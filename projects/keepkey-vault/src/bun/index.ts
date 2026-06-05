@@ -3085,7 +3085,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					PIONEER_TIMEOUT_MS,
 					'GetName'
 				)
-				const data = resp?.data || {}
+				// Pioneer wraps the payload in a `data` envelope (like GetStakingPositions).
+				const data = resp?.data?.data ?? resp?.data ?? {}
 				return {
 					found: !!data.found,
 					name: params.name,
@@ -3107,7 +3108,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					PIONEER_TIMEOUT_MS,
 					'GetNameRegistrationQuote'
 				)
-				const data = resp?.data
+				const data = resp?.data?.data ?? resp?.data
 				if (!data?.registerFeeBase || !data?.feePerBlockBase || !data?.blocksPerYear) {
 					throw new Error(`Unexpected name quote format for ${chain.id}: ${JSON.stringify(data)}`)
 				}

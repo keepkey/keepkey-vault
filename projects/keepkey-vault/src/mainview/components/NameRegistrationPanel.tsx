@@ -10,6 +10,7 @@ import { Z } from "../lib/z-index"
 interface NameRegistrationPanelProps {
 	chain: ChainDef
 	address: string | null
+	availableBalance: string
 	watchOnly?: boolean
 }
 
@@ -17,6 +18,11 @@ type TxPhase = "input" | "built" | "signing" | "signed" | "broadcast"
 
 const NAME_RE = /^[a-zA-Z0-9+_-]{1,30}$/
 const YEAR_OPTIONS = [1, 2, 3, 5, 10]
+
+// Native tx fee THOR/Maya charge at the bank layer (outside tx.fee.amount).
+// Mirrors the FEES table in bun/txbuilder/cosmos.ts. The account needs the
+// registration cost PLUS this fee, so it factors into the affordability check.
+const NATIVE_FEE: Record<string, string> = { thorchain: "0.02", mayachain: "0.2" }
 
 function getExplorerTxUrl(chain: ChainDef, txid: string): string | null {
 	if (!chain.explorerTxUrl) return null
@@ -32,7 +38,7 @@ function formatBase(base: bigint, decimals: number): string {
 	return (neg ? "-" : "") + whole + (frac ? "." + frac : "")
 }
 
-export function NameRegistrationPanel({ chain, address, watchOnly }: NameRegistrationPanelProps) {
+export function NameRegistrationPanel({ chain, address, availableBalance, watchOnly }: NameRegistrationPanelProps) {
 	const { t } = useTranslation("names")
 
 	// Branding: THORChain → "THORName", Maya → "MAYAName".
@@ -91,8 +97,18 @@ export function NameRegistrationPanel({ chain, address, watchOnly }: NameRegistr
 
 	const costDisplay = costBase != null ? formatBase(costBase, chain.decimals) : null
 
-	const isAvailable = nameInfo != null && nameInfo.found === false
-	const canBuild = !!address && !watchOnly && isValidName && isAvailable && !checking && !!quote
+	const nativeFee = NATIVE_FEE[chain.id] || "0"
+	// Total the account must hold: registration deposit + the native bank fee.
+	const totalCost = costDisplay != null ? (parseFloat(costDisplay) + parseFloat(nativeFee)) : null
+
+	// A name is registerable if it's never been registered, OR its registration
+	// has expired — THORChain/Maya both let an expired name be claimed/renewed
+	// once the current block passes its expiry.
+	const isExpired = !!(nameInfo?.found && quote && nameInfo.expireBlockHeight != null && nameInfo.expireBlockHeight <= quote.currentBlockHeight)
+	const isAvailable = nameInfo != null && (nameInfo.found === false || isExpired)
+
+	const hasFunds = totalCost != null && parseFloat(availableBalance || "0") >= totalCost
+	const canBuild = !!address && !watchOnly && isValidName && isAvailable && !checking && !!quote && hasFunds
 
 	const resetFlow = useCallback(() => {
 		setPhase("input")
@@ -215,8 +231,8 @@ export function NameRegistrationPanel({ chain, address, watchOnly }: NameRegistr
 							)}
 						</Flex>
 						{nameInfo?.found && nameInfo.owner && (
-							<Text fontSize="10px" color="kk.textMuted" mt="1" fontFamily="mono" wordBreak="break-all">
-								{t("ownedBy", { owner: nameInfo.owner })}
+							<Text fontSize="10px" color={isExpired ? "kk.gold" : "kk.textMuted"} mt="1" fontFamily="mono" wordBreak="break-all">
+								{isExpired ? t("expiredClaimable") : t("ownedBy", { owner: nameInfo.owner })}
 								{nameInfo.expireBlockHeight ? ` · ${t("expiresAtBlock", { height: nameInfo.expireBlockHeight })}` : ""}
 							</Text>
 						)}
@@ -254,9 +270,26 @@ export function NameRegistrationPanel({ chain, address, watchOnly }: NameRegistr
 								<Text fontSize="10px" color="kk.textMuted">{quoteError ? t("costUnavailable") : t("checking")}</Text>
 							)}
 						</Flex>
+						{costDisplay != null && (
+							<>
+								<Flex justify="space-between" mt="1">
+									<Text fontSize="xs" color="kk.textMuted">{t("fee")}</Text>
+									<Text fontSize="xs" fontFamily="mono" color="kk.textMuted">{nativeFee} {chain.symbol}</Text>
+								</Flex>
+								<Flex justify="space-between" mt="1" pt="1" borderTop="1px solid" borderColor="kk.border">
+									<Text fontSize="xs" color="kk.textPrimary">{t("total")}</Text>
+									<Text fontSize="xs" fontFamily="mono" color="kk.textPrimary">{totalCost} {chain.symbol}</Text>
+								</Flex>
+							</>
+						)}
 						{address && isValidName && (
 							<Text fontSize="10px" color="kk.textMuted" mt="2" fontFamily="mono" wordBreak="break-all">
 								{t("registersTo", { name, address })}
+							</Text>
+						)}
+						{address && !watchOnly && isAvailable && costDisplay != null && !hasFunds && (
+							<Text fontSize="10px" color="red.300" mt="2">
+								{t("insufficientFunds", { amount: totalCost, symbol: chain.symbol })}
 							</Text>
 						)}
 					</Box>

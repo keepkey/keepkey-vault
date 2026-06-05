@@ -1064,6 +1064,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 							<NameRegistrationPanel
 								chain={chain}
 								address={address}
+								availableBalance={activeBalance?.balance || '0'}
 								watchOnly={!address}
 							/>
 						</Suspense>

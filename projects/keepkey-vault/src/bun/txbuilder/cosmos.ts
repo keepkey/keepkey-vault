@@ -334,7 +334,8 @@ export async function buildCosmosNameRegTx(
   // 1. Live registration cost constants (base units) from Pioneer.
   console.log(`${TAG} Fetching name registration quote for ${chain.coin}...`)
   const quoteResp = await pioneer.GetNameRegistrationQuote({ network: chain.id })
-  const quote = quoteResp?.data
+  // Pioneer wraps the payload in a `data` envelope (like GetStakingPositions).
+  const quote = quoteResp?.data?.data ?? quoteResp?.data
   if (!quote?.registerFeeBase || !quote?.feePerBlockBase || !quote?.blocksPerYear) {
     throw new Error(`Unexpected name quote format for ${chain.id}: ${JSON.stringify(quote)}`)
   }
@@ -365,7 +366,10 @@ export async function buildCosmosNameRegTx(
   const chain_id = chain.chainId
 
   const fee = FEE_TEMPLATES[chain.id] || FEE_TEMPLATES.cosmos
-  const feeInDisplay = String(Number(fee.amount[0]?.amount || 0) / 10 ** chain.decimals)
+  // THOR/Maya set tx.fee.amount to '0' and charge the native tx fee at the bank
+  // layer (the FEES table). Report that as the display fee — the deposit amount
+  // is the full registration cost, so the account also needs this fee on top.
+  const feeInDisplay = String(FEES[chain.id] ?? Number(fee.amount[0]?.amount || 0) / 10 ** chain.decimals)
 
   // 3. Build the `~:` memo: ~:name:chain:address  (owner defaults to signer).
   const memoChain = NAME_MEMO_CHAIN[chain.id]!
