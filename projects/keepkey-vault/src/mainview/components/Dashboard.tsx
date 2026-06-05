@@ -28,6 +28,7 @@ import { preloadIcons } from "../lib/iconPreload"
 import { useDashboardView } from "../lib/dashboardViewContext"
 import { useFiat } from "../lib/fiat-context"
 import { ViewPickerButton } from "./ViewPickerMenu"
+import { DashboardLoading } from "./DashboardLoading"
 import { categorizeTokens } from "../../shared/spamFilter"
 import { useBtcAccounts } from "../hooks/useBtcAccounts"
 import { useEvmAddresses } from "../hooks/useEvmAddresses"
@@ -2003,7 +2004,9 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 								}}
 							/>
 						)
-					})() : !loadingBalances && initialLoaded && !pioneerError ? (
+					})() : (loadingBalances || !initialLoaded) && !pioneerError ? (
+						<DashboardLoading />
+					) : !loadingBalances && initialLoaded && !pioneerError ? (
 						<Flex direction="column" align="center" gap="3" textAlign="center" maxW="400px" mx="auto" py="4">
 							<Box
 								w="48px" h="48px" borderRadius="full"
