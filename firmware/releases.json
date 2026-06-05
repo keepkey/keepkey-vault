@@ -18,7 +18,7 @@
     "firmware": {
       "version": "v7.14.1",
       "url": "v7.14.1/firmware.keepkey.bin",
-      "hash": "e0c05185e7e3274bd256108a7f35e155c4fc3f70f6f6d928a805d9f201bebf47"
+      "hash": "73a880682d00c725cf9b38347ed0f08f4c2214c2c0f54559739f9d939f6275ae"
     },
     "bootloader": {
       "version": "v2.1.4",
@@ -59,7 +59,7 @@
       "8ed86d578019f127998215268b75165b92c52948647a8b31949e4f311d695d3d": "v7.14.0-zcash",
       "84c94eb69193d8bdf6be48992b852f25c3b30f0ea133019491849825137aca2f": "v7.14.0-zcash-askneg",
       "cab8446a1d17dd847938476be282e6e45041cece750afcdb089f63fa4ba5a248": "v7.14.0-zcash-widereduction",
-      "e0c05185e7e3274bd256108a7f35e155c4fc3f70f6f6d928a805d9f201bebf47": "v7.14.1",
+      "73a880682d00c725cf9b38347ed0f08f4c2214c2c0f54559739f9d939f6275ae": "v7.14.1",
       "958764cf3baa53eec0002eab9c54e02ce6f5fdab71e7efbbe723f958e26ff419": "v7.10.0",
       "24cca93ef5e7907dc6d8405b8ab9800d4e072dd9259138cf7679107985b88137": "v7.9.3",
       "9e691874bb6966aa0616d36b60489b82fab166d96e5166518eaa3e11468bf6a8": "v7.9.1",
