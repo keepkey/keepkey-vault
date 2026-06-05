@@ -130,6 +130,15 @@ const relayPioneerVerified = new Set<string>()
 // monitor side stays missing the id.
 const relayRegisterAttempts = new Map<string, number>()
 const MAX_RELAY_REGISTER_ATTEMPTS = 5
+// txids whose INITIAL CreatePendingSwap (in trackSwap) threw — retried on each
+// refreshSwap until success or MAX_PIONEER_REGISTER_ATTEMPTS. Distinct from the
+// relay-id backfill above: this is swapper-agnostic and guards the case where a
+// transient 400/500 at broadcast time leaves the swap unregistered entirely, so
+// GetPendingSwap returns not_found forever and the tracker is stuck on
+// "waiting for confirmations" even though funds already moved on-chain.
+const pioneerRegistrationRetry = new Set<string>()
+const pioneerRegistrationAttempts = new Map<string, number>()
+const MAX_PIONEER_REGISTER_ATTEMPTS = 10
 let sendMessage: ((msg: string, data: any) => void) | null = null
 let pioneerVerified = false
 let initPromise: Promise<void> | null = null
@@ -353,10 +362,16 @@ export function trackSwap(
   // Push immediate update to frontend FIRST (user sees "pending" instantly)
   pushUpdate(swap)
 
-  // Register with Pioneer API — log errors but don't block (server processes async)
-  registerWithPioneer(swap).catch((e) => {
+  // Register with Pioneer API — log errors but don't block (server processes async).
+  // On failure, mark for retry on each subsequent refreshSwap so a transient
+  // 400/500 doesn't leave the swap permanently unregistered.
+  pioneerRegistrationAttempts.set(result.txid, 1)
+  registerWithPioneer(swap).then(() => {
+    pioneerRegistrationRetry.delete(result.txid)
+  }).catch((e) => {
     console.error(`${TAG} Pioneer registration FAILED for ${result.txid}: ${e.message}`)
     console.error(`${TAG} Stack: ${e.stack}`)
+    pioneerRegistrationRetry.add(result.txid)
   })
 
   // Polling is on-demand — the UI calls refreshSwap(txid) once the dialog
@@ -479,7 +494,17 @@ async function registerWithPioneer(swap: PendingSwap): Promise<void> {
   }
   swapLog(`${TAG} CreatePendingSwap request:`, JSON.stringify({ txHash: body.txHash, sellCaip: body.sellAsset.caip, buyCaip: body.buyAsset.caip, integration: body.integration, swapper: body.swapper }))
 
-  const resp = await withTimeout(pioneer.CreatePendingSwap(body), PIONEER_SWAP_TIMEOUT_MS, 'CreatePendingSwap')
+  let resp: any
+  try {
+    resp = await withTimeout(pioneer.CreatePendingSwap(body), PIONEER_SWAP_TIMEOUT_MS, 'CreatePendingSwap')
+  } catch (e: any) {
+    // Surface the server's response body — without this a 400/500 only logs a
+    // bare message, leaving no way to tell a load spike from a schema rejection.
+    const responseBody = e?.response?.body || e?.response?.data || e?.response?.text || e?.body || e?.data
+    console.error(`${TAG} CreatePendingSwap HTTP error: ${e?.status || e?.statusCode || 'unknown'} ${e?.message}`)
+    if (responseBody) console.error(`${TAG} Server response:`, typeof responseBody === 'string' ? responseBody : JSON.stringify(responseBody))
+    throw e
+  }
   swapLog(`${TAG} CreatePendingSwap response:`, JSON.stringify(resp?.data || resp))
   swapLog(`${TAG} Registered swap with Pioneer: ${swap.txid}`)
 }
@@ -749,6 +774,30 @@ export async function refreshSwap(txid: string, deviceId?: string, walletId?: st
   if (!swap) {
     swapLog(`${TAG} refreshSwap: txid ${txid.slice(0, 10)}... not found in memory or DB`)
     return null
+  }
+
+  // Retry a failed INITIAL Pioneer registration. A transient 400/500 on the
+  // first CreatePendingSwap (trackSwap) is common at broadcast time (Pioneer
+  // load, duplicate-key race). Without this the swap is never registered and
+  // GetPendingSwap returns not_found forever, leaving a permanently-stuck
+  // tracker. Swapper-agnostic — covers THORChain/Maya/NEAR memo swaps that the
+  // Relay-id backfill path below never touches.
+  if (pioneerRegistrationRetry.has(txid)) {
+    const attempts = pioneerRegistrationAttempts.get(txid) || 0
+    if (attempts < MAX_PIONEER_REGISTER_ATTEMPTS) {
+      pioneerRegistrationAttempts.set(txid, attempts + 1)
+      console.log(`${TAG} Retrying Pioneer registration for ${txid.slice(0, 10)}... (attempt ${attempts + 1}/${MAX_PIONEER_REGISTER_ATTEMPTS})`)
+      try {
+        await registerWithPioneer(swap)
+        pioneerRegistrationRetry.delete(txid)
+        console.log(`${TAG} Pioneer registration retry succeeded for ${txid.slice(0, 10)}...`)
+      } catch (e: any) {
+        console.warn(`${TAG} Pioneer registration retry ${attempts + 1} FAILED for ${txid.slice(0, 10)}...: ${e.message}`)
+      }
+    } else {
+      console.warn(`${TAG} Giving up Pioneer registration for ${txid.slice(0, 10)}... after ${attempts} attempts`)
+      pioneerRegistrationRetry.delete(txid)
+    }
   }
 
   // Relay request-id backfill is two phases, both retry-safe:
