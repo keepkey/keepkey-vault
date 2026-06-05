@@ -16,14 +16,14 @@ firmware-bundle/
 
 - **Stronger chain of custody**: Apple-notarized DMG → firmware inside the signed bundle. Tampering with any bundled binary breaks the DMG signature. Stronger than downloading + hash-checking at runtime (which trusts a JSON file on GitHub).
 - **Offline installs**: Users on air-gapped machines can flash without network access.
-- **Alpha channel**: Ships 7.14.0 inside the app — alpha testers flip the toggle, no remote manifest update required.
+- **Alpha channel**: Ships 7.14.1 inside the app — alpha testers flip the Settings toggle, no remote manifest update required.
 
 ## Runtime behavior
 
 At startup, `EngineController.fetchFirmwareManifest()`:
 
 1. Loads `releases.json` from this directory (bundled, always works)
-2. Fetches `https://raw.githubusercontent.com/keepkey/keepkey-desktop/master/firmware/releases.json`
+2. Fetches `https://raw.githubusercontent.com/keepkey/keepkey-vault/master/firmware/releases.json`
 3. **Merges**: for each channel (latest, beta), picks the entry with the higher version
 4. When downloading: if the selected version's `.bin` exists here, reads from disk; else fetches over HTTPS
 5. Hash verification runs against the manifest hash regardless of source

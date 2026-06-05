@@ -6,7 +6,14 @@
 - [x] Tag `v7.14.1` pushed to `keepkey/keepkey-firmware` (annotated → commit `5482e736`)
 - [x] Firmware binary built (CI, asset attached 2026-05-30)
 - [x] Firmware binary signed (3/5 — slots 1/2/3, all verified against `pubkeys.h`)
-- [x] GitHub release published 2026-06-05 (un-drafted; marked Latest)
+- [x] GitHub release published 2026-06-05 (prerelease — alpha channel; NOT marked Latest)
+
+## Release channel
+v7.14.1 is **alpha**: it lives under the manifest `beta` key, which the vault treats
+as the "alpha firmware" opt-in (`alphaFirmware` → `manifest.beta`). Only users who
+enable **Settings → Alpha firmware** are prompted to update; default users stay on
+`latest` (7.10.0). The GitHub release is `prerelease=true`, so v7.14.0 remains the
+GitHub "Latest" release.
 
 ## Verified hashes (device-verifiable build hash = payload, `tail -c +257`)
 Canonical = the **tag-reproducible** build (commit `5482e736`, embeds that hash):
