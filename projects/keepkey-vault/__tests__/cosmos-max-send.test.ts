@@ -23,10 +23,17 @@ function mockPioneer(balance: string) {
 }
 
 describe('Cosmos MAX send/deposit fee reserve', () => {
-  // CACAO has 10 decimals; balance from the failing tx was 7782513301100 base
-  // units (778.25133011 CACAO). A correct MAX must reserve 0.2 CACAO
-  // (2000000000 base) so the account has amount + fee on hand.
-  test('mayachain MsgDeposit MAX reserves the 0.2 CACAO native fee', async () => {
+  // CACAO has 10 decimals; the reported balance was 7782513301100 base units
+  // (778.25133011 CACAO). Reserving the *bare* 0.2 CACAO fee (→ 7780513301100)
+  // STILL reverted with "insufficient funds": Pioneer's reported balance was a
+  // few hundred base units higher than the real on-chain balance, so amount +
+  // fee overdrew. The reserve must leave headroom (2× the native fee), so the
+  // MAX amount is strictly below balance − bareFee.
+  const MAYA_BAL_BASE = 7782513301100n   // 778.25133011 CACAO @ 10 decimals
+  const MAYA_FEE_BASE = 2000000000n      // 0.2 CACAO native fee
+  const MAYA_MAX_AMOUNT = '7778513301100' // balance − 2×fee
+
+  test('mayachain MsgDeposit MAX reserves more than the bare native fee', async () => {
     expect(maya.decimals).toBe(10)
 
     const result = await buildCosmosTx(mockPioneer('778.25133011'), maya, {
@@ -40,12 +47,13 @@ describe('Cosmos MAX send/deposit fee reserve', () => {
 
     const msg = result.tx.msg[0] as any
     expect(msg.type).toBe('mayachain/MsgDeposit')
-    // 7782513301100 balance − 2000000000 fee = 7780513301100
-    expect(msg.value.coins[0].amount).toBe('7780513301100')
-    expect(BigInt(msg.value.coins[0].amount)).toBeLessThan(7782513301100n)
+    expect(msg.value.coins[0].amount).toBe(MAYA_MAX_AMOUNT)
+    // The whole point of the fix: headroom beyond the bare fee, so a slightly
+    // stale reported balance can't make amount + fee overdraw the real balance.
+    expect(BigInt(msg.value.coins[0].amount)).toBeLessThan(MAYA_BAL_BASE - MAYA_FEE_BASE)
   })
 
-  test('mayachain MsgSend MAX also reserves the native fee', async () => {
+  test('mayachain MsgSend MAX reserves the same buffered native fee', async () => {
     const result = await buildCosmosTx(mockPioneer('778.25133011'), maya, {
       to: mayaAddress,
       amount: '0',
@@ -55,11 +63,12 @@ describe('Cosmos MAX send/deposit fee reserve', () => {
 
     const msg = result.tx.msg[0] as any
     expect(msg.type).toBe('mayachain/MsgSend')
-    expect(msg.value.amount[0].amount).toBe('7780513301100')
+    expect(msg.value.amount[0].amount).toBe(MAYA_MAX_AMOUNT)
   })
 
-  test('thorchain MAX still reserves 0.02 RUNE', async () => {
-    // RUNE has 8 decimals: 10.0 RUNE = 1000000000 base, reserve 0.02 = 2000000.
+  test('thorchain MAX reserves more than the bare 0.02 RUNE fee', async () => {
+    // RUNE has 8 decimals: 10.0 RUNE = 1000000000 base, bare fee 0.02 = 2000000,
+    // 2× reserve = 4000000 → MAX = 996000000.
     const result = await buildCosmosTx(mockPioneer('10.0'), thor, {
       to: thorAddress,
       amount: '0',
@@ -70,6 +79,32 @@ describe('Cosmos MAX send/deposit fee reserve', () => {
 
     const msg = result.tx.msg[0] as any
     expect(msg.type).toBe('thorchain/MsgDeposit')
-    expect(msg.value.coins[0].amount).toBe('998000000')
+    expect(msg.value.coins[0].amount).toBe('996000000')
+    expect(BigInt(msg.value.coins[0].amount)).toBeLessThan(1000000000n - 2000000n)
+  })
+
+  test('cosmos ATOM MsgSend MAX reserves above the actual feeLevel-adjusted fee', async () => {
+    const atom = CHAINS.find(c => c.id === 'cosmos')!
+    expect(atom.decimals).toBe(6)
+    // Regression: the default dispatcher path uses feeLevel 5, which doubles the
+    // 5000 uatom template fee to 10000 uatom (the *actual* fee paid). Reserving
+    // FEES.cosmos×2 (=10000) before that left amount + fee == balance exactly —
+    // zero headroom. The reserve must sit above the adjusted fee. 1.0 ATOM =
+    // 1000000 uatom; reserve max(10000,5000)×2 = 20000 → amount 980000.
+    const result = await buildCosmosTx(mockPioneer('1.0'), atom, {
+      to: 'cosmos1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq',
+      amount: '0',
+      isMax: true,
+      fromAddress: 'cosmos1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq',
+    })
+
+    const msg = result.tx.msg[0] as any
+    expect(msg.type).toBe('cosmos-sdk/MsgSend')
+    const amount = BigInt(msg.value.amount[0].amount)
+    const adjustedFee = BigInt(result.tx.fee.amount[0].amount)
+    expect(adjustedFee).toBe(10000n)            // feeLevel 5 → 2× the 5000 template
+    expect(amount).toBe(980000n)
+    // The fix: amount + the fee it will actually pay stays strictly under balance.
+    expect(amount + adjustedFee).toBeLessThan(1000000n)
   })
 })

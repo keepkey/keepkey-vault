@@ -31,6 +31,36 @@ const FEES: Record<string, number> = {
   osmosis: 0.035,
 }
 
+// A MAX reserves FEE × this multiplier — never the bare fee. Reserving exactly
+// the fee leaves zero headroom, and a MAX CACAO swap STILL reverted on-chain
+// with "insufficient funds" (no refund) even after FEES.mayachain was set to
+// the exact 0.2 CACAO: Pioneer reports the balance rounded/slightly stale
+// (778.25133011 for an on-chain 778.2513), so amount = reportedBalance − fee
+// overdrew the *real* balance by a few hundred base units. The frontend
+// EVM/Solana MAX reserves deliberately leave a real buffer (the Solana one is
+// ~2000× the fee) for exactly this drift; mirror that here. 2× the fee is
+// ~$0.025 on Maya / ~$0.04 on THOR — dust against any swap. The unused
+// remainder simply stays in the wallet.
+const MAX_FEE_RESERVE_MULTIPLIER = 2n
+
+/** Base-unit amount to hold back on a MAX send/deposit so the account keeps
+ *  `amount` + everything the network charges, with headroom for a slightly-stale
+ *  reported balance (Pioneer rounds balances). There are two distinct cost
+ *  sources and only one applies per chain:
+ *    - cosmos/osmosis pay the tx fee via `fee.amount` (deducted by the ante
+ *      handler). Pass the *actual feeLevel-adjusted* fee — reserving the static
+ *      FEES value under-reserves once the gas multiplier kicks in (feeLevel 5
+ *      doubles it), leaving zero headroom.
+ *    - thor/maya set `fee.amount` to '0' and charge the native fee at the bank
+ *      layer (the FEES table), which `fee.amount` can't see.
+ *  Reserve the larger of the two, then × the multiplier so a full extra fee of
+ *  headroom sits above the real cost. */
+function maxFeeReserveBase(chain: ChainDef, adjustedTxFeeBase: bigint): bigint {
+  const nativeBankFeeBase = toBaseUnits(String(FEES[chain.id] || 0), chain.decimals)
+  const cost = adjustedTxFeeBase > nativeBankFeeBase ? adjustedTxFeeBase : nativeBankFeeBase
+  return cost * MAX_FEE_RESERVE_MULTIPLIER
+}
+
 // Chain-specific msg types (MsgSend)
 const MSG_SEND_TYPES: Record<string, string> = {
   thorchain: 'thorchain/MsgSend',
@@ -98,24 +128,8 @@ export async function buildCosmosTx(
 
   console.log(`${TAG} account_number=${account_number}, sequence=${sequence}`)
 
-  // 2. Compute amount in base units (integer math to avoid float precision loss)
-  let baseAmount: bigint
-
-  if (isMax) {
-    const balResp = await pioneer.GetPortfolioBalances({ pubkeys: [{ caip: chain.caip, pubkey: fromAddress }] }, { forceRefresh: true })
-    const balStr = String((balResp?.data?.balances || [])[0]?.balance ?? '0')
-    const feeDisplay = FEES[chain.id] || 0
-    const balBase = toBaseUnits(balStr, chain.decimals)
-    const feeBase = toBaseUnits(String(feeDisplay), chain.decimals)
-    baseAmount = balBase - feeBase
-    if (baseAmount < 0n) baseAmount = 0n
-  } else {
-    baseAmount = toBaseUnits(params.amount, chain.decimals)
-  }
-
-  if (baseAmount <= 0n) throw new Error('Amount must be greater than zero')
-
-  // 3. Build unsigned tx — apply feeLevel multiplier to gas
+  // 2. Build the fee FIRST (it's independent of amount) so a MAX can reserve
+  //    against the actual feeLevel-adjusted fee, not a stale guess.
   const baseFee = FEE_TEMPLATES[chain.id] || FEE_TEMPLATES.cosmos
   const gasMultiplier = feeLevel <= 2 ? 1 : feeLevel <= 4 ? 1.5 : 2
   const adjustedGas = String(Math.ceil(Number(baseFee.gas) * gasMultiplier))
@@ -128,6 +142,22 @@ export async function buildCosmosTx(
   const chain_id = chain.chainId
 
   const feeInDisplay = String(Number(fee.amount[0]?.amount || 0) / 10 ** chain.decimals)
+
+  // 3. Compute amount in base units (integer math to avoid float precision loss)
+  let baseAmount: bigint
+
+  if (isMax) {
+    const balResp = await pioneer.GetPortfolioBalances({ pubkeys: [{ caip: chain.caip, pubkey: fromAddress }] }, { forceRefresh: true })
+    const balStr = String((balResp?.data?.balances || [])[0]?.balance ?? '0')
+    const balBase = toBaseUnits(balStr, chain.decimals)
+    const feeBase = maxFeeReserveBase(chain, BigInt(fee.amount[0]?.amount || '0'))
+    baseAmount = balBase - feeBase
+    if (baseAmount < 0n) baseAmount = 0n
+  } else {
+    baseAmount = toBaseUnits(params.amount, chain.decimals)
+  }
+
+  if (baseAmount <= 0n) throw new Error('Amount must be greater than zero')
 
   // Determine message type: MsgDeposit for THORChain/Maya swaps (explicit flag), MsgSend otherwise
   // NOTE: Do NOT infer from !!memo — normal sends with memos (e.g. exchange deposits) must use MsgSend
@@ -228,7 +258,10 @@ export async function buildCosmosStakingTx(
     const balResp = await pioneer.GetPortfolioBalances({ pubkeys: [{ caip: chain.caip, pubkey: fromAddress }] }, { forceRefresh: true })
     const balStr = String((balResp?.data?.balances || [])[0]?.balance ?? '0')
     const balBase = toBaseUnits(balStr, chain.decimals)
-    const feeBase = BigInt(fee.amount[0]?.amount || '0')
+    // Same headroom rationale as buildCosmosTx (see maxFeeReserveBase). This
+    // builder doesn't apply a feeLevel multiplier, so fee.amount is the actual
+    // fee paid.
+    const feeBase = maxFeeReserveBase(chain, BigInt(fee.amount[0]?.amount || '0'))
     baseAmount = balBase - feeBase
     if (baseAmount < 0n) baseAmount = 0n
   } else {
