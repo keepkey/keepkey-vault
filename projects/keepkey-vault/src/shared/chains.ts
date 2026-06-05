@@ -270,7 +270,7 @@ const CONFIGS: ChainConfig[] = [
     defaultPath: [0x8000002C, 0x800004FB, 0x80000000, 0, 0],
     explorerAddressUrl: 'https://hiveblocks.com/@{{address}}',
     explorerTxUrl: 'https://hiveblocks.com/tx/{{txid}}',
-    minFirmware: '7.14.0',
+    minFirmware: '7.16.0',
   },
 ]
 

@@ -810,6 +810,7 @@ function App() {
 					onClose={() => setPaletteOpen(false)}
 					onJumpToVault={() => setActiveTab("vault")}
 					balances={paletteBalances}
+					firmwareVersion={undefined}
 				/>
 			</>
 		)
@@ -971,6 +972,7 @@ function App() {
 				onClose={() => setPaletteOpen(false)}
 				onJumpToVault={() => setActiveTab("vault")}
 				balances={paletteBalances}
+				firmwareVersion={deviceState.firmwareVersion}
 			/>
 			{/* Top-level swap dialog mount for REST-driven /api/v2/swap/open. */}
 			<SwapRpcMount />
