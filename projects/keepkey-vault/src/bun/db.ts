@@ -8,7 +8,7 @@ import { Database } from 'bun:sqlite'
 import { Utils } from 'electrobun/bun'
 import { join, dirname } from 'node:path'
 import { mkdirSync, unlinkSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
-import type { ChainBalance, CustomToken, CustomChain, PairedAppInfo, ApiLogEntry, ReportMeta, ReportData, SwapHistoryRecord, SwapHistoryFilter, SwapTrackingStatus, SwapHistoryStats, Bip85SeedMeta, PioneerServer } from '../shared/types'
+import type { ChainBalance, CustomToken, CustomChain, PairedAppInfo, ApiLogEntry, ReportMeta, ReportData, SwapHistoryRecord, SwapHistoryFilter, SwapTrackingStatus, SwapHistoryStats, Bip85SeedMeta, PioneerServer, AddressBookEntry, AddressBookTx, AddressBookFilter, AddressBookKind } from '../shared/types'
 
 const SCHEMA_VERSION = '10'
 
@@ -331,6 +331,50 @@ export function initDb() {
     try { db.exec(`CREATE INDEX IF NOT EXISTS idx_swap_history_device_txid ON swap_history(device_id, txid)`) } catch { /* already exists */ }
     try { db.exec(`CREATE INDEX IF NOT EXISTS idx_swap_history_wallet_created ON swap_history(wallet_id, created_at DESC)`) } catch { /* already exists */ }
     try { db.exec(`CREATE INDEX IF NOT EXISTS idx_swap_history_wallet_txid ON swap_history(wallet_id, txid)`) } catch { /* already exists */ }
+
+    // ── Address Book (additive — NEVER add to the SCHEMA_VERSION DROP block at
+    //    db.ts:47-48; these hold irreplaceable user labels). Identity per row is
+    //    (wallet_id, network_id, address). `kind` separates auto-seeded own-wallet
+    //    rows (R2) from external recipients auto-created on send (R4). ──
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS addressbook (
+        id              TEXT PRIMARY KEY,
+        wallet_id       TEXT NOT NULL,
+        device_id       TEXT NOT NULL,
+        kind            TEXT NOT NULL DEFAULT 'external' CHECK(kind IN ('own','external')),
+        network_id      TEXT NOT NULL,
+        chain_id        TEXT NOT NULL,
+        address         TEXT NOT NULL,
+        label           TEXT,
+        derivation_path TEXT,
+        script_type     TEXT,
+        address_index   INTEGER,
+        first_seen_txid TEXT,
+        note            TEXT,
+        created_at      INTEGER NOT NULL,
+        updated_at      INTEGER NOT NULL
+      )
+    `)
+    db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_addressbook_dedupe ON addressbook(wallet_id, network_id, address)`)
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_addressbook_wallet_net ON addressbook(wallet_id, network_id)`)
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_addressbook_device ON addressbook(device_id)`)
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS addressbook_tx (
+        id           TEXT PRIMARY KEY,
+        entry_id     TEXT NOT NULL,
+        wallet_id    TEXT NOT NULL,
+        device_id    TEXT NOT NULL,
+        txid         TEXT NOT NULL,
+        from_address TEXT,
+        caip         TEXT NOT NULL,
+        symbol       TEXT,
+        amount       TEXT,
+        broadcast_at INTEGER NOT NULL
+      )
+    `)
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_addressbook_tx_entry ON addressbook_tx(entry_id, broadcast_at DESC)`)
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_addressbook_tx_device ON addressbook_tx(device_id)`)
 
     // ── Double-entry accounting ledger (additive — never dropped on version bump) ──
     db.exec(`
@@ -1300,6 +1344,8 @@ export function deleteDeviceSnapshot(deviceId: string) {
     db.run('DELETE FROM reports WHERE device_id = ?', [deviceId])
     db.run('DELETE FROM api_log WHERE device_id = ?', [deviceId])
     db.run('DELETE FROM swap_history WHERE device_id = ?', [deviceId])
+    db.run('DELETE FROM addressbook WHERE device_id = ?', [deviceId])
+    db.run('DELETE FROM addressbook_tx WHERE device_id = ?', [deviceId])
   } catch (e: any) {
     console.warn('[db] deleteDeviceSnapshot failed:', e.message)
   }
@@ -1801,6 +1847,215 @@ export function setSwapRelayRequestId(txid: string, relayRequestId: string, devi
     else db.run('UPDATE swap_history SET relay_request_id = ? WHERE txid = ?', [relayRequestId, txid])
   } catch (e: any) {
     console.warn('[db] setSwapRelayRequestId failed:', e.message)
+  }
+}
+
+// ── Address Book ────────────────────────────────────────────────────
+// Unified, top-level contact + own-wallet book. Identity = (wallet_id,
+// network_id, address). All write paths normalize the address (EVM lowercased)
+// so a checksummed paste and a lowercase paste never create duplicate rows.
+
+/** Normalize an address for storage/dedupe. EVM is case-insensitive and must be
+ *  lowercased; every other family is case-sensitive and stored verbatim. */
+export function normalizeAddress(address: string, chainFamily: string): string {
+  return chainFamily === 'evm' ? address.toLowerCase() : address
+}
+
+function mapAddressBookRow(r: any): AddressBookEntry {
+  return {
+    id: r.id,
+    walletId: r.wallet_id,
+    deviceId: r.device_id,
+    kind: r.kind as AddressBookKind,
+    networkId: r.network_id,
+    chainId: r.chain_id,
+    address: r.address,
+    label: r.label || undefined,
+    derivationPath: r.derivation_path || undefined,
+    scriptType: r.script_type || undefined,
+    addressIndex: r.address_index ?? undefined,
+    firstSeenTxid: r.first_seen_txid || undefined,
+    note: r.note || undefined,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  }
+}
+
+function mapAddressBookTxRow(r: any): AddressBookTx {
+  return {
+    id: r.id,
+    entryId: r.entry_id,
+    txid: r.txid,
+    fromAddress: r.from_address || undefined,
+    caip: r.caip,
+    symbol: r.symbol || undefined,
+    amount: r.amount || undefined,
+    broadcastAt: r.broadcast_at,
+  }
+}
+
+export interface OwnAddressSeed {
+  address: string
+  networkId: string
+  chainId: string
+  chainFamily: string
+  symbol: string
+  label: string
+  derivationPath?: string
+  scriptType?: string
+  addressIndex?: number
+}
+
+/** Idempotently mirror connected-wallet addresses as kind='own' entries (R2).
+ *  INSERT OR IGNORE on the dedupe key, so a user-renamed own entry is never
+ *  clobbered by a later re-sync. Returns the number of NEW rows inserted. */
+export function syncOwnAddressBook(
+  scope: { deviceId: string; walletId: string },
+  seeds: OwnAddressSeed[],
+): number {
+  try {
+    if (!db || seeds.length === 0) return 0
+    const now = Date.now()
+    const stmt = db.query(
+      `INSERT OR IGNORE INTO addressbook
+         (id, wallet_id, device_id, kind, network_id, chain_id, address, label,
+          derivation_path, script_type, address_index, created_at, updated_at)
+       VALUES (?, ?, ?, 'own', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    let inserted = 0
+    const tx = db.transaction(() => {
+      for (const s of seeds) {
+        const addr = normalizeAddress(s.address, s.chainFamily)
+        const res = stmt.run(
+          crypto.randomUUID(), scope.walletId, scope.deviceId, s.networkId, s.chainId, addr,
+          s.label, s.derivationPath ?? null, s.scriptType ?? null, s.addressIndex ?? null, now, now,
+        )
+        if ((res as any)?.changes) inserted++
+      }
+    })
+    tx()
+    return inserted
+  } catch (e: any) {
+    console.warn('[db] syncOwnAddressBook failed:', e.message)
+    return 0
+  }
+}
+
+/** Record a manual outbound (R3/R7): upsert the recipient entry + append a
+ *  history row. Returns the entry id and whether a brand-new EXTERNAL entry was
+ *  created (=> the UI offers a "save a label?" prompt, R4). */
+export function recordOutbound(args: {
+  walletId: string; deviceId: string
+  toAddress: string; networkId: string; chainId: string; chainFamily: string
+  fromAddress?: string | null; caip: string; symbol?: string | null; amount?: string | null; txid: string
+}): { entryId: string; isNew: boolean } | null {
+  try {
+    const database = db
+    if (!database) return null
+    const addr = normalizeAddress(args.toAddress, args.chainFamily)
+    const from = args.fromAddress ? normalizeAddress(args.fromAddress, args.chainFamily) : null
+    const now = Date.now()
+    let entryId = ''
+    let isNew = false
+    const tx = database.transaction(() => {
+      const existing = database.query(
+        'SELECT id FROM addressbook WHERE wallet_id = ? AND network_id = ? AND address = ?',
+      ).get(args.walletId, args.networkId, addr) as { id: string } | null
+      if (existing) {
+        entryId = existing.id
+        database.run('UPDATE addressbook SET updated_at = ? WHERE id = ?', [now, entryId])
+      } else {
+        entryId = crypto.randomUUID()
+        isNew = true
+        database.run(
+          `INSERT INTO addressbook
+             (id, wallet_id, device_id, kind, network_id, chain_id, address, first_seen_txid, created_at, updated_at)
+           VALUES (?, ?, ?, 'external', ?, ?, ?, ?, ?, ?)`,
+          [entryId, args.walletId, args.deviceId, args.networkId, args.chainId, addr, args.txid, now, now],
+        )
+      }
+      database.run(
+        `INSERT INTO addressbook_tx
+           (id, entry_id, wallet_id, device_id, txid, from_address, caip, symbol, amount, broadcast_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [crypto.randomUUID(), entryId, args.walletId, args.deviceId, args.txid, from, args.caip,
+         args.symbol ?? null, args.amount ?? null, now],
+      )
+    })
+    tx()
+    return { entryId, isNew }
+  } catch (e: any) {
+    console.warn('[db] recordOutbound failed:', e.message)
+    return null
+  }
+}
+
+/** List entries for a wallet, optionally filtered by network/chain/kind/search. */
+export function getAddressBookList(filter: AddressBookFilter): AddressBookEntry[] {
+  try {
+    if (!db || !filter.walletId) return []
+    let sql = 'SELECT * FROM addressbook WHERE wallet_id = ?'
+    const params: any[] = [filter.walletId]
+    if (filter.networkId) { sql += ' AND network_id = ?'; params.push(filter.networkId) }
+    if (filter.chainId)   { sql += ' AND chain_id = ?';   params.push(filter.chainId) }
+    if (filter.kind)      { sql += ' AND kind = ?';       params.push(filter.kind) }
+    if (filter.search) {
+      sql += ` AND (label LIKE ? ESCAPE '\\' OR address LIKE ? ESCAPE '\\')`
+      const q = `%${filter.search.replace(/[\\%_]/g, c => '\\' + c)}%`
+      params.push(q, q)
+    }
+    sql += ' ORDER BY updated_at DESC LIMIT ? OFFSET ?'
+    params.push(filter.limit ?? 1000, filter.offset ?? 0)
+    return (db.query(sql).all(...params) as any[]).map(mapAddressBookRow)
+  } catch (e: any) {
+    console.warn('[db] getAddressBookList failed:', e.message)
+    return []
+  }
+}
+
+/** Patch a label/note. Scoped by wallet_id for safety. Returns true if a row changed. */
+export function updateAddressBookEntry(
+  id: string, walletId: string, patch: { label?: string; note?: string },
+): boolean {
+  try {
+    if (!db) return false
+    const sets: string[] = []
+    const params: any[] = []
+    if (patch.label !== undefined) { sets.push('label = ?'); params.push(patch.label || null) }
+    if (patch.note !== undefined)  { sets.push('note = ?');  params.push(patch.note || null) }
+    if (sets.length === 0) return false
+    sets.push('updated_at = ?'); params.push(Date.now())
+    params.push(id, walletId)
+    const res = db.run(`UPDATE addressbook SET ${sets.join(', ')} WHERE id = ? AND wallet_id = ?`, params)
+    return Boolean((res as any)?.changes)
+  } catch (e: any) {
+    console.warn('[db] updateAddressBookEntry failed:', e.message)
+    return false
+  }
+}
+
+/** Delete an entry + its history. Scoped by wallet_id. */
+export function deleteAddressBookEntry(id: string, walletId: string): void {
+  try {
+    if (!db) return
+    db.run('DELETE FROM addressbook_tx WHERE entry_id = ? AND wallet_id = ?', [id, walletId])
+    db.run('DELETE FROM addressbook WHERE id = ? AND wallet_id = ?', [id, walletId])
+  } catch (e: any) {
+    console.warn('[db] deleteAddressBookEntry failed:', e.message)
+  }
+}
+
+/** Per-recipient outbound history (R7), newest first. */
+export function getAddressBookHistory(entryId: string, walletId: string, limit = 100): AddressBookTx[] {
+  try {
+    if (!db) return []
+    const rows = db.query(
+      'SELECT * FROM addressbook_tx WHERE entry_id = ? AND wallet_id = ? ORDER BY broadcast_at DESC LIMIT ?',
+    ).all(entryId, walletId, limit) as any[]
+    return rows.map(mapAddressBookTxRow)
+  } catch (e: any) {
+    console.warn('[db] getAddressBookHistory failed:', e.message)
+    return []
   }
 }
 

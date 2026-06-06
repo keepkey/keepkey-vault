@@ -7,7 +7,7 @@ import { rpcRequest } from "../lib/rpc"
 import kkIcon from "../assets/icon.png"
 import { NAV_HEIGHT } from "../layout"
 
-export type NavTab = "vault" | "shapeshift" | "apps"
+export type NavTab = "vault" | "shapeshift" | "apps" | "addresses"
 
 interface TopNavProps {
 	label?: string
@@ -161,6 +161,18 @@ export function TopNav({
 			id: "vault",
 			label: t("keepkey"),
 			icon: <Image src={kkIcon} alt="KeepKey" w="14px" h="14px" borderRadius="3px" />,
+		},
+		{
+			id: "addresses",
+			label: t("addresses"),
+			icon: (
+				<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+					<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+					<path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+					<circle cx="11" cy="9" r="2" />
+					<path d="M8 14c0-1.5 1.3-2.5 3-2.5s3 1 3 2.5" />
+				</svg>
+			),
 		},
 		{
 			id: "shapeshift",

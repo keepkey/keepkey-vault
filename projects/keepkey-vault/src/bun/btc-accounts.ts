@@ -130,6 +130,19 @@ export class BtcAccountManager extends EventEmitter {
     return result
   }
 
+  /** All xpubs across all accounts with derivation metadata — used to seed
+   *  own-wallet Address Book entries (R2). Unlike getFundedXpubs() this includes
+   *  unfunded xpubs so a fresh wallet still appears in the book. */
+  getAllXpubMeta(): Array<{ xpub: string; scriptType: BtcScriptType; accountIndex: number; path: number[] }> {
+    const out: Array<{ xpub: string; scriptType: BtcScriptType; accountIndex: number; path: number[] }> = []
+    for (const account of this.accounts) {
+      for (const xp of account.xpubs) {
+        if (xp.xpub) out.push({ xpub: xp.xpub, scriptType: xp.scriptType, accountIndex: account.accountIndex, path: xp.path })
+      }
+    }
+    return out
+  }
+
   /** Change the selected xpub. */
   setSelectedXpub(accountIndex: number, scriptType: BtcScriptType): void {
     this.selectedXpub = { accountIndex, scriptType }

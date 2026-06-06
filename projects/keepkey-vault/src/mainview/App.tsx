@@ -24,6 +24,7 @@ import { Dashboard } from "./components/Dashboard"
 import { CommandPalette } from "./components/CommandPalette"
 import { useLatestBalances } from "./lib/commandBus"
 import { AppStore } from "./components/AppStore"
+import { AddressBookView } from "./components/AddressBookView"
 import { DeviceSettingsDrawer } from "./components/DeviceSettingsDrawer"
 import { UpdateBanner } from "./components/UpdateBanner"
 import { IncomingTxToast, type IncomingTx } from "./components/IncomingTxToast"
@@ -916,6 +917,7 @@ function App() {
 				{/* TopNav offset plus banner height when visible. */}
 					{activeTab === "vault" && <Dashboard onLoaded={handlePortfolioLoaded} onOpenSettings={() => setSettingsOpen(true)} firmwareVersion={deviceState.firmwareVersion} forceRefresh={wizardComplete} onForceRefreshConsumed={() => setWizardComplete(false)} isHiddenWallet={deviceState.isHiddenWallet} />}
 					{activeTab === "apps" && <AppStore onOpenApp={handleOpenApp} onOpenKeepKey={handleOpenKeepKey} />}
+					{activeTab === "addresses" && <AddressBookView />}
 				</Flex>
 			</Flex>
 			<DeviceSettingsDrawer
