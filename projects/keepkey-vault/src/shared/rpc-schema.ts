@@ -272,6 +272,9 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       // own entries are auto-seeded from connected wallets (R2); external entries
       // are auto-created on manual sends (R4). Identity = (walletId, networkId, address).
       listAddressBook: { params: AddressBookFilter | void; response: AddressBookEntry[] }
+      // Manually add (or relabel) an external contact. networkId picks the chain;
+      // the address is normalized + the row scoped to the current wallet.
+      addAddressBook: { params: { networkId: string; address: string; label?: string }; response: AddressBookEntry | null }
       updateAddressBook: { params: { id: string; label?: string; note?: string }; response: boolean }
       deleteAddressBook: { params: { id: string }; response: void }
       getAddressBookHistory: { params: { entryId: string }; response: AddressBookTx[] }

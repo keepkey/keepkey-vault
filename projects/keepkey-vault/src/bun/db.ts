@@ -2063,6 +2063,38 @@ export function getAddressBookHistory(entryId: string, walletId: string, limit =
   }
 }
 
+/** Manually add (or relabel) an external contact. Upserts on the dedupe key so a
+ *  re-add just updates the label. Returns the resulting row. */
+export function addExternalEntry(args: {
+  walletId: string; deviceId: string; networkId: string; chainId: string; chainFamily: string; address: string; label?: string | null
+}): AddressBookEntry | null {
+  try {
+    if (!db) return null
+    const addr = normalizeAddress(args.address, args.chainFamily)
+    const now = Date.now()
+    const existing = db.query('SELECT id FROM addressbook WHERE wallet_id = ? AND network_id = ? AND address = ?')
+      .get(args.walletId, args.networkId, addr) as { id: string } | null
+    let id: string
+    if (existing) {
+      id = existing.id
+      db.run('UPDATE addressbook SET label = ?, updated_at = ? WHERE id = ?', [args.label ?? null, now, id])
+    } else {
+      id = crypto.randomUUID()
+      db.run(
+        `INSERT INTO addressbook
+           (id, wallet_id, device_id, kind, network_id, chain_id, address, label, created_at, updated_at)
+         VALUES (?, ?, ?, 'external', ?, ?, ?, ?, ?, ?)`,
+        [id, args.walletId, args.deviceId, args.networkId, args.chainId, addr, args.label ?? null, now, now],
+      )
+    }
+    const row = db.query('SELECT * FROM addressbook WHERE id = ?').get(id) as any
+    return row ? mapAddressBookRow(row) : null
+  } catch (e: any) {
+    console.warn('[db] addExternalEntry failed:', e.message)
+    return null
+  }
+}
+
 /** device_id -> label, from device_snapshot (the registered/watch-only device list).
  *  Used to attribute each own address to the device it belongs to. */
 export function getDeviceLabelMap(): Record<string, string> {

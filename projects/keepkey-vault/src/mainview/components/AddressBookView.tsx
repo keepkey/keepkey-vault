@@ -8,12 +8,14 @@ import { useAddressBook } from "../hooks/useAddressBook"
 import { useDeviceState } from "../hooks/useDeviceState"
 import { AddressIdenticon } from "./AddressIdenticon"
 import { AssetIcon } from "./AssetIcon"
+import { AddAddressDialog } from "./AddAddressDialog"
 import type { AddressBookEntry, AddressBookTx } from "../../shared/types"
 
 const chainById = new Map(CHAINS.map(c => [c.id, c]))
 const chainByNetwork = new Map(CHAINS.map(c => [c.networkId, c]))
 
 const shortDevice = (id?: string) => (id && id.length > 12 ? `${id.slice(0, 6)}…${id.slice(-4)}` : (id || "Wallet"))
+const EXTERNAL_TAB = "__external__"
 
 interface DisplayEntry extends AddressBookEntry {
   /** All underlying entry ids this row represents (own EVM collapses the same
@@ -24,22 +26,22 @@ interface DisplayEntry extends AddressBookEntry {
   networkCount?: number
 }
 
-/** Top-level Address Book destination (R1/R6). Own wallets are grouped by the
- *  device they belong to (across all of the user's devices, from the watch-only
- *  cache); saved recipients are listed separately. GitHub-squares identicon (R3),
- *  chain filter, search, and a per-address outbound-history drilldown (R7). */
+/** Top-level Address Book destination (R1/R6). One tab per device (own wallets,
+ *  with a connected/watch-only indicator) plus a "Saved recipients" tab for
+ *  external contacts. Device-seeded identicons (R3), per-tab chain filter +
+ *  search, manual add, and a per-address outbound-history drilldown (R7). */
 export function AddressBookView() {
   const { t } = useTranslation("addressbook")
   const { entries, loading, seeding, saveLabel, remove } = useAddressBook()
   const deviceState = useDeviceState()
-  // "Connected" = the device is physically attached and identified (ready, or mid
-  // PIN/passphrase/bootloader) — anything but disconnected/error. Requires a deviceId
-  // so we never light up a device we can't actually match.
+  // "Connected" = device attached & identified (anything but disconnected/error, with an id).
   const connectedDeviceId = (deviceState.deviceId && deviceState.state !== "disconnected" && deviceState.state !== "error")
     ? deviceState.deviceId
     : undefined
   const [search, setSearch] = useState("")
   const [chainFilter, setChainFilter] = useState<string>("all")
+  const [activeTab, setActiveTab] = useState<string | null>(null)
+  const [addOpen, setAddOpen] = useState(false)
 
   // Collapse own EVM rows (same address across many eip155 networks) into one card,
   // keyed per device, retaining every member id + chain so ops aggregate correctly.
@@ -67,137 +69,132 @@ export function AddressBookView() {
     return out
   }, [entries])
 
-  // Pills come from the raw entries so a chain that only exists inside a collapsed
-  // row is still selectable.
-  const chainsWithEntries = useMemo(() => {
-    const ids = new Set(entries.map(e => e.chainId))
-    return CHAINS.filter(c => ids.has(c.id))
-  }, [entries])
-
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase()
-    return display
-      .filter(e => chainFilter === "all" || e.memberChainIds.includes(chainFilter))
-      .filter(e => !q || e.label?.toLowerCase().includes(q) || e.address.toLowerCase().includes(q) || e.deviceLabel?.toLowerCase().includes(q))
-  }, [display, chainFilter, search])
-
-  // Group own entries by their device; external recipients go in their own section.
-  const groups = useMemo(() => {
-    const own = new Map<string, { deviceId: string; label: string; rows: DisplayEntry[] }>()
-    const external: DisplayEntry[] = []
-    for (const e of filtered) {
-      if (e.kind === "own") {
-        const key = e.deviceId || "unknown"
-        const g = own.get(key) || { deviceId: key, label: e.deviceLabel || shortDevice(e.deviceId), rows: [] }
-        g.rows.push(e)
-        own.set(key, g)
-      } else {
-        external.push(e)
-      }
+  // One tab per device (own), then an External tab if there are contacts.
+  const deviceTabs = useMemo(() => {
+    const byDevice = new Map<string, { deviceId: string; label: string; rows: DisplayEntry[] }>()
+    for (const e of display) {
+      if (e.kind !== "own") continue
+      const key = e.deviceId || "unknown"
+      const g = byDevice.get(key) || { deviceId: key, label: e.deviceLabel || shortDevice(e.deviceId), rows: [] }
+      g.rows.push(e)
+      byDevice.set(key, g)
     }
-    return { own: Array.from(own.values()), external }
-  }, [filtered])
+    return Array.from(byDevice.values())
+  }, [display])
 
-  const deviceCount = useMemo(() => new Set(display.filter(e => e.kind === "own").map(e => e.deviceId)).size, [display])
+  const externalRows = useMemo(() => display.filter(e => e.kind === "external"), [display])
+
+  const tabs = useMemo(() => {
+    const list: Array<{ id: string; label: string; connected?: boolean; external?: boolean }> =
+      deviceTabs.map(g => ({ id: g.deviceId, label: g.label, connected: g.deviceId === connectedDeviceId }))
+    if (externalRows.length) list.push({ id: EXTERNAL_TAB, label: t("contacts", { defaultValue: "Saved recipients" }), external: true })
+    return list
+  }, [deviceTabs, externalRows, connectedDeviceId, t])
+
+  // Resolve the active tab: explicit selection if still valid, else connected device, else first.
+  const effectiveTab = (activeTab && tabs.some(tb => tb.id === activeTab))
+    ? activeTab
+    : (tabs.find(tb => tb.connected)?.id || tabs[0]?.id || null)
+
+  const tabRows = useMemo<DisplayEntry[]>(() => {
+    if (effectiveTab === EXTERNAL_TAB) return externalRows
+    return deviceTabs.find(g => g.deviceId === effectiveTab)?.rows || []
+  }, [effectiveTab, deviceTabs, externalRows])
+
+  const chainsInTab = useMemo(() => {
+    const ids = new Set<string>()
+    for (const e of tabRows) for (const c of e.memberChainIds) ids.add(c)
+    return CHAINS.filter(c => ids.has(c.id))
+  }, [tabRows])
+
+  const visibleRows = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    return tabRows
+      .filter(e => chainFilter === "all" || e.memberChainIds.includes(chainFilter))
+      .filter(e => !q || e.label?.toLowerCase().includes(q) || e.address.toLowerCase().includes(q))
+  }, [tabRows, chainFilter, search])
 
   const handleSave = useCallback((ids: string[], label: string) =>
     Promise.all(ids.map(id => saveLabel(id, label))).then(() => {}), [saveLabel])
   const handleRemove = useCallback((ids: string[]) =>
     Promise.all(ids.map(id => remove(id))).then(() => {}), [remove])
 
+  const connectedActive = tabs.find(tb => tb.id === effectiveTab)?.connected
+
   return (
-    <Box maxW="720px" mx="auto" w="full" px="4">
-      <Flex align="center" justify="space-between" mb="3" mt="2">
+    <Box maxW="760px" mx="auto" w="full" px="4">
+      <Flex align="center" justify="space-between" mb="3" mt="2" gap="2">
         <Text fontSize="lg" fontWeight="700" color="var(--text-0)">{t("title", { defaultValue: "Address Book" })}</Text>
-        <Flex gap="2">
-          <Badge>{display.length} {t("addressesLabel", { defaultValue: "addresses" })}</Badge>
-          {deviceCount > 0 && <Badge>{deviceCount} {t("devicesLabel", { defaultValue: "devices" })}</Badge>}
-        </Flex>
+        <Button size="sm" bg="var(--gold)" color="var(--ink-0)" fontWeight="600" borderRadius="10px"
+                _hover={{ bg: "var(--gold-2)" }} onClick={() => setAddOpen(true)} flexShrink={0}>
+          <Flex align="center" gap="1">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
+            {t("addAddress", { defaultValue: "Add address" })}
+          </Flex>
+        </Button>
       </Flex>
 
-      <Flex gap="1.5" mb="3" wrap="wrap">
-        <Pill active={chainFilter === "all"} onClick={() => setChainFilter("all")}>{t("allChains", { defaultValue: "All" })}</Pill>
-        {chainsWithEntries.map(c => (
-          <Pill key={c.id} active={chainFilter === c.id} onClick={() => setChainFilter(c.id)}>
-            <AssetIcon caip={c.caip} size={14} alt={c.symbol} /> {c.symbol}
-          </Pill>
-        ))}
-      </Flex>
+      {/* Tabs: one per device + External */}
+      {tabs.length > 0 && (
+        <Flex gap="1" mb="3" overflowX="auto" pb="1" borderBottom="1px solid var(--line)">
+          {tabs.map(tb => {
+            const active = tb.id === effectiveTab
+            return (
+              <Flex key={tb.id} as="button" align="center" gap="1.5" px="3" py="2" flexShrink={0}
+                    borderBottom="2px solid" borderColor={active ? "var(--gold)" : "transparent"}
+                    color={active ? "var(--text-0)" : "var(--text-2)"} fontSize="12.5px" fontWeight={active ? "700" : "500"}
+                    _hover={{ color: "var(--text-0)" }} onClick={() => { setActiveTab(tb.id); setChainFilter("all") }}>
+                {tb.external ? (
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></svg>
+                ) : (
+                  <Box w="7px" h="7px" borderRadius="full" bg={tb.connected ? "var(--teal)" : "var(--text-2)"} title={tb.connected ? t("connected", { defaultValue: "Connected" }) : t("watchOnly", { defaultValue: "Watch-only" })} />
+                )}
+                <Text truncate maxW="140px">{tb.label}</Text>
+              </Flex>
+            )
+          })}
+        </Flex>
+      )}
+
+      {/* Connected/watch-only status for the active device tab */}
+      {effectiveTab !== EXTERNAL_TAB && tabs.length > 0 && (
+        <Text fontSize="10px" fontWeight="600" textTransform="uppercase" letterSpacing="0.05em" mb="2"
+              color={connectedActive ? "var(--teal)" : "var(--text-2)"}>
+          {connectedActive ? t("connected", { defaultValue: "Connected" }) : t("watchOnly", { defaultValue: "Watch-only" })}
+        </Text>
+      )}
+
+      {chainsInTab.length > 1 && (
+        <Flex gap="1.5" mb="3" wrap="wrap">
+          <Pill active={chainFilter === "all"} onClick={() => setChainFilter("all")}>{t("allChains", { defaultValue: "All" })}</Pill>
+          {chainsInTab.map(c => (
+            <Pill key={c.id} active={chainFilter === c.id} onClick={() => setChainFilter(c.id)}>
+              <AssetIcon caip={c.caip} size={14} alt={c.symbol} /> {c.symbol}
+            </Pill>
+          ))}
+        </Flex>
+      )}
 
       <Input value={search} onChange={(e) => setSearch(e.target.value)}
-             placeholder={t("searchPlaceholder", { defaultValue: "Search label, address, or device…" })}
+             placeholder={t("searchPlaceholder", { defaultValue: "Search label or address…" })}
              size="sm" mb="3" bg="var(--ink-0)" border="1px solid var(--line)" color="var(--text-0)" />
 
       {loading || (seeding && display.length === 0) ? (
         <Text fontSize="sm" color="var(--text-2)" py="8" textAlign="center">
           {seeding ? t("seeding", { defaultValue: "Loading your wallet addresses…" }) : t("loading", { defaultValue: "Loading…" })}
         </Text>
-      ) : filtered.length === 0 ? (
-        <Text fontSize="sm" color="var(--text-2)" py="8" textAlign="center">
-          {display.length === 0 ? t("noAddresses", { defaultValue: "No saved addresses yet" }) : t("noMatches", { defaultValue: "No addresses match your filter" })}
-        </Text>
+      ) : tabs.length === 0 ? (
+        <Text fontSize="sm" color="var(--text-2)" py="8" textAlign="center">{t("noAddresses", { defaultValue: "No saved addresses yet" })}</Text>
+      ) : visibleRows.length === 0 ? (
+        <Text fontSize="sm" color="var(--text-2)" py="8" textAlign="center">{t("noMatches", { defaultValue: "No addresses match your filter" })}</Text>
       ) : (
-        <Flex direction="column" gap="4">
-          {groups.own.map(g => {
-            const connected = !!connectedDeviceId && g.deviceId === connectedDeviceId
-            return (
-              <Box key={g.deviceId}>
-                <SectionHeader icon="device" connected={connected}>{g.label}</SectionHeader>
-                <Flex direction="column" gap="1.5">
-                  {g.rows.map(e => <Row key={e.id} entry={e} connected={connected} onSave={handleSave} onRemove={handleRemove} />)}
-                </Flex>
-              </Box>
-            )
-          })}
-          {groups.external.length > 0 && (
-            <Box>
-              <SectionHeader icon="contact">{t("contacts", { defaultValue: "Saved recipients" })}</SectionHeader>
-              <Flex direction="column" gap="1.5">
-                {groups.external.map(e => <Row key={e.id} entry={e} connected={false} onSave={handleSave} onRemove={handleRemove} />)}
-              </Flex>
-            </Box>
-          )}
+        <Flex direction="column" gap="1.5">
+          {visibleRows.map(e => <Row key={e.id} entry={e} connected={!!connectedActive && e.kind === "own"} onSave={handleSave} onRemove={handleRemove} />)}
         </Flex>
       )}
+
+      {addOpen && <AddAddressDialog onClose={() => setAddOpen(false)} onAdded={() => setActiveTab(EXTERNAL_TAB)} />}
     </Box>
-  )
-}
-
-function Badge({ children }: { children: ReactNode }) {
-  return (
-    <Text fontSize="11px" color="var(--text-2)" bg="var(--ink-2)" border="1px solid var(--line)" px="2" py="0.5" borderRadius="999px">
-      {children}
-    </Text>
-  )
-}
-
-function SectionHeader({ children, icon, connected }: { children: ReactNode; icon: "device" | "contact"; connected?: boolean }) {
-  const { t } = useTranslation("addressbook")
-  return (
-    <Flex align="center" gap="1.5" mb="1.5" px="1">
-      <Box color="var(--text-3)">
-        {icon === "device" ? (
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-            <rect x="5" y="2" width="14" height="20" rx="2" /><line x1="12" y1="18" x2="12" y2="18" />
-          </svg>
-        ) : (
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" />
-          </svg>
-        )}
-      </Box>
-      <Text fontSize="11px" fontWeight="700" color="var(--text-1)" textTransform="uppercase" letterSpacing="0.06em" truncate>
-        {children}
-      </Text>
-      {icon === "device" && (
-        <Flex align="center" gap="1" flexShrink={0}>
-          <Box w="7px" h="7px" borderRadius="full" bg={connected ? "var(--teal)" : "var(--text-2)"} />
-          <Text fontSize="9px" fontWeight="600" color={connected ? "var(--teal)" : "var(--text-2)"} textTransform="uppercase" letterSpacing="0.04em">
-            {connected ? t("connected", { defaultValue: "Connected" }) : t("watchOnly", { defaultValue: "Watch-only" })}
-          </Text>
-        </Flex>
-      )}
-    </Flex>
   )
 }
 
@@ -233,7 +230,6 @@ function Row({ entry, connected, onSave, onRemove }: {
     setExpanded(v => {
       const next = !v
       if (next && history === null) {
-        // Aggregate history across every collapsed member (own address on N networks).
         Promise.all(entry.memberIds.map(id =>
           rpcRequest<AddressBookTx[]>("getAddressBookHistory", { entryId: id }, 8000).catch(() => [] as AddressBookTx[])
         )).then(lists => setHistory(lists.flat().sort((a, b) => b.broadcastAt - a.broadcastAt)))
@@ -247,14 +243,14 @@ function Row({ entry, connected, onSave, onRemove }: {
       <Flex as="button" w="full" align="center" gap="3" px="3" py="2.5" textAlign="left"
             _hover={{ bg: "var(--ink-1)" }} onClick={toggle}>
         <Box position="relative" flexShrink={0}>
-          <AddressIdenticon seed={seed} size={32} />
+          <AddressIdenticon seed={seed} size={36} />
           {isOwn && (
             <Box position="absolute" bottom="-2px" right="-2px" w="11px" h="11px" borderRadius="full"
                  bg={connected ? "var(--teal)" : "var(--text-2)"} border="2px solid var(--ink-0)"
                  title={connected ? t("connected", { defaultValue: "Connected" }) : t("watchOnly", { defaultValue: "Watch-only" })} />
           )}
         </Box>
-        <Flex direction="column" minW="0" flex="1">
+        <Flex direction="column" minW="0" flex="1" gap="0.5">
           <Flex align="center" gap="1.5">
             <Text fontSize="13px" fontWeight="600" color="var(--text-0)" truncate>
               {entry.label || t("unlabeled", { defaultValue: "Unlabeled" })}
@@ -275,11 +271,12 @@ function Row({ entry, connected, onSave, onRemove }: {
               </Text>
             )}
           </Flex>
-          <Text fontSize="11px" fontFamily="mono" color="var(--text-2)" truncate>
-            {entry.address.slice(0, 12)}…{entry.address.slice(-8)}
+          {/* Full address — no middle ellipsis; wraps for long xpubs. */}
+          <Text fontSize="11px" fontFamily="mono" color="var(--text-2)" wordBreak="break-all" lineHeight="1.4">
+            {entry.address}
           </Text>
         </Flex>
-        {chain && <AssetIcon caip={chain.caip} size={16} alt={chain.symbol} />}
+        {chain && <AssetIcon caip={chain.caip} size={30} alt={chain.symbol} />}
       </Flex>
 
       {expanded && (
@@ -319,8 +316,6 @@ function Row({ entry, connected, onSave, onRemove }: {
           ) : (
             <Flex direction="column" gap="1">
               {history.map(tx => {
-                // A collapsed own row aggregates txs across networks — resolve each
-                // tx's chain from its own CAIP, falling back to the row's chain.
                 const txChain = chainByNetwork.get(caipToNetworkId(tx.caip)) || chain
                 const url = txChain ? getExplorerTxUrl(txChain.id, tx.txid) : null
                 return (
