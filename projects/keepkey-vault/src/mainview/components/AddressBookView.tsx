@@ -26,10 +26,10 @@ interface DisplayEntry extends AddressBookEntry {
   networkCount?: number
 }
 
-/** Top-level Address Book destination (R1/R6). One tab per device (own wallets,
- *  with a connected/watch-only indicator) plus a "Saved recipients" tab for
- *  external contacts. Device-seeded identicons (R3), per-tab chain filter +
- *  search, manual add, and a per-address outbound-history drilldown (R7). */
+/** Top-level Address Book destination (R1/R6). A global network filter sits above
+ *  the tabs (one tab per device + a "Saved recipients" tab) and persists as you
+ *  switch tabs. Device-seeded identicons (R3), copy-to-clipboard, manual add, and
+ *  a per-address outbound-history drilldown (R7). */
 export function AddressBookView() {
   const { t } = useTranslation("addressbook")
   const { entries, loading, seeding, saveLabel, remove } = useAddressBook()
@@ -69,7 +69,7 @@ export function AddressBookView() {
     return out
   }, [entries])
 
-  // One tab per device (own), then an External tab if there are contacts.
+  // One tab per device (own), then an always-present External tab.
   const deviceTabs = useMemo(() => {
     const byDevice = new Map<string, { deviceId: string; label: string; rows: DisplayEntry[] }>()
     for (const e of display) {
@@ -87,9 +87,10 @@ export function AddressBookView() {
   const tabs = useMemo(() => {
     const list: Array<{ id: string; label: string; connected?: boolean; external?: boolean }> =
       deviceTabs.map(g => ({ id: g.deviceId, label: g.label, connected: g.deviceId === connectedDeviceId }))
-    if (externalRows.length) list.push({ id: EXTERNAL_TAB, label: t("contacts", { defaultValue: "Saved recipients" }), external: true })
+    // External tab is always shown so it's discoverable + a target for "Add address".
+    list.push({ id: EXTERNAL_TAB, label: t("contacts", { defaultValue: "Saved recipients" }), external: true })
     return list
-  }, [deviceTabs, externalRows, connectedDeviceId, t])
+  }, [deviceTabs, connectedDeviceId, t])
 
   // Resolve the active tab: explicit selection if still valid, else connected device, else first.
   const effectiveTab = (activeTab && tabs.some(tb => tb.id === activeTab))
@@ -101,11 +102,12 @@ export function AddressBookView() {
     return deviceTabs.find(g => g.deviceId === effectiveTab)?.rows || []
   }, [effectiveTab, deviceTabs, externalRows])
 
-  const chainsInTab = useMemo(() => {
+  // Global network filter — built from EVERY entry (all tabs) and kept across tab switches.
+  const allChainsPresent = useMemo(() => {
     const ids = new Set<string>()
-    for (const e of tabRows) for (const c of e.memberChainIds) ids.add(c)
+    for (const e of display) for (const c of e.memberChainIds) ids.add(c)
     return CHAINS.filter(c => ids.has(c.id))
-  }, [tabRows])
+  }, [display])
 
   const visibleRows = useMemo(() => {
     const q = search.trim().toLowerCase()
@@ -119,22 +121,34 @@ export function AddressBookView() {
   const handleRemove = useCallback((ids: string[]) =>
     Promise.all(ids.map(id => remove(id))).then(() => {}), [remove])
 
-  const connectedActive = tabs.find(tb => tb.id === effectiveTab)?.connected
+  const onExternalTab = effectiveTab === EXTERNAL_TAB
 
   return (
     <Box maxW="760px" mx="auto" w="full" px="4">
       <Flex align="center" justify="space-between" mb="3" mt="2" gap="2">
         <Text fontSize="lg" fontWeight="700" color="var(--text-0)">{t("title", { defaultValue: "Address Book" })}</Text>
-        <Button size="sm" bg="var(--gold)" color="var(--ink-0)" fontWeight="600" borderRadius="10px"
-                _hover={{ bg: "var(--gold-2)" }} onClick={() => setAddOpen(true)} flexShrink={0}>
-          <Flex align="center" gap="1">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
-            {t("addAddress", { defaultValue: "Add address" })}
+        <Button size="sm" variant="outline" borderColor="var(--gold)" color="var(--gold)" borderRadius="10px" px="3" h="34px"
+                _hover={{ bg: "rgba(233,196,106,0.10)" }} onClick={() => setAddOpen(true)} flexShrink={0} title={t("addAddressHint", { defaultValue: "Add an address to your Address Book" })}>
+          <Flex align="center" gap="1.5">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
+            <Text fontSize="12.5px" fontWeight="700">{t("addAddress", { defaultValue: "Add Address" })}</Text>
           </Flex>
         </Button>
       </Flex>
 
-      {/* Tabs: one per device + External */}
+      {/* Global network filter — above the tabs, persists across tab switches. */}
+      {allChainsPresent.length > 1 && (
+        <Flex gap="1.5" mb="3" wrap="wrap">
+          <Pill active={chainFilter === "all"} onClick={() => setChainFilter("all")}>{t("allNetworks", { defaultValue: "All networks" })}</Pill>
+          {allChainsPresent.map(c => (
+            <Pill key={c.id} active={chainFilter === c.id} onClick={() => setChainFilter(c.id)}>
+              <AssetIcon caip={c.caip} size={14} alt={c.symbol} /> {c.symbol}
+            </Pill>
+          ))}
+        </Flex>
+      )}
+
+      {/* Tabs: one per device + Saved recipients */}
       {tabs.length > 0 && (
         <Flex gap="1" mb="3" overflowX="auto" pb="1" borderBottom="1px solid var(--line)">
           {tabs.map(tb => {
@@ -143,7 +157,7 @@ export function AddressBookView() {
               <Flex key={tb.id} as="button" align="center" gap="1.5" px="3" py="2" flexShrink={0}
                     borderBottom="2px solid" borderColor={active ? "var(--gold)" : "transparent"}
                     color={active ? "var(--text-0)" : "var(--text-2)"} fontSize="12.5px" fontWeight={active ? "700" : "500"}
-                    _hover={{ color: "var(--text-0)" }} onClick={() => { setActiveTab(tb.id); setChainFilter("all") }}>
+                    _hover={{ color: "var(--text-0)" }} onClick={() => setActiveTab(tb.id)}>
                 {tb.external ? (
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></svg>
                 ) : (
@@ -156,25 +170,6 @@ export function AddressBookView() {
         </Flex>
       )}
 
-      {/* Connected/watch-only status for the active device tab */}
-      {effectiveTab !== EXTERNAL_TAB && tabs.length > 0 && (
-        <Text fontSize="10px" fontWeight="600" textTransform="uppercase" letterSpacing="0.05em" mb="2"
-              color={connectedActive ? "var(--teal)" : "var(--text-2)"}>
-          {connectedActive ? t("connected", { defaultValue: "Connected" }) : t("watchOnly", { defaultValue: "Watch-only" })}
-        </Text>
-      )}
-
-      {chainsInTab.length > 1 && (
-        <Flex gap="1.5" mb="3" wrap="wrap">
-          <Pill active={chainFilter === "all"} onClick={() => setChainFilter("all")}>{t("allChains", { defaultValue: "All" })}</Pill>
-          {chainsInTab.map(c => (
-            <Pill key={c.id} active={chainFilter === c.id} onClick={() => setChainFilter(c.id)}>
-              <AssetIcon caip={c.caip} size={14} alt={c.symbol} /> {c.symbol}
-            </Pill>
-          ))}
-        </Flex>
-      )}
-
       <Input value={search} onChange={(e) => setSearch(e.target.value)}
              placeholder={t("searchPlaceholder", { defaultValue: "Search label or address…" })}
              size="sm" mb="3" bg="var(--ink-0)" border="1px solid var(--line)" color="var(--text-0)" />
@@ -183,13 +178,17 @@ export function AddressBookView() {
         <Text fontSize="sm" color="var(--text-2)" py="8" textAlign="center">
           {seeding ? t("seeding", { defaultValue: "Loading your wallet addresses…" }) : t("loading", { defaultValue: "Loading…" })}
         </Text>
-      ) : tabs.length === 0 ? (
-        <Text fontSize="sm" color="var(--text-2)" py="8" textAlign="center">{t("noAddresses", { defaultValue: "No saved addresses yet" })}</Text>
       ) : visibleRows.length === 0 ? (
-        <Text fontSize="sm" color="var(--text-2)" py="8" textAlign="center">{t("noMatches", { defaultValue: "No addresses match your filter" })}</Text>
+        <Text fontSize="sm" color="var(--text-2)" py="8" textAlign="center">
+          {onExternalTab && externalRows.length === 0
+            ? t("noContacts", { defaultValue: "No saved recipients yet — add one with “Add Address”." })
+            : (chainFilter !== "all" || search.trim())
+              ? t("noMatches", { defaultValue: "No addresses match your filter" })
+              : t("noAddresses", { defaultValue: "No saved addresses yet" })}
+        </Text>
       ) : (
         <Flex direction="column" gap="1.5">
-          {visibleRows.map(e => <Row key={e.id} entry={e} connected={!!connectedActive && e.kind === "own"} onSave={handleSave} onRemove={handleRemove} />)}
+          {visibleRows.map(e => <Row key={e.id} entry={e} connected={!!tabs.find(tb => tb.id === effectiveTab)?.connected && e.kind === "own"} onSave={handleSave} onRemove={handleRemove} />)}
         </Flex>
       )}
 
@@ -206,6 +205,26 @@ function Pill({ active, onClick, children }: { active: boolean; onClick: () => v
           onClick={onClick}>
       {children}
     </Flex>
+  )
+}
+
+function CopyButton({ value, label }: { value: string; label: string }) {
+  const [copied, setCopied] = useState(false)
+  // A div (not a <button>) because it lives inside the row's <button> header — nested
+  // buttons are invalid. stopPropagation so copying doesn't toggle the row.
+  return (
+    <Box as="span" role="button" aria-label={label} title={label} cursor="pointer" flexShrink={0}
+         color={copied ? "var(--teal)" : "var(--text-3)"} _hover={{ color: "var(--text-1)" }}
+         onClick={(e) => {
+           e.stopPropagation()
+           navigator.clipboard?.writeText(value).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500) }).catch(() => {})
+         }}>
+      {copied ? (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+      ) : (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
+      )}
+    </Box>
   )
 }
 
@@ -276,6 +295,7 @@ function Row({ entry, connected, onSave, onRemove }: {
             {entry.address}
           </Text>
         </Flex>
+        <CopyButton value={entry.address} label={t("copyAddress", { defaultValue: "Copy address" })} />
         {chain && <AssetIcon caip={chain.caip} size={30} alt={chain.symbol} />}
       </Flex>
 
