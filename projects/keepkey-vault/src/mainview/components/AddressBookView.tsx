@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next"
 import { rpcRequest } from "../lib/rpc"
 import { CHAINS, getExplorerTxUrl, caipToNetworkId } from "../../shared/chains"
 import { useAddressBook } from "../hooks/useAddressBook"
+import { useDeviceState } from "../hooks/useDeviceState"
 import { AddressIdenticon } from "./AddressIdenticon"
 import { AssetIcon } from "./AssetIcon"
 import type { AddressBookEntry, AddressBookTx } from "../../shared/types"
@@ -30,6 +31,13 @@ interface DisplayEntry extends AddressBookEntry {
 export function AddressBookView() {
   const { t } = useTranslation("addressbook")
   const { entries, loading, seeding, saveLabel, remove } = useAddressBook()
+  const deviceState = useDeviceState()
+  // "Connected" = the device is physically attached and identified (ready, or mid
+  // PIN/passphrase/bootloader) — anything but disconnected/error. Requires a deviceId
+  // so we never light up a device we can't actually match.
+  const connectedDeviceId = (deviceState.deviceId && deviceState.state !== "disconnected" && deviceState.state !== "error")
+    ? deviceState.deviceId
+    : undefined
   const [search, setSearch] = useState("")
   const [chainFilter, setChainFilter] = useState<string>("all")
 
@@ -130,19 +138,22 @@ export function AddressBookView() {
         </Text>
       ) : (
         <Flex direction="column" gap="4">
-          {groups.own.map(g => (
-            <Box key={g.deviceId}>
-              <SectionHeader icon="device">{g.label}</SectionHeader>
-              <Flex direction="column" gap="1.5">
-                {g.rows.map(e => <Row key={e.id} entry={e} onSave={handleSave} onRemove={handleRemove} />)}
-              </Flex>
-            </Box>
-          ))}
+          {groups.own.map(g => {
+            const connected = !!connectedDeviceId && g.deviceId === connectedDeviceId
+            return (
+              <Box key={g.deviceId}>
+                <SectionHeader icon="device" connected={connected}>{g.label}</SectionHeader>
+                <Flex direction="column" gap="1.5">
+                  {g.rows.map(e => <Row key={e.id} entry={e} connected={connected} onSave={handleSave} onRemove={handleRemove} />)}
+                </Flex>
+              </Box>
+            )
+          })}
           {groups.external.length > 0 && (
             <Box>
               <SectionHeader icon="contact">{t("contacts", { defaultValue: "Saved recipients" })}</SectionHeader>
               <Flex direction="column" gap="1.5">
-                {groups.external.map(e => <Row key={e.id} entry={e} onSave={handleSave} onRemove={handleRemove} />)}
+                {groups.external.map(e => <Row key={e.id} entry={e} connected={false} onSave={handleSave} onRemove={handleRemove} />)}
               </Flex>
             </Box>
           )}
@@ -160,7 +171,8 @@ function Badge({ children }: { children: ReactNode }) {
   )
 }
 
-function SectionHeader({ children, icon }: { children: ReactNode; icon: "device" | "contact" }) {
+function SectionHeader({ children, icon, connected }: { children: ReactNode; icon: "device" | "contact"; connected?: boolean }) {
+  const { t } = useTranslation("addressbook")
   return (
     <Flex align="center" gap="1.5" mb="1.5" px="1">
       <Box color="var(--text-3)">
@@ -177,6 +189,14 @@ function SectionHeader({ children, icon }: { children: ReactNode; icon: "device"
       <Text fontSize="11px" fontWeight="700" color="var(--text-1)" textTransform="uppercase" letterSpacing="0.06em" truncate>
         {children}
       </Text>
+      {icon === "device" && (
+        <Flex align="center" gap="1" flexShrink={0}>
+          <Box w="7px" h="7px" borderRadius="full" bg={connected ? "var(--teal)" : "var(--text-2)"} />
+          <Text fontSize="9px" fontWeight="600" color={connected ? "var(--teal)" : "var(--text-2)"} textTransform="uppercase" letterSpacing="0.04em">
+            {connected ? t("connected", { defaultValue: "Connected" }) : t("watchOnly", { defaultValue: "Watch-only" })}
+          </Text>
+        </Flex>
+      )}
     </Flex>
   )
 }
@@ -192,13 +212,18 @@ function Pill({ active, onClick, children }: { active: boolean; onClick: () => v
   )
 }
 
-function Row({ entry, onSave, onRemove }: {
+function Row({ entry, connected, onSave, onRemove }: {
   entry: DisplayEntry
+  connected?: boolean
   onSave: (ids: string[], label: string) => Promise<void> | void
   onRemove: (ids: string[]) => Promise<void> | void
 }) {
   const { t } = useTranslation("addressbook")
   const chain = chainById.get(entry.chainId)
+  const isOwn = entry.kind === "own"
+  // Own avatars are seeded by device (so a device's addresses share one identicon);
+  // external contacts are seeded by their address.
+  const seed = isOwn ? (entry.deviceId || entry.address) : entry.address
   const [expanded, setExpanded] = useState(false)
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(entry.label || "")
@@ -221,12 +246,29 @@ function Row({ entry, onSave, onRemove }: {
     <Box border="1px solid var(--line)" borderRadius="12px" bg="var(--ink-0)" overflow="hidden">
       <Flex as="button" w="full" align="center" gap="3" px="3" py="2.5" textAlign="left"
             _hover={{ bg: "var(--ink-1)" }} onClick={toggle}>
-        <AddressIdenticon address={entry.address} chainId={entry.chainId} size={32} />
+        <Box position="relative" flexShrink={0}>
+          <AddressIdenticon seed={seed} size={32} />
+          {isOwn && (
+            <Box position="absolute" bottom="-2px" right="-2px" w="11px" h="11px" borderRadius="full"
+                 bg={connected ? "var(--teal)" : "var(--text-2)"} border="2px solid var(--ink-0)"
+                 title={connected ? t("connected", { defaultValue: "Connected" }) : t("watchOnly", { defaultValue: "Watch-only" })} />
+          )}
+        </Box>
         <Flex direction="column" minW="0" flex="1">
           <Flex align="center" gap="1.5">
             <Text fontSize="13px" fontWeight="600" color="var(--text-0)" truncate>
               {entry.label || t("unlabeled", { defaultValue: "Unlabeled" })}
             </Text>
+            {!isOwn && (
+              <Flex align="center" gap="0.5" px="1" py="0.5" borderRadius="sm" bg="rgba(224,140,123,0.12)" border="1px solid rgba(224,140,123,0.30)" flexShrink={0}>
+                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="var(--rose)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" />
+                </svg>
+                <Text fontSize="9px" fontWeight="700" color="var(--rose)" textTransform="uppercase" letterSpacing="0.04em">
+                  {t("external", { defaultValue: "External" })}
+                </Text>
+              </Flex>
+            )}
             {entry.networkCount && entry.networkCount > 1 && (
               <Text fontSize="9px" color="var(--text-3)" bg="var(--ink-2)" px="1" borderRadius="sm">
                 {entry.networkCount} {t("networksLabel", { defaultValue: "networks" })}

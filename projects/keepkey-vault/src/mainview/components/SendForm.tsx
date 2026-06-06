@@ -462,7 +462,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 						)}
 						{selectedContact && recipient === selectedContact.address && (
 							<Flex align="center" gap="2" mt="1.5" px="2" py="1" w="fit-content" bg="rgba(233,196,106,0.06)" border="1px solid rgba(233,196,106,0.22)" borderRadius="999px">
-								<AddressIdenticon address={selectedContact.address} chainId={selectedContact.chainId} size={16} />
+								<AddressIdenticon seed={selectedContact.kind === "own" ? (selectedContact.deviceId || selectedContact.address) : selectedContact.address} size={16} />
 								<Text fontSize="11px" color="kk.gold" fontWeight="600" truncate maxW="220px">
 									{selectedContact.label || t("unlabeled", { ns: "addressbook" })}
 								</Text>
@@ -749,7 +749,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 						{recipientIsNew && !labelSaved && (
 							<Box bg="var(--ink-0)" border="1px solid var(--line)" borderRadius="14px" p="3" w="full">
 								<Flex align="center" gap="2" mb="2">
-									<AddressIdenticon address={recipient} chainId={chain.id} size={20} />
+									<AddressIdenticon seed={recipient} size={20} />
 									<Text fontSize="11px" color="kk.textMuted" truncate flex="1">
 										{t("saveRecipientPrompt", { ns: "addressbook" })}
 									</Text>

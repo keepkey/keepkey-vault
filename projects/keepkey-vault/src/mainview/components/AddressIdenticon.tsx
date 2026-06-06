@@ -12,17 +12,17 @@ function fnv1a(str: string): number {
 }
 
 interface Props {
-  address: string
-  /** Hashed with the address so the same address on two networks differs. */
-  chainId?: string
+  /** What the avatar identifies. Pass a deviceId for own-wallet entries (so every
+   *  address on one device shares an avatar) or an address for external contacts. */
+  seed: string
   size?: number
 }
 
 /** GitHub-style 5×5 mirrored-grid identicon, derived deterministically from the
- *  address. Pure inline SVG — no library, works for every address family
- *  (0x, bech32, base58, xpub …) which R3 requires. */
-export function AddressIdenticon({ address, chainId, size = 28 }: Props) {
-  const seed = `${chainId || ""}:${(address || "?").toLowerCase()}`
+ *  seed. Pure inline SVG — no library, works for any string (deviceId, 0x addr,
+ *  bech32, base58, xpub …) which R3 requires. */
+export function AddressIdenticon({ seed: rawSeed, size = 28 }: Props) {
+  const seed = (rawSeed || "?").toLowerCase()
   const hCells = fnv1a(seed)
   const hColor = fnv1a(seed + "#c")
 
