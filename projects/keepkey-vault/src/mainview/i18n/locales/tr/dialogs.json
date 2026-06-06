@@ -28,7 +28,15 @@
 		"rpcPlaceholder": "https://...",
 		"explorerUrlOptional": "Blok gezgini URL'si (isteğe bağlı)",
 		"addChainButton": "Ağ ekle",
-		"adding": "Ekleniyor..."
+		"adding": "Ekleniyor...",
+		"chainIdHeader": "Ağ Kimliği",
+		"networkHeader": "Ağ",
+		"noChains": "Kullanılabilir ağ yok",
+		"noWorkingNodes": "Çalışan RPC düğümü bulunamadı. Şu adreste bulabilirsiniz:",
+		"ofChains": "/ {{total}} ağ",
+		"online": "çevrimiçi",
+		"selected": "SEÇİLİ",
+		"symbolHeader": "Sembol"
 	},
 	"addToken": {
 		"title": "Özel token ekle",

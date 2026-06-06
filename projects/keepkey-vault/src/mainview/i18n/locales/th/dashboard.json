@@ -28,5 +28,12 @@
 	"timeJustNow": "เมื่อสักครู่",
 	"timeMinutesAgo": "{{count}} นาทีที่แล้ว",
 	"timeHoursAgo": "{{count}} ชั่วโมงที่แล้ว",
-	"timeDaysAgo": "{{count}} วันที่แล้ว"
+	"timeDaysAgo": "{{count}} วันที่แล้ว",
+	"staleCtaTitle": "กดเพื่อรีเฟรชยอดคงเหลือ",
+	"staleCtaSubtitle": "ตรวจสอบล่าสุด {{time}}",
+	"loadingDashboardTitle": "กำลังโหลดแดชบอร์ด",
+	"loadingConnect": "กำลังเชื่อมต่อกับ KeepKey ของคุณ",
+	"loadingSync": "กำลังซิงค์ยอดคงเหลือทุกเครือข่าย",
+	"loadingPrices": "กำลังดึงราคาล่าสุด",
+	"tokensCount": "+{{count}} โทเค็น"
 }

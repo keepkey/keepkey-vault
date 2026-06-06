@@ -19,5 +19,10 @@
 	"add": "Ekle",
 	"verify": "Doğrula",
 	"skip": "Atla",
-	"previous": "Önceki"
+	"previous": "Önceki",
+	"incomingTx": {
+		"onChain": "{{chain}} · bakiye yenileniyor",
+		"refreshing": "Bakiye yenileniyor",
+		"title": "Gelen ödeme"
+	}
 }

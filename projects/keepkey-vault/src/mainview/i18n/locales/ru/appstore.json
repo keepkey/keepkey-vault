@@ -6,5 +6,7 @@
 	"shapeshiftName": "ShapeShift",
 	"shapeshiftDescription": "Обменивайте, отслеживайте и управляйте криптовалютой между сетями",
 	"walletconnectName": "WalletConnect",
-	"walletconnectDescription": "Подключайтесь к любому dApp, совместимому с WalletConnect"
+	"walletconnectDescription": "Подключайтесь к любому dApp, совместимому с WalletConnect",
+	"internal": "Открыть",
+	"open": "Открыть"
 }

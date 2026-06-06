@@ -6,5 +6,7 @@
 	"shapeshiftName": "ShapeShift",
 	"shapeshiftDescription": "Échangez, suivez et gérez vos cryptos entre chaînes",
 	"walletconnectName": "WalletConnect",
-	"walletconnectDescription": "Connectez-vous à n'importe quelle dApp compatible WalletConnect"
+	"walletconnectDescription": "Connectez-vous à n'importe quelle dApp compatible WalletConnect",
+	"internal": "Ouvrir",
+	"open": "Ouvrir"
 }

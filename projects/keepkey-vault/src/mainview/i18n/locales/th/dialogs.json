@@ -28,7 +28,15 @@
 		"rpcPlaceholder": "https://...",
 		"explorerUrlOptional": "URL เครื่องมือสำรวจบล็อก (ไม่บังคับ)",
 		"addChainButton": "เพิ่มเครือข่าย",
-		"adding": "กำลังเพิ่ม..."
+		"adding": "กำลังเพิ่ม...",
+		"chainIdHeader": "ID เครือข่าย",
+		"networkHeader": "เครือข่าย",
+		"noChains": "ไม่มีเครือข่ายที่ใช้ได้",
+		"noWorkingNodes": "ไม่พบโหนด RPC ที่ใช้งานได้ ค้นหาได้ที่",
+		"ofChains": "จาก {{total}} เครือข่าย",
+		"online": "ออนไลน์",
+		"selected": "เลือกแล้ว",
+		"symbolHeader": "สัญลักษณ์"
 	},
 	"addToken": {
 		"title": "เพิ่มโทเค็นกำหนดเอง",

@@ -14,5 +14,8 @@
 	"errorWithMessage": "Hata: {{error}}",
 	"tryUnplugging": "KeepKey'i çıkarıp yeniden takmayı deneyin.",
 	"watchOnlyConnectPrompt": "Yalnızca izleme — Tam erişim için cihazı bağlayın",
-	"passphraseMode": "Parola"
+	"passphraseMode": "Parola",
+	"addresses": "Adresler",
+	"mobileApp": "Mobil Uygulama",
+	"walletConnect": "WalletConnect"
 }

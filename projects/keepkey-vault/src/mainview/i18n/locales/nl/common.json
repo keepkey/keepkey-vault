@@ -19,5 +19,10 @@
 	"add": "Toevoegen",
 	"verify": "Verifiëren",
 	"skip": "Overslaan",
-	"previous": "Vorige"
+	"previous": "Vorige",
+	"incomingTx": {
+		"onChain": "{{chain}} · saldo vernieuwen",
+		"refreshing": "Saldo vernieuwen",
+		"title": "Inkomende betaling"
+	}
 }

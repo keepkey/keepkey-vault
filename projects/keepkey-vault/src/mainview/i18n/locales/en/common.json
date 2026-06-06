@@ -19,5 +19,10 @@
 	"add": "Add",
 	"verify": "Verify",
 	"skip": "Skip",
-	"previous": "Previous"
+	"previous": "Previous",
+	"incomingTx": {
+		"onChain": "{{chain}} · refreshing balance",
+		"refreshing": "Refreshing balance",
+		"title": "Incoming payment"
+	}
 }

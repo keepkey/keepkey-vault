@@ -6,5 +6,7 @@
 	"shapeshiftName": "ShapeShift",
 	"shapeshiftDescription": "크로스 체인 암호화폐 거래, 추적 및 관리",
 	"walletconnectName": "WalletConnect",
-	"walletconnectDescription": "WalletConnect 호환 dApp에 연결"
+	"walletconnectDescription": "WalletConnect 호환 dApp에 연결",
+	"internal": "열기",
+	"open": "열기"
 }

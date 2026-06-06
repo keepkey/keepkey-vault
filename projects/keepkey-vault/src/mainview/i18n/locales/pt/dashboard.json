@@ -28,5 +28,12 @@
 	"timeJustNow": "agora mesmo",
 	"timeMinutesAgo": "{{count}}min atrás",
 	"timeHoursAgo": "{{count}}h atrás",
-	"timeDaysAgo": "{{count}}d atrás"
+	"timeDaysAgo": "{{count}}d atrás",
+	"staleCtaTitle": "Pressione para atualizar saldos",
+	"staleCtaSubtitle": "Última verificação {{time}}",
+	"loadingDashboardTitle": "Carregando painel",
+	"loadingConnect": "Conectando ao seu KeepKey",
+	"loadingSync": "Sincronizando saldos entre redes",
+	"loadingPrices": "Buscando os preços mais recentes",
+	"tokensCount": "+{{count}} tokens"
 }

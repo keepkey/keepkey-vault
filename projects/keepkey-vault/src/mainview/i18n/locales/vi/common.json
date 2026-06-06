@@ -19,5 +19,10 @@
 	"add": "Thêm",
 	"verify": "Xác minh",
 	"skip": "Bỏ qua",
-	"previous": "Trước"
+	"previous": "Trước",
+	"incomingTx": {
+		"onChain": "{{chain}} · đang làm mới số dư",
+		"refreshing": "Đang làm mới số dư",
+		"title": "Thanh toán đến"
+	}
 }

@@ -14,5 +14,8 @@
 	"errorWithMessage": "Błąd: {{error}}",
 	"tryUnplugging": "Spróbuj odłączyć i ponownie podłączyć KeepKey.",
 	"watchOnlyConnectPrompt": "Tylko podgląd — Podłącz urządzenie, aby uzyskać pełny dostęp",
-	"passphraseMode": "Hasło"
+	"passphraseMode": "Hasło",
+	"addresses": "Adresy",
+	"mobileApp": "Aplikacja mobilna",
+	"walletConnect": "WalletConnect"
 }

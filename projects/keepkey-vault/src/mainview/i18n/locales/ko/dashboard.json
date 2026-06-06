@@ -28,5 +28,12 @@
 	"timeJustNow": "방금",
 	"timeMinutesAgo": "{{count}}분 전",
 	"timeHoursAgo": "{{count}}시간 전",
-	"timeDaysAgo": "{{count}}일 전"
+	"timeDaysAgo": "{{count}}일 전",
+	"staleCtaTitle": "눌러서 잔액 새로고침",
+	"staleCtaSubtitle": "마지막 확인 {{time}}",
+	"loadingDashboardTitle": "대시보드 로드 중",
+	"loadingConnect": "KeepKey에 연결 중",
+	"loadingSync": "체인 전반의 잔액 동기화 중",
+	"loadingPrices": "최신 시세를 가져오는 중",
+	"tokensCount": "+{{count}}개 토큰"
 }

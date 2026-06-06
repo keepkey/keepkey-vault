@@ -19,5 +19,10 @@
 	"add": "추가",
 	"verify": "검증",
 	"skip": "건너뛰기",
-	"previous": "이전"
+	"previous": "이전",
+	"incomingTx": {
+		"onChain": "{{chain}} · 잔액 새로고침 중",
+		"refreshing": "잔액 새로고침 중",
+		"title": "입금"
+	}
 }

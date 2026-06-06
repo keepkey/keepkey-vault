@@ -144,5 +144,11 @@
 		"securityNote": "Code expires in 15 minutes, one-time use only. Only public keys are shared — private keys never leave your device.",
 		"retry": "Retry",
 		"regenerate": "New Code"
-	}
+	},
+	"alphaFirmware": "Alpha Firmware",
+	"alphaFirmwareDesc": "Opt in to early firmware releases from the beta channel",
+	"downloadManually": "Download from GitHub",
+	"downloadUpdate": "Download Update",
+	"preReleaseUpdates": "Pre-release Updates",
+	"preReleaseUpdatesDesc": "Get early access to new features before stable release"
 }

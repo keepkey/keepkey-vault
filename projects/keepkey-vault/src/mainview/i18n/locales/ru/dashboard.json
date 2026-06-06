@@ -28,5 +28,12 @@
 	"timeJustNow": "только что",
 	"timeMinutesAgo": "{{count}}м назад",
 	"timeHoursAgo": "{{count}}ч назад",
-	"timeDaysAgo": "{{count}}д назад"
+	"timeDaysAgo": "{{count}}д назад",
+	"staleCtaTitle": "Нажмите для обновления балансов",
+	"staleCtaSubtitle": "Последняя проверка {{time}}",
+	"loadingDashboardTitle": "Загрузка панели",
+	"loadingConnect": "Подключение к вашему KeepKey",
+	"loadingSync": "Синхронизация балансов по сетям",
+	"loadingPrices": "Получение актуальных цен",
+	"tokensCount": "+{{count}} токенов"
 }

@@ -19,5 +19,10 @@
 	"add": "Hinzufügen",
 	"verify": "Überprüfen",
 	"skip": "Überspringen",
-	"previous": "Zurück"
+	"previous": "Zurück",
+	"incomingTx": {
+		"onChain": "{{chain}} · Guthaben wird aktualisiert",
+		"refreshing": "Guthaben wird aktualisiert",
+		"title": "Eingehende Zahlung"
+	}
 }
