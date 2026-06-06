@@ -56,8 +56,8 @@ const CONFIGS: ChainConfig[] = [
     // been initialized (cold start before BTC dashboard). Native SegWit is the
     // de-facto modern default since 2017.
     defaultPath: [0x80000054, 0x80000000, 0x80000000, 0, 0], scriptType: 'p2wpkh',
-    explorerTxUrl: 'https://blockchair.com/bitcoin/transaction/{{txid}}',
-    explorerAddressUrl: 'https://blockchair.com/bitcoin/address/{{address}}',
+    explorerTxUrl: 'https://mempool.space/tx/{{txid}}',
+    explorerAddressUrl: 'https://mempool.space/address/{{address}}',
   },
   {
     id: 'ethereum', chain: Chain.Ethereum, coin: 'Ethereum', symbol: 'ETH',
