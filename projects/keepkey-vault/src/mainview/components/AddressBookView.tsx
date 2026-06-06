@@ -26,7 +26,7 @@ interface DisplayEntry extends AddressBookEntry {
  *  per-address outbound-history drilldown (R7). */
 export function AddressBookView() {
   const { t } = useTranslation("addressbook")
-  const { entries, loading, saveLabel, remove } = useAddressBook()
+  const { entries, loading, seeding, saveLabel, remove } = useAddressBook()
   const [search, setSearch] = useState("")
   const [chainFilter, setChainFilter] = useState<string>("all")
 
@@ -99,8 +99,10 @@ export function AddressBookView() {
              placeholder={t("searchPlaceholder", { defaultValue: "Search label or address…" })}
              size="sm" mb="3" bg="var(--ink-0)" border="1px solid var(--line)" color="var(--text-0)" />
 
-      {loading ? (
-        <Text fontSize="sm" color="var(--text-2)" py="8" textAlign="center">{t("loading", { defaultValue: "Loading…" })}</Text>
+      {loading || (seeding && display.length === 0) ? (
+        <Text fontSize="sm" color="var(--text-2)" py="8" textAlign="center">
+          {seeding ? t("seeding", { defaultValue: "Loading your wallet addresses…" }) : t("loading", { defaultValue: "Loading…" })}
+        </Text>
       ) : filtered.length === 0 ? (
         <Text fontSize="sm" color="var(--text-2)" py="8" textAlign="center">
           {display.length === 0 ? t("noAddresses", { defaultValue: "No saved addresses yet" }) : t("noMatches", { defaultValue: "No addresses match your filter" })}

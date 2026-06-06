@@ -5,6 +5,7 @@
 	"allChains": "All",
 	"searchPlaceholder": "Search label or address…",
 	"loading": "Loading…",
+	"seeding": "Loading your wallet addresses…",
 	"noAddresses": "No saved addresses yet",
 	"noMatches": "No addresses match your filter",
 	"unlabeled": "Unlabeled",
