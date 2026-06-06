@@ -568,7 +568,10 @@ function applyRemoteSwapData(swap: PendingSwap, remoteSwap: any): void {
   // gas fields are only adopted for EVM inputs.
   const isEvmInput = !!swap.fromCaip?.startsWith('eip155:')
   const btd = remoteSwap.blockchainTxData || undefined
-  const inboundBlockNumber: number | undefined = (btd?.blockNumber != null && Number.isFinite(Number(btd.blockNumber)))
+  // Blockchair (Pioneer's UTXO backend) reports `block_id: -1` for txs still in
+  // the mempool, and some backends use 0. A real block height is >= 1, so anything
+  // non-positive means "not yet mined" — drop it rather than render "Block #-1".
+  const inboundBlockNumber: number | undefined = (btd?.blockNumber != null && Number.isFinite(Number(btd.blockNumber)) && Number(btd.blockNumber) > 0)
     ? Number(btd.blockNumber)
     : undefined
   const inboundBlockHash: string | undefined = btd?.blockHash || undefined

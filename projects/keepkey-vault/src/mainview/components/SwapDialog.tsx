@@ -845,7 +845,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   // and is the only place createdAt (the broadcast anchor) is available.
   const applyInboundSnap = useCallback((snap: any) => {
     if (!snap) return
-    if (snap.inboundBlockNumber !== undefined && snap.inboundBlockNumber !== null) setLiveInboundBlockNumber(snap.inboundBlockNumber)
+    if (snap.inboundBlockNumber != null && snap.inboundBlockNumber > 0) setLiveInboundBlockNumber(snap.inboundBlockNumber)
     if (snap.inboundBlockHash) setLiveInboundBlockHash(snap.inboundBlockHash)
     if (snap.inboundGasUsed) setLiveInboundGasUsed(snap.inboundGasUsed)
     if (snap.inboundEffectiveGasPrice) setLiveInboundEffectiveGasPrice(snap.inboundEffectiveGasPrice)
@@ -872,7 +872,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       if (update.outboundChainId) setLiveOutboundChainId(update.outboundChainId)
       if (update.refundReason) setLiveRefundReason(update.refundReason)
       if (update.nearTxHash) setLiveNearTxHash(update.nearTxHash)
-      if (update.inboundBlockNumber !== undefined) setLiveInboundBlockNumber(update.inboundBlockNumber)
+      if (update.inboundBlockNumber !== undefined && update.inboundBlockNumber > 0) setLiveInboundBlockNumber(update.inboundBlockNumber)
       if (update.inboundBlockHash) setLiveInboundBlockHash(update.inboundBlockHash)
       if (update.inboundGasUsed) setLiveInboundGasUsed(update.inboundGasUsed)
       if (update.inboundEffectiveGasPrice) setLiveInboundEffectiveGasPrice(update.inboundEffectiveGasPrice)
@@ -1255,7 +1255,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     if (resumeSwap.nearTxHash) setLiveNearTxHash(resumeSwap.nearTxHash)
     // Seed inbound location + timing + failure guidance from the persisted row
     // so a resumed dialog renders them on first paint (before any fresh poll).
-    if (resumeSwap.inboundBlockNumber !== undefined) setLiveInboundBlockNumber(resumeSwap.inboundBlockNumber)
+    if (resumeSwap.inboundBlockNumber !== undefined && resumeSwap.inboundBlockNumber > 0) setLiveInboundBlockNumber(resumeSwap.inboundBlockNumber)
     if (resumeSwap.inboundBlockHash) setLiveInboundBlockHash(resumeSwap.inboundBlockHash)
     if (resumeSwap.inboundGasUsed) setLiveInboundGasUsed(resumeSwap.inboundGasUsed)
     if (resumeSwap.inboundEffectiveGasPrice) setLiveInboundEffectiveGasPrice(resumeSwap.inboundEffectiveGasPrice)
@@ -1710,7 +1710,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
           toAddress,
           slippageBps,
           isMax: sendIsMax,
-        }, 30000)
+        }, 60000)
         if (version !== quoteVersionRef.current) return
         setQuote(result)
         setQuoteFetchedAt(Date.now())
@@ -1804,7 +1804,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
           amount: sendAmount,
           fromAddress, toAddress, slippageBps,
           isMax: sendIsMax,
-        }, 30000)
+        }, 60000)
         // Block on >1% output drop — quote degraded, user should re-review
         const oldOut = parseFloat(quote.expectedOutput || '0')
         const newOut = parseFloat(refreshed.expectedOutput || '0')
