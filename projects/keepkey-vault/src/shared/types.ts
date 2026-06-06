@@ -278,6 +278,7 @@ export interface AddressBookEntry {
   id: string
   walletId: string
   deviceId: string
+  deviceLabel?: string       // resolved at read from device_snapshot — which device owns this (display only)
   kind: AddressBookKind
   networkId: string          // CAIP-2 identity, e.g. 'eip155:1'
   chainId: string            // internal chain id, e.g. 'ethereum'

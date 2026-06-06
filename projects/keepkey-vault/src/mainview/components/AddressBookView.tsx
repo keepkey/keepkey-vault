@@ -12,6 +12,8 @@ import type { AddressBookEntry, AddressBookTx } from "../../shared/types"
 const chainById = new Map(CHAINS.map(c => [c.id, c]))
 const chainByNetwork = new Map(CHAINS.map(c => [c.networkId, c]))
 
+const shortDevice = (id?: string) => (id && id.length > 12 ? `${id.slice(0, 6)}…${id.slice(-4)}` : (id || "Wallet"))
+
 interface DisplayEntry extends AddressBookEntry {
   /** All underlying entry ids this row represents (own EVM collapses the same
    *  address across eip155 networks into one card). Edit/delete/history act on
@@ -21,9 +23,10 @@ interface DisplayEntry extends AddressBookEntry {
   networkCount?: number
 }
 
-/** Top-level Address Book destination (R1/R6). Unified list of own wallets + saved
- *  recipients, with a GitHub-squares identicon (R3), chain filter, search, and a
- *  per-address outbound-history drilldown (R7). */
+/** Top-level Address Book destination (R1/R6). Own wallets are grouped by the
+ *  device they belong to (across all of the user's devices, from the watch-only
+ *  cache); saved recipients are listed separately. GitHub-squares identicon (R3),
+ *  chain filter, search, and a per-address outbound-history drilldown (R7). */
 export function AddressBookView() {
   const { t } = useTranslation("addressbook")
   const { entries, loading, seeding, saveLabel, remove } = useAddressBook()
@@ -31,14 +34,15 @@ export function AddressBookView() {
   const [chainFilter, setChainFilter] = useState<string>("all")
 
   // Collapse own EVM rows (same address across many eip155 networks) into one card,
-  // retaining every member id + chain so operations aggregate correctly.
+  // keyed per device, retaining every member id + chain so ops aggregate correctly.
   const display = useMemo<DisplayEntry[]>(() => {
     const out: DisplayEntry[] = []
     const ownEvmByAddr = new Map<string, DisplayEntry>()
     for (const e of entries) {
       const fam = chainById.get(e.chainId)?.chainFamily
       if (e.kind === "own" && fam === "evm") {
-        const ex = ownEvmByAddr.get(e.address)
+        const key = `${e.deviceId}:${e.address}`
+        const ex = ownEvmByAddr.get(key)
         if (ex) {
           ex.networkCount = (ex.networkCount || 1) + 1
           ex.memberIds.push(e.id)
@@ -46,7 +50,7 @@ export function AddressBookView() {
           continue
         }
         const d: DisplayEntry = { ...e, networkCount: 1, memberIds: [e.id], memberChainIds: [e.chainId] }
-        ownEvmByAddr.set(e.address, d)
+        ownEvmByAddr.set(key, d)
         out.push(d)
       } else {
         out.push({ ...e, memberIds: [e.id], memberChainIds: [e.chainId] })
@@ -66,10 +70,27 @@ export function AddressBookView() {
     const q = search.trim().toLowerCase()
     return display
       .filter(e => chainFilter === "all" || e.memberChainIds.includes(chainFilter))
-      .filter(e => !q || e.label?.toLowerCase().includes(q) || e.address.toLowerCase().includes(q))
+      .filter(e => !q || e.label?.toLowerCase().includes(q) || e.address.toLowerCase().includes(q) || e.deviceLabel?.toLowerCase().includes(q))
   }, [display, chainFilter, search])
 
-  const ownCount = useMemo(() => display.filter(e => e.kind === "own").length, [display])
+  // Group own entries by their device; external recipients go in their own section.
+  const groups = useMemo(() => {
+    const own = new Map<string, { deviceId: string; label: string; rows: DisplayEntry[] }>()
+    const external: DisplayEntry[] = []
+    for (const e of filtered) {
+      if (e.kind === "own") {
+        const key = e.deviceId || "unknown"
+        const g = own.get(key) || { deviceId: key, label: e.deviceLabel || shortDevice(e.deviceId), rows: [] }
+        g.rows.push(e)
+        own.set(key, g)
+      } else {
+        external.push(e)
+      }
+    }
+    return { own: Array.from(own.values()), external }
+  }, [filtered])
+
+  const deviceCount = useMemo(() => new Set(display.filter(e => e.kind === "own").map(e => e.deviceId)).size, [display])
 
   const handleSave = useCallback((ids: string[], label: string) =>
     Promise.all(ids.map(id => saveLabel(id, label))).then(() => {}), [saveLabel])
@@ -82,7 +103,7 @@ export function AddressBookView() {
         <Text fontSize="lg" fontWeight="700" color="var(--text-0)">{t("title", { defaultValue: "Address Book" })}</Text>
         <Flex gap="2">
           <Badge>{display.length} {t("addressesLabel", { defaultValue: "addresses" })}</Badge>
-          {ownCount > 0 && <Badge>{ownCount} {t("myWalletsLabel", { defaultValue: "my wallets" })}</Badge>}
+          {deviceCount > 0 && <Badge>{deviceCount} {t("devicesLabel", { defaultValue: "devices" })}</Badge>}
         </Flex>
       </Flex>
 
@@ -96,7 +117,7 @@ export function AddressBookView() {
       </Flex>
 
       <Input value={search} onChange={(e) => setSearch(e.target.value)}
-             placeholder={t("searchPlaceholder", { defaultValue: "Search label or address…" })}
+             placeholder={t("searchPlaceholder", { defaultValue: "Search label, address, or device…" })}
              size="sm" mb="3" bg="var(--ink-0)" border="1px solid var(--line)" color="var(--text-0)" />
 
       {loading || (seeding && display.length === 0) ? (
@@ -108,8 +129,23 @@ export function AddressBookView() {
           {display.length === 0 ? t("noAddresses", { defaultValue: "No saved addresses yet" }) : t("noMatches", { defaultValue: "No addresses match your filter" })}
         </Text>
       ) : (
-        <Flex direction="column" gap="1.5">
-          {filtered.map(e => <Row key={e.id} entry={e} onSave={handleSave} onRemove={handleRemove} />)}
+        <Flex direction="column" gap="4">
+          {groups.own.map(g => (
+            <Box key={g.deviceId}>
+              <SectionHeader icon="device">{g.label}</SectionHeader>
+              <Flex direction="column" gap="1.5">
+                {g.rows.map(e => <Row key={e.id} entry={e} onSave={handleSave} onRemove={handleRemove} />)}
+              </Flex>
+            </Box>
+          ))}
+          {groups.external.length > 0 && (
+            <Box>
+              <SectionHeader icon="contact">{t("contacts", { defaultValue: "Saved recipients" })}</SectionHeader>
+              <Flex direction="column" gap="1.5">
+                {groups.external.map(e => <Row key={e.id} entry={e} onSave={handleSave} onRemove={handleRemove} />)}
+              </Flex>
+            </Box>
+          )}
         </Flex>
       )}
     </Box>
@@ -121,6 +157,27 @@ function Badge({ children }: { children: ReactNode }) {
     <Text fontSize="11px" color="var(--text-2)" bg="var(--ink-2)" border="1px solid var(--line)" px="2" py="0.5" borderRadius="999px">
       {children}
     </Text>
+  )
+}
+
+function SectionHeader({ children, icon }: { children: ReactNode; icon: "device" | "contact" }) {
+  return (
+    <Flex align="center" gap="1.5" mb="1.5" px="1">
+      <Box color="var(--text-3)">
+        {icon === "device" ? (
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="5" y="2" width="14" height="20" rx="2" /><line x1="12" y1="18" x2="12" y2="18" />
+          </svg>
+        ) : (
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" />
+          </svg>
+        )}
+      </Box>
+      <Text fontSize="11px" fontWeight="700" color="var(--text-1)" textTransform="uppercase" letterSpacing="0.06em" truncate>
+        {children}
+      </Text>
+    </Flex>
   )
 }
 
@@ -170,9 +227,9 @@ function Row({ entry, onSave, onRemove }: {
             <Text fontSize="13px" fontWeight="600" color="var(--text-0)" truncate>
               {entry.label || t("unlabeled", { defaultValue: "Unlabeled" })}
             </Text>
-            {entry.kind === "own" && (
-              <Text fontSize="9px" color="var(--teal)" bg="rgba(139,227,196,0.10)" px="1" borderRadius="sm">
-                {t("ownWallet", { defaultValue: "My wallet" })}{entry.networkCount && entry.networkCount > 1 ? ` · ${entry.networkCount}` : ""}
+            {entry.networkCount && entry.networkCount > 1 && (
+              <Text fontSize="9px" color="var(--text-3)" bg="var(--ink-2)" px="1" borderRadius="sm">
+                {entry.networkCount} {t("networksLabel", { defaultValue: "networks" })}
               </Text>
             )}
           </Flex>

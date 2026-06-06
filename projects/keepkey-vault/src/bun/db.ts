@@ -1990,12 +1990,16 @@ export function recordOutbound(args: {
   }
 }
 
-/** List entries for a wallet, optionally filtered by network/chain/kind/search. */
+/** List entries, optionally filtered by network/chain/kind/search. Own entries are
+ *  cross-device (no walletId required, so the book shows every device's wallets);
+ *  external entries must be wallet-scoped for privacy. */
 export function getAddressBookList(filter: AddressBookFilter): AddressBookEntry[] {
   try {
-    if (!db || !filter.walletId) return []
-    let sql = 'SELECT * FROM addressbook WHERE wallet_id = ?'
-    const params: any[] = [filter.walletId]
+    if (!db) return []
+    if (filter.kind !== 'own' && !filter.walletId) return []
+    let sql = 'SELECT * FROM addressbook WHERE 1=1'
+    const params: any[] = []
+    if (filter.walletId) { sql += ' AND wallet_id = ?'; params.push(filter.walletId) }
     if (filter.networkId) { sql += ' AND network_id = ?'; params.push(filter.networkId) }
     if (filter.chainId)   { sql += ' AND chain_id = ?';   params.push(filter.chainId) }
     if (filter.kind)      { sql += ' AND kind = ?';       params.push(filter.kind) }
@@ -2055,6 +2059,37 @@ export function getAddressBookHistory(entryId: string, walletId: string, limit =
     return rows.map(mapAddressBookTxRow)
   } catch (e: any) {
     console.warn('[db] getAddressBookHistory failed:', e.message)
+    return []
+  }
+}
+
+/** device_id -> label, from device_snapshot (the registered/watch-only device list).
+ *  Used to attribute each own address to the device it belongs to. */
+export function getDeviceLabelMap(): Record<string, string> {
+  try {
+    if (!db) return {}
+    const rows = db.query('SELECT device_id, label FROM device_snapshot').all() as any[]
+    const map: Record<string, string> = {}
+    for (const r of rows) if (r.label) map[r.device_id] = r.label
+    return map
+  } catch (e: any) {
+    console.warn('[db] getDeviceLabelMap failed:', e.message)
+    return {}
+  }
+}
+
+/** Per-device cached addresses (the watch-only balance cache) for seeding own
+ *  entries across ALL of the user's devices — not just the connected one. One
+ *  primary address per chain per device; addresses are already persisted. */
+export function getBalancesForOwnSeed(): Array<{ deviceId: string; chainId: string; address: string }> {
+  try {
+    if (!db) return []
+    const rows = db.query(
+      "SELECT device_id, chain_id, address FROM balances WHERE address != '' AND device_id != '' AND device_id != 'unknown'",
+    ).all() as any[]
+    return rows.map(r => ({ deviceId: r.device_id, chainId: r.chain_id, address: r.address }))
+  } catch (e: any) {
+    console.warn('[db] getBalancesForOwnSeed failed:', e.message)
     return []
   }
 }

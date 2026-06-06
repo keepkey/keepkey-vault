@@ -125,7 +125,7 @@ import { BtcAccountManager } from "./btc-accounts"
 import { EvmAddressManager, evmAddressPath } from "./evm-addresses"
 import { shouldResetManagersOnReady, nextReadyDeviceId } from "../shared/device-switch"
 import { WalletConnectManager } from "./walletconnect"
-import { initDb, factoryResetDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, setCustomTokenIcon as dbSetCustomTokenIcon, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility, insertApiLog, getApiLogs, clearApiLogs, setCachedBalances, getCachedBalances, updateCachedBalance, clearBalances, saveCachedPubkey, getLatestDeviceSnapshot, getCachedPubkeys, saveReport, getReportsList, getReportById, deleteReport, reportExists, getSwapHistory, getSwapHistoryStats, getSwapHistoryByTxid, getBip85Seeds, saveBip85Seed, deleteBip85Seed, clearCachedPubkeys, getRecentActivityFromLog, getPioneerServers, addPioneerServerDb, removePioneerServerDb, syncOwnAddressBook, recordOutbound, getAddressBookList, updateAddressBookEntry, deleteAddressBookEntry, getAddressBookHistory } from "./db"
+import { initDb, factoryResetDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, setCustomTokenIcon as dbSetCustomTokenIcon, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility, insertApiLog, getApiLogs, clearApiLogs, setCachedBalances, getCachedBalances, updateCachedBalance, clearBalances, saveCachedPubkey, getLatestDeviceSnapshot, getCachedPubkeys, saveReport, getReportsList, getReportById, deleteReport, reportExists, getSwapHistory, getSwapHistoryStats, getSwapHistoryByTxid, getBip85Seeds, saveBip85Seed, deleteBip85Seed, clearCachedPubkeys, getRecentActivityFromLog, getPioneerServers, addPioneerServerDb, removePioneerServerDb, syncOwnAddressBook, recordOutbound, getAddressBookList, updateAddressBookEntry, deleteAddressBookEntry, getAddressBookHistory, getDeviceLabelMap, getBalancesForOwnSeed } from "./db"
 import type { OwnAddressSeed } from "./db"
 import { rectifyWallet, getLedgerSummary, getLedgerJournals } from "./ledger"
 import { generateReport, reportToPdfBuffer, reportToCsv } from "./reports"
@@ -778,6 +778,41 @@ function getWalletDbScope(): { deviceId: string; walletId: string } | null {
 	const seedId = engine.currentSeedEthAddress?.toLowerCase()
 	if (!seedId) return null
 	return { deviceId, walletId: `${deviceId}:${seedId}` }
+}
+
+/** Seed own-wallet Address Book entries for EVERY known device from the persisted
+ *  watch-only balance cache — so the book shows all the user's wallets (not just
+ *  the connected one), each attributable to its device. Cheap, idempotent (INSERT
+ *  OR IGNORE), no device calls. Caller must gate on !engine.isPassphraseWallet.
+ *  walletId is reconstructed as `${deviceId}:${ethAddr}` (matching getWalletDbScope)
+ *  so the connected device's cache-seed dedupes against its live getBalances seed. */
+function seedOwnFromCache(): void {
+	try {
+		const rows = getBalancesForOwnSeed()
+		if (rows.length === 0) return
+		const labels = getDeviceLabelMap()
+		const chainById = new Map(getAllChains().map(c => [c.id, c]))
+		const byDevice = new Map<string, Array<{ chainId: string; address: string }>>()
+		for (const r of rows) {
+			if (!labels[r.deviceId]) continue // only registered devices (skip 'unknown'/unlabeled)
+			const list = byDevice.get(r.deviceId) || []
+			list.push({ chainId: r.chainId, address: r.address })
+			byDevice.set(r.deviceId, list)
+		}
+		for (const [deviceId, drows] of byDevice) {
+			const ethAddr = drows.find(r => r.chainId === 'ethereum')?.address
+			const walletId = ethAddr ? `${deviceId}:${ethAddr.toLowerCase()}` : deviceId
+			const seeds: OwnAddressSeed[] = []
+			for (const r of drows) {
+				const ch = chainById.get(r.chainId)
+				if (!ch) continue
+				seeds.push({ address: r.address, networkId: ch.networkId, chainId: ch.id, chainFamily: ch.chainFamily, symbol: ch.symbol, label: ch.symbol })
+			}
+			if (seeds.length) syncOwnAddressBook({ deviceId, walletId }, seeds)
+		}
+	} catch (e: any) {
+		console.warn('[seedOwnFromCache] failed:', e?.message)
+	}
 }
 
 const pendingScopedApiLogs: ApiLogEntry[] = []
@@ -4121,7 +4156,16 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (engine.isPassphraseWallet) return []
 				const scope = getWalletDbScope()
 				if (!scope) return []
-				return getAddressBookList({ ...(params || {}), walletId: scope.walletId })
+				// Populate own entries for ALL devices from the watch-only cache (cheap,
+				// idempotent) so the book isn't limited to the connected wallet.
+				try { seedOwnFromCache() } catch { /* never block the read */ }
+				const labels = getDeviceLabelMap()
+				const networkId = params?.networkId
+				const search = params?.search
+				// own = every device's wallets (cross-device); external = this wallet's contacts.
+				const own = getAddressBookList({ kind: 'own', networkId, search })
+				const external = getAddressBookList({ kind: 'external', walletId: scope.walletId, networkId, search })
+				return [...own, ...external].map(e => ({ ...e, deviceLabel: labels[e.deviceId] || e.deviceLabel }))
 			},
 			updateAddressBook: async (params) => {
 				if (engine.isPassphraseWallet) return false
