@@ -1,5 +1,5 @@
 import type { ElectrobunRPCSchema } from 'electrobun/bun'
-import type { DeviceStateInfo, FirmwareProgress, FirmwareAnalysis, FatalEvent, PinRequest, CharacterRequest, ChainBalance, BuildTxParams, BuildTxResult, BroadcastResult, BtcAccountSet, BtcScriptType, EvmAddressSet, CustomToken, CustomChain, AppSettings, PioneerServer, BtcGetAddressParams, EthGetAddressParams, EthSignTxParams, BtcSignTxParams, GetPublicKeysParams, UpdateInfo, UpdateStatus, TokenVisibilityStatus, PairingRequestInfo, PairedAppInfo, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, ReportMeta, ReportData, SwapAsset, SwapQuote, SwapQuoteParams, ExecuteSwapParams, SwapResult, SwapHealth, PendingSwap, SwapStatusUpdate, SwapHistoryRecord, SwapHistoryFilter, SwapHistoryStats, SwapUiState, SwapUiCommand, RecentActivity, BuildStakingTxParams, StakingPosition, NameInfo, NameQuote, BuildNameRegTxParams, ZcashTransaction, EmulatorStatus, EmulatorWalletInfo, RegisteredDevice, WcSessionInfo } from './types'
+import type { DeviceStateInfo, FirmwareProgress, FirmwareAnalysis, FatalEvent, PinRequest, CharacterRequest, ChainBalance, BuildTxParams, BuildTxResult, BroadcastResult, BtcAccountSet, BtcScriptType, EvmAddressSet, CustomToken, CustomChain, AppSettings, PioneerServer, BtcGetAddressParams, EthGetAddressParams, EthSignTxParams, BtcSignTxParams, GetPublicKeysParams, UpdateInfo, UpdateStatus, TokenVisibilityStatus, PairingRequestInfo, PairedAppInfo, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, ReportMeta, ReportData, SwapAsset, SwapQuote, SwapQuoteParams, ExecuteSwapParams, SwapResult, SwapHealth, PendingSwap, SwapStatusUpdate, SwapHistoryRecord, SwapHistoryFilter, SwapHistoryStats, SwapUiState, SwapUiCommand, RecentActivity, BuildStakingTxParams, StakingPosition, NameInfo, NameQuote, BuildNameRegTxParams, ZcashTransaction, EmulatorStatus, EmulatorWalletInfo, RegisteredDevice, WcSessionInfo, AddressBookEntry, AddressBookFilter, AddressBookTx } from './types'
 
 /**
  * RPC Schema for Bun ↔ WebView communication.
@@ -89,7 +89,10 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       getBalances: { params: { forceRefresh?: boolean }; response: ChainBalance[] }
       getBalance: { params: { chainId: string }; response: ChainBalance }
       buildTx: { params: BuildTxParams; response: BuildTxResult }
-      broadcastTx: { params: { chainId: string; signedTx: any }; response: BroadcastResult }
+      // `to`/`amount`/`symbol`/`caip`/`fromAddress` are optional and used only to
+      // populate the Address Book (R3/R4/R7). Callers that omit them broadcast
+      // exactly as before and create no entry.
+      broadcastTx: { params: { chainId: string; signedTx: any; to?: string; amount?: string; symbol?: string; caip?: string; fromAddress?: string }; response: BroadcastResult }
 
       // ── Staking / delegation ─────────────────────────────────────────
       getStakingPositions: { params: { chainId: string; address: string }; response: StakingPosition[] }
@@ -265,6 +268,17 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       // so REST /api/v2/swap/state can read what the user sees.
       publishSwapUiState: { params: SwapUiState; response: void }
 
+      // ── Address Book (SQLite-persisted, unified across all wallets) ──────
+      // own entries are auto-seeded from connected wallets (R2); external entries
+      // are auto-created on manual sends (R4). Identity = (walletId, networkId, address).
+      listAddressBook: { params: AddressBookFilter | void; response: AddressBookEntry[] }
+      // Manually add (or relabel) an external contact. networkId picks the chain;
+      // the address is normalized + the row scoped to the current wallet.
+      addAddressBook: { params: { networkId: string; address: string; label?: string }; response: AddressBookEntry | null }
+      updateAddressBook: { params: { id: string; label?: string; note?: string }; response: boolean }
+      deleteAddressBook: { params: { id: string }; response: void }
+      getAddressBookHistory: { params: { entryId: string }; response: AddressBookTx[] }
+
       // ── Recent Activity ──────────────────────────────────────────────────
       getRecentActivity: { params: { limit?: number; chainId?: string } | void; response: RecentActivity[] }
       scanChainHistory: { params: { chainId: string }; response: { count: number } }
@@ -398,6 +412,9 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       /** SSE event-stream connection status. 'connected' = watching addresses; 'disconnected' = no stream. */
       'stream-status': { connected: boolean; watching: number; sessionId?: string }
       'token-visibility-changed': { caip: string; status: 'visible' | 'hidden' | null }
+      // Address Book mutated (own-sync inserted rows, or a send created/updated a
+      // recipient) — frontend re-fetches the list.
+      'addressbook-changed': Record<string, never>
       'sweep-progress': { scanId: string; current: number; total: number; phase: string; foundCount: number; foundSats: number }
       'shield-progress': { step: string; detail?: string }
       'deshield-progress': { step: string; detail?: string }

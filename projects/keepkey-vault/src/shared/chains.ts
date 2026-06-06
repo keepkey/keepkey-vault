@@ -323,6 +323,20 @@ export function findChainByNetwork(
   return undefined
 }
 
+/** Reduce a CAIP-19 asset string (or an already-bare CAIP-2 networkId) to its
+ *  CAIP-2 networkId — the Address Book's identity for a recipient:
+ *    'eip155:1/erc20:0xdac17f…'        -> 'eip155:1'
+ *    'eip155:1/slip44:60'              -> 'eip155:1'
+ *    'bip122:000…93/slip44:0'          -> 'bip122:000…93'
+ *    'eip155:1'                        -> 'eip155:1'
+ *  Used by the Send picker (R5): an entry matches iff its networkId equals
+ *  caipToNetworkId(activeCaip). Exact equality — eip155:1 must never surface on
+ *  an eip155:137 send. */
+export function caipToNetworkId(caip: string): string {
+  const slash = caip.indexOf('/')
+  return slash === -1 ? caip : caip.slice(0, slash)
+}
+
 /** Best-effort block-explorer URL for a block height, derived from the chain's
  *  tx-URL template. Only EVM and UTXO explorers follow a known, stable
  *  `…/block/{n}` convention (etherscan-family use `/block/`, Blockchair uses
