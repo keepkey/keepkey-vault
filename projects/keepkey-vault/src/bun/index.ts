@@ -4132,6 +4132,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return ok
 			},
 			deleteAddressBook: async (params) => {
+				if (engine.isPassphraseWallet) return
 				const scope = getWalletDbScope()
 				if (!scope) return
 				deleteAddressBookEntry(params.id, scope.walletId)

@@ -3,16 +3,21 @@ import type { ReactNode } from "react"
 import { Box, Flex, Text, Input, Button } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
 import { rpcRequest } from "../lib/rpc"
-import { CHAINS, getExplorerTxUrl } from "../../shared/chains"
+import { CHAINS, getExplorerTxUrl, caipToNetworkId } from "../../shared/chains"
 import { useAddressBook } from "../hooks/useAddressBook"
 import { AddressIdenticon } from "./AddressIdenticon"
 import { AssetIcon } from "./AssetIcon"
 import type { AddressBookEntry, AddressBookTx } from "../../shared/types"
 
 const chainById = new Map(CHAINS.map(c => [c.id, c]))
+const chainByNetwork = new Map(CHAINS.map(c => [c.networkId, c]))
 
 interface DisplayEntry extends AddressBookEntry {
-  /** For own EVM rows collapsed across L2s: how many networks share this address. */
+  /** All underlying entry ids this row represents (own EVM collapses the same
+   *  address across eip155 networks into one card). Edit/delete/history act on
+   *  every member id; chain filtering matches any member chain. */
+  memberIds: string[]
+  memberChainIds: string[]
   networkCount?: number
 }
 
@@ -25,7 +30,8 @@ export function AddressBookView() {
   const [search, setSearch] = useState("")
   const [chainFilter, setChainFilter] = useState<string>("all")
 
-  // Collapse own EVM rows (same address across many eip155 networks) into one card.
+  // Collapse own EVM rows (same address across many eip155 networks) into one card,
+  // retaining every member id + chain so operations aggregate correctly.
   const display = useMemo<DisplayEntry[]>(() => {
     const out: DisplayEntry[] = []
     const ownEvmByAddr = new Map<string, DisplayEntry>()
@@ -33,30 +39,42 @@ export function AddressBookView() {
       const fam = chainById.get(e.chainId)?.chainFamily
       if (e.kind === "own" && fam === "evm") {
         const ex = ownEvmByAddr.get(e.address)
-        if (ex) { ex.networkCount = (ex.networkCount || 1) + 1; continue }
-        const d: DisplayEntry = { ...e, networkCount: 1 }
+        if (ex) {
+          ex.networkCount = (ex.networkCount || 1) + 1
+          ex.memberIds.push(e.id)
+          if (!ex.memberChainIds.includes(e.chainId)) ex.memberChainIds.push(e.chainId)
+          continue
+        }
+        const d: DisplayEntry = { ...e, networkCount: 1, memberIds: [e.id], memberChainIds: [e.chainId] }
         ownEvmByAddr.set(e.address, d)
         out.push(d)
       } else {
-        out.push(e)
+        out.push({ ...e, memberIds: [e.id], memberChainIds: [e.chainId] })
       }
     }
     return out
   }, [entries])
 
+  // Pills come from the raw entries so a chain that only exists inside a collapsed
+  // row is still selectable.
   const chainsWithEntries = useMemo(() => {
-    const ids = new Set(display.map(e => e.chainId))
+    const ids = new Set(entries.map(e => e.chainId))
     return CHAINS.filter(c => ids.has(c.id))
-  }, [display])
+  }, [entries])
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
     return display
-      .filter(e => chainFilter === "all" || e.chainId === chainFilter)
+      .filter(e => chainFilter === "all" || e.memberChainIds.includes(chainFilter))
       .filter(e => !q || e.label?.toLowerCase().includes(q) || e.address.toLowerCase().includes(q))
   }, [display, chainFilter, search])
 
   const ownCount = useMemo(() => display.filter(e => e.kind === "own").length, [display])
+
+  const handleSave = useCallback((ids: string[], label: string) =>
+    Promise.all(ids.map(id => saveLabel(id, label))).then(() => {}), [saveLabel])
+  const handleRemove = useCallback((ids: string[]) =>
+    Promise.all(ids.map(id => remove(id))).then(() => {}), [remove])
 
   return (
     <Box maxW="720px" mx="auto" w="full" px="4">
@@ -89,7 +107,7 @@ export function AddressBookView() {
         </Text>
       ) : (
         <Flex direction="column" gap="1.5">
-          {filtered.map(e => <Row key={e.id} entry={e} onSave={saveLabel} onRemove={remove} />)}
+          {filtered.map(e => <Row key={e.id} entry={e} onSave={handleSave} onRemove={handleRemove} />)}
         </Flex>
       )}
     </Box>
@@ -117,8 +135,8 @@ function Pill({ active, onClick, children }: { active: boolean; onClick: () => v
 
 function Row({ entry, onSave, onRemove }: {
   entry: DisplayEntry
-  onSave: (id: string, label: string) => Promise<void> | void
-  onRemove: (id: string) => Promise<void> | void
+  onSave: (ids: string[], label: string) => Promise<void> | void
+  onRemove: (ids: string[]) => Promise<void> | void
 }) {
   const { t } = useTranslation("addressbook")
   const chain = chainById.get(entry.chainId)
@@ -131,12 +149,14 @@ function Row({ entry, onSave, onRemove }: {
     setExpanded(v => {
       const next = !v
       if (next && history === null) {
-        rpcRequest<AddressBookTx[]>("getAddressBookHistory", { entryId: entry.id }, 8000)
-          .then(rows => setHistory(rows ?? [])).catch(() => setHistory([]))
+        // Aggregate history across every collapsed member (own address on N networks).
+        Promise.all(entry.memberIds.map(id =>
+          rpcRequest<AddressBookTx[]>("getAddressBookHistory", { entryId: id }, 8000).catch(() => [] as AddressBookTx[])
+        )).then(lists => setHistory(lists.flat().sort((a, b) => b.broadcastAt - a.broadcastAt)))
       }
       return next
     })
-  }, [entry.id, history])
+  }, [entry.memberIds, history])
 
   return (
     <Box border="1px solid var(--line)" borderRadius="12px" bg="var(--ink-0)" overflow="hidden">
@@ -169,7 +189,7 @@ function Row({ entry, onSave, onRemove }: {
                 <Input value={draft} onChange={(e) => setDraft(e.target.value)} size="xs" flex="1"
                        bg="var(--ink-0)" border="1px solid var(--line)" color="var(--text-0)" maxLength={100}
                        placeholder={t("labelPlaceholder", { defaultValue: "Label" })} />
-                <Button size="xs" bg="var(--gold)" color="var(--ink-0)" onClick={async () => { await onSave(entry.id, draft.trim()); setEditing(false) }}>
+                <Button size="xs" bg="var(--gold)" color="var(--ink-0)" onClick={async () => { await onSave(entry.memberIds, draft.trim()); setEditing(false) }}>
                   {t("save", { ns: "common", defaultValue: "Save" })}
                 </Button>
                 <Button size="xs" variant="ghost" color="var(--text-2)" onClick={() => { setDraft(entry.label || ""); setEditing(false) }}>
@@ -181,7 +201,7 @@ function Row({ entry, onSave, onRemove }: {
                 <Button size="xs" variant="ghost" color="var(--text-2)" _hover={{ color: "var(--teal)" }} onClick={() => setEditing(true)}>
                   {t("edit", { defaultValue: "Edit" })}
                 </Button>
-                <Button size="xs" variant="ghost" color="var(--text-2)" _hover={{ color: "var(--rose)" }} onClick={() => onRemove(entry.id)}>
+                <Button size="xs" variant="ghost" color="var(--text-2)" _hover={{ color: "var(--rose)" }} onClick={() => onRemove(entry.memberIds)}>
                   {t("delete", { defaultValue: "Delete" })}
                 </Button>
               </>
@@ -198,7 +218,10 @@ function Row({ entry, onSave, onRemove }: {
           ) : (
             <Flex direction="column" gap="1">
               {history.map(tx => {
-                const url = getExplorerTxUrl(entry.chainId, tx.txid)
+                // A collapsed own row aggregates txs across networks — resolve each
+                // tx's chain from its own CAIP, falling back to the row's chain.
+                const txChain = chainByNetwork.get(caipToNetworkId(tx.caip)) || chain
+                const url = txChain ? getExplorerTxUrl(txChain.id, tx.txid) : null
                 return (
                   <Flex key={tx.id} align="center" justify="space-between" gap="2" fontSize="11px">
                     <Text color="var(--text-2)" fontFamily="mono">{new Date(tx.broadcastAt).toLocaleDateString()}</Text>

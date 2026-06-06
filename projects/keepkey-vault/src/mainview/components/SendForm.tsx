@@ -219,12 +219,24 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 		setLoading(true)
 		setError(null)
 
+		// History needs a real amount even for MAX sends (BuildTxResult has none):
+		// token MAX = full token balance; native MAX = balance − network fee.
+		let sendAmount: string | undefined
+		if (!isMax) {
+			sendAmount = amount || undefined
+		} else if (isTokenSend) {
+			sendAmount = displayBalance || undefined
+		} else {
+			const net = parseFloat(displayBalance) - parseFloat(buildResult?.fee || '0')
+			sendAmount = net > 0 ? String(net) : (displayBalance || undefined)
+		}
+
 		try {
 			const result = await rpcRequest<BroadcastResult>('broadcastTx', {
 				chainId: chain.id,
 				signedTx,
 				to: recipient,
-				amount: isMax ? undefined : (amount || undefined),
+				amount: sendAmount,
 				symbol: displaySymbol,
 				caip: activeCaip,
 				fromAddress: address || undefined,
@@ -241,7 +253,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 			setError(e.message || t("broadcastFailed"))
 		}
 		setLoading(false)
-	}, [chain, signedTx, recipient, amount, isMax, displaySymbol, activeCaip, address])
+	}, [chain, signedTx, recipient, amount, isMax, isTokenSend, displaySymbol, displayBalance, buildResult, activeCaip, address])
 
 	const reset = useCallback(() => {
 		setPhase('input')
