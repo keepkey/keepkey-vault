@@ -106,6 +106,7 @@ process.on('unhandledRejection', (reason) => {
 })
 
 import { EngineController, withTimeout } from "./engine-controller"
+import { runUsbDiagnostic as runUsbDiagnosticProbe } from "./windows-usb-probe"
 import { startRestApi, clearFeaturesCache, setUiActive, uiHeartbeat, type RestApiCallbacks } from "./rest-api"
 import { parseSolanaTx, SolanaTxParseError, solanaMessageSlice } from "./solana-tx"
 import { AuthStore } from "./auth"
@@ -392,28 +393,24 @@ function deferredInit() {
 	} catch {}
 	perf('db + chains loaded')
 
-	// Settings + tracker init MUST run after initDb so swapsEnabled reflects
-	// the persisted flag. Without this, tracker won't rehydrate pending swaps
-	// from history on cold boot — they'd stall until executeSwap lazy-init kicks in.
+	// Settings + tracker init MUST run after initDb. Without this, tracker won't
+	// rehydrate pending swaps from history on cold boot — they'd stall until
+	// executeSwap lazy-init kicks in.
 	loadSettings()
 	loadSupportedChains(getPioneerApiBase()).catch(() => { /* static fallback handles it */ })
-	if (swapsEnabled) {
-		import('./swap-tracker').then(async ({ initSwapTracker }) => {
-			await initSwapTracker((msg: string, data: any) => {
-				try {
-					if (msg === 'swap-update') rpc.send['swap-update'](data)
-					else if (msg === 'swap-complete') rpc.send['swap-complete'](data)
-					else console.error(`[swap-tracker] Unknown message: ${msg}`)
-				} catch (e: any) {
-					console.warn(`[swap-tracker] Failed to send '${msg}':`, e.message)
-				}
-			}, { getDeviceId: () => getWalletDbScope()?.deviceId, getWalletId: () => getWalletDbScope()?.walletId })
-		}).catch((e) => {
-			console.error('[swap-tracker] Failed to initialize swap tracker (swaps will be unavailable):', e.message || e)
-		})
-	} else {
-		console.log('[swap-tracker] Swap feature flag is OFF — tracker not initialized')
-	}
+	import('./swap-tracker').then(async ({ initSwapTracker }) => {
+		await initSwapTracker((msg: string, data: any) => {
+			try {
+				if (msg === 'swap-update') rpc.send['swap-update'](data)
+				else if (msg === 'swap-complete') rpc.send['swap-complete'](data)
+				else console.error(`[swap-tracker] Unknown message: ${msg}`)
+			} catch (e: any) {
+				console.warn(`[swap-tracker] Failed to send '${msg}':`, e.message)
+			}
+		}, { getDeviceId: () => getWalletDbScope()?.deviceId, getWalletId: () => getWalletDbScope()?.walletId })
+	}).catch((e) => {
+		console.error('[swap-tracker] Failed to initialize swap tracker (swaps will be unavailable):', e.message || e)
+	})
 }
 
 /** All chains: built-in + user-added custom chains */
@@ -437,7 +434,6 @@ const auth = new AuthStore()
 // Settings loaded lazily after DB init — defaults used until then
 let restApiEnabled = false
 let walletConnectEnabled = false
-let swapsEnabled = false  // default off; only enabled when explicitly set to '1'
 let bip85Enabled = false
 let zcashPrivacyEnabled = false
 // True after the per-session incremental scan has caught the wallet up to
@@ -458,7 +454,6 @@ let privateModeEnabled = false
 function loadSettings() {
 	restApiEnabled = getSetting('rest_api_enabled') === '1'
 	walletConnectEnabled = getSetting('walletconnect_enabled') === '1'
-	swapsEnabled = getSetting('swaps_enabled') === '1'  // absent → false (opt-in model)
 	bip85Enabled = getSetting('bip85_enabled') === '1'
 	zcashPrivacyEnabled = getSetting('zcash_privacy_enabled') === '1'
 	emulatorEnabled = getSetting('emulator_enabled') === '1'
@@ -762,7 +757,6 @@ function getAppSettings() {
 		fiatCurrency: getSetting('fiat_currency') || 'USD',
 		numberLocale: getSetting('number_locale') || 'en-US',
 		walletConnectEnabled,
-		swapsEnabled,
 		bip85Enabled,
 		zcashPrivacyEnabled,
 		emulatorEnabled,
@@ -833,7 +827,6 @@ function flushPendingScopedApiLogs() {
 // firmware < 7.15.0). Single source shared by the RPC handler and the REST
 // callback so both surfaces gate identically.
 async function deviceSwapAssets() {
-	if (!swapsEnabled) return []
 	const { getSwapAssets } = await import('./swap')
 	const assets = await getSwapAssets()
 	const fw = engine.getDeviceState().firmwareVersion
@@ -3944,28 +3937,6 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				console.log('[settings] WalletConnect enabled:', params.enabled)
 				return getAppSettings()
 			},
-			setSwapsEnabled: async (params) => {
-				swapsEnabled = params.enabled
-				setSetting('swaps_enabled', params.enabled ? '1' : '0')
-				console.log('[settings] Swaps enabled:', params.enabled)
-				// Initialize tracker on-demand when user enables swaps mid-session
-				if (params.enabled) {
-					import('./swap-tracker').then(async ({ initSwapTracker }) => {
-						await initSwapTracker((msg: string, data: any) => {
-							try {
-								if (msg === 'swap-update') rpc.send['swap-update'](data)
-								else if (msg === 'swap-complete') rpc.send['swap-complete'](data)
-								else console.error(`[swap-tracker] Unknown message: ${msg}`)
-							} catch (e: any) {
-								console.warn(`[swap-tracker] Failed to send '${msg}':`, e.message)
-							}
-						}, { getDeviceId: () => getWalletDbScope()?.deviceId, getWalletId: () => getWalletDbScope()?.walletId })
-					}).catch((e) => {
-						console.error('[swap-tracker] Failed to initialize swap tracker:', e.message || e)
-					})
-				}
-				return getAppSettings()
-			},
 			setBip85Enabled: async (params) => {
 				// BIP-85 requires firmware >= 7.16.0
 				const fwVer = engine.getDeviceState().firmwareVersion
@@ -4396,7 +4367,6 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 			// ── Swap (quote cache for tracker) ──────────────────────
 			getSwappableChainIds: async () => {
-				if (!swapsEnabled) return []
 				const { getSwapAssets } = await import('./swap')
 				const assets = await getSwapAssets()
 				const fw = engine.getDeviceState().firmwareVersion
@@ -4411,7 +4381,6 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			getSwapAssets: async () => deviceSwapAssets(),
 			searchSwapAssets: async (params) => {
-				if (!swapsEnabled) return []
 				const { searchDiscoveryAssets } = await import('./swap')
 				return searchDiscoveryAssets(params.query)
 			},
@@ -4444,7 +4413,6 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			 *  token" when the user pastes a contract into the picker search and
 			 *  nothing matches. */
 			lookupTokenContract: async (params) => {
-				if (!swapsEnabled) return { hits: [], reason: 'swaps-disabled' as string | undefined }
 				const raw = (params.contractAddress || '').trim()
 
 				// ── Solana SPL mint (base58, not 0x) ──────────────────────────
@@ -4532,7 +4500,6 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return { hits }
 			},
 			getSwapQuote: async (params) => {
-				if (!swapsEnabled) throw new Error('Swaps feature is disabled')
 				const { getSwapQuote } = await import('./swap')
 
 				// Resolve xpub addresses to real receive addresses for UTXO chains.
@@ -4652,7 +4619,6 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return quote
 			},
 			executeSwap: async (params) => {
-				if (!swapsEnabled) throw new Error('Swaps feature is disabled')
 				if (!engine.wallet) throw new Error('No device connected')
 				const { executeSwap } = await import('./swap')
 				const { trackSwap, isTrackerInitialized, initSwapTracker } = await import('./swap-tracker')
@@ -4750,7 +4716,6 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return result
 			},
 			getPendingSwaps: async () => {
-				if (!swapsEnabled) return []
 				if (engine.isPassphraseWallet) return []
 				const { getPendingSwaps } = await import('./swap-tracker')
 				const scope = getWalletDbScope()
@@ -4762,7 +4727,6 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				dismissSwap(params.txid)
 			},
 			previewSwapBuild: async (params) => {
-				if (!swapsEnabled) throw new Error('Swaps feature is disabled')
 				if (!engine.wallet) throw new Error('No device connected')
 				const { previewSwapBuild, NOOP_PUSH_SUBSTAGE } = await import('./swap')
 				return previewSwapBuild(params, {
@@ -5668,6 +5632,14 @@ udevadm trigger --subsystem-match=usb --attr-match=idVendor=2b24 || udevadm trig
 				} catch (err: any) {
 					return { success: false, error: err?.message || String(err) }
 				}
+			},
+
+			// ── Windows USB troubleshooter (read-only diagnostic) ────
+			// Returns a labelled report (likely cause + guidance + copy-ready
+			// text) for the device-not-detected wizard. Never throws.
+			runUsbDiagnostic: async () => {
+				const version = await Updater.localInfo.version().catch(() => 'unknown')
+				return runUsbDiagnosticProbe(version)
 			},
 
 			// ── App Updates ──────────────────────────────────────────

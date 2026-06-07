@@ -93,8 +93,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 	// Use refreshed balance if available, otherwise prop
 	const baseBalance = refreshedBalance || balance
 
-	// Feature flags: swaps, zcash privacy
-	const [swapsEnabled, setSwapsEnabled] = useState(false)
+	// Feature flags: zcash privacy
 	const [swappableChainIds, setSwappableChainIds] = useState<Set<string>>(new Set())
 	const [zcashPrivacyEnabled, setZcashPrivacyEnabled] = useState(false)
 	const settingsLoaded = useRef(false)
@@ -102,16 +101,11 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 		rpcRequest<AppSettings>("getAppSettings")
 			.then(s => {
 				settingsLoaded.current = true
-				setSwapsEnabled(s.swapsEnabled)
 				setZcashPrivacyEnabled(s.zcashPrivacyEnabled)
-				if (s.swapsEnabled) {
-					rpcRequest<string[]>("getSwappableChainIds", undefined, 20000)
-						.then(ids => setSwappableChainIds(new Set(ids)))
-						.catch(() => {})
-				} else {
-					setSwappableChainIds(new Set())
-				}
 			})
+			.catch(() => {})
+		rpcRequest<string[]>("getSwappableChainIds", undefined, 20000)
+			.then(ids => setSwappableChainIds(new Set(ids)))
 			.catch(() => {})
 	}, [])
 	useEffect(() => { refreshFeatureFlags() }, [refreshFeatureFlags])
@@ -370,7 +364,6 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 	const [showSwapDialog, setShowSwapDialog] = useState(initialAction === "swap")
 	const [showSweep, setShowSweep] = useState(false)
 	const [showNameReg, setShowNameReg] = useState(false)
-	useEffect(() => { if (!swapsEnabled) setShowSwapDialog(false) }, [swapsEnabled])
 
 	// Scoped Pioneer push subscription: only refresh while this page is mounted,
 	// and only when the event chain matches this asset or the active swap output.
@@ -481,7 +474,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 		{ id: "send", label: t("send"), color: '#fb923c', bg: 'rgba(251,146,60,0.12)', icon: (
 			<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fb923c" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="19" x2="12" y2="5" /><polyline points="5 12 12 5 19 12" /></svg>
 		) },
-		...(swapsEnabled && swappableChainIds.has(chain.id) ? [{ id: "swap" as const, label: t("swap"), color: '#60a5fa', bg: 'rgba(96,165,250,0.12)', icon: (
+		...(swappableChainIds.has(chain.id) ? [{ id: "swap" as const, label: t("swap"), color: '#60a5fa', bg: 'rgba(96,165,250,0.12)', icon: (
 			<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polyline points="17 1 21 5 17 9" /><path d="M3 11V9a4 4 0 0 1 4-4h14" /><polyline points="7 23 3 19 7 15" /><path d="M21 13v2a4 4 0 0 1-4 4H3" /></svg>
 		) }] : []),
 		...(!selectedToken && zcashPrivacyEnabled && zcashShieldedSupported ? [{ id: "privacy" as const, label: t("privacy"), color: '#a78bfa', bg: 'rgba(167,139,250,0.12)', icon: (
@@ -1230,7 +1223,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 				</Box>
 			</Box>
 			{/* SwapDialog rendered outside overflow container so position:fixed works */}
-			{swapsEnabled && showSwapDialog && (
+			{showSwapDialog && (
 				<SwapErrorBoundary>
 					<Suspense fallback={null}>
 						<SwapDialog

@@ -119,6 +119,15 @@ export class EngineController extends EventEmitter {
   private retryCount = 0
   private static readonly MAX_PAIR_RETRIES = 24 // ~2 minutes at 5s intervals
   private rebootPollTimer: ReturnType<typeof setInterval> | null = null
+  // Windows: WinUSB can take longer than ATTACH_DELAY_MS to bind interface 0
+  // (composite device behind a hub/dock), during which the device is invisible
+  // to libusb. A single post-attach syncState() then sees nothing and gives up.
+  // This bounded poll re-probes so a slow-binding device is still detected
+  // without an app restart. See docs/WINDOWS-USB-AUDIT.md (Cause A).
+  private discoveryPollTimer: ReturnType<typeof setInterval> | null = null
+  private discoveryPollCount = 0
+  private static readonly DISCOVERY_POLL_MS = 1500
+  private static readonly MAX_DISCOVERY_POLLS = 12 // ~18s of post-attach grace
   // Linux: KeepKey was enumerated on the bus but neither transport could open
   // it. Surfaces in DeviceStateInfo so the UI can offer the udev-rules auto-fix.
   private linuxUdevPermissionDenied = false
@@ -263,6 +272,9 @@ export class EngineController extends EventEmitter {
         if (this.setupInProgress || this.verifyInProgress) return
         this.updateState('connected_unpaired')
         setTimeout(() => this.syncState(), ATTACH_DELAY_MS)
+        // Backstop: WinUSB binding can outlast ATTACH_DELAY_MS on hubs/docks,
+        // so keep re-probing until paired (or the grace window expires).
+        this.startDiscoveryPoll()
       })
 
       usb.on('detach', (device) => {
@@ -278,6 +290,9 @@ export class EngineController extends EventEmitter {
         }
         this.clearWallet()
         this.lastError = null
+        // An unplug is a natural stop point for the post-attach discovery poll —
+        // otherwise it keeps re-probing a now-absent device until the grace window.
+        this.stopDiscoveryPoll()
         // Clear the Linux udev flag — otherwise getDeviceState() keeps reporting
         // "KeepKey detected, install rules" after the user has unplugged.
         this.linuxUdevPermissionDenied = false
@@ -313,12 +328,16 @@ export class EngineController extends EventEmitter {
     }
     console.log('[Engine] calling syncState()')
     await this.syncState()
+    // If a device is present but not yet visible (slow WinUSB bind on Windows),
+    // keep re-probing instead of waiting for another attach event.
+    if (!this.wallet) this.startDiscoveryPoll()
     console.log('[Engine] start() complete')
   }
 
   stop() {
     this.clearRetry()
     this.stopRebootPoll()
+    this.stopDiscoveryPoll()
     usb.removeAllListeners('attach')
     usb.removeAllListeners('detach')
   }
@@ -704,6 +723,7 @@ export class EngineController extends EventEmitter {
       if (result.wallet) {
         this.wallet = result.wallet
         this.retryCount = 0
+        this.stopDiscoveryPoll()
         this.attachTransportListeners()
         this.lastError = null
         try {
@@ -858,6 +878,50 @@ export class EngineController extends EventEmitter {
     if (this.rebootPollTimer) {
       clearInterval(this.rebootPollTimer)
       this.rebootPollTimer = null
+    }
+  }
+
+  /**
+   * Bounded poll that re-runs syncState() after a USB attach so a device whose
+   * WinUSB interface binds slower than ATTACH_DELAY_MS (composite device behind
+   * a hub/dock on Windows) is still detected without an app restart. The single
+   * post-attach syncState() otherwise sees nothing — the device is invisible to
+   * libusb until WinUSB binds — lands in the `disconnected` branch with no
+   * lastError, and never re-probes (scheduleRetry only arms on
+   * connected_unpaired + lastError). Self-stops once paired or after the grace
+   * window. The existing `syncing` guard prevents concurrent runs.
+   * See docs/WINDOWS-USB-AUDIT.md (Cause A) and docs/WINDOWS-USB-FIX-PLAN.md (FIX-1).
+   *
+   * Windows-only: this works around a WinUSB binding race that does not exist on
+   * macOS/Linux, where attach→syncState() already sees the device. Gating here
+   * avoids ~18s of redundant USB enumeration + log churn at every device-less
+   * startup on those platforms.
+   */
+  private startDiscoveryPoll() {
+    if (process.platform !== 'win32') return
+    if (this.discoveryPollTimer) return
+    this.discoveryPollCount = 0
+    console.log('[Engine] Starting discovery poll (1.5s interval, ~18s grace)')
+    this.discoveryPollTimer = setInterval(() => {
+      // Stop if we've paired or another phase has taken over the transport.
+      if (this.wallet || this.updatePhase === 'rebooting' || this.setupInProgress || this.verifyInProgress) {
+        this.stopDiscoveryPoll()
+        return
+      }
+      this.discoveryPollCount++
+      if (this.discoveryPollCount > EngineController.MAX_DISCOVERY_POLLS) {
+        console.log('[Engine] Discovery poll: grace window elapsed, stopping')
+        this.stopDiscoveryPoll()
+        return
+      }
+      this.syncState()
+    }, EngineController.DISCOVERY_POLL_MS)
+  }
+
+  private stopDiscoveryPoll() {
+    if (this.discoveryPollTimer) {
+      clearInterval(this.discoveryPollTimer)
+      this.discoveryPollTimer = null
     }
   }
 

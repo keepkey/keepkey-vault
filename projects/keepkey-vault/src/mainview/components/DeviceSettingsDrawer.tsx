@@ -161,12 +161,11 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 	const [removePinConfirm, setRemovePinConfirm] = useState(false)
 	const [togglingPassphrase, setTogglingPassphrase] = useState(false)
 	const [togglingPolicy, setTogglingPolicy] = useState("")
-	const [appSettings, setAppSettings] = useState<AppSettings>({ restApiEnabled: false, pioneerApiBase: '', pioneerServers: [], activePioneerServer: '', fiatCurrency: 'USD', numberLocale: 'en-US', walletConnectEnabled: false, swapsEnabled: false, bip85Enabled: false, zcashPrivacyEnabled: false, emulatorEnabled: false, preReleaseUpdates: false, alphaFirmware: false, privateModeEnabled: false })
+	const [appSettings, setAppSettings] = useState<AppSettings>({ restApiEnabled: false, pioneerApiBase: '', pioneerServers: [], activePioneerServer: '', fiatCurrency: 'USD', numberLocale: 'en-US', walletConnectEnabled: false, bip85Enabled: false, zcashPrivacyEnabled: false, emulatorEnabled: false, preReleaseUpdates: false, alphaFirmware: false, privateModeEnabled: false })
 	const [togglingRestApi, setTogglingRestApi] = useState(false)
 	const [windowFocusState, setWindowFocusState] = useState<{ refs: number; alwaysOnTop: boolean } | null>(null)
 	const [releasingWindowFocus, setReleasingWindowFocus] = useState(false)
 	const [togglingWalletConnect, setTogglingWalletConnect] = useState(false)
-	const [togglingSwaps, setTogglingSwaps] = useState(false)
 	const [togglingBip85, setTogglingBip85] = useState(false)
 	const [togglingZcashPrivacy, setTogglingZcashPrivacy] = useState(false)
 	const [togglingEmulator, setTogglingEmulator] = useState(false)
@@ -312,15 +311,6 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 			setAppSettings(result)
 		} catch (e: any) { console.error("setWalletConnectEnabled:", e) }
 		setTogglingWalletConnect(false)
-	}, [])
-
-	const toggleSwaps = useCallback(async (enabled: boolean) => {
-		setTogglingSwaps(true)
-		try {
-			const result = await rpcRequest<AppSettings>("setSwapsEnabled", { enabled }, 10000)
-			setAppSettings(result)
-		} catch (e: any) { console.error("setSwapsEnabled:", e) }
-		setTogglingSwaps(false)
 	}, [])
 
 	const toggleBip85 = useCallback(async (enabled: boolean) => {
@@ -1341,30 +1331,6 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 									checked={appSettings.walletConnectEnabled}
 									onChange={toggleWalletConnect}
 									disabled={togglingWalletConnect}
-								/>
-							</Flex>
-
-							<Flex justify="space-between" align="center">
-								<Flex align="center" gap="3">
-									<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(35,220,200,0.1)">
-										<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--teal)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-											<path d="M16 3l5 5-5 5" />
-											<path d="M21 8H9" />
-											<path d="M8 21l-5-5 5-5" />
-											<path d="M3 16h12" />
-										</svg>
-									</Flex>
-									<Box>
-										<Text fontSize="md" color="kk.textPrimary" fontWeight="500">{t("swapsFeature")}</Text>
-										<Text fontSize="sm" color="kk.textSecondary" mt="0.5">
-											{t("swapsFeatureDescription")}
-										</Text>
-									</Box>
-								</Flex>
-								<Toggle
-									checked={appSettings.swapsEnabled}
-									onChange={toggleSwaps}
-									disabled={togglingSwaps}
 								/>
 							</Flex>
 
