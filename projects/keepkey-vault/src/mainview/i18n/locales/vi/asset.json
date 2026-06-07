@@ -85,5 +85,6 @@
   "scanFromBlock": "Quét từ khối {{block}}",
   "validatingWallet": "Đang xác thực ví được che chắn với chuỗi...",
   "hideFiltered": "Ẩn {{count}} token đã lọc",
-  "showFiltered": "Hiện {{count}} token đã lọc"
+  "showFiltered": "Hiện {{count}} token đã lọc",
+  "invalidAddress": "Địa chỉ không hợp lệ"
 }

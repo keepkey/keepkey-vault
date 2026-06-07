@@ -150,5 +150,6 @@
 	"downloadManually": "从 GitHub 下载",
 	"downloadUpdate": "下载更新",
 	"preReleaseUpdates": "预发布更新",
-	"preReleaseUpdatesDesc": "在稳定版发布前抢先体验新功能"
+	"preReleaseUpdatesDesc": "在稳定版发布前抢先体验新功能",
+	"restartToUpdate": "重启并安装"
 }

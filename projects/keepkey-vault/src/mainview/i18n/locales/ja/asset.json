@@ -85,5 +85,6 @@
   "scanFromBlock": "ブロック {{block}} からスキャン",
   "validatingWallet": "シールドウォレットをチェーンと照合して検証中...",
   "hideFiltered": "{{count}} 件のフィルタ済みトークンを非表示",
-  "showFiltered": "{{count}} 件のフィルタ済みトークンを表示"
+  "showFiltered": "{{count}} 件のフィルタ済みトークンを表示",
+  "invalidAddress": "無効なアドレス"
 }

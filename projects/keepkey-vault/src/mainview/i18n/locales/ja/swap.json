@@ -200,5 +200,7 @@
 	"whatHappened": "発生した内容",
 	"youPay": "支払額",
 	"youReceived": "受取額",
-	"exceedsSafeMax": "ネットワーク手数料用に約{{reserve}} {{symbol}}を残してください — 金額を減らすかMAXをタップしてください。"
+	"exceedsSafeMax": "ネットワーク手数料用に約{{reserve}} {{symbol}}を残してください — 金額を減らすかMAXをタップしてください。",
+	"sent": "送信済み",
+	"gas": "Gas"
 }

@@ -85,5 +85,6 @@
   "scanFromBlock": "Skanuj od bloku {{block}}",
   "validatingWallet": "Walidacja osłoniętego portfela względem łańcucha...",
   "hideFiltered": "Ukryj {{count}} odfiltrowany token",
-  "showFiltered": "Pokaż {{count}} odfiltrowany token"
+  "showFiltered": "Pokaż {{count}} odfiltrowany token",
+  "invalidAddress": "Nieprawidłowy adres"
 }

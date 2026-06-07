@@ -85,5 +85,6 @@
   "scanFromBlock": "Scannen vanaf blok {{block}}",
   "validatingWallet": "Afgeschermde wallet valideren tegen de keten...",
   "hideFiltered": "Verberg {{count}} gefilterde token",
-  "showFiltered": "Toon {{count}} gefilterde token"
+  "showFiltered": "Toon {{count}} gefilterde token",
+  "invalidAddress": "Ongeldig adres"
 }

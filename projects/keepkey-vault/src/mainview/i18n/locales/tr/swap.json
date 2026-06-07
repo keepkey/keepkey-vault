@@ -200,5 +200,7 @@
 	"youReceived": "Aldınız",
 	"exceedsSafeMax": "Ağ ücretleri için ~{{reserve}} {{symbol}} bırakın — miktarı azaltın veya MAKS.'a dokunun.",
 	"retry": "Tekrar dene",
-	"quoteTimedOut": "Fiyat teklifi isteği zaman aşımına uğradı — takas servisi yanıt vermekte çok yavaş. Tekrar denemek için Tekrar Dene'ye dokunun."
+	"quoteTimedOut": "Fiyat teklifi isteği zaman aşımına uğradı — takas servisi yanıt vermekte çok yavaş. Tekrar denemek için Tekrar Dene'ye dokunun.",
+	"sent": "Gönderildi",
+	"gas": "Gas"
 }

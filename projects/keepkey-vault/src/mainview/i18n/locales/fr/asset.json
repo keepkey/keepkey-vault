@@ -85,5 +85,6 @@
   "scanFromBlock": "Analyser depuis le bloc {{block}}",
   "hideFiltered": "Masquer {{count}} jeton filtré",
   "showFiltered": "Afficher {{count}} jeton filtré",
-  "validatingWallet": "Validation du portefeuille protégé par rapport à la chaîne…"
+  "validatingWallet": "Validation du portefeuille protégé par rapport à la chaîne…",
+  "invalidAddress": "Adresse invalide"
 }

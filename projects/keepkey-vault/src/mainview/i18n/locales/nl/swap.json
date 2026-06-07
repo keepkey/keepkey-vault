@@ -200,5 +200,7 @@
 	"customAddressPlaceholder": "Voer bestemmingsadres in...",
 	"customAddressWarning": "Fondsen worden naar dit externe adres verzonden",
 	"retry": "Opnieuw proberen",
-	"quoteTimedOut": "Offerteverzoek verlopen — de ruildienst reageert te traag. Tik op Opnieuw proberen om het nogmaals te proberen."
+	"quoteTimedOut": "Offerteverzoek verlopen — de ruildienst reageert te traag. Tik op Opnieuw proberen om het nogmaals te proberen.",
+	"sent": "Verzonden",
+	"gas": "Gas"
 }

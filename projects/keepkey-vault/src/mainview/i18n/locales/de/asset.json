@@ -85,5 +85,6 @@
   "scanFromBlock": "Ab Block {{block}} scannen",
   "validatingWallet": "Abgeschirmtes Wallet wird mit der Chain validiert...",
   "hideFiltered": "{{count}} gefilterten Token ausblenden",
-  "showFiltered": "{{count}} gefilterten Token anzeigen"
+  "showFiltered": "{{count}} gefilterten Token anzeigen",
+  "invalidAddress": "Ungültige Adresse"
 }

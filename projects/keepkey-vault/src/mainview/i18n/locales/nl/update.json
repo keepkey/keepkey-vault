@@ -7,5 +7,6 @@
 	"errorWithMessage": "Updatefout: {{error}}",
 	"download": "Downloaden",
 	"later": "Later",
-	"restartToUpdate": "Herstart om bij te werken"
+	"restartToUpdate": "Herstart om bij te werken",
+	"checkFailed": "Controle op updates mislukt"
 }

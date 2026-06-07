@@ -150,5 +150,6 @@
 	"downloadManually": "Télécharger depuis GitHub",
 	"downloadUpdate": "Télécharger la mise à jour",
 	"preReleaseUpdates": "Mises à jour en préversion",
-	"preReleaseUpdatesDesc": "Accédez en avant-première aux nouvelles fonctionnalités avant la version stable"
+	"preReleaseUpdatesDesc": "Accédez en avant-première aux nouvelles fonctionnalités avant la version stable",
+	"restartToUpdate": "Redémarrer et installer"
 }

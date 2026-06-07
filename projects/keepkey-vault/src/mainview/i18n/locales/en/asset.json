@@ -85,5 +85,6 @@
   "validatingWallet": "Validating shielded wallet against the chain...",
   "saplingNotSupported": "Sapling addresses (zs1...) are not supported — use a Unified address (u1...)",
   "hideFiltered": "Hide {{count}} filtered token",
-  "showFiltered": "Show {{count}} filtered token"
+  "showFiltered": "Show {{count}} filtered token",
+  "invalidAddress": "Invalid address"
 }

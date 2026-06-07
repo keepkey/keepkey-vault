@@ -85,5 +85,6 @@
   "scanFromBlock": "从区块 {{block}} 扫描",
   "validatingWallet": "正在根据链上数据验证屏蔽钱包…",
   "hideFiltered": "隐藏 {{count}} 个已过滤代币",
-  "showFiltered": "显示 {{count}} 个已过滤代币"
+  "showFiltered": "显示 {{count}} 个已过滤代币",
+  "invalidAddress": "地址无效"
 }

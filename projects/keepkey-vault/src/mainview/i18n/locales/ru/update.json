@@ -7,5 +7,6 @@
 	"errorWithMessage": "Ошибка обновления: {{error}}",
 	"download": "Скачать",
 	"later": "Позже",
-	"restartToUpdate": "Перезапустить для обновления"
+	"restartToUpdate": "Перезапустить для обновления",
+	"checkFailed": "Не удалось проверить обновления"
 }

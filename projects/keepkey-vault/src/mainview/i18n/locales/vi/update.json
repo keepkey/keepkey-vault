@@ -7,5 +7,6 @@
 	"errorWithMessage": "Lỗi cập nhật: {{error}}",
 	"download": "Tải xuống",
 	"later": "Để sau",
-	"restartToUpdate": "Khởi động lại để cập nhật"
+	"restartToUpdate": "Khởi động lại để cập nhật",
+	"checkFailed": "Kiểm tra cập nhật thất bại"
 }

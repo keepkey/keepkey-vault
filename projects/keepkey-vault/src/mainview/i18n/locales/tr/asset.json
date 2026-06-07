@@ -85,5 +85,6 @@
   "scanFromBlock": "{{block}} bloğundan tara",
   "validatingWallet": "Korumalı cüzdan zincire göre doğrulanıyor...",
   "hideFiltered": "{{count}} filtrelenmiş tokeni gizle",
-  "showFiltered": "{{count}} filtrelenmiş tokeni göster"
+  "showFiltered": "{{count}} filtrelenmiş tokeni göster",
+  "invalidAddress": "Geçersiz adres"
 }

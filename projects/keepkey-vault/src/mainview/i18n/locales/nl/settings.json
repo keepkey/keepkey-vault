@@ -150,5 +150,6 @@
 	"downloadManually": "Downloaden van GitHub",
 	"downloadUpdate": "Update downloaden",
 	"preReleaseUpdates": "Pre-release-updates",
-	"preReleaseUpdatesDesc": "Krijg vroege toegang tot nieuwe functies vóór de stabiele release"
+	"preReleaseUpdatesDesc": "Krijg vroege toegang tot nieuwe functies vóór de stabiele release",
+	"restartToUpdate": "Herstarten & installeren"
 }

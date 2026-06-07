@@ -85,5 +85,6 @@
   "scanFromBlock": "Buscar a partir do bloco {{block}}",
   "validatingWallet": "Validando carteira blindada contra a cadeia...",
   "hideFiltered": "Ocultar {{count}} token filtrado",
-  "showFiltered": "Mostrar {{count}} token filtrado"
+  "showFiltered": "Mostrar {{count}} token filtrado",
+  "invalidAddress": "Endereço inválido"
 }

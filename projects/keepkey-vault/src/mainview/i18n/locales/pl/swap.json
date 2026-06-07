@@ -200,5 +200,7 @@
 	"hideDetails": "Ukryj szczegóły",
 	"showPayload": "Pokaż ładunek transakcji",
 	"hidePayload": "Ukryj ładunek transakcji",
-	"payloadPending": "Dostępne po potwierdzeniu"
+	"payloadPending": "Dostępne po potwierdzeniu",
+	"sent": "Wysłano",
+	"gas": "Gas"
 }

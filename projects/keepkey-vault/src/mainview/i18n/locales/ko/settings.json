@@ -150,5 +150,6 @@
 	"downloadManually": "GitHub에서 다운로드",
 	"downloadUpdate": "업데이트 다운로드",
 	"preReleaseUpdates": "사전 릴리스 업데이트",
-	"preReleaseUpdatesDesc": "안정 릴리스 전에 새 기능을 미리 사용해 보세요"
+	"preReleaseUpdatesDesc": "안정 릴리스 전에 새 기능을 미리 사용해 보세요",
+	"restartToUpdate": "다시 시작하고 설치"
 }

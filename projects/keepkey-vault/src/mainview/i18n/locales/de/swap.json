@@ -200,5 +200,7 @@
 	"whatHappened": "Was geschah",
 	"youPay": "Sie zahlen",
 	"youReceived": "Sie erhielten",
-	"exceedsSafeMax": "Lassen Sie ~{{reserve}} {{symbol}} für Netzwerkgebühren — verringern Sie den Betrag oder tippen Sie auf MAX."
+	"exceedsSafeMax": "Lassen Sie ~{{reserve}} {{symbol}} für Netzwerkgebühren — verringern Sie den Betrag oder tippen Sie auf MAX.",
+	"sent": "Gesendet",
+	"gas": "Gas"
 }

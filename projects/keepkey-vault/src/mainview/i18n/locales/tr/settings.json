@@ -150,5 +150,6 @@
 	"downloadManually": "GitHub'dan indir",
 	"downloadUpdate": "Güncellemeyi indir",
 	"preReleaseUpdates": "Ön sürüm güncellemeleri",
-	"preReleaseUpdatesDesc": "Kararlı sürümden önce yeni özelliklere erken erişim elde edin"
+	"preReleaseUpdatesDesc": "Kararlı sürümden önce yeni özelliklere erken erişim elde edin",
+	"restartToUpdate": "Yeniden başlat ve yükle"
 }

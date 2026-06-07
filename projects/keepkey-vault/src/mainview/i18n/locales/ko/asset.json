@@ -85,5 +85,6 @@
   "scanFromBlock": "블록 {{block}}부터 스캔",
   "hideFiltered": "필터링된 토큰 {{count}}개 숨기기",
   "showFiltered": "필터링된 토큰 {{count}}개 표시",
-  "validatingWallet": "체인과 대조하여 보호된 지갑 검증 중..."
+  "validatingWallet": "체인과 대조하여 보호된 지갑 검증 중...",
+  "invalidAddress": "유효하지 않은 주소"
 }

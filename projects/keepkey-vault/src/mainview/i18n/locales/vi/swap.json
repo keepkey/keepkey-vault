@@ -200,5 +200,7 @@
 	"whatHappened": "Đã xảy ra gì",
 	"youPay": "Bạn trả",
 	"youReceived": "Bạn đã nhận",
-	"exceedsSafeMax": "Để lại ~{{reserve}} {{symbol}} cho phí mạng — giảm số lượng hoặc nhấn TỐI ĐA."
+	"exceedsSafeMax": "Để lại ~{{reserve}} {{symbol}} cho phí mạng — giảm số lượng hoặc nhấn TỐI ĐA.",
+	"sent": "Đã gửi",
+	"gas": "Gas"
 }

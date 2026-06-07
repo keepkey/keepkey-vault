@@ -200,5 +200,7 @@
 	"whatHappened": "발생한 일",
 	"youPay": "지불 금액",
 	"youReceived": "수령 금액",
-	"exceedsSafeMax": "네트워크 수수료를 위해 ~{{reserve}} {{symbol}}를 남기세요 — 수량을 줄이거나 MAX를 탭하세요."
+	"exceedsSafeMax": "네트워크 수수료를 위해 ~{{reserve}} {{symbol}}를 남기세요 — 수량을 줄이거나 MAX를 탭하세요.",
+	"sent": "전송됨",
+	"gas": "Gas"
 }

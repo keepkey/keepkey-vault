@@ -150,5 +150,6 @@
 	"downloadManually": "GitHubからダウンロード",
 	"downloadUpdate": "アップデートをダウンロード",
 	"preReleaseUpdates": "プレリリースアップデート",
-	"preReleaseUpdatesDesc": "安定版リリース前に新機能への早期アクセスを取得します"
+	"preReleaseUpdatesDesc": "安定版リリース前に新機能への早期アクセスを取得します",
+	"restartToUpdate": "再起動してインストール"
 }

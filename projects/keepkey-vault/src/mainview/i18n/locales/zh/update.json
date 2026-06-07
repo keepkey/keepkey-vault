@@ -7,5 +7,6 @@
 	"errorWithMessage": "更新错误：{{error}}",
 	"download": "下载",
 	"later": "稍后",
-	"restartToUpdate": "重启以更新"
+	"restartToUpdate": "重启以更新",
+	"checkFailed": "检查更新失败"
 }

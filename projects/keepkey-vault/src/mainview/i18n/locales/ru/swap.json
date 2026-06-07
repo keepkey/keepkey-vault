@@ -200,5 +200,7 @@
 	"whatHappened": "Что произошло",
 	"youPay": "Вы платите",
 	"youReceived": "Вы получили",
-	"exceedsSafeMax": "Оставьте ~{{reserve}} {{symbol}} на комиссии сети — уменьшите сумму или нажмите MAX."
+	"exceedsSafeMax": "Оставьте ~{{reserve}} {{symbol}} на комиссии сети — уменьшите сумму или нажмите MAX.",
+	"sent": "Отправлено",
+	"gas": "Gas"
 }

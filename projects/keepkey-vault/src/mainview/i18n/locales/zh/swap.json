@@ -200,5 +200,7 @@
 	"whatHappened": "发生了什么",
 	"youPay": "您支付",
 	"youReceived": "您收到",
-	"exceedsSafeMax": "请保留约 {{reserve}} {{symbol}} 用于网络费 — 减少数量或点击 MAX。"
+	"exceedsSafeMax": "请保留约 {{reserve}} {{symbol}} 用于网络费 — 减少数量或点击 MAX。",
+	"sent": "已发送",
+	"gas": "Gas"
 }

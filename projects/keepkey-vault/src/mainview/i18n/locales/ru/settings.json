@@ -150,5 +150,6 @@
 	"downloadManually": "Скачать с GitHub",
 	"downloadUpdate": "Скачать обновление",
 	"preReleaseUpdates": "Предварительные обновления",
-	"preReleaseUpdatesDesc": "Получайте ранний доступ к новым функциям до стабильного выпуска"
+	"preReleaseUpdatesDesc": "Получайте ранний доступ к новым функциям до стабильного выпуска",
+	"restartToUpdate": "Перезапустить и установить"
 }

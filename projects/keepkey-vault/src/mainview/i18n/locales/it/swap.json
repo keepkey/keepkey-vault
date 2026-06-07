@@ -200,5 +200,7 @@
 	"whatHappened": "Cosa è successo",
 	"youPay": "Paghi",
 	"youReceived": "Hai ricevuto",
-	"exceedsSafeMax": "Lascia ~{{reserve}} {{symbol}} per le commissioni di rete — riduci l'importo o tocca MAX."
+	"exceedsSafeMax": "Lascia ~{{reserve}} {{symbol}} per le commissioni di rete — riduci l'importo o tocca MAX.",
+	"sent": "Inviato",
+	"gas": "Gas"
 }

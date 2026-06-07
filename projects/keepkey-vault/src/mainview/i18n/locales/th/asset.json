@@ -85,5 +85,6 @@
   "scanFromBlock": "สแกนจากบล็อก {{block}}",
   "hideFiltered": "ซ่อน {{count}} โทเค็นที่ถูกกรอง",
   "showFiltered": "แสดง {{count}} โทเค็นที่ถูกกรอง",
-  "validatingWallet": "กำลังตรวจสอบกระเป๋าเงินที่ป้องกันกับเชน..."
+  "validatingWallet": "กำลังตรวจสอบกระเป๋าเงินที่ป้องกันกับเชน...",
+  "invalidAddress": "ที่อยู่ไม่ถูกต้อง"
 }

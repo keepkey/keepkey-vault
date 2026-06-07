@@ -201,5 +201,7 @@
 	"whatHappened": "What happened",
 	"youPay": "You pay",
 	"youReceived": "You received",
-	"exceedsSafeMax": "Leave ~{{reserve}} {{symbol}} for network fees — reduce the amount or tap MAX."
+	"exceedsSafeMax": "Leave ~{{reserve}} {{symbol}} for network fees — reduce the amount or tap MAX.",
+	"sent": "Sent",
+	"gas": "Gas"
 }

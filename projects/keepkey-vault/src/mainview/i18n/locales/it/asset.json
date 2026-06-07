@@ -85,5 +85,6 @@
   "scanFromBlock": "Scansiona dal blocco {{block}}",
   "validatingWallet": "Convalida del portafoglio schermato rispetto alla catena...",
   "hideFiltered": "Nascondi {{count}} token filtrato",
-  "showFiltered": "Mostra {{count}} token filtrato"
+  "showFiltered": "Mostra {{count}} token filtrato",
+  "invalidAddress": "Indirizzo non valido"
 }

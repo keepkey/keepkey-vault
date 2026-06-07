@@ -150,5 +150,6 @@
 	"downloadManually": "Tải từ GitHub",
 	"downloadUpdate": "Tải bản cập nhật",
 	"preReleaseUpdates": "Cập nhật bản phát hành trước",
-	"preReleaseUpdatesDesc": "Truy cập sớm các tính năng mới trước bản phát hành ổn định"
+	"preReleaseUpdatesDesc": "Truy cập sớm các tính năng mới trước bản phát hành ổn định",
+	"restartToUpdate": "Khởi động lại & cài đặt"
 }

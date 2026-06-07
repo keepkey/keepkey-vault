@@ -150,5 +150,6 @@
 		"securityNote": "O código expira em 15 minutos, uso único. Apenas chaves públicas são compartilhadas — as chaves privadas nunca saem do seu dispositivo.",
 		"retry": "Tentar novamente",
 		"regenerate": "Novo código"
-	}
+	},
+	"restartToUpdate": "Reiniciar e instalar"
 }
