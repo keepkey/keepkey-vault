@@ -16,6 +16,8 @@ import { SplashScreen } from "./components/SplashScreen"
 import { DeviceGrid } from "./components/DeviceGrid"
 import { DeviceClaimedDialog } from "./components/DeviceClaimedDialog"
 import { LinuxUdevWarning } from "./components/LinuxUdevWarning"
+import { WindowsUsbTroubleshooter } from "./components/WindowsUsbTroubleshooter"
+import { IS_WINDOWS } from "./lib/platform"
 import { OobSetupWizard } from "./components/OobSetupWizard"
 import { TopNav, SplashNav } from "./components/TopNav"
 import { WindowResizeHandles } from "./components/WindowResizeHandles"
@@ -70,7 +72,6 @@ function App() {
 	const [appVersion, setAppVersion] = useState<{ version: string; channel: string } | null>(null)
 	const [restApiEnabled, setRestApiEnabled] = useState(false)
 	const [walletConnectEnabled, setWalletConnectEnabled] = useState(false)
-	const [swapsEnabled, setSwapsEnabled] = useState(false)
 	const [emulatorEnabled, setEmulatorEnabled] = useState(false)
 	const [pendingAppUrl, setPendingAppUrl] = useState<string | null>(null)
 	const [pendingWcOpen, setPendingWcOpen] = useState(false)
@@ -97,7 +98,7 @@ function App() {
 		const refreshSettings = () => {
 			rpcRequest<AppSettings>("getAppSettings")
 				.then((s) => {
-					setRestApiEnabled(s.restApiEnabled); setWalletConnectEnabled(s.walletConnectEnabled); setSwapsEnabled(s.swapsEnabled); setEmulatorEnabled(s.emulatorEnabled)
+					setRestApiEnabled(s.restApiEnabled); setWalletConnectEnabled(s.walletConnectEnabled); setEmulatorEnabled(s.emulatorEnabled)
 					if (s.pioneerApiBase) loadSupportedChains(s.pioneerApiBase).catch(() => {})
 				})
 				.catch(() => {})
@@ -870,11 +871,16 @@ function App() {
 						<LinuxUdevWarning />
 					) : (
 						/* Unified device grid — registered devices + emulator wallets */
-						<DeviceGrid
-							onViewPortfolio={(id, label) => { setWatchOnlyDeviceId(id); setWatchOnlyLabel(label); setWatchOnlyMode(true) }}
-							onReady={() => setGridReady(true)}
-							emulatorEnabled={emulatorEnabled}
-						/>
+						<>
+							<DeviceGrid
+								onViewPortfolio={(id, label) => { setWatchOnlyDeviceId(id); setWatchOnlyLabel(label); setWatchOnlyMode(true) }}
+								onReady={() => setGridReady(true)}
+								emulatorEnabled={emulatorEnabled}
+							/>
+							{/* Windows: a connected KeepKey can be invisible to the app if WinUSB
+							    didn't bind. Offer a read-only diagnostic when nothing is detected. */}
+							{IS_WINDOWS && deviceState.state === "disconnected" && <WindowsUsbTroubleshooter />}
+						</>
 					)}
 				</SplashScreen>
 			</>
@@ -942,7 +948,7 @@ function App() {
 				onClose={() => {
 					setSettingsOpen(false)
 					rpcRequest<AppSettings>("getAppSettings")
-						.then((s) => { setRestApiEnabled(s.restApiEnabled); setWalletConnectEnabled(s.walletConnectEnabled); setSwapsEnabled(s.swapsEnabled); setEmulatorEnabled(s.emulatorEnabled) })
+						.then((s) => { setRestApiEnabled(s.restApiEnabled); setWalletConnectEnabled(s.walletConnectEnabled); setEmulatorEnabled(s.emulatorEnabled) })
 						.catch(() => {})
 					window.dispatchEvent(new Event("keepkey-settings-changed"))
 				}}
