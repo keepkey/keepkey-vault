@@ -92,7 +92,10 @@ begin
   Result := True;
   { Warn about a previous broken system-wide ("all users") install in Program Files. }
   StaleDir := ExpandConstant('{commonpf}\{#MyAppDirName}');
-  if DirExists(StaleDir) then
+  { Skip the prompt on /SILENT|/VERYSILENT -- /SUPPRESSMSGBOXES does NOT suppress
+    [Code] MsgBox, so an unattended install would hang here. The install still
+    proceeds; the warning is informational only. }
+  if DirExists(StaleDir) and (not WizardSilent) then
     MsgBox('A previous system-wide installation was found at:' + #13#10 + StaleDir + #13#10#13#10 +
            'That copy cannot start when launched normally because it lives in a read-only location.' + #13#10#13#10 +
            'This installer will set up a working per-user copy. Afterwards, please remove the old one ' +
@@ -105,14 +108,18 @@ begin
   Result := True;
   { Refuse a Program Files target even if the user browses to one or runs setup }
   { elevated -- the runtime cannot launch from a read-only directory. }
+  { NextButtonClick also fires on silent installs (Inno simulates the clicks), so
+    a /SILENT /DIR="C:\Program Files\..." is still rejected here -- but suppress the
+    blocking MsgBox when silent so the abort is clean rather than a hang. }
   if CurPageID = wpSelectDir then
     if IsUnderProgramFiles(WizardDirValue) then
     begin
-      MsgBox('KeepKey Vault must be installed in a writable, per-user location ' +
-             '(not under Program Files).' + #13#10#13#10 +
-             'Please choose a folder under your user profile, for example:' + #13#10 +
-             ExpandConstant('{localappdata}\Programs\{#MyAppDirName}'),
-             mbError, MB_OK);
+      if not WizardSilent then
+        MsgBox('KeepKey Vault must be installed in a writable, per-user location ' +
+               '(not under Program Files).' + #13#10#13#10 +
+               'Please choose a folder under your user profile, for example:' + #13#10 +
+               ExpandConstant('{localappdata}\Programs\{#MyAppDirName}'),
+               mbError, MB_OK);
       Result := False;
     end;
 end;
