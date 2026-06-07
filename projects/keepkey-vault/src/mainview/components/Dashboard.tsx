@@ -153,8 +153,8 @@ function OrbitalView({
 
 	const cx = size / 2
 	const cy = size / 2
-	const orbitR = size * 0.42
-	const ringR  = size * 0.46
+	const orbitR = size * 0.294 // ~30% smaller orbit diameter
+	const ringR  = size * 0.322 // scaled with orbitR to keep satellites on the ring
 
 	const orbitChains = chains
 		.map(c => ({ chain: c, usd: cleanBalanceUsd.get(c.id)?.usd || 0, bal: balances.get(c.id) }))
@@ -477,8 +477,8 @@ function ChainDetailOrbital({
 
 	const cx = size / 2
 	const cy = size / 2
-	const orbitR = size * 0.42
-	const ringR  = size * 0.46
+	const orbitR = size * 0.294 // ~30% smaller orbit diameter
+	const ringR  = size * 0.322 // scaled with orbitR to keep satellites on the ring
 
 	const tokenSats = cleanTokens
 		.slice()
