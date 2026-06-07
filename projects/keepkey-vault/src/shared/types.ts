@@ -565,7 +565,6 @@ export interface AppSettings {
   fiatCurrency: FiatCurrency     // display currency (default 'USD')
   numberLocale: string           // number formatting locale (default 'en-US')
   walletConnectEnabled: boolean   // feature flag: WalletConnect dApp support (default OFF)
-  swapsEnabled: boolean          // feature flag: cross-chain swaps (default OFF)
   bip85Enabled: boolean          // feature flag: BIP-85 derived seeds (default OFF)
   zcashPrivacyEnabled: boolean   // feature flag: Zcash shielded/privacy (default OFF, locked)
   emulatorEnabled: boolean       // feature flag: macOS emulator surface (default OFF — dev-only)
