@@ -122,17 +122,13 @@ export function parseQuoteResponse(
     console.error(`${TAG}   first 2KB of best: ${JSON.stringify(best, null, 2).slice(0, 2000)}`)
     throw new Error(`No quote output for ${params.fromCaip} → ${params.toCaip} — pool may have no liquidity, or Pioneer schema has drifted (see backend logs for response shape)`)
   }
-  // Pioneer normalises CACAO amounts using 8 decimal places (same as RUNE on
-  // THORChain), but CACAO has 10 decimal places — outputs are 10^(10-8)=100× too
-  // large. Guard is on the exact CACAO CAIP so Maya-routed ETH/ARB (18 dec) are
-  // not touched. cacaoScale is reused for amountOutMin below.
-  const CACAO_CAIP = 'cosmos:mayachain-mainnet-v1/slip44:931'
-  const cacaoScale = params.toCaip === CACAO_CAIP ? 100 : 1
-  let expectedOutputStr = String(expectedOutput)
-  if (cacaoScale > 1) {
-    const corrected = parseFloat(expectedOutputStr) / cacaoScale
-    if (corrected > 0) expectedOutputStr = corrected.toFixed(10).replace(/\.?0+$/, '')
-  }
+  // CACAO is scaled by Pioneer at its native 10 decimal places. An earlier
+  // workaround (PR #192) divided CACAO outputs by 100 because Pioneer was then
+  // normalising CACAO with RUNE's 8 decimals (10^(10-8)=100× too large). Pioneer
+  // has since corrected this, so the /100 now makes ETH→CACAO outputs 100× too
+  // small (e.g. $37 of ETH quoting 3.26 CACAO instead of ~326). Trust Pioneer's
+  // value directly — no per-asset rescale.
+  const expectedOutputStr = String(expectedOutput)
 
   // ── Pre-built calldata integrations (relay, shapeshiftSwap, …) ──
   // Any integration that hands us calldata gets the same treatment: we sign
@@ -268,10 +264,9 @@ export function parseQuoteResponse(
   const actualSlippageBps = fees.slippage_bps || fees.slippageBps || (params.slippageBps ?? 100)
 
   // Minimum output — Pioneer provides amountOutMin, fallback to slippage calc.
-  // Apply cacaoScale to amountOutMin too: Pioneer inflates it by the same factor.
   const expectedNum = parseFloat(expectedOutputStr)
   const minOut = quote.amountOutMin
-    ? parseFloat(quote.amountOutMin) / cacaoScale
+    ? parseFloat(quote.amountOutMin)
     : expectedNum * (1 - actualSlippageBps / 10000)
 
   // Estimated time — prefer total_swap_seconds (full swap duration) over
