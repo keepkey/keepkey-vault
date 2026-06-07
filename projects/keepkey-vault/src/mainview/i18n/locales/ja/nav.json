@@ -13,5 +13,9 @@
 	"errorWithMessage": "エラー: {{error}}",
 	"tryUnplugging": "KeepKeyを抜いて再接続してみてください。",
 	"watchOnlyConnectPrompt": "閲覧専用 — フルアクセスにはデバイスを接続してください",
-	"passphraseMode": "パスフレーズ"
+	"passphraseMode": "パスフレーズ",
+	"addresses": "アドレス",
+	"swap": "スワップ",
+	"mobileApp": "モバイルアプリ",
+	"walletConnect": "WalletConnect"
 }

@@ -6,5 +6,7 @@
 	"shapeshiftName": "ShapeShift",
 	"shapeshiftDescription": "ซื้อขาย ติดตาม และจัดการคริปโตข้ามเครือข่าย",
 	"walletconnectName": "WalletConnect",
-	"walletconnectDescription": "เชื่อมต่อกับแอปใดก็ได้ที่รองรับ WalletConnect"
+	"walletconnectDescription": "เชื่อมต่อกับแอปใดก็ได้ที่รองรับ WalletConnect",
+	"internal": "เปิด",
+	"open": "เปิด"
 }

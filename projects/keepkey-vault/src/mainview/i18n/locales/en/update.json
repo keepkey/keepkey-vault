@@ -7,5 +7,6 @@
 	"errorWithMessage": "Update error: {{error}}",
 	"download": "Download",
 	"later": "Later",
-	"restartToUpdate": "Restart to Update"
+	"restartToUpdate": "Restart to Update",
+	"checkFailed": "Update check failed"
 }

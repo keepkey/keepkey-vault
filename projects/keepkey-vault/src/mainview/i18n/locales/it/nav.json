@@ -13,5 +13,9 @@
 	"errorWithMessage": "Errore: {{error}}",
 	"tryUnplugging": "Prova a scollegare e ricollegare il tuo KeepKey.",
 	"watchOnlyConnectPrompt": "Solo visualizzazione — Collega il dispositivo per l'accesso completo",
-	"passphraseMode": "Passphrase"
+	"passphraseMode": "Passphrase",
+	"addresses": "Indirizzi",
+	"swap": "Scambia",
+	"mobileApp": "App mobile",
+	"walletConnect": "WalletConnect"
 }

@@ -19,5 +19,10 @@
 	"add": "追加",
 	"verify": "検証",
 	"skip": "スキップ",
-	"previous": "前へ"
+	"previous": "前へ",
+	"incomingTx": {
+		"onChain": "{{chain}} · 残高を更新中",
+		"refreshing": "残高を更新中",
+		"title": "入金"
+	}
 }

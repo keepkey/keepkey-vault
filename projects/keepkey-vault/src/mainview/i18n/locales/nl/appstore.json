@@ -6,5 +6,7 @@
 	"shapeshiftName": "ShapeShift",
 	"shapeshiftDescription": "Handel, volg en beheer crypto op meerdere netwerken",
 	"walletconnectName": "WalletConnect",
-	"walletconnectDescription": "Verbind met elke WalletConnect-compatibele applicatie"
+	"walletconnectDescription": "Verbind met elke WalletConnect-compatibele applicatie",
+	"internal": "Openen",
+	"open": "Openen"
 }

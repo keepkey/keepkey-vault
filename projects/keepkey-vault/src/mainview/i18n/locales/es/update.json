@@ -7,5 +7,6 @@
 	"errorWithMessage": "Error de actualización: {{error}}",
 	"download": "Descargar",
 	"later": "Más tarde",
-	"restartToUpdate": "Reiniciar para actualizar"
+	"restartToUpdate": "Reiniciar para actualizar",
+	"checkFailed": "Error al buscar actualizaciones"
 }

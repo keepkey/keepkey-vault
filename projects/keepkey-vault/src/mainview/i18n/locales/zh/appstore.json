@@ -6,5 +6,7 @@
 	"shapeshiftName": "ShapeShift",
 	"shapeshiftDescription": "跨链交易、追踪和管理您的加密资产",
 	"walletconnectName": "WalletConnect",
-	"walletconnectDescription": "连接到任何兼容 WalletConnect 的 dApp"
+	"walletconnectDescription": "连接到任何兼容 WalletConnect 的 dApp",
+	"internal": "打开",
+	"open": "打开"
 }

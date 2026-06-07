@@ -19,5 +19,10 @@
 	"add": "Ajouter",
 	"verify": "Vérifier",
 	"skip": "Passer",
-	"previous": "Précédent"
+	"previous": "Précédent",
+	"incomingTx": {
+		"onChain": "{{chain}} · actualisation du solde",
+		"refreshing": "Actualisation du solde",
+		"title": "Paiement entrant"
+	}
 }

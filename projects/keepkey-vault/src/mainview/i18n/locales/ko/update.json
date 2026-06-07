@@ -7,5 +7,6 @@
 	"errorWithMessage": "업데이트 오류: {{error}}",
 	"download": "다운로드",
 	"later": "나중에",
-	"restartToUpdate": "재시작하여 업데이트"
+	"restartToUpdate": "재시작하여 업데이트",
+	"checkFailed": "업데이트 확인 실패"
 }

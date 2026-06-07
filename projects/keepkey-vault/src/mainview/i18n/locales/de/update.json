@@ -7,5 +7,6 @@
 	"errorWithMessage": "Update-Fehler: {{error}}",
 	"download": "Herunterladen",
 	"later": "Später",
-	"restartToUpdate": "Zum Aktualisieren neu starten"
+	"restartToUpdate": "Zum Aktualisieren neu starten",
+	"checkFailed": "Update-Prüfung fehlgeschlagen"
 }

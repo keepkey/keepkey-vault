@@ -28,5 +28,12 @@
 	"timeJustNow": "gerade eben",
 	"timeMinutesAgo": "vor {{count}}m",
 	"timeHoursAgo": "vor {{count}}h",
-	"timeDaysAgo": "vor {{count}}t"
+	"timeDaysAgo": "vor {{count}}t",
+	"staleCtaTitle": "Drücken Sie, um Guthaben zu aktualisieren",
+	"staleCtaSubtitle": "Zuletzt geprüft {{time}}",
+	"loadingDashboardTitle": "Dashboard wird geladen",
+	"loadingConnect": "Verbindung zu Ihrem KeepKey wird hergestellt",
+	"loadingSync": "Guthaben werden über alle Blockchains synchronisiert",
+	"loadingPrices": "Aktuelle Kurse werden abgerufen",
+	"tokensCount": "+{{count}} Token"
 }

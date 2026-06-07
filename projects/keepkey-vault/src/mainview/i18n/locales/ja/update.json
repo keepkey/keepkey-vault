@@ -7,5 +7,6 @@
 	"errorWithMessage": "アップデートエラー: {{error}}",
 	"download": "ダウンロード",
 	"later": "後で",
-	"restartToUpdate": "再起動してアップデート"
+	"restartToUpdate": "再起動してアップデート",
+	"checkFailed": "アップデートの確認に失敗しました"
 }

@@ -28,7 +28,15 @@
 		"rpcPlaceholder": "https://...",
 		"explorerUrlOptional": "URL de l'explorateur de blocs (facultatif)",
 		"addChainButton": "Ajouter la chaîne",
-		"adding": "Ajout en cours..."
+		"adding": "Ajout en cours...",
+		"chainIdHeader": "ID de chaîne",
+		"networkHeader": "Réseau",
+		"noChains": "Aucune chaîne disponible",
+		"noWorkingNodes": "Aucun nœud RPC fonctionnel trouvé. Trouvez-en un sur",
+		"ofChains": "sur {{total}} chaînes",
+		"online": "en ligne",
+		"selected": "SÉLECTIONNÉE",
+		"symbolHeader": "Symbole"
 	},
 	"addToken": {
 		"title": "Ajouter un jeton personnalisé",

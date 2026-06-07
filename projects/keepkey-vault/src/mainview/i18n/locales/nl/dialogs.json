@@ -28,7 +28,15 @@
 		"rpcPlaceholder": "https://...",
 		"explorerUrlOptional": "Blokverkenner-URL (optioneel)",
 		"addChainButton": "Netwerk toevoegen",
-		"adding": "Toevoegen..."
+		"adding": "Toevoegen...",
+		"chainIdHeader": "Netwerk-ID",
+		"networkHeader": "Netwerk",
+		"noChains": "Geen netwerken beschikbaar",
+		"noWorkingNodes": "Geen werkende RPC-nodes gevonden. Vind er een op",
+		"ofChains": "van {{total}} netwerken",
+		"online": "online",
+		"selected": "GESELECTEERD",
+		"symbolHeader": "Symbool"
 	},
 	"addToken": {
 		"title": "Aangepaste token toevoegen",

@@ -28,5 +28,12 @@
 	"timeJustNow": "zojuist",
 	"timeMinutesAgo": "{{count}} min geleden",
 	"timeHoursAgo": "{{count}} uur geleden",
-	"timeDaysAgo": "{{count}} dagen geleden"
+	"timeDaysAgo": "{{count}} dagen geleden",
+	"staleCtaTitle": "Druk om saldo's te vernieuwen",
+	"staleCtaSubtitle": "Laatst gecontroleerd {{time}}",
+	"loadingDashboardTitle": "Dashboard laden",
+	"loadingConnect": "Verbinden met je KeepKey",
+	"loadingSync": "Saldo's synchroniseren over netwerken",
+	"loadingPrices": "Nieuwste prijzen ophalen",
+	"tokensCount": "+{{count}} tokens"
 }

@@ -7,5 +7,6 @@
 	"errorWithMessage": "ข้อผิดพลาดในการอัปเดต: {{error}}",
 	"download": "ดาวน์โหลด",
 	"later": "ภายหลัง",
-	"restartToUpdate": "รีสตาร์ทเพื่ออัปเดต"
+	"restartToUpdate": "รีสตาร์ทเพื่ออัปเดต",
+	"checkFailed": "ตรวจสอบการอัปเดตล้มเหลว"
 }

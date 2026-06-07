@@ -7,5 +7,6 @@
 	"errorWithMessage": "Błąd aktualizacji: {{error}}",
 	"download": "Pobierz",
 	"later": "Później",
-	"restartToUpdate": "Uruchom ponownie, aby zaktualizować"
+	"restartToUpdate": "Uruchom ponownie, aby zaktualizować",
+	"checkFailed": "Sprawdzanie aktualizacji nie powiodło się"
 }

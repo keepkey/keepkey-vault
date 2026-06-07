@@ -13,5 +13,9 @@
 	"errorWithMessage": "Ошибка: {{error}}",
 	"tryUnplugging": "Попробуйте отключить и снова подключить ваш KeepKey.",
 	"watchOnlyConnectPrompt": "Только просмотр — Подключите устройство для полного доступа",
-	"passphraseMode": "Кодовая фраза"
+	"passphraseMode": "Кодовая фраза",
+	"addresses": "Адреса",
+	"swap": "Обмен",
+	"mobileApp": "Мобильное приложение",
+	"walletConnect": "WalletConnect"
 }

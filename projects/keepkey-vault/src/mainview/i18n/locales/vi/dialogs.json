@@ -28,7 +28,15 @@
 		"rpcPlaceholder": "https://...",
 		"explorerUrlOptional": "URL trình duyệt khối (tùy chọn)",
 		"addChainButton": "Thêm mạng",
-		"adding": "Đang thêm..."
+		"adding": "Đang thêm...",
+		"chainIdHeader": "ID mạng",
+		"networkHeader": "Mạng",
+		"noChains": "Không có mạng nào khả dụng",
+		"noWorkingNodes": "Không tìm thấy nút RPC nào hoạt động. Tìm một nút tại",
+		"ofChains": "trong số {{total}} mạng",
+		"online": "trực tuyến",
+		"selected": "ĐÃ CHỌN",
+		"symbolHeader": "Ký hiệu"
 	},
 	"addToken": {
 		"title": "Thêm token tùy chỉnh",

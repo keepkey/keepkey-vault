@@ -7,5 +7,6 @@
 	"errorWithMessage": "Güncelleme hatası: {{error}}",
 	"download": "İndir",
 	"later": "Daha sonra",
-	"restartToUpdate": "Güncellemek için yeniden başlat"
+	"restartToUpdate": "Güncellemek için yeniden başlat",
+	"checkFailed": "Güncelleme kontrolü başarısız"
 }

@@ -6,5 +6,7 @@
 	"shapeshiftName": "ShapeShift",
 	"shapeshiftDescription": "チェーン間で暗号資産を交換、追跡、管理",
 	"walletconnectName": "WalletConnect",
-	"walletconnectDescription": "WalletConnect対応のあらゆるdAppに接続"
+	"walletconnectDescription": "WalletConnect対応のあらゆるdAppに接続",
+	"internal": "開く",
+	"open": "開く"
 }

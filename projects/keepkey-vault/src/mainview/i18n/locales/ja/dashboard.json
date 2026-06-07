@@ -28,5 +28,12 @@
 	"timeJustNow": "たった今",
 	"timeMinutesAgo": "{{count}}分前",
 	"timeHoursAgo": "{{count}}時間前",
-	"timeDaysAgo": "{{count}}日前"
+	"timeDaysAgo": "{{count}}日前",
+	"staleCtaTitle": "押して残高を更新",
+	"staleCtaSubtitle": "最終確認 {{time}}",
+	"loadingDashboardTitle": "ダッシュボードを読み込み中",
+	"loadingConnect": "KeepKey に接続中",
+	"loadingSync": "チェーン間で残高を同期中",
+	"loadingPrices": "最新の価格を取得中",
+	"tokensCount": "+{{count}} トークン"
 }

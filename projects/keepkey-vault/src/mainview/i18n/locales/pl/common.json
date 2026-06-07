@@ -19,5 +19,10 @@
 	"add": "Dodaj",
 	"verify": "Weryfikuj",
 	"skip": "Pomiń",
-	"previous": "Poprzedni"
+	"previous": "Poprzedni",
+	"incomingTx": {
+		"onChain": "{{chain}} · odświeżanie salda",
+		"refreshing": "Odświeżanie salda",
+		"title": "Płatność przychodząca"
+	}
 }

@@ -34,5 +34,6 @@
 	"loadingDashboardTitle": "Loading dashboard",
 	"loadingConnect": "Connecting to your KeepKey",
 	"loadingSync": "Syncing balances across chains",
-	"loadingPrices": "Fetching the latest prices"
+	"loadingPrices": "Fetching the latest prices",
+	"tokensCount": "+{{count}} tokens"
 }

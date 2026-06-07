@@ -6,5 +6,7 @@
 	"shapeshiftName": "ShapeShift",
 	"shapeshiftDescription": "Giao dịch, theo dõi và quản lý tiền mã hóa trên nhiều mạng",
 	"walletconnectName": "WalletConnect",
-	"walletconnectDescription": "Kết nối với bất kỳ ứng dụng nào tương thích WalletConnect"
+	"walletconnectDescription": "Kết nối với bất kỳ ứng dụng nào tương thích WalletConnect",
+	"internal": "Mở",
+	"open": "Mở"
 }
