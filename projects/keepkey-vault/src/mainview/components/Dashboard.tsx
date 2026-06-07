@@ -1980,7 +1980,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 						return (
 							<DonutChart
 								data={chartData}
-								size={220}
+								size={300}
 								activeIndex={safeIndex}
 								onHoverSlice={(i) => setActiveSliceIndex(i === null ? 0 : i)}
 								onClickSlice={(i) => {
