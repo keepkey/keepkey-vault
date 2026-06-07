@@ -290,6 +290,9 @@ export class EngineController extends EventEmitter {
         }
         this.clearWallet()
         this.lastError = null
+        // An unplug is a natural stop point for the post-attach discovery poll —
+        // otherwise it keeps re-probing a now-absent device until the grace window.
+        this.stopDiscoveryPoll()
         // Clear the Linux udev flag — otherwise getDeviceState() keeps reporting
         // "KeepKey detected, install rules" after the user has unplugged.
         this.linuxUdevPermissionDenied = false
@@ -888,8 +891,14 @@ export class EngineController extends EventEmitter {
    * connected_unpaired + lastError). Self-stops once paired or after the grace
    * window. The existing `syncing` guard prevents concurrent runs.
    * See docs/WINDOWS-USB-AUDIT.md (Cause A) and docs/WINDOWS-USB-FIX-PLAN.md (FIX-1).
+   *
+   * Windows-only: this works around a WinUSB binding race that does not exist on
+   * macOS/Linux, where attach→syncState() already sees the device. Gating here
+   * avoids ~18s of redundant USB enumeration + log churn at every device-less
+   * startup on those platforms.
    */
   private startDiscoveryPoll() {
+    if (process.platform !== 'win32') return
     if (this.discoveryPollTimer) return
     this.discoveryPollCount = 0
     console.log('[Engine] Starting discovery poll (1.5s interval, ~18s grace)')

@@ -118,7 +118,7 @@ Keep the existing port-1646 probe as a secondary check. Independent of `restApiE
 
 **Solution (simple, asymmetric timeouts).** Writes should never block long; reads legitimately wait on button presses.
 - **Writes:** wrap `transferOut` in a 3–5 s race → on timeout, `clearHalt` + `releaseInterface(0)` + `close()`, then throw `Disconnected`.
-- **Reads:** use a *generous* ceiling (~90 s, matching `core.LONG_TIMEOUT` used for button flows) so a truly dead device eventually errors but real confirmations survive. Tear down the interface the same way on timeout.
+- **Reads:** use a *generous* ceiling (`core.LONG_TIMEOUT` = **5 min**, used for button flows) so a truly dead device eventually errors but real confirmations survive. Tear down the interface the same way on timeout.
 - Don't try to make the existing `withTimeout()` race fix this — it abandons the native promise but doesn't release the interface. The release must happen in the transport.
 
 **Risk.** Too-short a read timeout breaks long button confirmations — keep it ≥ `LONG_TIMEOUT`. Test PIN entry, passphrase, and a tx-sign that the user lets sit for >60 s.
