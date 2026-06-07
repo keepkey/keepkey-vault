@@ -16,6 +16,8 @@ import { SplashScreen } from "./components/SplashScreen"
 import { DeviceGrid } from "./components/DeviceGrid"
 import { DeviceClaimedDialog } from "./components/DeviceClaimedDialog"
 import { LinuxUdevWarning } from "./components/LinuxUdevWarning"
+import { WindowsUsbTroubleshooter } from "./components/WindowsUsbTroubleshooter"
+import { IS_WINDOWS } from "./lib/platform"
 import { OobSetupWizard } from "./components/OobSetupWizard"
 import { TopNav, SplashNav } from "./components/TopNav"
 import { WindowResizeHandles } from "./components/WindowResizeHandles"
@@ -869,11 +871,16 @@ function App() {
 						<LinuxUdevWarning />
 					) : (
 						/* Unified device grid — registered devices + emulator wallets */
-						<DeviceGrid
-							onViewPortfolio={(id, label) => { setWatchOnlyDeviceId(id); setWatchOnlyLabel(label); setWatchOnlyMode(true) }}
-							onReady={() => setGridReady(true)}
-							emulatorEnabled={emulatorEnabled}
-						/>
+						<>
+							<DeviceGrid
+								onViewPortfolio={(id, label) => { setWatchOnlyDeviceId(id); setWatchOnlyLabel(label); setWatchOnlyMode(true) }}
+								onReady={() => setGridReady(true)}
+								emulatorEnabled={emulatorEnabled}
+							/>
+							{/* Windows: a connected KeepKey can be invisible to the app if WinUSB
+							    didn't bind. Offer a read-only diagnostic when nothing is detected. */}
+							{IS_WINDOWS && deviceState.state === "disconnected" && <WindowsUsbTroubleshooter />}
+						</>
 					)}
 				</SplashScreen>
 			</>

@@ -1167,3 +1167,30 @@ export interface RecentActivity {
 // RPC types — derived from the single source of truth in rpc-schema.ts
 // Import VaultRPCSchema from './rpc-schema' if you need the full Electrobun schema.
 // These aliases are for convenience in frontend code that doesn't need Electrobun types.
+
+// ── Windows USB diagnostic (troubleshooter) ──────────────────────────
+// Read-only signals collected by src/bun/windows-usb-probe.ts to tell a user
+// why a connected KeepKey isn't detected on Windows. Never includes wallet
+// data, device serial, labels, xpubs, or addresses.
+export type UsbDiagnosticCause = "A" | "B" | "C" | "detected" | "not-present" | "unknown" | "non-windows"
+
+export interface UsbDiagnosticReport {
+  timestamp: number
+  appVersion: string
+  platform: string
+  osVersion: string
+  /** A 2B24 device is visible to libusb right now (the app can open it). */
+  libusbDetected: boolean
+  windows?: {
+    pnpPresent: boolean
+    status: string | null
+    boundService: string | null
+    osvc: string | null
+    probeError: string | null
+  }
+  likelyCause: UsbDiagnosticCause
+  headline: string
+  guidance: string
+  /** Copy-ready plain-text report for pasting into a support request. */
+  text: string
+}
