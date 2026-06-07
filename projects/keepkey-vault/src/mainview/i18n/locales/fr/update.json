@@ -7,5 +7,6 @@
 	"errorWithMessage": "Erreur de mise à jour : {{error}}",
 	"download": "Télécharger",
 	"later": "Plus tard",
-	"restartToUpdate": "Redémarrer pour mettre à jour"
+	"restartToUpdate": "Redémarrer pour mettre à jour",
+	"checkFailed": "Échec de la vérification des mises à jour"
 }

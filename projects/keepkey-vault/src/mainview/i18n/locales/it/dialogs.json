@@ -28,7 +28,15 @@
 		"rpcPlaceholder": "https://...",
 		"explorerUrlOptional": "URL block explorer (facoltativo)",
 		"addChainButton": "Aggiungi catena",
-		"adding": "Aggiunta in corso..."
+		"adding": "Aggiunta in corso...",
+		"chainIdHeader": "ID catena",
+		"networkHeader": "Rete",
+		"noChains": "Nessuna catena disponibile",
+		"noWorkingNodes": "Nessun nodo RPC funzionante trovato. Trovane uno su",
+		"ofChains": "di {{total}} catene",
+		"online": "online",
+		"selected": "SELEZIONATA",
+		"symbolHeader": "Simbolo"
 	},
 	"addToken": {
 		"title": "Aggiungi token personalizzato",

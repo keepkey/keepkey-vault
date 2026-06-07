@@ -115,7 +115,7 @@ import { PioneerSocket } from "./pioneer-socket"
 import { startEventStream, stopEventStream, type AddressEntry } from "./event-stream"
 import { rebuildActivityHistory } from "./activity-history"
 import { buildTx, broadcastTx } from "./txbuilder"
-import { buildCosmosStakingTx } from "./txbuilder/cosmos"
+import { buildCosmosStakingTx, buildCosmosNameRegTx } from "./txbuilder/cosmos"
 import { initializeOrchardFromDevice, scanOrchardNotes, getShieldedBalance, sendShielded, ensureFvkLoaded, displayOrchardAddressOnDevice } from "./txbuilder/zcash-shielded"
 import { isSidecarReady, startSidecar, stopSidecar, wipeSidecarWalletDb, hasFvkLoaded, getCachedFvk, onScanProgress, getScanState, updateSyncedTo } from "./zcash-sidecar"
 import { CHAINS, customChainToChainDef, isChainSupported } from "../shared/chains"
@@ -125,7 +125,8 @@ import { BtcAccountManager } from "./btc-accounts"
 import { EvmAddressManager, evmAddressPath } from "./evm-addresses"
 import { shouldResetManagersOnReady, nextReadyDeviceId } from "../shared/device-switch"
 import { WalletConnectManager } from "./walletconnect"
-import { initDb, factoryResetDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, setCustomTokenIcon as dbSetCustomTokenIcon, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility, insertApiLog, getApiLogs, clearApiLogs, setCachedBalances, getCachedBalances, updateCachedBalance, clearBalances, saveCachedPubkey, getLatestDeviceSnapshot, getCachedPubkeys, saveReport, getReportsList, getReportById, deleteReport, reportExists, getSwapHistory, getSwapHistoryStats, getSwapHistoryByTxid, getBip85Seeds, saveBip85Seed, deleteBip85Seed, clearCachedPubkeys, getRecentActivityFromLog, getPioneerServers, addPioneerServerDb, removePioneerServerDb } from "./db"
+import { initDb, factoryResetDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, setCustomTokenIcon as dbSetCustomTokenIcon, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility, insertApiLog, getApiLogs, clearApiLogs, setCachedBalances, getCachedBalances, updateCachedBalance, clearBalances, saveCachedPubkey, getLatestDeviceSnapshot, getCachedPubkeys, saveReport, getReportsList, getReportById, deleteReport, reportExists, getSwapHistory, getSwapHistoryStats, getSwapHistoryByTxid, getBip85Seeds, saveBip85Seed, deleteBip85Seed, clearCachedPubkeys, getRecentActivityFromLog, getPioneerServers, addPioneerServerDb, removePioneerServerDb, syncOwnAddressBook, recordOutbound, getAddressBookList, updateAddressBookEntry, deleteAddressBookEntry, getAddressBookHistory, getDeviceLabelMap, getBalancesForOwnSeed, addExternalEntry } from "./db"
+import type { OwnAddressSeed } from "./db"
 import { rectifyWallet, getLedgerSummary, getLedgerJournals } from "./ledger"
 import { generateReport, reportToPdfBuffer, reportToCsv } from "./reports"
 import { extractTransactionsFromReport, toCoinTrackerCsv, toZenLedgerCsv } from "./tax-export"
@@ -777,6 +778,41 @@ function getWalletDbScope(): { deviceId: string; walletId: string } | null {
 	const seedId = engine.currentSeedEthAddress?.toLowerCase()
 	if (!seedId) return null
 	return { deviceId, walletId: `${deviceId}:${seedId}` }
+}
+
+/** Seed own-wallet Address Book entries for EVERY known device from the persisted
+ *  watch-only balance cache — so the book shows all the user's wallets (not just
+ *  the connected one), each attributable to its device. Cheap, idempotent (INSERT
+ *  OR IGNORE), no device calls. Caller must gate on !engine.isPassphraseWallet.
+ *  walletId is reconstructed as `${deviceId}:${ethAddr}` (matching getWalletDbScope)
+ *  so the connected device's cache-seed dedupes against its live getBalances seed. */
+function seedOwnFromCache(): void {
+	try {
+		const rows = getBalancesForOwnSeed()
+		if (rows.length === 0) return
+		const labels = getDeviceLabelMap()
+		const chainById = new Map(getAllChains().map(c => [c.id, c]))
+		const byDevice = new Map<string, Array<{ chainId: string; address: string }>>()
+		for (const r of rows) {
+			if (!labels[r.deviceId]) continue // only registered devices (skip 'unknown'/unlabeled)
+			const list = byDevice.get(r.deviceId) || []
+			list.push({ chainId: r.chainId, address: r.address })
+			byDevice.set(r.deviceId, list)
+		}
+		for (const [deviceId, drows] of byDevice) {
+			const ethAddr = drows.find(r => r.chainId === 'ethereum')?.address
+			const walletId = ethAddr ? `${deviceId}:${ethAddr.toLowerCase()}` : deviceId
+			const seeds: OwnAddressSeed[] = []
+			for (const r of drows) {
+				const ch = chainById.get(r.chainId)
+				if (!ch) continue
+				seeds.push({ address: r.address, networkId: ch.networkId, chainId: ch.id, chainFamily: ch.chainFamily, symbol: ch.symbol, label: ch.symbol })
+			}
+			if (seeds.length) syncOwnAddressBook({ deviceId, walletId }, seeds)
+		}
+	} catch (e: any) {
+		console.warn('[seedOwnFromCache] failed:', e?.message)
+	}
 }
 
 const pendingScopedApiLogs: ApiLogEntry[] = []
@@ -1840,6 +1876,49 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const btcPubkeySet = new Set(btcPubkeyEntries.map(e => e.pubkey))
 				for (const entry of btcPubkeyEntries) {
 					pubkeys.push({ caip: entry.caip, pubkey: entry.pubkey, chainId: 'bitcoin', symbol: 'BTC', networkId: btcChain.networkId })
+				}
+
+				// ── Address Book: mirror own-wallet addresses (R2) ──────────────
+				// Fire-and-forget, fully guarded — must never break the balance path.
+				// Runs here (not on 'ready') because addresses only exist once the
+				// managers have derived them above. evmPubkeyEntries is the N×M
+				// cartesian, so own EVM rows are stored one-per-network for the
+				// exact-networkId Send picker (decision: own addresses are pickable).
+				try {
+					const abScope = getWalletDbScope()
+					if (abScope && !engine.isPassphraseWallet) {
+						const chainById = new Map(allChains.map(c => [c.id, c]))
+						const own: OwnAddressSeed[] = []
+						for (const e of evmPubkeyEntries) {
+							own.push({
+								address: e.pubkey, networkId: e.networkId, chainId: e.chainId, chainFamily: 'evm',
+								symbol: e.symbol, addressIndex: e.addressIndex,
+								derivationPath: `m/44'/60'/${e.addressIndex}'/0/0`,
+								label: `${e.symbol} #${e.addressIndex}`,
+							})
+						}
+						for (const m of btcAccounts.getAllXpubMeta()) {
+							own.push({
+								address: m.xpub, networkId: btcChain.networkId, chainId: 'bitcoin', chainFamily: 'utxo',
+								symbol: 'BTC', scriptType: m.scriptType, addressIndex: m.accountIndex,
+								derivationPath: 'm/' + m.path.map(n => n >= 0x80000000 ? `${n - 0x80000000}'` : `${n}`).join('/'),
+								label: `BTC ${m.scriptType} #${m.accountIndex}`,
+							})
+						}
+						for (const p of pubkeys) {
+							const ch = chainById.get(p.chainId)
+							if (!ch || ch.chainFamily === 'evm' || p.chainId === 'bitcoin') continue
+							const isXpub = ch.chainFamily === 'utxo'
+							own.push({
+								address: p.pubkey, networkId: p.networkId, chainId: p.chainId, chainFamily: ch.chainFamily,
+								symbol: p.symbol, label: isXpub ? `${p.symbol} (xpub)` : `My ${p.symbol}`,
+							})
+						}
+						const insertedOwn = syncOwnAddressBook(abScope, own)
+						if (insertedOwn > 0) { try { rpc.send['addressbook-changed']({}) } catch { /* webview not ready */ } }
+					}
+				} catch (e: any) {
+					console.warn('[getBalances] addressbook own-sync failed:', e?.message)
 				}
 
 				console.log(`[getBalances] ${pubkeys.length} pubkeys (${btcPubkeyEntries.length} BTC xpubs) → chunked GetPortfolioBalances calls`)
@@ -2952,10 +3031,27 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// PRIVACY: Skip DB write for passphrase wallets (still push to UI).
 				const scope = getWalletDbScope()
 				const logEntry: ApiLogEntry = { ...(scope || {}), method: 'RPC', route: 'broadcastTx', timestamp: Date.now(), durationMs: 0, status: 200, appName: 'vault', txid: result.txid, chain: chain.symbol, activityType: 'broadcast' }
-				if (!engine.isPassphraseWallet && scope) insertApiLog(logEntry)
+				let abEntry: { entryId: string; isNew: boolean } | null = null
+				if (!engine.isPassphraseWallet && scope) {
+					insertApiLog(logEntry)
+					// Address Book (R3/R4/R7): capture the recipient as an external entry
+					// + outbound-history row. Best-effort — never block the broadcast.
+					if (params.to) {
+						try {
+							abEntry = recordOutbound({
+								walletId: scope.walletId, deviceId: scope.deviceId,
+								toAddress: params.to, networkId: chain.networkId, chainId: chain.id, chainFamily: chain.chainFamily,
+								fromAddress: params.fromAddress ?? null,
+								caip: params.caip || chain.caip, symbol: params.symbol || chain.symbol,
+								amount: params.amount ?? null, txid: result.txid,
+							})
+							if (abEntry) { try { rpc.send['addressbook-changed']({}) } catch { /* webview not ready */ } }
+						} catch (e: any) { console.warn('[broadcastTx] addressbook recordOutbound failed:', e?.message) }
+					}
+				}
 				try { rpc.send['api-log'](logEntry) } catch { /* webview not ready */ }
 
-				return result
+				return { ...result, addressBookEntryId: abEntry?.entryId, recipientIsNew: abEntry?.isNew }
 			},
 
 			getMarketData: async (params) => {
@@ -3067,6 +3163,80 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					memo: params.memo,
 					fromAddress,
 					type: 'undelegate',
+				})
+
+				const { fee, ...unsignedTx } = result
+				return { unsignedTx, fee }
+			},
+
+			// ── THORName / MAYAName registration ──────────────────────
+			lookupName: async (params) => {
+				const chain = getAllChains().find(c => c.id === params.chainId)
+				if (!chain) throw new Error(`Unknown chain: ${params.chainId}`)
+				if (chain.id !== 'thorchain' && chain.id !== 'mayachain') throw new Error(`Name service not supported for chain: ${params.chainId}`)
+				const pioneer = await getPioneer()
+
+				const resp = await withTimeout(
+					pioneer.GetName({ network: chain.id, name: params.name }),
+					PIONEER_TIMEOUT_MS,
+					'GetName'
+				)
+				// Pioneer wraps the payload in a `data` envelope (like GetStakingPositions).
+				const data = resp?.data?.data ?? resp?.data ?? {}
+				return {
+					found: !!data.found,
+					name: params.name,
+					owner: data.owner,
+					expireBlockHeight: data.expireBlockHeight != null ? Number(data.expireBlockHeight) : undefined,
+					aliases: Array.isArray(data.aliases) ? data.aliases : undefined,
+					preferredAsset: data.preferredAsset || undefined,
+				}
+			},
+
+			getNameQuote: async (params) => {
+				const chain = getAllChains().find(c => c.id === params.chainId)
+				if (!chain) throw new Error(`Unknown chain: ${params.chainId}`)
+				if (chain.id !== 'thorchain' && chain.id !== 'mayachain') throw new Error(`Name service not supported for chain: ${params.chainId}`)
+				const pioneer = await getPioneer()
+
+				const resp = await withTimeout(
+					pioneer.GetNameRegistrationQuote({ network: chain.id }),
+					PIONEER_TIMEOUT_MS,
+					'GetNameRegistrationQuote'
+				)
+				const data = resp?.data?.data ?? resp?.data
+				if (!data?.registerFeeBase || !data?.feePerBlockBase || !data?.blocksPerYear) {
+					throw new Error(`Unexpected name quote format for ${chain.id}: ${JSON.stringify(data)}`)
+				}
+				return {
+					registerFeeBase: String(data.registerFeeBase),
+					feePerBlockBase: String(data.feePerBlockBase),
+					blocksPerYear: Number(data.blocksPerYear),
+					currentBlockHeight: Number(data.currentBlockHeight ?? 0),
+				}
+			},
+
+			buildNameRegistrationTx: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				const chain = getAllChains().find(c => c.id === params.chainId)
+				if (!chain) throw new Error(`Unknown chain: ${params.chainId}`)
+				if (chain.id !== 'thorchain' && chain.id !== 'mayachain') throw new Error(`Name registration not supported for chain: ${params.chainId}`)
+				const pioneer = await getPioneer()
+
+				const wallet = engine.wallet as any
+				const addrParams: any = {
+					addressNList: chain.defaultPath,
+					showDisplay: false,
+					coin: chain.coin,
+				}
+				const addrResult = await wallet[chain.rpcMethod](addrParams)
+				const fromAddress = typeof addrResult === 'string' ? addrResult : addrResult?.address
+				if (!fromAddress) throw new Error(`Could not derive address for ${chain.coin}`)
+
+				const result = await buildCosmosNameRegTx(pioneer, chain, {
+					name: params.name,
+					years: params.years,
+					fromAddress,
 				})
 
 				const { fee, ...unsignedTx } = result
@@ -3979,6 +4149,58 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			clearApiLogs: async () => {
 				const scope = getWalletDbScope()
 				if (scope) clearApiLogs(scope.deviceId, scope.walletId)
+			},
+
+			// ── Address Book ─────────────────────────────────────────
+			listAddressBook: async (params) => {
+				if (engine.isPassphraseWallet) return []
+				const scope = getWalletDbScope()
+				if (!scope) return []
+				// Populate own entries for ALL devices from the watch-only cache (cheap,
+				// idempotent) so the book isn't limited to the connected wallet.
+				try { seedOwnFromCache() } catch { /* never block the read */ }
+				const labels = getDeviceLabelMap()
+				const networkId = params?.networkId
+				const search = params?.search
+				// own = every device's wallets (cross-device); external = this wallet's contacts.
+				const own = getAddressBookList({ kind: 'own', networkId, search })
+				const external = getAddressBookList({ kind: 'external', walletId: scope.walletId, networkId, search })
+				return [...own, ...external].map(e => ({ ...e, deviceLabel: labels[e.deviceId] || e.deviceLabel }))
+			},
+			addAddressBook: async (params) => {
+				if (engine.isPassphraseWallet) return null
+				const scope = getWalletDbScope()
+				if (!scope) return null
+				const chain = getAllChains().find(c => c.networkId === params.networkId)
+				if (!chain) { console.warn('[addressbook] addAddressBook: unknown networkId', params.networkId); return null }
+				const entry = addExternalEntry({
+					walletId: scope.walletId, deviceId: scope.deviceId,
+					networkId: chain.networkId, chainId: chain.id, chainFamily: chain.chainFamily,
+					address: params.address, label: params.label ?? null,
+				})
+				if (entry) { try { rpc.send['addressbook-changed']({}) } catch { /* webview not ready */ } }
+				return entry
+			},
+			updateAddressBook: async (params) => {
+				if (engine.isPassphraseWallet) return false
+				const scope = getWalletDbScope()
+				if (!scope) return false
+				const ok = updateAddressBookEntry(params.id, scope.walletId, { label: params.label, note: params.note })
+				if (ok) { try { rpc.send['addressbook-changed']({}) } catch { /* webview not ready */ } }
+				return ok
+			},
+			deleteAddressBook: async (params) => {
+				if (engine.isPassphraseWallet) return
+				const scope = getWalletDbScope()
+				if (!scope) return
+				deleteAddressBookEntry(params.id, scope.walletId)
+				try { rpc.send['addressbook-changed']({}) } catch { /* webview not ready */ }
+			},
+			getAddressBookHistory: async (params) => {
+				if (engine.isPassphraseWallet) return []
+				const scope = getWalletDbScope()
+				if (!scope) return []
+				return getAddressBookHistory(params.entryId, scope.walletId)
 			},
 
 			// ── Accounting ledger ────────────────────────────────────
@@ -5652,6 +5874,25 @@ engine.on('state-change', (state) => {
 			onDisconnect: () => console.log('[PioneerSocket] disconnected from Pioneer'),
 		})
 		pioneerSocket.start()
+	}
+	if (state.state === 'ready' && !engine.isPassphraseWallet) {
+		// Fire-and-forget background history scan on every ready transition (startup + reconnect).
+		// 3s delay lets wallet address derivation settle before hitting Pioneer.
+		setTimeout(() => {
+			const scope = getWalletDbScope()
+			if (!scope || !engine.wallet) return
+			console.log('[activity] Auto-scanning history on device ready...')
+			rebuildActivityHistory({
+				wallet: engine.wallet,
+				scope,
+				chains: getAllChains(),
+				firmwareVersion: engine.getDeviceState().firmwareVersion,
+			}).then(result => {
+				console.log(`[activity] Auto-scan complete: ${result.totals.inserted} new txs across ${result.totals.chains} chains`)
+			}).catch(e => {
+				console.warn('[activity] Auto-scan failed:', e?.message || e)
+			})
+		}, 3000)
 	}
 	if (state.state === 'disconnected') {
 		// Keep btcAccounts + evmAddresses in memory across disconnect so the

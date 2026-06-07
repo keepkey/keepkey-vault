@@ -28,5 +28,12 @@
 	"timeJustNow": "proprio ora",
 	"timeMinutesAgo": "{{count}}m fa",
 	"timeHoursAgo": "{{count}}h fa",
-	"timeDaysAgo": "{{count}}g fa"
+	"timeDaysAgo": "{{count}}g fa",
+	"staleCtaTitle": "Premi per aggiornare i saldi",
+	"staleCtaSubtitle": "Ultimo controllo {{time}}",
+	"loadingDashboardTitle": "Caricamento dashboard",
+	"loadingConnect": "Connessione al tuo KeepKey",
+	"loadingSync": "Sincronizzazione dei saldi tra le catene",
+	"loadingPrices": "Recupero dei prezzi più recenti",
+	"tokensCount": "+{{count}} token"
 }

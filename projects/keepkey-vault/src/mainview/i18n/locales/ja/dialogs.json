@@ -28,7 +28,15 @@
 		"rpcPlaceholder": "https://...",
 		"explorerUrlOptional": "ブロックエクスプローラーURL（任意）",
 		"addChainButton": "チェーンを追加",
-		"adding": "追加中..."
+		"adding": "追加中...",
+		"chainIdHeader": "チェーンID",
+		"networkHeader": "ネットワーク",
+		"noChains": "利用可能なチェーンがありません",
+		"noWorkingNodes": "動作するRPCノードが見つかりません。こちらで検索：",
+		"ofChains": "/ {{total}}チェーン",
+		"online": "オンライン",
+		"selected": "選択済み",
+		"symbolHeader": "シンボル"
 	},
 	"addToken": {
 		"title": "カスタムトークンを追加",

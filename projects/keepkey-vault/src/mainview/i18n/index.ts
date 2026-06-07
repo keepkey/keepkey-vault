@@ -17,6 +17,8 @@ import appstore from "./locales/en/appstore.json"
 import dialogs from "./locales/en/dialogs.json"
 import swap from "./locales/en/swap.json"
 import staking from "./locales/en/staking.json"
+import names from "./locales/en/names.json"
+import addressbook from "./locales/en/addressbook.json"
 
 const STORAGE_KEY = "keepkey-vault-lang"
 
@@ -78,6 +80,8 @@ i18n
 			"dialogs",
 			"swap",
 			"staking",
+			"names",
+			"addressbook",
 		],
 		resources: {
 			en: {
@@ -95,6 +99,8 @@ i18n
 				dialogs,
 				swap,
 				staking,
+				names,
+				addressbook,
 			},
 		},
 		interpolation: { escapeValue: false },

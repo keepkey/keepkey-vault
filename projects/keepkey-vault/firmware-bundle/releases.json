@@ -2,9 +2,9 @@
   "_note": "Firmware manifest bundled with the vault app. Ships inside the signed/notarized DMG — tampering breaks Apple's signature. Used as the guaranteed floor when remote manifest is unavailable. Hash format: header-stripped (tail -c +257) for firmware, full binary for bootloader.",
   "latest": {
     "firmware": {
-      "version": "v7.10.0",
-      "url": "v7.10.0/firmware.keepkey.bin",
-      "hash": "958764cf3baa53eec0002eab9c54e02ce6f5fdab71e7efbbe723f958e26ff419"
+      "version": "v7.14.1",
+      "url": "v7.14.1/firmware.keepkey.bin",
+      "hash": "73a880682d00c725cf9b38347ed0f08f4c2214c2c0f54559739f9d939f6275ae"
     },
     "bootloader": {
       "version": "v2.1.4",
@@ -16,7 +16,7 @@
     "firmware": {
       "version": "v7.14.1",
       "url": "v7.14.1/firmware.keepkey.bin",
-      "hash": "e0c05185e7e3274bd256108a7f35e155c4fc3f70f6f6d928a805d9f201bebf47"
+      "hash": "73a880682d00c725cf9b38347ed0f08f4c2214c2c0f54559739f9d939f6275ae"
     },
     "bootloader": {
       "version": "v2.1.4",
@@ -51,7 +51,7 @@
     "firmware": {
       "958764cf3baa53eec0002eab9c54e02ce6f5fdab71e7efbbe723f958e26ff419": "v7.10.0",
       "8c1082eca6c6f79b14e84de6d0d21e15eff3c545982d97c9fc6e4b30365513c7": "v7.14.0",
-      "e0c05185e7e3274bd256108a7f35e155c4fc3f70f6f6d928a805d9f201bebf47": "v7.14.1"
+      "73a880682d00c725cf9b38347ed0f08f4c2214c2c0f54559739f9d939f6275ae": "v7.14.1"
     }
   }
 }

@@ -28,5 +28,12 @@
 	"timeJustNow": "vừa xong",
 	"timeMinutesAgo": "{{count}} phút trước",
 	"timeHoursAgo": "{{count}} giờ trước",
-	"timeDaysAgo": "{{count}} ngày trước"
+	"timeDaysAgo": "{{count}} ngày trước",
+	"staleCtaTitle": "Nhấn để làm mới số dư",
+	"staleCtaSubtitle": "Kiểm tra lần cuối {{time}}",
+	"loadingDashboardTitle": "Đang tải bảng điều khiển",
+	"loadingConnect": "Đang kết nối với KeepKey của bạn",
+	"loadingSync": "Đang đồng bộ số dư trên các mạng",
+	"loadingPrices": "Đang lấy giá mới nhất",
+	"tokensCount": "+{{count}} token"
 }

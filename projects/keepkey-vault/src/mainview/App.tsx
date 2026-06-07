@@ -24,6 +24,7 @@ import { Dashboard } from "./components/Dashboard"
 import { CommandPalette } from "./components/CommandPalette"
 import { useLatestBalances } from "./lib/commandBus"
 import { AppStore } from "./components/AppStore"
+import { AddressBookView } from "./components/AddressBookView"
 import { DeviceSettingsDrawer } from "./components/DeviceSettingsDrawer"
 import { UpdateBanner } from "./components/UpdateBanner"
 import { IncomingTxToast, type IncomingTx } from "./components/IncomingTxToast"
@@ -49,6 +50,11 @@ function App() {
 	const update = useUpdateState()
 	const [wizardComplete, setWizardComplete] = useState(false)
 	const [setupInProgress, setSetupInProgress] = useState(false)
+	// Session-only firmware-update skip. When the user chooses "skip" in the OOB
+	// wizard's firmware step we let them into the app on the older firmware, but
+	// we deliberately never persist this — it resets on disconnect so the update
+	// is re-offered on every reconnect.
+	const [firmwareSkipped, setFirmwareSkipped] = useState(false)
 	// Ref-based OOB lock: once the device enters an OOB state, keep the wizard
 	// mounted through disconnects. The state-based setupInProgress can lose races
 	// with React render batching on fast USB detach/reattach cycles (Windows).
@@ -103,6 +109,13 @@ function App() {
 		window.addEventListener("keepkey-settings-changed", refreshSettings)
 		return () => window.removeEventListener("keepkey-settings-changed", refreshSettings)
 	}, [])
+
+	// Re-offer a skipped firmware update on every reconnect: clear the skip flag
+	// once the device is fully unplugged so the next connect routes back through
+	// the firmware step instead of silently staying on the dashboard.
+	useEffect(() => {
+		if (deviceState.state === "disconnected") setFirmwareSkipped(false)
+	}, [deviceState.state])
 
 	// ── REST API UI-active handshake ─────────────────────────────────
 	// The Bun process refuses to serve pubkeys/addresses on port 1646 unless
@@ -677,8 +690,10 @@ function App() {
 	// ── Phase detection ─────────────────────────────────────────────
 	const isClaimed = deviceState.state === "connected_unpaired" && !!deviceState.error
 
-	// Track OOB entry — once the wizard is shown, lock it through disconnects
-	if (!wizardComplete && ["bootloader", "needs_firmware", "needs_init"].includes(deviceState.state)) {
+	// Track OOB entry — once the wizard is shown, lock it through disconnects.
+	// A skipped firmware update is the one exception: don't re-arm the OOB lock,
+	// otherwise the user would be yanked back into the wizard after skipping.
+	if (!wizardComplete && !firmwareSkipped && ["bootloader", "needs_firmware", "needs_init"].includes(deviceState.state)) {
 		oobEnteredRef.current = true
 	}
 	if (wizardComplete) {
@@ -702,6 +717,9 @@ function App() {
 		oobLock ? "setup"
 		: isClaimed ? "claimed"
 		: ["disconnected", "connected_unpaired", "error"].includes(deviceState.state) ? "splash"
+		// Firmware update skipped this session — let the user into the app on the
+		// older firmware. TopNav keeps showing the "vX → vY" update reminder.
+		: firmwareSkipped && deviceState.state === "needs_firmware" ? "ready"
 		: !wizardComplete && ["bootloader", "needs_firmware", "needs_init"].includes(deviceState.state) ? "setup"
 		: deviceState.state === "ready" ? "ready"
 		: ["needs_pin", "needs_passphrase"].includes(deviceState.state) ? "splash"
@@ -777,7 +795,7 @@ function App() {
 	if (watchOnlyMode) {
 		return (
 			<>{resizeHandles}{updateBanner}{firmwareDropZone}
-				<Flex direction="column" h="100vh" bg="kk.bg" color="kk.textPrimary">
+				<Flex direction="column" h="100vh" bg="transparent" color="kk.textPrimary">
 					<TopNav
 						label={watchOnlyLabel || "KeepKey"}
 						connected={false}
@@ -810,6 +828,7 @@ function App() {
 					onClose={() => setPaletteOpen(false)}
 					onJumpToVault={() => setActiveTab("vault")}
 					balances={paletteBalances}
+					firmwareVersion={undefined}
 				/>
 			</>
 		)
@@ -865,7 +884,7 @@ function App() {
 	if (phase === "setup") {
 		return (
 			<>{splashNav}{resizeHandles}{updateBanner}{firmwareDropZone}{signingOverlay}{pairingOverlay}{passphraseOverlay}{charOverlay}{pinOverlay}
-				<OobSetupWizard onComplete={() => { setWizardComplete(true); setSetupInProgress(false) }} onSetupInProgress={setSetupInProgress} onWordCountChange={setRecoveryWordCount} />
+				<OobSetupWizard onComplete={() => { setWizardComplete(true); setSetupInProgress(false) }} onSkipFirmware={() => { setFirmwareSkipped(true); setWizardComplete(true); setSetupInProgress(false) }} onSetupInProgress={setSetupInProgress} onWordCountChange={setRecoveryWordCount} />
 			</>
 		)
 	}
@@ -879,7 +898,7 @@ function App() {
 			{!portfolioLoaded && activeTab === "vault" && (
 				<SplashScreen statusText={t("loadingPortfolio", { ns: "nav" })} variant="connecting" />
 			)}
-			<Flex direction="column" h="100vh" bg="kk.bg" color="kk.textPrimary" position="relative"
+			<Flex direction="column" h="100vh" bg="transparent" color="kk.textPrimary" position="relative"
 				{...(!portfolioLoaded && activeTab === "vault" ? { position: "absolute", w: 0, h: 0, overflow: "hidden" } as const : {})}
 			>
 				{/* Full-screen ambient radial glow — replaces the per-card glow inside the orbital view. */}
@@ -914,7 +933,8 @@ function App() {
 				<Flex flex="1" direction="column" overflow="auto" pt={showBanner ? NAV_CONTENT_OFFSET_WITH_BANNER : NAV_CONTENT_OFFSET} pb="4" transition="padding-top 0.2s">
 				{/* TopNav offset plus banner height when visible. */}
 					{activeTab === "vault" && <Dashboard onLoaded={handlePortfolioLoaded} onOpenSettings={() => setSettingsOpen(true)} firmwareVersion={deviceState.firmwareVersion} forceRefresh={wizardComplete} onForceRefreshConsumed={() => setWizardComplete(false)} isHiddenWallet={deviceState.isHiddenWallet} />}
-					{activeTab === "apps" && <AppStore onOpenApp={handleOpenApp} onOpenKeepKey={handleOpenKeepKey} />}
+					{activeTab === "explore" && <AppStore onOpenApp={handleOpenApp} onOpenKeepKey={handleOpenKeepKey} />}
+					{activeTab === "addresses" && <AddressBookView />}
 				</Flex>
 			</Flex>
 			<DeviceSettingsDrawer
@@ -971,6 +991,7 @@ function App() {
 				onClose={() => setPaletteOpen(false)}
 				onJumpToVault={() => setActiveTab("vault")}
 				balances={paletteBalances}
+				firmwareVersion={deviceState.firmwareVersion}
 			/>
 			{/* Top-level swap dialog mount for REST-driven /api/v2/swap/open. */}
 			<SwapRpcMount />

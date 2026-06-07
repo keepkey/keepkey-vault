@@ -56,8 +56,8 @@ const CONFIGS: ChainConfig[] = [
     // been initialized (cold start before BTC dashboard). Native SegWit is the
     // de-facto modern default since 2017.
     defaultPath: [0x80000054, 0x80000000, 0x80000000, 0, 0], scriptType: 'p2wpkh',
-    explorerTxUrl: 'https://blockchair.com/bitcoin/transaction/{{txid}}',
-    explorerAddressUrl: 'https://blockchair.com/bitcoin/address/{{address}}',
+    explorerTxUrl: 'https://mempool.space/tx/{{txid}}',
+    explorerAddressUrl: 'https://mempool.space/address/{{address}}',
   },
   {
     id: 'ethereum', chain: Chain.Ethereum, coin: 'Ethereum', symbol: 'ETH',
@@ -270,7 +270,7 @@ const CONFIGS: ChainConfig[] = [
     defaultPath: [0x8000002C, 0x800004FB, 0x80000000, 0, 0],
     explorerAddressUrl: 'https://hiveblocks.com/@{{address}}',
     explorerTxUrl: 'https://hiveblocks.com/tx/{{txid}}',
-    minFirmware: '7.14.0',
+    minFirmware: '7.16.0',
   },
 ]
 
@@ -321,6 +321,20 @@ export function findChainByNetwork(
     return chains.find(c => caip === c.caip || caip.startsWith(`${c.networkId}/`))
   }
   return undefined
+}
+
+/** Reduce a CAIP-19 asset string (or an already-bare CAIP-2 networkId) to its
+ *  CAIP-2 networkId — the Address Book's identity for a recipient:
+ *    'eip155:1/erc20:0xdac17f…'        -> 'eip155:1'
+ *    'eip155:1/slip44:60'              -> 'eip155:1'
+ *    'bip122:000…93/slip44:0'          -> 'bip122:000…93'
+ *    'eip155:1'                        -> 'eip155:1'
+ *  Used by the Send picker (R5): an entry matches iff its networkId equals
+ *  caipToNetworkId(activeCaip). Exact equality — eip155:1 must never surface on
+ *  an eip155:137 send. */
+export function caipToNetworkId(caip: string): string {
+  const slash = caip.indexOf('/')
+  return slash === -1 ? caip : caip.slice(0, slash)
 }
 
 /** Best-effort block-explorer URL for a block height, derived from the chain's

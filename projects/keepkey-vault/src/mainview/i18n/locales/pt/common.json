@@ -19,5 +19,10 @@
 	"add": "Adicionar",
 	"verify": "Verificar",
 	"skip": "Pular",
-	"previous": "Anterior"
+	"previous": "Anterior",
+	"incomingTx": {
+		"onChain": "{{chain}} · atualizando saldo",
+		"refreshing": "Atualizando saldo",
+		"title": "Pagamento recebido"
+	}
 }

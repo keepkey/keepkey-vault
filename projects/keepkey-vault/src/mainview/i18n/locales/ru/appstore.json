@@ -1,10 +1,25 @@
 {
-	"title": "Приложения",
+	"title": "Обзор",
+	"heading": "Обзор",
 	"subtitle": "Подключите ваш KeepKey к поддерживаемым приложениям",
 	"keepkeyName": "KeepKey",
 	"keepkeyDescription": "Управляйте аппаратным кошельком KeepKey",
 	"shapeshiftName": "ShapeShift",
 	"shapeshiftDescription": "Обменивайте, отслеживайте и управляйте криптовалютой между сетями",
+	"supportName": "Поддержка",
+	"supportDescription": "Получите помощь и ответы от команды KeepKey",
+	"docsName": "Документация",
+	"docsDescription": "Руководства, обучающие материалы и документация для разработчиков",
+	"affiliatesName": "Партнёры",
+	"affiliatesDescription": "Получайте вознаграждения, рекомендуя KeepKey другим",
+	"coincapName": "CoinCap",
+	"coincapDescription": "Котировки криптовалют и рыночные данные в реальном времени",
+	"veniceName": "Venice",
+	"veniceDescription": "Приватный ИИ без цензуры для чата и генерации изображений",
+	"bexName": "Расширение браузера",
+	"bexDescription": "Используйте KeepKey во всей экосистеме web3",
 	"walletconnectName": "WalletConnect",
-	"walletconnectDescription": "Подключайтесь к любому dApp, совместимому с WalletConnect"
+	"walletconnectDescription": "Подключайтесь к любому dApp, совместимому с WalletConnect",
+	"internal": "Открыть",
+	"open": "Открыть"
 }

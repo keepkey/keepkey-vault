@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { Box, Flex, Text, Image, Input } from "@chakra-ui/react"
-import { CHAINS, type ChainDef } from "../../shared/chains"
+import { CHAINS, isChainSupported, type ChainDef } from "../../shared/chains"
 import { getAssetIcon } from "../../shared/assetLookup"
 import type { ChainBalance, TokenBalance } from "../../shared/types"
 import { Z } from "../lib/z-index"
@@ -15,6 +15,8 @@ interface CommandPaletteProps {
 	/** Latest balances snapshot (bridged out of Dashboard). Empty Map is fine —
 	 *  results just fall back to chains-only. */
 	balances: Map<string, ChainBalance>
+	/** Device firmware version — used to filter chains that require newer firmware. */
+	firmwareVersion?: string
 }
 
 type ChainResult = { kind: "chain"; chain: ChainDef; balanceUsd: number }
@@ -45,7 +47,7 @@ function scoreMatch(query: string, fields: { symbol?: string; coin?: string; nam
 	return 0
 }
 
-export function CommandPalette({ open, onClose, onJumpToVault, balances }: CommandPaletteProps) {
+export function CommandPalette({ open, onClose, onJumpToVault, balances, firmwareVersion }: CommandPaletteProps) {
 	const { privateModeEnabled } = useFiat()
 	const [query, setQuery] = useState("")
 	const [activeIdx, setActiveIdx] = useState(0)
@@ -64,7 +66,7 @@ export function CommandPalette({ open, onClose, onJumpToVault, balances }: Comma
 	}, [open])
 
 	const results = useMemo<Result[]>(() => {
-		const chains = CHAINS.filter(c => !c.hidden)
+		const chains = CHAINS.filter(c => !c.hidden && isChainSupported(c, firmwareVersion))
 		const trimmed = query.trim()
 
 		if (!trimmed) {

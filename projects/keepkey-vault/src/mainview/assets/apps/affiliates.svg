@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <defs>
+    <linearGradient id="kkAffBg" x1="0" y1="0" x2="0" y2="64" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#17171c"/>
+      <stop offset="1" stop-color="#0a0a0c"/>
+    </linearGradient>
+    <radialGradient id="kkAffGlow" cx="32" cy="22" r="26" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#e9c46a" stop-opacity="0.16"/>
+      <stop offset="1" stop-color="#e9c46a" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="64" height="64" rx="15" fill="url(#kkAffBg)"/>
+  <rect width="64" height="64" rx="15" fill="url(#kkAffGlow)"/>
+  <rect x="0.5" y="0.5" width="63" height="63" rx="14.5" stroke="#ffffff" stroke-opacity="0.06"/>
+  <!-- links -->
+  <path d="M32 24v8m0 0-9 9m9-9 9 9" stroke="#ffffff" stroke-opacity="0.5" stroke-width="2.4" stroke-linecap="round"/>
+  <!-- referrer node (gold) -->
+  <circle cx="32" cy="20" r="5.5" fill="#e9c46a"/>
+  <!-- referral nodes -->
+  <circle cx="20" cy="44" r="5.5" fill="#ffffff"/>
+  <circle cx="44" cy="44" r="5.5" fill="#ffffff"/>
+</svg>

@@ -1,10 +1,25 @@
 {
-	"title": "Apps",
+	"title": "Entdecken",
+	"heading": "Entdecken",
 	"subtitle": "Verbinden Sie Ihren KeepKey mit unterstützten Anwendungen",
 	"keepkeyName": "KeepKey",
 	"keepkeyDescription": "Verwalten Sie Ihre KeepKey Hardware-Wallet",
 	"shapeshiftName": "ShapeShift",
 	"shapeshiftDescription": "Tauschen, verfolgen und verwalten Sie Ihre Krypto über Blockchains hinweg",
+	"supportName": "Support",
+	"supportDescription": "Hilfe und Antworten vom KeepKey-Team erhalten",
+	"docsName": "Dokumentation",
+	"docsDescription": "Anleitungen, Tutorials und Entwicklerdokumentation",
+	"affiliatesName": "Partner",
+	"affiliatesDescription": "Verdienen Sie Prämien, indem Sie andere an KeepKey verweisen",
+	"coincapName": "CoinCap",
+	"coincapDescription": "Echtzeit-Kryptopreise und Marktdaten",
+	"veniceName": "Venice",
+	"veniceDescription": "Private, unzensierte KI für Chat und Bildgenerierung",
+	"bexName": "Browser-Erweiterung",
+	"bexDescription": "Nutzen Sie Ihren KeepKey im gesamten Web3-Ökosystem",
 	"walletconnectName": "WalletConnect",
-	"walletconnectDescription": "Verbinden Sie sich mit jeder WalletConnect-kompatiblen dApp"
+	"walletconnectDescription": "Verbinden Sie sich mit jeder WalletConnect-kompatiblen dApp",
+	"internal": "Öffnen",
+	"open": "Öffnen"
 }

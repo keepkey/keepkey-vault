@@ -1,5 +1,5 @@
 {
-	"apps": "应用",
+	"explore": "探索",
 	"keepkey": "KeepKey",
 	"shapeshift": "ShapeShift",
 	"watchOnly": "仅查看",
@@ -13,5 +13,9 @@
 	"errorWithMessage": "错误：{{error}}",
 	"tryUnplugging": "请尝试拔出并重新插入您的 KeepKey。",
 	"watchOnlyConnectPrompt": "仅查看 — 连接设备以获得完整访问权限",
-	"passphraseMode": "密码短语"
+	"passphraseMode": "密码短语",
+	"addresses": "地址",
+	"swap": "兑换",
+	"mobileApp": "移动应用",
+	"walletConnect": "WalletConnect"
 }

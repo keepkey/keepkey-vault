@@ -28,5 +28,12 @@
 	"timeJustNow": "ahora mismo",
 	"timeMinutesAgo": "hace {{count}}m",
 	"timeHoursAgo": "hace {{count}}h",
-	"timeDaysAgo": "hace {{count}}d"
+	"timeDaysAgo": "hace {{count}}d",
+	"staleCtaTitle": "Presiona para actualizar saldos",
+	"staleCtaSubtitle": "Última comprobación {{time}}",
+	"loadingDashboardTitle": "Cargando panel",
+	"loadingConnect": "Conectando con tu KeepKey",
+	"loadingSync": "Sincronizando saldos entre cadenas",
+	"loadingPrices": "Obteniendo los últimos precios",
+	"tokensCount": "+{{count}} tokens"
 }

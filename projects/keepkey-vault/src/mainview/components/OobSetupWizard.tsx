@@ -93,6 +93,9 @@ const stepToVisibleId: Record<WizardStep, string | null> = {
 
 interface OobSetupWizardProps {
   onComplete: () => void
+  // Called when the user skips the firmware update on an already-initialized
+  // device. App.tsx lets them into the app on the older firmware (session-only).
+  onSkipFirmware?: () => void
   onSetupInProgress?: (inProgress: boolean) => void
   onWordCountChange?: (count: 12 | 18 | 24) => void
 }
@@ -109,7 +112,7 @@ const confettiPieces = Array.from({ length: 50 }, (_, i) => ({
 
 // ── Main Wizard ─────────────────────────────────────────────────────────────
 
-export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChange }: OobSetupWizardProps) {
+export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, onWordCountChange }: OobSetupWizardProps) {
   const [step, setStep] = useState<WizardStep>('intro')
   const [introCard, setIntroCard] = useState(0)
   const [tipCard, setTipCard] = useState(0)
@@ -486,7 +489,12 @@ export function OobSetupWizard({ onComplete, onSetupInProgress, onWordCountChang
 
   const handleSkipFirmware = () => {
     if (needsInit) {
+      // Still need to initialize — can't drop straight to the dashboard.
       setStep('init-choose')
+    } else if (onSkipFirmware) {
+      // Already initialized: hand control back to App, which lets the user into
+      // the app on the older firmware and re-offers the update on next connect.
+      onSkipFirmware()
     } else {
       setStep('complete')
     }

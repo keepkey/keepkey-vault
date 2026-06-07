@@ -28,7 +28,15 @@
 		"rpcPlaceholder": "https://...",
 		"explorerUrlOptional": "区块浏览器 URL（可选）",
 		"addChainButton": "添加链",
-		"adding": "添加中..."
+		"adding": "添加中...",
+		"chainIdHeader": "链 ID",
+		"networkHeader": "网络",
+		"noChains": "无可用链",
+		"noWorkingNodes": "未找到可用的 RPC 节点。可在此查找",
+		"ofChains": "共 {{total}} 条链",
+		"online": "在线",
+		"selected": "已选择",
+		"symbolHeader": "符号"
 	},
 	"addToken": {
 		"title": "添加自定义代币",

@@ -1,5 +1,9 @@
 import { Box, Flex, Text, Grid, Image } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
+import supportIcon from "../assets/apps/support.svg"
+import docsIcon from "../assets/apps/docs.svg"
+import affiliatesIcon from "../assets/apps/affiliates.svg"
+import bexIcon from "../assets/apps/bex.svg"
 
 interface AppDef {
 	id: string
@@ -23,7 +27,16 @@ function useApps(): AppDef[] {
 			name: t("keepkeyName"),
 			description: t("keepkeyDescription"),
 			icon: "https://pioneers.dev/coins/keepkey.png",
-			url: "https://vault.keepkey.com",
+			url: "https://keepkey.com",
+			enabled: true,
+			accent: "var(--gold)",
+		},
+		{
+			id: "bex",
+			name: t("bexName"),
+			description: t("bexDescription"),
+			icon: bexIcon,
+			url: "https://keepkey.com/bex",
 			enabled: true,
 			accent: "var(--gold)",
 		},
@@ -35,6 +48,51 @@ function useApps(): AppDef[] {
 			url: "https://app.shapeshift.com",
 			enabled: true,
 			accent: "var(--teal)",
+		},
+		{
+			id: "support",
+			name: t("supportName"),
+			description: t("supportDescription"),
+			icon: supportIcon,
+			url: "https://support.keepkey.com",
+			enabled: true,
+			accent: "var(--gold)",
+		},
+		{
+			id: "docs",
+			name: t("docsName"),
+			description: t("docsDescription"),
+			icon: docsIcon,
+			url: "https://docs.keepkey.com",
+			enabled: true,
+			accent: "var(--gold)",
+		},
+		{
+			id: "affiliates",
+			name: t("affiliatesName"),
+			description: t("affiliatesDescription"),
+			icon: affiliatesIcon,
+			url: "https://affiliates.keepkey.com",
+			enabled: true,
+			accent: "var(--gold)",
+		},
+		{
+			id: "coincap",
+			name: t("coincapName"),
+			description: t("coincapDescription"),
+			icon: "https://coincap.io/static/logo_mark.png",
+			url: "https://coincap.io",
+			enabled: true,
+			accent: "var(--teal)",
+		},
+		{
+			id: "venice",
+			name: t("veniceName"),
+			description: t("veniceDescription"),
+			icon: "https://venice.ai/apple-touch-icon.png",
+			url: "https://venice.ai",
+			enabled: true,
+			accent: "var(--gold)",
 		},
 	]
 }
@@ -77,7 +135,7 @@ export function AppStore({ onOpenApp, onOpenKeepKey }: AppStoreProps) {
 						fontSize={{ base: "44px", md: "64px" }}
 						m="0"
 					>
-						Apps
+						{t("heading")}
 					</Text>
 					<Text fontSize="15px" color="var(--text-2)" mt="3" maxW="520px" lineHeight="1.5">
 						{t("subtitle")}

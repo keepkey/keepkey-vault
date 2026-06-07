@@ -28,5 +28,12 @@
 	"timeJustNow": "刚刚",
 	"timeMinutesAgo": "{{count}}分钟前",
 	"timeHoursAgo": "{{count}}小时前",
-	"timeDaysAgo": "{{count}}天前"
+	"timeDaysAgo": "{{count}}天前",
+	"staleCtaTitle": "按下以刷新余额",
+	"staleCtaSubtitle": "上次检查 {{time}}",
+	"loadingDashboardTitle": "正在加载仪表盘",
+	"loadingConnect": "正在连接您的 KeepKey",
+	"loadingSync": "正在同步各链余额",
+	"loadingPrices": "正在获取最新价格",
+	"tokensCount": "+{{count}} 个代币"
 }

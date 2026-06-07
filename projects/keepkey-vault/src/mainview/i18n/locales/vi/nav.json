@@ -1,5 +1,5 @@
 {
-	"apps": "Ứng dụng",
+	"explore": "Khám phá",
 	"keepkey": "KeepKey",
 	"swap": "Đổi",
 	"shapeshift": "ShapeShift",
@@ -14,5 +14,8 @@
 	"errorWithMessage": "Lỗi: {{error}}",
 	"tryUnplugging": "Thử rút và cắm lại KeepKey.",
 	"watchOnlyConnectPrompt": "Chỉ xem — Kết nối thiết bị để có quyền truy cập đầy đủ",
-	"passphraseMode": "Cụm mật khẩu"
+	"passphraseMode": "Cụm mật khẩu",
+	"addresses": "Địa chỉ",
+	"mobileApp": "Ứng dụng di động",
+	"walletConnect": "WalletConnect"
 }

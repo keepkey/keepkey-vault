@@ -28,7 +28,15 @@
 		"rpcPlaceholder": "https://...",
 		"explorerUrlOptional": "URL обозревателя блоков (необязательно)",
 		"addChainButton": "Добавить сеть",
-		"adding": "Добавление..."
+		"adding": "Добавление...",
+		"chainIdHeader": "ID сети",
+		"networkHeader": "Сеть",
+		"noChains": "Нет доступных сетей",
+		"noWorkingNodes": "Рабочие RPC-узлы не найдены. Найдите узел на",
+		"ofChains": "из {{total}} сетей",
+		"online": "онлайн",
+		"selected": "ВЫБРАНО",
+		"symbolHeader": "Символ"
 	},
 	"addToken": {
 		"title": "Добавить пользовательский токен",

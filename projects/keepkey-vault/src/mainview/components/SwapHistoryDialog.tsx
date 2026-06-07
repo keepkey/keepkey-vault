@@ -406,7 +406,7 @@ function HistoryCard({ record, onResume }: { record: SwapHistoryRecord; onResume
               />
             )}
             {/* Inbound block # — best-effort; clickable on EVM/UTXO explorers. */}
-            {record.inboundBlockNumber !== undefined && (
+            {record.inboundBlockNumber !== undefined && record.inboundBlockNumber > 0 && (
               <Flex justify="space-between" align="center">
                 <Text fontSize="10px" color="kk.textMuted" minW="80px">Inbound Block</Text>
                 {(() => {

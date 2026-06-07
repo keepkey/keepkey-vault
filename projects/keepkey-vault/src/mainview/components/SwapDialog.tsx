@@ -845,7 +845,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   // and is the only place createdAt (the broadcast anchor) is available.
   const applyInboundSnap = useCallback((snap: any) => {
     if (!snap) return
-    if (snap.inboundBlockNumber !== undefined && snap.inboundBlockNumber !== null) setLiveInboundBlockNumber(snap.inboundBlockNumber)
+    if (snap.inboundBlockNumber != null && snap.inboundBlockNumber > 0) setLiveInboundBlockNumber(snap.inboundBlockNumber)
     if (snap.inboundBlockHash) setLiveInboundBlockHash(snap.inboundBlockHash)
     if (snap.inboundGasUsed) setLiveInboundGasUsed(snap.inboundGasUsed)
     if (snap.inboundEffectiveGasPrice) setLiveInboundEffectiveGasPrice(snap.inboundEffectiveGasPrice)
@@ -872,7 +872,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       if (update.outboundChainId) setLiveOutboundChainId(update.outboundChainId)
       if (update.refundReason) setLiveRefundReason(update.refundReason)
       if (update.nearTxHash) setLiveNearTxHash(update.nearTxHash)
-      if (update.inboundBlockNumber !== undefined) setLiveInboundBlockNumber(update.inboundBlockNumber)
+      if (update.inboundBlockNumber !== undefined && update.inboundBlockNumber > 0) setLiveInboundBlockNumber(update.inboundBlockNumber)
       if (update.inboundBlockHash) setLiveInboundBlockHash(update.inboundBlockHash)
       if (update.inboundGasUsed) setLiveInboundGasUsed(update.inboundGasUsed)
       if (update.inboundEffectiveGasPrice) setLiveInboundEffectiveGasPrice(update.inboundEffectiveGasPrice)
@@ -1255,7 +1255,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     if (resumeSwap.nearTxHash) setLiveNearTxHash(resumeSwap.nearTxHash)
     // Seed inbound location + timing + failure guidance from the persisted row
     // so a resumed dialog renders them on first paint (before any fresh poll).
-    if (resumeSwap.inboundBlockNumber !== undefined) setLiveInboundBlockNumber(resumeSwap.inboundBlockNumber)
+    if (resumeSwap.inboundBlockNumber !== undefined && resumeSwap.inboundBlockNumber > 0) setLiveInboundBlockNumber(resumeSwap.inboundBlockNumber)
     if (resumeSwap.inboundBlockHash) setLiveInboundBlockHash(resumeSwap.inboundBlockHash)
     if (resumeSwap.inboundGasUsed) setLiveInboundGasUsed(resumeSwap.inboundGasUsed)
     if (resumeSwap.inboundEffectiveGasPrice) setLiveInboundEffectiveGasPrice(resumeSwap.inboundEffectiveGasPrice)
@@ -1484,11 +1484,19 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     if (balNum <= 0) return
     const balUsd = balNum * fromPriceUsd
 
-    if (balUsd <= 100) {
+    const cryptoAmount = 100 / fromPriceUsd
+    // The reserve-aware safe max already subtracts the chain's fee/rent
+    // reserve (e.g. 0.01 SOL). A "$100 default" must never exceed it, or the
+    // swap drains the reserve and reverts on-chain ("insufficient lamports").
+    // When $100-worth meets/exceeds the safe max, fall back to MAX — which
+    // clamps to the reserve-aware amount. For chains without a frontend
+    // reserve (UTXO/Cosmos/tokens) safeMax == full balance, so this only fires
+    // when balUsd <= 100, identical to the prior behavior.
+    const safeMax = parseFloat(maxSpendableAmount(fromAsset, fromBalance, 'safe'))
+    if (balUsd <= 100 || (Number.isFinite(safeMax) && safeMax > 0 && cryptoAmount >= safeMax)) {
       setIsMax(true)
       setMaxReserveMode('safe')
     } else {
-      const cryptoAmount = 100 / fromPriceUsd
       const formatted = cryptoAmount < 1
         ? cryptoAmount.toPrecision(6)
         : cryptoAmount.toFixed(6).replace(/\.?0+$/, '')
@@ -1529,6 +1537,13 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   const amountNum = parseFloat(amount)
   const balanceNum = fromBalance ? parseFloat(fromBalance) : 0
   const exceedsBalance = !isMax && !isNaN(amountNum) && amountNum > 0 && balanceNum > 0 && amountNum > balanceNum
+  // Reserve-aware guard: an amount that fits the raw balance but spends into
+  // the chain's fee/rent reserve (e.g. leaves < 0.01 SOL) reverts on-chain
+  // after ATA rent + fees. Flagged separately from the hard balance error so
+  // the message stays actionable ("leave ~X for fees"). For chains without a
+  // frontend reserve safeMax == balance, so this never fires beyond exceedsBalance.
+  const safeMaxAmountNum = fromAsset && fromBalance ? parseFloat(maxSpendableAmount(fromAsset, fromBalance, 'safe')) : 0
+  const exceedsSafeMax = !isMax && !exceedsBalance && !isNaN(amountNum) && amountNum > 0 && Number.isFinite(safeMaxAmountNum) && safeMaxAmountNum > 0 && amountNum > safeMaxAmountNum
   const sameAsset = fromAsset && toAsset && fromAsset.asset === toAsset.asset
 
   const fromAddress = useMemo(() => {
@@ -1612,7 +1627,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   // address that didn't come from the user's wallet. Wait for the UTXO
   // resolver to populate a real receive address.
   const toAddressIsXpub = !!toAddress && !useCustomAddress && XPUB_RE.test(toAddress)
-  const canQuote = fromAsset && toAsset && !sameAsset && validAmount && fromAddress && toAddress && !toAddressIsXpub && !exceedsBalance && !customAddressError
+  const canQuote = fromAsset && toAsset && !sameAsset && validAmount && fromAddress && toAddress && !toAddressIsXpub && !exceedsBalance && !exceedsSafeMax && !customAddressError
 
   // ── Preview-build the unsigned tx(s) when entering Confirm Quote ──
   // Fires once per quote — gives the user the exact payload to audit before
@@ -1710,7 +1725,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
           toAddress,
           slippageBps,
           isMax: sendIsMax,
-        }, 30000)
+        }, 60000)
         if (version !== quoteVersionRef.current) return
         setQuote(result)
         setQuoteFetchedAt(Date.now())
@@ -1804,7 +1819,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
           amount: sendAmount,
           fromAddress, toAddress, slippageBps,
           isMax: sendIsMax,
-        }, 30000)
+        }, 60000)
         // Block on >1% output drop — quote degraded, user should re-review
         const oldOut = parseFloat(quote.expectedOutput || '0')
         const newOut = parseFloat(refreshed.expectedOutput || '0')
@@ -2139,9 +2154,9 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   if (!open) return null
   if (chain && !resumeSwap && !loadingAssets && assets.length > 0 && !swappableChainIds.has(chain.id)) {
     return (
-      <Box position="fixed" inset="0" zIndex={Z.dialog} display="flex" alignItems="center" justifyContent="center" onClick={handleClose}>
+      <Box position="fixed" inset="0" zIndex={Z.dialog} display="flex" alignItems="center" justifyContent="center">
         <Box position="absolute" inset="0" bg="rgba(0,0,0,0.6)" backdropFilter="blur(8px)" />
-        <Box position="relative" bg="kk.cardBg" border="2px solid" borderColor="rgba(139,227,196,0.4)" borderRadius="xl" boxShadow="0 0 20px rgba(139,227,196,0.12)" p="6" w="400px" maxW="90vw" onClick={(e) => e.stopPropagation()} textAlign="center">
+        <Box position="relative" bg="kk.cardBg" border="2px solid" borderColor="rgba(139,227,196,0.4)" borderRadius="xl" boxShadow="0 0 20px rgba(139,227,196,0.12)" p="6" w="400px" maxW="90vw" textAlign="center">
           <Flex justify="center"><ProviderBadge swapper="thorchain" size={32} variant="compact" /></Flex>
           <Text fontSize="sm" color="kk.textMuted" mt="3">{t("notSupported", { coin: chain.coin })}</Text>
           <Button size="sm" mt="4" variant="ghost" color="kk.textSecondary" px="4" py="2" onClick={handleClose}>{t("close")}</Button>
@@ -2151,7 +2166,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   }
 
   return (
-    <Box position="fixed" inset="0" zIndex={Z.dialog} display="flex" alignItems="center" justifyContent="center" onClick={handleClose}>
+    <Box position="fixed" inset="0" zIndex={Z.dialog} display="flex" alignItems="center" justifyContent="center">
       <style>{DIALOG_CSS}</style>
       <Box position="absolute" inset="0" bg="rgba(0,0,0,0.6)" backdropFilter="blur(8px)" />
       <Box
@@ -3896,7 +3911,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                           onChange={(e) => { if (isMax) { setIsMax(false); setMaxReserveMode('safe') } inputMode === 'crypto' ? handleCryptoChange(e.target.value) : handleFiatChange(e.target.value) }}
                           placeholder={inputMode === 'fiat' ? '0.00' : t("amountPlaceholder")}
                           bg="rgba(0,0,0,0.4)" border="1px solid"
-                          borderColor={exceedsBalance ? "kk.error" : "rgba(255,255,255,0.08)"}
+                          borderColor={exceedsBalance ? "kk.error" : exceedsSafeMax ? "kk.gold" : "rgba(255,255,255,0.08)"}
                           borderRadius="lg" color="kk.textPrimary" size="sm" fontFamily="mono" fontSize="sm" fontWeight="700"
                           disabled={busy} px={inputMode === 'fiat' ? "6" : "3"}
                           _focus={{ borderColor: exceedsBalance ? "kk.error" : "kk.gold", boxShadow: exceedsBalance ? "none" : "0 0 0 1px rgba(233,196,106,0.3)" }}
@@ -3926,6 +3941,15 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                       )}
                       {exceedsBalance && (
                         <Text fontSize="10px" color="kk.error" mt="1" fontWeight="600">{t("insufficientBalance")}</Text>
+                      )}
+                      {exceedsSafeMax && fromAsset && (
+                        <Text fontSize="10px" color="kk.gold" mt="1" fontWeight="600">
+                          {t("exceedsSafeMax", {
+                            defaultValue: "Leave ~{{reserve}} {{symbol}} for network fees — reduce the amount or tap MAX.",
+                            reserve: formatBalance(String(nativeMaxFeeReserve(fromAsset, 'safe'))),
+                            symbol: fromAsset.symbol,
+                          })}
+                        </Text>
                       )}
                       {isFeeReservedNativeMax && !nativeMaxInsufficient && fromAsset && nativeMaxReserveDisplay && (
                         <Box mt="2" p="2" borderRadius="md" bg="rgba(233,196,106,0.06)" border="1px solid rgba(233,196,106,0.18)">

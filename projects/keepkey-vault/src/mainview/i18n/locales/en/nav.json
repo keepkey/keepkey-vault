@@ -1,5 +1,6 @@
 {
-	"apps": "Apps",
+	"explore": "Explore",
+	"addresses": "Addresses",
 	"keepkey": "KeepKey",
 	"swap": "Swap",
 	"shapeshift": "ShapeShift",
@@ -14,5 +15,7 @@
 	"errorWithMessage": "Error: {{error}}",
 	"tryUnplugging": "Try unplugging and replugging your KeepKey.",
 	"watchOnlyConnectPrompt": "Watch Only — Connect device for full access",
-	"passphraseMode": "Passphrase"
+	"passphraseMode": "Passphrase",
+	"mobileApp": "Mobile App",
+	"walletConnect": "WalletConnect"
 }

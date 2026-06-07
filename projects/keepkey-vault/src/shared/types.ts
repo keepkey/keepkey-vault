@@ -166,6 +166,34 @@ export interface StakingPosition {
   status?: string
 }
 
+// ── THORName / MAYAName registration types ──────────────────────────────
+// THORName (THORChain) and MAYAName (Maya) registration is a MsgDeposit with a
+// structured `~:` memo. Name lookup + live cost constants come from Pioneer.
+
+/** Result of resolving a name. `found: false` ⇒ the name is available. */
+export interface NameInfo {
+  found: boolean
+  name: string
+  owner?: string                 // THOR/MAYA bech32 owner address
+  expireBlockHeight?: number
+  aliases?: { chain: string; address: string }[]
+  preferredAsset?: string
+}
+
+/** Live registration constants for a chain (amounts in base units). */
+export interface NameQuote {
+  registerFeeBase: string        // one-time, non-refundable
+  feePerBlockBase: string        // rent per block
+  blocksPerYear: number          // 5256000
+  currentBlockHeight: number
+}
+
+export interface BuildNameRegTxParams {
+  chainId: string                // 'thorchain' | 'mayachain'
+  name: string                   // ^[a-zA-Z0-9+_-]+$, <=30 chars
+  years: number                  // years of rent to prepay
+}
+
 // ── Zcash shielded transaction history ──────────────────────────────────
 
 export interface ZcashTransaction {
@@ -237,6 +265,53 @@ export interface BuildTxResult {
 
 export interface BroadcastResult {
   txid: string
+  // Address Book: set when a manual send auto-creates/updates a recipient entry.
+  // `recipientIsNew` drives the post-broadcast "save a label?" prompt (R4).
+  addressBookEntryId?: string
+  recipientIsNew?: boolean
+}
+
+// ── Address Book (unified, top-level, across all wallets) ───────────────
+export type AddressBookKind = 'own' | 'external'
+
+export interface AddressBookEntry {
+  id: string
+  walletId: string
+  deviceId: string
+  deviceLabel?: string       // resolved at read from device_snapshot — which device owns this (display only)
+  kind: AddressBookKind
+  networkId: string          // CAIP-2 identity, e.g. 'eip155:1'
+  chainId: string            // internal chain id, e.g. 'ethereum'
+  address: string            // recipient/own address (normalized); xpub for own UTXO rows
+  label?: string
+  derivationPath?: string    // own rows — label binds to path, survives re-derive
+  scriptType?: string        // own UTXO rows (p2pkh|p2sh-p2wpkh|p2wpkh)
+  addressIndex?: number      // own EVM index / BTC account index
+  firstSeenTxid?: string     // external rows — txid that introduced the recipient
+  note?: string
+  createdAt: number
+  updatedAt: number
+}
+
+export interface AddressBookTx {
+  id: string
+  entryId: string
+  txid: string
+  fromAddress?: string       // which of our addresses sent (R7)
+  caip: string               // full CAIP-19 of the asset sent (token-aware)
+  symbol?: string
+  amount?: string
+  broadcastAt: number
+}
+
+export interface AddressBookFilter {
+  walletId?: string
+  networkId?: string
+  chainId?: string
+  kind?: AddressBookKind
+  search?: string            // LIKE over label + address
+  limit?: number
+  offset?: number
 }
 
 // Custom token / chain types

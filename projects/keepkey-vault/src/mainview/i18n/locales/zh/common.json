@@ -19,5 +19,10 @@
 	"add": "添加",
 	"verify": "验证",
 	"skip": "跳过",
-	"previous": "上一步"
+	"previous": "上一步",
+	"incomingTx": {
+		"onChain": "{{chain}} · 正在刷新余额",
+		"refreshing": "正在刷新余额",
+		"title": "收到付款"
+	}
 }

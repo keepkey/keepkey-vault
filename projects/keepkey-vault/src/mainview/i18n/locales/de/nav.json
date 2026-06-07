@@ -1,5 +1,5 @@
 {
-	"apps": "Apps",
+	"explore": "Entdecken",
 	"keepkey": "KeepKey",
 	"shapeshift": "ShapeShift",
 	"watchOnly": "Nur Ansicht",
@@ -13,5 +13,9 @@
 	"errorWithMessage": "Fehler: {{error}}",
 	"tryUnplugging": "Versuchen Sie, Ihren KeepKey aus- und wieder einzustecken.",
 	"watchOnlyConnectPrompt": "Nur Ansicht — Gerät verbinden für vollen Zugriff",
-	"passphraseMode": "Passphrase"
+	"passphraseMode": "Passphrase",
+	"addresses": "Adressen",
+	"swap": "Tauschen",
+	"mobileApp": "Mobile App",
+	"walletConnect": "WalletConnect"
 }

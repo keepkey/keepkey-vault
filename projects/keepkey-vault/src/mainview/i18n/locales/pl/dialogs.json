@@ -28,7 +28,15 @@
 		"rpcPlaceholder": "https://...",
 		"explorerUrlOptional": "Adres eksploratora bloków (opcjonalnie)",
 		"addChainButton": "Dodaj sieć",
-		"adding": "Dodawanie..."
+		"adding": "Dodawanie...",
+		"chainIdHeader": "ID sieci",
+		"networkHeader": "Sieć",
+		"noChains": "Brak dostępnych sieci",
+		"noWorkingNodes": "Nie znaleziono działających węzłów RPC. Znajdź je na",
+		"ofChains": "z {{total}} sieci",
+		"online": "online",
+		"selected": "WYBRANO",
+		"symbolHeader": "Symbol"
 	},
 	"addToken": {
 		"title": "Dodaj niestandardowy token",

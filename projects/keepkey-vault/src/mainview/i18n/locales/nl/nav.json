@@ -1,5 +1,5 @@
 {
-	"apps": "Apps",
+	"explore": "Ontdekken",
 	"keepkey": "KeepKey",
 	"swap": "Ruilen",
 	"shapeshift": "ShapeShift",
@@ -14,5 +14,8 @@
 	"errorWithMessage": "Fout: {{error}}",
 	"tryUnplugging": "Probeer je KeepKey los te koppelen en opnieuw aan te sluiten.",
 	"watchOnlyConnectPrompt": "Alleen bekijken — Sluit apparaat aan voor volledige toegang",
-	"passphraseMode": "Wachtwoordzin"
+	"passphraseMode": "Wachtwoordzin",
+	"addresses": "Adressen",
+	"mobileApp": "Mobiele app",
+	"walletConnect": "WalletConnect"
 }

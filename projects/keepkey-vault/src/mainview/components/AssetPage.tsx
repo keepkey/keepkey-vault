@@ -1,7 +1,7 @@
 import React, { lazy, Suspense, useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { useTranslation } from "react-i18next"
 import { Box, Flex, Text, Button, Image, VStack, HStack, IconButton, Spinner } from "@chakra-ui/react"
-import { FaPlus, FaEye, FaEyeSlash, FaShieldAlt, FaCheck, FaCopy } from "react-icons/fa"
+import { FaPlus, FaEye, FaEyeSlash, FaShieldAlt, FaCheck, FaCopy, FaTag, FaChevronDown, FaChevronUp } from "react-icons/fa"
 import { rpcRequest, onRpcMessage, rpcFire } from "../lib/rpc"
 import type { ChainDef } from "../../shared/chains"
 import { CHAINS, BTC_SCRIPT_TYPES, btcAccountPath, isChainSupported } from "../../shared/chains"
@@ -19,6 +19,7 @@ import { SendForm } from "./SendForm"
 const SwapDialog = lazy(() => import("./SwapDialog").then(m => ({ default: m.SwapDialog })).catch(err => { console.error("[SwapDialog lazy] TDZ or load error:", err, err?.stack); throw err }))
 const ZcashPrivacyTab = lazy(() => import("./ZcashPrivacyTab").then(m => ({ default: m.ZcashPrivacyTab })))
 const StakingPanel = lazy(() => import("./StakingPanel").then(m => ({ default: m.StakingPanel })))
+const NameRegistrationPanel = lazy(() => import("./NameRegistrationPanel").then(m => ({ default: m.NameRegistrationPanel })))
 
 import { SweepDialog } from "./SweepDialog"
 import { ActivityTable, TxDetailDialog, recentFirst, nativePriceByChain, type TxDetail } from "./ActivityPanel"
@@ -368,6 +369,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 	const [showAddToken, setShowAddToken] = useState(false)
 	const [showSwapDialog, setShowSwapDialog] = useState(initialAction === "swap")
 	const [showSweep, setShowSweep] = useState(false)
+	const [showNameReg, setShowNameReg] = useState(false)
 	useEffect(() => { if (!swapsEnabled) setShowSwapDialog(false) }, [swapsEnabled])
 
 	// Scoped Pioneer push subscription: only refresh while this page is mounted,
@@ -1053,6 +1055,41 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 								watchOnly={!address}
 							/>
 						</Suspense>
+					</Box>
+				)}
+
+				{/* THORName / MAYAName registration — THORChain & Maya. Niche feature,
+				    collapsed by default so it stays out of the way of the main flow. */}
+				{(chain.id === 'thorchain' || chain.id === 'mayachain') && (
+					<Box mt="5" bg="linear-gradient(180deg, var(--ink-2), var(--ink-1))" border="1px solid var(--line)" borderRadius="var(--r-lg)" px={{ base: "4", md: "6" }} py={showNameReg ? { base: "4", md: "6" } : "3"}>
+						<Flex
+							as="button"
+							w="100%"
+							align="center"
+							justify="space-between"
+							onClick={() => setShowNameReg((v) => !v)}
+							cursor="pointer"
+						>
+							<HStack gap="2">
+								<Box as={FaTag} fontSize="11px" color="var(--text-3)" />
+								<Text fontSize="12px" fontWeight="500" color="var(--text-2)">
+									{chain.id === 'thorchain' ? 'THORName' : 'MAYAName'}
+								</Text>
+							</HStack>
+							<Box as={showNameReg ? FaChevronUp : FaChevronDown} fontSize="10px" color="var(--text-3)" />
+						</Flex>
+						{showNameReg && (
+							<Box mt="4">
+								<Suspense fallback={<Spinner size="sm" color="kk.gold" />}>
+									<NameRegistrationPanel
+										chain={chain}
+										address={address}
+										availableBalance={activeBalance?.balance || '0'}
+										watchOnly={!address}
+									/>
+								</Suspense>
+							</Box>
+						)}
 					</Box>
 				)}
 

@@ -8,7 +8,7 @@ import { AnimatedUsd } from "./AnimatedUsd"
 import { getAssetIcon, registerCustomAsset } from "../../shared/assetLookup"
 import { AssetPage } from "./AssetPage"
 import { ActivityPage } from "./ActivityPage"
-import { DonutChart, ChartLegend, type DonutChartItem } from "./DonutChart"
+import { DonutChart, SelectedSlice, type DonutChartItem } from "./DonutChart"
 import { AddChainDialog } from "./AddChainDialog"
 import { ReportDialog } from "./ReportDialog"
 import { Bip85VaultDialog } from "./Bip85VaultDialog"
@@ -28,6 +28,7 @@ import { preloadIcons } from "../lib/iconPreload"
 import { useDashboardView } from "../lib/dashboardViewContext"
 import { useFiat } from "../lib/fiat-context"
 import { ViewPickerButton } from "./ViewPickerMenu"
+import { DashboardLoading } from "./DashboardLoading"
 import { categorizeTokens } from "../../shared/spamFilter"
 import { useBtcAccounts } from "../hooks/useBtcAccounts"
 import { useEvmAddresses } from "../hooks/useEvmAddresses"
@@ -1204,6 +1205,30 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 		return [{ name: chain.symbol, value: 0, color: chain.color + '55' }]
 	}, [drilledChainId, drilledChainTokensChartData, allChains])
 
+	// Token-level breakdown for a chain — native asset plus each non-spam token —
+	// as stacked-bar items. Shared by the stacked-bar view and the donut's
+	// selected-slice breakdown.
+	const buildChainTokenItems = (chain: ChainDef): StackedBarItem[] => {
+		const bal = getEffectiveBalance(chain.id)
+		const overrides = new Map(Object.entries(visibilityMap).map(([k, v]) => [k.toLowerCase(), v] as const))
+		const cleanTokens = bal?.tokens ? categorizeTokens(bal.tokens, overrides).clean : []
+		const cleanTokensUsd = cleanTokens.reduce((s, t) => s + (t.balanceUsd ?? 0), 0)
+		const nativeUsd = bal?.nativeBalanceUsd ?? Math.max(0, (bal?.balanceUsd ?? 0) - cleanTokensUsd)
+		const arr: StackedBarItem[] = []
+		if (nativeUsd > 0) arr.push({ id: `${chain.id}:native`, label: chain.symbol, color: chain.color, value: nativeUsd, onSelect: () => openChainPage(chain) })
+		cleanTokens
+			.slice()
+			.sort((a, b) => (b.balanceUsd ?? 0) - (a.balanceUsd ?? 0))
+			.forEach((tok, i) => arr.push({
+				id: tok.caip,
+				label: tok.symbol,
+				color: TOKEN_PALETTE[i % TOKEN_PALETTE.length]!,
+				value: tok.balanceUsd ?? 0,
+				onSelect: () => openChainPage(chain, undefined, tok),
+			}))
+		return arr
+	}
+
 	const chartData = drilledChainId ? drilledPlaceholder : allChainsChartData
 
 	// Reset active slice whenever the drill target changes so the index never
@@ -1937,26 +1962,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 							const items: StackedBarItem[] = drilledChainId
 								? (() => {
 									const dchain = visibleChains.find(c => c.id === drilledChainId)
-									if (!dchain) return []
-									const bal = getEffectiveBalance(dchain.id)
-									const overrides = new Map(Object.entries(visibilityMap).map(([k, v]) => [k.toLowerCase(), v] as const))
-									const cleanTokens = bal?.tokens ? categorizeTokens(bal.tokens, overrides).clean : []
-									const cleanTokensUsd = cleanTokens.reduce((s, t) => s + (t.balanceUsd ?? 0), 0)
-									const nativeUsd = bal?.nativeBalanceUsd ?? Math.max(0, (bal?.balanceUsd ?? 0) - cleanTokensUsd)
-									const tokenPalette = ['#e9c46a', '#8be3c4', '#6c7be8', '#e08c7b', '#9f8ce0', '#f0a85c', '#4eb591', '#4f7fc8']
-									const arr: StackedBarItem[] = []
-									if (nativeUsd > 0) arr.push({ id: `${dchain.id}:native`, label: dchain.symbol, color: dchain.color, value: nativeUsd, onSelect: () => openChainPage(dchain) })
-									cleanTokens
-										.slice()
-										.sort((a, b) => (b.balanceUsd ?? 0) - (a.balanceUsd ?? 0))
-										.forEach((tok, i) => arr.push({
-											id: tok.caip,
-											label: tok.symbol,
-											color: tokenPalette[i % tokenPalette.length]!,
-											value: tok.balanceUsd ?? 0,
-											onSelect: () => openChainPage(dchain, undefined, tok),
-										}))
-									return arr
+									return dchain ? buildChainTokenItems(dchain) : []
 								})()
 								: visibleChains.map(chain => ({
 									id: chain.id,
@@ -1998,7 +2004,9 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 								}}
 							/>
 						)
-					})() : !loadingBalances && initialLoaded && !pioneerError ? (
+					})() : (loadingBalances || !initialLoaded) && !pioneerError ? (
+						<DashboardLoading />
+					) : !loadingBalances && initialLoaded && !pioneerError ? (
 						<Flex direction="column" align="center" gap="3" textAlign="center" maxW="400px" mx="auto" py="4">
 							<Box
 								w="48px" h="48px" borderRadius="full"
@@ -2061,32 +2069,35 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 						const legendTotal = drilledChainId
 							? drilledChainTokensChartData.reduce((s, d) => s + d.value, 0)
 							: totalUsd
+						const active = chartData[safeIndex] ?? null
+						// Top-level slices are chains — break the active chain down by token.
+						// Drilled slices are already tokens, so they carry no nested breakdown.
+						const activeChain = !drilledChainId && active
+							? allChains.find(c => c.coin === active.name)
+							: undefined
+						const breakdown = activeChain ? buildChainTokenItems(activeChain) : undefined
+						const handleClick = () => {
+							if (!active) return
+							if (drilledChainId) {
+								// Drilled view: the selected key is a token
+								const dchain = visibleChains.find(c => c.id === drilledChainId)
+								const bal = dchain ? getEffectiveBalance(dchain.id) : undefined
+								const overrides = new Map(Object.entries(visibilityMap).map(([k, v]) => [k.toLowerCase(), v] as const))
+								const cleanTokens = bal?.tokens ? categorizeTokens(bal.tokens, overrides).clean : []
+								if (active.name === dchain?.symbol) { openChainPage(dchain!); return }
+								const tok = cleanTokens.find(t => t.symbol === active.name)
+								if (tok && dchain) openChainPage(dchain, undefined, tok)
+							} else if (activeChain) {
+								setDrilledChainId(activeChain.id)
+							}
+						}
 						return (
 							<Box w="100%" maxW="440px">
-								<ChartLegend
-									data={chartData}
+								<SelectedSlice
+									active={active}
 									total={legendTotal}
-									activeIndex={safeIndex}
-									onHoverItem={(i) => setActiveSliceIndex(i === null ? 0 : i)}
-									onClickItem={(i) => {
-										if (drilledChainId) {
-											// Drilled view: legend items are tokens
-											const dchain = visibleChains.find(c => c.id === drilledChainId)
-											const bal = dchain ? getEffectiveBalance(dchain.id) : undefined
-											const overrides = new Map(Object.entries(visibilityMap).map(([k, v]) => [k.toLowerCase(), v] as const))
-											const cleanTokens = bal?.tokens ? categorizeTokens(bal.tokens, overrides).clean : []
-											const item = chartData[i]
-											if (!item) return
-											if (item.name === dchain?.symbol) { openChainPage(dchain!); return }
-											const tok = cleanTokens.find(t => t.symbol === item.name)
-											if (tok && dchain) openChainPage(dchain, undefined, tok)
-										} else {
-											const item = allChainsChartData[i]
-											if (!item) return
-											const chain = allChains.find(c => c.coin === (item as any).name)
-											if (chain) setDrilledChainId(chain.id)
-										}
-									}}
+									breakdown={breakdown}
+									onClick={handleClick}
 								/>
 							</Box>
 						)

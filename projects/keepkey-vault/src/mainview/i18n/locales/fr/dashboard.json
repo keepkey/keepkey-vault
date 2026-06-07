@@ -28,5 +28,12 @@
 	"timeJustNow": "à l'instant",
 	"timeMinutesAgo": "il y a {{count}}m",
 	"timeHoursAgo": "il y a {{count}}h",
-	"timeDaysAgo": "il y a {{count}}j"
+	"timeDaysAgo": "il y a {{count}}j",
+	"staleCtaTitle": "Appuyez pour rafraîchir les soldes",
+	"staleCtaSubtitle": "Dernière vérification {{time}}",
+	"loadingDashboardTitle": "Chargement du tableau de bord",
+	"loadingConnect": "Connexion à votre KeepKey",
+	"loadingSync": "Synchronisation des soldes entre les chaînes",
+	"loadingPrices": "Récupération des derniers prix",
+	"tokensCount": "+{{count}} jetons"
 }

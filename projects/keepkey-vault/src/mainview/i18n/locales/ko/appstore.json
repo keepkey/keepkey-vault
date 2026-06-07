@@ -1,10 +1,25 @@
 {
-	"title": "앱",
+	"title": "둘러보기",
+	"heading": "둘러보기",
 	"subtitle": "KeepKey를 지원되는 애플리케이션에 연결",
 	"keepkeyName": "KeepKey",
 	"keepkeyDescription": "KeepKey 하드웨어 지갑 관리",
 	"shapeshiftName": "ShapeShift",
 	"shapeshiftDescription": "크로스 체인 암호화폐 거래, 추적 및 관리",
+	"supportName": "지원",
+	"supportDescription": "KeepKey 팀의 도움과 답변을 받으세요",
+	"docsName": "문서",
+	"docsDescription": "가이드, 튜토리얼 및 개발자 문서",
+	"affiliatesName": "제휴",
+	"affiliatesDescription": "다른 사람에게 KeepKey를 추천하고 보상을 받으세요",
+	"coincapName": "CoinCap",
+	"coincapDescription": "실시간 암호화폐 시세 및 시장 데이터",
+	"veniceName": "Venice",
+	"veniceDescription": "비공개·무검열 AI 채팅 및 이미지 생성",
+	"bexName": "브라우저 확장 프로그램",
+	"bexDescription": "web3 생태계 전반에서 KeepKey 사용",
 	"walletconnectName": "WalletConnect",
-	"walletconnectDescription": "WalletConnect 호환 dApp에 연결"
+	"walletconnectDescription": "WalletConnect 호환 dApp에 연결",
+	"internal": "열기",
+	"open": "열기"
 }

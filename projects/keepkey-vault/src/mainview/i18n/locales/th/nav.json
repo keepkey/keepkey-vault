@@ -1,5 +1,5 @@
 {
-	"apps": "แอปพลิเคชัน",
+	"explore": "สำรวจ",
 	"keepkey": "KeepKey",
 	"swap": "แลกเปลี่ยน",
 	"shapeshift": "ShapeShift",
@@ -14,5 +14,8 @@
 	"errorWithMessage": "ข้อผิดพลาด: {{error}}",
 	"tryUnplugging": "ลองถอดและเสียบ KeepKey ใหม่",
 	"watchOnlyConnectPrompt": "ดูอย่างเดียว — เชื่อมต่ออุปกรณ์เพื่อเข้าถึงเต็มรูปแบบ",
-	"passphraseMode": "รหัสผ่าน"
+	"passphraseMode": "รหัสผ่าน",
+	"addresses": "ที่อยู่",
+	"mobileApp": "แอปมือถือ",
+	"walletConnect": "WalletConnect"
 }

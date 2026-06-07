@@ -6,8 +6,11 @@ import { formatBalance } from "../lib/formatting"
 import { useFiat } from "../lib/fiat-context"
 import { getAsset } from "../../shared/assetLookup"
 import { QrScannerOverlay } from "./QrScannerOverlay"
+import { AddressBookPicker } from "./AddressBookPicker"
+import { AddressIdenticon } from "./AddressIdenticon"
+import { caipToNetworkId } from "../../shared/chains"
 import type { ChainDef } from "../../shared/chains"
-import type { ChainBalance, TokenBalance, BuildTxResult, BroadcastResult } from "../../shared/types"
+import type { ChainBalance, TokenBalance, BuildTxResult, BroadcastResult, AddressBookEntry } from "../../shared/types"
 import { validateAddress } from "../../shared/address-validation"
 
 type SendPhase = 'input' | 'built' | 'signed' | 'broadcast'
@@ -61,6 +64,12 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 	const [copied, setCopied] = useState(false)
 	const [showPayload, setShowPayload] = useState(false)
 	const [showScanner, setShowScanner] = useState(false)
+	const [showAddressBook, setShowAddressBook] = useState(false)
+	const [selectedContact, setSelectedContact] = useState<AddressBookEntry | null>(null)
+	const [recipientIsNew, setRecipientIsNew] = useState(false)
+	const [savedEntryId, setSavedEntryId] = useState<string | null>(null)
+	const [labelDraft, setLabelDraft] = useState("")
+	const [labelSaved, setLabelSaved] = useState(false)
 
 	// Reset form when token selection changes
 	const tokenCaip = token?.caip ?? null
@@ -75,12 +84,20 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 		setUsdAmount("")
 		setMemo("")
 		setIsMax(false)
+		setSelectedContact(null)
+		setShowAddressBook(false)
+		setRecipientIsNew(false)
+		setSavedEntryId(null)
+		setLabelDraft("")
+		setLabelSaved(false)
 	}, [tokenCaip])
 
 	// Derived display values — token mode vs native mode
 	const isTokenSend = !!(token && token.caip && !token.caip.endsWith('/slip44:501') && (token.caip.includes('erc20') || token.caip.includes('/token:') || token.caip.includes('/spl:') || token.caip.includes('/trc20:')))
 	const displaySymbol = isTokenSend ? token!.symbol : chain.symbol
 	const displayBalance = isTokenSend ? token!.balance : (balance?.balance || '0')
+	// The CAIP the Address Book picker filters by (token caip for token sends, else native).
+	const activeCaip = isTokenSend && token?.caip ? token.caip : chain.caip
 
 	// Basic client-side validation
 	const amountNum = parseFloat(amount)
@@ -202,19 +219,41 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 		setLoading(true)
 		setError(null)
 
+		// History needs a real amount even for MAX sends (BuildTxResult has none):
+		// token MAX = full token balance; native MAX = balance − network fee.
+		let sendAmount: string | undefined
+		if (!isMax) {
+			sendAmount = amount || undefined
+		} else if (isTokenSend) {
+			sendAmount = displayBalance || undefined
+		} else {
+			const net = parseFloat(displayBalance) - parseFloat(buildResult?.fee || '0')
+			sendAmount = net > 0 ? String(net) : (displayBalance || undefined)
+		}
+
 		try {
 			const result = await rpcRequest<BroadcastResult>('broadcastTx', {
 				chainId: chain.id,
 				signedTx,
+				to: recipient,
+				amount: sendAmount,
+				symbol: displaySymbol,
+				caip: activeCaip,
+				fromAddress: address || undefined,
 			}, 60000)
 			setTxid(result.txid)
 			setPhase('broadcast')
+			// R4: offer to label the recipient only when this send created a new entry.
+			if (result.recipientIsNew && result.addressBookEntryId) {
+				setRecipientIsNew(true)
+				setSavedEntryId(result.addressBookEntryId)
+			}
 			rpcFire('getBalance', { chainId: chain.id })
 		} catch (e: any) {
 			setError(e.message || t("broadcastFailed"))
 		}
 		setLoading(false)
-	}, [chain, signedTx])
+	}, [chain, signedTx, recipient, amount, isMax, isTokenSend, displaySymbol, displayBalance, buildResult, activeCaip, address])
 
 	const reset = useCallback(() => {
 		setPhase('input')
@@ -227,7 +266,24 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 		setUsdAmount("")
 		setMemo("")
 		setIsMax(false)
+		setSelectedContact(null)
+		setShowAddressBook(false)
+		setRecipientIsNew(false)
+		setSavedEntryId(null)
+		setLabelDraft("")
+		setLabelSaved(false)
 	}, [])
+
+	const handleSaveLabel = useCallback(async () => {
+		const label = labelDraft.trim()
+		if (!label || !savedEntryId) return
+		try {
+			await rpcRequest('updateAddressBook', { id: savedEntryId, label }, 5000)
+			setLabelSaved(true)
+		} catch {
+			setError(t("saveContactFailed", { ns: "addressbook" }))
+		}
+	}, [labelDraft, savedEntryId, t])
 
 	const copyTxid = useCallback(() => {
 		if (!txid) return
@@ -378,6 +434,20 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 								borderColor="kk.border"
 								color="kk.textSecondary"
 								_hover={{ borderColor: "kk.gold", color: "kk.gold", bg: "rgba(233,196,106,0.06)" }}
+								onClick={() => setShowAddressBook(true)}
+								px="2"
+								minW="36px"
+								h="32px"
+								title={t("openAddressBook", { ns: "addressbook" })}
+							>
+								<BookIcon />
+							</Button>
+							<Button
+								size="sm"
+								variant="outline"
+								borderColor="kk.border"
+								color="kk.textSecondary"
+								_hover={{ borderColor: "kk.gold", color: "kk.gold", bg: "rgba(233,196,106,0.06)" }}
 								onClick={() => setShowScanner(true)}
 								px="2"
 								minW="36px"
@@ -389,6 +459,14 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 						</Flex>
 						{addressValidation && !addressValidation.valid && (
 							<Text fontSize="11px" color="kk.error" mt="1">{t(addressValidation.error!)}</Text>
+						)}
+						{selectedContact && recipient === selectedContact.address && (
+							<Flex align="center" gap="2" mt="1.5" px="2" py="1" w="fit-content" bg="rgba(233,196,106,0.06)" border="1px solid rgba(233,196,106,0.22)" borderRadius="999px">
+								<AddressIdenticon seed={selectedContact.kind === "own" ? (selectedContact.deviceId || selectedContact.address) : selectedContact.address} size={16} />
+								<Text fontSize="11px" color="kk.gold" fontWeight="600" truncate maxW="220px">
+									{selectedContact.label || t("unlabeled", { ns: "addressbook" })}
+								</Text>
+							</Flex>
 						)}
 					</Box>
 
@@ -667,6 +745,37 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 							</Flex>
 						</Box>
 
+						{/* R4: offer to save the recipient as a labeled contact */}
+						{recipientIsNew && !labelSaved && (
+							<Box bg="var(--ink-0)" border="1px solid var(--line)" borderRadius="14px" p="3" w="full">
+								<Flex align="center" gap="2" mb="2">
+									<AddressIdenticon seed={recipient} size={20} />
+									<Text fontSize="11px" color="kk.textMuted" truncate flex="1">
+										{t("saveRecipientPrompt", { ns: "addressbook" })}
+									</Text>
+								</Flex>
+								<Flex gap="2">
+									<Input
+										value={labelDraft}
+										onChange={(e) => setLabelDraft(e.target.value)}
+										placeholder={t("labelPlaceholder", { ns: "addressbook" })}
+										size="sm" flex="1" bg="var(--ink-0)" border="1px solid var(--line)"
+										color="var(--text-0)" maxLength={100}
+										onKeyDown={(e) => { if (e.key === "Enter") handleSaveLabel() }}
+									/>
+									<Button size="sm" bg="var(--gold)" color="var(--ink-0)" fontWeight="600" borderRadius="10px"
+										_hover={{ bg: "var(--gold-2)" }} onClick={handleSaveLabel} disabled={!labelDraft.trim()}>
+										{t("save", { ns: "common" })}
+									</Button>
+								</Flex>
+							</Box>
+						)}
+						{labelSaved && (
+							<Text fontSize="11px" color="var(--teal)" w="full" textAlign="center">
+								{t("contactSaved", { ns: "addressbook" })}
+							</Text>
+						)}
+
 						<Flex gap="2" w="full">
 							{explorerUrl && (
 								<Button
@@ -700,6 +809,16 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 			{showScanner && (
 				<QrScannerOverlay onScan={handleQrScan} onClose={() => setShowScanner(false)} />
 			)}
+
+			{/* Address Book picker (R5) — entries matching this send's network */}
+			{showAddressBook && (
+				<AddressBookPicker
+					networkId={caipToNetworkId(activeCaip)}
+					chainFamily={chain.chainFamily}
+					onSelect={(e) => { setRecipient(e.address); setSelectedContact(e); setShowAddressBook(false) }}
+					onClose={() => setShowAddressBook(false)}
+				/>
+			)}
 		</VStack>
 	)
 }
@@ -725,6 +844,15 @@ function QrIcon() {
 			<rect x="19" y="14" width="3" height="3" fill="currentColor" />
 			<rect x="14" y="19" width="3" height="3" fill="currentColor" />
 			<rect x="19" y="19" width="3" height="3" fill="currentColor" />
+		</svg>
+	)
+}
+
+function BookIcon() {
+	return (
+		<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+			<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+			<path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
 		</svg>
 	)
 }

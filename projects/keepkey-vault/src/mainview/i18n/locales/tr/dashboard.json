@@ -28,5 +28,12 @@
 	"timeJustNow": "az önce",
 	"timeMinutesAgo": "{{count}} dk önce",
 	"timeHoursAgo": "{{count}} sa önce",
-	"timeDaysAgo": "{{count}} gün önce"
+	"timeDaysAgo": "{{count}} gün önce",
+	"staleCtaTitle": "Bakiyeleri yenilemek için basın",
+	"staleCtaSubtitle": "Son kontrol {{time}}",
+	"loadingDashboardTitle": "Pano yükleniyor",
+	"loadingConnect": "KeepKey'inize bağlanılıyor",
+	"loadingSync": "Ağlar arası bakiyeler eşitleniyor",
+	"loadingPrices": "En güncel fiyatlar alınıyor",
+	"tokensCount": "+{{count}} token"
 }

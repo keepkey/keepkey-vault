@@ -1,5 +1,5 @@
 {
-	"apps": "アプリ",
+	"explore": "探索",
 	"keepkey": "KeepKey",
 	"shapeshift": "ShapeShift",
 	"watchOnly": "閲覧専用",
@@ -13,5 +13,9 @@
 	"errorWithMessage": "エラー: {{error}}",
 	"tryUnplugging": "KeepKeyを抜いて再接続してみてください。",
 	"watchOnlyConnectPrompt": "閲覧専用 — フルアクセスにはデバイスを接続してください",
-	"passphraseMode": "パスフレーズ"
+	"passphraseMode": "パスフレーズ",
+	"addresses": "アドレス",
+	"swap": "スワップ",
+	"mobileApp": "モバイルアプリ",
+	"walletConnect": "WalletConnect"
 }
