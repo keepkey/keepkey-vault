@@ -93,6 +93,7 @@
 	"amountBelowMinimum": "Amount below minimum — try at least {{min}} {{symbol}}",
 	"amountBelowMinimumGeneric": "Amount below the minimum required by the swap pool — try a larger amount",
 	"insufficientBalance": "Insufficient balance",
+	"exceedsSafeMax": "Leave ~{{reserve}} {{symbol}} for network fees — reduce the amount or tap MAX.",
 	"sameAsset": "Cannot swap the same asset",
 	"routerContract": "Router",
 	"route": "Route",
