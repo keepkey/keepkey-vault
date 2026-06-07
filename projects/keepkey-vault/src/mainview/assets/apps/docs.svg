@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <defs>
+    <linearGradient id="kkDocBg" x1="0" y1="0" x2="0" y2="64" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#17171c"/>
+      <stop offset="1" stop-color="#0a0a0c"/>
+    </linearGradient>
+    <radialGradient id="kkDocGlow" cx="32" cy="22" r="26" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#e9c46a" stop-opacity="0.16"/>
+      <stop offset="1" stop-color="#e9c46a" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="64" height="64" rx="15" fill="url(#kkDocBg)"/>
+  <rect width="64" height="64" rx="15" fill="url(#kkDocGlow)"/>
+  <rect x="0.5" y="0.5" width="63" height="63" rx="14.5" stroke="#ffffff" stroke-opacity="0.06"/>
+  <!-- page with folded corner -->
+  <path d="M20 15h13l11 11v21a2 2 0 0 1-2 2H20a2 2 0 0 1-2-2V17a2 2 0 0 1 2-2z" stroke="#ffffff" stroke-width="2.4" stroke-linejoin="round"/>
+  <path d="M33 15v9a2 2 0 0 0 2 2h9" stroke="#ffffff" stroke-width="2.4" stroke-linejoin="round"/>
+  <!-- text lines -->
+  <path d="M24 34h16" stroke="#e9c46a" stroke-width="2.4" stroke-linecap="round"/>
+  <path d="M24 40h16" stroke="#ffffff" stroke-opacity="0.55" stroke-width="2.4" stroke-linecap="round"/>
+  <path d="M24 46h10" stroke="#ffffff" stroke-opacity="0.55" stroke-width="2.4" stroke-linecap="round"/>
+</svg>

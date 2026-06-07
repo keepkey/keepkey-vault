@@ -7,7 +7,7 @@ import { rpcRequest } from "../lib/rpc"
 import kkIcon from "../assets/icon.png"
 import { NAV_HEIGHT } from "../layout"
 
-export type NavTab = "vault" | "shapeshift" | "apps" | "addresses"
+export type NavTab = "vault" | "shapeshift" | "explore" | "addresses"
 
 interface TopNavProps {
 	label?: string
@@ -146,8 +146,8 @@ export function TopNav({
 
 	const TAB_DEFS: { id: NavTab; label: string; icon: JSX.Element }[] = [
 		{
-			id: "apps",
-			label: t("apps"),
+			id: "explore",
+			label: t("explore"),
 			icon: (
 				<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
 					<rect x="3" y="3" width="7" height="7" rx="1.5"/>

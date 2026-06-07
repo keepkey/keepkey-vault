@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <defs>
+    <linearGradient id="kkBexBg" x1="0" y1="0" x2="0" y2="64" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#17171c"/>
+      <stop offset="1" stop-color="#0a0a0c"/>
+    </linearGradient>
+    <radialGradient id="kkBexGlow" cx="32" cy="22" r="26" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#e9c46a" stop-opacity="0.18"/>
+      <stop offset="1" stop-color="#e9c46a" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="kkBexGold" x1="0" y1="0" x2="0" y2="24" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#f2d27e"/>
+      <stop offset="1" stop-color="#e9c46a"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="15" fill="url(#kkBexBg)"/>
+  <rect width="64" height="64" rx="15" fill="url(#kkBexGlow)"/>
+  <rect x="0.5" y="0.5" width="63" height="63" rx="14.5" stroke="#ffffff" stroke-opacity="0.06"/>
+  <!-- puzzle piece (browser-extension glyph) -->
+  <g transform="translate(13.25 13.25) scale(1.5)" fill="url(#kkBexGold)">
+    <path d="M20.5 11H19V7c0-1.1-.9-2-2-2h-4V3.5C13 2.12 11.88 1 10.5 1S8 2.12 8 3.5V5H4c-1.1 0-1.99.9-1.99 2v3.8H3.5c1.49 0 2.7 1.21 2.7 2.7s-1.21 2.7-2.7 2.7H2V20c0 1.1.9 2 2 2h3.8v-1.5c0-1.49 1.21-2.7 2.7-2.7s2.7 1.21 2.7 2.7V22H17c1.1 0 2-.9 2-2v-4h1.5c1.38 0 2.5-1.12 2.5-2.5S21.88 11 20.5 11z"/>
+  </g>
+</svg>
