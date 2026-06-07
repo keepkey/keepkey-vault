@@ -102,6 +102,23 @@ $PackageJson = Get-Content (Join-Path $ProjectDir "package.json") | ConvertFrom-
 $Version = $PackageJson.version
 $AppName = "KeepKey Vault"
 
+# ----------------------------------------------------------------------------
+# Ensure GNU tar wins over System32 bsdtar.
+#
+# Electrobun's CLI bootstrap (node_modules/electrobun/bin/electrobun.cjs) extracts
+# its downloaded core with `tar --force-local -xzf` (the --force-local is added on
+# Windows by scripts/patch-electrobun.sh so tar does not treat the "C:" in the cache
+# path as a remote host). That flag is GNU-tar-only; Windows' built-in System32 tar
+# is bsdtar, which rejects it ("Option --force-local is not supported") and aborts
+# the build. Git for Windows ships GNU tar at %ProgramFiles%\Git\usr\bin\tar.exe, so
+# prepend that directory to PATH. It contains no link.exe/cl.exe, so MSVC native
+# builds (usb, node-hid, cargo C deps) are unaffected.
+# ----------------------------------------------------------------------------
+$GitUsrBin = Join-Path $env:ProgramFiles "Git\usr\bin"
+if ((Test-Path (Join-Path $GitUsrBin "tar.exe")) -and ($env:Path -notlike "*$GitUsrBin*")) {
+    $env:Path = "$GitUsrBin;$env:Path"
+}
+
 # ============================================================================
 # Helper Functions
 # ============================================================================

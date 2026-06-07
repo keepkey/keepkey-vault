@@ -1,0 +1,8 @@
+# Shell scripts must always check out with LF endings.
+#
+# They are executed by bash — Git Bash / WSL during the Windows build
+# (e.g. modules/device-protocol build, scripts/patch-electrobun.sh) and by
+# macOS/Linux. With core.autocrlf=true (common on Windows clones) and no
+# explicit rule, these files arrive as CRLF, which breaks bash parsing and
+# fails the Windows preflight check (scripts/preflight-windows.ps1).
+*.sh text eol=lf
