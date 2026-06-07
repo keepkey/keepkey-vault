@@ -154,15 +154,38 @@ function HeatmapTileBox({
 			<Flex direction="column" justify="space-between" w="100%" h="100%" p={area > 4500 ? "3" : "2"} gap="1">
 				<Flex align="center" gap="2" minW="0">
 					{showIcon && (
-						<Image
-							src={tile.icon}
-							alt=""
-							w={`${iconSize}px`}
-							h={`${iconSize}px`}
-							borderRadius="full"
-							flexShrink={0}
-							bg="var(--ink-2)"
-						/>
+						tile.id.endsWith("__others__") ? (
+							// Aggregated "Others" tile has no single asset icon — render a
+							// 2x2 dot grid glyph ("more items") themed to the tile color.
+							<Box
+								w={`${iconSize}px`}
+								h={`${iconSize}px`}
+								borderRadius="full"
+								flexShrink={0}
+								bg={`${tile.color}33`}
+								border="1px solid"
+								borderColor={`${tile.color}66`}
+								display="grid"
+								gridTemplateColumns="repeat(2, 1fr)"
+								gap={`${Math.max(1, Math.floor(iconSize / 14))}px`}
+								placeContent="center"
+								p={`${Math.max(3, Math.floor(iconSize / 4))}px`}
+							>
+								{[0, 1, 2, 3].map((i) => (
+									<Box key={i} w="100%" aspectRatio="1" borderRadius="full" bg={tile.color} />
+								))}
+							</Box>
+						) : (
+							<Image
+								src={tile.icon}
+								alt=""
+								w={`${iconSize}px`}
+								h={`${iconSize}px`}
+								borderRadius="full"
+								flexShrink={0}
+								bg="var(--ink-2)"
+							/>
+						)
 					)}
 					{showLabel && (
 						<Box minW="0">

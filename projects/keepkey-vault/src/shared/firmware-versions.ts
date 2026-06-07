@@ -61,7 +61,7 @@ export const FIRMWARE_VERSION_MAP: FirmwareVersionInfo[] = [
   {
     version: '7.14.1',
     date: '2026-05',
-    headline: 'Stability and TON improvements',
+    headline: 'Solana, Tron & TON support',
     features: [
       {
         title: 'TON Off-Chain Signing',

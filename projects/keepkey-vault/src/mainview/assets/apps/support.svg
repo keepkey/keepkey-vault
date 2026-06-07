@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <defs>
+    <linearGradient id="kkSupBg" x1="0" y1="0" x2="0" y2="64" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#17171c"/>
+      <stop offset="1" stop-color="#0a0a0c"/>
+    </linearGradient>
+    <radialGradient id="kkSupGlow" cx="32" cy="22" r="26" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#e9c46a" stop-opacity="0.16"/>
+      <stop offset="1" stop-color="#e9c46a" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="64" height="64" rx="15" fill="url(#kkSupBg)"/>
+  <rect width="64" height="64" rx="15" fill="url(#kkSupGlow)"/>
+  <rect x="0.5" y="0.5" width="63" height="63" rx="14.5" stroke="#ffffff" stroke-opacity="0.06"/>
+  <!-- headband -->
+  <path d="M19 35v-3a13 13 0 0 1 26 0v3" stroke="#ffffff" stroke-width="2.4" stroke-linecap="round"/>
+  <!-- left earcup -->
+  <rect x="15" y="33" width="7" height="13" rx="3.5" fill="#e9c46a"/>
+  <!-- right earcup -->
+  <rect x="42" y="33" width="7" height="13" rx="3.5" fill="#e9c46a"/>
+  <!-- mic boom + tip -->
+  <path d="M45.5 46v2.5a4 4 0 0 1-4 4H35" stroke="#ffffff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="32.5" cy="52.5" r="2.6" fill="#ffffff"/>
+</svg>
