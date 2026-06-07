@@ -106,6 +106,7 @@ process.on('unhandledRejection', (reason) => {
 })
 
 import { EngineController, withTimeout } from "./engine-controller"
+import { runUsbDiagnostic as runUsbDiagnosticProbe } from "./windows-usb-probe"
 import { startRestApi, clearFeaturesCache, setUiActive, uiHeartbeat, type RestApiCallbacks } from "./rest-api"
 import { parseSolanaTx, SolanaTxParseError, solanaMessageSlice } from "./solana-tx"
 import { AuthStore } from "./auth"
@@ -5668,6 +5669,14 @@ udevadm trigger --subsystem-match=usb --attr-match=idVendor=2b24 || udevadm trig
 				} catch (err: any) {
 					return { success: false, error: err?.message || String(err) }
 				}
+			},
+
+			// ── Windows USB troubleshooter (read-only diagnostic) ────
+			// Returns a labelled report (likely cause + guidance + copy-ready
+			// text) for the device-not-detected wizard. Never throws.
+			runUsbDiagnostic: async () => {
+				const version = await Updater.localInfo.version().catch(() => 'unknown')
+				return runUsbDiagnosticProbe(version)
 			},
 
 			// ── App Updates ──────────────────────────────────────────
