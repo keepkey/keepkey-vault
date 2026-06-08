@@ -92,8 +92,8 @@ begin
   Result := True;
   { Warn about a previous broken system-wide ("all users") install in Program Files. }
   StaleDir := ExpandConstant('{commonpf}\{#MyAppDirName}');
-  { Skip the prompt on /SILENT|/VERYSILENT -- /SUPPRESSMSGBOXES does NOT suppress
-    [Code] MsgBox, so an unattended install would hang here. The install still
+  { Skip the prompt on /SILENT|/VERYSILENT -- /SUPPRESSMSGBOXES does NOT suppress a
+    Code-section MsgBox, so an unattended install would hang here. The install still
     proceeds; the warning is informational only. }
   if DirExists(StaleDir) and (not WizardSilent) then
     MsgBox('A previous system-wide installation was found at:' + #13#10 + StaleDir + #13#10#13#10 +
