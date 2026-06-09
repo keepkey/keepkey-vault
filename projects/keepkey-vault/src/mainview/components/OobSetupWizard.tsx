@@ -116,6 +116,12 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
   const [step, setStep] = useState<WizardStep>('intro')
   const [introCard, setIntroCard] = useState(0)
   const [tipCard, setTipCard] = useState(0)
+  // Passphrase opt-in chosen on the (non-skippable) hidden-wallets tip card.
+  // Applied to the device when the user clicks Continue (see security-tips below).
+  const [tipPassphraseEnabled, setTipPassphraseEnabled] = useState(false)
+  const [applyingTipPassphrase, setApplyingTipPassphrase] = useState(false)
+  // Synchronous in-flight guard (state updates are async — mirrors applyingLabelRef).
+  const applyingTipPassphraseRef = useRef(false)
   const [setupType, setSetupType] = useState<'create' | 'recover' | null>(null)
   const [wordCount, setWordCount] = useState<12 | 18 | 24>(12)
   const [deviceLabel, setDeviceLabel] = useState('')
@@ -2397,11 +2403,34 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
               <TutorialPage
                 type="post"
                 cardIndex={tipCard}
-                onNext={() => {
-                  if (tipCard < 2) setTipCard(prev => prev + 1)
-                  else setStep('complete')
+                passphraseEnabled={tipPassphraseEnabled}
+                onPassphraseToggle={setTipPassphraseEnabled}
+                nextPending={applyingTipPassphrase}
+                onNext={async () => {
+                  // The passphrase card is last (index 2). Earlier cards just advance.
+                  if (tipCard < 2) { setTipCard(prev => prev + 1); return }
+                  // Apply the opt-in choice before finishing. Enabling clears the
+                  // device session (engine.applySettings), so the device re-prompts
+                  // for PIN + passphrase — those overlays appear as we move to
+                  // 'complete'. On failure (rejected on device) we still proceed;
+                  // the device is the authority and the user can retry in Settings.
+                  if (tipPassphraseEnabled) {
+                    if (applyingTipPassphraseRef.current) return
+                    applyingTipPassphraseRef.current = true
+                    setApplyingTipPassphrase(true)
+                    try {
+                      await rpcRequest('applySettings', { usePassphrase: true }, 0)
+                    } catch (e) {
+                      console.error('[OOB] enable passphrase failed:', e)
+                    }
+                    setApplyingTipPassphrase(false)
+                    applyingTipPassphraseRef.current = false
+                  }
+                  setStep('complete')
                 }}
-                onSkip={() => setStep('complete')}
+                // The passphrase card itself hides Skip (nonSkippable). Skipping an
+                // earlier tip lands on it so the passphrase choice can't be bypassed.
+                onSkip={() => setTipCard(2)}
               />
             )}
 
