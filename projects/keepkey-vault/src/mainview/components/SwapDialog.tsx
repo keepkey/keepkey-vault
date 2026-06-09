@@ -1656,17 +1656,31 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     return null
   }, [fromAsset, toAsset, sameAsset, validAmount, exceedsBalance, exceedsSafeMax, customAddressError, fromAddress, toAddress, toAddressIsXpub, t])
 
-  // Manual "Get Quote" fallback. The usual stuck-empty cause is a destination
-  // receive address that never resolved (empty balance cache + no resolver for
-  // non-UTXO chains). Derive it on demand here, then re-fire the quote effect
-  // via requoteTick. A bare requote is not enough — canQuote stays false until
-  // the address exists.
+  // A missing DESTINATION address is the dead-end the manual button can fix by
+  // deriving on demand. A missing SOURCE address is a transient that the quote
+  // effect re-runs automatically once fromAddress populates (it's in the effect
+  // deps), so we show the reason for it but no action button.
+  const needsDestAddress = !!quoteBlockReason && !!fromAddress && !toAddress && !toAddressIsXpub && !useCustomAddress
+
+  // Latest output chain id — lets the async manual-quote derivation below detect
+  // an output-asset switch that happened during the (up to 60s) address RPC and
+  // discard a stale result, so we never write a receive address for the wrong
+  // chain (the auto-resolver useEffect has the same guard via a cancel flag).
+  const toAssetChainIdRef = useRef<string | undefined>(undefined)
+  useEffect(() => { toAssetChainIdRef.current = toAsset?.chainId }, [toAsset])
+
+  // Manual "Get Quote" fallback. The stuck-empty cause is a destination receive
+  // address that never resolved (empty balance cache + no resolver for non-UTXO
+  // chains). Derive it on demand here, then re-fire the quote effect via
+  // requoteTick. A bare requote is not enough — canQuote stays false until the
+  // address exists.
   const handleManualQuote = useCallback(async () => {
-    if (manualQuoting) return
+    if (manualQuoting || !toAsset) return
+    const requestedChainId = toAsset.chainId
     setManualQuoting(true)
     setError(null)
     try {
-      if (toAsset && !toAddress && !useCustomAddress) {
+      if (!toAddress && !useCustomAddress) {
         const toChain = CHAINS.find(c => c.id === toAsset.chainId)
         // EVM addresses come from evmAddresses (cachedToAddress already falls
         // back to them); non-EVM chains derive a receive address from the device.
@@ -1674,14 +1688,17 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
           const params: any = { addressNList: toChain.defaultPath, showDisplay: false, coin: toChain.coin }
           if (toChain.scriptType) params.scriptType = toChain.scriptType
           const result = await rpcRequest<any>(toChain.rpcMethod, params, 60000)
+          // Output asset switched mid-RPC → this address is for the wrong chain.
+          if (toAssetChainIdRef.current !== requestedChainId) return
           const addr = typeof result === 'string' ? result : (result?.address || '')
           if (addr) setResolvedToAddress(addr)
         }
         const cached = await rpcRequest<{ balances: ChainBalance[] } | null>('getCachedBalances', undefined, 8000).catch(() => null)
+        if (toAssetChainIdRef.current !== requestedChainId) return
         if (cached?.balances) setBalances(cached.balances)
       }
     } catch (e: any) {
-      setError(e?.message || t("errorQuote"))
+      if (toAssetChainIdRef.current === requestedChainId) setError(e?.message || t("errorQuote"))
     } finally {
       setManualQuoting(false)
       setRequoteTick(tick => tick + 1)
@@ -4189,19 +4206,21 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                   {phase === 'input' && !quote && !error && quoteBlockReason && (
                     <Box mt="3" p="2.5" bg="rgba(233,196,106,0.06)" borderRadius="lg" border="1px solid" borderColor="rgba(233,196,106,0.20)"
                       style={{ animation: 'kkSwapFadeIn 0.25s ease-out' }}>
-                      <Text fontSize="10px" color="kk.textSecondary" fontWeight="500" mb="2" lineHeight="1.45">
+                      <Text fontSize="10px" color="kk.textSecondary" fontWeight="500" mb={needsDestAddress ? "2" : "0"} lineHeight="1.45">
                         {quoteBlockReason}
                       </Text>
-                      <Button
-                        w="full" size="sm" fontWeight="700" fontSize="12px"
-                        bg="kk.gold" color="black" borderRadius="lg" border="0"
-                        _hover={{ bg: "kk.goldHover" }}
-                        loading={manualQuoting}
-                        loadingText={t("gettingQuote")}
-                        onClick={handleManualQuote}
-                      >
-                        {t("getQuote", "Get Quote")}
-                      </Button>
+                      {needsDestAddress && (
+                        <Button
+                          w="full" size="sm" fontWeight="700" fontSize="12px"
+                          bg="kk.gold" color="black" borderRadius="lg" border="0"
+                          _hover={{ bg: "kk.goldHover" }}
+                          loading={manualQuoting}
+                          loadingText={t("gettingQuote")}
+                          onClick={handleManualQuote}
+                        >
+                          {t("getQuote", "Get Quote")}
+                        </Button>
+                      )}
                     </Box>
                   )}
 
