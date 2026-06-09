@@ -4,7 +4,7 @@
  * Pre-tutorial: PIN, Recovery Phrase, Recovery Cipher (before device setup)
  * Post-tutorial: Verify on Device, REST API, Passphrase (after setup)
  */
-import { Box, Text, VStack, HStack, Flex, Button } from '@chakra-ui/react'
+import { Box, Text, VStack, HStack, Flex, Button, Spinner } from '@chakra-ui/react'
 import { useTranslation } from 'react-i18next'
 import {
   FaLock, FaEyeSlash, FaKey, FaPen, FaShieldAlt, FaKeyboard,
@@ -132,6 +132,12 @@ interface TutorialCard {
   icon1: React.ReactNode
   icon2: React.ReactNode
   icon3: React.ReactNode
+  // Renders an inline opt-in toggle (currently only the passphrase card) so the
+  // user can act on the explanation right here instead of hunting in Settings.
+  interactive?: 'passphrase'
+  // Hides the Skip button — the user must make a choice and continue. Skipping
+  // earlier cards routes here (see OobSetupWizard) so this card can't be bypassed.
+  nonSkippable?: boolean
 }
 
 const PRE_CARDS: TutorialCard[] = [
@@ -190,8 +196,31 @@ const POST_CARDS: TutorialCard[] = [
     icon1: <FaUserSecret size={28} color="#8B5CF6" />,
     icon2: <DualWallets />,
     icon3: <FaExclamationTriangle size={22} color="rgba(139,92,246,0.6)" />,
+    interactive: 'passphrase',
+    nonSkippable: true,
   },
 ]
+
+/** Interactive on/off switch for the in-card passphrase opt-in. */
+function CardToggle({ checked, onChange, accent, disabled }: { checked: boolean; onChange: (v: boolean) => void; accent: string; disabled?: boolean }) {
+  return (
+    <Box
+      as="button"
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      onClick={() => !disabled && onChange(!checked)}
+      w="44px" h="24px" borderRadius="full" flexShrink={0} position="relative"
+      bg={checked ? accent : 'rgba(255,255,255,0.18)'}
+      transition="background 0.2s"
+      cursor={disabled ? 'not-allowed' : 'pointer'}
+      opacity={disabled ? 0.5 : 1}
+    >
+      <Box position="absolute" top="2px" left={checked ? '22px' : '2px'} w="20px" h="20px"
+        borderRadius="full" bg="white" transition="left 0.2s" boxShadow="0 1px 3px rgba(0,0,0,0.4)" />
+    </Box>
+  )
+}
 
 // ── Render ────────────────────────────────────────────────────────────
 
@@ -200,14 +229,22 @@ interface TutorialPageProps {
   cardIndex: number
   onNext: () => void
   onSkip: () => void
+  // Opt-in state for the interactive 'passphrase' card. Owned by the wizard so
+  // the choice can be applied (applySettings) when the user clicks Continue.
+  passphraseEnabled?: boolean
+  onPassphraseToggle?: (enabled: boolean) => void
+  // Shows a spinner / disables the Next button while the choice is being applied.
+  nextPending?: boolean
 }
 
-export function TutorialPage({ type, cardIndex, onNext, onSkip }: TutorialPageProps) {
+export function TutorialPage({ type, cardIndex, onNext, onSkip, passphraseEnabled = false, onPassphraseToggle, nextPending = false }: TutorialPageProps) {
   const { t } = useTranslation('setup')
   const cards = type === 'pre' ? PRE_CARDS : POST_CARDS
   const card = cards[cardIndex]
   if (!card) return null
   const isLast = cardIndex === cards.length - 1
+  const isPassphrase = card.interactive === 'passphrase'
+  const showSkip = !card.nonSkippable
   const nextLabel = isLast
     ? t(type === 'pre' ? 'tutorial.actions.getStarted' : 'tutorial.actions.startUsing')
     : t('footer.next')
@@ -251,6 +288,28 @@ export function TutorialPage({ type, cardIndex, onNext, onSkip }: TutorialPagePr
           <Text fontSize="sm" color="gray.400" textAlign="center" lineHeight="1.6" maxW="340px">
             {t(card.bodyKey)}
           </Text>
+
+          {/* Inline passphrase opt-in (interactive card only) */}
+          {isPassphrase && (
+            <VStack gap={2} w="100%" pt={1}>
+              <Flex w="100%" align="center" justify="space-between" gap={3}
+                bg="rgba(255,255,255,0.04)" border="1px solid" borderColor={`${card.accent}33`}
+                borderRadius="xl" px={4} py={3}>
+                <Text fontSize="sm" fontWeight="600" color="white" textAlign="left">
+                  {t('tutorial.cards.hiddenWallets.toggleLabel', { defaultValue: 'Enable passphrase protection' })}
+                </Text>
+                <CardToggle
+                  checked={passphraseEnabled}
+                  onChange={(v) => onPassphraseToggle?.(v)}
+                  accent={card.accent}
+                  disabled={nextPending}
+                />
+              </Flex>
+              <Text fontSize="xs" color="gray.500" textAlign="center" maxW="340px">
+                {t('tutorial.cards.hiddenWallets.settingsHint', { defaultValue: 'You can turn this on or off anytime in Settings.' })}
+              </Text>
+            </VStack>
+          )}
         </VStack>
       </Box>
 
@@ -259,19 +318,22 @@ export function TutorialPage({ type, cardIndex, onNext, onSkip }: TutorialPagePr
         <Button w="100%" size="md" bg={card.accent} color="black" fontWeight="700"
           _hover={{ opacity: 0.9, transform: 'translateY(-1px)', boxShadow: `0 4px 16px ${card.accent}40` }}
           _active={{ transform: 'scale(0.98)' }} transition="all 0.15s ease"
-          onClick={onNext}
+          onClick={onNext} disabled={nextPending}
         >
           <HStack gap={2} justify="center">
+            {nextPending && <Spinner size="sm" />}
             <Text>{nextLabel}</Text>
-            <FaChevronRight size={10} />
+            {!nextPending && <FaChevronRight size={10} />}
           </HStack>
         </Button>
-        <Button w="100%" size="sm" variant="ghost" color="gray.500" fontWeight="500"
-          _hover={{ color: 'gray.300', bg: 'rgba(255,255,255,0.04)' }}
-          transition="all 0.15s ease" onClick={onSkip}
-        >
-          {skipLabel}
-        </Button>
+        {showSkip && (
+          <Button w="100%" size="sm" variant="ghost" color="gray.500" fontWeight="500"
+            _hover={{ color: 'gray.300', bg: 'rgba(255,255,255,0.04)' }}
+            transition="all 0.15s ease" onClick={onSkip}
+          >
+            {skipLabel}
+          </Button>
+        )}
       </VStack>
 
       {/* Step counter */}
