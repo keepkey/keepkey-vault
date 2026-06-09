@@ -1054,13 +1054,25 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   }, [liveStatus])
 
   // ── Load cached balances ──────────────────────────────────────────
+  // Cache-first; when the cache is null/empty (hidden wallets always — the
+  // balance cache is never written for passphrase sessions — and first-run),
+  // fall through to a live getBalances, mirroring Dashboard's cache-miss
+  // auto-refresh. Without this the FROM picker shows "Your KeepKey is empty"
+  // for hidden wallets and non-EVM fromAddress never resolves (it reads
+  // balances.find()?.address). getBalances derives addresses live from the
+  // device and persists nothing for hidden wallets.
   useEffect(() => {
     if (!open) return
+    let cancelled = false
     rpcRequest<{ balances: ChainBalance[]; updatedAt: number } | null>('getCachedBalances', undefined, 5000)
       .then((result) => {
-        if (result?.balances) setBalances(result.balances)
+        if (cancelled) return
+        if (result?.balances?.length) { setBalances(result.balances); return }
+        return rpcRequest<ChainBalance[]>('getBalances', undefined, 120000)
+          .then((live) => { if (!cancelled && Array.isArray(live) && live.length) setBalances(live) })
       })
       .catch(() => {})
+    return () => { cancelled = true }
   }, [open])
 
   // ── Live balance sync — keep sendMax math current ──────────────────

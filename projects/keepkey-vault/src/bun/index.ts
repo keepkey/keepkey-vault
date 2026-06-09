@@ -115,6 +115,7 @@ import { loadSupportedChains } from "../shared/swap-support-matrix"
 import { PioneerSocket } from "./pioneer-socket"
 import { startEventStream, stopEventStream, type AddressEntry } from "./event-stream"
 import { rebuildActivityHistory } from "./activity-history"
+import { addSessionActivity, getSessionActivity, clearSessionActivity } from "./session-activity"
 import { buildTx, broadcastTx } from "./txbuilder"
 import { buildCosmosStakingTx, buildCosmosNameRegTx } from "./txbuilder/cosmos"
 import { initializeOrchardFromDevice, scanOrchardNotes, getShieldedBalance, sendShielded, ensureFvkLoaded, displayOrchardAddressOnDevice } from "./txbuilder/zcash-shielded"
@@ -767,6 +768,13 @@ function getAppSettings() {
 	}
 }
 
+/** Scope for wallet-scoped DB rows.
+ *  INVARIANT: a non-null scope does NOT imply persistence is allowed. Hidden
+ *  (passphrase) sessions also get an in-memory scope (sendPassphrase derives
+ *  seedEthAddress RAM-only), so every consumer that WRITES to disk must ALSO
+ *  gate on !engine.isPassphraseWallet. Scoped READS are safe as-is: a hidden
+ *  walletId never has persisted rows (the write gates guarantee it), so
+ *  wallet-scoped queries return empty rather than leaking standard-wallet data. */
 function getWalletDbScope(): { deviceId: string; walletId: string } | null {
 	const deviceId = engine.getDeviceState().deviceId
 	if (!deviceId) return null
@@ -4723,7 +4731,13 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return result
 			},
 			getPendingSwaps: async () => {
-				if (engine.isPassphraseWallet) return []
+				// Hidden sessions DO get pending swaps: the tracker holds them in RAM
+				// (registerSwap with skipPersist → noPersistSwaps), so this exposes only
+				// live in-session state. The rehydrate inside swap-tracker reads
+				// swap_history scoped to walletId — a hidden walletId has zero persisted
+				// rows (write gates), so nothing from the standard wallet can leak here,
+				// and the in-memory filter (s.walletId === walletId) keeps the two
+				// sessions' swaps apart in both directions.
 				const { getPendingSwaps } = await import('./swap-tracker')
 				const scope = getWalletDbScope()
 				if (!scope) return []
@@ -4889,7 +4903,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			// ── Recent Activity (from api_log + swap_history) ────────
 			getRecentActivity: async (params) => {
 				// PRIVACY: Don't expose standard-wallet activity during hidden sessions.
-				if (engine.isPassphraseWallet) return []
+				// Hidden sessions get the RAM-only session store instead (populated by
+				// scanChainHistory's live fetch below) — display without persistence.
+				if (engine.isPassphraseWallet) return getSessionActivity(params?.limit || 50, params?.chainId)
 				const scope = getWalletDbScope()
 				if (!scope) return []
 				return getRecentActivityFromLog(params?.limit || 50, params?.chainId, scope.deviceId, scope.walletId)
@@ -4897,13 +4913,30 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			scanChainHistory: async (params) => {
 				const chain = getAllChains().find(c => c.id === params.chainId)
 				if (!chain) throw new Error(`Unknown chain: ${params.chainId}`)
-
-				// PRIVACY: Chain history reads from DB cache + writes to api_log,
-				// both of which are bypassed/risky for passphrase wallets.
-				if (engine.isPassphraseWallet) {
-					throw new Error('Chain history scanning is not available for passphrase-protected wallets (privacy).')
-				}
 				if (!engine.wallet) throw new Error('No device connected')
+
+				// PRIVACY: hidden sessions never write api_log — but the server lookup
+				// only needs an address. Fetch the same Pioneer history live (dryRun)
+				// and hold the rows in RAM only; cleared on needs_passphrase/disconnect.
+				if (engine.isPassphraseWallet) {
+					const deviceId = engine.getDeviceState().deviceId || 'unknown'
+					// Scope is normally set in-memory by sendPassphrase; the fallback covers
+					// reconnect-with-cached-passphrase where no identity probe ran. Only used
+					// for the (empty-by-invariant) dedup read + result echo — nothing is written.
+					const scope = getWalletDbScope() || { deviceId, walletId: `${deviceId}:hidden-session` }
+					const result = await rebuildActivityHistory({
+						wallet: engine.wallet,
+						scope,
+						chains: getAllChains(),
+						firmwareVersion: engine.getDeviceState().firmwareVersion,
+						options: { chainId: params.chainId, dryRun: true, collectRows: true },
+					})
+					const chainResult = result.chains.find(c => c.chainId === params.chainId)
+					if (chainResult?.error) throw new Error(chainResult.error)
+					const added = addSessionActivity(result.rows || [])
+					console.log(`[activity] Live-scanned ${chain.symbol} (hidden session): ${chainResult?.txs || 0} txs, ${added} new — RAM only`)
+					return { count: added }
+				}
 				const scope = getWalletDbScope()
 				if (!scope) throw new Error('Wallet scope is not ready. Unlock the device and wait for seed identity.')
 
@@ -5887,6 +5920,10 @@ engine.on('state-change', (state) => {
 	}
 	if (state.state === 'disconnected' || state.state === 'needs_passphrase') {
 		pendingScopedApiLogs.splice(0)
+		// PRIVACY: hidden-session activity must not outlive its session — drop the
+		// RAM store the moment the session ends (unplug) or a new one starts
+		// (device requests a passphrase). No-op for standard sessions (store empty).
+		clearSessionActivity()
 	}
 	// When entering passphrase mode, the seed is about to change — clear all
 	// cached addresses so they get re-derived from the new passphrase seed.
@@ -5915,6 +5952,7 @@ engine.on('seed-changed', ({ deviceId, oldAddress, newAddress }) => {
 	console.warn(`[Vault] SEED CHANGED on ${deviceId}: ${oldAddress?.slice(0, 10)} → ${newAddress?.slice(0, 10)}`)
 	btcAccounts.reset()
 	evmAddresses.reset()
+	clearSessionActivity()
 	// Zcash sidecar holds a per-seed FVK + scanned notes both in memory and in
 	// ~/.keepkey/zcash_wallet.db. After a seed change those are wrong for the
 	// new wallet — but `hasFvkLoaded()` would still return true (cache is

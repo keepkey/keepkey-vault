@@ -470,6 +470,71 @@ describe('parseQuoteResponse', () => {
     expect(result.relayTx?.isDepositChannel).toBe(true)
   })
 
+  // ── Buildable-quote selection (scan past unbuildable head quotes) ──
+
+  test('unbuildable NEAR Intents head quote — falls through to buildable quotes[1]', () => {
+    // NEAR memoless with no deposit address and no calldata on a non-UTXO
+    // source is unbuildable. Previously quotes[0] was taken unconditionally,
+    // so this killed the pair even with a buildable Chainflip route behind it.
+    const btcCaip = 'bip122:000000000019d6689c085ae165831e93/slip44:0'
+    const ethCaip = 'eip155:1/slip44:60'
+    const resp = {
+      data: [
+        {
+          integration: 'shapeshift',
+          // inbound_address present but no memo, no txParams.to (no deposit
+          // channel), no calldata, non-UTXO source → "No supported routes"
+          quote: { swapper: 'NEAR Intents', buyAmount: '0.0003', inbound_address: 'near_deposit_addr', txs: [{ txParams: {} }] },
+        },
+        {
+          integration: 'shapeshiftSwap',
+          quote: {
+            swapper: 'Chainflip',
+            buyAmount: '0.0002685',
+            txs: [{ txParams: { to: '0xchainflip_deposit', data: '0x', value: '10000000000000000' } }],
+          },
+        },
+      ],
+    }
+    const result = parseQuoteResponse(resp, { fromCaip: ethCaip, toCaip: btcCaip, slippageBps: 300 })
+    expect(result.swapper).toBe('Chainflip')
+    expect(result.relayTx?.isDepositChannel).toBe(true)
+  })
+
+  test('NEAR Intents is the ONLY quote and unbuildable — still throws No supported routes', () => {
+    const btcCaip = 'bip122:000000000019d6689c085ae165831e93/slip44:0'
+    const ethCaip = 'eip155:1/slip44:60'
+    const resp = {
+      data: [{
+        integration: 'shapeshift',
+        quote: { swapper: 'NEAR Intents', buyAmount: '0.0003', inbound_address: 'near_deposit_addr', txs: [{ txParams: {} }] },
+      }],
+    }
+    expect(() => parseQuoteResponse(resp, { fromCaip: ethCaip, toCaip: btcCaip, slippageBps: 300 }))
+      .toThrow(/No supported routes for this pair.*NEAR Intents/)
+  })
+
+  test('zero-output head quote — falls through to buildable quotes[1]', () => {
+    const ethCaip = 'eip155:1/slip44:60'
+    const usdcCaip = 'eip155:1/erc20:0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48'
+    const resp = {
+      data: [
+        { integration: 'thorchain', quote: { buyAmount: '0', memo: 'MEMO', inbound_address: '0xvault' } },
+        {
+          integration: 'shapeshift',
+          quote: {
+            swapper: 'Relay',
+            buyAmount: '100.0',
+            txs: [{ txParams: { data: '0x12345678000000000000000000000000000000000000000000', to: '0xrelayRouter', value: '0', chainId: 1 } }],
+          },
+        },
+      ],
+    }
+    const result = parseQuoteResponse(resp, { fromCaip: ethCaip, toCaip: usdcCaip, slippageBps: 300 })
+    expect(result.swapper).toBe('Relay')
+    expect(result.expectedOutput).toBe('100.0')
+  })
+
   test('relayTx with real calldata to EVM destination is still accepted', () => {
     // Relay ETH → USDC (same chain, EVM destination) should work fine.
     const ethCaip = 'eip155:1/slip44:60'
