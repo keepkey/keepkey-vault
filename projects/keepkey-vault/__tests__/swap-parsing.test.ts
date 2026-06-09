@@ -446,6 +446,52 @@ describe('parseQuoteResponse', () => {
     expect(result.nearIntentsRefundTo).toBe(userZecAddr)
   })
 
+  test('NEAR Intents SPL→ETH (Solana source, no memo) — memoless transfer succeeds', () => {
+    const solUsdcCaip = 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/token:EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'
+    const ethCaip = 'eip155:1/slip44:60'
+    const depositAddress = 'ALUVVWPJb2XY1AXzh3mxAnGVGxgwbLvYZKufs5hk1kzK'
+    const userSolAddr = 'A8cBVxWP6FUAp9K24Ge6Bb43qwqmQaMBBHqJCbFWb6Yt'
+    const resp = {
+      data: [{
+        integration: 'nearIntents',
+        quote: {
+          source: 'near-intents',
+          swapper: 'NEAR Intents',
+          amountOut: 0.0149715747000598,
+          amountOutMin: 0.014821858953059201,
+          buyAmount: 0.0149715747000598,
+          txs: [{
+            type: 'SOLANA',
+            chain: 'solana:5eykt4usfv8p8njdtrepy1vzqkqzkvdp',
+            txParams: {
+              recipientAddress: depositAddress,
+              senderAddress: userSolAddr,
+              amount: '24.856901',
+            },
+          }],
+          meta: {
+            depositAddress,
+            depositMemo: null,
+          },
+          raw: {
+            quote: {
+              depositAddress,
+              amountOutFormatted: '0.014971574700059801',
+            },
+          },
+        },
+      }],
+    }
+    const result = parseQuoteResponse(resp, { fromCaip: solUsdcCaip, toCaip: ethCaip, slippageBps: 100 })
+    expect(result.swapper).toBe('NEAR Intents')
+    expect(result.integration).toBe('nearIntents')
+    expect(result.inboundAddress).toBe(depositAddress)
+    expect(result.memo).toBe('')
+    expect(result.relayTx).toBeUndefined()
+    expect(result.nearIntentsDepositAddress).toBe(depositAddress)
+    expect(result.nearIntentsRefundTo).toBe(userSolAddr)
+  })
+
   test('NEAR Intents first in list — selected as best (Pioneer ranks it first)', () => {
     const btcCaip = 'bip122:000000000019d6689c085ae165831e93/slip44:0'
     const ethCaip = 'eip155:1/slip44:60'

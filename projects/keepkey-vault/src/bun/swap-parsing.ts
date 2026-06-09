@@ -184,6 +184,7 @@ function parseSingleQuote(
   // are rejected by buildRelaySwapTx's ERC-20 guard if applicable, and warned
   // by the pre-existing cross-chain guard.
   const fromIsUtxo = params.fromCaip.startsWith('bip122:')
+  const fromIsSolana = params.fromCaip.startsWith('solana:')
   // Deposit-channel only applies when source is EVM. For UTXO sources (BTC→ETH via
   // NEAR Intents), the txParams.to is a Bitcoin address and we use the inboundAddress
   // path instead (isMemolessTransfer below).
@@ -238,6 +239,12 @@ function parseSingleQuote(
     || txParams.to
     || best.inbound_address || best.inboundAddress
 
+  if (!inboundAddress && swapper === 'NEAR Intents') {
+    inboundAddress = txParams.recipientAddress
+      || (quote.meta as any)?.depositAddress
+      || raw.quote?.depositAddress
+  }
+
   // Last-resort fallback: for UTXO swaps, THORChain's "router" IS the vault address
   // (EVM router is a contract, but UTXO "router" is the inbound vault)
   if (!inboundAddress && router) {
@@ -272,10 +279,11 @@ function parseSingleQuote(
     console.error(`${TAG}   full best: ${JSON.stringify(best, null, 2).slice(0, 2000)}`)
     throw new Error('Quote response missing inbound address')
   }
-  // For memo-less UTXO swaps (NEAR Intents BTC→ETH): the deposit address IS the
-  // only instruction — no memo or calldata needed. fromIsUtxo guards direction:
-  // EVM→BTC with no calldata has no way to encode the BTC destination.
-  const isMemolessTransfer = fromIsUtxo && !!inboundAddress && swapper === 'NEAR Intents'
+  // For memo-less UTXO/Solana swaps (NEAR Intents BTC/SOL/SPL→EVM): the deposit
+  // address IS the only instruction — no memo or calldata needed. Source-chain
+  // guards preserve the EVM→BTC/SOL case: EVM with no calldata has no way to
+  // encode the destination, so it remains rejected unless it is a deposit channel.
+  const isMemolessTransfer = (fromIsUtxo || fromIsSolana) && !!inboundAddress && swapper === 'NEAR Intents'
   if (!memo && !hasPrebuiltTx && !isNativeDeposit && !isMemolessTransfer) {
     console.error(`${TAG} MISSING memo + no prebuilt tx — dumping response structure:`)
     console.error(`${TAG}   integration: ${integration}, swapper: ${swapper ?? 'none'}`)
