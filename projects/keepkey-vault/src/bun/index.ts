@@ -763,6 +763,7 @@ function getAppSettings() {
 		preReleaseUpdates,
 		alphaFirmware,
 		privateModeEnabled,
+		passphraseIntroShown: getSetting('passphrase_intro_shown') === '1',
 	}
 }
 
@@ -3895,6 +3896,12 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 			// ── App Settings ─────────────────────────────────────────
 			getAppSettings: async () => {
+				return getAppSettings()
+			},
+			// One-time: mark the passphrase/hidden-wallet intro dialog as seen so it
+			// never shows again (also set when the OOB passphrase card is completed).
+			markPassphraseIntroShown: async () => {
+				setSetting('passphrase_intro_shown', '1')
 				return getAppSettings()
 			},
 			setRestApiEnabled: async (params) => {

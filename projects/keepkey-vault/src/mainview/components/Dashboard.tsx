@@ -12,6 +12,7 @@ import { DonutChart, SelectedSlice, type DonutChartItem } from "./DonutChart"
 import { AddChainDialog } from "./AddChainDialog"
 import { ReportDialog } from "./ReportDialog"
 import { Bip85VaultDialog } from "./Bip85VaultDialog"
+import { PassphraseIntroDialog } from "./PassphraseIntroDialog"
 import { DogeEasterEgg } from "./DogeEasterEgg"
 import { HeatmapView, buildAllChainsTiles, buildChainDetailTiles } from "./HeatmapView"
 import { StackedBarView, type StackedBarItem } from "./StackedBarView"
@@ -676,6 +677,11 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 	const [showBip85, setShowBip85] = useState(false)
 	const [bip85Enabled, setBip85Enabled] = useState(false)
 	const [zcashEnabled, setZcashEnabled] = useState(false)
+	// One-time passphrase/hidden-wallet intro. `passphraseIntroSeen` starts true so
+	// the dialog never flashes before settings load; refreshFeatureFlags sets the
+	// real value. `introDismissed` suppresses it for the rest of this session.
+	const [passphraseIntroSeen, setPassphraseIntroSeen] = useState(true)
+	const [introDismissed, setIntroDismissed] = useState(false)
 	const [pioneerError, setPioneerError] = useState<PioneerError | null>(null)
 	const [streamStatus, setStreamStatus] = useState<{ connected: boolean; watching: number } | null>(null)
 	const [cacheUpdatedAt, setCacheUpdatedAt] = useState<number | null>(null)
@@ -821,6 +827,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 			.then(s => {
 				setBip85Enabled(s.bip85Enabled)
 				setZcashEnabled(s.zcashPrivacyEnabled)
+				setPassphraseIntroSeen(s.passphraseIntroShown)
 			})
 			.catch(() => {})
 	}, [])
@@ -2485,6 +2492,18 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 
 			{showBip85 && (
 				<Bip85VaultDialog onClose={() => setShowBip85(false)} />
+			)}
+
+			{/* One-time passphrase/hidden-wallet intro — shown the first time a user
+			    reaches the dashboard, then persisted so it never reappears. Skipped
+			    in watch-only mode and for users who already saw it (incl. OOB). */}
+			{!passphraseIntroSeen && !introDismissed && !watchOnly && initialLoaded && (
+				<PassphraseIntroDialog
+					onClose={() => {
+						setIntroDismissed(true)
+						rpcRequest('markPassphraseIntroShown').catch(() => {})
+					}}
+				/>
 			)}
 
 			{/* BIP-85 lock icon — bottom right (only when feature enabled AND firmware >= 7.16.0) */}

@@ -2426,6 +2426,9 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
                     setApplyingTipPassphrase(false)
                     applyingTipPassphraseRef.current = false
                   }
+                  // The user just got the passphrase explanation here — suppress the
+                  // one-time dashboard intro dialog so they aren't educated twice.
+                  rpcRequest('markPassphraseIntroShown').catch(() => {})
                   setStep('complete')
                 }}
                 // The passphrase card itself hides Skip (nonSkippable). Skipping an
