@@ -1846,6 +1846,10 @@ export class EngineController extends EventEmitter {
       // Now it's safe to refresh features.
       this.cachedFeatures = await this.wallet.getFeatures()
       this.updateState(this.deriveState(this.cachedFeatures))
+      // If sendPassphrase() ran while promptPin owned the transport, it could
+      // not derive the hidden-wallet scope there. Do it now, after the seed
+      // access request has fully completed.
+      await this.deriveHiddenWalletScopeInMemory()
       return { status: 'unlocked', message: 'Device already unlocked' }
     } catch (err: any) {
       // PIN/passphrase flow interruption is expected — the UI handles input
@@ -1885,28 +1889,8 @@ export class EngineController extends EventEmitter {
       this.cachedFeatures = await this.wallet.getFeatures()
       this.updateState(this.deriveState(this.cachedFeatures))
     }
-    // Hidden wallet: derive the seed identity IN MEMORY ONLY so getWalletDbScope()
-    // works for a fresh passphrase entry, matching the reconnect probe (which sets
-    // seedEthAddress for confirmed-hidden sessions). Deliberately NOT
-    // checkSeedIdentity() — that persists seed_eth_<deviceId> via setSetting, which
-    // would leave a disk trace of the hidden wallet. Standard sessions (empty
-    // passphrase) are covered by updateState → checkSeedIdentity above. Skipped
-    // while promptPinActive for the same transport-ownership reason as getFeatures.
     if (this.hiddenWalletActive && !this.promptPinActive) {
-      try {
-        const result = await (this.wallet as any).ethGetAddress({
-          addressNList: [0x80000000 + 44, 0x80000000 + 60, 0x80000000 + 0, 0, 0],
-          showDisplay: false,
-        })
-        const addr = (typeof result === 'string' ? result : result?.address)?.toLowerCase()
-        if (addr) {
-          this.seedEthAddress = addr // RAM only — never written to disk for hidden wallets
-          this.emit('wallet-scope-ready', { deviceId: this.cachedFeatures?.deviceId || 'unknown', seedAddress: addr })
-          this.emit('state-change', this.getDeviceState())
-        }
-      } catch (err: any) {
-        console.warn('[Engine] Hidden-wallet scope derive failed (non-fatal):', err?.message)
-      }
+      await this.deriveHiddenWalletScopeInMemory()
     }
   }
 
@@ -2108,6 +2092,29 @@ export class EngineController extends EventEmitter {
 
   /** The primary ETH address for the current seed (available after ready). */
   get currentSeedEthAddress(): string | null { return this.seedEthAddress }
+
+  /**
+   * Hidden wallet: derive the seed identity IN MEMORY ONLY so getWalletDbScope()
+   * works for fresh passphrase sessions. Deliberately NOT checkSeedIdentity():
+   * that persists seed_eth_<deviceId> via setSetting, which would leave a disk
+   * trace of the hidden wallet.
+   */
+  private async deriveHiddenWalletScopeInMemory(): Promise<void> {
+    if (!this.wallet || !this.hiddenWalletActive) return
+    try {
+      const result = await (this.wallet as any).ethGetAddress({
+        addressNList: [0x80000000 + 44, 0x80000000 + 60, 0x80000000 + 0, 0, 0],
+        showDisplay: false,
+      })
+      const addr = (typeof result === 'string' ? result : result?.address)?.toLowerCase()
+      if (!addr) return
+      this.seedEthAddress = addr // RAM only — never written to disk for hidden wallets
+      this.emit('wallet-scope-ready', { deviceId: this.cachedFeatures?.deviceId || 'unknown', seedAddress: addr })
+      this.emit('state-change', this.getDeviceState())
+    } catch (err: any) {
+      console.warn('[Engine] Hidden-wallet scope derive failed (non-fatal):', err?.message)
+    }
+  }
 
   /**
    * Derive ETH primary address and check if the seed changed since last session.
