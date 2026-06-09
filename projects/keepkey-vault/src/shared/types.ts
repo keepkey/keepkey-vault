@@ -571,6 +571,7 @@ export interface AppSettings {
   preReleaseUpdates: boolean     // opt-in to pre-release auto-updates (default OFF)
   alphaFirmware: boolean         // opt-in to alpha firmware channel (manifest.beta) (default OFF)
   privateModeEnabled: boolean    // hide portfolio totals from the UI (default OFF)
+  passphraseIntroShown: boolean  // one-time passphrase/hidden-wallet intro dialog seen (default false)
 }
 
 // ── WalletConnect types ─────────────────────────────────────────────────

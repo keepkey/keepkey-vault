@@ -2426,6 +2426,14 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
                     setApplyingTipPassphrase(false)
                     applyingTipPassphraseRef.current = false
                   }
+                  // The user just got the passphrase explanation here — persist the
+                  // one-time intro flag BEFORE leaving so the dashboard's on-mount
+                  // settings read can't race it and re-show the dialog. The bun side
+                  // writes SQLite synchronously, so once this resolves getAppSettings
+                  // is guaranteed to return passphraseIntroShown=true. Best-effort:
+                  // on failure we still complete (worst case the dialog shows once).
+                  try { await rpcRequest('markPassphraseIntroShown') }
+                  catch (e) { console.error('[OOB] mark passphrase intro shown failed:', e) }
                   setStep('complete')
                 }}
                 // The passphrase card itself hides Skip (nonSkippable). Skipping an
