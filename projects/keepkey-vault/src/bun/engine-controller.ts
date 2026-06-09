@@ -1767,6 +1767,28 @@ export class EngineController extends EventEmitter {
     }
     if (opts.autoLockDelayMs !== undefined) settings.autoLockDelayMs = opts.autoLockDelayMs
     await this.wallet.applySettings(settings)
+
+    // Toggling passphrase protection changes the effective seed, but the firmware
+    // caches the derived seed for the session INDEPENDENTLY of the
+    // passphrase_protection flag. storage_setPassphraseProtected() only flips the
+    // flag — it does not clear session.seedCached — so storage_getRootNode() keeps
+    // returning the seed cached under the OLD setting (typically the empty-passphrase
+    // standard wallet derived earlier this session). Every subsequent
+    // GetPublicKey/GetAddress — including "view address on device" — then shows the
+    // wrong wallet until a physical reconnect power-cycles the device and clears the
+    // cache. ClearSession drops the cached seed + passphrase + PIN over USB, so the
+    // device re-prompts and re-derives from the correct seed with no reconnect needed.
+    // Skipped on the emulator: a ClearSession right after ApplySettings can leave a
+    // stale ButtonAck in the ring buffer (emulators reconnect for clean state).
+    if (opts.usePassphrase !== undefined && this.activeTransport !== 'emulator') {
+      await this.wallet.clearSession()
+      // Session is now empty — the device will re-prompt for PIN/passphrase. Drop our
+      // session classification so it's re-established on re-entry (sendPassphrase sets
+      // hiddenWalletActive; deriveState routes through needs_pin → needs_passphrase).
+      this.passphraseSetThisSession = false
+      this.hiddenWalletActive = false
+    }
+
     // Emulator: skip getFeatures — stale ButtonAck in rb_main_in causes failure.
     // Caller should reconnect via connectEmulator() for clean state.
     if (opts.skipRefresh) return
