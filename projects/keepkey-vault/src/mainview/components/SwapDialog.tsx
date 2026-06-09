@@ -1586,8 +1586,15 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     return cb?.address || ''
   }, [toAsset, balances, evmAddresses, effectiveEvmIndex])
 
-  // For UTXO destinations, ensure we display (and use) a real receive address
-  // rather than an xpub. Mirrors the re-derive effect AssetPage runs on mount.
+  // Derive a real receive address for non-EVM destinations from the device when
+  // the balance cache hasn't supplied one. UTXO chains additionally need this to
+  // turn an xpub into a real address. EVM destinations are skipped — their
+  // address comes from evmAddresses via cachedToAddress (above), cache-free.
+  // This is what makes auto-quoting work for Solana/Cosmos/etc.: without it the
+  // destination address stayed '' on an empty cache and the quote never fired
+  // until the user hit the manual "Get Quote" button. Mirrors the re-derive
+  // effect AssetPage runs on mount; the cancel flag below guards against an
+  // output-asset switch landing a stale address on the wrong chain.
   const [resolvedToAddress, setResolvedToAddress] = useState<string>('')
   const [destAddressError, setDestAddressError] = useState<string | null>(null)
   useEffect(() => {
@@ -1596,7 +1603,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     if (!toAsset) return
     const toChain = CHAINS.find(c => c.id === toAsset.chainId)
     if (!toChain) return
-    if (toChain.chainFamily !== 'utxo') return
+    if (toChain.chainFamily === 'evm') return
     // Fast path: cached address already looks like a real address (not an xpub).
     if (cachedToAddress && !XPUB_RE.test(cachedToAddress)) return
     let cancelled = false
