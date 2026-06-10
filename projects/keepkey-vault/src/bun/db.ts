@@ -2034,6 +2034,26 @@ export function getAddressBookList(filter: AddressBookFilter): AddressBookEntry[
   }
 }
 
+/** Match a recipient against the book for instant form-fill detection (R5). EXACT
+ *  networkId equality (never family/prefix — fund safety). Returns the best match:
+ *  own wallets first, then explicitly-saved contacts. History-only recipients
+ *  (saved_at NULL) do NOT count as "known". null if unknown. */
+export function matchAddressBook(networkId: string, address: string, chainFamily: string): AddressBookEntry | null {
+  try {
+    if (!db) return null
+    const addr = normalizeAddress(address, chainFamily)
+    const row = db.query(
+      `SELECT * FROM addressbook
+        WHERE network_id = ? AND address = ? AND (kind = 'own' OR saved_at IS NOT NULL)
+        ORDER BY (kind = 'own') DESC, saved_at DESC LIMIT 1`,
+    ).get(networkId, addr) as any
+    return row ? mapAddressBookRow(row) : null
+  } catch (e: any) {
+    console.warn('[db] matchAddressBook failed:', e.message)
+    return null
+  }
+}
+
 /** Patch a label/note. Pass walletId to scope by wallet; omit (null) to act on the
  *  entry globally (the book is wallet-agnostic). Returns true if a row changed. */
 export function updateAddressBookEntry(

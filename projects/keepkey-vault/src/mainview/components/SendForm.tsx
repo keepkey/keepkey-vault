@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, Fragment } from "react"
+import { useState, useEffect, useCallback, useMemo, useRef, Fragment } from "react"
 import { useTranslation } from "react-i18next"
 import { Box, Flex, Text, VStack, Button, Input } from "@chakra-ui/react"
 import { rpcRequest, rpcFire } from "../lib/rpc"
@@ -66,11 +66,12 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 	const [showPayload, setShowPayload] = useState(false)
 	const [showScanner, setShowScanner] = useState(false)
 	const [showAddressBook, setShowAddressBook] = useState(false)
-	const [selectedContact, setSelectedContact] = useState<AddressBookEntry | null>(null)
-	// R4 opt-in: recipient isn't a saved contact → prompt to save after broadcast.
-	const [recipientUnsaved, setRecipientUnsaved] = useState(false)
-	const [contactSaved, setContactSaved] = useState(false)
-	const [saveDismissed, setSaveDismissed] = useState(false)
+	// R5 form-fill detection: as the recipient is entered, match it against the book.
+	const [matchedContact, setMatchedContact] = useState<AddressBookEntry | null>(null)
+	const [addressIsNew, setAddressIsNew] = useState(false)
+	const [showSaveDialog, setShowSaveDialog] = useState(false)
+	// Address we've already auto-prompted to save, so the dialog doesn't re-pop.
+	const promptedAddressRef = useRef<string | null>(null)
 
 	// Reset form when token selection changes
 	const tokenCaip = token?.caip ?? null
@@ -85,11 +86,11 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 		setUsdAmount("")
 		setMemo("")
 		setIsMax(false)
-		setSelectedContact(null)
+		setMatchedContact(null)
+		setAddressIsNew(false)
+		setShowSaveDialog(false)
+		promptedAddressRef.current = null
 		setShowAddressBook(false)
-		setRecipientUnsaved(false)
-		setContactSaved(false)
-		setSaveDismissed(false)
 	}, [tokenCaip])
 
 	// Derived display values — token mode vs native mode
@@ -167,6 +168,37 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 		return validateAddress(recipient, chain)
 	}, [recipient, chain])
 
+	// R5: instantly detect whether the recipient is a known contact/own wallet (show
+	// its logo) or a new external address (offer to save). Debounced; clears on every
+	// edit so we never show stale info while the next lookup resolves.
+	const addressValid = addressValidation?.valid === true
+	useEffect(() => {
+		setMatchedContact(null)
+		setAddressIsNew(false)
+		const addr = recipient.trim()
+		if (!addr || !addressValid) return
+		let alive = true
+		const networkId = caipToNetworkId(activeCaip)
+		const handle = setTimeout(() => {
+			rpcRequest<AddressBookEntry | null>("matchAddress", { networkId, address: addr }, 5000)
+				.then(entry => {
+					if (!alive) return
+					if (entry) {
+						setMatchedContact(entry)
+					} else {
+						setAddressIsNew(true)
+						// Auto-prompt to save — once per distinct new address.
+						if (promptedAddressRef.current !== addr) {
+							promptedAddressRef.current = addr
+							setShowSaveDialog(true)
+						}
+					}
+				})
+				.catch(() => { /* detection is best-effort; never block sending */ })
+		}, 300)
+		return () => { alive = false; clearTimeout(handle) }
+	}, [recipient, activeCaip, addressValid])
+
 	const handleBuild = useCallback(async () => {
 		if (!recipient || (!amount && !isMax)) return
 		if (addressValidation && !addressValidation.valid) { setError(t(addressValidation.error!)); return }
@@ -243,8 +275,6 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 			}, 60000)
 			setTxid(result.txid)
 			setPhase('broadcast')
-			// R4 opt-in: prompt to save the recipient only when it isn't already a contact.
-			if (result.recipientUnsaved) setRecipientUnsaved(true)
 			rpcFire('getBalance', { chainId: chain.id })
 		} catch (e: any) {
 			setError(e.message || t("broadcastFailed"))
@@ -263,11 +293,11 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 		setUsdAmount("")
 		setMemo("")
 		setIsMax(false)
-		setSelectedContact(null)
+		setMatchedContact(null)
+		setAddressIsNew(false)
+		setShowSaveDialog(false)
+		promptedAddressRef.current = null
 		setShowAddressBook(false)
-		setRecipientUnsaved(false)
-		setContactSaved(false)
-		setSaveDismissed(false)
 	}, [])
 
 	const copyTxid = useCallback(() => {
@@ -445,12 +475,26 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 						{addressValidation && !addressValidation.valid && (
 							<Text fontSize="11px" color="kk.error" mt="1">{t(addressValidation.error!)}</Text>
 						)}
-						{selectedContact && recipient === selectedContact.address && (
+						{/* R5: known contact/own wallet — show its identicon + label. */}
+						{matchedContact && (
 							<Flex align="center" gap="2" mt="1.5" px="2" py="1" w="fit-content" bg="rgba(233,196,106,0.06)" border="1px solid rgba(233,196,106,0.22)" borderRadius="999px">
-								<AddressIdenticon seed={selectedContact.kind === "own" ? (selectedContact.deviceId || selectedContact.address) : selectedContact.address} size={16} />
+								<AddressIdenticon seed={matchedContact.kind === "own" ? (matchedContact.deviceId || matchedContact.address) : matchedContact.address} size={16} />
 								<Text fontSize="11px" color="kk.gold" fontWeight="600" truncate maxW="220px">
-									{selectedContact.label || t("unlabeled", { ns: "addressbook" })}
+									{matchedContact.label || (matchedContact.kind === "own" ? (matchedContact.deviceLabel || t("ownWallet", { ns: "addressbook" })) : t("unlabeled", { ns: "addressbook" }))}
 								</Text>
+							</Flex>
+						)}
+						{/* R5: new external address — flag it + offer to save (opens dialog). */}
+						{addressIsNew && !matchedContact && (
+							<Flex align="center" gap="2" mt="1.5" px="2" py="1" w="fit-content" bg="rgba(224,140,123,0.08)" border="1px solid rgba(224,140,123,0.28)" borderRadius="999px">
+								<AddressIdenticon seed={recipient.trim()} size={16} />
+								<Text fontSize="11px" color="var(--rose)" fontWeight="600">
+									{t("newAddressBadge", { ns: "addressbook", defaultValue: "New address" })}
+								</Text>
+								<Box as="button" fontSize="11px" color="kk.gold" fontWeight="700" textDecoration="underline"
+									onClick={() => setShowSaveDialog(true)}>
+									{t("save", { ns: "common", defaultValue: "Save" })}
+								</Box>
 							</Flex>
 						)}
 					</Box>
@@ -730,13 +774,6 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 							</Flex>
 						</Box>
 
-						{/* R4 opt-in: confirmation once the recipient is saved as a contact. */}
-						{contactSaved && (
-							<Text fontSize="11px" color="var(--teal)" w="full" textAlign="center">
-								{t("savedToBook", { ns: "addressbook", defaultValue: "Saved to Address Book" })}
-							</Text>
-						)}
-
 						<Flex gap="2" w="full">
 							{explorerUrl && (
 								<Button
@@ -776,20 +813,20 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 				<AddressBookPicker
 					networkId={caipToNetworkId(activeCaip)}
 					chainFamily={chain.chainFamily}
-					onSelect={(e) => { setRecipient(e.address); setSelectedContact(e); setShowAddressBook(false) }}
+					onSelect={(e) => { setRecipient(e.address); promptedAddressRef.current = e.address; setShowAddressBook(false) }}
 					onClose={() => setShowAddressBook(false)}
 				/>
 			)}
 
-			{/* R4 opt-in: prompt to save a new external recipient after a successful send */}
-			{phase === 'broadcast' && recipientUnsaved && !contactSaved && !saveDismissed && (
+			{/* R5: save dialog for a new external recipient — at form-fill, before sending */}
+			{showSaveDialog && (
 				<SaveRecipientDialog
-					address={recipient}
+					address={recipient.trim()}
 					networkId={caipToNetworkId(activeCaip)}
 					assetCaip={chain.caip}
 					symbol={displaySymbol}
-					onClose={() => setSaveDismissed(true)}
-					onSaved={() => setContactSaved(true)}
+					onClose={() => setShowSaveDialog(false)}
+					onSaved={(entry) => { setMatchedContact(entry); setAddressIsNew(false); setShowSaveDialog(false) }}
 				/>
 			)}
 		</VStack>
