@@ -10,6 +10,7 @@ import { Box, Flex, Text, VStack, Button, Input, Image, HStack, Spinner } from "
 import CountUp from "react-countup"
 import { rpcRequest, rpcFire, onRpcMessage } from "../lib/rpc"
 import { formatBalance } from "../lib/formatting"
+import { isTokenCaip } from "../lib/asset-utils"
 import { useFiat } from "../lib/fiat-context"
 import { AssetIcon } from "./AssetIcon"
 import { CHAINS, getExplorerTxUrl, getExplorerBlockUrl } from "../../shared/chains"
@@ -685,6 +686,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   const [loadingAssets, setLoadingAssets] = useState(true)
   const [assetLoadError, setAssetLoadError] = useState<string | null>(null)
   const [balances, setBalances] = useState<ChainBalance[]>([])
+  const [loadingBalances, setLoadingBalances] = useState(false)
   // User-added custom tokens, refetched whenever the asset picker opens so a
   // freshly-added contract shows up on the next open without restarting.
   const [customTokens, setCustomTokens] = useState<CustomToken[]>([])
@@ -1062,16 +1064,27 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   // balances.find()?.address). getBalances derives addresses live from the
   // device and persists nothing for hidden wallets.
   useEffect(() => {
-    if (!open) return
+    if (!open) {
+      setLoadingBalances(false)
+      return
+    }
     let cancelled = false
+    setLoadingBalances(true)
     rpcRequest<{ balances: ChainBalance[]; updatedAt: number } | null>('getCachedBalances', undefined, 5000)
       .then((result) => {
         if (cancelled) return
-        if (result?.balances?.length) { setBalances(result.balances); return }
+        if (result?.balances?.length) {
+          setBalances(result.balances)
+          setLoadingBalances(false)
+          return
+        }
         return rpcRequest<ChainBalance[]>('getBalances', undefined, 120000)
-          .then((live) => { if (!cancelled && Array.isArray(live) && live.length) setBalances(live) })
+          .then((live) => {
+            if (!cancelled && Array.isArray(live)) setBalances(live)
+          })
+          .finally(() => { if (!cancelled) setLoadingBalances(false) })
       })
-      .catch(() => {})
+      .catch(() => { if (!cancelled) setLoadingBalances(false) })
     return () => { cancelled = true }
   }, [open])
 
@@ -1660,7 +1673,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   // address that didn't come from the user's wallet. Wait for the UTXO
   // resolver to populate a real receive address.
   const toAddressIsXpub = !!toAddress && !useCustomAddress && XPUB_RE.test(toAddress)
-  const canQuote = fromAsset && toAsset && !sameAsset && validAmount && fromAddress && toAddress && !toAddressIsXpub && !exceedsBalance && !exceedsSafeMax && !customAddressError
+  const canQuote = !!(fromAsset && toAsset && !sameAsset && validAmount && fromAddress && toAddress && !toAddressIsXpub && !exceedsBalance && !exceedsSafeMax && !customAddressError)
 
   // Human reason a quote can't fire right now, but ONLY for the cases that
   // otherwise render nothing — a missing send/receive address. Conditions that
@@ -1752,6 +1765,9 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       fromEvmAddressIndex: fromAsset.chainFamily === 'evm' ? evmAddresses.selectedIndex : undefined,
       integration: quote.integration,
       relayTx: quote.relayTx,
+      // Token sources Pioneer's available-assets doesn't pre-list (e.g. SPL
+      // USDT) have no decimals lookup backend-side — carry the picker's value.
+      tokenDecimals: isTokenCaip(fromAsset.caip!) ? normalizeDecimals(fromAsset.decimals) ?? undefined : undefined,
     }).then((res) => { if (!cancelled) { setPreviewBuild(res); setPreviewLoading(false) } })
       .catch((e: any) => { if (!cancelled) { setPreviewError(e?.message || 'Preview failed'); setPreviewLoading(false) } })
     return () => { cancelled = true }
@@ -1862,7 +1878,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     return () => {
       if (quoteTimerRef.current) clearTimeout(quoteTimerRef.current)
     }
-  }, [fromAsset?.asset, toAsset?.asset, sendAmount, sendIsMax, fromAddress, toAddress, exceedsBalance, fromBalance, slippageBps, requoteTick, destAddressError, toAddressIsXpub])
+  }, [fromAsset?.caip, toAsset?.caip, sendAmount, sendIsMax, fromAddress, toAddress, exceedsBalance, fromBalance, slippageBps, requoteTick, destAddressError, toAddressIsXpub])
 
   // ── Flip ──────────────────────────────────────────────────────────
   const handleFlip = useCallback(() => {
@@ -1877,6 +1893,14 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     setPhase('input')
     setError(null)
   }, [fromAsset, toAsset])
+
+  const handleBackToInput = useCallback(() => {
+    setQuote(null)
+    setPhase('input')
+    setError(null)
+    setQuoteRetryable(false)
+    setRequoteTick(tick => tick + 1)
+  }, [])
 
   // ── Execute swap ──────────────────────────────────────────────────
   const handleExecuteSwap = useCallback(async () => {
@@ -1982,6 +2006,9 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
         integration: liveQuote.integration,
         swapper: liveQuote.swapper,
         relayTx: liveQuote.relayTx,
+        // Same as the preview build: synthesized token sources need the
+        // picker's decimals — Pioneer's available-assets won't have them.
+        tokenDecimals: isTokenCaip(fromAsset.caip!) ? normalizeDecimals(fromAsset.decimals) ?? undefined : undefined,
       }, 600000)
 
       setTxid(result.txid)
@@ -2336,6 +2363,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
           {/* Loading state */}
           {loadingAssets && (
             <Box py="8" textAlign="center">
+              <Spinner size="md" color="kk.gold" mb="3" />
               <Text fontSize="sm" color="kk.textMuted">{t("loadingAssets")}</Text>
             </Box>
           )}
@@ -3833,7 +3861,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                   cursor="pointer"
                   _hover={{ bg: "var(--ink-3)" }}
                   transition="background 0.15s"
-                  onClick={() => { setQuote(null); setPhase('input') }}
+                  onClick={handleBackToInput}
                 >
                   {t("back")}
                 </Box>
@@ -4243,6 +4271,25 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                     </Box>
                   )}
 
+                  {phase === 'input' && !quote && !error && !quoteBlockReason && canQuote && (
+                    <Box mt="3" p="2.5" bg="rgba(233,196,106,0.06)" borderRadius="lg" border="1px solid" borderColor="rgba(233,196,106,0.20)"
+                      style={{ animation: 'kkSwapFadeIn 0.25s ease-out' }}>
+                      <Text fontSize="10px" color="kk.textSecondary" fontWeight="500" mb="2" lineHeight="1.45">
+                        {t("readyForQuote", "Ready to fetch a fresh quote.")}
+                      </Text>
+                      <Button
+                        w="full" size="sm" fontWeight="700" fontSize="12px"
+                        bg="kk.gold" color="black" borderRadius="lg" border="0"
+                        _hover={{ bg: "kk.goldHover" }}
+                        loading={manualQuoting}
+                        loadingText={t("gettingQuote")}
+                        onClick={handleManualQuote}
+                      >
+                        {t("getQuote", "Get Quote")}
+                      </Button>
+                    </Box>
+                  )}
+
                   {toAsset && (
                     <Box mt="2">
                       <Flex justify="space-between" align="center" mb="1">
@@ -4636,6 +4683,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
         onClose={() => setPickerSide(null)}
         swappable={assets}
         balances={balances}
+        balancesLoading={loadingBalances}
         customTokens={customTokens}
         excludeCaip={pickerSide === 'from' ? toAsset?.caip : fromAsset?.caip}
         side={pickerSide || 'from'}
