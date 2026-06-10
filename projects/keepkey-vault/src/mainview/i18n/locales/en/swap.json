@@ -11,6 +11,8 @@
 	"getQuote": "Get Quote",
 	"gettingQuote": "Getting quote...",
 	"noQuote": "No quote available",
+	"resolvingSendAddress": "Preparing your {{symbol}} send address…",
+	"resolvingReceiveAddress": "Preparing your {{symbol}} receive address…",
 	"expectedOutput": "Expected output",
 	"minimumReceived": "Minimum received",
 	"expectedAfterFees": "Expected after fees",

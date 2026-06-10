@@ -79,11 +79,45 @@ export function parseQuoteResponse(
   const qInner = qOuter?.data || qOuter
   if (!qInner) throw new Error('Pioneer Quote returned empty response')
 
-  // Pioneer returns array of quotes from different integrations — pick best
+  // Pioneer returns array of quotes from different integrations, best first.
+  // Take the FIRST quote we can actually build. Previously this took quotes[0]
+  // unconditionally, so a single unbuildable head quote (e.g. a memoless NEAR
+  // Intents route on a non-EVM-calldata, non-UTXO source) killed the whole
+  // pair even when a buildable route sat at quotes[1]. Buildability is tested
+  // by parseSingleQuote's own throws — the validator IS the parser, so the
+  // two can never disagree. Skipping a higher-ranked quote may select a
+  // lower-output route: logged loudly below, never silent.
   const quotes: any[] = Array.isArray(qInner) ? qInner : [qInner]
   if (quotes.length === 0) throw new Error('No quotes available for this pair')
 
-  const best = quotes[0]
+  let firstErr: Error | null = null
+  const failures: string[] = []
+  for (let i = 0; i < quotes.length; i++) {
+    try {
+      const parsed = parseSingleQuote(quotes[i], params)
+      if (i > 0) {
+        console.warn(`${TAG} selected quotes[${i}] (${parsed.swapper || parsed.integration}) — skipped ${i} higher-ranked unbuildable quote(s): ${failures.join(' | ')}. Output may be lower than the skipped route(s) advertised.`)
+      }
+      return parsed
+    } catch (e: any) {
+      if (!firstErr) firstErr = e
+      failures.push(`quotes[${i}]: ${e?.message}`)
+    }
+  }
+  // None buildable — rethrow the head quote's error (most relevant; for a
+  // NEAR-Intents-only response this preserves the exact "No supported routes"
+  // message users and tests know).
+  if (quotes.length > 1) console.error(`${TAG} all ${quotes.length} quotes unbuildable: ${failures.join(' | ')}`)
+  throw firstErr || new Error('No quotes available for this pair')
+}
+
+/** Parse ONE Pioneer quote entry into SwapQuote. Throws when the quote is not
+ *  buildable (zero/empty output, missing inbound address, EVM inbound for a
+ *  UTXO source, or no memo/calldata/deposit instruction). */
+function parseSingleQuote(
+  best: any,
+  params: { fromCaip: string; toCaip: string; slippageBps?: number },
+): SwapQuote {
   const integration = best.integration || 'thorchain'
   const quote = best.quote || best
   // Pioneer wraps THORNode data in quote.raw and tx details in quote.txs[]
@@ -150,6 +184,7 @@ export function parseQuoteResponse(
   // are rejected by buildRelaySwapTx's ERC-20 guard if applicable, and warned
   // by the pre-existing cross-chain guard.
   const fromIsUtxo = params.fromCaip.startsWith('bip122:')
+  const fromIsSolana = params.fromCaip.startsWith('solana:')
   // Deposit-channel only applies when source is EVM. For UTXO sources (BTC→ETH via
   // NEAR Intents), the txParams.to is a Bitcoin address and we use the inboundAddress
   // path instead (isMemolessTransfer below).
@@ -204,6 +239,12 @@ export function parseQuoteResponse(
     || txParams.to
     || best.inbound_address || best.inboundAddress
 
+  if (!inboundAddress && swapper === 'NEAR Intents') {
+    inboundAddress = txParams.recipientAddress
+      || (quote.meta as any)?.depositAddress
+      || raw.quote?.depositAddress
+  }
+
   // Last-resort fallback: for UTXO swaps, THORChain's "router" IS the vault address
   // (EVM router is a contract, but UTXO "router" is the inbound vault)
   if (!inboundAddress && router) {
@@ -238,10 +279,11 @@ export function parseQuoteResponse(
     console.error(`${TAG}   full best: ${JSON.stringify(best, null, 2).slice(0, 2000)}`)
     throw new Error('Quote response missing inbound address')
   }
-  // For memo-less UTXO swaps (NEAR Intents BTC→ETH): the deposit address IS the
-  // only instruction — no memo or calldata needed. fromIsUtxo guards direction:
-  // EVM→BTC with no calldata has no way to encode the BTC destination.
-  const isMemolessTransfer = fromIsUtxo && !!inboundAddress && swapper === 'NEAR Intents'
+  // For memo-less UTXO/Solana swaps (NEAR Intents BTC/SOL/SPL→EVM): the deposit
+  // address IS the only instruction — no memo or calldata needed. Source-chain
+  // guards preserve the EVM→BTC/SOL case: EVM with no calldata has no way to
+  // encode the destination, so it remains rejected unless it is a deposit channel.
+  const isMemolessTransfer = (fromIsUtxo || fromIsSolana) && !!inboundAddress && swapper === 'NEAR Intents'
   if (!memo && !hasPrebuiltTx && !isNativeDeposit && !isMemolessTransfer) {
     console.error(`${TAG} MISSING memo + no prebuilt tx — dumping response structure:`)
     console.error(`${TAG}   integration: ${integration}, swapper: ${swapper ?? 'none'}`)

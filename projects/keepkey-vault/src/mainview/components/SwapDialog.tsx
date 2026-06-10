@@ -10,6 +10,7 @@ import { Box, Flex, Text, VStack, Button, Input, Image, HStack, Spinner } from "
 import CountUp from "react-countup"
 import { rpcRequest, rpcFire, onRpcMessage } from "../lib/rpc"
 import { formatBalance } from "../lib/formatting"
+import { isTokenCaip } from "../lib/asset-utils"
 import { useFiat } from "../lib/fiat-context"
 import { AssetIcon } from "./AssetIcon"
 import { CHAINS, getExplorerTxUrl, getExplorerBlockUrl } from "../../shared/chains"
@@ -685,6 +686,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   const [loadingAssets, setLoadingAssets] = useState(true)
   const [assetLoadError, setAssetLoadError] = useState<string | null>(null)
   const [balances, setBalances] = useState<ChainBalance[]>([])
+  const [loadingBalances, setLoadingBalances] = useState(false)
   // User-added custom tokens, refetched whenever the asset picker opens so a
   // freshly-added contract shows up on the next open without restarting.
   const [customTokens, setCustomTokens] = useState<CustomToken[]>([])
@@ -709,6 +711,9 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   // ts when the current quote was received — used to detect staleness on Confirm
   const [quoteFetchedAt, setQuoteFetchedAt] = useState<number>(0)
   const [refreshingQuote, setRefreshingQuote] = useState(false)
+  // Manual fallback quote in flight (the "Get Quote" button in the empty
+  // receive slot) — re-derives a missing destination address then requotes.
+  const [manualQuoting, setManualQuoting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   // Whether the current `error` came from a retryable cause (a quote timeout) —
   // only then do we offer Retry. Deterministic errors (pool unavailable, amount
@@ -1051,13 +1056,36 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   }, [liveStatus])
 
   // ── Load cached balances ──────────────────────────────────────────
+  // Cache-first; when the cache is null/empty (hidden wallets always — the
+  // balance cache is never written for passphrase sessions — and first-run),
+  // fall through to a live getBalances, mirroring Dashboard's cache-miss
+  // auto-refresh. Without this the FROM picker shows "Your KeepKey is empty"
+  // for hidden wallets and non-EVM fromAddress never resolves (it reads
+  // balances.find()?.address). getBalances derives addresses live from the
+  // device and persists nothing for hidden wallets.
   useEffect(() => {
-    if (!open) return
+    if (!open) {
+      setLoadingBalances(false)
+      return
+    }
+    let cancelled = false
+    setLoadingBalances(true)
     rpcRequest<{ balances: ChainBalance[]; updatedAt: number } | null>('getCachedBalances', undefined, 5000)
       .then((result) => {
-        if (result?.balances) setBalances(result.balances)
+        if (cancelled) return
+        if (result?.balances?.length) {
+          setBalances(result.balances)
+          setLoadingBalances(false)
+          return
+        }
+        return rpcRequest<ChainBalance[]>('getBalances', undefined, 120000)
+          .then((live) => {
+            if (!cancelled && Array.isArray(live)) setBalances(live)
+          })
+          .finally(() => { if (!cancelled) setLoadingBalances(false) })
       })
-      .catch(() => {})
+      .catch(() => { if (!cancelled) setLoadingBalances(false) })
+    return () => { cancelled = true }
   }, [open])
 
   // ── Live balance sync — keep sendMax math current ──────────────────
@@ -1568,12 +1596,30 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   // memo encodes a real destination, not an extended pubkey.
   const cachedToAddress = useMemo(() => {
     if (!toAsset) return ''
+    // EVM destinations share one receive address across all EVM chains — the
+    // user's own device-derived address, available from evmAddresses regardless
+    // of whether the balance cache has loaded. Mirror fromAddress here so a swap
+    // INTO an EVM asset never stalls on an empty receive address when the balance
+    // cache is empty (e.g. balance server unavailable). Without this fallback,
+    // toAddress was '' until a balance-updated event happened to stream the dest
+    // chain — leaving canQuote false and the receive panel a silent dead-end.
+    if (toAsset.chainFamily === 'evm' && evmAddresses.addresses.length > 0) {
+      const selectedAddr = evmAddresses.addresses.find(a => a.addressIndex === effectiveEvmIndex)
+      if (selectedAddr?.address) return selectedAddr.address
+    }
     const cb = balances.find(b => b.chainId === toAsset.chainId)
     return cb?.address || ''
-  }, [toAsset, balances])
+  }, [toAsset, balances, evmAddresses, effectiveEvmIndex])
 
-  // For UTXO destinations, ensure we display (and use) a real receive address
-  // rather than an xpub. Mirrors the re-derive effect AssetPage runs on mount.
+  // Derive a real receive address for non-EVM destinations from the device when
+  // the balance cache hasn't supplied one. UTXO chains additionally need this to
+  // turn an xpub into a real address. EVM destinations are skipped — their
+  // address comes from evmAddresses via cachedToAddress (above), cache-free.
+  // This is what makes auto-quoting work for Solana/Cosmos/etc.: without it the
+  // destination address stayed '' on an empty cache and the quote never fired
+  // until the user hit the manual "Get Quote" button. Mirrors the re-derive
+  // effect AssetPage runs on mount; the cancel flag below guards against an
+  // output-asset switch landing a stale address on the wrong chain.
   const [resolvedToAddress, setResolvedToAddress] = useState<string>('')
   const [destAddressError, setDestAddressError] = useState<string | null>(null)
   useEffect(() => {
@@ -1582,7 +1628,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     if (!toAsset) return
     const toChain = CHAINS.find(c => c.id === toAsset.chainId)
     if (!toChain) return
-    if (toChain.chainFamily !== 'utxo') return
+    if (toChain.chainFamily === 'evm') return
     // Fast path: cached address already looks like a real address (not an xpub).
     if (cachedToAddress && !XPUB_RE.test(cachedToAddress)) return
     let cancelled = false
@@ -1627,7 +1673,69 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   // address that didn't come from the user's wallet. Wait for the UTXO
   // resolver to populate a real receive address.
   const toAddressIsXpub = !!toAddress && !useCustomAddress && XPUB_RE.test(toAddress)
-  const canQuote = fromAsset && toAsset && !sameAsset && validAmount && fromAddress && toAddress && !toAddressIsXpub && !exceedsBalance && !exceedsSafeMax && !customAddressError
+  const canQuote = !!(fromAsset && toAsset && !sameAsset && validAmount && fromAddress && toAddress && !toAddressIsXpub && !exceedsBalance && !exceedsSafeMax && !customAddressError)
+
+  // Human reason a quote can't fire right now, but ONLY for the cases that
+  // otherwise render nothing — a missing send/receive address. Conditions that
+  // already show their own message (balance, safe-max, same asset, custom
+  // address, max-insufficient, invalid amount) are excluded so we don't double
+  // up. Non-null ⇒ we're in a silent dead-end the user can recover from.
+  const quoteBlockReason = useMemo(() => {
+    if (!fromAsset || !toAsset || sameAsset || !validAmount) return null
+    if (exceedsBalance || exceedsSafeMax || customAddressError) return null
+    if (!fromAddress) return t("resolvingSendAddress", "Preparing your {{symbol}} send address…", { symbol: fromAsset.symbol })
+    if (!toAddress && !toAddressIsXpub) return t("resolvingReceiveAddress", "Preparing your {{symbol}} receive address…", { symbol: toAsset.symbol })
+    return null
+  }, [fromAsset, toAsset, sameAsset, validAmount, exceedsBalance, exceedsSafeMax, customAddressError, fromAddress, toAddress, toAddressIsXpub, t])
+
+  // A missing DESTINATION address is the dead-end the manual button can fix by
+  // deriving on demand. A missing SOURCE address is a transient that the quote
+  // effect re-runs automatically once fromAddress populates (it's in the effect
+  // deps), so we show the reason for it but no action button.
+  const needsDestAddress = !!quoteBlockReason && !!fromAddress && !toAddress && !toAddressIsXpub && !useCustomAddress
+
+  // Latest output chain id — lets the async manual-quote derivation below detect
+  // an output-asset switch that happened during the (up to 60s) address RPC and
+  // discard a stale result, so we never write a receive address for the wrong
+  // chain (the auto-resolver useEffect has the same guard via a cancel flag).
+  const toAssetChainIdRef = useRef<string | undefined>(undefined)
+  useEffect(() => { toAssetChainIdRef.current = toAsset?.chainId }, [toAsset])
+
+  // Manual "Get Quote" fallback. The stuck-empty cause is a destination receive
+  // address that never resolved (empty balance cache + no resolver for non-UTXO
+  // chains). Derive it on demand here, then re-fire the quote effect via
+  // requoteTick. A bare requote is not enough — canQuote stays false until the
+  // address exists.
+  const handleManualQuote = useCallback(async () => {
+    if (manualQuoting || !toAsset) return
+    const requestedChainId = toAsset.chainId
+    setManualQuoting(true)
+    setError(null)
+    try {
+      if (!toAddress && !useCustomAddress) {
+        const toChain = CHAINS.find(c => c.id === toAsset.chainId)
+        // EVM addresses come from evmAddresses (cachedToAddress already falls
+        // back to them); non-EVM chains derive a receive address from the device.
+        if (toChain && toChain.chainFamily !== 'evm') {
+          const params: any = { addressNList: toChain.defaultPath, showDisplay: false, coin: toChain.coin }
+          if (toChain.scriptType) params.scriptType = toChain.scriptType
+          const result = await rpcRequest<any>(toChain.rpcMethod, params, 60000)
+          // Output asset switched mid-RPC → this address is for the wrong chain.
+          if (toAssetChainIdRef.current !== requestedChainId) return
+          const addr = typeof result === 'string' ? result : (result?.address || '')
+          if (addr) setResolvedToAddress(addr)
+        }
+        const cached = await rpcRequest<{ balances: ChainBalance[] } | null>('getCachedBalances', undefined, 8000).catch(() => null)
+        if (toAssetChainIdRef.current !== requestedChainId) return
+        if (cached?.balances) setBalances(cached.balances)
+      }
+    } catch (e: any) {
+      if (toAssetChainIdRef.current === requestedChainId) setError(e?.message || t("errorQuote"))
+    } finally {
+      setManualQuoting(false)
+      setRequoteTick(tick => tick + 1)
+    }
+  }, [manualQuoting, toAsset, toAddress, useCustomAddress, t])
 
   // ── Preview-build the unsigned tx(s) when entering Confirm Quote ──
   // Fires once per quote — gives the user the exact payload to audit before
@@ -1657,6 +1765,9 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       fromEvmAddressIndex: fromAsset.chainFamily === 'evm' ? evmAddresses.selectedIndex : undefined,
       integration: quote.integration,
       relayTx: quote.relayTx,
+      // Token sources Pioneer's available-assets doesn't pre-list (e.g. SPL
+      // USDT) have no decimals lookup backend-side — carry the picker's value.
+      tokenDecimals: isTokenCaip(fromAsset.caip!) ? normalizeDecimals(fromAsset.decimals) ?? undefined : undefined,
     }).then((res) => { if (!cancelled) { setPreviewBuild(res); setPreviewLoading(false) } })
       .catch((e: any) => { if (!cancelled) { setPreviewError(e?.message || 'Preview failed'); setPreviewLoading(false) } })
     return () => { cancelled = true }
@@ -1767,7 +1878,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     return () => {
       if (quoteTimerRef.current) clearTimeout(quoteTimerRef.current)
     }
-  }, [fromAsset?.asset, toAsset?.asset, sendAmount, sendIsMax, fromAddress, toAddress, exceedsBalance, fromBalance, slippageBps, requoteTick, destAddressError, toAddressIsXpub])
+  }, [fromAsset?.caip, toAsset?.caip, sendAmount, sendIsMax, fromAddress, toAddress, exceedsBalance, fromBalance, slippageBps, requoteTick, destAddressError, toAddressIsXpub])
 
   // ── Flip ──────────────────────────────────────────────────────────
   const handleFlip = useCallback(() => {
@@ -1782,6 +1893,14 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     setPhase('input')
     setError(null)
   }, [fromAsset, toAsset])
+
+  const handleBackToInput = useCallback(() => {
+    setQuote(null)
+    setPhase('input')
+    setError(null)
+    setQuoteRetryable(false)
+    setRequoteTick(tick => tick + 1)
+  }, [])
 
   // ── Execute swap ──────────────────────────────────────────────────
   const handleExecuteSwap = useCallback(async () => {
@@ -1887,6 +2006,9 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
         integration: liveQuote.integration,
         swapper: liveQuote.swapper,
         relayTx: liveQuote.relayTx,
+        // Same as the preview build: synthesized token sources need the
+        // picker's decimals — Pioneer's available-assets won't have them.
+        tokenDecimals: isTokenCaip(fromAsset.caip!) ? normalizeDecimals(fromAsset.decimals) ?? undefined : undefined,
       }, 600000)
 
       setTxid(result.txid)
@@ -2241,6 +2363,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
           {/* Loading state */}
           {loadingAssets && (
             <Box py="8" textAlign="center">
+              <Spinner size="md" color="kk.gold" mb="3" />
               <Text fontSize="sm" color="kk.textMuted">{t("loadingAssets")}</Text>
             </Box>
           )}
@@ -3738,7 +3861,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                   cursor="pointer"
                   _hover={{ bg: "var(--ink-3)" }}
                   transition="background 0.15s"
-                  onClick={() => { setQuote(null); setPhase('input') }}
+                  onClick={handleBackToInput}
                 >
                   {t("back")}
                 </Box>
@@ -4119,6 +4242,54 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                     </Box>
                   )}
 
+                  {/* Fallback fetch — the amount is valid and nothing is blocking
+                      it with its own visible message, yet a send/receive address
+                      hasn't resolved (the silent dead-end: empty balance cache /
+                      balance server down, no resolver for non-UTXO chains). When
+                      canQuote is otherwise true the quote effect flips phase to
+                      'quoting', so this only renders in the genuinely-stuck case.
+                      Fill the otherwise-blank slot with the reason + a Get Quote
+                      button that re-derives the address and re-fires the quote. */}
+                  {phase === 'input' && !quote && !error && quoteBlockReason && (
+                    <Box mt="3" p="2.5" bg="rgba(233,196,106,0.06)" borderRadius="lg" border="1px solid" borderColor="rgba(233,196,106,0.20)"
+                      style={{ animation: 'kkSwapFadeIn 0.25s ease-out' }}>
+                      <Text fontSize="10px" color="kk.textSecondary" fontWeight="500" mb={needsDestAddress ? "2" : "0"} lineHeight="1.45">
+                        {quoteBlockReason}
+                      </Text>
+                      {needsDestAddress && (
+                        <Button
+                          w="full" size="sm" fontWeight="700" fontSize="12px"
+                          bg="kk.gold" color="black" borderRadius="lg" border="0"
+                          _hover={{ bg: "kk.goldHover" }}
+                          loading={manualQuoting}
+                          loadingText={t("gettingQuote")}
+                          onClick={handleManualQuote}
+                        >
+                          {t("getQuote", "Get Quote")}
+                        </Button>
+                      )}
+                    </Box>
+                  )}
+
+                  {phase === 'input' && !quote && !error && !quoteBlockReason && canQuote && (
+                    <Box mt="3" p="2.5" bg="rgba(233,196,106,0.06)" borderRadius="lg" border="1px solid" borderColor="rgba(233,196,106,0.20)"
+                      style={{ animation: 'kkSwapFadeIn 0.25s ease-out' }}>
+                      <Text fontSize="10px" color="kk.textSecondary" fontWeight="500" mb="2" lineHeight="1.45">
+                        {t("readyForQuote", "Ready to fetch a fresh quote.")}
+                      </Text>
+                      <Button
+                        w="full" size="sm" fontWeight="700" fontSize="12px"
+                        bg="kk.gold" color="black" borderRadius="lg" border="0"
+                        _hover={{ bg: "kk.goldHover" }}
+                        loading={manualQuoting}
+                        loadingText={t("gettingQuote")}
+                        onClick={handleManualQuote}
+                      >
+                        {t("getQuote", "Get Quote")}
+                      </Button>
+                    </Box>
+                  )}
+
                   {toAsset && (
                     <Box mt="2">
                       <Flex justify="space-between" align="center" mb="1">
@@ -4285,7 +4456,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
               )}
 
               {/* Hint */}
-              {phase === 'input' && fromAsset && toAsset && !sameAsset && !amount && !isMax && !quote && (
+              {phase === 'input' && fromAsset && toAsset && !sameAsset && !isMax && !manualAmountReady && !quote && (
                 <Text fontSize="10px" color="kk.textMuted" textAlign="center">{t("enterAmount")}</Text>
               )}
 
@@ -4512,6 +4683,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
         onClose={() => setPickerSide(null)}
         swappable={assets}
         balances={balances}
+        balancesLoading={loadingBalances}
         customTokens={customTokens}
         excludeCaip={pickerSide === 'from' ? toAsset?.caip : fromAsset?.caip}
         side={pickerSide || 'from'}

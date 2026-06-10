@@ -2,7 +2,7 @@ import { withTimeout } from './engine-controller'
 import { getPioneer } from './pioneer'
 import { apiLogScanTxidExists, insertApiLog, updateApiLogTxMeta } from './db'
 import { BTC_SCRIPT_TYPES, btcAccountPath, isChainSupported, type ChainDef } from '../shared/chains'
-import type { ActivityType } from '../shared/types'
+import type { ActivityType, RecentActivity } from '../shared/types'
 
 const PIONEER_TIMEOUT_MS = 60_000
 
@@ -17,6 +17,9 @@ export type ActivityHistoryRebuildOptions = {
   includeHidden?: boolean
   dryRun?: boolean
   accountIndex?: number
+  /** Collect normalized RecentActivity rows into result.rows. Used with dryRun
+   *  by hidden (passphrase) sessions: fetch live, return rows, write nothing. */
+  collectRows?: boolean
 }
 
 type HistoryQuery = {
@@ -50,6 +53,8 @@ export type ActivityHistoryRebuildResult = {
   scope: ActivityHistoryScope & { seedAddress?: string }
   dryRun: boolean
   scannedAt: number
+  /** Present only when options.collectRows — normalized rows, never persisted here. */
+  rows?: RecentActivity[]
   chains: ActivityHistoryChainResult[]
   totals: {
     chains: number
@@ -197,6 +202,7 @@ export async function rebuildActivityHistory(params: {
 }): Promise<ActivityHistoryRebuildResult> {
   const options = params.options || {}
   const dryRun = !!options.dryRun
+  const collected: RecentActivity[] | undefined = options.collectRows ? [] : undefined
   const accountIndex = Math.max(0, Number.isInteger(options.accountIndex) ? options.accountIndex! : 0)
   const selectedChains = selectChains(params.chains, params.firmwareVersion, options)
   const pioneer = await getPioneer()
@@ -276,6 +282,26 @@ export async function rebuildActivityHistory(params: {
             networkId: chain.networkId,
           }
           const exists = apiLogScanTxidExists(txid, params.scope.deviceId, params.scope.walletId)
+          if (collected) {
+            // Same shape getRecentActivityFromLog produces for SCAN rows, so
+            // the frontend renders session rows identically to persisted ones.
+            collected.push({
+              id: `live-${chain.id}-${txid}`,
+              deviceId: params.scope.deviceId,
+              walletId: params.scope.walletId,
+              txid,
+              chain: chain.symbol,
+              chainId: chain.id,
+              type: activityType,
+              source: 'scan',
+              status: 'broadcast',
+              createdAt: timestamp,
+              confirmations: meta.confirmations,
+              blockHeight: meta.blockHeight,
+              amount: meta.value,
+              fee: meta.fee,
+            })
+          }
           if (!dryRun) {
             if (exists) {
               updateApiLogTxMeta(txid, meta, params.scope.deviceId, params.scope.walletId, {
@@ -317,5 +343,6 @@ export async function rebuildActivityHistory(params: {
     result.chains.push(chainResult)
   }
 
+  if (collected) result.rows = collected
   return result
 }
