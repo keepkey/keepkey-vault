@@ -265,10 +265,11 @@ export interface BuildTxResult {
 
 export interface BroadcastResult {
   txid: string
-  // Address Book: set when a manual send auto-creates/updates a recipient entry.
-  // `recipientIsNew` drives the post-broadcast "save a label?" prompt (R4).
+  // Address Book: set when a manual send touches a recipient entry.
+  // `recipientUnsaved` (true when the recipient is not yet a saved contact) drives
+  // the post-broadcast "save this address?" dialog (R4 opt-in).
   addressBookEntryId?: string
-  recipientIsNew?: boolean
+  recipientUnsaved?: boolean
 }
 
 // ── Address Book (unified, top-level, across all wallets) ───────────────
@@ -289,6 +290,7 @@ export interface AddressBookEntry {
   addressIndex?: number      // own EVM index / BTC account index
   firstSeenTxid?: string     // external rows — txid that introduced the recipient
   note?: string
+  savedAt?: number           // external rows — when the user explicitly saved it (R4); null = history-only
   createdAt: number
   updatedAt: number
 }
@@ -310,6 +312,7 @@ export interface AddressBookFilter {
   chainId?: string
   kind?: AddressBookKind
   search?: string            // LIKE over label + address
+  savedOnly?: boolean        // external rows — exclude history-only (unsaved) recipients
   limit?: number
   offset?: number
 }

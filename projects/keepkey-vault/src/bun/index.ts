@@ -3033,7 +3033,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// PRIVACY: Skip DB write for passphrase wallets (still push to UI).
 				const scope = getWalletDbScope()
 				const logEntry: ApiLogEntry = { ...(scope || {}), method: 'RPC', route: 'broadcastTx', timestamp: Date.now(), durationMs: 0, status: 200, appName: 'vault', txid: result.txid, chain: chain.symbol, activityType: 'broadcast' }
-				let abEntry: { entryId: string; isNew: boolean } | null = null
+				let abEntry: { entryId: string; isNew: boolean; unsaved: boolean } | null = null
 				if (!engine.isPassphraseWallet && scope) {
 					insertApiLog(logEntry)
 					// Address Book (R3/R4/R7): capture the recipient as an external entry
@@ -3053,7 +3053,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				}
 				try { rpc.send['api-log'](logEntry) } catch { /* webview not ready */ }
 
-				return { ...result, addressBookEntryId: abEntry?.entryId, recipientIsNew: abEntry?.isNew }
+				return { ...result, addressBookEntryId: abEntry?.entryId, recipientUnsaved: abEntry?.unsaved }
 			},
 
 			getMarketData: async (params) => {
@@ -4148,9 +4148,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const labels = getDeviceLabelMap()
 				const networkId = params?.networkId
 				const search = params?.search
-				// own = every device's wallets (cross-device); external = this wallet's contacts.
+				// own = every device's wallets (cross-device); external = this wallet's
+				// explicitly-saved contacts (R4 opt-in — history-only recipients stay hidden).
 				const own = getAddressBookList({ kind: 'own', networkId, search })
-				const external = getAddressBookList({ kind: 'external', walletId: scope.walletId, networkId, search })
+				const external = getAddressBookList({ kind: 'external', walletId: scope.walletId, networkId, search, savedOnly: true })
 				return [...own, ...external].map(e => ({ ...e, deviceLabel: labels[e.deviceId] || e.deviceLabel }))
 			},
 			addAddressBook: async (params) => {
