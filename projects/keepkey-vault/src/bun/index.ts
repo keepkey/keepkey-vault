@@ -4772,66 +4772,80 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 			// ── Swap History (SQLite-persisted) ─────────────────────
 			getSwapByTxid: async (params) => {
-				// PRIVACY: Don't expose standard-wallet swap records during hidden sessions.
-				if (engine.isPassphraseWallet) return null
+				// PRIVACY via scoping, NOT a blanket passphrase block. Hidden-wallet
+				// swaps are in-memory only (skipPersist) — there is no DB row — so a
+				// blanket block left the hidden session unable to read its OWN swap
+				// (status stuck "pending" in the detail view). Scope by walletId and
+				// fall back to the live tracker copy: a hidden walletId never matches a
+				// standard swap (DB lookup is walletId-scoped; in-memory filter too), so
+				// standard-wallet swaps stay invisible here.
 				const scope = getWalletDbScope()
 				if (!scope) return null
 				const record = getSwapHistoryByTxid(params.txid, scope.deviceId, scope.walletId)
-				if (!record) return null
 				const { inferConfirmationsFromStatus, getPendingSwaps } = await import('./swap-tracker')
 				// Prefer the in-memory tracker copy when present — it has live
 				// outboundConfirmations / required / swapper that the DB row doesn't
-				// store. Falls back to the persisted record otherwise.
-				const live = getPendingSwaps(scope.deviceId, scope.walletId).find(s => s.txid === record.txid)
+				// store, and IS the only source for in-memory-only hidden swaps.
+				const live = getPendingSwaps(scope.deviceId, scope.walletId).find(s => s.txid === params.txid)
+				if (!record && !live) return null
 				// Lazy CAIP backfill for swaps inserted before the from_caip/to_caip
 				// columns existed — derive on the fly from the THORChain asset id.
-				let fromCaip = record.fromCaip
-				let toCaip = record.toCaip
+				let fromCaip = record?.fromCaip ?? live?.fromCaip
+				let toCaip = record?.toCaip ?? live?.toCaip
+				const fromAssetId = record?.fromAsset ?? live?.fromAsset
+				const toAssetId = record?.toAsset ?? live?.toAsset
 				if (!fromCaip || !toCaip) {
 					const { assetToCaip } = await import('./swap-parsing')
-					if (!fromCaip) try { fromCaip = assetToCaip(record.fromAsset) } catch { /* unknown chain */ }
-					if (!toCaip) try { toCaip = assetToCaip(record.toAsset) } catch { /* unknown chain */ }
+					if (!fromCaip && fromAssetId) try { fromCaip = assetToCaip(fromAssetId) } catch { /* unknown chain */ }
+					if (!toCaip && toAssetId) try { toCaip = assetToCaip(toAssetId) } catch { /* unknown chain */ }
 				}
+				const status = record?.status ?? live!.status
 				return {
-					deviceId: record.deviceId,
-					walletId: record.walletId,
-					txid: record.txid,
-					fromAsset: record.fromAsset,
-					toAsset: record.toAsset,
-					fromSymbol: record.fromSymbol,
-					toSymbol: record.toSymbol,
-					fromChainId: record.fromChainId,
-					toChainId: record.toChainId,
+					deviceId: record?.deviceId ?? live?.deviceId,
+					walletId: record?.walletId ?? live?.walletId,
+					txid: record?.txid ?? live!.txid,
+					fromAsset: fromAssetId!,
+					toAsset: toAssetId!,
+					fromSymbol: record?.fromSymbol ?? live?.fromSymbol,
+					toSymbol: record?.toSymbol ?? live?.toSymbol,
+					fromChainId: record?.fromChainId ?? live?.fromChainId,
+					toChainId: record?.toChainId ?? live?.toChainId,
 					fromCaip,
 					toCaip,
-					fromAmount: record.fromAmount,
-					expectedOutput: record.receivedOutput || record.quotedOutput,
-					receivedOutput: record.receivedOutput,
-					memo: record.memo,
-					inboundAddress: record.inboundAddress,
-					router: record.router,
-					integration: record.integration,
-					swapper: record.swapper || live?.swapper,
-					status: record.status,
-					confirmations: live?.confirmations ?? inferConfirmationsFromStatus(record.status),
+					fromAmount: record?.fromAmount ?? live?.fromAmount,
+					expectedOutput: record ? (record.receivedOutput || record.quotedOutput) : (live?.receivedOutput || live?.expectedOutput),
+					receivedOutput: record?.receivedOutput ?? live?.receivedOutput,
+					memo: record?.memo ?? live?.memo,
+					inboundAddress: record?.inboundAddress ?? live?.inboundAddress,
+					router: record?.router ?? live?.router,
+					integration: record?.integration ?? live?.integration,
+					swapper: record?.swapper || live?.swapper,
+					status,
+					confirmations: live?.confirmations ?? inferConfirmationsFromStatus(status),
 					outboundConfirmations: live?.outboundConfirmations,
 					outboundRequiredConfirmations: live?.outboundRequiredConfirmations,
-					outboundTxid: record.outboundTxid,
-					error: record.error,
-					createdAt: record.createdAt,
-					updatedAt: record.updatedAt,
-					completedAt: record.completedAt,
-					estimatedTime: record.estimatedTimeSeconds,
-					slippageBps: record.slippageBps,
-					relayRequestId: live?.relayRequestId ?? record.relayRequestId,
-					nearTxHash: live?.nearTxHash ?? record.nearTxHash,
-					outboundChainId: live?.outboundChainId ?? record.outboundChainId,
-					refundReason: live?.refundReason ?? record.refundReason,
+					outboundTxid: record?.outboundTxid ?? live?.outboundTxid,
+					error: record?.error ?? live?.error,
+					createdAt: record?.createdAt ?? live?.createdAt,
+					updatedAt: record?.updatedAt ?? live?.updatedAt,
+					completedAt: record?.completedAt ?? live?.completedAt,
+					estimatedTime: record?.estimatedTimeSeconds ?? live?.estimatedTime,
+					slippageBps: record?.slippageBps ?? live?.slippageBps,
+					relayRequestId: live?.relayRequestId ?? record?.relayRequestId,
+					nearTxHash: live?.nearTxHash ?? record?.nearTxHash,
+					outboundChainId: live?.outboundChainId ?? record?.outboundChainId,
+					refundReason: live?.refundReason ?? record?.refundReason,
 				}
 			},
 			refreshSwap: async (params) => {
-				// PRIVACY: Standard-wallet swaps are not refreshable from a hidden session.
-				if (engine.isPassphraseWallet) return null
+				// PRIVACY via scoping, NOT a blanket passphrase block. A hidden session
+				// must still refresh ITS OWN in-memory swaps (they're skipPersist, so
+				// the live poll is the only thing that can advance them to completed —
+				// e.g. a NEAR Intents Solana deposit waiting on 1Click). The tracker
+				// filters by walletId (live.walletId === walletId, and hydrateFromDb is
+				// walletId-scoped), and a hidden walletId (deviceId:hiddenSeedEthAddr)
+				// never matches a standard swap's walletId — so standard-wallet swaps
+				// remain unreachable from here. Same posture as getPendingSwaps.
 				const { refreshSwap } = await import('./swap-tracker')
 				const scope = getWalletDbScope()
 				if (!scope) return null
