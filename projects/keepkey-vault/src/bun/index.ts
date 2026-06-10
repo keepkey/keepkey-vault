@@ -3034,10 +3034,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const scope = getWalletDbScope()
 				const logEntry: ApiLogEntry = { ...(scope || {}), method: 'RPC', route: 'broadcastTx', timestamp: Date.now(), durationMs: 0, status: 200, appName: 'vault', txid: result.txid, chain: chain.symbol, activityType: 'broadcast' }
 				let abEntry: { entryId: string; isNew: boolean; unsaved: boolean } | null = null
-				if (!engine.isPassphraseWallet && scope) {
-					insertApiLog(logEntry)
-					// Address Book (R3/R4/R7): capture the recipient as an external entry
-					// + outbound-history row. Best-effort — never block the broadcast.
+				if (scope) {
+					// api_log is part of hidden-wallet deniability — keep it standard-only.
+					if (!engine.isPassphraseWallet) insertApiLog(logEntry)
+					// Address Book (R3/R4/R7) is wallet-agnostic: capture the recipient +
+					// outbound-history row in any session (incl. hidden). Best-effort.
 					if (params.to) {
 						try {
 							abEntry = recordOutbound({
@@ -4139,23 +4140,22 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 			// ── Address Book ─────────────────────────────────────────
 			listAddressBook: async (params) => {
-				if (engine.isPassphraseWallet) return []
-				const scope = getWalletDbScope()
-				if (!scope) return []
-				// Populate own entries for ALL devices from the watch-only cache (cheap,
-				// idempotent) so the book isn't limited to the connected wallet.
-				try { seedOwnFromCache() } catch { /* never block the read */ }
+				// The Address Book is wallet-agnostic public data (own = watch-only public
+				// addresses; external = saved contacts), so it loads regardless of which
+				// wallet is active — including hidden/passphrase sessions. Only the SEED
+				// (a write) is gated, since hidden sessions persist nothing new.
+				if (!engine.isPassphraseWallet) { try { seedOwnFromCache() } catch { /* never block the read */ } }
 				const labels = getDeviceLabelMap()
 				const networkId = params?.networkId
 				const search = params?.search
-				// own = every device's wallets (cross-device); external = this wallet's
-				// explicitly-saved contacts (R4 opt-in — history-only recipients stay hidden).
+				// own = every device's wallets (cross-device); external = all explicitly-saved
+				// contacts (cross-wallet; R4 opt-in — history-only recipients stay hidden).
 				const own = getAddressBookList({ kind: 'own', networkId, search })
-				const external = getAddressBookList({ kind: 'external', walletId: scope.walletId, networkId, search, savedOnly: true })
+				const external = getAddressBookList({ kind: 'external', networkId, search, savedOnly: true })
 				return [...own, ...external].map(e => ({ ...e, deviceLabel: labels[e.deviceId] || e.deviceLabel }))
 			},
 			addAddressBook: async (params) => {
-				if (engine.isPassphraseWallet) return null
+				// Wallet-agnostic: contacts can be saved from any session (incl. hidden).
 				const scope = getWalletDbScope()
 				if (!scope) return null
 				const chain = getAllChains().find(c => c.networkId === params.networkId)
@@ -4169,25 +4169,17 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return entry
 			},
 			updateAddressBook: async (params) => {
-				if (engine.isPassphraseWallet) return false
-				const scope = getWalletDbScope()
-				if (!scope) return false
-				const ok = updateAddressBookEntry(params.id, scope.walletId, { label: params.label, note: params.note })
+				// Global (wallet-agnostic) — edit any contact from any session.
+				const ok = updateAddressBookEntry(params.id, null, { label: params.label, note: params.note })
 				if (ok) { try { rpc.send['addressbook-changed']({}) } catch { /* webview not ready */ } }
 				return ok
 			},
 			deleteAddressBook: async (params) => {
-				if (engine.isPassphraseWallet) return
-				const scope = getWalletDbScope()
-				if (!scope) return
-				deleteAddressBookEntry(params.id, scope.walletId)
+				deleteAddressBookEntry(params.id, null)
 				try { rpc.send['addressbook-changed']({}) } catch { /* webview not ready */ }
 			},
 			getAddressBookHistory: async (params) => {
-				if (engine.isPassphraseWallet) return []
-				const scope = getWalletDbScope()
-				if (!scope) return []
-				return getAddressBookHistory(params.entryId, scope.walletId)
+				return getAddressBookHistory(params.entryId, null)
 			},
 
 			// ── Accounting ledger ────────────────────────────────────

@@ -2011,7 +2011,8 @@ export function recordOutbound(args: {
 export function getAddressBookList(filter: AddressBookFilter): AddressBookEntry[] {
   try {
     if (!db) return []
-    if (filter.kind !== 'own' && !filter.walletId) return []
+    // The Address Book is wallet-agnostic: own + external are readable without a
+    // wallet scope (omit walletId for a global, cross-wallet listing).
     let sql = 'SELECT * FROM addressbook WHERE 1=1'
     const params: any[] = []
     if (filter.walletId) { sql += ' AND wallet_id = ?'; params.push(filter.walletId) }
@@ -2033,9 +2034,10 @@ export function getAddressBookList(filter: AddressBookFilter): AddressBookEntry[
   }
 }
 
-/** Patch a label/note. Scoped by wallet_id for safety. Returns true if a row changed. */
+/** Patch a label/note. Pass walletId to scope by wallet; omit (null) to act on the
+ *  entry globally (the book is wallet-agnostic). Returns true if a row changed. */
 export function updateAddressBookEntry(
-  id: string, walletId: string, patch: { label?: string; note?: string },
+  id: string, walletId: string | null, patch: { label?: string; note?: string },
 ): boolean {
   try {
     if (!db) return false
@@ -2045,8 +2047,9 @@ export function updateAddressBookEntry(
     if (patch.note !== undefined)  { sets.push('note = ?');  params.push(patch.note || null) }
     if (sets.length === 0) return false
     sets.push('updated_at = ?'); params.push(Date.now())
-    params.push(id, walletId)
-    const res = db.run(`UPDATE addressbook SET ${sets.join(', ')} WHERE id = ? AND wallet_id = ?`, params)
+    let where = 'id = ?'; params.push(id)
+    if (walletId) { where += ' AND wallet_id = ?'; params.push(walletId) }
+    const res = db.run(`UPDATE addressbook SET ${sets.join(', ')} WHERE ${where}`, params)
     return Boolean((res as any)?.changes)
   } catch (e: any) {
     console.warn('[db] updateAddressBookEntry failed:', e.message)
@@ -2054,24 +2057,33 @@ export function updateAddressBookEntry(
   }
 }
 
-/** Delete an entry + its history. Scoped by wallet_id. */
-export function deleteAddressBookEntry(id: string, walletId: string): void {
+/** Delete an entry + its history. Pass walletId to scope by wallet; omit (null) for
+ *  a global delete (wallet-agnostic book). */
+export function deleteAddressBookEntry(id: string, walletId: string | null): void {
   try {
     if (!db) return
-    db.run('DELETE FROM addressbook_tx WHERE entry_id = ? AND wallet_id = ?', [id, walletId])
-    db.run('DELETE FROM addressbook WHERE id = ? AND wallet_id = ?', [id, walletId])
+    if (walletId) {
+      db.run('DELETE FROM addressbook_tx WHERE entry_id = ? AND wallet_id = ?', [id, walletId])
+      db.run('DELETE FROM addressbook WHERE id = ? AND wallet_id = ?', [id, walletId])
+    } else {
+      db.run('DELETE FROM addressbook_tx WHERE entry_id = ?', [id])
+      db.run('DELETE FROM addressbook WHERE id = ?', [id])
+    }
   } catch (e: any) {
     console.warn('[db] deleteAddressBookEntry failed:', e.message)
   }
 }
 
-/** Per-recipient outbound history (R7), newest first. */
-export function getAddressBookHistory(entryId: string, walletId: string, limit = 100): AddressBookTx[] {
+/** Per-recipient outbound history (R7), newest first. Pass walletId to scope by
+ *  wallet; omit (null) for the entry's full history regardless of wallet. */
+export function getAddressBookHistory(entryId: string, walletId: string | null, limit = 100): AddressBookTx[] {
   try {
     if (!db) return []
-    const rows = db.query(
-      'SELECT * FROM addressbook_tx WHERE entry_id = ? AND wallet_id = ? ORDER BY broadcast_at DESC LIMIT ?',
-    ).all(entryId, walletId, limit) as any[]
+    const sql = walletId
+      ? 'SELECT * FROM addressbook_tx WHERE entry_id = ? AND wallet_id = ? ORDER BY broadcast_at DESC LIMIT ?'
+      : 'SELECT * FROM addressbook_tx WHERE entry_id = ? ORDER BY broadcast_at DESC LIMIT ?'
+    const args = walletId ? [entryId, walletId, limit] : [entryId, limit]
+    const rows = db.query(sql).all(...args) as any[]
     return rows.map(mapAddressBookTxRow)
   } catch (e: any) {
     console.warn('[db] getAddressBookHistory failed:', e.message)
