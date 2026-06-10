@@ -852,6 +852,9 @@ export interface ExecuteSwapParams {
   fromEvmAddressIndex?: number    // EVM address derivation index (0 = default m/44'/60'/0'/0/0)
   integration?: string            // DEX source (relay quotes skip memo+router flow)
   relayTx?: RelayTxParams         // pre-built tx for relay/bridge integrations
+  tokenDecimals?: number          // source-token decimals from the picker asset — needed for
+                                  // token sources Pioneer's available-assets doesn't list (e.g.
+                                  // SPL USDT); Pioneer's canonical value still wins when present
 }
 
 export type SwapProviderStatus = 'ok' | 'degraded' | 'offline' | 'unknown'
