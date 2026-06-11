@@ -2094,6 +2094,32 @@ export class EngineController extends EventEmitter {
   get currentSeedEthAddress(): string | null { return this.seedEthAddress }
 
   /**
+   * Derive the seed-identity address (ETH m/44'/60'/0'/0/0) FRESH from the
+   * device and return it. RAM-only: no settings write, no events — safe for
+   * hidden wallets and callable on every balance fetch.
+   *
+   * This is the ground truth for the seed-staleness guard in getBalances:
+   * cached classification (seedEthAddress) can be stale or null right after a
+   * passphrase toggle / reconnect, so the guard re-reads the device instead of
+   * trusting session state. Returns null if no wallet or derivation fails.
+   */
+  async deriveSeedIdentity(): Promise<string | null> {
+    if (!this.wallet) return null
+    try {
+      const result = await (this.wallet as any).ethGetAddress({
+        addressNList: [0x80000000 + 44, 0x80000000 + 60, 0x80000000 + 0, 0, 0],
+        showDisplay: false,
+      })
+      const addr = (typeof result === 'string' ? result : result?.address)?.toLowerCase()
+      if (addr) this.seedEthAddress = addr
+      return addr || null
+    } catch (err: any) {
+      console.warn('[Engine] deriveSeedIdentity failed (non-fatal):', err?.message)
+      return null
+    }
+  }
+
+  /**
    * Hidden wallet: derive the seed identity IN MEMORY ONLY so getWalletDbScope()
    * works for fresh passphrase sessions. Deliberately NOT checkSeedIdentity():
    * that persists seed_eth_<deviceId> via setSetting, which would leave a disk
@@ -2222,6 +2248,11 @@ export class EngineController extends EventEmitter {
     } else {
       console.log(`[Engine] Reconnect probe: ETH address differs from stored — confirmed hidden wallet`)
       this.seedEthAddress = addr
+      // Re-emit so index.ts's ready handler re-runs the seed-staleness guard
+      // with the now-known hidden identity (the match path above already emits;
+      // without this, a confirmed-hidden reconnect never reconciles the
+      // in-memory account managers and they keep the previous wallet's data).
+      this.emit('state-change', this.getDeviceState())
     }
   }
 

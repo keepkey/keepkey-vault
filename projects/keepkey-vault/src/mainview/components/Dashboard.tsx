@@ -1102,6 +1102,23 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 		})
 	}, [])
 
+	// Seed-staleness purge: the backend detected the wallet data belonged to a
+	// DIFFERENT seed than the device (passphrase toggle, hidden↔standard
+	// transition, cached-passphrase reconnect) and dropped it. Clear the
+	// displayed balances immediately — rendering the previous wallet's funds is
+	// the bug — then pull fresh data.
+	useEffect(() => {
+		return onRpcMessage("wallet-data-purged", ({ reason }: { reason: string }) => {
+			console.warn(`[Dashboard] Wallet data purged (${reason}) — clearing displayed balances`)
+			chainLastUpdatedRef.current.clear()
+			setBalances(new Map())
+			// If a fetch is already in flight it self-heals (the purge ran at its
+			// start, before any derivation) and its result repopulates the cleared
+			// map. Otherwise force-refresh now.
+			if (!loadingBalancesRef.current) refreshBalances(true)
+		})
+	}, [refreshBalances])
+
 	const cleanBalanceUsd = useMemo(() => {
 		const overrides = new Map(
 			Object.entries(visibilityMap).map(([k, v]) => [k.toLowerCase(), v] as const),

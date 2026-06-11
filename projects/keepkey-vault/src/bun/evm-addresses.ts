@@ -8,22 +8,12 @@
  */
 import { EventEmitter } from 'events'
 import { getSetting, setSetting } from './db'
+import { evmAddressPath } from '../shared/chains'
 import type { EvmTrackedAddress, EvmAddressSet, EvmAddressChainBalance } from '../shared/types'
 
-/**
- * Build an EVM derivation path for a given BIP44 account index.
- *
- * Path: m/44'/60'/{index}'/0/0
- *
- * This matches MetaMask / ShapeShift / keepkey-client — each "account" is a
- * separate hardened branch at the third path component, so account 1's address
- * is independent of account 0. Earlier versions of this file derived
- * m/44'/60'/0'/0/{index} (varying the receive-address index inside account 0),
- * which would not find balances on MetaMask account #1. See SETTINGS_VERSION.
- */
-export function evmAddressPath(index: number): number[] {
-  return [0x8000002C, 0x8000003C, 0x80000000 + index, 0, 0]
-}
+// Moved to shared/chains.ts (pure, test-importable) — re-exported so existing
+// importers (index.ts, walletconnect.ts) keep working unchanged.
+export { evmAddressPath }
 
 const SETTINGS_KEY = 'evm_tracked_indices'
 // Bump when the derivation scheme changes so persisted indices > 0 (which were
@@ -138,6 +128,13 @@ export class EvmAddressManager extends EventEmitter {
   /** Get the currently selected EvmTrackedAddress. */
   getSelectedAddress(): EvmTrackedAddress | undefined {
     return this.addresses.find(a => a.addressIndex === this.selectedIndex)
+  }
+
+  /** Get the tracked address at a specific BIP44 account index (undefined if
+   *  not tracked). Index 0 is the seed-identity address — same path as the
+   *  engine's checkSeedIdentity — used by the seed-staleness guard. */
+  getAddressByIndex(index: number): EvmTrackedAddress | undefined {
+    return this.addresses.find(a => a.addressIndex === index)
   }
 
   /**
