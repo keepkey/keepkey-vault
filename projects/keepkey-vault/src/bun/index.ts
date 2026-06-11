@@ -190,9 +190,30 @@ async function mapWithConcurrency<T, R>(
 	return results
 }
 
-function unwrapPortfolioEntries(resp: any): any[] {
+interface PortfolioMeta {
+	degraded: boolean
+	degradedCount: number
+	failures: Array<{ caip: string; reason: string }>
+	staleChains: Array<{ caip: string; pubkey: string; ageMs: number; fetchedAtISO: string }>
+}
+
+// Pioneer v1.3.115+ returns { balances, meta } where meta reports which chains
+// served degraded (fresh fetch failed) or stale (>5min old cache) data. The old
+// unwrap discarded meta entirely, so the vault could never explain a $0/stale row.
+function unwrapPortfolioResponse(resp: any): { entries: any[]; meta: PortfolioMeta | null } {
 	const rawData = resp?.data?.data || resp?.data || {}
-	return rawData.balances || (Array.isArray(rawData) ? rawData : [])
+	const entries = rawData.balances || (Array.isArray(rawData) ? rawData : [])
+	const meta: PortfolioMeta | null = rawData.meta ?? null
+	return { entries, meta }
+}
+
+function mergeMetas(metas: PortfolioMeta[]): PortfolioMeta {
+	return {
+		degraded: metas.some(m => m.degraded),
+		degradedCount: metas.reduce((n, m) => n + (m.degradedCount || 0), 0),
+		failures: metas.flatMap(m => m.failures || []),
+		staleChains: metas.flatMap(m => m.staleChains || []),
+	}
 }
 
 // ── Desktop update — open GitHub releases page ──
@@ -2088,12 +2109,13 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 										`GetPortfolioBalances chunk ${i + 1}/${pubkeyChunks.length}`
 									)
 								}
-								return { entries: unwrapPortfolioEntries(resp), error: null as string | null }
+								const { entries, meta } = unwrapPortfolioResponse(resp)
+								return { entries, meta, error: null as string | null }
 							} catch (err: any) {
 								const sampleChains = chunk.map((p: any) => String(p.caip || '').split('/')[0]).join(', ')
 								const error = getPioneerPortfolioErrorMessage(err)
 								console.warn(`[getBalances] Portfolio chunk ${i + 1}/${pubkeyChunks.length} failed (${sampleChains}):`, error)
-								return { entries: [] as any[], error }
+								return { entries: [] as any[], meta: null as PortfolioMeta | null, error }
 							}
 						}),
 						PIONEER_PORTFOLIO_TOTAL_TIMEOUT_MS,
@@ -2135,6 +2157,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					)
 					console.log(`[getBalances] effectivePubkeys: ${effectivePubkeys.length}/${pubkeys.length} — chains: ${[...new Set(effectivePubkeys.map(p => p.chainId))].join(', ')}`)
 					const allEntries = chunkResults.flatMap(r => r.entries)
+					const portfolioMeta = mergeMetas(chunkResults.map(r => r.meta).filter(Boolean) as PortfolioMeta[])
 
 					console.log(`[getBalances] GetPortfolioBalances response: ${allEntries.length} entries`)
 					// Log TRON-specific entries for debugging
@@ -2512,6 +2535,37 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							rectifyWallet(deviceId, results)
 						}
 					} catch { /* never block on cache failure */ }
+
+					// ── Fault disclosure ──
+					// Surface degraded (fresh fetch failed) + stale (>5min cache) chains to the
+					// webview through the existing pioneer-error banner channel. severity 'warning'
+					// renders a soft banner (data shown but suspect); 'none' clears it. Hard
+					// failures still throw → severity 'error' in the catch below.
+					try {
+						const chainSymbol = (id: string) => allChains.find(c => c.id === id)?.symbol || id
+						const caipToName = (caip: string) => {
+							const prefix = (caip.split('/')[0] || '').toLowerCase()
+							const chainId = networkToChain.get(prefix)
+							const ch = chainId ? allChains.find(c => c.id === chainId) : allChains.find(c => c.networkId?.toLowerCase() === prefix)
+							return ch?.symbol || ch?.name || (caip.split(':')[0] || caip)
+						}
+						// Chains whose every pubkey landed in a failed chunk (timeout/error) are
+						// degraded from the vault's view even when the server meta is clean.
+						const chunkDegraded = [...new Set(pubkeys.map(p => p.chainId))]
+							.filter(id => !confirmedChainIds.has(id))
+							.map(chainSymbol)
+						const degradedChains = [...new Set([...chunkDegraded, ...portfolioMeta.failures.map(f => caipToName(f.caip))])].filter(Boolean)
+						const staleChains = [...new Set(portfolioMeta.staleChains.map(s => caipToName(s.caip)))].filter(Boolean)
+						const staleMinutes = portfolioMeta.staleChains.length
+							? Math.floor(Math.max(...portfolioMeta.staleChains.map(s => s.ageMs || 0)) / 60000)
+							: 0
+						if (degradedChains.length > 0 || staleChains.length > 0) {
+							console.warn(`[getBalances] Fault: degraded=[${degradedChains.join(', ')}] stale=[${staleChains.join(', ')}] (${staleMinutes}m)`)
+							rpc.send['pioneer-error']({ message: '', url: getPioneerApiBase(), severity: 'warning', degradedChains, staleChains, staleMinutes })
+						} else {
+							rpc.send['pioneer-error']({ message: '', url: getPioneerApiBase(), severity: 'none' })
+						}
+					} catch { /* webview not ready */ }
 				} catch (e: any) {
 					const message = getPioneerPortfolioErrorMessage(e)
 					console.warn('[getBalances] Portfolio API failed:', message)

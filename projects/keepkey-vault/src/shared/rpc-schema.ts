@@ -382,7 +382,17 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       'btc-accounts-update': BtcAccountSet
       'evm-addresses-update': EvmAddressSet
 'update-status': UpdateStatus
-      'pioneer-error': { message: string; url: string }
+      // severity defaults to 'error' (hard failure — server unreachable). 'warning'
+      // carries soft fault info (some chains degraded/stale, data still shown);
+      // 'none' clears any soft-fault banner after a clean fetch.
+      'pioneer-error': {
+        message: string
+        url: string
+        severity?: 'error' | 'warning' | 'none'
+        degradedChains?: string[]
+        staleChains?: string[]
+        staleMinutes?: number
+      }
       'pair-request': PairingRequestInfo
       'pair-dismissed': Record<string, never>
       'signing-request': SigningRequestInfo
