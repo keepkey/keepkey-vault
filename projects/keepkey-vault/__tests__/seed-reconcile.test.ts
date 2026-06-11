@@ -91,3 +91,29 @@ describe('blind-spot sequences resolve correctly', () => {
     expect(isManagerSeedStale(HIDDEN.toLowerCase(), HIDDEN)).toBe(false)
   })
 })
+
+// ── Seed-owner stamp: the BTC-only staleness anchor ─────────────────────────
+// reconcileSeedManagers detects staleness two ways, BOTH via this same pure
+// comparison: (1) EVM index-0 address vs device, and (2) the seed-owner STAMP
+// (managersSeedOwner — the seed the managers were derived under) vs device. The
+// stamp is what catches a stale BTC-only manager, where getBtcAccounts
+// initialized BTC with no EVM index-0 to compare. Same helper, different operand.
+describe('seed-owner stamp comparison (BTC-only gap)', () => {
+  test('BTC-only managers stamped under the previous seed are stale when the device seed changes', () => {
+    // getBtcAccounts initialized BTC under HIDDEN and stamped it; EVM never
+    // initialized (evmIdx0 === null → that leg no-ops). The stamp is the only
+    // signal, and it must fire.
+    const stamp = HIDDEN.toLowerCase()
+    expect(isManagerSeedStale(STANDARD, stamp)).toBe(true)   // stamp leg → purge
+    expect(isManagerSeedStale(STANDARD, null)).toBe(false)   // evmIdx0 leg absent → no-op
+  })
+
+  test('BTC-only managers stamped under the current seed are fresh (no churn on cold start)', () => {
+    const stamp = STANDARD.toLowerCase()
+    expect(isManagerSeedStale(STANDARD, stamp)).toBe(false)
+  })
+
+  test('unstamped managers (owner null) never purge on the stamp leg — adopt, do not churn', () => {
+    expect(isManagerSeedStale(STANDARD, null)).toBe(false)
+  })
+})
