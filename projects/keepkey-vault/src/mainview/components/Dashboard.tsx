@@ -708,7 +708,9 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 	const loadingBalancesRef = useRef(false)
 	// Last time a live balance refresh was attempted — drives the window-focus
 	// re-fetch (skip if recently refreshed) and degraded-chain backoff retries.
-	const lastFetchAttemptRef = useRef(0)
+	// Seed with mount time so an immediate focus round-trip after loading cached
+	// balances doesn't read as "idle > 5 min" and force a refresh on startup.
+	const lastFetchAttemptRef = useRef(Date.now())
 	const degradedAttemptRef = useRef(0)
 	const degradedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 	// Records when each chain's balance was last set via a single-chain balance-updated event.
@@ -1957,11 +1959,20 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 								{portfolioFault.degradedChains.length > 0 ? t("degradedTitle") : t("staleTitle")}
 							</Text>
 						</Flex>
-						<Text fontSize="xs" color="kk.textSecondary" lineHeight="1.4">
-							{portfolioFault.degradedChains.length > 0
-								? t("degradedDesc", { chains: portfolioFault.degradedChains.join(", ") })
-								: t("staleDesc", { count: portfolioFault.staleMinutes })}
-						</Text>
+						{/* Backend can report degraded and stale chains together; render
+						    both so the stale warning isn't swallowed by the degraded one. */}
+						<Flex direction="column" gap="1">
+							{portfolioFault.degradedChains.length > 0 && (
+								<Text fontSize="xs" color="kk.textSecondary" lineHeight="1.4">
+									{t("degradedDesc", { chains: portfolioFault.degradedChains.join(", ") })}
+								</Text>
+							)}
+							{portfolioFault.staleChains.length > 0 && (
+								<Text fontSize="xs" color="kk.textSecondary" lineHeight="1.4">
+									{t("staleDesc", { count: portfolioFault.staleMinutes })}
+								</Text>
+							)}
+						</Flex>
 						<Flex gap="2" mt="1">
 							<Box
 								as="button"
