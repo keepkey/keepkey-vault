@@ -603,6 +603,14 @@ interface PioneerError {
 	url: string
 }
 
+// Soft fault: balances were returned but some chains are degraded (fresh fetch
+// failed) or stale (>5min cache). Distinct from PioneerError (hard, server down).
+interface PortfolioFault {
+	degradedChains: string[]
+	staleChains: string[]
+	staleMinutes: number
+}
+
 interface DashboardProps {
 	onLoaded?: () => void
 	watchOnly?: boolean
@@ -683,6 +691,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 	const [passphraseIntroSeen, setPassphraseIntroSeen] = useState(true)
 	const [introDismissed, setIntroDismissed] = useState(false)
 	const [pioneerError, setPioneerError] = useState<PioneerError | null>(null)
+	const [portfolioFault, setPortfolioFault] = useState<PortfolioFault | null>(null)
 	const [streamStatus, setStreamStatus] = useState<{ connected: boolean; watching: number } | null>(null)
 	const [cacheUpdatedAt, setCacheUpdatedAt] = useState<number | null>(null)
 	const [hasEverRefreshed, setHasEverRefreshed] = useState(false)
@@ -697,6 +706,13 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 	})())
 	const refreshGenRef = useRef(0)
 	const loadingBalancesRef = useRef(false)
+	// Last time a live balance refresh was attempted — drives the window-focus
+	// re-fetch (skip if recently refreshed) and degraded-chain backoff retries.
+	// Seed with mount time so an immediate focus round-trip after loading cached
+	// balances doesn't read as "idle > 5 min" and force a refresh on startup.
+	const lastFetchAttemptRef = useRef(Date.now())
+	const degradedAttemptRef = useRef(0)
+	const degradedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 	// Records when each chain's balance was last set via a single-chain balance-updated event.
 	// Used by full refreshes to skip chains that received a fresher per-chain update while
 	// the bulk request was in-flight (prevents old getBalances response from overwriting newer data).
@@ -839,10 +855,27 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 		return () => window.removeEventListener('keepkey-settings-changed', refreshFeatureFlags)
 	}, [refreshFeatureFlags])
 
-	// Listen for Pioneer connection errors from backend
+	// Listen for Pioneer faults from backend. severity distinguishes a hard
+	// failure (server unreachable → blocking error banner) from a soft fault
+	// (some chains degraded/stale, balances still shown → dismissable warning).
 	useEffect(() => {
 		return onRpcMessage("pioneer-error", (payload) => {
-			stagePioneerError(payload as PioneerError)
+			const p = payload as PioneerError & Partial<PortfolioFault> & { severity?: 'error' | 'warning' | 'none' }
+			if (p.severity === 'none') {
+				setPortfolioFault(null)
+				return
+			}
+			if (p.severity === 'warning') {
+				setPortfolioFault({
+					degradedChains: p.degradedChains ?? [],
+					staleChains: p.staleChains ?? [],
+					staleMinutes: p.staleMinutes ?? 0,
+				})
+				return
+			}
+			// Hard error supersedes any soft-fault banner.
+			setPortfolioFault(null)
+			stagePioneerError({ message: p.message, url: p.url })
 		})
 	}, [stagePioneerError])
 
@@ -987,6 +1020,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 		// Generation counter: discard responses from older concurrent full refreshes.
 		const gen = ++refreshGenRef.current
 		const refreshStartedAt = Date.now()
+		lastFetchAttemptRef.current = refreshStartedAt
 		loadingBalancesRef.current = true
 		setLoadingBalances(true)
 
@@ -1032,6 +1066,53 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 			setLoadingBalances(false)
 		}
 	}, [watchOnly, clearPioneerError, stagePioneerError])
+
+	// Phase 2 trigger — window focus: catch long idle periods. If the last live
+	// fetch is older than 5 min, force-refresh on return to the window.
+	useEffect(() => {
+		if (watchOnly) return
+		const onFocus = () => {
+			const AGE_BEFORE_REFETCH_MS = 5 * 60 * 1000
+			if (Date.now() - lastFetchAttemptRef.current > AGE_BEFORE_REFETCH_MS) {
+				refreshBalances(true)
+			}
+		}
+		window.addEventListener('focus', onFocus)
+		return () => window.removeEventListener('focus', onFocus)
+	}, [watchOnly, refreshBalances])
+
+	// Phase 2 trigger — degraded-chain background retry with exponential backoff.
+	// Each new fault report (re-)schedules a forced refresh; a clean fetch
+	// (portfolioFault === null) resets the backoff. We refresh the whole portfolio
+	// rather than only degraded chains — at ~5-6s a full refresh is simpler and the
+	// difference is negligible.
+	useEffect(() => {
+		if (degradedTimerRef.current) {
+			clearTimeout(degradedTimerRef.current)
+			degradedTimerRef.current = null
+		}
+		const hasDegraded = (portfolioFault?.degradedChains.length ?? 0) > 0
+		if (watchOnly || !hasDegraded) {
+			degradedAttemptRef.current = 0
+			return
+		}
+		const SCHEDULE = [30_000, 60_000, 120_000, 300_000]
+		const delay = SCHEDULE[Math.min(degradedAttemptRef.current, SCHEDULE.length - 1)]
+		degradedAttemptRef.current += 1
+		degradedTimerRef.current = setTimeout(() => {
+			degradedTimerRef.current = null
+			if (!loadingBalancesRef.current) {
+				console.log('[Dashboard] Retrying degraded chains:', portfolioFault?.degradedChains.join(', '))
+				refreshBalances(true)
+			}
+		}, delay)
+		return () => {
+			if (degradedTimerRef.current) {
+				clearTimeout(degradedTimerRef.current)
+				degradedTimerRef.current = null
+			}
+		}
+	}, [portfolioFault, watchOnly, refreshBalances])
 
 	// Auto-refresh balances when Zcash feature flag is enabled mid-session
 	const prevZcashRef = useRef(zcashEnabled)
@@ -1850,6 +1931,79 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 								}}
 							>
 								{t("retry")}
+							</Box>
+						</Flex>
+					</Flex>
+				</Box>
+			)}
+
+			{/* Soft-fault banner — degraded/stale chains. Hidden while a hard
+			    pioneerError banner is showing (that one supersedes). */}
+			{!pioneerError && portfolioFault && (portfolioFault.degradedChains.length > 0 || portfolioFault.staleChains.length > 0) && (
+				<Box
+					mb="3"
+					px="4"
+					py="3"
+					bg="rgba(233,196,106,0.08)"
+					border="1px solid"
+					borderColor="rgba(233,196,106,0.3)"
+					borderRadius="lg"
+				>
+					<Flex direction="column" gap="2">
+						<Flex align="center" gap="2">
+							<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+								<circle cx="12" cy="12" r="10" />
+								<polyline points="12 6 12 12 16 14" />
+							</svg>
+							<Text fontSize="sm" fontWeight="600" color="var(--gold)">
+								{portfolioFault.degradedChains.length > 0 ? t("degradedTitle") : t("staleTitle")}
+							</Text>
+						</Flex>
+						{/* Backend can report degraded and stale chains together; render
+						    both so the stale warning isn't swallowed by the degraded one. */}
+						<Flex direction="column" gap="1">
+							{portfolioFault.degradedChains.length > 0 && (
+								<Text fontSize="xs" color="kk.textSecondary" lineHeight="1.4">
+									{t("degradedDesc", { chains: portfolioFault.degradedChains.join(", ") })}
+								</Text>
+							)}
+							{portfolioFault.staleChains.length > 0 && (
+								<Text fontSize="xs" color="kk.textSecondary" lineHeight="1.4">
+									{t("staleDesc", { count: portfolioFault.staleMinutes })}
+								</Text>
+							)}
+						</Flex>
+						<Flex gap="2" mt="1">
+							<Box
+								as="button"
+								px="3"
+								py="1.5"
+								fontSize="xs"
+								fontWeight="600"
+								color="white"
+								bg="rgba(233,196,106,0.2)"
+								border="1px solid"
+								borderColor="kk.gold"
+								borderRadius="md"
+								cursor="pointer"
+								_hover={{ bg: "rgba(233,196,106,0.35)" }}
+								onClick={() => refreshBalances(true)}
+							>
+								{t("syncNow")}
+							</Box>
+							<Box
+								as="button"
+								px="3"
+								py="1.5"
+								fontSize="xs"
+								fontWeight="600"
+								color="kk.textMuted"
+								bg="transparent"
+								cursor="pointer"
+								_hover={{ color: "white" }}
+								onClick={() => setPortfolioFault(null)}
+							>
+								{t("dismiss")}
 							</Box>
 						</Flex>
 					</Flex>
