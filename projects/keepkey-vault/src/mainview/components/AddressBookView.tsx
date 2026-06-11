@@ -294,6 +294,11 @@ function Row({ entry, connected, onSave, onRemove }: {
           <Text fontSize="11px" fontFamily="mono" color="var(--text-2)" wordBreak="break-all" lineHeight="1.4">
             {entry.address}
           </Text>
+          {!isOwn && entry.savedAt && (
+            <Text fontSize="10px" color="var(--text-3)">
+              {t("addedOn", { defaultValue: "Added {{date}}", date: new Date(entry.savedAt).toLocaleDateString() })}
+            </Text>
+          )}
         </Flex>
         <CopyButton value={entry.address} label={t("copyAddress", { defaultValue: "Copy address" })} />
         {chain && <AssetIcon caip={chain.caip} size={30} alt={chain.symbol} />}

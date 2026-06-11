@@ -358,6 +358,16 @@ export function initDb() {
     db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_addressbook_dedupe ON addressbook(wallet_id, network_id, address)`)
     db.exec(`CREATE INDEX IF NOT EXISTS idx_addressbook_wallet_net ON addressbook(wallet_id, network_id)`)
     db.exec(`CREATE INDEX IF NOT EXISTS idx_addressbook_device ON addressbook(device_id)`)
+    // `saved_at` (R4 opt-in): null for external rows merely auto-recorded on send
+    // (history-only, hidden from the book); set when the user explicitly saves the
+    // contact. Backfill existing intentional rows — labeled, or manually added
+    // (manual adds never carry a first_seen_txid) — so they aren't hidden.
+    try { db.exec(`ALTER TABLE addressbook ADD COLUMN saved_at INTEGER`) } catch { /* already exists */ }
+    try {
+      db.exec(`UPDATE addressbook SET saved_at = COALESCE(saved_at, updated_at)
+               WHERE kind = 'external' AND saved_at IS NULL
+                 AND (label IS NOT NULL OR first_seen_txid IS NULL)`)
+    } catch { /* best effort */ }
 
     db.exec(`
       CREATE TABLE IF NOT EXISTS addressbook_tx (
@@ -1876,6 +1886,7 @@ function mapAddressBookRow(r: any): AddressBookEntry {
     addressIndex: r.address_index ?? undefined,
     firstSeenTxid: r.first_seen_txid || undefined,
     note: r.note || undefined,
+    savedAt: r.saved_at ?? undefined,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   }
@@ -1941,14 +1952,16 @@ export function syncOwnAddressBook(
   }
 }
 
-/** Record a manual outbound (R3/R7): upsert the recipient entry + append a
- *  history row. Returns the entry id and whether a brand-new EXTERNAL entry was
- *  created (=> the UI offers a "save a label?" prompt, R4). */
+/** Record a manual outbound (R3/R7): anchor the recipient entry + append a history
+ *  row. Auto-created external rows are left with saved_at=null (history-only) — they
+ *  do NOT enter the visible book until the user explicitly saves them (R4 opt-in).
+ *  `unsaved` is true when the recipient is not yet a saved contact, driving the
+ *  post-send "save this address?" dialog. */
 export function recordOutbound(args: {
   walletId: string; deviceId: string
   toAddress: string; networkId: string; chainId: string; chainFamily: string
   fromAddress?: string | null; caip: string; symbol?: string | null; amount?: string | null; txid: string
-}): { entryId: string; isNew: boolean } | null {
+}): { entryId: string; isNew: boolean; unsaved: boolean } | null {
   try {
     const database = db
     if (!database) return null
@@ -1957,12 +1970,14 @@ export function recordOutbound(args: {
     const now = Date.now()
     let entryId = ''
     let isNew = false
+    let unsaved = true
     const tx = database.transaction(() => {
       const existing = database.query(
-        'SELECT id FROM addressbook WHERE wallet_id = ? AND network_id = ? AND address = ?',
-      ).get(args.walletId, args.networkId, addr) as { id: string } | null
+        'SELECT id, saved_at FROM addressbook WHERE wallet_id = ? AND network_id = ? AND address = ?',
+      ).get(args.walletId, args.networkId, addr) as { id: string; saved_at: number | null } | null
       if (existing) {
         entryId = existing.id
+        unsaved = existing.saved_at == null
         database.run('UPDATE addressbook SET updated_at = ? WHERE id = ?', [now, entryId])
       } else {
         entryId = crypto.randomUUID()
@@ -1983,7 +1998,7 @@ export function recordOutbound(args: {
       )
     })
     tx()
-    return { entryId, isNew }
+    return { entryId, isNew, unsaved }
   } catch (e: any) {
     console.warn('[db] recordOutbound failed:', e.message)
     return null
@@ -1996,13 +2011,15 @@ export function recordOutbound(args: {
 export function getAddressBookList(filter: AddressBookFilter): AddressBookEntry[] {
   try {
     if (!db) return []
-    if (filter.kind !== 'own' && !filter.walletId) return []
+    // The Address Book is wallet-agnostic: own + external are readable without a
+    // wallet scope (omit walletId for a global, cross-wallet listing).
     let sql = 'SELECT * FROM addressbook WHERE 1=1'
     const params: any[] = []
     if (filter.walletId) { sql += ' AND wallet_id = ?'; params.push(filter.walletId) }
     if (filter.networkId) { sql += ' AND network_id = ?'; params.push(filter.networkId) }
     if (filter.chainId)   { sql += ' AND chain_id = ?';   params.push(filter.chainId) }
     if (filter.kind)      { sql += ' AND kind = ?';       params.push(filter.kind) }
+    if (filter.savedOnly) { sql += ' AND saved_at IS NOT NULL' }
     if (filter.search) {
       sql += ` AND (label LIKE ? ESCAPE '\\' OR address LIKE ? ESCAPE '\\')`
       const q = `%${filter.search.replace(/[\\%_]/g, c => '\\' + c)}%`
@@ -2017,9 +2034,30 @@ export function getAddressBookList(filter: AddressBookFilter): AddressBookEntry[
   }
 }
 
-/** Patch a label/note. Scoped by wallet_id for safety. Returns true if a row changed. */
+/** Match a recipient against the book for instant form-fill detection (R5). EXACT
+ *  networkId equality (never family/prefix — fund safety). Returns the best match:
+ *  own wallets first, then explicitly-saved contacts. History-only recipients
+ *  (saved_at NULL) do NOT count as "known". null if unknown. */
+export function matchAddressBook(networkId: string, address: string, chainFamily: string): AddressBookEntry | null {
+  try {
+    if (!db) return null
+    const addr = normalizeAddress(address, chainFamily)
+    const row = db.query(
+      `SELECT * FROM addressbook
+        WHERE network_id = ? AND address = ? AND (kind = 'own' OR saved_at IS NOT NULL)
+        ORDER BY (kind = 'own') DESC, saved_at DESC LIMIT 1`,
+    ).get(networkId, addr) as any
+    return row ? mapAddressBookRow(row) : null
+  } catch (e: any) {
+    console.warn('[db] matchAddressBook failed:', e.message)
+    return null
+  }
+}
+
+/** Patch a label/note. Pass walletId to scope by wallet; omit (null) to act on the
+ *  entry globally (the book is wallet-agnostic). Returns true if a row changed. */
 export function updateAddressBookEntry(
-  id: string, walletId: string, patch: { label?: string; note?: string },
+  id: string, walletId: string | null, patch: { label?: string; note?: string },
 ): boolean {
   try {
     if (!db) return false
@@ -2029,8 +2067,9 @@ export function updateAddressBookEntry(
     if (patch.note !== undefined)  { sets.push('note = ?');  params.push(patch.note || null) }
     if (sets.length === 0) return false
     sets.push('updated_at = ?'); params.push(Date.now())
-    params.push(id, walletId)
-    const res = db.run(`UPDATE addressbook SET ${sets.join(', ')} WHERE id = ? AND wallet_id = ?`, params)
+    let where = 'id = ?'; params.push(id)
+    if (walletId) { where += ' AND wallet_id = ?'; params.push(walletId) }
+    const res = db.run(`UPDATE addressbook SET ${sets.join(', ')} WHERE ${where}`, params)
     return Boolean((res as any)?.changes)
   } catch (e: any) {
     console.warn('[db] updateAddressBookEntry failed:', e.message)
@@ -2038,24 +2077,33 @@ export function updateAddressBookEntry(
   }
 }
 
-/** Delete an entry + its history. Scoped by wallet_id. */
-export function deleteAddressBookEntry(id: string, walletId: string): void {
+/** Delete an entry + its history. Pass walletId to scope by wallet; omit (null) for
+ *  a global delete (wallet-agnostic book). */
+export function deleteAddressBookEntry(id: string, walletId: string | null): void {
   try {
     if (!db) return
-    db.run('DELETE FROM addressbook_tx WHERE entry_id = ? AND wallet_id = ?', [id, walletId])
-    db.run('DELETE FROM addressbook WHERE id = ? AND wallet_id = ?', [id, walletId])
+    if (walletId) {
+      db.run('DELETE FROM addressbook_tx WHERE entry_id = ? AND wallet_id = ?', [id, walletId])
+      db.run('DELETE FROM addressbook WHERE id = ? AND wallet_id = ?', [id, walletId])
+    } else {
+      db.run('DELETE FROM addressbook_tx WHERE entry_id = ?', [id])
+      db.run('DELETE FROM addressbook WHERE id = ?', [id])
+    }
   } catch (e: any) {
     console.warn('[db] deleteAddressBookEntry failed:', e.message)
   }
 }
 
-/** Per-recipient outbound history (R7), newest first. */
-export function getAddressBookHistory(entryId: string, walletId: string, limit = 100): AddressBookTx[] {
+/** Per-recipient outbound history (R7), newest first. Pass walletId to scope by
+ *  wallet; omit (null) for the entry's full history regardless of wallet. */
+export function getAddressBookHistory(entryId: string, walletId: string | null, limit = 100): AddressBookTx[] {
   try {
     if (!db) return []
-    const rows = db.query(
-      'SELECT * FROM addressbook_tx WHERE entry_id = ? AND wallet_id = ? ORDER BY broadcast_at DESC LIMIT ?',
-    ).all(entryId, walletId, limit) as any[]
+    const sql = walletId
+      ? 'SELECT * FROM addressbook_tx WHERE entry_id = ? AND wallet_id = ? ORDER BY broadcast_at DESC LIMIT ?'
+      : 'SELECT * FROM addressbook_tx WHERE entry_id = ? ORDER BY broadcast_at DESC LIMIT ?'
+    const args = walletId ? [entryId, walletId, limit] : [entryId, limit]
+    const rows = db.query(sql).all(...args) as any[]
     return rows.map(mapAddressBookTxRow)
   } catch (e: any) {
     console.warn('[db] getAddressBookHistory failed:', e.message)
@@ -2077,14 +2125,15 @@ export function addExternalEntry(args: {
     let id: string
     if (existing) {
       id = existing.id
-      db.run('UPDATE addressbook SET label = ?, updated_at = ? WHERE id = ?', [args.label ?? null, now, id])
+      // Explicit save — confirm the contact (preserve the original save date if any).
+      db.run('UPDATE addressbook SET label = ?, saved_at = COALESCE(saved_at, ?), updated_at = ? WHERE id = ?', [args.label ?? null, now, now, id])
     } else {
       id = crypto.randomUUID()
       db.run(
         `INSERT INTO addressbook
-           (id, wallet_id, device_id, kind, network_id, chain_id, address, label, created_at, updated_at)
-         VALUES (?, ?, ?, 'external', ?, ?, ?, ?, ?, ?)`,
-        [id, args.walletId, args.deviceId, args.networkId, args.chainId, addr, args.label ?? null, now, now],
+           (id, wallet_id, device_id, kind, network_id, chain_id, address, label, saved_at, created_at, updated_at)
+         VALUES (?, ?, ?, 'external', ?, ?, ?, ?, ?, ?, ?)`,
+        [id, args.walletId, args.deviceId, args.networkId, args.chainId, addr, args.label ?? null, now, now, now],
       )
     }
     const row = db.query('SELECT * FROM addressbook WHERE id = ?').get(id) as any

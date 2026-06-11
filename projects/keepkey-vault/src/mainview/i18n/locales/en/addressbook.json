@@ -41,5 +41,13 @@
 	"openAddressBook": "Address book",
 	"saveRecipientPrompt": "Save this recipient?",
 	"contactSaved": "Contact saved",
-	"saveContactFailed": "Could not save contact"
+	"saveContactFailed": "Could not save contact",
+	"saveAddressTitle": "New external address",
+	"fundsLeavingWarning": "Double-check the address — sent funds can't be reversed",
+	"saveAddressPrompt": "Save this address to your Address Book?",
+	"newAddressBadge": "New address",
+	"notNow": "Not now",
+	"saving": "Saving…",
+	"savedToBook": "Saved to Address Book",
+	"addedOn": "Added {{date}}"
 }
