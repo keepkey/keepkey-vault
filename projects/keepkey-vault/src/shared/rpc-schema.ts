@@ -270,6 +270,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
 
       // ── ENS resolution ────────────────────────────────────────────────────
       resolveEns: { params: { name: string }; response: { address: string | null } }
+      reverseResolveEns: { params: { address: string }; response: { name: string | null } }
 
       // ── Address Book (SQLite-persisted, unified across all wallets) ──────
       // own entries are auto-seeded from connected wallets (R2); external entries

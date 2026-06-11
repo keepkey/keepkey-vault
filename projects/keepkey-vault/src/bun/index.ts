@@ -4157,6 +4157,24 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				}
 			},
 
+			reverseResolveEns: async (params) => {
+				const base = getPioneerApiBase()
+				try {
+					const resp = await fetch(`${base}/api/v1/names/ens-reverse`, {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({ address: params.address }),
+						signal: AbortSignal.timeout(10000),
+					})
+					if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+					const data = await resp.json() as any
+					return { name: data?.data?.name ?? null }
+				} catch (e: any) {
+					console.warn('[ens] reverse resolve failed:', e?.message)
+					return { name: null }
+				}
+			},
+
 			// ── Address Book ─────────────────────────────────────────
 			matchAddress: async (params) => {
 				// Instant recipient detection (R5) — wallet-agnostic, read-only.

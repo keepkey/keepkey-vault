@@ -73,13 +73,16 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 	// Address we've already auto-prompted to save, so the dialog doesn't re-pop.
 	const promptedAddressRef = useRef<string | null>(null)
 
-	// ENS resolution
+	// ENS forward resolution (.eth → address)
 	const [ensResolved, setEnsResolved] = useState<string | null>(null)
 	const [ensResolving, setEnsResolving] = useState(false)
 	const [ensError, setEnsError] = useState(false)
 	const isEnsName = recipient.trim().endsWith('.eth') && recipient.trim().length >= 7
 	// The address that actually goes into the transaction
 	const effectiveRecipient = isEnsName ? (ensResolved ?? '') : recipient
+
+	// ENS reverse resolution (address → .eth name), EVM chains only
+	const [ensReverseName, setEnsReverseName] = useState<string | null>(null)
 
 	// ENS resolution — fires when recipient changes
 	useEffect(() => {
@@ -108,6 +111,19 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 		return () => { alive = false }
 	}, [recipient])
 
+	// ENS reverse lookup — fires when a valid EVM address is entered
+	useEffect(() => {
+		setEnsReverseName(null)
+		const addr = recipient.trim()
+		if (!addr || isEnsName || chain.chainFamily !== 'evm') return
+		if (!addr.startsWith('0x') || addr.length !== 42) return
+		let alive = true
+		rpcRequest<{ name: string | null }>('reverseResolveEns', { address: addr }, 10000)
+			.then(result => { if (alive) setEnsReverseName(result?.name ?? null) })
+			.catch(() => {})
+		return () => { alive = false }
+	}, [recipient, isEnsName, chain.chainFamily])
+
 	// Reset form when token selection changes
 	const tokenCaip = token?.caip ?? null
 	useEffect(() => {
@@ -129,6 +145,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 		setEnsResolved(null)
 		setEnsResolving(false)
 		setEnsError(false)
+		setEnsReverseName(null)
 	}, [tokenCaip])
 
 	// Derived display values — token mode vs native mode
@@ -341,6 +358,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 		setEnsResolved(null)
 		setEnsResolving(false)
 		setEnsError(false)
+		setEnsReverseName(null)
 	}, [])
 
 	const copyTxid = useCallback(() => {
@@ -530,6 +548,12 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 								<Text fontSize="11px" color="kk.green" fontFamily="mono" truncate maxW="240px">{ensResolved}</Text>
 							</Flex>
 						)}
+						{/* Reverse ENS: show .eth name for a pasted address */}
+						{ensReverseName && !isEnsName && (
+							<Flex align="center" gap="2" mt="1.5" px="2" py="1" w="fit-content" bg="rgba(139,227,196,0.08)" border="1px solid rgba(139,227,196,0.28)" borderRadius="999px">
+								<Text fontSize="11px" color="kk.green" fontWeight="600">{ensReverseName}</Text>
+							</Flex>
+						)}
 						{/* R5: known contact/own wallet — show its identicon + label. */}
 						{matchedContact && (
 							<Flex align="center" gap="2" mt="1.5" px="2" py="1" w="fit-content" bg="rgba(233,196,106,0.06)" border="1px solid rgba(233,196,106,0.22)" borderRadius="999px">
@@ -694,6 +718,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 							<Flex direction="column" align="flex-end">
 								<Text fontSize="xs" fontFamily="mono" color="kk.textPrimary" maxW="250px" truncate>{effectiveRecipient}</Text>
 								{isEnsName && <Text fontSize="10px" color="kk.textMuted">{recipient}</Text>}
+								{ensReverseName && !isEnsName && <Text fontSize="10px" color="kk.green">{ensReverseName}</Text>}
 							</Flex>
 						</Flex>
 						<Flex justify="space-between" mb="1">
