@@ -4138,6 +4138,25 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (scope) clearApiLogs(scope.deviceId, scope.walletId)
 			},
 
+			// ── ENS resolution ────────────────────────────────────────
+			resolveEns: async (params) => {
+				const base = getPioneerApiBase()
+				try {
+					const resp = await fetch(`${base}/api/v1/names/ens-resolve`, {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({ name: params.name }),
+						signal: AbortSignal.timeout(10000),
+					})
+					if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+					const data = await resp.json() as any
+					return { address: data?.data?.address ?? null }
+				} catch (e: any) {
+					console.warn('[ens] resolve failed:', e?.message)
+					return { address: null }
+				}
+			},
+
 			// ── Address Book ─────────────────────────────────────────
 			matchAddress: async (params) => {
 				// Instant recipient detection (R5) — wallet-agnostic, read-only.

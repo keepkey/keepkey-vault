@@ -73,6 +73,41 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 	// Address we've already auto-prompted to save, so the dialog doesn't re-pop.
 	const promptedAddressRef = useRef<string | null>(null)
 
+	// ENS resolution
+	const [ensResolved, setEnsResolved] = useState<string | null>(null)
+	const [ensResolving, setEnsResolving] = useState(false)
+	const [ensError, setEnsError] = useState(false)
+	const isEnsName = recipient.trim().endsWith('.eth') && recipient.trim().length >= 7
+	// The address that actually goes into the transaction
+	const effectiveRecipient = isEnsName ? (ensResolved ?? '') : recipient
+
+	// ENS resolution — fires when recipient changes
+	useEffect(() => {
+		setEnsResolved(null)
+		setEnsResolving(false)
+		setEnsError(false)
+		const name = recipient.trim()
+		if (!name.endsWith('.eth') || name.length < 7) return
+		let alive = true
+		setEnsResolving(true)
+		rpcRequest<{ address: string | null }>('resolveEns', { name }, 12000)
+			.then(result => {
+				if (!alive) return
+				setEnsResolving(false)
+				if (result?.address) {
+					setEnsResolved(result.address)
+				} else {
+					setEnsError(true)
+				}
+			})
+			.catch(() => {
+				if (!alive) return
+				setEnsResolving(false)
+				setEnsError(true)
+			})
+		return () => { alive = false }
+	}, [recipient])
+
 	// Reset form when token selection changes
 	const tokenCaip = token?.caip ?? null
 	useEffect(() => {
@@ -91,6 +126,9 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 		setShowSaveDialog(false)
 		promptedAddressRef.current = null
 		setShowAddressBook(false)
+		setEnsResolved(null)
+		setEnsResolving(false)
+		setEnsError(false)
 	}, [tokenCaip])
 
 	// Derived display values — token mode vs native mode
@@ -175,12 +213,14 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 	useEffect(() => {
 		setMatchedContact(null)
 		setAddressIsNew(false)
-		const addr = recipient.trim()
-		if (!addr || !addressValid) return
+		if (!addressValid) return
+		// For ENS names use the resolved address; skip if still resolving.
+		const lookupAddr = isEnsName ? ensResolved : recipient.trim()
+		if (!lookupAddr) return
 		let alive = true
 		const networkId = caipToNetworkId(activeCaip)
 		const handle = setTimeout(() => {
-			rpcRequest<AddressBookEntry | null>("matchAddress", { networkId, address: addr }, 5000)
+			rpcRequest<AddressBookEntry | null>("matchAddress", { networkId, address: lookupAddr }, 5000)
 				.then(entry => {
 					if (!alive) return
 					if (entry) {
@@ -188,8 +228,8 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 					} else {
 						setAddressIsNew(true)
 						// Auto-prompt to save — once per distinct new address.
-						if (promptedAddressRef.current !== addr) {
-							promptedAddressRef.current = addr
+						if (promptedAddressRef.current !== lookupAddr) {
+							promptedAddressRef.current = lookupAddr
 							setShowSaveDialog(true)
 						}
 					}
@@ -197,10 +237,10 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 				.catch(() => { /* detection is best-effort; never block sending */ })
 		}, 300)
 		return () => { alive = false; clearTimeout(handle) }
-	}, [recipient, activeCaip, addressValid])
+	}, [recipient, activeCaip, addressValid, isEnsName, ensResolved])
 
 	const handleBuild = useCallback(async () => {
-		if (!recipient || (!amount && !isMax)) return
+		if (!effectiveRecipient || (!amount && !isMax)) return
 		if (addressValidation && !addressValidation.valid) { setError(t(addressValidation.error!)); return }
 		if (exceedsBalance) { setError(t("exceedsBalanceShort")); return }
 		setLoading(true)
@@ -209,7 +249,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 		try {
 			const result = await rpcRequest<BuildTxResult>('buildTx', {
 				chainId: chain.id,
-				to: recipient,
+				to: effectiveRecipient,
 				amount: isMax ? '0' : amount,
 				memo: memo || undefined,
 				feeLevel,
@@ -229,7 +269,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 			setError(e.message || t("failedToBuild"))
 		}
 		setLoading(false)
-	}, [chain, recipient, amount, memo, feeLevel, isMax, addressValidation, exceedsBalance, isTokenSend, token, balance?.balance, xpubOverride, scriptTypeOverride, evmAddressIndex])
+	}, [chain, effectiveRecipient, recipient, amount, memo, feeLevel, isMax, addressValidation, exceedsBalance, isTokenSend, token, balance?.balance, xpubOverride, scriptTypeOverride, evmAddressIndex])
 
 	const handleSign = useCallback(async () => {
 		if (!buildResult) return
@@ -267,7 +307,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 			const result = await rpcRequest<BroadcastResult>('broadcastTx', {
 				chainId: chain.id,
 				signedTx,
-				to: recipient,
+				to: effectiveRecipient,
 				amount: sendAmount,
 				symbol: displaySymbol,
 				caip: activeCaip,
@@ -280,7 +320,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 			setError(e.message || t("broadcastFailed"))
 		}
 		setLoading(false)
-	}, [chain, signedTx, recipient, amount, isMax, isTokenSend, displaySymbol, displayBalance, buildResult, activeCaip, address])
+	}, [chain, signedTx, effectiveRecipient, recipient, amount, isMax, isTokenSend, displaySymbol, displayBalance, buildResult, activeCaip, address])
 
 	const reset = useCallback(() => {
 		setPhase('input')
@@ -298,6 +338,9 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 		setShowSaveDialog(false)
 		promptedAddressRef.current = null
 		setShowAddressBook(false)
+		setEnsResolved(null)
+		setEnsResolving(false)
+		setEnsError(false)
 	}, [])
 
 	const copyTxid = useCallback(() => {
@@ -472,8 +515,20 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 								<QrIcon />
 							</Button>
 						</Flex>
-						{addressValidation && !addressValidation.valid && (
+						{addressValidation && !addressValidation.valid && !isEnsName && (
 							<Text fontSize="11px" color="kk.error" mt="1">{t(addressValidation.error!)}</Text>
+						)}
+						{/* ENS resolution status */}
+						{isEnsName && ensResolving && (
+							<Text fontSize="11px" color="kk.textMuted" mt="1">Resolving {recipient}…</Text>
+						)}
+						{isEnsName && ensError && !ensResolving && (
+							<Text fontSize="11px" color="kk.error" mt="1">ENS name not found</Text>
+						)}
+						{isEnsName && ensResolved && !ensResolving && (
+							<Flex align="center" gap="2" mt="1.5" px="2" py="1" w="fit-content" bg="rgba(139,227,196,0.08)" border="1px solid rgba(139,227,196,0.28)" borderRadius="999px">
+								<Text fontSize="11px" color="kk.green" fontFamily="mono" truncate maxW="240px">{ensResolved}</Text>
+							</Flex>
 						)}
 						{/* R5: known contact/own wallet — show its identicon + label. */}
 						{matchedContact && (
@@ -620,7 +675,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 						borderRadius="12px"
 						_hover={{ bg: "var(--gold-2)" }}
 						onClick={handleBuild}
-						disabled={loading || !recipient || (!amount && !isMax) || (addressValidation != null && !addressValidation.valid)}
+						disabled={loading || !effectiveRecipient || (!amount && !isMax) || (addressValidation != null && !addressValidation.valid) || ensResolving || ensError}
 						px="4" py="2"
 						w="full"
 					>
@@ -636,7 +691,10 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 						<Text fontSize="xs" color="kk.textMuted" mb="2">{t("transactionReady")}</Text>
 						<Flex justify="space-between" mb="1">
 							<Text fontSize="xs" color="kk.textSecondary">{t("to")}</Text>
-							<Text fontSize="xs" fontFamily="mono" color="kk.textPrimary" maxW="250px" truncate>{recipient}</Text>
+							<Flex direction="column" align="flex-end">
+								<Text fontSize="xs" fontFamily="mono" color="kk.textPrimary" maxW="250px" truncate>{effectiveRecipient}</Text>
+								{isEnsName && <Text fontSize="10px" color="kk.textMuted">{recipient}</Text>}
+							</Flex>
 						</Flex>
 						<Flex justify="space-between" mb="1">
 							<Text fontSize="xs" color="kk.textSecondary">{t("amount")}</Text>
@@ -821,7 +879,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 			{/* R5: save dialog for a new external recipient — at form-fill, before sending */}
 			{showSaveDialog && (
 				<SaveRecipientDialog
-					address={recipient.trim()}
+					address={effectiveRecipient || recipient.trim()}
 					networkId={caipToNetworkId(activeCaip)}
 					assetCaip={chain.caip}
 					symbol={displaySymbol}

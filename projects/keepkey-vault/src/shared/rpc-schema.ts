@@ -268,6 +268,9 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       // so REST /api/v2/swap/state can read what the user sees.
       publishSwapUiState: { params: SwapUiState; response: void }
 
+      // ── ENS resolution ────────────────────────────────────────────────────
+      resolveEns: { params: { name: string }; response: { address: string | null } }
+
       // ── Address Book (SQLite-persisted, unified across all wallets) ──────
       // own entries are auto-seeded from connected wallets (R2); external entries
       // are auto-created on manual sends (R4). Identity = (walletId, networkId, address).
