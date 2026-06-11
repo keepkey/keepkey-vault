@@ -126,6 +126,7 @@ import type { ChainDef } from "../shared/chains"
 import { BtcAccountManager } from "./btc-accounts"
 import { EvmAddressManager, evmAddressPath } from "./evm-addresses"
 import { shouldResetManagersOnReady, nextReadyDeviceId } from "../shared/device-switch"
+import { isManagerSeedStale } from "../shared/seed-reconcile"
 import { WalletConnectManager } from "./walletconnect"
 import { initDb, factoryResetDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, setCustomTokenIcon as dbSetCustomTokenIcon, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility, insertApiLog, getApiLogs, clearApiLogs, setCachedBalances, getCachedBalances, updateCachedBalance, clearBalances, saveCachedPubkey, getLatestDeviceSnapshot, getCachedPubkeys, saveReport, getReportsList, getReportById, deleteReport, reportExists, getSwapHistory, getSwapHistoryStats, getSwapHistoryByTxid, getBip85Seeds, saveBip85Seed, deleteBip85Seed, clearCachedPubkeys, getRecentActivityFromLog, getPioneerServers, addPioneerServerDb, removePioneerServerDb, syncOwnAddressBook, recordOutbound, getAddressBookList, updateAddressBookEntry, deleteAddressBookEntry, getAddressBookHistory, getDeviceLabelMap, getBalancesForOwnSeed, addExternalEntry, matchAddressBook } from "./db"
 import type { OwnAddressSeed } from "./db"
@@ -781,6 +782,106 @@ function getWalletDbScope(): { deviceId: string; walletId: string } | null {
 	const seedId = engine.currentSeedEthAddress?.toLowerCase()
 	if (!seedId) return null
 	return { deviceId, walletId: `${deviceId}:${seedId}` }
+}
+
+/** The seed identity (lowercased ETH idx0) under which the in-memory account
+ *  managers' CURRENT data was derived. This is the staleness anchor that works
+ *  even when only the BTC manager is initialized — BTC xpubs have no cheap
+ *  identity to compare to the device, but the stamp records which seed they
+ *  belong to, so a later consumer can detect a change. null = unknown (cold,
+ *  or just reset); the next fresh init re-stamps it. */
+let managersSeedOwner: string | null = null
+
+/** Reset BOTH in-memory account managers and drop the seed stamp. Single choke
+ *  point so every reset path (device swap, needs_passphrase, seed-changed, the
+ *  staleness purge) keeps managersSeedOwner in lock-step with the managers. */
+function resetSeedManagers(): void {
+	btcAccounts.reset()
+	evmAddresses.reset()
+	managersSeedOwner = null
+}
+
+/** Seed-staleness guard — the single authority for "do the in-memory account
+ *  managers belong to the seed currently on the device?".
+ *
+ *  Staleness is detected two ways (either triggers a purge):
+ *   1. STAMP: the seed the managers were derived under (managersSeedOwner)
+ *      differs from `truth`. Works for ANY initialized manager — critically the
+ *      BTC-only case, where getBtcAccounts can initialize BTC independently and
+ *      there is no EVM index-0 to compare.
+ *   2. EVM index-0 proof: evmAddressPath(0) IS the seed-identity path, so the
+ *      EVM manager's index-0 address MUST equal `truth`. Direct, stamp-free
+ *      proof (defense-in-depth; pinned by __tests__/seed-reconcile.test.ts).
+ *
+ *  A mismatch means the managers (and everything derived from them: displayed
+ *  addresses, BTC xpubs, balances, and tx-build inputs) belong to a previous
+ *  wallet — passphrase toggled, hidden→standard transition, reconnect with a
+ *  cached passphrase — none of which reliably fire the event-based resets (see
+ *  src/shared/seed-reconcile.ts for the full blind-spot inventory).
+ *
+ *  On purge: reset both managers (the next init re-derives from the device),
+ *  push empty sets so the UI drops stale addresses immediately, wipe the
+ *  deviceId-scoped DB cache, and tell the frontend to clear + force-refresh.
+ *
+ *  Never purges on uncertainty: truth==null or no initialized manager no-op. */
+function reconcileSeedManagers(truth: string | null | undefined, source: string): boolean {
+	if (!truth) return false
+	const t = truth.toLowerCase()
+	if (!evmAddresses.isInitialized && !btcAccounts.isInitialized) {
+		// Nothing populated yet — the next init stamps. Drop any orphan stamp.
+		managersSeedOwner = null
+		return false
+	}
+	const evmIdx0 = evmAddresses.isInitialized ? (evmAddresses.getAddressByIndex(0)?.address ?? null) : null
+	const stampStale = isManagerSeedStale(t, managersSeedOwner)
+	const evmStale = isManagerSeedStale(t, evmIdx0)
+	if (!stampStale && !evmStale) {
+		// Fresh. Adopt the stamp if managers were initialized via a path that
+		// didn't set one (keeps the BTC-only anchor populated).
+		if (managersSeedOwner == null) managersSeedOwner = t
+		return false
+	}
+	console.warn(`[Vault] STALE WALLET PURGE (${source}): owner=${managersSeedOwner} evmIdx0=${evmIdx0} device=${t} — resetting account managers`)
+	resetSeedManagers()
+	try { rpc.send['btc-accounts-update'](btcAccounts.toAccountSet()) } catch { /* webview not ready */ }
+	try { rpc.send['evm-addresses-update'](evmAddresses.toAddressSet()) } catch { /* webview not ready */ }
+	// A fetch that ran with the stale managers may have persisted the WRONG
+	// wallet's pubkeys/balances under this deviceId — wipe so the next fetch
+	// rebuilds. Run this UNCONDITIONALLY (not gated on !isPassphraseWallet):
+	// clearing only REMOVES rows — it never writes hidden-wallet data to disk —
+	// so it's privacy-safe even mid-passphrase-probe. The old gate let stale
+	// rows survive the conservative cached-passphrase reconnect window (skipped
+	// on the hidden leg, then matched on the standard re-emit so no second purge
+	// ever cleared them).
+	const devId = engine.getDeviceState().deviceId
+	if (devId) {
+		try {
+			clearCachedPubkeys(devId)
+			clearBalances(devId)
+			console.warn(`[Vault] STALE WALLET PURGE (${source}): cleared cached pubkeys + balances for ${devId}`)
+		} catch { /* non-fatal */ }
+	}
+	try { rpc.send['wallet-data-purged']({ reason: source }) } catch { /* webview not ready */ }
+	return true
+}
+
+/** Shared seed-freshness boundary for ALL manager consumers (balances, signing,
+ *  account views). Derives the seed identity FRESH from the device and purges
+ *  the managers if they belong to a different seed, BEFORE the caller reads or
+ *  initializes them. Returns the live identity (null if underivable) and whether
+ *  a purge happened. Callers that (re)POPULATE the managers must stampManagers()
+ *  with the returned truth afterward so a later consumer can detect the next
+ *  seed change — especially on the BTC-only path. */
+async function ensureManagersForSeed(source: string): Promise<{ truth: string | null; purged: boolean }> {
+	const truth = await engine.deriveSeedIdentity()
+	const purged = reconcileSeedManagers(truth, source)
+	return { truth, purged }
+}
+
+/** Record the seed identity the managers' data now belongs to. Call AFTER a
+ *  successful (re)initialize so reconcileSeedManagers' stamp check is armed. */
+function stampManagers(truth: string | null | undefined): void {
+	if (truth) managersSeedOwner = truth.toLowerCase()
 }
 
 /** Seed own-wallet Address Book entries for EVERY known device from the persisted
@@ -1754,6 +1855,17 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 				const wallet = engine.wallet as any
 
+				// Seed-staleness boundary (shared by all manager consumers): verify
+				// the in-memory managers against the DEVICE — not cached session
+				// state — and purge them if they belong to a previous wallet
+				// (passphrase toggled, hidden↔standard transition, cached-passphrase
+				// reconnect) so the init guards below re-derive from the current
+				// seed. Result-based on purpose: the event-based resets each have
+				// blind spots (see src/shared/seed-reconcile.ts) and customers kept
+				// seeing the previous wallet's addresses/balances. `truth` is stamped
+				// onto the managers after init so the BTC-only path stays detectable.
+				const { truth: liveSeedIdentity } = await ensureManagersForSeed('getBalances')
+
 				// Initialize BTC multi-account on first balance fetch
 				if (!btcAccounts.isInitialized) {
 					try { await btcAccounts.initialize(wallet) } catch (e: any) {
@@ -1820,6 +1932,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						console.warn('[getBalances] EVM addresses init failed:', e.message)
 					}
 				}
+
+				// Managers now reflect the current seed — stamp it so the next
+				// consumer (getBalance / buildTx / getBtcAccounts) can detect a
+				// subsequent change even before another full getBalances runs.
+				stampManagers(liveSeedIdentity)
 
 				// Reset EVM balances before aggregation
 				evmAddresses.resetBalances()
@@ -2463,6 +2580,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const pioneer = await getPioneer()
 				const wallet = engine.wallet as any
 
+				// Shared seed-staleness boundary — a single-chain refresh (AssetPage,
+				// tx-push, post-send) can run before a full getBalances, so it must
+				// also verify the managers against the device and purge if stale.
+				const { truth: liveSeedIdentity } = await ensureManagersForSeed('getBalance')
+
 				// Build pubkey list — EVM chains send ALL multi-address entries, others send one
 				const pubkeys: Array<{ caip: string; pubkey: string }> = []
 				let displayAddress = '' // address shown in UI / used for swaps
@@ -2546,6 +2668,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					pubkeys.push({ caip: chain.caip, pubkey: addr })
 					displayAddress = addr
 				}
+
+				// Stamp the seed the (possibly just-initialized) managers belong to.
+				// Safe even for non-BTC/EVM chains: reconcileSeedManagers nulls an
+				// orphan stamp when no manager is initialized.
+				stampManagers(liveSeedIdentity)
 
 				// Single portfolio call with all pubkeys for this chain
 				const isBtc = chain.id === 'bitcoin'
@@ -2842,6 +2969,16 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const chain = getAllChains().find(c => c.id === params.chainId)
 				if (!chain) throw new Error(`Unknown chain: ${params.chainId}`)
 				const pioneer = await getPioneer()
+
+				// Seed-staleness boundary on the SIGNING path. params (xpubOverride,
+				// evmAddressIndex, amount, recipient) were prepared against the UI's
+				// wallet view; if the device seed has since changed, those inputs
+				// belong to a different wallet. Abort rather than build a tx from
+				// stale context — the purge clears the managers + notifies the
+				// frontend, which refreshes so the user can re-initiate cleanly.
+				if ((await ensureManagersForSeed('buildTx')).purged) {
+					throw new Error('Wallet changed since this transaction was prepared. Balances were refreshed — please review and try again.')
+				}
 
 				// For chains that need fromAddress or xpub, derive them
 				const wallet = engine.wallet as any
@@ -3249,9 +3386,14 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			// ── Bitcoin multi-account ─────────────────────────────────
 			getBtcAccounts: async () => {
 				if (!engine.wallet) throw new Error('No device connected')
+				// Boundary: BTC can initialize here independently of EVM, so this is
+				// the one init site where a stale BTC-only manager could otherwise
+				// survive (no EVM index-0 to compare). Reconcile + stamp the seed.
+				const { truth } = await ensureManagersForSeed('getBtcAccounts')
 				if (!btcAccounts.isInitialized) {
 					await btcAccounts.initialize(engine.wallet as any)
 				}
+				stampManagers(truth)
 				// Hydrate per-xpub balances from DB cache only on first load (before Pioneer has responded).
 				// Once pioneerFetched=true, the in-memory values are authoritative — don't overwrite with stale DB rows.
 				const devId = engine.getDeviceState().deviceId
@@ -3306,9 +3448,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			// ── EVM multi-address ────────────────────────────────────
 			getEvmAddresses: async () => {
 				if (!engine.wallet) throw new Error('No device connected')
+				const { truth } = await ensureManagersForSeed('getEvmAddresses')
 				if (!evmAddresses.isInitialized) {
 					await evmAddresses.initialize(engine.wallet as any)
 				}
+				stampManagers(truth)
 				return evmAddresses.toAddressSet()
 			},
 			addEvmAddressIndex: async (params) => {
@@ -5824,14 +5968,24 @@ engine.on('state-change', (state) => {
 	// seed-changed handler. See src/shared/device-switch.ts.
 	if (shouldResetManagersOnReady(state, lastReadyDeviceId)) {
 		console.warn(`[Vault] Device swap ${lastReadyDeviceId} → ${state.deviceId}: resetting in-memory account managers`)
-		btcAccounts.reset()
-		evmAddresses.reset()
+		resetSeedManagers()
 		// Proactively push the now-empty sets so the frontend drops device-A's
 		// addresses immediately, rather than showing them until the next re-init.
 		try { rpc.send['btc-accounts-update'](btcAccounts.toAccountSet()) } catch { /* webview not ready yet */ }
 		try { rpc.send['evm-addresses-update'](evmAddresses.toAddressSet()) } catch { /* webview not ready yet */ }
 	}
 	lastReadyDeviceId = nextReadyDeviceId(state, lastReadyDeviceId)
+	// Seed-staleness guard (event-driven leg): once the engine has classified the
+	// session and derived the seed identity (checkSeedIdentity / hidden-wallet
+	// scope derive / reconnect probe — all re-emit state-change after setting it),
+	// verify the in-memory managers belong to that seed and purge if not. Catches
+	// same-device seed changes the deviceId-based reset above can't see, BEFORE
+	// the frontend round-trips for accounts/balances. getBalances has its own
+	// device-verified leg for fetches that race this. No-op when the identity
+	// isn't known yet (currentSeedEthAddress null → never purge on uncertainty).
+	if (state.state === 'ready') {
+		reconcileSeedManagers(engine.currentSeedEthAddress, 'device-ready')
+	}
 	// Replay any WC deep link that was queued while no device was connected.
 	// Without this, a deep link delivered before the device was ready would
 	// sit in pendingDeepLinkUri until the next mount of WalletConnectPanel.
@@ -5942,8 +6096,7 @@ engine.on('state-change', (state) => {
 	// cached addresses so they get re-derived from the new passphrase seed.
 	if (state.state === 'needs_passphrase') {
 		// Reset in-memory managers so they re-derive after passphrase entry.
-		btcAccounts.reset()
-		evmAddresses.reset()
+		resetSeedManagers()
 		// NOTE: We do NOT clear DB caches (clearCachedPubkeys, clearBalances) here.
 		// needs_passphrase fires when the device *requests* a passphrase — before the
 		// user enters it. We don't know yet if this is the standard wallet (empty
@@ -5963,8 +6116,7 @@ engine.on('wallet-scope-ready', ({ deviceId, seedAddress }) => {
 // Don't wipe DB — let the fresh Pioneer fetch naturally overwrite stale entries.
 engine.on('seed-changed', ({ deviceId, oldAddress, newAddress }) => {
 	console.warn(`[Vault] SEED CHANGED on ${deviceId}: ${oldAddress?.slice(0, 10)} → ${newAddress?.slice(0, 10)}`)
-	btcAccounts.reset()
-	evmAddresses.reset()
+	resetSeedManagers()
 	clearSessionActivity()
 	// Zcash sidecar holds a per-seed FVK + scanned notes both in memory and in
 	// ~/.keepkey/zcash_wallet.db. After a seed change those are wrong for the

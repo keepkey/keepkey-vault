@@ -413,6 +413,12 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       'swap-cmd': SwapUiCommand
       'scan-progress': { percent: number; scannedHeight: number; tipHeight: number; blocksPerSec: number; etaSeconds: number }
       'balance-updated': ChainBalance
+      /** Seed-staleness purge: the backend detected the in-memory wallet data
+       *  belonged to a DIFFERENT seed than the device (passphrase toggle,
+       *  hidden↔standard transition, cached-passphrase reconnect) and dropped
+       *  it. Frontend must clear displayed balances immediately (showing the
+       *  wrong wallet's funds is the bug) and force-refresh from the device. */
+      'wallet-data-purged': { reason: string }
       /** Pioneer push notification: a transaction arrived on a watched address.
        *  Frontend resyncs the affected chain (matched by networkId) regardless of
        *  direction, and shows a toast only for inbound payments (type === 'incoming').
