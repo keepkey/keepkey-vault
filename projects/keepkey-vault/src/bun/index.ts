@@ -5291,6 +5291,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					mismatchAccounts: params.mismatchAccounts,
 					currentMaxAccount: params.currentMaxAccount,
 					higherAccountScanLimit: params.higherAccountScanLimit,
+					gapLimitReceive: params.gapLimitReceive,
+					gapLimitChange: params.gapLimitChange,
+					higherReceiveLimit: params.higherReceiveLimit,
 				})
 				return { scanId }
 			},
@@ -5516,6 +5519,70 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					balanceError = true
 				}
 				return { pathStr: pathToBip32(path), address, native, symbol: chain.symbol, hasBalance, balanceError, explorerUrl: explorerAddressUrl(chain, address) }
+			},
+			// Batch derive + balance-check a list of explicit paths (EVM known-paths
+			// grid). Read-only, gen-guarded.
+			auditScanPaths: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				if (engine.getDeviceState().state !== 'ready') throw new Error('Device not ready')
+				const chain = getAllChains().find(c => c.id === params.chainId)
+				if (!chain) throw new Error(`Unknown chain: ${params.chainId}`)
+				if (!chainSupportsDeepScan(chain)) throw new Error(`${chain.symbol} doesn't support path scanning`)
+				const captured = engine.wallet
+				const pioneer = await getPioneer()
+				const paths = (params.paths || []).slice(0, 40)
+				const results: any[] = []
+				for (const path of paths) {
+					if (engine.wallet !== captured) break
+					if (!Array.isArray(path) || path.length < 2 || path.length > 10 || path.some(n => !Number.isInteger(n) || n < 0)) continue
+					const { method, params: dp } = deriveAddressParams(chain, path)
+					if (params.scriptType) dp.scriptType = params.scriptType
+					let address = ''
+					try { address = extractAddress(await (engine.wallet as any)[method](dp)) } catch { continue }
+					if (!address) continue
+					let native = '0', hasBalance = false, balanceError = false
+					try {
+						const resp = await pioneer.GetBalanceAddressByNetwork({ networkId: chain.networkId, address })
+						;({ native, hasBalance } = parseNativeBalance(resp))
+					} catch { balanceError = true }
+					results.push({ pathStr: pathToBip32(path), address, native, symbol: chain.symbol, hasBalance, balanceError, explorerUrl: explorerAddressUrl(chain, address) })
+				}
+				return { results }
+			},
+			// Raw-path inspector: derive an address + its pubkey/xpub + balance for a
+			// power user verifying derivations. Read-only.
+			auditInspectPath: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				if (engine.getDeviceState().state !== 'ready') throw new Error('Device not ready')
+				const chain = getAllChains().find(c => c.id === params.chainId)
+				if (!chain) throw new Error(`Unknown chain: ${params.chainId}`)
+				if (!chainSupportsDeepScan(chain)) throw new Error(`${chain.symbol} doesn't support path inspection`)
+				const path = params.addressNList
+				if (!Array.isArray(path) || path.length < 2 || path.length > 10 || path.some(n => !Number.isInteger(n) || n < 0)) {
+					throw new Error('Invalid derivation path')
+				}
+				const { method, params: dp } = deriveAddressParams(chain, path)
+				if (params.scriptType) dp.scriptType = params.scriptType
+				const address = extractAddress(await (engine.wallet as any)[method](dp))
+				if (!address) throw new Error('Device returned no address for that path')
+				// Pubkey/xpub via getPublicKeys (best-effort — not all curves/paths return both).
+				let pubkey: string | null = null, xpub: string | null = null
+				try {
+					const pk = await engine.wallet.getPublicKeys([{ addressNList: path, coin: chain.coin, scriptType: chain.scriptType, curve: 'secp256k1' }])
+					const entry = pk?.[0]
+					xpub = entry?.xpub || null
+					const raw = entry?.publicKey
+					pubkey = raw instanceof Uint8Array ? Buffer.from(raw).toString('base64') : (typeof raw === 'string' ? raw : null)
+				} catch (e: any) {
+					console.warn(`[audit] inspect ${chain.id} getPublicKeys failed: ${e?.message}`)
+				}
+				let native = '0', hasBalance = false, balanceError = false
+				try {
+					const pioneer = await getPioneer()
+					const resp = await pioneer.GetBalanceAddressByNetwork({ networkId: chain.networkId, address })
+					;({ native, hasBalance } = parseNativeBalance(resp))
+				} catch { balanceError = true }
+				return { pathStr: pathToBip32(path), address, pubkey, xpub, native, hasBalance, balanceError, explorerUrl: explorerAddressUrl(chain, address) }
 			},
 
 			// ── Emulator (macOS only, feature-flagged off by default) ────

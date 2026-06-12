@@ -10,6 +10,7 @@ import {
   chainLevelPath, deriveAddressParams, extractAddress, parseNativeBalance,
   explorerAddressUrl, pathToBip32, parseBip32Path, chainSupportsDeepScan, chainSupportsLevelScan,
 } from '../src/bun/chain-scan'
+import { EVM_KNOWN_SCHEMES } from '../src/shared/evm-paths'
 import type { ChainDef } from '../src/shared/chains'
 
 // Minimal ChainDef fixtures (only the fields the helpers read).
@@ -110,6 +111,37 @@ describe('chainSupportsDeepScan (custom paths)', () => {
     expect(chainSupportsDeepScan(ETH)).toBe(true)
     expect(chainSupportsDeepScan(ATOM)).toBe(true)
     expect(chainSupportsDeepScan(BTC)).toBe(true) // custom paths (with scriptType) are valid for BTC
+  })
+})
+
+describe('EVM_KNOWN_SCHEMES (MyEtherWallet-style grid)', () => {
+  const H = 0x80000000
+  test('BIP44/MetaMask varies the LAST element (receive index)', () => {
+    const s = EVM_KNOWN_SCHEMES.find(x => x.key === 'bip44')!
+    expect(s.path(0)).toEqual([H + 44, H + 60, H + 0, 0, 0])
+    expect(s.path(3)).toEqual([H + 44, H + 60, H + 0, 0, 3])
+  })
+  test('Ledger Live varies the account element [2]', () => {
+    const s = EVM_KNOWN_SCHEMES.find(x => x.key === 'ledger-live')!
+    expect(s.path(2)).toEqual([H + 44, H + 60, H + 2, 0, 0])
+  })
+  test('Ledger Legacy/MEW is the 4-element m/44\'/60\'/0\'/i', () => {
+    const s = EVM_KNOWN_SCHEMES.find(x => x.key === 'ledger-legacy')!
+    expect(s.path(5)).toEqual([H + 44, H + 60, H + 0, 5])
+  })
+  test('every scheme yields a valid 2-10 element non-negative path at indices 0..3', () => {
+    for (const s of EVM_KNOWN_SCHEMES) {
+      for (let i = 0; i <= 3; i++) {
+        const p = s.path(i)
+        expect(p.length).toBeGreaterThanOrEqual(2)
+        expect(p.length).toBeLessThanOrEqual(10)
+        expect(p.every(n => Number.isInteger(n) && n >= 0)).toBe(true)
+      }
+    }
+  })
+  test('scheme keys are unique', () => {
+    const keys = EVM_KNOWN_SCHEMES.map(s => s.key)
+    expect(new Set(keys).size).toBe(keys.length)
   })
 })
 

@@ -59,6 +59,12 @@ export interface SweepScanConfig {
   mismatchAccounts?: number       // default 1
   currentMaxAccount?: number      // user's highest configured account index (default 0)
   higherAccountScanLimit?: number // scan standard combos up to this account index (default 9)
+  // Gap-limit expansion (audit "scan deeper indices"). Receive indices probed are
+  // 0..gapLimitReceive-1, change 0..gapLimitChange-1. Defaults preserve the prior
+  // hardcoded behaviour (Cat B receive 5 / Cat C receive 3, change 1).
+  gapLimitReceive?: number        // Category B receive depth (default 5)
+  gapLimitChange?: number         // change-branch depth for Cat B + Cat C (default 1)
+  higherReceiveLimit?: number     // Category C receive depth (default 3)
 }
 
 // ── Scan store (in-memory) ─────────────────────────────────────────
@@ -87,6 +93,9 @@ export function generatePathMatrix(config: SweepScanConfig): PathEntry[] {
   const entries: PathEntry[] = []
   const [acctMin, acctMax] = config.accountRange || [0, 4]
   const mismatchAccts = config.mismatchAccounts ?? 1
+  const gapReceive = Math.max(config.gapLimitReceive ?? 5, 1)
+  const gapChange = Math.max(config.gapLimitChange ?? 1, 0)
+  const higherReceive = Math.max(config.higherReceiveLimit ?? 3, 1)
 
   const scriptTypes = BTC_SCRIPT_TYPES.map(st => st.scriptType)
 
@@ -112,14 +121,16 @@ export function generatePathMatrix(config: SweepScanConfig): PathEntry[] {
         // Skip standard combos
         if (STANDARD_COMBOS.has(`${st.purpose}:${encodeAs}`)) continue
 
-        // Receive indices 0-4
-        for (let idx = 0; idx < 5; idx++) {
+        // Receive indices 0..gapReceive-1
+        for (let idx = 0; idx < gapReceive; idx++) {
           const path = [...btcAccountPath(st.purpose, acct), 0, idx]
           entries.push({ path, pathStr: pathToString(path), scriptType: encodeAs, category: 'mismatch' })
         }
-        // Change index 0
-        const changePath = [...btcAccountPath(st.purpose, acct), 1, 0]
-        entries.push({ path: changePath, pathStr: pathToString(changePath), scriptType: encodeAs, category: 'mismatch' })
+        // Change indices 0..gapChange-1
+        for (let idx = 0; idx < gapChange; idx++) {
+          const changePath = [...btcAccountPath(st.purpose, acct), 1, idx]
+          entries.push({ path: changePath, pathStr: pathToString(changePath), scriptType: encodeAs, category: 'mismatch' })
+        }
       }
     }
   }
@@ -131,8 +142,8 @@ export function generatePathMatrix(config: SweepScanConfig): PathEntry[] {
   for (let acct = currentMax + 1; acct <= higherLimit; acct++) {
     for (const st of BTC_SCRIPT_TYPES) {
       // Standard combo: purpose matches scriptType
-      // Probe receive indices 0-2 + change index 0 to catch funds beyond first address
-      for (let idx = 0; idx < 3; idx++) {
+      // Probe receive indices 0..higherReceive-1 + change to catch funds beyond first address
+      for (let idx = 0; idx < higherReceive; idx++) {
         const path = [...btcAccountPath(st.purpose, acct), 0, idx]
         entries.push({
           path,
@@ -142,14 +153,16 @@ export function generatePathMatrix(config: SweepScanConfig): PathEntry[] {
           accountIndex: acct,
         })
       }
-      const changePath = [...btcAccountPath(st.purpose, acct), 1, 0]
-      entries.push({
-        path: changePath,
-        pathStr: pathToString(changePath),
-        scriptType: st.scriptType,
-        category: 'higher-account',
-        accountIndex: acct,
-      })
+      for (let idx = 0; idx < gapChange; idx++) {
+        const changePath = [...btcAccountPath(st.purpose, acct), 1, idx]
+        entries.push({
+          path: changePath,
+          pathStr: pathToString(changePath),
+          scriptType: st.scriptType,
+          category: 'higher-account',
+          accountIndex: acct,
+        })
+      }
     }
   }
 

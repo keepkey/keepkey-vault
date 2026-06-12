@@ -845,6 +845,19 @@ export interface AuditDerivedAddress {
   balanceError?: boolean
 }
 
+/** Raw-path debug inspector result (auditInspectPath). Read-only device-derived
+ *  values for a power user verifying what an address derives to. */
+export interface AuditInspectResult {
+  pathStr: string
+  address: string
+  pubkey: string | null   // base64 raw public key (when the device returns one)
+  xpub: string | null     // account xpub (when the path is account-level)
+  native: string
+  hasBalance: boolean
+  balanceError?: boolean
+  explorerUrl: string | null
+}
+
 // ── Swap types ─────────────────────────────────────────────────────────
 
 /** An asset available for swapping (via THORChain, ChainFlip, Pioneer aggregation, etc.) */
