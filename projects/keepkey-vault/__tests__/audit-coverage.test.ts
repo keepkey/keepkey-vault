@@ -66,6 +66,14 @@ describe('classifyCoverage — three-state honesty', () => {
     expect(out.find(c => c.chainId === 'ethereum')!.coverage).toBe('empty-confirmed')
   })
 
+  test('an empty EVM chain is NOT "empty-confirmed" when index discovery found funds (snapshot predates discovery)', () => {
+    const withDiscovery = classifyCoverage(CHAINS, snapshot(), true)
+    expect(withDiscovery.find(c => c.chainId === 'ethereum')!.coverage).toBe('checked-shallow')
+    expect(withDiscovery.find(c => c.chainId === 'base')!.coverage).toBe('checked-shallow')
+    // UTXO is unaffected by EVM discovery.
+    expect(withDiscovery.find(c => c.chainId === 'bitcoin')!.coverage).toBe('empty-confirmed')
+  })
+
   test('degraded supersedes a present balance (suspect data is never shown as funded-clean)', () => {
     const out = classifyCoverage(CHAINS, snapshot({
       chains: [{ chainId: 'ethereum', balanceUsd: 50 }],

@@ -2711,6 +2711,8 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 				<AuditDialog
 					onClose={() => setShowAudit(false)}
 					isHidden={!!isHiddenWallet}
+					chainCatalog={allChains}
+					chainAddresses={Object.fromEntries([...balances.values()].filter(b => b.address).map(b => [b.chainId, b.address]))}
 					snapshot={{
 						chains: [...balances.values()].map(b => ({ chainId: b.chainId, balanceUsd: b.balanceUsd })),
 						degradedChainIds: portfolioFault?.degradedChainIds || [],

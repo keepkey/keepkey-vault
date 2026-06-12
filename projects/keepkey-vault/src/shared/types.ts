@@ -830,6 +830,21 @@ export interface AuditPortfolioSnapshot {
   unresolvedFaultCount: number
 }
 
+/** One derived address checked during the per-chain walkthrough (a scanned
+ *  account/index level, or a custom path). Native balance is human-readable. */
+export interface AuditDerivedAddress {
+  level?: number          // account/index level (omitted for custom paths)
+  pathStr: string         // BIP32 path, e.g. m/44'/60'/0'/0/3
+  address: string
+  native: string          // human-readable native balance
+  symbol: string
+  hasBalance: boolean
+  explorerUrl: string | null
+  /** True when the balance lookup THREW — the address was derived but its balance
+   *  is unknown. Must never be shown as a confident "0" (honesty rule). */
+  balanceError?: boolean
+}
+
 // ── Swap types ─────────────────────────────────────────────────────────
 
 /** An asset available for swapping (via THORChain, ChainFlip, Pioneer aggregation, etc.) */

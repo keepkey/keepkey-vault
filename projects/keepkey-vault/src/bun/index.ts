@@ -133,6 +133,7 @@ import type { OwnAddressSeed } from "./db"
 import { rectifyWallet, getLedgerSummary, getLedgerJournals } from "./ledger"
 import { generateReport, reportToPdfBuffer, reportToCsv } from "./reports"
 import { startAudit, getAudit, getAuditBtcRaw, getAuditEntry, dismissAudit, markAuditsStale, type AuditDeps } from "./audit-engine"
+import { chainSupportsDeepScan, chainSupportsLevelScan, chainLevelPath, deriveAddressParams, extractAddress, parseNativeBalance, explorerAddressUrl, pathToBip32 } from "./chain-scan"
 import { extractTransactionsFromReport, toCoinTrackerCsv, toZenLedgerCsv } from "./tax-export"
 import * as os from "os"
 import * as path from "path"
@@ -5451,6 +5452,70 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			auditDismiss: async (params) => {
 				dismissAudit(params.auditId)
+			},
+
+			// Per-chain walkthrough: derive `count` addresses for `chainId` starting
+			// at account/index `fromLevel`, balance-check each via Pioneer. Read-only
+			// (no signing). Gen-guarded so a mid-scan device swap stops cleanly.
+			auditScanLevels: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				if (engine.getDeviceState().state !== 'ready') throw new Error('Device not ready')
+				const chain = getAllChains().find(c => c.id === params.chainId)
+				if (!chain) throw new Error(`Unknown chain: ${params.chainId}`)
+				if (!chainSupportsLevelScan(chain)) throw new Error(`${chain.symbol} can't be account-scanned`)
+				const captured = engine.wallet
+				const pioneer = await getPioneer()
+				const count = Math.min(Math.max(params.count ?? 3, 1), 10)
+				const from = Math.max(params.fromLevel ?? 0, 0)
+				const results: any[] = []
+				for (let i = 0; i < count; i++) {
+					if (engine.wallet !== captured) break // device changed — stop
+					const level = from + i
+					const path = chainLevelPath(chain, level)
+					const { method, params: dp } = deriveAddressParams(chain, path)
+					let address = ''
+					try { address = extractAddress(await (engine.wallet as any)[method](dp)) } catch (e: any) {
+						console.warn(`[audit] scan ${chain.id} L${level} derive failed: ${e?.message}`)
+						continue
+					}
+					if (!address) continue
+					let native = '0', hasBalance = false, balanceError = false
+					try {
+						const resp = await pioneer.GetBalanceAddressByNetwork({ networkId: chain.networkId, address })
+						;({ native, hasBalance } = parseNativeBalance(resp))
+					} catch (e: any) {
+						console.warn(`[audit] scan ${chain.id} L${level} balance failed: ${e?.message}`)
+						balanceError = true // unknown, not a confident zero
+					}
+					results.push({ level, pathStr: pathToBip32(path), address, native, symbol: chain.symbol, hasBalance, balanceError, explorerUrl: explorerAddressUrl(chain, address) })
+				}
+				return { results }
+			},
+			// Derive + balance-check one user-supplied path (custom-path search).
+			auditDeriveCustom: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				if (engine.getDeviceState().state !== 'ready') throw new Error('Device not ready')
+				const chain = getAllChains().find(c => c.id === params.chainId)
+				if (!chain) throw new Error(`Unknown chain: ${params.chainId}`)
+				if (!chainSupportsDeepScan(chain)) throw new Error(`${chain.symbol} doesn't support custom-path search`)
+				const path = params.addressNList
+				if (!Array.isArray(path) || path.length < 2 || path.length > 10 || path.some(n => !Number.isInteger(n) || n < 0)) {
+					throw new Error('Invalid derivation path')
+				}
+				const { method, params: dp } = deriveAddressParams(chain, path)
+				if (params.scriptType) dp.scriptType = params.scriptType
+				const address = extractAddress(await (engine.wallet as any)[method](dp))
+				if (!address) throw new Error('Device returned no address for that path')
+				let native = '0', hasBalance = false, balanceError = false
+				try {
+					const pioneer = await getPioneer()
+					const resp = await pioneer.GetBalanceAddressByNetwork({ networkId: chain.networkId, address })
+					;({ native, hasBalance } = parseNativeBalance(resp))
+				} catch (e: any) {
+					console.warn(`[audit] custom ${chain.id} balance failed: ${e?.message}`)
+					balanceError = true
+				}
+				return { pathStr: pathToBip32(path), address, native, symbol: chain.symbol, hasBalance, balanceError, explorerUrl: explorerAddressUrl(chain, address) }
 			},
 
 			// ── Emulator (macOS only, feature-flagged off by default) ────

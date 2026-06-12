@@ -55,6 +55,12 @@ function familyOf(chainFamily: string): 'utxo' | 'evm' | 'fixed' {
 export function classifyCoverage(
   chains: AuditChainInput[],
   snapshot: AuditPortfolioSnapshot,
+  /** True when the EVM index discovery phase found funds on a NEW index. The
+   *  coverage snapshot is captured BEFORE discovery, so an EVM chain that holds
+   *  those funds would otherwise read 'empty-confirmed' — a false absent. With
+   *  discovery present, EVM empties are downgraded to 'checked-shallow' (the
+   *  index isn't chain-specific, so we can't pin which EVM chain holds it). */
+  evmHasDiscovery = false,
 ): AuditChainFinding[] {
   const balByChain = new Map(snapshot.chains.map(c => [c.chainId, c.balanceUsd]))
   const degraded = new Set(snapshot.degradedChainIds)
@@ -70,6 +76,8 @@ export function classifyCoverage(
       coverage = 'funded'
     } else if (family === 'fixed') {
       coverage = 'checked-shallow'
+    } else if (family === 'evm' && evmHasDiscovery) {
+      coverage = 'checked-shallow' // discovery found funds at an index the snapshot predates
     } else {
       coverage = 'empty-confirmed'
     }

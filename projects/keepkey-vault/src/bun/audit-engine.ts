@@ -287,7 +287,7 @@ async function auditWorker(entry: AuditEntry, mode: AuditMode, snapshot: AuditPo
   // ── Phase: coverage (three-state, pure) ──
   report.phase = 'coverage'
   report.progress = { current: 0, total: 1, label: 'Reviewing chain coverage…' }
-  report.chains = classifyCoverage(deps.coverageChains, snapshot)
+  report.chains = classifyCoverage(deps.coverageChains, snapshot, report.evm.discoveredIndices.length > 0)
   const summary = summarizeCoverage(report.chains, snapshot)
   report.anyUnverified = summary.anyUnverified
   report.anyShallow = summary.anyShallow
