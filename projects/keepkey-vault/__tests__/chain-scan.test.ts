@@ -7,7 +7,7 @@
  */
 import { describe, test, expect } from 'bun:test'
 import {
-  chainLevelPath, deriveAddressParams, extractAddress, parseNativeScanResult, parseEvmScanResult,
+  chainLevelPath, deriveAddressParams, extractAddress, parseNativeScanResult, parseEvmScanResult, utxoAccountScriptPaths,
   explorerAddressUrl, pathToBip32, parseBip32Path, chainSupportsDeepScan, chainSupportsLevelScan,
 } from '../src/bun/chain-scan'
 import { EVM_KNOWN_SCHEMES } from '../src/shared/evm-paths'
@@ -211,5 +211,22 @@ describe('chainSupportsLevelScan (per-account single-address scan)', () => {
     expect(chainSupportsLevelScan(ETH)).toBe(true)
     expect(chainSupportsLevelScan(ATOM)).toBe(true)
     expect(chainSupportsLevelScan(XRP)).toBe(true)
+  })
+})
+
+describe('utxoAccountScriptPaths — per-account xpub paths for UTXO altcoins', () => {
+  const DOGE = { id: 'dogecoin', scriptType: 'p2pkh', defaultPath: [0x8000002C, 0x80000003, 0x80000000, 0, 0] } as ChainDef
+  const LTC = { id: 'litecoin', scriptType: 'p2wpkh', defaultPath: [0x80000054, 0x80000002, 0x80000000, 0, 0] } as ChainDef
+
+  test('single script type (DOGE p2pkh/44) varies only the account element, keeps coinType 3', () => {
+    expect(utxoAccountScriptPaths(DOGE, 0)).toEqual([{ scriptType: 'p2pkh', path: [0x8000002C, 0x80000003, 0x80000000] }])
+    expect(utxoAccountScriptPaths(DOGE, 2)).toEqual([{ scriptType: 'p2pkh', path: [0x8000002C, 0x80000003, 0x80000002] }])
+  })
+
+  test('Litecoin walks all three script types (purposes 44/49/84) at coinType 2', () => {
+    const r = utxoAccountScriptPaths(LTC, 1)
+    expect(r.map(x => x.scriptType)).toEqual(['p2pkh', 'p2sh-p2wpkh', 'p2wpkh'])
+    expect(r.map(x => x.path[0])).toEqual([0x8000002C, 0x80000031, 0x80000054]) // 44'/49'/84'
+    expect(r.every(x => x.path[1] === 0x80000002 && x.path[2] === 0x80000001)).toBe(true) // coin 2, account 1
   })
 })

@@ -316,6 +316,8 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       auditDismiss: { params: { auditId: string }; response: void }
       // Per-chain walkthrough: derive + balance-check account/index levels, and custom paths.
       auditScanLevels: { params: { chainId: string; fromLevel?: number; count?: number }; response: { results: AuditDerivedAddress[] } }
+      // UTXO altcoins (DOGE/LTC/BCH/…): xpub-based per-account scan (Pioneer gap scan).
+      auditScanUtxoAccounts: { params: { chainId: string; fromLevel?: number; count?: number }; response: { results: AuditDerivedAddress[] } }
       auditDeriveCustom: { params: { chainId: string; addressNList: number[]; scriptType?: string }; response: AuditDerivedAddress }
       auditScanPaths: { params: { chainId: string; paths: number[][]; scriptType?: string }; response: { results: AuditDerivedAddress[] } }
       auditInspectPath: { params: { chainId: string; addressNList: number[]; scriptType?: string }; response: AuditInspectResult }

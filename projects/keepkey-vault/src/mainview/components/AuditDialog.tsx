@@ -253,13 +253,21 @@ export function AuditDialog({ onClose, snapshot, isHidden, chainCatalog, chainAd
   const current = walk[chainIdx]
   const ladder = current ? (ladders[current.chainId] || EMPTY_LADDER) : EMPTY_LADDER
   const currentDef = current ? catalog.current.get(current.chainId) : undefined
+  // Single-address account scan (non-UTXO). UTXO altcoins use an xpub-based
+  // per-account scan instead (BTC has its own deep scan). Either way the user
+  // gets "accounts 1/2/3…" — accountScannable gates that whole affordance.
   const levelScannable = !!currentDef && currentDef.chainFamily !== 'utxo' && !['zcash-shielded', 'hive'].includes(currentDef.chainFamily)
+  const utxoAccountScannable = !!currentDef && currentDef.chainFamily === 'utxo' && currentDef.id !== 'bitcoin'
+  const accountScannable = levelScannable || utxoAccountScannable
   const hasCommon = current?.family === 'evm' || current?.chainId === 'bitcoin'
 
   const runScan = useCallback(async (chain: AuditChainFinding, fromLevel: number, count: number, markAuto: boolean) => {
     patchLadder(chain.chainId, markAuto ? { autoScanning: true, autoScanned: true, scanErr: null } : { scanning: true, scanErr: null })
     try {
-      const { results } = await rpcRequest<{ results: AuditDerivedAddress[] }>('auditScanLevels', { chainId: chain.chainId, fromLevel, count }, 180000)
+      // UTXO altcoins: xpub-based per-account scan; everything else: single-address level scan.
+      const { results } = chain.family === 'utxo'
+        ? await rpcRequest<{ results: AuditDerivedAddress[] }>('auditScanUtxoAccounts', { chainId: chain.chainId, fromLevel, count }, 180000)
+        : await rpcRequest<{ results: AuditDerivedAddress[] }>('auditScanLevels', { chainId: chain.chainId, fromLevel, count }, 180000)
       setLadders(prev => {
         const cur = prev[chain.chainId] || EMPTY_LADDER
         return { ...prev, [chain.chainId]: { ...cur, scanning: false, autoScanning: false, scanned: [...cur.scanned, ...results], nextLevel: Math.max(cur.nextLevel, fromLevel + count) } }
@@ -277,13 +285,13 @@ export function AuditDialog({ onClose, snapshot, isHidden, chainCatalog, chainAd
 
   // Auto-scan accounts 1-3 on arrival (read-only; does NOT block close).
   useEffect(() => {
-    if (phase !== 'walkthrough' || !current || !levelScannable) return
+    if (phase !== 'walkthrough' || !current || !accountScannable) return
     const l = ladders[current.chainId]
     if (l?.autoScanned || l?.autoScanning || l?.scanning) return
     const t = setTimeout(() => runScan(current, 1, 3, true), 450)
     return () => clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phase, current?.chainId, levelScannable])
+  }, [phase, current?.chainId, accountScannable])
 
   // Lazy Bitcoin scan: trigger once when the user first opens the Bitcoin page.
   useEffect(() => {
@@ -604,7 +612,7 @@ export function AuditDialog({ onClose, snapshot, isHidden, chainCatalog, chainAd
             <Box ref={scrollRef} flex="1" overflow="auto" px="7" pt="5" pb="2" minH="0">
               <Box maxW="640px" mx="auto">
                 <Text fontSize="sm" color="var(--text-1)" lineHeight="1.65" textAlign="center" mb="4.5">
-                  {scanningNow && !ladder.autoScanned ? `Checking the first few ${current.symbol} accounts…` : statusCopy(current, levelScannable)}
+                  {scanningNow && !ladder.autoScanned ? `Checking the first few ${current.symbol} accounts…` : statusCopy(current, accountScannable)}
                 </Text>
 
                 {/* BTC lazy scan — runs when you open the Bitcoin page */}
@@ -650,7 +658,7 @@ export function AuditDialog({ onClose, snapshot, isHidden, chainCatalog, chainAd
                 {/* unverified — offer a real, independent re-check of the primary
                     address (derive + native balance), bypassing the degraded
                     portfolio fetch. Only where a level scan is meaningful. */}
-                {current.coverage === 'unverified' && levelScannable && !ladder.scanning && !checkedPrimary && (
+                {current.coverage === 'unverified' && accountScannable && !ladder.scanning && !checkedPrimary && (
                   <Box bg="rgba(224,140,123,0.09)" border="1px solid" borderColor="rgba(224,140,123,0.28)" borderRadius="16px" p="4.5" mb="4">
                     <Text fontSize="13px" color="var(--rose)" mb="3.5" lineHeight="1.55">We couldn’t reach {current.symbol}’s node just now — so we won’t pretend it’s empty. Let’s read your primary address straight from the device.</Text>
                     <Button size="sm" variant="outline" borderColor="var(--line-2)" color="var(--text-0)" _hover={{ borderColor: "var(--teal)", color: "var(--teal)" }} onClick={() => runScan(current, 0, 1, false)}>Check it directly</Button>
@@ -712,7 +720,7 @@ export function AuditDialog({ onClose, snapshot, isHidden, chainCatalog, chainAd
             {/* persistent action bar */}
             <Flex flexShrink={0} align="center" gap="3" wrap="wrap" px="7" py="3.5" borderTop="1px solid" borderColor="var(--line)" bg="rgba(255,255,255,0.022)">
               <Text fontSize="12px" color="var(--text-2)" whiteSpace="nowrap">Expected more?</Text>
-              {levelScannable && (
+              {accountScannable && (
                 <Box as="button" style={chip} onClick={() => { runScan(current, ladder.nextLevel, 3, false); scrollDown() }}>
                   {ladder.scanning && <Spinner size="xs" color="var(--gold)" />}Scan more accounts
                 </Box>

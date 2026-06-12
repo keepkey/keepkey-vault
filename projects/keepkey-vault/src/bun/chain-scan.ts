@@ -67,6 +67,23 @@ export function extractAddress(result: any): string {
 }
 
 /**
+ * Account-level derivation paths (m/purpose'/coinType'/account') for a non-BTC
+ * UTXO chain, one per supported script type. Mirrors the dashboard's
+ * utxoPubKeyPaths (getBalances) so an audit account scan matches what the
+ * portfolio tracks. Litecoin walks all three script types; the rest use their
+ * single configured type. coinType comes from the chain's own defaultPath[1].
+ */
+export function utxoAccountScriptPaths(chain: ChainDef, account: number): Array<{ scriptType: string; path: number[] }> {
+  const scriptTypes = chain.id === 'litecoin'
+    ? [{ scriptType: 'p2pkh', purpose: 44 }, { scriptType: 'p2sh-p2wpkh', purpose: 49 }, { scriptType: 'p2wpkh', purpose: 84 }]
+    : [{ scriptType: chain.scriptType || 'p2pkh', purpose: 44 }]
+  return scriptTypes.map(st => ({
+    scriptType: st.scriptType,
+    path: [st.purpose + 0x80000000, chain.defaultPath[1], 0x80000000 + account],
+  }))
+}
+
+/**
  * Native (human-readable) balance for `caip` from already-unwrapped portfolio
  * entries — the cross-family GetPortfolioBalances path the dashboard uses for
  * EVERY chain. Filters to native entries on the chain (by caip prefix), prefers

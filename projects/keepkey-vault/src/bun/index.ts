@@ -133,7 +133,7 @@ import type { OwnAddressSeed } from "./db"
 import { rectifyWallet, getLedgerSummary, getLedgerJournals } from "./ledger"
 import { generateReport, reportToPdfBuffer, reportToCsv } from "./reports"
 import { startAudit, startBtcScan, getAudit, getAuditBtcRaw, getAuditEntry, dismissAudit, markAuditsStale, type AuditDeps } from "./audit-engine"
-import { chainSupportsDeepScan, chainSupportsLevelScan, chainLevelPath, deriveAddressParams, extractAddress, parseNativeScanResult, parseEvmScanResult, explorerAddressUrl, pathToBip32 } from "./chain-scan"
+import { chainSupportsDeepScan, chainSupportsLevelScan, chainLevelPath, deriveAddressParams, extractAddress, parseNativeScanResult, parseEvmScanResult, utxoAccountScriptPaths, explorerAddressUrl, pathToBip32 } from "./chain-scan"
 import { extractTransactionsFromReport, toCoinTrackerCsv, toZenLedgerCsv } from "./tax-export"
 import * as os from "os"
 import * as path from "path"
@@ -1941,15 +1941,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// all so Pioneer reports balances from every address type.
 				const utxoPubKeyPaths: Array<{ chain: typeof utxoChains[0]; scriptType: string; path: number[] }> = []
 				for (const c of utxoChains) {
-					const scriptTypes = c.id === 'litecoin'
-						? [{ scriptType: 'p2pkh', purpose: 44 }, { scriptType: 'p2sh-p2wpkh', purpose: 49 }, { scriptType: 'p2wpkh', purpose: 84 }]
-						: [{ scriptType: c.scriptType || 'p2pkh', purpose: 44 }]
-					for (const st of scriptTypes) {
-						utxoPubKeyPaths.push({
-							chain: c,
-							scriptType: st.scriptType,
-							path: [st.purpose + 0x80000000, c.defaultPath[1], 0x80000000],
-						})
+					for (const sp of utxoAccountScriptPaths(c, 0)) {
+						utxoPubKeyPaths.push({ chain: c, scriptType: sp.scriptType, path: sp.path })
 					}
 				}
 				let xpubResults: any[] = []
@@ -5541,6 +5534,55 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						balanceError = true // unknown, not a confident zero
 					}
 					results.push({ level, pathStr: pathToBip32(path), address, native, symbol: chain.symbol, hasBalance, balanceError, tokens, explorerUrl: explorerAddressUrl(chain, address) })
+				}
+				return { results }
+			},
+			// UTXO multi-account scan: for non-BTC UTXO chains (DOGE/LTC/BCH/DASH/DGB),
+			// derive each account's xpub(s) and balance-check via Pioneer's xpub gap
+			// scan (GetPortfolioBalances) — the path the dashboard uses for account 0.
+			// xpub-based (not single-address), so it correctly reads a UTXO account tree.
+			auditScanUtxoAccounts: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				if (engine.getDeviceState().state !== 'ready') throw new Error('Device not ready')
+				const chain = getAllChains().find(c => c.id === params.chainId)
+				if (!chain) throw new Error(`Unknown chain: ${params.chainId}`)
+				if (chain.chainFamily !== 'utxo') throw new Error(`${chain.symbol} is not a UTXO chain`)
+				const captured = engine.wallet
+				const count = Math.min(Math.max(params.count ?? 3, 1), 10)
+				const from = Math.max(params.fromLevel ?? 0, 0)
+				const prefix = (chain.caip || '').split('/')[0]
+				const results: any[] = []
+				for (let i = 0; i < count; i++) {
+					if (engine.wallet !== captured) break // device changed — stop
+					const account = from + i
+					const sps = utxoAccountScriptPaths(chain, account)
+					let xpubs: string[] = []
+					try {
+						const pks = await (engine.wallet as any).getPublicKeys(sps.map(sp => ({ addressNList: sp.path, coin: chain.coin, scriptType: sp.scriptType, curve: 'secp256k1' })))
+						xpubs = (pks || []).map((pk: any) => pk?.xpub).filter(Boolean)
+					} catch (e: any) {
+						console.warn(`[audit] utxo-acct ${chain.id} #${account} xpub derive failed: ${e?.message}`)
+						continue
+					}
+					if (!xpubs.length) continue
+					let native = '0', hasBalance = false, balanceError = false
+					try {
+						const pioneer = await getPioneer()
+						const resp = await withTimeout(
+							pioneer.GetPortfolioBalances({ pubkeys: xpubs.map(x => ({ caip: chain.caip, pubkey: x })) }, { forceRefresh: true }),
+							PIONEER_TIMEOUT_MS, `audit utxo-acct ${chain.id}`,
+						)
+						const { entries, meta } = unwrapPortfolioResponse(resp)
+						const natives = (Array.isArray(entries) ? entries : []).filter((e: any) => String(e?.caip || '').split('/')[0] === prefix)
+						const total = natives.reduce((acc: number, e: any) => acc + (parseFloat(String(e?.balance ?? '0')) || 0), 0)
+						native = String(total)
+						hasBalance = total > 0
+						if (!hasBalance && meta?.degraded) balanceError = true // unverified, not a confident zero
+					} catch (e: any) {
+						console.warn(`[audit] utxo-acct ${chain.id} #${account} balance failed: ${e?.message}`)
+						balanceError = true
+					}
+					results.push({ level: account, pathStr: pathToBip32(sps[0].path), address: xpubs[0], native, symbol: chain.symbol, hasBalance, balanceError, explorerUrl: null })
 				}
 				return { results }
 			},
