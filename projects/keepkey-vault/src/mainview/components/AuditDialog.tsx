@@ -1,18 +1,19 @@
 /**
- * AuditDialog — the "where's my money" recovery/debug console.
+ * AuditDialog — the "where's my money" recovery wizard.
  *
- * Initial light scan (identity → BTC sweep → EVM discovery → coverage), then a
- * chain-by-chain walkthrough with a top network-logo filmstrip. Landing on a
- * chain auto-scans accounts 1-3; "Dig deeper" reveals opt-in deep scanners
- * (EVM known-paths grid, BTC wrong-script-type + gap-limit, raw-path inspector),
- * custom paths, and a support handoff.
+ * A large, wide guided dialog (onboarding-wizard feel) that walks EVERY chain on
+ * the device one page at a time, explaining what it's checking. After an initial
+ * light scan it auto-checks accounts 1-3 per chain on arrival, then offers four
+ * explicit actions: Looks right · Scan more accounts · Scan common (other-wallet)
+ * paths · Scan a custom path. Recovery is on-device; non-trackable finds route
+ * to a support handoff.
  *
- * Honest by construction: degraded/stale → "could not verify" (never "$0/clean");
- * single-address chains → "primary address only"; failed lookups → "could not
- * verify". Recovery is on-device; non-trackable finds route to the handoff.
+ * Honest by construction: degraded/stale → "couldn't verify" (never "$0/clean");
+ * single-address chains → "primary address only"; failed lookups → "couldn't
+ * verify".
  */
 import { useState, useEffect, useRef, useCallback } from "react"
-import { Box, Flex, Text, Button, VStack, Spinner, Textarea } from "@chakra-ui/react"
+import { Box, Flex, Text, Button, VStack, HStack, Spinner, Textarea } from "@chakra-ui/react"
 import { rpcRequest, onRpcMessage } from "../lib/rpc"
 import { Z } from "../lib/z-index"
 import { ChainLogo } from "./ChainLogo"
@@ -24,7 +25,10 @@ import type { ChainDef } from "../../shared/chains"
 import type { AuditReport, AuditPortfolioSnapshot, AuditMode, AuditChainFinding, AuditDerivedAddress } from "../../shared/types"
 
 const SUPPORT_URL = "https://support.keepkey.com"
-const ANIM = `@keyframes auditPulse { 0%,100% { box-shadow: 0 0 0 2px rgba(80,200,120,0.5); } 50% { box-shadow: 0 0 0 5px rgba(80,200,120,0.15); } }`
+const ANIM = `
+  @keyframes auditPulse { 0%,100% { box-shadow: 0 0 0 2px rgba(139,227,196,0.55); } 50% { box-shadow: 0 0 0 6px rgba(139,227,196,0.10); } }
+  @keyframes auditGlow { 0%,100% { box-shadow: 0 0 14px rgba(139,227,196,0.20); } 50% { box-shadow: 0 0 30px rgba(139,227,196,0.45); } }
+`
 
 function formatSats(sats: number): string {
   if (sats >= 100_000_000) return (sats / 100_000_000).toFixed(8).replace(/0+$/, '').replace(/\.$/, '') + ' BTC'
@@ -32,17 +36,17 @@ function formatSats(sats: number): string {
 }
 
 const PHASES: { key: AuditReport['phase']; label: string }[] = [
-  { key: 'identity', label: 'Verifying device' },
+  { key: 'identity', label: 'Verifying your device' },
   { key: 'btc', label: 'Scanning Bitcoin paths' },
   { key: 'evm', label: 'Discovering EVM addresses' },
-  { key: 'coverage', label: 'Reviewing chains' },
+  { key: 'coverage', label: 'Reviewing every chain' },
 ]
 
 const COVERAGE_STYLE: Record<AuditChainFinding['coverage'], { label: string; color: string }> = {
   'funded': { label: 'funded', color: 'var(--teal)' },
-  'empty-confirmed': { label: 'empty', color: 'kk.textMuted' },
-  'checked-shallow': { label: 'primary address only', color: 'kk.gold' },
-  'unverified': { label: 'could not verify', color: 'var(--rose)' },
+  'empty-confirmed': { label: 'empty', color: 'var(--text-2)' },
+  'checked-shallow': { label: 'primary address only', color: 'var(--gold)' },
+  'unverified': { label: 'couldn’t verify', color: 'var(--rose)' },
 }
 
 function coverageRank(c: AuditChainFinding): number {
@@ -54,16 +58,25 @@ function coverageRank(c: AuditChainFinding): number {
   }
 }
 
+function statusCopy(c: AuditChainFinding, levelScannable: boolean): string {
+  switch (c.coverage) {
+    case 'funded': return `Your ${c.symbol} is accounted for. If you expected more, check for funds on other accounts.`
+    case 'unverified': return `We couldn’t reach ${c.symbol} just now — the balance above may be incomplete. Sync, or scan its paths directly.`
+    case 'checked-shallow': return `We checked your main ${c.symbol} address. This chain can hold funds on other accounts we can’t see automatically — scan if you expected more.`
+    default: return levelScannable ? `Nothing on your main ${c.symbol} address — and the next few accounts are empty too.` : `Nothing on your main ${c.symbol} address.`
+  }
+}
+
 interface Ladder {
-  autoScanned: boolean        // accounts 1-3 auto-scan attempted on arrival
-  autoScanning: boolean       // involuntary on-arrival scan in flight (does NOT block close)
-  scanning: boolean           // user-initiated scan in flight (blocks close)
+  autoScanned: boolean
+  autoScanning: boolean
+  scanning: boolean
   scanned: AuditDerivedAddress[]
   nextLevel: number
-  digDeeper: boolean          // deep-dive panels open
-  customResults: AuditDerivedAddress[]
-  extraFound: AuditDerivedAddress[]  // funded finds from known-paths/inspector → handoff
+  showCommon: boolean
   showCustom: boolean
+  customResults: AuditDerivedAddress[]
+  extraFound: AuditDerivedAddress[]
   recovering: boolean
   recovered: string | null
   recoverErr: string | null
@@ -73,9 +86,9 @@ interface Ladder {
 }
 
 const EMPTY_LADDER: Ladder = {
-  autoScanned: false, autoScanning: false, scanning: false, scanned: [], nextLevel: 1, digDeeper: false,
-  customResults: [], extraFound: [], showCustom: false, recovering: false, recovered: null,
-  recoverErr: null, showHandoff: false, handoffNote: '', scanErr: null,
+  autoScanned: false, autoScanning: false, scanning: false, scanned: [], nextLevel: 1,
+  showCommon: false, showCustom: false, customResults: [], extraFound: [], recovering: false,
+  recovered: null, recoverErr: null, showHandoff: false, handoffNote: '', scanErr: null,
 }
 
 interface AuditDialogProps {
@@ -127,16 +140,11 @@ export function AuditDialog({ onClose, snapshot, isHidden, chainCatalog, chainAd
           const r = await rpcRequest<AuditReport>('auditGetStatus', { auditId })
           if (auditId !== auditIdRef.current || unmountedRef.current) return
           setReport(r)
-          if (r.status !== 'running') {
-            stopPoll()
-            if (r.status === 'complete') setPhase('walkthrough')
-          }
+          if (r.status !== 'running') { stopPoll(); if (r.status === 'complete') setPhase('walkthrough') }
         } catch { /* transient */ }
         finally { pollingRef.current = false }
       }, 1500)
-    } catch (e: any) {
-      if (!unmountedRef.current) setError(e.message)
-    }
+    } catch (e: any) { if (!unmountedRef.current) setError(e.message) }
   }, [stopPoll])
 
   useEffect(() => { start('light') }, [start])
@@ -156,18 +164,15 @@ export function AuditDialog({ onClose, snapshot, isHidden, chainCatalog, chainAd
   const busy = sweeping || Object.values(ladders).some(l => l.scanning || l.recovering)
   const openUrl = (url: string) => rpcRequest('openUrl', { url }).catch(() => {})
 
-  // Ordered walkthrough chains + current.
   const walk = report ? [...report.chains].sort((a, b) => coverageRank(a) - coverageRank(b)) : []
   const current = walk[chainIdx]
   const ladder = current ? (ladders[current.chainId] || EMPTY_LADDER) : EMPTY_LADDER
   const currentDef = current ? catalog.current.get(current.chainId) : undefined
   const levelScannable = !!currentDef && currentDef.chainFamily !== 'utxo' && !['zcash-shielded', 'hive'].includes(currentDef.chainFamily)
+  const hasCommon = current?.family === 'evm' || current?.chainId === 'bitcoin'
   const firstEvmId = walk.find(c => c.family === 'evm')?.chainId
 
   const runScan = useCallback(async (chain: AuditChainFinding, fromLevel: number, count: number, markAuto: boolean) => {
-    // An on-arrival auto-scan is involuntary + read-only — it sets autoScanning,
-    // which is NOT in `busy`, so it never blocks the close button. A user-clicked
-    // "Search more" sets scanning, which does guard close.
     patchLadder(chain.chainId, markAuto ? { autoScanning: true, autoScanned: true, scanErr: null } : { scanning: true, scanErr: null })
     try {
       const { results } = await rpcRequest<{ results: AuditDerivedAddress[] }>('auditScanLevels', { chainId: chain.chainId, fromLevel, count }, 180000)
@@ -186,7 +191,7 @@ export function AuditDialog({ onClose, snapshot, isHidden, chainCatalog, chainAd
     onClose()
   }, [busy, onClose])
 
-  // Auto-scan accounts 1-3 on arrival (lazy, default-on) for level-scannable chains.
+  // Auto-scan accounts 1-3 on arrival (read-only; does NOT block close).
   useEffect(() => {
     if (phase !== 'walkthrough' || !current || !levelScannable) return
     const l = ladders[current.chainId]
@@ -196,7 +201,6 @@ export function AuditDialog({ onClose, snapshot, isHidden, chainCatalog, chainAd
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase, current?.chainId, levelScannable])
 
-  // Keep the current logo visible in the filmstrip.
   useEffect(() => {
     const el = filmRef.current?.querySelector('[data-current="true"]') as HTMLElement | null
     el?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' })
@@ -259,21 +263,21 @@ export function AuditDialog({ onClose, snapshot, isHidden, chainCatalog, chainAd
     const canTrack = (chain.chainId === 'bitcoin' || chain.family === 'evm') && a.level != null
     const fundedNoTrack = a.hasBalance && !canTrack
     return (
-      <Box bg="whiteAlpha.50" borderRadius="md" px="3" py="1.5">
+      <Box bg="var(--ink-2)" borderRadius="lg" px="3.5" py="2.5">
         <Flex justify="space-between" align="center">
-          <Text fontSize="xs" color="kk.textSecondary">{a.level != null ? (chain.family === 'evm' ? `Address #${a.level}` : `Account #${a.level}`) : 'Custom'}</Text>
+          <Text fontSize="sm" color="var(--text-1)">{a.level != null ? (chain.family === 'evm' ? `Address #${a.level}` : `Account #${a.level}`) : 'Custom path'}</Text>
           {a.balanceError
-            ? <Text fontSize="xs" fontWeight="600" color="var(--rose)">could not verify</Text>
-            : <Text fontSize="xs" fontWeight="600" color={a.hasBalance ? 'var(--teal)' : 'kk.textMuted'}>{a.native} {a.symbol}</Text>}
+            ? <Text fontSize="sm" fontWeight="600" color="var(--rose)">couldn’t verify</Text>
+            : <Text fontSize="sm" fontWeight="700" color={a.hasBalance ? 'var(--teal)' : 'var(--text-2)'}>{a.native} {a.symbol}</Text>}
         </Flex>
-        <Flex justify="space-between" align="center" mt="0.5">
-          <Text fontSize="10px" fontFamily="mono" color="kk.textMuted" truncate maxW="220px" title={a.address}>{a.address}</Text>
-          <Flex gap="2">
-            {a.explorerUrl && <Box as="button" fontSize="10px" color="var(--teal)" onClick={() => openUrl(a.explorerUrl!)}>explorer ↗</Box>}
-            {a.hasBalance && canTrack && <Box as="button" fontSize="10px" color="kk.gold" fontWeight="600" onClick={() => trackLevel(chain, a.level!)}>track</Box>}
-          </Flex>
+        <Flex justify="space-between" align="center" mt="1" gap="3">
+          <Text flex="1" minW="0" fontSize="11px" fontFamily="mono" color="var(--text-3)" truncate title={`${a.pathStr} · ${a.address}`}>{a.pathStr} · {a.address}</Text>
+          <HStack gap="3" flexShrink={0}>
+            {a.explorerUrl && <Box as="button" fontSize="11px" color="var(--teal)" onClick={() => openUrl(a.explorerUrl!)}>explorer ↗</Box>}
+            {a.hasBalance && canTrack && <Box as="button" fontSize="11px" color="var(--gold)" fontWeight="700" onClick={() => trackLevel(chain, a.level!)}>track</Box>}
+          </HStack>
         </Flex>
-        {fundedNoTrack && <Text fontSize="10px" color="kk.gold" mt="1">Funds here, but KeepKey can’t track this path in-app. <Box as="button" textDecoration="underline" onClick={() => patchLadder(chain.chainId, { digDeeper: true, showHandoff: true })}>Send to support →</Box></Text>}
+        {fundedNoTrack && <Text fontSize="11px" color="var(--gold)" mt="1.5">Funds here, but KeepKey can’t track this path in-app. <Box as="button" textDecoration="underline" onClick={() => patchLadder(chain.chainId, { showHandoff: true })}>Send to support →</Box></Text>}
       </Box>
     )
   }
@@ -283,198 +287,200 @@ export function AuditDialog({ onClose, snapshot, isHidden, chainCatalog, chainAd
   const currentCaip = currentDef?.caip
   const currentAddr = current ? chainAddresses[current.chainId] : undefined
   const explorerForCurrent = (currentAddr && currentDef?.explorerAddressUrl) ? currentDef.explorerAddressUrl.replace('{{address}}', currentAddr) : null
+  const scanningNow = ladder.scanning || ladder.autoScanning
+
+  const btnOutline = {
+    size: 'sm' as const, variant: 'outline' as const, borderColor: 'var(--line-2)', color: 'var(--text-1)', fontWeight: '600',
+    _hover: { borderColor: 'var(--teal)', color: 'var(--teal)', bg: 'rgba(139,227,196,0.06)' }, transition: 'all 0.15s ease',
+  }
 
   return (
-    <Box position="fixed" inset="0" zIndex={Z.dialog || 1500} display="flex" alignItems="center" justifyContent="center">
+    <Box position="fixed" inset="0" zIndex={Z.dialog || 1500} display="flex" alignItems="center" justifyContent="center" p="4">
       <style>{ANIM}</style>
-      <Box position="absolute" inset="0" bg="blackAlpha.700" onClick={handleClose} />
+      <Box position="absolute" inset="0" bg="blackAlpha.700" backdropFilter="blur(2px)" onClick={handleClose} />
 
-      <Box position="relative" w="480px" maxH="88vh" overflow="auto"
-        bg="kk.cardBg" border="1px solid" borderColor="kk.border" borderRadius="2xl" p="6" boxShadow="0 8px 40px rgba(0,0,0,0.5)">
+      <Box position="relative" w="880px" maxW="94vw" maxH="90vh" overflow="auto"
+        bg="var(--ink-1)" border="2px solid" borderColor="var(--gold)" borderRadius="xl" boxShadow="0 12px 48px rgba(0,0,0,0.6)">
 
         {/* Header */}
-        <Flex align="center" justify="space-between" mb="4">
-          <Flex align="center" gap="2">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--teal)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="7" /><path d="M21 21l-4.35-4.35" /></svg>
-            <Text fontSize="lg" fontWeight="600" color="var(--teal)">Audit balances</Text>
-          </Flex>
-          <Flex align="center" gap="2">
-            {phase === 'walkthrough' && <Text fontSize="11px" color="kk.textMuted">{chainIdx + 1} / {walk.length}</Text>}
-            <Box as="button" onClick={handleClose} color="kk.textMuted" _hover={{ color: "white" }} p="1" opacity={busy ? 0.3 : 1} cursor={busy ? "not-allowed" : "pointer"}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12" /></svg>
-            </Box>
-          </Flex>
-        </Flex>
-
-        {/* Filmstrip stepper */}
-        {phase === 'walkthrough' && walk.length > 0 && (
-          <Box mb="4">
-            <Flex ref={filmRef} gap="2.5" overflowX="auto" pb="2" align="center"
-              css={{ scrollbarWidth: 'none', '&::-webkit-scrollbar': { display: 'none' } }}>
-              {walk.map((c, i) => {
-                const def = catalog.current.get(c.chainId)
-                const isCur = i === chainIdx
-                const visited = i < chainIdx
-                const ring = isCur ? 'var(--teal)' : c.coverage === 'funded' ? 'rgba(74,222,128,0.5)' : c.coverage === 'unverified' ? 'var(--rose)' : null
-                return (
-                  <Box key={c.chainId} data-current={isCur} onClick={() => setChainIdx(i)} cursor="pointer" flexShrink={0} pt="1">
-                    <ChainLogo caip={def?.caip} symbol={c.symbol} size={isCur ? 34 : 26} ring={ring}
-                      dim={!isCur && !visited && c.coverage !== 'funded' && c.coverage !== 'unverified'}
-                      done={visited && c.coverage !== 'unverified'} scanning={isCur && !!(ladders[c.chainId]?.scanning || ladders[c.chainId]?.autoScanning)} />
-                  </Box>
-                )
-              })}
+        <Box px="6" py="4" borderBottom="1px solid" borderColor="var(--ink-3)">
+          <Flex align="center" justify="space-between">
+            <Flex align="center" gap="2.5">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--teal)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="7" /><path d="M21 21l-4.35-4.35" /></svg>
+              <Box>
+                <Text fontSize="lg" fontWeight="700" color="var(--teal)" letterSpacing="-0.01em" lineHeight="1.1">Audit balances</Text>
+                <Text fontSize="xs" color="var(--text-2)">Let’s walk every chain and make sure nothing’s hiding.</Text>
+              </Box>
             </Flex>
-            <Box h="2px" bg="whiteAlpha.100" borderRadius="full" overflow="hidden">
-              <Box h="100%" bg="var(--teal)" borderRadius="full" transition="width 0.3s" w={`${Math.round(((chainIdx + 1) / walk.length) * 100)}%`} />
-            </Box>
-          </Box>
-        )}
+            <Flex align="center" gap="3">
+              {phase === 'walkthrough' && <Text fontSize="sm" color="var(--text-2)" fontFamily="mono">{chainIdx + 1} / {walk.length}</Text>}
+              <Box as="button" onClick={handleClose} color="var(--text-2)" _hover={{ color: "white" }} p="1" opacity={busy ? 0.3 : 1} cursor={busy ? "not-allowed" : "pointer"}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12" /></svg>
+              </Box>
+            </Flex>
+          </Flex>
+        </Box>
 
-        {/* Stale */}
+        {/* Stale / error */}
         {stale && (
-          <VStack gap="3" align="stretch" mb="2">
-            <Text fontSize="sm" color="kk.gold">The wallet changed while auditing — these results are no longer reliable.</Text>
-            <Button size="sm" bg="var(--teal)" color="black" fontWeight="600" _hover={{ bg: "#22c55e" }} onClick={() => start('light')}>Re-run audit</Button>
-          </VStack>
+          <Box p="6"><VStack gap="3" align="stretch">
+            <Text fontSize="sm" color="var(--gold)">The wallet changed while auditing — these results are no longer reliable.</Text>
+            <Button size="sm" alignSelf="flex-start" bg="var(--gold)" color="black" fontWeight="700" _hover={{ bg: "var(--gold-2)" }} onClick={() => start('light')}>Re-run audit</Button>
+          </VStack></Box>
         )}
-
-        {!stale && error && (
-          <Box mb="3" px="3" py="2" bg="rgba(255,99,99,0.08)" border="1px solid" borderColor="rgba(255,99,99,0.3)" borderRadius="md"><Text fontSize="xs" color="red.400">{error}</Text></Box>
-        )}
+        {!stale && error && <Box mx="6" mt="4" px="3.5" py="2.5" bg="rgba(224,140,123,0.08)" border="1px solid" borderColor="rgba(224,140,123,0.3)" borderRadius="md"><Text fontSize="sm" color="var(--rose)">{error}</Text></Box>}
 
         {/* Initial scanning */}
         {!stale && phase === 'scanning' && running && (
-          <VStack gap="4" align="stretch" py="2">
-            <Flex justify="center"><Box w="56px" h="56px" borderRadius="full" bg="rgba(80,200,120,0.08)" css={{ animation: "auditPulse 1.4s ease-in-out infinite" }} display="flex" alignItems="center" justifyContent="center">
-              <Spinner size="md" color="var(--teal)" />
-            </Box></Flex>
-            <Text fontSize="xs" color="kk.textMuted" textAlign="center">{isHidden ? 'Auditing your hidden wallet — nothing is written to disk.' : 'Checking your funds across every chain…'}</Text>
-            <VStack gap="2" align="stretch">
+          <VStack gap="5" align="center" py="14" px="6">
+            <Box w="84px" h="84px" borderRadius="full" bg="rgba(139,227,196,0.07)" border="2px solid" borderColor="var(--teal)" display="flex" alignItems="center" justifyContent="center" css={{ animation: "auditGlow 1.8s ease-in-out infinite" }}>
+              <Spinner size="lg" color="var(--teal)" />
+            </Box>
+            <Text fontSize="md" color="var(--text-1)" textAlign="center" maxW="420px" lineHeight="1.6">
+              {isHidden ? 'Auditing your hidden wallet — nothing is written to disk.' : 'Checking your funds across every chain. This only takes a moment.'}
+            </Text>
+            <VStack gap="2.5" align="stretch" w="100%" maxW="360px">
               {PHASES.map((p, i) => {
                 const activeIdx = report ? PHASES.findIndex(x => x.key === report.phase) : 0
                 const done = report ? i < activeIdx || report.status !== 'running' : false
                 const active = report ? i === activeIdx && report.status === 'running' : i === 0
                 return (
-                  <Flex key={p.key} align="center" gap="2">
-                    <Box w="16px" h="16px" display="flex" alignItems="center" justifyContent="center">
-                      {done ? <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--teal)" strokeWidth="3"><polyline points="20 6 9 17 4 12" /></svg>
-                        : active ? <Spinner size="xs" color="var(--teal)" /> : <Box w="6px" h="6px" borderRadius="full" bg="kk.border" />}
+                  <Flex key={p.key} align="center" gap="3">
+                    <Box w="22px" h="22px" borderRadius="full" display="flex" alignItems="center" justifyContent="center" bg={done ? 'var(--teal)' : active ? 'rgba(139,227,196,0.12)' : 'var(--ink-3)'}>
+                      {done ? <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="black" strokeWidth="3.5"><polyline points="20 6 9 17 4 12" /></svg>
+                        : active ? <Spinner size="xs" color="var(--teal)" /> : <Box w="5px" h="5px" borderRadius="full" bg="var(--text-3)" />}
                     </Box>
-                    <Text fontSize="sm" color={active ? "kk.textSecondary" : "kk.textMuted"}>{active && report ? report.progress.label : p.label}</Text>
+                    <Text fontSize="sm" color={active ? "var(--text-0)" : done ? "var(--text-2)" : "var(--text-3)"}>{active && report ? report.progress.label : p.label}</Text>
                   </Flex>
                 )
               })}
             </VStack>
-            {report?.status === 'aborted' && <Text fontSize="xs" color="kk.gold" textAlign="center">Scan stopped early ({report.error || 'device interrupted'}). <Box as="button" textDecoration="underline" onClick={() => start('light')}>Retry</Box></Text>}
+            {report?.status === 'aborted' && <Text fontSize="sm" color="var(--gold)">Scan stopped early ({report.error || 'device interrupted'}). <Box as="button" textDecoration="underline" onClick={() => start('light')}>Retry</Box></Text>}
           </VStack>
         )}
 
         {/* Walkthrough */}
         {!stale && phase === 'walkthrough' && current && (
-          <VStack gap="3" align="stretch">
-            {/* Hero */}
-            <VStack gap="1" pb="1">
-              <ChainLogo caip={currentCaip} symbol={current.symbol} size={52} scanning={ladder.scanning || ladder.autoScanning} ring={(ladder.scanning || ladder.autoScanning) ? 'var(--teal)' : null} />
-              <Text fontSize="lg" fontWeight="600" color="white" mt="1">{current.symbol}</Text>
-              <Text fontSize="xl" fontWeight="700" color={current.balanceUsd > 0 ? 'var(--teal)' : 'kk.textMuted'}>${current.balanceUsd.toLocaleString('en-US', { maximumFractionDigits: 2 })}</Text>
-              <Flex align="center" gap="2">
-                <Text fontSize="10px" color={COVERAGE_STYLE[current.coverage].color}>{COVERAGE_STYLE[current.coverage].label}</Text>
-                {explorerForCurrent && <Box as="button" fontSize="10px" color="var(--teal)" onClick={() => openUrl(explorerForCurrent)}>explorer ↗</Box>}
-              </Flex>
-            </VStack>
-
-            {current.coverage === 'unverified' && <Text fontSize="11px" color="var(--rose)" textAlign="center">This chain didn’t report — the balance shown may be wrong. <Box as="button" textDecoration="underline" onClick={() => onRecovered?.()}>Sync now</Box></Text>}
-
-            {/* BTC v1 sweep + track */}
-            {current.chainId === 'bitcoin' && report && report.btc.findings.some(f => f.category !== 'higher-account') && (
-              <Box bg="rgba(233,196,106,0.08)" border="1px solid" borderColor="rgba(233,196,106,0.2)" borderRadius="lg" p="3">
-                <Text fontSize="sm" fontWeight="600" color="kk.gold">{formatSats(report.btc.findings.filter(f => f.category !== 'higher-account').reduce((s, f) => s + f.balanceSats, 0))} on non-standard paths</Text>
-                {sweepPreview ? (
-                  <>
-                    <Box bg="whiteAlpha.50" borderRadius="md" p="2" my="2"><Flex justify="space-between"><Text fontSize="xs" color="kk.textMuted">You receive</Text><Text fontSize="xs" fontWeight="600" color="kk.gold">{formatSats(sweepPreview.outputSats)}</Text></Flex></Box>
-                    <Flex gap="2"><Button flex="1" size="sm" variant="ghost" color="kk.textSecondary" onClick={() => setSweepPreview(null)}>Back</Button><Button flex="1" size="sm" bg="kk.gold" color="black" fontWeight="600" loading={sweeping} onClick={sweepConfirm}>Confirm & broadcast</Button></Flex>
-                  </>
-                ) : <Button size="sm" w="100%" mt="2" bg="kk.gold" color="black" fontWeight="600" loading={sweeping} onClick={sweepDryRun}>Sweep to main address</Button>}
+          <Box>
+            {/* progress + filmstrip */}
+            <Box px="6" pt="4">
+              <Box h="3px" bg="var(--ink-3)" borderRadius="full" overflow="hidden" mb="3">
+                <Box h="100%" bg="var(--teal)" borderRadius="full" transition="width 0.3s" w={`${Math.round(((chainIdx + 1) / walk.length) * 100)}%`} />
               </Box>
-            )}
-            {current.chainId === 'bitcoin' && report && report.btc.higherAccountMax > 0 && (
-              <Button size="sm" w="100%" bg="var(--teal)" color="black" fontWeight="600" _hover={{ bg: "#22c55e" }} loading={ladder.recovering} onClick={() => trackLevel(current, report.btc.higherAccountMax)}>Track Bitcoin accounts up to #{report.btc.higherAccountMax}</Button>
-            )}
-            {current.chainId === firstEvmId && report && report.evm.discoveredIndices.length > 0 && (
-              <Text fontSize="xs" color="var(--teal)" textAlign="center">Found funds on EVM address #{report.evm.discoveredIndices.join(', #')} — {report.evm.persisted ? 'added to your portfolio.' : 'found this session.'} (shared across all EVM chains)</Text>
-            )}
-
-            {/* Auto-scan summary */}
-            {ladder.autoScanning && <Text fontSize="xs" color="kk.textMuted" textAlign="center">Checking accounts 1–3…</Text>}
-            {fundedScanned.length > 0 && <VStack gap="1.5" align="stretch">{fundedScanned.map((a, i) => <AddrRow key={`f${i}`} chain={current} a={a} />)}</VStack>}
-            {ladder.autoScanned && !ladder.scanning && fundedScanned.length === 0 && levelScannable && <Text fontSize="11px" color="kk.textMuted" textAlign="center">Accounts 1–3 checked — nothing beyond your main address.</Text>}
-            {ladder.recovered && <Box bg="rgba(74,222,128,0.08)" border="1px solid" borderColor="rgba(74,222,128,0.2)" borderRadius="md" p="2"><Text fontSize="xs" color="var(--teal)">{ladder.recovered}</Text></Box>}
-            {ladder.recoverErr && <Text fontSize="xs" color="red.400">{ladder.recoverErr}</Text>}
-            {current.coverage === 'checked-shallow' && !levelScannable && <Text fontSize="10px" color="kk.gold" textAlign="center">KeepKey can’t auto-track extra accounts on this chain — dig deeper to search, then send a report to support.</Text>}
-
-            {/* Primary actions */}
-            {!ladder.digDeeper ? (
-              <Flex gap="2">
-                <Button flex="1" size="sm" variant="outline" borderColor="kk.border" color="var(--teal)" _hover={{ bg: "rgba(74,222,128,0.08)" }} onClick={() => { if (chainIdx + 1 < walk.length) setChainIdx(chainIdx + 1); else handleClose() }}>Looks right ✓</Button>
-                <Button flex="1" size="sm" variant="outline" borderColor="kk.gold" color="kk.gold" _hover={{ bg: "rgba(233,196,106,0.08)" }} onClick={() => patchLadder(current.chainId, { digDeeper: true })}>Dig deeper</Button>
+              <Flex ref={filmRef} gap="2.5" overflowX="auto" pb="1" align="center" css={{ scrollbarWidth: 'none', '&::-webkit-scrollbar': { display: 'none' } }}>
+                {walk.map((c, i) => {
+                  const def = catalog.current.get(c.chainId)
+                  const isCur = i === chainIdx
+                  const visited = i < chainIdx
+                  const ring = isCur ? 'var(--teal)' : c.coverage === 'funded' ? 'rgba(139,227,196,0.45)' : c.coverage === 'unverified' ? 'var(--rose)' : null
+                  return (
+                    <Box key={c.chainId} data-current={isCur} onClick={() => setChainIdx(i)} cursor="pointer" flexShrink={0} pt="1">
+                      <ChainLogo caip={def?.caip} symbol={c.symbol} size={isCur ? 30 : 22} ring={ring}
+                        dim={!isCur && !visited && c.coverage !== 'funded' && c.coverage !== 'unverified'}
+                        done={visited && c.coverage !== 'unverified'} scanning={isCur && scanningNow} />
+                    </Box>
+                  )
+                })}
               </Flex>
-            ) : (
-              <Box borderTop="1px solid" borderColor="kk.border" pt="3">
-                <VStack gap="2.5" align="stretch">
-                  {ladder.scanErr && <Text fontSize="xs" color="red.400">{ladder.scanErr}</Text>}
+            </Box>
 
-                  {/* deeper account levels */}
-                  {levelScannable && (
-                    <Box>
-                      <Text fontSize="11px" color="kk.textMuted" textTransform="uppercase" letterSpacing="0.08em" mb="1.5">More accounts</Text>
-                      <VStack gap="1.5" align="stretch" maxH="160px" overflow="auto">
-                        {ladder.scanned.filter(a => !a.hasBalance && !a.balanceError).map((a, i) => <AddrRow key={`s${i}`} chain={current} a={a} />)}
-                      </VStack>
-                      <Button size="xs" mt="1.5" variant="outline" borderColor="kk.border" color="kk.textSecondary" loading={ladder.scanning} onClick={() => runScan(current, ladder.nextLevel, 3, false)}>Search 3 more accounts</Button>
-                    </Box>
-                  )}
+            {/* two-column body */}
+            <Flex px="6" py="5" gap="6" align="stretch" direction={{ base: 'column', md: 'row' }}>
+              {/* hero */}
+              <VStack gap="2" w={{ base: '100%', md: '264px' }} flexShrink={0} textAlign="center" justify="flex-start" pt="2">
+                <Box w="92px" h="92px" borderRadius="full" display="flex" alignItems="center" justifyContent="center" bg="rgba(139,227,196,0.05)"
+                  css={scanningNow ? { animation: "auditGlow 1.8s ease-in-out infinite" } : undefined}>
+                  <ChainLogo caip={currentCaip} symbol={current.symbol} size={56} scanning={scanningNow} ring={scanningNow ? 'var(--teal)' : null} />
+                </Box>
+                <Text fontSize="xl" fontWeight="700" color="white" mt="1">{current.symbol}</Text>
+                <Text fontSize="2xl" fontWeight="800" color={current.balanceUsd > 0 ? 'var(--teal)' : 'var(--text-2)'} lineHeight="1">${current.balanceUsd.toLocaleString('en-US', { maximumFractionDigits: 2 })}</Text>
+                <HStack gap="2.5" mt="0.5">
+                  <Text fontSize="11px" color={COVERAGE_STYLE[current.coverage].color}>{COVERAGE_STYLE[current.coverage].label}</Text>
+                  {explorerForCurrent && <Box as="button" fontSize="11px" color="var(--teal)" onClick={() => openUrl(explorerForCurrent)}>explorer ↗</Box>}
+                </HStack>
+              </VStack>
 
-                  {/* EVM known-paths grid */}
-                  {current.family === 'evm' && <AuditKnownPaths chainId={current.chainId} onFound={(r) => pushExtra(current.chainId, r)} onOpenUrl={openUrl} />}
+              {/* content */}
+              <Box flex="1" minW="0">
+                <Text fontSize="sm" color="var(--text-1)" lineHeight="1.6" mb="3">
+                  {scanningNow && !ladder.autoScanned ? `Checking the first few ${current.symbol} accounts…` : statusCopy(current, levelScannable)}
+                </Text>
 
-                  {/* BTC deep scans */}
-                  {current.chainId === 'bitcoin' && (
-                    <Box>
-                      <Text fontSize="11px" color="kk.textMuted" textTransform="uppercase" letterSpacing="0.08em" mb="1.5">Deep Bitcoin scans</Text>
-                      <AuditBtcDeep onRecovered={() => onRecovered?.()} />
-                    </Box>
-                  )}
+                {/* BTC sweep + track (bitcoin) */}
+                {current.chainId === 'bitcoin' && report && report.btc.findings.some(f => f.category !== 'higher-account') && (
+                  <Box bg="rgba(233,196,106,0.07)" border="1px solid" borderColor="rgba(233,196,106,0.22)" borderRadius="lg" p="3.5" mb="3">
+                    <Text fontSize="sm" fontWeight="700" color="var(--gold)">{formatSats(report.btc.findings.filter(f => f.category !== 'higher-account').reduce((s, f) => s + f.balanceSats, 0))} on non-standard paths</Text>
+                    <Text fontSize="xs" color="var(--text-2)" mt="0.5" mb="2.5">Stranded by a wallet bug — we can sweep it to your main address.</Text>
+                    {sweepPreview ? (
+                      <>
+                        <Box bg="var(--ink-2)" borderRadius="md" p="2.5" mb="2.5"><Flex justify="space-between"><Text fontSize="xs" color="var(--text-2)">You receive</Text><Text fontSize="xs" fontWeight="700" color="var(--gold)">{formatSats(sweepPreview.outputSats)}</Text></Flex></Box>
+                        <Flex gap="2"><Button flex="1" size="sm" variant="ghost" color="var(--text-2)" onClick={() => setSweepPreview(null)}>Back</Button><Button flex="1" size="sm" bg="var(--gold)" color="black" fontWeight="700" loading={sweeping} onClick={sweepConfirm}>Confirm & broadcast</Button></Flex>
+                      </>
+                    ) : <Button size="sm" w="100%" bg="var(--gold)" color="black" fontWeight="700" _hover={{ bg: "var(--gold-2)" }} loading={sweeping} onClick={sweepDryRun}>Sweep to main address</Button>}
+                  </Box>
+                )}
+                {current.chainId === 'bitcoin' && report && report.btc.higherAccountMax > 0 && (
+                  <Button size="sm" w="100%" mb="3" bg="var(--teal)" color="black" fontWeight="700" _hover={{ bg: "var(--teal-2)" }} loading={ladder.recovering} onClick={() => trackLevel(current, report.btc.higherAccountMax)}>Track Bitcoin accounts up to #{report.btc.higherAccountMax}</Button>
+                )}
+                {current.chainId === firstEvmId && report && report.evm.discoveredIndices.length > 0 && (
+                  <Text fontSize="sm" color="var(--teal)" mb="3">✓ Found funds on EVM address #{report.evm.discoveredIndices.join(', #')} — {report.evm.persisted ? 'added to your portfolio.' : 'found this session.'} (shared across all EVM chains)</Text>
+                )}
 
-                  {/* custom path */}
-                  {currentDef && (ladder.showCustom
-                    ? <AuditCustomPath chainId={current.chainId} family={currentDef.chainFamily} defaultPath={currentDef.defaultPath} scriptType={currentDef.scriptType} onResult={(r) => pushCustom(current.chainId, r)} />
-                    : <Box as="button" fontSize="11px" color="kk.textMuted" _hover={{ color: "var(--teal)" }} onClick={() => patchLadder(current.chainId, { showCustom: true })}>Try a custom path →</Box>)}
-                  {ladder.customResults.map((a, i) => <AddrRow key={`c${i}`} chain={current} a={a} />)}
+                {/* auto-scan finds */}
+                {fundedScanned.length > 0 && <VStack gap="2" align="stretch" mb="3">{fundedScanned.map((a, i) => <AddrRow key={`f${i}`} chain={current} a={a} />)}</VStack>}
+                {ladder.recovered && <Box bg="rgba(139,227,196,0.08)" border="1px solid" borderColor="rgba(139,227,196,0.2)" borderRadius="md" p="2.5" mb="3"><Text fontSize="sm" color="var(--teal)">{ladder.recovered}</Text></Box>}
+                {ladder.recoverErr && <Text fontSize="sm" color="var(--rose)" mb="2">{ladder.recoverErr}</Text>}
+                {ladder.scanErr && <Text fontSize="sm" color="var(--rose)" mb="2">{ladder.scanErr}</Text>}
 
-                  {/* inspector */}
-                  {currentDef && <AuditInspector chainId={current.chainId} family={currentDef.chainFamily} defaultPath={currentDef.defaultPath} scriptType={currentDef.scriptType} onOpenUrl={openUrl} />}
+                {/* deeper account levels (only the empty ones — funded shown above) */}
+                {ladder.scanned.filter(a => !a.hasBalance && !a.balanceError).length > 0 && (
+                  <VStack gap="2" align="stretch" mb="3" maxH="180px" overflow="auto">
+                    {ladder.scanned.filter(a => !a.hasBalance && !a.balanceError).map((a, i) => <AddrRow key={`s${i}`} chain={current} a={a} />)}
+                  </VStack>
+                )}
 
-                  {/* handoff */}
-                  {ladder.showHandoff ? (
-                    <Box bg="whiteAlpha.50" borderRadius="md" p="3">
-                      <Text fontSize="xs" color="kk.textSecondary" mb="2">We’ll bundle everything checked into a report you can send to support.</Text>
-                      <Textarea size="sm" placeholder="What balance did you expect? (optional)" value={ladder.handoffNote} onChange={e => patchLadder(current.chainId, { handoffNote: e.target.value })} bg="whiteAlpha.50" border="1px solid" borderColor="kk.border" fontSize="xs" rows={2} mb="2" />
-                      <Button size="sm" w="100%" bg="var(--teal)" color="black" fontWeight="600" _hover={{ bg: "#22c55e" }} onClick={() => copyHandoff(current, ladder, current.balanceUsd)}>Copy report & open support ↗</Button>
-                    </Box>
-                  ) : <Box as="button" fontSize="11px" color="kk.textMuted" _hover={{ color: "var(--teal)" }} onClick={() => patchLadder(current.chainId, { showHandoff: true })}>Still missing? Send to support →</Box>}
-                </VStack>
+                {/* common (other-wallet) paths */}
+                {ladder.showCommon && current.family === 'evm' && <Box mb="3"><AuditKnownPaths chainId={current.chainId} defaultAddress={currentAddr} onFound={(r) => pushExtra(current.chainId, r)} onOpenUrl={openUrl} /></Box>}
+                {ladder.showCommon && current.chainId === 'bitcoin' && <Box mb="3"><Text fontSize="11px" color="var(--text-2)" textTransform="uppercase" letterSpacing="0.08em" mb="1.5">Deep Bitcoin scans</Text><AuditBtcDeep onRecovered={() => onRecovered?.()} /></Box>}
+
+                {/* custom + inspector */}
+                {ladder.showCustom && currentDef && (
+                  <Box mb="3">
+                    <AuditCustomPath chainId={current.chainId} family={currentDef.chainFamily} defaultPath={currentDef.defaultPath} scriptType={currentDef.scriptType} onResult={(r) => pushCustom(current.chainId, r)} />
+                    {ladder.customResults.map((a, i) => <Box key={`c${i}`} mt="2"><AddrRow chain={current} a={a} /></Box>)}
+                    <Box mt="2"><AuditInspector chainId={current.chainId} family={currentDef.chainFamily} defaultPath={currentDef.defaultPath} scriptType={currentDef.scriptType} onOpenUrl={openUrl} /></Box>
+                  </Box>
+                )}
+
+                {/* handoff */}
+                {ladder.showHandoff && (
+                  <Box bg="var(--ink-2)" borderRadius="lg" p="3.5" mb="3">
+                    <Text fontSize="sm" color="var(--text-1)" mb="2">We’ll bundle everything we checked into a report you can hand to support.</Text>
+                    <Textarea size="sm" placeholder="What balance did you expect? (optional)" value={ladder.handoffNote} onChange={e => patchLadder(current.chainId, { handoffNote: e.target.value })} bg="var(--ink-1)" border="1px solid" borderColor="var(--ink-3)" fontSize="sm" rows={2} mb="2.5" />
+                    <Button size="sm" w="100%" bg="var(--teal)" color="black" fontWeight="700" _hover={{ bg: "var(--teal-2)" }} onClick={() => copyHandoff(current, ladder, current.balanceUsd)}>Copy report & open support ↗</Button>
+                  </Box>
+                )}
+
+                {/* action buttons */}
+                <Flex gap="2" wrap="wrap" mt="1">
+                  {levelScannable && <Button {...btnOutline} loading={ladder.scanning} onClick={() => runScan(current, ladder.nextLevel, 3, false)}>Scan more accounts</Button>}
+                  {hasCommon && <Button {...btnOutline} onClick={() => patchLadder(current.chainId, { showCommon: !ladder.showCommon })}>{current.family === 'evm' ? 'Scan common wallet paths' : 'Scan unusual paths'}</Button>}
+                  <Button {...btnOutline} onClick={() => patchLadder(current.chainId, { showCustom: !ladder.showCustom })}>Scan a custom path</Button>
+                  {!ladder.showHandoff && <Button size="sm" variant="ghost" color="var(--text-2)" fontWeight="600" _hover={{ color: "white" }} onClick={() => patchLadder(current.chainId, { showHandoff: true })}>Still missing?</Button>}
+                </Flex>
               </Box>
-            )}
-
-            {/* Nav */}
-            <Flex gap="2" pt="1" borderTop="1px solid" borderColor="kk.border">
-              <Button flex="1" size="sm" variant="ghost" color="kk.textSecondary" disabled={chainIdx === 0} onClick={() => setChainIdx(Math.max(0, chainIdx - 1))}>← Back</Button>
-              {chainIdx + 1 < walk.length
-                ? <Button flex="1" size="sm" variant="ghost" color="kk.textSecondary" onClick={() => setChainIdx(chainIdx + 1)}>Next →</Button>
-                : <Button flex="1" size="sm" bg="var(--teal)" color="black" fontWeight="600" _hover={{ bg: "#22c55e" }} onClick={handleClose}>Finish</Button>}
             </Flex>
-          </VStack>
+
+            {/* footer nav */}
+            <Flex px="6" py="4" gap="3" align="center" justify="space-between" borderTop="1px solid" borderColor="var(--ink-3)">
+              <Button size="sm" variant="ghost" color="var(--text-2)" fontWeight="600" disabled={chainIdx === 0} _hover={{ color: "white" }} onClick={() => setChainIdx(Math.max(0, chainIdx - 1))}>← Back</Button>
+              <Button size="lg" px="8" bg="var(--teal)" color="black" fontWeight="700" _hover={{ bg: "var(--teal-2)", transform: "translateY(-1px)", boxShadow: "0 4px 14px rgba(139,227,196,0.3)" }} _active={{ transform: "scale(0.98)" }} transition="all 0.15s ease"
+                onClick={() => { if (chainIdx + 1 < walk.length) setChainIdx(chainIdx + 1); else handleClose() }}>
+                {chainIdx + 1 < walk.length ? 'Looks right ✓' : 'Finish ✓'}
+              </Button>
+              <Button size="sm" variant="ghost" color="var(--text-2)" fontWeight="600" visibility={chainIdx + 1 < walk.length ? 'visible' : 'hidden'} _hover={{ color: "white" }} onClick={() => setChainIdx(chainIdx + 1)}>Skip →</Button>
+            </Flex>
+          </Box>
         )}
       </Box>
     </Box>
