@@ -9,6 +9,7 @@
  * calls using what these return.
  */
 import { evmAddressPath, type ChainDef } from '../shared/chains'
+import type { AuditToken } from '../shared/types'
 
 // Families with no single-receive-address scheme custom-path derivation can walk:
 //  - zcash-shielded: Orchard FVK, not an address
@@ -71,6 +72,58 @@ export function parseNativeBalance(resp: any): { native: string; hasBalance: boo
   const native = String(data.nativeBalance ?? data.balance ?? '0')
   const n = parseFloat(native)
   return { native, hasBalance: Number.isFinite(n) && n > 0 }
+}
+
+/** A portfolio entry is a token (not the chain's native coin) when its CAIP
+ *  asset part is present and is neither `slip44:` nor `native:`, or it's flagged
+ *  as a token by type/contract. Mirrors the getBalances classifier in index.ts
+ *  (Gate 2) so the audit and the dashboard agree on what "native" means. */
+function isTokenEntry(e: any): boolean {
+  const caipPath = String(e?.caip || '').split('/')[1] || ''
+  const byCaip = !!caipPath && !caipPath.startsWith('slip44:') && !caipPath.startsWith('native:')
+  const byType = e?.type === 'token' || (e?.isNative === false && !!e?.contract)
+  return byCaip || byType
+}
+
+/**
+ * Classify the already-unwrapped portfolio entries (natives + tokens) for ONE
+ * EVM address into native + tokens. hasBalance is true when native > 0 OR any
+ * token has a positive balance — so a token-only account (e.g. $0 ETH but $500
+ * USDC) is correctly surfaced as funded, not a false empty. Native balance is
+ * human-readable (Pioneer normalizes it), matching the dashboard.
+ *
+ * Takes entries (from unwrapPortfolioResponse), NOT the raw response, so its
+ * entry-extraction can't diverge from the unwrap the rest of the codebase uses.
+ *
+ * PURE — and honesty-preserving: it NEVER decides "couldn't verify". A degraded
+ * (200-but-failed) or thrown response is the CALLER's job to map to balanceError;
+ * this only reports what was actually present.
+ */
+export function parseEvmScanResult(entries: any[]): { native: string; hasBalance: boolean; tokens: AuditToken[] } {
+  const list: any[] = Array.isArray(entries) ? entries : []
+  let native = '0'
+  const tokens: AuditToken[] = []
+  for (const e of list) {
+    const bal = String(e?.balance ?? '0')
+    if (isTokenEntry(e)) {
+      if (parseFloat(bal) > 0) {
+        tokens.push({
+          symbol: e?.symbol || '???',
+          name: e?.name || e?.symbol || 'Token',
+          balance: bal,
+          balanceUsd: Number(e?.valueUsd ?? 0),
+          caip: String(e?.caip || ''),
+        })
+      }
+    } else {
+      // Native entry for this chain. We request a single caip+pubkey, so there's
+      // at most one; if Pioneer returns several, the funded one wins.
+      if (parseFloat(bal) > 0 || native === '0') native = bal
+    }
+  }
+  const n = parseFloat(native)
+  const hasBalance = (Number.isFinite(n) && n > 0) || tokens.length > 0
+  return { native, hasBalance, tokens }
 }
 
 export function explorerAddressUrl(chain: ChainDef, address: string): string | null {

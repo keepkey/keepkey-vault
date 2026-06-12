@@ -833,6 +833,17 @@ export interface AuditPortfolioSnapshot {
   unresolvedFaultCount: number
 }
 
+/** An ERC-20 (or other) token found on a derived address during an EVM account
+ *  scan. Native ETH and tokens share the same address, so tracking the account
+ *  index covers both. */
+export interface AuditToken {
+  symbol: string
+  name: string
+  balance: string         // human-readable token balance
+  balanceUsd: number
+  caip: string            // CAIP-19 (identity + icon lookup)
+}
+
 /** One derived address checked during the per-chain walkthrough (a scanned
  *  account/index level, or a custom path). Native balance is human-readable. */
 export interface AuditDerivedAddress {
@@ -841,8 +852,10 @@ export interface AuditDerivedAddress {
   address: string
   native: string          // human-readable native balance
   symbol: string
-  hasBalance: boolean
+  hasBalance: boolean     // native > 0 OR any token has value (EVM)
   explorerUrl: string | null
+  /** Tokens (ERC-20 etc.) found at this address — EVM level scans only. */
+  tokens?: AuditToken[]
   /** True when the balance lookup THREW — the address was derived but its balance
    *  is unknown. Must never be shown as a confident "0" (honesty rule). */
   balanceError?: boolean

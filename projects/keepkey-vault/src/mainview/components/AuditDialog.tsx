@@ -16,10 +16,11 @@
  * verify". Recovery is on-device; non-trackable finds route to a support handoff.
  */
 import { useState, useEffect, useRef, useCallback } from "react"
-import { Box, Flex, Text, Button, VStack, HStack, Spinner, Textarea } from "@chakra-ui/react"
+import { Box, Flex, Text, Button, VStack, HStack, Spinner, Textarea, Image } from "@chakra-ui/react"
 import { rpcRequest, onRpcMessage } from "../lib/rpc"
 import { Z } from "../lib/z-index"
 import { ChainLogo } from "./ChainLogo"
+import { getAssetIcon } from "../../shared/assetLookup"
 import { AuditCustomPath } from "./AuditCustomPath"
 import { AuditKnownPaths } from "./AuditKnownPaths"
 import { AuditBtcDeep } from "./AuditBtcDeep"
@@ -52,13 +53,74 @@ const COVERAGE_PILL: Record<AuditChainFinding['coverage'], { label: string; colo
   'unverified': { label: 'couldn’t verify', color: 'var(--rose)', bg: 'rgba(224,140,123,0.12)', border: 'rgba(224,140,123,0.28)' },
 }
 
-function coverageRank(c: AuditChainFinding): number {
-  switch (c.coverage) {
-    case 'funded': return 0
-    case 'unverified': return 1
-    case 'checked-shallow': return 2
-    default: return 3
-  }
+// Walk the chains people actually hold first — Bitcoin, then Ethereum, then the
+// majors — so the audit front-loads what matters and leaves the long tail last.
+// (Ordering only; every classified chain is still walked.)
+const WALK_ORDER = [
+  'bitcoin', 'ethereum', 'ripple', 'solana', 'dogecoin', 'litecoin', 'bitcoincash',
+  'thorchain', 'cosmos', 'base', 'arbitrum', 'optimism', 'polygon', 'bsc',
+  'avalanche', 'gnosis', 'osmosis', 'mayachain', 'dash', 'zcash', 'tron', 'ton',
+  'digibyte', 'monad', 'hyperliquid', 'hive',
+]
+function walkRank(chainId: string): number {
+  const i = WALK_ORDER.indexOf(chainId)
+  return i === -1 ? WALK_ORDER.length : i
+}
+
+// Human-readable token amount — trims long decimal tails to 6 significant places.
+function fmtAmt(s: string): string {
+  const n = parseFloat(s)
+  return Number.isFinite(n) ? n.toLocaleString('en-US', { maximumFractionDigits: 6 }) : s
+}
+
+/** Split a CAIP-19 ("eip155:1/slip44:60") into its chain + asset halves. */
+function parseCaip(caip: string): { chain: string; asset: string | null } {
+  const slash = caip.indexOf('/')
+  return slash === -1 ? { chain: caip, asset: null } : { chain: caip.slice(0, slash), asset: caip.slice(slash + 1) }
+}
+
+/** The full CAIP shown as a mono chip, with a tap-to-open "what's a CAIP?"
+ *  popover that breaks it into its chain and asset halves. */
+function CaipBadge({ caip }: { caip: string }) {
+  const [open, setOpen] = useState(false)
+  const { chain, asset } = parseCaip(caip)
+  return (
+    <Box position="relative" display="inline-flex">
+      <Flex as="button" align="center" gap="1.5" px="2" py="1px" borderRadius="full" bg="var(--ink-2)"
+        border="1px solid" borderColor={open ? 'var(--gold)' : 'var(--line)'} _hover={{ borderColor: 'var(--gold)' }}
+        onClick={() => setOpen(o => !o)}>
+        <Text fontSize="11px" fontFamily="mono" color="var(--text-2)">{caip}</Text>
+        <Box w="13px" h="13px" borderRadius="full" border="1px solid" borderColor="var(--text-3)" color="var(--text-3)"
+          fontSize="9px" fontWeight="700" fontFamily="serif" lineHeight="1" display="flex" alignItems="center" justifyContent="center">i</Box>
+      </Flex>
+      {open && (
+        <>
+          <Box position="fixed" inset="0" zIndex={1} onClick={() => setOpen(false)} />
+          <Box position="absolute" bottom="calc(100% + 9px)" left="50%" transform="translateX(-50%)" zIndex={2} w="320px"
+            bg="var(--ink-4)" border="1px solid" borderColor="rgba(233,196,106,0.35)" borderRadius="14px" p="4" textAlign="left"
+            boxShadow="0 16px 44px rgba(0,0,0,0.55)">
+            <Text fontSize="13px" fontWeight="700" color="var(--gold)" mb="1.5">What’s a CAIP?</Text>
+            <Text fontSize="12px" color="var(--text-1)" lineHeight="1.55" mb="3">
+              A Chain-Agnostic identifier — it names this asset the same way everywhere, so ETH on Ethereum is never confused with ETH on Arbitrum.
+            </Text>
+            <VStack gap="1.5" align="stretch" mb="3">
+              <Flex justify="space-between" gap="3" align="center">
+                <Text fontSize="11px" color="var(--text-3)" textTransform="uppercase" letterSpacing="0.06em">chain</Text>
+                <Text fontSize="11.5px" fontFamily="mono" color="var(--text-0)">{chain}</Text>
+              </Flex>
+              {asset && (
+                <Flex justify="space-between" gap="3" align="center">
+                  <Text fontSize="11px" color="var(--text-3)" textTransform="uppercase" letterSpacing="0.06em">asset</Text>
+                  <Text fontSize="11.5px" fontFamily="mono" color="var(--text-0)">{asset}</Text>
+                </Flex>
+              )}
+            </VStack>
+            <Text fontSize="11px" color="var(--text-3)" lineHeight="1.5">KeepKey and Pioneer use CAIPs internally for every balance and address.</Text>
+          </Box>
+        </>
+      )}
+    </Box>
+  )
 }
 
 function statusCopy(c: AuditChainFinding, levelScannable: boolean): string {
@@ -187,7 +249,7 @@ export function AuditDialog({ onClose, snapshot, isHidden, chainCatalog, chainAd
     requestAnimationFrame(() => { const el = scrollRef.current; if (el) el.scrollTo({ top: 0 }) })
   }, [])
 
-  const walk = report ? [...report.chains].sort((a, b) => coverageRank(a) - coverageRank(b)) : []
+  const walk = report ? [...report.chains].sort((a, b) => walkRank(a.chainId) - walkRank(b.chainId)) : []
   const current = walk[chainIdx]
   const ladder = current ? (ladders[current.chainId] || EMPTY_LADDER) : EMPTY_LADDER
   const currentDef = current ? catalog.current.get(current.chainId) : undefined
@@ -269,7 +331,15 @@ export function AuditDialog({ onClose, snapshot, isHidden, chainCatalog, chainAd
       } else if (chain.family === 'evm') {
         await rpcRequest('addEvmAddressIndex', { index: level }, 60000)
       }
-      patchLadder(chain.chainId, { recovering: false, recovered: isHidden ? `Tracking for this session.` : `Added — it’ll appear in your portfolio after the next sync.` })
+      // Honest persistence promise: EVM indices are written to disk (show from
+      // now on); BTC accounts are NOT persisted yet (session only); hidden-wallet
+      // indices are never persisted by design.
+      const recovered = isHidden
+        ? `Tracking for this session.`
+        : chain.chainId === 'bitcoin'
+          ? `Tracking for now — re-run the audit after you reconnect to bring it back.`
+          : `Added — it’ll show in your portfolio from now on.`
+      patchLadder(chain.chainId, { recovering: false, recovered })
       onRecovered?.()
     } catch (e: any) { patchLadder(chain.chainId, { recovering: false, recoverErr: e.message }) }
   }, [isHidden, onRecovered, patchLadder])
@@ -363,7 +433,7 @@ export function AuditDialog({ onClose, snapshot, isHidden, chainCatalog, chainAd
           <Text fontSize="sm" color="var(--text-0)" whiteSpace="nowrap">{a.level != null ? (chain.family === 'evm' ? `Address #${a.level}` : `Account #${a.level}`) : 'Custom path'}</Text>
           {a.balanceError
             ? <Text fontSize="sm" fontWeight="600" color="var(--rose)" whiteSpace="nowrap">couldn’t verify</Text>
-            : <Text fontSize="sm" fontWeight="700" whiteSpace="nowrap" color={a.hasBalance ? 'var(--gold)' : 'var(--text-2)'}>{a.native} {a.symbol}</Text>}
+            : <Text fontSize="sm" fontWeight="700" whiteSpace="nowrap" color={parseFloat(a.native) > 0 ? 'var(--gold)' : 'var(--text-2)'}>{fmtAmt(a.native)} {a.symbol}</Text>}
         </Flex>
         <Flex justify="space-between" align="center" mt="1.5" gap="3">
           <Text flex="1" minW="0" fontSize="11px" color="var(--text-3)" truncate title={`${a.pathStr} · ${a.address}`}>{a.pathStr} · {a.address}</Text>
@@ -372,6 +442,19 @@ export function AuditDialog({ onClose, snapshot, isHidden, chainCatalog, chainAd
             {a.hasBalance && canTrack && <Box as="button" fontSize="11px" color="var(--gold)" fontWeight="700" onClick={() => trackLevel(chain, a.level!)}>track</Box>}
           </HStack>
         </Flex>
+        {a.tokens && a.tokens.length > 0 && (
+          <VStack gap="1.5" align="stretch" mt="2.5" pt="2.5" borderTop="1px solid" borderColor={gold ? 'rgba(233,196,106,0.2)' : 'var(--line)'}>
+            {a.tokens.map((t, i) => (
+              <Flex key={i} align="center" justify="space-between" gap="3">
+                <Flex align="center" gap="2" minW="0">
+                  <Image src={getAssetIcon(t.caip)} alt={t.symbol} w="17px" h="17px" borderRadius="full" bg="var(--ink-2)" flexShrink={0} />
+                  <Text fontSize="12px" color="var(--text-1)" truncate>{t.symbol}</Text>
+                </Flex>
+                <Text fontSize="12px" color="var(--text-1)" whiteSpace="nowrap">{fmtAmt(t.balance)} {t.symbol}{t.balanceUsd > 0 ? ` · ${usd(t.balanceUsd)}` : ''}</Text>
+              </Flex>
+            ))}
+          </VStack>
+        )}
         {fundedNoTrack && <Text fontSize="11px" color="var(--gold)" mt="1.5">Funds here, but KeepKey can’t track this path in-app. <Box as="button" textDecoration="underline" onClick={() => patchLadder(chain.chainId, { showHandoff: true })}>Send to support →</Box></Text>}
       </Box>
     )
@@ -502,14 +585,16 @@ export function AuditDialog({ onClose, snapshot, isHidden, chainCatalog, chainAd
 
               {/* identity */}
               <Box textAlign="center" mt="3.5">
-                <Flex align="baseline" justify="center" gap="3">
-                  <Text fontSize="xl" fontWeight="700" color="var(--text-0)">{current.symbol}</Text>
+                <Flex align="baseline" justify="center" gap="2.5">
+                  <Text fontSize="xl" fontWeight="700" color="var(--text-0)">{currentDef?.coin ?? current.symbol}</Text>
+                  <Text fontSize="13px" fontWeight="600" color="var(--text-3)">{current.symbol}</Text>
                   <Text fontSize="2xl" fontWeight="700" color={current.balanceUsd > 0 ? 'var(--teal)' : 'var(--text-2)'}>{usd(current.balanceUsd)}</Text>
                 </Flex>
-                <HStack gap="2.5" justify="center" mt="2">
+                <HStack gap="2.5" justify="center" mt="2" wrap="wrap">
                   <Flex align="center" gap="1.5" px="3" py="1" borderRadius="full" fontSize="11.5px" bg={COVERAGE_PILL[current.coverage].bg} color={COVERAGE_PILL[current.coverage].color} border="1px solid" borderColor={COVERAGE_PILL[current.coverage].border}>
                     <Box w="6px" h="6px" borderRadius="full" bg={COVERAGE_PILL[current.coverage].color} />{COVERAGE_PILL[current.coverage].label}
                   </Flex>
+                  {currentCaip && <CaipBadge key={currentCaip} caip={currentCaip} />}
                   {explorerForCurrent && <Box as="button" fontSize="11.5px" color="var(--text-3)" _hover={{ color: "var(--teal)" }} onClick={() => openUrl(explorerForCurrent)}>explorer ↗</Box>}
                 </HStack>
               </Box>
@@ -577,9 +662,9 @@ export function AuditDialog({ onClose, snapshot, isHidden, chainCatalog, chainAd
                   <Box style={{ background: 'linear-gradient(135deg, rgba(233,196,106,0.15), rgba(233,196,106,0.05))' }} border="1px solid" borderColor="rgba(233,196,106,0.42)" borderRadius="16px" p="4.5" mb="4" css={{ animation: "auditPop 0.55s cubic-bezier(0.16,1,0.3,1)" }}>
                     <Flex align="center" gap="2.5" mb="2.5">
                       <Box w="26px" h="26px" borderRadius="full" bg="var(--gold)" display="flex" alignItems="center" justifyContent="center" flexShrink={0}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--ink-0)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg></Box>
-                      <Text fontSize="15px" fontWeight="700" color="var(--gold)">Found {current.symbol} you weren’t tracking</Text>
+                      <Text fontSize="15px" fontWeight="700" color="var(--gold)">{current.family === 'evm' ? 'Found funds you weren’t tracking' : `Found ${current.symbol} you weren’t tracking`}</Text>
                     </Flex>
-                    <Text fontSize="12.5px" color="var(--text-1)" lineHeight="1.55" mb="3.5">It was sitting on a higher account from an earlier setup. Add it to your portfolio and it’ll always show up from now on.</Text>
+                    <Text fontSize="12.5px" color="var(--text-1)" lineHeight="1.55" mb="3.5">It was sitting on a higher account from an earlier setup. {isHidden ? 'We’ll track it for this hidden-wallet session.' : 'Add it to your portfolio and it’ll always show up from now on.'}</Text>
                     <VStack gap="2" align="stretch">{fundedFinds.map((a, i) => <AddrRow key={`f${i}`} chain={current} a={a} gold />)}</VStack>
                   </Box>
                 )}
@@ -683,7 +768,10 @@ export function AuditDialog({ onClose, snapshot, isHidden, chainCatalog, chainAd
                 return (
                   <Flex key={c.chainId} align="center" gap="3.5" bg="var(--ink-3)" border="1px solid" borderColor="var(--line)" borderRadius="12px" px="4" py="2.5">
                     <ChainLogo caip={def?.caip} symbol={c.symbol} size={26} />
-                    <Text fontSize="13.5px" color="var(--text-0)" w="54px">{c.symbol}</Text>
+                    <Box w="130px" flexShrink={0}>
+                      <Text fontSize="13.5px" color="var(--text-0)" truncate title={def?.coin}>{def?.coin ?? c.symbol}</Text>
+                      <Text fontSize="10.5px" color="var(--text-3)" lineHeight="1.1">{c.symbol}</Text>
+                    </Box>
                     <Text flex="1" fontSize="12px" color={st.color}>{st.label}</Text>
                     <Text fontSize="13.5px" fontWeight="700" color="var(--text-1)">{usd(c.balanceUsd)}</Text>
                   </Flex>

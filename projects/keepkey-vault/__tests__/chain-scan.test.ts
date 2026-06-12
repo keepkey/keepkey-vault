@@ -7,7 +7,7 @@
  */
 import { describe, test, expect } from 'bun:test'
 import {
-  chainLevelPath, deriveAddressParams, extractAddress, parseNativeBalance,
+  chainLevelPath, deriveAddressParams, extractAddress, parseNativeBalance, parseEvmScanResult,
   explorerAddressUrl, pathToBip32, parseBip32Path, chainSupportsDeepScan, chainSupportsLevelScan,
 } from '../src/bun/chain-scan'
 import { EVM_KNOWN_SCHEMES } from '../src/shared/evm-paths'
@@ -73,6 +73,47 @@ describe('parseNativeBalance', () => {
     expect(parseNativeBalance({ data: { balance: '0' } })).toEqual({ native: '0', hasBalance: false })
     expect(parseNativeBalance({ nativeBalance: '2' })).toEqual({ native: '2', hasBalance: true })
     expect(parseNativeBalance({})).toEqual({ native: '0', hasBalance: false })
+  })
+})
+
+describe('parseEvmScanResult — native + tokens classifier (takes unwrapped entries)', () => {
+  const native = (bal: string) => ({ caip: 'eip155:1/slip44:60', balance: bal, valueUsd: 1 })
+  const token = (sym: string, bal: string, usd: number, contract = '0xabc') =>
+    ({ caip: `eip155:1/erc20:${contract}`, symbol: sym, name: sym, balance: bal, valueUsd: usd })
+
+  test('separates native from tokens; funded when native > 0', () => {
+    const r = parseEvmScanResult([native('1.5'), token('USDC', '500', 500)])
+    expect(r.native).toBe('1.5')
+    expect(r.hasBalance).toBe(true)
+    expect(r.tokens).toEqual([{ symbol: 'USDC', name: 'USDC', balance: '500', balanceUsd: 500, caip: 'eip155:1/erc20:0xabc' }])
+  })
+  test('token-only account (0 native, funded token) is funded — never a false empty', () => {
+    const r = parseEvmScanResult([native('0'), token('USDT', '250', 250)])
+    expect(r.native).toBe('0')
+    expect(r.hasBalance).toBe(true)
+    expect(r.tokens.length).toBe(1)
+  })
+  test('truly empty → hasBalance false, no tokens (caller maps degraded → balanceError)', () => {
+    const r = parseEvmScanResult([native('0')])
+    expect(r.hasBalance).toBe(false)
+    expect(r.tokens).toEqual([])
+  })
+  test('drops zero-balance tokens', () => {
+    const r = parseEvmScanResult([native('0'), token('SPAM', '0', 0)])
+    expect(r.hasBalance).toBe(false)
+    expect(r.tokens).toEqual([])
+  })
+  test('empty/non-array entries → empty, never throws', () => {
+    expect(parseEvmScanResult([]).hasBalance).toBe(false)
+    expect(parseEvmScanResult(undefined as any).hasBalance).toBe(false)
+  })
+  test('classifies native by slip44/native asset part, token otherwise', () => {
+    expect(parseEvmScanResult([{ caip: 'eip155:42161/slip44:60', balance: '0.2' }]).native).toBe('0.2')
+    expect(parseEvmScanResult([{ caip: 'eip155:1/native:eth', balance: '0.3' }]).native).toBe('0.3')
+    // type:'token' flag classifies a contract entry even without an erc20 caip
+    const r = parseEvmScanResult([{ caip: 'eip155:1/slip44:60', balance: '0' }, { type: 'token', symbol: 'X', balance: '5', valueUsd: 9, caip: 'eip155:1/foo:bar' }])
+    expect(r.tokens.length).toBe(1)
+    expect(r.native).toBe('0')
   })
 })
 

@@ -133,12 +133,12 @@ import type { OwnAddressSeed } from "./db"
 import { rectifyWallet, getLedgerSummary, getLedgerJournals } from "./ledger"
 import { generateReport, reportToPdfBuffer, reportToCsv } from "./reports"
 import { startAudit, startBtcScan, getAudit, getAuditBtcRaw, getAuditEntry, dismissAudit, markAuditsStale, type AuditDeps } from "./audit-engine"
-import { chainSupportsDeepScan, chainSupportsLevelScan, chainLevelPath, deriveAddressParams, extractAddress, parseNativeBalance, explorerAddressUrl, pathToBip32 } from "./chain-scan"
+import { chainSupportsDeepScan, chainSupportsLevelScan, chainLevelPath, deriveAddressParams, extractAddress, parseNativeBalance, parseEvmScanResult, explorerAddressUrl, pathToBip32 } from "./chain-scan"
 import { extractTransactionsFromReport, toCoinTrackerCsv, toZenLedgerCsv } from "./tax-export"
 import * as os from "os"
 import * as path from "path"
 import { EVM_RPC_URLS, getTokenMetadata, broadcastEvmTx } from "./evm-rpc"
-import type { ChainBalance, TokenBalance, CustomToken, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, EvmAddressSet, Bip85SeedMeta, StakingPosition, SwapAsset } from "../shared/types"
+import type { ChainBalance, TokenBalance, CustomToken, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, EvmAddressSet, Bip85SeedMeta, StakingPosition, SwapAsset, AuditToken } from "../shared/types"
 import type { VaultRPCSchema } from "../shared/rpc-schema"
 
 // L3 fix: withTimeout imported from engine-controller (was duplicated here)
@@ -5486,14 +5486,35 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					}
 					if (!address) continue
 					let native = '0', hasBalance = false, balanceError = false
+					let tokens: AuditToken[] | undefined
 					try {
-						const resp = await pioneer.GetBalanceAddressByNetwork({ networkId: chain.networkId, address })
-						;({ native, hasBalance } = parseNativeBalance(resp))
+						if (chain.chainFamily === 'evm') {
+							// EVM: pull native + ERC-20 tokens so a token-only account
+							// (e.g. $0 ETH but $500 USDC) is surfaced, not a false empty.
+							// GetPortfolioBalances can return 200 with DEGRADED data — for a
+							// single-caip query meta.degraded means THIS chain's fresh fetch
+							// failed, so an empty result is "couldn't verify", NOT a clean $0.
+							const resp = await withTimeout(
+								pioneer.GetPortfolioBalances({ pubkeys: [{ caip: chain.caip, pubkey: address }] }, { forceRefresh: true }),
+								PIONEER_TIMEOUT_MS, 'audit EVM scan',
+							)
+							const { entries, meta } = unwrapPortfolioResponse(resp)
+							const parsed = parseEvmScanResult(entries)
+							if (!parsed.hasBalance && meta?.degraded) {
+								balanceError = true // degraded + nothing found — unverified, not a confident zero
+							} else {
+								native = parsed.native; hasBalance = parsed.hasBalance
+								tokens = parsed.tokens.length ? parsed.tokens : undefined
+							}
+						} else {
+							const resp = await pioneer.GetBalanceAddressByNetwork({ networkId: chain.networkId, address })
+							;({ native, hasBalance } = parseNativeBalance(resp))
+						}
 					} catch (e: any) {
 						console.warn(`[audit] scan ${chain.id} L${level} balance failed: ${e?.message}`)
 						balanceError = true // unknown, not a confident zero
 					}
-					results.push({ level, pathStr: pathToBip32(path), address, native, symbol: chain.symbol, hasBalance, balanceError, explorerUrl: explorerAddressUrl(chain, address) })
+					results.push({ level, pathStr: pathToBip32(path), address, native, symbol: chain.symbol, hasBalance, balanceError, tokens, explorerUrl: explorerAddressUrl(chain, address) })
 				}
 				return { results }
 			},
