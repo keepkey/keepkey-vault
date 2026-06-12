@@ -132,7 +132,7 @@ import { initDb, factoryResetDb, getCustomTokens, addCustomToken as dbAddCustomT
 import type { OwnAddressSeed } from "./db"
 import { rectifyWallet, getLedgerSummary, getLedgerJournals } from "./ledger"
 import { generateReport, reportToPdfBuffer, reportToCsv } from "./reports"
-import { startAudit, getAudit, getAuditBtcRaw, getAuditEntry, dismissAudit, markAuditsStale, type AuditDeps } from "./audit-engine"
+import { startAudit, startBtcScan, getAudit, getAuditBtcRaw, getAuditEntry, dismissAudit, markAuditsStale, type AuditDeps } from "./audit-engine"
 import { chainSupportsDeepScan, chainSupportsLevelScan, chainLevelPath, deriveAddressParams, extractAddress, parseNativeBalance, explorerAddressUrl, pathToBip32 } from "./chain-scan"
 import { extractTransactionsFromReport, toCoinTrackerCsv, toZenLedgerCsv } from "./tax-export"
 import * as os from "os"
@@ -5369,21 +5369,17 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					if ((c.id === 'zcash' || c.id === 'zcash-shielded') && !zcashPrivacyEnabled) return false
 					return true
 				})
-				const evmChains = enabledChains
-					.filter(c => c.chainFamily === 'evm')
-					.map(c => ({ caip: c.caip, id: c.id, symbol: c.symbol, networkId: c.networkId }))
 				const coverageChains = enabledChains.map(c => ({ chainId: c.id, symbol: c.symbol, chainFamily: c.chainFamily }))
 				const btcMax = btcAccounts.isInitialized && btcAccounts.toAccountSet().accounts.length > 0
 					? Math.max(...btcAccounts.toAccountSet().accounts.map(a => a.accountIndex))
 					: 0
-				const pioneer = await getPioneer()
+				// Fast: identity + coverage only. BTC paths scan lazily on the Bitcoin
+				// page (auditScanBtc); EVM/other accounts scan lazily per page. No up-front sweeps.
 				const deps: AuditDeps = {
 					wallet,
 					currentWallet: () => engine.wallet,
 					deriveSeedIdentity: () => engine.deriveSeedIdentity(),
 					evmIdx0: () => (evmAddresses.isInitialized ? (evmAddresses.getAddressByIndex(0)?.address ?? null) : null),
-					evmChains,
-					autoDiscoverEvm: (w, maxIndex) => evmAddresses.autoDiscover(w, pioneer, evmChains, maxIndex),
 					coverageChains,
 					btcCurrentMaxAccount: btcMax,
 					isHidden: engine.isPassphraseWallet,
@@ -5392,6 +5388,13 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const snapshot = params?.snapshot || { chains: [], degradedChainIds: [], staleChainIds: [], unresolvedFaultCount: 0 }
 				const auditId = startAudit(deps, params?.mode === 'deep' ? 'deep' : 'light', snapshot)
 				return { auditId }
+			},
+			// Lazy Bitcoin path scan — triggered when the user opens the Bitcoin page.
+			auditScanBtc: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				if (engine.getDeviceState().state !== 'ready') throw new Error('Device not ready')
+				if (!startBtcScan(params.auditId)) throw new Error('Audit not found')
+				return { started: true }
 			},
 			auditGetStatus: async (params) => {
 				const report = getAudit(params.auditId)

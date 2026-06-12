@@ -37,9 +37,7 @@ function formatSats(sats: number): string {
 
 const PHASES: { key: AuditReport['phase']; label: string }[] = [
   { key: 'identity', label: 'Verifying your device' },
-  { key: 'btc', label: 'Scanning Bitcoin paths' },
-  { key: 'evm', label: 'Discovering EVM addresses' },
-  { key: 'coverage', label: 'Reviewing every chain' },
+  { key: 'coverage', label: 'Lining up your chains' },
 ]
 
 const COVERAGE_STYLE: Record<AuditChainFinding['coverage'], { label: string; color: string }> = {
@@ -109,6 +107,7 @@ export function AuditDialog({ onClose, snapshot, isHidden, chainCatalog, chainAd
   const [ladders, setLadders] = useState<Record<string, Ladder>>({})
   const [sweepPreview, setSweepPreview] = useState<any>(null)
   const [sweeping, setSweeping] = useState(false)
+  const [btcTriggerFailed, setBtcTriggerFailed] = useState(false)
 
   const auditIdRef = useRef<string | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -117,6 +116,7 @@ export function AuditDialog({ onClose, snapshot, isHidden, chainCatalog, chainAd
   const snapshotRef = useRef(snapshot)
   snapshotRef.current = snapshot
   const filmRef = useRef<HTMLDivElement | null>(null)
+  const btcTriggeredRef = useRef(false)
 
   const catalog = useRef(new Map<string, ChainDef>())
   catalog.current = new Map(chainCatalog.map(c => [c.id, c]))
@@ -170,7 +170,6 @@ export function AuditDialog({ onClose, snapshot, isHidden, chainCatalog, chainAd
   const currentDef = current ? catalog.current.get(current.chainId) : undefined
   const levelScannable = !!currentDef && currentDef.chainFamily !== 'utxo' && !['zcash-shielded', 'hive'].includes(currentDef.chainFamily)
   const hasCommon = current?.family === 'evm' || current?.chainId === 'bitcoin'
-  const firstEvmId = walk.find(c => c.family === 'evm')?.chainId
 
   const runScan = useCallback(async (chain: AuditChainFinding, fromLevel: number, count: number, markAuto: boolean) => {
     patchLadder(chain.chainId, markAuto ? { autoScanning: true, autoScanned: true, scanErr: null } : { scanning: true, scanErr: null })
@@ -205,6 +204,42 @@ export function AuditDialog({ onClose, snapshot, isHidden, chainCatalog, chainAd
     const el = filmRef.current?.querySelector('[data-current="true"]') as HTMLElement | null
     el?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' })
   }, [chainIdx, phase])
+
+  // Lazy Bitcoin scan: trigger once when the user first opens the Bitcoin page.
+  useEffect(() => {
+    if (phase !== 'walkthrough' || current?.chainId !== 'bitcoin' || !report || !auditIdRef.current) return
+    if (report.btcScanState === 'idle' && !btcTriggeredRef.current) {
+      btcTriggeredRef.current = true
+      setBtcTriggerFailed(false)
+      rpcRequest('auditScanBtc', { auditId: auditIdRef.current }).catch(() => setBtcTriggerFailed(true))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase, current?.chainId, report?.btcScanState])
+
+  // Retry a failed/stuck Bitcoin scan (error state OR a rejected trigger).
+  const retryBtc = useCallback(() => {
+    if (!auditIdRef.current) return
+    btcTriggeredRef.current = true
+    setBtcTriggerFailed(false)
+    rpcRequest('auditScanBtc', { auditId: auditIdRef.current }).catch(() => setBtcTriggerFailed(true))
+  }, [])
+
+  // Poll for BTC scan progress while on the Bitcoin page and it's running.
+  useEffect(() => {
+    if (phase !== 'walkthrough' || current?.chainId !== 'bitcoin' || !auditIdRef.current) return
+    if (report?.btcScanState !== 'idle' && report?.btcScanState !== 'scanning') return
+    const id = auditIdRef.current
+    const iv = setInterval(async () => {
+      try {
+        const r = await rpcRequest<AuditReport>('auditGetStatus', { auditId: id })
+        if (unmountedRef.current) return
+        setReport(r)
+        if (r.btcScanState !== 'idle' && r.btcScanState !== 'scanning') clearInterval(iv)
+      } catch { /* transient */ }
+    }, 1200)
+    return () => clearInterval(iv)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase, current?.chainId, report?.btcScanState])
 
   const trackLevel = useCallback(async (chain: AuditChainFinding, level: number) => {
     patchLadder(chain.chainId, { recovering: true, recoverErr: null })
@@ -406,8 +441,25 @@ export function AuditDialog({ onClose, snapshot, isHidden, chainCatalog, chainAd
                   {scanningNow && !ladder.autoScanned ? `Checking the first few ${current.symbol} accounts…` : statusCopy(current, levelScannable)}
                 </Text>
 
-                {/* BTC sweep + track (bitcoin) */}
-                {current.chainId === 'bitcoin' && report && report.btc.findings.some(f => f.category !== 'higher-account') && (
+                {/* BTC lazy scan — runs when you open the Bitcoin page */}
+                {current.chainId === 'bitcoin' && (report?.btcScanState === 'scanning' || (report?.btcScanState === 'idle' && !btcTriggerFailed)) && (
+                  <Flex align="center" gap="3" bg="var(--ink-2)" borderRadius="lg" p="3.5" mb="3">
+                    <Spinner size="sm" color="var(--gold)" />
+                    <Box minW="0">
+                      <Text fontSize="sm" color="var(--text-1)">Scanning your Bitcoin paths for stranded funds…</Text>
+                      {report?.btcScanState === 'scanning' && report.progress.total > 1 && <Text fontSize="11px" color="var(--text-3)">{report.progress.label} {report.progress.current}/{report.progress.total}</Text>}
+                    </Box>
+                  </Flex>
+                )}
+                {current.chainId === 'bitcoin' && (report?.btcScanState === 'error' || (report?.btcScanState === 'idle' && btcTriggerFailed)) && (
+                  <Flex align="center" justify="space-between" bg="rgba(224,140,123,0.08)" border="1px solid" borderColor="rgba(224,140,123,0.25)" borderRadius="lg" p="3" mb="3" gap="3">
+                    <Text fontSize="sm" color="var(--rose)">{report?.btcScanState === 'error' ? 'Bitcoin scan stopped early.' : 'Couldn’t start the Bitcoin scan.'}</Text>
+                    <Box as="button" fontSize="xs" color="var(--teal)" fontWeight="600" flexShrink={0} onClick={retryBtc}>Retry</Box>
+                  </Flex>
+                )}
+
+                {/* BTC findings (after the scan completes) */}
+                {current.chainId === 'bitcoin' && report?.btcScanState === 'done' && report.btc.findings.some(f => f.category !== 'higher-account') && (
                   <Box bg="rgba(233,196,106,0.07)" border="1px solid" borderColor="rgba(233,196,106,0.22)" borderRadius="lg" p="3.5" mb="3">
                     <Text fontSize="sm" fontWeight="700" color="var(--gold)">{formatSats(report.btc.findings.filter(f => f.category !== 'higher-account').reduce((s, f) => s + f.balanceSats, 0))} on non-standard paths</Text>
                     <Text fontSize="xs" color="var(--text-2)" mt="0.5" mb="2.5">Stranded by a wallet bug — we can sweep it to your main address.</Text>
@@ -419,11 +471,11 @@ export function AuditDialog({ onClose, snapshot, isHidden, chainCatalog, chainAd
                     ) : <Button size="sm" w="100%" bg="var(--gold)" color="black" fontWeight="700" _hover={{ bg: "var(--gold-2)" }} loading={sweeping} onClick={sweepDryRun}>Sweep to main address</Button>}
                   </Box>
                 )}
-                {current.chainId === 'bitcoin' && report && report.btc.higherAccountMax > 0 && (
+                {current.chainId === 'bitcoin' && report?.btcScanState === 'done' && report.btc.higherAccountMax > 0 && (
                   <Button size="sm" w="100%" mb="3" bg="var(--teal)" color="black" fontWeight="700" _hover={{ bg: "var(--teal-2)" }} loading={ladder.recovering} onClick={() => trackLevel(current, report.btc.higherAccountMax)}>Track Bitcoin accounts up to #{report.btc.higherAccountMax}</Button>
                 )}
-                {current.chainId === firstEvmId && report && report.evm.discoveredIndices.length > 0 && (
-                  <Text fontSize="sm" color="var(--teal)" mb="3">✓ Found funds on EVM address #{report.evm.discoveredIndices.join(', #')} — {report.evm.persisted ? 'added to your portfolio.' : 'found this session.'} (shared across all EVM chains)</Text>
+                {current.chainId === 'bitcoin' && report?.btcScanState === 'done' && report.btc.findings.length === 0 && (
+                  <Text fontSize="sm" color="var(--teal)" mb="3">✓ No funds stranded on non-standard Bitcoin paths.</Text>
                 )}
 
                 {/* auto-scan finds */}

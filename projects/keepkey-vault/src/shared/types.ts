@@ -798,6 +798,9 @@ export interface AuditReport {
   /** True when the live device identity differs from what the managers track. */
   identityMismatch: boolean
   chains: AuditChainFinding[]
+  /** Bitcoin path scan is LAZY — triggered when the user opens the Bitcoin page,
+   *  not during auditStart. 'idle' until then. */
+  btcScanState: 'idle' | 'scanning' | 'done' | 'error'
   btc: {
     findings: AuditBtcFinding[]
     totalFoundSats: number

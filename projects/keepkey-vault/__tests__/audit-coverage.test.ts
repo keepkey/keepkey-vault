@@ -66,6 +66,19 @@ describe('classifyCoverage — three-state honesty', () => {
     expect(out.find(c => c.chainId === 'ethereum')!.coverage).toBe('empty-confirmed')
   })
 
+  test('lazy mode: non-funded non-degraded chains are checked-shallow (page confirms later), never empty-confirmed', () => {
+    const out = classifyCoverage(CHAINS, snapshot({ chains: [{ chainId: 'ethereum', balanceUsd: 5 }] }), false, true)
+    expect(out.find(c => c.chainId === 'ethereum')!.coverage).toBe('funded')       // funded stays funded
+    expect(out.find(c => c.chainId === 'bitcoin')!.coverage).toBe('checked-shallow') // utxo not yet deep-scanned
+    expect(out.find(c => c.chainId === 'base')!.coverage).toBe('checked-shallow')   // evm not yet deep-scanned
+    expect(out.every(c => c.coverage !== 'empty-confirmed')).toBe(true)
+  })
+
+  test('lazy mode still marks degraded as unverified (honesty preserved)', () => {
+    const out = classifyCoverage(CHAINS, snapshot({ degradedChainIds: ['ethereum'] }), false, true)
+    expect(out.find(c => c.chainId === 'ethereum')!.coverage).toBe('unverified')
+  })
+
   test('an empty EVM chain is NOT "empty-confirmed" when index discovery found funds (snapshot predates discovery)', () => {
     const withDiscovery = classifyCoverage(CHAINS, snapshot(), true)
     expect(withDiscovery.find(c => c.chainId === 'ethereum')!.coverage).toBe('checked-shallow')

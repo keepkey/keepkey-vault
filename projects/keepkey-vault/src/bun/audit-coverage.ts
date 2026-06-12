@@ -61,6 +61,11 @@ export function classifyCoverage(
    *  discovery present, EVM empties are downgraded to 'checked-shallow' (the
    *  index isn't chain-specific, so we can't pin which EVM chain holds it). */
   evmHasDiscovery = false,
+  /** Lazy mode: device scanning happens per-page, so at classify time NOTHING is
+   *  deep-confirmed — a non-funded, non-degraded chain is 'checked-shallow'
+   *  ("primary address only, more checked on the page"), never 'empty-confirmed'.
+   *  Avoids the chip claiming "empty" while the page then finds funds. */
+  lazy = false,
 ): AuditChainFinding[] {
   const balByChain = new Map(snapshot.chains.map(c => [c.chainId, c.balanceUsd]))
   const degraded = new Set(snapshot.degradedChainIds)
@@ -76,8 +81,8 @@ export function classifyCoverage(
       coverage = 'funded'
     } else if (family === 'fixed') {
       coverage = 'checked-shallow'
-    } else if (family === 'evm' && evmHasDiscovery) {
-      coverage = 'checked-shallow' // discovery found funds at an index the snapshot predates
+    } else if (lazy || (family === 'evm' && evmHasDiscovery)) {
+      coverage = 'checked-shallow' // not deep-scanned yet (lazy) / discovery predates snapshot
     } else {
       coverage = 'empty-confirmed'
     }

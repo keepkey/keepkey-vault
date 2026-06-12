@@ -44,10 +44,6 @@ export interface AuditDeps {
   deriveSeedIdentity: () => Promise<string | null>
   /** The EVM idx0 address the account managers currently track. */
   evmIdx0: () => string | null
-  /** EVM chains enabled for this device/firmware (for the EVM discovery phase). */
-  evmChains: Array<{ caip: string; id: string; symbol: string; networkId: string }>
-  /** Runs EvmAddressManager.autoDiscover and returns the newly funded indices. */
-  autoDiscoverEvm: (wallet: any, maxIndex: number) => Promise<{ discovered: number[] }>
   /** Enabled chains for the coverage classifier (subset of ChainDef). */
   coverageChains: AuditChainInput[]
   /** User's highest tracked BTC account index. */
@@ -140,6 +136,7 @@ export function startAudit(deps: AuditDeps, mode: AuditMode, snapshot: AuditPort
     seedIdentity: null,
     identityMismatch: false,
     chains: [],
+    btcScanState: 'idle',
     btc: { findings: [], totalFoundSats: 0, higherAccountMax: 0, partial: false },
     evm: { discoveredIndices: [], persisted: !deps.isHidden },
     anyUnverified: false,
@@ -148,7 +145,7 @@ export function startAudit(deps: AuditDeps, mode: AuditMode, snapshot: AuditPort
   const entry: AuditEntry = { report, btcRaw: [], capturedWallet: deps.wallet, deps, staled: false }
   audits.set(id, entry)
 
-  auditWorker(entry, mode, snapshot).catch(e => {
+  auditWorker(entry, snapshot).catch(e => {
     report.status = 'error'
     report.error = e?.message || String(e)
     report.completedAt = Date.now()
@@ -176,9 +173,8 @@ async function deriveBtcAddress(wallet: any, path: number[], scriptType: string)
   return typeof r === 'string' ? r : r?.address
 }
 
-async function auditWorker(entry: AuditEntry, mode: AuditMode, snapshot: AuditPortfolioSnapshot): Promise<void> {
+async function auditWorker(entry: AuditEntry, snapshot: AuditPortfolioSnapshot): Promise<void> {
   const { report, deps } = entry
-  const config = AUDIT_CONFIGS[mode]
 
   // ── Phase: identity (READ-ONLY) ──
   report.phase = 'identity'
@@ -196,8 +192,50 @@ async function auditWorker(entry: AuditEntry, mode: AuditMode, snapshot: AuditPo
   }
   if (!isLive(entry)) return abort(report, 'device changed during audit')
 
-  // ── Phase: BTC (gen-guarded derive loop — do NOT delegate to scanWorker) ──
-  report.phase = 'btc'
+  // ── Phase: coverage (pure, instant) ──
+  // No device scanning here — auditStart goes STRAIGHT into the walkthrough.
+  // BTC paths are scanned lazily on the Bitcoin page (startBtcScan); EVM and
+  // other accounts are scanned lazily per page via the frontend's
+  // auditScanLevels. We never scan up front what the pages scan again. `lazy`
+  // keeps non-funded chains as 'checked-shallow' until a page confirms them.
+  report.phase = 'coverage'
+  report.progress = { current: 0, total: 1, label: 'Reviewing your chains…' }
+  report.chains = classifyCoverage(deps.coverageChains, snapshot, false, true)
+  const summary = summarizeCoverage(report.chains, snapshot)
+  report.anyUnverified = summary.anyUnverified
+  report.anyShallow = summary.anyShallow
+
+  report.phase = 'done'
+  report.status = 'complete'
+  report.completedAt = Date.now()
+  console.log(`${TAG} audit ${report.auditId} ready: ${report.chains.length} chains (lazy scan per page)`)
+}
+
+/** Lazy Bitcoin path scan — runs the gen-guarded derive loop on demand (when the
+ *  user opens the Bitcoin page). Populates report.btc + entry.btcRaw + progress
+ *  and flips btcScanState. Does NOT touch report.status (the audit is already
+ *  'complete'). Idempotent. */
+export function startBtcScan(auditId: string): boolean {
+  const entry = audits.get(auditId)
+  if (!entry) return false
+  // Only short-circuit on genuinely in-progress / finished scans. From 'idle' OR
+  // 'error' we (re)start — a Retry after a failed scan MUST actually re-run.
+  if (entry.report.btcScanState === 'scanning' || entry.report.btcScanState === 'done') return true
+  // Reset accumulators so a retry from a partial 'error' doesn't double-count.
+  entry.btcRaw = []
+  entry.report.btc = { findings: [], totalFoundSats: 0, higherAccountMax: 0, partial: false }
+  entry.report.btcScanState = 'scanning'
+  runBtcScan(entry).catch(e => {
+    entry.report.btcScanState = 'error'
+    entry.report.btc.partial = true
+    console.error(`${TAG} btc scan ${auditId} failed:`, e)
+  })
+  return true
+}
+
+async function runBtcScan(entry: AuditEntry): Promise<void> {
+  const { report, deps } = entry
+  const config = AUDIT_CONFIGS[report.mode]
   const matrix: PathEntry[] = generatePathMatrix({
     accountRange: config.accountRange,
     mismatchAccounts: config.mismatchAccounts,
@@ -209,10 +247,7 @@ async function auditWorker(entry: AuditEntry, mode: AuditMode, snapshot: AuditPo
   const derived: Array<PathEntry & { address: string }> = []
   let consecutiveFailures = 0
   for (let i = 0; i < matrix.length; i++) {
-    if (!isLive(entry)) {
-      report.btc.partial = true
-      return abort(report, 'device changed during scan')
-    }
+    if (!isLive(entry)) { report.btc.partial = true; report.btcScanState = 'error'; return }
     const e = matrix[i]
     try {
       const address = await deriveBtcAddress(deps.wallet, e.path, e.scriptType)
@@ -221,10 +256,7 @@ async function auditWorker(entry: AuditEntry, mode: AuditMode, snapshot: AuditPo
     } catch (err: any) {
       consecutiveFailures++
       console.warn(`${TAG} derive failed (${e.pathStr} as ${e.scriptType}): ${err?.message}`)
-      if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
-        report.btc.partial = true
-        return abort(report, 'device unresponsive during scan')
-      }
+      if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) { report.btc.partial = true; report.btcScanState = 'error'; return }
     }
     report.progress.current = i + 1
   }
@@ -232,83 +264,20 @@ async function auditWorker(entry: AuditEntry, mode: AuditMode, snapshot: AuditPo
   report.progress = { current: 0, total: derived.length, label: 'Checking Bitcoin balances…' }
   const BATCH = 5
   for (let i = 0; i < derived.length; i += BATCH) {
-    if (!isLive(entry)) {
-      report.btc.partial = true
-      return abort(report, 'device changed during scan')
-    }
+    if (!isLive(entry)) { report.btc.partial = true; report.btcScanState = 'error'; return }
     const batch = derived.slice(i, i + BATCH)
-    const results = await Promise.all(
-      batch.map(async (e) => ({ ...e, balanceSats: await checkAddressBalance(e.address) })),
-    )
+    const results = await Promise.all(batch.map(async (e) => ({ ...e, balanceSats: await checkAddressBalance(e.address) })))
     for (const r of results) {
       if (r.balanceSats > 0) {
         const utxos = await fetchUtxos(r.address)
-        entry.btcRaw.push({
-          path: r.path,
-          pathStr: r.pathStr,
-          scriptType: r.scriptType,
-          address: r.address,
-          category: r.category,
-          accountIndex: r.accountIndex,
-          balanceSats: r.balanceSats,
-          utxos,
-        })
-        report.btc.findings.push({
-          path: r.pathStr,
-          scriptType: r.scriptType,
-          address: r.address,
-          category: r.category,
-          accountIndex: r.accountIndex,
-          balanceSats: r.balanceSats,
-          utxoCount: utxos.length,
-        })
+        entry.btcRaw.push({ path: r.path, pathStr: r.pathStr, scriptType: r.scriptType, address: r.address, category: r.category, accountIndex: r.accountIndex, balanceSats: r.balanceSats, utxos })
+        report.btc.findings.push({ path: r.pathStr, scriptType: r.scriptType, address: r.address, category: r.category, accountIndex: r.accountIndex, balanceSats: r.balanceSats, utxoCount: utxos.length })
         report.btc.totalFoundSats += r.balanceSats
-        if (r.category === 'higher-account' && r.accountIndex != null) {
-          report.btc.higherAccountMax = Math.max(report.btc.higherAccountMax, r.accountIndex)
-        }
+        if (r.category === 'higher-account' && r.accountIndex != null) report.btc.higherAccountMax = Math.max(report.btc.higherAccountMax, r.accountIndex)
       }
     }
     report.progress.current = Math.min(i + BATCH, derived.length)
   }
-
-  // ── Phase: EVM (awaited auto-discover — reported accurately) ──
-  report.phase = 'evm'
-  report.progress = { current: 0, total: 1, label: 'Discovering EVM addresses…' }
-  if (deps.evmChains.length > 0) {
-    try {
-      const { discovered } = await deps.autoDiscoverEvm(deps.wallet, config.evmMaxIndex)
-      report.evm.discoveredIndices = discovered
-    } catch (e: any) {
-      console.warn(`${TAG} EVM autoDiscover failed (non-fatal): ${e?.message}`)
-    }
-  }
-  if (!isLive(entry)) return abort(report, 'device changed during audit')
-
-  // ── Phase: coverage (three-state, pure) ──
-  report.phase = 'coverage'
-  report.progress = { current: 0, total: 1, label: 'Reviewing chain coverage…' }
-  report.chains = classifyCoverage(deps.coverageChains, snapshot, report.evm.discoveredIndices.length > 0)
-  const summary = summarizeCoverage(report.chains, snapshot)
-  report.anyUnverified = summary.anyUnverified
-  report.anyShallow = summary.anyShallow
-
-  // Final safety: a same-handle seed change (passphrase toggle) reuses
-  // engine.wallet, so the object gen-guard above can't see it. Re-derive the
-  // identity and compare to the one captured at the identity phase — if it
-  // changed, the scan spanned two seeds and must NOT read as a clean 'complete'.
-  let finalIdentity: string | null = null
-  try { finalIdentity = await deps.deriveSeedIdentity() } catch { /* best effort */ }
-  if (!isLive(entry)) return abort(report, 'wallet data changed during audit')
-  if (seedIdentity && finalIdentity && seedIdentity.toLowerCase() !== finalIdentity.toLowerCase()) {
-    return abort(report, 'wallet seed changed during audit')
-  }
-
-  report.phase = 'done'
-  report.status = 'complete'
-  report.completedAt = Date.now()
-  console.log(
-    `${TAG} audit ${report.auditId} complete: ${report.btc.findings.length} BTC findings ` +
-    `(${report.btc.totalFoundSats} sats), ${report.evm.discoveredIndices.length} EVM indices, ` +
-    `${report.chains.length} chains classified`,
-  )
+  report.btcScanState = 'done'
+  console.log(`${TAG} btc scan ${report.auditId} done: ${report.btc.findings.length} findings, ${report.btc.totalFoundSats} sats`)
 }

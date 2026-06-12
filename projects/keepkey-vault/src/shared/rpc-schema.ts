@@ -311,6 +311,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       // ── Balance Audit (multi-chain "where's my money" wizard) ───────
       auditStart: { params: { mode?: AuditMode; snapshot?: AuditPortfolioSnapshot }; response: { auditId: string } }
       auditGetStatus: { params: { auditId: string }; response: AuditReport }
+      auditScanBtc: { params: { auditId: string }; response: { started: boolean } }
       auditSweep: { params: { auditId: string; destinationAddress?: string; dryRun?: boolean }; response: any }
       auditDismiss: { params: { auditId: string }; response: void }
       // Per-chain walkthrough: derive + balance-check account/index levels, and custom paths.
