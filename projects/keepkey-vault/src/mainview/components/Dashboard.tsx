@@ -11,6 +11,7 @@ import { ActivityPage } from "./ActivityPage"
 import { DonutChart, SelectedSlice, type DonutChartItem } from "./DonutChart"
 import { AddChainDialog } from "./AddChainDialog"
 import { ReportDialog } from "./ReportDialog"
+import { AuditDialog } from "./AuditDialog"
 import { Bip85VaultDialog } from "./Bip85VaultDialog"
 import { PassphraseIntroDialog } from "./PassphraseIntroDialog"
 import { DogeEasterEgg } from "./DogeEasterEgg"
@@ -33,7 +34,7 @@ import { DashboardLoading } from "./DashboardLoading"
 import { categorizeTokens } from "../../shared/spamFilter"
 import { useBtcAccounts } from "../hooks/useBtcAccounts"
 import { useEvmAddresses } from "../hooks/useEvmAddresses"
-import type { ChainBalance, CustomChain, TokenVisibilityStatus, AppSettings, TokenBalance, PendingSwap, SwapStatusUpdate } from "../../shared/types"
+import type { ChainBalance, CustomChain, TokenVisibilityStatus, AppSettings, TokenBalance, PendingSwap, SwapStatusUpdate, AuditPortfolioSnapshot } from "../../shared/types"
 import { playChaChing } from "../lib/sounds"
 
 /** Error boundary wrapping AssetPage — ensures user can always go back to Dashboard */
@@ -609,6 +610,10 @@ interface PortfolioFault {
 	degradedChains: string[]
 	staleChains: string[]
 	staleMinutes: number
+	// chainId-granular fault info for the Audit wizard (symbols above drive the banner).
+	degradedChainIds: string[]
+	staleChainIds: string[]
+	unresolvedFaultCount: number
 }
 
 interface DashboardProps {
@@ -682,6 +687,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 	const [customChainDefs, setCustomChainDefs] = useState<ChainDef[]>([])
 	const [showAddChain, setShowAddChain] = useState(false)
 	const [showReports, setShowReports] = useState(false)
+	const [showAudit, setShowAudit] = useState(false)
 	const [showBip85, setShowBip85] = useState(false)
 	const [bip85Enabled, setBip85Enabled] = useState(false)
 	const [zcashEnabled, setZcashEnabled] = useState(false)
@@ -870,6 +876,9 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 					degradedChains: p.degradedChains ?? [],
 					staleChains: p.staleChains ?? [],
 					staleMinutes: p.staleMinutes ?? 0,
+					degradedChainIds: p.degradedChainIds ?? [],
+					staleChainIds: p.staleChainIds ?? [],
+					unresolvedFaultCount: p.unresolvedFaultCount ?? 0,
 				})
 				return
 			}
@@ -1703,6 +1712,29 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 						py="1"
 						fontSize="11px"
 						fontWeight="600"
+						color="kk.gold"
+						bg="transparent"
+						borderRadius="full"
+						cursor="pointer"
+						transition="all 0.2s"
+						_hover={{ color: "white", bg: "rgba(233,196,106,0.12)" }}
+						onClick={() => setShowAudit(true)}
+						title="Audit balances — find funds on alternate paths, higher accounts, or chains that didn't report"
+					>
+						<Flex align="center" gap="1.5">
+							<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+								<circle cx="11" cy="11" r="7" />
+								<path d="M21 21l-4.35-4.35" />
+							</svg>
+							Audit
+						</Flex>
+					</Box>
+					<Box
+						as="button"
+						px="3"
+						py="1"
+						fontSize="11px"
+						fontWeight="600"
 						color={loadingBalances ? "kk.textMuted" : "kk.gold"}
 						bg="transparent"
 						borderRadius="full"
@@ -2004,6 +2036,20 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 								onClick={() => setPortfolioFault(null)}
 							>
 								{t("dismiss")}
+							</Box>
+							<Box
+								as="button"
+								px="3"
+								py="1.5"
+								fontSize="xs"
+								fontWeight="600"
+								color="kk.gold"
+								bg="transparent"
+								cursor="pointer"
+								_hover={{ color: "white" }}
+								onClick={() => setShowAudit(true)}
+							>
+								Run audit
 							</Box>
 						</Flex>
 					</Flex>
@@ -2659,6 +2705,20 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 
 			{showReports && (
 				<ReportDialog onClose={() => setShowReports(false)} />
+			)}
+
+			{showAudit && (
+				<AuditDialog
+					onClose={() => setShowAudit(false)}
+					isHidden={!!isHiddenWallet}
+					snapshot={{
+						chains: [...balances.values()].map(b => ({ chainId: b.chainId, balanceUsd: b.balanceUsd })),
+						degradedChainIds: portfolioFault?.degradedChainIds || [],
+						staleChainIds: portfolioFault?.staleChainIds || [],
+						unresolvedFaultCount: portfolioFault?.unresolvedFaultCount || 0,
+					} satisfies AuditPortfolioSnapshot}
+					onRecovered={() => refreshBalances(true)}
+				/>
 			)}
 
 			{showBip85 && (

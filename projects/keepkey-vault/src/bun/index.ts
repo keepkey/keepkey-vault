@@ -132,6 +132,7 @@ import { initDb, factoryResetDb, getCustomTokens, addCustomToken as dbAddCustomT
 import type { OwnAddressSeed } from "./db"
 import { rectifyWallet, getLedgerSummary, getLedgerJournals } from "./ledger"
 import { generateReport, reportToPdfBuffer, reportToCsv } from "./reports"
+import { startAudit, getAudit, getAuditBtcRaw, getAuditEntry, dismissAudit, markAuditsStale, type AuditDeps } from "./audit-engine"
 import { extractTransactionsFromReport, toCoinTrackerCsv, toZenLedgerCsv } from "./tax-export"
 import * as os from "os"
 import * as path from "path"
@@ -883,6 +884,9 @@ function reconcileSeedManagers(truth: string | null | undefined, source: string)
 		} catch { /* non-fatal */ }
 	}
 	try { rpc.send['wallet-data-purged']({ reason: source }) } catch { /* webview not ready */ }
+	// An open Audit wizard's findings are no longer authoritative once the seed
+	// changed underneath it — mark its run stale so the UI prompts a re-run.
+	markAuditsStale(source)
 	return true
 }
 
@@ -2542,26 +2546,36 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					// renders a soft banner (data shown but suspect); 'none' clears it. Hard
 					// failures still throw → severity 'error' in the catch below.
 					try {
-						const chainSymbol = (id: string) => allChains.find(c => c.id === id)?.symbol || id
-						const caipToName = (caip: string) => {
+						const caipToChain = (caip: string) => {
 							const prefix = (caip.split('/')[0] || '').toLowerCase()
 							const chainId = networkToChain.get(prefix)
-							const ch = chainId ? allChains.find(c => c.id === chainId) : allChains.find(c => c.networkId?.toLowerCase() === prefix)
+							return chainId ? allChains.find(c => c.id === chainId) : allChains.find(c => c.networkId?.toLowerCase() === prefix)
+						}
+						const chainSymbol = (id: string) => allChains.find(c => c.id === id)?.symbol || id
+						const caipToName = (caip: string) => {
+							const ch = caipToChain(caip)
 							return ch?.symbol || ch?.name || (caip.split(':')[0] || caip)
 						}
 						// Chains whose every pubkey landed in a failed chunk (timeout/error) are
 						// degraded from the vault's view even when the server meta is clean.
-						const chunkDegraded = [...new Set(pubkeys.map(p => p.chainId))]
-							.filter(id => !confirmedChainIds.has(id))
-							.map(chainSymbol)
-						const degradedChains = [...new Set([...chunkDegraded, ...portfolioMeta.failures.map(f => caipToName(f.caip))])].filter(Boolean)
+						const chunkDegradedIds = [...new Set(pubkeys.map(p => p.chainId))].filter(id => !confirmedChainIds.has(id))
+						const degradedChains = [...new Set([...chunkDegradedIds.map(chainSymbol), ...portfolioMeta.failures.map(f => caipToName(f.caip))])].filter(Boolean)
 						const staleChains = [...new Set(portfolioMeta.staleChains.map(s => caipToName(s.caip)))].filter(Boolean)
+						// chainId-granular fault sets for the Audit wizard (symbol arrays above
+						// drive the banner; symbols collide across chains so the audit needs ids).
+						// unresolvedFaultCount = faults that couldn't be mapped to a known chain,
+						// so an unmappable fault still forbids a false "all clear".
+						const degradedChainIds = new Set<string>(chunkDegradedIds)
+						const staleChainIds = new Set<string>()
+						let unresolvedFaultCount = 0
+						for (const f of portfolioMeta.failures) { const ch = caipToChain(f.caip); if (ch) degradedChainIds.add(ch.id); else unresolvedFaultCount++ }
+						for (const s of portfolioMeta.staleChains) { const ch = caipToChain(s.caip); if (ch) staleChainIds.add(ch.id); else unresolvedFaultCount++ }
 						const staleMinutes = portfolioMeta.staleChains.length
 							? Math.floor(Math.max(...portfolioMeta.staleChains.map(s => s.ageMs || 0)) / 60000)
 							: 0
 						if (degradedChains.length > 0 || staleChains.length > 0) {
 							console.warn(`[getBalances] Fault: degraded=[${degradedChains.join(', ')}] stale=[${staleChains.join(', ')}] (${staleMinutes}m)`)
-							rpc.send['pioneer-error']({ message: '', url: getPioneerApiBase(), severity: 'warning', degradedChains, staleChains, staleMinutes })
+							rpc.send['pioneer-error']({ message: '', url: getPioneerApiBase(), severity: 'warning', degradedChains, staleChains, staleMinutes, degradedChainIds: [...degradedChainIds], staleChainIds: [...staleChainIds], unresolvedFaultCount })
 						} else {
 							rpc.send['pioneer-error']({ message: '', url: getPioneerApiBase(), severity: 'none' })
 						}
@@ -5338,6 +5352,105 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!txid) throw new Error(`Broadcast failed: ${JSON.stringify(bdata).slice(0, 200)}`)
 
 				return { txid, destination, inputCount: sweepResult.inputCount, totalSweptSats: sweepResult.totalInputSats, fee: sweepResult.fee, outputSats: sweepResult.totalInputSats - sweepResult.fee }
+			},
+
+			// ── Balance Audit (multi-chain "where's my money" wizard) ────
+			auditStart: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				if (engine.getDeviceState().state !== 'ready') throw new Error('Device not ready')
+				const wallet = engine.wallet
+				const fwVersion = engine.getDeviceState().firmwareVersion
+				const enabledChains = getAllChains().filter(c => {
+					if (!isChainSupported(c, fwVersion)) return false
+					if ((c.id === 'zcash' || c.id === 'zcash-shielded') && !zcashPrivacyEnabled) return false
+					return true
+				})
+				const evmChains = enabledChains
+					.filter(c => c.chainFamily === 'evm')
+					.map(c => ({ caip: c.caip, id: c.id, symbol: c.symbol, networkId: c.networkId }))
+				const coverageChains = enabledChains.map(c => ({ chainId: c.id, symbol: c.symbol, chainFamily: c.chainFamily }))
+				const btcMax = btcAccounts.isInitialized && btcAccounts.toAccountSet().accounts.length > 0
+					? Math.max(...btcAccounts.toAccountSet().accounts.map(a => a.accountIndex))
+					: 0
+				const pioneer = await getPioneer()
+				const deps: AuditDeps = {
+					wallet,
+					currentWallet: () => engine.wallet,
+					deriveSeedIdentity: () => engine.deriveSeedIdentity(),
+					evmIdx0: () => (evmAddresses.isInitialized ? (evmAddresses.getAddressByIndex(0)?.address ?? null) : null),
+					evmChains,
+					autoDiscoverEvm: (w, maxIndex) => evmAddresses.autoDiscover(w, pioneer, evmChains, maxIndex),
+					coverageChains,
+					btcCurrentMaxAccount: btcMax,
+					isHidden: engine.isPassphraseWallet,
+					deviceId: engine.getDeviceState().deviceId || 'unknown',
+				}
+				const snapshot = params?.snapshot || { chains: [], degradedChainIds: [], staleChainIds: [], unresolvedFaultCount: 0 }
+				const auditId = startAudit(deps, params?.mode === 'deep' ? 'deep' : 'light', snapshot)
+				return { auditId }
+			},
+			auditGetStatus: async (params) => {
+				const report = getAudit(params.auditId)
+				if (!report) throw new Error('Audit not found')
+				return report
+			},
+			// Recover BTC found on non-standard paths / account-level keys (higher
+			// accounts are recovered via addBtcAccount, not swept). Gen-guarded so
+			// stale-seed UTXOs from a since-replaced wallet are never signed.
+			auditSweep: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				const entry = getAuditEntry(params.auditId)
+				if (!entry) throw new Error('Audit not found')
+				// Gen-guard 1: device handle replaced (reconnect/purge).
+				if (entry.capturedWallet !== engine.wallet) {
+					throw new Error('Device changed since this audit ran — re-run the audit')
+				}
+				// Gen-guard 2: the audit must have completed cleanly (not stale/aborted).
+				if (entry.report.status !== 'complete') {
+					throw new Error('Audit is no longer current — re-run the audit')
+				}
+				// Gen-guard 3: a same-handle seed change (passphrase toggle) reuses
+				// engine.wallet, so the object check above can't see it. Re-derive the
+				// live seed identity and refuse if it differs from the scan's — never
+				// sign UTXOs captured under a since-replaced seed.
+				const liveIdentity = await engine.deriveSeedIdentity()
+				if (entry.report.seedIdentity && (!liveIdentity || liveIdentity.toLowerCase() !== entry.report.seedIdentity.toLowerCase())) {
+					throw new Error('Wallet seed changed since this audit ran — re-run the audit')
+				}
+				const raw = getAuditBtcRaw(params.auditId)
+				if (!raw || raw.length === 0) throw new Error('No funds found to sweep')
+
+				const { buildSweepTx } = await import('./sweep-engine')
+				let destination = params.destinationAddress
+				if (!destination) {
+					const result = await engine.wallet.btcGetAddress({
+						addressNList: [0x80000054, 0x80000000, 0x80000000, 0, 0],
+						coin: 'Bitcoin', scriptType: 'p2wpkh', showDisplay: false,
+					})
+					destination = typeof result === 'string' ? result : result?.address
+					if (!destination) throw new Error('Could not derive standard BTC receive address')
+				}
+
+				// buildSweepTx only reads scan.results — hand it the audit's raw findings.
+				const sweepResult = await buildSweepTx({ results: raw } as any, destination)
+
+				if (params.dryRun) {
+					return { dryRun: true, destination, inputCount: sweepResult.inputCount, totalSweptSats: sweepResult.totalInputSats, fee: sweepResult.fee, outputSats: sweepResult.totalInputSats - sweepResult.fee }
+				}
+
+				const signedTx = await engine.wallet.btcSignTx(sweepResult.unsignedTx)
+				const serializedTx = signedTx?.serializedTx || signedTx?.serialized
+				if (!serializedTx) throw new Error('Device signing failed')
+
+				const pioneer = await getPioneer()
+				const broadcastResp = await pioneer.Broadcast({ networkId: 'bip122:000000000019d6689c085ae165831e93', serialized: serializedTx })
+				const bdata = broadcastResp?.data || broadcastResp
+				const txid = bdata?.txid || bdata?.tx_hash || bdata?.hash
+				if (!txid) throw new Error(`Broadcast failed: ${JSON.stringify(bdata).slice(0, 200)}`)
+				return { txid, destination, inputCount: sweepResult.inputCount, totalSweptSats: sweepResult.totalInputSats, fee: sweepResult.fee, outputSats: sweepResult.totalInputSats - sweepResult.fee }
+			},
+			auditDismiss: async (params) => {
+				dismissAudit(params.auditId)
 			},
 
 			// ── Emulator (macOS only, feature-flagged off by default) ────

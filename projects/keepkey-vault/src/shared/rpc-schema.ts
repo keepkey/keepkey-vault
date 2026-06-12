@@ -1,5 +1,5 @@
 import type { ElectrobunRPCSchema } from 'electrobun/bun'
-import type { DeviceStateInfo, FirmwareProgress, FirmwareAnalysis, FatalEvent, PinRequest, CharacterRequest, ChainBalance, BuildTxParams, BuildTxResult, BroadcastResult, BtcAccountSet, BtcScriptType, EvmAddressSet, CustomToken, CustomChain, AppSettings, PioneerServer, BtcGetAddressParams, EthGetAddressParams, EthSignTxParams, BtcSignTxParams, GetPublicKeysParams, UpdateInfo, UpdateStatus, TokenVisibilityStatus, PairingRequestInfo, PairedAppInfo, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, ReportMeta, ReportData, SwapAsset, SwapQuote, SwapQuoteParams, ExecuteSwapParams, SwapResult, SwapHealth, PendingSwap, SwapStatusUpdate, SwapHistoryRecord, SwapHistoryFilter, SwapHistoryStats, SwapUiState, SwapUiCommand, RecentActivity, BuildStakingTxParams, StakingPosition, NameInfo, NameQuote, BuildNameRegTxParams, ZcashTransaction, EmulatorStatus, EmulatorWalletInfo, RegisteredDevice, WcSessionInfo, AddressBookEntry, AddressBookFilter, AddressBookTx, UsbDiagnosticReport } from './types'
+import type { DeviceStateInfo, FirmwareProgress, FirmwareAnalysis, FatalEvent, PinRequest, CharacterRequest, ChainBalance, BuildTxParams, BuildTxResult, BroadcastResult, BtcAccountSet, BtcScriptType, EvmAddressSet, CustomToken, CustomChain, AppSettings, PioneerServer, BtcGetAddressParams, EthGetAddressParams, EthSignTxParams, BtcSignTxParams, GetPublicKeysParams, UpdateInfo, UpdateStatus, TokenVisibilityStatus, PairingRequestInfo, PairedAppInfo, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, ReportMeta, ReportData, AuditReport, AuditPortfolioSnapshot, AuditMode, SwapAsset, SwapQuote, SwapQuoteParams, ExecuteSwapParams, SwapResult, SwapHealth, PendingSwap, SwapStatusUpdate, SwapHistoryRecord, SwapHistoryFilter, SwapHistoryStats, SwapUiState, SwapUiCommand, RecentActivity, BuildStakingTxParams, StakingPosition, NameInfo, NameQuote, BuildNameRegTxParams, ZcashTransaction, EmulatorStatus, EmulatorWalletInfo, RegisteredDevice, WcSessionInfo, AddressBookEntry, AddressBookFilter, AddressBookTx, UsbDiagnosticReport } from './types'
 
 /**
  * RPC Schema for Bun ↔ WebView communication.
@@ -308,6 +308,12 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       sweepGetStatus: { params: { scanId: string }; response: any }
       sweepExecute: { params: { scanId: string; destinationAddress?: string; dryRun?: boolean }; response: any }
 
+      // ── Balance Audit (multi-chain "where's my money" wizard) ───────
+      auditStart: { params: { mode?: AuditMode; snapshot?: AuditPortfolioSnapshot }; response: { auditId: string } }
+      auditGetStatus: { params: { auditId: string }; response: AuditReport }
+      auditSweep: { params: { auditId: string; destinationAddress?: string; dryRun?: boolean }; response: any }
+      auditDismiss: { params: { auditId: string }; response: void }
+
       // ── Emulator (macOS only — Keychain-encrypted flash) ────────────
       emulatorPair: { params: void; response: EmulatorStatus }
       emulatorInit: { params: { flashName?: string } | void; response: EmulatorStatus }
@@ -392,6 +398,11 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
         degradedChains?: string[]
         staleChains?: string[]
         staleMinutes?: number
+        // chainId-granular fault info for the Audit wizard (symbols above are for
+        // the banner). Symbols collide across chains, so the audit matches by id.
+        degradedChainIds?: string[]
+        staleChainIds?: string[]
+        unresolvedFaultCount?: number
       }
       'pair-request': PairingRequestInfo
       'pair-dismissed': Record<string, never>

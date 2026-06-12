@@ -71,7 +71,7 @@ export function getScan(id: string): SweepScan | undefined {
 
 // ── Path matrix generation ─────────────────────────────────────────
 
-interface PathEntry {
+export interface PathEntry {
   path: number[]
   pathStr: string
   scriptType: string
@@ -83,7 +83,7 @@ function pathToString(path: number[]): string {
   return 'm/' + path.map(p => p >= 0x80000000 ? `${p - 0x80000000}'` : String(p)).join('/')
 }
 
-function generatePathMatrix(config: SweepScanConfig): PathEntry[] {
+export function generatePathMatrix(config: SweepScanConfig): PathEntry[] {
   const entries: PathEntry[] = []
   const [acctMin, acctMax] = config.accountRange || [0, 4]
   const mismatchAccts = config.mismatchAccounts ?? 1
@@ -170,7 +170,7 @@ async function deriveAddress(wallet: any, path: number[], scriptType: string): P
 
 // ── Balance & UTXO checking ────────────────────────────────────────
 
-async function checkAddressBalance(address: string): Promise<number> {
+export async function checkAddressBalance(address: string): Promise<number> {
   try {
     const pioneer = await getPioneer()
     const resp = await pioneer.GetBalanceAddressByNetwork({
@@ -191,7 +191,7 @@ async function checkAddressBalance(address: string): Promise<number> {
   }
 }
 
-async function fetchUtxos(address: string): Promise<SweepUtxo[]> {
+export async function fetchUtxos(address: string): Promise<SweepUtxo[]> {
   try {
     // Pioneer's ListUnspent endpoint accepts both xpubs AND single addresses
     // (verified 2026-05-07). Path: /api/v1/utxo/unspent/{network}/{xpub-or-address}.
