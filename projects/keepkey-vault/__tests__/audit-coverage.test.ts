@@ -140,4 +140,20 @@ describe('AUDIT_CONFIGS — light is bounded, deep is thorough', () => {
   test('deep never scans past BTC account 19 (sweep-engine schema ceiling)', () => {
     expect(AUDIT_CONFIGS.deep.higherAccountScanLimit).toBeLessThanOrEqual(19)
   })
+
+  test('deep sets explicit BTC gap-limit depths deeper than generatePathMatrix defaults (5/1/3)', () => {
+    const d = AUDIT_CONFIGS.deep
+    // These are forwarded to generatePathMatrix; without them the deep scan
+    // silently fell back to the shallow defaults and missed funds past the gap.
+    expect(d.gapLimitReceive!).toBeGreaterThan(5)
+    expect(d.gapLimitChange!).toBeGreaterThan(1)
+    expect(d.higherReceiveLimit!).toBeGreaterThan(3)
+  })
+
+  test('light inherits the default gap depths (fields unset) — stays cheap', () => {
+    const l = AUDIT_CONFIGS.light
+    expect(l.gapLimitReceive).toBeUndefined()
+    expect(l.gapLimitChange).toBeUndefined()
+    expect(l.higherReceiveLimit).toBeUndefined()
+  })
 })

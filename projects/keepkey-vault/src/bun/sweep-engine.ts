@@ -183,25 +183,18 @@ async function deriveAddress(wallet: any, path: number[], scriptType: string): P
 
 // ── Balance & UTXO checking ────────────────────────────────────────
 
+// Per-address balance in satoshis, sourced from the UTXO set (ListUnspent).
+//
+// Do NOT use Pioneer's GetBalanceAddressByNetwork here. Despite the name, that
+// endpoint is EVM-only (route /evm/balance/{networkId}/{address} → ETH JSON-RPC):
+// passing a bip122 networkId + a Bitcoin address routes into the ETH provider,
+// which throws on the non-hex address, so it ALWAYS returned 0. The sweep/audit
+// gate is `balanceSats > 0`, so it never opened and funded BTC addresses were
+// silently missed. ListUnspent is the only Pioneer endpoint that serves Bitcoin,
+// and its UTXO `value` is integer satoshis — no unit guessing needed.
 export async function checkAddressBalance(address: string): Promise<number> {
-  try {
-    const pioneer = await getPioneer()
-    const resp = await pioneer.GetBalanceAddressByNetwork({
-      networkId: BTC_NETWORK_ID,
-      address,
-    })
-    const data = resp?.data || resp
-    const balStr = data?.nativeBalance || data?.balance || '0'
-    // Balance comes as BTC string or satoshis — detect by magnitude
-    const val = parseFloat(balStr)
-    if (isNaN(val) || val === 0) return 0
-    // If value < 1, assume BTC; if >= 1 and looks like sats, use as-is
-    // Pioneer returns BTC for UTXO chains typically
-    return val < 21_000_000 ? Math.round(val * 1e8) : Math.round(val)
-  } catch (e: any) {
-    console.warn(`${TAG} Balance check failed for ${address}: ${e.message}`)
-    return 0
-  }
+  const utxos = await fetchUtxos(address)
+  return utxos.reduce((sum, u) => sum + u.value, 0)
 }
 
 export async function fetchUtxos(address: string): Promise<SweepUtxo[]> {

@@ -23,14 +23,22 @@ export interface AuditScanConfig {
   higherAccountScanLimit: number
   /** EVM index-discovery ceiling (m/44'/60'/0'/0/{0..N}). */
   evmMaxIndex: number
+  /** BTC gap-limit depths forwarded to generatePathMatrix: receive/change indices
+   *  probed per account, plus the Category-C higher-account receive depth. Omit to
+   *  inherit generatePathMatrix's defaults (receive 5 / change 1 / higher-receive 3). */
+  gapLimitReceive?: number
+  gapLimitChange?: number
+  higherReceiveLimit?: number
 }
 
 // Light = the common case (funded EVM index or a scriptType mismatch within
 // account 0-2), a few seconds of device occupancy. Deep matches the manual
-// SweepDialog reach (accounts up to 19) — ~30-60s of continuous derivation.
+// SweepDialog reach (accounts up to 19) and scans deeper receive/change gaps —
+// ~1-2 min of continuous derivation. Gap depths are tunable here; each increment
+// multiplies the per-account address count (device-derivation time).
 export const AUDIT_CONFIGS: Record<AuditMode, AuditScanConfig> = {
   light: { accountRange: [0, 2], mismatchAccounts: 1, higherAccountScanLimit: 5, evmMaxIndex: 3 },
-  deep: { accountRange: [0, 9], mismatchAccounts: 2, higherAccountScanLimit: 19, evmMaxIndex: 9 },
+  deep: { accountRange: [0, 9], mismatchAccounts: 2, higherAccountScanLimit: 19, evmMaxIndex: 9, gapLimitReceive: 10, gapLimitChange: 3, higherReceiveLimit: 5 },
 }
 
 function familyOf(chainFamily: string): 'utxo' | 'evm' | 'fixed' {

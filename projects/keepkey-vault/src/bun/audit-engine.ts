@@ -241,6 +241,9 @@ async function runBtcScan(entry: AuditEntry): Promise<void> {
     mismatchAccounts: config.mismatchAccounts,
     currentMaxAccount: deps.btcCurrentMaxAccount,
     higherAccountScanLimit: Math.min(deps.btcCurrentMaxAccount + config.higherAccountScanLimit, 19),
+    gapLimitReceive: config.gapLimitReceive,
+    gapLimitChange: config.gapLimitChange,
+    higherReceiveLimit: config.higherReceiveLimit,
   })
   report.progress = { current: 0, total: matrix.length, label: 'Scanning Bitcoin paths…' }
 
