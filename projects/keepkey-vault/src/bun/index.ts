@@ -133,7 +133,7 @@ import type { OwnAddressSeed } from "./db"
 import { rectifyWallet, getLedgerSummary, getLedgerJournals } from "./ledger"
 import { generateReport, reportToPdfBuffer, reportToCsv } from "./reports"
 import { startAudit, startBtcScan, getAudit, getAuditBtcRaw, getAuditEntry, dismissAudit, markAuditsStale, type AuditDeps } from "./audit-engine"
-import { chainSupportsDeepScan, chainSupportsLevelScan, chainLevelPath, deriveAddressParams, extractAddress, parseNativeBalance, parseEvmScanResult, explorerAddressUrl, pathToBip32 } from "./chain-scan"
+import { chainSupportsDeepScan, chainSupportsLevelScan, chainLevelPath, deriveAddressParams, extractAddress, parseNativeScanResult, parseEvmScanResult, explorerAddressUrl, pathToBip32 } from "./chain-scan"
 import { extractTransactionsFromReport, toCoinTrackerCsv, toZenLedgerCsv } from "./tax-export"
 import * as os from "os"
 import * as path from "path"
@@ -207,6 +207,32 @@ function unwrapPortfolioResponse(resp: any): { entries: any[]; meta: PortfolioMe
 	const entries = rawData.balances || (Array.isArray(rawData) ? rawData : [])
 	const meta: PortfolioMeta | null = rawData.meta ?? null
 	return { entries, meta }
+}
+
+// Native balance for a single derived address on ANY family, via the
+// cross-family GetPortfolioBalances path (what the dashboard uses for every
+// chain). Replaces the audit's former GetBalanceAddressByNetwork calls, which
+// were EVM-only (route /evm/balance → ETH JSON-RPC) and 500'd for any non-EVM
+// networkId (bip122/cosmos/ripple), so BTC/DOGE/XRP/Cosmos balances read 0.
+async function auditNativeBalance(
+  chain: { caip: string; id: string },
+  address: string,
+): Promise<{ native: string; hasBalance: boolean; balanceError: boolean }> {
+  try {
+    const pioneer = await getPioneer()
+    const resp = await withTimeout(
+      pioneer.GetPortfolioBalances({ pubkeys: [{ caip: chain.caip, pubkey: address }] }, { forceRefresh: true }),
+      PIONEER_TIMEOUT_MS, `audit balance ${chain.id}`,
+    )
+    const { entries, meta } = unwrapPortfolioResponse(resp)
+    const { native, hasBalance } = parseNativeScanResult(entries, chain.caip)
+    // degraded + nothing found = unverified, not a confident zero (honesty rule).
+    if (!hasBalance && meta?.degraded) return { native: '0', hasBalance: false, balanceError: true }
+    return { native, hasBalance, balanceError: false }
+  } catch (e: any) {
+    console.warn(`[audit] balance ${chain.id} failed: ${e?.message}`)
+    return { native: '0', hasBalance: false, balanceError: true }
+  }
 }
 
 function mergeMetas(metas: PortfolioMeta[]): PortfolioMeta {
@@ -5507,8 +5533,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 								tokens = parsed.tokens.length ? parsed.tokens : undefined
 							}
 						} else {
-							const resp = await pioneer.GetBalanceAddressByNetwork({ networkId: chain.networkId, address })
-							;({ native, hasBalance } = parseNativeBalance(resp))
+							const r = await auditNativeBalance(chain, address)
+							native = r.native; hasBalance = r.hasBalance; balanceError = r.balanceError
 						}
 					} catch (e: any) {
 						console.warn(`[audit] scan ${chain.id} L${level} balance failed: ${e?.message}`)
@@ -5533,15 +5559,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (params.scriptType) dp.scriptType = params.scriptType
 				const address = extractAddress(await (engine.wallet as any)[method](dp))
 				if (!address) throw new Error('Device returned no address for that path')
-				let native = '0', hasBalance = false, balanceError = false
-				try {
-					const pioneer = await getPioneer()
-					const resp = await pioneer.GetBalanceAddressByNetwork({ networkId: chain.networkId, address })
-					;({ native, hasBalance } = parseNativeBalance(resp))
-				} catch (e: any) {
-					console.warn(`[audit] custom ${chain.id} balance failed: ${e?.message}`)
-					balanceError = true
-				}
+				const { native, hasBalance, balanceError } = await auditNativeBalance(chain, address)
 				return { pathStr: pathToBip32(path), address, native, symbol: chain.symbol, hasBalance, balanceError, explorerUrl: explorerAddressUrl(chain, address) }
 			},
 			// Batch derive + balance-check a list of explicit paths (EVM known-paths
@@ -5553,7 +5571,6 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!chain) throw new Error(`Unknown chain: ${params.chainId}`)
 				if (!chainSupportsDeepScan(chain)) throw new Error(`${chain.symbol} doesn't support path scanning`)
 				const captured = engine.wallet
-				const pioneer = await getPioneer()
 				const paths = (params.paths || []).slice(0, 40)
 				const results: any[] = []
 				for (const path of paths) {
@@ -5564,11 +5581,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					let address = ''
 					try { address = extractAddress(await (engine.wallet as any)[method](dp)) } catch { continue }
 					if (!address) continue
-					let native = '0', hasBalance = false, balanceError = false
-					try {
-						const resp = await pioneer.GetBalanceAddressByNetwork({ networkId: chain.networkId, address })
-						;({ native, hasBalance } = parseNativeBalance(resp))
-					} catch { balanceError = true }
+					const { native, hasBalance, balanceError } = await auditNativeBalance(chain, address)
 					results.push({ pathStr: pathToBip32(path), address, native, symbol: chain.symbol, hasBalance, balanceError, explorerUrl: explorerAddressUrl(chain, address) })
 				}
 				return { results }
@@ -5600,12 +5613,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				} catch (e: any) {
 					console.warn(`[audit] inspect ${chain.id} getPublicKeys failed: ${e?.message}`)
 				}
-				let native = '0', hasBalance = false, balanceError = false
-				try {
-					const pioneer = await getPioneer()
-					const resp = await pioneer.GetBalanceAddressByNetwork({ networkId: chain.networkId, address })
-					;({ native, hasBalance } = parseNativeBalance(resp))
-				} catch { balanceError = true }
+				const { native, hasBalance, balanceError } = await auditNativeBalance(chain, address)
 				return { pathStr: pathToBip32(path), address, pubkey, xpub, native, hasBalance, balanceError, explorerUrl: explorerAddressUrl(chain, address) }
 			},
 

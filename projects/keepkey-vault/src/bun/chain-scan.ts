@@ -66,10 +66,27 @@ export function extractAddress(result: any): string {
   return result?.address || result?.publicKey || ''
 }
 
-/** Native (human-readable) balance from a Pioneer GetBalanceAddressByNetwork response. */
-export function parseNativeBalance(resp: any): { native: string; hasBalance: boolean } {
-  const data = resp?.data || resp || {}
-  const native = String(data.nativeBalance ?? data.balance ?? '0')
+/**
+ * Native (human-readable) balance for `caip` from already-unwrapped portfolio
+ * entries — the cross-family GetPortfolioBalances path the dashboard uses for
+ * EVERY chain. Filters to native entries on the chain (by caip prefix), prefers
+ * the exact caip, and reads its balance.
+ *
+ * Use this for ALL families. Do NOT use Pioneer's GetBalanceAddressByNetwork:
+ * despite the name it is EVM-only (route /evm/balance → ETH JSON-RPC), so a
+ * non-EVM networkId (bip122/cosmos/ripple) routes a foreign address into the
+ * Ethereum provider, which 500s ("Invalid Ethereum address") — every non-EVM
+ * single-address balance silently read 0.
+ *
+ * PURE and honesty-preserving: it never decides "couldn't verify". A degraded
+ * (200-but-failed) response is the CALLER's job to map to balanceError.
+ */
+export function parseNativeScanResult(entries: any[], caip: string): { native: string; hasBalance: boolean } {
+  const list: any[] = Array.isArray(entries) ? entries : []
+  const prefix = String(caip).split('/')[0]
+  const natives = list.filter(e => String(e?.caip || '').split('/')[0] === prefix && !isTokenEntry(e))
+  const match = natives.find(e => e?.caip === caip) || natives[0]
+  const native = String(match?.balance ?? '0')
   const n = parseFloat(native)
   return { native, hasBalance: Number.isFinite(n) && n > 0 }
 }

@@ -7,7 +7,7 @@
  */
 import { describe, test, expect } from 'bun:test'
 import {
-  chainLevelPath, deriveAddressParams, extractAddress, parseNativeBalance, parseEvmScanResult,
+  chainLevelPath, deriveAddressParams, extractAddress, parseNativeScanResult, parseEvmScanResult,
   explorerAddressUrl, pathToBip32, parseBip32Path, chainSupportsDeepScan, chainSupportsLevelScan,
 } from '../src/bun/chain-scan'
 import { EVM_KNOWN_SCHEMES } from '../src/shared/evm-paths'
@@ -67,12 +67,29 @@ describe('extractAddress', () => {
   })
 })
 
-describe('parseNativeBalance', () => {
-  test('reads nativeBalance then balance, detects funded', () => {
-    expect(parseNativeBalance({ data: { nativeBalance: '1.5' } })).toEqual({ native: '1.5', hasBalance: true })
-    expect(parseNativeBalance({ data: { balance: '0' } })).toEqual({ native: '0', hasBalance: false })
-    expect(parseNativeBalance({ nativeBalance: '2' })).toEqual({ native: '2', hasBalance: true })
-    expect(parseNativeBalance({})).toEqual({ native: '0', hasBalance: false })
+describe('parseNativeScanResult — native balance from cross-family portfolio entries', () => {
+  const XRP_CAIP = 'ripple:4109c6f2045fc7eff4cde8f9905d19c2/slip44:144'
+  test('reads the native entry for the caip (XRP — the chain that was hitting the EVM endpoint)', () => {
+    const entries = [{ caip: XRP_CAIP, balance: '12.5', valueUsd: 7 }]
+    expect(parseNativeScanResult(entries, XRP_CAIP)).toEqual({ native: '12.5', hasBalance: true })
+  })
+  test('empty / zero → not funded (caller maps degraded → balanceError)', () => {
+    expect(parseNativeScanResult([], XRP_CAIP)).toEqual({ native: '0', hasBalance: false })
+    expect(parseNativeScanResult([{ caip: XRP_CAIP, balance: '0' }], XRP_CAIP)).toEqual({ native: '0', hasBalance: false })
+    expect(parseNativeScanResult(undefined as any, XRP_CAIP)).toEqual({ native: '0', hasBalance: false })
+  })
+  test('matches by chain prefix and ignores tokens / other-chain entries', () => {
+    const entries = [
+      { caip: 'eip155:1/erc20:0xabc', balance: '500' },                 // token, different chain
+      { caip: 'bip122:000.../slip44:0', balance: '1' },                 // different chain native
+      { caip: XRP_CAIP, balance: '3.3' },                               // the one we want
+    ]
+    expect(parseNativeScanResult(entries, XRP_CAIP)).toEqual({ native: '3.3', hasBalance: true })
+  })
+  test('falls back to any native entry on the chain when exact caip differs', () => {
+    // same chain prefix, slightly different asset part → still the native balance
+    const entries = [{ caip: 'cosmos:cosmoshub-4/slip44:118', balance: '9' }]
+    expect(parseNativeScanResult(entries, 'cosmos:cosmoshub-4/native:uatom')).toEqual({ native: '9', hasBalance: true })
   })
 })
 
