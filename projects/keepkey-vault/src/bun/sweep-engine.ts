@@ -67,6 +67,22 @@ export interface SweepScanConfig {
   higherReceiveLimit?: number     // Category C receive depth (default 3)
 }
 
+// Live per-path progress, emitted as each path is derived/checked so the UI can
+// stream what it's doing (rather than a bare current/total counter). Optional —
+// only wired when the caller asks (the audit "unusual paths" panel).
+export interface SweepProgressEvent {
+  scanId: string
+  phase: 'deriving' | 'found'
+  current?: number
+  total?: number
+  pathStr: string
+  scriptType: string
+  category?: PathEntry['category']
+  address?: string
+  balanceSats?: number
+}
+export type SweepProgressFn = (evt: SweepProgressEvent) => void
+
 // ── Scan store (in-memory) ─────────────────────────────────────────
 
 const scans = new Map<string, SweepScan>()
@@ -238,7 +254,7 @@ async function fetchTxHex(txid: string): Promise<string | undefined> {
 
 // ─�� Scan worker ────────────────────────────────────────────────────
 
-export async function startScan(wallet: any, config: SweepScanConfig = {}): Promise<string> {
+export async function startScan(wallet: any, config: SweepScanConfig = {}, onProgress?: SweepProgressFn): Promise<string> {
   const id = crypto.randomUUID()
   const matrix = generatePathMatrix(config)
 
@@ -253,7 +269,7 @@ export async function startScan(wallet: any, config: SweepScanConfig = {}): Prom
   scans.set(id, scan)
 
   // Run async — don't block the HTTP response
-  scanWorker(scan, wallet, matrix).catch(e => {
+  scanWorker(scan, wallet, matrix, onProgress).catch(e => {
     scan.status = 'error'
     scan.error = e.message
     console.error(`${TAG} Scan ${id} failed:`, e)
@@ -262,7 +278,7 @@ export async function startScan(wallet: any, config: SweepScanConfig = {}): Prom
   return id
 }
 
-async function scanWorker(scan: SweepScan, wallet: any, matrix: PathEntry[]): Promise<void> {
+async function scanWorker(scan: SweepScan, wallet: any, matrix: PathEntry[], onProgress?: SweepProgressFn): Promise<void> {
   console.log(`${TAG} Scan ${scan.id}: deriving ${matrix.length} addresses...`)
 
   // Phase 1: Derive all addresses from device (sequential — USB is serial)
@@ -271,6 +287,8 @@ async function scanWorker(scan: SweepScan, wallet: any, matrix: PathEntry[]): Pr
 
   for (let i = 0; i < matrix.length; i++) {
     const entry = matrix[i]
+    // Tell the UI which path we're about to check, before the device round-trip.
+    onProgress?.({ scanId: scan.id, phase: 'deriving', current: i + 1, total: matrix.length, pathStr: entry.pathStr, scriptType: entry.scriptType, category: entry.category })
     try {
       const address = await deriveAddress(wallet, entry.path, entry.scriptType)
       if (address) {
@@ -298,6 +316,7 @@ async function scanWorker(scan: SweepScan, wallet: any, matrix: PathEntry[]): Pr
     for (const r of results) {
       if (r.balanceSats > 0) {
         console.log(`${TAG} FOUND: ${r.address} (${r.pathStr} as ${r.scriptType}) [${r.category}] = ${r.balanceSats} sats`)
+        onProgress?.({ scanId: scan.id, phase: 'found', pathStr: r.pathStr, scriptType: r.scriptType, category: r.category, address: r.address, balanceSats: r.balanceSats })
         const utxos = await fetchUtxos(r.address)
         scan.results.push({
           path: r.path,

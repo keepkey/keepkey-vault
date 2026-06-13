@@ -5305,6 +5305,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			sweepScan: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
 				const { startScan } = await import('./sweep-engine')
+				// streamProgress (audit "unusual paths" panel): push each path to the
+				// WebView as it's derived/checked so the user sees what's happening.
+				const onProgress = params.streamProgress
+					? (evt: any) => { try { rpc.send['audit-sweep-progress'](evt) } catch { /* webview not ready */ } }
+					: undefined
 				const scanId = await startScan(engine.wallet, {
 					accountRange: params.accountRange,
 					mismatchAccounts: params.mismatchAccounts,
@@ -5313,7 +5318,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					gapLimitReceive: params.gapLimitReceive,
 					gapLimitChange: params.gapLimitChange,
 					higherReceiveLimit: params.higherReceiveLimit,
-				})
+				}, onProgress)
 				return { scanId }
 			},
 			sweepGetStatus: async (params) => {
@@ -5556,15 +5561,20 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					if (engine.wallet !== captured) break // device changed — stop
 					const account = from + i
 					const sps = utxoAccountScriptPaths(chain, account)
-					let xpubs: string[] = []
+					// Derive every script type's xpub (legacy/segwit/native-segwit) and
+					// keep them aligned to their path so the UI can show each as proof.
+					let xpubMeta: Array<{ scriptType: string; xpub: string; pathStr: string }> = []
 					try {
 						const pks = await (engine.wallet as any).getPublicKeys(sps.map(sp => ({ addressNList: sp.path, coin: chain.coin, scriptType: sp.scriptType, curve: 'secp256k1' })))
-						xpubs = (pks || []).map((pk: any) => pk?.xpub).filter(Boolean)
+						xpubMeta = sps
+							.map((sp, idx) => ({ scriptType: sp.scriptType, xpub: (pks?.[idx] as any)?.xpub as string, pathStr: pathToBip32(sp.path) }))
+							.filter(m => !!m.xpub)
 					} catch (e: any) {
 						console.warn(`[audit] utxo-acct ${chain.id} #${account} xpub derive failed: ${e?.message}`)
 						continue
 					}
-					if (!xpubs.length) continue
+					if (!xpubMeta.length) continue
+					const xpubs = xpubMeta.map(m => m.xpub)
 					let native = '0', hasBalance = false, balanceError = false
 					try {
 						const pioneer = await getPioneer()
@@ -5582,7 +5592,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						console.warn(`[audit] utxo-acct ${chain.id} #${account} balance failed: ${e?.message}`)
 						balanceError = true
 					}
-					results.push({ level: account, pathStr: pathToBip32(sps[0].path), address: xpubs[0], native, symbol: chain.symbol, hasBalance, balanceError, explorerUrl: null })
+					results.push({ level: account, pathStr: xpubMeta[0].pathStr, address: xpubMeta[0].xpub, xpubs: xpubMeta, native, symbol: chain.symbol, hasBalance, balanceError, explorerUrl: null })
 				}
 				return { results }
 			},

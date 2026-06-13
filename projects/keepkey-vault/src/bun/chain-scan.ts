@@ -25,10 +25,9 @@ export function chainSupportsDeepScan(chain: ChainDef): boolean {
  * Whether the per-account LEVEL scan (auditScanLevels) is meaningful.
  *
  * Excludes UTXO: a single-receive-address balance check would misread an account
- * whose receive index 0 is empty as a funded tree empty. BTC higher accounts are
- * discovered correctly by the initial sweep (xpub-aware, all script types,
- * receive 0/1/2 + change) and recovered via addBtcAccount — the level scan would
- * be both redundant and less accurate.
+ * whose receive index 0 is empty as a funded tree empty. UTXO chains (incl. BTC)
+ * use the xpub-based per-account scan instead (auditScanUtxoAccounts) — Pioneer
+ * gap-scans the whole account tree server-side, which is both faster and accurate.
  */
 export function chainSupportsLevelScan(chain: ChainDef): boolean {
   return chain.chainFamily !== 'utxo' && chainSupportsDeepScan(chain)
@@ -67,14 +66,16 @@ export function extractAddress(result: any): string {
 }
 
 /**
- * Account-level derivation paths (m/purpose'/coinType'/account') for a non-BTC
- * UTXO chain, one per supported script type. Mirrors the dashboard's
- * utxoPubKeyPaths (getBalances) so an audit account scan matches what the
- * portfolio tracks. Litecoin walks all three script types; the rest use their
- * single configured type. coinType comes from the chain's own defaultPath[1].
+ * Account-level derivation paths (m/purpose'/coinType'/account') for a UTXO
+ * chain, one per supported script type. Mirrors the dashboard's utxoPubKeyPaths
+ * (getBalances) so an audit account scan matches what the portfolio tracks.
+ * Bitcoin and Litecoin walk all three script types (legacy/segwit/native-segwit);
+ * the rest use their single configured type. coinType comes from the chain's own
+ * defaultPath[1]. Deriving the xpub per account lets Pioneer gap-scan the whole
+ * account tree server-side — far faster than walking individual addresses.
  */
 export function utxoAccountScriptPaths(chain: ChainDef, account: number): Array<{ scriptType: string; path: number[] }> {
-  const scriptTypes = chain.id === 'litecoin'
+  const scriptTypes = (chain.id === 'litecoin' || chain.id === 'bitcoin')
     ? [{ scriptType: 'p2pkh', purpose: 44 }, { scriptType: 'p2sh-p2wpkh', purpose: 49 }, { scriptType: 'p2wpkh', purpose: 84 }]
     : [{ scriptType: chain.scriptType || 'p2pkh', purpose: 44 }]
   return scriptTypes.map(st => ({

@@ -304,7 +304,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       factoryReset: { params: void; response: void }
 
       // ── Sweep (non-standard BTC path recovery) ──────────────────────
-      sweepScan: { params: { accountRange?: [number, number]; mismatchAccounts?: number; currentMaxAccount?: number; higherAccountScanLimit?: number; gapLimitReceive?: number; gapLimitChange?: number; higherReceiveLimit?: number }; response: { scanId: string } }
+      sweepScan: { params: { accountRange?: [number, number]; mismatchAccounts?: number; currentMaxAccount?: number; higherAccountScanLimit?: number; gapLimitReceive?: number; gapLimitChange?: number; higherReceiveLimit?: number; streamProgress?: boolean }; response: { scanId: string } }
       sweepGetStatus: { params: { scanId: string }; response: any }
       sweepExecute: { params: { scanId: string; destinationAddress?: string; dryRun?: boolean }; response: any }
 
@@ -418,6 +418,19 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       'signing-dismissed': { id: string }
       'api-log': ApiLogEntry
       'report-progress': { id: string; message: string; percent: number }
+      // Live per-path progress for the audit "unusual paths" (sweep) scan, so the
+      // panel can stream what it's checking. scanId scopes it to one scan.
+      'audit-sweep-progress': {
+        scanId: string
+        phase: 'deriving' | 'found'
+        current?: number
+        total?: number
+        pathStr: string
+        scriptType: string
+        category?: string
+        address?: string
+        balanceSats?: number
+      }
       'walletconnect-uri': string
       'wc-sessions': WcSessionInfo[]
       'wc-pair-request': { id: string; peerName: string; peerUrl: string; peerIcon: string; chains: string[]; methods: string[] }

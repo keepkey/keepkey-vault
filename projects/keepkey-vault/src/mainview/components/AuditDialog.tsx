@@ -38,12 +38,14 @@ const ANIM = `
   @keyframes auditRise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 `
 
-function formatSats(sats: number): string {
-  if (sats >= 100_000_000) return (sats / 100_000_000).toFixed(8).replace(/0+$/, '').replace(/\.$/, '') + ' BTC'
-  return sats.toLocaleString() + ' sats'
-}
 function usd(n: number): string {
   return '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+function scriptLabel(st: string): string {
+  if (st === 'p2pkh') return 'Legacy'
+  if (st === 'p2sh-p2wpkh') return 'SegWit'
+  if (st === 'p2wpkh') return 'Native SegWit'
+  return st
 }
 
 const COVERAGE_PILL: Record<AuditChainFinding['coverage'], { label: string; color: string; bg: string; border: string }> = {
@@ -160,8 +162,10 @@ interface Ladder {
 }
 
 const EMPTY_LADDER: Ladder = {
+  // showEmpties defaults true: the auto-scanned low accounts are shown as proof
+  // we checked them, rather than hidden behind a "$0, all set" claim.
   autoScanned: false, autoScanning: false, scanning: false, scanned: [], nextLevel: 1,
-  showCommon: false, showCustom: false, showEmpties: false, customResults: [], extraFound: [], recovering: false,
+  showCommon: false, showCustom: false, showEmpties: true, customResults: [], extraFound: [], recovering: false,
   recovered: null, recoverErr: null, showHandoff: false, handoffNote: '', scanErr: null,
 }
 
@@ -181,9 +185,6 @@ export function AuditDialog({ onClose, snapshot, isHidden, chainCatalog, chainAd
   const [phase, setPhase] = useState<'scanning' | 'walkthrough' | 'finish'>('scanning')
   const [chainIdx, setChainIdx] = useState(0)
   const [ladders, setLadders] = useState<Record<string, Ladder>>({})
-  const [sweepPreview, setSweepPreview] = useState<any>(null)
-  const [sweeping, setSweeping] = useState(false)
-  const [btcTriggerFailed, setBtcTriggerFailed] = useState(false)
 
   const auditIdRef = useRef<string | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -192,7 +193,8 @@ export function AuditDialog({ onClose, snapshot, isHidden, chainCatalog, chainAd
   const snapshotRef = useRef(snapshot)
   snapshotRef.current = snapshot
   const scrollRef = useRef<HTMLDivElement | null>(null)
-  const btcTriggeredRef = useRef(false)
+  // One slow reveal-scroll per chain, the first time its auto-scan completes.
+  const revealedChains = useRef(new Set<string>())
 
   const catalog = useRef(new Map<string, ChainDef>())
   catalog.current = new Map(chainCatalog.map(c => [c.id, c]))
@@ -204,8 +206,8 @@ export function AuditDialog({ onClose, snapshot, isHidden, chainCatalog, chainAd
 
   const start = useCallback(async (m: AuditMode) => {
     stopPoll()
-    btcTriggeredRef.current = false
-    setReport(null); setError(null); setStale(false); setPhase('scanning'); setChainIdx(0); setLadders({}); setSweepPreview(null); setBtcTriggerFailed(false)
+    revealedChains.current.clear()
+    setReport(null); setError(null); setStale(false); setPhase('scanning'); setChainIdx(0); setLadders({})
     try {
       const { auditId } = await rpcRequest<{ auditId: string }>('auditStart', { mode: m, snapshot: snapshotRef.current }, 60000)
       if (unmountedRef.current) return
@@ -240,13 +242,32 @@ export function AuditDialog({ onClose, snapshot, isHidden, chainCatalog, chainAd
     setLadders(prev => { const cur = prev[chainId] || EMPTY_LADDER; return { ...prev, [chainId]: { ...cur, extraFound: [...cur.extraFound, r] } } })
   }, [])
 
-  const busy = sweeping || Object.values(ladders).some(l => l.scanning || l.recovering)
+  const busy = Object.values(ladders).some(l => l.scanning || l.recovering)
   const openUrl = (url: string) => rpcRequest('openUrl', { url }).catch(() => {})
   const scrollDown = useCallback(() => {
     requestAnimationFrame(() => { const el = scrollRef.current; if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' }) })
   }, [])
   const scrollTop = useCallback(() => {
     requestAnimationFrame(() => { const el = scrollRef.current; if (el) el.scrollTo({ top: 0 }) })
+  }, [])
+  // Slow, eased scroll to the bottom — for the "accounts loaded → reveal the
+  // summary" moment. Browser smooth-scroll is too fast/fixed, so we animate
+  // scrollTop ourselves (easeOutCubic) using rAF timestamps.
+  const slowScrollToBottom = useCallback((duration = 1200) => {
+    const el = scrollRef.current
+    if (!el) return
+    const startTop = el.scrollTop
+    const dist = (el.scrollHeight - el.clientHeight) - startTop
+    if (dist <= 4) return
+    let t0: number | null = null
+    const ease = (t: number) => 1 - Math.pow(1 - t, 3)
+    const step = (ts: number) => {
+      if (t0 == null) t0 = ts
+      const p = Math.min((ts - t0) / duration, 1)
+      el.scrollTop = startTop + dist * ease(p)
+      if (p < 1) requestAnimationFrame(step)
+    }
+    requestAnimationFrame(step)
   }, [])
 
   const walk = report ? [...report.chains].sort((a, b) => walkRank(a.chainId) - walkRank(b.chainId)) : []
@@ -257,7 +278,8 @@ export function AuditDialog({ onClose, snapshot, isHidden, chainCatalog, chainAd
   // per-account scan instead (BTC has its own deep scan). Either way the user
   // gets "accounts 1/2/3…" — accountScannable gates that whole affordance.
   const levelScannable = !!currentDef && currentDef.chainFamily !== 'utxo' && !['zcash-shielded', 'hive'].includes(currentDef.chainFamily)
-  const utxoAccountScannable = !!currentDef && currentDef.chainFamily === 'utxo' && currentDef.id !== 'bitcoin'
+  // All UTXO chains (incl. Bitcoin) use the xpub-based per-account scan.
+  const utxoAccountScannable = !!currentDef && currentDef.chainFamily === 'utxo'
   const accountScannable = levelScannable || utxoAccountScannable
   const hasCommon = current?.family === 'evm' || current?.chainId === 'bitcoin'
 
@@ -270,7 +292,11 @@ export function AuditDialog({ onClose, snapshot, isHidden, chainCatalog, chainAd
         : await rpcRequest<{ results: AuditDerivedAddress[] }>('auditScanLevels', { chainId: chain.chainId, fromLevel, count }, 180000)
       setLadders(prev => {
         const cur = prev[chain.chainId] || EMPTY_LADDER
-        return { ...prev, [chain.chainId]: { ...cur, scanning: false, autoScanning: false, scanned: [...cur.scanned, ...results], nextLevel: Math.max(cur.nextLevel, fromLevel + count) } }
+        // Dedupe by account/index level so a re-run (or a double effect) never
+        // shows the same account twice. Custom paths (level null) always append.
+        const seen = new Set(cur.scanned.map(a => a.level).filter(l => l != null))
+        const fresh = results.filter(r => r.level == null || !seen.has(r.level))
+        return { ...prev, [chain.chainId]: { ...cur, scanning: false, autoScanning: false, scanned: [...cur.scanned, ...fresh], nextLevel: Math.max(cur.nextLevel, fromLevel + count) } }
       })
     } catch (e: any) {
       patchLadder(chain.chainId, markAuto ? { autoScanning: false, scanErr: e.message } : { scanning: false, scanErr: e.message })
@@ -283,51 +309,31 @@ export function AuditDialog({ onClose, snapshot, isHidden, chainCatalog, chainAd
     onClose()
   }, [busy, onClose])
 
-  // Auto-scan accounts 1-3 on arrival (read-only; does NOT block close).
+  // Auto-scan low accounts on arrival (read-only; does NOT block close). UTXO
+  // chains cover accounts 0/1/2 (account 0 = the main wallet, verified directly
+  // via its xpub); EVM/other start at index 1 (index 0 is the tracked primary).
   useEffect(() => {
     if (phase !== 'walkthrough' || !current || !accountScannable) return
     const l = ladders[current.chainId]
     if (l?.autoScanned || l?.autoScanning || l?.scanning) return
-    const t = setTimeout(() => runScan(current, 1, 3, true), 450)
+    const startLevel = current.family === 'utxo' ? 0 : 1
+    const t = setTimeout(() => runScan(current, startLevel, 3, true), 450)
     return () => clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase, current?.chainId, accountScannable])
 
-  // Lazy Bitcoin scan: trigger once when the user first opens the Bitcoin page.
+  // Once a chain's auto-scan finishes, reveal the summary with a slow scroll to
+  // the bottom — one time per chain (subsequent manual scans scroll on click).
   useEffect(() => {
-    if (phase !== 'walkthrough' || current?.chainId !== 'bitcoin' || !report || !auditIdRef.current) return
-    if (report.btcScanState === 'idle' && !btcTriggeredRef.current) {
-      btcTriggeredRef.current = true
-      setBtcTriggerFailed(false)
-      rpcRequest('auditScanBtc', { auditId: auditIdRef.current }).catch(() => setBtcTriggerFailed(true))
-    }
+    if (phase !== 'walkthrough' || !current || !accountScannable) return
+    const l = ladders[current.chainId]
+    const done = !!l?.autoScanned && !l.autoScanning && !l.scanning
+    if (!done || revealedChains.current.has(current.chainId)) return
+    revealedChains.current.add(current.chainId)
+    const t = setTimeout(() => slowScrollToBottom(1300), 300)
+    return () => clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phase, current?.chainId, report?.btcScanState])
-
-  // Retry a failed/stuck Bitcoin scan (error state OR a rejected trigger).
-  const retryBtc = useCallback(() => {
-    if (!auditIdRef.current) return
-    btcTriggeredRef.current = true
-    setBtcTriggerFailed(false)
-    rpcRequest('auditScanBtc', { auditId: auditIdRef.current }).catch(() => setBtcTriggerFailed(true))
-  }, [])
-
-  // Poll for BTC scan progress while on the Bitcoin page and it's running.
-  useEffect(() => {
-    if (phase !== 'walkthrough' || current?.chainId !== 'bitcoin' || !auditIdRef.current) return
-    if (report?.btcScanState !== 'idle' && report?.btcScanState !== 'scanning') return
-    const id = auditIdRef.current
-    const iv = setInterval(async () => {
-      try {
-        const r = await rpcRequest<AuditReport>('auditGetStatus', { auditId: id })
-        if (unmountedRef.current) return
-        setReport(r)
-        if (r.btcScanState !== 'idle' && r.btcScanState !== 'scanning') clearInterval(iv)
-      } catch { /* transient */ }
-    }, 1200)
-    return () => clearInterval(iv)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phase, current?.chainId, report?.btcScanState])
+  }, [phase, current?.chainId, accountScannable, ladders[current?.chainId || '']?.autoScanned, ladders[current?.chainId || '']?.autoScanning, ladders[current?.chainId || '']?.scanning])
 
   const trackLevel = useCallback(async (chain: AuditChainFinding, level: number) => {
     patchLadder(chain.chainId, { recovering: true, recoverErr: null })
@@ -351,22 +357,6 @@ export function AuditDialog({ onClose, snapshot, isHidden, chainCatalog, chainAd
       onRecovered?.()
     } catch (e: any) { patchLadder(chain.chainId, { recovering: false, recoverErr: e.message }) }
   }, [isHidden, onRecovered, patchLadder])
-
-  const sweepDryRun = useCallback(async () => {
-    if (!auditIdRef.current) return
-    setSweeping(true)
-    try { setSweepPreview(await rpcRequest('auditSweep', { auditId: auditIdRef.current, dryRun: true }, 600000)) }
-    catch (e: any) { setError(e.message) } finally { setSweeping(false) }
-  }, [])
-  const sweepConfirm = useCallback(async () => {
-    if (!auditIdRef.current) return
-    setSweeping(true)
-    try {
-      const res = await rpcRequest<any>('auditSweep', { auditId: auditIdRef.current, dryRun: false }, 600000)
-      setSweepPreview(null); onRecovered?.(); setError(null)
-      patchLadder('bitcoin', { recovered: `Swept ${formatSats(res.outputSats)} home — txid ${String(res.txid).slice(0, 12)}…` })
-    } catch (e: any) { setError(e.message) } finally { setSweeping(false) }
-  }, [onRecovered, patchLadder])
 
   const copyHandoff = useCallback((chain: AuditChainFinding, l: Ladder, balanceUsd: number) => {
     const lines: string[] = []
@@ -401,9 +391,13 @@ export function AuditDialog({ onClose, snapshot, isHidden, chainCatalog, chainAd
   const running = !report || report.status === 'running'
   const scanReady = !!report && report.status === 'complete'
   const finds = [...ladder.scanned, ...ladder.extraFound, ...ladder.customResults]
-  const fundedFinds = finds.filter(a => a.hasBalance)
-  const errFinds = finds.filter(a => a.balanceError)
-  const emptyFinds = finds.filter(a => !a.hasBalance && !a.balanceError)
+  // Account 0 is the main wallet (already in the portfolio) — always shown as a
+  // verified primary (even at 0, as proof we checked it), NOT folded into the
+  // "found money you weren't tracking" reveal or the empty-accounts summary.
+  const primaryFind = finds.find(a => a.level === 0)
+  const fundedFinds = finds.filter(a => a.hasBalance && a.level !== 0)
+  const errFinds = finds.filter(a => a.balanceError && a.level !== 0)
+  const emptyFinds = finds.filter(a => !a.hasBalance && !a.balanceError && a.level !== 0)
   const checkedPrimary = finds.some(a => a.level === 0)
   const currentDef0 = currentDef
   const currentCaip = currentDef0?.caip
@@ -432,9 +426,22 @@ export function AuditDialog({ onClose, snapshot, isHidden, chainCatalog, chainAd
     _hover: { bg: 'var(--gold-2)' }, transition: 'all 0.15s ease',
   }
 
+  // UTXO per-account xpubs (one per script type) — shown as derivation proof.
+  const XpubRows = ({ xpubs, gold }: { xpubs: NonNullable<AuditDerivedAddress['xpubs']>; gold?: boolean }) => (
+    <VStack gap="1.5" align="stretch" mt="2" pt="2" borderTop="1px solid" borderColor={gold ? 'rgba(233,196,106,0.2)' : 'var(--line)'}>
+      {xpubs.map((x, i) => (
+        <Box key={i} minW="0">
+          <Text fontSize="10px" color="var(--text-2)" fontWeight="600">{scriptLabel(x.scriptType)} · {x.pathStr}</Text>
+          <Text fontSize="10px" color="var(--text-3)" fontFamily="mono" truncate title={x.xpub}>{x.xpub}</Text>
+        </Box>
+      ))}
+    </VStack>
+  )
+
   const AddrRow = ({ chain, a, gold }: { chain: AuditChainFinding; a: AuditDerivedAddress; gold?: boolean }) => {
     const canTrack = (chain.chainId === 'bitcoin' || chain.family === 'evm') && a.level != null
     const fundedNoTrack = a.hasBalance && !canTrack
+    const hasXpubs = !!a.xpubs?.length
     return (
       <Box bg={gold ? 'var(--ink-1)' : 'var(--ink-3)'} border="1px solid" borderColor={gold ? 'rgba(233,196,106,0.22)' : 'var(--line)'} borderRadius="12px" px="3.5" py="3">
         <Flex justify="space-between" align="center" gap="3">
@@ -444,12 +451,15 @@ export function AuditDialog({ onClose, snapshot, isHidden, chainCatalog, chainAd
             : <Text fontSize="sm" fontWeight="700" whiteSpace="nowrap" color={parseFloat(a.native) > 0 ? 'var(--gold)' : 'var(--text-2)'}>{fmtAmt(a.native)} {a.symbol}</Text>}
         </Flex>
         <Flex justify="space-between" align="center" mt="1.5" gap="3">
-          <Text flex="1" minW="0" fontSize="11px" color="var(--text-3)" truncate title={`${a.pathStr} · ${a.address}`}>{a.pathStr} · {a.address}</Text>
+          {hasXpubs
+            ? <Text flex="1" minW="0" fontSize="11px" color="var(--text-3)">{a.xpubs!.length} xpubs — every address style</Text>
+            : <Text flex="1" minW="0" fontSize="11px" color="var(--text-3)" truncate title={`${a.pathStr} · ${a.address}`}>{a.pathStr} · {a.address}</Text>}
           <HStack gap="3" flexShrink={0}>
             {a.explorerUrl && <Box as="button" fontSize="11px" color="var(--teal)" onClick={() => openUrl(a.explorerUrl!)}>explorer ↗</Box>}
             {a.hasBalance && canTrack && <Box as="button" fontSize="11px" color="var(--gold)" fontWeight="700" onClick={() => trackLevel(chain, a.level!)}>track</Box>}
           </HStack>
         </Flex>
+        {hasXpubs && <XpubRows xpubs={a.xpubs!} gold={gold} />}
         {a.tokens && a.tokens.length > 0 && (
           <VStack gap="1.5" align="stretch" mt="2.5" pt="2.5" borderTop="1px solid" borderColor={gold ? 'rgba(233,196,106,0.2)' : 'var(--line)'}>
             {a.tokens.map((t, i) => (
@@ -611,48 +621,31 @@ export function AuditDialog({ onClose, snapshot, isHidden, chainCatalog, chainAd
             {/* scrolling content */}
             <Box ref={scrollRef} flex="1" overflow="auto" px="7" pt="5" pb="2" minH="0">
               <Box maxW="640px" mx="auto">
-                <Text fontSize="sm" color="var(--text-1)" lineHeight="1.65" textAlign="center" mb="4.5">
-                  {scanningNow && !ladder.autoScanned ? `Checking the first few ${current.symbol} accounts…` : statusCopy(current, accountScannable)}
-                </Text>
+                {/* While the auto-scan runs: a live status. The conclusion
+                    ("…accounted for, scan deeper below") is held until all
+                    accounts load and appears at the bottom (see the summary
+                    block). Fixed-address chains have no per-account scan, so
+                    they keep the conclusion up top. */}
+                {ladder.autoScanning
+                  ? <Text fontSize="sm" color="var(--text-1)" lineHeight="1.65" textAlign="center" mb="4.5">Checking the first few {current.symbol} accounts…</Text>
+                  : !accountScannable && <Text fontSize="sm" color="var(--text-1)" lineHeight="1.65" textAlign="center" mb="4.5">{statusCopy(current, accountScannable)}</Text>}
 
-                {/* BTC lazy scan — runs when you open the Bitcoin page */}
-                {current.chainId === 'bitcoin' && (report?.btcScanState === 'scanning' || (report?.btcScanState === 'idle' && !btcTriggerFailed)) && (
-                  <Flex align="center" gap="3" bg="var(--ink-3)" borderRadius="13px" p="3.5" mb="4">
-                    <Spinner size="sm" color="var(--gold)" />
-                    <Box minW="0">
-                      <Text fontSize="sm" color="var(--text-0)">Scanning your Bitcoin paths for stranded funds…</Text>
-                      {report?.btcScanState === 'scanning' && report.progress.total > 1 && <Text fontSize="11px" color="var(--text-3)">{report.progress.label} {report.progress.current}/{report.progress.total}</Text>}
-                    </Box>
-                  </Flex>
-                )}
-                {current.chainId === 'bitcoin' && (report?.btcScanState === 'error' || (report?.btcScanState === 'idle' && btcTriggerFailed)) && (
-                  <Flex align="center" justify="space-between" bg="rgba(224,140,123,0.09)" border="1px solid" borderColor="rgba(224,140,123,0.28)" borderRadius="13px" p="3.5" mb="4" gap="3">
-                    <Text fontSize="sm" color="var(--rose)">{report?.btcScanState === 'error' ? 'Bitcoin scan stopped early.' : 'Couldn’t start the Bitcoin scan.'}</Text>
-                    <Box as="button" fontSize="xs" color="var(--teal)" fontWeight="700" flexShrink={0} onClick={retryBtc}>Try again</Box>
-                  </Flex>
-                )}
-
-                {/* BTC sweep recovery (after the scan completes) */}
-                {current.chainId === 'bitcoin' && report?.btcScanState === 'done' && report.btc.findings.some(f => f.category !== 'higher-account') && (
-                  <Box style={{ background: 'linear-gradient(135deg, rgba(233,196,106,0.12), rgba(233,196,106,0.04))' }} border="1px solid" borderColor="rgba(233,196,106,0.3)" borderRadius="16px" p="4.5" mb="4" css={{ animation: "auditPop 0.5s cubic-bezier(0.16,1,0.3,1)" }}>
-                    <Flex align="center" gap="2.5" mb="1.5">
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2v20M5 9l7-7 7 7" /></svg>
-                      <Text fontSize="sm" fontWeight="700" color="var(--gold)">{formatSats(report.btc.findings.filter(f => f.category !== 'higher-account').reduce((s, f) => s + f.balanceSats, 0))} on a non-standard path</Text>
+                {/* Account 0 = the main wallet, verified directly from its xpub(s). */}
+                {primaryFind && (
+                  <Box bg="rgba(139,227,196,0.07)" border="1px solid" borderColor="rgba(139,227,196,0.24)" borderRadius="13px" px="4" py="3" mb="4" css={{ animation: "auditRise 0.5s cubic-bezier(0.16,1,0.3,1) both" }}>
+                    <Flex justify="space-between" align="center" gap="3">
+                      <Flex align="center" gap="2" minW="0">
+                        <svg width="15" height="15" style={{ flexShrink: 0 }} viewBox="0 0 24 24" fill="none" stroke="var(--teal)" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+                        <Text fontSize="sm" color="var(--text-1)" truncate>Account #0 — your main {current.symbol} wallet, checked on-device</Text>
+                      </Flex>
+                      {primaryFind.balanceError
+                        ? <Text fontSize="sm" fontWeight="600" color="var(--rose)" flexShrink={0}>couldn’t verify</Text>
+                        : <Text fontSize="sm" fontWeight="700" color="var(--text-0)" flexShrink={0}>{fmtAmt(primaryFind.native)} {primaryFind.symbol}</Text>}
                     </Flex>
-                    <Text fontSize="xs" color="var(--text-2)" mb="3.5" lineHeight="1.55">An old wallet left these coins on a legacy path. We can sweep them safely to your main address — nothing leaves your device unsigned.</Text>
-                    {sweepPreview ? (
-                      <>
-                        <Box bg="var(--ink-1)" borderRadius="md" p="3" mb="3"><Flex justify="space-between"><Text fontSize="xs" color="var(--text-2)">You receive</Text><Text fontSize="xs" fontWeight="700" color="var(--gold)">{formatSats(sweepPreview.outputSats)}</Text></Flex></Box>
-                        <Flex gap="2"><Button flex="1" size="sm" variant="ghost" color="var(--text-2)" onClick={() => setSweepPreview(null)}>Back</Button><Button flex="1" size="sm" {...goldBtn} loading={sweeping} onClick={sweepConfirm}>Confirm & broadcast</Button></Flex>
-                      </>
-                    ) : <Button size="sm" {...goldBtn} loading={sweeping} onClick={sweepDryRun}>Sweep it to my main address</Button>}
+                    {primaryFind.xpubs?.length
+                      ? <XpubRows xpubs={primaryFind.xpubs} />
+                      : <Text fontSize="10px" color="var(--text-3)" fontFamily="mono" truncate mt="2" title={`${primaryFind.pathStr} · ${primaryFind.address}`}>{primaryFind.pathStr} · {primaryFind.address}</Text>}
                   </Box>
-                )}
-                {current.chainId === 'bitcoin' && report?.btcScanState === 'done' && report.btc.higherAccountMax > 0 && (
-                  <Button size="sm" w="100%" mb="4" {...goldBtn} loading={ladder.recovering} onClick={() => trackLevel(current, report.btc.higherAccountMax)}>Track Bitcoin accounts up to #{report.btc.higherAccountMax}</Button>
-                )}
-                {current.chainId === 'bitcoin' && report?.btcScanState === 'done' && report.btc.findings.length === 0 && (
-                  <Flex align="flex-start" gap="2.5" mb="4"><svg width="15" height="15" style={{ flexShrink: 0, marginTop: 2 }} viewBox="0 0 24 24" fill="none" stroke="var(--teal)" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg><Text fontSize="sm" color="var(--text-2)">No funds stranded on non-standard Bitcoin paths. Your BTC is fully accounted for.</Text></Flex>
                 )}
 
                 {/* unverified — offer a real, independent re-check of the primary
@@ -690,7 +683,15 @@ export function AuditDialog({ onClose, snapshot, isHidden, chainCatalog, chainAd
                     <Flex align="flex-start" gap="2.5"><svg width="15" height="15" style={{ flexShrink: 0, marginTop: 2 }} viewBox="0 0 24 24" fill="none" stroke="var(--teal)" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
                       <Text fontSize="sm" color="var(--text-2)">Checked {emptyFinds.length} more {emptyFinds.length === 1 ? 'account' : 'accounts'} — {emptyFinds.length === 1 ? 'it’s' : 'they’re'} empty. <Box as="button" color="var(--text-3)" textDecoration="underline" onClick={() => patchLadder(current.chainId, { showEmpties: !ladder.showEmpties })}>{ladder.showEmpties ? 'hide' : 'show'}</Box></Text>
                     </Flex>
-                    {ladder.showEmpties && <VStack gap="2" align="stretch" mt="2.5" maxH="180px" overflow="auto">{emptyFinds.map((a, i) => <AddrRow key={`s${i}`} chain={current} a={a} />)}</VStack>}
+                    {ladder.showEmpties && <VStack gap="2" align="stretch" mt="2.5" maxH="220px" overflow="auto">{emptyFinds.map((a, i) => <Box key={`s${i}`} css={{ animation: "auditRise 0.45s cubic-bezier(0.16,1,0.3,1) both", animationDelay: `${Math.min(i, 6) * 0.09}s` }}><AddrRow chain={current} a={a} /></Box>)}</VStack>}
+                  </Box>
+                )}
+
+                {/* Conclusion — held back until the accounts have streamed in, then
+                    revealed at the bottom (slow auto-scroll lands here). */}
+                {accountScannable && ladder.autoScanned && !scanningNow && (
+                  <Box mb="4" textAlign="center" css={{ animation: "auditRise 0.6s cubic-bezier(0.16,1,0.3,1) both", animationDelay: "0.32s" }}>
+                    <Text fontSize="sm" color="var(--text-1)" lineHeight="1.65">{statusCopy(current, accountScannable)}</Text>
                   </Box>
                 )}
 

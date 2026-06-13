@@ -7,12 +7,23 @@
  */
 import { useState, useRef, useEffect, useCallback } from "react"
 import { Box, Flex, Text, Button, VStack, Spinner } from "@chakra-ui/react"
-import { rpcRequest } from "../lib/rpc"
+import { rpcRequest, onRpcMessage } from "../lib/rpc"
 
 function formatSats(sats: number): string {
   if (sats >= 100_000_000) return (sats / 100_000_000).toFixed(8).replace(/0+$/, '').replace(/\.$/, '') + ' BTC'
   return sats.toLocaleString() + ' sats'
 }
+
+function scriptLabel(st: string): string {
+  if (st === 'p2pkh') return 'Legacy'
+  if (st === 'p2sh-p2wpkh') return 'SegWit'
+  if (st === 'p2wpkh') return 'Native SegWit'
+  return st
+}
+
+// Live progress streamed per-path from the backend (audit-sweep-progress).
+interface LiveProgress { current: string | null; scriptType: string; checked: number; total: number; found: number }
+const EMPTY_LIVE: LiveProgress = { current: null, scriptType: '', checked: 0, total: 0, found: 0 }
 
 type Mode = 'scripttype' | 'gaplimit'
 type Phase = 'idle' | 'scanning' | 'results' | 'sweeping' | 'done' | 'error'
@@ -28,25 +39,41 @@ export function AuditBtcDeep({ onRecovered }: AuditBtcDeepProps) {
   const [status, setStatus] = useState<any>(null)
   const [sweepResult, setSweepResult] = useState<any>(null)
   const [err, setErr] = useState<string | null>(null)
+  const [live, setLive] = useState<LiveProgress>(EMPTY_LIVE)
+  const [foundLog, setFoundLog] = useState<Array<{ pathStr: string; scriptType: string; balanceSats: number }>>([])
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const pollingRef = useRef(false)
+  const scanIdRef = useRef<string | null>(null)
 
   const stop = useCallback(() => { if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null } pollingRef.current = false }, [])
   useEffect(() => () => stop(), [stop])
 
+  // Stream each path the backend is checking (filtered to the active scan).
+  useEffect(() => onRpcMessage('audit-sweep-progress', (evt: any) => {
+    if (!scanIdRef.current || evt.scanId !== scanIdRef.current) return
+    if (evt.phase === 'deriving') {
+      setLive(l => ({ ...l, current: evt.pathStr, scriptType: evt.scriptType, checked: evt.current ?? l.checked, total: evt.total ?? l.total }))
+    } else if (evt.phase === 'found') {
+      setFoundLog(log => [{ pathStr: evt.pathStr, scriptType: evt.scriptType, balanceSats: evt.balanceSats ?? 0 }, ...log].slice(0, 8))
+      setLive(l => ({ ...l, found: l.found + 1 }))
+    }
+  }), [])
+
   const start = useCallback(async (m: Mode) => {
     stop()
     setMode(m); setPhase('scanning'); setErr(null); setStatus(null); setSweepResult(null); setScanId(null)
+    setLive(EMPTY_LIVE); setFoundLog([]); scanIdRef.current = null
     // higherAccountScanLimit:0 disables the standard higher-account (Category C)
     // probe — that's the main audit's "Track Bitcoin accounts" job. This panel
     // only surfaces sweepable non-standard finds, so the total never counts
     // higher-account funds we then can't show/sweep here.
+    // streamProgress: stream each path to the UI as it's checked.
     const config = m === 'scripttype'
-      ? { accountRange: [0, 4] as [number, number], mismatchAccounts: 3, higherAccountScanLimit: 0 }
-      : { accountRange: [0, 2] as [number, number], mismatchAccounts: 2, gapLimitReceive: 20, gapLimitChange: 5, higherAccountScanLimit: 0 }
+      ? { accountRange: [0, 4] as [number, number], mismatchAccounts: 3, higherAccountScanLimit: 0, streamProgress: true }
+      : { accountRange: [0, 2] as [number, number], mismatchAccounts: 2, gapLimitReceive: 20, gapLimitChange: 5, higherAccountScanLimit: 0, streamProgress: true }
     try {
       const { scanId: id } = await rpcRequest<{ scanId: string }>('sweepScan', config, 0)
-      setScanId(id)
+      setScanId(id); scanIdRef.current = id
       pollRef.current = setInterval(async () => {
         if (pollingRef.current) return
         pollingRef.current = true
@@ -96,18 +123,40 @@ export function AuditBtcDeep({ onRecovered }: AuditBtcDeepProps) {
         {phase !== 'scanning' && phase !== 'sweeping' && <Box as="button" fontSize="10px" color="kk.textMuted" onClick={() => { stop(); setPhase('idle') }}>reset</Box>}
       </Flex>
 
+      {phase === 'scanning' && (
+        <Text fontSize="11px" color="kk.textMuted" mb="2.5" lineHeight="1.5">
+          {mode === 'scripttype'
+            ? 'Checking your accounts under every other address style — coins from an old wallet that used a different format show up here.'
+            : 'Looking deeper into each account (receive addresses 0–19 and change), in case funds landed past the usual range.'}
+        </Text>
+      )}
+
       {err && <Text fontSize="xs" color="red.400" mb="2">{err}</Text>}
 
-      {phase === 'scanning' && status && (
-        <Flex align="center" gap="2">
-          <Spinner size="xs" color="kk.gold" />
-          <Text fontSize="xs" color="kk.textSecondary">
-            {status.progress?.phase === 'deriving' ? 'Deriving addresses…' : 'Checking balances…'} {status.progress?.current}/{status.progress?.total}
-            {status.totalFoundSats > 0 && ` — ${formatSats(status.totalFoundSats)} so far`}
-          </Text>
-        </Flex>
+      {phase === 'scanning' && (
+        <VStack align="stretch" gap="2">
+          <Flex align="center" gap="2">
+            <Spinner size="xs" color="kk.gold" />
+            <Text fontSize="xs" color="kk.textSecondary">
+              Checking path {live.checked || status?.progress?.current || 0}{(live.total || status?.progress?.total) ? ` of ${live.total || status.progress.total}` : ''}
+              {live.found > 0 && ` · ${live.found} with funds`}
+            </Text>
+          </Flex>
+          {live.current
+            ? <Text fontSize="10px" fontFamily="mono" color="kk.textMuted" truncate>{live.current} · {scriptLabel(live.scriptType)}</Text>
+            : <Text fontSize="10px" color="kk.textMuted">Starting scan…</Text>}
+          {foundLog.length > 0 && (
+            <VStack align="stretch" gap="1" maxH="84px" overflow="auto" pt="1" borderTop="1px solid" borderColor="kk.border">
+              {foundLog.map((f, i) => (
+                <Flex key={i} justify="space-between" gap="2">
+                  <Text fontSize="10px" fontFamily="mono" color="kk.gold" truncate maxW="220px">{f.pathStr} · {scriptLabel(f.scriptType)}</Text>
+                  <Text fontSize="10px" color="kk.gold" flexShrink={0}>{formatSats(f.balanceSats)}</Text>
+                </Flex>
+              ))}
+            </VStack>
+          )}
+        </VStack>
       )}
-      {phase === 'scanning' && !status && <Flex align="center" gap="2"><Spinner size="xs" color="kk.gold" /><Text fontSize="xs" color="kk.textSecondary">Starting scan…</Text></Flex>}
 
       {phase === 'results' && (
         nonStandard.length === 0

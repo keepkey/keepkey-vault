@@ -856,6 +856,10 @@ export interface AuditDerivedAddress {
   explorerUrl: string | null
   /** Tokens (ERC-20 etc.) found at this address — EVM level scans only. */
   tokens?: AuditToken[]
+  /** UTXO per-account xpubs, one per supported script type (legacy/segwit/
+   *  native-segwit). Shown as derivation proof; `address`/`pathStr` mirror the
+   *  first entry for back-compat. */
+  xpubs?: Array<{ scriptType: string; xpub: string; pathStr: string }>
   /** True when the balance lookup THREW — the address was derived but its balance
    *  is unknown. Must never be shown as a confident "0" (honesty rule). */
   balanceError?: boolean
