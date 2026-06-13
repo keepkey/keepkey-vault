@@ -52,6 +52,11 @@ export interface SweepScan {
   results: SweepAddress[]
   totalFoundSats: number
   error?: string
+  // Signing guard (set by the RPC layer for the audit recovery path): the wallet
+  // handle + seed identity captured when the scan ran. Re-checked before signing
+  // so UTXOs found under a since-replaced wallet/seed are never swept.
+  capturedWallet?: any
+  seedIdentity?: string | null
 }
 
 export interface SweepScanConfig {
@@ -59,7 +64,29 @@ export interface SweepScanConfig {
   mismatchAccounts?: number       // default 1
   currentMaxAccount?: number      // user's highest configured account index (default 0)
   higherAccountScanLimit?: number // scan standard combos up to this account index (default 9)
+  // Gap-limit expansion (audit "scan deeper indices"). Receive indices probed are
+  // 0..gapLimitReceive-1, change 0..gapLimitChange-1. Defaults preserve the prior
+  // hardcoded behaviour (Cat B receive 5 / Cat C receive 3, change 1).
+  gapLimitReceive?: number        // Category B receive depth (default 5)
+  gapLimitChange?: number         // change-branch depth for Cat B + Cat C (default 1)
+  higherReceiveLimit?: number     // Category C receive depth (default 3)
 }
+
+// Live per-path progress, emitted as each path is derived/checked so the UI can
+// stream what it's doing (rather than a bare current/total counter). Optional —
+// only wired when the caller asks (the audit "unusual paths" panel).
+export interface SweepProgressEvent {
+  scanId: string
+  phase: 'deriving' | 'found'
+  current?: number
+  total?: number
+  pathStr: string
+  scriptType: string
+  category?: PathEntry['category']
+  address?: string
+  balanceSats?: number
+}
+export type SweepProgressFn = (evt: SweepProgressEvent) => void
 
 // ── Scan store (in-memory) ─────────────────────────────────────────
 
@@ -71,7 +98,7 @@ export function getScan(id: string): SweepScan | undefined {
 
 // ── Path matrix generation ─────────────────────────────────────────
 
-interface PathEntry {
+export interface PathEntry {
   path: number[]
   pathStr: string
   scriptType: string
@@ -83,10 +110,13 @@ function pathToString(path: number[]): string {
   return 'm/' + path.map(p => p >= 0x80000000 ? `${p - 0x80000000}'` : String(p)).join('/')
 }
 
-function generatePathMatrix(config: SweepScanConfig): PathEntry[] {
+export function generatePathMatrix(config: SweepScanConfig): PathEntry[] {
   const entries: PathEntry[] = []
   const [acctMin, acctMax] = config.accountRange || [0, 4]
   const mismatchAccts = config.mismatchAccounts ?? 1
+  const gapReceive = Math.max(config.gapLimitReceive ?? 5, 1)
+  const gapChange = Math.max(config.gapLimitChange ?? 1, 0)
+  const higherReceive = Math.max(config.higherReceiveLimit ?? 3, 1)
 
   const scriptTypes = BTC_SCRIPT_TYPES.map(st => st.scriptType)
 
@@ -112,14 +142,16 @@ function generatePathMatrix(config: SweepScanConfig): PathEntry[] {
         // Skip standard combos
         if (STANDARD_COMBOS.has(`${st.purpose}:${encodeAs}`)) continue
 
-        // Receive indices 0-4
-        for (let idx = 0; idx < 5; idx++) {
+        // Receive indices 0..gapReceive-1
+        for (let idx = 0; idx < gapReceive; idx++) {
           const path = [...btcAccountPath(st.purpose, acct), 0, idx]
           entries.push({ path, pathStr: pathToString(path), scriptType: encodeAs, category: 'mismatch' })
         }
-        // Change index 0
-        const changePath = [...btcAccountPath(st.purpose, acct), 1, 0]
-        entries.push({ path: changePath, pathStr: pathToString(changePath), scriptType: encodeAs, category: 'mismatch' })
+        // Change indices 0..gapChange-1
+        for (let idx = 0; idx < gapChange; idx++) {
+          const changePath = [...btcAccountPath(st.purpose, acct), 1, idx]
+          entries.push({ path: changePath, pathStr: pathToString(changePath), scriptType: encodeAs, category: 'mismatch' })
+        }
       }
     }
   }
@@ -131,8 +163,8 @@ function generatePathMatrix(config: SweepScanConfig): PathEntry[] {
   for (let acct = currentMax + 1; acct <= higherLimit; acct++) {
     for (const st of BTC_SCRIPT_TYPES) {
       // Standard combo: purpose matches scriptType
-      // Probe receive indices 0-2 + change index 0 to catch funds beyond first address
-      for (let idx = 0; idx < 3; idx++) {
+      // Probe receive indices 0..higherReceive-1 + change to catch funds beyond first address
+      for (let idx = 0; idx < higherReceive; idx++) {
         const path = [...btcAccountPath(st.purpose, acct), 0, idx]
         entries.push({
           path,
@@ -142,14 +174,16 @@ function generatePathMatrix(config: SweepScanConfig): PathEntry[] {
           accountIndex: acct,
         })
       }
-      const changePath = [...btcAccountPath(st.purpose, acct), 1, 0]
-      entries.push({
-        path: changePath,
-        pathStr: pathToString(changePath),
-        scriptType: st.scriptType,
-        category: 'higher-account',
-        accountIndex: acct,
-      })
+      for (let idx = 0; idx < gapChange; idx++) {
+        const changePath = [...btcAccountPath(st.purpose, acct), 1, idx]
+        entries.push({
+          path: changePath,
+          pathStr: pathToString(changePath),
+          scriptType: st.scriptType,
+          category: 'higher-account',
+          accountIndex: acct,
+        })
+      }
     }
   }
 
@@ -170,28 +204,21 @@ async function deriveAddress(wallet: any, path: number[], scriptType: string): P
 
 // ── Balance & UTXO checking ────────────────────────────────────────
 
-async function checkAddressBalance(address: string): Promise<number> {
-  try {
-    const pioneer = await getPioneer()
-    const resp = await pioneer.GetBalanceAddressByNetwork({
-      networkId: BTC_NETWORK_ID,
-      address,
-    })
-    const data = resp?.data || resp
-    const balStr = data?.nativeBalance || data?.balance || '0'
-    // Balance comes as BTC string or satoshis — detect by magnitude
-    const val = parseFloat(balStr)
-    if (isNaN(val) || val === 0) return 0
-    // If value < 1, assume BTC; if >= 1 and looks like sats, use as-is
-    // Pioneer returns BTC for UTXO chains typically
-    return val < 21_000_000 ? Math.round(val * 1e8) : Math.round(val)
-  } catch (e: any) {
-    console.warn(`${TAG} Balance check failed for ${address}: ${e.message}`)
-    return 0
-  }
+// Per-address balance in satoshis, sourced from the UTXO set (ListUnspent).
+//
+// Do NOT use Pioneer's GetBalanceAddressByNetwork here. Despite the name, that
+// endpoint is EVM-only (route /evm/balance/{networkId}/{address} → ETH JSON-RPC):
+// passing a bip122 networkId + a Bitcoin address routes into the ETH provider,
+// which throws on the non-hex address, so it ALWAYS returned 0. The sweep/audit
+// gate is `balanceSats > 0`, so it never opened and funded BTC addresses were
+// silently missed. ListUnspent is the only Pioneer endpoint that serves Bitcoin,
+// and its UTXO `value` is integer satoshis — no unit guessing needed.
+export async function checkAddressBalance(address: string): Promise<number> {
+  const utxos = await fetchUtxos(address)
+  return utxos.reduce((sum, u) => sum + u.value, 0)
 }
 
-async function fetchUtxos(address: string): Promise<SweepUtxo[]> {
+export async function fetchUtxos(address: string): Promise<SweepUtxo[]> {
   try {
     // Pioneer's ListUnspent endpoint accepts both xpubs AND single addresses
     // (verified 2026-05-07). Path: /api/v1/utxo/unspent/{network}/{xpub-or-address}.
@@ -232,7 +259,7 @@ async function fetchTxHex(txid: string): Promise<string | undefined> {
 
 // ─�� Scan worker ────────────────────────────────────────────────────
 
-export async function startScan(wallet: any, config: SweepScanConfig = {}): Promise<string> {
+export async function startScan(wallet: any, config: SweepScanConfig = {}, onProgress?: SweepProgressFn): Promise<string> {
   const id = crypto.randomUUID()
   const matrix = generatePathMatrix(config)
 
@@ -247,7 +274,7 @@ export async function startScan(wallet: any, config: SweepScanConfig = {}): Prom
   scans.set(id, scan)
 
   // Run async — don't block the HTTP response
-  scanWorker(scan, wallet, matrix).catch(e => {
+  scanWorker(scan, wallet, matrix, onProgress).catch(e => {
     scan.status = 'error'
     scan.error = e.message
     console.error(`${TAG} Scan ${id} failed:`, e)
@@ -256,7 +283,7 @@ export async function startScan(wallet: any, config: SweepScanConfig = {}): Prom
   return id
 }
 
-async function scanWorker(scan: SweepScan, wallet: any, matrix: PathEntry[]): Promise<void> {
+async function scanWorker(scan: SweepScan, wallet: any, matrix: PathEntry[], onProgress?: SweepProgressFn): Promise<void> {
   console.log(`${TAG} Scan ${scan.id}: deriving ${matrix.length} addresses...`)
 
   // Phase 1: Derive all addresses from device (sequential — USB is serial)
@@ -265,6 +292,8 @@ async function scanWorker(scan: SweepScan, wallet: any, matrix: PathEntry[]): Pr
 
   for (let i = 0; i < matrix.length; i++) {
     const entry = matrix[i]
+    // Tell the UI which path we're about to check, before the device round-trip.
+    onProgress?.({ scanId: scan.id, phase: 'deriving', current: i + 1, total: matrix.length, pathStr: entry.pathStr, scriptType: entry.scriptType, category: entry.category })
     try {
       const address = await deriveAddress(wallet, entry.path, entry.scriptType)
       if (address) {
@@ -292,6 +321,7 @@ async function scanWorker(scan: SweepScan, wallet: any, matrix: PathEntry[]): Pr
     for (const r of results) {
       if (r.balanceSats > 0) {
         console.log(`${TAG} FOUND: ${r.address} (${r.pathStr} as ${r.scriptType}) [${r.category}] = ${r.balanceSats} sats`)
+        onProgress?.({ scanId: scan.id, phase: 'found', pathStr: r.pathStr, scriptType: r.scriptType, category: r.category, address: r.address, balanceSats: r.balanceSats })
         const utxos = await fetchUtxos(r.address)
         scan.results.push({
           path: r.path,

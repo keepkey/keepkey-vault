@@ -132,11 +132,13 @@ import { initDb, factoryResetDb, getCustomTokens, addCustomToken as dbAddCustomT
 import type { OwnAddressSeed } from "./db"
 import { rectifyWallet, getLedgerSummary, getLedgerJournals } from "./ledger"
 import { generateReport, reportToPdfBuffer, reportToCsv } from "./reports"
+import { startAudit, startBtcScan, getAudit, getAuditBtcRaw, getAuditEntry, dismissAudit, markAuditsStale, type AuditDeps } from "./audit-engine"
+import { chainSupportsDeepScan, chainSupportsLevelScan, chainLevelPath, deriveAddressParams, extractAddress, parseNativeScanResult, parseEvmScanResult, utxoAccountScriptPaths, explorerAddressUrl, pathToBip32 } from "./chain-scan"
 import { extractTransactionsFromReport, toCoinTrackerCsv, toZenLedgerCsv } from "./tax-export"
 import * as os from "os"
 import * as path from "path"
 import { EVM_RPC_URLS, getTokenMetadata, broadcastEvmTx } from "./evm-rpc"
-import type { ChainBalance, TokenBalance, CustomToken, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, EvmAddressSet, Bip85SeedMeta, StakingPosition, SwapAsset } from "../shared/types"
+import type { ChainBalance, TokenBalance, CustomToken, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, EvmAddressSet, Bip85SeedMeta, StakingPosition, SwapAsset, AuditToken } from "../shared/types"
 import type { VaultRPCSchema } from "../shared/rpc-schema"
 
 // L3 fix: withTimeout imported from engine-controller (was duplicated here)
@@ -205,6 +207,62 @@ function unwrapPortfolioResponse(resp: any): { entries: any[]; meta: PortfolioMe
 	const entries = rawData.balances || (Array.isArray(rawData) ? rawData : [])
 	const meta: PortfolioMeta | null = rawData.meta ?? null
 	return { entries, meta }
+}
+
+// Native balance for a single derived address on ANY family, via the
+// cross-family GetPortfolioBalances path (what the dashboard uses for every
+// chain). Replaces the audit's former GetBalanceAddressByNetwork calls, which
+// were EVM-only (route /evm/balance → ETH JSON-RPC) and 500'd for any non-EVM
+// networkId (bip122/cosmos/ripple), so BTC/DOGE/XRP/Cosmos balances read 0.
+async function auditNativeBalance(
+  chain: { caip: string; id: string },
+  address: string,
+): Promise<{ native: string; hasBalance: boolean; balanceError: boolean }> {
+  try {
+    const pioneer = await getPioneer()
+    const resp = await withTimeout(
+      pioneer.GetPortfolioBalances({ pubkeys: [{ caip: chain.caip, pubkey: address }] }, { forceRefresh: true }),
+      PIONEER_TIMEOUT_MS, `audit balance ${chain.id}`,
+    )
+    const { entries, meta } = unwrapPortfolioResponse(resp)
+    const { native, hasBalance } = parseNativeScanResult(entries, chain.caip)
+    // degraded + nothing found = unverified, not a confident zero (honesty rule).
+    if (!hasBalance && meta?.degraded) return { native: '0', hasBalance: false, balanceError: true }
+    return { native, hasBalance, balanceError: false }
+  } catch (e: any) {
+    console.warn(`[audit] balance ${chain.id} failed: ${e?.message}`)
+    return { native: '0', hasBalance: false, balanceError: true }
+  }
+}
+
+// Balance for one derived address, EVM-token-aware. EVM addresses are read via
+// GetPortfolioBalances + parseEvmScanResult so a token-only account ($0 native
+// but e.g. $500 USDC) is surfaced as FUNDED — not a false "empty". Non-EVM falls
+// back to the native-only path. The single shared entry point for every audit
+// address scan (levels, known-paths grid, custom-path search) so they can't
+// disagree the way the native-only path silently dropped token-only EVM funds.
+async function auditBalanceForAddress(
+  chain: { caip: string; id: string; chainFamily?: string },
+  address: string,
+): Promise<{ native: string; hasBalance: boolean; balanceError: boolean; tokens?: AuditToken[] }> {
+  if (chain.chainFamily !== 'evm') return await auditNativeBalance(chain, address)
+  try {
+    const pioneer = await getPioneer()
+    // GetPortfolioBalances can return 200 with DEGRADED data — for a single-caip
+    // query meta.degraded means THIS chain's fresh fetch failed, so an empty
+    // result is "couldn't verify", NOT a clean $0 (honesty rule).
+    const resp = await withTimeout(
+      pioneer.GetPortfolioBalances({ pubkeys: [{ caip: chain.caip, pubkey: address }] }, { forceRefresh: true }),
+      PIONEER_TIMEOUT_MS, `audit EVM balance ${chain.id}`,
+    )
+    const { entries, meta } = unwrapPortfolioResponse(resp)
+    const parsed = parseEvmScanResult(entries)
+    if (!parsed.hasBalance && meta?.degraded) return { native: '0', hasBalance: false, balanceError: true }
+    return { native: parsed.native, hasBalance: parsed.hasBalance, balanceError: false, tokens: parsed.tokens.length ? parsed.tokens : undefined }
+  } catch (e: any) {
+    console.warn(`[audit] EVM balance ${chain.id} failed: ${e?.message}`)
+    return { native: '0', hasBalance: false, balanceError: true }
+  }
 }
 
 function mergeMetas(metas: PortfolioMeta[]): PortfolioMeta {
@@ -883,6 +941,9 @@ function reconcileSeedManagers(truth: string | null | undefined, source: string)
 		} catch { /* non-fatal */ }
 	}
 	try { rpc.send['wallet-data-purged']({ reason: source }) } catch { /* webview not ready */ }
+	// An open Audit wizard's findings are no longer authoritative once the seed
+	// changed underneath it — mark its run stale so the UI prompts a re-run.
+	markAuditsStale(source)
 	return true
 }
 
@@ -1910,15 +1971,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// all so Pioneer reports balances from every address type.
 				const utxoPubKeyPaths: Array<{ chain: typeof utxoChains[0]; scriptType: string; path: number[] }> = []
 				for (const c of utxoChains) {
-					const scriptTypes = c.id === 'litecoin'
-						? [{ scriptType: 'p2pkh', purpose: 44 }, { scriptType: 'p2sh-p2wpkh', purpose: 49 }, { scriptType: 'p2wpkh', purpose: 84 }]
-						: [{ scriptType: c.scriptType || 'p2pkh', purpose: 44 }]
-					for (const st of scriptTypes) {
-						utxoPubKeyPaths.push({
-							chain: c,
-							scriptType: st.scriptType,
-							path: [st.purpose + 0x80000000, c.defaultPath[1], 0x80000000],
-						})
+					for (const sp of utxoAccountScriptPaths(c, 0)) {
+						utxoPubKeyPaths.push({ chain: c, scriptType: sp.scriptType, path: sp.path })
 					}
 				}
 				let xpubResults: any[] = []
@@ -2542,26 +2596,36 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					// renders a soft banner (data shown but suspect); 'none' clears it. Hard
 					// failures still throw → severity 'error' in the catch below.
 					try {
-						const chainSymbol = (id: string) => allChains.find(c => c.id === id)?.symbol || id
-						const caipToName = (caip: string) => {
+						const caipToChain = (caip: string) => {
 							const prefix = (caip.split('/')[0] || '').toLowerCase()
 							const chainId = networkToChain.get(prefix)
-							const ch = chainId ? allChains.find(c => c.id === chainId) : allChains.find(c => c.networkId?.toLowerCase() === prefix)
+							return chainId ? allChains.find(c => c.id === chainId) : allChains.find(c => c.networkId?.toLowerCase() === prefix)
+						}
+						const chainSymbol = (id: string) => allChains.find(c => c.id === id)?.symbol || id
+						const caipToName = (caip: string) => {
+							const ch = caipToChain(caip)
 							return ch?.symbol || ch?.name || (caip.split(':')[0] || caip)
 						}
 						// Chains whose every pubkey landed in a failed chunk (timeout/error) are
 						// degraded from the vault's view even when the server meta is clean.
-						const chunkDegraded = [...new Set(pubkeys.map(p => p.chainId))]
-							.filter(id => !confirmedChainIds.has(id))
-							.map(chainSymbol)
-						const degradedChains = [...new Set([...chunkDegraded, ...portfolioMeta.failures.map(f => caipToName(f.caip))])].filter(Boolean)
+						const chunkDegradedIds = [...new Set(pubkeys.map(p => p.chainId))].filter(id => !confirmedChainIds.has(id))
+						const degradedChains = [...new Set([...chunkDegradedIds.map(chainSymbol), ...portfolioMeta.failures.map(f => caipToName(f.caip))])].filter(Boolean)
 						const staleChains = [...new Set(portfolioMeta.staleChains.map(s => caipToName(s.caip)))].filter(Boolean)
+						// chainId-granular fault sets for the Audit wizard (symbol arrays above
+						// drive the banner; symbols collide across chains so the audit needs ids).
+						// unresolvedFaultCount = faults that couldn't be mapped to a known chain,
+						// so an unmappable fault still forbids a false "all clear".
+						const degradedChainIds = new Set<string>(chunkDegradedIds)
+						const staleChainIds = new Set<string>()
+						let unresolvedFaultCount = 0
+						for (const f of portfolioMeta.failures) { const ch = caipToChain(f.caip); if (ch) degradedChainIds.add(ch.id); else unresolvedFaultCount++ }
+						for (const s of portfolioMeta.staleChains) { const ch = caipToChain(s.caip); if (ch) staleChainIds.add(ch.id); else unresolvedFaultCount++ }
 						const staleMinutes = portfolioMeta.staleChains.length
 							? Math.floor(Math.max(...portfolioMeta.staleChains.map(s => s.ageMs || 0)) / 60000)
 							: 0
 						if (degradedChains.length > 0 || staleChains.length > 0) {
 							console.warn(`[getBalances] Fault: degraded=[${degradedChains.join(', ')}] stale=[${staleChains.join(', ')}] (${staleMinutes}m)`)
-							rpc.send['pioneer-error']({ message: '', url: getPioneerApiBase(), severity: 'warning', degradedChains, staleChains, staleMinutes })
+							rpc.send['pioneer-error']({ message: '', url: getPioneerApiBase(), severity: 'warning', degradedChains, staleChains, staleMinutes, degradedChainIds: [...degradedChainIds], staleChainIds: [...staleChainIds], unresolvedFaultCount })
 						} else {
 							rpc.send['pioneer-error']({ message: '', url: getPioneerApiBase(), severity: 'none' })
 						}
@@ -5270,13 +5334,28 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			// ── Sweep (non-standard BTC path recovery) ──────────────
 			sweepScan: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
-				const { startScan } = await import('./sweep-engine')
+				const { startScan, getScan } = await import('./sweep-engine')
+				// Capture the signing guard BEFORE starting the scan worker — USB is
+				// serial, so deriving the seed identity after startScan would race the
+				// worker's device calls. Re-checked in sweepExecute before signing.
+				const capturedWallet = engine.wallet
+				const seedIdentity = await engine.deriveSeedIdentity().catch(() => null)
+				// streamProgress (audit "unusual paths" panel): push each path to the
+				// WebView as it's derived/checked so the user sees what's happening.
+				const onProgress = params.streamProgress
+					? (evt: any) => { try { rpc.send['audit-sweep-progress'](evt) } catch { /* webview not ready */ } }
+					: undefined
 				const scanId = await startScan(engine.wallet, {
 					accountRange: params.accountRange,
 					mismatchAccounts: params.mismatchAccounts,
 					currentMaxAccount: params.currentMaxAccount,
 					higherAccountScanLimit: params.higherAccountScanLimit,
-				})
+					gapLimitReceive: params.gapLimitReceive,
+					gapLimitChange: params.gapLimitChange,
+					higherReceiveLimit: params.higherReceiveLimit,
+				}, onProgress)
+				const scan = getScan(scanId)
+				if (scan) { scan.capturedWallet = capturedWallet; scan.seedIdentity = seedIdentity }
 				return { scanId }
 			},
 			sweepGetStatus: async (params) => {
@@ -5326,6 +5405,24 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					return { dryRun: true, destination, inputCount: sweepResult.inputCount, totalSweptSats: sweepResult.totalInputSats, fee: sweepResult.fee, outputSats: sweepResult.totalInputSats - sweepResult.fee, unsignedTx: sweepResult.unsignedTx }
 				}
 
+				// Gen-guard before signing: never sign UTXOs discovered under a
+				// since-replaced wallet/seed (device swap OR a same-handle passphrase
+				// toggle, which reuses engine.wallet so the handle check alone misses it).
+				if (scan.capturedWallet && scan.capturedWallet !== engine.wallet) {
+					throw new Error('Device changed since this scan ran — please re-scan before sweeping')
+				}
+				// Fail CLOSED if the seed identity couldn't be captured when the scan ran:
+				// with no baseline we can't prove the seed is unchanged, and a recovery
+				// sweep must never sign what it can't verify (a same-handle passphrase
+				// toggle would otherwise pass the handle check above).
+				if (!scan.seedIdentity) {
+					throw new Error('Could not verify the wallet for this scan — please re-scan before sweeping')
+				}
+				const liveSeedIdentity = await engine.deriveSeedIdentity().catch(() => null)
+				if (!liveSeedIdentity || liveSeedIdentity.toLowerCase() !== scan.seedIdentity.toLowerCase()) {
+					throw new Error('Wallet seed changed since this scan ran — please re-scan before sweeping')
+				}
+
 				const signedTx = await engine.wallet.btcSignTx(sweepResult.unsignedTx)
 				const serializedTx = signedTx?.serializedTx || signedTx?.serialized
 				if (!serializedTx) throw new Error('Device signing failed')
@@ -5338,6 +5435,264 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!txid) throw new Error(`Broadcast failed: ${JSON.stringify(bdata).slice(0, 200)}`)
 
 				return { txid, destination, inputCount: sweepResult.inputCount, totalSweptSats: sweepResult.totalInputSats, fee: sweepResult.fee, outputSats: sweepResult.totalInputSats - sweepResult.fee }
+			},
+
+			// ── Balance Audit (multi-chain "where's my money" wizard) ────
+			auditStart: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				if (engine.getDeviceState().state !== 'ready') throw new Error('Device not ready')
+				const wallet = engine.wallet
+				const fwVersion = engine.getDeviceState().firmwareVersion
+				const enabledChains = getAllChains().filter(c => {
+					if (!isChainSupported(c, fwVersion)) return false
+					if ((c.id === 'zcash' || c.id === 'zcash-shielded') && !zcashPrivacyEnabled) return false
+					return true
+				})
+				const coverageChains = enabledChains.map(c => ({ chainId: c.id, symbol: c.symbol, chainFamily: c.chainFamily }))
+				const btcMax = btcAccounts.isInitialized && btcAccounts.toAccountSet().accounts.length > 0
+					? Math.max(...btcAccounts.toAccountSet().accounts.map(a => a.accountIndex))
+					: 0
+				// Fast: identity + coverage only. BTC paths scan lazily on the Bitcoin
+				// page (auditScanBtc); EVM/other accounts scan lazily per page. No up-front sweeps.
+				const deps: AuditDeps = {
+					wallet,
+					currentWallet: () => engine.wallet,
+					deriveSeedIdentity: () => engine.deriveSeedIdentity(),
+					evmIdx0: () => (evmAddresses.isInitialized ? (evmAddresses.getAddressByIndex(0)?.address ?? null) : null),
+					coverageChains,
+					btcCurrentMaxAccount: btcMax,
+					isHidden: engine.isPassphraseWallet,
+					deviceId: engine.getDeviceState().deviceId || 'unknown',
+				}
+				const snapshot = params?.snapshot || { chains: [], degradedChainIds: [], staleChainIds: [], unresolvedFaultCount: 0 }
+				const auditId = startAudit(deps, params?.mode === 'deep' ? 'deep' : 'light', snapshot)
+				return { auditId }
+			},
+			// Lazy Bitcoin path scan — triggered when the user opens the Bitcoin page.
+			auditScanBtc: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				if (engine.getDeviceState().state !== 'ready') throw new Error('Device not ready')
+				if (!startBtcScan(params.auditId)) throw new Error('Audit not found')
+				return { started: true }
+			},
+			auditGetStatus: async (params) => {
+				const report = getAudit(params.auditId)
+				if (!report) throw new Error('Audit not found')
+				return report
+			},
+			// Recover BTC found on non-standard paths / account-level keys (higher
+			// accounts are recovered via addBtcAccount, not swept). Gen-guarded so
+			// stale-seed UTXOs from a since-replaced wallet are never signed.
+			auditSweep: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				const entry = getAuditEntry(params.auditId)
+				if (!entry) throw new Error('Audit not found')
+				// Gen-guard 1: device handle replaced (reconnect/purge).
+				if (entry.capturedWallet !== engine.wallet) {
+					throw new Error('Device changed since this audit ran — re-run the audit')
+				}
+				// Gen-guard 2: the audit must have completed cleanly (not stale/aborted).
+				if (entry.report.status !== 'complete') {
+					throw new Error('Audit is no longer current — re-run the audit')
+				}
+				// Gen-guard 3: a same-handle seed change (passphrase toggle) reuses
+				// engine.wallet, so the object check above can't see it. Re-derive the
+				// live seed identity and refuse if it differs from the scan's — never
+				// sign UTXOs captured under a since-replaced seed.
+				const liveIdentity = await engine.deriveSeedIdentity()
+				if (entry.report.seedIdentity && (!liveIdentity || liveIdentity.toLowerCase() !== entry.report.seedIdentity.toLowerCase())) {
+					throw new Error('Wallet seed changed since this audit ran — re-run the audit')
+				}
+				const raw = getAuditBtcRaw(params.auditId)
+				if (!raw || raw.length === 0) throw new Error('No funds found to sweep')
+
+				const { buildSweepTx } = await import('./sweep-engine')
+				let destination = params.destinationAddress
+				if (!destination) {
+					const result = await engine.wallet.btcGetAddress({
+						addressNList: [0x80000054, 0x80000000, 0x80000000, 0, 0],
+						coin: 'Bitcoin', scriptType: 'p2wpkh', showDisplay: false,
+					})
+					destination = typeof result === 'string' ? result : result?.address
+					if (!destination) throw new Error('Could not derive standard BTC receive address')
+				}
+
+				// buildSweepTx only reads scan.results — hand it the audit's raw findings.
+				const sweepResult = await buildSweepTx({ results: raw } as any, destination)
+
+				if (params.dryRun) {
+					return { dryRun: true, destination, inputCount: sweepResult.inputCount, totalSweptSats: sweepResult.totalInputSats, fee: sweepResult.fee, outputSats: sweepResult.totalInputSats - sweepResult.fee }
+				}
+
+				const signedTx = await engine.wallet.btcSignTx(sweepResult.unsignedTx)
+				const serializedTx = signedTx?.serializedTx || signedTx?.serialized
+				if (!serializedTx) throw new Error('Device signing failed')
+
+				const pioneer = await getPioneer()
+				const broadcastResp = await pioneer.Broadcast({ networkId: 'bip122:000000000019d6689c085ae165831e93', serialized: serializedTx })
+				const bdata = broadcastResp?.data || broadcastResp
+				const txid = bdata?.txid || bdata?.tx_hash || bdata?.hash
+				if (!txid) throw new Error(`Broadcast failed: ${JSON.stringify(bdata).slice(0, 200)}`)
+				return { txid, destination, inputCount: sweepResult.inputCount, totalSweptSats: sweepResult.totalInputSats, fee: sweepResult.fee, outputSats: sweepResult.totalInputSats - sweepResult.fee }
+			},
+			auditDismiss: async (params) => {
+				dismissAudit(params.auditId)
+			},
+
+			// Per-chain walkthrough: derive `count` addresses for `chainId` starting
+			// at account/index `fromLevel`, balance-check each via Pioneer. Read-only
+			// (no signing). Gen-guarded so a mid-scan device swap stops cleanly.
+			auditScanLevels: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				if (engine.getDeviceState().state !== 'ready') throw new Error('Device not ready')
+				const chain = getAllChains().find(c => c.id === params.chainId)
+				if (!chain) throw new Error(`Unknown chain: ${params.chainId}`)
+				if (!chainSupportsLevelScan(chain)) throw new Error(`${chain.symbol} can't be account-scanned`)
+				const captured = engine.wallet
+				const count = Math.min(Math.max(params.count ?? 3, 1), 10)
+				const from = Math.max(params.fromLevel ?? 0, 0)
+				const results: any[] = []
+				for (let i = 0; i < count; i++) {
+					if (engine.wallet !== captured) break // device changed — stop
+					const level = from + i
+					const path = chainLevelPath(chain, level)
+					const { method, params: dp } = deriveAddressParams(chain, path)
+					let address = ''
+					try { address = extractAddress(await (engine.wallet as any)[method](dp)) } catch (e: any) {
+						console.warn(`[audit] scan ${chain.id} L${level} derive failed: ${e?.message}`)
+						continue
+					}
+					if (!address) continue
+					const { native, hasBalance, balanceError, tokens } = await auditBalanceForAddress(chain, address)
+					results.push({ level, pathStr: pathToBip32(path), address, native, symbol: chain.symbol, hasBalance, balanceError, tokens, explorerUrl: explorerAddressUrl(chain, address) })
+				}
+				return { results }
+			},
+			// UTXO multi-account scan: for non-BTC UTXO chains (DOGE/LTC/BCH/DASH/DGB),
+			// derive each account's xpub(s) and balance-check via Pioneer's xpub gap
+			// scan (GetPortfolioBalances) — the path the dashboard uses for account 0.
+			// xpub-based (not single-address), so it correctly reads a UTXO account tree.
+			auditScanUtxoAccounts: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				if (engine.getDeviceState().state !== 'ready') throw new Error('Device not ready')
+				const chain = getAllChains().find(c => c.id === params.chainId)
+				if (!chain) throw new Error(`Unknown chain: ${params.chainId}`)
+				if (chain.chainFamily !== 'utxo') throw new Error(`${chain.symbol} is not a UTXO chain`)
+				const captured = engine.wallet
+				const count = Math.min(Math.max(params.count ?? 3, 1), 10)
+				const from = Math.max(params.fromLevel ?? 0, 0)
+				const prefix = (chain.caip || '').split('/')[0]
+				const results: any[] = []
+				for (let i = 0; i < count; i++) {
+					if (engine.wallet !== captured) break // device changed — stop
+					const account = from + i
+					const sps = utxoAccountScriptPaths(chain, account)
+					// Derive every script type's xpub (legacy/segwit/native-segwit) and
+					// keep them aligned to their path so the UI can show each as proof.
+					let xpubMeta: Array<{ scriptType: string; xpub: string; pathStr: string }> = []
+					try {
+						const pks = await (engine.wallet as any).getPublicKeys(sps.map(sp => ({ addressNList: sp.path, coin: chain.coin, scriptType: sp.scriptType, curve: 'secp256k1' })))
+						xpubMeta = sps
+							.map((sp, idx) => ({ scriptType: sp.scriptType, xpub: (pks?.[idx] as any)?.xpub as string, pathStr: pathToBip32(sp.path) }))
+							.filter(m => !!m.xpub)
+					} catch (e: any) {
+						console.warn(`[audit] utxo-acct ${chain.id} #${account} xpub derive failed: ${e?.message}`)
+						continue
+					}
+					if (!xpubMeta.length) continue
+					const xpubs = xpubMeta.map(m => m.xpub)
+					let native = '0', hasBalance = false, balanceError = false
+					try {
+						const pioneer = await getPioneer()
+						const resp = await withTimeout(
+							pioneer.GetPortfolioBalances({ pubkeys: xpubs.map(x => ({ caip: chain.caip, pubkey: x })) }, { forceRefresh: true }),
+							PIONEER_TIMEOUT_MS, `audit utxo-acct ${chain.id}`,
+						)
+						const { entries, meta } = unwrapPortfolioResponse(resp)
+						const natives = (Array.isArray(entries) ? entries : []).filter((e: any) => String(e?.caip || '').split('/')[0] === prefix)
+						const total = natives.reduce((acc: number, e: any) => acc + (parseFloat(String(e?.balance ?? '0')) || 0), 0)
+						native = String(total)
+						hasBalance = total > 0
+						if (!hasBalance && meta?.degraded) balanceError = true // unverified, not a confident zero
+					} catch (e: any) {
+						console.warn(`[audit] utxo-acct ${chain.id} #${account} balance failed: ${e?.message}`)
+						balanceError = true
+					}
+					results.push({ level: account, pathStr: xpubMeta[0].pathStr, address: xpubMeta[0].xpub, xpubs: xpubMeta, native, symbol: chain.symbol, hasBalance, balanceError, explorerUrl: null })
+				}
+				return { results }
+			},
+			// Derive + balance-check one user-supplied path (custom-path search).
+			auditDeriveCustom: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				if (engine.getDeviceState().state !== 'ready') throw new Error('Device not ready')
+				const chain = getAllChains().find(c => c.id === params.chainId)
+				if (!chain) throw new Error(`Unknown chain: ${params.chainId}`)
+				if (!chainSupportsDeepScan(chain)) throw new Error(`${chain.symbol} doesn't support custom-path search`)
+				const path = params.addressNList
+				if (!Array.isArray(path) || path.length < 2 || path.length > 10 || path.some(n => !Number.isInteger(n) || n < 0)) {
+					throw new Error('Invalid derivation path')
+				}
+				const { method, params: dp } = deriveAddressParams(chain, path)
+				if (params.scriptType) dp.scriptType = params.scriptType
+				const address = extractAddress(await (engine.wallet as any)[method](dp))
+				if (!address) throw new Error('Device returned no address for that path')
+				const { native, hasBalance, balanceError, tokens } = await auditBalanceForAddress(chain, address)
+				return { pathStr: pathToBip32(path), address, native, symbol: chain.symbol, hasBalance, balanceError, tokens, explorerUrl: explorerAddressUrl(chain, address) }
+			},
+			// Batch derive + balance-check a list of explicit paths (EVM known-paths
+			// grid). Read-only, gen-guarded.
+			auditScanPaths: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				if (engine.getDeviceState().state !== 'ready') throw new Error('Device not ready')
+				const chain = getAllChains().find(c => c.id === params.chainId)
+				if (!chain) throw new Error(`Unknown chain: ${params.chainId}`)
+				if (!chainSupportsDeepScan(chain)) throw new Error(`${chain.symbol} doesn't support path scanning`)
+				const captured = engine.wallet
+				const paths = (params.paths || []).slice(0, 40)
+				const results: any[] = []
+				for (const path of paths) {
+					if (engine.wallet !== captured) break
+					if (!Array.isArray(path) || path.length < 2 || path.length > 10 || path.some(n => !Number.isInteger(n) || n < 0)) continue
+					const { method, params: dp } = deriveAddressParams(chain, path)
+					if (params.scriptType) dp.scriptType = params.scriptType
+					let address = ''
+					try { address = extractAddress(await (engine.wallet as any)[method](dp)) } catch { continue }
+					if (!address) continue
+					const { native, hasBalance, balanceError, tokens } = await auditBalanceForAddress(chain, address)
+					results.push({ pathStr: pathToBip32(path), address, native, symbol: chain.symbol, hasBalance, balanceError, tokens, explorerUrl: explorerAddressUrl(chain, address) })
+				}
+				return { results }
+			},
+			// Raw-path inspector: derive an address + its pubkey/xpub + balance for a
+			// power user verifying derivations. Read-only.
+			auditInspectPath: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				if (engine.getDeviceState().state !== 'ready') throw new Error('Device not ready')
+				const chain = getAllChains().find(c => c.id === params.chainId)
+				if (!chain) throw new Error(`Unknown chain: ${params.chainId}`)
+				if (!chainSupportsDeepScan(chain)) throw new Error(`${chain.symbol} doesn't support path inspection`)
+				const path = params.addressNList
+				if (!Array.isArray(path) || path.length < 2 || path.length > 10 || path.some(n => !Number.isInteger(n) || n < 0)) {
+					throw new Error('Invalid derivation path')
+				}
+				const { method, params: dp } = deriveAddressParams(chain, path)
+				if (params.scriptType) dp.scriptType = params.scriptType
+				const address = extractAddress(await (engine.wallet as any)[method](dp))
+				if (!address) throw new Error('Device returned no address for that path')
+				// Pubkey/xpub via getPublicKeys (best-effort — not all curves/paths return both).
+				let pubkey: string | null = null, xpub: string | null = null
+				try {
+					const pk = await engine.wallet.getPublicKeys([{ addressNList: path, coin: chain.coin, scriptType: chain.scriptType, curve: 'secp256k1' }])
+					const entry = pk?.[0]
+					xpub = entry?.xpub || null
+					const raw = entry?.publicKey
+					pubkey = raw instanceof Uint8Array ? Buffer.from(raw).toString('base64') : (typeof raw === 'string' ? raw : null)
+				} catch (e: any) {
+					console.warn(`[audit] inspect ${chain.id} getPublicKeys failed: ${e?.message}`)
+				}
+				const { native, hasBalance, balanceError } = await auditNativeBalance(chain, address)
+				return { pathStr: pathToBip32(path), address, pubkey, xpub, native, symbol: chain.symbol, hasBalance, balanceError, explorerUrl: explorerAddressUrl(chain, address) }
 			},
 
 			// ── Emulator (macOS only, feature-flagged off by default) ────
@@ -6159,6 +6514,15 @@ engine.on('state-change', (state) => {
 		// guards (isPassphraseWallet checks) prevent hidden wallet data from ever
 		// reaching the DB during the session.
 		console.log('[Vault] Passphrase mode: reset in-memory address managers — will re-derive after passphrase entry')
+		// An open Audit run belongs to the pre-passphrase seed — mark it stale AND
+		// push an audit-specific signal so the wizard stops and prompts a re-run
+		// instead of mixing seeds. markAuditsStale alone is invisible to a COMPLETED
+		// audit (status stays 'complete' and the dialog has stopped polling). We use
+		// the dedicated 'audit-stale' push, NOT wallet-data-purged: needs_passphrase
+		// fires on every passphrase-protected unlock (incl. the standard
+		// empty-passphrase wallet) and must not churn the dashboard cache.
+		markAuditsStale('needs_passphrase')
+		try { rpc.send['audit-stale']({ reason: 'needs_passphrase' }) } catch { /* webview not ready */ }
 	}
 })
 engine.on('wallet-scope-ready', ({ deviceId, seedAddress }) => {
@@ -6190,6 +6554,11 @@ engine.on('seed-changed', ({ deviceId, oldAddress, newAddress }) => {
 		clearBalances(deviceId)
 		console.log('[Vault] Seed changed: cleared cached pubkeys + balances for', deviceId)
 	}
+	// The old seed's balances are now wrong: clear the dashboard's displayed
+	// balances and invalidate any open Audit run (mirrors the reconciliation purge
+	// path so the wizard can't mix an old report with new-seed scans).
+	try { rpc.send['wallet-data-purged']({ reason: 'seed-changed' }) } catch { /* webview not ready */ }
+	markAuditsStale('seed-changed')
 	// Push fresh state to frontend so it re-renders
 	try { rpc.send['device-state'](engine.getDeviceState()) } catch {}
 })

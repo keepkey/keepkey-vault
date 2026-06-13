@@ -383,11 +383,13 @@ export function DeviceGrid({ onViewPortfolio, onReady, emulatorEnabled = false }
 					<line x1="12" y1="17" x2="12.01" y2="17" />
 				</svg>
 				<Text
-					as="a"
-					{...({ href: SUPPORT_URL, target: "_blank", rel: "noopener noreferrer" } as any)}
+					as="button"
+					onClick={() => rpcRequest("openUrl", { url: SUPPORT_URL }).catch((e: any) => console.warn("[openUrl]", e?.message))}
+					cursor="pointer"
 					fontSize="11px"
 					color="var(--text-2)"
 					letterSpacing="0.04em"
+					bg="transparent"
 					_hover={{ color: "var(--gold)" }}
 				>
 					Trouble connecting? Visit support

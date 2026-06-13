@@ -746,6 +746,139 @@ export type ReportSection =
   | { title: string; type: 'list'; data: string[] }
   | { title: string; type: 'text'; data: string }
 
+// ── Balance Audit (multi-chain "where's my money" wizard) ───────────────
+// Diagnose + recover funds a worried user expects but doesn't see: BTC on
+// non-standard paths / un-added accounts, EVM funds on higher indices, and
+// chains that silently failed to price/fetch. Reuses sweep-engine (BTC) and
+// EvmAddressManager.autoDiscover (EVM); fixed-address chains can only be
+// coverage-checked, never deep-discovered.
+
+export type AuditMode = 'light' | 'deep'
+export type AuditStatus = 'running' | 'complete' | 'aborted' | 'stale' | 'error'
+export type AuditPhaseName = 'identity' | 'btc' | 'evm' | 'coverage' | 'done'
+
+/** Per-chain verification state. The cardinal honesty rule: a chain whose
+ *  re-check threw/degraded is `unverified` (NEVER folded into "$0/clean"); a
+ *  single-address chain reached only at its one tracked address is
+ *  `checked-shallow` (funds at another index are undiscoverable — say so). */
+export type AuditCoverage = 'funded' | 'empty-confirmed' | 'unverified' | 'checked-shallow'
+
+export interface AuditChainFinding {
+  chainId: string
+  symbol: string
+  family: 'utxo' | 'evm' | 'fixed'
+  coverage: AuditCoverage
+  balanceUsd: number
+  note?: string
+}
+
+/** A BTC discovery on a non-standard path or higher account (sweep-engine
+ *  result, minus the raw utxos which stay backend-side). */
+export interface AuditBtcFinding {
+  path: string
+  scriptType: string
+  address: string
+  category: 'account-key' | 'mismatch' | 'higher-account'
+  accountIndex?: number
+  balanceSats: number
+  utxoCount: number
+}
+
+export interface AuditReport {
+  auditId: string
+  status: AuditStatus
+  mode: AuditMode
+  isHidden: boolean
+  phase: AuditPhaseName
+  progress: { current: number; total: number; label: string }
+  startedAt: number
+  completedAt?: number
+  /** Device-derived seed identity (read-only — never triggers a purge). */
+  seedIdentity: string | null
+  /** True when the live device identity differs from what the managers track. */
+  identityMismatch: boolean
+  chains: AuditChainFinding[]
+  /** Bitcoin path scan is LAZY — triggered when the user opens the Bitcoin page,
+   *  not during auditStart. 'idle' until then. */
+  btcScanState: 'idle' | 'scanning' | 'done' | 'error'
+  btc: {
+    findings: AuditBtcFinding[]
+    totalFoundSats: number
+    /** Highest account index with funds beyond the user's tracked accounts (0 = none). */
+    higherAccountMax: number
+    /** True when the scan aborted before covering the full matrix (device hung / changed). */
+    partial: boolean
+  }
+  evm: {
+    discoveredIndices: number[]
+    /** False in a hidden session — indices are session-scoped, not persisted. */
+    persisted: boolean
+  }
+  anyUnverified: boolean
+  anyShallow: boolean
+  error?: string
+}
+
+/** Current portfolio state passed from the Dashboard so the coverage phase
+ *  classifies without re-querying an already-degraded Pioneer. Faults are keyed
+ *  by chainId (NOT symbol — symbols collide across chains). */
+export interface AuditPortfolioSnapshot {
+  chains: Array<{ chainId: string; balanceUsd: number }>
+  /** Chain IDs the latest fetch served degraded (fresh fetch failed). */
+  degradedChainIds: string[]
+  /** Chain IDs served from stale cache (>5min old). */
+  staleChainIds: string[]
+  /** Degraded/stale faults the backend couldn't resolve to a chainId — counted
+   *  so an unmappable fault still forbids a false "all clear". */
+  unresolvedFaultCount: number
+}
+
+/** An ERC-20 (or other) token found on a derived address during an EVM account
+ *  scan. Native ETH and tokens share the same address, so tracking the account
+ *  index covers both. */
+export interface AuditToken {
+  symbol: string
+  name: string
+  balance: string         // human-readable token balance
+  balanceUsd: number
+  caip: string            // CAIP-19 (identity + icon lookup)
+}
+
+/** One derived address checked during the per-chain walkthrough (a scanned
+ *  account/index level, or a custom path). Native balance is human-readable. */
+export interface AuditDerivedAddress {
+  level?: number          // account/index level (omitted for custom paths)
+  pathStr: string         // BIP32 path, e.g. m/44'/60'/0'/0/3
+  address: string
+  native: string          // human-readable native balance
+  symbol: string
+  hasBalance: boolean     // native > 0 OR any token has value (EVM)
+  explorerUrl: string | null
+  /** Tokens (ERC-20 etc.) found at this address — EVM level scans only. */
+  tokens?: AuditToken[]
+  /** UTXO per-account xpubs, one per supported script type (legacy/segwit/
+   *  native-segwit). Shown as derivation proof; `address`/`pathStr` mirror the
+   *  first entry for back-compat. */
+  xpubs?: Array<{ scriptType: string; xpub: string; pathStr: string }>
+  /** True when the balance lookup THREW — the address was derived but its balance
+   *  is unknown. Must never be shown as a confident "0" (honesty rule). */
+  balanceError?: boolean
+}
+
+/** Raw-path debug inspector result (auditInspectPath). Read-only device-derived
+ *  values for a power user verifying what an address derives to. */
+export interface AuditInspectResult {
+  pathStr: string
+  address: string
+  symbol: string
+  pubkey: string | null   // base64 raw public key (when the device returns one)
+  xpub: string | null     // account xpub (when the path is account-level)
+  native: string
+  hasBalance: boolean
+  balanceError?: boolean
+  explorerUrl: string | null
+}
+
 // ── Swap types ─────────────────────────────────────────────────────────
 
 /** An asset available for swapping (via THORChain, ChainFlip, Pioneer aggregation, etc.) */
