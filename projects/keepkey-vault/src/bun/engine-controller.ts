@@ -107,6 +107,12 @@ export class EngineController extends EventEmitter {
   wallet: (core.HDWallet & Record<string, any>) | null = null
   private activeTransport: ActiveTransport = null
   private updatePhase: UpdatePhase = 'idle'
+  // After a firmware/bootloader flash the device must be physically unplugged and
+  // replugged before we trust it again — it does NOT auto-reboot. Re-pairing to
+  // the still-connected, non-power-cycled device yields a stale session that reads
+  // features fine but fails at signing. This flag flips true only when a real USB
+  // detach is seen during the reboot phase, gating acceptance of the reconnect.
+  private sawDetachSinceFlash = false
   private lastState: DeviceState = 'disconnected'
   private cachedFeatures: any = null
   private latestFirmware = FALLBACK_FIRMWARE
@@ -284,7 +290,10 @@ export class EngineController extends EventEmitter {
         // M1 fix: During firmware reboot, device disconnects/reconnects — don't
         // clear wallet state or emit disconnected (reboot poll handles reconnection)
         if (this.updatePhase === 'rebooting') {
-          console.log('[Engine] Detach during reboot phase — ignoring (reboot poll active)')
+          console.log('[Engine] Detach during reboot phase — physical unplug seen, reconnect can be trusted')
+          // The user physically unplugged after the flash — a reconnect now means
+          // a genuine power-cycle, so it's safe to re-pair (see the gate in syncState).
+          this.sawDetachSinceFlash = true
           this.clearWallet()
           return
         }
@@ -681,6 +690,17 @@ export class EngineController extends EventEmitter {
     // receives GetFeatures instead of the next CharacterAck, garbling the
     // decoded word and triggering "Word not found in BIP39 wordlist").
     if (this.setupInProgress || this.verifyInProgress) return
+
+    // Post-flash reconnect gate: after a firmware/bootloader flash the device must
+    // be physically unplugged and replugged before we trust it. Re-pairing to the
+    // still-connected, non-power-cycled device binds a stale session that reads
+    // features fine but fails at signing — leaving the user stranded mid-send with
+    // a cryptic error. Until a real detach is seen, leave the device alone and let
+    // the reboot poll keep waiting (the UI shows manual unplug/replug guidance).
+    if (this.updatePhase === 'rebooting' && !this.sawDetachSinceFlash) {
+      return
+    }
+
     this.syncing = true
 
     try {
@@ -870,6 +890,22 @@ export class EngineController extends EventEmitter {
         return
       }
       if (this.rebootPollCount % 6 === 0) console.log(`[Engine] Reboot poll ${this.rebootPollCount}/${EngineController.MAX_REBOOT_POLLS}: calling syncState()`)
+      // Confirm the physical power-cycle even when the detach event never fires
+      // (Windows attach/detach are unreliable after a reboot — the whole reason
+      // this poll exists). Watch the raw bus: once the KeepKey is absent, a later
+      // reconnect is a genuine power-cycle and syncState's gate may re-pair it.
+      // Until then the device is still the stale post-flash session — leave it.
+      if (!this.sawDetachSinceFlash) {
+        try {
+          const present = usb.getDeviceList().some(d => d.deviceDescriptor.idVendor === KEEPKEY_VENDOR_ID)
+          if (!present) {
+            console.log('[Engine] Reboot poll: device absent from bus — power-cycle confirmed')
+            this.sawDetachSinceFlash = true
+          }
+        } catch (err: any) {
+          console.warn('[Engine] Reboot poll: getDeviceList() failed:', err?.message || err)
+        }
+      }
       this.syncState()
     }, 5000)
   }
@@ -1500,6 +1536,7 @@ export class EngineController extends EventEmitter {
 
       this.emit('firmware-progress', { percent: 90, message: 'Bootloader updated, rebooting...' })
       this.updatePhase = 'rebooting'
+      this.sawDetachSinceFlash = false
       this.clearWallet()
       this.emit('state-change', this.getDeviceState())
       this.emit('firmware-progress', { percent: 100, message: 'Bootloader update complete' })
@@ -1554,6 +1591,7 @@ export class EngineController extends EventEmitter {
 
       this.emit('firmware-progress', { percent: 90, message: 'Firmware updated, rebooting...' })
       this.updatePhase = 'rebooting'
+      this.sawDetachSinceFlash = false
       this.clearWallet()
       this.emit('state-change', this.getDeviceState())
       this.emit('firmware-progress', { percent: 100, message: 'Firmware update complete' })
