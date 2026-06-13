@@ -265,10 +265,11 @@ export interface BuildTxResult {
 
 export interface BroadcastResult {
   txid: string
-  // Address Book: set when a manual send auto-creates/updates a recipient entry.
-  // `recipientIsNew` drives the post-broadcast "save a label?" prompt (R4).
+  // Address Book: set when a manual send touches a recipient entry.
+  // `recipientUnsaved` (true when the recipient is not yet a saved contact) drives
+  // the post-broadcast "save this address?" dialog (R4 opt-in).
   addressBookEntryId?: string
-  recipientIsNew?: boolean
+  recipientUnsaved?: boolean
 }
 
 // ── Address Book (unified, top-level, across all wallets) ───────────────
@@ -289,6 +290,7 @@ export interface AddressBookEntry {
   addressIndex?: number      // own EVM index / BTC account index
   firstSeenTxid?: string     // external rows — txid that introduced the recipient
   note?: string
+  savedAt?: number           // external rows — when the user explicitly saved it (R4); null = history-only
   createdAt: number
   updatedAt: number
 }
@@ -310,6 +312,7 @@ export interface AddressBookFilter {
   chainId?: string
   kind?: AddressBookKind
   search?: string            // LIKE over label + address
+  savedOnly?: boolean        // external rows — exclude history-only (unsaved) recipients
   limit?: number
   offset?: number
 }
@@ -571,6 +574,7 @@ export interface AppSettings {
   preReleaseUpdates: boolean     // opt-in to pre-release auto-updates (default OFF)
   alphaFirmware: boolean         // opt-in to alpha firmware channel (manifest.beta) (default OFF)
   privateModeEnabled: boolean    // hide portfolio totals from the UI (default OFF)
+  passphraseIntroShown: boolean  // one-time passphrase/hidden-wallet intro dialog seen (default false)
 }
 
 // ── WalletConnect types ─────────────────────────────────────────────────
@@ -742,6 +746,139 @@ export type ReportSection =
   | { title: string; type: 'list'; data: string[] }
   | { title: string; type: 'text'; data: string }
 
+// ── Balance Audit (multi-chain "where's my money" wizard) ───────────────
+// Diagnose + recover funds a worried user expects but doesn't see: BTC on
+// non-standard paths / un-added accounts, EVM funds on higher indices, and
+// chains that silently failed to price/fetch. Reuses sweep-engine (BTC) and
+// EvmAddressManager.autoDiscover (EVM); fixed-address chains can only be
+// coverage-checked, never deep-discovered.
+
+export type AuditMode = 'light' | 'deep'
+export type AuditStatus = 'running' | 'complete' | 'aborted' | 'stale' | 'error'
+export type AuditPhaseName = 'identity' | 'btc' | 'evm' | 'coverage' | 'done'
+
+/** Per-chain verification state. The cardinal honesty rule: a chain whose
+ *  re-check threw/degraded is `unverified` (NEVER folded into "$0/clean"); a
+ *  single-address chain reached only at its one tracked address is
+ *  `checked-shallow` (funds at another index are undiscoverable — say so). */
+export type AuditCoverage = 'funded' | 'empty-confirmed' | 'unverified' | 'checked-shallow'
+
+export interface AuditChainFinding {
+  chainId: string
+  symbol: string
+  family: 'utxo' | 'evm' | 'fixed'
+  coverage: AuditCoverage
+  balanceUsd: number
+  note?: string
+}
+
+/** A BTC discovery on a non-standard path or higher account (sweep-engine
+ *  result, minus the raw utxos which stay backend-side). */
+export interface AuditBtcFinding {
+  path: string
+  scriptType: string
+  address: string
+  category: 'account-key' | 'mismatch' | 'higher-account'
+  accountIndex?: number
+  balanceSats: number
+  utxoCount: number
+}
+
+export interface AuditReport {
+  auditId: string
+  status: AuditStatus
+  mode: AuditMode
+  isHidden: boolean
+  phase: AuditPhaseName
+  progress: { current: number; total: number; label: string }
+  startedAt: number
+  completedAt?: number
+  /** Device-derived seed identity (read-only — never triggers a purge). */
+  seedIdentity: string | null
+  /** True when the live device identity differs from what the managers track. */
+  identityMismatch: boolean
+  chains: AuditChainFinding[]
+  /** Bitcoin path scan is LAZY — triggered when the user opens the Bitcoin page,
+   *  not during auditStart. 'idle' until then. */
+  btcScanState: 'idle' | 'scanning' | 'done' | 'error'
+  btc: {
+    findings: AuditBtcFinding[]
+    totalFoundSats: number
+    /** Highest account index with funds beyond the user's tracked accounts (0 = none). */
+    higherAccountMax: number
+    /** True when the scan aborted before covering the full matrix (device hung / changed). */
+    partial: boolean
+  }
+  evm: {
+    discoveredIndices: number[]
+    /** False in a hidden session — indices are session-scoped, not persisted. */
+    persisted: boolean
+  }
+  anyUnverified: boolean
+  anyShallow: boolean
+  error?: string
+}
+
+/** Current portfolio state passed from the Dashboard so the coverage phase
+ *  classifies without re-querying an already-degraded Pioneer. Faults are keyed
+ *  by chainId (NOT symbol — symbols collide across chains). */
+export interface AuditPortfolioSnapshot {
+  chains: Array<{ chainId: string; balanceUsd: number }>
+  /** Chain IDs the latest fetch served degraded (fresh fetch failed). */
+  degradedChainIds: string[]
+  /** Chain IDs served from stale cache (>5min old). */
+  staleChainIds: string[]
+  /** Degraded/stale faults the backend couldn't resolve to a chainId — counted
+   *  so an unmappable fault still forbids a false "all clear". */
+  unresolvedFaultCount: number
+}
+
+/** An ERC-20 (or other) token found on a derived address during an EVM account
+ *  scan. Native ETH and tokens share the same address, so tracking the account
+ *  index covers both. */
+export interface AuditToken {
+  symbol: string
+  name: string
+  balance: string         // human-readable token balance
+  balanceUsd: number
+  caip: string            // CAIP-19 (identity + icon lookup)
+}
+
+/** One derived address checked during the per-chain walkthrough (a scanned
+ *  account/index level, or a custom path). Native balance is human-readable. */
+export interface AuditDerivedAddress {
+  level?: number          // account/index level (omitted for custom paths)
+  pathStr: string         // BIP32 path, e.g. m/44'/60'/0'/0/3
+  address: string
+  native: string          // human-readable native balance
+  symbol: string
+  hasBalance: boolean     // native > 0 OR any token has value (EVM)
+  explorerUrl: string | null
+  /** Tokens (ERC-20 etc.) found at this address — EVM level scans only. */
+  tokens?: AuditToken[]
+  /** UTXO per-account xpubs, one per supported script type (legacy/segwit/
+   *  native-segwit). Shown as derivation proof; `address`/`pathStr` mirror the
+   *  first entry for back-compat. */
+  xpubs?: Array<{ scriptType: string; xpub: string; pathStr: string }>
+  /** True when the balance lookup THREW — the address was derived but its balance
+   *  is unknown. Must never be shown as a confident "0" (honesty rule). */
+  balanceError?: boolean
+}
+
+/** Raw-path debug inspector result (auditInspectPath). Read-only device-derived
+ *  values for a power user verifying what an address derives to. */
+export interface AuditInspectResult {
+  pathStr: string
+  address: string
+  symbol: string
+  pubkey: string | null   // base64 raw public key (when the device returns one)
+  xpub: string | null     // account xpub (when the path is account-level)
+  native: string
+  hasBalance: boolean
+  balanceError?: boolean
+  explorerUrl: string | null
+}
+
 // ── Swap types ─────────────────────────────────────────────────────────
 
 /** An asset available for swapping (via THORChain, ChainFlip, Pioneer aggregation, etc.) */
@@ -851,6 +988,9 @@ export interface ExecuteSwapParams {
   fromEvmAddressIndex?: number    // EVM address derivation index (0 = default m/44'/60'/0'/0/0)
   integration?: string            // DEX source (relay quotes skip memo+router flow)
   relayTx?: RelayTxParams         // pre-built tx for relay/bridge integrations
+  tokenDecimals?: number          // source-token decimals from the picker asset — needed for
+                                  // token sources Pioneer's available-assets doesn't list (e.g.
+                                  // SPL USDT); Pioneer's canonical value still wins when present
 }
 
 export type SwapProviderStatus = 'ok' | 'degraded' | 'offline' | 'unknown'

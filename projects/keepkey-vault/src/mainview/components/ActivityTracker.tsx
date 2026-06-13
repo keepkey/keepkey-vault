@@ -72,7 +72,10 @@ export function ActivityTracker() {
         setActivities([])
         setPendingSwaps([])
       }
-      if (state.state === 'ready' && state.deviceId && !state.isHiddenWallet) {
+      // Hidden wallets included: both RPCs are hidden-safe — getRecentActivity
+      // serves the RAM-only session store and getPendingSwaps serves in-memory
+      // (never-persisted) swaps, scoped to the hidden walletId.
+      if (state.state === 'ready' && state.deviceId) {
         fetchActivities()
         fetchSwaps()
       }

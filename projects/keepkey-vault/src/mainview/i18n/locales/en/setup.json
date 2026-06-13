@@ -219,7 +219,10 @@
 			},
 			"hiddenWallets": {
 				"title": "Hidden Wallets (Advanced)",
-				"body": "Passphrase creates a separate hidden wallet from the same seed. If enabled, you MUST remember it - a wrong passphrase opens a different empty wallet, not an error."
+				"body": "Passphrase creates a separate hidden wallet from the same seed. If enabled, you MUST remember it - a wrong passphrase opens a different empty wallet, not an error.",
+				"toggleLabel": "Enable passphrase protection",
+				"settingsHint": "You can turn this on or off anytime in Settings.",
+				"gotIt": "Got it"
 			}
 		},
 		"actions": {

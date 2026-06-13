@@ -615,7 +615,7 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
         to: params.relayTx!.to || params.inboundAddress,
         amount: params.amount, memo: params.memo || '', feeLevel: params.feeLevel, isMax: params.isMax,
         isSwapDeposit: true, fromAddress,
-        caip: fromAssetMeta?.caip ?? params.fromCaip, tokenDecimals: fromAssetMeta?.decimals,
+        caip: fromAssetMeta?.caip ?? params.fromCaip, tokenDecimals: fromAssetMeta?.decimals ?? params.tokenDecimals,
       })
       unsignedTx = buildResult.unsignedTx
     } else {
@@ -781,12 +781,13 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
     // pattern would matter for any future SPL/non-EVM token sends.
     const knownAssets = await getSwapAssets()
     // CAIP-keyed lookup. Synthesized assets (picker selections Pioneer didn't
-    // pre-list) won't be in knownAssets; fromAssetMeta is undefined in that
-    // case and downstream code already handles it (decimals fall back to
-    // chain default; sourceCaip falls back to params.fromCaip).
+    // pre-list, e.g. SPL USDT — Pioneer's available-assets carries no SPL
+    // tokens at all) won't be in knownAssets; fall back to the decimals the
+    // picker asset carried. The SPL builder hard-throws when both are missing
+    // rather than guessing — wrong decimals scale the send by 10^n.
     const fromAssetMeta = knownAssets.find(a => a.caip === params.fromCaip)
     const sourceCaip = fromAssetMeta?.caip ?? params.fromCaip
-    const tokenDecimals = fromAssetMeta?.decimals
+    const tokenDecimals = fromAssetMeta?.decimals ?? params.tokenDecimals
 
     const buildResult = await txb.buildTx(pioneer, fromChain, {
       chainId: fromChain.id,
@@ -952,7 +953,7 @@ export async function previewSwapBuild(
         to: params.relayTx!.to || params.inboundAddress,
         amount: params.amount, memo: params.memo || '', feeLevel: params.feeLevel, isMax: params.isMax,
         isSwapDeposit: true, fromAddress,
-        caip: fromAssetMeta?.caip ?? params.fromCaip, tokenDecimals: fromAssetMeta?.decimals,
+        caip: fromAssetMeta?.caip ?? params.fromCaip, tokenDecimals: fromAssetMeta?.decimals ?? params.tokenDecimals,
       })
       return { unsignedTx: buildResult.unsignedTx }
     }
@@ -1033,8 +1034,10 @@ export async function previewSwapBuild(
     amount: params.amount, memo: params.memo, feeLevel: params.feeLevel, isMax: params.isMax,
     isSwapDeposit: true, fromAddress,
     // Prefer Pioneer's canonical CAIP (correct case for TRON tokens) but fall
-    // back to the picker-supplied CAIP for synthesized selections.
-    caip: fromAssetMeta?.caip ?? params.fromCaip, tokenDecimals: fromAssetMeta?.decimals,
+    // back to the picker-supplied CAIP for synthesized selections. Same for
+    // decimals: synthesized token sources (e.g. SPL USDT, absent from
+    // Pioneer's available-assets) carry them in params.tokenDecimals.
+    caip: fromAssetMeta?.caip ?? params.fromCaip, tokenDecimals: fromAssetMeta?.decimals ?? params.tokenDecimals,
   })
   return { unsignedTx: buildResult.unsignedTx }
 }

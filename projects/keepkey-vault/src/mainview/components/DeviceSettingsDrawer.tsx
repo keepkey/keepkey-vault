@@ -427,19 +427,17 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 		setTogglingPassphrase(true)
 		try {
 			await rpcRequest("applySettings", { usePassphrase: enable }, 60000)
-			// When enabling, state transitions to 'needs_passphrase' and the dashboard
-			// (including this drawer) unmounts — skip getFeatures to avoid racing with
-			// promptPin()'s getPublicKeys() on the transport lock (causes hang).
-			// When disabling, state stays 'ready' so refresh features for the toggle.
-			if (!enable) {
-				const updated = await rpcRequest<DeviceFeatures>("getFeatures")
-				setFeatures(updated)
-			}
+			// Toggling passphrase (enable OR disable) clears the device session so the
+			// firmware re-derives from the correct seed (see engine.applySettings). That
+			// transitions the device to 'needs_pin' → 'needs_passphrase', the app switches
+			// to the splash re-auth flow, and this drawer unmounts. We must NOT call
+			// getFeatures here — it would race promptPin()'s getPublicKeys() on the
+			// transport lock and hang. The drawer re-fetches features when it next opens.
 		} catch (e: any) {
 			console.error("togglePassphrase:", e)
-			// Refresh features from device on failure — if PIN timed out or the
-			// operation was cancelled, the device is still the authority on whether
-			// passphrase protection is enabled.
+			// On failure — e.g. the on-device confirm was rejected before the session was
+			// cleared, so the device stays 'ready' — refresh features so the toggle
+			// reflects the device's actual state.
 			rpcRequest<DeviceFeatures>("getFeatures").then(setFeatures).catch(() => {})
 		}
 		setTogglingPassphrase(false)

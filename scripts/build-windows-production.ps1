@@ -691,7 +691,14 @@ if ((Test-Path $WrapperExe) -and $SkipBuild) {
 
     Write-Host "    Using Zig: $ZigExe (version $zigVer)" -ForegroundColor Gray
     Push-Location (Split-Path $WrapperSrc -Parent)
-    & $ZigExe build-exe $WrapperSrc -O ReleaseSmall --subsystem windows "-femit-bin=$WrapperExe"
+    # CRITICAL: pin the target ISA to -mcpu=baseline. Without it, Zig compiles
+    # for the BUILD BOX's native CPU (AVX2-capable), baking VEX/AVX instructions
+    # into KeepKeyVault.exe -- e.g. `vmovdqa %xmm6` in main()'s prologue. On a
+    # no-AVX CPU (Intel Pentium Silver N5030 "Gemini Lake": SSE4.2, no AVX/AVX2)
+    # the app dies instantly at launch with 0xC000001D STATUS_ILLEGAL_INSTRUCTION
+    # before bun.exe ever runs. baseline = x86-64-v1, runs everywhere.
+    # See docs/handoff-windows-non-avx-launcher-crash.md.
+    & $ZigExe build-exe $WrapperSrc -target x86_64-windows -mcpu=baseline -O ReleaseSmall --subsystem windows "-femit-bin=$WrapperExe"
     Pop-Location
 
     if ($LASTEXITCODE -eq 0) {

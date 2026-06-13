@@ -15,6 +15,13 @@ export default {
 	},
 	build: {
 		buildFolder: "_build",
+		// Pin Bun to a non-AVX-safe baseline build. Electrobun 1.13.1 defaults to
+		// Bun 1.3.9, which sits inside an upstream non-AVX regression window. 1.3.14
+		// is the first version combining baseline WebKit + the JSC AVX-gating fix.
+		// On Windows this override always fetches bun-windows-x64-baseline.zip.
+		// Pairs with the -mcpu=baseline wrapper build (scripts/build-windows-production.ps1).
+		// See docs/windows-non-avx-launcher-crash.md §5.
+		bunVersion: "1.3.14",
 		bun: {
 			// Point at the pre-bundled backend from scripts/bundle-backend.ts.
 			// It already inlines ALL deps (@keepkey/*, ethers, protobuf, swagger, etc.)

@@ -18,6 +18,12 @@ import { getPioneer } from './pioneer'
 import { withTimeout } from './engine-controller'
 
 const PIONEER_SWAP_TIMEOUT_MS = 30_000
+// Grace window after a swap is created before the first GetPendingSwap poll.
+// Pioneer registers the row asynchronously, so an immediate poll reliably 404s
+// ("Pending swap not found") and spams the logs. The swap is already shown as
+// 'pending' from the local in-memory record, so there's nothing to gain from
+// polling before Pioneer has had a chance to process the registration.
+const PIONEER_POLL_GRACE_MS = 30_000
 import { insertSwapHistory, updateSwapHistoryStatus, getSwapHistory, getSwapHistoryByTxid, setSwapRelayRequestId } from './db'
 import { recordSwap } from './ledger'
 import { assetData as discoveryAssetData } from '@pioneer-platform/pioneer-discovery'
@@ -927,6 +933,15 @@ export async function refreshSwap(txid: string, deviceId?: string, walletId?: st
         }
       }
     } catch { /* best-effort */ }
+  }
+
+  // Skip the very first poll(s): Pioneer registers the row asynchronously, so a
+  // GetPendingSwap within the grace window after creation reliably 404s. The
+  // swap already shows as 'pending' from the in-memory record — just return it.
+  // A manual rescan bypasses the grace (the user explicitly asked to recheck).
+  if (!rescan && Date.now() - swap.createdAt < PIONEER_POLL_GRACE_MS) {
+    swapLog(`${TAG} refreshSwap ${txid.slice(0, 10)}...: within poll grace window, deferring Pioneer poll`)
+    return swap
   }
 
   const pioneer = await getPioneer()

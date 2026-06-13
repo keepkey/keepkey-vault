@@ -42,6 +42,26 @@ export function btcAccountPath(purpose: number, accountIndex: number): number[] 
   return [purpose + 0x80000000, 0x80000000, accountIndex + 0x80000000]
 }
 
+/**
+ * Build an EVM derivation path for a given BIP44 account index.
+ *
+ * Path: m/44'/60'/{index}'/0/0
+ *
+ * This matches MetaMask / ShapeShift / keepkey-client — each "account" is a
+ * separate hardened branch at the third path component, so account 1's address
+ * is independent of account 0. (Earlier versions varied the receive-address
+ * index inside account 0; see SETTINGS_VERSION in src/bun/evm-addresses.ts.)
+ *
+ * INVARIANT: evmAddressPath(0) is the seed-identity path the engine derives in
+ * checkSeedIdentity/deriveSeedIdentity — the seed-staleness guard depends on
+ * the index-0 address equaling the device's identity address. Pinned by
+ * __tests__/seed-reconcile.test.ts. Lives here (shared/, no I/O imports) so
+ * tests can import it without dragging in ./db / electrobun side effects.
+ */
+export function evmAddressPath(index: number): number[] {
+  return [0x8000002C, 0x8000003C, 0x80000000 + index, 0, 0]
+}
+
 // Minimal per-chain config — everything else derived from pioneer-caip
 type ChainConfig = Omit<ChainDef, 'networkId' | 'caip' | 'decimals'>
 

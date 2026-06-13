@@ -1,5 +1,5 @@
 import type { ElectrobunRPCSchema } from 'electrobun/bun'
-import type { DeviceStateInfo, FirmwareProgress, FirmwareAnalysis, FatalEvent, PinRequest, CharacterRequest, ChainBalance, BuildTxParams, BuildTxResult, BroadcastResult, BtcAccountSet, BtcScriptType, EvmAddressSet, CustomToken, CustomChain, AppSettings, PioneerServer, BtcGetAddressParams, EthGetAddressParams, EthSignTxParams, BtcSignTxParams, GetPublicKeysParams, UpdateInfo, UpdateStatus, TokenVisibilityStatus, PairingRequestInfo, PairedAppInfo, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, ReportMeta, ReportData, SwapAsset, SwapQuote, SwapQuoteParams, ExecuteSwapParams, SwapResult, SwapHealth, PendingSwap, SwapStatusUpdate, SwapHistoryRecord, SwapHistoryFilter, SwapHistoryStats, SwapUiState, SwapUiCommand, RecentActivity, BuildStakingTxParams, StakingPosition, NameInfo, NameQuote, BuildNameRegTxParams, ZcashTransaction, EmulatorStatus, EmulatorWalletInfo, RegisteredDevice, WcSessionInfo, AddressBookEntry, AddressBookFilter, AddressBookTx, UsbDiagnosticReport } from './types'
+import type { DeviceStateInfo, FirmwareProgress, FirmwareAnalysis, FatalEvent, PinRequest, CharacterRequest, ChainBalance, BuildTxParams, BuildTxResult, BroadcastResult, BtcAccountSet, BtcScriptType, EvmAddressSet, CustomToken, CustomChain, AppSettings, PioneerServer, BtcGetAddressParams, EthGetAddressParams, EthSignTxParams, BtcSignTxParams, GetPublicKeysParams, UpdateInfo, UpdateStatus, TokenVisibilityStatus, PairingRequestInfo, PairedAppInfo, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, ReportMeta, ReportData, AuditReport, AuditPortfolioSnapshot, AuditMode, AuditDerivedAddress, AuditInspectResult, SwapAsset, SwapQuote, SwapQuoteParams, ExecuteSwapParams, SwapResult, SwapHealth, PendingSwap, SwapStatusUpdate, SwapHistoryRecord, SwapHistoryFilter, SwapHistoryStats, SwapUiState, SwapUiCommand, RecentActivity, BuildStakingTxParams, StakingPosition, NameInfo, NameQuote, BuildNameRegTxParams, ZcashTransaction, EmulatorStatus, EmulatorWalletInfo, RegisteredDevice, WcSessionInfo, AddressBookEntry, AddressBookFilter, AddressBookTx, UsbDiagnosticReport } from './types'
 
 /**
  * RPC Schema for Bun ↔ WebView communication.
@@ -182,6 +182,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
 
       // ── App Settings ──────────────────────────────────────────────────
       getAppSettings: { params: void; response: AppSettings }
+      markPassphraseIntroShown: { params: void; response: AppSettings }
       setRestApiEnabled: { params: { enabled: boolean }; response: AppSettings }
       setPioneerApiBase: { params: { url: string }; response: AppSettings }
       setFiatCurrency: { params: { currency: string }; response: AppSettings }
@@ -271,6 +272,9 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       // own entries are auto-seeded from connected wallets (R2); external entries
       // are auto-created on manual sends (R4). Identity = (walletId, networkId, address).
       listAddressBook: { params: AddressBookFilter | void; response: AddressBookEntry[] }
+      // Instant form-fill detection (R5): is this recipient a known own wallet or
+      // saved contact? Returns the matching entry (logo/label) or null (new address).
+      matchAddress: { params: { networkId: string; address: string }; response: AddressBookEntry | null }
       // Manually add (or relabel) an external contact. networkId picks the chain;
       // the address is normalized + the row scoped to the current wallet.
       addAddressBook: { params: { networkId: string; address: string; label?: string }; response: AddressBookEntry | null }
@@ -300,9 +304,23 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       factoryReset: { params: void; response: void }
 
       // ── Sweep (non-standard BTC path recovery) ──────────────────────
-      sweepScan: { params: { accountRange?: [number, number]; mismatchAccounts?: number; currentMaxAccount?: number; higherAccountScanLimit?: number }; response: { scanId: string } }
+      sweepScan: { params: { accountRange?: [number, number]; mismatchAccounts?: number; currentMaxAccount?: number; higherAccountScanLimit?: number; gapLimitReceive?: number; gapLimitChange?: number; higherReceiveLimit?: number; streamProgress?: boolean }; response: { scanId: string } }
       sweepGetStatus: { params: { scanId: string }; response: any }
       sweepExecute: { params: { scanId: string; destinationAddress?: string; dryRun?: boolean }; response: any }
+
+      // ── Balance Audit (multi-chain "where's my money" wizard) ───────
+      auditStart: { params: { mode?: AuditMode; snapshot?: AuditPortfolioSnapshot }; response: { auditId: string } }
+      auditGetStatus: { params: { auditId: string }; response: AuditReport }
+      auditScanBtc: { params: { auditId: string }; response: { started: boolean } }
+      auditSweep: { params: { auditId: string; destinationAddress?: string; dryRun?: boolean }; response: any }
+      auditDismiss: { params: { auditId: string }; response: void }
+      // Per-chain walkthrough: derive + balance-check account/index levels, and custom paths.
+      auditScanLevels: { params: { chainId: string; fromLevel?: number; count?: number }; response: { results: AuditDerivedAddress[] } }
+      // UTXO altcoins (DOGE/LTC/BCH/…): xpub-based per-account scan (Pioneer gap scan).
+      auditScanUtxoAccounts: { params: { chainId: string; fromLevel?: number; count?: number }; response: { results: AuditDerivedAddress[] } }
+      auditDeriveCustom: { params: { chainId: string; addressNList: number[]; scriptType?: string }; response: AuditDerivedAddress }
+      auditScanPaths: { params: { chainId: string; paths: number[][]; scriptType?: string }; response: { results: AuditDerivedAddress[] } }
+      auditInspectPath: { params: { chainId: string; addressNList: number[]; scriptType?: string }; response: AuditInspectResult }
 
       // ── Emulator (macOS only — Keychain-encrypted flash) ────────────
       emulatorPair: { params: void; response: EmulatorStatus }
@@ -378,13 +396,41 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       'btc-accounts-update': BtcAccountSet
       'evm-addresses-update': EvmAddressSet
 'update-status': UpdateStatus
-      'pioneer-error': { message: string; url: string }
+      // severity defaults to 'error' (hard failure — server unreachable). 'warning'
+      // carries soft fault info (some chains degraded/stale, data still shown);
+      // 'none' clears any soft-fault banner after a clean fetch.
+      'pioneer-error': {
+        message: string
+        url: string
+        severity?: 'error' | 'warning' | 'none'
+        degradedChains?: string[]
+        staleChains?: string[]
+        staleMinutes?: number
+        // chainId-granular fault info for the Audit wizard (symbols above are for
+        // the banner). Symbols collide across chains, so the audit matches by id.
+        degradedChainIds?: string[]
+        staleChainIds?: string[]
+        unresolvedFaultCount?: number
+      }
       'pair-request': PairingRequestInfo
       'pair-dismissed': Record<string, never>
       'signing-request': SigningRequestInfo
       'signing-dismissed': { id: string }
       'api-log': ApiLogEntry
       'report-progress': { id: string; message: string; percent: number }
+      // Live per-path progress for the audit "unusual paths" (sweep) scan, so the
+      // panel can stream what it's checking. scanId scopes it to one scan.
+      'audit-sweep-progress': {
+        scanId: string
+        phase: 'deriving' | 'found'
+        current?: number
+        total?: number
+        pathStr: string
+        scriptType: string
+        category?: string
+        address?: string
+        balanceSats?: number
+      }
       'walletconnect-uri': string
       'wc-sessions': WcSessionInfo[]
       'wc-pair-request': { id: string; peerName: string; peerUrl: string; peerIcon: string; chains: string[]; methods: string[] }
@@ -409,6 +455,19 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       'swap-cmd': SwapUiCommand
       'scan-progress': { percent: number; scannedHeight: number; tipHeight: number; blocksPerSec: number; etaSeconds: number }
       'balance-updated': ChainBalance
+      /** Seed-staleness purge: the backend detected the in-memory wallet data
+       *  belonged to a DIFFERENT seed than the device (passphrase toggle,
+       *  hidden↔standard transition, cached-passphrase reconnect) and dropped
+       *  it. Frontend must clear displayed balances immediately (showing the
+       *  wrong wallet's funds is the bug) and force-refresh from the device. */
+      'wallet-data-purged': { reason: string }
+      /** Audit-specific staleness push (only AuditDialog consumes it) for events
+       *  that must invalidate an open wizard WITHOUT the dashboard-wide
+       *  wallet-data-purged churn — e.g. needs_passphrase, which fires on every
+       *  passphrase-protected unlock incl. the standard empty-passphrase wallet.
+       *  markAuditsStale alone is invisible to a COMPLETED audit (status stays
+       *  'complete' and the dialog has stopped polling), so the UI needs this. */
+      'audit-stale': { reason: string }
       /** Pioneer push notification: a transaction arrived on a watched address.
        *  Frontend resyncs the affected chain (matched by networkId) regardless of
        *  direction, and shows a toast only for inbound payments (type === 'incoming').

@@ -6,7 +6,7 @@
  *            Step 2 — paginated asset list with text search for that network, 64px icons, full CAIP.
  */
 import { useState, useEffect, useMemo, useCallback } from "react"
-import { Box, Flex, Text, Input } from "@chakra-ui/react"
+import { Box, Flex, Text, Input, Spinner } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
 import { AssetIcon } from "./AssetIcon"
 import type { SwapAsset, ChainBalance, CustomToken } from "../../shared/types"
@@ -202,8 +202,8 @@ function NetSwitchBanner({ fromChainId, toChainId, providers }: {
 // FROM picker — all held assets, ranked by USD value, square tiles
 // ══════════════════════════════════════════════════════════════════════════
 
-function FromPicker({ entries, onSelect, fmtCompact, privateModeEnabled }: {
-  entries: AssetEntry[]; onSelect: (e: AssetEntry) => void; fmtCompact: (v: number) => string; privateModeEnabled: boolean
+function FromPicker({ entries, onSelect, fmtCompact, privateModeEnabled, balancesLoading }: {
+  entries: AssetEntry[]; onSelect: (e: AssetEntry) => void; fmtCompact: (v: number) => string; privateModeEnabled: boolean; balancesLoading: boolean
 }) {
   const { t } = useTranslation("swap")
   const [search, setSearch] = useState("")
@@ -243,7 +243,19 @@ function FromPicker({ entries, onSelect, fmtCompact, privateModeEnabled }: {
       <SearchBar value={search} onChange={setSearch} placeholder={t("filterHeld", "Filter by symbol, name or network…")} />
 
       <Box flex="1" overflowY="auto" px="5" pb="4">
-        {filtered.length === 0 ? (
+        {balancesLoading && held.length === 0 && !search ? (
+          <Flex direction="column" align="center" py="16" gap="4">
+            <Spinner size="md" color="kk.gold" />
+            <Box textAlign="center">
+              <Text fontSize="14px" fontWeight="500" color="kk.textSecondary" mb="1">
+                {t("loadingAssets", "Loading assets...")}
+              </Text>
+              <Text fontSize="11px" color="kk.textMuted" lineHeight="1.6" maxW="320px">
+                {t("loadingBalances", "Checking your KeepKey balances...")}
+              </Text>
+            </Box>
+          </Flex>
+        ) : filtered.length === 0 ? (
           <Flex direction="column" align="center" py="16" gap="4">
             <Box w="56px" h="56px" borderRadius="full" bg="rgba(255,255,255,0.04)"
               border="1px dashed rgba(255,255,255,0.10)" display="grid" placeItems="center" color="kk.textMuted">
@@ -1067,6 +1079,7 @@ interface AssetPickerDialogProps {
   onClose: () => void
   swappable: SwapAsset[]
   balances: ChainBalance[]
+  balancesLoading?: boolean
   customTokens?: CustomToken[]
   excludeCaip?: string
   onSelect: (asset: SwapAsset) => void
@@ -1074,7 +1087,7 @@ interface AssetPickerDialogProps {
 }
 
 export function AssetPickerDialog({
-  open, onClose, swappable, balances, customTokens, excludeCaip, onSelect, side,
+  open, onClose, swappable, balances, balancesLoading = false, customTokens, excludeCaip, onSelect, side,
 }: AssetPickerDialogProps) {
   const { fmtCompact, privateModeEnabled } = useFiat()
   // Connected device's firmware version — gates chains whose `minFirmware` the
@@ -1197,7 +1210,7 @@ export function AssetPickerDialog({
             </Flex>
           ) : !entries ? null
           : side === "from" ? (
-            <FromPicker entries={entries} onSelect={handleSelect} fmtCompact={fmtCompact} privateModeEnabled={privateModeEnabled} />
+            <FromPicker entries={entries} onSelect={handleSelect} fmtCompact={fmtCompact} privateModeEnabled={privateModeEnabled} balancesLoading={balancesLoading} />
           ) : unavailEntry ? (
             <UnavailableRouteView
               fromChainId={fromChainId}

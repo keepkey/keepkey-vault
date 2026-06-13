@@ -1767,6 +1767,28 @@ export class EngineController extends EventEmitter {
     }
     if (opts.autoLockDelayMs !== undefined) settings.autoLockDelayMs = opts.autoLockDelayMs
     await this.wallet.applySettings(settings)
+
+    // Toggling passphrase protection changes the effective seed, but the firmware
+    // caches the derived seed for the session INDEPENDENTLY of the
+    // passphrase_protection flag. storage_setPassphraseProtected() only flips the
+    // flag — it does not clear session.seedCached — so storage_getRootNode() keeps
+    // returning the seed cached under the OLD setting (typically the empty-passphrase
+    // standard wallet derived earlier this session). Every subsequent
+    // GetPublicKey/GetAddress — including "view address on device" — then shows the
+    // wrong wallet until a physical reconnect power-cycles the device and clears the
+    // cache. ClearSession drops the cached seed + passphrase + PIN over USB, so the
+    // device re-prompts and re-derives from the correct seed with no reconnect needed.
+    // Skipped on the emulator: a ClearSession right after ApplySettings can leave a
+    // stale ButtonAck in the ring buffer (emulators reconnect for clean state).
+    if (opts.usePassphrase !== undefined && this.activeTransport !== 'emulator') {
+      await this.wallet.clearSession()
+      // Session is now empty — the device will re-prompt for PIN/passphrase. Drop our
+      // session classification so it's re-established on re-entry (sendPassphrase sets
+      // hiddenWalletActive; deriveState routes through needs_pin → needs_passphrase).
+      this.passphraseSetThisSession = false
+      this.hiddenWalletActive = false
+    }
+
     // Emulator: skip getFeatures — stale ButtonAck in rb_main_in causes failure.
     // Caller should reconnect via connectEmulator() for clean state.
     if (opts.skipRefresh) return
@@ -1824,6 +1846,10 @@ export class EngineController extends EventEmitter {
       // Now it's safe to refresh features.
       this.cachedFeatures = await this.wallet.getFeatures()
       this.updateState(this.deriveState(this.cachedFeatures))
+      // If sendPassphrase() ran while promptPin owned the transport, it could
+      // not derive the hidden-wallet scope there. Do it now, after the seed
+      // access request has fully completed.
+      await this.deriveHiddenWalletScopeInMemory()
       return { status: 'unlocked', message: 'Device already unlocked' }
     } catch (err: any) {
       // PIN/passphrase flow interruption is expected — the UI handles input
@@ -1862,6 +1888,9 @@ export class EngineController extends EventEmitter {
     if (!this.promptPinActive) {
       this.cachedFeatures = await this.wallet.getFeatures()
       this.updateState(this.deriveState(this.cachedFeatures))
+    }
+    if (this.hiddenWalletActive && !this.promptPinActive) {
+      await this.deriveHiddenWalletScopeInMemory()
     }
   }
 
@@ -2065,6 +2094,55 @@ export class EngineController extends EventEmitter {
   get currentSeedEthAddress(): string | null { return this.seedEthAddress }
 
   /**
+   * Derive the seed-identity address (ETH m/44'/60'/0'/0/0) FRESH from the
+   * device and return it. RAM-only: no settings write, no events — safe for
+   * hidden wallets and callable on every balance fetch.
+   *
+   * This is the ground truth for the seed-staleness guard in getBalances:
+   * cached classification (seedEthAddress) can be stale or null right after a
+   * passphrase toggle / reconnect, so the guard re-reads the device instead of
+   * trusting session state. Returns null if no wallet or derivation fails.
+   */
+  async deriveSeedIdentity(): Promise<string | null> {
+    if (!this.wallet) return null
+    try {
+      const result = await (this.wallet as any).ethGetAddress({
+        addressNList: [0x80000000 + 44, 0x80000000 + 60, 0x80000000 + 0, 0, 0],
+        showDisplay: false,
+      })
+      const addr = (typeof result === 'string' ? result : result?.address)?.toLowerCase()
+      if (addr) this.seedEthAddress = addr
+      return addr || null
+    } catch (err: any) {
+      console.warn('[Engine] deriveSeedIdentity failed (non-fatal):', err?.message)
+      return null
+    }
+  }
+
+  /**
+   * Hidden wallet: derive the seed identity IN MEMORY ONLY so getWalletDbScope()
+   * works for fresh passphrase sessions. Deliberately NOT checkSeedIdentity():
+   * that persists seed_eth_<deviceId> via setSetting, which would leave a disk
+   * trace of the hidden wallet.
+   */
+  private async deriveHiddenWalletScopeInMemory(): Promise<void> {
+    if (!this.wallet || !this.hiddenWalletActive) return
+    try {
+      const result = await (this.wallet as any).ethGetAddress({
+        addressNList: [0x80000000 + 44, 0x80000000 + 60, 0x80000000 + 0, 0, 0],
+        showDisplay: false,
+      })
+      const addr = (typeof result === 'string' ? result : result?.address)?.toLowerCase()
+      if (!addr) return
+      this.seedEthAddress = addr // RAM only — never written to disk for hidden wallets
+      this.emit('wallet-scope-ready', { deviceId: this.cachedFeatures?.deviceId || 'unknown', seedAddress: addr })
+      this.emit('state-change', this.getDeviceState())
+    } catch (err: any) {
+      console.warn('[Engine] Hidden-wallet scope derive failed (non-fatal):', err?.message)
+    }
+  }
+
+  /**
    * Derive ETH primary address and check if the seed changed since last session.
    * Emits 'seed-changed' if the address differs from what's stored in settings DB.
    */
@@ -2170,6 +2248,11 @@ export class EngineController extends EventEmitter {
     } else {
       console.log(`[Engine] Reconnect probe: ETH address differs from stored — confirmed hidden wallet`)
       this.seedEthAddress = addr
+      // Re-emit so index.ts's ready handler re-runs the seed-staleness guard
+      // with the now-known hidden identity (the match path above already emits;
+      // without this, a confirmed-hidden reconnect never reconciles the
+      // in-memory account managers and they keep the previous wallet's data).
+      this.emit('state-change', this.getDeviceState())
     }
   }
 
