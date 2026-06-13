@@ -82,6 +82,8 @@ Checks that `modules/device-protocol/lib/messages_pb.js` is present. If missing,
 ### 6. Electrobun build (lines ~318-321)
 `bun run build` — produces `_build/dev-win-x64/keepkey-vault-dev/`. Build channel is patched from `dev` to `stable` at runtime (line ~325) because Electrobun's native `--env=stable` produces a macOS-style bundle on Windows.
 
+**Bundled Bun must be a non-AVX-safe baseline build.** `electrobun.config.ts` pins `build.bunVersion` (≥ `1.3.14`) so the build downloads a known-good Bun instead of whatever ships with the pinned Electrobun. On Windows the override always fetches `bun-windows-x64-baseline.zip` (the baseline/non-AVX variant). This is the second half of the non-AVX launch fix: the `-mcpu=baseline` wrapper (step 9) lets the app *reach* `bun.exe`, and a baseline Bun ≥ 1.3.14 (baseline WebKit + the JSC AVX-gating fix) ensures `bun.exe` itself runs on no-AVX CPUs. Bun 1.3.9 (the old Electrobun 1.13.1 default) sits inside an upstream non-AVX regression window — do not ship it. **Verify after build:** the bundled `bun.exe` banner reads `Bun v<ver> ... Windows x64 (baseline)` with `<ver>` ≥ 1.3.14, and the bundle's `version.json` records the same. See §5 of [`windows-non-avx-launcher-crash.md`](./windows-non-avx-launcher-crash.md).
+
 ### 7. Bulk signing (lines ~360-396)
 Scans `*.exe`, `*.dll`, and `*.node` under `bin/` and `Resources/`; native `.node` addons and Bun `.bin` shims are skipped because they are not signable PE files. The wrapper EXE (`KeepKeyVault.exe`) is rebuilt and signed later in step 9.
 
@@ -96,7 +98,9 @@ Skip patterns (treated as success):
 Converts the renamed-PNG `Resources/app.ico` to a real multi-size ICO (16/32/48/256px) using `System.Drawing`. `LoadImageW` at runtime can't load PNGs disguised as ICO, so this step is required for the title bar / taskbar icon.
 
 ### 9. Build wrapper EXE + rcedit + re-sign (lines ~464-588)
-- Compiles `scripts/wrapper-launcher.zig` to `KeepKeyVault.exe` via Zig (`-O ReleaseSmall --subsystem windows`)
+- Compiles `scripts/wrapper-launcher.zig` to `KeepKeyVault.exe` via Zig (`-target x86_64-windows -mcpu=baseline -O ReleaseSmall --subsystem windows`)
+  - **`-mcpu=baseline` is load-bearing — do not drop it.** Without it Zig defaults to `-mcpu=native` and compiles the wrapper for the *build box's* CPU (AVX2), baking a VEX `vmovdqa` into `main()`'s prologue. On a no-AVX CPU (e.g. Intel Pentium Silver N5030 "Gemini Lake", SSE4.2 only) the app dies instantly at launch with `0xC000001D STATUS_ILLEGAL_INSTRUCTION` at `KeepKeyVault.exe+0x1b96`, before `bun.exe` ever runs. `baseline` = x86-64-v1, runs everywhere. See [`windows-non-avx-launcher-crash.md`](./windows-non-avx-launcher-crash.md).
+  - **Verify baseline after build:** disassemble the produced `KeepKeyVault.exe` and confirm **zero** AVX/VEX instructions (`vmov*`, `vxor*`, `vpxor`, …); the byte sequence `c5 f9 7f` must be absent. PE sanity: `.text` VSize ≈ `0x5A46` (baseline), not `0x5CB6` (the AVX build that shipped in 1.4.3).
 - Copies the DPI manifest next to the wrapper
 - Runs `rcedit` to embed the icon into the wrapper and `launcher.exe`
 - **Re-signs** both rcedit-modified EXEs — `rcedit` invalidates Authenticode signatures because `BeginUpdateResource` modifies the `.rsrc` section. Without this, the user-launched binary ships unsigned.
@@ -259,8 +263,11 @@ Before tagging and uploading:
 - [ ] EV token plugged in, unlocked, certificate visible
 - [ ] Run `.\scripts\preflight-windows.ps1 -Strict`
 - [ ] Run `.\scripts\build-windows-production.ps1`
+- [ ] **Non-AVX:** `KeepKeyVault.exe` disassembles to **0** AVX/VEX instructions (`.text` VSize ≈ `0x5A46`; `c5 f9 7f` absent) — see step 9
+- [ ] **Non-AVX:** bundled `bun.exe` banner reads `Windows x64 (baseline)` and version ≥ 1.3.14 — see step 6
 - [ ] Verify installer signature via `signtool verify /pa /v`
 - [ ] Smoke-test the installer on a clean Windows VM
+- [ ] **Non-AVX (if hardware available):** app launches past the splash on a no-AVX CPU (Gemini Lake N5030/N4020) instead of `0xC000001D`
 - [ ] Compare `SHA256SUMS-windows.txt` against the installer hash
 - [ ] Upload `*.exe` and `SHA256SUMS-windows.txt` to the GitHub draft release
 - [ ] Run the installed app, pair a real device, confirm `vault-backend.log` has the expected boot lines
