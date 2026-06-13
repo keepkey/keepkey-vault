@@ -52,6 +52,11 @@ export interface SweepScan {
   results: SweepAddress[]
   totalFoundSats: number
   error?: string
+  // Signing guard (set by the RPC layer for the audit recovery path): the wallet
+  // handle + seed identity captured when the scan ran. Re-checked before signing
+  // so UTXOs found under a since-replaced wallet/seed are never swept.
+  capturedWallet?: any
+  seedIdentity?: string | null
 }
 
 export interface SweepScanConfig {

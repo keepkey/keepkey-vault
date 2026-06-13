@@ -106,7 +106,7 @@ export function AuditKnownPaths({ chainId, defaultAddress, onFound, onOpenUrl }:
             </Box>
             <HStack gap="3" flexShrink={0}>
               {r.balanceError ? <Text fontSize="xs" color="var(--rose)">couldn’t verify</Text>
-                : <Text fontSize="sm" fontWeight={r.hasBalance ? '700' : '400'} color={r.hasBalance ? 'var(--teal)' : 'var(--text-3)'}>{r.hasBalance ? `${r.native} ${r.symbol}` : 'empty'}</Text>}
+                : <Text fontSize="sm" fontWeight={r.hasBalance ? '700' : '400'} color={r.hasBalance ? 'var(--teal)' : 'var(--text-3)'}>{!r.hasBalance ? 'empty' : (parseFloat(r.native) > 0 || !r.tokens?.length) ? `${r.native} ${r.symbol}` : `${r.tokens.length} token${r.tokens.length > 1 ? 's' : ''}`}</Text>}
               {r.explorerUrl && <Box as="button" fontSize="11px" color="var(--teal)" onClick={() => onOpenUrl(r.explorerUrl!)}>explorer ↗</Box>}
             </HStack>
           </Flex>

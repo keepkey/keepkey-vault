@@ -372,6 +372,7 @@ export function AuditDialog({ onClose, snapshot, isHidden, chainCatalog, chainAd
     for (const a of all) {
       const bal = a.balanceError ? '(unverified — balance check failed)' : `${a.native} ${a.symbol}${a.hasBalance ? ' (FUNDED)' : ''}`
       lines.push(isHidden ? `  ${a.pathStr}: ${bal}` : `  ${a.pathStr}  ${a.address}  ${bal}`)
+      for (const t of a.tokens || []) lines.push(`      + ${t.balance} ${t.symbol}${t.balanceUsd ? ` ($${t.balanceUsd.toFixed(2)})` : ''} (FUNDED)`)
     }
     if (!all.length) lines.push('  (none beyond the default address)')
     lines.push('')
@@ -755,13 +756,13 @@ export function AuditDialog({ onClose, snapshot, isHidden, chainCatalog, chainAd
                 style={{ background: 'linear-gradient(145deg, var(--ink-4), var(--ink-3))' }} border="1px solid" borderColor="rgba(233,196,106,0.5)" css={{ animation: "auditGold 2.4s ease-in-out infinite" }}>
                 <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 12l2 2 4-4" /><circle cx="12" cy="12" r="9" /></svg>
               </Box>
-              <Text fontSize="2xl" fontWeight="700" color="var(--text-0)" letterSpacing="-0.02em">{report?.anyUnverified ? 'Audit complete — a couple chains need a second look.' : 'Everything’s accounted for.'}</Text>
+              <Text fontSize="2xl" fontWeight="700" color="var(--text-0)" letterSpacing="-0.02em">{report?.anyUnverified ? 'Audit complete — a couple chains need a second look.' : report?.anyShallow ? 'Audit complete — your tracked balances are accounted for.' : 'Everything’s accounted for.'}</Text>
               <Text fontSize="13.5px" color="var(--text-2)" mt="3" maxW="460px" mx="auto" lineHeight="1.6">We walked all {walk.length} chains on your device and checked every tracked address. Here’s what we found.</Text>
             </Box>
 
             <Flex gap="4" maxW="580px" mx="auto" mb="6">
               <Box flex="1" bg="var(--ink-3)" border="1px solid" borderColor="var(--line)" borderRadius="16px" p="4.5" textAlign="center">
-                <Text fontSize="11px" color="var(--text-3)" textTransform="uppercase" letterSpacing="0.06em">{report?.anyUnverified ? 'Total balance' : 'Total verified'}</Text>
+                <Text fontSize="11px" color="var(--text-3)" textTransform="uppercase" letterSpacing="0.06em">{report?.anyUnverified || report?.anyShallow ? 'Total balance' : 'Total verified'}</Text>
                 <Text fontSize="26px" fontWeight="700" color="var(--text-0)" mt="1.5">{usd(totalBalance)}</Text>
               </Box>
               <Box flex="1" style={{ background: 'linear-gradient(135deg, rgba(233,196,106,0.14), rgba(233,196,106,0.04))' }} border="1px solid" borderColor="rgba(233,196,106,0.32)" borderRadius="16px" p="4.5" textAlign="center">

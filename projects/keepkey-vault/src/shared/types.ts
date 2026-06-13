@@ -870,6 +870,7 @@ export interface AuditDerivedAddress {
 export interface AuditInspectResult {
   pathStr: string
   address: string
+  symbol: string
   pubkey: string | null   // base64 raw public key (when the device returns one)
   xpub: string | null     // account xpub (when the path is account-level)
   native: string
