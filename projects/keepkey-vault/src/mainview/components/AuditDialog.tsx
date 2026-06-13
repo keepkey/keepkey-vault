@@ -231,6 +231,9 @@ export function AuditDialog({ onClose, snapshot, isHidden, chainCatalog, chainAd
   useEffect(() => { start('light') }, [start])
   useEffect(() => () => { unmountedRef.current = true; stopPoll() }, [stopPoll])
   useEffect(() => onRpcMessage('wallet-data-purged', () => { setStale(true); stopPoll() }), [stopPoll])
+  // needs_passphrase / other seed-context changes that invalidate this run without
+  // a dashboard-wide purge — stop and show the re-run banner even if already complete.
+  useEffect(() => onRpcMessage('audit-stale', () => { setStale(true); stopPoll() }), [stopPoll])
 
   const patchLadder = useCallback((chainId: string, patch: Partial<Ladder>) => {
     setLadders(prev => ({ ...prev, [chainId]: { ...(prev[chainId] || EMPTY_LADDER), ...patch } }))

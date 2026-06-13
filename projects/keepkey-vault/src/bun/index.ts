@@ -6514,11 +6514,15 @@ engine.on('state-change', (state) => {
 		// guards (isPassphraseWallet checks) prevent hidden wallet data from ever
 		// reaching the DB during the session.
 		console.log('[Vault] Passphrase mode: reset in-memory address managers — will re-derive after passphrase entry')
-		// An open Audit run belongs to the pre-passphrase seed — mark it stale so the
-		// wizard prompts a re-run instead of mixing seeds. No wallet-data-purged emit
-		// here: needs_passphrase fires on every passphrase-protected unlock (incl. the
-		// standard empty-passphrase wallet), and we must not churn the dashboard cache.
+		// An open Audit run belongs to the pre-passphrase seed — mark it stale AND
+		// push an audit-specific signal so the wizard stops and prompts a re-run
+		// instead of mixing seeds. markAuditsStale alone is invisible to a COMPLETED
+		// audit (status stays 'complete' and the dialog has stopped polling). We use
+		// the dedicated 'audit-stale' push, NOT wallet-data-purged: needs_passphrase
+		// fires on every passphrase-protected unlock (incl. the standard
+		// empty-passphrase wallet) and must not churn the dashboard cache.
 		markAuditsStale('needs_passphrase')
+		try { rpc.send['audit-stale']({ reason: 'needs_passphrase' }) } catch { /* webview not ready */ }
 	}
 })
 engine.on('wallet-scope-ready', ({ deviceId, seedAddress }) => {

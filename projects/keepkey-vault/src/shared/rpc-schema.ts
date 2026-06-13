@@ -461,6 +461,13 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
        *  it. Frontend must clear displayed balances immediately (showing the
        *  wrong wallet's funds is the bug) and force-refresh from the device. */
       'wallet-data-purged': { reason: string }
+      /** Audit-specific staleness push (only AuditDialog consumes it) for events
+       *  that must invalidate an open wizard WITHOUT the dashboard-wide
+       *  wallet-data-purged churn — e.g. needs_passphrase, which fires on every
+       *  passphrase-protected unlock incl. the standard empty-passphrase wallet.
+       *  markAuditsStale alone is invisible to a COMPLETED audit (status stays
+       *  'complete' and the dialog has stopped polling), so the UI needs this. */
+      'audit-stale': { reason: string }
       /** Pioneer push notification: a transaction arrived on a watched address.
        *  Frontend resyncs the affected chain (matched by networkId) regardless of
        *  direction, and shows a toast only for inbound payments (type === 'incoming').
