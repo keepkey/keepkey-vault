@@ -6,6 +6,7 @@ import type { ChainDef } from "../../shared/chains"
 import type { BuildTxResult, BroadcastResult, NameInfo, NameQuote } from "../../shared/types"
 import { rpcRequest } from "../lib/rpc"
 import { Z } from "../lib/z-index"
+import { describeSigningError } from "../lib/signing-errors"
 
 interface NameRegistrationPanelProps {
 	chain: ChainDef
@@ -150,7 +151,7 @@ export function NameRegistrationPanel({ chain, address, availableBalance, watchO
 			setSignedTx(result)
 			setPhase("signed")
 		} catch (e: any) {
-			setError(e?.message || t("signingFailed"))
+			setError(describeSigningError(e, t))
 			setPhase("built")
 		}
 		setLoading(false)

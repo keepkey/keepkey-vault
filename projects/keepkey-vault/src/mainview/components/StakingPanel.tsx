@@ -7,6 +7,7 @@ import type { BuildTxResult, BroadcastResult, StakingPosition } from "../../shar
 import { rpcRequest } from "../lib/rpc"
 import { useFiat } from "../lib/fiat-context"
 import { Z } from "../lib/z-index"
+import { describeSigningError } from "../lib/signing-errors"
 
 interface StakingPanelProps {
 	chain: ChainDef
@@ -133,7 +134,7 @@ function DelegateDialog({ isOpen, onClose, chain, availableBalance, rewardAmount
 			setSignedTx(result)
 			setPhase("signed")
 		} catch (e: any) {
-			setError(e.message || t('signingFailed'))
+			setError(describeSigningError(e, t))
 			setPhase("built")
 		}
 		setLoading(false)
@@ -547,7 +548,7 @@ function UndelegateDialog({ isOpen, onClose, chain, delegations, onSuccess, watc
 			setSignedTx(result)
 			setPhase("signed")
 		} catch (e: any) {
-			setError(e.message || t('signingFailed'))
+			setError(describeSigningError(e, t))
 			setPhase("built")
 		}
 		setLoading(false)
