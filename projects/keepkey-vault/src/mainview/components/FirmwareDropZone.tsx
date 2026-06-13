@@ -659,9 +659,16 @@ export function FirmwareDropZone() {
 						<Text fontSize="lg" fontWeight="700" color="var(--teal)" mb="2">
 							Firmware Flash Complete
 						</Text>
-						<Text fontSize="sm" color="kk.textSecondary" mb="4">
-							Your KeepKey is rebooting with the new firmware.
-							It will reconnect automatically.
+						<Text fontSize="sm" color="kk.gold" fontWeight="600" mb="2">
+							Unplug your KeepKey and plug it back in to finish.
+						</Text>
+						<Text fontSize="sm" color="kk.textSecondary" mb="2">
+							The device does not reboot on its own — it stays in this state
+							until you physically reconnect the USB cable.
+						</Text>
+						<Text fontSize="xs" color="kk.textSecondary" mb="4">
+							Do not hold the button while reconnecting — just plug it in
+							normally, or it will re-enter bootloader mode.
 						</Text>
 						<Button
 							size="sm"
