@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next"
 import { Box, Flex, Text, VStack, Button, Input } from "@chakra-ui/react"
 import { rpcRequest, rpcFire } from "../lib/rpc"
 import { formatBalance } from "../lib/formatting"
+import { describeSigningError } from "../lib/signing-errors"
 import { useFiat } from "../lib/fiat-context"
 import { getAsset } from "../../shared/assetLookup"
 import { QrScannerOverlay } from "./QrScannerOverlay"
@@ -241,7 +242,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 			setSignedTx(result)
 			setPhase('signed')
 		} catch (e: any) {
-			setError(e.message || t("signingFailed"))
+			setError(describeSigningError(e, t))
 		}
 		setLoading(false)
 	}, [chain, buildResult])
