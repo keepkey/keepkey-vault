@@ -546,13 +546,14 @@ function loadSettings() {
 	alphaFirmware = getSetting('alpha_firmware') === '1'
 	privateModeEnabled = getSetting('private_mode_enabled') === '1'
 
-	// Normalize emulator flag on non-macOS. The kkemu dylibs + Keychain pairing
-	// only work on darwin, and the Settings toggle is hidden on other platforms
-	// (IS_MAC gate in DeviceSettingsDrawer). A copied or migrated DB carrying
-	// emulator_enabled=1 would otherwise re-expose a broken surface on Linux /
-	// Windows with no in-app way for the user to turn it back off.
-	if (emulatorEnabled && process.platform !== 'darwin') {
-		console.warn(`[settings] Forcing emulator_enabled=0 on non-macOS platform (${process.platform})`)
+	// Normalize emulator flag on platforms with no emulator support. The
+	// emulator runs on macOS (Keychain + libkkemu.dylib) and Windows (DPAPI +
+	// libkkemu.dll); Linux has no key store wired up. A copied or migrated DB
+	// carrying emulator_enabled=1 would otherwise re-expose a broken surface on
+	// Linux with no in-app way to turn it back off. Do NOT reset on Windows —
+	// that would wipe the flag set by a dropped .dll on every relaunch.
+	if (emulatorEnabled && process.platform !== 'darwin' && process.platform !== 'win32') {
+		console.warn(`[settings] Forcing emulator_enabled=0 on unsupported platform (${process.platform})`)
 		emulatorEnabled = false
 		setSetting('emulator_enabled', '0')
 	}
@@ -1188,10 +1189,29 @@ async function emuConfirmOp(fn: () => Promise<any>, confirmCount = 2): Promise<a
 // emuConfirmOp for auto-confirm.
 async function emuSigningOp(
 	fn: () => Promise<any>,
-	details: { operation: string; chain?: string; to?: string; value?: string; memo?: string },
+	details: { operation: string; chain?: string; to?: string; value?: string; fee?: string; memo?: string },
 ): Promise<any> {
 	const { emuInteractiveConfirm } = await import('./emulator-window')
 	return emuInteractiveConfirm(fn, details, engine.emuDelegate)
+}
+
+// F5: best-effort confirm fields for the Cosmos-family tx shape (Cosmos/THOR/
+// Maya/Osmosis). All accesses are guarded — a missing/odd field just omits that
+// row; it never throws or changes signing. Amounts are shown in raw base units
+// (no fake decimal conversion — the device shows what it shows).
+function cosmosConfirmDetails(operation: string, chain: string, params: any) {
+	const tx = params?.tx ?? params
+	const msg = tx?.msg?.[0]?.value ?? tx?.msg?.[0]
+	const to = msg?.to_address ?? msg?.recipient ?? msg?.receiver ?? msg?.delegator_address
+	const amt = msg?.amount?.[0]?.amount ?? msg?.amount?.amount ?? msg?.amount
+	const feeAmt = tx?.fee?.amount?.[0]?.amount
+	return {
+		operation, chain,
+		to: typeof to === 'string' ? to : undefined,
+		value: amt != null && typeof amt !== 'object' ? String(amt) : undefined,
+		fee: feeAmt != null ? String(feeAmt) : undefined,
+		memo: tx?.memo || undefined,
+	}
 }
 
 // Race engine.getEmulatorMnemonic() against a 3s deadline. The DebugLink
@@ -1666,18 +1686,35 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			// ── Transaction signing ───────────────────────────────────
 			btcSignTx: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
-				if (engine.isEmulator) return emuSigningOp(
-					() => engine.wallet!.btcSignTx(params),
-					{ operation: 'btcSignTx', chain: 'Bitcoin', to: params.outputs?.[0]?.address, value: params.outputs?.[0]?.amount },
-				)
+				if (engine.isEmulator) {
+					// fee = sum(inputs) - sum(outputs), only if inputs carry their value
+					// (they often don't in params — omit rather than show a wrong number).
+					const outs: any[] = (params as any).outputs || []
+					const ins: any[] = (params as any).inputs || []
+					const sumOut = outs.reduce((s, o) => s + Number(o?.amount || 0), 0)
+					const sumIn = ins.reduce((s, i) => s + Number(i?.amount ?? i?.value ?? 0), 0)
+					const fee = sumIn > sumOut ? String(sumIn - sumOut) + ' sats' : undefined
+					const amt = outs[0]?.amount
+					return emuSigningOp(
+						() => engine.wallet!.btcSignTx(params),
+						{ operation: 'btcSignTx', chain: 'Bitcoin', to: outs[0]?.address, value: amt != null ? String(amt) + ' sats' : undefined, fee },
+					)
+				}
 				return await engine.wallet.btcSignTx(params)
 			},
 			ethSignTx: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
-				if (engine.isEmulator) return emuSigningOp(
-					() => engine.wallet!.ethSignTx(params),
-					{ operation: 'ethSignTx', chain: 'Ethereum', to: params.to, value: params.value },
-				)
+				if (engine.isEmulator) {
+					let fee: string | undefined
+					try {
+						const gp = (params as any).maxFeePerGas ?? (params as any).gasPrice
+						if ((params as any).gasLimit && gp) fee = (BigInt((params as any).gasLimit) * BigInt(gp)).toString() + ' wei'
+					} catch { /* malformed hex — omit fee rather than crash */ }
+					return emuSigningOp(
+						() => engine.wallet!.ethSignTx(params),
+						{ operation: 'ethSignTx', chain: 'Ethereum', to: params.to, value: params.value, fee },
+					)
+				}
 				return await engine.wallet.ethSignTx(params)
 			},
 			ethSignMessage: async (params) => {
@@ -1704,7 +1741,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!engine.wallet) throw new Error('No device connected')
 				if (engine.isEmulator) return emuSigningOp(
 					() => engine.wallet!.cosmosSignTx(params),
-					{ operation: 'cosmosSignTx', chain: 'Cosmos' },
+					cosmosConfirmDetails('cosmosSignTx', 'Cosmos', params),
 				)
 				return await engine.wallet.cosmosSignTx(params)
 			},
@@ -1712,7 +1749,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!engine.wallet) throw new Error('No device connected')
 				if (engine.isEmulator) return emuSigningOp(
 					() => engine.wallet!.thorchainSignTx(params),
-					{ operation: 'thorchainSignTx', chain: 'THORChain' },
+					cosmosConfirmDetails('thorchainSignTx', 'THORChain', params),
 				)
 				return await engine.wallet.thorchainSignTx(params)
 			},
@@ -1720,7 +1757,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!engine.wallet) throw new Error('No device connected')
 				if (engine.isEmulator) return emuSigningOp(
 					() => engine.wallet!.mayachainSignTx(params),
-					{ operation: 'mayachainSignTx', chain: 'Maya' },
+					cosmosConfirmDetails('mayachainSignTx', 'Maya', params),
 				)
 				return await engine.wallet.mayachainSignTx(params)
 			},
@@ -1728,16 +1765,24 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!engine.wallet) throw new Error('No device connected')
 				if (engine.isEmulator) return emuSigningOp(
 					() => engine.wallet!.osmosisSignTx(params),
-					{ operation: 'osmosisSignTx', chain: 'Osmosis' },
+					cosmosConfirmDetails('osmosisSignTx', 'Osmosis', params),
 				)
 				return await engine.wallet.osmosisSignTx(params)
 			},
 			xrpSignTx: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
-				if (engine.isEmulator) return emuSigningOp(
-					() => engine.wallet!.rippleSignTx(params),
-					{ operation: 'xrpSignTx', chain: 'XRP' },
-				)
+				if (engine.isEmulator) {
+					const tx: any = (params as any).tx ?? params
+					return emuSigningOp(
+						() => engine.wallet!.rippleSignTx(params),
+						{
+							operation: 'xrpSignTx', chain: 'XRP',
+							to: typeof tx?.destination === 'string' ? tx.destination : undefined,
+							value: tx?.amount != null ? String(tx.amount) + ' drops' : undefined,
+							fee: tx?.fee != null ? String(tx.fee) + ' drops' : undefined,
+						},
+					)
+				}
 				return await engine.wallet.rippleSignTx(params)
 			},
 			solanaSignTx: async (params) => {
@@ -4244,11 +4289,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return getAppSettings()
 			},
 			setEmulatorEnabled: async (params) => {
-				// Non-macOS: refuse to enable. The kkemu dylibs + Keychain pairing
-				// are POSIX-only (really macOS-only), so exposing the surface
-				// anywhere else just shows a broken UI.
-				if (params.enabled && process.platform !== 'darwin') {
-					throw new Error('Emulator is only available on macOS')
+				// Refuse to enable on platforms with no emulator support. The
+				// emulator runs on macOS (Keychain) and Windows (DPAPI); Linux
+				// has no key store, so enabling there just shows a broken UI.
+				if (params.enabled && process.platform !== 'darwin' && process.platform !== 'win32') {
+					throw new Error('Emulator is only available on macOS and Windows')
 				}
 				// When turning the emulator off while it's running, stop it first
 				// and fail CLOSED — if shutdown doesn't complete, the flag stays
@@ -5757,20 +5802,28 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return getEmulatorStatus()
 			},
 			emulatorInstallDylib: async (params) => {
-				// macOS-only: copy a user-supplied libkkemu.dylib into ~/.keepkey/emulator/
-				// so subsequent emulatorInit() loads it. Auto-flips emulator_enabled
-				// since the user has explicitly opted in by dropping a binary.
-				if (process.platform !== 'darwin') throw new Error('Emulator is only available on macOS')
-				if (!params?.data) throw new Error('Missing dylib payload')
+				// Copy a user-supplied emulator library into ~/.keepkey/emulator/
+				// (libkkemu.dylib on macOS, libkkemu.dll on Windows) so subsequent
+				// emulatorInit() loads it. Auto-flips emulator_enabled since the user
+				// has explicitly opted in by dropping a binary.
+				const isWin = process.platform === 'win32'
+				if (process.platform !== 'darwin' && !isWin) throw new Error('Emulator is only available on macOS and Windows')
+				if (!params?.data) throw new Error('Missing emulator library payload')
 
 				const buf = Buffer.from(params.data, 'base64')
-				if (buf.length < 4) throw new Error('Empty dylib payload')
-				// Mach-O header (thin or fat). Reject anything else early so we
-				// don't dlopen() an arbitrary file later.
-				const magic = buf.readUInt32BE(0)
-				const MACHO_MAGIC = new Set([0xfeedfacf, 0xcffaedfe, 0xfeedface, 0xcefaedfe, 0xcafebabe, 0xbebafeca])
-				if (!MACHO_MAGIC.has(magic)) {
-					throw new Error('File is not a Mach-O dynamic library')
+				if (buf.length < 4) throw new Error('Empty emulator library payload')
+				// Validate the binary header so we never dlopen() an arbitrary file:
+				// PE/'MZ' on Windows, Mach-O (thin or fat) on macOS.
+				if (isWin) {
+					if (buf.readUInt16BE(0) !== 0x4d5a) {
+						throw new Error('File is not a Windows DLL (PE/MZ header expected)')
+					}
+				} else {
+					const magic = buf.readUInt32BE(0)
+					const MACHO_MAGIC = new Set([0xfeedfacf, 0xcffaedfe, 0xfeedface, 0xcefaedfe, 0xcafebabe, 0xbebafeca])
+					if (!MACHO_MAGIC.has(magic)) {
+						throw new Error('File is not a Mach-O dynamic library')
+					}
 				}
 
 				// Stop any running emulator before swapping the dylib — replacing

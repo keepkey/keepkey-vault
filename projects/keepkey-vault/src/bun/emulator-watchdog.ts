@@ -11,9 +11,11 @@
 // surfaces it as an error, the app stays alive, the user retries. Killing the
 // whole process for a slow button press on a 2020 bootloader was wrong.
 //
-// PLATFORM: POSIX only. Uses bash/sleep/cat/date/kill -9. On Windows: no-op.
-// kkemu is POSIX-only anyway (dylib builds only on macOS/Linux), so the
-// watchdog is never needed on win32.
+// PLATFORM: POSIX uses a detached bash loop (sleep/cat/date/kill -9); Windows
+// uses an equivalent PowerShell loop (Start-Sleep/Get-Content/Stop-Process).
+// Both are needed now that the emulator runs on Windows via libkkemu.dll — a
+// frozen confirm_helper would otherwise hang the whole app on win32 with no
+// recovery (the in-process Promise.race timeouts can't fire on a frozen loop).
 
 import * as fs from 'fs'
 import * as os from 'os'
@@ -26,10 +28,6 @@ let started = false
 
 export function startEmulatorWatchdog(): void {
   if (started) return
-  if (process.platform === 'win32') {
-    console.log('[EmuWatchdog] Skipped on Windows (kkemu is POSIX-only)')
-    return
-  }
 
   // Spawn the killer subprocess FIRST. If this throws, we bail before
   // arming the heartbeat — otherwise a failed spawn leaves an orphaned
@@ -42,20 +40,39 @@ export function startEmulatorWatchdog(): void {
     // turned slow-but-working flows into kill-the-app crashes. Keep the
     // watchdog as a backstop against genuine freezes (confirm_helper-style
     // busy loops), just give legit work room to finish.
-    watchdogProc = Bun.spawn(['bash', '-c', `
-      while true; do
-        sleep 5
-        if [ ! -f "${HEARTBEAT_FILE}" ]; then exit 0; fi
-        last=$(cat "${HEARTBEAT_FILE}" 2>/dev/null || echo 0)
-        now=$(date +%s)
-        age=$(( now - last / 1000 ))
-        if [ "$age" -gt 60 ]; then
-          kill -9 ${process.pid} 2>/dev/null
-          rm -f "${HEARTBEAT_FILE}"
-          exit 0
-        fi
-      done
-    `], { stdout: 'ignore', stderr: 'ignore' })
+    const watcherCmd = process.platform === 'win32'
+      // PowerShell mirror of the bash loop. Heartbeat is epoch-ms (Date.now());
+      // Stop-Process -Force is the win32 equivalent of kill -9.
+      ? ['powershell', '-NoProfile', '-NonInteractive', '-Command', `
+        $f = '${HEARTBEAT_FILE}'
+        while ($true) {
+          Start-Sleep -Seconds 5
+          if (-not (Test-Path $f)) { exit 0 }
+          $last = 0
+          try { $last = [int64]((Get-Content -Raw $f).Trim()) } catch { $last = 0 }
+          $now = [int64][DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+          if ((($now - $last) / 1000) -gt 60) {
+            Stop-Process -Id ${process.pid} -Force -ErrorAction SilentlyContinue
+            Remove-Item $f -ErrorAction SilentlyContinue
+            exit 0
+          }
+        }
+      `]
+      : ['bash', '-c', `
+        while true; do
+          sleep 5
+          if [ ! -f "${HEARTBEAT_FILE}" ]; then exit 0; fi
+          last=$(cat "${HEARTBEAT_FILE}" 2>/dev/null || echo 0)
+          now=$(date +%s)
+          age=$(( now - last / 1000 ))
+          if [ "$age" -gt 60 ]; then
+            kill -9 ${process.pid} 2>/dev/null
+            rm -f "${HEARTBEAT_FILE}"
+            exit 0
+          fi
+        done
+      `]
+    watchdogProc = Bun.spawn(watcherCmd, { stdout: 'ignore', stderr: 'ignore' })
     watchdogProc.unref()
   } catch (err: any) {
     console.warn(`[EmuWatchdog] Spawn failed (continuing without it): ${err?.message || err}`)

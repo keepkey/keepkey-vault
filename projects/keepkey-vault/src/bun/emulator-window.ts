@@ -61,6 +61,8 @@ export interface EmulatorConfirmDetails {
   chain?: string
   to?: string
   value?: string
+  /** Network fee, pre-formatted by the sign handler (shown before approval). */
+  fee?: string
   memo?: string
   /** Override firmware confirmation count (default: auto-detected from operation) */
   confirmCount?: number
@@ -408,14 +410,19 @@ let displayPollTimer: ReturnType<typeof setInterval> | null = null
 let cachedPopFrames: (() => Uint8Array[]) | null = null
 const playbackQueue: Uint8Array[] = []
 const PLAYBACK_QUEUE_CAP = 90 // ~6s at 15fps; older frames dropped
+const PLAYBACK_TICK_MS = 66 // ~15fps normal/idle cadence
+const PLAYBACK_TICK_SLOW_MS = 350 // post-approval: linger so confirm screens are readable
+let slowPlaybackUntil = 0 // epoch ms; emit at the slow cadence until then (F4)
 
 export function startDisplayPoll(): void {
   if (displayPollTimer) return
   import('./emulator').then(mod => {
     cachedPopFrames = mod.emuPopFrames
-    let lastHadDisplay = false
-    displayPollTimer = setInterval(() => {
-      if (!emuWindow || !cachedPopFrames) return
+    // Self-rescheduling timer so the cadence can change per tick: normal
+    // ~15fps, but slower right after an approval so the burst of confirm
+    // screens (rendered in one synchronous kkemu_poll) is readable (F4).
+    const tick = () => {
+      if (!emuWindow || !cachedPopFrames) { displayPollTimer = setTimeout(tick, PLAYBACK_TICK_MS); return }
 
       // Always drain the C ring so the dylib doesn't overflow during the
       // bridge handshake. Frames captured before viewReady are held in the
@@ -430,22 +437,23 @@ export function startDisplayPoll(): void {
 
       // sendToWindow is a no-op until viewReady. Don't shift off the queue
       // until then — emitted frames would be discarded mid-flight.
-      if (!viewReady) return
-
-      if (playbackQueue.length > 0) {
+      if (viewReady && playbackQueue.length > 0) {
         const fb = playbackQueue.shift()!
         const b64 = Buffer.from(fb).toString('base64')
         sendToWindow('display-update', { fb: b64, w: 256, h: 64 })
-        lastHadDisplay = true
       }
       // No queued frame: leave the last frame on screen. (Don't emit
       // display-lost; the device hasn't gone away, it's just idle.)
-    }, 66) // ~15fps
+
+      const delay = Date.now() < slowPlaybackUntil ? PLAYBACK_TICK_SLOW_MS : PLAYBACK_TICK_MS
+      displayPollTimer = setTimeout(tick, delay)
+    }
+    displayPollTimer = setTimeout(tick, PLAYBACK_TICK_MS)
   })
 }
 
 export function stopDisplayPoll(): void {
-  if (displayPollTimer) { clearInterval(displayPollTimer); displayPollTimer = null }
+  if (displayPollTimer) { clearTimeout(displayPollTimer); displayPollTimer = null }
   cachedPopFrames = null
   playbackQueue.length = 0
 }
@@ -574,6 +582,11 @@ export async function emuInteractiveConfirm(
     // All confirms happen inside a single kkemu_poll() C call — we can't
     // inject between them. Both BA+DLD go to iface 1 (same FIFO) so
     // confirm_helper reads them in order without iface-priority starvation.
+    //
+    // F4: that single poll renders every confirm screen into the C frame ring
+    // as a burst. Slow the playback cadence so the user can actually read the
+    // genuine firmware-rendered summary screens that stream in after Confirm.
+    slowPlaybackUntil = Date.now() + Math.max(4000, nConfirms * PLAYBACK_TICK_SLOW_MS + 1500)
     prewriteConfirmations(nConfirms)
     emuPollOnce()
 
@@ -849,6 +862,7 @@ function buildEmulatorHTML(bridgePort: number): string {
       html += '<div class="addr">To: ' + esc(addr) + '</div>';
     }
     if (details.value) html += '<div class="detail">Amount: ' + esc(details.value) + '</div>';
+    if (details.fee) html += '<div class="detail">Fee: ' + esc(details.fee) + '</div>';
     if (details.memo) html += '<div class="detail">Memo: ' + esc(details.memo) + '</div>';
     confirmMeta.innerHTML = html;
     confirmMeta.classList.add('visible');

@@ -19,7 +19,7 @@ import { join } from 'path'
 import { existsSync, mkdirSync } from 'fs'
 import { homedir } from 'os'
 import {
-  isMacOS, getOrCreateKey, getPairingStatus,
+  isMacOS, isEmulatorSupported, getOrCreateKey, getPairingStatus,
   loadFlash, saveFlash, zeroFlash, listFlashImages, deleteFlash,
   type EmulatorFlash, type EmulatorPairingStatus,
 } from './emulator-keychain'
@@ -38,9 +38,16 @@ function getEmulatorBinDir(): string {
   return dir
 }
 
-/** Path to the user-installed dylib. May not exist yet. */
+/** Platform filename for the firmware shared library the vault loads via FFI. */
+export function getLibFilename(): string {
+  if (process.platform === 'win32') return 'libkkemu.dll'
+  if (process.platform === 'linux') return 'libkkemu.so'
+  return 'libkkemu.dylib'
+}
+
+/** Path to the user-installed emulator library. May not exist yet. */
 export function getDylibPath(): string {
-  return join(getEmulatorBinDir(), 'libkkemu.dylib')
+  return join(getEmulatorBinDir(), getLibFilename())
 }
 
 /** True when the user has installed a dylib. */
@@ -89,12 +96,12 @@ export function getEmulatorStatus(): EmulatorStatus {
   }
 }
 
-export { isMacOS, getPairingStatus }
+export { isMacOS, isEmulatorSupported, getPairingStatus }
 
-// ── Pairing (Keychain key generation) ───────────────────────────────────
+// ── Pairing (OS key store key generation) ───────────────────────────────
 
 export function pairEmulator(): EmulatorPairingStatus {
-  if (!isMacOS()) throw new Error('Emulator requires macOS (Keychain)')
+  if (!isEmulatorSupported()) throw new Error('Emulator requires macOS or Windows')
   getOrCreateKey()
   console.log(`${TAG} Emulator paired with Keychain`)
   return getPairingStatus()
@@ -112,8 +119,8 @@ export function pairEmulator(): EmulatorPairingStatus {
  * @param flashName - Name of the flash image to use (default: 'default')
  */
 export function initEmulator(flashName = 'default'): EmulatorStatus {
-  if (!isMacOS()) {
-    emuError = 'Emulator requires macOS'
+  if (!isEmulatorSupported()) {
+    emuError = 'Emulator requires macOS or Windows'
     return getEmulatorStatus()
   }
 
@@ -131,7 +138,9 @@ export function initEmulator(flashName = 'default'): EmulatorStatus {
     // an orphan flash file when the user hasn't installed an emulator yet.
     const dylibPath = getDylibPath()
     if (!isDylibInstalled()) {
-      throw new Error(`No emulator installed. Drop a libkkemu.dylib onto the window or run: make build-emulator`)
+      const lib = getLibFilename()
+      const how = process.platform === 'win32' ? 'make build-emulator-windows' : 'make build-emulator'
+      throw new Error(`No emulator installed. Drop a ${lib} onto the window or run: ${how}`)
     }
 
     // 2. Decrypt flash
