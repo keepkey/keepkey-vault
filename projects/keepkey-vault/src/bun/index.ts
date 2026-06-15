@@ -546,13 +546,14 @@ function loadSettings() {
 	alphaFirmware = getSetting('alpha_firmware') === '1'
 	privateModeEnabled = getSetting('private_mode_enabled') === '1'
 
-	// Normalize emulator flag on non-macOS. The kkemu dylibs + Keychain pairing
-	// only work on darwin, and the Settings toggle is hidden on other platforms
-	// (IS_MAC gate in DeviceSettingsDrawer). A copied or migrated DB carrying
-	// emulator_enabled=1 would otherwise re-expose a broken surface on Linux /
-	// Windows with no in-app way for the user to turn it back off.
-	if (emulatorEnabled && process.platform !== 'darwin') {
-		console.warn(`[settings] Forcing emulator_enabled=0 on non-macOS platform (${process.platform})`)
+	// Normalize emulator flag on platforms with no emulator support. The
+	// emulator runs on macOS (Keychain + libkkemu.dylib) and Windows (DPAPI +
+	// libkkemu.dll); Linux has no key store wired up. A copied or migrated DB
+	// carrying emulator_enabled=1 would otherwise re-expose a broken surface on
+	// Linux with no in-app way to turn it back off. Do NOT reset on Windows —
+	// that would wipe the flag set by a dropped .dll on every relaunch.
+	if (emulatorEnabled && process.platform !== 'darwin' && process.platform !== 'win32') {
+		console.warn(`[settings] Forcing emulator_enabled=0 on unsupported platform (${process.platform})`)
 		emulatorEnabled = false
 		setSetting('emulator_enabled', '0')
 	}
@@ -4244,11 +4245,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return getAppSettings()
 			},
 			setEmulatorEnabled: async (params) => {
-				// Non-macOS: refuse to enable. The kkemu dylibs + Keychain pairing
-				// are POSIX-only (really macOS-only), so exposing the surface
-				// anywhere else just shows a broken UI.
-				if (params.enabled && process.platform !== 'darwin') {
-					throw new Error('Emulator is only available on macOS')
+				// Refuse to enable on platforms with no emulator support. The
+				// emulator runs on macOS (Keychain) and Windows (DPAPI); Linux
+				// has no key store, so enabling there just shows a broken UI.
+				if (params.enabled && process.platform !== 'darwin' && process.platform !== 'win32') {
+					throw new Error('Emulator is only available on macOS and Windows')
 				}
 				// When turning the emulator off while it's running, stop it first
 				// and fail CLOSED — if shutdown doesn't complete, the flag stays

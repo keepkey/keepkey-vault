@@ -126,58 +126,89 @@ function getWinKeyPath(): string {
   return join(getStorageDir(), 'flash-key.dpapi')
 }
 
-/** Run a PowerShell snippet, piping `input` to its stdin, returning stdout. */
-function runPowerShell(script: string, input: string): string {
-  return execSync(
-    `powershell -NoProfile -NonInteractive -Command "${script}"`,
-    { input, encoding: 'utf-8', timeout: 10000 }
-  ).trim()
+const PS_PROTECT = [
+  "$ErrorActionPreference='Stop'",
+  'Add-Type -AssemblyName System.Security',
+  '$b64=[Console]::In.ReadToEnd().Trim()',
+  '$plain=[Convert]::FromBase64String($b64)',
+  '$prot=[System.Security.Cryptography.ProtectedData]::Protect($plain,$null,[System.Security.Cryptography.DataProtectionScope]::CurrentUser)',
+  '[Convert]::ToBase64String($prot)',
+].join('; ')
+
+const PS_UNPROTECT = [
+  "$ErrorActionPreference='Stop'",
+  'Add-Type -AssemblyName System.Security',
+  '$b64=[Console]::In.ReadToEnd().Trim()',
+  '$prot=[Convert]::FromBase64String($b64)',
+  '$plain=[System.Security.Cryptography.ProtectedData]::Unprotect($prot,$null,[System.Security.Cryptography.DataProtectionScope]::CurrentUser)',
+  '[Convert]::ToBase64String($plain)',
+].join('; ')
+
+/**
+ * Run a PowerShell snippet via argv (NOT a cmd.exe string), piping `input` to
+ * its stdin. The argv form is quoting-immune (matches windows-usb-probe.ts).
+ * Returns { ok, out, err } so callers can tell "ran and failed" (e.g. DPAPI
+ * Unprotect failed, or Constrained Language Mode blocked Add-Type) apart from
+ * a clean result — which the caller needs to avoid clobbering an existing key.
+ */
+function runPowerShell(script: string, input: string): { ok: boolean; out: string; err: string } {
+  const proc = Bun.spawnSync(
+    ['powershell', '-NoProfile', '-NonInteractive', '-Command', script],
+    { stdin: Buffer.from(input, 'utf-8') }
+  )
+  return {
+    ok: proc.exitCode === 0,
+    out: proc.stdout.toString().trim(),
+    err: proc.stderr.toString().trim(),
+  }
 }
 
 /** DPAPI-protect the key (CurrentUser) and write the blob to disk. */
 function writeWinKey(key: Buffer): void {
-  const script = [
-    "$ErrorActionPreference='Stop'",
-    'Add-Type -AssemblyName System.Security',
-    '$b64=[Console]::In.ReadToEnd().Trim()',
-    '$plain=[Convert]::FromBase64String($b64)',
-    '$prot=[System.Security.Cryptography.ProtectedData]::Protect($plain,$null,[System.Security.Cryptography.DataProtectionScope]::CurrentUser)',
-    '[Convert]::ToBase64String($prot)',
-  ].join('; ')
-  const out = runPowerShell(script, key.toString('base64'))
-  if (!out) throw new Error('DPAPI Protect returned empty output')
-  writeFileSync(getWinKeyPath(), out, { mode: 0o600 })
+  const r = runPowerShell(PS_PROTECT, key.toString('base64'))
+  if (!r.ok || !r.out) throw new Error(`DPAPI Protect failed${r.err ? `: ${r.err}` : ''}`)
+  // mode 0o600 is a no-op on Windows (POSIX bits ignored) — confidentiality
+  // comes from DPAPI, not the file mode. Harmless on macOS/Linux.
+  writeFileSync(getWinKeyPath(), r.out, { mode: 0o600 })
 }
 
-/** Read + DPAPI-unprotect the key. Returns null if absent or undecryptable. */
+/**
+ * Read + DPAPI-unprotect the key.
+ *   - returns null ONLY when the blob is genuinely absent (legit first run)
+ *   - THROWS when the blob exists but can't be decrypted (DPAPI master key
+ *     rotated, roamed/restored profile, or PowerShell blocked). Throwing —
+ *     instead of returning null — is what stops getOrCreateKey() from silently
+ *     overwriting the key and permanently orphaning existing encrypted wallets.
+ */
 function readWinKey(): Buffer | null {
   const p = getWinKeyPath()
   if (!existsSync(p)) return null
-  try {
-    const protB64 = (readFileSync(p, 'utf-8') as string).trim()
-    if (!protB64) return null
-    const script = [
-      "$ErrorActionPreference='Stop'",
-      'Add-Type -AssemblyName System.Security',
-      '$b64=[Console]::In.ReadToEnd().Trim()',
-      '$prot=[Convert]::FromBase64String($b64)',
-      '$plain=[System.Security.Cryptography.ProtectedData]::Unprotect($prot,$null,[System.Security.Cryptography.DataProtectionScope]::CurrentUser)',
-      '[Convert]::ToBase64String($plain)',
-    ].join('; ')
-    const out = runPowerShell(script, protB64)
-    if (!out) return null
-    const key = Buffer.from(out, 'base64')
-    return key.length === KEY_SIZE ? key : null
-  } catch {
-    return null
+  const protB64 = (readFileSync(p, 'utf-8') as string).trim()
+  if (!protB64) return null
+  const r = runPowerShell(PS_UNPROTECT, protB64)
+  if (!r.ok || !r.out) {
+    throw new Error(
+      `Cannot decrypt the emulator key at ${p}. Your Windows account or ` +
+      `PowerShell environment may have changed. Refusing to overwrite it — ` +
+      `that would lose existing emulator wallets. To start fresh, delete that ` +
+      `file and the *.enc images in the same folder.${r.err ? ` [${r.err}]` : ''}`)
   }
+  const key = Buffer.from(r.out, 'base64')
+  if (key.length !== KEY_SIZE) {
+    throw new Error(`Emulator key at ${p} is the wrong size (${key.length} bytes)`)
+  }
+  return key
 }
 
 /**
  * Check if a key exists in the OS store without reading it.
  */
 export function hasKeychainKey(): boolean {
-  if (isWindows()) return readWinKey() !== null
+  // On Windows "paired" = the DPAPI blob exists. Use file existence rather than
+  // readWinKey(), which now throws on a present-but-undecryptable blob — that
+  // state is still "paired" (just broken), and this is called from the
+  // pairing-status path which must never throw.
+  if (isWindows()) return existsSync(getWinKeyPath())
   if (!isMacOS()) return false
   return readKeychainKey() !== null
 }
