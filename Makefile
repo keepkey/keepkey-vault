@@ -22,7 +22,7 @@ include .env
 export ELECTROBUN_DEVELOPER_ID ELECTROBUN_TEAMID ELECTROBUN_APPLEID ELECTROBUN_APPLEIDPASS
 endif
 
-.PHONY: install dev dev-hmr build build-stable build-canary build-signed prune-bundle dmg clean help vault sign-check verify verify-entitlements publish release upload-dmg upload-all-dmgs sign-release sign-release-intel verify-arch submodules modules-install modules-build modules-clean audit build-zcash-cli build-zcash-cli-debug build-zcash-cli-intel test test-unit test-rest test-zcash-cli test-emu build-intel build-signed-intel build-electrobun-x64-core publish-electrobun-x64-core build-electrobun-linux-x64-core publish-electrobun-linux-x64-core preflight build-emulator clean-emulator test-emu-python
+.PHONY: install dev dev-hmr build build-stable build-canary build-signed prune-bundle dmg clean help vault sign-check verify verify-entitlements publish release upload-dmg upload-all-dmgs sign-release sign-release-intel verify-arch submodules modules-install modules-build modules-clean audit build-zcash-cli build-zcash-cli-debug build-zcash-cli-intel test test-unit test-rest test-zcash-cli test-emu build-intel build-signed-intel build-electrobun-x64-core publish-electrobun-x64-core build-electrobun-linux-x64-core publish-electrobun-linux-x64-core preflight build-emulator build-emulator-windows clean-emulator test-emu-python
 
 # --- Submodules (auto-init on fresh worktrees/clones) ---
 
@@ -347,10 +347,22 @@ test-emu:
 	cd $(PROJECT_DIR) && bun test tests/emulator/
 
 # --- Emulator (developer feature) ---
-# Build the native macOS emulator (libkkemu.dylib + kkemu) from the firmware
-# submodule on the current checkout, install the dylib at
-# ~/.keepkey/emulator/libkkemu.dylib (where the vault loads it), and place
-# the standalone kkemu binary alongside for python-keepkey UDP testing.
+# Build the native emulator from the firmware submodule on the current
+# checkout. Two DIFFERENT artifacts come out of this target — keep them
+# straight:
+#
+#   1. libkkemu.dylib  — the in-process FFI library THE VAULT LOADS via
+#      bun:ffi. Ring buffers (no sockets), caller-driven kkemu_poll, OLED
+#      capture ring for the live screen preview. Installed at
+#      ~/.keepkey/emulator/libkkemu.dylib.  ← this is the "vault emulator".
+#
+#   2. kkemu  — the STANDALONE UDP binary (:11044/:11045). This is the
+#      transport the firmware CI uses (python-keepkey UDP tests + OLED
+#      screenshot regression). The vault NEVER talks to it; it's here only
+#      so `make test-emu-python` can run the same checks locally.
+#
+# Same firmware source, two transports. The Windows port (below) only needs
+# artifact #1 — see `make build-emulator-windows`.
 #
 # No channels — devs bring their own firmware checkout. Switch revs by
 # checking out the target ref in modules/keepkey-firmware before running.
@@ -383,6 +395,15 @@ build-emulator:
 	chmod +x $(EMU_INSTALL_DIR)/kkemu
 	@echo "    Binary: $(EMU_INSTALL_DIR)/kkemu"
 	@echo "=== Emulator installed ==="
+
+# Cross-compile the Windows emulator DLL (libkkemu.dll) from THIS macOS/Linux
+# host using MinGW-w64 — no Windows runner needed. Produces artifact #1 above
+# (the vault FFI library) as a .dll instead of a .dylib; does NOT build the
+# standalone UDP `kkemu` binary (gated out on Windows). Requires mingw-w64:
+#   macOS: brew install mingw-w64   |   Linux: apt-get install mingw-w64
+build-emulator-windows:
+	cd $(EMU_FW_DIR) && git submodule update --init --recursive
+	bash scripts/build-emulator-windows.sh
 
 # Run python-keepkey consistency tests against the locally-built kkemu binary.
 test-emu-python:
