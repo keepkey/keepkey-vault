@@ -2090,6 +2090,36 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 					zIndex={1}
 				>
 					{hasAnyBalance ? (() => {
+						// Drilled into a chain that holds nothing (no native, no tokens):
+						// drilledChainTokensChartData is already [] in that case. Show an
+						// explicit $0.00 / "no balance" state instead of a near-invisible
+						// zero-value orbital/donut/heatmap (which read as a blank panel).
+						if (drilledChainId && drilledChainTokensChartData.length === 0) {
+							const dchain = visibleChains.find(c => c.id === drilledChainId)
+							if (dchain) {
+								return (
+									<Flex direction="column" align="center" justify="center" gap="4" maxW="320px" textAlign="center">
+										<Image
+											src={getAssetIcon(dchain.caip)}
+											alt={dchain.coin}
+											w="56px" h="56px"
+											borderRadius="full"
+											bg="kk.cardBg"
+											boxShadow={`0 0 0 1px var(--line), 0 8px 24px -8px ${dchain.color}`}
+											opacity={0.85}
+										/>
+										<Box>
+											<Text fontSize="28px" fontWeight="600" fontFamily="mono" color="var(--text-1)" lineHeight="1.1">
+												{privateModeEnabled ? "••••" : "$0.00"}
+											</Text>
+											<Text fontSize="13px" color="var(--text-3)" mt="1">
+												No {dchain.coin} balance yet
+											</Text>
+										</Box>
+									</Flex>
+								)
+							}
+						}
 						if (drilledChainId && viewMode === 'orbital') {
 							const dchain = visibleChains.find(c => c.id === drilledChainId)
 							if (!dchain) return null

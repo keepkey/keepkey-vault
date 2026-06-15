@@ -34,6 +34,19 @@ const CONFETTI_CSS = `
   }
 `
 
+// Nudges the swap arrows on hover so the converted-amount pill reads as a
+// tappable unit toggle (USD ⇄ native) rather than static helper text.
+const AMOUNT_FLIP_CSS = `
+  @keyframes kkAmountFlipNudge {
+    0%, 100% { transform: translateY(0) rotate(0deg); }
+    30%      { transform: translateY(-2px) rotate(-10deg); }
+    65%      { transform: translateY(1px) rotate(10deg); }
+  }
+  .kk-amount-flip:hover .kk-amount-flip-icon {
+    animation: kkAmountFlipNudge 0.5s ease-in-out;
+  }
+`
+
 interface SendFormProps {
 	chain: ChainDef
 	address: string | null
@@ -270,6 +283,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 				signedTx,
 				to: recipient,
 				amount: sendAmount,
+				fee: buildResult?.fee,
 				symbol: displaySymbol,
 				caip: activeCaip,
 				fromAddress: address || undefined,
@@ -541,33 +555,38 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 							</Button>
 						</Flex>
 
-						{/* Clickable secondary value — tap to flip input mode */}
+						{/* Clickable secondary value — tap to flip input mode (USD ⇄ native) */}
 						{hasPrice && (
-							<Flex
-								mt="1" px="1" justify="space-between" align="center"
-								cursor={!isMax ? "pointer" : "default"}
-								onClick={!isMax ? toggleInputMode : undefined}
-								role={!isMax ? "button" : undefined}
-								borderRadius="sm"
-								_hover={!isMax ? { bg: "rgba(255,255,255,0.04)" } : undefined}
-								py="0.5"
-							>
-								{!isMax && (
-									<Flex align="center" gap="1">
-										{inputMode === 'crypto' ? (
-											<Text fontSize="11px" color="kk.textMuted" fontFamily="mono">
-												{amountUsdPreview !== null ? (fmtCompact(amountUsdPreview) || fmt(0)) : fmt(0)}
-											</Text>
-										) : (
-											<Text fontSize="11px" color="kk.textMuted" fontFamily="mono">
-												{amount ? `${formatBalance(amount)} ${displaySymbol}` : `0 ${displaySymbol}`}
-											</Text>
-										)}
-										<Box color="kk.textMuted" opacity={0.6} _hover={{ color: "kk.gold", opacity: 1 }} transition="all 0.15s">
+							<Flex mt="1.5" px="1" justify="space-between" align="center" py="0.5">
+								<style>{AMOUNT_FLIP_CSS}</style>
+								{!isMax ? (
+									<Flex
+										as="button"
+										className="kk-amount-flip"
+										align="center"
+										gap="1.5"
+										onClick={toggleInputMode}
+										cursor="pointer"
+										px="2.5"
+										py="1"
+										borderRadius="999px"
+										bg="rgba(233,196,106,0.10)"
+										border="1px solid rgba(233,196,106,0.30)"
+										color="kk.gold"
+										transition="all 0.15s"
+										_hover={{ bg: "rgba(233,196,106,0.18)", borderColor: "rgba(233,196,106,0.55)" }}
+										title={t("switchAmountUnit", { defaultValue: "Tap to switch between USD and native amount" })}
+									>
+										<Text fontSize="12px" fontWeight="600" fontFamily="mono" letterSpacing="0.01em">
+											{inputMode === 'crypto'
+												? (amountUsdPreview !== null ? (fmtCompact(amountUsdPreview) || fmt(0)) : fmt(0))
+												: (amount ? `${formatBalance(amount)} ${displaySymbol}` : `0 ${displaySymbol}`)}
+										</Text>
+										<Box className="kk-amount-flip-icon" display="flex">
 											<SwapIcon />
 										</Box>
 									</Flex>
-								)}
+								) : <Box />}
 								{pricePerUnit > 0 && (
 									<Text fontSize="10px" color="kk.textMuted">1 {displaySymbol} = {fmtCompact(pricePerUnit)}</Text>
 								)}

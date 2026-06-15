@@ -92,7 +92,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       // `to`/`amount`/`symbol`/`caip`/`fromAddress` are optional and used only to
       // populate the Address Book (R3/R4/R7). Callers that omit them broadcast
       // exactly as before and create no entry.
-      broadcastTx: { params: { chainId: string; signedTx: any; to?: string; amount?: string; symbol?: string; caip?: string; fromAddress?: string }; response: BroadcastResult }
+      broadcastTx: { params: { chainId: string; signedTx: any; to?: string; amount?: string; fee?: string; symbol?: string; caip?: string; fromAddress?: string }; response: BroadcastResult }
 
       // ── Staking / delegation ─────────────────────────────────────────
       getStakingPositions: { params: { chainId: string; address: string }; response: StakingPosition[] }
@@ -285,6 +285,9 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       // ── Recent Activity ──────────────────────────────────────────────────
       getRecentActivity: { params: { limit?: number; chainId?: string } | void; response: RecentActivity[] }
       scanChainHistory: { params: { chainId: string }; response: { count: number } }
+      // True while the engine's startup/background bulk history scan is in flight,
+      // so the activity UI can show "Syncing…" instead of a false "no activity".
+      getActivityScanState: { params: void; response: { running: boolean } }
       dismissActivity: { params: { id: string }; response: void }
       clearRecentActivity: { params: void; response: void }
 
@@ -455,6 +458,11 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       'swap-cmd': SwapUiCommand
       'scan-progress': { percent: number; scannedHeight: number; tipHeight: number; blocksPerSec: number; etaSeconds: number }
       'balance-updated': ChainBalance
+      /** The engine's background history scan (fired on every device-ready)
+       *  finished. The activity UI refetches on this so freshly-indexed txs
+       *  replace the "No indexed activity yet" placeholder without a manual
+       *  navigate-away. inserted/chains are for logging/telemetry only. */
+      'activity-scan-complete': { inserted: number; chains: number }
       /** Seed-staleness purge: the backend detected the in-memory wallet data
        *  belonged to a DIFFERENT seed than the device (passphrase toggle,
        *  hidden↔standard transition, cached-passphrase reconnect) and dropped

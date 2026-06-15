@@ -396,7 +396,9 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 	const [previewActivities, setPreviewActivities] = useState<RecentActivity[]>([])
 	const [previewPrices, setPreviewPrices] = useState<Record<string, number>>({})
 	const [activityDetail, setActivityDetail] = useState<TxDetail | null>(null)
-	useEffect(() => {
+	const [activityScanning, setActivityScanning] = useState(false)
+
+	const loadPreviewActivity = useCallback(() => {
 		rpcRequest<RecentActivity[]>('getRecentActivity', { limit: 100 }, 10000)
 			.then(result => {
 				if (!result) return
@@ -406,10 +408,29 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 				setPreviewActivities(filtered)
 			})
 			.catch(() => {})
+	}, [chain.id, chain.symbol])
+
+	useEffect(() => {
+		loadPreviewActivity()
 		rpcRequest<{ balances: ChainBalance[] } | null>('getCachedBalances')
 			.then(r => { if (r?.balances) setPreviewPrices(nativePriceByChain(r.balances)) })
 			.catch(() => {})
-	}, [chain.id, chain.symbol])
+		// Reflect any in-flight startup/background history scan so the empty state
+		// reads "Syncing…" instead of a false "no activity" while it runs.
+		rpcRequest<{ running: boolean } | null>('getActivityScanState')
+			.then(r => setActivityScanning(!!r?.running))
+			.catch(() => {})
+	}, [loadPreviewActivity])
+
+	// The engine fires a background history scan on every device-ready and emits
+	// this when it finishes — refetch so freshly-indexed txs replace the
+	// "No indexed activity yet" placeholder without a manual navigate-away.
+	useEffect(() => {
+		return onRpcMessage('activity-scan-complete', () => {
+			setActivityScanning(false)
+			loadPreviewActivity()
+		})
+	}, [loadPreviewActivity])
 	const isEvmChain = chain.chainFamily === 'evm'
 
 	// Toggle token visibility via RPC
@@ -1200,17 +1221,26 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 							bg="var(--ink-1)" border="1px solid var(--line)"
 							borderRadius="var(--r-sm)"
 						>
-							<Text fontSize="12px" color="var(--text-3)">No indexed activity yet</Text>
-							{onViewActivity && (
-								<Box
-									as="button"
-									fontSize="11px" color="var(--teal)" fontWeight="500"
-									cursor="pointer" _hover={{ opacity: 0.75 }} transition="opacity 0.15s"
-									onClick={() => onViewActivity(chain.id)}
-									className="electrobun-webkit-app-region-no-drag"
-								>
-									Scan history →
-								</Box>
+							{activityScanning ? (
+								<Flex align="center" gap="2">
+									<Spinner size="xs" color="var(--teal)" />
+									<Text fontSize="12px" color="var(--text-3)">Syncing recent activity…</Text>
+								</Flex>
+							) : (
+								<>
+									<Text fontSize="12px" color="var(--text-3)">No indexed activity yet</Text>
+									{onViewActivity && (
+										<Box
+											as="button"
+											fontSize="11px" color="var(--teal)" fontWeight="500"
+											cursor="pointer" _hover={{ opacity: 0.75 }} transition="opacity 0.15s"
+											onClick={() => onViewActivity(chain.id)}
+											className="electrobun-webkit-app-region-no-drag"
+										>
+											Scan history →
+										</Box>
+									)}
+								</>
 							)}
 						</Flex>
 					) : (

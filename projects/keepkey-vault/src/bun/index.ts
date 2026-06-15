@@ -283,6 +283,10 @@ const GITHUB_REPO = 'keepkey/keepkey-vault'
 // Cached version from pre-release GitHub check (Updater.updateInfo() doesn't have it)
 let pendingUpdateVersion: string | null = null
 let pioneerSocket: PioneerSocket | null = null
+// True from the moment a device becomes ready until the background bulk history
+// scan finishes. Exposed via getActivityScanState so the activity UI can show
+// "Syncing…" when it mounts mid-scan instead of a false "no activity".
+let activityScanRunning = false
 
 function openReleasePage() {
 	const version = pendingUpdateVersion || Updater.updateInfo()?.version
@@ -3287,7 +3291,19 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// Track broadcast in api_log + notify frontend.
 				// PRIVACY: Skip DB write for passphrase wallets (still push to UI).
 				const scope = getWalletDbScope()
-				const logEntry: ApiLogEntry = { ...(scope || {}), method: 'RPC', route: 'broadcastTx', timestamp: Date.now(), durationMs: 0, status: 200, appName: 'vault', txid: result.txid, chain: chain.symbol, activityType: 'broadcast' }
+				// Persist the send intent (recipient/amount/fee/asset) in response_body so
+				// the activity detail panel can show the full record. Without this an in-app
+				// send logs only its txid — getRecentActivityFromLog reads these back as meta.
+				const txMeta = {
+					value: params.amount,
+					fee: params.fee,
+					to: params.to,
+					asset: params.symbol,
+					caip: params.caip,
+					chainId: chain.id,
+					chainSymbol: chain.symbol,
+				}
+				const logEntry: ApiLogEntry = { ...(scope || {}), method: 'RPC', route: 'broadcastTx', timestamp: Date.now(), durationMs: 0, status: 200, appName: 'vault', txid: result.txid, chain: chain.symbol, activityType: 'broadcast', responseBody: txMeta }
 				let abEntry: { entryId: string; isNew: boolean; unsaved: boolean } | null = null
 				if (scope) {
 					// api_log is part of hidden-wallet deniability — keep it standard-only.
@@ -5185,6 +5201,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!scope) return []
 				return getRecentActivityFromLog(params?.limit || 50, params?.chainId, scope.deviceId, scope.walletId)
 			},
+			getActivityScanState: async () => ({ running: activityScanRunning }),
 			scanChainHistory: async (params) => {
 				const chain = getAllChains().find(c => c.id === params.chainId)
 				if (!chain) throw new Error(`Unknown chain: ${params.chainId}`)
@@ -6466,9 +6483,10 @@ engine.on('state-change', (state) => {
 	if (state.state === 'ready' && !engine.isPassphraseWallet) {
 		// Fire-and-forget background history scan on every ready transition (startup + reconnect).
 		// 3s delay lets wallet address derivation settle before hitting Pioneer.
+		activityScanRunning = true
 		setTimeout(() => {
 			const scope = getWalletDbScope()
-			if (!scope || !engine.wallet) return
+			if (!scope || !engine.wallet) { activityScanRunning = false; return }
 			console.log('[activity] Auto-scanning history on device ready...')
 			rebuildActivityHistory({
 				wallet: engine.wallet,
@@ -6477,8 +6495,12 @@ engine.on('state-change', (state) => {
 				firmwareVersion: engine.getDeviceState().firmwareVersion,
 			}).then(result => {
 				console.log(`[activity] Auto-scan complete: ${result.totals.inserted} new txs across ${result.totals.chains} chains`)
+				try { rpc.send['activity-scan-complete']({ inserted: result.totals.inserted, chains: result.totals.chains }) } catch { /* webview not ready */ }
 			}).catch(e => {
 				console.warn('[activity] Auto-scan failed:', e?.message || e)
+				try { rpc.send['activity-scan-complete']({ inserted: 0, chains: 0 }) } catch { /* webview not ready */ }
+			}).finally(() => {
+				activityScanRunning = false
 			})
 		}, 3000)
 	}

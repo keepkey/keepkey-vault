@@ -96,13 +96,37 @@ function normalizeActivityType(tx: any): ActivityType {
   return Number.isFinite(value) && value < 0 ? 'send' : 'receive'
 }
 
+// Pioneer returns to/from as arrays of addresses (occasionally a string or
+// {address} objects). Collapse to one display string: a single address, or
+// "addr +N" when a tx fans out to several (common for UTXO change outputs).
+function normalizeAddressField(field: any): string | undefined {
+  if (!field) return undefined
+  const arr = Array.isArray(field) ? field : [field]
+  const addrs = arr
+    .map(a => (typeof a === 'string' ? a : a?.address || a?.addr || ''))
+    .map(s => String(s).trim())
+    .filter(Boolean)
+  if (addrs.length === 0) return undefined
+  if (addrs.length === 1) return addrs[0]
+  return `${addrs[0]} +${addrs.length - 1}`
+}
+
 function normalizeMeta(tx: any, activityType = normalizeActivityType(tx)) {
   return {
-    confirmations: typeof tx.confirmations === 'number' ? tx.confirmations : 0,
+    // Absent ≠ zero: a tx returned by the HISTORY endpoint is already on-chain.
+    // Defaulting a missing field to 0 falsely renders "Unconfirmed" (red) forever
+    // for chains whose history Pioneer doesn't annotate (e.g. Solana). undefined
+    // → the UI shows no confirmation badge rather than a wrong negative claim.
+    // A real mempool tx still arrives as an explicit 0 and is preserved.
+    confirmations: typeof tx.confirmations === 'number' ? tx.confirmations : undefined,
     blockHeight: tx.blockHeight || tx.block_height || tx.height || 0,
     value: tx.value != null ? String(tx.value) : undefined,
     fee: tx.fee != null ? String(tx.fee) : undefined,
     direction: activityType === 'send' ? 'sent' : 'received',
+    // Counterparties Pioneer already provides per tx — previously discarded, so
+    // historical/received txs showed no addresses in the detail panel.
+    to: normalizeAddressField(tx.to),
+    from: normalizeAddressField(tx.from),
   }
 }
 
@@ -300,6 +324,8 @@ export async function rebuildActivityHistory(params: {
               blockHeight: meta.blockHeight,
               amount: meta.value,
               fee: meta.fee,
+              to: meta.to,
+              from: meta.from,
             })
           }
           if (!dryRun) {
