@@ -1189,10 +1189,29 @@ async function emuConfirmOp(fn: () => Promise<any>, confirmCount = 2): Promise<a
 // emuConfirmOp for auto-confirm.
 async function emuSigningOp(
 	fn: () => Promise<any>,
-	details: { operation: string; chain?: string; to?: string; value?: string; memo?: string },
+	details: { operation: string; chain?: string; to?: string; value?: string; fee?: string; memo?: string },
 ): Promise<any> {
 	const { emuInteractiveConfirm } = await import('./emulator-window')
 	return emuInteractiveConfirm(fn, details, engine.emuDelegate)
+}
+
+// F5: best-effort confirm fields for the Cosmos-family tx shape (Cosmos/THOR/
+// Maya/Osmosis). All accesses are guarded — a missing/odd field just omits that
+// row; it never throws or changes signing. Amounts are shown in raw base units
+// (no fake decimal conversion — the device shows what it shows).
+function cosmosConfirmDetails(operation: string, chain: string, params: any) {
+	const tx = params?.tx ?? params
+	const msg = tx?.msg?.[0]?.value ?? tx?.msg?.[0]
+	const to = msg?.to_address ?? msg?.recipient ?? msg?.receiver ?? msg?.delegator_address
+	const amt = msg?.amount?.[0]?.amount ?? msg?.amount?.amount ?? msg?.amount
+	const feeAmt = tx?.fee?.amount?.[0]?.amount
+	return {
+		operation, chain,
+		to: typeof to === 'string' ? to : undefined,
+		value: amt != null && typeof amt !== 'object' ? String(amt) : undefined,
+		fee: feeAmt != null ? String(feeAmt) : undefined,
+		memo: tx?.memo || undefined,
+	}
 }
 
 // Race engine.getEmulatorMnemonic() against a 3s deadline. The DebugLink
@@ -1667,18 +1686,35 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			// ── Transaction signing ───────────────────────────────────
 			btcSignTx: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
-				if (engine.isEmulator) return emuSigningOp(
-					() => engine.wallet!.btcSignTx(params),
-					{ operation: 'btcSignTx', chain: 'Bitcoin', to: params.outputs?.[0]?.address, value: params.outputs?.[0]?.amount },
-				)
+				if (engine.isEmulator) {
+					// fee = sum(inputs) - sum(outputs), only if inputs carry their value
+					// (they often don't in params — omit rather than show a wrong number).
+					const outs: any[] = (params as any).outputs || []
+					const ins: any[] = (params as any).inputs || []
+					const sumOut = outs.reduce((s, o) => s + Number(o?.amount || 0), 0)
+					const sumIn = ins.reduce((s, i) => s + Number(i?.amount ?? i?.value ?? 0), 0)
+					const fee = sumIn > sumOut ? String(sumIn - sumOut) + ' sats' : undefined
+					const amt = outs[0]?.amount
+					return emuSigningOp(
+						() => engine.wallet!.btcSignTx(params),
+						{ operation: 'btcSignTx', chain: 'Bitcoin', to: outs[0]?.address, value: amt != null ? String(amt) + ' sats' : undefined, fee },
+					)
+				}
 				return await engine.wallet.btcSignTx(params)
 			},
 			ethSignTx: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
-				if (engine.isEmulator) return emuSigningOp(
-					() => engine.wallet!.ethSignTx(params),
-					{ operation: 'ethSignTx', chain: 'Ethereum', to: params.to, value: params.value },
-				)
+				if (engine.isEmulator) {
+					let fee: string | undefined
+					try {
+						const gp = (params as any).maxFeePerGas ?? (params as any).gasPrice
+						if ((params as any).gasLimit && gp) fee = (BigInt((params as any).gasLimit) * BigInt(gp)).toString() + ' wei'
+					} catch { /* malformed hex — omit fee rather than crash */ }
+					return emuSigningOp(
+						() => engine.wallet!.ethSignTx(params),
+						{ operation: 'ethSignTx', chain: 'Ethereum', to: params.to, value: params.value, fee },
+					)
+				}
 				return await engine.wallet.ethSignTx(params)
 			},
 			ethSignMessage: async (params) => {
@@ -1705,7 +1741,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!engine.wallet) throw new Error('No device connected')
 				if (engine.isEmulator) return emuSigningOp(
 					() => engine.wallet!.cosmosSignTx(params),
-					{ operation: 'cosmosSignTx', chain: 'Cosmos' },
+					cosmosConfirmDetails('cosmosSignTx', 'Cosmos', params),
 				)
 				return await engine.wallet.cosmosSignTx(params)
 			},
@@ -1713,7 +1749,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!engine.wallet) throw new Error('No device connected')
 				if (engine.isEmulator) return emuSigningOp(
 					() => engine.wallet!.thorchainSignTx(params),
-					{ operation: 'thorchainSignTx', chain: 'THORChain' },
+					cosmosConfirmDetails('thorchainSignTx', 'THORChain', params),
 				)
 				return await engine.wallet.thorchainSignTx(params)
 			},
@@ -1721,7 +1757,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!engine.wallet) throw new Error('No device connected')
 				if (engine.isEmulator) return emuSigningOp(
 					() => engine.wallet!.mayachainSignTx(params),
-					{ operation: 'mayachainSignTx', chain: 'Maya' },
+					cosmosConfirmDetails('mayachainSignTx', 'Maya', params),
 				)
 				return await engine.wallet.mayachainSignTx(params)
 			},
@@ -1729,16 +1765,24 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!engine.wallet) throw new Error('No device connected')
 				if (engine.isEmulator) return emuSigningOp(
 					() => engine.wallet!.osmosisSignTx(params),
-					{ operation: 'osmosisSignTx', chain: 'Osmosis' },
+					cosmosConfirmDetails('osmosisSignTx', 'Osmosis', params),
 				)
 				return await engine.wallet.osmosisSignTx(params)
 			},
 			xrpSignTx: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
-				if (engine.isEmulator) return emuSigningOp(
-					() => engine.wallet!.rippleSignTx(params),
-					{ operation: 'xrpSignTx', chain: 'XRP' },
-				)
+				if (engine.isEmulator) {
+					const tx: any = (params as any).tx ?? params
+					return emuSigningOp(
+						() => engine.wallet!.rippleSignTx(params),
+						{
+							operation: 'xrpSignTx', chain: 'XRP',
+							to: typeof tx?.destination === 'string' ? tx.destination : undefined,
+							value: tx?.amount != null ? String(tx.amount) + ' drops' : undefined,
+							fee: tx?.fee != null ? String(tx.fee) + ' drops' : undefined,
+						},
+					)
+				}
 				return await engine.wallet.rippleSignTx(params)
 			},
 			solanaSignTx: async (params) => {
