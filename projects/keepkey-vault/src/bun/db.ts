@@ -1205,8 +1205,12 @@ export function getRecentActivityFromLog(limit = 50, chainFilter?: string, devic
       logSql += ` AND (chain = ? OR route = ? OR response_body LIKE ?)`
       logParams.push(chainFilter, `history/${chainFilter}`, `%"chainId":"${chainFilter}"%`)
     }
+    // Over-fetch: an in-app send and the Pioneer scan of the same tx are two
+    // rows that get merged below. Fetching only `limit` rows would let those
+    // duplicates shrink the deduped result below `limit` and hide older unique
+    // rows. 3x covers the worst realistic per-txid row count with headroom.
     logSql += ` ORDER BY timestamp DESC LIMIT ?`
-    logParams.push(limit)
+    logParams.push(limit * 3)
 
     const logRows = db.query(logSql).all(...logParams) as Array<{
       id: number; device_id: string | null; wallet_id: string | null; txid: string | null; chain: string | null; activity_type: string;

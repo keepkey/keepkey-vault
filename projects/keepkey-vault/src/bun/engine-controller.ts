@@ -2338,6 +2338,7 @@ export class EngineController extends EventEmitter {
 
       this.emit('firmware-progress', { percent: 90, message: 'Firmware uploaded, rebooting...' })
       this.updatePhase = 'rebooting'
+      this.sawDetachSinceFlash = false
       this.clearWallet()
       this.emit('state-change', this.getDeviceState())
       this.emit('firmware-progress', { percent: 100, message: 'Custom firmware flash complete' })

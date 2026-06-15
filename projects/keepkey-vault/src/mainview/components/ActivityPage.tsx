@@ -229,7 +229,10 @@ export function ActivityPage({ defaultChainId, onBack, onResumeSwap }: ActivityP
     })
     const u2 = onRpcMessage('swap-update', (_u: SwapStatusUpdate) => { fetchSwaps() })
     const u3 = onRpcMessage('swap-complete', () => { fetchSwaps(); fetchActivities() })
-    return () => { u1(); u2(); u3() }
+    // Background history scans write rows directly via DB helpers (no api-log) —
+    // refresh on the scan-complete signal so the timeline isn't stale until manual refresh.
+    const u4 = onRpcMessage('activity-scan-complete', () => { fetchActivities() })
+    return () => { u1(); u2(); u3(); u4() }
   }, [fetchActivities, fetchSwaps])
 
   const nativePrices = useMemo(() => nativePriceByChain(availableChains), [availableChains])
