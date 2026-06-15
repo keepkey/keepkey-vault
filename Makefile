@@ -379,11 +379,24 @@ build-emulator:
 	mkdir -p $(EMU_BUILD_DIR)
 	@# KK_DEBUG_LINK=ON: required for the dylib FFI path (DebugLinkDecision parsing).
 	@# KK_BUILD_DYLIB=ON: produces libkkemu.dylib alongside standalone kkemu.
-	cd $(EMU_BUILD_DIR) && cmake .. -DKK_EMULATOR=ON -DKK_DEBUG_LINK=ON -DKK_BUILD_DYLIB=ON \
-		-DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
-		-DCMAKE_C_FLAGS="-DPB_NO_PACKED_STRUCTS=1" \
-		-DCMAKE_CXX_FLAGS="-DPB_NO_PACKED_STRUCTS=1"
-	cd $(EMU_BUILD_DIR) && make -j$$(sysctl -n hw.ncpu) kkemu kkemulator_dylib
+	@# Toolchain: nanopb 0.3.9.4 + protoc-gen-nanopb live in pyenv 3.10.15;
+	@# protoc is pinned to 3.21.x (from the .toolchain cache if present, else
+	@# whatever is on PATH). cmake MUST get NANOPB_DIR/NANOPB_PLUGIN — without
+	@# them it falls back to a bogus /root/nanopb default and proto-gen fails.
+	cd $(EMU_BUILD_DIR) && \
+		PYBIN="$(HOME)/.pyenv/versions/3.10.15/bin"; \
+		test -x "$$PYBIN/python" || { echo "ERROR: pyenv 3.10.15 required (pyenv install 3.10.15 + pip install nanopb==0.3.9.4.post3)"; exit 1; }; \
+		NANOPB_DIR="$$($$PYBIN/python -c 'import os,nanopb;print(os.path.dirname(nanopb.__file__))')"; \
+		PINNED="$(EMU_INSTALL_DIR)/.toolchain/protoc-21.12/bin"; \
+		if [ -x "$$PINNED/protoc" ]; then export PATH="$$PINNED:$$PYBIN:$$NANOPB_DIR/generator:$$PATH"; \
+		else export PATH="$$PYBIN:$$NANOPB_DIR/generator:$$PATH"; fi; \
+		cmake .. -DKK_EMULATOR=ON -DKK_DEBUG_LINK=ON -DKK_BUILD_DYLIB=ON \
+			-DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+			-DNANOPB_DIR="$$NANOPB_DIR" \
+			-DNANOPB_PLUGIN="$$(command -v protoc-gen-nanopb)" \
+			-DCMAKE_C_FLAGS="-DPB_NO_PACKED_STRUCTS=1" \
+			-DCMAKE_CXX_FLAGS="-DPB_NO_PACKED_STRUCTS=1" && \
+		make -j$$(sysctl -n hw.ncpu) kkemu kkemulator_dylib
 	mkdir -p $(EMU_INSTALL_DIR)
 	@if [ -f $(EMU_BUILD_DIR)/lib/libkkemu.dylib ]; then \
 		cp $(EMU_BUILD_DIR)/lib/libkkemu.dylib $(EMU_INSTALL_DIR)/libkkemu.dylib; \
