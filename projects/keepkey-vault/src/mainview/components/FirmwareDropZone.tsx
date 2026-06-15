@@ -20,6 +20,9 @@ import { FirmwareUpgradePreview } from "./FirmwareUpgradePreview"
  */
 type FlashPhase = "idle" | "analyzing" | "confirm" | "flashing" | "complete" | "error" | "emu-installing" | "emu-starting" | "emu-installed"
 const IS_MAC = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform || '')
+const IS_WIN = typeof navigator !== 'undefined' && /Win/i.test(navigator.platform || '')
+// Platforms where the emulator (FFI library) can be installed + run.
+const IS_EMU_PLATFORM = IS_MAC || IS_WIN
 
 export function FirmwareDropZone() {
 	const [isDragging, setIsDragging] = useState(false)
@@ -84,17 +87,28 @@ export function FirmwareDropZone() {
 				await processFile(file)
 				return
 			}
-			if (lower.endsWith(".dylib")) {
-				if (!IS_MAC) {
-					setError("Emulator is only available on macOS")
+			if (lower.endsWith(".dylib") || lower.endsWith(".dll")) {
+				if (!IS_EMU_PLATFORM) {
+					setError("Emulator is only available on macOS and Windows")
+					setPhase("error")
+					return
+				}
+				// Reject the wrong-OS library early (clearer than a dlopen failure).
+				if (lower.endsWith(".dylib") && !IS_MAC) {
+					setError("That's a macOS emulator (.dylib). On Windows, drop a libkkemu.dll")
+					setPhase("error")
+					return
+				}
+				if (lower.endsWith(".dll") && !IS_WIN) {
+					setError("That's a Windows emulator (.dll). On macOS, drop a libkkemu.dylib")
 					setPhase("error")
 					return
 				}
 				await processDylib(file)
 				return
 			}
-			setError(IS_MAC
-				? "Only .bin firmware or .dylib emulator files are supported"
+			setError(IS_EMU_PLATFORM
+				? `Only .bin firmware or ${IS_WIN ? ".dll" : ".dylib"} emulator files are supported`
 				: "Only .bin firmware files are supported")
 			setPhase("error")
 		}
@@ -239,9 +253,9 @@ export function FirmwareDropZone() {
 						Drop File
 					</Text>
 					<Text fontSize="sm" color="kk.textSecondary" textAlign="center">
-						{IS_MAC
+						{IS_EMU_PLATFORM
 							? <>Drop a <Text as="span" fontFamily="mono">.bin</Text> firmware to flash your KeepKey,
-							   or a <Text as="span" fontFamily="mono">.dylib</Text> to install an emulator.</>
+							   or a <Text as="span" fontFamily="mono">{IS_WIN ? '.dll' : '.dylib'}</Text> to install an emulator.</>
 							: <>Drop a <Text as="span" fontFamily="mono">.bin</Text> firmware file to flash your KeepKey.
 							   Signed and unsigned firmware supported.</>}
 					</Text>

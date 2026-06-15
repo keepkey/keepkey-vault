@@ -5757,20 +5757,28 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return getEmulatorStatus()
 			},
 			emulatorInstallDylib: async (params) => {
-				// macOS-only: copy a user-supplied libkkemu.dylib into ~/.keepkey/emulator/
-				// so subsequent emulatorInit() loads it. Auto-flips emulator_enabled
-				// since the user has explicitly opted in by dropping a binary.
-				if (process.platform !== 'darwin') throw new Error('Emulator is only available on macOS')
-				if (!params?.data) throw new Error('Missing dylib payload')
+				// Copy a user-supplied emulator library into ~/.keepkey/emulator/
+				// (libkkemu.dylib on macOS, libkkemu.dll on Windows) so subsequent
+				// emulatorInit() loads it. Auto-flips emulator_enabled since the user
+				// has explicitly opted in by dropping a binary.
+				const isWin = process.platform === 'win32'
+				if (process.platform !== 'darwin' && !isWin) throw new Error('Emulator is only available on macOS and Windows')
+				if (!params?.data) throw new Error('Missing emulator library payload')
 
 				const buf = Buffer.from(params.data, 'base64')
-				if (buf.length < 4) throw new Error('Empty dylib payload')
-				// Mach-O header (thin or fat). Reject anything else early so we
-				// don't dlopen() an arbitrary file later.
-				const magic = buf.readUInt32BE(0)
-				const MACHO_MAGIC = new Set([0xfeedfacf, 0xcffaedfe, 0xfeedface, 0xcefaedfe, 0xcafebabe, 0xbebafeca])
-				if (!MACHO_MAGIC.has(magic)) {
-					throw new Error('File is not a Mach-O dynamic library')
+				if (buf.length < 4) throw new Error('Empty emulator library payload')
+				// Validate the binary header so we never dlopen() an arbitrary file:
+				// PE/'MZ' on Windows, Mach-O (thin or fat) on macOS.
+				if (isWin) {
+					if (buf.readUInt16BE(0) !== 0x4d5a) {
+						throw new Error('File is not a Windows DLL (PE/MZ header expected)')
+					}
+				} else {
+					const magic = buf.readUInt32BE(0)
+					const MACHO_MAGIC = new Set([0xfeedfacf, 0xcffaedfe, 0xfeedface, 0xcefaedfe, 0xcafebabe, 0xbebafeca])
+					if (!MACHO_MAGIC.has(magic)) {
+						throw new Error('File is not a Mach-O dynamic library')
+					}
 				}
 
 				// Stop any running emulator before swapping the dylib — replacing

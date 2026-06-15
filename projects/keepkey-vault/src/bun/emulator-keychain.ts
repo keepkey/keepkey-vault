@@ -68,6 +68,19 @@ export function isMacOS(): boolean {
   return process.platform === 'darwin'
 }
 
+/** Check if we're on Windows */
+export function isWindows(): boolean {
+  return process.platform === 'win32'
+}
+
+/**
+ * Platforms with an OS-backed key store for the flash encryption key:
+ * macOS (Keychain) and Windows (DPAPI). Linux has no store wired up yet.
+ */
+export function isEmulatorSupported(): boolean {
+  return isMacOS() || isWindows()
+}
+
 /**
  * Read the encryption key from macOS Keychain.
  * Returns null if not found (first run).
@@ -101,10 +114,70 @@ function writeKeychainKey(key: Buffer): void {
   }
 }
 
+// ── Windows DPAPI key store ─────────────────────────────────────────────
+//
+// Windows has no Keychain. We protect the 32-byte key with DPAPI
+// (CurrentUser scope — OS-derived, per-user) and persist the protected blob
+// at ~/.keepkey/emulator/flash-key.dpapi. The plaintext key is passed to
+// PowerShell over stdin (never on the command line) and the blob on disk is
+// only decryptable by this Windows user account.
+
+function getWinKeyPath(): string {
+  return join(getStorageDir(), 'flash-key.dpapi')
+}
+
+/** Run a PowerShell snippet, piping `input` to its stdin, returning stdout. */
+function runPowerShell(script: string, input: string): string {
+  return execSync(
+    `powershell -NoProfile -NonInteractive -Command "${script}"`,
+    { input, encoding: 'utf-8', timeout: 10000 }
+  ).trim()
+}
+
+/** DPAPI-protect the key (CurrentUser) and write the blob to disk. */
+function writeWinKey(key: Buffer): void {
+  const script = [
+    "$ErrorActionPreference='Stop'",
+    'Add-Type -AssemblyName System.Security',
+    '$b64=[Console]::In.ReadToEnd().Trim()',
+    '$plain=[Convert]::FromBase64String($b64)',
+    '$prot=[System.Security.Cryptography.ProtectedData]::Protect($plain,$null,[System.Security.Cryptography.DataProtectionScope]::CurrentUser)',
+    '[Convert]::ToBase64String($prot)',
+  ].join('; ')
+  const out = runPowerShell(script, key.toString('base64'))
+  if (!out) throw new Error('DPAPI Protect returned empty output')
+  writeFileSync(getWinKeyPath(), out, { mode: 0o600 })
+}
+
+/** Read + DPAPI-unprotect the key. Returns null if absent or undecryptable. */
+function readWinKey(): Buffer | null {
+  const p = getWinKeyPath()
+  if (!existsSync(p)) return null
+  try {
+    const protB64 = (readFileSync(p, 'utf-8') as string).trim()
+    if (!protB64) return null
+    const script = [
+      "$ErrorActionPreference='Stop'",
+      'Add-Type -AssemblyName System.Security',
+      '$b64=[Console]::In.ReadToEnd().Trim()',
+      '$prot=[Convert]::FromBase64String($b64)',
+      '$plain=[System.Security.Cryptography.ProtectedData]::Unprotect($prot,$null,[System.Security.Cryptography.DataProtectionScope]::CurrentUser)',
+      '[Convert]::ToBase64String($plain)',
+    ].join('; ')
+    const out = runPowerShell(script, protB64)
+    if (!out) return null
+    const key = Buffer.from(out, 'base64')
+    return key.length === KEY_SIZE ? key : null
+  } catch {
+    return null
+  }
+}
+
 /**
- * Check if a key exists in the Keychain without reading it.
+ * Check if a key exists in the OS store without reading it.
  */
 export function hasKeychainKey(): boolean {
+  if (isWindows()) return readWinKey() !== null
   if (!isMacOS()) return false
   return readKeychainKey() !== null
 }
@@ -115,17 +188,18 @@ export function hasKeychainKey(): boolean {
  * On subsequent calls: reads existing key from Keychain.
  */
 export function getOrCreateKey(): Buffer {
-  if (!isMacOS()) throw new Error('Emulator keychain requires macOS')
+  if (!isEmulatorSupported()) throw new Error('Emulator key store requires macOS or Windows')
 
-  let key = readKeychainKey()
+  let key = isWindows() ? readWinKey() : readKeychainKey()
   if (key && key.length === KEY_SIZE) {
     return key
   }
 
   console.log(`${TAG} Generating new encryption key...`)
   key = Buffer.from(crypto.getRandomValues(new Uint8Array(KEY_SIZE)))
-  writeKeychainKey(key)
-  console.log(`${TAG} Key stored in Keychain`)
+  if (isWindows()) writeWinKey(key)
+  else writeKeychainKey(key)
+  console.log(`${TAG} Key stored in ${isWindows() ? 'Windows DPAPI store' : 'Keychain'}`)
   return key
 }
 
@@ -348,7 +422,7 @@ export function getPairingStatus(): EmulatorPairingStatus {
   return {
     paired: hasKeychainKey(),
     platform: process.platform,
-    flashImages: isMacOS() ? listFlashImages() : [],
+    flashImages: isEmulatorSupported() ? listFlashImages() : [],
     storagePath: getStorageDir(),
   }
 }
