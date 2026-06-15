@@ -1286,6 +1286,7 @@ export interface RecentActivity {
   type: ActivityType
   source: ActivitySource
   to?: string
+  from?: string             // counterparty/sender (from Pioneer history; esp. for received txs)
   amount?: string
   asset?: string             // token symbol if different from chain native
   appName?: string           // for API-originating activities

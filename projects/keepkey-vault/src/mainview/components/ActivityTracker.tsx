@@ -94,6 +94,15 @@ export function ActivityTracker() {
     return unsub
   }, [fetchActivities])
 
+  // Listen for background history-scan completion — those rows are written
+  // directly via DB helpers (no api-log), so this is the only refresh signal.
+  useEffect(() => {
+    const unsub = onRpcMessage('activity-scan-complete', () => {
+      fetchActivities()
+    })
+    return unsub
+  }, [fetchActivities])
+
   // Listen for swap updates (keep swap awareness)
   useEffect(() => {
     const unsub1 = onRpcMessage('swap-update', (_update: SwapStatusUpdate) => {

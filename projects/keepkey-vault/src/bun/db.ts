@@ -1166,6 +1166,25 @@ export function updateApiLogTxMeta(
 const VALID_ACTIVITY_TYPES = new Set(['send', 'receive', 'swap', 'sign', 'message', 'approve', 'broadcast'])
 
 /** Query api_log entries that have activity_type set + swap_history, merged by timestamp */
+// Collapse two api_log rows describing the SAME on-chain txid into one record
+// (e.g. an in-app RPC 'broadcast' row + the Pioneer SCAN row). The primary row
+// OWNS the amount/source pairing — these must stay together because scan amounts
+// are base units while app/api amounts are human, and crossing them breaks
+// display formatting. We prefer an explicit app/api send as primary (clean human
+// amount + recipient) and overlay only the on-chain truth the primary can't know
+// (confirmations / block height / counterparty) from the scan row.
+function mergeTxRows(a: RecentActivity, b: RecentActivity): RecentActivity {
+  const primary = a.source !== 'scan' ? a : b.source !== 'scan' ? b : a
+  const secondary = primary === a ? b : a
+  return {
+    ...primary,
+    confirmations: primary.confirmations ?? secondary.confirmations,
+    blockHeight: primary.blockHeight || secondary.blockHeight || undefined,
+    from: primary.from ?? secondary.from,
+    to: primary.to ?? secondary.to,
+  }
+}
+
 export function getRecentActivityFromLog(limit = 50, chainFilter?: string, deviceId?: string, walletId?: string): RecentActivity[] {
   try {
     if (!db) return []
@@ -1186,8 +1205,12 @@ export function getRecentActivityFromLog(limit = 50, chainFilter?: string, devic
       logSql += ` AND (chain = ? OR route = ? OR response_body LIKE ?)`
       logParams.push(chainFilter, `history/${chainFilter}`, `%"chainId":"${chainFilter}"%`)
     }
+    // Over-fetch: an in-app send and the Pioneer scan of the same tx are two
+    // rows that get merged below. Fetching only `limit` rows would let those
+    // duplicates shrink the deduped result below `limit` and hide older unique
+    // rows. 3x covers the worst realistic per-txid row count with headroom.
     logSql += ` ORDER BY timestamp DESC LIMIT ?`
-    logParams.push(limit)
+    logParams.push(limit * 3)
 
     const logRows = db.query(logSql).all(...logParams) as Array<{
       id: number; device_id: string | null; wallet_id: string | null; txid: string | null; chain: string | null; activity_type: string;
@@ -1215,6 +1238,9 @@ export function getRecentActivityFromLog(limit = 50, chainFilter?: string, devic
         blockHeight: meta?.blockHeight ?? undefined,
         amount: meta?.value ?? undefined,
         fee: meta?.fee ?? undefined,
+        to: meta?.to ?? undefined,
+        from: meta?.from ?? undefined,
+        asset: meta?.asset ?? undefined,
       }
     })
 
@@ -1252,7 +1278,19 @@ export function getRecentActivityFromLog(limit = 50, chainFilter?: string, devic
     const swapLogTxids = new Set(rawLogActivities.filter(a => a.type === 'swap' && a.txid).map(a => a.txid))
     const swapRowTxids = new Set(swapRows.filter(r => r.txid).map(r => r.txid))
     const allSwapTxids = new Set([...swapLogTxids, ...swapRowTxids])
-    const logActivities = rawLogActivities.filter(a => !(a.txid && a.type !== 'swap' && allSwapTxids.has(a.txid)))
+    const filteredLog = rawLogActivities.filter(a => !(a.txid && a.type !== 'swap' && allSwapTxids.has(a.txid)))
+    // Dedupe by txid: an in-app send and the Pioneer scan of the same tx each
+    // produce a row — merge them into one complete record instead of two.
+    const byTxid = new Map<string, RecentActivity>()
+    const noTxid: RecentActivity[] = []
+    const txidOrder: string[] = []
+    for (const a of filteredLog) {
+      if (!a.txid) { noTxid.push(a); continue }
+      const existing = byTxid.get(a.txid)
+      if (existing) byTxid.set(a.txid, mergeTxRows(existing, a))
+      else { byTxid.set(a.txid, a); txidOrder.push(a.txid) }
+    }
+    const logActivities = [...noTxid, ...txidOrder.map(t => byTxid.get(t)!)]
     const swapActivities: RecentActivity[] = swapRows
       .filter(r => !swapLogTxids.has(r.txid))
       .map(r => ({
