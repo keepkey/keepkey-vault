@@ -228,9 +228,9 @@ export class EngineController extends EventEmitter {
       // distinguish "device computing silently" from "user must press the
       // button NOW". Fires globally for any device flow that needs a press.
       this.emit('button-request')
-      // Emulator button presses are handled by prewriteConfirmations() in
-      // the RPC handler — NOT here. Sending stale DebugLinkDecision from a
-      // setTimeout poisons the ring buffer and causes "Unexpected message".
+      // Emulator button presses are handled reactively by emuGatedConfirm via
+      // the transport delegate's onButtonRequest hook (one DebugLinkDecision
+      // per ButtonRequest, gated on the user's click) — NOT here.
     })
 
     transport.on(String(core.Events.PASSPHRASE_REQUEST), () => {
@@ -1092,27 +1092,13 @@ export class EngineController extends EventEmitter {
    * Run a firmware operation that requires button confirmations on the emulator.
    * Shared by loadDevice, wipe, applySettings, and auto-reload recovery.
    */
-  async emuConfirmOp(fn: () => Promise<any>, confirmCount = 2): Promise<any> {
-    const { pausePoll, resumePoll, emuPollOnce, saveEmulatorState, flushRingBuffers } = await import('./emulator')
-    const { prewriteConfirmations } = await import('./emulator-transport')
-    const delegate = this.emuDelegate
-    if (delegate) delegate.chunkCount = 0
-    pausePoll()
-    try {
-      const promise = fn()
-      await new Promise(r => setTimeout(r, 30))
-      const numChunks = delegate?.chunkCount || 1
-      for (let i = 0; i < numChunks - 1; i++) emuPollOnce()
-      prewriteConfirmations(confirmCount)
-      emuPollOnce()
-      resumePoll()
-      const result = await promise
-      flushRingBuffers()
-      saveEmulatorState()
-      return result
-    } finally {
-      resumePoll()
-    }
+  async emuConfirmOp(fn: () => Promise<any>, _confirmCount = 2): Promise<any> {
+    // Reactive auto-confirm: the dylib poll thread runs the firmware; each
+    // ButtonRequest gets an immediate approve via emuGatedConfirm (auto mode).
+    // confirmCount is legacy/ignored. Shared by loadDevice, wipe, applySettings,
+    // and auto-reload recovery.
+    const { emuGatedConfirm } = await import('./emulator-window')
+    return emuGatedConfirm(fn, this.emuDelegate, { interactive: false })
   }
 
   /**

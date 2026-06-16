@@ -58,7 +58,6 @@ export function isDylibInstalled(): boolean {
 // ── FFI Handle ──────────────────────────────────────────────────────────
 
 let ffi: ReturnType<typeof dlopen> | null = null
-let pollTimer: ReturnType<typeof setInterval> | null = null
 
 function loadDylib(path: string) {
   return dlopen(path, {
@@ -70,6 +69,13 @@ function loadDylib(path: string) {
     kkemu_is_running:   { args: [], returns: FFIType.i32 },
     kkemu_get_display:  { args: [FFIType.ptr, FFIType.ptr], returns: FFIType.ptr },
     kkemu_pop_frame:    { args: [FFIType.ptr], returns: FFIType.i32 },
+    // Thread-driven mode (Approach B): the dylib owns the event loop on a
+    // dedicated thread so confirm_helper can block in C without freezing the
+    // Bun event loop — enables screen-first confirm gating.
+    kkemu_start:        { args: [], returns: FFIType.i32 },
+    kkemu_stop:         { args: [], returns: FFIType.void },
+    kkemu_lock:         { args: [], returns: FFIType.void },
+    kkemu_unlock:       { args: [], returns: FFIType.void },
   })
 }
 
@@ -160,14 +166,20 @@ export function initEmulator(flashName = 'default'): EmulatorStatus {
       throw new Error(`kkemu_init returned ${rc}`)
     }
 
-    // 4. Start poll timer (~60fps)
-    pollTimer = setInterval(() => {
-      try { ffi?.symbols.kkemu_poll() } catch {}
-    }, 16)
+    // 4. Hand the event loop to the dylib's poll thread (Approach B). The
+    // thread owns kkemu_poll from here on — the host MUST NOT poll directly
+    // (kkemu_poll() no-ops while the thread runs). This is what lets the
+    // firmware's confirm_helper block in C, waiting for a button decision,
+    // without freezing the Bun event loop — so the vault can render and HOLD
+    // the real confirm frame BEFORE the user approves (screen-first gating).
+    const startRc = ffi.symbols.kkemu_start()
+    if (startRc !== 0) {
+      throw new Error(`kkemu_start returned ${startRc}`)
+    }
 
-    // 5. Arm the FFI liveness watchdog — kkemu_poll can busy-loop inside
-    // confirm_helper and freeze the event loop. The watchdog is emulator-
-    // scoped; physical device flows stay alive even on slow button presses.
+    // 5. Arm the FFI liveness watchdog as a backstop. With the poll thread the
+    // event loop no longer freezes on confirms, so this should never fire on a
+    // slow button press anymore; it's kept only to catch a genuine dylib hang.
     startEmulatorWatchdog()
 
     emuState = 'running'
@@ -179,10 +191,10 @@ export function initEmulator(flashName = 'default'): EmulatorStatus {
     console.error(`${TAG} Failed to init emulator:`, err.message)
 
     // Cleanup partial init — watchdog first so a half-armed heartbeat
-    // doesn't outlive the init failure.
+    // doesn't outlive the init failure. kkemu_stop() is idempotent (no-op if
+    // the poll thread was never started).
     stopEmulatorWatchdog()
-    if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
-    if (ffi) { try { ffi.close() } catch {} ; ffi = null }
+    if (ffi) { try { ffi.symbols.kkemu_stop() } catch {} ; try { ffi.close() } catch {} ; ffi = null }
     if (activeFlash) { zeroFlash(activeFlash); activeFlash = null }
 
     return getEmulatorStatus()
@@ -197,7 +209,12 @@ export function saveEmulatorState(): void {
     console.warn(`${TAG} No active flash to save`)
     return
   }
-  saveFlash(activeFlash)
+  // Snapshot the flash buffer under the firmware lock so a concurrent
+  // storage_commit() on the poll thread can't tear the encrypted image.
+  // kkemu_lock no-ops when the thread isn't running.
+  ffi?.symbols.kkemu_lock()
+  try { saveFlash(activeFlash) }
+  finally { ffi?.symbols.kkemu_unlock() }
 }
 
 /**
@@ -214,13 +231,13 @@ export function stopEmulator(): EmulatorStatus {
   }
 
   try {
-    // Stop poll timer
-    if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
-
-    // Disarm the FFI watchdog — no more kkemu_poll calls after this point.
+    // Disarm the FFI watchdog first.
     stopEmulatorWatchdog()
 
-    // Flush firmware storage to flash buffer
+    // Flush firmware storage to flash buffer. kkemu_shutdown() stops + joins
+    // the poll thread internally (injecting a Cancel to unblock any pending
+    // confirm) BEFORE committing storage, so nothing drives the firmware while
+    // we read the flash buffer below.
     if (ffi) {
       try { ffi.symbols.kkemu_shutdown() } catch (e: any) {
         console.warn(`${TAG} kkemu_shutdown error:`, e.message)
@@ -281,11 +298,10 @@ const FLUSH_MAX_READS = 1000 // safety cap — prevent infinite drain loop
 
 export function flushRingBuffers(): void {
   if (!ffi) return
-  // Process any stale messages in rb_main_in / rb_debug_in
-  for (let i = 0; i < 10; i++) {
-    try { ffi.symbols.kkemu_poll() } catch {}
-  }
-  // Drain rb_main_out and rb_debug_out (bounded to prevent spin)
+  // The poll thread drains the INPUT rings continuously, so we only clear any
+  // leftover OUTPUT here (e.g. a late Success/Failure) to keep the next
+  // operation's reads clean. kkemu_read drains the lock-free output rings
+  // directly — safe to call concurrently with the poll thread (SPSC).
   const buf = new Uint8Array(64)
   let reads = 0
   while (reads < FLUSH_MAX_READS && ffi.symbols.kkemu_read(ptr(buf), 64, 0) > 0) reads++
@@ -294,49 +310,6 @@ export function flushRingBuffers(): void {
     console.warn(`${TAG} Ring buffer flush hit safety cap (${FLUSH_MAX_READS} reads)`)
   }
   console.log(`${TAG} Ring buffers flushed (${reads} reads)`)
-}
-
-// ── Poll control (for pre-writing confirmations) ────────────────────────
-
-let pollSafetyTimer: ReturnType<typeof setTimeout> | null = null
-// Auto-resume poll after this long to prevent a forgotten resume from
-// permanently stalling the firmware. MUST exceed both the confirm prompt
-// (CONFIRM_TIMEOUT_MS = 120s) AND the readChunk deadline (READ_TIMEOUT_MS
-// = 240s) since fn() runs while the user is deciding and chunks are
-// queued in the ring. If safety fires first, the auto-resumed poll
-// consumes the queued sign chunk -> confirm_helper enters with no
-// prewritten BA/DLD -> busy-loop -> watchdog SIGKILL.
-const POLL_SAFETY_MS = 270_000
-
-/** Pause kkemu_poll timer — call before writing messages that trigger confirm. */
-export function pausePoll(): void {
-  if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
-  // Safety net: auto-resume if nothing calls resumePoll() within timeout
-  if (pollSafetyTimer) clearTimeout(pollSafetyTimer)
-  pollSafetyTimer = setTimeout(() => {
-    pollSafetyTimer = null
-    if (!pollTimer && ffi) {
-      console.warn(`${TAG} Poll safety timeout — auto-resuming after ${POLL_SAFETY_MS / 1000}s`)
-      resumePoll()
-    }
-  }, POLL_SAFETY_MS)
-}
-
-/** Run a single kkemu_poll tick synchronously. */
-export function emuPollOnce(): void {
-  if (ffi) {
-    try { ffi.symbols.kkemu_poll() } catch {}
-  }
-}
-
-/** Resume kkemu_poll timer. */
-export function resumePoll(): void {
-  if (pollSafetyTimer) { clearTimeout(pollSafetyTimer); pollSafetyTimer = null }
-  if (!pollTimer && ffi) {
-    pollTimer = setInterval(() => {
-      try { ffi?.symbols.kkemu_poll() } catch {}
-    }, 16)
-  }
 }
 
 // ── Display (OLED framebuffer) ──────────────────────────────────────────
