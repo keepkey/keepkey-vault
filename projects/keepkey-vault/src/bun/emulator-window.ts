@@ -527,7 +527,7 @@ export async function emuGatedConfirm(
 
   try {
     const result = await fn()
-    saveEmulatorState()
+    await saveEmulatorState()
     return result
   } catch (e) {
     // If the user rejected, surface a clean message rather than the raw

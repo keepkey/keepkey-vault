@@ -14,7 +14,7 @@
  * dropped onto the app via FileDropZone, or copied there by `make
  * build-emulator`. No channel/version system: one slot, one binary.
  */
-import { dlopen, FFIType, ptr, toArrayBuffer } from 'bun:ffi'
+import { dlopen, FFIType, ptr } from 'bun:ffi'
 import { join } from 'path'
 import { existsSync, mkdirSync } from 'fs'
 import { homedir } from 'os'
@@ -67,7 +67,6 @@ function loadDylib(path: string) {
     kkemu_read:         { args: [FFIType.ptr, FFIType.u64, FFIType.i32], returns: FFIType.i32 },
     kkemu_poll:         { args: [], returns: FFIType.i32 },
     kkemu_is_running:   { args: [], returns: FFIType.i32 },
-    kkemu_get_display:  { args: [FFIType.ptr, FFIType.ptr], returns: FFIType.ptr },
     kkemu_pop_frame:    { args: [FFIType.ptr], returns: FFIType.i32 },
     // Thread-driven mode (Approach B): the dylib owns the event loop on a
     // dedicated thread so confirm_helper can block in C without freezing the
@@ -76,6 +75,7 @@ function loadDylib(path: string) {
     kkemu_stop:         { args: [], returns: FFIType.void },
     kkemu_lock:         { args: [], returns: FFIType.void },
     kkemu_unlock:       { args: [], returns: FFIType.void },
+    kkemu_trylock:      { args: [], returns: FFIType.i32 },
   })
 }
 
@@ -204,17 +204,47 @@ export function initEmulator(flashName = 'default'): EmulatorStatus {
 /**
  * Save current flash state to disk (encrypted) without stopping.
  */
-export function saveEmulatorState(): void {
+// Max time to wait for the firmware lock before giving up on a save. The poll
+// thread holds the lock for the whole duration of a pending confirm, and
+// confirm_helper has NO idle timeout of its own — what ultimately bounds the
+// wait is the HOST-side confirm prompt timer (requestUserConfirm's
+// CONFIRM_TIMEOUT_MS, 120s, in emulator-window.ts), which delivers a rejecting
+// decision and frees the lock. So this must exceed that 120s: a save requested
+// mid-confirm completes once the prompt resolves rather than skipping. (Skipping
+// is still safe — see below — it just leaves the previous good snapshot.)
+const SAVE_LOCK_TIMEOUT_MS = 130_000
+
+export async function saveEmulatorState(): Promise<void> {
   if (!activeFlash) {
     console.warn(`${TAG} No active flash to save`)
     return
   }
-  // Snapshot the flash buffer under the firmware lock so a concurrent
-  // storage_commit() on the poll thread can't tear the encrypted image.
-  // kkemu_lock no-ops when the thread isn't running.
-  ffi?.symbols.kkemu_lock()
+  if (!ffi) return
+
+  // Snapshot the flash under the firmware lock so a concurrent storage_commit()
+  // on the poll thread can't tear the encrypted image — but acquire it WITHOUT
+  // freezing the event loop. A blocking kkemu_lock() would deadlock if a confirm
+  // is pending: the poll thread holds the lock across the whole confirm wait,
+  // and a frozen Bun loop can't run the bridge that delivers the click which
+  // releases it. So try-lock and yield between attempts; the loop stays alive,
+  // the confirm resolves, the lock frees. kkemu_trylock returns 1 immediately
+  // when the thread isn't running, so the single-threaded path is unaffected.
+  const deadline = Date.now() + SAVE_LOCK_TIMEOUT_MS
+  while (ffi.symbols.kkemu_trylock() !== 1) {
+    if (Date.now() >= deadline) {
+      console.warn(`${TAG} saveEmulatorState: firmware lock not acquired within ${SAVE_LOCK_TIMEOUT_MS / 1000}s — skipping save to avoid a torn flash read`)
+      return
+    }
+    await new Promise(r => setTimeout(r, 10))
+    if (!ffi || !activeFlash) return // emulator torn down while we waited
+  }
+  // Lock held (or no-op success when the thread isn't running). INVARIANT: no
+  // await between the successful trylock above and the unlock below — kkemu_unlock
+  // releases the real mutex only while the poll thread is running, so an await
+  // here that let stopEmulator() run (g_poll_running 1→0) would skip the unlock
+  // and leak the mutex. saveFlash() is synchronous, so the region stays atomic.
   try { saveFlash(activeFlash) }
-  finally { ffi?.symbols.kkemu_unlock() }
+  finally { ffi.symbols.kkemu_unlock() }
 }
 
 /**
@@ -313,31 +343,6 @@ export function flushRingBuffers(): void {
 }
 
 // ── Display (OLED framebuffer) ──────────────────────────────────────────
-
-/**
- * Read the emulator's 256x64 OLED framebuffer.
- * Returns null if the dylib doesn't expose a framebuffer.
- *
- * The returned Uint8Array is a fresh copy. We use `toArrayBuffer + slice()`
- * rather than `toBuffer` because Bun's Buffer-from-pointer wrapper attempts
- * to free the underlying memory on GC — fine for malloc'd C buffers, but
- * the dylib's framebuffer is a static `.bss` page and freeing it segfaults
- * the next setInterval tick.
- */
-export function emuGetDisplay(): { framebuffer: Uint8Array | null; width: number; height: number } {
-  if (!ffi) return { framebuffer: null, width: 0, height: 0 }
-  const widthBuf = new Int32Array(1)
-  const heightBuf = new Int32Array(1)
-  const fbPtr = ffi.symbols.kkemu_get_display(ptr(widthBuf), ptr(heightBuf))
-  const w = widthBuf[0]
-  const h = heightBuf[0]
-  if (!fbPtr || w === 0 || h === 0) return { framebuffer: null, width: w, height: h }
-  const byteLen = (w * h) / 8 // 2048 bytes for 256x64 1-bit
-  // .slice() forces a copy into a JS-owned ArrayBuffer; the borrowed view of
-  // the dylib's static memory is dropped immediately.
-  const framebuffer = new Uint8Array(toArrayBuffer(fbPtr, 0, byteLen)).slice()
-  return { framebuffer, width: w, height: h }
-}
 
 /**
  * Pop captured framebuffers from the dylib's display ring.

@@ -5750,7 +5750,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			emulatorSave: async () => {
 				if (!emulatorEnabled) throw new Error('Emulator is disabled')
 				const { saveEmulatorState } = await import('./emulator')
-				saveEmulatorState()
+				await saveEmulatorState()
 			},
 			emulatorStatus: async () => {
 				if (!emulatorEnabled) {
