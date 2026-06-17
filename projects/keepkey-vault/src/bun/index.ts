@@ -1130,57 +1130,15 @@ import type { SwapQuote } from '../shared/types'
 const swapQuoteCache = new Map<string, SwapQuote>()
 
 // ── Emulator confirm helper ──────────────────────────────────────────
-// Wraps any operation that triggers firmware confirm_helper() (blocking C loop).
-//
-// The key challenge: multi-chunk messages (e.g. LoadDevice with a real mnemonic)
-// span 2+ HID packets. If BA+DLD are pre-written to rb_main_in before all chunks
-// are consumed, usb_rx_helper treats BA as a continuation chunk → corruption.
-//
-// Solution (proven in test harness — 17/17 pass):
-// 1. Pause poll, start the operation (transport writes N chunks)
-// 2. Poll (N-1) times to consume all chunks except the last
-// 3. Write BA+DLD to ring buffers
-// 4. Poll once — firmware reads last chunk, assembles, dispatches,
-//    enters confirm_helper, finds BA+DLD → exits immediately
-// 5. Resume poll for transport to read the response
-async function emuConfirmOp(fn: () => Promise<any>, confirmCount = 2): Promise<any> {
-	const { pausePoll, resumePoll, saveEmulatorState, emuPollOnce, flushRingBuffers } = await import('./emulator')
-	const { prewriteConfirmations } = await import('./emulator-transport')
-
-	// Get the transport delegate for chunk counting
-	const delegate = engine.emuDelegate
-	if (delegate) delegate.chunkCount = 0
-
-	pausePoll()
-
-	try {
-		const promise = fn()
-		await new Promise(r => setTimeout(r, 30)) // let transport write all chunks
-
-		const numChunks = delegate?.chunkCount || 1
-		console.log(`[emuConfirmOp] ${numChunks} chunks written, polling ${numChunks - 1} pre-polls`)
-
-		// Consume all chunks except the last
-		for (let i = 0; i < numChunks - 1; i++) {
-			emuPollOnce()
-		}
-
-		// Pre-write all confirmations then poll once. Both BA+DLD go to iface 1
-		// (same FIFO) so confirm_helper reads them in order without starvation.
-		prewriteConfirmations(confirmCount)
-		emuPollOnce()
-
-		// Resume poll BEFORE awaiting — readChunk needs kkemu_poll() running
-		// to deliver the firmware response.
-		resumePoll()
-
-		const result = await promise
-		flushRingBuffers() // drain any unused pre-written confirmations
-		saveEmulatorState()
-		return result
-	} finally {
-		resumePoll() // idempotent — ensures poll is always restored
-	}
+// Setup-op confirm (wipe / loadDevice / applySettings): the firmware shows
+// confirmation screens; on the emulator we auto-press through them via the same
+// reactive gate as signing (emuGatedConfirm), but in AUTO mode — each firmware
+// ButtonRequest gets an immediate approve, no user click. The confirmCount
+// argument is now legacy/ignored (the gate reacts per ButtonRequest instead of
+// pre-writing a fixed count).
+async function emuConfirmOp(fn: () => Promise<any>, _confirmCount = 2): Promise<any> {
+	const { emuGatedConfirm } = await import('./emulator-window')
+	return emuGatedConfirm(fn, engine.emuDelegate, { interactive: false })
 }
 
 // ── Emulator interactive signing helper ─────────────────────────────
@@ -5792,7 +5750,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			emulatorSave: async () => {
 				if (!emulatorEnabled) throw new Error('Emulator is disabled')
 				const { saveEmulatorState } = await import('./emulator')
-				saveEmulatorState()
+				await saveEmulatorState()
 			},
 			emulatorStatus: async () => {
 				if (!emulatorEnabled) {

@@ -26,17 +26,19 @@ const READ_TIMEOUT_MS = 240_000
 
 export class EmulatorTransportDelegate implements TransportDelegate {
   private connected = false
-  /** Chunk counter — reset before confirmOp, read after to know how many polls needed. */
+  /** Chunk counter (legacy; retained for callers that still reset it). */
   chunkCount = 0
   /**
-   * When true, suppress ButtonAck writes from hdwallet on iface 0.
-   *
-   * Pre-written BA+DLD on iface 1 satisfy confirm_helper inside kkemu_poll().
-   * But hdwallet still sends ButtonAck in response to ButtonRequest — this
-   * orphaned BA arrives during the next TxRequest/TxAck exchange (BTC signing)
-   * and causes "Unexpected message". Suppressing the write prevents this.
+   * Reactive confirm hook. Fires once each time the firmware emits a
+   * ButtonRequest (msg type 26) on the main interface — i.e. it has rendered a
+   * confirm screen and is now blocked in confirm_helper on the dylib's poll
+   * thread, waiting for a decision. The confirm orchestrator (emuGatedConfirm)
+   * installs this to gate the DebugLinkDecision: in interactive mode it shows
+   * the held frame and waits for the user's click; in auto mode it presses
+   * immediately. hdwallet still auto-sends the ButtonAck itself — we only
+   * supply the simulated press (the DLD on iface 1).
    */
-  autoConfirm = false
+  onButtonRequest: (() => void) | null = null
 
   constructor(private deviceId: string = 'emulator-default') {}
 
@@ -71,13 +73,9 @@ export class EmulatorTransportDelegate implements TransportDelegate {
   async writeChunk(buf: Uint8Array, debugLink?: boolean): Promise<void> {
     const iface = debugLink ? 1 : 0
 
-    // Suppress ButtonAck (msg type 27) when autoConfirm is active.
-    // Pre-written BA+DLD already satisfied confirm_helper; hdwallet's
-    // ButtonAck response would arrive during TxRequest/TxAck and cause
-    // "Unexpected message" in multi-round protocols (BTC signing).
-    if (!debugLink && this.autoConfirm && isButtonAck(buf)) {
-      return
-    }
+    // No ButtonAck suppression: in the reactive model hdwallet's ButtonAck is
+    // exactly what sets button_request_acked in confirm_helper. We add only the
+    // DebugLinkDecision (the simulated press) on iface 1, gated by the user.
 
     const ok = emuWrite(buf, iface)
     if (!ok) {
@@ -93,7 +91,19 @@ export class EmulatorTransportDelegate implements TransportDelegate {
 
     while (Date.now() < deadline) {
       const data = emuRead(iface)
-      if (data) return data
+      if (data) {
+        // A ButtonRequest on the main interface means the firmware just
+        // rendered a confirm screen and is now parked in confirm_helper on the
+        // poll thread. Notify the orchestrator so it can hold the frame and
+        // gate the decision. Fire-and-forget: we still return the frame to
+        // hdwallet, which then auto-sends its ButtonAck.
+        if (!debugLink && this.onButtonRequest && isButtonRequest(data)) {
+          try { this.onButtonRequest() } catch (e: any) {
+            console.warn(`${TAG} onButtonRequest handler threw:`, e?.message)
+          }
+        }
+        return data
+      }
       pollCount++
       // Non-blocking read returned nothing — yield then retry
       await new Promise(r => setTimeout(r, READ_POLL_MS))
@@ -134,40 +144,23 @@ const EmulatorAdapterDelegate: AdapterDelegate<EmulatorDevice> = {
 
 export const EmulatorKeepKeyAdapter = Adapter.fromDelegate(EmulatorAdapterDelegate)
 
-// ── ButtonAck detection ─────────────────────────────────────────────────
+// ── ButtonRequest detection ─────────────────────────────────────────────
 
-/** Check if a 64-byte HID frame is a ButtonAck (msg type 27 = 0x001B). */
-function isButtonAck(buf: Uint8Array): boolean {
-  // First-chunk header: [0x3F][0x23][0x23][msgType_high][msgType_low]...
-  return buf.length >= 5 && buf[0] === 0x3F && buf[1] === 0x23 && buf[2] === 0x23 && buf[3] === 0x00 && buf[4] === 0x1B
+/** Check if a 64-byte first-frame HID report is a ButtonRequest (type 26 = 0x001A). */
+function isButtonRequest(buf: Uint8Array): boolean {
+  // First-chunk header: [0x3F]['#']['#'][msgType_high][msgType_low]...
+  return buf.length >= 5 && buf[0] === 0x3F && buf[1] === 0x23 && buf[2] === 0x23 && buf[3] === 0x00 && buf[4] === 0x1A
 }
 
-// ── Raw DebugLinkDecision (bypasses hdwallet transport) ─────────────────
+// ── Reactive DebugLinkDecision (the simulated button press) ─────────────
 //
-// The firmware's confirm_helper() requires BOTH:
-//   1. ButtonAck on interface 0 (sent by hdwallet Transport automatically)
-//   2. DebugLinkDecision on interface 1 (sent here)
-//
-// We write the raw HID frame directly via FFI because going through
-// wallet.pressYes() → transport.call() has timing/lock issues.
-
-// ── Raw HID frame helpers ───────────────────────────────────────────────
-//
-// The firmware's confirm_helper() is a BLOCKING C loop inside kkemu_poll().
-// It needs both ButtonAck AND DebugLinkDecision to exit (debug_decided &&
-// button_request_acked). It reads messages via check_for_tiny_msg →
-// usbPoll → emulatorSocketRead.
-//
-// CRITICAL: emulatorSocketRead ALWAYS checks iface 0 before iface 1.
-// If BA is on iface 0 and DLD is on iface 1, the confirm_helper loop
-// drains ALL BA from iface 0 (each iteration re-sets button_request_acked)
-// before reading any DLD from iface 1. With N pre-written BA+DLD pairs,
-// the first confirm eats all N BA, leaving none for subsequent confirms.
-//
-// FIX: Write BOTH BA and DLD to iface 1 (debug interface) in alternating
-// order. Since iface 1 is a single FIFO, confirm_helper reads BA→DLD
-// in order — exactly one pair per confirm. All confirms within a single
-// kkemu_poll() tick work correctly.
+// In thread-driven mode the firmware's confirm_helper() blocks on the dylib
+// poll thread until it has read BOTH a ButtonAck (sent automatically by
+// hdwallet on iface 0) AND a DebugLinkDecision (sent here on iface 1). We no
+// longer pre-write anything: writeDecision() delivers exactly one DLD per
+// ButtonRequest, when the user (or auto mode) decides. yes_no=true advances
+// the screen; yes_no=false makes confirm_helper return false → the firmware
+// aborts the operation with a Failure.
 
 function buildHidFrame(msgType: number, payload: Uint8Array = new Uint8Array(0)): Uint8Array {
   if (payload.length > 55) throw new Error(`HID frame payload too large: ${payload.length} > 55 bytes`)
@@ -185,45 +178,19 @@ function buildHidFrame(msgType: number, payload: Uint8Array = new Uint8Array(0))
   return frame
 }
 
-// ButtonAck (type 27 = 0x001B) — no payload
-const BUTTON_ACK_FRAME = buildHidFrame(27)
-// DebugLinkDecision (type 100 = 0x0064) — yes_no=true: protobuf field 1 varint = [0x08, 0x01]
+// DebugLinkDecision (type 100 = 0x0064), bool field 1 (yes_no): tag 0x08 then
+// 0x01 (approve) or 0x00 (reject). Field is encoded explicitly in both cases.
 const DEBUG_LINK_DECISION_YES = buildHidFrame(100, new Uint8Array([0x08, 0x01]))
-// Cancel (type 20 = 0x0014) — no payload. confirm_helper's tiny-msg switch
-// has an explicit case for Cancel that exits with ret_stat=false.
-const CANCEL_FRAME = buildHidFrame(20)
+const DEBUG_LINK_DECISION_NO = buildHidFrame(100, new Uint8Array([0x08, 0x00]))
 
 /**
- * Pre-write N button confirmations into the emulator ring buffers.
- *
- * Both BA and DLD are written to iface 1 (debug) in alternating order so
- * they share a single FIFO. confirm_helper reads BA→DLD per iteration,
- * consuming exactly one pair per confirm. This avoids the iface-priority
- * starvation bug where emulatorSocketRead drains all of iface 0 first.
- *
- * Must be called BEFORE kkemu_poll() processes a message that triggers
- * confirm_helper() (e.g., after EntropyAck or ResetDevice).
+ * Deliver one button decision (the simulated press) for the confirm screen the
+ * firmware is currently holding. Written to iface 1 (debug); confirm_helper —
+ * already holding hdwallet's ButtonAck — reads it and either advances
+ * (approved) or returns false → firmware Failure (rejected).
  */
-export function prewriteConfirmations(count: number): void {
-  console.log(`${TAG} Pre-writing ${count} button confirmations (both on iface 1)`)
-  for (let i = 0; i < count; i++) {
-    emuWrite(BUTTON_ACK_FRAME, 1)
-    emuWrite(DEBUG_LINK_DECISION_YES, 1)
-  }
-}
-
-/**
- * Pre-queue a Cancel frame on iface 0 (main).
- *
- * Use before draining the input ring on user reject: when the queued sign
- * chunk gets consumed and the firmware enters confirm_helper, its tiny-msg
- * loop reads the Cancel and exits with ret_stat=false instead of busy-
- * looping forever waiting for BA+DLD that never come (which would trigger
- * the watchdog SIGKILL at 60s).
- */
-export function prewriteCancel(): void {
-  console.log(`${TAG} Pre-writing Cancel on iface 0`)
-  emuWrite(CANCEL_FRAME, 0)
+export function writeDecision(approved: boolean): void {
+  emuWrite(approved ? DEBUG_LINK_DECISION_YES : DEBUG_LINK_DECISION_NO, 1)
 }
 
 

@@ -400,7 +400,8 @@ build-emulator:
 	mkdir -p $(EMU_INSTALL_DIR)
 	@if [ -f $(EMU_BUILD_DIR)/lib/libkkemu.dylib ]; then \
 		cp $(EMU_BUILD_DIR)/lib/libkkemu.dylib $(EMU_INSTALL_DIR)/libkkemu.dylib; \
-		echo "    Dylib:  $(EMU_INSTALL_DIR)/libkkemu.dylib"; \
+		codesign --force --sign - $(EMU_INSTALL_DIR)/libkkemu.dylib; \
+		echo "    Dylib:  $(EMU_INSTALL_DIR)/libkkemu.dylib (ad-hoc signed)"; \
 	else \
 		echo "ERROR: libkkemu.dylib missing from build output"; exit 1; \
 	fi
