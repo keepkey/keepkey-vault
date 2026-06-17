@@ -111,6 +111,7 @@ import { startRestApi, clearFeaturesCache, setUiActive, uiHeartbeat, type RestAp
 import { parseSolanaTx, SolanaTxParseError, solanaMessageSlice } from "./solana-tx"
 import { AuthStore } from "./auth"
 import { getPioneer, getPioneerApiBase, resetPioneer, DEFAULT_API_BASE, getQueryKey as getPioneerQueryKey } from "./pioneer"
+import { fetchDefiPositions } from "./zapper"
 import { loadSupportedChains } from "../shared/swap-support-matrix"
 import { PioneerSocket } from "./pioneer-socket"
 import { startEventStream, stopEventStream, type AddressEntry } from "./event-stream"
@@ -3402,6 +3403,15 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				} else {
 					return { fee: 'fixed', note: 'Cosmos/XRP chains use fixed fees' }
 				}
+			},
+
+			// ── DeFi positions (Zapper) ───────────────────────────────
+			// Live-fetched per EVM address from the KeepKey Zapper proxy.
+			// Display-only and not persisted — supplementary to the Pioneer
+			// token list, so failures degrade to an empty section.
+			getDefiPositions: async (params) => {
+				if (!params?.address) return []
+				return fetchDefiPositions(params.address)
 			},
 
 			// ── Staking / delegation ──────────────────────────────────

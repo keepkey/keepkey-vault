@@ -19,6 +19,7 @@ import { SendForm } from "./SendForm"
 const SwapDialog = lazy(() => import("./SwapDialog").then(m => ({ default: m.SwapDialog })).catch(err => { console.error("[SwapDialog lazy] TDZ or load error:", err, err?.stack); throw err }))
 const ZcashPrivacyTab = lazy(() => import("./ZcashPrivacyTab").then(m => ({ default: m.ZcashPrivacyTab })))
 const StakingPanel = lazy(() => import("./StakingPanel").then(m => ({ default: m.StakingPanel })))
+const DefiPositionsPanel = lazy(() => import("./DefiPositionsPanel").then(m => ({ default: m.DefiPositionsPanel })))
 const NameRegistrationPanel = lazy(() => import("./NameRegistrationPanel").then(m => ({ default: m.NameRegistrationPanel })))
 
 import { SweepDialog } from "./SweepDialog"
@@ -1178,6 +1179,16 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 						)}
 					</Box>
 				)}
+
+				{/* DeFi Positions — EVM chains only, below the token table. Protocol
+				    holdings (staked / supplied / borrowed / LP / claimable) from the
+				    Zapper proxy, kept separate from plain wallet tokens. */}
+				{!selectedToken && isEvmChain && address && (
+					<Suspense fallback={null}>
+						<DefiPositionsPanel address={address} color={chain.color} />
+					</Suspense>
+				)}
+
 				{showAddToken && (
 					<AddTokenDialog
 						defaultChainId={chain.id}
