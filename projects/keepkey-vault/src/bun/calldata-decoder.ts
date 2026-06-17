@@ -325,6 +325,29 @@ const LOCAL_DECODERS: LocalDecoder[] = [
   },
 ]
 
+/**
+ * Synchronous, OFFLINE calldata decode — runs ONLY the local registry above
+ * (no Pioneer/network). For contexts that must not block on I/O, like the
+ * emulator confirm dialog. Returns the method name + decoded fields, or null if
+ * the selector isn't known locally. Never throws.
+ */
+export function decodeCalldataLocal(
+  data: string,
+): { method: string; selector: string; fields: CalldataDecodedField[] } | null {
+  if (!data || data.length < 10) return null
+  const selector = data.slice(0, 10).toLowerCase()
+  for (const d of LOCAL_DECODERS) {
+    if (d.selector === selector) {
+      try {
+        return { method: d.method, selector, fields: d.decode(data) }
+      } catch {
+        return { method: d.method, selector, fields: [] }
+      }
+    }
+  }
+  return null
+}
+
 // ── Pioneer SDK calls ───────────────────────────────────────────────────
 
 interface PioneerDecodeResponse {

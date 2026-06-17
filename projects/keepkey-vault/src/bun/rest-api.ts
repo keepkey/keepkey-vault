@@ -40,9 +40,14 @@ import { usb } from 'usb'
 
 export interface EmuSigningDetails {
   operation: string
+  /** Human label override for the operation header (e.g. "Token Approval"). */
+  opLabel?: string
   chain?: string
   to?: string
+  /** Label for the `to` row — "To" (default), "Spender", "Contract", "Validator". */
+  toLabel?: string
   value?: string
+  fee?: string
   memo?: string
 }
 
@@ -2010,7 +2015,10 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
           console.log('[REST] ethSignTx hdwallet payload:', JSON.stringify(msg, null, 2))
           try {
-            const result = await emuWrap(() => wallet.ethSignTx(msg), { operation: 'ethSignTx', chain: 'Ethereum', to: msg.to, value: msg.value })
+            // Honest confirm dialog: decode msg.data so token/contract calls
+            // don't show the contract as recipient or 0x0/hex-wei as amount.
+            const { evmConfirmDetails } = await import('./emulator-confirm-details')
+            const result = await emuWrap(() => wallet.ethSignTx(msg), evmConfirmDetails('ethSignTx', 'Ethereum', msg))
             console.log('[REST] ethSignTx result:', JSON.stringify(result))
             return json(validateResponse(result, S.EthSignTransactionResponse, path))
           } catch (err: any) {

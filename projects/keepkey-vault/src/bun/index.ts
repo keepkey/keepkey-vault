@@ -1147,7 +1147,7 @@ async function emuConfirmOp(fn: () => Promise<any>, _confirmCount = 2): Promise<
 // emuConfirmOp for auto-confirm.
 async function emuSigningOp(
 	fn: () => Promise<any>,
-	details: { operation: string; chain?: string; to?: string; value?: string; fee?: string; memo?: string },
+	details: { operation: string; opLabel?: string; chain?: string; to?: string; toLabel?: string; value?: string; fee?: string; memo?: string },
 ): Promise<any> {
 	const { emuInteractiveConfirm } = await import('./emulator-window')
 	return emuInteractiveConfirm(fn, details, engine.emuDelegate)
@@ -1160,16 +1160,46 @@ async function emuSigningOp(
 function cosmosConfirmDetails(operation: string, chain: string, params: any) {
 	const tx = params?.tx ?? params
 	const msg = tx?.msg?.[0]?.value ?? tx?.msg?.[0]
-	const to = msg?.to_address ?? msg?.recipient ?? msg?.receiver ?? msg?.delegator_address
-	const amt = msg?.amount?.[0]?.amount ?? msg?.amount?.amount ?? msg?.amount
 	const feeAmt = tx?.fee?.amount?.[0]?.amount
+	const memo = tx?.memo || undefined
+
+	// Recipient: a real payee (MsgSend) vs a validator (MsgDelegate/Undelegate).
+	// NEVER fall back to delegator_address — that is the user's OWN address and
+	// would read as a self-transfer while the funds actually bond to a validator.
+	const payee = msg?.to_address ?? msg?.recipient ?? msg?.receiver
+	const validator = msg?.validator_address
+	let to: string | undefined
+	let toLabel: string | undefined
+	if (typeof payee === 'string') to = payee
+	else if (typeof validator === 'string') { to = validator; toLabel = 'Validator' }
+
+	// Amount + denom. MsgSend/Delegate carry amount[0]; MsgDeposit (THOR/Maya
+	// swaps + THORName/MAYAName registration) carries coins[0] {amount, asset}
+	// with NO amount field — so the old amount-only read showed a blank amount.
+	const amtObj = msg?.amount?.[0] ?? msg?.coins?.[0]
+	const amtRaw = amtObj?.amount
+		?? msg?.amount?.amount
+		?? (typeof msg?.amount !== 'object' ? msg?.amount : undefined)
+	const denom = amtObj?.denom ?? amtObj?.asset
+	const value = amtRaw != null && typeof amtRaw !== 'object'
+		? String(amtRaw) + (denom ? ' ' + denom : '')
+		: undefined
+
 	return {
-		operation, chain,
-		to: typeof to === 'string' ? to : undefined,
-		value: amt != null && typeof amt !== 'object' ? String(amt) : undefined,
+		operation, chain, to, toLabel, value,
 		fee: feeAmt != null ? String(feeAmt) : undefined,
-		memo: tx?.memo || undefined,
+		memo,
 	}
+}
+
+// Zcash amounts are zatoshi (1 ZEC = 1e8 zatoshi). Show a unit-labeled value so
+// "50000000" doesn't read as a huge ZEC magnitude. Display-only; the device
+// renders its own base-unit view. Zatoshi stays well within Number's safe range
+// (max supply 21M ZEC * 1e8 ≈ 2.1e15 < 9e15).
+function zecAmount(zatoshi: any): string | undefined {
+	const n = Number(zatoshi)
+	if (!Number.isFinite(n)) return undefined
+	return (n / 1e8).toFixed(8).replace(/\.?0+$/, '') + ' ZEC'
 }
 
 // Race engine.getEmulatorMnemonic() against a 3s deadline. The DebugLink
@@ -1645,17 +1675,22 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			btcSignTx: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
 				if (engine.isEmulator) {
+					// The single UTXO handler serves BTC/LTC/DOGE/DASH/BCH/ZEC/DGB — use the
+					// real coin (params.coin) for the chain + base-unit label, not hardcoded
+					// Bitcoin/sats (which falsely asserts the wrong network/denomination).
+					const coin = (params as any).coin || 'Bitcoin'
+					const unit = coin === 'Bitcoin' ? ' sats' : '' // only BTC's base unit is "sats"
 					// fee = sum(inputs) - sum(outputs), only if inputs carry their value
 					// (they often don't in params — omit rather than show a wrong number).
 					const outs: any[] = (params as any).outputs || []
 					const ins: any[] = (params as any).inputs || []
 					const sumOut = outs.reduce((s, o) => s + Number(o?.amount || 0), 0)
 					const sumIn = ins.reduce((s, i) => s + Number(i?.amount ?? i?.value ?? 0), 0)
-					const fee = sumIn > sumOut ? String(sumIn - sumOut) + ' sats' : undefined
+					const fee = sumIn > sumOut ? String(sumIn - sumOut) + unit : undefined
 					const amt = outs[0]?.amount
 					return emuSigningOp(
 						() => engine.wallet!.btcSignTx(params),
-						{ operation: 'btcSignTx', chain: 'Bitcoin', to: outs[0]?.address, value: amt != null ? String(amt) + ' sats' : undefined, fee },
+						{ operation: 'btcSignTx', chain: coin, to: outs[0]?.address, value: amt != null ? String(amt) + unit : undefined, fee },
 					)
 				}
 				return await engine.wallet.btcSignTx(params)
@@ -1663,24 +1698,36 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			ethSignTx: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
 				if (engine.isEmulator) {
-					let fee: string | undefined
-					try {
-						const gp = (params as any).maxFeePerGas ?? (params as any).gasPrice
-						if ((params as any).gasLimit && gp) fee = (BigInt((params as any).gasLimit) * BigInt(gp)).toString() + ' wei'
-					} catch { /* malformed hex — omit fee rather than crash */ }
+					// Honest dialog: decode params.data so a token transfer shows the real
+					// recipient+amount (not the contract + 0x0), an approval is labeled, and
+					// a contract call isn't forged as a "To:" recipient. Display-only.
+					const { evmConfirmDetails } = await import('./emulator-confirm-details')
 					return emuSigningOp(
 						() => engine.wallet!.ethSignTx(params),
-						{ operation: 'ethSignTx', chain: 'Ethereum', to: params.to, value: params.value, fee },
+						evmConfirmDetails('ethSignTx', 'Ethereum', params),
 					)
 				}
 				return await engine.wallet.ethSignTx(params)
 			},
 			ethSignMessage: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
-				if (engine.isEmulator) return emuSigningOp(
-					() => engine.wallet!.ethSignMessage(params),
-					{ operation: 'ethSignMessage', chain: 'Ethereum', memo: params.message?.toString()?.slice(0, 64) },
-				)
+				if (engine.isEmulator) {
+					// hdwallet requires the message as a hex string; the device OLED renders
+					// the decoded text, so decode hex→UTF-8 for the memo (fall back to raw if
+					// it isn't printable text). Display-only.
+					const raw = params.message?.toString() ?? ''
+					let memo = raw.slice(0, 64)
+					if (/^0x[0-9a-fA-F]*$/.test(raw)) {
+						try {
+							const txt = Buffer.from(raw.slice(2), 'hex').toString('utf8')
+							if (txt && /^[\t\n\r\x20-\x7e]*$/.test(txt)) memo = txt.slice(0, 64)
+						} catch { /* not valid UTF-8 — keep raw hex */ }
+					}
+					return emuSigningOp(
+						() => engine.wallet!.ethSignMessage(params),
+						{ operation: 'ethSignMessage', chain: 'Ethereum', memo },
+					)
+				}
 				return await engine.wallet.ethSignMessage(params)
 			},
 			ethSignTypedData: async (params) => {
@@ -1777,7 +1824,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					const messageBytes = solanaMessageSlice(fullTx, parsed)
 					console.debug(`[solanaSignTx] v0 tx detected — routing through solanaSignMessage (${messageBytes.length}B message incl. 0x80 prefix)`)
 					const msgRes = engine.isEmulator
-						? await emuSigningOp(() => engine.wallet!.solanaSignMessage({ addressNList: params.addressNList, message: messageBytes, showDisplay: true }), { operation: 'solanaSignMessage', chain: 'Solana' })
+						? await emuSigningOp(() => engine.wallet!.solanaSignMessage({ addressNList: params.addressNList, message: messageBytes, showDisplay: true }), { operation: 'solanaSignTx', opLabel: 'Solana Sign Transaction (v0)', chain: 'Solana' })
 						: await engine.wallet.solanaSignMessage({ addressNList: params.addressNList, message: messageBytes, showDisplay: true })
 					const sig = msgRes?.signature
 					if (!sig) throw new Error('[solanaSignTx] v0: device returned no signature')
@@ -3844,7 +3891,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const signWrap = engine.isEmulator
 					? <T,>(fn: () => Promise<T>) => emuSigningOp(fn, {
 						operation: 'zcashShieldedSend', chain: 'Zcash',
-						to: params.recipient, value: String(params.amount), memo: params.memo,
+						to: params.recipient, value: zecAmount(params.amount), memo: params.memo,
 					}) as Promise<T>
 					: undefined
 				try { rpc.send['send-progress']({ step: 'building' }) } catch { /* webview not ready */ }
@@ -3899,7 +3946,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				try { rpc.send['shield-progress']({ step: 'building' }) } catch { /* webview not ready */ }
 				const signWrap = engine.isEmulator
 					? <T,>(fn: () => Promise<T>) => emuSigningOp(fn, {
-						operation: 'zcashShieldZec', chain: 'Zcash', value: String(params.amount),
+						operation: 'zcashShieldZec', chain: 'Zcash', value: zecAmount(params.amount),
 					}) as Promise<T>
 					: undefined
 				const onProgress = (step: string) => {
@@ -3923,7 +3970,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const signWrap = engine.isEmulator
 					? <T,>(fn: () => Promise<T>) => emuSigningOp(fn, {
 						operation: 'zcashDeshieldZec', chain: 'Zcash',
-						to: params.recipient, value: String(params.amount),
+						to: params.recipient, value: zecAmount(params.amount),
 					}) as Promise<T>
 					: undefined
 				const onProgress = (step: string) => {

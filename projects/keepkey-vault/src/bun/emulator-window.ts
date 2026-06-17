@@ -58,8 +58,12 @@ function saveWindowState(state: WindowState): void {
 
 export interface EmulatorConfirmDetails {
   operation: string
+  /** Human label override for the operation header (e.g. "Token Approval"). */
+  opLabel?: string
   chain?: string
   to?: string
+  /** Label for the `to` row — "To" (default), "Spender", "Contract", "Validator". */
+  toLabel?: string
   value?: string
   /** Network fee, pre-formatted by the sign handler (shown before approval). */
   fee?: string
@@ -795,7 +799,7 @@ function buildEmulatorHTML(bridgePort: number): string {
   function onConfirmRequest(details) {
     console.log('[emu-ui] Confirm request: op=' + details.operation + ' id=' + details.id);
     currentConfirmId = details.id;
-    var opName = details.operation
+    var opName = details.opLabel || details.operation
       .replace(/([A-Z])/g, ' $$1').replace(/^ /, '')
       .replace('Sign Tx', 'Sign Transaction')
       .replace('Get Address', 'Verify Address');
@@ -804,7 +808,7 @@ function buildEmulatorHTML(bridgePort: number): string {
     if (details.to) {
       var addr = details.to;
       if (addr.length > 24) addr = addr.slice(0, 12) + '...' + addr.slice(-10);
-      html += '<div class="addr">To: ' + esc(addr) + '</div>';
+      html += '<div class="addr">' + esc(details.toLabel || 'To') + ': ' + esc(addr) + '</div>';
     }
     if (details.value) html += '<div class="detail">Amount: ' + esc(details.value) + '</div>';
     if (details.fee) html += '<div class="detail">Fee: ' + esc(details.fee) + '</div>';
