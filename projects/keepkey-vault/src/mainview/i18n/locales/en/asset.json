@@ -3,6 +3,8 @@
   "send": "Send",
   "swap": "Swap",
   "tokens": "Tokens",
+  "defiPositions": "DeFi Positions",
+  "noDefiPositions": "No DeFi positions",
   "tokenCount_one": "{{count}} token",
   "tokenCount_other": "{{count}} tokens",
   "scam": "SCAM",

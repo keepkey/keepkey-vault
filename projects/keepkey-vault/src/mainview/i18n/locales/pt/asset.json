@@ -2,6 +2,8 @@
   "receive": "Receber",
   "send": "Enviar",
   "tokens": "Tokens",
+  "defiPositions": "Posições DeFi",
+  "noDefiPositions": "Nenhuma posição DeFi",
   "tokenCount_one": "{{count}} token",
   "tokenCount_other": "{{count}} tokens",
   "scam": "GOLPE",

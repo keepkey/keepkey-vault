@@ -129,6 +129,23 @@ export interface ChainBalance {
   updatedAt?: number    // unix ms — when this chain's balance was last confirmed non-zero from Pioneer
 }
 
+// DeFi position from the Zapper portfolio endpoint
+// (https://api.keepkey.info/api/v1/zapper/portfolio/{address}). Distinct from a
+// plain wallet TokenBalance: these are protocol positions (staked, supplied,
+// borrowed, LP, claimable, etc.) surfaced under their own section in the UI.
+export interface DefiPosition {
+  isDefi: boolean          // always true for entries returned to the UI; see classifyDefiPosition
+  protocol: string | null  // appId (e.g. "aave-v3", "uniswap-v3") or null
+  name: string             // display label (e.g. "Supplied USDC", "ETH / USDC LP")
+  symbol: string           // underlying token ticker when known
+  network: string          // network slug from Zapper (e.g. "ethereum", "base")
+  type: string             // tokenType (e.g. "contract-position", "app-token")
+  metaType: string | null  // position meta (e.g. "supplied", "borrowed", "claimable", "staked")
+  balance: string          // human-readable underlying amount
+  balanceUsd: number       // USD value of the position
+  icon?: string            // icon URL when provided by Zapper
+}
+
 export interface BuildTxParams {
   chainId: string
   to: string
