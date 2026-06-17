@@ -12,21 +12,40 @@
  */
 import type { EmulatorConfirmDetails } from './emulator-window'
 import { decodeCalldataLocal } from './calldata-decoder'
+import { CHAINS } from '../shared/chains'
 
 const MAX_UINT256 = (1n << 256n) - 1n
 
-// chainId -> { name, symbol } for the common EVM networks. Used so the dialog
-// states the real network/asset instead of a hardcoded "Ethereum"/"ETH".
-const EVM_CHAINS: Record<number, { name: string; symbol: string }> = {
-  1: { name: 'Ethereum', symbol: 'ETH' },
-  10: { name: 'Optimism', symbol: 'ETH' },
-  56: { name: 'BNB Chain', symbol: 'BNB' },
-  100: { name: 'Gnosis', symbol: 'xDAI' },
-  137: { name: 'Polygon', symbol: 'MATIC' },
-  250: { name: 'Fantom', symbol: 'FTM' },
-  8453: { name: 'Base', symbol: 'ETH' },
-  42161: { name: 'Arbitrum', symbol: 'ETH' },
-  43114: { name: 'Avalanche', symbol: 'AVAX' },
+/**
+ * Resolve an EVM chainId to its real { name, symbol } from the shared chain
+ * registry — covers every built-in EVM chain (Ethereum/Polygon/Arbitrum/…/
+ * Monad/Hyperliquid). For an unknown/custom chainId, fall back to a chainId-
+ * labeled name with NO symbol: better to omit the symbol than to falsely
+ * assert "ETH" for a non-Ethereum network.
+ */
+function evmNet(params: any, fallbackChain: string): { name: string; symbol: string } {
+  const raw = params?.chainId
+  if (raw != null && raw !== '') {
+    const n = Number(raw) // normalize number / decimal string / 0x-hex
+    if (Number.isFinite(n)) {
+      const cid = String(n)
+      const def = CHAINS.find(c => c.chainFamily === 'evm' && c.chainId === cid)
+      if (def) return { name: def.coin, symbol: def.symbol }
+      return { name: `EVM chain ${cid}`, symbol: '' }
+    }
+  }
+  return { name: fallbackChain, symbol: '' }
+}
+
+/** Decode hex calldata to UTF-8 if it is entirely printable text — used to tell
+ * a native-send memo (printable) apart from ABI calldata (0x00 padding makes it
+ * non-printable). Returns null when not printable text. */
+function hexToPrintableUtf8(data: string): string | null {
+  try {
+    const txt = Buffer.from(data.slice(2), 'hex').toString('utf8')
+    if (txt && /^[\t\n\r\x20-\x7e]*$/.test(txt)) return txt
+  } catch { /* not valid bytes */ }
+  return null
 }
 
 function parseWei(v: any): bigint | null {
@@ -44,7 +63,7 @@ function weiToDecimal(wei: bigint, symbol: string): string {
   const s = (neg ? -wei : wei).toString().padStart(19, '0')
   const intPart = s.slice(0, -18) || '0'
   const frac = s.slice(-18).replace(/0+$/, '')
-  return (neg ? '-' : '') + (frac ? `${intPart}.${frac}` : intPart) + ' ' + symbol
+  return (neg ? '-' : '') + (frac ? `${intPart}.${frac}` : intPart) + (symbol ? ' ' + symbol : '')
 }
 
 function shorten(addr?: string): string {
@@ -58,8 +77,7 @@ function shorten(addr?: string): string {
  * confirm dialog can't block on I/O.
  */
 export function evmConfirmDetails(operation: string, fallbackChain: string, params: any): EmulatorConfirmDetails {
-  const cid = Number(params?.chainId)
-  const net = (cid && EVM_CHAINS[cid]) || { name: fallbackChain, symbol: 'ETH' }
+  const net = evmNet(params, fallbackChain)
   const chain = net.name
 
   // Network fee = gasLimit * (maxFeePerGas|gasPrice).
@@ -112,6 +130,15 @@ export function evmConfirmDetails(operation: string, fallbackChain: string, para
       fee,
       memo: `Approve token ${shorten(params?.to)}`,
     }
+  }
+
+  // A native send can carry a UTF-8 memo encoded as `data` (see txbuilder/
+  // evm.ts). If the data is entirely printable text it's a memo on a NATIVE
+  // send — show the recipient + memo, not a forged "Contract". ABI calldata has
+  // 0x00 padding (non-printable), so a real contract call falls through below.
+  const memoText = hexToPrintableUtf8(data)
+  if (memoText != null) {
+    return { operation, chain, to: params?.to, value: nativeValue, fee, memo: memoText.slice(0, 64) }
   }
 
   // Arbitrary contract call (router swap, multicall, dApp tx, unknown). Do NOT

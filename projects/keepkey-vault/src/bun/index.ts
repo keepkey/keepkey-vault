@@ -1173,13 +1173,17 @@ function cosmosConfirmDetails(operation: string, chain: string, params: any) {
 	if (typeof payee === 'string') to = payee
 	else if (typeof validator === 'string') { to = validator; toLabel = 'Validator' }
 
-	// Amount + denom. MsgSend/Delegate carry amount[0]; MsgDeposit (THOR/Maya
-	// swaps + THORName/MAYAName registration) carries coins[0] {amount, asset}
-	// with NO amount field — so the old amount-only read showed a blank amount.
-	const amtObj = msg?.amount?.[0] ?? msg?.coins?.[0]
-	const amtRaw = amtObj?.amount
-		?? msg?.amount?.amount
-		?? (typeof msg?.amount !== 'object' ? msg?.amount : undefined)
+	// Amount + denom across the message shapes:
+	//   MsgSend            → amount[]  (array of {denom, amount})
+	//   MsgDelegate/Undel. → amount    (single {denom, amount} object)
+	//   MsgDeposit (THOR/  → coins[]   ({asset, amount}, no `amount` field)
+	//     Maya swaps + name registration)
+	// Pick the right object so neither the amount nor the denom is dropped.
+	const amtAny = msg?.amount
+	const amtObj = (Array.isArray(amtAny) ? amtAny[0]
+		: (amtAny && typeof amtAny === 'object' ? amtAny : undefined))
+		?? msg?.coins?.[0]
+	const amtRaw = amtObj?.amount ?? (typeof amtAny !== 'object' ? amtAny : undefined)
 	const denom = amtObj?.denom ?? amtObj?.asset
 	const value = amtRaw != null && typeof amtRaw !== 'object'
 		? String(amtRaw) + (denom ? ' ' + denom : '')
