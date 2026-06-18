@@ -12,37 +12,47 @@ interface DefiPositionsPanelProps {
 	address: string | null
 	/** Per-chain accent color, matching the token table. */
 	color: string
+	/**
+	 * Positions sourced from GetPortfolioBalances (includeDefi=true). When
+	 * provided, the panel skips its RPC fetch and renders directly. Used by
+	 * AssetPage to surface server-merged DeFi without re-fetching.
+	 */
+	positions?: DefiPosition[]
 }
 
 /**
  * DeFi positions for an EVM address, rendered below the token table.
  *
- * Data comes from the backend `getDefiPositions` RPC (Zapper proxy on the
- * KeepKey API). Positions are display-only and not counted toward the chain
- * total — they live in their own section so protocol holdings (staked,
- * supplied, borrowed, LP, claimable) read clearly apart from plain tokens.
+ * Primary source: `props.positions` (server-merged via GetPortfolioBalances
+ * includeDefi=true on dashboard refresh). Falls back to the legacy
+ * `getDefiPositions` RPC when no props are provided — keeps the panel
+ * functional against pre-v1.4 servers that don't return defiPositions.
  *
  * Hide-dust mirrors the token table: zero-USD positions are tucked behind a
  * "show hidden" toggle.
  */
-export function DefiPositionsPanel({ address, color }: DefiPositionsPanelProps) {
+export function DefiPositionsPanel({ address, color, positions: positionsFromProps }: DefiPositionsPanelProps) {
 	const { t } = useTranslation("asset")
 	const { fmtCompact } = useFiat()
-	const [positions, setPositions] = useState<DefiPosition[]>([])
+	const [fetchedPositions, setFetchedPositions] = useState<DefiPosition[]>([])
 	const [loading, setLoading] = useState(false)
 	const [loaded, setLoaded] = useState(false)
 	const [showHidden, setShowHidden] = useState(false)
 
+	const positions = positionsFromProps ?? fetchedPositions
+
 	useEffect(() => {
-		if (!address) { setPositions([]); setLoaded(true); return }
+		// When the parent supplied positions, we trust them — no RPC, no spinner.
+		if (positionsFromProps !== undefined) { setLoaded(true); return }
+		if (!address) { setFetchedPositions([]); setLoaded(true); return }
 		let cancelled = false
 		setLoading(true)
 		rpcRequest<DefiPosition[]>("getDefiPositions", { address }, 30000)
-			.then((res) => { if (!cancelled) setPositions(Array.isArray(res) ? res : []) })
-			.catch((e) => { if (!cancelled) { console.warn("[DefiPanel] fetch failed:", e); setPositions([]) } })
+			.then((res) => { if (!cancelled) setFetchedPositions(Array.isArray(res) ? res : []) })
+			.catch((e) => { if (!cancelled) { console.warn("[DefiPanel] fetch failed:", e); setFetchedPositions([]) } })
 			.finally(() => { if (!cancelled) { setLoading(false); setLoaded(true) } })
 		return () => { cancelled = true }
-	}, [address])
+	}, [address, positionsFromProps])
 
 	// Hide-dust: zero-USD positions hidden behind a toggle (same rule as tokens).
 	const { live, dust } = useMemo(() => {

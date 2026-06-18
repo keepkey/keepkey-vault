@@ -138,6 +138,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 			nativeBalanceUsd: selectedEvmChainBalance.nativeBalanceUsd,
 			address: selectedEvmAddress.address,
 			tokens: selectedEvmChainBalance.tokens,
+			defiPositions: selectedEvmChainBalance.defiPositions,
 		}
 		: baseBalance
 
@@ -1181,11 +1182,13 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 				)}
 
 				{/* DeFi Positions — EVM chains only, below the token table. Protocol
-				    holdings (staked / supplied / borrowed / LP / claimable) from the
-				    Zapper proxy, kept separate from plain wallet tokens. */}
+				    holdings (staked / supplied / borrowed / LP / claimable) sourced
+				    from the dashboard refresh (GetPortfolioBalances includeDefi=true).
+				    Falls back to the legacy getDefiPositions RPC when activeBalance
+				    has no defiPositions field (pre-v1.4 server). */}
 				{!selectedToken && isEvmChain && address && (
 					<Suspense fallback={null}>
-						<DefiPositionsPanel address={address} color={chain.color} />
+						<DefiPositionsPanel address={address} color={chain.color} positions={activeBalance?.defiPositions} />
 					</Suspense>
 				)}
 
