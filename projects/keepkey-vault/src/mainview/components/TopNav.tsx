@@ -1,13 +1,14 @@
 import { Flex, Text, Box, Image, IconButton, HStack } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
 import { Z } from "../lib/z-index"
+import { SWAP_SIDEPANEL } from "../lib/flags"
 import { IS_WINDOWS, IS_MAC } from "../lib/platform"
 import { useWindowDrag } from "../hooks/useWindowDrag"
 import { rpcRequest } from "../lib/rpc"
 import kkIcon from "../assets/icon.png"
 import { NAV_HEIGHT } from "../layout"
 
-export type NavTab = "vault" | "shapeshift" | "explore" | "addresses"
+export type NavTab = "vault" | "swap" | "explore" | "addresses"
 
 interface TopNavProps {
 	label?: string
@@ -175,9 +176,16 @@ export function TopNav({
 			),
 		},
 		{
-			id: "shapeshift",
-			label: t("shapeshift"),
-			icon: <Image src="https://pioneers.dev/coins/fox.png" alt="ShapeShift" w="14px" h="14px" borderRadius="3px" />,
+			id: "swap",
+			label: t("swap"),
+			icon: (
+				<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+					<polyline points="17 1 21 5 17 9" />
+					<path d="M3 11V9a4 4 0 0 1 4-4h14" />
+					<polyline points="7 23 3 19 7 15" />
+					<path d="M21 13v2a4 4 0 0 1-4 4H3" />
+				</svg>
+			),
 		},
 	]
 
@@ -327,7 +335,7 @@ export function TopNav({
 				p="3px"
 				className="electrobun-webkit-app-region-no-drag"
 			>
-				{TAB_DEFS.map((tab) => {
+				{TAB_DEFS.filter((tab) => SWAP_SIDEPANEL || tab.id !== "swap").map((tab) => {
 					const isActive = activeTab === tab.id
 					return (
 						<Box
