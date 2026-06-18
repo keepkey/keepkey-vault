@@ -1,6 +1,7 @@
 import { Flex, Text, Box, Image, IconButton, HStack } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
 import { Z } from "../lib/z-index"
+import { SWAP_SIDEPANEL } from "../lib/flags"
 import { IS_WINDOWS, IS_MAC } from "../lib/platform"
 import { useWindowDrag } from "../hooks/useWindowDrag"
 import { rpcRequest } from "../lib/rpc"
@@ -334,7 +335,7 @@ export function TopNav({
 				p="3px"
 				className="electrobun-webkit-app-region-no-drag"
 			>
-				{TAB_DEFS.map((tab) => {
+				{TAB_DEFS.filter((tab) => SWAP_SIDEPANEL || tab.id !== "swap").map((tab) => {
 					const isActive = activeTab === tab.id
 					return (
 						<Box

@@ -21,6 +21,7 @@ import { validateAddress } from "../../shared/address-validation"
 import type { SwapAsset, SwapQuote, ChainBalance, CustomToken, SwapStatusUpdate, SwapTrackingStatus, PendingSwap, SwapUiState, SwapUiCommand, SwapHealth } from "../../shared/types"
 import { SOLANA_BLIND_SIGNING_REQUIRED } from "../../shared/types"
 import { Z } from "../lib/z-index"
+import { SWAP_SIDEPANEL } from "../lib/flags"
 import { providerTrackerUrl } from "../lib/trackers"
 import { ProviderBadge, ProverChip, resolveProvider } from "./ProviderBadge"
 import { getSwapperAnimation } from "../lib/swapper-animations"
@@ -2278,6 +2279,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   }, [assets, findAssetByKey])
 
   if (!open) return null
+  if (!SWAP_SIDEPANEL) return null  // build-time gate: swap UI fully hidden when OFF
   if (chain && !resumeSwap && !loadingAssets && assets.length > 0 && !swappableChainIds.has(chain.id)) {
     return (
       <>

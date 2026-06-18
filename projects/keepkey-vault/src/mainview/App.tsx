@@ -36,6 +36,7 @@ import { rpcRequest, onRpcMessage, rpcFire, dispatchLocalRpcMessage } from "./li
 import { CHAINS, customChainToChainDef, findChainByNetwork, type ChainDef } from "../shared/chains"
 import { loadSupportedChains } from "../shared/swap-support-matrix"
 import { Z } from "./lib/z-index"
+import { SWAP_SIDEPANEL } from "./lib/flags"
 import { ActivityTracker } from "./components/ActivityTracker"
 import { SwapRpcMount } from "./components/SwapRpcMount"
 import { NAV_CONTENT_OFFSET, NAV_CONTENT_OFFSET_WITH_BANNER } from "./layout"
@@ -998,7 +999,7 @@ function App() {
 				firmwareVersion={deviceState.firmwareVersion}
 			/>
 			{/* Top-level swap dialog mount for REST-driven /api/v2/swap/open. */}
-			<SwapRpcMount />
+			{SWAP_SIDEPANEL && <SwapRpcMount />}
 			{/* Enable API Bridge dialog — shown when user tries to launch an app with REST disabled */}
 			{/* ── WalletConnect Not Supported dialog ──────────────────── */}
 			{wcNotSupportedOpen && (
