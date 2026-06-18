@@ -32,7 +32,7 @@ import { UpdateBanner } from "./components/UpdateBanner"
 import { IncomingTxToast, type IncomingTx } from "./components/IncomingTxToast"
 import { useDeviceState } from "./hooks/useDeviceState"
 import { useUpdateState } from "./hooks/useUpdateState"
-import { rpcRequest, onRpcMessage, rpcFire } from "./lib/rpc"
+import { rpcRequest, onRpcMessage, rpcFire, dispatchLocalRpcMessage } from "./lib/rpc"
 import { CHAINS, customChainToChainDef, findChainByNetwork, type ChainDef } from "../shared/chains"
 import { loadSupportedChains } from "../shared/swap-support-matrix"
 import { Z } from "./lib/z-index"
@@ -601,16 +601,14 @@ function App() {
 
 	// ── Tab change handler ──────────────────────────────────────────
 	const handleTabChange = useCallback(async (tab: NavTab) => {
-		if (tab === "shapeshift") {
-			if (!restApiEnabled) {
-				setPendingAppUrl("https://app.shapeshift.com")
-				return
-			}
-			await launchApp("https://app.shapeshift.com")
+		if (tab === "swap") {
+			// Native KeepKey swap — open the in-app swap side panel.
+			// SwapRpcMount (mounted at app root) listens for this and mounts the panel.
+			dispatchLocalRpcMessage('swap-cmd', { kind: 'open' })
 			return
 		}
 		setActiveTab(tab)
-	}, [restApiEnabled, launchApp])
+	}, [])
 
 	// ── Open app from AppStore ───────────────────────────────────────
 	const handleOpenApp = useCallback(async (url: string) => {
