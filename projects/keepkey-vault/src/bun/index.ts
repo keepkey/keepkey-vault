@@ -139,7 +139,7 @@ import { extractTransactionsFromReport, toCoinTrackerCsv, toZenLedgerCsv } from 
 import * as os from "os"
 import * as path from "path"
 import { EVM_RPC_URLS, getTokenMetadata, broadcastEvmTx } from "./evm-rpc"
-import type { ChainBalance, TokenBalance, CustomToken, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, EvmAddressSet, Bip85SeedMeta, StakingPosition, SwapAsset, AuditToken } from "../shared/types"
+import type { ChainBalance, TokenBalance, CustomToken, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, EvmAddressSet, Bip85SeedMeta, StakingPosition, SwapAsset, AuditToken, DefiPosition } from "../shared/types"
 import type { VaultRPCSchema } from "../shared/rpc-schema"
 
 // L3 fix: withTimeout imported from engine-controller (was duplicated here)
@@ -200,14 +200,36 @@ interface PortfolioMeta {
 	staleChains: Array<{ caip: string; pubkey: string; ageMs: number; fetchedAtISO: string }>
 }
 
+// Server-side DeFi position shape from GetPortfolioBalances (includeDefi=true).
+// Shape mirrors DefiPositionEntry in pioneer-server's balance.controller.ts.
+interface ServerDefiPosition {
+	pubkey: string
+	protocol: string
+	displayName: string
+	network: string
+	networkId: string
+	balanceUsd: number
+	icon?: string
+	tokens?: Array<{ networkId: string; address: string; symbol?: string }>
+}
+
 // Pioneer v1.3.115+ returns { balances, meta } where meta reports which chains
 // served degraded (fresh fetch failed) or stale (>5min old cache) data. The old
 // unwrap discarded meta entirely, so the vault could never explain a $0/stale row.
-function unwrapPortfolioResponse(resp: any): { entries: any[]; meta: PortfolioMeta | null } {
+//
+// v1.4+ also surfaces { defiPositions } when the request set includeDefi=true.
+// We return null (not []) when the field is absent so callers can distinguish
+// "DeFi wasn't requested" (and thus skip the merge step) from "no positions."
+function unwrapPortfolioResponse(resp: any): {
+	entries: any[];
+	meta: PortfolioMeta | null;
+	defiPositions: ServerDefiPosition[] | null;
+} {
 	const rawData = resp?.data?.data || resp?.data || {}
 	const entries = rawData.balances || (Array.isArray(rawData) ? rawData : [])
 	const meta: PortfolioMeta | null = rawData.meta ?? null
-	return { entries, meta }
+	const defiPositions: ServerDefiPosition[] | null = Array.isArray(rawData.defiPositions) ? rawData.defiPositions : null
+	return { entries, meta, defiPositions }
 }
 
 // Native balance for a single derived address on ANY family, via the
@@ -2200,7 +2222,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					const pubkeyChunks = chunkArray(pubkeys, PIONEER_PORTFOLIO_CHUNK_SIZE)
 					const chunkResults = await withTimeout(
 						mapWithConcurrency(pubkeyChunks, PIONEER_PORTFOLIO_MAX_CONCURRENCY, async (chunk, i) => {
-							const chunkBody: any = { pubkeys: chunk.map(p => ({ caip: p.caip, pubkey: p.pubkey })) }
+							// Opt the dashboard refresh into the server's DeFi merge. Server-side
+							// is cached, so the per-pubkey Zapper lookup is typically a Redis
+							// read; misses degrade to [] without blocking balances. Pre-v1.4
+							// servers ignore the field and return the legacy shape unchanged.
+							const chunkBody: any = { pubkeys: chunk.map(p => ({ caip: p.caip, pubkey: p.pubkey })), includeDefi: true }
 							if (extraContracts.length > 0) chunkBody.extraContracts = extraContracts
 							try {
 								let resp: any
@@ -2215,20 +2241,20 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 									console.warn('[getBalances] Pioneer rejected extraContracts; retrying portfolio chunk without custom tokens')
 									resp = await withTimeout(
 										pioneer.GetPortfolioBalances(
-											{ pubkeys: chunkBody.pubkeys },
+											{ pubkeys: chunkBody.pubkeys, includeDefi: true },
 											{ forceRefresh }
 										),
 										PIONEER_PORTFOLIO_CHUNK_TIMEOUT_MS,
 										`GetPortfolioBalances chunk ${i + 1}/${pubkeyChunks.length}`
 									)
 								}
-								const { entries, meta } = unwrapPortfolioResponse(resp)
-								return { entries, meta, error: null as string | null }
+								const { entries, meta, defiPositions } = unwrapPortfolioResponse(resp)
+								return { entries, meta, defiPositions, error: null as string | null }
 							} catch (err: any) {
 								const sampleChains = chunk.map((p: any) => String(p.caip || '').split('/')[0]).join(', ')
 								const error = getPioneerPortfolioErrorMessage(err)
 								console.warn(`[getBalances] Portfolio chunk ${i + 1}/${pubkeyChunks.length} failed (${sampleChains}):`, error)
-								return { entries: [] as any[], meta: null as PortfolioMeta | null, error }
+								return { entries: [] as any[], meta: null as PortfolioMeta | null, defiPositions: null as ServerDefiPosition[] | null, error }
 							}
 						}),
 						PIONEER_PORTFOLIO_TOTAL_TIMEOUT_MS,
@@ -2271,6 +2297,81 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					console.log(`[getBalances] effectivePubkeys: ${effectivePubkeys.length}/${pubkeys.length} — chains: ${[...new Set(effectivePubkeys.map(p => p.chainId))].join(', ')}`)
 					const allEntries = chunkResults.flatMap(r => r.entries)
 					const portfolioMeta = mergeMetas(chunkResults.map(r => r.meta).filter(Boolean) as PortfolioMeta[])
+
+					// Aggregate server-merged DeFi positions across chunks and group by
+					// chainId. The networkId on each position (eip155:N) maps cleanly
+					// into the existing networkToChain table; positions on networks the
+					// vault doesn't know about are dropped on the floor with a log.
+					// defiTokenSuppressionByChain captures the contract addresses to
+					// hide from each chain's wallet TokenBalance list (option B dedup).
+					const allDefiPositions: ServerDefiPosition[] = chunkResults.flatMap(r => r.defiPositions || [])
+					const defiByChain = new Map<string, DefiPosition[]>()
+					const defiByChainAndOwner = new Map<string, Map<string, DefiPosition[]>>()
+					const defiTokenSuppressionByChain = new Map<string, Set<string>>()
+					const defiTokenSuppressionByChainAndOwner = new Map<string, Map<string, Set<string>>>()
+					let droppedDefi = 0
+					for (const sp of allDefiPositions) {
+						const networkId = (sp.networkId || '').toLowerCase()
+						const chainId = networkId ? (networkToChain.get(networkId) || null) : null
+						if (!chainId) { droppedDefi++; continue }
+						const ownerAddr = String(sp.pubkey || '').toLowerCase()
+						const dp: DefiPosition = {
+							protocol: sp.protocol || null,
+							displayName: sp.displayName,
+							name: sp.displayName || sp.protocol || 'DeFi Position',
+							network: sp.network,
+							networkId: sp.networkId,
+							balanceUsd: Number(sp.balanceUsd) || 0,
+							icon: sp.icon,
+							tokens: Array.isArray(sp.tokens) ? sp.tokens.map(t => ({
+								networkId: t.networkId,
+								address: String(t.address || '').toLowerCase(),
+								symbol: t.symbol,
+							})).filter(t => !!t.address) : [],
+						}
+						// Chain-level (dashboard chain row)
+						const chainList = defiByChain.get(chainId) || []
+						chainList.push(dp)
+						defiByChain.set(chainId, chainList)
+						// Owner-level (per-account drilldown)
+						if (ownerAddr) {
+							let perOwner = defiByChainAndOwner.get(chainId)
+							if (!perOwner) { perOwner = new Map(); defiByChainAndOwner.set(chainId, perOwner) }
+							const list = perOwner.get(ownerAddr) || []
+							list.push(dp)
+							perOwner.set(ownerAddr, list)
+						}
+						// Token-suppression sets
+						const chainSet = defiTokenSuppressionByChain.get(chainId) || new Set<string>()
+						for (const t of dp.tokens || []) chainSet.add(t.address)
+						defiTokenSuppressionByChain.set(chainId, chainSet)
+						if (ownerAddr) {
+							let perOwner = defiTokenSuppressionByChainAndOwner.get(chainId)
+							if (!perOwner) { perOwner = new Map(); defiTokenSuppressionByChainAndOwner.set(chainId, perOwner) }
+							const set = perOwner.get(ownerAddr) || new Set<string>()
+							for (const t of dp.tokens || []) set.add(t.address)
+							perOwner.set(ownerAddr, set)
+						}
+					}
+					if (allDefiPositions.length > 0) {
+						console.log(`[getBalances] DeFi: ${allDefiPositions.length} positions across ${defiByChain.size} chain(s)${droppedDefi ? ` (${droppedDefi} dropped: unknown networkId)` : ''}`)
+					}
+					// Returns the input token list minus any whose contract address
+					// matches a DeFi position's `tokens` for the same chain. Undefined
+					// stays undefined; an emptied list becomes undefined too so the
+					// downstream "if tokens.length > 0" guards still fire correctly.
+					const suppressDefiTokens = (tokens: TokenBalance[] | undefined, suppress: Set<string> | undefined): TokenBalance[] | undefined => {
+						if (!tokens || tokens.length === 0) return tokens
+						if (!suppress || suppress.size === 0) return tokens
+						const filtered = tokens.filter(tok => {
+							const parts = String(tok.caip || '').split('/')
+							if (parts.length < 2) return true
+							const ref = parts[1]
+							const addr = (ref.includes(':') ? ref.split(':')[1] : ref).toLowerCase()
+							return !suppress.has(addr)
+						})
+						return filtered.length > 0 ? filtered : undefined
+					}
 
 					console.log(`[getBalances] GetPortfolioBalances response: ${allEntries.length} entries`)
 					// Log TRON-specific entries for debugging
@@ -2479,15 +2580,23 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 								|| pureNatives.find((d: any) => d.caip === entry.caip && d.address?.toLowerCase() === entry.pubkey.toLowerCase())
 							const bal = parseFloat(String(match?.balance ?? '0'))
 							const usd = Number(match?.valueUsd ?? 0)
-							const entryTokens = evmTokensByOwner.get(`${entry.chainId}:${entry.pubkey.toLowerCase()}`) || []
+							const ownerLower = entry.pubkey.toLowerCase()
+							const ownerDefiPositions = defiByChainAndOwner.get(entry.chainId)?.get(ownerLower)
+							const ownerSuppress = defiTokenSuppressionByChainAndOwner.get(entry.chainId)?.get(ownerLower)
+							const entryTokens = suppressDefiTokens(
+								evmTokensByOwner.get(`${entry.chainId}:${ownerLower}`),
+								ownerSuppress,
+							) || []
 							const entryTokenUsd = entryTokens.reduce((sum, t) => sum + t.balanceUsd, 0)
+							const ownerDefiUsd = ownerDefiPositions?.reduce((sum, p) => sum + (p.balanceUsd || 0), 0) || 0
 							evmAddresses.setAddressChainBalance(entry.pubkey, entry.chainId, {
 								chainId: entry.chainId,
 								symbol: entry.symbol,
 								balance: bal > 0 ? bal.toFixed(18).replace(/0+$/, '').replace(/\.$/, '') : '0',
-								balanceUsd: usd + entryTokenUsd,
+								balanceUsd: usd + entryTokenUsd + ownerDefiUsd,
 								nativeBalanceUsd: usd,
 								tokens: entryTokens.length > 0 ? entryTokens : undefined,
+								defiPositions: ownerDefiPositions && ownerDefiPositions.length > 0 ? ownerDefiPositions : undefined,
 							})
 							// Accumulate per-chain totals
 							const existing = evmChainAgg.get(entry.chainId)
@@ -2528,16 +2637,25 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 					// Push aggregated EVM chain entries
 					for (const [chainId, agg] of evmChainAgg) {
-						const chainTokens = tokensByChainId.get(chainId)
+						const chainTokens = suppressDefiTokens(
+							tokensByChainId.get(chainId),
+							defiTokenSuppressionByChain.get(chainId),
+						)
 						const tokenUsdTotal = chainTokens?.reduce((sum, t) => sum + t.balanceUsd, 0) || 0
+						const chainDefi = defiByChain.get(chainId)
+						const defiUsdTotal = chainDefi?.reduce((sum, p) => sum + (p.balanceUsd || 0), 0) || 0
 						results.push({
 							chainId,
 							symbol: agg.symbol,
 							balance: agg.balance > 0 ? agg.balance.toFixed(18).replace(/0+$/, '').replace(/\.$/, '') : '0',
-							balanceUsd: agg.usd + tokenUsdTotal,
+							// Chain total folds DeFi in so the dashboard $ keeps parity
+							// with zapper.xyz net worth once stETH-style tokens are
+							// suppressed from the wallet list.
+							balanceUsd: agg.usd + tokenUsdTotal + defiUsdTotal,
 							nativeBalanceUsd: agg.usd,
 							address: agg.address,
 							tokens: chainTokens && chainTokens.length > 0 ? chainTokens : undefined,
+							defiPositions: chainDefi && chainDefi.length > 0 ? chainDefi : undefined,
 						})
 					}
 
@@ -2857,6 +2975,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const isUtxo = chain.chainFamily === 'utxo'
 				let balance = '0', balanceUsd = 0, address = displayAddress
 				let tokens: TokenBalance[] | undefined
+				let chainDefiPositions: DefiPosition[] | undefined
 				// Snapshot pre-refresh address from cache so we can preserve it on Pioneer failure (Finding 3)
 				let cachedAddress = ''
 				try {
@@ -2883,6 +3002,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						}))
 					const portfolioBody: any = { pubkeys: pubkeys.map(p => ({ caip: p.caip, pubkey: p.pubkey })) }
 					if (extraContracts.length > 0) portfolioBody.extraContracts = extraContracts
+					// Single-chain refresh: only worth fetching DeFi for EVM chains.
+					// Other families can't have Zapper apps and the extra round-trip is wasted.
+					if (isEvm) portfolioBody.includeDefi = true
 					let resp: any
 					try {
 						resp = await withTimeout(
@@ -2895,7 +3017,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						console.warn(`[getBalance] ${chain.coin}: Pioneer rejected extraContracts; retrying without custom tokens`)
 						resp = await withTimeout(
 							pioneer.GetPortfolioBalances(
-								{ pubkeys: portfolioBody.pubkeys },
+								{ pubkeys: portfolioBody.pubkeys, ...(isEvm ? { includeDefi: true } : {}) },
 								{ forceRefresh: true }
 							),
 							PIONEER_TIMEOUT_MS,
@@ -2904,6 +3026,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					}
 					const rawData = resp?.data?.data || resp?.data || {}
 					const allEntries: any[] = rawData.balances || (Array.isArray(rawData) ? rawData : [])
+					const rawDefiPositions: ServerDefiPosition[] = Array.isArray(rawData.defiPositions) ? rawData.defiPositions : []
 
 					console.log(`[getBalance] ${chain.coin}: ${allEntries.length} entries from Pioneer (${pubkeys.length} pubkeys)`)
 
@@ -3076,21 +3199,93 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						}
 					}
 
+					// Group server-merged DeFi by owner address for per-account attribution,
+					// and build a chain-level suppression set so the aggregated `tokens`
+					// list below mirrors the dashboard's dedup.
+					const ownerDefiPositions = new Map<string, DefiPosition[]>()
+					const ownerDefiSuppress = new Map<string, Set<string>>()
+					const chainDefiSuppress = new Set<string>()
+					const allChainDefi: DefiPosition[] = []
+					for (const sp of rawDefiPositions) {
+						const dp: DefiPosition = {
+							protocol: sp.protocol || null,
+							displayName: sp.displayName,
+							name: sp.displayName || sp.protocol || 'DeFi Position',
+							network: sp.network,
+							networkId: sp.networkId,
+							balanceUsd: Number(sp.balanceUsd) || 0,
+							icon: sp.icon,
+							tokens: Array.isArray(sp.tokens) ? sp.tokens.map(t => ({
+								networkId: t.networkId,
+								address: String(t.address || '').toLowerCase(),
+								symbol: t.symbol,
+							})).filter(t => !!t.address) : [],
+						}
+						allChainDefi.push(dp)
+						const ownerLower = String(sp.pubkey || '').toLowerCase()
+						if (ownerLower) {
+							const list = ownerDefiPositions.get(ownerLower) || []
+							list.push(dp)
+							ownerDefiPositions.set(ownerLower, list)
+							const set = ownerDefiSuppress.get(ownerLower) || new Set<string>()
+							for (const t of dp.tokens || []) set.add(t.address)
+							ownerDefiSuppress.set(ownerLower, set)
+						}
+						for (const t of dp.tokens || []) chainDefiSuppress.add(t.address)
+					}
+					if (rawDefiPositions.length > 0) {
+						console.log(`[getBalance] ${chain.coin}: ${rawDefiPositions.length} DeFi positions across ${ownerDefiPositions.size} owner(s)`)
+					}
+					// Same suppression helper as the main getBalances flow.
+					const suppressDefiTokensLocal = (toks: TokenBalance[] | undefined, suppress: Set<string> | undefined): TokenBalance[] | undefined => {
+						if (!toks || toks.length === 0) return toks
+						if (!suppress || suppress.size === 0) return toks
+						const filtered = toks.filter(tok => {
+							const parts = String(tok.caip || '').split('/')
+							if (parts.length < 2) return true
+							const ref = parts[1]
+							const addr = (ref.includes(':') ? ref.split(':')[1] : ref).toLowerCase()
+							return !suppress.has(addr)
+						})
+						return filtered.length > 0 ? filtered : undefined
+					}
+
 					if (isEvm) {
 						for (const pk of pubkeys) {
 							const ownerAddress = pk.pubkey.toLowerCase()
 							const native = evmNativeByPubkey.get(ownerAddress) || { balance: 0, usd: 0 }
-							const ownerTokens = evmTokensByOwner.get(ownerAddress) || []
+							const ownerTokens = suppressDefiTokensLocal(
+								evmTokensByOwner.get(ownerAddress),
+								ownerDefiSuppress.get(ownerAddress),
+							) || []
 							const tokenUsdTotal = ownerTokens.reduce((sum, t) => sum + t.balanceUsd, 0)
+							const ownerDefi = ownerDefiPositions.get(ownerAddress)
+							const ownerDefiUsd = ownerDefi?.reduce((sum, p) => sum + (p.balanceUsd || 0), 0) || 0
 							evmAddresses.setAddressChainBalance(pk.pubkey, chain.id, {
 								chainId: chain.id,
 								symbol: chain.symbol,
 								balance: native.balance > 0 ? native.balance.toFixed(18).replace(/0+$/, '').replace(/\.$/, '') : '0',
-								balanceUsd: native.usd + tokenUsdTotal,
+								balanceUsd: native.usd + tokenUsdTotal + ownerDefiUsd,
 								nativeBalanceUsd: native.usd,
 								tokens: ownerTokens.length > 0 ? ownerTokens : undefined,
+								defiPositions: ownerDefi && ownerDefi.length > 0 ? ownerDefi : undefined,
 							})
 						}
+					}
+
+					// Apply chain-level suppression to the aggregated `tokens` array
+					// and recompute totals so the single-chain ChainBalance returned
+					// below matches the per-address sums.
+					if (isEvm && chainDefiSuppress.size > 0) {
+						const filtered = suppressDefiTokensLocal(tokens, chainDefiSuppress)
+						const removedUsd = (tokens || []).reduce((s, t) => s + (t.balanceUsd || 0), 0)
+							- (filtered || []).reduce((s, t) => s + (t.balanceUsd || 0), 0)
+						tokens = filtered
+						if (removedUsd > 0) balanceUsd -= removedUsd
+					}
+					if (isEvm && allChainDefi.length > 0) {
+						balanceUsd += allChainDefi.reduce((s, p) => s + (p.balanceUsd || 0), 0)
+						chainDefiPositions = allChainDefi
 					}
 				} catch (e: any) {
 					const message = getPioneerPortfolioErrorMessage(e)
@@ -3101,8 +3296,19 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// If Pioneer failed or returned no address, preserve the cached address
 				// so we don't wipe a previously good address from the shared cache (Finding 3)
 				if (!address && cachedAddress) address = cachedAddress
-				const nativeBalanceUsd = Number(balanceUsd) - (tokens?.reduce((s, t) => s + (t.balanceUsd || 0), 0) || 0)
-				const result: ChainBalance = { chainId: chain.id, symbol: chain.symbol, balance, balanceUsd, nativeBalanceUsd, address, tokens }
+				const tokensUsd = tokens?.reduce((s, t) => s + (t.balanceUsd || 0), 0) || 0
+				const defiUsd = chainDefiPositions?.reduce((s, p) => s + (p.balanceUsd || 0), 0) || 0
+				const nativeBalanceUsd = Number(balanceUsd) - tokensUsd - defiUsd
+				const result: ChainBalance = {
+					chainId: chain.id,
+					symbol: chain.symbol,
+					balance,
+					balanceUsd,
+					nativeBalanceUsd,
+					address,
+					tokens,
+					defiPositions: chainDefiPositions,
+				}
 
 				// Update single-chain cache + push to frontend so Dashboard stays in sync.
 				// PRIVACY: Skip DB write for passphrase wallets.

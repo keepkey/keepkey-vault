@@ -126,24 +126,45 @@ export interface ChainBalance {
   nativeBalanceUsd?: number  // native-only USD (excludes tokens)
   address: string
   tokens?: TokenBalance[]
+  /**
+   * DeFi protocol positions attributed to this chain, populated when the
+   * server returns `defiPositions` (GetPortfolioBalances with includeDefi=true).
+   * The vault filters its `tokens` list to suppress contracts referenced by
+   * any position here so the same on-chain ERC-20 is never double-counted.
+   */
+  defiPositions?: DefiPosition[]
   updatedAt?: number    // unix ms — when this chain's balance was last confirmed non-zero from Pioneer
 }
 
-// DeFi position from the Zapper portfolio endpoint
-// (https://api.keepkey.info/api/v1/zapper/portfolio/{address}). Distinct from a
-// plain wallet TokenBalance: these are protocol positions (staked, supplied,
-// borrowed, LP, claimable, etc.) surfaced under their own section in the UI.
+// DeFi position. The server-side merged path (includeDefi=true) is the
+// canonical source; the legacy fields below (isDefi, type, metaType, balance,
+// symbol, name) are retained so prior shapes built by classifyDefiPosition
+// continue to deserialize cleanly.
 export interface DefiPosition {
-  isDefi: boolean          // always true for entries returned to the UI; see classifyDefiPosition
-  protocol: string | null  // appId (e.g. "aave-v3", "uniswap-v3") or null
-  name: string             // display label (e.g. "Supplied USDC", "ETH / USDC LP")
-  symbol: string           // underlying token ticker when known
-  network: string          // network slug from Zapper (e.g. "ethereum", "base")
-  type: string             // tokenType (e.g. "contract-position", "app-token")
-  metaType: string | null  // position meta (e.g. "supplied", "borrowed", "claimable", "staked")
-  balance: string          // human-readable underlying amount
-  balanceUsd: number       // USD value of the position
-  icon?: string            // icon URL when provided by Zapper
+  // === Server-side (canonical) ===
+  protocol: string | null   // Zapper appId slug ("lido", "morpheus", "aave-v3") or null
+  displayName?: string      // Pretty protocol name from the server ("Lido", "Morpheus")
+  network: string           // Zapper network display ("Ethereum") or legacy slug ("ethereum")
+  networkId?: string        // CAIP-2 chain ("eip155:1") — required for token dedup
+  balanceUsd: number        // USD value Zapper attributes to the protocol for this pubkey
+  icon?: string
+  /**
+   * Constituent ERC-20 contracts the protocol holds. Used to suppress the
+   * same contracts from the wallet TokenBalance list.
+   */
+  tokens?: Array<{
+    networkId: string
+    address: string
+    symbol?: string
+  }>
+
+  // === Legacy (classifyDefiPosition / /zapper/portfolio path) ===
+  isDefi?: boolean
+  name?: string             // display label (e.g. "Supplied USDC", "ETH / USDC LP")
+  symbol?: string           // underlying token ticker when known
+  type?: string             // tokenType (e.g. "contract-position", "app-token")
+  metaType?: string | null  // position meta (e.g. "supplied", "borrowed", "claimable", "staked")
+  balance?: string          // human-readable underlying amount
 }
 
 export interface BuildTxParams {
@@ -259,6 +280,7 @@ export interface EvmAddressChainBalance {
   balanceUsd: number
   nativeBalanceUsd: number
   tokens?: TokenBalance[]
+  defiPositions?: DefiPosition[]
 }
 
 export interface EvmTrackedAddress {
