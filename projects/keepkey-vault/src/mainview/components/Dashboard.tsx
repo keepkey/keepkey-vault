@@ -22,6 +22,7 @@ import { StackedBarView, type StackedBarItem } from "./StackedBarView"
 // initial Dashboard chunk. Used to open Swap directly from the action row
 // without routing through AssetPage.
 const LazySwapDialog = lazy(() => import("./SwapDialog").then(m => ({ default: m.SwapDialog })))
+const LazyDefiPositionsPanel = lazy(() => import("./DefiPositionsPanel").then(m => ({ default: m.DefiPositionsPanel })))
 
 import { rpcRequest, onRpcMessage } from "../lib/rpc"
 import { subscribeVaultCommand, publishBalances, clearBalances } from "../lib/commandBus"
@@ -2479,6 +2480,22 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 													</Flex>
 												))}
 										</Flex>
+									</Box>
+								)}
+
+								{/* DeFi positions for the drilled chain. Mirrors the
+								    AssetPage section; reads from the ChainBalance the
+								    backend filled when includeDefi=true. Self-hides when
+								    the chain has no positions. */}
+								{(bal?.defiPositions?.length ?? 0) > 0 && (
+									<Box w="100%" mt="2">
+										<Suspense fallback={null}>
+											<LazyDefiPositionsPanel
+												address={bal?.address || null}
+												color={dchain.color}
+												positions={bal?.defiPositions}
+											/>
+										</Suspense>
 									</Box>
 								)}
 							</>

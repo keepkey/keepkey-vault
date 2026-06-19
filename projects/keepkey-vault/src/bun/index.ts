@@ -2304,7 +2304,23 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					// vault doesn't know about are dropped on the floor with a log.
 					// defiTokenSuppressionByChain captures the contract addresses to
 					// hide from each chain's wallet TokenBalance list (option B dedup).
-					const allDefiPositions: ServerDefiPosition[] = chunkResults.flatMap(r => r.defiPositions || [])
+					// Pioneer chunks pubkeys, so one EVM address can show up in multiple
+					// chunk responses (Account #0 is used on Ethereum, Optimism, Polygon,
+					// Base, Arbitrum, …). The server returns the FULL DeFi list per
+					// address per chunk, so flat-merging would 3× every position.
+					// Dedupe by (pubkey, protocol, networkId) — first occurrence wins.
+					const rawDefiPositions: ServerDefiPosition[] = chunkResults.flatMap(r => r.defiPositions || [])
+					const allDefiPositions: ServerDefiPosition[] = []
+					const seenDefiKey = new Set<string>()
+					for (const sp of rawDefiPositions) {
+						const key = `${String(sp.pubkey || '').toLowerCase()}|${sp.protocol || ''}|${(sp.networkId || '').toLowerCase()}`
+						if (seenDefiKey.has(key)) continue
+						seenDefiKey.add(key)
+						allDefiPositions.push(sp)
+					}
+					if (rawDefiPositions.length !== allDefiPositions.length) {
+						console.log(`[getBalances] DeFi dedup: ${rawDefiPositions.length} raw → ${allDefiPositions.length} unique (chunked duplicates collapsed)`)
+					}
 					const defiByChain = new Map<string, DefiPosition[]>()
 					const defiByChainAndOwner = new Map<string, Map<string, DefiPosition[]>>()
 					const defiTokenSuppressionByChain = new Map<string, Set<string>>()
