@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { Box, Flex, Text, Image } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
 import { rpcRequest } from "../lib/rpc"
-import kkIcon from "../../mainview/assets/kk-icon.png?asset"
+import kkIcon from "../assets/icon.png"
 import type { RegisteredDevice } from "../../shared/types"
 
 interface WalletSelectorProps {
