@@ -23,9 +23,7 @@ import { StackedBarView, type StackedBarItem } from "./StackedBarView"
 // without routing through AssetPage.
 const LazySwapDialog = lazy(() => import("./SwapDialog").then(m => ({ default: m.SwapDialog })))
 
-import { rpcRequest, onRpcMessage, dispatchLocalRpcMessage } from "../lib/rpc"
-import { SWAP_SIDEPANEL } from "../lib/flags"
-import { SendReceivePicker, type PickerAsset } from "./SendReceivePicker"
+import { rpcRequest, onRpcMessage } from "../lib/rpc"
 import { subscribeVaultCommand, publishBalances, clearBalances } from "../lib/commandBus"
 import { useIconColor } from "../lib/iconColor"
 import { preloadIcons } from "../lib/iconPreload"
@@ -667,8 +665,6 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 	}, [])
 	const [drilledChainId, setDrilledChainId] = useState<string | null>(null)
 	const [swapDialogChain, setSwapDialogChain] = useState<ChainDef | null>(null)
-	// Front-page Send/Receive asset chooser (Swap is asset-agnostic, opens the panel directly).
-	const [sendReceivePicker, setSendReceivePicker] = useState<"send" | "receive" | null>(null)
 	const openChainPage = useCallback((chain: ChainDef, action?: "send" | "receive" | "swap" | "privacy", token?: TokenBalance) => {
 		// Swap routes directly to SwapDialog — skip the AssetPage shell that
 		// would otherwise show the Receive view underneath.
@@ -1391,13 +1387,6 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 		if (aHas && bHas) return bUsd - aUsd
 		return 0
 	}), [visibleChains, balances, cleanBalanceUsd])
-
-	// Assets offered in the front-page Send/Receive picker — funded chains first.
-	const pickerAssets = useMemo<PickerAsset[]>(() => sortedChains.map(chain => ({
-		chain,
-		balance: formatBalance(balances.get(chain.id)?.balance || '0'),
-		usd: cleanBalanceUsd.get(chain.id)?.usd || 0,
-	})), [sortedChains, balances, cleanBalanceUsd])
 
 	// Is data stale? (loaded from cache but haven't refreshed yet this session)
 	const isStale = !hasEverRefreshed && !loadingBalances
@@ -2368,53 +2357,6 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 						)
 					})()}
 
-					{/* Always-on front-page action row: Receive / Send / Swap.
-					    Send/Receive open the asset chooser; Swap opens the panel. */}
-					{hasAnyBalance && !drilledChainId && (
-						<Flex
-							align="center"
-							gap="2px"
-							bg="var(--ink-2)"
-							border="1px solid var(--line)"
-							p="3px"
-							borderRadius="999px"
-						>
-							{([
-								{ id: 'receive' as const, label: 'Receive', color: '#4ade80', bg: 'rgba(74,222,128,0.12)', onClick: () => setSendReceivePicker('receive'), icon: (
-									<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4ade80" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19" /><polyline points="5 12 12 19 19 12" /></svg>
-								) },
-								{ id: 'send' as const, label: 'Send', color: '#fb923c', bg: 'rgba(251,146,60,0.12)', onClick: () => setSendReceivePicker('send'), icon: (
-									<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fb923c" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="19" x2="12" y2="5" /><polyline points="5 12 12 5 19 12" /></svg>
-								) },
-								...(SWAP_SIDEPANEL ? [{ id: 'swap' as const, label: 'Swap', color: '#60a5fa', bg: 'rgba(96,165,250,0.12)', onClick: () => dispatchLocalRpcMessage('swap-cmd', { kind: 'open' }), icon: (
-									<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polyline points="17 1 21 5 17 9" /><path d="M3 11V9a4 4 0 0 1 4-4h14" /><polyline points="7 23 3 19 7 15" /><path d="M21 13v2a4 4 0 0 1-4 4H3" /></svg>
-								) }] : []),
-							]).map((p) => (
-								<Box
-									key={p.id}
-									as="button"
-									onClick={p.onClick}
-									display="flex"
-									alignItems="center"
-									gap="1.5"
-									px="4"
-									py="2"
-									borderRadius="999px"
-									fontSize="13px"
-									fontWeight="600"
-									letterSpacing="-0.01em"
-									color={p.color}
-									bg={p.bg}
-									border="1px solid transparent"
-									_hover={{ borderColor: p.color, bg: p.bg, opacity: 0.9 }}
-									transition="all 0.15s"
-								>
-									{p.icon}
-									{p.label}
-								</Box>
-							))}
-						</Flex>
-					)}
 					{hasAnyBalance && drilledChainId && (() => {
 						const dchain = visibleChains.find(c => c.id === drilledChainId)
 						if (!dchain) return null
@@ -2761,14 +2703,6 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 
 			{drilledChainId === 'dogecoin' && <DogeEasterEgg />}
 
-			{sendReceivePicker && (
-				<SendReceivePicker
-					action={sendReceivePicker}
-					assets={pickerAssets}
-					onSelect={(chain) => { if (sendReceivePicker) openChainPage(chain, sendReceivePicker); setSendReceivePicker(null) }}
-					onClose={() => setSendReceivePicker(null)}
-				/>
-			)}
 			{swapDialogChain && (
 				<Suspense fallback={null}>
 					<LazySwapDialog
