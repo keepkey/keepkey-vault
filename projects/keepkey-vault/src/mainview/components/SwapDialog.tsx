@@ -27,6 +27,7 @@ import { getSwapperAnimation } from "../lib/swapper-animations"
 import { computeDustWarning, shouldWarnHighSlippage, computeEffectiveSlippageBps } from "../../shared/swap-warnings"
 import { useEvmAddresses } from "../hooks/useEvmAddresses"
 import { AssetPickerDialog } from "./AssetPickerDialog"
+import { networkDisplayName } from "../../shared/swap-discovery"
 import { KeepKeyDevice, RouteMap, SpinningDevice } from "./v3"
 import calculatingGif from "../assets/swap/calculating.gif"
 import shiftingGif from "../assets/swap/shifting.gif"
@@ -615,9 +616,29 @@ function AssetSelector({ label, selected, onOpenPicker, disabled }: AssetSelecto
               ring="rgba(139,227,196,0.28)"
             />
           </Box>
-          <VStack gap="0" align="flex-start">
-            <Text fontSize="lg" fontWeight="800" color="kk.textPrimary" lineHeight="1.1">{selected.symbol}</Text>
-            <Text fontSize="xs" color="kk.textSecondary">{selected.name}</Text>
+          <VStack gap="0.5" align="flex-start" minW="0">
+            <Flex align="center" gap="2">
+              <Text fontSize="lg" fontWeight="800" color="kk.textPrimary" lineHeight="1.1">{selected.symbol}</Text>
+              {/* GAS vs TOKEN — never let a token masquerade as the chain coin */}
+              <Box
+                bg={selected.contractAddress ? "rgba(255,255,255,0.06)" : "rgba(233,196,106,0.14)"}
+                color={selected.contractAddress ? "kk.textMuted" : "kk.gold"}
+                px="1.5" py="0.5" borderRadius="4px" fontSize="9px" fontWeight="700" letterSpacing="0.06em">
+                {selected.contractAddress ? "TOKEN" : "GAS"}
+              </Box>
+            </Flex>
+            {/* Network — distinguishes USDC-on-Ethereum from USDC-on-Optimism */}
+            <Text fontSize="xs" color="kk.textSecondary">
+              {selected.name}
+              {selected.caip && <> · <Text as="span" fontWeight="600" color="kk.textPrimary">{networkDisplayName(selected.caip.split("/")[0])}</Text></>}
+            </Text>
+            {/* Exact CAIP-19 so the asset is unambiguous everywhere */}
+            {selected.caip && (
+              <Text fontSize="9px" fontFamily="mono" color="kk.textMuted" opacity={0.6}
+                overflow="hidden" textOverflow="ellipsis" whiteSpace="nowrap" maxW="220px">
+                {selected.caip}
+              </Text>
+            )}
           </VStack>
         </Flex>
       </Box>

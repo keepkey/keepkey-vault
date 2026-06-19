@@ -137,6 +137,11 @@ const STABLE_SYMBOLS = new Set<string>([
   'DOLA', 'MIM', 'BUIDL', 'USDC.E', 'USDT.E',
 ])
 
+/** USDC and USDT — the two stablecoins users reach for most often. Ranked
+ *  ABOVE the broad STABLE_SYMBOLS list so they lead the stablecoin section
+ *  instead of being buried among dozens of uncommon stables. */
+const PRIORITY_STABLE_SYMBOLS = new Set<string>(['USDC', 'USDT'])
+
 /** Treat an entry as a stablecoin for ordering purposes. CURATED symbol set
  *  only — a broader "USD-ish symbol + usd/dollar/stable in name" heuristic was
  *  tried and rejected: it matched ~800 catalog tokens, floating obscure
@@ -146,6 +151,18 @@ const STABLE_SYMBOLS = new Set<string>([
 export function isStablecoinEntry(e: AssetEntry): boolean {
   if (e.isNative) return false
   return STABLE_SYMBOLS.has(e.symbol.toUpperCase())
+}
+
+/** USDC/USDT only — the high-priority stablecoin subset. */
+export function isPriorityStableEntry(e: AssetEntry): boolean {
+  if (e.isNative) return false
+  return PRIORITY_STABLE_SYMBOLS.has(e.symbol.toUpperCase())
+}
+
+/** A chain-native "gas" asset (ETH on Ethereum, SOL on Solana, …). These pay
+ *  for gas and must lead every select list — never buried under tokens. */
+export function isGasAsset(e: AssetEntry): boolean {
+  return e.isNative
 }
 
 const JUNK_PATTERN = /(https?:\/\/|www\.|t\.me\/|\bairdrop\b|\bclaim\b|just buy|buy and|\bpresale\b|\bgiveaway\b|free \$|\$\$\$)/i
@@ -164,19 +181,21 @@ export function isJunkEntry(e: AssetEntry): boolean {
 }
 
 /** Ordering tier for the destination list. Lower floats to the top.
- *  held(value) → held(no price) → stablecoins → native chain asset → popular
- *  → junk → unsupported. The native asset gets its own tier just below stables
- *  so a chain's own coin (SOL/ETH) stays prominent instead of sinking into the
- *  long tail when it isn't held. */
-export function pickerTier(e: AssetEntry): 0 | 1 | 2 | 3 | 4 | 5 | 6 {
+ *  held(value) → held(no price) → gas/native → USDC/USDT → other stablecoins →
+ *  popular token → junk → unsupported. Gas leads the swappable section (a
+ *  chain's own coin must never hide under tokens), then USDC/USDT, then the
+ *  broad stablecoin list, so the two stables users actually reach for sit above
+ *  the long tail of uncommon stables. */
+export function pickerTier(e: AssetEntry): 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 {
   if ((e.balance?.usd ?? 0) > 0) return 0                 // held + value
   if (e.balance) return 1                                 // held, no price feed
   const selectable = e.availability.status === 'swappable' || e.availability.status === 'unknown'
-  if (!selectable) return 6                               // unsupported → bottom
-  if (isJunkEntry(e)) return 5                            // spam/silly → just above unsupported
-  if (isStablecoinEntry(e)) return 2                      // stablecoins → top of swappable
-  if (e.isNative) return 3                                // native chain asset (SOL/ETH)
-  return 4                                                // normal swappable token
+  if (!selectable) return 7                               // unsupported → bottom
+  if (isJunkEntry(e)) return 6                            // spam/silly → just above unsupported
+  if (isGasAsset(e)) return 2                             // gas/native (ETH/SOL) → top of swappable
+  if (isPriorityStableEntry(e)) return 3                  // USDC/USDT → right under gas
+  if (isStablecoinEntry(e)) return 4                      // other stablecoins
+  return 5                                                // normal swappable token
 }
 
 /** Compare two entries for the destination token list: tier asc → held by USD
