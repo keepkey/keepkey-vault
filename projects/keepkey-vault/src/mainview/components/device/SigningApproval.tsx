@@ -32,6 +32,10 @@ const METHOD_LABEL_KEYS: Record<string, string> = {
 	"/solana/sign-message": "signing.methodSolanaSignMessage",
 	"/ton/sign-transaction": "signing.methodTonSignTx",
 	"/tron/sign-transaction": "signing.methodTronSignTx",
+	"/tron/sign-message": "signing.methodTronSignMessage",
+	"/tron/sign-typed-hash": "signing.methodTronSignTypedHash",
+	"/ton/sign-message": "signing.methodTonSignMessage",
+	"/solana/sign-offchain-message": "signing.methodSolanaSignOffchainMessage",
 }
 
 const SIGNING_ANIMATIONS = `
@@ -491,7 +495,7 @@ function EthMessageSection({ decoded, t }: {
 					{t("signing.ethPersonalSign", "Message to Sign")}
 				</Text>
 				<Text fontSize="2xs" px="2" py="0.5" borderRadius="full" bg="rgba(233,196,106,0.15)" color="kk.gold" fontWeight="500">
-					EIP-191
+					{decoded.standard ?? "EIP-191"}
 				</Text>
 			</Flex>
 			<Row label="Signer" value={decoded.address} />
