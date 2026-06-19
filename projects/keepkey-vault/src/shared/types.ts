@@ -183,6 +183,10 @@ export interface BuildTxParams {
   scriptTypeOverride?: string  // BTC multi-account: use this scriptType instead of default
   accountPath?: number[]       // BTC multi-account: account-level path [purpose+H, coinType+H, account+H]
   evmAddressIndex?: number     // EVM multi-address: derivation index (default 0)
+  // Custom (free-form) fee overrides — when present, replace the feeLevel preset.
+  gasPriceGwei?: string        // EVM custom gas price in gwei (legacy gasPrice)
+  gasLimit?: string            // EVM custom gas limit (gas units)
+  satPerVByte?: number         // UTXO custom fee rate (sat/vByte)
 }
 
 // ── Staking / delegation types ───────────────────────────────────────────

@@ -92,6 +92,8 @@ export interface BuildEvmParams {
   tokenDecimals?: number // token decimals from frontend
   rpcUrl?: string   // Direct RPC URL — bypasses Pioneer for custom chains
   addressIndex?: number  // EVM multi-address: derivation index (default 0)
+  gasPriceGwei?: string  // custom (free-form) legacy gas price in gwei — overrides feeLevel
+  gasLimit?: string      // custom (free-form) gas limit (gas units) — overrides the default
 }
 
 export async function buildEvmTx(
@@ -99,10 +101,20 @@ export async function buildEvmTx(
   chain: ChainDef,
   params: BuildEvmParams,
 ) {
-  const { to, memo, feeLevel = 5, isMax = false, fromAddress, caip, tokenBalance, tokenDecimals: frontendDecimals, rpcUrl, addressIndex } = params
+  const { to, memo, feeLevel = 5, isMax = false, fromAddress, caip, tokenBalance, tokenDecimals: frontendDecimals, rpcUrl, addressIndex, gasPriceGwei: gasPriceGweiOverride, gasLimit: gasLimitOverrideStr } = params
   const amountNum = parseFloat(params.amount)
   const chainId = parseInt(chain.chainId || '1', 10)
   const isErc20 = !!(caip && caip.includes('erc20'))
+
+  // Custom gas-limit override (free-form). Floored at 21000 (the native minimum) to
+  // avoid building an obviously invalid tx; the UI validates above this too.
+  let gasLimitOverride: bigint | null = null
+  if (gasLimitOverrideStr) {
+    try {
+      const gl = BigInt(gasLimitOverrideStr)
+      if (gl >= 21000n) gasLimitOverride = gl
+    } catch { /* ignore non-numeric override */ }
+  }
 
   // Derive addressNList from addressIndex (multi-address) or fall back to chain.defaultPath
   const addressNList = addressIndex != null
@@ -164,6 +176,17 @@ export async function buildEvmTx(
     gasPrice = minGas
   }
 
+  // Custom gas price (free-form) — overrides the feeLevel preset AND the floor entirely.
+  // Always legacy gasPrice (this builder never emits EIP-1559), so it sidesteps the
+  // chainId>=256 firmware signing bug that affects maxFeePerGas/maxPriorityFeePerGas.
+  if (gasPriceGweiOverride) {
+    const gwei = parseFloat(gasPriceGweiOverride)
+    if (isFinite(gwei) && gwei > 0) {
+      gasPrice = BigInt(Math.round(gwei * 1e9))
+      console.log(`${TAG} Custom gas price: ${gwei} gwei (${gasPrice} wei)`)
+    }
+  }
+
   // 2. Nonce
   let nonce: number | undefined
   if (rpcUrl) {
@@ -201,7 +224,10 @@ export async function buildEvmTx(
   // ── ERC-20 token transfer ───────────────────────────────────────────
   if (isErc20) {
     const contractAddress = extractContractFromCaip(caip!)
-    const gasLimit = 100000n // ERC-20 transfers need ~65k, 100k is safe margin
+    // ERC-20 transfers need ~45-65k; 100k is the safe default. Only honor an override
+    // that RAISES the limit (e.g. tokens with transfer hooks) — never let a custom value
+    // lower it into an out-of-gas revert.
+    const gasLimit = gasLimitOverride && gasLimitOverride > 100000n ? gasLimitOverride : 100000n
 
     // Use frontend-provided decimals when available, otherwise fetch from API
     let tokenDecimals: number
@@ -283,7 +309,7 @@ export async function buildEvmTx(
   // ── Native ETH transfer ─────────────────────────────────────────────
   const memoBytes = memo ? Buffer.from(memo, 'utf8') : null
   const memoGas = memoBytes ? memoBytes.reduce((sum: bigint, b: number) => sum + (b === 0 ? 4n : 16n), 0n) : 0n
-  const gasLimit = 21000n + memoGas
+  const gasLimit = gasLimitOverride ?? (21000n + memoGas)
   const gasFee = gasPrice * gasLimit
 
   let amountWei: bigint
