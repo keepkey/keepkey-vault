@@ -1299,6 +1299,11 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 	// Token palette used for the drilled-chain donut so each slice reads as a
 	// distinct color even though tokens don't carry a brand color of their own.
 	const TOKEN_PALETTE = ['#e9c46a', '#8be3c4', '#6c7be8', '#e08c7b', '#9f8ce0', '#f0a85c', '#4eb591', '#4f7fc8']
+	// DeFi positions are folded into the chain's balanceUsd, so the drilled
+	// breakdowns must include them too or the slice sum won't reconcile with the
+	// chain total. Distinct (cooler/purple) palette so protocol slices read apart
+	// from native + wallet tokens.
+	const DEFI_PALETTE = ['#7c5cff', '#a78bfa', '#5b8def', '#43c1c9', '#b06ad6', '#6f86ff']
 
 	const drilledChainTokensChartData = useMemo<DonutChartItem[]>(() => {
 		if (!drilledChainId) return []
@@ -1307,7 +1312,10 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 		if (!chain || !bal) return []
 		const overrides = new Map(Object.entries(visibilityMap).map(([k, v]) => [k.toLowerCase(), v] as const))
 		const cleanTokens = bal.tokens ? categorizeTokens(bal.tokens, overrides).clean : []
-		const nativeUsd = bal.nativeBalanceUsd ?? Math.max(0, (bal.balanceUsd || 0) - cleanTokens.reduce((s, t) => s + (t.balanceUsd || 0), 0))
+		const defiPositions = bal.defiPositions ?? []
+		const cleanTokensUsd = cleanTokens.reduce((s, t) => s + (t.balanceUsd || 0), 0)
+		const defiUsd = defiPositions.reduce((s, p) => s + (p.balanceUsd || 0), 0)
+		const nativeUsd = bal.nativeBalanceUsd ?? Math.max(0, (bal.balanceUsd || 0) - cleanTokensUsd - defiUsd)
 		const out: DonutChartItem[] = []
 		if (nativeUsd > 0) {
 			out.push({ name: chain.symbol, value: nativeUsd, color: chain.color })
@@ -1317,6 +1325,14 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 			.sort((a, b) => (b.balanceUsd ?? 0) - (a.balanceUsd ?? 0))
 			.forEach((tok, i) => {
 				out.push({ name: tok.symbol, value: tok.balanceUsd ?? 0, color: TOKEN_PALETTE[i % TOKEN_PALETTE.length] })
+			})
+		// DeFi protocol slices — folded into balanceUsd, so include them or the
+		// donut sum won't match the chain total.
+		defiPositions
+			.slice()
+			.sort((a, b) => (b.balanceUsd ?? 0) - (a.balanceUsd ?? 0))
+			.forEach((p, i) => {
+				out.push({ name: p.displayName || p.protocol || 'DeFi', value: p.balanceUsd ?? 0, color: DEFI_PALETTE[i % DEFI_PALETTE.length] })
 			})
 		return out.filter(d => d.value > 0)
 	}, [drilledChainId, allChains, getEffectiveBalance, visibilityMap])
@@ -1337,8 +1353,10 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 		const bal = getEffectiveBalance(chain.id)
 		const overrides = new Map(Object.entries(visibilityMap).map(([k, v]) => [k.toLowerCase(), v] as const))
 		const cleanTokens = bal?.tokens ? categorizeTokens(bal.tokens, overrides).clean : []
+		const defiPositions = bal?.defiPositions ?? []
 		const cleanTokensUsd = cleanTokens.reduce((s, t) => s + (t.balanceUsd ?? 0), 0)
-		const nativeUsd = bal?.nativeBalanceUsd ?? Math.max(0, (bal?.balanceUsd ?? 0) - cleanTokensUsd)
+		const defiUsd = defiPositions.reduce((s, p) => s + (p.balanceUsd ?? 0), 0)
+		const nativeUsd = bal?.nativeBalanceUsd ?? Math.max(0, (bal?.balanceUsd ?? 0) - cleanTokensUsd - defiUsd)
 		const arr: StackedBarItem[] = []
 		if (nativeUsd > 0) arr.push({ id: `${chain.id}:native`, label: chain.symbol, color: chain.color, value: nativeUsd, onSelect: () => openChainPage(chain) })
 		cleanTokens
@@ -1350,6 +1368,19 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 				color: TOKEN_PALETTE[i % TOKEN_PALETTE.length]!,
 				value: tok.balanceUsd ?? 0,
 				onSelect: () => openChainPage(chain, undefined, tok),
+			}))
+		// DeFi protocol items — folded into balanceUsd, so include them or the
+		// stacked bar won't sum to the chain total. Selecting one drills into the
+		// chain page where the DeFi panel lists the positions.
+		defiPositions
+			.slice()
+			.sort((a, b) => (b.balanceUsd ?? 0) - (a.balanceUsd ?? 0))
+			.forEach((p, i) => arr.push({
+				id: `${chain.id}:defi:${p.protocol || p.displayName || i}`,
+				label: p.displayName || p.protocol || 'DeFi',
+				color: DEFI_PALETTE[i % DEFI_PALETTE.length]!,
+				value: p.balanceUsd ?? 0,
+				onSelect: () => openChainPage(chain),
 			}))
 		return arr
 	}

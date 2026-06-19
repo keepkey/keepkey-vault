@@ -1097,7 +1097,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 								chain={chain}
 								address={address}
 								availableBalance={activeBalance?.balance || '0'}
-								watchOnly={!address}
+								watchOnly={watchOnly || !address}
 							/>
 						</Suspense>
 					</Box>
@@ -1213,11 +1213,14 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 				{/* DeFi Positions — EVM chains only, below the token table. Protocol
 				    holdings (staked / supplied / borrowed / LP / claimable) sourced
 				    from the dashboard refresh (GetPortfolioBalances includeDefi=true).
-				    Falls back to the legacy getDefiPositions RPC when activeBalance
-				    has no defiPositions field (pre-v1.4 server). */}
+				    EVM chains are always queried with includeDefi, so the server
+				    result is authoritative — pass `?? []` (never undefined) so an
+				    empty result renders empty instead of falling back to the legacy
+				    address-wide getDefiPositions RPC, which would surface this
+				    address's positions from OTHER chains on this chain's page. */}
 				{!selectedToken && isEvmChain && address && (
 					<Suspense fallback={null}>
-						<DefiPositionsPanel address={address} color={chain.color} positions={activeBalance?.defiPositions} />
+						<DefiPositionsPanel address={address} color={chain.color} positions={activeBalance?.defiPositions ?? []} />
 					</Suspense>
 				)}
 
