@@ -33,6 +33,7 @@
  *   or: make test-sign-gating
  */
 import { describe, test, expect, beforeAll } from 'bun:test'
+import { SIGNING_ROUTES } from '../src/bun/signing-routes'
 
 const BASE = process.env.VAULT_API_URL || 'http://localhost:1646'
 let API_KEY = ''
@@ -72,20 +73,27 @@ beforeAll(async () => {
   API_KEY = pair.body.apiKey
 })
 
-// Every POST signing route must enter the overlay-gating block — proven by
-// the distinctive gate error on an empty probe. The four message routes at
-// the end are the ones this PR fixed.
-const GATED_ROUTES = [
-  '/eth/sign',
-  '/solana/sign-message',
-  '/tron/sign-transaction',
-  '/ton/sign-transaction',
-  // ── newly gated by this PR (were holes) ──
+// Derived from the single source of truth (src/bun/signing-routes.ts) so the
+// guard covers EVERY current sign route — adding a route to SIGNING_ROUTES
+// without a real gate now fails this test automatically. The four message
+// routes this PR fixed are part of the set.
+const GATED_ROUTES = [...SIGNING_ROUTES]
+
+// Sanity: the four routes this PR added must be in the set under test.
+const FIXED_ROUTES = [
   '/tron/sign-message',
   '/tron/sign-typed-hash',
   '/ton/sign-message',
   '/solana/sign-offchain-message',
 ]
+
+describe('the four message routes this PR fixed are in SIGNING_ROUTES', () => {
+  for (const route of FIXED_ROUTES) {
+    test(`${route} is gated`, () => {
+      expect(GATED_ROUTES).toContain(route)
+    })
+  }
+})
 
 describe('every sign route is gated by the Vault overlay', () => {
   for (const route of GATED_ROUTES) {

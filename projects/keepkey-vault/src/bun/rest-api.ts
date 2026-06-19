@@ -15,6 +15,7 @@ import { readFileSync } from 'fs'
 import { join } from 'path'
 import * as S from './schemas'
 import { parseRequest, validateResponse } from './validate'
+import { SIGNING_ROUTES, requiredSigningFields } from './signing-routes'
 import { handleV2DataRoute } from './rest-pioneer'
 import { handleSwapRoute } from './rest-swap'
 import { handleSweepRoute } from './rest-sweep'
@@ -192,6 +193,23 @@ function formatAddressNPath(addressNList: number[]): string {
     const hardened = n >= 0x80000000
     return `${hardened ? n - 0x80000000 : n}${hardened ? "'" : ''}`
   }).join('/')
+}
+
+/**
+ * True when a decoded string is human-readable enough to show as the message
+ * in the approval overlay. Empty strings and ones dominated by control
+ * characters (NUL, etc.) return false so the UI falls back to the raw-hex view
+ * + "not readable" warning instead of rendering a blank/ambiguous message.
+ * Common whitespace (\n, \r, \t) is allowed.
+ */
+function isMostlyPrintable(text: string): boolean {
+  if (!text) return false
+  let printable = 0
+  for (const ch of text) {
+    const code = ch.codePointAt(0)!
+    if (code === 0x09 || code === 0x0a || code === 0x0d || code >= 0x20) printable++
+  }
+  return printable / [...text].length >= 0.8
 }
 
 // ── Features cache (10s TTL, matches keepkey-desktop) ──────────────────
@@ -1032,72 +1050,6 @@ const ROUTE_TO_CHAIN: Record<string, string> = {
   solana: 'SOL', tron: 'TRX', ton: 'TON',
 }
 
-/** Set of signing endpoints that require user approval */
-const SIGNING_ROUTES = new Set([
-  '/eth/sign-transaction', '/eth/sign-typed-data', '/eth/sign',
-  '/utxo/sign-transaction', '/xrp/sign-transaction', '/solana/sign-transaction', '/solana/sign-message', '/tron/sign-transaction', '/ton/sign-transaction',
-  // Message / off-chain signing. The firmware always confirms these on its
-  // OLED, but that is the device surface only — without these in the set a
-  // REST caller reaches the device with no in-Vault review. Gate them so the
-  // approval overlay shows the message before the device is touched.
-  '/tron/sign-message', '/tron/sign-typed-hash', '/ton/sign-message', '/solana/sign-offchain-message',
-  '/cosmos/sign-amino', '/cosmos/sign-amino-delegate', '/cosmos/sign-amino-undelegate',
-  '/cosmos/sign-amino-redelegate', '/cosmos/sign-amino-withdraw-delegator-rewards-all',
-  '/cosmos/sign-amino-ibc-transfer',
-  '/osmosis/sign-amino', '/osmosis/sign-amino-delegate', '/osmosis/sign-amino-undelegate',
-  '/osmosis/sign-amino-redelegate', '/osmosis/sign-amino-withdraw-delegator-rewards-all',
-  '/osmosis/sign-amino-ibc-transfer', '/osmosis/sign-amino-lp-remove',
-  '/osmosis/sign-amino-lp-add', '/osmosis/sign-amino-swap',
-  '/thorchain/sign-amino-transfer', '/thorchain/sign-amino-deposit',
-  '/mayachain/sign-amino-transfer', '/mayachain/sign-amino-deposit',
-])
-
-/**
- * Minimum-payload fingerprint per signing route.
- *
- * Empty-body probes (observed hitting /solana/sign-transaction etc. with
- * `{}`) used to reach the approval dialog and spam the user with dialogs
- * for requests that had nothing to sign. This function returns the list
- * of top-level payload keys where *any* one being present indicates a
- * real signing attempt. The approval gate short-circuits with 400 when
- * the body contains none of them.
- *
- * Keys mirror the schemas in schemas.ts exactly; when a new sign route is
- * added to SIGNING_ROUTES it must also be added here or it'll fall
- * through as "no required fields known" → no probe gating (the handler's
- * schema.parse will still reject the empty body, just one layer deeper).
- *
- * Route families that share a schema (all the Cosmos/Osmosis amino
- * variants use CosmosAminoSignRequest — { signerAddress, signDoc }) are
- * covered by a single prefix check so we don't have to enumerate every
- * variant and risk missing one.
- */
-function requiredSigningFields(path: string): string[] | null {
-  const exact: Record<string, string[]> = {
-    '/eth/sign-transaction':    ['to', 'data', 'value', 'nonce'],
-    '/eth/sign-typed-data':     ['typedData'],
-    '/eth/sign':                ['message'],
-    '/utxo/sign-transaction':   ['inputs', 'outputs'],
-    '/xrp/sign-transaction':    ['payment', 'sequence'],
-    '/solana/sign-transaction': ['raw_tx', 'rawTx'],
-    '/solana/sign-message':     ['message'],
-    '/tron/sign-transaction':   ['raw_tx', 'rawTx', 'to_address', 'amount'],
-    '/ton/sign-transaction':    ['raw_tx', 'rawTx', 'to_address', 'amount'],
-    '/tron/sign-message':       ['message'],
-    '/tron/sign-typed-hash':    ['domain_separator_hash'],
-    '/ton/sign-message':        ['message'],
-    '/solana/sign-offchain-message': ['message'],
-  }
-  if (exact[path]) return exact[path]
-  // All Cosmos-family amino sign endpoints (cosmos/osmosis/thorchain/
-  // mayachain delegates, swaps, LP ops, IBC transfers, etc.) use
-  // CosmosAminoSignRequest.
-  if (/^\/(cosmos|osmosis|thorchain|mayachain)\/sign-amino/.test(path)) {
-    return ['signerAddress', 'signDoc']
-  }
-  return null
-}
-
 export function startRestApi(engine: EngineController, auth: AuthStore, port = 1646, callbacks?: RestApiCallbacks) {
   const getWalletDbScope = (): { deviceId: string; walletId: string } | null => {
     const deviceId = engine.getDeviceState().deviceId
@@ -1667,11 +1619,22 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
                 messageText = raw
                 isUtf8Text = true
               } else {
-                const hex = raw.startsWith('0x') ? raw.slice(2) : raw
-                try {
-                  messageText = new TextDecoder('utf-8', { fatal: true }).decode(Buffer.from(hex, 'hex'))
-                  isUtf8Text = true
-                } catch { /* non-UTF-8 hex — UI shows the raw hex fallback */ }
+                // is_text=false carries raw hex. Only treat it as a readable
+                // message when it decodes to UTF-8 that is *mostly printable* —
+                // otherwise valid-but-blank/control byte sequences (e.g. "00",
+                // whitespace) render as an empty/ambiguous message while the
+                // device signs real bytes. When not readable, leave messageText
+                // undefined so the overlay forces the raw-hex view + warning.
+                const hexBody = raw.startsWith('0x') ? raw.slice(2) : raw
+                if (/^[0-9a-fA-F]*$/.test(hexBody) && hexBody.length % 2 === 0) {
+                  try {
+                    const text = new TextDecoder('utf-8', { fatal: true }).decode(Buffer.from(hexBody, 'hex'))
+                    if (isMostlyPrintable(text)) {
+                      messageText = text
+                      isUtf8Text = true
+                    }
+                  } catch { /* non-UTF-8 hex — UI shows the raw hex fallback */ }
+                }
               }
               const defaultPath = path.startsWith('/tron')
                 ? [0x8000002C, 0x800000C3, 0x80000000, 0, 0]
