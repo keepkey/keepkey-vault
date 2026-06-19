@@ -57,12 +57,22 @@ interface AssetPageProps {
 	initialToken?: TokenBalance
 	/** Navigate to the full Activity page filtered by this chain */
 	onViewActivity?: (chainId: string) => void
+	/**
+	 * Watch-only mode: balances come from a cached non-connected wallet.
+	 * Signing flows (Send / Swap / Privacy / Sweep / Sign-message) must be
+	 * suppressed so the live USB device isn't asked to sign against another
+	 * wallet's balances.
+	 */
+	watchOnly?: boolean
 }
 
-export function AssetPage({ chain, balance, onBack, firmwareVersion, initialAction, initialToken, onViewActivity }: AssetPageProps) {
+export function AssetPage({ chain, balance, onBack, firmwareVersion, initialAction, initialToken, onViewActivity, watchOnly }: AssetPageProps) {
 	const { t } = useTranslation("asset")
 	const { fmtCompact, symbol: fiatSymbol } = useFiat()
-	const [view, setView] = useState<AssetView>(initialAction === "send" ? "send" : initialAction === "privacy" ? "privacy" : "receive")
+	// Watch-only mode never lands on a signing view, regardless of the
+	// requested initialAction.
+	const safeInitial = watchOnly ? "receive" : initialAction
+	const [view, setView] = useState<AssetView>(safeInitial === "send" ? "send" : safeInitial === "privacy" ? "privacy" : "receive")
 	const [selectedToken, setSelectedToken] = useState<TokenBalance | null>(initialToken ?? null)
 	const [copiedCaip, setCopiedCaip] = useState<string | null>(null)
 	const [address, setAddress] = useState<string | null>(balance?.address || null)

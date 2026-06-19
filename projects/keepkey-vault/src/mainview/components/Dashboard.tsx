@@ -667,6 +667,15 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 	const [drilledChainId, setDrilledChainId] = useState<string | null>(null)
 	const [swapDialogChain, setSwapDialogChain] = useState<ChainDef | null>(null)
 	const openChainPage = useCallback((chain: ChainDef, action?: "send" | "receive" | "swap" | "privacy", token?: TokenBalance) => {
+		// Watch-only mode views a non-connected wallet's cached balances.
+		// Any signing action would build the tx against the live USB device
+		// using THIS wallet's balances — a wrong-balance signing foot-gun.
+		// Demote signing actions to Receive (or no-op for swap, which doesn't
+		// land on the AssetPage shell).
+		if (watchOnly && (action === "send" || action === "swap" || action === "privacy")) {
+			if (action === "swap") return
+			action = "receive"
+		}
 		// Swap routes directly to SwapDialog — skip the AssetPage shell that
 		// would otherwise show the Receive view underneath.
 		if (action === "swap") {
@@ -676,7 +685,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 		setSelectedChainAction(action)
 		setSelectedChainInitialToken(token)
 		setSelectedChain(chain)
-	}, [])
+	}, [watchOnly])
 	const [balances, setBalances] = useState<Map<string, ChainBalance>>(new Map())
 	// Per-account (BTC) and per-address (EVM) balances for the sidebar account drop-down.
 	// The Bun side already derives + tracks these; we only render what's already there.
@@ -1421,7 +1430,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 		const bal = balances.get(selectedChain.id)
 		return (
 			<AssetPageErrorBoundary onBack={() => setSelectedChain(null)} chainName={selectedChain.coin}>
-				<AssetPage chain={selectedChain} balance={bal} onBack={() => { setSelectedChain(null); setSelectedChainAction(undefined); setSelectedChainInitialToken(undefined) }} firmwareVersion={firmwareVersion} initialAction={selectedChainAction} initialToken={selectedChainInitialToken} onViewActivity={handleViewActivity} />
+				<AssetPage chain={selectedChain} balance={bal} onBack={() => { setSelectedChain(null); setSelectedChainAction(undefined); setSelectedChainInitialToken(undefined) }} firmwareVersion={firmwareVersion} initialAction={selectedChainAction} initialToken={selectedChainInitialToken} onViewActivity={handleViewActivity} watchOnly={watchOnly} />
 			</AssetPageErrorBoundary>
 		)
 	}
@@ -2371,7 +2380,12 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 						return (
 							<>
 								{/* Always-on action row: Receive / Send / Swap. Sits in the same
-								    slot whether or not the chain has tokens. */}
+								    slot whether or not the chain has tokens.
+								    Watch-only mode (viewing a non-connected wallet's cached
+								    balances): only Receive is safe to surface. Send/Swap/Privacy
+								    would build a transaction against the live USB device using
+								    THIS wallet's balances as input — a wrong-balance signing
+								    foot-gun. Hide them. */}
 								<Flex
 									align="center"
 									gap="2px"
@@ -2384,13 +2398,15 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 										{ id: 'receive' as const, label: 'Receive', color: '#4ade80', bg: 'rgba(74,222,128,0.12)', icon: (
 											<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4ade80" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19" /><polyline points="5 12 12 19 19 12" /></svg>
 										) },
-										{ id: 'send' as const, label: 'Send', color: '#fb923c', bg: 'rgba(251,146,60,0.12)', icon: (
-											<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fb923c" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="19" x2="12" y2="5" /><polyline points="5 12 12 5 19 12" /></svg>
-										) },
-										{ id: 'swap' as const, label: 'Swap', color: '#60a5fa', bg: 'rgba(96,165,250,0.12)', icon: (
-											<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polyline points="17 1 21 5 17 9" /><path d="M3 11V9a4 4 0 0 1 4-4h14" /><polyline points="7 23 3 19 7 15" /><path d="M21 13v2a4 4 0 0 1-4 4H3" /></svg>
-										) },
-										...(dchain.id === 'zcash' && zcashEnabled ? [{
+										...(!watchOnly ? [
+											{ id: 'send' as const, label: 'Send', color: '#fb923c', bg: 'rgba(251,146,60,0.12)', icon: (
+												<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fb923c" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="19" x2="12" y2="5" /><polyline points="5 12 12 5 19 12" /></svg>
+											) },
+											{ id: 'swap' as const, label: 'Swap', color: '#60a5fa', bg: 'rgba(96,165,250,0.12)', icon: (
+												<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polyline points="17 1 21 5 17 9" /><path d="M3 11V9a4 4 0 0 1 4-4h14" /><polyline points="7 23 3 19 7 15" /><path d="M21 13v2a4 4 0 0 1-4 4H3" /></svg>
+											) },
+										] : []),
+										...(!watchOnly && dchain.id === 'zcash' && zcashEnabled ? [{
 											id: 'privacy' as const, label: 'Privacy', color: '#a78bfa', bg: 'rgba(167,139,250,0.12)', icon: (
 												<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>
 											),

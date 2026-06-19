@@ -103,6 +103,19 @@ export function WalletSelector({
 		return connected ? [connected, ...rest] : devices
 	}, [devices, connectedDeviceId])
 
+	// Two KeepKeys often ship with the same firmware label ("KeepKey" or a
+	// user's reused name like "Midas"). Without disambiguation the dropdown
+	// looks like the same wallet twice. When labels collide, decorate
+	// non-connected rows with a short deviceId suffix.
+	const labelCounts = useMemo(() => {
+		const m = new Map<string, number>()
+		for (const d of ordered) {
+			const key = (d.label || 'KeepKey').toLowerCase()
+			m.set(key, (m.get(key) || 0) + 1)
+		}
+		return m
+	}, [ordered])
+
 	if (!open || !anchor) return null
 
 	const activeDeviceId = watchingDeviceId || connectedDeviceId
@@ -143,9 +156,15 @@ export function WalletSelector({
 			{ordered.map((d) => {
 				const isConnected = !!connectedDeviceId && d.deviceId === connectedDeviceId
 				const isActive = d.deviceId === activeDeviceId
-				const displayLabel = isConnected
+				const baseLabel = isConnected
 					? (connectedLabel || d.label || "KeepKey")
 					: (d.label || "KeepKey")
+				// Disambiguate when two wallets share a label so the user can
+				// tell them apart at a glance.
+				const labelDup = (labelCounts.get(baseLabel.toLowerCase()) ?? 0) > 1
+				const displayLabel = labelDup
+					? `${baseLabel} · ${d.deviceId.slice(0, 6)}`
+					: baseLabel
 				const onClick = () => {
 					if (isConnected) {
 						// Active wallet IS the connected one — clicking either
