@@ -1036,6 +1036,11 @@ const ROUTE_TO_CHAIN: Record<string, string> = {
 const SIGNING_ROUTES = new Set([
   '/eth/sign-transaction', '/eth/sign-typed-data', '/eth/sign',
   '/utxo/sign-transaction', '/xrp/sign-transaction', '/solana/sign-transaction', '/solana/sign-message', '/tron/sign-transaction', '/ton/sign-transaction',
+  // Message / off-chain signing. The firmware always confirms these on its
+  // OLED, but that is the device surface only — without these in the set a
+  // REST caller reaches the device with no in-Vault review. Gate them so the
+  // approval overlay shows the message before the device is touched.
+  '/tron/sign-message', '/tron/sign-typed-hash', '/ton/sign-message', '/solana/sign-offchain-message',
   '/cosmos/sign-amino', '/cosmos/sign-amino-delegate', '/cosmos/sign-amino-undelegate',
   '/cosmos/sign-amino-redelegate', '/cosmos/sign-amino-withdraw-delegator-rewards-all',
   '/cosmos/sign-amino-ibc-transfer',
@@ -1078,6 +1083,10 @@ function requiredSigningFields(path: string): string[] | null {
     '/solana/sign-message':     ['message'],
     '/tron/sign-transaction':   ['raw_tx', 'rawTx', 'to_address', 'amount'],
     '/ton/sign-transaction':    ['raw_tx', 'rawTx', 'to_address', 'amount'],
+    '/tron/sign-message':       ['message'],
+    '/tron/sign-typed-hash':    ['domain_separator_hash'],
+    '/ton/sign-message':        ['message'],
+    '/solana/sign-offchain-message': ['message'],
   }
   if (exact[path]) return exact[path]
   // All Cosmos-family amino sign endpoints (cosmos/osmosis/thorchain/
@@ -1640,6 +1649,54 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               } else {
                 signingInfo.solanaDecodeError = 'missing raw_tx payload'
               }
+            } else if (
+              path === '/tron/sign-message'
+              || path === '/ton/sign-message'
+              || path === '/solana/sign-offchain-message'
+            ) {
+              // Message / off-chain signing. Decode the payload to text so the
+              // overlay shows what's actually being signed (mirrors /eth/sign),
+              // rendered via the generic message section. is_text defaults to
+              // true (UTF-8); is_text=false carries raw hex which we try to
+              // decode to text, falling back to the raw hex in the UI.
+              const isText = preview.is_text !== false
+              const raw = typeof preview.message === 'string' ? preview.message : ''
+              let messageText: string | undefined
+              let isUtf8Text = false
+              if (isText) {
+                messageText = raw
+                isUtf8Text = true
+              } else {
+                const hex = raw.startsWith('0x') ? raw.slice(2) : raw
+                try {
+                  messageText = new TextDecoder('utf-8', { fatal: true }).decode(Buffer.from(hex, 'hex'))
+                  isUtf8Text = true
+                } catch { /* non-UTF-8 hex — UI shows the raw hex fallback */ }
+              }
+              const defaultPath = path.startsWith('/tron')
+                ? [0x8000002C, 0x800000C3, 0x80000000, 0, 0]
+                : path.startsWith('/ton')
+                  ? [0x8000002C, 0x8000025F, 0x80000000]
+                  : DEFAULT_SOLANA_ADDRESS_N
+              signingInfo.ethMessageDecoded = {
+                address: formatAddressNPath(pickAddressNList(preview, defaultPath)),
+                messageRaw: raw,
+                messageText,
+                isUtf8Text,
+                standard: path.startsWith('/tron') ? 'TIP-191'
+                  : path.startsWith('/ton') ? 'Ed25519'
+                    : 'Solana off-chain',
+              }
+            } else if (path === '/tron/sign-typed-hash') {
+              // TIP-712 hash mode: only the domain + message hashes reach the
+              // device — there is no structured data to decode, so this is an
+              // inherently blind signature. Surface the hashes and flag it so
+              // the overlay shows the blind-signing warning.
+              signingInfo.needsBlindSigning = true
+              signingInfo.data =
+                `TIP-712 hashes (blind)\n` +
+                `domainSeparator: ${preview.domain_separator_hash || '(none)'}\n` +
+                `message: ${preview.message_hash || '(EIP712Domain only)'}`
             } else {
               signingInfo.from = preview.from || preview.signerAddress
               signingInfo.to = preview.to

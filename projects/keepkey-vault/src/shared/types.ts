@@ -459,6 +459,9 @@ export interface EthMessageDecodedInfo {
   messageText?: string
   /** True when `messageRaw` looked like hex and successfully round-tripped to UTF-8. */
   isUtf8Text: boolean
+  /** Signing-standard badge shown in the overlay (e.g. "EIP-191", "TIP-191",
+   *  "Ed25519", "Solana off-chain"). Defaults to "EIP-191" when omitted. */
+  standard?: string
 }
 
 export interface SolanaMessageDecodedInfo {
