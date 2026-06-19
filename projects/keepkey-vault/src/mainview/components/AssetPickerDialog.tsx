@@ -222,24 +222,72 @@ function NetSwitchBanner({ fromChainId, toChainId, providers }: {
 // FROM picker — all held assets, ranked by USD value, square tiles
 // ══════════════════════════════════════════════════════════════════════════
 
+/** Chip used by the FROM picker's chain-filter row. Active state lifts to
+ *  white text on a 6%-white fill with a gold hairline; inactive sits muted. */
+function ChainChip({ label, count, active, onClick }: { label: string; count: number; active: boolean; onClick: () => void }) {
+  return (
+    <Box
+      as="button"
+      onClick={onClick}
+      px="2.5"
+      py="1"
+      borderRadius="999px"
+      flexShrink={0}
+      cursor="pointer"
+      bg={active ? "rgba(255,255,255,0.06)" : "transparent"}
+      border="1px solid"
+      borderColor={active ? "rgba(233,196,106,0.45)" : "rgba(255,255,255,0.08)"}
+      _hover={{ borderColor: active ? "var(--gold)" : "rgba(255,255,255,0.18)", bg: active ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.03)" }}
+      transition="all 0.15s"
+      className="electrobun-webkit-app-region-no-drag"
+    >
+      <Flex align="center" gap="1.5">
+        <Text fontSize="11px" fontWeight="600" color={active ? "var(--text-0)" : "var(--text-2)"} lineHeight="1">
+          {label}
+        </Text>
+        <Text fontSize="10px" color="var(--text-3)" lineHeight="1" fontFamily="mono">
+          {count}
+        </Text>
+      </Flex>
+    </Box>
+  )
+}
+
 function FromPicker({ entries, onSelect, fmtCompact, privateModeEnabled, balancesLoading }: {
   entries: AssetEntry[]; onSelect: (e: AssetEntry) => void; fmtCompact: (v: number) => string; privateModeEnabled: boolean; balancesLoading: boolean
 }) {
   const { t } = useTranslation("swap")
   const [search, setSearch] = useState("")
+  const [chainFilter, setChainFilter] = useState<string | null>(null)
 
   // All held assets flat, ranked by USD value
   const held = useMemo(
     () => entries.filter(e => e.balance).sort((a, b) => (b.balance!.usd) - (a.balance!.usd)),
     [entries]
   )
+
+  // One chip per chain represented in the held list, sorted by USD held on
+  // that chain — chains with the most value come first.
+  const chains = useMemo(() => {
+    const m = new Map<string, { chainId: string; assetCount: number; usd: number }>()
+    for (const e of held) {
+      const cur = m.get(e.chainId) || { chainId: e.chainId, assetCount: 0, usd: 0 }
+      cur.assetCount += 1
+      cur.usd += e.balance?.usd ?? 0
+      m.set(e.chainId, cur)
+    }
+    return [...m.values()].sort((a, b) => b.usd - a.usd)
+  }, [held])
+
   const filtered = useMemo(() => {
+    let list = held
+    if (chainFilter) list = list.filter(e => e.chainId === chainFilter)
     const q = search.trim().toLowerCase()
-    if (!q) return held
-    return held.filter(e =>
+    if (!q) return list
+    return list.filter(e =>
       `${e.symbol} ${e.name} ${networkDisplayName(e.chainId)}`.toLowerCase().includes(q)
     )
-  }, [held, search])
+  }, [held, search, chainFilter])
 
   const totalUsd = held.reduce((s, e) => s + (e.balance?.usd ?? 0), 0)
 
@@ -261,6 +309,40 @@ function FromPicker({ entries, onSelect, fmtCompact, privateModeEnabled, balance
       </Flex>
 
       <SearchBar value={search} onChange={setSearch} placeholder={t("filterHeld", "Filter by symbol, name or network…")} />
+
+      {/* Chain filter chips — quick narrow by network. The "All" chip clears
+          the filter; the others highlight when active. Sorted by USD value on
+          that chain so the user's main chains land at the top of the list. */}
+      {chains.length > 1 && (
+        <Flex
+          gap="1.5"
+          px="5"
+          pb="3"
+          flexShrink={0}
+          overflowX="auto"
+          css={{
+            scrollbarWidth: "none",
+            "&::-webkit-scrollbar": { display: "none" },
+            fontVariantNumeric: "tabular-nums",
+          }}
+        >
+          <ChainChip
+            label="All"
+            count={held.length}
+            active={chainFilter === null}
+            onClick={() => setChainFilter(null)}
+          />
+          {chains.map(c => (
+            <ChainChip
+              key={c.chainId}
+              label={networkDisplayName(c.chainId)}
+              count={c.assetCount}
+              active={chainFilter === c.chainId}
+              onClick={() => setChainFilter(prev => prev === c.chainId ? null : c.chainId)}
+            />
+          ))}
+        </Flex>
+      )}
 
       <Box flex="1" overflowY="auto" px="5" pb="4">
         {balancesLoading && held.length === 0 && !search ? (
@@ -1255,10 +1337,18 @@ export function AssetPickerDialog({
     return () => { cancelled = true }
   }, [open, swappable, balances, customTokens, firmwareVersion])
 
-  // Reset navigation on open/close
+  // Reset navigation on open/close.
+  // On the TO side, default the chain step to the FROM token's chain so the
+  // user lands directly on the same-chain asset list (the common case) instead
+  // of having to pick the network again. They can still hit Back to switch.
   useEffect(() => {
-    if (open) { setToChain(null); setUnavailEntry(null); setConfirmEntry(null); setSearch("") }
-  }, [open])
+    if (open) {
+      setToChain(side === 'to' && fromChainId ? fromChainId : null)
+      setUnavailEntry(null)
+      setConfirmEntry(null)
+      setSearch("")
+    }
+  }, [open, side, fromChainId])
 
   // Escape to close
   useEffect(() => {
@@ -1311,19 +1401,26 @@ export function AssetPickerDialog({
   return (
     <Box position="fixed" inset="0" zIndex={Z.assetPicker}
       display="flex" alignItems="center" justifyContent="center"
+      bg="rgba(11,11,14,0.28)"
+      backdropFilter="blur(20px) saturate(140%)"
       onClick={onClose}>
-      <Box position="absolute" inset="0" bg="blackAlpha.700" />
       <Box
         position="relative"
-        bg="#101015"
-        border="1px solid rgba(255,255,255,0.10)"
         borderRadius="22px"
-        boxShadow="0 1px 0 rgba(255,255,255,0.05) inset, 0 18px 60px -18px rgba(0,0,0,0.9)"
+        border="1px solid rgba(255,255,255,0.10)"
         w="700px" maxW="96vw" h="700px" maxH="92vh"
         display="flex" flexDirection="column"
         overflow="hidden"
         fontFamily="'Geist Mono', ui-monospace, monospace"
         onClick={(e) => e.stopPropagation()}
+        style={{
+          background:
+            "linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.015)), rgba(16,16,21,0.78)",
+          backdropFilter: "blur(32px) saturate(160%)",
+          WebkitBackdropFilter: "blur(32px) saturate(160%)",
+          boxShadow:
+            "0 0 0 1px rgba(255,255,255,0.06), 0 24px 60px -16px rgba(0,0,0,0.8), 0 4px 12px -4px rgba(0,0,0,0.5)",
+        }}
         _before={{
           content: '""', position: "absolute", inset: "0",
           bg: "radial-gradient(800px 400px at 50% -10%, rgba(233,196,106,0.04), transparent 60%)",
