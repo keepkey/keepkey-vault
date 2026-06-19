@@ -164,12 +164,13 @@ export interface BuildUtxoParams {
   to: string
   amount: string   // human-readable (e.g. "0.001")
   memo?: string
-  feeLevel?: number // 1=slow, 3=avg, 5=fast (default 5)
+  feeLevel?: number // 1-2=slow, 3-4=avg, 5+=fast (default 5)
   isMax?: boolean
   xpub?: string    // primary xpub for UTXO lookup (single-xpub chains or change address)
   allXpubs?: XpubInfo[]  // BTC multi-xpub: aggregate UTXOs from all funded xpubs
   scriptTypeOverride?: string // BTC multi-account: override chain default scriptType
   accountPath?: number[] // BTC multi-account: account-level path [purpose+H, coinType+H, account+H]
+  satPerVByte?: number   // custom (free-form) fee rate — overrides feeLevel preset
 }
 
 /** Unwrap Pioneer ListUnspent response (handles Swagger/Axios double-wrapping) */
@@ -207,10 +208,10 @@ async function fetchUtxosForXpub(
 export async function estimateUtxoFee(
   pioneer: any,
   chain: ChainDef,
-  params: Pick<BuildUtxoParams, 'to' | 'amount' | 'feeLevel' | 'isMax' | 'xpub' | 'allXpubs' | 'accountPath'>,
+  params: Pick<BuildUtxoParams, 'to' | 'amount' | 'feeLevel' | 'isMax' | 'xpub' | 'allXpubs' | 'accountPath' | 'satPerVByte'>,
 ): Promise<{ feeSat: number; netSat: number } | null> {
   try {
-    const { to, feeLevel = 5, isMax = false, xpub, allXpubs, accountPath } = params
+    const { to, feeLevel = 5, isMax = false, xpub, allXpubs, accountPath, satPerVByte } = params
     const primaryXpub = xpub || allXpubs?.[0]?.xpub
     if (!primaryXpub) return null
     const scriptType = getScriptTypeFromXpub(primaryXpub) || chain.scriptType || 'p2pkh'
@@ -246,7 +247,9 @@ export async function estimateUtxoFee(
         feeRates = DEFAULT_FEES[chain.networkId] || { slow: 3, average: 5, fast: 15 }
       }
     }
-    const effectiveFeeRate = Math.max(3, Math.ceil(feeLevel <= 2 ? feeRates.slow : feeLevel <= 4 ? feeRates.average : feeRates.fast))
+    const effectiveFeeRate = satPerVByte && satPerVByte > 0
+      ? Math.max(1, Math.ceil(satPerVByte))
+      : Math.max(3, Math.ceil(feeLevel <= 2 ? feeRates.slow : feeLevel <= 4 ? feeRates.average : feeRates.fast))
 
     const satoshis = parseDecimalToInt(params.amount, chain.decimals)
     const result = isMax
@@ -276,7 +279,7 @@ export async function buildUtxoTx(
   chain: ChainDef,
   params: BuildUtxoParams,
 ) {
-  const { memo, feeLevel = 5, isMax = false, xpub, allXpubs, scriptTypeOverride, accountPath } = params
+  const { memo, feeLevel = 5, isMax = false, xpub, allXpubs, scriptTypeOverride, accountPath, satPerVByte } = params
   // BCH: NEAR Intents (and some other providers) return legacy P2PKH/P2SH addresses
   // (starting with '1'/'3'). The KeepKey firmware requires cashaddr format — convert.
   const to = chain.id === 'bitcoincash' ? normalizeBchAddress(params.to) : params.to
@@ -355,11 +358,13 @@ export async function buildUtxoTx(
     }
   }
 
-  const effectiveFeeRate = Math.max(
-    3, // min relay fee
-    Math.ceil(feeLevel <= 2 ? feeRates.slow : feeLevel <= 4 ? feeRates.average : feeRates.fast),
-  )
-  console.log(`${TAG} Fee rate: ${effectiveFeeRate} sat/vB (level=${feeLevel})`)
+  const effectiveFeeRate = satPerVByte && satPerVByte > 0
+    ? Math.max(1, Math.ceil(satPerVByte)) // custom rate — user's explicit choice (consensus floors still apply below)
+    : Math.max(
+        3, // min relay fee
+        Math.ceil(feeLevel <= 2 ? feeRates.slow : feeLevel <= 4 ? feeRates.average : feeRates.fast),
+      )
+  console.log(`${TAG} Fee rate: ${effectiveFeeRate} sat/vB (level=${feeLevel}${satPerVByte ? ', custom' : ''})`)
 
   // 3. Coin selection (string-based to avoid float precision loss)
   const satoshis = parseDecimalToInt(params.amount, chain.decimals)

@@ -67,7 +67,11 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 	const [inputMode, setInputMode] = useState<'crypto' | 'usd'>('crypto')
 	const [memo, setMemo] = useState("")
 	const [isMax, setIsMax] = useState(false)
-	const [feeLevel, setFeeLevel] = useState(5) // 1=slow, 5=avg, 10=fast
+	const [feeLevel, setFeeLevel] = useState(3) // preset buttons send 1=slow / 3=normal(avg) / 10=fast
+	const [feeMode, setFeeMode] = useState<'preset' | 'custom'>('preset')
+	const [customGasPrice, setCustomGasPrice] = useState("")     // EVM gas price (gwei)
+	const [customGasLimit, setCustomGasLimit] = useState("")     // EVM gas limit (units, optional)
+	const [customSatPerVByte, setCustomSatPerVByte] = useState("") // UTXO fee rate (sat/vByte)
 
 	const [phase, setPhase] = useState<SendPhase>('input')
 	const [loading, setLoading] = useState(false)
@@ -107,10 +111,26 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 		setShowAddressBook(false)
 	}, [tokenCaip])
 
+	// Reset fee selection back to presets when the chain family OR the selected asset
+	// changes, so a custom fee doesn't leak across a chain switch or a token<->native
+	// (or token A->B) toggle on the same chain — both would otherwise reuse a stale
+	// gas limit / rate and mis-compute the MAX gas reserve.
+	useEffect(() => {
+		setFeeMode('preset')
+		setFeeLevel(3) // default every send to Normal
+		setCustomGasPrice("")
+		setCustomGasLimit("")
+		setCustomSatPerVByte("")
+	}, [chain.chainFamily, tokenCaip])
+
 	// Derived display values — token mode vs native mode
 	const isTokenSend = !!(token && token.caip && !token.caip.endsWith('/slip44:501') && (token.caip.includes('erc20') || token.caip.includes('/token:') || token.caip.includes('/spl:') || token.caip.includes('/trc20:')))
 	const displaySymbol = isTokenSend ? token!.symbol : chain.symbol
 	const displayBalance = isTokenSend ? token!.balance : (balance?.balance || '0')
+	// Fee controls: presets where a builder honors feeLevel; free-form custom only where
+	// the builder accepts an exact rate (EVM gas price/limit, UTXO sat/vByte).
+	const supportsFeePresets = chain.chainFamily === 'utxo' || chain.chainFamily === 'evm' || chain.chainFamily === 'cosmos'
+	const supportsCustomFee = chain.chainFamily === 'evm' || chain.chainFamily === 'utxo'
 	// The CAIP the Address Book picker filters by (token caip for token sends, else native).
 	const activeCaip = isTokenSend && token?.caip ? token.caip : chain.caip
 
@@ -217,6 +237,19 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 		if (!recipient || (!amount && !isMax)) return
 		if (addressValidation && !addressValidation.valid) { setError(t(addressValidation.error!)); return }
 		if (exceedsBalance) { setError(t("exceedsBalanceShort")); return }
+
+		// Custom fee validation — only the field(s) relevant to this chain family.
+		const useCustom = feeMode === 'custom' && supportsCustomFee
+		if (useCustom && chain.chainFamily === 'evm') {
+			const gwei = parseFloat(customGasPrice)
+			if (!customGasPrice || !isFinite(gwei) || gwei <= 0) { setError(t("invalidGasPrice")); return }
+			if (customGasLimit && (!/^\d+$/.test(customGasLimit.trim()) || parseInt(customGasLimit, 10) < 21000)) { setError(t("invalidGasLimit")); return }
+		}
+		if (useCustom && chain.chainFamily === 'utxo') {
+			const rate = parseFloat(customSatPerVByte)
+			if (!customSatPerVByte || !isFinite(rate) || rate <= 0) { setError(t("invalidSatPerVByte")); return }
+		}
+
 		setLoading(true)
 		setError(null)
 
@@ -235,6 +268,9 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 				xpubOverride: xpubOverride || undefined,
 				scriptTypeOverride: scriptTypeOverride || undefined,
 				evmAddressIndex: evmAddressIndex,
+				gasPriceGwei: useCustom && chain.chainFamily === 'evm' ? customGasPrice : undefined,
+				gasLimit: useCustom && chain.chainFamily === 'evm' && customGasLimit ? customGasLimit : undefined,
+				satPerVByte: useCustom && chain.chainFamily === 'utxo' ? parseFloat(customSatPerVByte) : undefined,
 			}, 60000)
 
 			setBuildResult(result)
@@ -243,7 +279,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 			setError(e.message || t("failedToBuild"))
 		}
 		setLoading(false)
-	}, [chain, recipient, amount, memo, feeLevel, isMax, addressValidation, exceedsBalance, isTokenSend, token, balance?.balance, xpubOverride, scriptTypeOverride, evmAddressIndex])
+	}, [chain, recipient, amount, memo, feeLevel, feeMode, supportsCustomFee, customGasPrice, customGasLimit, customSatPerVByte, isMax, addressValidation, exceedsBalance, isTokenSend, token, balance?.balance, xpubOverride, scriptTypeOverride, evmAddressIndex])
 
 	const handleSign = useCallback(async () => {
 		if (!buildResult) return
@@ -603,28 +639,94 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 						/>
 					)}
 
-					{chain.chainFamily === 'utxo' && (
+					{supportsFeePresets && (
 						<Box>
-							<Text fontSize="xs" color="kk.textMuted" mb="1">{t("feePriority")}</Text>
-							<Flex gap="2">
-								{[{ label: t("feeSlow"), val: 1 }, { label: t("feeNormal"), val: 5 }, { label: t("feeFast"), val: 10 }].map((opt) => (
-									<Button
-										key={opt.val}
-										size="xs"
-										flex="1"
-										variant={feeLevel === opt.val ? "solid" : "outline"}
-										bg={feeLevel === opt.val ? "var(--gold)" : "var(--ink-3)"}
-										color={feeLevel === opt.val ? "var(--ink-0)" : "var(--text-1)"}
-										border="1px solid var(--line)"
-										borderRadius="10px"
-										fontWeight="500"
-										_hover={{ bg: feeLevel === opt.val ? "var(--gold-2)" : "var(--ink-4)" }}
-										onClick={() => setFeeLevel(opt.val)}
+							<Flex justify="space-between" align="center" mb="1">
+								<Text fontSize="xs" color="kk.textMuted">{t("feePriority")}</Text>
+								{supportsCustomFee && (
+									<Text
+										as="button"
+										fontSize="10px"
+										color={feeMode === 'custom' ? "var(--gold)" : "kk.textMuted"}
+										_hover={{ color: "var(--gold)" }}
+										cursor="pointer"
+										onClick={() => setFeeMode(feeMode === 'custom' ? 'preset' : 'custom')}
 									>
-										{opt.label}
-									</Button>
-								))}
+										{feeMode === 'custom' ? t("feeUsePreset") : t("feeCustom")}
+									</Text>
+								)}
 							</Flex>
+
+							{/* Default, low-friction view: just the three presets. */}
+							{feeMode === 'preset' && (
+								<Flex gap="2">
+									{[{ label: t("feeSlow"), val: 1 }, { label: t("feeNormal"), val: 3 }, { label: t("feeFast"), val: 10 }].map((opt) => {
+										const active = feeLevel === opt.val
+										return (
+											<Button
+												key={opt.val}
+												size="xs"
+												flex="1"
+												variant="outline"
+												bg={active ? "rgba(233,196,106,0.12)" : "transparent"}
+												color={active ? "var(--gold)" : "kk.textMuted"}
+												border="1px solid"
+												borderColor={active ? "rgba(233,196,106,0.45)" : "var(--line)"}
+												borderRadius="10px"
+												fontWeight={active ? "600" : "400"}
+												_hover={{ bg: active ? "rgba(233,196,106,0.18)" : "var(--ink-3)", color: active ? "var(--gold)" : "var(--text-1)" }}
+												onClick={() => setFeeLevel(opt.val)}
+											>
+												{opt.label}
+											</Button>
+										)
+									})}
+								</Flex>
+							)}
+
+							{/* Advanced view: shown only after the user opts into Custom. */}
+							{feeMode === 'custom' && chain.chainFamily === 'evm' && (
+								<Flex gap="2">
+									<Box flex="1">
+										<Text fontSize="10px" color="kk.textMuted" mb="1">{t("gasPriceGwei")}</Text>
+										<Input
+											size="xs" value={customGasPrice}
+											onChange={(e) => setCustomGasPrice(e.target.value)}
+											placeholder="20" inputMode="decimal"
+											bg="var(--ink-3)" border="1px solid var(--line)" borderRadius="10px"
+										/>
+									</Box>
+									{/* Gas limit is hidden for token sends — the safe ERC-20 default (100k)
+									    must not be lowered into an out-of-gas revert. Native only. */}
+									{!isTokenSend && (
+										<Box flex="1">
+											<Text fontSize="10px" color="kk.textMuted" mb="1">{t("gasLimitOptional")}</Text>
+											<Input
+												size="xs" value={customGasLimit}
+												onChange={(e) => setCustomGasLimit(e.target.value)}
+												placeholder="21000" inputMode="numeric"
+												bg="var(--ink-3)" border="1px solid var(--line)" borderRadius="10px"
+											/>
+										</Box>
+									)}
+								</Flex>
+							)}
+
+							{feeMode === 'custom' && chain.chainFamily === 'utxo' && (
+								<Box>
+									<Text fontSize="10px" color="kk.textMuted" mb="1">{t("satPerVByte")}</Text>
+									<Input
+										size="xs" value={customSatPerVByte}
+										onChange={(e) => setCustomSatPerVByte(e.target.value)}
+										placeholder="5" inputMode="decimal"
+										bg="var(--ink-3)" border="1px solid var(--line)" borderRadius="10px"
+									/>
+								</Box>
+							)}
+
+							{feeMode === 'custom' && (
+								<Text fontSize="10px" color="kk.textMuted" mt="1">{t("customFeeHint")}</Text>
+							)}
 						</Box>
 					)}
 

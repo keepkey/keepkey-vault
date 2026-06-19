@@ -1,18 +1,24 @@
 /**
  * REST swap routes — `/api/v2/swap/*`.
  *
- * Strict scope: drive the in-app SwapDialog as if a user were clicking it.
- * Nothing else lives here. No headless quoting, no asset list, no history,
- * no debug passthroughs. Quoting + signing + broadcast all flow through the
- * dialog and the device, where the user can review and approve.
+ * Two families share this prefix:
  *
+ * 1. Remote-control of the in-app SwapDialog (drive vault's own window):
  *   - GET  /state    → snapshot of the dialog's visible state
  *   - POST /open     → pop the dialog with optional seed fields
  *   - POST /set      → change a field while the dialog is open
  *   - POST /requote  → force a re-quote with current inputs
- *   - POST /close    → dismiss the dialog
+ *   - POST /advance / /confirm / /close
  *
- * All endpoints require bearer-token auth.
+ * 2. Headless (BEX swap epic) — the caller composes its OWN swap UI and uses
+ *    vault only for the engine + the device signature:
+ *   - GET  /assets   → firmware-filtered SwapAsset[] for the picker
+ *   - POST /quote    → SwapQuote (no GUI; wraps getSwapQuote + reserve re-quote)
+ *   - POST /execute  → SwapResult{txid} (signs on the device, then trackSwap)
+ *
+ * Headless = "no vault GUI in the loop," NOT "no device confirmation": /execute
+ * still signs on the physical KeepKey (firmware shows details; user presses the
+ * button). All endpoints require bearer-token auth.
  */
 import type { AuthStore } from './auth'
 import type { RestApiCallbacks } from './rest-api'
@@ -51,6 +57,27 @@ export async function handleSwapRoute(
       // device can't sign (e.g. ZEC below 7.15.0) — mirrors the RPC + picker.
       const assets = await resolveDeviceSwapAssets(callbacks)
       return json({ data: assets })
+    }
+
+    if (path === '/api/v2/swap/quote' && method === 'POST') {
+      auth.requireAuth(req)
+      if (!callbacks?.getSwapQuoteHeadless) return json({ error: 'Headless swap not wired' }, 503)
+      const body = await parseRequest(req, S.SwapQuoteHeadlessRequest)
+      // Reject unknown assets at the boundary (CAIP form), same as the dialog seed path.
+      const validation = await validateSeedAssets({ fromAsset: body.fromCaip, toAsset: body.toCaip }, callbacks)
+      if (validation) return json(validation, 400)
+      const quote = await callbacks.getSwapQuoteHeadless(body as any)
+      return json({ data: quote })
+    }
+
+    if (path === '/api/v2/swap/execute' && method === 'POST') {
+      auth.requireAuth(req)
+      if (!callbacks?.executeSwapHeadless) return json({ error: 'Headless swap not wired' }, 503)
+      const body = await parseRequest(req, S.SwapExecuteHeadlessRequest)
+      // Device-interactive: signs on the physical KeepKey, then broadcasts. The
+      // caller should use a long (≈5 min) client timeout; no shorter server cap.
+      const result = await callbacks.executeSwapHeadless(body as any)
+      return json({ data: result })
     }
 
     if (path === '/api/v2/swap/open' && method === 'POST') {

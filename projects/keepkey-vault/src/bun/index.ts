@@ -139,7 +139,7 @@ import { extractTransactionsFromReport, toCoinTrackerCsv, toZenLedgerCsv } from 
 import * as os from "os"
 import * as path from "path"
 import { EVM_RPC_URLS, getTokenMetadata, broadcastEvmTx } from "./evm-rpc"
-import type { ChainBalance, TokenBalance, CustomToken, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, EvmAddressSet, Bip85SeedMeta, StakingPosition, SwapAsset, AuditToken } from "../shared/types"
+import type { ChainBalance, TokenBalance, CustomToken, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, EvmAddressSet, Bip85SeedMeta, StakingPosition, SwapAsset, AuditToken, DefiPosition } from "../shared/types"
 import type { VaultRPCSchema } from "../shared/rpc-schema"
 
 // L3 fix: withTimeout imported from engine-controller (was duplicated here)
@@ -200,14 +200,36 @@ interface PortfolioMeta {
 	staleChains: Array<{ caip: string; pubkey: string; ageMs: number; fetchedAtISO: string }>
 }
 
+// Server-side DeFi position shape from GetPortfolioBalances (includeDefi=true).
+// Shape mirrors DefiPositionEntry in pioneer-server's balance.controller.ts.
+interface ServerDefiPosition {
+	pubkey: string
+	protocol: string
+	displayName: string
+	network: string
+	networkId: string
+	balanceUsd: number
+	icon?: string
+	tokens?: Array<{ networkId: string; address: string; symbol?: string }>
+}
+
 // Pioneer v1.3.115+ returns { balances, meta } where meta reports which chains
 // served degraded (fresh fetch failed) or stale (>5min old cache) data. The old
 // unwrap discarded meta entirely, so the vault could never explain a $0/stale row.
-function unwrapPortfolioResponse(resp: any): { entries: any[]; meta: PortfolioMeta | null } {
+//
+// v1.4+ also surfaces { defiPositions } when the request set includeDefi=true.
+// We return null (not []) when the field is absent so callers can distinguish
+// "DeFi wasn't requested" (and thus skip the merge step) from "no positions."
+function unwrapPortfolioResponse(resp: any): {
+	entries: any[];
+	meta: PortfolioMeta | null;
+	defiPositions: ServerDefiPosition[] | null;
+} {
 	const rawData = resp?.data?.data || resp?.data || {}
 	const entries = rawData.balances || (Array.isArray(rawData) ? rawData : [])
 	const meta: PortfolioMeta | null = rawData.meta ?? null
-	return { entries, meta }
+	const defiPositions: ServerDefiPosition[] | null = Array.isArray(rawData.defiPositions) ? rawData.defiPositions : null
+	return { entries, meta, defiPositions }
 }
 
 // Native balance for a single derived address on ANY family, via the
@@ -1077,6 +1099,10 @@ const restCallbacks: RestApiCallbacks = {
 	sendSwapCmd: (cmd) => {
 		try { rpc.send['swap-cmd'](cmd) } catch { /* webview not ready */ }
 	},
+	// Headless swap (BEX swap epic): same engine as the in-app dialog, no GUI in
+	// the loop. The device still gates every signature. NOOP substage push.
+	getSwapQuoteHeadless: (params) => headlessSwapQuote(params),
+	executeSwapHeadless: (params) => headlessExecuteSwap(params, () => { /* headless: no WebView substage */ }),
 	getPioneer: () => getPioneer(),
 	getPioneerApiBase: () => getPioneerApiBase(),
 	setPioneerApiBase: async (url: string) => {
@@ -1127,7 +1153,7 @@ async function applyRestApiState() {
 // REST API started in deferredInit() after DB is ready
 
 // ── Swap quote cache (last 10 quotes for tracker data) ───────────────
-import type { SwapQuote } from '../shared/types'
+import type { SwapQuote, SwapQuoteParams, ExecuteSwapParams, SwapResult, SwapSubStage } from '../shared/types'
 const swapQuoteCache = new Map<string, SwapQuote>()
 
 // ── Emulator confirm helper ──────────────────────────────────────────
@@ -1286,6 +1312,228 @@ function maybeStartBackgroundWalletVerification(): void {
 			zcashBackgroundVerifyInFlight = false
 		}
 	})()
+}
+
+// ── Shared swap engine entrypoints ───────────────────────────────────
+// Lifted out of the RPC handlers so the headless REST routes (BEX swap epic)
+// call the exact same logic — getSwapQuote + reserve/net-amount re-quote, and
+// executeSwap + device signing + trackSwap. `pushSubStage` is parametrized:
+// the in-app RPC path pushes to the WebView; the REST path passes NOOP.
+// The device still gates every signature in both paths.
+async function headlessSwapQuote(params: SwapQuoteParams): Promise<SwapQuote> {
+	const { getSwapQuote } = await import('./swap')
+
+	// Resolve xpub addresses to real receive addresses for UTXO chains.
+	// ChainBalance.address can be an xpub when Pioneer doesn't return
+	// an address field — THORChain rejects xpubs as destination addresses.
+	// Detect extended pubkeys: xpub/ypub/zpub (BTC), dgub (DOGE), Ltub/Mtub (LTC), drkp (DASH), tpub (testnet)
+	const isXpub = (addr: string) => /^(xpub|ypub|zpub|dgub|Ltub|Mtub|drkp|drks|tpub|upub|vpub)/.test(addr)
+
+	if (engine.wallet) {
+		// CAIP-driven: find vault chain by matching CAIP-19 directly.
+		const resolveAddr = async (caip: string, addr: string): Promise<string> => {
+			if (!isXpub(addr)) return addr
+			const chainDef = getAllChains().find(c => c.caip === caip)
+			if (!chainDef || chainDef.chainFamily !== 'utxo') return addr
+			try {
+				const selected = chainDef.id === 'bitcoin' && btcAccounts.isInitialized
+					? btcAccounts.getSelectedXpub() : undefined
+				// selected.path is account-level (3 elements: m/purpose'/0'/account')
+				// btcGetAddress needs full 5-element path — append /0/0 (first receive address)
+				const acctPath = selected?.path || chainDef.defaultPath
+				const addressNList = acctPath.length === 3 ? [...acctPath, 0, 0] : acctPath
+				const scriptType = selected?.scriptType || chainDef.scriptType
+				const result = await engine.wallet.btcGetAddress({
+					addressNList,
+					coin: chainDef.coin,
+					scriptType,
+					showDisplay: false,
+				})
+				const resolved = typeof result === 'string' ? result : result?.address
+				if (resolved) {
+					console.log(`[swap] Resolved xpub → ${resolved} for ${caip}`)
+					return resolved
+				}
+			} catch (e: any) {
+				console.warn(`[swap] Failed to resolve xpub for ${caip}: ${e.message}`)
+			}
+			return addr
+		}
+		params = {
+			...params,
+			fromAddress: await resolveAddr(params.fromCaip, params.fromAddress),
+			toAddress: await resolveAddr(params.toCaip, params.toAddress),
+		}
+	}
+
+	// Fail fast if addresses are still xpubs after resolution attempt
+	if (isXpub(params.fromAddress)) {
+		throw new Error(`Could not resolve source address for ${params.fromCaip} — device may be locked or disconnected`)
+	}
+	if (isXpub(params.toAddress)) {
+		throw new Error(`Could not resolve destination address for ${params.toCaip} — device may be locked or disconnected`)
+	}
+
+	let quote = await getSwapQuote(params)
+
+	// NEAR Intents sendMax fix for all bip122 chains: the first quote commits
+	// NEAR Intents to receiving `params.amount` (full balance), but the UTXO tx
+	// only delivers `balance - miner_fee`. NEAR Intents hard-fails on any
+	// shortfall. Fix: re-quote with the actual net delivery amount.
+	if (
+		quote.swapper === 'NEAR Intents'
+		&& params.isMax
+		&& params.fromCaip.startsWith('bip122:')
+		&& engine.wallet
+	) {
+		try {
+			const { estimateUtxoFee } = await import('./txbuilder/utxo')
+			const { getPioneer: getPio } = await import('./pioneer')
+			const pio = await getPio()
+			const fromChain = getAllChains().find(c => c.caip === params.fromCaip)
+			let estXpubs: Array<{ xpub: string; scriptType: string; accountPath: number[] }> | undefined
+			let estXpub: string | undefined
+			let estAccountPath: number[] | undefined
+			if (fromChain?.id === 'bitcoin') {
+				estXpubs = btcAccounts.isInitialized ? btcAccounts.getFundedXpubs() : []
+			} else if (fromChain) {
+				const results = await (engine.wallet as any).getPublicKeys([{
+					addressNList: fromChain.defaultPath.slice(0, 3),
+					coin: fromChain.coin,
+					scriptType: fromChain.scriptType || 'p2pkh',
+					curve: 'secp256k1',
+				}])
+				estXpub = results?.[0]?.xpub
+				estAccountPath = fromChain.defaultPath.slice(0, 3)
+			}
+			const hasXpub = (estXpubs && estXpubs.length > 0) || estXpub
+			if (fromChain && hasXpub) {
+				const est = await estimateUtxoFee(pio, fromChain, {
+					to: quote.inboundAddress || params.fromAddress,
+					amount: params.amount,
+					isMax: true,
+					feeLevel: params.feeLevel,
+					...(estXpubs && estXpubs.length > 0
+						? { allXpubs: estXpubs }
+						: { xpub: estXpub, accountPath: estAccountPath }),
+				})
+				if (est && est.feeSat > 0) {
+					const netAmount = (est.netSat / 1e8).toFixed(8)
+					console.log(`[swap] NEAR Intents sendMax: re-quoting ${fromChain.symbol} with net ${netAmount} (fee=${est.feeSat} sat)`)
+					quote = { ...await getSwapQuote({ ...params, amount: netAmount, isMax: false }), netFromAmount: netAmount }
+				}
+			}
+		} catch (e: any) {
+			console.warn(`[swap] NEAR Intents fee estimation failed, using original quote: ${e.message}`)
+		}
+	}
+
+	// Cache quote so executeSwap can pass real data to the tracker
+	const cacheKey = `${params.fromCaip}-${params.toCaip}-${params.amount}-${params.slippageBps || 300}-${params.fromAddress}-${params.toAddress}`
+	swapQuoteCache.delete(cacheKey) // delete+set for LRU ordering
+	swapQuoteCache.set(cacheKey, quote)
+	// Keep cache small (last 10 quotes)
+	if (swapQuoteCache.size > 10) {
+		const oldest = swapQuoteCache.keys().next().value
+		if (oldest) swapQuoteCache.delete(oldest)
+	}
+	return quote
+}
+
+async function headlessExecuteSwap(params: ExecuteSwapParams, pushSubStage: (stage: SwapSubStage) => void): Promise<SwapResult> {
+	if (!engine.wallet) throw new Error('No device connected')
+	const { executeSwap } = await import('./swap')
+	const { trackSwap, isTrackerInitialized, initSwapTracker } = await import('./swap-tracker')
+	// Ensure tracker is initialized before tracking (guards against race/init failure)
+	if (!isTrackerInitialized()) {
+		await initSwapTracker((msg: string, data: any) => {
+			try {
+				if (msg === 'swap-update') rpc.send['swap-update'](data)
+				else if (msg === 'swap-complete') rpc.send['swap-complete'](data)
+				else console.error(`[swap-tracker] Unknown message: ${msg}`)
+			} catch (e: any) {
+				console.warn(`[swap-tracker] Failed to send '${msg}':`, e.message)
+			}
+		}, { getDeviceId: () => getWalletDbScope()?.deviceId, getWalletId: () => getWalletDbScope()?.walletId })
+	}
+	// Look up cached quote BEFORE executing so we can use netFromAmount to
+	// override the send amount for NEAR Intents bip122 sendMax swaps.
+	let cachedQuote: SwapQuote | undefined
+	for (const [key, val] of swapQuoteCache) {
+		// Key format: fromCaip-toCaip-amount-slippageBps-fromAddress-toAddress
+		const keyPrefix = `${params.fromCaip}-${params.toCaip}-${params.amount}-`
+		if (key.startsWith(keyPrefix) && val.inboundAddress === params.inboundAddress) {
+			cachedQuote = val
+			break
+		}
+	}
+	if (!cachedQuote) console.warn('[index] No cached quote for swap tracker — using fallback data')
+
+	// For NEAR Intents bip122 sendMax: the re-quote stored netFromAmount
+	// (balance - estimated fee). Use it with isMax=false so buildTx's
+	// coinSelectSplit outputs exactly that amount instead of (balance - actualFee),
+	// which may diverge from estimatedFee and cause INCOMPLETE_DEPOSIT.
+	let execParams = params
+	if (
+		cachedQuote?.netFromAmount
+		&& params.isMax
+		&& params.fromCaip.startsWith('bip122:')
+		&& (params.swapper === 'NEAR Intents' || params.integration === 'nearIntents')
+	) {
+		execParams = { ...params, amount: cachedQuote.netFromAmount, isMax: false }
+		console.log(`[swap] NEAR Intents sendMax: net amount ${cachedQuote.netFromAmount} (was ${params.amount}), isMax→false`)
+	}
+
+	const result = await executeSwap(execParams, {
+		wallet: engine.wallet,
+		getAllChains,
+		getRpcUrl,
+		getBtcXpub: () => {
+			if (btcAccounts.isInitialized) {
+				const selected = btcAccounts.getSelectedXpub()
+				if (selected) return { xpub: selected.xpub, accountPath: selected.path }
+			}
+			return undefined
+		},
+		getAllBtcXpubs: () => {
+			if (btcAccounts.isInitialized) return btcAccounts.getFundedXpubs()
+			return []
+		},
+		wrapSign: engine.isEmulator
+			? (fn, details) => emuSigningOp(fn, details)
+			: (fn) => fn(),
+		pushSubStage,
+		isAdvancedModeEnabled: getAdvancedModeEnabled,
+	})
+	const scope = getWalletDbScope()
+	// Register swap for tracking (non-blocking)
+	try {
+		const trackParams = cachedQuote?.netFromAmount
+			? { ...execParams, amount: cachedQuote.netFromAmount }
+			: execParams
+		trackSwap(result, trackParams, {
+			expectedOutput: cachedQuote?.expectedOutput || params.expectedOutput,
+			minimumOutput: cachedQuote?.minimumOutput || '0',
+			inboundAddress: cachedQuote?.inboundAddress || params.inboundAddress,
+			router: cachedQuote?.router || params.router,
+			memo: cachedQuote?.memo || params.memo,
+			expiry: cachedQuote?.expiry || params.expiry,
+			fees: cachedQuote?.fees || { affiliate: '0', outbound: '0', totalBps: 0 },
+			estimatedTime: cachedQuote?.estimatedTime || 600,
+			slippageBps: cachedQuote?.slippageBps || 300,
+			integration: cachedQuote?.integration || 'thorchain',
+			swapper: cachedQuote?.swapper,
+			nearIntentsDepositAddress: cachedQuote?.nearIntentsDepositAddress,
+		}, { skipPersist: engine.isPassphraseWallet || !scope, deviceId: scope?.deviceId, walletId: scope?.walletId })
+	} catch (e: any) {
+		console.warn('[index] Failed to register swap for tracking:', e.message)
+	}
+	// Track swap in api_log. PRIVACY: Skip DB write for passphrase wallets.
+	if (!engine.isPassphraseWallet && scope) {
+		const fromChain = getAllChains().find(c => c.id === params.fromChainId)
+		insertApiLog({ ...scope, method: 'RPC', route: 'executeSwap', timestamp: Date.now(), durationMs: 0, status: 200, appName: 'vault', txid: result.txid, chain: fromChain?.symbol || params.fromChainId, activityType: 'swap' })
+	}
+	return result
 }
 
 // ── RPC Bridge (Electrobun UI ↔ Bun) ─────────────────────────────────
@@ -2200,7 +2448,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					const pubkeyChunks = chunkArray(pubkeys, PIONEER_PORTFOLIO_CHUNK_SIZE)
 					const chunkResults = await withTimeout(
 						mapWithConcurrency(pubkeyChunks, PIONEER_PORTFOLIO_MAX_CONCURRENCY, async (chunk, i) => {
-							const chunkBody: any = { pubkeys: chunk.map(p => ({ caip: p.caip, pubkey: p.pubkey })) }
+							// Opt the dashboard refresh into the server's DeFi merge. Server-side
+							// is cached, so the per-pubkey Zapper lookup is typically a Redis
+							// read; misses degrade to [] without blocking balances. Pre-v1.4
+							// servers ignore the field and return the legacy shape unchanged.
+							const chunkBody: any = { pubkeys: chunk.map(p => ({ caip: p.caip, pubkey: p.pubkey })), includeDefi: true }
 							if (extraContracts.length > 0) chunkBody.extraContracts = extraContracts
 							try {
 								let resp: any
@@ -2215,20 +2467,20 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 									console.warn('[getBalances] Pioneer rejected extraContracts; retrying portfolio chunk without custom tokens')
 									resp = await withTimeout(
 										pioneer.GetPortfolioBalances(
-											{ pubkeys: chunkBody.pubkeys },
+											{ pubkeys: chunkBody.pubkeys, includeDefi: true },
 											{ forceRefresh }
 										),
 										PIONEER_PORTFOLIO_CHUNK_TIMEOUT_MS,
 										`GetPortfolioBalances chunk ${i + 1}/${pubkeyChunks.length}`
 									)
 								}
-								const { entries, meta } = unwrapPortfolioResponse(resp)
-								return { entries, meta, error: null as string | null }
+								const { entries, meta, defiPositions } = unwrapPortfolioResponse(resp)
+								return { entries, meta, defiPositions, error: null as string | null }
 							} catch (err: any) {
 								const sampleChains = chunk.map((p: any) => String(p.caip || '').split('/')[0]).join(', ')
 								const error = getPioneerPortfolioErrorMessage(err)
 								console.warn(`[getBalances] Portfolio chunk ${i + 1}/${pubkeyChunks.length} failed (${sampleChains}):`, error)
-								return { entries: [] as any[], meta: null as PortfolioMeta | null, error }
+								return { entries: [] as any[], meta: null as PortfolioMeta | null, defiPositions: null as ServerDefiPosition[] | null, error }
 							}
 						}),
 						PIONEER_PORTFOLIO_TOTAL_TIMEOUT_MS,
@@ -2271,6 +2523,74 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					console.log(`[getBalances] effectivePubkeys: ${effectivePubkeys.length}/${pubkeys.length} — chains: ${[...new Set(effectivePubkeys.map(p => p.chainId))].join(', ')}`)
 					const allEntries = chunkResults.flatMap(r => r.entries)
 					const portfolioMeta = mergeMetas(chunkResults.map(r => r.meta).filter(Boolean) as PortfolioMeta[])
+
+					// Aggregate server-merged DeFi positions across chunks and group by
+					// chainId. The networkId on each position (eip155:N) maps cleanly
+					// into the existing networkToChain table; positions on networks the
+					// vault doesn't know about are dropped on the floor with a log.
+					// NOTE: we deliberately do NOT suppress wallet tokens that share a
+					// contract with a position's `tokens[]`. Those are the protocol's
+					// *underlyings* (e.g. an LP's WETH, or the native-ETH zero address),
+					// not wallet-held duplicates, and the server sends no position type
+					// to tell an app-token (stETH = the position) from a contract/LP
+					// position. Address-only suppression hid real, sendable balances, so
+					// DeFi is purely additive: own panel + folded USD.
+					// Pioneer chunks pubkeys, and one EVM address is reused across every
+					// EVM chain (Account #0 on Ethereum, Optimism, Base, Arbitrum, …), so
+					// it lands in multiple chunks. Each chunk response carries the FULL
+					// DeFi list for that address, so flat-merging would add every position
+					// once per chunk that contained the pubkey. Dedupe by
+					// (pubkey, protocol, networkId) — first occurrence wins — before grouping.
+					const rawDefiPositions: ServerDefiPosition[] = chunkResults.flatMap(r => r.defiPositions || [])
+					const allDefiPositions: ServerDefiPosition[] = []
+					const seenDefiKey = new Set<string>()
+					for (const sp of rawDefiPositions) {
+						const key = `${String(sp.pubkey || '').toLowerCase()}|${sp.protocol || ''}|${(sp.networkId || '').toLowerCase()}`
+						if (seenDefiKey.has(key)) continue
+						seenDefiKey.add(key)
+						allDefiPositions.push(sp)
+					}
+					if (rawDefiPositions.length !== allDefiPositions.length) {
+						console.log(`[getBalances] DeFi dedup: ${rawDefiPositions.length} raw → ${allDefiPositions.length} unique (chunked duplicates collapsed)`)
+					}
+					const defiByChain = new Map<string, DefiPosition[]>()
+					const defiByChainAndOwner = new Map<string, Map<string, DefiPosition[]>>()
+					let droppedDefi = 0
+					for (const sp of allDefiPositions) {
+						const networkId = (sp.networkId || '').toLowerCase()
+						const chainId = networkId ? (networkToChain.get(networkId) || null) : null
+						if (!chainId) { droppedDefi++; continue }
+						const ownerAddr = String(sp.pubkey || '').toLowerCase()
+						const dp: DefiPosition = {
+							protocol: sp.protocol || null,
+							displayName: sp.displayName,
+							name: sp.displayName || sp.protocol || 'DeFi Position',
+							network: sp.network,
+							networkId: sp.networkId,
+							balanceUsd: Number(sp.balanceUsd) || 0,
+							icon: sp.icon,
+							tokens: Array.isArray(sp.tokens) ? sp.tokens.map(t => ({
+								networkId: t.networkId,
+								address: String(t.address || '').toLowerCase(),
+								symbol: t.symbol,
+							})).filter(t => !!t.address) : [],
+						}
+						// Chain-level (dashboard chain row)
+						const chainList = defiByChain.get(chainId) || []
+						chainList.push(dp)
+						defiByChain.set(chainId, chainList)
+						// Owner-level (per-account drilldown)
+						if (ownerAddr) {
+							let perOwner = defiByChainAndOwner.get(chainId)
+							if (!perOwner) { perOwner = new Map(); defiByChainAndOwner.set(chainId, perOwner) }
+							const list = perOwner.get(ownerAddr) || []
+							list.push(dp)
+							perOwner.set(ownerAddr, list)
+						}
+					}
+					if (allDefiPositions.length > 0) {
+						console.log(`[getBalances] DeFi: ${allDefiPositions.length} positions across ${defiByChain.size} chain(s)${droppedDefi ? ` (${droppedDefi} dropped: unknown networkId)` : ''}`)
+					}
 
 					console.log(`[getBalances] GetPortfolioBalances response: ${allEntries.length} entries`)
 					// Log TRON-specific entries for debugging
@@ -2479,15 +2799,19 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 								|| pureNatives.find((d: any) => d.caip === entry.caip && d.address?.toLowerCase() === entry.pubkey.toLowerCase())
 							const bal = parseFloat(String(match?.balance ?? '0'))
 							const usd = Number(match?.valueUsd ?? 0)
-							const entryTokens = evmTokensByOwner.get(`${entry.chainId}:${entry.pubkey.toLowerCase()}`) || []
+							const ownerLower = entry.pubkey.toLowerCase()
+							const ownerDefiPositions = defiByChainAndOwner.get(entry.chainId)?.get(ownerLower)
+							const entryTokens = evmTokensByOwner.get(`${entry.chainId}:${ownerLower}`) || []
 							const entryTokenUsd = entryTokens.reduce((sum, t) => sum + t.balanceUsd, 0)
+							const ownerDefiUsd = ownerDefiPositions?.reduce((sum, p) => sum + (p.balanceUsd || 0), 0) || 0
 							evmAddresses.setAddressChainBalance(entry.pubkey, entry.chainId, {
 								chainId: entry.chainId,
 								symbol: entry.symbol,
 								balance: bal > 0 ? bal.toFixed(18).replace(/0+$/, '').replace(/\.$/, '') : '0',
-								balanceUsd: usd + entryTokenUsd,
+								balanceUsd: usd + entryTokenUsd + ownerDefiUsd,
 								nativeBalanceUsd: usd,
 								tokens: entryTokens.length > 0 ? entryTokens : undefined,
+								defiPositions: ownerDefiPositions && ownerDefiPositions.length > 0 ? ownerDefiPositions : undefined,
 							})
 							// Accumulate per-chain totals
 							const existing = evmChainAgg.get(entry.chainId)
@@ -2530,14 +2854,22 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					for (const [chainId, agg] of evmChainAgg) {
 						const chainTokens = tokensByChainId.get(chainId)
 						const tokenUsdTotal = chainTokens?.reduce((sum, t) => sum + t.balanceUsd, 0) || 0
+						const chainDefi = defiByChain.get(chainId)
+						const defiUsdTotal = chainDefi?.reduce((sum, p) => sum + (p.balanceUsd || 0), 0) || 0
 						results.push({
 							chainId,
 							symbol: agg.symbol,
 							balance: agg.balance > 0 ? agg.balance.toFixed(18).replace(/0+$/, '').replace(/\.$/, '') : '0',
-							balanceUsd: agg.usd + tokenUsdTotal,
+							// Chain total folds DeFi in so the dashboard $ keeps parity
+							// with zapper.xyz net worth. Wallet tokens are no longer
+							// suppressed, so a wallet-held app-token (e.g. stETH) that the
+							// position also reports can double-count — accepted as the
+							// lesser evil vs hiding sendable balances (see note above).
+							balanceUsd: agg.usd + tokenUsdTotal + defiUsdTotal,
 							nativeBalanceUsd: agg.usd,
 							address: agg.address,
 							tokens: chainTokens && chainTokens.length > 0 ? chainTokens : undefined,
+							defiPositions: chainDefi && chainDefi.length > 0 ? chainDefi : undefined,
 						})
 					}
 
@@ -2857,6 +3189,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const isUtxo = chain.chainFamily === 'utxo'
 				let balance = '0', balanceUsd = 0, address = displayAddress
 				let tokens: TokenBalance[] | undefined
+				let chainDefiPositions: DefiPosition[] | undefined
 				// Snapshot pre-refresh address from cache so we can preserve it on Pioneer failure (Finding 3)
 				let cachedAddress = ''
 				try {
@@ -2883,6 +3216,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						}))
 					const portfolioBody: any = { pubkeys: pubkeys.map(p => ({ caip: p.caip, pubkey: p.pubkey })) }
 					if (extraContracts.length > 0) portfolioBody.extraContracts = extraContracts
+					// Single-chain refresh: only worth fetching DeFi for EVM chains.
+					// Other families can't have Zapper apps and the extra round-trip is wasted.
+					if (isEvm) portfolioBody.includeDefi = true
 					let resp: any
 					try {
 						resp = await withTimeout(
@@ -2895,7 +3231,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						console.warn(`[getBalance] ${chain.coin}: Pioneer rejected extraContracts; retrying without custom tokens`)
 						resp = await withTimeout(
 							pioneer.GetPortfolioBalances(
-								{ pubkeys: portfolioBody.pubkeys },
+								{ pubkeys: portfolioBody.pubkeys, ...(isEvm ? { includeDefi: true } : {}) },
 								{ forceRefresh: true }
 							),
 							PIONEER_TIMEOUT_MS,
@@ -2904,6 +3240,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					}
 					const rawData = resp?.data?.data || resp?.data || {}
 					const allEntries: any[] = rawData.balances || (Array.isArray(rawData) ? rawData : [])
+					const rawDefiPositions: ServerDefiPosition[] = Array.isArray(rawData.defiPositions) ? rawData.defiPositions : []
 
 					console.log(`[getBalance] ${chain.coin}: ${allEntries.length} entries from Pioneer (${pubkeys.length} pubkeys)`)
 
@@ -3076,21 +3413,67 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						}
 					}
 
+					// Group server-merged DeFi by owner address for per-account attribution.
+					// Single-chain refresh: keep ONLY positions on this chain — the server
+					// may return multi-network DeFi for the same EVM address, so without
+					// this filter a Base/Arbitrum position would leak into an Ethereum
+					// refresh. (No token suppression: a position's `tokens[]` are the
+					// protocol's underlyings, not wallet-held duplicates, and the server
+					// sends no type to tell them apart — see the dashboard-path note.)
+					const ownerDefiPositions = new Map<string, DefiPosition[]>()
+					const allChainDefi: DefiPosition[] = []
+					for (const sp of rawDefiPositions) {
+						const spNetworkId = (sp.networkId || '').toLowerCase()
+						if (!spNetworkId || networkToChain.get(spNetworkId) !== chain.id) continue
+						const dp: DefiPosition = {
+							protocol: sp.protocol || null,
+							displayName: sp.displayName,
+							name: sp.displayName || sp.protocol || 'DeFi Position',
+							network: sp.network,
+							networkId: sp.networkId,
+							balanceUsd: Number(sp.balanceUsd) || 0,
+							icon: sp.icon,
+							tokens: Array.isArray(sp.tokens) ? sp.tokens.map(t => ({
+								networkId: t.networkId,
+								address: String(t.address || '').toLowerCase(),
+								symbol: t.symbol,
+							})).filter(t => !!t.address) : [],
+						}
+						allChainDefi.push(dp)
+						const ownerLower = String(sp.pubkey || '').toLowerCase()
+						if (ownerLower) {
+							const list = ownerDefiPositions.get(ownerLower) || []
+							list.push(dp)
+							ownerDefiPositions.set(ownerLower, list)
+						}
+					}
+					if (allChainDefi.length > 0) {
+						console.log(`[getBalance] ${chain.coin}: ${allChainDefi.length} DeFi positions across ${ownerDefiPositions.size} owner(s)`)
+					}
+
 					if (isEvm) {
 						for (const pk of pubkeys) {
 							const ownerAddress = pk.pubkey.toLowerCase()
 							const native = evmNativeByPubkey.get(ownerAddress) || { balance: 0, usd: 0 }
 							const ownerTokens = evmTokensByOwner.get(ownerAddress) || []
 							const tokenUsdTotal = ownerTokens.reduce((sum, t) => sum + t.balanceUsd, 0)
+							const ownerDefi = ownerDefiPositions.get(ownerAddress)
+							const ownerDefiUsd = ownerDefi?.reduce((sum, p) => sum + (p.balanceUsd || 0), 0) || 0
 							evmAddresses.setAddressChainBalance(pk.pubkey, chain.id, {
 								chainId: chain.id,
 								symbol: chain.symbol,
 								balance: native.balance > 0 ? native.balance.toFixed(18).replace(/0+$/, '').replace(/\.$/, '') : '0',
-								balanceUsd: native.usd + tokenUsdTotal,
+								balanceUsd: native.usd + tokenUsdTotal + ownerDefiUsd,
 								nativeBalanceUsd: native.usd,
 								tokens: ownerTokens.length > 0 ? ownerTokens : undefined,
+								defiPositions: ownerDefi && ownerDefi.length > 0 ? ownerDefi : undefined,
 							})
 						}
+					}
+
+					if (isEvm && allChainDefi.length > 0) {
+						balanceUsd += allChainDefi.reduce((s, p) => s + (p.balanceUsd || 0), 0)
+						chainDefiPositions = allChainDefi
 					}
 				} catch (e: any) {
 					const message = getPioneerPortfolioErrorMessage(e)
@@ -3101,8 +3484,19 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// If Pioneer failed or returned no address, preserve the cached address
 				// so we don't wipe a previously good address from the shared cache (Finding 3)
 				if (!address && cachedAddress) address = cachedAddress
-				const nativeBalanceUsd = Number(balanceUsd) - (tokens?.reduce((s, t) => s + (t.balanceUsd || 0), 0) || 0)
-				const result: ChainBalance = { chainId: chain.id, symbol: chain.symbol, balance, balanceUsd, nativeBalanceUsd, address, tokens }
+				const tokensUsd = tokens?.reduce((s, t) => s + (t.balanceUsd || 0), 0) || 0
+				const defiUsd = chainDefiPositions?.reduce((s, p) => s + (p.balanceUsd || 0), 0) || 0
+				const nativeBalanceUsd = Number(balanceUsd) - tokensUsd - defiUsd
+				const result: ChainBalance = {
+					chainId: chain.id,
+					symbol: chain.symbol,
+					balance,
+					balanceUsd,
+					nativeBalanceUsd,
+					address,
+					tokens,
+					defiPositions: chainDefiPositions,
+				}
 
 				// Update single-chain cache + push to frontend so Dashboard stays in sync.
 				// PRIVACY: Skip DB write for passphrase wallets.
@@ -4855,222 +5249,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 				return { hits }
 			},
-			getSwapQuote: async (params) => {
-				const { getSwapQuote } = await import('./swap')
-
-				// Resolve xpub addresses to real receive addresses for UTXO chains.
-				// ChainBalance.address can be an xpub when Pioneer doesn't return
-				// an address field — THORChain rejects xpubs as destination addresses.
-				// Detect extended pubkeys: xpub/ypub/zpub (BTC), dgub (DOGE), Ltub/Mtub (LTC), drkp (DASH), tpub (testnet)
-				const isXpub = (addr: string) => /^(xpub|ypub|zpub|dgub|Ltub|Mtub|drkp|drks|tpub|upub|vpub)/.test(addr)
-
-				if (engine.wallet) {
-					// CAIP-driven: find vault chain by matching CAIP-19 directly.
-					const resolveAddr = async (caip: string, addr: string): Promise<string> => {
-						if (!isXpub(addr)) return addr
-						const chainDef = getAllChains().find(c => c.caip === caip)
-						if (!chainDef || chainDef.chainFamily !== 'utxo') return addr
-						try {
-							const selected = chainDef.id === 'bitcoin' && btcAccounts.isInitialized
-								? btcAccounts.getSelectedXpub() : undefined
-							// selected.path is account-level (3 elements: m/purpose'/0'/account')
-							// btcGetAddress needs full 5-element path — append /0/0 (first receive address)
-							const acctPath = selected?.path || chainDef.defaultPath
-							const addressNList = acctPath.length === 3 ? [...acctPath, 0, 0] : acctPath
-							const scriptType = selected?.scriptType || chainDef.scriptType
-							const result = await engine.wallet.btcGetAddress({
-								addressNList,
-								coin: chainDef.coin,
-								scriptType,
-								showDisplay: false,
-							})
-							const resolved = typeof result === 'string' ? result : result?.address
-							if (resolved) {
-								console.log(`[swap] Resolved xpub → ${resolved} for ${caip}`)
-								return resolved
-							}
-						} catch (e: any) {
-							console.warn(`[swap] Failed to resolve xpub for ${caip}: ${e.message}`)
-						}
-						return addr
-					}
-					params = {
-						...params,
-						fromAddress: await resolveAddr(params.fromCaip, params.fromAddress),
-						toAddress: await resolveAddr(params.toCaip, params.toAddress),
-					}
-				}
-
-				// Fail fast if addresses are still xpubs after resolution attempt
-				if (isXpub(params.fromAddress)) {
-					throw new Error(`Could not resolve source address for ${params.fromCaip} — device may be locked or disconnected`)
-				}
-				if (isXpub(params.toAddress)) {
-					throw new Error(`Could not resolve destination address for ${params.toCaip} — device may be locked or disconnected`)
-				}
-
-				let quote = await getSwapQuote(params)
-
-				// NEAR Intents sendMax fix for all bip122 chains: the first quote commits
-				// NEAR Intents to receiving `params.amount` (full balance), but the UTXO tx
-				// only delivers `balance - miner_fee`. NEAR Intents hard-fails on any
-				// shortfall. Fix: re-quote with the actual net delivery amount.
-				if (
-					quote.swapper === 'NEAR Intents'
-					&& params.isMax
-					&& params.fromCaip.startsWith('bip122:')
-					&& engine.wallet
-				) {
-					try {
-						const { estimateUtxoFee } = await import('./txbuilder/utxo')
-						const { getPioneer: getPio } = await import('./pioneer')
-						const pio = await getPio()
-						const fromChain = getAllChains().find(c => c.caip === params.fromCaip)
-						let estXpubs: Array<{ xpub: string; scriptType: string; accountPath: number[] }> | undefined
-						let estXpub: string | undefined
-						let estAccountPath: number[] | undefined
-						if (fromChain?.id === 'bitcoin') {
-							estXpubs = btcAccounts.isInitialized ? btcAccounts.getFundedXpubs() : []
-						} else if (fromChain) {
-							const results = await (engine.wallet as any).getPublicKeys([{
-								addressNList: fromChain.defaultPath.slice(0, 3),
-								coin: fromChain.coin,
-								scriptType: fromChain.scriptType || 'p2pkh',
-								curve: 'secp256k1',
-							}])
-							estXpub = results?.[0]?.xpub
-							estAccountPath = fromChain.defaultPath.slice(0, 3)
-						}
-						const hasXpub = (estXpubs && estXpubs.length > 0) || estXpub
-						if (fromChain && hasXpub) {
-							const est = await estimateUtxoFee(pio, fromChain, {
-								to: quote.inboundAddress || params.fromAddress,
-								amount: params.amount,
-								isMax: true,
-								feeLevel: params.feeLevel,
-								...(estXpubs && estXpubs.length > 0
-									? { allXpubs: estXpubs }
-									: { xpub: estXpub, accountPath: estAccountPath }),
-							})
-							if (est && est.feeSat > 0) {
-								const netAmount = (est.netSat / 1e8).toFixed(8)
-								console.log(`[swap] NEAR Intents sendMax: re-quoting ${fromChain.symbol} with net ${netAmount} (fee=${est.feeSat} sat)`)
-								quote = { ...await getSwapQuote({ ...params, amount: netAmount, isMax: false }), netFromAmount: netAmount }
-							}
-						}
-					} catch (e: any) {
-						console.warn(`[swap] NEAR Intents fee estimation failed, using original quote: ${e.message}`)
-					}
-				}
-
-				// Cache quote so executeSwap can pass real data to the tracker
-				const cacheKey = `${params.fromCaip}-${params.toCaip}-${params.amount}-${params.slippageBps || 300}-${params.fromAddress}-${params.toAddress}`
-				swapQuoteCache.delete(cacheKey) // delete+set for LRU ordering
-				swapQuoteCache.set(cacheKey, quote)
-				// Keep cache small (last 10 quotes)
-				if (swapQuoteCache.size > 10) {
-					const oldest = swapQuoteCache.keys().next().value
-					if (oldest) swapQuoteCache.delete(oldest)
-				}
-				return quote
-			},
-			executeSwap: async (params) => {
-				if (!engine.wallet) throw new Error('No device connected')
-				const { executeSwap } = await import('./swap')
-				const { trackSwap, isTrackerInitialized, initSwapTracker } = await import('./swap-tracker')
-				// Ensure tracker is initialized before tracking (guards against race/init failure)
-				if (!isTrackerInitialized()) {
-					await initSwapTracker((msg: string, data: any) => {
-						try {
-							if (msg === 'swap-update') rpc.send['swap-update'](data)
-							else if (msg === 'swap-complete') rpc.send['swap-complete'](data)
-							else console.error(`[swap-tracker] Unknown message: ${msg}`)
-						} catch (e: any) {
-							console.warn(`[swap-tracker] Failed to send '${msg}':`, e.message)
-						}
-					}, { getDeviceId: () => getWalletDbScope()?.deviceId, getWalletId: () => getWalletDbScope()?.walletId })
-				}
-				// Look up cached quote BEFORE executing so we can use netFromAmount to
-				// override the send amount for NEAR Intents bip122 sendMax swaps.
-				let cachedQuote: Awaited<ReturnType<typeof getSwapQuote>> | undefined
-				for (const [key, val] of swapQuoteCache) {
-					// Key format: fromCaip-toCaip-amount-slippageBps-fromAddress-toAddress
-					const keyPrefix = `${params.fromCaip}-${params.toCaip}-${params.amount}-`
-					if (key.startsWith(keyPrefix) && val.inboundAddress === params.inboundAddress) {
-						cachedQuote = val
-						break
-					}
-				}
-				if (!cachedQuote) console.warn('[index] No cached quote for swap tracker — using fallback data')
-
-				// For NEAR Intents bip122 sendMax: the re-quote stored netFromAmount
-				// (balance - estimated fee). Use it with isMax=false so buildTx's
-				// coinSelectSplit outputs exactly that amount instead of (balance - actualFee),
-				// which may diverge from estimatedFee and cause INCOMPLETE_DEPOSIT.
-				let execParams = params
-				if (
-					cachedQuote?.netFromAmount
-					&& params.isMax
-					&& params.fromCaip.startsWith('bip122:')
-					&& (params.swapper === 'NEAR Intents' || params.integration === 'nearIntents')
-				) {
-					execParams = { ...params, amount: cachedQuote.netFromAmount, isMax: false }
-					console.log(`[swap] NEAR Intents sendMax: net amount ${cachedQuote.netFromAmount} (was ${params.amount}), isMax→false`)
-				}
-
-				const result = await executeSwap(execParams, {
-					wallet: engine.wallet,
-					getAllChains,
-					getRpcUrl,
-					getBtcXpub: () => {
-						if (btcAccounts.isInitialized) {
-							const selected = btcAccounts.getSelectedXpub()
-							if (selected) return { xpub: selected.xpub, accountPath: selected.path }
-						}
-						return undefined
-					},
-					getAllBtcXpubs: () => {
-						if (btcAccounts.isInitialized) return btcAccounts.getFundedXpubs()
-						return []
-					},
-					wrapSign: engine.isEmulator
-						? (fn, details) => emuSigningOp(fn, details)
-						: (fn) => fn(),
-					pushSubStage: (stage) => {
-						try { rpc.send["swap-substage"]({ stage }) } catch { /* webview not ready */ }
-					},
-					isAdvancedModeEnabled: getAdvancedModeEnabled,
-				})
-				const scope = getWalletDbScope()
-				// Register swap for tracking (non-blocking)
-				try {
-					const trackParams = cachedQuote?.netFromAmount
-						? { ...execParams, amount: cachedQuote.netFromAmount }
-						: execParams
-					trackSwap(result, trackParams, {
-						expectedOutput: cachedQuote?.expectedOutput || params.expectedOutput,
-						minimumOutput: cachedQuote?.minimumOutput || '0',
-						inboundAddress: cachedQuote?.inboundAddress || params.inboundAddress,
-						router: cachedQuote?.router || params.router,
-						memo: cachedQuote?.memo || params.memo,
-						expiry: cachedQuote?.expiry || params.expiry,
-						fees: cachedQuote?.fees || { affiliate: '0', outbound: '0', totalBps: 0 },
-						estimatedTime: cachedQuote?.estimatedTime || 600,
-						slippageBps: cachedQuote?.slippageBps || 300,
-						integration: cachedQuote?.integration || 'thorchain',
-						swapper: cachedQuote?.swapper,
-						nearIntentsDepositAddress: cachedQuote?.nearIntentsDepositAddress,
-					}, { skipPersist: engine.isPassphraseWallet || !scope, deviceId: scope?.deviceId, walletId: scope?.walletId })
-				} catch (e: any) {
-					console.warn('[index] Failed to register swap for tracking:', e.message)
-				}
-				// Track swap in api_log. PRIVACY: Skip DB write for passphrase wallets.
-				if (!engine.isPassphraseWallet && scope) {
-					const fromChain = getAllChains().find(c => c.id === params.fromChainId)
-					insertApiLog({ ...scope, method: 'RPC', route: 'executeSwap', timestamp: Date.now(), durationMs: 0, status: 200, appName: 'vault', txid: result.txid, chain: fromChain?.symbol || params.fromChainId, activityType: 'swap' })
-				}
-				return result
-			},
+			getSwapQuote: (params) => headlessSwapQuote(params),
+			executeSwap: (params) => headlessExecuteSwap(params, (stage) => {
+				try { rpc.send["swap-substage"]({ stage }) } catch { /* webview not ready */ }
+			}),
 			getPendingSwaps: async () => {
 				// Hidden sessions DO get pending swaps: the tracker holds them in RAM
 				// (registerSwap with skipPersist → noPersistSwaps), so this exposes only

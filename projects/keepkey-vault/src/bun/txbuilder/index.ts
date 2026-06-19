@@ -111,6 +111,7 @@ export async function buildTx(
         allXpubs: params.allXpubs,
         scriptTypeOverride: params.scriptTypeOverride,
         accountPath: params.accountPath,
+        satPerVByte: params.satPerVByte,
       })
       const { fee: utxoFee, ...utxoTx } = utxoResult
       return { unsignedTx: utxoTx, fee: utxoFee }
@@ -130,6 +131,8 @@ export async function buildTx(
         tokenDecimals: params.tokenDecimals,
         rpcUrl: params.rpcUrl,
         addressIndex: params.evmAddressIndex,
+        gasPriceGwei: params.gasPriceGwei,
+        gasLimit: params.gasLimit,
       })
       // Strip non-tx metadata so only hdwallet-compatible fields reach ethSignTx
       const { fee, ...unsignedTx } = evmResult
@@ -142,6 +145,7 @@ export async function buildTx(
         to: params.to,
         amount: params.amount,
         memo: params.memo,
+        feeLevel: params.feeLevel,
         isMax: params.isMax,
         isSwapDeposit: params.isSwapDeposit,
         fromAddress: params.fromAddress,

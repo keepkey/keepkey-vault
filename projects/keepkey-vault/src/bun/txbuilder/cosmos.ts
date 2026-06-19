@@ -93,7 +93,7 @@ export interface BuildCosmosParams {
   to: string
   amount: string    // human-readable (e.g. "1.5")
   memo?: string
-  feeLevel?: number // 1=slow, 5=fast (default 5)
+  feeLevel?: number // 1-2=slow, 3-4=avg, 5+=fast (default 5)
   isMax?: boolean
   isSwapDeposit?: boolean // use MsgDeposit instead of MsgSend (for THORChain/Maya swaps)
   fromAddress: string

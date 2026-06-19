@@ -480,6 +480,41 @@ export const SwapQuoteRequest = z.object({
   slippage: z.number().optional(),
 }).passthrough()
 
+// ── Headless swap (BEX swap epic) — POST /api/v2/swap/{quote,execute} ──
+// Match SwapQuoteParams / ExecuteSwapParams in shared/types.ts. passthrough()
+// keeps forward-compat with tracker fields the executor reads as fallbacks.
+export const SwapQuoteHeadlessRequest = z.object({
+  fromCaip: z.string(),
+  toCaip: z.string(),
+  amount: z.string(),
+  fromAddress: z.string(),
+  toAddress: z.string(),
+  slippageBps: z.number().int().min(10).max(5000).optional(),
+  isMax: z.boolean().optional(),
+  feeLevel: z.number().optional(),
+}).passthrough()
+
+export const SwapExecuteHeadlessRequest = z.object({
+  fromChainId: z.string(),
+  toChainId: z.string(),
+  fromCaip: z.string(),
+  toCaip: z.string(),
+  amount: z.string(),
+  memo: z.string(),
+  inboundAddress: z.string(),
+  expectedOutput: z.string(),
+  router: z.string().optional(),
+  expiry: z.number().optional(),
+  isMax: z.boolean().optional(),
+  feeLevel: z.number().optional(),
+  fromAddressOverride: z.string().optional(),
+  toAddressOverride: z.string().optional(),
+  fromEvmAddressIndex: z.number().optional(),
+  integration: z.string().optional(),
+  swapper: z.string().optional(),
+  tokenDecimals: z.number().optional(),
+}).passthrough()
+
 // ── Swap UI control (REST → SwapDialog) ────────────────────────────────
 // Mirrors SwapUiCommand discriminated union in shared/types.ts.
 

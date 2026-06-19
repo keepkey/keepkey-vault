@@ -57,12 +57,33 @@ interface AssetPageProps {
 	initialToken?: TokenBalance
 	/** Navigate to the full Activity page filtered by this chain */
 	onViewActivity?: (chainId: string) => void
+	/**
+	 * Watch-only mode: balances come from a cached non-connected wallet.
+	 * Signing flows (Send / Swap / Privacy / Sweep / Sign-message) must be
+	 * suppressed so the live USB device isn't asked to sign against another
+	 * wallet's balances.
+	 */
+	watchOnly?: boolean
 }
 
-export function AssetPage({ chain, balance, onBack, firmwareVersion, initialAction, initialToken, onViewActivity }: AssetPageProps) {
+export function AssetPage({ chain, balance, onBack, firmwareVersion, initialAction, initialToken, onViewActivity, watchOnly }: AssetPageProps) {
 	const { t } = useTranslation("asset")
 	const { fmtCompact, symbol: fiatSymbol } = useFiat()
-	const [view, setView] = useState<AssetView>(initialAction === "send" ? "send" : initialAction === "privacy" ? "privacy" : "receive")
+	// Watch-only mode never lands on a signing view, regardless of the
+	// requested initialAction.
+	const safeInitial = watchOnly ? "receive" : initialAction
+	const [view, setViewRaw] = useState<AssetView>(safeInitial === "send" ? "send" : safeInitial === "privacy" ? "privacy" : "receive")
+	// Every setView call inside AssetPage flows through this guard. Watch-only
+	// view of a non-connected wallet must NEVER reach a signing flow — the
+	// live USB device would sign against the wrong wallet's balances. Any
+	// attempt to switch to 'send' or 'privacy' is redirected to 'receive'.
+	const setView = (v: AssetView) => {
+		if (watchOnly && (v === "send" || v === "privacy")) {
+			setViewRaw("receive")
+			return
+		}
+		setViewRaw(v)
+	}
 	const [selectedToken, setSelectedToken] = useState<TokenBalance | null>(initialToken ?? null)
 	const [copiedCaip, setCopiedCaip] = useState<string | null>(null)
 	const [address, setAddress] = useState<string | null>(balance?.address || null)
@@ -138,6 +159,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 			nativeBalanceUsd: selectedEvmChainBalance.nativeBalanceUsd,
 			address: selectedEvmAddress.address,
 			tokens: selectedEvmChainBalance.tokens,
+			defiPositions: selectedEvmChainBalance.defiPositions,
 		}
 		: baseBalance
 
@@ -362,9 +384,14 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 	const cleanBalanceUsd = (activeBalance?.balanceUsd || 0) - spamTotalUsd
 
 	const [showAddToken, setShowAddToken] = useState(false)
-	const [showSwapDialog, setShowSwapDialog] = useState(initialAction === "swap")
-	const [showSweep, setShowSweep] = useState(false)
-	const [showNameReg, setShowNameReg] = useState(false)
+	// Watch-only mode never opens signing dialogs, regardless of how they're
+	// triggered (initialAction prop, action-row button, hotkey, dApp request).
+	const [showSwapDialog, setShowSwapDialogRaw] = useState(initialAction === "swap" && !watchOnly)
+	const setShowSwapDialog = (open: boolean) => { if (open && watchOnly) return; setShowSwapDialogRaw(open) }
+	const [showSweep, setShowSweepRaw] = useState(false)
+	const setShowSweep = (open: boolean) => { if (open && watchOnly) return; setShowSweepRaw(open) }
+	const [showNameReg, setShowNameRegRaw] = useState(false)
+	const setShowNameReg = (open: boolean) => { if (open && watchOnly) return; setShowNameRegRaw(open) }
 
 	// Scoped Pioneer push subscription: only refresh while this page is mounted,
 	// and only when the event chain matches this asset or the active swap output.
@@ -489,17 +516,20 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 		}
 	}, [selectedToken, chain])
 
+	// Action pills. In watch-only mode, only Receive is exposed — Send/Swap/
+	// Privacy would build a tx against the live USB device using THIS
+	// (cached, non-connected) wallet's balances.
 	const PILLS: { id: AssetView | 'swap'; label: string; color: string; bg: string; icon: JSX.Element }[] = [
 		...(!selectedToken ? [{ id: "receive" as const, label: t("receive"), color: '#4ade80', bg: 'rgba(74,222,128,0.12)', icon: (
 			<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#4ade80" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19" /><polyline points="5 12 12 19 19 12" /></svg>
 		) }] : []),
-		{ id: "send", label: t("send"), color: '#fb923c', bg: 'rgba(251,146,60,0.12)', icon: (
+		...(!watchOnly ? [{ id: "send" as const, label: t("send"), color: '#fb923c', bg: 'rgba(251,146,60,0.12)', icon: (
 			<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fb923c" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="19" x2="12" y2="5" /><polyline points="5 12 12 5 19 12" /></svg>
-		) },
-		...(swappableChainIds.has(chain.id) ? [{ id: "swap" as const, label: t("swap"), color: '#60a5fa', bg: 'rgba(96,165,250,0.12)', icon: (
+		) }] : []),
+		...(!watchOnly && swappableChainIds.has(chain.id) ? [{ id: "swap" as const, label: t("swap"), color: '#60a5fa', bg: 'rgba(96,165,250,0.12)', icon: (
 			<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polyline points="17 1 21 5 17 9" /><path d="M3 11V9a4 4 0 0 1 4-4h14" /><polyline points="7 23 3 19 7 15" /><path d="M21 13v2a4 4 0 0 1-4 4H3" /></svg>
 		) }] : []),
-		...(!selectedToken && zcashPrivacyEnabled && zcashShieldedSupported ? [{ id: "privacy" as const, label: t("privacy"), color: '#a78bfa', bg: 'rgba(167,139,250,0.12)', icon: (
+		...(!watchOnly && !selectedToken && zcashPrivacyEnabled && zcashShieldedSupported ? [{ id: "privacy" as const, label: t("privacy"), color: '#a78bfa', bg: 'rgba(167,139,250,0.12)', icon: (
 			<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>
 		) }] : []),
 	]
@@ -1067,7 +1097,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 								chain={chain}
 								address={address}
 								availableBalance={activeBalance?.balance || '0'}
-								watchOnly={!address}
+								watchOnly={watchOnly || !address}
 							/>
 						</Suspense>
 					</Box>
@@ -1181,11 +1211,16 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 				)}
 
 				{/* DeFi Positions — EVM chains only, below the token table. Protocol
-				    holdings (staked / supplied / borrowed / LP / claimable) from the
-				    Zapper proxy, kept separate from plain wallet tokens. */}
+				    holdings (staked / supplied / borrowed / LP / claimable) sourced
+				    from the dashboard refresh (GetPortfolioBalances includeDefi=true).
+				    EVM chains are always queried with includeDefi, so the server
+				    result is authoritative — pass `?? []` (never undefined) so an
+				    empty result renders empty instead of falling back to the legacy
+				    address-wide getDefiPositions RPC, which would surface this
+				    address's positions from OTHER chains on this chain's page. */}
 				{!selectedToken && isEvmChain && address && (
 					<Suspense fallback={null}>
-						<DefiPositionsPanel address={address} color={chain.color} />
+						<DefiPositionsPanel address={address} color={chain.color} positions={activeBalance?.defiPositions ?? []} />
 					</Suspense>
 				)}
 

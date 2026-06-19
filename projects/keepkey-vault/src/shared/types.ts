@@ -126,24 +126,50 @@ export interface ChainBalance {
   nativeBalanceUsd?: number  // native-only USD (excludes tokens)
   address: string
   tokens?: TokenBalance[]
+  /**
+   * DeFi protocol positions attributed to this chain, populated when the
+   * server returns `defiPositions` (GetPortfolioBalances with includeDefi=true).
+   * Additive: their USD is folded into the chain total and they render in a
+   * dedicated panel. The vault does NOT suppress wallet `tokens` that share a
+   * contract with a position — a position's tokens are protocol underlyings
+   * (LP legs, the native-ETH zero address), not wallet-held duplicates, and the
+   * server sends no type to tell an app-token apart from a contract/LP position.
+   * Consequence: a wallet-held app-token (e.g. stETH) the position also reports
+   * can double-count until the server provides a position type.
+   */
+  defiPositions?: DefiPosition[]
   updatedAt?: number    // unix ms — when this chain's balance was last confirmed non-zero from Pioneer
 }
 
-// DeFi position from the Zapper portfolio endpoint
-// (https://api.keepkey.info/api/v1/zapper/portfolio/{address}). Distinct from a
-// plain wallet TokenBalance: these are protocol positions (staked, supplied,
-// borrowed, LP, claimable, etc.) surfaced under their own section in the UI.
+// DeFi position. The server-side merged path (includeDefi=true) is the
+// canonical source; the legacy fields below (isDefi, type, metaType, balance,
+// symbol, name) are retained so prior shapes built by classifyDefiPosition
+// continue to deserialize cleanly.
 export interface DefiPosition {
-  isDefi: boolean          // always true for entries returned to the UI; see classifyDefiPosition
-  protocol: string | null  // appId (e.g. "aave-v3", "uniswap-v3") or null
-  name: string             // display label (e.g. "Supplied USDC", "ETH / USDC LP")
-  symbol: string           // underlying token ticker when known
-  network: string          // network slug from Zapper (e.g. "ethereum", "base")
-  type: string             // tokenType (e.g. "contract-position", "app-token")
-  metaType: string | null  // position meta (e.g. "supplied", "borrowed", "claimable", "staked")
-  balance: string          // human-readable underlying amount
-  balanceUsd: number       // USD value of the position
-  icon?: string            // icon URL when provided by Zapper
+  // === Server-side (canonical) ===
+  protocol: string | null   // Zapper appId slug ("lido", "morpheus", "aave-v3") or null
+  displayName?: string      // Pretty protocol name from the server ("Lido", "Morpheus")
+  network: string           // Zapper network display ("Ethereum") or legacy slug ("ethereum")
+  networkId?: string        // CAIP-2 chain ("eip155:1") — used to attribute the position to a chain
+  balanceUsd: number        // USD value Zapper attributes to the protocol for this pubkey
+  icon?: string
+  /**
+   * The protocol's underlying ERC-20 legs (e.g. an LP's token pair). NOT
+   * wallet-held duplicates — display/metadata only; not used for suppression.
+   */
+  tokens?: Array<{
+    networkId: string
+    address: string
+    symbol?: string
+  }>
+
+  // === Legacy (classifyDefiPosition / /zapper/portfolio path) ===
+  isDefi?: boolean
+  name?: string             // display label (e.g. "Supplied USDC", "ETH / USDC LP")
+  symbol?: string           // underlying token ticker when known
+  type?: string             // tokenType (e.g. "contract-position", "app-token")
+  metaType?: string | null  // position meta (e.g. "supplied", "borrowed", "claimable", "staked")
+  balance?: string          // human-readable underlying amount
 }
 
 export interface BuildTxParams {
@@ -162,6 +188,10 @@ export interface BuildTxParams {
   scriptTypeOverride?: string  // BTC multi-account: use this scriptType instead of default
   accountPath?: number[]       // BTC multi-account: account-level path [purpose+H, coinType+H, account+H]
   evmAddressIndex?: number     // EVM multi-address: derivation index (default 0)
+  // Custom (free-form) fee overrides — when present, replace the feeLevel preset.
+  gasPriceGwei?: string        // EVM custom gas price in gwei (legacy gasPrice)
+  gasLimit?: string            // EVM custom gas limit (gas units)
+  satPerVByte?: number         // UTXO custom fee rate (sat/vByte)
 }
 
 // ── Staking / delegation types ───────────────────────────────────────────
@@ -259,6 +289,7 @@ export interface EvmAddressChainBalance {
   balanceUsd: number
   nativeBalanceUsd: number
   tokens?: TokenBalance[]
+  defiPositions?: DefiPosition[]
 }
 
 export interface EvmTrackedAddress {

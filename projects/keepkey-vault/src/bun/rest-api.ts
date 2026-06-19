@@ -67,6 +67,12 @@ export interface RestApiCallbacks {
   getDeviceSwapAssets?: () => Promise<import('../shared/types').SwapAsset[]>
   /** Push a swap-cmd to the WebView (used by /api/v2/swap/{open,set,requote,close}) */
   sendSwapCmd?: (cmd: import('../shared/types').SwapUiCommand) => void
+  /** Headless swap quote (BEX swap epic) — same engine as the dialog, no GUI.
+   *  Wraps getSwapQuote + reserve/net-amount re-quote. Used by POST /api/v2/swap/quote. */
+  getSwapQuoteHeadless?: (params: import('../shared/types').SwapQuoteParams) => Promise<import('../shared/types').SwapQuote>
+  /** Headless swap execute — signs on the device, broadcasts, registers tracking.
+   *  Used by POST /api/v2/swap/execute. Device still gates the signature. */
+  executeSwapHeadless?: (params: import('../shared/types').ExecuteSwapParams) => Promise<import('../shared/types').SwapResult>
   /** Returns initialized Pioneer client (for debug endpoints) */
   getPioneer?: () => Promise<any>
   /** Returns the active Pioneer API base URL */
