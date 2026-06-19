@@ -74,14 +74,16 @@ export function DefiPositionsPanel({ address, color, positions: positionsFromPro
 	const renderRow = (pos: DefiPosition, key: string) => (
 		<Box
 			key={key}
+			className="v3-glass-row"
 			w="100%"
 			py="2"
 			px="3"
-			bg="kk.cardBg"
-			border="1px solid"
-			borderColor={pos.balanceUsd > 0 ? `${color}30` : "kk.border"}
-			borderRadius="lg"
+			bg="transparent"
+			borderLeft="2px solid"
+			borderLeftColor={pos.balanceUsd > 0 ? `${color}80` : "transparent"}
+			borderRadius="md"
 			opacity={pos.balanceUsd > 0 ? 1 : 0.6}
+			transition="all 0.15s"
 		>
 			<Flex align="center" justify="space-between">
 				<HStack gap="2" flex="1" minW="0">
@@ -114,21 +116,66 @@ export function DefiPositionsPanel({ address, color, positions: positionsFromPro
 					</Box>
 				</HStack>
 				<Box textAlign="right" flexShrink={0}>
-					<Text fontSize="xs" fontFamily="mono" fontWeight="500" color="white" lineHeight="1.2">
-						{fmtCompact(pos.balanceUsd)}
-					</Text>
-					{Number(pos.balance) > 0 && (
-						<Text fontSize="11px" color="kk.textMuted" lineHeight="1.2" fontFamily="mono">
-							{formatBalance(pos.balance)} {pos.symbol}
-						</Text>
-					)}
+					{(() => {
+						// Surface the absolute amount alongside USD. Three sources, in
+						// order of preference:
+						//   1. Legacy classifier shape (pos.balance + pos.symbol)
+						//   2. Server-merged single-constituent (tokens[0].balance + symbol)
+						//   3. Server-merged multi-constituent — combine token symbols
+						let amount: string | null = null
+						let symbol: string | undefined
+						let titleFull: string | undefined
+						if (pos.balance && Number(pos.balance) > 0) {
+							amount = formatBalance(pos.balance)
+							symbol = pos.symbol
+							titleFull = `${pos.balance} ${pos.symbol || ''}`.trim()
+						} else if (pos.tokens && pos.tokens.length > 0) {
+							const withBal = pos.tokens.filter(t => t.balance && Number(t.balance) > 0)
+							if (withBal.length === 1) {
+								amount = formatBalance(withBal[0].balance!)
+								symbol = withBal[0].symbol
+								titleFull = `${withBal[0].balance} ${withBal[0].symbol || ''}`.trim()
+							} else if (withBal.length > 1) {
+								amount = withBal.map(t => `${formatBalance(t.balance!)} ${t.symbol || ''}`.trim()).join(' · ')
+								titleFull = withBal.map(t => `${t.balance} ${t.symbol || ''}`.trim()).join('  +  ')
+							}
+						}
+						return (
+							<>
+								<Text
+									fontSize="13px"
+									fontFamily="mono"
+									fontWeight="600"
+									color="white"
+									lineHeight="1.2"
+									title={titleFull}
+									cursor={titleFull ? "help" : undefined}
+								>
+									{fmtCompact(pos.balanceUsd)}
+								</Text>
+								{amount && (
+									<Text
+										fontSize="11px"
+										color="kk.textMuted"
+										lineHeight="1.3"
+										mt="0.5"
+										fontFamily="mono"
+										title={titleFull}
+										cursor={titleFull ? "help" : undefined}
+									>
+										{amount}{symbol ? ` ${symbol}` : ''}
+									</Text>
+								)}
+							</>
+						)
+					})()}
 				</Box>
 			</Flex>
 		</Box>
 	)
 
 	return (
-		<Box mt="6">
+		<Box>
 			<Flex align="center" justify="space-between" mb="3" px="1">
 				<Text fontSize="11px" fontWeight="500" color="var(--text-3)" textTransform="uppercase" letterSpacing="0.18em">
 					{t("defiPositions")}{live.length > 0 && ` · ${live.length}`}
@@ -142,7 +189,7 @@ export function DefiPositionsPanel({ address, color, positions: positionsFromPro
 			</Flex>
 
 			{live.length > 0 ? (
-				<VStack gap="1.5">
+				<VStack gap="0" align="stretch">
 					{live.map((p, i) => renderRow(p, `live-${i}`))}
 				</VStack>
 			) : (
@@ -166,7 +213,7 @@ export function DefiPositionsPanel({ address, color, positions: positionsFromPro
 						{showHidden ? t("hideFiltered", { count: dust.length }) : t("showFiltered", { count: dust.length })}
 					</Button>
 					{showHidden && (
-						<VStack gap="1.5" mt="2">
+						<VStack gap="0" align="stretch" mt="2">
 							{dust.map((p, i) => renderRow(p, `dust-${i}`))}
 						</VStack>
 					)}
