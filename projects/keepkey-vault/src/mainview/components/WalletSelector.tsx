@@ -127,21 +127,38 @@ export function WalletSelector({
 			top={`${anchor.top}px`}
 			left={`${anchor.left}px`}
 			zIndex={9999}
-			bg="rgba(11,11,14,0.98)"
-			backdropFilter="blur(20px)"
-			border="1px solid var(--line)"
-			borderRadius="lg"
-			boxShadow="0 12px 40px rgba(0,0,0,0.6)"
+			// Solid graphite + strong frosted blur so the sidebar chain list
+			// behind the popover doesn't bleed visually into the wallet rows
+			// (the two layouts look structurally similar and got confused).
+			bg="linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.015)), rgba(11,11,14,0.94)"
+			backdropFilter="blur(28px) saturate(160%)"
+			border="1px solid rgba(255,255,255,0.14)"
+			borderRadius="16px"
+			boxShadow="0 0 0 1px rgba(0,0,0,0.4), 0 24px 64px -12px rgba(0,0,0,0.85), 0 6px 16px -4px rgba(0,0,0,0.55)"
 			w="320px"
 			maxH="min(70vh, 480px)"
 			overflowY="auto"
 			py="1.5"
 			className="electrobun-webkit-app-region-no-drag"
 		>
-			<Flex align="center" justify="space-between" px="3" py="1.5" mb="0.5">
-				<Text fontSize="10px" color="var(--text-3)" letterSpacing="0.18em" textTransform="uppercase">
-					{t("walletSelectorTitle", { defaultValue: "Wallets" })}
-				</Text>
+			<Flex
+				align="center"
+				justify="space-between"
+				px="3"
+				py="2"
+				mb="1"
+				borderBottom="1px solid rgba(255,255,255,0.07)"
+			>
+				<Flex align="center" gap="2">
+					<Box as="svg" width="11px" height="11px" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" color="var(--gold)">
+						<path d="M21 12V7H5a2 2 0 0 1 0-4h14v4" />
+						<path d="M3 5v14a2 2 0 0 0 2 2h16v-5" />
+						<path d="M18 12a2 2 0 0 0 0 4h4v-4Z" />
+					</Box>
+					<Text fontSize="11px" fontWeight="600" color="var(--text-1)" letterSpacing="0.22em" textTransform="uppercase">
+						{t("walletSelectorTitle", { defaultValue: "Wallets" })}
+					</Text>
+				</Flex>
 				{loading && (
 					<Text fontSize="9px" color="var(--text-3)">…</Text>
 				)}
