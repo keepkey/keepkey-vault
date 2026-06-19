@@ -636,6 +636,53 @@ export function resetSwapUiState(): void {
 		outboundTxid: null, relayRequestId: null, refundReason: null,
 	}
 	swapUiUpdatedAt = Date.now()
+	notifySwapUiWaiters(swapUiState)
+}
+
+// ── Headless swap review bridge ───────────────────────────────────────────
+// A swap must NEVER reach the device without Vault showing the user exactly
+// what they're signing — the firmware can only render "send X to <addr>", which
+// hides the swap intent (router/inbound address + opaque memo). So the REST
+// /execute path drives Vault's real SwapDialog to its review screen and blocks
+// on the user's on-screen approval. These waiters let that Bun-side flow observe
+// the dialog's state mirror (published via publishSwapUiState). Mirrors the
+// WalletConnect requestSigningApproval gate.
+type SwapUiWaiter = (state: SwapUiState) => void
+const swapUiWaiters = new Set<SwapUiWaiter>()
+function notifySwapUiWaiters(state: SwapUiState): void {
+	for (const w of [...swapUiWaiters]) { try { w(state) } catch { /* waiter threw — ignore */ } }
+}
+// True while a REST-driven swap review occupies the singleton dialog.
+let headlessSwapReviewInFlight = false
+
+/** Resolve once the SwapDialog state satisfies `predicate('resolve')`, reject on
+ *  `'reject'` or timeout. Evaluates the current snapshot first (it may already
+ *  satisfy), then subscribes to future publishes. The predicate is free to hold
+ *  closure state (e.g. "have we seen the dialog open yet"). */
+function awaitSwapUiState(
+	predicate: (s: SwapUiState) => 'resolve' | 'reject' | 'wait',
+	timeoutMs: number,
+	timeoutMsg: string,
+): Promise<SwapUiState> {
+	return new Promise<SwapUiState>((resolve, reject) => {
+		let settled = false
+		const cleanup = () => { swapUiWaiters.delete(waiter); clearTimeout(timer) }
+		const waiter: SwapUiWaiter = (s) => {
+			if (settled) return
+			const verdict = predicate(s)
+			if (verdict === 'wait') return
+			settled = true; cleanup()
+			if (verdict === 'resolve') resolve(s)
+			else reject(new Error(s.error || 'Swap review was cancelled'))
+		}
+		const timer = setTimeout(() => {
+			if (settled) return
+			settled = true; cleanup()
+			reject(new Error(timeoutMsg))
+		}, timeoutMs)
+		swapUiWaiters.add(waiter)
+		waiter(getSwapUiState().state)
+	})
 }
 
 // Refcounted setAlwaysOnTop. Multiple sources (WC pair approval, signing
@@ -1102,7 +1149,7 @@ const restCallbacks: RestApiCallbacks = {
 	// Headless swap (BEX swap epic): same engine as the in-app dialog, no GUI in
 	// the loop. The device still gates every signature. NOOP substage push.
 	getSwapQuoteHeadless: (params) => headlessSwapQuote(params),
-	executeSwapHeadless: (params) => headlessExecuteSwap(params, () => { /* headless: no WebView substage */ }),
+	executeSwapHeadless: (params) => headlessExecuteSwap(params),
 	getPioneer: () => getPioneer(),
 	getPioneerApiBase: () => getPioneerApiBase(),
 	setPioneerApiBase: async (url: string) => {
@@ -1153,7 +1200,7 @@ async function applyRestApiState() {
 // REST API started in deferredInit() after DB is ready
 
 // ── Swap quote cache (last 10 quotes for tracker data) ───────────────
-import type { SwapQuote, SwapQuoteParams, ExecuteSwapParams, SwapResult, SwapSubStage } from '../shared/types'
+import type { SwapQuote, SwapQuoteParams, ExecuteSwapParams, SwapResult, SwapUiCommand, SwapUiState } from '../shared/types'
 const swapQuoteCache = new Map<string, SwapQuote>()
 
 // ── Emulator confirm helper ──────────────────────────────────────────
@@ -1323,11 +1370,50 @@ function maybeStartBackgroundWalletVerification(): void {
 async function headlessSwapQuote(params: SwapQuoteParams): Promise<SwapQuote> {
 	const { getSwapQuote } = await import('./swap')
 
+	// Derive missing addresses from the connected device. The BEX swap UI omits
+	// fromAddress/toAddress on /quote (it can't resolve a receive address for a
+	// chain the user may not already hold). The device owns every chain's key, so
+	// fill them in here — mirrors executeSwap's defaultPath derivation. Any xpub
+	// that comes back is normalized to a receive address by the block below.
+	if (engine.wallet && (!params.fromAddress || !params.toAddress)) {
+		const deriveAddressForCaip = async (caip: string): Promise<string | undefined> => {
+			const chainPrefix = caip.split('/')[0]
+			const chain = getAllChains().find(c => c.caip === caip)
+				?? getAllChains().find(c => c.caip?.split('/')[0] === chainPrefix)
+			if (!chain) return undefined
+			const addrParams: any = {
+				addressNList: chain.defaultPath,
+				showDisplay: false,
+				coin: chain.chainFamily === 'evm' ? 'Ethereum' : chain.coin,
+			}
+			if (chain.scriptType) addrParams.scriptType = chain.scriptType
+			const method = chain.id === 'ripple' ? 'rippleGetAddress' : chain.rpcMethod
+			const res = await (engine.wallet as any)[method](addrParams)
+			return typeof res === 'string' ? res : res?.address
+		}
+		if (!params.fromAddress) {
+			const a = await deriveAddressForCaip(params.fromCaip)
+			if (!a) throw new Error(`Could not derive source address for ${params.fromCaip} — device may be locked or disconnected`)
+			params = { ...params, fromAddress: a }
+		}
+		if (!params.toAddress) {
+			const a = await deriveAddressForCaip(params.toCaip)
+			if (!a) throw new Error(`Could not derive destination address for ${params.toCaip} — device may be locked or disconnected`)
+			params = { ...params, toAddress: a }
+		}
+	}
+
 	// Resolve xpub addresses to real receive addresses for UTXO chains.
 	// ChainBalance.address can be an xpub when Pioneer doesn't return
 	// an address field — THORChain rejects xpubs as destination addresses.
 	// Detect extended pubkeys: xpub/ypub/zpub (BTC), dgub (DOGE), Ltub/Mtub (LTC), drkp (DASH), tpub (testnet)
 	const isXpub = (addr: string) => /^(xpub|ypub|zpub|dgub|Ltub|Mtub|drkp|drks|tpub|upub|vpub)/.test(addr)
+
+	// Addresses are guaranteed present at this point — either derived above from
+	// the device, or supplied by the caller. Fail fast if neither (e.g. no device).
+	if (!params.fromAddress || !params.toAddress) {
+		throw new Error('Swap quote requires source and destination addresses')
+	}
 
 	if (engine.wallet) {
 		// CAIP-driven: find vault chain by matching CAIP-19 directly.
@@ -1367,10 +1453,10 @@ async function headlessSwapQuote(params: SwapQuoteParams): Promise<SwapQuote> {
 	}
 
 	// Fail fast if addresses are still xpubs after resolution attempt
-	if (isXpub(params.fromAddress)) {
+	if (isXpub(params.fromAddress!)) {
 		throw new Error(`Could not resolve source address for ${params.fromCaip} — device may be locked or disconnected`)
 	}
-	if (isXpub(params.toAddress)) {
+	if (isXpub(params.toAddress!)) {
 		throw new Error(`Could not resolve destination address for ${params.toCaip} — device may be locked or disconnected`)
 	}
 
@@ -1440,100 +1526,90 @@ async function headlessSwapQuote(params: SwapQuoteParams): Promise<SwapQuote> {
 	return quote
 }
 
-async function headlessExecuteSwap(params: ExecuteSwapParams, pushSubStage: (stage: SwapSubStage) => void): Promise<SwapResult> {
+/** Headless (REST/BEX) swap execute — but NOT headless signing. A swap must
+ *  never reach the device without Vault showing the user exactly what they're
+ *  signing, because the firmware can only render "send X to <addr>" and cannot
+ *  convey the swap intent (router/inbound address + opaque memo). So instead of
+ *  signing directly, this drives Vault's real SwapDialog to its review screen,
+ *  seeded with this swap, and blocks until the user approves on-screen (the
+ *  dialog's own confirm → device-sign → trackSwap path runs) or cancels.
+ *
+ *  The signed quote is therefore Vault's authoritative re-quote, not the
+ *  caller's pre-estimate. Rejecting in Vault surfaces as a thrown 409. */
+async function headlessExecuteSwap(params: ExecuteSwapParams): Promise<SwapResult> {
 	if (!engine.wallet) throw new Error('No device connected')
-	const { executeSwap } = await import('./swap')
-	const { trackSwap, isTrackerInitialized, initSwapTracker } = await import('./swap-tracker')
-	// Ensure tracker is initialized before tracking (guards against race/init failure)
-	if (!isTrackerInitialized()) {
-		await initSwapTracker((msg: string, data: any) => {
-			try {
-				if (msg === 'swap-update') rpc.send['swap-update'](data)
-				else if (msg === 'swap-complete') rpc.send['swap-complete'](data)
-				else console.error(`[swap-tracker] Unknown message: ${msg}`)
-			} catch (e: any) {
-				console.warn(`[swap-tracker] Failed to send '${msg}':`, e.message)
-			}
-		}, { getDeviceId: () => getWalletDbScope()?.deviceId, getWalletId: () => getWalletDbScope()?.walletId })
-	}
-	// Look up cached quote BEFORE executing so we can use netFromAmount to
-	// override the send amount for NEAR Intents bip122 sendMax swaps.
-	let cachedQuote: SwapQuote | undefined
-	for (const [key, val] of swapQuoteCache) {
-		// Key format: fromCaip-toCaip-amount-slippageBps-fromAddress-toAddress
-		const keyPrefix = `${params.fromCaip}-${params.toCaip}-${params.amount}-`
-		if (key.startsWith(keyPrefix) && val.inboundAddress === params.inboundAddress) {
-			cachedQuote = val
-			break
-		}
-	}
-	if (!cachedQuote) console.warn('[index] No cached quote for swap tracker — using fallback data')
 
-	// For NEAR Intents bip122 sendMax: the re-quote stored netFromAmount
-	// (balance - estimated fee). Use it with isMax=false so buildTx's
-	// coinSelectSplit outputs exactly that amount instead of (balance - actualFee),
-	// which may diverge from estimatedFee and cause INCOMPLETE_DEPOSIT.
-	let execParams = params
-	if (
-		cachedQuote?.netFromAmount
-		&& params.isMax
-		&& params.fromCaip.startsWith('bip122:')
-		&& (params.swapper === 'NEAR Intents' || params.integration === 'nearIntents')
-	) {
-		execParams = { ...params, amount: cachedQuote.netFromAmount, isMax: false }
-		console.log(`[swap] NEAR Intents sendMax: net amount ${cachedQuote.netFromAmount} (was ${params.amount}), isMax→false`)
+	// Singleton dialog: refuse to seed over an in-progress review or an open
+	// in-app swap, rather than clobbering the user's current flow.
+	if (headlessSwapReviewInFlight) {
+		const err: any = new Error('A swap review is already in progress in Vault')
+		err.status = 409
+		throw err
+	}
+	if (getSwapUiState().state.phase !== 'closed') {
+		const err: any = new Error('A swap is already open in Vault — finish or close it first')
+		err.status = 409
+		throw err
 	}
 
-	const result = await executeSwap(execParams, {
-		wallet: engine.wallet,
-		getAllChains,
-		getRpcUrl,
-		getBtcXpub: () => {
-			if (btcAccounts.isInitialized) {
-				const selected = btcAccounts.getSelectedXpub()
-				if (selected) return { xpub: selected.xpub, accountPath: selected.path }
-			}
-			return undefined
-		},
-		getAllBtcXpubs: () => {
-			if (btcAccounts.isInitialized) return btcAccounts.getFundedXpubs()
-			return []
-		},
-		wrapSign: engine.isEmulator
-			? (fn, details) => emuSigningOp(fn, details)
-			: (fn) => fn(),
-		pushSubStage,
-		isAdvancedModeEnabled: getAdvancedModeEnabled,
-	})
-	const scope = getWalletDbScope()
-	// Register swap for tracking (non-blocking)
+	const sendCmd = (cmd: SwapUiCommand) => { try { rpc.send['swap-cmd'](cmd) } catch { /* webview not ready */ } }
+	headlessSwapReviewInFlight = true
+	acquireWindowFocus()
 	try {
-		const trackParams = cachedQuote?.netFromAmount
-			? { ...execParams, amount: cachedQuote.netFromAmount }
-			: execParams
-		trackSwap(result, trackParams, {
-			expectedOutput: cachedQuote?.expectedOutput || params.expectedOutput,
-			minimumOutput: cachedQuote?.minimumOutput || '0',
-			inboundAddress: cachedQuote?.inboundAddress || params.inboundAddress,
-			router: cachedQuote?.router || params.router,
-			memo: cachedQuote?.memo || params.memo,
-			expiry: cachedQuote?.expiry || params.expiry,
-			fees: cachedQuote?.fees || { affiliate: '0', outbound: '0', totalBps: 0 },
-			estimatedTime: cachedQuote?.estimatedTime || 600,
-			slippageBps: cachedQuote?.slippageBps || 300,
-			integration: cachedQuote?.integration || 'thorchain',
-			swapper: cachedQuote?.swapper,
-			nearIntentsDepositAddress: cachedQuote?.nearIntentsDepositAddress,
-		}, { skipPersist: engine.isPassphraseWallet || !scope, deviceId: scope?.deviceId, walletId: scope?.walletId })
+		resetSwapUiState()
+		// 1. Open + seed the dialog. The dialog's swap-cmd handler accepts a CAIP
+		//    as the asset key and buffers it until its swappable list loads.
+		sendCmd({
+			kind: 'open',
+			fromAsset: params.fromCaip,
+			toAsset: params.toCaip,
+			amount: params.amount,
+			...(params.toAddressOverride
+				? { useCustomAddress: true, customToAddress: params.toAddressOverride }
+				: {}),
+		})
+		if (params.isMax) sendCmd({ kind: 'set', isMax: true })
+
+		// 2. Wait for the dialog to mount, resolve the assets and produce a quote,
+		//    then advance it to the review screen. 'closed' only counts as a
+		//    cancel AFTER we've seen it open (the seed snapshot starts 'closed').
+		let seenOpen = false
+		await awaitSwapUiState(s => {
+			if (s.error) return 'reject'
+			if (s.phase !== 'closed') seenOpen = true
+			if (s.quote && s.fromAsset && s.toAsset) return 'resolve'
+			if (seenOpen && s.phase === 'closed') return 'reject'
+			return 'wait'
+		}, 90_000, 'Timed out preparing the swap quote for Vault review')
+		sendCmd({ kind: 'advance' })
+
+		// 3. Block on the user's on-screen decision. The dialog signs on the
+		//    device and tracks the swap itself; we just observe the outcome.
+		const final = await awaitSwapUiState(s => {
+			if (s.phase === 'submitted' && s.txid) return 'resolve'
+			if (s.error) return 'reject'
+			if (s.phase === 'closed') return 'reject' // user dismissed the review
+			return 'wait'
+		}, 290_000, 'Swap review timed out waiting for approval in Vault')
+
+		return {
+			txid: final.txid!,
+			fromCaip: params.fromCaip,
+			toCaip: params.toCaip,
+			fromAmount: params.amount,
+			expectedOutput: final.quote?.expectedOutput || params.expectedOutput,
+		}
 	} catch (e: any) {
-		console.warn('[index] Failed to register swap for tracking:', e.message)
+		// A user dismissal/timeout → 409 so the BEX can distinguish "rejected in
+		// Vault" from a real engine/signing failure (which stays a 5xx).
+		if (!e?.status) {
+			e.status = /cancelled|timed out|timeout/i.test(e?.message ?? '') ? 409 : 502
+		}
+		throw e
+	} finally {
+		releaseWindowFocus()
+		headlessSwapReviewInFlight = false
 	}
-	// Track swap in api_log. PRIVACY: Skip DB write for passphrase wallets.
-	if (!engine.isPassphraseWallet && scope) {
-		const fromChain = getAllChains().find(c => c.id === params.fromChainId)
-		insertApiLog({ ...scope, method: 'RPC', route: 'executeSwap', timestamp: Date.now(), durationMs: 0, status: 200, appName: 'vault', txid: result.txid, chain: fromChain?.symbol || params.fromChainId, activityType: 'swap' })
-	}
-	return result
 }
 
 // ── RPC Bridge (Electrobun UI ↔ Bun) ─────────────────────────────────
@@ -5404,6 +5480,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			publishSwapUiState: async (params) => {
 				swapUiState = params
 				swapUiUpdatedAt = Date.now()
+				notifySwapUiWaiters(params)
 			},
 
 			exportSwapReport: async (params) => {

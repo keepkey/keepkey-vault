@@ -10,15 +10,19 @@
  *   - POST /requote  → force a re-quote with current inputs
  *   - POST /advance / /confirm / /close
  *
- * 2. Headless (BEX swap epic) — the caller composes its OWN swap UI and uses
- *    vault only for the engine + the device signature:
+ * 2. Headless quoting (BEX swap epic) — the caller composes its OWN swap UI and
+ *    uses vault for the engine + (for execute) a mandatory in-vault review:
  *   - GET  /assets   → firmware-filtered SwapAsset[] for the picker
  *   - POST /quote    → SwapQuote (no GUI; wraps getSwapQuote + reserve re-quote)
- *   - POST /execute  → SwapResult{txid} (signs on the device, then trackSwap)
+ *   - POST /execute  → SwapResult{txid}
  *
- * Headless = "no vault GUI in the loop," NOT "no device confirmation": /execute
- * still signs on the physical KeepKey (firmware shows details; user presses the
- * button). All endpoints require bearer-token auth.
+ * IMPORTANT: /execute is NOT headless signing. A swap must never reach the
+ * device without vault showing the user exactly what they're signing — the
+ * firmware can only render "send X to <addr>", which hides the swap intent
+ * (router/inbound address + opaque memo). So /execute drives vault's real
+ * SwapDialog to its review screen, seeded with the swap, and blocks until the
+ * user approves on-screen (vault re-quotes; that quote is what's signed) or
+ * cancels (→ 409). All endpoints require bearer-token auth.
  */
 import type { AuthStore } from './auth'
 import type { RestApiCallbacks } from './rest-api'
@@ -74,8 +78,9 @@ export async function handleSwapRoute(
       auth.requireAuth(req)
       if (!callbacks?.executeSwapHeadless) return json({ error: 'Headless swap not wired' }, 503)
       const body = await parseRequest(req, S.SwapExecuteHeadlessRequest)
-      // Device-interactive: signs on the physical KeepKey, then broadcasts. The
-      // caller should use a long (≈5 min) client timeout; no shorter server cap.
+      // Drives vault's SwapDialog review, then signs on the physical KeepKey on
+      // user approval. Device- AND review-interactive: use a long (≈5 min)
+      // client timeout. Rejecting/cancelling in vault returns 409.
       const result = await callbacks.executeSwapHeadless(body as any)
       return json({ data: result })
     }

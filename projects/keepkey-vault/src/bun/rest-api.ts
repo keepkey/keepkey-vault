@@ -70,8 +70,10 @@ export interface RestApiCallbacks {
   /** Headless swap quote (BEX swap epic) — same engine as the dialog, no GUI.
    *  Wraps getSwapQuote + reserve/net-amount re-quote. Used by POST /api/v2/swap/quote. */
   getSwapQuoteHeadless?: (params: import('../shared/types').SwapQuoteParams) => Promise<import('../shared/types').SwapQuote>
-  /** Headless swap execute — signs on the device, broadcasts, registers tracking.
-   *  Used by POST /api/v2/swap/execute. Device still gates the signature. */
+  /** Swap execute for REST/BEX callers. NOT headless signing: drives vault's
+   *  SwapDialog to its review screen and blocks until the user approves on-screen
+   *  (vault re-quotes; the dialog signs + tracks), or cancels (rejects, status 409).
+   *  Used by POST /api/v2/swap/execute. */
   executeSwapHeadless?: (params: import('../shared/types').ExecuteSwapParams) => Promise<import('../shared/types').SwapResult>
   /** Returns initialized Pioneer client (for debug endpoints) */
   getPioneer?: () => Promise<any>
