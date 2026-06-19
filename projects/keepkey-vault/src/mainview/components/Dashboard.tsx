@@ -1256,6 +1256,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 			nativeBalanceUsd: cb.nativeBalanceUsd,
 			address: selected.address,
 			tokens: cb.tokens,
+			defiPositions: cb.defiPositions,
 			updatedAt: agg?.updatedAt,
 		}
 	}, [balances, allChains, evmAddressSet])
