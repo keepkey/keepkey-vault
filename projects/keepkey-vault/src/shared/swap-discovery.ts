@@ -199,12 +199,23 @@ export function pickerTier(e: AssetEntry): 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 {
 }
 
 /** Compare two entries for the destination token list: tier asc → held by USD
- *  desc → catalog popularity (discoveryRank) asc → symbol alpha. */
+ *  desc → route count desc → catalog popularity (discoveryRank) asc → symbol
+ *  alpha.
+ *
+ *  Route count (number of providers that confirmably route the asset) is the
+ *  strongest within-tier signal of a real, common, swappable asset: a confirmed
+ *  route beats a "try a quote" guess. It floats genuinely-routable assets above
+ *  same-symbol impostors that only matched by ticker — e.g. the real USDC
+ *  (3+ routes) sits above a "Morpho USDC Pool" (0 routes, TRY QUOTE) in the
+ *  USDC/USDT tier — and orders the rest most-routes-first. */
 export function compareForPicker(a: AssetEntry, b: AssetEntry): number {
   const ta = pickerTier(a)
   const tb = pickerTier(b)
   if (ta !== tb) return ta - tb
   if (ta === 0) return (b.balance!.usd) - (a.balance!.usd)
+  const routesA = a.availability.providers.length
+  const routesB = b.availability.providers.length
+  if (routesA !== routesB) return routesB - routesA
   const ra = a.discoveryRank ?? Number.MAX_SAFE_INTEGER
   const rb = b.discoveryRank ?? Number.MAX_SAFE_INTEGER
   if (ra !== rb) return ra - rb

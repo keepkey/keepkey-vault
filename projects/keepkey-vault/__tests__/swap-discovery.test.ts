@@ -287,6 +287,33 @@ describe('picker ordering — stables → popularity → junk last', () => {
     expect(sorted).toEqual(['SOL', 'USDC', 'USDT', 'PYUSD', 'DAI'])
   })
 
+  test('within a tier, more routes win — real USDC outranks a same-symbol 0-route impostor', () => {
+    // "Morpho USDC Pool" matches the priority-stable tier by ticker but has no
+    // confirmed route (TRY QUOTE). The real USDC, with routes, must lead it even
+    // though the impostor has the better catalog rank.
+    const realUsdc = tok('USDC', 'USD Coin', 100, {
+      availability: { status: 'swappable', providers: ['relay', 'zeroex', 'thorchain'] },
+    })
+    const morpho = tok('USDC', 'Morpho USDC Pool', 5, {
+      availability: { status: 'unknown', providers: [] },
+    })
+    expect(compareForPicker(realUsdc, morpho)).toBeLessThan(0)
+    expect([morpho, realUsdc].sort(compareForPicker).map(e => e.name))
+      .toEqual(['USD Coin', 'Morpho USDC Pool'])
+  })
+
+  test('most-routes-first orders same-tier assets (common-ness signal)', () => {
+    const three = tok('AAA', 'Three Routes', 900, {
+      availability: { status: 'swappable', providers: ['relay', 'zeroex', 'thorchain'] },
+    })
+    const one = tok('BBB', 'One Route', 1, {
+      availability: { status: 'swappable', providers: ['relay'] },
+    })
+    const none = tok('CCC', 'No Route', 0, { availability: { status: 'unknown', providers: [] } })
+    const sorted = [none, one, three].sort(compareForPicker).map(e => e.symbol)
+    expect(sorted).toEqual(['AAA', 'BBB', 'CCC'])
+  })
+
   test('held assets outrank stablecoins regardless of value', () => {
     const heldSol = entry({
       caip: `${sol}/slip44:501`, symbol: 'SOL', name: 'Solana', chainId: sol,
