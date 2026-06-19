@@ -27,6 +27,7 @@ import { getSwapperAnimation } from "../lib/swapper-animations"
 import { computeDustWarning, shouldWarnHighSlippage, computeEffectiveSlippageBps } from "../../shared/swap-warnings"
 import { useEvmAddresses } from "../hooks/useEvmAddresses"
 import { AssetPickerDialog } from "./AssetPickerDialog"
+import { networkDisplayName, ellipsizeCaip, parseCaip } from "../../shared/swap-discovery"
 import { KeepKeyDevice, RouteMap, SpinningDevice } from "./v3"
 import calculatingGif from "../assets/swap/calculating.gif"
 import shiftingGif from "../assets/swap/shifting.gif"
@@ -615,10 +616,38 @@ function AssetSelector({ label, selected, onOpenPicker, disabled }: AssetSelecto
               ring="rgba(139,227,196,0.28)"
             />
           </Box>
-          <VStack gap="0" align="flex-start">
-            <Text fontSize="lg" fontWeight="800" color="kk.textPrimary" lineHeight="1.1">{selected.symbol}</Text>
-            <Text fontSize="xs" color="kk.textSecondary">{selected.name}</Text>
+          {(() => {
+            // GAS vs TOKEN — prefer the CAIP namespace (authoritative: `/slip44:`
+            // is native, `/erc20:` `/token:` are tokens). A SwapAsset can carry a
+            // token CAIP yet a missing contractAddress, which would mislabel it as
+            // GAS — only fall back to contractAddress when there's no CAIP.
+            const isToken = selected.caip ? parseCaip(selected.caip).isToken : !!selected.contractAddress
+            return (
+          <VStack gap="0.5" align="flex-start" minW="0">
+            <Flex align="center" gap="2">
+              <Text fontSize="lg" fontWeight="800" color="kk.textPrimary" lineHeight="1.1">{selected.symbol}</Text>
+              {/* GAS vs TOKEN — never let a token masquerade as the chain coin */}
+              <Box
+                bg={isToken ? "rgba(255,255,255,0.06)" : "rgba(233,196,106,0.14)"}
+                color={isToken ? "kk.textMuted" : "kk.gold"}
+                px="1.5" py="0.5" borderRadius="4px" fontSize="9px" fontWeight="700" letterSpacing="0.06em">
+                {isToken ? "TOKEN" : "GAS"}
+              </Box>
+            </Flex>
+            {/* Network — distinguishes USDC-on-Ethereum from USDC-on-Optimism */}
+            <Text fontSize="xs" color="kk.textSecondary">
+              {selected.name}
+              {selected.caip && <> · <Text as="span" fontWeight="600" color="kk.textPrimary">{networkDisplayName(selected.caip.split("/")[0])}</Text></>}
+            </Text>
+            {/* Exact CAIP-19 (hex parts middle-ellipsized) so it stays unambiguous without overflowing */}
+            {selected.caip && (
+              <Text fontSize="9px" fontFamily="mono" color="kk.textMuted" opacity={0.6} whiteSpace="nowrap">
+                {ellipsizeCaip(selected.caip)}
+              </Text>
+            )}
           </VStack>
+            )
+          })()}
         </Flex>
       </Box>
     )
