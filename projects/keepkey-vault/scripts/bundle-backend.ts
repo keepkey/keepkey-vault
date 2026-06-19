@@ -52,6 +52,12 @@ const FORCE_EXTERNAL = new Set([
   '@walletconnect/types',
   '@walletconnect/utils',
   '@walletconnect/jsonrpc-utils',
+  // pioneer-discovery exposes large JSON files via sub-path imports
+  // (lib/chains.json, lib/generatedAssetData.json). Bun's bundler refuses
+  // these in fresh-install CI environments ("Could not resolve … Maybe you
+  // need to bun install?") even though they're in the published tarball.
+  // Leave it external — runtime resolution from node_modules works fine.
+  '@pioneer-platform/pioneer-discovery',
 ])
 
 // Pre-flight: device-protocol lib/ must be built (submodule has lib/ in .gitignore).
