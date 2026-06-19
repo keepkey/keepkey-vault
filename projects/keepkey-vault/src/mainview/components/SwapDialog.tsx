@@ -598,7 +598,9 @@ function AssetSelector({ label, selected, onOpenPicker, disabled }: AssetSelecto
           )}
         </Flex>
         <Flex
-          align="center" gap="5"
+          direction="column"
+          align="center"
+          gap="2"
           cursor={disabled ? "default" : "pointer"}
           opacity={disabled ? 0.7 : 1}
           onClick={() => { if (!disabled) onOpenPicker() }}
@@ -623,29 +625,29 @@ function AssetSelector({ label, selected, onOpenPicker, disabled }: AssetSelecto
             // GAS — only fall back to contractAddress when there's no CAIP.
             const isToken = selected.caip ? parseCaip(selected.caip).isToken : !!selected.contractAddress
             return (
-          <VStack gap="0.5" align="flex-start" minW="0">
-            <Flex align="center" gap="2">
-              <Text fontSize="lg" fontWeight="800" color="kk.textPrimary" lineHeight="1.1">{selected.symbol}</Text>
-              {/* GAS vs TOKEN — never let a token masquerade as the chain coin */}
-              <Box
-                bg={isToken ? "rgba(255,255,255,0.06)" : "rgba(233,196,106,0.14)"}
-                color={isToken ? "kk.textMuted" : "kk.gold"}
-                px="1.5" py="0.5" borderRadius="4px" fontSize="9px" fontWeight="700" letterSpacing="0.06em">
-                {isToken ? "TOKEN" : "GAS"}
-              </Box>
-            </Flex>
-            {/* Network — distinguishes USDC-on-Ethereum from USDC-on-Optimism */}
-            <Text fontSize="xs" color="kk.textSecondary">
-              {selected.name}
-              {selected.caip && <> · <Text as="span" fontWeight="600" color="kk.textPrimary">{networkDisplayName(selected.caip.split("/")[0])}</Text></>}
-            </Text>
-            {/* Exact CAIP-19 (hex parts middle-ellipsized) so it stays unambiguous without overflowing */}
-            {selected.caip && (
-              <Text fontSize="9px" fontFamily="mono" color="kk.textMuted" opacity={0.6} whiteSpace="nowrap">
-                {ellipsizeCaip(selected.caip)}
-              </Text>
-            )}
-          </VStack>
+              <VStack gap="0.5" align="center" minW="0" maxW="100%">
+                <Flex align="center" justify="center" gap="2">
+                  <Text fontSize="lg" fontWeight="800" color="kk.textPrimary" lineHeight="1.1">{selected.symbol}</Text>
+                  {/* GAS vs TOKEN — never let a token masquerade as the chain coin */}
+                  <Box
+                    bg={isToken ? "rgba(255,255,255,0.06)" : "rgba(233,196,106,0.14)"}
+                    color={isToken ? "kk.textMuted" : "kk.gold"}
+                    px="1.5" py="0.5" borderRadius="4px" fontSize="9px" fontWeight="700" letterSpacing="0.06em">
+                    {isToken ? "TOKEN" : "GAS"}
+                  </Box>
+                </Flex>
+                {/* Network — distinguishes USDC-on-Ethereum from USDC-on-Optimism */}
+                <Text fontSize="xs" color="kk.textSecondary" textAlign="center">
+                  {selected.name}
+                  {selected.caip && <> · <Text as="span" fontWeight="600" color="kk.textPrimary">{networkDisplayName(selected.caip.split("/")[0])}</Text></>}
+                </Text>
+                {/* Exact CAIP-19 (hex parts middle-ellipsized) so it stays unambiguous without overflowing */}
+                {selected.caip && (
+                  <Text fontSize="9px" fontFamily="mono" color="kk.textMuted" opacity={0.6} whiteSpace="nowrap" textAlign="center">
+                    {ellipsizeCaip(selected.caip)}
+                  </Text>
+                )}
+              </VStack>
             )
           })()}
         </Flex>
@@ -4013,11 +4015,25 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                               the user clicked MAX expecting it to "do something".
                               To exit MAX mode, the user types — the input's
                               onChange already calls setIsMax(false). */}
-                          <Button size="xs" px="2" variant={isMax ? "solid" : "outline"}
-                            bg={isMax ? "kk.gold" : "transparent"} color={isMax ? "black" : "kk.gold"}
-                            borderColor={isMax ? "kk.gold" : "rgba(233,196,106,0.3)"} fontWeight="700" fontSize="10px"
-                            borderRadius="md" _hover={{ bg: isMax ? "kk.goldHover" : "rgba(233,196,106,0.1)" }}
-                            onClick={() => { setIsMax(true); setMaxReserveMode('safe'); setAmount(""); setFiatAmount("") }} disabled={busy}>
+                          <Button
+                            size="xs"
+                            h="22px"
+                            minH="22px"
+                            px="2"
+                            py="0.5"
+                            variant={isMax ? "solid" : "outline"}
+                            bg={isMax ? "kk.gold" : "transparent"}
+                            color={isMax ? "black" : "kk.gold"}
+                            borderColor={isMax ? "kk.gold" : "rgba(233,196,106,0.3)"}
+                            border="1px solid"
+                            fontWeight="700"
+                            fontSize="10px"
+                            lineHeight="1"
+                            borderRadius="md"
+                            _hover={{ bg: isMax ? "kk.goldHover" : "rgba(233,196,106,0.1)" }}
+                            onClick={() => { setIsMax(true); setMaxReserveMode('safe'); setAmount(""); setFiatAmount("") }}
+                            disabled={busy}
+                          >
                             {t("max")}
                           </Button>
                         </Flex>
@@ -4075,43 +4091,48 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                         </Box>
                       )}
 
-                      <Box position="relative">
-                        {inputMode === 'fiat' && (
-                          <Text position="absolute" left="8px" top="50%" transform="translateY(-50%)" fontSize="xs" fontWeight="600" color="kk.textSecondary" pointerEvents="none" zIndex={1}>$</Text>
-                        )}
-                        <Input
-                          value={isMax ? (sendAmount ? formatBalance(sendAmount) : 'MAX') : (inputMode === 'crypto' ? amount : fiatAmount)}
-                          onChange={(e) => { if (isMax) { setIsMax(false); setMaxReserveMode('safe') } inputMode === 'crypto' ? handleCryptoChange(e.target.value) : handleFiatChange(e.target.value) }}
-                          placeholder={inputMode === 'fiat' ? '0.00' : t("amountPlaceholder")}
-                          bg="rgba(0,0,0,0.4)" border="1px solid"
-                          borderColor={exceedsBalance ? "kk.error" : exceedsSafeMax ? "kk.gold" : "rgba(255,255,255,0.08)"}
-                          borderRadius="lg" color="kk.textPrimary" size="sm" fontFamily="mono" fontSize="sm" fontWeight="700"
-                          disabled={busy} px={inputMode === 'fiat' ? "6" : "3"}
-                          _focus={{ borderColor: exceedsBalance ? "kk.error" : "kk.gold", boxShadow: exceedsBalance ? "none" : "0 0 0 1px rgba(233,196,106,0.3)" }}
-                        />
-                      </Box>
-
-                      {!isMax && hasFromPrice && (
-                        <Flex mt="1" px="1">
-                          {inputMode === 'crypto' && amountUsdPreview !== null ? (
+                      {/* Amount + USD-equivalent side by side: the input takes
+                          the available width, the converted figure sits right
+                          on the same baseline. Click the converted value to
+                          flip input modes (was a separate row below). */}
+                      <Flex align="center" gap="2">
+                        <Box position="relative" flex="1">
+                          {inputMode === 'fiat' && (
+                            <Text position="absolute" left="8px" top="50%" transform="translateY(-50%)" fontSize="xs" fontWeight="600" color="kk.textSecondary" pointerEvents="none" zIndex={1}>$</Text>
+                          )}
+                          <Input
+                            value={isMax ? (sendAmount ? formatBalance(sendAmount) : 'MAX') : (inputMode === 'crypto' ? amount : fiatAmount)}
+                            onChange={(e) => { if (isMax) { setIsMax(false); setMaxReserveMode('safe') } inputMode === 'crypto' ? handleCryptoChange(e.target.value) : handleFiatChange(e.target.value) }}
+                            placeholder={inputMode === 'fiat' ? '0.00' : t("amountPlaceholder")}
+                            bg="rgba(0,0,0,0.4)" border="1px solid"
+                            borderColor={exceedsBalance ? "kk.error" : exceedsSafeMax ? "kk.gold" : "rgba(255,255,255,0.08)"}
+                            borderRadius="lg" color="kk.textPrimary" size="sm" fontFamily="mono" fontSize="sm" fontWeight="700"
+                            disabled={busy} px={inputMode === 'fiat' ? "6" : "3"}
+                            _focus={{ borderColor: exceedsBalance ? "kk.error" : "kk.gold", boxShadow: exceedsBalance ? "none" : "0 0 0 1px rgba(233,196,106,0.3)" }}
+                          />
+                        </Box>
+                        {!isMax && hasFromPrice && (
+                          inputMode === 'crypto' && amountUsdPreview !== null ? (
                             <Box as="button" onClick={toggleInputMode} cursor="pointer"
                               title={t("switchToFiat") || "Switch to fiat input"}
+                              px="1"
                               _hover={{ color: "kk.gold" }}>
-                              <Text fontSize="xs" color="kk.textSecondary" fontFamily="mono">
+                              <Text fontSize="xs" color="kk.textSecondary" fontFamily="mono" whiteSpace="nowrap">
                                 ≈ {fmtCompact(amountUsdPreview)}
                               </Text>
                             </Box>
                           ) : inputMode === 'fiat' && amount ? (
                             <Box as="button" onClick={toggleInputMode} cursor="pointer"
                               title={t("switchToCrypto") || `Switch to ${fromAsset.symbol} input`}
+                              px="1"
                               _hover={{ color: "kk.gold" }}>
-                              <Text fontSize="xs" color="kk.textSecondary" fontFamily="mono">
+                              <Text fontSize="xs" color="kk.textSecondary" fontFamily="mono" whiteSpace="nowrap">
                                 ≈ {formatBalance(amount)} {fromAsset.symbol}
                               </Text>
                             </Box>
-                          ) : null}
-                        </Flex>
-                      )}
+                          ) : null
+                        )}
+                      </Flex>
                       {exceedsBalance && (
                         <Text fontSize="10px" color="kk.error" mt="1" fontWeight="600">{t("insufficientBalance")}</Text>
                       )}
