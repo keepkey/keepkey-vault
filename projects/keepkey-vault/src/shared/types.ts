@@ -129,8 +129,13 @@ export interface ChainBalance {
   /**
    * DeFi protocol positions attributed to this chain, populated when the
    * server returns `defiPositions` (GetPortfolioBalances with includeDefi=true).
-   * The vault filters its `tokens` list to suppress contracts referenced by
-   * any position here so the same on-chain ERC-20 is never double-counted.
+   * Additive: their USD is folded into the chain total and they render in a
+   * dedicated panel. The vault does NOT suppress wallet `tokens` that share a
+   * contract with a position — a position's tokens are protocol underlyings
+   * (LP legs, the native-ETH zero address), not wallet-held duplicates, and the
+   * server sends no type to tell an app-token apart from a contract/LP position.
+   * Consequence: a wallet-held app-token (e.g. stETH) the position also reports
+   * can double-count until the server provides a position type.
    */
   defiPositions?: DefiPosition[]
   updatedAt?: number    // unix ms — when this chain's balance was last confirmed non-zero from Pioneer
@@ -145,12 +150,12 @@ export interface DefiPosition {
   protocol: string | null   // Zapper appId slug ("lido", "morpheus", "aave-v3") or null
   displayName?: string      // Pretty protocol name from the server ("Lido", "Morpheus")
   network: string           // Zapper network display ("Ethereum") or legacy slug ("ethereum")
-  networkId?: string        // CAIP-2 chain ("eip155:1") — required for token dedup
+  networkId?: string        // CAIP-2 chain ("eip155:1") — used to attribute the position to a chain
   balanceUsd: number        // USD value Zapper attributes to the protocol for this pubkey
   icon?: string
   /**
-   * Constituent ERC-20 contracts the protocol holds. Used to suppress the
-   * same contracts from the wallet TokenBalance list.
+   * The protocol's underlying ERC-20 legs (e.g. an LP's token pair). NOT
+   * wallet-held duplicates — display/metadata only; not used for suppression.
    */
   tokens?: Array<{
     networkId: string
