@@ -1,3 +1,4 @@
+import { useRef, useState } from "react"
 import { Flex, Text, Box, Image, IconButton, HStack } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
 import { Z } from "../lib/z-index"
@@ -6,6 +7,7 @@ import { useWindowDrag } from "../hooks/useWindowDrag"
 import { rpcRequest } from "../lib/rpc"
 import kkIcon from "../assets/icon.png"
 import { NAV_HEIGHT } from "../layout"
+import { WalletSelector } from "./WalletSelector"
 
 export type NavTab = "vault" | "shapeshift" | "explore" | "addresses"
 
@@ -28,6 +30,12 @@ interface TopNavProps {
 	watchOnly?: boolean
 	onExitToDeviceSelect?: () => void
 	passphraseActive?: boolean
+	/** Wallet picker plumbing — see WalletSelector. Optional so SplashNav and
+	 *  any caller that doesn't want a picker can omit them. */
+	connectedDeviceId?: string | null
+	watchingDeviceId?: string | null
+	onWatchWallet?: (deviceId: string, label: string) => void
+	onReturnToConnected?: () => void
 }
 
 const NAV_BG = "rgba(11,11,14,0.92)"
@@ -140,9 +148,28 @@ export function TopNav({
 	watchOnly,
 	onExitToDeviceSelect,
 	passphraseActive,
+	connectedDeviceId,
+	watchingDeviceId,
+	onWatchWallet,
+	onReturnToConnected,
 }: TopNavProps) {
 	const { t } = useTranslation("nav")
 	const windowDrag = useWindowDrag()
+
+	// Wallet-selector popover state lives here so the LogoTile's bounding
+	// box drives its anchor — keeps the menu pinned to the logo no matter
+	// where the user has scrolled or resized.
+	const logoTileRef = useRef<HTMLDivElement | null>(null)
+	const [walletMenuOpen, setWalletMenuOpen] = useState(false)
+	const [walletAnchor, setWalletAnchor] = useState<{ left: number; top: number } | null>(null)
+	const walletSelectorEnabled = !!onWatchWallet
+	const openWalletMenu = () => {
+		const el = logoTileRef.current
+		if (!el) return
+		const r = el.getBoundingClientRect()
+		setWalletAnchor({ left: r.left, top: r.bottom + 6 })
+		setWalletMenuOpen(true)
+	}
 
 	const TAB_DEFS: { id: NavTab; label: string; icon: JSX.Element }[] = [
 		{
@@ -203,11 +230,15 @@ export function TopNav({
 		>
 			{/* Left: logo tile + identity stack */}
 			<Flex align="center" gap="2.5" flex="1" minW={0}>
-				<LogoTile
-					glow={logoGlow}
-					onClick={onExitToDeviceSelect || (() => rpcRequest("openUrl", { url: "https://keepkey.com" }).catch(() => {}))}
-					title={onExitToDeviceSelect ? "Back to device select" : "KeepKey"}
-				/>
+				<Box ref={logoTileRef} display="inline-block">
+					<LogoTile
+						glow={logoGlow}
+						onClick={walletSelectorEnabled
+							? openWalletMenu
+							: (onExitToDeviceSelect || (() => rpcRequest("openUrl", { url: "https://keepkey.com" }).catch(() => {})))}
+						title={walletSelectorEnabled ? "Switch wallet" : (onExitToDeviceSelect ? "Back to device select" : "KeepKey")}
+					/>
+				</Box>
 				<Flex direction="column" minW={0} gap="0">
 					<Flex align="center" gap="1.5" minW={0}>
 						<Text fontSize="13px" fontWeight="600" letterSpacing="-0.01em" color="var(--text-0)" fontFamily={FONT_SANS} truncate>
@@ -406,6 +437,19 @@ export function TopNav({
 					</svg>
 				</IconButton>
 			</Flex>
+
+			{walletSelectorEnabled && (
+				<WalletSelector
+					open={walletMenuOpen}
+					close={() => setWalletMenuOpen(false)}
+					anchor={walletAnchor}
+					connectedDeviceId={connectedDeviceId ?? null}
+					connectedLabel={label}
+					watchingDeviceId={watchingDeviceId ?? null}
+					onWatch={(id, lbl) => { onWatchWallet?.(id, lbl); setWalletMenuOpen(false) }}
+					onReturnToConnected={() => { onReturnToConnected?.(); setWalletMenuOpen(false) }}
+				/>
+			)}
 		</Flex>
 	)
 }

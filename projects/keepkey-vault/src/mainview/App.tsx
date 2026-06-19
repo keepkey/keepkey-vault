@@ -808,6 +808,10 @@ function App() {
 						onTabChange={() => {}}
 						watchOnly
 						onExitToDeviceSelect={() => { setWatchOnlyMode(false); setWatchOnlyDeviceId(undefined) }}
+						connectedDeviceId={deviceState.deviceId || null}
+						watchingDeviceId={watchOnlyDeviceId || null}
+						onWatchWallet={(id, lbl) => { setWatchOnlyDeviceId(id); setWatchOnlyLabel(lbl); setWatchOnlyMode(true) }}
+						onReturnToConnected={() => { setWatchOnlyMode(false); setWatchOnlyDeviceId(undefined) }}
 					/>
 					<Flex flex="1" direction="column" overflow="auto" pt={NAV_CONTENT_OFFSET} pb="4">
 						<Dashboard watchOnly watchOnlyDeviceId={watchOnlyDeviceId} onLoaded={() => {}} />
@@ -935,6 +939,10 @@ function App() {
 					onTabChange={handleTabChange}
 					passphraseActive={deviceState.isHiddenWallet}
 					onExitToDeviceSelect={deviceState.isEmulator ? () => { rpcRequest("emulatorStop").catch(() => {}) } : undefined}
+					connectedDeviceId={deviceState.deviceId || null}
+					watchingDeviceId={null}
+					onWatchWallet={(id, lbl) => { setWatchOnlyDeviceId(id); setWatchOnlyLabel(lbl); setWatchOnlyMode(true) }}
+					onReturnToConnected={() => { /* already on connected wallet */ }}
 				/>
 				<Flex flex="1" direction="column" overflow="auto" pt={showBanner ? NAV_CONTENT_OFFSET_WITH_BANNER : NAV_CONTENT_OFFSET} pb="4" transition="padding-top 0.2s">
 				{/* TopNav offset plus banner height when visible. */}
