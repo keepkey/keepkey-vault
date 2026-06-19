@@ -2247,17 +2247,14 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
         return
       }
       if (cmd.kind === 'confirm') {
-        // Click "Confirm Swap" — kicks off executeSwap. The TxReview gate
-        // and the physical device button press still happen normally.
-        // Mirror the on-screen button's preflight gate: refuse to advance
-        // unless the preview build succeeded and balance is sufficient,
-        // so REST callers can't bypass the UI's "preview failed" lock and
-        // sign a tx the chain will reject.
-        const insufficientBalance = !!(previewBuild?.balance && !previewBuild.balance.sufficient)
-        const previewBlocked = previewLoading || !!previewError || !previewBuild?.unsignedTx || insufficientBalance
-        if (phase === 'review' && quote && fromAsset && toAsset && !previewBlocked) {
-          handleExecuteSwap()
-        }
+        // SECURITY: a programmatic command must NEVER trigger signing. An
+        // authenticated REST client could otherwise drive the dialog to review
+        // and then POST /confirm to sign without a human ever clicking — exactly
+        // the headless-signing hole the in-vault review gate exists to close.
+        // Signing is only ever kicked off by the on-screen "Approve & Swap"
+        // button (a real user gesture). This command is intentionally ignored;
+        // the /api/v2/swap/confirm route has been removed.
+        console.warn('[SwapDialog] Ignoring programmatic "confirm" command — signing requires an on-screen click')
         return
       }
       // Both 'open' and 'set' carry the same partial-update fields below.

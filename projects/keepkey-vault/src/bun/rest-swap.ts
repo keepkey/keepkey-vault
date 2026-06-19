@@ -122,11 +122,12 @@ export async function handleSwapRoute(
 
     if (path === '/api/v2/swap/confirm' && method === 'POST') {
       auth.requireAuth(req)
-      if (!callbacks?.sendSwapCmd) return json({ error: 'Swap UI bridge not wired' }, 503)
-      // Equivalent to clicking "Confirm Swap" / "Approve & Swap" — kicks off
-      // executeSwap. The physical device button press still applies.
-      callbacks.sendSwapCmd({ kind: 'confirm' } as SwapUiCommand)
-      return json({ data: { ok: true } })
+      // REMOVED for security: this let an authenticated client programmatically
+      // "click" Approve & Swap and sign without a human ever reviewing in vault —
+      // defeating the in-vault review gate. Signing is only ever initiated by the
+      // on-screen "Approve & Swap" button. Callers drive the dialog to review via
+      // /execute (or /open + /advance) and the user approves on-screen.
+      return json({ error: 'Programmatic swap confirmation is not permitted. The user must approve the swap on-screen in Vault.' }, 403)
     }
 
     if (path === '/api/v2/swap/close' && method === 'POST') {
