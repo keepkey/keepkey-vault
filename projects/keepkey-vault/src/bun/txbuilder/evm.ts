@@ -309,7 +309,11 @@ export async function buildEvmTx(
   // ── Native ETH transfer ─────────────────────────────────────────────
   const memoBytes = memo ? Buffer.from(memo, 'utf8') : null
   const memoGas = memoBytes ? memoBytes.reduce((sum: bigint, b: number) => sum + (b === 0 ? 4n : 16n), 0n) : 0n
-  const gasLimit = gasLimitOverride ?? (21000n + memoGas)
+  // Intrinsic gas for THIS payload (base + calldata). A custom override must
+  // never go below it — a memo arriving via URI/deep link would otherwise build
+  // an under-gassed tx that reverts. Clamp up to intrinsic; honor higher values.
+  const intrinsicGas = 21000n + memoGas
+  const gasLimit = gasLimitOverride !== null && gasLimitOverride > intrinsicGas ? gasLimitOverride : intrinsicGas
   const gasFee = gasPrice * gasLimit
 
   let amountWei: bigint

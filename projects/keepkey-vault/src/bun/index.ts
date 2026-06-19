@@ -2302,13 +2302,16 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					// chainId. The networkId on each position (eip155:N) maps cleanly
 					// into the existing networkToChain table; positions on networks the
 					// vault doesn't know about are dropped on the floor with a log.
-					// defiTokenSuppressionByChain captures the contract addresses to
-					// hide from each chain's wallet TokenBalance list (option B dedup).
+					// NOTE: we deliberately do NOT suppress wallet tokens that share a
+					// contract with a position's `tokens[]`. Those are the protocol's
+					// *underlyings* (e.g. an LP's WETH, or the native-ETH zero address),
+					// not wallet-held duplicates, and the server sends no position type
+					// to tell an app-token (stETH = the position) from a contract/LP
+					// position. Address-only suppression hid real, sendable balances, so
+					// DeFi is purely additive: own panel + folded USD.
 					const allDefiPositions: ServerDefiPosition[] = chunkResults.flatMap(r => r.defiPositions || [])
 					const defiByChain = new Map<string, DefiPosition[]>()
 					const defiByChainAndOwner = new Map<string, Map<string, DefiPosition[]>>()
-					const defiTokenSuppressionByChain = new Map<string, Set<string>>()
-					const defiTokenSuppressionByChainAndOwner = new Map<string, Map<string, Set<string>>>()
 					let droppedDefi = 0
 					for (const sp of allDefiPositions) {
 						const networkId = (sp.networkId || '').toLowerCase()
@@ -2341,36 +2344,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							list.push(dp)
 							perOwner.set(ownerAddr, list)
 						}
-						// Token-suppression sets
-						const chainSet = defiTokenSuppressionByChain.get(chainId) || new Set<string>()
-						for (const t of dp.tokens || []) chainSet.add(t.address)
-						defiTokenSuppressionByChain.set(chainId, chainSet)
-						if (ownerAddr) {
-							let perOwner = defiTokenSuppressionByChainAndOwner.get(chainId)
-							if (!perOwner) { perOwner = new Map(); defiTokenSuppressionByChainAndOwner.set(chainId, perOwner) }
-							const set = perOwner.get(ownerAddr) || new Set<string>()
-							for (const t of dp.tokens || []) set.add(t.address)
-							perOwner.set(ownerAddr, set)
-						}
 					}
 					if (allDefiPositions.length > 0) {
 						console.log(`[getBalances] DeFi: ${allDefiPositions.length} positions across ${defiByChain.size} chain(s)${droppedDefi ? ` (${droppedDefi} dropped: unknown networkId)` : ''}`)
-					}
-					// Returns the input token list minus any whose contract address
-					// matches a DeFi position's `tokens` for the same chain. Undefined
-					// stays undefined; an emptied list becomes undefined too so the
-					// downstream "if tokens.length > 0" guards still fire correctly.
-					const suppressDefiTokens = (tokens: TokenBalance[] | undefined, suppress: Set<string> | undefined): TokenBalance[] | undefined => {
-						if (!tokens || tokens.length === 0) return tokens
-						if (!suppress || suppress.size === 0) return tokens
-						const filtered = tokens.filter(tok => {
-							const parts = String(tok.caip || '').split('/')
-							if (parts.length < 2) return true
-							const ref = parts[1]
-							const addr = (ref.includes(':') ? ref.split(':')[1] : ref).toLowerCase()
-							return !suppress.has(addr)
-						})
-						return filtered.length > 0 ? filtered : undefined
 					}
 
 					console.log(`[getBalances] GetPortfolioBalances response: ${allEntries.length} entries`)
@@ -2582,11 +2558,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							const usd = Number(match?.valueUsd ?? 0)
 							const ownerLower = entry.pubkey.toLowerCase()
 							const ownerDefiPositions = defiByChainAndOwner.get(entry.chainId)?.get(ownerLower)
-							const ownerSuppress = defiTokenSuppressionByChainAndOwner.get(entry.chainId)?.get(ownerLower)
-							const entryTokens = suppressDefiTokens(
-								evmTokensByOwner.get(`${entry.chainId}:${ownerLower}`),
-								ownerSuppress,
-							) || []
+							const entryTokens = evmTokensByOwner.get(`${entry.chainId}:${ownerLower}`) || []
 							const entryTokenUsd = entryTokens.reduce((sum, t) => sum + t.balanceUsd, 0)
 							const ownerDefiUsd = ownerDefiPositions?.reduce((sum, p) => sum + (p.balanceUsd || 0), 0) || 0
 							evmAddresses.setAddressChainBalance(entry.pubkey, entry.chainId, {
@@ -2637,10 +2609,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 					// Push aggregated EVM chain entries
 					for (const [chainId, agg] of evmChainAgg) {
-						const chainTokens = suppressDefiTokens(
-							tokensByChainId.get(chainId),
-							defiTokenSuppressionByChain.get(chainId),
-						)
+						const chainTokens = tokensByChainId.get(chainId)
 						const tokenUsdTotal = chainTokens?.reduce((sum, t) => sum + t.balanceUsd, 0) || 0
 						const chainDefi = defiByChain.get(chainId)
 						const defiUsdTotal = chainDefi?.reduce((sum, p) => sum + (p.balanceUsd || 0), 0) || 0
@@ -2649,8 +2618,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							symbol: agg.symbol,
 							balance: agg.balance > 0 ? agg.balance.toFixed(18).replace(/0+$/, '').replace(/\.$/, '') : '0',
 							// Chain total folds DeFi in so the dashboard $ keeps parity
-							// with zapper.xyz net worth once stETH-style tokens are
-							// suppressed from the wallet list.
+							// with zapper.xyz net worth. Wallet tokens are no longer
+							// suppressed, so a wallet-held app-token (e.g. stETH) that the
+							// position also reports can double-count — accepted as the
+							// lesser evil vs hiding sendable balances (see note above).
 							balanceUsd: agg.usd + tokenUsdTotal + defiUsdTotal,
 							nativeBalanceUsd: agg.usd,
 							address: agg.address,
@@ -3199,14 +3170,18 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						}
 					}
 
-					// Group server-merged DeFi by owner address for per-account attribution,
-					// and build a chain-level suppression set so the aggregated `tokens`
-					// list below mirrors the dashboard's dedup.
+					// Group server-merged DeFi by owner address for per-account attribution.
+					// Single-chain refresh: keep ONLY positions on this chain — the server
+					// may return multi-network DeFi for the same EVM address, so without
+					// this filter a Base/Arbitrum position would leak into an Ethereum
+					// refresh. (No token suppression: a position's `tokens[]` are the
+					// protocol's underlyings, not wallet-held duplicates, and the server
+					// sends no type to tell them apart — see the dashboard-path note.)
 					const ownerDefiPositions = new Map<string, DefiPosition[]>()
-					const ownerDefiSuppress = new Map<string, Set<string>>()
-					const chainDefiSuppress = new Set<string>()
 					const allChainDefi: DefiPosition[] = []
 					for (const sp of rawDefiPositions) {
+						const spNetworkId = (sp.networkId || '').toLowerCase()
+						if (!spNetworkId || networkToChain.get(spNetworkId) !== chain.id) continue
 						const dp: DefiPosition = {
 							protocol: sp.protocol || null,
 							displayName: sp.displayName,
@@ -3227,37 +3202,17 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							const list = ownerDefiPositions.get(ownerLower) || []
 							list.push(dp)
 							ownerDefiPositions.set(ownerLower, list)
-							const set = ownerDefiSuppress.get(ownerLower) || new Set<string>()
-							for (const t of dp.tokens || []) set.add(t.address)
-							ownerDefiSuppress.set(ownerLower, set)
 						}
-						for (const t of dp.tokens || []) chainDefiSuppress.add(t.address)
 					}
-					if (rawDefiPositions.length > 0) {
-						console.log(`[getBalance] ${chain.coin}: ${rawDefiPositions.length} DeFi positions across ${ownerDefiPositions.size} owner(s)`)
-					}
-					// Same suppression helper as the main getBalances flow.
-					const suppressDefiTokensLocal = (toks: TokenBalance[] | undefined, suppress: Set<string> | undefined): TokenBalance[] | undefined => {
-						if (!toks || toks.length === 0) return toks
-						if (!suppress || suppress.size === 0) return toks
-						const filtered = toks.filter(tok => {
-							const parts = String(tok.caip || '').split('/')
-							if (parts.length < 2) return true
-							const ref = parts[1]
-							const addr = (ref.includes(':') ? ref.split(':')[1] : ref).toLowerCase()
-							return !suppress.has(addr)
-						})
-						return filtered.length > 0 ? filtered : undefined
+					if (allChainDefi.length > 0) {
+						console.log(`[getBalance] ${chain.coin}: ${allChainDefi.length} DeFi positions across ${ownerDefiPositions.size} owner(s)`)
 					}
 
 					if (isEvm) {
 						for (const pk of pubkeys) {
 							const ownerAddress = pk.pubkey.toLowerCase()
 							const native = evmNativeByPubkey.get(ownerAddress) || { balance: 0, usd: 0 }
-							const ownerTokens = suppressDefiTokensLocal(
-								evmTokensByOwner.get(ownerAddress),
-								ownerDefiSuppress.get(ownerAddress),
-							) || []
+							const ownerTokens = evmTokensByOwner.get(ownerAddress) || []
 							const tokenUsdTotal = ownerTokens.reduce((sum, t) => sum + t.balanceUsd, 0)
 							const ownerDefi = ownerDefiPositions.get(ownerAddress)
 							const ownerDefiUsd = ownerDefi?.reduce((sum, p) => sum + (p.balanceUsd || 0), 0) || 0
@@ -3273,16 +3228,6 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						}
 					}
 
-					// Apply chain-level suppression to the aggregated `tokens` array
-					// and recompute totals so the single-chain ChainBalance returned
-					// below matches the per-address sums.
-					if (isEvm && chainDefiSuppress.size > 0) {
-						const filtered = suppressDefiTokensLocal(tokens, chainDefiSuppress)
-						const removedUsd = (tokens || []).reduce((s, t) => s + (t.balanceUsd || 0), 0)
-							- (filtered || []).reduce((s, t) => s + (t.balanceUsd || 0), 0)
-						tokens = filtered
-						if (removedUsd > 0) balanceUsd -= removedUsd
-					}
 					if (isEvm && allChainDefi.length > 0) {
 						balanceUsd += allChainDefi.reduce((s, p) => s + (p.balanceUsd || 0), 0)
 						chainDefiPositions = allChainDefi
