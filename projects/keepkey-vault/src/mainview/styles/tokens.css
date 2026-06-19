@@ -66,10 +66,15 @@
 .v3-mono  { font-family: var(--font-mono);  font-feature-settings: "tnum"; }
 .v3-serif { font-family: var(--font-mono); font-style: normal; }
 
-/* Page enter transition (mirrors study) */
+/* Page enter transition (mirrors study).
+ * IMPORTANT: opacity-only — never `transform`. A `transform` property on
+ * the page root persists in computed style after the animation (even at
+ * the identity value) and creates a new containing block, which breaks
+ * `position: fixed` overlays mounted inside the page (e.g. SwapDialog) —
+ * they get anchored to the AssetPage box instead of the viewport. */
 @keyframes v3-fadeUp {
-  from { opacity: 0; transform: translateY(8px); }
-  to   { opacity: 1; transform: translateY(0); }
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
 .v3-page-enter { animation: v3-fadeUp 0.4s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
 

@@ -2306,8 +2306,23 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   if (chain && !resumeSwap && !loadingAssets && assets.length > 0 && !swappableChainIds.has(chain.id)) {
     return (
       <Box position="fixed" inset="0" zIndex={Z.dialog} display="flex" alignItems="center" justifyContent="center">
-        <Box position="absolute" inset="0" bg="rgba(0,0,0,0.6)" backdropFilter="blur(8px)" />
-        <Box position="relative" bg="kk.cardBg" border="2px solid" borderColor="rgba(139,227,196,0.4)" borderRadius="xl" boxShadow="0 0 20px rgba(139,227,196,0.12)" p="6" w="400px" maxW="90vw" textAlign="center">
+        <Box position="absolute" inset="0" bg="rgba(11,11,14,0.28)" backdropFilter="blur(20px) saturate(140%)" />
+        <Box
+          position="relative"
+          borderRadius="22px"
+          border="1px solid rgba(255,255,255,0.10)"
+          p="6"
+          w="400px"
+          maxW="90vw"
+          textAlign="center"
+          style={{
+            background:
+              "linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.015)), rgba(16,16,21,0.78)",
+            backdropFilter: "blur(32px) saturate(160%)",
+            WebkitBackdropFilter: "blur(32px) saturate(160%)",
+            boxShadow: "0 0 0 1px rgba(255,255,255,0.06), 0 24px 60px -16px rgba(0,0,0,0.8), 0 4px 12px -4px rgba(0,0,0,0.5)",
+          }}
+        >
           <Flex justify="center"><ProviderBadge swapper="thorchain" size={32} variant="compact" /></Flex>
           <Text fontSize="sm" color="kk.textMuted" mt="3">{t("notSupported", { coin: chain.coin })}</Text>
           <Button size="sm" mt="4" variant="ghost" color="kk.textSecondary" px="4" py="2" onClick={handleClose}>{t("close")}</Button>
@@ -2319,19 +2334,25 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   return (
     <Box position="fixed" inset="0" zIndex={Z.dialog} display="flex" alignItems="center" justifyContent="center">
       <style>{DIALOG_CSS}</style>
-      <Box position="absolute" inset="0" bg="rgba(0,0,0,0.6)" backdropFilter="blur(8px)" />
+      <Box position="absolute" inset="0" bg="rgba(11,11,14,0.28)" backdropFilter="blur(20px) saturate(140%)" />
       <Box
         position="relative"
-        bg="linear-gradient(180deg, var(--ink-2), var(--ink-1))"
-        border="1px solid var(--line-2)"
-        borderRadius="var(--r-xl)"
-        boxShadow="0 20px 80px -20px rgba(139,227,196,0.20), 0 0 0 1px rgba(255,255,255,0.04) inset"
+        borderRadius="22px"
+        border="1px solid rgba(255,255,255,0.10)"
         w={isSwapComplete && phase === 'submitted' ? "1040px" : "760px"}
         maxW="94vw"
         maxH="90vh"
         overflow="auto"
         onClick={(e) => e.stopPropagation()}
-        style={{ animation: 'kkSwapFadeIn 0.2s ease-out' }}
+        style={{
+          animation: 'kkSwapFadeIn 0.2s ease-out',
+          background:
+            "linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.015)), rgba(16,16,21,0.78)",
+          backdropFilter: "blur(32px) saturate(160%)",
+          WebkitBackdropFilter: "blur(32px) saturate(160%)",
+          boxShadow:
+            "0 0 0 1px rgba(255,255,255,0.06), 0 24px 60px -16px rgba(0,0,0,0.8), 0 4px 12px -4px rgba(0,0,0,0.5)",
+        }}
       >
         {/* ── Header ──────────────────────────────────────────────── */}
         <Flex px="5" py="2.5" borderBottom="1px solid" borderColor="kk.border" align="center" justify="space-between"
