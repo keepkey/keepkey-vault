@@ -284,6 +284,29 @@ export function parseCaip(caip: string): {
   return { chainCaip2, isToken: false }
 }
 
+/** Middle-ellipsize a CAIP-19/CAIP-2 for display: keep the human-readable
+ *  namespace prefixes (`eip155:1/erc20:`, `bip122:…/slip44:`) fully intact and
+ *  shorten ONLY the long hex/base58 reference segments to `head…tail`. Short
+ *  references (chain ids like `1`, slip44 indices like `0`/`60`) are left as-is.
+ *
+ *    eip155:1/erc20:0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48
+ *      → eip155:1/erc20:0xa0b869…eb48
+ *    bip122:000000000019d6689c085ae165831e93/slip44:0
+ *      → bip122:000000…831e93/slip44:0
+ *
+ *  Splitting on the `:`/`/` delimiters (and preserving them) means the chop only
+ *  ever lands inside a single hash/address segment — never across a delimiter. */
+export function ellipsizeCaip(caip: string, head = 6, tail = 6, max = 18): string {
+  if (!caip) return caip
+  return caip.split(/([:/])/).map(seg => {
+    if (seg === ':' || seg === '/' || seg.length <= max) return seg
+    const hexPrefix = seg.startsWith('0x') ? '0x' : ''
+    const body = seg.slice(hexPrefix.length)
+    if (body.length <= head + tail) return seg
+    return `${hexPrefix}${body.slice(0, head)}…${body.slice(-tail)}`
+  }).join('')
+}
+
 /** BSC tokens are equivalently expressible as `/erc20:` (CAIP-19 standard for
  *  EVM tokens) or `/bep20:` (BSC-specific extension pioneer-discovery emits).
  *  Pioneer-server's quote endpoint only routes the `/erc20:` form — sending

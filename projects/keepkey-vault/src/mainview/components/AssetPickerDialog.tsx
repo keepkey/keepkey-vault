@@ -19,6 +19,7 @@ import {
   parseCaip,
   assessWithFirmware,
   isGasAsset,
+  ellipsizeCaip,
   type AssetEntry,
 } from "../../shared/swap-discovery"
 import { rpcRequest } from "../lib/rpc"
@@ -360,8 +361,8 @@ function HeldTile({ entry: e, onSelect, fmtCompact, privateModeEnabled }: {
         </Text>
         <Text fontSize="11px" fontWeight="500" color="kk.textSecondary" fontVariantNumeric="tabular-nums">{privateModeEnabled ? "••••••" : fmtCompact(e.balance!.usd)}</Text>
         {/* Full CAIP */}
-        <Text fontSize="8px" color="kk.textMuted" fontFamily="mono" mt="1.5" overflow="hidden" textOverflow="ellipsis" whiteSpace="nowrap" opacity={0.6}>
-          {e.caip}
+        <Text fontSize="8px" color="kk.textMuted" fontFamily="mono" mt="1.5" whiteSpace="nowrap" opacity={0.6}>
+          {ellipsizeCaip(e.caip)}
         </Text>
       </Box>
     </Box>
@@ -550,8 +551,8 @@ function NetworkTile({ chain: c, onPick, unavail }: {
           {unavail ? (c.firmwareGated ? "Update firmware" : "No route") : `${c.routableCount} swappable`}
         </Text>
         {/* CAIP-2 */}
-        <Text fontSize="8px" color="kk.textMuted" fontFamily="mono" mt="1" overflow="hidden" textOverflow="ellipsis" whiteSpace="nowrap" opacity={0.6}>
-          {c.caip2}
+        <Text fontSize="8px" color="kk.textMuted" fontFamily="mono" mt="1" whiteSpace="nowrap" opacity={0.6}>
+          {ellipsizeCaip(c.caip2)}
         </Text>
       </Box>
     </Box>
@@ -879,8 +880,8 @@ function AssetListRow({ entry: e, onSelect, onUnavailable }: {
           {e.name} · <Text as="span" color="kk.textSecondary" fontWeight="600">{chainName}</Text>
         </Text>
         {/* Full CAIP-19 */}
-        <Text fontSize="9px" color="kk.textMuted" fontFamily="mono" mt="1" opacity={0.55} overflow="hidden" textOverflow="ellipsis" whiteSpace="nowrap">
-          {e.caip}
+        <Text fontSize="9px" color="kk.textMuted" fontFamily="mono" mt="1" opacity={0.55} whiteSpace="nowrap">
+          {ellipsizeCaip(e.caip)}
         </Text>
       </Box>
 
@@ -947,7 +948,7 @@ function ContractHitRow({ loading, hit, adding, chainName, onAdd }: {
           </Flex>
           <Text fontSize="12px" color="kk.textMuted" mt="0.5">{hit.name} · {hit.decimals} decimals</Text>
           <Text fontSize="9px" color="kk.textMuted" fontFamily="mono" mt="1" opacity={0.55}
-            overflow="hidden" textOverflow="ellipsis" whiteSpace="nowrap">{hit.caip}</Text>
+            whiteSpace="nowrap">{ellipsizeCaip(hit.caip!)}</Text>
         </Box>
         <Box as="button" flexShrink={0} fontFamily="inherit"
           px="3.5" py="2" borderRadius="10px" bg="var(--gold)" color="#0b0b0e"
@@ -1056,7 +1057,7 @@ function UnavailableRouteView({ fromChainId, target, entries, onBack, onAltSelec
                         )}
                       </Flex>
                       <Text fontSize="10px" color="kk.textMuted" mt="0.5">{a.name} · on {chainName}</Text>
-                      <Text fontSize="9px" color="kk.textMuted" fontFamily="mono" mt="1" opacity={0.55} overflow="hidden" textOverflow="ellipsis" whiteSpace="nowrap">{a.caip}</Text>
+                      <Text fontSize="9px" color="kk.textMuted" fontFamily="mono" mt="1" opacity={0.55} whiteSpace="nowrap">{ellipsizeCaip(a.caip)}</Text>
                     </Box>
                     <Flex align="center" gap="1.5" px="2.5" py="1"
                       bg="rgba(139,227,196,0.08)" border="1px solid rgba(139,227,196,0.25)"

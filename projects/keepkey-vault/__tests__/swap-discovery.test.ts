@@ -27,6 +27,7 @@ import {
   isStablecoinEntry,
   isJunkEntry,
   assessWithFirmware,
+  ellipsizeCaip,
   type AssetEntry,
 } from '../src/shared/swap-discovery'
 
@@ -151,6 +152,27 @@ describe('compareEntries — empty-query bucket sort', () => {
     const a = entry({ caip: 'a', symbol: 'BBB', name: 'Beta', availability: { status: 'unknown', providers: [] } })
     const b = entry({ caip: 'b', symbol: 'AAA', name: 'Alpha', availability: { status: 'unknown', providers: [] } })
     expect(compareEntries(a, b)).toBeGreaterThan(0)
+  })
+})
+
+describe('ellipsizeCaip — middle-ellipsis only on long hex/base58 parts', () => {
+  test('shortens the erc20 contract, keeps eip155:1/erc20: prefix intact', () => {
+    expect(ellipsizeCaip('eip155:1/erc20:0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48'))
+      .toBe('eip155:1/erc20:0xa0b869…06eb48')
+  })
+  test('shortens the bip122 genesis hash, keeps slip44 index', () => {
+    expect(ellipsizeCaip('bip122:000000000019d6689c085ae165831e93/slip44:0'))
+      .toBe('bip122:000000…831e93/slip44:0')
+  })
+  test('leaves short references (chain id, slip44) untouched', () => {
+    expect(ellipsizeCaip('eip155:1/slip44:60')).toBe('eip155:1/slip44:60')
+  })
+  test('never chops across a delimiter', () => {
+    const out = ellipsizeCaip('eip155:10/erc20:0x0b2c639c533813f4aa9d7837caf62653d097ff85')
+    expect(out.startsWith('eip155:10/erc20:0x')).toBe(true)
+  })
+  test('empty string is a no-op', () => {
+    expect(ellipsizeCaip('')).toBe('')
   })
 })
 
