@@ -210,7 +210,10 @@ interface ServerDefiPosition {
 	networkId: string
 	balanceUsd: number
 	icon?: string
-	tokens?: Array<{ networkId: string; address: string; symbol?: string }>
+	// Per-token amount/symbol/USD when the server reports it. Older servers may
+	// only include {networkId, address, symbol}; balance/balanceUsd stay
+	// undefined and the UI degrades to USD-only.
+	tokens?: Array<{ networkId: string; address: string; symbol?: string; balance?: string | number; balanceUsd?: number }>
 }
 
 // Pioneer v1.3.115+ returns { balances, meta } where meta reports which chains
@@ -2573,6 +2576,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 								networkId: t.networkId,
 								address: String(t.address || '').toLowerCase(),
 								symbol: t.symbol,
+								balance: t.balance != null ? String(t.balance) : undefined,
+								balanceUsd: typeof t.balanceUsd === 'number' ? t.balanceUsd : undefined,
 							})).filter(t => !!t.address) : [],
 						}
 						// Chain-level (dashboard chain row)
@@ -3437,6 +3442,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 								networkId: t.networkId,
 								address: String(t.address || '').toLowerCase(),
 								symbol: t.symbol,
+								balance: t.balance != null ? String(t.balance) : undefined,
+								balanceUsd: typeof t.balanceUsd === 'number' ? t.balanceUsd : undefined,
 							})).filter(t => !!t.address) : [],
 						}
 						allChainDefi.push(dp)
