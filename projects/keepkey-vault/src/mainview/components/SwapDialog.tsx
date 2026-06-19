@@ -2359,50 +2359,76 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
         {/* ── Header ──────────────────────────────────────────────── */}
         <Flex px="5" py="2.5" borderBottom="1px solid" borderColor="kk.border" align="center" justify="space-between"
           bg="transparent">
-          <HStack gap="2">
+          <HStack gap="2.5" align="center">
             <ProviderBadge swapper={quote?.swapper || liveSwapper || quote?.integration} size={22} variant="compact" />
             <Text fontSize="sm" fontWeight="700" color="kk.textPrimary" letterSpacing="-0.01em">
-              {phase === 'review' ? t("review") : phase === 'submitted' ? t("swapSubmitted") : phase === 'blind-signing-required' ? t("blindSignHeader", "Blind Signing") : t("title")}
+              {phase === 'review' ? t("review") : phase === 'submitted' ? t("swapSubmitted") : phase === 'blind-signing-required' ? t("blindSignHeader", "Blind Signing") : "Swaps.pro"}
             </Text>
+            {/* Provider health — rendered as ascending wifi-style bars so
+                the overall integration status reads at a glance (the worst
+                status determines the colour). Click to open the detail
+                dialog with per-provider rows. */}
+            {swapHealth && (() => {
+              const worst = (() => {
+                const s = swapHealth.integrations.map(i => i.status)
+                if (s.some(x => x === 'offline')) return 'offline'
+                if (s.some(x => x === 'degraded')) return 'degraded'
+                if (s.some(x => x === 'ok')) return 'ok'
+                return 'unknown'
+              })()
+              const color =
+                worst === 'ok'       ? '#22c55e' :
+                worst === 'degraded' ? '#f59e0b' :
+                worst === 'offline'  ? '#ef4444' : '#6b7280'
+              const okCount  = swapHealth.integrations.filter(i => i.status === 'ok').length
+              const total    = swapHealth.integrations.length
+              const activeBars = worst === 'ok' ? 4 : worst === 'degraded' ? 3 : worst === 'offline' ? 1 : 2
+              const heights   = [4, 7, 10, 13]
+              const label =
+                worst === 'ok'       ? `All providers operational (${okCount}/${total})` :
+                worst === 'degraded' ? `Some providers degraded (${okCount}/${total} ok)` :
+                worst === 'offline'  ? `Provider(s) offline (${okCount}/${total} ok)` :
+                'Fetching provider status…'
+              return (
+                <Box
+                  as="button"
+                  display="inline-flex"
+                  alignItems="flex-end"
+                  gap="2px"
+                  px="2"
+                  py="1.5"
+                  borderRadius="md"
+                  cursor="pointer"
+                  bg="rgba(255,255,255,0.03)"
+                  _hover={{ bg: 'rgba(255,255,255,0.08)' }}
+                  border="1px solid rgba(255,255,255,0.08)"
+                  title={label}
+                  onClick={() => setHealthDialogOpen(true)}
+                  className="electrobun-webkit-app-region-no-drag"
+                  aria-label={label}
+                >
+                  {heights.map((h, i) => {
+                    const active = i < activeBars
+                    return (
+                      <Box
+                        key={i}
+                        w="3px"
+                        h={`${h}px`}
+                        borderRadius="1px"
+                        bg={active ? color : 'rgba(255,255,255,0.10)'}
+                        style={active && worst === 'ok' ? { boxShadow: `0 0 4px ${color}66` } : undefined}
+                      />
+                    )
+                  })}
+                </Box>
+              )
+            })()}
           </HStack>
-          <HStack gap="2" align="center">
-            {/* Provider health dots — click to open detail dialog */}
-            {swapHealth && (
-              <HStack
-                gap="2" px="2" py="1" borderRadius="full" cursor="pointer"
-                bg="rgba(255,255,255,0.04)" _hover={{ bg: 'rgba(255,255,255,0.08)' }}
-                border="1px solid" borderColor="kk.border"
-                title="Click for swap provider status"
-                onClick={() => setHealthDialogOpen(true)}
-              >
-                {swapHealth.integrations.map(intg => {
-                  const dotColor =
-                    intg.status === 'ok'       ? '#22c55e' :
-                    intg.status === 'degraded' ? '#f59e0b' :
-                    intg.status === 'offline'  ? '#ef4444' : '#6b7280'
-                  const hoverLabel =
-                    intg.status === 'ok'       ? `${intg.label}: operational` :
-                    intg.status === 'degraded' ? `${intg.label}: ${intg.detail || 'some pairs unavailable'}` :
-                    intg.status === 'offline'  ? `${intg.label}: unreachable` :
-                    `${intg.label}: status unknown`
-                  return (
-                    <Box key={intg.key} title={hoverLabel}
-                      w="7px" h="7px" borderRadius="full" flexShrink={0}
-                      style={{
-                        background: dotColor,
-                        boxShadow: intg.status === 'ok' ? `0 0 5px ${dotColor}99` : 'none',
-                      }}
-                    />
-                  )
-                })}
-              </HStack>
-            )}
-            {!busy && (
-              <Button size="xs" variant="ghost" color="kk.textMuted" px="1" minW="auto" _hover={{ color: "kk.textPrimary" }} onClick={handleClose}>
-                &times;
-              </Button>
-            )}
-          </HStack>
+          {!busy && (
+            <Button size="xs" variant="ghost" color="kk.textMuted" px="1" minW="auto" _hover={{ color: "kk.textPrimary" }} onClick={handleClose}>
+              &times;
+            </Button>
+          )}
         </Flex>
 
         {/* ── Body ────────────────────────────────────────────────── */}
@@ -4591,14 +4617,29 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       {/* ── Asset picker (modal-over-modal) ──────────────────────── */}
       {/* ── Swap Provider Health Dialog ──────────────────────────── */}
       {healthDialogOpen && (
-        <Box position="fixed" inset="0" zIndex={Z.assetPicker} display="flex" alignItems="center" justifyContent="center"
-          bg="rgba(0,0,0,0.6)" onClick={() => setHealthDialogOpen(false)}>
+        <Box
+          position="fixed" inset="0" zIndex={Z.assetPicker}
+          display="flex" alignItems="center" justifyContent="center"
+          bg="rgba(11,11,14,0.28)"
+          backdropFilter="blur(20px) saturate(140%)"
+          onClick={() => setHealthDialogOpen(false)}
+        >
           <Box
-            bg="kk.bg" borderRadius="16px" border="1px solid" borderColor="kk.border"
-            w="360px" maxH="80vh" overflow="auto"
-            boxShadow="0 24px 64px rgba(0,0,0,0.6)"
+            borderRadius="22px"
+            border="1px solid rgba(255,255,255,0.10)"
+            w="min(680px, 92vw)"
+            maxH="min(80vh, 720px)"
+            overflow="auto"
             onClick={e => e.stopPropagation()}
-            style={{ animation: 'kkSwapFadeIn 0.15s ease-out' }}
+            style={{
+              animation: 'kkSwapFadeIn 0.15s ease-out',
+              background:
+                "linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.015)), rgba(16,16,21,0.78)",
+              backdropFilter: "blur(32px) saturate(160%)",
+              WebkitBackdropFilter: "blur(32px) saturate(160%)",
+              boxShadow:
+                "0 0 0 1px rgba(255,255,255,0.06), 0 24px 60px -16px rgba(0,0,0,0.8), 0 4px 12px -4px rgba(0,0,0,0.5)",
+            }}
           >
             {/* Dialog header */}
             <Flex px="5" py="3" borderBottom="1px solid" borderColor="kk.border" align="center" justify="space-between">
