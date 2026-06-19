@@ -21,7 +21,6 @@ import { validateAddress } from "../../shared/address-validation"
 import type { SwapAsset, SwapQuote, ChainBalance, CustomToken, SwapStatusUpdate, SwapTrackingStatus, PendingSwap, SwapUiState, SwapUiCommand, SwapHealth } from "../../shared/types"
 import { SOLANA_BLIND_SIGNING_REQUIRED } from "../../shared/types"
 import { Z } from "../lib/z-index"
-import { SWAP_SIDEPANEL } from "../lib/flags"
 import { providerTrackerUrl } from "../lib/trackers"
 import { ProviderBadge, ProverChip, resolveProvider } from "./ProviderBadge"
 import { getSwapperAnimation } from "../lib/swapper-animations"
@@ -525,10 +524,6 @@ const DIALOG_CSS = `
   @keyframes kkSwapFadeIn {
     from { opacity: 0; transform: translateY(8px); }
     to { opacity: 1; transform: translateY(0); }
-  }
-  @keyframes kkSwapSlideIn {
-    from { opacity: 0; transform: translateX(24px); }
-    to { opacity: 1; transform: translateX(0); }
   }
   @keyframes kkBounceUp {
     0% { opacity: 0; transform: translateY(8px); }
@@ -2279,55 +2274,39 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   }, [assets, findAssetByKey])
 
   if (!open) return null
-  if (!SWAP_SIDEPANEL) return null  // build-time gate: swap UI fully hidden when OFF
   if (chain && !resumeSwap && !loadingAssets && assets.length > 0 && !swappableChainIds.has(chain.id)) {
     return (
-      <>
-        <style>{DIALOG_CSS}</style>
-        <Box position="fixed" inset="0" bg="rgba(0,0,0,0.45)" backdropFilter="blur(2px)" zIndex={Z.drawerBackdrop} />
-        <Flex
-          position="fixed" top="0" right="0" bottom="0"
-          w={{ base: "100vw", md: "520px" }} maxW="100vw"
-          direction="column" align="center" justify="center" gap="3" px="6" textAlign="center"
-          bg="linear-gradient(180deg, var(--ink-2), var(--ink-1))"
-          borderLeft="1px solid var(--line-2)"
-          boxShadow="-12px 0 48px -16px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.04) inset"
-          zIndex={Z.drawerPanel}
-          style={{ animation: 'kkSwapSlideIn 0.22s ease-out' }}
-        >
-          <ProviderBadge swapper="thorchain" size={32} variant="compact" />
-          <Text fontSize="sm" color="kk.textMuted">{t("notSupported", { coin: chain.coin })}</Text>
-          <Button size="sm" variant="ghost" color="kk.textSecondary" px="4" py="2" onClick={handleClose}>{t("close")}</Button>
-        </Flex>
-      </>
+      <Box position="fixed" inset="0" zIndex={Z.dialog} display="flex" alignItems="center" justifyContent="center">
+        <Box position="absolute" inset="0" bg="rgba(0,0,0,0.6)" backdropFilter="blur(8px)" />
+        <Box position="relative" bg="kk.cardBg" border="2px solid" borderColor="rgba(139,227,196,0.4)" borderRadius="xl" boxShadow="0 0 20px rgba(139,227,196,0.12)" p="6" w="400px" maxW="90vw" textAlign="center">
+          <Flex justify="center"><ProviderBadge swapper="thorchain" size={32} variant="compact" /></Flex>
+          <Text fontSize="sm" color="kk.textMuted" mt="3">{t("notSupported", { coin: chain.coin })}</Text>
+          <Button size="sm" mt="4" variant="ghost" color="kk.textSecondary" px="4" py="2" onClick={handleClose}>{t("close")}</Button>
+        </Box>
+      </Box>
     )
   }
 
   return (
-    <>
+    <Box position="fixed" inset="0" zIndex={Z.dialog} display="flex" alignItems="center" justifyContent="center">
       <style>{DIALOG_CSS}</style>
-      {/* Backdrop — dimmer only; backdrop-click intentionally does NOT close
-          (prevents accidental dismissal mid-quote/sign), matching swap UX. */}
-      <Box position="fixed" inset="0" bg="rgba(0,0,0,0.45)" backdropFilter="blur(2px)" zIndex={Z.drawerBackdrop} />
-      {/* Right-slide swap side panel (re-housed from the former modal card) */}
-      <Flex
-        position="fixed"
-        top="0"
-        right="0"
-        bottom="0"
-        w={{ base: "100vw", md: "520px" }}
-        maxW="100vw"
-        direction="column"
+      <Box position="absolute" inset="0" bg="rgba(0,0,0,0.6)" backdropFilter="blur(8px)" />
+      <Box
+        position="relative"
         bg="linear-gradient(180deg, var(--ink-2), var(--ink-1))"
-        borderLeft="1px solid var(--line-2)"
-        boxShadow="-12px 0 48px -16px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.04) inset"
-        zIndex={Z.drawerPanel}
+        border="1px solid var(--line-2)"
+        borderRadius="var(--r-xl)"
+        boxShadow="0 20px 80px -20px rgba(139,227,196,0.20), 0 0 0 1px rgba(255,255,255,0.04) inset"
+        w={isSwapComplete && phase === 'submitted' ? "1040px" : "760px"}
+        maxW="94vw"
+        maxH="90vh"
+        overflow="auto"
         onClick={(e) => e.stopPropagation()}
-        style={{ animation: 'kkSwapSlideIn 0.22s ease-out' }}
+        style={{ animation: 'kkSwapFadeIn 0.2s ease-out' }}
       >
         {/* ── Header ──────────────────────────────────────────────── */}
         <Flex px="5" py="2.5" borderBottom="1px solid" borderColor="kk.border" align="center" justify="space-between"
-          bg="transparent" flexShrink={0}>
+          bg="transparent">
           <HStack gap="2">
             <ProviderBadge swapper={quote?.swapper || liveSwapper || quote?.integration} size={22} variant="compact" />
             <Text fontSize="sm" fontWeight="700" color="kk.textPrimary" letterSpacing="-0.01em">
@@ -2374,13 +2353,10 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
           </HStack>
         </Flex>
 
-        {/* ── Body (scrolls; header & footer pinned via flexShrink) ─────── */}
+        {/* ── Body ────────────────────────────────────────────────── */}
         {/* Padding zeroed on the complete-swap view so the 2-column hero/details
-            layout reaches the panel edges and the footer can span full width. */}
+            layout reaches the modal edges and the footer can span full width. */}
         <Box
-          flex="1"
-          minH="0"
-          overflow="auto"
           px={isSwapComplete && phase === 'submitted' ? "0" : "5"}
           py={isSwapComplete && phase === 'submitted' ? "0" : "3"}
         >
@@ -2427,10 +2403,8 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
               <Box style={{ animation: 'kkSwapFadeIn 0.3s ease-out' }} position="relative">
                 {showConfetti && <ConfettiBurst />}
 
-                {/* Single column always: the panel is fixed-width, so the
-                    former 2-col (modal-widened-to-1040) layout stacks vertically. */}
                 <Box display="grid"
-                  gridTemplateColumns="1fr">
+                  gridTemplateColumns={{ base: "1fr", md: "minmax(0, 0.95fr) minmax(0, 1.25fr)" }}>
 
                   {/* ── HERO (mascot + title + slim stepper) ──
                       Grid with three rows (1fr auto 1fr) so the auto-row
@@ -2442,7 +2416,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                     display="grid"
                     gridTemplateRows="1fr auto 1fr"
                     justifyItems="center"
-                    borderBottom="1px solid"
+                    borderBottom={{ base: "1px solid", md: "0" }}
                     borderColor="kk.border"
                     overflow="hidden"
                     style={{
@@ -4510,7 +4484,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
 
         {/* ── Footer ──────────────────────────────────────────────── */}
         {!loadingAssets && phase !== 'submitted' && !busy && phase !== 'review' && phase !== 'blind-signing-required' && (
-          <Flex px="5" py="2.5" borderTop="1px solid" borderColor="kk.border" justify="space-between" align="center" gap="3" flexShrink={0}
+          <Flex px="5" py="2.5" borderTop="1px solid" borderColor="kk.border" justify="space-between" align="center" gap="3"
             bg="linear-gradient(90deg, transparent 0%, rgba(35,220,200,0.02) 50%, transparent 100%)">
             <Box minW="0" flex="1">
               {quote ? (
@@ -4541,7 +4515,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
             </Box>
           </Flex>
         )}
-      </Flex>
+      </Box>
 
       {/* ── Asset picker (modal-over-modal) ──────────────────────── */}
       {/* ── Swap Provider Health Dialog ──────────────────────────── */}
@@ -4721,6 +4695,6 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
           setError(null)
         }}
       />
-    </>
+    </Box>
   )
 }

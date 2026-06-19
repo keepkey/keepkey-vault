@@ -32,11 +32,10 @@ import { UpdateBanner } from "./components/UpdateBanner"
 import { IncomingTxToast, type IncomingTx } from "./components/IncomingTxToast"
 import { useDeviceState } from "./hooks/useDeviceState"
 import { useUpdateState } from "./hooks/useUpdateState"
-import { rpcRequest, onRpcMessage, rpcFire, dispatchLocalRpcMessage } from "./lib/rpc"
+import { rpcRequest, onRpcMessage, rpcFire } from "./lib/rpc"
 import { CHAINS, customChainToChainDef, findChainByNetwork, type ChainDef } from "../shared/chains"
 import { loadSupportedChains } from "../shared/swap-support-matrix"
 import { Z } from "./lib/z-index"
-import { SWAP_SIDEPANEL } from "./lib/flags"
 import { ActivityTracker } from "./components/ActivityTracker"
 import { SwapRpcMount } from "./components/SwapRpcMount"
 import { NAV_CONTENT_OFFSET, NAV_CONTENT_OFFSET_WITH_BANNER } from "./layout"
@@ -602,14 +601,16 @@ function App() {
 
 	// ── Tab change handler ──────────────────────────────────────────
 	const handleTabChange = useCallback(async (tab: NavTab) => {
-		if (tab === "swap") {
-			// Native KeepKey swap — open the in-app swap side panel.
-			// SwapRpcMount (mounted at app root) listens for this and mounts the panel.
-			dispatchLocalRpcMessage('swap-cmd', { kind: 'open' })
+		if (tab === "shapeshift") {
+			if (!restApiEnabled) {
+				setPendingAppUrl("https://app.shapeshift.com")
+				return
+			}
+			await launchApp("https://app.shapeshift.com")
 			return
 		}
 		setActiveTab(tab)
-	}, [])
+	}, [restApiEnabled, launchApp])
 
 	// ── Open app from AppStore ───────────────────────────────────────
 	const handleOpenApp = useCallback(async (url: string) => {
@@ -999,7 +1000,7 @@ function App() {
 				firmwareVersion={deviceState.firmwareVersion}
 			/>
 			{/* Top-level swap dialog mount for REST-driven /api/v2/swap/open. */}
-			{SWAP_SIDEPANEL && <SwapRpcMount />}
+			<SwapRpcMount />
 			{/* Enable API Bridge dialog — shown when user tries to launch an app with REST disabled */}
 			{/* ── WalletConnect Not Supported dialog ──────────────────── */}
 			{wcNotSupportedOpen && (

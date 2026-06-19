@@ -3,7 +3,6 @@ import { useTranslation } from "react-i18next"
 import { Box, Flex, Text, Button, Image, VStack, HStack, IconButton, Spinner } from "@chakra-ui/react"
 import { FaPlus, FaEye, FaEyeSlash, FaShieldAlt, FaCheck, FaCopy, FaTag, FaChevronDown, FaChevronUp } from "react-icons/fa"
 import { rpcRequest, onRpcMessage, rpcFire } from "../lib/rpc"
-import { SWAP_SIDEPANEL } from "../lib/flags"
 import type { ChainDef } from "../../shared/chains"
 import { CHAINS, BTC_SCRIPT_TYPES, btcAccountPath, isChainSupported } from "../../shared/chains"
 import type { ChainBalance, TokenBalance, TokenVisibilityStatus, AppSettings, SwapAsset } from "../../shared/types"
@@ -497,7 +496,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 		{ id: "send", label: t("send"), color: '#fb923c', bg: 'rgba(251,146,60,0.12)', icon: (
 			<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fb923c" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="19" x2="12" y2="5" /><polyline points="5 12 12 5 19 12" /></svg>
 		) },
-		...(SWAP_SIDEPANEL && swappableChainIds.has(chain.id) ? [{ id: "swap" as const, label: t("swap"), color: '#60a5fa', bg: 'rgba(96,165,250,0.12)', icon: (
+		...(swappableChainIds.has(chain.id) ? [{ id: "swap" as const, label: t("swap"), color: '#60a5fa', bg: 'rgba(96,165,250,0.12)', icon: (
 			<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polyline points="17 1 21 5 17 9" /><path d="M3 11V9a4 4 0 0 1 4-4h14" /><polyline points="7 23 3 19 7 15" /><path d="M21 13v2a4 4 0 0 1-4 4H3" /></svg>
 		) }] : []),
 		...(!selectedToken && zcashPrivacyEnabled && zcashShieldedSupported ? [{ id: "privacy" as const, label: t("privacy"), color: '#a78bfa', bg: 'rgba(167,139,250,0.12)', icon: (
@@ -1265,7 +1264,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 				</Box>
 			</Box>
 			{/* SwapDialog rendered outside overflow container so position:fixed works */}
-			{SWAP_SIDEPANEL && showSwapDialog && (
+			{showSwapDialog && (
 				<SwapErrorBoundary>
 					<Suspense fallback={null}>
 						<SwapDialog
