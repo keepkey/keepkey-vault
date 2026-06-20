@@ -717,7 +717,7 @@ pub async fn build_pczt(
         let effects_action = &effects_bundle.actions()[i];
         let nullifier_bytes = effects_action.nullifier().to_bytes().to_vec();
         let cmx_bytes = effects_action.cmx().to_bytes().to_vec();
-        let epk_bytes = effects_action.encrypted_note().epk_bytes.as_ref().to_vec();
+        let epk_bytes = effects_action.encrypted_note().epk_bytes[..].to_vec();
         let enc = &effects_action.encrypted_note().enc_ciphertext;
         if enc.len() != 580 {
             return Err(anyhow::anyhow!(
@@ -1378,7 +1378,7 @@ pub async fn build_shield_pczt(
         let effects_action = &effects_bundle.actions()[i];
         let nullifier_bytes = effects_action.nullifier().to_bytes().to_vec();
         let cmx_bytes = effects_action.cmx().to_bytes().to_vec();
-        let epk_bytes = effects_action.encrypted_note().epk_bytes.as_ref().to_vec();
+        let epk_bytes = effects_action.encrypted_note().epk_bytes[..].to_vec();
         let enc = &effects_action.encrypted_note().enc_ciphertext;
         let enc_compact = enc[..52].to_vec();
         let enc_memo = enc[52..564].to_vec();
@@ -2109,7 +2109,7 @@ pub async fn build_deshield_pczt(
         let effects_action = &effects_bundle.actions()[i];
         let nullifier_bytes = effects_action.nullifier().to_bytes().to_vec();
         let cmx_bytes = effects_action.cmx().to_bytes().to_vec();
-        let epk_bytes = effects_action.encrypted_note().epk_bytes.as_ref().to_vec();
+        let epk_bytes = effects_action.encrypted_note().epk_bytes[..].to_vec();
         let enc = &effects_action.encrypted_note().enc_ciphertext;
         if enc.len() != 580 {
             return Err(anyhow::anyhow!("Invalid enc_ciphertext length: {}", enc.len()));
@@ -3225,10 +3225,8 @@ mod roundtrip_v5_tests {
         Action, Anchor, Proof,
     };
     use zcash_primitives::transaction::Transaction;
-    // zcash_primitives 0.19 pins zcash_protocol 0.4; its `Transaction::read`
-    // signature wants that exact BranchId. Our crate also depends on
-    // zcash_protocol 0.7 (used elsewhere). Pull the 0.4 alias here.
-    use zcash_protocol_v04::consensus::BranchId;
+    // zcash_primitives 0.28's `Transaction::read` wants this BranchId.
+    use zcash_protocol::consensus::BranchId;
 
     /// NU5 consensus branch id. Picked because deshield txs ship under NU5+
     /// rules and `Transaction::read` for v5 ignores the branch_id parameter
@@ -3324,8 +3322,11 @@ mod roundtrip_v5_tests {
 
     // ── Helpers ──────────────────────────────────────────────────────────
 
-    /// One synthetic Orchard action with on-curve Pallas points + arbitrary sig.
-    fn synthetic_action() -> Action<redpallas::Signature<redpallas::SpendAuth>> {
+    /// One synthetic effects-only Orchard action with on-curve Pallas points.
+    /// orchard 0.14 only exposes a public `from_parts` for `Bundle<EffectsOnly>`,
+    /// whose actions carry `()` spend-auth; the binding/spend sigs are grafted on
+    /// afterwards via `map_authorization` in `synthetic_bundle`.
+    fn synthetic_action() -> Action<()> {
         let cv_net = ValueCommitment::from_bytes(&TV_CV_NET).unwrap();
         let nf = Nullifier::from_bytes(&TV_NF_OLD).unwrap();
         // `rk` is a randomized SpendAuth verification key — same compressed-Pallas
@@ -3338,8 +3339,8 @@ mod roundtrip_v5_tests {
             enc_ciphertext: tv_c_enc(),
             out_ciphertext: TV_C_OUT,
         };
-        let spend_auth_sig: redpallas::Signature<redpallas::SpendAuth> = [0xab; 64].into();
-        Action::from_parts(nf, rk, cmx, encrypted_note, cv_net, spend_auth_sig)
+        Action::from_parts(nf, rk, cmx, encrypted_note, cv_net, ())
+            .expect("synthetic action parts are well-formed")
     }
 
     fn synthetic_bundle(n_actions: usize, value_balance: i64)
@@ -3350,10 +3351,18 @@ mod roundtrip_v5_tests {
         let actions_ne = NonEmpty::from_vec(actions).unwrap();
         let flags = Flags::from_byte(0x03).unwrap();
         let anchor = Anchor::from_bytes(TV_CMX).unwrap();
+        let effects = orchard::Bundle::<_, i64>::from_parts(
+            actions_ne, flags, value_balance, anchor, orchard::bundle::EffectsOnly,
+        );
         let proof = Proof::new(vec![0u8; 1500]);
         let binding_sig: redpallas::Signature<redpallas::Binding> = [0xcd; 64].into();
-        let auth = Authorized::from_parts(proof, binding_sig);
-        orchard::Bundle::from_parts(actions_ne, flags, value_balance, anchor, auth)
+        let spend_auth_sig: redpallas::Signature<redpallas::SpendAuth> = [0xab; 64].into();
+        // Graft authorizing data on, transitioning EffectsOnly → Authorized.
+        effects.map_authorization(
+            &mut (),
+            |_, _, ()| spend_auth_sig.clone(),
+            |_, _| Authorized::from_parts(proof, binding_sig),
+        )
     }
 
     /// Recompute the txid the way `finalize_pczt` (shielded-only) does.
@@ -3491,8 +3500,8 @@ mod roundtrip_v5_tests {
         assert_eq!(parsed_transparent.vin.len(), 0, "no transparent inputs");
         assert_eq!(parsed_transparent.vout.len(), 1, "exactly one transparent output");
         let parsed_out = &parsed_transparent.vout[0];
-        assert_eq!(u64::from(parsed_out.value), outputs[0].value, "vout value");
-        assert_eq!(parsed_out.script_pubkey.0, outputs[0].script_pubkey, "vout script");
+        assert_eq!(u64::from(parsed_out.value()), outputs[0].value, "vout value");
+        assert_eq!(parsed_out.script_pubkey().0.0, outputs[0].script_pubkey, "vout script");
         assert_eq!(
             parsed.orchard_bundle().expect("orchard bundle present").actions().len(),
             bundle.actions().len(),
@@ -3523,7 +3532,7 @@ mod roundtrip_v5_tests {
 #[cfg(test)]
 mod batch_validate_test {
     use zcash_primitives::transaction::Transaction;
-    use zcash_protocol_v04::consensus::BranchId;
+    use zcash_protocol::consensus::BranchId;
 
     const NU5_BRANCH_ID_LE: [u8; 4] = 0xc2d6d0b4u32.to_le_bytes();
 
@@ -3534,8 +3543,8 @@ mod batch_validate_test {
     #[ignore]
     fn batch_validate_saved_shield_tx_t1_passes() {
         use rand::rngs::OsRng;
-        use orchard_v010::bundle::BatchValidator;
-        use orchard_v010::circuit::VerifyingKey;
+        use orchard::bundle::BatchValidator;
+        use orchard::circuit::VerifyingKey;
 
         let hex_path = "/tmp/shield_tx_9c240769e2089bdf.hex";
         let hex = match std::fs::read_to_string(hex_path) {

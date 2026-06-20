@@ -958,14 +958,20 @@ pub fn parse_orchard_actions_from_raw_tx(raw: &[u8]) -> Result<Vec<Action<()>>> 
             out_ciphertext,
         };
 
-        let action = Action::from_parts(
+        // orchard 0.14: from_parts validates the parts and returns a Result.
+        // A malformed action from a raw tx is skipped, matching the other
+        // parse-failure `continue`s above.
+        let action = match Action::from_parts(
             nf.unwrap(),
             rk,
             cmx.unwrap(),
             encrypted_note,
             cv_net.unwrap(),
             (),
-        );
+        ) {
+            Ok(a) => a,
+            Err(_) => continue,
+        };
         actions.push(action);
     }
 
