@@ -1114,6 +1114,13 @@ const restCallbacks: RestApiCallbacks = {
 	// the loop. The device still gates every signature. NOOP substage push.
 	getSwapQuoteHeadless: (params) => headlessSwapQuote(params),
 	executeSwapHeadless: (params) => headlessExecuteSwap(params, () => { /* headless: no WebView substage */ }),
+	zcashPreSendGate: async (account: number) => {
+		// Same fail-closed preflight the RPC send path runs: prove the FVK belongs
+		// to the connected device (purges stale state on mismatch) THEN catch the
+		// note set up to tip. A device-comms failure throws and aborts the send.
+		await ensureZcashDeviceMatch(account)
+		await ensureZcashScanFresh()
+	},
 	getPioneer: () => getPioneer(),
 	getPioneerApiBase: () => getPioneerApiBase(),
 	setPioneerApiBase: async (url: string) => {
@@ -4335,6 +4342,36 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					verifying: zcashBackgroundVerifyInFlight,
 				}
 				console.log(`[zcash] zcashShieldedStatus → ready=${result.ready} fvk=${fvkLoaded} verified=${result.verified} synced=${result.synced} verifying=${result.verifying} synced_to=${scanState.syncedTo} addr=${cached?.address?.slice(0, 20) ?? 'none'}`)
+				return result
+			},
+			// Read-only diagnostic: does the cached shielded balance actually belong
+			// to the CONNECTED device? Derives the Orchard FVK fresh from the device
+			// (silent, no button) and compares its `ak` to the cached one. Does NOT
+			// mutate the sidecar/db. `match: false` means the shown balance is from a
+			// different/stale wallet and is not spendable here.
+			zcashVerifyDevice: async (params) => {
+				if (!zcashPrivacyEnabled) throw new Error('Zcash privacy feature is disabled')
+				if (!engine.wallet) throw new Error('No device connected')
+				if (typeof (engine.wallet as any).zcashGetOrchardFVK !== 'function') {
+					throw new Error('Device firmware does not support Orchard FVK export')
+				}
+				const cached = getCachedFvk()
+				const deviceFvk = await (engine.wallet as any).zcashGetOrchardFVK(params?.account ?? 0)
+				const deviceAk = Buffer.from(deviceFvk.ak).toString('hex')
+				const cachedAk = cached?.fvk?.ak ?? null
+				const match = !!cachedAk && cachedAk.toLowerCase() === deviceAk.toLowerCase()
+				const result = {
+					match,
+					deviceAk,
+					cachedAk,
+					cachedAddress: cached?.address ?? null,
+					message: cachedAk === null
+						? 'No cached FVK — nothing to compare (wallet not initialized).'
+						: match
+							? 'OK: the cached shielded balance belongs to the connected device.'
+							: 'MISMATCH: cached shielded balance is NOT from the connected device — stale/another wallet, not spendable here.',
+				}
+				console.log(`[zcash] zcashVerifyDevice → match=${match} deviceAk=${deviceAk.slice(0, 12)}… cachedAk=${(cachedAk ?? 'none').slice(0, 12)}…`)
 				return result
 			},
 			zcashShieldedInit: async (params) => {

@@ -595,7 +595,28 @@ pub async fn build_pczt(
 
         info!("Note {} pos={} anchor_ckpt={}", orig_idx, pos, anchor_checkpoint_id);
 
-        builder.add_spend(fvk.clone(), orchard_notes[orig_idx].clone(), merkle_path.into())
+        // The proof consumes the orchard-crate MerklePath (after `.into()`), NOT the
+        // ShardTree witness. A conversion/encoding divergence — or orchard's root math
+        // disagreeing with incrementalmerkletree for a deep-shard path — would bind a
+        // DIFFERENT anchor into the proof while the ShardTree witness still recomputes
+        // the root, producing exactly "could not validate orchard proof" at broadcast.
+        // Verify the orchard path recomputes the SAME anchor before building the proof.
+        let orchard_path: orchard::tree::MerklePath = merkle_path.into();
+        let extracted_cmx: ExtractedNoteCommitment = orchard_notes[orig_idx].commitment().into();
+        let path_root = orchard_path.root(extracted_cmx);
+        if path_root.to_bytes() != anchor.to_bytes() {
+            return Err(anyhow::anyhow!(
+                "Orchard MerklePath root MISMATCH for note {} at pos {}: \
+                 path recomputes {} but tx anchor is {} — the proof would be invalid. \
+                 (ShardTree witness was correct; the orchard-crate path diverges.)",
+                orig_idx, pos,
+                hex::encode(path_root.to_bytes()),
+                hex::encode(anchor.to_bytes()),
+            ));
+        }
+        info!("Note {} orchard MerklePath root MATCHES anchor — proof witness OK", orig_idx);
+
+        builder.add_spend(fvk.clone(), orchard_notes[orig_idx].clone(), orchard_path)
             .map_err(|e| anyhow::anyhow!("Failed to add spend {}: {:?}", orig_idx, e))?;
     }
 
@@ -696,7 +717,7 @@ pub async fn build_pczt(
         let effects_action = &effects_bundle.actions()[i];
         let nullifier_bytes = effects_action.nullifier().to_bytes().to_vec();
         let cmx_bytes = effects_action.cmx().to_bytes().to_vec();
-        let epk_bytes = effects_action.encrypted_note().epk_bytes.as_ref().to_vec();
+        let epk_bytes = effects_action.encrypted_note().epk_bytes[..].to_vec();
         let enc = &effects_action.encrypted_note().enc_ciphertext;
         if enc.len() != 580 {
             return Err(anyhow::anyhow!(
@@ -856,6 +877,71 @@ pub fn finalize_pczt(
     // Apply binding signature
     let authorized_bundle = unbound_bundle.apply_binding_signature(sighash, &mut rng)
         .ok_or_else(|| anyhow::anyhow!("Binding signature verification failed"))?;
+
+    // In-process proof verification — catches circuit constraint violations BEFORE
+    // broadcast. If this fails, the chain rejects with "could not validate orchard
+    // proof". The shield path already does this; the z→z spend path did not, so the
+    // only signal was the opaque consensus rejection. Now we get the real halo2 error
+    // locally and know it's the proof (not serialization) for an aged deep-shard spend.
+    let vk = VerifyingKey::build();
+    authorized_bundle.verify_proof(&vk)
+        .map_err(|e| anyhow::anyhow!("Local Orchard proof verification FAILED (would be rejected on-chain): {:?}", e))?;
+    info!("Local Orchard proof verification: PASSED");
+
+    // FULL consensus check: proof + spend-auth sigs + binding sig together, the
+    // exact thing zebra runs. verify_proof() above only covers the zk proof and
+    // always passes for a self-consistent bundle — it can't catch a binding-sig
+    // or sighash problem. Run the BatchValidator with the SAME sighash the device
+    // signed AND with the sighash recomputed from the final tx; a divergence in
+    // outcome localizes the bug to the sighash. If both pass, the chain rejection
+    // is consensus STATE (already-spent nullifier / unknown anchor), not our tx.
+    {
+        let mut bv = orchard::bundle::BatchValidator::new();
+        bv.add_bundle(&authorized_bundle, sighash);
+        let ok_signing = bv.validate(&VerifyingKey::build(), OsRng);
+        info!("BatchValidator (proof+sigs+binding, signing sighash): {}", if ok_signing { "PASS" } else { "FAIL" });
+        // FAIL-CLOSED: a FAIL here is exactly what the chain runs — proof, spend-auth
+        // sigs, and binding sig together. Broadcasting past it just burns a doomed tx
+        // and surfaces as the opaque "could not validate orchard proof" rejection.
+        if !ok_signing {
+            return Err(anyhow::anyhow!(
+                "BatchValidator FAILED under the device-signed sighash — proof/spend-auth/\
+                 binding signatures are inconsistent; the network would reject this tx. \
+                 Aborting before broadcast."
+            ));
+        }
+
+        // Recompute the consensus sighash from the FINAL authorized bundle.
+        let cs_header = zip244::digest_header(branch_id, 0, 0);
+        let cs_orchard = zip244::digest_orchard(&authorized_bundle);
+        let cs_digests = zip244::Zip244Digests {
+            header_digest: cs_header,
+            transparent_digest: zip244::EMPTY_TRANSPARENT_DIGEST,
+            sapling_digest: zip244::EMPTY_SAPLING_DIGEST,
+            orchard_digest: cs_orchard,
+        };
+        let consensus_sighash = zip244::compute_sighash(&cs_digests, branch_id);
+        if consensus_sighash != sighash {
+            // The chain recomputes the sighash from the tx and checks sigs against
+            // it. The device signed a DIFFERENT sighash, so on-chain verification
+            // is guaranteed to fail — abort rather than broadcast a doomed tx.
+            log::error!("SIGHASH DIVERGENCE: device signed {} but final-tx consensus sighash is {}",
+                hex::encode(&sighash), hex::encode(&consensus_sighash));
+            let mut bv2 = orchard::bundle::BatchValidator::new();
+            bv2.add_bundle(&authorized_bundle, consensus_sighash);
+            let ok_consensus = bv2.validate(&VerifyingKey::build(), OsRng);
+            info!("BatchValidator (consensus sighash): {}", if ok_consensus { "PASS" } else { "FAIL" });
+            return Err(anyhow::anyhow!(
+                "Consensus sighash {} diverges from the device-signed sighash {} \
+                 (BatchValidator under consensus sighash: {}). The network computes the \
+                 consensus sighash, so this tx is doomed. Aborting before broadcast.",
+                hex::encode(&consensus_sighash), hex::encode(&sighash),
+                if ok_consensus { "PASS" } else { "FAIL" },
+            ));
+        } else {
+            info!("Signing sighash == consensus sighash ({})", hex::encode(&sighash));
+        }
+    }
 
     // Serialize as v5 transaction
     let tx_bytes = serialize_v5_shielded_tx(&authorized_bundle, branch_id)?;
@@ -1312,7 +1398,7 @@ pub async fn build_shield_pczt(
         let effects_action = &effects_bundle.actions()[i];
         let nullifier_bytes = effects_action.nullifier().to_bytes().to_vec();
         let cmx_bytes = effects_action.cmx().to_bytes().to_vec();
-        let epk_bytes = effects_action.encrypted_note().epk_bytes.as_ref().to_vec();
+        let epk_bytes = effects_action.encrypted_note().epk_bytes[..].to_vec();
         let enc = &effects_action.encrypted_note().enc_ciphertext;
         let enc_compact = enc[..52].to_vec();
         let enc_memo = enc[52..564].to_vec();
@@ -1772,22 +1858,36 @@ pub async fn build_deshield_pczt(
     let mut tree: ShardTree<MemoryShardStore<MerkleHashOrchard, u32>, 32, 16> =
         ShardTree::new(MemoryShardStore::empty(), 100);
 
-    // Insert completed shard roots (not containing our notes)
-    for (shard_idx, root_hash, completing_height) in &subtree_roots {
-        if note_shards.contains(shard_idx) { continue; }
-        let root = MerkleHashOrchard::from_bytes(&root_hash);
-        if bool::from(root.is_none()) { continue; }
-        let addr = incrementalmerkletree::Address::above_position(
-            16.into(),
-            incrementalmerkletree::Position::from((*shard_idx as u64) * SHARD_SIZE),
-        );
-        tree.insert(addr, root.unwrap())
-            .map_err(|e| anyhow::anyhow!("Failed to insert shard root {}: {:?}", shard_idx, e))?;
-        debug!("Inserted shard {} root (completing_height={})", shard_idx, completing_height);
-    }
-
-    // For shards containing our notes, fetch all leaves and append
-    for shard_idx in &note_shards {
+    // Build the tree in ASCENDING shard order — insert a completed shard's root
+    // or append a note shard's leaves as we go. append() writes at the tree's
+    // current frontier, so a note in a COMPLETED shard BELOW higher shards must
+    // be appended BEFORE those higher roots are inserted, else its leaves land at
+    // the wrong position and root_at_checkpoint_id fails ("Failed to get root").
+    // Same fix as build_pczt — see test_note_in_lower_completed_shard_requires_ordered_build.
+    let highest_note_shard = note_shards.iter().max().copied().unwrap_or(0);
+    let last_ordered_shard = std::cmp::max((num_shards as u32).saturating_sub(1), highest_note_shard);
+    for shard_idx_val in 0..=last_ordered_shard {
+        if !note_shards.contains(&shard_idx_val) {
+            if (shard_idx_val as usize) < num_shards {
+                if let Some((_, root_hash, completing_height)) =
+                    subtree_roots.iter().find(|(i, _, _)| *i == shard_idx_val)
+                {
+                    let root = MerkleHashOrchard::from_bytes(root_hash);
+                    if bool::from(root.is_none()) { continue; }
+                    let addr = incrementalmerkletree::Address::above_position(
+                        16.into(),
+                        incrementalmerkletree::Position::from((shard_idx_val as u64) * SHARD_SIZE),
+                    );
+                    tree.insert(addr, root.unwrap())
+                        .map_err(|e| anyhow::anyhow!("Failed to insert shard root {}: {:?}", shard_idx_val, e))?;
+                    debug!("Inserted shard {} root (completing_height={})", shard_idx_val, completing_height);
+                }
+            }
+            // else: non-note incomplete shard → handled by the frontier block below.
+            continue;
+        }
+        // Note shard → append its leaves. Keep `shard_idx` as a &u32 so the body is unchanged.
+        let shard_idx = &shard_idx_val;
         let shard_start_pos = (*shard_idx as u64) * SHARD_SIZE;
 
         let (fetch_start_height, actions_to_skip) = if *shard_idx == 0 {
@@ -2029,7 +2129,7 @@ pub async fn build_deshield_pczt(
         let effects_action = &effects_bundle.actions()[i];
         let nullifier_bytes = effects_action.nullifier().to_bytes().to_vec();
         let cmx_bytes = effects_action.cmx().to_bytes().to_vec();
-        let epk_bytes = effects_action.encrypted_note().epk_bytes.as_ref().to_vec();
+        let epk_bytes = effects_action.encrypted_note().epk_bytes[..].to_vec();
         let enc = &effects_action.encrypted_note().enc_ciphertext;
         if enc.len() != 580 {
             return Err(anyhow::anyhow!("Invalid enc_ciphertext length: {}", enc.len()));
@@ -3145,10 +3245,8 @@ mod roundtrip_v5_tests {
         Action, Anchor, Proof,
     };
     use zcash_primitives::transaction::Transaction;
-    // zcash_primitives 0.19 pins zcash_protocol 0.4; its `Transaction::read`
-    // signature wants that exact BranchId. Our crate also depends on
-    // zcash_protocol 0.7 (used elsewhere). Pull the 0.4 alias here.
-    use zcash_protocol_v04::consensus::BranchId;
+    // zcash_primitives 0.28's `Transaction::read` wants this BranchId.
+    use zcash_protocol::consensus::BranchId;
 
     /// NU5 consensus branch id. Picked because deshield txs ship under NU5+
     /// rules and `Transaction::read` for v5 ignores the branch_id parameter
@@ -3244,8 +3342,11 @@ mod roundtrip_v5_tests {
 
     // ── Helpers ──────────────────────────────────────────────────────────
 
-    /// One synthetic Orchard action with on-curve Pallas points + arbitrary sig.
-    fn synthetic_action() -> Action<redpallas::Signature<redpallas::SpendAuth>> {
+    /// One synthetic effects-only Orchard action with on-curve Pallas points.
+    /// orchard 0.14 only exposes a public `from_parts` for `Bundle<EffectsOnly>`,
+    /// whose actions carry `()` spend-auth; the binding/spend sigs are grafted on
+    /// afterwards via `map_authorization` in `synthetic_bundle`.
+    fn synthetic_action() -> Action<()> {
         let cv_net = ValueCommitment::from_bytes(&TV_CV_NET).unwrap();
         let nf = Nullifier::from_bytes(&TV_NF_OLD).unwrap();
         // `rk` is a randomized SpendAuth verification key — same compressed-Pallas
@@ -3258,8 +3359,8 @@ mod roundtrip_v5_tests {
             enc_ciphertext: tv_c_enc(),
             out_ciphertext: TV_C_OUT,
         };
-        let spend_auth_sig: redpallas::Signature<redpallas::SpendAuth> = [0xab; 64].into();
-        Action::from_parts(nf, rk, cmx, encrypted_note, cv_net, spend_auth_sig)
+        Action::from_parts(nf, rk, cmx, encrypted_note, cv_net, ())
+            .expect("synthetic action parts are well-formed")
     }
 
     fn synthetic_bundle(n_actions: usize, value_balance: i64)
@@ -3270,10 +3371,18 @@ mod roundtrip_v5_tests {
         let actions_ne = NonEmpty::from_vec(actions).unwrap();
         let flags = Flags::from_byte(0x03).unwrap();
         let anchor = Anchor::from_bytes(TV_CMX).unwrap();
+        let effects = orchard::Bundle::<_, i64>::from_parts(
+            actions_ne, flags, value_balance, anchor, orchard::bundle::EffectsOnly,
+        );
         let proof = Proof::new(vec![0u8; 1500]);
         let binding_sig: redpallas::Signature<redpallas::Binding> = [0xcd; 64].into();
-        let auth = Authorized::from_parts(proof, binding_sig);
-        orchard::Bundle::from_parts(actions_ne, flags, value_balance, anchor, auth)
+        let spend_auth_sig: redpallas::Signature<redpallas::SpendAuth> = [0xab; 64].into();
+        // Graft authorizing data on, transitioning EffectsOnly → Authorized.
+        effects.map_authorization(
+            &mut (),
+            |_, _, ()| spend_auth_sig.clone(),
+            |_, _| Authorized::from_parts(proof, binding_sig),
+        )
     }
 
     /// Recompute the txid the way `finalize_pczt` (shielded-only) does.
@@ -3411,8 +3520,8 @@ mod roundtrip_v5_tests {
         assert_eq!(parsed_transparent.vin.len(), 0, "no transparent inputs");
         assert_eq!(parsed_transparent.vout.len(), 1, "exactly one transparent output");
         let parsed_out = &parsed_transparent.vout[0];
-        assert_eq!(u64::from(parsed_out.value), outputs[0].value, "vout value");
-        assert_eq!(parsed_out.script_pubkey.0, outputs[0].script_pubkey, "vout script");
+        assert_eq!(u64::from(parsed_out.value()), outputs[0].value, "vout value");
+        assert_eq!(parsed_out.script_pubkey().0.0, outputs[0].script_pubkey, "vout script");
         assert_eq!(
             parsed.orchard_bundle().expect("orchard bundle present").actions().len(),
             bundle.actions().len(),
@@ -3443,7 +3552,7 @@ mod roundtrip_v5_tests {
 #[cfg(test)]
 mod batch_validate_test {
     use zcash_primitives::transaction::Transaction;
-    use zcash_protocol_v04::consensus::BranchId;
+    use zcash_protocol::consensus::BranchId;
 
     const NU5_BRANCH_ID_LE: [u8; 4] = 0xc2d6d0b4u32.to_le_bytes();
 
@@ -3454,8 +3563,8 @@ mod batch_validate_test {
     #[ignore]
     fn batch_validate_saved_shield_tx_t1_passes() {
         use rand::rngs::OsRng;
-        use orchard_v010::bundle::BatchValidator;
-        use orchard_v010::circuit::VerifyingKey;
+        use orchard::bundle::BatchValidator;
+        use orchard::circuit::VerifyingKey;
 
         let hex_path = "/tmp/shield_tx_9c240769e2089bdf.hex";
         let hex = match std::fs::read_to_string(hex_path) {
