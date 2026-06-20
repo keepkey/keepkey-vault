@@ -246,35 +246,48 @@ pub async fn build_pczt(
     let mut tree: ShardTree<MemoryShardStore<MerkleHashOrchard, u32>, 32, 16> =
         ShardTree::new(MemoryShardStore::empty(), 100);
 
-    // For shards NOT containing our notes, insert pre-computed roots
-    for (shard_idx, root_hash, completing_height) in &subtree_roots {
-        if note_shards.contains(shard_idx) {
-            // We need to fill this shard with individual leaves
-            continue;
-        }
-
-        let root = MerkleHashOrchard::from_bytes(&root_hash);
-        if bool::from(root.is_none()) {
-            continue;
-        }
-        let addr = incrementalmerkletree::Address::above_position(
-            16.into(),
-            incrementalmerkletree::Position::from((*shard_idx as u64) * SHARD_SIZE),
-        );
-        tree.insert(addr, root.unwrap())
-            .map_err(|e| anyhow::anyhow!("Failed to insert shard root {}: {:?}", shard_idx, e))?;
-        debug!("Inserted shard {} root (completing_height={})", shard_idx, completing_height);
-    }
-
-    // For shards containing our notes, fetch all leaves and append.
+    // Build the tree in ASCENDING shard order, inserting a completed shard's
+    // pre-computed root or appending a note shard's individual leaves as we go.
     //
-    // CRITICAL: completing_block_height for shard N is the block where the tree
-    // size first reached (N+1)*65536. But that block may contain actions that
-    // STRADDLE the shard boundary — some actions fill shard N, the rest start
-    // shard N+1. We must use orchardCommitmentTreeSize to find the exact leaf
-    // position boundary, then include cross-boundary actions from the completing
-    // block that belong to the NEXT shard.
-    for shard_idx in &note_shards {
+    // ORDER MATTERS: append() always writes at the tree's current frontier. A
+    // note shard that sits BELOW a completed shard must therefore be appended
+    // BEFORE that higher shard's root is inserted — otherwise the note leaves
+    // land past the higher shard at the wrong position and the tip root can't
+    // be computed ("Failed to get Merkle root"). See
+    // test_note_in_lower_completed_shard_requires_ordered_build.
+    //
+    // For note shards we fetch all leaves and append. CRITICAL: the completing
+    // block for shard N is where the tree size first reached (N+1)*65536, but
+    // that block may contain actions that STRADDLE the shard boundary — some
+    // fill shard N, the rest start shard N+1. We use orchardCommitmentTreeSize
+    // to find the exact leaf-position boundary and include cross-boundary
+    // actions from the completing block that belong to this shard.
+    let highest_note_shard = note_shards.iter().max().copied().unwrap_or(0);
+    let last_ordered_shard = std::cmp::max((num_shards as u32).saturating_sub(1), highest_note_shard);
+    for shard_idx_val in 0..=last_ordered_shard {
+        if !note_shards.contains(&shard_idx_val) {
+            // Completed, non-note shard → insert its pre-computed root.
+            if (shard_idx_val as usize) < num_shards {
+                if let Some((_, root_hash, completing_height)) =
+                    subtree_roots.iter().find(|(i, _, _)| *i == shard_idx_val)
+                {
+                    let root = MerkleHashOrchard::from_bytes(root_hash);
+                    if bool::from(root.is_none()) { continue; }
+                    let addr = incrementalmerkletree::Address::above_position(
+                        16.into(),
+                        incrementalmerkletree::Position::from((shard_idx_val as u64) * SHARD_SIZE),
+                    );
+                    tree.insert(addr, root.unwrap())
+                        .map_err(|e| anyhow::anyhow!("Failed to insert shard root {}: {:?}", shard_idx_val, e))?;
+                    debug!("Inserted shard {} root (completing_height={})", shard_idx_val, completing_height);
+                }
+            }
+            // else: non-note incomplete shard → handled by the frontier block below.
+            continue;
+        }
+        // Note shard → append its leaves. Keep `shard_idx` as a &u32 so the
+        // body below is unchanged.
+        let shard_idx = &shard_idx_val;
         let shard_start_pos = (*shard_idx as u64) * SHARD_SIZE;
 
         // Determine the block range and how many actions to skip at the start.
@@ -2687,6 +2700,101 @@ mod tests {
             "Skipping cross-boundary leaves must produce a DIFFERENT (wrong) root — \
              this is the exact 'unknown Orchard anchor' failure mode"
         );
+    }
+
+    /// Reproducer for the "Failed to get Merkle root" build_pczt bug: the
+    /// spent note lives in a COMPLETED shard that is BELOW other completed
+    /// shards. build_pczt's construction inserts ALL non-note shard roots
+    /// first (including shards above the note), THEN appends the note shard's
+    /// leaves. Because append() writes at the tree's current frontier (now
+    /// past the higher shards), the note leaves land at the wrong position and
+    /// the tip root cannot be computed / is wrong.
+    ///
+    /// The fix is to build in ascending shard order: insert root OR append
+    /// leaves per shard as we go, so every append lands at the correct
+    /// position. This test pins both the bug and the fix.
+    #[test]
+    fn test_note_in_lower_completed_shard_requires_ordered_build() {
+        use incrementalmerkletree::{Address, Position};
+
+        let shard_size: u64 = 1 << 4; // 16
+        let n_complete = 3u64; // shards 0,1,2 complete
+        let note_shard = 1u64; // note sits in a completed shard BELOW shard 2
+        let note_pos = note_shard * shard_size + 5; // position 21
+        let incomplete = 7u64; // 7 leaves in incomplete shard 3
+        let total = n_complete * shard_size + incomplete;
+
+        // Reference: build everything by append, note Marked at its true pos.
+        let mut ref_tree: ShardTree<MemoryShardStore<MerkleHashOrchard, u32>, 8, 4> =
+            ShardTree::new(MemoryShardStore::empty(), 100);
+        for i in 0..total {
+            let r = if i == note_pos { Retention::Marked } else { Retention::Ephemeral };
+            ref_tree.append(test_leaf(i), r).unwrap();
+        }
+        ref_tree.checkpoint(0u32).unwrap();
+        let ref_root = ref_tree.root_at_checkpoint_id(&0u32).unwrap().unwrap();
+
+        // Precompute completed shard roots.
+        let shard_root = |s: u64| -> [u8; 32] {
+            let mut st: ShardTree<MemoryShardStore<MerkleHashOrchard, u32>, 4, 4> =
+                ShardTree::new(MemoryShardStore::empty(), 100);
+            for j in 0..shard_size { st.append(test_leaf(s * shard_size + j), Retention::Ephemeral).unwrap(); }
+            st.checkpoint(0u32).unwrap();
+            st.root_at_checkpoint_id(&0u32).unwrap().unwrap().to_bytes()
+        };
+
+        // BUGGY (current build_pczt order): insert all non-note roots, then
+        // append note-shard leaves, then frontier.
+        let buggy_root = {
+            let mut t: ShardTree<MemoryShardStore<MerkleHashOrchard, u32>, 8, 4> =
+                ShardTree::new(MemoryShardStore::empty(), 100);
+            for s in 0..n_complete {
+                if s == note_shard { continue; }
+                let root = MerkleHashOrchard::from_bytes(&shard_root(s)).unwrap();
+                t.insert(Address::above_position(4.into(), Position::from(s * shard_size)), root).unwrap();
+            }
+            for j in 0..shard_size {
+                let i = note_shard * shard_size + j;
+                let r = if i == note_pos { Retention::Marked } else { Retention::Ephemeral };
+                t.append(test_leaf(i), r).unwrap();
+            }
+            for j in 0..incomplete { t.append(test_leaf(n_complete * shard_size + j), Retention::Ephemeral).unwrap(); }
+            t.checkpoint(1u32).ok();
+            t.root_at_checkpoint_id(&1u32).ok().flatten().map(|r| r.to_bytes())
+        };
+
+        // ORDERED (the fix): ascending shard order — insert root or append leaves.
+        let (ordered_root, ordered_witness_ok) = {
+            let mut t: ShardTree<MemoryShardStore<MerkleHashOrchard, u32>, 8, 4> =
+                ShardTree::new(MemoryShardStore::empty(), 100);
+            for s in 0..n_complete {
+                if s == note_shard {
+                    for j in 0..shard_size {
+                        let i = s * shard_size + j;
+                        let r = if i == note_pos { Retention::Marked } else { Retention::Ephemeral };
+                        t.append(test_leaf(i), r).unwrap();
+                    }
+                } else {
+                    let root = MerkleHashOrchard::from_bytes(&shard_root(s)).unwrap();
+                    t.insert(Address::above_position(4.into(), Position::from(s * shard_size)), root).unwrap();
+                }
+            }
+            for j in 0..incomplete { t.append(test_leaf(n_complete * shard_size + j), Retention::Ephemeral).unwrap(); }
+            t.checkpoint(2u32).unwrap();
+            let root = t.root_at_checkpoint_id(&2u32).unwrap().unwrap().to_bytes();
+            let w = t.witness_at_checkpoint_id(Position::from(note_pos), &2u32);
+            (root, w.is_ok() && w.unwrap().is_some())
+        };
+
+        // The fix must reproduce the reference root AND yield a usable witness.
+        assert_eq!(ordered_root, ref_root.to_bytes(),
+            "Ordered per-shard build must match the all-append reference root");
+        assert!(ordered_witness_ok, "Ordered build must produce a witness for the marked note");
+
+        // The current build_pczt order must NOT match (it either fails to
+        // compute a root or computes the wrong one) — that's the live bug.
+        assert!(buggy_root != Some(ref_root.to_bytes()),
+            "Insert-all-roots-then-append-note-shard (current order) must not match the reference");
     }
 
     // ══════════════════════════════════════════════════════════════════════
