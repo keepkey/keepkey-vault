@@ -516,21 +516,22 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 		}
 	}, [selectedToken, chain])
 
-	// Action pills. In watch-only mode, only Receive is exposed — Send/Swap/
-	// Privacy would build a tx against the live USB device using THIS
-	// (cached, non-connected) wallet's balances.
-	const PILLS: { id: AssetView | 'swap'; label: string; color: string; bg: string; icon: JSX.Element }[] = [
-		...(!selectedToken ? [{ id: "receive" as const, label: t("receive"), color: '#4ade80', bg: 'rgba(74,222,128,0.12)', icon: (
-			<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#4ade80" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19" /><polyline points="5 12 12 19 19 12" /></svg>
+	// Action pills. Neutralized palette — each pill uses the same muted
+	// `--text-2` color regardless of action; active state lifts to white
+	// + a subtle hairline. Reads more standard / sober alongside the rest
+	// of the glassy chrome.
+	const PILLS: { id: AssetView | 'swap'; label: string; icon: JSX.Element }[] = [
+		...(!selectedToken ? [{ id: "receive" as const, label: t("receive"), icon: (
+			<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19" /><polyline points="5 12 12 19 19 12" /></svg>
 		) }] : []),
-		...(!watchOnly ? [{ id: "send" as const, label: t("send"), color: '#fb923c', bg: 'rgba(251,146,60,0.12)', icon: (
-			<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fb923c" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="19" x2="12" y2="5" /><polyline points="5 12 12 5 19 12" /></svg>
+		...(!watchOnly ? [{ id: "send" as const, label: t("send"), icon: (
+			<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="19" x2="12" y2="5" /><polyline points="5 12 12 5 19 12" /></svg>
 		) }] : []),
-		...(!watchOnly && swappableChainIds.has(chain.id) ? [{ id: "swap" as const, label: t("swap"), color: '#60a5fa', bg: 'rgba(96,165,250,0.12)', icon: (
-			<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polyline points="17 1 21 5 17 9" /><path d="M3 11V9a4 4 0 0 1 4-4h14" /><polyline points="7 23 3 19 7 15" /><path d="M21 13v2a4 4 0 0 1-4 4H3" /></svg>
+		...(!watchOnly && swappableChainIds.has(chain.id) ? [{ id: "swap" as const, label: t("swap"), icon: (
+			<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="17 1 21 5 17 9" /><path d="M3 11V9a4 4 0 0 1 4-4h14" /><polyline points="7 23 3 19 7 15" /><path d="M21 13v2a4 4 0 0 1-4 4H3" /></svg>
 		) }] : []),
-		...(!watchOnly && !selectedToken && zcashPrivacyEnabled && zcashShieldedSupported ? [{ id: "privacy" as const, label: t("privacy"), color: '#a78bfa', bg: 'rgba(167,139,250,0.12)', icon: (
-			<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>
+		...(!watchOnly && !selectedToken && zcashPrivacyEnabled && zcashShieldedSupported ? [{ id: "privacy" as const, label: t("privacy"), icon: (
+			<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>
 		) }] : []),
 	]
 
@@ -541,21 +542,25 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 		const isUserHidden = override === 'hidden'
 		const isUserSafe = override === 'visible'
 
+		// Per-row signal: a thin colored left edge replaces the boxy outline.
+		// Funded rows pick up the chain accent, spam glows orange, user-hidden
+		// rows go red — all expressed as a 2px inset border for the glass-row
+		// hairline pattern (matches the design study).
+		const edgeColor = isUserHidden ? "rgba(220,72,72,0.55)"
+			: spamResult?.isSpam ? "rgba(232,154,67,0.55)"
+			: tok.balanceUsd > 0 ? `${chain.color}80`
+			: "transparent"
 		return (
 			<Box
 				key={tok.caip}
+				className="v3-glass-row"
 				w="100%"
 				py="2"
 				px="3"
-				bg="kk.cardBg"
-				border="1px solid"
-				borderColor={
-					isUserHidden ? "red.900"
-					: spamResult?.isSpam ? "orange.900"
-					: tok.balanceUsd > 0 ? `${chain.color}30`
-					: "kk.border"
-				}
-				borderRadius="lg"
+				bg="transparent"
+				borderLeft="2px solid"
+				borderLeftColor={edgeColor}
+				borderRadius="md"
 				transition="all 0.15s"
 				opacity={isUserHidden ? 0.5 : 1}
 			>
@@ -694,25 +699,33 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 	return (
 		<Flex flex="1" direction="column" align="center" px={{ base: "3", md: "6" }} py={{ base: "5", md: "8" }} className="v3-page-enter">
 			<Box w="100%" maxW={{ base: "100%", sm: "640px", md: "880px" }}>
-				{/* Header — back button + chain identity hero + sync status + refresh */}
-				<Flex align="center" justify="space-between" gap={{ base: "3", md: "4" }} mb="6">
+				{/* Header — back button + chain identity hero + sync status + refresh.
+				    Wrapped in its own glass card to read as a unified pill, matching
+				    the rest of the panels below. */}
+				<Flex
+					align="center"
+					justify="space-between"
+					gap={{ base: "3", md: "4" }}
+					mb="6"
+					className="v3-glass-card"
+					px={{ base: "3", md: "4" }}
+					py={{ base: "3", md: "3.5" }}
+				>
 					<Flex align="center" gap={{ base: "3", md: "4" }} flex="1" minW="0">
 						<Box
 							as="button"
 							onClick={selectedToken ? () => { setSelectedToken(null); setView('receive') } : onBack}
 							w="36px"
 							h="36px"
-							borderRadius="10px"
-							bg="var(--ink-2)"
-							border="1px solid var(--line)"
+							borderRadius="12px"
 							color="var(--text-1)"
 							display="grid"
 							placeItems="center"
 							cursor="pointer"
-							_hover={{ bg: "var(--ink-3)", color: "var(--text-0)", borderColor: "var(--line-2)" }}
+							_hover={{ color: "var(--text-0)", borderColor: "rgba(255,255,255,0.16)", bg: "rgba(255,255,255,0.06)" }}
 							transition="all 0.18s"
 							flexShrink={0}
-							className="electrobun-webkit-app-region-no-drag"
+							className="electrobun-webkit-app-region-no-drag v3-glass-pill"
 							aria-label="Back"
 						>
 							<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
@@ -729,8 +742,8 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 									h={{ base: "44px", md: "52px" }}
 									borderRadius="full"
 									flexShrink={0}
-									bg="var(--ink-2)"
-									boxShadow={`0 0 0 1px var(--line), 0 8px 24px -8px ${chain.color}`}
+									bg="transparent"
+									boxShadow="0 0 0 1px rgba(255,255,255,0.06)"
 								/>
 								<Box flex="1" minW="0">
 									<Flex align="baseline" gap="2" flexWrap="wrap">
@@ -791,11 +804,11 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 									h={{ base: "44px", md: "52px" }}
 									borderRadius="full"
 									flexShrink={0}
-									bg="var(--ink-2)"
-									boxShadow={`0 0 0 1px var(--line), 0 8px 24px -8px ${chain.color}`}
+									bg="transparent"
+									boxShadow="0 0 0 1px rgba(255,255,255,0.06)"
 								/>
 								<Box flex="1" minW="0">
-									<Flex align="baseline" gap="2.5">
+									<Flex align="center" gap="2.5" flexWrap="wrap">
 										<Text
 											fontWeight="500"
 											fontSize={{ base: "26px", md: "34px" }}
@@ -806,7 +819,20 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 										>
 											{chain.coin}
 										</Text>
-										<Text fontSize={{ base: "13px", md: "15px" }} color="var(--text-3)" fontWeight="500" letterSpacing="-0.005em">{chain.symbol}</Text>
+										{/* Sync status — design study: replaces the redundant chain symbol
+										    that used to sit here. Single source of sync truth (the duplicate
+										    badge on the right column was removed below). */}
+										{activeBalance ? (
+											<Flex align="center" gap="1" color="var(--teal)" className="v3-glass-chip" px="2" py="0.5">
+												<Box as={FaCheck} fontSize="9px" />
+												<Text fontSize="10px" fontFamily="mono" fontWeight="500" letterSpacing="0.02em">{t("synced")}</Text>
+											</Flex>
+										) : (
+											<Flex align="center" gap="1" color="var(--rose)" className="v3-glass-chip" px="2" py="0.5">
+												<Box w="6px" h="6px" borderRadius="full" bg="var(--rose)" />
+												<Text fontSize="10px" fontFamily="mono" fontWeight="500" letterSpacing="0.02em">{t("outOfSync")}</Text>
+											</Flex>
+										)}
 									</Flex>
 									<Flex align="center" gap="2" mt="0.5" flexWrap="wrap">
 										<Text fontSize="11px" fontFamily="mono" color="var(--text-3)" letterSpacing="0.02em" truncate>
@@ -848,52 +874,67 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 							)}
 						</Flex>
 					) : (
-						<Flex direction="column" align="flex-end" gap="1.5" flexShrink={0}>
-							{/* Sync status indicator */}
-							{activeBalance ? (
-								<Flex align="center" gap="1" color="var(--teal)">
-									<Box as={FaCheck} fontSize="10px" />
-									<Text fontSize="10px" fontFamily="mono" fontWeight="500">{t("synced")}</Text>
-								</Flex>
-							) : (
-								<Flex align="center" gap="1" color="var(--rose)">
-									<Box w="7px" h="7px" borderRadius="full" bg="var(--rose)" />
-									<Text fontSize="10px" fontFamily="mono" fontWeight="500">{t("outOfSync")}</Text>
-								</Flex>
-							)}
+						<Flex
+							direction="column"
+							align="flex-end"
+							gap="0.5"
+							flexShrink={0}
+							display={{ base: "none", sm: "flex" }}
+							css={{ fontVariantNumeric: "tabular-nums" }}
+						>
+							{/* Sync status moved inline next to the chain name (above) per the
+							    design study — single source of truth, no duplicate badge here. */}
 							{/* Balance display (only when available) */}
 							{activeBalance && (
-								<Flex direction="column" align="flex-end" flexShrink={0} display={{ base: "none", sm: "flex" }}>
-									<Text
-										fontFamily="mono"
-										fontSize={{ base: "16px", md: "20px" }}
-										fontWeight="500"
-										color="var(--text-0)"
-										letterSpacing="0.01em"
-										lineHeight="1.2"
-									>
-										{activeBalance.balance}
-										<Box as="span" color="var(--text-3)" ml="1.5" fontSize={{ base: "13px", md: "15px" }}>{chain.symbol}</Box>
-									</Text>
-									{cleanBalanceUsd > 0 && (
-										<AnimatedUsd
-											value={cleanBalanceUsd}
-											prefix="≈ "
-											fontSize="12px"
-											fontFamily="mono"
-											color="var(--text-2)"
-											fontWeight="400"
-										/>
-									)}
-									{showEvmMultiTotal && (
-										<Flex align="center" gap="1" mt="0.5">
-											<Text fontSize="9px" color="kk.gold" lineHeight="1">⬡⬡</Text>
-											<Text fontSize="9px" fontFamily="mono" color="kk.textMuted" lineHeight="1">
-												{evmTotalChainBalance.toFixed(4)} {chain.symbol} total · {evmAddressesWithChainBalance.length} addrs
+								<>
+									{/* Primary row: native balance + symbol AND USD value on
+									    one line. There's room horizontally, and the
+									    side-by-side reads as one composite figure rather
+									    than a stacked column. */}
+									<Flex align="baseline" gap="3">
+										<Flex align="baseline" gap="1.5">
+											<Text
+												fontFamily="mono"
+												fontSize={{ base: "20px", md: "26px" }}
+												fontWeight="600"
+												color="var(--text-0)"
+												letterSpacing="-0.01em"
+												lineHeight="1.05"
+												title={`${activeBalance.balance} ${chain.symbol}`}
+												cursor="help"
+											>
+												{formatBalance(activeBalance.balance)}
+											</Text>
+											<Text
+												fontFamily="mono"
+												fontSize={{ base: "12px", md: "14px" }}
+												fontWeight="500"
+												color="var(--text-3)"
+												letterSpacing="0.04em"
+											>
+												{chain.symbol}
 											</Text>
 										</Flex>
+										{cleanBalanceUsd > 0 && (
+											<AnimatedUsd
+												value={cleanBalanceUsd}
+												prefix="≈ "
+												fontSize="14px"
+												fontFamily="mono"
+												color="var(--text-2)"
+												fontWeight="400"
+											/>
+										)}
+									</Flex>
+
+									{/* Multi-address total — only when funds are spread across
+									    >1 address on this chain. */}
+									{showEvmMultiTotal && (
+										<Text fontSize="10px" fontFamily="mono" color="var(--text-3)" mt="0.5" letterSpacing="0.02em">
+											∞ {evmTotalChainBalance.toFixed(4)} {chain.symbol} total · {evmAddressesWithChainBalance.length} addrs
+										</Text>
 									)}
-								</Flex>
+								</>
 							)}
 						</Flex>
 					)}
@@ -960,9 +1001,41 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 					</>
 				)}
 
-				{/* Action tabs — colorful pill toggle */}
-				<Flex justify="center" mb="5">
-					<Flex gap="2px" bg="var(--ink-2)" border="1px solid var(--line)" p="3px" borderRadius="999px">
+				{/* Action row — account dropdown + colorful pill toggle, on the
+				    same line per the design study so the page is tighter vertically.
+				    On narrow widths the account selector stacks above the pills. */}
+				<Flex
+					align="center"
+					justify={{ base: "center", md: "space-between" }}
+					gap="3"
+					mb="5"
+					flexWrap="wrap"
+				>
+					{/* Account selector slot — populated below when there's more than
+					    one address; empty <Box flex /> keeps the pills centered when
+					    there isn't. */}
+					<Box minW={{ base: "0", md: "200px" }} flex={{ base: "0 0 100%", md: "1" }}>
+						{isBtc && btcAccounts.accounts.length > 0 && (
+							<BtcXpubSelector
+								btcAccounts={btcAccounts}
+								onSelectXpub={selectXpub}
+								onAddAccount={addAccount}
+								addingAccount={btcLoading}
+							/>
+						)}
+						{isEvm && evmAddresses.addresses.length >= 1 && (
+							<EvmAddressSelector
+								evmAddresses={evmAddresses}
+								onSelectIndex={evmSelectIndex}
+								onAddIndex={() => evmAddIndex()}
+								onRemoveIndex={evmRemoveIndex}
+								adding={evmLoading}
+								compact
+							/>
+						)}
+					</Box>
+
+					<Flex gap="2px" p="3px" className="v3-glass-pill">
 						{PILLS.map((p) => {
 							const isActive = view === p.id
 							return (
@@ -983,11 +1056,11 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 									fontSize="13px"
 									fontWeight="600"
 									letterSpacing="-0.01em"
-									color={p.color}
-									bg={isActive ? p.bg : "transparent"}
+									color={isActive ? "var(--text-0)" : "var(--text-2)"}
+									bg={isActive ? "rgba(255,255,255,0.06)" : "transparent"}
 									border="1px solid"
-									borderColor={isActive ? p.color : "transparent"}
-									_hover={{ bg: p.bg, borderColor: p.color }}
+									borderColor={isActive ? "rgba(255,255,255,0.14)" : "transparent"}
+									_hover={{ bg: "rgba(255,255,255,0.04)", color: "var(--text-0)" }}
 									transition="all 0.15s"
 									cursor="pointer"
 									minW="100px"
@@ -1001,45 +1074,11 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 					</Flex>
 				</Flex>
 
-				{/* BTC multi-account selector */}
-				{isBtc && btcAccounts.accounts.length > 0 && (
-					<BtcXpubSelector
-						btcAccounts={btcAccounts}
-						onSelectXpub={selectXpub}
-						onAddAccount={addAccount}
-						addingAccount={btcLoading}
-					/>
-				)}
-
-				{/* EVM multi-address selector */}
-				{isEvm && evmAddresses.addresses.length > 1 && (
-					<EvmAddressSelector
-						evmAddresses={evmAddresses}
-						onSelectIndex={evmSelectIndex}
-						onAddIndex={() => evmAddIndex()}
-						onRemoveIndex={evmRemoveIndex}
-						adding={evmLoading}
-					/>
-				)}
-				{isEvm && evmAddresses.addresses.length === 1 && (
-					<Flex mb="3" align="center" gap="2">
-						<Button
-							size="xs"
-							variant="ghost"
-							color="kk.textMuted"
-							_hover={{ color: "kk.gold" }}
-							onClick={() => evmAddIndex()}
-							disabled={evmLoading}
-							fontSize="10px"
-							px="2"
-						>
-							<Box as={FaPlus} fontSize="9px" mr="1" /> Add Address
-						</Button>
-					</Flex>
-				)}
+				{/* Account selector now lives inline with the action pills above
+				    (per the design study). Original duplicate block removed. */}
 
 				{/* Content */}
-				<Box bg="linear-gradient(180deg, var(--ink-2), var(--ink-1))" border="1px solid var(--line)" borderRadius="var(--r-lg)" p={{ base: "4", md: "6" }} minH="280px">
+				<Box className="v3-glass-card" borderRadius="var(--r-lg)" p={{ base: "4", md: "6" }} minH="280px">
 					{view === "send" ? (
 						isBtc && !btcSelected?.xpubData ? (
 							<Flex align="center" justify="center" minH="200px">
@@ -1138,9 +1177,12 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 					</Box>
 				)}
 
-				{/* Tokens Section — with spam filter. Hidden when viewing a specific token. */}
+				{/* Tokens Section — with spam filter. Hidden when viewing a specific token.
+				    Wrapped in a glass card so the rows look like a single bordered surface,
+				    matching the design study; per-row signal is now a thin colored left edge
+				    inside renderTokenRow rather than the old hard box outline. */}
 				{!selectedToken && (tokens.length > 0 || isEvmChain) && (
-					<Box mt="6">
+					<Box mt="6" className="v3-glass-card" p={{ base: "3", md: "4" }}>
 						<Flex align="center" justify="space-between" mb="3" px="1">
 							<Text fontSize="11px" fontWeight="500" color="var(--text-3)" textTransform="uppercase" letterSpacing="0.18em">
 								{t("tokens")}{cleanTokens.length > 0 && ` · ${cleanTokens.length}`}
@@ -1164,7 +1206,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 							</HStack>
 						</Flex>
 
-						<VStack gap="1.5">
+						<VStack gap="0" align="stretch">
 							{cleanTokens.map((tok) => renderTokenRow(tok, { showSpamBadge: true }))}
 						</VStack>
 
@@ -1218,10 +1260,12 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 				    empty result renders empty instead of falling back to the legacy
 				    address-wide getDefiPositions RPC, which would surface this
 				    address's positions from OTHER chains on this chain's page. */}
-				{!selectedToken && isEvmChain && address && (
-					<Suspense fallback={null}>
-						<DefiPositionsPanel address={address} color={chain.color} positions={activeBalance?.defiPositions ?? []} />
-					</Suspense>
+				{!selectedToken && isEvmChain && address && (activeBalance?.defiPositions?.length ?? 0) > 0 && (
+					<Box mt="6" className="v3-glass-card" p={{ base: "3", md: "4" }}>
+						<Suspense fallback={null}>
+							<DefiPositionsPanel address={address} color={chain.color} positions={activeBalance?.defiPositions ?? []} />
+						</Suspense>
+					</Box>
 				)}
 
 				{showAddToken && (

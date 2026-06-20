@@ -429,15 +429,30 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 				</Flex>
 			)}
 
-			{/* Balance display */}
-			<Flex justify="space-between" align="center" bg="var(--ink-0)" border="1px solid var(--line)" px="3.5" py="2.5" borderRadius="12px">
-				<Text fontSize="xs" color="kk.textMuted">{t("available")}</Text>
-				<Flex direction="column" align="flex-end">
-					<Text fontSize="sm" fontFamily="mono" color="kk.textPrimary">
-						{formatBalance(displayBalance)} {displaySymbol}
+			{/* Available balance — centered, borderless. The label sits as a
+			    small overline above the number so the figure itself reads as the
+			    focal point of the row instead of a labeled card. */}
+			<Flex direction="column" align="center" gap="0.5" py="2">
+				<Text fontSize="9px" color="kk.textMuted" letterSpacing="0.18em" textTransform="uppercase" fontFamily="mono">
+					{t("available")}
+				</Text>
+				<Flex align="baseline" gap="2" css={{ fontVariantNumeric: "tabular-nums" }}>
+					<Text
+						fontSize={{ base: "18px", md: "22px" }}
+						fontFamily="mono"
+						fontWeight="600"
+						color="kk.textPrimary"
+						letterSpacing="-0.01em"
+						title={`${displayBalance} ${displaySymbol}`}
+						cursor="help"
+					>
+						{formatBalance(displayBalance)}
+					</Text>
+					<Text fontSize={{ base: "12px", md: "13px" }} fontFamily="mono" color="kk.textMuted" letterSpacing="0.04em">
+						{displaySymbol}
 					</Text>
 					{hasPrice && (
-						<Text fontSize="10px" fontFamily="mono" color="kk.textMuted">
+						<Text fontSize="12px" fontFamily="mono" color="kk.textMuted" ml="2">
 							{fmtCompact(parseFloat(displayBalance) * pricePerUnit)}
 						</Text>
 					)}
@@ -485,14 +500,16 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 								value={recipient}
 								onChange={(e) => setRecipient(e.target.value)}
 								placeholder={t("addressPlaceholder")}
-								bg="var(--ink-0)"
-								border="1px solid var(--line)"
+								bg="transparent"
+								border="1px solid var(--line-2)"
 								borderRadius="12px"
 								color="var(--text-0)"
 								size="sm"
 								fontFamily="mono"
 								px="3"
 								flex="1"
+								_hover={{ borderColor: "rgba(255,255,255,0.18)" }}
+								_focus={{ borderColor: "var(--gold)", bg: "rgba(255,255,255,0.02)" }}
 							/>
 							<Button
 								size="sm"
@@ -563,14 +580,16 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 									value={isMax ? 'MAX' : (inputMode === 'crypto' ? amount : usdAmount)}
 									onChange={(e) => inputMode === 'crypto' ? handleCryptoChange(e.target.value) : handleUsdChange(e.target.value)}
 									placeholder={inputMode === 'usd' ? '0.00' : t("amountPlaceholder")}
-									bg="var(--ink-0)"
-									border="1px solid var(--line)"
+									bg="transparent"
+									border="1px solid var(--line-2)"
 									borderRadius="12px"
 									color="var(--text-0)"
 									size="sm"
 									fontFamily="mono"
 									disabled={isMax}
 									px="3"
+									_hover={{ borderColor: "rgba(255,255,255,0.18)" }}
+									_focus={{ borderColor: "var(--gold)", bg: "rgba(255,255,255,0.02)" }}
 								/>
 							</Box>
 							<Button
@@ -999,14 +1018,16 @@ function Field({ label, value, onChange, placeholder, disabled }: {
 				value={value}
 				onChange={(e) => onChange(e.target.value)}
 				placeholder={placeholder}
-				bg="var(--ink-0)"
-				border="1px solid var(--line)"
+				bg="transparent"
+				border="1px solid var(--line-2)"
 				borderRadius="12px"
 				color="var(--text-0)"
 				size="sm"
 				fontFamily="mono"
 				disabled={disabled}
 				px="3"
+				_hover={{ borderColor: "rgba(255,255,255,0.18)" }}
+				_focus={{ borderColor: "var(--gold)", bg: "rgba(255,255,255,0.02)" }}
 			/>
 		</Box>
 	)

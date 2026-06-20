@@ -161,6 +161,10 @@ export interface DefiPosition {
     networkId: string
     address: string
     symbol?: string
+    /** Human-readable underlying amount, when the server reports it. */
+    balance?: string
+    /** USD value of THIS underlying constituent, when the server reports it. */
+    balanceUsd?: number
   }>
 
   // === Legacy (classifyDefiPosition / /zapper/portfolio path) ===
