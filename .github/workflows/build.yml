@@ -147,7 +147,11 @@ jobs:
           fi
 
       - name: Install vault dependencies
-        run: cd projects/keepkey-vault && bun install
+        # --frozen-lockfile: install exactly what bun.lock pins. Without it, bun
+        # floats caret ranges to latest — e.g. @pioneer-platform/pioneer-discovery
+        # ^10.0.9 → 10.2.0, which added a strict exports map that blocks the raw
+        # `lib/chains.json` subpath import and breaks the vite build.
+        run: cd projects/keepkey-vault && bun install --frozen-lockfile
         shell: bash
 
       - name: Install protoc (macOS)
