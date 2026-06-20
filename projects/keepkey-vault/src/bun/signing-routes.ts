@@ -29,6 +29,11 @@ export const SIGNING_ROUTES = new Set([
   '/osmosis/sign-amino-lp-add', '/osmosis/sign-amino-swap',
   '/thorchain/sign-amino-transfer', '/thorchain/sign-amino-deposit',
   '/mayachain/sign-amino-transfer', '/mayachain/sign-amino-deposit',
+  // Headless swap execute (BEX). executeSwapHeadless signs on the device with
+  // no SwapDialog in the loop — gate it so the same approval overlay used by
+  // every other raw-sign route (and WalletConnect) shows the swap (amount,
+  // destination, memo) before the device is touched.
+  '/api/v2/swap/execute',
 ])
 
 /**
@@ -66,6 +71,7 @@ export function requiredSigningFields(path: string): string[] | null {
     '/tron/sign-typed-hash':    ['domain_separator_hash'],
     '/ton/sign-message':        ['message'],
     '/solana/sign-offchain-message': ['message'],
+    '/api/v2/swap/execute':     ['fromCaip', 'toCaip', 'amount', 'inboundAddress'],
   }
   if (exact[path]) return exact[path]
   // All Cosmos-family amino sign endpoints (cosmos/osmosis/thorchain/

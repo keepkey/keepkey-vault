@@ -1660,6 +1660,25 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
                 `TIP-712 hashes (blind)\n` +
                 `domainSeparator: ${preview.domain_separator_hash || '(none)'}\n` +
                 `message: ${preview.message_hash || '(EIP712Domain only)'}`
+            } else if (path === '/api/v2/swap/execute') {
+              // Headless swap. The on-chain tx is a plain send to the swap
+              // router/inbound vault with an opaque memo carrying the intent —
+              // the device can only render "send X to <addr>". Surface the swap
+              // terms (in/out asset, amount, expected output, router, memo) in
+              // the approval overlay so the user consents to the actual swap,
+              // not just an opaque transfer. Flagged blind: the memo is not
+              // human-verifiable on-device.
+              signingInfo.chain = (preview.fromChainId || preview.fromCaip || '').toString().split('/')[0]
+              signingInfo.to = preview.router || preview.inboundAddress
+              signingInfo.value = `${preview.amount} (${preview.fromCaip})`
+              signingInfo.needsBlindSigning = true
+              const swapper = preview.swapper || preview.integration || 'swap'
+              signingInfo.data =
+                `Swap via ${swapper}\n` +
+                `send: ${preview.amount} ${preview.fromCaip}\n` +
+                `to (router/inbound): ${preview.router || preview.inboundAddress}\n` +
+                `expected out: ${preview.expectedOutput} ${preview.toCaip}\n` +
+                `memo: ${preview.memo || '(none)'}`
             } else {
               signingInfo.from = preview.from || preview.signerAddress
               signingInfo.to = preview.to

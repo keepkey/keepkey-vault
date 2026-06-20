@@ -79,15 +79,17 @@ beforeAll(async () => {
 // routes this PR fixed are part of the set.
 const GATED_ROUTES = [...SIGNING_ROUTES]
 
-// Sanity: the four routes this PR added must be in the set under test.
+// Sanity: routes closed by the sign-gating work must be in the set under test.
 const FIXED_ROUTES = [
   '/tron/sign-message',
   '/tron/sign-typed-hash',
   '/ton/sign-message',
   '/solana/sign-offchain-message',
+  // headless swap execute (BEX) — now routed through the same approval overlay
+  '/api/v2/swap/execute',
 ]
 
-describe('the four message routes this PR fixed are in SIGNING_ROUTES', () => {
+describe('previously-headless sign routes are in SIGNING_ROUTES', () => {
   for (const route of FIXED_ROUTES) {
     test(`${route} is gated`, () => {
       expect(GATED_ROUTES).toContain(route)

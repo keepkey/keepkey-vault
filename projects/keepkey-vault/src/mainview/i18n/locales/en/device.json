@@ -62,6 +62,7 @@
 		"methodTronSignTypedHash": "Tron Sign Typed Hash (TIP-712)",
 		"methodTonSignMessage": "TON Sign Message",
 		"methodSolanaSignOffchainMessage": "Solana Off-chain Message",
+		"methodSwapExecute": "Swap — Sign & Broadcast",
 		"domainName": "Domain",
 		"contract": "Contract",
 		"operationType": "Operation",
