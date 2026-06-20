@@ -878,6 +878,16 @@ pub fn finalize_pczt(
     let authorized_bundle = unbound_bundle.apply_binding_signature(sighash, &mut rng)
         .ok_or_else(|| anyhow::anyhow!("Binding signature verification failed"))?;
 
+    // In-process proof verification — catches circuit constraint violations BEFORE
+    // broadcast. If this fails, the chain rejects with "could not validate orchard
+    // proof". The shield path already does this; the z→z spend path did not, so the
+    // only signal was the opaque consensus rejection. Now we get the real halo2 error
+    // locally and know it's the proof (not serialization) for an aged deep-shard spend.
+    let vk = VerifyingKey::build();
+    authorized_bundle.verify_proof(&vk)
+        .map_err(|e| anyhow::anyhow!("Local Orchard proof verification FAILED (would be rejected on-chain): {:?}", e))?;
+    info!("Local Orchard proof verification: PASSED");
+
     // Serialize as v5 transaction
     let tx_bytes = serialize_v5_shielded_tx(&authorized_bundle, branch_id)?;
 
