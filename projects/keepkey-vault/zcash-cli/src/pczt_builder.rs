@@ -900,6 +900,16 @@ pub fn finalize_pczt(
         bv.add_bundle(&authorized_bundle, sighash);
         let ok_signing = bv.validate(&VerifyingKey::build(), OsRng);
         info!("BatchValidator (proof+sigs+binding, signing sighash): {}", if ok_signing { "PASS" } else { "FAIL" });
+        // FAIL-CLOSED: a FAIL here is exactly what the chain runs — proof, spend-auth
+        // sigs, and binding sig together. Broadcasting past it just burns a doomed tx
+        // and surfaces as the opaque "could not validate orchard proof" rejection.
+        if !ok_signing {
+            return Err(anyhow::anyhow!(
+                "BatchValidator FAILED under the device-signed sighash — proof/spend-auth/\
+                 binding signatures are inconsistent; the network would reject this tx. \
+                 Aborting before broadcast."
+            ));
+        }
 
         // Recompute the consensus sighash from the FINAL authorized bundle.
         let cs_header = zip244::digest_header(branch_id, 0, 0);
@@ -912,12 +922,22 @@ pub fn finalize_pczt(
         };
         let consensus_sighash = zip244::compute_sighash(&cs_digests, branch_id);
         if consensus_sighash != sighash {
+            // The chain recomputes the sighash from the tx and checks sigs against
+            // it. The device signed a DIFFERENT sighash, so on-chain verification
+            // is guaranteed to fail — abort rather than broadcast a doomed tx.
             log::error!("SIGHASH DIVERGENCE: device signed {} but final-tx consensus sighash is {}",
                 hex::encode(&sighash), hex::encode(&consensus_sighash));
             let mut bv2 = orchard::bundle::BatchValidator::new();
             bv2.add_bundle(&authorized_bundle, consensus_sighash);
             let ok_consensus = bv2.validate(&VerifyingKey::build(), OsRng);
             info!("BatchValidator (consensus sighash): {}", if ok_consensus { "PASS" } else { "FAIL" });
+            return Err(anyhow::anyhow!(
+                "Consensus sighash {} diverges from the device-signed sighash {} \
+                 (BatchValidator under consensus sighash: {}). The network computes the \
+                 consensus sighash, so this tx is doomed. Aborting before broadcast.",
+                hex::encode(&consensus_sighash), hex::encode(&sighash),
+                if ok_consensus { "PASS" } else { "FAIL" },
+            ));
         } else {
             info!("Signing sighash == consensus sighash ({})", hex::encode(&sighash));
         }

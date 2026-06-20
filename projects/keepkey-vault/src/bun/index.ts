@@ -1114,6 +1114,13 @@ const restCallbacks: RestApiCallbacks = {
 	// the loop. The device still gates every signature. NOOP substage push.
 	getSwapQuoteHeadless: (params) => headlessSwapQuote(params),
 	executeSwapHeadless: (params) => headlessExecuteSwap(params, () => { /* headless: no WebView substage */ }),
+	zcashPreSendGate: async (account: number) => {
+		// Same fail-closed preflight the RPC send path runs: prove the FVK belongs
+		// to the connected device (purges stale state on mismatch) THEN catch the
+		// note set up to tip. A device-comms failure throws and aborts the send.
+		await ensureZcashDeviceMatch(account)
+		await ensureZcashScanFresh()
+	},
 	getPioneer: () => getPioneer(),
 	getPioneerApiBase: () => getPioneerApiBase(),
 	setPioneerApiBase: async (url: string) => {

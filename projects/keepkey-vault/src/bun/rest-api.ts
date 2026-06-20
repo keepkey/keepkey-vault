@@ -74,6 +74,12 @@ export interface RestApiCallbacks {
   /** Headless swap execute — signs on the device, broadcasts, registers tracking.
    *  Used by POST /api/v2/swap/execute. Device still gates the signature. */
   executeSwapHeadless?: (params: import('../shared/types').ExecuteSwapParams) => Promise<import('../shared/types').SwapResult>
+  /** Fail-closed pre-send preflight for the headless Zcash send/shield/deshield
+   *  paths. Mirrors the RPC flow: prove the cached Orchard FVK belongs to the
+   *  CONNECTED device (purges stale sidecar state + re-derives on mismatch) and
+   *  refresh the note set to chain tip. Throws to abort BEFORE signing, so a
+   *  stale-DB / device-swap can never build from old notes and fail late. */
+  zcashPreSendGate?: (account: number) => Promise<void>
   /** Returns initialized Pioneer client (for debug endpoints) */
   getPioneer?: () => Promise<any>
   /** Returns the active Pioneer API base URL */
@@ -3670,11 +3676,18 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         if (path === '/api/zcash/shielded/send' && method === 'POST') {
           const wallet = requireWallet(engine)
           if (!engine.isEmulator) auth.requireAuth(req)
-          const body = await req.json() as { recipient?: string; amount?: number; memo?: string }
-          if (!body?.recipient || typeof body.amount !== 'number') {
-            throw new HttpError(400, 'recipient (string) and amount (number, ZEC) are required')
+          const body = await req.json() as { recipient?: string; amount?: number; memo?: string; account?: number }
+          // amount is ZATOSHIS (integer) — it goes straight to the sidecar's
+          // build_pczt, which parses u64. The Rust side rejects fractions, so
+          // 0.01 would 400 and `1` would send 1 zatoshi, not 1 ZEC.
+          if (!body?.recipient || typeof body.amount !== 'number' || !Number.isInteger(body.amount) || body.amount <= 0) {
+            throw new HttpError(400, 'recipient (string) and amount (positive integer, zatoshis) are required')
           }
-          await ensureFvkLoaded(wallet, 0)
+          const account = body.account ?? 0
+          await ensureFvkLoaded(wallet, account)
+          // FAIL-CLOSED preflight (device-FVK match + fresh scan) before signing.
+          if (!callbacks?.zcashPreSendGate) throw new HttpError(503, 'Zcash pre-send gate unavailable')
+          await callbacks.zcashPreSendGate(account)
           const details: EmuSigningDetails = {
             operation: 'zcashShieldedSend', chain: 'Zcash',
             to: body.recipient, value: String(body.amount), memo: body.memo,
@@ -3688,7 +3701,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             try {
               result = await sendShielded(
                 wallet,
-                { recipient: body.recipient, amount: body.amount, memo: body.memo },
+                { recipient: body.recipient, amount: body.amount, memo: body.memo, account },
                 { signWrap: <T,>(fn: () => Promise<T>) => emuWrap(fn, details) },
               )
             } finally {
@@ -3710,15 +3723,19 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const wallet = requireWallet(engine)
           if (!engine.isEmulator) auth.requireAuth(req)
           const body = await req.json() as { recipient?: string; amount?: number; account?: number }
-          if (!body?.recipient || typeof body.amount !== 'number') {
-            throw new HttpError(400, 'recipient (string) and amount (number, zatoshis) are required')
+          if (!body?.recipient || typeof body.amount !== 'number' || !Number.isInteger(body.amount) || body.amount <= 0) {
+            throw new HttpError(400, 'recipient (string) and amount (positive integer, zatoshis) are required')
           }
-          await ensureFvkLoaded(wallet, 0)
+          const account = body.account ?? 0
+          await ensureFvkLoaded(wallet, account)
+          // FAIL-CLOSED preflight (device-FVK match + fresh scan) before signing.
+          if (!callbacks?.zcashPreSendGate) throw new HttpError(503, 'Zcash pre-send gate unavailable')
+          await callbacks.zcashPreSendGate(account)
           const details: EmuSigningDetails = {
             operation: 'zcashDeshieldZec', chain: 'Zcash', to: body.recipient, value: String(body.amount),
           }
           const { deshieldZec } = await import('./txbuilder/zcash-deshield')
-          const run = () => deshieldZec(wallet, { recipient: body.recipient!, amount: body.amount!, account: body.account },
+          const run = () => deshieldZec(wallet, { recipient: body.recipient!, amount: body.amount!, account },
             { signWrap: <T,>(fn: () => Promise<T>) => emuWrap(fn, details) })
           if (engine.isEmulator) {
             const { setEmuAutoApprove } = await import('./emulator-window')
@@ -3733,15 +3750,21 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const wallet = requireWallet(engine)
           if (!engine.isEmulator) auth.requireAuth(req)
           const body = await req.json() as { amount?: number; account?: number }
-          if (typeof body.amount !== 'number') throw new HttpError(400, 'amount (number, zatoshis) is required')
+          if (typeof body.amount !== 'number' || !Number.isInteger(body.amount) || body.amount <= 0) {
+            throw new HttpError(400, 'amount (positive integer, zatoshis) is required')
+          }
           if (!callbacks?.getPioneer) throw new HttpError(503, 'Pioneer client unavailable')
-          await ensureFvkLoaded(wallet, body.account ?? 0)
+          const account = body.account ?? 0
+          await ensureFvkLoaded(wallet, account)
+          // FAIL-CLOSED preflight (device-FVK match + fresh scan) before signing.
+          if (!callbacks?.zcashPreSendGate) throw new HttpError(503, 'Zcash pre-send gate unavailable')
+          await callbacks.zcashPreSendGate(account)
           const details: EmuSigningDetails = {
             operation: 'zcashShieldZec', chain: 'Zcash', value: String(body.amount),
           }
           const pioneer = await callbacks.getPioneer()
           const { shieldZec } = await import('./txbuilder/zcash-shield')
-          const run = () => shieldZec(wallet, pioneer, { amount: body.amount!, account: body.account },
+          const run = () => shieldZec(wallet, pioneer, { amount: body.amount!, account },
             { signWrap: <T,>(fn: () => Promise<T>) => emuWrap(fn, details) })
           if (engine.isEmulator) {
             const { setEmuAutoApprove } = await import('./emulator-window')
