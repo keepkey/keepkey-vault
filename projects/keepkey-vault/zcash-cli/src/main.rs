@@ -1178,10 +1178,37 @@ async fn handle_broadcast(_state: &mut State, params: &Value) -> Result<Value> {
 
     let raw_tx = hex::decode(raw_tx_hex)?;
 
-    let mut client = scanner::LightwalletClient::connect(None).await?;
-    let txid = client.send_transaction(&raw_tx).await?;
-    info!("Broadcast accepted: txid={}", txid);
-    Ok(serde_json::json!({ "txid": txid }))
+    // Broadcast to EVERY node and report each verdict. If na.zec.rocks rejects a
+    // tx that another node accepts, the failure is node-specific (policy/branch),
+    // not our transaction. First node that accepts wins.
+    let servers = [
+        "https://na.zec.rocks:443",
+        "https://sa.zec.rocks:443",
+        "https://eu.zec.rocks:443",
+        "https://mainnet.lightwalletd.com:9067",
+        "https://zec.rocks:443",
+    ];
+    let mut last_err = String::from("no nodes reachable");
+    let mut any_accepted: Option<String> = None;
+    for url in servers {
+        match scanner::LightwalletClient::connect(Some(url)).await {
+            Ok(mut client) => match client.send_transaction(&raw_tx).await {
+                Ok(txid) => {
+                    info!("Broadcast ACCEPTED by {} — txid={}", url, txid);
+                    if any_accepted.is_none() { any_accepted = Some(txid); }
+                }
+                Err(e) => {
+                    log::error!("Broadcast REJECTED by {}: {}", url, e);
+                    last_err = format!("{}: {}", url, e);
+                }
+            },
+            Err(e) => log::warn!("Could not connect to {} for broadcast: {}", url, e),
+        }
+    }
+    match any_accepted {
+        Some(txid) => Ok(serde_json::json!({ "txid": txid })),
+        None => Err(anyhow::anyhow!("All nodes rejected the transaction. Last: {}", last_err)),
+    }
 }
 
 // ── Main IPC loop ──────────────────────────────────────────────────────
