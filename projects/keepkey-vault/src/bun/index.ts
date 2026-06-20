@@ -4361,6 +4361,13 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// could have no FVK loaded — `scanOrchardNotes` would then fail with
 				// "No FVK set". Refresh from device first if needed.
 				await ensureFvkLoaded(engine.wallet, 0)
+				// The user pressing "Sync" expects real work: re-prove the cached FVK
+				// against the CONNECTED device every time (force a device round-trip,
+				// ignoring a prior session's verified flag). On mismatch this purges the
+				// stale FVK + notes and re-derives — so Sync also fixes a stale wallet
+				// from the UI without a manual DB wipe.
+				zcashDeviceVerified = false
+				await ensureZcashDeviceMatch(params?.account ?? 0)
 				const result = await scanOrchardNotes(params?.startHeight, params?.fullRescan)
 				if (result?.synced_to != null) updateSyncedTo(result.synced_to)
 				// A successful scan validates the wallet against the chain — even an
