@@ -17,13 +17,6 @@ import { homedir } from 'os'
 
 const TAG = '[emu-window]'
 
-// Headless auto-approve for autonomous emulator testing. When true, interactive
-// sign confirms are auto-pressed (no window click needed) — set ONLY around the
-// REST /api/zcash/shielded/send flow on an emulator. Never enable for real
-// devices (there is no emulator transport to write decisions to anyway).
-let autoApproveAll = false
-export function setEmuAutoApprove(v: boolean): void { autoApproveAll = v }
-
 // ── Window state persistence ────────────────────────────────────────────
 
 const STATE_DIR = join(homedir(), '.keepkey', 'emulator')
@@ -508,9 +501,9 @@ export async function emuGatedConfirm(
 
   if (delegate) {
     delegate.onButtonRequest = () => {
-      if (!opts.interactive || autoApproveAll) {
-        // Setup op, or headless auto-approve mode (autonomous emulator testing
-        // via the REST send endpoint) — auto-press through each confirm screen.
+      if (!opts.interactive) {
+        // Setup op (wipe / load / settings) — auto-press through each confirm.
+        // Signing ops are always interactive and must be approved by the user.
         writeDecision(true)
         return
       }

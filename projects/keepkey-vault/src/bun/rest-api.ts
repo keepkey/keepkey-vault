@@ -3668,14 +3668,14 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           return json(result)
         }
 
-        // Full headless shielded send: build → device sign → finalize → broadcast.
-        // EMULATOR ONLY auth bypass: when an emulator is connected, this is an
-        // autonomous test rig (the emu-window bridge auto-approves the confirm),
-        // so we skip pairing/auth to allow driving the whole flow via curl. A
-        // REAL device still requires a paired bearer token.
+        // Headless shielded send: build → device sign → finalize → broadcast.
+        // ALWAYS requires a paired bearer token AND on-device/UI confirmation —
+        // there is no auth or approval bypass, emulator included. On the emulator
+        // emuWrap routes through emuSigningOp, which raises the interactive confirm
+        // prompt the user must approve; it does NOT auto-press.
         if (path === '/api/zcash/shielded/send' && method === 'POST') {
+          auth.requireAuth(req)
           const wallet = requireWallet(engine)
-          if (!engine.isEmulator) auth.requireAuth(req)
           const body = await req.json() as { recipient?: string; amount?: number; memo?: string; account?: number }
           // amount is ZATOSHIS (integer) — it goes straight to the sidecar's
           // build_pczt, which parses u64. The Rust side rejects fractions, so
@@ -3692,36 +3692,19 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             operation: 'zcashShieldedSend', chain: 'Zcash',
             to: body.recipient, value: String(body.amount), memo: body.memo,
           }
-          // Headless: auto-approve the emulator confirms (no window click) so the
-          // full flow can run via curl. Scoped tightly to this send + emulator.
-          let result
-          if (engine.isEmulator) {
-            const { setEmuAutoApprove } = await import('./emulator-window')
-            setEmuAutoApprove(true)
-            try {
-              result = await sendShielded(
-                wallet,
-                { recipient: body.recipient, amount: body.amount, memo: body.memo, account },
-                { signWrap: <T,>(fn: () => Promise<T>) => emuWrap(fn, details) },
-              )
-            } finally {
-              setEmuAutoApprove(false)
-            }
-          } else {
-            result = await sendShielded(
-              wallet,
-              { recipient: body.recipient, amount: body.amount, memo: body.memo },
-              { signWrap: <T,>(fn: () => Promise<T>) => emuWrap(fn, details) },
-            )
-          }
+          const result = await sendShielded(
+            wallet,
+            { recipient: body.recipient, amount: body.amount, memo: body.memo, account },
+            { signWrap: <T,>(fn: () => Promise<T>) => emuWrap(fn, details) },
+          )
           return json(result)
         }
 
         // Headless DESHIELD (z→t): spend a shielded note to a transparent addr.
-        // Emulator: auto-approve + no auth (autonomous testing).
+        // Always requires auth + interactive confirm (no emulator bypass).
         if (path === '/api/zcash/shielded/deshield' && method === 'POST') {
+          auth.requireAuth(req)
           const wallet = requireWallet(engine)
-          if (!engine.isEmulator) auth.requireAuth(req)
           const body = await req.json() as { recipient?: string; amount?: number; account?: number }
           if (!body?.recipient || typeof body.amount !== 'number' || !Number.isInteger(body.amount) || body.amount <= 0) {
             throw new HttpError(400, 'recipient (string) and amount (positive integer, zatoshis) are required')
@@ -3735,20 +3718,16 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             operation: 'zcashDeshieldZec', chain: 'Zcash', to: body.recipient, value: String(body.amount),
           }
           const { deshieldZec } = await import('./txbuilder/zcash-deshield')
-          const run = () => deshieldZec(wallet, { recipient: body.recipient!, amount: body.amount!, account },
+          const result = await deshieldZec(wallet, { recipient: body.recipient!, amount: body.amount!, account },
             { signWrap: <T,>(fn: () => Promise<T>) => emuWrap(fn, details) })
-          if (engine.isEmulator) {
-            const { setEmuAutoApprove } = await import('./emulator-window')
-            setEmuAutoApprove(true)
-            try { return json(await run()) } finally { setEmuAutoApprove(false) }
-          }
-          return json(await run())
+          return json(result)
         }
 
         // Headless SHIELD (t→z): move transparent funds into a fresh shielded note.
+        // Always requires auth + interactive confirm (no emulator bypass).
         if (path === '/api/zcash/shielded/shield' && method === 'POST') {
+          auth.requireAuth(req)
           const wallet = requireWallet(engine)
-          if (!engine.isEmulator) auth.requireAuth(req)
           const body = await req.json() as { amount?: number; account?: number }
           if (typeof body.amount !== 'number' || !Number.isInteger(body.amount) || body.amount <= 0) {
             throw new HttpError(400, 'amount (positive integer, zatoshis) is required')
@@ -3764,22 +3743,16 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           }
           const pioneer = await callbacks.getPioneer()
           const { shieldZec } = await import('./txbuilder/zcash-shield')
-          const run = () => shieldZec(wallet, pioneer, { amount: body.amount!, account },
+          const result = await shieldZec(wallet, pioneer, { amount: body.amount!, account },
             { signWrap: <T,>(fn: () => Promise<T>) => emuWrap(fn, details) })
-          if (engine.isEmulator) {
-            const { setEmuAutoApprove } = await import('./emulator-window')
-            setEmuAutoApprove(true)
-            try { return json(await run()) } finally { setEmuAutoApprove(false) }
-          }
-          return json(await run())
+          return json(result)
         }
 
         // Read-only diagnostic: does the cached shielded balance belong to the
         // CONNECTED device? Derives the Orchard FVK fresh from the device and
         // compares ak to the cache. Does not mutate state.
         if (path === '/api/zcash/shielded/verify-device' && method === 'GET') {
-          // Emulator = autonomous test rig: skip auth (read-only). Real device requires a token.
-          if (!engine.isEmulator) auth.requireAuth(req)
+          auth.requireAuth(req)
           const wallet = requireWallet(engine)
           if (typeof (wallet as any).zcashGetOrchardFVK !== 'function') {
             throw new HttpError(400, 'Device firmware does not support Orchard FVK export')
