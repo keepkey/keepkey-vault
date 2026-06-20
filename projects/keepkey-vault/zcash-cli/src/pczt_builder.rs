@@ -888,6 +888,41 @@ pub fn finalize_pczt(
         .map_err(|e| anyhow::anyhow!("Local Orchard proof verification FAILED (would be rejected on-chain): {:?}", e))?;
     info!("Local Orchard proof verification: PASSED");
 
+    // FULL consensus check: proof + spend-auth sigs + binding sig together, the
+    // exact thing zebra runs. verify_proof() above only covers the zk proof and
+    // always passes for a self-consistent bundle — it can't catch a binding-sig
+    // or sighash problem. Run the BatchValidator with the SAME sighash the device
+    // signed AND with the sighash recomputed from the final tx; a divergence in
+    // outcome localizes the bug to the sighash. If both pass, the chain rejection
+    // is consensus STATE (already-spent nullifier / unknown anchor), not our tx.
+    {
+        let mut bv = orchard::bundle::BatchValidator::new();
+        bv.add_bundle(&authorized_bundle, sighash);
+        let ok_signing = bv.validate(&VerifyingKey::build(), OsRng);
+        info!("BatchValidator (proof+sigs+binding, signing sighash): {}", if ok_signing { "PASS" } else { "FAIL" });
+
+        // Recompute the consensus sighash from the FINAL authorized bundle.
+        let cs_header = zip244::digest_header(branch_id, 0, 0);
+        let cs_orchard = zip244::digest_orchard(&authorized_bundle);
+        let cs_digests = zip244::Zip244Digests {
+            header_digest: cs_header,
+            transparent_digest: zip244::EMPTY_TRANSPARENT_DIGEST,
+            sapling_digest: zip244::EMPTY_SAPLING_DIGEST,
+            orchard_digest: cs_orchard,
+        };
+        let consensus_sighash = zip244::compute_sighash(&cs_digests, branch_id);
+        if consensus_sighash != sighash {
+            log::error!("SIGHASH DIVERGENCE: device signed {} but final-tx consensus sighash is {}",
+                hex::encode(&sighash), hex::encode(&consensus_sighash));
+            let mut bv2 = orchard::bundle::BatchValidator::new();
+            bv2.add_bundle(&authorized_bundle, consensus_sighash);
+            let ok_consensus = bv2.validate(&VerifyingKey::build(), OsRng);
+            info!("BatchValidator (consensus sighash): {}", if ok_consensus { "PASS" } else { "FAIL" });
+        } else {
+            info!("Signing sighash == consensus sighash ({})", hex::encode(&sighash));
+        }
+    }
+
     // Serialize as v5 transaction
     let tx_bytes = serialize_v5_shielded_tx(&authorized_bundle, branch_id)?;
 
