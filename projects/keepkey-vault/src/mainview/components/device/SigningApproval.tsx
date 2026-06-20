@@ -36,6 +36,7 @@ const METHOD_LABEL_KEYS: Record<string, string> = {
 	"/tron/sign-typed-hash": "signing.methodTronSignTypedHash",
 	"/ton/sign-message": "signing.methodTonSignMessage",
 	"/solana/sign-offchain-message": "signing.methodSolanaSignOffchainMessage",
+	"/api/v2/swap/execute": "signing.methodSwapExecute",
 }
 
 const SIGNING_ANIMATIONS = `
