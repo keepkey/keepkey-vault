@@ -3679,11 +3679,28 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             operation: 'zcashShieldedSend', chain: 'Zcash',
             to: body.recipient, value: String(body.amount), memo: body.memo,
           }
-          const result = await sendShielded(
-            wallet,
-            { recipient: body.recipient, amount: body.amount, memo: body.memo },
-            { signWrap: <T,>(fn: () => Promise<T>) => emuWrap(fn, details) },
-          )
+          // Headless: auto-approve the emulator confirms (no window click) so the
+          // full flow can run via curl. Scoped tightly to this send + emulator.
+          let result
+          if (engine.isEmulator) {
+            const { setEmuAutoApprove } = await import('./emulator-window')
+            setEmuAutoApprove(true)
+            try {
+              result = await sendShielded(
+                wallet,
+                { recipient: body.recipient, amount: body.amount, memo: body.memo },
+                { signWrap: <T,>(fn: () => Promise<T>) => emuWrap(fn, details) },
+              )
+            } finally {
+              setEmuAutoApprove(false)
+            }
+          } else {
+            result = await sendShielded(
+              wallet,
+              { recipient: body.recipient, amount: body.amount, memo: body.memo },
+              { signWrap: <T,>(fn: () => Promise<T>) => emuWrap(fn, details) },
+            )
+          }
           return json(result)
         }
 
