@@ -157,6 +157,9 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
         response: { address: string; balanceZat: number; pendingZat: number; matureCount: number; pendingCount: number }
       }
       zcashDeshieldZec: { params: { recipient: string; amount: number; account?: number }; response: { txid: string } }
+      // Read-only diagnostic: does the cached shielded balance belong to the
+      // connected device? `match: false` ⇒ stale/other-wallet, not spendable here.
+      zcashVerifyDevice: { params: { account?: number } | void; response: { match: boolean; deviceAk: string; cachedAk: string | null; cachedAddress: string | null; message: string } }
       zcashGetTransactions: { params: void; response: { transactions: ZcashTransaction[] } }
       zcashBackfillMemos: { params: void; response: { backfilled: number } }
       // Ask the device to derive and display its Orchard UA for this account.

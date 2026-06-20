@@ -3684,6 +3684,11 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             throw new HttpError(400, 'recipient (string) and amount (positive integer, zatoshis) are required')
           }
           const account = body.account ?? 0
+          // The sidecar/FVK/scan state is global (single-account). ensureFvkLoaded
+          // and ensureZcashDeviceMatch key off "any FVK loaded" / "any account
+          // verified", so a non-zero account would silently spend from account 0's
+          // state. Reject until the Zcash state is genuinely account-scoped.
+          if (account !== 0) throw new HttpError(400, 'Only account 0 is supported; multi-account shielded sends are not implemented')
           await ensureFvkLoaded(wallet, account)
           // FAIL-CLOSED preflight (device-FVK match + fresh scan) before signing.
           if (!callbacks?.zcashPreSendGate) throw new HttpError(503, 'Zcash pre-send gate unavailable')
@@ -3710,6 +3715,11 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             throw new HttpError(400, 'recipient (string) and amount (positive integer, zatoshis) are required')
           }
           const account = body.account ?? 0
+          // The sidecar/FVK/scan state is global (single-account). ensureFvkLoaded
+          // and ensureZcashDeviceMatch key off "any FVK loaded" / "any account
+          // verified", so a non-zero account would silently spend from account 0's
+          // state. Reject until the Zcash state is genuinely account-scoped.
+          if (account !== 0) throw new HttpError(400, 'Only account 0 is supported; multi-account shielded sends are not implemented')
           await ensureFvkLoaded(wallet, account)
           // FAIL-CLOSED preflight (device-FVK match + fresh scan) before signing.
           if (!callbacks?.zcashPreSendGate) throw new HttpError(503, 'Zcash pre-send gate unavailable')
@@ -3734,6 +3744,11 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           }
           if (!callbacks?.getPioneer) throw new HttpError(503, 'Pioneer client unavailable')
           const account = body.account ?? 0
+          // The sidecar/FVK/scan state is global (single-account). ensureFvkLoaded
+          // and ensureZcashDeviceMatch key off "any FVK loaded" / "any account
+          // verified", so a non-zero account would silently spend from account 0's
+          // state. Reject until the Zcash state is genuinely account-scoped.
+          if (account !== 0) throw new HttpError(400, 'Only account 0 is supported; multi-account shielded sends are not implemented')
           await ensureFvkLoaded(wallet, account)
           // FAIL-CLOSED preflight (device-FVK match + fresh scan) before signing.
           if (!callbacks?.zcashPreSendGate) throw new HttpError(503, 'Zcash pre-send gate unavailable')
