@@ -10,7 +10,7 @@ import {
   buildShieldedTx, finalizeShieldedTx, broadcastShieldedTx,
   ensureFvkLoaded, displayOrchardAddressOnDevice,
 } from './txbuilder/zcash-shielded'
-import { isSidecarReady } from './zcash-sidecar'
+import { isSidecarReady, getCachedFvk } from './zcash-sidecar'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 import * as S from './schemas'
@@ -3660,6 +3660,33 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           auth.requireAuth(req)
           const result = await getShieldedBalance()
           return json(result)
+        }
+
+        // Read-only diagnostic: does the cached shielded balance belong to the
+        // CONNECTED device? Derives the Orchard FVK fresh from the device and
+        // compares ak to the cache. Does not mutate state.
+        if (path === '/api/zcash/shielded/verify-device' && method === 'GET') {
+          auth.requireAuth(req)
+          const wallet = requireWallet(engine)
+          if (typeof (wallet as any).zcashGetOrchardFVK !== 'function') {
+            throw new HttpError(400, 'Device firmware does not support Orchard FVK export')
+          }
+          const cached = getCachedFvk()
+          const deviceFvk = await (wallet as any).zcashGetOrchardFVK(0)
+          const deviceAk = Buffer.from(deviceFvk.ak).toString('hex')
+          const cachedAk = cached?.fvk?.ak ?? null
+          const match = !!cachedAk && cachedAk.toLowerCase() === deviceAk.toLowerCase()
+          return json({
+            match,
+            deviceAk,
+            cachedAk,
+            cachedAddress: cached?.address ?? null,
+            message: cachedAk === null
+              ? 'No cached FVK — nothing to compare.'
+              : match
+                ? 'OK: cached shielded balance belongs to the connected device.'
+                : 'MISMATCH: cached shielded balance is NOT from the connected device — stale/another wallet, not spendable here.',
+          })
         }
 
         if (path === '/api/zcash/shielded/build' && method === 'POST') {
