@@ -595,7 +595,28 @@ pub async fn build_pczt(
 
         info!("Note {} pos={} anchor_ckpt={}", orig_idx, pos, anchor_checkpoint_id);
 
-        builder.add_spend(fvk.clone(), orchard_notes[orig_idx].clone(), merkle_path.into())
+        // The proof consumes the orchard-crate MerklePath (after `.into()`), NOT the
+        // ShardTree witness. A conversion/encoding divergence — or orchard's root math
+        // disagreeing with incrementalmerkletree for a deep-shard path — would bind a
+        // DIFFERENT anchor into the proof while the ShardTree witness still recomputes
+        // the root, producing exactly "could not validate orchard proof" at broadcast.
+        // Verify the orchard path recomputes the SAME anchor before building the proof.
+        let orchard_path: orchard::tree::MerklePath = merkle_path.into();
+        let extracted_cmx: ExtractedNoteCommitment = orchard_notes[orig_idx].commitment().into();
+        let path_root = orchard_path.root(extracted_cmx);
+        if path_root.to_bytes() != anchor.to_bytes() {
+            return Err(anyhow::anyhow!(
+                "Orchard MerklePath root MISMATCH for note {} at pos {}: \
+                 path recomputes {} but tx anchor is {} — the proof would be invalid. \
+                 (ShardTree witness was correct; the orchard-crate path diverges.)",
+                orig_idx, pos,
+                hex::encode(path_root.to_bytes()),
+                hex::encode(anchor.to_bytes()),
+            ));
+        }
+        info!("Note {} orchard MerklePath root MATCHES anchor — proof witness OK", orig_idx);
+
+        builder.add_spend(fvk.clone(), orchard_notes[orig_idx].clone(), orchard_path)
             .map_err(|e| anyhow::anyhow!("Failed to add spend {}: {:?}", orig_idx, e))?;
     }
 

@@ -8,7 +8,7 @@ import { CHAINS, isChainSupported } from '../shared/chains'
 import {
   initializeOrchardFromDevice, scanOrchardNotes, getShieldedBalance,
   buildShieldedTx, finalizeShieldedTx, broadcastShieldedTx,
-  ensureFvkLoaded, displayOrchardAddressOnDevice,
+  ensureFvkLoaded, displayOrchardAddressOnDevice, sendShielded,
 } from './txbuilder/zcash-shielded'
 import { isSidecarReady, getCachedFvk } from './zcash-sidecar'
 import { readFileSync } from 'fs'
@@ -3659,6 +3659,31 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         if (path === '/api/zcash/shielded/balance' && method === 'GET') {
           auth.requireAuth(req)
           const result = await getShieldedBalance()
+          return json(result)
+        }
+
+        // Full headless shielded send: build → device sign → finalize → broadcast.
+        // EMULATOR ONLY auth bypass: when an emulator is connected, this is an
+        // autonomous test rig (the emu-window bridge auto-approves the confirm),
+        // so we skip pairing/auth to allow driving the whole flow via curl. A
+        // REAL device still requires a paired bearer token.
+        if (path === '/api/zcash/shielded/send' && method === 'POST') {
+          const wallet = requireWallet(engine)
+          if (!engine.isEmulator) auth.requireAuth(req)
+          const body = await req.json() as { recipient?: string; amount?: number; memo?: string }
+          if (!body?.recipient || typeof body.amount !== 'number') {
+            throw new HttpError(400, 'recipient (string) and amount (number, ZEC) are required')
+          }
+          await ensureFvkLoaded(wallet, 0)
+          const details: EmuSigningDetails = {
+            operation: 'zcashShieldedSend', chain: 'Zcash',
+            to: body.recipient, value: String(body.amount), memo: body.memo,
+          }
+          const result = await sendShielded(
+            wallet,
+            { recipient: body.recipient, amount: body.amount, memo: body.memo },
+            { signWrap: <T,>(fn: () => Promise<T>) => emuWrap(fn, details) },
+          )
           return json(result)
         }
 
