@@ -3691,7 +3691,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         // CONNECTED device? Derives the Orchard FVK fresh from the device and
         // compares ak to the cache. Does not mutate state.
         if (path === '/api/zcash/shielded/verify-device' && method === 'GET') {
-          auth.requireAuth(req)
+          // Emulator = autonomous test rig: skip auth (read-only). Real device requires a token.
+          if (!engine.isEmulator) auth.requireAuth(req)
           const wallet = requireWallet(engine)
           if (typeof (wallet as any).zcashGetOrchardFVK !== 'function') {
             throw new HttpError(400, 'Device firmware does not support Orchard FVK export')
