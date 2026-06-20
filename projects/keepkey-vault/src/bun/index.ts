@@ -1996,7 +1996,12 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			ethVerifyMessage: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
-				return await engine.wallet.ethVerifyMessage(params)
+				// Verify shows the message + address on device and waits for a button
+				// press — on the emulator that needs the Confirm/Reject affordance, same
+				// as tronVerifyMessage. Without the gate it hangs until the 120s timeout.
+				return engine.isEmulator
+					? await emuSigningOp(() => engine.wallet!.ethVerifyMessage(params), { operation: 'ethVerifyMessage', chain: 'Ethereum' })
+					: await engine.wallet.ethVerifyMessage(params)
 			},
 			cosmosSignTx: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
@@ -4414,7 +4419,17 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			zcashDisplayAddress: async (params) => {
 				if (!zcashPrivacyEnabled) throw new Error('Zcash privacy feature is disabled')
 				if (!engine.wallet) throw new Error('No device connected')
-				return await displayOrchardAddressOnDevice(engine.wallet as any, params?.account ?? 0)
+				// On the emulator there is no physical button, so wrap the on-device
+				// display in emuSigningOp — that installs the ButtonRequest handler that
+				// surfaces the Confirm/Reject affordance in the emulator window (same as
+				// the other getAddress display flows). Without it the address-verify
+				// screen hangs with no button until the 120s confirm timeout.
+				return engine.isEmulator
+					? await emuSigningOp(
+						() => displayOrchardAddressOnDevice(engine.wallet as any, params?.account ?? 0),
+						{ operation: 'zcashDisplayAddress', chain: 'Zcash' },
+					)
+					: await displayOrchardAddressOnDevice(engine.wallet as any, params?.account ?? 0)
 			},
 
 			zcashDiagnoseAnchor: async (params: any) => {
