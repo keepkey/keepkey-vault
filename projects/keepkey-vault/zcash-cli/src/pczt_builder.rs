@@ -1838,22 +1838,36 @@ pub async fn build_deshield_pczt(
     let mut tree: ShardTree<MemoryShardStore<MerkleHashOrchard, u32>, 32, 16> =
         ShardTree::new(MemoryShardStore::empty(), 100);
 
-    // Insert completed shard roots (not containing our notes)
-    for (shard_idx, root_hash, completing_height) in &subtree_roots {
-        if note_shards.contains(shard_idx) { continue; }
-        let root = MerkleHashOrchard::from_bytes(&root_hash);
-        if bool::from(root.is_none()) { continue; }
-        let addr = incrementalmerkletree::Address::above_position(
-            16.into(),
-            incrementalmerkletree::Position::from((*shard_idx as u64) * SHARD_SIZE),
-        );
-        tree.insert(addr, root.unwrap())
-            .map_err(|e| anyhow::anyhow!("Failed to insert shard root {}: {:?}", shard_idx, e))?;
-        debug!("Inserted shard {} root (completing_height={})", shard_idx, completing_height);
-    }
-
-    // For shards containing our notes, fetch all leaves and append
-    for shard_idx in &note_shards {
+    // Build the tree in ASCENDING shard order — insert a completed shard's root
+    // or append a note shard's leaves as we go. append() writes at the tree's
+    // current frontier, so a note in a COMPLETED shard BELOW higher shards must
+    // be appended BEFORE those higher roots are inserted, else its leaves land at
+    // the wrong position and root_at_checkpoint_id fails ("Failed to get root").
+    // Same fix as build_pczt — see test_note_in_lower_completed_shard_requires_ordered_build.
+    let highest_note_shard = note_shards.iter().max().copied().unwrap_or(0);
+    let last_ordered_shard = std::cmp::max((num_shards as u32).saturating_sub(1), highest_note_shard);
+    for shard_idx_val in 0..=last_ordered_shard {
+        if !note_shards.contains(&shard_idx_val) {
+            if (shard_idx_val as usize) < num_shards {
+                if let Some((_, root_hash, completing_height)) =
+                    subtree_roots.iter().find(|(i, _, _)| *i == shard_idx_val)
+                {
+                    let root = MerkleHashOrchard::from_bytes(root_hash);
+                    if bool::from(root.is_none()) { continue; }
+                    let addr = incrementalmerkletree::Address::above_position(
+                        16.into(),
+                        incrementalmerkletree::Position::from((shard_idx_val as u64) * SHARD_SIZE),
+                    );
+                    tree.insert(addr, root.unwrap())
+                        .map_err(|e| anyhow::anyhow!("Failed to insert shard root {}: {:?}", shard_idx_val, e))?;
+                    debug!("Inserted shard {} root (completing_height={})", shard_idx_val, completing_height);
+                }
+            }
+            // else: non-note incomplete shard → handled by the frontier block below.
+            continue;
+        }
+        // Note shard → append its leaves. Keep `shard_idx` as a &u32 so the body is unchanged.
+        let shard_idx = &shard_idx_val;
         let shard_start_pos = (*shard_idx as u64) * SHARD_SIZE;
 
         let (fetch_start_height, actions_to_skip) = if *shard_idx == 0 {

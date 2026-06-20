@@ -3704,6 +3704,53 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           return json(result)
         }
 
+        // Headless DESHIELD (z→t): spend a shielded note to a transparent addr.
+        // Emulator: auto-approve + no auth (autonomous testing).
+        if (path === '/api/zcash/shielded/deshield' && method === 'POST') {
+          const wallet = requireWallet(engine)
+          if (!engine.isEmulator) auth.requireAuth(req)
+          const body = await req.json() as { recipient?: string; amount?: number; account?: number }
+          if (!body?.recipient || typeof body.amount !== 'number') {
+            throw new HttpError(400, 'recipient (string) and amount (number, zatoshis) are required')
+          }
+          await ensureFvkLoaded(wallet, 0)
+          const details: EmuSigningDetails = {
+            operation: 'zcashDeshieldZec', chain: 'Zcash', to: body.recipient, value: String(body.amount),
+          }
+          const { deshieldZec } = await import('./txbuilder/zcash-deshield')
+          const run = () => deshieldZec(wallet, { recipient: body.recipient!, amount: body.amount!, account: body.account },
+            { signWrap: <T,>(fn: () => Promise<T>) => emuWrap(fn, details) })
+          if (engine.isEmulator) {
+            const { setEmuAutoApprove } = await import('./emulator-window')
+            setEmuAutoApprove(true)
+            try { return json(await run()) } finally { setEmuAutoApprove(false) }
+          }
+          return json(await run())
+        }
+
+        // Headless SHIELD (t→z): move transparent funds into a fresh shielded note.
+        if (path === '/api/zcash/shielded/shield' && method === 'POST') {
+          const wallet = requireWallet(engine)
+          if (!engine.isEmulator) auth.requireAuth(req)
+          const body = await req.json() as { amount?: number; account?: number }
+          if (typeof body.amount !== 'number') throw new HttpError(400, 'amount (number, zatoshis) is required')
+          if (!callbacks?.getPioneer) throw new HttpError(503, 'Pioneer client unavailable')
+          await ensureFvkLoaded(wallet, body.account ?? 0)
+          const details: EmuSigningDetails = {
+            operation: 'zcashShieldZec', chain: 'Zcash', value: String(body.amount),
+          }
+          const pioneer = await callbacks.getPioneer()
+          const { shieldZec } = await import('./txbuilder/zcash-shield')
+          const run = () => shieldZec(wallet, pioneer, { amount: body.amount!, account: body.account },
+            { signWrap: <T,>(fn: () => Promise<T>) => emuWrap(fn, details) })
+          if (engine.isEmulator) {
+            const { setEmuAutoApprove } = await import('./emulator-window')
+            setEmuAutoApprove(true)
+            try { return json(await run()) } finally { setEmuAutoApprove(false) }
+          }
+          return json(await run())
+        }
+
         // Read-only diagnostic: does the cached shielded balance belong to the
         // CONNECTED device? Derives the Orchard FVK fresh from the device and
         // compares ak to the cache. Does not mutate state.
