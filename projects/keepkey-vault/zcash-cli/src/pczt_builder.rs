@@ -393,6 +393,66 @@ pub async fn build_pczt(
             shard_idx, leaves_in_shard, shard_start_pos, current_pos - 1);
     }
 
+    // Extend the tree past the last COMPLETED shard up to the chain tip by
+    // appending the final incomplete shard's leaves as frontier-only
+    // (Ephemeral). Without this the tree stops at the last completed shard
+    // boundary while the anchor at lwd_tip_height covers every commitment up
+    // to the tip — so the locally reconstructed root can't be computed at the
+    // tip checkpoint ("Failed to get Merkle root") / mismatches lightwalletd.
+    //
+    // Skip when our notes are already in that incomplete shard: the per-note
+    // loop above walks it to the tip (shard_end_pos = u64::MAX), so a second
+    // pass here would double-append. This mirrors build_deshield_pczt.
+    let last_completed_shard = num_shards as u32;
+    let last_completed_height = subtree_roots.last().map(|(_, _, h)| *h).unwrap_or(1687104);
+    if !note_shards.contains(&last_completed_shard) && lwd_tip_height > last_completed_height {
+        let shard_start_pos = (last_completed_shard as u64) * SHARD_SIZE;
+        let tree_size_before_completing = if last_completed_height > 0 {
+            lwd_client.get_orchard_tree_size_at(last_completed_height - 1).await?
+        } else { 0 };
+        let tree_size_after_completing = lwd_client.get_orchard_tree_size_at(last_completed_height).await?;
+        let plan = plan_incomplete_shard_fetch(
+            last_completed_height, shard_start_pos,
+            tree_size_before_completing, tree_size_after_completing,
+        );
+        info!(
+            "Extending tree past shard {} to chain tip (heights {} to {}, skip {} actions)",
+            last_completed_shard, plan.fetch_start_height, lwd_tip_height, plan.actions_to_skip,
+        );
+
+        let chunk_size = 10000u64;
+        let mut current_pos = shard_start_pos;
+        let mut current_height = plan.fetch_start_height;
+        let mut global_action_counter = 0u64;
+        while current_height <= lwd_tip_height {
+            let end = std::cmp::min(current_height + chunk_size - 1, lwd_tip_height);
+            let blocks = lwd_client.fetch_block_actions(current_height, end).await?;
+
+            for (_block_height, txs) in &blocks {
+                for (_tx_idx, cmxs) in txs {
+                    for cmx_bytes in cmxs.iter() {
+                        if global_action_counter < plan.actions_to_skip {
+                            global_action_counter += 1;
+                            continue;
+                        }
+                        global_action_counter += 1;
+
+                        let cmx = ExtractedNoteCommitment::from_bytes(cmx_bytes);
+                        if bool::from(cmx.is_none()) { continue; }
+                        let leaf = MerkleHashOrchard::from_cmx(&cmx.unwrap());
+                        // Ephemeral: frontier-only, present so the locally
+                        // reconstructed root reflects the chain tip.
+                        tree.append(leaf, Retention::Ephemeral)
+                            .context(format!("Failed to append frontier leaf at pos {}", current_pos))?;
+                        current_pos += 1;
+                    }
+                }
+            }
+            current_height = end + 1;
+        }
+        info!("Frontier extension done: tree size now {}", current_pos);
+    }
+
     // Verify leaf count against lightwalletd's tree size
     let expected_tree_size = lwd_client.get_orchard_tree_size_at(lwd_tip_height).await?;
     // Our tree should cover positions 0..(num_shards * SHARD_SIZE - 1) via shard roots
