@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next"
 import { Box, Flex, Text, VStack, Button, Input } from "@chakra-ui/react"
 import { rpcRequest, rpcFire } from "../lib/rpc"
 import { formatBalance } from "../lib/formatting"
+import { describeSigningError } from "../lib/signing-errors"
 import { useFiat } from "../lib/fiat-context"
 import { getAsset } from "../../shared/assetLookup"
 import { QrScannerOverlay } from "./QrScannerOverlay"
@@ -33,6 +34,19 @@ const CONFETTI_CSS = `
   }
 `
 
+// Nudges the swap arrows on hover so the converted-amount pill reads as a
+// tappable unit toggle (USD ⇄ native) rather than static helper text.
+const AMOUNT_FLIP_CSS = `
+  @keyframes kkAmountFlipNudge {
+    0%, 100% { transform: translateY(0) rotate(0deg); }
+    30%      { transform: translateY(-2px) rotate(-10deg); }
+    65%      { transform: translateY(1px) rotate(10deg); }
+  }
+  .kk-amount-flip:hover .kk-amount-flip-icon {
+    animation: kkAmountFlipNudge 0.5s ease-in-out;
+  }
+`
+
 interface SendFormProps {
 	chain: ChainDef
 	address: string | null
@@ -53,7 +67,11 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 	const [inputMode, setInputMode] = useState<'crypto' | 'usd'>('crypto')
 	const [memo, setMemo] = useState("")
 	const [isMax, setIsMax] = useState(false)
-	const [feeLevel, setFeeLevel] = useState(5) // 1=slow, 5=avg, 10=fast
+	const [feeLevel, setFeeLevel] = useState(3) // preset buttons send 1=slow / 3=normal(avg) / 10=fast
+	const [feeMode, setFeeMode] = useState<'preset' | 'custom'>('preset')
+	const [customGasPrice, setCustomGasPrice] = useState("")     // EVM gas price (gwei)
+	const [customGasLimit, setCustomGasLimit] = useState("")     // EVM gas limit (units, optional)
+	const [customSatPerVByte, setCustomSatPerVByte] = useState("") // UTXO fee rate (sat/vByte)
 
 	const [phase, setPhase] = useState<SendPhase>('input')
 	const [loading, setLoading] = useState(false)
@@ -93,10 +111,26 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 		setShowAddressBook(false)
 	}, [tokenCaip])
 
+	// Reset fee selection back to presets when the chain family OR the selected asset
+	// changes, so a custom fee doesn't leak across a chain switch or a token<->native
+	// (or token A->B) toggle on the same chain — both would otherwise reuse a stale
+	// gas limit / rate and mis-compute the MAX gas reserve.
+	useEffect(() => {
+		setFeeMode('preset')
+		setFeeLevel(3) // default every send to Normal
+		setCustomGasPrice("")
+		setCustomGasLimit("")
+		setCustomSatPerVByte("")
+	}, [chain.chainFamily, tokenCaip])
+
 	// Derived display values — token mode vs native mode
 	const isTokenSend = !!(token && token.caip && !token.caip.endsWith('/slip44:501') && (token.caip.includes('erc20') || token.caip.includes('/token:') || token.caip.includes('/spl:') || token.caip.includes('/trc20:')))
 	const displaySymbol = isTokenSend ? token!.symbol : chain.symbol
 	const displayBalance = isTokenSend ? token!.balance : (balance?.balance || '0')
+	// Fee controls: presets where a builder honors feeLevel; free-form custom only where
+	// the builder accepts an exact rate (EVM gas price/limit, UTXO sat/vByte).
+	const supportsFeePresets = chain.chainFamily === 'utxo' || chain.chainFamily === 'evm' || chain.chainFamily === 'cosmos'
+	const supportsCustomFee = chain.chainFamily === 'evm' || chain.chainFamily === 'utxo'
 	// The CAIP the Address Book picker filters by (token caip for token sends, else native).
 	const activeCaip = isTokenSend && token?.caip ? token.caip : chain.caip
 
@@ -203,6 +237,19 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 		if (!recipient || (!amount && !isMax)) return
 		if (addressValidation && !addressValidation.valid) { setError(t(addressValidation.error!)); return }
 		if (exceedsBalance) { setError(t("exceedsBalanceShort")); return }
+
+		// Custom fee validation — only the field(s) relevant to this chain family.
+		const useCustom = feeMode === 'custom' && supportsCustomFee
+		if (useCustom && chain.chainFamily === 'evm') {
+			const gwei = parseFloat(customGasPrice)
+			if (!customGasPrice || !isFinite(gwei) || gwei <= 0) { setError(t("invalidGasPrice")); return }
+			if (customGasLimit && (!/^\d+$/.test(customGasLimit.trim()) || parseInt(customGasLimit, 10) < 21000)) { setError(t("invalidGasLimit")); return }
+		}
+		if (useCustom && chain.chainFamily === 'utxo') {
+			const rate = parseFloat(customSatPerVByte)
+			if (!customSatPerVByte || !isFinite(rate) || rate <= 0) { setError(t("invalidSatPerVByte")); return }
+		}
+
 		setLoading(true)
 		setError(null)
 
@@ -221,6 +268,9 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 				xpubOverride: xpubOverride || undefined,
 				scriptTypeOverride: scriptTypeOverride || undefined,
 				evmAddressIndex: evmAddressIndex,
+				gasPriceGwei: useCustom && chain.chainFamily === 'evm' ? customGasPrice : undefined,
+				gasLimit: useCustom && chain.chainFamily === 'evm' && customGasLimit ? customGasLimit : undefined,
+				satPerVByte: useCustom && chain.chainFamily === 'utxo' ? parseFloat(customSatPerVByte) : undefined,
 			}, 60000)
 
 			setBuildResult(result)
@@ -229,7 +279,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 			setError(e.message || t("failedToBuild"))
 		}
 		setLoading(false)
-	}, [chain, recipient, amount, memo, feeLevel, isMax, addressValidation, exceedsBalance, isTokenSend, token, balance?.balance, xpubOverride, scriptTypeOverride, evmAddressIndex])
+	}, [chain, recipient, amount, memo, feeLevel, feeMode, supportsCustomFee, customGasPrice, customGasLimit, customSatPerVByte, isMax, addressValidation, exceedsBalance, isTokenSend, token, balance?.balance, xpubOverride, scriptTypeOverride, evmAddressIndex])
 
 	const handleSign = useCallback(async () => {
 		if (!buildResult) return
@@ -241,7 +291,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 			setSignedTx(result)
 			setPhase('signed')
 		} catch (e: any) {
-			setError(e.message || t("signingFailed"))
+			setError(describeSigningError(e, t))
 		}
 		setLoading(false)
 	}, [chain, buildResult])
@@ -269,6 +319,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 				signedTx,
 				to: recipient,
 				amount: sendAmount,
+				fee: buildResult?.fee,
 				symbol: displaySymbol,
 				caip: activeCaip,
 				fromAddress: address || undefined,
@@ -378,15 +429,30 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 				</Flex>
 			)}
 
-			{/* Balance display */}
-			<Flex justify="space-between" align="center" bg="var(--ink-0)" border="1px solid var(--line)" px="3.5" py="2.5" borderRadius="12px">
-				<Text fontSize="xs" color="kk.textMuted">{t("available")}</Text>
-				<Flex direction="column" align="flex-end">
-					<Text fontSize="sm" fontFamily="mono" color="kk.textPrimary">
-						{formatBalance(displayBalance)} {displaySymbol}
+			{/* Available balance — centered, borderless. The label sits as a
+			    small overline above the number so the figure itself reads as the
+			    focal point of the row instead of a labeled card. */}
+			<Flex direction="column" align="center" gap="0.5" py="2">
+				<Text fontSize="9px" color="kk.textMuted" letterSpacing="0.18em" textTransform="uppercase" fontFamily="mono">
+					{t("available")}
+				</Text>
+				<Flex align="baseline" gap="2" css={{ fontVariantNumeric: "tabular-nums" }}>
+					<Text
+						fontSize={{ base: "18px", md: "22px" }}
+						fontFamily="mono"
+						fontWeight="600"
+						color="kk.textPrimary"
+						letterSpacing="-0.01em"
+						title={`${displayBalance} ${displaySymbol}`}
+						cursor="help"
+					>
+						{formatBalance(displayBalance)}
+					</Text>
+					<Text fontSize={{ base: "12px", md: "13px" }} fontFamily="mono" color="kk.textMuted" letterSpacing="0.04em">
+						{displaySymbol}
 					</Text>
 					{hasPrice && (
-						<Text fontSize="10px" fontFamily="mono" color="kk.textMuted">
+						<Text fontSize="12px" fontFamily="mono" color="kk.textMuted" ml="2">
 							{fmtCompact(parseFloat(displayBalance) * pricePerUnit)}
 						</Text>
 					)}
@@ -434,14 +500,16 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 								value={recipient}
 								onChange={(e) => setRecipient(e.target.value)}
 								placeholder={t("addressPlaceholder")}
-								bg="var(--ink-0)"
-								border="1px solid var(--line)"
+								bg="transparent"
+								border="1px solid var(--line-2)"
 								borderRadius="12px"
 								color="var(--text-0)"
 								size="sm"
 								fontFamily="mono"
 								px="3"
 								flex="1"
+								_hover={{ borderColor: "rgba(255,255,255,0.18)" }}
+								_focus={{ borderColor: "var(--gold)", bg: "rgba(255,255,255,0.02)" }}
 							/>
 							<Button
 								size="sm"
@@ -512,14 +580,16 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 									value={isMax ? 'MAX' : (inputMode === 'crypto' ? amount : usdAmount)}
 									onChange={(e) => inputMode === 'crypto' ? handleCryptoChange(e.target.value) : handleUsdChange(e.target.value)}
 									placeholder={inputMode === 'usd' ? '0.00' : t("amountPlaceholder")}
-									bg="var(--ink-0)"
-									border="1px solid var(--line)"
+									bg="transparent"
+									border="1px solid var(--line-2)"
 									borderRadius="12px"
 									color="var(--text-0)"
 									size="sm"
 									fontFamily="mono"
 									disabled={isMax}
 									px="3"
+									_hover={{ borderColor: "rgba(255,255,255,0.18)" }}
+									_focus={{ borderColor: "var(--gold)", bg: "rgba(255,255,255,0.02)" }}
 								/>
 							</Box>
 							<Button
@@ -540,33 +610,38 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 							</Button>
 						</Flex>
 
-						{/* Clickable secondary value — tap to flip input mode */}
+						{/* Clickable secondary value — tap to flip input mode (USD ⇄ native) */}
 						{hasPrice && (
-							<Flex
-								mt="1" px="1" justify="space-between" align="center"
-								cursor={!isMax ? "pointer" : "default"}
-								onClick={!isMax ? toggleInputMode : undefined}
-								role={!isMax ? "button" : undefined}
-								borderRadius="sm"
-								_hover={!isMax ? { bg: "rgba(255,255,255,0.04)" } : undefined}
-								py="0.5"
-							>
-								{!isMax && (
-									<Flex align="center" gap="1">
-										{inputMode === 'crypto' ? (
-											<Text fontSize="11px" color="kk.textMuted" fontFamily="mono">
-												{amountUsdPreview !== null ? (fmtCompact(amountUsdPreview) || fmt(0)) : fmt(0)}
-											</Text>
-										) : (
-											<Text fontSize="11px" color="kk.textMuted" fontFamily="mono">
-												{amount ? `${formatBalance(amount)} ${displaySymbol}` : `0 ${displaySymbol}`}
-											</Text>
-										)}
-										<Box color="kk.textMuted" opacity={0.6} _hover={{ color: "kk.gold", opacity: 1 }} transition="all 0.15s">
+							<Flex mt="1.5" px="1" justify="space-between" align="center" py="0.5">
+								<style>{AMOUNT_FLIP_CSS}</style>
+								{!isMax ? (
+									<Flex
+										as="button"
+										className="kk-amount-flip"
+										align="center"
+										gap="1.5"
+										onClick={toggleInputMode}
+										cursor="pointer"
+										px="2.5"
+										py="1"
+										borderRadius="999px"
+										bg="rgba(233,196,106,0.10)"
+										border="1px solid rgba(233,196,106,0.30)"
+										color="kk.gold"
+										transition="all 0.15s"
+										_hover={{ bg: "rgba(233,196,106,0.18)", borderColor: "rgba(233,196,106,0.55)" }}
+										title={t("switchAmountUnit", { defaultValue: "Tap to switch between USD and native amount" })}
+									>
+										<Text fontSize="12px" fontWeight="600" fontFamily="mono" letterSpacing="0.01em">
+											{inputMode === 'crypto'
+												? (amountUsdPreview !== null ? (fmtCompact(amountUsdPreview) || fmt(0)) : fmt(0))
+												: (amount ? `${formatBalance(amount)} ${displaySymbol}` : `0 ${displaySymbol}`)}
+										</Text>
+										<Box className="kk-amount-flip-icon" display="flex">
 											<SwapIcon />
 										</Box>
 									</Flex>
-								)}
+								) : <Box />}
 								{pricePerUnit > 0 && (
 									<Text fontSize="10px" color="kk.textMuted">1 {displaySymbol} = {fmtCompact(pricePerUnit)}</Text>
 								)}
@@ -583,28 +658,94 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 						/>
 					)}
 
-					{chain.chainFamily === 'utxo' && (
+					{supportsFeePresets && (
 						<Box>
-							<Text fontSize="xs" color="kk.textMuted" mb="1">{t("feePriority")}</Text>
-							<Flex gap="2">
-								{[{ label: t("feeSlow"), val: 1 }, { label: t("feeNormal"), val: 5 }, { label: t("feeFast"), val: 10 }].map((opt) => (
-									<Button
-										key={opt.val}
-										size="xs"
-										flex="1"
-										variant={feeLevel === opt.val ? "solid" : "outline"}
-										bg={feeLevel === opt.val ? "var(--gold)" : "var(--ink-3)"}
-										color={feeLevel === opt.val ? "var(--ink-0)" : "var(--text-1)"}
-										border="1px solid var(--line)"
-										borderRadius="10px"
-										fontWeight="500"
-										_hover={{ bg: feeLevel === opt.val ? "var(--gold-2)" : "var(--ink-4)" }}
-										onClick={() => setFeeLevel(opt.val)}
+							<Flex justify="space-between" align="center" mb="1">
+								<Text fontSize="xs" color="kk.textMuted">{t("feePriority")}</Text>
+								{supportsCustomFee && (
+									<Text
+										as="button"
+										fontSize="10px"
+										color={feeMode === 'custom' ? "var(--gold)" : "kk.textMuted"}
+										_hover={{ color: "var(--gold)" }}
+										cursor="pointer"
+										onClick={() => setFeeMode(feeMode === 'custom' ? 'preset' : 'custom')}
 									>
-										{opt.label}
-									</Button>
-								))}
+										{feeMode === 'custom' ? t("feeUsePreset") : t("feeCustom")}
+									</Text>
+								)}
 							</Flex>
+
+							{/* Default, low-friction view: just the three presets. */}
+							{feeMode === 'preset' && (
+								<Flex gap="2">
+									{[{ label: t("feeSlow"), val: 1 }, { label: t("feeNormal"), val: 3 }, { label: t("feeFast"), val: 10 }].map((opt) => {
+										const active = feeLevel === opt.val
+										return (
+											<Button
+												key={opt.val}
+												size="xs"
+												flex="1"
+												variant="outline"
+												bg={active ? "rgba(233,196,106,0.12)" : "transparent"}
+												color={active ? "var(--gold)" : "kk.textMuted"}
+												border="1px solid"
+												borderColor={active ? "rgba(233,196,106,0.45)" : "var(--line)"}
+												borderRadius="10px"
+												fontWeight={active ? "600" : "400"}
+												_hover={{ bg: active ? "rgba(233,196,106,0.18)" : "var(--ink-3)", color: active ? "var(--gold)" : "var(--text-1)" }}
+												onClick={() => setFeeLevel(opt.val)}
+											>
+												{opt.label}
+											</Button>
+										)
+									})}
+								</Flex>
+							)}
+
+							{/* Advanced view: shown only after the user opts into Custom. */}
+							{feeMode === 'custom' && chain.chainFamily === 'evm' && (
+								<Flex gap="2">
+									<Box flex="1">
+										<Text fontSize="10px" color="kk.textMuted" mb="1">{t("gasPriceGwei")}</Text>
+										<Input
+											size="xs" value={customGasPrice}
+											onChange={(e) => setCustomGasPrice(e.target.value)}
+											placeholder="20" inputMode="decimal"
+											bg="var(--ink-3)" border="1px solid var(--line)" borderRadius="10px"
+										/>
+									</Box>
+									{/* Gas limit is hidden for token sends — the safe ERC-20 default (100k)
+									    must not be lowered into an out-of-gas revert. Native only. */}
+									{!isTokenSend && (
+										<Box flex="1">
+											<Text fontSize="10px" color="kk.textMuted" mb="1">{t("gasLimitOptional")}</Text>
+											<Input
+												size="xs" value={customGasLimit}
+												onChange={(e) => setCustomGasLimit(e.target.value)}
+												placeholder="21000" inputMode="numeric"
+												bg="var(--ink-3)" border="1px solid var(--line)" borderRadius="10px"
+											/>
+										</Box>
+									)}
+								</Flex>
+							)}
+
+							{feeMode === 'custom' && chain.chainFamily === 'utxo' && (
+								<Box>
+									<Text fontSize="10px" color="kk.textMuted" mb="1">{t("satPerVByte")}</Text>
+									<Input
+										size="xs" value={customSatPerVByte}
+										onChange={(e) => setCustomSatPerVByte(e.target.value)}
+										placeholder="5" inputMode="decimal"
+										bg="var(--ink-3)" border="1px solid var(--line)" borderRadius="10px"
+									/>
+								</Box>
+							)}
+
+							{feeMode === 'custom' && (
+								<Text fontSize="10px" color="kk.textMuted" mt="1">{t("customFeeHint")}</Text>
+							)}
 						</Box>
 					)}
 
@@ -877,14 +1018,16 @@ function Field({ label, value, onChange, placeholder, disabled }: {
 				value={value}
 				onChange={(e) => onChange(e.target.value)}
 				placeholder={placeholder}
-				bg="var(--ink-0)"
-				border="1px solid var(--line)"
+				bg="transparent"
+				border="1px solid var(--line-2)"
 				borderRadius="12px"
 				color="var(--text-0)"
 				size="sm"
 				fontFamily="mono"
 				disabled={disabled}
 				px="3"
+				_hover={{ borderColor: "rgba(255,255,255,0.18)" }}
+				_focus={{ borderColor: "var(--gold)", bg: "rgba(255,255,255,0.02)" }}
 			/>
 		</Box>
 	)

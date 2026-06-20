@@ -126,7 +126,54 @@ export interface ChainBalance {
   nativeBalanceUsd?: number  // native-only USD (excludes tokens)
   address: string
   tokens?: TokenBalance[]
+  /**
+   * DeFi protocol positions attributed to this chain, populated when the
+   * server returns `defiPositions` (GetPortfolioBalances with includeDefi=true).
+   * Additive: their USD is folded into the chain total and they render in a
+   * dedicated panel. The vault does NOT suppress wallet `tokens` that share a
+   * contract with a position — a position's tokens are protocol underlyings
+   * (LP legs, the native-ETH zero address), not wallet-held duplicates, and the
+   * server sends no type to tell an app-token apart from a contract/LP position.
+   * Consequence: a wallet-held app-token (e.g. stETH) the position also reports
+   * can double-count until the server provides a position type.
+   */
+  defiPositions?: DefiPosition[]
   updatedAt?: number    // unix ms — when this chain's balance was last confirmed non-zero from Pioneer
+}
+
+// DeFi position. The server-side merged path (includeDefi=true) is the
+// canonical source; the legacy fields below (isDefi, type, metaType, balance,
+// symbol, name) are retained so prior shapes built by classifyDefiPosition
+// continue to deserialize cleanly.
+export interface DefiPosition {
+  // === Server-side (canonical) ===
+  protocol: string | null   // Zapper appId slug ("lido", "morpheus", "aave-v3") or null
+  displayName?: string      // Pretty protocol name from the server ("Lido", "Morpheus")
+  network: string           // Zapper network display ("Ethereum") or legacy slug ("ethereum")
+  networkId?: string        // CAIP-2 chain ("eip155:1") — used to attribute the position to a chain
+  balanceUsd: number        // USD value Zapper attributes to the protocol for this pubkey
+  icon?: string
+  /**
+   * The protocol's underlying ERC-20 legs (e.g. an LP's token pair). NOT
+   * wallet-held duplicates — display/metadata only; not used for suppression.
+   */
+  tokens?: Array<{
+    networkId: string
+    address: string
+    symbol?: string
+    /** Human-readable underlying amount, when the server reports it. */
+    balance?: string
+    /** USD value of THIS underlying constituent, when the server reports it. */
+    balanceUsd?: number
+  }>
+
+  // === Legacy (classifyDefiPosition / /zapper/portfolio path) ===
+  isDefi?: boolean
+  name?: string             // display label (e.g. "Supplied USDC", "ETH / USDC LP")
+  symbol?: string           // underlying token ticker when known
+  type?: string             // tokenType (e.g. "contract-position", "app-token")
+  metaType?: string | null  // position meta (e.g. "supplied", "borrowed", "claimable", "staked")
+  balance?: string          // human-readable underlying amount
 }
 
 export interface BuildTxParams {
@@ -145,6 +192,10 @@ export interface BuildTxParams {
   scriptTypeOverride?: string  // BTC multi-account: use this scriptType instead of default
   accountPath?: number[]       // BTC multi-account: account-level path [purpose+H, coinType+H, account+H]
   evmAddressIndex?: number     // EVM multi-address: derivation index (default 0)
+  // Custom (free-form) fee overrides — when present, replace the feeLevel preset.
+  gasPriceGwei?: string        // EVM custom gas price in gwei (legacy gasPrice)
+  gasLimit?: string            // EVM custom gas limit (gas units)
+  satPerVByte?: number         // UTXO custom fee rate (sat/vByte)
 }
 
 // ── Staking / delegation types ───────────────────────────────────────────
@@ -242,6 +293,7 @@ export interface EvmAddressChainBalance {
   balanceUsd: number
   nativeBalanceUsd: number
   tokens?: TokenBalance[]
+  defiPositions?: DefiPosition[]
 }
 
 export interface EvmTrackedAddress {
@@ -411,6 +463,9 @@ export interface EthMessageDecodedInfo {
   messageText?: string
   /** True when `messageRaw` looked like hex and successfully round-tripped to UTF-8. */
   isUtf8Text: boolean
+  /** Signing-standard badge shown in the overlay (e.g. "EIP-191", "TIP-191",
+   *  "Ed25519", "Solana off-chain"). Defaults to "EIP-191" when omitted. */
+  standard?: string
 }
 
 export interface SolanaMessageDecodedInfo {
@@ -1286,6 +1341,7 @@ export interface RecentActivity {
   type: ActivityType
   source: ActivitySource
   to?: string
+  from?: string             // counterparty/sender (from Pioneer history; esp. for received txs)
   amount?: string
   asset?: string             // token symbol if different from chain native
   appName?: string           // for API-originating activities

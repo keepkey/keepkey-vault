@@ -130,24 +130,32 @@ export function PinEntry({ type = "current", failed, onSubmit, onCancel, onWipe 
 			left={0}
 			w="100vw"
 			h="100vh"
-			bg="rgba(0,0,0,0.3)"
+			bg="rgba(11,11,14,0.28)"
 			align="center"
 			justify="center"
 			zIndex={Z.overlay + 10}
-			backdropFilter="blur(2px)"
+			backdropFilter="blur(20px) saturate(140%)"
 			style={{ animation: "pinOverlayFadeIn 0.25s ease-out" }}
 		>
 			<style>{PIN_ANIMATIONS}</style>
 			<Box
-				bg="kk.cardBg"
-				borderRadius="xl"
-				border="1px solid"
-				borderColor="kk.gold"
+				borderRadius="22px"
 				p="8"
 				maxW="360px"
 				w="90%"
-				boxShadow="0 0 20px rgba(233,196,106, 0.08), 0 8px 32px rgba(0,0,0,0.6)"
-				style={{ animation: "pinFadeIn 0.3s ease-out" }}
+				border="1px solid rgba(255,255,255,0.10)"
+				style={{
+					animation: "pinFadeIn 0.3s ease-out",
+					// True glass: barely-tinted dark fill so the blurred backdrop
+					// shows through, paired with a stronger blur and a gold halo
+					// so the modal still reads as a focused, important surface.
+					background:
+						"linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.015)), rgba(16,16,21,0.62)",
+					backdropFilter: "blur(32px) saturate(160%)",
+					WebkitBackdropFilter: "blur(32px) saturate(160%)",
+					boxShadow:
+						"0 0 0 1px rgba(233,196,106,0.22), 0 0 40px -6px rgba(233,196,106,0.18), 0 24px 60px -16px rgba(0,0,0,0.8), 0 4px 12px -4px rgba(0,0,0,0.5)",
+				}}
 			>
 				<Text fontSize="xl" fontWeight="bold" mb="2" textAlign="center" color="kk.textPrimary">
 					{t(TITLE_KEYS[type])}
@@ -179,12 +187,12 @@ export function PinEntry({ type = "current", failed, onSubmit, onCancel, onWipe 
 					</Box>
 				)}
 
-				{/* PIN display - masked dots */}
+				{/* PIN display - masked dots, transparent so the glass card shows through */}
 				<Box
-					bg="kk.bg"
-					borderRadius="md"
+					bg="transparent"
+					borderRadius="12px"
 					border="1px solid"
-					borderColor={showError ? "rgba(255, 59, 48, 0.5)" : pin.length > 0 ? "kk.gold" : "rgba(233,196,106, 0.3)"}
+					borderColor={showError ? "rgba(255, 59, 48, 0.5)" : pin.length > 0 ? "kk.gold" : "rgba(255,255,255,0.10)"}
 					p="3"
 					mb="5"
 					textAlign="center"
@@ -221,17 +229,18 @@ export function PinEntry({ type = "current", failed, onSubmit, onCancel, onWipe 
 									onClick={() => handleDigit(digit)}
 									w="72px"
 									h="72px"
-									bg="kk.cardBg"
+									bg="rgba(255,255,255,0.03)"
 									border="1px solid"
-									borderColor="rgba(233,196,106, 0.25)"
+									borderColor="rgba(255,255,255,0.10)"
 									color="kk.textPrimary"
 									fontSize="xl"
 									fontWeight="bold"
-									borderRadius="xl"
+									borderRadius="16px"
 									transition="all 0.15s ease"
-									_hover={{ borderColor: "kk.gold", bg: "kk.cardBgHover", transform: "scale(1.05)" }}
+									_hover={{ borderColor: "rgba(233,196,106,0.6)", bg: "rgba(233,196,106,0.08)", transform: "scale(1.05)" }}
 									_active={{ bg: "kk.gold", borderColor: "kk.gold", color: "black", transform: "scale(0.95)" }}
 									disabled={pin.length >= 9}
+									css={{ backdropFilter: "blur(12px) saturate(140%)" }}
 								>
 									{"\u2022"}
 								</Button>
@@ -245,14 +254,16 @@ export function PinEntry({ type = "current", failed, onSubmit, onCancel, onWipe 
 					<Button
 						onClick={handleBackspace}
 						size="md"
-						variant="outline"
-						borderColor="rgba(233,196,106, 0.2)"
+						bg="rgba(255,255,255,0.03)"
+						border="1px solid rgba(255,255,255,0.10)"
+						borderRadius="12px"
 						color="kk.textSecondary"
 						transition="all 0.15s ease"
-						_hover={{ borderColor: "kk.gold", color: "kk.textPrimary" }}
+						_hover={{ borderColor: "rgba(233,196,106,0.6)", color: "kk.textPrimary", bg: "rgba(233,196,106,0.06)" }}
 						_active={{ transform: "scale(0.97)" }}
 						disabled={pin.length === 0}
 						flex={1}
+						css={{ backdropFilter: "blur(12px) saturate(140%)" }}
 					>
 						{t("pin.backspace")}
 					</Button>
@@ -262,8 +273,9 @@ export function PinEntry({ type = "current", failed, onSubmit, onCancel, onWipe 
 						bg="kk.gold"
 						color="black"
 						fontWeight="semibold"
+						borderRadius="12px"
 						transition="all 0.15s ease"
-						_hover={{ bg: "kk.goldHover", transform: "scale(1.02)" }}
+						_hover={{ bg: "kk.goldHover", transform: "scale(1.02)", boxShadow: "0 0 24px -4px rgba(233,196,106,0.5)" }}
 						_active={{ transform: "scale(0.97)" }}
 						disabled={pin.length === 0}
 						flex={1}

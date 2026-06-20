@@ -27,6 +27,7 @@ import { getSwapperAnimation } from "../lib/swapper-animations"
 import { computeDustWarning, shouldWarnHighSlippage, computeEffectiveSlippageBps } from "../../shared/swap-warnings"
 import { useEvmAddresses } from "../hooks/useEvmAddresses"
 import { AssetPickerDialog } from "./AssetPickerDialog"
+import { networkDisplayName, ellipsizeCaip, parseCaip } from "../../shared/swap-discovery"
 import { KeepKeyDevice, RouteMap, SpinningDevice } from "./v3"
 import calculatingGif from "../assets/swap/calculating.gif"
 import shiftingGif from "../assets/swap/shifting.gif"
@@ -597,7 +598,9 @@ function AssetSelector({ label, selected, onOpenPicker, disabled }: AssetSelecto
           )}
         </Flex>
         <Flex
-          align="center" gap="5"
+          direction="column"
+          align="center"
+          gap="2"
           cursor={disabled ? "default" : "pointer"}
           opacity={disabled ? 0.7 : 1}
           onClick={() => { if (!disabled) onOpenPicker() }}
@@ -615,10 +618,38 @@ function AssetSelector({ label, selected, onOpenPicker, disabled }: AssetSelecto
               ring="rgba(139,227,196,0.28)"
             />
           </Box>
-          <VStack gap="0" align="flex-start">
-            <Text fontSize="lg" fontWeight="800" color="kk.textPrimary" lineHeight="1.1">{selected.symbol}</Text>
-            <Text fontSize="xs" color="kk.textSecondary">{selected.name}</Text>
-          </VStack>
+          {(() => {
+            // GAS vs TOKEN — prefer the CAIP namespace (authoritative: `/slip44:`
+            // is native, `/erc20:` `/token:` are tokens). A SwapAsset can carry a
+            // token CAIP yet a missing contractAddress, which would mislabel it as
+            // GAS — only fall back to contractAddress when there's no CAIP.
+            const isToken = selected.caip ? parseCaip(selected.caip).isToken : !!selected.contractAddress
+            return (
+              <VStack gap="0.5" align="center" minW="0" maxW="100%">
+                <Flex align="center" justify="center" gap="2">
+                  <Text fontSize="lg" fontWeight="800" color="kk.textPrimary" lineHeight="1.1">{selected.symbol}</Text>
+                  {/* GAS vs TOKEN — never let a token masquerade as the chain coin */}
+                  <Box
+                    bg={isToken ? "rgba(255,255,255,0.06)" : "rgba(233,196,106,0.14)"}
+                    color={isToken ? "kk.textMuted" : "kk.gold"}
+                    px="1.5" py="0.5" borderRadius="4px" fontSize="9px" fontWeight="700" letterSpacing="0.06em">
+                    {isToken ? "TOKEN" : "GAS"}
+                  </Box>
+                </Flex>
+                {/* Network — distinguishes USDC-on-Ethereum from USDC-on-Optimism */}
+                <Text fontSize="xs" color="kk.textSecondary" textAlign="center">
+                  {selected.name}
+                  {selected.caip && <> · <Text as="span" fontWeight="600" color="kk.textPrimary">{networkDisplayName(selected.caip.split("/")[0])}</Text></>}
+                </Text>
+                {/* Exact CAIP-19 (hex parts middle-ellipsized) so it stays unambiguous without overflowing */}
+                {selected.caip && (
+                  <Text fontSize="9px" fontFamily="mono" color="kk.textMuted" opacity={0.6} whiteSpace="nowrap" textAlign="center">
+                    {ellipsizeCaip(selected.caip)}
+                  </Text>
+                )}
+              </VStack>
+            )
+          })()}
         </Flex>
       </Box>
     )
@@ -2277,8 +2308,23 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   if (chain && !resumeSwap && !loadingAssets && assets.length > 0 && !swappableChainIds.has(chain.id)) {
     return (
       <Box position="fixed" inset="0" zIndex={Z.dialog} display="flex" alignItems="center" justifyContent="center">
-        <Box position="absolute" inset="0" bg="rgba(0,0,0,0.6)" backdropFilter="blur(8px)" />
-        <Box position="relative" bg="kk.cardBg" border="2px solid" borderColor="rgba(139,227,196,0.4)" borderRadius="xl" boxShadow="0 0 20px rgba(139,227,196,0.12)" p="6" w="400px" maxW="90vw" textAlign="center">
+        <Box position="absolute" inset="0" bg="rgba(11,11,14,0.28)" backdropFilter="blur(20px) saturate(140%)" />
+        <Box
+          position="relative"
+          borderRadius="22px"
+          border="1px solid rgba(255,255,255,0.10)"
+          p="6"
+          w="400px"
+          maxW="90vw"
+          textAlign="center"
+          style={{
+            background:
+              "linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.015)), rgba(16,16,21,0.78)",
+            backdropFilter: "blur(32px) saturate(160%)",
+            WebkitBackdropFilter: "blur(32px) saturate(160%)",
+            boxShadow: "0 0 0 1px rgba(255,255,255,0.06), 0 24px 60px -16px rgba(0,0,0,0.8), 0 4px 12px -4px rgba(0,0,0,0.5)",
+          }}
+        >
           <Flex justify="center"><ProviderBadge swapper="thorchain" size={32} variant="compact" /></Flex>
           <Text fontSize="sm" color="kk.textMuted" mt="3">{t("notSupported", { coin: chain.coin })}</Text>
           <Button size="sm" mt="4" variant="ghost" color="kk.textSecondary" px="4" py="2" onClick={handleClose}>{t("close")}</Button>
@@ -2290,67 +2336,99 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   return (
     <Box position="fixed" inset="0" zIndex={Z.dialog} display="flex" alignItems="center" justifyContent="center">
       <style>{DIALOG_CSS}</style>
-      <Box position="absolute" inset="0" bg="rgba(0,0,0,0.6)" backdropFilter="blur(8px)" />
+      <Box position="absolute" inset="0" bg="rgba(11,11,14,0.28)" backdropFilter="blur(20px) saturate(140%)" />
       <Box
         position="relative"
-        bg="linear-gradient(180deg, var(--ink-2), var(--ink-1))"
-        border="1px solid var(--line-2)"
-        borderRadius="var(--r-xl)"
-        boxShadow="0 20px 80px -20px rgba(139,227,196,0.20), 0 0 0 1px rgba(255,255,255,0.04) inset"
+        borderRadius="22px"
+        border="1px solid rgba(255,255,255,0.10)"
         w={isSwapComplete && phase === 'submitted' ? "1040px" : "760px"}
         maxW="94vw"
         maxH="90vh"
         overflow="auto"
         onClick={(e) => e.stopPropagation()}
-        style={{ animation: 'kkSwapFadeIn 0.2s ease-out' }}
+        style={{
+          animation: 'kkSwapFadeIn 0.2s ease-out',
+          background:
+            "linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.015)), rgba(16,16,21,0.78)",
+          backdropFilter: "blur(32px) saturate(160%)",
+          WebkitBackdropFilter: "blur(32px) saturate(160%)",
+          boxShadow:
+            "0 0 0 1px rgba(255,255,255,0.06), 0 24px 60px -16px rgba(0,0,0,0.8), 0 4px 12px -4px rgba(0,0,0,0.5)",
+        }}
       >
         {/* ── Header ──────────────────────────────────────────────── */}
         <Flex px="5" py="2.5" borderBottom="1px solid" borderColor="kk.border" align="center" justify="space-between"
           bg="transparent">
-          <HStack gap="2">
+          <HStack gap="2.5" align="center">
             <ProviderBadge swapper={quote?.swapper || liveSwapper || quote?.integration} size={22} variant="compact" />
             <Text fontSize="sm" fontWeight="700" color="kk.textPrimary" letterSpacing="-0.01em">
-              {phase === 'review' ? t("review") : phase === 'submitted' ? t("swapSubmitted") : phase === 'blind-signing-required' ? t("blindSignHeader", "Blind Signing") : t("title")}
+              {phase === 'review' ? t("review") : phase === 'submitted' ? t("swapSubmitted") : phase === 'blind-signing-required' ? t("blindSignHeader", "Blind Signing") : "Swaps.pro"}
             </Text>
+            {/* Provider health — rendered as ascending wifi-style bars so
+                the overall integration status reads at a glance (the worst
+                status determines the colour). Click to open the detail
+                dialog with per-provider rows. */}
+            {swapHealth && (() => {
+              const worst = (() => {
+                const s = swapHealth.integrations.map(i => i.status)
+                if (s.some(x => x === 'offline')) return 'offline'
+                if (s.some(x => x === 'degraded')) return 'degraded'
+                if (s.some(x => x === 'ok')) return 'ok'
+                return 'unknown'
+              })()
+              const color =
+                worst === 'ok'       ? '#22c55e' :
+                worst === 'degraded' ? '#f59e0b' :
+                worst === 'offline'  ? '#ef4444' : '#6b7280'
+              const okCount  = swapHealth.integrations.filter(i => i.status === 'ok').length
+              const total    = swapHealth.integrations.length
+              const activeBars = worst === 'ok' ? 4 : worst === 'degraded' ? 3 : worst === 'offline' ? 1 : 2
+              const heights   = [4, 7, 10, 13]
+              const label =
+                worst === 'ok'       ? `All providers operational (${okCount}/${total})` :
+                worst === 'degraded' ? `Some providers degraded (${okCount}/${total} ok)` :
+                worst === 'offline'  ? `Provider(s) offline (${okCount}/${total} ok)` :
+                'Fetching provider status…'
+              return (
+                <Box
+                  as="button"
+                  display="inline-flex"
+                  alignItems="flex-end"
+                  gap="2px"
+                  px="2"
+                  py="1.5"
+                  borderRadius="md"
+                  cursor="pointer"
+                  bg="rgba(255,255,255,0.03)"
+                  _hover={{ bg: 'rgba(255,255,255,0.08)' }}
+                  border="1px solid rgba(255,255,255,0.08)"
+                  title={label}
+                  onClick={() => setHealthDialogOpen(true)}
+                  className="electrobun-webkit-app-region-no-drag"
+                  aria-label={label}
+                >
+                  {heights.map((h, i) => {
+                    const active = i < activeBars
+                    return (
+                      <Box
+                        key={i}
+                        w="3px"
+                        h={`${h}px`}
+                        borderRadius="1px"
+                        bg={active ? color : 'rgba(255,255,255,0.10)'}
+                        style={active && worst === 'ok' ? { boxShadow: `0 0 4px ${color}66` } : undefined}
+                      />
+                    )
+                  })}
+                </Box>
+              )
+            })()}
           </HStack>
-          <HStack gap="2" align="center">
-            {/* Provider health dots — click to open detail dialog */}
-            {swapHealth && (
-              <HStack
-                gap="2" px="2" py="1" borderRadius="full" cursor="pointer"
-                bg="rgba(255,255,255,0.04)" _hover={{ bg: 'rgba(255,255,255,0.08)' }}
-                border="1px solid" borderColor="kk.border"
-                title="Click for swap provider status"
-                onClick={() => setHealthDialogOpen(true)}
-              >
-                {swapHealth.integrations.map(intg => {
-                  const dotColor =
-                    intg.status === 'ok'       ? '#22c55e' :
-                    intg.status === 'degraded' ? '#f59e0b' :
-                    intg.status === 'offline'  ? '#ef4444' : '#6b7280'
-                  const hoverLabel =
-                    intg.status === 'ok'       ? `${intg.label}: operational` :
-                    intg.status === 'degraded' ? `${intg.label}: ${intg.detail || 'some pairs unavailable'}` :
-                    intg.status === 'offline'  ? `${intg.label}: unreachable` :
-                    `${intg.label}: status unknown`
-                  return (
-                    <Box key={intg.key} title={hoverLabel}
-                      w="7px" h="7px" borderRadius="full" flexShrink={0}
-                      style={{
-                        background: dotColor,
-                        boxShadow: intg.status === 'ok' ? `0 0 5px ${dotColor}99` : 'none',
-                      }}
-                    />
-                  )
-                })}
-              </HStack>
-            )}
-            {!busy && (
-              <Button size="xs" variant="ghost" color="kk.textMuted" px="1" minW="auto" _hover={{ color: "kk.textPrimary" }} onClick={handleClose}>
-                &times;
-              </Button>
-            )}
-          </HStack>
+          {!busy && (
+            <Button size="xs" variant="ghost" color="kk.textMuted" px="1" minW="auto" _hover={{ color: "kk.textPrimary" }} onClick={handleClose}>
+              &times;
+            </Button>
+          )}
         </Flex>
 
         {/* ── Body ────────────────────────────────────────────────── */}
@@ -3963,11 +4041,25 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                               the user clicked MAX expecting it to "do something".
                               To exit MAX mode, the user types — the input's
                               onChange already calls setIsMax(false). */}
-                          <Button size="xs" px="2" variant={isMax ? "solid" : "outline"}
-                            bg={isMax ? "kk.gold" : "transparent"} color={isMax ? "black" : "kk.gold"}
-                            borderColor={isMax ? "kk.gold" : "rgba(233,196,106,0.3)"} fontWeight="700" fontSize="10px"
-                            borderRadius="md" _hover={{ bg: isMax ? "kk.goldHover" : "rgba(233,196,106,0.1)" }}
-                            onClick={() => { setIsMax(true); setMaxReserveMode('safe'); setAmount(""); setFiatAmount("") }} disabled={busy}>
+                          <Button
+                            size="xs"
+                            h="22px"
+                            minH="22px"
+                            px="2"
+                            py="0.5"
+                            variant={isMax ? "solid" : "outline"}
+                            bg={isMax ? "kk.gold" : "transparent"}
+                            color={isMax ? "black" : "kk.gold"}
+                            borderColor={isMax ? "kk.gold" : "rgba(233,196,106,0.3)"}
+                            border="1px solid"
+                            fontWeight="700"
+                            fontSize="10px"
+                            lineHeight="1"
+                            borderRadius="md"
+                            _hover={{ bg: isMax ? "kk.goldHover" : "rgba(233,196,106,0.1)" }}
+                            onClick={() => { setIsMax(true); setMaxReserveMode('safe'); setAmount(""); setFiatAmount("") }}
+                            disabled={busy}
+                          >
                             {t("max")}
                           </Button>
                         </Flex>
@@ -4025,43 +4117,48 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                         </Box>
                       )}
 
-                      <Box position="relative">
-                        {inputMode === 'fiat' && (
-                          <Text position="absolute" left="8px" top="50%" transform="translateY(-50%)" fontSize="xs" fontWeight="600" color="kk.textSecondary" pointerEvents="none" zIndex={1}>$</Text>
-                        )}
-                        <Input
-                          value={isMax ? (sendAmount ? formatBalance(sendAmount) : 'MAX') : (inputMode === 'crypto' ? amount : fiatAmount)}
-                          onChange={(e) => { if (isMax) { setIsMax(false); setMaxReserveMode('safe') } inputMode === 'crypto' ? handleCryptoChange(e.target.value) : handleFiatChange(e.target.value) }}
-                          placeholder={inputMode === 'fiat' ? '0.00' : t("amountPlaceholder")}
-                          bg="rgba(0,0,0,0.4)" border="1px solid"
-                          borderColor={exceedsBalance ? "kk.error" : exceedsSafeMax ? "kk.gold" : "rgba(255,255,255,0.08)"}
-                          borderRadius="lg" color="kk.textPrimary" size="sm" fontFamily="mono" fontSize="sm" fontWeight="700"
-                          disabled={busy} px={inputMode === 'fiat' ? "6" : "3"}
-                          _focus={{ borderColor: exceedsBalance ? "kk.error" : "kk.gold", boxShadow: exceedsBalance ? "none" : "0 0 0 1px rgba(233,196,106,0.3)" }}
-                        />
-                      </Box>
-
-                      {!isMax && hasFromPrice && (
-                        <Flex mt="1" px="1">
-                          {inputMode === 'crypto' && amountUsdPreview !== null ? (
+                      {/* Amount + USD-equivalent side by side: the input takes
+                          the available width, the converted figure sits right
+                          on the same baseline. Click the converted value to
+                          flip input modes (was a separate row below). */}
+                      <Flex align="center" gap="2">
+                        <Box position="relative" flex="1">
+                          {inputMode === 'fiat' && (
+                            <Text position="absolute" left="8px" top="50%" transform="translateY(-50%)" fontSize="xs" fontWeight="600" color="kk.textSecondary" pointerEvents="none" zIndex={1}>$</Text>
+                          )}
+                          <Input
+                            value={isMax ? (sendAmount ? formatBalance(sendAmount) : 'MAX') : (inputMode === 'crypto' ? amount : fiatAmount)}
+                            onChange={(e) => { if (isMax) { setIsMax(false); setMaxReserveMode('safe') } inputMode === 'crypto' ? handleCryptoChange(e.target.value) : handleFiatChange(e.target.value) }}
+                            placeholder={inputMode === 'fiat' ? '0.00' : t("amountPlaceholder")}
+                            bg="rgba(0,0,0,0.4)" border="1px solid"
+                            borderColor={exceedsBalance ? "kk.error" : exceedsSafeMax ? "kk.gold" : "rgba(255,255,255,0.08)"}
+                            borderRadius="lg" color="kk.textPrimary" size="sm" fontFamily="mono" fontSize="sm" fontWeight="700"
+                            disabled={busy} px={inputMode === 'fiat' ? "6" : "3"}
+                            _focus={{ borderColor: exceedsBalance ? "kk.error" : "kk.gold", boxShadow: exceedsBalance ? "none" : "0 0 0 1px rgba(233,196,106,0.3)" }}
+                          />
+                        </Box>
+                        {!isMax && hasFromPrice && (
+                          inputMode === 'crypto' && amountUsdPreview !== null ? (
                             <Box as="button" onClick={toggleInputMode} cursor="pointer"
                               title={t("switchToFiat") || "Switch to fiat input"}
+                              px="1"
                               _hover={{ color: "kk.gold" }}>
-                              <Text fontSize="xs" color="kk.textSecondary" fontFamily="mono">
+                              <Text fontSize="xs" color="kk.textSecondary" fontFamily="mono" whiteSpace="nowrap">
                                 ≈ {fmtCompact(amountUsdPreview)}
                               </Text>
                             </Box>
                           ) : inputMode === 'fiat' && amount ? (
                             <Box as="button" onClick={toggleInputMode} cursor="pointer"
                               title={t("switchToCrypto") || `Switch to ${fromAsset.symbol} input`}
+                              px="1"
                               _hover={{ color: "kk.gold" }}>
-                              <Text fontSize="xs" color="kk.textSecondary" fontFamily="mono">
+                              <Text fontSize="xs" color="kk.textSecondary" fontFamily="mono" whiteSpace="nowrap">
                                 ≈ {formatBalance(amount)} {fromAsset.symbol}
                               </Text>
                             </Box>
-                          ) : null}
-                        </Flex>
-                      )}
+                          ) : null
+                        )}
+                      </Flex>
                       {exceedsBalance && (
                         <Text fontSize="10px" color="kk.error" mt="1" fontWeight="600">{t("insufficientBalance")}</Text>
                       )}
@@ -4520,14 +4617,29 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       {/* ── Asset picker (modal-over-modal) ──────────────────────── */}
       {/* ── Swap Provider Health Dialog ──────────────────────────── */}
       {healthDialogOpen && (
-        <Box position="fixed" inset="0" zIndex={Z.assetPicker} display="flex" alignItems="center" justifyContent="center"
-          bg="rgba(0,0,0,0.6)" onClick={() => setHealthDialogOpen(false)}>
+        <Box
+          position="fixed" inset="0" zIndex={Z.assetPicker}
+          display="flex" alignItems="center" justifyContent="center"
+          bg="rgba(11,11,14,0.28)"
+          backdropFilter="blur(20px) saturate(140%)"
+          onClick={() => setHealthDialogOpen(false)}
+        >
           <Box
-            bg="kk.bg" borderRadius="16px" border="1px solid" borderColor="kk.border"
-            w="360px" maxH="80vh" overflow="auto"
-            boxShadow="0 24px 64px rgba(0,0,0,0.6)"
+            borderRadius="22px"
+            border="1px solid rgba(255,255,255,0.10)"
+            w="min(680px, 92vw)"
+            maxH="min(80vh, 720px)"
+            overflow="auto"
             onClick={e => e.stopPropagation()}
-            style={{ animation: 'kkSwapFadeIn 0.15s ease-out' }}
+            style={{
+              animation: 'kkSwapFadeIn 0.15s ease-out',
+              background:
+                "linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.015)), rgba(16,16,21,0.78)",
+              backdropFilter: "blur(32px) saturate(160%)",
+              WebkitBackdropFilter: "blur(32px) saturate(160%)",
+              boxShadow:
+                "0 0 0 1px rgba(255,255,255,0.06), 0 24px 60px -16px rgba(0,0,0,0.8), 0 4px 12px -4px rgba(0,0,0,0.5)",
+            }}
           >
             {/* Dialog header */}
             <Flex px="5" py="3" borderBottom="1px solid" borderColor="kk.border" align="center" justify="space-between">

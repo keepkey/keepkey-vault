@@ -58,9 +58,15 @@ function saveWindowState(state: WindowState): void {
 
 export interface EmulatorConfirmDetails {
   operation: string
+  /** Human label override for the operation header (e.g. "Token Approval"). */
+  opLabel?: string
   chain?: string
   to?: string
+  /** Label for the `to` row — "To" (default), "Spender", "Contract", "Validator". */
+  toLabel?: string
   value?: string
+  /** Network fee, pre-formatted by the sign handler (shown before approval). */
+  fee?: string
   memo?: string
   /** Override firmware confirmation count (default: auto-detected from operation) */
   confirmCount?: number
@@ -408,14 +414,19 @@ let displayPollTimer: ReturnType<typeof setInterval> | null = null
 let cachedPopFrames: (() => Uint8Array[]) | null = null
 const playbackQueue: Uint8Array[] = []
 const PLAYBACK_QUEUE_CAP = 90 // ~6s at 15fps; older frames dropped
+const PLAYBACK_TICK_MS = 66 // ~15fps normal/idle cadence
+const PLAYBACK_TICK_SLOW_MS = 350 // post-approval: linger so confirm screens are readable
+let slowPlaybackUntil = 0 // epoch ms; emit at the slow cadence until then (F4)
 
 export function startDisplayPoll(): void {
   if (displayPollTimer) return
   import('./emulator').then(mod => {
     cachedPopFrames = mod.emuPopFrames
-    let lastHadDisplay = false
-    displayPollTimer = setInterval(() => {
-      if (!emuWindow || !cachedPopFrames) return
+    // Self-rescheduling timer so the cadence can change per tick: normal
+    // ~15fps, but slower right after an approval so the burst of confirm
+    // screens (rendered in one synchronous kkemu_poll) is readable (F4).
+    const tick = () => {
+      if (!emuWindow || !cachedPopFrames) { displayPollTimer = setTimeout(tick, PLAYBACK_TICK_MS); return }
 
       // Always drain the C ring so the dylib doesn't overflow during the
       // bridge handshake. Frames captured before viewReady are held in the
@@ -430,168 +441,119 @@ export function startDisplayPoll(): void {
 
       // sendToWindow is a no-op until viewReady. Don't shift off the queue
       // until then — emitted frames would be discarded mid-flight.
-      if (!viewReady) return
-
-      if (playbackQueue.length > 0) {
+      if (viewReady && playbackQueue.length > 0) {
         const fb = playbackQueue.shift()!
         const b64 = Buffer.from(fb).toString('base64')
         sendToWindow('display-update', { fb: b64, w: 256, h: 64 })
-        lastHadDisplay = true
       }
       // No queued frame: leave the last frame on screen. (Don't emit
       // display-lost; the device hasn't gone away, it's just idle.)
-    }, 66) // ~15fps
+
+      const delay = Date.now() < slowPlaybackUntil ? PLAYBACK_TICK_SLOW_MS : PLAYBACK_TICK_MS
+      displayPollTimer = setTimeout(tick, delay)
+    }
+    displayPollTimer = setTimeout(tick, PLAYBACK_TICK_MS)
   })
 }
 
 export function stopDisplayPoll(): void {
-  if (displayPollTimer) { clearInterval(displayPollTimer); displayPollTimer = null }
+  if (displayPollTimer) { clearTimeout(displayPollTimer); displayPollTimer = null }
   cachedPopFrames = null
   playbackQueue.length = 0
 }
 
-// Firmware confirmation counts by operation type.
-// kkemu_poll() BLOCKS inside confirm_helper() until BA+DLD are in the ring
-// buffer, so ALL confirmations must be pre-written before the final poll tick.
-// Over-writing is safe — unused pairs get consumed as no-ops by subsequent polls.
-const CONFIRM_COUNTS: Record<string, number> = {
-  ethSignTx: 4,         // approve/transfer + data warning + fee + margin
-  btcSignTx: 20,        // per-output confirm + fee + final (varies by output count, over-allocate is safe)
-  cosmosSignTx: 3,
-  thorchainSignTx: 7,   // router + vault + asset + amount + memo + fee + margin
-  mayachainSignTx: 7,
-  osmosisSignTx: 3,
-  binanceSignTx: 3,
-  xrpSignTx: 3,
-  btcGetAddress: 2,
-  ethGetAddress: 2,
-  cosmosGetAddress: 2,
-  thorchainGetAddress: 2,
-  mayachainGetAddress: 2,
-  osmosisGetAddress: 2,
-  binanceGetAddress: 2,
-  xrpGetAddress: 2,
-  ethSignMessage: 3,
-  ethSignTypedData: 3,
-  ethVerifyMessage: 3,
-}
-const DEFAULT_CONFIRM_COUNT = 5
+/** Transport delegate fields the confirm gate needs (a subset of EmulatorTransportDelegate). */
+type ConfirmDelegate = { onButtonRequest: (() => void) | null }
 
-function getConfirmCount(details: EmulatorConfirmDetails): number {
-  if (details.confirmCount) return details.confirmCount
-  return CONFIRM_COUNTS[details.operation] ?? DEFAULT_CONFIRM_COUNT
+/**
+ * Run a wallet op on the emulator with screen-first confirm gating.
+ *
+ * Thread-driven model (Approach B): the dylib poll thread keeps the firmware
+ * running, so confirm_helper renders the REAL OLED frame and then blocks in C
+ * waiting for a button decision — without freezing the Bun event loop. The
+ * frame streams to the emulator window via the capture ring + display poll, so
+ * the user sees and reviews exactly what the device drew, HELD, before
+ * deciding — like a physical KeepKey.
+ *
+ * We hook the transport (delegate.onButtonRequest, fired from readChunk when
+ * the firmware emits a ButtonRequest) to gate the decision:
+ *   - interactive: show Confirm/Reject over the held frame, wait for the click,
+ *     then deliver the DebugLinkDecision. One ButtonRequest = one screen = one
+ *     click, so multi-screen signs (BTC per-output, ETH data+fee) advance
+ *     press-by-press.
+ *   - auto: deliver an approve immediately (setup ops: wipe / load / settings).
+ *
+ * hdwallet auto-sends the ButtonAck (which sets button_request_acked); we only
+ * supply the DebugLinkDecision (the simulated press). A reject writes
+ * yes_no=false → confirm_helper returns false → the firmware aborts with a
+ * Failure, which rejects fn().
+ */
+export async function emuGatedConfirm(
+  fn: () => Promise<any>,
+  delegate: ConfirmDelegate | null,
+  opts: { interactive: true; details: EmulatorConfirmDetails } | { interactive: false },
+): Promise<any> {
+  const { saveEmulatorState, flushRingBuffers } = await import('./emulator')
+  const { writeDecision } = await import('./emulator-transport')
+
+  let rejected = false
+  const prevHandler = delegate ? delegate.onButtonRequest : null
+
+  if (delegate) {
+    delegate.onButtonRequest = () => {
+      if (!opts.interactive) {
+        // Setup op — auto-press through each confirm screen.
+        writeDecision(true)
+        return
+      }
+      // Interactive sign — the real frame is already on screen (display poll).
+      // Hold it and gate on the user's click. Fire-and-forget: hdwallet still
+      // gets its ButtonRequest back and sends the ButtonAck; the DLD we write
+      // on click is what releases confirm_helper.
+      requestUserConfirm({ id: crypto.randomUUID(), ...opts.details })
+        .then((approved) => {
+          if (!approved) rejected = true
+          writeDecision(approved)
+        })
+        .catch((e: any) => {
+          // A failed prompt must not strand confirm_helper waiting forever —
+          // reject so the firmware aborts cleanly.
+          console.warn(`${TAG} confirm prompt failed — rejecting:`, e?.message)
+          rejected = true
+          writeDecision(false)
+        })
+    }
+  }
+
+  // Open the window up front (interactive) so the confirm frame is visible the
+  // moment confirm_helper renders it, not after the first click.
+  if (opts.interactive && !emuWindow) openEmulatorWindow()
+
+  try {
+    const result = await fn()
+    await saveEmulatorState()
+    return result
+  } catch (e) {
+    // If the user rejected, surface a clean message rather than the raw
+    // firmware Failure that bubbled up through hdwallet.
+    if (rejected) throw new Error('Transaction rejected by user on emulator')
+    throw e
+  } finally {
+    if (delegate) delegate.onButtonRequest = prevHandler
+    flushRingBuffers() // drain any late output so the next op reads clean
+    sendDismiss()
+  }
 }
 
 /**
- * Interactive confirm wrapper for emulator signing/address operations.
- *
- * Order preserves the HW-wallet review pattern: fn() starts FIRST so the
- * firmware can render its OLED screens (visible via the dylib frame
- * capture ring) BEFORE the user is asked to approve — the user reviews
- * what the device drew, not what the host claims.
- *
- * 1. Pause poll, start operation (chunks queue in ring buffer)
- * 2. Pre-poll N-1 (consume all but the last chunk; firmware accumulates
- *    but doesn't dispatch yet — confirm_helper isn't entered)
- * 3. Show confirm prompt with details; user can also see captured OLED
- *    frames in the playback queue from the pre-polls
- * 4. Wait for user Confirm/Reject (arrives via bridge HTTP POST)
- * 5. If approved: prewriteConfirmations(N), final poll -> firmware reads
- *    the Nth chunk, dispatches, enters confirm_helper, draws screen,
- *    sees pre-written BA+DLD, exits cleanly, returns response
- * 6. If rejected: prewriteCancel, flushRingBuffers -> the queued Nth
- *    chunk gets consumed and triggers confirm_helper, which sees Cancel
- *    in its tiny-msg switch and exits ret_stat=false. Without Cancel
- *    waiting, confirm_helper would busy-loop until the watchdog SIGKILLs.
- *
- * The transport's READ_TIMEOUT_MS is sized to outlive both the confirm
- * timeout AND the firmware roundtrip so a late-but-valid approval doesn't
- * race the readChunk deadline. POLL_SAFETY_MS likewise outlives the
- * confirm timeout so the paused poll doesn't auto-resume mid-decision.
- *
- * CRITICAL: kkemu_poll() blocks inside confirm_helper(). The firmware may
- * call confirm_helper() multiple times per operation (e.g. ETH: data + fee).
- * ALL confirmations must be pre-written before the poll tick or it blocks forever.
+ * Interactive (user-gated) confirm wrapper for emulator signing/address ops.
  */
 export async function emuInteractiveConfirm(
   fn: () => Promise<any>,
   details: EmulatorConfirmDetails,
-  engineDelegate?: { chunkCount: number; autoConfirm?: boolean } | null,
+  engineDelegate?: ConfirmDelegate | null,
 ): Promise<any> {
-  const { pausePoll, resumePoll, saveEmulatorState, emuPollOnce, flushRingBuffers } = await import('./emulator')
-  const { prewriteConfirmations, prewriteCancel } = await import('./emulator-transport')
-
-  const id = crypto.randomUUID()
-  if (engineDelegate) engineDelegate.chunkCount = 0
-
-  pausePoll()
-
-  try {
-    // Start the wallet op — transport writes N chunks into the ring buffer.
-    const promise = fn()
-    await new Promise(r => setTimeout(r, 30)) // let transport flush all writes
-
-    const numChunks = engineDelegate?.chunkCount || 1
-    console.log(`${TAG} ${numChunks} chunks written, polling ${numChunks - 1} pre-polls`)
-
-    // Drive the firmware up to (but not into) confirm_helper. Pre-polling
-    // N-1 chunks lets it accumulate the message but defer dispatch until
-    // the final chunk arrives — so the JS thread isn't blocked.
-    for (let i = 0; i < numChunks - 1; i++) {
-      emuPollOnce()
-    }
-
-    console.log(`${TAG} Waiting for user confirmation (id=${id.slice(0, 8)}...)`)
-    const approved = await requestUserConfirm({ id, ...details })
-    console.log(`${TAG} User responded: approved=${approved}`)
-
-    if (!approved) {
-      // Pre-queue Cancel BEFORE flushing. flushRingBuffers calls kkemu_poll
-      // which consumes the Nth (queued) sign chunk and triggers confirm_helper.
-      // Without Cancel waiting in the ring, confirm_helper busy-loops forever
-      // for BA+DLD that never come and the watchdog SIGKILLs bun. Cancel is
-      // in confirm_helper's tiny-msg switch (case MessageType_Cancel ->
-      // ret_stat=false, goto exit), so the firmware exits cleanly.
-      prewriteCancel()
-      flushRingBuffers()
-      // The underlying wallet op is still pending — it'll reject once the
-      // transport reads the firmware's Failure response triggered by Cancel.
-      // Attach a no-op catch so the eventual rejection isn't surfaced as an
-      // UnhandledPromiseRejection after we throw the user-facing error.
-      promise.catch(() => {})
-      throw new Error('Transaction rejected by user on emulator')
-    }
-
-    const nConfirms = getConfirmCount(details)
-    console.log(`${TAG} Pre-writing ${nConfirms} confirmations (op=${details.operation}) + final poll`)
-
-    // Suppress hdwallet's ButtonAck writes — pre-written BA+DLD satisfy
-    // confirm_helper, and the orphaned ButtonAck would cause "Unexpected
-    // message" during BTC's multi-round TxRequest/TxAck protocol.
-    if (engineDelegate) engineDelegate.autoConfirm = true
-
-    // Pre-write all needed confirmations, then run ONE poll tick.
-    // All confirms happen inside a single kkemu_poll() C call — we can't
-    // inject between them. Both BA+DLD go to iface 1 (same FIFO) so
-    // confirm_helper reads them in order without iface-priority starvation.
-    prewriteConfirmations(nConfirms)
-    emuPollOnce()
-
-    // Resume poll BEFORE awaiting — readChunk needs kkemu_poll() running
-    // to deliver the firmware response. Without this, await hangs forever.
-    resumePoll()
-
-    const result = await promise
-    console.log(`${TAG} Operation complete, saving state`)
-
-    flushRingBuffers()
-    saveEmulatorState()
-    return result
-  } finally {
-    if (engineDelegate) engineDelegate.autoConfirm = false
-    resumePoll() // idempotent — ensures poll is always restored
-    sendDismiss()
-  }
+  return emuGatedConfirm(fn, engineDelegate ?? null, { interactive: true, details })
 }
 
 // ── Inline HTML ─────────────────────────────────────────────────────────
@@ -837,7 +799,7 @@ function buildEmulatorHTML(bridgePort: number): string {
   function onConfirmRequest(details) {
     console.log('[emu-ui] Confirm request: op=' + details.operation + ' id=' + details.id);
     currentConfirmId = details.id;
-    var opName = details.operation
+    var opName = details.opLabel || details.operation
       .replace(/([A-Z])/g, ' $$1').replace(/^ /, '')
       .replace('Sign Tx', 'Sign Transaction')
       .replace('Get Address', 'Verify Address');
@@ -846,9 +808,10 @@ function buildEmulatorHTML(bridgePort: number): string {
     if (details.to) {
       var addr = details.to;
       if (addr.length > 24) addr = addr.slice(0, 12) + '...' + addr.slice(-10);
-      html += '<div class="addr">To: ' + esc(addr) + '</div>';
+      html += '<div class="addr">' + esc(details.toLabel || 'To') + ': ' + esc(addr) + '</div>';
     }
     if (details.value) html += '<div class="detail">Amount: ' + esc(details.value) + '</div>';
+    if (details.fee) html += '<div class="detail">Fee: ' + esc(details.fee) + '</div>';
     if (details.memo) html += '<div class="detail">Memo: ' + esc(details.memo) + '</div>';
     confirmMeta.innerHTML = html;
     confirmMeta.classList.add('visible');

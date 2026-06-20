@@ -808,6 +808,10 @@ function App() {
 						onTabChange={() => {}}
 						watchOnly
 						onExitToDeviceSelect={() => { setWatchOnlyMode(false); setWatchOnlyDeviceId(undefined) }}
+						connectedDeviceId={deviceState.deviceId || null}
+						watchingDeviceId={watchOnlyDeviceId || null}
+						onWatchWallet={(id, lbl) => { setWatchOnlyDeviceId(id); setWatchOnlyLabel(lbl); setWatchOnlyMode(true) }}
+						onReturnToConnected={() => { setWatchOnlyMode(false); setWatchOnlyDeviceId(undefined) }}
 					/>
 					<Flex flex="1" direction="column" overflow="auto" pt={NAV_CONTENT_OFFSET} pb="4">
 						<Dashboard watchOnly watchOnlyDeviceId={watchOnlyDeviceId} onLoaded={() => {}} />
@@ -907,14 +911,15 @@ function App() {
 			<Flex direction="column" h="100vh" bg="transparent" color="kk.textPrimary" position="relative"
 				{...(!portfolioLoaded && activeTab === "vault" ? { position: "absolute", w: 0, h: 0, overflow: "hidden" } as const : {})}
 			>
-				{/* Full-screen ambient radial glow — replaces the per-card glow inside the orbital view. */}
+				{/* Full-screen ambient radial glow — gentler, neutral-warm tint
+				    so the page feels lit but doesn't read as a yellow wash. */}
 				<Box
 					position="absolute"
 					inset="0"
 					pointerEvents="none"
 					zIndex={0}
 					style={{
-						background: 'radial-gradient(ellipse 70% 55% at 50% 42%, rgba(233,196,106,0.22) 0%, rgba(139,227,196,0.06) 35%, transparent 75%)',
+						background: 'radial-gradient(ellipse 70% 55% at 50% 42%, rgba(233,196,106,0.06) 0%, rgba(139,227,196,0.03) 35%, transparent 75%)',
 					}}
 				/>
 				<TopNav
@@ -935,6 +940,10 @@ function App() {
 					onTabChange={handleTabChange}
 					passphraseActive={deviceState.isHiddenWallet}
 					onExitToDeviceSelect={deviceState.isEmulator ? () => { rpcRequest("emulatorStop").catch(() => {}) } : undefined}
+					connectedDeviceId={deviceState.deviceId || null}
+					watchingDeviceId={null}
+					onWatchWallet={(id, lbl) => { setWatchOnlyDeviceId(id); setWatchOnlyLabel(lbl); setWatchOnlyMode(true) }}
+					onReturnToConnected={() => { /* already on connected wallet */ }}
 				/>
 				<Flex flex="1" direction="column" overflow="auto" pt={showBanner ? NAV_CONTENT_OFFSET_WITH_BANNER : NAV_CONTENT_OFFSET} pb="4" transition="padding-top 0.2s">
 				{/* TopNav offset plus banner height when visible. */}

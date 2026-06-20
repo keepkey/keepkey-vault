@@ -111,6 +111,7 @@ import { startRestApi, clearFeaturesCache, setUiActive, uiHeartbeat, type RestAp
 import { parseSolanaTx, SolanaTxParseError, solanaMessageSlice } from "./solana-tx"
 import { AuthStore } from "./auth"
 import { getPioneer, getPioneerApiBase, resetPioneer, DEFAULT_API_BASE, getQueryKey as getPioneerQueryKey } from "./pioneer"
+import { fetchDefiPositions } from "./zapper"
 import { loadSupportedChains } from "../shared/swap-support-matrix"
 import { PioneerSocket } from "./pioneer-socket"
 import { startEventStream, stopEventStream, type AddressEntry } from "./event-stream"
@@ -138,7 +139,7 @@ import { extractTransactionsFromReport, toCoinTrackerCsv, toZenLedgerCsv } from 
 import * as os from "os"
 import * as path from "path"
 import { EVM_RPC_URLS, getTokenMetadata, broadcastEvmTx } from "./evm-rpc"
-import type { ChainBalance, TokenBalance, CustomToken, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, EvmAddressSet, Bip85SeedMeta, StakingPosition, SwapAsset, AuditToken } from "../shared/types"
+import type { ChainBalance, TokenBalance, CustomToken, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, EvmAddressSet, Bip85SeedMeta, StakingPosition, SwapAsset, AuditToken, DefiPosition } from "../shared/types"
 import type { VaultRPCSchema } from "../shared/rpc-schema"
 
 // L3 fix: withTimeout imported from engine-controller (was duplicated here)
@@ -199,14 +200,39 @@ interface PortfolioMeta {
 	staleChains: Array<{ caip: string; pubkey: string; ageMs: number; fetchedAtISO: string }>
 }
 
+// Server-side DeFi position shape from GetPortfolioBalances (includeDefi=true).
+// Shape mirrors DefiPositionEntry in pioneer-server's balance.controller.ts.
+interface ServerDefiPosition {
+	pubkey: string
+	protocol: string
+	displayName: string
+	network: string
+	networkId: string
+	balanceUsd: number
+	icon?: string
+	// Per-token amount/symbol/USD when the server reports it. Older servers may
+	// only include {networkId, address, symbol}; balance/balanceUsd stay
+	// undefined and the UI degrades to USD-only.
+	tokens?: Array<{ networkId: string; address: string; symbol?: string; balance?: string | number; balanceUsd?: number }>
+}
+
 // Pioneer v1.3.115+ returns { balances, meta } where meta reports which chains
 // served degraded (fresh fetch failed) or stale (>5min old cache) data. The old
 // unwrap discarded meta entirely, so the vault could never explain a $0/stale row.
-function unwrapPortfolioResponse(resp: any): { entries: any[]; meta: PortfolioMeta | null } {
+//
+// v1.4+ also surfaces { defiPositions } when the request set includeDefi=true.
+// We return null (not []) when the field is absent so callers can distinguish
+// "DeFi wasn't requested" (and thus skip the merge step) from "no positions."
+function unwrapPortfolioResponse(resp: any): {
+	entries: any[];
+	meta: PortfolioMeta | null;
+	defiPositions: ServerDefiPosition[] | null;
+} {
 	const rawData = resp?.data?.data || resp?.data || {}
 	const entries = rawData.balances || (Array.isArray(rawData) ? rawData : [])
 	const meta: PortfolioMeta | null = rawData.meta ?? null
-	return { entries, meta }
+	const defiPositions: ServerDefiPosition[] | null = Array.isArray(rawData.defiPositions) ? rawData.defiPositions : null
+	return { entries, meta, defiPositions }
 }
 
 // Native balance for a single derived address on ANY family, via the
@@ -283,6 +309,10 @@ const GITHUB_REPO = 'keepkey/keepkey-vault'
 // Cached version from pre-release GitHub check (Updater.updateInfo() doesn't have it)
 let pendingUpdateVersion: string | null = null
 let pioneerSocket: PioneerSocket | null = null
+// True from the moment a device becomes ready until the background bulk history
+// scan finishes. Exposed via getActivityScanState so the activity UI can show
+// "Syncing…" when it mounts mid-scan instead of a false "no activity".
+let activityScanRunning = false
 
 function openReleasePage() {
 	const version = pendingUpdateVersion || Updater.updateInfo()?.version
@@ -542,13 +572,14 @@ function loadSettings() {
 	alphaFirmware = getSetting('alpha_firmware') === '1'
 	privateModeEnabled = getSetting('private_mode_enabled') === '1'
 
-	// Normalize emulator flag on non-macOS. The kkemu dylibs + Keychain pairing
-	// only work on darwin, and the Settings toggle is hidden on other platforms
-	// (IS_MAC gate in DeviceSettingsDrawer). A copied or migrated DB carrying
-	// emulator_enabled=1 would otherwise re-expose a broken surface on Linux /
-	// Windows with no in-app way for the user to turn it back off.
-	if (emulatorEnabled && process.platform !== 'darwin') {
-		console.warn(`[settings] Forcing emulator_enabled=0 on non-macOS platform (${process.platform})`)
+	// Normalize emulator flag on platforms with no emulator support. The
+	// emulator runs on macOS (Keychain + libkkemu.dylib) and Windows (DPAPI +
+	// libkkemu.dll); Linux has no key store wired up. A copied or migrated DB
+	// carrying emulator_enabled=1 would otherwise re-expose a broken surface on
+	// Linux with no in-app way to turn it back off. Do NOT reset on Windows —
+	// that would wipe the flag set by a dropped .dll on every relaunch.
+	if (emulatorEnabled && process.platform !== 'darwin' && process.platform !== 'win32') {
+		console.warn(`[settings] Forcing emulator_enabled=0 on unsupported platform (${process.platform})`)
 		emulatorEnabled = false
 		setSetting('emulator_enabled', '0')
 	}
@@ -1071,6 +1102,10 @@ const restCallbacks: RestApiCallbacks = {
 	sendSwapCmd: (cmd) => {
 		try { rpc.send['swap-cmd'](cmd) } catch { /* webview not ready */ }
 	},
+	// Headless swap (BEX swap epic): same engine as the in-app dialog, no GUI in
+	// the loop. The device still gates every signature. NOOP substage push.
+	getSwapQuoteHeadless: (params) => headlessSwapQuote(params),
+	executeSwapHeadless: (params) => headlessExecuteSwap(params, () => { /* headless: no WebView substage */ }),
 	getPioneer: () => getPioneer(),
 	getPioneerApiBase: () => getPioneerApiBase(),
 	setPioneerApiBase: async (url: string) => {
@@ -1121,61 +1156,19 @@ async function applyRestApiState() {
 // REST API started in deferredInit() after DB is ready
 
 // ── Swap quote cache (last 10 quotes for tracker data) ───────────────
-import type { SwapQuote } from '../shared/types'
+import type { SwapQuote, SwapQuoteParams, ExecuteSwapParams, SwapResult, SwapSubStage } from '../shared/types'
 const swapQuoteCache = new Map<string, SwapQuote>()
 
 // ── Emulator confirm helper ──────────────────────────────────────────
-// Wraps any operation that triggers firmware confirm_helper() (blocking C loop).
-//
-// The key challenge: multi-chunk messages (e.g. LoadDevice with a real mnemonic)
-// span 2+ HID packets. If BA+DLD are pre-written to rb_main_in before all chunks
-// are consumed, usb_rx_helper treats BA as a continuation chunk → corruption.
-//
-// Solution (proven in test harness — 17/17 pass):
-// 1. Pause poll, start the operation (transport writes N chunks)
-// 2. Poll (N-1) times to consume all chunks except the last
-// 3. Write BA+DLD to ring buffers
-// 4. Poll once — firmware reads last chunk, assembles, dispatches,
-//    enters confirm_helper, finds BA+DLD → exits immediately
-// 5. Resume poll for transport to read the response
-async function emuConfirmOp(fn: () => Promise<any>, confirmCount = 2): Promise<any> {
-	const { pausePoll, resumePoll, saveEmulatorState, emuPollOnce, flushRingBuffers } = await import('./emulator')
-	const { prewriteConfirmations } = await import('./emulator-transport')
-
-	// Get the transport delegate for chunk counting
-	const delegate = engine.emuDelegate
-	if (delegate) delegate.chunkCount = 0
-
-	pausePoll()
-
-	try {
-		const promise = fn()
-		await new Promise(r => setTimeout(r, 30)) // let transport write all chunks
-
-		const numChunks = delegate?.chunkCount || 1
-		console.log(`[emuConfirmOp] ${numChunks} chunks written, polling ${numChunks - 1} pre-polls`)
-
-		// Consume all chunks except the last
-		for (let i = 0; i < numChunks - 1; i++) {
-			emuPollOnce()
-		}
-
-		// Pre-write all confirmations then poll once. Both BA+DLD go to iface 1
-		// (same FIFO) so confirm_helper reads them in order without starvation.
-		prewriteConfirmations(confirmCount)
-		emuPollOnce()
-
-		// Resume poll BEFORE awaiting — readChunk needs kkemu_poll() running
-		// to deliver the firmware response.
-		resumePoll()
-
-		const result = await promise
-		flushRingBuffers() // drain any unused pre-written confirmations
-		saveEmulatorState()
-		return result
-	} finally {
-		resumePoll() // idempotent — ensures poll is always restored
-	}
+// Setup-op confirm (wipe / loadDevice / applySettings): the firmware shows
+// confirmation screens; on the emulator we auto-press through them via the same
+// reactive gate as signing (emuGatedConfirm), but in AUTO mode — each firmware
+// ButtonRequest gets an immediate approve, no user click. The confirmCount
+// argument is now legacy/ignored (the gate reacts per ButtonRequest instead of
+// pre-writing a fixed count).
+async function emuConfirmOp(fn: () => Promise<any>, _confirmCount = 2): Promise<any> {
+	const { emuGatedConfirm } = await import('./emulator-window')
+	return emuGatedConfirm(fn, engine.emuDelegate, { interactive: false })
 }
 
 // ── Emulator interactive signing helper ─────────────────────────────
@@ -1184,10 +1177,63 @@ async function emuConfirmOp(fn: () => Promise<any>, confirmCount = 2): Promise<a
 // emuConfirmOp for auto-confirm.
 async function emuSigningOp(
 	fn: () => Promise<any>,
-	details: { operation: string; chain?: string; to?: string; value?: string; memo?: string },
+	details: { operation: string; opLabel?: string; chain?: string; to?: string; toLabel?: string; value?: string; fee?: string; memo?: string },
 ): Promise<any> {
 	const { emuInteractiveConfirm } = await import('./emulator-window')
 	return emuInteractiveConfirm(fn, details, engine.emuDelegate)
+}
+
+// F5: best-effort confirm fields for the Cosmos-family tx shape (Cosmos/THOR/
+// Maya/Osmosis). All accesses are guarded — a missing/odd field just omits that
+// row; it never throws or changes signing. Amounts are shown in raw base units
+// (no fake decimal conversion — the device shows what it shows).
+function cosmosConfirmDetails(operation: string, chain: string, params: any) {
+	const tx = params?.tx ?? params
+	const msg = tx?.msg?.[0]?.value ?? tx?.msg?.[0]
+	const feeAmt = tx?.fee?.amount?.[0]?.amount
+	const memo = tx?.memo || undefined
+
+	// Recipient: a real payee (MsgSend) vs a validator (MsgDelegate/Undelegate).
+	// NEVER fall back to delegator_address — that is the user's OWN address and
+	// would read as a self-transfer while the funds actually bond to a validator.
+	const payee = msg?.to_address ?? msg?.recipient ?? msg?.receiver
+	const validator = msg?.validator_address
+	let to: string | undefined
+	let toLabel: string | undefined
+	if (typeof payee === 'string') to = payee
+	else if (typeof validator === 'string') { to = validator; toLabel = 'Validator' }
+
+	// Amount + denom across the message shapes:
+	//   MsgSend            → amount[]  (array of {denom, amount})
+	//   MsgDelegate/Undel. → amount    (single {denom, amount} object)
+	//   MsgDeposit (THOR/  → coins[]   ({asset, amount}, no `amount` field)
+	//     Maya swaps + name registration)
+	// Pick the right object so neither the amount nor the denom is dropped.
+	const amtAny = msg?.amount
+	const amtObj = (Array.isArray(amtAny) ? amtAny[0]
+		: (amtAny && typeof amtAny === 'object' ? amtAny : undefined))
+		?? msg?.coins?.[0]
+	const amtRaw = amtObj?.amount ?? (typeof amtAny !== 'object' ? amtAny : undefined)
+	const denom = amtObj?.denom ?? amtObj?.asset
+	const value = amtRaw != null && typeof amtRaw !== 'object'
+		? String(amtRaw) + (denom ? ' ' + denom : '')
+		: undefined
+
+	return {
+		operation, chain, to, toLabel, value,
+		fee: feeAmt != null ? String(feeAmt) : undefined,
+		memo,
+	}
+}
+
+// Zcash amounts are zatoshi (1 ZEC = 1e8 zatoshi). Show a unit-labeled value so
+// "50000000" doesn't read as a huge ZEC magnitude. Display-only; the device
+// renders its own base-unit view. Zatoshi stays well within Number's safe range
+// (max supply 21M ZEC * 1e8 ≈ 2.1e15 < 9e15).
+function zecAmount(zatoshi: any): string | undefined {
+	const n = Number(zatoshi)
+	if (!Number.isFinite(n)) return undefined
+	return (n / 1e8).toFixed(8).replace(/\.?0+$/, '') + ' ZEC'
 }
 
 // Race engine.getEmulatorMnemonic() against a 3s deadline. The DebugLink
@@ -1269,6 +1315,228 @@ function maybeStartBackgroundWalletVerification(): void {
 			zcashBackgroundVerifyInFlight = false
 		}
 	})()
+}
+
+// ── Shared swap engine entrypoints ───────────────────────────────────
+// Lifted out of the RPC handlers so the headless REST routes (BEX swap epic)
+// call the exact same logic — getSwapQuote + reserve/net-amount re-quote, and
+// executeSwap + device signing + trackSwap. `pushSubStage` is parametrized:
+// the in-app RPC path pushes to the WebView; the REST path passes NOOP.
+// The device still gates every signature in both paths.
+async function headlessSwapQuote(params: SwapQuoteParams): Promise<SwapQuote> {
+	const { getSwapQuote } = await import('./swap')
+
+	// Resolve xpub addresses to real receive addresses for UTXO chains.
+	// ChainBalance.address can be an xpub when Pioneer doesn't return
+	// an address field — THORChain rejects xpubs as destination addresses.
+	// Detect extended pubkeys: xpub/ypub/zpub (BTC), dgub (DOGE), Ltub/Mtub (LTC), drkp (DASH), tpub (testnet)
+	const isXpub = (addr: string) => /^(xpub|ypub|zpub|dgub|Ltub|Mtub|drkp|drks|tpub|upub|vpub)/.test(addr)
+
+	if (engine.wallet) {
+		// CAIP-driven: find vault chain by matching CAIP-19 directly.
+		const resolveAddr = async (caip: string, addr: string): Promise<string> => {
+			if (!isXpub(addr)) return addr
+			const chainDef = getAllChains().find(c => c.caip === caip)
+			if (!chainDef || chainDef.chainFamily !== 'utxo') return addr
+			try {
+				const selected = chainDef.id === 'bitcoin' && btcAccounts.isInitialized
+					? btcAccounts.getSelectedXpub() : undefined
+				// selected.path is account-level (3 elements: m/purpose'/0'/account')
+				// btcGetAddress needs full 5-element path — append /0/0 (first receive address)
+				const acctPath = selected?.path || chainDef.defaultPath
+				const addressNList = acctPath.length === 3 ? [...acctPath, 0, 0] : acctPath
+				const scriptType = selected?.scriptType || chainDef.scriptType
+				const result = await engine.wallet.btcGetAddress({
+					addressNList,
+					coin: chainDef.coin,
+					scriptType,
+					showDisplay: false,
+				})
+				const resolved = typeof result === 'string' ? result : result?.address
+				if (resolved) {
+					console.log(`[swap] Resolved xpub → ${resolved} for ${caip}`)
+					return resolved
+				}
+			} catch (e: any) {
+				console.warn(`[swap] Failed to resolve xpub for ${caip}: ${e.message}`)
+			}
+			return addr
+		}
+		params = {
+			...params,
+			fromAddress: await resolveAddr(params.fromCaip, params.fromAddress),
+			toAddress: await resolveAddr(params.toCaip, params.toAddress),
+		}
+	}
+
+	// Fail fast if addresses are still xpubs after resolution attempt
+	if (isXpub(params.fromAddress)) {
+		throw new Error(`Could not resolve source address for ${params.fromCaip} — device may be locked or disconnected`)
+	}
+	if (isXpub(params.toAddress)) {
+		throw new Error(`Could not resolve destination address for ${params.toCaip} — device may be locked or disconnected`)
+	}
+
+	let quote = await getSwapQuote(params)
+
+	// NEAR Intents sendMax fix for all bip122 chains: the first quote commits
+	// NEAR Intents to receiving `params.amount` (full balance), but the UTXO tx
+	// only delivers `balance - miner_fee`. NEAR Intents hard-fails on any
+	// shortfall. Fix: re-quote with the actual net delivery amount.
+	if (
+		quote.swapper === 'NEAR Intents'
+		&& params.isMax
+		&& params.fromCaip.startsWith('bip122:')
+		&& engine.wallet
+	) {
+		try {
+			const { estimateUtxoFee } = await import('./txbuilder/utxo')
+			const { getPioneer: getPio } = await import('./pioneer')
+			const pio = await getPio()
+			const fromChain = getAllChains().find(c => c.caip === params.fromCaip)
+			let estXpubs: Array<{ xpub: string; scriptType: string; accountPath: number[] }> | undefined
+			let estXpub: string | undefined
+			let estAccountPath: number[] | undefined
+			if (fromChain?.id === 'bitcoin') {
+				estXpubs = btcAccounts.isInitialized ? btcAccounts.getFundedXpubs() : []
+			} else if (fromChain) {
+				const results = await (engine.wallet as any).getPublicKeys([{
+					addressNList: fromChain.defaultPath.slice(0, 3),
+					coin: fromChain.coin,
+					scriptType: fromChain.scriptType || 'p2pkh',
+					curve: 'secp256k1',
+				}])
+				estXpub = results?.[0]?.xpub
+				estAccountPath = fromChain.defaultPath.slice(0, 3)
+			}
+			const hasXpub = (estXpubs && estXpubs.length > 0) || estXpub
+			if (fromChain && hasXpub) {
+				const est = await estimateUtxoFee(pio, fromChain, {
+					to: quote.inboundAddress || params.fromAddress,
+					amount: params.amount,
+					isMax: true,
+					feeLevel: params.feeLevel,
+					...(estXpubs && estXpubs.length > 0
+						? { allXpubs: estXpubs }
+						: { xpub: estXpub, accountPath: estAccountPath }),
+				})
+				if (est && est.feeSat > 0) {
+					const netAmount = (est.netSat / 1e8).toFixed(8)
+					console.log(`[swap] NEAR Intents sendMax: re-quoting ${fromChain.symbol} with net ${netAmount} (fee=${est.feeSat} sat)`)
+					quote = { ...await getSwapQuote({ ...params, amount: netAmount, isMax: false }), netFromAmount: netAmount }
+				}
+			}
+		} catch (e: any) {
+			console.warn(`[swap] NEAR Intents fee estimation failed, using original quote: ${e.message}`)
+		}
+	}
+
+	// Cache quote so executeSwap can pass real data to the tracker
+	const cacheKey = `${params.fromCaip}-${params.toCaip}-${params.amount}-${params.slippageBps || 300}-${params.fromAddress}-${params.toAddress}`
+	swapQuoteCache.delete(cacheKey) // delete+set for LRU ordering
+	swapQuoteCache.set(cacheKey, quote)
+	// Keep cache small (last 10 quotes)
+	if (swapQuoteCache.size > 10) {
+		const oldest = swapQuoteCache.keys().next().value
+		if (oldest) swapQuoteCache.delete(oldest)
+	}
+	return quote
+}
+
+async function headlessExecuteSwap(params: ExecuteSwapParams, pushSubStage: (stage: SwapSubStage) => void): Promise<SwapResult> {
+	if (!engine.wallet) throw new Error('No device connected')
+	const { executeSwap } = await import('./swap')
+	const { trackSwap, isTrackerInitialized, initSwapTracker } = await import('./swap-tracker')
+	// Ensure tracker is initialized before tracking (guards against race/init failure)
+	if (!isTrackerInitialized()) {
+		await initSwapTracker((msg: string, data: any) => {
+			try {
+				if (msg === 'swap-update') rpc.send['swap-update'](data)
+				else if (msg === 'swap-complete') rpc.send['swap-complete'](data)
+				else console.error(`[swap-tracker] Unknown message: ${msg}`)
+			} catch (e: any) {
+				console.warn(`[swap-tracker] Failed to send '${msg}':`, e.message)
+			}
+		}, { getDeviceId: () => getWalletDbScope()?.deviceId, getWalletId: () => getWalletDbScope()?.walletId })
+	}
+	// Look up cached quote BEFORE executing so we can use netFromAmount to
+	// override the send amount for NEAR Intents bip122 sendMax swaps.
+	let cachedQuote: SwapQuote | undefined
+	for (const [key, val] of swapQuoteCache) {
+		// Key format: fromCaip-toCaip-amount-slippageBps-fromAddress-toAddress
+		const keyPrefix = `${params.fromCaip}-${params.toCaip}-${params.amount}-`
+		if (key.startsWith(keyPrefix) && val.inboundAddress === params.inboundAddress) {
+			cachedQuote = val
+			break
+		}
+	}
+	if (!cachedQuote) console.warn('[index] No cached quote for swap tracker — using fallback data')
+
+	// For NEAR Intents bip122 sendMax: the re-quote stored netFromAmount
+	// (balance - estimated fee). Use it with isMax=false so buildTx's
+	// coinSelectSplit outputs exactly that amount instead of (balance - actualFee),
+	// which may diverge from estimatedFee and cause INCOMPLETE_DEPOSIT.
+	let execParams = params
+	if (
+		cachedQuote?.netFromAmount
+		&& params.isMax
+		&& params.fromCaip.startsWith('bip122:')
+		&& (params.swapper === 'NEAR Intents' || params.integration === 'nearIntents')
+	) {
+		execParams = { ...params, amount: cachedQuote.netFromAmount, isMax: false }
+		console.log(`[swap] NEAR Intents sendMax: net amount ${cachedQuote.netFromAmount} (was ${params.amount}), isMax→false`)
+	}
+
+	const result = await executeSwap(execParams, {
+		wallet: engine.wallet,
+		getAllChains,
+		getRpcUrl,
+		getBtcXpub: () => {
+			if (btcAccounts.isInitialized) {
+				const selected = btcAccounts.getSelectedXpub()
+				if (selected) return { xpub: selected.xpub, accountPath: selected.path }
+			}
+			return undefined
+		},
+		getAllBtcXpubs: () => {
+			if (btcAccounts.isInitialized) return btcAccounts.getFundedXpubs()
+			return []
+		},
+		wrapSign: engine.isEmulator
+			? (fn, details) => emuSigningOp(fn, details)
+			: (fn) => fn(),
+		pushSubStage,
+		isAdvancedModeEnabled: getAdvancedModeEnabled,
+	})
+	const scope = getWalletDbScope()
+	// Register swap for tracking (non-blocking)
+	try {
+		const trackParams = cachedQuote?.netFromAmount
+			? { ...execParams, amount: cachedQuote.netFromAmount }
+			: execParams
+		trackSwap(result, trackParams, {
+			expectedOutput: cachedQuote?.expectedOutput || params.expectedOutput,
+			minimumOutput: cachedQuote?.minimumOutput || '0',
+			inboundAddress: cachedQuote?.inboundAddress || params.inboundAddress,
+			router: cachedQuote?.router || params.router,
+			memo: cachedQuote?.memo || params.memo,
+			expiry: cachedQuote?.expiry || params.expiry,
+			fees: cachedQuote?.fees || { affiliate: '0', outbound: '0', totalBps: 0 },
+			estimatedTime: cachedQuote?.estimatedTime || 600,
+			slippageBps: cachedQuote?.slippageBps || 300,
+			integration: cachedQuote?.integration || 'thorchain',
+			swapper: cachedQuote?.swapper,
+			nearIntentsDepositAddress: cachedQuote?.nearIntentsDepositAddress,
+		}, { skipPersist: engine.isPassphraseWallet || !scope, deviceId: scope?.deviceId, walletId: scope?.walletId })
+	} catch (e: any) {
+		console.warn('[index] Failed to register swap for tracking:', e.message)
+	}
+	// Track swap in api_log. PRIVACY: Skip DB write for passphrase wallets.
+	if (!engine.isPassphraseWallet && scope) {
+		const fromChain = getAllChains().find(c => c.id === params.fromChainId)
+		insertApiLog({ ...scope, method: 'RPC', route: 'executeSwap', timestamp: Date.now(), durationMs: 0, status: 200, appName: 'vault', txid: result.txid, chain: fromChain?.symbol || params.fromChainId, activityType: 'swap' })
+	}
+	return result
 }
 
 // ── RPC Bridge (Electrobun UI ↔ Bun) ─────────────────────────────────
@@ -1662,26 +1930,60 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			// ── Transaction signing ───────────────────────────────────
 			btcSignTx: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
-				if (engine.isEmulator) return emuSigningOp(
-					() => engine.wallet!.btcSignTx(params),
-					{ operation: 'btcSignTx', chain: 'Bitcoin', to: params.outputs?.[0]?.address, value: params.outputs?.[0]?.amount },
-				)
+				if (engine.isEmulator) {
+					// The single UTXO handler serves BTC/LTC/DOGE/DASH/BCH/ZEC/DGB — use the
+					// real coin (params.coin) for the chain + base-unit label, not hardcoded
+					// Bitcoin/sats (which falsely asserts the wrong network/denomination).
+					const coin = (params as any).coin || 'Bitcoin'
+					const unit = coin === 'Bitcoin' ? ' sats' : '' // only BTC's base unit is "sats"
+					// fee = sum(inputs) - sum(outputs), only if inputs carry their value
+					// (they often don't in params — omit rather than show a wrong number).
+					const outs: any[] = (params as any).outputs || []
+					const ins: any[] = (params as any).inputs || []
+					const sumOut = outs.reduce((s, o) => s + Number(o?.amount || 0), 0)
+					const sumIn = ins.reduce((s, i) => s + Number(i?.amount ?? i?.value ?? 0), 0)
+					const fee = sumIn > sumOut ? String(sumIn - sumOut) + unit : undefined
+					const amt = outs[0]?.amount
+					return emuSigningOp(
+						() => engine.wallet!.btcSignTx(params),
+						{ operation: 'btcSignTx', chain: coin, to: outs[0]?.address, value: amt != null ? String(amt) + unit : undefined, fee },
+					)
+				}
 				return await engine.wallet.btcSignTx(params)
 			},
 			ethSignTx: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
-				if (engine.isEmulator) return emuSigningOp(
-					() => engine.wallet!.ethSignTx(params),
-					{ operation: 'ethSignTx', chain: 'Ethereum', to: params.to, value: params.value },
-				)
+				if (engine.isEmulator) {
+					// Honest dialog: decode params.data so a token transfer shows the real
+					// recipient+amount (not the contract + 0x0), an approval is labeled, and
+					// a contract call isn't forged as a "To:" recipient. Display-only.
+					const { evmConfirmDetails } = await import('./emulator-confirm-details')
+					return emuSigningOp(
+						() => engine.wallet!.ethSignTx(params),
+						evmConfirmDetails('ethSignTx', 'Ethereum', params),
+					)
+				}
 				return await engine.wallet.ethSignTx(params)
 			},
 			ethSignMessage: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
-				if (engine.isEmulator) return emuSigningOp(
-					() => engine.wallet!.ethSignMessage(params),
-					{ operation: 'ethSignMessage', chain: 'Ethereum', memo: params.message?.toString()?.slice(0, 64) },
-				)
+				if (engine.isEmulator) {
+					// hdwallet requires the message as a hex string; the device OLED renders
+					// the decoded text, so decode hex→UTF-8 for the memo (fall back to raw if
+					// it isn't printable text). Display-only.
+					const raw = params.message?.toString() ?? ''
+					let memo = raw.slice(0, 64)
+					if (/^0x[0-9a-fA-F]*$/.test(raw)) {
+						try {
+							const txt = Buffer.from(raw.slice(2), 'hex').toString('utf8')
+							if (txt && /^[\t\n\r\x20-\x7e]*$/.test(txt)) memo = txt.slice(0, 64)
+						} catch { /* not valid UTF-8 — keep raw hex */ }
+					}
+					return emuSigningOp(
+						() => engine.wallet!.ethSignMessage(params),
+						{ operation: 'ethSignMessage', chain: 'Ethereum', memo },
+					)
+				}
 				return await engine.wallet.ethSignMessage(params)
 			},
 			ethSignTypedData: async (params) => {
@@ -1700,7 +2002,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!engine.wallet) throw new Error('No device connected')
 				if (engine.isEmulator) return emuSigningOp(
 					() => engine.wallet!.cosmosSignTx(params),
-					{ operation: 'cosmosSignTx', chain: 'Cosmos' },
+					cosmosConfirmDetails('cosmosSignTx', 'Cosmos', params),
 				)
 				return await engine.wallet.cosmosSignTx(params)
 			},
@@ -1708,7 +2010,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!engine.wallet) throw new Error('No device connected')
 				if (engine.isEmulator) return emuSigningOp(
 					() => engine.wallet!.thorchainSignTx(params),
-					{ operation: 'thorchainSignTx', chain: 'THORChain' },
+					cosmosConfirmDetails('thorchainSignTx', 'THORChain', params),
 				)
 				return await engine.wallet.thorchainSignTx(params)
 			},
@@ -1716,7 +2018,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!engine.wallet) throw new Error('No device connected')
 				if (engine.isEmulator) return emuSigningOp(
 					() => engine.wallet!.mayachainSignTx(params),
-					{ operation: 'mayachainSignTx', chain: 'Maya' },
+					cosmosConfirmDetails('mayachainSignTx', 'Maya', params),
 				)
 				return await engine.wallet.mayachainSignTx(params)
 			},
@@ -1724,16 +2026,24 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!engine.wallet) throw new Error('No device connected')
 				if (engine.isEmulator) return emuSigningOp(
 					() => engine.wallet!.osmosisSignTx(params),
-					{ operation: 'osmosisSignTx', chain: 'Osmosis' },
+					cosmosConfirmDetails('osmosisSignTx', 'Osmosis', params),
 				)
 				return await engine.wallet.osmosisSignTx(params)
 			},
 			xrpSignTx: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
-				if (engine.isEmulator) return emuSigningOp(
-					() => engine.wallet!.rippleSignTx(params),
-					{ operation: 'xrpSignTx', chain: 'XRP' },
-				)
+				if (engine.isEmulator) {
+					const tx: any = (params as any).tx ?? params
+					return emuSigningOp(
+						() => engine.wallet!.rippleSignTx(params),
+						{
+							operation: 'xrpSignTx', chain: 'XRP',
+							to: typeof tx?.destination === 'string' ? tx.destination : undefined,
+							value: tx?.amount != null ? String(tx.amount) + ' drops' : undefined,
+							fee: tx?.fee != null ? String(tx.fee) + ' drops' : undefined,
+						},
+					)
+				}
 				return await engine.wallet.rippleSignTx(params)
 			},
 			solanaSignTx: async (params) => {
@@ -1770,7 +2080,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					const messageBytes = solanaMessageSlice(fullTx, parsed)
 					console.debug(`[solanaSignTx] v0 tx detected — routing through solanaSignMessage (${messageBytes.length}B message incl. 0x80 prefix)`)
 					const msgRes = engine.isEmulator
-						? await emuSigningOp(() => engine.wallet!.solanaSignMessage({ addressNList: params.addressNList, message: messageBytes, showDisplay: true }), { operation: 'solanaSignMessage', chain: 'Solana' })
+						? await emuSigningOp(() => engine.wallet!.solanaSignMessage({ addressNList: params.addressNList, message: messageBytes, showDisplay: true }), { operation: 'solanaSignTx', opLabel: 'Solana Sign Transaction (v0)', chain: 'Solana' })
 						: await engine.wallet.solanaSignMessage({ addressNList: params.addressNList, message: messageBytes, showDisplay: true })
 					const sig = msgRes?.signature
 					if (!sig) throw new Error('[solanaSignTx] v0: device returned no signature')
@@ -2141,7 +2451,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					const pubkeyChunks = chunkArray(pubkeys, PIONEER_PORTFOLIO_CHUNK_SIZE)
 					const chunkResults = await withTimeout(
 						mapWithConcurrency(pubkeyChunks, PIONEER_PORTFOLIO_MAX_CONCURRENCY, async (chunk, i) => {
-							const chunkBody: any = { pubkeys: chunk.map(p => ({ caip: p.caip, pubkey: p.pubkey })) }
+							// Opt the dashboard refresh into the server's DeFi merge. Server-side
+							// is cached, so the per-pubkey Zapper lookup is typically a Redis
+							// read; misses degrade to [] without blocking balances. Pre-v1.4
+							// servers ignore the field and return the legacy shape unchanged.
+							const chunkBody: any = { pubkeys: chunk.map(p => ({ caip: p.caip, pubkey: p.pubkey })), includeDefi: true }
 							if (extraContracts.length > 0) chunkBody.extraContracts = extraContracts
 							try {
 								let resp: any
@@ -2156,20 +2470,20 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 									console.warn('[getBalances] Pioneer rejected extraContracts; retrying portfolio chunk without custom tokens')
 									resp = await withTimeout(
 										pioneer.GetPortfolioBalances(
-											{ pubkeys: chunkBody.pubkeys },
+											{ pubkeys: chunkBody.pubkeys, includeDefi: true },
 											{ forceRefresh }
 										),
 										PIONEER_PORTFOLIO_CHUNK_TIMEOUT_MS,
 										`GetPortfolioBalances chunk ${i + 1}/${pubkeyChunks.length}`
 									)
 								}
-								const { entries, meta } = unwrapPortfolioResponse(resp)
-								return { entries, meta, error: null as string | null }
+								const { entries, meta, defiPositions } = unwrapPortfolioResponse(resp)
+								return { entries, meta, defiPositions, error: null as string | null }
 							} catch (err: any) {
 								const sampleChains = chunk.map((p: any) => String(p.caip || '').split('/')[0]).join(', ')
 								const error = getPioneerPortfolioErrorMessage(err)
 								console.warn(`[getBalances] Portfolio chunk ${i + 1}/${pubkeyChunks.length} failed (${sampleChains}):`, error)
-								return { entries: [] as any[], meta: null as PortfolioMeta | null, error }
+								return { entries: [] as any[], meta: null as PortfolioMeta | null, defiPositions: null as ServerDefiPosition[] | null, error }
 							}
 						}),
 						PIONEER_PORTFOLIO_TOTAL_TIMEOUT_MS,
@@ -2212,6 +2526,76 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					console.log(`[getBalances] effectivePubkeys: ${effectivePubkeys.length}/${pubkeys.length} — chains: ${[...new Set(effectivePubkeys.map(p => p.chainId))].join(', ')}`)
 					const allEntries = chunkResults.flatMap(r => r.entries)
 					const portfolioMeta = mergeMetas(chunkResults.map(r => r.meta).filter(Boolean) as PortfolioMeta[])
+
+					// Aggregate server-merged DeFi positions across chunks and group by
+					// chainId. The networkId on each position (eip155:N) maps cleanly
+					// into the existing networkToChain table; positions on networks the
+					// vault doesn't know about are dropped on the floor with a log.
+					// NOTE: we deliberately do NOT suppress wallet tokens that share a
+					// contract with a position's `tokens[]`. Those are the protocol's
+					// *underlyings* (e.g. an LP's WETH, or the native-ETH zero address),
+					// not wallet-held duplicates, and the server sends no position type
+					// to tell an app-token (stETH = the position) from a contract/LP
+					// position. Address-only suppression hid real, sendable balances, so
+					// DeFi is purely additive: own panel + folded USD.
+					// Pioneer chunks pubkeys, and one EVM address is reused across every
+					// EVM chain (Account #0 on Ethereum, Optimism, Base, Arbitrum, …), so
+					// it lands in multiple chunks. Each chunk response carries the FULL
+					// DeFi list for that address, so flat-merging would add every position
+					// once per chunk that contained the pubkey. Dedupe by
+					// (pubkey, protocol, networkId) — first occurrence wins — before grouping.
+					const rawDefiPositions: ServerDefiPosition[] = chunkResults.flatMap(r => r.defiPositions || [])
+					const allDefiPositions: ServerDefiPosition[] = []
+					const seenDefiKey = new Set<string>()
+					for (const sp of rawDefiPositions) {
+						const key = `${String(sp.pubkey || '').toLowerCase()}|${sp.protocol || ''}|${(sp.networkId || '').toLowerCase()}`
+						if (seenDefiKey.has(key)) continue
+						seenDefiKey.add(key)
+						allDefiPositions.push(sp)
+					}
+					if (rawDefiPositions.length !== allDefiPositions.length) {
+						console.log(`[getBalances] DeFi dedup: ${rawDefiPositions.length} raw → ${allDefiPositions.length} unique (chunked duplicates collapsed)`)
+					}
+					const defiByChain = new Map<string, DefiPosition[]>()
+					const defiByChainAndOwner = new Map<string, Map<string, DefiPosition[]>>()
+					let droppedDefi = 0
+					for (const sp of allDefiPositions) {
+						const networkId = (sp.networkId || '').toLowerCase()
+						const chainId = networkId ? (networkToChain.get(networkId) || null) : null
+						if (!chainId) { droppedDefi++; continue }
+						const ownerAddr = String(sp.pubkey || '').toLowerCase()
+						const dp: DefiPosition = {
+							protocol: sp.protocol || null,
+							displayName: sp.displayName,
+							name: sp.displayName || sp.protocol || 'DeFi Position',
+							network: sp.network,
+							networkId: sp.networkId,
+							balanceUsd: Number(sp.balanceUsd) || 0,
+							icon: sp.icon,
+							tokens: Array.isArray(sp.tokens) ? sp.tokens.map(t => ({
+								networkId: t.networkId,
+								address: String(t.address || '').toLowerCase(),
+								symbol: t.symbol,
+								balance: t.balance != null ? String(t.balance) : undefined,
+								balanceUsd: typeof t.balanceUsd === 'number' ? t.balanceUsd : undefined,
+							})).filter(t => !!t.address) : [],
+						}
+						// Chain-level (dashboard chain row)
+						const chainList = defiByChain.get(chainId) || []
+						chainList.push(dp)
+						defiByChain.set(chainId, chainList)
+						// Owner-level (per-account drilldown)
+						if (ownerAddr) {
+							let perOwner = defiByChainAndOwner.get(chainId)
+							if (!perOwner) { perOwner = new Map(); defiByChainAndOwner.set(chainId, perOwner) }
+							const list = perOwner.get(ownerAddr) || []
+							list.push(dp)
+							perOwner.set(ownerAddr, list)
+						}
+					}
+					if (allDefiPositions.length > 0) {
+						console.log(`[getBalances] DeFi: ${allDefiPositions.length} positions across ${defiByChain.size} chain(s)${droppedDefi ? ` (${droppedDefi} dropped: unknown networkId)` : ''}`)
+					}
 
 					console.log(`[getBalances] GetPortfolioBalances response: ${allEntries.length} entries`)
 					// Log TRON-specific entries for debugging
@@ -2420,15 +2804,19 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 								|| pureNatives.find((d: any) => d.caip === entry.caip && d.address?.toLowerCase() === entry.pubkey.toLowerCase())
 							const bal = parseFloat(String(match?.balance ?? '0'))
 							const usd = Number(match?.valueUsd ?? 0)
-							const entryTokens = evmTokensByOwner.get(`${entry.chainId}:${entry.pubkey.toLowerCase()}`) || []
+							const ownerLower = entry.pubkey.toLowerCase()
+							const ownerDefiPositions = defiByChainAndOwner.get(entry.chainId)?.get(ownerLower)
+							const entryTokens = evmTokensByOwner.get(`${entry.chainId}:${ownerLower}`) || []
 							const entryTokenUsd = entryTokens.reduce((sum, t) => sum + t.balanceUsd, 0)
+							const ownerDefiUsd = ownerDefiPositions?.reduce((sum, p) => sum + (p.balanceUsd || 0), 0) || 0
 							evmAddresses.setAddressChainBalance(entry.pubkey, entry.chainId, {
 								chainId: entry.chainId,
 								symbol: entry.symbol,
 								balance: bal > 0 ? bal.toFixed(18).replace(/0+$/, '').replace(/\.$/, '') : '0',
-								balanceUsd: usd + entryTokenUsd,
+								balanceUsd: usd + entryTokenUsd + ownerDefiUsd,
 								nativeBalanceUsd: usd,
 								tokens: entryTokens.length > 0 ? entryTokens : undefined,
+								defiPositions: ownerDefiPositions && ownerDefiPositions.length > 0 ? ownerDefiPositions : undefined,
 							})
 							// Accumulate per-chain totals
 							const existing = evmChainAgg.get(entry.chainId)
@@ -2471,14 +2859,22 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					for (const [chainId, agg] of evmChainAgg) {
 						const chainTokens = tokensByChainId.get(chainId)
 						const tokenUsdTotal = chainTokens?.reduce((sum, t) => sum + t.balanceUsd, 0) || 0
+						const chainDefi = defiByChain.get(chainId)
+						const defiUsdTotal = chainDefi?.reduce((sum, p) => sum + (p.balanceUsd || 0), 0) || 0
 						results.push({
 							chainId,
 							symbol: agg.symbol,
 							balance: agg.balance > 0 ? agg.balance.toFixed(18).replace(/0+$/, '').replace(/\.$/, '') : '0',
-							balanceUsd: agg.usd + tokenUsdTotal,
+							// Chain total folds DeFi in so the dashboard $ keeps parity
+							// with zapper.xyz net worth. Wallet tokens are no longer
+							// suppressed, so a wallet-held app-token (e.g. stETH) that the
+							// position also reports can double-count — accepted as the
+							// lesser evil vs hiding sendable balances (see note above).
+							balanceUsd: agg.usd + tokenUsdTotal + defiUsdTotal,
 							nativeBalanceUsd: agg.usd,
 							address: agg.address,
 							tokens: chainTokens && chainTokens.length > 0 ? chainTokens : undefined,
+							defiPositions: chainDefi && chainDefi.length > 0 ? chainDefi : undefined,
 						})
 					}
 
@@ -2798,6 +3194,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const isUtxo = chain.chainFamily === 'utxo'
 				let balance = '0', balanceUsd = 0, address = displayAddress
 				let tokens: TokenBalance[] | undefined
+				let chainDefiPositions: DefiPosition[] | undefined
 				// Snapshot pre-refresh address from cache so we can preserve it on Pioneer failure (Finding 3)
 				let cachedAddress = ''
 				try {
@@ -2824,6 +3221,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						}))
 					const portfolioBody: any = { pubkeys: pubkeys.map(p => ({ caip: p.caip, pubkey: p.pubkey })) }
 					if (extraContracts.length > 0) portfolioBody.extraContracts = extraContracts
+					// Single-chain refresh: only worth fetching DeFi for EVM chains.
+					// Other families can't have Zapper apps and the extra round-trip is wasted.
+					if (isEvm) portfolioBody.includeDefi = true
 					let resp: any
 					try {
 						resp = await withTimeout(
@@ -2836,7 +3236,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						console.warn(`[getBalance] ${chain.coin}: Pioneer rejected extraContracts; retrying without custom tokens`)
 						resp = await withTimeout(
 							pioneer.GetPortfolioBalances(
-								{ pubkeys: portfolioBody.pubkeys },
+								{ pubkeys: portfolioBody.pubkeys, ...(isEvm ? { includeDefi: true } : {}) },
 								{ forceRefresh: true }
 							),
 							PIONEER_TIMEOUT_MS,
@@ -2845,6 +3245,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					}
 					const rawData = resp?.data?.data || resp?.data || {}
 					const allEntries: any[] = rawData.balances || (Array.isArray(rawData) ? rawData : [])
+					const rawDefiPositions: ServerDefiPosition[] = Array.isArray(rawData.defiPositions) ? rawData.defiPositions : []
 
 					console.log(`[getBalance] ${chain.coin}: ${allEntries.length} entries from Pioneer (${pubkeys.length} pubkeys)`)
 
@@ -3017,21 +3418,69 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						}
 					}
 
+					// Group server-merged DeFi by owner address for per-account attribution.
+					// Single-chain refresh: keep ONLY positions on this chain — the server
+					// may return multi-network DeFi for the same EVM address, so without
+					// this filter a Base/Arbitrum position would leak into an Ethereum
+					// refresh. (No token suppression: a position's `tokens[]` are the
+					// protocol's underlyings, not wallet-held duplicates, and the server
+					// sends no type to tell them apart — see the dashboard-path note.)
+					const ownerDefiPositions = new Map<string, DefiPosition[]>()
+					const allChainDefi: DefiPosition[] = []
+					for (const sp of rawDefiPositions) {
+						const spNetworkId = (sp.networkId || '').toLowerCase()
+						if (!spNetworkId || networkToChain.get(spNetworkId) !== chain.id) continue
+						const dp: DefiPosition = {
+							protocol: sp.protocol || null,
+							displayName: sp.displayName,
+							name: sp.displayName || sp.protocol || 'DeFi Position',
+							network: sp.network,
+							networkId: sp.networkId,
+							balanceUsd: Number(sp.balanceUsd) || 0,
+							icon: sp.icon,
+							tokens: Array.isArray(sp.tokens) ? sp.tokens.map(t => ({
+								networkId: t.networkId,
+								address: String(t.address || '').toLowerCase(),
+								symbol: t.symbol,
+								balance: t.balance != null ? String(t.balance) : undefined,
+								balanceUsd: typeof t.balanceUsd === 'number' ? t.balanceUsd : undefined,
+							})).filter(t => !!t.address) : [],
+						}
+						allChainDefi.push(dp)
+						const ownerLower = String(sp.pubkey || '').toLowerCase()
+						if (ownerLower) {
+							const list = ownerDefiPositions.get(ownerLower) || []
+							list.push(dp)
+							ownerDefiPositions.set(ownerLower, list)
+						}
+					}
+					if (allChainDefi.length > 0) {
+						console.log(`[getBalance] ${chain.coin}: ${allChainDefi.length} DeFi positions across ${ownerDefiPositions.size} owner(s)`)
+					}
+
 					if (isEvm) {
 						for (const pk of pubkeys) {
 							const ownerAddress = pk.pubkey.toLowerCase()
 							const native = evmNativeByPubkey.get(ownerAddress) || { balance: 0, usd: 0 }
 							const ownerTokens = evmTokensByOwner.get(ownerAddress) || []
 							const tokenUsdTotal = ownerTokens.reduce((sum, t) => sum + t.balanceUsd, 0)
+							const ownerDefi = ownerDefiPositions.get(ownerAddress)
+							const ownerDefiUsd = ownerDefi?.reduce((sum, p) => sum + (p.balanceUsd || 0), 0) || 0
 							evmAddresses.setAddressChainBalance(pk.pubkey, chain.id, {
 								chainId: chain.id,
 								symbol: chain.symbol,
 								balance: native.balance > 0 ? native.balance.toFixed(18).replace(/0+$/, '').replace(/\.$/, '') : '0',
-								balanceUsd: native.usd + tokenUsdTotal,
+								balanceUsd: native.usd + tokenUsdTotal + ownerDefiUsd,
 								nativeBalanceUsd: native.usd,
 								tokens: ownerTokens.length > 0 ? ownerTokens : undefined,
+								defiPositions: ownerDefi && ownerDefi.length > 0 ? ownerDefi : undefined,
 							})
 						}
+					}
+
+					if (isEvm && allChainDefi.length > 0) {
+						balanceUsd += allChainDefi.reduce((s, p) => s + (p.balanceUsd || 0), 0)
+						chainDefiPositions = allChainDefi
 					}
 				} catch (e: any) {
 					const message = getPioneerPortfolioErrorMessage(e)
@@ -3042,8 +3491,19 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// If Pioneer failed or returned no address, preserve the cached address
 				// so we don't wipe a previously good address from the shared cache (Finding 3)
 				if (!address && cachedAddress) address = cachedAddress
-				const nativeBalanceUsd = Number(balanceUsd) - (tokens?.reduce((s, t) => s + (t.balanceUsd || 0), 0) || 0)
-				const result: ChainBalance = { chainId: chain.id, symbol: chain.symbol, balance, balanceUsd, nativeBalanceUsd, address, tokens }
+				const tokensUsd = tokens?.reduce((s, t) => s + (t.balanceUsd || 0), 0) || 0
+				const defiUsd = chainDefiPositions?.reduce((s, p) => s + (p.balanceUsd || 0), 0) || 0
+				const nativeBalanceUsd = Number(balanceUsd) - tokensUsd - defiUsd
+				const result: ChainBalance = {
+					chainId: chain.id,
+					symbol: chain.symbol,
+					balance,
+					balanceUsd,
+					nativeBalanceUsd,
+					address,
+					tokens,
+					defiPositions: chainDefiPositions,
+				}
 
 				// Update single-chain cache + push to frontend so Dashboard stays in sync.
 				// PRIVACY: Skip DB write for passphrase wallets.
@@ -3287,7 +3747,19 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// Track broadcast in api_log + notify frontend.
 				// PRIVACY: Skip DB write for passphrase wallets (still push to UI).
 				const scope = getWalletDbScope()
-				const logEntry: ApiLogEntry = { ...(scope || {}), method: 'RPC', route: 'broadcastTx', timestamp: Date.now(), durationMs: 0, status: 200, appName: 'vault', txid: result.txid, chain: chain.symbol, activityType: 'broadcast' }
+				// Persist the send intent (recipient/amount/fee/asset) in response_body so
+				// the activity detail panel can show the full record. Without this an in-app
+				// send logs only its txid — getRecentActivityFromLog reads these back as meta.
+				const txMeta = {
+					value: params.amount,
+					fee: params.fee,
+					to: params.to,
+					asset: params.symbol,
+					caip: params.caip,
+					chainId: chain.id,
+					chainSymbol: chain.symbol,
+				}
+				const logEntry: ApiLogEntry = { ...(scope || {}), method: 'RPC', route: 'broadcastTx', timestamp: Date.now(), durationMs: 0, status: 200, appName: 'vault', txid: result.txid, chain: chain.symbol, activityType: 'broadcast', responseBody: txMeta }
 				let abEntry: { entryId: string; isNew: boolean; unsaved: boolean } | null = null
 				if (scope) {
 					// api_log is part of hidden-wallet deniability — keep it standard-only.
@@ -3332,6 +3804,15 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				} else {
 					return { fee: 'fixed', note: 'Cosmos/XRP chains use fixed fees' }
 				}
+			},
+
+			// ── DeFi positions (Zapper) ───────────────────────────────
+			// Live-fetched per EVM address from the KeepKey Zapper proxy.
+			// Display-only and not persisted — supplementary to the Pioneer
+			// token list, so failures degrade to an empty section.
+			getDefiPositions: async (params) => {
+				if (!params?.address) return []
+				return fetchDefiPositions(params.address)
 			},
 
 			// ── Staking / delegation ──────────────────────────────────
@@ -3825,7 +4306,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const signWrap = engine.isEmulator
 					? <T,>(fn: () => Promise<T>) => emuSigningOp(fn, {
 						operation: 'zcashShieldedSend', chain: 'Zcash',
-						to: params.recipient, value: String(params.amount), memo: params.memo,
+						to: params.recipient, value: zecAmount(params.amount), memo: params.memo,
 					}) as Promise<T>
 					: undefined
 				try { rpc.send['send-progress']({ step: 'building' }) } catch { /* webview not ready */ }
@@ -3880,7 +4361,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				try { rpc.send['shield-progress']({ step: 'building' }) } catch { /* webview not ready */ }
 				const signWrap = engine.isEmulator
 					? <T,>(fn: () => Promise<T>) => emuSigningOp(fn, {
-						operation: 'zcashShieldZec', chain: 'Zcash', value: String(params.amount),
+						operation: 'zcashShieldZec', chain: 'Zcash', value: zecAmount(params.amount),
 					}) as Promise<T>
 					: undefined
 				const onProgress = (step: string) => {
@@ -3904,7 +4385,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const signWrap = engine.isEmulator
 					? <T,>(fn: () => Promise<T>) => emuSigningOp(fn, {
 						operation: 'zcashDeshieldZec', chain: 'Zcash',
-						to: params.recipient, value: String(params.amount),
+						to: params.recipient, value: zecAmount(params.amount),
 					}) as Promise<T>
 					: undefined
 				const onProgress = (step: string) => {
@@ -4228,11 +4709,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return getAppSettings()
 			},
 			setEmulatorEnabled: async (params) => {
-				// Non-macOS: refuse to enable. The kkemu dylibs + Keychain pairing
-				// are POSIX-only (really macOS-only), so exposing the surface
-				// anywhere else just shows a broken UI.
-				if (params.enabled && process.platform !== 'darwin') {
-					throw new Error('Emulator is only available on macOS')
+				// Refuse to enable on platforms with no emulator support. The
+				// emulator runs on macOS (Keychain) and Windows (DPAPI); Linux
+				// has no key store, so enabling there just shows a broken UI.
+				if (params.enabled && process.platform !== 'darwin' && process.platform !== 'win32') {
+					throw new Error('Emulator is only available on macOS and Windows')
 				}
 				// When turning the emulator off while it's running, stop it first
 				// and fail CLOSED — if shutdown doesn't complete, the flag stays
@@ -4775,222 +5256,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 				return { hits }
 			},
-			getSwapQuote: async (params) => {
-				const { getSwapQuote } = await import('./swap')
-
-				// Resolve xpub addresses to real receive addresses for UTXO chains.
-				// ChainBalance.address can be an xpub when Pioneer doesn't return
-				// an address field — THORChain rejects xpubs as destination addresses.
-				// Detect extended pubkeys: xpub/ypub/zpub (BTC), dgub (DOGE), Ltub/Mtub (LTC), drkp (DASH), tpub (testnet)
-				const isXpub = (addr: string) => /^(xpub|ypub|zpub|dgub|Ltub|Mtub|drkp|drks|tpub|upub|vpub)/.test(addr)
-
-				if (engine.wallet) {
-					// CAIP-driven: find vault chain by matching CAIP-19 directly.
-					const resolveAddr = async (caip: string, addr: string): Promise<string> => {
-						if (!isXpub(addr)) return addr
-						const chainDef = getAllChains().find(c => c.caip === caip)
-						if (!chainDef || chainDef.chainFamily !== 'utxo') return addr
-						try {
-							const selected = chainDef.id === 'bitcoin' && btcAccounts.isInitialized
-								? btcAccounts.getSelectedXpub() : undefined
-							// selected.path is account-level (3 elements: m/purpose'/0'/account')
-							// btcGetAddress needs full 5-element path — append /0/0 (first receive address)
-							const acctPath = selected?.path || chainDef.defaultPath
-							const addressNList = acctPath.length === 3 ? [...acctPath, 0, 0] : acctPath
-							const scriptType = selected?.scriptType || chainDef.scriptType
-							const result = await engine.wallet.btcGetAddress({
-								addressNList,
-								coin: chainDef.coin,
-								scriptType,
-								showDisplay: false,
-							})
-							const resolved = typeof result === 'string' ? result : result?.address
-							if (resolved) {
-								console.log(`[swap] Resolved xpub → ${resolved} for ${caip}`)
-								return resolved
-							}
-						} catch (e: any) {
-							console.warn(`[swap] Failed to resolve xpub for ${caip}: ${e.message}`)
-						}
-						return addr
-					}
-					params = {
-						...params,
-						fromAddress: await resolveAddr(params.fromCaip, params.fromAddress),
-						toAddress: await resolveAddr(params.toCaip, params.toAddress),
-					}
-				}
-
-				// Fail fast if addresses are still xpubs after resolution attempt
-				if (isXpub(params.fromAddress)) {
-					throw new Error(`Could not resolve source address for ${params.fromCaip} — device may be locked or disconnected`)
-				}
-				if (isXpub(params.toAddress)) {
-					throw new Error(`Could not resolve destination address for ${params.toCaip} — device may be locked or disconnected`)
-				}
-
-				let quote = await getSwapQuote(params)
-
-				// NEAR Intents sendMax fix for all bip122 chains: the first quote commits
-				// NEAR Intents to receiving `params.amount` (full balance), but the UTXO tx
-				// only delivers `balance - miner_fee`. NEAR Intents hard-fails on any
-				// shortfall. Fix: re-quote with the actual net delivery amount.
-				if (
-					quote.swapper === 'NEAR Intents'
-					&& params.isMax
-					&& params.fromCaip.startsWith('bip122:')
-					&& engine.wallet
-				) {
-					try {
-						const { estimateUtxoFee } = await import('./txbuilder/utxo')
-						const { getPioneer: getPio } = await import('./pioneer')
-						const pio = await getPio()
-						const fromChain = getAllChains().find(c => c.caip === params.fromCaip)
-						let estXpubs: Array<{ xpub: string; scriptType: string; accountPath: number[] }> | undefined
-						let estXpub: string | undefined
-						let estAccountPath: number[] | undefined
-						if (fromChain?.id === 'bitcoin') {
-							estXpubs = btcAccounts.isInitialized ? btcAccounts.getFundedXpubs() : []
-						} else if (fromChain) {
-							const results = await (engine.wallet as any).getPublicKeys([{
-								addressNList: fromChain.defaultPath.slice(0, 3),
-								coin: fromChain.coin,
-								scriptType: fromChain.scriptType || 'p2pkh',
-								curve: 'secp256k1',
-							}])
-							estXpub = results?.[0]?.xpub
-							estAccountPath = fromChain.defaultPath.slice(0, 3)
-						}
-						const hasXpub = (estXpubs && estXpubs.length > 0) || estXpub
-						if (fromChain && hasXpub) {
-							const est = await estimateUtxoFee(pio, fromChain, {
-								to: quote.inboundAddress || params.fromAddress,
-								amount: params.amount,
-								isMax: true,
-								feeLevel: params.feeLevel,
-								...(estXpubs && estXpubs.length > 0
-									? { allXpubs: estXpubs }
-									: { xpub: estXpub, accountPath: estAccountPath }),
-							})
-							if (est && est.feeSat > 0) {
-								const netAmount = (est.netSat / 1e8).toFixed(8)
-								console.log(`[swap] NEAR Intents sendMax: re-quoting ${fromChain.symbol} with net ${netAmount} (fee=${est.feeSat} sat)`)
-								quote = { ...await getSwapQuote({ ...params, amount: netAmount, isMax: false }), netFromAmount: netAmount }
-							}
-						}
-					} catch (e: any) {
-						console.warn(`[swap] NEAR Intents fee estimation failed, using original quote: ${e.message}`)
-					}
-				}
-
-				// Cache quote so executeSwap can pass real data to the tracker
-				const cacheKey = `${params.fromCaip}-${params.toCaip}-${params.amount}-${params.slippageBps || 300}-${params.fromAddress}-${params.toAddress}`
-				swapQuoteCache.delete(cacheKey) // delete+set for LRU ordering
-				swapQuoteCache.set(cacheKey, quote)
-				// Keep cache small (last 10 quotes)
-				if (swapQuoteCache.size > 10) {
-					const oldest = swapQuoteCache.keys().next().value
-					if (oldest) swapQuoteCache.delete(oldest)
-				}
-				return quote
-			},
-			executeSwap: async (params) => {
-				if (!engine.wallet) throw new Error('No device connected')
-				const { executeSwap } = await import('./swap')
-				const { trackSwap, isTrackerInitialized, initSwapTracker } = await import('./swap-tracker')
-				// Ensure tracker is initialized before tracking (guards against race/init failure)
-				if (!isTrackerInitialized()) {
-					await initSwapTracker((msg: string, data: any) => {
-						try {
-							if (msg === 'swap-update') rpc.send['swap-update'](data)
-							else if (msg === 'swap-complete') rpc.send['swap-complete'](data)
-							else console.error(`[swap-tracker] Unknown message: ${msg}`)
-						} catch (e: any) {
-							console.warn(`[swap-tracker] Failed to send '${msg}':`, e.message)
-						}
-					}, { getDeviceId: () => getWalletDbScope()?.deviceId, getWalletId: () => getWalletDbScope()?.walletId })
-				}
-				// Look up cached quote BEFORE executing so we can use netFromAmount to
-				// override the send amount for NEAR Intents bip122 sendMax swaps.
-				let cachedQuote: Awaited<ReturnType<typeof getSwapQuote>> | undefined
-				for (const [key, val] of swapQuoteCache) {
-					// Key format: fromCaip-toCaip-amount-slippageBps-fromAddress-toAddress
-					const keyPrefix = `${params.fromCaip}-${params.toCaip}-${params.amount}-`
-					if (key.startsWith(keyPrefix) && val.inboundAddress === params.inboundAddress) {
-						cachedQuote = val
-						break
-					}
-				}
-				if (!cachedQuote) console.warn('[index] No cached quote for swap tracker — using fallback data')
-
-				// For NEAR Intents bip122 sendMax: the re-quote stored netFromAmount
-				// (balance - estimated fee). Use it with isMax=false so buildTx's
-				// coinSelectSplit outputs exactly that amount instead of (balance - actualFee),
-				// which may diverge from estimatedFee and cause INCOMPLETE_DEPOSIT.
-				let execParams = params
-				if (
-					cachedQuote?.netFromAmount
-					&& params.isMax
-					&& params.fromCaip.startsWith('bip122:')
-					&& (params.swapper === 'NEAR Intents' || params.integration === 'nearIntents')
-				) {
-					execParams = { ...params, amount: cachedQuote.netFromAmount, isMax: false }
-					console.log(`[swap] NEAR Intents sendMax: net amount ${cachedQuote.netFromAmount} (was ${params.amount}), isMax→false`)
-				}
-
-				const result = await executeSwap(execParams, {
-					wallet: engine.wallet,
-					getAllChains,
-					getRpcUrl,
-					getBtcXpub: () => {
-						if (btcAccounts.isInitialized) {
-							const selected = btcAccounts.getSelectedXpub()
-							if (selected) return { xpub: selected.xpub, accountPath: selected.path }
-						}
-						return undefined
-					},
-					getAllBtcXpubs: () => {
-						if (btcAccounts.isInitialized) return btcAccounts.getFundedXpubs()
-						return []
-					},
-					wrapSign: engine.isEmulator
-						? (fn, details) => emuSigningOp(fn, details)
-						: (fn) => fn(),
-					pushSubStage: (stage) => {
-						try { rpc.send["swap-substage"]({ stage }) } catch { /* webview not ready */ }
-					},
-					isAdvancedModeEnabled: getAdvancedModeEnabled,
-				})
-				const scope = getWalletDbScope()
-				// Register swap for tracking (non-blocking)
-				try {
-					const trackParams = cachedQuote?.netFromAmount
-						? { ...execParams, amount: cachedQuote.netFromAmount }
-						: execParams
-					trackSwap(result, trackParams, {
-						expectedOutput: cachedQuote?.expectedOutput || params.expectedOutput,
-						minimumOutput: cachedQuote?.minimumOutput || '0',
-						inboundAddress: cachedQuote?.inboundAddress || params.inboundAddress,
-						router: cachedQuote?.router || params.router,
-						memo: cachedQuote?.memo || params.memo,
-						expiry: cachedQuote?.expiry || params.expiry,
-						fees: cachedQuote?.fees || { affiliate: '0', outbound: '0', totalBps: 0 },
-						estimatedTime: cachedQuote?.estimatedTime || 600,
-						slippageBps: cachedQuote?.slippageBps || 300,
-						integration: cachedQuote?.integration || 'thorchain',
-						swapper: cachedQuote?.swapper,
-						nearIntentsDepositAddress: cachedQuote?.nearIntentsDepositAddress,
-					}, { skipPersist: engine.isPassphraseWallet || !scope, deviceId: scope?.deviceId, walletId: scope?.walletId })
-				} catch (e: any) {
-					console.warn('[index] Failed to register swap for tracking:', e.message)
-				}
-				// Track swap in api_log. PRIVACY: Skip DB write for passphrase wallets.
-				if (!engine.isPassphraseWallet && scope) {
-					const fromChain = getAllChains().find(c => c.id === params.fromChainId)
-					insertApiLog({ ...scope, method: 'RPC', route: 'executeSwap', timestamp: Date.now(), durationMs: 0, status: 200, appName: 'vault', txid: result.txid, chain: fromChain?.symbol || params.fromChainId, activityType: 'swap' })
-				}
-				return result
-			},
+			getSwapQuote: (params) => headlessSwapQuote(params),
+			executeSwap: (params) => headlessExecuteSwap(params, (stage) => {
+				try { rpc.send["swap-substage"]({ stage }) } catch { /* webview not ready */ }
+			}),
 			getPendingSwaps: async () => {
 				// Hidden sessions DO get pending swaps: the tracker holds them in RAM
 				// (registerSwap with skipPersist → noPersistSwaps), so this exposes only
@@ -5185,6 +5454,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!scope) return []
 				return getRecentActivityFromLog(params?.limit || 50, params?.chainId, scope.deviceId, scope.walletId)
 			},
+			getActivityScanState: async () => ({ running: activityScanRunning }),
 			scanChainHistory: async (params) => {
 				const chain = getAllChains().find(c => c.id === params.chainId)
 				if (!chain) throw new Error(`Unknown chain: ${params.chainId}`)
@@ -5730,7 +6000,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			emulatorSave: async () => {
 				if (!emulatorEnabled) throw new Error('Emulator is disabled')
 				const { saveEmulatorState } = await import('./emulator')
-				saveEmulatorState()
+				await saveEmulatorState()
 			},
 			emulatorStatus: async () => {
 				if (!emulatorEnabled) {
@@ -5740,20 +6010,28 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return getEmulatorStatus()
 			},
 			emulatorInstallDylib: async (params) => {
-				// macOS-only: copy a user-supplied libkkemu.dylib into ~/.keepkey/emulator/
-				// so subsequent emulatorInit() loads it. Auto-flips emulator_enabled
-				// since the user has explicitly opted in by dropping a binary.
-				if (process.platform !== 'darwin') throw new Error('Emulator is only available on macOS')
-				if (!params?.data) throw new Error('Missing dylib payload')
+				// Copy a user-supplied emulator library into ~/.keepkey/emulator/
+				// (libkkemu.dylib on macOS, libkkemu.dll on Windows) so subsequent
+				// emulatorInit() loads it. Auto-flips emulator_enabled since the user
+				// has explicitly opted in by dropping a binary.
+				const isWin = process.platform === 'win32'
+				if (process.platform !== 'darwin' && !isWin) throw new Error('Emulator is only available on macOS and Windows')
+				if (!params?.data) throw new Error('Missing emulator library payload')
 
 				const buf = Buffer.from(params.data, 'base64')
-				if (buf.length < 4) throw new Error('Empty dylib payload')
-				// Mach-O header (thin or fat). Reject anything else early so we
-				// don't dlopen() an arbitrary file later.
-				const magic = buf.readUInt32BE(0)
-				const MACHO_MAGIC = new Set([0xfeedfacf, 0xcffaedfe, 0xfeedface, 0xcefaedfe, 0xcafebabe, 0xbebafeca])
-				if (!MACHO_MAGIC.has(magic)) {
-					throw new Error('File is not a Mach-O dynamic library')
+				if (buf.length < 4) throw new Error('Empty emulator library payload')
+				// Validate the binary header so we never dlopen() an arbitrary file:
+				// PE/'MZ' on Windows, Mach-O (thin or fat) on macOS.
+				if (isWin) {
+					if (buf.readUInt16BE(0) !== 0x4d5a) {
+						throw new Error('File is not a Windows DLL (PE/MZ header expected)')
+					}
+				} else {
+					const magic = buf.readUInt32BE(0)
+					const MACHO_MAGIC = new Set([0xfeedfacf, 0xcffaedfe, 0xfeedface, 0xcefaedfe, 0xcafebabe, 0xbebafeca])
+					if (!MACHO_MAGIC.has(magic)) {
+						throw new Error('File is not a Mach-O dynamic library')
+					}
 				}
 
 				// Stop any running emulator before swapping the dylib — replacing
@@ -6466,9 +6744,10 @@ engine.on('state-change', (state) => {
 	if (state.state === 'ready' && !engine.isPassphraseWallet) {
 		// Fire-and-forget background history scan on every ready transition (startup + reconnect).
 		// 3s delay lets wallet address derivation settle before hitting Pioneer.
+		activityScanRunning = true
 		setTimeout(() => {
 			const scope = getWalletDbScope()
-			if (!scope || !engine.wallet) return
+			if (!scope || !engine.wallet) { activityScanRunning = false; return }
 			console.log('[activity] Auto-scanning history on device ready...')
 			rebuildActivityHistory({
 				wallet: engine.wallet,
@@ -6477,8 +6756,12 @@ engine.on('state-change', (state) => {
 				firmwareVersion: engine.getDeviceState().firmwareVersion,
 			}).then(result => {
 				console.log(`[activity] Auto-scan complete: ${result.totals.inserted} new txs across ${result.totals.chains} chains`)
+				try { rpc.send['activity-scan-complete']({ inserted: result.totals.inserted, chains: result.totals.chains }) } catch { /* webview not ready */ }
 			}).catch(e => {
 				console.warn('[activity] Auto-scan failed:', e?.message || e)
+				try { rpc.send['activity-scan-complete']({ inserted: 0, chains: 0 }) } catch { /* webview not ready */ }
+			}).finally(() => {
+				activityScanRunning = false
 			})
 		}, 3000)
 	}

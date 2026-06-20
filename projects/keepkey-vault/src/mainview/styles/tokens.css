@@ -66,10 +66,15 @@
 .v3-mono  { font-family: var(--font-mono);  font-feature-settings: "tnum"; }
 .v3-serif { font-family: var(--font-mono); font-style: normal; }
 
-/* Page enter transition (mirrors study) */
+/* Page enter transition (mirrors study).
+ * IMPORTANT: opacity-only — never `transform`. A `transform` property on
+ * the page root persists in computed style after the animation (even at
+ * the identity value) and creates a new containing block, which breaks
+ * `position: fixed` overlays mounted inside the page (e.g. SwapDialog) —
+ * they get anchored to the AssetPage box instead of the viewport. */
 @keyframes v3-fadeUp {
-  from { opacity: 0; transform: translateY(8px); }
-  to   { opacity: 1; transform: translateY(0); }
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
 .v3-page-enter { animation: v3-fadeUp 0.4s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
 
@@ -79,3 +84,86 @@
 }
 
 @keyframes v3-spin { to { transform: rotate(360deg); } }
+
+
+/* ============================================================
+   AssetPage — Glass / iOS-26 study
+   Imported from the design at:
+   https://claude.ai/design/p/019e0aa5-6eba-7097-aebe-c5fb67f0400e
+   Wrap the AssetPage root in `.v3-asset-glass-root` to opt in.
+   ============================================================ */
+
+/* Glass card. Use as className on Chakra Boxes. The pseudo-double-fill
+   (low-opacity rgba over a saturate-blur backdrop) is what gives the
+   tactile iOS-26 sheen. */
+.v3-glass-card {
+  background: linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0.018));
+  -webkit-backdrop-filter: blur(22px) saturate(140%);
+  backdrop-filter: blur(22px) saturate(140%);
+  border: 1px solid rgba(255,255,255,0.07);
+  border-radius: var(--r-md);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.06) inset,
+    0 12px 32px -16px rgba(0, 0, 0, 0.7);
+}
+
+/* Overlay variant — for popovers, dropdowns, menus that float over the
+   regular page content. The translucent fill of `.v3-glass-card` reads
+   beautifully when behind text is its own page background, but loses
+   contrast over busy content like the QR + token table on the AssetPage.
+   This variant keeps the iOS blur + saturate but stacks a near-opaque
+   ink fill so the menu items stay legible. */
+.v3-glass-card-overlay {
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.025)),
+    rgba(16, 16, 21, 0.96);
+  -webkit-backdrop-filter: blur(24px) saturate(160%);
+  backdrop-filter: blur(24px) saturate(160%);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: var(--r-md);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.08) inset,
+    0 24px 60px -16px rgba(0, 0, 0, 0.8),
+    0 4px 12px -4px rgba(0, 0, 0, 0.5);
+}
+
+/* Pill-shaped glass surface for action toggles + refresh-style controls. */
+.v3-glass-pill {
+  background: rgba(255,255,255,0.04);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+  backdrop-filter: blur(18px) saturate(140%);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 999px;
+}
+
+/* Soft hairline row separator — replaces hard borders inside tables/lists. */
+.v3-glass-row {
+  border-top: 1px solid rgba(255,255,255,0.045);
+  transition: background 0.15s ease;
+}
+.v3-glass-row:first-child { border-top-color: transparent; }
+.v3-glass-row:hover { background: rgba(255,255,255,0.025); }
+
+/* Inset chip — for tags / namespace badges / small metadata pills. */
+.v3-glass-chip {
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 999px;
+}
+
+/* Brand-tinted glow used behind hero icons / orbital coin orbs. */
+.v3-glass-orb {
+  position: relative;
+  border-radius: 999px;
+}
+.v3-glass-orb::before {
+  content: '';
+  position: absolute;
+  inset: -22%;
+  border-radius: 999px;
+  background: radial-gradient(closest-side, currentColor 0%, transparent 70%);
+  opacity: 0.28;
+  filter: blur(14px);
+  z-index: -1;
+  pointer-events: none;
+}

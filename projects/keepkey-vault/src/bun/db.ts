@@ -58,10 +58,16 @@ export function initDb() {
         balance_usd REAL NOT NULL DEFAULT 0,
         address     TEXT NOT NULL DEFAULT '',
         tokens_json TEXT,
+        defi_positions_json TEXT,
         updated_at  INTEGER NOT NULL,
         PRIMARY KEY (device_id, chain_id)
       )
     `)
+    // Migration: add defi_positions_json for existing installs that
+    // predate the GetPortfolioBalances includeDefi merge.
+    try {
+      db.exec(`ALTER TABLE balances ADD COLUMN defi_positions_json TEXT`)
+    } catch { /* column already exists */ }
 
     db.exec(`
       CREATE TABLE IF NOT EXISTS pioneer_cache (
@@ -508,8 +514,8 @@ export function getCachedBalances(deviceId: string): { balances: ChainBalance[];
   try {
     if (!db) return null
     const rows = db.query(
-      'SELECT chain_id, symbol, balance, balance_usd, address, tokens_json, updated_at FROM balances WHERE device_id = ?'
-    ).all(deviceId) as Array<{ chain_id: string; symbol: string; balance: string; balance_usd: number; address: string; tokens_json: string | null; updated_at: number }>
+      'SELECT chain_id, symbol, balance, balance_usd, address, tokens_json, defi_positions_json, updated_at FROM balances WHERE device_id = ?'
+    ).all(deviceId) as Array<{ chain_id: string; symbol: string; balance: string; balance_usd: number; address: string; tokens_json: string | null; defi_positions_json: string | null; updated_at: number }>
     if (!rows || rows.length === 0) return null
     let maxUpdatedAt = 0
     const balances = rows.map(r => {
@@ -525,9 +531,15 @@ export function getCachedBalances(deviceId: string): { balances: ChainBalance[];
       if (r.tokens_json) {
         try { entry.tokens = JSON.parse(r.tokens_json) } catch { /* corrupt JSON, skip tokens */ }
       }
-      // Compute native-only USD by subtracting token totals
+      if (r.defi_positions_json) {
+        try { entry.defiPositions = JSON.parse(r.defi_positions_json) } catch { /* corrupt JSON, skip defi */ }
+      }
+      // Native = balanceUsd − tokens − defi. We can't reconstruct it perfectly
+      // because the live path doesn't separately persist nativeBalanceUsd, but
+      // this matches how the live ChainBalance is constructed.
       const tokenUsdTotal = entry.tokens?.reduce((sum, t) => sum + (t.balanceUsd || 0), 0) || 0
-      entry.nativeBalanceUsd = r.balance_usd - tokenUsdTotal
+      const defiUsdTotal = entry.defiPositions?.reduce((sum, p) => sum + (p.balanceUsd || 0), 0) || 0
+      entry.nativeBalanceUsd = r.balance_usd - tokenUsdTotal - defiUsdTotal
       return entry
     })
     return { balances, updatedAt: maxUpdatedAt }
@@ -546,32 +558,35 @@ export function setCachedBalances(deviceId: string, balances: ChainBalance[], co
     const now = Date.now()
     // Guarded upsert: keep existing non-zero if Pioneer didn't respond for this chain.
     const stmtGuarded = db.prepare(
-      `INSERT INTO balances (device_id, chain_id, symbol, balance, balance_usd, address, tokens_json, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO balances (device_id, chain_id, symbol, balance, balance_usd, address, tokens_json, defi_positions_json, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(device_id, chain_id) DO UPDATE SET
          symbol     = excluded.symbol,
          address    = CASE WHEN excluded.address != '' THEN excluded.address ELSE address END,
          balance    = CASE WHEN CAST(excluded.balance_usd AS REAL) > 0 THEN excluded.balance    ELSE balance    END,
          balance_usd= CASE WHEN CAST(excluded.balance_usd AS REAL) > 0 THEN excluded.balance_usd ELSE balance_usd END,
          tokens_json= CASE WHEN CAST(excluded.balance_usd AS REAL) > 0 THEN excluded.tokens_json ELSE tokens_json END,
+         defi_positions_json = CASE WHEN CAST(excluded.balance_usd AS REAL) > 0 THEN excluded.defi_positions_json ELSE defi_positions_json END,
          updated_at = CASE WHEN CAST(excluded.balance_usd AS REAL) > 0 THEN excluded.updated_at  ELSE updated_at  END`
     )
     // Forced upsert: Pioneer confirmed this chain — always write, even if balance=0.
     const stmtForced = db.prepare(
-      `INSERT INTO balances (device_id, chain_id, symbol, balance, balance_usd, address, tokens_json, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO balances (device_id, chain_id, symbol, balance, balance_usd, address, tokens_json, defi_positions_json, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(device_id, chain_id) DO UPDATE SET
          symbol      = excluded.symbol,
          address     = CASE WHEN excluded.address != '' THEN excluded.address ELSE address END,
          balance     = excluded.balance,
          balance_usd = excluded.balance_usd,
          tokens_json = excluded.tokens_json,
+         defi_positions_json = excluded.defi_positions_json,
          updated_at  = excluded.updated_at`
     )
     const tx = db.transaction(() => {
       for (const b of balances) {
         const tokensJson = b.tokens && b.tokens.length > 0 ? JSON.stringify(b.tokens) : null
-        const args = [deviceId, b.chainId, b.symbol, b.balance, b.balanceUsd, b.address, tokensJson, now] as const
+        const defiJson = b.defiPositions && b.defiPositions.length > 0 ? JSON.stringify(b.defiPositions) : null
+        const args = [deviceId, b.chainId, b.symbol, b.balance, b.balanceUsd, b.address, tokensJson, defiJson, now] as const
         if (confirmedChainIds?.has(b.chainId)) {
           stmtForced.run(...args)
         } else {
@@ -591,31 +606,34 @@ export function updateCachedBalance(deviceId: string, balance: ChainBalance, for
   try {
     if (!db) return
     const tokensJson = balance.tokens && balance.tokens.length > 0 ? JSON.stringify(balance.tokens) : null
+    const defiJson = balance.defiPositions && balance.defiPositions.length > 0 ? JSON.stringify(balance.defiPositions) : null
     if (force) {
       db.run(
-        `INSERT INTO balances (device_id, chain_id, symbol, balance, balance_usd, address, tokens_json, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO balances (device_id, chain_id, symbol, balance, balance_usd, address, tokens_json, defi_positions_json, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(device_id, chain_id) DO UPDATE SET
            symbol      = excluded.symbol,
            address     = CASE WHEN excluded.address != '' THEN excluded.address ELSE address END,
            balance     = excluded.balance,
            balance_usd = excluded.balance_usd,
            tokens_json = excluded.tokens_json,
+           defi_positions_json = excluded.defi_positions_json,
            updated_at  = excluded.updated_at`,
-        [deviceId, balance.chainId, balance.symbol, balance.balance, balance.balanceUsd, balance.address, tokensJson, Date.now()]
+        [deviceId, balance.chainId, balance.symbol, balance.balance, balance.balanceUsd, balance.address, tokensJson, defiJson, Date.now()]
       )
     } else {
       db.run(
-        `INSERT INTO balances (device_id, chain_id, symbol, balance, balance_usd, address, tokens_json, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO balances (device_id, chain_id, symbol, balance, balance_usd, address, tokens_json, defi_positions_json, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(device_id, chain_id) DO UPDATE SET
            symbol     = excluded.symbol,
            address    = CASE WHEN excluded.address != '' THEN excluded.address ELSE address END,
            balance    = CASE WHEN CAST(excluded.balance_usd AS REAL) > 0 THEN excluded.balance    ELSE balance    END,
            balance_usd= CASE WHEN CAST(excluded.balance_usd AS REAL) > 0 THEN excluded.balance_usd ELSE balance_usd END,
            tokens_json= CASE WHEN CAST(excluded.balance_usd AS REAL) > 0 THEN excluded.tokens_json ELSE tokens_json END,
+           defi_positions_json = CASE WHEN CAST(excluded.balance_usd AS REAL) > 0 THEN excluded.defi_positions_json ELSE defi_positions_json END,
            updated_at = CASE WHEN CAST(excluded.balance_usd AS REAL) > 0 THEN excluded.updated_at  ELSE updated_at  END`,
-        [deviceId, balance.chainId, balance.symbol, balance.balance, balance.balanceUsd, balance.address, tokensJson, Date.now()]
+        [deviceId, balance.chainId, balance.symbol, balance.balance, balance.balanceUsd, balance.address, tokensJson, defiJson, Date.now()]
       )
     }
   } catch (e: any) {
@@ -1166,6 +1184,25 @@ export function updateApiLogTxMeta(
 const VALID_ACTIVITY_TYPES = new Set(['send', 'receive', 'swap', 'sign', 'message', 'approve', 'broadcast'])
 
 /** Query api_log entries that have activity_type set + swap_history, merged by timestamp */
+// Collapse two api_log rows describing the SAME on-chain txid into one record
+// (e.g. an in-app RPC 'broadcast' row + the Pioneer SCAN row). The primary row
+// OWNS the amount/source pairing — these must stay together because scan amounts
+// are base units while app/api amounts are human, and crossing them breaks
+// display formatting. We prefer an explicit app/api send as primary (clean human
+// amount + recipient) and overlay only the on-chain truth the primary can't know
+// (confirmations / block height / counterparty) from the scan row.
+function mergeTxRows(a: RecentActivity, b: RecentActivity): RecentActivity {
+  const primary = a.source !== 'scan' ? a : b.source !== 'scan' ? b : a
+  const secondary = primary === a ? b : a
+  return {
+    ...primary,
+    confirmations: primary.confirmations ?? secondary.confirmations,
+    blockHeight: primary.blockHeight || secondary.blockHeight || undefined,
+    from: primary.from ?? secondary.from,
+    to: primary.to ?? secondary.to,
+  }
+}
+
 export function getRecentActivityFromLog(limit = 50, chainFilter?: string, deviceId?: string, walletId?: string): RecentActivity[] {
   try {
     if (!db) return []
@@ -1186,8 +1223,12 @@ export function getRecentActivityFromLog(limit = 50, chainFilter?: string, devic
       logSql += ` AND (chain = ? OR route = ? OR response_body LIKE ?)`
       logParams.push(chainFilter, `history/${chainFilter}`, `%"chainId":"${chainFilter}"%`)
     }
+    // Over-fetch: an in-app send and the Pioneer scan of the same tx are two
+    // rows that get merged below. Fetching only `limit` rows would let those
+    // duplicates shrink the deduped result below `limit` and hide older unique
+    // rows. 3x covers the worst realistic per-txid row count with headroom.
     logSql += ` ORDER BY timestamp DESC LIMIT ?`
-    logParams.push(limit)
+    logParams.push(limit * 3)
 
     const logRows = db.query(logSql).all(...logParams) as Array<{
       id: number; device_id: string | null; wallet_id: string | null; txid: string | null; chain: string | null; activity_type: string;
@@ -1215,6 +1256,9 @@ export function getRecentActivityFromLog(limit = 50, chainFilter?: string, devic
         blockHeight: meta?.blockHeight ?? undefined,
         amount: meta?.value ?? undefined,
         fee: meta?.fee ?? undefined,
+        to: meta?.to ?? undefined,
+        from: meta?.from ?? undefined,
+        asset: meta?.asset ?? undefined,
       }
     })
 
@@ -1252,7 +1296,19 @@ export function getRecentActivityFromLog(limit = 50, chainFilter?: string, devic
     const swapLogTxids = new Set(rawLogActivities.filter(a => a.type === 'swap' && a.txid).map(a => a.txid))
     const swapRowTxids = new Set(swapRows.filter(r => r.txid).map(r => r.txid))
     const allSwapTxids = new Set([...swapLogTxids, ...swapRowTxids])
-    const logActivities = rawLogActivities.filter(a => !(a.txid && a.type !== 'swap' && allSwapTxids.has(a.txid)))
+    const filteredLog = rawLogActivities.filter(a => !(a.txid && a.type !== 'swap' && allSwapTxids.has(a.txid)))
+    // Dedupe by txid: an in-app send and the Pioneer scan of the same tx each
+    // produce a row — merge them into one complete record instead of two.
+    const byTxid = new Map<string, RecentActivity>()
+    const noTxid: RecentActivity[] = []
+    const txidOrder: string[] = []
+    for (const a of filteredLog) {
+      if (!a.txid) { noTxid.push(a); continue }
+      const existing = byTxid.get(a.txid)
+      if (existing) byTxid.set(a.txid, mergeTxRows(existing, a))
+      else { byTxid.set(a.txid, a); txidOrder.push(a.txid) }
+    }
+    const logActivities = [...noTxid, ...txidOrder.map(t => byTxid.get(t)!)]
     const swapActivities: RecentActivity[] = swapRows
       .filter(r => !swapLogTxids.has(r.txid))
       .map(r => ({

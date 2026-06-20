@@ -27,6 +27,7 @@ import {
   isStablecoinEntry,
   isJunkEntry,
   assessWithFirmware,
+  ellipsizeCaip,
   type AssetEntry,
 } from '../src/shared/swap-discovery'
 
@@ -154,6 +155,27 @@ describe('compareEntries — empty-query bucket sort', () => {
   })
 })
 
+describe('ellipsizeCaip — middle-ellipsis only on long hex/base58 parts', () => {
+  test('shortens the erc20 contract, keeps eip155:1/erc20: prefix intact', () => {
+    expect(ellipsizeCaip('eip155:1/erc20:0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48'))
+      .toBe('eip155:1/erc20:0xa0b869…06eb48')
+  })
+  test('shortens the bip122 genesis hash, keeps slip44 index', () => {
+    expect(ellipsizeCaip('bip122:000000000019d6689c085ae165831e93/slip44:0'))
+      .toBe('bip122:000000…831e93/slip44:0')
+  })
+  test('leaves short references (chain id, slip44) untouched', () => {
+    expect(ellipsizeCaip('eip155:1/slip44:60')).toBe('eip155:1/slip44:60')
+  })
+  test('never chops across a delimiter', () => {
+    const out = ellipsizeCaip('eip155:10/erc20:0x0b2c639c533813f4aa9d7837caf62653d097ff85')
+    expect(out.startsWith('eip155:10/erc20:0x')).toBe(true)
+  })
+  test('empty string is a no-op', () => {
+    expect(ellipsizeCaip('')).toBe('')
+  })
+})
+
 describe('picker ordering — stables → popularity → junk last', () => {
   const sol = 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp'
   const tok = (sym: string, name: string, rank: number | undefined, extra: Partial<AssetEntry> = {}) =>
@@ -209,16 +231,18 @@ describe('picker ordering — stables → popularity → junk last', () => {
   })
 
   describe('pickerTier', () => {
-    test('held(value)=0, held(no price)=1, stable=2, native=3, normal=4, junk=5, unsupported=6', () => {
+    test('held(value)=0, held(no price)=1, gas/native=2, USDC/USDT=3, other stable=4, normal=5, junk=6, unsupported=7', () => {
       expect(pickerTier(tok('USDC', 'USD Coin', 1, { balance: { amount: '5', usd: 5 } }))).toBe(0)
       expect(pickerTier(tok('WUT', 'Wut', 9, { balance: { amount: '5', usd: 0 } }))).toBe(1)
-      expect(pickerTier(tok('USDT', 'Tether', 0))).toBe(2)
-      expect(pickerTier(nativeSol(30))).toBe(3)
-      expect(pickerTier(tok('LINK', 'Chainlink', 2))).toBe(4)
-      expect(pickerTier(tok('AIR', 'free airdrop claim', 4000))).toBe(5)
+      expect(pickerTier(nativeSol(30))).toBe(2)                  // gas/native leads swappable
+      expect(pickerTier(tok('USDT', 'Tether', 0))).toBe(3)       // priority stable
+      expect(pickerTier(tok('USDC', 'USD Coin', 1))).toBe(3)     // priority stable
+      expect(pickerTier(tok('PYUSD', 'PayPal USD', 5))).toBe(4)  // other stable
+      expect(pickerTier(tok('LINK', 'Chainlink', 2))).toBe(5)
+      expect(pickerTier(tok('AIR', 'free airdrop claim', 4000))).toBe(6)
       expect(pickerTier(tok('X', 'Unsupported', 7, {
         availability: { status: 'unsupported_token', providers: [] },
-      }))).toBe(6)
+      }))).toBe(7)
     })
   })
 
@@ -235,10 +259,10 @@ describe('picker ordering — stables → popularity → junk last', () => {
     expect(sorted).toEqual(['USDT', 'USDC', 'LINK', 'BONK', '000'])
   })
 
-  test('native asset leads non-stable tokens; obscure USD-named tokens are NOT promoted', () => {
-    // Regression guard for the HIGH review finding: stables first, then the
-    // native chain asset, then popular tokens by rank — and a non-curated
-    // "USD…" memecoin must sink to the long tail, not jump above SOL/LINK.
+  test('gas/native leads, then USDC/USDT, then tokens; obscure USD-named tokens are NOT promoted', () => {
+    // Gas asset (SOL) now leads the swappable section, then the priority
+    // stable (USDT), then popular tokens by rank — and a non-curated "USD…"
+    // memecoin must sink to the long tail, not jump above SOL/LINK.
     const list = [
       tok('LINK', 'Chainlink', 2),
       tok('USDUT', 'Unstable Tether', 8000),  // non-curated → normal tier, high rank
@@ -246,7 +270,48 @@ describe('picker ordering — stables → popularity → junk last', () => {
       tok('USDT', 'Tether', 0),
     ]
     const sorted = [...list].sort(compareForPicker).map(e => e.symbol)
-    expect(sorted).toEqual(['USDT', 'SOL', 'LINK', 'USDUT'])
+    expect(sorted).toEqual(['SOL', 'USDT', 'LINK', 'USDUT'])
+  })
+
+  test('USDC/USDT lead the broad stablecoin list', () => {
+    // The two stables users reach for most sit above uncommon stables.
+    const list = [
+      tok('PYUSD', 'PayPal USD', 3),   // other stable
+      tok('USDC', 'USD Coin', 50),
+      tok('DAI', 'Dai', 4),            // other stable
+      tok('USDT', 'Tether', 60),
+      nativeSol(50),
+    ]
+    const sorted = [...list].sort(compareForPicker).map(e => e.symbol)
+    // gas first, then USDC/USDT (by rank), then other stables (by rank)
+    expect(sorted).toEqual(['SOL', 'USDC', 'USDT', 'PYUSD', 'DAI'])
+  })
+
+  test('within a tier, more routes win — real USDC outranks a same-symbol 0-route impostor', () => {
+    // "Morpho USDC Pool" matches the priority-stable tier by ticker but has no
+    // confirmed route (TRY QUOTE). The real USDC, with routes, must lead it even
+    // though the impostor has the better catalog rank.
+    const realUsdc = tok('USDC', 'USD Coin', 100, {
+      availability: { status: 'swappable', providers: ['relay', 'zeroex', 'thorchain'] },
+    })
+    const morpho = tok('USDC', 'Morpho USDC Pool', 5, {
+      availability: { status: 'unknown', providers: [] },
+    })
+    expect(compareForPicker(realUsdc, morpho)).toBeLessThan(0)
+    expect([morpho, realUsdc].sort(compareForPicker).map(e => e.name))
+      .toEqual(['USD Coin', 'Morpho USDC Pool'])
+  })
+
+  test('most-routes-first orders same-tier assets (common-ness signal)', () => {
+    const three = tok('AAA', 'Three Routes', 900, {
+      availability: { status: 'swappable', providers: ['relay', 'zeroex', 'thorchain'] },
+    })
+    const one = tok('BBB', 'One Route', 1, {
+      availability: { status: 'swappable', providers: ['relay'] },
+    })
+    const none = tok('CCC', 'No Route', 0, { availability: { status: 'unknown', providers: [] } })
+    const sorted = [none, one, three].sort(compareForPicker).map(e => e.symbol)
+    expect(sorted).toEqual(['AAA', 'BBB', 'CCC'])
   })
 
   test('held assets outrank stablecoins regardless of value', () => {
@@ -259,9 +324,9 @@ describe('picker ordering — stables → popularity → junk last', () => {
     expect(compareForPicker(heldSol, usdt)).toBeLessThan(0)
   })
 
-  test('within stablecoin tier, lower discoveryRank wins; undefined rank sinks', () => {
+  test('within priority-stable tier, lower discoveryRank wins; undefined rank sinks', () => {
     const usdt = tok('USDT', 'Tether', 0)
-    const noRank = tok('USDS', 'USDS', undefined)
+    const noRank = tok('USDC', 'USD Coin', undefined)
     expect(compareForPicker(usdt, noRank)).toBeLessThan(0)
   })
 })
@@ -602,7 +667,7 @@ describe('pickerTier / bucketFor — firmware-gated assets sink and are not sele
 
   test('unsupported_firmware lands in the unsupported buckets', () => {
     expect(bucketFor(gated)).toBe(7)
-    expect(pickerTier(gated)).toBe(6)
+    expect(pickerTier(gated)).toBe(7)
   })
 
   test('Pioneer-listed but firmware-gated still sinks (swappable does not override the gate)', () => {
@@ -615,7 +680,7 @@ describe('pickerTier / bucketFor — firmware-gated assets sink and are not sele
       swappableAsset: 'ZEC.ZEC',
     }
     expect(bucketFor(pioneerGated)).toBe(7)
-    expect(pickerTier(pioneerGated)).toBe(6)
+    expect(pickerTier(pioneerGated)).toBe(7)
   })
 
   test('held firmware-gated asset still ranks by holdings, not buried', () => {

@@ -6,6 +6,12 @@ on:
 
 jobs:
   request-copilot-review:
+    # GitHub revokes write scopes on GITHUB_TOKEN for `pull_request` events
+    # fired from forks, so the `requested_reviewers` POST below always 403s
+    # on cross-fork PRs. Skip the job outright in that case — it's a no-op
+    # anyway — so the check stays green. Maintainers can still request
+    # Copilot manually on fork PRs from the UI.
+    if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write

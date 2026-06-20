@@ -5,7 +5,7 @@
  * TO side:   Step 1 — square network tiles (all supported, no same-network, no held-grouping).
  *            Step 2 — paginated asset list with text search for that network, 64px icons, full CAIP.
  */
-import { useState, useEffect, useMemo, useCallback } from "react"
+import { useState, useEffect, useMemo, useCallback, type ReactNode } from "react"
 import { Box, Flex, Text, Input, Spinner } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
 import { AssetIcon } from "./AssetIcon"
@@ -18,6 +18,8 @@ import {
   compareForPicker,
   parseCaip,
   assessWithFirmware,
+  isGasAsset,
+  ellipsizeCaip,
   type AssetEntry,
 } from "../../shared/swap-discovery"
 import { rpcRequest } from "../lib/rpc"
@@ -107,6 +109,24 @@ function ProviderDots({ providers }: { providers: string[] }) {
       ))}
       {providers.length > 4 && <Box w="6px" h="6px" borderRadius="full" bg="rgba(255,255,255,0.2)" />}
     </Flex>
+  )
+}
+
+// ── gas / token classifier badge ────────────────────────────────────────────
+
+/** Small pill marking an asset as the chain's GAS (native) asset or a TOKEN.
+ *  Gas assets get a gold pill so they read as "this pays for gas / is the
+ *  chain's own coin" and never get confused with a same-symbol token. */
+function GasTokenBadge({ entry }: { entry: AssetEntry }) {
+  const gas = isGasAsset(entry)
+  return (
+    <Box
+      bg={gas ? "rgba(233,196,106,0.14)" : "rgba(255,255,255,0.06)"}
+      color={gas ? "var(--gold)" : "kk.textMuted"}
+      px="1.5" py="0.5" borderRadius="4px" fontSize="9px" fontWeight="700"
+      letterSpacing="0.06em" flexShrink={0}>
+      {gas ? "GAS" : "TOKEN"}
+    </Box>
   )
 }
 
@@ -202,24 +222,72 @@ function NetSwitchBanner({ fromChainId, toChainId, providers }: {
 // FROM picker — all held assets, ranked by USD value, square tiles
 // ══════════════════════════════════════════════════════════════════════════
 
+/** Chip used by the FROM picker's chain-filter row. Active state lifts to
+ *  white text on a 6%-white fill with a gold hairline; inactive sits muted. */
+function ChainChip({ label, count, active, onClick }: { label: string; count: number; active: boolean; onClick: () => void }) {
+  return (
+    <Box
+      as="button"
+      onClick={onClick}
+      px="2.5"
+      py="1"
+      borderRadius="999px"
+      flexShrink={0}
+      cursor="pointer"
+      bg={active ? "rgba(255,255,255,0.06)" : "transparent"}
+      border="1px solid"
+      borderColor={active ? "rgba(233,196,106,0.45)" : "rgba(255,255,255,0.08)"}
+      _hover={{ borderColor: active ? "var(--gold)" : "rgba(255,255,255,0.18)", bg: active ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.03)" }}
+      transition="all 0.15s"
+      className="electrobun-webkit-app-region-no-drag"
+    >
+      <Flex align="center" gap="1.5">
+        <Text fontSize="11px" fontWeight="600" color={active ? "var(--text-0)" : "var(--text-2)"} lineHeight="1">
+          {label}
+        </Text>
+        <Text fontSize="10px" color="var(--text-3)" lineHeight="1" fontFamily="mono">
+          {count}
+        </Text>
+      </Flex>
+    </Box>
+  )
+}
+
 function FromPicker({ entries, onSelect, fmtCompact, privateModeEnabled, balancesLoading }: {
   entries: AssetEntry[]; onSelect: (e: AssetEntry) => void; fmtCompact: (v: number) => string; privateModeEnabled: boolean; balancesLoading: boolean
 }) {
   const { t } = useTranslation("swap")
   const [search, setSearch] = useState("")
+  const [chainFilter, setChainFilter] = useState<string | null>(null)
 
   // All held assets flat, ranked by USD value
   const held = useMemo(
     () => entries.filter(e => e.balance).sort((a, b) => (b.balance!.usd) - (a.balance!.usd)),
     [entries]
   )
+
+  // One chip per chain represented in the held list, sorted by USD held on
+  // that chain — chains with the most value come first.
+  const chains = useMemo(() => {
+    const m = new Map<string, { chainId: string; assetCount: number; usd: number }>()
+    for (const e of held) {
+      const cur = m.get(e.chainId) || { chainId: e.chainId, assetCount: 0, usd: 0 }
+      cur.assetCount += 1
+      cur.usd += e.balance?.usd ?? 0
+      m.set(e.chainId, cur)
+    }
+    return [...m.values()].sort((a, b) => b.usd - a.usd)
+  }, [held])
+
   const filtered = useMemo(() => {
+    let list = held
+    if (chainFilter) list = list.filter(e => e.chainId === chainFilter)
     const q = search.trim().toLowerCase()
-    if (!q) return held
-    return held.filter(e =>
+    if (!q) return list
+    return list.filter(e =>
       `${e.symbol} ${e.name} ${networkDisplayName(e.chainId)}`.toLowerCase().includes(q)
     )
-  }, [held, search])
+  }, [held, search, chainFilter])
 
   const totalUsd = held.reduce((s, e) => s + (e.balance?.usd ?? 0), 0)
 
@@ -241,6 +309,40 @@ function FromPicker({ entries, onSelect, fmtCompact, privateModeEnabled, balance
       </Flex>
 
       <SearchBar value={search} onChange={setSearch} placeholder={t("filterHeld", "Filter by symbol, name or network…")} />
+
+      {/* Chain filter chips — quick narrow by network. The "All" chip clears
+          the filter; the others highlight when active. Sorted by USD value on
+          that chain so the user's main chains land at the top of the list. */}
+      {chains.length > 1 && (
+        <Flex
+          gap="1.5"
+          px="5"
+          pb="3"
+          flexShrink={0}
+          overflowX="auto"
+          css={{
+            scrollbarWidth: "none",
+            "&::-webkit-scrollbar": { display: "none" },
+            fontVariantNumeric: "tabular-nums",
+          }}
+        >
+          <ChainChip
+            label="All"
+            count={held.length}
+            active={chainFilter === null}
+            onClick={() => setChainFilter(null)}
+          />
+          {chains.map(c => (
+            <ChainChip
+              key={c.chainId}
+              label={networkDisplayName(c.chainId)}
+              count={c.assetCount}
+              active={chainFilter === c.chainId}
+              onClick={() => setChainFilter(prev => prev === c.chainId ? null : c.chainId)}
+            />
+          ))}
+        </Flex>
+      )}
 
       <Box flex="1" overflowY="auto" px="5" pb="4">
         {balancesLoading && held.length === 0 && !search ? (
@@ -341,8 +443,8 @@ function HeldTile({ entry: e, onSelect, fmtCompact, privateModeEnabled }: {
         </Text>
         <Text fontSize="11px" fontWeight="500" color="kk.textSecondary" fontVariantNumeric="tabular-nums">{privateModeEnabled ? "••••••" : fmtCompact(e.balance!.usd)}</Text>
         {/* Full CAIP */}
-        <Text fontSize="8px" color="kk.textMuted" fontFamily="mono" mt="1.5" overflow="hidden" textOverflow="ellipsis" whiteSpace="nowrap" opacity={0.6}>
-          {e.caip}
+        <Text fontSize="8px" color="kk.textMuted" fontFamily="mono" mt="1.5" whiteSpace="nowrap" opacity={0.6}>
+          {ellipsizeCaip(e.caip)}
         </Text>
       </Box>
     </Box>
@@ -531,8 +633,8 @@ function NetworkTile({ chain: c, onPick, unavail }: {
           {unavail ? (c.firmwareGated ? "Update firmware" : "No route") : `${c.routableCount} swappable`}
         </Text>
         {/* CAIP-2 */}
-        <Text fontSize="8px" color="kk.textMuted" fontFamily="mono" mt="1" overflow="hidden" textOverflow="ellipsis" whiteSpace="nowrap" opacity={0.6}>
-          {c.caip2}
+        <Text fontSize="8px" color="kk.textMuted" fontFamily="mono" mt="1" whiteSpace="nowrap" opacity={0.6}>
+          {ellipsizeCaip(c.caip2)}
         </Text>
       </Box>
     </Box>
@@ -835,6 +937,7 @@ function AssetListRow({ entry: e, onSelect, onUnavailable }: {
       <Box flex="1" minW="0">
         <Flex align="center" gap="2" flexWrap="wrap">
           <Text fontSize="15px" fontWeight="800">{e.symbol}</Text>
+          <GasTokenBadge entry={e} />
           {e.balance && (
             <Box bg="rgba(139,227,196,0.12)" color="var(--teal)" px="1.5" py="0.5"
               borderRadius="4px" fontSize="9px" fontWeight="600" letterSpacing="0.04em">
@@ -854,10 +957,13 @@ function AssetListRow({ entry: e, onSelect, onUnavailable }: {
             </Box>
           )}
         </Flex>
-        <Text fontSize="12px" color="kk.textMuted" mt="0.5">{e.name}</Text>
+        {/* Name + network — distinguishes USDC-on-Ethereum from USDC-on-Optimism */}
+        <Text fontSize="12px" color="kk.textMuted" mt="0.5">
+          {e.name} · <Text as="span" color="kk.textSecondary" fontWeight="600">{chainName}</Text>
+        </Text>
         {/* Full CAIP-19 */}
-        <Text fontSize="9px" color="kk.textMuted" fontFamily="mono" mt="1" opacity={0.55} overflow="hidden" textOverflow="ellipsis" whiteSpace="nowrap">
-          {e.caip}
+        <Text fontSize="9px" color="kk.textMuted" fontFamily="mono" mt="1" opacity={0.55} whiteSpace="nowrap">
+          {ellipsizeCaip(e.caip)}
         </Text>
       </Box>
 
@@ -924,7 +1030,7 @@ function ContractHitRow({ loading, hit, adding, chainName, onAdd }: {
           </Flex>
           <Text fontSize="12px" color="kk.textMuted" mt="0.5">{hit.name} · {hit.decimals} decimals</Text>
           <Text fontSize="9px" color="kk.textMuted" fontFamily="mono" mt="1" opacity={0.55}
-            overflow="hidden" textOverflow="ellipsis" whiteSpace="nowrap">{hit.caip}</Text>
+            whiteSpace="nowrap">{ellipsizeCaip(hit.caip!)}</Text>
         </Box>
         <Box as="button" flexShrink={0} fontFamily="inherit"
           px="3.5" py="2" borderRadius="10px" bg="var(--gold)" color="#0b0b0e"
@@ -1033,7 +1139,7 @@ function UnavailableRouteView({ fromChainId, target, entries, onBack, onAltSelec
                         )}
                       </Flex>
                       <Text fontSize="10px" color="kk.textMuted" mt="0.5">{a.name} · on {chainName}</Text>
-                      <Text fontSize="9px" color="kk.textMuted" fontFamily="mono" mt="1" opacity={0.55} overflow="hidden" textOverflow="ellipsis" whiteSpace="nowrap">{a.caip}</Text>
+                      <Text fontSize="9px" color="kk.textMuted" fontFamily="mono" mt="1" opacity={0.55} whiteSpace="nowrap">{ellipsizeCaip(a.caip)}</Text>
                     </Box>
                     <Flex align="center" gap="1.5" px="2.5" py="1"
                       bg="rgba(139,227,196,0.08)" border="1px solid rgba(139,227,196,0.25)"
@@ -1071,6 +1177,116 @@ function UnavailableRouteView({ fromChainId, target, entries, onBack, onAltSelec
 }
 
 // ══════════════════════════════════════════════════════════════════════════
+// Confirm step — explicit breakdown before committing a selection
+// ══════════════════════════════════════════════════════════════════════════
+
+/** One labelled row in the breakdown table. */
+function BreakdownRow({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <Flex justify="space-between" align="center" gap="3" py="2.5"
+      borderBottom="1px solid" borderColor="rgba(255,255,255,0.06)">
+      <Text fontSize="10px" color="kk.textMuted" letterSpacing="0.08em" textTransform="uppercase" flexShrink={0}>
+        {label}
+      </Text>
+      <Box minW="0" textAlign="right">{children}</Box>
+    </Flex>
+  )
+}
+
+/** Confirmation gate. Forces the user to acknowledge exactly which asset —
+ *  chain, token-vs-gas, and full CAIP-19 — they're committing to, so a mis-tap
+ *  or a substituted row can't silently become the selection. Fires for both
+ *  the FROM and TO sides. */
+function ConfirmStep({ entry, side, onConfirm, onBack }: {
+  entry: AssetEntry
+  side: "from" | "to"
+  onConfirm: () => void
+  onBack: () => void
+}) {
+  const gas = isGasAsset(entry)
+  const chainName = networkDisplayName(entry.chainId)
+  const providers = entry.availability.providers
+
+  return (
+    <>
+      <Flex align="center" gap="2" mx="5" mb="2.5" flexShrink={0}>
+        <Box as="button" display="inline-flex" alignItems="center" gap="1.5"
+          bg="transparent" border="none" cursor="pointer" color="kk.textSecondary"
+          px="2" py="1" borderRadius="8px" fontFamily="inherit" fontSize="11px"
+          _hover={{ color: "kk.textPrimary", bg: "rgba(255,255,255,0.05)" }}
+          onClick={onBack}>
+          <BackIcon /> Back
+        </Box>
+      </Flex>
+
+      <Box flex="1" overflowY="auto" px="5" pb="4">
+        {/* Hero asset */}
+        <Flex direction="column" align="center" gap="3" p="5" mb="4"
+          bg="linear-gradient(180deg, rgba(233,196,106,0.05), transparent)"
+          border="1px solid rgba(233,196,106,0.16)" borderRadius="18px" textAlign="center">
+          <AssetIcon caip={entry.caip} iconUrl={entry.iconUrl} chainCaip={chainBadgeCaip(entry)} size={72} alt={entry.symbol} />
+          <Box>
+            <Flex align="center" gap="2" justify="center">
+              <Text fontSize="22px" fontWeight="800" letterSpacing="-0.02em">{entry.symbol}</Text>
+              <GasTokenBadge entry={entry} />
+            </Flex>
+            <Text fontSize="12px" color="kk.textSecondary" mt="1">{entry.name}</Text>
+          </Box>
+        </Flex>
+
+        {/* Breakdown table */}
+        <Box bg="rgba(255,255,255,0.02)" border="1px solid rgba(255,255,255,0.06)"
+          borderRadius="14px" px="4" py="1">
+          <BreakdownRow label="Network">
+            <Text fontSize="13px" fontWeight="700" color="kk.textPrimary">{chainName}</Text>
+          </BreakdownRow>
+          <BreakdownRow label="Network ID">
+            <Text fontSize="11px" fontFamily="mono" color="kk.textSecondary">{entry.chainId}</Text>
+          </BreakdownRow>
+          <BreakdownRow label="Type">
+            <Text fontSize="12px" fontWeight="700" color={gas ? "var(--gold)" : "kk.textPrimary"}>
+              {gas ? "Gas / native asset" : "Token"}
+            </Text>
+          </BreakdownRow>
+          {providers.length > 0 && (
+            <BreakdownRow label="Routes">
+              <Flex align="center" gap="2" justify="flex-end">
+                <ProviderDots providers={providers} />
+                <Text fontSize="11px" color="kk.textSecondary">
+                  {providers.length} {providers.length === 1 ? "route" : "routes"}
+                </Text>
+              </Flex>
+            </BreakdownRow>
+          )}
+          <Flex justify="space-between" align="center" gap="3" py="2.5">
+            <Text fontSize="10px" color="kk.textMuted" letterSpacing="0.08em" textTransform="uppercase" flexShrink={0}>
+              Asset ID
+            </Text>
+            <Text fontSize="10px" fontFamily="mono" color="kk.textMuted" minW="0"
+              wordBreak="break-all" textAlign="right">{entry.caip}</Text>
+          </Flex>
+        </Box>
+      </Box>
+
+      {/* Footer actions */}
+      <Flex px="5" py="3" borderTop="1px solid" borderColor="kk.border"
+        justify="space-between" align="center" gap="3" flexShrink={0} bg="#101015">
+        <Box as="button" px="4" py="2.5" bg="rgba(255,255,255,0.05)" border="1px solid" borderColor="kk.border"
+          borderRadius="10px" fontSize="12px" color="kk.textSecondary" cursor="pointer" fontFamily="inherit"
+          _hover={{ bg: "rgba(255,255,255,0.08)" }} onClick={onBack}>
+          Back
+        </Box>
+        <Box as="button" flex="1" px="4" py="2.5" bg="var(--gold)" color="#0b0b0e"
+          borderRadius="10px" fontSize="12px" fontWeight="700" border="none" cursor="pointer"
+          fontFamily="inherit" _hover={{ filter: "brightness(1.08)" }} onClick={onConfirm}>
+          Use {entry.symbol} on {chainName} as {side === "from" ? "input" : "output"}
+        </Box>
+      </Flex>
+    </>
+  )
+}
+
+// ══════════════════════════════════════════════════════════════════════════
 // Props + main component
 // ══════════════════════════════════════════════════════════════════════════
 
@@ -1099,6 +1315,8 @@ export function AssetPickerDialog({
   const [loading, setLoading]         = useState(false)
   const [toChain, setToChain]         = useState<string | null>(null)
   const [unavailEntry, setUnavailEntry] = useState<AssetEntry | null>(null)
+  // Pending selection awaiting explicit confirmation in the breakdown gate.
+  const [confirmEntry, setConfirmEntry] = useState<AssetEntry | null>(null)
   const [search, setSearch]           = useState("")
 
   // FROM chain id (for NetSwitchBanner + excluding self): extracted from excludeCaip when side=to
@@ -1119,10 +1337,18 @@ export function AssetPickerDialog({
     return () => { cancelled = true }
   }, [open, swappable, balances, customTokens, firmwareVersion])
 
-  // Reset navigation on open/close
+  // Reset navigation on open/close.
+  // On the TO side, default the chain step to the FROM token's chain so the
+  // user lands directly on the same-chain asset list (the common case) instead
+  // of having to pick the network again. They can still hit Back to switch.
   useEffect(() => {
-    if (open) { setToChain(null); setUnavailEntry(null); setSearch("") }
-  }, [open])
+    if (open) {
+      setToChain(side === 'to' && fromChainId ? fromChainId : null)
+      setUnavailEntry(null)
+      setConfirmEntry(null)
+      setSearch("")
+    }
+  }, [open, side, fromChainId])
 
   // Escape to close
   useEffect(() => {
@@ -1138,8 +1364,16 @@ export function AssetPickerDialog({
     return buildChainInfos(entries, excludeCaip)
   }, [entries, excludeCaip])
 
+  // Step 1: route any selectable row into the confirmation gate instead of
+  // committing immediately. The gate shows the full chain/token-vs-gas/CAIP
+  // breakdown so a mis-tap or a substituted row can't silently become the pick.
   const handleSelect = useCallback((entry: AssetEntry) => {
     if (!isRowSelectable(entry)) return
+    setConfirmEntry(entry)
+  }, [])
+
+  // Step 2: commit the confirmed selection.
+  const commitSelect = useCallback((entry: AssetEntry) => {
     const base = entry.swappable ?? synthesizeSwapAsset(entry)
     if (!base) {
       console.warn("[AssetPickerDialog] No vault chain config for", entry.chainId)
@@ -1153,31 +1387,40 @@ export function AssetPickerDialog({
   if (!open) return null
 
   // Title
-  const title = side === "from" ? "Select asset to swap from"
+  const title = confirmEntry ? "Confirm your selection"
+    : side === "from" ? "Select asset to swap from"
     : unavailEntry  ? "Route unavailable"
     : toChain       ? `Assets on ${networkDisplayName(toChain)}`
     :                 "Select destination network"
 
-  const stepLabel = side === "from" ? "Step 1 of 2 — pick what you're swapping"
+  const stepLabel = confirmEntry ? `Review the ${side === "from" ? "input" : "output"} before continuing`
+    : side === "from" ? "Step 1 of 2 — pick what you're swapping"
     : toChain       ? `Step 2 of 2 — pick an asset on ${networkDisplayName(toChain)}`
     :                 "Step 2 of 2 — choose destination network"
 
   return (
     <Box position="fixed" inset="0" zIndex={Z.assetPicker}
       display="flex" alignItems="center" justifyContent="center"
+      bg="rgba(11,11,14,0.28)"
+      backdropFilter="blur(20px) saturate(140%)"
       onClick={onClose}>
-      <Box position="absolute" inset="0" bg="blackAlpha.700" />
       <Box
         position="relative"
-        bg="#101015"
-        border="1px solid rgba(255,255,255,0.10)"
         borderRadius="22px"
-        boxShadow="0 1px 0 rgba(255,255,255,0.05) inset, 0 18px 60px -18px rgba(0,0,0,0.9)"
+        border="1px solid rgba(255,255,255,0.10)"
         w="700px" maxW="96vw" h="700px" maxH="92vh"
         display="flex" flexDirection="column"
         overflow="hidden"
         fontFamily="'Geist Mono', ui-monospace, monospace"
         onClick={(e) => e.stopPropagation()}
+        style={{
+          background:
+            "linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.015)), rgba(16,16,21,0.78)",
+          backdropFilter: "blur(32px) saturate(160%)",
+          WebkitBackdropFilter: "blur(32px) saturate(160%)",
+          boxShadow:
+            "0 0 0 1px rgba(255,255,255,0.06), 0 24px 60px -16px rgba(0,0,0,0.8), 0 4px 12px -4px rgba(0,0,0,0.5)",
+        }}
         _before={{
           content: '""', position: "absolute", inset: "0",
           bg: "radial-gradient(800px 400px at 50% -10%, rgba(233,196,106,0.04), transparent 60%)",
@@ -1209,7 +1452,14 @@ export function AssetPickerDialog({
               <Text fontSize="12px" color="kk.textMuted">Loading…</Text>
             </Flex>
           ) : !entries ? null
-          : side === "from" ? (
+          : confirmEntry ? (
+            <ConfirmStep
+              entry={confirmEntry}
+              side={side}
+              onConfirm={() => commitSelect(confirmEntry)}
+              onBack={() => setConfirmEntry(null)}
+            />
+          ) : side === "from" ? (
             <FromPicker entries={entries} onSelect={handleSelect} fmtCompact={fmtCompact} privateModeEnabled={privateModeEnabled} balancesLoading={balancesLoading} />
           ) : unavailEntry ? (
             <UnavailableRouteView

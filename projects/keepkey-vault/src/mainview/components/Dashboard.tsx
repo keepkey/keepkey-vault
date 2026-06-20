@@ -10,6 +10,7 @@ import { AssetPage } from "./AssetPage"
 import { ActivityPage } from "./ActivityPage"
 import { DonutChart, SelectedSlice, type DonutChartItem } from "./DonutChart"
 import { AddChainDialog } from "./AddChainDialog"
+import { ChainPickerDialog } from "./ChainPickerDialog"
 import { ReportDialog } from "./ReportDialog"
 import { AuditDialog } from "./AuditDialog"
 import { Bip85VaultDialog } from "./Bip85VaultDialog"
@@ -22,6 +23,7 @@ import { StackedBarView, type StackedBarItem } from "./StackedBarView"
 // initial Dashboard chunk. Used to open Swap directly from the action row
 // without routing through AssetPage.
 const LazySwapDialog = lazy(() => import("./SwapDialog").then(m => ({ default: m.SwapDialog })))
+const LazyDefiPositionsPanel = lazy(() => import("./DefiPositionsPanel").then(m => ({ default: m.DefiPositionsPanel })))
 
 import { rpcRequest, onRpcMessage } from "../lib/rpc"
 import { subscribeVaultCommand, publishBalances, clearBalances } from "../lib/commandBus"
@@ -666,6 +668,15 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 	const [drilledChainId, setDrilledChainId] = useState<string | null>(null)
 	const [swapDialogChain, setSwapDialogChain] = useState<ChainDef | null>(null)
 	const openChainPage = useCallback((chain: ChainDef, action?: "send" | "receive" | "swap" | "privacy", token?: TokenBalance) => {
+		// Watch-only mode views a non-connected wallet's cached balances.
+		// Any signing action would build the tx against the live USB device
+		// using THIS wallet's balances — a wrong-balance signing foot-gun.
+		// Demote signing actions to Receive (or no-op for swap, which doesn't
+		// land on the AssetPage shell).
+		if (watchOnly && (action === "send" || action === "swap" || action === "privacy")) {
+			if (action === "swap") return
+			action = "receive"
+		}
 		// Swap routes directly to SwapDialog — skip the AssetPage shell that
 		// would otherwise show the Receive view underneath.
 		if (action === "swap") {
@@ -675,7 +686,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 		setSelectedChainAction(action)
 		setSelectedChainInitialToken(token)
 		setSelectedChain(chain)
-	}, [])
+	}, [watchOnly])
 	const [balances, setBalances] = useState<Map<string, ChainBalance>>(new Map())
 	// Per-account (BTC) and per-address (EVM) balances for the sidebar account drop-down.
 	// The Bun side already derives + tracks these; we only render what's already there.
@@ -686,6 +697,12 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 	const [activeSliceIndex, setActiveSliceIndex] = useState<number | null>(0)
 	const [customChainDefs, setCustomChainDefs] = useState<ChainDef[]>([])
 	const [showAddChain, setShowAddChain] = useState(false)
+	// User-promoted built-in chains: chains that have no balance but the
+	// user explicitly picked from the "Add a blockchain" grid. Stays in the
+	// sidebar from then on so the user can receive on it without re-opening
+	// the picker.
+	const [manuallyShown, setManuallyShown] = useState<Set<string>>(new Set())
+	const [showChainPicker, setShowChainPicker] = useState(false)
 	const [showReports, setShowReports] = useState(false)
 	const [showAudit, setShowAudit] = useState(false)
 	const [showBip85, setShowBip85] = useState(false)
@@ -1255,6 +1272,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 			nativeBalanceUsd: cb.nativeBalanceUsd,
 			address: selected.address,
 			tokens: cb.tokens,
+			defiPositions: cb.defiPositions,
 			updatedAt: agg?.updatedAt,
 		}
 	}, [balances, allChains, evmAddressSet])
@@ -1288,6 +1306,11 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 	// Token palette used for the drilled-chain donut so each slice reads as a
 	// distinct color even though tokens don't carry a brand color of their own.
 	const TOKEN_PALETTE = ['#e9c46a', '#8be3c4', '#6c7be8', '#e08c7b', '#9f8ce0', '#f0a85c', '#4eb591', '#4f7fc8']
+	// DeFi positions are folded into the chain's balanceUsd, so the drilled
+	// breakdowns must include them too or the slice sum won't reconcile with the
+	// chain total. Distinct (cooler/purple) palette so protocol slices read apart
+	// from native + wallet tokens.
+	const DEFI_PALETTE = ['#7c5cff', '#a78bfa', '#5b8def', '#43c1c9', '#b06ad6', '#6f86ff']
 
 	const drilledChainTokensChartData = useMemo<DonutChartItem[]>(() => {
 		if (!drilledChainId) return []
@@ -1296,7 +1319,10 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 		if (!chain || !bal) return []
 		const overrides = new Map(Object.entries(visibilityMap).map(([k, v]) => [k.toLowerCase(), v] as const))
 		const cleanTokens = bal.tokens ? categorizeTokens(bal.tokens, overrides).clean : []
-		const nativeUsd = bal.nativeBalanceUsd ?? Math.max(0, (bal.balanceUsd || 0) - cleanTokens.reduce((s, t) => s + (t.balanceUsd || 0), 0))
+		const defiPositions = bal.defiPositions ?? []
+		const cleanTokensUsd = cleanTokens.reduce((s, t) => s + (t.balanceUsd || 0), 0)
+		const defiUsd = defiPositions.reduce((s, p) => s + (p.balanceUsd || 0), 0)
+		const nativeUsd = bal.nativeBalanceUsd ?? Math.max(0, (bal.balanceUsd || 0) - cleanTokensUsd - defiUsd)
 		const out: DonutChartItem[] = []
 		if (nativeUsd > 0) {
 			out.push({ name: chain.symbol, value: nativeUsd, color: chain.color })
@@ -1306,6 +1332,14 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 			.sort((a, b) => (b.balanceUsd ?? 0) - (a.balanceUsd ?? 0))
 			.forEach((tok, i) => {
 				out.push({ name: tok.symbol, value: tok.balanceUsd ?? 0, color: TOKEN_PALETTE[i % TOKEN_PALETTE.length] })
+			})
+		// DeFi protocol slices — folded into balanceUsd, so include them or the
+		// donut sum won't match the chain total.
+		defiPositions
+			.slice()
+			.sort((a, b) => (b.balanceUsd ?? 0) - (a.balanceUsd ?? 0))
+			.forEach((p, i) => {
+				out.push({ name: p.displayName || p.protocol || 'DeFi', value: p.balanceUsd ?? 0, color: DEFI_PALETTE[i % DEFI_PALETTE.length] })
 			})
 		return out.filter(d => d.value > 0)
 	}, [drilledChainId, allChains, getEffectiveBalance, visibilityMap])
@@ -1326,8 +1360,10 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 		const bal = getEffectiveBalance(chain.id)
 		const overrides = new Map(Object.entries(visibilityMap).map(([k, v]) => [k.toLowerCase(), v] as const))
 		const cleanTokens = bal?.tokens ? categorizeTokens(bal.tokens, overrides).clean : []
+		const defiPositions = bal?.defiPositions ?? []
 		const cleanTokensUsd = cleanTokens.reduce((s, t) => s + (t.balanceUsd ?? 0), 0)
-		const nativeUsd = bal?.nativeBalanceUsd ?? Math.max(0, (bal?.balanceUsd ?? 0) - cleanTokensUsd)
+		const defiUsd = defiPositions.reduce((s, p) => s + (p.balanceUsd ?? 0), 0)
+		const nativeUsd = bal?.nativeBalanceUsd ?? Math.max(0, (bal?.balanceUsd ?? 0) - cleanTokensUsd - defiUsd)
 		const arr: StackedBarItem[] = []
 		if (nativeUsd > 0) arr.push({ id: `${chain.id}:native`, label: chain.symbol, color: chain.color, value: nativeUsd, onSelect: () => openChainPage(chain) })
 		cleanTokens
@@ -1339,6 +1375,19 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 				color: TOKEN_PALETTE[i % TOKEN_PALETTE.length]!,
 				value: tok.balanceUsd ?? 0,
 				onSelect: () => openChainPage(chain, undefined, tok),
+			}))
+		// DeFi protocol items — folded into balanceUsd, so include them or the
+		// stacked bar won't sum to the chain total. Selecting one drills into the
+		// chain page where the DeFi panel lists the positions.
+		defiPositions
+			.slice()
+			.sort((a, b) => (b.balanceUsd ?? 0) - (a.balanceUsd ?? 0))
+			.forEach((p, i) => arr.push({
+				id: `${chain.id}:defi:${p.protocol || p.displayName || i}`,
+				label: p.displayName || p.protocol || 'DeFi',
+				color: DEFI_PALETTE[i % DEFI_PALETTE.length]!,
+				value: p.balanceUsd ?? 0,
+				onSelect: () => openChainPage(chain),
 			}))
 		return arr
 	}
@@ -1388,6 +1437,25 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 		return 0
 	}), [visibleChains, balances, cleanBalanceUsd])
 
+	// Split the visible list so the sidebar shows funded chains by default.
+	// Empty-balance chains stay reachable via the "+ Add a blockchain" grid
+	// below the list; once the user picks one, it joins `manuallyShown` and
+	// behaves like a funded row from then on. The currently drilled chain
+	// stays visible regardless so the user doesn't lose their selection.
+	const { sidebarChains, hiddenChains } = useMemo(() => {
+		const sidebar: ChainDef[] = []
+		const hidden: ChainDef[] = []
+		for (const c of sortedChains) {
+			const usd = cleanBalanceUsd.get(c.id)?.usd || 0
+			const native = parseFloat(balances.get(c.id)?.balance || '0')
+			const funded = usd > 0 || native > 0
+			const promoted = manuallyShown.has(c.id) || drilledChainId === c.id
+			if (funded || promoted) sidebar.push(c)
+			else hidden.push(c)
+		}
+		return { sidebarChains: sidebar, hiddenChains: hidden }
+	}, [sortedChains, balances, cleanBalanceUsd, manuallyShown, drilledChainId])
+
 	// Is data stale? (loaded from cache but haven't refreshed yet this session)
 	const isStale = !hasEverRefreshed && !loadingBalances
 
@@ -1419,7 +1487,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 		const bal = balances.get(selectedChain.id)
 		return (
 			<AssetPageErrorBoundary onBack={() => setSelectedChain(null)} chainName={selectedChain.coin}>
-				<AssetPage chain={selectedChain} balance={bal} onBack={() => { setSelectedChain(null); setSelectedChainAction(undefined); setSelectedChainInitialToken(undefined) }} firmwareVersion={firmwareVersion} initialAction={selectedChainAction} initialToken={selectedChainInitialToken} onViewActivity={handleViewActivity} />
+				<AssetPage chain={selectedChain} balance={bal} onBack={() => { setSelectedChain(null); setSelectedChainAction(undefined); setSelectedChainInitialToken(undefined) }} firmwareVersion={firmwareVersion} initialAction={selectedChainAction} initialToken={selectedChainInitialToken} onViewActivity={handleViewActivity} watchOnly={watchOnly} />
 			</AssetPageErrorBoundary>
 		)
 	}
@@ -1503,7 +1571,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 						</Flex>
 					</Box>
 
-					{sortedChains.map((chain) => {
+					{sidebarChains.map((chain) => {
 						const bal = balances.get(chain.id)
 						const clean = cleanBalanceUsd.get(chain.id)
 						const balNum = parseFloat(bal?.balance || '0')
@@ -1554,7 +1622,9 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 							<Fragment key={chain.id}>
 							<Box
 								as="button"
-								onClick={() => setDrilledChainId(prev => prev === chain.id ? null : chain.id)}
+								// Always drill in — never toggle off when re-clicking the same
+								// chain. Use the explicit "All Chains" row above to deselect.
+								onClick={() => setDrilledChainId(chain.id)}
 								w="100%"
 								textAlign="left"
 								p="2.5"
@@ -1651,25 +1721,32 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 						)
 					})}
 
-					{/* Add Chain row */}
+					{/* Add a blockchain — opens a grid of empty-balance built-in
+					    chains. The legacy "custom EVM chain" flow lives under
+					    Settings; the sidebar trigger now points at the grid so
+					    Monad / Hyperliquid / Mayachain etc. stop cluttering the
+					    list as zero rows. */}
 					{!watchOnly && (
 						<Box
 							as="button"
-							onClick={() => setShowAddChain(true)}
+							onClick={() => setShowChainPicker(true)}
 							w="100%"
 							mt="2"
 							p="2.5"
 							borderRadius="lg"
 							bg="transparent"
-							border="1px dashed"
-							borderColor="kk.border"
-							_hover={{ borderColor: "kk.gold", bg: "rgba(233,196,106,0.05)" }}
+							border="1px dashed rgba(255,255,255,0.10)"
+							_hover={{ borderColor: "rgba(255,255,255,0.20)", bg: "rgba(255,255,255,0.04)" }}
 							cursor="pointer"
 							transition="all 0.15s"
 						>
 							<Flex align="center" gap="2" justify="center">
-								<Text fontSize="14px" color="kk.textMuted">+</Text>
-								<Text fontSize="11px" color="kk.textMuted">{t("addChain")}</Text>
+								<Text fontSize="14px" color="var(--text-2)">+</Text>
+								<Text fontSize="11px" color="var(--text-2)" fontWeight="500" letterSpacing="0.02em">
+									{hiddenChains.length > 0
+										? t("addBlockchain", { defaultValue: "Add a blockchain" }) + ` · ${hiddenChains.length}`
+										: t("addBlockchain", { defaultValue: "Add a blockchain" })}
+								</Text>
 							</Flex>
 						</Box>
 					)}
@@ -2090,6 +2167,91 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 					zIndex={1}
 				>
 					{hasAnyBalance ? (() => {
+						// Drilled into a chain that holds nothing (no native, no tokens):
+						// drilledChainTokensChartData is already [] in that case. Show an
+						// explicit $0.00 / "no balance" state instead of a near-invisible
+						// zero-value orbital/donut/heatmap (which read as a blank panel).
+						// BUT: getEffectiveBalance returns the SELECTED EVM account's per-
+						// chain row, while the sidebar shows the chain AGGREGATE. If the
+						// selected account is empty but the chain holds funds on a
+						// different account, surface those instead of pretending the
+						// chain is empty — and tell the user where to find them.
+						if (drilledChainId && drilledChainTokensChartData.length === 0) {
+							const dchain = visibleChains.find(c => c.id === drilledChainId)
+							if (dchain) {
+								const agg = balances.get(drilledChainId)
+								const isEvm = dchain.chainFamily === 'evm'
+								const fundedAddrs = isEvm
+									? evmAddressSet.addresses.filter(a => (a.chainBalances?.[drilledChainId]?.balanceUsd ?? 0) > 0)
+									: []
+								const hasAggregate = (agg?.balanceUsd ?? 0) > 0
+								return (
+									<Flex direction="column" align="center" justify="center" gap="4" maxW="360px" textAlign="center">
+										<Image
+											src={getAssetIcon(dchain.caip)}
+											alt={dchain.coin}
+											w="56px" h="56px"
+											borderRadius="full"
+											bg="transparent"
+											boxShadow="0 0 0 1px rgba(255,255,255,0.06)"
+											opacity={hasAggregate ? 1 : 0.85}
+										/>
+										<Box>
+											{hasAggregate ? (
+												<>
+													<Text fontSize="28px" fontWeight="600" fontFamily="mono" color="var(--text-0)" lineHeight="1.1">
+														{privateModeEnabled ? "••••" : `$${(agg!.balanceUsd || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+													</Text>
+													<Text fontSize="12px" color="var(--text-2)" fontFamily="mono" mt="1">
+														{formatBalance(agg!.balance || '0')} {dchain.symbol}
+													</Text>
+													{isEvm && fundedAddrs.length > 0 && (
+														<Flex direction="column" align="center" gap="1.5" mt="3">
+															<Text fontSize="11px" color="var(--text-3)">
+																Selected account has $0 — held on {fundedAddrs.length === 1 ? '1 other account' : `${fundedAddrs.length} other accounts`}
+															</Text>
+															{fundedAddrs.slice(0, 3).map(a => (
+																<Box
+																	key={a.addressIndex}
+																	as="button"
+																	onClick={() => evmSelectIndex(a.addressIndex)}
+																	className="v3-glass-pill electrobun-webkit-app-region-no-drag"
+																	display="inline-flex"
+																	alignItems="center"
+																	gap="2"
+																	px="3"
+																	py="1"
+																	cursor="pointer"
+																	_hover={{ bg: "rgba(255,255,255,0.06)" }}
+																	transition="all 0.15s"
+																>
+																	<Text fontSize="10px" fontFamily="mono" color="var(--text-2)" fontWeight="600">
+																		#{a.addressIndex}
+																	</Text>
+																	<Text fontSize="11px" fontFamily="mono" color="var(--text-0)">
+																		{formatBalance(String(a.chainBalances?.[drilledChainId]?.balance || '0'))} {dchain.symbol}
+																	</Text>
+																	<Text fontSize="10px" color="var(--text-3)">→</Text>
+																</Box>
+															))}
+														</Flex>
+													)}
+												</>
+											) : (
+												<>
+													<Text fontSize="28px" fontWeight="600" fontFamily="mono" color="var(--text-1)" lineHeight="1.1">
+														{privateModeEnabled ? "••••" : "$0.00"}
+													</Text>
+													<Text fontSize="13px" color="var(--text-3)" mt="1">
+														No {dchain.coin} balance yet
+													</Text>
+												</>
+											)}
+										</Box>
+									</Flex>
+								)
+							}
+						}
 						if (drilledChainId && viewMode === 'orbital') {
 							const dchain = visibleChains.find(c => c.id === drilledChainId)
 							if (!dchain) return null
@@ -2339,7 +2501,12 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 						return (
 							<>
 								{/* Always-on action row: Receive / Send / Swap. Sits in the same
-								    slot whether or not the chain has tokens. */}
+								    slot whether or not the chain has tokens.
+								    Watch-only mode (viewing a non-connected wallet's cached
+								    balances): only Receive is safe to surface. Send/Swap/Privacy
+								    would build a transaction against the live USB device using
+								    THIS wallet's balances as input — a wrong-balance signing
+								    foot-gun. Hide them. */}
 								<Flex
 									align="center"
 									gap="2px"
@@ -2352,13 +2519,15 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 										{ id: 'receive' as const, label: 'Receive', color: '#4ade80', bg: 'rgba(74,222,128,0.12)', icon: (
 											<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4ade80" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19" /><polyline points="5 12 12 19 19 12" /></svg>
 										) },
-										{ id: 'send' as const, label: 'Send', color: '#fb923c', bg: 'rgba(251,146,60,0.12)', icon: (
-											<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fb923c" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="19" x2="12" y2="5" /><polyline points="5 12 12 5 19 12" /></svg>
-										) },
-										{ id: 'swap' as const, label: 'Swap', color: '#60a5fa', bg: 'rgba(96,165,250,0.12)', icon: (
-											<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polyline points="17 1 21 5 17 9" /><path d="M3 11V9a4 4 0 0 1 4-4h14" /><polyline points="7 23 3 19 7 15" /><path d="M21 13v2a4 4 0 0 1-4 4H3" /></svg>
-										) },
-										...(dchain.id === 'zcash' && zcashEnabled ? [{
+										...(!watchOnly ? [
+											{ id: 'send' as const, label: 'Send', color: '#fb923c', bg: 'rgba(251,146,60,0.12)', icon: (
+												<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fb923c" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="19" x2="12" y2="5" /><polyline points="5 12 12 5 19 12" /></svg>
+											) },
+											{ id: 'swap' as const, label: 'Swap', color: '#60a5fa', bg: 'rgba(96,165,250,0.12)', icon: (
+												<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polyline points="17 1 21 5 17 9" /><path d="M3 11V9a4 4 0 0 1 4-4h14" /><polyline points="7 23 3 19 7 15" /><path d="M21 13v2a4 4 0 0 1-4 4H3" /></svg>
+											) },
+										] : []),
+										...(!watchOnly && dchain.id === 'zcash' && zcashEnabled ? [{
 											id: 'privacy' as const, label: 'Privacy', color: '#a78bfa', bg: 'rgba(167,139,250,0.12)', icon: (
 												<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>
 											),
@@ -2449,6 +2618,22 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 													</Flex>
 												))}
 										</Flex>
+									</Box>
+								)}
+
+								{/* DeFi positions for the drilled chain. Mirrors the
+								    AssetPage section; reads from the ChainBalance the
+								    backend filled when includeDefi=true. Self-hides when
+								    the chain has no positions. */}
+								{(bal?.defiPositions?.length ?? 0) > 0 && (
+									<Box w="100%" mt="2">
+										<Suspense fallback={null}>
+											<LazyDefiPositionsPanel
+												address={bal?.address || null}
+												color={dchain.color}
+												positions={bal?.defiPositions}
+											/>
+										</Suspense>
 									</Box>
 								)}
 							</>
@@ -2700,6 +2885,22 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 						}
 					}}
 					existingChainIds={existingChainIds}
+				/>
+			)}
+
+			{showChainPicker && (
+				<ChainPickerDialog
+					chains={hiddenChains}
+					onPick={(chainId) => {
+						setManuallyShown(prev => {
+							const next = new Set(prev)
+							next.add(chainId)
+							return next
+						})
+						setDrilledChainId(chainId)
+						setShowChainPicker(false)
+					}}
+					onClose={() => setShowChainPicker(false)}
 				/>
 			)}
 

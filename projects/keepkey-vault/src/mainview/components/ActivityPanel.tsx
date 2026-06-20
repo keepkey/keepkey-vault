@@ -25,21 +25,31 @@ interface ActivityPanelProps {
 const CHAIN_COLORS: Record<string, string> = {}
 CHAINS.forEach(c => { CHAIN_COLORS[c.symbol] = c.color; CHAIN_COLORS[c.id] = c.color })
 
+// Colors are spec-palette hex (not CSS vars) because they're alpha-appended as
+// `${color}22` for badge backgrounds — `var(--x)22` is invalid CSS. Hex maps:
+// rose #e08c7b, teal #8be3c4, gold #e9c46a (see theme.ts).
 const TYPE_CONFIG: Record<string, { label: string; color: string }> = {
-  send: { label: 'Sent', color: '#E53E3E' },
-  receive: { label: 'Received', color: '#23DCC8' },
-  swap: { label: 'Swap', color: '#F7931A' },
+  send: { label: 'Sent', color: '#e08c7b' },
+  receive: { label: 'Received', color: '#8be3c4' },
+  swap: { label: 'Swap', color: '#e9c46a' },
   sign: { label: 'Signed', color: '#627EEA' },
   message: { label: 'Message', color: '#8247E5' },
-  approve: { label: 'Approve', color: '#FF0420' },
+  approve: { label: 'Approve', color: '#e08c7b' },
 }
 
 const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
-  broadcast: { label: 'Broadcast', color: '#23DCC8' },
-  signed: { label: 'Signed', color: '#F7931A' },
-  completed: { label: 'Completed', color: 'var(--teal)' },
-  refunded: { label: 'Refunded', color: '#FB923C' },
-  failed: { label: 'Failed', color: '#E53E3E' },
+  broadcast: { label: 'Broadcast', color: '#8be3c4' },
+  signed: { label: 'Signed', color: '#e9c46a' },
+  completed: { label: 'Completed', color: '#8be3c4' },
+  refunded: { label: 'Refunded', color: '#e9c46a' },
+  failed: { label: 'Failed', color: '#e08c7b' },
+}
+
+// How a record reached us — surfaced in the detail panel so nothing is implicit.
+const SOURCE_LABELS: Record<string, string> = {
+  scan: 'On-chain scan',
+  app: 'In-app',
+  api: 'External app',
 }
 
 const SWAP_STATUS_CONFIG: Record<string, { label: string; color: string; dot?: boolean }> = {
@@ -209,9 +219,9 @@ export function formatFullDate(ts: number): string {
 
 function TxDetailRow({ label, value, mono, color: c }: { label: string; value: string; mono?: boolean; color?: string }) {
   return (
-    <Flex justify="space-between" align="center" py="1">
-      <Text fontSize="11px" color="whiteAlpha.500" minW="100px">{label}</Text>
-      <Text fontSize="11px" color={c || 'white'} textAlign="right" fontFamily={mono ? 'mono' : undefined} wordBreak="break-all" maxW="280px">{value}</Text>
+    <Flex justify="space-between" align="center" py="1.5" gap="3">
+      <Text fontSize="11px" color="kk.textMuted" minW="100px" flexShrink={0}>{label}</Text>
+      <Text fontSize="11px" color={c || 'kk.textSecondary'} textAlign="right" fontFamily={mono ? 'mono' : undefined} wordBreak="break-all" maxW="280px">{value}</Text>
     </Flex>
   )
 }
@@ -220,17 +230,17 @@ function CopyableRow({ label, value, explorerUrl }: { label: string; value: stri
   const [copied, setCopied] = useState(false)
   const handleCopy = () => { navigator.clipboard.writeText(value); setCopied(true); setTimeout(() => setCopied(false), 1500) }
   return (
-    <Flex justify="space-between" align="center" py="1" gap="2">
-      <Text fontSize="11px" color="whiteAlpha.500" minW="100px" flexShrink={0}>{label}</Text>
+    <Flex justify="space-between" align="center" py="1.5" gap="3">
+      <Text fontSize="11px" color="kk.textMuted" minW="100px" flexShrink={0}>{label}</Text>
       <HStack gap="1" justify="flex-end" minW="0">
         <Text
           fontSize="11px" color="var(--teal)" fontFamily="mono" cursor="pointer" wordBreak="break-all" textAlign="right"
-          _hover={{ color: 'var(--teal)' }} onClick={handleCopy} title={copied ? 'Copied!' : 'Click to copy'}
+          _hover={{ opacity: 0.8 }} onClick={handleCopy} title={copied ? 'Copied!' : 'Click to copy'}
         >
           {copied ? 'Copied!' : value}
         </Text>
         {explorerUrl && (
-          <Text as="button" fontSize="10px" color="whiteAlpha.400" _hover={{ color: '#23DCC8' }} flexShrink={0}
+          <Text as="button" fontSize="10px" color="kk.textMuted" _hover={{ color: 'var(--teal)' }} flexShrink={0}
             onClick={() => rpcRequest('openUrl', { url: explorerUrl }).catch(() => {})}>
             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
@@ -255,21 +265,23 @@ export function TxDetailDialog({ detail, onClose, nativePrices }: { detail: TxDe
     const amountValue = formatNativeValue(a.amount, chainDef, a.source, nativePrice)
     const feeValue = formatNativeValue(a.fee, chainDef, a.source, nativePrice)
     const explorerUrl = a.txid && chainDef ? getExplorerTxUrl(chainDef.id, a.txid) : null
-    const explorerAddrUrl = a.to && chainDef?.explorerAddressUrl ? chainDef.explorerAddressUrl.replace('{{address}}', a.to) : null
+    // Only build address explorer links for a single address (not "addr +N" fan-out summaries).
+    const explorerAddrUrl = a.to && !a.to.includes(' ') && chainDef?.explorerAddressUrl ? chainDef.explorerAddressUrl.replace('{{address}}', a.to) : null
+    const explorerFromUrl = a.from && !a.from.includes(' ') && chainDef?.explorerAddressUrl ? chainDef.explorerAddressUrl.replace('{{address}}', a.from) : null
     const required = getRequiredConfs(chainSymbol)
 
     return (
       <Box position="fixed" inset="0" zIndex={Z.dialog} display="flex" alignItems="center" justifyContent="center" onClick={onClose}>
         <Box position="absolute" inset="0" bg="blackAlpha.700" />
         <Box
-          position="relative" bg="#1A1A2E" border="1px solid" borderColor="rgba(35,220,200,0.25)"
+          position="relative" bg="kk.cardBg" border="1px solid" borderColor="kk.border"
           borderRadius="xl" w="440px" maxW="95vw" maxH="85vh" overflow="auto"
           onClick={e => e.stopPropagation()}
           boxShadow="0 12px 40px rgba(0,0,0,0.6)"
           style={{ animation: 'kkTxDetailFadeIn 0.15s ease-out' }}
         >
           {/* Header */}
-          <Flex px="5" py="3" borderBottom="1px solid" borderColor="rgba(255,255,255,0.08)" align="center" justify="space-between">
+          <Flex px="5" py="3" borderBottom="1px solid" borderColor="kk.border" align="center" justify="space-between">
             <HStack gap="2">
               <Box px="2" py="0.5" borderRadius="md" fontSize="xs" fontWeight="700" bg={`${typeConf.color}22`} color={typeConf.color}>{typeConf.label}</Box>
               {a.type === 'swap' && a.swapStatus ? (
@@ -279,52 +291,61 @@ export function TxDetailDialog({ detail, onClose, nativePrices }: { detail: TxDe
               )}
               {a.source === 'api' && <Box px="2" py="0.5" borderRadius="md" fontSize="xs" fontWeight="600" bg="rgba(130,71,229,0.15)" color="#8247E5">API</Box>}
             </HStack>
-            <Text as="button" fontSize="lg" color="whiteAlpha.500" _hover={{ color: 'white' }} onClick={onClose}>&times;</Text>
+            <Text as="button" fontSize="lg" color="kk.textMuted" _hover={{ color: 'kk.textPrimary' }} onClick={onClose}>&times;</Text>
           </Flex>
 
           {/* Body */}
           <VStack px="5" py="4" gap="0" align="stretch">
             {/* Chain */}
-            <Flex justify="space-between" align="center" py="1">
-              <Text fontSize="11px" color="whiteAlpha.500" minW="100px">Chain</Text>
+            <Flex justify="space-between" align="center" py="1.5" gap="3">
+              <Text fontSize="11px" color="kk.textMuted" minW="100px" flexShrink={0}>Chain</Text>
               <HStack gap="2">
                 {chainDef && (
                   <Image src={caipToIcon(chainDef.caip)} w="16px" h="16px" borderRadius="full"
                     fallback={<Box w="16px" h="16px" borderRadius="full" bg={chainDef.color} />}
                   />
                 )}
-                <Text fontSize="11px" color="white" fontWeight="600">{chainDef?.coin || a.chain} ({chainSymbol})</Text>
+                <Text fontSize="11px" color="kk.textPrimary" fontWeight="600">{chainDef?.coin || a.chain} ({chainSymbol})</Text>
               </HStack>
             </Flex>
 
             {/* Amount */}
             {amountValue && <TxDetailRow label="Amount" value={`${amountValue.amount} ${a.asset || chainSymbol}${amountValue.usd ? ` (${amountValue.usd})` : ''}`} />}
 
+            {/* Received (swap output, when this activity is a swap) */}
+            {a.type === 'swap' && a.outAmount && <TxDetailRow label="Received" value={`${a.outAmount} ${a.outAsset || ''}`.trim()} color="var(--teal)" />}
+
             {/* Fee */}
             {feeValue && <TxDetailRow label="Fee" value={`${feeValue.amount} ${chainSymbol}${feeValue.usd ? ` (${feeValue.usd})` : ''}`} />}
 
             {/* Separator */}
-            <Box h="1px" bg="rgba(255,255,255,0.06)" my="2" />
+            <Box h="1px" bg="kk.border" my="2" />
 
             {/* TxID */}
             {a.txid && <CopyableRow label="Transaction ID" value={a.txid} explorerUrl={explorerUrl} />}
+
+            {/* From address (counterparty — most useful for received txs) */}
+            {a.from && <CopyableRow label="From" value={a.from} explorerUrl={explorerFromUrl} />}
 
             {/* To address */}
             {a.to && <CopyableRow label="To" value={a.to} explorerUrl={explorerAddrUrl} />}
 
             {/* Confirmations */}
             {a.confirmations !== undefined && (
-              <Flex justify="space-between" align="center" py="1">
-                <Text fontSize="11px" color="whiteAlpha.500" minW="100px">Confirmations</Text>
+              <Flex justify="space-between" align="center" py="1.5" gap="3">
+                <Text fontSize="11px" color="kk.textMuted" minW="100px" flexShrink={0}>Confirmations</Text>
                 <HStack gap="2">
                   <ConfBadge confirmations={a.confirmations} chain={a.chain} />
-                  <Text fontSize="11px" color="whiteAlpha.400">({a.confirmations} / {required})</Text>
+                  <Text fontSize="11px" color="kk.textMuted">({a.confirmations} / {required})</Text>
                 </HStack>
               </Flex>
             )}
 
             {/* Block height */}
             {a.blockHeight ? <TxDetailRow label="Block" value={String(a.blockHeight)} mono /> : null}
+
+            {/* Source — how this record reached us (on-chain scan / in-app / external app) */}
+            <TxDetailRow label="Source" value={SOURCE_LABELS[a.source] || a.source} />
 
             {/* App name */}
             {a.appName && <TxDetailRow label="App" value={a.appName} />}
@@ -337,9 +358,9 @@ export function TxDetailDialog({ detail, onClose, nativePrices }: { detail: TxDe
               <Box mt="3">
                 <Flex
                   as="button" w="100%" justify="center" align="center" gap="2"
-                  bg="rgba(35,220,200,0.1)" border="1px solid" borderColor="rgba(35,220,200,0.25)"
+                  bg="rgba(139,227,196,0.10)" border="1px solid" borderColor="rgba(139,227,196,0.30)"
                   borderRadius="lg" py="2" cursor="pointer"
-                  _hover={{ bg: 'rgba(35,220,200,0.18)' }} transition="all 0.15s"
+                  _hover={{ bg: 'rgba(139,227,196,0.18)' }} transition="all 0.15s"
                   onClick={() => rpcRequest('openUrl', { url: explorerUrl }).catch(() => {})}
                 >
                   <Text fontSize="xs" fontWeight="600" color="var(--teal)">View on Explorer</Text>
@@ -370,20 +391,20 @@ export function TxDetailDialog({ detail, onClose, nativePrices }: { detail: TxDe
     <Box position="fixed" inset="0" zIndex={Z.dialog} display="flex" alignItems="center" justifyContent="center" onClick={onClose}>
       <Box position="absolute" inset="0" bg="blackAlpha.700" />
       <Box
-        position="relative" bg="#1A1A2E" border="1px solid" borderColor="rgba(35,220,200,0.25)"
+        position="relative" bg="kk.cardBg" border="1px solid" borderColor="kk.border"
         borderRadius="xl" w="440px" maxW="95vw" maxH="85vh" overflow="auto"
         onClick={e => e.stopPropagation()}
         boxShadow="0 12px 40px rgba(0,0,0,0.6)"
         style={{ animation: 'kkTxDetailFadeIn 0.15s ease-out' }}
       >
         {/* Header */}
-        <Flex px="5" py="3" borderBottom="1px solid" borderColor="rgba(255,255,255,0.08)" align="center" justify="space-between">
+        <Flex px="5" py="3" borderBottom="1px solid" borderColor="kk.border" align="center" justify="space-between">
           <HStack gap="2">
-            <Box px="2" py="0.5" borderRadius="md" fontSize="xs" fontWeight="700" bg="rgba(247,147,26,0.15)" color="#F7931A">Swap</Box>
-            <Text fontSize="sm" fontWeight="600" color="white">{s.fromSymbol} &rarr; {s.toSymbol}</Text>
+            <Box px="2" py="0.5" borderRadius="md" fontSize="xs" fontWeight="700" bg="rgba(233,196,106,0.15)" color="var(--gold)">Swap</Box>
+            <Text fontSize="sm" fontWeight="600" color="kk.textPrimary">{s.fromSymbol} &rarr; {s.toSymbol}</Text>
             <SwapStatusBadge status={s.status} />
           </HStack>
-          <Text as="button" fontSize="lg" color="whiteAlpha.500" _hover={{ color: 'white' }} onClick={onClose}>&times;</Text>
+          <Text as="button" fontSize="lg" color="kk.textMuted" _hover={{ color: 'kk.textPrimary' }} onClick={onClose}>&times;</Text>
         </Flex>
 
         {/* Body */}
@@ -392,7 +413,7 @@ export function TxDetailDialog({ detail, onClose, nativePrices }: { detail: TxDe
           <TxDetailRow label="Expected" value={`${s.expectedOutput} ${s.toSymbol}`} />
           {s.integration && <TxDetailRow label="Integration" value={s.integration} />}
 
-          <Box h="1px" bg="rgba(255,255,255,0.06)" my="2" />
+          <Box h="1px" bg="kk.border" my="2" />
 
           <CopyableRow label="Inbound TX" value={s.txid} explorerUrl={inboundUrl} />
           {s.outboundTxid && <CopyableRow label="Outbound TX" value={s.outboundTxid} explorerUrl={outboundUrl} />}
@@ -400,7 +421,7 @@ export function TxDetailDialog({ detail, onClose, nativePrices }: { detail: TxDe
           {s.memo && <CopyableRow label="Memo" value={s.memo} />}
           {s.router && <CopyableRow label="Router" value={s.router} />}
 
-          <Box h="1px" bg="rgba(255,255,255,0.06)" my="2" />
+          <Box h="1px" bg="kk.border" my="2" />
 
           {/* Confirmations */}
           {s.confirmations > 0 && <TxDetailRow label="Inbound Confs" value={String(s.confirmations)} />}
@@ -418,9 +439,9 @@ export function TxDetailDialog({ detail, onClose, nativePrices }: { detail: TxDe
             {inboundUrl && (
               <Flex
                 as="button" flex="1" justify="center" align="center" gap="2"
-                bg="rgba(35,220,200,0.1)" border="1px solid" borderColor="rgba(35,220,200,0.25)"
+                bg="rgba(139,227,196,0.10)" border="1px solid" borderColor="rgba(139,227,196,0.30)"
                 borderRadius="lg" py="2" cursor="pointer"
-                _hover={{ bg: 'rgba(35,220,200,0.18)' }} transition="all 0.15s"
+                _hover={{ bg: 'rgba(139,227,196,0.18)' }} transition="all 0.15s"
                 onClick={() => rpcRequest('openUrl', { url: inboundUrl }).catch(() => {})}
               >
                 <Text fontSize="xs" fontWeight="600" color="var(--teal)">Inbound Explorer</Text>
@@ -429,12 +450,12 @@ export function TxDetailDialog({ detail, onClose, nativePrices }: { detail: TxDe
             {outboundUrl && (
               <Flex
                 as="button" flex="1" justify="center" align="center" gap="2"
-                bg="rgba(74,222,128,0.1)" border="1px solid" borderColor="rgba(74,222,128,0.25)"
+                bg="rgba(233,196,106,0.10)" border="1px solid" borderColor="rgba(233,196,106,0.30)"
                 borderRadius="lg" py="2" cursor="pointer"
-                _hover={{ bg: 'rgba(74,222,128,0.18)' }} transition="all 0.15s"
+                _hover={{ bg: 'rgba(233,196,106,0.18)' }} transition="all 0.15s"
                 onClick={() => rpcRequest('openUrl', { url: outboundUrl }).catch(() => {})}
               >
-                <Text fontSize="xs" fontWeight="600" color="var(--teal)">Outbound Explorer</Text>
+                <Text fontSize="xs" fontWeight="600" color="var(--gold)">Outbound Explorer</Text>
               </Flex>
             )}
           </HStack>

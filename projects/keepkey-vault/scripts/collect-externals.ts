@@ -52,6 +52,9 @@ const EXTERNALS = [
   '@stablelib/ed25519',
   'fast-redact',
   'duplexify',
+  // Marked external in bundle-backend.ts (large JSON sub-path imports Bun's
+  // bundler refuses in fresh-install CI). Must be copied so runtime require works.
+  '@pioneer-platform/pioneer-discovery',
 ]
 
 const projectRoot = join(import.meta.dir, '..')
