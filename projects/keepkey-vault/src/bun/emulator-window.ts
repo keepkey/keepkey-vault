@@ -502,7 +502,8 @@ export async function emuGatedConfirm(
   if (delegate) {
     delegate.onButtonRequest = () => {
       if (!opts.interactive) {
-        // Setup op — auto-press through each confirm screen.
+        // Setup op (wipe / load / settings) — auto-press through each confirm.
+        // Signing ops are always interactive and must be approved by the user.
         writeDecision(true)
         return
       }

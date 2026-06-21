@@ -8,7 +8,7 @@
  *   4. Broadcast via lightwalletd
  */
 
-import { sendCommand, isSidecarReady, startSidecar, getCachedFvk } from "../zcash-sidecar"
+import { sendCommand, isSidecarReady, startSidecar, getCachedFvk, beginZcashSend, endZcashSend } from "../zcash-sidecar"
 import { initializeOrchardFromDevice } from "./zcash-shielded"
 
 export interface DeshieldParams {
@@ -62,9 +62,11 @@ export async function deshieldZec(
 		throw new Error("A deshield transaction is already in progress")
 	}
 	deshieldInProgress = true
+	beginZcashSend()
 	try {
 		return await _deshieldZecInner(wallet, params, opts)
 	} finally {
+		endZcashSend()
 		deshieldInProgress = false
 	}
 }

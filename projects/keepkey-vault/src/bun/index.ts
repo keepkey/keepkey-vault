@@ -120,7 +120,7 @@ import { addSessionActivity, getSessionActivity, clearSessionActivity } from "./
 import { buildTx, broadcastTx } from "./txbuilder"
 import { buildCosmosStakingTx, buildCosmosNameRegTx } from "./txbuilder/cosmos"
 import { initializeOrchardFromDevice, scanOrchardNotes, getShieldedBalance, sendShielded, ensureFvkLoaded, displayOrchardAddressOnDevice } from "./txbuilder/zcash-shielded"
-import { isSidecarReady, startSidecar, stopSidecar, wipeSidecarWalletDb, hasFvkLoaded, getCachedFvk, onScanProgress, getScanState, updateSyncedTo } from "./zcash-sidecar"
+import { isSidecarReady, startSidecar, stopSidecar, wipeSidecarWalletDb, hasFvkLoaded, getCachedFvk, onScanProgress, getScanState, updateSyncedTo, beginZcashSend, endZcashSend, isZcashSendInFlight } from "./zcash-sidecar"
 import { CHAINS, customChainToChainDef, isChainSupported } from "../shared/chains"
 import { versionCompare } from "../shared/firmware-versions"
 import type { ChainDef } from "../shared/chains"
@@ -557,6 +557,17 @@ let zcashVerifiedThisSession = false
 // field above doesn't lie about completion. Cleared after the scan resolves
 // (whether successfully or not).
 let zcashBackgroundVerifyInFlight = false
+// True once the cached Orchard FVK has been PROVEN to belong to the connected
+// device this session (its `ak` matches a fresh device derivation). The FVK
+// store (~/.keepkey/zcash_wallet.db) carries no device identity, so without
+// this a stale FVK from a previous device/seed/passphrase would show a phantom
+// balance and produce an unspendable (wrong-signer) transaction. This is the
+// hard gate for showing the shielded balance and for sending. Reset whenever
+// the wallet identity could have changed (seed/device switch, FVK re-derive).
+let zcashDeviceVerified = false
+// Coalesces the sidecar purge (stop→wipe→start→init) so a forced spend-path
+// re-derive and a background verify can't run two overlapping cycles (FIXB-02).
+let zcashPurgeInFlight: Promise<void> | null = null
 let emulatorEnabled = false
 let preReleaseUpdates = false
 let alphaFirmware = false
@@ -909,6 +920,16 @@ function resetSeedManagers(): void {
 	btcAccounts.reset()
 	evmAddresses.reset()
 	managersSeedOwner = null
+	// The Zcash sidecar's device-verified flag is per-wallet. A same-handle
+	// passphrase / hidden-wallet toggle changes the active wallet WITHOUT firing
+	// seed-changed, but DOES route through a resetSeedManagers() path (the
+	// needs_passphrase handler and the result-based reconcile). Drop the sticky
+	// flag here so the next balance / scan / send re-derives the device FVK and
+	// fail-closes instead of bleeding the previous wallet's shielded balance
+	// (FS-1). The lazy purge in ensureZcashDeviceMatch then rebuilds the sidecar
+	// for the active wallet on first access.
+	zcashDeviceVerified = false
+	zcashVerifiedThisSession = false
 }
 
 /** Seed-staleness guard — the single authority for "do the in-memory account
@@ -1106,6 +1127,20 @@ const restCallbacks: RestApiCallbacks = {
 	// the loop. The device still gates every signature. NOOP substage push.
 	getSwapQuoteHeadless: (params) => headlessSwapQuote(params),
 	executeSwapHeadless: (params) => headlessExecuteSwap(params, () => { /* headless: no WebView substage */ }),
+	zcashPreSendGate: async (account: number) => {
+		// Same fail-closed preflight the RPC send path runs: prove the FVK belongs
+		// to the connected device (purges stale state on mismatch) THEN catch the
+		// note set up to tip. A device-comms failure throws and aborts the send.
+		// `force` re-derives every send so a same-handle passphrase/hidden-wallet
+		// toggle can't slip through the session-sticky verified flag (P2-E).
+		await ensureZcashDeviceMatch(account, true)
+		await ensureZcashScanFresh()
+	},
+	zcashVerifyWallet: async (account: number) => {
+		// Read-only REST balance still exposes local shielded state, so prove the
+		// sidecar DB belongs to the connected device before returning it.
+		await ensureZcashDeviceMatch(account)
+	},
 	getPioneer: () => getPioneer(),
 	getPioneerApiBase: () => getPioneerApiBase(),
 	setPioneerApiBase: async (url: string) => {
@@ -1300,17 +1335,99 @@ async function ensureZcashScanFresh(): Promise<void> {
  * must be a deliberate user action (the manual "Repair wallet" / "Full scan"
  * controls in the UI).
  */
+/**
+ * Prove the cached Orchard FVK actually belongs to the CONNECTED device before
+ * we trust its balance or let it spend. The on-disk FVK store has no device
+ * identity, and the only existing invalidation — the `seed-changed` event —
+ * does not fire reliably on device-to-device swaps. So derive the FVK fresh
+ * from the device (silent; no button, seed never leaves) and compare `ak`.
+ *
+ *  - match            → mark verified, keep the cache + scanned notes.
+ *  - no cache / mismatch → the cache belongs to a DIFFERENT wallet (bleed):
+ *    purge the stale FVK + scanned notes and re-init from the connected device.
+ *
+ * Returns true when the cache is device-verified (matched or freshly re-derived
+ * to the connected device). Throws if the device can't be reached — callers on
+ * the send path MUST treat a throw as fail-closed.
+ */
+async function ensureZcashDeviceMatch(account: number = 0, force: boolean = false): Promise<boolean> {
+	if (!zcashPrivacyEnabled || !engine.wallet) return false
+	if (typeof (engine.wallet as any).zcashGetOrchardFVK !== 'function') return false
+	// `force` bypasses the session-sticky verified flag on the SPEND path: a
+	// same-handle passphrase / hidden-wallet toggle never fires `seed-changed`,
+	// so a sticky `true` would let a send build against the PREVIOUS wallet's
+	// cached FVK/notes. Re-derive + compare the device ak every send (cheap,
+	// silent — no button press). The display path keeps the sticky short-circuit.
+	if (zcashDeviceVerified && !force) return true
+
+	const deviceFvk = await (engine.wallet as any).zcashGetOrchardFVK(account)
+	if (!deviceFvk?.ak) throw new Error('Device returned no Orchard ak — cannot verify wallet identity')
+	const deviceAk = Buffer.from(deviceFvk.ak).toString('hex').toLowerCase()
+
+	const cached = getCachedFvk()
+	if (cached && cached.fvk.ak.toLowerCase() === deviceAk) {
+		zcashDeviceVerified = true
+		return true
+	}
+
+	// No cache, or the cache belongs to a DIFFERENT wallet (device-bleed).
+	console.warn(
+		`[zcash] Cached FVK does not match connected device ` +
+		`(cached ak=${cached?.fvk.ak.slice(0, 12) ?? 'none'}…, device ak=${deviceAk.slice(0, 12)}…) — ` +
+		`purging stale wallet state and re-deriving from the device`,
+	)
+	// Coalesce concurrent purges (FIXB-02): a forced spend-path re-derive and a
+	// fire-and-forget background verify can both reach here; running two
+	// stop/wipe/start/init cycles concurrently corrupts the sidecar. Share one
+	// in-flight purge — a second caller awaits it instead of starting its own.
+	if (zcashPurgeInFlight) {
+		await zcashPurgeInFlight
+	} else {
+		const purge = (async () => {
+			// Mark the sidecar busy so a background verify can't START another purge
+			// concurrently while this one runs (P2-B).
+			beginZcashSend()
+			try {
+				stopSidecar()
+				wipeSidecarWalletDb()
+				await startSidecar()
+				await initializeOrchardFromDevice(engine.wallet as any, account)
+			} finally {
+				endZcashSend()
+			}
+		})()
+		zcashPurgeInFlight = purge
+		try {
+			await purge
+		} finally {
+			zcashPurgeInFlight = null
+		}
+	}
+	// Notes from the previous wallet are gone; the next scan rebuilds the
+	// unspent set for the real device. Caller is responsible for scanning.
+	zcashVerifiedThisSession = false
+	zcashDeviceVerified = true
+	return true
+}
+
 function maybeStartBackgroundWalletVerification(): void {
-	if (zcashVerifiedThisSession || zcashBackgroundVerifyInFlight || !hasFvkLoaded()) return
+	// `isZcashSendInFlight()` (P2-B): never kick off a background device-verify —
+	// which stop/wipe/restart-s the sidecar on FVK mismatch — while a send is
+	// mid build→sign→broadcast; it would delete the sidecar's in-memory PCZT
+	// state underneath the build. The next Privacy-tab refresh re-fires it.
+	if (zcashDeviceVerified || zcashBackgroundVerifyInFlight || !hasFvkLoaded() || isZcashSendInFlight()) return
 	zcashBackgroundVerifyInFlight = true
 	;(async () => {
 		try {
+			// Prove the cached FVK belongs to the connected device FIRST (purges
+			// stale state on mismatch), THEN catch the unspent set up to tip.
+			await ensureZcashDeviceMatch(0)
 			const result = await scanOrchardNotes()
 			if (result?.synced_to != null) updateSyncedTo(result.synced_to)
 			zcashVerifiedThisSession = true
-			console.log(`[zcash] Background scan caught up: synced_to=${result?.synced_to ?? '?'}, new_notes=${result?.notes_found ?? 0}`)
+			console.log(`[zcash] Device-verified + scan caught up: synced_to=${result?.synced_to ?? '?'}, new_notes=${result?.notes_found ?? 0}`)
 		} catch (e: any) {
-			console.warn('[zcash] Background scan failed (non-fatal):', e?.message || e)
+			console.warn('[zcash] Background device-verify/scan failed (non-fatal):', e?.message || e)
 		} finally {
 			zcashBackgroundVerifyInFlight = false
 		}
@@ -1996,7 +2113,12 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			ethVerifyMessage: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
-				return await engine.wallet.ethVerifyMessage(params)
+				// Verify shows the message + address on device and waits for a button
+				// press — on the emulator that needs the Confirm/Reject affordance, same
+				// as tronVerifyMessage. Without the gate it hangs until the 120s timeout.
+				return engine.isEmulator
+					? await emuSigningOp(() => engine.wallet!.ethVerifyMessage(params), { operation: 'ethVerifyMessage', chain: 'Ethereum' })
+					: await engine.wallet.ethVerifyMessage(params)
 			},
 			cosmosSignTx: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
@@ -2893,7 +3015,16 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					// Attach shielded ZEC as a synthetic token under native Zcash so the
 					// dashboard renders it like an ERC20 sub-row. The Orchard FVK lives
 					// in the local sidecar; the seed never left the device.
-					if (zcashPrivacyEnabled && hasFvkLoaded()) {
+					// Only surface a shielded balance once the cached FVK has been PROVEN
+					// to belong to the connected device. Otherwise a stale FVK from a
+					// previous device/seed would show a phantom balance the user can't
+					// actually spend. When not yet verified, kick off the device-match
+					// check (which purges stale state on mismatch) and skip this round —
+					// the balance appears on the next refresh once verified.
+					if (zcashPrivacyEnabled && hasFvkLoaded() && !zcashDeviceVerified) {
+						maybeStartBackgroundWalletVerification()
+					}
+					if (zcashPrivacyEnabled && hasFvkLoaded() && zcashDeviceVerified) {
 						try {
 							const shielded = await Promise.race([
 								getShieldedBalance(),
@@ -4255,10 +4386,44 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					fvk: cached?.fvk ?? null,
 					synced_to: scanState.syncedTo,
 					keepkey_release_block: scanState.releaseBlock,
-					verified: zcashVerifiedThisSession,
+					// `verified` now means the cached FVK was PROVEN to match the
+					// connected device — not merely "scanned to tip". `synced` keeps
+					// the old scan-freshness signal for clients that want both.
+					verified: zcashDeviceVerified,
+					synced: zcashVerifiedThisSession,
 					verifying: zcashBackgroundVerifyInFlight,
 				}
-				console.log(`[zcash] zcashShieldedStatus → ready=${result.ready} fvk=${fvkLoaded} verified=${result.verified} verifying=${result.verifying} synced_to=${scanState.syncedTo} addr=${cached?.address?.slice(0, 20) ?? 'none'}`)
+				console.log(`[zcash] zcashShieldedStatus → ready=${result.ready} fvk=${fvkLoaded} verified=${result.verified} synced=${result.synced} verifying=${result.verifying} synced_to=${scanState.syncedTo} addr=${cached?.address?.slice(0, 20) ?? 'none'}`)
+				return result
+			},
+			// Read-only diagnostic: does the cached shielded balance actually belong
+			// to the CONNECTED device? Derives the Orchard FVK fresh from the device
+			// (silent, no button) and compares its `ak` to the cached one. Does NOT
+			// mutate the sidecar/db. `match: false` means the shown balance is from a
+			// different/stale wallet and is not spendable here.
+			zcashVerifyDevice: async (params) => {
+				if (!zcashPrivacyEnabled) throw new Error('Zcash privacy feature is disabled')
+				if (!engine.wallet) throw new Error('No device connected')
+				if (typeof (engine.wallet as any).zcashGetOrchardFVK !== 'function') {
+					throw new Error('Device firmware does not support Orchard FVK export')
+				}
+				const cached = getCachedFvk()
+				const deviceFvk = await (engine.wallet as any).zcashGetOrchardFVK(params?.account ?? 0)
+				const deviceAk = Buffer.from(deviceFvk.ak).toString('hex')
+				const cachedAk = cached?.fvk?.ak ?? null
+				const match = !!cachedAk && cachedAk.toLowerCase() === deviceAk.toLowerCase()
+				const result = {
+					match,
+					deviceAk,
+					cachedAk,
+					cachedAddress: cached?.address ?? null,
+					message: cachedAk === null
+						? 'No cached FVK — nothing to compare (wallet not initialized).'
+						: match
+							? 'OK: the cached shielded balance belongs to the connected device.'
+							: 'MISMATCH: cached shielded balance is NOT from the connected device — stale/another wallet, not spendable here.',
+				}
+				console.log(`[zcash] zcashVerifyDevice → match=${match} deviceAk=${deviceAk.slice(0, 12)}… cachedAk=${(cachedAk ?? 'none').slice(0, 12)}…`)
 				return result
 			},
 			zcashShieldedInit: async (params) => {
@@ -4271,7 +4436,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!engine.wallet) throw new Error('No device connected')
 				// initializeOrchardFromDevice updates the in-process FVK cache itself.
 				const result = await initializeOrchardFromDevice(engine.wallet as any, params?.account ?? 0)
+				// FVK came straight from the connected device → it is device-verified
+				// by construction, but the unspent set still needs a fresh scan.
 				zcashVerifiedThisSession = false
+				zcashDeviceVerified = true
 				return result
 			},
 			zcashShieldedScan: async (params) => {
@@ -4282,6 +4450,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// could have no FVK loaded — `scanOrchardNotes` would then fail with
 				// "No FVK set". Refresh from device first if needed.
 				await ensureFvkLoaded(engine.wallet, 0)
+				// Scan returns { balance, notes_found, ... }, so it is a balance-exposing
+				// path — prove the cached FVK belongs to the connected device first, or a
+				// stale/other-wallet FVK would surface a phantom balance via a scan request
+				// (reviewer#2). ensureFvkLoaded only loads-if-absent; it does NOT verify.
+				await ensureZcashDeviceMatch(0)
 				const result = await scanOrchardNotes(params?.startHeight, params?.fullRescan)
 				if (result?.synced_to != null) updateSyncedTo(result.synced_to)
 				// A successful scan validates the wallet against the chain — even an
@@ -4291,12 +4464,25 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			zcashShieldedBalance: async () => {
 				if (!zcashPrivacyEnabled) throw new Error('Zcash privacy feature is disabled')
+				if (hasFvkLoaded() && !zcashDeviceVerified) {
+					maybeStartBackgroundWalletVerification()
+					throw new Error('Zcash wallet is not verified against the connected device yet')
+				}
 				return await getShieldedBalance()
 			},
 			zcashShieldedSend: async (params) => {
 				if (!zcashPrivacyEnabled) throw new Error('Zcash privacy feature is disabled')
 				if (!engine.wallet) throw new Error('No device connected')
+				const account = (params as any)?.account ?? 0
+				if (account !== 0) throw new Error('Only account 0 is supported; multi-account shielded sends are not implemented')
 				await ensureFvkLoaded(engine.wallet, 0)
+				// FAIL-CLOSED: prove the FVK we're about to spend from belongs to the
+				// CONNECTED device before building anything. On mismatch this purges
+				// the stale wallet and re-derives from the device — so a wrong-signer
+				// spend (which consensus rejects with "could not validate orchard
+				// proof") can never be built. A device-comms failure throws and
+				// aborts the send rather than proceeding on unverified state.
+				await ensureZcashDeviceMatch(account, true)
 				await ensureZcashScanFresh()
 				// FVK already loaded means device supports Orchard — skip version check
 				// (version string may not be populated yet at call time)
@@ -4347,7 +4533,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			zcashShieldZec: async (params) => {
 				if (!zcashPrivacyEnabled) throw new Error('Zcash privacy feature is disabled')
 				if (!engine.wallet) throw new Error('No device connected')
-				await ensureFvkLoaded(engine.wallet, params.account ?? 0)
+				const account = params.account ?? 0
+				if (account !== 0) throw new Error('Only account 0 is supported; multi-account shielded sends are not implemented')
+				await ensureFvkLoaded(engine.wallet, account)
+				await ensureZcashDeviceMatch(account, true)
 				await ensureZcashScanFresh()
 				// Transparent shielding uses standard ECDSA (secp256k1) for transparent inputs
 				// + Orchard RedPallas for the shielded output. The ECDSA part works on any
@@ -4369,7 +4558,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				}
 				const result = await shieldZec(engine.wallet as any, pioneer, {
 					amount: params.amount,
-					account: params.account,
+					account,
 				}, { signWrap, onProgress })
 				try { rpc.send['shield-progress']({ step: 'complete', detail: result.txid }) } catch { /* webview not ready */ }
 				return result
@@ -4378,7 +4567,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			zcashDeshieldZec: async (params) => {
 				if (!zcashPrivacyEnabled) throw new Error('Zcash privacy feature is disabled')
 				if (!engine.wallet) throw new Error('No device connected')
-				await ensureFvkLoaded(engine.wallet, 0)
+				const account = params.account ?? 0
+				if (account !== 0) throw new Error('Only account 0 is supported; multi-account shielded sends are not implemented')
+				await ensureFvkLoaded(engine.wallet, account)
+				await ensureZcashDeviceMatch(account, true)
 				await ensureZcashScanFresh()
 				const { deshieldZec } = await import("./txbuilder/zcash-deshield")
 				try { rpc.send['deshield-progress']({ step: 'building' }) } catch { /* webview not ready */ }
@@ -4394,7 +4586,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const result = await deshieldZec(engine.wallet as any, {
 					recipient: params.recipient,
 					amount: params.amount,
-					account: params.account,
+					account,
 				}, { signWrap, onProgress })
 				try { rpc.send['deshield-progress']({ step: 'complete', detail: result.txid }) } catch { /* webview not ready */ }
 				return result
@@ -4414,7 +4606,17 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			zcashDisplayAddress: async (params) => {
 				if (!zcashPrivacyEnabled) throw new Error('Zcash privacy feature is disabled')
 				if (!engine.wallet) throw new Error('No device connected')
-				return await displayOrchardAddressOnDevice(engine.wallet as any, params?.account ?? 0)
+				// On the emulator there is no physical button, so wrap the on-device
+				// display in emuSigningOp — that installs the ButtonRequest handler that
+				// surfaces the Confirm/Reject affordance in the emulator window (same as
+				// the other getAddress display flows). Without it the address-verify
+				// screen hangs with no button until the 120s confirm timeout.
+				return engine.isEmulator
+					? await emuSigningOp(
+						() => displayOrchardAddressOnDevice(engine.wallet as any, params?.account ?? 0),
+						{ operation: 'zcashDisplayAddress', chain: 'Zcash' },
+					)
+					: await displayOrchardAddressOnDevice(engine.wallet as any, params?.account ?? 0)
 			},
 
 			zcashDiagnoseAnchor: async (params: any) => {
@@ -6656,6 +6858,11 @@ engine.on('state-change', (state) => {
 	if (shouldResetManagersOnReady(state, lastReadyDeviceId)) {
 		console.warn(`[Vault] Device swap ${lastReadyDeviceId} → ${state.deviceId}: resetting in-memory account managers`)
 		resetSeedManagers()
+		// Device-to-device swap is exactly the case `seed-changed` does NOT catch.
+		// Force Zcash to re-prove the cached FVK against the NEW device before any
+		// shielded balance is shown or spend is built (anti-bleed).
+		zcashDeviceVerified = false
+		zcashVerifiedThisSession = false
 		// Proactively push the now-empty sets so the frontend drops device-A's
 		// addresses immediately, rather than showing them until the next re-init.
 		try { rpc.send['btc-accounts-update'](btcAccounts.toAccountSet()) } catch { /* webview not ready yet */ }
@@ -6830,6 +7037,7 @@ engine.on('seed-changed', ({ deviceId, oldAddress, newAddress }) => {
 	stopSidecar()
 	wipeSidecarWalletDb()
 	zcashVerifiedThisSession = false
+	zcashDeviceVerified = false
 	zcashBackgroundVerifyInFlight = false
 	// Clear stale DB caches — old seed's pubkeys and balances are wrong for the new seed
 	if (deviceId) {

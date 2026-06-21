@@ -140,7 +140,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       getTokenVisibilityMap: { params: void; response: Record<string, TokenVisibilityStatus> }
 
       // ── Zcash Shielded (Orchard) ──────────────────────────────────────
-      zcashShieldedStatus: { params: void; response: { ready: boolean; fvk_loaded: boolean; address: string | null; fvk: { ak: string; nk: string; rivk: string } | null; synced_to: number | null; keepkey_release_block: number | null } }
+      zcashShieldedStatus: { params: void; response: { ready: boolean; fvk_loaded: boolean; address: string | null; fvk: { ak: string; nk: string; rivk: string } | null; synced_to: number | null; keepkey_release_block: number | null; verified: boolean; synced: boolean; verifying: boolean } }
       zcashShieldedInit: { params: { account?: number }; response: { fvk: { ak: string; nk: string; rivk: string }; address: string } }
       zcashShieldedScan: { params: { startHeight?: number; fullRescan?: boolean }; response: { balance: number; notes_found: number; synced_to: number } }
       zcashShieldedBalance: { params: void; response: { confirmed: number; pending: number; synced_to?: number | null; notes_total?: number; notes_unspent?: number; keepkey_release_block?: number } }
@@ -157,6 +157,9 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
         response: { address: string; balanceZat: number; pendingZat: number; matureCount: number; pendingCount: number }
       }
       zcashDeshieldZec: { params: { recipient: string; amount: number; account?: number }; response: { txid: string } }
+      // Read-only diagnostic: does the cached shielded balance belong to the
+      // connected device? `match: false` ⇒ stale/other-wallet, not spendable here.
+      zcashVerifyDevice: { params: { account?: number } | void; response: { match: boolean; deviceAk: string; cachedAk: string | null; cachedAddress: string | null; message: string } }
       zcashGetTransactions: { params: void; response: { transactions: ZcashTransaction[] } }
       zcashBackfillMemos: { params: void; response: { backfilled: number } }
       // Ask the device to derive and display its Orchard UA for this account.

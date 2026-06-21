@@ -18,18 +18,14 @@ const VERSION_GROUP_ID: u32 = 0x26A7270A;
 
 /// Precomputed BLAKE2b-256("ZTxIdTranspaHash", "") for shielded-only txs
 pub const EMPTY_TRANSPARENT_DIGEST: [u8; 32] = [
-    0xc3, 0x3f, 0x2e, 0x95, 0x70, 0x5f, 0xaa, 0xb3,
-    0x5f, 0x8d, 0x53, 0x3f, 0xa6, 0x1e, 0x95, 0xc3,
-    0xb7, 0xaa, 0xba, 0x07, 0x76, 0xb8, 0x74, 0xa9,
-    0xf7, 0x4f, 0xc1, 0x27, 0x84, 0x37, 0x6a, 0x59,
+    0xc3, 0x3f, 0x2e, 0x95, 0x70, 0x5f, 0xaa, 0xb3, 0x5f, 0x8d, 0x53, 0x3f, 0xa6, 0x1e, 0x95, 0xc3,
+    0xb7, 0xaa, 0xba, 0x07, 0x76, 0xb8, 0x74, 0xa9, 0xf7, 0x4f, 0xc1, 0x27, 0x84, 0x37, 0x6a, 0x59,
 ];
 
 /// Precomputed BLAKE2b-256("ZTxIdSaplingHash", "") for Orchard-only txs
 pub const EMPTY_SAPLING_DIGEST: [u8; 32] = [
-    0x6f, 0x2f, 0xc8, 0xf9, 0x8f, 0xea, 0xfd, 0x94,
-    0xe7, 0x4a, 0x0d, 0xf4, 0xbe, 0xd7, 0x43, 0x91,
-    0xee, 0x0b, 0x5a, 0x69, 0x94, 0x5e, 0x4c, 0xed,
-    0x8c, 0xa8, 0xa0, 0x95, 0x20, 0x6f, 0x00, 0xae,
+    0x6f, 0x2f, 0xc8, 0xf9, 0x8f, 0xea, 0xfd, 0x94, 0xe7, 0x4a, 0x0d, 0xf4, 0xbe, 0xd7, 0x43, 0x91,
+    0xee, 0x0b, 0x5a, 0x69, 0x94, 0x5e, 0x4c, 0xed, 0x8c, 0xa8, 0xa0, 0x95, 0x20, 0x6f, 0x00, 0xae,
 ];
 
 /// All ZIP-244 sub-digests needed for sighash computation.
@@ -43,21 +39,14 @@ pub struct Zip244Digests {
 
 /// BLAKE2b-256 with a 16-byte personalization string.
 fn blake2b_256(personal: &[u8; 16], data: &[u8]) -> [u8; 32] {
-    let hash = Params::new()
-        .hash_length(32)
-        .personal(personal)
-        .hash(data);
+    let hash = Params::new().hash_length(32).personal(personal).hash(data);
     let mut out = [0u8; 32];
     out.copy_from_slice(hash.as_bytes());
     out
 }
 
 /// Compute the ZIP-244 header digest.
-pub fn digest_header(
-    branch_id: u32,
-    lock_time: u32,
-    expiry_height: u32,
-) -> [u8; 32] {
+pub fn digest_header(branch_id: u32, lock_time: u32, expiry_height: u32) -> [u8; 32] {
     let mut data = Vec::with_capacity(20);
     data.extend_from_slice(&TX_VERSION.to_le_bytes());
     data.extend_from_slice(&VERSION_GROUP_ID.to_le_bytes());
@@ -69,8 +58,7 @@ pub fn digest_header(
 
 /// Compute the ZIP-244 orchard digest from an authorized Orchard bundle.
 pub fn digest_orchard(bundle: &orchard::Bundle<orchard::bundle::Authorized, i64>) -> [u8; 32] {
-    let (compact_hash, memos_hash, noncompact_hash) =
-        compute_orchard_action_hashes(bundle);
+    let (compact_hash, memos_hash, noncompact_hash) = compute_orchard_action_hashes(bundle);
 
     let mut data = Vec::with_capacity(32 * 3 + 1 + 8 + 32);
     data.extend_from_slice(&compact_hash);
@@ -178,11 +166,11 @@ where
 /// Transparent input for ZIP-244 digest computation.
 #[derive(Debug, Clone)]
 pub struct TransparentInput {
-    pub prevout_hash: [u8; 32],   // txid (internal byte order)
+    pub prevout_hash: [u8; 32], // txid (internal byte order)
     pub prevout_index: u32,
-    pub script_pubkey: Vec<u8>,   // for the UTXO being spent
-    pub value: u64,               // zatoshis
-    pub sequence: u32,            // typically 0xFFFFFFFF
+    pub script_pubkey: Vec<u8>, // for the UTXO being spent
+    pub value: u64,             // zatoshis
+    pub sequence: u32,          // typically 0xFFFFFFFF
 }
 
 /// Transparent output for ZIP-244 digest computation.
@@ -248,7 +236,10 @@ pub fn digest_transparent_outputs(outputs: &[TransparentOutput]) -> [u8; 32] {
 /// (sequence) || T.2c (outputs)). The amounts/scripts sub-digests are
 /// sighash-only (§4.10) and MUST NOT appear here, despite both digests sharing
 /// the "ZTxIdTranspaHash" personalization.
-pub fn digest_transparent_txid(inputs: &[TransparentInput], outputs: &[TransparentOutput]) -> [u8; 32] {
+pub fn digest_transparent_txid(
+    inputs: &[TransparentInput],
+    outputs: &[TransparentOutput],
+) -> [u8; 32] {
     if inputs.is_empty() && outputs.is_empty() {
         return EMPTY_TRANSPARENT_DIGEST;
     }
@@ -418,7 +409,10 @@ where
 {
     Zip244Digests {
         header_digest: digest_header(branch_id, lock_time, expiry_height),
-        transparent_digest: hybrid_orchard_transparent_digest(transparent_inputs, transparent_outputs),
+        transparent_digest: hybrid_orchard_transparent_digest(
+            transparent_inputs,
+            transparent_outputs,
+        ),
         sapling_digest: EMPTY_SAPLING_DIGEST,
         orchard_digest: digest_orchard_effects(bundle),
     }
@@ -538,8 +532,12 @@ mod tests {
         let digests = Zip244Digests {
             header_digest: header,
             transparent_digest: EMPTY_TRANSPARENT_DIGEST,
-            sapling_digest: hex_to_array("6f2fc8f98feafd94e74a0df4bed74391ee0b5a69945e4ced8ca8a095206f00ae"),
-            orchard_digest: hex_to_array("0ee1912a92e13f43e2511d9c0a12ab26c165391eefc7311e382d752806e6cb8a"),
+            sapling_digest: hex_to_array(
+                "6f2fc8f98feafd94e74a0df4bed74391ee0b5a69945e4ced8ca8a095206f00ae",
+            ),
+            orchard_digest: hex_to_array(
+                "0ee1912a92e13f43e2511d9c0a12ab26c165391eefc7311e382d752806e6cb8a",
+            ),
         };
         let sighash = compute_sighash(&digests, NU5_BRANCH_ID);
         // Deterministic: pin for regression detection
@@ -556,13 +554,19 @@ mod tests {
         let inputs = vec![TransparentInput {
             prevout_hash: [0xAA; 32],
             prevout_index: 0,
-            script_pubkey: vec![0x76, 0xa9, 0x14, /* 20 zero bytes */ 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, 0x88, 0xac],
+            script_pubkey: vec![
+                0x76, 0xa9, 0x14, /* 20 zero bytes */ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 0x88, 0xac,
+            ],
             value: 100_000,
             sequence: 0xFFFFFFFF,
         }];
         let outputs = vec![TransparentOutput {
             value: 90_000,
-            script_pubkey: vec![0x76, 0xa9, 0x14, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, 0x88, 0xac],
+            script_pubkey: vec![
+                0x76, 0xa9, 0x14, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x88,
+                0xac,
+            ],
         }];
 
         let txid_digest = digest_transparent_txid(&inputs, &outputs);
@@ -598,7 +602,8 @@ mod tests {
         let outputs = vec![TransparentOutput {
             value: 90_000,
             script_pubkey: vec![
-                0x76, 0xa9, 0x14, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, 0x88, 0xac,
+                0x76, 0xa9, 0x14, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x88,
+                0xac,
             ],
         }];
 
@@ -632,9 +637,8 @@ mod tests {
             prevout_hash: [0xAA; 32],
             prevout_index: 0,
             script_pubkey: vec![
-                0x76, 0xa9, 0x14,
-                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                0x88, 0xac,
+                0x76, 0xa9, 0x14, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x88,
+                0xac,
             ],
             value: 100_000,
             sequence: 0xFFFF_FFFF,
@@ -642,9 +646,8 @@ mod tests {
         let outputs = vec![TransparentOutput {
             value: 5_000,
             script_pubkey: vec![
-                0x76, 0xa9, 0x14,
-                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                0x88, 0xac,
+                0x76, 0xa9, 0x14, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x88,
+                0xac,
             ],
         }];
 

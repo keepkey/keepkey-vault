@@ -550,6 +550,82 @@ function getPackageVersion(pkgDir: string): string | null {
   } catch { return null }
 }
 
+// Parse "5.7.0" / "5.7.0-beta.1" → [5,7,0]; returns null if unparseable.
+function parseSemver(v: string): [number, number, number] | null {
+  const m = /^(\d+)\.(\d+)\.(\d+)/.exec(v)
+  return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null
+}
+
+// True when the top-level copy can safely satisfy a nested copy, making the
+// nested one redundant (Node resolution falls back UP to top-level):
+//   - identical versions, OR
+//   - same MAJOR (>=1) and top-level is the same-or-newer minor/patch.
+// Per semver a caret range (^x.y.z — how the ethers/@ethersproject 5.x ecosystem
+// pins itself) is satisfied by any same-major, >= version, so collapsing the
+// nested ethers@5.7.x to top-level ethers@5.8.0 is safe and matches the version
+// the app's own EVM paths already load. We deliberately do NOT collapse 0.x
+// packages (every 0.minor is a breaking change — e.g. @cosmjs 0.28 vs 0.29,
+// axios 0.21 vs 0.27) or cross-major copies (ws 7 vs 8): those stay nested.
+function topLevelSupersedes(nestedVer: string, topVer: string): boolean {
+  if (nestedVer === topVer) return true
+  const n = parseSemver(nestedVer), t = parseSemver(topVer)
+  if (!n || !t) return false
+  if (n[0] < 1 || n[0] !== t[0]) return false
+  if (t[1] !== n[1]) return t[1] > n[1]
+  return t[2] >= n[2]
+}
+
+// Long-path-safe recursive removal. Deeply re-nested node_modules (e.g. the
+// @ethersproject chain inside pioneer-discovery's ethers@5.7.2) exceed Windows
+// MAX_PATH; a bare rmSync fails partway and leaves broken shadow dirs (the reason
+// same-version nested dedupe used to be skipped on Windows). The \\?\ extended-
+// length prefix lets the removal complete on >260-char paths so the dedupe can
+// run on Windows too, instead of shipping a tree Inno Setup can't package.
+function rmTreeSafe(p: string) {
+  const target = process.platform === 'win32' ? '\\\\?\\' + resolve(p) : p
+  rmSync(target, { recursive: true, force: true })
+}
+
+// The Windows installer stages the bundle under
+// C:\tmp\kk\Resources\app\node_modules\<rel> before Inno Setup packages it, and
+// Inno chokes as paths approach MAX_PATH (260). This prefix is that staged root;
+// a file's staged length ≈ STAGE_PREFIX_LEN + (its path beneath nmDest).
+// Keep in sync with the staging dir in scripts/build-windows-production.ps1 — if
+// that root moves, the post-strip MAX_PATH assertion below surfaces the mismatch.
+const STAGE_PREFIX_LEN = 'C:\\tmp\\kk\\Resources\\app\\node_modules\\'.length
+const STAGE_BUDGET = 248 // collapse only what would overflow, with margin under 260
+
+// Longest staged path any file under `dir` would occupy once staged for Inno.
+function subtreeMaxStagedLen(dir: string): number {
+  let max = 0
+  const walk = (d: string) => {
+    let entries: ReturnType<typeof readdirSync>
+    try { entries = readdirSync(d, { withFileTypes: true }) } catch { return }
+    for (const e of entries) {
+      const fp = join(d, e.name)
+      if (e.isDirectory()) walk(fp)
+      else {
+        const staged = STAGE_PREFIX_LEN + (fp.length - nmDest.length)
+        if (staged > max) max = staged
+      }
+    }
+  }
+  walk(dir)
+  return max
+}
+
+// Whether a redundant nested package should be collapsed (removed so resolution
+// falls back to top-level). Non-Windows keeps the original conservative behavior
+// (exact-version dups only). Windows ALSO collapses semver-superseded copies, but
+// ONLY when their subtree would overflow the Inno staging budget — so trees that
+// already fit (e.g. the WalletConnect chain the build script probes for) are left
+// byte-for-byte as the working build had them, and we touch only the genuine
+// MAX_PATH offenders (pioneer-discovery's deep ethers/@ethersproject re-nesting).
+function shouldCollapseNested(pkgPath: string, nestedVer: string, topVer: string): boolean {
+  if (process.platform !== 'win32') return nestedVer === topVer
+  return topLevelSupersedes(nestedVer, topVer) && subtreeMaxStagedLen(pkgPath) > STAGE_BUDGET
+}
+
 function stripDuplicateNestedNodeModules(dirPath: string) {
   try {
     const entries = readdirSync(dirPath, { withFileTypes: true })
@@ -572,15 +648,17 @@ function stripDuplicateNestedNodeModules(dirPath: string) {
                 const scopedName = `${pkg.name}/${scoped.name}`
                 const nestedVer = getPackageVersion(scopedPath)
                 const topVer = getPackageVersion(join(nmDest, scopedName))
-                if (nestedVer && topVer && nestedVer === topVer) {
-                  // On Windows, removing very deep duplicate node_modules can
-                  // partially delete packages and leave broken shadow dirs
-                  // (for example uint8arrays without cjs/src). Keep them.
-                  if (process.platform !== 'win32') {
-                    rmSync(scopedPath, { recursive: true, force: true })
-                  }
-                } else if (nestedVer && topVer && nestedVer !== topVer) {
-                  console.log(`  Keeping nested: ${scopedName}@${nestedVer} (top-level: ${topVer})`)
+                if (nestedVer && topVer && shouldCollapseNested(scopedPath, nestedVer, topVer)) {
+                  // Redundant + overflows the staging budget — collapse it.
+                  // Long-path-safe so it completes on deep Windows paths instead
+                  // of leaving broken shadow dirs.
+                  rmTreeSafe(scopedPath)
+                } else if (nestedVer && topVer) {
+                  if (nestedVer !== topVer) console.log(`  Keeping nested: ${scopedName}@${nestedVer} (top-level: ${topVer})`)
+                  // Recurse INTO the kept package (Windows): a version-differing dep
+                  // (e.g. ethers@5.7.2) can re-nest its own deep semver-superseded
+                  // dups that overflow MAX_PATH; reach and collapse just those.
+                  if (process.platform === 'win32') stripDuplicateNestedNodeModules(scopedPath)
                 }
               }
               // Remove the scope dir if empty
@@ -590,14 +668,15 @@ function stripDuplicateNestedNodeModules(dirPath: string) {
             } else {
               const nestedVer = getPackageVersion(nestedPkgPath)
               const topVer = getPackageVersion(join(nmDest, pkg.name))
-              if (nestedVer && topVer && nestedVer === topVer) {
-                // See scoped-package case above: partial deletion on Windows
-                // is worse than a slightly larger bundle.
-                if (process.platform !== 'win32') {
-                  rmSync(nestedPkgPath, { recursive: true, force: true })
-                }
-              } else if (nestedVer && topVer && nestedVer !== topVer) {
-                console.log(`  Keeping nested: ${pkg.name}@${nestedVer} (top-level: ${topVer})`)
+              if (nestedVer && topVer && shouldCollapseNested(nestedPkgPath, nestedVer, topVer)) {
+                // Redundant + overflows the staging budget — long-path-safe removal
+                // (see scoped case above) so it completes on deep paths.
+                rmTreeSafe(nestedPkgPath)
+              } else if (nestedVer && topVer) {
+                if (nestedVer !== topVer) console.log(`  Keeping nested: ${pkg.name}@${nestedVer} (top-level: ${topVer})`)
+                // Recurse into the kept package (Windows) to collapse its own deep
+                // semver-superseded dups (MAX_PATH offenders).
+                if (process.platform === 'win32') stripDuplicateNestedNodeModules(nestedPkgPath)
               }
             }
           }
@@ -623,6 +702,23 @@ function stripDuplicateNestedNodeModules(dirPath: string) {
 }
 stripDuplicateNestedNodeModules(nmDest)
 console.log(`[collect-externals] Stripped duplicate nested node_modules (kept version-differing deps)`)
+
+// Fail LOUDLY if anything still exceeds Windows MAX_PATH after the dedupe. A future
+// deep nested tree this pass can't collapse (a 0.x or cross-major dup that must stay
+// nested) would otherwise surface only as an opaque Inno Setup "The system cannot
+// find the path specified" mid-compress. Catch it here with the offending length.
+// Windows-only: the staging budget / MAX_PATH limit is Windows-specific.
+if (process.platform === 'win32') {
+  const deepestStaged = subtreeMaxStagedLen(nmDest)
+  console.log(`[collect-externals] Windows: deepest staged path = ${deepestStaged} chars (MAX_PATH 260)`)
+  if (deepestStaged > 260) {
+    throw new Error(
+      `[collect-externals] A staged path is ${deepestStaged} chars — over Windows MAX_PATH (260) — ` +
+      `after nested dedupe. A deep nested tree could not be collapsed (likely a 0.x or cross-major ` +
+      `dup that must stay nested). Inno Setup would fail to package it; resolve the offending dep tree.`
+    )
+  }
+}
 let strippedSize = 0
 for (const dir of STRIP_DIRS) {
   const target = join(nmDest, dir)
