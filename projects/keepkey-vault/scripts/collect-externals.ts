@@ -590,6 +590,8 @@ function rmTreeSafe(p: string) {
 // C:\tmp\kk\Resources\app\node_modules\<rel> before Inno Setup packages it, and
 // Inno chokes as paths approach MAX_PATH (260). This prefix is that staged root;
 // a file's staged length ≈ STAGE_PREFIX_LEN + (its path beneath nmDest).
+// Keep in sync with the staging dir in scripts/build-windows-production.ps1 — if
+// that root moves, the post-strip MAX_PATH assertion below surfaces the mismatch.
 const STAGE_PREFIX_LEN = 'C:\\tmp\\kk\\Resources\\app\\node_modules\\'.length
 const STAGE_BUDGET = 248 // collapse only what would overflow, with margin under 260
 
@@ -700,6 +702,23 @@ function stripDuplicateNestedNodeModules(dirPath: string) {
 }
 stripDuplicateNestedNodeModules(nmDest)
 console.log(`[collect-externals] Stripped duplicate nested node_modules (kept version-differing deps)`)
+
+// Fail LOUDLY if anything still exceeds Windows MAX_PATH after the dedupe. A future
+// deep nested tree this pass can't collapse (a 0.x or cross-major dup that must stay
+// nested) would otherwise surface only as an opaque Inno Setup "The system cannot
+// find the path specified" mid-compress. Catch it here with the offending length.
+// Windows-only: the staging budget / MAX_PATH limit is Windows-specific.
+if (process.platform === 'win32') {
+  const deepestStaged = subtreeMaxStagedLen(nmDest)
+  console.log(`[collect-externals] Windows: deepest staged path = ${deepestStaged} chars (MAX_PATH 260)`)
+  if (deepestStaged > 260) {
+    throw new Error(
+      `[collect-externals] A staged path is ${deepestStaged} chars — over Windows MAX_PATH (260) — ` +
+      `after nested dedupe. A deep nested tree could not be collapsed (likely a 0.x or cross-major ` +
+      `dup that must stay nested). Inno Setup would fail to package it; resolve the offending dep tree.`
+    )
+  }
+}
 let strippedSize = 0
 for (const dir of STRIP_DIRS) {
   const target = join(nmDest, dir)
