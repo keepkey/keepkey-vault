@@ -80,6 +80,10 @@ export interface RestApiCallbacks {
    *  refresh the note set to chain tip. Throws to abort BEFORE signing, so a
    *  stale-DB / device-swap can never build from old notes and fail late. */
   zcashPreSendGate?: (account: number) => Promise<void>
+  /** Fail-closed Zcash wallet identity check for read-only balance paths.
+   *  Proves the cached Orchard FVK belongs to the connected device before
+   *  exposing any shielded balance from the local sidecar database. */
+  zcashVerifyWallet?: (account: number) => Promise<void>
   /** Returns initialized Pioneer client (for debug endpoints) */
   getPioneer?: () => Promise<any>
   /** Returns the active Pioneer API base URL */
@@ -3664,6 +3668,10 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/api/zcash/shielded/balance' && method === 'GET') {
           auth.requireAuth(req)
+          const wallet = requireWallet(engine)
+          await ensureFvkLoaded(wallet, 0)
+          if (!callbacks?.zcashVerifyWallet) throw new HttpError(503, 'Zcash wallet verification unavailable')
+          await callbacks.zcashVerifyWallet(0)
           const result = await getShieldedBalance()
           return json(result)
         }
@@ -3792,7 +3800,20 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/api/zcash/shielded/build' && method === 'POST') {
           auth.requireAuth(req)
+          const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.ZcashBuildRequest)
+          // FAIL-CLOSED preflight, mirroring /send (P2-C): prove the cached Orchard
+          // FVK belongs to the connected device (purges stale state on mismatch) +
+          // fresh scan BEFORE building a spend, so /build can't construct a PCZT from
+          // a previous wallet's notes after a device swap. Every PCZT-building entry
+          // point must prove device identity. (/finalize needs device signatures, so
+          // the split path isn't remotely completable regardless — but the invariant
+          // must hold uniformly.)
+          const account = (body as any).account ?? 0
+          if (account !== 0) throw new HttpError(400, 'Only account 0 is supported; multi-account shielded sends are not implemented')
+          await ensureFvkLoaded(wallet, account)
+          if (!callbacks?.zcashPreSendGate) throw new HttpError(503, 'Zcash pre-send gate unavailable')
+          await callbacks.zcashPreSendGate(account)
           const result = await buildShieldedTx(body)
           return json(result)
         }

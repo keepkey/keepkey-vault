@@ -11,7 +11,7 @@
  *   5. Sidecar (or Pioneer API) broadcasts
  */
 
-import { sendCommand, isSidecarReady, startSidecar, setCachedFvk, hasFvkLoaded } from "../zcash-sidecar"
+import { sendCommand, isSidecarReady, startSidecar, setCachedFvk, hasFvkLoaded, beginZcashSend, endZcashSend } from "../zcash-sidecar"
 
 export interface ShieldedSendParams {
 	/** Hex-encoded Orchard recipient address (43 bytes) */
@@ -295,9 +295,11 @@ export async function sendShielded(
 		throw new Error("A shielded send is already in progress — wait for it to complete")
 	}
 	sendInProgress = true
+	beginZcashSend()
 	try {
 		return await _sendShieldedInner(wallet, params, opts)
 	} finally {
+		endZcashSend()
 		sendInProgress = false
 	}
 }

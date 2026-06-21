@@ -333,7 +333,9 @@ export function ZcashPrivacyTab() {
 			})
 			if (bal.synced_to != null) { setSyncedTo(bal.synced_to); setNeedsScan(false) }
 			else setNeedsScan(true)
-		} catch { /* not available yet */ }
+		} catch {
+			setBalance(null)
+		}
 	}, [])
 
 	const loadTransactions = useCallback(async () => {
@@ -353,7 +355,7 @@ export function ZcashPrivacyTab() {
 			try {
 				const r = await rpcRequest<{
 					ready: boolean; fvk_loaded: boolean; address: string | null
-					synced_to?: number | null
+					synced_to?: number | null; verified?: boolean
 				}>("zcashShieldedStatus", undefined, 5000)
 				if (cancelled) return
 				if (!r.ready) { setStatus("not_running"); return }
@@ -361,7 +363,12 @@ export function ZcashPrivacyTab() {
 				else setNeedsScan(true)
 				if (r.fvk_loaded && r.address) {
 					setOrchardAddress(r.address); setStatus("ready")
-					refreshBalance(); loadTransactions(); return
+					if (r.verified) {
+						refreshBalance(); loadTransactions()
+					} else {
+						setBalance(null); setTransactions([])
+					}
+					return
 				}
 				setStatus("initializing")
 				const initRes = await rpcRequest<{ fvk: any; address: string }>(

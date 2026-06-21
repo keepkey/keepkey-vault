@@ -4,10 +4,10 @@
 //! trial-decrypt Orchard notes, persist to wallet DB, track nullifiers,
 //! and broadcast transactions.
 
-use anyhow::{Result, Context};
-use log::{info, debug};
-use tonic::transport::{Channel, ClientTlsConfig};
+use anyhow::{Context, Result};
+use log::{debug, info};
 use tokio_stream::StreamExt;
+use tonic::transport::{Channel, ClientTlsConfig};
 
 use orchard::keys::{FullViewingKey, PreparedIncomingViewingKey, Scope};
 use orchard::note::ExtractedNoteCommitment;
@@ -15,15 +15,15 @@ use orchard::note::Nullifier;
 use orchard::note_encryption::{CompactAction, OrchardDomain};
 use zcash_note_encryption::{try_compact_note_decryption, try_note_decryption, EphemeralKeyBytes};
 
-use crate::wallet_db::{WalletDb, ScannedNote};
+use crate::wallet_db::{ScannedNote, WalletDb};
 
 /// A transparent UTXO from lightwalletd.
 #[derive(Debug, Clone)]
 pub struct TransparentUtxo {
     pub txid: [u8; 32],
     pub output_index: u32,
-    pub value: u64,         // zatoshis
-    pub script: Vec<u8>,    // scriptPubKey
+    pub value: u64,      // zatoshis
+    pub script: Vec<u8>, // scriptPubKey
     pub height: u64,
 }
 
@@ -71,13 +71,17 @@ impl LightwalletClient {
                     match tokio::time::timeout(
                         std::time::Duration::from_secs(5),
                         endpoint.connect(),
-                    ).await {
+                    )
+                    .await
+                    {
                         Ok(Ok(channel)) => {
                             let mut client = CompactTxStreamerClient::new(channel);
                             match tokio::time::timeout(
                                 std::time::Duration::from_secs(5),
                                 client.get_lightd_info(proto::Empty {}),
-                            ).await {
+                            )
+                            .await
+                            {
                                 Ok(Ok(_)) => {
                                     info!("Connected to lightwalletd: {}", url);
                                     return Ok(Self { client });
@@ -94,20 +98,25 @@ impl LightwalletClient {
             }
         }
 
-        Err(anyhow::anyhow!("Failed to connect to any lightwalletd server"))
+        Err(anyhow::anyhow!(
+            "Failed to connect to any lightwalletd server"
+        ))
     }
 
     /// Get the current consensus branch ID from lightwalletd.
     pub async fn get_consensus_branch_id(&mut self) -> Result<u32> {
-        let response = self.client
+        let response = self
+            .client
             .get_lightd_info(proto::Empty {})
             .await
             .context("GetLightdInfo failed")?;
 
         let info = response.into_inner();
         let branch_str = info.consensus_branch_id.trim_start_matches("0x");
-        let branch_id = u32::from_str_radix(branch_str, 16)
-            .context(format!("Invalid consensus branch ID string: '{}'", info.consensus_branch_id))?;
+        let branch_id = u32::from_str_radix(branch_str, 16).context(format!(
+            "Invalid consensus branch ID string: '{}'",
+            info.consensus_branch_id
+        ))?;
 
         info!("Current consensus branch ID: 0x{:08x}", branch_id);
         Ok(branch_id)
@@ -115,7 +124,8 @@ impl LightwalletClient {
 
     /// Get the current chain tip height.
     pub async fn get_latest_block_height(&mut self) -> Result<u64> {
-        let response = self.client
+        let response = self
+            .client
             .get_latest_block(proto::ChainSpec {})
             .await
             .context("GetLatestBlock failed")?;
@@ -124,7 +134,8 @@ impl LightwalletClient {
 
     /// Broadcast a raw transaction via lightwalletd.
     pub async fn send_transaction(&mut self, raw_tx: &[u8]) -> Result<String> {
-        let response = self.client
+        let response = self
+            .client
             .send_transaction(proto::RawTransaction {
                 data: raw_tx.to_vec(),
                 height: 0,
@@ -158,7 +169,8 @@ impl LightwalletClient {
             max_entries,
         };
 
-        let mut stream = self.client
+        let mut stream = self
+            .client
             .get_subtree_roots(request)
             .await
             .context("GetSubtreeRoots failed")?
@@ -176,7 +188,11 @@ impl LightwalletClient {
             }
         }
 
-        info!("Fetched {} Orchard subtree roots (start_index={})", roots.len(), start_index);
+        info!(
+            "Fetched {} Orchard subtree roots (start_index={})",
+            roots.len(),
+            start_index
+        );
         Ok(roots)
     }
 
@@ -189,13 +205,18 @@ impl LightwalletClient {
             hash: vec![],
         };
 
-        let response = self.client
+        let response = self
+            .client
             .get_tree_state(request)
             .await
             .context("GetTreeState failed")?;
 
         let state = response.into_inner();
-        info!("Tree state at height {}: orchard_tree len={}", height, state.orchard_tree.len());
+        info!(
+            "Tree state at height {}: orchard_tree len={}",
+            height,
+            state.orchard_tree.len()
+        );
         Ok((state.height, state.orchard_tree))
     }
 
@@ -214,16 +235,23 @@ impl LightwalletClient {
         let (_, tree_hex) = self.get_tree_state(height).await?;
 
         if tree_hex.is_empty() {
-            return Err(anyhow::anyhow!("Empty Orchard tree state at height {}", height));
+            return Err(anyhow::anyhow!(
+                "Empty Orchard tree state at height {}",
+                height
+            ));
         }
 
-        let tree_bytes = hex::decode(&tree_hex)
-            .map_err(|e| anyhow::anyhow!("Invalid tree state hex: {}", e))?;
+        let tree_bytes =
+            hex::decode(&tree_hex).map_err(|e| anyhow::anyhow!("Invalid tree state hex: {}", e))?;
 
-        info!("Parsing Orchard CommitmentTree ({} bytes) at height {}", tree_bytes.len(), height);
+        info!(
+            "Parsing Orchard CommitmentTree ({} bytes) at height {}",
+            tree_bytes.len(),
+            height
+        );
 
-        use orchard::tree::MerkleHashOrchard;
         use incrementalmerkletree::Hashable;
+        use orchard::tree::MerkleHashOrchard;
 
         let data = &tree_bytes[..];
         let len = data.len();
@@ -231,39 +259,49 @@ impl LightwalletClient {
 
         // Helper: read an Optional<32-byte hash> with strict validation.
         // Returns Ok(Some(hash)) for 0x01 tag, Ok(None) for 0x00, Err for anything else.
-        let read_optional = |data: &[u8], offset: &mut usize|
-            -> Result<Option<MerkleHashOrchard>>
-        {
-            if *offset >= data.len() {
-                return Err(anyhow::anyhow!("CommitmentTree truncated at offset {}", *offset));
-            }
-            match data[*offset] {
-                0x00 => { *offset += 1; Ok(None) }
-                0x01 => {
-                    *offset += 1;
-                    if *offset + 32 > data.len() {
-                        return Err(anyhow::anyhow!(
+        let read_optional =
+            |data: &[u8], offset: &mut usize| -> Result<Option<MerkleHashOrchard>> {
+                if *offset >= data.len() {
+                    return Err(anyhow::anyhow!(
+                        "CommitmentTree truncated at offset {}",
+                        *offset
+                    ));
+                }
+                match data[*offset] {
+                    0x00 => {
+                        *offset += 1;
+                        Ok(None)
+                    }
+                    0x01 => {
+                        *offset += 1;
+                        if *offset + 32 > data.len() {
+                            return Err(anyhow::anyhow!(
                             "CommitmentTree truncated reading hash at offset {} (need 32, have {})",
                             *offset, data.len() - *offset
                         ));
+                        }
+                        let mut h = [0u8; 32];
+                        h.copy_from_slice(&data[*offset..*offset + 32]);
+                        *offset += 32;
+                        let hash =
+                            MerkleHashOrchard::from_bytes(&h)
+                                .into_option()
+                                .ok_or_else(|| {
+                                    anyhow::anyhow!(
+                                        "Invalid MerkleHashOrchard at offset {}: {}",
+                                        *offset - 32,
+                                        hex::encode(&h)
+                                    )
+                                })?;
+                        Ok(Some(hash))
                     }
-                    let mut h = [0u8; 32];
-                    h.copy_from_slice(&data[*offset..*offset + 32]);
-                    *offset += 32;
-                    let hash = MerkleHashOrchard::from_bytes(&h)
-                        .into_option()
-                        .ok_or_else(|| anyhow::anyhow!(
-                            "Invalid MerkleHashOrchard at offset {}: {}",
-                            *offset - 32, hex::encode(&h)
-                        ))?;
-                    Ok(Some(hash))
+                    tag => Err(anyhow::anyhow!(
+                        "Invalid Optional tag 0x{:02x} at offset {} (expected 0x00 or 0x01)",
+                        tag,
+                        *offset
+                    )),
                 }
-                tag => Err(anyhow::anyhow!(
-                    "Invalid Optional tag 0x{:02x} at offset {} (expected 0x00 or 0x01)",
-                    tag, *offset
-                )),
-            }
-        };
+            };
 
         // Read Optional<left>
         let left = read_optional(data, &mut offset)?;
@@ -273,13 +311,17 @@ impl LightwalletClient {
 
         // Read Vector<Optional<parent>> — compact_size count, then each Optional
         if offset >= len {
-            return Err(anyhow::anyhow!("CommitmentTree truncated reading parents count at offset {}", offset));
+            return Err(anyhow::anyhow!(
+                "CommitmentTree truncated reading parents count at offset {}",
+                offset
+            ));
         }
         let parents_count = data[offset] as usize;
         offset += 1;
         if parents_count > 32 {
             return Err(anyhow::anyhow!(
-                "CommitmentTree parents count {} exceeds max depth 32", parents_count
+                "CommitmentTree parents count {} exceeds max depth 32",
+                parents_count
             ));
         }
         let mut parents: Vec<Option<MerkleHashOrchard>> = Vec::with_capacity(parents_count);
@@ -290,12 +332,20 @@ impl LightwalletClient {
         }
 
         if offset != len {
-            info!("WARNING: CommitmentTree has {} trailing bytes (offset={}, len={})",
-                len - offset, offset, len);
+            info!(
+                "WARNING: CommitmentTree has {} trailing bytes (offset={}, len={})",
+                len - offset,
+                offset,
+                len
+            );
         }
 
-        info!("CommitmentTree: left={}, right={}, {} parents",
-            left.is_some(), right.is_some(), parents_count);
+        info!(
+            "CommitmentTree: left={}, right={}, {} parents",
+            left.is_some(),
+            right.is_some(),
+            parents_count
+        );
 
         // Compute root following CommitmentTree::root_at_depth logic.
         // Start with the leaf-level pair, then walk up through parents.
@@ -311,16 +361,24 @@ impl LightwalletClient {
             }
             (None, None) => {
                 // Empty tree
-                MerkleHashOrchard::combine(incrementalmerkletree::Level::from(0), &empty_leaf, &empty_leaf)
+                MerkleHashOrchard::combine(
+                    incrementalmerkletree::Level::from(0),
+                    &empty_leaf,
+                    &empty_leaf,
+                )
             }
             (None, Some(_)) => {
-                return Err(anyhow::anyhow!("Invalid CommitmentTree: right without left"));
+                return Err(anyhow::anyhow!(
+                    "Invalid CommitmentTree: right without left"
+                ));
             }
         };
 
         // Levels 1..32: combine with parent or empty
         let mut empty_at_level = MerkleHashOrchard::combine(
-            incrementalmerkletree::Level::from(0), &empty_leaf, &empty_leaf,
+            incrementalmerkletree::Level::from(0),
+            &empty_leaf,
+            &empty_leaf,
         );
 
         for level in 1..32u8 {
@@ -370,11 +428,18 @@ impl LightwalletClient {
         end_height: u64,
     ) -> Result<Vec<(u64, Vec<(u32, Vec<[u8; 32]>)>)>> {
         let request = proto::BlockRange {
-            start: Some(proto::BlockId { height: start_height, hash: vec![] }),
-            end: Some(proto::BlockId { height: end_height, hash: vec![] }),
+            start: Some(proto::BlockId {
+                height: start_height,
+                hash: vec![],
+            }),
+            end: Some(proto::BlockId {
+                height: end_height,
+                hash: vec![],
+            }),
         };
 
-        let mut stream = self.client
+        let mut stream = self
+            .client
             .get_block_range(request)
             .await
             .context("GetBlockRange for actions failed")?
@@ -400,11 +465,17 @@ impl LightwalletClient {
             blocks.push((block.height, txs));
         }
 
-        let total_actions: usize = blocks.iter()
+        let total_actions: usize = blocks
+            .iter()
             .flat_map(|(_, txs)| txs.iter().map(|(_, cmxs)| cmxs.len()))
             .sum();
-        info!("Fetched {} blocks with {} total Orchard actions ({} to {})",
-            blocks.len(), total_actions, start_height, end_height);
+        info!(
+            "Fetched {} blocks with {} total Orchard actions ({} to {})",
+            blocks.len(),
+            total_actions,
+            start_height,
+            end_height
+        );
         Ok(blocks)
     }
 
@@ -416,13 +487,15 @@ impl LightwalletClient {
             hash: vec![],
         };
 
-        let response = self.client
+        let response = self
+            .client
             .get_block(request)
             .await
             .context("GetBlock failed")?;
 
         let block = response.into_inner();
-        let size = block.chain_metadata
+        let size = block
+            .chain_metadata
             .map(|m| m.orchard_commitment_tree_size as u64)
             .unwrap_or(0);
 
@@ -432,17 +505,15 @@ impl LightwalletClient {
 
     /// Fetch transparent UTXOs for a given address via lightwalletd.
     /// Uses the GetAddressUtxos gRPC method.
-    pub async fn get_address_utxos(
-        &mut self,
-        address: &str,
-    ) -> Result<Vec<TransparentUtxo>> {
+    pub async fn get_address_utxos(&mut self, address: &str) -> Result<Vec<TransparentUtxo>> {
         let request = proto::GetAddressUtxosArg {
             addresses: vec![address.to_string()],
             start_height: 0,
             max_entries: 1000,
         };
 
-        let response = self.client
+        let response = self
+            .client
             .get_address_utxos(request)
             .await
             .context("GetAddressUtxos failed")?;
@@ -475,12 +546,17 @@ impl LightwalletClient {
             index: 0,
             hash: txid.to_vec(),
         };
-        let response = self.client
+        let response = self
+            .client
             .get_transaction(request)
             .await
             .context("GetTransaction failed")?;
         let raw = response.into_inner();
-        debug!("Fetched transaction: {} bytes at height {}", raw.data.len(), raw.height);
+        debug!(
+            "Fetched transaction: {} bytes at height {}",
+            raw.data.len(),
+            raw.height
+        );
         Ok(raw.data)
     }
 
@@ -498,7 +574,8 @@ impl LightwalletClient {
         if action_index >= actions.len() {
             return Err(anyhow::anyhow!(
                 "Action index {} out of range (tx has {} Orchard actions)",
-                action_index, actions.len()
+                action_index,
+                actions.len()
             ));
         }
 
@@ -510,7 +587,8 @@ impl LightwalletClient {
             let prepared_ivk = PreparedIncomingViewingKey::new(&ivk);
             let domain = OrchardDomain::for_action(action);
 
-            if let Some((_note, _addr, memo)) = try_note_decryption(&domain, &prepared_ivk, action) {
+            if let Some((_note, _addr, memo)) = try_note_decryption(&domain, &prepared_ivk, action)
+            {
                 return Ok(Some(memo));
             }
         }
@@ -540,16 +618,16 @@ impl LightwalletClient {
 
         let start = match force_start {
             Some(h) => h,
-            None => saved_height
-                .map(|h| h + 1)
-                .unwrap_or_else(|| {
-                    // First scan: start from KeepKey release block — no KeepKey
-                    // user could have shielded notes before this height, so
-                    // scanning from Orchard activation (1687104) wastes ~1.6M blocks.
-                    info!("First scan — starting from KeepKey release block {} (tip={})",
-                           KEEPKEY_RELEASE_BLOCK, tip);
-                    KEEPKEY_RELEASE_BLOCK
-                }),
+            None => saved_height.map(|h| h + 1).unwrap_or_else(|| {
+                // First scan: start from KeepKey release block — no KeepKey
+                // user could have shielded notes before this height, so
+                // scanning from Orchard activation (1687104) wastes ~1.6M blocks.
+                info!(
+                    "First scan — starting from KeepKey release block {} (tip={})",
+                    KEEPKEY_RELEASE_BLOCK, tip
+                );
+                KEEPKEY_RELEASE_BLOCK
+            }),
         };
 
         // Only advance the scan cursor when this scan is contiguous with
@@ -564,7 +642,11 @@ impl LightwalletClient {
         };
 
         if start > tip {
-            info!("Already up to date (scanned to {}, tip is {})", start - 1, tip);
+            info!(
+                "Already up to date (scanned to {}, tip is {})",
+                start - 1,
+                tip
+            );
             let balance = db.get_balance()?;
             let (_total, unspent) = db.get_note_count()?;
             return Ok(OrchardScanResult {
@@ -594,11 +676,18 @@ impl LightwalletClient {
             let end = std::cmp::min(current + chunk_size - 1, tip);
 
             let request = proto::BlockRange {
-                start: Some(proto::BlockId { height: current, hash: vec![] }),
-                end: Some(proto::BlockId { height: end, hash: vec![] }),
+                start: Some(proto::BlockId {
+                    height: current,
+                    hash: vec![],
+                }),
+                end: Some(proto::BlockId {
+                    height: end,
+                    hash: vec![],
+                }),
             };
 
-            let mut stream = self.client
+            let mut stream = self
+                .client
                 .get_block_range(request)
                 .await
                 .context("GetBlockRange failed")?
@@ -759,30 +848,46 @@ pub struct OrchardScanResult {
 
 // ── Raw v5 transaction parsing for full memo decryption ────────────────
 
-use orchard::Action;
 use orchard::note::TransmittedNoteCiphertext;
 use orchard::primitives::redpallas::{self, SpendAuth};
 use orchard::value::ValueCommitment;
+use orchard::Action;
 
 /// Read a Bitcoin-style compact size from a byte slice.
 /// Returns (value, bytes_consumed).
 fn read_compact_size(data: &[u8]) -> Result<(u64, usize)> {
     if data.is_empty() {
-        return Err(anyhow::anyhow!("Unexpected end of data reading compact size"));
+        return Err(anyhow::anyhow!(
+            "Unexpected end of data reading compact size"
+        ));
     }
     match data[0] {
         0..=252 => Ok((data[0] as u64, 1)),
         253 => {
-            if data.len() < 3 { return Err(anyhow::anyhow!("Short compact size (fd)")); }
+            if data.len() < 3 {
+                return Err(anyhow::anyhow!("Short compact size (fd)"));
+            }
             Ok((u16::from_le_bytes([data[1], data[2]]) as u64, 3))
         }
         254 => {
-            if data.len() < 5 { return Err(anyhow::anyhow!("Short compact size (fe)")); }
-            Ok((u32::from_le_bytes([data[1], data[2], data[3], data[4]]) as u64, 5))
+            if data.len() < 5 {
+                return Err(anyhow::anyhow!("Short compact size (fe)"));
+            }
+            Ok((
+                u32::from_le_bytes([data[1], data[2], data[3], data[4]]) as u64,
+                5,
+            ))
         }
         255 => {
-            if data.len() < 9 { return Err(anyhow::anyhow!("Short compact size (ff)")); }
-            Ok((u64::from_le_bytes([data[1], data[2], data[3], data[4], data[5], data[6], data[7], data[8]]), 9))
+            if data.len() < 9 {
+                return Err(anyhow::anyhow!("Short compact size (ff)"));
+            }
+            Ok((
+                u64::from_le_bytes([
+                    data[1], data[2], data[3], data[4], data[5], data[6], data[7], data[8],
+                ]),
+                9,
+            ))
         }
     }
 }
@@ -797,12 +902,18 @@ fn read_compact_size(data: &[u8]) -> Result<(u64, usize)> {
 ///   orchard actions (variable — what we want)
 pub fn parse_orchard_actions_from_raw_tx(raw: &[u8]) -> Result<Vec<Action<()>>> {
     if raw.len() < 20 {
-        return Err(anyhow::anyhow!("Transaction too short: {} bytes", raw.len()));
+        return Err(anyhow::anyhow!(
+            "Transaction too short: {} bytes",
+            raw.len()
+        ));
     }
 
     let version = u32::from_le_bytes([raw[0], raw[1], raw[2], raw[3]]);
     if version != 0x80000005 {
-        return Err(anyhow::anyhow!("Not a v5 transaction (version=0x{:08x})", version));
+        return Err(anyhow::anyhow!(
+            "Not a v5 transaction (version=0x{:08x})",
+            version
+        ));
     }
 
     // Skip: version(4) + version_group_id(4) + branch_id(4) + lock_time(4) + expiry(4) = 20
@@ -813,26 +924,50 @@ pub fn parse_orchard_actions_from_raw_tx(raw: &[u8]) -> Result<Vec<Action<()>>> 
     offset += sz;
     for _ in 0..n_vin {
         // prevout (32 txid + 4 index) + compact_size script + script + sequence(4)
-        offset = offset.checked_add(36)
+        offset = offset
+            .checked_add(36)
             .filter(|&o| o <= raw.len())
-            .ok_or_else(|| anyhow::anyhow!("Offset overflow/OOB skipping prevout at offset {}", offset))?;
+            .ok_or_else(|| {
+                anyhow::anyhow!("Offset overflow/OOB skipping prevout at offset {}", offset)
+            })?;
         let (script_len, sz) = read_compact_size(&raw[offset..])?;
-        offset = offset.checked_add(sz).and_then(|o| o.checked_add(script_len as usize)).and_then(|o| o.checked_add(4))
+        offset = offset
+            .checked_add(sz)
+            .and_then(|o| o.checked_add(script_len as usize))
+            .and_then(|o| o.checked_add(4))
             .filter(|&o| o <= raw.len())
-            .ok_or_else(|| anyhow::anyhow!("Offset overflow/OOB skipping input script at offset {}", offset))?;
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "Offset overflow/OOB skipping input script at offset {}",
+                    offset
+                )
+            })?;
     }
 
     // Skip transparent outputs
     let (n_vout, sz) = read_compact_size(&raw[offset..])?;
     offset += sz;
     for _ in 0..n_vout {
-        offset = offset.checked_add(8)
+        offset = offset
+            .checked_add(8)
             .filter(|&o| o <= raw.len())
-            .ok_or_else(|| anyhow::anyhow!("Offset overflow/OOB skipping output value at offset {}", offset))?;
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "Offset overflow/OOB skipping output value at offset {}",
+                    offset
+                )
+            })?;
         let (script_len, sz) = read_compact_size(&raw[offset..])?;
-        offset = offset.checked_add(sz).and_then(|o| o.checked_add(script_len as usize))
+        offset = offset
+            .checked_add(sz)
+            .and_then(|o| o.checked_add(script_len as usize))
             .filter(|&o| o <= raw.len())
-            .ok_or_else(|| anyhow::anyhow!("Offset overflow/OOB skipping output script at offset {}", offset))?;
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "Offset overflow/OOB skipping output script at offset {}",
+                    offset
+                )
+            })?;
     }
 
     // Skip sapling spends (nSpendsSapling)
@@ -845,43 +980,96 @@ pub fn parse_orchard_actions_from_raw_tx(raw: &[u8]) -> Result<Vec<Action<()>>> 
 
     // Skip Sapling bundle (v5 layout: spends, outputs, value_balance, anchor, proofs, sigs)
     // v5 sapling spend: cv(32) + nullifier(32) + rk(32) = 96 bytes
-    offset = (n_sapling_spends as usize).checked_mul(96).and_then(|n| offset.checked_add(n))
+    offset = (n_sapling_spends as usize)
+        .checked_mul(96)
+        .and_then(|n| offset.checked_add(n))
         .filter(|&o| o <= raw.len())
-        .ok_or_else(|| anyhow::anyhow!("Offset overflow/OOB skipping sapling spends at offset {}", offset))?;
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "Offset overflow/OOB skipping sapling spends at offset {}",
+                offset
+            )
+        })?;
     // v5 sapling output: cv(32) + cmu(32) + epk(32) + enc_ciphertext(580) + out_ciphertext(80) = 756 bytes
-    offset = (n_sapling_outputs as usize).checked_mul(756).and_then(|n| offset.checked_add(n))
+    offset = (n_sapling_outputs as usize)
+        .checked_mul(756)
+        .and_then(|n| offset.checked_add(n))
         .filter(|&o| o <= raw.len())
-        .ok_or_else(|| anyhow::anyhow!("Offset overflow/OOB skipping sapling outputs at offset {}", offset))?;
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "Offset overflow/OOB skipping sapling outputs at offset {}",
+                offset
+            )
+        })?;
 
     if n_sapling_spends > 0 || n_sapling_outputs > 0 {
         // valueBalanceSapling: 8 bytes (present if either count > 0)
-        offset = offset.checked_add(8)
+        offset = offset
+            .checked_add(8)
             .filter(|&o| o <= raw.len())
-            .ok_or_else(|| anyhow::anyhow!("Offset overflow/OOB skipping sapling value balance at offset {}", offset))?;
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "Offset overflow/OOB skipping sapling value balance at offset {}",
+                    offset
+                )
+            })?;
     }
     if n_sapling_spends > 0 {
         // Sapling anchor: 32 bytes (present if spends > 0)
-        offset = offset.checked_add(32)
+        offset = offset
+            .checked_add(32)
             .filter(|&o| o <= raw.len())
-            .ok_or_else(|| anyhow::anyhow!("Offset overflow/OOB skipping sapling anchor at offset {}", offset))?;
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "Offset overflow/OOB skipping sapling anchor at offset {}",
+                    offset
+                )
+            })?;
     }
     // Spend proofs: 192 bytes per spend (Groth16)
-    offset = (n_sapling_spends as usize).checked_mul(192).and_then(|n| offset.checked_add(n))
+    offset = (n_sapling_spends as usize)
+        .checked_mul(192)
+        .and_then(|n| offset.checked_add(n))
         .filter(|&o| o <= raw.len())
-        .ok_or_else(|| anyhow::anyhow!("Offset overflow/OOB skipping sapling spend proofs at offset {}", offset))?;
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "Offset overflow/OOB skipping sapling spend proofs at offset {}",
+                offset
+            )
+        })?;
     // Spend auth sigs: 64 bytes per spend
-    offset = (n_sapling_spends as usize).checked_mul(64).and_then(|n| offset.checked_add(n))
+    offset = (n_sapling_spends as usize)
+        .checked_mul(64)
+        .and_then(|n| offset.checked_add(n))
         .filter(|&o| o <= raw.len())
-        .ok_or_else(|| anyhow::anyhow!("Offset overflow/OOB skipping sapling spend sigs at offset {}", offset))?;
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "Offset overflow/OOB skipping sapling spend sigs at offset {}",
+                offset
+            )
+        })?;
     // Output proofs: 192 bytes per output (Groth16)
-    offset = (n_sapling_outputs as usize).checked_mul(192).and_then(|n| offset.checked_add(n))
+    offset = (n_sapling_outputs as usize)
+        .checked_mul(192)
+        .and_then(|n| offset.checked_add(n))
         .filter(|&o| o <= raw.len())
-        .ok_or_else(|| anyhow::anyhow!("Offset overflow/OOB skipping sapling output proofs at offset {}", offset))?;
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "Offset overflow/OOB skipping sapling output proofs at offset {}",
+                offset
+            )
+        })?;
     if n_sapling_spends > 0 || n_sapling_outputs > 0 {
         // Binding sig: 64 bytes
-        offset = offset.checked_add(64)
+        offset = offset
+            .checked_add(64)
             .filter(|&o| o <= raw.len())
-            .ok_or_else(|| anyhow::anyhow!("Offset overflow/OOB skipping sapling binding sig at offset {}", offset))?;
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "Offset overflow/OOB skipping sapling binding sig at offset {}",
+                    offset
+                )
+            })?;
     }
 
     // Now parse Orchard actions
@@ -898,7 +1086,8 @@ pub fn parse_orchard_actions_from_raw_tx(raw: &[u8]) -> Result<Vec<Action<()>>> 
         if offset + 820 > raw.len() {
             return Err(anyhow::anyhow!(
                 "Not enough bytes for Orchard action at offset {} (need 820, have {})",
-                offset, raw.len() - offset
+                offset,
+                raw.len() - offset
             ));
         }
 
@@ -939,13 +1128,19 @@ pub fn parse_orchard_actions_from_raw_tx(raw: &[u8]) -> Result<Vec<Action<()>>> 
 
         // Construct Action<()>
         let nf = Nullifier::from_bytes(&nf_bytes);
-        if bool::from(nf.is_none()) { continue; }
+        if bool::from(nf.is_none()) {
+            continue;
+        }
 
         let cmx = ExtractedNoteCommitment::from_bytes(&cmx_bytes);
-        if bool::from(cmx.is_none()) { continue; }
+        if bool::from(cmx.is_none()) {
+            continue;
+        }
 
         let cv_net = ValueCommitment::from_bytes(&cv_bytes);
-        if bool::from(cv_net.is_none()) { continue; }
+        if bool::from(cv_net.is_none()) {
+            continue;
+        }
 
         let rk: redpallas::VerificationKey<SpendAuth> = match rk_bytes.try_into() {
             Ok(k) => k,
@@ -975,6 +1170,10 @@ pub fn parse_orchard_actions_from_raw_tx(raw: &[u8]) -> Result<Vec<Action<()>>> 
         actions.push(action);
     }
 
-    debug!("Parsed {} Orchard actions from raw tx ({} bytes)", actions.len(), raw.len());
+    debug!(
+        "Parsed {} Orchard actions from raw tx ({} bytes)",
+        actions.len(),
+        raw.len()
+    );
     Ok(actions)
 }

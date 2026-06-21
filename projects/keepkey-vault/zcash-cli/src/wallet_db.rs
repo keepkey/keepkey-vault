@@ -3,16 +3,16 @@
 //! Stores decrypted notes, scan progress, and nullifier tracking
 //! to enable incremental scanning and spending.
 
-use anyhow::{Result, Context};
-use rusqlite::{Connection, params};
+use anyhow::{Context, Result};
+use log::{debug, info};
+use rusqlite::{params, Connection};
 use std::path::PathBuf;
-use log::{info, debug};
 
 /// A scanned Orchard note with all fields needed to reconstruct it for spending.
 #[derive(Debug, Clone)]
 pub struct ScannedNote {
     pub value: u64,
-    pub recipient: Vec<u8>,    // 43-byte Orchard address
+    pub recipient: Vec<u8>, // 43-byte Orchard address
     pub rho: [u8; 32],
     pub rseed: [u8; 32],
     pub cmx: [u8; 32],
@@ -20,8 +20,8 @@ pub struct ScannedNote {
     pub block_height: u64,
     pub tx_index: u32,
     pub action_index: u32,
-    pub txid: Option<[u8; 32]>,       // Transaction hash (for memo backfill)
-    pub memo: Option<Vec<u8>>,        // 512-byte raw memo (None if compact-only scan)
+    pub txid: Option<[u8; 32]>, // Transaction hash (for memo backfill)
+    pub memo: Option<Vec<u8>>,  // 512-byte raw memo (None if compact-only scan)
 }
 
 /// A note record for transaction history display.
@@ -66,8 +66,7 @@ impl WalletDb {
             .ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?
             .join(".keepkey");
 
-        std::fs::create_dir_all(&db_dir)
-            .context("Failed to create ~/.keepkey directory")?;
+        std::fs::create_dir_all(&db_dir).context("Failed to create ~/.keepkey directory")?;
 
         let db_path = db_dir.join("zcash_wallet.db");
         Self::open(&db_path)
@@ -76,8 +75,7 @@ impl WalletDb {
     /// Open (or create) the wallet database at a specific path.
     pub fn open(path: &PathBuf) -> Result<Self> {
         debug!("Opening wallet database: {}", path.display());
-        let conn = Connection::open(path)
-            .context("Failed to open wallet database")?;
+        let conn = Connection::open(path).context("Failed to open wallet database")?;
 
         // Set restrictive file permissions (owner read/write only)
         #[cfg(unix)]
@@ -94,8 +92,9 @@ impl WalletDb {
     }
 
     fn initialize_schema(&self) -> Result<()> {
-        self.conn.execute_batch(
-            "CREATE TABLE IF NOT EXISTS notes (
+        self.conn
+            .execute_batch(
+                "CREATE TABLE IF NOT EXISTS notes (
                 id INTEGER PRIMARY KEY,
                 value INTEGER NOT NULL,
                 recipient BLOB NOT NULL,
@@ -130,41 +129,54 @@ impl WalletDb {
 
             CREATE INDEX IF NOT EXISTS idx_notes_nullifier ON notes(nullifier);
             CREATE INDEX IF NOT EXISTS idx_notes_unspent ON notes(is_spent) WHERE is_spent = 0;
-            "
-        ).context("Failed to initialize database schema")?;
+            ",
+            )
+            .context("Failed to initialize database schema")?;
 
         // Migration: add position column if missing (for existing databases)
-        let has_position = self.conn.query_row(
-            "SELECT COUNT(*) FROM pragma_table_info('notes') WHERE name='position'",
-            [],
-            |row| row.get::<_, i64>(0),
-        ).unwrap_or(0);
+        let has_position = self
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('notes') WHERE name='position'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap_or(0);
         if has_position == 0 {
-            self.conn.execute("ALTER TABLE notes ADD COLUMN position INTEGER", [])
+            self.conn
+                .execute("ALTER TABLE notes ADD COLUMN position INTEGER", [])
                 .context("Failed to add position column")?;
             info!("Migrated notes table: added position column");
         }
 
         // Migration: add memo column if missing
-        let has_memo = self.conn.query_row(
-            "SELECT COUNT(*) FROM pragma_table_info('notes') WHERE name='memo'",
-            [],
-            |row| row.get::<_, i64>(0),
-        ).unwrap_or(0);
+        let has_memo = self
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('notes') WHERE name='memo'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap_or(0);
         if has_memo == 0 {
-            self.conn.execute("ALTER TABLE notes ADD COLUMN memo BLOB", [])
+            self.conn
+                .execute("ALTER TABLE notes ADD COLUMN memo BLOB", [])
                 .context("Failed to add memo column")?;
             info!("Migrated notes table: added memo column");
         }
 
         // Migration: add txid column if missing
-        let has_txid = self.conn.query_row(
-            "SELECT COUNT(*) FROM pragma_table_info('notes') WHERE name='txid'",
-            [],
-            |row| row.get::<_, i64>(0),
-        ).unwrap_or(0);
+        let has_txid = self
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('notes') WHERE name='txid'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap_or(0);
         if has_txid == 0 {
-            self.conn.execute("ALTER TABLE notes ADD COLUMN txid BLOB", [])
+            self.conn
+                .execute("ALTER TABLE notes ADD COLUMN txid BLOB", [])
                 .context("Failed to add txid column")?;
             info!("Migrated notes table: added txid column");
         }
@@ -175,11 +187,14 @@ impl WalletDb {
 
     /// Get the last scanned block height, or None if never scanned.
     pub fn last_scanned_height(&self) -> Result<Option<u64>> {
-        let result: Option<String> = self.conn.query_row(
-            "SELECT value FROM scan_state WHERE key = 'last_scanned_height'",
-            [],
-            |row| row.get(0),
-        ).ok();
+        let result: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT value FROM scan_state WHERE key = 'last_scanned_height'",
+                [],
+                |row| row.get(0),
+            )
+            .ok();
 
         match result {
             Some(s) => Ok(Some(s.parse().context("Invalid last_scanned_height")?)),
@@ -189,10 +204,12 @@ impl WalletDb {
 
     /// Update the last scanned block height.
     pub fn set_last_scanned_height(&self, height: u64) -> Result<()> {
-        self.conn.execute(
-            "INSERT OR REPLACE INTO scan_state (key, value) VALUES ('last_scanned_height', ?1)",
-            params![height.to_string()],
-        ).context("Failed to update scan height")?;
+        self.conn
+            .execute(
+                "INSERT OR REPLACE INTO scan_state (key, value) VALUES ('last_scanned_height', ?1)",
+                params![height.to_string()],
+            )
+            .context("Failed to update scan height")?;
         Ok(())
     }
 
@@ -222,10 +239,13 @@ impl WalletDb {
 
     /// Mark a note as spent by its nullifier.
     pub fn mark_note_spent(&self, nullifier: &[u8; 32]) -> Result<bool> {
-        let updated = self.conn.execute(
-            "UPDATE notes SET is_spent = 1 WHERE nullifier = ?1 AND is_spent = 0",
-            params![nullifier.as_slice()],
-        ).context("Failed to mark note spent")?;
+        let updated = self
+            .conn
+            .execute(
+                "UPDATE notes SET is_spent = 1 WHERE nullifier = ?1 AND is_spent = 0",
+                params![nullifier.as_slice()],
+            )
+            .context("Failed to mark note spent")?;
 
         if updated > 0 {
             debug!("Marked note as spent: {}", hex::encode(nullifier));
@@ -253,66 +273,79 @@ impl WalletDb {
              FROM notes WHERE is_spent = 0 AND block_height <= ?1 ORDER BY value DESC"
         )?;
 
-        let notes = stmt.query_map(params![max_h], |row| {
-            let rho_blob: Vec<u8> = row.get(3)?;
-            let rseed_blob: Vec<u8> = row.get(4)?;
-            let cmx_blob: Vec<u8> = row.get(5)?;
-            let nf_blob: Vec<u8> = row.get(6)?;
+        let notes = stmt
+            .query_map(params![max_h], |row| {
+                let rho_blob: Vec<u8> = row.get(3)?;
+                let rseed_blob: Vec<u8> = row.get(4)?;
+                let cmx_blob: Vec<u8> = row.get(5)?;
+                let nf_blob: Vec<u8> = row.get(6)?;
 
-            if rho_blob.len() != 32 || rseed_blob.len() != 32 || cmx_blob.len() != 32 || nf_blob.len() != 32 {
-                return Err(rusqlite::Error::InvalidColumnType(
-                    3,
-                    format!(
-                        "Corrupt blob lengths: rho={} rseed={} cmx={} nf={}",
-                        rho_blob.len(), rseed_blob.len(), cmx_blob.len(), nf_blob.len()
-                    ),
-                    rusqlite::types::Type::Blob,
-                ));
-            }
-            let mut rho = [0u8; 32];
-            let mut rseed = [0u8; 32];
-            let mut cmx = [0u8; 32];
-            let mut nullifier = [0u8; 32];
-            rho.copy_from_slice(&rho_blob);
-            rseed.copy_from_slice(&rseed_blob);
-            cmx.copy_from_slice(&cmx_blob);
-            nullifier.copy_from_slice(&nf_blob);
+                if rho_blob.len() != 32
+                    || rseed_blob.len() != 32
+                    || cmx_blob.len() != 32
+                    || nf_blob.len() != 32
+                {
+                    return Err(rusqlite::Error::InvalidColumnType(
+                        3,
+                        format!(
+                            "Corrupt blob lengths: rho={} rseed={} cmx={} nf={}",
+                            rho_blob.len(),
+                            rseed_blob.len(),
+                            cmx_blob.len(),
+                            nf_blob.len()
+                        ),
+                        rusqlite::types::Type::Blob,
+                    ));
+                }
+                let mut rho = [0u8; 32];
+                let mut rseed = [0u8; 32];
+                let mut cmx = [0u8; 32];
+                let mut nullifier = [0u8; 32];
+                rho.copy_from_slice(&rho_blob);
+                rseed.copy_from_slice(&rseed_blob);
+                cmx.copy_from_slice(&cmx_blob);
+                nullifier.copy_from_slice(&nf_blob);
 
-            Ok(SpendableNote {
-                id: row.get(0)?,
-                value: row.get::<_, i64>(1)? as u64,
-                recipient: row.get(2)?,
-                rho,
-                rseed,
-                cmx,
-                nullifier,
-                block_height: row.get::<_, i64>(7)? as u64,
-                tx_index: row.get::<_, i64>(8)? as u32,
-                action_index: row.get::<_, i64>(9)? as u32,
-                position: row.get::<_, Option<i64>>(10)?.map(|p| p as u64),
-            })
-        })?.collect::<std::result::Result<Vec<_>, _>>()
-        .context("Failed to read spendable notes")?;
+                Ok(SpendableNote {
+                    id: row.get(0)?,
+                    value: row.get::<_, i64>(1)? as u64,
+                    recipient: row.get(2)?,
+                    rho,
+                    rseed,
+                    cmx,
+                    nullifier,
+                    block_height: row.get::<_, i64>(7)? as u64,
+                    tx_index: row.get::<_, i64>(8)? as u32,
+                    action_index: row.get::<_, i64>(9)? as u32,
+                    position: row.get::<_, Option<i64>>(10)?.map(|p| p as u64),
+                })
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .context("Failed to read spendable notes")?;
 
         Ok(notes)
     }
 
     /// Update the tree position for a note after computing it from the chain.
     pub fn update_note_position(&self, note_id: i64, position: u64) -> Result<()> {
-        self.conn.execute(
-            "UPDATE notes SET position = ?1 WHERE id = ?2",
-            params![position as i64, note_id],
-        ).context("Failed to update note position")?;
+        self.conn
+            .execute(
+                "UPDATE notes SET position = ?1 WHERE id = ?2",
+                params![position as i64, note_id],
+            )
+            .context("Failed to update note position")?;
         debug!("Updated note {} position to {}", note_id, position);
         Ok(())
     }
 
     /// Update the memo for a note identified by its database ID.
     pub fn update_note_memo(&self, note_id: i64, memo: &[u8]) -> Result<()> {
-        self.conn.execute(
-            "UPDATE notes SET memo = ?1 WHERE id = ?2",
-            params![memo, note_id],
-        ).context("Failed to update note memo")?;
+        self.conn
+            .execute(
+                "UPDATE notes SET memo = ?1 WHERE id = ?2",
+                params![memo, note_id],
+            )
+            .context("Failed to update note memo")?;
         debug!("Updated memo for note {}", note_id);
         Ok(())
     }
@@ -322,20 +355,22 @@ impl WalletDb {
         let mut stmt = self.conn.prepare(
             "SELECT id, txid, block_height, action_index FROM notes WHERE memo IS NULL AND txid IS NOT NULL"
         )?;
-        let rows = stmt.query_map([], |row| {
-            let txid_blob: Vec<u8> = row.get(1)?;
-            let mut txid = [0u8; 32];
-            if txid_blob.len() == 32 {
-                txid.copy_from_slice(&txid_blob);
-            }
-            Ok((
-                row.get::<_, i64>(0)?,
-                txid,
-                row.get::<_, i64>(2)? as u64,
-                row.get::<_, i64>(3)? as u32,
-            ))
-        })?.collect::<std::result::Result<Vec<_>, _>>()
-        .context("Failed to read notes without memo")?;
+        let rows = stmt
+            .query_map([], |row| {
+                let txid_blob: Vec<u8> = row.get(1)?;
+                let mut txid = [0u8; 32];
+                if txid_blob.len() == 32 {
+                    txid.copy_from_slice(&txid_blob);
+                }
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    txid,
+                    row.get::<_, i64>(2)? as u64,
+                    row.get::<_, i64>(3)? as u32,
+                ))
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .context("Failed to read notes without memo")?;
         Ok(rows)
     }
 
@@ -345,35 +380,37 @@ impl WalletDb {
             "SELECT id, value, block_height, tx_index, is_spent, memo, nullifier, txid, action_index
              FROM notes ORDER BY block_height DESC, tx_index DESC"
         )?;
-        let notes = stmt.query_map([], |row| {
-            let nf_blob: Vec<u8> = row.get(6)?;
-            let mut nullifier = [0u8; 32];
-            if nf_blob.len() == 32 {
-                nullifier.copy_from_slice(&nf_blob);
-            }
-            let txid_blob: Option<Vec<u8>> = row.get(7)?;
-            let txid = txid_blob.and_then(|b| {
-                if b.len() == 32 {
-                    let mut arr = [0u8; 32];
-                    arr.copy_from_slice(&b);
-                    Some(arr)
-                } else {
-                    None
+        let notes = stmt
+            .query_map([], |row| {
+                let nf_blob: Vec<u8> = row.get(6)?;
+                let mut nullifier = [0u8; 32];
+                if nf_blob.len() == 32 {
+                    nullifier.copy_from_slice(&nf_blob);
                 }
-            });
-            Ok(NoteRecord {
-                id: row.get(0)?,
-                value: row.get::<_, i64>(1)? as u64,
-                block_height: row.get::<_, i64>(2)? as u64,
-                tx_index: row.get::<_, i64>(3)? as u32,
-                is_spent: row.get::<_, i64>(4)? != 0,
-                memo: row.get(5)?,
-                nullifier,
-                txid,
-                action_index: row.get::<_, i64>(8)? as u32,
-            })
-        })?.collect::<std::result::Result<Vec<_>, _>>()
-        .context("Failed to read all notes")?;
+                let txid_blob: Option<Vec<u8>> = row.get(7)?;
+                let txid = txid_blob.and_then(|b| {
+                    if b.len() == 32 {
+                        let mut arr = [0u8; 32];
+                        arr.copy_from_slice(&b);
+                        Some(arr)
+                    } else {
+                        None
+                    }
+                });
+                Ok(NoteRecord {
+                    id: row.get(0)?,
+                    value: row.get::<_, i64>(1)? as u64,
+                    block_height: row.get::<_, i64>(2)? as u64,
+                    tx_index: row.get::<_, i64>(3)? as u32,
+                    is_spent: row.get::<_, i64>(4)? != 0,
+                    memo: row.get(5)?,
+                    nullifier,
+                    txid,
+                    action_index: row.get::<_, i64>(8)? as u32,
+                })
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .context("Failed to read all notes")?;
         Ok(notes)
     }
 
@@ -386,7 +423,8 @@ impl WalletDb {
         )?;
         if balance < 0 {
             return Err(anyhow::anyhow!(
-                "Corrupt wallet state: negative balance sum ({})", balance
+                "Corrupt wallet state: negative balance sum ({})",
+                balance
             ));
         }
         Ok(balance as u64)
@@ -394,12 +432,14 @@ impl WalletDb {
 
     /// Get total count of notes (spent + unspent).
     pub fn get_note_count(&self) -> Result<(u64, u64)> {
-        let total: i64 = self.conn.query_row(
-            "SELECT COUNT(*) FROM notes", [], |row| row.get(0),
-        )?;
-        let unspent: i64 = self.conn.query_row(
-            "SELECT COUNT(*) FROM notes WHERE is_spent = 0", [], |row| row.get(0),
-        )?;
+        let total: i64 = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM notes", [], |row| row.get(0))?;
+        let unspent: i64 =
+            self.conn
+                .query_row("SELECT COUNT(*) FROM notes WHERE is_spent = 0", [], |row| {
+                    row.get(0)
+                })?;
         Ok((total as u64, unspent as u64))
     }
 
@@ -452,13 +492,16 @@ impl WalletDb {
     /// Clear scan progress so the next scan starts from Orchard activation.
     /// Keeps the FVK and existing notes (duplicate nullifiers are ignored on re-insert).
     pub fn clear_scan_progress(&self) -> Result<()> {
-        self.conn.execute(
-            "DELETE FROM scan_state WHERE key = 'last_scanned_height'",
-            [],
-        ).context("Failed to clear scan progress")?;
+        self.conn
+            .execute(
+                "DELETE FROM scan_state WHERE key = 'last_scanned_height'",
+                [],
+            )
+            .context("Failed to clear scan progress")?;
         // Also clear notes since a full rescan will re-find them,
         // and stale spent-tracking could be inconsistent
-        self.conn.execute("DELETE FROM notes", [])
+        self.conn
+            .execute("DELETE FROM notes", [])
             .context("Failed to clear notes for rescan")?;
         info!("Scan progress cleared for full rescan (FVK preserved)");
         Ok(())
@@ -466,12 +509,14 @@ impl WalletDb {
 
     /// Delete all data for a full rescan, including stored FVK.
     pub fn reset(&self) -> Result<()> {
-        self.conn.execute_batch(
-            "DELETE FROM notes;
+        self.conn
+            .execute_batch(
+                "DELETE FROM notes;
              DELETE FROM scan_state;
              DELETE FROM tree_state;
-             DELETE FROM fvk_store;"
-        ).context("Failed to reset wallet database")?;
+             DELETE FROM fvk_store;",
+            )
+            .context("Failed to reset wallet database")?;
         info!("Wallet database reset for rescan (FVK cleared)");
         Ok(())
     }
@@ -480,11 +525,11 @@ impl WalletDb {
     /// Returns true if they match or no FVK is stored yet.
     pub fn fvk_matches(&self, new_fvk_bytes: &[u8; 96]) -> Result<bool> {
         let new_hash = hex::encode(&new_fvk_bytes[..32]);
-        let result = self.conn.query_row(
-            "SELECT ak_hash FROM fvk_store WHERE id = 1",
-            [],
-            |row| row.get::<_, Option<String>>(0),
-        );
+        let result = self
+            .conn
+            .query_row("SELECT ak_hash FROM fvk_store WHERE id = 1", [], |row| {
+                row.get::<_, Option<String>>(0)
+            });
         match result {
             Ok(Some(stored_hash)) => Ok(stored_hash == new_hash),
             Ok(None) | Err(rusqlite::Error::QueryReturnedNoRows) => Ok(true),
