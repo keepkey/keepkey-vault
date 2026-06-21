@@ -11,7 +11,7 @@
  *   5. Sidecar (or Pioneer API) broadcasts
  */
 
-import { sendCommand, isSidecarReady, startSidecar, setCachedFvk, hasFvkLoaded } from "../zcash-sidecar"
+import { sendCommand, isSidecarReady, startSidecar, setCachedFvk, hasFvkLoaded, beginZcashSend, endZcashSend } from "../zcash-sidecar"
 
 export interface ShieldedSendParams {
 	/** Hex-encoded Orchard recipient address (43 bytes) */
@@ -240,12 +240,20 @@ export async function buildShieldedTx(params: ShieldedSendParams): Promise<{
 		throw new Error("Sidecar not initialized — call initializeOrchard() first")
 	}
 
-	return await sendCommand("build_pczt", {
-		recipient: params.recipient,
-		amount: params.amount,
-		account: params.account ?? 0,
-		memo: params.memo,
-	})
+	// Guard the sidecar against a background device-verify teardown while the PCZT
+	// is being built (the split REST /build path doesn't go through sendShielded,
+	// so it would otherwise be unguarded — reviewer#3).
+	beginZcashSend()
+	try {
+		return await sendCommand("build_pczt", {
+			recipient: params.recipient,
+			amount: params.amount,
+			account: params.account ?? 0,
+			memo: params.memo,
+		})
+	} finally {
+		endZcashSend()
+	}
 }
 
 /**
@@ -261,7 +269,15 @@ export async function finalizeShieldedTx(signatures: string[]): Promise<{
 		throw new Error("Sidecar not initialized")
 	}
 
-	return await sendCommand("finalize", { signatures })
+	// Guard the sidecar against a background device-verify teardown during finalize
+	// (split REST /finalize path — reviewer#3). The build→finalize gap itself is
+	// covered by the device-verified flag invariant set at /build time.
+	beginZcashSend()
+	try {
+		return await sendCommand("finalize", { signatures })
+	} finally {
+		endZcashSend()
+	}
 }
 
 /**
@@ -295,9 +311,11 @@ export async function sendShielded(
 		throw new Error("A shielded send is already in progress — wait for it to complete")
 	}
 	sendInProgress = true
+	beginZcashSend()
 	try {
 		return await _sendShieldedInner(wallet, params, opts)
 	} finally {
+		endZcashSend()
 		sendInProgress = false
 	}
 }

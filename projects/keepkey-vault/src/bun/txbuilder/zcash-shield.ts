@@ -10,7 +10,7 @@
  *   6. Broadcast via lightwalletd
  */
 
-import { sendCommand, isSidecarReady, startSidecar, getCachedFvk, getScanState } from "../zcash-sidecar"
+import { sendCommand, isSidecarReady, startSidecar, getCachedFvk, getScanState, beginZcashSend, endZcashSend } from "../zcash-sidecar"
 import { initializeOrchardFromDevice } from "./zcash-shielded"
 
 /** Compute P2PKH scriptPubKey from compressed pubkey hex: OP_DUP OP_HASH160 <20> <HASH160> OP_EQUALVERIFY OP_CHECKSIG */
@@ -174,9 +174,11 @@ export async function shieldZec(
 		throw new Error("A shield transaction is already in progress")
 	}
 	shieldInProgress = true
+	beginZcashSend()
 	try {
 		return await _shieldZecInner(wallet, pioneer, params, opts)
 	} finally {
+		endZcashSend()
 		shieldInProgress = false
 	}
 }

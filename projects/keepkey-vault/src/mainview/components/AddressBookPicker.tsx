@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from "react"
+import type { ReactNode } from "react"
 import { Box, Flex, Text, Input } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
 import { rpcRequest } from "../lib/rpc"
@@ -11,6 +12,12 @@ interface Props {
   networkId: string
   /** Used to drop own-wallet UTXO rows, which store an xpub (not a send target). */
   chainFamily: string
+  /** Optional extra filter applied after the network/family filter. Used by the
+   *  Zcash tab to gate which address type (private vs transparent) is selectable
+   *  in a given context. */
+  entryFilter?: (entry: AddressBookEntry) => boolean
+  /** Optional per-entry badge rendered beside the label (e.g. address-type marker). */
+  renderTag?: (entry: AddressBookEntry) => ReactNode
   onSelect: (entry: AddressBookEntry) => void
   onClose: () => void
 }
@@ -18,7 +25,7 @@ interface Props {
 /** Send-screen recipient picker (R5). Lists address-book entries matching the
  *  current send's network and fills the recipient on select. Overlay styled like
  *  the app's other dialogs — closes on backdrop click. */
-export function AddressBookPicker({ networkId, chainFamily, onSelect, onClose }: Props) {
+export function AddressBookPicker({ networkId, chainFamily, entryFilter, renderTag, onSelect, onClose }: Props) {
   const { t } = useTranslation("addressbook")
   const [entries, setEntries] = useState<AddressBookEntry[]>([])
   const [search, setSearch] = useState("")
@@ -38,8 +45,9 @@ export function AddressBookPicker({ networkId, chainFamily, onSelect, onClose }:
     return entries
       // UTXO own rows store an xpub (not a sendable address) — never offer them.
       .filter(e => chainFamily !== "utxo" || e.kind === "external")
+      .filter(e => !entryFilter || entryFilter(e))
       .filter(e => !q || e.label?.toLowerCase().includes(q) || e.address.toLowerCase().includes(q))
-  }, [entries, chainFamily, search])
+  }, [entries, chainFamily, entryFilter, search])
 
   return (
     <Box position="fixed" inset="0" zIndex={Z.dialog} display="flex" alignItems="center" justifyContent="center"
@@ -83,6 +91,7 @@ export function AddressBookPicker({ networkId, chainFamily, onSelect, onClose }:
                       </Text>
                     </Flex>
                   )}
+                  {renderTag?.(e)}
                 </Flex>
                 <Text fontSize="11px" fontFamily="mono" color="var(--text-2)" truncate>
                   {e.address.slice(0, 10)}…{e.address.slice(-6)}

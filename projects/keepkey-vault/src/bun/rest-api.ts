@@ -80,6 +80,10 @@ export interface RestApiCallbacks {
    *  refresh the note set to chain tip. Throws to abort BEFORE signing, so a
    *  stale-DB / device-swap can never build from old notes and fail late. */
   zcashPreSendGate?: (account: number) => Promise<void>
+  /** Fail-closed Zcash wallet identity check for read-only balance paths.
+   *  Proves the cached Orchard FVK belongs to the connected device before
+   *  exposing any shielded balance from the local sidecar database. */
+  zcashVerifyWallet?: (account: number) => Promise<void>
   /** Returns initialized Pioneer client (for debug endpoints) */
   getPioneer?: () => Promise<any>
   /** Returns the active Pioneer API base URL */
@@ -3647,7 +3651,12 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           auth.requireAuth(req)
           const body = await parseRequest(req, S.ZcashDisplayAddressRequest)
           const wallet = requireWallet(engine)
-          return json(await displayOrchardAddressOnDevice(wallet, body.account ?? 0))
+          // Route through emuWrap for emulator parity (AUTH-2): on the emulator this
+          // raises the interactive view-on-device confirm the user must approve; on
+          // real hardware it is a pure passthrough. The RPC zcashDisplayAddress
+          // already does this — the REST twin must too or the emulator hangs.
+          const details: EmuSigningDetails = { operation: 'zcashDisplayAddress', chain: 'Zcash' }
+          return json(await emuWrap(() => displayOrchardAddressOnDevice(wallet, body.account ?? 0), details))
         }
 
         if (path === '/api/zcash/shielded/scan' && method === 'POST') {
@@ -3658,12 +3667,21 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           // so the sidecar may have no FVK yet — refresh from device first
           // rather than failing with "No FVK set".
           await ensureFvkLoaded(wallet, 0)
+          // Scan returns balance, so prove the cached FVK belongs to the connected
+          // device before scanning — otherwise a stale/other-wallet FVK leaks a
+          // phantom balance through the scan endpoint (reviewer#2). Mirrors /balance.
+          if (!callbacks?.zcashVerifyWallet) throw new HttpError(503, 'Zcash wallet verification unavailable')
+          await callbacks.zcashVerifyWallet(0)
           const result = await scanOrchardNotes(body.start_height, body.full_rescan)
           return json(result)
         }
 
         if (path === '/api/zcash/shielded/balance' && method === 'GET') {
           auth.requireAuth(req)
+          const wallet = requireWallet(engine)
+          await ensureFvkLoaded(wallet, 0)
+          if (!callbacks?.zcashVerifyWallet) throw new HttpError(503, 'Zcash wallet verification unavailable')
+          await callbacks.zcashVerifyWallet(0)
           const result = await getShieldedBalance()
           return json(result)
         }
@@ -3680,8 +3698,11 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           // amount is ZATOSHIS (integer) — it goes straight to the sidecar's
           // build_pczt, which parses u64. The Rust side rejects fractions, so
           // 0.01 would 400 and `1` would send 1 zatoshi, not 1 ZEC.
-          if (!body?.recipient || typeof body.amount !== 'number' || !Number.isInteger(body.amount) || body.amount <= 0) {
-            throw new HttpError(400, 'recipient (string) and amount (positive integer, zatoshis) are required')
+          // Upper-bound the amount at the Zcash money-supply cap (21M ZEC in
+          // zatoshis), matching ZcashBuildRequest. Without it a near-u64::MAX value
+          // reaches the sidecar's `amount + fee` add (REST-01).
+          if (!body?.recipient || typeof body.amount !== 'number' || !Number.isInteger(body.amount) || body.amount <= 0 || body.amount > 2_100_000_000_000_000) {
+            throw new HttpError(400, 'recipient (string) and amount (positive integer zatoshis, <= 21M ZEC) are required')
           }
           const account = body.account ?? 0
           // The sidecar/FVK/scan state is global (single-account). ensureFvkLoaded
@@ -3711,8 +3732,11 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const body = await req.json() as { recipient?: string; amount?: number; account?: number }
-          if (!body?.recipient || typeof body.amount !== 'number' || !Number.isInteger(body.amount) || body.amount <= 0) {
-            throw new HttpError(400, 'recipient (string) and amount (positive integer, zatoshis) are required')
+          // Upper-bound the amount at the Zcash money-supply cap (21M ZEC in
+          // zatoshis), matching ZcashBuildRequest. Without it a near-u64::MAX value
+          // reaches the sidecar's `amount + fee` add (REST-01).
+          if (!body?.recipient || typeof body.amount !== 'number' || !Number.isInteger(body.amount) || body.amount <= 0 || body.amount > 2_100_000_000_000_000) {
+            throw new HttpError(400, 'recipient (string) and amount (positive integer zatoshis, <= 21M ZEC) are required')
           }
           const account = body.account ?? 0
           // The sidecar/FVK/scan state is global (single-account). ensureFvkLoaded
@@ -3739,8 +3763,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const body = await req.json() as { amount?: number; account?: number }
-          if (typeof body.amount !== 'number' || !Number.isInteger(body.amount) || body.amount <= 0) {
-            throw new HttpError(400, 'amount (positive integer, zatoshis) is required')
+          if (typeof body.amount !== 'number' || !Number.isInteger(body.amount) || body.amount <= 0 || body.amount > 2_100_000_000_000_000) {
+            throw new HttpError(400, 'amount (positive integer zatoshis, <= 21M ZEC) is required')
           }
           if (!callbacks?.getPioneer) throw new HttpError(503, 'Pioneer client unavailable')
           const account = body.account ?? 0
@@ -3792,7 +3816,20 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/api/zcash/shielded/build' && method === 'POST') {
           auth.requireAuth(req)
+          const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.ZcashBuildRequest)
+          // FAIL-CLOSED preflight, mirroring /send (P2-C): prove the cached Orchard
+          // FVK belongs to the connected device (purges stale state on mismatch) +
+          // fresh scan BEFORE building a spend, so /build can't construct a PCZT from
+          // a previous wallet's notes after a device swap. Every PCZT-building entry
+          // point must prove device identity. (/finalize needs device signatures, so
+          // the split path isn't remotely completable regardless — but the invariant
+          // must hold uniformly.)
+          const account = (body as any).account ?? 0
+          if (account !== 0) throw new HttpError(400, 'Only account 0 is supported; multi-account shielded sends are not implemented')
+          await ensureFvkLoaded(wallet, account)
+          if (!callbacks?.zcashPreSendGate) throw new HttpError(503, 'Zcash pre-send gate unavailable')
+          await callbacks.zcashPreSendGate(account)
           const result = await buildShieldedTx(body)
           return json(result)
         }
