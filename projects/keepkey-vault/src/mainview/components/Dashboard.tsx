@@ -1755,10 +1755,11 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 
 			<Flex flex="1" direction="column" minW="0" px={{ base: 2, md: 4 }} w="100%">
 
-			{/* Top-right utility row: Reports + Refresh (sits above all main content) */}
-			{!watchOnly && (
-				<Flex justify="flex-end" align="center" gap="3" mb="2" pt="1">
-					{!isHiddenWallet && <Box
+			{/* Top-right utility row: Reports + Refresh (sits above all main content).
+			    Reports + Audit are signing/management actions gated to full mode;
+			    Refresh is read-only and stays available in watch-only mode. */}
+			<Flex justify="flex-end" align="center" gap="3" mb="2" pt="1">
+					{!watchOnly && !isHiddenWallet && <Box
 						as="button"
 						px="3"
 						py="1"
@@ -1783,7 +1784,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 							{t("reports")}
 						</Flex>
 					</Box>}
-					<Box
+					{!watchOnly && <Box
 						as="button"
 						px="3"
 						py="1"
@@ -1805,7 +1806,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 							</svg>
 							Audit
 						</Flex>
-					</Box>
+					</Box>}
 					<Box
 						as="button"
 						px="3"
@@ -1880,7 +1881,6 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 						</Flex>
 					)}
 				</Flex>
-			)}
 
 			{/* Watch-only banner */}
 			{watchOnly && (
