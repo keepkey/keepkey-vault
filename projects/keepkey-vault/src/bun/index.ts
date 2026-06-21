@@ -565,6 +565,9 @@ let zcashBackgroundVerifyInFlight = false
 // hard gate for showing the shielded balance and for sending. Reset whenever
 // the wallet identity could have changed (seed/device switch, FVK re-derive).
 let zcashDeviceVerified = false
+// Coalesces the sidecar purge (stop→wipe→start→init) so a forced spend-path
+// re-derive and a background verify can't run two overlapping cycles (FIXB-02).
+let zcashPurgeInFlight: Promise<void> | null = null
 let emulatorEnabled = false
 let preReleaseUpdates = false
 let alphaFirmware = false
@@ -917,6 +920,16 @@ function resetSeedManagers(): void {
 	btcAccounts.reset()
 	evmAddresses.reset()
 	managersSeedOwner = null
+	// The Zcash sidecar's device-verified flag is per-wallet. A same-handle
+	// passphrase / hidden-wallet toggle changes the active wallet WITHOUT firing
+	// seed-changed, but DOES route through a resetSeedManagers() path (the
+	// needs_passphrase handler and the result-based reconcile). Drop the sticky
+	// flag here so the next balance / scan / send re-derives the device FVK and
+	// fail-closes instead of bleeding the previous wallet's shielded balance
+	// (FS-1). The lazy purge in ensureZcashDeviceMatch then rebuilds the sidecar
+	// for the active wallet on first access.
+	zcashDeviceVerified = false
+	zcashVerifiedThisSession = false
 }
 
 /** Seed-staleness guard — the single authority for "do the in-memory account
@@ -1363,16 +1376,32 @@ async function ensureZcashDeviceMatch(account: number = 0, force: boolean = fals
 		`(cached ak=${cached?.fvk.ak.slice(0, 12) ?? 'none'}…, device ak=${deviceAk.slice(0, 12)}…) — ` +
 		`purging stale wallet state and re-deriving from the device`,
 	)
-	// Mark the sidecar busy across the purge so a fire-and-forget background
-	// verify can't start a SECOND stop/wipe/restart concurrently with this one (P2-B).
-	beginZcashSend()
-	try {
-		stopSidecar()
-		wipeSidecarWalletDb()
-		await startSidecar()
-		await initializeOrchardFromDevice(engine.wallet as any, account)
-	} finally {
-		endZcashSend()
+	// Coalesce concurrent purges (FIXB-02): a forced spend-path re-derive and a
+	// fire-and-forget background verify can both reach here; running two
+	// stop/wipe/start/init cycles concurrently corrupts the sidecar. Share one
+	// in-flight purge — a second caller awaits it instead of starting its own.
+	if (zcashPurgeInFlight) {
+		await zcashPurgeInFlight
+	} else {
+		const purge = (async () => {
+			// Mark the sidecar busy so a background verify can't START another purge
+			// concurrently while this one runs (P2-B).
+			beginZcashSend()
+			try {
+				stopSidecar()
+				wipeSidecarWalletDb()
+				await startSidecar()
+				await initializeOrchardFromDevice(engine.wallet as any, account)
+			} finally {
+				endZcashSend()
+			}
+		})()
+		zcashPurgeInFlight = purge
+		try {
+			await purge
+		} finally {
+			zcashPurgeInFlight = null
+		}
 	}
 	// Notes from the previous wallet are gone; the next scan rebuilds the
 	// unspent set for the real device. Caller is responsible for scanning.
@@ -4421,6 +4450,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// could have no FVK loaded — `scanOrchardNotes` would then fail with
 				// "No FVK set". Refresh from device first if needed.
 				await ensureFvkLoaded(engine.wallet, 0)
+				// Scan returns { balance, notes_found, ... }, so it is a balance-exposing
+				// path — prove the cached FVK belongs to the connected device first, or a
+				// stale/other-wallet FVK would surface a phantom balance via a scan request
+				// (reviewer#2). ensureFvkLoaded only loads-if-absent; it does NOT verify.
+				await ensureZcashDeviceMatch(0)
 				const result = await scanOrchardNotes(params?.startHeight, params?.fullRescan)
 				if (result?.synced_to != null) updateSyncedTo(result.synced_to)
 				// A successful scan validates the wallet against the chain — even an

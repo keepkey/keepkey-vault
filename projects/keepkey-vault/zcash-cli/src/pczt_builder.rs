@@ -189,11 +189,14 @@ pub async fn build_pczt(
     let n_spends = notes.len();
     let n_outputs_with_change = 2usize; // recipient + change
     let fee = zip317_fee(n_spends, n_outputs_with_change);
-    let change = total_input.checked_sub(amount + fee).ok_or_else(|| {
+    let needed = amount
+        .checked_add(fee)
+        .ok_or_else(|| anyhow::anyhow!("amount {} + fee {} overflows u64", amount, fee))?;
+    let change = total_input.checked_sub(needed).ok_or_else(|| {
         anyhow::anyhow!(
             "Insufficient funds: have {} ZAT, need {} ZAT (amount {} + fee {})",
             total_input,
-            amount + fee,
+            needed,
             amount,
             fee
         )
@@ -749,8 +752,17 @@ pub async fn build_pczt(
         let mut buf = [0u8; 512];
         if let Some(ref text) = memo {
             let bytes = text.as_bytes();
-            let len = std::cmp::min(bytes.len(), 512);
-            buf[..len].copy_from_slice(&bytes[..len]);
+            // Reject (don't silently truncate) an over-length memo: truncating could
+            // split a UTF-8 codepoint and put a DIFFERENT memo on chain than the user
+            // typed and the device confirmed (CC-2). ZIP-302 limit is 512 bytes.
+            if bytes.len() > 512 {
+                return Err(anyhow::anyhow!(
+                    "Memo is {} bytes; the ZIP-302 limit is 512. Shorten it so the \
+                     on-chain memo matches what is displayed and confirmed.",
+                    bytes.len()
+                ));
+            }
+            buf[..bytes.len()].copy_from_slice(bytes);
         } else {
             buf[0] = 0xF6; // ZIP-302: "no memo"
         }
@@ -1429,11 +1441,14 @@ pub async fn build_shield_pczt(
     let mut rng = OsRng;
 
     let total_input: u64 = transparent_inputs.iter().map(|i| i.value).sum();
-    let change = total_input.checked_sub(amount + fee).ok_or_else(|| {
+    let needed = amount
+        .checked_add(fee)
+        .ok_or_else(|| anyhow::anyhow!("amount {} + fee {} overflows u64", amount, fee))?;
+    let change = total_input.checked_sub(needed).ok_or_else(|| {
         anyhow::anyhow!(
             "Insufficient transparent funds: have {} ZAT, need {} ZAT (amount {} + fee {})",
             total_input,
-            amount + fee,
+            needed,
             amount,
             fee
         )
@@ -2193,11 +2208,14 @@ pub async fn build_deshield_pczt(
     let n_spends = notes.len();
     let fee = zip317_deshield_fee(n_spends);
 
-    let change = total_input.checked_sub(amount + fee).ok_or_else(|| {
+    let needed = amount
+        .checked_add(fee)
+        .ok_or_else(|| anyhow::anyhow!("amount {} + fee {} overflows u64", amount, fee))?;
+    let change = total_input.checked_sub(needed).ok_or_else(|| {
         anyhow::anyhow!(
             "Insufficient shielded funds: have {} ZAT, need {} ZAT (amount {} + fee {})",
             total_input,
-            amount + fee,
+            needed,
             amount,
             fee
         )

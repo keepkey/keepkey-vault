@@ -524,6 +524,14 @@ impl LightwalletClient {
             let mut txid = [0u8; 32];
             if entry.txid.len() == 32 {
                 txid.copy_from_slice(&entry.txid);
+            } else {
+                // Don't silently leave an all-zero txid (SCAN-1): reject a malformed
+                // entry rather than carry a bogus zero-fill into any future caller.
+                return Err(anyhow::anyhow!(
+                    "lightwalletd returned a UTXO with a {}-byte txid (expected 32) for {}",
+                    entry.txid.len(),
+                    address
+                ));
             }
             utxos.push(TransparentUtxo {
                 txid,
@@ -1080,6 +1088,18 @@ pub fn parse_orchard_actions_from_raw_tx(raw: &[u8]) -> Result<Vec<Action<()>>> 
         return Ok(Vec::new());
     }
 
+    // Cap the pre-allocation against a malicious lightwalletd: a crafted compact_size
+    // could request a huge Vec and OOM-abort the sidecar before the per-iteration
+    // bounds check runs. Each action is >= 820 bytes, so the remaining buffer bounds
+    // the real count (CC-1).
+    let max_actions = raw.len().saturating_sub(offset) / 820;
+    if n_orchard_actions as usize > max_actions {
+        return Err(anyhow::anyhow!(
+            "Declared {} Orchard actions but the buffer holds at most {}",
+            n_orchard_actions,
+            max_actions
+        ));
+    }
     let mut actions: Vec<Action<()>> = Vec::with_capacity(n_orchard_actions as usize);
 
     for _ in 0..n_orchard_actions {
