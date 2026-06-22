@@ -1433,14 +1433,23 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             if (callbacks?.onPairRequest) {
               callbacks.onPairRequest({ name: body.name, url: body.url || '', imageUrl: body.imageUrl || '' })
             }
-            // requestPair requires user approval via UI — NOT auto-granted
+            // requestPair requires user approval via UI — NOT auto-granted.
+            // Idempotent: an already-paired identity reuses its key (reused:true)
+            // after the user re-approves, instead of minting a duplicate.
             try {
-              const apiKey = await auth.requestPair(body)
-              return json({ apiKey })
+              const { apiKey, reused } = await auth.requestPair(body)
+              return json({ apiKey, reused })
             } finally {
               // Dismiss UI overlay + restore window level on approve, reject, or timeout
               callbacks?.onPairDismissed?.()
             }
+          }
+          if (method === 'DELETE') {
+            // Revoke the caller's own key (clean reset / explicit unpair).
+            const token = auth.extractBearerToken(req)
+            if (!token) return json({ revoked: false, message: 'No bearer token provided' }, 401)
+            const revoked = auth.revoke(token)
+            return json({ revoked })
           }
         }
 

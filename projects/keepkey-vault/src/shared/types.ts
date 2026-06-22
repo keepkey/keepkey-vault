@@ -427,6 +427,10 @@ export interface PairedAppInfo {
   url: string
   imageUrl: string
   addedOn: number
+  /** Stable per-install id sent by the client; preferred identity for dedup. */
+  clientId?: string
+  /** Last successful auth — drives LRU eviction + sliding TTL. */
+  lastUsedOn?: number
 }
 
 export interface EIP712DecodedField {
