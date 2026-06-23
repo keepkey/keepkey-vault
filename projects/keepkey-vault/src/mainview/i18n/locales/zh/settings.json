@@ -147,7 +147,7 @@
 	},
 	"alphaFirmware": "Alpha 固件",
 	"alphaFirmwareDesc": "加入 beta 通道，抢先体验早期固件版本",
-	"downloadManually": "从 GitHub 下载",
+	"downloadManually": "如何更新",
 	"downloadUpdate": "下载更新",
 	"preReleaseUpdates": "预发布更新",
 	"preReleaseUpdatesDesc": "在稳定版发布前抢先体验新功能",

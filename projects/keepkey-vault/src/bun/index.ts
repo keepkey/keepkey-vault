@@ -300,12 +300,14 @@ function mergeMetas(metas: PortfolioMeta[]): PortfolioMeta {
 	}
 }
 
-// ── Desktop update — open GitHub releases page ──
+// ── Desktop update — open keepkey.com "update your app" page ──
 // In-app auto-update is unreliable on both platforms:
 // - macOS: zig-zstd has different CLI flags than zstd, stock macOS has no zstd
 // - Windows: in-app exe download + spawn had process lock issues
-// Both platforms now open the GitHub releases page for manual download.
+// Both platforms now open the keepkey.com update page, which serves the correct
+// download for the user's OS/arch and explains how to update.
 const GITHUB_REPO = 'keepkey/keepkey-vault'
+const UPDATE_PAGE = 'https://keepkey.com/update'
 // Cached version from pre-release GitHub check (Updater.updateInfo() doesn't have it)
 let pendingUpdateVersion: string | null = null
 let pioneerSocket: PioneerSocket | null = null
@@ -314,13 +316,19 @@ let pioneerSocket: PioneerSocket | null = null
 // "Syncing…" when it mounts mid-scan instead of a false "no activity".
 let activityScanRunning = false
 
-function openReleasePage() {
-	const version = pendingUpdateVersion || Updater.updateInfo()?.version
-	const url = version
-		? `https://github.com/${GITHUB_REPO}/releases/tag/v${version}`
-		: `https://github.com/${GITHUB_REPO}/releases`
-	console.log(`[Update] Opening releases page: ${url}`)
-	const cmd = process.platform === 'win32' ? ['cmd', '/c', 'start', '', url] : ['open', url]
+function openUpdatePage() {
+	// Target version the user should upgrade to (latest available).
+	const target = pendingUpdateVersion || Updater.updateInfo()?.version
+	// os: mac | windows | linux ; arch: arm64 | x64 — keepkey.com serves the right build.
+	const os = process.platform === 'darwin' ? 'mac' : process.platform === 'win32' ? 'windows' : 'linux'
+	const params = new URLSearchParams({ os, arch: process.arch })
+	if (target) params.set('version', target)
+	if (appVersionCache) params.set('current', appVersionCache)
+	const url = `${UPDATE_PAGE}?${params.toString()}`
+	console.log(`[Update] Opening update page: ${url}`)
+	// On Windows `&` is a cmd command separator; `start` would split the query string
+	// into separate commands. Quote the URL so it stays a single argument.
+	const cmd = process.platform === 'win32' ? ['cmd', '/c', 'start', '', `"${url}"`] : ['open', url]
 	Bun.spawn(cmd, { stdio: ['ignore', 'ignore', 'ignore'] })
 }
 
@@ -6794,14 +6802,14 @@ udevadm trigger --subsystem-match=usb --attr-match=idVendor=2b24 || udevadm trig
 			},
 			downloadUpdate: async () => {
 				if (process.platform === 'win32' || process.platform === 'darwin') {
-					openReleasePage()
+					openUpdatePage()
 					return
 				}
 				await Updater.downloadUpdate()
 			},
 			applyUpdate: async () => {
 				if (process.platform === 'win32' || process.platform === 'darwin') {
-					openReleasePage()
+					openUpdatePage()
 					return
 				}
 				await Updater.applyUpdate()

@@ -112,7 +112,7 @@
 	"factoryResetQuitting": "แอปจะปิดหลังจากรีเซ็ต เปิดใหม่เพื่อเริ่มต้นใหม่",
 	"alphaFirmware": "เฟิร์มแวร์ Alpha",
 	"alphaFirmwareDesc": "เลือกรับเฟิร์มแวร์รุ่นแรกเริ่มจากช่องทางเบต้า",
-	"downloadManually": "ดาวน์โหลดจาก GitHub",
+	"downloadManually": "วิธีอัปเดต",
 	"downloadUpdate": "ดาวน์โหลดการอัปเดต",
 	"preReleaseUpdates": "การอัปเดตก่อนเผยแพร่",
 	"preReleaseUpdatesDesc": "เข้าถึงฟีเจอร์ใหม่ก่อนการเผยแพร่รุ่นเสถียร",

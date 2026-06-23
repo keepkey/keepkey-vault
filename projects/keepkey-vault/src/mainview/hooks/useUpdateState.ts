@@ -106,7 +106,11 @@ export function useUpdateState() {
   }, [])
 
   const downloadUpdate = useCallback(async () => {
-    setState(prev => ({ ...prev, phase: 'downloading', progress: 0, error: undefined }))
+    // No optimistic 'downloading' phase: on macOS/Windows this just opens the
+    // keepkey.com update page in the browser (no in-app download), so we must not
+    // show "Downloading…". On Linux the native updater emits real status events
+    // that drive the downloading/ready phases.
+    setState(prev => ({ ...prev, error: undefined }))
     try {
       await rpcRequest('downloadUpdate', undefined, 0)
     } catch (e: any) {

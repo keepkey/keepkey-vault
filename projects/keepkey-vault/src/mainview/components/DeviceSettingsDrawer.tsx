@@ -1197,7 +1197,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 										cursor="pointer" _hover={{ bg: "rgba(255,255,255,0.1)" }}
 										onClick={onDownloadUpdate}
 									>
-										{t("downloadManually", { defaultValue: "Download from GitHub" })}
+										{t("downloadManually", { defaultValue: "How to Update" })}
 									</Box>
 								)}
 							</Box>
