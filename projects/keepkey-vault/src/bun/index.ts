@@ -5861,16 +5861,23 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 								PIONEER_PORTFOLIO_CHUNK_TIMEOUT_MS,
 								`watch-only chunk ${i + 1}/${pubkeyChunks.length}`
 							)
-							return unwrapPortfolioResponse(resp)
+							return { ...unwrapPortfolioResponse(resp), failed: false }
 						} catch (err: any) {
 							console.warn(`[refreshWatchOnlyBalances] chunk ${i + 1}/${pubkeyChunks.length} failed:`, err?.message || err)
-							return { entries: [] as any[], meta: null, defiPositions: null as ServerDefiPosition[] | null }
+							return { entries: [] as any[], meta: null, defiPositions: null as ServerDefiPosition[] | null, failed: true }
 						}
 					}),
 					PIONEER_PORTFOLIO_TOTAL_TIMEOUT_MS,
 					'watch-only GetPortfolioBalances chunks'
 				)
 				const allEntries = chunkResults.flatMap(r => r.entries)
+
+				// Chains whose chunk failed must NOT be confirmed below — otherwise a
+				// transient Pioneer error would write a 0 over good cached balances.
+				const failedChainIds = new Set<string>()
+				for (let i = 0; i < chunkResults.length; i++) {
+					if (chunkResults[i].failed) for (const p of pubkeyChunks[i]) failedChainIds.add(p.chainId)
+				}
 
 				// 5. Classify natives vs tokens (same heuristic as getBalances)
 				const pureNatives: any[] = []
@@ -5999,8 +6006,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					})
 				}
 
-				// 9. Persist (confirmed → genuine zeros overwrite stale) and return
-				setCachedBalances(deviceId, results, new Set(results.map(r => r.chainId)))
+				// 9. Persist and return. Only chains whose chunk succeeded are "confirmed"
+				// (genuine zeros overwrite stale); failed chains keep their cached value.
+				const confirmed = new Set(results.map(r => r.chainId).filter(id => !failedChainIds.has(id)))
+				setCachedBalances(deviceId, results, confirmed)
 				return results
 			},
 			getWatchOnlyPubkeys: async (params) => {
