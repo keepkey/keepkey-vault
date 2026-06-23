@@ -205,6 +205,14 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 	const deriveAddress = useCallback(async (path?: number[], overrideBounceable?: boolean) => {
 		const usePath = path || effectivePath
 		if (path) setCurrentPath(path)
+		// Watch-only: no device to derive from — show the cached address only.
+		// Re-deriving a different path requires the device, so isn't possible offline.
+		if (watchOnly) {
+			setAddress(balance?.address || null)
+			setDeriveError(balance?.address ? null : 'Address unavailable offline')
+			setLoading(false)
+			return
+		}
 		setLoading(true)
 		setDeriveError(null)
 		try {
@@ -225,12 +233,19 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 			setAddress(null)
 		}
 		setLoading(false)
-	}, [chain, effectivePath, isBtc, btcSelected, isTon, tonBounceable])
+	}, [chain, effectivePath, isBtc, btcSelected, isTon, tonBounceable, watchOnly, balance?.address])
 
 	// Re-derive address when BTC xpub selection or change/index changes
 	// Cancellation guard prevents stale responses from overwriting current address (Finding 5)
 	useEffect(() => {
 		if (!isBtc || !btcSelected) return
+		// Watch-only: no device — show the cached BTC address; can't derive per-index offline.
+		if (watchOnly) {
+			setAddress(balance?.address || null)
+			setDeriveError(balance?.address ? null : 'Address unavailable offline')
+			setLoading(false)
+			return
+		}
 		let cancelled = false
 		const path = btcSelected.fullPath
 		;(async () => {
@@ -1124,6 +1139,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 							isTon={isTon}
 							tonBounceable={tonBounceable}
 							onTonBounceableChange={(v) => { setTonBounceable(v); deriveAddress(undefined, v) }}
+							watchOnly={watchOnly}
 						/>
 					)}
 				</Box>
