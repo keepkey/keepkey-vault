@@ -1885,7 +1885,18 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			applyPolicy: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
-				await engine.wallet.applyPolicy({ policyName: params.policyName, enabled: params.enabled })
+				// applyPolicy raises an "ENABLE/DISABLE POLICY" confirm on the device
+				// and blocks on a button press. On the emulator that needs the
+				// interactive Accept/Reject affordance or it hangs until timeout.
+				const apply = () => engine.wallet!.applyPolicy({ policyName: params.policyName, enabled: params.enabled })
+				if (engine.isEmulator) {
+					await emuSigningOp(apply, {
+						operation: 'applyPolicy',
+						opLabel: `${params.enabled ? 'Enable' : 'Disable'} ${params.policyName} policy`,
+					})
+				} else {
+					await apply()
+				}
 				clearFeaturesCache()
 				try {
 					await engine.refreshFeaturesSnapshot()
