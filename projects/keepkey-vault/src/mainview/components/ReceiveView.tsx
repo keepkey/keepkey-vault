@@ -29,6 +29,8 @@ interface ReceiveViewProps {
 	isTon?: boolean
 	tonBounceable?: boolean
 	onTonBounceableChange?: (bounceable: boolean) => void
+	// Watch-only: no device — hide device-required actions (verify-on-device, derive/retry).
+	watchOnly?: boolean
 }
 
 /** Eyebrow + ink-0 mono block + copy chip on the right.
@@ -144,7 +146,7 @@ function PillToggle<T extends string | number>({
 export function ReceiveView({
 	chain, address, loading, error, currentPath, onDerive, scriptType, xpub,
 	isBtc, btcChangeIndex = 0, btcAddressIndex = 0, onBtcChangeIndex, onBtcAddressIndex,
-	isTon, tonBounceable = false, onTonBounceableChange,
+	isTon, tonBounceable = false, onTonBounceableChange, watchOnly = false,
 }: ReceiveViewProps) {
 	const { t } = useTranslation("receive")
 	const [showing, setShowing] = useState(false)
@@ -184,6 +186,15 @@ export function ReceiveView({
 	}, [onBtcAddressIndex, btcAddressIndex])
 
 	if (!address && !loading) {
+		// Watch-only with no cached address: the device isn't here to derive one, so
+		// the retry/derive buttons would only re-fail. Show a plain explanation instead.
+		if (watchOnly) {
+			return (
+				<Flex direction="column" align="center" py="10" gap="4">
+					<Text fontSize="13px" color="var(--text-2)" letterSpacing="-0.005em">{t("watchOnlyNoAddress")}</Text>
+				</Flex>
+			)
+		}
 		return (
 			<Flex direction="column" align="center" py="10" gap="4">
 				{error ? (
@@ -271,6 +282,8 @@ export function ReceiveView({
 							sx={{ '& svg': { width: '100%', height: '100%', display: 'block' } }}
 						/>
 					</Box>
+					{/* Verify-on-device requires the device — hidden in watch-only mode. */}
+					{!watchOnly && (
 					<Box
 						as="button"
 						className="electrobun-webkit-app-region-no-drag"
@@ -296,6 +309,7 @@ export function ReceiveView({
 						<Box as={showing ? FaSpinner : FaEye} fontSize="11px" style={showing ? { animation: "v3-spin 1s linear infinite" } : undefined} />
 						{showing ? t("checkDevice") : t("verifyOnDevice")}
 					</Box>
+					)}
 				</Flex>
 
 				{/* Right column: address + xpub + path + chips */}
@@ -304,8 +318,9 @@ export function ReceiveView({
 						{t("sendToAddress", { symbol: chain.symbol })}
 					</Text>
 
-					{/* BTC: receive/change toggle + index stepper */}
-					{isBtc && onBtcChangeIndex && (
+					{/* BTC: receive/change toggle + index stepper — needs the device to derive
+					    each index, so hidden in watch-only (cached address only). */}
+					{!watchOnly && isBtc && onBtcChangeIndex && (
 						<Flex align="center" gap="3" flexWrap="wrap">
 							<PillToggle
 								options={[
@@ -380,8 +395,8 @@ export function ReceiveView({
 						</Flex>
 					)}
 
-					{/* TON: bounceable / non-bounceable */}
-					{isTon && onTonBounceableChange && (
+					{/* TON: bounceable / non-bounceable — re-derives via device, hidden offline */}
+					{!watchOnly && isTon && onTonBounceableChange && (
 						<Box>
 							<Text fontSize="10px" color="var(--text-3)" textTransform="uppercase" letterSpacing="0.18em" fontWeight="500" mb="2">
 								Address Type
@@ -422,6 +437,8 @@ export function ReceiveView({
 							<Text fontSize="12px" fontFamily="mono" color="var(--text-1)" letterSpacing="0.02em">
 								{pathToString(currentPath)}
 							</Text>
+							{/* Editing the path re-derives on the device — hidden in watch-only. */}
+							{!watchOnly && (
 							<Box
 								as="button"
 								className="electrobun-webkit-app-region-no-drag"
@@ -443,6 +460,7 @@ export function ReceiveView({
 									<path d="M18.5 2.5a2.121 2.121 0 113 3L12 15l-4 1 1-4 9.5-9.5z"/>
 								</svg>
 							</Box>
+							)}
 						</Flex>
 					</Box>
 

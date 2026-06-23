@@ -205,6 +205,14 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 	const deriveAddress = useCallback(async (path?: number[], overrideBounceable?: boolean) => {
 		const usePath = path || effectivePath
 		if (path) setCurrentPath(path)
+		// Watch-only: no device to derive from — show the cached address only.
+		// Re-deriving a different path requires the device, so isn't possible offline.
+		if (watchOnly) {
+			setAddress(balance?.address || null)
+			setDeriveError(balance?.address ? null : 'Address unavailable offline')
+			setLoading(false)
+			return
+		}
 		setLoading(true)
 		setDeriveError(null)
 		try {
@@ -225,12 +233,19 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 			setAddress(null)
 		}
 		setLoading(false)
-	}, [chain, effectivePath, isBtc, btcSelected, isTon, tonBounceable])
+	}, [chain, effectivePath, isBtc, btcSelected, isTon, tonBounceable, watchOnly, balance?.address])
 
 	// Re-derive address when BTC xpub selection or change/index changes
 	// Cancellation guard prevents stale responses from overwriting current address (Finding 5)
 	useEffect(() => {
 		if (!isBtc || !btcSelected) return
+		// Watch-only: no device — show the cached BTC address; can't derive per-index offline.
+		if (watchOnly) {
+			setAddress(balance?.address || null)
+			setDeriveError(balance?.address ? null : 'Address unavailable offline')
+			setLoading(false)
+			return
+		}
 		let cancelled = false
 		const path = btcSelected.fullPath
 		;(async () => {
@@ -302,6 +317,9 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 	// next non-empty push reseeds it with device B's address.
 	useEffect(() => {
 		if (!isEvm) return
+		// Watch-only: balance.address is the source of truth; the evmAddresses hook is
+		// device-backed and stays empty offline, which would wipe the cached address.
+		if (watchOnly) return
 		if (evmAddresses.addresses.length === 0) { setAddress(null); return }
 		const selected = evmAddresses.addresses.find(a => a.addressIndex === evmAddresses.selectedIndex)
 		if (selected) {
@@ -312,7 +330,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 			setAddress(selected.address)
 			setCurrentPath([0x8000002C, 0x8000003C, 0x80000000, 0, selected.addressIndex])
 		}
-	}, [isEvm, evmAddresses.selectedIndex, evmAddresses.addresses])
+	}, [isEvm, evmAddresses.selectedIndex, evmAddresses.addresses, watchOnly])
 
 	// Auto-derive once on mount; TON always re-derives to ensure correct bounceable flag;
 	// UTXO chains always re-derive because balance.address may be empty (xpub is not an address)
@@ -1015,7 +1033,10 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 					    one address; empty <Box flex /> keeps the pills centered when
 					    there isn't. */}
 					<Box minW={{ base: "0", md: "200px" }} flex={{ base: "0 0 100%", md: "1" }}>
-						{isBtc && btcAccounts.accounts.length > 0 && (
+						{/* Account selectors call device/backend account RPCs and mix live
+						    wallet account state with the cached receive address — hidden
+						    in watch-only. */}
+						{!watchOnly && isBtc && btcAccounts.accounts.length > 0 && (
 							<BtcXpubSelector
 								btcAccounts={btcAccounts}
 								onSelectXpub={selectXpub}
@@ -1023,7 +1044,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 								addingAccount={btcLoading}
 							/>
 						)}
-						{isEvm && evmAddresses.addresses.length >= 1 && (
+						{!watchOnly && isEvm && evmAddresses.addresses.length >= 1 && (
 							<EvmAddressSelector
 								evmAddresses={evmAddresses}
 								onSelectIndex={evmSelectIndex}
@@ -1124,6 +1145,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 							isTon={isTon}
 							tonBounceable={tonBounceable}
 							onTonBounceableChange={(v) => { setTonBounceable(v); deriveAddress(undefined, v) }}
+							watchOnly={watchOnly}
 						/>
 					)}
 				</Box>
