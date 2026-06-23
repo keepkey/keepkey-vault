@@ -1039,7 +1039,31 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 	// Manual refresh: fetch live data from Pioneer API
 	// forceRefresh=true bypasses Pioneer's balance cache — only pass it on explicit user action
 	const refreshBalances = useCallback(async (forceRefresh = false) => {
-		if (watchOnly) return
+		// Watch-only: no device, so re-fetch from Pioneer using cached addresses.
+		if (watchOnly) {
+			if (loadingBalancesRef.current) return
+			loadingBalancesRef.current = true
+			setLoadingBalances(true)
+			try {
+				const result = await rpcRequest<ChainBalance[] | null>('refreshWatchOnlyBalances', watchOnlyDeviceId ? { deviceId: watchOnlyDeviceId } : undefined, 200000)
+				if (result) {
+					const map = new Map<string, ChainBalance>()
+					for (const b of result) map.set(b.chainId, b)
+					setBalances(map)
+					setCacheUpdatedAt(Date.now())
+					setHasEverRefreshed(true)
+					clearPioneerError()
+				}
+			} catch (e: any) {
+				const message = e?.message || 'Unable to refresh balances'
+				console.warn('[Dashboard] refreshWatchOnlyBalances failed:', message)
+				stagePioneerError({ message, url: 'the configured balance server' })
+			} finally {
+				loadingBalancesRef.current = false
+				setLoadingBalances(false)
+			}
+			return
+		}
 		// Non-forced calls yield to any in-progress refresh (avoids non-forced swap-complete
 		// poll superseding an already-running forced user refresh).
 		if (!forceRefresh && loadingBalancesRef.current) return
@@ -1091,7 +1115,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 			loadingBalancesRef.current = false
 			setLoadingBalances(false)
 		}
-	}, [watchOnly, clearPioneerError, stagePioneerError])
+	}, [watchOnly, watchOnlyDeviceId, clearPioneerError, stagePioneerError])
 
 	// Phase 2 trigger — window focus: catch long idle periods. If the last live
 	// fetch is older than 5 min, force-refresh on return to the window.
