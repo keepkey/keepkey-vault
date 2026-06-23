@@ -1155,21 +1155,11 @@ export class EngineController extends EventEmitter {
       //
       // Recovery: flush ring buffers, reconnect transport, re-initialize, retry.
       if (derivedState === 'ready') {
-        const probeXpub = async () => {
-          await withTimeout(
-            (this.wallet as any).getPublicKeys([{
-              addressNList: [0x80000000 + 44, 0x80000000 + 0, 0x80000000 + 0],
-              coin: 'Bitcoin',
-              scriptType: 'p2pkh',
-              showDisplay: false,
-            }]),
-            10_000,
-            'emulator smoke-test'
-          )
-        }
-
+        // Captures the live m/44'/0'/0' BTC xpub from whichever probe succeeds,
+        // so we can verify the running seed matches the saved mnemonic below.
+        let liveBtcXpub: string | null = null
         try {
-          await probeXpub()
+          liveBtcXpub = await this.probeBtcXpub()
           console.log('[Engine] Emulator smoke-test passed (key derivation OK)')
         } catch (probeErr: any) {
           console.warn('[Engine] Emulator smoke-test failed, flushing + reconnecting...', probeErr?.message || probeErr)
@@ -1193,111 +1183,53 @@ export class EngineController extends EventEmitter {
 
           // Retry
           try {
-            await probeXpub()
+            liveBtcXpub = await this.probeBtcXpub()
             console.log('[Engine] Emulator smoke-test passed after reconnect')
           } catch (retryErr: any) {
-            // Storage key persistence is broken — the firmware can't decrypt
-            // its own stored seed after a restart.  Auto-wipe the flash and
-            // reload the saved mnemonic from Keychain if available.
-            console.warn('[Engine] Emulator storage key stale — auto-wiping flash')
-            const { stopEmulator, initEmulator, getActiveFlashName } = await import('./emulator')
-            const { deleteFlash, loadMnemonic } = await import('./emulator-keychain')
-            const flashName = getActiveFlashName()
-            const savedMnemonic = loadMnemonic(flashName)
-            stopEmulator()
-            deleteFlash(flashName)
-            const status = initEmulator(flashName)
-            if (status.state !== 'running') {
-              this.lastError = `Emulator restart failed: ${status.error}`
-              this.updateState('error')
-              return
-            }
-            // Reconnect to the fresh (uninitialized) emulator
-            const cleanAdapter = EmulatorKeepKeyAdapter.useKeyring(this.keyring)
-            const cleanDevice = await cleanAdapter.getDevice()
-            const cleanWallet = await cleanAdapter.pairRawDevice(cleanDevice, true)
-            if (!cleanWallet) {
-              this.lastError = 'Emulator reconnect failed after wipe'
-              this.updateState('error')
-              return
-            }
-            this.wallet = cleanWallet as any
-            this.activeTransport = 'emulator'
-            this.attachTransportListeners()
-            this.cachedFeatures = await withTimeout(
-              cleanWallet.initialize(),
-              PAIR_TIMEOUT_MS,
-              'emulator fresh-init'
-            )
-
-            // Auto-reload saved mnemonic if available
-            if (savedMnemonic) {
-              console.log('[Engine] Auto-reloading saved mnemonic from Keychain...')
-              await this.emuConfirmOp(() => (this.wallet as any).loadDevice({
-                mnemonic: savedMnemonic, pin: false, passphrase: false, skipChecksum: false,
-              }), 2)
-              console.log('[Engine] Mnemonic auto-loaded successfully')
-
-              // Flush + reconnect for clean state
-              const { flushRingBuffers } = await import('./emulator')
-              flushRingBuffers()
-              const reAdapter = EmulatorKeepKeyAdapter.useKeyring(this.keyring)
-              const reDevice = await reAdapter.getDevice()
-              const reWallet = await reAdapter.pairRawDevice(reDevice, true)
-              if (reWallet) {
-                this.wallet = reWallet as any
-                this.attachTransportListeners()
-                this.cachedFeatures = await withTimeout(
-                  reWallet.initialize(),
-                  PAIR_TIMEOUT_MS,
-                  'emulator post-reload'
-                )
-              }
-
-              // Verify auto-reload actually took effect. Race against a 3s
-              // deadline — the DebugLinkGetState read can hang on the dylib
-              // path (separate timing bug). The verify is just a sanity log;
-              // if it hangs, connectEmulator must NOT block forever or the
-              // wizard / dashboard never sees state → ready.
-              //
-              // The underlying readChunk has its own ~240s timeout and we
-              // can't cancel it from here, so the .then below may fire long
-              // after the race resolves. Suppress its log in that case so
-              // the user doesn't see a spurious VERIFY FAIL minutes later.
-              let verifyAbandoned = false
-              const verifyPromise = this.getEmulatorMnemonic()
-                .then(verifyMnemonic => {
-                  if (verifyAbandoned) return
-                  if (!verifyMnemonic) {
-                    console.error('[Engine] AUTO-RELOAD VERIFY FAIL — firmware returned no mnemonic')
-                  } else if (verifyMnemonic.trim() !== savedMnemonic.trim()) {
-                    console.error('[Engine] AUTO-RELOAD VERIFY FAIL — firmware has DIFFERENT mnemonic than saved')
-                    console.error('[Engine]   saved first word:  %s', savedMnemonic.trim().split(/\s+/)[0])
-                    console.error('[Engine]   actual first word: %s', verifyMnemonic.trim().split(/\s+/)[0])
-                  } else {
-                    console.log('[Engine] AUTO-RELOAD VERIFY OK — firmware mnemonic matches saved seed')
-                  }
-                })
-                .catch(err => {
-                  if (verifyAbandoned) return
-                  console.warn('[Engine] AUTO-RELOAD VERIFY error:', err?.message || err)
-                })
-              await Promise.race([
-                verifyPromise,
-                new Promise<void>(resolve => setTimeout(() => {
-                  verifyAbandoned = true
-                  console.warn('[Engine] AUTO-RELOAD VERIFY timed out (3s) — continuing')
-                  resolve()
-                }, 3000)),
-              ])
-
-              this.updateState(this.deriveState(this.cachedFeatures))
+            // Storage key persistence is broken — the firmware can't decrypt its
+            // own stored seed after a restart. Wipe the stale flash and reload
+            // the saved mnemonic. reloadSavedSeed verifies the live xpub and
+            // sets engine state; if no mnemonic is saved, fall back to setup.
+            console.warn('[Engine] Emulator storage key stale —', retryErr?.message || retryErr)
+            const { getActiveFlashName } = await import('./emulator')
+            const { hasMnemonic } = await import('./emulator-keychain')
+            if (hasMnemonic(getActiveFlashName())) {
+              await this.reloadSavedSeed('Emulator storage key stale')
             } else {
               console.log('[Engine] No saved mnemonic — showing setup wizard')
               this.updateState(this.deriveState(this.cachedFeatures))
             }
             return
           }
+        }
+
+        // Deterministic seed-identity guard. The persisted flash is NOT a
+        // trustworthy seed store — the firmware's storage key changes per
+        // kkemu_init (see emulator-keychain.ts:374), so a stale flash can boot
+        // a DIFFERENT seed than the one the user saved. The smoke-test above
+        // passes on any valid seed, so compare the live BTC xpub against the
+        // saved mnemonic and force a reload on mismatch. No flaky DebugLink
+        // read — the probe already gave us the live xpub.
+        if (liveBtcXpub) {
+          const { getActiveFlashName } = await import('./emulator')
+          const { loadMnemonic } = await import('./emulator-keychain')
+          const saved = loadMnemonic(getActiveFlashName())
+          if (saved && this.expectedBtcXpub(saved) !== liveBtcXpub) {
+            await this.reloadSavedSeed('Running seed does not match saved mnemonic')
+            return
+          }
+        }
+      } else if (this.cachedFeatures && this.cachedFeatures.initialized === false) {
+        // Flash booted blank/uninitialized but a mnemonic is saved for this
+        // wallet — same flash-untrustworthy failure. Restore the saved seed
+        // instead of dropping the user into setup. (A genuinely new wallet
+        // saves its mnemonic before connect, so "uninitialized + has-mnemonic"
+        // only happens when the flash lost its seed.)
+        const { getActiveFlashName } = await import('./emulator')
+        const { hasMnemonic } = await import('./emulator-keychain')
+        if (hasMnemonic(getActiveFlashName())) {
+          await this.reloadSavedSeed('Flash booted uninitialized but a saved mnemonic exists')
+          return
         }
       }
 
@@ -1309,6 +1241,103 @@ export class EngineController extends EventEmitter {
       this.updateState('error')
       throw err
     }
+  }
+
+  /**
+   * Fetch the live m/44'/0'/0' BTC legacy xpub from the device. Throws on
+   * timeout/transport failure (used as the connect smoke-test); returns null
+   * only if the device responds without an xpub.
+   */
+  private async probeBtcXpub(timeoutMs = 10_000, label = 'emulator smoke-test'): Promise<string | null> {
+    const r = await withTimeout(
+      (this.wallet as any).getPublicKeys([{
+        addressNList: [0x80000000 + 44, 0x80000000 + 0, 0x80000000 + 0],
+        coin: 'Bitcoin',
+        scriptType: 'p2pkh',
+        showDisplay: false,
+      }]),
+      timeoutMs,
+      label
+    )
+    return (r as any)?.[0]?.xpub ?? null
+  }
+
+  /**
+   * Derive the m/44'/0'/0' BTC legacy xpub for a mnemonic — the same key the
+   * smoke-test probe fetches from the device. Pure/offline, used to detect when
+   * the running emulator seed differs from the saved one.
+   */
+  private expectedBtcXpub(mnemonic: string): string {
+    const { mnemonicToSeedSync } = require('@scure/bip39')
+    const { HDKey } = require('@scure/bip32')
+    const seed = mnemonicToSeedSync(mnemonic.trim())
+    return HDKey.fromMasterSeed(seed).derive("m/44'/0'/0'").publicExtendedKey
+  }
+
+  /**
+   * Force the emulator's running seed to match the saved mnemonic for the active
+   * flash: wipe the (untrustworthy) flash and re-load the saved seed. No-op if
+   * no mnemonic is saved. Sets engine state on completion.
+   */
+  private async reloadSavedSeed(reason: string): Promise<void> {
+    const { stopEmulator, initEmulator, getActiveFlashName, flushRingBuffers } = await import('./emulator')
+    const { deleteFlash, loadMnemonic } = await import('./emulator-keychain')
+    const flashName = getActiveFlashName()
+    const savedMnemonic = loadMnemonic(flashName)
+    if (!savedMnemonic) {
+      console.warn(`[Engine] ${reason} — no saved mnemonic, cannot reload`)
+      return
+    }
+    console.warn(`[Engine] ${reason} — wiping flash + reloading saved seed for "${flashName}"`)
+    stopEmulator()
+    deleteFlash(flashName)
+    const status = initEmulator(flashName)
+    if (status.state !== 'running') {
+      this.lastError = `Emulator restart failed: ${status.error}`
+      this.updateState('error')
+      return
+    }
+    const adapter = EmulatorKeepKeyAdapter.useKeyring(this.keyring)
+    const device = await adapter.getDevice()
+    const wallet = await adapter.pairRawDevice(device, true)
+    if (!wallet) {
+      this.lastError = 'Emulator reconnect failed after wipe'
+      this.updateState('error')
+      return
+    }
+    this.wallet = wallet as any
+    this.activeTransport = 'emulator'
+    this.attachTransportListeners()
+    this.cachedFeatures = await withTimeout(wallet.initialize(), PAIR_TIMEOUT_MS, 'emulator fresh-init')
+    await this.emuConfirmOp(() => (this.wallet as any).loadDevice({
+      mnemonic: savedMnemonic, pin: false, passphrase: false, skipChecksum: false,
+    }), 2)
+    flushRingBuffers()
+    const reAdapter = EmulatorKeepKeyAdapter.useKeyring(this.keyring)
+    const reDevice = await reAdapter.getDevice()
+    const reWallet = await reAdapter.pairRawDevice(reDevice, true)
+    if (reWallet) {
+      this.wallet = reWallet as any
+      this.attachTransportListeners()
+      this.cachedFeatures = await withTimeout(reWallet.initialize(), PAIR_TIMEOUT_MS, 'emulator post-reload')
+    }
+
+    // Prove the reload took: the live xpub must now match the saved mnemonic.
+    // Without this, a failed reload could still report success (the same trap
+    // the connect-time guard exists to catch).
+    let reloadedXpub: string | null = null
+    try {
+      reloadedXpub = await this.probeBtcXpub(10_000, 'post-reload verify')
+    } catch (err: any) {
+      console.error('[Engine] Post-reload verify could not read xpub:', err?.message || err)
+    }
+    if (!reloadedXpub || reloadedXpub !== this.expectedBtcXpub(savedMnemonic)) {
+      this.lastError = 'Emulator seed restore failed — running seed still does not match saved mnemonic. Re-import to recover.'
+      this.updateState('error')
+      return
+    }
+    this.updateState(this.deriveState(this.cachedFeatures))
+    console.log('[Engine] Saved seed reloaded — running seed verified against saved mnemonic')
   }
 
   /**
