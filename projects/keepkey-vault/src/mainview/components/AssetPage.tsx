@@ -317,6 +317,9 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 	// next non-empty push reseeds it with device B's address.
 	useEffect(() => {
 		if (!isEvm) return
+		// Watch-only: balance.address is the source of truth; the evmAddresses hook is
+		// device-backed and stays empty offline, which would wipe the cached address.
+		if (watchOnly) return
 		if (evmAddresses.addresses.length === 0) { setAddress(null); return }
 		const selected = evmAddresses.addresses.find(a => a.addressIndex === evmAddresses.selectedIndex)
 		if (selected) {
@@ -327,7 +330,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 			setAddress(selected.address)
 			setCurrentPath([0x8000002C, 0x8000003C, 0x80000000, 0, selected.addressIndex])
 		}
-	}, [isEvm, evmAddresses.selectedIndex, evmAddresses.addresses])
+	}, [isEvm, evmAddresses.selectedIndex, evmAddresses.addresses, watchOnly])
 
 	// Auto-derive once on mount; TON always re-derives to ensure correct bounceable flag;
 	// UTXO chains always re-derive because balance.address may be empty (xpub is not an address)
@@ -1030,7 +1033,10 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 					    one address; empty <Box flex /> keeps the pills centered when
 					    there isn't. */}
 					<Box minW={{ base: "0", md: "200px" }} flex={{ base: "0 0 100%", md: "1" }}>
-						{isBtc && btcAccounts.accounts.length > 0 && (
+						{/* Account selectors call device/backend account RPCs and mix live
+						    wallet account state with the cached receive address — hidden
+						    in watch-only. */}
+						{!watchOnly && isBtc && btcAccounts.accounts.length > 0 && (
 							<BtcXpubSelector
 								btcAccounts={btcAccounts}
 								onSelectXpub={selectXpub}
@@ -1038,7 +1044,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 								addingAccount={btcLoading}
 							/>
 						)}
-						{isEvm && evmAddresses.addresses.length >= 1 && (
+						{!watchOnly && isEvm && evmAddresses.addresses.length >= 1 && (
 							<EvmAddressSelector
 								evmAddresses={evmAddresses}
 								onSelectIndex={evmSelectIndex}
