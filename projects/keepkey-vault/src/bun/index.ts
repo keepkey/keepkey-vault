@@ -326,7 +326,9 @@ function openUpdatePage() {
 	if (appVersionCache) params.set('current', appVersionCache)
 	const url = `${UPDATE_PAGE}?${params.toString()}`
 	console.log(`[Update] Opening update page: ${url}`)
-	const cmd = process.platform === 'win32' ? ['cmd', '/c', 'start', '', url] : ['open', url]
+	// On Windows `&` is a cmd command separator; `start` would split the query string
+	// into separate commands. Quote the URL so it stays a single argument.
+	const cmd = process.platform === 'win32' ? ['cmd', '/c', 'start', '', `"${url}"`] : ['open', url]
 	Bun.spawn(cmd, { stdio: ['ignore', 'ignore', 'ignore'] })
 }
 
