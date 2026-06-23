@@ -5803,6 +5803,215 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const result = getCachedBalances(snap.deviceId)
 				return result?.balances ?? null
 			},
+			// Re-fetch watch-only balances from Pioneer using addresses reconstructed
+			// from cache — NO device required. Self-contained: deliberately does NOT
+			// touch the device getBalances managers.
+			// ponytail: display-only simplified parse — no per-owner EVM token map and
+			// no addressbook sync (those need device-derived state). Good enough for a
+			// read-only snapshot view; do not use this path for signing/sends.
+			refreshWatchOnlyBalances: async (params) => {
+				const { getDeviceSnapshotById } = await import('./db')
+				const snap = params?.deviceId
+					? getDeviceSnapshotById(params.deviceId)
+					: getLatestDeviceSnapshot()
+				if (!snap) return null
+				const deviceId = snap.deviceId
+
+				// 1. Reconstruct the pubkey list from cache (no device available)
+				const allChains = getAllChains()
+				const chainById = new Map(allChains.map(c => [c.id, c]))
+				const pubkeys: Array<{ caip: string; pubkey: string; chainId: string; symbol: string; networkId: string }> = []
+
+				const cached = getCachedBalances(deviceId)
+				for (const b of cached?.balances ?? []) {
+					if (b.chainId === 'bitcoin') continue // cached BTC address isn't the xpub — handled below
+					if (!b.address) continue
+					const chain = chainById.get(b.chainId)
+					if (!chain || !chain.caip) continue
+					pubkeys.push({ caip: chain.caip, pubkey: b.address, chainId: chain.id, symbol: chain.symbol, networkId: chain.networkId })
+				}
+				// BTC: use the cached xpubs (one entry per script-type/account)
+				const btcChain = chainById.get('bitcoin')
+				if (btcChain) {
+					for (const p of getCachedPubkeys(deviceId).filter(p => p.chainId === 'bitcoin' && p.xpub)) {
+						pubkeys.push({ caip: btcChain.caip, pubkey: p.xpub, chainId: 'bitcoin', symbol: 'BTC', networkId: btcChain.networkId })
+					}
+				}
+
+				if (pubkeys.length === 0) return cached?.balances ?? null
+
+				// 2. Pioneer client — let init failure throw so the UI surfaces it
+				const pioneer = await getPioneer()
+
+				// 3. networkId → chainId lookup (non-hidden takes priority)
+				const networkToChain = new Map<string, string>()
+				for (const chain of allChains) {
+					if (!chain.networkId) continue
+					if (chain.hidden && networkToChain.has(chain.networkId.toLowerCase())) continue
+					networkToChain.set(chain.networkId.toLowerCase(), chain.id)
+				}
+
+				// 4. Chunked GetPortfolioBalances
+				const pubkeyChunks = chunkArray(pubkeys, PIONEER_PORTFOLIO_CHUNK_SIZE)
+				const chunkResults = await withTimeout(
+					mapWithConcurrency(pubkeyChunks, PIONEER_PORTFOLIO_MAX_CONCURRENCY, async (chunk, i) => {
+						try {
+							const resp = await withTimeout(
+								pioneer.GetPortfolioBalances({ pubkeys: chunk.map(p => ({ caip: p.caip, pubkey: p.pubkey })), includeDefi: true }, { forceRefresh: true }),
+								PIONEER_PORTFOLIO_CHUNK_TIMEOUT_MS,
+								`watch-only chunk ${i + 1}/${pubkeyChunks.length}`
+							)
+							return { ...unwrapPortfolioResponse(resp), failed: false }
+						} catch (err: any) {
+							console.warn(`[refreshWatchOnlyBalances] chunk ${i + 1}/${pubkeyChunks.length} failed:`, err?.message || err)
+							return { entries: [] as any[], meta: null, defiPositions: null as ServerDefiPosition[] | null, failed: true }
+						}
+					}),
+					PIONEER_PORTFOLIO_TOTAL_TIMEOUT_MS,
+					'watch-only GetPortfolioBalances chunks'
+				)
+				const allEntries = chunkResults.flatMap(r => r.entries)
+
+				// Chains whose chunk failed must NOT be confirmed below — otherwise a
+				// transient Pioneer error would write a 0 over good cached balances.
+				const failedChainIds = new Set<string>()
+				for (let i = 0; i < chunkResults.length; i++) {
+					if (chunkResults[i].failed) for (const p of pubkeyChunks[i]) failedChainIds.add(p.chainId)
+				}
+
+				// 5. Classify natives vs tokens (same heuristic as getBalances)
+				const pureNatives: any[] = []
+				const tokenEntries: any[] = []
+				for (const entry of allEntries) {
+					const caip = entry.caip || ''
+					const caipPath = caip.split('/')[1] || ''
+					const isTokenByCaip = caipPath && !caipPath.startsWith('slip44:') && !caipPath.startsWith('native:')
+					const isTokenByType = entry.type === 'token' || (entry.isNative === false && entry.contract)
+					if (isTokenByCaip || isTokenByType) tokenEntries.push(entry)
+					else pureNatives.push(entry)
+				}
+
+				// 6. Group tokens by parent chain
+				const tokensByChainId = new Map<string, TokenBalance[]>()
+				const seenByOwnerCaip = new Set<string>()
+				for (const tok of tokenEntries) {
+					const bal = parseFloat(String(tok.balance ?? '0'))
+					if (bal <= 0) continue
+					const ownerAddr = String(tok.address || tok.pubkey || '').toLowerCase()
+					const caipNorm = (tok.caip || '').startsWith('eip155:') ? (tok.caip || '').toLowerCase() : (tok.caip || '')
+					const ownerCaipKey = `${caipNorm}|${ownerAddr}`
+					if (seenByOwnerCaip.has(ownerCaipKey)) continue
+					seenByOwnerCaip.add(ownerCaipKey)
+
+					const tokNetworkId = (tok.networkId || '').toLowerCase()
+					const caipPrefix = ((tok.caip || '').split('/')[0]).toLowerCase()
+					const parentChainId = networkToChain.get(tokNetworkId) || networkToChain.get(caipPrefix) || null
+					if (!parentChainId) continue
+
+					const contractMatch = (tok.caip || '').match(/\/(erc20|spl|trc20|token):([^\s]+)/)
+					const token: TokenBalance = {
+						symbol: tok.symbol || '???',
+						name: tok.name || tok.symbol || 'Unknown Token',
+						balance: String(tok.balance ?? '0'),
+						balanceUsd: Number(tok.valueUsd ?? 0),
+						priceUsd: Number(tok.priceUsd ?? 0),
+						caip: tok.caip || '',
+						contractAddress: contractMatch?.[2] || tok.contract || undefined,
+						networkId: tokNetworkId || caipPrefix,
+						icon: tok.icon || undefined,
+						decimals: tok.decimals ?? tok.precision,
+						type: tok.type || 'token',
+						dataSource: tok.dataSource,
+					}
+					const existing = tokensByChainId.get(parentChainId) || []
+					existing.push(token)
+					tokensByChainId.set(parentChainId, existing)
+				}
+
+				// 7. Group DeFi positions by chain (dedup by pubkey|protocol|networkId)
+				const rawDefi: ServerDefiPosition[] = chunkResults.flatMap(r => r.defiPositions || [])
+				const defiByChain = new Map<string, DefiPosition[]>()
+				const seenDefiKey = new Set<string>()
+				for (const sp of rawDefi) {
+					const key = `${String(sp.pubkey || '').toLowerCase()}|${sp.protocol || ''}|${(sp.networkId || '').toLowerCase()}`
+					if (seenDefiKey.has(key)) continue
+					seenDefiKey.add(key)
+					const chainId = sp.networkId ? networkToChain.get(sp.networkId.toLowerCase()) : null
+					if (!chainId) continue
+					const dp: DefiPosition = {
+						protocol: sp.protocol || null,
+						displayName: sp.displayName,
+						name: sp.displayName || sp.protocol || 'DeFi Position',
+						network: sp.network,
+						networkId: sp.networkId,
+						balanceUsd: Number(sp.balanceUsd) || 0,
+						icon: sp.icon,
+						tokens: Array.isArray(sp.tokens) ? sp.tokens.map(t => ({
+							networkId: t.networkId,
+							address: String(t.address || '').toLowerCase(),
+							symbol: t.symbol,
+							balance: t.balance != null ? String(t.balance) : undefined,
+							balanceUsd: typeof t.balanceUsd === 'number' ? t.balanceUsd : undefined,
+						})).filter(t => !!t.address) : [],
+					}
+					const list = defiByChain.get(chainId) || []
+					list.push(dp)
+					defiByChain.set(chainId, list)
+				}
+
+				// 8. Build ChainBalance[] — sum BTC xpubs into one entry; others 1:1
+				const results: ChainBalance[] = []
+				let btcBalance = 0, btcUsd = 0, btcAddress = ''
+				for (const entry of pubkeys) {
+					if (entry.chainId === 'bitcoin') {
+						const match = pureNatives.find((d: any) => d.pubkey === entry.pubkey)
+							|| pureNatives.find((d: any) => d.caip === entry.caip && d.address === entry.pubkey)
+						btcBalance += parseFloat(String(match?.balance ?? '0'))
+						btcUsd += Number(match?.valueUsd ?? 0)
+						if (match?.address && !btcAddress) btcAddress = match.address
+						continue
+					}
+					const entryNetwork = entry.caip.split('/')[0]
+					const match = pureNatives.find((d: any) => d.caip === entry.caip)
+						|| pureNatives.find((d: any) => d.caip && d.caip.split('/')[0] === entryNetwork)
+						|| pureNatives.find((d: any) => d.pubkey === entry.pubkey)
+						|| pureNatives.find((d: any) => d.address === entry.pubkey)
+					const chainTokens = tokensByChainId.get(entry.chainId)
+					const tokenUsdTotal = chainTokens?.reduce((s, t) => s + t.balanceUsd, 0) || 0
+					const chainDefi = defiByChain.get(entry.chainId)
+					const defiUsdTotal = chainDefi?.reduce((s, p) => s + (p.balanceUsd || 0), 0) || 0
+					const nativeUsd = Number(match?.valueUsd ?? 0)
+					results.push({
+						chainId: entry.chainId,
+						symbol: entry.symbol,
+						balance: String(match?.balance ?? '0'),
+						balanceUsd: nativeUsd + tokenUsdTotal + defiUsdTotal,
+						nativeBalanceUsd: nativeUsd,
+						address: match?.address || entry.pubkey,
+						tokens: chainTokens && chainTokens.length > 0 ? chainTokens : undefined,
+						defiPositions: chainDefi && chainDefi.length > 0 ? chainDefi : undefined,
+					})
+				}
+				if (btcChain && pubkeys.some(p => p.chainId === 'bitcoin')) {
+					const chainTokens = tokensByChainId.get('bitcoin')
+					const tokenUsdTotal = chainTokens?.reduce((s, t) => s + t.balanceUsd, 0) || 0
+					results.push({
+						chainId: 'bitcoin',
+						symbol: 'BTC',
+						balance: String(btcBalance),
+						balanceUsd: btcUsd + tokenUsdTotal,
+						nativeBalanceUsd: btcUsd,
+						address: btcAddress,
+						tokens: chainTokens && chainTokens.length > 0 ? chainTokens : undefined,
+					})
+				}
+
+				// 9. Persist and return. Only chains whose chunk succeeded are "confirmed"
+				// (genuine zeros overwrite stale); failed chains keep their cached value.
+				const confirmed = new Set(results.map(r => r.chainId).filter(id => !failedChainIds.has(id)))
+				setCachedBalances(deviceId, results, confirmed)
+				return results
+			},
 			getWatchOnlyPubkeys: async (params) => {
 				const { getDeviceSnapshotById } = await import('./db')
 				const snap = params?.deviceId
