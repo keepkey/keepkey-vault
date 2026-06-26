@@ -34,17 +34,17 @@ async function main() {
   eq('RUNE amount base units', sendMsg(rune).value.amount[0].amount, '150000000')
 
   // TCY — denom from caip, fee still rune
-  const tcy = await buildCosmosTx(pioneer, THOR, { to: FROM, amount: '2', fromAddress: FROM, caip: 'cosmos:thorchain-mainnet-v1/bank:tcy' })
+  const tcy = await buildCosmosTx(pioneer, THOR, { to: FROM, amount: '2', fromAddress: FROM, caip: 'cosmos:thorchain-mainnet-v1/denom:tcy' })
   eq('TCY denom from caip', sendMsg(tcy).value.amount[0].denom, 'tcy')
   eq('TCY msg type is MsgSend', sendMsg(tcy).type, 'thorchain/MsgSend')
   eq('TCY fee paid in rune', tcy.tx.fee.amount[0].denom, 'rune')
 
   // RUJI — denom contains '/', must survive greedy parse
-  const ruji = await buildCosmosTx(pioneer, THOR, { to: FROM, amount: '1', fromAddress: FROM, caip: 'cosmos:thorchain-mainnet-v1/bank:x/ruji' })
+  const ruji = await buildCosmosTx(pioneer, THOR, { to: FROM, amount: '1', fromAddress: FROM, caip: 'cosmos:thorchain-mainnet-v1/denom:x/ruji' })
   eq('RUJI denom keeps slash', sendMsg(ruji).value.amount[0].denom, 'x/ruji')
 
   // Token MAX — sends full token balance, NO rune fee reserve subtracted
-  const max = await buildCosmosTx(pioneer, THOR, { to: FROM, amount: '0', isMax: true, fromAddress: FROM, caip: 'cosmos:thorchain-mainnet-v1/bank:tcy', tokenBalance: '42.5', tokenDecimals: 8 })
+  const max = await buildCosmosTx(pioneer, THOR, { to: FROM, amount: '0', isMax: true, fromAddress: FROM, caip: 'cosmos:thorchain-mainnet-v1/denom:tcy', tokenBalance: '42.5', tokenDecimals: 8 })
   eq('TCY MAX = full balance, no fee reserve', sendMsg(max).value.amount[0].amount, '4250000000')
 
   console.log(`\n  Result: ${pass} passed, ${fail} failed\n`)

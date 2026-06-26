@@ -112,10 +112,11 @@ export async function buildCosmosTx(
 ) {
   const { to, memo = '', feeLevel = 5, isMax = false, isSwapDeposit = false, fromAddress } = params
 
-  // Bank-token send? A `/bank:<denom>` caip segment (e.g. `.../bank:tcy`,
-  // `.../bank:x/ruji`) selects a non-native denom. Parse greedily to end so a
-  // denom containing '/' (RUJI `x/ruji`, secured assets `bch/bch`) survives.
-  const bankMatch = params.caip?.match(/\/bank:(.+)$/)
+  // Bank-token send? A `/denom:<denom>` caip segment (Pioneer's scheme, e.g.
+  // `.../denom:tcy`, `.../denom:x/ruji`) selects a non-native bank denom. Parse
+  // greedily to end so a denom containing '/' (RUJI `x/ruji`, secured assets
+  // `bch/bch`) survives. (`bank:` accepted too for forward-compat.)
+  const bankMatch = params.caip?.match(/\/(?:denom|bank):(.+)$/)
   const isToken = !!bankMatch
   const denom = isToken ? bankMatch![1] : (chain.denom || chain.symbol.toLowerCase())
   // ponytail: token amount decimals; tcy/ruji are 8 like RUNE so chain.decimals
