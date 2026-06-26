@@ -17,6 +17,8 @@
  * is purely a *predictive* hint, not a contract.
  */
 
+import { versionCompare } from './firmware-versions'
+
 export type SwapProvider =
   | 'thorchain'
   | 'mayachain'
@@ -231,6 +233,29 @@ const THORCHAIN_DENOM_ASSETS = new Set<string>([
   'cosmos:thorchain-mainnet-v1/denom:tcy',
   'cosmos:thorchain-mainnet-v1/denom:x/ruji',
 ])
+
+// ── Firmware gate for THORChain/Maya bank tokens (TCY, RUJI) ──────────────
+//
+// Sending a bank token is a MsgSend whose `denom` field the firmware honors
+// only from 7.15.0. On older firmware that field is ignored and the tx signs
+// as RUNE — the user thinks they're moving TCY but they'd move RUNE (or it
+// fails). That's a fund-safety gap, so the whole TCY/RUJI feature (send +
+// swap) is gated to 7.15+. Single source of truth used by the swap matrix and
+// the backend build/sign path.
+export const THORCHAIN_BANK_TOKEN_MIN_FW = '7.15.0'
+
+/** A THORChain/Maya bank-module token (TCY, RUJI, secured assets) — `/denom:` caip. */
+export function isThorchainBankToken(caip: string): boolean {
+  return (caip.startsWith('cosmos:thorchain-') || caip.startsWith('cosmos:mayachain-'))
+    && caip.includes('/denom:')
+}
+
+/** True if the connected firmware can safely sign this asset. Non-bank-tokens
+ *  are always OK; bank tokens require firmware ≥ 7.15.0 (unknown fw → not OK). */
+export function thorchainBankTokenFirmwareOK(caip: string, firmwareVersion?: string): boolean {
+  if (!isThorchainBankToken(caip)) return true
+  return !!firmwareVersion && versionCompare(firmwareVersion, THORCHAIN_BANK_TOKEN_MIN_FW) >= 0
+}
 
 // ── Public API ──────────────────────────────────────────────────────────
 

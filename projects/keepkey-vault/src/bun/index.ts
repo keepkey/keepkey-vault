@@ -1200,6 +1200,7 @@ async function applyRestApiState() {
 
 // ── Swap quote cache (last 10 quotes for tracker data) ───────────────
 import type { SwapQuote, SwapQuoteParams, ExecuteSwapParams, SwapResult, SwapSubStage } from '../shared/types'
+import { isThorchainBankToken, thorchainBankTokenFirmwareOK, THORCHAIN_BANK_TOKEN_MIN_FW } from '../shared/swap-support-matrix'
 const swapQuoteCache = new Map<string, SwapQuote>()
 
 // ── Emulator confirm helper ──────────────────────────────────────────
@@ -1450,6 +1451,17 @@ function maybeStartBackgroundWalletVerification(): void {
 // The device still gates every signature in both paths.
 async function headlessSwapQuote(params: SwapQuoteParams): Promise<SwapQuote> {
 	const { getSwapQuote } = await import('./swap')
+
+	// Firmware gate (see buildTx): selling a THORChain/Maya bank token (TCY,
+	// RUJI) requires firmware 7.15+. Refuse the quote on older firmware — the
+	// single chokepoint for both in-app and REST swaps — so the flow can't
+	// reach signing. Buying these (toCaip) is fine: the user only receives.
+	if (params.fromCaip && isThorchainBankToken(params.fromCaip)) {
+		const fw = engine.getDeviceState().firmwareVersion
+		if (!thorchainBankTokenFirmwareOK(params.fromCaip, fw)) {
+			throw new Error(`TCY / RUJI swaps require KeepKey firmware ${THORCHAIN_BANK_TOKEN_MIN_FW}+ (device has ${fw || 'unknown'}). Update your firmware.`)
+		}
+	}
 
 	// Resolve xpub addresses to real receive addresses for UTXO chains.
 	// ChainBalance.address can be an xpub when Pioneer doesn't return
@@ -3697,6 +3709,19 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!engine.wallet) throw new Error('No device connected')
 				const chain = getAllChains().find(c => c.id === params.chainId)
 				if (!chain) throw new Error(`Unknown chain: ${params.chainId}`)
+
+				// Firmware gate (fund safety): a THORChain/Maya bank-token send is a
+				// MsgSend whose `denom` field is only honored from 7.15.0. On older
+				// firmware the field is ignored and the tx signs as RUNE — refuse to
+				// build it rather than sign the wrong asset. Covers TCY/RUJI sends and
+				// swaps (both pass the bank-token caip). Native RUNE/ATOM are unaffected.
+				if (params.caip && isThorchainBankToken(params.caip)) {
+					const fw = engine.getDeviceState().firmwareVersion
+					if (!thorchainBankTokenFirmwareOK(params.caip, fw)) {
+						throw new Error(`This asset requires KeepKey firmware ${THORCHAIN_BANK_TOKEN_MIN_FW}+ (device has ${fw || 'unknown'}). Update your firmware to send or swap TCY / RUJI.`)
+					}
+				}
+
 				const pioneer = await getPioneer()
 
 				// Seed-staleness boundary on the SIGNING path. params (xpubOverride,
