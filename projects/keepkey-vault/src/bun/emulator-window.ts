@@ -191,6 +191,11 @@ let emuWindow: BrowserWindow<typeof emuRpc> | null = null
 export function openEmulatorWindow(): void {
   if (emuWindow) return
 
+  // A fresh window's webview hasn't loaded handlePacket yet. Close the gate
+  // until the new page posts /_emu/ready, so a stale `true` left over from a
+  // prior window can't let sendToWindow inject before this webview is ready.
+  viewReady = false
+
   const port = startBridge()
   const saved = loadWindowState()
   console.log(`${TAG} Opening emulator window at (${saved.x}, ${saved.y}) ${saved.width}x${saved.height}`)
@@ -270,7 +275,12 @@ function sendToWindow(messageName: string, payload: any): boolean {
   if (!emuWindow || !viewReady) return false
   const packet = JSON.stringify({ type: 'message', id: messageName, payload })
   try {
-    emuWindow.webview.executeJavascript(`window.handlePacket(${packet})`)
+    // Guard handlePacket: executeJavascript against a webview whose page hasn't
+    // finished loading — or was rebuilt without a close event resetting
+    // viewReady — throws inside WebKit and crashes the WKWebView process with
+    // EXC_BREAKPOINT (SIGTRAP / exit 133). The `if` makes a not-yet-ready
+    // injection a harmless no-op instead of killing the app.
+    emuWindow.webview.executeJavascript(`if(window.handlePacket)window.handlePacket(${packet})`)
     return true
   } catch (err: any) {
     console.warn(`${TAG} sendToWindow ${messageName} failed:`, err?.message)
