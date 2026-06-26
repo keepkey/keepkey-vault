@@ -708,6 +708,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 	const [showBip85, setShowBip85] = useState(false)
 	const [bip85Enabled, setBip85Enabled] = useState(false)
 	const [zcashEnabled, setZcashEnabled] = useState(false)
+	const [hiveEnabled, setHiveEnabled] = useState(false)
 	// One-time passphrase/hidden-wallet intro. `passphraseIntroSeen` starts true so
 	// the dialog never flashes before settings load; refreshFeatureFlags sets the
 	// real value. `introDismissed` suppresses it for the rest of this session.
@@ -866,6 +867,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 			.then(s => {
 				setBip85Enabled(s.bip85Enabled)
 				setZcashEnabled(s.zcashPrivacyEnabled)
+				setHiveEnabled(s.hiveEnabled)
 				setPassphraseIntroSeen(s.passphraseIntroShown)
 			})
 			.catch(() => {})
@@ -1177,6 +1179,19 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 		}
 	}, [zcashEnabled, refreshBalances, loadingBalances])
 
+	// Auto-refresh balances when Hive feature flag is enabled mid-session
+	const prevHiveRef = useRef(hiveEnabled)
+	useEffect(() => {
+		const becameEnabled = hiveEnabled && !prevHiveRef.current
+		if (becameEnabled && !loadingBalances) {
+			console.log('[Dashboard] Hive enabled — refreshing balances')
+			refreshBalances()
+			prevHiveRef.current = true
+		} else if (!hiveEnabled) {
+			prevHiveRef.current = false
+		}
+	}, [hiveEnabled, refreshBalances, loadingBalances])
+
 	// Auto-refresh after new seed (OOB setup) — one-shot, then clear the flag
 	useEffect(() => {
 		if (forceRefresh && initialLoaded && !hasEverRefreshed && !loadingBalances) {
@@ -1256,6 +1271,8 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 		)
 		const result = new Map<string, { usd: number; cleanTokenCount: number }>()
 		for (const [chainId, bal] of balances) {
+			// Honor the Hive feature flag — stale Hive rows in the map must not count toward totals
+			if (chainId === 'hive' && !hiveEnabled) continue
 			if (bal.tokens && bal.tokens.length > 0) {
 				const { clean } = categorizeTokens(bal.tokens, overrides)
 				const spamUsd = (bal.tokens.length - clean.length) > 0
@@ -1270,7 +1287,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 			}
 		}
 		return result
-	}, [balances, visibilityMap])
+	}, [balances, visibilityMap, hiveEnabled])
 
 	const totalUsd = useMemo(() => Array.from(cleanBalanceUsd.values()).reduce((sum, b) => sum + b.usd, 0), [cleanBalanceUsd])
 
@@ -1447,8 +1464,9 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 		if (!isChainSupported(c, firmwareVersion)) return false
 		// Zcash transparent is hidden by default — show when feature flag is on
 		if (c.id === 'zcash') return zcashEnabled
+		if (c.id === 'hive') return hiveEnabled
 		return !c.hidden
-	}), [allChains, firmwareVersion, zcashEnabled])
+	}), [allChains, firmwareVersion, zcashEnabled, hiveEnabled])
 
 	const sortedChains = useMemo(() => [...visibleChains].sort((a, b) => {
 		const aUsd = cleanBalanceUsd.get(a.id)?.usd || 0

@@ -1336,7 +1336,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             status: 'healthy',
             syncing: engine.isSyncing,
             apiVersion: 2,
-            supportedChains: CHAINS.filter(c => isChainSupported(c, ds.firmwareVersion)).map(c => c.networkId),
+            supportedChains: CHAINS.filter(c => isChainSupported(c, ds.firmwareVersion) && (c.id !== 'hive' || getSetting('hive_enabled') === '1')).map(c => c.networkId),
             device_connected: engine.wallet !== null,
             version: callbacks?.getVersion?.() || 'unknown',
             connected: engine.wallet !== null,
@@ -1987,6 +1987,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/addresses/hive' && method === 'POST') {
           auth.requireAuth(req)
+          // Gate behind the Hive feature flag (matches RPC handlers in index.ts)
+          if (getSetting('hive_enabled') !== '1') return json({ error: 'Hive is disabled' }, 403)
           const fwBlock = requireChainSupport('hive')
           if (fwBlock) return fwBlock
           const wallet = requireWallet(engine)
