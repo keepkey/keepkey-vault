@@ -12,6 +12,18 @@ const TAG = '[swap]'
 
 // ── Asset mapping helpers ───────────────────────────────────────────
 
+/** True for assets that swap via a THORChain/Maya MsgDeposit (no inbound vault
+ *  address): native RUNE/CACAO, plus on-chain bank tokens (TCY, RUJI, secured
+ *  assets) which carry a `/denom:` caip. Single source of truth — both the
+ *  quote parser and the tx-build path must agree, or one throws while the other
+ *  would have built fine. */
+export function isNativeDepositCaip(fromCaip: string): boolean {
+  if (fromCaip === 'cosmos:thorchain-mainnet-v1/slip44:931') return true
+  if (fromCaip === 'cosmos:mayachain-mainnet-v1/slip44:931') return true
+  return (fromCaip.startsWith('cosmos:thorchain-') || fromCaip.startsWith('cosmos:mayachain-'))
+    && fromCaip.includes('/denom:')
+}
+
 /** Parse a THORChain asset string (e.g. "ETH.USDT-0xDAC...") into parts */
 export function parseThorAsset(asset: string): { chain: string; symbol: string; contractAddress?: string } {
   const [chain, rest] = asset.split('.')
@@ -264,10 +276,9 @@ function parseSingleQuote(
   // Expiry for depositWithExpiry
   const expiry = raw.expiry || quote.expiry || 0
 
-  // Native THORChain/Maya swaps (RUNE, CACAO) use MsgDeposit — no inbound vault needed
-  const isNativeDeposit =
-    params.fromCaip === 'cosmos:thorchain-mainnet-v1/slip44:931' ||
-    params.fromCaip === 'cosmos:mayachain-mainnet-v1/slip44:931'
+  // Native THORChain/Maya swaps (RUNE, CACAO, and bank tokens TCY/RUJI/secured
+  // assets) use MsgDeposit — no inbound vault needed.
+  const isNativeDeposit = isNativeDepositCaip(params.fromCaip)
 
   if (!inboundAddress && !isNativeDeposit && !hasPrebuiltTx) {
     // Dump full response structure to help diagnose missing field

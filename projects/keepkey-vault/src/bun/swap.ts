@@ -22,7 +22,7 @@ import { normalizeBchAddress } from './txbuilder'
 // history rows without CAIP). The swap quote/execute path no longer uses it —
 // vault is CAIP-native end-to-end.
 export { parseAssetsResponse, parseQuoteResponse, assetToCaip } from './swap-parsing'
-import { parseQuoteResponse, parseAssetsResponse } from './swap-parsing'
+import { parseQuoteResponse, parseAssetsResponse, isNativeDepositCaip } from './swap-parsing'
 
 const TAG = '[swap]'
 
@@ -34,24 +34,9 @@ const TAG = '[swap]'
 const BTC_NETWORK_ID = 'bip122:000000000019d6689c085ae165831e93'
 const isBitcoin = (c: ChainDef) => c.networkId === BTC_NETWORK_ID
 
-// CAIP-19 of native THORChain (RUNE) and Mayachain (CACAO) — the only assets
-// that route via MsgDeposit instead of a vault inbound address. CAIP is the
-// canonical identifier; symbols and THOR-style asset strings are derived
-// display data, never load-bearing.
-const RUNE_CAIP  = 'cosmos:thorchain-mainnet-v1/slip44:931'
-const CACAO_CAIP = 'cosmos:mayachain-mainnet-v1/slip44:931'
-
-/** True for native THORChain/Maya deposits (CAIP-driven; replaces the
- *  fragile `fromAsset === 'THOR.RUNE'` check that depended on canonical
- *  THORChain prefix). */
-function isNativeDepositCaip(fromCaip: string): boolean {
-  if (fromCaip === RUNE_CAIP || fromCaip === CACAO_CAIP) return true
-  // THORChain/Maya bank tokens (TCY, RUJI, secured assets) live ON the chain —
-  // swapping them is a MsgDeposit with a swap memo, no inbound vault address
-  // (Pioneer's quote returns txs[0].type='deposit' and no inboundAddress).
-  return (fromCaip.startsWith('cosmos:thorchain-') || fromCaip.startsWith('cosmos:mayachain-'))
-    && fromCaip.includes('/denom:')
-}
+// isNativeDepositCaip lives in swap-parsing.ts (single source of truth — the
+// quote parser and this build path MUST agree on what's a MsgDeposit, or one
+// throws "missing inbound address" while the other would have built fine).
 
 // CAIP namespace parser is shared with the picker so a future namespace
 // addition (Solana SPL, etc.) only needs editing in one place.
