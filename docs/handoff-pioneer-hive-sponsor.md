@@ -45,8 +45,9 @@ logic, no abuse defense** today.
 
 ## 3. Locked decisions (do not re-litigate)
 
-1. **Gating = KeepKey owners only.** The create endpoint must verify a device-signed
-   attestation, not just rate-limit. (See §6 — confirm the exact mechanism before coding.)
+1. **Gating = KeepKey owners only**, enforced via a device-signed `account_create` payload +
+   rate-limit + circuit-breaker. No hardware attestation exists on fw 7.15.0, so this is an
+   *economic* gate, not hardware-identity proof — see §6 (resolved).
 2. **Empty ACT pool = queue + circuit-breaker.** Refuse below a threshold; refill via the
    mint cron. **Never** silently fall back to the 3-HIVE cash fee.
 3. **Single account, index 0 only** for v1. Keys arrive at `m/48'/13'/role'/0'/0'`.
@@ -118,21 +119,27 @@ Flow:
 
 ---
 
-## 6. Device attestation (CONFIRM BEFORE CODING — one open item)
+## 6. Device attestation (RESOLVED — baseline signature is the gate)
 
-Decision is "only a genuine KeepKey." The available signal:
+Decision was "only a genuine KeepKey." **Firmware 7.15.0 has no per-device hardware
+attestation** Pioneer can verify (confirmed against the firmware tree 2026-06-26):
+- U2F attestation cert is a *shared batch* cert (same key across many units, in the firmware
+  image) — can't identify a unit, not exposed for arbitrary signing.
+- `GetFeatures.device_id` is a stored UUID — not CA-signed, host-spoofable.
+- `OTP_MFG_SIG` is a one-time factory marker, not a signing oracle.
+- No manufacturer/root-CA pubkey, endorsement key, or device-cert message exists.
 
-- **Baseline (always available):** the request carries a payload the device signed during the
-  on-device `account_create` confirm (firmware `HiveSignAccountCreate` → 65-byte recoverable
-  sig). Pioneer verifies the signature recovers to the supplied `ownerKey`. This proves the
-  requester controls a full device-derived key set and completed a hardware confirmation.
-- **Stronger (only if it exists):** a hardware **device-attestation** key/cert baked into
-  KeepKey firmware, verifiable against KeepKey's manufacturing CA. **Unconfirmed that KeepKey
-  exposes this** — verify with the firmware team. If it exists, require it; if not, baseline
-  signature + rate-limit + `sponsor-info` circuit-breaker is the v1 gate.
+**v1 gate (implement this):** the request carries the payload the device signed during the
+on-device `account_create` confirm (firmware `HiveSignAccountCreate` → 65-byte recoverable
+sig). Pioneer verifies the signature recovers to the supplied `ownerKey`, over the exact
+serialized op being broadcast. This proves control of a full device-derived key set + a
+hardware confirmation. Combine with the §7 rate-limit and §5 circuit-breaker.
 
-**Action:** confirm with firmware whether a verifiable hardware attestation exists. Default to
-the baseline mechanism if not. Document whichever you implement in the endpoint.
+**Honest caveat:** a valid secp256k1 sig does **not** cryptographically prove genuine KeepKey
+hardware — any software can derive keys and sign. So "KeepKey-owners-only" is enforced
+*economically* (rate-limit + bounded ACT pool), not by hardware identity. If true hardware
+gating is later required, it needs a **new firmware attestation message** (manufacturer
+endorsement key + signed challenge) — track as a separate firmware feature, out of scope here.
 
 ---
 
@@ -162,7 +169,7 @@ the baseline mechanism if not. Document whichever you implement in the endpoint.
 - [ ] `username-available`, `create-account`, `sponsor-info` live and registered in `routes.ts`
 - [ ] Sponsor account funded + HP staked; active key via secrets (not env-in-git)
 - [ ] ACT mint cron running; pool maintained
-- [ ] Attestation verification implemented (mechanism confirmed with firmware)
+- [ ] Signature verification implemented (recover `account_create` sig → `ownerKey`; §6)
 - [ ] Rate-limit middleware added; blacklist in place
 - [ ] Circuit-breaker returns 503/queued below threshold — never the cash fee
 - [ ] End-to-end (mainnet): vault wizard → create-account → `@username` resolves via existing
