@@ -304,7 +304,7 @@ export async function displaySeedWords(mnemonic: string): Promise<void> {
   // user "seed displayed" when the words were never actually shown — that
   // would lead to backing up a seed the device doesn't hold.
   if (!viewReady) {
-    const deadline = Date.now() + 5000
+    const deadline = Date.now() + EMU_VIEW_READY_TIMEOUT_MS
     while (Date.now() < deadline && !viewReady && emuWindow) {
       await new Promise(r => setTimeout(r, 50))
     }
@@ -340,6 +340,11 @@ export function dismissSeedDisplay(): void {
 // ── Interactive confirm ─────────────────────────────────────────────────
 
 const CONFIRM_TIMEOUT_MS = 120_000 // 2 minutes — reject if emulator window is dead/unresponsive
+// How long to wait for a freshly-opened emulator webview to finish loading and
+// post /_emu/ready. A cold webview on `make dev` can take well over 5s; the
+// wait loop exits the instant viewReady flips, so a higher ceiling only avoids
+// spuriously rejecting a confirm (e.g. a swap) before the window is up.
+const EMU_VIEW_READY_TIMEOUT_MS = 20_000
 
 async function requestUserConfirm(details: EmulatorConfirmDetails & { id: string }): Promise<boolean> {
   if (!emuWindow) {
@@ -356,7 +361,7 @@ async function requestUserConfirm(details: EmulatorConfirmDetails & { id: string
   // immediately after open (HTML hasn't loaded yet) — sendToWindow would
   // silently no-op and the user would never see the prompt.
   if (!viewReady) {
-    const deadline = Date.now() + 5000
+    const deadline = Date.now() + EMU_VIEW_READY_TIMEOUT_MS
     while (Date.now() < deadline && !viewReady && emuWindow) {
       await new Promise(r => setTimeout(r, 50))
     }

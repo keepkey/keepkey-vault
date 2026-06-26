@@ -1054,6 +1054,9 @@ export async function previewSwapBuild(
     // decimals: synthesized token sources (e.g. SPL USDT, absent from
     // Pioneer's available-assets) carry them in params.tokenDecimals.
     caip: fromAssetMeta?.caip ?? params.fromCaip, tokenDecimals: fromAssetMeta?.decimals ?? params.tokenDecimals,
+    // Match the execute path: THOR.TCY/THOR.RUJI deposit asset, not the
+    // hardcoded THOR.RUNE default, so the preview shows the right coin.
+    depositAsset: fromAssetMeta?.asset,
   })
   return { unsignedTx: buildResult.unsignedTx }
 }
