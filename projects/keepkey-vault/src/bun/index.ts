@@ -1582,6 +1582,18 @@ async function headlessSwapQuote(params: SwapQuoteParams): Promise<SwapQuote> {
 
 async function headlessExecuteSwap(params: ExecuteSwapParams, pushSubStage: (stage: SwapSubStage) => void): Promise<SwapResult> {
 	if (!engine.wallet) throw new Error('No device connected')
+
+	// Firmware gate ENFORCED at execute time, not just quote time: /api/v2/swap/
+	// execute (rest-swap.ts) calls this directly, so a stale or crafted execute
+	// payload must not bypass the quote-time check and reach signing on firmware
+	// that would sign the wrong asset. Mirrors headlessSwapQuote + buildTx.
+	if (params.fromCaip && isThorchainBankToken(params.fromCaip)) {
+		const fw = engine.getDeviceState().firmwareVersion
+		if (!thorchainBankTokenFirmwareOK(params.fromCaip, fw)) {
+			throw new Error(`TCY / RUJI swaps require KeepKey firmware ${THORCHAIN_BANK_TOKEN_MIN_FW}+ (device has ${fw || 'unknown'}). Update your firmware.`)
+		}
+	}
+
 	const { executeSwap } = await import('./swap')
 	const { trackSwap, isTrackerInitialized, initSwapTracker } = await import('./swap-tracker')
 	// Ensure tracker is initialized before tracking (guards against race/init failure)
