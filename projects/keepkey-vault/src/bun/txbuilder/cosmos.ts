@@ -103,6 +103,9 @@ export interface BuildCosmosParams {
   caip?: string
   tokenBalance?: string  // human-readable token balance (for MAX)
   tokenDecimals?: number // token decimals (defaults to chain.decimals)
+  // THORChain/Maya asset for a swap MsgDeposit's coins (e.g. "THOR.RUNE",
+  // "THOR.TCY", "THOR.RUJI"). Defaults to the chain native if omitted.
+  depositAsset?: string
 }
 
 export async function buildCosmosTx(
@@ -189,7 +192,7 @@ export async function buildCosmosTx(
 
   if (isDeposit) {
     const depositType = MSG_DEPOSIT_TYPES[chain.id]!
-    const depositAsset = DEPOSIT_ASSETS[chain.id]!
+    const depositAsset = params.depositAsset || DEPOSIT_ASSETS[chain.id]!
     console.log(`${TAG} Building MsgDeposit: asset=${depositAsset}, amount=${baseAmount}, memo=${memo}`)
     msg = {
       type: depositType,

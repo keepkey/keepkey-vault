@@ -47,6 +47,18 @@ async function main() {
   const max = await buildCosmosTx(pioneer, THOR, { to: FROM, amount: '0', isMax: true, fromAddress: FROM, caip: 'cosmos:thorchain-mainnet-v1/denom:tcy', tokenBalance: '42.5', tokenDecimals: 8 })
   eq('TCY MAX = full balance, no fee reserve', sendMsg(max).value.amount[0].amount, '4250000000')
 
+  // Swap MsgDeposit FROM a bank token — coins asset must be THOR.TCY (not the
+  // hardcoded THOR.RUNE) so the network takes TCY, with the swap memo.
+  const dep = await buildCosmosTx(pioneer, THOR, {
+    to: FROM, amount: '190.76905663', fromAddress: FROM,
+    caip: 'cosmos:thorchain-mainnet-v1/denom:tcy', tokenDecimals: 8,
+    isSwapDeposit: true, depositAsset: 'THOR.TCY',
+    memo: '=:THOR.RUJI:' + FROM + ':7278216218:kk:30',
+  })
+  eq('swap deposit type is MsgDeposit', sendMsg(dep).type, 'thorchain/MsgDeposit')
+  eq('swap deposit coins asset is THOR.TCY', sendMsg(dep).value.coins[0].asset, 'THOR.TCY')
+  eq('swap deposit carries the swap memo', sendMsg(dep).value.memo, '=:THOR.RUJI:' + FROM + ':7278216218:kk:30')
+
   console.log(`\n  Result: ${pass} passed, ${fail} failed\n`)
   process.exit(fail > 0 ? 1 : 0)
 }

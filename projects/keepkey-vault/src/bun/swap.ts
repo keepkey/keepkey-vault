@@ -45,7 +45,12 @@ const CACAO_CAIP = 'cosmos:mayachain-mainnet-v1/slip44:931'
  *  fragile `fromAsset === 'THOR.RUNE'` check that depended on canonical
  *  THORChain prefix). */
 function isNativeDepositCaip(fromCaip: string): boolean {
-  return fromCaip === RUNE_CAIP || fromCaip === CACAO_CAIP
+  if (fromCaip === RUNE_CAIP || fromCaip === CACAO_CAIP) return true
+  // THORChain/Maya bank tokens (TCY, RUJI, secured assets) live ON the chain —
+  // swapping them is a MsgDeposit with a swap memo, no inbound vault address
+  // (Pioneer's quote returns txs[0].type='deposit' and no inboundAddress).
+  return (fromCaip.startsWith('cosmos:thorchain-') || fromCaip.startsWith('cosmos:mayachain-'))
+    && fromCaip.includes('/denom:')
 }
 
 // CAIP namespace parser is shared with the picker so a future namespace
@@ -823,6 +828,10 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
       fromAddress,
       caip: sourceCaip,
       tokenDecimals,
+      // MsgDeposit coins asset: THOR.RUNE for native, THOR.TCY/THOR.RUJI for
+      // bank tokens. Without this the builder defaults to THOR.RUNE and the
+      // network would try to take RUNE for a TCY/RUJI swap.
+      depositAsset: fromAssetMeta?.asset,
     })
     unsignedTx = buildResult.unsignedTx
   }
