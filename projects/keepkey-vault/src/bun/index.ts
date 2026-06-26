@@ -5710,7 +5710,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					const result = await rebuildActivityHistory({
 						wallet: engine.wallet,
 						scope,
-						chains: getAllChains(),
+						chains: getAllChains().filter(c => c.id !== 'hive' || hiveEnabled),
 						firmwareVersion: engine.getDeviceState().firmwareVersion,
 						options: { chainId: params.chainId, dryRun: true, collectRows: true },
 					})
@@ -5726,7 +5726,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const result = await rebuildActivityHistory({
 					wallet: engine.wallet,
 					scope,
-					chains: getAllChains(),
+					chains: getAllChains().filter(c => c.id !== 'hive' || hiveEnabled),
 					firmwareVersion: engine.getDeviceState().firmwareVersion,
 					options: { chainId: params.chainId },
 				})
@@ -5801,7 +5801,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// letting the user select them and then hitting a device signing error.
 				const filteredBalances = result.balances.filter(b => {
 					const chain = getAllChains().find(c => c.id === b.chainId)
-					return chain ? isChainSupported(chain, fwVersion) : true // keep unknowns (tokens)
+					if (!chain) return true // keep unknowns (tokens)
+					if (chain.id === 'hive' && !hiveEnabled) return false // honor feature flag — drop stale Hive rows
+					return isChainSupported(chain, fwVersion)
 				})
 				return { balances: filteredBalances, updatedAt: result.updatedAt, staleReasons: staleReasons.length > 0 ? staleReasons : undefined }
 			},
@@ -7206,7 +7208,7 @@ engine.on('state-change', (state) => {
 			rebuildActivityHistory({
 				wallet: engine.wallet,
 				scope,
-				chains: getAllChains(),
+				chains: getAllChains().filter(c => c.id !== 'hive' || hiveEnabled),
 				firmwareVersion: engine.getDeviceState().firmwareVersion,
 			}).then(result => {
 				console.log(`[activity] Auto-scan complete: ${result.totals.inserted} new txs across ${result.totals.chains} chains`)

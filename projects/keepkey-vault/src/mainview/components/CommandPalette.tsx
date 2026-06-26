@@ -98,7 +98,7 @@ export function CommandPalette({ open, onClose, onJumpToVault, balances, firmwar
 		}
 		scored.sort((a, b) => b.score - a.score)
 		return scored.slice(0, MAX_RESULTS).map(s => s.r)
-	}, [query, balances, hiveEnabled])
+	}, [query, balances, hiveEnabled, firmwareVersion])
 
 	// Clamp active index when results change
 	useEffect(() => {
