@@ -2809,7 +2809,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						//   ERC-20: "eip155:1/erc20:0xdac17..." → "0xdac17..."
 						//   SPL:    "solana:5eykt4.../spl:TokenMint..." → "TokenMint..."
 						//   TRC-20: "tron:27Lqcw/trc20:T..." → "T..."
-						const contractMatch = (tok.caip || '').match(/\/(erc20|spl|trc20|token):([^\s]+)/)
+						//   bank:   "cosmos:thorchain-mainnet-v1/bank:tcy" → "tcy" (cosmos bank denom)
+						const contractMatch = (tok.caip || '').match(/\/(erc20|spl|trc20|token|bank):([^\s]+)/)
 						const contractAddress = contractMatch?.[2] || tok.contract || undefined
 
 						const rawValueUsd = tok.valueUsd

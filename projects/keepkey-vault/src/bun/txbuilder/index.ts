@@ -149,6 +149,9 @@ export async function buildTx(
         isMax: params.isMax,
         isSwapDeposit: params.isSwapDeposit,
         fromAddress: params.fromAddress,
+        caip: params.caip,
+        tokenBalance: params.tokenBalance,
+        tokenDecimals: params.tokenDecimals,
       })
       const { fee: cosmosFee, ...cosmosTx } = cosmosResult
       return { unsignedTx: cosmosTx, fee: cosmosFee }
