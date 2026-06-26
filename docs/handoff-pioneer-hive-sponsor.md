@@ -131,9 +131,16 @@ attestation** Pioneer can verify (confirmed against the firmware tree 2026-06-26
 
 **v1 gate (implement this):** the request carries the payload the device signed during the
 on-device `account_create` confirm (firmware `HiveSignAccountCreate` → 65-byte recoverable
-sig). Pioneer verifies the signature recovers to the supplied `ownerKey`, over the exact
-serialized op being broadcast. This proves control of a full device-derived key set + a
-hardware confirmation. Combine with the §7 rate-limit and §5 circuit-breaker.
+sig). Pioneer recomputes the digest over the device-returned `serialized_tx`, recovers the
+signer, asserts it equals `ownerKey`, and **parses the bytes to bind the signature to the
+exact account name + 4 keys + sponsor** before spending an ACT. This proves control of a full
+device-derived key set + a hardware confirmation. Combine with the §7 rate-limit and §5
+circuit-breaker.
+
+→ **Byte-exact spec: `HIVE-ATTESTATION-DIGEST-SPEC.md`** (digest, signature recovery,
+`serialized_tx` layout, full verification algorithm). Implement against that, not from memory.
+Note: the device signs `account_create` (op 9) as attestation; Pioneer broadcasts
+`create_claimed_account` (op 23) signed by the sponsor — different op, no fee, spends an ACT.
 
 **Honest caveat:** a valid secp256k1 sig does **not** cryptographically prove genuine KeepKey
 hardware — any software can derive keys and sign. So "KeepKey-owners-only" is enforced
