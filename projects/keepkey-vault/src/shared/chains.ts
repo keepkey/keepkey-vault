@@ -290,7 +290,7 @@ const CONFIGS: ChainConfig[] = [
     defaultPath: [0x8000002C, 0x800004FB, 0x80000000, 0, 0],
     explorerAddressUrl: 'https://hiveblocks.com/@{{address}}',
     explorerTxUrl: 'https://hiveblocks.com/tx/{{txid}}',
-    minFirmware: '7.16.0',
+    minFirmware: '7.15.0',  // Hive handler ships in firmware 7.15.0 (alpha), same as Zcash
   },
 ]
 

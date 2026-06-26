@@ -555,6 +555,7 @@ let restApiEnabled = false
 let walletConnectEnabled = false
 let bip85Enabled = false
 let zcashPrivacyEnabled = false
+let hiveEnabled = false
 // True after the per-session incremental scan has caught the wallet up to
 // chain tip. The `verified` field on `zcashShieldedStatus` reports this so
 // API clients (and any future UI gating) get an honest answer about whether
@@ -586,6 +587,7 @@ function loadSettings() {
 	walletConnectEnabled = getSetting('walletconnect_enabled') === '1'
 	bip85Enabled = getSetting('bip85_enabled') === '1'
 	zcashPrivacyEnabled = getSetting('zcash_privacy_enabled') === '1'
+	hiveEnabled = getSetting('hive_enabled') === '1'
 	emulatorEnabled = getSetting('emulator_enabled') === '1'
 	preReleaseUpdates = getSetting('pre_release_updates') === '1'
 	alphaFirmware = getSetting('alpha_firmware') === '1'
@@ -890,6 +892,7 @@ function getAppSettings() {
 		walletConnectEnabled,
 		bip85Enabled,
 		zcashPrivacyEnabled,
+		hiveEnabled,
 		emulatorEnabled,
 		preReleaseUpdates,
 		alphaFirmware,
@@ -2412,6 +2415,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const allChains = getAllChains().filter(c => {
 					if (!isChainSupported(c, fwVersion)) return false
 					if ((c.id === 'zcash' || c.id === 'zcash-shielded') && !zcashPrivacyEnabled) return false
+					if (c.id === 'hive' && !hiveEnabled) return false
 					return true
 				})
 				const utxoChains = allChains.filter(c => c.chainFamily === 'utxo' && c.id !== 'bitcoin')
@@ -4691,6 +4695,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					if (!isChainSupported(c, fwVersion)) return false
 					// Zcash: gated by feature flag, not by hidden (hidden keeps it off Dashboard grid)
 					if (c.id === 'zcash' || c.id === 'zcash-shielded') return zcashPrivacyEnabled
+					if (c.id === 'hive') return hiveEnabled
 					if (c.hidden) return false
 					return true
 				})
@@ -4927,6 +4932,18 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				bip85Enabled = params.enabled
 				setSetting('bip85_enabled', params.enabled ? '1' : '0')
 				console.log('[settings] BIP-85 enabled:', params.enabled)
+				return getAppSettings()
+			},
+			setHiveEnabled: async (params) => {
+				// Hive requires firmware >= 7.15.0 (matches minFirmware in shared/chains.ts).
+				const fwVer = engine.getDeviceState().firmwareVersion
+				if (params.enabled && (!fwVer || versionCompare(fwVer, '7.15.0') < 0)) {
+					console.warn(`[settings] Hive blocked — firmware ${fwVer || 'unknown'} < 7.15.0`)
+					return getAppSettings()
+				}
+				hiveEnabled = params.enabled
+				setSetting('hive_enabled', params.enabled ? '1' : '0')
+				console.log('[settings] Hive enabled:', params.enabled)
 				return getAppSettings()
 			},
 			setEmulatorEnabled: async (params) => {
@@ -5750,6 +5767,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					if (!isChainSupported(c, fwVersion)) return false
 					if (c.id === 'zcash-shielded') return false
 					if (c.id === 'zcash') return zcashPrivacyEnabled
+					if (c.id === 'hive') return hiveEnabled
 					return !c.hidden
 				})
 				const cachedChainIds = new Set(result.balances.map(b => b.chainId))
@@ -6146,6 +6164,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const enabledChains = getAllChains().filter(c => {
 					if (!isChainSupported(c, fwVersion)) return false
 					if ((c.id === 'zcash' || c.id === 'zcash-shielded') && !zcashPrivacyEnabled) return false
+					if (c.id === 'hive' && !hiveEnabled) return false
 					return true
 				})
 				const coverageChains = enabledChains.map(c => ({ chainId: c.id, symbol: c.symbol, chainFamily: c.chainFamily }))
