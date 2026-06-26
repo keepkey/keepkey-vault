@@ -242,6 +242,28 @@ export async function getSwapAssets(): Promise<SwapAsset[]> {
     }
   }
 
+  // THORChain bank tokens TCY and RUJI have live THORChain pools (THOR.TCY,
+  // THOR.RUJI verified against thornode) but aren't always in Pioneer's
+  // available-assets list. Same defensive shim as RUNE/TRON above — keyed by
+  // their `/denom:` caip so the quote path routes them via THORChain.
+  const thorBankDef = CHAINS.find(c => c.id === 'thorchain')
+  if (thorBankDef) {
+    if (!assets.find(a => a.asset === 'THOR.TCY')) {
+      assets.push({
+        asset: 'THOR.TCY', chainId: 'thorchain', symbol: 'TCY', name: 'TCY',
+        chainFamily: 'cosmos', decimals: 8,
+        caip: 'cosmos:thorchain-mainnet-v1/denom:tcy',
+      })
+    }
+    if (!assets.find(a => a.asset === 'THOR.RUJI')) {
+      assets.push({
+        asset: 'THOR.RUJI', chainId: 'thorchain', symbol: 'RUJI', name: 'Rujira',
+        chainFamily: 'cosmos', decimals: 8,
+        caip: 'cosmos:thorchain-mainnet-v1/denom:x/ruji',
+      })
+    }
+  }
+
   swapLog(`${TAG} Loaded ${assets.length} swap assets from Pioneer`)
   assetCache = assets
   assetCacheTime = Date.now()

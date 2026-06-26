@@ -223,6 +223,15 @@ const THORCHAIN_TOKEN_PREFIXES = [
   'tron:0x2b6653dc/token:',
 ]
 
+// THORChain bank-module tokens with live THORChain pools (THOR.TCY, THOR.RUJI).
+// They route via THORChain like any pooled asset but carry a `/denom:` caip, so
+// they don't match the token prefixes above. Other thorchain `/denom:` assets
+// (random x/ pool/vault tokens) are NOT pooled, so allowlist explicitly.
+const THORCHAIN_DENOM_ASSETS = new Set<string>([
+  'cosmos:thorchain-mainnet-v1/denom:tcy',
+  'cosmos:thorchain-mainnet-v1/denom:x/ruji',
+])
+
 // ── Public API ──────────────────────────────────────────────────────────
 
 /** Given a CAIP-19 asset id, decide which providers route it (if any) and
@@ -263,6 +272,11 @@ export function assessAvailability(caip: string): AvailabilityAssessment {
       providers: [],
       reason: `${chainId} is not currently supported by any swap provider`,
     }
+  }
+
+  // THORChain bank tokens (TCY, RUJI) — pooled, routable via THORChain.
+  if (THORCHAIN_DENOM_ASSETS.has(normalizedCaip) && has('thorchain', chainId)) {
+    return { status: 'swappable', providers: ['thorchain'] }
   }
 
   // Token path. Token-specific providers first, then fall through. Use the
