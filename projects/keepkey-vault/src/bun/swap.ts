@@ -22,7 +22,7 @@ import { normalizeBchAddress } from './txbuilder'
 // history rows without CAIP). The swap quote/execute path no longer uses it —
 // vault is CAIP-native end-to-end.
 export { parseAssetsResponse, parseQuoteResponse, assetToCaip } from './swap-parsing'
-import { parseQuoteResponse, parseAssetsResponse } from './swap-parsing'
+import { parseQuoteResponse, parseAssetsResponse, isNativeDepositCaip } from './swap-parsing'
 
 const TAG = '[swap]'
 
@@ -34,19 +34,9 @@ const TAG = '[swap]'
 const BTC_NETWORK_ID = 'bip122:000000000019d6689c085ae165831e93'
 const isBitcoin = (c: ChainDef) => c.networkId === BTC_NETWORK_ID
 
-// CAIP-19 of native THORChain (RUNE) and Mayachain (CACAO) — the only assets
-// that route via MsgDeposit instead of a vault inbound address. CAIP is the
-// canonical identifier; symbols and THOR-style asset strings are derived
-// display data, never load-bearing.
-const RUNE_CAIP  = 'cosmos:thorchain-mainnet-v1/slip44:931'
-const CACAO_CAIP = 'cosmos:mayachain-mainnet-v1/slip44:931'
-
-/** True for native THORChain/Maya deposits (CAIP-driven; replaces the
- *  fragile `fromAsset === 'THOR.RUNE'` check that depended on canonical
- *  THORChain prefix). */
-function isNativeDepositCaip(fromCaip: string): boolean {
-  return fromCaip === RUNE_CAIP || fromCaip === CACAO_CAIP
-}
+// isNativeDepositCaip lives in swap-parsing.ts (single source of truth — the
+// quote parser and this build path MUST agree on what's a MsgDeposit, or one
+// throws "missing inbound address" while the other would have built fine).
 
 // CAIP namespace parser is shared with the picker so a future namespace
 // addition (Solana SPL, etc.) only needs editing in one place.
@@ -238,6 +228,33 @@ export async function getSwapAssets(): Promise<SwapAsset[]> {
         decimals: 6,
         contractAddress: 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',
         caip: 'tron:0x2b6653dc/token:TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',
+      })
+    }
+  }
+
+  // THORChain bank tokens TCY and RUJI have live THORChain pools (THOR.TCY,
+  // THOR.RUJI verified against thornode) but aren't always in Pioneer's
+  // available-assets list. Same defensive shim as RUNE/TRON above — keyed by
+  // their `/denom:` caip so the quote path routes them via THORChain.
+  //
+  // contractAddress = the bank denom: SwapDialog keys token-vs-native balance on
+  // contractAddress (matched against the portfolio token's contractAddress,
+  // which getBalances sets to the denom). WITHOUT it these fall through to the
+  // native RUNE balance, so max/validation/price would quote against RUNE.
+  const thorBankDef = CHAINS.find(c => c.id === 'thorchain')
+  if (thorBankDef) {
+    if (!assets.find(a => a.asset === 'THOR.TCY')) {
+      assets.push({
+        asset: 'THOR.TCY', chainId: 'thorchain', symbol: 'TCY', name: 'TCY',
+        chainFamily: 'cosmos', decimals: 8, contractAddress: 'tcy',
+        caip: 'cosmos:thorchain-mainnet-v1/denom:tcy',
+      })
+    }
+    if (!assets.find(a => a.asset === 'THOR.RUJI')) {
+      assets.push({
+        asset: 'THOR.RUJI', chainId: 'thorchain', symbol: 'RUJI', name: 'Rujira',
+        chainFamily: 'cosmos', decimals: 8, contractAddress: 'x/ruji',
+        caip: 'cosmos:thorchain-mainnet-v1/denom:x/ruji',
       })
     }
   }
@@ -801,6 +818,10 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
       fromAddress,
       caip: sourceCaip,
       tokenDecimals,
+      // MsgDeposit coins asset: THOR.RUNE for native, THOR.TCY/THOR.RUJI for
+      // bank tokens. Without this the builder defaults to THOR.RUNE and the
+      // network would try to take RUNE for a TCY/RUJI swap.
+      depositAsset: fromAssetMeta?.asset,
     })
     unsignedTx = buildResult.unsignedTx
   }
@@ -1038,6 +1059,9 @@ export async function previewSwapBuild(
     // decimals: synthesized token sources (e.g. SPL USDT, absent from
     // Pioneer's available-assets) carry them in params.tokenDecimals.
     caip: fromAssetMeta?.caip ?? params.fromCaip, tokenDecimals: fromAssetMeta?.decimals ?? params.tokenDecimals,
+    // Match the execute path: THOR.TCY/THOR.RUJI deposit asset, not the
+    // hardcoded THOR.RUNE default, so the preview shows the right coin.
+    depositAsset: fromAssetMeta?.asset,
   })
   return { unsignedTx: buildResult.unsignedTx }
 }

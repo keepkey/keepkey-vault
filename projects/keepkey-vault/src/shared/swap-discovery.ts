@@ -13,12 +13,15 @@
 import type { SwapAsset, ChainBalance, CustomToken } from './types'
 import { CHAINS, isChainSupported, type ChainDef } from './chains'
 import { COIN_MAP_LONG } from '@pioneer-platform/pioneer-coins'
-import { assessAvailability, normalizeChainCaip2, CHAIN_CAIP2_ALIASES, type AvailabilityAssessment } from './swap-support-matrix'
+import { assessAvailability, normalizeChainCaip2, CHAIN_CAIP2_ALIASES, isThorchainBankToken, thorchainBankTokenFirmwareOK, THORCHAIN_BANK_TOKEN_MIN_FW, type AvailabilityAssessment } from './swap-support-matrix'
 // Static-imported chains metadata — ~218KB, used synchronously by
 // networkDisplayName + chainMetaForCaip2 from both bun and frontend. Vite
 // inlines as a JSON module. The bigger generatedAssetData.json (~10MB) stays
 // lazy because the picker is the only consumer and the user may never open it.
-import discoveryChainsJson from '@pioneer-platform/pioneer-discovery/lib/chains.json'
+// pioneer-discovery 10.2.0+ ships a strict package `exports` map: the chains
+// catalog is exposed only via the `./chains` subpath (→ lib/chains.json), not
+// the raw `/lib/...` deep path, which vite/Node now reject.
+import discoveryChainsJson from '@pioneer-platform/pioneer-discovery/chains'
 
 /** Vault chain id → canonical THORChain short prefix. Built from
  *  `pioneer-coins` `COIN_MAP_LONG` (which maps THOR prefix → chain id) plus
@@ -414,6 +417,16 @@ function chainDefForCaip(caip: string): ChainDef | undefined {
 export function assessWithFirmware(caip: string, firmwareVersion?: string): AvailabilityAssessment {
   const base = assessAvailability(caip)
   if (base.status !== 'swappable' && base.status !== 'unknown') return base
+  // Asset-level gate: THORChain bank tokens (TCY, RUJI) require firmware 7.15+
+  // even though the THORChain *chain* has no minFirmware (RUNE works on older
+  // fw). Older firmware would sign a TCY MsgSend as RUNE — fund-safety gate.
+  if (isThorchainBankToken(caip) && !thorchainBankTokenFirmwareOK(caip, firmwareVersion)) {
+    return {
+      status: 'unsupported_firmware',
+      providers: [],
+      reason: `Update your KeepKey to firmware ${THORCHAIN_BANK_TOKEN_MIN_FW}+ to trade TCY / RUJI`,
+    }
+  }
   const chain = chainDefForCaip(caip)
   if (!chain?.minFirmware) return base
   if (isChainSupported(chain, firmwareVersion)) return base

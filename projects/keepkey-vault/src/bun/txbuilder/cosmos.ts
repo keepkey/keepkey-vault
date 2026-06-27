@@ -97,6 +97,15 @@ export interface BuildCosmosParams {
   isMax?: boolean
   isSwapDeposit?: boolean // use MsgDeposit instead of MsgSend (for THORChain/Maya swaps)
   fromAddress: string
+  // Bank-token send (e.g. THORChain TCY/RUJI/secured assets). When caip carries a
+  // `/bank:<denom>` segment, the MsgSend uses that denom instead of the chain
+  // native — the network fee is still paid in the chain's native coin.
+  caip?: string
+  tokenBalance?: string  // human-readable token balance (for MAX)
+  tokenDecimals?: number // token decimals (defaults to chain.decimals)
+  // THORChain/Maya asset for a swap MsgDeposit's coins (e.g. "THOR.RUNE",
+  // "THOR.TCY", "THOR.RUJI"). Defaults to the chain native if omitted.
+  depositAsset?: string
 }
 
 export async function buildCosmosTx(
@@ -106,7 +115,16 @@ export async function buildCosmosTx(
 ) {
   const { to, memo = '', feeLevel = 5, isMax = false, isSwapDeposit = false, fromAddress } = params
 
-  const denom = chain.denom || chain.symbol.toLowerCase()
+  // Bank-token send? A `/denom:<denom>` caip segment (Pioneer's scheme, e.g.
+  // `.../denom:tcy`, `.../denom:x/ruji`) selects a non-native bank denom. Parse
+  // greedily to end so a denom containing '/' (RUJI `x/ruji`, secured assets
+  // `bch/bch`) survives. (`bank:` accepted too for forward-compat.)
+  const bankMatch = params.caip?.match(/\/(?:denom|bank):(.+)$/)
+  const isToken = !!bankMatch
+  const denom = isToken ? bankMatch![1] : (chain.denom || chain.symbol.toLowerCase())
+  // ponytail: token amount decimals; tcy/ruji are 8 like RUNE so chain.decimals
+  // is correct today. tokenDecimals override covers a future non-8 bank token.
+  const amountDecimals = isToken ? (params.tokenDecimals ?? chain.decimals) : chain.decimals
 
   // 1. Get account info (API expects short network name, not CAIP networkId)
   console.log(`${TAG} Fetching account info for ${chain.coin}...`)
@@ -147,14 +165,22 @@ export async function buildCosmosTx(
   let baseAmount: bigint
 
   if (isMax) {
-    const balResp = await pioneer.GetPortfolioBalances({ pubkeys: [{ caip: chain.caip, pubkey: fromAddress }] }, { forceRefresh: true })
-    const balStr = String((balResp?.data?.balances || [])[0]?.balance ?? '0')
-    const balBase = toBaseUnits(balStr, chain.decimals)
-    const feeBase = maxFeeReserveBase(chain, BigInt(fee.amount[0]?.amount || '0'))
-    baseAmount = balBase - feeBase
-    if (baseAmount < 0n) baseAmount = 0n
+    if (isToken) {
+      // Token MAX: send the whole token balance. The native fee is paid from the
+      // chain's native coin (rune), a separate balance — so no reserve here.
+      const balStr = params.tokenBalance
+        ?? String((await pioneer.GetPortfolioBalances({ pubkeys: [{ caip: params.caip, pubkey: fromAddress }] }, { forceRefresh: true }))?.data?.balances?.[0]?.balance ?? '0')
+      baseAmount = toBaseUnits(String(balStr), amountDecimals)
+    } else {
+      const balResp = await pioneer.GetPortfolioBalances({ pubkeys: [{ caip: chain.caip, pubkey: fromAddress }] }, { forceRefresh: true })
+      const balStr = String((balResp?.data?.balances || [])[0]?.balance ?? '0')
+      const balBase = toBaseUnits(balStr, chain.decimals)
+      const feeBase = maxFeeReserveBase(chain, BigInt(fee.amount[0]?.amount || '0'))
+      baseAmount = balBase - feeBase
+      if (baseAmount < 0n) baseAmount = 0n
+    }
   } else {
-    baseAmount = toBaseUnits(params.amount, chain.decimals)
+    baseAmount = toBaseUnits(params.amount, amountDecimals)
   }
 
   if (baseAmount <= 0n) throw new Error('Amount must be greater than zero')
@@ -166,7 +192,7 @@ export async function buildCosmosTx(
 
   if (isDeposit) {
     const depositType = MSG_DEPOSIT_TYPES[chain.id]!
-    const depositAsset = DEPOSIT_ASSETS[chain.id]!
+    const depositAsset = params.depositAsset || DEPOSIT_ASSETS[chain.id]!
     console.log(`${TAG} Building MsgDeposit: asset=${depositAsset}, amount=${baseAmount}, memo=${memo}`)
     msg = {
       type: depositType,
