@@ -2477,6 +2477,24 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					if (xpub) pubkeys.push({ caip: c.caip, pubkey: xpub, chainId: c.id, symbol: c.symbol, networkId: c.networkId })
 				}
 
+				// Merge device-cached UTXO-altcoin xpubs beyond account 0 — persisted
+				// by the audit "track" action (addUtxoAccount). Device-scoped and never
+				// written for passphrase wallets, so reading them here is hidden-safe.
+				// Dedups by xpub against the freshly-derived account-0 entries above.
+				{
+					const utxoDevId = engine.getDeviceState().deviceId
+					if (utxoDevId && !engine.isPassphraseWallet) {
+						const utxoById = new Map(utxoChains.map(c => [c.id, c]))
+						const seen = new Set(pubkeys.map(p => p.pubkey))
+						for (const pk of getCachedPubkeys(utxoDevId)) {
+							const c = utxoById.get(pk.chainId)
+							if (!c || !pk.xpub || seen.has(pk.xpub)) continue
+							pubkeys.push({ caip: c.caip, pubkey: pk.xpub, chainId: c.id, symbol: c.symbol, networkId: c.networkId })
+							seen.add(pk.xpub)
+						}
+					}
+				}
+
 				// Initialize EVM multi-address manager
 				const evmChains = nonUtxoChains.filter(c => c.chainFamily === 'evm')
 				const nonEvmChains = nonUtxoChains.filter(c => c.chainFamily !== 'evm')
@@ -3328,6 +3346,17 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					for (let i = 0; i < scriptTypes.length; i++) {
 						const xpub = results?.[i]?.xpub
 						if (xpub) { pubkeys.push({ caip: chain.caip, pubkey: xpub }); anyXpub = true }
+					}
+					// Merge device-cached account-1+ xpubs (audit "track") so funds beyond
+					// account 0 are spendable. Device-scoped, never written for passphrase
+					// wallets. Mirrors the portfolio merge in getBalances.
+					const utxoDevId = engine.getDeviceState().deviceId
+					if (utxoDevId && !engine.isPassphraseWallet) {
+						const seen = new Set(pubkeys.map(p => p.pubkey))
+						for (const pk of getCachedPubkeys(utxoDevId)) {
+							if (pk.chainId !== chain.id || !pk.xpub || seen.has(pk.xpub)) continue
+							pubkeys.push({ caip: chain.caip, pubkey: pk.xpub }); seen.add(pk.xpub); anyXpub = true
+						}
 					}
 					if (!anyXpub) throw new Error(`Could not derive xpub for ${chain.coin}`)
 				} else if (chain.chainFamily === 'evm') {
@@ -4201,6 +4230,35 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			addBtcAccount: async () => {
 				if (!engine.wallet) throw new Error('No device connected')
 				return await btcAccounts.addAccount(engine.wallet as any)
+			},
+			// Persist a non-BTC UTXO account's xpubs to the device-scoped pubkey
+			// cache so the audit "track" action makes those funds show + spend from
+			// now on. Mirrors the BTC xpub-cache pattern (saveCachedPubkey gated on
+			// !isPassphraseWallet) — Bitcoin itself stays on the in-memory manager.
+			addUtxoAccount: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				const chain = getAllChains().find(c => c.id === params.chainId)
+				if (!chain) throw new Error(`Unknown chain: ${params.chainId}`)
+				if (chain.chainFamily !== 'utxo' || chain.id === 'bitcoin') throw new Error(`${params.chainId} is not a non-BTC UTXO chain`)
+				const devId = engine.getDeviceState().deviceId
+				if (!devId) throw new Error('No device id')
+				// PRIVACY: the device-scoped cache must never hold hidden-wallet xpubs.
+				if (engine.isPassphraseWallet) throw new Error('Cannot persist accounts for a passphrase wallet')
+				const account = Math.max(params.level ?? 0, 0)
+				const sps = utxoAccountScriptPaths(chain, account)
+				const pks = await (engine.wallet as any).getPublicKeys(
+					sps.map(sp => ({ addressNList: sp.path, coin: chain.coin, scriptType: sp.scriptType, curve: 'secp256k1' })),
+				)
+				let saved = 0
+				for (let i = 0; i < sps.length; i++) {
+					const xpub = (pks?.[i] as any)?.xpub
+					if (!xpub) continue
+					// Key by xpub (path column) like the BTC cache rows so re-tracking dedups.
+					saveCachedPubkey(devId, chain.id, xpub, xpub, '', sps[i].scriptType)
+					saved++
+				}
+				if (!saved) throw new Error(`Could not derive xpubs for ${chain.coin} account ${account}`)
+				return { saved, account }
 			},
 			setBtcSelectedXpub: async (params) => {
 				btcAccounts.setSelectedXpub(params.accountIndex, params.scriptType)

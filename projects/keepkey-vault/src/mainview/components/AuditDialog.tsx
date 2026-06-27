@@ -347,10 +347,16 @@ export function AuditDialog({ onClose, snapshot, isHidden, chainCatalog, chainAd
         while (cur < level) { set = await rpcRequest<any>('addBtcAccount', undefined, 60000); cur = set.accounts.length ? Math.max(...set.accounts.map((a: any) => a.accountIndex)) : cur + 1 }
       } else if (chain.family === 'evm') {
         await rpcRequest('addEvmAddressIndex', { index: level }, 60000)
+      } else if (chain.family === 'utxo') {
+        // Non-BTC UTXO altcoins (LTC/DOGE/DASH/…): persist the account's xpubs to
+        // the device-scoped pubkey cache so they show + spend from now on. Blocked
+        // for hidden wallets upstream (canTrack), so this never runs there.
+        await rpcRequest('addUtxoAccount', { chainId: chain.chainId, level }, 60000)
       }
       // Honest persistence promise: EVM indices are written to disk (show from
-      // now on); BTC accounts are NOT persisted yet (session only); hidden-wallet
-      // indices are never persisted by design.
+      // now on); UTXO altcoin accounts are written to the device-scoped pubkey
+      // cache (show from now on); BTC accounts are NOT persisted yet (session
+      // only); hidden-wallet state is never persisted by design.
       const recovered = isHidden
         ? `Tracking for this session.`
         : chain.chainId === 'bitcoin'
@@ -443,7 +449,9 @@ export function AuditDialog({ onClose, snapshot, isHidden, chainCatalog, chainAd
   )
 
   const AddrRow = ({ chain, a, gold }: { chain: AuditChainFinding; a: AuditDerivedAddress; gold?: boolean }) => {
-    const canTrack = (chain.chainId === 'bitcoin' || chain.family === 'evm') && a.level != null
+    // UTXO altcoins persist via the device-scoped pubkey cache, which deliberately
+    // never holds hidden-wallet xpubs — so they're only trackable on the standard wallet.
+    const canTrack = (chain.chainId === 'bitcoin' || chain.family === 'evm' || (chain.family === 'utxo' && !isHidden)) && a.level != null
     const fundedNoTrack = a.hasBalance && !canTrack
     const hasXpubs = !!a.xpubs?.length
     return (
