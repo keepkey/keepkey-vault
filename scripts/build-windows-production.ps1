@@ -414,6 +414,14 @@ if (-not $SkipBuild) {
     Push-Location (Join-Path $RepoRoot "modules\proto-tx-builder")
     bun install
     if ($LASTEXITCODE -ne 0) { throw "bun install failed for proto-tx-builder (exit $LASTEXITCODE)" }
+    # Build the dist (tsc -p .). WITHOUT this, the gitignored dist/ ships STALE
+    # from a previous pin: this step only ran `bun install` and skipped the
+    # build, so v1.4.6/1.4.7/1.4.8 shipped a pre-fix proto-tx-builder on Windows
+    # and EVERY Cosmos tx crashed with "createFeegrantAminoConverters is not a
+    # function". macOS rebuilds via the Makefile (+#290 stamp-clear); Windows
+    # must run the build too (mirrors the hdwallet `yarn build` below).
+    bun run build
+    if ($LASTEXITCODE -ne 0) { throw "build failed for proto-tx-builder (exit $LASTEXITCODE) — if tsc can't resolve osmosis codecimpl, copy modules/proto-tx-builder/osmosis-frontend/src/proto/generated/codecimpl.{js,d.ts} as in the macOS setup" }
     Pop-Location
 
     Write-Step "Building hdwallet"
