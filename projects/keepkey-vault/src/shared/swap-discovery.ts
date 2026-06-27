@@ -18,7 +18,10 @@ import { assessAvailability, normalizeChainCaip2, CHAIN_CAIP2_ALIASES, isThorcha
 // networkDisplayName + chainMetaForCaip2 from both bun and frontend. Vite
 // inlines as a JSON module. The bigger generatedAssetData.json (~10MB) stays
 // lazy because the picker is the only consumer and the user may never open it.
-import discoveryChainsJson from '@pioneer-platform/pioneer-discovery/lib/chains.json'
+// pioneer-discovery 10.2.0+ ships a strict package `exports` map: the chains
+// catalog is exposed only via the `./chains` subpath (→ lib/chains.json), not
+// the raw `/lib/...` deep path, which vite/Node now reject.
+import discoveryChainsJson from '@pioneer-platform/pioneer-discovery/chains'
 
 /** Vault chain id → canonical THORChain short prefix. Built from
  *  `pioneer-coins` `COIN_MAP_LONG` (which maps THOR prefix → chain id) plus
