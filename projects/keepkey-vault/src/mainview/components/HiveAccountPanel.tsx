@@ -118,6 +118,8 @@ function HiveOnboardWizard({ color, activeKey, onCreated }: { color: string; act
 	const [error, setError] = useState<string | null>(null)
 	const [needsFunding, setNeedsFunding] = useState<string | null>(null) // 0x ETH address to fund, or null
 	const [created, setCreated] = useState<{ name: string; txid?: string } | null>(null)
+	const [viewing, setViewing] = useState(false)        // "View account" lookup in flight
+	const [viewMsg, setViewMsg] = useState<string | null>(null)
 	const debounce = useRef<ReturnType<typeof setTimeout> | null>(null)
 	const latestName = useRef("")     // current input; guards stale availability responses
 	const stopped = useRef(false)     // set on unmount to halt the success poll
@@ -143,6 +145,26 @@ function HiveOnboardWizard({ color, activeKey, onCreated }: { color: string; act
 		return () => { if (debounce.current) clearTimeout(debounce.current) }
 	}, [username])
 
+	// Guarded hand-off: only leave the success screen once Pioneer actually
+	// resolves the new account. Shared by the auto-poll and the "View account"
+	// button so neither can bounce the celebration back to the wizard.
+	const resolveToAccount = async (): Promise<boolean> => {
+		try {
+			const rr = await rpcRequest<AccountResp>("hiveGetAccount", { pubkey: activeKey }, 15000)
+			if (rr.account) { onCreated(); return true }
+		} catch { /* not resolved yet */ }
+		return false
+	}
+
+	const onViewAccount = async () => {
+		if (viewing) return
+		setViewing(true); setViewMsg(null)
+		const ok = await resolveToAccount()
+		if (stopped.current) return
+		setViewing(false)
+		if (!ok) setViewMsg("Still finalizing on-chain — give it a few seconds and try again.")
+	}
+
 	const create = async () => {
 		const name = username.trim().toLowerCase()
 		if (!name || avail?.available !== true || avail.name !== name || creating) return
@@ -156,15 +178,10 @@ function HiveOnboardWizard({ color, activeKey, onCreated }: { color: string; act
 				// otherwise the parent would see noAccount and bounce back to this wizard.
 				// If it never resolves, the celebration stays with its "View account" button.
 				const deadline = Date.now() + 90000
-				const poll = (delay: number) => setTimeout(() => {
+				const poll = (delay: number) => setTimeout(async () => {
 					if (stopped.current) return
-					rpcRequest<AccountResp>("hiveGetAccount", { pubkey: activeKey }, 15000)
-						.then(rr => {
-							if (stopped.current) return
-							if (rr.account) onCreated()
-							else if (Date.now() < deadline) poll(Math.min(delay * 1.5, 8000))
-						})
-						.catch(() => { if (!stopped.current && Date.now() < deadline) poll(Math.min(delay * 1.5, 8000)) })
+					const ok = await resolveToAccount()
+					if (!ok && !stopped.current && Date.now() < deadline) poll(Math.min(delay * 1.5, 8000))
 				}, delay)
 				poll(2500)
 				return
@@ -235,9 +252,11 @@ function HiveOnboardWizard({ color, activeKey, onCreated }: { color: string; act
 					tx {created.txid.slice(0, 16)}…
 				</Text>
 			)}
-			<Button mt="3" size="sm" bg={color} color="white" _hover={{ filter: "brightness(1.1)" }} onClick={onCreated}>
-				View account
+			<Button mt="3" size="sm" bg={color} color="white" _hover={{ filter: "brightness(1.1)" }}
+				disabled={viewing} opacity={viewing ? 0.6 : 1} onClick={onViewAccount}>
+				{viewing ? <><Spinner size="sm" mr="2" /> Checking…</> : "View account"}
 			</Button>
+			{viewMsg && <Text fontSize="11px" color="var(--text-3)" mt="2">{viewMsg}</Text>}
 		</Box>
 	)
 
