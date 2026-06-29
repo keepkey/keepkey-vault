@@ -354,10 +354,6 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       wcPair: { params: { uri: string }; response: void }
       wcGetSessions: { params: void; response: WcSessionInfo[] }
       wcDisconnectSession: { params: { topic: string }; response: void }
-      // Capture a screen region (macOS interactive selection) and return the PNG.
-      // Returns null when the user cancels the selection. Frontend decodes the
-      // QR with jsqr and submits the URI to wcPair.
-      wcScanScreen: { params: void; response: { pngBase64: string } | null }
       // User responses to a pending pair-approval prompt. id is the proposal id.
       wcApprovePair: { params: { id: string }; response: void }
       wcRejectPair: { params: { id: string }; response: void }
