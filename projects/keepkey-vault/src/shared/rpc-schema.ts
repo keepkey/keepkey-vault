@@ -83,6 +83,10 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       tonSignTx: { params: any; response: any }
       tonSignMessage: { params: any; response: any }
       hiveGetPublicKey: { params: any; response: any }
+      hiveGetRoleKeys: { params: { accountIndex?: number }; response: { owner: string; active: string; posting: string; memo: string } }
+      hiveGetAccount: { params: { pubkey: string }; response: { success?: boolean; noAccount?: boolean; account?: { name: string; hive: string; hbd: string; hp?: string; rcPercent?: number } } }
+      hiveUsernameAvailable: { params: { name: string }; response: { success: boolean; available: boolean; reason?: string } }
+      hiveCreateAccount: { params: { username: string; accountIndex?: number }; response: { status: number; success?: boolean; txid?: string; username?: string; error?: string; retryAfter?: number } }
       hiveSignTx: { params: any; response: any }
 
       // ── Pioneer integration ─────────────────────────────────────────
