@@ -1130,7 +1130,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 							<ZcashPrivacyTab />
 						</Suspense>
 					) : isHive ? (
-						<HiveAccountPanel activeKey={address} color={chain.color} />
+						<HiveAccountPanel activeKey={address} color={chain.color} loading={loading} deriveError={deriveError} onRetryDerive={deriveAddress} />
 					) : (
 						<ReceiveView
 							chain={chain}

@@ -53,7 +53,10 @@ function KeyRow({ label, value }: { label: string; value: string }) {
  * @username, not a key). Resolves the device's active key to an account via
  * Pioneer and shows account view, or the in-app sponsor onboarding wizard.
  */
-export function HiveAccountPanel({ activeKey, color }: { activeKey: string | null; color: string }) {
+export function HiveAccountPanel({ activeKey, color, loading, deriveError, onRetryDerive }: {
+	activeKey: string | null; color: string
+	loading?: boolean; deriveError?: string | null; onRetryDerive?: () => void
+}) {
 	const [state, setState] = useState<"loading" | "has" | "none" | "error">("loading")
 	const [account, setAccount] = useState<HiveAccount | null>(null)
 
@@ -65,6 +68,18 @@ export function HiveAccountPanel({ activeKey, color }: { activeKey: string | nul
 			.catch(() => setState("error"))
 	}
 	useEffect(() => { let c = false; if (activeKey) { rpcRequest<AccountResp>("hiveGetAccount", { pubkey: activeKey }, 15000).then(r => { if (c) return; if (r.account) { setAccount(r.account); setState("has") } else setState("none") }).catch(() => { if (!c) setState("error") }) } return () => { c = true } }, [activeKey])
+
+	// No active key yet: distinguish a failed/absent derivation (actionable) from
+	// one still in flight (transient spinner) — otherwise a null key spins forever.
+	if (!activeKey) {
+		if (deriveError || !loading) return (
+			<Box className="v3-glass-card" p="4" mt="4">
+				<Text fontSize="13px" color="var(--text-2)">{deriveError || "Couldn't derive your Hive key from the device."}</Text>
+				{onRetryDerive && <Button mt="3" size="sm" variant="outline" onClick={onRetryDerive}>Retry</Button>}
+			</Box>
+		)
+		return <Flex justify="center" py="10"><Spinner color={color} /></Flex>
+	}
 
 	if (state === "loading") return <Flex justify="center" py="10"><Spinner color={color} /></Flex>
 
@@ -88,48 +103,70 @@ export function HiveAccountPanel({ activeKey, color }: { activeKey: string | nul
 		</Box>
 	)
 
-	return <HiveOnboardWizard color={color} onCreated={refresh} />
+	return <HiveOnboardWizard color={color} activeKey={activeKey} onCreated={refresh} />
 }
 
-function HiveOnboardWizard({ color, onCreated }: { color: string; onCreated: () => void }) {
+function HiveOnboardWizard({ color, activeKey, onCreated }: { color: string; activeKey: string; onCreated: () => void }) {
 	const [keys, setKeys] = useState<RoleKeys | null>(null)
 	const [showKeys, setShowKeys] = useState(false)
 	const [username, setUsername] = useState("")
-	const [avail, setAvail] = useState<Avail | null>(null)
+	// avail is tagged with the name it describes, so a late/out-of-order response
+	// for an old input can't enable creation for the current (unchecked) name.
+	const [avail, setAvail] = useState<(Avail & { name: string }) | null>(null)
 	const [checking, setChecking] = useState(false)
 	const [creating, setCreating] = useState(false)
 	const [error, setError] = useState<string | null>(null)
 	const [needsFunding, setNeedsFunding] = useState<string | null>(null) // 0x ETH address to fund, or null
 	const [created, setCreated] = useState<{ name: string; txid?: string } | null>(null)
 	const debounce = useRef<ReturnType<typeof setTimeout> | null>(null)
+	const latestName = useRef("")     // current input; guards stale availability responses
+	const stopped = useRef(false)     // set on unmount to halt the success poll
 
 	useEffect(() => { rpcRequest<RoleKeys>("hiveGetRoleKeys", {}, 30000).then(setKeys).catch(() => {}) }, [])
+	useEffect(() => () => { stopped.current = true }, [])
 
 	// Debounced availability check as the user types.
 	useEffect(() => {
 		setAvail(null); setError(null)
 		if (debounce.current) clearTimeout(debounce.current)
 		const name = username.trim().toLowerCase()
-		if (!name) return
+		latestName.current = name
+		if (!name) { setChecking(false); return }
 		setChecking(true)
 		debounce.current = setTimeout(() => {
 			rpcRequest<Avail>("hiveUsernameAvailable", { name }, 10000)
-				.then(r => setAvail(r)).catch(() => setAvail(null)).finally(() => setChecking(false))
+				// Only apply if the input hasn't changed since this request fired.
+				.then(r => { if (latestName.current === name) setAvail({ ...r, name }) })
+				.catch(() => { if (latestName.current === name) setAvail(null) })
+				.finally(() => { if (latestName.current === name) setChecking(false) })
 		}, 400)
 		return () => { if (debounce.current) clearTimeout(debounce.current) }
 	}, [username])
 
 	const create = async () => {
 		const name = username.trim().toLowerCase()
-		if (!name || !avail?.available || creating) return
+		if (!name || avail?.available !== true || avail.name !== name || creating) return
 		setCreating(true); setError(null); setNeedsFunding(null)
 		try {
 			const r = await rpcRequest<CreateResp>("hiveCreateAccount", { username: name }, 120000)
 			if (r.status === 200 && (r.success || r.txid)) {
 				setCreated({ name, txid: r.txid })
-				// Account is on-chain; the pubkey→account lookup may lag a block. Refresh
-				// the parent (account view) after a short beat while we celebrate.
-				setTimeout(() => onCreated(), 4500)
+				// Account is on-chain but the pubkey→account lookup may lag a block or two.
+				// Poll (backing off) and only hand off to the parent once it resolves —
+				// otherwise the parent would see noAccount and bounce back to this wizard.
+				// If it never resolves, the celebration stays with its "View account" button.
+				const deadline = Date.now() + 90000
+				const poll = (delay: number) => setTimeout(() => {
+					if (stopped.current) return
+					rpcRequest<AccountResp>("hiveGetAccount", { pubkey: activeKey }, 15000)
+						.then(rr => {
+							if (stopped.current) return
+							if (rr.account) onCreated()
+							else if (Date.now() < deadline) poll(Math.min(delay * 1.5, 8000))
+						})
+						.catch(() => { if (!stopped.current && Date.now() < deadline) poll(Math.min(delay * 1.5, 8000)) })
+				}, delay)
+				poll(2500)
 				return
 			}
 			// 403: ETH gate — the device's ETH address must hold mainnet ETH (one
@@ -144,7 +181,7 @@ function HiveOnboardWizard({ color, onCreated }: { color: string; onCreated: () 
 			// disambiguates; reformat-fail back to name-taken.
 			else if (r.status === 409) {
 				if (/eth|address/i.test(r.error ?? "")) setError("This device already has a sponsored Hive account.")
-				else { setError("That name was just taken — pick another."); setAvail({ success: true, available: false, reason: "taken" }) }
+				else { setError("That name was just taken — pick another."); setAvail({ success: true, available: false, reason: "taken", name }) }
 			}
 			else if (r.status === 401) setError("Device confirmation didn't verify. Try again.")
 			else if (r.status === 503) setError(`Sponsor is busy. Try again in ${r.retryAfter ?? 60}s.`)
@@ -156,7 +193,8 @@ function HiveOnboardWizard({ color, onCreated }: { color: string; onCreated: () 
 	}
 
 	const name = username.trim().toLowerCase()
-	const canCreate = !!name && avail?.available === true && !creating
+	// Gate on avail belonging to the CURRENT name — never sign for an unchecked name.
+	const canCreate = !!name && avail?.available === true && avail.name === name && !creating
 
 	if (needsFunding !== null) return (
 		<Box className="v3-glass-card" p="5" mt="4">
