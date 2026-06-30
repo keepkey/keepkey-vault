@@ -2434,7 +2434,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 						)
 					})() : (loadingBalances || !initialLoaded) && !pioneerError ? (
 						<DashboardLoading />
-					) : !loadingBalances && initialLoaded && !pioneerError ? (
+					) : !loadingBalances && initialLoaded && !pioneerError && !drilledChainId ? (
 						<Flex direction="column" align="center" gap="3" textAlign="center" maxW="400px" mx="auto" py="4">
 							<Box
 								w="48px" h="48px" borderRadius="full"
@@ -2531,7 +2531,11 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 						)
 					})()}
 
-					{hasAnyBalance && drilledChainId && (() => {
+					{/* Drilled-chain action row (Receive/Send/Swap). NOT gated on
+					    hasAnyBalance: a fresh wallet holds nothing, but the whole
+					    point of picking a chain is to RECEIVE on it — gating this
+					    on balance left new users unable to press Receive. */}
+					{drilledChainId && (() => {
 						const dchain = visibleChains.find(c => c.id === drilledChainId)
 						if (!dchain) return null
 						const bal = getEffectiveBalance(dchain.id)
