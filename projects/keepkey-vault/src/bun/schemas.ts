@@ -329,6 +329,11 @@ export const SendPinRequest = z.object({
   pin: z.string().min(1),
 }).passthrough()
 
+/** POST /system/recovery/character — one ciphered character during cipher recovery */
+export const SendCharacterRequest = z.object({
+  character: z.string().min(1).max(1),
+}).passthrough()
+
 // ── Zcash Shielded (Orchard) ─────────────────────────────────────────
 
 /** POST /api/zcash/shielded/init */

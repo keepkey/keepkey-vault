@@ -3625,6 +3625,39 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           return json({ success: true })
         }
 
+        // Cipher-recovery character entry. The device shows a scrambled keyboard
+        // on the OLED and the host relays the ciphered characters (CharacterAck).
+        // Mirrors /system/recovery/pin. The recover-device call rejects with
+        // "Word not found in BIP39 wordlist" when a finalized word is invalid.
+        if (path === '/system/recovery/character' && method === 'POST') {
+          auth.requireAuth(req)
+          const wallet = requireWallet(engine)
+          const body = await parseRequest(req, S.SendCharacterRequest)
+          await wallet.sendCharacter(body.character)
+          return json({ success: true })
+        }
+
+        if (path === '/system/recovery/character/delete' && method === 'POST') {
+          auth.requireAuth(req)
+          const wallet = requireWallet(engine)
+          await wallet.sendCharacterDelete()
+          return json({ success: true })
+        }
+
+        if (path === '/system/recovery/character/done' && method === 'POST') {
+          auth.requireAuth(req)
+          const wallet = requireWallet(engine)
+          await wallet.sendCharacterDone()
+          return json({ success: true })
+        }
+
+        // Current cipher-recovery state. `seq` advances each time the device asks
+        // for the next character, so a caller can sync sends with the device.
+        if (path === '/system/recovery/state' && method === 'GET') {
+          auth.requireAuth(req)
+          return json(engine.getRecoveryState())
+        }
+
         // ── Zcash Shielded (Orchard) ────────────────────────────────
 
         // Gate ALL zcash endpoints behind the feature flag (matches RPC handlers in index.ts)
