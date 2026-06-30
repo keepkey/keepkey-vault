@@ -191,7 +191,7 @@ export class KeepKeySdk {
 
       /** Wipe all secrets from the device. Requires user confirmation on device. */
       wipe: (): Promise<{ success: boolean }> =>
-        this.client.post('/system/wipe-device'),
+        this.client.post('/system/wipe-device', undefined, this.client.signingTimeoutMs),
 
       /** Change device label, passphrase protection, or auto-lock delay. */
       applySettings: (params: ApplySettingsParams): Promise<{ success: boolean }> =>
@@ -214,23 +214,26 @@ export class KeepKeySdk {
         word_count?: number; label?: string
         pin_protection?: boolean; passphrase_protection?: boolean
       }): Promise<{ success: boolean }> =>
-        this.client.post('/system/initialize/reset-device', params),
+        this.client.post('/system/initialize/reset-device', params, this.client.signingTimeoutMs),
 
       /** Recover an existing device from a seed phrase. Requires user input on device. */
       recoverDevice: (params: {
         word_count?: number; label?: string
         pin_protection?: boolean; passphrase_protection?: boolean
       }): Promise<{ success: boolean }> =>
-        this.client.post('/system/initialize/recover-device', params),
+        this.client.post('/system/initialize/recover-device', params, this.client.signingTimeoutMs),
 
       /** Load a device with a specific seed (testing only). */
       loadDevice: (params: any): Promise<{ success: boolean }> =>
-        this.client.post('/system/initialize/load-device', params),
+        this.client.post('/system/initialize/load-device', params, this.client.signingTimeoutMs),
 
       /** Send a PIN entered via matrix input during a recovery flow. */
       sendPin: (pin: string): Promise<{ success: boolean }> =>
         this.client.post('/system/recovery/pin', { pin }),
+    },
 
+    /** On-device cipher-recovery character entry (drives a RecoveryDevice flow). */
+    recovery: {
       /**
        * Send one ciphered character during on-device cipher recovery.
        * The device shows a scrambled keyboard on the OLED; the host relays the
@@ -251,7 +254,7 @@ export class KeepKeySdk {
 
       /** Current cipher-recovery state. `seq` advances each time the device asks
        *  for the next character — poll it to sync sends with the device. */
-      getRecoveryState: (): Promise<{ word_pos: number | null; character_pos: number | null; seq: number }> =>
+      getRecoveryState: (): Promise<{ active: boolean; word_pos: number | null; character_pos: number | null; seq: number }> =>
         this.client.get('/system/recovery/state'),
     },
   }

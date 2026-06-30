@@ -3597,13 +3597,18 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.RecoverDeviceRequest)
-          await wallet.recover({
-            entropy: body.word_count ? ({ 12: 128, 18: 192, 24: 256 } as Record<number, number>)[body.word_count] || 128 : 128,
-            label: body.label || 'KeepKey',
-            pin: body.pin_protection ?? true,
-            passphrase: body.passphrase_protection ?? false,
-            autoLockDelayMs: 600000,
-          })
+          engine.setRecoveryActive(true)
+          try {
+            await wallet.recover({
+              entropy: body.word_count ? ({ 12: 128, 18: 192, 24: 256 } as Record<number, number>)[body.word_count] || 128 : 128,
+              label: body.label || 'KeepKey',
+              pin: body.pin_protection ?? true,
+              passphrase: body.passphrase_protection ?? false,
+              autoLockDelayMs: 600000,
+            })
+          } finally {
+            engine.setRecoveryActive(false)
+          }
           featuresCache = null
           return json({ success: true })
         }
