@@ -59,6 +59,22 @@ not "broken." When the upstream PR lands, re-pin to the updated master → green
 To rehearse the eventual pin-swap safely, a fork pin may be used as a *practice*
 pin; the production state is always the upstream master.
 
+### Mergability is *in order*, not in isolation
+
+The success criterion is **"the SOP can be followed in order and stay green at
+each step,"** not "every branch builds standalone on bare develop." Staging is a
+**sequential pipeline**: develop accumulates as batches merge, and each PR is
+green *in its turn* — after its predecessors (and the upstream foundation) have
+landed. A later-batch PR being **red on today's develop is correct** when its
+base isn't there yet; it goes green once the batch it depends on merges.
+
+Practical consequence: stage and merge the **independent, develop-compatible
+fixes first** (they're green immediately). Defer **feature stacks that ride the
+alpha base** (e.g. EVM clear-signing, Hive, Zcash — which add alpha-only files or
+share a base-foundation commit) until their turn in the order; cutting them onto
+bare develop early produces low-signal red stubs and heavy reconciles, not
+useful PRs.
+
 ## Per-firmware-PR merge gate (before merge into fork develop)
 
 - [ ] `deps/device-protocol` pinned to `keepkey/device-protocol` master
