@@ -142,6 +142,12 @@ export class EngineController extends EventEmitter {
   // PIN flow tracking — device sends PIN_REQUEST mid-operation
   private setupInProgress = false
   private verifyInProgress = false // dry-run verify seed (PIN type stays 'current')
+  // Latest cipher-recovery CharacterRequest (transport event 80), exposed for
+  // REST/SDK callers driving recovery without the UI. seq increments on each
+  // request so a caller can wait for the device to ask for the next character.
+  private lastCharacterRequest: { wordPos: number; characterPos: number } | null = null
+  private characterRequestSeq = 0
+  private recoveryActive = false // true only while a recover/reset flow drives the cipher
   private pinRequestCount = 0
   // Tracks whether promptPin() → getPublicKeys() is still awaiting resolution.
   // While active, sendPin/sendPassphrase must NOT call getFeatures — that would
@@ -188,6 +194,7 @@ export class EngineController extends EventEmitter {
     this.seedEthAddress = null
     this.hiddenWalletActive = false
     this.passphraseSetThisSession = false
+    this.resetRecoveryState()
     this.keyring.removeAll().catch(() => {})
   }
 
@@ -251,7 +258,9 @@ export class EngineController extends EventEmitter {
       if (event.message) {
         const { wordPos, characterPos } = event.message
         console.log(`[Engine] CHARACTER_REQUEST → word=${wordPos} char=${characterPos}`)
-        this.emit('character-request', { wordPos: wordPos ?? 0, characterPos: characterPos ?? 0 })
+        this.lastCharacterRequest = { wordPos: wordPos ?? 0, characterPos: characterPos ?? 0 }
+        this.characterRequestSeq++
+        this.emit('character-request', this.lastCharacterRequest)
       }
     })
   }
@@ -1963,6 +1972,32 @@ export class EngineController extends EventEmitter {
     if (!this.wallet) throw new Error('No device connected')
     if (!this.setupInProgress && !this.verifyInProgress) return
     await this.wallet.sendCharacterDone()
+  }
+
+  /** Latest cipher-recovery character request, for REST/SDK callers driving
+   *  recovery. `seq` advances each time the device asks for the next character. */
+  getRecoveryState() {
+    return {
+      active: this.recoveryActive,
+      word_pos: this.lastCharacterRequest?.wordPos ?? null,
+      character_pos: this.lastCharacterRequest?.characterPos ?? null,
+      seq: this.characterRequestSeq,
+    }
+  }
+
+  /** Marks a cipher-recovery/reset flow active. The REST recover-device handler
+   *  wraps the call so /system/recovery/state reports active only while entry is
+   *  in progress. (seq stays monotonic so callers can sync on the next request.) */
+  setRecoveryActive(active: boolean) {
+    this.recoveryActive = active
+  }
+
+  /** Clear recovery progress — called on disconnect so /system/recovery/state
+   *  can't return stale word/character positions from a previous session. */
+  private resetRecoveryState() {
+    this.lastCharacterRequest = null
+    this.characterRequestSeq = 0
+    this.recoveryActive = false
   }
 
   resetUpdatePhase() {
