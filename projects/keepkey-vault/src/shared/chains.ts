@@ -62,6 +62,14 @@ export function evmAddressPath(index: number): number[] {
   return [0x8000002C, 0x8000003C, 0x80000000 + index, 0, 0]
 }
 
+// Hive uses SLIP-0048, not BIP-44: m/48'/13'/role'/account'/0' (all 5 hardened).
+// Must match Ledger / Hive Keychain / firmware (hive.h HIVE_SLIP48_*), or derived
+// keys are non-interoperable and unrecoverable in other tools.
+const HIVE_ROLES = { owner: 0, active: 1, memo: 3, posting: 4 } as const
+export function hiveRolePath(role: keyof typeof HIVE_ROLES, accountIndex = 0): number[] {
+  return [0x80000030, 0x8000000D, 0x80000000 + HIVE_ROLES[role], 0x80000000 + accountIndex, 0x80000000]
+}
+
 // Minimal per-chain config — everything else derived from pioneer-caip
 type ChainConfig = Omit<ChainDef, 'networkId' | 'caip' | 'decimals'>
 
@@ -287,10 +295,12 @@ const CONFIGS: ChainConfig[] = [
     id: 'hive', chain: 'HIVE' as any, coin: 'Hive', symbol: 'HIVE',
     chainFamily: 'hive', color: '#E31337',
     rpcMethod: 'hiveGetPublicKey', signMethod: 'hiveSignTx',
-    defaultPath: [0x8000002C, 0x800004FB, 0x80000000, 0, 0],
+    // SLIP-0048 active-role key: m/48'/13'/1'/0'/0' (matches Ledger / Hive Keychain).
+    // Was m/44'/1275'/0'/0/0 (v1, BIP-44) — non-interoperable; see hiveRolePath().
+    defaultPath: [0x80000030, 0x8000000D, 0x80000001, 0x80000000, 0x80000000],
     explorerAddressUrl: 'https://hiveblocks.com/@{{address}}',
     explorerTxUrl: 'https://hiveblocks.com/tx/{{txid}}',
-    minFirmware: '7.16.0',
+    minFirmware: '7.15.0',  // Hive handler ships in firmware 7.15.0 (alpha), same as Zcash
   },
 ]
 

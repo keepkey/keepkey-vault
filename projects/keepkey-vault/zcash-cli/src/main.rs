@@ -4,13 +4,13 @@
 //! Handles chain scanning, PCZT construction, Halo2 proving, and transaction finalization.
 //! NEVER opens the KeepKey device — Electrobun owns USB exclusively.
 
+mod pczt_builder;
+mod scanner;
 mod wallet_db;
 mod zip244;
-mod scanner;
-mod pczt_builder;
 
 use anyhow::Result;
-use log::{info, debug, error};
+use log::{debug, error, info};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::io::{self, BufRead, Write};
@@ -121,7 +121,11 @@ struct IpcResponse {
 }
 
 fn ok_response_with_id(data: Value, req_id: Option<u64>) -> IpcResponse {
-    IpcResponse { ok: true, _req_id: req_id, data }
+    IpcResponse {
+        ok: true,
+        _req_id: req_id,
+        data,
+    }
 }
 
 fn err_response_with_id(msg: &str, req_id: Option<u64>) -> IpcResponse {
@@ -160,7 +164,10 @@ fn parse_recipient_address(addr: &str) -> Result<orchard::Address> {
         let (network, ua) = unified::Address::decode(trimmed)
             .map_err(|e| anyhow::anyhow!("Invalid Unified Address: {:?}", e))?;
         if network != NetworkType::Main {
-            return Err(anyhow::anyhow!("Expected mainnet address, got {:?}", network));
+            return Err(anyhow::anyhow!(
+                "Expected mainnet address, got {:?}",
+                network
+            ));
         }
         // Look for the Orchard receiver
         for receiver in ua.items() {
@@ -170,7 +177,9 @@ fn parse_recipient_address(addr: &str) -> Result<orchard::Address> {
                     .ok_or_else(|| anyhow::anyhow!("Corrupt Orchard receiver in UA"));
             }
         }
-        return Err(anyhow::anyhow!("Unified Address has no Orchard receiver — cannot send from shielded pool"));
+        return Err(anyhow::anyhow!(
+            "Unified Address has no Orchard receiver — cannot send from shielded pool"
+        ));
     }
 
     // Transparent address (t1... / t3...) — use parse_recipient_flexible for deshielding
@@ -182,9 +191,11 @@ fn parse_recipient_address(addr: &str) -> Result<orchard::Address> {
     }
 
     // Raw hex fallback (43 bytes = 86 hex chars)
-    let bytes = hex::decode(trimmed)
-        .map_err(|_| anyhow::anyhow!("Invalid address — expected u1... (Unified) or t1... (transparent)"))?;
-    let arr: [u8; 43] = bytes.try_into()
+    let bytes = hex::decode(trimmed).map_err(|_| {
+        anyhow::anyhow!("Invalid address — expected u1... (Unified) or t1... (transparent)")
+    })?;
+    let arr: [u8; 43] = bytes
+        .try_into()
         .map_err(|_| anyhow::anyhow!("Raw hex address must be 43 bytes (86 hex chars)"))?;
     orchard::Address::from_raw_address_bytes(&arr)
         .into_option()
@@ -215,8 +226,10 @@ fn decode_transparent_address(addr: &str) -> Result<Vec<u8>> {
     // Base58 → big integer → bytes
     let mut big = vec![0u8; 1];
     for ch in addr.chars() {
-        let digit = ALPHABET.find(ch)
-            .ok_or_else(|| anyhow::anyhow!("Invalid base58 character: {}", ch))? as u8;
+        let digit = ALPHABET
+            .find(ch)
+            .ok_or_else(|| anyhow::anyhow!("Invalid base58 character: {}", ch))?
+            as u8;
         // Multiply big by 58 and add digit
         let mut carry = digit as u32;
         for byte in big.iter_mut().rev() {
@@ -237,22 +250,31 @@ fn decode_transparent_address(addr: &str) -> Result<Vec<u8>> {
 
     // Should be 26 bytes: 2 version + 20 hash + 4 checksum
     if num.len() < 26 {
-        return Err(anyhow::anyhow!("Base58Check decode too short: {} bytes", num.len()));
+        return Err(anyhow::anyhow!(
+            "Base58Check decode too short: {} bytes",
+            num.len()
+        ));
     }
 
     let payload = &num[..num.len() - 4];
     let expected_checksum = &num[num.len() - 4..];
 
     // Base58Check: checksum = first 4 bytes of SHA256(SHA256(payload))
-    use sha2::{Sha256, Digest};
+    use sha2::{Digest, Sha256};
     let first = Sha256::digest(payload);
     let second = Sha256::digest(&first);
     if &second[..4] != expected_checksum {
         return Err(anyhow::anyhow!(
             "Invalid address checksum — address may contain a typo. \
              Expected {:02x}{:02x}{:02x}{:02x}, got {:02x}{:02x}{:02x}{:02x}",
-            second[0], second[1], second[2], second[3],
-            expected_checksum[0], expected_checksum[1], expected_checksum[2], expected_checksum[3],
+            second[0],
+            second[1],
+            second[2],
+            second[3],
+            expected_checksum[0],
+            expected_checksum[1],
+            expected_checksum[2],
+            expected_checksum[3],
         ));
     }
 
@@ -260,7 +282,10 @@ fn decode_transparent_address(addr: &str) -> Result<Vec<u8>> {
     let hash = &payload[2..];
 
     if hash.len() != 20 {
-        return Err(anyhow::anyhow!("Invalid address hash length: {}", hash.len()));
+        return Err(anyhow::anyhow!(
+            "Invalid address hash length: {}",
+            hash.len()
+        ));
     }
 
     match version {
@@ -286,19 +311,22 @@ fn decode_transparent_address(addr: &str) -> Result<Vec<u8>> {
             script.push(0x87); // OP_EQUAL
             Ok(script)
         }
-        _ => Err(anyhow::anyhow!("Unknown address version: {:02x}{:02x}", version[0], version[1])),
+        _ => Err(anyhow::anyhow!(
+            "Unknown address version: {:02x}{:02x}",
+            version[0],
+            version[1]
+        )),
     }
 }
 
 // ── Command handlers ───────────────────────────────────────────────────
 
 async fn handle_derive_fvk(state: &mut State, params: &Value) -> Result<Value> {
-    let seed_hex = params.get("seed_hex")
+    let seed_hex = params
+        .get("seed_hex")
         .and_then(|v| v.as_str())
         .ok_or_else(|| anyhow::anyhow!("Missing seed_hex"))?;
-    let account = params.get("account")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0) as u32;
+    let account = params.get("account").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
 
     let seed_bytes = hex::decode(seed_hex)?;
 
@@ -332,13 +360,16 @@ async fn handle_derive_fvk(state: &mut State, params: &Value) -> Result<Value> {
 /// Accept a FullViewingKey directly from the device (no seed needed).
 /// The device exports {ak, nk, rivk} as hex strings (32 bytes each, 96 total).
 async fn handle_set_fvk(state: &mut State, params: &Value) -> Result<Value> {
-    let ak_hex = params.get("ak")
+    let ak_hex = params
+        .get("ak")
         .and_then(|v| v.as_str())
         .ok_or_else(|| anyhow::anyhow!("Missing ak"))?;
-    let nk_hex = params.get("nk")
+    let nk_hex = params
+        .get("nk")
         .and_then(|v| v.as_str())
         .ok_or_else(|| anyhow::anyhow!("Missing nk"))?;
-    let rivk_hex = params.get("rivk")
+    let rivk_hex = params
+        .get("rivk")
         .and_then(|v| v.as_str())
         .ok_or_else(|| anyhow::anyhow!("Missing rivk"))?;
 
@@ -363,10 +394,13 @@ async fn handle_set_fvk(state: &mut State, params: &Value) -> Result<Value> {
     // Diagnostic: check ak sign bit (must be 0 per Zcash spec §4.2.3)
     let ak_sign_bit = ak_bytes[31] & 0x80;
     if ak_sign_bit != 0 {
-        error!("set_fvk: FIRMWARE BUG — ak sign bit is SET (byte[31]=0x{:02x}). \
+        error!(
+            "set_fvk: FIRMWARE BUG — ak sign bit is SET (byte[31]=0x{:02x}). \
                 The orchard crate requires sign bit = 0 (even y-coordinate). \
                 This means the firmware's ask negation failed. \
-                Attempting auto-fix by clearing the sign bit...", ak_bytes[31]);
+                Attempting auto-fix by clearing the sign bit...",
+            ak_bytes[31]
+        );
     }
 
     // Try with sign bit cleared (auto-fix for firmware bug)
@@ -378,14 +412,20 @@ async fn handle_set_fvk(state: &mut State, params: &Value) -> Result<Value> {
         let ak_arr: [u8; 32] = ak_fixed.clone().try_into().unwrap();
         let ak_point = pasta_curves::pallas::Affine::from_bytes(&ak_arr);
         let valid = bool::from(ak_point.is_some());
-        info!("set_fvk: ak decompresses as valid Pallas point (sign cleared)? {}", valid);
+        info!(
+            "set_fvk: ak decompresses as valid Pallas point (sign cleared)? {}",
+            valid
+        );
 
         if !valid {
             // Check with original bytes too
             let ak_arr_orig: [u8; 32] = ak_bytes.clone().try_into().unwrap();
             let ak_point_orig = pasta_curves::pallas::Affine::from_bytes(&ak_arr_orig);
             let valid_orig = bool::from(ak_point_orig.is_some());
-            info!("set_fvk: ak decompresses with original sign bit? {}", valid_orig);
+            info!(
+                "set_fvk: ak decompresses with original sign bit? {}",
+                valid_orig
+            );
 
             let mut x_bytes = ak_arr;
             x_bytes[31] &= 0x7f;
@@ -418,23 +458,27 @@ async fn handle_set_fvk(state: &mut State, params: &Value) -> Result<Value> {
     fvk_fixed[32..64].copy_from_slice(&nk_bytes);
     fvk_fixed[64..96].copy_from_slice(&rivk_bytes);
 
-    let fvk = FullViewingKey::from_bytes(&fvk_fixed)
-        .ok_or_else(|| {
-            // Try with original bytes to give better error message
-            let orig_result = FullViewingKey::from_bytes(&fvk_bytes);
-            let sign_note = if ak_sign_bit != 0 {
-                " (sign bit was set — firmware bug confirmed)"
-            } else {
-                ""
-            };
-            anyhow::anyhow!(
-                "Invalid FVK bytes — decode failed{}. ak_valid={}, nk_valid={}, rivk_valid={}. \
+    let fvk = FullViewingKey::from_bytes(&fvk_fixed).ok_or_else(|| {
+        // Try with original bytes to give better error message
+        let orig_result = FullViewingKey::from_bytes(&fvk_bytes);
+        let sign_note = if ak_sign_bit != 0 {
+            " (sign bit was set — firmware bug confirmed)"
+        } else {
+            ""
+        };
+        anyhow::anyhow!(
+            "Invalid FVK bytes — decode failed{}. ak_valid={}, nk_valid={}, rivk_valid={}. \
                  ak={}, nk={}, rivk={}, orig_decode={}",
-                sign_note, ak_valid, nk_valid, rivk_valid,
-                hex::encode(&ak_fixed), nk_hex, rivk_hex,
-                orig_result.is_some()
-            )
-        })?;
+            sign_note,
+            ak_valid,
+            nk_valid,
+            rivk_valid,
+            hex::encode(&ak_fixed),
+            nk_hex,
+            rivk_hex,
+            orig_result.is_some()
+        )
+    })?;
 
     if ak_sign_bit != 0 {
         info!("set_fvk: Successfully recovered FVK by clearing ak sign bit");
@@ -470,13 +514,15 @@ async fn handle_set_fvk(state: &mut State, params: &Value) -> Result<Value> {
 }
 
 async fn handle_scan(state: &mut State, params: &Value) -> Result<Value> {
-    let fvk = state.fvk.as_ref()
+    let fvk = state
+        .fvk
+        .as_ref()
         .ok_or_else(|| anyhow::anyhow!("No FVK set — call derive_fvk first"))?
         .clone();
 
-    let start_height = params.get("start_height")
-        .and_then(|v| v.as_u64());
-    let full_rescan = params.get("full_rescan")
+    let start_height = params.get("start_height").and_then(|v| v.as_u64());
+    let full_rescan = params
+        .get("full_rescan")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
@@ -541,22 +587,25 @@ async fn handle_balance(state: &mut State, _params: &Value) -> Result<Value> {
 }
 
 async fn handle_build_pczt(state: &mut State, params: &Value) -> Result<Value> {
-    let fvk = state.fvk.as_ref()
+    let fvk = state
+        .fvk
+        .as_ref()
         .ok_or_else(|| anyhow::anyhow!("No FVK set — call derive_fvk first"))?
         .clone();
 
-    let recipient_str = params.get("recipient")
+    let recipient_str = params
+        .get("recipient")
         .and_then(|v| v.as_str())
         .ok_or_else(|| anyhow::anyhow!("Missing recipient"))?;
-    let amount = params.get("amount")
+    let amount = params
+        .get("amount")
         .and_then(|v| v.as_u64())
         .ok_or_else(|| anyhow::anyhow!("Missing amount"))?;
-    let account = params.get("account")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0) as u32;
+    let account = params.get("account").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
 
     // Parse optional memo (UTF-8 text, max 512 bytes)
-    let memo = params.get("memo")
+    let memo = params
+        .get("memo")
         .and_then(|v| v.as_str())
         .filter(|s| !s.is_empty())
         .map(|s| s.to_string());
@@ -587,7 +636,9 @@ async fn handle_build_pczt(state: &mut State, params: &Value) -> Result<Value> {
             return Err(anyhow::anyhow!(
                 "All {} unspent notes are within {} confirmations of the chain tip ({}). \
                  Wait a few minutes and retry.",
-                total_unspent, MIN_CONFIRMATIONS, tip,
+                total_unspent,
+                MIN_CONFIRMATIONS,
+                tip,
             ));
         }
         return Err(anyhow::anyhow!("No spendable notes — scan first"));
@@ -595,9 +646,17 @@ async fn handle_build_pczt(state: &mut State, params: &Value) -> Result<Value> {
 
     // Build PCZT with real chain tree data
     let pczt_state = pczt_builder::build_pczt(
-        &fvk, notes, recipient, amount, account, branch_id,
-        &mut lwd_client, db, memo,
-    ).await?;
+        &fvk,
+        notes,
+        recipient,
+        amount,
+        account,
+        branch_id,
+        &mut lwd_client,
+        db,
+        memo,
+    )
+    .await?;
 
     let signing_request = serde_json::to_value(&pczt_state.signing_request)?;
 
@@ -610,16 +669,20 @@ async fn handle_build_pczt(state: &mut State, params: &Value) -> Result<Value> {
 }
 
 async fn handle_finalize(state: &mut State, params: &Value) -> Result<Value> {
-    let pczt_state = state.pending_pczt.take()
+    let pczt_state = state
+        .pending_pczt
+        .take()
         .ok_or_else(|| anyhow::anyhow!("No pending PCZT — call build_pczt first"))?;
 
-    let sigs_json = params.get("signatures")
+    let sigs_json = params
+        .get("signatures")
         .and_then(|v| v.as_array())
         .ok_or_else(|| anyhow::anyhow!("Missing signatures array"))?;
 
     let mut signatures: Vec<Vec<u8>> = Vec::new();
     for sig_val in sigs_json {
-        let sig_hex = sig_val.as_str()
+        let sig_hex = sig_val
+            .as_str()
             .ok_or_else(|| anyhow::anyhow!("Signature must be hex string"))?;
         let sig_bytes = hex::decode(sig_hex)?;
         signatures.push(sig_bytes);
@@ -641,33 +704,41 @@ async fn handle_finalize(state: &mut State, params: &Value) -> Result<Value> {
 // ── Shield (transparent → Orchard) IPC handlers ──────────────────────────
 
 async fn handle_build_shield_pczt(state: &mut State, params: &Value) -> Result<Value> {
-    let fvk = state.fvk.as_ref()
+    let fvk = state
+        .fvk
+        .as_ref()
         .ok_or_else(|| anyhow::anyhow!("No FVK set — call set_fvk first"))?
         .clone();
 
-    let inputs_json = params.get("transparent_inputs")
+    let inputs_json = params
+        .get("transparent_inputs")
         .and_then(|v| v.as_array())
         .ok_or_else(|| anyhow::anyhow!("Missing transparent_inputs array"))?;
 
     let mut transparent_inputs: Vec<pczt_builder::ShieldTransparentInput> = Vec::new();
     for inp in inputs_json {
         transparent_inputs.push(pczt_builder::ShieldTransparentInput {
-            txid: inp.get("txid").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+            txid: inp
+                .get("txid")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
             vout: inp.get("vout").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
             value: inp.get("value").and_then(|v| v.as_u64()).unwrap_or(0),
-            script_pubkey: inp.get("script_pubkey").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+            script_pubkey: inp
+                .get("script_pubkey")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
         });
     }
 
-    let amount = params.get("amount")
+    let amount = params
+        .get("amount")
         .and_then(|v| v.as_u64())
         .ok_or_else(|| anyhow::anyhow!("Missing amount"))?;
-    let fee = params.get("fee")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(10000);
-    let account = params.get("account")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0) as u32;
+    let fee = params.get("fee").and_then(|v| v.as_u64()).unwrap_or(10000);
+    let account = params.get("account").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
 
     let mut lwd_client = scanner::LightwalletClient::connect(None).await?;
     let branch_id = lwd_client.get_consensus_branch_id().await?;
@@ -676,34 +747,50 @@ async fn handle_build_shield_pczt(state: &mut State, params: &Value) -> Result<V
     let db = state.ensure_db()?;
 
     let shield_state = pczt_builder::build_shield_pczt(
-        &fvk, transparent_inputs, amount, fee, account, branch_id,
-        &mut lwd_client, db,
-    ).await?;
+        &fvk,
+        transparent_inputs,
+        amount,
+        fee,
+        account,
+        branch_id,
+        &mut lwd_client,
+        db,
+    )
+    .await?;
 
     // Build the signing request JSON for the TypeScript layer
-    let ti_json: Vec<Value> = shield_state.transparent_signing_inputs.iter().map(|ti| {
-        serde_json::json!({
-            "index": ti.index,
-            "sighash": hex::encode(&ti.sighash),
-            "address_path": ti.address_path,
-            "amount": ti.amount,
-            "prevout_txid": ti.prevout_txid,
-            "prevout_index": ti.prevout_index,
-            "sequence": ti.sequence,
-            "script_pubkey": ti.script_pubkey,
+    let ti_json: Vec<Value> = shield_state
+        .transparent_signing_inputs
+        .iter()
+        .map(|ti| {
+            serde_json::json!({
+                "index": ti.index,
+                "sighash": hex::encode(&ti.sighash),
+                "address_path": ti.address_path,
+                "amount": ti.amount,
+                "prevout_txid": ti.prevout_txid,
+                "prevout_index": ti.prevout_index,
+                "sequence": ti.sequence,
+                "script_pubkey": ti.script_pubkey,
+            })
         })
-    }).collect();
+        .collect();
 
-    let to_json: Vec<Value> = shield_state.transparent_outputs.iter().enumerate().map(|(i, o)| {
-        serde_json::json!({
-            "index": i,
-            "value": o.value,
-            "script_pubkey": hex::encode(&o.script_pubkey),
+    let to_json: Vec<Value> = shield_state
+        .transparent_outputs
+        .iter()
+        .enumerate()
+        .map(|(i, o)| {
+            serde_json::json!({
+                "index": i,
+                "value": o.value,
+                "script_pubkey": hex::encode(&o.script_pubkey),
+            })
         })
-    }).collect();
+        .collect();
 
-    let orchard_json = serde_json::to_value(&shield_state.orchard_signing_request)
-        .unwrap_or_default();
+    let orchard_json =
+        serde_json::to_value(&shield_state.orchard_signing_request).unwrap_or_default();
 
     let signing_request = serde_json::json!({
         "transparent_inputs": ti_json,
@@ -725,33 +812,40 @@ async fn handle_build_shield_pczt(state: &mut State, params: &Value) -> Result<V
 }
 
 async fn handle_finalize_shield(state: &mut State, params: &Value) -> Result<Value> {
-    let shield_state = state.pending_shield_pczt.take()
+    let shield_state = state
+        .pending_shield_pczt
+        .take()
         .ok_or_else(|| anyhow::anyhow!("No pending shield PCZT — call build_shield_pczt first"))?;
 
-    let transparent_sigs_json = params.get("transparent_signatures")
+    let transparent_sigs_json = params
+        .get("transparent_signatures")
         .and_then(|v| v.as_array())
         .ok_or_else(|| anyhow::anyhow!("Missing transparent_signatures array"))?;
 
-    let orchard_sigs_json = params.get("orchard_signatures")
+    let orchard_sigs_json = params
+        .get("orchard_signatures")
         .and_then(|v| v.as_array())
         .ok_or_else(|| anyhow::anyhow!("Missing orchard_signatures array"))?;
 
     let mut transparent_sigs: Vec<Vec<u8>> = Vec::new();
     for sig_val in transparent_sigs_json {
-        let sig_hex = sig_val.as_str()
+        let sig_hex = sig_val
+            .as_str()
             .ok_or_else(|| anyhow::anyhow!("Transparent signature must be hex string"))?;
         transparent_sigs.push(hex::decode(sig_hex)?);
     }
 
     let mut orchard_sigs: Vec<Vec<u8>> = Vec::new();
     for sig_val in orchard_sigs_json {
-        let sig_hex = sig_val.as_str()
+        let sig_hex = sig_val
+            .as_str()
             .ok_or_else(|| anyhow::anyhow!("Orchard signature must be hex string"))?;
         orchard_sigs.push(hex::decode(sig_hex)?);
     }
 
     // compressed_pubkey is passed alongside transparent sigs for P2PKH scriptSig
-    let compressed_pubkey = params.get("compressed_pubkey")
+    let compressed_pubkey = params
+        .get("compressed_pubkey")
         .and_then(|v| v.as_str())
         .map(|s| hex::decode(s).unwrap_or_default());
 
@@ -771,19 +865,21 @@ async fn handle_finalize_shield(state: &mut State, params: &Value) -> Result<Val
 // ── Deshield (Orchard → transparent) IPC handlers ────────────────────────
 
 async fn handle_build_deshield_pczt(state: &mut State, params: &Value) -> Result<Value> {
-    let fvk = state.fvk.as_ref()
+    let fvk = state
+        .fvk
+        .as_ref()
         .ok_or_else(|| anyhow::anyhow!("No FVK set — call set_fvk first"))?
         .clone();
 
-    let recipient_str = params.get("recipient")
+    let recipient_str = params
+        .get("recipient")
         .and_then(|v| v.as_str())
         .ok_or_else(|| anyhow::anyhow!("Missing recipient (t1... or t3... address)"))?;
-    let amount = params.get("amount")
+    let amount = params
+        .get("amount")
         .and_then(|v| v.as_u64())
         .ok_or_else(|| anyhow::anyhow!("Missing amount"))?;
-    let account = params.get("account")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0) as u32;
+    let account = params.get("account").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
 
     // Parse recipient — must be a transparent address for deshielding
     let script_pubkey = match parse_recipient_flexible(recipient_str)? {
@@ -812,7 +908,9 @@ async fn handle_build_deshield_pczt(state: &mut State, params: &Value) -> Result
             return Err(anyhow::anyhow!(
                 "All {} unspent notes are within {} confirmations of the chain tip ({}). \
                  Wait a few minutes and retry.",
-                total_unspent, MIN_CONFIRMATIONS, tip,
+                total_unspent,
+                MIN_CONFIRMATIONS,
+                tip,
             ));
         }
         return Err(anyhow::anyhow!("No spendable notes — scan first"));
@@ -825,20 +923,31 @@ async fn handle_build_deshield_pczt(state: &mut State, params: &Value) -> Result
     };
 
     let deshield_state = pczt_builder::build_deshield_pczt(
-        &fvk, notes, transparent_output, amount, account, branch_id,
-        &mut lwd_client, db,
-    ).await?;
+        &fvk,
+        notes,
+        transparent_output,
+        amount,
+        account,
+        branch_id,
+        &mut lwd_client,
+        db,
+    )
+    .await?;
 
     // Build the signing request JSON for the TypeScript layer
-    let orchard_json = serde_json::to_value(&deshield_state.orchard_signing_request)
-        .unwrap_or_default();
+    let orchard_json =
+        serde_json::to_value(&deshield_state.orchard_signing_request).unwrap_or_default();
 
-    let transparent_outputs_json: Vec<Value> = deshield_state.transparent_outputs.iter().map(|o| {
-        serde_json::json!({
-            "value": o.value,
-            "script_pubkey": hex::encode(&o.script_pubkey),
+    let transparent_outputs_json: Vec<Value> = deshield_state
+        .transparent_outputs
+        .iter()
+        .map(|o| {
+            serde_json::json!({
+                "value": o.value,
+                "script_pubkey": hex::encode(&o.script_pubkey),
+            })
         })
-    }).collect();
+        .collect();
 
     let signing_request = serde_json::json!({
         "orchard_signing_request": orchard_json,
@@ -856,24 +965,24 @@ async fn handle_build_deshield_pczt(state: &mut State, params: &Value) -> Result
 }
 
 async fn handle_finalize_deshield(state: &mut State, params: &Value) -> Result<Value> {
-    let deshield_state = state.pending_deshield_pczt.take()
-        .ok_or_else(|| anyhow::anyhow!("No pending deshield PCZT — call build_deshield_pczt first"))?;
+    let deshield_state = state.pending_deshield_pczt.take().ok_or_else(|| {
+        anyhow::anyhow!("No pending deshield PCZT — call build_deshield_pczt first")
+    })?;
 
-    let orchard_sigs_json = params.get("orchard_signatures")
+    let orchard_sigs_json = params
+        .get("orchard_signatures")
         .and_then(|v| v.as_array())
         .ok_or_else(|| anyhow::anyhow!("Missing orchard_signatures array"))?;
 
     let mut orchard_sigs: Vec<Vec<u8>> = Vec::new();
     for sig_val in orchard_sigs_json {
-        let sig_hex = sig_val.as_str()
+        let sig_hex = sig_val
+            .as_str()
             .ok_or_else(|| anyhow::anyhow!("Orchard signature must be hex string"))?;
         orchard_sigs.push(hex::decode(sig_hex)?);
     }
 
-    let (raw_tx, txid) = pczt_builder::finalize_deshield_pczt(
-        deshield_state,
-        &orchard_sigs,
-    )?;
+    let (raw_tx, txid) = pczt_builder::finalize_deshield_pczt(deshield_state, &orchard_sigs)?;
 
     Ok(serde_json::json!({
         "raw_tx": hex::encode(&raw_tx),
@@ -901,7 +1010,11 @@ fn decode_zip302_memo(raw: &[u8]) -> Option<String> {
     }
 
     // Text memo: strip trailing zeros, decode UTF-8
-    let end = raw.iter().rposition(|&b| b != 0).map(|i| i + 1).unwrap_or(0);
+    let end = raw
+        .iter()
+        .rposition(|&b| b != 0)
+        .map(|i| i + 1)
+        .unwrap_or(0);
     if end == 0 {
         return None; // all zeros — effectively empty
     }
@@ -914,28 +1027,33 @@ async fn handle_get_transactions(state: &mut State, _params: &Value) -> Result<V
     let db = state.ensure_db()?;
     let notes = db.get_all_notes()?;
 
-    let txs: Vec<Value> = notes.iter().map(|n| {
-        let memo_text = n.memo.as_ref().and_then(|m| decode_zip302_memo(m));
-        let txid_hex = n.txid.as_ref().map(|t| hex::encode(t));
-        serde_json::json!({
-            "id": n.id,
-            "value": n.value,
-            "block_height": n.block_height,
-            "tx_index": n.tx_index,
-            "is_spent": n.is_spent,
-            "memo": memo_text,
-            "nullifier": hex::encode(&n.nullifier),
-            "txid": txid_hex,
-            "action_index": n.action_index,
+    let txs: Vec<Value> = notes
+        .iter()
+        .map(|n| {
+            let memo_text = n.memo.as_ref().and_then(|m| decode_zip302_memo(m));
+            let txid_hex = n.txid.as_ref().map(|t| hex::encode(t));
+            serde_json::json!({
+                "id": n.id,
+                "value": n.value,
+                "block_height": n.block_height,
+                "tx_index": n.tx_index,
+                "is_spent": n.is_spent,
+                "memo": memo_text,
+                "nullifier": hex::encode(&n.nullifier),
+                "txid": txid_hex,
+                "action_index": n.action_index,
+            })
         })
-    }).collect();
+        .collect();
 
     Ok(serde_json::json!({ "transactions": txs }))
 }
 
 /// Fetch full transactions for notes missing memos and decrypt them.
 async fn handle_backfill_memos(state: &mut State, _params: &Value) -> Result<Value> {
-    let fvk = state.fvk.as_ref()
+    let fvk = state
+        .fvk
+        .as_ref()
         .ok_or_else(|| anyhow::anyhow!("No FVK set — call set_fvk first"))?
         .clone();
 
@@ -952,13 +1070,20 @@ async fn handle_backfill_memos(state: &mut State, _params: &Value) -> Result<Val
     let mut count = 0u32;
 
     for (note_id, txid, _height, action_idx) in &pending {
-        match client.fetch_and_decrypt_memo(&txid, *action_idx as usize, &fvk).await {
+        match client
+            .fetch_and_decrypt_memo(&txid, *action_idx as usize, &fvk)
+            .await
+        {
             Ok(Some(memo)) => {
                 db.update_note_memo(*note_id, &memo)?;
                 count += 1;
                 let text = decode_zip302_memo(&memo);
                 if let Some(ref t) = text {
-                    info!("Note {}: memo = {:?}", note_id, &t[..std::cmp::min(t.len(), 50)]);
+                    info!(
+                        "Note {}: memo = {:?}",
+                        note_id,
+                        &t[..std::cmp::min(t.len(), 50)]
+                    );
                 }
             }
             Ok(None) => {
@@ -977,12 +1102,13 @@ async fn handle_backfill_memos(state: &mut State, _params: &Value) -> Result<Val
 /// Diagnostic: cross-validate subtree roots, tree state, and leaf-computed hashes.
 /// Exposes the raw bytes at every seam to identify encoding/semantic mismatches.
 async fn handle_diagnose_anchor(_state: &mut State, params: &Value) -> Result<Value> {
-    use orchard::tree::MerkleHashOrchard;
-    use orchard::note::ExtractedNoteCommitment;
     use incrementalmerkletree::{Hashable, Retention};
+    use orchard::note::ExtractedNoteCommitment;
+    use orchard::tree::MerkleHashOrchard;
     use shardtree::{store::memory::MemoryShardStore, ShardTree};
 
-    let shard_idx = params.get("shard_index")
+    let shard_idx = params
+        .get("shard_index")
         .and_then(|v| v.as_u64())
         .unwrap_or(0) as u32;
 
@@ -998,12 +1124,18 @@ async fn handle_diagnose_anchor(_state: &mut State, params: &Value) -> Result<Va
     let (idx, root_hash, completing_height) = &subtree_roots[0];
     info!("[1] GetSubtreeRoots(index={}):", idx);
     info!("    rootHash (raw hex): {}", hex::encode(root_hash));
-    info!("    rootHash (reversed): {}", hex::encode(root_hash.iter().rev().copied().collect::<Vec<_>>()));
+    info!(
+        "    rootHash (reversed): {}",
+        hex::encode(root_hash.iter().rev().copied().collect::<Vec<_>>())
+    );
     info!("    completingBlockHeight: {}", completing_height);
 
     // Check if rootHash is a valid Pallas base field element
     let as_merkle = MerkleHashOrchard::from_bytes(root_hash);
-    info!("    MerkleHashOrchard::from_bytes valid: {}", bool::from(as_merkle.is_some()));
+    info!(
+        "    MerkleHashOrchard::from_bytes valid: {}",
+        bool::from(as_merkle.is_some())
+    );
     if let Some(m) = as_merkle.into_option() {
         info!("    round-trip bytes: {}", hex::encode(m.to_bytes()));
     }
@@ -1012,29 +1144,48 @@ async fn handle_diagnose_anchor(_state: &mut State, params: &Value) -> Result<Va
     let (ts_height, tree_hex) = client.get_tree_state(*completing_height).await?;
     info!("[2] GetTreeState(height={}):", completing_height);
     info!("    returned height: {}", ts_height);
-    info!("    orchardTree hex length: {} chars ({} bytes decoded)", tree_hex.len(), tree_hex.len() / 2);
+    info!(
+        "    orchardTree hex length: {} chars ({} bytes decoded)",
+        tree_hex.len(),
+        tree_hex.len() / 2
+    );
 
     // Compute anchor from tree state
     let anchor_at_completing = client.get_orchard_anchor(*completing_height).await?;
-    info!("    tree-state anchor: {}", hex::encode(&anchor_at_completing));
+    info!(
+        "    tree-state anchor: {}",
+        hex::encode(&anchor_at_completing)
+    );
 
     // 3. Get the tree size at completing height
     let tree_size_at_completing = client.get_orchard_tree_size_at(*completing_height).await?;
-    info!("[3] Tree size at completing height {}: {}", completing_height, tree_size_at_completing);
+    info!(
+        "[3] Tree size at completing height {}: {}",
+        completing_height, tree_size_at_completing
+    );
     let shard_size: u64 = 1 << 16; // 65536
     let expected_size = ((*idx as u64) + 1) * shard_size;
-    info!("    Expected size (shard {} complete): {}", idx, expected_size);
+    info!(
+        "    Expected size (shard {} complete): {}",
+        idx, expected_size
+    );
     info!("    Match: {}", tree_size_at_completing == expected_size);
     if tree_size_at_completing != expected_size {
-        info!("    MISMATCH: tree has {} leaves but shard {} should end at position {}",
-            tree_size_at_completing, idx, expected_size);
+        info!(
+            "    MISMATCH: tree has {} leaves but shard {} should end at position {}",
+            tree_size_at_completing, idx, expected_size
+        );
     }
 
     // 4. Also fetch the previous shard's completing height to know where this shard starts
     let shard_start_height = if *idx > 0 {
         let prev_roots = client.get_subtree_roots(idx - 1, 1).await?;
         if let Some((_, _, prev_completing)) = prev_roots.first() {
-            info!("[4] Previous shard {} completing height: {}", idx - 1, prev_completing);
+            info!(
+                "[4] Previous shard {} completing height: {}",
+                idx - 1,
+                prev_completing
+            );
             *prev_completing + 1
         } else {
             1687104 // Orchard activation
@@ -1045,7 +1196,10 @@ async fn handle_diagnose_anchor(_state: &mut State, params: &Value) -> Result<Va
 
     // 5. Compute the shard hash from individual leaves (fetch compact blocks)
     info!("[5] Computing shard {} hash from individual leaves...", idx);
-    info!("    Fetching blocks {} to {}", shard_start_height, completing_height);
+    info!(
+        "    Fetching blocks {} to {}",
+        shard_start_height, completing_height
+    );
 
     let mut leaf_hashes: Vec<MerkleHashOrchard> = Vec::new();
     let chunk_size = 10000u64;
@@ -1058,7 +1212,9 @@ async fn handle_diagnose_anchor(_state: &mut State, params: &Value) -> Result<Va
             for (_tx_idx, cmxs) in txs {
                 for cmx_bytes in cmxs {
                     let cmx = ExtractedNoteCommitment::from_bytes(cmx_bytes);
-                    if bool::from(cmx.is_none()) { continue; }
+                    if bool::from(cmx.is_none()) {
+                        continue;
+                    }
                     leaf_hashes.push(MerkleHashOrchard::from_cmx(&cmx.unwrap()));
                 }
             }
@@ -1066,18 +1222,27 @@ async fn handle_diagnose_anchor(_state: &mut State, params: &Value) -> Result<Va
         current_height = end + 1;
     }
 
-    info!("    Collected {} leaves from compact blocks", leaf_hashes.len());
+    info!(
+        "    Collected {} leaves from compact blocks",
+        leaf_hashes.len()
+    );
     info!("    Expected {} leaves for shard (65536)", shard_size);
 
     // Log first and last few leaves
     if leaf_hashes.len() >= 3 {
         info!("    leaf[0]: {}", hex::encode(leaf_hashes[0].to_bytes()));
         info!("    leaf[1]: {}", hex::encode(leaf_hashes[1].to_bytes()));
-        info!("    leaf[last]: {}", hex::encode(leaf_hashes.last().unwrap().to_bytes()));
+        info!(
+            "    leaf[last]: {}",
+            hex::encode(leaf_hashes.last().unwrap().to_bytes())
+        );
     }
 
     // 6. Compute the subtree hash by building a local Merkle tree
-    info!("[6] Computing subtree hash from {} leaves...", leaf_hashes.len());
+    info!(
+        "[6] Computing subtree hash from {} leaves...",
+        leaf_hashes.len()
+    );
 
     // Method A: manual binary Merkle hash at each level
     let mut level_hashes = leaf_hashes.clone();
@@ -1088,7 +1253,11 @@ async fn handle_diagnose_anchor(_state: &mut State, params: &Value) -> Result<Va
     }
     // If we have MORE than shard_size leaves, the shard boundary assumption is wrong
     if level_hashes.len() > shard_size as usize {
-        info!("    WARNING: {} leaves exceeds shard size {}", level_hashes.len(), shard_size);
+        info!(
+            "    WARNING: {} leaves exceeds shard size {}",
+            level_hashes.len(),
+            shard_size
+        );
         level_hashes.truncate(shard_size as usize);
     }
 
@@ -1098,7 +1267,11 @@ async fn handle_diagnose_anchor(_state: &mut State, params: &Value) -> Result<Va
             let combined = MerkleHashOrchard::combine(
                 incrementalmerkletree::Level::from(level),
                 &pair[0],
-                if pair.len() > 1 { &pair[1] } else { &empty_leaf },
+                if pair.len() > 1 {
+                    &pair[1]
+                } else {
+                    &empty_leaf
+                },
             );
             next_level.push(combined);
         }
@@ -1106,8 +1279,14 @@ async fn handle_diagnose_anchor(_state: &mut State, params: &Value) -> Result<Va
     }
 
     let computed_subtree_hash = level_hashes[0].to_bytes();
-    info!("    Computed subtree hash (manual): {}", hex::encode(&computed_subtree_hash));
-    info!("    GetSubtreeRoots rootHash:       {}", hex::encode(root_hash));
+    info!(
+        "    Computed subtree hash (manual): {}",
+        hex::encode(&computed_subtree_hash)
+    );
+    info!(
+        "    GetSubtreeRoots rootHash:       {}",
+        hex::encode(root_hash)
+    );
     info!("    MATCH: {}", computed_subtree_hash == *root_hash);
 
     if computed_subtree_hash != *root_hash {
@@ -1115,10 +1294,16 @@ async fn handle_diagnose_anchor(_state: &mut State, params: &Value) -> Result<Va
         let reversed: Vec<u8> = root_hash.iter().rev().copied().collect();
         let mut rev_arr = [0u8; 32];
         rev_arr.copy_from_slice(&reversed);
-        info!("    Match (reversed rootHash): {}", computed_subtree_hash == rev_arr);
+        info!(
+            "    Match (reversed rootHash): {}",
+            computed_subtree_hash == rev_arr
+        );
 
         // Check if rootHash is the full tree root at completing_height (not subtree)
-        info!("    rootHash == tree-state anchor: {}", *root_hash == anchor_at_completing);
+        info!(
+            "    rootHash == tree-state anchor: {}",
+            *root_hash == anchor_at_completing
+        );
     }
 
     // Method B: using ShardTree to compute the same thing
@@ -1127,15 +1312,21 @@ async fn handle_diagnose_anchor(_state: &mut State, params: &Value) -> Result<Va
     let _shard_start_pos = (*idx as u64) * shard_size;
     for (i, leaf) in leaf_hashes.iter().enumerate().take(shard_size as usize) {
         // We need leaves at the correct global positions for ShardTree
-        shard_tree.append(*leaf, Retention::Ephemeral)
+        shard_tree
+            .append(*leaf, Retention::Ephemeral)
             .map_err(|e| anyhow::anyhow!("Failed to append leaf {}: {:?}", i, e))?;
     }
-    shard_tree.checkpoint(0u32)
+    shard_tree
+        .checkpoint(0u32)
         .map_err(|e| anyhow::anyhow!("Failed to checkpoint: {:?}", e))?;
-    let shard_tree_root = shard_tree.root_at_checkpoint_id(&0u32)
+    let shard_tree_root = shard_tree
+        .root_at_checkpoint_id(&0u32)
         .map_err(|e| anyhow::anyhow!("Failed to get root: {:?}", e))?
         .ok_or_else(|| anyhow::anyhow!("Empty root"))?;
-    info!("    ShardTree root (leaves at pos 0): {}", hex::encode(shard_tree_root.to_bytes()));
+    info!(
+        "    ShardTree root (leaves at pos 0): {}",
+        hex::encode(shard_tree_root.to_bytes())
+    );
     info!("    NOTE: ShardTree root here is the full depth-32 root with only 1 shard filled,");
     info!("    not the level-16 subtree hash. These are different values.");
 
@@ -1144,10 +1335,22 @@ async fn handle_diagnose_anchor(_state: &mut State, params: &Value) -> Result<Va
     info!("  Shard index: {}", idx);
     info!("  Completing height: {}", completing_height);
     info!("  Leaves from compact blocks: {}", leaf_hashes.len());
-    info!("  Tree size at completing height: {}", tree_size_at_completing);
-    info!("  Computed level-16 subtree hash: {}", hex::encode(&computed_subtree_hash));
-    info!("  GetSubtreeRoots rootHash:       {}", hex::encode(root_hash));
-    info!("  Tree-state anchor:              {}", hex::encode(&anchor_at_completing));
+    info!(
+        "  Tree size at completing height: {}",
+        tree_size_at_completing
+    );
+    info!(
+        "  Computed level-16 subtree hash: {}",
+        hex::encode(&computed_subtree_hash)
+    );
+    info!(
+        "  GetSubtreeRoots rootHash:       {}",
+        hex::encode(root_hash)
+    );
+    info!(
+        "  Tree-state anchor:              {}",
+        hex::encode(&anchor_at_completing)
+    );
     let subtree_match = computed_subtree_hash == *root_hash;
     info!("  Subtree hash matches rootHash: {}", subtree_match);
     if !subtree_match {
@@ -1172,28 +1375,71 @@ async fn handle_diagnose_anchor(_state: &mut State, params: &Value) -> Result<Va
 }
 
 async fn handle_broadcast(_state: &mut State, params: &Value) -> Result<Value> {
-    let raw_tx_hex = params.get("raw_tx")
+    let raw_tx_hex = params
+        .get("raw_tx")
         .and_then(|v| v.as_str())
         .ok_or_else(|| anyhow::anyhow!("Missing raw_tx"))?;
 
     let raw_tx = hex::decode(raw_tx_hex)?;
 
-    let mut client = scanner::LightwalletClient::connect(None).await?;
-    let txid = client.send_transaction(&raw_tx).await?;
-    info!("Broadcast accepted: txid={}", txid);
-    Ok(serde_json::json!({ "txid": txid }))
+    // Broadcast to EVERY node and report each verdict. If na.zec.rocks rejects a
+    // tx that another node accepts, the failure is node-specific (policy/branch),
+    // not our transaction. First node that accepts wins.
+    let servers = [
+        "https://na.zec.rocks:443",
+        "https://sa.zec.rocks:443",
+        "https://eu.zec.rocks:443",
+        "https://mainnet.lightwalletd.com:9067",
+        "https://zec.rocks:443",
+    ];
+    let mut last_err = String::from("no nodes reachable");
+    let mut any_accepted: Option<String> = None;
+    for url in servers {
+        match scanner::LightwalletClient::connect(Some(url)).await {
+            Ok(mut client) => match tokio::time::timeout(
+                std::time::Duration::from_secs(15),
+                client.send_transaction(&raw_tx),
+            )
+            .await
+            {
+                Ok(Ok(txid)) => {
+                    info!("Broadcast ACCEPTED by {} — txid={}", url, txid);
+                    if any_accepted.is_none() {
+                        any_accepted = Some(txid);
+                    }
+                }
+                Ok(Err(e)) => {
+                    log::error!("Broadcast REJECTED by {}: {}", url, e);
+                    last_err = format!("{}: {}", url, e);
+                }
+                // A node that completes the TLS/connect handshake then hangs on
+                // SendTransaction must not strand an already-signed tx forever —
+                // record the timeout and move on to the next node.
+                Err(_) => {
+                    log::warn!("Broadcast to {} timed out after 15s — trying next node", url);
+                    last_err = format!("{}: send_transaction timed out after 15s", url);
+                }
+            },
+            Err(e) => log::warn!("Could not connect to {} for broadcast: {}", url, e),
+        }
+    }
+    match any_accepted {
+        Some(txid) => Ok(serde_json::json!({ "txid": txid })),
+        None => Err(anyhow::anyhow!(
+            "All nodes rejected the transaction. Last: {}",
+            last_err
+        )),
+    }
 }
 
 // ── Main IPC loop ──────────────────────────────────────────────────────
 
 #[tokio::main]
 async fn main() {
-    env_logger::Builder::from_env(
-        env_logger::Env::default().default_filter_or("info")
-    )
-    // Log to stderr so stdout stays clean for NDJSON IPC
-    .target(env_logger::Target::Stderr)
-    .init();
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
+        // Log to stderr so stdout stays clean for NDJSON IPC
+        .target(env_logger::Target::Stderr)
+        .init();
 
     info!("zcash-cli sidecar starting");
 
@@ -1204,11 +1450,16 @@ async fn main() {
     // Try to auto-load FVK from database
     let has_fvk = match state.try_load_fvk() {
         Ok(loaded) => loaded,
-        Err(e) => { error!("Failed to auto-load FVK: {}", e); false }
+        Err(e) => {
+            error!("Failed to auto-load FVK: {}", e);
+            false
+        }
     };
 
     // Build ready signal with FVK status + scan state
-    let synced_to = state.ensure_db().ok()
+    let synced_to = state
+        .ensure_db()
+        .ok()
         .and_then(|db| db.last_scanned_height().ok().flatten());
     let ready_data = if has_fvk {
         let fvk = state.fvk.as_ref().unwrap();
@@ -1313,11 +1564,11 @@ async fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ff::PrimeField;
     use orchard::keys::{FullViewingKey, SpendingKey};
     use pasta_curves::group::GroupEncoding;
-    use ff::PrimeField;
-    use zip32::AccountId;
     use tempfile::TempDir;
+    use zip32::AccountId;
 
     fn account(n: u32) -> AccountId {
         AccountId::try_from(n).unwrap()
@@ -1369,7 +1620,11 @@ mod tests {
     fn test_fvk_roundtrip_from_spending_key() {
         let fvk = derive_test_fvk(0x42, 0);
         let fvk_bytes = fvk.to_bytes();
-        assert_eq!(fvk_bytes[31] & 0x80, 0, "ak sign bit must be 0 in valid FVK");
+        assert_eq!(
+            fvk_bytes[31] & 0x80,
+            0,
+            "ak sign bit must be 0 in valid FVK"
+        );
         let fvk2 = FullViewingKey::from_bytes(&fvk_bytes).expect("round-trip failed");
         assert_eq!(fvk.to_bytes(), fvk2.to_bytes());
     }
@@ -1379,8 +1634,10 @@ mod tests {
         let fvk = derive_test_fvk(0x42, 0);
         let mut fvk_bytes = fvk.to_bytes();
         fvk_bytes[31] |= 0x80;
-        assert!(FullViewingKey::from_bytes(&fvk_bytes).is_none(),
-            "FVK should reject ak with sign bit set");
+        assert!(
+            FullViewingKey::from_bytes(&fvk_bytes).is_none(),
+            "FVK should reject ak with sign bit set"
+        );
     }
 
     #[test]
@@ -1391,8 +1648,8 @@ mod tests {
         corrupted[31] |= 0x80;
         assert!(FullViewingKey::from_bytes(&corrupted).is_none());
         corrupted[31] &= 0x7f;
-        let recovered = FullViewingKey::from_bytes(&corrupted)
-            .expect("Should recover with sign bit cleared");
+        let recovered =
+            FullViewingKey::from_bytes(&corrupted).expect("Should recover with sign bit cleared");
         assert_eq!(original_bytes, recovered.to_bytes());
     }
 
@@ -1400,8 +1657,12 @@ mod tests {
     fn test_multiple_accounts_sign_bit() {
         for acct in 0..16u32 {
             let fvk = derive_test_fvk(0x42, acct);
-            assert_eq!(fvk.to_bytes()[31] & 0x80, 0,
-                "Account {} has ak sign bit set", acct);
+            assert_eq!(
+                fvk.to_bytes()[31] & 0x80,
+                0,
+                "Account {} has ak sign bit set",
+                acct
+            );
         }
     }
 
@@ -1416,8 +1677,8 @@ mod tests {
         let fvk = derive_test_fvk(0x42, 0);
         let b = fvk.to_bytes();
 
-        let response = call_set_fvk(&mut state, &b[..32], &b[32..64], &b[64..96])
-            .expect("should succeed");
+        let response =
+            call_set_fvk(&mut state, &b[..32], &b[32..64], &b[64..96]).expect("should succeed");
 
         // State has FVK
         let state_fvk = state.fvk.as_ref().expect("state.fvk should be set");
@@ -1549,7 +1810,10 @@ mod tests {
         // Actually: the corrupt bytes have sign bit set (0xFF & 0x80 = 0x80), so
         // try_load_fvk clears it in-memory. Since decode fails, save_fvk is NOT called.
         // DB should still have the original 0xFF bytes.
-        assert_eq!(stored[31], 0xFF, "DB must NOT be rewritten when decode fails");
+        assert_eq!(
+            stored[31], 0xFF,
+            "DB must NOT be rewritten when decode fails"
+        );
     }
 
     /// Empty DB: try_load_fvk returns false gracefully.
@@ -1597,7 +1861,11 @@ mod tests {
         let addr2 = state2_fvk.address_at(0u32, orchard::keys::Scope::External);
         let ua2 = encode_unified_address(&addr2).unwrap();
         assert_eq!(ua2, session1_address, "address must survive restart");
-        assert_eq!(state2_fvk.to_bytes()[31] & 0x80, 0, "sign bit must be 0 after reload");
+        assert_eq!(
+            state2_fvk.to_bytes()[31] & 0x80,
+            0,
+            "sign bit must be 0 after reload"
+        );
     }
 
     // ══════════════════════════════════════════════════════════════════════
@@ -1612,8 +1880,13 @@ mod tests {
         let original = fvk.to_bytes();
 
         // First call: canonical
-        call_set_fvk(&mut state, &original[..32], &original[32..64], &original[64..96])
-            .expect("first call");
+        call_set_fvk(
+            &mut state,
+            &original[..32],
+            &original[32..64],
+            &original[64..96],
+        )
+        .expect("first call");
 
         // Insert a note so we can detect a reset
         let db = state.db.as_ref().unwrap();
@@ -1629,7 +1902,8 @@ mod tests {
             action_index: 0,
             txid: None,
             memo: None,
-        }).unwrap();
+        })
+        .unwrap();
 
         // Second call: same key but with buggy sign bit
         let mut buggy_ak = [0u8; 32];
@@ -1654,19 +1928,24 @@ mod tests {
         call_set_fvk(&mut state, &b0[..32], &b0[32..64], &b0[64..96]).unwrap();
 
         // Insert a note
-        state.db.as_ref().unwrap().insert_note(&wallet_db::ScannedNote {
-            value: 100000,
-            recipient: vec![0u8; 43],
-            rho: [1u8; 32],
-            rseed: [2u8; 32],
-            cmx: [3u8; 32],
-            nullifier: [4u8; 32],
-            block_height: 1000,
-            tx_index: 0,
-            action_index: 0,
-            txid: None,
-            memo: None,
-        }).unwrap();
+        state
+            .db
+            .as_ref()
+            .unwrap()
+            .insert_note(&wallet_db::ScannedNote {
+                value: 100000,
+                recipient: vec![0u8; 43],
+                rho: [1u8; 32],
+                rseed: [2u8; 32],
+                cmx: [3u8; 32],
+                nullifier: [4u8; 32],
+                block_height: 1000,
+                tx_index: 0,
+                action_index: 0,
+                txid: None,
+                memo: None,
+            })
+            .unwrap();
 
         // Set account 1 (different key)
         let fvk1 = derive_test_fvk(0x42, 1);
@@ -1683,8 +1962,10 @@ mod tests {
     fn test_fvk_matches_returns_true_for_empty_db() {
         let fvk = derive_test_fvk(0x42, 0);
         let (db, _dir) = test_db();
-        assert!(db.fvk_matches(&fvk.to_bytes()).unwrap(),
-            "empty DB should match any FVK");
+        assert!(
+            db.fvk_matches(&fvk.to_bytes()).unwrap(),
+            "empty DB should match any FVK"
+        );
     }
 
     // ══════════════════════════════════════════════════════════════════════
@@ -1697,15 +1978,12 @@ mod tests {
     /// canonicalization path or a change in the orchard crate's FVK decoding.
     #[test]
     fn test_handle_set_fvk_device_vector() {
-        let ak = hex::decode(
-            "59285e6994df779f819ea1e67bd687d698137dc4789430ffb0ece45370948ea7"
-        ).unwrap();
-        let nk = hex::decode(
-            "568fa99d2705be00371cadfba937efe844533b54c631bea1045fd8f46e1a4c17"
-        ).unwrap();
-        let rivk = hex::decode(
-            "01111ac7987d132f2d5d69d69f834c523d3b4705b25030fd6025372cad4a1f3d"
-        ).unwrap();
+        let ak = hex::decode("59285e6994df779f819ea1e67bd687d698137dc4789430ffb0ece45370948ea7")
+            .unwrap();
+        let nk = hex::decode("568fa99d2705be00371cadfba937efe844533b54c631bea1045fd8f46e1a4c17")
+            .unwrap();
+        let rivk = hex::decode("01111ac7987d132f2d5d69d69f834c523d3b4705b25030fd6025372cad4a1f3d")
+            .unwrap();
 
         assert_eq!(ak[31] & 0x80, 0x80, "device ak must have sign bit set");
 
@@ -1734,29 +2012,33 @@ mod tests {
     /// Exact device log vector: component-level validation.
     #[test]
     fn test_device_log_vector_component_validation() {
-        let ak = hex::decode(
-            "59285e6994df779f819ea1e67bd687d698137dc4789430ffb0ece45370948ea7"
-        ).unwrap();
-        let nk = hex::decode(
-            "568fa99d2705be00371cadfba937efe844533b54c631bea1045fd8f46e1a4c17"
-        ).unwrap();
-        let rivk = hex::decode(
-            "01111ac7987d132f2d5d69d69f834c523d3b4705b25030fd6025372cad4a1f3d"
-        ).unwrap();
+        let ak = hex::decode("59285e6994df779f819ea1e67bd687d698137dc4789430ffb0ece45370948ea7")
+            .unwrap();
+        let nk = hex::decode("568fa99d2705be00371cadfba937efe844533b54c631bea1045fd8f46e1a4c17")
+            .unwrap();
+        let rivk = hex::decode("01111ac7987d132f2d5d69d69f834c523d3b4705b25030fd6025372cad4a1f3d")
+            .unwrap();
 
         // ak with sign cleared decompresses as valid Pallas point
         let mut ak_fixed: [u8; 32] = ak.clone().try_into().unwrap();
         ak_fixed[31] &= 0x7f;
         let ak_point = pasta_curves::pallas::Affine::from_bytes(&ak_fixed);
-        assert!(bool::from(ak_point.is_some()), "ak must be valid Pallas point");
+        assert!(
+            bool::from(ak_point.is_some()),
+            "ak must be valid Pallas point"
+        );
 
         // nk valid as base field element
         let nk_arr: [u8; 32] = nk.try_into().unwrap();
-        assert!(bool::from(pasta_curves::pallas::Base::from_repr(nk_arr).is_some()));
+        assert!(bool::from(
+            pasta_curves::pallas::Base::from_repr(nk_arr).is_some()
+        ));
 
         // rivk valid as scalar
         let rivk_arr: [u8; 32] = rivk.try_into().unwrap();
-        assert!(bool::from(pasta_curves::pallas::Scalar::from_repr(rivk_arr).is_some()));
+        assert!(bool::from(
+            pasta_curves::pallas::Scalar::from_repr(rivk_arr).is_some()
+        ));
     }
 
     // ══════════════════════════════════════════════════════════════════════

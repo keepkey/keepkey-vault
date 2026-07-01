@@ -40,6 +40,8 @@ export const PairRequest = z.object({
   name: z.string().min(1),
   url: z.string().optional(),
   imageUrl: z.string().optional(),
+  /** Stable per-install id — preferred identity for dedup/idempotent pairing. */
+  clientId: z.string().optional(),
 }).passthrough()
 
 /** POST /eth/sign-transaction */
@@ -325,6 +327,11 @@ export const LoadDeviceRequest = z.object({}).passthrough()
 /** POST /system/recovery/pin */
 export const SendPinRequest = z.object({
   pin: z.string().min(1),
+}).passthrough()
+
+/** POST /system/recovery/character — one ciphered character during cipher recovery */
+export const SendCharacterRequest = z.object({
+  character: z.string().min(1).max(1),
 }).passthrough()
 
 // ── Zcash Shielded (Orchard) ─────────────────────────────────────────

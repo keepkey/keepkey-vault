@@ -147,7 +147,7 @@
 	},
 	"alphaFirmware": "Альфа-прошивка",
 	"alphaFirmwareDesc": "Подписаться на ранние выпуски прошивки из бета-канала",
-	"downloadManually": "Скачать с GitHub",
+	"downloadManually": "Как обновить",
 	"downloadUpdate": "Скачать обновление",
 	"preReleaseUpdates": "Предварительные обновления",
 	"preReleaseUpdatesDesc": "Получайте ранний доступ к новым функциям до стабильного выпуска",

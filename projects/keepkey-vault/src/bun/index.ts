@@ -120,8 +120,8 @@ import { addSessionActivity, getSessionActivity, clearSessionActivity } from "./
 import { buildTx, broadcastTx } from "./txbuilder"
 import { buildCosmosStakingTx, buildCosmosNameRegTx } from "./txbuilder/cosmos"
 import { initializeOrchardFromDevice, scanOrchardNotes, getShieldedBalance, sendShielded, ensureFvkLoaded, displayOrchardAddressOnDevice } from "./txbuilder/zcash-shielded"
-import { isSidecarReady, startSidecar, stopSidecar, wipeSidecarWalletDb, hasFvkLoaded, getCachedFvk, onScanProgress, getScanState, updateSyncedTo } from "./zcash-sidecar"
-import { CHAINS, customChainToChainDef, isChainSupported } from "../shared/chains"
+import { isSidecarReady, startSidecar, stopSidecar, wipeSidecarWalletDb, hasFvkLoaded, getCachedFvk, onScanProgress, getScanState, updateSyncedTo, beginZcashSend, endZcashSend, isZcashSendInFlight } from "./zcash-sidecar"
+import { CHAINS, customChainToChainDef, isChainSupported, hiveRolePath } from "../shared/chains"
 import { versionCompare } from "../shared/firmware-versions"
 import type { ChainDef } from "../shared/chains"
 import { BtcAccountManager } from "./btc-accounts"
@@ -300,12 +300,14 @@ function mergeMetas(metas: PortfolioMeta[]): PortfolioMeta {
 	}
 }
 
-// ── Desktop update — open GitHub releases page ──
+// ── Desktop update — open keepkey.com "update your app" page ──
 // In-app auto-update is unreliable on both platforms:
 // - macOS: zig-zstd has different CLI flags than zstd, stock macOS has no zstd
 // - Windows: in-app exe download + spawn had process lock issues
-// Both platforms now open the GitHub releases page for manual download.
+// Both platforms now open the keepkey.com update page, which serves the correct
+// download for the user's OS/arch and explains how to update.
 const GITHUB_REPO = 'keepkey/keepkey-vault'
+const UPDATE_PAGE = 'https://keepkey.com/update'
 // Cached version from pre-release GitHub check (Updater.updateInfo() doesn't have it)
 let pendingUpdateVersion: string | null = null
 let pioneerSocket: PioneerSocket | null = null
@@ -314,13 +316,19 @@ let pioneerSocket: PioneerSocket | null = null
 // "Syncing…" when it mounts mid-scan instead of a false "no activity".
 let activityScanRunning = false
 
-function openReleasePage() {
-	const version = pendingUpdateVersion || Updater.updateInfo()?.version
-	const url = version
-		? `https://github.com/${GITHUB_REPO}/releases/tag/v${version}`
-		: `https://github.com/${GITHUB_REPO}/releases`
-	console.log(`[Update] Opening releases page: ${url}`)
-	const cmd = process.platform === 'win32' ? ['cmd', '/c', 'start', '', url] : ['open', url]
+function openUpdatePage() {
+	// Target version the user should upgrade to (latest available).
+	const target = pendingUpdateVersion || Updater.updateInfo()?.version
+	// os: mac | windows | linux ; arch: arm64 | x64 — keepkey.com serves the right build.
+	const os = process.platform === 'darwin' ? 'mac' : process.platform === 'win32' ? 'windows' : 'linux'
+	const params = new URLSearchParams({ os, arch: process.arch })
+	if (target) params.set('version', target)
+	if (appVersionCache) params.set('current', appVersionCache)
+	const url = `${UPDATE_PAGE}?${params.toString()}`
+	console.log(`[Update] Opening update page: ${url}`)
+	// On Windows `&` is a cmd command separator; `start` would split the query string
+	// into separate commands. Quote the URL so it stays a single argument.
+	const cmd = process.platform === 'win32' ? ['cmd', '/c', 'start', '', `"${url}"`] : ['open', url]
 	Bun.spawn(cmd, { stdio: ['ignore', 'ignore', 'ignore'] })
 }
 
@@ -547,6 +555,7 @@ let restApiEnabled = false
 let walletConnectEnabled = false
 let bip85Enabled = false
 let zcashPrivacyEnabled = false
+let hiveEnabled = false
 // True after the per-session incremental scan has caught the wallet up to
 // chain tip. The `verified` field on `zcashShieldedStatus` reports this so
 // API clients (and any future UI gating) get an honest answer about whether
@@ -565,6 +574,9 @@ let zcashBackgroundVerifyInFlight = false
 // hard gate for showing the shielded balance and for sending. Reset whenever
 // the wallet identity could have changed (seed/device switch, FVK re-derive).
 let zcashDeviceVerified = false
+// Coalesces the sidecar purge (stop→wipe→start→init) so a forced spend-path
+// re-derive and a background verify can't run two overlapping cycles (FIXB-02).
+let zcashPurgeInFlight: Promise<void> | null = null
 let emulatorEnabled = false
 let preReleaseUpdates = false
 let alphaFirmware = false
@@ -575,6 +587,7 @@ function loadSettings() {
 	walletConnectEnabled = getSetting('walletconnect_enabled') === '1'
 	bip85Enabled = getSetting('bip85_enabled') === '1'
 	zcashPrivacyEnabled = getSetting('zcash_privacy_enabled') === '1'
+	hiveEnabled = getSetting('hive_enabled') === '1'
 	emulatorEnabled = getSetting('emulator_enabled') === '1'
 	preReleaseUpdates = getSetting('pre_release_updates') === '1'
 	alphaFirmware = getSetting('alpha_firmware') === '1'
@@ -879,6 +892,7 @@ function getAppSettings() {
 		walletConnectEnabled,
 		bip85Enabled,
 		zcashPrivacyEnabled,
+		hiveEnabled,
 		emulatorEnabled,
 		preReleaseUpdates,
 		alphaFirmware,
@@ -917,6 +931,16 @@ function resetSeedManagers(): void {
 	btcAccounts.reset()
 	evmAddresses.reset()
 	managersSeedOwner = null
+	// The Zcash sidecar's device-verified flag is per-wallet. A same-handle
+	// passphrase / hidden-wallet toggle changes the active wallet WITHOUT firing
+	// seed-changed, but DOES route through a resetSeedManagers() path (the
+	// needs_passphrase handler and the result-based reconcile). Drop the sticky
+	// flag here so the next balance / scan / send re-derives the device FVK and
+	// fail-closes instead of bleeding the previous wallet's shielded balance
+	// (FS-1). The lazy purge in ensureZcashDeviceMatch then rebuilds the sidecar
+	// for the active wallet on first access.
+	zcashDeviceVerified = false
+	zcashVerifiedThisSession = false
 }
 
 /** Seed-staleness guard — the single authority for "do the in-memory account
@@ -1114,6 +1138,20 @@ const restCallbacks: RestApiCallbacks = {
 	// the loop. The device still gates every signature. NOOP substage push.
 	getSwapQuoteHeadless: (params) => headlessSwapQuote(params),
 	executeSwapHeadless: (params) => headlessExecuteSwap(params, () => { /* headless: no WebView substage */ }),
+	zcashPreSendGate: async (account: number) => {
+		// Same fail-closed preflight the RPC send path runs: prove the FVK belongs
+		// to the connected device (purges stale state on mismatch) THEN catch the
+		// note set up to tip. A device-comms failure throws and aborts the send.
+		// `force` re-derives every send so a same-handle passphrase/hidden-wallet
+		// toggle can't slip through the session-sticky verified flag (P2-E).
+		await ensureZcashDeviceMatch(account, true)
+		await ensureZcashScanFresh()
+	},
+	zcashVerifyWallet: async (account: number) => {
+		// Read-only REST balance still exposes local shielded state, so prove the
+		// sidecar DB belongs to the connected device before returning it.
+		await ensureZcashDeviceMatch(account)
+	},
 	getPioneer: () => getPioneer(),
 	getPioneerApiBase: () => getPioneerApiBase(),
 	setPioneerApiBase: async (url: string) => {
@@ -1165,6 +1203,7 @@ async function applyRestApiState() {
 
 // ── Swap quote cache (last 10 quotes for tracker data) ───────────────
 import type { SwapQuote, SwapQuoteParams, ExecuteSwapParams, SwapResult, SwapSubStage } from '../shared/types'
+import { isThorchainBankToken, thorchainBankTokenFirmwareOK, THORCHAIN_BANK_TOKEN_MIN_FW } from '../shared/swap-support-matrix'
 const swapQuoteCache = new Map<string, SwapQuote>()
 
 // ── Emulator confirm helper ──────────────────────────────────────────
@@ -1323,10 +1362,15 @@ async function ensureZcashScanFresh(): Promise<void> {
  * to the connected device). Throws if the device can't be reached — callers on
  * the send path MUST treat a throw as fail-closed.
  */
-async function ensureZcashDeviceMatch(account: number = 0): Promise<boolean> {
+async function ensureZcashDeviceMatch(account: number = 0, force: boolean = false): Promise<boolean> {
 	if (!zcashPrivacyEnabled || !engine.wallet) return false
 	if (typeof (engine.wallet as any).zcashGetOrchardFVK !== 'function') return false
-	if (zcashDeviceVerified) return true
+	// `force` bypasses the session-sticky verified flag on the SPEND path: a
+	// same-handle passphrase / hidden-wallet toggle never fires `seed-changed`,
+	// so a sticky `true` would let a send build against the PREVIOUS wallet's
+	// cached FVK/notes. Re-derive + compare the device ak every send (cheap,
+	// silent — no button press). The display path keeps the sticky short-circuit.
+	if (zcashDeviceVerified && !force) return true
 
 	const deviceFvk = await (engine.wallet as any).zcashGetOrchardFVK(account)
 	if (!deviceFvk?.ak) throw new Error('Device returned no Orchard ak — cannot verify wallet identity')
@@ -1344,10 +1388,33 @@ async function ensureZcashDeviceMatch(account: number = 0): Promise<boolean> {
 		`(cached ak=${cached?.fvk.ak.slice(0, 12) ?? 'none'}…, device ak=${deviceAk.slice(0, 12)}…) — ` +
 		`purging stale wallet state and re-deriving from the device`,
 	)
-	stopSidecar()
-	wipeSidecarWalletDb()
-	await startSidecar()
-	await initializeOrchardFromDevice(engine.wallet as any, account)
+	// Coalesce concurrent purges (FIXB-02): a forced spend-path re-derive and a
+	// fire-and-forget background verify can both reach here; running two
+	// stop/wipe/start/init cycles concurrently corrupts the sidecar. Share one
+	// in-flight purge — a second caller awaits it instead of starting its own.
+	if (zcashPurgeInFlight) {
+		await zcashPurgeInFlight
+	} else {
+		const purge = (async () => {
+			// Mark the sidecar busy so a background verify can't START another purge
+			// concurrently while this one runs (P2-B).
+			beginZcashSend()
+			try {
+				stopSidecar()
+				wipeSidecarWalletDb()
+				await startSidecar()
+				await initializeOrchardFromDevice(engine.wallet as any, account)
+			} finally {
+				endZcashSend()
+			}
+		})()
+		zcashPurgeInFlight = purge
+		try {
+			await purge
+		} finally {
+			zcashPurgeInFlight = null
+		}
+	}
 	// Notes from the previous wallet are gone; the next scan rebuilds the
 	// unspent set for the real device. Caller is responsible for scanning.
 	zcashVerifiedThisSession = false
@@ -1356,7 +1423,11 @@ async function ensureZcashDeviceMatch(account: number = 0): Promise<boolean> {
 }
 
 function maybeStartBackgroundWalletVerification(): void {
-	if (zcashDeviceVerified || zcashBackgroundVerifyInFlight || !hasFvkLoaded()) return
+	// `isZcashSendInFlight()` (P2-B): never kick off a background device-verify —
+	// which stop/wipe/restart-s the sidecar on FVK mismatch — while a send is
+	// mid build→sign→broadcast; it would delete the sidecar's in-memory PCZT
+	// state underneath the build. The next Privacy-tab refresh re-fires it.
+	if (zcashDeviceVerified || zcashBackgroundVerifyInFlight || !hasFvkLoaded() || isZcashSendInFlight()) return
 	zcashBackgroundVerifyInFlight = true
 	;(async () => {
 		try {
@@ -1383,6 +1454,17 @@ function maybeStartBackgroundWalletVerification(): void {
 // The device still gates every signature in both paths.
 async function headlessSwapQuote(params: SwapQuoteParams): Promise<SwapQuote> {
 	const { getSwapQuote } = await import('./swap')
+
+	// Firmware gate (see buildTx): selling a THORChain/Maya bank token (TCY,
+	// RUJI) requires firmware 7.15+. Refuse the quote on older firmware — the
+	// single chokepoint for both in-app and REST swaps — so the flow can't
+	// reach signing. Buying these (toCaip) is fine: the user only receives.
+	if (params.fromCaip && isThorchainBankToken(params.fromCaip)) {
+		const fw = engine.getDeviceState().firmwareVersion
+		if (!thorchainBankTokenFirmwareOK(params.fromCaip, fw)) {
+			throw new Error(`TCY / RUJI swaps require KeepKey firmware ${THORCHAIN_BANK_TOKEN_MIN_FW}+ (device has ${fw || 'unknown'}). Update your firmware.`)
+		}
+	}
 
 	// Resolve xpub addresses to real receive addresses for UTXO chains.
 	// ChainBalance.address can be an xpub when Pioneer doesn't return
@@ -1503,6 +1585,18 @@ async function headlessSwapQuote(params: SwapQuoteParams): Promise<SwapQuote> {
 
 async function headlessExecuteSwap(params: ExecuteSwapParams, pushSubStage: (stage: SwapSubStage) => void): Promise<SwapResult> {
 	if (!engine.wallet) throw new Error('No device connected')
+
+	// Firmware gate ENFORCED at execute time, not just quote time: /api/v2/swap/
+	// execute (rest-swap.ts) calls this directly, so a stale or crafted execute
+	// payload must not bypass the quote-time check and reach signing on firmware
+	// that would sign the wrong asset. Mirrors headlessSwapQuote + buildTx.
+	if (params.fromCaip && isThorchainBankToken(params.fromCaip)) {
+		const fw = engine.getDeviceState().firmwareVersion
+		if (!thorchainBankTokenFirmwareOK(params.fromCaip, fw)) {
+			throw new Error(`TCY / RUJI swaps require KeepKey firmware ${THORCHAIN_BANK_TOKEN_MIN_FW}+ (device has ${fw || 'unknown'}). Update your firmware.`)
+		}
+	}
+
 	const { executeSwap } = await import('./swap')
 	const { trackSwap, isTrackerInitialized, initSwapTracker } = await import('./swap-tracker')
 	// Ensure tracker is initialized before tracking (guards against race/init failure)
@@ -1826,7 +1920,18 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			applyPolicy: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
-				await engine.wallet.applyPolicy({ policyName: params.policyName, enabled: params.enabled })
+				// applyPolicy raises an "ENABLE/DISABLE POLICY" confirm on the device
+				// and blocks on a button press. On the emulator that needs the
+				// interactive Accept/Reject affordance or it hangs until timeout.
+				const apply = () => engine.wallet!.applyPolicy({ policyName: params.policyName, enabled: params.enabled })
+				if (engine.isEmulator) {
+					await emuSigningOp(apply, {
+						operation: 'applyPolicy',
+						opLabel: `${params.enabled ? 'Enable' : 'Disable'} ${params.policyName} policy`,
+					})
+				} else {
+					await apply()
+				}
 				clearFeaturesCache()
 				try {
 					await engine.refreshFeaturesSnapshot()
@@ -2278,9 +2383,126 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!result) throw new Error('hiveGetPublicKey returned no result')
 				return result
 			},
+			// Derive all four SLIP-0048 role keys (owner/active/posting/memo) for an
+			// account index, for the Hive onboarding panel (account creation needs all 4).
+			hiveGetRoleKeys: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				const accountIndex = params?.accountIndex ?? 0
+				const roles = ['owner', 'active', 'posting', 'memo'] as const
+				const out: Record<string, string> = {}
+				for (const role of roles) {
+					const r = await (engine.wallet as any).hiveGetPublicKey({
+						addressNList: hiveRolePath(role, accountIndex),
+						showDisplay: false,
+					})
+					if (!r?.publicKey) throw new Error(`hiveGetPublicKey(${role}) returned no key`)
+					out[role] = r.publicKey
+				}
+				return out as { owner: string; active: string; posting: string; memo: string }
+			},
+			// Resolve a Hive account from a device public key via Pioneer. Returns
+			// { noAccount: true } when the key controls no account yet (onboarding
+			// case), or { account: {...} } with balances/RC when it does.
+			hiveGetAccount: async (params) => {
+				const pubkey = params?.pubkey
+				if (!pubkey) throw new Error('hiveGetAccount requires a pubkey')
+				const base = getPioneerApiBase()
+				const resp = await fetch(`${base}/api/v1/hive/account/${encodeURIComponent(pubkey)}`)
+				if (!resp.ok) throw new Error(`Pioneer hive/account ${resp.status}`)
+				return await resp.json()
+			},
+			// Live username availability (format + on-chain), for the onboarding wizard.
+			hiveUsernameAvailable: async (params) => {
+				const name = params?.name
+				if (!name) return { success: false, available: false, reason: 'empty' }
+				const base = getPioneerApiBase()
+				const resp = await fetch(`${base}/api/v1/hive/username-available/${encodeURIComponent(name)}`)
+				return await resp.json()
+			},
+			// Full sponsor-backed account creation: derive the 4 device keys, get a
+			// device attestation (owner-signed account_create, op 9), POST to Pioneer's
+			// sponsor endpoint. The sponsor (@keepkey) pays; no user key leaves the device.
+			hiveCreateAccount: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				const username = params?.username
+				if (!username) throw new Error('hiveCreateAccount requires a username')
+				const wallet = engine.wallet as any
+				const accountIndex = params?.accountIndex ?? 0
+
+				// 1. Derive the four SLIP-0048 role keys.
+				const roles = ['owner', 'active', 'posting', 'memo'] as const
+				const keys: Record<string, string> = {}
+				for (const role of roles) {
+					const r = await wallet.hiveGetPublicKey({ addressNList: hiveRolePath(role, accountIndex), showDisplay: false })
+					if (!r?.publicKey) throw new Error(`hiveGetPublicKey(${role}) returned no key`)
+					keys[role] = r.publicKey
+				}
+
+				// 2. Device attestation — owner-signed account_create (op 9). The device
+				//    re-derives the keys itself; ref_block/expiration are unchecked by the
+				//    server (attestation only, not broadcast). On the emulator, route
+				//    through emuSigningOp so the interactive Confirm/Reject gate appears;
+				//    a real device uses its physical button (calling emuSigningOp there
+				//    would pop the emulator window).
+				const signAccountCreate = () => wallet.hiveSignAccountCreate({
+					addressNList: hiveRolePath('owner', accountIndex),
+					refBlockNum: 0, refBlockPrefix: 0, expiration: 0,
+					creator: 'keepkey',
+					newAccountName: username,
+					ownerKey: keys.owner, activeKey: keys.active,
+					postingKey: keys.posting, memoKey: keys.memo,
+					feeAmount: 3000,
+				})
+				const signed = engine.isEmulator
+					? await emuSigningOp(signAccountCreate, { operation: 'hiveSignAccountCreate', chain: 'Hive' })
+					: await signAccountCreate()
+				if (!signed?.signature || !signed?.serializedTx) {
+					throw new Error('Device did not return an attestation')
+				}
+				const toHex = (v: any) => v instanceof Uint8Array ? Buffer.from(v).toString('hex') : String(v)
+
+				// 3. ETH gate (anti-sponsor-drain). Sign a fixed EIP-191 message bound to
+				//    username+ownerKey with the device ETH key (m/44'/60'/0'/0/0). The
+				//    server recovers the address, requires it to hold mainnet ETH, and
+				//    allows one sponsored account per address. Message bytes are pinned by
+				//    a server unit test — do NOT reformat (no trailing newline).
+				const gateMessage = `KeepKey Hive onboarding\nusername:${username}\nowner:${keys.owner}`
+				const gateMessageHex = '0x' + Buffer.from(gateMessage, 'utf8').toString('hex')
+				const signEthGate = () => wallet.ethSignMessage({ addressNList: evmAddressPath(0), message: gateMessageHex })
+				const ethSigned = engine.isEmulator
+					? await emuSigningOp(signEthGate, { operation: 'ethSignMessage', chain: 'Ethereum', memo: gateMessage.slice(0, 64) })
+					: await signEthGate()
+				// hdwallet returns { address: eip55 0x…, signature: 0x…+65-byte r||s||v } —
+				// exactly the form ethers.verifyMessage expects.
+				if (!ethSigned?.address || !ethSigned?.signature) {
+					throw new Error('Device did not return an ETH gate signature')
+				}
+
+				// 4. POST to the sponsor endpoint.
+				const base = getPioneerApiBase()
+				const resp = await fetch(`${base}/api/v1/hive/create-account`, {
+					method: 'POST',
+					headers: { 'content-type': 'application/json' },
+					body: JSON.stringify({
+						username,
+						ownerKey: keys.owner, activeKey: keys.active,
+						postingKey: keys.posting, memoKey: keys.memo,
+						attestation: { serializedTx: toHex(signed.serializedTx), signature: toHex(signed.signature) },
+						ethAddress: ethSigned.address,
+						ethSignature: ethSigned.signature,
+					}),
+				})
+				const body = await resp.json().catch(() => ({}))
+				return { status: resp.status, ...body }
+			},
 			hiveSignTx: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
-				const result = await (engine.wallet as any).hiveSignTx(params)
+				// Route through emuSigningOp on the emulator so the interactive
+				// Confirm/Reject gate appears (a real device uses its button).
+				const signTx = () => (engine.wallet as any).hiveSignTx(params)
+				const result = engine.isEmulator
+					? await emuSigningOp(signTx, { operation: 'hiveSignTx', chain: 'Hive', to: params?.to, value: params?.amount != null ? String(params.amount) : undefined })
+					: await signTx()
 				if (!result) throw new Error('hiveSignTx returned no result')
 				return {
 					signature: result.signature instanceof Uint8Array
@@ -2334,6 +2556,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const allChains = getAllChains().filter(c => {
 					if (!isChainSupported(c, fwVersion)) return false
 					if ((c.id === 'zcash' || c.id === 'zcash-shielded') && !zcashPrivacyEnabled) return false
+					if (c.id === 'hive' && !hiveEnabled) return false
 					return true
 				})
 				const utxoChains = allChains.filter(c => c.chainFamily === 'utxo' && c.id !== 'bitcoin')
@@ -2731,7 +2954,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						//   ERC-20: "eip155:1/erc20:0xdac17..." → "0xdac17..."
 						//   SPL:    "solana:5eykt4.../spl:TokenMint..." → "TokenMint..."
 						//   TRC-20: "tron:27Lqcw/trc20:T..." → "T..."
-						const contractMatch = (tok.caip || '').match(/\/(erc20|spl|trc20|token):([^\s]+)/)
+						//   denom:  "cosmos:thorchain-mainnet-v1/denom:tcy" → "tcy" (cosmos bank denom)
+						const contractMatch = (tok.caip || '').match(/\/(erc20|spl|trc20|token|denom|bank):([^\s]+)/)
 						const contractAddress = contractMatch?.[2] || tok.contract || undefined
 
 						const rawValueUsd = tok.valueUsd
@@ -3618,6 +3842,19 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!engine.wallet) throw new Error('No device connected')
 				const chain = getAllChains().find(c => c.id === params.chainId)
 				if (!chain) throw new Error(`Unknown chain: ${params.chainId}`)
+
+				// Firmware gate (fund safety): a THORChain/Maya bank-token send is a
+				// MsgSend whose `denom` field is only honored from 7.15.0. On older
+				// firmware the field is ignored and the tx signs as RUNE — refuse to
+				// build it rather than sign the wrong asset. Covers TCY/RUJI sends and
+				// swaps (both pass the bank-token caip). Native RUNE/ATOM are unaffected.
+				if (params.caip && isThorchainBankToken(params.caip)) {
+					const fw = engine.getDeviceState().firmwareVersion
+					if (!thorchainBankTokenFirmwareOK(params.caip, fw)) {
+						throw new Error(`This asset requires KeepKey firmware ${THORCHAIN_BANK_TOKEN_MIN_FW}+ (device has ${fw || 'unknown'}). Update your firmware to send or swap TCY / RUJI.`)
+					}
+				}
+
 				const pioneer = await getPioneer()
 
 				// Seed-staleness boundary on the SIGNING path. params (xpubOverride,
@@ -4337,6 +4574,36 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				console.log(`[zcash] zcashShieldedStatus → ready=${result.ready} fvk=${fvkLoaded} verified=${result.verified} synced=${result.synced} verifying=${result.verifying} synced_to=${scanState.syncedTo} addr=${cached?.address?.slice(0, 20) ?? 'none'}`)
 				return result
 			},
+			// Read-only diagnostic: does the cached shielded balance actually belong
+			// to the CONNECTED device? Derives the Orchard FVK fresh from the device
+			// (silent, no button) and compares its `ak` to the cached one. Does NOT
+			// mutate the sidecar/db. `match: false` means the shown balance is from a
+			// different/stale wallet and is not spendable here.
+			zcashVerifyDevice: async (params) => {
+				if (!zcashPrivacyEnabled) throw new Error('Zcash privacy feature is disabled')
+				if (!engine.wallet) throw new Error('No device connected')
+				if (typeof (engine.wallet as any).zcashGetOrchardFVK !== 'function') {
+					throw new Error('Device firmware does not support Orchard FVK export')
+				}
+				const cached = getCachedFvk()
+				const deviceFvk = await (engine.wallet as any).zcashGetOrchardFVK(params?.account ?? 0)
+				const deviceAk = Buffer.from(deviceFvk.ak).toString('hex')
+				const cachedAk = cached?.fvk?.ak ?? null
+				const match = !!cachedAk && cachedAk.toLowerCase() === deviceAk.toLowerCase()
+				const result = {
+					match,
+					deviceAk,
+					cachedAk,
+					cachedAddress: cached?.address ?? null,
+					message: cachedAk === null
+						? 'No cached FVK — nothing to compare (wallet not initialized).'
+						: match
+							? 'OK: the cached shielded balance belongs to the connected device.'
+							: 'MISMATCH: cached shielded balance is NOT from the connected device — stale/another wallet, not spendable here.',
+				}
+				console.log(`[zcash] zcashVerifyDevice → match=${match} deviceAk=${deviceAk.slice(0, 12)}… cachedAk=${(cachedAk ?? 'none').slice(0, 12)}…`)
+				return result
+			},
 			zcashShieldedInit: async (params) => {
 				if (!zcashPrivacyEnabled) throw new Error('Zcash privacy feature is disabled')
 				// If FVK is already loaded from DB, return it immediately
@@ -4361,13 +4628,17 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// could have no FVK loaded — `scanOrchardNotes` would then fail with
 				// "No FVK set". Refresh from device first if needed.
 				await ensureFvkLoaded(engine.wallet, 0)
-				// The user pressing "Sync" expects real work: re-prove the cached FVK
-				// against the CONNECTED device every time (force a device round-trip,
-				// ignoring a prior session's verified flag). On mismatch this purges the
-				// stale FVK + notes and re-derives — so Sync also fixes a stale wallet
-				// from the UI without a manual DB wipe.
-				zcashDeviceVerified = false
-				await ensureZcashDeviceMatch(params?.account ?? 0)
+				// Scan returns { balance, notes_found, ... }, so it is a balance-exposing
+				// path — prove the cached FVK belongs to the connected device first, or a
+				// stale/other-wallet FVK would surface a phantom balance via a scan request
+				// (reviewer#2). ensureFvkLoaded only loads-if-absent; it does NOT verify.
+				// force=true: the user pressing "Sync" expects a real device round-trip
+				// every time, ignoring the sticky session flag — on mismatch this purges
+				// the stale FVK + notes and re-derives, repairing a stale wallet from the
+				// UI without a manual DB wipe. Reuses the coalesced-purge path instead of
+				// mutating the module-global zcashDeviceVerified (which would open a
+				// transient window where a concurrent balance read throws "not verified").
+				await ensureZcashDeviceMatch(0, true)
 				const result = await scanOrchardNotes(params?.startHeight, params?.fullRescan)
 				if (result?.synced_to != null) updateSyncedTo(result.synced_to)
 				// A successful scan validates the wallet against the chain — even an
@@ -4377,11 +4648,17 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			zcashShieldedBalance: async () => {
 				if (!zcashPrivacyEnabled) throw new Error('Zcash privacy feature is disabled')
+				if (hasFvkLoaded() && !zcashDeviceVerified) {
+					maybeStartBackgroundWalletVerification()
+					throw new Error('Zcash wallet is not verified against the connected device yet')
+				}
 				return await getShieldedBalance()
 			},
 			zcashShieldedSend: async (params) => {
 				if (!zcashPrivacyEnabled) throw new Error('Zcash privacy feature is disabled')
 				if (!engine.wallet) throw new Error('No device connected')
+				const account = (params as any)?.account ?? 0
+				if (account !== 0) throw new Error('Only account 0 is supported; multi-account shielded sends are not implemented')
 				await ensureFvkLoaded(engine.wallet, 0)
 				// FAIL-CLOSED: prove the FVK we're about to spend from belongs to the
 				// CONNECTED device before building anything. On mismatch this purges
@@ -4389,7 +4666,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// spend (which consensus rejects with "could not validate orchard
 				// proof") can never be built. A device-comms failure throws and
 				// aborts the send rather than proceeding on unverified state.
-				await ensureZcashDeviceMatch(params.account ?? 0)
+				await ensureZcashDeviceMatch(account, true)
 				await ensureZcashScanFresh()
 				// FVK already loaded means device supports Orchard — skip version check
 				// (version string may not be populated yet at call time)
@@ -4440,7 +4717,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			zcashShieldZec: async (params) => {
 				if (!zcashPrivacyEnabled) throw new Error('Zcash privacy feature is disabled')
 				if (!engine.wallet) throw new Error('No device connected')
-				await ensureFvkLoaded(engine.wallet, params.account ?? 0)
+				const account = params.account ?? 0
+				if (account !== 0) throw new Error('Only account 0 is supported; multi-account shielded sends are not implemented')
+				await ensureFvkLoaded(engine.wallet, account)
+				await ensureZcashDeviceMatch(account, true)
 				await ensureZcashScanFresh()
 				// Transparent shielding uses standard ECDSA (secp256k1) for transparent inputs
 				// + Orchard RedPallas for the shielded output. The ECDSA part works on any
@@ -4462,7 +4742,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				}
 				const result = await shieldZec(engine.wallet as any, pioneer, {
 					amount: params.amount,
-					account: params.account,
+					account,
 				}, { signWrap, onProgress })
 				try { rpc.send['shield-progress']({ step: 'complete', detail: result.txid }) } catch { /* webview not ready */ }
 				return result
@@ -4471,7 +4751,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			zcashDeshieldZec: async (params) => {
 				if (!zcashPrivacyEnabled) throw new Error('Zcash privacy feature is disabled')
 				if (!engine.wallet) throw new Error('No device connected')
-				await ensureFvkLoaded(engine.wallet, 0)
+				const account = params.account ?? 0
+				if (account !== 0) throw new Error('Only account 0 is supported; multi-account shielded sends are not implemented')
+				await ensureFvkLoaded(engine.wallet, account)
+				await ensureZcashDeviceMatch(account, true)
 				await ensureZcashScanFresh()
 				const { deshieldZec } = await import("./txbuilder/zcash-deshield")
 				try { rpc.send['deshield-progress']({ step: 'building' }) } catch { /* webview not ready */ }
@@ -4487,7 +4770,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const result = await deshieldZec(engine.wallet as any, {
 					recipient: params.recipient,
 					amount: params.amount,
-					account: params.account,
+					account,
 				}, { signWrap, onProgress })
 				try { rpc.send['deshield-progress']({ step: 'complete', detail: result.txid }) } catch { /* webview not ready */ }
 				return result
@@ -4573,6 +4856,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					if (!isChainSupported(c, fwVersion)) return false
 					// Zcash: gated by feature flag, not by hidden (hidden keeps it off Dashboard grid)
 					if (c.id === 'zcash' || c.id === 'zcash-shielded') return zcashPrivacyEnabled
+					if (c.id === 'hive') return hiveEnabled
 					if (c.hidden) return false
 					return true
 				})
@@ -4809,6 +5093,18 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				bip85Enabled = params.enabled
 				setSetting('bip85_enabled', params.enabled ? '1' : '0')
 				console.log('[settings] BIP-85 enabled:', params.enabled)
+				return getAppSettings()
+			},
+			setHiveEnabled: async (params) => {
+				// Hive requires firmware >= 7.15.0 (matches minFirmware in shared/chains.ts).
+				const fwVer = engine.getDeviceState().firmwareVersion
+				if (params.enabled && (!fwVer || versionCompare(fwVer, '7.15.0') < 0)) {
+					console.warn(`[settings] Hive blocked — firmware ${fwVer || 'unknown'} < 7.15.0`)
+					return getAppSettings()
+				}
+				hiveEnabled = params.enabled
+				setSetting('hive_enabled', params.enabled ? '1' : '0')
+				console.log('[settings] Hive enabled:', params.enabled)
 				return getAppSettings()
 			},
 			setEmulatorEnabled: async (params) => {
@@ -5575,7 +5871,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					const result = await rebuildActivityHistory({
 						wallet: engine.wallet,
 						scope,
-						chains: getAllChains(),
+						chains: getAllChains().filter(c => c.id !== 'hive' || hiveEnabled),
 						firmwareVersion: engine.getDeviceState().firmwareVersion,
 						options: { chainId: params.chainId, dryRun: true, collectRows: true },
 					})
@@ -5591,7 +5887,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const result = await rebuildActivityHistory({
 					wallet: engine.wallet,
 					scope,
-					chains: getAllChains(),
+					chains: getAllChains().filter(c => c.id !== 'hive' || hiveEnabled),
 					firmwareVersion: engine.getDeviceState().firmwareVersion,
 					options: { chainId: params.chainId },
 				})
@@ -5632,6 +5928,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					if (!isChainSupported(c, fwVersion)) return false
 					if (c.id === 'zcash-shielded') return false
 					if (c.id === 'zcash') return zcashPrivacyEnabled
+					if (c.id === 'hive') return hiveEnabled
 					return !c.hidden
 				})
 				const cachedChainIds = new Set(result.balances.map(b => b.chainId))
@@ -5665,7 +5962,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// letting the user select them and then hitting a device signing error.
 				const filteredBalances = result.balances.filter(b => {
 					const chain = getAllChains().find(c => c.id === b.chainId)
-					return chain ? isChainSupported(chain, fwVersion) : true // keep unknowns (tokens)
+					if (!chain) return true // keep unknowns (tokens)
+					if (chain.id === 'hive' && !hiveEnabled) return false // honor feature flag — drop stale Hive rows
+					return isChainSupported(chain, fwVersion)
 				})
 				return { balances: filteredBalances, updatedAt: result.updatedAt, staleReasons: staleReasons.length > 0 ? staleReasons : undefined }
 			},
@@ -5684,6 +5983,215 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!snap) return null
 				const result = getCachedBalances(snap.deviceId)
 				return result?.balances ?? null
+			},
+			// Re-fetch watch-only balances from Pioneer using addresses reconstructed
+			// from cache — NO device required. Self-contained: deliberately does NOT
+			// touch the device getBalances managers.
+			// ponytail: display-only simplified parse — no per-owner EVM token map and
+			// no addressbook sync (those need device-derived state). Good enough for a
+			// read-only snapshot view; do not use this path for signing/sends.
+			refreshWatchOnlyBalances: async (params) => {
+				const { getDeviceSnapshotById } = await import('./db')
+				const snap = params?.deviceId
+					? getDeviceSnapshotById(params.deviceId)
+					: getLatestDeviceSnapshot()
+				if (!snap) return null
+				const deviceId = snap.deviceId
+
+				// 1. Reconstruct the pubkey list from cache (no device available)
+				const allChains = getAllChains()
+				const chainById = new Map(allChains.map(c => [c.id, c]))
+				const pubkeys: Array<{ caip: string; pubkey: string; chainId: string; symbol: string; networkId: string }> = []
+
+				const cached = getCachedBalances(deviceId)
+				for (const b of cached?.balances ?? []) {
+					if (b.chainId === 'bitcoin') continue // cached BTC address isn't the xpub — handled below
+					if (!b.address) continue
+					const chain = chainById.get(b.chainId)
+					if (!chain || !chain.caip) continue
+					pubkeys.push({ caip: chain.caip, pubkey: b.address, chainId: chain.id, symbol: chain.symbol, networkId: chain.networkId })
+				}
+				// BTC: use the cached xpubs (one entry per script-type/account)
+				const btcChain = chainById.get('bitcoin')
+				if (btcChain) {
+					for (const p of getCachedPubkeys(deviceId).filter(p => p.chainId === 'bitcoin' && p.xpub)) {
+						pubkeys.push({ caip: btcChain.caip, pubkey: p.xpub, chainId: 'bitcoin', symbol: 'BTC', networkId: btcChain.networkId })
+					}
+				}
+
+				if (pubkeys.length === 0) return cached?.balances ?? null
+
+				// 2. Pioneer client — let init failure throw so the UI surfaces it
+				const pioneer = await getPioneer()
+
+				// 3. networkId → chainId lookup (non-hidden takes priority)
+				const networkToChain = new Map<string, string>()
+				for (const chain of allChains) {
+					if (!chain.networkId) continue
+					if (chain.hidden && networkToChain.has(chain.networkId.toLowerCase())) continue
+					networkToChain.set(chain.networkId.toLowerCase(), chain.id)
+				}
+
+				// 4. Chunked GetPortfolioBalances
+				const pubkeyChunks = chunkArray(pubkeys, PIONEER_PORTFOLIO_CHUNK_SIZE)
+				const chunkResults = await withTimeout(
+					mapWithConcurrency(pubkeyChunks, PIONEER_PORTFOLIO_MAX_CONCURRENCY, async (chunk, i) => {
+						try {
+							const resp = await withTimeout(
+								pioneer.GetPortfolioBalances({ pubkeys: chunk.map(p => ({ caip: p.caip, pubkey: p.pubkey })), includeDefi: true }, { forceRefresh: true }),
+								PIONEER_PORTFOLIO_CHUNK_TIMEOUT_MS,
+								`watch-only chunk ${i + 1}/${pubkeyChunks.length}`
+							)
+							return { ...unwrapPortfolioResponse(resp), failed: false }
+						} catch (err: any) {
+							console.warn(`[refreshWatchOnlyBalances] chunk ${i + 1}/${pubkeyChunks.length} failed:`, err?.message || err)
+							return { entries: [] as any[], meta: null, defiPositions: null as ServerDefiPosition[] | null, failed: true }
+						}
+					}),
+					PIONEER_PORTFOLIO_TOTAL_TIMEOUT_MS,
+					'watch-only GetPortfolioBalances chunks'
+				)
+				const allEntries = chunkResults.flatMap(r => r.entries)
+
+				// Chains whose chunk failed must NOT be confirmed below — otherwise a
+				// transient Pioneer error would write a 0 over good cached balances.
+				const failedChainIds = new Set<string>()
+				for (let i = 0; i < chunkResults.length; i++) {
+					if (chunkResults[i].failed) for (const p of pubkeyChunks[i]) failedChainIds.add(p.chainId)
+				}
+
+				// 5. Classify natives vs tokens (same heuristic as getBalances)
+				const pureNatives: any[] = []
+				const tokenEntries: any[] = []
+				for (const entry of allEntries) {
+					const caip = entry.caip || ''
+					const caipPath = caip.split('/')[1] || ''
+					const isTokenByCaip = caipPath && !caipPath.startsWith('slip44:') && !caipPath.startsWith('native:')
+					const isTokenByType = entry.type === 'token' || (entry.isNative === false && entry.contract)
+					if (isTokenByCaip || isTokenByType) tokenEntries.push(entry)
+					else pureNatives.push(entry)
+				}
+
+				// 6. Group tokens by parent chain
+				const tokensByChainId = new Map<string, TokenBalance[]>()
+				const seenByOwnerCaip = new Set<string>()
+				for (const tok of tokenEntries) {
+					const bal = parseFloat(String(tok.balance ?? '0'))
+					if (bal <= 0) continue
+					const ownerAddr = String(tok.address || tok.pubkey || '').toLowerCase()
+					const caipNorm = (tok.caip || '').startsWith('eip155:') ? (tok.caip || '').toLowerCase() : (tok.caip || '')
+					const ownerCaipKey = `${caipNorm}|${ownerAddr}`
+					if (seenByOwnerCaip.has(ownerCaipKey)) continue
+					seenByOwnerCaip.add(ownerCaipKey)
+
+					const tokNetworkId = (tok.networkId || '').toLowerCase()
+					const caipPrefix = ((tok.caip || '').split('/')[0]).toLowerCase()
+					const parentChainId = networkToChain.get(tokNetworkId) || networkToChain.get(caipPrefix) || null
+					if (!parentChainId) continue
+
+					const contractMatch = (tok.caip || '').match(/\/(erc20|spl|trc20|token):([^\s]+)/)
+					const token: TokenBalance = {
+						symbol: tok.symbol || '???',
+						name: tok.name || tok.symbol || 'Unknown Token',
+						balance: String(tok.balance ?? '0'),
+						balanceUsd: Number(tok.valueUsd ?? 0),
+						priceUsd: Number(tok.priceUsd ?? 0),
+						caip: tok.caip || '',
+						contractAddress: contractMatch?.[2] || tok.contract || undefined,
+						networkId: tokNetworkId || caipPrefix,
+						icon: tok.icon || undefined,
+						decimals: tok.decimals ?? tok.precision,
+						type: tok.type || 'token',
+						dataSource: tok.dataSource,
+					}
+					const existing = tokensByChainId.get(parentChainId) || []
+					existing.push(token)
+					tokensByChainId.set(parentChainId, existing)
+				}
+
+				// 7. Group DeFi positions by chain (dedup by pubkey|protocol|networkId)
+				const rawDefi: ServerDefiPosition[] = chunkResults.flatMap(r => r.defiPositions || [])
+				const defiByChain = new Map<string, DefiPosition[]>()
+				const seenDefiKey = new Set<string>()
+				for (const sp of rawDefi) {
+					const key = `${String(sp.pubkey || '').toLowerCase()}|${sp.protocol || ''}|${(sp.networkId || '').toLowerCase()}`
+					if (seenDefiKey.has(key)) continue
+					seenDefiKey.add(key)
+					const chainId = sp.networkId ? networkToChain.get(sp.networkId.toLowerCase()) : null
+					if (!chainId) continue
+					const dp: DefiPosition = {
+						protocol: sp.protocol || null,
+						displayName: sp.displayName,
+						name: sp.displayName || sp.protocol || 'DeFi Position',
+						network: sp.network,
+						networkId: sp.networkId,
+						balanceUsd: Number(sp.balanceUsd) || 0,
+						icon: sp.icon,
+						tokens: Array.isArray(sp.tokens) ? sp.tokens.map(t => ({
+							networkId: t.networkId,
+							address: String(t.address || '').toLowerCase(),
+							symbol: t.symbol,
+							balance: t.balance != null ? String(t.balance) : undefined,
+							balanceUsd: typeof t.balanceUsd === 'number' ? t.balanceUsd : undefined,
+						})).filter(t => !!t.address) : [],
+					}
+					const list = defiByChain.get(chainId) || []
+					list.push(dp)
+					defiByChain.set(chainId, list)
+				}
+
+				// 8. Build ChainBalance[] — sum BTC xpubs into one entry; others 1:1
+				const results: ChainBalance[] = []
+				let btcBalance = 0, btcUsd = 0, btcAddress = ''
+				for (const entry of pubkeys) {
+					if (entry.chainId === 'bitcoin') {
+						const match = pureNatives.find((d: any) => d.pubkey === entry.pubkey)
+							|| pureNatives.find((d: any) => d.caip === entry.caip && d.address === entry.pubkey)
+						btcBalance += parseFloat(String(match?.balance ?? '0'))
+						btcUsd += Number(match?.valueUsd ?? 0)
+						if (match?.address && !btcAddress) btcAddress = match.address
+						continue
+					}
+					const entryNetwork = entry.caip.split('/')[0]
+					const match = pureNatives.find((d: any) => d.caip === entry.caip)
+						|| pureNatives.find((d: any) => d.caip && d.caip.split('/')[0] === entryNetwork)
+						|| pureNatives.find((d: any) => d.pubkey === entry.pubkey)
+						|| pureNatives.find((d: any) => d.address === entry.pubkey)
+					const chainTokens = tokensByChainId.get(entry.chainId)
+					const tokenUsdTotal = chainTokens?.reduce((s, t) => s + t.balanceUsd, 0) || 0
+					const chainDefi = defiByChain.get(entry.chainId)
+					const defiUsdTotal = chainDefi?.reduce((s, p) => s + (p.balanceUsd || 0), 0) || 0
+					const nativeUsd = Number(match?.valueUsd ?? 0)
+					results.push({
+						chainId: entry.chainId,
+						symbol: entry.symbol,
+						balance: String(match?.balance ?? '0'),
+						balanceUsd: nativeUsd + tokenUsdTotal + defiUsdTotal,
+						nativeBalanceUsd: nativeUsd,
+						address: match?.address || entry.pubkey,
+						tokens: chainTokens && chainTokens.length > 0 ? chainTokens : undefined,
+						defiPositions: chainDefi && chainDefi.length > 0 ? chainDefi : undefined,
+					})
+				}
+				if (btcChain && pubkeys.some(p => p.chainId === 'bitcoin')) {
+					const chainTokens = tokensByChainId.get('bitcoin')
+					const tokenUsdTotal = chainTokens?.reduce((s, t) => s + t.balanceUsd, 0) || 0
+					results.push({
+						chainId: 'bitcoin',
+						symbol: 'BTC',
+						balance: String(btcBalance),
+						balanceUsd: btcUsd + tokenUsdTotal,
+						nativeBalanceUsd: btcUsd,
+						address: btcAddress,
+						tokens: chainTokens && chainTokens.length > 0 ? chainTokens : undefined,
+					})
+				}
+
+				// 9. Persist and return. Only chains whose chunk succeeded are "confirmed"
+				// (genuine zeros overwrite stale); failed chains keep their cached value.
+				const confirmed = new Set(results.map(r => r.chainId).filter(id => !failedChainIds.has(id)))
+				setCachedBalances(deviceId, results, confirmed)
+				return results
 			},
 			getWatchOnlyPubkeys: async (params) => {
 				const { getDeviceSnapshotById } = await import('./db')
@@ -5819,6 +6327,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const enabledChains = getAllChains().filter(c => {
 					if (!isChainSupported(c, fwVersion)) return false
 					if ((c.id === 'zcash' || c.id === 'zcash-shielded') && !zcashPrivacyEnabled) return false
+					if (c.id === 'hive' && !hiveEnabled) return false
 					return true
 				})
 				const coverageChains = enabledChains.map(c => ({ chainId: c.id, symbol: c.symbol, chainFamily: c.chainFamily }))
@@ -6684,14 +7193,14 @@ udevadm trigger --subsystem-match=usb --attr-match=idVendor=2b24 || udevadm trig
 			},
 			downloadUpdate: async () => {
 				if (process.platform === 'win32' || process.platform === 'darwin') {
-					openReleasePage()
+					openUpdatePage()
 					return
 				}
 				await Updater.downloadUpdate()
 			},
 			applyUpdate: async () => {
 				if (process.platform === 'win32' || process.platform === 'darwin') {
-					openReleasePage()
+					openUpdatePage()
 					return
 				}
 				await Updater.applyUpdate()
@@ -6860,7 +7369,7 @@ engine.on('state-change', (state) => {
 			rebuildActivityHistory({
 				wallet: engine.wallet,
 				scope,
-				chains: getAllChains(),
+				chains: getAllChains().filter(c => c.id !== 'hive' || hiveEnabled),
 				firmwareVersion: engine.getDeviceState().firmwareVersion,
 			}).then(result => {
 				console.log(`[activity] Auto-scan complete: ${result.totals.inserted} new txs across ${result.totals.chains} chains`)

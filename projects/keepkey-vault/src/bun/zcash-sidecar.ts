@@ -353,6 +353,16 @@ export function clearCachedFvk(): void {
 	cachedFvk = null
 }
 
+// ── Send-in-flight guard (P2-B: sidecar teardown race) ────────────────
+// Counts shielded send/shield/deshield operations that are mid build→sign→
+// finalize→broadcast. The fire-and-forget background device-verify consults
+// this so it never stop/wipe/restart-s the sidecar (and deletes its in-memory
+// PCZT state) underneath an in-flight send build.
+let sendInFlight = 0
+export function beginZcashSend(): void { sendInFlight++ }
+export function endZcashSend(): void { sendInFlight = Math.max(0, sendInFlight - 1) }
+export function isZcashSendInFlight(): boolean { return sendInFlight > 0 }
+
 /**
  * Register a callback for scan progress events parsed from sidecar stderr.
  */

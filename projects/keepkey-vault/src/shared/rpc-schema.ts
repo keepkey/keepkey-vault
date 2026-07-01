@@ -83,6 +83,10 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       tonSignTx: { params: any; response: any }
       tonSignMessage: { params: any; response: any }
       hiveGetPublicKey: { params: any; response: any }
+      hiveGetRoleKeys: { params: { accountIndex?: number }; response: { owner: string; active: string; posting: string; memo: string } }
+      hiveGetAccount: { params: { pubkey: string }; response: { success?: boolean; noAccount?: boolean; account?: { name: string; hive: string; hbd: string; hp?: string; rcPercent?: number } } }
+      hiveUsernameAvailable: { params: { name: string }; response: { success: boolean; available: boolean; reason?: string } }
+      hiveCreateAccount: { params: { username: string; accountIndex?: number }; response: { status: number; success?: boolean; txid?: string; username?: string; error?: string; retryAfter?: number } }
       hiveSignTx: { params: any; response: any }
 
       // ── Pioneer integration ─────────────────────────────────────────
@@ -140,7 +144,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       getTokenVisibilityMap: { params: void; response: Record<string, TokenVisibilityStatus> }
 
       // ── Zcash Shielded (Orchard) ──────────────────────────────────────
-      zcashShieldedStatus: { params: void; response: { ready: boolean; fvk_loaded: boolean; address: string | null; fvk: { ak: string; nk: string; rivk: string } | null; synced_to: number | null; keepkey_release_block: number | null } }
+      zcashShieldedStatus: { params: void; response: { ready: boolean; fvk_loaded: boolean; address: string | null; fvk: { ak: string; nk: string; rivk: string } | null; synced_to: number | null; keepkey_release_block: number | null; verified: boolean; synced: boolean; verifying: boolean } }
       zcashShieldedInit: { params: { account?: number }; response: { fvk: { ak: string; nk: string; rivk: string }; address: string } }
       zcashShieldedScan: { params: { startHeight?: number; fullRescan?: boolean }; response: { balance: number; notes_found: number; synced_to: number } }
       zcashShieldedBalance: { params: void; response: { confirmed: number; pending: number; synced_to?: number | null; notes_total?: number; notes_unspent?: number; keepkey_release_block?: number } }
@@ -157,6 +161,9 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
         response: { address: string; balanceZat: number; pendingZat: number; matureCount: number; pendingCount: number }
       }
       zcashDeshieldZec: { params: { recipient: string; amount: number; account?: number }; response: { txid: string } }
+      // Read-only diagnostic: does the cached shielded balance belong to the
+      // connected device? `match: false` ⇒ stale/other-wallet, not spendable here.
+      zcashVerifyDevice: { params: { account?: number } | void; response: { match: boolean; deviceAk: string; cachedAk: string | null; cachedAddress: string | null; message: string } }
       zcashGetTransactions: { params: void; response: { transactions: ZcashTransaction[] } }
       zcashBackfillMemos: { params: void; response: { backfilled: number } }
       // Ask the device to derive and display its Orchard UA for this account.
@@ -193,6 +200,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       setWalletConnectEnabled: { params: { enabled: boolean }; response: AppSettings }
       setBip85Enabled: { params: { enabled: boolean }; response: AppSettings }
       setZcashPrivacyEnabled: { params: { enabled: boolean }; response: AppSettings }
+      setHiveEnabled: { params: { enabled: boolean }; response: AppSettings }
       setEmulatorEnabled: { params: { enabled: boolean }; response: AppSettings }
       setPreReleaseUpdates: { params: { enabled: boolean }; response: AppSettings }
       setAlphaFirmware: { params: { enabled: boolean }; response: AppSettings }
@@ -300,6 +308,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       // ── Watch-only mode ──────────────────────────────────────────────
       checkWatchOnlyCache: { params: void; response: { available: boolean; deviceLabel?: string; lastSynced?: number } }
       getWatchOnlyBalances: { params: { deviceId?: string } | void; response: ChainBalance[] | null }
+      refreshWatchOnlyBalances: { params: { deviceId?: string } | void; response: ChainBalance[] | null }
       getWatchOnlyPubkeys: { params: { deviceId?: string } | void; response: Array<{ chainId: string; path: string; xpub: string; address: string }> }
 
       // ── Registered devices (device history) ──────────────────────────

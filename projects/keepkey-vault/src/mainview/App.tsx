@@ -72,6 +72,7 @@ function App() {
 	const [appVersion, setAppVersion] = useState<{ version: string; channel: string } | null>(null)
 	const [restApiEnabled, setRestApiEnabled] = useState(false)
 	const [walletConnectEnabled, setWalletConnectEnabled] = useState(false)
+	const [hiveEnabled, setHiveEnabled] = useState(false)
 	const [emulatorEnabled, setEmulatorEnabled] = useState(false)
 	const [pendingAppUrl, setPendingAppUrl] = useState<string | null>(null)
 	const [pendingWcOpen, setPendingWcOpen] = useState(false)
@@ -98,7 +99,7 @@ function App() {
 		const refreshSettings = () => {
 			rpcRequest<AppSettings>("getAppSettings")
 				.then((s) => {
-					setRestApiEnabled(s.restApiEnabled); setWalletConnectEnabled(s.walletConnectEnabled); setEmulatorEnabled(s.emulatorEnabled)
+					setRestApiEnabled(s.restApiEnabled); setWalletConnectEnabled(s.walletConnectEnabled); setEmulatorEnabled(s.emulatorEnabled); setHiveEnabled(s.hiveEnabled)
 					if (s.pioneerApiBase) loadSupportedChains(s.pioneerApiBase).catch(() => {})
 				})
 				.catch(() => {})
@@ -834,6 +835,7 @@ function App() {
 					onJumpToVault={() => setActiveTab("vault")}
 					balances={paletteBalances}
 					firmwareVersion={undefined}
+					hiveEnabled={hiveEnabled}
 				/>
 			</>
 		)
@@ -957,7 +959,7 @@ function App() {
 				onClose={() => {
 					setSettingsOpen(false)
 					rpcRequest<AppSettings>("getAppSettings")
-						.then((s) => { setRestApiEnabled(s.restApiEnabled); setWalletConnectEnabled(s.walletConnectEnabled); setEmulatorEnabled(s.emulatorEnabled) })
+						.then((s) => { setRestApiEnabled(s.restApiEnabled); setWalletConnectEnabled(s.walletConnectEnabled); setEmulatorEnabled(s.emulatorEnabled); setHiveEnabled(s.hiveEnabled) })
 						.catch(() => {})
 					window.dispatchEvent(new Event("keepkey-settings-changed"))
 				}}
@@ -1007,6 +1009,7 @@ function App() {
 				onJumpToVault={() => setActiveTab("vault")}
 				balances={paletteBalances}
 				firmwareVersion={deviceState.firmwareVersion}
+				hiveEnabled={hiveEnabled}
 			/>
 			{/* Top-level swap dialog mount for REST-driven /api/v2/swap/open. */}
 			<SwapRpcMount />

@@ -97,7 +97,7 @@ export async function injectTronMemo(tronGridTx: any, memo: string): Promise<any
 export async function buildTx(
   pioneer: any,
   chain: ChainDef,
-  params: BuildTxParams & { fromAddress?: string; xpub?: string; allXpubs?: XpubInfo[]; rpcUrl?: string; accountPath?: number[]; evmAddressIndex?: number; publicKeyHex?: string; pioneerBaseUrl?: string },
+  params: BuildTxParams & { fromAddress?: string; xpub?: string; allXpubs?: XpubInfo[]; rpcUrl?: string; accountPath?: number[]; evmAddressIndex?: number; publicKeyHex?: string; pioneerBaseUrl?: string; depositAsset?: string },
 ): Promise<{ unsignedTx: any; fee: string }> {
   switch (chain.chainFamily) {
     case 'utxo': {
@@ -149,6 +149,10 @@ export async function buildTx(
         isMax: params.isMax,
         isSwapDeposit: params.isSwapDeposit,
         fromAddress: params.fromAddress,
+        caip: params.caip,
+        tokenBalance: params.tokenBalance,
+        tokenDecimals: params.tokenDecimals,
+        depositAsset: params.depositAsset,
       })
       const { fee: cosmosFee, ...cosmosTx } = cosmosResult
       return { unsignedTx: cosmosTx, fee: cosmosFee }

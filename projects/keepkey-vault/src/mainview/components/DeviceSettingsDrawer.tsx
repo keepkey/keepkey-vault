@@ -161,13 +161,14 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 	const [removePinConfirm, setRemovePinConfirm] = useState(false)
 	const [togglingPassphrase, setTogglingPassphrase] = useState(false)
 	const [togglingPolicy, setTogglingPolicy] = useState("")
-	const [appSettings, setAppSettings] = useState<AppSettings>({ restApiEnabled: false, pioneerApiBase: '', pioneerServers: [], activePioneerServer: '', fiatCurrency: 'USD', numberLocale: 'en-US', walletConnectEnabled: false, bip85Enabled: false, zcashPrivacyEnabled: false, emulatorEnabled: false, preReleaseUpdates: false, alphaFirmware: false, privateModeEnabled: false })
+	const [appSettings, setAppSettings] = useState<AppSettings>({ restApiEnabled: false, pioneerApiBase: '', pioneerServers: [], activePioneerServer: '', fiatCurrency: 'USD', numberLocale: 'en-US', walletConnectEnabled: false, bip85Enabled: false, zcashPrivacyEnabled: false, hiveEnabled: false, emulatorEnabled: false, preReleaseUpdates: false, alphaFirmware: false, privateModeEnabled: false })
 	const [togglingRestApi, setTogglingRestApi] = useState(false)
 	const [windowFocusState, setWindowFocusState] = useState<{ refs: number; alwaysOnTop: boolean } | null>(null)
 	const [releasingWindowFocus, setReleasingWindowFocus] = useState(false)
 	const [togglingWalletConnect, setTogglingWalletConnect] = useState(false)
 	const [togglingBip85, setTogglingBip85] = useState(false)
 	const [togglingZcashPrivacy, setTogglingZcashPrivacy] = useState(false)
+	const [togglingHive, setTogglingHive] = useState(false)
 	const [togglingEmulator, setTogglingEmulator] = useState(false)
 	const [togglingPreRelease, setTogglingPreRelease] = useState(false)
 	const [togglingAlphaFirmware, setTogglingAlphaFirmware] = useState(false)
@@ -329,6 +330,15 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 			setAppSettings(result)
 		} catch (e: any) { console.error("setZcashPrivacyEnabled:", e) }
 		setTogglingZcashPrivacy(false)
+	}, [])
+
+	const toggleHive = useCallback(async (enabled: boolean) => {
+		setTogglingHive(true)
+		try {
+			const result = await rpcRequest<AppSettings>("setHiveEnabled", { enabled }, 10000)
+			setAppSettings(result)
+		} catch (e: any) { console.error("setHiveEnabled:", e) }
+		setTogglingHive(false)
 	}, [])
 
 	const toggleEmulator = useCallback(async (enabled: boolean) => {
@@ -1197,7 +1207,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 										cursor="pointer" _hover={{ bg: "rgba(255,255,255,0.1)" }}
 										onClick={onDownloadUpdate}
 									>
-										{t("downloadManually", { defaultValue: "Download from GitHub" })}
+										{t("downloadManually", { defaultValue: "How to Update" })}
 									</Box>
 								)}
 							</Box>
@@ -1382,6 +1392,33 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 											checked={zcashFwOk && appSettings.zcashPrivacyEnabled}
 											onChange={toggleZcashPrivacy}
 											disabled={!zcashFwOk || togglingZcashPrivacy}
+										/>
+									</Flex>
+								)
+							})()}
+
+							{/* Hive toggle — requires firmware >= 7.15.0 */}
+							{(() => {
+								const hiveFwOk = !!deviceState.firmwareVersion && versionCompare(deviceState.firmwareVersion, '7.15.0') >= 0
+								return (
+									<Flex justify="space-between" align="center" opacity={hiveFwOk ? 1 : 0.45}>
+										<Flex align="center" gap="3">
+											<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(227,19,55,0.1)">
+												<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#E31337" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+													<path d="M12 2l8 4.5v9L12 22l-8-6.5v-9z" />
+												</svg>
+											</Flex>
+											<Box>
+												<Text fontSize="md" color="kk.textPrimary" fontWeight="500">Hive</Text>
+												<Text fontSize="sm" color={hiveFwOk ? "kk.textSecondary" : "kk.textTertiary"} mt="0.5">
+													{hiveFwOk ? "Enable the Hive blockchain" : "Requires firmware 7.15.0 or later"}
+												</Text>
+											</Box>
+										</Flex>
+										<Toggle
+											checked={hiveFwOk && appSettings.hiveEnabled}
+											onChange={toggleHive}
+											disabled={!hiveFwOk || togglingHive}
 										/>
 									</Flex>
 								)

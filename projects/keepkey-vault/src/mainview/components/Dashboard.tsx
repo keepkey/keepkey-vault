@@ -708,6 +708,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 	const [showBip85, setShowBip85] = useState(false)
 	const [bip85Enabled, setBip85Enabled] = useState(false)
 	const [zcashEnabled, setZcashEnabled] = useState(false)
+	const [hiveEnabled, setHiveEnabled] = useState(false)
 	// One-time passphrase/hidden-wallet intro. `passphraseIntroSeen` starts true so
 	// the dialog never flashes before settings load; refreshFeatureFlags sets the
 	// real value. `introDismissed` suppresses it for the rest of this session.
@@ -866,6 +867,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 			.then(s => {
 				setBip85Enabled(s.bip85Enabled)
 				setZcashEnabled(s.zcashPrivacyEnabled)
+				setHiveEnabled(s.hiveEnabled)
 				setPassphraseIntroSeen(s.passphraseIntroShown)
 			})
 			.catch(() => {})
@@ -1039,7 +1041,31 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 	// Manual refresh: fetch live data from Pioneer API
 	// forceRefresh=true bypasses Pioneer's balance cache — only pass it on explicit user action
 	const refreshBalances = useCallback(async (forceRefresh = false) => {
-		if (watchOnly) return
+		// Watch-only: no device, so re-fetch from Pioneer using cached addresses.
+		if (watchOnly) {
+			if (loadingBalancesRef.current) return
+			loadingBalancesRef.current = true
+			setLoadingBalances(true)
+			try {
+				const result = await rpcRequest<ChainBalance[] | null>('refreshWatchOnlyBalances', watchOnlyDeviceId ? { deviceId: watchOnlyDeviceId } : undefined, 200000)
+				if (result) {
+					const map = new Map<string, ChainBalance>()
+					for (const b of result) map.set(b.chainId, b)
+					setBalances(map)
+					setCacheUpdatedAt(Date.now())
+					setHasEverRefreshed(true)
+					clearPioneerError()
+				}
+			} catch (e: any) {
+				const message = e?.message || 'Unable to refresh balances'
+				console.warn('[Dashboard] refreshWatchOnlyBalances failed:', message)
+				stagePioneerError({ message, url: 'the configured balance server' })
+			} finally {
+				loadingBalancesRef.current = false
+				setLoadingBalances(false)
+			}
+			return
+		}
 		// Non-forced calls yield to any in-progress refresh (avoids non-forced swap-complete
 		// poll superseding an already-running forced user refresh).
 		if (!forceRefresh && loadingBalancesRef.current) return
@@ -1091,7 +1117,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 			loadingBalancesRef.current = false
 			setLoadingBalances(false)
 		}
-	}, [watchOnly, clearPioneerError, stagePioneerError])
+	}, [watchOnly, watchOnlyDeviceId, clearPioneerError, stagePioneerError])
 
 	// Phase 2 trigger — window focus: catch long idle periods. If the last live
 	// fetch is older than 5 min, force-refresh on return to the window.
@@ -1152,6 +1178,19 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 			prevZcashRef.current = false
 		}
 	}, [zcashEnabled, refreshBalances, loadingBalances])
+
+	// Auto-refresh balances when Hive feature flag is enabled mid-session
+	const prevHiveRef = useRef(hiveEnabled)
+	useEffect(() => {
+		const becameEnabled = hiveEnabled && !prevHiveRef.current
+		if (becameEnabled && !loadingBalances) {
+			console.log('[Dashboard] Hive enabled — refreshing balances')
+			refreshBalances()
+			prevHiveRef.current = true
+		} else if (!hiveEnabled) {
+			prevHiveRef.current = false
+		}
+	}, [hiveEnabled, refreshBalances, loadingBalances])
 
 	// Auto-refresh after new seed (OOB setup) — one-shot, then clear the flag
 	useEffect(() => {
@@ -1232,6 +1271,8 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 		)
 		const result = new Map<string, { usd: number; cleanTokenCount: number }>()
 		for (const [chainId, bal] of balances) {
+			// Honor the Hive feature flag — stale Hive rows in the map must not count toward totals
+			if (chainId === 'hive' && !hiveEnabled) continue
 			if (bal.tokens && bal.tokens.length > 0) {
 				const { clean } = categorizeTokens(bal.tokens, overrides)
 				const spamUsd = (bal.tokens.length - clean.length) > 0
@@ -1246,7 +1287,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 			}
 		}
 		return result
-	}, [balances, visibilityMap])
+	}, [balances, visibilityMap, hiveEnabled])
 
 	const totalUsd = useMemo(() => Array.from(cleanBalanceUsd.values()).reduce((sum, b) => sum + b.usd, 0), [cleanBalanceUsd])
 
@@ -1423,8 +1464,9 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 		if (!isChainSupported(c, firmwareVersion)) return false
 		// Zcash transparent is hidden by default — show when feature flag is on
 		if (c.id === 'zcash') return zcashEnabled
+		if (c.id === 'hive') return hiveEnabled
 		return !c.hidden
-	}), [allChains, firmwareVersion, zcashEnabled])
+	}), [allChains, firmwareVersion, zcashEnabled, hiveEnabled])
 
 	const sortedChains = useMemo(() => [...visibleChains].sort((a, b) => {
 		const aUsd = cleanBalanceUsd.get(a.id)?.usd || 0
@@ -1755,10 +1797,11 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 
 			<Flex flex="1" direction="column" minW="0" px={{ base: 2, md: 4 }} w="100%">
 
-			{/* Top-right utility row: Reports + Refresh (sits above all main content) */}
-			{!watchOnly && (
-				<Flex justify="flex-end" align="center" gap="3" mb="2" pt="1">
-					{!isHiddenWallet && <Box
+			{/* Top-right utility row: Reports + Refresh (sits above all main content).
+			    Reports + Audit are signing/management actions gated to full mode;
+			    Refresh is read-only and stays available in watch-only mode. */}
+			<Flex justify="flex-end" align="center" gap="3" mb="2" pt="1">
+					{!watchOnly && !isHiddenWallet && <Box
 						as="button"
 						px="3"
 						py="1"
@@ -1783,7 +1826,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 							{t("reports")}
 						</Flex>
 					</Box>}
-					<Box
+					{!watchOnly && <Box
 						as="button"
 						px="3"
 						py="1"
@@ -1805,7 +1848,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 							</svg>
 							Audit
 						</Flex>
-					</Box>
+					</Box>}
 					<Box
 						as="button"
 						px="3"
@@ -1880,7 +1923,6 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 						</Flex>
 					)}
 				</Flex>
-			)}
 
 			{/* Watch-only banner */}
 			{watchOnly && (
@@ -2392,7 +2434,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 						)
 					})() : (loadingBalances || !initialLoaded) && !pioneerError ? (
 						<DashboardLoading />
-					) : !loadingBalances && initialLoaded && !pioneerError ? (
+					) : !loadingBalances && initialLoaded && !pioneerError && !drilledChainId ? (
 						<Flex direction="column" align="center" gap="3" textAlign="center" maxW="400px" mx="auto" py="4">
 							<Box
 								w="48px" h="48px" borderRadius="full"
@@ -2489,7 +2531,11 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 						)
 					})()}
 
-					{hasAnyBalance && drilledChainId && (() => {
+					{/* Drilled-chain action row (Receive/Send/Swap). NOT gated on
+					    hasAnyBalance: a fresh wallet holds nothing, but the whole
+					    point of picking a chain is to RECEIVE on it — gating this
+					    on balance left new users unable to press Receive. */}
+					{drilledChainId && (() => {
 						const dchain = visibleChains.find(c => c.id === drilledChainId)
 						if (!dchain) return null
 						const bal = getEffectiveBalance(dchain.id)

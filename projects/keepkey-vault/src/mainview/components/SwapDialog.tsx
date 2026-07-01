@@ -2362,7 +2362,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
           <HStack gap="2.5" align="center">
             <ProviderBadge swapper={quote?.swapper || liveSwapper || quote?.integration} size={22} variant="compact" />
             <Text fontSize="sm" fontWeight="700" color="kk.textPrimary" letterSpacing="-0.01em">
-              {phase === 'review' ? t("review") : phase === 'submitted' ? t("swapSubmitted") : phase === 'blind-signing-required' ? t("blindSignHeader", "Blind Signing") : "Swaps.pro"}
+              {phase === 'review' ? t("review") : phase === 'submitted' ? t("swapSubmitted") : phase === 'blind-signing-required' ? t("blindSignHeader", "Blind Signing") : t("title")}
             </Text>
             {/* Provider health — rendered as ascending wifi-style bars so
                 the overall integration status reads at a glance (the worst

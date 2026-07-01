@@ -7,7 +7,46 @@ import { rpcRequest, onRpcMessage } from "../lib/rpc"
 import { useFiat } from "../lib/fiat-context"
 import { generateQRSvg } from "../lib/qr"
 import { QrScannerOverlay } from "./QrScannerOverlay"
+import { AddressBookPicker } from "./AddressBookPicker"
+import { SaveRecipientDialog } from "./SaveRecipientDialog"
+import { AddressIdenticon } from "./AddressIdenticon"
 import { ZCASH_V2_CSS } from "./zcash-v2-styles"
+import { CHAINS } from "../../shared/chains"
+import type { AddressBookEntry } from "../../shared/types"
+
+/** CAIP-2 network + native asset CAIP shared by Zcash transparent + shielded
+ *  entries. The address book keys recipients off the network; type (private vs
+ *  transparent) is read from the address prefix, not the network. */
+const ZCASH_CHAIN = CHAINS.find(c => c.id === "zcash")
+const ZCASH_NETWORK_ID = ZCASH_CHAIN?.networkId ?? ""
+const ZCASH_CAIP = ZCASH_CHAIN?.caip ?? ""
+
+type ZcashAddrKind = "private" | "transparent"
+/** Classify a Zcash address by prefix so we never conflate the two pools:
+ *  u1… = unified/Orchard (PRIVATE), t1…/t3… = transparent (PUBLIC). */
+function zcashAddrKind(addr: string): ZcashAddrKind | null {
+	const s = addr.trim()
+	if (s.startsWith("u1")) return "private"
+	if (s.startsWith("t1") || s.startsWith("t3")) return "transparent"
+	return null
+}
+
+/** Small inline marker shown beside an address-book entry in the picker. */
+function ZcashKindBadge({ kind }: { kind: ZcashAddrKind | null }) {
+	if (!kind) return null
+	const isPrivate = kind === "private"
+	return (
+		<span style={{
+			fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em",
+			padding: "1px 5px", borderRadius: 4, flexShrink: 0,
+			color: isPrivate ? "#6ee787" : "#d97757",
+			background: isPrivate ? "rgba(110,231,135,0.12)" : "rgba(217,119,87,0.12)",
+			border: `1px solid ${isPrivate ? "rgba(110,231,135,0.30)" : "rgba(217,119,87,0.30)"}`,
+		}}>
+			{isPrivate ? "Private" : "Transparent"}
+		</span>
+	)
+}
 
 /** Validate Zcash recipient: unified (u1...) or transparent (t1.../t3...) only.
  *  Sapling (zs1...) is explicitly rejected — only Orchard is supported. */
@@ -106,7 +145,7 @@ function ensureStylesInjected() {
 }
 
 export function ZcashPrivacyTab() {
-	const { t } = useTranslation("asset")
+	const { t } = useTranslation(["asset", "addressbook", "common"])
 	const { locale: fiatLocale } = useFiat()
 
 	useEffect(() => { ensureStylesInjected() }, [])
@@ -128,7 +167,16 @@ export function ZcashPrivacyTab() {
 	const [copied, setCopied] = useState(false)
 
 	const [showScanner, setShowScanner] = useState(false)
+	// Which "To" field the address-book picker is filling, or null when closed.
+	// "send" accepts both private + transparent; "deshield" is transparent-only.
+	const [addressBookFor, setAddressBookFor] = useState<null | "send" | "deshield">(null)
 	const [recipient, setRecipient] = useState("")
+	// Address-book match state for the send recipient — mirrors SendForm (R5):
+	// known contact → show identicon+label; new address → offer to save.
+	const [matchedContact, setMatchedContact] = useState<AddressBookEntry | null>(null)
+	const [addressIsNew, setAddressIsNew] = useState(false)
+	const [showSaveDialog, setShowSaveDialog] = useState(false)
+	const promptedAddressRef = useRef<string | null>(null)
 	const [amount, setAmount] = useState("")
 	const [memo, setMemo] = useState("")
 	const [sending, setSending] = useState(false)
@@ -192,6 +240,33 @@ export function ZcashPrivacyTab() {
 		if (!recipient) return null
 		return validateZcashRecipient(recipient)
 	}, [recipient])
+
+	// R5 (same flow as SendForm): debounced lookup — known contact shows its
+	// identicon+label, a new valid address auto-prompts the save dialog once.
+	const recipientValid = recipientValidation?.valid === true
+	useEffect(() => {
+		setMatchedContact(null)
+		setAddressIsNew(false)
+		const addr = recipient.trim()
+		if (!addr || !recipientValid) return
+		let alive = true
+		const handle = setTimeout(() => {
+			rpcRequest<AddressBookEntry | null>("matchAddress", { networkId: ZCASH_NETWORK_ID, address: addr }, 5000)
+				.then(entry => {
+					if (!alive) return
+					if (entry) { setMatchedContact(entry) }
+					else {
+						setAddressIsNew(true)
+						if (promptedAddressRef.current !== addr) {
+							promptedAddressRef.current = addr
+							setShowSaveDialog(true)
+						}
+					}
+				})
+				.catch(() => { /* best-effort; never block sending */ })
+		}, 300)
+		return () => { alive = false; clearTimeout(handle) }
+	}, [recipient, recipientValid])
 
 	const handleQrScan = useCallback((raw: string) => {
 		const data = raw.trim().replace(/[\x00-\x1f\x7f-\x9f]/g, "").slice(0, 256)
@@ -258,7 +333,9 @@ export function ZcashPrivacyTab() {
 			})
 			if (bal.synced_to != null) { setSyncedTo(bal.synced_to); setNeedsScan(false) }
 			else setNeedsScan(true)
-		} catch { /* not available yet */ }
+		} catch {
+			setBalance(null)
+		}
 	}, [])
 
 	const loadTransactions = useCallback(async () => {
@@ -278,7 +355,7 @@ export function ZcashPrivacyTab() {
 			try {
 				const r = await rpcRequest<{
 					ready: boolean; fvk_loaded: boolean; address: string | null
-					synced_to?: number | null
+					synced_to?: number | null; verified?: boolean
 				}>("zcashShieldedStatus", undefined, 5000)
 				if (cancelled) return
 				if (!r.ready) { setStatus("not_running"); return }
@@ -286,7 +363,12 @@ export function ZcashPrivacyTab() {
 				else setNeedsScan(true)
 				if (r.fvk_loaded && r.address) {
 					setOrchardAddress(r.address); setStatus("ready")
-					refreshBalance(); loadTransactions(); return
+					if (r.verified) {
+						refreshBalance(); loadTransactions()
+					} else {
+						setBalance(null); setTransactions([])
+					}
+					return
 				}
 				setStatus("initializing")
 				const initRes = await rpcRequest<{ fvk: any; address: string }>(
@@ -557,8 +639,6 @@ export function ZcashPrivacyTab() {
 		}
 	}, [transactions, historyFilter])
 
-	const recentTxs = transactions.slice(0, 5)
-
 	if (status === "not_running") {
 		const handleStartEngine = async () => {
 			setStarting(true)
@@ -717,52 +797,6 @@ export function ZcashPrivacyTab() {
 				))}
 			</nav>
 
-			{/* Inline quick actions + recent activity */}
-			<div className="zk-inline-overview">
-				<div className="quick-actions">
-					<button className="quick-action" onClick={() => setPage("send")}>
-						<div className="qa-title">Send</div>
-						<div className="qa-sub">Pay any Zcash address privately</div>
-					</button>
-					<button className="quick-action" onClick={() => setPage("receive")}>
-						<div className="qa-title">Receive</div>
-						<div className="qa-sub">Show your address &amp; QR code</div>
-					</button>
-					<button className="quick-action" onClick={() => setPage("shield")}>
-						<div className="qa-title">Shield / Unshield</div>
-						<div className="qa-sub">Move between private &amp; public</div>
-					</button>
-				</div>
-
-				<div className="card">
-					<div className="card-head">
-						<div className="title">Recent activity</div>
-						<button className="ghost-btn" onClick={() => setPage("history")}>View all →</button>
-					</div>
-					<div className="recent-list">
-						{loadingTxs ? (
-							<div className="recent-empty">Loading…</div>
-						) : recentTxs.length === 0 ? (
-							<div className="recent-empty">No transactions yet</div>
-						) : recentTxs.map(tx => (
-							<div className="recent-row" key={tx.id}>
-								<span className={`pill ${tx.is_spent ? "pill-trans" : "pill-orchard"}`}>
-									{tx.is_spent ? "Sent" : "Received"}
-								</span>
-								<div className="label">
-									{tx.memo
-										? <>"{tx.memo.slice(0, 60)}{tx.memo.length > 60 ? "…" : ""}"</>
-										: <>Block #{tx.block_height.toLocaleString(fiatLocale)}</>}
-								</div>
-								<div className={`v ${tx.is_spent ? "amount-neg" : "amount-pos"}`}>
-									{tx.is_spent ? "−" : "+"}{formatZec(tx.value)} ZEC
-								</div>
-							</div>
-						))}
-					</div>
-				</div>
-			</div>
-
 			{/* ===== SEND ===== */}
 			{page === "send" && (
 				<section>
@@ -786,6 +820,19 @@ export function ZcashPrivacyTab() {
 											/>
 											<button
 												type="button"
+												title="Address book"
+												className="qr-scan-btn"
+												onClick={() => setAddressBookFor("send")}
+											>
+												<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+													<path d="M4 1.5h7a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H4z"/>
+													<path d="M4 1.5a1.5 1.5 0 0 0 0 13"/>
+													<circle cx="8" cy="6" r="1.6"/>
+													<path d="M5.5 11c.4-1.4 1.3-2 2.5-2s2.1.6 2.5 2"/>
+												</svg>
+											</button>
+											<button
+												type="button"
 												title="Scan QR code"
 												className="qr-scan-btn"
 												onClick={() => setShowScanner(true)}
@@ -798,6 +845,30 @@ export function ZcashPrivacyTab() {
 											</button>
 										</div>
 									</div>
+									{/* Known contact — identicon + label, same pill as the main Send form. */}
+									{matchedContact && (
+										<Flex align="center" gap="2" mt="1.5" px="2" py="1" w="fit-content" bg="rgba(233,196,106,0.06)" border="1px solid rgba(233,196,106,0.22)" borderRadius="999px">
+											<AddressIdenticon seed={matchedContact.kind === "own" ? (matchedContact.deviceId || matchedContact.address) : matchedContact.address} size={16} />
+											<Text fontSize="11px" color="var(--gold)" fontWeight="600" truncate maxW="220px">
+												{matchedContact.label || (matchedContact.kind === "own" ? (matchedContact.deviceLabel || t("ownWallet", { ns: "addressbook" })) : t("unlabeled", { ns: "addressbook" }))}
+											</Text>
+											<ZcashKindBadge kind={zcashAddrKind(matchedContact.address)} />
+										</Flex>
+									)}
+									{/* New external address — flag it + offer to save (same UI as Send form). */}
+									{addressIsNew && !matchedContact && (
+										<Flex align="center" gap="2" mt="1.5" px="2" py="1" w="fit-content" bg="rgba(224,140,123,0.08)" border="1px solid rgba(224,140,123,0.28)" borderRadius="999px">
+											<AddressIdenticon seed={recipient.trim()} size={16} />
+											<Text fontSize="11px" color="var(--rose)" fontWeight="600">
+												{t("newAddressBadge", { ns: "addressbook", defaultValue: "New address" })}
+											</Text>
+											<ZcashKindBadge kind={zcashAddrKind(recipient)} />
+											<Box as="button" fontSize="11px" color="var(--gold)" fontWeight="700" textDecoration="underline"
+												onClick={() => setShowSaveDialog(true)}>
+												{t("save", { ns: "common", defaultValue: "Save" })}
+											</Box>
+										</Flex>
+									)}
 									{recipientValidation && !recipientValidation.valid && recipientValidation.error && (
 										<div className="field-err">{t(recipientValidation.error)}</div>
 									)}
@@ -871,6 +942,37 @@ export function ZcashPrivacyTab() {
 			{/* QR scanner overlay */}
 			{showScanner && (
 				<QrScannerOverlay onScan={handleQrScan} onClose={() => setShowScanner(false)} />
+			)}
+
+			{/* Address book picker — type-gated so a private (u1…) address can never
+			    be picked for the transparent-only Unshield field, and vice versa. */}
+			{addressBookFor && (
+				<AddressBookPicker
+					networkId={ZCASH_NETWORK_ID}
+					chainFamily="utxo"
+					entryFilter={e => addressBookFor === "deshield"
+						? zcashAddrKind(e.address) === "transparent"
+						: zcashAddrKind(e.address) != null}
+					renderTag={e => <ZcashKindBadge kind={zcashAddrKind(e.address)} />}
+					onSelect={e => {
+						if (addressBookFor === "deshield") setDeshieldRecipient(e.address)
+						else setRecipient(e.address)
+						setAddressBookFor(null)
+					}}
+					onClose={() => setAddressBookFor(null)}
+				/>
+			)}
+
+			{/* Save-new-recipient prompt — same dialog the main Send form uses. */}
+			{showSaveDialog && (
+				<SaveRecipientDialog
+					address={recipient.trim()}
+					networkId={ZCASH_NETWORK_ID}
+					assetCaip={ZCASH_CAIP}
+					symbol="ZEC"
+					onClose={() => setShowSaveDialog(false)}
+					onSaved={(entry) => { setMatchedContact(entry); setAddressIsNew(false); setShowSaveDialog(false) }}
+				/>
 			)}
 
 			{/* ===== SHIELD / UNSHIELD ===== */}
@@ -970,6 +1072,11 @@ export function ZcashPrivacyTab() {
 											value={deshieldRecipient}
 											onChange={e => setDeshieldRecipient(e.target.value)}
 										/>
+										<button
+											className="max"
+											onClick={() => setAddressBookFor("deshield")}
+											title="Pick a transparent address from your address book"
+										>Book</button>
 										{myTransparentAddr && deshieldRecipient !== myTransparentAddr && (
 											<button
 												className="max"

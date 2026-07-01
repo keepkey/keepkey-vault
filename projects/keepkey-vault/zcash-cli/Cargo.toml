@@ -28,13 +28,16 @@ env_logger = "0.11"
 # BLAKE2b for ZIP-244 sighash computation
 blake2b_simd = "1.0"
 
-# Zcash crates
-orchard = "0.12"
-zcash_address = "0.10"
-zcash_protocol = "0.7"
+# Zcash crates — NU6.2 cohort (all published 2026-06-03). orchard 0.14 ships
+# the FixedPostNu6_2 Orchard circuit; every prior version is yanked and builds
+# pre-fork proofs that current Zebra/zcashd nodes reject ("could not validate
+# orchard proof"). These versions must be upgraded together.
+orchard = "0.14"
+zcash_address = "0.12"
+zcash_protocol = "0.9"
 zcash_note_encryption = "0.4"
-zcash_primitives = "0.19"
-zcash_keys = "0.8"
+zcash_primitives = "0.28"
+zcash_keys = "0.14"
 
 # Lightwalletd gRPC client
 tonic = { version = "0.12", features = ["tls", "tls-roots"] }
@@ -63,11 +66,6 @@ sha2 = "0.10"
 [dev-dependencies]
 tempfile = "3.10"
 nonempty = "0.11"
-# Alias orchard 0.10.2 for BatchValidator — same version zcash_primitives uses,
-# so Cargo reuses the same compiled crate. Types are compatible with Transaction::read output.
-orchard_v010 = { package = "orchard", version = "0.10", features = ["circuit"] }
-# zcash_primitives 0.19 pins zcash_protocol 0.4; Transaction::read wants the 0.4 BranchId.
-zcash_protocol_v04 = { package = "zcash_protocol", version = "0.4" }
 
 [build-dependencies]
 tonic-build = "0.12"

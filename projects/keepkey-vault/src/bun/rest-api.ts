@@ -8,9 +8,9 @@ import { CHAINS, isChainSupported } from '../shared/chains'
 import {
   initializeOrchardFromDevice, scanOrchardNotes, getShieldedBalance,
   buildShieldedTx, finalizeShieldedTx, broadcastShieldedTx,
-  ensureFvkLoaded, displayOrchardAddressOnDevice,
+  ensureFvkLoaded, displayOrchardAddressOnDevice, sendShielded,
 } from './txbuilder/zcash-shielded'
-import { isSidecarReady } from './zcash-sidecar'
+import { isSidecarReady, getCachedFvk } from './zcash-sidecar'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 import * as S from './schemas'
@@ -74,6 +74,16 @@ export interface RestApiCallbacks {
   /** Headless swap execute — signs on the device, broadcasts, registers tracking.
    *  Used by POST /api/v2/swap/execute. Device still gates the signature. */
   executeSwapHeadless?: (params: import('../shared/types').ExecuteSwapParams) => Promise<import('../shared/types').SwapResult>
+  /** Fail-closed pre-send preflight for the headless Zcash send/shield/deshield
+   *  paths. Mirrors the RPC flow: prove the cached Orchard FVK belongs to the
+   *  CONNECTED device (purges stale sidecar state + re-derives on mismatch) and
+   *  refresh the note set to chain tip. Throws to abort BEFORE signing, so a
+   *  stale-DB / device-swap can never build from old notes and fail late. */
+  zcashPreSendGate?: (account: number) => Promise<void>
+  /** Fail-closed Zcash wallet identity check for read-only balance paths.
+   *  Proves the cached Orchard FVK belongs to the connected device before
+   *  exposing any shielded balance from the local sidecar database. */
+  zcashVerifyWallet?: (account: number) => Promise<void>
   /** Returns initialized Pioneer client (for debug endpoints) */
   getPioneer?: () => Promise<any>
   /** Returns the active Pioneer API base URL */
@@ -1326,7 +1336,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             status: 'healthy',
             syncing: engine.isSyncing,
             apiVersion: 2,
-            supportedChains: CHAINS.filter(c => isChainSupported(c, ds.firmwareVersion)).map(c => c.networkId),
+            supportedChains: CHAINS.filter(c => isChainSupported(c, ds.firmwareVersion) && (c.id !== 'hive' || getSetting('hive_enabled') === '1')).map(c => c.networkId),
             device_connected: engine.wallet !== null,
             version: callbacks?.getVersion?.() || 'unknown',
             connected: engine.wallet !== null,
@@ -1423,14 +1433,23 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             if (callbacks?.onPairRequest) {
               callbacks.onPairRequest({ name: body.name, url: body.url || '', imageUrl: body.imageUrl || '' })
             }
-            // requestPair requires user approval via UI — NOT auto-granted
+            // requestPair requires user approval via UI — NOT auto-granted.
+            // Idempotent: an already-paired identity reuses its key (reused:true)
+            // after the user re-approves, instead of minting a duplicate.
             try {
-              const apiKey = await auth.requestPair(body)
-              return json({ apiKey })
+              const { apiKey, reused } = await auth.requestPair(body)
+              return json({ apiKey, reused })
             } finally {
               // Dismiss UI overlay + restore window level on approve, reject, or timeout
               callbacks?.onPairDismissed?.()
             }
+          }
+          if (method === 'DELETE') {
+            // Revoke the caller's own key (clean reset / explicit unpair).
+            const token = auth.extractBearerToken(req)
+            if (!token) return json({ revoked: false, message: 'No bearer token provided' }, 401)
+            const revoked = auth.revoke(token)
+            return json({ revoked })
           }
         }
 
@@ -1968,6 +1987,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/addresses/hive' && method === 'POST') {
           auth.requireAuth(req)
+          // Gate behind the Hive feature flag (matches RPC handlers in index.ts)
+          if (getSetting('hive_enabled') !== '1') return json({ error: 'Hive is disabled' }, 403)
           const fwBlock = requireChainSupport('hive')
           if (fwBlock) return fwBlock
           const wallet = requireWallet(engine)
@@ -3576,13 +3597,18 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.RecoverDeviceRequest)
-          await wallet.recover({
-            entropy: body.word_count ? ({ 12: 128, 18: 192, 24: 256 } as Record<number, number>)[body.word_count] || 128 : 128,
-            label: body.label || 'KeepKey',
-            pin: body.pin_protection ?? true,
-            passphrase: body.passphrase_protection ?? false,
-            autoLockDelayMs: 600000,
-          })
+          engine.setRecoveryActive(true)
+          try {
+            await wallet.recover({
+              entropy: body.word_count ? ({ 12: 128, 18: 192, 24: 256 } as Record<number, number>)[body.word_count] || 128 : 128,
+              label: body.label || 'KeepKey',
+              pin: body.pin_protection ?? true,
+              passphrase: body.passphrase_protection ?? false,
+              autoLockDelayMs: 600000,
+            })
+          } finally {
+            engine.setRecoveryActive(false)
+          }
           featuresCache = null
           return json({ success: true })
         }
@@ -3602,6 +3628,39 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const body = await parseRequest(req, S.SendPinRequest)
           await wallet.sendPin(body.pin)
           return json({ success: true })
+        }
+
+        // Cipher-recovery character entry. The device shows a scrambled keyboard
+        // on the OLED and the host relays the ciphered characters (CharacterAck).
+        // Mirrors /system/recovery/pin. The recover-device call rejects with
+        // "Word not found in BIP39 wordlist" when a finalized word is invalid.
+        if (path === '/system/recovery/character' && method === 'POST') {
+          auth.requireAuth(req)
+          const wallet = requireWallet(engine)
+          const body = await parseRequest(req, S.SendCharacterRequest)
+          await wallet.sendCharacter(body.character)
+          return json({ success: true })
+        }
+
+        if (path === '/system/recovery/character/delete' && method === 'POST') {
+          auth.requireAuth(req)
+          const wallet = requireWallet(engine)
+          await wallet.sendCharacterDelete()
+          return json({ success: true })
+        }
+
+        if (path === '/system/recovery/character/done' && method === 'POST') {
+          auth.requireAuth(req)
+          const wallet = requireWallet(engine)
+          await wallet.sendCharacterDone()
+          return json({ success: true })
+        }
+
+        // Current cipher-recovery state. `seq` advances each time the device asks
+        // for the next character, so a caller can sync sends with the device.
+        if (path === '/system/recovery/state' && method === 'GET') {
+          auth.requireAuth(req)
+          return json(engine.getRecoveryState())
         }
 
         // ── Zcash Shielded (Orchard) ────────────────────────────────
@@ -3641,7 +3700,12 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           auth.requireAuth(req)
           const body = await parseRequest(req, S.ZcashDisplayAddressRequest)
           const wallet = requireWallet(engine)
-          return json(await displayOrchardAddressOnDevice(wallet, body.account ?? 0))
+          // Route through emuWrap for emulator parity (AUTH-2): on the emulator this
+          // raises the interactive view-on-device confirm the user must approve; on
+          // real hardware it is a pure passthrough. The RPC zcashDisplayAddress
+          // already does this — the REST twin must too or the emulator hangs.
+          const details: EmuSigningDetails = { operation: 'zcashDisplayAddress', chain: 'Zcash' }
+          return json(await emuWrap(() => displayOrchardAddressOnDevice(wallet, body.account ?? 0), details))
         }
 
         if (path === '/api/zcash/shielded/scan' && method === 'POST') {
@@ -3652,19 +3716,169 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           // so the sidecar may have no FVK yet — refresh from device first
           // rather than failing with "No FVK set".
           await ensureFvkLoaded(wallet, 0)
+          // Scan returns balance, so prove the cached FVK belongs to the connected
+          // device before scanning — otherwise a stale/other-wallet FVK leaks a
+          // phantom balance through the scan endpoint (reviewer#2). Mirrors /balance.
+          if (!callbacks?.zcashVerifyWallet) throw new HttpError(503, 'Zcash wallet verification unavailable')
+          await callbacks.zcashVerifyWallet(0)
           const result = await scanOrchardNotes(body.start_height, body.full_rescan)
           return json(result)
         }
 
         if (path === '/api/zcash/shielded/balance' && method === 'GET') {
           auth.requireAuth(req)
+          const wallet = requireWallet(engine)
+          await ensureFvkLoaded(wallet, 0)
+          if (!callbacks?.zcashVerifyWallet) throw new HttpError(503, 'Zcash wallet verification unavailable')
+          await callbacks.zcashVerifyWallet(0)
           const result = await getShieldedBalance()
           return json(result)
         }
 
+        // Headless shielded send: build → device sign → finalize → broadcast.
+        // ALWAYS requires a paired bearer token AND on-device/UI confirmation —
+        // there is no auth or approval bypass, emulator included. On the emulator
+        // emuWrap routes through emuSigningOp, which raises the interactive confirm
+        // prompt the user must approve; it does NOT auto-press.
+        if (path === '/api/zcash/shielded/send' && method === 'POST') {
+          auth.requireAuth(req)
+          const wallet = requireWallet(engine)
+          const body = await req.json() as { recipient?: string; amount?: number; memo?: string; account?: number }
+          // amount is ZATOSHIS (integer) — it goes straight to the sidecar's
+          // build_pczt, which parses u64. The Rust side rejects fractions, so
+          // 0.01 would 400 and `1` would send 1 zatoshi, not 1 ZEC.
+          // Upper-bound the amount at the Zcash money-supply cap (21M ZEC in
+          // zatoshis), matching ZcashBuildRequest. Without it a near-u64::MAX value
+          // reaches the sidecar's `amount + fee` add (REST-01).
+          if (!body?.recipient || typeof body.amount !== 'number' || !Number.isInteger(body.amount) || body.amount <= 0 || body.amount > 2_100_000_000_000_000) {
+            throw new HttpError(400, 'recipient (string) and amount (positive integer zatoshis, <= 21M ZEC) are required')
+          }
+          const account = body.account ?? 0
+          // The sidecar/FVK/scan state is global (single-account). ensureFvkLoaded
+          // and ensureZcashDeviceMatch key off "any FVK loaded" / "any account
+          // verified", so a non-zero account would silently spend from account 0's
+          // state. Reject until the Zcash state is genuinely account-scoped.
+          if (account !== 0) throw new HttpError(400, 'Only account 0 is supported; multi-account shielded sends are not implemented')
+          await ensureFvkLoaded(wallet, account)
+          // FAIL-CLOSED preflight (device-FVK match + fresh scan) before signing.
+          if (!callbacks?.zcashPreSendGate) throw new HttpError(503, 'Zcash pre-send gate unavailable')
+          await callbacks.zcashPreSendGate(account)
+          const details: EmuSigningDetails = {
+            operation: 'zcashShieldedSend', chain: 'Zcash',
+            to: body.recipient, value: String(body.amount), memo: body.memo,
+          }
+          const result = await sendShielded(
+            wallet,
+            { recipient: body.recipient, amount: body.amount, memo: body.memo, account },
+            { signWrap: <T,>(fn: () => Promise<T>) => emuWrap(fn, details) },
+          )
+          return json(result)
+        }
+
+        // Headless DESHIELD (z→t): spend a shielded note to a transparent addr.
+        // Always requires auth + interactive confirm (no emulator bypass).
+        if (path === '/api/zcash/shielded/deshield' && method === 'POST') {
+          auth.requireAuth(req)
+          const wallet = requireWallet(engine)
+          const body = await req.json() as { recipient?: string; amount?: number; account?: number }
+          // Upper-bound the amount at the Zcash money-supply cap (21M ZEC in
+          // zatoshis), matching ZcashBuildRequest. Without it a near-u64::MAX value
+          // reaches the sidecar's `amount + fee` add (REST-01).
+          if (!body?.recipient || typeof body.amount !== 'number' || !Number.isInteger(body.amount) || body.amount <= 0 || body.amount > 2_100_000_000_000_000) {
+            throw new HttpError(400, 'recipient (string) and amount (positive integer zatoshis, <= 21M ZEC) are required')
+          }
+          const account = body.account ?? 0
+          // The sidecar/FVK/scan state is global (single-account). ensureFvkLoaded
+          // and ensureZcashDeviceMatch key off "any FVK loaded" / "any account
+          // verified", so a non-zero account would silently spend from account 0's
+          // state. Reject until the Zcash state is genuinely account-scoped.
+          if (account !== 0) throw new HttpError(400, 'Only account 0 is supported; multi-account shielded sends are not implemented')
+          await ensureFvkLoaded(wallet, account)
+          // FAIL-CLOSED preflight (device-FVK match + fresh scan) before signing.
+          if (!callbacks?.zcashPreSendGate) throw new HttpError(503, 'Zcash pre-send gate unavailable')
+          await callbacks.zcashPreSendGate(account)
+          const details: EmuSigningDetails = {
+            operation: 'zcashDeshieldZec', chain: 'Zcash', to: body.recipient, value: String(body.amount),
+          }
+          const { deshieldZec } = await import('./txbuilder/zcash-deshield')
+          const result = await deshieldZec(wallet, { recipient: body.recipient!, amount: body.amount!, account },
+            { signWrap: <T,>(fn: () => Promise<T>) => emuWrap(fn, details) })
+          return json(result)
+        }
+
+        // Headless SHIELD (t→z): move transparent funds into a fresh shielded note.
+        // Always requires auth + interactive confirm (no emulator bypass).
+        if (path === '/api/zcash/shielded/shield' && method === 'POST') {
+          auth.requireAuth(req)
+          const wallet = requireWallet(engine)
+          const body = await req.json() as { amount?: number; account?: number }
+          if (typeof body.amount !== 'number' || !Number.isInteger(body.amount) || body.amount <= 0 || body.amount > 2_100_000_000_000_000) {
+            throw new HttpError(400, 'amount (positive integer zatoshis, <= 21M ZEC) is required')
+          }
+          if (!callbacks?.getPioneer) throw new HttpError(503, 'Pioneer client unavailable')
+          const account = body.account ?? 0
+          // The sidecar/FVK/scan state is global (single-account). ensureFvkLoaded
+          // and ensureZcashDeviceMatch key off "any FVK loaded" / "any account
+          // verified", so a non-zero account would silently spend from account 0's
+          // state. Reject until the Zcash state is genuinely account-scoped.
+          if (account !== 0) throw new HttpError(400, 'Only account 0 is supported; multi-account shielded sends are not implemented')
+          await ensureFvkLoaded(wallet, account)
+          // FAIL-CLOSED preflight (device-FVK match + fresh scan) before signing.
+          if (!callbacks?.zcashPreSendGate) throw new HttpError(503, 'Zcash pre-send gate unavailable')
+          await callbacks.zcashPreSendGate(account)
+          const details: EmuSigningDetails = {
+            operation: 'zcashShieldZec', chain: 'Zcash', value: String(body.amount),
+          }
+          const pioneer = await callbacks.getPioneer()
+          const { shieldZec } = await import('./txbuilder/zcash-shield')
+          const result = await shieldZec(wallet, pioneer, { amount: body.amount!, account },
+            { signWrap: <T,>(fn: () => Promise<T>) => emuWrap(fn, details) })
+          return json(result)
+        }
+
+        // Read-only diagnostic: does the cached shielded balance belong to the
+        // CONNECTED device? Derives the Orchard FVK fresh from the device and
+        // compares ak to the cache. Does not mutate state.
+        if (path === '/api/zcash/shielded/verify-device' && method === 'GET') {
+          auth.requireAuth(req)
+          const wallet = requireWallet(engine)
+          if (typeof (wallet as any).zcashGetOrchardFVK !== 'function') {
+            throw new HttpError(400, 'Device firmware does not support Orchard FVK export')
+          }
+          const cached = getCachedFvk()
+          const deviceFvk = await (wallet as any).zcashGetOrchardFVK(0)
+          const deviceAk = Buffer.from(deviceFvk.ak).toString('hex')
+          const cachedAk = cached?.fvk?.ak ?? null
+          const match = !!cachedAk && cachedAk.toLowerCase() === deviceAk.toLowerCase()
+          return json({
+            match,
+            deviceAk,
+            cachedAk,
+            cachedAddress: cached?.address ?? null,
+            message: cachedAk === null
+              ? 'No cached FVK — nothing to compare.'
+              : match
+                ? 'OK: cached shielded balance belongs to the connected device.'
+                : 'MISMATCH: cached shielded balance is NOT from the connected device — stale/another wallet, not spendable here.',
+          })
+        }
+
         if (path === '/api/zcash/shielded/build' && method === 'POST') {
           auth.requireAuth(req)
+          const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.ZcashBuildRequest)
+          // FAIL-CLOSED preflight, mirroring /send (P2-C): prove the cached Orchard
+          // FVK belongs to the connected device (purges stale state on mismatch) +
+          // fresh scan BEFORE building a spend, so /build can't construct a PCZT from
+          // a previous wallet's notes after a device swap. Every PCZT-building entry
+          // point must prove device identity. (/finalize needs device signatures, so
+          // the split path isn't remotely completable regardless — but the invariant
+          // must hold uniformly.)
+          const account = (body as any).account ?? 0
+          if (account !== 0) throw new HttpError(400, 'Only account 0 is supported; multi-account shielded sends are not implemented')
+          await ensureFvkLoaded(wallet, account)
+          if (!callbacks?.zcashPreSendGate) throw new HttpError(503, 'Zcash pre-send gate unavailable')
+          await callbacks.zcashPreSendGate(account)
           const result = await buildShieldedTx(body)
           return json(result)
         }
