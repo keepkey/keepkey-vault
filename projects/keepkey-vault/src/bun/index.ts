@@ -3888,7 +3888,13 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					}
 					if (derivedXpubs.length > 0) {
 						xpub = derivedXpubs[0].xpub
-						if (derivedXpubs.length > 1) {
+						// Use multi-xpub aggregation for 2+ xpubs OR whenever any xpub is
+						// account > 0. The single-xpub path ignores per-xpub accountPath, so a
+						// lone account-N xpub (e.g. account-0 derivation returned nothing but a
+						// tracked account-1 row exists) would otherwise sign with blockbook's
+						// account-0 path — a wrong key. Aggregation tags each input with its
+						// source account path, so account-N always signs with the account-N key.
+						if (derivedXpubs.length > 1 || derivedXpubs.some(x => x.accountPath[2] !== 0x80000000)) {
 							allXpubs = derivedXpubs
 						}
 					}
