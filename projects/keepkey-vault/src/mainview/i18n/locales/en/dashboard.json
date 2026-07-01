@@ -4,6 +4,7 @@
 	"connectDeviceToRefresh": "Connect device to refresh",
 	"networksCount": "{{count}} networks",
 	"addChain": "Add Chain",
+	"addEvmChain": "Add EVM chain",
 	"noBalance": "No balance",
 	"tokensCount_one": "+{{count}} token",
 	"tokensCount_other": "+{{count}} tokens",
