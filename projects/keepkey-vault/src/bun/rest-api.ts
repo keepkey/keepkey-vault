@@ -2051,7 +2051,14 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           // EIP-1559 fields
           if (body.maxFeePerGas || body.max_fee_per_gas) {
             msg.maxFeePerGas = body.maxFeePerGas || body.max_fee_per_gas
-            msg.maxPriorityFeePerGas = body.maxPriorityFeePerGas || body.max_priority_fee_per_gas || '0x0'
+            // Canonical RLP requires a zero priority fee to be the EMPTY string, not
+            // a 0x00 byte. hdwallet does not strip the EIP-1559 fee fields, so a
+            // literal '0x0' reaches the device as [0x00], which the firmware hashes
+            // non-canonically → the tx recovers to the wrong signer and is
+            // unbroadcastable (see keepkey-firmware eip1559-zero-priority fix). Send
+            // empty for a zero/absent priority fee.
+            const prio = body.maxPriorityFeePerGas || body.max_priority_fee_per_gas
+            msg.maxPriorityFeePerGas = (!prio || /^0x0*$/.test(prio)) ? '0x' : prio
           } else {
             msg.gasPrice = body.gasPrice || body.gas_price || '0x0'
           }
