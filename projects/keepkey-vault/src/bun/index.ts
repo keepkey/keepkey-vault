@@ -134,7 +134,7 @@ import type { OwnAddressSeed } from "./db"
 import { rectifyWallet, getLedgerSummary, getLedgerJournals } from "./ledger"
 import { generateReport, reportToPdfBuffer, reportToCsv } from "./reports"
 import { startAudit, startBtcScan, getAudit, getAuditBtcRaw, getAuditEntry, dismissAudit, markAuditsStale, type AuditDeps } from "./audit-engine"
-import { chainSupportsDeepScan, chainSupportsLevelScan, chainLevelPath, deriveAddressParams, extractAddress, parseNativeScanResult, parseEvmScanResult, utxoAccountScriptPaths, explorerAddressUrl, pathToBip32 } from "./chain-scan"
+import { chainSupportsDeepScan, chainSupportsLevelScan, chainLevelPath, deriveAddressParams, extractAddress, parseNativeScanResult, parseEvmScanResult, utxoAccountScriptPaths, explorerAddressUrl, pathToBip32, parseBip32Path } from "./chain-scan"
 import { extractTransactionsFromReport, toCoinTrackerCsv, toZenLedgerCsv } from "./tax-export"
 import * as os from "os"
 import * as path from "path"
@@ -3869,6 +3869,23 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							})
 						}
 					}
+					// Aggregate device-cached account-1+ xpubs (persisted by the audit
+					// "track" action, addUtxoAccount) so those tracked funds are actually
+					// SPENDABLE, not just displayed. Each row carries its own account-level
+					// path (parsed from the path column) so per-input signing derives the
+					// correct key for account > 0. Device-scoped, never written for
+					// passphrase wallets; dedup by xpub against the account-0 set above.
+					const utxoDevId = engine.getDeviceState().deviceId
+					if (utxoDevId && !engine.isPassphraseWallet) {
+						const seen = new Set(derivedXpubs.map(x => x.xpub))
+						for (const pk of getCachedPubkeys(utxoDevId)) {
+							if (pk.chainId !== chain.id || !pk.xpub || seen.has(pk.xpub)) continue
+							const acctPath = parseBip32Path(pk.path)
+							if (!acctPath || acctPath.length !== 3) continue
+							derivedXpubs.push({ xpub: pk.xpub, scriptType: pk.scriptType || chain.scriptType || 'p2pkh', accountPath: acctPath })
+							seen.add(pk.xpub)
+						}
+					}
 					if (derivedXpubs.length > 0) {
 						xpub = derivedXpubs[0].xpub
 						if (derivedXpubs.length > 1) {
@@ -4253,8 +4270,12 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				for (let i = 0; i < sps.length; i++) {
 					const xpub = (pks?.[i] as any)?.xpub
 					if (!xpub) continue
-					// Key by xpub (path column) like the BTC cache rows so re-tracking dedups.
-					saveCachedPubkey(devId, chain.id, xpub, xpub, '', sps[i].scriptType)
+					// Key the row by the account-level BIP32 path (not the xpub) so the
+					// account INDEX survives: the spend path (buildTx) needs it to rebuild
+					// per-input signing paths for account > 0. The (device,chain,path)
+					// upsert dedups per (scriptType, account); the xpub lives in its own
+					// column for the display merges.
+					saveCachedPubkey(devId, chain.id, pathToBip32(sps[i].path), xpub, '', sps[i].scriptType)
 					saved++
 				}
 				if (!saved) throw new Error(`Could not derive xpubs for ${chain.coin} account ${account}`)
