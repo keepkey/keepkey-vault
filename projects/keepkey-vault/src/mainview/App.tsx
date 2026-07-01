@@ -62,6 +62,17 @@ function App() {
 	// with React render batching on fast USB detach/reattach cycles (Windows).
 	const oobEnteredRef = useRef(false)
 	const oobClaimStuckSince = useRef<number | null>(null)
+
+	// If the device drops back into a setup state (wiped, or rebooted uninitialized
+	// after a firmware flash) once the wizard already completed, wizardComplete is
+	// stuck true — Dashboard, which normally consumes it, only mounts when ready, so
+	// it never clears. That forces the app to the wallet-picker splash instead of
+	// re-opening onboarding. Clear it so the OOB wizard can mount again.
+	useEffect(() => {
+		if (wizardComplete && ["bootloader", "needs_firmware", "needs_init"].includes(deviceState.state)) {
+			setWizardComplete(false)
+		}
+	}, [wizardComplete, deviceState.state])
 	const [portfolioLoaded, setPortfolioLoaded] = useState(false)
 	const [gridReady, setGridReady] = useState(false)
 	const [settingsOpen, setSettingsOpen] = useState(false)
