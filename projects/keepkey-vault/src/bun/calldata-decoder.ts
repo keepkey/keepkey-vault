@@ -47,6 +47,26 @@ interface LocalDecoder {
   decode: (data: string) => CalldataDecodedField[]
 }
 
+// THORChain/Maya router deposit head layout: vault (word0), asset (word1) and
+// amount (word2) sit at identical offsets for both deposit(...,memo) and
+// depositWithExpiry(...,memo,expiry), so one decoder serves both selectors.
+// The firmware (thortx.c) clear-signs BOTH — so the Vault must recognize both,
+// otherwise the plain deposit() path decodes as source:'none', the signing
+// overlay flags needsBlindSigning and forces AdvancedMode ON, which turns OFF
+// the device's own blind-sign gate and defeats the router-pin fix (PR #261).
+function decodeThorDeposit(data: string): CalldataDecodedField[] {
+  const vault = formatAddress('0x' + data.slice(10, 74))
+  const asset = formatAddress('0x' + data.slice(74, 138))
+  const amount = formatUint256('0x' + data.slice(138, 202))
+  const isNativeAsset = asset === '0x0000000000000000000000000000000000000000'
+  return [
+    { name: 'Protocol', type: 'string', value: 'THORChain Router', format: 'raw' },
+    { name: 'Vault', type: 'address', value: vault, format: 'address' },
+    { name: 'Asset', type: 'string', value: isNativeAsset ? 'Native (ETH)' : asset, format: isNativeAsset ? 'raw' : 'address' },
+    { name: 'Amount', type: 'uint256', value: amount, format: 'amount' },
+  ]
+}
+
 const LOCAL_DECODERS: LocalDecoder[] = [
   // ERC-20 transfer(address,uint256)
   {
@@ -305,24 +325,48 @@ const LOCAL_DECODERS: LocalDecoder[] = [
       ]
     },
   },
-  // ── THORChain Router ──
-  // depositWithExpiry(address vault, address asset, uint256 amount, string memo, uint256 expiry)
+  // ── 0x Exchange Proxy / Uniswap (firmware clear-signs these) ──
+  // The firmware (zxswap.c / zxliquidtx.c) natively clear-signs these to their
+  // pinned routers, so decode them — otherwise they read as source:'none' and
+  // the signing overlay over-gates into blind-signing (forcing AdvancedMode ON,
+  // which disables the device's own gate). The device stays authoritative: it
+  // re-checks the array offset / LP recipient and rejects spoofed variants
+  // regardless of what we display here.
+  // sellToUniswap(address[] tokens, uint256 sellAmount, uint256 minBuyAmount, bool isSushi)
   {
-    selector: '0x44bc937b',
-    method: 'Deposit (THORChain)',
+    selector: '0xd9627aa4',
+    method: 'Sell to Uniswap (0x)',
     decode: (data) => {
-      const vault = formatAddress('0x' + data.slice(10, 74))
-      const asset = formatAddress('0x' + data.slice(74, 138))
-      const amount = formatUint256('0x' + data.slice(138, 202))
-      const isNativeAsset = asset === '0x0000000000000000000000000000000000000000'
+      const sellAmount = formatUint256('0x' + data.slice(74, 138))
+      const minBuyAmount = formatUint256('0x' + data.slice(138, 202))
       return [
-        { name: 'Protocol', type: 'string', value: 'THORChain Router', format: 'raw' },
-        { name: 'Vault', type: 'address', value: vault, format: 'address' },
-        { name: 'Asset', type: 'string', value: isNativeAsset ? 'Native (ETH)' : asset, format: isNativeAsset ? 'raw' : 'address' },
-        { name: 'Amount', type: 'uint256', value: amount, format: 'amount' },
+        { name: 'Protocol', type: 'string', value: '0x Exchange Proxy', format: 'raw' },
+        { name: 'Sell Amount', type: 'uint256', value: sellAmount, format: 'amount' },
+        { name: 'Min Buy Amount', type: 'uint256', value: minBuyAmount, format: 'amount' },
       ]
     },
   },
+  // addLiquidityETH(address token, uint amountTokenDesired, uint amountTokenMin, uint amountETHMin, address to, uint deadline)
+  {
+    selector: '0xf305d719',
+    method: 'Add Liquidity (Uniswap)',
+    decode: (data) => {
+      const token = formatAddress('0x' + data.slice(10, 74))
+      const recipient = formatAddress('0x' + data.slice(266, 330))
+      return [
+        { name: 'Protocol', type: 'string', value: 'Uniswap V2 Router', format: 'raw' },
+        { name: 'Token', type: 'address', value: token, format: 'address' },
+        { name: 'LP Recipient', type: 'address', value: recipient, format: 'address' },
+      ]
+    },
+  },
+  // ── THORChain Router ──
+  // deposit(vault, asset, amount, memo) [0x1fece7b4] and
+  // depositWithExpiry(vault, asset, amount, memo, expiry) [0x44bc937b].
+  // Firmware clear-signs both; recognize both so the plain deposit() path is
+  // not over-gated into blind-signing. (keepkey-firmware thortx.h selectors.)
+  { selector: '0x1fece7b4', method: 'Deposit (THORChain)', decode: decodeThorDeposit },
+  { selector: '0x44bc937b', method: 'Deposit (THORChain)', decode: decodeThorDeposit },
 ]
 
 /**
