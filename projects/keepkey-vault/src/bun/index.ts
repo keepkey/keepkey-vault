@@ -129,7 +129,7 @@ import { EvmAddressManager, evmAddressPath } from "./evm-addresses"
 import { shouldResetManagersOnReady, nextReadyDeviceId } from "../shared/device-switch"
 import { isManagerSeedStale } from "../shared/seed-reconcile"
 import { WalletConnectManager } from "./walletconnect"
-import { initDb, factoryResetDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, setCustomTokenIcon as dbSetCustomTokenIcon, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility, insertApiLog, getApiLogs, clearApiLogs, setCachedBalances, getCachedBalances, updateCachedBalance, clearBalances, saveCachedPubkey, getLatestDeviceSnapshot, getCachedPubkeys, saveReport, getReportsList, getReportById, deleteReport, reportExists, getSwapHistory, getSwapHistoryStats, getSwapHistoryByTxid, getBip85Seeds, saveBip85Seed, deleteBip85Seed, clearCachedPubkeys, getRecentActivityFromLog, getPioneerServers, addPioneerServerDb, removePioneerServerDb, syncOwnAddressBook, recordOutbound, getAddressBookList, updateAddressBookEntry, deleteAddressBookEntry, getAddressBookHistory, getDeviceLabelMap, getBalancesForOwnSeed, addExternalEntry, matchAddressBook } from "./db"
+import { initDb, factoryResetDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, setCustomTokenIcon as dbSetCustomTokenIcon, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility, insertApiLog, getApiLogs, clearApiLogs, setCachedBalances, getCachedBalances, updateCachedBalance, clearBalances, deleteCachedChainBalance, saveCachedPubkey, getLatestDeviceSnapshot, getCachedPubkeys, saveReport, getReportsList, getReportById, deleteReport, reportExists, getSwapHistory, getSwapHistoryStats, getSwapHistoryByTxid, getBip85Seeds, saveBip85Seed, deleteBip85Seed, clearCachedPubkeys, getRecentActivityFromLog, getPioneerServers, addPioneerServerDb, removePioneerServerDb, syncOwnAddressBook, recordOutbound, getAddressBookList, updateAddressBookEntry, deleteAddressBookEntry, getAddressBookHistory, getDeviceLabelMap, getBalancesForOwnSeed, addExternalEntry, matchAddressBook } from "./db"
 import type { OwnAddressSeed } from "./db"
 import { rectifyWallet, getLedgerSummary, getLedgerJournals } from "./ledger"
 import { generateReport, reportToPdfBuffer, reportToCsv } from "./reports"
@@ -1711,6 +1711,29 @@ async function headlessExecuteSwap(params: ExecuteSwapParams, pushSubStage: (sta
 	return result
 }
 
+// ── Firmware-capability cache for device address derivation ──────────
+// A chain can be added to the vault ahead of the firmware that implements its
+// address message (Hive is the current case). Deriving it then sends a message
+// the device doesn't recognize; the firmware replies FAILURE "Unknown message",
+// and on some builds that unrecognized round-trip knocks the device off the USB
+// bus — bouncing the user from the dashboard back to the wallet picker on every
+// balance refresh. Probe once per device+firmware, remember the miss, and skip
+// that chain until the firmware version changes.
+const unsupportedDeviceMessages = new Set<string>()
+const capabilityKey = (chainId: string) => {
+	const s = engine.getDeviceState()
+	return `${s.deviceId || 'unknown'}:${s.firmwareVersion || '?'}:${chainId}`
+}
+/** True when an address-derivation error is the firmware rejecting an
+ *  unrecognized message type (vs. a transient/device-busy failure we should
+ *  retry). readResponse turns the device Failure into `{ code, message }` via
+ *  toObject(); match the firmware's exact FAILURE_UnexpectedMessage text. */
+const isUnsupportedMessageError = (e: any): boolean => {
+	const failure = e?.message
+	const text = typeof failure === 'string' ? failure : (failure?.message ?? '')
+	return /unknown message/i.test(String(text))
+}
+
 // ── RPC Bridge (Electrobun UI ↔ Bun) ─────────────────────────────────
 const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 	maxRequestTime: 1_800_000, // 30 minutes — generous for device-interactive ops, but not infinite
@@ -2666,6 +2689,15 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				console.log(`[getBalances] nonEvmChains to derive: ${nonEvmChains.filter(c => !c.hidden).map(c => c.id).join(', ')}`)
 				for (const chain of nonEvmChains) {
 					if (chain.hidden) continue
+					// Capture identity BEFORE the device call: a failed derivation can
+					// drop the device off USB, and recomputing in the catch would then
+					// read cleared features (deviceId 'unknown', fw '?') and store a
+					// mismatched miss — so the next refresh re-sends the message.
+					const capDevId = engine.getDeviceState().deviceId || 'unknown'
+					const capKey = capabilityKey(chain.id)
+					// Skip chains this firmware already rejected as an unknown message —
+					// re-sending only fails again and can drop the device off USB.
+					if (unsupportedDeviceMessages.has(capKey)) continue
 					const t0 = Date.now()
 					try {
 						const addrParams: any = { addressNList: chain.defaultPath, showDisplay: false, coin: chain.coin }
@@ -2683,7 +2715,16 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							console.warn(`[getBalances] ${chain.id} address empty after ${ms}ms! method=${method} result=${JSON.stringify(result)}`)
 						}
 					} catch (e: any) {
-						console.warn(`[getBalances] ${chain.id} address THREW (${Date.now() - t0}ms): ${e.message}`)
+						if (isUnsupportedMessageError(e)) {
+							unsupportedDeviceMessages.add(capKey)
+							// Drop any stale cached balance for this chain (e.g. cached on a
+							// prior firmware that did implement it) so a now-underivable chain
+							// can't linger in the dashboard.
+							if (capDevId !== 'unknown') deleteCachedChainBalance(capDevId, chain.id)
+							console.warn(`[getBalances] ${chain.id}: firmware does not implement ${chain.rpcMethod} ("Unknown message") — skipping until firmware updates`)
+						} else {
+							console.warn(`[getBalances] ${chain.id} address THREW (${Date.now() - t0}ms): ${e.message}`)
+						}
 					}
 				}
 				console.log(`[getBalances] pubkeys after nonEVM derivation: ${pubkeys.length} total (nonEVM added: ${pubkeys.filter(p => !['bitcoin','litecoin','dogecoin','bitcoincash','dash','digibyte','zcash'].includes(p.chainId) && !p.chainId.startsWith('evm')).length})`)
@@ -3430,6 +3471,14 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!engine.wallet) throw new Error('No device connected')
 				const chain = getAllChains().find(c => c.id === params.chainId)
 				if (!chain) throw new Error(`Unknown chain: ${params.chainId}`)
+				// Firmware-capability gate (mirrors getBalances): if this chain's address
+				// message was already rejected as unknown, return an empty balance instead
+				// of re-sending it — the failed round-trip can drop the device off USB and
+				// bounce the user to the wallet picker (e.g. drilling into Hive to Receive).
+				if (unsupportedDeviceMessages.has(capabilityKey(chain.id))) {
+					console.warn(`[getBalance] ${chain.id}: firmware does not implement ${chain.rpcMethod} — returning empty balance`)
+					return { chainId: chain.id, symbol: chain.symbol, balance: '0', balanceUsd: 0, address: '' }
+				}
 				const pioneer = await getPioneer()
 				const wallet = engine.wallet as any
 
