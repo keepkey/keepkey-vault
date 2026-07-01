@@ -129,6 +129,11 @@ export const XrpSignRequest = z.object({
     destination: z.string().min(1),
     destinationTag: z.union([z.string(), z.number()]).optional(),
   }).passthrough(),
+  // tx (StdTx wrapper) + lastLedgerSequence are read by hdwallet's rippleSignTx
+  // (tx.value.fee/msg, lastLedgerSequence). Without them in the shape, .strip()
+  // deletes them and signing throws "undefined is not an object (msg.tx.value)".
+  tx: z.any(),
+  lastLedgerSequence: z.union([z.string(), z.number()]),
   sequence: z.union([z.string(), z.number()]),
   fee: z.union([z.string(), z.number()]).optional(),
   flags: z.number().optional(),
