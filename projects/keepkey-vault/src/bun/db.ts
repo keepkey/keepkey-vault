@@ -658,6 +658,18 @@ export function clearBalances(deviceId?: string) {
   }
 }
 
+/** Remove one chain's cached balance for a device. Used when a chain becomes
+ *  underivable on the current firmware (unknown-message) so a stale row cached
+ *  under earlier firmware can't keep showing in the dashboard. */
+export function deleteCachedChainBalance(deviceId: string, chainId: string) {
+  try {
+    if (!db) return
+    db.run('DELETE FROM balances WHERE device_id = ? AND chain_id = ?', [deviceId, chainId])
+  } catch (e: any) {
+    console.warn('[db] deleteCachedChainBalance failed:', e.message)
+  }
+}
+
 // ── Custom Tokens ────────────────────────────────────────────────────
 
 export function getCustomTokens(): CustomToken[] {
