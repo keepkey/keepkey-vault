@@ -134,7 +134,7 @@ import type { OwnAddressSeed } from "./db"
 import { rectifyWallet, getLedgerSummary, getLedgerJournals } from "./ledger"
 import { generateReport, reportToPdfBuffer, reportToCsv } from "./reports"
 import { startAudit, startBtcScan, getAudit, getAuditBtcRaw, getAuditEntry, dismissAudit, markAuditsStale, type AuditDeps } from "./audit-engine"
-import { chainSupportsDeepScan, chainSupportsLevelScan, chainLevelPath, deriveAddressParams, extractAddress, parseNativeScanResult, parseEvmScanResult, utxoAccountScriptPaths, explorerAddressUrl, pathToBip32 } from "./chain-scan"
+import { chainSupportsDeepScan, chainSupportsLevelScan, chainLevelPath, deriveAddressParams, extractAddress, parseNativeScanResult, parseEvmScanResult, utxoAccountScriptPaths, explorerAddressUrl, pathToBip32, parseBip32Path } from "./chain-scan"
 import { extractTransactionsFromReport, toCoinTrackerCsv, toZenLedgerCsv } from "./tax-export"
 import * as os from "os"
 import * as path from "path"
@@ -1548,6 +1548,26 @@ async function headlessSwapQuote(params: SwapQuoteParams): Promise<SwapQuote> {
 				}])
 				estXpub = results?.[0]?.xpub
 				estAccountPath = fromChain.defaultPath.slice(0, 3)
+				// Merge device-cached account-1+ xpubs (audit "track") so the sendMax
+				// fee estimator aggregates the SAME funds getBalances/buildTx do. Without
+				// this, a funded account 1 with an empty account 0 yields no UTXOs here →
+				// estimateUtxoFee returns null → the net re-quote below is skipped → the
+				// NEAR Intents sendMax deposit under-delivers. Mirrors the buildTx merge.
+				const utxoDevId = engine.getDeviceState().deviceId
+				if (estXpub && utxoDevId && !engine.isPassphraseWallet) {
+					const merged: Array<{ xpub: string; scriptType: string; accountPath: number[] }> = [
+						{ xpub: estXpub, scriptType: fromChain.scriptType || 'p2pkh', accountPath: estAccountPath },
+					]
+					const seen = new Set(merged.map(x => x.xpub))
+					for (const pk of getCachedPubkeys(utxoDevId)) {
+						if (pk.chainId !== fromChain.id || !pk.xpub || seen.has(pk.xpub)) continue
+						const acctPath = parseBip32Path(pk.path)
+						if (!acctPath || acctPath.length !== 3) continue
+						merged.push({ xpub: pk.xpub, scriptType: pk.scriptType || fromChain.scriptType || 'p2pkh', accountPath: acctPath })
+						seen.add(pk.xpub)
+					}
+					if (merged.length > 1) estXpubs = merged
+				}
 			}
 			const hasXpub = (estXpubs && estXpubs.length > 0) || estXpub
 			if (fromChain && hasXpub) {
@@ -2599,6 +2619,24 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					if (xpub) pubkeys.push({ caip: c.caip, pubkey: xpub, chainId: c.id, symbol: c.symbol, networkId: c.networkId })
 				}
 
+				// Merge device-cached UTXO-altcoin xpubs beyond account 0 — persisted
+				// by the audit "track" action (addUtxoAccount). Device-scoped and never
+				// written for passphrase wallets, so reading them here is hidden-safe.
+				// Dedups by xpub against the freshly-derived account-0 entries above.
+				{
+					const utxoDevId = engine.getDeviceState().deviceId
+					if (utxoDevId && !engine.isPassphraseWallet) {
+						const utxoById = new Map(utxoChains.map(c => [c.id, c]))
+						const seen = new Set(pubkeys.map(p => p.pubkey))
+						for (const pk of getCachedPubkeys(utxoDevId)) {
+							const c = utxoById.get(pk.chainId)
+							if (!c || !pk.xpub || seen.has(pk.xpub)) continue
+							pubkeys.push({ caip: c.caip, pubkey: pk.xpub, chainId: c.id, symbol: c.symbol, networkId: c.networkId })
+							seen.add(pk.xpub)
+						}
+					}
+				}
+
 				// Initialize EVM multi-address manager
 				const evmChains = nonUtxoChains.filter(c => c.chainFamily === 'evm')
 				const nonEvmChains = nonUtxoChains.filter(c => c.chainFamily !== 'evm')
@@ -3451,6 +3489,17 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						const xpub = results?.[i]?.xpub
 						if (xpub) { pubkeys.push({ caip: chain.caip, pubkey: xpub }); anyXpub = true }
 					}
+					// Merge device-cached account-1+ xpubs (audit "track") so funds beyond
+					// account 0 are spendable. Device-scoped, never written for passphrase
+					// wallets. Mirrors the portfolio merge in getBalances.
+					const utxoDevId = engine.getDeviceState().deviceId
+					if (utxoDevId && !engine.isPassphraseWallet) {
+						const seen = new Set(pubkeys.map(p => p.pubkey))
+						for (const pk of getCachedPubkeys(utxoDevId)) {
+							if (pk.chainId !== chain.id || !pk.xpub || seen.has(pk.xpub)) continue
+							pubkeys.push({ caip: chain.caip, pubkey: pk.xpub }); seen.add(pk.xpub); anyXpub = true
+						}
+					}
 					if (!anyXpub) throw new Error(`Could not derive xpub for ${chain.coin}`)
 				} else if (chain.chainFamily === 'evm') {
 					// EVM multi-address: send all tracked addresses (matches getBalances behavior)
@@ -3962,9 +4011,32 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							})
 						}
 					}
+					// Aggregate device-cached account-1+ xpubs (persisted by the audit
+					// "track" action, addUtxoAccount) so those tracked funds are actually
+					// SPENDABLE, not just displayed. Each row carries its own account-level
+					// path (parsed from the path column) so per-input signing derives the
+					// correct key for account > 0. Device-scoped, never written for
+					// passphrase wallets; dedup by xpub against the account-0 set above.
+					const utxoDevId = engine.getDeviceState().deviceId
+					if (utxoDevId && !engine.isPassphraseWallet) {
+						const seen = new Set(derivedXpubs.map(x => x.xpub))
+						for (const pk of getCachedPubkeys(utxoDevId)) {
+							if (pk.chainId !== chain.id || !pk.xpub || seen.has(pk.xpub)) continue
+							const acctPath = parseBip32Path(pk.path)
+							if (!acctPath || acctPath.length !== 3) continue
+							derivedXpubs.push({ xpub: pk.xpub, scriptType: pk.scriptType || chain.scriptType || 'p2pkh', accountPath: acctPath })
+							seen.add(pk.xpub)
+						}
+					}
 					if (derivedXpubs.length > 0) {
 						xpub = derivedXpubs[0].xpub
-						if (derivedXpubs.length > 1) {
+						// Use multi-xpub aggregation for 2+ xpubs OR whenever any xpub is
+						// account > 0. The single-xpub path ignores per-xpub accountPath, so a
+						// lone account-N xpub (e.g. account-0 derivation returned nothing but a
+						// tracked account-1 row exists) would otherwise sign with blockbook's
+						// account-0 path — a wrong key. Aggregation tags each input with its
+						// source account path, so account-N always signs with the account-N key.
+						if (derivedXpubs.length > 1 || derivedXpubs.some(x => x.accountPath[2] !== 0x80000000)) {
 							allXpubs = derivedXpubs
 						}
 					}
@@ -4323,6 +4395,39 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			addBtcAccount: async () => {
 				if (!engine.wallet) throw new Error('No device connected')
 				return await btcAccounts.addAccount(engine.wallet as any)
+			},
+			// Persist a non-BTC UTXO account's xpubs to the device-scoped pubkey
+			// cache so the audit "track" action makes those funds show + spend from
+			// now on. Mirrors the BTC xpub-cache pattern (saveCachedPubkey gated on
+			// !isPassphraseWallet) — Bitcoin itself stays on the in-memory manager.
+			addUtxoAccount: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				const chain = getAllChains().find(c => c.id === params.chainId)
+				if (!chain) throw new Error(`Unknown chain: ${params.chainId}`)
+				if (chain.chainFamily !== 'utxo' || chain.id === 'bitcoin') throw new Error(`${params.chainId} is not a non-BTC UTXO chain`)
+				const devId = engine.getDeviceState().deviceId
+				if (!devId) throw new Error('No device id')
+				// PRIVACY: the device-scoped cache must never hold hidden-wallet xpubs.
+				if (engine.isPassphraseWallet) throw new Error('Cannot persist accounts for a passphrase wallet')
+				const account = Math.max(params.level ?? 0, 0)
+				const sps = utxoAccountScriptPaths(chain, account)
+				const pks = await (engine.wallet as any).getPublicKeys(
+					sps.map(sp => ({ addressNList: sp.path, coin: chain.coin, scriptType: sp.scriptType, curve: 'secp256k1' })),
+				)
+				let saved = 0
+				for (let i = 0; i < sps.length; i++) {
+					const xpub = (pks?.[i] as any)?.xpub
+					if (!xpub) continue
+					// Key the row by the account-level BIP32 path (not the xpub) so the
+					// account INDEX survives: the spend path (buildTx) needs it to rebuild
+					// per-input signing paths for account > 0. The (device,chain,path)
+					// upsert dedups per (scriptType, account); the xpub lives in its own
+					// column for the display merges.
+					saveCachedPubkey(devId, chain.id, pathToBip32(sps[i].path), xpub, '', sps[i].scriptType)
+					saved++
+				}
+				if (!saved) throw new Error(`Could not derive xpubs for ${chain.coin} account ${account}`)
+				return { saved, account }
 			},
 			setBtcSelectedXpub: async (params) => {
 				btcAccounts.setSelectedXpub(params.accountIndex, params.scriptType)

@@ -120,6 +120,12 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       setBtcSelectedXpub: { params: { accountIndex: number; scriptType: BtcScriptType }; response: void }
       getBtcAddressIndices: { params: { xpub: string }; response: { receiveIndex: number; changeIndex: number } }
 
+      // ── UTXO altcoin multi-account (LTC/DOGE/DASH/…) ───────────────────
+      // Persist a discovered account's xpubs to the device-scoped pubkey cache
+      // so funds beyond account 0 show + spend across reconnect. Non-BTC only
+      // (Bitcoin uses the in-memory BtcAccountManager).
+      addUtxoAccount: { params: { chainId: string; level: number }; response: { saved: number; account: number } }
+
       // ── EVM multi-address ──────────────────────────────────────────────
       getEvmAddresses: { params: void; response: EvmAddressSet }
       addEvmAddressIndex: { params: { index?: number }; response: EvmAddressSet }
