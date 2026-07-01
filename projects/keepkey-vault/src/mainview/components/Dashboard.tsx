@@ -2943,8 +2943,13 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 							next.add(chainId)
 							return next
 						})
-						setDrilledChainId(chainId)
 						setShowChainPicker(false)
+						// Open the picked chain's Receive page so the user gets its address.
+						// Without this the picker only drilled the dashboard viz, leaving the
+						// hardcoded "Get BTC address" CTA as the only obvious action.
+						const picked = allChains.find(c => c.id === chainId)
+						if (picked) openChainPage(picked, 'receive')
+						else setDrilledChainId(chainId)
 					}}
 					onClose={() => setShowChainPicker(false)}
 				/>

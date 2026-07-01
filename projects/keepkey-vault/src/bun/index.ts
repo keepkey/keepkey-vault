@@ -1998,11 +1998,16 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			// ── Address derivation ────────────────────────────────────
 			btcGetAddress: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
+				// btcGetAddress is shared by every UTXO chain (Litecoin, Dash, Dogecoin, …),
+				// so resolve the cache key from params.coin instead of hardcoding bitcoin —
+				// otherwise an altcoin address overwrites bitcoin's cache and never persists
+				// under its own chain.
+				const chainId = CHAINS.find(c => c.coin === params.coin)?.id || 'bitcoin'
 				const result = (engine.isEmulator && params.showDisplay)
-					? await emuSigningOp(() => engine.wallet!.btcGetAddress(params), { operation: 'btcGetAddress', chain: 'Bitcoin' })
+					? await emuSigningOp(() => engine.wallet!.btcGetAddress(params), { operation: 'btcGetAddress', chain: params.coin || 'Bitcoin' })
 					: await engine.wallet.btcGetAddress(params)
 				const addr = typeof result === 'string' ? result : result?.address
-				if (addr) cacheAddress('bitcoin', JSON.stringify(params.addressNList || []), addr)
+				if (addr) cacheAddress(chainId, JSON.stringify(params.addressNList || []), addr)
 				return result
 			},
 			ethGetAddress: async (params) => {
