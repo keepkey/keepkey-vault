@@ -4637,7 +4637,13 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// path — prove the cached FVK belongs to the connected device first, or a
 				// stale/other-wallet FVK would surface a phantom balance via a scan request
 				// (reviewer#2). ensureFvkLoaded only loads-if-absent; it does NOT verify.
-				await ensureZcashDeviceMatch(0)
+				// force=true: the user pressing "Sync" expects a real device round-trip
+				// every time, ignoring the sticky session flag — on mismatch this purges
+				// the stale FVK + notes and re-derives, repairing a stale wallet from the
+				// UI without a manual DB wipe. Reuses the coalesced-purge path instead of
+				// mutating the module-global zcashDeviceVerified (which would open a
+				// transient window where a concurrent balance read throws "not verified").
+				await ensureZcashDeviceMatch(0, true)
 				const result = await scanOrchardNotes(params?.startHeight, params?.fullRescan)
 				if (result?.synced_to != null) updateSyncedTo(result.synced_to)
 				// A successful scan validates the wallet against the chain — even an
