@@ -1548,6 +1548,26 @@ async function headlessSwapQuote(params: SwapQuoteParams): Promise<SwapQuote> {
 				}])
 				estXpub = results?.[0]?.xpub
 				estAccountPath = fromChain.defaultPath.slice(0, 3)
+				// Merge device-cached account-1+ xpubs (audit "track") so the sendMax
+				// fee estimator aggregates the SAME funds getBalances/buildTx do. Without
+				// this, a funded account 1 with an empty account 0 yields no UTXOs here →
+				// estimateUtxoFee returns null → the net re-quote below is skipped → the
+				// NEAR Intents sendMax deposit under-delivers. Mirrors the buildTx merge.
+				const utxoDevId = engine.getDeviceState().deviceId
+				if (estXpub && utxoDevId && !engine.isPassphraseWallet) {
+					const merged: Array<{ xpub: string; scriptType: string; accountPath: number[] }> = [
+						{ xpub: estXpub, scriptType: fromChain.scriptType || 'p2pkh', accountPath: estAccountPath },
+					]
+					const seen = new Set(merged.map(x => x.xpub))
+					for (const pk of getCachedPubkeys(utxoDevId)) {
+						if (pk.chainId !== fromChain.id || !pk.xpub || seen.has(pk.xpub)) continue
+						const acctPath = parseBip32Path(pk.path)
+						if (!acctPath || acctPath.length !== 3) continue
+						merged.push({ xpub: pk.xpub, scriptType: pk.scriptType || fromChain.scriptType || 'p2pkh', accountPath: acctPath })
+						seen.add(pk.xpub)
+					}
+					if (merged.length > 1) estXpubs = merged
+				}
 			}
 			const hasXpub = (estXpubs && estXpubs.length > 0) || estXpub
 			if (fromChain && hasXpub) {
