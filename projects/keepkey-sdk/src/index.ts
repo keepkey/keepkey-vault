@@ -191,7 +191,7 @@ export class KeepKeySdk {
 
       /** Wipe all secrets from the device. Requires user confirmation on device. */
       wipe: (): Promise<{ success: boolean }> =>
-        this.client.post('/system/wipe-device'),
+        this.client.post('/system/wipe-device', undefined, this.client.signingTimeoutMs),
 
       /** Change device label, passphrase protection, or auto-lock delay. */
       applySettings: (params: ApplySettingsParams): Promise<{ success: boolean }> =>
@@ -214,22 +214,48 @@ export class KeepKeySdk {
         word_count?: number; label?: string
         pin_protection?: boolean; passphrase_protection?: boolean
       }): Promise<{ success: boolean }> =>
-        this.client.post('/system/initialize/reset-device', params),
+        this.client.post('/system/initialize/reset-device', params, this.client.signingTimeoutMs),
 
       /** Recover an existing device from a seed phrase. Requires user input on device. */
       recoverDevice: (params: {
         word_count?: number; label?: string
         pin_protection?: boolean; passphrase_protection?: boolean
       }): Promise<{ success: boolean }> =>
-        this.client.post('/system/initialize/recover-device', params),
+        this.client.post('/system/initialize/recover-device', params, this.client.signingTimeoutMs),
 
       /** Load a device with a specific seed (testing only). */
       loadDevice: (params: any): Promise<{ success: boolean }> =>
-        this.client.post('/system/initialize/load-device', params),
+        this.client.post('/system/initialize/load-device', params, this.client.signingTimeoutMs),
 
       /** Send a PIN entered via matrix input during a recovery flow. */
       sendPin: (pin: string): Promise<{ success: boolean }> =>
         this.client.post('/system/recovery/pin', { pin }),
+    },
+
+    /** On-device cipher-recovery character entry (drives a RecoveryDevice flow). */
+    recovery: {
+      /**
+       * Send one ciphered character during on-device cipher recovery.
+       * The device shows a scrambled keyboard on the OLED; the host relays the
+       * character the user "typed". A finalized word that isn't in the BIP-39
+       * wordlist makes the in-flight `recoverDevice()` promise reject with
+       * "Word not found in BIP39 wordlist".
+       */
+      sendCharacter: (character: string): Promise<{ success: boolean }> =>
+        this.client.post('/system/recovery/character', { character }),
+
+      /** Delete the last character entered during cipher recovery. */
+      sendCharacterDelete: (): Promise<{ success: boolean }> =>
+        this.client.post('/system/recovery/character/delete', {}),
+
+      /** Finalize cipher-recovery word/seed entry (equivalent to pressing "next"). */
+      sendCharacterDone: (): Promise<{ success: boolean }> =>
+        this.client.post('/system/recovery/character/done', {}),
+
+      /** Current cipher-recovery state. `seq` advances each time the device asks
+       *  for the next character — poll it to sync sends with the device. */
+      getRecoveryState: (): Promise<{ active: boolean; word_pos: number | null; character_pos: number | null; seq: number }> =>
+        this.client.get('/system/recovery/state'),
     },
   }
 

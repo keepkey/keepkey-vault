@@ -54,6 +54,7 @@
   "author": "KeepKey",
   "license": "MIT",
   "devDependencies": {
+    "ethers": "^6.16.0",
     "typescript": "^5.5.0"
   }
 }

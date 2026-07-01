@@ -121,7 +121,7 @@ import { buildTx, broadcastTx } from "./txbuilder"
 import { buildCosmosStakingTx, buildCosmosNameRegTx } from "./txbuilder/cosmos"
 import { initializeOrchardFromDevice, scanOrchardNotes, getShieldedBalance, sendShielded, ensureFvkLoaded, displayOrchardAddressOnDevice } from "./txbuilder/zcash-shielded"
 import { isSidecarReady, startSidecar, stopSidecar, wipeSidecarWalletDb, hasFvkLoaded, getCachedFvk, onScanProgress, getScanState, updateSyncedTo, beginZcashSend, endZcashSend, isZcashSendInFlight } from "./zcash-sidecar"
-import { CHAINS, customChainToChainDef, isChainSupported } from "../shared/chains"
+import { CHAINS, customChainToChainDef, isChainSupported, hiveRolePath } from "../shared/chains"
 import { versionCompare } from "../shared/firmware-versions"
 import type { ChainDef } from "../shared/chains"
 import { BtcAccountManager } from "./btc-accounts"
@@ -2388,9 +2388,126 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!result) throw new Error('hiveGetPublicKey returned no result')
 				return result
 			},
+			// Derive all four SLIP-0048 role keys (owner/active/posting/memo) for an
+			// account index, for the Hive onboarding panel (account creation needs all 4).
+			hiveGetRoleKeys: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				const accountIndex = params?.accountIndex ?? 0
+				const roles = ['owner', 'active', 'posting', 'memo'] as const
+				const out: Record<string, string> = {}
+				for (const role of roles) {
+					const r = await (engine.wallet as any).hiveGetPublicKey({
+						addressNList: hiveRolePath(role, accountIndex),
+						showDisplay: false,
+					})
+					if (!r?.publicKey) throw new Error(`hiveGetPublicKey(${role}) returned no key`)
+					out[role] = r.publicKey
+				}
+				return out as { owner: string; active: string; posting: string; memo: string }
+			},
+			// Resolve a Hive account from a device public key via Pioneer. Returns
+			// { noAccount: true } when the key controls no account yet (onboarding
+			// case), or { account: {...} } with balances/RC when it does.
+			hiveGetAccount: async (params) => {
+				const pubkey = params?.pubkey
+				if (!pubkey) throw new Error('hiveGetAccount requires a pubkey')
+				const base = getPioneerApiBase()
+				const resp = await fetch(`${base}/api/v1/hive/account/${encodeURIComponent(pubkey)}`)
+				if (!resp.ok) throw new Error(`Pioneer hive/account ${resp.status}`)
+				return await resp.json()
+			},
+			// Live username availability (format + on-chain), for the onboarding wizard.
+			hiveUsernameAvailable: async (params) => {
+				const name = params?.name
+				if (!name) return { success: false, available: false, reason: 'empty' }
+				const base = getPioneerApiBase()
+				const resp = await fetch(`${base}/api/v1/hive/username-available/${encodeURIComponent(name)}`)
+				return await resp.json()
+			},
+			// Full sponsor-backed account creation: derive the 4 device keys, get a
+			// device attestation (owner-signed account_create, op 9), POST to Pioneer's
+			// sponsor endpoint. The sponsor (@keepkey) pays; no user key leaves the device.
+			hiveCreateAccount: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				const username = params?.username
+				if (!username) throw new Error('hiveCreateAccount requires a username')
+				const wallet = engine.wallet as any
+				const accountIndex = params?.accountIndex ?? 0
+
+				// 1. Derive the four SLIP-0048 role keys.
+				const roles = ['owner', 'active', 'posting', 'memo'] as const
+				const keys: Record<string, string> = {}
+				for (const role of roles) {
+					const r = await wallet.hiveGetPublicKey({ addressNList: hiveRolePath(role, accountIndex), showDisplay: false })
+					if (!r?.publicKey) throw new Error(`hiveGetPublicKey(${role}) returned no key`)
+					keys[role] = r.publicKey
+				}
+
+				// 2. Device attestation — owner-signed account_create (op 9). The device
+				//    re-derives the keys itself; ref_block/expiration are unchecked by the
+				//    server (attestation only, not broadcast). On the emulator, route
+				//    through emuSigningOp so the interactive Confirm/Reject gate appears;
+				//    a real device uses its physical button (calling emuSigningOp there
+				//    would pop the emulator window).
+				const signAccountCreate = () => wallet.hiveSignAccountCreate({
+					addressNList: hiveRolePath('owner', accountIndex),
+					refBlockNum: 0, refBlockPrefix: 0, expiration: 0,
+					creator: 'keepkey',
+					newAccountName: username,
+					ownerKey: keys.owner, activeKey: keys.active,
+					postingKey: keys.posting, memoKey: keys.memo,
+					feeAmount: 3000,
+				})
+				const signed = engine.isEmulator
+					? await emuSigningOp(signAccountCreate, { operation: 'hiveSignAccountCreate', chain: 'Hive' })
+					: await signAccountCreate()
+				if (!signed?.signature || !signed?.serializedTx) {
+					throw new Error('Device did not return an attestation')
+				}
+				const toHex = (v: any) => v instanceof Uint8Array ? Buffer.from(v).toString('hex') : String(v)
+
+				// 3. ETH gate (anti-sponsor-drain). Sign a fixed EIP-191 message bound to
+				//    username+ownerKey with the device ETH key (m/44'/60'/0'/0/0). The
+				//    server recovers the address, requires it to hold mainnet ETH, and
+				//    allows one sponsored account per address. Message bytes are pinned by
+				//    a server unit test — do NOT reformat (no trailing newline).
+				const gateMessage = `KeepKey Hive onboarding\nusername:${username}\nowner:${keys.owner}`
+				const gateMessageHex = '0x' + Buffer.from(gateMessage, 'utf8').toString('hex')
+				const signEthGate = () => wallet.ethSignMessage({ addressNList: evmAddressPath(0), message: gateMessageHex })
+				const ethSigned = engine.isEmulator
+					? await emuSigningOp(signEthGate, { operation: 'ethSignMessage', chain: 'Ethereum', memo: gateMessage.slice(0, 64) })
+					: await signEthGate()
+				// hdwallet returns { address: eip55 0x…, signature: 0x…+65-byte r||s||v } —
+				// exactly the form ethers.verifyMessage expects.
+				if (!ethSigned?.address || !ethSigned?.signature) {
+					throw new Error('Device did not return an ETH gate signature')
+				}
+
+				// 4. POST to the sponsor endpoint.
+				const base = getPioneerApiBase()
+				const resp = await fetch(`${base}/api/v1/hive/create-account`, {
+					method: 'POST',
+					headers: { 'content-type': 'application/json' },
+					body: JSON.stringify({
+						username,
+						ownerKey: keys.owner, activeKey: keys.active,
+						postingKey: keys.posting, memoKey: keys.memo,
+						attestation: { serializedTx: toHex(signed.serializedTx), signature: toHex(signed.signature) },
+						ethAddress: ethSigned.address,
+						ethSignature: ethSigned.signature,
+					}),
+				})
+				const body = await resp.json().catch(() => ({}))
+				return { status: resp.status, ...body }
+			},
 			hiveSignTx: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
-				const result = await (engine.wallet as any).hiveSignTx(params)
+				// Route through emuSigningOp on the emulator so the interactive
+				// Confirm/Reject gate appears (a real device uses its button).
+				const signTx = () => (engine.wallet as any).hiveSignTx(params)
+				const result = engine.isEmulator
+					? await emuSigningOp(signTx, { operation: 'hiveSignTx', chain: 'Hive', to: params?.to, value: params?.amount != null ? String(params.amount) : undefined })
+					: await signTx()
 				if (!result) throw new Error('hiveSignTx returned no result')
 				return {
 					signature: result.signature instanceof Uint8Array

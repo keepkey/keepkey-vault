@@ -69,7 +69,7 @@ class KeepKeySdk {
                 /** Ping the device. Useful for connection checks. */
                 ping: () => this.client.post('/system/info/ping'),
                 /** Wipe all secrets from the device. Requires user confirmation on device. */
-                wipe: () => this.client.post('/system/wipe-device'),
+                wipe: () => this.client.post('/system/wipe-device', undefined, this.client.signingTimeoutMs),
                 /** Change device label, passphrase protection, or auto-lock delay. */
                 applySettings: (params) => this.client.post('/system/apply-settings', params),
                 /** Apply device policy changes. */
@@ -79,13 +79,31 @@ class KeepKeySdk {
                 /** Clear the device session (forces PIN re-entry for the next sensitive call). */
                 clearSession: () => this.client.post('/system/clear-session'),
                 /** Initialize a new device with a fresh seed. Requires user confirmation. */
-                resetDevice: (params) => this.client.post('/system/initialize/reset-device', params),
+                resetDevice: (params) => this.client.post('/system/initialize/reset-device', params, this.client.signingTimeoutMs),
                 /** Recover an existing device from a seed phrase. Requires user input on device. */
-                recoverDevice: (params) => this.client.post('/system/initialize/recover-device', params),
+                recoverDevice: (params) => this.client.post('/system/initialize/recover-device', params, this.client.signingTimeoutMs),
                 /** Load a device with a specific seed (testing only). */
-                loadDevice: (params) => this.client.post('/system/initialize/load-device', params),
+                loadDevice: (params) => this.client.post('/system/initialize/load-device', params, this.client.signingTimeoutMs),
                 /** Send a PIN entered via matrix input during a recovery flow. */
                 sendPin: (pin) => this.client.post('/system/recovery/pin', { pin }),
+            },
+            /** On-device cipher-recovery character entry (drives a RecoveryDevice flow). */
+            recovery: {
+                /**
+                 * Send one ciphered character during on-device cipher recovery.
+                 * The device shows a scrambled keyboard on the OLED; the host relays the
+                 * character the user "typed". A finalized word that isn't in the BIP-39
+                 * wordlist makes the in-flight `recoverDevice()` promise reject with
+                 * "Word not found in BIP39 wordlist".
+                 */
+                sendCharacter: (character) => this.client.post('/system/recovery/character', { character }),
+                /** Delete the last character entered during cipher recovery. */
+                sendCharacterDelete: () => this.client.post('/system/recovery/character/delete', {}),
+                /** Finalize cipher-recovery word/seed entry (equivalent to pressing "next"). */
+                sendCharacterDone: () => this.client.post('/system/recovery/character/done', {}),
+                /** Current cipher-recovery state. `seq` advances each time the device asks
+                 *  for the next character — poll it to sync sends with the device. */
+                getRecoveryState: () => this.client.get('/system/recovery/state'),
             },
         };
         // ═══════════════════════════════════════════════════════════════════
@@ -231,6 +249,18 @@ class KeepKeySdk {
         this.solana = {
             /** Sign a Solana transaction. `raw_tx` must be the base64-encoded serialized transaction. */
             solanaSignTransaction: (params) => this.client.post('/solana/sign-transaction', params),
+            /**
+             * Sign a Solana off-chain message with domain separation. Firmware
+             * builds the spec envelope (`\xff` || "solana offchain" || version ||
+             * format || length || message) and Ed25519-signs it. NO AdvancedMode
+             * gate is needed — the envelope's leading `\xff` byte is invalid as a
+             * Solana transaction prefix, providing the domain separation that
+             * `solanaSignMessage` lacks. Format 2 (extended UTF-8) is rejected
+             * device-side; only formats 0 (ASCII) and 1 (UTF-8 limited, max 1212
+             * bytes) are supported. Verifier MUST reconstruct the envelope locally
+             * and verify against it, NOT against the bare message.
+             */
+            solanaSignOffchainMessage: (params) => this.client.post('/solana/sign-offchain-message', params),
         };
         // ═══════════════════════════════════════════════════════════════════
         // tron — TRON signing
@@ -239,6 +269,31 @@ class KeepKeySdk {
         this.tron = {
             /** Sign a TRON transaction. `amount` is in sun (1 TRX = 1,000,000 sun). */
             tronSignTransaction: (params) => this.client.post('/tron/sign-transaction', params),
+            /**
+             * Sign a message under TIP-191 (TRON's analog of EIP-191 personal_sign):
+             *   hash = keccak256("\x19TRON Signed Message:\n" + decimal(len) + msg)
+             *   sig  = secp256k1_sign(hash) → 65 bytes (r || s || 27+v)
+             *
+             * Pass `is_text=false` to send `message` as hex bytes; default treats
+             * it as UTF-8.
+             */
+            tronSignMessage: (params) => this.client.post('/tron/sign-message', params),
+            /**
+             * Verify a TIP-191 signature against the claimed Base58Check address.
+             * The device recovers the secp256k1 pubkey, derives the canonical
+             * TRON address, and compares it against `address`. Returns
+             * `{ verified: boolean }`.
+             */
+            tronVerifyMessage: (params) => this.client.post('/tron/verify-message', params),
+            /**
+             * TIP-712 typed-data signing in hash mode. Host pre-computes the
+             * domainSeparator + message hashes per the TIP-712 spec; the device
+             * assembles
+             *   keccak256("\x19\x01" || domain_separator_hash || message_hash)
+             * and signs with secp256k1. Both hashes must be exactly 32 bytes;
+             * omit `message_hash` for primaryType="EIP712Domain".
+             */
+            tronSignTypedHash: (params) => this.client.post('/tron/sign-typed-hash', params),
         };
         // ═══════════════════════════════════════════════════════════════════
         // ton — TON signing
@@ -247,6 +302,32 @@ class KeepKeySdk {
         this.ton = {
             /** Sign a TON transaction. `raw_tx` must be the base64- or hex-encoded raw transaction. */
             tonSignTransaction: (params) => this.client.post('/ton/sign-transaction', params),
+            /**
+             * Bare Ed25519 over message bytes. NO domain separation — firmware
+             * fences this behind the `AdvancedMode` policy. With the policy
+             * disabled (default) this call returns a Failure response. Returns
+             * the 32-byte Ed25519 public key + 64-byte signature, both hex.
+             *
+             * For TON Connect-style auth flows, prefer the upcoming `ton_proof`
+             * envelope (separate endpoint, not yet implemented) which carries
+             * proper domain separation and doesn't need the policy gate.
+             */
+            tonSignMessage: (params) => this.client.post('/ton/sign-message', params),
+            /**
+             * Build an unsigned TON v4R2 transfer. Fetches seqno and wallet
+             * state from TonCenter, constructs the body cell, and returns the
+             * 32-byte body hash the device should sign — the client never
+             * touches BOC/Cell internals. Echo the returned `build` object back
+             * to `tonFinalizeTransfer` after signing.
+             */
+            tonBuildTransfer: (params) => this.client.post('/ton/build-transfer', params),
+            /**
+             * Finalize a signed TON transfer: assembles the external message
+             * BOC from the prior `build` + the device's Ed25519 signature, then
+             * broadcasts via TonCenter. Pass `broadcast: false` to skip the
+             * broadcast and inspect/retry manually.
+             */
+            tonFinalizeTransfer: (params) => this.client.post('/ton/finalize-transfer', params),
         };
         // ═══════════════════════════════════════════════════════════════════
         // xpub — public key operations

@@ -12,6 +12,7 @@ import { AnimatedUsd } from "./AnimatedUsd"
 import { formatBalance } from "../lib/formatting"
 import { useFiat } from "../lib/fiat-context"
 import { ReceiveView } from "./ReceiveView"
+import { HiveAccountPanel } from "./HiveAccountPanel"
 import { SendForm } from "./SendForm"
 
 // Lazy-load optional feature components — defers module evaluation to avoid
@@ -200,6 +201,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 
 	// TON: bounceable toggle (default: non-bounceable / UQ for safe receiving)
 	const isTon = chain.chainFamily === 'ton'
+	const isHive = chain.chainFamily === 'hive'
 	const [tonBounceable, setTonBounceable] = useState(false)
 
 	const deriveAddress = useCallback(async (path?: number[], overrideBounceable?: boolean) => {
@@ -1127,6 +1129,8 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 						<Suspense fallback={<Spinner size="sm" color="kk.gold" />}>
 							<ZcashPrivacyTab />
 						</Suspense>
+					) : isHive ? (
+						<HiveAccountPanel activeKey={address} color={chain.color} loading={loading} deriveError={deriveError} onRetryDerive={deriveAddress} />
 					) : (
 						<ReceiveView
 							chain={chain}
