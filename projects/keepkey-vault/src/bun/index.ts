@@ -3287,7 +3287,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						if (p.chainId === 'bitcoin' || evmAddressSet.has(p.pubkey.toLowerCase())) continue
 						utxoChainEntryCount.set(p.chainId, (utxoChainEntryCount.get(p.chainId) || 0) + 1)
 					}
-					const utxoChainAgg = new Map<string, { balance: number; usd: number; address: string; symbol: string; matched: boolean }>()
+					const utxoChainAgg = new Map<string, { balance: number; usd: number; address: string; symbol: string; matched: boolean; allOk: boolean }>()
 
 					const selectedXpubStr = btcAccounts.getSelectedXpub()?.xpub
 					for (const entry of pubkeys) {
@@ -3370,8 +3370,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 								agg.usd += usd
 								if (!agg.address && match?.address) agg.address = match.address
 								agg.matched = agg.matched || !!match
+								agg.allOk = agg.allOk && !isFailedEntry
 							} else {
-								utxoChainAgg.set(entry.chainId, { balance: bal, usd, address: match?.address || '', symbol: entry.symbol, matched: !!match })
+								utxoChainAgg.set(entry.chainId, { balance: bal, usd, address: match?.address || '', symbol: entry.symbol, matched: !!match, allOk: !isFailedEntry })
 							}
 							continue
 						}
@@ -3473,10 +3474,12 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					const btcConfirmed = btcPubkeyEntries.every(e => !failedPubkeySetForDb.has(`${e.caip}:${e.pubkey}`))
 					if (btcConfirmed) confirmedChainIds.add('bitcoin')
 					else confirmedChainIds.delete('bitcoin')
-					// Never persist a 0 we didn't validate: if Pioneer returned no row for ANY
-					// of a multi-xpub chain's pubkeys, keep the cached value instead.
+					// Never persist an aggregate we didn't fully validate: like BTC above, a
+					// multi-xpub chain is confirmed only if EVERY pubkey's chunk succeeded AND
+					// at least one row came back — else a partial/zero sum would force-write
+					// over a good cached balance. Unconfirmed → guarded upsert keeps non-zero.
 					for (const [chainId, agg] of utxoChainAgg) {
-						if (!agg.matched) confirmedChainIds.delete(chainId)
+						if (!agg.matched || !agg.allOk) confirmedChainIds.delete(chainId)
 					}
 
 					// Mark that Pioneer has responded — prevents getBtcAccounts from re-loading stale DB rows
