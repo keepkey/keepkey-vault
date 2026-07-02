@@ -240,20 +240,43 @@ function unwrapPortfolioResponse(resp: any): {
 // chain). Replaces the audit's former GetBalanceAddressByNetwork calls, which
 // were EVM-only (route /evm/balance → ETH JSON-RPC) and 500'd for any non-EVM
 // networkId (bip122/cosmos/ripple), so BTC/DOGE/XRP/Cosmos balances read 0.
+// Patient retry for audit balance lookups: a transient Pioneer blip must not
+// surface as "couldn't verify" — only claim the API is down after it failed
+// repeatedly over a real window. 5 attempts, 30s between failures.
+const AUDIT_BALANCE_ATTEMPTS = 5
+const AUDIT_BALANCE_RETRY_MS = 30_000
+async function auditPatientFetch<T>(label: string, fn: () => Promise<T>): Promise<T> {
+  let lastErr: any
+  for (let attempt = 1; attempt <= AUDIT_BALANCE_ATTEMPTS; attempt++) {
+    try {
+      return await withTimeout(fn(), PIONEER_TIMEOUT_MS, label)
+    } catch (e: any) {
+      lastErr = e
+      if (attempt < AUDIT_BALANCE_ATTEMPTS) {
+        console.warn(`[audit] ${label} attempt ${attempt}/${AUDIT_BALANCE_ATTEMPTS} failed (${e?.message}) — retrying in ${AUDIT_BALANCE_RETRY_MS / 1000}s`)
+        await new Promise(r => setTimeout(r, AUDIT_BALANCE_RETRY_MS))
+      }
+    }
+  }
+  throw lastErr
+}
+
 async function auditNativeBalance(
   chain: { caip: string; id: string },
   address: string,
 ): Promise<{ native: string; hasBalance: boolean; balanceError: boolean }> {
   try {
     const pioneer = await getPioneer()
-    const resp = await withTimeout(
-      pioneer.GetPortfolioBalances({ pubkeys: [{ caip: chain.caip, pubkey: address }] }, { forceRefresh: true }),
-      PIONEER_TIMEOUT_MS, `audit balance ${chain.id}`,
-    )
-    const { entries, meta } = unwrapPortfolioResponse(resp)
-    const { native, hasBalance } = parseNativeScanResult(entries, chain.caip)
-    // degraded + nothing found = unverified, not a confident zero (honesty rule).
-    if (!hasBalance && meta?.degraded) return { native: '0', hasBalance: false, balanceError: true }
+    // degraded + nothing found = unverified, not a confident zero (honesty
+    // rule) — treated as retryable so a transient upstream blip gets the same
+    // patience as a thrown request.
+    const { native, hasBalance } = await auditPatientFetch(`audit balance ${chain.id}`, async () => {
+      const resp = await pioneer.GetPortfolioBalances({ pubkeys: [{ caip: chain.caip, pubkey: address }] }, { forceRefresh: true })
+      const { entries, meta } = unwrapPortfolioResponse(resp)
+      const parsed = parseNativeScanResult(entries, chain.caip)
+      if (!parsed.hasBalance && meta?.degraded) throw new Error('balance API degraded')
+      return parsed
+    })
     return { native, hasBalance, balanceError: false }
   } catch (e: any) {
     console.warn(`[audit] balance ${chain.id} failed: ${e?.message}`)
@@ -276,14 +299,15 @@ async function auditBalanceForAddress(
     const pioneer = await getPioneer()
     // GetPortfolioBalances can return 200 with DEGRADED data — for a single-caip
     // query meta.degraded means THIS chain's fresh fetch failed, so an empty
-    // result is "couldn't verify", NOT a clean $0 (honesty rule).
-    const resp = await withTimeout(
-      pioneer.GetPortfolioBalances({ pubkeys: [{ caip: chain.caip, pubkey: address }] }, { forceRefresh: true }),
-      PIONEER_TIMEOUT_MS, `audit EVM balance ${chain.id}`,
-    )
-    const { entries, meta } = unwrapPortfolioResponse(resp)
-    const parsed = parseEvmScanResult(entries)
-    if (!parsed.hasBalance && meta?.degraded) return { native: '0', hasBalance: false, balanceError: true }
+    // result is "couldn't verify", NOT a clean $0 (honesty rule). Degraded-empty
+    // is retryable — same patience as a thrown request.
+    const parsed = await auditPatientFetch(`audit EVM balance ${chain.id}`, async () => {
+      const resp = await pioneer.GetPortfolioBalances({ pubkeys: [{ caip: chain.caip, pubkey: address }] }, { forceRefresh: true })
+      const { entries, meta } = unwrapPortfolioResponse(resp)
+      const p = parseEvmScanResult(entries)
+      if (!p.hasBalance && meta?.degraded) throw new Error('balance API degraded')
+      return p
+    })
     return { native: parsed.native, hasBalance: parsed.hasBalance, balanceError: false, tokens: parsed.tokens.length ? parsed.tokens : undefined }
   } catch (e: any) {
     console.warn(`[audit] EVM balance ${chain.id} failed: ${e?.message}`)
@@ -3635,17 +3659,17 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					for (const entry of btcPubkeyEntries) pubkeys.push({ caip: entry.caip, pubkey: entry.pubkey })
 					// displayAddress left empty — UTXO: frontend auto-derives from device
 				} else if (chain.chainFamily === 'utxo') {
-					// Non-BTC UTXO: derive all script-type xpubs (LTC has 3, others have 1)
-					const scriptTypes = chain.id === 'litecoin'
-						? [{ scriptType: 'p2pkh', purpose: 44 }, { scriptType: 'p2sh-p2wpkh', purpose: 49 }, { scriptType: 'p2wpkh', purpose: 84 }]
-						: [{ scriptType: chain.scriptType || 'p2pkh', purpose: 44 }]
-					const paths = scriptTypes.map(st => ({
-						addressNList: [st.purpose + 0x80000000, chain.defaultPath[1], 0x80000000],
-						coin: chain.coin, scriptType: st.scriptType, curve: 'secp256k1',
+					// Non-BTC UTXO: derive account-0 xpubs via the shared helper (standard
+					// script-type set + the chain's own receive convention — see
+					// utxoAccountScriptPaths for why the latter is load-bearing on LTC).
+					const sps = utxoAccountScriptPaths(chain, 0)
+					const paths = sps.map(sp => ({
+						addressNList: sp.path,
+						coin: chain.coin, scriptType: sp.scriptType, curve: 'secp256k1',
 					}))
 					const results = await wallet.getPublicKeys(paths)
 					let anyXpub = false
-					for (let i = 0; i < scriptTypes.length; i++) {
+					for (let i = 0; i < sps.length; i++) {
 						const xpub = results?.[i]?.xpub
 						if (xpub) { pubkeys.push({ caip: chain.caip, pubkey: xpub }); anyXpub = true }
 					}
@@ -4114,13 +4138,12 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				} else {
 					// Non-BTC UTXO: derive all applicable script-type xpubs so buildUtxoTx
 					// can aggregate UTXOs from any address type (mirrors BTC multi-xpub logic).
-					const scriptTypes = chain.id === 'litecoin'
-						? [{ scriptType: 'p2pkh', purpose: 44 }, { scriptType: 'p2sh-p2wpkh', purpose: 49 }, { scriptType: 'p2wpkh', purpose: 84 }]
-						: [{ scriptType: chain.scriptType || 'p2pkh', purpose: 44 }]
+					// Shared helper — includes the chain's own receive convention (LTC hands
+					// out p2wpkh on the 44' branch), which the standard trio misses.
+					const scriptTypes = utxoAccountScriptPaths(chain, 0)
 
-					const coinType = chain.defaultPath[1] // already hardened (0x80000000 + slip44)
 					const pubKeyPaths = scriptTypes.map(st => ({
-						addressNList: [st.purpose + 0x80000000, coinType, 0x80000000],
+						addressNList: st.path,
 						coin: chain.coin,
 						scriptType: st.scriptType,
 						curve: 'secp256k1',
@@ -4555,6 +4578,22 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				}
 				if (!saved) throw new Error(`Could not derive xpubs for ${chain.coin} account ${account}`)
 				return { saved, account }
+			},
+			// Tracked account indices for a non-BTC UTXO chain: account 0 always,
+			// plus any accounts persisted by addUtxoAccount. Hidden wallets never
+			// have cached rows (and must not read the standard wallet's), so they
+			// only ever see account 0.
+			getUtxoAccounts: async (params) => {
+				const devId = engine.getDeviceState().deviceId
+				const accounts = new Set<number>([0])
+				if (devId && !engine.isPassphraseWallet) {
+					for (const pk of getCachedPubkeys(devId)) {
+						if (pk.chainId !== params.chainId) continue
+						const path = parseBip32Path(pk.path)
+						if (path && path.length >= 3) accounts.add(path[2] & 0x7fffffff)
+					}
+				}
+				return { accounts: [...accounts].sort((a, b) => a - b) }
 			},
 			setBtcSelectedXpub: async (params) => {
 				btcAccounts.setSelectedXpub(params.accountIndex, params.scriptType)
@@ -6690,16 +6729,18 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					let native = '0', hasBalance = false, balanceError = false
 					try {
 						const pioneer = await getPioneer()
-						const resp = await withTimeout(
-							pioneer.GetPortfolioBalances({ pubkeys: xpubs.map(x => ({ caip: chain.caip, pubkey: x })) }, { forceRefresh: true }),
-							PIONEER_TIMEOUT_MS, `audit utxo-acct ${chain.id}`,
-						)
-						const { entries, meta } = unwrapPortfolioResponse(resp)
-						const natives = (Array.isArray(entries) ? entries : []).filter((e: any) => String(e?.caip || '').split('/')[0] === prefix)
-						const total = natives.reduce((acc: number, e: any) => acc + (parseFloat(String(e?.balance ?? '0')) || 0), 0)
+						// Patient: degraded-empty (unverified, not a confident zero) and
+						// thrown requests both retry before surfacing "couldn't verify".
+						const total = await auditPatientFetch(`audit utxo-acct ${chain.id}`, async () => {
+							const resp = await pioneer.GetPortfolioBalances({ pubkeys: xpubs.map(x => ({ caip: chain.caip, pubkey: x })) }, { forceRefresh: true })
+							const { entries, meta } = unwrapPortfolioResponse(resp)
+							const natives = (Array.isArray(entries) ? entries : []).filter((e: any) => String(e?.caip || '').split('/')[0] === prefix)
+							const sum = natives.reduce((acc: number, e: any) => acc + (parseFloat(String(e?.balance ?? '0')) || 0), 0)
+							if (sum <= 0 && meta?.degraded) throw new Error('balance API degraded')
+							return sum
+						})
 						native = String(total)
 						hasBalance = total > 0
-						if (!hasBalance && meta?.degraded) balanceError = true // unverified, not a confident zero
 					} catch (e: any) {
 						console.warn(`[audit] utxo-acct ${chain.id} #${account} balance failed: ${e?.message}`)
 						balanceError = true
@@ -6724,7 +6765,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const address = extractAddress(await (engine.wallet as any)[method](dp))
 				if (!address) throw new Error('Device returned no address for that path')
 				const { native, hasBalance, balanceError, tokens } = await auditBalanceForAddress(chain, address)
-				return { pathStr: pathToBip32(path), address, native, symbol: chain.symbol, hasBalance, balanceError, tokens, explorerUrl: explorerAddressUrl(chain, address) }
+				return { pathStr: pathToBip32(path), address, native, symbol: chain.symbol, hasBalance, balanceError, tokens, explorerUrl: explorerAddressUrl(chain, address), addressNList: path, scriptType: dp.scriptType }
 			},
 			// Batch derive + balance-check a list of explicit paths (EVM known-paths
 			// grid). Read-only, gen-guarded.
@@ -6746,9 +6787,65 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					try { address = extractAddress(await (engine.wallet as any)[method](dp)) } catch { continue }
 					if (!address) continue
 					const { native, hasBalance, balanceError, tokens } = await auditBalanceForAddress(chain, address)
-					results.push({ pathStr: pathToBip32(path), address, native, symbol: chain.symbol, hasBalance, balanceError, tokens, explorerUrl: explorerAddressUrl(chain, address) })
+					results.push({ pathStr: pathToBip32(path), address, native, symbol: chain.symbol, hasBalance, balanceError, tokens, explorerUrl: explorerAddressUrl(chain, address), addressNList: path, scriptType: dp.scriptType })
 				}
 				return { results }
+			},
+			// Sweep ONE funded address-level audit find to the chain's standard
+			// receive address. For funds on path+scriptType combos the portfolio
+			// can't spend from the Send page (uncommon branches, custom paths).
+			// Signs with the exact found path — no xpub/account machinery, nothing
+			// persisted (hidden-wallet safe). Two-step: dryRun quotes, then signs.
+			auditSweepPath: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				if (engine.getDeviceState().state !== 'ready') throw new Error('Device not ready')
+				const chain = getAllChains().find(c => c.id === params.chainId)
+				if (!chain) throw new Error(`Unknown chain: ${params.chainId}`)
+				if (chain.chainFamily !== 'utxo') throw new Error(`${chain.symbol} can't be swept this way`)
+				const path = params.addressNList
+				if (!Array.isArray(path) || path.length < 2 || path.length > 10 || path.some(n => !Number.isInteger(n) || n < 0)) {
+					throw new Error('Invalid derivation path')
+				}
+				const captured = engine.wallet
+				// Device-swap guard: the find may be from a scan on a DIFFERENT physical
+				// device/seed. Re-derive on the connected device and require an exact
+				// match before touching funds — never sign with the wrong wallet.
+				const { method, params: dp } = deriveAddressParams(chain, path)
+				if (params.scriptType) dp.scriptType = params.scriptType
+				const derived = extractAddress(await (engine.wallet as any)[method](dp))
+				if (!derived || derived !== params.expectedAddress) {
+					throw new Error('The connected device does not derive this address — reconnect the wallet the funds were found with and re-run the scan')
+				}
+				// Destination: the chain's standard receive address (account 0).
+				let destination = params.destinationAddress
+				if (!destination) {
+					const { method: m2, params: dp2 } = deriveAddressParams(chain, chain.defaultPath)
+					destination = extractAddress(await (engine.wallet as any)[m2](dp2))
+				}
+				if (!destination) throw new Error(`Could not derive standard ${chain.symbol} receive address`)
+				if (destination === derived) throw new Error('These funds are already on the standard receive address')
+
+				const { fetchUtxos, buildSweepTx } = await import('./sweep-engine')
+				const utxos = await fetchUtxos(derived, chain.networkId)
+				if (!utxos.length) throw new Error('No spendable funds found on this address')
+				const balanceSats = utxos.reduce((s, u) => s + u.value, 0)
+				const scriptType = dp.scriptType || chain.scriptType || 'p2pkh'
+				const sweep = await buildSweepTx(
+					{ results: [{ path, pathStr: pathToBip32(path), scriptType, address: derived, category: 'mismatch', balanceSats, utxos }] } as any,
+					destination,
+					{ coin: chain.coin, networkId: chain.networkId },
+				)
+				const summary = {
+					fromAddress: derived, destination, inputCount: sweep.inputCount,
+					totalSats: sweep.totalInputSats, fee: sweep.fee, outputSats: sweep.totalInputSats - sweep.fee,
+					symbol: chain.symbol,
+				}
+				if (params.dryRun) return { ...summary, dryRun: true }
+				if (engine.wallet !== captured) throw new Error('Device changed — re-run the scan')
+				const signed = await engine.wallet.btcSignTx(sweep.unsignedTx)
+				const pioneer = await getPioneer()
+				const { txid } = await broadcastTx(pioneer, chain, signed)
+				return { ...summary, txid, explorerTxUrl: chain.explorerTxUrl ? chain.explorerTxUrl.replace('{{txid}}', txid) : null }
 			},
 			// Raw-path inspector: derive an address + its pubkey/xpub + balance for a
 			// power user verifying derivations. Read-only.

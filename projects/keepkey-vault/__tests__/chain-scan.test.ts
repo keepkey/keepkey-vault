@@ -216,6 +216,7 @@ describe('chainSupportsLevelScan (per-account single-address scan)', () => {
 
 describe('utxoAccountScriptPaths — per-account xpub paths for UTXO altcoins', () => {
   const DOGE = { id: 'dogecoin', scriptType: 'p2pkh', defaultPath: [0x8000002C, 0x80000003, 0x80000000, 0, 0] } as ChainDef
+  // Real production LTC def: BIP84 native segwit (p2wpkh on 84').
   const LTC = { id: 'litecoin', scriptType: 'p2wpkh', defaultPath: [0x80000054, 0x80000002, 0x80000000, 0, 0] } as ChainDef
 
   test('single script type (DOGE p2pkh/44) varies only the account element, keeps coinType 3', () => {
@@ -223,10 +224,17 @@ describe('utxoAccountScriptPaths — per-account xpub paths for UTXO altcoins', 
     expect(utxoAccountScriptPaths(DOGE, 2)).toEqual([{ scriptType: 'p2pkh', path: [0x8000002C, 0x80000003, 0x80000002] }])
   })
 
-  test('Litecoin walks all three script types (purposes 44/49/84) at coinType 2', () => {
+  test('Litecoin walks all three script types (44/49/84) at coinType 2, plus the historical p2wpkh-on-44 branch', () => {
     const r = utxoAccountScriptPaths(LTC, 1)
-    expect(r.map(x => x.scriptType)).toEqual(['p2pkh', 'p2sh-p2wpkh', 'p2wpkh'])
-    expect(r.map(x => x.path[0])).toEqual([0x8000002C, 0x80000031, 0x80000054]) // 44'/49'/84'
+    expect(r.map(x => x.scriptType)).toEqual(['p2pkh', 'p2sh-p2wpkh', 'p2wpkh', 'p2wpkh'])
+    expect(r.map(x => x.path[0])).toEqual([0x8000002C, 0x80000031, 0x80000054, 0x8000002C]) // 44'/49'/84'/44'
     expect(r.every(x => x.path[1] === 0x80000002 && x.path[2] === 0x80000001)).toBe(true) // coin 2, account 1
+    // Historical entry must be LAST: the (device,chain,path)-keyed pubkey
+    // cache upsert keeps the final write when it shares m/44'/2'/N' with p2pkh.
+    expect(r[r.length - 1]).toEqual({ scriptType: 'p2wpkh', path: [0x8000002C, 0x80000002, 0x80000001] })
+  })
+
+  test('a chain whose receive convention matches a standard entry gets no duplicate', () => {
+    expect(utxoAccountScriptPaths(DOGE, 0)).toHaveLength(1)
   })
 })

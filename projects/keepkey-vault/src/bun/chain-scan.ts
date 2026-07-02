@@ -78,10 +78,29 @@ export function utxoAccountScriptPaths(chain: ChainDef, account: number): Array<
   const scriptTypes = (chain.id === 'litecoin' || chain.id === 'bitcoin')
     ? [{ scriptType: 'p2pkh', purpose: 44 }, { scriptType: 'p2sh-p2wpkh', purpose: 49 }, { scriptType: 'p2wpkh', purpose: 84 }]
     : [{ scriptType: chain.scriptType || 'p2pkh', purpose: 44 }]
-  return scriptTypes.map(st => ({
+  const out = scriptTypes.map(st => ({
     scriptType: st.scriptType,
     path: [st.purpose + 0x80000000, chain.defaultPath[1], 0x80000000 + account],
   }))
+  // The chain's own receive convention (defaultPath purpose + chain.scriptType)
+  // must always be queried: blockbook derives the script type from the xpub's
+  // SLIP-132 version bytes (which the wallet picks from scriptType), so a
+  // convention outside the standard purpose-matched entries above would leave
+  // the vault's own receive addresses invisible to the balance pipeline.
+  const ownScript = chain.scriptType || 'p2pkh'
+  const ownPurpose = chain.defaultPath[0]
+  if (!out.some(e => e.scriptType === ownScript && e.path[0] === ownPurpose)) {
+    out.push({ scriptType: ownScript, path: [ownPurpose, chain.defaultPath[1], 0x80000000 + account] })
+  }
+  // Litecoin historical convention: pre-1.4.10 releases handed out p2wpkh
+  // addresses on the 44' branch. Keep that branch queried as p2wpkh so those
+  // funds stay visible and spendable. LAST so the (device, chain, path)-keyed
+  // pubkey-cache upsert keeps this entry over p2pkh on the shared 44' path
+  // (vault-generated addresses are far more likely to hold funds there).
+  if (chain.id === 'litecoin') {
+    out.push({ scriptType: 'p2wpkh', path: [0x8000002C, chain.defaultPath[1], 0x80000000 + account] })
+  }
+  return out
 }
 
 /**

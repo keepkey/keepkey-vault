@@ -923,6 +923,14 @@ export interface AuditDerivedAddress {
   /** True when the balance lookup THREW — the address was derived but its balance
    *  is unknown. Must never be shown as a confident "0" (honesty rule). */
   balanceError?: boolean
+  /** Exact derivation of `address` (UTXO address-level scans) — what the audit
+   *  sweep (auditSweepPath) needs to spend from this exact find. */
+  addressNList?: number[]
+  scriptType?: string
+  /** Set to false by the known-paths grid for standard-scheme rows so the
+   *  walkthrough's find rows don't offer sweeping the standard receive branch
+   *  (it's the sweep DESTINATION). Absent (custom finds) = sweepable. */
+  sweepable?: boolean
 }
 
 /** Raw-path debug inspector result (auditInspectPath). Read-only device-derived
