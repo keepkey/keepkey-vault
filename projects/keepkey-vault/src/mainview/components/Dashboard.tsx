@@ -1602,6 +1602,11 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 						const usdNum = clean?.usd || 0
 						const hasBalance = balNum > 0 || usdNum > 0
 						const tokenCount = clean?.cleanTokenCount || 0
+						// Low-gas: tokens are stranded on the chain but the NATIVE
+						// balance can't pay network fees — every family, not just EVM
+						// (TRC-20 needs TRX, ERC-20 needs ETH, SPL needs SOL, …).
+						const nativeUsd = bal?.nativeBalanceUsd ?? 0
+						const lowGas = nativeUsd < 1 && (usdNum - nativeUsd) > 1
 						const isActive = drilledChainId === chain.id
 						// Per-account (BIP44) sub-rows: BTC accountIndex or EVM addressIndex.
 						// Only chains that have multiple funded accounts/addresses get a drop-down.
@@ -1679,6 +1684,21 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 											<Text fontSize="12px" color="var(--text-2)" lineHeight="1.3" truncate>
 												{hasBalance ? `${formatBalance(bal?.balance || '0')} ${chain.symbol}` : t("noBalance")}
 											</Text>
+											{lowGas && (
+												<Flex
+													as="span"
+													align="center"
+													gap="1"
+													flexShrink={0}
+													cursor="help"
+													title={`Low ${chain.symbol} for gas — deposit ${chain.symbol} to move tokens on ${chain.coin}`}
+												>
+													<svg width="10" height="10" viewBox="0 0 24 24" fill="#E53E3E" xmlns="http://www.w3.org/2000/svg">
+														<path d="M3 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v9h1a3 3 0 0 1 3 3v3a1 1 0 0 0 2 0v-7.5l-2.4-2.4a1 1 0 0 1 1.4-1.4l3.3 3.3c.2.2.3.4.3.7V19a3 3 0 0 1-6 0v-3a1 1 0 0 0-1-1h-1v7H3zM7 6h4v5H7V6z"/>
+													</svg>
+													<Text as="span" fontSize="8px" fontWeight="700" color="#E53E3E" lineHeight="1">LOW GAS</Text>
+												</Flex>
+											)}
 											{tokenCount > 0 && (
 												<Text fontSize="10px" color={chain.color} fontWeight="600" lineHeight="1.3" flexShrink={0}>
 													+{tokenCount}
