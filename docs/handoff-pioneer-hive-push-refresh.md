@@ -62,14 +62,33 @@ user silently gets last-known cache tagged `_degraded` (and per #3, stamped
 fresh). Add an AbortController timeout + a fallback node (api.deathwing.me /
 anyx.io), and cache the immutable pubkey→account-name resolution.
 
-## 5. Socket events the vault can't decode (LOW — vault-side repair planned)
+## 5. Socket events the vault can't decode (LOW)
 
 `WebSocketHandler.ts:1874,1927` emit `balance:update` /
 `balance:cache:update` as `JSON.stringify(payload)` **strings** while
 `transaction:incoming` (`:410-424`) is an object. Emit objects consistently
-(or document the string envelope). The vault is being fixed to parse both,
-but these worker-refresh events are the "soft update" signal and today no
-client can use them as objects arrive stringified.
+(or document the string envelope). NOTE: the vault deliberately does NOT
+consume these two events even after its socket-leg repair — see #7.
+
+## 7. `balance:update` / `balance:cache:update` are self-echoes, not worker pushes (HIGH — blocks any client using them)
+
+The **GetPortfolioBalances controller itself** emits these events, per
+requested pubkey, to the *requesting user's own sockets*:
+`balance.controller.ts:776/788/798` (`emitBalanceCacheUpdate`, subtypes
+`updated`/`same`/`skipped` — `skipped` fires whenever `fetchedAt < 5 min`,
+i.e. the steady state) and `:974` (`emitBalanceUpdate`, once per pubkey of
+the response). These three call sites are the only emitters in the tree —
+the background cache worker (`RefreshWorker` / `StaleBalanceScanner`) never
+publishes balance updates. So today the events are 100% echoes of the
+client's own REST queries: any client that refreshes balances on them
+enters a self-sustaining request loop (we confirmed this in review and
+reverted the vault's consumption of them — the vault now listens only to
+`transaction:incoming`).
+
+For a usable "soft update" signal: emit balance events from the WORKER
+refresh path (or add a `source: 'worker' | 'request'` field), gate on
+`type === 'updated'` with `balance !== previousBalance`, and don't echo to
+the requester's own socket for request-triggered fetches.
 
 ## 6. Hive is in the slow soft-update lane (LOW / FYI)
 

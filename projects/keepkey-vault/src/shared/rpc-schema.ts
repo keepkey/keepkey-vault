@@ -91,7 +91,9 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
 
       // ── Pioneer integration ─────────────────────────────────────────
       getBalances: { params: { forceRefresh?: boolean }; response: ChainBalance[] }
-      getBalance: { params: { chainId: string }; response: ChainBalance }
+      /** forceRefresh defaults to TRUE (user-clicked refresh / tx pushes must bypass
+       *  Pioneer's cache). Pass false only when Pioneer's cache is known-fresh. */
+      getBalance: { params: { chainId: string; forceRefresh?: boolean }; response: ChainBalance }
       buildTx: { params: BuildTxParams; response: BuildTxResult }
       // `to`/`amount`/`symbol`/`caip`/`fromAddress` are optional and used only to
       // populate the Address Book (R3/R4/R7). Callers that omit them broadcast
