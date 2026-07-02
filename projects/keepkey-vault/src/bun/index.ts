@@ -3278,6 +3278,17 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					// Aggregate EVM entries per-chain (sum across address indices)
 					const evmChainAgg = new Map<string, { balance: number; usd: number; address: string; symbol: string }>()
 
+					// Non-BTC UTXO chains carry multiple xpubs (script types + tracked accounts)
+					// sharing one caip. Pioneer returns one row PER pubkey, so a caip-level find()
+					// grabs the chain's first row (often an empty legacy xpub) and reports 0 while
+					// funds sit under another script type. Sum per-pubkey, mirroring BTC.
+					const utxoChainEntryCount = new Map<string, number>()
+					for (const p of pubkeys) {
+						if (p.chainId === 'bitcoin' || evmAddressSet.has(p.pubkey.toLowerCase())) continue
+						utxoChainEntryCount.set(p.chainId, (utxoChainEntryCount.get(p.chainId) || 0) + 1)
+					}
+					const utxoChainAgg = new Map<string, { balance: number; usd: number; address: string; symbol: string; matched: boolean }>()
+
 					const selectedXpubStr = btcAccounts.getSelectedXpub()?.xpub
 					for (const entry of pubkeys) {
 						const isFailedEntry = failedPubkeySetForDb.has(`${entry.caip}:${entry.pubkey}`)
@@ -3346,6 +3357,25 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							continue
 						}
 
+						// Multi-xpub UTXO chain (LTC/DOGE/…): match strictly by THIS entry's pubkey
+						// and sum across the chain's xpubs — caip matching cannot distinguish them.
+						if ((utxoChainEntryCount.get(entry.chainId) || 0) > 1) {
+							const match = pureNatives.find((d: any) => d.pubkey === entry.pubkey)
+								|| pureNatives.find((d: any) => d.address === entry.pubkey)
+							const bal = parseFloat(String(match?.balance ?? '0')) || 0
+							const usd = Number(match?.valueUsd ?? 0)
+							const agg = utxoChainAgg.get(entry.chainId)
+							if (agg) {
+								agg.balance += bal
+								agg.usd += usd
+								if (!agg.address && match?.address) agg.address = match.address
+								agg.matched = agg.matched || !!match
+							} else {
+								utxoChainAgg.set(entry.chainId, { balance: bal, usd, address: match?.address || '', symbol: entry.symbol, matched: !!match })
+							}
+							continue
+						}
+
 						// Match by CAIP, then by networkId prefix (handles slip44 vs native CAIP variants),
 						// then pubkey, then address field (Pioneer may use either)
 						const entryNetwork = entry.caip.split('/')[0] // e.g. "tron:0x2b6653dc"
@@ -3363,6 +3393,20 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							balanceUsd: nativeUsd + tokenUsdTotal,
 							nativeBalanceUsd: nativeUsd,
 							address: match?.address || entry.pubkey,
+							tokens: chainTokens && chainTokens.length > 0 ? chainTokens : undefined,
+						})
+					}
+
+					// Push aggregated multi-xpub UTXO chain entries (one row per chain)
+					for (const [chainId, agg] of utxoChainAgg) {
+						const chainTokens = tokensByChainId.get(chainId)
+						const tokenUsdTotal = chainTokens?.reduce((sum, t) => sum + t.balanceUsd, 0) || 0
+						results.push({
+							chainId, symbol: agg.symbol,
+							balance: agg.balance > 0 ? agg.balance.toFixed(8).replace(/0+$/, '').replace(/\.$/, '') : '0',
+							balanceUsd: agg.usd + tokenUsdTotal,
+							nativeBalanceUsd: agg.usd,
+							address: agg.address || pubkeys.find(p => p.chainId === chainId)?.pubkey || '',
 							tokens: chainTokens && chainTokens.length > 0 ? chainTokens : undefined,
 						})
 					}
@@ -3429,6 +3473,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					const btcConfirmed = btcPubkeyEntries.every(e => !failedPubkeySetForDb.has(`${e.caip}:${e.pubkey}`))
 					if (btcConfirmed) confirmedChainIds.add('bitcoin')
 					else confirmedChainIds.delete('bitcoin')
+					// Never persist a 0 we didn't validate: if Pioneer returned no row for ANY
+					// of a multi-xpub chain's pubkeys, keep the cached value instead.
+					for (const [chainId, agg] of utxoChainAgg) {
+						if (!agg.matched) confirmedChainIds.delete(chainId)
+					}
 
 					// Mark that Pioneer has responded — prevents getBtcAccounts from re-loading stale DB rows
 					if (btcPubkeyEntries.length > 0) btcAccounts.markPioneerFetched()
