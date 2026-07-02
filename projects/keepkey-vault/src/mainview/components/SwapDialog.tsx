@@ -1401,6 +1401,27 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     return tokenMaxSpendableAmount(fromBalance, fromAsset.decimals)
   }, [fromAsset, fromBalance])
 
+  /* Low-gas pre-flight for TOKEN swaps: fees are paid in the source chain's
+   * NATIVE asset, so a token swap from a dust-native account is guaranteed to
+   * die at broadcast (e.g. TRON "Account resource insufficient error") — after
+   * the user already signed on-device. Warn up-front instead. Warning only,
+   * not a gate: staked/delegated resources (TRON energy) can make fees free
+   * without any native balance, so blocking would false-positive. */
+  const fromChainLowGas = useMemo(() => {
+    if (!fromAsset) return null
+    const isToken = fromAsset.caip ? isTokenCaip(fromAsset.caip) : !!fromAsset.contractAddress
+    if (!isToken) return null
+    const cb = balances.find(b => b.chainId === fromAsset.chainId)
+    if (!cb) return null
+    if (Number(cb.nativeBalanceUsd ?? 0) >= 1) return null
+    const chainDef = CHAINS.find(c => c.id === fromAsset.chainId)
+    return {
+      symbol: chainDef?.symbol ?? fromAsset.chainId.toUpperCase(),
+      coin: chainDef?.coin ?? fromAsset.chainId,
+      balance: cb.balance || '0',
+    }
+  }, [fromAsset, balances])
+
   /* Resolved (amount, isMax) tuple to send to the backend. For fee-reserved native
    * and token-precision-reserved MAX the amount is already clamped, so isMax
    * is dropped to keep the quote, display, and submitted amount honest. For
@@ -4226,6 +4247,28 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                           {t("maxInsufficientForGas", { defaultValue: "Balance is below the fee reserve (~{{reserve}} {{symbol}}). Top up to swap.", reserve: nativeMaxFeeReserve(fromAsset, maxReserveMode).toString(), symbol: fromAsset.symbol })}
                         </Text>
                       )}
+                    </Box>
+                  )}
+
+                  {fromAsset && fromChainLowGas && (
+                    <Box mt="2" p="2.5" borderRadius="md" bg="rgba(229,62,62,0.08)" border="1px solid rgba(229,62,62,0.3)">
+                      <Flex align="center" gap="1.5" mb="1">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="#E53E3E" xmlns="http://www.w3.org/2000/svg">
+                          <path d="M3 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v9h1a3 3 0 0 1 3 3v3a1 1 0 0 0 2 0v-7.5l-2.4-2.4a1 1 0 0 1 1.4-1.4l3.3 3.3c.2.2.3.4.3.7V19a3 3 0 0 1-6 0v-3a1 1 0 0 0-1-1h-1v7H3zM7 6h4v5H7V6z"/>
+                        </svg>
+                        <Text fontSize="11px" fontWeight="700" color="kk.error">
+                          {t("lowGasTitle", { defaultValue: "Low {{symbol}} for network fees", symbol: fromChainLowGas.symbol })}
+                        </Text>
+                      </Flex>
+                      <Text fontSize="10px" color="kk.error" lineHeight="1.45">
+                        {t("lowGasSwapBody", {
+                          defaultValue: "Sending {{token}} costs {{symbol}} in network fees — this swap will likely fail to broadcast. Deposit {{symbol}} to your {{coin}} address first. You have {{balance}} {{symbol}}.",
+                          token: fromAsset.symbol,
+                          symbol: fromChainLowGas.symbol,
+                          coin: fromChainLowGas.coin,
+                          balance: formatBalance(fromChainLowGas.balance),
+                        })}
+                      </Text>
                     </Box>
                   )}
 
