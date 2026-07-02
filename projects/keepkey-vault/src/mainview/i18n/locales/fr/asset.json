@@ -80,6 +80,7 @@
   "outOfSync": "Désynchronisé",
   "synced": "Synchronisé",
   "refresh": "Actualiser",
+  "refreshFailed": "Échec de l'actualisation",
   "refreshing": "Actualisation…",
   "needsScanPrompt": "Le portefeuille n'a pas encore été analysé. Analysez la chaîne pour trouver vos notes protégées.",
   "scanFromBlock": "Analyser depuis le bloc {{block}}",

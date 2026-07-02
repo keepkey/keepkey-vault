@@ -2,7 +2,7 @@ import React, { lazy, Suspense, useState, useEffect, useCallback, useMemo, useRe
 import { useTranslation } from "react-i18next"
 import { Box, Flex, Text, Button, Image, VStack, HStack, IconButton, Spinner } from "@chakra-ui/react"
 import { FaPlus, FaEye, FaEyeSlash, FaShieldAlt, FaCheck, FaCopy, FaTag, FaChevronDown, FaChevronUp } from "react-icons/fa"
-import { rpcRequest, onRpcMessage, rpcFire } from "../lib/rpc"
+import { rpcRequest, onRpcMessage } from "../lib/rpc"
 import type { ChainDef } from "../../shared/chains"
 import { CHAINS, BTC_SCRIPT_TYPES, btcAccountPath, isChainSupported } from "../../shared/chains"
 import type { ChainBalance, TokenBalance, TokenVisibilityStatus, AppSettings, SwapAsset } from "../../shared/types"
@@ -92,29 +92,43 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 	const [deriveError, setDeriveError] = useState<string | null>(null)
 	const [currentPath, setCurrentPath] = useState<number[]>(chain.defaultPath)
 
-	// BTC multi-account support (declared early — handleRefresh depends on isBtc + refreshBtcAccounts)
+	// BTC multi-account support
 	const isBtc = chain.id === 'bitcoin'
 	const { btcAccounts, selectXpub, addAccount, refresh: refreshBtcAccounts, loading: btcLoading } = useBtcAccounts()
 
-	// Single-chain refresh
+	// Single-chain refresh. Always forced (bun getBalance passes forceRefresh:true
+	// to Pioneer). The result is NOT kept locally: the backend pushes the identical
+	// data back as 'balance-updated' (and 'btc-accounts-update' / 'evm-addresses-update'),
+	// which Dashboard merges into the `balance` prop — a local snapshot would only
+	// shadow newer push/bulk-refresh data for the rest of the mount.
 	const [refreshing, setRefreshing] = useState(false)
-	const [refreshedBalance, setRefreshedBalance] = useState<ChainBalance | null>(null)
+	const [refreshError, setRefreshError] = useState<string | null>(null)
+	// Bumped on every manual refresh so chain-specific panels that fetch their own
+	// data (HiveAccountPanel) re-fetch too.
+	const [refreshNonce, setRefreshNonce] = useState(0)
 	const handleRefresh = useCallback(async () => {
 		setRefreshing(true)
+		setRefreshError(null)
 		try {
-			const updated = await rpcRequest<ChainBalance>("getBalance", { chainId: chain.id })
-			setRefreshedBalance(updated)
-			// BTC: re-fetch per-xpub balances so the selector pills update
-			if (isBtc) await refreshBtcAccounts()
+			// 90s: backend budget is 60s of Pioneer time plus device derivation —
+			// the 30s rpc default made slow forced refreshes fail invisibly.
+			await rpcRequest<ChainBalance>("getBalance", { chainId: chain.id }, 90000)
+			setRefreshNonce(n => n + 1)
 		} catch (e) {
 			console.warn(`[AssetPage] refresh ${chain.id} failed:`, e)
+			setRefreshError(e instanceof Error ? e.message : String(e))
 		} finally {
 			setRefreshing(false)
 		}
-	}, [chain.id, isBtc, refreshBtcAccounts])
-
-	// Use refreshed balance if available, otherwise prop
-	const baseBalance = refreshedBalance || balance
+	}, [chain.id])
+	// A fresh balance for this chain (from any refresh path — incl. a backend
+	// getBalance that outlived the 90s rpc timeout above) supersedes the error:
+	// keeping the chip up next to just-updated data would be a false alarm.
+	useEffect(() => {
+		return onRpcMessage("balance-updated", (updated: ChainBalance) => {
+			if (updated.chainId === chain.id) setRefreshError(null)
+		})
+	}, [chain.id])
 
 	// Feature flags: zcash privacy
 	const [swappableChainIds, setSwappableChainIds] = useState<Set<string>>(new Set())
@@ -162,7 +176,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 			tokens: selectedEvmChainBalance.tokens,
 			defiPositions: selectedEvmChainBalance.defiPositions,
 		}
-		: baseBalance
+		: balance
 
 	// Multi-address total: show when >1 EVM address has funds on this chain
 	const evmAddressesWithChainBalance = isEvm
@@ -413,32 +427,11 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 	const [showNameReg, setShowNameRegRaw] = useState(false)
 	const setShowNameReg = (open: boolean) => { if (open && watchOnly) return; setShowNameRegRaw(open) }
 
-	// Scoped Pioneer push subscription: only refresh while this page is mounted,
-	// and only when the event chain matches this asset or the active swap output.
-	const [swapOutputChainId, setSwapOutputChainId] = useState<string | null>(null)
-	useEffect(() => {
-		return onRpcMessage("tx-push-received", (payload: { chain?: string; txid?: string }) => {
-			if (!payload.chain && !payload.txid) return // truly empty pings are not actionable
-			if (payload.chain) {
-				// Chain-scoped push: only refresh if it matches this asset or the active swap output.
-				// payload.chain is CAIP-19 (e.g. "eip155:1/slip44:60") — match against exact caip or
-				// networkId with trailing slash to avoid eip155:1 matching eip155:10 (Optimism).
-				const matches = payload.chain === chain.caip || payload.chain.startsWith(`${chain.networkId}/`)
-				const outputDef = swapOutputChainId ? CHAINS.find(c => c.id === swapOutputChainId) : null
-				const matchesOutput = outputDef
-					? (payload.chain === outputDef.caip || payload.chain.startsWith(`${outputDef.networkId}/`))
-					: false
-				if (!matches && !matchesOutput) return
-				// Output-chain match without current-chain match: refresh the output chain,
-				// not this page's chain (handleRefresh only fetches chain.id).
-				if (matchesOutput && !matches) {
-					rpcFire('getBalance', { chainId: swapOutputChainId! })
-					return
-				}
-			}
-			handleRefresh()
-		})
-	}, [handleRefresh, chain.caip, chain.networkId, swapOutputChainId])
+	// NOTE: no scoped push subscription here. App.tsx's always-mounted
+	// 'tx-push-received' listener already force-resyncs whatever chain a push
+	// matches (this page's chain, a swap output, custom chains) and the backend's
+	// 'balance-updated' push flows back into this page via the `balance` prop —
+	// a second subscription here just doubled the forced Pioneer fetch.
 
 	// Activity preview
 	const [previewActivities, setPreviewActivities] = useState<RecentActivity[]>([])
@@ -842,7 +835,12 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 										{/* Sync status — design study: replaces the redundant chain symbol
 										    that used to sit here. Single source of sync truth (the duplicate
 										    badge on the right column was removed below). */}
-										{activeBalance ? (
+										{refreshError ? (
+											<Flex align="center" gap="1" color="var(--rose)" className="v3-glass-chip" px="2" py="0.5" title={refreshError} cursor="help">
+												<Box w="6px" h="6px" borderRadius="full" bg="var(--rose)" />
+												<Text fontSize="10px" fontFamily="mono" fontWeight="500" letterSpacing="0.02em">{t("refreshFailed")}</Text>
+											</Flex>
+										) : activeBalance ? (
 											<Flex align="center" gap="1" color="var(--teal)" className="v3-glass-chip" px="2" py="0.5">
 												<Box as={FaCheck} fontSize="9px" />
 												<Text fontSize="10px" fontFamily="mono" fontWeight="500" letterSpacing="0.02em">{t("synced")}</Text>
@@ -959,7 +957,9 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 						</Flex>
 					)}
 
-					<Box
+					{/* Refresh needs a connected device (bun getBalance derives on-device) —
+					    hide in watch-only mode like the other device-gated actions. */}
+					{!watchOnly && <Box
 						as="button"
 						onClick={refreshing ? undefined : handleRefresh}
 						disabled={refreshing}
@@ -985,7 +985,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 								<path d="M3 22v-6h6" /><path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
 							</svg>
 						)}
-					</Box>
+					</Box>}
 				</Flex>
 
 				{/* Mobile-only balance row */}
@@ -1002,8 +1002,8 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 				) : activeBalance && (
 					<>
 						<Flex display={{ base: "flex", sm: "none" }} align="baseline" justify="space-between" mb="1" gap="3">
-							<Text fontFamily="mono" fontSize="18px" fontWeight="500" color="var(--text-0)" letterSpacing="0.01em">
-								{activeBalance.balance}
+							<Text fontFamily="mono" fontSize="18px" fontWeight="500" color="var(--text-0)" letterSpacing="0.01em" title={`${activeBalance.balance} ${chain.symbol}`}>
+								{formatBalance(activeBalance.balance)}
 								<Box as="span" color="var(--text-3)" ml="1.5" fontSize="13px">{chain.symbol}</Box>
 							</Text>
 							{cleanBalanceUsd > 0 && (
@@ -1130,7 +1130,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 							<ZcashPrivacyTab />
 						</Suspense>
 					) : isHive ? (
-						<HiveAccountPanel activeKey={address} color={chain.color} loading={loading} deriveError={deriveError} onRetryDerive={deriveAddress} />
+						<HiveAccountPanel activeKey={address} color={chain.color} loading={loading} deriveError={deriveError} onRetryDerive={deriveAddress} refreshNonce={refreshNonce} />
 					) : (
 						<ReceiveView
 							chain={chain}
@@ -1383,7 +1383,6 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 								nativeBalanceUsd: btcSelected.xpubData.balanceUsd,
 							} : activeBalance}
 							address={address}
-							onOutputAssetChange={setSwapOutputChainId}
 							initialFromAsset={initialFromAsset}
 							initialFromCaip={
 								selectedToken && parseFloat(selectedToken.balance) > 0

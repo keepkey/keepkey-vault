@@ -53,9 +53,13 @@ function KeyRow({ label, value }: { label: string; value: string }) {
  * @username, not a key). Resolves the device's active key to an account via
  * Pioneer and shows account view, or the in-app sponsor onboarding wizard.
  */
-export function HiveAccountPanel({ activeKey, color, loading, deriveError, onRetryDerive }: {
+export function HiveAccountPanel({ activeKey, color, loading, deriveError, onRetryDerive, refreshNonce }: {
 	activeKey: string | null; color: string
 	loading?: boolean; deriveError?: string | null; onRetryDerive?: () => void
+	// Bumped by the parent's refresh button — re-fetches HIVE/HBD/HP without
+	// flashing back to the loading state (this panel is the page's primary
+	// balance display and was previously unreachable by any refresh path).
+	refreshNonce?: number
 }) {
 	const [state, setState] = useState<"loading" | "has" | "none" | "error">("loading")
 	const [account, setAccount] = useState<HiveAccount | null>(null)
@@ -67,7 +71,10 @@ export function HiveAccountPanel({ activeKey, color, loading, deriveError, onRet
 			.then(r => { if (r.account) { setAccount(r.account); setState("has") } else setState("none") })
 			.catch(() => setState("error"))
 	}
-	useEffect(() => { let c = false; if (activeKey) { rpcRequest<AccountResp>("hiveGetAccount", { pubkey: activeKey }, 15000).then(r => { if (c) return; if (r.account) { setAccount(r.account); setState("has") } else setState("none") }).catch(() => { if (!c) setState("error") }) } return () => { c = true } }, [activeKey])
+	// On a refreshNonce refetch over a displayed account, a transient failure or
+	// flaky noAccount must not tear down good data (error card / onboarding
+	// wizard replacing real balances) — only downgrade when nothing is shown yet.
+	useEffect(() => { let c = false; if (activeKey) { rpcRequest<AccountResp>("hiveGetAccount", { pubkey: activeKey }, 15000).then(r => { if (c) return; if (r.account) { setAccount(r.account); setState("has") } else setState(s => s === "has" ? s : "none") }).catch(() => { if (!c) setState(s => s === "has" ? s : "error") }) } return () => { c = true } }, [activeKey, refreshNonce])
 
 	// No active key yet: distinguish a failed/absent derivation (actionable) from
 	// one still in flight (transient spinner) — otherwise a null key spins forever.

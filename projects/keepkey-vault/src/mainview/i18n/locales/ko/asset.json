@@ -80,6 +80,7 @@
   "outOfSync": "동기화 안 됨",
   "synced": "동기화됨",
   "refresh": "새로고침",
+  "refreshFailed": "새로고침 실패",
   "refreshing": "새로고침 중...",
   "needsScanPrompt": "지갑이 아직 스캔되지 않았습니다. 보호된 노트를 찾으려면 체인을 스캔하세요.",
   "scanFromBlock": "블록 {{block}}부터 스캔",

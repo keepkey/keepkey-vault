@@ -82,6 +82,7 @@
   "outOfSync": "Dessincronizado",
   "synced": "Sincronizado",
   "refresh": "Atualizar",
+  "refreshFailed": "Falha ao atualizar",
   "refreshing": "Atualizando...",
   "needsScanPrompt": "A carteira ainda não foi buscada. Busque a cadeia para encontrar suas notas blindadas.",
   "scanFromBlock": "Buscar a partir do bloco {{block}}",

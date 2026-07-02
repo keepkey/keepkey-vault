@@ -202,19 +202,25 @@ export class EvmAddressManager extends EventEmitter {
   /**
    * Auto-discover balance-bearing addresses by scanning indices 0–maxIndex.
    * Derives each address, checks Pioneer for non-zero balance, and auto-adds any with funds.
-   * Call once after initial balance fetch to expand tracked addresses.
+   * Guarded to run once per session — it used to re-derive + re-scan every
+   * untracked index (device round-trips + forced Pioneer reads) on EVERY
+   * getBalances call, including soft page loads.
    */
+  private discoveryDone = false
   async autoDiscover(
     wallet: any,
     pioneer: any,
     evmChains: Array<{ caip: string; id: string; symbol: string; networkId: string }>,
     maxIndex = 9,
   ): Promise<{ discovered: number[] }> {
+    if (this.discoveryDone) return { discovered: [] }
     const discovered: number[] = []
     const existingIndices = new Set(this.addresses.map(a => a.addressIndex))
+    let attempted = 0, succeeded = 0
 
     for (let idx = 0; idx <= maxIndex; idx++) {
       if (existingIndices.has(idx)) continue
+      attempted++
 
       // Derive address without persisting yet
       const path = evmAddressPath(idx)
@@ -225,10 +231,13 @@ export class EvmAddressManager extends EventEmitter {
         if (!address) continue
       } catch { continue }
 
-      // Check if any EVM chain has a balance for this address
+      // Check if any EVM chain has a balance for this address. Soft read: a
+      // never-queried key is a cache miss and gets fetched fresh anyway, so
+      // discovery doesn't need to bypass Pioneer's cache.
       const pubkeys = evmChains.map(c => ({ caip: c.caip, pubkey: address }))
       try {
-        const resp = await pioneer.GetPortfolioBalances({ pubkeys }, { forceRefresh: true })
+        const resp = await pioneer.GetPortfolioBalances({ pubkeys })
+        succeeded++
         const balances = resp?.data?.balances || resp?.data || []
         const hasBalance = (Array.isArray(balances) ? balances : []).some(
           (b: any) => parseFloat(String(b?.balance ?? '0')) > 0 || Number(b?.valueUsd ?? 0) > 0,
@@ -241,6 +250,11 @@ export class EvmAddressManager extends EventEmitter {
         }
       } catch { continue }
     }
+
+    // Latch only when the scan actually ran: if EVERY probe errored (Pioneer
+    // outage at cold start, device unplug mid-scan — both swallowed above),
+    // leave the session's discovery shot available for the next getBalances.
+    if (attempted === 0 || succeeded > 0) this.discoveryDone = true
 
     if (discovered.length > 0) {
       this.persistIndices()
@@ -256,6 +270,7 @@ export class EvmAddressManager extends EventEmitter {
     this.addresses = []
     this.selectedIndex = 0
     this.initPromise = null
+    this.discoveryDone = false
   }
 
   get isInitialized(): boolean {

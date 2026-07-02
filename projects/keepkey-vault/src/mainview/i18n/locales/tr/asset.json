@@ -80,6 +80,7 @@
   "outOfSync": "Senkronize değil",
   "synced": "Senkronize",
   "refresh": "Yenile",
+  "refreshFailed": "Yenileme başarısız",
   "refreshing": "Yenileniyor...",
   "needsScanPrompt": "Cüzdan henüz taranmadı. Korumalı notlarınızı bulmak için zinciri tarayın.",
   "scanFromBlock": "{{block}} bloğundan tara",
