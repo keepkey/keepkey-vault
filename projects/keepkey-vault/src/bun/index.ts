@@ -2765,6 +2765,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					serializedTx: result.serializedTx instanceof Uint8Array
 						? Buffer.from(result.serializedTx).toString('hex')
 						: result.serializedTx,
+					// Pass hiveBuildResult through for broadcastHiveTx
+					hiveBuildResult: (params as any).hiveBuildResult,
 				}
 			},
 
