@@ -23,12 +23,43 @@ import { ChainLogo } from "./ChainLogo"
 import { getAssetIcon } from "../../shared/assetLookup"
 import { AuditCustomPath } from "./AuditCustomPath"
 import { AuditKnownPaths } from "./AuditKnownPaths"
+import { AuditSweepButton } from "./AuditSweepButton"
 import { AuditBtcDeep } from "./AuditBtcDeep"
 import { AuditInspector } from "./AuditInspector"
 import type { ChainDef } from "../../shared/chains"
 import type { AuditReport, AuditPortfolioSnapshot, AuditMode, AuditChainFinding, AuditDerivedAddress } from "../../shared/types"
 
 const SUPPORT_URL = "https://support.keepkey.com"
+
+/** Clipboard write that actually reports failure: async API first, hidden
+ *  textarea + execCommand as the WKWebView fallback. */
+async function copyTextRobust(text: string): Promise<boolean> {
+  try { await navigator.clipboard.writeText(text); return true } catch { /* fall through */ }
+  try {
+    const ta = document.createElement('textarea')
+    ta.value = text
+    ta.style.position = 'fixed'
+    ta.style.opacity = '0'
+    document.body.appendChild(ta)
+    ta.select()
+    const ok = document.execCommand('copy')
+    document.body.removeChild(ta)
+    return ok
+  } catch { return false }
+}
+
+/** base64url-encode the audit payload for the support ?audit= GET param. */
+function encodeAuditParam(payload: unknown): string {
+  const json = JSON.stringify(payload)
+  const b64 = btoa(unescape(encodeURIComponent(json)))
+  return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+}
+
+function dedupXpubs(xpubs: Array<{ scriptType: string; xpub: string; pathStr: string }>) {
+  const seen = new Set<string>()
+  return xpubs.filter(x => x.xpub && !seen.has(x.xpub) && seen.add(x.xpub))
+}
+
 const ANIM = `
   @keyframes auditPulse { 0%,100% { box-shadow: 0 0 0 2px rgba(233,196,106,0.55); } 50% { box-shadow: 0 0 0 6px rgba(233,196,106,0.10); } }
   @keyframes auditGlow { 0%,100% { box-shadow: 0 0 14px rgba(233,196,106,0.18); } 50% { box-shadow: 0 0 34px rgba(233,196,106,0.45); } }
@@ -284,15 +315,15 @@ export function AuditDialog({ onClose, snapshot, isHidden, chainCatalog, chainAd
   // All UTXO chains (incl. Bitcoin) use the xpub-based per-account scan.
   const utxoAccountScannable = !!currentDef && currentDef.chainFamily === 'utxo'
   const accountScannable = levelScannable || utxoAccountScannable
-  const hasCommon = current?.family === 'evm' || current?.chainId === 'bitcoin'
+  const hasCommon = current?.family === 'evm' || current?.chainId === 'bitcoin' || current?.chainId === 'litecoin'
 
   const runScan = useCallback(async (chain: AuditChainFinding, fromLevel: number, count: number, markAuto: boolean) => {
     patchLadder(chain.chainId, markAuto ? { autoScanning: true, autoScanned: true, scanErr: null } : { scanning: true, scanErr: null })
     try {
       // UTXO altcoins: xpub-based per-account scan; everything else: single-address level scan.
       const { results } = chain.family === 'utxo'
-        ? await rpcRequest<{ results: AuditDerivedAddress[] }>('auditScanUtxoAccounts', { chainId: chain.chainId, fromLevel, count }, 180000)
-        : await rpcRequest<{ results: AuditDerivedAddress[] }>('auditScanLevels', { chainId: chain.chainId, fromLevel, count }, 180000)
+        ? await rpcRequest<{ results: AuditDerivedAddress[] }>('auditScanUtxoAccounts', { chainId: chain.chainId, fromLevel, count }, 900000)
+        : await rpcRequest<{ results: AuditDerivedAddress[] }>('auditScanLevels', { chainId: chain.chainId, fromLevel, count }, 900000)
       setLadders(prev => {
         const cur = prev[chain.chainId] || EMPTY_LADDER
         // Dedupe by account/index level so a re-run (or a double effect) never
@@ -367,7 +398,8 @@ export function AuditDialog({ onClose, snapshot, isHidden, chainCatalog, chainAd
     } catch (e: any) { patchLadder(chain.chainId, { recovering: false, recoverErr: e.message }) }
   }, [isHidden, onRecovered, patchLadder])
 
-  const copyHandoff = useCallback((chain: AuditChainFinding, l: Ladder, balanceUsd: number) => {
+  const buildHandoff = useCallback((chain: AuditChainFinding, l: Ladder, balanceUsd: number) => {
+    const all = [...l.scanned, ...l.customResults, ...l.extraFound]
     const lines: string[] = []
     lines.push('KeepKey Vault — Balance Audit handoff')
     lines.push(`Time: ${new Date().toISOString()}`)
@@ -377,7 +409,6 @@ export function AuditDialog({ onClose, snapshot, isHidden, chainCatalog, chainAd
     lines.push('')
     lines.push('Addresses checked:')
     if (isHidden) lines.push('  [hidden wallet — addresses redacted]')
-    const all = [...l.scanned, ...l.customResults, ...l.extraFound]
     for (const a of all) {
       const bal = a.balanceError ? '(unverified — balance check failed)' : `${a.native} ${a.symbol}${a.hasBalance ? ' (FUNDED)' : ''}`
       lines.push(isHidden ? `  ${a.pathStr}: ${bal}` : `  ${a.pathStr}  ${a.address}  ${bal}`)
@@ -386,9 +417,52 @@ export function AuditDialog({ onClose, snapshot, isHidden, chainCatalog, chainAd
     if (!all.length) lines.push('  (none beyond the default address)')
     lines.push('')
     lines.push(`Support: ${SUPPORT_URL}`)
-    navigator.clipboard.writeText(lines.join('\n')).catch(() => {})
-    openUrl(SUPPORT_URL)
+
+    // Structured payload for support.keepkey.com — carried in the ?audit= GET
+    // param so the ticket auto-includes what was checked (see
+    // docs/handoff-support-audit-get-param.md). Hidden wallets: no addresses,
+    // no xpubs — path + balance shape only, same redaction as the text report.
+    const xpubs = isHidden ? [] : dedupXpubs(all.flatMap(a => a.xpubs || []))
+    const payload = {
+      v: 1,
+      time: new Date().toISOString(),
+      chainId: chain.chainId,
+      symbol: chain.symbol,
+      dashboardUsd: Number(balanceUsd.toFixed(2)),
+      expected: l.handoffNote.trim() || undefined,
+      hidden: isHidden || undefined,
+      results: all.map(a => ({
+        path: a.pathStr,
+        address: isHidden ? undefined : a.address,
+        balance: a.native,
+        symbol: a.symbol,
+        funded: a.hasBalance || undefined,
+        error: a.balanceError || undefined,
+        tokens: a.tokens?.length ? a.tokens.map(t => ({ symbol: t.symbol, balance: t.balance, usd: t.balanceUsd })) : undefined,
+      })),
+      xpubs,
+    }
+    let chunk = encodeAuditParam(payload)
+    if (chunk.length > 7000) {
+      // URL-length guard: drop empty rows first, then tokens.
+      chunk = encodeAuditParam({
+        ...payload,
+        results: payload.results.filter(r => r.funded || r.error).map(r => ({ ...r, tokens: undefined })),
+        truncated: true,
+      } as any)
+    }
+    return { text: lines.join('\n'), url: `${SUPPORT_URL}/?audit=${chunk}` }
   }, [isHidden])
+
+  const [handoffCopied, setHandoffCopied] = useState(false)
+  const copyHandoff = useCallback(async (chain: AuditChainFinding, l: Ladder, balanceUsd: number, openSupport: boolean) => {
+    const { text, url } = buildHandoff(chain, l, balanceUsd)
+    // Copy FIRST and await it — opening the browser steals focus, and a
+    // focus-less clipboard write rejects (the old silent-failure bug).
+    const ok = await copyTextRobust(`${text}\n${url}`)
+    if (ok) { setHandoffCopied(true); setTimeout(() => setHandoffCopied(false), 2000) }
+    if (openSupport) openUrl(url)
+  }, [buildHandoff])
 
   // Navigation
   const goWalk = useCallback(() => { setPhase('walkthrough'); scrollTop() }, [scrollTop])
@@ -472,6 +546,13 @@ export function AuditDialog({ onClose, snapshot, isHidden, chainCatalog, chainAd
           </HStack>
         </Flex>
         {hasXpubs && <XpubRows xpubs={a.xpubs!} gold={gold} />}
+        {/* Address-level UTXO finds (uncommon path/scriptType combos, custom
+            paths) can't be spent from the Send page — sweep them to the
+            standard receive address right here. sweepable === false marks a
+            standard-scheme row (the sweep destination) — never offer those. */}
+        {a.hasBalance && chain.family === 'utxo' && !!a.addressNList?.length && a.sweepable !== false && (
+          <AuditSweepButton chainId={chain.chainId} addressNList={a.addressNList} scriptType={a.scriptType} address={a.address} onOpenUrl={openUrl} />
+        )}
         {a.tokens && a.tokens.length > 0 && (
           <VStack gap="1.5" align="stretch" mt="2.5" pt="2.5" borderTop="1px solid" borderColor={gold ? 'rgba(233,196,106,0.2)' : 'var(--line)'}>
             {a.tokens.map((t, i) => (
@@ -708,7 +789,7 @@ export function AuditDialog({ onClose, snapshot, isHidden, chainCatalog, chainAd
                 )}
 
                 {/* common (other-wallet) paths */}
-                {ladder.showCommon && current.family === 'evm' && <Box mb="4"><AuditKnownPaths chainId={current.chainId} defaultAddress={currentAddr} onFound={(r) => pushExtra(current.chainId, r)} onOpenUrl={openUrl} /></Box>}
+                {ladder.showCommon && (current.family === 'evm' || current.chainId === 'litecoin') && <Box mb="4"><AuditKnownPaths chainId={current.chainId} defaultAddress={currentAddr} onFound={(r) => pushExtra(current.chainId, r)} onOpenUrl={openUrl} /></Box>}
                 {ladder.showCommon && current.chainId === 'bitcoin' && <Box mb="4"><Text fontSize="11px" color="var(--text-2)" textTransform="uppercase" letterSpacing="0.08em" mb="1.5">Deep Bitcoin scans</Text><AuditBtcDeep onRecovered={() => onRecovered?.()} /></Box>}
 
                 {/* custom + inspector */}
@@ -724,7 +805,14 @@ export function AuditDialog({ onClose, snapshot, isHidden, chainCatalog, chainAd
                   <Box bg="var(--ink-3)" border="1px solid" borderColor="var(--line)" borderRadius="13px" p="4" mb="4">
                     <Text fontSize="sm" color="var(--text-0)" mb="2.5">We’ll bundle everything we checked into a report you can hand to support.</Text>
                     <Textarea size="sm" placeholder="What balance did you expect? (optional)" value={ladder.handoffNote} onChange={e => patchLadder(current.chainId, { handoffNote: e.target.value })} bg="var(--ink-1)" border="1px solid" borderColor="var(--line-2)" fontSize="sm" rows={2} mb="3" />
-                    <Button size="sm" w="100%" {...goldBtn} onClick={() => copyHandoff(current, ladder, current.balanceUsd)}>Copy report & open support ↗</Button>
+                    <Flex gap="2">
+                      <Button size="sm" flex="1" variant="outline" borderColor="var(--line-2)" color="var(--text-1)" fontWeight="600"
+                        _hover={{ borderColor: "var(--gold)", color: "var(--gold)" }}
+                        onClick={() => copyHandoff(current, ladder, current.balanceUsd, false)}>
+                        {handoffCopied ? 'Copied ✓' : 'Copy report'}
+                      </Button>
+                      <Button size="sm" flex="1" {...goldBtn} onClick={() => copyHandoff(current, ladder, current.balanceUsd, true)}>Open support with report ↗</Button>
+                    </Flex>
                   </Box>
                 )}
               </Box>
@@ -740,7 +828,7 @@ export function AuditDialog({ onClose, snapshot, isHidden, chainCatalog, chainAd
               )}
               {hasCommon && (
                 <Box as="button" style={chip} onClick={() => { patchLadder(current.chainId, { showCommon: !ladder.showCommon }); scrollDown() }}>
-                  {current.family === 'evm' ? 'Scan common wallet paths' : 'Scan unusual paths'}
+                  {current.family === 'evm' ? 'Scan common wallet paths' : current.chainId === 'litecoin' ? 'Scan uncommon paths' : 'Scan unusual paths'}
                 </Box>
               )}
               <Box as="button" style={chip} onClick={() => { patchLadder(current.chainId, { showCustom: !ladder.showCustom }); scrollDown() }}>Scan a custom path</Box>

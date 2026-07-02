@@ -27,6 +27,7 @@ import { SweepDialog } from "./SweepDialog"
 import { ActivityTable, TxDetailDialog, recentFirst, nativePriceByChain, type TxDetail } from "./ActivityPanel"
 import type { RecentActivity } from "../../shared/types"
 import { BtcXpubSelector } from "./BtcXpubSelector"
+import { UtxoAccountSelector } from "./UtxoAccountSelector"
 import { EvmAddressSelector } from "./EvmAddressSelector"
 import { useBtcAccounts } from "../hooks/useBtcAccounts"
 import { useEvmAddresses } from "../hooks/useEvmAddresses"
@@ -34,6 +35,13 @@ import { AddTokenDialog } from "./AddTokenDialog"
 import { detectSpamToken, categorizeTokens, type SpamResult } from "../../shared/spamFilter"
 
 type AssetView = "receive" | "send" | "privacy"
+
+// Litecoin script types — same trio as Bitcoin, standard purpose per type.
+const LTC_SCRIPT_TYPES = [
+	{ scriptType: 'p2pkh', purpose: 44, label: 'Legacy', prefix: 'L' },
+	{ scriptType: 'p2sh-p2wpkh', purpose: 49, label: 'SegWit', prefix: 'M' },
+	{ scriptType: 'p2wpkh', purpose: 84, label: 'Native SegWit', prefix: 'ltc1' },
+]
 
 class SwapErrorBoundary extends React.Component<{ children: React.ReactNode }, { error: Error | null }> {
 	state = { error: null as Error | null }
@@ -65,9 +73,11 @@ interface AssetPageProps {
 	 * wallet's balances.
 	 */
 	watchOnly?: boolean
+	/** Hidden (passphrase) wallet: UTXO altcoin accounts are never persisted, so hide the account selector. */
+	isHiddenWallet?: boolean
 }
 
-export function AssetPage({ chain, balance, onBack, firmwareVersion, initialAction, initialToken, onViewActivity, watchOnly }: AssetPageProps) {
+export function AssetPage({ chain, balance, onBack, firmwareVersion, initialAction, initialToken, onViewActivity, watchOnly, isHiddenWallet }: AssetPageProps) {
 	const { t } = useTranslation("asset")
 	const { fmtCompact, symbol: fiatSymbol } = useFiat()
 	// Watch-only mode never lands on a signing view, regardless of the
@@ -103,6 +113,10 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 	// shadow newer push/bulk-refresh data for the rest of the mount.
 	const [refreshing, setRefreshing] = useState(false)
 	const [refreshError, setRefreshError] = useState<string | null>(null)
+	// Last time THIS page saw fresh data for the chain (manual refresh success
+	// or a balance push). Mount-time data is of unknown age, so no stamp then —
+	// the Synced badge only shows a time it can vouch for.
+	const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null)
 	// Bumped on every manual refresh so chain-specific panels that fetch their own
 	// data (HiveAccountPanel) re-fetch too.
 	const [refreshNonce, setRefreshNonce] = useState(0)
@@ -114,6 +128,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 			// the 30s rpc default made slow forced refreshes fail invisibly.
 			await rpcRequest<ChainBalance>("getBalance", { chainId: chain.id }, 90000)
 			setRefreshNonce(n => n + 1)
+			setLastSyncedAt(new Date())
 		} catch (e) {
 			console.warn(`[AssetPage] refresh ${chain.id} failed:`, e)
 			setRefreshError(e instanceof Error ? e.message : String(e))
@@ -126,7 +141,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 	// keeping the chip up next to just-updated data would be a false alarm.
 	useEffect(() => {
 		return onRpcMessage("balance-updated", (updated: ChainBalance) => {
-			if (updated.chainId === chain.id) setRefreshError(null)
+			if (updated.chainId === chain.id) { setRefreshError(null); setLastSyncedAt(new Date()) }
 		})
 	}, [chain.id])
 
@@ -218,7 +233,12 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 	const isHive = chain.chainFamily === 'hive'
 	const [tonBounceable, setTonBounceable] = useState(false)
 
-	const deriveAddress = useCallback(async (path?: number[], overrideBounceable?: boolean) => {
+	// UTXO altcoin script-type picker (Litecoin only — same three types as
+	// Bitcoin, standard purpose per type: 44 legacy / 49 wrapped / 84 native).
+	const utxoScripts = chain.id === 'litecoin' ? LTC_SCRIPT_TYPES : null
+	const [utxoScriptType, setUtxoScriptType] = useState(chain.scriptType || 'p2pkh')
+
+	const deriveAddress = useCallback(async (path?: number[], overrideBounceable?: boolean, overrideScriptType?: string) => {
 		const usePath = path || effectivePath
 		if (path) setCurrentPath(path)
 		// Watch-only: no device to derive from — show the cached address only.
@@ -237,7 +257,10 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 				showDisplay: false,
 				coin: chain.chainFamily === 'evm' ? 'Ethereum' : chain.coin,
 			}
-			const st = (isBtc && btcSelected) ? btcSelected.scriptType : chain.scriptType
+			const st = overrideScriptType
+				|| ((isBtc && btcSelected) ? btcSelected.scriptType
+					: utxoScripts ? utxoScriptType
+					: chain.scriptType)
 			if (st) params.scriptType = st
 			if (isTon) params.bounceable = overrideBounceable ?? tonBounceable
 			const result = await rpcRequest(chain.rpcMethod, params, 60000)
@@ -249,7 +272,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 			setAddress(null)
 		}
 		setLoading(false)
-	}, [chain, effectivePath, isBtc, btcSelected, isTon, tonBounceable, watchOnly, balance?.address])
+	}, [chain, effectivePath, isBtc, btcSelected, isTon, tonBounceable, watchOnly, balance?.address, utxoScripts, utxoScriptType])
 
 	// Re-derive address when BTC xpub selection or change/index changes
 	// Cancellation guard prevents stale responses from overwriting current address (Finding 5)
@@ -358,21 +381,67 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 		if (isTon || isUtxo || (!address && !deriveError)) deriveAddress()
 	}, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-	// Fetch xpub/zpub for non-BTC UTXO chains (Litecoin, DASH, DOGE, BCH)
+	// UTXO altcoin multi-account (LTC/DOGE/DASH/…): tracked accounts come from
+	// the device-scoped pubkey cache (addUtxoAccount / audit "track"); the
+	// selector switches the receive path to m/purpose'/coin'/N'/0/0, with the
+	// purpose taken from the selected script type when the chain has a picker.
+	const isAltUtxo = isUtxo && !isBtc
+	const [utxoAccounts, setUtxoAccounts] = useState<number[]>([0])
+	const [utxoAccount, setUtxoAccount] = useState(0)
+	const [utxoAdding, setUtxoAdding] = useState(false)
+	const utxoPath = useCallback((n: number, st?: string) => {
+		const p = [...chain.defaultPath]
+		const purpose = utxoScripts?.find(s => s.scriptType === (st || utxoScriptType))?.purpose
+		if (purpose != null) p[0] = (0x80000000 + purpose) >>> 0
+		p[2] = (0x80000000 + n) >>> 0
+		return p
+	}, [chain.defaultPath, utxoScripts, utxoScriptType])
+	useEffect(() => {
+		if (!isAltUtxo || watchOnly) return
+		rpcRequest<{ accounts: number[] }>('getUtxoAccounts', { chainId: chain.id }, 15000)
+			.then(res => { if (res?.accounts?.length) setUtxoAccounts(res.accounts) })
+			.catch(e => console.warn(`[AssetPage] ${chain.coin} getUtxoAccounts failed:`, e))
+	}, [isAltUtxo, watchOnly, chain.id, chain.coin])
+	const selectUtxoAccount = useCallback((n: number) => {
+		setUtxoAccount(n)
+		deriveAddress(utxoPath(n))
+	}, [deriveAddress, utxoPath])
+	const selectUtxoScript = useCallback((st: string) => {
+		setUtxoScriptType(st)
+		deriveAddress(utxoPath(utxoAccount, st), undefined, st)
+	}, [deriveAddress, utxoPath, utxoAccount])
+	const addUtxoAccount = useCallback(async () => {
+		setUtxoAdding(true)
+		try {
+			const next = Math.max(...utxoAccounts) + 1
+			await rpcRequest('addUtxoAccount', { chainId: chain.id, level: next }, 60000)
+			setUtxoAccounts(prev => [...new Set([...prev, next])].sort((a, b) => a - b))
+			setUtxoAccount(next)
+			deriveAddress(utxoPath(next))
+		} catch (e: any) {
+			console.error(`[AssetPage] addUtxoAccount ${chain.coin}:`, e)
+			setDeriveError(e.message || 'Could not add account')
+		} finally {
+			setUtxoAdding(false)
+		}
+	}, [utxoAccounts, chain.id, chain.coin, deriveAddress, utxoPath])
+
+	// Fetch the account xpub for non-BTC UTXO chains (Litecoin, DASH, DOGE, BCH)
+	// — encoding follows the selected script type (xpub/Ltub vs Mtub vs zpub).
 	const [utxoXpub, setUtxoXpub] = useState<string | null>(null)
 	useEffect(() => {
-		if (!isUtxo || isBtc) return
+		if (!isAltUtxo) return
 		rpcRequest<Array<{ xpub: string }>>('getPublicKeys', {
 			paths: [{
-				addressNList: chain.defaultPath.slice(0, 3),
+				addressNList: utxoPath(utxoAccount).slice(0, 3),
 				coin: chain.coin,
-				scriptType: chain.scriptType,
+				scriptType: utxoScripts ? utxoScriptType : chain.scriptType,
 				curve: 'secp256k1',
 			}],
 		}, 30000)
 			.then(result => { if (result?.[0]?.xpub) setUtxoXpub(result[0].xpub) })
 			.catch(e => console.warn(`[AssetPage] ${chain.coin} xpub fetch failed:`, e))
-	}, [isUtxo, isBtc, chain.coin, chain.scriptType, chain.defaultPath])
+	}, [isAltUtxo, chain.coin, chain.scriptType, utxoPath, utxoAccount, utxoScripts, utxoScriptType])
 
 	// ── Token spam filter ──────────────────────────────────────────────
 	const tokens = useMemo(() => activeBalance?.tokens || [], [activeBalance?.tokens])
@@ -841,9 +910,12 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 												<Text fontSize="10px" fontFamily="mono" fontWeight="500" letterSpacing="0.02em">{t("refreshFailed")}</Text>
 											</Flex>
 										) : activeBalance ? (
-											<Flex align="center" gap="1" color="var(--teal)" className="v3-glass-chip" px="2" py="0.5">
+											<Flex align="center" gap="1" color="var(--teal)" className="v3-glass-chip" px="2" py="0.5"
+												title={lastSyncedAt ? `Last updated ${lastSyncedAt.toLocaleString()}` : undefined}>
 												<Box as={FaCheck} fontSize="9px" />
-												<Text fontSize="10px" fontFamily="mono" fontWeight="500" letterSpacing="0.02em">{t("synced")}</Text>
+												<Text fontSize="10px" fontFamily="mono" fontWeight="500" letterSpacing="0.02em">
+													{t("synced")}{lastSyncedAt ? ` · ${lastSyncedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}
+												</Text>
 											</Flex>
 										) : (
 											<Flex align="center" gap="1" color="var(--rose)" className="v3-glass-chip" px="2" py="0.5">
@@ -1044,6 +1116,19 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 								onSelectXpub={selectXpub}
 								onAddAccount={addAccount}
 								addingAccount={btcLoading}
+							/>
+						)}
+						{!watchOnly && !isHiddenWallet && isAltUtxo && (
+							<UtxoAccountSelector
+								accounts={utxoAccounts}
+								selected={utxoAccount}
+								onSelect={selectUtxoAccount}
+								onAddAccount={addUtxoAccount}
+								adding={utxoAdding}
+								symbol={chain.symbol}
+								scripts={utxoScripts || undefined}
+								selectedScript={utxoScriptType}
+								onSelectScript={selectUtxoScript}
 							/>
 						)}
 						{!watchOnly && isEvm && evmAddresses.addresses.length >= 1 && (

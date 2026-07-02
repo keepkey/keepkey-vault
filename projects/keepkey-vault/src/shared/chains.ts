@@ -203,7 +203,10 @@ const CONFIGS: ChainConfig[] = [
     id: 'litecoin', chain: Chain.Litecoin, coin: 'Litecoin', symbol: 'LTC',
     chainFamily: 'utxo', color: '#BFBBBB',
     rpcMethod: 'btcGetAddress', signMethod: 'btcSignTx',
-    defaultPath: [0x8000002C, 0x80000002, 0x80000000, 0, 0], scriptType: 'p2wpkh',
+    // BIP84 native segwit. Pre-1.4.10 releases handed out p2wpkh addresses on
+    // the 44' branch — that legacy branch stays queried in utxoAccountScriptPaths
+    // so historical funds remain visible and spendable.
+    defaultPath: [0x80000054, 0x80000002, 0x80000000, 0, 0], scriptType: 'p2wpkh',
     explorerTxUrl: 'https://blockchair.com/litecoin/transaction/{{txid}}',
     explorerAddressUrl: 'https://blockchair.com/litecoin/address/{{address}}',
   },

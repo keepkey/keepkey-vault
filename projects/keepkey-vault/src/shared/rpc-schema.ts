@@ -127,6 +127,9 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       // so funds beyond account 0 show + spend across reconnect. Non-BTC only
       // (Bitcoin uses the in-memory BtcAccountManager).
       addUtxoAccount: { params: { chainId: string; level: number }; response: { saved: number; account: number } }
+      // Tracked account indices for a non-BTC UTXO chain: 0 plus anything
+      // persisted via addUtxoAccount (asset-page "+" or audit "track").
+      getUtxoAccounts: { params: { chainId: string }; response: { accounts: number[] } }
 
       // ── EVM multi-address ──────────────────────────────────────────────
       getEvmAddresses: { params: void; response: EvmAddressSet }
@@ -343,6 +346,8 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       auditScanUtxoAccounts: { params: { chainId: string; fromLevel?: number; count?: number }; response: { results: AuditDerivedAddress[] } }
       auditDeriveCustom: { params: { chainId: string; addressNList: number[]; scriptType?: string }; response: AuditDerivedAddress }
       auditScanPaths: { params: { chainId: string; paths: number[][]; scriptType?: string }; response: { results: AuditDerivedAddress[] } }
+      // Sweep one funded address-level find to the chain's standard receive address (dryRun quotes first).
+      auditSweepPath: { params: { chainId: string; addressNList: number[]; scriptType?: string; expectedAddress: string; destinationAddress?: string; dryRun?: boolean }; response: any }
       auditInspectPath: { params: { chainId: string; addressNList: number[]; scriptType?: string }; response: AuditInspectResult }
 
       // ── Emulator (macOS only — Keychain-encrypted flash) ────────────

@@ -218,7 +218,7 @@ export async function checkAddressBalance(address: string): Promise<number> {
   return utxos.reduce((sum, u) => sum + u.value, 0)
 }
 
-export async function fetchUtxos(address: string): Promise<SweepUtxo[]> {
+export async function fetchUtxos(address: string, networkId: string = BTC_NETWORK_ID): Promise<SweepUtxo[]> {
   try {
     // Pioneer's ListUnspent endpoint accepts both xpubs AND single addresses
     // (verified 2026-05-07). Path: /api/v1/utxo/unspent/{network}/{xpub-or-address}.
@@ -226,7 +226,7 @@ export async function fetchUtxos(address: string): Promise<SweepUtxo[]> {
     // doesn't exist on pioneer-server (404), so the sweep tool was silently
     // returning [] for every funded address found.
     const pioneer = await getPioneer()
-    const resp = await pioneer.ListUnspent({ network: BTC_NETWORK_ID, xpub: address })
+    const resp = await pioneer.ListUnspent({ network: networkId, xpub: address })
     const data = Array.isArray(resp) ? resp
       : Array.isArray(resp?.data) ? resp.data
       : Array.isArray(resp?.data?.data) ? resp.data.data
@@ -244,12 +244,12 @@ export async function fetchUtxos(address: string): Promise<SweepUtxo[]> {
   }
 }
 
-async function fetchTxHex(txid: string): Promise<string | undefined> {
+async function fetchTxHex(txid: string, networkId: string = BTC_NETWORK_ID): Promise<string | undefined> {
   try {
     // Pioneer's tx lookup: /api/v1/utxo/lookup/{networkId}/{txid}.
     // Older code hit /api/v2/tx-specific/{txid} on Pioneer's base URL — 404.
     const pioneer = await getPioneer()
-    const resp = await pioneer.UtxoLookup({ networkId: BTC_NETWORK_ID, txid })
+    const resp = await pioneer.UtxoLookup({ networkId, txid })
     const data = resp?.data || resp
     return data?.hex || data?.tx?.hex || undefined
   } catch {
@@ -358,7 +358,12 @@ export interface SweepTxResult {
 export async function buildSweepTx(
   scan: SweepScan,
   destinationAddress: string,
+  // Chain override for non-BTC UTXO sweeps (the audit uncommon-path sweep).
+  // Defaults keep every existing BTC caller byte-identical.
+  opts: { coin?: string; networkId?: string } = {},
 ): Promise<SweepTxResult> {
+  const coin = opts.coin || 'Bitcoin'
+  const networkId = opts.networkId || BTC_NETWORK_ID
   // Only sweep mismatch/account-key entries — higher-account funds are recovered by adding the account
   const funded = scan.results.filter(r => r.utxos.length > 0 && r.category !== 'higher-account')
   if (funded.length === 0) throw new Error('No UTXOs found to sweep')
@@ -367,7 +372,11 @@ export async function buildSweepTx(
   const pioneer = await getPioneer()
   let feeRate = 5 // sat/byte default
   try {
-    const feeResp = await pioneer.GetFeeRateByNetwork({ networkId: BTC_NETWORK_ID })
+    // This pioneer SDK build may not have GetFeeRateByNetwork — fall back to
+    // GetFeeRate like txbuilder/utxo.ts does.
+    const feeResp = typeof pioneer.GetFeeRateByNetwork === 'function'
+      ? await pioneer.GetFeeRateByNetwork({ networkId })
+      : await pioneer.GetFeeRate({ networkId })
     const feeData = feeResp?.data || feeResp
     const fast = feeData?.fast || feeData?.average || 5
     // Auto-detect sat/kB vs sat/byte
@@ -400,7 +409,7 @@ export async function buildSweepTx(
   // Fetch raw tx hex for inputs that need it (non-segwit: p2pkh)
   for (const u of allUtxos) {
     if (u.entry.scriptType === 'p2pkh' && !u.utxo.hex) {
-      u.utxo.hex = await fetchTxHex(u.utxo.txid) || ''
+      u.utxo.hex = await fetchTxHex(u.utxo.txid, networkId) || ''
     }
   }
 
@@ -423,7 +432,7 @@ export async function buildSweepTx(
   }]
 
   const unsignedTx = {
-    coin: 'Bitcoin',
+    coin,
     inputs,
     outputs,
     version: 1,

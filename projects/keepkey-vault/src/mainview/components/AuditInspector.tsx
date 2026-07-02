@@ -61,7 +61,7 @@ export function AuditInspector({ chainId, family, defaultPath, scriptType, onOpe
     if (!path) { setErr("Enter a valid path like m/44'/60'/0'/0/0"); return }
     setBusy(true); setErr(null)
     try {
-      setResult(await rpcRequest<AuditInspectResult>('auditInspectPath', { chainId, addressNList: path, scriptType: family === 'utxo' ? scriptType : undefined }, 120000))
+      setResult(await rpcRequest<AuditInspectResult>('auditInspectPath', { chainId, addressNList: path, scriptType: family === 'utxo' ? scriptType : undefined }, 900000))
     } catch (e: any) { setErr(e.message) } finally { setBusy(false) }
   }
 
