@@ -107,6 +107,7 @@ process.on('unhandledRejection', (reason) => {
 
 import { EngineController, withTimeout } from "./engine-controller"
 import { runUsbDiagnostic as runUsbDiagnosticProbe } from "./windows-usb-probe"
+import { ensureScreenPermission, captureScreens } from "./screen-capture"
 import { startRestApi, clearFeaturesCache, setUiActive, uiHeartbeat, type RestApiCallbacks } from "./rest-api"
 import { parseSolanaTx, SolanaTxParseError, solanaMessageSlice } from "./solana-tx"
 import { AuthStore } from "./auth"
@@ -2226,6 +2227,21 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					throw new Error(`Failed to open URL: ${e?.message || e}`)
 				}
 				return { ok: true as const }
+			},
+			captureScreens: async () => {
+				// Permission check BEFORE minimizing — a denied request opens
+				// System Settings, and bouncing the window first looks broken.
+				const denied = ensureScreenPermission()
+				if (denied) return denied
+				// Minimize so the vault window doesn't cover the QR being scanned,
+				// wait out the minimize animation, capture, restore.
+				try { _mainWindow?.minimize() } catch { /* headless / window gone */ }
+				await new Promise((r) => setTimeout(r, 600))
+				try {
+					return await captureScreens()
+				} finally {
+					try { _mainWindow?.unminimize() } catch { /* ignore */ }
+				}
 			},
 			cancelDeviceSigning: async () => {
 				// User backed out of an in-flight confirm/PIN/passphrase prompt.
