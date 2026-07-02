@@ -1411,16 +1411,33 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     if (!fromAsset) return null
     const isToken = fromAsset.caip ? isTokenCaip(fromAsset.caip) : !!fromAsset.contractAddress
     if (!isToken) return null
-    const cb = balances.find(b => b.chainId === fromAsset.chainId)
-    if (!cb) return null
-    if (Number(cb.nativeBalanceUsd ?? 0) >= 1) return null
+    // Mirror fromBalance: EVM swaps sign from the SELECTED address, so judge
+    // gas on that address's native balance — the chain aggregate can hide a
+    // dust-native signing address behind a funded sibling.
+    let nativeUsd: number | null = null
+    let nativeBalance = '0'
+    if (fromAsset.chainFamily === 'evm' && evmAddresses.addresses.length > 0) {
+      const selectedAddr = evmAddresses.addresses.find(a => a.addressIndex === effectiveEvmIndex)
+      const chainBal = selectedAddr?.chainBalances?.[fromAsset.chainId]
+      if (chainBal) {
+        nativeUsd = Number(chainBal.nativeBalanceUsd ?? 0)
+        nativeBalance = chainBal.balance || '0'
+      }
+    }
+    if (nativeUsd === null) {
+      const cb = balances.find(b => b.chainId === fromAsset.chainId)
+      if (!cb) return null
+      nativeUsd = Number(cb.nativeBalanceUsd ?? 0)
+      nativeBalance = cb.balance || '0'
+    }
+    if (nativeUsd >= 1) return null
     const chainDef = CHAINS.find(c => c.id === fromAsset.chainId)
     return {
       symbol: chainDef?.symbol ?? fromAsset.chainId.toUpperCase(),
       coin: chainDef?.coin ?? fromAsset.chainId,
-      balance: cb.balance || '0',
+      balance: nativeBalance,
     }
-  }, [fromAsset, balances])
+  }, [fromAsset, balances, evmAddresses, effectiveEvmIndex])
 
   /* Resolved (amount, isMax) tuple to send to the backend. For fee-reserved native
    * and token-precision-reserved MAX the amount is already clamped, so isMax
