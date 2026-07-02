@@ -408,6 +408,26 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
 
   // ── Firmware step ──────────────────────────────────────────────────────
 
+  // Auto-skip firmware step when FW is already current (or newer — e.g. a test
+  // build above the release channel). Mirrors the bootloader auto-skip; without
+  // it the wizard offers a downgrade and waits for bootloader entry forever.
+  useEffect(() => {
+    if (step !== 'firmware') return
+    const s = deviceStatus.state
+    if (s === 'disconnected' || s === 'connected_unpaired' || s === 'error') return
+    if (needsFirmware) return
+    if (inBootloader) return // in-bootloader flash UI stays available
+    if (updateState !== 'idle') return
+    if (isRebooting) return
+    if (customFwPhase !== 'idle') return
+    if (firmwareJustFlashed) return // post-flash advance effect handles routing
+    if (needsInit) {
+      setStep('init-choose')
+    } else {
+      onComplete()
+    }
+  }, [step, needsFirmware, needsInit, inBootloader, updateState, rebootPhase, customFwPhase, firmwareJustFlashed, onComplete, deviceStatus.state])
+
   const handleEnterBootloaderForFirmware = () => {
     if (bootloaderPollRef.current) clearInterval(bootloaderPollRef.current) // H1 fix
     setWaitingForBootloaderFw(true)
@@ -444,10 +464,11 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
     if (updateState !== 'idle') return
     if (isRebooting) return
     if (inBootloader) return // Already in BL — user will click to start
+    if (!needsFirmware) return // FW current/newer — auto-skip effect routes away
     if (!waitingForBootloaderFw) {
       handleEnterBootloaderForFirmware()
     }
-  }, [step, updateState, rebootPhase, inBootloader, waitingForBootloaderFw, deviceStatus.state]) // H4 fix: added waitingForBootloaderFw
+  }, [step, updateState, rebootPhase, inBootloader, waitingForBootloaderFw, needsFirmware, deviceStatus.state]) // H4 fix: added waitingForBootloaderFw
 
   // Enter reboot phase when firmware update completes
   useEffect(() => {
@@ -517,6 +538,10 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
           setCustomFwPhase('idle')
           resetUpdate()
           setRebootPhase('firmware-rebooting')
+          // Same as the official-update path: without this, the reboot-advance
+          // effect can fire on stale bootloader features, drop rebootPhase, and
+          // strand the wizard on the firmware step after the device reboots.
+          setFirmwareJustFlashed(true)
         }
       }
     })
@@ -1309,6 +1334,15 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
                                   : t('firmware.notInstalled')
                               : `v${deviceStatus.firmwareVersion || '?'}`}
                           </Text>
+                          {!inBootloader && deviceStatus.firmwareVerified !== undefined && (
+                            <Box
+                              px={2} py={0.5} borderRadius="md" fontSize="2xs" fontWeight="bold"
+                              bg={deviceStatus.firmwareVerified ? 'rgba(72,187,120,0.15)' : 'rgba(237,137,54,0.15)'}
+                              color={deviceStatus.firmwareVerified ? 'green.400' : 'yellow.400'}
+                            >
+                              {deviceStatus.firmwareVerified ? t('firmware.signed') : t('firmware.unsigned')}
+                            </Box>
+                          )}
                         </VStack>
                         <Text color="kk.textMuted" fontSize="lg">&rarr;</Text>
                         <VStack gap={0.5} align="end">
