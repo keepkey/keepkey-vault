@@ -473,9 +473,12 @@ function openUpdatePage() {
 	if (appVersionCache) params.set('current', appVersionCache)
 	const url = `${UPDATE_PAGE}?${params.toString()}`
 	console.log(`[Update] Opening update page: ${url}`)
-	// On Windows `&` is a cmd command separator; `start` would split the query string
-	// into separate commands. Quote the URL so it stays a single argument.
-	const cmd = process.platform === 'win32' ? ['cmd', '/c', 'start', '', `"${url}"`] : ['open', url]
+	// `cmd /c start` re-parses its command line with cmd.exe's own (non-backslash-aware)
+	// quoting rules, which collide with Bun.spawn's Win32 argv-escaping and mangle the
+	// URL (observed: quote gets corrupted into a stray leading backslash, "Windows cannot
+	// find '\https://...'"). rundll32 takes the URL as a normal argv element — no shell
+	// re-parsing, so `&` in the query string and Bun's escaping both just work.
+	const cmd = process.platform === 'win32' ? ['rundll32', 'url.dll,FileProtocolHandler', url] : ['open', url]
 	Bun.spawn(cmd, { stdio: ['ignore', 'ignore', 'ignore'] })
 }
 
@@ -2187,7 +2190,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!/^https?:\/\//i.test(url)) {
 					throw new Error("openExternal: only http(s) URLs are allowed")
 				}
-				const cmd = process.platform === "win32" ? ["cmd", "/c", "start", "", url]
+				// `cmd /c start` re-parses its command line with cmd.exe's own quoting rules
+				// (not Bun.spawn's Win32 argv-escaping), so URLs with `&` get split into
+				// separate commands. rundll32 takes the URL as a normal argv element instead.
+				const cmd = process.platform === "win32" ? ["rundll32", "url.dll,FileProtocolHandler", url]
 					: process.platform === "darwin" ? ["open", url]
 					: ["xdg-open", url]
 				try {
@@ -7182,9 +7188,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					const parsed = new URL(params.url)
 					if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error()
 					if (process.platform === 'win32') {
-						// 'start' is a cmd.exe built-in, not an executable — must invoke via cmd /c
-						// Empty title "" required because start treats URLs with & as title strings
-						Bun.spawn(['cmd', '/c', 'start', '', parsed.href])
+						// `cmd /c start` re-parses its command line with cmd.exe's own quoting
+						// rules (not Bun.spawn's Win32 argv-escaping), so URLs with `&` get split
+						// into separate commands and quoted URLs get corrupted. rundll32 takes the
+						// URL as a normal argv element — no shell re-parsing involved.
+						Bun.spawn(['rundll32', 'url.dll,FileProtocolHandler', parsed.href])
 					} else {
 						const cmd = process.platform === 'linux' ? 'xdg-open' : 'open'
 						Bun.spawn([cmd, parsed.href])
