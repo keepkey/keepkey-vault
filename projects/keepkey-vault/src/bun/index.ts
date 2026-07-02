@@ -556,6 +556,11 @@ let walletConnectEnabled = false
 let bip85Enabled = false
 let zcashPrivacyEnabled = false
 let hiveEnabled = false
+// Hive sponsor ETH anti-drain gate. OFF until Pioneer implements the server side
+// (deployed /hive/create-account rejects ethAddress/ethSignature as excess fields —
+// its own code notes "no abuse gate yet"). Flip back on once Pioneer ships the gate.
+// See docs/handoff-pioneer-hive-eth-gate.md. ponytail: in-code flag, flip + rebuild.
+const HIVE_ETH_GATE = false
 // True after the per-session incremental scan has caught the wallet up to
 // chain tip. The `verified` field on `zcashShieldedStatus` reports this so
 // API clients (and any future UI gating) get an honest answer about whether
@@ -2514,16 +2519,21 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				//    server recovers the address, requires it to hold mainnet ETH, and
 				//    allows one sponsored account per address. Message bytes are pinned by
 				//    a server unit test — do NOT reformat (no trailing newline).
-				const gateMessage = `KeepKey Hive onboarding\nusername:${username}\nowner:${keys.owner}`
-				const gateMessageHex = '0x' + Buffer.from(gateMessage, 'utf8').toString('hex')
-				const signEthGate = () => wallet.ethSignMessage({ addressNList: evmAddressPath(0), message: gateMessageHex })
-				const ethSigned = engine.isEmulator
-					? await emuSigningOp(signEthGate, { operation: 'ethSignMessage', chain: 'Ethereum', memo: gateMessage.slice(0, 64) })
-					: await signEthGate()
-				// hdwallet returns { address: eip55 0x…, signature: 0x…+65-byte r||s||v } —
-				// exactly the form ethers.verifyMessage expects.
-				if (!ethSigned?.address || !ethSigned?.signature) {
-					throw new Error('Device did not return an ETH gate signature')
+				//    GATED: deployed Pioneer has no server side yet (rejects these fields),
+				//    so skip the signing entirely (avoids a pointless device confirm).
+				let ethSigned: { address: string; signature: string } | null = null
+				if (HIVE_ETH_GATE) {
+					const gateMessage = `KeepKey Hive onboarding\nusername:${username}\nowner:${keys.owner}`
+					const gateMessageHex = '0x' + Buffer.from(gateMessage, 'utf8').toString('hex')
+					const signEthGate = () => wallet.ethSignMessage({ addressNList: evmAddressPath(0), message: gateMessageHex })
+					// hdwallet returns { address: eip55 0x…, signature: 0x…+65-byte r||s||v } —
+					// exactly the form ethers.verifyMessage expects.
+					ethSigned = engine.isEmulator
+						? await emuSigningOp(signEthGate, { operation: 'ethSignMessage', chain: 'Ethereum', memo: gateMessage.slice(0, 64) })
+						: await signEthGate()
+					if (!ethSigned?.address || !ethSigned?.signature) {
+						throw new Error('Device did not return an ETH gate signature')
+					}
 				}
 
 				// 4. POST to the sponsor endpoint.
@@ -2536,11 +2546,21 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						ownerKey: keys.owner, activeKey: keys.active,
 						postingKey: keys.posting, memoKey: keys.memo,
 						attestation: { serializedTx: toHex(signed.serializedTx), signature: toHex(signed.signature) },
-						ethAddress: ethSigned.address,
-						ethSignature: ethSigned.signature,
+						...(ethSigned ? { ethAddress: ethSigned.address, ethSignature: ethSigned.signature } : {}),
 					}),
 				})
 				const body = await resp.json().catch(() => ({}))
+				if (resp.status !== 200) {
+					// Surface WHY Pioneer rejected — the 400 body carries field-level
+					// validation detail the frontend otherwise throws away.
+					console.error('[hiveCreateAccount] Pioneer', resp.status, 'rejected:', JSON.stringify(body))
+					console.error('[hiveCreateAccount] sent:', JSON.stringify({
+						username,
+						ownerKey: keys.owner, activeKey: keys.active, postingKey: keys.posting, memoKey: keys.memo,
+						attestation: { serializedTx: toHex(signed.serializedTx), signature: toHex(signed.signature) },
+						...(ethSigned ? { ethAddress: ethSigned.address, ethSignature: ethSigned.signature } : {}),
+					}))
+				}
 				return { status: resp.status, ...body }
 			},
 			hiveSignTx: async (params) => {

@@ -204,8 +204,12 @@ function HiveOnboardWizard({ color, activeKey, onCreated }: { color: string; act
 			else if (r.status === 503) setError(`Sponsor is busy. Try again in ${r.retryAfter ?? 60}s.`)
 			else if (r.status === 400) setError("Request rejected (invalid). This is a client bug — don't retry.")
 			else setError(r.error || "Account creation failed. Try again later.")
-		} catch {
-			setError("Account creation failed — device or network error.")
+		} catch (e) {
+			// Surface the real backend reason instead of blaming device/network — a
+			// bare "device or network error" here masked a missing hdwallet binding
+			// (wallet.hiveSignAccountCreate is not a function) and sent us hunting Pioneer.
+			const m = (e as any)?.message
+			setError(m ? `Account creation failed — ${m}` : "Account creation failed — device or network error.")
 		} finally { setCreating(false) }
 	}
 
