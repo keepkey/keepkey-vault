@@ -30,7 +30,9 @@ export function useAddressBook() {
         seededRef.current = true
         setSeeding(true)
         // Heavy (device round-trips) — only fired when the book is genuinely empty.
-        rpcRequest("getBalances", { forceRefresh: true }, 120000)
+        // Soft fetch: we only need the own-address seeding side effect; forced
+        // Pioneer cache bypass is reserved for user-clicked refresh.
+        rpcRequest("getBalances", {}, 120000)
           .catch(() => {})
           .finally(() => setSeeding(false))
       }

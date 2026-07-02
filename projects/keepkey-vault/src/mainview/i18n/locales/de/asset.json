@@ -80,6 +80,7 @@
   "outOfSync": "Nicht synchronisiert",
   "synced": "Synchronisiert",
   "refresh": "Aktualisieren",
+  "refreshFailed": "Aktualisierung fehlgeschlagen",
   "refreshing": "Wird aktualisiert...",
   "needsScanPrompt": "Das Wallet wurde noch nicht gescannt. Scannen Sie die Chain, um Ihre abgeschirmten Notes zu finden.",
   "scanFromBlock": "Ab Block {{block}} scannen",

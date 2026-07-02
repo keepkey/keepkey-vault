@@ -3597,7 +3597,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					if (chain.chainFamily === 'ton') addrParams.bounceable = false
 					const method = chain.id === 'ripple' ? 'rippleGetAddress' : chain.rpcMethod
 					const result = await wallet[method](addrParams)
-					const addr = typeof result === 'string' ? result : result?.address || ''
+					// publicKey fallback: pubkey-identified chains (hive) return { publicKey },
+					// not { address } — mirrors the bulk getBalances derive.
+					const addr = typeof result === 'string' ? result : result?.address || result?.publicKey || ''
 					if (!addr) throw new Error(`Could not derive address for ${chain.coin}`)
 					pubkeys.push({ caip: chain.caip, pubkey: addr })
 					displayAddress = addr
@@ -3742,7 +3744,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							// PRIVACY: Skip DB write for hidden passphrase wallets.
 							try {
 								const devId = engine.getDeviceState().deviceId
-								if (devId && !engine.isPassphraseWallet) saveCachedPubkey(devId, 'bitcoin', pk.pubkey, pk.pubkey, match?.address || '', '', xpubBal, usd)
+								if (devId && !engine.isPassphraseWallet) saveCachedPubkey(devId, 'bitcoin', pk.pubkey, pk.pubkey, match?.address || '', '', xpubBal, usd, true)
 							} catch { /* non-fatal */ }
 						}
 					}
@@ -3930,7 +3932,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				try {
 					const deviceId = engine.getDeviceState().deviceId || 'unknown'
 					if (!engine.isPassphraseWallet) {
-						updateCachedBalance(deviceId, result)
+						// force=true: reaching here means Pioneer confirmed the value, so a
+						// genuine zero / unpriced balance must overwrite the stale cache row
+						// (same rule as getBalances' confirmedChainIds).
+						updateCachedBalance(deviceId, result, true)
 						rectifyWallet(deviceId, [result])
 					}
 				} catch { /* never block on cache failure */ }
@@ -3953,7 +3958,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 								balanceUsd: btcSet.totalBalanceUsd,
 								nativeBalanceUsd: btcSet.totalBalanceUsd,
 								address: result.address || btcAccounts.getSelectedXpub()?.xpub || '',
-							})
+							}, true)
 						}
 					} catch { /* non-fatal */ }
 				}

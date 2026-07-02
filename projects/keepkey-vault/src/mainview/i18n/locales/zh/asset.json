@@ -80,6 +80,7 @@
   "outOfSync": "未同步",
   "synced": "已同步",
   "refresh": "刷新",
+  "refreshFailed": "刷新失败",
   "refreshing": "刷新中…",
   "needsScanPrompt": "钱包尚未扫描。扫描链上以查找您的屏蔽票据。",
   "scanFromBlock": "从区块 {{block}} 扫描",

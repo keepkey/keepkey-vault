@@ -81,6 +81,7 @@
   "outOfSync": "Out of Sync",
   "synced": "Synced",
   "refresh": "Refresh",
+  "refreshFailed": "Refresh failed",
   "refreshing": "Refreshing...",
   "needsScanPrompt": "Wallet has not been scanned yet. Scan the chain to find your shielded notes.",
   "scanFromBlock": "Scan from block {{block}}",

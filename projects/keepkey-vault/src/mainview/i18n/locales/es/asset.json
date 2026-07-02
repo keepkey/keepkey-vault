@@ -80,6 +80,7 @@
   "outOfSync": "Desincronizado",
   "synced": "Sincronizado",
   "refresh": "Actualizar",
+  "refreshFailed": "Error al actualizar",
   "refreshing": "Actualizando...",
   "needsScanPrompt": "La billetera aún no se ha escaneado. Escanea la cadena para encontrar tus notas blindadas.",
   "scanFromBlock": "Escanear desde el bloque {{block}}",
