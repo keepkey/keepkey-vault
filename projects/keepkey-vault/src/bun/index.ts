@@ -300,6 +300,129 @@ function mergeMetas(metas: PortfolioMeta[]): PortfolioMeta {
 	}
 }
 
+// ── Shared portfolio-entry parsing ──────────────────────────────────────────
+// Single source of truth for the leaf logic that getBalances (bulk/dashboard),
+// getBalance (single-chain/asset page) and refreshWatchOnlyBalances all need.
+// These used to be hand-mirrored copies that drifted — the missing publicKey
+// derive fallback broke every single-chain Hive refresh, the token regex lost
+// denom|bank (TCY/RUJI), and getBalance dropped response meta entirely. Keep
+// the leaves here so the paths cannot diverge again.
+
+// Contract id from a CAIP-19 asset path:
+//   ERC-20: "eip155:1/erc20:0xdac17..." → "0xdac17..."
+//   SPL:    "solana:5eykt4.../spl:TokenMint..." → "TokenMint..."
+//   TRC-20: "tron:27Lqcw/trc20:T..." → "T..."
+//   denom:  "cosmos:thorchain-mainnet-v1/denom:tcy" → "tcy" (cosmos bank denom)
+const CONTRACT_CAIP_RE = /\/(erc20|spl|trc20|token|denom|bank):([^\s]+)/
+
+// A Pioneer portfolio entry is a token when its CAIP asset path isn't a native
+// slip44/native id, or when the server explicitly types it as one.
+function isTokenEntry(entry: any): boolean {
+	const caipPath = ((entry.caip || '').split('/')[1]) || ''
+	const isTokenByCaip = !!caipPath && !caipPath.startsWith('slip44:') && !caipPath.startsWith('native:')
+	const isTokenByType = entry.type === 'token' || (entry.isNative === false && !!entry.contract)
+	return isTokenByCaip || isTokenByType
+}
+
+function parseTokenEntry(tok: any): TokenBalance {
+	const tokNetworkId = (tok.networkId || '').toLowerCase()
+	const caipPrefix = ((tok.caip || '').split('/')[0]).toLowerCase()
+	const contractMatch = (tok.caip || '').match(CONTRACT_CAIP_RE)
+	return {
+		symbol: tok.symbol || '???',
+		name: tok.name || tok.symbol || 'Unknown Token',
+		balance: String(tok.balance ?? '0'),
+		balanceUsd: Number(tok.valueUsd ?? 0),
+		priceUsd: Number(tok.priceUsd ?? 0),
+		caip: tok.caip || '',
+		contractAddress: contractMatch?.[2] || tok.contract || undefined,
+		networkId: tokNetworkId || caipPrefix,
+		icon: tok.icon || undefined,
+		decimals: tok.decimals ?? tok.precision,
+		type: tok.type || 'token',
+		dataSource: tok.dataSource,
+	}
+}
+
+// Sum duplicates by normalized CAIP. EVM hex is case-insensitive (lowercase for
+// the dedup key only — canonical caip on the object stays intact); Solana/Tron
+// identifiers are case-sensitive, keep them exact. Pioneer can return the same
+// token for multiple address indices — sum so value isn't underreported.
+function dedupeTokensByCaip(tokens: TokenBalance[]): TokenBalance[] {
+	const seen = new Map<string, TokenBalance>()
+	for (const tok of tokens) {
+		const key = tok.caip.startsWith('eip155:') ? tok.caip.toLowerCase() : tok.caip
+		const existing = seen.get(key)
+		if (!existing) {
+			seen.set(key, { ...tok })
+		} else {
+			existing.balance = String(parseFloat(existing.balance) + parseFloat(tok.balance || '0'))
+			existing.balanceUsd += tok.balanceUsd
+		}
+	}
+	return [...seen.values()]
+}
+
+function mapServerDefiPosition(sp: ServerDefiPosition): DefiPosition {
+	return {
+		protocol: sp.protocol || null,
+		displayName: sp.displayName,
+		name: sp.displayName || sp.protocol || 'DeFi Position',
+		network: sp.network,
+		networkId: sp.networkId,
+		balanceUsd: Number(sp.balanceUsd) || 0,
+		icon: sp.icon,
+		tokens: Array.isArray(sp.tokens) ? sp.tokens.map(t => ({
+			networkId: t.networkId,
+			address: String(t.address || '').toLowerCase(),
+			symbol: t.symbol,
+			balance: t.balance != null ? String(t.balance) : undefined,
+			balanceUsd: typeof t.balanceUsd === 'number' ? t.balanceUsd : undefined,
+		})).filter(t => !!t.address) : [],
+	}
+}
+
+/**
+ * Shielded ZEC as a synthetic token to attach under native Zcash — the
+ * dashboard renders it like an ERC20 sub-row. The Orchard FVK lives in the
+ * local sidecar; the seed never left the device. Only surfaces once the
+ * cached FVK is PROVEN to belong to the connected device (a stale FVK from a
+ * previous seed would show a phantom balance the user can't spend); when not
+ * yet verified, kicks off the device-match check and returns null — the
+ * balance appears on the next refresh. Shared by getBalances and getBalance
+ * so a single-chain zcash refresh can't wipe the shielded sub-row.
+ */
+async function fetchShieldedZecToken(zecPriceUsd: number): Promise<TokenBalance | null> {
+	if (!zcashPrivacyEnabled || !hasFvkLoaded()) return null
+	if (!zcashDeviceVerified) {
+		maybeStartBackgroundWalletVerification()
+		return null
+	}
+	try {
+		const shielded = await Promise.race([
+			getShieldedBalance(),
+			new Promise<null>(r => setTimeout(() => r(null), 5000)),
+		])
+		if (!shielded || shielded.confirmed <= 0) return null
+		const zecAmount = shielded.confirmed / 1e8
+		return {
+			symbol: 'zZEC',
+			name: 'Shielded ZEC',
+			balance: zecAmount.toFixed(8),
+			balanceUsd: zecAmount * zecPriceUsd,
+			priceUsd: zecPriceUsd,
+			caip: 'bip122:00040fe8ec8471911baa1db1266ea15d/orchard:shielded',
+			contractAddress: 'orchard',
+			networkId: 'bip122:00040fe8ec8471911baa1db1266ea15d',
+			decimals: 8,
+			type: 'shielded',
+		}
+	} catch (e: any) {
+		console.warn('[balances] Shielded balance fetch failed:', e?.message || e)
+		return null
+	}
+}
+
 // ── Desktop update — open keepkey.com "update your app" page ──
 // In-app auto-update is unreliable on both platforms:
 // - macOS: zig-zstd has different CLI flags than zstd, stock macOS has no zstd
@@ -311,6 +434,30 @@ const UPDATE_PAGE = 'https://keepkey.com/update'
 // Cached version from pre-release GitHub check (Updater.updateInfo() doesn't have it)
 let pendingUpdateVersion: string | null = null
 let pioneerSocket: PioneerSocket | null = null
+// Debounce Pioneer push events per CAIP-2 network — rapid-fire tx events /
+// per-confirmation re-fires coalesce into one refresh. Pending payload is kept
+// so a replacement can merge (an 'incoming' must survive a confirmation update
+// landing in its window). Module scope so the disconnect path can clear pending
+// timers (a timer firing after unplug would trigger a getBalance that throws
+// 'No device connected').
+type PendingPush = { payload: { chain?: string; networkId?: string; address?: string; txid?: string; type?: 'incoming' | 'outgoing' | 'confirmed' }; timer: ReturnType<typeof setTimeout> }
+const pioneerEventDebounce = new Map<string, PendingPush>()
+function clearPioneerEventDebounce(): void {
+	for (const p of pioneerEventDebounce.values()) clearTimeout(p.timer)
+	pioneerEventDebounce.clear()
+}
+// The same tx reaches the vault on BOTH push legs (SSE watch-list + Pioneer
+// socket). Dedup by txid so one deposit doesn't toast twice and trigger two
+// forced device+Pioneer refetches. Checking marks: first caller wins.
+const recentPushTxids = new Map<string, number>()
+function txidRecentlyPushed(txid: string | undefined): boolean {
+	if (!txid) return false
+	const now = Date.now()
+	for (const [k, exp] of recentPushTxids) { if (exp < now) recentPushTxids.delete(k) }
+	if (recentPushTxids.has(txid)) return true
+	recentPushTxids.set(txid, now + 15_000)
+	return false
+}
 // True from the moment a device becomes ready until the background bulk history
 // scan finishes. Exposed via getActivityScanState so the activity UI can show
 // "Syncing…" when it mounts mid-scan instead of a false "no activity".
@@ -1740,6 +1887,44 @@ const isUnsupportedMessageError = (e: any): boolean => {
 	return /unknown message/i.test(String(text))
 }
 
+/**
+ * Derive the display/native address for a non-EVM, non-UTXO chain — the ONE
+ * place that owns the address-message contract: param shape (scriptType, TON
+ * bounceable), the ripple method quirk, the `{ address }` vs `{ publicKey }`
+ * result shapes (hive is pubkey-identified), and unknown-message capability
+ * recording (re-sending a rejected message can knock the device off USB).
+ * Shared by getBalances and getBalance so the derive paths cannot drift —
+ * that drift is exactly what broke every single-chain hive refresh.
+ *
+ * Returns null when this firmware doesn't implement the chain's message (the
+ * miss is recorded + the stale cache row dropped). Throws on other failures.
+ */
+async function deriveChainAddress(wallet: any, chain: ChainDef): Promise<string | null> {
+	const capDevId = engine.getDeviceState().deviceId || 'unknown'
+	const capKey = capabilityKey(chain.id)
+	if (unsupportedDeviceMessages.has(capKey)) return null
+	const addrParams: any = { addressNList: chain.defaultPath, showDisplay: false, coin: chain.coin }
+	if (chain.scriptType) addrParams.scriptType = chain.scriptType
+	// TON: always non-bounceable (UQ) — bounceable (EQ) bounces if wallet uninitialized
+	if (chain.chainFamily === 'ton') addrParams.bounceable = false
+	const method = chain.id === 'ripple' ? 'rippleGetAddress' : chain.rpcMethod
+	try {
+		const result = await (wallet as any)[method](addrParams)
+		return typeof result === 'string' ? result : result?.address || result?.publicKey || null
+	} catch (e: any) {
+		if (isUnsupportedMessageError(e)) {
+			unsupportedDeviceMessages.add(capKey)
+			// Drop any stale cached balance for this chain (e.g. cached on a prior
+			// firmware that did implement it) so a now-underivable chain can't
+			// linger in the dashboard.
+			if (capDevId !== 'unknown') deleteCachedChainBalance(capDevId, chain.id)
+			console.warn(`[derive] ${chain.id}: firmware does not implement ${chain.rpcMethod} ("Unknown message") — skipping until firmware updates`)
+			return null
+		}
+		throw e
+	}
+}
+
 // ── RPC Bridge (Electrobun UI ↔ Bun) ─────────────────────────────────
 const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 	maxRequestTime: 1_800_000, // 30 minutes — generous for device-interactive ops, but not infinite
@@ -2710,42 +2895,18 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				console.log(`[getBalances] nonEvmChains to derive: ${nonEvmChains.filter(c => !c.hidden).map(c => c.id).join(', ')}`)
 				for (const chain of nonEvmChains) {
 					if (chain.hidden) continue
-					// Capture identity BEFORE the device call: a failed derivation can
-					// drop the device off USB, and recomputing in the catch would then
-					// read cleared features (deviceId 'unknown', fw '?') and store a
-					// mismatched miss — so the next refresh re-sends the message.
-					const capDevId = engine.getDeviceState().deviceId || 'unknown'
-					const capKey = capabilityKey(chain.id)
-					// Skip chains this firmware already rejected as an unknown message —
-					// re-sending only fails again and can drop the device off USB.
-					if (unsupportedDeviceMessages.has(capKey)) continue
 					const t0 = Date.now()
 					try {
-						const addrParams: any = { addressNList: chain.defaultPath, showDisplay: false, coin: chain.coin }
-						if (chain.scriptType) addrParams.scriptType = chain.scriptType
-						// TON: always non-bounceable (UQ) — bounceable (EQ) bounces if wallet uninitialized
-						if (chain.chainFamily === 'ton') addrParams.bounceable = false
-						const method = chain.id === 'ripple' ? 'rippleGetAddress' : chain.rpcMethod
-						const result = await wallet[method](addrParams)
-						const address = typeof result === 'string' ? result : result?.address || result?.publicKey || ''
+						// Shared derive (capability recording + { publicKey } fallback live
+						// inside deriveChainAddress). null = firmware miss or empty result.
+						const address = await deriveChainAddress(wallet, chain)
 						const ms = Date.now() - t0
 						if (address) {
 							console.log(`[getBalances] ${chain.id} address derived in ${ms}ms: ${address.substring(0, 20)}... caip=${chain.caip}`)
 							pubkeys.push({ caip: chain.caip, pubkey: address, chainId: chain.id, symbol: chain.symbol, networkId: chain.networkId })
-						} else {
-							console.warn(`[getBalances] ${chain.id} address empty after ${ms}ms! method=${method} result=${JSON.stringify(result)}`)
 						}
 					} catch (e: any) {
-						if (isUnsupportedMessageError(e)) {
-							unsupportedDeviceMessages.add(capKey)
-							// Drop any stale cached balance for this chain (e.g. cached on a
-							// prior firmware that did implement it) so a now-underivable chain
-							// can't linger in the dashboard.
-							if (capDevId !== 'unknown') deleteCachedChainBalance(capDevId, chain.id)
-							console.warn(`[getBalances] ${chain.id}: firmware does not implement ${chain.rpcMethod} ("Unknown message") — skipping until firmware updates`)
-						} else {
-							console.warn(`[getBalances] ${chain.id} address THREW (${Date.now() - t0}ms): ${e.message}`)
-						}
+						console.warn(`[getBalances] ${chain.id} address THREW (${Date.now() - t0}ms): ${e.message}`)
 					}
 				}
 				console.log(`[getBalances] pubkeys after nonEVM derivation: ${pubkeys.length} total (nonEVM added: ${pubkeys.filter(p => !['bitcoin','litecoin','dogecoin','bitcoincash','dash','digibyte','zcash'].includes(p.chainId) && !p.chainId.startsWith('evm')).length})`)
@@ -2955,22 +3116,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						const chainId = networkId ? (networkToChain.get(networkId) || null) : null
 						if (!chainId) { droppedDefi++; continue }
 						const ownerAddr = String(sp.pubkey || '').toLowerCase()
-						const dp: DefiPosition = {
-							protocol: sp.protocol || null,
-							displayName: sp.displayName,
-							name: sp.displayName || sp.protocol || 'DeFi Position',
-							network: sp.network,
-							networkId: sp.networkId,
-							balanceUsd: Number(sp.balanceUsd) || 0,
-							icon: sp.icon,
-							tokens: Array.isArray(sp.tokens) ? sp.tokens.map(t => ({
-								networkId: t.networkId,
-								address: String(t.address || '').toLowerCase(),
-								symbol: t.symbol,
-								balance: t.balance != null ? String(t.balance) : undefined,
-								balanceUsd: typeof t.balanceUsd === 'number' ? t.balanceUsd : undefined,
-							})).filter(t => !!t.address) : [],
-						}
+						const dp = mapServerDefiPosition(sp)
 						// Chain-level (dashboard chain row)
 						const chainList = defiByChain.get(chainId) || []
 						chainList.push(dp)
@@ -3004,19 +3150,12 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						console.log(`  BTC: caip=${b.caip}, pubkey=${String(b.pubkey).substring(0, 24)}..., balance=${b.balance}, valueUsd=${b.valueUsd}, address=${b.address}`)
 					}
 
-					// Classify entries into natives vs tokens
+					// Classify entries into natives vs tokens (shared isTokenEntry)
 					const pureNatives: any[] = []
 					const tokenEntries: any[] = []
 					for (const entry of allEntries) {
-						const caip = entry.caip || ''
-						const caipPath = caip.split('/')[1] || ''
-						const isTokenByCaip = caipPath && !caipPath.startsWith('slip44:') && !caipPath.startsWith('native:')
-						const isTokenByType = entry.type === 'token' || (entry.isNative === false && entry.contract)
-						if (isTokenByCaip || isTokenByType) {
-							tokenEntries.push(entry)
-						} else {
-							pureNatives.push(entry)
-						}
+						if (isTokenEntry(entry)) tokenEntries.push(entry)
+						else pureNatives.push(entry)
 					}
 
 					console.log(`[getBalances] After classification: ${pureNatives.length} natives, ${tokenEntries.length} tokens`)
@@ -3055,33 +3194,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							continue
 						}
 
-						// Extract contract address from CAIP:
-						//   ERC-20: "eip155:1/erc20:0xdac17..." → "0xdac17..."
-						//   SPL:    "solana:5eykt4.../spl:TokenMint..." → "TokenMint..."
-						//   TRC-20: "tron:27Lqcw/trc20:T..." → "T..."
-						//   denom:  "cosmos:thorchain-mainnet-v1/denom:tcy" → "tcy" (cosmos bank denom)
-						const contractMatch = (tok.caip || '').match(/\/(erc20|spl|trc20|token|denom|bank):([^\s]+)/)
-						const contractAddress = contractMatch?.[2] || tok.contract || undefined
-
-						const rawValueUsd = tok.valueUsd
-						const rawPriceUsd = tok.priceUsd
-						const parsedBalanceUsd = Number(rawValueUsd ?? 0)
-						const parsedPriceUsd = Number(rawPriceUsd ?? 0)
-
-						const token: TokenBalance = {
-							symbol: tok.symbol || '???',
-							name: tok.name || tok.symbol || 'Unknown Token',
-							balance: String(tok.balance ?? '0'),
-							balanceUsd: parsedBalanceUsd,
-							priceUsd: parsedPriceUsd,
-							caip: tok.caip || '',
-							contractAddress,
-							networkId: tokNetworkId || caipPrefix,
-							icon: tok.icon || undefined,
-							decimals: tok.decimals ?? tok.precision,
-							type: tok.type || 'token',
-							dataSource: tok.dataSource,
-						}
+						const token = parseTokenEntry(tok)
 
 						const existing = tokensByChainId.get(parentChainId) || []
 						existing.push(token)
@@ -3099,47 +3212,22 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 					console.debug(`[getBalances] Token grouping: ${tokensGrouped} grouped, ${tokensSkippedZero} skipped (zero bal), ${tokensSkippedNoChain} DROPPED (no parent chain)`)
 
-					// Deduplicate tokens within each chain by normalized CAIP.
-					// EVM addresses are case-insensitive hex — normalize for dedup only (caip on
-					// the object stays canonical). Non-EVM identifiers (Solana base58 mint,
-					// Tron base58check) are case-sensitive — keep them exact.
-					// When Pioneer returns the same ERC-20 for multiple EVM address indices,
-					// sum their balances so portfolio value is not underreported.
+					// Deduplicate tokens within each chain (shared dedupeTokensByCaip).
 					for (const [chainId, chainTokens] of tokensByChainId) {
-						const seen = new Map<string, TokenBalance>()
-						for (const tok of chainTokens) {
-							const key = tok.caip.startsWith('eip155:') ? tok.caip.toLowerCase() : tok.caip
-							const existing = seen.get(key)
-							if (!existing) {
-								seen.set(key, { ...tok })
-							} else {
-								existing.balance = String(parseFloat(existing.balance) + parseFloat(tok.balance || '0'))
-								existing.balanceUsd += tok.balanceUsd
-							}
-						}
-						if (seen.size < chainTokens.length) {
-							console.debug(`[getBalances] Deduped ${chainId}: ${chainTokens.length} → ${seen.size} tokens`)
-							tokensByChainId.set(chainId, [...seen.values()])
+						const deduped = dedupeTokensByCaip(chainTokens)
+						if (deduped.length < chainTokens.length) {
+							console.debug(`[getBalances] Deduped ${chainId}: ${chainTokens.length} → ${deduped.length} tokens`)
+							tokensByChainId.set(chainId, deduped)
 						}
 					}
 
 					// EVM AssetPage shows per-address tokens from evmTokensByOwner, not tokensByChainId.
 					// Pioneer returns the same token multiple times per address — dedup that map too.
 					for (const [ownerKey, ownerTokens] of evmTokensByOwner) {
-						const seen = new Map<string, TokenBalance>()
-						for (const tok of ownerTokens) {
-							const key = tok.caip.startsWith('eip155:') ? tok.caip.toLowerCase() : tok.caip
-							const existing = seen.get(key)
-							if (!existing) {
-								seen.set(key, { ...tok })
-							} else {
-								existing.balance = String(parseFloat(existing.balance) + parseFloat(tok.balance || '0'))
-								existing.balanceUsd += tok.balanceUsd
-							}
-						}
-						if (seen.size < ownerTokens.length) {
-							console.debug(`[getBalances] Deduped owner ${ownerKey}: ${ownerTokens.length} → ${seen.size} tokens`)
-							evmTokensByOwner.set(ownerKey, [...seen.values()])
+						const deduped = dedupeTokensByCaip(ownerTokens)
+						if (deduped.length < ownerTokens.length) {
+							console.debug(`[getBalances] Deduped owner ${ownerKey}: ${ownerTokens.length} → ${deduped.length} tokens`)
+							evmTokensByOwner.set(ownerKey, deduped)
 						}
 					}
 
@@ -3282,50 +3370,18 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						})
 					}
 
-					// Attach shielded ZEC as a synthetic token under native Zcash so the
-					// dashboard renders it like an ERC20 sub-row. The Orchard FVK lives
-					// in the local sidecar; the seed never left the device.
-					// Only surface a shielded balance once the cached FVK has been PROVEN
-					// to belong to the connected device. Otherwise a stale FVK from a
-					// previous device/seed would show a phantom balance the user can't
-					// actually spend. When not yet verified, kick off the device-match
-					// check (which purges stale state on mismatch) and skip this round —
-					// the balance appears on the next refresh once verified.
-					if (zcashPrivacyEnabled && hasFvkLoaded() && !zcashDeviceVerified) {
-						maybeStartBackgroundWalletVerification()
-					}
-					if (zcashPrivacyEnabled && hasFvkLoaded() && zcashDeviceVerified) {
-						try {
-							const shielded = await Promise.race([
-								getShieldedBalance(),
-								new Promise<null>(r => setTimeout(() => r(null), 5000)),
-							])
-							if (shielded && shielded.confirmed > 0) {
-								const zcashEntry = results.find(r => r.chainId === 'zcash')
-								if (zcashEntry) {
-									const zcashCaip = 'bip122:00040fe8ec8471911baa1db1266ea15d/slip44:133'
-									const zcashNative = pureNatives.find((d: any) => d.caip === zcashCaip)
-									const zecPrice = parseFloat(zcashNative?.priceUsd ?? '0')
-									const zecAmount = shielded.confirmed / 1e8
-									const shieldedUsd = zecAmount * zecPrice
-									zcashEntry.tokens = zcashEntry.tokens || []
-									zcashEntry.tokens.push({
-										symbol: 'zZEC',
-										name: 'Shielded ZEC',
-										balance: zecAmount.toFixed(8),
-										balanceUsd: shieldedUsd,
-										priceUsd: zecPrice,
-										caip: 'bip122:00040fe8ec8471911baa1db1266ea15d/orchard:shielded',
-										contractAddress: 'orchard',
-										networkId: 'bip122:00040fe8ec8471911baa1db1266ea15d',
-										decimals: 8,
-										type: 'shielded',
-									})
-									zcashEntry.balanceUsd = (zcashEntry.balanceUsd || 0) + shieldedUsd
-								}
+					// Attach shielded ZEC as a synthetic token under native Zcash
+					// (verification + FVK rules live in fetchShieldedZecToken).
+					{
+						const zcashEntry = results.find(r => r.chainId === 'zcash')
+						if (zcashEntry) {
+							const zcashCaip = 'bip122:00040fe8ec8471911baa1db1266ea15d/slip44:133'
+							const zcashNative = pureNatives.find((d: any) => d.caip === zcashCaip)
+							const shieldedTok = await fetchShieldedZecToken(parseFloat(zcashNative?.priceUsd ?? '0'))
+							if (shieldedTok) {
+								zcashEntry.tokens = [...(zcashEntry.tokens || []), shieldedTok]
+								zcashEntry.balanceUsd = (zcashEntry.balanceUsd || 0) + shieldedTok.balanceUsd
 							}
-						} catch (e: any) {
-							console.warn('[getBalances] Shielded balance fetch failed:', e?.message || e)
 						}
 					}
 
@@ -3465,6 +3521,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 								// event.data.type is the real direction ('incoming' | 'outgoing').
 								// Forward it verbatim — frontend resyncs either way (both change the
 								// balance) but only shows the "Incoming payment" toast for 'incoming'.
+								// Mark the txid so the Pioneer-socket leg doesn't re-forward it.
+								if (txidRecentlyPushed(event.data.txid)) return
 								console.log(`[event-stream] ${event.data.type} tx ${event.data.txid} → ${event.data.address} (${event.data.networkId})`)
 								try { rpc.send['tx-push-received']({
 									chain: event.data.caip,
@@ -3476,7 +3534,16 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							}
 							if (event.type === 'tx:confirmed') {
 								console.log(`[event-stream] Confirmed tx ${event.data.txid} (${event.data.confirmations} confs)`)
-								try { rpc.send['tx-push-received']({ networkId: event.data.networkId, txid: event.data.txid, type: 'confirmed' }) } catch { /* webview not ready */ }
+								// Debounce per network: the stream re-fires tx:confirmed on every
+								// confirmation update, and each forward costs a forced getBalance.
+								const confKey = `confirmed:${event.data.networkId}`
+								const pending = pioneerEventDebounce.get(confKey)
+								if (pending) clearTimeout(pending.timer)
+								const payload = { networkId: event.data.networkId, txid: event.data.txid, type: 'confirmed' as const }
+								pioneerEventDebounce.set(confKey, { payload, timer: setTimeout(() => {
+									pioneerEventDebounce.delete(confKey)
+									try { rpc.send['tx-push-received'](payload) } catch { /* webview not ready */ }
+								}, 2000) })
 							}
 						},
 						(status) => {
@@ -3492,6 +3559,21 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!engine.wallet) throw new Error('No device connected')
 				const chain = getAllChains().find(c => c.id === params.chainId)
 				if (!chain) throw new Error(`Unknown chain: ${params.chainId}`)
+				// forceRefresh defaults TRUE: single-chain fetches are user-clicked
+				// refreshes, post-send resyncs, or tx pushes — chain state changed, so
+				// Pioneer's cache must be bypassed. Callers pass false only when the
+				// cache is known-fresh.
+				const forceRefresh = params.forceRefresh !== false
+				// Chain gating (mirrors getBalances): firmware minimum + feature flags.
+				// Returns the same empty-balance shape as the capability gate below —
+				// throwing here would bounce flows that merely render the page (#310).
+				const fwVersion = engine.getDeviceState().firmwareVersion
+				if (!isChainSupported(chain, fwVersion)
+					|| ((chain.id === 'zcash' || chain.id === 'zcash-shielded') && !zcashPrivacyEnabled)
+					|| (chain.id === 'hive' && !hiveEnabled)) {
+					console.warn(`[getBalance] ${chain.id}: unsupported on firmware ${fwVersion || '?'} or feature-flagged off — returning empty balance`)
+					return { chainId: chain.id, symbol: chain.symbol, balance: '0', balanceUsd: 0, address: '' }
+				}
 				// Firmware-capability gate (mirrors getBalances): if this chain's address
 				// message was already rejected as unknown, return an empty balance instead
 				// of re-sending it — the failed round-trip can drop the device off USB and
@@ -3592,14 +3674,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						displayAddress = addr
 					}
 				} else {
-					const addrParams: any = { addressNList: chain.defaultPath, showDisplay: false, coin: chain.coin }
-					if (chain.scriptType) addrParams.scriptType = chain.scriptType
-					if (chain.chainFamily === 'ton') addrParams.bounceable = false
-					const method = chain.id === 'ripple' ? 'rippleGetAddress' : chain.rpcMethod
-					const result = await wallet[method](addrParams)
-					// publicKey fallback: pubkey-identified chains (hive) return { publicKey },
-					// not { address } — mirrors the bulk getBalances derive.
-					const addr = typeof result === 'string' ? result : result?.address || result?.publicKey || ''
+					// Shared derive — unknown-message capability recording and the
+					// { publicKey } result fallback (hive) live inside deriveChainAddress.
+					const addr = await deriveChainAddress(wallet, chain)
 					if (!addr) throw new Error(`Could not derive address for ${chain.coin}`)
 					pubkeys.push({ caip: chain.caip, pubkey: addr })
 					displayAddress = addr
@@ -3617,6 +3694,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				let balance = '0', balanceUsd = 0, address = displayAddress
 				let tokens: TokenBalance[] | undefined
 				let chainDefiPositions: DefiPosition[] | undefined
+				// True once Pioneer answered with NON-degraded data — gates the force
+				// cache overwrite below (degraded responses must not clobber the cache).
+				let pioneerConfirmed = false
 				// Snapshot pre-refresh address from cache so we can preserve it on Pioneer failure (Finding 3)
 				let cachedAddress = ''
 				try {
@@ -3649,7 +3729,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					let resp: any
 					try {
 						resp = await withTimeout(
-							pioneer.GetPortfolioBalances(portfolioBody, { forceRefresh: true }),
+							pioneer.GetPortfolioBalances(portfolioBody, { forceRefresh }),
 							PIONEER_TIMEOUT_MS,
 							'GetPortfolioBalances'
 						)
@@ -3659,15 +3739,25 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						resp = await withTimeout(
 							pioneer.GetPortfolioBalances(
 								{ pubkeys: portfolioBody.pubkeys, ...(isEvm ? { includeDefi: true } : {}) },
-								{ forceRefresh: true }
+								{ forceRefresh }
 							),
 							PIONEER_TIMEOUT_MS,
 							'GetPortfolioBalances'
 						)
 					}
-					const rawData = resp?.data?.data || resp?.data || {}
-					const allEntries: any[] = rawData.balances || (Array.isArray(rawData) ? rawData : [])
-					const rawDefiPositions: ServerDefiPosition[] = Array.isArray(rawData.defiPositions) ? rawData.defiPositions : []
+					const { entries: allEntries, meta: portfolioMeta, defiPositions: respDefiPositions } = unwrapPortfolioResponse(resp)
+					const rawDefiPositions: ServerDefiPosition[] = respDefiPositions || []
+					// Degraded = Pioneer's fresh fetch failed and it served last-known
+					// cache. Surface it (same banner channel as getBalances) and treat
+					// the response as UNCONFIRMED — its values must not force-overwrite
+					// our cache (a degraded zero would clobber a good cached balance).
+					pioneerConfirmed = !portfolioMeta?.degraded
+					if (portfolioMeta?.degraded) {
+						console.warn(`[getBalance] ${chain.coin}: Pioneer served degraded data`)
+						try {
+							rpc.send['pioneer-error']({ message: '', url: getPioneerApiBase(), severity: 'warning', degradedChains: [chain.symbol], staleChains: [], staleMinutes: 0, degradedChainIds: [chain.id], staleChainIds: [], unresolvedFaultCount: 0 })
+						} catch { /* webview not ready */ }
+					}
 
 					console.log(`[getBalance] ${chain.coin}: ${allEntries.length} entries from Pioneer (${pubkeys.length} pubkeys)`)
 
@@ -3690,12 +3780,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							|| entryCaipPrefix === chainCaipPrefix
 						if (!belongsToChain) { skippedCrossChain++; continue }
 
-						const caip = entry.caip || ''
-						const caipPath = caip.split('/')[1] || ''
-						const isTokenByCaip = caipPath && !caipPath.startsWith('slip44:') && !caipPath.startsWith('native:')
-						const isTokenByType = entry.type === 'token' || (entry.isNative === false && entry.contract)
-
-						if (isTokenByCaip || isTokenByType) {
+						if (isTokenEntry(entry)) {
 							// Gate 2 (tokens): owner address must be one we requested
 							const ownerAddr = (entry.address || entry.pubkey || '').toLowerCase()
 							if (ownerAddr && !pubkeySet.has(ownerAddr)) continue
@@ -3744,7 +3829,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							// PRIVACY: Skip DB write for hidden passphrase wallets.
 							try {
 								const devId = engine.getDeviceState().deviceId
-								if (devId && !engine.isPassphraseWallet) saveCachedPubkey(devId, 'bitcoin', pk.pubkey, pk.pubkey, match?.address || '', '', xpubBal, usd, true)
+								if (devId && !engine.isPassphraseWallet) saveCachedPubkey(devId, 'bitcoin', pk.pubkey, pk.pubkey, match?.address || '', '', xpubBal, usd, pioneerConfirmed)
 							} catch { /* non-fatal */ }
 						}
 					}
@@ -3772,22 +3857,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							const caipNorm = (tok.caip || '').startsWith('eip155:') ? (tok.caip || '').toLowerCase() : (tok.caip || '')
 							if (seenByOwnerCaip.has(`${caipNorm}|${ownerAddr}`)) continue
 							seenByOwnerCaip.add(`${caipNorm}|${ownerAddr}`)
-							const contractMatch = (tok.caip || '').match(/\/(erc20|spl|trc20|token):([^\s]+)/)
-							const contractAddress = contractMatch?.[2] || tok.contract || undefined
-							const token: TokenBalance = {
-								symbol: tok.symbol || '???',
-								name: tok.name || tok.symbol || 'Unknown Token',
-								balance: String(tok.balance ?? '0'),
-								balanceUsd: Number(tok.valueUsd ?? 0),
-								priceUsd: Number(tok.priceUsd ?? 0),
-								caip: tok.caip || '',
-								contractAddress,
-								networkId: (tok.networkId || '').toLowerCase(),
-								icon: tok.icon || undefined,
-								decimals: tok.decimals ?? tok.precision,
-								type: tok.type || 'token',
-								dataSource: tok.dataSource,
-							}
+							const token = parseTokenEntry(tok)
 							parsedTokens.push(token)
 							if (isEvm) {
 								const ownerAddress = String(tok.address || tok.pubkey || '').toLowerCase()
@@ -3800,43 +3870,19 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						}
 
 						if (parsedTokens.length > 0) {
-							// Deduplicate by normalized CAIP — same EVM-only rule as getBalances.
-							// EVM: lowercase for dedup; canonical caip on the object stays intact.
-							// Non-EVM: exact match (Solana/Tron identifiers are case-sensitive).
-							const seen = new Map<string, TokenBalance>()
-							for (const tok of parsedTokens) {
-								const key = tok.caip.startsWith('eip155:') ? tok.caip.toLowerCase() : tok.caip
-								const existing = seen.get(key)
-								if (!existing) {
-									seen.set(key, { ...tok })
-								} else {
-									existing.balance = String(parseFloat(existing.balance) + parseFloat(tok.balance || '0'))
-									existing.balanceUsd += tok.balanceUsd
-								}
-							}
-							tokens = [...seen.values()]
+							tokens = dedupeTokensByCaip(parsedTokens)
 							const tokenUsdTotal = tokens.reduce((sum, t) => sum + t.balanceUsd, 0)
 							balanceUsd += tokenUsdTotal
 						}
 						console.log(`[getBalance] ${chain.coin}: ${tokens?.length ?? 0} tokens, $${balanceUsd.toFixed(2)} total`)
 					}
 
-					// Dedup per-address EVM token lists before writing to evmAddresses.
-					// tokensByChainId is already deduped above; evmTokensByOwner feeds AssetPage directly.
+					// Dedup per-address EVM token lists before writing to evmAddresses
+					// (evmTokensByOwner feeds AssetPage directly).
 					if (isEvm) {
 						for (const [addr, addrTokens] of evmTokensByOwner) {
-							const seen = new Map<string, TokenBalance>()
-							for (const tok of addrTokens) {
-								const key = tok.caip.startsWith('eip155:') ? tok.caip.toLowerCase() : tok.caip
-								const existing = seen.get(key)
-								if (!existing) {
-									seen.set(key, { ...tok })
-								} else {
-									existing.balance = String(parseFloat(existing.balance) + parseFloat(tok.balance || '0'))
-									existing.balanceUsd += tok.balanceUsd
-								}
-							}
-							if (seen.size < addrTokens.length) evmTokensByOwner.set(addr, [...seen.values()])
+							const deduped = dedupeTokensByCaip(addrTokens)
+							if (deduped.length < addrTokens.length) evmTokensByOwner.set(addr, deduped)
 						}
 					}
 
@@ -3850,24 +3896,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					const ownerDefiPositions = new Map<string, DefiPosition[]>()
 					const allChainDefi: DefiPosition[] = []
 					for (const sp of rawDefiPositions) {
+						// Single-chain context: keep only positions on THIS chain's network.
 						const spNetworkId = (sp.networkId || '').toLowerCase()
-						if (!spNetworkId || networkToChain.get(spNetworkId) !== chain.id) continue
-						const dp: DefiPosition = {
-							protocol: sp.protocol || null,
-							displayName: sp.displayName,
-							name: sp.displayName || sp.protocol || 'DeFi Position',
-							network: sp.network,
-							networkId: sp.networkId,
-							balanceUsd: Number(sp.balanceUsd) || 0,
-							icon: sp.icon,
-							tokens: Array.isArray(sp.tokens) ? sp.tokens.map(t => ({
-								networkId: t.networkId,
-								address: String(t.address || '').toLowerCase(),
-								symbol: t.symbol,
-								balance: t.balance != null ? String(t.balance) : undefined,
-								balanceUsd: typeof t.balanceUsd === 'number' ? t.balanceUsd : undefined,
-							})).filter(t => !!t.address) : [],
-						}
+						if (!spNetworkId || spNetworkId !== chainNetworkId) continue
+						const dp = mapServerDefiPosition(sp)
 						allChainDefi.push(dp)
 						const ownerLower = String(sp.pubkey || '').toLowerCase()
 						if (ownerLower) {
@@ -3904,6 +3936,18 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						balanceUsd += allChainDefi.reduce((s, p) => s + (p.balanceUsd || 0), 0)
 						chainDefiPositions = allChainDefi
 					}
+
+					// Zcash: attach the shielded zZEC synthetic token, same as the bulk
+					// path — without this a single-chain zcash refresh wiped the cached
+					// shielded sub-row (its cache write replaces tokens_json wholesale).
+					if (chain.id === 'zcash') {
+						const zcashNative = pureNatives.find((d: any) => d.caip === chain.caip)
+						const shieldedTok = await fetchShieldedZecToken(parseFloat(zcashNative?.priceUsd ?? '0'))
+						if (shieldedTok) {
+							tokens = [...(tokens || []), shieldedTok]
+							balanceUsd += shieldedTok.balanceUsd
+						}
+					}
 				} catch (e: any) {
 					const message = getPioneerPortfolioErrorMessage(e)
 					console.warn(`[getBalance] ${chain.coin} portfolio failed:`, message)
@@ -3932,10 +3976,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				try {
 					const deviceId = engine.getDeviceState().deviceId || 'unknown'
 					if (!engine.isPassphraseWallet) {
-						// force=true: reaching here means Pioneer confirmed the value, so a
+						// force only when Pioneer confirmed (non-degraded) the value — then a
 						// genuine zero / unpriced balance must overwrite the stale cache row
 						// (same rule as getBalances' confirmedChainIds).
-						updateCachedBalance(deviceId, result, true)
+						updateCachedBalance(deviceId, result, pioneerConfirmed)
 						rectifyWallet(deviceId, [result])
 					}
 				} catch { /* never block on cache failure */ }
@@ -3958,7 +4002,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 								balanceUsd: btcSet.totalBalanceUsd,
 								nativeBalanceUsd: btcSet.totalBalanceUsd,
 								address: result.address || btcAccounts.getSelectedXpub()?.xpub || '',
-							}, true)
+							}, pioneerConfirmed)
 						}
 					} catch { /* non-fatal */ }
 				}
@@ -6245,15 +6289,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					if (chunkResults[i].failed) for (const p of pubkeyChunks[i]) failedChainIds.add(p.chainId)
 				}
 
-				// 5. Classify natives vs tokens (same heuristic as getBalances)
+				// 5. Classify natives vs tokens (shared isTokenEntry)
 				const pureNatives: any[] = []
 				const tokenEntries: any[] = []
 				for (const entry of allEntries) {
-					const caip = entry.caip || ''
-					const caipPath = caip.split('/')[1] || ''
-					const isTokenByCaip = caipPath && !caipPath.startsWith('slip44:') && !caipPath.startsWith('native:')
-					const isTokenByType = entry.type === 'token' || (entry.isNative === false && entry.contract)
-					if (isTokenByCaip || isTokenByType) tokenEntries.push(entry)
+					if (isTokenEntry(entry)) tokenEntries.push(entry)
 					else pureNatives.push(entry)
 				}
 
@@ -6274,21 +6314,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					const parentChainId = networkToChain.get(tokNetworkId) || networkToChain.get(caipPrefix) || null
 					if (!parentChainId) continue
 
-					const contractMatch = (tok.caip || '').match(/\/(erc20|spl|trc20|token):([^\s]+)/)
-					const token: TokenBalance = {
-						symbol: tok.symbol || '???',
-						name: tok.name || tok.symbol || 'Unknown Token',
-						balance: String(tok.balance ?? '0'),
-						balanceUsd: Number(tok.valueUsd ?? 0),
-						priceUsd: Number(tok.priceUsd ?? 0),
-						caip: tok.caip || '',
-						contractAddress: contractMatch?.[2] || tok.contract || undefined,
-						networkId: tokNetworkId || caipPrefix,
-						icon: tok.icon || undefined,
-						decimals: tok.decimals ?? tok.precision,
-						type: tok.type || 'token',
-						dataSource: tok.dataSource,
-					}
+					const token = parseTokenEntry(tok)
 					const existing = tokensByChainId.get(parentChainId) || []
 					existing.push(token)
 					tokensByChainId.set(parentChainId, existing)
@@ -6304,22 +6330,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					seenDefiKey.add(key)
 					const chainId = sp.networkId ? networkToChain.get(sp.networkId.toLowerCase()) : null
 					if (!chainId) continue
-					const dp: DefiPosition = {
-						protocol: sp.protocol || null,
-						displayName: sp.displayName,
-						name: sp.displayName || sp.protocol || 'DeFi Position',
-						network: sp.network,
-						networkId: sp.networkId,
-						balanceUsd: Number(sp.balanceUsd) || 0,
-						icon: sp.icon,
-						tokens: Array.isArray(sp.tokens) ? sp.tokens.map(t => ({
-							networkId: t.networkId,
-							address: String(t.address || '').toLowerCase(),
-							symbol: t.symbol,
-							balance: t.balance != null ? String(t.balance) : undefined,
-							balanceUsd: typeof t.balanceUsd === 'number' ? t.balanceUsd : undefined,
-						})).filter(t => !!t.address) : [],
-					}
+					const dp = mapServerDefiPosition(sp)
 					const list = defiByChain.get(chainId) || []
 					list.push(dp)
 					defiByChain.set(chainId, list)
@@ -7430,43 +7441,64 @@ engine.on('state-change', (state) => {
 		}
 	}
 	if (state.state === 'ready' && !pioneerSocket) {
-		// Debounce Pioneer push events per chain — rapid-fire cache pings coalesce into one refresh.
-		const pioneerEventDebounce = new Map<string, ReturnType<typeof setTimeout>>()
 		pioneerSocket = new PioneerSocket({
 			queryKey: getPioneerQueryKey(),
 			onEvent: (event, data) => {
-				const REFRESH_EVENTS = new Set(['transaction:incoming', 'balance:update', 'balance:cache:update'])
-				if (!REFRESH_EVENTS.has(event)) return
-				const d = data as any
-				const address = d?.address ?? undefined
+				// ONLY 'transaction:incoming'. Pioneer also emits 'balance:update' /
+				// 'balance:cache:update' — but those fire from INSIDE its
+				// GetPortfolioBalances controller, per pubkey, to the requesting
+				// user's own socket (balance.controller.ts:776/788/798, :974): they
+				// are echoes of the vault's own queries, not background-worker
+				// signals. Consuming them creates a self-sustaining refresh loop
+				// (each getBalance → echo → getBalance, with device USB traffic per
+				// cycle). Re-add only after Pioneer separates genuine worker pushes
+				// from per-request emits — see docs/handoff-pioneer-hive-push-refresh.md.
+				if (event !== 'transaction:incoming') return
+				// Some payloads arrive JSON-STRINGIFIED (server emit style varies) —
+				// parse both shapes.
+				let d: any = data
+				if (typeof d === 'string') {
+					try { d = JSON.parse(d) } catch { return }
+				}
+				const address = d?.address ?? d?.pubkey ?? undefined
 				const txid = d?.txid ?? d?.tx?.txid ?? undefined
-				// Normalize whatever Pioneer sends into a canonical CAIP-19 string.
-				// Pioneer may send: CAIP-19 (has "/"), CAIP-2 ("eip155:1"), internal id
-				// ("ethereum"), or raw symbol ("ETH"). Symbol is ambiguous (ETH = Ethereum,
-				// Arbitrum, Optimism, Base) so we never fall back to it.
+				// The SSE leg usually delivers the same tx first — don't double-toast
+				// or double-fetch it.
+				if (txidRecentlyPushed(txid)) return
+				// The server reuses the 'transaction:incoming' event name for
+				// confirmation updates; map its payload type into the schema union.
+				const rawType = d?.type
+				const type = rawType === 'incoming' || rawType === 'outgoing' ? rawType
+					: rawType === 'confirmation_update' ? 'confirmed' as const
+					: undefined
+				// Normalize to a canonical CAIP-19 string. Prefer explicit caip, then
+				// networkId — the server's 'chain' field is symbol-ish ("ETH") and
+				// ambiguous (ETH = Ethereum, Arbitrum, Optimism, Base), so it's only
+				// consulted for CAIP/id-shaped values, never as a symbol.
 				const allChains = [...CHAINS, ...customChainDefs]
 				let chain: string | undefined
-				const raw: string | undefined = d?.chain
-				if (raw) {
-					if (raw.includes('/')) {
-						chain = raw // already CAIP-19
-					} else {
-						// CAIP-2 (networkId like "eip155:1") or internal id like "ethereum"
-						const def = allChains.find(c => c.networkId === raw || c.id === raw)
-						chain = def?.caip
-					}
+				for (const cand of [d?.caip, d?.networkId, d?.chain]) {
+					if (typeof cand !== 'string' || !cand) continue
+					if (cand.includes('/')) { chain = cand; break } // already CAIP-19
+					// CAIP-2 (networkId like "eip155:1") or internal id like "ethereum"
+					const def = allChains.find(c => c.networkId === cand || c.id === cand)
+					if (def) { chain = def.caip; break }
 				}
 				if (!chain) return
-				// Debounce per network (CAIP-2 prefix) so multiple token pushes on the same
-				// EVM network collapse into a single refresh rather than bypassing the debounce.
+				// Debounce per network (CAIP-2 prefix) so rapid-fire events on the same
+				// network collapse into one refresh. When replacing a pending forward,
+				// keep 'incoming' if either had it — a confirmation update arriving in
+				// the window must not eat the incoming-payment toast.
 				const networkId = chain.split('/')[0]
-				const existing = pioneerEventDebounce.get(networkId)
-				if (existing) clearTimeout(existing)
-				pioneerEventDebounce.set(networkId, setTimeout(() => {
+				const pending = pioneerEventDebounce.get(networkId)
+				if (pending) clearTimeout(pending.timer)
+				const mergedType = pending?.payload.type === 'incoming' ? 'incoming' : type
+				const payload = { chain, address, txid, type: mergedType }
+				pioneerEventDebounce.set(networkId, { payload, timer: setTimeout(() => {
 					pioneerEventDebounce.delete(networkId)
-					console.log(`[PioneerSocket] push event '${event}' chain=${chain} → forwarding`)
-					try { rpc.send['tx-push-received']({ chain, address, txid }) } catch { /* webview not ready */ }
-				}, 2000))
+					console.log(`[PioneerSocket] push event '${event}' chain=${chain} type=${mergedType} → forwarding`)
+					try { rpc.send['tx-push-received'](payload) } catch { /* webview not ready */ }
+				}, 2000) })
 			},
 			onConnect: () => console.log('[PioneerSocket] connected to Pioneer'),
 			onDisconnect: () => console.log('[PioneerSocket] disconnected from Pioneer'),
@@ -7507,6 +7539,7 @@ engine.on('state-change', (state) => {
 		console.log('[Vault] Device disconnected: keeping in-memory account managers for watch-only')
 		pioneerSocket?.stop()
 		pioneerSocket = null
+		clearPioneerEventDebounce() // pending timers would getBalance a gone device
 		stopEventStream()
 	}
 	if (state.state === 'disconnected' || state.state === 'needs_passphrase') {
