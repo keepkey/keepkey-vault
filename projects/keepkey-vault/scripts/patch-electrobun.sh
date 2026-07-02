@@ -39,6 +39,18 @@ if [ -f "$EBUN_CLI" ]; then
   else
     echo "[patch-electrobun] WARNING: Info.plist pattern not found — camera permission may not work"
   fi
+
+  # Add NSScreenCaptureUsageDescription (the QR "scan screen" option). Screen
+  # Recording itself is pure TCC — no entitlement exists — but newer macOS
+  # expects a purpose string on apps that request capture access.
+  if grep -q 'NSScreenCaptureUsageDescription' "$EBUN_CLI"; then
+    echo "[patch-electrobun] NSScreenCaptureUsageDescription already patched"
+  elif grep -q 'NSAppTransportSecurity' "$EBUN_CLI"; then
+    sed_in_place 's|</dict>|<key>NSScreenCaptureUsageDescription</key>\n\t<string>KeepKey Vault takes a one-time screenshot to find a QR code on your screen when you choose Scan Screen.</string>\n</dict>|' "$EBUN_CLI"
+    echo "[patch-electrobun] Patched NSScreenCaptureUsageDescription"
+  else
+    echo "[patch-electrobun] WARNING: Info.plist pattern not found — screen recording permission may not work"
+  fi
 else
   echo "[patch-electrobun] $EBUN_CLI not found, skipping (expected during CI or fresh install)"
 fi
