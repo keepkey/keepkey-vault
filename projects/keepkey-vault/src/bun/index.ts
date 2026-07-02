@@ -556,11 +556,12 @@ let walletConnectEnabled = false
 let bip85Enabled = false
 let zcashPrivacyEnabled = false
 let hiveEnabled = false
-// Hive sponsor ETH anti-drain gate. OFF until Pioneer implements the server side
-// (deployed /hive/create-account rejects ethAddress/ethSignature as excess fields —
-// its own code notes "no abuse gate yet"). Flip back on once Pioneer ships the gate.
-// See docs/handoff-pioneer-hive-eth-gate.md. ponytail: in-code flag, flip + rebuild.
-const HIVE_ETH_GATE = false
+// Hive sponsor ETH anti-drain gate. ON for release — the vault signs the EIP-191
+// gate and sends ethAddress/ethSignature. HARD DEPENDENCY: Pioneer must have the
+// server-side gate deployed (accept + verify the fields) or /hive/create-account
+// 400s on the excess fields. See docs/handoff-pioneer-hive-eth-gate.md.
+// ponytail: in-code flag, flip + rebuild.
+const HIVE_ETH_GATE = true
 // True after the per-session incremental scan has caught the wallet up to
 // chain tip. The `verified` field on `zcashShieldedStatus` reports this so
 // API clients (and any future UI gating) get an honest answer about whether
