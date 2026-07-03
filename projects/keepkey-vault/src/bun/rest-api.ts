@@ -3,7 +3,7 @@ import type { AuthStore } from './auth'
 import { HttpError } from './auth'
 import type { SigningRequestInfo, ApiLogEntry, EIP712DecodedInfo } from '../shared/types'
 import { decodeEIP712 } from './eip712-decoder'
-import { decodeCalldata } from './calldata-decoder'
+import { decodeCalldata, type EvmUnsignedTxFields } from './calldata-decoder'
 import { CHAINS, isChainSupported } from '../shared/chains'
 import {
   initializeOrchardFromDevice, scanOrchardNotes, getShieldedBalance,
@@ -1711,7 +1711,30 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
                   const chainIdNum = typeof signingInfo.chainId === 'string'
                     ? (signingInfo.chainId.startsWith('0x') ? parseInt(signingInfo.chainId, 16) : parseInt(signingInfo.chainId, 10))
                     : signingInfo.chainId
-                  signingInfo.calldataDecoded = await decodeCalldata(preview.to, preview.data, chainIdNum) ?? undefined
+                  // Full unsigned tx for the pioneer signed blob. MUST mirror the
+                  // msg construction in the /eth/sign-transaction handler exactly
+                  // (same defaults, same fee-field selection) — the blob's tx_hash
+                  // is bound to the sighash over these fields, and rc3 firmware
+                  // refuses the blob if it doesn't match what the device signs.
+                  let txFields: EvmUnsignedTxFields | undefined
+                  if (path === '/eth/sign-transaction') {
+                    txFields = {
+                      nonce: preview.nonce || '0x0',
+                      gasLimit: preview.gas || preview.gasLimit || '0x5208',
+                      value: preview.value || '0x0',
+                    }
+                    if (preview.maxFeePerGas || preview.max_fee_per_gas) {
+                      txFields.maxFeePerGas = preview.maxFeePerGas || preview.max_fee_per_gas
+                      // Handler sends '0x' (canonical empty) to the device for a
+                      // zero priority fee; send pioneer '0x0' — ethers RLP-encodes
+                      // zero as empty too, so both sides hash identically.
+                      const prio = preview.maxPriorityFeePerGas || preview.max_priority_fee_per_gas
+                      txFields.maxPriorityFeePerGas = (!prio || /^0x0*$/.test(prio)) ? '0x0' : prio
+                    } else {
+                      txFields.gasPrice = preview.gasPrice || preview.gas_price || '0x0'
+                    }
+                  }
+                  signingInfo.calldataDecoded = await decodeCalldata(preview.to, preview.data, chainIdNum, txFields) ?? undefined
                   console.log(`[REST] Calldata decoded:`, JSON.stringify(signingInfo.calldataDecoded, null, 2))
                 } catch (e) { console.warn('[REST] Calldata decode failed:', e) }
 
@@ -2076,11 +2099,16 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           } else {
             const decoded = activeSigningInfo?.calldataDecoded
             if (decoded?.signedInsightBlob) {
+              // Pioneer emits the blob as base64, but hdwallet's ethSignTx
+              // arrayify()s a STRING signedPayload as hex ("0x"+s) → a base64
+              // string throws "invalid hexadecimal string" before the device
+              // sees anything. Hand it the raw bytes (Uint8Array branch) so the
+              // encoding is unambiguous.
               msg.txMetadata = {
-                signedPayload: decoded.signedInsightBlob,
+                signedPayload: new Uint8Array(Buffer.from(decoded.signedInsightBlob, 'base64')),
                 keyId: decoded.insightKeyId,
               }
-              console.log(`[REST] EVM clear-sign: using Pioneer blob (keyId=${decoded.insightKeyId})`)
+              console.log(`[REST] EVM clear-sign: using Pioneer blob (keyId=${decoded.insightKeyId}, ${msg.txMetadata.signedPayload.length} bytes)`)
             } else {
               console.log('[REST] EVM clear-sign: no metadata blob — device will show raw hex')
             }
