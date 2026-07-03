@@ -2130,7 +2130,9 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             }
           }
 
-          console.log('[REST] ethSignTx hdwallet payload:', JSON.stringify(msg, null, 2))
+          // Replacer: txMetadata.signedPayload is a Uint8Array — default stringify
+          // emits one line per byte, flooding the log with the whole blob.
+          console.log('[REST] ethSignTx hdwallet payload:', JSON.stringify(msg, (_k, v) => v instanceof Uint8Array ? `Uint8Array(${v.length})` : v, 2))
           try {
             // Honest confirm dialog: decode msg.data so token/contract calls
             // don't show the contract as recipient or 0x0/hex-wei as amount.
