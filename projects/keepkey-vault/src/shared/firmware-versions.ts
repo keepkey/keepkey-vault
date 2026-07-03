@@ -56,6 +56,13 @@ export const FIRMWARE_VERSION_MAP: FirmwareVersionInfo[] = [
         color: '#805AD5',
         icon: 'feature',
       },
+      {
+        title: 'Hive Support',
+        description: 'Send, receive, and sign Hive transactions with sponsor-backed account onboarding.',
+        chains: ['hive'],
+        color: '#E31337',
+        icon: 'chain',
+      },
     ],
   },
   {

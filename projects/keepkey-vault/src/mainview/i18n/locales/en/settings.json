@@ -147,7 +147,7 @@
 	},
 	"alphaFirmware": "Alpha Firmware",
 	"alphaFirmwareDesc": "Opt in to early firmware releases from the beta channel",
-	"downloadManually": "Download from GitHub",
+	"downloadManually": "How to Update",
 	"downloadUpdate": "Download Update",
 	"preReleaseUpdates": "Pre-release Updates",
 	"preReleaseUpdatesDesc": "Get early access to new features before stable release",

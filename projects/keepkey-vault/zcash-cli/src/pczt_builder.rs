@@ -3671,6 +3671,52 @@ mod tests {
         );
     }
 
+    /// THE real-spend case: the note sits in a COMPLETED shard that is BELOW
+    /// other completed shards (whose roots are insert()ed) and an incomplete
+    /// frontier shard. Mirrors build_pczt's ordered construction exactly. The
+    /// anchor (root) can be correct while the note's WITNESS still fails to
+    /// recompute it — which the chain reports as "could not validate orchard
+    /// proof" on a real shielded spend.
+    #[test]
+    fn test_witness_recomputes_root_note_in_lower_completed_shard() {
+        use incrementalmerkletree::{Address, Position};
+
+        let shard_size: u64 = 1 << 4; // 16
+        let n_complete = 3u64;        // shards 0,1,2 complete
+        let note_shard = 1u64;        // note in a completed shard BELOW shard 2
+        let note_pos = note_shard * shard_size + 5;
+        let incomplete = 7u64;        // frontier leaves in shard 3
+
+        let shard_root = |s: u64| -> [u8; 32] {
+            let mut st: ShardTree<MemoryShardStore<MerkleHashOrchard, u32>, 4, 4> =
+                ShardTree::new(MemoryShardStore::empty(), 100);
+            for j in 0..shard_size { st.append(test_leaf(s * shard_size + j), Retention::Ephemeral).unwrap(); }
+            st.checkpoint(0u32).unwrap();
+            st.root_at_checkpoint_id(&0u32).unwrap().unwrap().to_bytes()
+        };
+
+        // Ordered build, exactly as build_pczt does it.
+        let mut tree: ShardTree<MemoryShardStore<MerkleHashOrchard, u32>, 8, 4> =
+            ShardTree::new(MemoryShardStore::empty(), 100);
+        for s in 0..n_complete {
+            if s == note_shard {
+                for j in 0..shard_size {
+                    let i = s * shard_size + j;
+                    let r = if i == note_pos { Retention::Marked } else { Retention::Ephemeral };
+                    tree.append(test_leaf(i), r).unwrap();
+                }
+            } else {
+                let root = MerkleHashOrchard::from_bytes(&shard_root(s)).unwrap();
+                tree.insert(Address::above_position(4.into(), Position::from(s * shard_size)), root).unwrap();
+            }
+        }
+        for j in 0..incomplete { tree.append(test_leaf(n_complete * shard_size + j), Retention::Ephemeral).unwrap(); }
+
+        let ckpt = u32::MAX;
+        tree.checkpoint(ckpt).unwrap();
+        assert_witness_recomputes_root(&mut tree, note_pos, test_leaf(note_pos), ckpt, "note_in_lower_completed_shard");
+    }
+
     /// Mirrors the deshield builder's tree shape: insert N-1 completed shard
     /// roots, walk shard N from leaves marking the note, no frontier. This
     /// is the case where notes live in the latest incomplete shard.

@@ -80,6 +80,7 @@
   "outOfSync": "Niet gesynchroniseerd",
   "synced": "Gesynchroniseerd",
   "refresh": "Vernieuwen",
+  "refreshFailed": "Vernieuwen mislukt",
   "refreshing": "Vernieuwen...",
   "needsScanPrompt": "Wallet is nog niet gescand. Scan de keten om je afgeschermde notes te vinden.",
   "scanFromBlock": "Scannen vanaf blok {{block}}",

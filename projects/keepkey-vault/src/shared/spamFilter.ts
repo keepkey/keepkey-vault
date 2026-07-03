@@ -39,6 +39,14 @@ export function detectSpamToken(
 	// Synthetic tokens injected by the vault that will never appear in the discovery catalog.
 	if (caip.includes('/orchard:')) return { isSpam: false, level: null, reason: 'Synthetic shielded token' }
 
+	// THORChain/Maya bank-module tokens (TCY, RUJI, secured assets) use a
+	// `/denom:` caip. They're protocol-defined assets — not arbitrarily
+	// deployable like ERC-20s, so a counterfeit "TCY" can't exist. The discovery
+	// catalog doesn't list them yet; allowlist them so they aren't flagged spam.
+	if (caip.includes('/denom:') && (caip.startsWith('cosmos:thorchain-') || caip.startsWith('cosmos:mayachain-'))) {
+		return { isSpam: false, level: null, reason: 'THORChain/Maya native bank token' }
+	}
+
 	// Discovery emits BSC tokens as /bep20:; Pioneer portfolio returns /erc20: for the same assets.
 	const lookupCaip = caip.replace(/^eip155:56\/erc20:/, 'eip155:56/bep20:')
 	if (DISCOVERY_SET.has(lookupCaip)) return { isSpam: false, level: null, reason: 'In discovery catalog' }

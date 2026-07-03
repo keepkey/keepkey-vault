@@ -164,14 +164,14 @@ function Assert-Command {
 #
 # Why this exists: rcedit (and some upstream Electrobun-built launcher.exe
 # binaries) leave a non-zero Security Directory RVA/Size pointing at garbage
-# data — the file isn't actually signed (Get-AuthenticodeSignature reports
+# data -- the file isn't actually signed (Get-AuthenticodeSignature reports
 # NotSigned), but a stale ~10 KB cert-table-shaped chunk lives inside the PE.
 # signtool then refuses to sign the file with the misleading error
 # `0x800700C1 / ERROR_BAD_EXE_FORMAT` because it can't safely overwrite the
 # malformed cert table. `signtool remove /s` also fails (`0x00000057`)
 # because there's no valid signature to strip.
 #
-# The fix is purely a 8-byte zero write in the PE Optional Header — the
+# The fix is purely a 8-byte zero write in the PE Optional Header -- the
 # orphan cert blob at the end of the file is harmless (signtool overwrites
 # or appends past it). No section table, no checksum, no relocation needs
 # to change.
@@ -185,7 +185,7 @@ function Clear-PECertTableEntry {
     if ($bytes[$peOff] -ne 0x50 -or $bytes[$peOff + 1] -ne 0x45) { return $false }  # PE
     $optOff = $peOff + 24
     $magic = [BitConverter]::ToUInt16($bytes, $optOff)
-    # NumberOfRvaAndSizes lives at +108 for PE32+, +92 for PE32 — pick the
+    # NumberOfRvaAndSizes lives at +108 for PE32+, +92 for PE32 -- pick the
     # right offset so we land on the actual DataDirectories array.
     $rvaCountOff = if ($magic -eq 0x20B) { $optOff + 108 } elseif ($magic -eq 0x10B) { $optOff + 92 } else { return $false }
     if ($rvaCountOff + 4 + (5 * 8) -gt $bytes.Length) { return $false }
@@ -240,9 +240,9 @@ function Sign-File {
     }
 
     # Try each timestamp URL in order. signtool failures with a timestamp
-    # server are transient (network blip, server rotation) — retry against the
+    # server are transient (network blip, server rotation) -- retry against the
     # next URL before declaring failure. Sign-without-timestamp is NOT a
-    # fallback: an untimestamped sig is valid only while the cert is — once
+    # fallback: an untimestamped sig is valid only while the cert is -- once
     # the cert expires, every signed binary becomes "publisher unknown".
     $lastResult = ""
     $exitCode = 1
@@ -315,7 +315,7 @@ function Sign-File {
         $resultStr = $retryResult -join ' '
     }
 
-    # Genuinely-unsignable formats — bun shims (handled above by path) and
+    # Genuinely-unsignable formats -- bun shims (handled above by path) and
     # native .node addons (handled above by extension) are the only files
     # that should land here. If we still match "not recognized", it's a
     # signtool-side rejection we can't fix; log and skip.
@@ -414,6 +414,14 @@ if (-not $SkipBuild) {
     Push-Location (Join-Path $RepoRoot "modules\proto-tx-builder")
     bun install
     if ($LASTEXITCODE -ne 0) { throw "bun install failed for proto-tx-builder (exit $LASTEXITCODE)" }
+    # Build the dist (tsc -p .). WITHOUT this, the gitignored dist/ ships STALE
+    # from a previous pin: this step only ran `bun install` and skipped the
+    # build, so v1.4.6/1.4.7/1.4.8 shipped a pre-fix proto-tx-builder on Windows
+    # and EVERY Cosmos tx crashed with "createFeegrantAminoConverters is not a
+    # function". macOS rebuilds via the Makefile (+#290 stamp-clear); Windows
+    # must run the build too (mirrors the hdwallet `yarn build` below).
+    bun run build
+    if ($LASTEXITCODE -ne 0) { throw "build failed for proto-tx-builder (exit $LASTEXITCODE) -- if tsc can't resolve osmosis codecimpl, copy modules/proto-tx-builder/osmosis-frontend/src/proto/generated/codecimpl.{js,d.ts} as in the macOS setup" }
     Pop-Location
 
     Write-Step "Building hdwallet"
@@ -483,7 +491,7 @@ if (-not $SkipBuild) {
     }
 
     # Patch version.json: stable channel + force version to match package.json.
-    # Electrobun's `bun run build` is an incremental build — when a stale _build/
+    # Electrobun's `bun run build` is an incremental build -- when a stale _build/
     # exists from a different branch, it can leave version.json with the wrong
     # version. We had a current-version-named installer shipped with stale
     # previous-version bits inside because
@@ -726,7 +734,7 @@ if (Test-Path $ManifestSrc) {
 # BeginUpdateResource API which invalidates Authenticode signatures
 # (https://learn.microsoft.com/windows/win32/api/winbase/nf-winbase-beginupdateresourcea).
 # The bulk sign loop above runs before the wrapper EXE exists, and we touch
-# launcher.exe here too — so both get re-signed in the next step.
+# launcher.exe here too -- so both get re-signed in the next step.
 $RceditExe = Join-Path $ProjectDir "node_modules\rcedit\bin\rcedit-x64.exe"
 $rceditTouched = @()
 if ((Test-Path $IconIco) -and (Test-Path $RceditExe)) {
@@ -821,14 +829,14 @@ if (Test-Path $ShortStage) { Remove-Item -Recurse -Force $ShortStage }
 Write-Host "    Copying build to $ShortStage ..."
 # robocopy can handle source paths >260 chars when long-path support remains enabled.
 # Critical flags (learned the hard way):
-#   /MT:16     — 16-thread copy. Single-threaded robocopy + Defender real-time
+#   /MT:16     -- 16-thread copy. Single-threaded robocopy + Defender real-time
 #                scan = ~30 min for 14k files. Multi-threaded = ~1-2 min.
-#   /R:1 /W:1  — retry ONCE with a 1-sec wait. Defaults are /R:1000000 /W:30
+#   /R:1 /W:1  -- retry ONCE with a 1-sec wait. Defaults are /R:1000000 /W:30
 #                (one million retries, 30-sec wait), which means a single
 #                Defender-locked file hangs the entire copy for hours.
-#   /XJ        — skip junction points / reparse points. Without this, symlink
+#   /XJ        -- skip junction points / reparse points. Without this, symlink
 #                loops inside nested node_modules can trap robocopy forever.
-# robocopy exits 0-7 on success (0=no files, 1=copied, 2=extra, etc.) — normalize to 0
+# robocopy exits 0-7 on success (0=no files, 1=copied, 2=extra, etc.) -- normalize to 0
 $rcStart = Get-Date
 robocopy $BuildDir $ShortStage /E /MT:16 /R:1 /W:1 /XJ /NFL /NDL /NJH /NJS /NP /NS | Out-Null
 $stageCopyExit = $LASTEXITCODE

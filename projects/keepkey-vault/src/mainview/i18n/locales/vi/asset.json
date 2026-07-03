@@ -80,6 +80,7 @@
   "outOfSync": "Mất đồng bộ",
   "synced": "Đã đồng bộ",
   "refresh": "Làm mới",
+  "refreshFailed": "Làm mới thất bại",
   "refreshing": "Đang làm mới...",
   "needsScanPrompt": "Ví chưa được quét. Quét chuỗi để tìm các ghi chú được che chắn của bạn.",
   "scanFromBlock": "Quét từ khối {{block}}",

@@ -80,6 +80,7 @@
   "outOfSync": "Non sincronizzato",
   "synced": "Sincronizzato",
   "refresh": "Aggiorna",
+  "refreshFailed": "Aggiornamento non riuscito",
   "refreshing": "Aggiornamento...",
   "needsScanPrompt": "Il portafoglio non è ancora stato scansionato. Scansiona la catena per trovare le tue note schermate.",
   "scanFromBlock": "Scansiona dal blocco {{block}}",

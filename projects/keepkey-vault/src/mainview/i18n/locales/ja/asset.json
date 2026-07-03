@@ -80,6 +80,7 @@
   "outOfSync": "同期されていません",
   "synced": "同期済み",
   "refresh": "更新",
+  "refreshFailed": "更新に失敗しました",
   "refreshing": "更新中...",
   "needsScanPrompt": "ウォレットはまだスキャンされていません。チェーンをスキャンしてシールドノートを探してください。",
   "scanFromBlock": "ブロック {{block}} からスキャン",

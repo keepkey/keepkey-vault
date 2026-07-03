@@ -40,6 +40,8 @@ export const PairRequest = z.object({
   name: z.string().min(1),
   url: z.string().optional(),
   imageUrl: z.string().optional(),
+  /** Stable per-install id — preferred identity for dedup/idempotent pairing. */
+  clientId: z.string().optional(),
 }).passthrough()
 
 /** POST /eth/sign-transaction */
@@ -127,6 +129,11 @@ export const XrpSignRequest = z.object({
     destination: z.string().min(1),
     destinationTag: z.union([z.string(), z.number()]).optional(),
   }).passthrough(),
+  // tx (StdTx wrapper) + lastLedgerSequence are read by hdwallet's rippleSignTx
+  // (tx.value.fee/msg, lastLedgerSequence). Without them in the shape, .strip()
+  // deletes them and signing throws "undefined is not an object (msg.tx.value)".
+  tx: z.any(),
+  lastLedgerSequence: z.union([z.string(), z.number()]),
   sequence: z.union([z.string(), z.number()]),
   fee: z.union([z.string(), z.number()]).optional(),
   flags: z.number().optional(),
@@ -325,6 +332,11 @@ export const LoadDeviceRequest = z.object({}).passthrough()
 /** POST /system/recovery/pin */
 export const SendPinRequest = z.object({
   pin: z.string().min(1),
+}).passthrough()
+
+/** POST /system/recovery/character — one ciphered character during cipher recovery */
+export const SendCharacterRequest = z.object({
+  character: z.string().min(1).max(1),
 }).passthrough()
 
 // ── Zcash Shielded (Orchard) ─────────────────────────────────────────

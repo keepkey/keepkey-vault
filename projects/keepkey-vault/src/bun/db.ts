@@ -294,6 +294,10 @@ export function initDb() {
       try { db.exec(`ALTER TABLE api_log ADD COLUMN ${col}`) } catch { /* already exists */ }
     }
     try { db.exec(`ALTER TABLE swap_history ADD COLUMN device_id TEXT`) } catch { /* already exists */ }
+    // Pairing identity (stable per-install id) + sliding-TTL recency
+    for (const col of ['client_id TEXT', 'last_used_on INTEGER']) {
+      try { db.exec(`ALTER TABLE paired_apps ADD COLUMN ${col}`) } catch { /* already exists */ }
+    }
     try { db.exec(`ALTER TABLE swap_history ADD COLUMN wallet_id TEXT`) } catch { /* already exists */ }
     // Underlying protocol when integration is an aggregator (e.g. Relay, 0x via ShapeShift)
     try { db.exec(`ALTER TABLE swap_history ADD COLUMN swapper TEXT`) } catch { /* already exists */ }
@@ -654,6 +658,18 @@ export function clearBalances(deviceId?: string) {
   }
 }
 
+/** Remove one chain's cached balance for a device. Used when a chain becomes
+ *  underivable on the current firmware (unknown-message) so a stale row cached
+ *  under earlier firmware can't keep showing in the dashboard. */
+export function deleteCachedChainBalance(deviceId: string, chainId: string) {
+  try {
+    if (!db) return
+    db.run('DELETE FROM balances WHERE device_id = ? AND chain_id = ?', [deviceId, chainId])
+  } catch (e: any) {
+    console.warn('[db] deleteCachedChainBalance failed:', e.message)
+  }
+}
+
 // ── Custom Tokens ────────────────────────────────────────────────────
 
 export function getCustomTokens(): CustomToken[] {
@@ -885,25 +901,39 @@ export function getTokensByVisibility(status: TokenVisibilityStatus): TokenVisib
 export function getStoredPairings(): PairedAppInfo[] {
   try {
     if (!db) return []
-    const rows = db.query('SELECT api_key, name, url, image_url, added_on FROM paired_apps').all() as Array<{
-      api_key: string; name: string; url: string; image_url: string; added_on: number
+    const rows = db.query('SELECT api_key, name, url, image_url, added_on, client_id, last_used_on FROM paired_apps').all() as Array<{
+      api_key: string; name: string; url: string; image_url: string; added_on: number; client_id: string | null; last_used_on: number | null
     }>
-    return rows.map(r => ({ apiKey: r.api_key, name: r.name, url: r.url, imageUrl: r.image_url, addedOn: r.added_on }))
+    return rows.map(r => ({
+      apiKey: r.api_key, name: r.name, url: r.url, imageUrl: r.image_url, addedOn: r.added_on,
+      clientId: r.client_id ?? undefined, lastUsedOn: r.last_used_on ?? undefined,
+    }))
   } catch (e: any) {
     console.warn('[db] getStoredPairings failed:', e.message)
     return []
   }
 }
 
-export function storePairing(apiKey: string, info: { name: string; url: string; imageUrl: string; addedOn: number }) {
+export function storePairing(apiKey: string, info: { name: string; url: string; imageUrl: string; addedOn: number; clientId?: string; lastUsedOn?: number }) {
   try {
     if (!db) return
     db.run(
-      'INSERT OR REPLACE INTO paired_apps (api_key, name, url, image_url, added_on) VALUES (?, ?, ?, ?, ?)',
-      [apiKey, info.name, info.url || '', info.imageUrl || '', info.addedOn]
+      'INSERT OR REPLACE INTO paired_apps (api_key, name, url, image_url, added_on, client_id, last_used_on) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [apiKey, info.name, info.url || '', info.imageUrl || '', info.addedOn, info.clientId ?? null, info.lastUsedOn ?? info.addedOn]
     )
   } catch (e: any) {
     console.warn('[db] storePairing failed:', e.message)
+  }
+}
+
+/** Lightweight recency write-back — used by the sliding-TTL refresh on the auth
+ *  hot path, so it must not rewrite the whole row. No-op if the row is gone. */
+export function touchPairing(apiKey: string, lastUsedOn: number) {
+  try {
+    if (!db) return
+    db.run('UPDATE paired_apps SET last_used_on = ? WHERE api_key = ?', [lastUsedOn, apiKey])
+  } catch (e: any) {
+    console.warn('[db] touchPairing failed:', e.message)
   }
 }
 

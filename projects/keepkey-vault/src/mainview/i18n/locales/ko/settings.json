@@ -147,7 +147,7 @@
 	},
 	"alphaFirmware": "알파 펌웨어",
 	"alphaFirmwareDesc": "베타 채널의 초기 펌웨어 릴리스를 사용 신청합니다",
-	"downloadManually": "GitHub에서 다운로드",
+	"downloadManually": "업데이트 방법",
 	"downloadUpdate": "업데이트 다운로드",
 	"preReleaseUpdates": "사전 릴리스 업데이트",
 	"preReleaseUpdatesDesc": "안정 릴리스 전에 새 기능을 미리 사용해 보세요",

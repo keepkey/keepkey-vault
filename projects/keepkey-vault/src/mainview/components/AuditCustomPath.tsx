@@ -90,7 +90,7 @@ export function AuditCustomPath({ chainId, family, defaultPath, scriptType, onRe
     try {
       const r = await rpcRequest<AuditDerivedAddress>('auditDeriveCustom', {
         chainId, addressNList: path, scriptType: family === 'utxo' ? script : undefined,
-      }, 120000)
+      }, 900000)
       onResult(r)
     } catch (e: any) {
       setErr(e.message)

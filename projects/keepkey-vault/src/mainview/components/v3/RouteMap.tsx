@@ -64,9 +64,6 @@ export function RouteMap({ from, to, integration, centerImageUrl, animate = true
 						<stop offset="0%" stopColor={from.color || "var(--text-3)"} />
 						<stop offset="100%" stopColor={to.color || "var(--text-3)"} />
 					</linearGradient>
-					<clipPath id="routeMapCenterClip">
-						<circle cx={cx} cy={cy} r={half} />
-					</clipPath>
 				</defs>
 
 				{/* Dashed background line — gives the curve a subtle "track" feel */}
@@ -100,15 +97,16 @@ export function RouteMap({ from, to, integration, centerImageUrl, animate = true
 					<>
 						{/* Soft halo behind the centerpiece — picks up brand accent */}
 						<circle cx={cx} cy={cy} r={half + 2} fill="var(--ink-2)" stroke="var(--gold)" strokeWidth="1" opacity="0.7" />
-						<image
-							href={centerImageUrl}
-							x={cx - half}
-							y={cy - half}
-							width={centerSize}
-							height={centerSize}
-							clipPath="url(#routeMapCenterClip)"
-							preserveAspectRatio="xMidYMid slice"
-						/>
+						{/* foreignObject <img>, not SVG <image>: WKWebView's SVG image
+						    loader bypasses the custom views:// scheme handler, so local
+						    bundle assets (the gif) render as a broken-image glyph. */}
+						<foreignObject x={cx - half} y={cy - half} width={centerSize} height={centerSize}>
+							<img
+								src={centerImageUrl}
+								alt=""
+								style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "50%" }}
+							/>
+						</foreignObject>
 					</>
 				) : (
 					<>

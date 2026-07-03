@@ -289,9 +289,17 @@ prune-bundle:
 	cd $(PROJECT_DIR) && bun scripts/prune-app-bundle.ts
 
 # Full signed build: electrobun build → audit → prune → extract from tar → create DMG → sign + notarize + staple
-# Force-clear zcash-cli stamp so it gets re-signed with Developer ID (stamp may be stale from unsigned build)
+# Force-clear stamps so the release always rebuilds from the pinned source:
+#  - zcash-cli: so it gets re-signed with Developer ID (stamp may be stale from an unsigned build)
+#  - module build stamps: the proto-tx-builder / hdwallet / device-protocol dist/ output is
+#    gitignored and copied into the bundle via file: refs. The stamps track src mtimes, but a
+#    submodule `git checkout` to a new pin does NOT reliably bump src mtimes past an existing
+#    stamp — so make skips the rebuild and the bundle ships a STALE dist from a previous commit.
+#    (This shipped the @cosmjs/stargate Freegrant/Feegrant fallback as a pre-fix build in v1.4.6/1.4.7,
+#    breaking every Cosmos tx with "createFeegrantAminoConverters is not a function".)
+#    Clearing the stamps forces modules-build from the pinned source before the vault install copies it.
 build-signed: sign-check
-	@rm -f $(ZCASH_CLI_STAMP)
+	@rm -f $(ZCASH_CLI_STAMP) $(PROTO_BUILD_STAMP) $(HDWALLET_BUILD_STAMP) $(DEVICE_PROTOCOL_BUILD_STAMP)
 	$(MAKE) build-stable audit prune-bundle dmg
 	@echo ""
 	@echo "=== Build complete ==="

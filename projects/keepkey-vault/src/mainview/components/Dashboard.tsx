@@ -1,5 +1,5 @@
 import { Component, Fragment, lazy, Suspense, useState, useEffect, useCallback, useMemo, useRef, type ReactNode, type ErrorInfo } from "react"
-import { Box, Flex, Text, Spinner, Image, SimpleGrid, Button } from "@chakra-ui/react"
+import { Box, Flex, Text, Spinner, Image, Button } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
 import { CHAINS, customChainToChainDef, isChainSupported, type ChainDef } from "../../shared/chains"
 import { versionCompare } from "../../shared/firmware-versions"
@@ -10,7 +10,6 @@ import { AssetPage } from "./AssetPage"
 import { ActivityPage } from "./ActivityPage"
 import { DonutChart, SelectedSlice, type DonutChartItem } from "./DonutChart"
 import { AddChainDialog } from "./AddChainDialog"
-import { ChainPickerDialog } from "./ChainPickerDialog"
 import { ReportDialog } from "./ReportDialog"
 import { AuditDialog } from "./AuditDialog"
 import { Bip85VaultDialog } from "./Bip85VaultDialog"
@@ -697,17 +696,12 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 	const [activeSliceIndex, setActiveSliceIndex] = useState<number | null>(0)
 	const [customChainDefs, setCustomChainDefs] = useState<ChainDef[]>([])
 	const [showAddChain, setShowAddChain] = useState(false)
-	// User-promoted built-in chains: chains that have no balance but the
-	// user explicitly picked from the "Add a blockchain" grid. Stays in the
-	// sidebar from then on so the user can receive on it without re-opening
-	// the picker.
-	const [manuallyShown, setManuallyShown] = useState<Set<string>>(new Set())
-	const [showChainPicker, setShowChainPicker] = useState(false)
 	const [showReports, setShowReports] = useState(false)
 	const [showAudit, setShowAudit] = useState(false)
 	const [showBip85, setShowBip85] = useState(false)
 	const [bip85Enabled, setBip85Enabled] = useState(false)
 	const [zcashEnabled, setZcashEnabled] = useState(false)
+	const [hiveEnabled, setHiveEnabled] = useState(false)
 	// One-time passphrase/hidden-wallet intro. `passphraseIntroSeen` starts true so
 	// the dialog never flashes before settings load; refreshFeatureFlags sets the
 	// real value. `introDismissed` suppresses it for the rest of this session.
@@ -866,6 +860,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 			.then(s => {
 				setBip85Enabled(s.bip85Enabled)
 				setZcashEnabled(s.zcashPrivacyEnabled)
+				setHiveEnabled(s.hiveEnabled)
 				setPassphraseIntroSeen(s.passphraseIntroShown)
 			})
 			.catch(() => {})
@@ -1039,7 +1034,31 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 	// Manual refresh: fetch live data from Pioneer API
 	// forceRefresh=true bypasses Pioneer's balance cache — only pass it on explicit user action
 	const refreshBalances = useCallback(async (forceRefresh = false) => {
-		if (watchOnly) return
+		// Watch-only: no device, so re-fetch from Pioneer using cached addresses.
+		if (watchOnly) {
+			if (loadingBalancesRef.current) return
+			loadingBalancesRef.current = true
+			setLoadingBalances(true)
+			try {
+				const result = await rpcRequest<ChainBalance[] | null>('refreshWatchOnlyBalances', watchOnlyDeviceId ? { deviceId: watchOnlyDeviceId } : undefined, 200000)
+				if (result) {
+					const map = new Map<string, ChainBalance>()
+					for (const b of result) map.set(b.chainId, b)
+					setBalances(map)
+					setCacheUpdatedAt(Date.now())
+					setHasEverRefreshed(true)
+					clearPioneerError()
+				}
+			} catch (e: any) {
+				const message = e?.message || 'Unable to refresh balances'
+				console.warn('[Dashboard] refreshWatchOnlyBalances failed:', message)
+				stagePioneerError({ message, url: 'the configured balance server' })
+			} finally {
+				loadingBalancesRef.current = false
+				setLoadingBalances(false)
+			}
+			return
+		}
 		// Non-forced calls yield to any in-progress refresh (avoids non-forced swap-complete
 		// poll superseding an already-running forced user refresh).
 		if (!forceRefresh && loadingBalancesRef.current) return
@@ -1091,7 +1110,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 			loadingBalancesRef.current = false
 			setLoadingBalances(false)
 		}
-	}, [watchOnly, clearPioneerError, stagePioneerError])
+	}, [watchOnly, watchOnlyDeviceId, clearPioneerError, stagePioneerError])
 
 	// Phase 2 trigger — window focus: catch long idle periods. If the last live
 	// fetch is older than 5 min, force-refresh on return to the window.
@@ -1152,6 +1171,19 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 			prevZcashRef.current = false
 		}
 	}, [zcashEnabled, refreshBalances, loadingBalances])
+
+	// Auto-refresh balances when Hive feature flag is enabled mid-session
+	const prevHiveRef = useRef(hiveEnabled)
+	useEffect(() => {
+		const becameEnabled = hiveEnabled && !prevHiveRef.current
+		if (becameEnabled && !loadingBalances) {
+			console.log('[Dashboard] Hive enabled — refreshing balances')
+			refreshBalances()
+			prevHiveRef.current = true
+		} else if (!hiveEnabled) {
+			prevHiveRef.current = false
+		}
+	}, [hiveEnabled, refreshBalances, loadingBalances])
 
 	// Auto-refresh after new seed (OOB setup) — one-shot, then clear the flag
 	useEffect(() => {
@@ -1232,6 +1264,8 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 		)
 		const result = new Map<string, { usd: number; cleanTokenCount: number }>()
 		for (const [chainId, bal] of balances) {
+			// Honor the Hive feature flag — stale Hive rows in the map must not count toward totals
+			if (chainId === 'hive' && !hiveEnabled) continue
 			if (bal.tokens && bal.tokens.length > 0) {
 				const { clean } = categorizeTokens(bal.tokens, overrides)
 				const spamUsd = (bal.tokens.length - clean.length) > 0
@@ -1246,7 +1280,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 			}
 		}
 		return result
-	}, [balances, visibilityMap])
+	}, [balances, visibilityMap, hiveEnabled])
 
 	const totalUsd = useMemo(() => Array.from(cleanBalanceUsd.values()).reduce((sum, b) => sum + b.usd, 0), [cleanBalanceUsd])
 
@@ -1423,8 +1457,9 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 		if (!isChainSupported(c, firmwareVersion)) return false
 		// Zcash transparent is hidden by default — show when feature flag is on
 		if (c.id === 'zcash') return zcashEnabled
+		if (c.id === 'hive') return hiveEnabled
 		return !c.hidden
-	}), [allChains, firmwareVersion, zcashEnabled])
+	}), [allChains, firmwareVersion, zcashEnabled, hiveEnabled])
 
 	const sortedChains = useMemo(() => [...visibleChains].sort((a, b) => {
 		const aUsd = cleanBalanceUsd.get(a.id)?.usd || 0
@@ -1437,24 +1472,11 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 		return 0
 	}), [visibleChains, balances, cleanBalanceUsd])
 
-	// Split the visible list so the sidebar shows funded chains by default.
-	// Empty-balance chains stay reachable via the "+ Add a blockchain" grid
-	// below the list; once the user picks one, it joins `manuallyShown` and
-	// behaves like a funded row from then on. The currently drilled chain
-	// stays visible regardless so the user doesn't lose their selection.
-	const { sidebarChains, hiddenChains } = useMemo(() => {
-		const sidebar: ChainDef[] = []
-		const hidden: ChainDef[] = []
-		for (const c of sortedChains) {
-			const usd = cleanBalanceUsd.get(c.id)?.usd || 0
-			const native = parseFloat(balances.get(c.id)?.balance || '0')
-			const funded = usd > 0 || native > 0
-			const promoted = manuallyShown.has(c.id) || drilledChainId === c.id
-			if (funded || promoted) sidebar.push(c)
-			else hidden.push(c)
-		}
-		return { sidebarChains: sidebar, hiddenChains: hidden }
-	}, [sortedChains, balances, cleanBalanceUsd, manuallyShown, drilledChainId])
+	// Every default chain stays in the sidebar, always. sortedChains already puts
+	// funded chains first, so empty defaults just sit lower in the list instead of
+	// being hidden behind an "add" step. Custom EVM chains are the only thing that
+	// needs adding — that's what the "Add chain" button below does.
+	const sidebarChains = sortedChains
 
 	// Is data stale? (loaded from cache but haven't refreshed yet this session)
 	const isStale = !hasEverRefreshed && !loadingBalances
@@ -1487,7 +1509,9 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 		const bal = balances.get(selectedChain.id)
 		return (
 			<AssetPageErrorBoundary onBack={() => setSelectedChain(null)} chainName={selectedChain.coin}>
-				<AssetPage chain={selectedChain} balance={bal} onBack={() => { setSelectedChain(null); setSelectedChainAction(undefined); setSelectedChainInitialToken(undefined) }} firmwareVersion={firmwareVersion} initialAction={selectedChainAction} initialToken={selectedChainInitialToken} onViewActivity={handleViewActivity} watchOnly={watchOnly} />
+				{/* key: remount on chain switch — AssetPage's mount-only effects (address
+				    derive, initial view) must not leak chain A state into chain B */}
+				<AssetPage key={selectedChain.id} chain={selectedChain} balance={bal} onBack={() => { setSelectedChain(null); setSelectedChainAction(undefined); setSelectedChainInitialToken(undefined) }} firmwareVersion={firmwareVersion} initialAction={selectedChainAction} initialToken={selectedChainInitialToken} onViewActivity={handleViewActivity} watchOnly={watchOnly} isHiddenWallet={isHiddenWallet} />
 			</AssetPageErrorBoundary>
 		)
 	}
@@ -1578,6 +1602,11 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 						const usdNum = clean?.usd || 0
 						const hasBalance = balNum > 0 || usdNum > 0
 						const tokenCount = clean?.cleanTokenCount || 0
+						// Low-gas: tokens are stranded on the chain but the NATIVE
+						// balance can't pay network fees — every family, not just EVM
+						// (TRC-20 needs TRX, ERC-20 needs ETH, SPL needs SOL, …).
+						const nativeUsd = bal?.nativeBalanceUsd ?? 0
+						const lowGas = nativeUsd < 1 && (usdNum - nativeUsd) > 1
 						const isActive = drilledChainId === chain.id
 						// Per-account (BIP44) sub-rows: BTC accountIndex or EVM addressIndex.
 						// Only chains that have multiple funded accounts/addresses get a drop-down.
@@ -1655,6 +1684,21 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 											<Text fontSize="12px" color="var(--text-2)" lineHeight="1.3" truncate>
 												{hasBalance ? `${formatBalance(bal?.balance || '0')} ${chain.symbol}` : t("noBalance")}
 											</Text>
+											{lowGas && (
+												<Flex
+													as="span"
+													align="center"
+													gap="1"
+													flexShrink={0}
+													cursor="help"
+													title={`Low ${chain.symbol} for gas — deposit ${chain.symbol} to move tokens on ${chain.coin}`}
+												>
+													<svg width="10" height="10" viewBox="0 0 24 24" fill="#E53E3E" xmlns="http://www.w3.org/2000/svg">
+														<path d="M3 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v9h1a3 3 0 0 1 3 3v3a1 1 0 0 0 2 0v-7.5l-2.4-2.4a1 1 0 0 1 1.4-1.4l3.3 3.3c.2.2.3.4.3.7V19a3 3 0 0 1-6 0v-3a1 1 0 0 0-1-1h-1v7H3zM7 6h4v5H7V6z"/>
+													</svg>
+													<Text as="span" fontSize="8px" fontWeight="700" color="#E53E3E" lineHeight="1">LOW GAS</Text>
+												</Flex>
+											)}
 											{tokenCount > 0 && (
 												<Text fontSize="10px" color={chain.color} fontWeight="600" lineHeight="1.3" flexShrink={0}>
 													+{tokenCount}
@@ -1721,15 +1765,13 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 						)
 					})}
 
-					{/* Add a blockchain — opens a grid of empty-balance built-in
-					    chains. The legacy "custom EVM chain" flow lives under
-					    Settings; the sidebar trigger now points at the grid so
-					    Monad / Hyperliquid / Mayachain etc. stop cluttering the
-					    list as zero rows. */}
+					{/* Add chain — every default chain is already shown above, so the
+					    only thing left to add is a custom EVM network (by chainId /
+					    RPC, or from the Pioneer catalog). Opens AddChainDialog. */}
 					{!watchOnly && (
 						<Box
 							as="button"
-							onClick={() => setShowChainPicker(true)}
+							onClick={() => setShowAddChain(true)}
 							w="100%"
 							mt="2"
 							p="2.5"
@@ -1743,9 +1785,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 							<Flex align="center" gap="2" justify="center">
 								<Text fontSize="14px" color="var(--text-2)">+</Text>
 								<Text fontSize="11px" color="var(--text-2)" fontWeight="500" letterSpacing="0.02em">
-									{hiddenChains.length > 0
-										? t("addBlockchain", { defaultValue: "Add a blockchain" }) + ` · ${hiddenChains.length}`
-										: t("addBlockchain", { defaultValue: "Add a blockchain" })}
+									{t("addEvmChain", { defaultValue: "Add EVM chain" })}
 								</Text>
 							</Flex>
 						</Box>
@@ -2392,7 +2432,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 						)
 					})() : (loadingBalances || !initialLoaded) && !pioneerError ? (
 						<DashboardLoading />
-					) : !loadingBalances && initialLoaded && !pioneerError ? (
+					) : !loadingBalances && initialLoaded && !pioneerError && !drilledChainId ? (
 						<Flex direction="column" align="center" gap="3" textAlign="center" maxW="400px" mx="auto" py="4">
 							<Box
 								w="48px" h="48px" borderRadius="full"
@@ -2489,7 +2529,11 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 						)
 					})()}
 
-					{hasAnyBalance && drilledChainId && (() => {
+					{/* Drilled-chain action row (Receive/Send/Swap). NOT gated on
+					    hasAnyBalance: a fresh wallet holds nothing, but the whole
+					    point of picking a chain is to RECEIVE on it — gating this
+					    on balance left new users unable to press Receive. */}
+					{drilledChainId && (() => {
 						const dchain = visibleChains.find(c => c.id === drilledChainId)
 						if (!dchain) return null
 						const bal = getEffectiveBalance(dchain.id)
@@ -2698,163 +2742,6 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 				</Box>
 			)}
 
-		{false && <SimpleGrid columns={{ base: 2, sm: 3 }} gap="2.5">
-				{sortedChains.map((chain) => {
-					const bal = balances.get(chain.id)
-					const clean = cleanBalanceUsd.get(chain.id)
-					const balNum = parseFloat(bal?.balance || '0')
-					const usdNum = clean?.usd || 0
-					const hasBalance = balNum > 0 || usdNum > 0
-					const tokenCount = clean?.cleanTokenCount || 0
-
-					// Low-gas warning: EVM chain with < $1 native but > $1 in tokens
-					const nativeUsd = bal?.nativeBalanceUsd ?? 0
-					const tokenUsd = usdNum - nativeUsd
-					const lowGas = chain.chainFamily === 'evm' && nativeUsd < 1 && tokenUsd > 1
-
-					return (
-						<Box
-							key={chain.id}
-							bg="kk.cardBg"
-							border="1px solid"
-							borderColor={hasBalance ? `${chain.color}50` : "kk.border"}
-							borderRadius="xl"
-							p="3"
-							cursor="pointer"
-							transition="all 0.15s"
-							_hover={{
-								borderColor: chain.color,
-								bg: `${chain.color}10`,
-								transform: "translateY(-1px)",
-								boxShadow: `0 4px 12px ${chain.color}15`,
-							}}
-							_active={{ transform: "scale(0.98)" }}
-							onClick={() => setSelectedChain(chain)}
-							position="relative"
-							overflow="hidden"
-						>
-							{hasBalance && (
-								<Box
-									position="absolute"
-									top="-20px"
-									right="-20px"
-									w="60px"
-									h="60px"
-									borderRadius="full"
-									bg={chain.color}
-									opacity={0.06}
-									pointerEvents="none"
-								/>
-							)}
-
-							<Flex direction="column" gap="2" position="relative">
-								<Flex align="center" gap="2">
-									<Image
-										src={getAssetIcon(chain.caip)}
-										alt={chain.symbol}
-										w="28px"
-										h="28px"
-										borderRadius="full"
-										flexShrink={0}
-										bg={chain.color}
-									/>
-									<Box overflow="hidden" flex="1">
-										<Text fontSize="sm" fontWeight="600" color="white" lineHeight="1.2" truncate>
-											{chain.coin}
-										</Text>
-										<Text fontSize="10px" color="kk.textMuted" lineHeight="1.2">
-											{chain.symbol}
-										</Text>
-									</Box>
-									{lowGas && (
-										<Flex
-											direction="column"
-											align="center"
-											title={`Low ${chain.symbol} for gas \u2014 you need ${chain.symbol} to send tokens on ${chain.coin}`}
-											flexShrink={0}
-											cursor="help"
-											onClick={(e) => e.stopPropagation()}
-										>
-											<svg width="16" height="16" viewBox="0 0 24 24" fill="#E53E3E" xmlns="http://www.w3.org/2000/svg">
-												<path d="M3 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v9h1a3 3 0 0 1 3 3v3a1 1 0 0 0 2 0v-7.5l-2.4-2.4a1 1 0 0 1 1.4-1.4l3.3 3.3c.2.2.3.4.3.7V19a3 3 0 0 1-6 0v-3a1 1 0 0 0-1-1h-1v7H3zM7 6h4v5H7V6z"/>
-											</svg>
-											<Text fontSize="8px" fontWeight="700" color="#E53E3E" lineHeight="1" mt="1">LOW GAS</Text>
-										</Flex>
-									)}
-								</Flex>
-
-								{bal ? (
-									<Box>
-										<Text fontSize="xs" fontFamily="mono" fontWeight="500" color={isStale ? "kk.textMuted" : "white"} lineHeight="1.3" truncate>
-											{formatBalance(bal.balance)} {chain.symbol}
-										</Text>
-										{usdNum > 0 && (
-											<AnimatedUsd value={usdNum} fontSize="11px" color={isStale ? "kk.textMuted" : undefined} fontWeight="500" lineHeight="1.3" />
-										)}
-										{(() => {
-											// Zcash gets a special "+ shielded" sub-row instead of generic token count.
-											// The shielded balance is appended as a synthetic token with type:'shielded'
-											// in getBalances; surface it explicitly so users see the private balance.
-											const shielded = bal.tokens?.find(tk => tk.type === 'shielded')
-											const otherTokens = bal.tokens?.filter(tk => tk.type !== 'shielded') ?? []
-											return (
-												<>
-													{shielded && parseFloat(shielded.balance || '0') > 0 && (
-														<Flex align="center" gap="1" mt="0.5" title="Shielded (Orchard) balance — visible only to you">
-															<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke={chain.color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-																<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-															</svg>
-															<Text fontSize="10px" fontFamily="mono" color={chain.color} fontWeight="600" lineHeight="1.3" truncate>
-																+ {formatBalance(shielded.balance)} private
-															</Text>
-														</Flex>
-													)}
-													{otherTokens.length > 0 && (
-														<Text fontSize="10px" color={chain.color} fontWeight="600" lineHeight="1.3" mt="0.5">
-															{t("tokensCount", { count: otherTokens.length })}
-														</Text>
-													)}
-												</>
-											)
-										})()}
-									</Box>
-								) : loadingBalances ? (
-									<Text fontSize="10px" color="kk.textMuted">{t("loading", { ns: "common" })}</Text>
-								) : (
-									<Text fontSize="10px" color="kk.textMuted">{t("noBalance")}</Text>
-								)}
-							</Flex>
-						</Box>
-					)
-				})}
-
-				{/* Add Chain card — hidden in watch-only mode */}
-				{!watchOnly && (
-					<Box
-						bg="kk.cardBg"
-						border="1px dashed"
-						borderColor="kk.border"
-						borderRadius="xl"
-						p="3"
-						cursor="pointer"
-						transition="all 0.15s"
-						_hover={{
-							borderColor: "kk.gold",
-							bg: "rgba(233,196,106,0.05)",
-						}}
-						onClick={() => setShowAddChain(true)}
-						display="flex"
-						alignItems="center"
-						justifyContent="center"
-						minH="80px"
-					>
-						<Flex direction="column" align="center" gap="1">
-							<Text fontSize="lg" color="kk.textMuted">+</Text>
-							<Text fontSize="10px" color="kk.textMuted">{t("addChain")}</Text>
-						</Flex>
-					</Box>
-				)}
-			</SimpleGrid>}
 
 			{drilledChainId === 'dogecoin' && <DogeEasterEgg />}
 
@@ -2885,22 +2772,6 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 						}
 					}}
 					existingChainIds={existingChainIds}
-				/>
-			)}
-
-			{showChainPicker && (
-				<ChainPickerDialog
-					chains={hiddenChains}
-					onPick={(chainId) => {
-						setManuallyShown(prev => {
-							const next = new Set(prev)
-							next.add(chainId)
-							return next
-						})
-						setDrilledChainId(chainId)
-						setShowChainPicker(false)
-					}}
-					onClose={() => setShowChainPicker(false)}
 				/>
 			)}
 

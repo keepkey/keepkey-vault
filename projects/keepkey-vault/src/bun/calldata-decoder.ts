@@ -47,6 +47,26 @@ interface LocalDecoder {
   decode: (data: string) => CalldataDecodedField[]
 }
 
+// THORChain/Maya router deposit head layout: vault (word0), asset (word1) and
+// amount (word2) sit at identical offsets for both deposit(...,memo) and
+// depositWithExpiry(...,memo,expiry), so one decoder serves both selectors.
+// The firmware (thortx.c) clear-signs BOTH — so the Vault must recognize both,
+// otherwise the plain deposit() path decodes as source:'none', the signing
+// overlay flags needsBlindSigning and forces AdvancedMode ON, which turns OFF
+// the device's own blind-sign gate and defeats the router-pin fix (PR #261).
+function decodeThorDeposit(data: string): CalldataDecodedField[] {
+  const vault = formatAddress('0x' + data.slice(10, 74))
+  const asset = formatAddress('0x' + data.slice(74, 138))
+  const amount = formatUint256('0x' + data.slice(138, 202))
+  const isNativeAsset = asset === '0x0000000000000000000000000000000000000000'
+  return [
+    { name: 'Protocol', type: 'string', value: 'THORChain Router', format: 'raw' },
+    { name: 'Vault', type: 'address', value: vault, format: 'address' },
+    { name: 'Asset', type: 'string', value: isNativeAsset ? 'Native (ETH)' : asset, format: isNativeAsset ? 'raw' : 'address' },
+    { name: 'Amount', type: 'uint256', value: amount, format: 'amount' },
+  ]
+}
+
 const LOCAL_DECODERS: LocalDecoder[] = [
   // ERC-20 transfer(address,uint256)
   {
@@ -305,24 +325,48 @@ const LOCAL_DECODERS: LocalDecoder[] = [
       ]
     },
   },
-  // ── THORChain Router ──
-  // depositWithExpiry(address vault, address asset, uint256 amount, string memo, uint256 expiry)
+  // ── 0x Exchange Proxy / Uniswap (firmware clear-signs these) ──
+  // The firmware (zxswap.c / zxliquidtx.c) natively clear-signs these to their
+  // pinned routers, so decode them — otherwise they read as source:'none' and
+  // the signing overlay over-gates into blind-signing (forcing AdvancedMode ON,
+  // which disables the device's own gate). The device stays authoritative: it
+  // re-checks the array offset / LP recipient and rejects spoofed variants
+  // regardless of what we display here.
+  // sellToUniswap(address[] tokens, uint256 sellAmount, uint256 minBuyAmount, bool isSushi)
   {
-    selector: '0x44bc937b',
-    method: 'Deposit (THORChain)',
+    selector: '0xd9627aa4',
+    method: 'Sell to Uniswap (0x)',
     decode: (data) => {
-      const vault = formatAddress('0x' + data.slice(10, 74))
-      const asset = formatAddress('0x' + data.slice(74, 138))
-      const amount = formatUint256('0x' + data.slice(138, 202))
-      const isNativeAsset = asset === '0x0000000000000000000000000000000000000000'
+      const sellAmount = formatUint256('0x' + data.slice(74, 138))
+      const minBuyAmount = formatUint256('0x' + data.slice(138, 202))
       return [
-        { name: 'Protocol', type: 'string', value: 'THORChain Router', format: 'raw' },
-        { name: 'Vault', type: 'address', value: vault, format: 'address' },
-        { name: 'Asset', type: 'string', value: isNativeAsset ? 'Native (ETH)' : asset, format: isNativeAsset ? 'raw' : 'address' },
-        { name: 'Amount', type: 'uint256', value: amount, format: 'amount' },
+        { name: 'Protocol', type: 'string', value: '0x Exchange Proxy', format: 'raw' },
+        { name: 'Sell Amount', type: 'uint256', value: sellAmount, format: 'amount' },
+        { name: 'Min Buy Amount', type: 'uint256', value: minBuyAmount, format: 'amount' },
       ]
     },
   },
+  // addLiquidityETH(address token, uint amountTokenDesired, uint amountTokenMin, uint amountETHMin, address to, uint deadline)
+  {
+    selector: '0xf305d719',
+    method: 'Add Liquidity (Uniswap)',
+    decode: (data) => {
+      const token = formatAddress('0x' + data.slice(10, 74))
+      const recipient = formatAddress('0x' + data.slice(266, 330))
+      return [
+        { name: 'Protocol', type: 'string', value: 'Uniswap V2 Router', format: 'raw' },
+        { name: 'Token', type: 'address', value: token, format: 'address' },
+        { name: 'LP Recipient', type: 'address', value: recipient, format: 'address' },
+      ]
+    },
+  },
+  // ── THORChain Router ──
+  // deposit(vault, asset, amount, memo) [0x1fece7b4] and
+  // depositWithExpiry(vault, asset, amount, memo, expiry) [0x44bc937b].
+  // Firmware clear-signs both; recognize both so the plain deposit() path is
+  // not over-gated into blind-signing. (keepkey-firmware thortx.h selectors.)
+  { selector: '0x1fece7b4', method: 'Deposit (THORChain)', decode: decodeThorDeposit },
+  { selector: '0x44bc937b', method: 'Deposit (THORChain)', decode: decodeThorDeposit },
 ]
 
 /**
@@ -368,6 +412,21 @@ interface PioneerSignResponse {
   dappName?: string
   contractName?: string
   method?: string
+  txHash?: string            // the sighash the blob is bound to (== device's sighash)
+}
+
+/**
+ * The full unsigned-tx fields /descriptors/sign needs to bind the blob to the
+ * exact sighash the device will sign. MUST be byte-identical to the values
+ * later passed to ethSignTx — any drift and rc3 firmware refuses the blob.
+ */
+export interface EvmUnsignedTxFields {
+  nonce: string | number
+  gasLimit: string | number
+  value: string | number
+  gasPrice?: string | number
+  maxFeePerGas?: string | number
+  maxPriorityFeePerGas?: string | number
 }
 
 /**
@@ -409,8 +468,13 @@ async function fetchPioneerDecode(
 async function fetchPioneerSignedBlob(
   chainId: number,
   contractAddress: string,
-  data: string
+  data: string,
+  tx?: EvmUnsignedTxFields
 ): Promise<PioneerSignResponse | null> {
+  // The blob's tx_hash covers nonce/gas/value/fees — without the full tx the
+  // server 400s (and any blob it could make would fail the rc3 hash binding).
+  if (!tx) return null
+  const request = { chainId, contractAddress, data, ...tx }
   try {
     // Try SDK first (available once spec is regenerated)
     const pioneer = await Promise.race([
@@ -419,7 +483,7 @@ async function fetchPioneerSignedBlob(
     ])
     if (pioneer?.SignDescriptor) {
       const resp = await Promise.race([
-        pioneer.SignDescriptor({ chainId, contractAddress, data }),
+        pioneer.SignDescriptor(request),
         new Promise<null>((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000)),
       ])
       const result = resp?.data as PioneerSignResponse | undefined
@@ -431,7 +495,7 @@ async function fetchPioneerSignedBlob(
     const resp = await fetch(`${base}/api/v1/descriptors/sign`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chainId, contractAddress, data }),
+      body: JSON.stringify(request),
       signal: AbortSignal.timeout(3000),
     })
     if (!resp.ok) return null
@@ -448,6 +512,7 @@ export async function decodeCalldata(
   contractAddress: string,
   data: string,
   chainId?: number,
+  tx?: EvmUnsignedTxFields,
 ): Promise<CalldataDecodedInfo | null> {
   // Skip if no calldata or just a bare transfer (no data)
   if (!data || data === '0x' || data.length < 10) return null
@@ -460,10 +525,18 @@ export async function decodeCalldata(
   const resolvedChainId = chainId || 1
   if (resolvedChainId) {
     const networkId = chainIdToNetworkId(resolvedChainId)
-    const [pioneer, signedBlob] = await Promise.all([
+    const [pioneer, signedBlobRaw] = await Promise.all([
       fetchPioneerDecode(networkId, contractAddress, data),
-      fetchPioneerSignedBlob(resolvedChainId, contractAddress, data),
+      fetchPioneerSignedBlob(resolvedChainId, contractAddress, data, tx),
     ])
+
+    // Only attach VERIFIED blobs. An OPAQUE/UNKNOWN blob doesn't enable
+    // clear-sign — rc3 fail-closes on it — and attaching it would just mask
+    // the honest "unverified contract call" state from the UI/device paths.
+    const signedBlob = signedBlobRaw?.classification === 'VERIFIED' ? signedBlobRaw : null
+    if (signedBlobRaw) {
+      console.log(`[calldata] Pioneer /sign: classification=${signedBlobRaw.classification} keyId=${signedBlobRaw.keyId} txHash=${signedBlobRaw.txHash ?? '(n/a)'} attach=${!!signedBlob}`)
+    }
 
     if (pioneer) {
       const fields: CalldataDecodedField[] = pioneer.args.map((arg) => ({
@@ -483,10 +556,11 @@ export async function decodeCalldata(
         source: 'pioneer',
         signedInsightBlob: signedBlob?.signedPayload,
         insightKeyId: signedBlob?.keyId,
+        insightClassification: signedBlobRaw?.classification,
       }
     }
 
-    // Pioneer decode failed but we got a signed blob — still useful
+    // Pioneer decode failed but we got a VERIFIED blob — still useful
     if (signedBlob) {
       return {
         dappName: signedBlob.dappName || 'Unknown',
@@ -497,6 +571,7 @@ export async function decodeCalldata(
         source: 'pioneer',
         signedInsightBlob: signedBlob.signedPayload,
         insightKeyId: signedBlob.keyId,
+        insightClassification: signedBlob.classification,
       }
     }
   }

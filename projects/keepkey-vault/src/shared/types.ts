@@ -427,6 +427,10 @@ export interface PairedAppInfo {
   url: string
   imageUrl: string
   addedOn: number
+  /** Stable per-install id sent by the client; preferred identity for dedup. */
+  clientId?: string
+  /** Last successful auth — drives LRU eviction + sliding TTL. */
+  lastUsedOn?: number
 }
 
 export interface EIP712DecodedField {
@@ -508,6 +512,11 @@ export interface CalldataDecodedInfo {
   signedInsightBlob?: string
   /** Signing key slot used for the insight blob */
   insightKeyId?: number
+  /** Pioneer's verdict on the blob: VERIFIED = curated descriptor + exact
+   *  calldata round-trip; UNKNOWN = opaque. Blob is only attached when
+   *  VERIFIED — rc3 fail-closes on opaque blobs, so on UNKNOWN the existing
+   *  raw-hex/AdvancedMode path applies. */
+  insightClassification?: 'VERIFIED' | 'UNKNOWN'
 }
 
 export interface SigningRequestInfo {
@@ -625,6 +634,7 @@ export interface AppSettings {
   walletConnectEnabled: boolean   // feature flag: WalletConnect dApp support (default OFF)
   bip85Enabled: boolean          // feature flag: BIP-85 derived seeds (default OFF)
   zcashPrivacyEnabled: boolean   // feature flag: Zcash shielded/privacy (default OFF, locked)
+  hiveEnabled: boolean           // feature flag: Hive blockchain (default OFF, requires firmware >= 7.15.0)
   emulatorEnabled: boolean       // feature flag: macOS emulator surface (default OFF — dev-only)
   preReleaseUpdates: boolean     // opt-in to pre-release auto-updates (default OFF)
   alphaFirmware: boolean         // opt-in to alpha firmware channel (manifest.beta) (default OFF)
@@ -918,6 +928,14 @@ export interface AuditDerivedAddress {
   /** True when the balance lookup THREW — the address was derived but its balance
    *  is unknown. Must never be shown as a confident "0" (honesty rule). */
   balanceError?: boolean
+  /** Exact derivation of `address` (UTXO address-level scans) — what the audit
+   *  sweep (auditSweepPath) needs to spend from this exact find. */
+  addressNList?: number[]
+  scriptType?: string
+  /** Set to false by the known-paths grid for standard-scheme rows so the
+   *  walkthrough's find rows don't offer sweeping the standard receive branch
+   *  (it's the sweep DESTINATION). Absent (custom finds) = sweepable. */
+  sweepable?: boolean
 }
 
 /** Raw-path debug inspector result (auditInspectPath). Read-only device-derived
@@ -1390,3 +1408,8 @@ export interface UsbDiagnosticReport {
   /** Copy-ready plain-text report for pasting into a support request. */
   text: string
 }
+
+/** Result of a native "scan screen" capture (see src/bun/screen-capture.ts). */
+export type ScreenCaptureResult =
+  | { ok: true; images: string[] } // base64 PNG, one per display
+  | { ok: false; reason: 'permission' | 'unsupported' | 'failed'; message: string }

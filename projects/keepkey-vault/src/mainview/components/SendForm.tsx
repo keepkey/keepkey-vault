@@ -17,6 +17,10 @@ import { validateAddress } from "../../shared/address-validation"
 
 type SendPhase = 'input' | 'built' | 'signed' | 'broadcast'
 
+// Balance servers need a moment to index a just-broadcast tx — resyncing
+// immediately re-reads the pre-send balance and briefly shows it as current.
+const POST_SEND_RESYNC_DELAY_MS = 4000
+
 // ── Confetti ────────────────────────────────────────────────────────────────
 const CONFETTI_COLORS = ['#8be3c4', '#e9c46a', '#a8efd2', '#9f8ce0', '#e08c7b', '#f2d27e']
 const confettiPieces = Array.from({ length: 40 }, (_, i) => ({
@@ -124,7 +128,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 	}, [chain.chainFamily, tokenCaip])
 
 	// Derived display values — token mode vs native mode
-	const isTokenSend = !!(token && token.caip && !token.caip.endsWith('/slip44:501') && (token.caip.includes('erc20') || token.caip.includes('/token:') || token.caip.includes('/spl:') || token.caip.includes('/trc20:')))
+	const isTokenSend = !!(token && token.caip && !token.caip.endsWith('/slip44:501') && (token.caip.includes('erc20') || token.caip.includes('/token:') || token.caip.includes('/spl:') || token.caip.includes('/trc20:') || token.caip.includes('/denom:')))
 	const displaySymbol = isTokenSend ? token!.symbol : chain.symbol
 	const displayBalance = isTokenSend ? token!.balance : (balance?.balance || '0')
 	// Fee controls: presets where a builder honors feeLevel; free-form custom only where
@@ -326,7 +330,10 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 			}, 60000)
 			setTxid(result.txid)
 			setPhase('broadcast')
-			rpcFire('getBalance', { chainId: chain.id })
+			// Gated to the chain we sent FROM — the balance server needs time to
+			// index the broadcast before a resync reflects it, not the pre-send state.
+			const resyncChainId = chain.id
+			setTimeout(() => rpcFire('getBalance', { chainId: resyncChainId }), POST_SEND_RESYNC_DELAY_MS)
 		} catch (e: any) {
 			setError(e.message || t("broadcastFailed"))
 		}

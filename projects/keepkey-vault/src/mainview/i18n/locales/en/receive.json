@@ -12,5 +12,6 @@
 	"derivingAddress": "Deriving address...",
 	"noAddressDerived": "No address derived yet",
 	"deriveAddress": "Derive Address",
+	"watchOnlyNoAddress": "No cached address. Connect your device to view receive addresses.",
 	"account": "Account {{index}}"
 }

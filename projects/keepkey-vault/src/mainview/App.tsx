@@ -62,6 +62,17 @@ function App() {
 	// with React render batching on fast USB detach/reattach cycles (Windows).
 	const oobEnteredRef = useRef(false)
 	const oobClaimStuckSince = useRef<number | null>(null)
+
+	// If the device drops back into a setup state (wiped, or rebooted uninitialized
+	// after a firmware flash) once the wizard already completed, wizardComplete is
+	// stuck true — Dashboard, which normally consumes it, only mounts when ready, so
+	// it never clears. That forces the app to the wallet-picker splash instead of
+	// re-opening onboarding. Clear it so the OOB wizard can mount again.
+	useEffect(() => {
+		if (wizardComplete && ["bootloader", "needs_firmware", "needs_init"].includes(deviceState.state)) {
+			setWizardComplete(false)
+		}
+	}, [wizardComplete, deviceState.state])
 	const [portfolioLoaded, setPortfolioLoaded] = useState(false)
 	const [gridReady, setGridReady] = useState(false)
 	const [settingsOpen, setSettingsOpen] = useState(false)
@@ -72,6 +83,7 @@ function App() {
 	const [appVersion, setAppVersion] = useState<{ version: string; channel: string } | null>(null)
 	const [restApiEnabled, setRestApiEnabled] = useState(false)
 	const [walletConnectEnabled, setWalletConnectEnabled] = useState(false)
+	const [hiveEnabled, setHiveEnabled] = useState(false)
 	const [emulatorEnabled, setEmulatorEnabled] = useState(false)
 	const [pendingAppUrl, setPendingAppUrl] = useState<string | null>(null)
 	const [pendingWcOpen, setPendingWcOpen] = useState(false)
@@ -98,7 +110,7 @@ function App() {
 		const refreshSettings = () => {
 			rpcRequest<AppSettings>("getAppSettings")
 				.then((s) => {
-					setRestApiEnabled(s.restApiEnabled); setWalletConnectEnabled(s.walletConnectEnabled); setEmulatorEnabled(s.emulatorEnabled)
+					setRestApiEnabled(s.restApiEnabled); setWalletConnectEnabled(s.walletConnectEnabled); setEmulatorEnabled(s.emulatorEnabled); setHiveEnabled(s.hiveEnabled)
 					if (s.pioneerApiBase) loadSupportedChains(s.pioneerApiBase).catch(() => {})
 				})
 				.catch(() => {})
@@ -834,6 +846,7 @@ function App() {
 					onJumpToVault={() => setActiveTab("vault")}
 					balances={paletteBalances}
 					firmwareVersion={undefined}
+					hiveEnabled={hiveEnabled}
 				/>
 			</>
 		)
@@ -957,7 +970,7 @@ function App() {
 				onClose={() => {
 					setSettingsOpen(false)
 					rpcRequest<AppSettings>("getAppSettings")
-						.then((s) => { setRestApiEnabled(s.restApiEnabled); setWalletConnectEnabled(s.walletConnectEnabled); setEmulatorEnabled(s.emulatorEnabled) })
+						.then((s) => { setRestApiEnabled(s.restApiEnabled); setWalletConnectEnabled(s.walletConnectEnabled); setEmulatorEnabled(s.emulatorEnabled); setHiveEnabled(s.hiveEnabled) })
 						.catch(() => {})
 					window.dispatchEvent(new Event("keepkey-settings-changed"))
 				}}
@@ -1007,6 +1020,7 @@ function App() {
 				onJumpToVault={() => setActiveTab("vault")}
 				balances={paletteBalances}
 				firmwareVersion={deviceState.firmwareVersion}
+				hiveEnabled={hiveEnabled}
 			/>
 			{/* Top-level swap dialog mount for REST-driven /api/v2/swap/open. */}
 			<SwapRpcMount />

@@ -97,7 +97,7 @@ export async function injectTronMemo(tronGridTx: any, memo: string): Promise<any
 export async function buildTx(
   pioneer: any,
   chain: ChainDef,
-  params: BuildTxParams & { fromAddress?: string; xpub?: string; allXpubs?: XpubInfo[]; rpcUrl?: string; accountPath?: number[]; evmAddressIndex?: number; publicKeyHex?: string; pioneerBaseUrl?: string },
+  params: BuildTxParams & { fromAddress?: string; xpub?: string; allXpubs?: XpubInfo[]; rpcUrl?: string; accountPath?: number[]; evmAddressIndex?: number; publicKeyHex?: string; pioneerBaseUrl?: string; depositAsset?: string },
 ): Promise<{ unsignedTx: any; fee: string }> {
   switch (chain.chainFamily) {
     case 'utxo': {
@@ -149,6 +149,10 @@ export async function buildTx(
         isMax: params.isMax,
         isSwapDeposit: params.isSwapDeposit,
         fromAddress: params.fromAddress,
+        caip: params.caip,
+        tokenBalance: params.tokenBalance,
+        tokenDecimals: params.tokenDecimals,
+        depositAsset: params.depositAsset,
       })
       const { fee: cosmosFee, ...cosmosTx } = cosmosResult
       return { unsignedTx: cosmosTx, fee: cosmosFee }
@@ -352,10 +356,17 @@ export async function buildTx(
         const amountHex = tokenAmountBase.toString(16).padStart(64, '0')
         const parameter = recipientHashHex.padStart(64, '0') + amountHex
 
-        // fee_limit caps the energy/TRX a smart contract call can burn — 30 TRX
-        // is generous for a USDT.transfer() (typical cost is ~14 TRX) and
-        // matches what TronLink defaults to for unknown contracts.
-        const FEE_LIMIT_SUN = 30_000_000
+        // fee_limit caps the energy/TRX a smart contract call can burn — it is
+        // a CEILING, not a price: only actual consumption is charged. A USDT
+        // transfer to a zero-USDT recipient is ~130k energy PLUS the
+        // dynamic-energy penalty (USDT sits over getDynamicEnergyThreshold;
+        // the factor moves every maintenance cycle, up to 3.4x) — at peak
+        // that's >300k energy = >30 TRX, so the old 30 TRX limit made those
+        // sends revert on-chain as "Failed — Out of Energy" while still
+        // burning the full 30 TRX (e.g. tx c105241a…, 2026-07-02). 100 TRX
+        // covers the worst case (~57 TRX at max factor) and matches
+        // TronLink's current USDT default.
+        const FEE_LIMIT_SUN = 100_000_000
 
         let tronGridTx: any
         try {
@@ -396,6 +407,40 @@ export async function buildTx(
           tronGridTx = await injectTronMemo(tronGridTx, params.memo)
         }
 
+        // Estimate the REAL fee for display — showing the 100 TRX ceiling as
+        // "the fee" would 4-10x overstate a typical transfer. Simulate the
+        // call for its energy cost and price it at the chain's getEnergyFee.
+        let displayFeeTrx = String(FEE_LIMIT_SUN / 1_000_000) // ponytail: fallback = ceiling (upper bound, honest as "max fee")
+        try {
+          const [simResp, chainParamsResp] = await Promise.all([
+            fetch('https://api.trongrid.io/wallet/triggerconstantcontract', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                owner_address: params.fromAddress,
+                contract_address: tokenContractFromCaip,
+                function_selector: 'transfer(address,uint256)',
+                parameter,
+                visible: true,
+              }),
+            }),
+            fetch('https://api.trongrid.io/wallet/getchainparameters'),
+          ])
+          const sim = await simResp.json() as any
+          const chainParams = await chainParamsResp.json() as any
+          // energy_penalty is the dynamic-energy surcharge on hot contracts
+          // (USDT is always over getDynamicEnergyThreshold) — it's what made
+          // the real cost exceed energy_used × price. It moves every
+          // maintenance cycle, so this is an estimate, not a quote.
+          const energyUsed = Number(sim?.energy_used) + (Number(sim?.energy_penalty) || 0)
+          const energyPriceSun = Number(chainParams?.chainParameter?.find((p: any) => p.key === 'getEnergyFee')?.value)
+          if (energyUsed > 0 && energyPriceSun > 0) {
+            displayFeeTrx = String(Math.min(energyUsed * energyPriceSun, FEE_LIMIT_SUN) / 1_000_000)
+          }
+        } catch (e: any) {
+          console.warn(`[buildTx] TRON fee estimate failed, displaying fee_limit: ${e.message}`)
+        }
+
         // Intentionally do NOT pass `toAddress`/`amount` for TRC-20.
         // Firmware 7.14's TRON FSM has only a TransferContract clear-sign
         // path — given those fields it shows "Send <amount> TRX to
@@ -412,7 +457,7 @@ export async function buildTx(
           rawTx: tronGridTx.raw_data_hex,
           tronGridTx,
         }
-        return { unsignedTx: tronUnsignedTx, fee: String(FEE_LIMIT_SUN / 1_000_000) }
+        return { unsignedTx: tronUnsignedTx, fee: displayFeeTrx }
       }
 
       // ── Native TRX path (TransferContract) ──

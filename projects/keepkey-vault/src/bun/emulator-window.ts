@@ -191,6 +191,11 @@ let emuWindow: BrowserWindow<typeof emuRpc> | null = null
 export function openEmulatorWindow(): void {
   if (emuWindow) return
 
+  // A fresh window's webview hasn't loaded handlePacket yet. Close the gate
+  // until the new page posts /_emu/ready, so a stale `true` left over from a
+  // prior window can't let sendToWindow inject before this webview is ready.
+  viewReady = false
+
   const port = startBridge()
   const saved = loadWindowState()
   console.log(`${TAG} Opening emulator window at (${saved.x}, ${saved.y}) ${saved.width}x${saved.height}`)
@@ -270,7 +275,12 @@ function sendToWindow(messageName: string, payload: any): boolean {
   if (!emuWindow || !viewReady) return false
   const packet = JSON.stringify({ type: 'message', id: messageName, payload })
   try {
-    emuWindow.webview.executeJavascript(`window.handlePacket(${packet})`)
+    // Guard handlePacket: executeJavascript against a webview whose page hasn't
+    // finished loading — or was rebuilt without a close event resetting
+    // viewReady — throws inside WebKit and crashes the WKWebView process with
+    // EXC_BREAKPOINT (SIGTRAP / exit 133). The `if` makes a not-yet-ready
+    // injection a harmless no-op instead of killing the app.
+    emuWindow.webview.executeJavascript(`if(window.handlePacket)window.handlePacket(${packet})`)
     return true
   } catch (err: any) {
     console.warn(`${TAG} sendToWindow ${messageName} failed:`, err?.message)
@@ -294,7 +304,7 @@ export async function displaySeedWords(mnemonic: string): Promise<void> {
   // user "seed displayed" when the words were never actually shown — that
   // would lead to backing up a seed the device doesn't hold.
   if (!viewReady) {
-    const deadline = Date.now() + 5000
+    const deadline = Date.now() + EMU_VIEW_READY_TIMEOUT_MS
     while (Date.now() < deadline && !viewReady && emuWindow) {
       await new Promise(r => setTimeout(r, 50))
     }
@@ -330,6 +340,11 @@ export function dismissSeedDisplay(): void {
 // ── Interactive confirm ─────────────────────────────────────────────────
 
 const CONFIRM_TIMEOUT_MS = 120_000 // 2 minutes — reject if emulator window is dead/unresponsive
+// How long to wait for a freshly-opened emulator webview to finish loading and
+// post /_emu/ready. A cold webview on `make dev` can take well over 5s; the
+// wait loop exits the instant viewReady flips, so a higher ceiling only avoids
+// spuriously rejecting a confirm (e.g. a swap) before the window is up.
+const EMU_VIEW_READY_TIMEOUT_MS = 20_000
 
 async function requestUserConfirm(details: EmulatorConfirmDetails & { id: string }): Promise<boolean> {
   if (!emuWindow) {
@@ -346,7 +361,7 @@ async function requestUserConfirm(details: EmulatorConfirmDetails & { id: string
   // immediately after open (HTML hasn't loaded yet) — sendToWindow would
   // silently no-op and the user would never see the prompt.
   if (!viewReady) {
-    const deadline = Date.now() + 5000
+    const deadline = Date.now() + EMU_VIEW_READY_TIMEOUT_MS
     while (Date.now() < deadline && !viewReady && emuWindow) {
       await new Promise(r => setTimeout(r, 50))
     }

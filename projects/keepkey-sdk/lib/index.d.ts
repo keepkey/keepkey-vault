@@ -1,5 +1,5 @@
 import { VaultClient } from './client';
-import type { SdkConfig, DeviceFeatures, DeviceInfo, SignedTx, AddressRequest, EthSignTxParams, EthSignTypedDataParams, EthSignMessageParams, EthVerifyMessageParams, BtcSignTxParams, CosmosAminoSignParams, XrpSignTxParams, BnbSignTxParams, SolanaSignTxParams, TronSignTxParams, TonSignTxParams, GetPublicKeyRequest, BatchPubkeysPath, ApplySettingsParams, HealthResponse, SupportedAsset, PortfolioBalancesParams, MarketInfoParams, SearchAssetsParams, ListUnspentParams, PubkeyInfoParams, TxHistoryParams, BroadcastParams, NetworkIdParams, NetworkAddressParams, TokenDecimalsParams, StakingParams, SwapQuoteParams, SweepScanParams, SweepScanStatus, SweepExecuteParams, SweepExecuteResult } from './types';
+import type { SdkConfig, DeviceFeatures, DeviceInfo, SignedTx, AddressRequest, EthSignTxParams, EthSignTypedDataParams, EthSignMessageParams, EthVerifyMessageParams, BtcSignTxParams, CosmosAminoSignParams, XrpSignTxParams, BnbSignTxParams, SolanaSignTxParams, SolanaSignOffchainMessageParams, SolanaOffchainMessageSignatureResult, TronSignTxParams, TronSignMessageParams, TronMessageSignatureResult, TronVerifyMessageParams, TronSignTypedHashParams, TronTypedDataSignatureResult, TonSignTxParams, TonSignMessageParams, TonMessageSignatureResult, TonBuildTransferParams, TonBuildTransferResult, TonFinalizeTransferParams, TonFinalizeTransferResult, GetPublicKeyRequest, BatchPubkeysPath, ApplySettingsParams, HealthResponse, SupportedAsset, PortfolioBalancesParams, MarketInfoParams, SearchAssetsParams, ListUnspentParams, PubkeyInfoParams, TxHistoryParams, BroadcastParams, NetworkIdParams, NetworkAddressParams, TokenDecimalsParams, StakingParams, SwapQuoteParams, SweepScanParams, SweepScanStatus, SweepExecuteParams, SweepExecuteResult } from './types';
 export { SdkError } from './client';
 export * from './types';
 /**
@@ -123,6 +123,35 @@ export declare class KeepKeySdk {
             /** Send a PIN entered via matrix input during a recovery flow. */
             sendPin: (pin: string) => Promise<{
                 success: boolean;
+            }>;
+        };
+        /** On-device cipher-recovery character entry (drives a RecoveryDevice flow). */
+        recovery: {
+            /**
+             * Send one ciphered character during on-device cipher recovery.
+             * The device shows a scrambled keyboard on the OLED; the host relays the
+             * character the user "typed". A finalized word that isn't in the BIP-39
+             * wordlist makes the in-flight `recoverDevice()` promise reject with
+             * "Word not found in BIP39 wordlist".
+             */
+            sendCharacter: (character: string) => Promise<{
+                success: boolean;
+            }>;
+            /** Delete the last character entered during cipher recovery. */
+            sendCharacterDelete: () => Promise<{
+                success: boolean;
+            }>;
+            /** Finalize cipher-recovery word/seed entry (equivalent to pressing "next"). */
+            sendCharacterDone: () => Promise<{
+                success: boolean;
+            }>;
+            /** Current cipher-recovery state. `seq` advances each time the device asks
+             *  for the next character — poll it to sync sends with the device. */
+            getRecoveryState: () => Promise<{
+                active: boolean;
+                word_pos: number | null;
+                character_pos: number | null;
+                seq: number;
             }>;
         };
     };
@@ -263,16 +292,81 @@ export declare class KeepKeySdk {
     solana: {
         /** Sign a Solana transaction. `raw_tx` must be the base64-encoded serialized transaction. */
         solanaSignTransaction: (params: SolanaSignTxParams) => Promise<SignedTx>;
+        /**
+         * Sign a Solana off-chain message with domain separation. Firmware
+         * builds the spec envelope (`\xff` || "solana offchain" || version ||
+         * format || length || message) and Ed25519-signs it. NO AdvancedMode
+         * gate is needed — the envelope's leading `\xff` byte is invalid as a
+         * Solana transaction prefix, providing the domain separation that
+         * `solanaSignMessage` lacks. Format 2 (extended UTF-8) is rejected
+         * device-side; only formats 0 (ASCII) and 1 (UTF-8 limited, max 1212
+         * bytes) are supported. Verifier MUST reconstruct the envelope locally
+         * and verify against it, NOT against the bare message.
+         */
+        solanaSignOffchainMessage: (params: SolanaSignOffchainMessageParams) => Promise<SolanaOffchainMessageSignatureResult>;
     };
     /** TRON (TRX) signing, including TRC-20 tokens. */
     tron: {
         /** Sign a TRON transaction. `amount` is in sun (1 TRX = 1,000,000 sun). */
         tronSignTransaction: (params: TronSignTxParams) => Promise<SignedTx>;
+        /**
+         * Sign a message under TIP-191 (TRON's analog of EIP-191 personal_sign):
+         *   hash = keccak256("\x19TRON Signed Message:\n" + decimal(len) + msg)
+         *   sig  = secp256k1_sign(hash) → 65 bytes (r || s || 27+v)
+         *
+         * Pass `is_text=false` to send `message` as hex bytes; default treats
+         * it as UTF-8.
+         */
+        tronSignMessage: (params: TronSignMessageParams) => Promise<TronMessageSignatureResult>;
+        /**
+         * Verify a TIP-191 signature against the claimed Base58Check address.
+         * The device recovers the secp256k1 pubkey, derives the canonical
+         * TRON address, and compares it against `address`. Returns
+         * `{ verified: boolean }`.
+         */
+        tronVerifyMessage: (params: TronVerifyMessageParams) => Promise<{
+            verified: boolean;
+        }>;
+        /**
+         * TIP-712 typed-data signing in hash mode. Host pre-computes the
+         * domainSeparator + message hashes per the TIP-712 spec; the device
+         * assembles
+         *   keccak256("\x19\x01" || domain_separator_hash || message_hash)
+         * and signs with secp256k1. Both hashes must be exactly 32 bytes;
+         * omit `message_hash` for primaryType="EIP712Domain".
+         */
+        tronSignTypedHash: (params: TronSignTypedHashParams) => Promise<TronTypedDataSignatureResult>;
     };
     /** TON signing (supports Jettons). */
     ton: {
         /** Sign a TON transaction. `raw_tx` must be the base64- or hex-encoded raw transaction. */
         tonSignTransaction: (params: TonSignTxParams) => Promise<SignedTx>;
+        /**
+         * Bare Ed25519 over message bytes. NO domain separation — firmware
+         * fences this behind the `AdvancedMode` policy. With the policy
+         * disabled (default) this call returns a Failure response. Returns
+         * the 32-byte Ed25519 public key + 64-byte signature, both hex.
+         *
+         * For TON Connect-style auth flows, prefer the upcoming `ton_proof`
+         * envelope (separate endpoint, not yet implemented) which carries
+         * proper domain separation and doesn't need the policy gate.
+         */
+        tonSignMessage: (params: TonSignMessageParams) => Promise<TonMessageSignatureResult>;
+        /**
+         * Build an unsigned TON v4R2 transfer. Fetches seqno and wallet
+         * state from TonCenter, constructs the body cell, and returns the
+         * 32-byte body hash the device should sign — the client never
+         * touches BOC/Cell internals. Echo the returned `build` object back
+         * to `tonFinalizeTransfer` after signing.
+         */
+        tonBuildTransfer: (params: TonBuildTransferParams) => Promise<TonBuildTransferResult>;
+        /**
+         * Finalize a signed TON transfer: assembles the external message
+         * BOC from the prior `build` + the device's Ed25519 signature, then
+         * broadcasts via TonCenter. Pass `broadcast: false` to skip the
+         * broadcast and inspect/retry manually.
+         */
+        tonFinalizeTransfer: (params: TonFinalizeTransferParams) => Promise<TonFinalizeTransferResult>;
     };
     /** Extended public key (xpub) derivation — single and batch. */
     xpub: {

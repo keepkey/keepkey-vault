@@ -80,6 +80,7 @@
   "outOfSync": "Niezsynchronizowane",
   "synced": "Zsynchronizowane",
   "refresh": "Odśwież",
+  "refreshFailed": "Odświeżanie nie powiodło się",
   "refreshing": "Odświeżanie...",
   "needsScanPrompt": "Portfel nie został jeszcze przeskanowany. Przeskanuj łańcuch, aby znaleźć osłonięte notatki.",
   "scanFromBlock": "Skanuj od bloku {{block}}",
