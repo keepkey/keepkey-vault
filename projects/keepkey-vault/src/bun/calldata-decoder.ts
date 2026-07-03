@@ -412,6 +412,21 @@ interface PioneerSignResponse {
   dappName?: string
   contractName?: string
   method?: string
+  txHash?: string            // the sighash the blob is bound to (== device's sighash)
+}
+
+/**
+ * The full unsigned-tx fields /descriptors/sign needs to bind the blob to the
+ * exact sighash the device will sign. MUST be byte-identical to the values
+ * later passed to ethSignTx — any drift and rc3 firmware refuses the blob.
+ */
+export interface EvmUnsignedTxFields {
+  nonce: string | number
+  gasLimit: string | number
+  value: string | number
+  gasPrice?: string | number
+  maxFeePerGas?: string | number
+  maxPriorityFeePerGas?: string | number
 }
 
 /**
@@ -453,8 +468,13 @@ async function fetchPioneerDecode(
 async function fetchPioneerSignedBlob(
   chainId: number,
   contractAddress: string,
-  data: string
+  data: string,
+  tx?: EvmUnsignedTxFields
 ): Promise<PioneerSignResponse | null> {
+  // The blob's tx_hash covers nonce/gas/value/fees — without the full tx the
+  // server 400s (and any blob it could make would fail the rc3 hash binding).
+  if (!tx) return null
+  const request = { chainId, contractAddress, data, ...tx }
   try {
     // Try SDK first (available once spec is regenerated)
     const pioneer = await Promise.race([
@@ -463,7 +483,7 @@ async function fetchPioneerSignedBlob(
     ])
     if (pioneer?.SignDescriptor) {
       const resp = await Promise.race([
-        pioneer.SignDescriptor({ chainId, contractAddress, data }),
+        pioneer.SignDescriptor(request),
         new Promise<null>((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000)),
       ])
       const result = resp?.data as PioneerSignResponse | undefined
@@ -475,7 +495,7 @@ async function fetchPioneerSignedBlob(
     const resp = await fetch(`${base}/api/v1/descriptors/sign`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chainId, contractAddress, data }),
+      body: JSON.stringify(request),
       signal: AbortSignal.timeout(3000),
     })
     if (!resp.ok) return null
@@ -492,6 +512,7 @@ export async function decodeCalldata(
   contractAddress: string,
   data: string,
   chainId?: number,
+  tx?: EvmUnsignedTxFields,
 ): Promise<CalldataDecodedInfo | null> {
   // Skip if no calldata or just a bare transfer (no data)
   if (!data || data === '0x' || data.length < 10) return null
@@ -504,10 +525,18 @@ export async function decodeCalldata(
   const resolvedChainId = chainId || 1
   if (resolvedChainId) {
     const networkId = chainIdToNetworkId(resolvedChainId)
-    const [pioneer, signedBlob] = await Promise.all([
+    const [pioneer, signedBlobRaw] = await Promise.all([
       fetchPioneerDecode(networkId, contractAddress, data),
-      fetchPioneerSignedBlob(resolvedChainId, contractAddress, data),
+      fetchPioneerSignedBlob(resolvedChainId, contractAddress, data, tx),
     ])
+
+    // Only attach VERIFIED blobs. An OPAQUE/UNKNOWN blob doesn't enable
+    // clear-sign — rc3 fail-closes on it — and attaching it would just mask
+    // the honest "unverified contract call" state from the UI/device paths.
+    const signedBlob = signedBlobRaw?.classification === 'VERIFIED' ? signedBlobRaw : null
+    if (signedBlobRaw) {
+      console.log(`[calldata] Pioneer /sign: classification=${signedBlobRaw.classification} keyId=${signedBlobRaw.keyId} txHash=${signedBlobRaw.txHash ?? '(n/a)'} attach=${!!signedBlob}`)
+    }
 
     if (pioneer) {
       const fields: CalldataDecodedField[] = pioneer.args.map((arg) => ({
@@ -527,10 +556,11 @@ export async function decodeCalldata(
         source: 'pioneer',
         signedInsightBlob: signedBlob?.signedPayload,
         insightKeyId: signedBlob?.keyId,
+        insightClassification: signedBlobRaw?.classification,
       }
     }
 
-    // Pioneer decode failed but we got a signed blob — still useful
+    // Pioneer decode failed but we got a VERIFIED blob — still useful
     if (signedBlob) {
       return {
         dappName: signedBlob.dappName || 'Unknown',
@@ -541,6 +571,7 @@ export async function decodeCalldata(
         source: 'pioneer',
         signedInsightBlob: signedBlob.signedPayload,
         insightKeyId: signedBlob.keyId,
+        insightClassification: signedBlob.classification,
       }
     }
   }

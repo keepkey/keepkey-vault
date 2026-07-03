@@ -3,8 +3,10 @@ import type { AuthStore } from './auth'
 import { HttpError } from './auth'
 import type { SigningRequestInfo, ApiLogEntry, EIP712DecodedInfo } from '../shared/types'
 import { decodeEIP712 } from './eip712-decoder'
-import { decodeCalldata } from './calldata-decoder'
+import { decodeCalldata, type EvmUnsignedTxFields } from './calldata-decoder'
 import { CHAINS, isChainSupported } from '../shared/chains'
+import { EVM_INSIGHT } from '../shared/flags'
+import { versionCompare } from '../shared/firmware-versions'
 import {
   initializeOrchardFromDevice, scanOrchardNotes, getShieldedBalance,
   buildShieldedTx, finalizeShieldedTx, broadcastShieldedTx,
@@ -1061,6 +1063,10 @@ const ROUTE_TO_CHAIN: Record<string, string> = {
 }
 
 export function startRestApi(engine: EngineController, auth: AuthStore, port = 1646, callbacks?: RestApiCallbacks) {
+  // EVM clear-signing (insight): OFF by default, and only on firmware >= 7.15.0.
+  // getDeviceState() is an in-memory read (cachedFeatures); `?? '0.0.0'` fails closed.
+  const evmInsightEnabled = (): boolean =>
+    EVM_INSIGHT && versionCompare(engine.getDeviceState().firmwareVersion ?? '0.0.0', '7.15.0') >= 0
   const getWalletDbScope = (): { deviceId: string; walletId: string } | null => {
     const deviceId = engine.getDeviceState().deviceId
     if (!deviceId) return null
@@ -1711,7 +1717,34 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
                   const chainIdNum = typeof signingInfo.chainId === 'string'
                     ? (signingInfo.chainId.startsWith('0x') ? parseInt(signingInfo.chainId, 16) : parseInt(signingInfo.chainId, 10))
                     : signingInfo.chainId
-                  signingInfo.calldataDecoded = await decodeCalldata(preview.to, preview.data, chainIdNum) ?? undefined
+                  // Full unsigned tx for the pioneer signed blob. MUST mirror the
+                  // msg construction in the /eth/sign-transaction handler exactly
+                  // (same defaults, same fee-field selection) — the blob's tx_hash
+                  // is bound to the sighash over these fields, and rc3 firmware
+                  // refuses the blob if it doesn't match what the device signs.
+                  // Gated: only fetch a Pioneer signed blob when insight is enabled +
+                  // fw >= 7.15. Off → txFields stays undefined → fetchPioneerSignedBlob
+                  // short-circuits to null (no /descriptors/sign call). Local decode +
+                  // needsBlindSigning below stay live on all firmware.
+                  let txFields: EvmUnsignedTxFields | undefined
+                  if (evmInsightEnabled() && path === '/eth/sign-transaction') {
+                    txFields = {
+                      nonce: preview.nonce || '0x0',
+                      gasLimit: preview.gas || preview.gasLimit || '0x5208',
+                      value: preview.value || '0x0',
+                    }
+                    if (preview.maxFeePerGas || preview.max_fee_per_gas) {
+                      txFields.maxFeePerGas = preview.maxFeePerGas || preview.max_fee_per_gas
+                      // Handler sends '0x' (canonical empty) to the device for a
+                      // zero priority fee; send pioneer '0x0' — ethers RLP-encodes
+                      // zero as empty too, so both sides hash identically.
+                      const prio = preview.maxPriorityFeePerGas || preview.max_priority_fee_per_gas
+                      txFields.maxPriorityFeePerGas = (!prio || /^0x0*$/.test(prio)) ? '0x0' : prio
+                    } else {
+                      txFields.gasPrice = preview.gasPrice || preview.gas_price || '0x0'
+                    }
+                  }
+                  signingInfo.calldataDecoded = await decodeCalldata(preview.to, preview.data, chainIdNum, txFields) ?? undefined
                   console.log(`[REST] Calldata decoded:`, JSON.stringify(signingInfo.calldataDecoded, null, 2))
                 } catch (e) { console.warn('[REST] Calldata decode failed:', e) }
 
@@ -2064,29 +2097,42 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           }
 
           // ── EVM Clear-Signing: attach signed metadata blob for device OLED ──
+          // Gated OFF by default + fw >= 7.15. This is the device-facing chokepoint:
+          // the caller-provided branch reads the blob straight from the request body,
+          // independent of the fetch gate above, so it MUST be gated here on its own —
+          // otherwise a caller could inject a blob and force clear-sign while disabled.
           // Priority: 1) caller provides txMetadata in request body (test fixtures)
           //           2) Pioneer signedInsightBlob from calldata decoder
           //           3) none — device falls back to raw hex
-          if (body.txMetadata && body.txMetadata.signedPayload) {
-            msg.txMetadata = {
-              signedPayload: body.txMetadata.signedPayload,
-              keyId: body.txMetadata.keyId ?? 0,
-            }
-            console.log(`[REST] EVM clear-sign: using caller-provided blob (${String(body.txMetadata.signedPayload).length} chars, keyId=${msg.txMetadata.keyId})`)
-          } else {
-            const decoded = activeSigningInfo?.calldataDecoded
-            if (decoded?.signedInsightBlob) {
+          if (evmInsightEnabled()) {
+            if (body.txMetadata && body.txMetadata.signedPayload) {
               msg.txMetadata = {
-                signedPayload: decoded.signedInsightBlob,
-                keyId: decoded.insightKeyId,
+                signedPayload: body.txMetadata.signedPayload,
+                keyId: body.txMetadata.keyId ?? 0,
               }
-              console.log(`[REST] EVM clear-sign: using Pioneer blob (keyId=${decoded.insightKeyId})`)
+              console.log(`[REST] EVM clear-sign: using caller-provided blob (${String(body.txMetadata.signedPayload).length} chars, keyId=${msg.txMetadata.keyId})`)
             } else {
-              console.log('[REST] EVM clear-sign: no metadata blob — device will show raw hex')
+              const decoded = activeSigningInfo?.calldataDecoded
+              if (decoded?.signedInsightBlob) {
+                // Pioneer emits the blob as base64, but hdwallet's ethSignTx
+                // arrayify()s a STRING signedPayload as hex ("0x"+s) → a base64
+                // string throws "invalid hexadecimal string" before the device
+                // sees anything. Hand it the raw bytes (Uint8Array branch) so the
+                // encoding is unambiguous.
+                msg.txMetadata = {
+                  signedPayload: new Uint8Array(Buffer.from(decoded.signedInsightBlob, 'base64')),
+                  keyId: decoded.insightKeyId,
+                }
+                console.log(`[REST] EVM clear-sign: using Pioneer blob (keyId=${decoded.insightKeyId}, ${msg.txMetadata.signedPayload.length} bytes)`)
+              } else {
+                console.log('[REST] EVM clear-sign: no metadata blob — device will show raw hex')
+              }
             }
           }
 
-          console.log('[REST] ethSignTx hdwallet payload:', JSON.stringify(msg, null, 2))
+          // Replacer: txMetadata.signedPayload is a Uint8Array — default stringify
+          // emits one line per byte, flooding the log with the whole blob.
+          console.log('[REST] ethSignTx hdwallet payload:', JSON.stringify(msg, (_k, v) => v instanceof Uint8Array ? `Uint8Array(${v.length})` : v, 2))
           try {
             // Honest confirm dialog: decode msg.data so token/contract calls
             // don't show the contract as recipient or 0x0/hex-wei as amount.

@@ -512,6 +512,11 @@ export interface CalldataDecodedInfo {
   signedInsightBlob?: string
   /** Signing key slot used for the insight blob */
   insightKeyId?: number
+  /** Pioneer's verdict on the blob: VERIFIED = curated descriptor + exact
+   *  calldata round-trip; UNKNOWN = opaque. Blob is only attached when
+   *  VERIFIED — rc3 fail-closes on opaque blobs, so on UNKNOWN the existing
+   *  raw-hex/AdvancedMode path applies. */
+  insightClassification?: 'VERIFIED' | 'UNKNOWN'
 }
 
 export interface SigningRequestInfo {
