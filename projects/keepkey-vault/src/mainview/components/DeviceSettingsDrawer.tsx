@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next"
 import { LanguageSelector } from "../i18n/LanguageSelector"
 import { CurrencySelector } from "./CurrencySelector"
 import { rpcRequest, onRpcMessage } from "../lib/rpc"
-import { IS_MAC } from "../lib/platform"
+import { IS_MAC, IS_WINDOWS } from "../lib/platform"
 import { Z } from "../lib/z-index"
 import type { DeviceStateInfo, AppSettings } from "../../shared/types"
 import { versionCompare } from "../../shared/firmware-versions"
@@ -348,6 +348,39 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 			setAppSettings(result)
 		} catch (e: any) { console.error("setEmulatorEnabled:", e) }
 		setTogglingEmulator(false)
+	}, [])
+
+	// File-picker install of the emulator library. Drag-drop is the other path,
+	// but it's unreliable on Windows (Electrobun raw-input handling swallows OS
+	// file drops — see WINDOWS-QUIRKS.md), so a Browse button is the dependable
+	// route there. Reuses the same backend RPC the drop handler uses; the backend
+	// validates the PE/Mach-O header and normalizes the filename to libkkemu.<ext>.
+	const emuFileRef = useRef<HTMLInputElement>(null)
+	const [installingEmu, setInstallingEmu] = useState(false)
+	const [emuInstallMsg, setEmuInstallMsg] = useState<string | null>(null)
+	const handleEmuFilePick = useCallback(async (input: HTMLInputElement) => {
+		const file = input.files?.[0]
+		input.value = "" // let the user re-pick the same file after a failure
+		if (!file) return
+		const wantExt = IS_WINDOWS ? ".dll" : ".dylib"
+		if (!file.name.toLowerCase().endsWith(wantExt)) {
+			setEmuInstallMsg(`Pick a libkkemu${wantExt} file`)
+			return
+		}
+		setInstallingEmu(true); setEmuInstallMsg(null)
+		try {
+			const bytes = new Uint8Array(await file.arrayBuffer())
+			const CHUNK = 8192
+			let binary = ""
+			for (let i = 0; i < bytes.length; i += CHUNK) binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK))
+			await rpcRequest("emulatorInstallDylib", { data: btoa(binary) }, 30000)
+			// Backend auto-enables the emulator; nudge the app to re-pull settings.
+			window.dispatchEvent(new Event("keepkey-settings-changed"))
+			setEmuInstallMsg("Installed. Start the emulator from the device list.")
+		} catch (err: any) {
+			setEmuInstallMsg(err?.message || "Install failed")
+		}
+		setInstallingEmu(false)
 	}, [])
 
 	const togglePreRelease = useCallback(async (enabled: boolean) => {
@@ -1424,30 +1457,48 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 								)
 							})()}
 
-							{/* Emulator toggle — macOS-only dev tool, default off */}
-							{IS_MAC && (
-								<Flex justify="space-between" align="center">
-									<Flex align="center" gap="3">
-										<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(168,85,247,0.1)">
-											<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#A855F7" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-												<rect x="4" y="2" width="16" height="20" rx="2" />
-												<line x1="8" y1="6" x2="16" y2="6" />
-												<line x1="12" y1="18" x2="12.01" y2="18" />
-											</svg>
+							{/* Emulator toggle — dev tool, default off. Supported on macOS
+							    (Keychain) and Windows (DPAPI); Linux has no key store wired up. */}
+							{(IS_MAC || IS_WINDOWS) && (
+								<VStack align="stretch" gap="2">
+									<Flex justify="space-between" align="center">
+										<Flex align="center" gap="3">
+											<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(168,85,247,0.1)">
+												<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#A855F7" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+													<rect x="4" y="2" width="16" height="20" rx="2" />
+													<line x1="8" y1="6" x2="16" y2="6" />
+													<line x1="12" y1="18" x2="12.01" y2="18" />
+												</svg>
+											</Flex>
+											<Box>
+												<Text fontSize="md" color="kk.textPrimary" fontWeight="500">Emulator</Text>
+												<Text fontSize="sm" color="kk.textSecondary" mt="0.5">
+													Run a KeepKey firmware emulator locally for development and testing.
+												</Text>
+											</Box>
 										</Flex>
-										<Box>
-											<Text fontSize="md" color="kk.textPrimary" fontWeight="500">Emulator</Text>
-											<Text fontSize="sm" color="kk.textSecondary" mt="0.5">
-												Run a KeepKey firmware emulator locally for development and testing. macOS only.
-											</Text>
-										</Box>
+										<Toggle
+											checked={appSettings.emulatorEnabled}
+											onChange={toggleEmulator}
+											disabled={togglingEmulator}
+										/>
 									</Flex>
-									<Toggle
-										checked={appSettings.emulatorEnabled}
-										onChange={toggleEmulator}
-										disabled={togglingEmulator}
-									/>
-								</Flex>
+									{appSettings.emulatorEnabled && (
+										<Flex align="center" gap="3" pl="44px" wrap="wrap">
+											<input
+												ref={emuFileRef}
+												type="file"
+												accept={IS_WINDOWS ? ".dll" : ".dylib"}
+												style={{ display: "none" }}
+												onChange={(e) => handleEmuFilePick(e.currentTarget)}
+											/>
+											<Button size="xs" variant="outline" onClick={() => emuFileRef.current?.click()} disabled={installingEmu}>
+												{installingEmu ? "Installing…" : `Install ${IS_WINDOWS ? "libkkemu.dll" : "libkkemu.dylib"}…`}
+											</Button>
+											{emuInstallMsg && <Text fontSize="xs" color="kk.textSecondary">{emuInstallMsg}</Text>}
+										</Flex>
+									)}
+								</VStack>
 							)}
 						</VStack>
 					</Section>
