@@ -376,7 +376,17 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 			await rpcRequest("emulatorInstallDylib", { data: btoa(binary) }, 30000)
 			// Backend auto-enables the emulator; nudge the app to re-pull settings.
 			window.dispatchEvent(new Event("keepkey-settings-changed"))
-			setEmuInstallMsg("Installed. Start the emulator from the device list.")
+			// First-time install (no existing wallets) — DeviceGrid only shows a
+			// Start card for wallets emulatorListWallets returns, so with none it
+			// has nothing to click. Bootstrap one, same as the drag-drop path.
+			const wallets = await rpcRequest<Array<{ name: string }>>("emulatorListWallets").catch(() => [])
+			if (wallets.length === 0) {
+				try { await rpcRequest("emulatorPair", undefined, 10000) } catch { /* may already be paired */ }
+				await rpcRequest("emulatorInit", { flashName: "default" }, 30000)
+				setEmuInstallMsg("Installed and started.")
+			} else {
+				setEmuInstallMsg("Installed. Start the emulator from the device list.")
+			}
 		} catch (err: any) {
 			setEmuInstallMsg(err?.message || "Install failed")
 		}
