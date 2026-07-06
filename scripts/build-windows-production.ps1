@@ -908,6 +908,30 @@ if (-not $SkipSign) {
 }
 
 # ============================================================================
+# Package as .zip (Smart App Control-safe distribution)
+# ============================================================================
+# installer.iss sets UseSetupLdr=no, so Inno emits setup.exe + setup-*.bin
+# instead of a single self-extracting exe. That is deliberate: the normal
+# single-exe extracts an UNSIGNED setup.tmp engine to %TEMP% and runs it, which
+# Smart App Control blocks ("failed to initialize", Code Integrity 3077/3033).
+# With no loader there is no tmp -- SAC only sees the EV-signed setup.exe. Ship
+# the parts zipped; the user extracts and runs setup.exe. See
+# docs/WINDOWS-BUILD-AND-SIGN.md "Smart App Control".
+Write-Step "Packaging installer as .zip (Smart App Control-safe)"
+$installerParts = Get-ChildItem -Path $ArtifactsDir -File | Where-Object {
+    $_.Name -like "KeepKey-Vault-$Version-win-x64-setup*" -and ($_.Extension -eq '.exe' -or $_.Extension -eq '.bin')
+}
+if (-not $installerParts) { throw "No installer parts (setup.exe/.bin) found to package" }
+$zipPath = Join-Path $ArtifactsDir "KeepKey-Vault-$Version-win-x64-setup.zip"
+Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
+Compress-Archive -Path $installerParts.FullName -DestinationPath $zipPath -CompressionLevel Optimal
+# Drop the loose parts so ONLY the .zip is uploaded — a bare setup.exe won't run
+# without its .bin siblings anyway, and leaving the SAC-blocked single exe around
+# invites shipping the broken artifact.
+$installerParts | Remove-Item -Force
+Write-Success "Created: $(Split-Path $zipPath -Leaf) ($([math]::Round((Get-Item $zipPath).Length / 1MB, 1)) MB)"
+
+# ============================================================================
 # Generate Checksums
 # ============================================================================
 
@@ -956,9 +980,9 @@ if (-not $SkipSign) {
     }
     Write-Host ""
     Write-Host "Next steps:" -ForegroundColor Yellow
-    Write-Host "  1. Test the installer: run the setup EXE" -ForegroundColor Gray
-    Write-Host "  2. Upload EXE to GitHub release" -ForegroundColor Gray
-    Write-Host "  3. Verify SmartScreen reputation" -ForegroundColor Gray
+    Write-Host "  1. Test on a Smart App Control (Enforce) machine: extract the .zip, run setup.exe" -ForegroundColor Gray
+    Write-Host "  2. Upload the .zip (NOT a bare .exe) to the GitHub release" -ForegroundColor Gray
+    Write-Host "  3. Verify SmartScreen/Smart App Control does not block it" -ForegroundColor Gray
 } else {
     Write-Host "WARNING: Artifacts are NOT signed - test build only" -ForegroundColor Yellow
 }
