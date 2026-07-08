@@ -2140,7 +2140,15 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           }
           console.log(`[REST] clearsign load-signer: slot=${body.keyId} alias="${body.alias}" pubkey=${body.pubkey}`)
           try {
-            await (wallet as any).loadClearsignSigner({ keyId: body.keyId, pubkey, alias: body.alias })
+            // Loading a signer raises a mandatory on-device "Trust signer" confirm.
+            // On the emulator that button press must be armed via emuWrap (interactive
+            // approve), exactly like the signing routes — otherwise the OLED shows the
+            // trust screen but no green button ever appears and the call hangs.
+            // emuWrap is a transparent no-op on real hardware.
+            await emuWrap(
+              () => (wallet as any).loadClearsignSigner({ keyId: body.keyId, pubkey, alias: body.alias }),
+              { operation: 'loadClearsignSigner', opLabel: 'Trust Signer', chain: 'Ethereum' },
+            )
             return json({ ok: true, keyId: body.keyId, alias: body.alias })
           } catch (err: any) {
             const errMsg = String(err?.message || err || '').toLowerCase()
