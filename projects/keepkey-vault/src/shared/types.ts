@@ -32,6 +32,13 @@ export interface DeviceStateInfo {
   bootloaderVersion?: string
   latestFirmware?: string
   latestBootloader?: string
+  /** Pinned payload sha256 for the latest firmware (from the manifest) — the
+   *  hash Vault verifies the downloaded binary against before flashing. */
+  latestFirmwareHash?: string
+  /** Which manifest channel latestFirmware/latestFirmwareHash resolved from.
+   *  'beta' builds are pre-release and not covered by the reproducible-build
+   *  claim (no published git tag / release assets to verify against). */
+  firmwareChannel?: 'latest' | 'beta'
   bootloaderMode: boolean
   needsBootloaderUpdate: boolean
   needsFirmwareUpdate: boolean

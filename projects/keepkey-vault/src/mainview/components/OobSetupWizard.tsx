@@ -18,6 +18,7 @@ import { useDeviceState } from '../hooks/useDeviceState'
 import { rpcRequest, onRpcMessage } from '../lib/rpc'
 import type { FirmwareAnalysis, FirmwareProgress } from '../../shared/types'
 import { FirmwareUpgradePreview } from './FirmwareUpgradePreview'
+import { ReproducibleBuildNotice } from './ReproducibleBuildNotice'
 import { TutorialPage } from './TutorialCards'
 import { LanguagePicker } from '../i18n/LanguageSelector'
 
@@ -1369,6 +1370,17 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
                       <FirmwareUpgradePreview
                         currentVersion={deviceStatus.resolvedFwVersion?.replace(/^v/, '') || deviceStatus.firmwareVersion || null}
                         targetVersion={deviceStatus.latestFirmware}
+                      />
+                    )}
+
+                    {/* Reproducible-build claim + pinned hash the download is verified
+                        against. Only shown when a pinned hash exists (the manifest-less
+                        fallback path installs without a hash check) and for the 'latest'
+                        channel — beta/alpha builds have no tagged release to verify against. */}
+                    {deviceStatus.latestFirmware && deviceStatus.latestFirmwareHash && deviceStatus.firmwareChannel !== 'beta' && (
+                      <ReproducibleBuildNotice
+                        version={deviceStatus.latestFirmware}
+                        payloadHash={deviceStatus.latestFirmwareHash}
                       />
                     )}
 

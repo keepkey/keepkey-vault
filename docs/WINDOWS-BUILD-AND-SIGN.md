@@ -14,7 +14,9 @@ The build, signing, and installer steps are all driven by **one PowerShell scrip
 .\scripts\build-windows-production.ps1
 ```
 
-Output: `release-windows\KeepKey-Vault-<version>-win-x64-setup.exe` (signed) and `SHA256SUMS-windows.txt`.
+Output: `release-windows\KeepKey-Vault-<version>-win-x64-setup.zip` (contains the
+EV-signed `setup.exe` + `setup-*.bin`) and `SHA256SUMS-windows.txt`. **Ship the
+`.zip`, not a bare `.exe`** — see [Smart App Control](#smart-app-control-ship-a-zip-not-a-bare-exe).
 
 To rebuild the installer from an existing build tree without rebuilding sources:
 
@@ -153,6 +155,42 @@ After the file exists once, subsequent builds reuse it. Commit-or-don't is a sep
 
 ---
 
+## Smart App Control: ship a `.zip`, not a bare `.exe`
+
+**This shipped broken in 1.4.11.** A normal single-file Inno installer
+(`UseSetupLdr=yes`, the default) is a self-extractor: at runtime it unpacks an
+**unsigned** `setup.tmp` engine into `%TEMP%\is-*` and executes it. **Smart App
+Control (SAC)** and WDAC block unsigned code, so on any Windows 11 machine with
+SAC on (the default on many clean installs) the installer dies immediately with
+"Setup failed to initialize" (exit code 1) and logs **CodeIntegrity 3077/3033**
+in `Microsoft-Windows-CodeIntegrity/Operational`. The outer `setup.exe` being
+EV-signed does not help — SAC evaluates the extracted `setup.tmp` on its own, and
+that file is never signed (stock Inno cannot sign it).
+
+**The fix (already in `installer.iss` + `build-windows-production.ps1`):**
+`UseSetupLdr=no`. With no loader there is no `setup.tmp`; the EV-signed `setup.exe`
+IS the engine and runs in-process, so SAC only sees the signed exe and allows it.
+Inno then emits `setup.exe` + `setup-*.bin`, which the build script zips into
+`KeepKey-Vault-<version>-win-x64-setup.zip`. Users extract the zip and run
+`setup.exe`. **Only the `.zip` is uploaded; never a bare `.exe`.**
+
+**The app itself is SAC-clean** — every shipped binary (`KeepKeyVault.exe`,
+`launcher.exe`, `bin\bun.exe`, DLLs) is EV-signed and runs under SAC without a
+block. Only the installer's extracted `setup.tmp` was the problem.
+
+> **You MUST test the installer on a machine with Smart App Control ON (Enforce)
+> before every release.** SAC-off machines install fine even with the broken
+> single-exe — that is exactly how 1.4.11 slipped through (the 1.4.7 smoke test
+> ran on a SAC-off box). Verify no 3077/3033 appears:
+> ```powershell
+> Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-CodeIntegrity/Operational';Id=3077,3033;StartTime=(Get-Date).AddMinutes(-5)}
+> # (also confirm SAC is actually on: (Get-MpComputerStatus).SmartAppControlState -eq 'On')
+> ```
+
+Full incident write-up: [`docs/incidents/1.4.11-smart-app-control-installer-block.md`](./incidents/1.4.11-smart-app-control-installer-block.md).
+
+---
+
 ## Verifying the release
 
 After the script finishes, verify everything before uploading:
@@ -265,9 +303,10 @@ Before tagging and uploading:
 - [ ] Run `.\scripts\build-windows-production.ps1`
 - [ ] **Non-AVX:** `KeepKeyVault.exe` disassembles to **0** AVX/VEX instructions (`.text` VSize ≈ `0x5A46`; `c5 f9 7f` absent) — see step 9
 - [ ] **Non-AVX:** bundled `bun.exe` banner reads `Windows x64 (baseline)` and version ≥ 1.3.14 — see step 6
-- [ ] Verify installer signature via `signtool verify /pa /v`
+- [ ] Verify installer signature via `signtool verify /pa /v` (on the extracted `setup.exe`)
+- [ ] **Smart App Control:** extract the `.zip` and run `setup.exe` on a machine with **SAC ON (Enforce)** — installs with **no** CodeIntegrity 3077/3033. This is mandatory and non-negotiable (see [Smart App Control](#smart-app-control-ship-a-zip-not-a-bare-exe)); SAC-off machines are NOT a valid test.
 - [ ] Smoke-test the installer on a clean Windows VM
 - [ ] **Non-AVX (if hardware available):** app launches past the splash on a no-AVX CPU (Gemini Lake N5030/N4020) instead of `0xC000001D`
-- [ ] Compare `SHA256SUMS-windows.txt` against the installer hash
-- [ ] Upload `*.exe` and `SHA256SUMS-windows.txt` to the GitHub draft release
+- [ ] Compare `SHA256SUMS-windows.txt` against the `.zip` hash
+- [ ] Upload the **`.zip`** (NOT a bare `.exe`) and `SHA256SUMS-windows.txt` to the GitHub release
 - [ ] Run the installed app, pair a real device, confirm `vault-backend.log` has the expected boot lines
