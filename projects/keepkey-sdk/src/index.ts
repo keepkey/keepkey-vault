@@ -6,6 +6,8 @@ import type {
   SignedTx,
   AddressRequest,
   EthSignTxParams,
+  LoadClearsignSignerParams,
+  LoadClearsignSignerResult,
   EthSignTypedDataParams,
   EthSignMessageParams,
   EthVerifyMessageParams,
@@ -329,6 +331,16 @@ export class KeepKeySdk {
     /** Sign an Ethereum or EVM transaction. Supports legacy and EIP-1559. */
     ethSignTransaction: (params: EthSignTxParams): Promise<SignedTx> =>
       this.client.post('/eth/sign-transaction', params),
+
+    /**
+     * Load a runtime EVM clear-sign signer into a device key slot (RAM-only,
+     * user-confirmed on device). The device shows a trust screen naming the
+     * alias + pubkey fingerprint. Dropped on reboot/wipe — reload per session.
+     * Firmware 7.15.0+. Used to trust a metadata-signing key (e.g. a CI test
+     * key in slot 3) so `ethSignTransaction`'s `txMetadata` blobs verify.
+     */
+    loadClearsignSigner: (params: LoadClearsignSignerParams): Promise<LoadClearsignSignerResult> =>
+      this.client.post('/eth/clearsign/load-signer', params),
 
     /** Sign a personal message (`eth_sign` / `personal_sign`). */
     ethSignMessage: (params: EthSignMessageParams): Promise<any> =>
