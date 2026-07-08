@@ -99,6 +99,17 @@ let pendingSeedAck: {
 } | null = null
 
 /**
+ * Pending screen capture — resolved when the webview posts back the current
+ * oledCanvas as a PNG data URL. Reuses the canvas's existing 1bpp-unpack
+ * logic (onDisplayUpdate) instead of re-implementing PNG encoding on the Bun
+ * side; the webview always has the last-rendered frame, capture or not.
+ */
+let pendingCapture: {
+  id: string
+  resolve: (dataUrl: string) => void
+} | null = null
+
+/**
  * True once the webview has POSTed /_emu/ready. Until then, `sendToWindow`
  * drops messages — calling executeJavascript on a not-yet-loaded WebView
  * crashes the WebContent process (EXC_BREAKPOINT in WebPageProxy launch).
@@ -139,6 +150,16 @@ function startBridge(): number {
           pendingSeedAck = null
         }
         return new Response('ok', { headers: { 'Access-Control-Allow-Origin': '*' } })
+      }
+
+      if (url.pathname === '/_emu/capture' && req.method === 'POST') {
+        return req.json().then((body: any) => {
+          if (pendingCapture && pendingCapture.id === body.id) {
+            pendingCapture.resolve(body.dataUrl)
+            pendingCapture = null
+          }
+          return new Response('ok', { headers: { 'Access-Control-Allow-Origin': '*' } })
+        })
       }
 
       // CORS preflight
@@ -335,6 +356,45 @@ export async function displaySeedWords(mnemonic: string): Promise<void> {
 export function dismissSeedDisplay(): void {
   sendToWindow('seed-dismiss', {})
   sendToWindow('emu-state', { state: 'idle' })
+}
+
+// ── Screen capture ───────────────────────────────────────────────────────
+
+const CAPTURE_TIMEOUT_MS = 5_000
+
+/**
+ * Grab whatever is currently on the emulator's OLED as a PNG data URL — for
+ * an automated test driver to save alongside a txid as visual proof of what
+ * the device actually showed. Reads the webview's live canvas rather than
+ * the raw frame ring, so it captures exactly what a human looking at the
+ * window would see (including the "no real display yet" idle placeholder).
+ */
+export async function captureCurrentFrame(): Promise<string> {
+  if (!emuWindow || !viewReady) {
+    throw new Error(`Emulator window not ready (emuWindow=${!!emuWindow} viewReady=${viewReady}) — cannot capture`)
+  }
+
+  const id = `cap-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  return new Promise<string>((resolve, reject) => {
+    if (pendingCapture) pendingCapture = null // stale request — drop it, no one is awaiting it anymore
+
+    const timer = setTimeout(() => {
+      if (pendingCapture?.id === id) pendingCapture = null
+      reject(new Error('Screen capture timed out — emulator webview did not respond'))
+    }, CAPTURE_TIMEOUT_MS)
+
+    pendingCapture = {
+      id,
+      resolve: (dataUrl: string) => { clearTimeout(timer); resolve(dataUrl) },
+    }
+
+    const delivered = sendToWindow('capture-request', { id })
+    if (!delivered) {
+      clearTimeout(timer)
+      pendingCapture = null
+      reject(new Error('Failed to deliver capture request to emulator webview'))
+    }
+  })
 }
 
 // ── Interactive confirm ─────────────────────────────────────────────────
@@ -757,6 +817,7 @@ function buildEmulatorHTML(bridgePort: number): string {
       if (packet.id === 'confirm-dismiss') onConfirmDismiss();
       if (packet.id === 'seed-display') onSeedDisplay(packet.payload);
       if (packet.id === 'seed-dismiss') onSeedDismiss();
+      if (packet.id === 'capture-request') onCaptureRequest(packet.payload);
     }
   };
 
@@ -864,6 +925,11 @@ function buildEmulatorHTML(bridgePort: number): string {
     if (!hasRealDisplay) {
       oled.innerHTML = '<div class="idle-text">KeepKey Emulator Ready</div>';
     }
+  }
+
+  function onCaptureRequest(data) {
+    var dataUrl = oledCanvas.toDataURL('image/png');
+    postBridge('/_emu/capture', { id: data.id, dataUrl: dataUrl });
   }
 
   function esc(str) {

@@ -7220,6 +7220,41 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!emulatorEnabled) return null
 				return await engine.getEmulatorMnemonic()
 			},
+			// Emulator-only "view seed for backup" — reads the persisted (encrypted)
+			// mnemonic for the active flash rather than a live DebugLink read, since
+			// DebugLink can hang on the dylib path (see raceVerifyMnemonic) and the
+			// saved mnemonic IS the backup of record. Hard-gated on engine.isEmulator
+			// (not just the emulatorEnabled feature flag) so this can never be reached
+			// against real hardware regardless of what the UI does.
+			emulatorRevealSeed: async () => {
+				if (!engine.isEmulator) throw new Error('Seed reveal is emulator-only')
+				const { loadMnemonic } = await import('./emulator-keychain')
+				const { getActiveFlashName } = await import('./emulator')
+				const flashName = getActiveFlashName()
+				const mnemonic = loadMnemonic(flashName)
+				if (!mnemonic) throw new Error('No saved seed for this emulator wallet')
+				return { mnemonic, flashName }
+			},
+			// Grabs whatever is currently on the emulator's OLED and writes it to
+			// disk as a PNG — visual proof for an automated test driver to attach
+			// alongside a txid (e.g. the mainnet test suite). Defaults to
+			// ~/.keepkey/emulator/screenshots/ so ad-hoc calls don't need a dir;
+			// callers with a real run in progress should pass one under their own
+			// results folder.
+			emulatorCaptureFrame: async (params) => {
+				if (!engine.isEmulator) throw new Error('Screen capture is emulator-only')
+				const { captureCurrentFrame } = await import('./emulator-window')
+				const dataUrl = await captureCurrentFrame()
+				const match = /^data:image\/png;base64,(.+)$/.exec(dataUrl)
+				if (!match) throw new Error('Unexpected capture format from emulator webview')
+
+				const dir = params?.dir || path.join(os.homedir(), '.keepkey', 'emulator', 'screenshots')
+				await fs.promises.mkdir(dir, { recursive: true })
+				const safeLabel = (params?.label || 'frame').replace(/[^A-Za-z0-9._-]+/g, '-')
+				const filePath = path.join(dir, `${Date.now()}-${safeLabel}.png`)
+				await fs.promises.writeFile(filePath, Buffer.from(match[1], 'base64'))
+				return { path: filePath }
+			},
 			emulatorCreateWallet: async (params) => {
 				if (!emulatorEnabled) throw new Error('Emulator is disabled')
 				if (!engine.wallet) throw new Error('No device connected')

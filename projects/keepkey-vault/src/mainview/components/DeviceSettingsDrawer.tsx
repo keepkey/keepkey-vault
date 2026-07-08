@@ -7,7 +7,7 @@ import { CurrencySelector } from "./CurrencySelector"
 import { rpcRequest, onRpcMessage } from "../lib/rpc"
 import { IS_MAC, IS_WINDOWS } from "../lib/platform"
 import { Z } from "../lib/z-index"
-import type { DeviceStateInfo, AppSettings } from "../../shared/types"
+import type { DeviceStateInfo, AppSettings, EmulatorWalletInfo } from "../../shared/types"
 import { versionCompare } from "../../shared/firmware-versions"
 
 interface DevicePolicy {
@@ -393,6 +393,90 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 		setInstallingEmu(false)
 	}, [])
 
+	// Emulator wallet (seed) management — switch between saved seeds, generate
+	// or import a new one for the active flash, and reveal the active seed for
+	// backup. All ops are only reachable while deviceState.isEmulator is true
+	// (the Section below is gated on it); emulatorRevealSeed also hard-gates
+	// server-side on engine.isEmulator so it can never fire against real hardware.
+	const [emuWallets, setEmuWallets] = useState<EmulatorWalletInfo[]>([])
+	const [showSeedTools, setShowSeedTools] = useState(false)
+	const [newSeedWordCount, setNewSeedWordCount] = useState<12 | 18 | 24>(12)
+	const [creatingNewSeed, setCreatingNewSeed] = useState(false)
+	const [switchingWallet, setSwitchingWallet] = useState(false)
+	const [importMnemonic, setImportMnemonic] = useState("")
+	const [importingSeed, setImportingSeed] = useState(false)
+	const [revealedSeed, setRevealedSeed] = useState<string | null>(null)
+	const [revealingSeed, setRevealingSeed] = useState(false)
+	const [emuSeedMsg, setEmuSeedMsg] = useState<string | null>(null)
+
+	const reloadEmuWallets = useCallback(async () => {
+		try { setEmuWallets(await rpcRequest<EmulatorWalletInfo[]>("emulatorListWallets", undefined, 10000)) }
+		catch (e: any) { console.error("emulatorListWallets:", e?.message); setEmuSeedMsg(`Wallet list refresh failed: ${e?.message || e}`) }
+	}, [])
+
+	useEffect(() => {
+		if (deviceState.isEmulator) reloadEmuWallets()
+	}, [deviceState.isEmulator, reloadEmuWallets])
+
+	const activeEmuWalletName = emuWallets.find((w) => w.isActive)?.name || "default"
+
+	// A revealed mnemonic belongs to whichever wallet was active when it was
+	// read — clear it the moment the active wallet changes for ANY reason,
+	// including a switch initiated from DeviceGrid's own picker (which calls
+	// emulatorSwitchWallet directly, bypassing switchEmuWallet below).
+	useEffect(() => { setRevealedSeed(null) }, [activeEmuWalletName])
+
+	// Wipe/Stop/Delete/Switch/New-Seed/Import-Seed all mutate the same live
+	// flash + dylib handle — mutually exclusive so a second click mid-flight
+	// can't race two stopEmulator/initEmulator/loadDevice sequences.
+	const emuBusy = wiping || switchingWallet || creatingNewSeed || importingSeed
+
+	const switchEmuWallet = useCallback(async (name: string) => {
+		if (name === activeEmuWalletName) return
+		setSwitchingWallet(true); setEmuSeedMsg(null)
+		try {
+			await rpcRequest("emulatorSwitchWallet", { name }, 30000)
+			await reloadEmuWallets()
+		} catch (e: any) { setEmuSeedMsg(e?.message || "Switch failed") }
+		setSwitchingWallet(false)
+	}, [activeEmuWalletName, reloadEmuWallets])
+
+	const generateNewSeed = useCallback(async () => {
+		if (!confirm(`Wipe "${activeEmuWalletName}" and load a fresh ${newSeedWordCount}-word seed?`)) return
+		setCreatingNewSeed(true); setEmuSeedMsg(null); setRevealedSeed(null)
+		try {
+			await rpcRequest("emulatorCreateWallet", { wordCount: newSeedWordCount }, 30000)
+			setEmuSeedMsg("New seed loaded. Use Reveal Seed below to back it up.")
+			await reloadEmuWallets()
+		} catch (e: any) { setEmuSeedMsg(e?.message || "Seed generation failed") }
+		setCreatingNewSeed(false)
+	}, [activeEmuWalletName, newSeedWordCount, reloadEmuWallets])
+
+	const importCustomSeed = useCallback(async () => {
+		const mnemonic = importMnemonic.trim()
+		const wc = mnemonic.split(/\s+/).filter(Boolean).length
+		if (![12, 18, 24].includes(wc)) { setEmuSeedMsg(`Expected 12, 18, or 24 words, got ${wc}`); return }
+		if (!confirm(`Wipe "${activeEmuWalletName}" and load this seed?`)) return
+		setImportingSeed(true); setEmuSeedMsg(null); setRevealedSeed(null)
+		try {
+			await rpcRequest("emulatorImportWallet", { name: activeEmuWalletName, mnemonic }, 30000)
+			setImportMnemonic("")
+			setEmuSeedMsg("Seed imported.")
+			await reloadEmuWallets()
+		} catch (e: any) { setEmuSeedMsg(e?.message || "Import failed") }
+		setImportingSeed(false)
+	}, [activeEmuWalletName, importMnemonic, reloadEmuWallets])
+
+	const revealSeed = useCallback(async () => {
+		if (revealedSeed) { setRevealedSeed(null); return }
+		setRevealingSeed(true); setEmuSeedMsg(null)
+		try {
+			const result = await rpcRequest<{ mnemonic: string; flashName: string }>("emulatorRevealSeed", undefined, 10000)
+			setRevealedSeed(result.mnemonic)
+		} catch (e: any) { setEmuSeedMsg(e?.message || "Reveal failed") }
+		setRevealingSeed(false)
+	}, [revealedSeed])
+
 	const togglePreRelease = useCallback(async (enabled: boolean) => {
 		setTogglingPreRelease(true)
 		try {
@@ -563,6 +647,18 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 
 	return (
 		<>
+			{/* Hidden dylib file picker — shared by the Settings "Install…" button
+			    and the Emulator section's "Change Version…" button. Lives at the
+			    drawer top level (always mounted) so neither button depends on the
+			    other section's render condition. */}
+			<input
+				ref={emuFileRef}
+				type="file"
+				accept={IS_WINDOWS ? ".dll" : ".dylib"}
+				style={{ display: "none" }}
+				onChange={(e) => handleEmuFilePick(e.currentTarget)}
+			/>
+
 			{/* Backdrop */}
 			{open && (
 				<Box
@@ -716,7 +812,8 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 								</Box>
 								<InfoRow label="Mode" value="In-Process (dylib FFI)" />
 								<InfoRow label="Transport" value="Ring Buffer" />
-								<InfoRow label="Flash" value={deviceState.deviceId?.split(":")[0]?.slice(0, 12) + "..." || "—"} />
+								<InfoRow label="Firmware" value={deviceState.firmwareVersion || "—"} />
+								<InfoRow label="Flash" value={activeEmuWalletName} />
 								<InfoRow label="Seed ID" value={deviceState.deviceId?.includes(":") ? deviceState.deviceId.split(":")[1] : "—"} />
 							</VStack>
 
@@ -726,13 +823,13 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 									_hover={{ borderColor: "orange.400", color: "orange.400" }}
 									onClick={async () => {
 										try {
-											setWiping(true)
+											setWiping(true); setRevealedSeed(null)
 											await rpcRequest("wipeDevice", undefined, 30000)
 										} catch (e: any) {
 											console.error("Emulator wipe failed:", e?.message)
 										} finally { setWiping(false) }
 									}}
-									disabled={wiping}
+									disabled={wiping || emuBusy}
 								>
 									{wiping ? "Wiping..." : "Wipe Emulator"}
 								</Button>
@@ -740,12 +837,14 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 									size="sm" variant="outline" borderColor="kk.border" color="kk.textSecondary" px="4" py="2"
 									_hover={{ borderColor: "kk.error", color: "kk.error" }}
 									onClick={async () => {
+										setRevealedSeed(null)
 										try {
 											await rpcRequest("emulatorStop", undefined, 10000)
 										} catch (e: any) {
 											console.error("Emulator stop failed:", e?.message)
 										}
 									}}
+									disabled={emuBusy}
 								>
 									Stop Emulator
 								</Button>
@@ -754,6 +853,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 									_hover={{ borderColor: "kk.error", color: "kk.error" }}
 									onClick={async () => {
 										if (!confirm("Delete flash and stop? This erases the emulator seed.")) return
+										setRevealedSeed(null)
 										try {
 											await rpcRequest("emulatorStop", undefined, 10000)
 											await rpcRequest("emulatorDeleteFlash", { name: "default" }, 5000)
@@ -761,10 +861,102 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 											console.error("Flash delete failed:", e?.message)
 										}
 									}}
+									disabled={emuBusy}
 								>
 									Delete Flash
 								</Button>
+								<Button
+									size="sm" variant="outline" borderColor="kk.border" color="kk.textSecondary" px="4" py="2"
+									_hover={{ borderColor: "kk.gold", color: "kk.gold" }}
+									onClick={() => emuFileRef.current?.click()}
+									disabled={installingEmu || emuBusy}
+								>
+									{installingEmu ? "Installing…" : "Change Version…"}
+								</Button>
 							</Flex>
+
+							{/* ── Wallet (seed) switcher — pick a different saved seed ── */}
+							{emuWallets.length > 1 && (
+								<Flex align="center" gap="2" mt="3" wrap="wrap">
+									<Text fontSize="xs" color="kk.textMuted">Wallet:</Text>
+									<Box
+										as="select"
+										value={activeEmuWalletName}
+										onChange={(e: React.ChangeEvent<HTMLSelectElement>) => switchEmuWallet(e.target.value)}
+										disabled={emuBusy}
+										bg="var(--ink-1)" color="kk.textPrimary" borderWidth="1px" borderColor="kk.border"
+										borderRadius="md" fontSize="xs" px="2" py="1"
+									>
+										{emuWallets.map((w) => (
+											<option key={w.name} value={w.name}>{w.label || w.name}{w.firmwareVersion ? ` (fw ${w.firmwareVersion})` : ""}</option>
+										))}
+									</Box>
+								</Flex>
+							)}
+
+							{/* ── Seed tools — adjust or reveal the active wallet's seed ── */}
+							<Box mt="3">
+								<Box as="button" fontSize="xs" color="kk.textMuted" cursor="pointer" _hover={{ color: "kk.textSecondary" }} onClick={() => setShowSeedTools(!showSeedTools)}>
+									{showSeedTools ? "- Hide seed tools" : "+ Seed tools (generate / import / reveal)"}
+								</Box>
+								{showSeedTools && (
+									<VStack align="stretch" gap="3" mt="2" p="3" bg="rgba(255,255,255,0.03)" borderRadius="md">
+										<Box bg="rgba(229,62,62,0.08)" border="1px solid" borderColor="rgba(229,62,62,0.3)" borderRadius="md" px="3" py="2">
+											<Text fontSize="xs" color="red.300" fontWeight="600">
+												Emulator-only. These actions wipe the active flash and never touch real hardware.
+											</Text>
+										</Box>
+
+										{/* Generate a new random seed */}
+										<Flex align="center" gap="2" wrap="wrap">
+											<Flex gap="1">
+												{([12, 18, 24] as const).map((wc) => (
+													<Box
+														key={wc} as="button" px="2" py="1" borderRadius="md" fontSize="xs" fontWeight="500" cursor="pointer"
+														bg={newSeedWordCount === wc ? "kk.gold" : "rgba(255,255,255,0.06)"}
+														color={newSeedWordCount === wc ? "black" : "kk.textSecondary"}
+														onClick={() => setNewSeedWordCount(wc)}
+													>
+														{wc}
+													</Box>
+												))}
+											</Flex>
+											<Button size="xs" variant="outline" onClick={generateNewSeed} disabled={emuBusy}>
+												{creatingNewSeed ? "Generating…" : "New Seed"}
+											</Button>
+										</Flex>
+
+										{/* Import a custom seed */}
+										<VStack align="stretch" gap="1">
+											<Box
+												as="textarea"
+												value={importMnemonic}
+												onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setImportMnemonic(e.target.value)}
+												placeholder="Paste a 12/18/24-word mnemonic to load onto the active wallet"
+												w="100%" rows={2} p={2} bg="var(--ink-1)" color="white" borderWidth="1px" borderColor="gray.700"
+												borderRadius="md" fontSize="xs" fontFamily="mono" resize="none"
+											/>
+											<Button size="xs" variant="outline" alignSelf="flex-start" onClick={importCustomSeed} disabled={emuBusy || !importMnemonic.trim()}>
+												{importingSeed ? "Importing…" : "Import Seed"}
+											</Button>
+										</VStack>
+
+										{/* Reveal the active seed for backup */}
+										<VStack align="stretch" gap="1">
+											<Button size="xs" variant="outline" alignSelf="flex-start" onClick={revealSeed} disabled={revealingSeed}>
+												{revealingSeed ? "Reading…" : revealedSeed ? "Hide Seed" : "Reveal Seed (Backup)"}
+											</Button>
+											{revealedSeed && (
+												<Box bg="var(--ink-1)" borderWidth="1px" borderColor="kk.gold" borderRadius="md" p={2}>
+													<Text fontSize="xs" fontFamily="mono" color="kk.textPrimary" wordBreak="break-word">{revealedSeed}</Text>
+												</Box>
+											)}
+										</VStack>
+
+										{emuSeedMsg && <Text fontSize="xs" color="kk.textSecondary">{emuSeedMsg}</Text>}
+									</VStack>
+								)}
+							</Box>
 						</Section>
 					)}
 
@@ -1495,13 +1687,6 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 									</Flex>
 									{appSettings.emulatorEnabled && (
 										<Flex align="center" gap="3" pl="44px" wrap="wrap">
-											<input
-												ref={emuFileRef}
-												type="file"
-												accept={IS_WINDOWS ? ".dll" : ".dylib"}
-												style={{ display: "none" }}
-												onChange={(e) => handleEmuFilePick(e.currentTarget)}
-											/>
 											<Button size="xs" variant="outline" onClick={() => emuFileRef.current?.click()} disabled={installingEmu}>
 												{installingEmu ? "Installing…" : `Install ${IS_WINDOWS ? "libkkemu.dll" : "libkkemu.dylib"}…`}
 											</Button>
