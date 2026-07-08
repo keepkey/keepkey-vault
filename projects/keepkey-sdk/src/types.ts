@@ -92,6 +92,33 @@ export interface EthSignTxParams {
   maxFeePerGas?: string
   maxPriorityFeePerGas?: string
   chainId?: number
+  /**
+   * EVM clear-signing metadata (firmware 7.15.0+). A signed blob, bound to this
+   * tx's exact sighash, sent as EthereumTxMetadata before signing so the device
+   * shows decoded contract-call info instead of raw hex. `keyId` names the
+   * device key slot the blob is signed against (0 = built-in production key;
+   * 3 = a runtime signer loaded via `loadClearsignSigner`).
+   */
+  txMetadata?: {
+    signedPayload: string
+    keyId?: number
+  }
+}
+
+/** Params for `eth.loadClearsignSigner` — POST /eth/clearsign/load-signer. */
+export interface LoadClearsignSignerParams {
+  /** Device key slot 1-3 (0 = built-in production key, not loadable). */
+  keyId: number
+  /** 33-byte compressed secp256k1 pubkey, hex (with or without 0x). */
+  pubkey: string
+  /** Signer label shown on the device trust screen. `[A-Za-z0-9 _-]`, 1-31 chars. */
+  alias: string
+}
+
+export interface LoadClearsignSignerResult {
+  ok: true
+  keyId: number
+  alias: string
 }
 
 export interface EthSignTypedDataParams {

@@ -74,6 +74,13 @@ export const EthSignTransactionRequest = z.object({
   { message: 'Missing from address or addressNList' },
 )
 
+/** POST /eth/clearsign/load-signer — load a runtime clear-sign signer (RAM-only, user-confirmed) */
+export const LoadClearsignSignerRequest = z.object({
+  keyId: z.number().int().min(1).max(3),          // slot 0 = built-in production key, not loadable
+  pubkey: z.string().regex(/^(0x)?[0-9a-fA-F]{66}$/), // 33-byte compressed secp256k1 hex
+  alias: z.string().min(1).max(31).regex(/^[A-Za-z0-9 _-]+$/), // shown on the device trust screen
+}).strip()
+
 /** POST /eth/sign-typed-data */
 export const EthSignTypedDataRequest = z.object({
   address: z.string().min(1),

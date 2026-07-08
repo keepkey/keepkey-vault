@@ -2373,6 +2373,14 @@ export class EngineController extends EventEmitter {
    */
   async flashCustomFirmware(data: Buffer) {
     if (!this.wallet) throw new Error('No device connected')
+    // Firmware can only be written in bootloader (updater) mode. Erasing a
+    // wallet-mode device stalls the synchronous HID read (see firmwareErase
+    // note below) — the flash hangs on "do not unplug" with no recovery. Fail
+    // fast with an actionable message instead. The UI gates on this too, but
+    // guard here so any RPC caller can't brick the flow.
+    if (this.cachedFeatures?.bootloaderMode !== true) {
+      throw new Error('Device is not in bootloader mode. Unplug your KeepKey, hold the button, and plug it back in while holding to enter bootloader mode, then try again.')
+    }
     this.updatePhase = 'flashing'
     this.emit('state-change', this.getDeviceState())
     this.emit('firmware-progress', { percent: 0, message: 'Preparing custom firmware...' })

@@ -1,10 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from "react"
-import { Box, Flex, Text, Button } from "@chakra-ui/react"
+import { Box, Flex, Text, Button, Spinner } from "@chakra-ui/react"
 import { rpcRequest, onRpcMessage } from "../lib/rpc"
 import { Z } from "../lib/z-index"
 import { IS_MAC, IS_WINDOWS } from "../lib/platform"
 import type { FirmwareAnalysis, FirmwareProgress } from "../../shared/types"
 import { FirmwareUpgradePreview } from "./FirmwareUpgradePreview"
+import { useDeviceState } from "../hooks/useDeviceState"
+import holdAndConnectRaw from "../assets/svg/hold-and-connect.svg?raw"
 
 /**
  * FirmwareDropZone — Global drag-and-drop dispatcher.
@@ -36,6 +38,14 @@ export function FirmwareDropZone() {
 	const dragCounter = useRef(0)
 	const phaseRef = useRef(phase)
 	phaseRef.current = phase
+
+	// Live device state — a KeepKey can ONLY be flashed while in bootloader
+	// (updater) mode. Firmware-erase against a wallet-mode device stalls the HID
+	// read and the flash appears to freeze mid-"do not unplug". Gate on the live
+	// bootloader flag (not the analysis snapshot) so the flash button unlocks the
+	// moment the user finishes entering bootloader mode.
+	const deviceState = useDeviceState()
+	const inBootloader = deviceState.bootloaderMode === true
 
 	// Listen for firmware progress — only react when THIS component initiated the flash (C1 fix)
 	useEffect(() => {
@@ -194,6 +204,9 @@ export function FirmwareDropZone() {
 
 	const handleFlash = useCallback(async () => {
 		if (!fileDataB64) return
+		// Never start a flash unless the device is actually in bootloader mode —
+		// otherwise firmwareErase hangs the HID read and looks like a freeze.
+		if (!inBootloader) return
 		setPhase("flashing")
 		setProgress({ percent: 0, message: "Starting firmware flash..." })
 		try {
@@ -204,7 +217,7 @@ export function FirmwareDropZone() {
 			setError(err?.message || "Firmware flash failed")
 			setPhase("error")
 		}
-	}, [fileDataB64])
+	}, [fileDataB64, inBootloader])
 
 	const handleDismiss = useCallback(() => {
 		setPhase("idle")
@@ -590,6 +603,38 @@ export function FirmwareDropZone() {
 							</Box>
 						)}
 
+						{/* ── GATE: device must be in bootloader mode to flash ── */}
+						{!inBootloader && (
+							<Box
+								mx="6" mb="3" p="4"
+								bg="rgba(139,227,196,0.08)"
+								border="1px solid"
+								borderColor="kk.border"
+								borderRadius="lg"
+							>
+								<Text fontSize="sm" fontWeight="700" color="kk.textPrimary" mb="1">
+									Put your KeepKey in bootloader mode
+								</Text>
+								<Text fontSize="xs" color="kk.textSecondary" mb="3">
+									Firmware can only be flashed from bootloader mode. Your device
+									isn't in bootloader mode yet — follow these steps:
+								</Text>
+								<Box maxW="90px" mx="auto" mb="3" opacity={0.85} dangerouslySetInnerHTML={{ __html: holdAndConnectRaw }} sx={{ '& svg': { width: '100%', height: '100%' } }} />
+								<Box as="ol" pl="4" style={{ listStyle: "decimal" }}>
+									<Text as="li" fontSize="xs" color="kk.textSecondary">Unplug your KeepKey</Text>
+									<Text as="li" fontSize="xs" color="kk.textSecondary">Hold down the button on the device</Text>
+									<Text as="li" fontSize="xs" color="kk.textSecondary">While holding, plug in the USB cable</Text>
+									<Text as="li" fontSize="xs" color="kk.textSecondary">Release when the bootloader screen appears</Text>
+								</Box>
+								<Flex align="center" gap="2" mt="3">
+									<Spinner size="xs" color="var(--teal)" />
+									<Text fontSize="xs" color="var(--teal)">
+										Waiting for your device to enter bootloader mode…
+									</Text>
+								</Flex>
+							</Box>
+						)}
+
 						{/* Actions */}
 						<Flex
 							px="6" py="4" gap="3"
@@ -619,13 +664,16 @@ export function FirmwareDropZone() {
 								}}
 								onClick={handleFlash}
 								disabled={
-									(analysis.willWipeDevice && !wipeAcknowledged)
+									!inBootloader
+									|| (analysis.willWipeDevice && !wipeAcknowledged)
 									|| (!analysis.isSigned && !analysis.willWipeDevice && !warningAcknowledged)
 								}
 							>
-								{analysis.willWipeDevice
-									? "Wipe & Flash"
-									: `Flash ${analysis.detectedVersion || "Firmware"}`}
+								{!inBootloader
+									? "Enter bootloader mode first"
+									: analysis.willWipeDevice
+										? "Wipe & Flash"
+										: `Flash ${analysis.detectedVersion || "Firmware"}`}
 							</Button>
 						</Flex>
 					</Box>

@@ -578,10 +578,13 @@ export function SigningApproval({ request, phase, onApprove, onReject }: Signing
 
 	let trustLevel: 'verified' | 'known' | 'unknown' = 'verified'
 	if (hasCalldata) {
+		// needsBlindSigning is authoritative: it mirrors what the FIRMWARE
+		// clear-signs. A contract our decoder recognizes (source 'local') but the
+		// firmware blind-signs (e.g. Uniswap) must still read 'unknown' — the badge
+		// can't claim "known" for a tx the device shows as raw hex.
 		if (hasSignedBlob) trustLevel = 'verified'
-		else if (decoded?.source === 'pioneer') trustLevel = 'known'
-		else if (decoded?.source === 'local') trustLevel = 'known'
 		else if (request.needsBlindSigning) trustLevel = 'unknown'
+		else if (decoded?.source === 'pioneer' || decoded?.source === 'local') trustLevel = 'known'
 	}
 	if (request.typedDataDecoded) {
 		trustLevel = request.typedDataDecoded.isKnownType ? 'verified' : 'known'

@@ -3,7 +3,7 @@ import type { AuthStore } from './auth'
 import { HttpError } from './auth'
 import type { SigningRequestInfo, ApiLogEntry, EIP712DecodedInfo } from '../shared/types'
 import { decodeEIP712 } from './eip712-decoder'
-import { decodeCalldata, type EvmUnsignedTxFields } from './calldata-decoder'
+import { decodeCalldata, firmwareClearSigns } from './calldata-decoder'
 import { CHAINS, isChainSupported } from '../shared/chains'
 import {
   initializeOrchardFromDevice, scanOrchardNotes, getShieldedBalance,
@@ -1705,44 +1705,41 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               signingInfo.chainId = preview.chainId || preview.chain_id
               signingInfo.data = preview.data   // full data — UI handles display
 
-              // Clear-signing: decode calldata via Pioneer descriptor API + local fallback
+              // Clear-signing: decode calldata locally (vendored, no network) for
+              // the UI, and gate blind-signing off what the FIRMWARE clear-signs.
               if (preview.data && preview.data.length >= 10 && preview.to) {
+                const chainIdNum = typeof signingInfo.chainId === 'string'
+                  ? (signingInfo.chainId.startsWith('0x') ? parseInt(signingInfo.chainId, 16) : parseInt(signingInfo.chainId, 10))
+                  : signingInfo.chainId
                 try {
-                  const chainIdNum = typeof signingInfo.chainId === 'string'
-                    ? (signingInfo.chainId.startsWith('0x') ? parseInt(signingInfo.chainId, 16) : parseInt(signingInfo.chainId, 10))
-                    : signingInfo.chainId
-                  // Full unsigned tx for the pioneer signed blob. MUST mirror the
-                  // msg construction in the /eth/sign-transaction handler exactly
-                  // (same defaults, same fee-field selection) — the blob's tx_hash
-                  // is bound to the sighash over these fields, and rc3 firmware
-                  // refuses the blob if it doesn't match what the device signs.
-                  let txFields: EvmUnsignedTxFields | undefined
-                  if (path === '/eth/sign-transaction') {
-                    txFields = {
-                      nonce: preview.nonce || '0x0',
-                      gasLimit: preview.gas || preview.gasLimit || '0x5208',
-                      value: preview.value || '0x0',
-                    }
-                    if (preview.maxFeePerGas || preview.max_fee_per_gas) {
-                      txFields.maxFeePerGas = preview.maxFeePerGas || preview.max_fee_per_gas
-                      // Handler sends '0x' (canonical empty) to the device for a
-                      // zero priority fee; send pioneer '0x0' — ethers RLP-encodes
-                      // zero as empty too, so both sides hash identically.
-                      const prio = preview.maxPriorityFeePerGas || preview.max_priority_fee_per_gas
-                      txFields.maxPriorityFeePerGas = (!prio || /^0x0*$/.test(prio)) ? '0x0' : prio
-                    } else {
-                      txFields.gasPrice = preview.gasPrice || preview.gas_price || '0x0'
-                    }
-                  }
-                  signingInfo.calldataDecoded = await decodeCalldata(preview.to, preview.data, chainIdNum, txFields) ?? undefined
+                  signingInfo.calldataDecoded = await decodeCalldata(preview.to, preview.data, chainIdNum) ?? undefined
                   console.log(`[REST] Calldata decoded:`, JSON.stringify(signingInfo.calldataDecoded, null, 2))
                 } catch (e) { console.warn('[REST] Calldata decode failed:', e) }
 
-                // Determine if this tx needs blind signing:
-                // Has calldata AND calldata is not fully decoded (source is 'none' or missing)
-                const decoded = signingInfo.calldataDecoded
-                signingInfo.needsBlindSigning = !decoded || decoded.source === 'none'
-                console.log(`[REST] needsBlindSigning=${signingInfo.needsBlindSigning}, source=${decoded?.source}`)
+                // Caller supplied a runtime-signer blob directly (LoadClearsignSigner
+                // flow — the /eth/sign-transaction handler below honors this at
+                // priority 1). The device verifies it against the loaded signer and
+                // clear-signs regardless of what the firmware natively handles.
+                if (preview.txMetadata?.signedPayload) {
+                  signingInfo.calldataDecoded = {
+                    dappName: 'Unknown', contractName: 'Unknown', method: '(runtime signer)',
+                    selector: preview.data.slice(0, 10), fields: [], source: 'none',
+                    ...signingInfo.calldataDecoded,
+                    signedInsightBlob: preview.txMetadata.signedPayload,
+                    insightKeyId: preview.txMetadata.keyId,
+                  }
+                  signingInfo.needsBlindSigning = false
+                  console.log(`[REST] needsBlindSigning=false (caller-provided runtime-signer blob, keyId=${preview.txMetadata.keyId})`)
+                } else {
+                  // Needs blind signing unless the firmware clear-signs it natively.
+                  // Keyed off the device's own allowlist (firmwareClearSigns), NOT
+                  // whether our decoder recognized the calldata — a contract we can
+                  // decode (Uniswap/1inch) but the firmware can't still blind-signs,
+                  // and forcing global AdvancedMode on a firmware-clearsignable tx
+                  // re-opens the drain vector (PR #261/#303).
+                  signingInfo.needsBlindSigning = !firmwareClearSigns(preview.to, preview.data, chainIdNum)
+                  console.log(`[REST] needsBlindSigning=${signingInfo.needsBlindSigning} (firmwareClearSigns=${!signingInfo.needsBlindSigning}, decoder source=${signingInfo.calldataDecoded?.source})`)
+                }
               }
             }
           } catch (e: any) {
@@ -2127,6 +2124,28 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             const errMsg = String(err?.message || err || '').toLowerCase()
             if (errMsg.includes('cancel') || errMsg.includes('rejected') || errMsg.includes('denied') || errMsg.includes('action cancelled')) {
               return json({ error: 'User cancelled signing on device' }, 403)
+            }
+            throw err
+          }
+        }
+
+        if (path === '/eth/clearsign/load-signer' && method === 'POST') {
+          auth.requireAuth(req)
+          const wallet = requireWallet(engine)
+          const body = await parseRequest(req, S.LoadClearsignSignerRequest)
+          const pubkey = parseHex(body.pubkey, 'pubkey')
+          if (pubkey.length !== 33) throw new HttpError(400, `pubkey must be 33 bytes, got ${pubkey.length}`)
+          if (typeof (wallet as any).loadClearsignSigner !== 'function') {
+            throw new HttpError(501, 'Connected device does not support LoadClearsignSigner (requires firmware 7.15.0+)')
+          }
+          console.log(`[REST] clearsign load-signer: slot=${body.keyId} alias="${body.alias}" pubkey=${body.pubkey}`)
+          try {
+            await (wallet as any).loadClearsignSigner({ keyId: body.keyId, pubkey, alias: body.alias })
+            return json({ ok: true, keyId: body.keyId, alias: body.alias })
+          } catch (err: any) {
+            const errMsg = String(err?.message || err || '').toLowerCase()
+            if (errMsg.includes('cancel') || errMsg.includes('rejected') || errMsg.includes('denied') || errMsg.includes('action cancelled')) {
+              return json({ error: 'User rejected clear-sign signer on device' }, 403)
             }
             throw err
           }
