@@ -97,9 +97,15 @@ export function DeviceGrid({ onViewPortfolio, onReady, emulatorEnabled = false }
 		setLoading(`emu:${name}`)
 		setError(null)
 		try {
-			await rpcRequest<EmulatorStatus>("emulatorSwitchWallet", { name }, 20000)
+			// Never dead-click: the backend throws on failure, but even if a path
+			// resolves with a non-running status (or nothing), surface it rather
+			// than silently reverting to the Start card.
+			const status = await rpcRequest<EmulatorStatus>("emulatorSwitchWallet", { name }, 20000)
+			if (!status || status.state !== "running") {
+				throw new Error(status?.error || "Emulator did not start (no error reported)")
+			}
 			await refresh()
-		} catch (e: any) { setError(e?.message || String(e)) }
+		} catch (e: any) { setError(e?.message || String(e) || "Emulator failed to start") }
 		setLoading(null)
 	}, [refresh])
 

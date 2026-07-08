@@ -6961,13 +6961,12 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!emulatorEnabled) throw new Error('Emulator is disabled')
 				const { initEmulator } = await import('./emulator')
 				const status = initEmulator(params?.flashName)
-				if (status.state === 'running') {
-					// Open the emulator device window
-					const { openEmulatorWindow } = await import('./emulator-window')
-					openEmulatorWindow()
-					// Bridge emulator to engine so UI transitions through onboarding
-					await engine.connectEmulator()
-				}
+				if (status.state !== 'running') throw new Error(status.error || 'Emulator failed to start')
+				// Open the emulator device window
+				const { openEmulatorWindow } = await import('./emulator-window')
+				openEmulatorWindow()
+				// Bridge emulator to engine so UI transitions through onboarding
+				await engine.connectEmulator()
 				return status
 			},
 			emulatorStop: async () => {
@@ -7124,7 +7123,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 				// Init with the new flash name + channel (creates flash file on disk)
 				const status = initEmulator(params.name)
-				if (status.state !== 'running') return status
+				if (status.state !== 'running') throw new Error(status.error || 'Emulator failed to start')
 
 				try {
 					// Open window + connect engine
@@ -7209,7 +7208,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 				// Init with the requested flash name + channel
 				const status = initEmulator(params.name)
-				if (status.state !== 'running') return status
+				if (status.state !== 'running') throw new Error(status.error || 'Emulator failed to start')
 
 				// Open window + connect engine (auto-reloads saved mnemonic)
 				const { openEmulatorWindow } = await import('./emulator-window')
