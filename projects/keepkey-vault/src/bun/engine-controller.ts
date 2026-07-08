@@ -1470,6 +1470,7 @@ export class EngineController extends EventEmitter {
       bootloaderVersion: effectiveBlVersion || blVersion,
       latestFirmware: this.latestFirmware,
       latestBootloader: this.latestBootloader,
+      latestFirmwareHash: this.getChannelEntry()?.firmware?.hash,
       bootloaderMode,
       needsBootloaderUpdate: needsBl,
       needsFirmwareUpdate: needsFw,
@@ -1603,6 +1604,7 @@ export class EngineController extends EventEmitter {
           throw new Error(`Firmware binary integrity check failed: expected ${channel.firmware.hash}, got ${downloadedHash}`)
         }
         console.log(`[Engine] Firmware binary integrity verified${hasKpkyHeader ? ' (KPKY header stripped)' : ''}`)
+        this.emit('firmware-progress', { percent: 20, message: `Binary verified — sha256 matches the pinned release hash (${downloadedHash.slice(0, 16)}…)` })
       }
 
       // See note in startBootloaderUpdate: no JS timeout can cover a readSync

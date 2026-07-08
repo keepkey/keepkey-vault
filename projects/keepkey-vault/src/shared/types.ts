@@ -32,6 +32,9 @@ export interface DeviceStateInfo {
   bootloaderVersion?: string
   latestFirmware?: string
   latestBootloader?: string
+  /** Pinned payload sha256 for the latest firmware (from the manifest) — the
+   *  hash Vault verifies the downloaded binary against before flashing. */
+  latestFirmwareHash?: string
   bootloaderMode: boolean
   needsBootloaderUpdate: boolean
   needsFirmwareUpdate: boolean
