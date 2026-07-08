@@ -2200,6 +2200,20 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           return json(result)
         }
 
+        // ── EMULATOR (external test-driver support) ──────────────────
+        // The RPC surface (emulatorCaptureFrame, emulatorSwitchWallet, etc.)
+        // is only reachable from inside the app's own webview↔bun bridge —
+        // an external script (e.g. the mainnet test suite) has no path to
+        // it. Expose just the screen capture here since it's read-only and
+        // safe; wallet-switching / tx-building stay RPC-only for now.
+        if (path === '/emulator/capture' && method === 'POST') {
+          auth.requireAuth(req)
+          if (!engine.isEmulator) throw new HttpError(400, 'Screen capture is emulator-only')
+          const { captureCurrentFrame } = await import('./emulator-window')
+          const dataUrl = await captureCurrentFrame()
+          return json({ dataUrl })
+        }
+
         // ── UTXO SIGNING (1 endpoint) ────────────────────────────────
         if (path === '/utxo/sign-transaction' && method === 'POST') {
           auth.requireAuth(req)

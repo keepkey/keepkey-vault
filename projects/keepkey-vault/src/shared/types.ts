@@ -684,6 +684,10 @@ export interface EmulatorWalletInfo {
   deviceId?: string
   /** Sum of cached balance USD across chains for this wallet's deviceId. */
   totalUsd?: number
+  /** Firmware version last reported by this wallet's Features (populated after connect). */
+  firmwareVersion?: string
+  /** Firmware release channel last reported for this wallet, if known. */
+  channel?: string
 }
 
 /** Persisted device snapshot — one per device_id, stored in SQLite. */
