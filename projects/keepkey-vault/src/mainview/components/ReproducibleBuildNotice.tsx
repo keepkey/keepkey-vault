@@ -39,12 +39,13 @@ export function ReproducibleBuildNotice({ version, payloadHash }: Props) {
           </Text>
           <Text fontSize="2xs" color="whiteAlpha.600" lineHeight="1.5">
             This release is built deterministically from public source code. Vault
-            checks the binary&apos;s sha256 against the pinned release hash before
-            flashing anything to your device.
+            checks the downloaded firmware&apos;s payload sha256 (the signed file
+            minus its 256-byte signature header) against the pinned release hash
+            before flashing anything to your device.
           </Text>
           {payloadHash && (
             <Text fontSize="2xs" color="whiteAlpha.500" fontFamily="mono" wordBreak="break-all">
-              sha256 {payloadHash}
+              payload sha256 {payloadHash}
             </Text>
           )}
           <HStack gap={3} pt={0.5}>

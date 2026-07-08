@@ -1373,8 +1373,11 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
                       />
                     )}
 
-                    {/* Reproducible-build claim + pinned hash the download is verified against */}
-                    {deviceStatus.latestFirmware && (
+                    {/* Reproducible-build claim + pinned hash the download is verified
+                        against. Only shown when a pinned hash exists (the manifest-less
+                        fallback path installs without a hash check) and for the 'latest'
+                        channel — beta/alpha builds have no tagged release to verify against. */}
+                    {deviceStatus.latestFirmware && deviceStatus.latestFirmwareHash && deviceStatus.firmwareChannel !== 'beta' && (
                       <ReproducibleBuildNotice
                         version={deviceStatus.latestFirmware}
                         payloadHash={deviceStatus.latestFirmwareHash}

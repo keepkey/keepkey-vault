@@ -1471,6 +1471,7 @@ export class EngineController extends EventEmitter {
       latestFirmware: this.latestFirmware,
       latestBootloader: this.latestBootloader,
       latestFirmwareHash: this.getChannelEntry()?.firmware?.hash,
+      firmwareChannel: this.alphaFirmware && this.manifest?.beta ? 'beta' : 'latest',
       bootloaderMode,
       needsBootloaderUpdate: needsBl,
       needsFirmwareUpdate: needsFw,
