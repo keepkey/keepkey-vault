@@ -1,0 +1,1607 @@
+{
+ "testPrivKey": "f6d19e15a4385f03b78b5a1e1614e7d9a104d81f7324498756e571904068a260",
+ "testPubKey": "02e3b3015c47ddcaabe4f8e872f1ed8f09ca145a8d81770d92213d56da31ab5107",
+ "firmwareSlot3Pubkey": "02e3b3015c47ddcaabe4f8e872f1ed8f09ca145a8d81770d92213d56da31ab5107",
+ "keyId": 3,
+ "timestamp": 1700000000,
+ "classification": 1,
+ "snapshots": {
+  "aave-v3-supply": [
+   "434ee7389f099e8ab77a4274fd7da40918a74c719dd0bdb4a81c6259846bda2d",
+   246
+  ],
+  "erc20-transfer": [
+   "adbd1e054f8b59b1bb86af046951df53510c10dcc0ec0e3e46b19eaf6410cf05",
+   205
+  ],
+  "erc20-approve": [
+   "75e5108f578f27d60c572d12072fb4cf0455321c6f39445e1d59fe4d99713c91",
+   193
+  ],
+  "erc20-approve-unlimited": [
+   "a5c043a60da8f317975ee8f1b9f3a0718186f6bdce625b605ce71973b3fa3811",
+   221
+  ],
+  "uniswap-v2-eth-to-token": [
+   "ec5aac82aa9b03f043456e486d6bfc6cbd5cde507997fc07a122f9fb1fb32194",
+   229
+  ],
+  "uniswap-v2-token-to-eth": [
+   "d94e8842cde731f2dd77ea47a896618b1a317736744ac34f6cbdaf7367e794a7",
+   254
+  ],
+  "uniswap-v3-exact-input": [
+   "7186e5b902209bb68630a4ff360727df3696395c69782d1a94adc4ae58abfa59",
+   286
+  ],
+  "uniswap-v3-multicall": [
+   "e76f3d88be226a1cbd51923cf9753fed30bef1a8e830e5f5ea71a362dd7e43d9",
+   198
+  ],
+  "aave-v3-pool-borrow": [
+   "224af25cac14759def6a6272ad5572c991bb46beae8ad253ee2e9d9764674f0a",
+   263
+  ],
+  "aave-v3-pool-repay": [
+   "4cb1f4742731ba3c90a2c9a41e5dbe72ace0357d47726df6df1861ffd4b291b0",
+   262
+  ],
+  "aave-v3-pool-withdraw": [
+   "584234a72fb32c63ba70aeda1e21def382df6fa85c6e6d88291f8f8530975ef6",
+   222
+  ],
+  "compound-v3-comet-supply": [
+   "f7324ea680b02a9eb6b8274592195c048690081dd75ce77deaba69790155a045",
+   219
+  ],
+  "compound-v3-comet-withdraw": [
+   "a1a9ec8cb33e4f21c8e746ef805f44747a7b42aff26c3687f14aac145316135c",
+   225
+  ],
+  "spark-protocol-supply": [
+   "70e8a0f11ab1b8d12960442c2449b865860e93e2c6c9710473070774f38aba6f",
+   268
+  ],
+  "lido-steth-submit": [
+   "c1d0efa2dfdac3e824156ed891d8ac405d86a69dd9241608d5bb43c75e8c01c7",
+   200
+  ],
+  "rocketpool-deposit-pool-deposit": [
+   "31b67c47a72fc80dce6c54ff50d1eca0281e62ac34657892b00c3ef79ef1bf85",
+   193
+  ],
+  "etherfi-liquiditypool-deposit": [
+   "4a85922bf92ef1b6e0d6c6fbcf720a5240c037161dab18222ec73da255a34ea5",
+   221
+  ],
+  "eigenlayer-strategymanager-deposit": [
+   "2728fc859048bcc71288bfa04a6e3957638ebc8c841cea2d6bbfa802b3ebaf4d",
+   267
+  ],
+  "eigenlayer-strategymanager-deposit-steth": [
+   "688c636044e4572c4a2d02b38eb6d30277fc43d8852c06f489cbe41db961eb31",
+   274
+  ],
+  "erc20-usdc-increase-allowance": [
+   "e689183d751352f6f517bffe53028a1d497cf45c3e2c146ee470a9e21901df09",
+   208
+  ],
+  "erc20-usdc-decrease-allowance": [
+   "c4997d82e03bd748dab00dfcec0c2f673a2458634efada134b1ae57689fe66b6",
+   213
+  ],
+  "eip2612-usdc-permit": [
+   "06889bb26039122fd59f859196cc2d201c343c66bab3b6dba3bbc6860f4f7346",
+   288
+  ],
+  "permit2-approve": [
+   "02c762e1ac3c9b3974a4f5d26a48e7766fe139ba6dd803505be3da24d2f0b1ad",
+   292
+  ],
+  "erc721-bayc-set-approval-for-all": [
+   "6449489e8d0c6275d532ba40a99f4077a764a8687c10f2583f9a4dbe39da8ccb",
+   256
+  ],
+  "erc1155-opensea-storefront-set-approval-for-all": [
+   "a9acc53ea1f1b88a2679495d2e4e5e5f0f089e8daf073699d1504b0d92b974d3",
+   255
+  ],
+  "usdt-approve": [
+   "52a5aa020b2151ffb3694277026ea671c095fc7a59a4e37d29d2c9d3a5917302",
+   193
+  ],
+  "dai-permit": [
+   "a625ee696af3add431c6be7f6e870875432b726db3e951445ae0899f93a2777b",
+   269
+  ],
+  "erc721-safe-transfer-from": [
+   "57a50c128066e30a14ffbfe3ad6fbc913086d1678c6d6abcc9ab1aca48dde555",
+   231
+  ],
+  "safe-addownerwiththreshold": [
+   "12979ff0d05396be10daf6016eee0fa4da73f5d44c64899bfb43d09d75075dc7",
+   257
+  ],
+  "hop-protocol-l1-bridge-sendtol2": [
+   "2bf4be50ca05159780a8baf3dc73de7d88f4b9150a1331dfd4c4c6e5c11bb7d6",
+   250
+  ],
+  "wormhole-token-bridge-transfertokens": [
+   "b903447283627ea9f7dc051652fa26713d715193e2577ddcee99ae3892c0757c",
+   274
+  ],
+  "compound-governor-bravo-castvote": [
+   "869f2aaadb966cde633da10b9dd2fdc4419aa2c22d7bd5b0a98ef0a8777da8bd",
+   209
+  ],
+  "ens-public-resolver-setaddr": [
+   "38983de76989898d1bc1d6d07f2dfcb93141ac78f263588d67e7829fa7ea5f75",
+   194
+  ],
+  "metamorpho-steakhouse-usdc-deposit": [
+   "c965b8598311e92a1399503b9c69b52e6efe274de1b9a168a893c77bb7803a9e",
+   227
+  ],
+  "metamorpho-steakhouse-usdc-withdraw": [
+   "fb0415338d2733b46b72157623f0a4e153cb2baf9bc70911fefa001d98e35049",
+   224
+  ],
+  "yearn-v2-yusdc-deposit": [
+   "402cf60cf1b79d201e082ffb1c2c8ea4c26f375e2a2296fe258c820a52fc240a",
+   195
+  ],
+  "yearn-v3-aave-usdc-lender-deposit": [
+   "4222df2284f1ff9bcd767d5c38961b1687d8d3685aa655c28bbbe7a92346e21c",
+   224
+  ],
+  "compound-iii-comet-usdc-supply": [
+   "6419f4f524b6ce606aa822d15afed70b5dc56c92ebb62c691b07196fba3ef2bc",
+   220
+  ],
+  "weth-deposit": [
+   "a9d5f44091a616e2c226b40433bcac99ecb2e03b0936241c814d4c844772a387",
+   193
+  ],
+  "weth-withdraw": [
+   "6cfcda551f935439cb79b23c35625d5f6288be2f2fff420415018b012f78ef88",
+   164
+  ],
+  "erc20-transferfrom": [
+   "2c5e697d6e0c50eb9c256969e00790b5d56163159fa0f352e65d6445fd27e60b",
+   257
+  ],
+  "uniswap-v3-exact-output-single": [
+   "b86dc23deb60c3ef29328cf2567e2170ebb20fc2a6b937551e552aabda335a09",
+   322
+  ],
+  "curve-3pool-exchange": [
+   "a90e07ecc65c5e40427811a7580095e6278997125bc42ed324bdcf7bac8f1cff",
+   238
+  ],
+  "erc1155-safe-transfer-from": [
+   "4b4f46aa1f3be99c131103146120d3bcc72334758055292d5b792470a0240984",
+   267
+  ],
+  "erc1155-safe-batch-transfer-from": [
+   "1d9b41bc88b2b635327f5aa5a748a5705b59e6b8a5d3c30f39df48b4793f20a3",
+   272
+  ],
+  "uniswap-v4-universal-router-swap": [
+   "7e1584ce8615670ce54972fe6f538d806afa35803033bbe98e2ec75643f81dc1",
+   258
+  ],
+  "permit2-permit-transfer-from": [
+   "c0fde596537a6bf1e53b98d3746638b4249a7a90d8196fe4a9f40f711729ec84",
+   276
+  ],
+  "across-spokepool-depositv3": [
+   "ab185113f0b47ef5f6e1fab6a6839df8b71bf8d48796afee64a61ba8b336ac01",
+   311
+  ],
+  "safe-exectransaction": [
+   "00a523f8e02d196db7213813edfbeee2a707679b026c6c6b6f8af88d35bf4889",
+   274
+  ],
+  "erc4337-entrypoint-v0.7-handleops": [
+   "0b44fc0f98727877a1d6bd1346300d9fe4b537e48d901002ea241d01b79c52cd",
+   281
+  ],
+  "eip7702-setcode-authorization": [
+   "0518442c7172b8c57fcbd09ded11b54e1d20076c4b5e79a7490c4ae9c2096a18",
+   299
+  ]
+ },
+ "flows": {
+  "aave-v3-supply": {
+   "chainId": 1,
+   "to": "7d2768de32b0b80b7a3454c06bdac94a69ddc7a9",
+   "value": 0,
+   "selector": "617ba037",
+   "calldata": "617ba0370000000000000000000000006b175474e89094c44da98b954eedeac495271d0f00000000000000000000000000000000000000000000000091b77e5e5d9a0000000000000000000000000000d8da6bf26964af9d7eed9e03e53415d37aa960450000000000000000000000000000000000000000000000000000000000000000",
+   "method": "supply",
+   "txHash": "67044b1e8a8f62f3b1daa9780b12aac283b0203fed7e074cf3c1c7e8cbb2f91d",
+   "args": [
+    {
+     "name": "protocol",
+     "format": 4,
+     "value": "41617665205633"
+    },
+    {
+     "name": "asset",
+     "format": 1,
+     "value": "6b175474e89094c44da98b954eedeac495271d0f"
+    },
+    {
+     "name": "amount",
+     "format": 5,
+     "value": "120344414991b77e5e5d9a0000"
+    },
+    {
+     "name": "onBehalfOf",
+     "format": 1,
+     "value": "d8da6bf26964af9d7eed9e03e53415d37aa96045"
+    }
+   ]
+  },
+  "erc20-transfer": {
+   "chainId": 1,
+   "to": "a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+   "value": 0,
+   "selector": "a9059cbb",
+   "calldata": "a9059cbb000000000000000000000000742d35cc6634c0532950a20547b231011e30c8e700000000000000000000000000000000000000000000000000000000000f4240",
+   "method": "transfer",
+   "txHash": "a52dcdf05bc5b147c4568170b82092e40e56bee87ec098684511009bf997e5b2",
+   "args": [
+    {
+     "name": "token",
+     "format": 4,
+     "value": "55534420436f696e"
+    },
+    {
+     "name": "to",
+     "format": 1,
+     "value": "742d35cc6634c0532950a20547b231011e30c8e7"
+    },
+    {
+     "name": "amount",
+     "format": 5,
+     "value": "0604555344430f4240"
+    }
+   ]
+  },
+  "erc20-approve": {
+   "chainId": 1,
+   "to": "a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+   "value": 0,
+   "selector": "095ea7b3",
+   "calldata": "095ea7b300000000000000000000000068b3465833fb72a70ecdf485e0e4c7bd8665fc45000000000000000000000000000000000000000000000000000000003b9aca00",
+   "method": "approve",
+   "txHash": "1704d4027ed642b12a403ea4b5ae357f6a3ed32f1e34127a75ff1d96d75e0171",
+   "args": [
+    {
+     "name": "spender",
+     "format": 1,
+     "value": "68b3465833fb72a70ecdf485e0e4c7bd8665fc45"
+    },
+    {
+     "name": "amount",
+     "format": 5,
+     "value": "0604555344433b9aca00"
+    }
+   ]
+  },
+  "erc20-approve-unlimited": {
+   "chainId": 1,
+   "to": "a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+   "value": 0,
+   "selector": "095ea7b3",
+   "calldata": "095ea7b300000000000000000000000068b3465833fb72a70ecdf485e0e4c7bd8665fc45ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+   "method": "approve",
+   "txHash": "be8f621c3c666243eb2bd5aa32a0b237a5e14a403fbccf25d72858a77d4e8567",
+   "args": [
+    {
+     "name": "spender",
+     "format": 1,
+     "value": "68b3465833fb72a70ecdf485e0e4c7bd8665fc45"
+    },
+    {
+     "name": "amount",
+     "format": 5,
+     "value": "060455534443ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+    }
+   ]
+  },
+  "uniswap-v2-eth-to-token": {
+   "chainId": 1,
+   "to": "7a250d5630b4cf539739df2c5dacb4c659f2488d",
+   "value": 10000000000000000,
+   "selector": "7ff36ab5",
+   "calldata": "7ff36ab5000000000000000000000000000000000000000000000000000000000090f5600000000000000000000000000000000000000000000000000000000000000080000000000000000000000000742d35cc6634c0532950a20547b231011e30c8e7000000000000000000000000000000000000000000000000000000006553f1000000000000000000000000000000000000000000000000000000000000000002000000000000000000000000c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+   "method": "swapExactETHForTokens",
+   "txHash": "b0729dc26316d2272a0a8c5ad65bdd4666ed8a59bca522ffd8af603539592bbb",
+   "args": [
+    {
+     "name": "protocol",
+     "format": 4,
+     "value": "556e6973776170205632"
+    },
+    {
+     "name": "amountOutMin",
+     "format": 5,
+     "value": "06045553444390f560"
+    },
+    {
+     "name": "to",
+     "format": 1,
+     "value": "742d35cc6634c0532950a20547b231011e30c8e7"
+    }
+   ]
+  },
+  "uniswap-v2-token-to-eth": {
+   "chainId": 1,
+   "to": "7a250d5630b4cf539739df2c5dacb4c659f2488d",
+   "value": 0,
+   "selector": "18cbafe5",
+   "calldata": "18cbafe50000000000000000000000000000000000000000000000000000000005f5e100000000000000000000000000000000000000000000000000000aa87bee53800000000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000742d35cc6634c0532950a20547b231011e30c8e7000000000000000000000000000000000000000000000000000000006553f1000000000000000000000000000000000000000000000000000000000000000002000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48000000000000000000000000c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+   "method": "swapExactTokensForETH",
+   "txHash": "d460bed06b917c20a85ffcd3987843ecbd16132c0ca899cdf31cb28220cf3b76",
+   "args": [
+    {
+     "name": "protocol",
+     "format": 4,
+     "value": "556e6973776170205632"
+    },
+    {
+     "name": "amountIn",
+     "format": 5,
+     "value": "06045553444305f5e100"
+    },
+    {
+     "name": "amountOutMin",
+     "format": 5,
+     "value": "12034554480aa87bee538000"
+    },
+    {
+     "name": "to",
+     "format": 1,
+     "value": "742d35cc6634c0532950a20547b231011e30c8e7"
+    }
+   ]
+  },
+  "uniswap-v3-exact-input": {
+   "chainId": 1,
+   "to": "e592427a0aece92de3edee1f18e0157c05861564",
+   "value": 0,
+   "selector": "414bf389",
+   "calldata": "414bf389000000000000000000000000c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb480000000000000000000000000000000000000000000000000000000000000bb8000000000000000000000000742d35cc6634c0532950a20547b231011e30c8e7000000000000000000000000000000000000000000000000000000006553f100000000000000000000000000000000000000000000000000002386f26fc10000000000000000000000000000000000000000000000000000000000000090f5600000000000000000000000000000000000000000000000000000000000000000",
+   "method": "exactInputSingle",
+   "txHash": "139af987585e4c3e2520626dff50937c325d18eebbec79e58dae2326659e6aa1",
+   "args": [
+    {
+     "name": "protocol",
+     "format": 4,
+     "value": "556e6973776170205633"
+    },
+    {
+     "name": "tokenIn",
+     "format": 1,
+     "value": "c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
+    },
+    {
+     "name": "tokenOut",
+     "format": 1,
+     "value": "a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+    },
+    {
+     "name": "amountIn",
+     "format": 5,
+     "value": "1204574554482386f26fc10000"
+    },
+    {
+     "name": "amountOutMin",
+     "format": 5,
+     "value": "06045553444390f560"
+    }
+   ]
+  },
+  "uniswap-v3-multicall": {
+   "chainId": 1,
+   "to": "68b3465833fb72a70ecdf485e0e4c7bd8665fc45",
+   "value": 0,
+   "selector": "5ae401dc",
+   "calldata": "5ae401dc000000000000000000000000000000000000000000000000000000006553f100000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000000412210e8a00000000000000000000000000000000000000000000000000000000",
+   "method": "multicall",
+   "txHash": "3c8411268d158a579ddc6a50fb3edb1b3d79efacf43cf81561acfd252b59abd1",
+   "args": [
+    {
+     "name": "protocol",
+     "format": 4,
+     "value": "556e6973776170205633"
+    },
+    {
+     "name": "calls",
+     "format": 4,
+     "value": "3120696e6e65722063616c6c3a20726566756e64455448"
+    }
+   ]
+  },
+  "aave-v3-pool-borrow": {
+   "chainId": 1,
+   "to": "87870bca3f3fd6335c3f4ce8392d69350b4fa4e2",
+   "value": 0,
+   "selector": "a415bcad",
+   "calldata": "a415bcad000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48000000000000000000000000000000000000000000000000000000003b9aca00000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000000000000000000000000000001234567890abcdef1234567890abcdef12345678",
+   "method": "borrow",
+   "txHash": "99970261d80ca22963b821568760d3d79979fcd53e3426698f09328f1d67b482",
+   "args": [
+    {
+     "name": "asset",
+     "format": 1,
+     "value": "a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+    },
+    {
+     "name": "amount",
+     "format": 5,
+     "value": "0604555344433b9aca00"
+    },
+    {
+     "name": "interestRateMode",
+     "format": 4,
+     "value": "72617465206d6f64653a205661726961626c65"
+    },
+    {
+     "name": "onBehalfOf",
+     "format": 1,
+     "value": "1234567890abcdef1234567890abcdef12345678"
+    }
+   ]
+  },
+  "aave-v3-pool-repay": {
+   "chainId": 1,
+   "to": "87870bca3f3fd6335c3f4ce8392d69350b4fa4e2",
+   "value": 0,
+   "selector": "573ade81",
+   "calldata": "573ade81000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48000000000000000000000000000000000000000000000000000000001dcd650000000000000000000000000000000000000000000000000000000000000000020000000000000000000000001234567890abcdef1234567890abcdef12345678",
+   "method": "repay",
+   "txHash": "cb8ec37f9e5d7f4f88b2fa28163557079b6cf8e4ac70e1d396ff726ae7a9d031",
+   "args": [
+    {
+     "name": "asset",
+     "format": 1,
+     "value": "a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+    },
+    {
+     "name": "amount",
+     "format": 5,
+     "value": "0604555344431dcd6500"
+    },
+    {
+     "name": "interestRateMode",
+     "format": 4,
+     "value": "72617465206d6f64653a205661726961626c65"
+    },
+    {
+     "name": "onBehalfOf",
+     "format": 1,
+     "value": "1234567890abcdef1234567890abcdef12345678"
+    }
+   ]
+  },
+  "aave-v3-pool-withdraw": {
+   "chainId": 1,
+   "to": "87870bca3f3fd6335c3f4ce8392d69350b4fa4e2",
+   "value": 0,
+   "selector": "69328dec",
+   "calldata": "69328dec000000000000000000000000c02aaa39b223fe8d0a0e5c4f27ead9083c756cc20000000000000000000000000000000000000000000000001bc16d674ec800000000000000000000000000001234567890abcdef1234567890abcdef12345678",
+   "method": "withdraw",
+   "txHash": "087ffaae5a364f06c719616e39dbd91b2e9057c26011a03cd3e4f21a475fde28",
+   "args": [
+    {
+     "name": "asset",
+     "format": 1,
+     "value": "c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
+    },
+    {
+     "name": "amount",
+     "format": 5,
+     "value": "1204574554481bc16d674ec80000"
+    },
+    {
+     "name": "to",
+     "format": 1,
+     "value": "1234567890abcdef1234567890abcdef12345678"
+    }
+   ]
+  },
+  "compound-v3-comet-supply": {
+   "chainId": 1,
+   "to": "c3d688b66703497daa19211eedff47f25384cdc3",
+   "value": 0,
+   "selector": "f2b9fdb8",
+   "calldata": "f2b9fdb8000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48000000000000000000000000000000000000000000000000000000003b9aca00",
+   "method": "supply",
+   "txHash": "73c0a22020d9422010c368272de69ee2b37c0ba66e0292530bee45b157fc5af0",
+   "args": [
+    {
+     "name": "asset",
+     "format": 1,
+     "value": "a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+    },
+    {
+     "name": "amount",
+     "format": 5,
+     "value": "0604555344433b9aca00"
+    },
+    {
+     "name": "protocol",
+     "format": 4,
+     "value": "436f6d706f756e6420563320436f6d6574"
+    }
+   ]
+  },
+  "compound-v3-comet-withdraw": {
+   "chainId": 1,
+   "to": "c3d688b66703497daa19211eedff47f25384cdc3",
+   "value": 0,
+   "selector": "f3fef3a3",
+   "calldata": "f3fef3a3000000000000000000000000c02aaa39b223fe8d0a0e5c4f27ead9083c756cc20000000000000000000000000000000000000000000000000de0b6b3a7640000",
+   "method": "withdraw",
+   "txHash": "26be97cf0c740b0e7d9f7c0936c9b46f6af7f7904f70e9a0300cb767e93910b7",
+   "args": [
+    {
+     "name": "asset",
+     "format": 1,
+     "value": "c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
+    },
+    {
+     "name": "amount",
+     "format": 5,
+     "value": "1204574554480de0b6b3a7640000"
+    },
+    {
+     "name": "protocol",
+     "format": 4,
+     "value": "436f6d706f756e6420563320436f6d6574"
+    }
+   ]
+  },
+  "spark-protocol-supply": {
+   "chainId": 1,
+   "to": "c13e21b648a5ee794902342038ff3adab66be987",
+   "value": 0,
+   "selector": "617ba037",
+   "calldata": "617ba0370000000000000000000000006b175474e89094c44da98b954eedeac495271d0f00000000000000000000000000000000000000000000010f0cf064dd592000000000000000000000000000001234567890abcdef1234567890abcdef123456780000000000000000000000000000000000000000000000000000000000000000",
+   "method": "supply",
+   "txHash": "e6d20a1d3ff6dabae2b05fc78d5ab2f94c0ee1ddd0cb5a9f998a7ee04926ff76",
+   "args": [
+    {
+     "name": "asset",
+     "format": 1,
+     "value": "6b175474e89094c44da98b954eedeac495271d0f"
+    },
+    {
+     "name": "amount",
+     "format": 5,
+     "value": "1203444149010f0cf064dd59200000"
+    },
+    {
+     "name": "onBehalfOf",
+     "format": 1,
+     "value": "1234567890abcdef1234567890abcdef12345678"
+    },
+    {
+     "name": "referralCode",
+     "format": 4,
+     "value": "726566657272616c20636f64653a203020286e6f6e6529"
+    }
+   ]
+  },
+  "lido-steth-submit": {
+   "chainId": 1,
+   "to": "ae7ab96520de3a18e5e111b5eaab095312d7fe84",
+   "value": 1000000000000000000,
+   "selector": "a1903eab",
+   "calldata": "a1903eab0000000000000000000000000000000000000000000000000000000000000000",
+   "method": "submit",
+   "txHash": "61c65bfee0664ab77fc5d5753588cb01310a6657612283a082c2e1e2f36af582",
+   "args": [
+    {
+     "name": "_referral",
+     "format": 1,
+     "value": "0000000000000000000000000000000000000000"
+    },
+    {
+     "name": "action",
+     "format": 4,
+     "value": "4c69646f207374455448207374616b65"
+    }
+   ]
+  },
+  "rocketpool-deposit-pool-deposit": {
+   "chainId": 1,
+   "to": "dd3f50f8a6cafbe9b31a427582963f465e745af8",
+   "value": 1000000000000000000,
+   "selector": "d0e30db0",
+   "calldata": "d0e30db0",
+   "method": "deposit",
+   "txHash": "294ab9c44870fab8cc8eeccf2f9717fc963c45a87ccc071e6c3e110df43daa94",
+   "args": [
+    {
+     "name": "value",
+     "format": 5,
+     "value": "12034554480de0b6b3a7640000"
+    },
+    {
+     "name": "action",
+     "format": 4,
+     "value": "526f636b657420506f6f6c206465706f736974"
+    }
+   ]
+  },
+  "etherfi-liquiditypool-deposit": {
+   "chainId": 1,
+   "to": "308861a430be4cce5502d0a12724771fc6daf216",
+   "value": 1000000000000000000,
+   "selector": "f340fa01",
+   "calldata": "f340fa010000000000000000000000000000000000000000000000000000000000000000",
+   "method": "deposit",
+   "txHash": "ddd48b406d94bea416f0682eef9a5b9a9495437ae921e9cd3634f7b55fa9f5cf",
+   "args": [
+    {
+     "name": "_referral",
+     "format": 1,
+     "value": "0000000000000000000000000000000000000000"
+    },
+    {
+     "name": "value",
+     "format": 5,
+     "value": "12034554480de0b6b3a7640000"
+    },
+    {
+     "name": "action",
+     "format": 4,
+     "value": "65746865722e6669207374616b65"
+    }
+   ]
+  },
+  "eigenlayer-strategymanager-deposit": {
+   "chainId": 1,
+   "to": "858646372cc42e1ab8f579c244c0ae3f9dcbce72",
+   "value": 0,
+   "selector": "e7a050aa",
+   "calldata": "e7a050aa00000000000000000000000093c4b944d05dfe6df7645a86cd2206016c51564d000000000000000000000000c02aaa39b223fe8d0a0e5c4f27ead9083c756cc20000000000000000000000000000000000000000000000000de0b6b3a7640000",
+   "method": "depositIntoStrategy",
+   "txHash": "ef9a1a8b4d672c29fd2200b130f5a9d58da478ce09bebea81f7397ac02b9aa12",
+   "args": [
+    {
+     "name": "strategy",
+     "format": 1,
+     "value": "93c4b944d05dfe6df7645a86cd2206016c51564d"
+    },
+    {
+     "name": "token",
+     "format": 1,
+     "value": "c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
+    },
+    {
+     "name": "amount",
+     "format": 5,
+     "value": "1204574554480de0b6b3a7640000"
+    },
+    {
+     "name": "action",
+     "format": 4,
+     "value": "456967656e4c617965722072657374616b65"
+    }
+   ]
+  },
+  "eigenlayer-strategymanager-deposit-steth": {
+   "chainId": 1,
+   "to": "858646372cc42e1ab8f579c244c0ae3f9dcbce72",
+   "value": 0,
+   "selector": "e7a050aa",
+   "calldata": "e7a050aa00000000000000000000000093c4b944d05dfe6df7645a86cd2206016c51564d000000000000000000000000ae7ab96520de3a18e5e111b5eaab095312d7fe840000000000000000000000000000000000000000000000001bc16d674ec80000",
+   "method": "depositIntoStrategy",
+   "txHash": "280656169086ec28623c4309fef67359da088324a86fc884743f6df417c25ea0",
+   "args": [
+    {
+     "name": "strategy",
+     "format": 1,
+     "value": "93c4b944d05dfe6df7645a86cd2206016c51564d"
+    },
+    {
+     "name": "token",
+     "format": 1,
+     "value": "ae7ab96520de3a18e5e111b5eaab095312d7fe84"
+    },
+    {
+     "name": "amount",
+     "format": 5,
+     "value": "120573744554481bc16d674ec80000"
+    },
+    {
+     "name": "action",
+     "format": 4,
+     "value": "456967656e4c617965722072657374616b65207374455448"
+    }
+   ]
+  },
+  "erc20-usdc-increase-allowance": {
+   "chainId": 1,
+   "to": "a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+   "value": 0,
+   "selector": "39509351",
+   "calldata": "395093510000000000000000000000003fc91a3afd70395cd496c647d5a6cc9d4b2b7fad000000000000000000000000000000000000000000000000000000e8d4a51000",
+   "method": "increaseAllowance",
+   "txHash": "fc61bad949c7beb195a9fa090fd892e0f15d0a1a936872441d638f3096691006",
+   "args": [
+    {
+     "name": "spender",
+     "format": 1,
+     "value": "3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad"
+    },
+    {
+     "name": "addedValue",
+     "format": 5,
+     "value": "060455534443e8d4a51000"
+    }
+   ]
+  },
+  "erc20-usdc-decrease-allowance": {
+   "chainId": 1,
+   "to": "a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+   "value": 0,
+   "selector": "a457c2d7",
+   "calldata": "a457c2d70000000000000000000000003fc91a3afd70395cd496c647d5a6cc9d4b2b7fad000000000000000000000000000000000000000000000000000000746a528800",
+   "method": "decreaseAllowance",
+   "txHash": "09902638735757377bc0c5170d1e76a866c796cd5554525209f56c50e721a9e4",
+   "args": [
+    {
+     "name": "spender",
+     "format": 1,
+     "value": "3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad"
+    },
+    {
+     "name": "subtractedValue",
+     "format": 5,
+     "value": "060455534443746a528800"
+    }
+   ]
+  },
+  "eip2612-usdc-permit": {
+   "chainId": 1,
+   "to": "a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+   "value": 0,
+   "selector": "d505accf",
+   "calldata": "d505accf00000000000000000000000000000000000000000000000000000000000000000000000000000000000000003fc91a3afd70395cd496c647d5a6cc9d4b2b7fadffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff000000000000000000000000000000000000000000000000000000006d139580000000000000000000000000000000000000000000000000000000000000001b00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+   "method": "permit",
+   "txHash": "bd39aa334909f3b720ade65890927681e0bed396dd2fba0da5de2a6e0f18e234",
+   "args": [
+    {
+     "name": "owner",
+     "format": 1,
+     "value": "0000000000000000000000000000000000000000"
+    },
+    {
+     "name": "spender",
+     "format": 1,
+     "value": "3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad"
+    },
+    {
+     "name": "value",
+     "format": 5,
+     "value": "060455534443ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+    },
+    {
+     "name": "deadline",
+     "format": 4,
+     "value": "6578706972657320323032372d31322d32382031333a323020555443"
+    }
+   ]
+  },
+  "permit2-approve": {
+   "chainId": 1,
+   "to": "000000000022d473030f116ddee9f6b43ac78ba3",
+   "value": 0,
+   "selector": "87517c45",
+   "calldata": "87517c45000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb480000000000000000000000003fc91a3afd70395cd496c647d5a6cc9d4b2b7fad000000000000000000000000ffffffffffffffffffffffffffffffffffffffff000000000000000000000000000000000000000000000000000000006d139580",
+   "method": "approve",
+   "txHash": "d88573a637b154107deaeda2ecc71eb1d398b1670175332f95f2202e32f4cc88",
+   "args": [
+    {
+     "name": "token",
+     "format": 1,
+     "value": "a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+    },
+    {
+     "name": "spender",
+     "format": 1,
+     "value": "3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad"
+    },
+    {
+     "name": "amount",
+     "format": 5,
+     "value": "060455534443ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+    },
+    {
+     "name": "expiration",
+     "format": 4,
+     "value": "6578706972657320323032372d31322d32382031333a323020555443"
+    }
+   ]
+  },
+  "erc721-bayc-set-approval-for-all": {
+   "chainId": 1,
+   "to": "bc4ca0eda7647a8ab7c2061c2e118a18a936f13d",
+   "value": 0,
+   "selector": "a22cb465",
+   "calldata": "a22cb4650000000000000000000000003fc91a3afd70395cd496c647d5a6cc9d4b2b7fad0000000000000000000000000000000000000000000000000000000000000001",
+   "method": "setApprovalForAll",
+   "txHash": "e1c22b8b8551219b26b64380a283a3242c5401343197a440dcccb0e88e275e1e",
+   "args": [
+    {
+     "name": "operator",
+     "format": 1,
+     "value": "3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad"
+    },
+    {
+     "name": "approved",
+     "format": 4,
+     "value": "6772616e747320636f6e74726f6c206f6620414c4c204e465473"
+    },
+    {
+     "name": "collection",
+     "format": 4,
+     "value": "426f7265642041706520596163687420436c7562"
+    }
+   ]
+  },
+  "erc1155-opensea-storefront-set-approval-for-all": {
+   "chainId": 1,
+   "to": "495f947276749ce646f68ac8c248420045cb7b5e",
+   "value": 0,
+   "selector": "a22cb465",
+   "calldata": "a22cb4650000000000000000000000003fc91a3afd70395cd496c647d5a6cc9d4b2b7fad0000000000000000000000000000000000000000000000000000000000000001",
+   "method": "setApprovalForAll",
+   "txHash": "d38bb7e7f21bca846abf018af1e43225f0a73f55a2659a40cf3b66589d0eb99f",
+   "args": [
+    {
+     "name": "operator",
+     "format": 1,
+     "value": "3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad"
+    },
+    {
+     "name": "approved",
+     "format": 4,
+     "value": "6772616e747320636f6e74726f6c206f6620414c4c206974656d73"
+    },
+    {
+     "name": "collection",
+     "format": 4,
+     "value": "4f70656e5365612053746f726566726f6e74"
+    }
+   ]
+  },
+  "usdt-approve": {
+   "chainId": 1,
+   "to": "dac17f958d2ee523a2206206994597c13d831ec7",
+   "value": 0,
+   "selector": "095ea7b3",
+   "calldata": "095ea7b30000000000000000000000003fc91a3afd70395cd496c647d5a6cc9d4b2b7fad000000000000000000000000000000000000000000000000000000001dcd6500",
+   "method": "approve",
+   "txHash": "ade9c9ac33ed2b4375c0ff5c69c43bd9bf68b2e020b7030d2a0b236fc4b55f05",
+   "args": [
+    {
+     "name": "spender",
+     "format": 1,
+     "value": "3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad"
+    },
+    {
+     "name": "amount",
+     "format": 5,
+     "value": "0604555344541dcd6500"
+    }
+   ]
+  },
+  "dai-permit": {
+   "chainId": 1,
+   "to": "6b175474e89094c44da98b954eedeac495271d0f",
+   "value": 0,
+   "selector": "8fcbaf0c",
+   "calldata": "8fcbaf0c00000000000000000000000028c6c06298d514db089934071355e5743bf21d600000000000000000000000003fc91a3afd70395cd496c647d5a6cc9d4b2b7fad0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000006d1395800000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000001b00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+   "method": "permit",
+   "txHash": "5dee23ac7e15d0fc0b1743de07b4a6a72ed5eb7438c4584688e716dcb9404d12",
+   "args": [
+    {
+     "name": "holder",
+     "format": 1,
+     "value": "28c6c06298d514db089934071355e5743bf21d60"
+    },
+    {
+     "name": "spender",
+     "format": 1,
+     "value": "3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad"
+    },
+    {
+     "name": "allowed",
+     "format": 4,
+     "value": "6772616e743a20756e6c696d6974656420616c6c6f77616e6365"
+    },
+    {
+     "name": "expiry",
+     "format": 4,
+     "value": "323032372d31322d32382031333a323020555443"
+    }
+   ]
+  },
+  "erc721-safe-transfer-from": {
+   "chainId": 1,
+   "to": "bc4ca0eda7647a8ab7c2061c2e118a18a936f13d",
+   "value": 0,
+   "selector": "42842e0e",
+   "calldata": "42842e0e0000000000000000000000007a16ff8270133f063aab6c9977183d9e7283542a000000000000000000000000742d35cc6634c0532950a20547b231011e30c8e700000000000000000000000000000000000000000000000000000000000011e0",
+   "method": "safeTransferFrom",
+   "txHash": "b2522410ee83e643be5f8ace4b6e3aa79f2a67cb354b4848dad0727686a28712",
+   "args": [
+    {
+     "name": "from",
+     "format": 1,
+     "value": "7a16ff8270133f063aab6c9977183d9e7283542a"
+    },
+    {
+     "name": "to",
+     "format": 1,
+     "value": "742d35cc6634c0532950a20547b231011e30c8e7"
+    },
+    {
+     "name": "tokenId",
+     "format": 4,
+     "value": "4e46543a2042415943202334353736"
+    }
+   ]
+  },
+  "safe-addownerwiththreshold": {
+   "chainId": 1,
+   "to": "1b9cef6bdd029f378c511e5e6c20ee556b6781b9",
+   "value": 0,
+   "selector": "0d582f13",
+   "calldata": "0d582f1300000000000000000000000000000000000000000000000000000000deadbeef0000000000000000000000000000000000000000000000000000000000000003",
+   "method": "addOwnerWithThreshold",
+   "txHash": "4a61d9decebdbcb7a2b58c58a6b8922442405a003ed2834aebb0ead77bedd2a2",
+   "args": [
+    {
+     "name": "owner",
+     "format": 1,
+     "value": "00000000000000000000000000000000deadbeef"
+    },
+    {
+     "name": "_threshold",
+     "format": 4,
+     "value": "6e6577207468726573686f6c643a2033206f776e657273"
+    },
+    {
+     "name": "protocol",
+     "format": 4,
+     "value": "536166653a20676f7665726e616e6365206368616e6765"
+    }
+   ]
+  },
+  "hop-protocol-l1-bridge-sendtol2": {
+   "chainId": 1,
+   "to": "3666f603cc164936c1b87e207f36beba4ac5f18a",
+   "value": 0,
+   "selector": "deace8f5",
+   "calldata": "deace8f50000000000000000000000000000000000000000000000000000000000000089000000000000000000000000742d35cc6634c0532950a20547b231011e30c8e7000000000000000000000000000000000000000000000000000000000ee6b280000000000000000000000000000000000000000000000000000000000e9a6740000000000000000000000000000000000000000000000000000000006d13958000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+   "method": "sendToL2",
+   "txHash": "400bf91d6f2e4beead2a2f5bea7f29a2279b055da6a6861f30998ecf8e2856fc",
+   "args": [
+    {
+     "name": "chainId",
+     "format": 4,
+     "value": "64657374696e6174696f6e3a20506f6c79676f6e"
+    },
+    {
+     "name": "recipient",
+     "format": 1,
+     "value": "742d35cc6634c0532950a20547b231011e30c8e7"
+    },
+    {
+     "name": "amount",
+     "format": 5,
+     "value": "0604555344430ee6b280"
+    },
+    {
+     "name": "relayerFee",
+     "format": 5,
+     "value": "06045553444307a120"
+    }
+   ]
+  },
+  "wormhole-token-bridge-transfertokens": {
+   "chainId": 1,
+   "to": "3ee18b2214aff97000d974cf647e7c347e8fa585",
+   "value": 0,
+   "selector": "0f5287b0",
+   "calldata": "0f5287b0000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb480000000000000000000000000000000000000000000000000000000005f5e1000000000000000000000000000000000000000000000000000000000000000017000000000000000000000000742d35cc6634c0532950a20547b231011e30c8e700000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+   "method": "transferTokens",
+   "txHash": "2cdd71346493ffb07bb673dbd22d32f14ba947deafe6f00ed4eb0a6be6ac1de0",
+   "args": [
+    {
+     "name": "token",
+     "format": 1,
+     "value": "a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+    },
+    {
+     "name": "amount",
+     "format": 5,
+     "value": "06045553444305f5e100"
+    },
+    {
+     "name": "recipientChain",
+     "format": 4,
+     "value": "646573743a20417262697472756d2028576f726d686f6c6529"
+    },
+    {
+     "name": "recipient",
+     "format": 1,
+     "value": "742d35cc6634c0532950a20547b231011e30c8e7"
+    }
+   ]
+  },
+  "compound-governor-bravo-castvote": {
+   "chainId": 1,
+   "to": "c0da02939e1441f497fd74f78ce7decb17b66529",
+   "value": 0,
+   "selector": "56781388",
+   "calldata": "5678138800000000000000000000000000000000000000000000000000000000000000cb0000000000000000000000000000000000000000000000000000000000000001",
+   "method": "castVote",
+   "txHash": "46781b2c24f2e8ff6f4805cfa1125565be1978431ca60016a0457aca463b8418",
+   "args": [
+    {
+     "name": "proposalId",
+     "format": 4,
+     "value": "70726f706f73616c2049443a20323033"
+    },
+    {
+     "name": "support",
+     "format": 4,
+     "value": "303d416761696e737420313d466f7220323d4162737461696e"
+    }
+   ]
+  },
+  "ens-public-resolver-setaddr": {
+   "chainId": 1,
+   "to": "231b0ee14048e9dccd1d247744d114a4eb5e8e63",
+   "value": 0,
+   "selector": "d5fa2b00",
+   "calldata": "d5fa2b00ee6c4522aab0003e8d14cd40a6af439055fd2577951148c14b6cea9a53475835000000000000000000000000d8da6bf26964af9d7eed9e03e53415d37aa96045",
+   "method": "setAddr",
+   "txHash": "2808f33f53e7303a628f4545a07aec6083eaea7d05808c9427998ceccb9fde4b",
+   "args": [
+    {
+     "name": "node",
+     "format": 4,
+     "value": "454e53206e616d6520286e616d656861736829"
+    },
+    {
+     "name": "a",
+     "format": 1,
+     "value": "d8da6bf26964af9d7eed9e03e53415d37aa96045"
+    }
+   ]
+  },
+  "metamorpho-steakhouse-usdc-deposit": {
+   "chainId": 1,
+   "to": "beef01735c132ada46aa9aa4c54623caa92a64cb",
+   "value": 0,
+   "selector": "6e553f65",
+   "calldata": "6e553f65000000000000000000000000000000000000000000000000000000003b9aca0000000000000000000000000000000000000000000000000000000000deadbeef",
+   "method": "deposit",
+   "txHash": "41ab35d7106eb9b391894417a66f32986a66f6d6b1f32dee33bd0a7dc27e8444",
+   "args": [
+    {
+     "name": "assets",
+     "format": 5,
+     "value": "0604555344433b9aca00"
+    },
+    {
+     "name": "receiver",
+     "format": 1,
+     "value": "00000000000000000000000000000000deadbeef"
+    },
+    {
+     "name": "protocol",
+     "format": 4,
+     "value": "537465616b686f7573652055534443207661756c74"
+    }
+   ]
+  },
+  "metamorpho-steakhouse-usdc-withdraw": {
+   "chainId": 1,
+   "to": "beef01735c132ada46aa9aa4c54623caa92a64cb",
+   "value": 0,
+   "selector": "b460af94",
+   "calldata": "b460af94000000000000000000000000000000000000000000000000000000003b9aca0000000000000000000000000000000000000000000000000000000000deadbeef00000000000000000000000000000000000000000000000000000000deadbeef",
+   "method": "withdraw",
+   "txHash": "df964b46b026c103330b51ed945132d521e0e2efcaeef4ae0ae379fb1503891a",
+   "args": [
+    {
+     "name": "assets",
+     "format": 5,
+     "value": "0604555344433b9aca00"
+    },
+    {
+     "name": "receiver",
+     "format": 1,
+     "value": "00000000000000000000000000000000deadbeef"
+    },
+    {
+     "name": "owner",
+     "format": 1,
+     "value": "00000000000000000000000000000000deadbeef"
+    }
+   ]
+  },
+  "yearn-v2-yusdc-deposit": {
+   "chainId": 1,
+   "to": "5f18c75abdae578b483e5f43f12a39cf75b973a9",
+   "value": 0,
+   "selector": "b6b55f25",
+   "calldata": "b6b55f25000000000000000000000000000000000000000000000000000000003b9aca00",
+   "method": "deposit",
+   "txHash": "790655e31d3b8e9bdf21c3a12760f45bf43cf9706060236b41e2fe7b35e21128",
+   "args": [
+    {
+     "name": "_amount",
+     "format": 5,
+     "value": "0604555344433b9aca00"
+    },
+    {
+     "name": "protocol",
+     "format": 4,
+     "value": "596561726e205632207955534443205661756c74"
+    }
+   ]
+  },
+  "yearn-v3-aave-usdc-lender-deposit": {
+   "chainId": 1,
+   "to": "bdb97ec319c41c6fa383e94ece6bdf383dfc7be4",
+   "value": 0,
+   "selector": "6e553f65",
+   "calldata": "6e553f65000000000000000000000000000000000000000000000000000000003b9aca0000000000000000000000000000000000000000000000000000000000deadbeef",
+   "method": "deposit",
+   "txHash": "7205511db705f814be5e8a081d952a546a59491d1123621d3ccfd9ad099f2316",
+   "args": [
+    {
+     "name": "assets",
+     "format": 5,
+     "value": "0604555344433b9aca00"
+    },
+    {
+     "name": "receiver",
+     "format": 1,
+     "value": "00000000000000000000000000000000deadbeef"
+    },
+    {
+     "name": "protocol",
+     "format": 4,
+     "value": "596561726e20563320416176652055534443"
+    }
+   ]
+  },
+  "compound-iii-comet-usdc-supply": {
+   "chainId": 1,
+   "to": "c3d688b66703497daa19211eedff47f25384cdc3",
+   "value": 0,
+   "selector": "f2b9fdb8",
+   "calldata": "f2b9fdb8000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48000000000000000000000000000000000000000000000000000000003b9aca00",
+   "method": "supply",
+   "txHash": "73c0a22020d9422010c368272de69ee2b37c0ba66e0292530bee45b157fc5af0",
+   "args": [
+    {
+     "name": "asset",
+     "format": 1,
+     "value": "a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+    },
+    {
+     "name": "amount",
+     "format": 5,
+     "value": "0604555344433b9aca00"
+    },
+    {
+     "name": "protocol",
+     "format": 4,
+     "value": "436f6d706f756e642049494920436f6d6574"
+    }
+   ]
+  },
+  "weth-deposit": {
+   "chainId": 1,
+   "to": "c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+   "value": 1000000000000000000,
+   "selector": "d0e30db0",
+   "calldata": "d0e30db0",
+   "method": "deposit",
+   "txHash": "dd9043787820a3d1535ab5d0725c6d99a0c8422627ce7de84a981f6930aea866",
+   "args": [
+    {
+     "name": "action",
+     "format": 4,
+     "value": "577261702045544820696e746f2057455448"
+    },
+    {
+     "name": "amount",
+     "format": 5,
+     "value": "12034554480de0b6b3a7640000"
+    }
+   ]
+  },
+  "weth-withdraw": {
+   "chainId": 1,
+   "to": "c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+   "value": 0,
+   "selector": "2e1a7d4d",
+   "calldata": "2e1a7d4d00000000000000000000000000000000000000000000000006f05b59d3b20000",
+   "method": "withdraw",
+   "txHash": "970a1ea34689f8735727fc1f62bde724af09e9613b89283fbe5c32dc107bd174",
+   "args": [
+    {
+     "name": "wad",
+     "format": 5,
+     "value": "12045745544806f05b59d3b20000"
+    }
+   ]
+  },
+  "erc20-transferfrom": {
+   "chainId": 1,
+   "to": "dac17f958d2ee523a2206206994597c13d831ec7",
+   "value": 0,
+   "selector": "23b872dd",
+   "calldata": "23b872dd0000000000000000000000007a16ff8270133f063aab6c9977183d9e7283542a000000000000000000000000742d35cc6634c0532950a20547b231011e30c8e7000000000000000000000000000000000000000000000000000000003b9aca00",
+   "method": "transferFrom",
+   "txHash": "569113e7db6209d0283f5e2ffa1a01063ef02ae29a7fb91dbe239054c098d09e",
+   "args": [
+    {
+     "name": "action",
+     "format": 4,
+     "value": "70756c6c2066726f6d20617070726f766564206163636f756e74"
+    },
+    {
+     "name": "from",
+     "format": 1,
+     "value": "7a16ff8270133f063aab6c9977183d9e7283542a"
+    },
+    {
+     "name": "to",
+     "format": 1,
+     "value": "742d35cc6634c0532950a20547b231011e30c8e7"
+    },
+    {
+     "name": "amount",
+     "format": 5,
+     "value": "0604555344543b9aca00"
+    }
+   ]
+  },
+  "uniswap-v3-exact-output-single": {
+   "chainId": 1,
+   "to": "68b3465833fb72a70ecdf485e0e4c7bd8665fc45",
+   "value": 0,
+   "selector": "5023b4df",
+   "calldata": "5023b4df000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48000000000000000000000000c02aaa39b223fe8d0a0e5c4f27ead9083c756cc20000000000000000000000000000000000000000000000000000000000000bb800000000000000000000000000000000000000000000000000000000deadbeef0000000000000000000000000000000000000000000000000de0b6b3a764000000000000000000000000000000000000000000000000000000000000bebc20000000000000000000000000000000000000000000000000000000000000000000",
+   "method": "exactOutputSingle",
+   "txHash": "f911df582d2dd39b28ec12953690642a3b43a16fc83fb41307ed704610cd2325",
+   "args": [
+    {
+     "name": "protocol",
+     "format": 4,
+     "value": "556e6973776170205633"
+    },
+    {
+     "name": "tokenIn",
+     "format": 1,
+     "value": "a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+    },
+    {
+     "name": "tokenOut",
+     "format": 1,
+     "value": "c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
+    },
+    {
+     "name": "amountOut",
+     "format": 5,
+     "value": "1204574554480de0b6b3a7640000"
+    },
+    {
+     "name": "amountInMax",
+     "format": 5,
+     "value": "060455534443bebc2000"
+    },
+    {
+     "name": "recipient",
+     "format": 1,
+     "value": "00000000000000000000000000000000deadbeef"
+    }
+   ]
+  },
+  "curve-3pool-exchange": {
+   "chainId": 1,
+   "to": "bebc44782c7db0a1a60cb6fe97d0b483032ff1c7",
+   "value": 0,
+   "selector": "3df02124",
+   "calldata": "3df0212400000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000003b9aca00000000000000000000000000000000000000000000000000000000003b8b87c0",
+   "method": "exchange",
+   "txHash": "96d53dfe7371724287d91fef8fb3854e8742a6b6bde739c0319feb70636c9b6d",
+   "args": [
+    {
+     "name": "i",
+     "format": 4,
+     "value": "73656c6c20636f696e20696e6465783a203120285553444329"
+    },
+    {
+     "name": "j",
+     "format": 4,
+     "value": "62757920636f696e20696e6465783a203220285553445429"
+    },
+    {
+     "name": "dx",
+     "format": 5,
+     "value": "0604555344433b9aca00"
+    },
+    {
+     "name": "min_dy",
+     "format": 5,
+     "value": "0604555344543b8b87c0"
+    }
+   ]
+  },
+  "erc1155-safe-transfer-from": {
+   "chainId": 1,
+   "to": "495f947276749ce646f68ac8c248420045cb7b5e",
+   "value": 0,
+   "selector": "f242432a",
+   "calldata": "f242432a0000000000000000000000007a16ff8270133f063aab6c9977183d9e7283542a000000000000000000000000742d35cc6634c0532950a20547b231011e30c8e738c3b803071828780525e5c962927d9fe70ce0e5000000000000340000000001000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000",
+   "method": "safeTransferFrom",
+   "txHash": "0369828de22f7861cff59cfbcc673e4dc0e5da0df44eed2c3f6a4c4abff4a0d9",
+   "args": [
+    {
+     "name": "from",
+     "format": 1,
+     "value": "7a16ff8270133f063aab6c9977183d9e7283542a"
+    },
+    {
+     "name": "to",
+     "format": 1,
+     "value": "742d35cc6634c0532950a20547b231011e30c8e7"
+    },
+    {
+     "name": "tokenId",
+     "format": 4,
+     "value": "4e46543a204f70656e5365612053746f726566726f6e74206974656d"
+    },
+    {
+     "name": "quantity",
+     "format": 4,
+     "value": "7175616e746974793a2031"
+    }
+   ]
+  },
+  "erc1155-safe-batch-transfer-from": {
+   "chainId": 1,
+   "to": "495f947276749ce646f68ac8c248420045cb7b5e",
+   "value": 0,
+   "selector": "2eb2c2d6",
+   "calldata": "2eb2c2d60000000000000000000000007a16ff8270133f063aab6c9977183d9e7283542a000000000000000000000000742d35cc6634c0532950a20547b231011e30c8e700000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000001600000000000000000000000000000000000000000000000000000000000000002e500f16014e55316e4c0fadb6c4abb306b7538eb0000000000000100000186a0000000000000000000000000000000000000000000000000000000000000022b0000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000",
+   "method": "safeBatchTransferFrom",
+   "txHash": "123959f29bd04766f0bb0ced4f25f4f0fdb604519262eadbbecbfa4885fc78d9",
+   "args": [
+    {
+     "name": "from",
+     "format": 1,
+     "value": "7a16ff8270133f063aab6c9977183d9e7283542a"
+    },
+    {
+     "name": "to",
+     "format": 1,
+     "value": "742d35cc6634c0532950a20547b231011e30c8e7"
+    },
+    {
+     "name": "ids",
+     "format": 4,
+     "value": "32204e46542069647320696e2074686973206261746368"
+    },
+    {
+     "name": "amounts",
+     "format": 4,
+     "value": "7175616e7469746965733a20322c207468656e2031"
+    }
+   ]
+  },
+  "uniswap-v4-universal-router-swap": {
+   "chainId": 1,
+   "to": "66a9893cc07d91d95644aedd05d03f95e1dba8af",
+   "value": 0,
+   "selector": "3593564c",
+   "calldata": "3593564c000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000000000000000000000000000000000006d13958000000000000000000000000000000000000000000000000000000000000000011000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000000",
+   "method": "execute",
+   "txHash": "3c78de096522f4ffe3f85470835294968df9d770b54100b9033724164ef0a38d",
+   "args": [
+    {
+     "name": "protocol",
+     "format": 4,
+     "value": "556e69737761702056342028556e6976657273616c20526f7574657229"
+    },
+    {
+     "name": "commands",
+     "format": 4,
+     "value": "636f6d6d616e643a2030783130202856345f5357415029"
+    },
+    {
+     "name": "deadline",
+     "format": 4,
+     "value": "6578706972657320323032372d31322d32382031333a323020555443"
+    }
+   ]
+  },
+  "permit2-permit-transfer-from": {
+   "chainId": 1,
+   "to": "000000000022d473030f116ddee9f6b43ac78ba3",
+   "value": 0,
+   "selector": "30f28b7a",
+   "calldata": "30f28b7a000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb480000000000000000000000000000000000000000000000000000003a352944000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000006d1395800000000000000000000000003fc91a3afd70395cd496c647d5a6cc9d4b2b7fad0000000000000000000000000000000000000000000000000000003a3529440000000000000000000000000000000000000000000000000000000000deadbeef00000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000041000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+   "method": "permitTransferFrom",
+   "txHash": "97565b1af4c71f9a6060ebac94a5458998736168adb1fb2c169091274b0209ad",
+   "args": [
+    {
+     "name": "token",
+     "format": 1,
+     "value": "a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+    },
+    {
+     "name": "amount",
+     "format": 5,
+     "value": "0604555344433a35294400"
+    },
+    {
+     "name": "recipient",
+     "format": 1,
+     "value": "3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad"
+    },
+    {
+     "name": "deadline",
+     "format": 4,
+     "value": "6578706972657320323032372d31322d32382031333a323020555443"
+    }
+   ]
+  },
+  "across-spokepool-depositv3": {
+   "chainId": 1,
+   "to": "5c7bcd6e7de5423a257d81b442095a1a6ced35c5",
+   "value": 0,
+   "selector": "7b939232",
+   "calldata": "7b939232000000000000000000000000742d35cc6634c0532950a20547b231011e30c8e70000000000000000000000009406cc6185a346906296840746125a0e44976454000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48000000000000000000000000af88d065e77c8cc2239327c5edb3a432268e5831000000000000000000000000000000000000000000000000000000003b9aca00000000000000000000000000000000000000000000000000000000003b4e7ec0000000000000000000000000000000000000000000000000000000000000a4b1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000685e23c0000000000000000000000000000000000000000000000000000000006d139580000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001800000000000000000000000000000000000000000000000000000000000000000",
+   "method": "depositV3",
+   "txHash": "0930d50a3aaed5a3711e86ff1f484a37bd5878e802da9bf52277d759512c5efc",
+   "args": [
+    {
+     "name": "inputToken",
+     "format": 1,
+     "value": "a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+    },
+    {
+     "name": "inputAmount",
+     "format": 5,
+     "value": "0604555344433b9aca00"
+    },
+    {
+     "name": "outputToken",
+     "format": 1,
+     "value": "af88d065e77c8cc2239327c5edb3a432268e5831"
+    },
+    {
+     "name": "recipient",
+     "format": 1,
+     "value": "9406cc6185a346906296840746125a0e44976454"
+    },
+    {
+     "name": "destination",
+     "format": 4,
+     "value": "64657374696e6174696f6e3a20417262697472756d204f6e65"
+    }
+   ]
+  },
+  "safe-exectransaction": {
+   "chainId": 1,
+   "to": "1b9cef6bdd029f378c511e5e6c20ee556b6781b9",
+   "value": 0,
+   "selector": "6a761202",
+   "calldata": "6a761202000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb4800000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000140000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000249f00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000016000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000041000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+   "method": "execTransaction",
+   "txHash": "f333f35112d414011432f099088a6c21283130fbec7fe7bf81b707952cf911ed",
+   "args": [
+    {
+     "name": "to",
+     "format": 1,
+     "value": "a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+    },
+    {
+     "name": "operation",
+     "format": 4,
+     "value": "63616c6c20747970653a20303d43414c4c"
+    },
+    {
+     "name": "gasBudget",
+     "format": 4,
+     "value": "676173206275646765743a20313530303030"
+    },
+    {
+     "name": "protocol",
+     "format": 4,
+     "value": "536166653a2065786563757465207472616e73616374696f6e"
+    }
+   ]
+  },
+  "erc4337-entrypoint-v0.7-handleops": {
+   "chainId": 1,
+   "to": "0000000071727de22e5e9d8baf0edac6f37da032",
+   "value": 0,
+   "selector": "765e827f",
+   "calldata": "765e827f00000000000000000000000000000000000000000000000000000000000000400000000000000000000000004343434343434343434343434343434343434343000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000200000000000000000000000009406cc6185a346906296840746125a0e44976454000000000000000000000000000000000000000000000000000000000000000c000000000000000000000000000000000000000000000000000000000000012000000000000000000000000000000000000000000000000000000000000001400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000c3500000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000016000000000000000000000000000000000000000000000000000000000000001800000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+   "method": "handleOps",
+   "txHash": "a77bd44695287e2e07afd978ff4c4f2fe491e5801e6798fe7d294b0ff39256c5",
+   "args": [
+    {
+     "name": "sender",
+     "format": 1,
+     "value": "9406cc6185a346906296840746125a0e44976454"
+    },
+    {
+     "name": "nonce",
+     "format": 4,
+     "value": "557365724f7065726174696f6e206e6f6e63653a203132"
+    },
+    {
+     "name": "beneficiary",
+     "format": 1,
+     "value": "4343434343434343434343434343434343434343"
+    },
+    {
+     "name": "innerCall",
+     "format": 4,
+     "value": "6465636f6465642073657061726174656c792c206e6f7420726177"
+    }
+   ]
+  },
+  "eip7702-setcode-authorization": {
+   "chainId": 1,
+   "to": "4cd241e8d1510e30b2076397afc7508ae59c66c9",
+   "value": 0,
+   "selector": "04000000",
+   "calldata": "04000000",
+   "method": "authorization",
+   "txHash": "ee8e421241b56e9d90b567a890f70123bd3acce3f4bbc550fd72ab74d1839479",
+   "args": [
+    {
+     "name": "txType",
+     "format": 4,
+     "value": "4e45573a20747970652d3078303420284549502d3737303229"
+    },
+    {
+     "name": "delegate",
+     "format": 1,
+     "value": "4cd241e8d1510e30b2076397afc7508ae59c66c9"
+    },
+    {
+     "name": "chainScope",
+     "format": 4,
+     "value": "636861696e2031206f6e6c79202830203d20414c4c20636861696e7329"
+    },
+    {
+     "name": "effect",
+     "format": 4,
+     "value": "454f41206265636f6d657320616c69617320666f72207468697320636f6465"
+    }
+   ]
+  }
+ }
+}
