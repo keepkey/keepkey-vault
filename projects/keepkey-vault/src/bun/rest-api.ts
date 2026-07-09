@@ -1123,6 +1123,13 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
   const server = Bun.serve({
     port,
     maxRequestBodySize: 1024 * 1024, // 1 MB max (addresses/signing payloads are small)
+    // Disable the idle-connection timeout (Bun default 10s). Signing requests
+    // block the response while the user confirms on the device — an interactive
+    // emulator confirm or a slow physical-button press legitimately exceeds 10s,
+    // and letting Bun close the socket aborts the in-flight sign mid-confirm
+    // ("other side closed" → the device's confirm is cancelled and it returns
+    // home). Human-gated signing has no business timing out at the socket layer.
+    idleTimeout: 0,
     async fetch(req) {
       const url = new URL(req.url)
       const path = url.pathname
@@ -2138,7 +2145,10 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           if (typeof (wallet as any).loadClearsignSigner !== 'function') {
             throw new HttpError(501, 'Connected device does not support LoadClearsignSigner (requires firmware 7.15.0+)')
           }
-          console.log(`[REST] clearsign load-signer: slot=${body.keyId} alias="${body.alias}" pubkey=${body.pubkey}`)
+          const icon = body.icon ? parseHex(body.icon, 'icon') : undefined
+          if (icon && icon.length > 384) throw new HttpError(400, `icon must be <= 384 bytes, got ${icon.length}`)
+          console.log(`[REST] clearsign load-signer: slot=${body.keyId} alias="${body.alias}" pubkey=${body.pubkey}`
+            + `${icon ? ` icon=${icon.length}B ${body.iconWidth}x${body.iconHeight}` : ''}${body.persist ? ' persist' : ''}`)
           try {
             // Loading a signer raises a mandatory on-device "Trust signer" confirm.
             // On the emulator that button press must be armed via emuWrap (interactive
@@ -2146,7 +2156,11 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             // trust screen but no green button ever appears and the call hangs.
             // emuWrap is a transparent no-op on real hardware.
             await emuWrap(
-              () => (wallet as any).loadClearsignSigner({ keyId: body.keyId, pubkey, alias: body.alias }),
+              () => (wallet as any).loadClearsignSigner({
+                keyId: body.keyId, pubkey, alias: body.alias,
+                icon, iconWidth: body.iconWidth, iconHeight: body.iconHeight,
+                persist: body.persist === true,
+              }),
               { operation: 'loadClearsignSigner', opLabel: 'Trust Signer', chain: 'Ethereum' },
             )
             return json({ ok: true, keyId: body.keyId, alias: body.alias })

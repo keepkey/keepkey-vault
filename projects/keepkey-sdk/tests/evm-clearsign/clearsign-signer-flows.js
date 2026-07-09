@@ -36,7 +36,10 @@ const PIONEER_URL = (process.env.PIONEER_URL || 'http://localhost:9001').replace
 const NONCE = '0x0', GAS_PRICE = '0x4a817c800' /* 20 gwei */, GAS_LIMIT = '0x3d090' /* 250000 */
 
 // self mode: golden catalog flows the CI key signs offline (slot 3, byte-parity-proven).
-const SELF_FLOWS = ['aave-v3-supply', 'erc20-transfer', 'erc20-approve-unlimited']
+// CLEARSIGN_FLOW=<key> runs a single flow (useful for isolating one flow / avoiding
+// the consecutive-sign hang while that's investigated separately).
+const ALL_SELF_FLOWS = ['aave-v3-supply', 'erc20-transfer', 'erc20-approve-unlimited']
+const SELF_FLOWS = process.env.CLEARSIGN_FLOW ? [process.env.CLEARSIGN_FLOW] : ALL_SELF_FLOWS
 
 // pioneer mode: real contracts Pioneer classifies VERIFIED. Extend as coverage grows.
 const PIONEER_FLOWS = [

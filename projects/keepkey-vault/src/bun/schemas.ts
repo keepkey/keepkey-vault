@@ -79,6 +79,13 @@ export const LoadClearsignSignerRequest = z.object({
   keyId: z.number().int().min(1).max(3),          // slot 0 = built-in production key, not loadable
   pubkey: z.string().regex(/^(0x)?[0-9a-fA-F]{66}$/), // 33-byte compressed secp256k1 hex
   alias: z.string().min(1).max(31).regex(/^[A-Za-z0-9 _-]+$/), // shown on the device trust screen
+  // Optional identity logo (1bpp mono RLE, <=384 bytes hex) + its dimensions;
+  // shown on the trust screen and led before every clear-sign it vouches for.
+  icon: z.string().regex(/^(0x)?[0-9a-fA-F]{2,768}$/).optional(),
+  iconWidth: z.number().int().min(1).max(64).optional(),
+  iconHeight: z.number().int().min(1).max(64).optional(),
+  // Persist the identity in device flash across reboots (until WipeDevice).
+  persist: z.boolean().optional(),
 }).strip()
 
 /** POST /eth/sign-typed-data */

@@ -113,6 +113,13 @@ export interface LoadClearsignSignerParams {
   pubkey: string
   /** Signer label shown on the device trust screen. `[A-Za-z0-9 _-]`, 1-31 chars. */
   alias: string
+  /** Optional identity logo: 1bpp mono RLE bitmap as hex, <= 384 bytes. Shown on
+   *  the trust screen and led before every clear-sign the identity vouches for. */
+  icon?: string
+  iconWidth?: number
+  iconHeight?: number
+  /** Persist the identity in device flash across reboots (until WipeDevice). */
+  persist?: boolean
 }
 
 export interface LoadClearsignSignerResult {
