@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react"
 import { Box, Flex, Text, Button, Spinner, IconButton, Input } from "@chakra-ui/react"
-import { FaCopy, FaCheck, FaTimes, FaChevronDown, FaChevronUp } from "react-icons/fa"
+import { FaCopy, FaCheck, FaTimes, FaChevronDown, FaChevronUp, FaExternalLinkAlt } from "react-icons/fa"
 import { rpcRequest } from "../lib/rpc"
 
 type RoleKeys = { owner: string; active: string; posting: string; memo: string }
@@ -33,6 +33,17 @@ function Confetti() {
 }
 type Avail = { success: boolean; available: boolean; reason?: string }
 type CreateResp = { status: number; success?: boolean; txid?: string; username?: string; error?: string; retryAfter?: number }
+
+// Standalone copy-icon button with its own transient "copied" state.
+function CopyBtn({ value, label }: { value: string; label: string }) {
+	const [copied, setCopied] = useState(false)
+	return (
+		<IconButton aria-label={label} size="xs" variant="ghost" flexShrink="0"
+			onClick={() => { navigator.clipboard.writeText(value); setCopied(true); setTimeout(() => setCopied(false), 1200) }}>
+			<Box as={copied ? FaCheck : FaCopy} fontSize="13px" color={copied ? "#34D399" : "var(--text-3)"} />
+		</IconButton>
+	)
+}
 
 function KeyRow({ label, value }: { label: string; value: string }) {
 	const [copied, setCopied] = useState(false)
@@ -100,12 +111,28 @@ export function HiveAccountPanel({ activeKey, color, loading, deriveError, onRet
 	if (state === "has" && account) return (
 		<Box className="v3-glass-card" p="4" mt="4">
 			<Text fontSize="11px" color="var(--text-3)" textTransform="uppercase" letterSpacing="0.18em">Hive Account</Text>
-			<Text fontSize="22px" fontWeight="700" color="var(--text-0)" mt="1">@{account.name}</Text>
+			<Flex align="center" gap="1" mt="1">
+				<Text fontSize="22px" fontWeight="700" color="var(--text-0)">@{account.name}</Text>
+				<CopyBtn value={account.name} label="copy Hive account name" />
+			</Flex>
 			<Flex gap="6" mt="3" wrap="wrap">
 				<Box><Text fontSize="11px" color="var(--text-3)">HIVE</Text><Text fontSize="14px" fontFamily="mono" color="var(--text-1)">{account.hive}</Text></Box>
 				<Box><Text fontSize="11px" color="var(--text-3)">HBD</Text><Text fontSize="14px" fontFamily="mono" color="var(--text-1)">{account.hbd}</Text></Box>
 				{account.hp != null && <Box><Text fontSize="11px" color="var(--text-3)">HP</Text><Text fontSize="14px" fontFamily="mono" color="var(--text-1)">{account.hp}</Text></Box>}
 				{account.rcPercent != null && <Box><Text fontSize="11px" color="var(--text-3)">RC</Text><Text fontSize="14px" fontFamily="mono" color="var(--text-1)">{account.rcPercent}%</Text></Box>}
+			</Flex>
+			<Flex gap="2" mt="4" wrap="wrap" align="center">
+				<Text fontSize="11px" color="var(--text-3)" textTransform="uppercase" letterSpacing="0.18em" mr="1">Profile</Text>
+				{[
+					{ label: "PeakD", url: `https://peakd.com/@${account.name}` },
+					{ label: "Hive.blog", url: `https://hive.blog/@${account.name}` },
+					{ label: "Ecency", url: `https://ecency.com/@${account.name}` },
+				].map(l => (
+					<Button key={l.label} size="xs" variant="outline" gap="1.5"
+						onClick={() => rpcRequest("openUrl", { url: l.url }).catch(() => {})}>
+						{l.label}<Box as={FaExternalLinkAlt} fontSize="9px" />
+					</Button>
+				))}
 			</Flex>
 		</Box>
 	)
