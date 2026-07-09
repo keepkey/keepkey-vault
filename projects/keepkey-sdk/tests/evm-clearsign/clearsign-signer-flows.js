@@ -73,6 +73,7 @@ function selfProvider() {
   })
   const signer = { keyId: TEST_KEY_ID, pubkey: CI_TEST_PUBKEY, alias: CI_SIGNER_ALIAS }
   if (IDENTITY_ICON) {
+    signer.alias = IDENTITY_ICON.alias || signer.alias // e.g. "Pioneer" (compass logo)
     signer.icon = IDENTITY_ICON.hex
     signer.iconWidth = IDENTITY_ICON.width
     signer.iconHeight = IDENTITY_ICON.height
