@@ -152,6 +152,7 @@ function SearchBar({ value, onChange, placeholder, autoFocus }: {
         placeholder={placeholder}
         bg="transparent" border="none" color="kk.textPrimary" px="0" fontSize="12px"
         _focus={{ outline: "none", boxShadow: "none" }}
+        autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false}
         autoFocus={autoFocus} />
       {value && (
         <Box as="button" color="kk.textMuted" cursor="pointer" onClick={() => onChange("")}
