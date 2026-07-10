@@ -70,6 +70,11 @@ const NATIVE_EVM_GAS_RESERVE: Record<string, number> = {
   'eip155:43114': 0.005,    // Avalanche C-Chain
 }
 const NATIVE_EVM_GAS_RESERVE_DEFAULT = 0.001
+
+/** THORChain/Midgard reports an all-zero hash for an outbound leg that hasn't
+ *  been scheduled/observed yet. It's a "no tx" sentinel, not a real txid —
+ *  reject it so the UI never renders a bogus OUTPUT TX / explorer link. */
+const isRealHash = (h?: string | null): h is string => !!h && !/^(0x)?0+$/i.test(h)
 type NativeMaxReserveMode = 'safe' | 'closer'
 const NATIVE_EVM_CLOSER_RESERVE_FACTOR = 0.35
 const NATIVE_EVM_CLOSER_RESERVE_FLOOR: Record<string, number> = {
@@ -902,7 +907,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       if (update.confirmations !== undefined) setLiveConfirmations(update.confirmations)
       if (update.outboundConfirmations !== undefined) setLiveOutboundConfirmations(update.outboundConfirmations)
       if (update.outboundRequiredConfirmations !== undefined) setLiveOutboundRequired(update.outboundRequiredConfirmations)
-      if (update.outboundTxid) setLiveOutboundTxid(update.outboundTxid)
+      if (isRealHash(update.outboundTxid)) setLiveOutboundTxid(update.outboundTxid)
       if (update.swapper) setLiveSwapper(update.swapper)
       if (update.relayRequestId) setLiveRelayRequestId(update.relayRequestId)
       if (update.outboundChainId) setLiveOutboundChainId(update.outboundChainId)
@@ -1302,7 +1307,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     setLiveConfirmations(resumeSwap.confirmations)
     if (resumeSwap.outboundConfirmations !== undefined) setLiveOutboundConfirmations(resumeSwap.outboundConfirmations)
     if (resumeSwap.outboundRequiredConfirmations !== undefined) setLiveOutboundRequired(resumeSwap.outboundRequiredConfirmations)
-    if (resumeSwap.outboundTxid) setLiveOutboundTxid(resumeSwap.outboundTxid)
+    if (isRealHash(resumeSwap.outboundTxid)) setLiveOutboundTxid(resumeSwap.outboundTxid)
     if (resumeSwap.relayRequestId) setLiveRelayRequestId(resumeSwap.relayRequestId)
     // Seed outbound chain + refund reason from the persisted record so a
     // refund's explorer link points at the source chain on first render —
