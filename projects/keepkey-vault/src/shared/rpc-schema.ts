@@ -209,6 +209,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       // ── App Settings ──────────────────────────────────────────────────
       getAppSettings: { params: void; response: AppSettings }
       markPassphraseIntroShown: { params: void; response: AppSettings }
+      markBtcOnboardingShown: { params: void; response: AppSettings }
       setRestApiEnabled: { params: { enabled: boolean }; response: AppSettings }
       setPioneerApiBase: { params: { url: string }; response: AppSettings }
       setFiatCurrency: { params: { currency: string }; response: AppSettings }

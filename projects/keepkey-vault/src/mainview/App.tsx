@@ -16,6 +16,7 @@ import { SplashScreen } from "./components/SplashScreen"
 import { isBitcoinOnlyVariant } from "../shared/flags"
 import { useOnline } from "./hooks/useOnline"
 import { OfflineBanner } from "./components/OfflineBanner"
+import { BitcoinOnlyOnboardingDialog } from "./components/BitcoinOnlyOnboardingDialog"
 import { DeviceGrid } from "./components/DeviceGrid"
 import { DeviceClaimedDialog } from "./components/DeviceClaimedDialog"
 import { LinuxUdevWarning } from "./components/LinuxUdevWarning"
@@ -93,6 +94,10 @@ function App() {
 	const [hiveEnabled, setHiveEnabled] = useState(false)
 	const [emulatorEnabled, setEmulatorEnabled] = useState(false)
 	const [offlineModeSetting, setOfflineModeSetting] = useState(false)
+	// One-time btc-only data-source onboarding. Starts true so it never flashes
+	// before settings load; the real value arrives from getAppSettings.
+	const [btcOnboardingSeen, setBtcOnboardingSeen] = useState(true)
+	const [btcOnboardingDismissed, setBtcOnboardingDismissed] = useState(false)
 	// Skip the reachability probe when airplane mode is on — we already know we're
 	// offline and must make zero network calls.
 	const online = useOnline(!offlineModeSetting)
@@ -121,7 +126,7 @@ function App() {
 		const refreshSettings = () => {
 			rpcRequest<AppSettings>("getAppSettings")
 				.then((s) => {
-					setRestApiEnabled(s.restApiEnabled); setWalletConnectEnabled(s.walletConnectEnabled); setEmulatorEnabled(s.emulatorEnabled); setHiveEnabled(s.hiveEnabled); setOfflineModeSetting(s.offlineMode)
+					setRestApiEnabled(s.restApiEnabled); setWalletConnectEnabled(s.walletConnectEnabled); setEmulatorEnabled(s.emulatorEnabled); setHiveEnabled(s.hiveEnabled); setOfflineModeSetting(s.offlineMode); setBtcOnboardingSeen(s.btcOnboardingShown)
 					if (s.pioneerApiBase) loadSupportedChains(s.pioneerApiBase).catch(() => {})
 				})
 				.catch(() => {})
@@ -950,6 +955,9 @@ function App() {
 	return (
 		<>{resizeHandles}{updateBanner}{incomingTxToast}{firmwareDropZone}{signingOverlay}{pairingOverlay}{passphraseOverlay}{charOverlay}{pinOverlay}
 			{offline && <OfflineBanner airplane={offlineModeSetting} />}
+			{splashBitcoinOnly && !btcOnboardingSeen && !btcOnboardingDismissed && portfolioLoaded && !btcSplashHold && (
+				<BitcoinOnlyOnboardingDialog onClose={() => { setBtcOnboardingDismissed(true); rpcRequest("markBtcOnboardingShown").catch(() => {}) }} />
+			)}
 			{(!portfolioLoaded || btcSplashHold) && activeTab === "vault" && (
 				<SplashScreen statusText={t("loadingPortfolio", { ns: "nav" })} variant="connecting" isBitcoinOnly={splashBitcoinOnly} />
 			)}

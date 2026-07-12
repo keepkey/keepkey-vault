@@ -658,6 +658,7 @@ export interface AppSettings {
   offlineMode: boolean           // airplane mode: zero outbound network; BTC data ops throw OFFLINE (default OFF)
   btcNodeEnabled: boolean        // self-host: route BTC data to the user's own node instead of Pioneer (default OFF)
   btcNodeUrl: string             // self-host node RPC URL (auth stored separately, never returned to the UI)
+  btcOnboardingShown: boolean    // one-time btc-only data-source onboarding seen (default false)
   preReleaseUpdates: boolean     // opt-in to pre-release auto-updates (default OFF)
   alphaFirmware: boolean         // opt-in to alpha firmware channel (manifest.beta) (default OFF)
   privateModeEnabled: boolean    // hide portfolio totals from the UI (default OFF)

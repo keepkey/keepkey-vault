@@ -1093,6 +1093,7 @@ function getAppSettings() {
 		offlineMode,
 		btcNodeEnabled: getSetting('btc_node_enabled') === '1',
 		btcNodeUrl: getSetting('btc_node_url') || '',
+		btcOnboardingShown: getSetting('btc_onboarding_shown') === '1',
 		preReleaseUpdates,
 		alphaFirmware,
 		privateModeEnabled,
@@ -5403,6 +5404,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			// never shows again (also set when the OOB passphrase card is completed).
 			markPassphraseIntroShown: async () => {
 				setSetting('passphrase_intro_shown', '1')
+				return getAppSettings()
+			},
+			markBtcOnboardingShown: async () => {
+				setSetting('btc_onboarding_shown', '1')
 				return getAppSettings()
 			},
 			setRestApiEnabled: async (params) => {
