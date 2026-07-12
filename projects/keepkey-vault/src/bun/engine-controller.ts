@@ -2039,6 +2039,7 @@ export class EngineController extends EventEmitter {
     isDowngrade: boolean
     isSameVersion: boolean
     willWipeDevice: boolean
+    isBitcoinOnly: boolean
   } {
     const fileSize = data.length
     const hasKpkyHeader = data.length >= 256
@@ -2093,6 +2094,12 @@ export class EngineController extends EventEmitter {
       }
     }
 
+    // Bitcoin-only variant detection. The BITCOIN_ONLY firmware build compiles in
+    // the literal "KeepKeyBTC"/"EmulatorBTC" (fsm_msg_common.h, under #if BITCOIN_ONLY);
+    // a full build never contains it. This is the only reliable signal at flash
+    // time — the device can't report firmware_variant until it boots the new fw.
+    const isBitcoinOnly = /KeepKeyBTC|EmulatorBTC/.test(payload.toString('latin1'))
+
     // Device state — distinguish bootloader mode from firmware mode
     const isBootloaderMode = this.cachedFeatures?.bootloaderMode === true
     // Use resolved BL version (hash→version from manifest) when raw features lack it
@@ -2137,6 +2144,7 @@ export class EngineController extends EventEmitter {
       isDowngrade,
       isSameVersion,
       willWipeDevice,
+      isBitcoinOnly,
     }
   }
 
