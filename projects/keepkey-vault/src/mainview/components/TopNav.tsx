@@ -32,6 +32,8 @@ interface TopNavProps {
 	passphraseActive?: boolean
 	/** btc-only device: hide multi-chain surfaces (ShapeShift tab, WalletConnect). */
 	isBitcoinOnly?: boolean
+	/** Offline (airplane) mode or OS reports no network — show OFFLINE badge. */
+	offline?: boolean
 	/** Wallet picker plumbing — see WalletSelector. Optional so SplashNav and
 	 *  any caller that doesn't want a picker can omit them. */
 	connectedDeviceId?: string | null
@@ -151,6 +153,7 @@ export function TopNav({
 	onExitToDeviceSelect,
 	passphraseActive,
 	isBitcoinOnly,
+	offline,
 	connectedDeviceId,
 	watchingDeviceId,
 	onWatchWallet,
@@ -309,6 +312,22 @@ export function TopNav({
 								<PassphraseLockIcon />
 								<Text fontSize="9px" fontWeight="500" letterSpacing="0.04em" textTransform="uppercase" fontFamily={FONT_MONO}>
 									{t("passphraseMode")}
+								</Text>
+							</Flex>
+						)}
+						{offline && (
+							<Flex align="center" gap="0.5" bg="rgba(224,140,123,0.12)" px="1.5" py="0.5" borderRadius="sm" color="var(--rose)" title={t("offlineHint", { defaultValue: "No network — Vault is offline. Device, addresses, and signing still work." })}>
+								<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+									<line x1="2" y1="2" x2="22" y2="22" />
+									<path d="M8.5 16.5a5 5 0 0 1 7 0" />
+									<path d="M2 8.82a15 15 0 0 1 4.17-2.65" />
+									<path d="M10.66 5c4.01-.36 8.14.9 11.34 3.76" />
+									<path d="M16.85 11.25a10 10 0 0 1 2.22 1.68" />
+									<path d="M5 13a10 10 0 0 1 5.24-2.76" />
+									<line x1="12" y1="20" x2="12.01" y2="20" />
+								</svg>
+								<Text fontSize="9px" fontWeight="600" letterSpacing="0.06em" textTransform="uppercase" fontFamily={FONT_MONO}>
+									{t("offline", { defaultValue: "Offline" })}
 								</Text>
 							</Flex>
 						)}

@@ -214,6 +214,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       setFiatCurrency: { params: { currency: string }; response: AppSettings }
       setNumberLocale: { params: { locale: string }; response: AppSettings }
       setWalletConnectEnabled: { params: { enabled: boolean }; response: AppSettings }
+      setOfflineMode: { params: { enabled: boolean }; response: AppSettings }
       setBip85Enabled: { params: { enabled: boolean }; response: AppSettings }
       setZcashPrivacyEnabled: { params: { enabled: boolean }; response: AppSettings }
       setHiveEnabled: { params: { enabled: boolean }; response: AppSettings }

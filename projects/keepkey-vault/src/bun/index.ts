@@ -112,6 +112,7 @@ import { startRestApi, clearFeaturesCache, setUiActive, uiHeartbeat, type RestAp
 import { parseSolanaTx, SolanaTxParseError, solanaMessageSlice } from "./solana-tx"
 import { AuthStore } from "./auth"
 import { getPioneer, getPioneerApiBase, resetPioneer, DEFAULT_API_BASE, getQueryKey as getPioneerQueryKey } from "./pioneer"
+import { setBtcBackendOffline } from "./btc-backend"
 import { fetchDefiPositions } from "./zapper"
 import { loadSupportedChains } from "../shared/swap-support-matrix"
 import { PioneerSocket } from "./pioneer-socket"
@@ -731,6 +732,7 @@ let walletConnectEnabled = false
 let bip85Enabled = false
 let zcashPrivacyEnabled = false
 let hiveEnabled = false
+let offlineMode = false
 // Hive sponsor ETH anti-drain gate. ON for release — the vault signs the EIP-191
 // gate and sends ethAddress/ethSignature. HARD DEPENDENCY: Pioneer must have the
 // server-side gate deployed (accept + verify the fields) or /hive/create-account
@@ -773,6 +775,8 @@ function loadSettings() {
 	preReleaseUpdates = getSetting('pre_release_updates') === '1'
 	alphaFirmware = getSetting('alpha_firmware') === '1'
 	privateModeEnabled = getSetting('private_mode_enabled') === '1'
+	offlineMode = getSetting('offline_mode') === '1'
+	setBtcBackendOffline(offlineMode)
 
 	// Normalize emulator flag on platforms with no emulator support. The
 	// emulator runs on macOS (Keychain + libkkemu.dylib) and Windows (DPAPI +
@@ -1075,6 +1079,7 @@ function getAppSettings() {
 		zcashPrivacyEnabled,
 		hiveEnabled,
 		emulatorEnabled,
+		offlineMode,
 		preReleaseUpdates,
 		alphaFirmware,
 		privateModeEnabled,
@@ -5419,6 +5424,13 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			setNumberLocale: async (params) => {
 				setSetting('number_locale', params.locale || 'en-US')
 				console.log('[settings] Number locale set to:', params.locale)
+				return getAppSettings()
+			},
+			setOfflineMode: async (params) => {
+				offlineMode = params.enabled
+				setSetting('offline_mode', params.enabled ? '1' : '0')
+				setBtcBackendOffline(offlineMode)
+				console.log('[settings] Offline (airplane) mode:', params.enabled)
 				return getAppSettings()
 			},
 			setWalletConnectEnabled: async (params) => {
