@@ -1123,11 +1123,24 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
   const server = Bun.serve({
     port,
     maxRequestBodySize: 1024 * 1024, // 1 MB max (addresses/signing payloads are small)
-    async fetch(req) {
+    // Keep Bun's default idle timeout for the server as a whole (so idle/
+    // unauthenticated connections still get reaped) — but lift it per-request
+    // for human-gated device operations below, where the response legitimately
+    // blocks while the user confirms on the device. Without that, Bun closes
+    // the socket mid-confirm ("other side closed" → the device cancels the
+    // confirm and returns home), which killed the second consecutive sign.
+    async fetch(req, server) {
       const url = new URL(req.url)
       const path = url.pathname
       const method = req.method
       const requestStart = Date.now()
+
+      // Human-gated device ops (signing + the clear-sign trust confirm) block
+      // the socket while the user presses the physical button. Disable the idle
+      // timeout for just these requests, not the whole server.
+      if (method === 'POST' && (SIGNING_ROUTES.has(path) || path === '/eth/clearsign/load-signer')) {
+        server.timeout(req, 0)
+      }
 
       // Resolve app info from bearer token (or 'public')
       const resolveAppInfo = (): { appName: string; imageUrl: string } => {
@@ -2138,7 +2151,10 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           if (typeof (wallet as any).loadClearsignSigner !== 'function') {
             throw new HttpError(501, 'Connected device does not support LoadClearsignSigner (requires firmware 7.15.0+)')
           }
-          console.log(`[REST] clearsign load-signer: slot=${body.keyId} alias="${body.alias}" pubkey=${body.pubkey}`)
+          const icon = body.icon ? parseHex(body.icon, 'icon') : undefined
+          if (icon && icon.length > 384) throw new HttpError(400, `icon must be <= 384 bytes, got ${icon.length}`)
+          console.log(`[REST] clearsign load-signer: slot=${body.keyId} alias="${body.alias}" pubkey=${body.pubkey}`
+            + `${icon ? ` icon=${icon.length}B ${body.iconWidth}x${body.iconHeight}` : ''}${body.persist ? ' persist' : ''}`)
           try {
             // Loading a signer raises a mandatory on-device "Trust signer" confirm.
             // On the emulator that button press must be armed via emuWrap (interactive
@@ -2146,7 +2162,11 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             // trust screen but no green button ever appears and the call hangs.
             // emuWrap is a transparent no-op on real hardware.
             await emuWrap(
-              () => (wallet as any).loadClearsignSigner({ keyId: body.keyId, pubkey, alias: body.alias }),
+              () => (wallet as any).loadClearsignSigner({
+                keyId: body.keyId, pubkey, alias: body.alias,
+                icon, iconWidth: body.iconWidth, iconHeight: body.iconHeight,
+                persist: body.persist === true,
+              }),
               { operation: 'loadClearsignSigner', opLabel: 'Trust Signer', chain: 'Ethereum' },
             )
             return json({ ok: true, keyId: body.keyId, alias: body.alias })
