@@ -1478,6 +1478,11 @@ export class EngineController extends EventEmitter {
       needsInit: !initialized,
       initialized,
       passphraseProtection: features?.passphraseProtection ?? false,
+      // Firmware variant, straight from the device Features. "KeepKeyBTC"/"EmulatorBTC"
+      // = bitcoin-only firmware; "bitcoin-only-locked" = multi-chain firmware
+      // refusing a btc-only seed (wipe required); else multi-chain. Drives the
+      // BTC-only UI restriction (see isBitcoinOnlyVariant).
+      firmwareVariant: features?.firmwareVariant || undefined,
       // In bootloader mode the device can't report `initialized` — use firmware
       // hash presence instead. If firmware bytes exist on flash, the device has
       // been set up before and entered bootloader for an update (not OOB).
@@ -1579,30 +1584,37 @@ export class EngineController extends EventEmitter {
     }
   }
 
-  async startFirmwareUpdate() {
+  async startFirmwareUpdate(bitcoinOnly = false) {
     if (!this.wallet) throw new Error('No device connected')
     this.updatePhase = 'flashing'
     this.emit('state-change', this.getDeviceState())
     this.emit('firmware-progress', { percent: 0, message: 'Starting firmware update...' })
 
     try {
+      // Pick the manifest entry for the chosen variant. Bitcoin-only lives in a
+      // separate manifest field (firmwareBitcoinOnly) and REQUIRES a manifest
+      // entry — there's no github fallback for it.
       const channel = this.getChannelEntry()
+      const fwEntry = bitcoinOnly ? channel?.firmwareBitcoinOnly : channel?.firmware
+      if (bitcoinOnly && !fwEntry) {
+        throw new Error('Bitcoin-only firmware is not available in this build (no manifest entry)')
+      }
       this.emit('firmware-progress', { percent: 10, message: 'Loading firmware...' })
-      const firmware = channel
-        ? await this.loadBinary(channel.firmware.url)
+      const firmware = fwEntry
+        ? await this.loadBinary(fwEntry.url)
         : Buffer.from(await (await fetch(`https://github.com/keepkey/keepkey-firmware/releases/download/v${this.latestFirmware}/firmware.keepkey.bin`)).arrayBuffer())
 
       // Binary integrity check — compare file hash against manifest.
       // If the binary starts with "KPKY" magic bytes, strip the 256-byte container
       // header before hashing — the manifest hash covers only the payload.
-      if (channel?.firmware?.hash) {
+      if (fwEntry?.hash) {
         const hasKpkyHeader = firmware.length >= 256
           && firmware[0] === 0x4B && firmware[1] === 0x50
           && firmware[2] === 0x4B && firmware[3] === 0x59 // "KPKY"
         const hashPayload = hasKpkyHeader ? firmware.subarray(256) : firmware
         const downloadedHash = sha256Hex(hashPayload)
-        if (downloadedHash !== channel.firmware.hash) {
-          throw new Error(`Firmware binary integrity check failed: expected ${channel.firmware.hash}, got ${downloadedHash}`)
+        if (downloadedHash !== fwEntry.hash) {
+          throw new Error(`Firmware binary integrity check failed: expected ${fwEntry.hash}, got ${downloadedHash}`)
         }
         console.log(`[Engine] Firmware binary integrity verified${hasKpkyHeader ? ' (KPKY header stripped)' : ''}`)
         this.emit('firmware-progress', { percent: 20, message: `Binary verified — sha256 matches the pinned release hash (${downloadedHash.slice(0, 16)}…)` })
