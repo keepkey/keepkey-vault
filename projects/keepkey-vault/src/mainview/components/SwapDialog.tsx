@@ -1262,6 +1262,18 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     }
   }, [assets, chain, initialFromCaip, initialFromAsset])
 
+  // Default the output to the input chain's native gas asset for a TOKEN input
+  // (e.g. USDT mainnet → ETH) when no output is chosen yet. Opening swap from a
+  // token page shouldn't land on a blank output; native inputs keep their own
+  // DEFAULT_OUTPUT above. Runs once assets are loaded (the initialFromAsset fast
+  // path sets fromAsset before assets arrive, so we can't do it inline there).
+  useEffect(() => {
+    if (!fromAsset || toAsset || assets.length === 0) return
+    if (!fromAsset.contractAddress) return // native input handled by DEFAULT_OUTPUT
+    const nativeOut = assets.find(a => a.chainId === fromAsset.chainId && !a.contractAddress)
+    if (nativeOut) setToAsset(nativeOut)
+  }, [fromAsset, toAsset, assets])
+
   // ── Resume from swap history ──────────────────────────────────────
   const hasResumedRef = useRef<string | null>(null)
   // Clear resume guard when dialog closes so re-clicking same swap works
@@ -3677,21 +3689,29 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
               </Box>
 
               {fromAsset.chainFamily === 'evm' && (
-                <Box w="full" bg="rgba(255,255,255,0.02)" border="1px solid" borderColor={auditPayloadReady ? "rgba(139,227,196,0.22)" : "rgba(233,196,106,0.28)"} borderRadius="lg" px="3" py="2">
-                  <Flex align="center" justify="space-between" mb="2" gap="2">
+                <Box as="details" className="kk-acc" w="full" bg="rgba(255,255,255,0.02)" border="1px solid" borderColor={auditPayloadReady ? "rgba(139,227,196,0.22)" : "rgba(233,196,106,0.28)"} borderRadius="lg" overflow="hidden">
+                  <Box as="summary" px="3" py="2"
+                    display="flex" alignItems="center" justifyContent="space-between" gap="2"
+                    _hover={{ bg: "rgba(255,255,255,0.03)" }} style={{ transition: 'background 120ms ease-out' }}>
                     <Text fontSize="11px" fontWeight="700" color="kk.textPrimary">
                       {t("evmSummary", "EVM summary")}
                     </Text>
-                    <Text fontSize="10px" fontFamily="mono" color={auditPayloadReady ? "var(--teal)" : "var(--gold)"}>
-                      {previewLoading
-                        ? t("payloadBuilding", "building payload")
-                        : previewError
-                          ? t("payloadFailed", "payload failed")
-                          : auditPayloadReady
-                            ? t("payloadReady", "payload ready")
-                            : t("payloadRequiredShort", "payload required")}
-                    </Text>
-                  </Flex>
+                    <Flex align="center" gap="2" color="kk.textMuted">
+                      <Text fontSize="10px" fontFamily="mono" color={auditPayloadReady ? "var(--teal)" : "var(--gold)"}>
+                        {previewLoading
+                          ? t("payloadBuilding", "building payload")
+                          : previewError
+                            ? t("payloadFailed", "payload failed")
+                            : auditPayloadReady
+                              ? t("payloadReady", "payload ready")
+                              : t("payloadRequiredShort", "payload required")}
+                      </Text>
+                      <svg className="kk-acc-chev" width="14" height="14" viewBox="0 0 16 16" fill="none">
+                        <path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    </Flex>
+                  </Box>
+                  <Box className="kk-acc-body" px="3" pt="1" pb="2">
                   <VStack gap="2" align="stretch">
                     {previewLoading && (
                       <Text fontSize="10px" color="kk.textMuted">{t("buildingPayloadDetail", "Building the exact transaction payload for review...")}</Text>
@@ -3717,6 +3737,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                       />
                     )}
                   </VStack>
+                  </Box>
                 </Box>
               )}
 
