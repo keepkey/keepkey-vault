@@ -9,6 +9,8 @@ import { IS_MAC, IS_WINDOWS } from "../lib/platform"
 import { Z } from "../lib/z-index"
 import type { DeviceStateInfo, AppSettings, EmulatorWalletInfo } from "../../shared/types"
 import { versionCompare } from "../../shared/firmware-versions"
+import { isBitcoinOnlyVariant } from "../../shared/flags"
+import { SelfHostNodePanel } from "./SelfHostNodePanel"
 
 interface DevicePolicy {
 	policyName?: string
@@ -1589,6 +1591,11 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 									disabled={togglingOffline}
 								/>
 							</Flex>
+
+							{/* Self-host node — bitcoin-only devices only */}
+							{isBitcoinOnlyVariant(deviceState.firmwareVariant) && (
+								<SelfHostNodePanel settings={appSettings} onChange={setAppSettings} />
+							)}
 
 							{/* WalletConnect toggle */}
 							<Flex justify="space-between" align="center">
