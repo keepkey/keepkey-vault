@@ -45,7 +45,7 @@ export function SelfHostNodePanel({ settings, onChange }: { settings: AppSetting
         {enabled && <Text fontSize="9px" color="var(--teal)" bg="rgba(139,227,196,0.12)" px="1.5" py="0.5" borderRadius="sm" textTransform="uppercase" letterSpacing="0.05em">Active</Text>}
       </Flex>
       <Text fontSize="sm" color="kk.textSecondary" mb="3">
-        Point Vault at your own Bitcoin Core node instead of Pioneer. If your node fails, Vault shows the error — it never falls back to Pioneer.
+        Point Vault at your own {type === "blockbook" ? "Blockbook indexer" : "Bitcoin Core node"} instead of Pioneer. If your node fails, Vault shows the error — it never falls back to Pioneer.
       </Text>
 
       <Text fontSize="11px" color="kk.textSecondary" mb="1">Node type</Text>

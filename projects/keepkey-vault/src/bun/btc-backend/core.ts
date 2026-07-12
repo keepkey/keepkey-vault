@@ -78,8 +78,15 @@ async function coreRpc(cfg: CoreConfig, method: string, params: any[] = [], time
     const body = await res.text().catch(() => '')
     throw new Error(`Bitcoin node HTTP ${res.status} on ${method}${body ? `: ${body.slice(0, 180)}` : ''}`)
   }
-  const json: any = await res.json().catch(() => null)
-  if (!json) throw new Error(`Bitcoin node returned a non-JSON response on ${method}`)
+  const text = await res.text().catch(() => '')
+  let json: any
+  try { json = JSON.parse(text) } catch {
+    const looksHtml = /^\s*</.test(text)
+    throw new Error(
+      `Expected Bitcoin Core JSON-RPC but got ${looksHtml ? 'an HTML page' : 'a non-JSON response'} on ${method}. ` +
+      `Is this a Bitcoin Core RPC URL (usually :8332)? A Blockbook or web URL (e.g. :9130) won't work with the "Bitcoin Core" type — switch the node type to Blockbook.`,
+    )
+  }
   if (json.error) throw new Error(`Bitcoin node RPC error on ${method}: ${json.error.message || JSON.stringify(json.error)}`)
   return json.result
 }
