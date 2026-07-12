@@ -1562,6 +1562,13 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 						</VStack>
 					</Section>
 
+					{/* ── Bitcoin node (self-host) — btc-only devices ─── */}
+					{isBitcoinOnlyVariant(deviceState.firmwareVariant) && (
+						<Section title="Bitcoin node" defaultOpen={true}>
+							<SelfHostNodePanel settings={appSettings} onChange={setAppSettings} />
+						</Section>
+					)}
+
 					{/* ── Feature Flags ──────────────────────────────── */}
 					<Section title={t("featureFlags")} defaultOpen={false}>
 						<VStack gap="4" align="stretch">
@@ -1591,11 +1598,6 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 									disabled={togglingOffline}
 								/>
 							</Flex>
-
-							{/* Self-host node — bitcoin-only devices only */}
-							{isBitcoinOnlyVariant(deviceState.firmwareVariant) && (
-								<SelfHostNodePanel settings={appSettings} onChange={setAppSettings} />
-							)}
 
 							{/* WalletConnect toggle */}
 							<Flex justify="space-between" align="center">
