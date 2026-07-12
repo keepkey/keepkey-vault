@@ -112,7 +112,7 @@ import { startRestApi, clearFeaturesCache, setUiActive, uiHeartbeat, type RestAp
 import { parseSolanaTx, SolanaTxParseError, solanaMessageSlice } from "./solana-tx"
 import { AuthStore } from "./auth"
 import { getPioneer, getPioneerApiBase, resetPioneer, DEFAULT_API_BASE, getQueryKey as getPioneerQueryKey } from "./pioneer"
-import { setBtcBackendOffline } from "./btc-backend"
+import { setBtcBackendOffline, setBtcNodeConfig } from "./btc-backend"
 import { fetchDefiPositions } from "./zapper"
 import { loadSupportedChains } from "../shared/swap-support-matrix"
 import { PioneerSocket } from "./pioneer-socket"
@@ -777,6 +777,7 @@ function loadSettings() {
 	privateModeEnabled = getSetting('private_mode_enabled') === '1'
 	offlineMode = getSetting('offline_mode') === '1'
 	setBtcBackendOffline(offlineMode)
+	loadBtcNodeConfig()
 
 	// Normalize emulator flag on platforms with no emulator support. The
 	// emulator runs on macOS (Keychain + libkkemu.dylib) and Windows (DPAPI +
@@ -789,6 +790,16 @@ function loadSettings() {
 		emulatorEnabled = false
 		setSetting('emulator_enabled', '0')
 	}
+}
+
+/** Push the persisted self-host node config into the BtcBackend selector. Called
+ *  on startup and after setBtcNode. Auth lives in its own setting, never returned
+ *  to the UI. Disabled or URL-less → null → getBtcBackend() falls back to Pioneer. */
+function loadBtcNodeConfig() {
+	const enabled = getSetting('btc_node_enabled') === '1'
+	const url = getSetting('btc_node_url') || ''
+	const auth = getSetting('btc_node_auth') || undefined
+	setBtcNodeConfig(enabled && url ? { url, auth } : null)
 }
 let appVersionCache = ''
 let restServer: ReturnType<typeof startRestApi> | null = null
@@ -1080,6 +1091,8 @@ function getAppSettings() {
 		hiveEnabled,
 		emulatorEnabled,
 		offlineMode,
+		btcNodeEnabled: getSetting('btc_node_enabled') === '1',
+		btcNodeUrl: getSetting('btc_node_url') || '',
 		preReleaseUpdates,
 		alphaFirmware,
 		privateModeEnabled,
@@ -5432,6 +5445,25 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				setBtcBackendOffline(offlineMode)
 				console.log('[settings] Offline (airplane) mode:', params.enabled)
 				return getAppSettings()
+			},
+			// Self-host Bitcoin node. Persist url/auth/enabled and re-point the
+			// BtcBackend. Empty url with enabled=false clears it → back to Pioneer.
+			setBtcNode: async (params) => {
+				setSetting('btc_node_enabled', params.enabled ? '1' : '0')
+				setSetting('btc_node_url', params.url || '')
+				// Only overwrite auth when provided — lets the user toggle enable
+				// without re-typing credentials (undefined = keep existing).
+				if (params.auth !== undefined) setSetting('btc_node_auth', params.auth)
+				loadBtcNodeConfig()
+				console.log('[settings] Self-host node:', params.enabled ? `enabled → ${params.url}` : 'disabled')
+				return getAppSettings()
+			},
+			// Verbose reachability + capability probe for the config panel. Uses the
+			// posted url/auth (pre-save), or the saved auth when re-testing.
+			testBtcNode: async (params) => {
+				const { testCoreNode } = await import('./btc-backend/core')
+				const auth = params.auth !== undefined ? params.auth : (getSetting('btc_node_auth') || undefined)
+				return testCoreNode({ url: params.url, auth })
 			},
 			setWalletConnectEnabled: async (params) => {
 				walletConnectEnabled = params.enabled
