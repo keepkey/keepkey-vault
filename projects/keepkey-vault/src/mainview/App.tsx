@@ -76,6 +76,10 @@ function App() {
 	}, [wizardComplete, deviceState.state])
 	const [portfolioLoaded, setPortfolioLoaded] = useState(false)
 	const [gridReady, setGridReady] = useState(false)
+	// Hold the bitcoin-only branded splash for a beat on startup so it's actually
+	// seen — a purged btc-only device loads its (BTC-only) portfolio near-instantly,
+	// which would otherwise flash the splash by. Cleared by a timer once connected.
+	const [btcSplashHold, setBtcSplashHold] = useState(false)
 	const [settingsOpen, setSettingsOpen] = useState(false)
 	const [activeTab, setActiveTab] = useState<NavTab>("vault")
 	const [paletteOpen, setPaletteOpen] = useState(false)
@@ -130,6 +134,20 @@ function App() {
 	useEffect(() => {
 		if (deviceState.state === "disconnected") setFirmwareSkipped(false)
 	}, [deviceState.state])
+
+	// Hold the bitcoin-only branded splash ~2.2s once a btc-only device is
+	// detected, so it's actually seen on startup instead of flashing by (a purged
+	// btc-only device loads its BTC-only portfolio near-instantly). Re-arms on the
+	// state/variant settling; a non-btc or disconnected device clears it.
+	useEffect(() => {
+		if (deviceState.state === "disconnected" || !isBitcoinOnlyVariant(deviceState.firmwareVariant)) {
+			setBtcSplashHold(false)
+			return
+		}
+		setBtcSplashHold(true)
+		const t = setTimeout(() => setBtcSplashHold(false), 2200)
+		return () => clearTimeout(t)
+	}, [deviceState.state, deviceState.firmwareVariant])
 
 	// ── REST API UI-active handshake ─────────────────────────────────
 	// The Bun process refuses to serve pubkeys/addresses on port 1646 unless
@@ -923,11 +941,11 @@ function App() {
 
 	return (
 		<>{resizeHandles}{updateBanner}{incomingTxToast}{firmwareDropZone}{signingOverlay}{pairingOverlay}{passphraseOverlay}{charOverlay}{pinOverlay}
-			{!portfolioLoaded && activeTab === "vault" && (
+			{(!portfolioLoaded || btcSplashHold) && activeTab === "vault" && (
 				<SplashScreen statusText={t("loadingPortfolio", { ns: "nav" })} variant="connecting" isBitcoinOnly={splashBitcoinOnly} />
 			)}
 			<Flex direction="column" h="100vh" bg="transparent" color="kk.textPrimary" position="relative"
-				{...(!portfolioLoaded && activeTab === "vault" ? { position: "absolute", w: 0, h: 0, overflow: "hidden" } as const : {})}
+				{...((!portfolioLoaded || btcSplashHold) && activeTab === "vault" ? { position: "absolute", w: 0, h: 0, overflow: "hidden" } as const : {})}
 			>
 				{/* Full-screen ambient radial glow — gentler, neutral-warm tint
 				    so the page feels lit but doesn't read as a yellow wash. */}
