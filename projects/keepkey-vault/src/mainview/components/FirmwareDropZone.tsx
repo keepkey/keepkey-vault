@@ -395,6 +395,19 @@ export function FirmwareDropZone() {
 									>
 										{analysis.isSigned ? "SIGNED" : "UNSIGNED"}
 									</Box>
+									{analysis.isBitcoinOnly && (
+										<Box
+											px="2" py="0.5"
+											borderRadius="md"
+											fontSize="xs"
+											fontWeight="700"
+											letterSpacing="0.05em"
+											bg="rgba(247,147,26,0.15)"
+											color="#F7931A"
+										>
+											BITCOIN-ONLY
+										</Box>
+									)}
 									{analysis.hasKpkyHeader && (
 										<Text fontSize="xs" color="kk.textSecondary">KPKY header detected</Text>
 									)}
@@ -481,6 +494,7 @@ export function FirmwareDropZone() {
 								<FirmwareUpgradePreview
 									currentVersion={analysis.currentFirmwareVersion}
 									targetVersion={analysis.detectedVersion}
+									isBitcoinOnly={analysis.isBitcoinOnly}
 								/>
 							</Box>
 						)}

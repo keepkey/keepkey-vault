@@ -118,6 +118,7 @@ export interface FirmwareAnalysis {
   isDowngrade: boolean
   isSameVersion: boolean
   willWipeDevice: boolean  // true when crossing signed/unsigned boundary in either direction (not in BL mode)
+  isBitcoinOnly: boolean   // btc-only firmware variant, detected from the embedded KeepKeyBTC/EmulatorBTC string
 }
 
 // Pioneer integration types
