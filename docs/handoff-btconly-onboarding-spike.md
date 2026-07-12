@@ -2,7 +2,14 @@
 
 **Branch:** `spike/bitcoin-only-onboarding` (worktree off `origin/develop`)
 **Worktree:** `/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11-btconly-onboarding`
-**Status:** SPIKE — design + de-risk first. These are sensitive, hard-to-reverse flows (firmware variant + seed-lock). Nothing implemented yet.
+**Status:** SPIKE — vault-side plumbing wired behind `BITCOIN_ONLY_ONBOARDING` (default OFF, `src/shared/flags.ts`). Firmware release pipeline (blocker #1) still owes a signed btc-only asset; on-device hash entries and device dry-run still pending. Do NOT flip the flag on until a signed btc-only asset ships in a release, then enable in the release AFTER that.
+
+**Wired (flag off = byte-identical to today):**
+- `flags.ts` — `BITCOIN_ONLY_ONBOARDING` + `BTC_ONLY_FIRMWARE_ASSET` (anticipated `firmware.keepkey-btc.bin`, unconfirmed).
+- `engine-controller.startFirmwareUpdate(bitcoinOnly)` — btc-only forces the fallback fetch path with the btc asset name; no hash check yet (unsigned placeholder tolerated until the signed asset exists).
+- RPC (`index.ts`) + `useFirmwareUpdate` hook thread `bitcoinOnly` through.
+- `OobSetupWizard` firmware step — inline Multi-coin / Bitcoin-only selector, OOB-fresh-device-only, with one-way warning. (Chose inline over a separate wizard step to avoid threading a new step through 5 jump-to-firmware sites; upgrade to a dedicated step if UX needs it.)
+- `firmware-versions.ts` — pointer comment where btc-only on-device hashes go.
 
 > Note: there is a stale `keepkey-vault-v11-bitcoin-only` worktree on `feature/bitcoin-only` (behind develop, unrelated dirty submodule) — leave it alone; this spike lives here.
 

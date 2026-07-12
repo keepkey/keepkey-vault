@@ -2,6 +2,7 @@ import { Component, Fragment, lazy, Suspense, useState, useEffect, useCallback, 
 import { Box, Flex, Text, Spinner, Image, Button } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
 import { CHAINS, customChainToChainDef, isChainSupported, type ChainDef } from "../../shared/chains"
+import { isBitcoinOnlyVariant } from "../../shared/flags"
 import { versionCompare } from "../../shared/firmware-versions"
 import { formatBalance } from "../lib/formatting"
 import { AnimatedUsd } from "./AnimatedUsd"
@@ -624,6 +625,8 @@ interface DashboardProps {
 	watchOnlyDeviceId?: string
 	onOpenSettings?: () => void
 	firmwareVersion?: string
+	/** Device firmware variant — when bitcoin-only, the chain list is restricted to Bitcoin */
+	firmwareVariant?: string
 	/** When true (e.g. after OOB setup), skip stale cache and auto-refresh live balances */
 	forceRefresh?: boolean
 	/** Called after forceRefresh has been consumed (one-shot) — parent should clear the flag */
@@ -646,7 +649,7 @@ function formatTimeAgo(ts: number, t: (key: string, opts?: Record<string, unknow
 	return t('timeDaysAgo', { count: days })
 }
 
-export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettings, firmwareVersion, forceRefresh, onForceRefreshConsumed, isHiddenWallet }: DashboardProps) {
+export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettings, firmwareVersion, firmwareVariant, forceRefresh, onForceRefreshConsumed, isHiddenWallet }: DashboardProps) {
 	const { t } = useTranslation("dashboard")
 	const [selectedChain, setSelectedChain] = useState<ChainDef | null>(null)
 	const [selectedChainAction, setSelectedChainAction] = useState<"send" | "receive" | "swap" | "privacy" | undefined>(undefined)
@@ -1453,13 +1456,16 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 		return n
 	}, [cleanBalanceUsd])
 
+	const btcOnly = isBitcoinOnlyVariant(firmwareVariant)
 	const visibleChains = useMemo(() => allChains.filter(c => {
+		// Bitcoin-only firmware physically can't touch other chains — show only BTC.
+		if (btcOnly) return c.id === 'bitcoin'
 		if (!isChainSupported(c, firmwareVersion)) return false
 		// Zcash transparent is hidden by default — show when feature flag is on
 		if (c.id === 'zcash') return zcashEnabled
 		if (c.id === 'hive') return hiveEnabled
 		return !c.hidden
-	}), [allChains, firmwareVersion, zcashEnabled, hiveEnabled])
+	}), [allChains, btcOnly, firmwareVersion, zcashEnabled, hiveEnabled])
 
 	const sortedChains = useMemo(() => [...visibleChains].sort((a, b) => {
 		const aUsd = cleanBalanceUsd.get(a.id)?.usd || 0

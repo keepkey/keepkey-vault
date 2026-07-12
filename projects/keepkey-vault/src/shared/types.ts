@@ -45,6 +45,10 @@ export interface DeviceStateInfo {
   needsInit: boolean
   initialized: boolean
   isOob: boolean
+  /** Firmware variant from device Features. "KeepKeyBTC"/"EmulatorBTC" = bitcoin-only
+   *  firmware; "bitcoin-only-locked" = multi-chain firmware refusing a btc-only seed.
+   *  See isBitcoinOnlyVariant() in shared/flags. */
+  firmwareVariant?: string
   resolvedFwVersion?: string  // firmware version resolved from on-device hash (bootloader mode only)
   firmwareHash?: string
   bootloaderHash?: string
@@ -78,14 +82,21 @@ export interface FatalEvent {
 }
 
 // Remote firmware manifest (from GitHub)
+/** A single downloadable firmware/bootloader binary: version + relative URL + hash. */
+export interface FirmwareBinaryRef { version: string; url: string; hash: string }
+
 export interface FirmwareManifest {
   latest: {
-    firmware: { version: string; url: string; hash: string }
-    bootloader: { version: string; url: string; hash: string }
+    firmware: FirmwareBinaryRef
+    bootloader: FirmwareBinaryRef
+    /** Bitcoin-only firmware variant — installed when the user picks Bitcoin-only
+     *  during onboarding. Absent until a btc-only build is published. */
+    firmwareBitcoinOnly?: FirmwareBinaryRef
   }
   beta: {
-    firmware: { version: string; url: string; hash: string }
-    bootloader: { version: string; url: string; hash: string }
+    firmware: FirmwareBinaryRef
+    bootloader: FirmwareBinaryRef
+    firmwareBitcoinOnly?: FirmwareBinaryRef
   }
   hashes: {
     bootloader: Record<string, string>

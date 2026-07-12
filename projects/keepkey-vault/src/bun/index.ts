@@ -1962,7 +1962,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			getDeviceState: async () => engine.getDeviceState(),
 			retryConnect: async () => { await engine.retryConnect() },
 			startBootloaderUpdate: async () => { await engine.startBootloaderUpdate() },
-			startFirmwareUpdate: async () => { await engine.startFirmwareUpdate() },
+			startFirmwareUpdate: async (params: { bitcoinOnly?: boolean }) => { await engine.startFirmwareUpdate(params?.bitcoinOnly) },
 			flashFirmware: async () => { await engine.flashFirmware() },
 			analyzeFirmware: async (params) => {
 				if (params.data.length > 10_000_000) throw new Error('Firmware data too large (max ~7.5MB)')
