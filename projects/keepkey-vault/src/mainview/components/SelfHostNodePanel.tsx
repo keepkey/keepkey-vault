@@ -109,18 +109,19 @@ export function SelfHostNodePanel({ settings, onChange }: { settings: AppSetting
                 borderColor="kk.border" color="kk.textPrimary" _hover={{ bg: "var(--ink-2)" }}>
           {testing ? "Testing…" : "Test connection"}
         </Button>
-        {enabled ? (
-          <Button size="sm" flex="1" onClick={() => save(false)} disabled={saving}
-                  bg="rgba(224,140,123,0.15)" color="var(--rose)" _hover={{ bg: "rgba(224,140,123,0.25)" }}>
-            {saving ? "…" : "Disable"}
-          </Button>
-        ) : (
-          <Button size="sm" flex="1" onClick={() => save(true)} disabled={saving || !url.trim()}
-                  bg="var(--gold)" color="kk.bg" _hover={{ opacity: 0.9 }}>
-            {saving ? "…" : "Use my node"}
-          </Button>
-        )}
+        {/* Always a save path — editing the URL/type/creds while already enabled
+            must persist (otherwise the node keeps probing the stale config). */}
+        <Button size="sm" flex="1" onClick={() => save(true)} disabled={saving || !url.trim()}
+                bg="var(--gold)" color="kk.bg" _hover={{ opacity: 0.9 }}>
+          {saving ? "…" : enabled ? "Save changes" : "Use my node"}
+        </Button>
       </Flex>
+      {enabled && (
+        <Box as="button" mt="2" w="100%" textAlign="center" fontSize="11px" color="var(--rose)"
+             _hover={{ textDecoration: "underline" }} onClick={() => !saving && save(false)}>
+          Disable self-host node
+        </Box>
+      )}
     </Box>
   )
 }
