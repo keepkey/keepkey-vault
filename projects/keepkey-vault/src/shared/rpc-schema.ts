@@ -406,6 +406,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       applyUpdate: { params: void; response: void }
       getUpdateInfo: { params: void; response: UpdateInfo | null }
       getAppVersion: { params: void; response: { version: string; channel: string } }
+      pingPioneer: { params: void; response: { online: boolean } }
       // ── REST API UI-active gate ────────────────────────────────
       // Frontend signals whether the Vault UI window is open so the REST API
       // (port 1646) won't serve pubkeys/addresses to 3rd-party apps unless

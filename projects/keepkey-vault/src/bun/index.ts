@@ -7558,6 +7558,18 @@ udevadm trigger --subsystem-match=usb --attr-match=idVendor=2b24 || udevadm trig
 				version: await Updater.localInfo.version(),
 				channel: await Updater.localInfo.channel(),
 			}),
+			// Real reachability probe — navigator.onLine is unreliable in the
+			// WebView (it stays true after wifi drops). Any HTTP response = online;
+			// a thrown fetch (DNS/socket/timeout) = offline. Skipped by the client
+			// when offline mode is on, so this never fires in airplane mode.
+			pingPioneer: async () => {
+				try {
+					await fetch(getPioneerApiBase(), { method: 'HEAD', signal: AbortSignal.timeout(4000) })
+					return { online: true }
+				} catch {
+					return { online: false }
+				}
+			},
 			// ── REST API UI-active gate ───────────────────────────────
 			// The WebView calls uiSetActive(true) on mount and uiSetActive(false)
 			// before unload, plus a periodic heartbeat. Without a fresh heartbeat,

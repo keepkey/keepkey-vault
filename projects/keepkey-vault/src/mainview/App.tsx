@@ -92,7 +92,9 @@ function App() {
 	const [hiveEnabled, setHiveEnabled] = useState(false)
 	const [emulatorEnabled, setEmulatorEnabled] = useState(false)
 	const [offlineModeSetting, setOfflineModeSetting] = useState(false)
-	const online = useOnline()
+	// Skip the reachability probe when airplane mode is on — we already know we're
+	// offline and must make zero network calls.
+	const online = useOnline(!offlineModeSetting)
 	const [pendingAppUrl, setPendingAppUrl] = useState<string | null>(null)
 	const [pendingWcOpen, setPendingWcOpen] = useState(false)
 	const [enablingApi, setEnablingApi] = useState(false)
