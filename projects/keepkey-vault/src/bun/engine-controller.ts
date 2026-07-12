@@ -2223,7 +2223,19 @@ export class EngineController extends EventEmitter {
    * passphrase toggle / reconnect, so the guard re-reads the device instead of
    * trusting session state. Returns null if no wallet or derivation fails.
    */
-  async deriveSeedIdentity(): Promise<string | null> {
+  /**
+   * Stable per-seed fingerprint. ETH primary address (m/44'/60'/0'/0/0) on
+   * multi-chain firmware; btc-only firmware REFUSES ETH derivation, so fall back
+   * to a fixed BTC address (m/84'/0'/0'/0/0, prefixed `btc:` so it can never
+   * collide with an eth address). Deterministic per seed either way — which is
+   * all the seed-change / wallet-scope / sweep-replay guards need.
+   *
+   * ponytail: a seed used first on multi-chain firmware then on btc-only (same
+   * seed, different variant) fingerprints differently across the two. Harmless —
+   * it emits a false "seed changed" (caches reset, fresh data reloads); it never
+   * signs or loses funds. Revisit only if variant-swap-on-one-seed is a real flow.
+   */
+  private async deriveSeedFingerprint(): Promise<string | null> {
     if (!this.wallet) return null
     try {
       const result = await (this.wallet as any).ethGetAddress({
@@ -2231,12 +2243,27 @@ export class EngineController extends EventEmitter {
         showDisplay: false,
       })
       const addr = (typeof result === 'string' ? result : result?.address)?.toLowerCase()
-      if (addr) this.seedEthAddress = addr
-      return addr || null
+      if (addr) return addr
     } catch (err: any) {
-      console.warn('[Engine] deriveSeedIdentity failed (non-fatal):', err?.message)
+      console.warn('[Engine] seed fingerprint (eth) failed, trying btc:', err?.message)
+    }
+    try {
+      const result = await (this.wallet as any).btcGetAddress({
+        addressNList: [0x80000000 + 84, 0x80000000 + 0, 0x80000000 + 0, 0, 0],
+        coin: 'Bitcoin', scriptType: 'p2wpkh', showDisplay: false,
+      })
+      const addr = (typeof result === 'string' ? result : result?.address)
+      return addr ? `btc:${addr.toLowerCase()}` : null
+    } catch (err: any) {
+      console.warn('[Engine] seed fingerprint (btc fallback) failed:', err?.message)
       return null
     }
+  }
+
+  async deriveSeedIdentity(): Promise<string | null> {
+    const addr = await this.deriveSeedFingerprint()
+    if (addr) this.seedEthAddress = addr
+    return addr
   }
 
   /**
@@ -2248,11 +2275,7 @@ export class EngineController extends EventEmitter {
   private async deriveHiddenWalletScopeInMemory(): Promise<void> {
     if (!this.wallet || !this.hiddenWalletActive) return
     try {
-      const result = await (this.wallet as any).ethGetAddress({
-        addressNList: [0x80000000 + 44, 0x80000000 + 60, 0x80000000 + 0, 0, 0],
-        showDisplay: false,
-      })
-      const addr = (typeof result === 'string' ? result : result?.address)?.toLowerCase()
+      const addr = await this.deriveSeedFingerprint()
       if (!addr) return
       this.seedEthAddress = addr // RAM only — never written to disk for hidden wallets
       this.emit('wallet-scope-ready', { deviceId: this.cachedFeatures?.deviceId || 'unknown', seedAddress: addr })
@@ -2269,13 +2292,9 @@ export class EngineController extends EventEmitter {
   async checkSeedIdentity(): Promise<void> {
     if (!this.wallet) return
     try {
-      const result = await (this.wallet as any).ethGetAddress({
-        addressNList: [0x80000000 + 44, 0x80000000 + 60, 0x80000000 + 0, 0, 0],
-        showDisplay: false,
-      })
-      const addr = (typeof result === 'string' ? result : result?.address)?.toLowerCase()
+      const addr = await this.deriveSeedFingerprint()
       if (!addr) {
-        console.warn('[Engine] checkSeedIdentity: could not derive ETH address')
+        console.warn('[Engine] checkSeedIdentity: could not derive seed fingerprint')
         return
       }
       this.seedEthAddress = addr
@@ -2335,13 +2354,9 @@ export class EngineController extends EventEmitter {
       return
     }
 
-    let addr: string | undefined
+    let addr: string | null = null
     try {
-      const result = await (probeWallet as any).ethGetAddress({
-        addressNList: [0x80000000 + 44, 0x80000000 + 60, 0x80000000 + 0, 0, 0],
-        showDisplay: false,
-      })
-      addr = (typeof result === 'string' ? result : result?.address)?.toLowerCase()
+      addr = await this.deriveSeedFingerprint()
     } catch (err: any) {
       console.warn('[Engine] Reconnect probe failed — staying conservative:', err?.message)
       return
