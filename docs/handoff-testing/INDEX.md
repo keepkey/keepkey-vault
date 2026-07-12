@@ -35,4 +35,3 @@ Full paths per repo convention.
   symptom; confirm 3 signs in a row actually complete before calling it done.
 - Firmware #299 SOP gate: CI green + device-protocol **upstream**-pin swap
   before the final release (rc is fork-pinned).
-</content>

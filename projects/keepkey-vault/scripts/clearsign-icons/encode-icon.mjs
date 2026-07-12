@@ -41,9 +41,11 @@ export function rleEncode(pixels) {
       out.push(run, pixels[i] & 0xff)
       i += run
     } else {
-      // Literal packet: pixels up to the next >=2 run, capped at 128 (int8 min).
+      // Literal packet: pixels up to the next >=2 run, capped at 127. The
+      // control byte carries -len as int8; -128 (from len 128) overflows the
+      // firmware's int8 count and trips the draw.c assertion, so 127 is the max.
       const lit = []
-      while (i < n && lit.length < 128) {
+      while (i < n && lit.length < 127) {
         if (i + 1 < n && pixels[i + 1] === pixels[i]) break // a run starts next
         lit.push(pixels[i] & 0xff)
         i++
@@ -140,7 +142,21 @@ function selfTest() {
   if (JSON.stringify(got) !== JSON.stringify(expect)) {
     console.error('SELF-TEST byte mismatch', { expect, got }); process.exit(1)
   }
-  console.log('self-test OK (encode+decode round-trip + exact byte stream)')
+  // Boundary: a long literal stretch (alternating pixels → no run ≥2) must
+  // split into ≤127-length packets and never emit control 0x80 (int8 -128),
+  // which overflows the firmware's int8 negated count. Values are mono
+  // (0x00/0xFF) so a value byte can't be mistaken for a 0x80 control byte.
+  const alt = Array.from({ length: 300 }, (_, k) => (k % 2) * 0xff)
+  const altEnc = rleEncode(alt)
+  for (let k = 0; k < altEnc.length;) {
+    let c = altEnc[k]; if (c > 127) c -= 256
+    if (c === -128) { console.error('SELF-TEST: emitted 0x80/-128 literal control byte'); process.exit(1) }
+    k += c >= 2 ? 2 : 1 + (-c) // run packet [n][v] : literal packet [n][v..]
+  }
+  if (!alt.every((v, k) => v === rleDecode(altEnc, 30, 10)[k])) {
+    console.error('SELF-TEST: alternating round-trip failed'); process.exit(1)
+  }
+  console.log('self-test OK (round-trip + exact byte stream + 127-literal boundary)')
 }
 
 if (import.meta.main) {

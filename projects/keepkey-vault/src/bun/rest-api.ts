@@ -1123,18 +1123,24 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
   const server = Bun.serve({
     port,
     maxRequestBodySize: 1024 * 1024, // 1 MB max (addresses/signing payloads are small)
-    // Disable the idle-connection timeout (Bun default 10s). Signing requests
-    // block the response while the user confirms on the device — an interactive
-    // emulator confirm or a slow physical-button press legitimately exceeds 10s,
-    // and letting Bun close the socket aborts the in-flight sign mid-confirm
-    // ("other side closed" → the device's confirm is cancelled and it returns
-    // home). Human-gated signing has no business timing out at the socket layer.
-    idleTimeout: 0,
-    async fetch(req) {
+    // Keep Bun's default idle timeout for the server as a whole (so idle/
+    // unauthenticated connections still get reaped) — but lift it per-request
+    // for human-gated device operations below, where the response legitimately
+    // blocks while the user confirms on the device. Without that, Bun closes
+    // the socket mid-confirm ("other side closed" → the device cancels the
+    // confirm and returns home), which killed the second consecutive sign.
+    async fetch(req, server) {
       const url = new URL(req.url)
       const path = url.pathname
       const method = req.method
       const requestStart = Date.now()
+
+      // Human-gated device ops (signing + the clear-sign trust confirm) block
+      // the socket while the user presses the physical button. Disable the idle
+      // timeout for just these requests, not the whole server.
+      if (method === 'POST' && (SIGNING_ROUTES.has(path) || path === '/eth/clearsign/load-signer')) {
+        server.timeout(req, 0)
+      }
 
       // Resolve app info from bearer token (or 'public')
       const resolveAppInfo = (): { appName: string; imageUrl: string } => {

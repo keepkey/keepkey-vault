@@ -86,7 +86,12 @@ export const LoadClearsignSignerRequest = z.object({
   iconHeight: z.number().int().min(1).max(64).optional(),
   // Persist the identity in device flash across reboots (until WipeDevice).
   persist: z.boolean().optional(),
-}).strip()
+}).strip().refine(
+  // icon + its dimensions travel together: firmware rejects an icon without
+  // dimensions, and dimensions without an icon are silently dropped.
+  (v) => [v.icon, v.iconWidth, v.iconHeight].filter((x) => x !== undefined).length % 3 === 0,
+  { message: 'icon, iconWidth, and iconHeight must all be present or all absent' },
+)
 
 /** POST /eth/sign-typed-data */
 export const EthSignTypedDataRequest = z.object({

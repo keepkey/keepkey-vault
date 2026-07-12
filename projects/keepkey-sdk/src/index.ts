@@ -333,9 +333,12 @@ export class KeepKeySdk {
       this.client.post('/eth/sign-transaction', params),
 
     /**
-     * Load a runtime EVM clear-sign signer into a device key slot (RAM-only,
-     * user-confirmed on device). The device shows a trust screen naming the
-     * alias + pubkey fingerprint. Dropped on reboot/wipe — reload per session.
+     * Load an EVM clear-sign signer into a device key slot (user-confirmed on
+     * device). The device shows a trust screen naming the alias + pubkey
+     * fingerprint. Default is RAM-only (dropped on reboot — reload per session);
+     * pass `persist: true` to keep it in device flash across reboots (until
+     * WipeDevice). An optional `icon` (+ `iconWidth`/`iconHeight`) renders the
+     * identity's logo on the trust screen and every clear-sign it vouches for.
      * Firmware 7.15.0+. Used to trust a metadata-signing key (e.g. a CI test
      * key in slot 3) so `ethSignTransaction`'s `txMetadata` blobs verify.
      */

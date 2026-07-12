@@ -10,7 +10,7 @@ screen and every per-tx confirm.
 - firmware `release/7.15.0-rc7` (`BitHighlander/keepkey-firmware#299`, OPEN) —
   `lib/firmware/storage.{c,h}`, `signed_metadata.c`, `fsm_msg_ethereum.h`,
   `lib/board/layout.c`, `include/keepkey/board/layout.h`.
-- hdwallet `feat/clearsign-signer-icon` (`keepkey/hdwallet#53`, OPEN).
+- hdwallet `keepkey/hdwallet#53` **MERGED** → pinned at `modules/hdwallet` `eccc3fa6`.
 - vault `feat/clearsign-identity-icons-vault` (`keepkey/keepkey-vault#342`, OPEN).
 
 ## Test (emulator, fastest)

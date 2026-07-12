@@ -114,7 +114,9 @@ export interface LoadClearsignSignerParams {
   /** Signer label shown on the device trust screen. `[A-Za-z0-9 _-]`, 1-31 chars. */
   alias: string
   /** Optional identity logo: 1bpp mono RLE bitmap as hex, <= 384 bytes. Shown on
-   *  the trust screen and led before every clear-sign the identity vouches for. */
+   *  the trust screen and led before every clear-sign the identity vouches for.
+   *  `icon`, `iconWidth`, and `iconHeight` must be supplied together — the REST
+   *  layer rejects a half-specified icon. */
   icon?: string
   iconWidth?: number
   iconHeight?: number
