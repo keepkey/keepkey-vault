@@ -1511,6 +1511,22 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 		)
 	}
 
+	// Bitcoin-only device: the "dashboard" IS the Bitcoin asset page — no donut,
+	// no chain list, no allocation. Big balance, per-account breakdown, receive/
+	// send/swap all already live in AssetPage, so reuse it rather than fork a
+	// parallel dashboard. Audit-balances entry point is dropped here (only lived
+	// on the multi-chain view); re-add if btc-only power users need it.
+	if (btcOnly) {
+		const btc = visibleChains.find(c => c.id === 'bitcoin') || allChains.find(c => c.id === 'bitcoin')
+		if (btc) {
+			return (
+				<AssetPageErrorBoundary onBack={() => {}} chainName={btc.coin}>
+					<AssetPage chain={btc} balance={balances.get('bitcoin')} onBack={() => {}} hideBack firmwareVersion={firmwareVersion} onViewActivity={handleViewActivity} watchOnly={watchOnly} isHiddenWallet={isHiddenWallet} />
+				</AssetPageErrorBoundary>
+			)
+		}
+	}
+
 	if (selectedChain) {
 		const bal = balances.get(selectedChain.id)
 		return (

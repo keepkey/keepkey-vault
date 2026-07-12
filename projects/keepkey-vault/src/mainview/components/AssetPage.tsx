@@ -75,9 +75,11 @@ interface AssetPageProps {
 	watchOnly?: boolean
 	/** Hidden (passphrase) wallet: UTXO altcoin accounts are never persisted, so hide the account selector. */
 	isHiddenWallet?: boolean
+	/** btc-only device uses this page AS the dashboard — there's nowhere to go "back" to, so hide the back arrow. */
+	hideBack?: boolean
 }
 
-export function AssetPage({ chain, balance, onBack, firmwareVersion, initialAction, initialToken, onViewActivity, watchOnly, isHiddenWallet }: AssetPageProps) {
+export function AssetPage({ chain, balance, onBack, firmwareVersion, initialAction, initialToken, onViewActivity, watchOnly, isHiddenWallet, hideBack }: AssetPageProps) {
 	const { t } = useTranslation("asset")
 	const { fmtCompact, symbol: fiatSymbol } = useFiat()
 	// Watch-only mode never lands on a signing view, regardless of the
@@ -794,6 +796,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 					py={{ base: "3", md: "3.5" }}
 				>
 					<Flex align="center" gap={{ base: "3", md: "4" }} flex="1" minW="0">
+						{(!hideBack || selectedToken) && (
 						<Box
 							as="button"
 							onClick={selectedToken ? () => { setSelectedToken(null); setView('receive') } : onBack}
@@ -814,6 +817,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 								<path d="M19 12H5M12 19l-7-7 7-7"/>
 							</svg>
 						</Box>
+						)}
 
 						{selectedToken ? (
 							<>

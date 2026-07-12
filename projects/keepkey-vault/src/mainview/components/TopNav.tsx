@@ -30,6 +30,8 @@ interface TopNavProps {
 	watchOnly?: boolean
 	onExitToDeviceSelect?: () => void
 	passphraseActive?: boolean
+	/** btc-only device: hide multi-chain surfaces (ShapeShift tab, WalletConnect). */
+	isBitcoinOnly?: boolean
 	/** Wallet picker plumbing — see WalletSelector. Optional so SplashNav and
 	 *  any caller that doesn't want a picker can omit them. */
 	connectedDeviceId?: string | null
@@ -148,6 +150,7 @@ export function TopNav({
 	watchOnly,
 	onExitToDeviceSelect,
 	passphraseActive,
+	isBitcoinOnly,
 	connectedDeviceId,
 	watchingDeviceId,
 	onWatchWallet,
@@ -358,7 +361,7 @@ export function TopNav({
 				p="3px"
 				className="electrobun-webkit-app-region-no-drag"
 			>
-				{TAB_DEFS.map((tab) => {
+				{TAB_DEFS.filter((tab) => !(isBitcoinOnly && tab.id === "shapeshift")).map((tab) => {
 					const isActive = activeTab === tab.id
 					return (
 						<Box
@@ -390,7 +393,7 @@ export function TopNav({
 
 			{/* Right: walletconnect + mobile + settings */}
 			<Flex flex="1" justify="flex-end" align="center" gap="2">
-				{onWalletConnectToggle && (
+				{onWalletConnectToggle && !isBitcoinOnly && (
 					<IconButton
 						aria-label={t("walletConnect", { defaultValue: "WalletConnect" })}
 						onClick={onWalletConnectToggle}

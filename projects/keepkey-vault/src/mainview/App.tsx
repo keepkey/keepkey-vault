@@ -975,6 +975,7 @@ function App() {
 					activeTab={activeTab}
 					onTabChange={handleTabChange}
 					passphraseActive={deviceState.isHiddenWallet}
+					isBitcoinOnly={splashBitcoinOnly}
 					onExitToDeviceSelect={deviceState.isEmulator ? () => { rpcRequest("emulatorStop").catch(() => {}) } : undefined}
 					connectedDeviceId={deviceState.deviceId || null}
 					watchingDeviceId={null}
