@@ -13,6 +13,8 @@ interface SplashScreenProps {
   childrenReady?: boolean
   /** Called when the logo is clicked (e.g. to retry connection) */
   onLogoClick?: () => void
+  /** Bitcoin-only firmware connected — brand the splash orange with a ₿ mark. */
+  isBitcoinOnly?: boolean
 }
 
 const STATUS_DOT_COLORS: Record<NonNullable<SplashScreenProps['variant']>, string> = {
@@ -22,10 +24,11 @@ const STATUS_DOT_COLORS: Record<NonNullable<SplashScreenProps['variant']>, strin
   claimed:    'var(--teal)',
 }
 
+const BTC_ORANGE = '#F7931A'
 const RETRY_HINT_DELAY_MS = 10_000
 
-export function SplashScreen({ statusText, hintText, children, variant = 'searching', childrenReady = false, onLogoClick }: SplashScreenProps) {
-  const dotColor = STATUS_DOT_COLORS[variant]
+export function SplashScreen({ statusText, hintText, children, variant = 'searching', childrenReady = false, onLogoClick, isBitcoinOnly = false }: SplashScreenProps) {
+  const dotColor = isBitcoinOnly ? BTC_ORANGE : STATUS_DOT_COLORS[variant]
   const [showRetry, setShowRetry] = useState(false)
 
   // Show "Tap to retry" hint after 10s — only when there's a click handler and grid isn't ready
@@ -81,11 +84,24 @@ export function SplashScreen({ statusText, hintText, children, variant = 'search
             <Logo
               width={childrenReady ? "60px" : "100px"}
               style={{
-                filter: 'brightness(1.15) drop-shadow(0 6px 24px rgba(233,196,106,0.25))',
+                filter: isBitcoinOnly
+                  ? 'brightness(1.1) drop-shadow(0 6px 24px rgba(247,147,26,0.35))'
+                  : 'brightness(1.15) drop-shadow(0 6px 24px rgba(233,196,106,0.25))',
                 transition: 'width 0.5s ease, filter 0.5s ease',
               }}
             />
           </Box>
+          {isBitcoinOnly && !childrenReady && (
+            <Flex align="center" gap="2" mt="4" style={{ animation: 'fadeIn 0.4s ease' }}>
+              <Flex align="center" justify="center" w="24px" h="24px" borderRadius="full"
+                bg="rgba(247,147,26,0.14)" border="1px solid rgba(247,147,26,0.45)" flexShrink={0}>
+                <Text fontSize="14px" fontWeight="700" color={BTC_ORANGE} lineHeight="1">₿</Text>
+              </Flex>
+              <Text fontSize="14px" fontWeight="700" color={BTC_ORANGE} letterSpacing="0.02em">
+                Bitcoin-Only KeepKey
+              </Text>
+            </Flex>
+          )}
           {showRetry && !childrenReady && (
             <Text
               fontSize="xs"

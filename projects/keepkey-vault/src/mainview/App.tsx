@@ -13,6 +13,7 @@ import { MobilePanel } from "./components/MobilePanel"
 import { WalletConnectPanel } from "./components/WalletConnectPanel"
 import { FirmwareDropZone } from "./components/FirmwareDropZone"
 import { SplashScreen } from "./components/SplashScreen"
+import { isBitcoinOnlyVariant } from "../shared/flags"
 import { DeviceGrid } from "./components/DeviceGrid"
 import { DeviceClaimedDialog } from "./components/DeviceClaimedDialog"
 import { LinuxUdevWarning } from "./components/LinuxUdevWarning"
@@ -852,10 +853,13 @@ function App() {
 		)
 	}
 
+	// Bitcoin-only firmware connected — brand the splash orange with a ₿ mark.
+	const splashBitcoinOnly = isBitcoinOnlyVariant(deviceState.firmwareVariant)
+
 	if (phase === "claimed") {
 		return (
 			<>{splashNav}{resizeHandles}{updateBanner}{firmwareDropZone}{signingOverlay}{pairingOverlay}{passphraseOverlay}{charOverlay}{pinOverlay}
-				<SplashScreen statusText={t("keepkeyDetected", { ns: "nav" })} variant="claimed">
+				<SplashScreen statusText={t("keepkeyDetected", { ns: "nav" })} variant="claimed" isBitcoinOnly={splashBitcoinOnly}>
 					<DeviceClaimedDialog error={deviceState.error || t("claimed.defaultError", { ns: "device" })} />
 				</SplashScreen>
 			</>
@@ -883,6 +887,7 @@ function App() {
 					variant={linuxUdevBlocked ? "error" : needsPin || needsPassphrase || isConnecting ? "connecting" : isError ? "error" : "searching"}
 					childrenReady={linuxUdevBlocked ? true : gridReady}
 					onLogoClick={linuxUdevBlocked || needsPin || needsPassphrase ? undefined : () => { rpcRequest("retryConnect").catch(() => {}) }}
+					isBitcoinOnly={splashBitcoinOnly}
 				>
 					{linuxUdevBlocked ? (
 						<LinuxUdevWarning />
@@ -919,7 +924,7 @@ function App() {
 	return (
 		<>{resizeHandles}{updateBanner}{incomingTxToast}{firmwareDropZone}{signingOverlay}{pairingOverlay}{passphraseOverlay}{charOverlay}{pinOverlay}
 			{!portfolioLoaded && activeTab === "vault" && (
-				<SplashScreen statusText={t("loadingPortfolio", { ns: "nav" })} variant="connecting" />
+				<SplashScreen statusText={t("loadingPortfolio", { ns: "nav" })} variant="connecting" isBitcoinOnly={splashBitcoinOnly} />
 			)}
 			<Flex direction="column" h="100vh" bg="transparent" color="kk.textPrimary" position="relative"
 				{...(!portfolioLoaded && activeTab === "vault" ? { position: "absolute", w: 0, h: 0, overflow: "hidden" } as const : {})}
