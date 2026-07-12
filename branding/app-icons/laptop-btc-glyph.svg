@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none">
+  <defs>
+    <linearGradient id="gold" x1="0" y1="0" x2="0" y2="24" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#f2d27e"/><stop offset="1" stop-color="#e9c46a"/></linearGradient>
+    <radialGradient id="pieOrange" cx="12.3" cy="10.2" r="4.6" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#ffe2b3"/><stop offset="0.55" stop-color="#f5a340"/><stop offset="1" stop-color="#ee8c12"/></radialGradient>
+  </defs>
+  <path fill="url(#gold)" fill-rule="evenodd" d="M5.5 3h13a1.8 1.8 0 0 1 1.8 1.8v9.4a1.8 1.8 0 0 1-1.8 1.8h-13a1.8 1.8 0 0 1-1.8-1.8V4.8A1.8 1.8 0 0 1 5.5 3zM5.7 4.5h12.6a.5.5 0 0 1 .5.5v9a.5.5 0 0 1-.5.5H5.7a.5.5 0 0 1-.5-.5V5a.5.5 0 0 1 .5-.5zM3.4 17.2h17.2a1.2 1.2 0 0 1 0 2.4H3.4a1.2 1.2 0 0 1 0-2.4z"/>
+  <circle cx="12" cy="9.5" r="4" fill="url(#pieOrange)"/>
+  <path d="M12 9.5L8.06 8.81A4 4 0 0 1 8.72 7.21Z" fill="#2a9d8f"/>
+  <path d="M12 9.5L8.72 7.21A4 4 0 0 1 9.03 6.82Z" fill="#1b4d3e"/>
+  <path d="M12 9.5L9.03 6.82A4 4 0 0 1 9.71 6.22Z" fill="#8a8f98"/>
+  <path d="M12 9.5L9.71 6.22A4 4 0 0 1 10.18 5.94Z" fill="#4a4f57"/>
+  <path d="M12 9.5L10.18 5.94A4 4 0 0 1 10.76 5.70Z" fill="#6b7280"/>
+  <path d="M12 9.5L10.76 5.70A4 4 0 0 1 11.17 5.59Z" fill="#3d5a52"/>
+</svg>
