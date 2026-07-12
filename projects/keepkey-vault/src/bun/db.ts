@@ -670,6 +670,20 @@ export function deleteCachedChainBalance(deviceId: string, chainId: string) {
   }
 }
 
+/** Purge every non-Bitcoin cached balance for a device. Used when the device
+ *  runs bitcoin-only firmware — its seed is locked to BTC and it can't derive
+ *  any other chain, so multi-chain balances cached from a prior firmware are
+ *  phantom (they'd sum into "All Chains"). Returns rows removed. */
+export function clearNonBitcoinBalances(deviceId: string): number {
+  try {
+    if (!db) return 0
+    return db.run("DELETE FROM balances WHERE device_id = ? AND chain_id != 'bitcoin'", [deviceId]).changes
+  } catch (e: any) {
+    console.warn('[db] clearNonBitcoinBalances failed:', e.message)
+    return 0
+  }
+}
+
 // ── Custom Tokens ────────────────────────────────────────────────────
 
 export function getCustomTokens(): CustomToken[] {
