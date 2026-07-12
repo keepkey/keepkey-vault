@@ -34,6 +34,10 @@ async function bbFetch(cfg: BlockbookConfig, path: string, init?: RequestInit): 
     throw new Error(`Blockbook unreachable at ${base(cfg)} — ${e?.name === 'TimeoutError' ? 'timed out' : (e?.message || 'network error')}`)
   }
   if (res.status === 401 || res.status === 403) throw new Error(`Blockbook rejected the request (HTTP ${res.status}) — check the URL or Cloudflare-Access token`)
+  if (res.status === 404) throw new Error(
+    `Blockbook 404 at ${base(cfg)}${path} — is this a Blockbook URL (usually port :9130)? ` +
+    `A Bitcoin Core RPC port (:8332) has no /api/. Check the URL, or switch the node type to Bitcoin Core.`,
+  )
   if (!res.ok) {
     const body = await res.text().catch(() => '')
     throw new Error(`Blockbook HTTP ${res.status} on ${path}${body ? `: ${body.slice(0, 180)}` : ''}`)
