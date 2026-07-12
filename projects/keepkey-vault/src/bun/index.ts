@@ -795,13 +795,20 @@ function loadSettings() {
 /** Push the persisted self-host node config into the BtcBackend selector. Called
  *  on startup and after setBtcNode. Auth lives in its own setting, never returned
  *  to the UI. Disabled or URL-less → null → getBtcBackend() falls back to Pioneer. */
+/** Basic-auth string from the separately-stored user + pass. Kept apart so a
+ *  44-char special-char rpcpassword can't be mangled by hand-joining with a colon. */
+function btcNodeAuth(): string | undefined {
+	const user = getSetting('btc_node_rpc_user') || ''
+	const pass = getSetting('btc_node_rpc_pass') || ''
+	return user || pass ? `${user}:${pass}` : undefined
+}
+
 function loadBtcNodeConfig() {
 	const enabled = getSetting('btc_node_enabled') === '1'
 	const url = getSetting('btc_node_url') || ''
 	if (!enabled || !url) { setBtcNodeConfig(null); return }
 	const type = getSetting('btc_node_type') === 'core' ? 'core' : 'blockbook'
-	const auth = getSetting('btc_node_auth') || undefined
-	setBtcNodeConfig(type === 'core' ? { type: 'core', url, auth } : { type: 'blockbook', url })
+	setBtcNodeConfig(type === 'core' ? { type: 'core', url, auth: btcNodeAuth() } : { type: 'blockbook', url })
 }
 let appVersionCache = ''
 let restServer: ReturnType<typeof startRestApi> | null = null
@@ -5460,21 +5467,23 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				setSetting('btc_node_enabled', params.enabled ? '1' : '0')
 				setSetting('btc_node_type', params.type === 'core' ? 'core' : 'blockbook')
 				setSetting('btc_node_url', params.url || '')
-				// Only overwrite auth when provided — lets the user toggle enable
-				// without re-typing credentials (undefined = keep existing).
-				if (params.auth !== undefined) setSetting('btc_node_auth', params.auth)
+				// Only overwrite each credential when provided — lets the user toggle
+				// enable without re-typing (undefined = keep existing).
+				if (params.rpcUser !== undefined) setSetting('btc_node_rpc_user', params.rpcUser)
+				if (params.rpcPass !== undefined) setSetting('btc_node_rpc_pass', params.rpcPass)
 				loadBtcNodeConfig()
 				console.log('[settings] Self-host node:', params.enabled ? `enabled → ${params.type} ${params.url}` : 'disabled')
 				return getAppSettings()
 			},
 			// Verbose reachability + capability probe for the config panel. Uses the
-			// posted url/auth (pre-save), or the saved auth when re-testing.
+			// posted creds (pre-save), or the saved creds when re-testing.
 			testBtcNode: async (params) => {
 				const url = params.url
 				if (params.type === 'core') {
 					const { testCoreNode } = await import('./btc-backend/core')
-					const auth = params.auth !== undefined ? params.auth : (getSetting('btc_node_auth') || undefined)
-					return testCoreNode({ url, auth })
+					const user = params.rpcUser !== undefined ? params.rpcUser : (getSetting('btc_node_rpc_user') || '')
+					const pass = params.rpcPass !== undefined ? params.rpcPass : (getSetting('btc_node_rpc_pass') || '')
+					return testCoreNode({ url, auth: user || pass ? `${user}:${pass}` : undefined })
 				}
 				const { testBlockbookNode } = await import('./btc-backend/blockbook')
 				return testBlockbookNode({ url })

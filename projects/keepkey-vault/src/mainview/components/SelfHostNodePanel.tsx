@@ -13,16 +13,20 @@ type TestResult = { ok: boolean; error?: string; chain?: string; blocks?: number
 export function SelfHostNodePanel({ settings, onChange }: { settings: AppSettings; onChange: (s: AppSettings) => void }) {
   const [type, setType] = useState<"blockbook" | "core">(settings.btcNodeType || "blockbook")
   const [url, setUrl] = useState(settings.btcNodeUrl || "")
-  const [auth, setAuth] = useState("")
+  const [rpcUser, setRpcUser] = useState("")
+  const [rpcPass, setRpcPass] = useState("")
   const [testing, setTesting] = useState(false)
   const [saving, setSaving] = useState(false)
   const [result, setResult] = useState<TestResult | null>(null)
   const enabled = settings.btcNodeEnabled
 
+  // Send creds only when the user typed them (blank = keep saved on the backend).
+  const creds = () => ({ rpcUser: rpcUser || undefined, rpcPass: rpcPass || undefined })
+
   const test = async () => {
     setTesting(true); setResult(null)
     try {
-      setResult(await rpcRequest<TestResult>("testBtcNode", { type, url: url.trim(), auth: auth || undefined }, 20000))
+      setResult(await rpcRequest<TestResult>("testBtcNode", { type, url: url.trim(), ...creds() }, 20000))
     } catch (e: any) {
       setResult({ ok: false, error: e?.message || "Test failed" })
     }
@@ -32,7 +36,7 @@ export function SelfHostNodePanel({ settings, onChange }: { settings: AppSetting
   const save = async (nextEnabled: boolean) => {
     setSaving(true)
     try {
-      const s = await rpcRequest<AppSettings>("setBtcNode", { enabled: nextEnabled, type, url: url.trim(), auth: auth || undefined }, 10000)
+      const s = await rpcRequest<AppSettings>("setBtcNode", { enabled: nextEnabled, type, url: url.trim(), ...creds() }, 10000)
       onChange(s)
     } catch (e: any) { console.error("setBtcNode:", e) }
     setSaving(false)
@@ -72,9 +76,13 @@ export function SelfHostNodePanel({ settings, onChange }: { settings: AppSetting
 
       {type === "core" && (
         <>
-          <Text fontSize="11px" color="kk.textSecondary" mb="1">Auth — rpcuser:rpcpassword {enabled ? "(leave blank to keep saved)" : ""}</Text>
-          <Input value={auth} onChange={(e) => setAuth(e.target.value)} type="password" placeholder="user:password"
-                 bg="var(--ink-0)" border="1px solid" borderColor="kk.border" color="kk.textPrimary" size="sm" fontFamily="mono" fontSize="xs" mb="3" />
+          <Text fontSize="11px" color="kk.textSecondary" mb="1">RPC username {enabled ? "(leave blank to keep saved)" : ""}</Text>
+          <Input value={rpcUser} onChange={(e) => setRpcUser(e.target.value)} autoComplete="off" spellCheck={false} placeholder="rpcuser"
+                 bg="var(--ink-0)" border="1px solid" borderColor="kk.border" color="kk.textPrimary" size="sm" fontFamily="mono" fontSize="xs" mb="2" />
+          <Text fontSize="11px" color="kk.textSecondary" mb="1">RPC password {enabled ? "(leave blank to keep saved)" : ""}</Text>
+          <Input value={rpcPass} onChange={(e) => setRpcPass(e.target.value)} type="password" autoComplete="off" spellCheck={false} placeholder="rpcpassword"
+                 bg="var(--ink-0)" border="1px solid" borderColor="kk.border" color="kk.textPrimary" size="sm" fontFamily="mono" fontSize="xs" mb="1" />
+          <Text fontSize="10px" color="kk.textSecondary" mb="3">Paste each field separately — no colon, no quotes, watch for a trailing space.</Text>
         </>
       )}
 
