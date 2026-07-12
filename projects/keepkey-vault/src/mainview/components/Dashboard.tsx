@@ -1773,8 +1773,9 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 
 					{/* Add chain — every default chain is already shown above, so the
 					    only thing left to add is a custom EVM network (by chainId /
-					    RPC, or from the Pioneer catalog). Opens AddChainDialog. */}
-					{!watchOnly && (
+					    RPC, or from the Pioneer catalog). Opens AddChainDialog.
+					    Hidden on bitcoin-only firmware — the device can't touch EVM. */}
+					{!watchOnly && !btcOnly && (
 						<Box
 							as="button"
 							onClick={() => setShowAddChain(true)}
