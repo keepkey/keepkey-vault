@@ -149,6 +149,7 @@ export function makeCoreBackend(cfg: CoreConfig): BtcBackend {
  *  can warn about pruning (no history) and missing txindex (can't spend legacy). */
 export async function testCoreNode(cfg: CoreConfig): Promise<{
   ok: boolean; error?: string; chain?: string; blocks?: number; pruned?: boolean; txindex?: boolean
+  syncing?: boolean; progress?: number
 }> {
   try {
     const info = await coreRpc({ ...cfg, timeoutMs: 10_000 }, 'getblockchaininfo')
@@ -157,7 +158,9 @@ export async function testCoreNode(cfg: CoreConfig): Promise<{
       const idx = await coreRpc({ ...cfg, timeoutMs: 10_000 }, 'getindexinfo')
       txindex = !!idx?.txindex
     } catch { txindex = undefined } // getindexinfo absent on old Core — unknown
-    return { ok: true, chain: info?.chain, blocks: info?.blocks, pruned: !!info?.pruned, txindex }
+    const progress = typeof info?.verificationprogress === 'number' ? info.verificationprogress : undefined
+    const syncing = !!info?.initialblockdownload || (progress !== undefined && progress < 0.9999)
+    return { ok: true, chain: info?.chain, blocks: info?.blocks, pruned: !!info?.pruned, txindex, syncing, progress }
   } catch (e: any) {
     return { ok: false, error: e?.message || 'connection failed' }
   }

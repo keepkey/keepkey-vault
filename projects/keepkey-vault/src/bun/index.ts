@@ -5488,6 +5488,22 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const { testBlockbookNode } = await import('./btc-backend/blockbook')
 				return testBlockbookNode({ url })
 			},
+			// Live status of the ACTIVE self-host node (for the bottom status bar).
+			// active:false when no node is enabled → the bar hides.
+			getBtcNodeStatus: async () => {
+				const enabled = getSetting('btc_node_enabled') === '1'
+				const url = getSetting('btc_node_url') || ''
+				if (!enabled || !url) return { active: false as const }
+				const type = getSetting('btc_node_type') === 'core' ? 'core' : 'blockbook'
+				if (type === 'core') {
+					const { testCoreNode } = await import('./btc-backend/core')
+					const r = await testCoreNode({ url, auth: btcNodeAuth() })
+					return { active: true as const, kind: 'core' as const, ok: r.ok, error: r.error, height: r.blocks, syncing: r.syncing, progress: r.progress }
+				}
+				const { testBlockbookNode } = await import('./btc-backend/blockbook')
+				const r = await testBlockbookNode({ url })
+				return { active: true as const, kind: 'blockbook' as const, ok: r.ok, error: r.error, height: r.blocks, syncing: r.ok ? r.inSync === false : undefined }
+			},
 			setWalletConnectEnabled: async (params) => {
 				walletConnectEnabled = params.enabled
 				setSetting('walletconnect_enabled', params.enabled ? '1' : '0')

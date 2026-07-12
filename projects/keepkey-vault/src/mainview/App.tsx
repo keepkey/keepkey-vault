@@ -15,7 +15,9 @@ import { FirmwareDropZone } from "./components/FirmwareDropZone"
 import { SplashScreen } from "./components/SplashScreen"
 import { isBitcoinOnlyVariant } from "../shared/flags"
 import { useOnline } from "./hooks/useOnline"
+import { useBtcNodeStatus } from "./hooks/useBtcNodeStatus"
 import { OfflineBanner } from "./components/OfflineBanner"
+import { NodeStatusBar } from "./components/NodeStatusBar"
 import { BitcoinOnlyOnboardingDialog } from "./components/BitcoinOnlyOnboardingDialog"
 import { DeviceGrid } from "./components/DeviceGrid"
 import { DeviceClaimedDialog } from "./components/DeviceClaimedDialog"
@@ -98,9 +100,12 @@ function App() {
 	// before settings load; the real value arrives from getAppSettings.
 	const [btcOnboardingSeen, setBtcOnboardingSeen] = useState(true)
 	const [btcOnboardingDismissed, setBtcOnboardingDismissed] = useState(false)
+	const [btcNodeEnabledSetting, setBtcNodeEnabledSetting] = useState(false)
 	// Skip the reachability probe when airplane mode is on — we already know we're
 	// offline and must make zero network calls.
 	const online = useOnline(!offlineModeSetting)
+	// Self-host node status for the bottom bar (skip while offline — no point probing).
+	const nodeStatus = useBtcNodeStatus(btcNodeEnabledSetting && !(offlineModeSetting || !online))
 	const [pendingAppUrl, setPendingAppUrl] = useState<string | null>(null)
 	const [pendingWcOpen, setPendingWcOpen] = useState(false)
 	const [enablingApi, setEnablingApi] = useState(false)
@@ -126,7 +131,7 @@ function App() {
 		const refreshSettings = () => {
 			rpcRequest<AppSettings>("getAppSettings")
 				.then((s) => {
-					setRestApiEnabled(s.restApiEnabled); setWalletConnectEnabled(s.walletConnectEnabled); setEmulatorEnabled(s.emulatorEnabled); setHiveEnabled(s.hiveEnabled); setOfflineModeSetting(s.offlineMode); setBtcOnboardingSeen(s.btcOnboardingShown)
+					setRestApiEnabled(s.restApiEnabled); setWalletConnectEnabled(s.walletConnectEnabled); setEmulatorEnabled(s.emulatorEnabled); setHiveEnabled(s.hiveEnabled); setOfflineModeSetting(s.offlineMode); setBtcOnboardingSeen(s.btcOnboardingShown); setBtcNodeEnabledSetting(s.btcNodeEnabled)
 					if (s.pioneerApiBase) loadSupportedChains(s.pioneerApiBase).catch(() => {})
 				})
 				.catch(() => {})
@@ -886,6 +891,8 @@ function App() {
 	const splashBitcoinOnly = isBitcoinOnlyVariant(deviceState.firmwareVariant)
 	// Offline = deliberate airplane-mode setting OR the OS reports no network.
 	const offline = offlineModeSetting || !online
+	const showNodeBar = !offline && !!nodeStatus?.active
+	const bottomBar = offline || showNodeBar
 
 	if (phase === "claimed") {
 		return (
@@ -955,6 +962,7 @@ function App() {
 	return (
 		<>{resizeHandles}{updateBanner}{incomingTxToast}{firmwareDropZone}{signingOverlay}{pairingOverlay}{passphraseOverlay}{charOverlay}{pinOverlay}
 			{offline && <OfflineBanner airplane={offlineModeSetting} />}
+			{showNodeBar && nodeStatus && <NodeStatusBar status={nodeStatus} />}
 			{splashBitcoinOnly && !btcOnboardingSeen && !btcOnboardingDismissed && portfolioLoaded && !btcSplashHold && (
 				<BitcoinOnlyOnboardingDialog onClose={() => { setBtcOnboardingDismissed(true); rpcRequest("markBtcOnboardingShown").catch(() => {}) }} />
 			)}
@@ -1000,7 +1008,7 @@ function App() {
 					onWatchWallet={(id, lbl) => { setWatchOnlyDeviceId(id); setWatchOnlyLabel(lbl); setWatchOnlyMode(true) }}
 					onReturnToConnected={() => { /* already on connected wallet */ }}
 				/>
-				<Flex flex="1" direction="column" overflow="auto" pt={showBanner ? NAV_CONTENT_OFFSET_WITH_BANNER : NAV_CONTENT_OFFSET} pb={offline ? "38px" : "4"} transition="padding-top 0.2s">
+				<Flex flex="1" direction="column" overflow="auto" pt={showBanner ? NAV_CONTENT_OFFSET_WITH_BANNER : NAV_CONTENT_OFFSET} pb={bottomBar ? "38px" : "4"} transition="padding-top 0.2s">
 				{/* TopNav offset plus banner height when visible. */}
 					{activeTab === "vault" && <Dashboard onLoaded={handlePortfolioLoaded} onOpenSettings={() => setSettingsOpen(true)} firmwareVersion={deviceState.firmwareVersion} firmwareVariant={deviceState.firmwareVariant} forceRefresh={wizardComplete} onForceRefreshConsumed={() => setWizardComplete(false)} isHiddenWallet={deviceState.isHiddenWallet} />}
 					{activeTab === "explore" && <AppStore onOpenApp={handleOpenApp} onOpenKeepKey={handleOpenKeepKey} />}
