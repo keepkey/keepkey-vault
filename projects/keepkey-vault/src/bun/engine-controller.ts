@@ -5,7 +5,8 @@ import * as core from '@keepkey/hdwallet-core'
 import { HIDKeepKeyAdapter } from '@keepkey/hdwallet-keepkey-nodehid'
 import { NodeWebUSBKeepKeyAdapter } from '@keepkey/hdwallet-keepkey-nodewebusb'
 import { usb } from 'usb'
-import { saveDeviceSnapshot, saveEmulatorWalletMeta } from './db'
+import { saveDeviceSnapshot, saveEmulatorWalletMeta, clearNonBitcoinBalances } from './db'
+import { isBitcoinOnlyVariant } from '../shared/flags'
 import type { DeviceStateInfo, ActiveTransport, UpdatePhase, DeviceState, FirmwareManifest, PinRequestType, Bip85DeriveParams, Bip85DisplayResult } from '../shared/types'
 import { resolveOndeviceFirmwareVersion } from '../shared/firmware-versions'
 import { EmulatorKeepKeyAdapter } from './emulator-transport'
@@ -415,6 +416,14 @@ export class EngineController extends EventEmitter {
           const label = this.cachedFeatures.label || ''
           const fwVer = this.extractVersion(this.cachedFeatures)
           saveDeviceSnapshot(deviceId, label, fwVer, JSON.stringify(this.cachedFeatures))
+          // Bitcoin-only firmware is seed-locked to BTC — it can't derive or hold
+          // any other chain. Purge multi-chain balances cached from this device's
+          // prior firmware, else the dashboard sums phantom balances (e.g. an ETH
+          // address this firmware can't produce) into the "All Chains" total.
+          if (deviceId !== 'unknown' && isBitcoinOnlyVariant(this.cachedFeatures.firmwareVariant)) {
+            const removed = clearNonBitcoinBalances(deviceId)
+            if (removed) console.log(`[Engine] btc-only ${deviceId}: purged ${removed} stale non-BTC cached balances`)
+          }
         } catch { /* never block on cache failure */ }
 
         // Check if the seed changed since last session — emits 'seed-changed'
