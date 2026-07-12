@@ -6619,12 +6619,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const serializedTx = signedTx?.serializedTx || signedTx?.serialized
 				if (!serializedTx) throw new Error('Device signing failed')
 
-				const { getPioneer } = await import('./pioneer')
-				const pioneer = await getPioneer()
-				const broadcastResp = await pioneer.Broadcast({ networkId: 'bip122:000000000019d6689c085ae165831e93', serialized: serializedTx })
-				const bdata = broadcastResp?.data || broadcastResp
-				const txid = bdata?.txid || bdata?.tx_hash || bdata?.hash
-				if (!txid) throw new Error(`Broadcast failed: ${JSON.stringify(bdata).slice(0, 200)}`)
+				const { getBtcBackend } = await import('./btc-backend')
+				const { txid } = await getBtcBackend().broadcast({
+					network: 'bip122:000000000019d6689c085ae165831e93',
+					rawTxHex: serializedTx,
+				})
 
 				return { txid, destination, inputCount: sweepResult.inputCount, totalSweptSats: sweepResult.totalInputSats, fee: sweepResult.fee, outputSats: sweepResult.totalInputSats - sweepResult.fee }
 			},
