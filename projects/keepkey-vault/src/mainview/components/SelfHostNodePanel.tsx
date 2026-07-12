@@ -3,12 +3,15 @@ import { Box, Flex, Text, Input, Button } from "@chakra-ui/react"
 import { rpcRequest } from "../lib/rpc"
 import type { AppSettings } from "../../shared/types"
 
-type TestResult = { ok: boolean; error?: string; chain?: string; blocks?: number; pruned?: boolean; txindex?: boolean }
+const ACCENT = "#F7931A" // bitcoin orange
+
+type TestResult = { ok: boolean; error?: string; chain?: string; blocks?: number; pruned?: boolean; txindex?: boolean; inSync?: boolean }
 
 /** Self-host Bitcoin node config (btc-only). Point Vault at your own Bitcoin Core
  *  node instead of Pioneer. Verbose Test Connection; no silent fallback — if the
  *  node is enabled and fails, the app surfaces the error rather than phoning home. */
 export function SelfHostNodePanel({ settings, onChange }: { settings: AppSettings; onChange: (s: AppSettings) => void }) {
+  const [type, setType] = useState<"blockbook" | "core">(settings.btcNodeType || "blockbook")
   const [url, setUrl] = useState(settings.btcNodeUrl || "")
   const [auth, setAuth] = useState("")
   const [testing, setTesting] = useState(false)
@@ -19,7 +22,7 @@ export function SelfHostNodePanel({ settings, onChange }: { settings: AppSetting
   const test = async () => {
     setTesting(true); setResult(null)
     try {
-      setResult(await rpcRequest<TestResult>("testBtcNode", { url: url.trim(), auth: auth || undefined }, 20000))
+      setResult(await rpcRequest<TestResult>("testBtcNode", { type, url: url.trim(), auth: auth || undefined }, 20000))
     } catch (e: any) {
       setResult({ ok: false, error: e?.message || "Test failed" })
     }
@@ -29,7 +32,7 @@ export function SelfHostNodePanel({ settings, onChange }: { settings: AppSetting
   const save = async (nextEnabled: boolean) => {
     setSaving(true)
     try {
-      const s = await rpcRequest<AppSettings>("setBtcNode", { enabled: nextEnabled, url: url.trim(), auth: auth || undefined }, 10000)
+      const s = await rpcRequest<AppSettings>("setBtcNode", { enabled: nextEnabled, type, url: url.trim(), auth: auth || undefined }, 10000)
       onChange(s)
     } catch (e: any) { console.error("setBtcNode:", e) }
     setSaving(false)
@@ -45,13 +48,35 @@ export function SelfHostNodePanel({ settings, onChange }: { settings: AppSetting
         Point Vault at your own Bitcoin Core node instead of Pioneer. If your node fails, Vault shows the error — it never falls back to Pioneer.
       </Text>
 
-      <Text fontSize="11px" color="kk.textSecondary" mb="1">Node RPC URL</Text>
-      <Input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="http://127.0.0.1:8332"
+      <Text fontSize="11px" color="kk.textSecondary" mb="1">Node type</Text>
+      <Flex gap="1.5" mb="2">
+        {(["blockbook", "core"] as const).map((tp) => (
+          <Box as="button" key={tp} flex="1" onClick={() => setType(tp)}
+               py="1.5" borderRadius="8px" fontSize="12px" fontWeight="600"
+               border="1px solid" borderColor={type === tp ? `${ACCENT}88` : "kk.border"}
+               bg={type === tp ? `${ACCENT}18` : "transparent"} color={type === tp ? "kk.textPrimary" : "kk.textSecondary"}
+               _hover={{ color: "kk.textPrimary" }}>
+            {tp === "blockbook" ? "Blockbook" : "Bitcoin Core"}
+          </Box>
+        ))}
+      </Flex>
+      <Text fontSize="10px" color="kk.textSecondary" mb="2.5">
+        {type === "blockbook"
+          ? "Trezor indexer — xpub-native, full history. What Pioneer uses."
+          : "Bitcoin Core RPC — scantxoutset (no history unless txindex + archival)."}
+      </Text>
+
+      <Text fontSize="11px" color="kk.textSecondary" mb="1">{type === "blockbook" ? "Blockbook URL" : "Node RPC URL"}</Text>
+      <Input value={url} onChange={(e) => setUrl(e.target.value)} placeholder={type === "blockbook" ? "http://100.117.181.111:9130" : "http://127.0.0.1:8332"}
              bg="var(--ink-0)" border="1px solid" borderColor="kk.border" color="kk.textPrimary" size="sm" fontFamily="mono" fontSize="xs" mb="2" />
 
-      <Text fontSize="11px" color="kk.textSecondary" mb="1">Auth — rpcuser:rpcpassword {enabled ? "(leave blank to keep saved)" : ""}</Text>
-      <Input value={auth} onChange={(e) => setAuth(e.target.value)} type="password" placeholder="user:password"
-             bg="var(--ink-0)" border="1px solid" borderColor="kk.border" color="kk.textPrimary" size="sm" fontFamily="mono" fontSize="xs" mb="3" />
+      {type === "core" && (
+        <>
+          <Text fontSize="11px" color="kk.textSecondary" mb="1">Auth — rpcuser:rpcpassword {enabled ? "(leave blank to keep saved)" : ""}</Text>
+          <Input value={auth} onChange={(e) => setAuth(e.target.value)} type="password" placeholder="user:password"
+                 bg="var(--ink-0)" border="1px solid" borderColor="kk.border" color="kk.textPrimary" size="sm" fontFamily="mono" fontSize="xs" mb="3" />
+        </>
+      )}
 
       {result && (
         <Box mb="3" p="2.5" borderRadius="8px" border="1px solid"
@@ -60,9 +85,10 @@ export function SelfHostNodePanel({ settings, onChange }: { settings: AppSetting
           {result.ok ? (
             <>
               <Text fontSize="xs" color="var(--teal)" fontWeight="600">Connected — {result.chain} · height {result.blocks?.toLocaleString()}</Text>
-              {result.pruned && <Text fontSize="11px" color="var(--gold)" mt="1">⚠ Pruned node — balances & sending work, but no transaction history.</Text>}
-              {result.txindex === false && <Text fontSize="11px" color="var(--gold)" mt="1">⚠ txindex off — can't spend legacy (1…) inputs. Set txindex=1 to enable.</Text>}
-              {result.txindex === undefined && <Text fontSize="11px" color="kk.textSecondary" mt="1">txindex status unknown (old Core) — legacy-input spends may fail.</Text>}
+              {type === "blockbook" && result.inSync === false && <Text fontSize="11px" color="var(--gold)" mt="1">⚠ Indexer still syncing — balances may be incomplete until caught up.</Text>}
+              {type === "core" && result.pruned && <Text fontSize="11px" color="var(--gold)" mt="1">⚠ Pruned node — balances & sending work, but no transaction history.</Text>}
+              {type === "core" && result.txindex === false && <Text fontSize="11px" color="var(--gold)" mt="1">⚠ txindex off — can't spend legacy (1…) inputs. Set txindex=1 to enable.</Text>}
+              {type === "core" && result.txindex === undefined && <Text fontSize="11px" color="kk.textSecondary" mt="1">txindex status unknown (old Core) — legacy-input spends may fail.</Text>}
             </>
           ) : (
             <Text fontSize="11px" color="var(--rose)" wordBreak="break-word">{result.error}</Text>

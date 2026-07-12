@@ -13,7 +13,14 @@
 import type { BtcBackend } from './types'
 import { PioneerBackend } from './pioneer'
 import { DeviceOnlyBackend } from './device-only'
-import { makeCoreBackend, type CoreConfig } from './core'
+import { makeCoreBackend } from './core'
+import { makeBlockbookBackend } from './blockbook'
+
+/** Persisted self-host node config. Blockbook (xpub-native, what Pioneer speaks)
+ *  or Bitcoin Core (scantxoutset). */
+export type NodeConfig =
+  | { type: 'blockbook'; url: string; headers?: Record<string, string> }
+  | { type: 'core'; url: string; auth?: string }
 
 let offlineMode = false
 let nodeBackend: BtcBackend | null = null
@@ -24,8 +31,10 @@ export function setBtcBackendOffline(v: boolean): void {
 }
 
 /** Set by index.ts from the persisted self-host node config. null → Pioneer. */
-export function setBtcNodeConfig(cfg: CoreConfig | null): void {
-  nodeBackend = cfg ? makeCoreBackend(cfg) : null
+export function setBtcNodeConfig(cfg: NodeConfig | null): void {
+  nodeBackend = !cfg ? null
+    : cfg.type === 'blockbook' ? makeBlockbookBackend(cfg)
+    : makeCoreBackend(cfg)
 }
 
 export function getBtcBackend(): BtcBackend {

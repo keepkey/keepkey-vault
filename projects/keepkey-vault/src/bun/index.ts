@@ -798,8 +798,10 @@ function loadSettings() {
 function loadBtcNodeConfig() {
 	const enabled = getSetting('btc_node_enabled') === '1'
 	const url = getSetting('btc_node_url') || ''
+	if (!enabled || !url) { setBtcNodeConfig(null); return }
+	const type = getSetting('btc_node_type') === 'core' ? 'core' : 'blockbook'
 	const auth = getSetting('btc_node_auth') || undefined
-	setBtcNodeConfig(enabled && url ? { url, auth } : null)
+	setBtcNodeConfig(type === 'core' ? { type: 'core', url, auth } : { type: 'blockbook', url })
 }
 let appVersionCache = ''
 let restServer: ReturnType<typeof startRestApi> | null = null
@@ -1092,6 +1094,7 @@ function getAppSettings() {
 		emulatorEnabled,
 		offlineMode,
 		btcNodeEnabled: getSetting('btc_node_enabled') === '1',
+		btcNodeType: getSetting('btc_node_type') === 'core' ? 'core' : 'blockbook',
 		btcNodeUrl: getSetting('btc_node_url') || '',
 		btcOnboardingShown: getSetting('btc_onboarding_shown') === '1',
 		preReleaseUpdates,
@@ -5455,20 +5458,26 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			// BtcBackend. Empty url with enabled=false clears it → back to Pioneer.
 			setBtcNode: async (params) => {
 				setSetting('btc_node_enabled', params.enabled ? '1' : '0')
+				setSetting('btc_node_type', params.type === 'core' ? 'core' : 'blockbook')
 				setSetting('btc_node_url', params.url || '')
 				// Only overwrite auth when provided — lets the user toggle enable
 				// without re-typing credentials (undefined = keep existing).
 				if (params.auth !== undefined) setSetting('btc_node_auth', params.auth)
 				loadBtcNodeConfig()
-				console.log('[settings] Self-host node:', params.enabled ? `enabled → ${params.url}` : 'disabled')
+				console.log('[settings] Self-host node:', params.enabled ? `enabled → ${params.type} ${params.url}` : 'disabled')
 				return getAppSettings()
 			},
 			// Verbose reachability + capability probe for the config panel. Uses the
 			// posted url/auth (pre-save), or the saved auth when re-testing.
 			testBtcNode: async (params) => {
-				const { testCoreNode } = await import('./btc-backend/core')
-				const auth = params.auth !== undefined ? params.auth : (getSetting('btc_node_auth') || undefined)
-				return testCoreNode({ url: params.url, auth })
+				const url = params.url
+				if (params.type === 'core') {
+					const { testCoreNode } = await import('./btc-backend/core')
+					const auth = params.auth !== undefined ? params.auth : (getSetting('btc_node_auth') || undefined)
+					return testCoreNode({ url, auth })
+				}
+				const { testBlockbookNode } = await import('./btc-backend/blockbook')
+				return testBlockbookNode({ url })
 			},
 			setWalletConnectEnabled: async (params) => {
 				walletConnectEnabled = params.enabled
