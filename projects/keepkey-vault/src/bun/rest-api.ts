@@ -5,6 +5,7 @@ import type { SigningRequestInfo, ApiLogEntry, EIP712DecodedInfo } from '../shar
 import { decodeEIP712 } from './eip712-decoder'
 import { decodeCalldata, firmwareClearSigns } from './calldata-decoder'
 import { CHAINS, isChainSupported } from '../shared/chains'
+import { isBitcoinOnlyVariant } from '../shared/flags'
 import {
   initializeOrchardFromDevice, scanOrchardNotes, getShieldedBalance,
   buildShieldedTx, finalizeShieldedTx, broadcastShieldedTx,
@@ -1104,6 +1105,21 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
     return fn()
   }
 
+  /** Non-Bitcoin address-derivation endpoints. Bitcoin-only firmware can't
+   *  derive any of these — Pioneer still polls them during portfolio sync, so
+   *  we short-circuit them (below) instead of hitting the device, which would
+   *  return "Unknown message" and flood the log. `/addresses/utxo` is BTC. */
+  const NON_BTC_ADDRESS_PATHS = new Set([
+    '/addresses/cosmos', '/addresses/osmosis', '/addresses/eth', '/addresses/tendermint',
+    '/addresses/thorchain', '/addresses/mayachain', '/addresses/xrp', '/addresses/solana',
+    '/addresses/tron', '/addresses/ton', '/addresses/hive',
+  ])
+
+  /** True when the connected device runs bitcoin-only firmware. */
+  function deviceIsBitcoinOnly(): boolean {
+    return isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant)
+  }
+
   /** Return 501 if firmware doesn't meet the chain's minFirmware requirement. */
   function requireChainSupport(chainId: string): Response | null {
     const chain = CHAINS.find(c => c.id === chainId)
@@ -1140,6 +1156,15 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
       // timeout for just these requests, not the whole server.
       if (method === 'POST' && (SIGNING_ROUTES.has(path) || path === '/eth/clearsign/load-signer')) {
         server.timeout(req, 0)
+      }
+
+      // Bitcoin-only firmware can't derive any non-Bitcoin chain. Pioneer still
+      // polls these address endpoints during portfolio sync — short-circuit with
+      // 501 before touching the device, which would otherwise reject the message
+      // ("Unknown message") and flood the log with multi-chain spam.
+      if (method === 'POST' && NON_BTC_ADDRESS_PATHS.has(path) && deviceIsBitcoinOnly()) {
+        return new Response(JSON.stringify({ error: 'not available on bitcoin-only firmware' }),
+          { status: 501, headers: { 'Content-Type': 'application/json', ...corsHeaders(req) } })
       }
 
       // Resolve app info from bearer token (or 'public')
@@ -3216,6 +3241,9 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             // ── Address-type paths (non-UTXO: XRP, ETH, Cosmos, etc.) ──
             // SDK sends type='address' for chains that need actual addresses, not xpubs.
             if (p.type === 'address') {
+              // Bitcoin-only firmware can't derive any non-UTXO chain — this whole
+              // branch. Skip quietly (the device would reject with "Unknown message").
+              if (deviceIsBitcoinOnly()) continue
               const primaryNetwork = (p.networks || [])[0] || ''
               const addrCacheKey = scopedKey(engine, 'batch-addr', { n: p.address_n, net: primaryNetwork })
               const cachedAddr = addressCache.get(addrCacheKey)
