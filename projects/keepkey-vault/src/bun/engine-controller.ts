@@ -1562,7 +1562,7 @@ export class EngineController extends EventEmitter {
       this.emit('firmware-progress', { percent: 30, message: 'Confirm on device, then erasing current firmware...' })
       await this.wallet.firmwareErase()
 
-      this.emit('firmware-progress', { percent: 50, message: 'Uploading bootloader...' })
+      this.emit('firmware-progress', { percent: 50, message: 'Look at your KeepKey — confirm to upload the bootloader…' })
       await this.wallet.firmwareUpload(firmware)
 
       this.emit('firmware-progress', { percent: 90, message: 'Bootloader updated, rebooting...' })
@@ -1625,7 +1625,7 @@ export class EngineController extends EventEmitter {
       this.emit('firmware-progress', { percent: 30, message: 'Confirm on device, then erasing current firmware...' })
       await this.wallet.firmwareErase()
 
-      this.emit('firmware-progress', { percent: 50, message: 'Uploading firmware...' })
+      this.emit('firmware-progress', { percent: 50, message: 'Look at your KeepKey — confirm the upload if prompted (unsigned firmware needs on-device approval)…' })
       await this.wallet.firmwareUpload(firmware)
 
       this.emit('firmware-progress', { percent: 90, message: 'Firmware updated, rebooting...' })
@@ -2414,7 +2414,7 @@ export class EngineController extends EventEmitter {
       this.emit('firmware-progress', { percent: 20, message: 'Confirm on device, then erasing current firmware...' })
       await this.wallet.firmwareErase()
 
-      this.emit('firmware-progress', { percent: 50, message: 'Uploading firmware...' })
+      this.emit('firmware-progress', { percent: 50, message: 'Look at your KeepKey — confirm the upload if prompted (unsigned firmware needs on-device approval)…' })
       await this.wallet.firmwareUpload(data)
 
       this.emit('firmware-progress', { percent: 90, message: 'Firmware uploaded, rebooting...' })
