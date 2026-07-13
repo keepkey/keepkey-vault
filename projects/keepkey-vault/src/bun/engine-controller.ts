@@ -5,7 +5,8 @@ import * as core from '@keepkey/hdwallet-core'
 import { HIDKeepKeyAdapter } from '@keepkey/hdwallet-keepkey-nodehid'
 import { NodeWebUSBKeepKeyAdapter } from '@keepkey/hdwallet-keepkey-nodewebusb'
 import { usb } from 'usb'
-import { saveDeviceSnapshot, saveEmulatorWalletMeta } from './db'
+import { saveDeviceSnapshot, saveEmulatorWalletMeta, clearNonBitcoinBalances } from './db'
+import { isBitcoinOnlyVariant } from '../shared/flags'
 import type { DeviceStateInfo, ActiveTransport, UpdatePhase, DeviceState, FirmwareManifest, PinRequestType, Bip85DeriveParams, Bip85DisplayResult } from '../shared/types'
 import { resolveOndeviceFirmwareVersion } from '../shared/firmware-versions'
 import { EmulatorKeepKeyAdapter } from './emulator-transport'
@@ -415,6 +416,14 @@ export class EngineController extends EventEmitter {
           const label = this.cachedFeatures.label || ''
           const fwVer = this.extractVersion(this.cachedFeatures)
           saveDeviceSnapshot(deviceId, label, fwVer, JSON.stringify(this.cachedFeatures))
+          // Bitcoin-only firmware is seed-locked to BTC — it can't derive or hold
+          // any other chain. Purge multi-chain balances cached from this device's
+          // prior firmware, else the dashboard sums phantom balances (e.g. an ETH
+          // address this firmware can't produce) into the "All Chains" total.
+          if (deviceId !== 'unknown' && isBitcoinOnlyVariant(this.cachedFeatures.firmwareVariant)) {
+            const removed = clearNonBitcoinBalances(deviceId)
+            if (removed) console.log(`[Engine] btc-only ${deviceId}: purged ${removed} stale non-BTC cached balances`)
+          }
         } catch { /* never block on cache failure */ }
 
         // Check if the seed changed since last session — emits 'seed-changed'
@@ -1471,6 +1480,7 @@ export class EngineController extends EventEmitter {
       latestFirmware: this.latestFirmware,
       latestBootloader: this.latestBootloader,
       latestFirmwareHash: this.getChannelEntry()?.firmware?.hash,
+      latestFirmwareBitcoinOnlyHash: this.getChannelEntry()?.firmwareBitcoinOnly?.hash,
       firmwareChannel: this.alphaFirmware && this.manifest?.beta ? 'beta' : 'latest',
       bootloaderMode,
       needsBootloaderUpdate: needsBl,
@@ -1478,6 +1488,11 @@ export class EngineController extends EventEmitter {
       needsInit: !initialized,
       initialized,
       passphraseProtection: features?.passphraseProtection ?? false,
+      // Firmware variant, straight from the device Features. "KeepKeyBTC"/"EmulatorBTC"
+      // = bitcoin-only firmware; "bitcoin-only-locked" = multi-chain firmware
+      // refusing a btc-only seed (wipe required); else multi-chain. Drives the
+      // BTC-only UI restriction (see isBitcoinOnlyVariant).
+      firmwareVariant: features?.firmwareVariant || undefined,
       // In bootloader mode the device can't report `initialized` — use firmware
       // hash presence instead. If firmware bytes exist on flash, the device has
       // been set up before and entered bootloader for an update (not OOB).
@@ -1557,7 +1572,7 @@ export class EngineController extends EventEmitter {
       this.emit('firmware-progress', { percent: 30, message: 'Confirm on device, then erasing current firmware...' })
       await this.wallet.firmwareErase()
 
-      this.emit('firmware-progress', { percent: 50, message: 'Uploading bootloader...' })
+      this.emit('firmware-progress', { percent: 50, message: 'Look at your KeepKey — confirm to upload the bootloader…' })
       await this.wallet.firmwareUpload(firmware)
 
       this.emit('firmware-progress', { percent: 90, message: 'Bootloader updated, rebooting...' })
@@ -1579,30 +1594,37 @@ export class EngineController extends EventEmitter {
     }
   }
 
-  async startFirmwareUpdate() {
+  async startFirmwareUpdate(bitcoinOnly = false) {
     if (!this.wallet) throw new Error('No device connected')
     this.updatePhase = 'flashing'
     this.emit('state-change', this.getDeviceState())
     this.emit('firmware-progress', { percent: 0, message: 'Starting firmware update...' })
 
     try {
+      // Pick the manifest entry for the chosen variant. Bitcoin-only lives in a
+      // separate manifest field (firmwareBitcoinOnly) and REQUIRES a manifest
+      // entry — there's no github fallback for it.
       const channel = this.getChannelEntry()
+      const fwEntry = bitcoinOnly ? channel?.firmwareBitcoinOnly : channel?.firmware
+      if (bitcoinOnly && !fwEntry) {
+        throw new Error('Bitcoin-only firmware is not available in this build (no manifest entry)')
+      }
       this.emit('firmware-progress', { percent: 10, message: 'Loading firmware...' })
-      const firmware = channel
-        ? await this.loadBinary(channel.firmware.url)
+      const firmware = fwEntry
+        ? await this.loadBinary(fwEntry.url)
         : Buffer.from(await (await fetch(`https://github.com/keepkey/keepkey-firmware/releases/download/v${this.latestFirmware}/firmware.keepkey.bin`)).arrayBuffer())
 
       // Binary integrity check — compare file hash against manifest.
       // If the binary starts with "KPKY" magic bytes, strip the 256-byte container
       // header before hashing — the manifest hash covers only the payload.
-      if (channel?.firmware?.hash) {
+      if (fwEntry?.hash) {
         const hasKpkyHeader = firmware.length >= 256
           && firmware[0] === 0x4B && firmware[1] === 0x50
           && firmware[2] === 0x4B && firmware[3] === 0x59 // "KPKY"
         const hashPayload = hasKpkyHeader ? firmware.subarray(256) : firmware
         const downloadedHash = sha256Hex(hashPayload)
-        if (downloadedHash !== channel.firmware.hash) {
-          throw new Error(`Firmware binary integrity check failed: expected ${channel.firmware.hash}, got ${downloadedHash}`)
+        if (downloadedHash !== fwEntry.hash) {
+          throw new Error(`Firmware binary integrity check failed: expected ${fwEntry.hash}, got ${downloadedHash}`)
         }
         console.log(`[Engine] Firmware binary integrity verified${hasKpkyHeader ? ' (KPKY header stripped)' : ''}`)
         this.emit('firmware-progress', { percent: 20, message: `Binary verified — sha256 matches the pinned release hash (${downloadedHash.slice(0, 16)}…)` })
@@ -1613,7 +1635,7 @@ export class EngineController extends EventEmitter {
       this.emit('firmware-progress', { percent: 30, message: 'Confirm on device, then erasing current firmware...' })
       await this.wallet.firmwareErase()
 
-      this.emit('firmware-progress', { percent: 50, message: 'Uploading firmware...' })
+      this.emit('firmware-progress', { percent: 50, message: 'Look at your KeepKey — confirm the upload if prompted (unsigned firmware needs on-device approval)…' })
       await this.wallet.firmwareUpload(firmware)
 
       this.emit('firmware-progress', { percent: 90, message: 'Firmware updated, rebooting...' })
@@ -2027,6 +2049,7 @@ export class EngineController extends EventEmitter {
     isDowngrade: boolean
     isSameVersion: boolean
     willWipeDevice: boolean
+    isBitcoinOnly: boolean
   } {
     const fileSize = data.length
     const hasKpkyHeader = data.length >= 256
@@ -2081,6 +2104,12 @@ export class EngineController extends EventEmitter {
       }
     }
 
+    // Bitcoin-only variant detection. The BITCOIN_ONLY firmware build compiles in
+    // the literal "KeepKeyBTC"/"EmulatorBTC" (fsm_msg_common.h, under #if BITCOIN_ONLY);
+    // a full build never contains it. This is the only reliable signal at flash
+    // time — the device can't report firmware_variant until it boots the new fw.
+    const isBitcoinOnly = /KeepKeyBTC|EmulatorBTC/.test(payload.toString('latin1'))
+
     // Device state — distinguish bootloader mode from firmware mode
     const isBootloaderMode = this.cachedFeatures?.bootloaderMode === true
     // Use resolved BL version (hash→version from manifest) when raw features lack it
@@ -2125,6 +2154,7 @@ export class EngineController extends EventEmitter {
       isDowngrade,
       isSameVersion,
       willWipeDevice,
+      isBitcoinOnly,
     }
   }
 
@@ -2194,7 +2224,19 @@ export class EngineController extends EventEmitter {
    * passphrase toggle / reconnect, so the guard re-reads the device instead of
    * trusting session state. Returns null if no wallet or derivation fails.
    */
-  async deriveSeedIdentity(): Promise<string | null> {
+  /**
+   * Stable per-seed fingerprint. ETH primary address (m/44'/60'/0'/0/0) on
+   * multi-chain firmware; btc-only firmware REFUSES ETH derivation, so fall back
+   * to a fixed BTC address (m/84'/0'/0'/0/0, prefixed `btc:` so it can never
+   * collide with an eth address). Deterministic per seed either way — which is
+   * all the seed-change / wallet-scope / sweep-replay guards need.
+   *
+   * ponytail: a seed used first on multi-chain firmware then on btc-only (same
+   * seed, different variant) fingerprints differently across the two. Harmless —
+   * it emits a false "seed changed" (caches reset, fresh data reloads); it never
+   * signs or loses funds. Revisit only if variant-swap-on-one-seed is a real flow.
+   */
+  private async deriveSeedFingerprint(): Promise<string | null> {
     if (!this.wallet) return null
     try {
       const result = await (this.wallet as any).ethGetAddress({
@@ -2202,12 +2244,37 @@ export class EngineController extends EventEmitter {
         showDisplay: false,
       })
       const addr = (typeof result === 'string' ? result : result?.address)?.toLowerCase()
-      if (addr) this.seedEthAddress = addr
-      return addr || null
+      if (addr) return addr
     } catch (err: any) {
-      console.warn('[Engine] deriveSeedIdentity failed (non-fatal):', err?.message)
+      console.warn('[Engine] seed fingerprint (eth) failed:', err?.message)
+    }
+    // ETH produced no address — it threw, OR resolved undefined/{}/address-less.
+    // Only btc-only firmware legitimately REFUSES ETH; on multi-chain firmware a
+    // missing ETH address is a transient transport/USB hiccup, and flipping to the
+    // btc: fingerprint would trigger a false "seed changed" purge. Multi-chain here
+    // is uncertain → return null. (Guard sits AFTER the attempt so it catches the
+    // resolve-empty case too, not just thrown errors.)
+    if (!isBitcoinOnlyVariant(this.cachedFeatures?.firmwareVariant)) {
+      console.warn('[Engine] seed fingerprint: ETH unavailable on multi-chain fw — uncertain, returning null')
       return null
     }
+    try {
+      const result = await (this.wallet as any).btcGetAddress({
+        addressNList: [0x80000000 + 84, 0x80000000 + 0, 0x80000000 + 0, 0, 0],
+        coin: 'Bitcoin', scriptType: 'p2wpkh', showDisplay: false,
+      })
+      const addr = (typeof result === 'string' ? result : result?.address)
+      return addr ? `btc:${addr.toLowerCase()}` : null
+    } catch (err: any) {
+      console.warn('[Engine] seed fingerprint (btc fallback) failed:', err?.message)
+      return null
+    }
+  }
+
+  async deriveSeedIdentity(): Promise<string | null> {
+    const addr = await this.deriveSeedFingerprint()
+    if (addr) this.seedEthAddress = addr
+    return addr
   }
 
   /**
@@ -2219,11 +2286,7 @@ export class EngineController extends EventEmitter {
   private async deriveHiddenWalletScopeInMemory(): Promise<void> {
     if (!this.wallet || !this.hiddenWalletActive) return
     try {
-      const result = await (this.wallet as any).ethGetAddress({
-        addressNList: [0x80000000 + 44, 0x80000000 + 60, 0x80000000 + 0, 0, 0],
-        showDisplay: false,
-      })
-      const addr = (typeof result === 'string' ? result : result?.address)?.toLowerCase()
+      const addr = await this.deriveSeedFingerprint()
       if (!addr) return
       this.seedEthAddress = addr // RAM only — never written to disk for hidden wallets
       this.emit('wallet-scope-ready', { deviceId: this.cachedFeatures?.deviceId || 'unknown', seedAddress: addr })
@@ -2240,13 +2303,9 @@ export class EngineController extends EventEmitter {
   async checkSeedIdentity(): Promise<void> {
     if (!this.wallet) return
     try {
-      const result = await (this.wallet as any).ethGetAddress({
-        addressNList: [0x80000000 + 44, 0x80000000 + 60, 0x80000000 + 0, 0, 0],
-        showDisplay: false,
-      })
-      const addr = (typeof result === 'string' ? result : result?.address)?.toLowerCase()
+      const addr = await this.deriveSeedFingerprint()
       if (!addr) {
-        console.warn('[Engine] checkSeedIdentity: could not derive ETH address')
+        console.warn('[Engine] checkSeedIdentity: could not derive seed fingerprint')
         return
       }
       this.seedEthAddress = addr
@@ -2306,13 +2365,9 @@ export class EngineController extends EventEmitter {
       return
     }
 
-    let addr: string | undefined
+    let addr: string | null = null
     try {
-      const result = await (probeWallet as any).ethGetAddress({
-        addressNList: [0x80000000 + 44, 0x80000000 + 60, 0x80000000 + 0, 0, 0],
-        showDisplay: false,
-      })
-      addr = (typeof result === 'string' ? result : result?.address)?.toLowerCase()
+      addr = await this.deriveSeedFingerprint()
     } catch (err: any) {
       console.warn('[Engine] Reconnect probe failed — staying conservative:', err?.message)
       return
@@ -2394,7 +2449,7 @@ export class EngineController extends EventEmitter {
       this.emit('firmware-progress', { percent: 20, message: 'Confirm on device, then erasing current firmware...' })
       await this.wallet.firmwareErase()
 
-      this.emit('firmware-progress', { percent: 50, message: 'Uploading firmware...' })
+      this.emit('firmware-progress', { percent: 50, message: 'Look at your KeepKey — confirm the upload if prompted (unsigned firmware needs on-device approval)…' })
       await this.wallet.firmwareUpload(data)
 
       this.emit('firmware-progress', { percent: 90, message: 'Firmware uploaded, rebooting...' })

@@ -13,6 +13,13 @@ import { MobilePanel } from "./components/MobilePanel"
 import { WalletConnectPanel } from "./components/WalletConnectPanel"
 import { FirmwareDropZone } from "./components/FirmwareDropZone"
 import { SplashScreen } from "./components/SplashScreen"
+import { isBitcoinOnlyVariant } from "../shared/flags"
+import { useOnline } from "./hooks/useOnline"
+import { useBtcNodeStatus } from "./hooks/useBtcNodeStatus"
+import { OfflineBanner } from "./components/OfflineBanner"
+import { NodeStatusBar } from "./components/NodeStatusBar"
+import { NodeConnectedDialog } from "./components/NodeConnectedDialog"
+import { BitcoinOnlyOnboardingDialog } from "./components/BitcoinOnlyOnboardingDialog"
 import { DeviceGrid } from "./components/DeviceGrid"
 import { DeviceClaimedDialog } from "./components/DeviceClaimedDialog"
 import { LinuxUdevWarning } from "./components/LinuxUdevWarning"
@@ -75,6 +82,10 @@ function App() {
 	}, [wizardComplete, deviceState.state])
 	const [portfolioLoaded, setPortfolioLoaded] = useState(false)
 	const [gridReady, setGridReady] = useState(false)
+	// Hold the bitcoin-only branded splash for a beat on startup so it's actually
+	// seen — a purged btc-only device loads its (BTC-only) portfolio near-instantly,
+	// which would otherwise flash the splash by. Cleared by a timer once connected.
+	const [btcSplashHold, setBtcSplashHold] = useState(false)
 	const [settingsOpen, setSettingsOpen] = useState(false)
 	const [activeTab, setActiveTab] = useState<NavTab>("vault")
 	const [paletteOpen, setPaletteOpen] = useState(false)
@@ -85,6 +96,18 @@ function App() {
 	const [walletConnectEnabled, setWalletConnectEnabled] = useState(false)
 	const [hiveEnabled, setHiveEnabled] = useState(false)
 	const [emulatorEnabled, setEmulatorEnabled] = useState(false)
+	const [offlineModeSetting, setOfflineModeSetting] = useState(false)
+	// One-time btc-only data-source onboarding. Starts true so it never flashes
+	// before settings load; the real value arrives from getAppSettings.
+	const [btcOnboardingSeen, setBtcOnboardingSeen] = useState(true)
+	const [btcOnboardingDismissed, setBtcOnboardingDismissed] = useState(false)
+	const [btcNodeEnabledSetting, setBtcNodeEnabledSetting] = useState(false)
+	const [nodeDialogOpen, setNodeDialogOpen] = useState(false)
+	// Skip the reachability probe when airplane mode is on — we already know we're
+	// offline and must make zero network calls.
+	const online = useOnline(!offlineModeSetting)
+	// Self-host node status for the bottom bar (skip while offline — no point probing).
+	const nodeStatus = useBtcNodeStatus(btcNodeEnabledSetting && !(offlineModeSetting || !online))
 	const [pendingAppUrl, setPendingAppUrl] = useState<string | null>(null)
 	const [pendingWcOpen, setPendingWcOpen] = useState(false)
 	const [enablingApi, setEnablingApi] = useState(false)
@@ -110,7 +133,7 @@ function App() {
 		const refreshSettings = () => {
 			rpcRequest<AppSettings>("getAppSettings")
 				.then((s) => {
-					setRestApiEnabled(s.restApiEnabled); setWalletConnectEnabled(s.walletConnectEnabled); setEmulatorEnabled(s.emulatorEnabled); setHiveEnabled(s.hiveEnabled)
+					setRestApiEnabled(s.restApiEnabled); setWalletConnectEnabled(s.walletConnectEnabled); setEmulatorEnabled(s.emulatorEnabled); setHiveEnabled(s.hiveEnabled); setOfflineModeSetting(s.offlineMode); setBtcOnboardingSeen(s.btcOnboardingShown); setBtcNodeEnabledSetting(s.btcNodeEnabled)
 					if (s.pioneerApiBase) loadSupportedChains(s.pioneerApiBase).catch(() => {})
 				})
 				.catch(() => {})
@@ -129,6 +152,20 @@ function App() {
 	useEffect(() => {
 		if (deviceState.state === "disconnected") setFirmwareSkipped(false)
 	}, [deviceState.state])
+
+	// Hold the bitcoin-only branded splash ~2.2s once a btc-only device is
+	// detected, so it's actually seen on startup instead of flashing by (a purged
+	// btc-only device loads its BTC-only portfolio near-instantly). Re-arms on the
+	// state/variant settling; a non-btc or disconnected device clears it.
+	useEffect(() => {
+		if (deviceState.state === "disconnected" || !isBitcoinOnlyVariant(deviceState.firmwareVariant)) {
+			setBtcSplashHold(false)
+			return
+		}
+		setBtcSplashHold(true)
+		const t = setTimeout(() => setBtcSplashHold(false), 2200)
+		return () => clearTimeout(t)
+	}, [deviceState.state, deviceState.firmwareVariant])
 
 	// ── REST API UI-active handshake ─────────────────────────────────
 	// The Bun process refuses to serve pubkeys/addresses on port 1646 unless
@@ -852,10 +889,17 @@ function App() {
 		)
 	}
 
+	// Bitcoin-only firmware connected — brand the splash orange with a ₿ mark.
+	const splashBitcoinOnly = isBitcoinOnlyVariant(deviceState.firmwareVariant)
+	// Offline = deliberate airplane-mode setting OR the OS reports no network.
+	const offline = offlineModeSetting || !online
+	const showNodeBar = !offline && !!nodeStatus?.active
+	const bottomBar = offline || showNodeBar
+
 	if (phase === "claimed") {
 		return (
 			<>{splashNav}{resizeHandles}{updateBanner}{firmwareDropZone}{signingOverlay}{pairingOverlay}{passphraseOverlay}{charOverlay}{pinOverlay}
-				<SplashScreen statusText={t("keepkeyDetected", { ns: "nav" })} variant="claimed">
+				<SplashScreen statusText={t("keepkeyDetected", { ns: "nav" })} variant="claimed" isBitcoinOnly={splashBitcoinOnly}>
 					<DeviceClaimedDialog error={deviceState.error || t("claimed.defaultError", { ns: "device" })} />
 				</SplashScreen>
 			</>
@@ -883,6 +927,7 @@ function App() {
 					variant={linuxUdevBlocked ? "error" : needsPin || needsPassphrase || isConnecting ? "connecting" : isError ? "error" : "searching"}
 					childrenReady={linuxUdevBlocked ? true : gridReady}
 					onLogoClick={linuxUdevBlocked || needsPin || needsPassphrase ? undefined : () => { rpcRequest("retryConnect").catch(() => {}) }}
+					isBitcoinOnly={splashBitcoinOnly}
 				>
 					{linuxUdevBlocked ? (
 						<LinuxUdevWarning />
@@ -918,11 +963,17 @@ function App() {
 
 	return (
 		<>{resizeHandles}{updateBanner}{incomingTxToast}{firmwareDropZone}{signingOverlay}{pairingOverlay}{passphraseOverlay}{charOverlay}{pinOverlay}
-			{!portfolioLoaded && activeTab === "vault" && (
-				<SplashScreen statusText={t("loadingPortfolio", { ns: "nav" })} variant="connecting" />
+			{offline && <OfflineBanner airplane={offlineModeSetting} />}
+			{showNodeBar && nodeStatus && <NodeStatusBar status={nodeStatus} />}
+			{nodeDialogOpen && <NodeConnectedDialog onClose={() => setNodeDialogOpen(false)} />}
+			{splashBitcoinOnly && !btcOnboardingSeen && !btcOnboardingDismissed && portfolioLoaded && !btcSplashHold && (
+				<BitcoinOnlyOnboardingDialog onClose={() => { setBtcOnboardingDismissed(true); rpcRequest("markBtcOnboardingShown").catch(() => {}) }} />
+			)}
+			{(!portfolioLoaded || btcSplashHold) && activeTab === "vault" && (
+				<SplashScreen statusText={t("loadingPortfolio", { ns: "nav" })} variant="connecting" isBitcoinOnly={splashBitcoinOnly} />
 			)}
 			<Flex direction="column" h="100vh" bg="transparent" color="kk.textPrimary" position="relative"
-				{...(!portfolioLoaded && activeTab === "vault" ? { position: "absolute", w: 0, h: 0, overflow: "hidden" } as const : {})}
+				{...((!portfolioLoaded || btcSplashHold) && activeTab === "vault" ? { position: "absolute", w: 0, h: 0, overflow: "hidden" } as const : {})}
 			>
 				{/* Full-screen ambient radial glow — gentler, neutral-warm tint
 				    so the page feels lit but doesn't read as a yellow wash. */}
@@ -952,15 +1003,17 @@ function App() {
 					activeTab={activeTab}
 					onTabChange={handleTabChange}
 					passphraseActive={deviceState.isHiddenWallet}
+					isBitcoinOnly={splashBitcoinOnly}
+					offline={offline}
 					onExitToDeviceSelect={deviceState.isEmulator ? () => { rpcRequest("emulatorStop").catch(() => {}) } : undefined}
 					connectedDeviceId={deviceState.deviceId || null}
 					watchingDeviceId={null}
 					onWatchWallet={(id, lbl) => { setWatchOnlyDeviceId(id); setWatchOnlyLabel(lbl); setWatchOnlyMode(true) }}
 					onReturnToConnected={() => { /* already on connected wallet */ }}
 				/>
-				<Flex flex="1" direction="column" overflow="auto" pt={showBanner ? NAV_CONTENT_OFFSET_WITH_BANNER : NAV_CONTENT_OFFSET} pb="4" transition="padding-top 0.2s">
+				<Flex flex="1" direction="column" overflow="auto" pt={showBanner ? NAV_CONTENT_OFFSET_WITH_BANNER : NAV_CONTENT_OFFSET} pb={bottomBar ? "38px" : "4"} transition="padding-top 0.2s">
 				{/* TopNav offset plus banner height when visible. */}
-					{activeTab === "vault" && <Dashboard onLoaded={handlePortfolioLoaded} onOpenSettings={() => setSettingsOpen(true)} firmwareVersion={deviceState.firmwareVersion} forceRefresh={wizardComplete} onForceRefreshConsumed={() => setWizardComplete(false)} isHiddenWallet={deviceState.isHiddenWallet} />}
+					{activeTab === "vault" && <Dashboard onLoaded={handlePortfolioLoaded} onOpenSettings={() => setSettingsOpen(true)} firmwareVersion={deviceState.firmwareVersion} firmwareVariant={deviceState.firmwareVariant} forceRefresh={wizardComplete} onForceRefreshConsumed={() => setWizardComplete(false)} isHiddenWallet={deviceState.isHiddenWallet} />}
 					{activeTab === "explore" && <AppStore onOpenApp={handleOpenApp} onOpenKeepKey={handleOpenKeepKey} />}
 					{activeTab === "addresses" && <AddressBookView />}
 				</Flex>
@@ -970,7 +1023,7 @@ function App() {
 				onClose={() => {
 					setSettingsOpen(false)
 					rpcRequest<AppSettings>("getAppSettings")
-						.then((s) => { setRestApiEnabled(s.restApiEnabled); setWalletConnectEnabled(s.walletConnectEnabled); setEmulatorEnabled(s.emulatorEnabled); setHiveEnabled(s.hiveEnabled) })
+						.then((s) => { setRestApiEnabled(s.restApiEnabled); setWalletConnectEnabled(s.walletConnectEnabled); setEmulatorEnabled(s.emulatorEnabled); setHiveEnabled(s.hiveEnabled); setOfflineModeSetting(s.offlineMode) })
 						.catch(() => {})
 					window.dispatchEvent(new Event("keepkey-settings-changed"))
 				}}
@@ -985,6 +1038,12 @@ function App() {
 				onOpenPairedApps={() => setPairedAppsOpen(true)}
 				onOpenMobilePairing={() => setMobilePairingOpen(true)}
 				onRestApiChanged={setRestApiEnabled}
+				onNodeConnected={() => {
+					setSettingsOpen(false)
+					setBtcNodeEnabledSetting(true)
+					setNodeDialogOpen(true)
+					window.dispatchEvent(new Event("keepkey-refresh-balances"))
+				}}
 				onWordCountChange={setRecoveryWordCount}
 			/>
 			<MobilePairingDialog

@@ -9,6 +9,8 @@ import { IS_MAC, IS_WINDOWS } from "../lib/platform"
 import { Z } from "../lib/z-index"
 import type { DeviceStateInfo, AppSettings, EmulatorWalletInfo } from "../../shared/types"
 import { versionCompare } from "../../shared/firmware-versions"
+import { isBitcoinOnlyVariant } from "../../shared/flags"
+import { SelfHostNodePanel } from "./SelfHostNodePanel"
 
 interface DevicePolicy {
 	policyName?: string
@@ -39,6 +41,8 @@ interface DeviceSettingsDrawerProps {
 	onOpenPairedApps?: () => void
 	onOpenMobilePairing?: () => void
 	onRestApiChanged?: (enabled: boolean) => void
+	/** Self-host node connected (tested OK + saved) — parent closes the drawer and runs the walkthrough. */
+	onNodeConnected?: () => void
 	onWordCountChange?: (count: 12 | 18 | 24) => void
 }
 
@@ -142,7 +146,7 @@ function VerificationBadge({ verified, t }: { verified?: boolean; t: (key: strin
 
 // ── Main Component ──────────────────────────────────────────────────
 
-export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpdate, onDownloadUpdate, onApplyUpdate, updatePhase, updateVersion, appVersion, onOpenAuditLog, onOpenPairedApps, onOpenMobilePairing, onRestApiChanged, onWordCountChange }: DeviceSettingsDrawerProps) {
+export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpdate, onDownloadUpdate, onApplyUpdate, updatePhase, updateVersion, appVersion, onOpenAuditLog, onOpenPairedApps, onOpenMobilePairing, onRestApiChanged, onNodeConnected, onWordCountChange }: DeviceSettingsDrawerProps) {
 	const { t } = useTranslation("settings")
 	const [features, setFeatures] = useState<DeviceFeatures | null>(null)
 	const [featuresError, setFeaturesError] = useState(false)
@@ -161,7 +165,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 	const [removePinConfirm, setRemovePinConfirm] = useState(false)
 	const [togglingPassphrase, setTogglingPassphrase] = useState(false)
 	const [togglingPolicy, setTogglingPolicy] = useState("")
-	const [appSettings, setAppSettings] = useState<AppSettings>({ restApiEnabled: false, pioneerApiBase: '', pioneerServers: [], activePioneerServer: '', fiatCurrency: 'USD', numberLocale: 'en-US', walletConnectEnabled: false, bip85Enabled: false, zcashPrivacyEnabled: false, hiveEnabled: false, emulatorEnabled: false, preReleaseUpdates: false, alphaFirmware: false, privateModeEnabled: false })
+	const [appSettings, setAppSettings] = useState<AppSettings>({ restApiEnabled: false, pioneerApiBase: '', pioneerServers: [], activePioneerServer: '', fiatCurrency: 'USD', numberLocale: 'en-US', walletConnectEnabled: false, bip85Enabled: false, zcashPrivacyEnabled: false, hiveEnabled: false, emulatorEnabled: false, offlineMode: false, btcNodeEnabled: false, btcNodeType: 'blockbook', btcNodeUrl: '', btcOnboardingShown: false, preReleaseUpdates: false, alphaFirmware: false, privateModeEnabled: false })
 	const [togglingRestApi, setTogglingRestApi] = useState(false)
 	const [windowFocusState, setWindowFocusState] = useState<{ refs: number; alwaysOnTop: boolean } | null>(null)
 	const [releasingWindowFocus, setReleasingWindowFocus] = useState(false)
@@ -348,6 +352,16 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 			setAppSettings(result)
 		} catch (e: any) { console.error("setEmulatorEnabled:", e) }
 		setTogglingEmulator(false)
+	}, [])
+
+	const [togglingOffline, setTogglingOffline] = useState(false)
+	const toggleOffline = useCallback(async (enabled: boolean) => {
+		setTogglingOffline(true)
+		try {
+			const result = await rpcRequest<AppSettings>("setOfflineMode", { enabled }, 10000)
+			setAppSettings(result)
+		} catch (e: any) { console.error("setOfflineMode:", e) }
+		setTogglingOffline(false)
 	}, [])
 
 	// File-picker install of the emulator library. Drag-drop is the other path,
@@ -1550,9 +1564,43 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 						</VStack>
 					</Section>
 
+					{/* ── Bitcoin node (self-host) — btc-only devices ─── */}
+					{isBitcoinOnlyVariant(deviceState.firmwareVariant) && (
+						<Section title="Bitcoin node" defaultOpen={true}>
+							<SelfHostNodePanel settings={appSettings} onChange={setAppSettings} onConnected={onNodeConnected} />
+						</Section>
+					)}
+
 					{/* ── Feature Flags ──────────────────────────────── */}
 					<Section title={t("featureFlags")} defaultOpen={false}>
 						<VStack gap="4" align="stretch">
+							{/* Offline (airplane) mode toggle */}
+							<Flex justify="space-between" align="center">
+								<Flex align="center" gap="3">
+									<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(224,140,123,0.1)">
+										<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--rose)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+											<line x1="2" y1="2" x2="22" y2="22" />
+											<path d="M8.5 16.5a5 5 0 0 1 7 0" />
+											<path d="M2 8.82a15 15 0 0 1 4.17-2.65" />
+											<path d="M10.66 5c4.01-.36 8.14.9 11.34 3.76" />
+											<path d="M16.85 11.25a10 10 0 0 1 2.22 1.68" />
+											<line x1="12" y1="20" x2="12.01" y2="20" />
+										</svg>
+									</Flex>
+									<Box>
+										<Text fontSize="md" color="kk.textPrimary" fontWeight="500">{t("offlineMode", { defaultValue: "Offline mode" })}</Text>
+										<Text fontSize="sm" color="kk.textSecondary" mt="0.5">
+											{t("offlineModeDescription", { defaultValue: "Airplane mode — no network. Device, addresses, and signing still work; balances, history, and broadcast are disabled." })}
+										</Text>
+									</Box>
+								</Flex>
+								<Toggle
+									checked={appSettings.offlineMode}
+									onChange={toggleOffline}
+									disabled={togglingOffline}
+								/>
+							</Flex>
+
 							{/* WalletConnect toggle */}
 							<Flex justify="space-between" align="center">
 								<Flex align="center" gap="3">

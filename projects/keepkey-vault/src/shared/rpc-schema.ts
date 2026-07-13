@@ -16,7 +16,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       getDeviceState: { params: void; response: DeviceStateInfo }
       retryConnect: { params: void; response: void }
       startBootloaderUpdate: { params: void; response: void }
-      startFirmwareUpdate: { params: void; response: void }
+      startFirmwareUpdate: { params: { bitcoinOnly?: boolean }; response: void }
       flashFirmware: { params: void; response: void }
       analyzeFirmware: { params: { data: string }; response: FirmwareAnalysis }
       flashCustomFirmware: { params: { data: string }; response: void }
@@ -209,11 +209,16 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       // ── App Settings ──────────────────────────────────────────────────
       getAppSettings: { params: void; response: AppSettings }
       markPassphraseIntroShown: { params: void; response: AppSettings }
+      markBtcOnboardingShown: { params: void; response: AppSettings }
       setRestApiEnabled: { params: { enabled: boolean }; response: AppSettings }
       setPioneerApiBase: { params: { url: string }; response: AppSettings }
       setFiatCurrency: { params: { currency: string }; response: AppSettings }
       setNumberLocale: { params: { locale: string }; response: AppSettings }
       setWalletConnectEnabled: { params: { enabled: boolean }; response: AppSettings }
+      setOfflineMode: { params: { enabled: boolean }; response: AppSettings }
+      setBtcNode: { params: { enabled: boolean; type: 'blockbook' | 'core'; url: string; rpcUser?: string; rpcPass?: string }; response: AppSettings }
+      testBtcNode: { params: { type: 'blockbook' | 'core'; url: string; rpcUser?: string; rpcPass?: string }; response: { ok: boolean; error?: string; chain?: string; blocks?: number; pruned?: boolean; txindex?: boolean; inSync?: boolean; detectedType?: 'blockbook' | 'core' } }
+      getBtcNodeStatus: { params: void; response: { active: boolean; kind?: 'blockbook' | 'core'; ok?: boolean; error?: string; height?: number; headers?: number; syncing?: boolean; progress?: number } }
       setBip85Enabled: { params: { enabled: boolean }; response: AppSettings }
       setZcashPrivacyEnabled: { params: { enabled: boolean }; response: AppSettings }
       setHiveEnabled: { params: { enabled: boolean }; response: AppSettings }
@@ -405,6 +410,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       applyUpdate: { params: void; response: void }
       getUpdateInfo: { params: void; response: UpdateInfo | null }
       getAppVersion: { params: void; response: { version: string; channel: string } }
+      pingPioneer: { params: void; response: { online: boolean } }
       // ── REST API UI-active gate ────────────────────────────────
       // Frontend signals whether the Vault UI window is open so the REST API
       // (port 1646) won't serve pubkeys/addresses to 3rd-party apps unless

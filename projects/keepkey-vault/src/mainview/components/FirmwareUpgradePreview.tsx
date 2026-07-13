@@ -8,6 +8,17 @@ import { Box, Text, VStack, HStack, Flex } from '@chakra-ui/react'
 import { CHAINS } from '../../shared/chains'
 import { getUpgradeFeatures, getVersionInfo, type FirmwareFeature } from '../../shared/firmware-versions'
 
+// Bitcoin-only firmware has no per-version multi-chain notes — it holds only BTC.
+// Show a single honest card instead of the full v-release feature list (which
+// would tout ETH/Solana/etc. the device physically can't touch).
+const BTC_ONLY_FEATURE: FirmwareFeature = {
+  title: 'Bitcoin-only',
+  description: 'Holds and signs Bitcoin exclusively — reduced attack surface.',
+  chains: ['bitcoin'],
+  color: '#F7931A',
+  icon: 'chain',
+}
+
 // ── Icon URL helper (same convention as assetLookup.ts) ──────────────
 function chainIconUrl(caip: string): string {
   return `https://api.keepkey.info/coins/${btoa(caip).replace(/=+$/, '')}.png`
@@ -54,9 +65,11 @@ interface Props {
   currentVersion: string | null
   /** Target firmware version being installed */
   targetVersion: string
+  /** Bitcoin-only firmware variant — show BTC-only messaging, not multi-chain notes */
+  isBitcoinOnly?: boolean
 }
 
-export function FirmwareUpgradePreview({ currentVersion, targetVersion }: Props) {
+export function FirmwareUpgradePreview({ currentVersion, targetVersion, isBitcoinOnly }: Props) {
   const [visible, setVisible] = useState(false)
 
   useEffect(() => {
@@ -66,8 +79,8 @@ export function FirmwareUpgradePreview({ currentVersion, targetVersion }: Props)
   }, [])
 
   const features = useMemo(
-    () => getUpgradeFeatures(currentVersion, targetVersion),
-    [currentVersion, targetVersion],
+    () => isBitcoinOnly ? [BTC_ONLY_FEATURE] : getUpgradeFeatures(currentVersion, targetVersion),
+    [currentVersion, targetVersion, isBitcoinOnly],
   )
 
   const versionInfo = useMemo(() => getVersionInfo(targetVersion), [targetVersion])
@@ -163,7 +176,7 @@ export function FirmwareUpgradePreview({ currentVersion, targetVersion }: Props)
                 animation: visible ? 'fw-fade-up 0.6s cubic-bezier(0.16, 1, 0.3, 1) 0.15s both' : undefined,
               }}
             >
-              {versionInfo?.headline || `Firmware v${targetVersion}`}
+              {isBitcoinOnly ? 'Bitcoin-only firmware' : (versionInfo?.headline || `Firmware v${targetVersion}`)}
             </Text>
           </Box>
 

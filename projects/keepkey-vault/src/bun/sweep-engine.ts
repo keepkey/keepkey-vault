@@ -9,7 +9,7 @@
  *   check balances via Pioneer → build sweep tx → sign → broadcast.
  */
 import { BTC_SCRIPT_TYPES, btcAccountPath } from '../shared/chains'
-import { getPioneer } from './pioneer'
+import { getBackendForNetwork } from './btc-backend'
 import coinSelectSplit from 'coinselect/split'
 
 const TAG = '[sweep]'
@@ -220,24 +220,10 @@ export async function checkAddressBalance(address: string): Promise<number> {
 
 export async function fetchUtxos(address: string, networkId: string = BTC_NETWORK_ID): Promise<SweepUtxo[]> {
   try {
-    // Pioneer's ListUnspent endpoint accepts both xpubs AND single addresses
-    // (verified 2026-05-07). Path: /api/v1/utxo/unspent/{network}/{xpub-or-address}.
-    // Older code hit /api/v2/utxo/{address} on Pioneer's base URL — that route
-    // doesn't exist on pioneer-server (404), so the sweep tool was silently
-    // returning [] for every funded address found.
-    const pioneer = await getPioneer()
-    const resp = await pioneer.ListUnspent({ network: networkId, xpub: address })
-    const data = Array.isArray(resp) ? resp
-      : Array.isArray(resp?.data) ? resp.data
-      : Array.isArray(resp?.data?.data) ? resp.data.data
-      : []
-
-    return data.map((u: any) => ({
-      txid: u.txid,
-      vout: u.vout,
-      value: parseInt(u.value, 10) || 0,
-      hex: u.tx?.hex || u.hex || undefined,
-    })).filter((u: SweepUtxo) => u.value > 0)
+    // ListUnspent accepts a single address as well as an xpub. The backend
+    // normalizes value→int-sats and hex, and already drops zero-value rows.
+    const utxos = await getBackendForNetwork(networkId).listUnspent({ network: networkId, address })
+    return utxos.map((u) => ({ txid: u.txid, vout: u.vout, value: u.value, hex: u.hex }))
   } catch (e: any) {
     console.warn(`${TAG} UTXO fetch failed for ${address}: ${e.message}`)
     return []
@@ -246,12 +232,7 @@ export async function fetchUtxos(address: string, networkId: string = BTC_NETWOR
 
 async function fetchTxHex(txid: string, networkId: string = BTC_NETWORK_ID): Promise<string | undefined> {
   try {
-    // Pioneer's tx lookup: /api/v1/utxo/lookup/{networkId}/{txid}.
-    // Older code hit /api/v2/tx-specific/{txid} on Pioneer's base URL — 404.
-    const pioneer = await getPioneer()
-    const resp = await pioneer.UtxoLookup({ networkId, txid })
-    const data = resp?.data || resp
-    return data?.hex || data?.tx?.hex || undefined
+    return await getBackendForNetwork(networkId).rawTxHex({ network: networkId, txid })
   } catch {
     return undefined
   }
@@ -368,19 +349,10 @@ export async function buildSweepTx(
   const funded = scan.results.filter(r => r.utxos.length > 0 && r.category !== 'higher-account')
   if (funded.length === 0) throw new Error('No UTXOs found to sweep')
 
-  // Fetch fee rate
-  const pioneer = await getPioneer()
-  let feeRate = 5 // sat/byte default
+  // Fetch fee rate (sat/vByte; backend handles the sat/kB↔sat/vB detection)
+  let feeRate = 5
   try {
-    // This pioneer SDK build may not have GetFeeRateByNetwork — fall back to
-    // GetFeeRate like txbuilder/utxo.ts does.
-    const feeResp = typeof pioneer.GetFeeRateByNetwork === 'function'
-      ? await pioneer.GetFeeRateByNetwork({ networkId })
-      : await pioneer.GetFeeRate({ networkId })
-    const feeData = feeResp?.data || feeResp
-    const fast = feeData?.fast || feeData?.average || 5
-    // Auto-detect sat/kB vs sat/byte
-    feeRate = fast > 500 ? Math.ceil(fast / 1000) : Math.ceil(fast)
+    feeRate = (await getBackendForNetwork(networkId).feeRate(networkId)).fast
   } catch (e: any) {
     console.warn(`${TAG} Fee rate fetch failed, using default ${feeRate}: ${e.message}`)
   }

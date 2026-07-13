@@ -11,6 +11,7 @@ import {
   FaChevronDown,
   FaChevronUp,
   FaFolderOpen,
+  FaBitcoin,
 } from 'react-icons/fa'
 import holdAndConnectRaw from '../assets/svg/hold-and-connect.svg?raw'
 import { useFirmwareUpdate } from '../hooks/useFirmwareUpdate'
@@ -21,6 +22,7 @@ import { FirmwareUpgradePreview } from './FirmwareUpgradePreview'
 import { ReproducibleBuildNotice } from './ReproducibleBuildNotice'
 import { TutorialPage } from './TutorialCards'
 import { LanguagePicker } from '../i18n/LanguageSelector'
+import { BITCOIN_ONLY_ONBOARDING } from '../../shared/flags'
 
 // ── Design tokens ───────────────────────────────────────────────────────────
 const HIGHLIGHT = 'green.500'
@@ -123,6 +125,9 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
   const [applyingTipPassphrase, setApplyingTipPassphrase] = useState(false)
   // Synchronous in-flight guard (state updates are async — mirrors applyingLabelRef).
   const applyingTipPassphraseRef = useRef(false)
+  // Bitcoin-only vs Multi-coin firmware choice (flag-gated, OOB-only). One-way:
+  // a btc-only seed is locked to btc-only firmware. Default multi = current behavior.
+  const [coinMode, setCoinMode] = useState<'multi' | 'bitcoin-only'>('multi')
   const [setupType, setSetupType] = useState<'create' | 'recover' | null>(null)
   const [wordCount, setWordCount] = useState<12 | 18 | 24>(12)
   const [deviceLabel, setDeviceLabel] = useState('')
@@ -1370,6 +1375,7 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
                       <FirmwareUpgradePreview
                         currentVersion={deviceStatus.resolvedFwVersion?.replace(/^v/, '') || deviceStatus.firmwareVersion || null}
                         targetVersion={deviceStatus.latestFirmware}
+                        isBitcoinOnly={coinMode === 'bitcoin-only'}
                       />
                     )}
 
@@ -1377,11 +1383,61 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
                         against. Only shown when a pinned hash exists (the manifest-less
                         fallback path installs without a hash check) and for the 'latest'
                         channel — beta/alpha builds have no tagged release to verify against. */}
-                    {deviceStatus.latestFirmware && deviceStatus.latestFirmwareHash && deviceStatus.firmwareChannel !== 'beta' && (
-                      <ReproducibleBuildNotice
-                        version={deviceStatus.latestFirmware}
-                        payloadHash={deviceStatus.latestFirmwareHash}
-                      />
+                    {(() => {
+                      // Verify against the binary actually being installed: the
+                      // Bitcoin-only choice flashes a different file with its own hash.
+                      const pinnedHash = coinMode === 'bitcoin-only'
+                        ? deviceStatus.latestFirmwareBitcoinOnlyHash
+                        : deviceStatus.latestFirmwareHash
+                      return deviceStatus.latestFirmware && pinnedHash && deviceStatus.firmwareChannel !== 'beta' && (
+                        <ReproducibleBuildNotice
+                          version={deviceStatus.latestFirmware}
+                          payloadHash={pinnedHash}
+                        />
+                      )
+                    })()}
+
+                    {/* Bitcoin-only vs Multi-coin — OOB (fresh device) only, gated by flag.
+                        Once full firmware is installed, switching to btc-only is a separate
+                        firmware flow (future Settings action) — out of scope here. The
+                        seed-lock (band 10017) makes this one-way; the warning below spells
+                        that out. */}
+                    {BITCOIN_ONLY_ONBOARDING && isOobDevice && (
+                      <VStack w="100%" gap={2}>
+                        {([
+                          { id: 'multi', icon: FaWallet, title: t('coinMode.multiTitle', { defaultValue: 'Multi-coin' }), desc: t('coinMode.multiDesc', { defaultValue: 'Bitcoin, Ethereum, and all supported assets.' }) },
+                          { id: 'bitcoin-only', icon: FaBitcoin, title: t('coinMode.btcTitle', { defaultValue: 'Bitcoin-only' }), desc: t('coinMode.btcDesc', { defaultValue: 'Bitcoin only. Smaller attack surface.' }) },
+                        ] as const).map((opt) => {
+                          const selected = coinMode === opt.id
+                          const Icon = opt.icon
+                          return (
+                            <Box
+                              key={opt.id}
+                              w="100%" p={3} borderRadius="lg" cursor="pointer"
+                              borderWidth="2px"
+                              borderColor={selected ? 'var(--teal)' : 'kk.border'}
+                              bg={selected ? 'rgba(72,187,120,0.08)' : 'kk.cardBg'}
+                              onClick={() => setCoinMode(opt.id)}
+                            >
+                              <HStack gap={3}>
+                                <Icon color={selected ? 'var(--teal)' : 'var(--chakra-colors-kk-textSecondary)'} size={20} />
+                                <VStack gap={0.5} align="start">
+                                  <Text fontSize="sm" fontWeight="700" color="white">{opt.title}</Text>
+                                  <Text fontSize="xs" color="kk.textSecondary">{opt.desc}</Text>
+                                </VStack>
+                              </HStack>
+                            </Box>
+                          )
+                        })}
+                        {coinMode === 'bitcoin-only' && (
+                          <HStack w="100%" p={2} gap={2} borderRadius="md" bg="rgba(237,137,54,0.12)" align="start">
+                            <FaExclamationTriangle color="var(--chakra-colors-yellow-400)" size={14} style={{ flexShrink: 0, marginTop: 2 }} />
+                            <Text fontSize="xs" color="yellow.300">
+                              {t('coinMode.warning', { defaultValue: 'This is one-way. A Bitcoin-only wallet cannot later hold ETH or other assets without wiping the device and reinstalling multi-coin firmware.' })}
+                            </Text>
+                          </HStack>
+                        )}
+                      </VStack>
                     )}
 
                     <Button
@@ -1393,7 +1449,7 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
                       _hover={{ bg: '#D4BC6A', transform: 'translateY(-1px)', boxShadow: '0 4px 12px rgba(233,196,106, 0.3)' }}
                       _active={{ transform: 'scale(0.98)' }}
                       transition="all 0.15s ease"
-                      onClick={() => startFirmwareUpdate(deviceStatus.latestFirmware || undefined)}
+                      onClick={() => startFirmwareUpdate(coinMode === 'bitcoin-only')}
                     >
                       {t('firmware.installLatestFirmware', { version: deviceStatus.latestFirmware || '?' })}
                     </Button>

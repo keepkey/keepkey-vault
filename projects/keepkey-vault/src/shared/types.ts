@@ -35,6 +35,10 @@ export interface DeviceStateInfo {
   /** Pinned payload sha256 for the latest firmware (from the manifest) — the
    *  hash Vault verifies the downloaded binary against before flashing. */
   latestFirmwareHash?: string
+  /** Pinned payload sha256 for the Bitcoin-only firmware binary. Distinct from
+   *  latestFirmwareHash (multi-coin) — the OOB "Bitcoin-only" choice installs a
+   *  different binary and must verify against this hash. */
+  latestFirmwareBitcoinOnlyHash?: string
   /** Which manifest channel latestFirmware/latestFirmwareHash resolved from.
    *  'beta' builds are pre-release and not covered by the reproducible-build
    *  claim (no published git tag / release assets to verify against). */
@@ -45,6 +49,10 @@ export interface DeviceStateInfo {
   needsInit: boolean
   initialized: boolean
   isOob: boolean
+  /** Firmware variant from device Features. "KeepKeyBTC"/"EmulatorBTC" = bitcoin-only
+   *  firmware; "bitcoin-only-locked" = multi-chain firmware refusing a btc-only seed.
+   *  See isBitcoinOnlyVariant() in shared/flags. */
+  firmwareVariant?: string
   resolvedFwVersion?: string  // firmware version resolved from on-device hash (bootloader mode only)
   firmwareHash?: string
   bootloaderHash?: string
@@ -78,14 +86,21 @@ export interface FatalEvent {
 }
 
 // Remote firmware manifest (from GitHub)
+/** A single downloadable firmware/bootloader binary: version + relative URL + hash. */
+export interface FirmwareBinaryRef { version: string; url: string; hash: string }
+
 export interface FirmwareManifest {
   latest: {
-    firmware: { version: string; url: string; hash: string }
-    bootloader: { version: string; url: string; hash: string }
+    firmware: FirmwareBinaryRef
+    bootloader: FirmwareBinaryRef
+    /** Bitcoin-only firmware variant — installed when the user picks Bitcoin-only
+     *  during onboarding. Absent until a btc-only build is published. */
+    firmwareBitcoinOnly?: FirmwareBinaryRef
   }
   beta: {
-    firmware: { version: string; url: string; hash: string }
-    bootloader: { version: string; url: string; hash: string }
+    firmware: FirmwareBinaryRef
+    bootloader: FirmwareBinaryRef
+    firmwareBitcoinOnly?: FirmwareBinaryRef
   }
   hashes: {
     bootloader: Record<string, string>
@@ -107,6 +122,7 @@ export interface FirmwareAnalysis {
   isDowngrade: boolean
   isSameVersion: boolean
   willWipeDevice: boolean  // true when crossing signed/unsigned boundary in either direction (not in BL mode)
+  isBitcoinOnly: boolean   // btc-only firmware variant, detected from the embedded KeepKeyBTC/EmulatorBTC string
 }
 
 // Pioneer integration types
@@ -643,6 +659,11 @@ export interface AppSettings {
   zcashPrivacyEnabled: boolean   // feature flag: Zcash shielded/privacy (default OFF, locked)
   hiveEnabled: boolean           // feature flag: Hive blockchain (default OFF, requires firmware >= 7.15.0)
   emulatorEnabled: boolean       // feature flag: macOS emulator surface (default OFF — dev-only)
+  offlineMode: boolean           // airplane mode: zero outbound network; BTC data ops throw OFFLINE (default OFF)
+  btcNodeEnabled: boolean        // self-host: route BTC data to the user's own node instead of Pioneer (default OFF)
+  btcNodeType: 'blockbook' | 'core' // self-host node backend type (default blockbook — xpub-native, what Pioneer speaks)
+  btcNodeUrl: string             // self-host node RPC URL (auth stored separately, never returned to the UI)
+  btcOnboardingShown: boolean    // one-time btc-only data-source onboarding seen (default false)
   preReleaseUpdates: boolean     // opt-in to pre-release auto-updates (default OFF)
   alphaFirmware: boolean         // opt-in to alpha firmware channel (manifest.beta) (default OFF)
   privateModeEnabled: boolean    // hide portfolio totals from the UI (default OFF)

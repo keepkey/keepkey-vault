@@ -12,6 +12,13 @@ import * as bech32 from 'bech32'
 // @ts-ignore
 import bs58check from 'bs58check'
 import type { ChainDef } from '../../shared/chains'
+import { getBtcBackend } from '../btc-backend'
+
+/** BTC mainnet — the ONLY UTXO chain that routes to a self-host node; every other
+ *  coin (LTC/DOGE/BCH/Dash/Zcash) stays on Pioneer. */
+const BTC_NETWORK_ID = 'bip122:000000000019d6689c085ae165831e93'
+const btcSelfHostActive = (networkId: string) =>
+  networkId === BTC_NETWORK_ID && getBtcBackend().kind !== 'pioneer'
 
 // @ts-ignore — CJS module, no types
 const cashaddrLib = require('@shapeshiftoss/bitcoinjs-lib/src/cashaddr')
@@ -182,12 +189,51 @@ function unwrapUtxoResponse(resp: any): any[] {
     : []
 }
 
+/** Resolve fee rates (sat/vByte). BTC self-host reads the node; everything else
+ *  uses Pioneer's fee API (sat/kB → sat/vB conversion), falling back to defaults. */
+async function resolveFeeRates(
+  pioneer: any, chain: ChainDef,
+): Promise<{ slow: number; average: number; fast: number }> {
+  if (HARDCODED_FEES[chain.networkId]) return HARDCODED_FEES[chain.networkId]
+  if (btcSelfHostActive(chain.networkId)) {
+    try { return await getBtcBackend().feeRate(chain.networkId) }
+    catch { return DEFAULT_FEES[chain.networkId] || { slow: 3, average: 5, fast: 15 } }
+  }
+  try {
+    const feeResp = pioneer.GetFeeRateByNetwork
+      ? await pioneer.GetFeeRateByNetwork({ networkId: chain.networkId })
+      : await pioneer.GetFeeRate({ networkId: chain.networkId })
+    const data = feeResp?.data || {}
+    const vals = [data.slow, data.average, data.fast, data.fastest].filter(Boolean)
+    const needsConversion = vals.some((v: number) => v > 500) // sat/kB → sat/vB
+    return {
+      slow: (data.slow || data.average || 5) / (needsConversion ? 1000 : 1),
+      average: (data.average || data.fast || 10) / (needsConversion ? 1000 : 1),
+      fast: (data.fastest || data.fast || data.average || 15) / (needsConversion ? 1000 : 1),
+    }
+  } catch {
+    return DEFAULT_FEES[chain.networkId] || { slow: 3, average: 5, fast: 15 }
+  }
+}
+
 /** Fetch UTXOs for a single xpub, tag each with its scriptType and source accountPath */
 async function fetchUtxosForXpub(
   pioneer: any, network: string, xpub: string, defaultScriptType: string,
   sourceAccountPath?: number[],
 ): Promise<any[]> {
   console.log(`${TAG} Fetching UTXOs: network=${network}, xpub=${xpub.slice(0, 20)}...`)
+  if (btcSelfHostActive(network)) {
+    const backend = getBtcBackend()
+    const raw = await backend.listUnspent({ network, xpub })
+    const utxos = raw.map((u) => ({
+      txid: u.txid, vout: u.vout, value: Number(u.value),
+      path: u.path, address: u.address, hex: u.hex,
+      scriptType: u.scriptType || (u.path ? getScriptTypeFromPath(u.path) : undefined) || defaultScriptType,
+      ...(sourceAccountPath ? { _sourceAccountPath: sourceAccountPath } : {}),
+    }))
+    console.log(`${TAG} ${xpub.slice(0, 8)}...: ${utxos.length} UTXOs via self-host ${backend.kind}, ${utxos.reduce((s, u) => s + u.value, 0) / 1e8}`)
+    return utxos
+  }
   const resp = await pioneer.ListUnspent({ network, xpub })
   console.log(`${TAG} ListUnspent raw: ${JSON.stringify(resp)?.slice(0, 300)}`)
   const utxos = unwrapUtxoResponse(resp)
@@ -227,26 +273,7 @@ export async function estimateUtxoFee(
     }
     if (!utxos.length) return null
 
-    let feeRates: { slow: number; average: number; fast: number }
-    if (HARDCODED_FEES[chain.networkId]) {
-      feeRates = HARDCODED_FEES[chain.networkId]
-    } else {
-      try {
-        const feeResp = pioneer.GetFeeRateByNetwork
-          ? await pioneer.GetFeeRateByNetwork({ networkId: chain.networkId })
-          : await pioneer.GetFeeRate({ networkId: chain.networkId })
-        const data = feeResp?.data || {}
-        const vals = [data.slow, data.average, data.fast, data.fastest].filter(Boolean)
-        const needsConversion = vals.some((v: number) => v > 500)
-        feeRates = {
-          slow: (data.slow || data.average || 5) / (needsConversion ? 1000 : 1),
-          average: (data.average || data.fast || 10) / (needsConversion ? 1000 : 1),
-          fast: (data.fastest || data.fast || data.average || 15) / (needsConversion ? 1000 : 1),
-        }
-      } catch {
-        feeRates = DEFAULT_FEES[chain.networkId] || { slow: 3, average: 5, fast: 15 }
-      }
-    }
+    const feeRates = await resolveFeeRates(pioneer, chain)
     const effectiveFeeRate = satPerVByte && satPerVByte > 0
       ? Math.max(1, Math.ceil(satPerVByte))
       : Math.max(3, Math.ceil(feeLevel <= 2 ? feeRates.slow : feeLevel <= 4 ? feeRates.average : feeRates.fast))
@@ -332,31 +359,7 @@ export async function buildUtxoTx(
   }
 
   // 2. Get fee rate
-  let feeRates: { slow: number; average: number; fast: number }
-
-  if (HARDCODED_FEES[chain.networkId]) {
-    feeRates = HARDCODED_FEES[chain.networkId]
-  } else {
-    try {
-      const feeResp = pioneer.GetFeeRateByNetwork
-        ? await pioneer.GetFeeRateByNetwork({ networkId: chain.networkId })
-        : await pioneer.GetFeeRate({ networkId: chain.networkId })
-      const data = feeResp?.data || {}
-
-      // Detect sat/kB → convert to sat/byte
-      const vals = [data.slow, data.average, data.fast, data.fastest].filter(Boolean)
-      const needsConversion = vals.some((v: number) => v > 500)
-
-      feeRates = {
-        slow: (data.slow || data.average || 5) / (needsConversion ? 1000 : 1),
-        average: (data.average || data.fast || 10) / (needsConversion ? 1000 : 1),
-        fast: (data.fastest || data.fast || data.average || 15) / (needsConversion ? 1000 : 1),
-      }
-    } catch {
-      feeRates = DEFAULT_FEES[chain.networkId] || { slow: 3, average: 5, fast: 15 }
-      console.warn(`${TAG} Fee API failed, using defaults for ${chain.coin}`)
-    }
-  }
+  const feeRates = await resolveFeeRates(pioneer, chain)
 
   const effectiveFeeRate = satPerVByte && satPerVByte > 0
     ? Math.max(1, Math.ceil(satPerVByte)) // custom rate — user's explicit choice (consensus floors still apply below)
@@ -450,10 +453,29 @@ export async function buildUtxoTx(
   //    Aggregate across all xpubs when multi-xpub mode
   let changeAddressIndex = 0
   const addressToPath = new Map<string, string>()
+  // BTC self-host: no Pioneer metadata. UTXOs already carry `path` (Blockbook/Core
+  // provide it), so the address→path enrichment below is a no-op; we only need the
+  // next change index. Derive it from unspent change UTXOs (path .../1/N).
+  // ponytail: under-counts only if a change addr was used then fully spent → address
+  // reuse (privacy), never fund loss; the collision loop below still prevents reusing
+  // a live input path. Upgrade path: query the node's used-address set if reuse bites.
+  const btcSelfHost = btcSelfHostActive(chain.networkId)
   // Always query primaryXpub for change-address discovery, plus all funded xpubs for path enrichment
-  const xpubsToQuery = allXpubs?.length
+  const xpubsToQuery = btcSelfHost ? [] : allXpubs?.length
     ? [...new Set([primaryXpub, ...allXpubs.map(x => x.xpub)])]
     : [primaryXpub]
+  if (btcSelfHost) {
+    let maxUsed = -1
+    for (const u of utxos) {
+      const parts = (u.path || '').split('/')
+      if (parts.length === 6 && parts[4] === '1') {
+        const idx = parseInt(parts[5], 10)
+        if (!isNaN(idx) && idx > maxUsed) maxUsed = idx
+      }
+    }
+    changeAddressIndex = maxUsed + 1
+    console.log(`${TAG} Self-host change index from UTXOs: ${changeAddressIndex}`)
+  }
   for (const qXpub of xpubsToQuery) {
     try {
       const pubkeyInfo = (await pioneer.GetPubkeyInfo({ network: chain.networkId, xpub: qXpub }))?.data

@@ -112,6 +112,8 @@ import { startRestApi, clearFeaturesCache, setUiActive, uiHeartbeat, type RestAp
 import { parseSolanaTx, SolanaTxParseError, solanaMessageSlice } from "./solana-tx"
 import { AuthStore } from "./auth"
 import { getPioneer, getPioneerApiBase, resetPioneer, DEFAULT_API_BASE, getQueryKey as getPioneerQueryKey } from "./pioneer"
+import { setBtcBackendOffline, setBtcNodeConfig, setBtcNodeDeviceEligible, isBtcNodeActive, getBtcBackend, broadcastBtcTx } from "./btc-backend"
+import { isBitcoinOnlyVariant } from "../shared/flags"
 import { fetchDefiPositions } from "./zapper"
 import { loadSupportedChains } from "../shared/swap-support-matrix"
 import { PioneerSocket } from "./pioneer-socket"
@@ -731,6 +733,7 @@ let walletConnectEnabled = false
 let bip85Enabled = false
 let zcashPrivacyEnabled = false
 let hiveEnabled = false
+let offlineMode = false
 // Hive sponsor ETH anti-drain gate. ON for release — the vault signs the EIP-191
 // gate and sends ethAddress/ethSignature. HARD DEPENDENCY: Pioneer must have the
 // server-side gate deployed (accept + verify the fields) or /hive/create-account
@@ -773,6 +776,9 @@ function loadSettings() {
 	preReleaseUpdates = getSetting('pre_release_updates') === '1'
 	alphaFirmware = getSetting('alpha_firmware') === '1'
 	privateModeEnabled = getSetting('private_mode_enabled') === '1'
+	offlineMode = getSetting('offline_mode') === '1'
+	setBtcBackendOffline(offlineMode)
+	loadBtcNodeConfig()
 
 	// Normalize emulator flag on platforms with no emulator support. The
 	// emulator runs on macOS (Keychain + libkkemu.dylib) and Windows (DPAPI +
@@ -785,6 +791,50 @@ function loadSettings() {
 		emulatorEnabled = false
 		setSetting('emulator_enabled', '0')
 	}
+}
+
+/** Push the persisted self-host node config into the BtcBackend selector. Called
+ *  on startup and after setBtcNode. Auth lives in its own setting, never returned
+ *  to the UI. Disabled or URL-less → null → getBtcBackend() falls back to Pioneer. */
+/** Basic-auth string from the separately-stored user + pass. Kept apart so a
+ *  44-char special-char rpcpassword can't be mangled by hand-joining with a colon. */
+function btcNodeAuth(): string | undefined {
+	const user = getSetting('btc_node_rpc_user') || ''
+	const pass = getSetting('btc_node_rpc_pass') || ''
+	return user || pass ? `${user}:${pass}` : undefined
+}
+
+function loadBtcNodeConfig() {
+	const enabled = getSetting('btc_node_enabled') === '1'
+	const url = getSetting('btc_node_url') || ''
+	if (!enabled || !url) { setBtcNodeConfig(null); return }
+	const type = getSetting('btc_node_type') === 'core' ? 'core' : 'blockbook'
+	setBtcNodeConfig(type === 'core' ? { type: 'core', url, auth: btcNodeAuth() } : { type: 'blockbook', url })
+}
+
+/** Probe a URL as the preferred type; if that fails, try the other type. The
+ *  #1 user mistake is a type/port mismatch (Blockbook selected on the Core :8332
+ *  port, or vice versa) — this self-corrects it so a wrong pick can't get saved. */
+async function detectBtcNode(url: string, auth: string | undefined, preferred: 'blockbook' | 'core') {
+	const { testCoreNode } = await import('./btc-backend/core')
+	const { testBlockbookNode } = await import('./btc-backend/blockbook')
+	const probe = async (t: 'blockbook' | 'core') => {
+		const r = t === 'core' ? await testCoreNode({ url, auth }) : await testBlockbookNode({ url })
+		// Reject a node on the wrong network — a testnet/regtest node would report
+		// bogus balances for a mainnet wallet. Bitcoin Core reports mainnet as 'main'.
+		// Undefined chain (older node that doesn't report it) is allowed through
+		// rather than blocking a valid node.
+		if (r.ok && r.chain && r.chain !== 'main') {
+			return { ...r, ok: false, error: `Node is on '${r.chain}', not Bitcoin mainnet` }
+		}
+		return r
+	}
+	const first = await probe(preferred)
+	if (first.ok) return { type: preferred, result: first }
+	const other: 'blockbook' | 'core' = preferred === 'core' ? 'blockbook' : 'core'
+	const second = await probe(other)
+	if (second.ok) return { type: other, result: second }
+	return { type: preferred, result: first } // both failed — surface the preferred type's error
 }
 let appVersionCache = ''
 let restServer: ReturnType<typeof startRestApi> | null = null
@@ -967,11 +1017,7 @@ function getOrCreateWcManager(): WalletConnectManager {
 		},
 		broadcastViaPioneer: async ({ networkId, serialized }) => {
 			const pioneer = await getPioneer()
-			const resp = await pioneer.Broadcast({ networkId, serialized })
-			const data = resp?.data ?? resp
-			const txid = data?.txid || data?.tx_hash || data?.hash
-			if (!txid) throw new Error(`Broadcast failed: ${JSON.stringify(data).slice(0, 200)}`)
-			return String(txid)
+			return await broadcastBtcTx(pioneer, networkId, serialized)
 		},
 		solanaSignTransactionRaw: async ({ addressNList, signerAddress, transactionBase64 }) => {
 			if (!engine.wallet) throw new Error('Device disconnected')
@@ -1075,6 +1121,11 @@ function getAppSettings() {
 		zcashPrivacyEnabled,
 		hiveEnabled,
 		emulatorEnabled,
+		offlineMode,
+		btcNodeEnabled: getSetting('btc_node_enabled') === '1',
+		btcNodeType: getSetting('btc_node_type') === 'core' ? 'core' : 'blockbook',
+		btcNodeUrl: getSetting('btc_node_url') || '',
+		btcOnboardingShown: getSetting('btc_onboarding_shown') === '1',
 		preReleaseUpdates,
 		alphaFirmware,
 		privateModeEnabled,
@@ -1962,7 +2013,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			getDeviceState: async () => engine.getDeviceState(),
 			retryConnect: async () => { await engine.retryConnect() },
 			startBootloaderUpdate: async () => { await engine.startBootloaderUpdate() },
-			startFirmwareUpdate: async () => { await engine.startFirmwareUpdate() },
+			startFirmwareUpdate: async (params: { bitcoinOnly?: boolean }) => { await engine.startFirmwareUpdate(params?.bitcoinOnly) },
 			flashFirmware: async () => { await engine.flashFirmware() },
 			analyzeFirmware: async (params) => {
 				if (params.data.length > 10_000_000) throw new Error('Firmware data too large (max ~7.5MB)')
@@ -3048,8 +3099,15 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						name: ct.name,
 						icon: ct.iconUrl,
 					}))
-					const pubkeyChunks = chunkArray(pubkeys, PIONEER_PORTFOLIO_CHUNK_SIZE)
-					const chunkResults = await withTimeout(
+					// Self-host: when a BTC node is active, BTC balances come from the
+					// node (below), NOT Pioneer — so exclude BTC xpubs from the Pioneer
+					// chunk. Non-BTC chains + price still use Pioneer. kind==='pioneer'
+					// (the default) leaves this byte-identical.
+					const btcBackend = getBtcBackend()
+					const useNodeForBtc = btcBackend.kind !== 'pioneer' && btcPubkeyEntries.length > 0
+					const pubkeysForPioneer = useNodeForBtc ? pubkeys.filter(p => p.chainId !== 'bitcoin') : pubkeys
+					const pubkeyChunks = chunkArray(pubkeysForPioneer, PIONEER_PORTFOLIO_CHUNK_SIZE)
+					const chunkResults = pubkeyChunks.length === 0 ? [] : await withTimeout(
 						mapWithConcurrency(pubkeyChunks, PIONEER_PORTFOLIO_MAX_CONCURRENCY, async (chunk, i) => {
 							// Opt the dashboard refresh into the server's DeFi merge. Server-side
 							// is cached, so the per-pubkey Zapper lookup is typically a Redis
@@ -3103,7 +3161,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 								console.warn(`[getBalances] Chunk ${i + 1} failed — excluded chains: ${chains}`)
 							}
 						}
-						if (failedChunkCount === pubkeyChunks.length) {
+						if (pubkeyChunks.length > 0 && failedChunkCount === pubkeyChunks.length) {
 							throw new Error(`All ${pubkeyChunks.length} portfolio chunks failed`)
 						}
 						// Key by caip:pubkey so a failed Hyperliquid entry (which shares the
@@ -3125,6 +3183,30 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					)
 					console.log(`[getBalances] effectivePubkeys: ${effectivePubkeys.length}/${pubkeys.length} — chains: ${[...new Set(effectivePubkeys.map(p => p.chainId))].join(', ')}`)
 					const allEntries = chunkResults.flatMap(r => r.entries)
+					// Self-host: BTC balances from the node, produced in Pioneer's entry shape
+					// so the BTC loop below processes them identically. Price still via Pioneer
+					// (GetMarketInfo — price isn't node data). A node failure for an xpub is
+					// marked failed so its stale cached balance isn't overwritten with 0.
+					if (useNodeForBtc) {
+						let btcPriceUsd = 0
+						try {
+							const mi: any = await withTimeout(pioneer.GetMarketInfo([btcChain.caip]), PIONEER_TIMEOUT_MS, 'GetMarketInfo(BTC)')
+							const md = Array.isArray(mi?.data) ? mi.data[0] : (Array.isArray(mi) ? mi[0] : mi?.data ?? mi)
+							btcPriceUsd = Number(md?.priceUsd ?? md?.price ?? 0) || 0
+						} catch (e: any) { console.warn('[getBalances] BTC price fetch failed (USD may show 0):', e?.message) }
+						for (const e of btcPubkeyEntries) {
+							try {
+								const utxos = await btcBackend.listUnspent({ network: btcChain.networkId, xpub: e.pubkey })
+								const sats = utxos.reduce((sum, u) => sum + u.value, 0)
+								const btc = sats / 1e8
+								allEntries.push({ caip: btcChain.caip, pubkey: e.pubkey, chainId: 'bitcoin', networkId: btcChain.networkId, symbol: 'BTC', type: 'native', balance: btc.toFixed(8), valueUsd: btc * btcPriceUsd, address: undefined })
+							} catch (err: any) {
+								failedPubkeySetForDb.add(`${btcChain.caip}:${e.pubkey}`)
+								console.warn(`[getBalances] self-host node BTC balance failed for ${e.pubkey.slice(0, 16)}…: ${err?.message}`)
+							}
+						}
+						console.log(`[getBalances] BTC via self-host node (${btcBackend.kind}): ${btcPubkeyEntries.length} xpub(s), price $${btcPriceUsd}`)
+					}
 					const portfolioMeta = mergeMetas(chunkResults.map(r => r.meta).filter(Boolean) as PortfolioMeta[])
 
 					// Aggregate server-merged DeFi positions across chunks and group by
@@ -4400,6 +4482,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const pioneer = await getPioneer()
 
 				if (chain.chainFamily === 'utxo') {
+					// BTC self-host: fees from the node, not Pioneer.
+					if (chain.networkId === 'bip122:000000000019d6689c085ae165831e93' && getBtcBackend().kind !== 'pioneer') {
+						return { feeRate: await getBtcBackend().feeRate(chain.networkId), unit: 'sat/byte' }
+					}
 					const resp = await withTimeout(pioneer.GetFeeRateByNetwork({ networkId: chain.networkId }), PIONEER_TIMEOUT_MS, 'GetFeeRateByNetwork')
 					return { feeRate: resp?.data, unit: 'sat/byte' }
 				} else if (chain.chainFamily === 'evm') {
@@ -5387,6 +5473,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				setSetting('passphrase_intro_shown', '1')
 				return getAppSettings()
 			},
+			markBtcOnboardingShown: async () => {
+				setSetting('btc_onboarding_shown', '1')
+				return getAppSettings()
+			},
 			setRestApiEnabled: async (params) => {
 				restApiEnabled = params.enabled
 				setSetting('rest_api_enabled', params.enabled ? '1' : '0')
@@ -5420,6 +5510,76 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				setSetting('number_locale', params.locale || 'en-US')
 				console.log('[settings] Number locale set to:', params.locale)
 				return getAppSettings()
+			},
+			setOfflineMode: async (params) => {
+				offlineMode = params.enabled
+				setSetting('offline_mode', params.enabled ? '1' : '0')
+				setBtcBackendOffline(offlineMode)
+				console.log('[settings] Offline (airplane) mode:', params.enabled)
+				return getAppSettings()
+			},
+			// Self-host Bitcoin node. Persist url/auth/enabled and re-point the
+			// BtcBackend. Empty url with enabled=false clears it → back to Pioneer.
+			setBtcNode: async (params) => {
+				// Only overwrite each credential when provided — lets the user toggle
+				// enable without re-typing (undefined = keep existing).
+				if (params.enabled && params.url) {
+					// Validate BEFORE persisting anything so a wrong-network/unreachable
+					// node can never get saved (a failed pre-test, race, or direct RPC
+					// call would otherwise stick). detectBtcNode also self-corrects the
+					// type (Blockbook on the :8332 Core port, or vice versa).
+					const user = params.rpcUser !== undefined ? params.rpcUser : (getSetting('btc_node_rpc_user') || '')
+					const pass = params.rpcPass !== undefined ? params.rpcPass : (getSetting('btc_node_rpc_pass') || '')
+					const auth = user || pass ? `${user}:${pass}` : undefined
+					const { type, result } = await detectBtcNode(params.url, auth, params.type === 'core' ? 'core' : 'blockbook')
+					if (!result.ok) throw new Error(result.error || 'Bitcoin node validation failed')
+					// Persist atomically only after a good probe.
+					setSetting('btc_node_enabled', '1')
+					setSetting('btc_node_url', params.url)
+					if (params.rpcUser !== undefined) setSetting('btc_node_rpc_user', params.rpcUser)
+					if (params.rpcPass !== undefined) setSetting('btc_node_rpc_pass', params.rpcPass)
+					setSetting('btc_node_type', type)
+					console.log(`[settings] Self-host node: enabled → ${type} ${params.url}`)
+				} else {
+					// Disabling: no validation. Keep url/creds so re-enable doesn't retype.
+					setSetting('btc_node_enabled', '0')
+					setSetting('btc_node_url', params.url || '')
+					if (params.rpcUser !== undefined) setSetting('btc_node_rpc_user', params.rpcUser)
+					if (params.rpcPass !== undefined) setSetting('btc_node_rpc_pass', params.rpcPass)
+					console.log('[settings] Self-host node: disabled')
+				}
+				loadBtcNodeConfig()
+				return getAppSettings()
+			},
+			// Verbose reachability + capability probe for the config panel. Auto-detects
+			// the type (Blockbook vs Core) so the user doesn't have to get the port right;
+			// detectedType tells the UI which one actually answered.
+			testBtcNode: async (params) => {
+				const user = params.rpcUser !== undefined ? params.rpcUser : (getSetting('btc_node_rpc_user') || '')
+				const pass = params.rpcPass !== undefined ? params.rpcPass : (getSetting('btc_node_rpc_pass') || '')
+				const auth = user || pass ? `${user}:${pass}` : undefined
+				const { type, result } = await detectBtcNode(params.url, auth, params.type === 'core' ? 'core' : 'blockbook')
+				return { ...result, detectedType: type }
+			},
+			// Live status of the ACTIVE self-host node (for the bottom status bar).
+			// active:false when no node is enabled → the bar hides.
+			getBtcNodeStatus: async () => {
+				// Actual eligibility, not the raw persisted setting: a saved node is
+				// suppressed on a multichain device (nodeActive gate), so the status bar
+				// must show inactive there rather than probing + claiming "self-host active".
+				if (!isBtcNodeActive()) return { active: false as const }
+				const url = getSetting('btc_node_url') || ''
+				const type = getSetting('btc_node_type') === 'core' ? 'core' : 'blockbook'
+				if (type === 'core') {
+					const { testCoreNode } = await import('./btc-backend/core')
+					const r = await testCoreNode({ url, auth: btcNodeAuth() })
+					const { getCoreScanState } = await import('./btc-backend/core')
+					const scan = getCoreScanState()
+					return { active: true as const, kind: 'core' as const, ok: r.ok, error: r.error, height: r.blocks, headers: r.headers, syncing: r.syncing, progress: r.progress, scanning: scan.scanning, scanProgress: scan.progress }
+				}
+				const { testBlockbookNode } = await import('./btc-backend/blockbook')
+				const r = await testBlockbookNode({ url })
+				return { active: true as const, kind: 'blockbook' as const, ok: r.ok, error: r.error, height: r.blocks, syncing: r.ok ? r.inSync === false : undefined }
 			},
 			setWalletConnectEnabled: async (params) => {
 				walletConnectEnabled = params.enabled
@@ -6619,12 +6779,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const serializedTx = signedTx?.serializedTx || signedTx?.serialized
 				if (!serializedTx) throw new Error('Device signing failed')
 
-				const { getPioneer } = await import('./pioneer')
-				const pioneer = await getPioneer()
-				const broadcastResp = await pioneer.Broadcast({ networkId: 'bip122:000000000019d6689c085ae165831e93', serialized: serializedTx })
-				const bdata = broadcastResp?.data || broadcastResp
-				const txid = bdata?.txid || bdata?.tx_hash || bdata?.hash
-				if (!txid) throw new Error(`Broadcast failed: ${JSON.stringify(bdata).slice(0, 200)}`)
+				const { getBtcBackend } = await import('./btc-backend')
+				const { txid } = await getBtcBackend().broadcast({
+					network: 'bip122:000000000019d6689c085ae165831e93',
+					rawTxHex: serializedTx,
+				})
 
 				return { txid, destination, inputCount: sweepResult.inputCount, totalSweptSats: sweepResult.totalInputSats, fee: sweepResult.fee, outputSats: sweepResult.totalInputSats - sweepResult.fee }
 			},
@@ -6722,10 +6881,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!serializedTx) throw new Error('Device signing failed')
 
 				const pioneer = await getPioneer()
-				const broadcastResp = await pioneer.Broadcast({ networkId: 'bip122:000000000019d6689c085ae165831e93', serialized: serializedTx })
-				const bdata = broadcastResp?.data || broadcastResp
-				const txid = bdata?.txid || bdata?.tx_hash || bdata?.hash
-				if (!txid) throw new Error(`Broadcast failed: ${JSON.stringify(bdata).slice(0, 200)}`)
+				const txid = await broadcastBtcTx(pioneer, 'bip122:000000000019d6689c085ae165831e93', serializedTx)
 				return { txid, destination, inputCount: sweepResult.inputCount, totalSweptSats: sweepResult.totalInputSats, fee: sweepResult.fee, outputSats: sweepResult.totalInputSats - sweepResult.fee }
 			},
 			auditDismiss: async (params) => {
@@ -7547,6 +7703,18 @@ udevadm trigger --subsystem-match=usb --attr-match=idVendor=2b24 || udevadm trig
 				version: await Updater.localInfo.version(),
 				channel: await Updater.localInfo.channel(),
 			}),
+			// Real reachability probe — navigator.onLine is unreliable in the
+			// WebView (it stays true after wifi drops). Any HTTP response = online;
+			// a thrown fetch (DNS/socket/timeout) = offline. Skipped by the client
+			// when offline mode is on, so this never fires in airplane mode.
+			pingPioneer: async () => {
+				try {
+					await fetch(getPioneerApiBase(), { method: 'HEAD', signal: AbortSignal.timeout(4000) })
+					return { online: true }
+				} catch {
+					return { online: false }
+				}
+			},
 			// ── REST API UI-active gate ───────────────────────────────
 			// The WebView calls uiSetActive(true) on mount and uiSetActive(false)
 			// before unload, plus a periodic heartbeat. Without a fresh heartbeat,
@@ -7588,6 +7756,11 @@ let pendingDeepLinkUri: string | null = null
 // Push engine events to WebView
 engine.on('state-change', (state) => {
 	try { rpc.send['device-state'](state) } catch { /* webview not ready yet */ }
+	// Scope the self-host node to the connected device: only a btc-only device may
+	// use the (global) persisted node. A multichain device — which can't even see
+	// the node control to disable it — keeps its BTC on Pioneer. Absent variant
+	// (connecting/disconnected) → suppressed.
+	setBtcNodeDeviceEligible(isBitcoinOnlyVariant(state.firmwareVariant))
 	// Device-to-device swap: a *different* device just reached 'ready'. Reset the
 	// in-memory account managers so device B re-derives its own xpubs/addresses
 	// instead of reusing device A's (the existing `if (!isInitialized)` guards

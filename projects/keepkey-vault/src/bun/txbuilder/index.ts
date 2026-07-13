@@ -13,6 +13,10 @@ import { buildTonTransfer, assembleTonSignedBoc, getTonSeqno, getTonWalletState,
 import { buildHiveTransfer, broadcastHiveTx } from './hive'
 import { SOLANA_LAMPORTS_PER_SIGNATURE, solanaTransferLamportsForAmount } from './solana'
 import { parseSolanaTx, solanaMessageSlice, SolanaTxParseError } from '../solana-tx'
+import { getBtcBackend } from '../btc-backend'
+
+/** BTC mainnet — the only UTXO chain that broadcasts via a self-host node. */
+const BTC_NETWORK_ID = 'bip122:000000000019d6689c085ae165831e93'
 // Pioneer SDK instance is passed as parameter to buildTx()
 
 export type { BuildTxParams }
@@ -868,6 +872,13 @@ export async function broadcastTx(
   // hdwallet's ethSignTx returns raw hex without 0x — add it here.
   if (chain.chainFamily === 'evm' && serializedTx && !serializedTx.startsWith('0x')) {
     serializedTx = '0x' + serializedTx
+  }
+
+  // BTC self-host: broadcast via the node, not Pioneer (no auto-fallback).
+  if (chain.networkId === BTC_NETWORK_ID && getBtcBackend().kind !== 'pioneer') {
+    const backend = getBtcBackend()
+    console.log(`[broadcast] BTC via self-host ${backend.kind}, len=${serializedTx.length}`)
+    return await backend.broadcast({ network: chain.networkId, rawTxHex: serializedTx })
   }
 
   console.log(`[broadcast] Sending to Pioneer: networkId=${chain.networkId}, format=${chain.chainFamily === 'cosmos' ? 'base64' : 'hex'}, len=${serializedTx.length}`)
