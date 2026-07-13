@@ -2143,9 +2143,25 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 						    both so the stale warning isn't swallowed by the degraded one. */}
 						<Flex direction="column" gap="1">
 							{portfolioFault.degradedChains.length > 0 && (
-								<Text fontSize="xs" color="kk.textSecondary" lineHeight="1.4">
-									{t("degradedDesc", { chains: portfolioFault.degradedChains.join(", ") })}
-								</Text>
+								<Flex wrap="wrap" align="center" gap="1.5" fontSize="xs" color="kk.textSecondary" lineHeight="1.4">
+									<Text>{t("degradedReach")}</Text>
+									{(() => {
+										// Show each degraded chain as [icon] SYMBOL so it's obvious which
+										// chain is behind. degradedChainIds map to real chains (icon+symbol);
+										// fall back to the plain symbol list for any fault we couldn't map.
+										const items = portfolioFault.degradedChainIds
+											.map(id => allChains.find(c => c.id === id))
+											.filter((c): c is ChainDef => !!c)
+										if (items.length === 0) return <Text>{portfolioFault.degradedChains.join(", ")}</Text>
+										return items.map(c => (
+											<Flex key={c.id} align="center" gap="1">
+												<Image src={getAssetIcon(c.caip)} alt="" w="14px" h="14px" borderRadius="full" />
+												<Text fontWeight="600">{c.symbol}</Text>
+											</Flex>
+										))
+									})()}
+									<Text>{t("degradedTail")}</Text>
+								</Flex>
 							)}
 							{portfolioFault.staleChains.length > 0 && (
 								<Text fontSize="xs" color="kk.textSecondary" lineHeight="1.4">

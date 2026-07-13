@@ -25,6 +25,8 @@
 	"pioneerOfflineDesc": "Unable to refresh balances from {{url}}. Cached balances are kept when available.",
 	"degradedTitle": "Some balances unavailable",
 	"degradedDesc": "Couldn't reach: {{chains}}. These balances may be incomplete or out of date.",
+	"degradedReach": "Couldn't reach:",
+	"degradedTail": "These balances may be incomplete or out of date.",
 	"staleTitle": "Balances may be outdated",
 	"staleDesc": "Some balances last synced {{count}} minutes ago.",
 	"syncNow": "Sync now",
