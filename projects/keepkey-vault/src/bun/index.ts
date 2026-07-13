@@ -112,7 +112,8 @@ import { startRestApi, clearFeaturesCache, setUiActive, uiHeartbeat, type RestAp
 import { parseSolanaTx, SolanaTxParseError, solanaMessageSlice } from "./solana-tx"
 import { AuthStore } from "./auth"
 import { getPioneer, getPioneerApiBase, resetPioneer, DEFAULT_API_BASE, getQueryKey as getPioneerQueryKey } from "./pioneer"
-import { setBtcBackendOffline, setBtcNodeConfig, getBtcBackend, broadcastBtcTx } from "./btc-backend"
+import { setBtcBackendOffline, setBtcNodeConfig, setBtcNodeDeviceEligible, getBtcBackend, broadcastBtcTx } from "./btc-backend"
+import { isBitcoinOnlyVariant } from "../shared/flags"
 import { fetchDefiPositions } from "./zapper"
 import { loadSupportedChains } from "../shared/swap-support-matrix"
 import { PioneerSocket } from "./pioneer-socket"
@@ -5520,22 +5521,34 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			// Self-host Bitcoin node. Persist url/auth/enabled and re-point the
 			// BtcBackend. Empty url with enabled=false clears it → back to Pioneer.
 			setBtcNode: async (params) => {
-				setSetting('btc_node_enabled', params.enabled ? '1' : '0')
-				setSetting('btc_node_url', params.url || '')
 				// Only overwrite each credential when provided — lets the user toggle
 				// enable without re-typing (undefined = keep existing).
-				if (params.rpcUser !== undefined) setSetting('btc_node_rpc_user', params.rpcUser)
-				if (params.rpcPass !== undefined) setSetting('btc_node_rpc_pass', params.rpcPass)
-				// Self-correct the type: a wrong pick (Blockbook on the :8332 Core port,
-				// or vice versa) probes both and persists whichever actually answers, so
-				// a type/port mismatch can't get stuck saved.
-				let type: 'blockbook' | 'core' = params.type === 'core' ? 'core' : 'blockbook'
 				if (params.enabled && params.url) {
-					type = (await detectBtcNode(params.url, btcNodeAuth(), type)).type
+					// Validate BEFORE persisting anything so a wrong-network/unreachable
+					// node can never get saved (a failed pre-test, race, or direct RPC
+					// call would otherwise stick). detectBtcNode also self-corrects the
+					// type (Blockbook on the :8332 Core port, or vice versa).
+					const user = params.rpcUser !== undefined ? params.rpcUser : (getSetting('btc_node_rpc_user') || '')
+					const pass = params.rpcPass !== undefined ? params.rpcPass : (getSetting('btc_node_rpc_pass') || '')
+					const auth = user || pass ? `${user}:${pass}` : undefined
+					const { type, result } = await detectBtcNode(params.url, auth, params.type === 'core' ? 'core' : 'blockbook')
+					if (!result.ok) throw new Error(result.error || 'Bitcoin node validation failed')
+					// Persist atomically only after a good probe.
+					setSetting('btc_node_enabled', '1')
+					setSetting('btc_node_url', params.url)
+					if (params.rpcUser !== undefined) setSetting('btc_node_rpc_user', params.rpcUser)
+					if (params.rpcPass !== undefined) setSetting('btc_node_rpc_pass', params.rpcPass)
+					setSetting('btc_node_type', type)
+					console.log(`[settings] Self-host node: enabled → ${type} ${params.url}`)
+				} else {
+					// Disabling: no validation. Keep url/creds so re-enable doesn't retype.
+					setSetting('btc_node_enabled', '0')
+					setSetting('btc_node_url', params.url || '')
+					if (params.rpcUser !== undefined) setSetting('btc_node_rpc_user', params.rpcUser)
+					if (params.rpcPass !== undefined) setSetting('btc_node_rpc_pass', params.rpcPass)
+					console.log('[settings] Self-host node: disabled')
 				}
-				setSetting('btc_node_type', type)
 				loadBtcNodeConfig()
-				console.log('[settings] Self-host node:', params.enabled ? `enabled → ${type} ${params.url}` : 'disabled')
 				return getAppSettings()
 			},
 			// Verbose reachability + capability probe for the config panel. Auto-detects
@@ -7741,6 +7754,11 @@ let pendingDeepLinkUri: string | null = null
 // Push engine events to WebView
 engine.on('state-change', (state) => {
 	try { rpc.send['device-state'](state) } catch { /* webview not ready yet */ }
+	// Scope the self-host node to the connected device: only a btc-only device may
+	// use the (global) persisted node. A multichain device — which can't even see
+	// the node control to disable it — keeps its BTC on Pioneer. Absent variant
+	// (connecting/disconnected) → suppressed.
+	setBtcNodeDeviceEligible(isBitcoinOnlyVariant(state.firmwareVariant))
 	// Device-to-device swap: a *different* device just reached 'ready'. Reset the
 	// in-memory account managers so device B re-derives its own xpubs/addresses
 	// instead of reusing device A's (the existing `if (!isInitialized)` guards

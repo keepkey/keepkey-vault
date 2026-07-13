@@ -16,7 +16,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       getDeviceState: { params: void; response: DeviceStateInfo }
       retryConnect: { params: void; response: void }
       startBootloaderUpdate: { params: void; response: void }
-      startFirmwareUpdate: { params: void; response: void }
+      startFirmwareUpdate: { params: { bitcoinOnly?: boolean }; response: void }
       flashFirmware: { params: void; response: void }
       analyzeFirmware: { params: { data: string }; response: FirmwareAnalysis }
       flashCustomFirmware: { params: { data: string }; response: void }

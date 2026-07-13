@@ -2246,15 +2246,17 @@ export class EngineController extends EventEmitter {
       const addr = (typeof result === 'string' ? result : result?.address)?.toLowerCase()
       if (addr) return addr
     } catch (err: any) {
-      // Only btc-only firmware legitimately REFUSES ETH derivation. On multi-chain
-      // firmware an ETH failure is a transient transport/USB error, not a seed
-      // signal — falling back to the btc: fingerprint here would flip the identity
-      // and trigger a false "seed changed" purge. Return null (uncertain) instead.
-      if (!isBitcoinOnlyVariant(this.cachedFeatures?.firmwareVariant)) {
-        console.warn('[Engine] seed fingerprint (eth) failed on multi-chain fw — treating as uncertain:', err?.message)
-        return null
-      }
-      console.warn('[Engine] seed fingerprint (eth) refused on btc-only fw, using btc fallback:', err?.message)
+      console.warn('[Engine] seed fingerprint (eth) failed:', err?.message)
+    }
+    // ETH produced no address — it threw, OR resolved undefined/{}/address-less.
+    // Only btc-only firmware legitimately REFUSES ETH; on multi-chain firmware a
+    // missing ETH address is a transient transport/USB hiccup, and flipping to the
+    // btc: fingerprint would trigger a false "seed changed" purge. Multi-chain here
+    // is uncertain → return null. (Guard sits AFTER the attempt so it catches the
+    // resolve-empty case too, not just thrown errors.)
+    if (!isBitcoinOnlyVariant(this.cachedFeatures?.firmwareVariant)) {
+      console.warn('[Engine] seed fingerprint: ETH unavailable on multi-chain fw — uncertain, returning null')
+      return null
     }
     try {
       const result = await (this.wallet as any).btcGetAddress({

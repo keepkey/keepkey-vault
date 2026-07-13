@@ -25,11 +25,19 @@ export type NodeConfig =
 
 let offlineMode = false
 let nodeBackend: BtcBackend | null = null
+// The persisted node config is GLOBAL, but only a btc-only device may use it. A
+// multichain device (or no device yet) must never inherit another device's
+// self-host node — its BTC stays on Pioneer. Set from index.ts on every device
+// state-change; false until a btc-only device reaches ready.
+let deviceBtcOnly = false
 
-/** BTC no longer routes to Pioneer whenever a node is set OR we're offline. Keep the
- *  honesty guard in lock-step so those Pioneer BTC calls throw instead of cheating. */
+/** The persisted node is live only when a btc-only device is connected. */
+function nodeActive(): boolean { return nodeBackend !== null && deviceBtcOnly }
+
+/** BTC no longer routes to Pioneer whenever the node is active OR we're offline. Keep
+ *  the honesty guard in lock-step so those Pioneer BTC calls throw instead of cheating. */
 function syncPioneerGuard(): void {
-  setPioneerGuardActive(offlineMode || nodeBackend !== null)
+  setPioneerGuardActive(offlineMode || nodeActive())
 }
 
 /** Set by index.ts on startup and whenever the offline-mode setting changes. */
@@ -46,11 +54,20 @@ export function setBtcNodeConfig(cfg: NodeConfig | null): void {
   syncPioneerGuard()
 }
 
+/** Set from index.ts on every device state-change. A non-btc-only (or absent)
+ *  device suppresses the persisted node so it can't hijack a multichain wallet's
+ *  BTC — that user can't even see the node control to disable it. */
+export function setBtcNodeDeviceEligible(isBtcOnly: boolean): void {
+  deviceBtcOnly = isBtcOnly
+  syncPioneerGuard()
+}
+
 export function getBtcBackend(): BtcBackend {
   if (offlineMode) return DeviceOnlyBackend
   // Self-host: route to the node with NO fallback to Pioneer — a failing node
-  // throws a verbose error the user must fix (sovereignty stance).
-  if (nodeBackend) return nodeBackend
+  // throws a verbose error the user must fix (sovereignty stance). Node only
+  // applies to a btc-only device (nodeActive); else BTC stays on Pioneer.
+  if (nodeActive()) return nodeBackend!
   return PioneerBackend
 }
 

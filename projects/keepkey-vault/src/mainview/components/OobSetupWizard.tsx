@@ -1375,6 +1375,7 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
                       <FirmwareUpgradePreview
                         currentVersion={deviceStatus.resolvedFwVersion?.replace(/^v/, '') || deviceStatus.firmwareVersion || null}
                         targetVersion={deviceStatus.latestFirmware}
+                        isBitcoinOnly={coinMode === 'bitcoin-only'}
                       />
                     )}
 
