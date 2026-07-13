@@ -217,7 +217,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       setWalletConnectEnabled: { params: { enabled: boolean }; response: AppSettings }
       setOfflineMode: { params: { enabled: boolean }; response: AppSettings }
       setBtcNode: { params: { enabled: boolean; type: 'blockbook' | 'core'; url: string; rpcUser?: string; rpcPass?: string }; response: AppSettings }
-      testBtcNode: { params: { type: 'blockbook' | 'core'; url: string; rpcUser?: string; rpcPass?: string }; response: { ok: boolean; error?: string; chain?: string; blocks?: number; pruned?: boolean; txindex?: boolean; inSync?: boolean } }
+      testBtcNode: { params: { type: 'blockbook' | 'core'; url: string; rpcUser?: string; rpcPass?: string }; response: { ok: boolean; error?: string; chain?: string; blocks?: number; pruned?: boolean; txindex?: boolean; inSync?: boolean; detectedType?: 'blockbook' | 'core' } }
       getBtcNodeStatus: { params: void; response: { active: boolean; kind?: 'blockbook' | 'core'; ok?: boolean; error?: string; height?: number; syncing?: boolean; progress?: number } }
       setBip85Enabled: { params: { enabled: boolean }; response: AppSettings }
       setZcashPrivacyEnabled: { params: { enabled: boolean }; response: AppSettings }

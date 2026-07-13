@@ -5,7 +5,7 @@ import type { AppSettings } from "../../shared/types"
 
 const ACCENT = "#F7931A" // bitcoin orange
 
-type TestResult = { ok: boolean; error?: string; chain?: string; blocks?: number; pruned?: boolean; txindex?: boolean; inSync?: boolean }
+type TestResult = { ok: boolean; error?: string; chain?: string; blocks?: number; pruned?: boolean; txindex?: boolean; inSync?: boolean; detectedType?: "blockbook" | "core" }
 
 /** Self-host Bitcoin node config (btc-only). Point Vault at your own Bitcoin Core
  *  node instead of Pioneer. Verbose Test Connection; no silent fallback — if the
@@ -26,7 +26,11 @@ export function SelfHostNodePanel({ settings, onChange }: { settings: AppSetting
   const test = async () => {
     setTesting(true); setResult(null)
     try {
-      setResult(await rpcRequest<TestResult>("testBtcNode", { type, url: url.trim(), ...creds() }, 20000))
+      const r = await rpcRequest<TestResult>("testBtcNode", { type, url: url.trim(), ...creds() }, 20000)
+      // Auto-detect corrected the type (e.g. you picked Blockbook but the URL is
+      // a Core node) — switch the selector so Save persists the right one.
+      if (r.detectedType && r.detectedType !== type) setType(r.detectedType)
+      setResult(r)
     } catch (e: any) {
       setResult({ ok: false, error: e?.message || "Test failed" })
     }
@@ -92,7 +96,9 @@ export function SelfHostNodePanel({ settings, onChange }: { settings: AppSetting
              bg={result.ok ? "rgba(139,227,196,0.08)" : "rgba(224,140,123,0.08)"}>
           {result.ok ? (
             <>
-              <Text fontSize="xs" color="var(--teal)" fontWeight="600">Connected — {result.chain} · height {result.blocks?.toLocaleString()}</Text>
+              <Text fontSize="xs" color="var(--teal)" fontWeight="600">
+                Connected as {result.detectedType === "core" ? "Bitcoin Core" : "Blockbook"} — {result.chain} · height {result.blocks?.toLocaleString()}
+              </Text>
               {type === "blockbook" && result.inSync === false && <Text fontSize="11px" color="var(--gold)" mt="1">⚠ Indexer still syncing — balances may be incomplete until caught up.</Text>}
               {type === "core" && result.pruned && <Text fontSize="11px" color="var(--gold)" mt="1">⚠ Pruned node — balances & sending work, but no transaction history.</Text>}
               {type === "core" && result.txindex === false && <Text fontSize="11px" color="var(--gold)" mt="1">⚠ txindex off — can't spend legacy (1…) inputs. Set txindex=1 to enable.</Text>}

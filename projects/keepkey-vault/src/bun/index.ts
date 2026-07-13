@@ -810,6 +810,21 @@ function loadBtcNodeConfig() {
 	const type = getSetting('btc_node_type') === 'core' ? 'core' : 'blockbook'
 	setBtcNodeConfig(type === 'core' ? { type: 'core', url, auth: btcNodeAuth() } : { type: 'blockbook', url })
 }
+
+/** Probe a URL as the preferred type; if that fails, try the other type. The
+ *  #1 user mistake is a type/port mismatch (Blockbook selected on the Core :8332
+ *  port, or vice versa) — this self-corrects it so a wrong pick can't get saved. */
+async function detectBtcNode(url: string, auth: string | undefined, preferred: 'blockbook' | 'core') {
+	const { testCoreNode } = await import('./btc-backend/core')
+	const { testBlockbookNode } = await import('./btc-backend/blockbook')
+	const probe = (t: 'blockbook' | 'core') => t === 'core' ? testCoreNode({ url, auth }) : testBlockbookNode({ url })
+	const first = await probe(preferred)
+	if (first.ok) return { type: preferred, result: first }
+	const other: 'blockbook' | 'core' = preferred === 'core' ? 'blockbook' : 'core'
+	const second = await probe(other)
+	if (second.ok) return { type: other, result: second }
+	return { type: preferred, result: first } // both failed — surface the preferred type's error
+}
 let appVersionCache = ''
 let restServer: ReturnType<typeof startRestApi> | null = null
 // WalletConnect manager — lazily initialized when user pairs
@@ -5496,28 +5511,32 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			// BtcBackend. Empty url with enabled=false clears it → back to Pioneer.
 			setBtcNode: async (params) => {
 				setSetting('btc_node_enabled', params.enabled ? '1' : '0')
-				setSetting('btc_node_type', params.type === 'core' ? 'core' : 'blockbook')
 				setSetting('btc_node_url', params.url || '')
 				// Only overwrite each credential when provided — lets the user toggle
 				// enable without re-typing (undefined = keep existing).
 				if (params.rpcUser !== undefined) setSetting('btc_node_rpc_user', params.rpcUser)
 				if (params.rpcPass !== undefined) setSetting('btc_node_rpc_pass', params.rpcPass)
+				// Self-correct the type: a wrong pick (Blockbook on the :8332 Core port,
+				// or vice versa) probes both and persists whichever actually answers, so
+				// a type/port mismatch can't get stuck saved.
+				let type: 'blockbook' | 'core' = params.type === 'core' ? 'core' : 'blockbook'
+				if (params.enabled && params.url) {
+					type = (await detectBtcNode(params.url, btcNodeAuth(), type)).type
+				}
+				setSetting('btc_node_type', type)
 				loadBtcNodeConfig()
-				console.log('[settings] Self-host node:', params.enabled ? `enabled → ${params.type} ${params.url}` : 'disabled')
+				console.log('[settings] Self-host node:', params.enabled ? `enabled → ${type} ${params.url}` : 'disabled')
 				return getAppSettings()
 			},
-			// Verbose reachability + capability probe for the config panel. Uses the
-			// posted creds (pre-save), or the saved creds when re-testing.
+			// Verbose reachability + capability probe for the config panel. Auto-detects
+			// the type (Blockbook vs Core) so the user doesn't have to get the port right;
+			// detectedType tells the UI which one actually answered.
 			testBtcNode: async (params) => {
-				const url = params.url
-				if (params.type === 'core') {
-					const { testCoreNode } = await import('./btc-backend/core')
-					const user = params.rpcUser !== undefined ? params.rpcUser : (getSetting('btc_node_rpc_user') || '')
-					const pass = params.rpcPass !== undefined ? params.rpcPass : (getSetting('btc_node_rpc_pass') || '')
-					return testCoreNode({ url, auth: user || pass ? `${user}:${pass}` : undefined })
-				}
-				const { testBlockbookNode } = await import('./btc-backend/blockbook')
-				return testBlockbookNode({ url })
+				const user = params.rpcUser !== undefined ? params.rpcUser : (getSetting('btc_node_rpc_user') || '')
+				const pass = params.rpcPass !== undefined ? params.rpcPass : (getSetting('btc_node_rpc_pass') || '')
+				const auth = user || pass ? `${user}:${pass}` : undefined
+				const { type, result } = await detectBtcNode(params.url, auth, params.type === 'core' ? 'core' : 'blockbook')
+				return { ...result, detectedType: type }
 			},
 			// Live status of the ACTIVE self-host node (for the bottom status bar).
 			// active:false when no node is enabled → the bar hides.
