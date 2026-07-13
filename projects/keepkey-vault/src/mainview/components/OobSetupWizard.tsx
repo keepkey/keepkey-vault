@@ -1382,12 +1382,19 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
                         against. Only shown when a pinned hash exists (the manifest-less
                         fallback path installs without a hash check) and for the 'latest'
                         channel — beta/alpha builds have no tagged release to verify against. */}
-                    {deviceStatus.latestFirmware && deviceStatus.latestFirmwareHash && deviceStatus.firmwareChannel !== 'beta' && (
-                      <ReproducibleBuildNotice
-                        version={deviceStatus.latestFirmware}
-                        payloadHash={deviceStatus.latestFirmwareHash}
-                      />
-                    )}
+                    {(() => {
+                      // Verify against the binary actually being installed: the
+                      // Bitcoin-only choice flashes a different file with its own hash.
+                      const pinnedHash = coinMode === 'bitcoin-only'
+                        ? deviceStatus.latestFirmwareBitcoinOnlyHash
+                        : deviceStatus.latestFirmwareHash
+                      return deviceStatus.latestFirmware && pinnedHash && deviceStatus.firmwareChannel !== 'beta' && (
+                        <ReproducibleBuildNotice
+                          version={deviceStatus.latestFirmware}
+                          payloadHash={pinnedHash}
+                        />
+                      )
+                    })()}
 
                     {/* Bitcoin-only vs Multi-coin — OOB (fresh device) only, gated by flag.
                         Once full firmware is installed, switching to btc-only is a separate

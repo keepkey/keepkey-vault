@@ -35,6 +35,10 @@ export interface DeviceStateInfo {
   /** Pinned payload sha256 for the latest firmware (from the manifest) — the
    *  hash Vault verifies the downloaded binary against before flashing. */
   latestFirmwareHash?: string
+  /** Pinned payload sha256 for the Bitcoin-only firmware binary. Distinct from
+   *  latestFirmwareHash (multi-coin) — the OOB "Bitcoin-only" choice installs a
+   *  different binary and must verify against this hash. */
+  latestFirmwareBitcoinOnlyHash?: string
   /** Which manifest channel latestFirmware/latestFirmwareHash resolved from.
    *  'beta' builds are pre-release and not covered by the reproducible-build
    *  claim (no published git tag / release assets to verify against). */

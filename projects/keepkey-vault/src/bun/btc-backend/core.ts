@@ -167,10 +167,16 @@ export function makeCoreBackend(cfg: CoreConfig): BtcBackend {
       try {
         return await coreRpc(cfg, 'scantxoutset', ['start', objs], SCAN_TIMEOUT)
       } catch (e: any) {
-        // A leftover scan from a crashed/aborted call blocks new ones — abort it once and retry.
+        // scantxoutset is a single global op on the node, and our own scans are
+        // serialized by scanLock — so "already in progress" means ANOTHER client
+        // (or a leftover from a crashed run still finishing server-side) owns it.
+        // We can't tell which, so never abort it: killing another wallet app's
+        // multi-minute scan is worse than making the user retry. Leftover scans
+        // finish on their own; a truly wedged one is aborted node-side by the user.
+        // ponytail: no ownership tracking — add it only if shared-node collisions
+        //   become a real, common complaint.
         if (/already in progress/i.test(e?.message || '')) {
-          await coreRpc(cfg, 'scantxoutset', ['abort']).catch(() => {})
-          return await coreRpc(cfg, 'scantxoutset', ['start', objs], SCAN_TIMEOUT)
+          throw new Error('Bitcoin node is busy with another scan — try again in a moment')
         }
         throw e
       }

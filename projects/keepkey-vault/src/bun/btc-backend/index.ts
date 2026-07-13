@@ -56,6 +56,14 @@ export function getBtcBackend(): BtcBackend {
 
 const BTC_NETWORK_ID = 'bip122:000000000019d6689c085ae165831e93'
 
+/** Network-scoped backend. The self-host node (and offline device-only mode) only
+ *  answer Bitcoin — every OTHER UTXO chain (LTC/DOGE/BCH…) must keep using Pioneer,
+ *  or a BTC Core node silently returns nothing for their addresses. Use this
+ *  anywhere the network isn't guaranteed to be Bitcoin (e.g. the audit sweep). */
+export function getBackendForNetwork(networkId: string): BtcBackend {
+  return networkId === BTC_NETWORK_ID ? getBtcBackend() : PioneerBackend
+}
+
 /** Broadcast a BTC tx through the self-host node when one is enabled, else Pioneer.
  *  Unifies every BTC broadcast site (send / sweep / REST) so none can silently cheat
  *  past the node. Returns the txid. */

@@ -9,7 +9,7 @@
  *   check balances via Pioneer → build sweep tx → sign → broadcast.
  */
 import { BTC_SCRIPT_TYPES, btcAccountPath } from '../shared/chains'
-import { getBtcBackend } from './btc-backend'
+import { getBackendForNetwork } from './btc-backend'
 import coinSelectSplit from 'coinselect/split'
 
 const TAG = '[sweep]'
@@ -222,7 +222,7 @@ export async function fetchUtxos(address: string, networkId: string = BTC_NETWOR
   try {
     // ListUnspent accepts a single address as well as an xpub. The backend
     // normalizes value→int-sats and hex, and already drops zero-value rows.
-    const utxos = await getBtcBackend().listUnspent({ network: networkId, address })
+    const utxos = await getBackendForNetwork(networkId).listUnspent({ network: networkId, address })
     return utxos.map((u) => ({ txid: u.txid, vout: u.vout, value: u.value, hex: u.hex }))
   } catch (e: any) {
     console.warn(`${TAG} UTXO fetch failed for ${address}: ${e.message}`)
@@ -232,7 +232,7 @@ export async function fetchUtxos(address: string, networkId: string = BTC_NETWOR
 
 async function fetchTxHex(txid: string, networkId: string = BTC_NETWORK_ID): Promise<string | undefined> {
   try {
-    return await getBtcBackend().rawTxHex({ network: networkId, txid })
+    return await getBackendForNetwork(networkId).rawTxHex({ network: networkId, txid })
   } catch {
     return undefined
   }
@@ -352,7 +352,7 @@ export async function buildSweepTx(
   // Fetch fee rate (sat/vByte; backend handles the sat/kB↔sat/vB detection)
   let feeRate = 5
   try {
-    feeRate = (await getBtcBackend().feeRate(networkId)).fast
+    feeRate = (await getBackendForNetwork(networkId).feeRate(networkId)).fast
   } catch (e: any) {
     console.warn(`${TAG} Fee rate fetch failed, using default ${feeRate}: ${e.message}`)
   }

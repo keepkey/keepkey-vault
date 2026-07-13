@@ -817,7 +817,17 @@ function loadBtcNodeConfig() {
 async function detectBtcNode(url: string, auth: string | undefined, preferred: 'blockbook' | 'core') {
 	const { testCoreNode } = await import('./btc-backend/core')
 	const { testBlockbookNode } = await import('./btc-backend/blockbook')
-	const probe = (t: 'blockbook' | 'core') => t === 'core' ? testCoreNode({ url, auth }) : testBlockbookNode({ url })
+	const probe = async (t: 'blockbook' | 'core') => {
+		const r = t === 'core' ? await testCoreNode({ url, auth }) : await testBlockbookNode({ url })
+		// Reject a node on the wrong network — a testnet/regtest node would report
+		// bogus balances for a mainnet wallet. Bitcoin Core reports mainnet as 'main'.
+		// Undefined chain (older node that doesn't report it) is allowed through
+		// rather than blocking a valid node.
+		if (r.ok && r.chain && r.chain !== 'main') {
+			return { ...r, ok: false, error: `Node is on '${r.chain}', not Bitcoin mainnet` }
+		}
+		return r
+	}
 	const first = await probe(preferred)
 	if (first.ok) return { type: preferred, result: first }
 	const other: 'blockbook' | 'core' = preferred === 'core' ? 'blockbook' : 'core'
