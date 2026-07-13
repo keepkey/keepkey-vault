@@ -112,7 +112,7 @@ import { startRestApi, clearFeaturesCache, setUiActive, uiHeartbeat, type RestAp
 import { parseSolanaTx, SolanaTxParseError, solanaMessageSlice } from "./solana-tx"
 import { AuthStore } from "./auth"
 import { getPioneer, getPioneerApiBase, resetPioneer, DEFAULT_API_BASE, getQueryKey as getPioneerQueryKey } from "./pioneer"
-import { setBtcBackendOffline, setBtcNodeConfig } from "./btc-backend"
+import { setBtcBackendOffline, setBtcNodeConfig, getBtcBackend } from "./btc-backend"
 import { fetchDefiPositions } from "./zapper"
 import { loadSupportedChains } from "../shared/swap-support-matrix"
 import { PioneerSocket } from "./pioneer-socket"
@@ -3077,8 +3077,15 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						name: ct.name,
 						icon: ct.iconUrl,
 					}))
-					const pubkeyChunks = chunkArray(pubkeys, PIONEER_PORTFOLIO_CHUNK_SIZE)
-					const chunkResults = await withTimeout(
+					// Self-host: when a BTC node is active, BTC balances come from the
+					// node (below), NOT Pioneer — so exclude BTC xpubs from the Pioneer
+					// chunk. Non-BTC chains + price still use Pioneer. kind==='pioneer'
+					// (the default) leaves this byte-identical.
+					const btcBackend = getBtcBackend()
+					const useNodeForBtc = btcBackend.kind !== 'pioneer' && btcPubkeyEntries.length > 0
+					const pubkeysForPioneer = useNodeForBtc ? pubkeys.filter(p => p.chainId !== 'bitcoin') : pubkeys
+					const pubkeyChunks = chunkArray(pubkeysForPioneer, PIONEER_PORTFOLIO_CHUNK_SIZE)
+					const chunkResults = pubkeyChunks.length === 0 ? [] : await withTimeout(
 						mapWithConcurrency(pubkeyChunks, PIONEER_PORTFOLIO_MAX_CONCURRENCY, async (chunk, i) => {
 							// Opt the dashboard refresh into the server's DeFi merge. Server-side
 							// is cached, so the per-pubkey Zapper lookup is typically a Redis
@@ -3132,7 +3139,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 								console.warn(`[getBalances] Chunk ${i + 1} failed — excluded chains: ${chains}`)
 							}
 						}
-						if (failedChunkCount === pubkeyChunks.length) {
+						if (pubkeyChunks.length > 0 && failedChunkCount === pubkeyChunks.length) {
 							throw new Error(`All ${pubkeyChunks.length} portfolio chunks failed`)
 						}
 						// Key by caip:pubkey so a failed Hyperliquid entry (which shares the
@@ -3154,6 +3161,30 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					)
 					console.log(`[getBalances] effectivePubkeys: ${effectivePubkeys.length}/${pubkeys.length} — chains: ${[...new Set(effectivePubkeys.map(p => p.chainId))].join(', ')}`)
 					const allEntries = chunkResults.flatMap(r => r.entries)
+					// Self-host: BTC balances from the node, produced in Pioneer's entry shape
+					// so the BTC loop below processes them identically. Price still via Pioneer
+					// (GetMarketInfo — price isn't node data). A node failure for an xpub is
+					// marked failed so its stale cached balance isn't overwritten with 0.
+					if (useNodeForBtc) {
+						let btcPriceUsd = 0
+						try {
+							const mi: any = await withTimeout(pioneer.GetMarketInfo([btcChain.caip]), PIONEER_TIMEOUT_MS, 'GetMarketInfo(BTC)')
+							const md = Array.isArray(mi?.data) ? mi.data[0] : (Array.isArray(mi) ? mi[0] : mi?.data ?? mi)
+							btcPriceUsd = Number(md?.priceUsd ?? md?.price ?? 0) || 0
+						} catch (e: any) { console.warn('[getBalances] BTC price fetch failed (USD may show 0):', e?.message) }
+						for (const e of btcPubkeyEntries) {
+							try {
+								const utxos = await btcBackend.listUnspent({ network: btcChain.networkId, xpub: e.pubkey })
+								const sats = utxos.reduce((sum, u) => sum + u.value, 0)
+								const btc = sats / 1e8
+								allEntries.push({ caip: btcChain.caip, pubkey: e.pubkey, chainId: 'bitcoin', networkId: btcChain.networkId, symbol: 'BTC', type: 'native', balance: btc.toFixed(8), valueUsd: btc * btcPriceUsd, address: undefined })
+							} catch (err: any) {
+								failedPubkeySetForDb.add(`${btcChain.caip}:${e.pubkey}`)
+								console.warn(`[getBalances] self-host node BTC balance failed for ${e.pubkey.slice(0, 16)}…: ${err?.message}`)
+							}
+						}
+						console.log(`[getBalances] BTC via self-host node (${btcBackend.kind}): ${btcPubkeyEntries.length} xpub(s), price $${btcPriceUsd}`)
+					}
 					const portfolioMeta = mergeMetas(chunkResults.map(r => r.meta).filter(Boolean) as PortfolioMeta[])
 
 					// Aggregate server-merged DeFi positions across chunks and group by
