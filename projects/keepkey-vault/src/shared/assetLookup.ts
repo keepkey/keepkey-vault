@@ -92,6 +92,19 @@ const LOCAL_ICONS: Record<string, string> = {
   'bip122:000000000019d6689c085ae165831e93/slip44:0': `data:image/svg+xml,${encodeURIComponent(BITCOIN_SVG)}`,
 }
 
+/** True once the async asset catalog has finished loading — lets best-effort
+ *  checks (e.g. symbol-squatter detection) fail open until data is available. */
+export function isAssetMapReady(): boolean {
+  return assetMap !== null
+}
+
+/** True if this exact CAIP is a curated/known asset in the catalog. Distinguishes
+ *  a legit token (e.g. MATIC's Ethereum ERC-20, which IS catalogued) from an
+ *  unknown/unverified token wearing a well-known ticker. */
+export function isKnownAsset(caip: string): boolean {
+  return !!assetMap && caip in assetMap
+}
+
 /** Look up just the icon URL for a CAIP */
 export function getAssetIcon(caip: string): string {
   if (LOCAL_ICONS[caip]) return LOCAL_ICONS[caip]
