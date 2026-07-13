@@ -41,6 +41,8 @@ interface DeviceSettingsDrawerProps {
 	onOpenPairedApps?: () => void
 	onOpenMobilePairing?: () => void
 	onRestApiChanged?: (enabled: boolean) => void
+	/** Self-host node connected (tested OK + saved) — parent closes the drawer and runs the walkthrough. */
+	onNodeConnected?: () => void
 	onWordCountChange?: (count: 12 | 18 | 24) => void
 }
 
@@ -144,7 +146,7 @@ function VerificationBadge({ verified, t }: { verified?: boolean; t: (key: strin
 
 // ── Main Component ──────────────────────────────────────────────────
 
-export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpdate, onDownloadUpdate, onApplyUpdate, updatePhase, updateVersion, appVersion, onOpenAuditLog, onOpenPairedApps, onOpenMobilePairing, onRestApiChanged, onWordCountChange }: DeviceSettingsDrawerProps) {
+export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpdate, onDownloadUpdate, onApplyUpdate, updatePhase, updateVersion, appVersion, onOpenAuditLog, onOpenPairedApps, onOpenMobilePairing, onRestApiChanged, onNodeConnected, onWordCountChange }: DeviceSettingsDrawerProps) {
 	const { t } = useTranslation("settings")
 	const [features, setFeatures] = useState<DeviceFeatures | null>(null)
 	const [featuresError, setFeaturesError] = useState(false)
@@ -1565,7 +1567,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 					{/* ── Bitcoin node (self-host) — btc-only devices ─── */}
 					{isBitcoinOnlyVariant(deviceState.firmwareVariant) && (
 						<Section title="Bitcoin node" defaultOpen={true}>
-							<SelfHostNodePanel settings={appSettings} onChange={setAppSettings} />
+							<SelfHostNodePanel settings={appSettings} onChange={setAppSettings} onConnected={onNodeConnected} />
 						</Section>
 					)}
 

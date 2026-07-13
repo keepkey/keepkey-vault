@@ -18,6 +18,7 @@ import { useOnline } from "./hooks/useOnline"
 import { useBtcNodeStatus } from "./hooks/useBtcNodeStatus"
 import { OfflineBanner } from "./components/OfflineBanner"
 import { NodeStatusBar } from "./components/NodeStatusBar"
+import { NodeConnectedDialog } from "./components/NodeConnectedDialog"
 import { BitcoinOnlyOnboardingDialog } from "./components/BitcoinOnlyOnboardingDialog"
 import { DeviceGrid } from "./components/DeviceGrid"
 import { DeviceClaimedDialog } from "./components/DeviceClaimedDialog"
@@ -101,6 +102,7 @@ function App() {
 	const [btcOnboardingSeen, setBtcOnboardingSeen] = useState(true)
 	const [btcOnboardingDismissed, setBtcOnboardingDismissed] = useState(false)
 	const [btcNodeEnabledSetting, setBtcNodeEnabledSetting] = useState(false)
+	const [nodeDialogOpen, setNodeDialogOpen] = useState(false)
 	// Skip the reachability probe when airplane mode is on — we already know we're
 	// offline and must make zero network calls.
 	const online = useOnline(!offlineModeSetting)
@@ -963,6 +965,7 @@ function App() {
 		<>{resizeHandles}{updateBanner}{incomingTxToast}{firmwareDropZone}{signingOverlay}{pairingOverlay}{passphraseOverlay}{charOverlay}{pinOverlay}
 			{offline && <OfflineBanner airplane={offlineModeSetting} />}
 			{showNodeBar && nodeStatus && <NodeStatusBar status={nodeStatus} />}
+			{nodeDialogOpen && <NodeConnectedDialog onClose={() => setNodeDialogOpen(false)} />}
 			{splashBitcoinOnly && !btcOnboardingSeen && !btcOnboardingDismissed && portfolioLoaded && !btcSplashHold && (
 				<BitcoinOnlyOnboardingDialog onClose={() => { setBtcOnboardingDismissed(true); rpcRequest("markBtcOnboardingShown").catch(() => {}) }} />
 			)}
@@ -1035,6 +1038,12 @@ function App() {
 				onOpenPairedApps={() => setPairedAppsOpen(true)}
 				onOpenMobilePairing={() => setMobilePairingOpen(true)}
 				onRestApiChanged={setRestApiEnabled}
+				onNodeConnected={() => {
+					setSettingsOpen(false)
+					setBtcNodeEnabledSetting(true)
+					setNodeDialogOpen(true)
+					window.dispatchEvent(new Event("keepkey-refresh-balances"))
+				}}
 				onWordCountChange={setRecoveryWordCount}
 			/>
 			<MobilePairingDialog

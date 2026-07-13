@@ -1129,6 +1129,14 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 		return () => window.removeEventListener('focus', onFocus)
 	}, [watchOnly, refreshBalances])
 
+	// Explicit balance refresh (e.g. right after a self-host node is connected, so
+	// balances re-fetch from the node instead of waiting for the next poll).
+	useEffect(() => {
+		const onRefresh = () => { if (!watchOnly) refreshBalances(true) }
+		window.addEventListener('keepkey-refresh-balances', onRefresh)
+		return () => window.removeEventListener('keepkey-refresh-balances', onRefresh)
+	}, [watchOnly, refreshBalances])
+
 	// Phase 2 trigger — degraded-chain background retry with exponential backoff.
 	// Each new fault report (re-)schedules a forced refresh; a clean fetch
 	// (portfolioFault === null) resets the backoff. We refresh the whole portfolio

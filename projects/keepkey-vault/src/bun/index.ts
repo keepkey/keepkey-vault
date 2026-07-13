@@ -5548,7 +5548,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (type === 'core') {
 					const { testCoreNode } = await import('./btc-backend/core')
 					const r = await testCoreNode({ url, auth: btcNodeAuth() })
-					return { active: true as const, kind: 'core' as const, ok: r.ok, error: r.error, height: r.blocks, syncing: r.syncing, progress: r.progress }
+					return { active: true as const, kind: 'core' as const, ok: r.ok, error: r.error, height: r.blocks, headers: r.headers, syncing: r.syncing, progress: r.progress }
 				}
 				const { testBlockbookNode } = await import('./btc-backend/blockbook')
 				const r = await testBlockbookNode({ url })

@@ -3,7 +3,7 @@ import { rpcRequest } from "../lib/rpc"
 
 export type BtcNodeStatus = {
   active: boolean; kind?: "blockbook" | "core"; ok?: boolean; error?: string
-  height?: number; syncing?: boolean; progress?: number
+  height?: number; headers?: number; syncing?: boolean; progress?: number
 }
 
 /** Polls the active self-host node's status for the bottom status bar. Only runs

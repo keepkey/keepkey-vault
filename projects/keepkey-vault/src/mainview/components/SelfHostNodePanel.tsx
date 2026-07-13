@@ -10,7 +10,7 @@ type TestResult = { ok: boolean; error?: string; chain?: string; blocks?: number
 /** Self-host Bitcoin node config (btc-only). Point Vault at your own Bitcoin Core
  *  node instead of Pioneer. Verbose Test Connection; no silent fallback — if the
  *  node is enabled and fails, the app surfaces the error rather than phoning home. */
-export function SelfHostNodePanel({ settings, onChange }: { settings: AppSettings; onChange: (s: AppSettings) => void }) {
+export function SelfHostNodePanel({ settings, onChange, onConnected }: { settings: AppSettings; onChange: (s: AppSettings) => void; onConnected?: () => void }) {
   const [type, setType] = useState<"blockbook" | "core">(settings.btcNodeType || "blockbook")
   const [url, setUrl] = useState(settings.btcNodeUrl || "")
   const [rpcUser, setRpcUser] = useState("")
@@ -40,9 +40,20 @@ export function SelfHostNodePanel({ settings, onChange }: { settings: AppSetting
   const save = async (nextEnabled: boolean) => {
     setSaving(true)
     try {
-      const s = await rpcRequest<AppSettings>("setBtcNode", { enabled: nextEnabled, type, url: url.trim(), ...creds() }, 10000)
-      onChange(s)
-    } catch (e: any) { console.error("setBtcNode:", e) }
+      if (nextEnabled) {
+        // Test before enabling — never save a node that doesn't answer.
+        const r = await rpcRequest<TestResult>("testBtcNode", { type, url: url.trim(), ...creds() }, 20000)
+        if (r.detectedType && r.detectedType !== type) setType(r.detectedType)
+        setResult(r)
+        if (!r.ok) { setSaving(false); return }
+        const s = await rpcRequest<AppSettings>("setBtcNode", { enabled: true, type: r.detectedType || type, url: url.trim(), ...creds() }, 10000)
+        onChange(s)
+        onConnected?.() // parent closes the panel + starts the connect walkthrough
+      } else {
+        const s = await rpcRequest<AppSettings>("setBtcNode", { enabled: false, type, url: url.trim(), ...creds() }, 10000)
+        onChange(s)
+      }
+    } catch (e: any) { setResult({ ok: false, error: e?.message || "Save failed" }) }
     setSaving(false)
   }
 
