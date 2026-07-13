@@ -34,6 +34,11 @@ let deviceBtcOnly = false
 /** The persisted node is live only when a btc-only device is connected. */
 function nodeActive(): boolean { return nodeBackend !== null && deviceBtcOnly }
 
+/** True when the persisted node is actually in use (configured AND the connected
+ *  device is btc-only). Callers use this instead of the raw btc_node_enabled
+ *  setting so a suppressed node isn't shown as active on a multichain device. */
+export function isBtcNodeActive(): boolean { return nodeActive() }
+
 /** BTC no longer routes to Pioneer whenever the node is active OR we're offline. Keep
  *  the honesty guard in lock-step so those Pioneer BTC calls throw instead of cheating. */
 function syncPioneerGuard(): void {

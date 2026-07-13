@@ -112,7 +112,7 @@ import { startRestApi, clearFeaturesCache, setUiActive, uiHeartbeat, type RestAp
 import { parseSolanaTx, SolanaTxParseError, solanaMessageSlice } from "./solana-tx"
 import { AuthStore } from "./auth"
 import { getPioneer, getPioneerApiBase, resetPioneer, DEFAULT_API_BASE, getQueryKey as getPioneerQueryKey } from "./pioneer"
-import { setBtcBackendOffline, setBtcNodeConfig, setBtcNodeDeviceEligible, getBtcBackend, broadcastBtcTx } from "./btc-backend"
+import { setBtcBackendOffline, setBtcNodeConfig, setBtcNodeDeviceEligible, isBtcNodeActive, getBtcBackend, broadcastBtcTx } from "./btc-backend"
 import { isBitcoinOnlyVariant } from "../shared/flags"
 import { fetchDefiPositions } from "./zapper"
 import { loadSupportedChains } from "../shared/swap-support-matrix"
@@ -5564,9 +5564,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			// Live status of the ACTIVE self-host node (for the bottom status bar).
 			// active:false when no node is enabled → the bar hides.
 			getBtcNodeStatus: async () => {
-				const enabled = getSetting('btc_node_enabled') === '1'
+				// Actual eligibility, not the raw persisted setting: a saved node is
+				// suppressed on a multichain device (nodeActive gate), so the status bar
+				// must show inactive there rather than probing + claiming "self-host active".
+				if (!isBtcNodeActive()) return { active: false as const }
 				const url = getSetting('btc_node_url') || ''
-				if (!enabled || !url) return { active: false as const }
 				const type = getSetting('btc_node_type') === 'core' ? 'core' : 'blockbook'
 				if (type === 'core') {
 					const { testCoreNode } = await import('./btc-backend/core')
