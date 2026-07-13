@@ -86,7 +86,7 @@ export function SelfHostNodePanel({ settings, onChange, onConnected }: { setting
       </Text>
 
       <Text fontSize="11px" color="kk.textSecondary" mb="1">{type === "blockbook" ? "Blockbook URL" : "Node RPC URL"}</Text>
-      <Input value={url} onChange={(e) => setUrl(e.target.value)} placeholder={type === "blockbook" ? "http://100.117.181.111:9130" : "http://127.0.0.1:8332"}
+      <Input value={url} onChange={(e) => setUrl(e.target.value)} placeholder={type === "blockbook" ? "http://127.0.0.1:9130" : "http://127.0.0.1:8332"}
              bg="var(--ink-0)" border="1px solid" borderColor="kk.border" color="kk.textPrimary" size="sm" fontFamily="mono" fontSize="xs" mb="2" />
 
       {type === "core" && (
