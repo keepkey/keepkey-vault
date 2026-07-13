@@ -112,7 +112,7 @@ import { startRestApi, clearFeaturesCache, setUiActive, uiHeartbeat, type RestAp
 import { parseSolanaTx, SolanaTxParseError, solanaMessageSlice } from "./solana-tx"
 import { AuthStore } from "./auth"
 import { getPioneer, getPioneerApiBase, resetPioneer, DEFAULT_API_BASE, getQueryKey as getPioneerQueryKey } from "./pioneer"
-import { setBtcBackendOffline, setBtcNodeConfig, getBtcBackend } from "./btc-backend"
+import { setBtcBackendOffline, setBtcNodeConfig, getBtcBackend, broadcastBtcTx } from "./btc-backend"
 import { fetchDefiPositions } from "./zapper"
 import { loadSupportedChains } from "../shared/swap-support-matrix"
 import { PioneerSocket } from "./pioneer-socket"
@@ -1006,11 +1006,7 @@ function getOrCreateWcManager(): WalletConnectManager {
 		},
 		broadcastViaPioneer: async ({ networkId, serialized }) => {
 			const pioneer = await getPioneer()
-			const resp = await pioneer.Broadcast({ networkId, serialized })
-			const data = resp?.data ?? resp
-			const txid = data?.txid || data?.tx_hash || data?.hash
-			if (!txid) throw new Error(`Broadcast failed: ${JSON.stringify(data).slice(0, 200)}`)
-			return String(txid)
+			return await broadcastBtcTx(pioneer, networkId, serialized)
 		},
 		solanaSignTransactionRaw: async ({ addressNList, signerAddress, transactionBase64 }) => {
 			if (!engine.wallet) throw new Error('Device disconnected')
@@ -4475,6 +4471,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const pioneer = await getPioneer()
 
 				if (chain.chainFamily === 'utxo') {
+					// BTC self-host: fees from the node, not Pioneer.
+					if (chain.networkId === 'bip122:000000000019d6689c085ae165831e93' && getBtcBackend().kind !== 'pioneer') {
+						return { feeRate: await getBtcBackend().feeRate(chain.networkId), unit: 'sat/byte' }
+					}
 					const resp = await withTimeout(pioneer.GetFeeRateByNetwork({ networkId: chain.networkId }), PIONEER_TIMEOUT_MS, 'GetFeeRateByNetwork')
 					return { feeRate: resp?.data, unit: 'sat/byte' }
 				} else if (chain.chainFamily === 'evm') {
@@ -5548,7 +5548,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (type === 'core') {
 					const { testCoreNode } = await import('./btc-backend/core')
 					const r = await testCoreNode({ url, auth: btcNodeAuth() })
-					return { active: true as const, kind: 'core' as const, ok: r.ok, error: r.error, height: r.blocks, headers: r.headers, syncing: r.syncing, progress: r.progress }
+					const { getCoreScanState } = await import('./btc-backend/core')
+					const scan = getCoreScanState()
+					return { active: true as const, kind: 'core' as const, ok: r.ok, error: r.error, height: r.blocks, headers: r.headers, syncing: r.syncing, progress: r.progress, scanning: scan.scanning, scanProgress: scan.progress }
 				}
 				const { testBlockbookNode } = await import('./btc-backend/blockbook')
 				const r = await testBlockbookNode({ url })
@@ -6854,10 +6856,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!serializedTx) throw new Error('Device signing failed')
 
 				const pioneer = await getPioneer()
-				const broadcastResp = await pioneer.Broadcast({ networkId: 'bip122:000000000019d6689c085ae165831e93', serialized: serializedTx })
-				const bdata = broadcastResp?.data || broadcastResp
-				const txid = bdata?.txid || bdata?.tx_hash || bdata?.hash
-				if (!txid) throw new Error(`Broadcast failed: ${JSON.stringify(bdata).slice(0, 200)}`)
+				const txid = await broadcastBtcTx(pioneer, 'bip122:000000000019d6689c085ae165831e93', serializedTx)
 				return { txid, destination, inputCount: sweepResult.inputCount, totalSweptSats: sweepResult.totalInputSats, fee: sweepResult.fee, outputSats: sweepResult.totalInputSats - sweepResult.fee }
 			},
 			auditDismiss: async (params) => {

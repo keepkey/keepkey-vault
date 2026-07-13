@@ -4,6 +4,7 @@ import { rpcRequest } from "../lib/rpc"
 export type BtcNodeStatus = {
   active: boolean; kind?: "blockbook" | "core"; ok?: boolean; error?: string
   height?: number; headers?: number; syncing?: boolean; progress?: number
+  scanning?: boolean; scanProgress?: number  // Core scantxoutset live progress (0..1)
 }
 
 /** Polls the active self-host node's status for the bottom status bar. Only runs
@@ -20,8 +21,9 @@ export function useBtcNodeStatus(enabled: boolean): BtcNodeStatus | null {
         .catch(() => { if (alive) setStatus({ active: true, ok: false, error: "unreachable" }) })
     }
     check()
-    const iv = setInterval(check, 12000)
+    // Poll fast while a Core scan is running so the progress bar animates; idle otherwise.
+    const iv = setInterval(check, status?.scanning ? 2000 : 12000)
     return () => { alive = false; clearInterval(iv) }
-  }, [enabled])
+  }, [enabled, status?.scanning])
   return status
 }

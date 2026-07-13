@@ -14,6 +14,7 @@ import { parseRequest } from './validate'
 import * as S from './schemas'
 import { startScan, getScan, buildSweepTx } from './sweep-engine'
 import { getPioneer } from './pioneer'
+import { broadcastBtcTx } from './btc-backend'
 
 const TAG = '[sweep-api]'
 
@@ -148,12 +149,9 @@ export async function handleSweepRoute(
       const serializedTx = signedTx?.serializedTx || signedTx?.serialized
       if (!serializedTx) throw new Error('Device signing failed — no serialized tx returned')
 
-      // Broadcast
+      // Broadcast — via the self-host node when enabled, else Pioneer.
       const pioneer = await getPioneer()
-      const broadcastResp = await pioneer.Broadcast({ networkId: BTC_NETWORK_ID, serialized: serializedTx })
-      const bdata = broadcastResp?.data || broadcastResp
-      const txid = bdata?.txid || bdata?.tx_hash || bdata?.hash
-      if (!txid) throw new Error(`Broadcast failed: ${JSON.stringify(bdata).slice(0, 200)}`)
+      const txid = await broadcastBtcTx(pioneer, BTC_NETWORK_ID, serializedTx)
 
       console.log(`${TAG} Sweep broadcast: txid=${txid}`)
 

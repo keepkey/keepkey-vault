@@ -81,6 +81,9 @@ export async function getPioneer(): Promise<any> {
       const client = new Pioneer(specUrl, { queryKey: qk, timeout: 60000, overrideHost })
       pioneerInstance = await client.init()
       if (!pioneerInstance) throw new Error('Pioneer client init returned null')
+      // Honesty guard: block BTC→Pioneer calls whenever a self-host node is enabled.
+      const { installPioneerGuard } = await import('./pioneer-guard')
+      installPioneerGuard(pioneerInstance)
       console.log('[Pioneer] Client initialized successfully')
 
       // Stopwatch every portfolio load and report vault-vs-API timings

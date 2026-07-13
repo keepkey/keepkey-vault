@@ -18,6 +18,13 @@ export interface BlockbookConfig {
 
 const DEFAULT_TIMEOUT = 30_000
 
+/** BIP32 purpose → scriptType, e.g. m/84'/… → p2wpkh. */
+const PURPOSE_SCRIPT: Record<string, string> = { '44': 'p2pkh', '49': 'p2sh-p2wpkh', '84': 'p2wpkh' }
+function scriptTypeFromPath(path?: string): string | undefined {
+  const m = path?.match(/^m\/(\d+)'/)
+  return m ? PURPOSE_SCRIPT[m[1]] : undefined
+}
+
 function base(cfg: BlockbookConfig): string {
   return cfg.url.replace(/\/+$/, '')
 }
@@ -55,10 +62,21 @@ export function makeBlockbookBackend(cfg: BlockbookConfig): BtcBackend {
     async listUnspent({ xpub, address }) {
       const key = xpub ?? address
       if (!key) return []
-      const utxos = await bbFetch(cfg, `/api/v2/utxo/${encodeURIComponent(key)}`)
-      return (Array.isArray(utxos) ? utxos : [])
-        .map((u: any): BtcUtxo => ({ txid: u.txid, vout: u.vout, value: parseInt(u.value, 10) || 0 }))
+      const raw = await bbFetch(cfg, `/api/v2/utxo/${encodeURIComponent(key)}`)
+      const utxos = (Array.isArray(raw) ? raw : [])
+        .map((u: any): BtcUtxo => ({
+          txid: u.txid, vout: u.vout, value: parseInt(u.value, 10) || 0,
+          path: u.path, address: u.address, scriptType: scriptTypeFromPath(u.path),
+        }))
         .filter((u) => u.value > 0)
+      // Blockbook's utxo endpoint omits the raw prev-tx; legacy (p2pkh) inputs need
+      // it to sign. Segwit doesn't — so fetch hex only for the p2pkh ones.
+      await Promise.all(utxos.map(async (u) => {
+        if (u.scriptType === 'p2pkh' && !u.hex) {
+          u.hex = await bbFetch(cfg, `/api/v2/tx-specific/${u.txid}`).then((t) => t?.hex).catch(() => undefined)
+        }
+      }))
+      return utxos
     },
 
     async feeRate(): Promise<BtcFeeRates> {

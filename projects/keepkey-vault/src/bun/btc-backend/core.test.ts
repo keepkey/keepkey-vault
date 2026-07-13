@@ -3,7 +3,7 @@
  * building, and the BTC↔sat / feerate math (the parts that silently corrupt money
  * if wrong). No network. Run: bun src/bun/btc-backend/core.test.ts
  */
-import { xpubToDescriptorParts, descriptorFor, btcToSats, feerateToSatVb } from './core'
+import { xpubToDescriptorParts, descriptorFor, btcToSats, feerateToSatVb, parseDescriptor, coreUtxoPath } from './core'
 
 let pass = 0
 function eq(a: any, b: any, msg: string) {
@@ -37,5 +37,29 @@ eq(btcToSats(1), 100000000, 'btcToSats 1 BTC')
 eq(feerateToSatVb(0.0001), 10, 'feerate 0.0001 BTC/kB → 10 sat/vB')
 eq(feerateToSatVb(0.00000141), 1, 'tiny feerate floors to 1')
 eq(feerateToSatVb(undefined), 1, 'missing feerate → 1')
+
+// scantxoutset desc → signing path + scriptType (get this wrong → sign with the
+// wrong key → unbroadcastable tx). Cover both hardened notations Core may emit.
+const wpkh = parseDescriptor("wpkh([abcd1234/84'/0'/0'/0/18]0289ab)#cs")
+eq(wpkh.path, "m/84'/0'/0'/0/18", 'wpkh desc → path')
+eq(wpkh.scriptType, 'p2wpkh', 'wpkh desc → p2wpkh')
+const shwpkh = parseDescriptor('sh(wpkh([abcd1234/49h/0h/0h/1/5]0289ab))#cs')
+eq(shwpkh.path, "m/49'/0'/0'/1/5", "sh(wpkh) desc, h-notation → path with '")
+eq(shwpkh.scriptType, 'p2sh-p2wpkh', 'sh(wpkh) desc → p2sh-p2wpkh')
+const pkh = parseDescriptor("pkh([abcd1234/44'/0'/0'/0/2]0289ab)#cs")
+eq(pkh.path, "m/44'/0'/0'/0/2", 'pkh desc → path')
+eq(pkh.scriptType, 'p2pkh', 'pkh desc → p2pkh')
+const none = parseDescriptor(undefined)
+ok(none.path === undefined && none.scriptType === undefined, 'undefined desc → empty')
+
+// THE money bug: Core reports paths relative to the account xpub (m/0/18). Signing
+// that raw fails at broadcast (OP_EQUALVERIFY). Must rebuild the full account-0 path.
+eq(coreUtxoPath('wpkh([abcd1234/0/18]0289ab)#cs', 'wpkh'), "m/84'/0'/0'/0/18", 'relative /0/18 → full BIP84 path')
+eq(coreUtxoPath('wpkh([abcd1234/1/4]0289ab)#cs', 'wpkh'), "m/84'/0'/0'/1/4", 'change branch preserved')
+eq(coreUtxoPath('pkh([abcd1234/0/2]0289ab)#cs', 'pkh'), "m/44'/0'/0'/0/2", 'legacy → purpose 44')
+eq(coreUtxoPath('sh(wpkh([abcd1234/0/7]0289ab))#cs', 'sh_wpkh'), "m/49'/0'/0'/0/7", 'wrapped segwit → purpose 49')
+// Already-full origin (if Core ever echoes it) still collapses to account-0 form.
+eq(coreUtxoPath("wpkh([abcd1234/84'/0'/0'/0/9]0289ab)#cs", 'wpkh'), "m/84'/0'/0'/0/9", 'full origin → last two segments')
+ok(coreUtxoPath('wpkh(0289ab)#cs', 'wpkh') === undefined, 'no origin → undefined (falls back to enrichment)')
 
 console.log(`[btc-backend] core OK — ${pass} assertions passed`)

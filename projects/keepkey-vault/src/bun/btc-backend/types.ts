@@ -19,7 +19,8 @@ export interface BtcUtxo {
   value: number       // satoshis (integer)
   hex?: string        // raw prev-tx hex — needed to sign non-segwit (p2pkh) inputs
   scriptType?: string
-  path?: string
+  path?: string       // full BIP32 path, e.g. m/84'/0'/0'/0/18 — drives addressNList for signing
+  address?: string    // owning address (address→path fallback when path absent)
 }
 
 /** Fee rates in sat/vByte. */
