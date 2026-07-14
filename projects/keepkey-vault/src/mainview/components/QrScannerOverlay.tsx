@@ -1,8 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react"
 import { Box, Flex, Text, Button } from "@chakra-ui/react"
 import jsQR from "jsqr"
-import { rpcRequest } from "../lib/rpc"
-import type { ScreenCaptureResult } from "../../shared/types"
 
 interface QrScannerOverlayProps {
 	onScan: (data: string) => void
@@ -39,7 +37,6 @@ export function QrScannerOverlay({ onScan, onClose }: QrScannerOverlayProps) {
 	const [mode, setMode] = useState<ScanMode>("starting")
 	const [error, setError] = useState<string | null>(null)
 	const [loading, setLoading] = useState(false)
-	const [screenScanning, setScreenScanning] = useState(false)
 	const [dragOver, setDragOver] = useState(false)
 	const videoRef = useRef<HTMLVideoElement>(null)
 	const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -91,7 +88,7 @@ export function QrScannerOverlay({ onScan, onClose }: QrScannerOverlayProps) {
 			} catch (err: any) {
 				if (cancelled) return
 				console.warn("[QrScanner] getUserMedia failed:", err.message)
-				setError("Camera not available. Scan your screen or upload a QR code image instead.")
+				setError("Camera not available. Upload a QR code image instead.")
 				setMode("fallback")
 			}
 		}
@@ -124,39 +121,6 @@ export function QrScannerOverlay({ onScan, onClose }: QrScannerOverlayProps) {
 		}
 	}, [onScan])
 
-	// Scan-screen option: Bun minimizes the window, screenshots every display
-	// natively (WKWebView can't getDisplayMedia), and we jsQR-decode each one.
-	const scanScreen = useCallback(async () => {
-		setScreenScanning(true)
-		setError(null)
-		try {
-			const res = await rpcRequest<ScreenCaptureResult>("captureScreens", undefined, 30000)
-			if (foundRef.current) return
-			if (!res.ok) {
-				setError(res.message)
-				setMode("fallback")
-				return
-			}
-			for (const b64 of res.images) {
-				const data = await decodeQrFromImageSrc(`data:image/png;base64,${b64}`)
-				if (data) {
-					foundRef.current = true
-					if (scanIntervalRef.current) clearInterval(scanIntervalRef.current)
-					if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop())
-					onScan(data)
-					return
-				}
-			}
-			setError("No QR code found on screen. Make sure it's visible (not covered by another window) and try again.")
-			setMode("fallback")
-		} catch (e: any) {
-			setError(`Screen scan failed: ${e?.message || e}`)
-			setMode("fallback")
-		} finally {
-			setScreenScanning(false)
-		}
-	}, [onScan])
-
 	const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
 		const file = e.target.files?.[0]
 		if (file) processFile(file)
@@ -171,17 +135,6 @@ export function QrScannerOverlay({ onScan, onClose }: QrScannerOverlayProps) {
 			processFile(file)
 		}
 	}, [processFile])
-
-	const scanScreenButton = (
-		<Button
-			size="xs" variant="ghost" color="gray.600" mt="2"
-			_hover={{ color: "gray.400" }}
-			onClick={scanScreen}
-			disabled={screenScanning}
-		>
-			{screenScanning ? "Scanning screen..." : "Scan my screen for a QR code"}
-		</Button>
-	)
 
 	return (
 		<Flex
@@ -243,8 +196,6 @@ export function QrScannerOverlay({ onScan, onClose }: QrScannerOverlayProps) {
 						Point your camera at a wallet QR code
 					</Text>
 
-					{scanScreenButton}
-
 					{/* Switch to file upload */}
 					<Button
 						size="xs" variant="ghost" color="gray.600" mt="2"
@@ -297,8 +248,6 @@ export function QrScannerOverlay({ onScan, onClose }: QrScannerOverlayProps) {
 							</Text>
 						</Flex>
 					</Box>
-
-					{scanScreenButton}
 
 					<input
 						ref={fileInputRef}
