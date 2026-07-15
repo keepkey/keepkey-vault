@@ -2136,18 +2136,23 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
           // Role from op tier unless the caller pinned a path
           const addressNList = body.addressNList || body.address_n || hiveRolePath(serialized.tier, 0)
-          const result = await emuWrap(() => (wallet as any).hiveSignOperations({
+          const result: any = await emuWrap(() => (wallet as any).hiveSignOperations({
             addressNList,
             chainId: txParams.chainId,
             serializedTx: new Uint8Array(serialized.serializedTx),
           }), { operation: 'hiveSignOperations', chain: 'HIVE' })
           if (!result?.signature) throw new HttpError(500, 'Hive sign-operations: device returned no signature')
           const sigBytes = result.signature instanceof Uint8Array ? Buffer.from(result.signature) : Buffer.from(String(result.signature), 'hex')
+          // Return the expiration derived from the SIGNED expirationUnix (the value
+          // baked into the serialized header), NOT Pioneer's separate expirationIso —
+          // if the two ever diverge, a caller broadcasting the ISO would reconstruct a
+          // different transaction than the one the device signed (invalid signature).
+          const signedExpirationIso = new Date(txParams.expirationUnix * 1000).toISOString().replace(/\.\d{3}Z$/, '')
           return json({
             signature: sigBytes.toString('hex'),
             ref_block_num: txParams.refBlockNum,
             ref_block_prefix: txParams.refBlockPrefix,
-            expiration: txParams.expirationIso,
+            expiration: signedExpirationIso,
             operations: body.operations,
           })
         }
