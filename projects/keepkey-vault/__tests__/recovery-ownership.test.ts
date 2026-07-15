@@ -64,8 +64,9 @@ class Gate {
   // the await resolving). All three actions share recoverySendInFlight.
   submitAck(ownerId: string, action: 'character' | 'delete' | 'done', opts: { expectedSeq?: number } = {}) {
     this.assertOwner(ownerId, action === 'done' ? undefined : opts.expectedSeq)
+    // no ack of ANY kind before the device has issued a CharacterRequest
+    if (!this.s.lastCharacterRequest) throw new Error('409:no request yet')
     if (action === 'character') {
-      if (!this.s.lastCharacterRequest) throw new Error('409:no request yet')
       if (opts.expectedSeq === undefined) throw new Error('400:seq required')
       if (opts.expectedSeq <= this.lastAcceptedCharSeq) throw new Error('409:already sent')
     }
@@ -129,6 +130,13 @@ describe('character before the device requests one (finding #1)', () => {
     const g = new Gate(idle())
     g.begin(OWNER) // device has NOT asked yet → lastCharacterRequest null, seq unchanged
     expect(() => g.submitAck(OWNER, 'character', { expectedSeq: 0 })).toThrow(/no request yet/)
+  })
+
+  test('delete and done are ALSO rejected before the device asks (not just character)', () => {
+    const g = new Gate(idle())
+    g.begin(OWNER)
+    expect(() => g.submitAck(OWNER, 'delete', {})).toThrow(/no request yet/)
+    expect(() => g.submitAck(OWNER, 'done', {})).toThrow(/no request yet/)
   })
 
   test('after the device asks, the character at the current seq is accepted', () => {

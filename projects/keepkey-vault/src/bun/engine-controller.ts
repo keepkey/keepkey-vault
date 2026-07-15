@@ -2073,10 +2073,13 @@ export class EngineController extends EventEmitter {
   ) {
     // done has no seq; delete may pin one; character requires one.
     this.assertRecoveryOwner(ownerId, action === 'done' ? undefined : opts.expectedSeq)
+    // NO acknowledgement of any kind (character, delete, or done) before the
+    // device has actually issued a CharacterRequest — an out-of-turn CharacterAck
+    // during the recover-confirm window corrupts the in-flight recover() loop.
+    if (!this.lastCharacterRequest) {
+      throw new HttpError(409, 'Device has not requested a character yet')
+    }
     if (action === 'character') {
-      if (!this.lastCharacterRequest) {
-        throw new HttpError(409, 'Device has not requested a character yet')
-      }
       if (opts.expectedSeq === undefined) {
         throw new HttpError(400, 'character requires seq')
       }
@@ -2088,11 +2091,18 @@ export class EngineController extends EventEmitter {
       throw new HttpError(409, 'A recovery acknowledgement is already in flight')
     }
     this.recoverySendInFlight = true
+    const prevAcceptedCharSeq = this.lastAcceptedCharSeq
     if (action === 'character') this.lastAcceptedCharSeq = opts.expectedSeq! // claim before the await
     try {
       if (action === 'character') await this.sendCharacter(opts.character!)
       else if (action === 'delete') await this.sendCharacterDelete()
       else await this.sendCharacterDone()
+    } catch (err) {
+      // The send never reached the device (transport error) — roll the seq claim
+      // back so a legitimate retry at the same (still-current) seq isn't wedged
+      // as "already sent" until a disconnect.
+      this.lastAcceptedCharSeq = prevAcceptedCharSeq
+      throw err
     } finally {
       this.recoverySendInFlight = false
     }
