@@ -2133,6 +2133,102 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           return json({ address })
         }
 
+        if (path === '/hive/sign-message' && method === 'POST') {
+          auth.requireAuth(req)
+          // Same gates as /addresses/hive: feature flag + firmware ≥ 7.15.0
+          if (getSetting('hive_enabled') !== '1') return json({ error: 'Hive is disabled' }, 403)
+          const fwBlock = requireChainSupport('hive')
+          if (fwBlock) return fwBlock
+          const wallet = requireWallet(engine)
+          const body = await parseRequest(req, S.HiveSignMessageRequest)
+          const messageBytes = body.is_text === false
+            ? Buffer.from(body.message.replace(/^0x/, ''), 'hex')
+            : Buffer.from(body.message, 'utf8')
+          if (messageBytes.length === 0 || messageBytes.length > 1024) {
+            throw new HttpError(400, 'Hive message must be 1–1024 bytes')
+          }
+          // Default to the posting role — Keychain signBuffer is overwhelmingly
+          // dApp login, which verifies against the account's posting authority.
+          const addressNList = body.addressNList || body.address_n || hiveRolePath('posting', 0)
+          const result = await emuWrap(() => (wallet as any).hiveSignMessage({
+            addressNList,
+            message: new Uint8Array(messageBytes),
+          }), { operation: 'hiveSignMessage', chain: 'HIVE' })
+          if (!result?.signature) throw new HttpError(500, 'Hive sign-message: device returned no signature')
+          const sigBytes = result.signature instanceof Uint8Array ? Buffer.from(result.signature) : Buffer.from(String(result.signature), 'hex')
+          const pubBytes = result.publicKey instanceof Uint8Array ? Buffer.from(result.publicKey) : Buffer.from(String(result.publicKey), 'hex')
+          // STM encoding: 'STM' + base58(pub33 || ripemd160(pub33)[0:4])
+          let stm = ''
+          if (pubBytes.length === 33) {
+            const { ripemd160 } = await import('@noble/hashes/ripemd160')
+            const bs58 = (await import('bs58')).default
+            const checksum = Buffer.from(ripemd160(pubBytes)).subarray(0, 4)
+            stm = 'STM' + bs58.encode(Buffer.concat([pubBytes, checksum]))
+          }
+          return json({
+            signature: sigBytes.toString('hex'),
+            public_key: stm,
+          })
+        }
+
+        if (path === '/hive/sign-operations' && method === 'POST') {
+          // STAGED: the HiveSignOperations (1616/1617) firmware handler ships in
+          // 7.15.0 via the rc10 stack (fw #307), but the ">=7.15.0" gate below
+          // can't distinguish an early 7.15.0-rc without it — such a device passes
+          // the gate then rejects the unknown message. This endpoint must not be
+          // treated as released until FINAL 7.15.0 firmware + live-device sign
+          // smoke pass (tracked in HIVE-STATUS). It is correct code against rc10+.
+          auth.requireAuth(req)
+          if (getSetting('hive_enabled') !== '1') return json({ error: 'Hive is disabled' }, 403)
+          const fwBlock = requireChainSupport('hive')
+          if (fwBlock) return fwBlock
+          const wallet = requireWallet(engine)
+          const body = await parseRequest(req, S.HiveSignOperationsRequest)
+
+          // Header (TaPoS) from Pioneer — the exact values the device signs
+          // are returned to the caller so broadcast reuses the same tx.
+          const pioneerBase = (callbacks?.getPioneerApiBase?.() || 'https://api.keepkey.info').replace(/\/$/, '')
+          const txParams = await fetch(`${pioneerBase}/api/v1/hive/tx-params`, {
+            signal: AbortSignal.timeout(20_000),
+          }).then(r => r.json()) as any
+          if (!txParams?.success) throw new HttpError(502, `Hive tx-params failed: ${txParams?.error || 'unknown'}`)
+
+          const { serializeHiveOpsTx } = await import('./txbuilder/hive-ops')
+          let serialized
+          try {
+            serialized = serializeHiveOpsTx({
+              refBlockNum: txParams.refBlockNum,
+              refBlockPrefix: txParams.refBlockPrefix,
+              expirationUnix: txParams.expirationUnix,
+              operations: body.operations as any,
+            })
+          } catch (e: any) {
+            throw new HttpError(400, e?.message || 'Hive ops serialization failed')
+          }
+
+          // Role from op tier unless the caller pinned a path
+          const addressNList = body.addressNList || body.address_n || hiveRolePath(serialized.tier, 0)
+          const result: any = await emuWrap(() => (wallet as any).hiveSignOperations({
+            addressNList,
+            chainId: txParams.chainId,
+            serializedTx: new Uint8Array(serialized.serializedTx),
+          }), { operation: 'hiveSignOperations', chain: 'HIVE' })
+          if (!result?.signature) throw new HttpError(500, 'Hive sign-operations: device returned no signature')
+          const sigBytes = result.signature instanceof Uint8Array ? Buffer.from(result.signature) : Buffer.from(String(result.signature), 'hex')
+          // Return the expiration derived from the SIGNED expirationUnix (the value
+          // baked into the serialized header), NOT Pioneer's separate expirationIso —
+          // if the two ever diverge, a caller broadcasting the ISO would reconstruct a
+          // different transaction than the one the device signed (invalid signature).
+          const signedExpirationIso = new Date(txParams.expirationUnix * 1000).toISOString().replace(/\.\d{3}Z$/, '')
+          return json({
+            signature: sigBytes.toString('hex'),
+            ref_block_num: txParams.refBlockNum,
+            ref_block_prefix: txParams.refBlockPrefix,
+            expiration: signedExpirationIso,
+            operations: body.operations,
+          })
+        }
+
         if (path === '/hive/sign-transfer' && method === 'POST') {
           auth.requireAuth(req)
           // Same gates as /addresses/hive: feature flag + firmware ≥ 7.15.0
