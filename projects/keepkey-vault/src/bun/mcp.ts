@@ -2,7 +2,9 @@
  * mcp — MCP server endpoint (Streamable HTTP, POST /mcp) for the agent bridge.
  * See EPIC_mcp_agent_bridge.md (keepkey-client repo).
  *
- * Agents connect with:  claude mcp add keepkey --transport http http://localhost:1646/mcp
+ * Agents connect with a pairing bearer token (same API keys as the REST API):
+ *   claude mcp add keepkey --transport http http://localhost:1646/mcp \
+ *     --header "Authorization: Bearer <pairing-key>"
  *
  * ponytail: hand-rolled JSON-RPC instead of @modelcontextprotocol/sdk — the
  * surface we serve is initialize/ping/tools/list/tools/call with plain JSON
@@ -13,16 +15,13 @@
  * the forwarding. Bridge down → structured bridge_disconnected error
  * (bex_status instead answers truthfully so agents can always probe).
  *
- * TRUST MODEL (accepted risk — see PR discussion): /mcp has NO caller
- * credential, by design, so `claude mcp add` is zero-config. Browsers are
- * excluded at the transport layer (Origin/Sec-Fetch reject in rest-api), but
- * ANY local process — or another OS user able to reach loopback — can call
- * /mcp once the BEX 'Agent mode' toggle (default off) is on, and read the
- * Tier-1 READ-ONLY data (accounts/xpubs, connected sites, provider logs). No
- * signing, no writes. This is a deliberate expansion beyond the bearer-authed
- * REST API for local-agent ergonomics; the Agent-mode toggle is the primary
- * gate. If per-install-secret auth is wanted later, require an Authorization
- * bearer on /mcp and surface the secret in the vault UI for `claude mcp add`.
+ * AUTH: /mcp requires a valid pairing bearer token — the SAME API keys as the
+ * rest of the REST API (auth.requireAuth in rest-api's /mcp block). A local
+ * process without a paired key cannot read wallet data. Defense in depth:
+ * browsers are also excluded at the transport layer (Origin/Sec-Fetch reject),
+ * since vault-served content at http://localhost:1646 could otherwise hold the
+ * user's token. The BEX 'Agent mode' toggle (default off) remains the gate for
+ * the tools actually returning data. Tools are Tier-1 READ-ONLY (no signing).
  */
 
 import { callBex, bridgeStatus, type BridgeError } from './bex-bridge'

@@ -1283,22 +1283,28 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           return new Response('WebSocket upgrade failed', { status: 400 })
         }
 
-        // /mcp — LOCAL NON-BROWSER AGENTS ONLY. A localhost-origin allowlist is
-        // NOT enough: the vault serves browser content at its OWN origin (the
-        // /wc dApp reverse-proxy below, the Swagger UI that loads remote JS from
-        // unpkg), and that content runs as http://localhost:1646 — a *localhost*
-        // origin — so it would pass an allowlist and could read bex_accounts/
-        // bex_logs same-origin. So exclude ALL browser traffic: a browser
-        // attaches an `Origin` header to every non-GET request (incl. same-origin
-        // POST) and `Sec-Fetch-Site` to every request, and JS cannot strip either
-        // (both are forbidden header names). A local CLI agent (`claude mcp add`)
-        // sends neither, so zero-config still works.
+        // /mcp is BEARER-AUTHENTICATED with the same pairing API keys as the
+        // rest of the REST API (see the auth.requireAuth below) AND excludes all
+        // browser traffic. Both matter: a localhost-origin allowlist is not a
+        // boundary because the vault serves browser content at its OWN origin
+        // (the /wc dApp reverse-proxy below, the Swagger UI that loads remote JS
+        // from unpkg) which runs as http://localhost:1646 — and such content may
+        // even hold the user's bearer token. A browser attaches an `Origin`
+        // header to every non-GET request (incl. same-origin POST) and
+        // `Sec-Fetch-Site` to every request, and JS cannot strip either (both are
+        // forbidden header names); a non-browser agent sends neither.
         if (req.headers.get('origin') !== null || req.headers.get('sec-fetch-site') !== null) {
           return new Response(JSON.stringify({ error: '/mcp is not reachable from a browser' }),
             { status: 403, headers: { 'Content-Type': 'application/json' } })
         }
         if (method === 'OPTIONS') return new Response(null, { status: 204 }) // deliberately no CORS grant
-        if (method === 'POST') return handleMcpRequest(req, {})
+        if (method === 'POST') {
+          // Require a valid pairing bearer token — configure the agent with
+          //   claude mcp add keepkey --transport http http://localhost:1646/mcp \
+          //     --header "Authorization: Bearer <pairing-key>"
+          auth.requireAuth(req)
+          return handleMcpRequest(req, {})
+        }
         return new Response(JSON.stringify({ error: 'POST only' }),
           { status: 405, headers: { 'Content-Type': 'application/json' } })
       }
