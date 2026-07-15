@@ -3814,10 +3814,15 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         }
 
         if (path === '/system/initialize/recover-device' && method === 'POST') {
-          auth.requireAuth(req)
+          const client = auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.RecoverDeviceRequest)
-          engine.setRecoveryActive(true)
+          // beginRecovery sets setupInProgress so syncState()/getFeatures()
+          // back off the transport — a concurrent GetFeatures corrupts the
+          // CharacterAck exchange (engine syncState comment). It also binds
+          // this recovery to the calling client so no other paired app can
+          // drive the character input.
+          engine.beginRecovery(client.apiKey)
           try {
             await wallet.recover({
               entropy: body.word_count ? ({ 12: 128, 18: 192, 24: 256 } as Record<number, number>)[body.word_count] || 128 : 128,
@@ -3827,7 +3832,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               autoLockDelayMs: 600000,
             })
           } finally {
-            engine.setRecoveryActive(false)
+            engine.endRecovery()
           }
           featuresCache = null
           return json({ success: true })
@@ -3843,9 +3848,16 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         }
 
         if (path === '/system/recovery/pin' && method === 'POST') {
-          auth.requireAuth(req)
+          const client = auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.SendPinRequest)
+          // During an owned recovery, only the initiating client may send the
+          // recovery PIN — otherwise a second paired client could inject PIN
+          // acknowledgements into someone else's flow. (When no REST recovery
+          // is active this is a no-op, so other PIN flows are unaffected.)
+          if (!engine.canReadRecoveryState(client.apiKey)) {
+            throw new HttpError(409, 'Cipher recovery is owned by a different client')
+          }
           await wallet.sendPin(body.pin)
           return json({ success: true })
         }
@@ -3854,32 +3866,45 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         // on the OLED and the host relays the ciphered characters (CharacterAck).
         // Mirrors /system/recovery/pin. The recover-device call rejects with
         // "Word not found in BIP39 wordlist" when a finalized word is invalid.
+        // Only the client that started recovery may drive it, and (when it
+        // sends the seq it last read from /state) the send is pinned to that
+        // exact CharacterRequest — a stale/reordered/foreign send is a 409, not
+        // a silently corrupted word. Input goes through engine.sendCharacter*,
+        // which additionally guards on setupInProgress.
         if (path === '/system/recovery/character' && method === 'POST') {
-          auth.requireAuth(req)
-          const wallet = requireWallet(engine)
+          const client = auth.requireAuth(req)
           const body = await parseRequest(req, S.SendCharacterRequest)
-          await wallet.sendCharacter(body.character)
+          // All three acks share ONE atomic, in-flight-guarded engine path, so
+          // no two competing requests can race or double-send a CharacterAck.
+          await engine.submitRecoveryAck(client.apiKey, 'character', { character: body.character, expectedSeq: body.seq })
           return json({ success: true })
         }
 
         if (path === '/system/recovery/character/delete' && method === 'POST') {
-          auth.requireAuth(req)
-          const wallet = requireWallet(engine)
-          await wallet.sendCharacterDelete()
+          const client = auth.requireAuth(req)
+          // seq optional here (delete is corrective) — tolerate an empty body
+          // rather than forcing JSON like parseRequest does.
+          const body = (await req.json().catch(() => ({}))) as { seq?: unknown }
+          const seq = typeof body.seq === 'number' ? body.seq : undefined
+          await engine.submitRecoveryAck(client.apiKey, 'delete', { expectedSeq: seq })
           return json({ success: true })
         }
 
         if (path === '/system/recovery/character/done' && method === 'POST') {
-          auth.requireAuth(req)
-          const wallet = requireWallet(engine)
-          await wallet.sendCharacterDone()
+          const client = auth.requireAuth(req)
+          await engine.submitRecoveryAck(client.apiKey, 'done')
           return json({ success: true })
         }
 
         // Current cipher-recovery state. `seq` advances each time the device asks
         // for the next character, so a caller can sync sends with the device.
+        // While a recovery is active, only its owning client may read live
+        // positions — a second paired app must not observe the flow.
         if (path === '/system/recovery/state' && method === 'GET') {
-          auth.requireAuth(req)
+          const client = auth.requireAuth(req)
+          if (!engine.canReadRecoveryState(client.apiKey)) {
+            throw new HttpError(409, 'Cipher recovery is owned by a different client')
+          }
           return json(engine.getRecoveryState())
         }
 

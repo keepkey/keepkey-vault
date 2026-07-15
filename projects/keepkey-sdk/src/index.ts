@@ -242,13 +242,20 @@ export class KeepKeySdk {
        * character the user "typed". A finalized word that isn't in the BIP-39
        * wordlist makes the in-flight `recoverDevice()` promise reject with
        * "Word not found in BIP39 wordlist".
+       *
+       * `seq` is the value last read from `getRecoveryState()`. The vault pins
+       * the send to that exact CharacterRequest and to the client that started
+       * recovery — a stale, reordered, or foreign send is rejected with 409
+       * rather than silently corrupting the decoded word.
        */
-      sendCharacter: (character: string): Promise<{ success: boolean }> =>
-        this.client.post('/system/recovery/character', { character }),
+      sendCharacter: (character: string, seq: number): Promise<{ success: boolean }> =>
+        this.client.post('/system/recovery/character', { character, seq }),
 
-      /** Delete the last character entered during cipher recovery. */
-      sendCharacterDelete: (): Promise<{ success: boolean }> =>
-        this.client.post('/system/recovery/character/delete', {}),
+      /** Delete the last character entered during cipher recovery. Pass the
+       *  current `seq` (from `getRecoveryState()`) to pin the delete; the
+       *  initiating-client check applies either way. */
+      sendCharacterDelete: (seq?: number): Promise<{ success: boolean }> =>
+        this.client.post('/system/recovery/character/delete', seq === undefined ? {} : { seq }),
 
       /** Finalize cipher-recovery word/seed entry (equivalent to pressing "next"). */
       sendCharacterDone: (): Promise<{ success: boolean }> =>
