@@ -2085,6 +2085,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             from: body.from,
             to: body.to,
             amount: body.amount,
+            decimals: 3, // HIVE and HBD are both 3-decimal; matches the RPC path (txbuilder/hive.ts)
             assetSymbol: body.asset_symbol || 'HIVE',
             memo: body.memo,
           }), { operation: 'hiveSignTx', chain: 'HIVE', to: body.to, value: String(body.amount) })

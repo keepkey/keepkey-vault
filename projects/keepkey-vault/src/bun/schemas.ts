@@ -195,8 +195,10 @@ export const HiveSignTransferRequest = z.object({
   expiration: z.number().int().min(0),
   from: z.string().min(1).max(16),
   to: z.string().min(1).max(16),
-  /** Integer milli-units (3 decimals): 1.000 HIVE = 1000 */
-  amount: z.number().int().min(1),
+  /** Integer milli-units (3 decimals): 1.000 HIVE = 1000. Capped at
+   *  MAX_SAFE_INTEGER — .int() alone admits floats like 1e20 that are already
+   *  precision-mangled before serialization. */
+  amount: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
   asset_symbol: z.enum(['HIVE', 'HBD']).optional(),
   /** Firmware rejects memos > 440 chars */
   memo: z.string().max(440).optional(),
