@@ -2105,6 +2105,53 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           })
         }
 
+        if (path === '/hive/sign-operations' && method === 'POST') {
+          auth.requireAuth(req)
+          if (getSetting('hive_enabled') !== '1') return json({ error: 'Hive is disabled' }, 403)
+          const fwBlock = requireChainSupport('hive')
+          if (fwBlock) return fwBlock
+          const wallet = requireWallet(engine)
+          const body = await parseRequest(req, S.HiveSignOperationsRequest)
+
+          // Header (TaPoS) from Pioneer — the exact values the device signs
+          // are returned to the caller so broadcast reuses the same tx.
+          const pioneerBase = (callbacks?.getPioneerApiBase?.() || 'https://api.keepkey.info').replace(/\/$/, '')
+          const txParams = await fetch(`${pioneerBase}/api/v1/hive/tx-params`, {
+            signal: AbortSignal.timeout(20_000),
+          }).then(r => r.json()) as any
+          if (!txParams?.success) throw new HttpError(502, `Hive tx-params failed: ${txParams?.error || 'unknown'}`)
+
+          const { serializeHiveOpsTx } = await import('./txbuilder/hive-ops')
+          let serialized
+          try {
+            serialized = serializeHiveOpsTx({
+              refBlockNum: txParams.refBlockNum,
+              refBlockPrefix: txParams.refBlockPrefix,
+              expirationUnix: txParams.expirationUnix,
+              operations: body.operations as any,
+            })
+          } catch (e: any) {
+            throw new HttpError(400, e?.message || 'Hive ops serialization failed')
+          }
+
+          // Role from op tier unless the caller pinned a path
+          const addressNList = body.addressNList || body.address_n || hiveRolePath(serialized.tier, 0)
+          const result = await emuWrap(() => (wallet as any).hiveSignOperations({
+            addressNList,
+            chainId: txParams.chainId,
+            serializedTx: new Uint8Array(serialized.serializedTx),
+          }), { operation: 'hiveSignOperations', chain: 'HIVE' })
+          if (!result?.signature) throw new HttpError(500, 'Hive sign-operations: device returned no signature')
+          const sigBytes = result.signature instanceof Uint8Array ? Buffer.from(result.signature) : Buffer.from(String(result.signature), 'hex')
+          return json({
+            signature: sigBytes.toString('hex'),
+            ref_block_num: txParams.refBlockNum,
+            ref_block_prefix: txParams.refBlockPrefix,
+            expiration: txParams.expirationIso,
+            operations: body.operations,
+          })
+        }
+
         if (path === '/hive/sign-transfer' && method === 'POST') {
           auth.requireAuth(req)
           // Same gates as /addresses/hive: feature flag + firmware ≥ 7.15.0

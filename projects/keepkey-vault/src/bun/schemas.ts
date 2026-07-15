@@ -194,6 +194,15 @@ export const HiveSignMessageRequest = z.object({
   is_text: z.boolean().optional(),
 }).strip()
 
+/** POST /hive/sign-operations — generic parsed-op signing over the device clear-sign op table (fw 7.15.0+) */
+export const HiveSignOperationsRequest = z.object({
+  /** SLIP-0048 path; role auto-selected from op tier when omitted */
+  address_n: z.array(z.number().int()).optional(),
+  addressNList: z.array(z.number().int()).optional(),
+  /** condenser-style tuples: [["vote", {...}], ...] — max 4, single tier */
+  operations: z.array(z.tuple([z.string(), z.record(z.any())])).min(1).max(4),
+}).strip()
+
 /** POST /hive/sign-transfer — Graphene transfer op, serialized + signed on-device (fw 7.15.0+) */
 export const HiveSignTransferRequest = z.object({
   /** SLIP-0048 path; defaults to active role m/48'/13'/1'/0'/0' */
