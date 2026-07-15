@@ -15,7 +15,7 @@
 export const SIGNING_ROUTES = new Set([
   '/eth/sign-transaction', '/eth/sign-typed-data', '/eth/sign',
   '/utxo/sign-transaction', '/xrp/sign-transaction', '/solana/sign-transaction', '/solana/sign-message', '/tron/sign-transaction', '/ton/sign-transaction',
-  '/hive/sign-transfer',
+  '/hive/sign-transfer', '/hive/sign-message',
   // Message / off-chain signing. The firmware always confirms these on its
   // OLED, but that is the device surface only — without these in the set a
   // REST caller reaches the device with no in-Vault review. Gate them so the
@@ -69,6 +69,7 @@ export function requiredSigningFields(path: string): string[] | null {
     '/tron/sign-transaction':   ['raw_tx', 'rawTx', 'to_address', 'amount'],
     '/ton/sign-transaction':    ['raw_tx', 'rawTx', 'to_address', 'amount'],
     '/hive/sign-transfer':      ['from', 'to', 'amount'],
+    '/hive/sign-message':       ['message'],
     '/tron/sign-message':       ['message'],
     '/tron/sign-typed-hash':    ['domain_separator_hash'],
     '/ton/sign-message':        ['message'],

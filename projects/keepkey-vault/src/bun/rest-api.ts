@@ -2067,6 +2067,44 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           return json({ address })
         }
 
+        if (path === '/hive/sign-message' && method === 'POST') {
+          auth.requireAuth(req)
+          // Same gates as /addresses/hive: feature flag + firmware ≥ 7.15.0
+          if (getSetting('hive_enabled') !== '1') return json({ error: 'Hive is disabled' }, 403)
+          const fwBlock = requireChainSupport('hive')
+          if (fwBlock) return fwBlock
+          const wallet = requireWallet(engine)
+          const body = await parseRequest(req, S.HiveSignMessageRequest)
+          const messageBytes = body.is_text === false
+            ? Buffer.from(body.message.replace(/^0x/, ''), 'hex')
+            : Buffer.from(body.message, 'utf8')
+          if (messageBytes.length === 0 || messageBytes.length > 1024) {
+            throw new HttpError(400, 'Hive message must be 1–1024 bytes')
+          }
+          // Default to the posting role — Keychain signBuffer is overwhelmingly
+          // dApp login, which verifies against the account's posting authority.
+          const addressNList = body.addressNList || body.address_n || hiveRolePath('posting', 0)
+          const result = await emuWrap(() => (wallet as any).hiveSignMessage({
+            addressNList,
+            message: new Uint8Array(messageBytes),
+          }), { operation: 'hiveSignMessage', chain: 'HIVE' })
+          if (!result?.signature) throw new HttpError(500, 'Hive sign-message: device returned no signature')
+          const sigBytes = result.signature instanceof Uint8Array ? Buffer.from(result.signature) : Buffer.from(String(result.signature), 'hex')
+          const pubBytes = result.publicKey instanceof Uint8Array ? Buffer.from(result.publicKey) : Buffer.from(String(result.publicKey), 'hex')
+          // STM encoding: 'STM' + base58(pub33 || ripemd160(pub33)[0:4])
+          let stm = ''
+          if (pubBytes.length === 33) {
+            const { ripemd160 } = await import('@noble/hashes/ripemd160')
+            const bs58 = (await import('bs58')).default
+            const checksum = Buffer.from(ripemd160(pubBytes)).subarray(0, 4)
+            stm = 'STM' + bs58.encode(Buffer.concat([pubBytes, checksum]))
+          }
+          return json({
+            signature: sigBytes.toString('hex'),
+            public_key: stm,
+          })
+        }
+
         if (path === '/hive/sign-transfer' && method === 'POST') {
           auth.requireAuth(req)
           // Same gates as /addresses/hive: feature flag + firmware ≥ 7.15.0

@@ -184,6 +184,16 @@ export const TonSignRequest = z.object({
   amount: z.string().optional(),      // amount in nanoTON — enables clear-sign on device
 }).strip()
 
+/** POST /hive/sign-message — Keychain signBuffer: sign SHA256(message bytes) on-device (fw 7.15.0+) */
+export const HiveSignMessageRequest = z.object({
+  /** SLIP-0048 path; defaults to posting role m/48'/13'/4'/0'/0' (dApp login) */
+  address_n: z.array(z.number().int()).optional(),
+  addressNList: z.array(z.number().int()).optional(),
+  /** Message payload. Default: UTF-8 text. If is_text=false, hex (optional 0x). */
+  message: z.string().min(1),
+  is_text: z.boolean().optional(),
+}).strip()
+
 /** POST /hive/sign-transfer — Graphene transfer op, serialized + signed on-device (fw 7.15.0+) */
 export const HiveSignTransferRequest = z.object({
   /** SLIP-0048 path; defaults to active role m/48'/13'/1'/0'/0' */
