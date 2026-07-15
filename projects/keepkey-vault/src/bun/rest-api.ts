@@ -1283,10 +1283,18 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           return new Response('WebSocket upgrade failed', { status: 400 })
         }
 
-        // /mcp — local non-browser agents only.
-        const origin = req.headers.get('origin')
-        if (origin && !/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i.test(origin)) {
-          return new Response(JSON.stringify({ error: 'cross-origin requests are not allowed on /mcp' }),
+        // /mcp — LOCAL NON-BROWSER AGENTS ONLY. A localhost-origin allowlist is
+        // NOT enough: the vault serves browser content at its OWN origin (the
+        // /wc dApp reverse-proxy below, the Swagger UI that loads remote JS from
+        // unpkg), and that content runs as http://localhost:1646 — a *localhost*
+        // origin — so it would pass an allowlist and could read bex_accounts/
+        // bex_logs same-origin. So exclude ALL browser traffic: a browser
+        // attaches an `Origin` header to every non-GET request (incl. same-origin
+        // POST) and `Sec-Fetch-Site` to every request, and JS cannot strip either
+        // (both are forbidden header names). A local CLI agent (`claude mcp add`)
+        // sends neither, so zero-config still works.
+        if (req.headers.get('origin') !== null || req.headers.get('sec-fetch-site') !== null) {
+          return new Response(JSON.stringify({ error: '/mcp is not reachable from a browser' }),
             { status: 403, headers: { 'Content-Type': 'application/json' } })
         }
         if (method === 'OPTIONS') return new Response(null, { status: 204 }) // deliberately no CORS grant
