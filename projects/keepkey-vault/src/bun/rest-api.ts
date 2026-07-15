@@ -3808,9 +3808,9 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         if (path === '/system/recovery/character' && method === 'POST') {
           const client = auth.requireAuth(req)
           const body = await parseRequest(req, S.SendCharacterRequest)
-          // Owner + seq check and the seq-claim are atomic inside the engine,
-          // so two concurrent same-seq sends can't both reach the device.
-          await engine.submitRecoveryCharacter(client.apiKey, body.character, body.seq)
+          // All three acks share ONE atomic, in-flight-guarded engine path, so
+          // no two competing requests can race or double-send a CharacterAck.
+          await engine.submitRecoveryAck(client.apiKey, 'character', { character: body.character, expectedSeq: body.seq })
           return json({ success: true })
         }
 
@@ -3820,15 +3820,13 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           // rather than forcing JSON like parseRequest does.
           const body = (await req.json().catch(() => ({}))) as { seq?: unknown }
           const seq = typeof body.seq === 'number' ? body.seq : undefined
-          engine.assertRecoveryOwner(client.apiKey, seq)
-          await engine.sendCharacterDelete()
+          await engine.submitRecoveryAck(client.apiKey, 'delete', { expectedSeq: seq })
           return json({ success: true })
         }
 
         if (path === '/system/recovery/character/done' && method === 'POST') {
           const client = auth.requireAuth(req)
-          engine.assertRecoveryOwner(client.apiKey)
-          await engine.sendCharacterDone()
+          await engine.submitRecoveryAck(client.apiKey, 'done')
           return json({ success: true })
         }
 

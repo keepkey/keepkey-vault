@@ -2039,12 +2039,13 @@ export class EngineController extends EventEmitter {
     this.recoveryActive = true
     this.recoveryOwner = ownerId
     this.pinRequestCount = 0
-    // Fresh session: drop any stale CharacterRequest/seq left over from a prior
-    // recovery, so /state can't report old positions and no send can match a
-    // stale seq before the device asks for this session's first character.
+    // Fresh session: clear the outstanding CharacterRequest so no send is
+    // accepted until the device actually asks for this session's first
+    // character. characterRequestSeq is deliberately NOT reset — it stays
+    // MONOTONIC across sessions, so a stale seq from a prior recovery is always
+    // < the current seq (rejected by the strict-equality check) and there is no
+    // seq==0 window that would accept a character before the device requests one.
     this.lastCharacterRequest = null
-    this.characterRequestSeq = 0
-    this.lastAcceptedCharSeq = -1
     this.recoverySendInFlight = false
   }
 
@@ -2057,22 +2058,41 @@ export class EngineController extends EventEmitter {
     this.pinRequestCount = 0
   }
 
-  /** Submit one recovery character atomically: owner + seq check and the
-   *  seq-claim happen synchronously (before any await), so two concurrent
-   *  same-seq sends can't both proceed — the second sees the claimed seq (or
-   *  the in-flight guard) and is rejected with 409 instead of double-sending. */
-  async submitRecoveryCharacter(ownerId: string, character: string, expectedSeq: number) {
-    this.assertRecoveryOwner(ownerId, expectedSeq)
-    if (expectedSeq <= this.lastAcceptedCharSeq) {
-      throw new HttpError(409, `Recovery seq ${expectedSeq} was already sent`)
+  /** Single atomic path for EVERY recovery acknowledgement (character / delete /
+   *  done). All three share one in-flight guard so competing HTTP requests can't
+   *  race or double-send unlocked CharacterAcks. Owner + seq checks and the
+   *  seq-claim run synchronously before the await, so a second concurrent call
+   *  sees the claim (or the guard) and is rejected with 409. A character is
+   *  additionally refused until the device has actually issued a CharacterRequest
+   *  (lastCharacterRequest present) — otherwise a send at the initial seq would
+   *  corrupt the transport before the device asks for anything. */
+  async submitRecoveryAck(
+    ownerId: string,
+    action: 'character' | 'delete' | 'done',
+    opts: { character?: string; expectedSeq?: number } = {},
+  ) {
+    // done has no seq; delete may pin one; character requires one.
+    this.assertRecoveryOwner(ownerId, action === 'done' ? undefined : opts.expectedSeq)
+    if (action === 'character') {
+      if (!this.lastCharacterRequest) {
+        throw new HttpError(409, 'Device has not requested a character yet')
+      }
+      if (opts.expectedSeq === undefined) {
+        throw new HttpError(400, 'character requires seq')
+      }
+      if (opts.expectedSeq <= this.lastAcceptedCharSeq) {
+        throw new HttpError(409, `Recovery seq ${opts.expectedSeq} was already sent`)
+      }
     }
     if (this.recoverySendInFlight) {
-      throw new HttpError(409, 'A recovery character send is already in flight')
+      throw new HttpError(409, 'A recovery acknowledgement is already in flight')
     }
     this.recoverySendInFlight = true
-    this.lastAcceptedCharSeq = expectedSeq // claim synchronously, before the await
+    if (action === 'character') this.lastAcceptedCharSeq = opts.expectedSeq! // claim before the await
     try {
-      await this.sendCharacter(character)
+      if (action === 'character') await this.sendCharacter(opts.character!)
+      else if (action === 'delete') await this.sendCharacterDelete()
+      else await this.sendCharacterDone()
     } finally {
       this.recoverySendInFlight = false
     }
