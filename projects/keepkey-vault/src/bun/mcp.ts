@@ -12,11 +12,24 @@
  * All tools execute inside the BEX; this file only owns the tool CATALOG and
  * the forwarding. Bridge down → structured bridge_disconnected error
  * (bex_status instead answers truthfully so agents can always probe).
+ *
+ * TRUST MODEL (accepted risk — see PR discussion): /mcp has NO caller
+ * credential, by design, so `claude mcp add` is zero-config. Browsers are
+ * excluded at the transport layer (Origin/Sec-Fetch reject in rest-api), but
+ * ANY local process — or another OS user able to reach loopback — can call
+ * /mcp once the BEX 'Agent mode' toggle (default off) is on, and read the
+ * Tier-1 READ-ONLY data (accounts/xpubs, connected sites, provider logs). No
+ * signing, no writes. This is a deliberate expansion beyond the bearer-authed
+ * REST API for local-agent ergonomics; the Agent-mode toggle is the primary
+ * gate. If per-install-secret auth is wanted later, require an Authorization
+ * bearer on /mcp and surface the secret in the vault UI for `claude mcp add`.
  */
 
 import { callBex, bridgeStatus, type BridgeError } from './bex-bridge'
 
-const PROTOCOL_VERSION = '2025-03-26'
+// Default to 2025-06-18, which REMOVED JSON-RPC batching — so advertising it
+// while this (deliberately single-request) server rejects batches is honest.
+const PROTOCOL_VERSION = '2025-06-18'
 // Versions whose initialize/ping/tools surface this server is compatible with.
 // We echo the client's requested version when it's one of these (MCP
 // negotiation), else offer ours.
@@ -85,15 +98,31 @@ const rpcResult = (id: unknown, result: unknown, cors: Record<string, string> = 
 
 /** Handle POST /mcp. Caller has already enforced loopback-only. */
 export async function handleMcpRequest(req: Request, cors: Record<string, string>): Promise<Response> {
+  // Validate the negotiated protocol version header when present (the spec says
+  // to reject an unsupported one, not ignore it). Absent is fine — the version
+  // is negotiated in the initialize body.
+  const hdrVersion = req.headers.get('mcp-protocol-version')
+  if (hdrVersion && !SUPPORTED_PROTOCOL_VERSIONS.has(hdrVersion)) {
+    return rpcError(null, -32600, `Unsupported MCP-Protocol-Version: ${hdrVersion}`, undefined, cors)
+  }
+
   let msg: any
   try {
     msg = await req.json()
   } catch {
     return rpcError(null, -32700, 'Parse error', undefined, cors)
   }
-  if (Array.isArray(msg)) return rpcError(null, -32600, 'batch requests not supported', undefined, cors)
+  // Batching was removed in 2025-06-18 (the version we advertise); reject it
+  // explicitly rather than silently mishandling it.
+  if (Array.isArray(msg)) return rpcError(null, -32600, 'batch requests are not supported', undefined, cors)
 
-  const { id, method, params } = msg ?? {}
+  // Every Request/Notification object must declare jsonrpc "2.0" — reject 1.0
+  // or a missing version rather than processing it.
+  if (!msg || msg.jsonrpc !== '2.0') {
+    return rpcError(msg?.id ?? null, -32600, 'Invalid Request: jsonrpc must be "2.0"', undefined, cors)
+  }
+
+  const { id, method, params } = msg
 
   if (typeof method !== 'string') {
     return rpcError(id ?? null, -32600, 'Invalid Request: missing method', undefined, cors)

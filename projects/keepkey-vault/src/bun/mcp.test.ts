@@ -16,8 +16,13 @@ function post(body: unknown): Request {
     body: typeof body === 'string' ? body : JSON.stringify(body),
   })
 }
-const call = async (body: unknown) => {
-  const res = await handleMcpRequest(post(body), {})
+const call = async (body: unknown, headers?: Record<string, string>) => {
+  const req = new Request('http://localhost:1646/mcp', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...headers },
+    body: typeof body === 'string' ? body : JSON.stringify(body),
+  })
+  const res = await handleMcpRequest(req, {})
   return { status: res.status, json: res.status === 202 ? null : await res.json() }
 }
 
@@ -25,6 +30,21 @@ describe('MCP JSON-RPC handler', () => {
   test('unparseable body → -32700 Parse error envelope (not a bare 400)', async () => {
     const { json } = await call('{not json')
     expect(json).toMatchObject({ jsonrpc: '2.0', id: null, error: { code: -32700 } })
+  })
+
+  test('jsonrpc other than "2.0" → -32600 (does not process 1.0)', async () => {
+    const { json } = await call({ jsonrpc: '1.0', id: 1, method: 'ping' })
+    expect(json.error.code).toBe(-32600)
+  })
+
+  test('unsupported MCP-Protocol-Version header → -32600', async () => {
+    const { json } = await call({ jsonrpc: '2.0', id: 1, method: 'ping' }, { 'MCP-Protocol-Version': '1999-01-01' })
+    expect(json.error.code).toBe(-32600)
+  })
+
+  test('a supported MCP-Protocol-Version header is accepted', async () => {
+    const { status } = await call({ jsonrpc: '2.0', method: 'ping' }, { 'MCP-Protocol-Version': '2025-06-18' })
+    expect(status).toBe(202) // id-less ping → notification
   })
 
   test('missing method → -32600 Invalid Request', async () => {
@@ -55,7 +75,7 @@ describe('MCP JSON-RPC handler', () => {
 
   test('initialize falls back to server version for an unsupported one', async () => {
     const { json } = await call({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '1999-01-01' } })
-    expect(json.result.protocolVersion).toBe('2025-03-26')
+    expect(json.result.protocolVersion).toBe('2025-06-18')
   })
 
   test('tools/list returns the read-only tool catalog', async () => {
