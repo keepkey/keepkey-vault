@@ -39,6 +39,8 @@ import {
   type TonBuildResult,
 } from './txbuilder/ton'
 import { usb } from 'usb'
+import { handleMcpRequest } from './mcp'
+import { onBexOpen, onBexClose, onBexMessage } from './bex-bridge'
 
 export interface EmuSigningDetails {
   operation: string
@@ -1243,7 +1245,57 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         return resp
       }
 
-      // CORS preflight
+      // ── MCP agent bridge (EPIC_mcp_agent_bridge.md, keepkey-client) ──
+      // LOOPBACK + LOCAL-AGENT ONLY, handled BEFORE the shared CORS/OPTIONS
+      // path below so /mcp owns its own preflight and never inherits the
+      // permissive wildcard CORS the rest of the (bearer-authed) API uses.
+      //
+      // A loopback peer IP is NOT a trust boundary against web pages: a
+      // fetch() from ANY site the user visits has peer 127.0.0.1 because the
+      // browser runs locally. /mcp carries no bearer token (so `claude mcp
+      // add` stays zero-config), so browsers are excluded two other ways:
+      //   1. reject any non-local Origin — the MCP Streamable-HTTP
+      //      DNS-rebinding defense. A local CLI agent sends no Origin; every
+      //      browser request (incl. a DNS-rebound public page pointing at
+      //      127.0.0.1) carries one.
+      //   2. never emit ACAO:* / Allow-Private-Network on /mcp — without them
+      //      a browser can neither read the response nor clear Chrome's PNA
+      //      preflight. The BEX Agent-mode toggle is a second gate, not the only one.
+      // /bex-bridge stays token-gated (the extension is a chrome-extension://
+      // origin needing a valid pairing key; https→ws://localhost is
+      // mixed-content-blocked for web pages regardless).
+      if (path === '/mcp' || path === '/bex-bridge') {
+        const ip = server.requestIP(req)?.address
+        const isLoopback = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1'
+        if (!isLoopback) {
+          return new Response(JSON.stringify({ error: 'loopback only' }),
+            { status: 403, headers: { 'Content-Type': 'application/json' } })
+        }
+
+        if (path === '/bex-bridge') {
+          // BEX authenticates with its existing pairing key. Browser WebSocket
+          // can't set an Authorization header, so the key arrives as ?token=.
+          const token = url.searchParams.get('token') || auth.extractBearerToken(req)
+          if (!token || !auth.validate(token)) {
+            return new Response('Unauthorized', { status: 401 })
+          }
+          if (server.upgrade(req)) return undefined as any
+          return new Response('WebSocket upgrade failed', { status: 400 })
+        }
+
+        // /mcp — local non-browser agents only.
+        const origin = req.headers.get('origin')
+        if (origin && !/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i.test(origin)) {
+          return new Response(JSON.stringify({ error: 'cross-origin requests are not allowed on /mcp' }),
+            { status: 403, headers: { 'Content-Type': 'application/json' } })
+        }
+        if (method === 'OPTIONS') return new Response(null, { status: 204 }) // deliberately no CORS grant
+        if (method === 'POST') return handleMcpRequest(req, {})
+        return new Response(JSON.stringify({ error: 'POST only' }),
+          { status: 405, headers: { 'Content-Type': 'application/json' } })
+      }
+
+      // CORS preflight (all other paths — bearer-token-authed API)
       if (method === 'OPTIONS') {
         return new Response(null, { status: 204, headers: corsHeaders(req) })
       }
@@ -4107,6 +4159,12 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         activeSigningId = undefined
         activeSigningInfo = undefined
       }
+    },
+    // WS endpoint for the BEX agent bridge (/bex-bridge upgrade above).
+    websocket: {
+      open(ws) { onBexOpen(ws) },
+      message(ws, data) { onBexMessage(ws, data as string | Buffer) },
+      close(ws) { onBexClose(ws) },
     },
   })
 
