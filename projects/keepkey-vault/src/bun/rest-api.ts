@@ -39,6 +39,8 @@ import {
   type TonBuildResult,
 } from './txbuilder/ton'
 import { usb } from 'usb'
+import { handleMcpRequest } from './mcp'
+import { onBexOpen, onBexClose, onBexMessage } from './bex-bridge'
 
 export interface EmuSigningDetails {
   operation: string
@@ -1243,7 +1245,71 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         return resp
       }
 
-      // CORS preflight
+      // ── MCP agent bridge (EPIC_mcp_agent_bridge.md, keepkey-client) ──
+      // LOOPBACK + LOCAL-AGENT ONLY, handled BEFORE the shared CORS/OPTIONS
+      // path below so /mcp owns its own preflight and never inherits the
+      // permissive wildcard CORS the rest of the (bearer-authed) API uses.
+      //
+      // A loopback peer IP is NOT a trust boundary against web pages: a
+      // fetch() from ANY site the user visits has peer 127.0.0.1 because the
+      // browser runs locally. /mcp carries no bearer token (so `claude mcp
+      // add` stays zero-config), so browsers are excluded two other ways:
+      //   1. reject any non-local Origin — the MCP Streamable-HTTP
+      //      DNS-rebinding defense. A local CLI agent sends no Origin; every
+      //      browser request (incl. a DNS-rebound public page pointing at
+      //      127.0.0.1) carries one.
+      //   2. never emit ACAO:* / Allow-Private-Network on /mcp — without them
+      //      a browser can neither read the response nor clear Chrome's PNA
+      //      preflight. The BEX Agent-mode toggle is a second gate, not the only one.
+      // /bex-bridge stays token-gated (the extension is a chrome-extension://
+      // origin needing a valid pairing key; https→ws://localhost is
+      // mixed-content-blocked for web pages regardless).
+      if (path === '/mcp' || path === '/bex-bridge') {
+        const ip = server.requestIP(req)?.address
+        const isLoopback = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1'
+        if (!isLoopback) {
+          return new Response(JSON.stringify({ error: 'loopback only' }),
+            { status: 403, headers: { 'Content-Type': 'application/json' } })
+        }
+
+        if (path === '/bex-bridge') {
+          // BEX authenticates with its existing pairing key. Browser WebSocket
+          // can't set an Authorization header, so the key arrives as ?token=.
+          const token = url.searchParams.get('token') || auth.extractBearerToken(req)
+          if (!token || !auth.validate(token)) {
+            return new Response('Unauthorized', { status: 401 })
+          }
+          if (server.upgrade(req)) return undefined as any
+          return new Response('WebSocket upgrade failed', { status: 400 })
+        }
+
+        // /mcp is BEARER-AUTHENTICATED with the same pairing API keys as the
+        // rest of the REST API (see the auth.requireAuth below) AND excludes all
+        // browser traffic. Both matter: a localhost-origin allowlist is not a
+        // boundary because the vault serves browser content at its OWN origin
+        // (the /wc dApp reverse-proxy below, the Swagger UI that loads remote JS
+        // from unpkg) which runs as http://localhost:1646 — and such content may
+        // even hold the user's bearer token. A browser attaches an `Origin`
+        // header to every non-GET request (incl. same-origin POST) and
+        // `Sec-Fetch-Site` to every request, and JS cannot strip either (both are
+        // forbidden header names); a non-browser agent sends neither.
+        if (req.headers.get('origin') !== null || req.headers.get('sec-fetch-site') !== null) {
+          return new Response(JSON.stringify({ error: '/mcp is not reachable from a browser' }),
+            { status: 403, headers: { 'Content-Type': 'application/json' } })
+        }
+        if (method === 'OPTIONS') return new Response(null, { status: 204 }) // deliberately no CORS grant
+        if (method === 'POST') {
+          // Require a valid pairing bearer token — configure the agent with
+          //   claude mcp add keepkey --transport http http://localhost:1646/mcp \
+          //     --header "Authorization: Bearer <pairing-key>"
+          auth.requireAuth(req)
+          return handleMcpRequest(req, {})
+        }
+        return new Response(JSON.stringify({ error: 'POST only' }),
+          { status: 405, headers: { 'Content-Type': 'application/json' } })
+      }
+
+      // CORS preflight (all other paths — bearer-token-authed API)
       if (method === 'OPTIONS') {
         return new Response(null, { status: 204, headers: corsHeaders(req) })
       }
@@ -4107,6 +4173,12 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         activeSigningId = undefined
         activeSigningInfo = undefined
       }
+    },
+    // WS endpoint for the BEX agent bridge (/bex-bridge upgrade above).
+    websocket: {
+      open(ws) { onBexOpen(ws) },
+      message(ws, data) { onBexMessage(ws, data as string | Buffer) },
+      close(ws) { onBexClose(ws) },
     },
   })
 
