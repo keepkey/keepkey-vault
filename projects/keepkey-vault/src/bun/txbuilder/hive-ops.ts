@@ -192,6 +192,12 @@ function serializeOp([name, p]: HiveOpTuple): { bytes: Buffer; tier: 'posting' |
         throw new Error(`comment_options percent_hbd out of range: ${p.percent_hbd ?? p.percent_steem_dollars}`)
       }
       const extensions: any[] = p.extensions ?? []
+      // Hive allows at most ONE comment_payout_beneficiaries extension per
+      // comment_options; two extensions could smuggle 16 beneficiaries / 200%
+      // weight past a per-extension check.
+      if (extensions.length > 1) {
+        throw new Error('comment_options: at most one extension (comment_payout_beneficiaries) is allowed')
+      }
       const extBufs: Buffer[] = []
       for (const ext of extensions) {
         // condenser static_variant: [0, { beneficiaries: [...] }] — only
@@ -201,15 +207,23 @@ function serializeOp([name, p]: HiveOpTuple): { bytes: Buffer; tier: 'posting' |
         }
         const bens: any[] = ext[1]?.beneficiaries ?? []
         if (!bens.length || bens.length > 8) {
-          throw new Error(`comment_options: 1–8 beneficiaries required per extension (got ${bens.length})`)
+          throw new Error(`comment_options: 1–8 beneficiaries required (got ${bens.length})`)
         }
         let weightSum = 0
+        let prevAccount = ''
         const benBufs = bens.map((b: any) => {
           const weight = Number(b?.weight)
           if (!b?.account || typeof b.account !== 'string') throw new Error('comment_options: beneficiary account missing')
           if (!Number.isInteger(weight) || weight < 0 || weight > 10000) {
             throw new Error(`comment_options: beneficiary weight out of range: ${b?.weight}`)
           }
+          // hived requires beneficiaries strictly ascending by account name,
+          // which also enforces uniqueness — an unsorted or duplicate list is
+          // rejected on-chain, so reject it here rather than silently signing it.
+          if (b.account <= prevAccount) {
+            throw new Error(`comment_options: beneficiaries must be sorted ascending and unique (got "${b.account}" after "${prevAccount}")`)
+          }
+          prevAccount = b.account
           weightSum += weight
           return Buffer.concat([str(b.account), u16(weight, 'beneficiary weight')])
         })
@@ -332,10 +346,15 @@ export function serializeHiveOpsTx(params: {
     // firmware rejects this too — fail fast with a clearer message.
     throw new Error('Cannot mix posting-tier and active-tier operations in one transaction')
   }
-  const head = Buffer.alloc(10)
-  head.writeUInt16LE(params.refBlockNum & 0xffff, 0)
-  head.writeUInt32LE(params.refBlockPrefix >>> 0, 2)
-  head.writeUInt32LE(params.expirationUnix >>> 0, 6)
+  // Validate the TaPoS header as bounded integers rather than silently masking
+  // (& 0xffff) / coercing (>>> 0). A malformed or custom Pioneer sending -1 or
+  // an out-of-range value would otherwise be signed as 0xffff/0xffffffff while
+  // the caller's response echoes the original — reconstructing a DIFFERENT tx.
+  const head = Buffer.concat([
+    u16(params.refBlockNum, 'refBlockNum'),
+    u32(params.refBlockPrefix, 'refBlockPrefix'),
+    u32(params.expirationUnix, 'expirationUnix'),
+  ])
   const serializedTx = Buffer.concat([
     head,
     varint(params.operations.length),

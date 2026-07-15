@@ -79,23 +79,24 @@ describe('phase-2 byte layouts', () => {
       author: 'alice', permlink: 'post',
       max_accepted_payout: '1000000.000 HBD', percent_hbd: 10000,
       allow_votes: true, allow_curation_rewards: true,
-      extensions: [[0, { beneficiaries: [{ account: 'skatehive', weight: 500 }, { account: 'bob', weight: 100 }] }]],
+      // beneficiaries MUST be sorted ascending by account (hived requirement)
+      extensions: [[0, { beneficiaries: [{ account: 'bob', weight: 100 }, { account: 'skatehive', weight: 500 }] }]],
     }]
     const { serializedTx, tier } = sign(comment, options)
     expect(tier).toBe('posting')
     const commentBytes = Buffer.concat([
       Buffer.from([1]), vstr(''), vstr('hive'), vstr('alice'), vstr('post'), vstr('t'), vstr('b'), vstr('{}'),
     ])
-    const w1 = Buffer.alloc(2); w1.writeUInt16LE(500)
-    const w2 = Buffer.alloc(2); w2.writeUInt16LE(100)
+    const wBob = Buffer.alloc(2); wBob.writeUInt16LE(100)
+    const wSkate = Buffer.alloc(2); wSkate.writeUInt16LE(500)
     const pct = Buffer.alloc(2); pct.writeUInt16LE(10000)
     const optionsBytes = Buffer.concat([
       Buffer.from([19]), vstr('alice'), vstr('post'),
       vasset(1_000_000_000n, 3, 'HBD'), pct,
       Buffer.from([1, 1]),          // allow_votes, allow_curation_rewards
       Buffer.from([1]),             // 1 extension
-      Buffer.from([0, 2]),          // tag 0, 2 beneficiaries
-      vstr('skatehive'), w1, vstr('bob'), w2,
+      Buffer.from([0, 2]),          // tag 0, 2 beneficiaries (sorted: bob, skatehive)
+      vstr('bob'), wBob, vstr('skatehive'), wSkate,
     ])
     expect(serializedTx.equals(txBytes(2, commentBytes, optionsBytes))).toBe(true)
   })
@@ -246,5 +247,46 @@ describe('validation', () => {
   test('unknown op is rejected', () => {
     expect(() => sign(['set_withdraw_vesting_route', { from_account: 'a', to_account: 'b', percent: 100, auto_vest: false }]))
       .toThrow(/Unsupported Hive operation/)
+  })
+})
+
+describe('TaPoS header validation (finding #5)', () => {
+  const op: HiveOpTuple = ['vote', { voter: 'a', author: 'b', permlink: 'p', weight: 100 }]
+  test('negative refBlockNum is rejected, not masked to 0xffff', () => {
+    expect(() => serializeHiveOpsTx({ refBlockNum: -1, refBlockPrefix: 1, expirationUnix: 1, operations: [op] })).toThrow(/refBlockNum/)
+  })
+  test('refBlockNum above uint16 is rejected', () => {
+    expect(() => serializeHiveOpsTx({ refBlockNum: 0x10000, refBlockPrefix: 1, expirationUnix: 1, operations: [op] })).toThrow(/refBlockNum/)
+  })
+  test('negative expirationUnix is rejected, not coerced to 0xffffffff', () => {
+    expect(() => serializeHiveOpsTx({ refBlockNum: 1, refBlockPrefix: 1, expirationUnix: -1, operations: [op] })).toThrow(/expirationUnix/)
+  })
+  test('refBlockPrefix above uint32 is rejected', () => {
+    expect(() => serializeHiveOpsTx({ refBlockNum: 1, refBlockPrefix: 0x100000000, expirationUnix: 1, operations: [op] })).toThrow(/refBlockPrefix/)
+  })
+})
+
+describe('comment_options beneficiary rules (finding #6)', () => {
+  const withExt = (extensions: any[]): HiveOpTuple[] => [
+    ['comment', { parent_author: '', parent_permlink: 'hive', author: 'a', permlink: 'p', title: '', body: 'b', json_metadata: '{}' }],
+    ['comment_options', { author: 'a', permlink: 'p', max_accepted_payout: '1000000.000 HBD', percent_hbd: 10000, allow_votes: true, allow_curation_rewards: true, extensions }],
+  ]
+  test('two beneficiary extensions are rejected (no 16-beneficiary / 200% smuggling)', () => {
+    expect(() => sign(...withExt([
+      [0, { beneficiaries: [{ account: 'x', weight: 5000 }] }],
+      [0, { beneficiaries: [{ account: 'y', weight: 5000 }] }],
+    ]))).toThrow(/at most one extension/)
+  })
+  test('unsorted beneficiaries are rejected', () => {
+    expect(() => sign(...withExt([[0, { beneficiaries: [{ account: 'bob', weight: 100 }, { account: 'alice', weight: 100 }] }]])))
+      .toThrow(/sorted ascending/)
+  })
+  test('duplicate beneficiary accounts are rejected', () => {
+    expect(() => sign(...withExt([[0, { beneficiaries: [{ account: 'bob', weight: 100 }, { account: 'bob', weight: 100 }] }]])))
+      .toThrow(/sorted ascending and unique/)
+  })
+  test('sorted unique beneficiaries within limits are accepted', () => {
+    expect(() => sign(...withExt([[0, { beneficiaries: [{ account: 'alice', weight: 100 }, { account: 'bob', weight: 200 }] }]])))
+      .not.toThrow()
   })
 })

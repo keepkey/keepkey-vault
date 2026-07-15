@@ -2106,6 +2106,12 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         }
 
         if (path === '/hive/sign-operations' && method === 'POST') {
+          // STAGED: the HiveSignOperations (1616/1617) firmware handler ships in
+          // 7.15.0 via the rc10 stack (fw #307), but the ">=7.15.0" gate below
+          // can't distinguish an early 7.15.0-rc without it — such a device passes
+          // the gate then rejects the unknown message. This endpoint must not be
+          // treated as released until FINAL 7.15.0 firmware + live-device sign
+          // smoke pass (tracked in HIVE-STATUS). It is correct code against rc10+.
           auth.requireAuth(req)
           if (getSetting('hive_enabled') !== '1') return json({ error: 'Hive is disabled' }, 403)
           const fwBlock = requireChainSupport('hive')
