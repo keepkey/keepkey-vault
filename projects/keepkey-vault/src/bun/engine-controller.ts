@@ -155,6 +155,12 @@ export class EngineController extends EventEmitter {
   // paired client (or a stray parallel request) must not inject or reorder
   // recovery characters. null when recovery is UI-driven or not running.
   private recoveryOwner: string | null = null
+  // Highest character seq already accepted this recovery session, and an
+  // in-flight guard — together they serialize character sends so two
+  // concurrent same-seq sends can't both reach the device (the claim is set
+  // synchronously before the await, so the second request sees it).
+  private lastAcceptedCharSeq = -1
+  private recoverySendInFlight = false
   private pinRequestCount = 0
   // Tracks whether promptPin() → getPublicKeys() is still awaiting resolution.
   // While active, sendPin/sendPassphrase must NOT call getFeatures — that would
@@ -2022,10 +2028,24 @@ export class EngineController extends EventEmitter {
    *  (see syncState). The REST recover-device handler wraps wallet.recover()
    *  between this and endRecovery(). */
   beginRecovery(ownerId: string) {
+    // Reject a concurrent start: without this, a second recover-device call
+    // would overwrite recoveryOwner and steal the lock while the first device
+    // operation is still running (and the first's finally would then clear the
+    // second's session).
+    if (this.recoveryActive || this.setupInProgress || this.verifyInProgress) {
+      throw new HttpError(409, 'Another device setup or recovery is already in progress')
+    }
     this.setupInProgress = true
     this.recoveryActive = true
     this.recoveryOwner = ownerId
     this.pinRequestCount = 0
+    // Fresh session: drop any stale CharacterRequest/seq left over from a prior
+    // recovery, so /state can't report old positions and no send can match a
+    // stale seq before the device asks for this session's first character.
+    this.lastCharacterRequest = null
+    this.characterRequestSeq = 0
+    this.lastAcceptedCharSeq = -1
+    this.recoverySendInFlight = false
   }
 
   /** End a REST/SDK-driven recovery (success or failure). */
@@ -2033,7 +2053,29 @@ export class EngineController extends EventEmitter {
     this.setupInProgress = false
     this.recoveryActive = false
     this.recoveryOwner = null
+    this.recoverySendInFlight = false
     this.pinRequestCount = 0
+  }
+
+  /** Submit one recovery character atomically: owner + seq check and the
+   *  seq-claim happen synchronously (before any await), so two concurrent
+   *  same-seq sends can't both proceed — the second sees the claimed seq (or
+   *  the in-flight guard) and is rejected with 409 instead of double-sending. */
+  async submitRecoveryCharacter(ownerId: string, character: string, expectedSeq: number) {
+    this.assertRecoveryOwner(ownerId, expectedSeq)
+    if (expectedSeq <= this.lastAcceptedCharSeq) {
+      throw new HttpError(409, `Recovery seq ${expectedSeq} was already sent`)
+    }
+    if (this.recoverySendInFlight) {
+      throw new HttpError(409, 'A recovery character send is already in flight')
+    }
+    this.recoverySendInFlight = true
+    this.lastAcceptedCharSeq = expectedSeq // claim synchronously, before the await
+    try {
+      await this.sendCharacter(character)
+    } finally {
+      this.recoverySendInFlight = false
+    }
   }
 
   /** Gate a recovery character mutation to the initiating client and, when the
@@ -2067,6 +2109,8 @@ export class EngineController extends EventEmitter {
   private resetRecoveryState() {
     this.lastCharacterRequest = null
     this.characterRequestSeq = 0
+    this.lastAcceptedCharSeq = -1
+    this.recoverySendInFlight = false
     this.recoveryActive = false
     this.recoveryOwner = null
     // A device yanked mid-recovery also drops the transport lock; the REST

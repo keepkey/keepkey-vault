@@ -18,6 +18,7 @@ interface RecoveryState {
 }
 
 class Gate {
+  lastAcceptedCharSeq = -1
   constructor(private s: RecoveryState) {}
 
   // throws with a 409-ish tag on any mismatch (mirror of assertRecoveryOwner)
@@ -35,6 +36,22 @@ class Gate {
 
   canRead(ownerId: string): boolean {
     return !this.s.recoveryActive || this.s.recoveryOwner === ownerId
+  }
+
+  // mirror of beginRecovery — rejects a concurrent start (lock-steal guard)
+  begin(ownerId: string) {
+    if (this.s.recoveryActive) throw new Error('409:already in progress')
+    this.s.recoveryActive = true
+    this.s.recoveryOwner = ownerId
+    this.s.characterRequestSeq = 0
+    this.lastAcceptedCharSeq = -1
+  }
+
+  // mirror of submitRecoveryCharacter's synchronous claim (owner + seq + claim)
+  claim(ownerId: string, expectedSeq: number) {
+    this.assertOwner(ownerId, expectedSeq)
+    if (expectedSeq <= this.lastAcceptedCharSeq) throw new Error('409:already sent')
+    this.lastAcceptedCharSeq = expectedSeq
   }
 }
 
@@ -78,5 +95,35 @@ describe('recovery state read access', () => {
     const g = new Gate({ recoveryActive: true, recoveryOwner: OWNER, characterRequestSeq: 2 })
     expect(g.canRead(OWNER)).toBe(true)
     expect(g.canRead(OTHER)).toBe(false)
+  })
+})
+
+describe('concurrent-start lock-steal guard', () => {
+  test('a second recover-device start is rejected while one is active', () => {
+    const g = new Gate({ recoveryActive: false, recoveryOwner: null, characterRequestSeq: 0 })
+    g.begin(OWNER)
+    expect(() => g.begin(OTHER)).toThrow(/already in progress/) // no lock steal
+    expect(g.canRead(OWNER)).toBe(true)
+    expect(g.canRead(OTHER)).toBe(false)
+  })
+})
+
+describe('duplicate concurrent character sends', () => {
+  test('two same-seq sends: the first claims the seq, the second is rejected', () => {
+    const g = new Gate({ recoveryActive: false, recoveryOwner: null, characterRequestSeq: 0 })
+    g.begin(OWNER)
+    // device asked for the first character → seq advances to 1
+    ;(g as any).s.characterRequestSeq = 1
+    g.claim(OWNER, 1)                              // reqA claims seq 1 synchronously
+    expect(() => g.claim(OWNER, 1)).toThrow(/already sent/) // reqB (same seq) rejected
+  })
+
+  test('the next character (advanced seq) is accepted', () => {
+    const g = new Gate({ recoveryActive: false, recoveryOwner: null, characterRequestSeq: 0 })
+    g.begin(OWNER)
+    ;(g as any).s.characterRequestSeq = 1
+    g.claim(OWNER, 1)
+    ;(g as any).s.characterRequestSeq = 2          // device asked again
+    expect(() => g.claim(OWNER, 2)).not.toThrow()
   })
 })

@@ -3782,9 +3782,16 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         }
 
         if (path === '/system/recovery/pin' && method === 'POST') {
-          auth.requireAuth(req)
+          const client = auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.SendPinRequest)
+          // During an owned recovery, only the initiating client may send the
+          // recovery PIN — otherwise a second paired client could inject PIN
+          // acknowledgements into someone else's flow. (When no REST recovery
+          // is active this is a no-op, so other PIN flows are unaffected.)
+          if (!engine.canReadRecoveryState(client.apiKey)) {
+            throw new HttpError(409, 'Cipher recovery is owned by a different client')
+          }
           await wallet.sendPin(body.pin)
           return json({ success: true })
         }
@@ -3801,8 +3808,9 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         if (path === '/system/recovery/character' && method === 'POST') {
           const client = auth.requireAuth(req)
           const body = await parseRequest(req, S.SendCharacterRequest)
-          engine.assertRecoveryOwner(client.apiKey, body.seq)
-          await engine.sendCharacter(body.character)
+          // Owner + seq check and the seq-claim are atomic inside the engine,
+          // so two concurrent same-seq sends can't both reach the device.
+          await engine.submitRecoveryCharacter(client.apiKey, body.character, body.seq)
           return json({ success: true })
         }
 
