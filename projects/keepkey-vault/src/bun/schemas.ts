@@ -184,6 +184,28 @@ export const TonSignRequest = z.object({
   amount: z.string().optional(),      // amount in nanoTON — enables clear-sign on device
 }).strip()
 
+/** POST /hive/sign-transfer — Graphene transfer op, serialized + signed on-device (fw 7.15.0+) */
+export const HiveSignTransferRequest = z.object({
+  /** SLIP-0048 path; defaults to active role m/48'/13'/1'/0'/0' */
+  address_n: z.array(z.number().int()).optional(),
+  addressNList: z.array(z.number().int()).optional(),
+  ref_block_num: z.number().int().min(0).max(0xffff),
+  ref_block_prefix: z.number().int().min(0).max(0xffffffff),
+  /** Unix seconds (TaPoS expiration) */
+  expiration: z.number().int().min(0),
+  from: z.string().min(1).max(16),
+  to: z.string().min(1).max(16),
+  /** Integer milli-units (3 decimals): 1.000 HIVE = 1000. Capped at
+   *  MAX_SAFE_INTEGER — .int() alone admits floats like 1e20 that are already
+   *  precision-mangled before serialization. */
+  amount: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
+  asset_symbol: z.enum(['HIVE', 'HBD']).optional(),
+  /** Firmware rejects memos > 440 chars */
+  memo: z.string().max(440).optional(),
+  /** 32-byte chain id hex override; firmware defaults to Hive mainnet (beeab0de…) */
+  chain_id: z.string().regex(/^[0-9a-fA-F]{64}$/).optional(),
+}).strip()
+
 // ── Message-signing surface (firmware 7.14.1+) ──────────────────────
 
 // 65-byte recoverable secp256k1 signature, hex with optional 0x prefix.

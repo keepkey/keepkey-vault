@@ -28,6 +28,7 @@ import { computeDustWarning, shouldWarnHighSlippage, computeEffectiveSlippageBps
 import { useEvmAddresses } from "../hooks/useEvmAddresses"
 import { AssetPickerDialog } from "./AssetPickerDialog"
 import { networkDisplayName, ellipsizeCaip, parseCaip } from "../../shared/swap-discovery"
+import { isSymbolSquatter } from "../../shared/symbolSquatter"
 import { KeepKeyDevice, RouteMap, SpinningDevice } from "./v3"
 import calculatingGif from "../assets/swap/calculating.gif"
 import shiftingGif from "../assets/swap/shifting.gif"
@@ -502,9 +503,11 @@ function GreenCountUp({ value, prefix = '', suffix = '', color = 'var(--teal)', 
   return (
     <Text as="span" color={color} fontSize={fontSize} display="inline-flex" alignItems="center"
       style={{ animation: 'kkBounceUp 0.5s ease-out' }}>
-      {prefix}
+      {/* whiteSpace:pre — inline-flex collapses the leading space in prefix/suffix
+          (e.g. " SOLANA"), which glued the amount to the symbol: "…291.85SOLANA" */}
+      {prefix && <Text as="span" whiteSpace="pre">{prefix}</Text>}
       <CountUp key={num} start={0} end={num} decimals={decimals} duration={duration} separator="," preserveValue={false} />
-      {suffix}
+      {suffix && <Text as="span" whiteSpace="pre">{suffix}</Text>}
     </Text>
   )
 }
@@ -590,6 +593,10 @@ function AssetSelector({ label, selected, onOpenPicker, disabled }: AssetSelecto
 
   /* ── Selected asset → big prominent display ── */
   if (selected) {
+    // Symbol squatter: an unverified token wearing a major chain's ticker/name
+    // (e.g. an ERC-20 that calls itself "SOLANA"). Strip its server icon so it
+    // can't wear the native logo, and warn — see shared/symbolSquatter.
+    const squatter = isSymbolSquatter(selected.caip, selected.symbol)
     return (
       <Box>
         <Flex justify="space-between" align="center" mb="3">
@@ -616,11 +623,11 @@ function AssetSelector({ label, selected, onOpenPicker, disabled }: AssetSelecto
             style={{ animation: 'kkLogoFloat 3s ease-in-out infinite, kkLogoGlow 3s ease-in-out infinite' }}>
             <AssetIcon
               caip={selected.caip}
-              iconUrl={selected.icon}
+              iconUrl={squatter ? undefined : selected.icon}
               chainCaip={chainBadgeCaip(selected)}
               size={80}
               alt={selected.symbol}
-              ring="rgba(139,227,196,0.28)"
+              ring={squatter ? "rgba(255,107,107,0.5)" : "rgba(139,227,196,0.28)"}
             />
           </Box>
           {(() => {
@@ -650,6 +657,15 @@ function AssetSelector({ label, selected, onOpenPicker, disabled }: AssetSelecto
                 {selected.caip && (
                   <Text fontSize="9px" fontFamily="mono" color="kk.textMuted" opacity={0.6} whiteSpace="nowrap" textAlign="center">
                     {ellipsizeCaip(selected.caip)}
+                  </Text>
+                )}
+                {/* Symbol-squatter warning — a token impersonating a native coin's name */}
+                {squatter && (
+                  <Text fontSize="10px" fontWeight="700" color="#ff6b6b" textAlign="center" maxW="220px" lineHeight="1.3" mt="0.5">
+                    {t("symbolSquatterWarning", {
+                      defaultValue: "⚠ Unverified token using the “{{symbol}}” name — this is NOT the native coin. Verify the contract above.",
+                      symbol: selected.symbol,
+                    })}
                   </Text>
                 )}
               </VStack>

@@ -1440,8 +1440,3 @@ export interface UsbDiagnosticReport {
   /** Copy-ready plain-text report for pasting into a support request. */
   text: string
 }
-
-/** Result of a native "scan screen" capture (see src/bun/screen-capture.ts). */
-export type ScreenCaptureResult =
-  | { ok: true; images: string[] } // base64 PNG, one per display
-  | { ok: false; reason: 'permission' | 'unsupported' | 'failed'; message: string }

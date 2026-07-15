@@ -4,7 +4,7 @@ import { HttpError } from './auth'
 import type { SigningRequestInfo, ApiLogEntry, EIP712DecodedInfo } from '../shared/types'
 import { decodeEIP712 } from './eip712-decoder'
 import { decodeCalldata, firmwareClearSigns } from './calldata-decoder'
-import { CHAINS, isChainSupported } from '../shared/chains'
+import { CHAINS, isChainSupported, hiveRolePath } from '../shared/chains'
 import { isBitcoinOnlyVariant } from '../shared/flags'
 import {
   initializeOrchardFromDevice, scanOrchardNotes, getShieldedBalance,
@@ -1058,7 +1058,7 @@ const startTime = Date.now()
 const ROUTE_TO_CHAIN: Record<string, string> = {
   eth: 'ETH', utxo: 'BTC', cosmos: 'ATOM', osmosis: 'OSMO',
   thorchain: 'RUNE', mayachain: 'CACAO', xrp: 'XRP',
-  solana: 'SOL', tron: 'TRX', ton: 'TON',
+  solana: 'SOL', tron: 'TRX', ton: 'TON', hive: 'HIVE',
 }
 
 export function startRestApi(engine: EngineController, auth: AuthStore, port = 1646, callbacks?: RestApiCallbacks) {
@@ -2065,6 +2065,36 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           addressCache.set(cacheKey, address)
           auth.saveAccount(String(address), body.address_n)
           return json({ address })
+        }
+
+        if (path === '/hive/sign-transfer' && method === 'POST') {
+          auth.requireAuth(req)
+          // Same gates as /addresses/hive: feature flag + firmware ≥ 7.15.0
+          if (getSetting('hive_enabled') !== '1') return json({ error: 'Hive is disabled' }, 403)
+          const fwBlock = requireChainSupport('hive')
+          if (fwBlock) return fwBlock
+          const wallet = requireWallet(engine)
+          const body = await parseRequest(req, S.HiveSignTransferRequest)
+          const addressNList = body.addressNList || body.address_n || hiveRolePath('active', 0)
+          const result = await emuWrap(() => (wallet as any).hiveSignTx({
+            addressNList,
+            chainId: body.chain_id,
+            refBlockNum: body.ref_block_num,
+            refBlockPrefix: body.ref_block_prefix,
+            expiration: body.expiration,
+            from: body.from,
+            to: body.to,
+            amount: body.amount,
+            decimals: 3, // HIVE and HBD are both 3-decimal; matches the RPC path (txbuilder/hive.ts)
+            assetSymbol: body.asset_symbol || 'HIVE',
+            memo: body.memo,
+          }), { operation: 'hiveSignTx', chain: 'HIVE', to: body.to, value: String(body.amount) })
+          if (!result?.signature) throw new HttpError(500, 'Hive sign: device returned no signature')
+          const toHexStr = (v: any) => v instanceof Uint8Array ? Buffer.from(v).toString('hex') : String(v)
+          return json({
+            signature: toHexStr(result.signature),
+            serialized_tx: toHexStr(result.serializedTx),
+          })
         }
 
         // ── ETH SIGNING (4 endpoints) ────────────────────────────────
