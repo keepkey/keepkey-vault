@@ -6,6 +6,7 @@ import { HIDKeepKeyAdapter } from '@keepkey/hdwallet-keepkey-nodehid'
 import { NodeWebUSBKeepKeyAdapter } from '@keepkey/hdwallet-keepkey-nodewebusb'
 import { usb } from 'usb'
 import { saveDeviceSnapshot, saveEmulatorWalletMeta, clearNonBitcoinBalances } from './db'
+import { HttpError } from './auth'
 import { isBitcoinOnlyVariant } from '../shared/flags'
 import type { DeviceStateInfo, ActiveTransport, UpdatePhase, DeviceState, FirmwareManifest, PinRequestType, Bip85DeriveParams, Bip85DisplayResult } from '../shared/types'
 import { resolveOndeviceFirmwareVersion } from '../shared/firmware-versions'
@@ -149,6 +150,17 @@ export class EngineController extends EventEmitter {
   private lastCharacterRequest: { wordPos: number; characterPos: number } | null = null
   private characterRequestSeq = 0
   private recoveryActive = false // true only while a recover/reset flow drives the cipher
+  // Identity (bearer apiKey) of the REST/SDK client that started the active
+  // cipher recovery. Only that client may drive character input — a second
+  // paired client (or a stray parallel request) must not inject or reorder
+  // recovery characters. null when recovery is UI-driven or not running.
+  private recoveryOwner: string | null = null
+  // Highest character seq already accepted this recovery session, and an
+  // in-flight guard — together they serialize character sends so two
+  // concurrent same-seq sends can't both reach the device (the claim is set
+  // synchronously before the await, so the second request sees it).
+  private lastAcceptedCharSeq = -1
+  private recoverySendInFlight = false
   private pinRequestCount = 0
   // Tracks whether promptPin() → getPublicKeys() is still awaiting resolution.
   // While active, sendPin/sendPassphrase must NOT call getFeatures — that would
@@ -2010,11 +2022,116 @@ export class EngineController extends EventEmitter {
     }
   }
 
-  /** Marks a cipher-recovery/reset flow active. The REST recover-device handler
-   *  wraps the call so /system/recovery/state reports active only while entry is
-   *  in progress. (seq stays monotonic so callers can sync on the next request.) */
-  setRecoveryActive(active: boolean) {
-    this.recoveryActive = active
+  /** Begin a REST/SDK-driven cipher recovery owned by `ownerId` (the caller's
+   *  bearer apiKey). Sets setupInProgress so syncState()/getFeatures() back off
+   *  the transport — a concurrent GetFeatures corrupts the CharacterAck flow
+   *  (see syncState). The REST recover-device handler wraps wallet.recover()
+   *  between this and endRecovery(). */
+  beginRecovery(ownerId: string) {
+    // Reject a concurrent start: without this, a second recover-device call
+    // would overwrite recoveryOwner and steal the lock while the first device
+    // operation is still running (and the first's finally would then clear the
+    // second's session).
+    if (this.recoveryActive || this.setupInProgress || this.verifyInProgress) {
+      throw new HttpError(409, 'Another device setup or recovery is already in progress')
+    }
+    this.setupInProgress = true
+    this.recoveryActive = true
+    this.recoveryOwner = ownerId
+    this.pinRequestCount = 0
+    // Fresh session: clear the outstanding CharacterRequest so no send is
+    // accepted until the device actually asks for this session's first
+    // character. characterRequestSeq is deliberately NOT reset — it stays
+    // MONOTONIC across sessions, so a stale seq from a prior recovery is always
+    // < the current seq (rejected by the strict-equality check) and there is no
+    // seq==0 window that would accept a character before the device requests one.
+    this.lastCharacterRequest = null
+    this.recoverySendInFlight = false
+  }
+
+  /** End a REST/SDK-driven recovery (success or failure). */
+  endRecovery() {
+    this.setupInProgress = false
+    this.recoveryActive = false
+    this.recoveryOwner = null
+    this.recoverySendInFlight = false
+    this.pinRequestCount = 0
+  }
+
+  /** Single atomic path for EVERY recovery acknowledgement (character / delete /
+   *  done). All three share one in-flight guard so competing HTTP requests can't
+   *  race or double-send unlocked CharacterAcks. Owner + seq checks and the
+   *  seq-claim run synchronously before the await, so a second concurrent call
+   *  sees the claim (or the guard) and is rejected with 409. A character is
+   *  additionally refused until the device has actually issued a CharacterRequest
+   *  (lastCharacterRequest present) — otherwise a send at the initial seq would
+   *  corrupt the transport before the device asks for anything. */
+  async submitRecoveryAck(
+    ownerId: string,
+    action: 'character' | 'delete' | 'done',
+    opts: { character?: string; expectedSeq?: number } = {},
+  ) {
+    // done has no seq; delete may pin one; character requires one.
+    this.assertRecoveryOwner(ownerId, action === 'done' ? undefined : opts.expectedSeq)
+    // NO acknowledgement of any kind (character, delete, or done) before the
+    // device has actually issued a CharacterRequest — an out-of-turn CharacterAck
+    // during the recover-confirm window corrupts the in-flight recover() loop.
+    if (!this.lastCharacterRequest) {
+      throw new HttpError(409, 'Device has not requested a character yet')
+    }
+    if (action === 'character') {
+      if (opts.expectedSeq === undefined) {
+        throw new HttpError(400, 'character requires seq')
+      }
+      if (opts.expectedSeq <= this.lastAcceptedCharSeq) {
+        throw new HttpError(409, `Recovery seq ${opts.expectedSeq} was already sent`)
+      }
+    }
+    if (this.recoverySendInFlight) {
+      throw new HttpError(409, 'A recovery acknowledgement is already in flight')
+    }
+    this.recoverySendInFlight = true
+    const prevAcceptedCharSeq = this.lastAcceptedCharSeq
+    if (action === 'character') this.lastAcceptedCharSeq = opts.expectedSeq! // claim before the await
+    try {
+      if (action === 'character') await this.sendCharacter(opts.character!)
+      else if (action === 'delete') await this.sendCharacterDelete()
+      else await this.sendCharacterDone()
+    } catch (err) {
+      // The send never reached the device (transport error) — roll the seq claim
+      // back so a legitimate retry at the same (still-current) seq isn't wedged
+      // as "already sent" until a disconnect.
+      this.lastAcceptedCharSeq = prevAcceptedCharSeq
+      throw err
+    } finally {
+      this.recoverySendInFlight = false
+    }
+  }
+
+  /** Gate a recovery character mutation to the initiating client and, when the
+   *  caller passes the seq it last saw, to that exact CharacterRequest — so a
+   *  stale, duplicated, or reordered send (or one from another paired client)
+   *  is rejected instead of silently corrupting the decoded word. Throws
+   *  HttpError(409) on any mismatch. */
+  assertRecoveryOwner(ownerId: string, expectedSeq?: number) {
+    if (!this.recoveryActive || !this.recoveryOwner) {
+      throw new HttpError(409, 'No cipher recovery is in progress')
+    }
+    if (this.recoveryOwner !== ownerId) {
+      throw new HttpError(409, 'Cipher recovery is owned by a different client')
+    }
+    if (expectedSeq !== undefined && expectedSeq !== this.characterRequestSeq) {
+      throw new HttpError(
+        409,
+        `Stale recovery seq: expected ${this.characterRequestSeq}, got ${expectedSeq}`,
+      )
+    }
+  }
+
+  /** True when `ownerId` may read live recovery state (owner, or no active
+   *  recovery so there is nothing owned to protect). */
+  canReadRecoveryState(ownerId: string): boolean {
+    return !this.recoveryActive || this.recoveryOwner === ownerId
   }
 
   /** Clear recovery progress — called on disconnect so /system/recovery/state
@@ -2022,7 +2139,14 @@ export class EngineController extends EventEmitter {
   private resetRecoveryState() {
     this.lastCharacterRequest = null
     this.characterRequestSeq = 0
+    this.lastAcceptedCharSeq = -1
+    this.recoverySendInFlight = false
     this.recoveryActive = false
+    this.recoveryOwner = null
+    // A device yanked mid-recovery also drops the transport lock; the REST
+    // handler's finally will call endRecovery() too, but clear it here so a
+    // UI-path recovery interrupted by unplug doesn't wedge setupInProgress.
+    this.setupInProgress = false
   }
 
   resetUpdatePhase() {

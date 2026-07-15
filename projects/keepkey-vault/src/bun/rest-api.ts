@@ -39,6 +39,8 @@ import {
   type TonBuildResult,
 } from './txbuilder/ton'
 import { usb } from 'usb'
+import { handleMcpRequest } from './mcp'
+import { onBexOpen, onBexClose, onBexMessage } from './bex-bridge'
 
 export interface EmuSigningDetails {
   operation: string
@@ -1243,7 +1245,71 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         return resp
       }
 
-      // CORS preflight
+      // ── MCP agent bridge (EPIC_mcp_agent_bridge.md, keepkey-client) ──
+      // LOOPBACK + LOCAL-AGENT ONLY, handled BEFORE the shared CORS/OPTIONS
+      // path below so /mcp owns its own preflight and never inherits the
+      // permissive wildcard CORS the rest of the (bearer-authed) API uses.
+      //
+      // A loopback peer IP is NOT a trust boundary against web pages: a
+      // fetch() from ANY site the user visits has peer 127.0.0.1 because the
+      // browser runs locally. /mcp carries no bearer token (so `claude mcp
+      // add` stays zero-config), so browsers are excluded two other ways:
+      //   1. reject any non-local Origin — the MCP Streamable-HTTP
+      //      DNS-rebinding defense. A local CLI agent sends no Origin; every
+      //      browser request (incl. a DNS-rebound public page pointing at
+      //      127.0.0.1) carries one.
+      //   2. never emit ACAO:* / Allow-Private-Network on /mcp — without them
+      //      a browser can neither read the response nor clear Chrome's PNA
+      //      preflight. The BEX Agent-mode toggle is a second gate, not the only one.
+      // /bex-bridge stays token-gated (the extension is a chrome-extension://
+      // origin needing a valid pairing key; https→ws://localhost is
+      // mixed-content-blocked for web pages regardless).
+      if (path === '/mcp' || path === '/bex-bridge') {
+        const ip = server.requestIP(req)?.address
+        const isLoopback = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1'
+        if (!isLoopback) {
+          return new Response(JSON.stringify({ error: 'loopback only' }),
+            { status: 403, headers: { 'Content-Type': 'application/json' } })
+        }
+
+        if (path === '/bex-bridge') {
+          // BEX authenticates with its existing pairing key. Browser WebSocket
+          // can't set an Authorization header, so the key arrives as ?token=.
+          const token = url.searchParams.get('token') || auth.extractBearerToken(req)
+          if (!token || !auth.validate(token)) {
+            return new Response('Unauthorized', { status: 401 })
+          }
+          if (server.upgrade(req)) return undefined as any
+          return new Response('WebSocket upgrade failed', { status: 400 })
+        }
+
+        // /mcp is BEARER-AUTHENTICATED with the same pairing API keys as the
+        // rest of the REST API (see the auth.requireAuth below) AND excludes all
+        // browser traffic. Both matter: a localhost-origin allowlist is not a
+        // boundary because the vault serves browser content at its OWN origin
+        // (the /wc dApp reverse-proxy below, the Swagger UI that loads remote JS
+        // from unpkg) which runs as http://localhost:1646 — and such content may
+        // even hold the user's bearer token. A browser attaches an `Origin`
+        // header to every non-GET request (incl. same-origin POST) and
+        // `Sec-Fetch-Site` to every request, and JS cannot strip either (both are
+        // forbidden header names); a non-browser agent sends neither.
+        if (req.headers.get('origin') !== null || req.headers.get('sec-fetch-site') !== null) {
+          return new Response(JSON.stringify({ error: '/mcp is not reachable from a browser' }),
+            { status: 403, headers: { 'Content-Type': 'application/json' } })
+        }
+        if (method === 'OPTIONS') return new Response(null, { status: 204 }) // deliberately no CORS grant
+        if (method === 'POST') {
+          // Require a valid pairing bearer token — configure the agent with
+          //   claude mcp add keepkey --transport http http://localhost:1646/mcp \
+          //     --header "Authorization: Bearer <pairing-key>"
+          auth.requireAuth(req)
+          return handleMcpRequest(req, {})
+        }
+        return new Response(JSON.stringify({ error: 'POST only' }),
+          { status: 405, headers: { 'Content-Type': 'application/json' } })
+      }
+
+      // CORS preflight (all other paths — bearer-token-authed API)
       if (method === 'OPTIONS') {
         return new Response(null, { status: 204, headers: corsHeaders(req) })
       }
@@ -3844,10 +3910,15 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         }
 
         if (path === '/system/initialize/recover-device' && method === 'POST') {
-          auth.requireAuth(req)
+          const client = auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.RecoverDeviceRequest)
-          engine.setRecoveryActive(true)
+          // beginRecovery sets setupInProgress so syncState()/getFeatures()
+          // back off the transport — a concurrent GetFeatures corrupts the
+          // CharacterAck exchange (engine syncState comment). It also binds
+          // this recovery to the calling client so no other paired app can
+          // drive the character input.
+          engine.beginRecovery(client.apiKey)
           try {
             await wallet.recover({
               entropy: body.word_count ? ({ 12: 128, 18: 192, 24: 256 } as Record<number, number>)[body.word_count] || 128 : 128,
@@ -3857,7 +3928,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               autoLockDelayMs: 600000,
             })
           } finally {
-            engine.setRecoveryActive(false)
+            engine.endRecovery()
           }
           featuresCache = null
           return json({ success: true })
@@ -3873,9 +3944,16 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         }
 
         if (path === '/system/recovery/pin' && method === 'POST') {
-          auth.requireAuth(req)
+          const client = auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.SendPinRequest)
+          // During an owned recovery, only the initiating client may send the
+          // recovery PIN — otherwise a second paired client could inject PIN
+          // acknowledgements into someone else's flow. (When no REST recovery
+          // is active this is a no-op, so other PIN flows are unaffected.)
+          if (!engine.canReadRecoveryState(client.apiKey)) {
+            throw new HttpError(409, 'Cipher recovery is owned by a different client')
+          }
           await wallet.sendPin(body.pin)
           return json({ success: true })
         }
@@ -3884,32 +3962,45 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         // on the OLED and the host relays the ciphered characters (CharacterAck).
         // Mirrors /system/recovery/pin. The recover-device call rejects with
         // "Word not found in BIP39 wordlist" when a finalized word is invalid.
+        // Only the client that started recovery may drive it, and (when it
+        // sends the seq it last read from /state) the send is pinned to that
+        // exact CharacterRequest — a stale/reordered/foreign send is a 409, not
+        // a silently corrupted word. Input goes through engine.sendCharacter*,
+        // which additionally guards on setupInProgress.
         if (path === '/system/recovery/character' && method === 'POST') {
-          auth.requireAuth(req)
-          const wallet = requireWallet(engine)
+          const client = auth.requireAuth(req)
           const body = await parseRequest(req, S.SendCharacterRequest)
-          await wallet.sendCharacter(body.character)
+          // All three acks share ONE atomic, in-flight-guarded engine path, so
+          // no two competing requests can race or double-send a CharacterAck.
+          await engine.submitRecoveryAck(client.apiKey, 'character', { character: body.character, expectedSeq: body.seq })
           return json({ success: true })
         }
 
         if (path === '/system/recovery/character/delete' && method === 'POST') {
-          auth.requireAuth(req)
-          const wallet = requireWallet(engine)
-          await wallet.sendCharacterDelete()
+          const client = auth.requireAuth(req)
+          // seq optional here (delete is corrective) — tolerate an empty body
+          // rather than forcing JSON like parseRequest does.
+          const body = (await req.json().catch(() => ({}))) as { seq?: unknown }
+          const seq = typeof body.seq === 'number' ? body.seq : undefined
+          await engine.submitRecoveryAck(client.apiKey, 'delete', { expectedSeq: seq })
           return json({ success: true })
         }
 
         if (path === '/system/recovery/character/done' && method === 'POST') {
-          auth.requireAuth(req)
-          const wallet = requireWallet(engine)
-          await wallet.sendCharacterDone()
+          const client = auth.requireAuth(req)
+          await engine.submitRecoveryAck(client.apiKey, 'done')
           return json({ success: true })
         }
 
         // Current cipher-recovery state. `seq` advances each time the device asks
         // for the next character, so a caller can sync sends with the device.
+        // While a recovery is active, only its owning client may read live
+        // positions — a second paired app must not observe the flow.
         if (path === '/system/recovery/state' && method === 'GET') {
-          auth.requireAuth(req)
+          const client = auth.requireAuth(req)
+          if (!engine.canReadRecoveryState(client.apiKey)) {
+            throw new HttpError(409, 'Cipher recovery is owned by a different client')
+          }
           return json(engine.getRecoveryState())
         }
 
@@ -4203,6 +4294,12 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         activeSigningId = undefined
         activeSigningInfo = undefined
       }
+    },
+    // WS endpoint for the BEX agent bridge (/bex-bridge upgrade above).
+    websocket: {
+      open(ws) { onBexOpen(ws) },
+      message(ws, data) { onBexMessage(ws, data as string | Buffer) },
+      close(ws) { onBexClose(ws) },
     },
   })
 

@@ -394,9 +394,13 @@ export const SendPinRequest = z.object({
   pin: z.string().min(1),
 }).passthrough()
 
-/** POST /system/recovery/character — one ciphered character during cipher recovery */
+/** POST /system/recovery/character — one ciphered character during cipher recovery.
+ *  `seq` is the value the caller last read from GET /system/recovery/state; the
+ *  server rejects the send (409) if it no longer matches the device's current
+ *  CharacterRequest, so a stale/duplicated/reordered send can't corrupt the word. */
 export const SendCharacterRequest = z.object({
   character: z.string().min(1).max(1),
+  seq: z.number().int().min(0),
 }).passthrough()
 
 // ── Zcash Shielded (Orchard) ─────────────────────────────────────────

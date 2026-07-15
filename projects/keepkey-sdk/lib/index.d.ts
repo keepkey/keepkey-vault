@@ -133,12 +133,19 @@ export declare class KeepKeySdk {
              * character the user "typed". A finalized word that isn't in the BIP-39
              * wordlist makes the in-flight `recoverDevice()` promise reject with
              * "Word not found in BIP39 wordlist".
+             *
+             * `seq` is the value last read from `getRecoveryState()`. The vault pins
+             * the send to that exact CharacterRequest and to the client that started
+             * recovery — a stale, reordered, or foreign send is rejected with 409
+             * rather than silently corrupting the decoded word.
              */
-            sendCharacter: (character: string) => Promise<{
+            sendCharacter: (character: string, seq: number) => Promise<{
                 success: boolean;
             }>;
-            /** Delete the last character entered during cipher recovery. */
-            sendCharacterDelete: () => Promise<{
+            /** Delete the last character entered during cipher recovery. Pass the
+             *  current `seq` (from `getRecoveryState()`) to pin the delete; the
+             *  initiating-client check applies either way. */
+            sendCharacterDelete: (seq?: number) => Promise<{
                 success: boolean;
             }>;
             /** Finalize cipher-recovery word/seed entry (equivalent to pressing "next"). */
@@ -217,9 +224,12 @@ export declare class KeepKeySdk {
         /** Sign an Ethereum or EVM transaction. Supports legacy and EIP-1559. */
         ethSignTransaction: (params: EthSignTxParams) => Promise<SignedTx>;
         /**
-         * Load a runtime EVM clear-sign signer into a device key slot (RAM-only,
-         * user-confirmed on device). The device shows a trust screen naming the
-         * alias + pubkey fingerprint. Dropped on reboot/wipe — reload per session.
+         * Load an EVM clear-sign signer into a device key slot (user-confirmed on
+         * device). The device shows a trust screen naming the alias + pubkey
+         * fingerprint. Default is RAM-only (dropped on reboot — reload per session);
+         * pass `persist: true` to keep it in device flash across reboots (until
+         * WipeDevice). An optional `icon` (+ `iconWidth`/`iconHeight`) renders the
+         * identity's logo on the trust screen and every clear-sign it vouches for.
          * Firmware 7.15.0+. Used to trust a metadata-signing key (e.g. a CI test
          * key in slot 3) so `ethSignTransaction`'s `txMetadata` blobs verify.
          */

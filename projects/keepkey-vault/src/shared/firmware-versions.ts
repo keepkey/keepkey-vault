@@ -58,6 +58,11 @@ export const FIRMWARE_VERSION_MAP: FirmwareVersionInfo[] = [
       },
       {
         title: 'Hive Support',
+        // comingSoon until the Hive firmware batch actually ships in a tagged
+        // build — the 7.15.0 rc line does not contain it yet, and a custom
+        // build detected as 7.15.0 would otherwise advertise it as present.
+        // Flip to false in the release that lands the Hive firmware stack.
+        comingSoon: true,
         description: 'Send, receive, and sign Hive transactions with sponsor-backed account onboarding.',
         chains: ['hive'],
         color: '#E31337',
