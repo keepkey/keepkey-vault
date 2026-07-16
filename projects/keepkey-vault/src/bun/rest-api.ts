@@ -1302,7 +1302,19 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           // Require a valid pairing bearer token — configure the agent with
           //   claude mcp add keepkey --transport http http://localhost:1646/mcp \
           //     --header "Authorization: Bearer <pairing-key>"
-          auth.requireAuth(req)
+          //
+          // requireAuth signals failure by THROWING HttpError, and this whole
+          // /mcp block runs before the try/catch further down that turns an
+          // HttpError into its status — Bun.serve has no top-level `error`
+          // handler either, so an uncaught throw escapes fetch() and the agent
+          // gets a dropped socket ("fetch failed") instead of 401. Catch here.
+          try {
+            auth.requireAuth(req)
+          } catch (err: any) {
+            return new Response(JSON.stringify({ error: err?.message || 'Unauthorized' }),
+              { status: typeof err?.status === 'number' ? err.status : 401,
+                headers: { 'Content-Type': 'application/json' } })
+          }
           return handleMcpRequest(req, {})
         }
         return new Response(JSON.stringify({ error: 'POST only' }),
