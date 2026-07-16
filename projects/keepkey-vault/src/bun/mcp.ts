@@ -168,10 +168,14 @@ export async function handleMcpRequest(req: Request, cors: Record<string, string
     case 'tools/call': {
       const name = params?.name
       const args = params?.arguments ?? {}
-      // No name guard here: the vault no longer knows the catalog. executeTool's
-      // default branch in the BEX throws {code:'unknown_tool'}, which the catch
-      // below surfaces as an isError result — one rejection path, in the process
-      // that owns the names.
+      // We validate the SHAPE of the request; the BEX owns which names are real.
+      // A falsy/non-string name must be rejected here: the BEX drops frames with
+      // a non-truthy `tool` without replying (mcpBridge.ts `if (!msg?.id ||
+      // !msg?.tool) return`), so forwarding one would hang out the full
+      // CALL_TIMEOUT_MS instead of failing now.
+      if (typeof name !== 'string' || name === '') {
+        return rpcError(id, -32602, 'Invalid params: name must be a non-empty string', undefined, cors)
+      }
       try {
         const result = (await callBex(name, args)) as any
         // The BEX may answer with MCP content blocks already (bex_snapshot
@@ -186,6 +190,13 @@ export async function handleMcpRequest(req: Request, cors: Record<string, string
         if (name === 'bex_status' && err?.code === 'bridge_disconnected') {
           const status = { bridge: 'down', ...bridgeStatus(), error: err.message }
           return rpcResult(id, { content: [{ type: 'text', text: JSON.stringify(status, null, 2) }] }, cors)
+        }
+        // An unknown tool is a PROTOCOL error per the MCP tools spec, not a
+        // tool-execution failure — isError is for a valid tool that failed. The
+        // BEX still owns the names; we only translate its verdict back into the
+        // JSON-RPC envelope the spec asks for.
+        if (err?.code === 'unknown_tool') {
+          return rpcError(id, -32602, err.message || `unknown tool: ${name}`, undefined, cors)
         }
         // Tool-level failure → isError result (MCP convention), never a hang.
         const payload = { error: err?.code || 'tool_error', message: err?.message || String(e) }

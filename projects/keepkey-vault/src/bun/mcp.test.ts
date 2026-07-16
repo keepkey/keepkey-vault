@@ -90,14 +90,24 @@ describe('MCP JSON-RPC handler', () => {
     expect(json.error.code).toBe(-32601)
   })
 
-  test('unknown tool is no longer rejected here — it goes to the BEX, which owns the names', async () => {
-    // The vault has no catalog to check against, so an unknown name is NOT a
-    // -32602 anymore: it is forwarded, and the BEX's unknown_tool surfaces as
-    // an isError result. Bridge down here, so the disconnect is what surfaces —
-    // either way, a result, never a JSON-RPC error.
+  test('an unknown (but well-formed) tool name is forwarded, not rejected on the catalog', async () => {
+    // The vault has no catalog to check against, so the name itself is the
+    // BEX's call. Bridge is down here, so what surfaces is the disconnect —
+    // an execution failure, hence isError rather than a protocol error.
     const { json } = await call({ jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'nope' } })
     expect(json.error).toBeUndefined()
     expect(json.result.isError).toBe(true)
+  })
+
+  test.each([
+    ['missing', undefined],
+    ['empty', ''],
+    ['non-string', 42],
+  ])('a %s tool name → -32602 immediately, never a 30s bridge timeout', async (_label, name) => {
+    // The BEX drops frames with a falsy `tool` without ever replying, so
+    // forwarding one would hang until CALL_TIMEOUT_MS. Shape is ours to check.
+    const { json } = await call({ jsonrpc: '2.0', id: 6, method: 'tools/call', params: { name } })
+    expect(json.error.code).toBe(-32602)
   })
 
   test('bex_status answers truthfully with the bridge DOWN (never hangs)', async () => {
@@ -126,6 +136,10 @@ describe('MCP dumb pipe (bridge UP)', () => {
     const ws = {
       send(raw: string) {
         const { id, tool } = JSON.parse(raw)
+        // Mirrors the real BEX: a frame without a truthy id/tool is dropped with
+        // NO reply (mcpBridge.ts `if (!msg?.id || !msg?.tool) return`). That
+        // silence is exactly what makes an unvalidated name hang for 30s.
+        if (!id || !tool) return
         const result = replies[tool]
         queueMicrotask(() =>
           onBexMessage(ws as any, JSON.stringify(
@@ -162,13 +176,25 @@ describe('MCP dumb pipe (bridge UP)', () => {
     expect(JSON.parse(json.result.content[0].text)).toEqual({ ethereum: '0xabc' })
   })
 
-  test("the BEX's unknown_tool surfaces as an isError result", async () => {
+  test("the BEX's unknown_tool becomes a -32602 protocol error, per the MCP tools spec", async () => {
+    // isError is for a valid tool that failed while executing; an unknown tool
+    // is a protocol error. The BEX still decides — we only translate.
     const ws = open = fakeBex({})
     onBexOpen(ws as any)
     const { json } = await call({ jsonrpc: '2.0', id: 13, method: 'tools/call', params: { name: 'nope' } })
-    expect(json.result.isError).toBe(true)
-    expect(JSON.parse(json.result.content[0].text).error).toBe('unknown_tool')
+    expect(json.result).toBeUndefined()
+    expect(json.error.code).toBe(-32602)
   })
+
+  test('an empty tool name fails fast rather than hanging on a BEX that never replies', async () => {
+    // Regression: without the shape guard this forwards to a BEX that silently
+    // drops it, and the call sits for the full CALL_TIMEOUT_MS (30s). If this
+    // ever starts timing out instead of asserting, the guard is gone.
+    const ws = open = fakeBex({ bex_status: { ok: true } })
+    onBexOpen(ws as any)
+    const { json } = await call({ jsonrpc: '2.0', id: 14, method: 'tools/call', params: { name: '' } })
+    expect(json.error.code).toBe(-32602)
+  }, 1000) // must resolve WAY inside the 30s bridge timeout
 })
 
 describe('BEX bridge call lifecycle', () => {
