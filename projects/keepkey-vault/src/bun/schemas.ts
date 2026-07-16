@@ -200,7 +200,7 @@ export const HiveSignOperationsRequest = z.object({
   address_n: z.array(z.number().int()).optional(),
   addressNList: z.array(z.number().int()).optional(),
   /** condenser-style tuples: [["vote", {...}], ...] — max 4, single tier */
-  operations: z.array(z.tuple([z.string(), z.record(z.any())])).min(1).max(4),
+  operations: z.array(z.tuple([z.string(), z.record(z.string(), z.any())])).min(1).max(4),
 }).strip()
 
 /** POST /hive/sign-transfer — Graphene transfer op, serialized + signed on-device (fw 7.15.0+) */
