@@ -2206,6 +2206,22 @@ pub async fn build_deshield_pczt(
     let total_input: u64 = notes.iter().map(|n| n.value).sum();
 
     let n_spends = notes.len();
+
+    // Firmware caps a signing session at ZCASH_MAX_ACTIONS (16) Orchard
+    // actions and rejects at ZcashSignPCZT — but only after we'd already
+    // spent minutes on tree building + Halo2 proving. Fail fast instead.
+    // ponytail: no note selection — consolidate via a z2z self-send first.
+    const FIRMWARE_MAX_ACTIONS: usize = 16;
+    if n_spends > FIRMWARE_MAX_ACTIONS {
+        return Err(anyhow::anyhow!(
+            "Deshield would spend {} notes but the device supports at most {} \
+             Orchard actions per transaction. Consolidate notes with a shielded \
+             send to your own address first.",
+            n_spends,
+            FIRMWARE_MAX_ACTIONS
+        ));
+    }
+
     let fee = zip317_deshield_fee(n_spends);
 
     let needed = amount
