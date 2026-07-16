@@ -11,9 +11,12 @@
  * responses (no SSE stream, no sessions; both optional per spec). Swap in the
  * SDK if we ever need notifications/resources.
  *
- * All tools execute inside the BEX; this file only owns the tool CATALOG and
- * the forwarding. Bridge down → structured bridge_disconnected error
- * (bex_status instead answers truthfully so agents can always probe).
+ * All tools execute inside the BEX, and the BEX also owns the CATALOG: this
+ * file is a dumb pipe that serves whatever bex_list_tools reports and passes
+ * tool content straight through. A new BEX tool therefore ships without a vault
+ * release. Bridge down → structured bridge_disconnected error, and tools/list
+ * serves FALLBACK_TOOLS (bex_status instead answers truthfully so agents can
+ * always probe).
  *
  * AUTH: /mcp requires a valid pairing bearer token — the SAME API keys as the
  * rest of the REST API (auth.requireAuth in rest-api's /mcp block). A local
@@ -34,8 +37,12 @@ const PROTOCOL_VERSION = '2025-06-18'
 // negotiation), else offer ours.
 const SUPPORTED_PROTOCOL_VERSIONS = new Set(['2025-06-18', '2025-03-26', '2024-11-05'])
 
-// Tier-1 read-only tools (Phase 1). Tier-2 control tools land in Phase 2.
-const TOOLS = [
+// FALLBACK ONLY — not the source of truth. The BEX owns the catalog and
+// answers bex_list_tools; these five tier-1 entries are served by tools/list
+// only when the bridge is down, so `claude mcp add` still succeeds and the
+// agent can reach bex_status to find out why. Do NOT add tools here: a new tool
+// belongs in the BEX alone (HANDOFF_vault_mcp_dumb_pipe.md, keepkey-client).
+const FALLBACK_TOOLS = [
   {
     name: 'bex_status',
     description:
@@ -83,8 +90,6 @@ const TOOLS = [
     },
   },
 ]
-
-const TOOL_NAMES = new Set(TOOLS.map(t => t.name))
 
 const json = (body: unknown, status = 200, cors: Record<string, string> = {}) =>
   new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json', ...cors } })
@@ -146,15 +151,34 @@ export async function handleMcpRequest(req: Request, cors: Record<string, string
     case 'ping':
       return rpcResult(id, {}, cors)
 
-    case 'tools/list':
-      return rpcResult(id, { tools: TOOLS }, cors)
+    case 'tools/list': {
+      // The BEX owns its catalog; we serve whatever it reports. This is what
+      // keeps a new tool a one-repo change.
+      try {
+        const { tools } = (await callBex('bex_list_tools', {})) as { tools: unknown[] }
+        return rpcResult(id, { tools }, cors)
+      } catch {
+        // Bridge down (BEX closed, or Agent mode off) — serve the static
+        // fallback so tools/list still succeeds. Note: a connected-but-
+        // unresponsive BEX costs the full CALL_TIMEOUT_MS before landing here.
+        return rpcResult(id, { tools: FALLBACK_TOOLS }, cors)
+      }
+    }
 
     case 'tools/call': {
       const name = params?.name
       const args = params?.arguments ?? {}
-      if (!TOOL_NAMES.has(name)) return rpcError(id, -32602, `unknown tool: ${name}`, undefined, cors)
+      // No name guard here: the vault no longer knows the catalog. executeTool's
+      // default branch in the BEX throws {code:'unknown_tool'}, which the catch
+      // below surfaces as an isError result — one rejection path, in the process
+      // that owns the names.
       try {
-        const result = await callBex(name, args)
+        const result = (await callBex(name, args)) as any
+        // The BEX may answer with MCP content blocks already (bex_snapshot
+        // returns pre-formatted text; bex_screenshot returns an image). Pass
+        // those through untouched — JSON-stringifying them would double-encode
+        // the text and mangle the image.
+        if (result && Array.isArray(result.content)) return rpcResult(id, result, cors)
         return rpcResult(id, { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] }, cors)
       } catch (e: any) {
         const err = e as BridgeError
