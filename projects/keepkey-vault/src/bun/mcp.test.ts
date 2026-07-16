@@ -9,13 +9,6 @@ import { describe, test, expect, afterEach } from 'bun:test'
 import { handleMcpRequest } from './mcp'
 import { callBex, onBexOpen, onBexClose, onBexMessage, bridgeConnected } from './bex-bridge'
 
-function post(body: unknown): Request {
-  return new Request('http://localhost:1646/mcp', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: typeof body === 'string' ? body : JSON.stringify(body),
-  })
-}
 const call = async (body: unknown, headers?: Record<string, string>) => {
   const req = new Request('http://localhost:1646/mcp', {
     method: 'POST',
