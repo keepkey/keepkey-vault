@@ -34,10 +34,11 @@ interface DeshieldBuildResult {
 			cmx: string; epk: string; enc_compact: string; enc_memo: string
 			enc_noncompact: string; rk: string; out_ciphertext: string
 			value: number; is_spend: boolean
+			recipient?: string; rseed?: string
 		}>
 		display: { amount: string; fee: string; to: string }
 	}
-	transparent_outputs: Array<{ value: number; script_pubkey: string }>
+	transparent_outputs: Array<{ index: number; value: number; script_pubkey: string }>
 	display: { amount: string; fee: string; action: string }
 }
 
@@ -110,14 +111,22 @@ async function _deshieldZecInner(
 	console.log(`[zcash-deshield] PCZT built: ${sr.n_actions} Orchard actions`)
 	console.log(`[zcash-deshield] Display: ${buildResult.display.amount} → ${buildResult.display.action}`)
 
-	// 2. Device signs Orchard actions (same as shielded send — no transparent signing needed)
+	// 2. Device signs Orchard actions (same as shielded send — no transparent signing needed).
+	// The transparent output MUST be declared and streamed: the firmware recomputes the
+	// transparent digest from plaintext (reviewing the t-address + amount on-device) and
+	// derives the sighash from it. Omitting it makes the device sign against the EMPTY
+	// transparent digest — an invalid signature — and fail the fee gate (value_balance ≠ fee).
 	console.log("[zcash-deshield] Requesting device signatures...")
 	opts?.onProgress?.("signing")
 	if (typeof wallet.zcashSignPczt !== "function") {
 		throw new Error("hdwallet does not support zcashSignPczt — ensure Zcash-capable firmware")
 	}
+	if (!Array.isArray(buildResult.transparent_outputs) || buildResult.transparent_outputs.length === 0) {
+		throw new Error("Sidecar returned no transparent_outputs for deshield — refusing to sign")
+	}
 
-	const signFn = () => wallet.zcashSignPczt(sr, sr.sighash)
+	const signingRequest = { ...sr, transparent_outputs: buildResult.transparent_outputs }
+	const signFn = () => wallet.zcashSignPczt(signingRequest, sr.sighash)
 	const signatures = opts?.signWrap ? await opts.signWrap(signFn) : await signFn()
 	if (!signatures || !Array.isArray(signatures)) {
 		throw new Error("Device did not return signatures")
