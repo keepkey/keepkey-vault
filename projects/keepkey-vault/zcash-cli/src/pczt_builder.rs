@@ -2647,8 +2647,11 @@ pub async fn build_deshield_pczt(
             .unwrap_or_else(|| vec![0u8; 32]);
         let cv_net_bytes = pczt_bundle.actions()[i].cv_net().to_bytes().to_vec();
         let is_spend = pczt_bundle.actions()[i].spend().spend_auth_sig().is_none();
+        // Firmware verifies the OUTPUT note commitment per action
+        // (cmx = commit(recipient, value, rseed, rho)) — always send
+        // output.value(), not spend.value(). Same as build_pczt.
         let value = pczt_bundle.actions()[i]
-            .spend()
+            .output()
             .value()
             .map(|v| v.inner())
             .unwrap_or(0);
@@ -2666,6 +2669,17 @@ pub async fn build_deshield_pczt(
         }
         let rk_bytes: [u8; 32] = effects_action.rk().into();
 
+        // Every Orchard action carries a spend+output pair; the firmware
+        // requires recipient+rseed on EVERY action to recompute cmx before
+        // signing. The PCZT stores the plaintext directly — read it, same
+        // as build_pczt / build_shield_pczt.
+        let out = pczt_bundle.actions()[i].output();
+        let orchard_recipient = out
+            .recipient()
+            .as_ref()
+            .map(|addr| hex::encode(addr.to_raw_address_bytes()));
+        let orchard_rseed = out.rseed().as_ref().map(|rs| hex::encode(rs.as_bytes()));
+
         action_fields.push(ActionFields {
             index: i as u32,
             alpha: alpha_bytes,
@@ -2680,8 +2694,8 @@ pub async fn build_deshield_pczt(
             out_ciphertext: effects_action.encrypted_note().out_ciphertext.to_vec(),
             value,
             is_spend,
-            recipient: None,
-            rseed: None,
+            recipient: orchard_recipient,
+            rseed: orchard_rseed,
         });
     }
 
@@ -2855,6 +2869,66 @@ mod tests {
         buf[..8].copy_from_slice(&i.to_le_bytes());
         // This produces a valid Pallas base field element for all small i
         MerkleHashOrchard::from_bytes(&buf).unwrap()
+    }
+
+    /// Deshield streams EVERY action's output part to the firmware, which
+    /// recomputes cmx = commit(recipient, value, rseed, rho) before signing.
+    /// Regression: build_deshield_pczt sent recipient/rseed = None and
+    /// spend().value() — firmware rejected with "Missing Orchard output
+    /// metadata". This pins the orchard-crate guarantee the fix relies on:
+    /// build_for_pczt populates recipient/rseed/value on every output part,
+    /// INCLUDING dummy/padding outputs.
+    #[test]
+    fn test_pczt_output_parts_carry_recipient_rseed_value_even_for_dummies() {
+        use orchard::builder::{Builder, BundleType};
+        use orchard::keys::{FullViewingKey, Scope, SpendingKey};
+        use orchard::value::NoteValue;
+        use orchard::Anchor;
+        use rand::rngs::OsRng;
+
+        let sk: SpendingKey =
+            Option::<SpendingKey>::from(SpendingKey::from_bytes([7u8; 32]))
+                .expect("valid spending key");
+        let fvk = FullViewingKey::from(&sk);
+        let recipient = fvk.address_at(0u32, Scope::External);
+
+        let mut builder = Builder::new(BundleType::DEFAULT, Anchor::empty_tree());
+        let mut memo = [0u8; 512];
+        memo[0] = 0xF6;
+        builder
+            .add_output(None, recipient, NoteValue::from_raw(1000), memo)
+            .expect("add_output");
+
+        let (bundle, _) = builder.build_for_pczt(&mut OsRng).expect("build_for_pczt");
+        assert!(
+            bundle.actions().len() >= 2,
+            "BundleType::DEFAULT must pad to at least 2 actions"
+        );
+
+        let mut real_outputs = 0;
+        for (i, action) in bundle.actions().iter().enumerate() {
+            let out = action.output();
+            assert!(
+                out.recipient().is_some(),
+                "action {} output part missing recipient",
+                i
+            );
+            assert!(
+                out.rseed().is_some(),
+                "action {} output part missing rseed",
+                i
+            );
+            let value = out
+                .value()
+                .map(|v| v.inner())
+                .expect("output part missing value");
+            if value == 1000 {
+                real_outputs += 1;
+            } else {
+                assert_eq!(value, 0, "dummy output must have zero value");
+            }
+        }
+        assert_eq!(real_outputs, 1, "exactly one real output expected");
     }
 
     /// ZIP-317 §3 + BundleType::DEFAULT padding. The chain counts orchard

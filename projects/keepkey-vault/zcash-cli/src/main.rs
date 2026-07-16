@@ -941,8 +941,10 @@ async fn handle_build_deshield_pczt(state: &mut State, params: &Value) -> Result
     let transparent_outputs_json: Vec<Value> = deshield_state
         .transparent_outputs
         .iter()
-        .map(|o| {
+        .enumerate()
+        .map(|(i, o)| {
             serde_json::json!({
+                "index": i,
                 "value": o.value,
                 "script_pubkey": hex::encode(&o.script_pubkey),
             })
