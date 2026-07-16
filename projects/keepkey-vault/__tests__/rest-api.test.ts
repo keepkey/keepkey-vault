@@ -247,3 +247,44 @@ describe('Address Caching', () => {
     console.log(`  First: ${first.toFixed(0)}ms, Cached: ${second.toFixed(0)}ms`)
   })
 })
+
+// ── MCP endpoint auth routing (regression: fix/mcp-401-uncaught) ──────────
+// /mcp is handled BEFORE the general try/catch that turns HttpError into a
+// status, so a bad/missing bearer must be caught locally — otherwise the throw
+// escapes fetch() as a dropped socket instead of a clean 401. These hit the
+// live routing layer (raw fetch so we control the exact headers the api()
+// helper would otherwise overwrite with the real key).
+describe('MCP endpoint (/mcp) auth routing', () => {
+  const mcpBody = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' })
+  const rawMcp = (headers: Record<string, string>) =>
+    fetch(`${BASE}/mcp`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: mcpBody })
+
+  test('missing bearer → 401 (resolves cleanly, NOT a dropped socket)', async () => {
+    // The bug: an uncaught HttpError made fetch() REJECT (UND_ERR_SOCKET). If
+    // this await throws instead of resolving, the regression is back.
+    const res = await rawMcp({})
+    expect(res.status).toBe(401)
+    // 401 from the /mcp local catch carries NO CORS grant (the discriminator
+    // vs the general :catch, which sets Access-Control-Allow-Origin).
+    expect(res.headers.get('access-control-allow-origin')).toBeNull()
+  })
+
+  test('invalid bearer → 401 (resolves cleanly)', async () => {
+    const res = await rawMcp({ Authorization: 'Bearer not-a-real-key' })
+    expect(res.status).toBe(401)
+  })
+
+  test('valid bearer → 200 with the tier-1 tool catalog', async () => {
+    const res = await rawMcp({ Authorization: `Bearer ${API_KEY}` })
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    const names = (body.result?.tools || []).map((t: any) => t.name)
+    expect(names).toContain('bex_status')
+    expect(names).toContain('bex_accounts')
+  })
+
+  test('browser Origin header → 403 even with a valid bearer', async () => {
+    const res = await rawMcp({ Authorization: `Bearer ${API_KEY}`, Origin: 'http://localhost:1646' })
+    expect(res.status).toBe(403)
+  })
+})
