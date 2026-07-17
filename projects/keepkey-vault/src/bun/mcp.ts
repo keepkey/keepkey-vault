@@ -100,6 +100,46 @@ const rpcError = (id: unknown, code: number, message: string, data?: unknown, co
 const rpcResult = (id: unknown, result: unknown, cors: Record<string, string> = {}) =>
   json({ jsonrpc: '2.0', id: id ?? null, result }, 200, cors)
 
+// ── Promote the browser while the agent drives it ───────────────────────────
+// Acting tools work in the user's real Chrome, which is usually buried behind
+// other windows — bring it to the front so the user can WATCH the agent work
+// instead of hunting for the window. This lives vault-side on purpose: macOS
+// cooperative activation lets one app raise ANOTHER app reliably (`open -b`,
+// no TCC/automation prompt), while an app raising itself from a background
+// context is focus-throttled. The extension handles which window/tab within
+// Chrome; we handle Chrome itself.
+const PROMOTE_BROWSER = true // in-code kill switch
+// Acting tools only — reads (snapshot/find/read_page/status/logs/…) stay
+// silent so agent observation never yanks the user's focus.
+const PROMOTE_TOOLS = new Set(['bex_navigate', 'bex_click', 'bex_type', 'bex_select', 'bex_screenshot'])
+const PROMOTE_TAB_ACTIONS = new Set(['create', 'select', 'new-window'])
+// One promote per burst: re-raising on every click would fight a user who
+// deliberately switched away mid-run.
+const PROMOTE_DEBOUNCE_MS = 30_000
+let lastPromoteAt = 0
+
+function shouldPromote(name: string, args: any): boolean {
+  if (!PROMOTE_BROWSER) return false
+  if (PROMOTE_TOOLS.has(name)) return true
+  return name === 'bex_tabs' && PROMOTE_TAB_ACTIONS.has(args?.action)
+}
+
+function promoteBrowser(): void {
+  if (process.platform !== 'darwin') return // ponytail: mac only; a Windows raise needs launcher help
+  if (process.env.NODE_ENV === 'test') return // bun test sets this; tests fake an open bridge
+  if (!bridgeStatus().connected) return // bridge down may mean no Chrome — `open` would LAUNCH it
+  const now = Date.now()
+  if (now - lastPromoteAt < PROMOTE_DEBOUNCE_MS) return
+  lastPromoteAt = now
+  try {
+    // ponytail: assumes Chrome by bundle id. If Brave/Edge users appear, sniff
+    // the bridge websocket's User-Agent instead of guessing harder.
+    Bun.spawn(['open', '-b', 'com.google.Chrome'], { stdout: 'ignore', stderr: 'ignore' })
+  } catch {
+    // Promotion is a courtesy; never let it fail a tool call.
+  }
+}
+
 /** Handle POST /mcp. Caller has already enforced loopback-only. */
 export async function handleMcpRequest(req: Request, cors: Record<string, string>): Promise<Response> {
   // Validate the negotiated protocol version header when present (the spec says
@@ -176,6 +216,7 @@ export async function handleMcpRequest(req: Request, cors: Record<string, string
       if (typeof name !== 'string' || name === '') {
         return rpcError(id, -32602, 'Invalid params: name must be a non-empty string', undefined, cors)
       }
+      if (shouldPromote(name, args)) promoteBrowser()
       try {
         const result = (await callBex(name, args)) as any
         // The BEX may answer with MCP content blocks already (bex_snapshot
