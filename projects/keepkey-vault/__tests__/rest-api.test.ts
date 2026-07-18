@@ -70,8 +70,10 @@ describe('Health & Device Info', () => {
     expect(body).toBeTruthy()
   })
 
-  test('GET /device/info/features → device features', async () => {
-    const { status, body } = await api('/device/info/features')
+  test('POST /system/info/get-features → device features', async () => {
+    // Route moved from GET /device/info/features during the v2 API reshuffle;
+    // the old path 404s.
+    const { status, body } = await post('/system/info/get-features', {})
     expect(status).toBe(200)
     expect(body.vendor).toBe('keepkey.com')
     expect(body.device_id).toBeTruthy()
@@ -179,9 +181,10 @@ describe('Auth & Pairing', () => {
   test('GET /auth/paired-apps → lists paired apps', async () => {
     const { status, body } = await api('/auth/paired-apps')
     expect(status).toBe(200)
-    expect(Array.isArray(body)).toBe(true)
-    expect(body.length).toBeGreaterThan(0)
-    expect(body[0].name).toBeTruthy()
+    // Shape is { apps, total } — a bare array was the pre-v2 response.
+    expect(Array.isArray(body.apps)).toBe(true)
+    expect(body.total).toBeGreaterThan(0)
+    expect(body.apps[0].name).toBeTruthy()
   })
 })
 
