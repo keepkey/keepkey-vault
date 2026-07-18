@@ -1396,6 +1396,7 @@ async fn handle_broadcast(_state: &mut State, params: &Value) -> Result<Value> {
     ];
     let mut last_err = String::from("no nodes reachable");
     let mut any_accepted: Option<String> = None;
+    let mut already_known = false;
     for url in servers {
         match scanner::LightwalletClient::connect(Some(url)).await {
             Ok(mut client) => match tokio::time::timeout(
@@ -1411,8 +1412,23 @@ async fn handle_broadcast(_state: &mut State, params: &Value) -> Result<Value> {
                     }
                 }
                 Ok(Err(e)) => {
-                    log::error!("Broadcast REJECTED by {}: {}", url, e);
-                    last_err = format!("{}: {}", url, e);
+                    // "Already known" is not a rejection — the network has the
+                    // tx (an earlier attempt, or gossip from a node we hit
+                    // moments ago, won the race). zcashd phrasings:
+                    // "transaction already exists in mempool" / "already in
+                    // block chain" / "txn-already-known".
+                    let lower = e.to_string().to_lowercase();
+                    if lower.contains("already exists in mempool")
+                        || lower.contains("already in mempool")
+                        || lower.contains("already in block chain")
+                        || lower.contains("txn-already-known")
+                    {
+                        info!("Broadcast to {}: transaction already known to the network", url);
+                        already_known = true;
+                    } else {
+                        log::error!("Broadcast REJECTED by {}: {}", url, e);
+                        last_err = format!("{}: {}", url, e);
+                    }
                 }
                 // A node that completes the TLS/connect handshake then hangs on
                 // SendTransaction must not strand an already-signed tx forever —
@@ -1427,6 +1443,13 @@ async fn handle_broadcast(_state: &mut State, params: &Value) -> Result<Value> {
     }
     match any_accepted {
         Some(txid) => Ok(serde_json::json!({ "txid": txid })),
+        // No fresh accept, but at least one node already has the tx: the
+        // broadcast succeeded (possibly on a prior attempt). Callers take the
+        // authoritative txid from finalize, not from here.
+        None if already_known => {
+            info!("Broadcast: transaction already in mempool — treating as success");
+            Ok(serde_json::json!({ "txid": "" }))
+        }
         None => Err(anyhow::anyhow!(
             "All nodes rejected the transaction. Last: {}",
             last_err
