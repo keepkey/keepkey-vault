@@ -653,7 +653,15 @@ export async function buildUtxoTx(
     ...(chain.coin === 'Zcash' ? {
       overwintered: true,
       versionGroupId: 0x892F2085,
-      branchId: 0x4dec4df0,   // NU6.1 (current Zcash mainnet)
+      // Consensus branch id baked into the ZIP-243 transparent sighash. A
+      // stale value makes every node reject the tx as ScriptInvalid (the
+      // signature commits to the wrong branch), so this MUST track Zcash
+      // network upgrades. The shielded paths get it live from the sidecar;
+      // this transparent path has no sidecar dependency, hence a constant.
+      // ponytail: rots at every NU activation — if ZEC sends suddenly fail
+      // ScriptInvalid on all nodes, update this first (the sidecar's
+      // ZcashSignPCZT log line prints the current live value).
+      branchId: 0x5437f330,   // NU6.2 (current Zcash mainnet, 2026)
       expiry: 0,
     } : {}),
     fee: String(fee / 10 ** chain.decimals),
