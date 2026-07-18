@@ -163,6 +163,25 @@ describe('parseQuoteResponse', () => {
     expect(result.memo).toBe('=:ETH.ETH:0xdest123:245000/3/0:kk:0')
   })
 
+  test('THORChain recommended_min_amount_in converts 1e8 base units to decimal minAmountIn', () => {
+    // 27472 sats input got refunded on-chain ("Emit asset less than price
+    // limit") because nothing enforced THORNode's floor. 50000 base units of
+    // the sell asset = 0.0005 decimal — a unit slip here (comparing 1e8
+    // against a human amount) would make the guard block every swap.
+    const fixture = JSON.parse(JSON.stringify(FIXTURE_BASE_TO_ETH_QUOTE))
+    fixture.data.data[0].quote.raw.recommended_min_amount_in = '50000'
+    const result = parseQuoteResponse(fixture, baseParams)
+    expect(result.minAmountIn).toBe('0.0005')
+  })
+
+  test('recommended_min_amount_in ignored for non-THORChain swappers (unknown units)', () => {
+    const fixture = JSON.parse(JSON.stringify(FIXTURE_BASE_TO_ETH_QUOTE))
+    fixture.data.data[0].integration = 'relay'
+    fixture.data.data[0].quote.raw.recommended_min_amount_in = '50000'
+    const result = parseQuoteResponse(fixture, baseParams)
+    expect(result.minAmountIn).toBeUndefined()
+  })
+
   test('BASE → ETH: extracts router from raw', () => {
     const result = parseQuoteResponse(FIXTURE_BASE_TO_ETH_QUOTE, baseParams)
     expect(result.router).toBe('0x1b3e6daa08e7a2e29e2ff23b6c40abe79a15a17a')
