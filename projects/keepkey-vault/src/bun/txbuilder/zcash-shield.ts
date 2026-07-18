@@ -444,15 +444,24 @@ async function _shieldZecInner(
 		header_fields: buildResult.orchard_signing_request.header_fields,
 		transparent_outputs: buildResult.transparent_outputs,
 		transparent_inputs: hasTransparentInputs
-			? buildResult.transparent_inputs.map((ti: any) => ({
-				index: ti.index,
-				addressNList: ti.address_path,
-				amount: ti.amount,
-				prevout_txid: ti.prevout_txid,
-				prevout_index: ti.prevout_index,
-				sequence: ti.sequence,
-				script_pubkey: ti.script_pubkey,
-			}))
+			? buildResult.transparent_inputs.map((ti: any) => {
+				// hdwallet's TransparentInput is camelCase; the sidecar speaks
+				// snake_case. A silent mismatch here reaches the device as an
+				// input with no prevout/script and fails as "Invalid transparent
+				// input data" — validate before mapping, throw on missing.
+				if (!ti.prevout_txid || ti.prevout_index === undefined || !ti.script_pubkey) {
+					throw new Error(`Sidecar transparent input ${ti.index} missing prevout_txid/prevout_index/script_pubkey`)
+				}
+				return {
+					index: ti.index,
+					addressNList: ti.address_path,
+					amount: ti.amount,
+					prevoutTxid: ti.prevout_txid,
+					prevoutIndex: ti.prevout_index,
+					sequence: ti.sequence,
+					scriptPubkey: ti.script_pubkey,
+				}
+			})
 			: undefined,
 	}
 
