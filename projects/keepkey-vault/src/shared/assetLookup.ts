@@ -62,8 +62,26 @@ function getAssetMap(): Record<string, SlimAssetEntry> | null {
 // Start loading immediately (non-blocking)
 getAssetMap()
 
-/** Derive the keepkey.info icon URL from a CAIP identifier */
+/** Bundled (offline-safe) icons for primary assets whose logo must never break —
+ *  the remote CDN is unreachable in offline/airplane mode. Inline SVG data URIs
+ *  so there's no asset-file/bundler coupling and no network fetch.
+ *  Bitcoin first (btc-only wallets live and die on this one). */
+const BITCOIN_SVG =
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="32" fill="#f7931a"/><path fill="#fff" d="M46.1 27.9c.6-4.2-2.6-6.5-7-8l1.4-5.7-3.5-.9-1.4 5.6c-.9-.2-1.9-.4-2.8-.6l1.4-5.7-3.5-.9-1.4 5.7c-.7-.2-1.4-.3-2.1-.5l-4.8-1.2-.9 3.7s2.6.6 2.5.6c1.4.4 1.7 1.3 1.6 2l-3.8 15.2c-.2.4-.6 1-1.5.8 0 .1-2.6-.6-2.6-.6l-1.7 4 4.5 1.1c.8.2 1.7.4 2.5.7l-1.4 5.7 3.5.9 1.4-5.7c.9.3 1.9.5 2.8.7l-1.4 5.7 3.5.9 1.4-5.7c5.9 1.1 10.4.7 12.2-4.7 1.5-4.3-.1-6.8-3.2-8.4 2.3-.5 4-2 4.5-5.1zM38.3 43c-1 4.3-8.2 2-10.6 1.4l1.9-7.6c2.3.6 9.8 1.7 8.7 6.2zm1-15.3c-1 3.9-6.9 1.9-8.9 1.4l1.7-6.9c2 .5 8.1 1.4 7.2 5.5z"/></svg>`
+/** Shielded ZEC (zZEC) — synthetic asset, never in the CDN catalog: gold shield + Zcash Z. */
+const ZCASH_SHIELDED_SVG =
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><path fill="#f4b728" d="M32 4l24 9v17c0 15.5-10.2 25.7-24 30C18.2 55.7 8 45.5 8 30V13z"/><path fill="#fff" d="M21 20h22v6L31 38h12v6H21v-6l12-12H21z"/><rect x="29" y="14" width="6" height="6" fill="#fff"/><rect x="29" y="44" width="6" height="6" fill="#fff"/></svg>`
+const LOCAL_ICONS: Record<string, string> = {
+  'bip122:000000000019d6689c085ae165831e93/slip44:0': `data:image/svg+xml,${encodeURIComponent(BITCOIN_SVG)}`,
+  'bip122:00040fe8ec8471911baa1db1266ea15d/orchard:shielded': `data:image/svg+xml,${encodeURIComponent(ZCASH_SHIELDED_SVG)}`,
+}
+
+/** Derive the keepkey.info icon URL from a CAIP identifier.
+ *  Bundled LOCAL_ICONS win — several components call this directly rather
+ *  than through getAssetIcon, and synthetic CAIPs (shielded ZEC) plus
+ *  offline-critical ones (BTC) must resolve at every call site. */
 export function caipToIcon(caip: string): string {
+  if (LOCAL_ICONS[caip]) return LOCAL_ICONS[caip]
   return `https://api.keepkey.info/coins/${btoa(caip).replace(/=+$/, '')}.png`
 }
 
@@ -80,16 +98,6 @@ export function getAsset(caip: string): AssetEntry | undefined {
     icon: entry.icon || caipToIcon(caip),
     color: entry.color || '#888',
   }
-}
-
-/** Bundled (offline-safe) icons for primary assets whose logo must never break —
- *  the remote CDN (caipToIcon) is unreachable in offline/airplane mode. Inline
- *  SVG data URIs so there's no asset-file/bundler coupling and no network fetch.
- *  Bitcoin first (btc-only wallets live and die on this one). */
-const BITCOIN_SVG =
-  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="32" fill="#f7931a"/><path fill="#fff" d="M46.1 27.9c.6-4.2-2.6-6.5-7-8l1.4-5.7-3.5-.9-1.4 5.6c-.9-.2-1.9-.4-2.8-.6l1.4-5.7-3.5-.9-1.4 5.7c-.7-.2-1.4-.3-2.1-.5l-4.8-1.2-.9 3.7s2.6.6 2.5.6c1.4.4 1.7 1.3 1.6 2l-3.8 15.2c-.2.4-.6 1-1.5.8 0 .1-2.6-.6-2.6-.6l-1.7 4 4.5 1.1c.8.2 1.7.4 2.5.7l-1.4 5.7 3.5.9 1.4-5.7c.9.3 1.9.5 2.8.7l-1.4 5.7 3.5.9 1.4-5.7c5.9 1.1 10.4.7 12.2-4.7 1.5-4.3-.1-6.8-3.2-8.4 2.3-.5 4-2 4.5-5.1zM38.3 43c-1 4.3-8.2 2-10.6 1.4l1.9-7.6c2.3.6 9.8 1.7 8.7 6.2zm1-15.3c-1 3.9-6.9 1.9-8.9 1.4l1.7-6.9c2 .5 8.1 1.4 7.2 5.5z"/></svg>`
-const LOCAL_ICONS: Record<string, string> = {
-  'bip122:000000000019d6689c085ae165831e93/slip44:0': `data:image/svg+xml,${encodeURIComponent(BITCOIN_SVG)}`,
 }
 
 /** True once the async asset catalog has finished loading — lets best-effort
