@@ -688,6 +688,16 @@ function getSwaggerUiHtml(): string {
         block until the user confirms or rejects on the KeepKey.
       </div>
 
+      <h2>AI Agents (MCP)</h2>
+      <p>AI agents connect over the Model Context Protocol at
+         <code>POST /mcp</code> (JSON-RPC, not REST) to inspect wallet state and
+         drive the KeepKey browser extension. Same pairing key as the REST API:</p>
+<pre><code><span class="kw">claude</span> mcp add --transport http keepkey http://localhost:1646/mcp \\
+  --header <span class="str">"Authorization: Bearer YOUR_API_KEY"</span></code></pre>
+      <p>The tool catalog is served live from the extension &mdash; call
+         <code>tools/list</code> for the source of truth. Full docs:
+         <a href="https://docs.keepkey.com/docs/bex/mcp">docs.keepkey.com/docs/bex/mcp</a></p>
+
       <h2>Clear Signing</h2>
       <p>EVM contract calls are decoded on-device in human-readable form:</p>
       <table>
