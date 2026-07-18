@@ -1136,16 +1136,6 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
   }
 
   /** Return 501 if firmware doesn't meet the chain's minFirmware requirement. */
-  function requireChainSupport(chainId: string): Response | null {
-    const chain = CHAINS.find(c => c.id === chainId)
-    if (!chain?.minFirmware) return null
-    const fw = engine.getDeviceState().firmwareVersion
-    if (!fw || !isChainSupported(chain, fw)) {
-      return json({ error: `${chain.symbol} requires firmware ≥ ${chain.minFirmware} (device has ${fw ?? 'unknown'})` }, 501)
-    }
-    return null
-  }
-
   /** Normalize showDisplay to boolean (undefined → false). */
   function showDisplay(requested: boolean | undefined): boolean {
     return requested ?? false
@@ -1256,6 +1246,20 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           })
         }
         return resp
+      }
+
+      // Firmware gate for chain routes. Lives INSIDE the request scope because
+      // it returns via the per-request json() helper (CORS + audit logging) —
+      // defined at server scope it threw "json is not defined" the moment the
+      // gate actually fired (observed on POST /addresses/hive).
+      function requireChainSupport(chainId: string): Response | null {
+        const chain = CHAINS.find(c => c.id === chainId)
+        if (!chain?.minFirmware) return null
+        const fw = engine.getDeviceState().firmwareVersion
+        if (!fw || !isChainSupported(chain, fw)) {
+          return json({ error: `${chain.symbol} requires firmware ≥ ${chain.minFirmware} (device has ${fw ?? 'unknown'})` }, 501)
+        }
+        return null
       }
 
       // ── MCP agent bridge (EPIC_mcp_agent_bridge.md, keepkey-client) ──
