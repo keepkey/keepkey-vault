@@ -34,6 +34,12 @@ struct State {
     pending_shield_pczt: Option<pczt_builder::ShieldPcztState>,
     /// Pending deshield (Orchard → transparent) PCZT state waiting for signatures
     pending_deshield_pczt: Option<pczt_builder::DeshieldPcztState>,
+    /// Spent-note nullifiers keyed by finalized raw-tx hex — marked spent in
+    /// the wallet DB when THAT transaction broadcasts, so the shielded balance
+    /// drops immediately instead of double-counting until the next chain scan.
+    /// Keyed (not global) so a failed or interleaved finalize can never mark
+    /// another transaction's notes. Bounded to the most recent few entries.
+    pending_spent_notes: Vec<(String, Vec<[u8; 32]>)>,
 }
 
 impl State {
@@ -44,6 +50,7 @@ impl State {
             pending_pczt: None,
             pending_shield_pczt: None,
             pending_deshield_pczt: None,
+            pending_spent_notes: Vec::new(),
         }
     }
 
@@ -55,6 +62,7 @@ impl State {
             pending_pczt: None,
             pending_shield_pczt: None,
             pending_deshield_pczt: None,
+            pending_spent_notes: Vec::new(),
         }
     }
 
@@ -557,6 +565,22 @@ async fn handle_scan(state: &mut State, params: &Value) -> Result<Value> {
     }))
 }
 
+/// Remember which notes a finalized tx spends, keyed by its raw-tx hex.
+/// Called only AFTER finalization succeeds, so an aborted finalize records
+/// nothing. Bounded so abandoned (never-broadcast) entries can't accumulate.
+fn record_pending_spent(state: &mut State, raw_tx_hex: String, nullifiers: Vec<[u8; 32]>) {
+    const MAX_PENDING_SPENT: usize = 4;
+    if nullifiers.is_empty() {
+        return;
+    }
+    state.pending_spent_notes.retain(|(k, _)| *k != raw_tx_hex);
+    state.pending_spent_notes.push((raw_tx_hex, nullifiers));
+    let len = state.pending_spent_notes.len();
+    if len > MAX_PENDING_SPENT {
+        state.pending_spent_notes.drain(..len - MAX_PENDING_SPENT);
+    }
+}
+
 async fn handle_balance(state: &mut State, _params: &Value) -> Result<Value> {
     let db = state.ensure_db()?;
     let balance = db.get_balance()?;
@@ -688,12 +712,15 @@ async fn handle_finalize(state: &mut State, params: &Value) -> Result<Value> {
         signatures.push(sig_bytes);
     }
 
+    let spent_nullifiers = pczt_state.spent_nullifiers.clone();
+
     let (raw_tx, txid) = pczt_builder::finalize_pczt(
         pczt_state.pczt_bundle,
         pczt_state.sighash,
         pczt_state.branch_id,
         &signatures,
     )?;
+    record_pending_spent(state, hex::encode(&raw_tx), spent_nullifiers);
 
     Ok(serde_json::json!({
         "raw_tx": hex::encode(&raw_tx),
@@ -984,7 +1011,10 @@ async fn handle_finalize_deshield(state: &mut State, params: &Value) -> Result<V
         orchard_sigs.push(hex::decode(sig_hex)?);
     }
 
+    let spent_nullifiers = deshield_state.spent_nullifiers.clone();
+
     let (raw_tx, txid) = pczt_builder::finalize_deshield_pczt(deshield_state, &orchard_sigs)?;
+    record_pending_spent(state, hex::encode(&raw_tx), spent_nullifiers);
 
     Ok(serde_json::json!({
         "raw_tx": hex::encode(&raw_tx),
@@ -1376,7 +1406,7 @@ async fn handle_diagnose_anchor(_state: &mut State, params: &Value) -> Result<Va
     }))
 }
 
-async fn handle_broadcast(_state: &mut State, params: &Value) -> Result<Value> {
+async fn handle_broadcast(state: &mut State, params: &Value) -> Result<Value> {
     let raw_tx_hex = params
         .get("raw_tx")
         .and_then(|v| v.as_str())
@@ -1396,6 +1426,7 @@ async fn handle_broadcast(_state: &mut State, params: &Value) -> Result<Value> {
     ];
     let mut last_err = String::from("no nodes reachable");
     let mut any_accepted: Option<String> = None;
+    let mut already_known = false;
     for url in servers {
         match scanner::LightwalletClient::connect(Some(url)).await {
             Ok(mut client) => match tokio::time::timeout(
@@ -1411,8 +1442,23 @@ async fn handle_broadcast(_state: &mut State, params: &Value) -> Result<Value> {
                     }
                 }
                 Ok(Err(e)) => {
-                    log::error!("Broadcast REJECTED by {}: {}", url, e);
-                    last_err = format!("{}: {}", url, e);
+                    // "Already known" is not a rejection — the network has the
+                    // tx (an earlier attempt, or gossip from a node we hit
+                    // moments ago, won the race). zcashd phrasings:
+                    // "transaction already exists in mempool" / "already in
+                    // block chain" / "txn-already-known".
+                    let lower = e.to_string().to_lowercase();
+                    if lower.contains("already exists in mempool")
+                        || lower.contains("already in mempool")
+                        || lower.contains("already in block chain")
+                        || lower.contains("txn-already-known")
+                    {
+                        info!("Broadcast to {}: transaction already known to the network", url);
+                        already_known = true;
+                    } else {
+                        log::error!("Broadcast REJECTED by {}: {}", url, e);
+                        last_err = format!("{}: {}", url, e);
+                    }
                 }
                 // A node that completes the TLS/connect handshake then hangs on
                 // SendTransaction must not strand an already-signed tx forever —
@@ -1425,8 +1471,46 @@ async fn handle_broadcast(_state: &mut State, params: &Value) -> Result<Value> {
             Err(e) => log::warn!("Could not connect to {} for broadcast: {}", url, e),
         }
     }
+    if any_accepted.is_some() || already_known {
+        // Optimistically mark THIS tx's input notes spent so the shielded
+        // balance drops now instead of double-counting (old notes + new
+        // transparent output) until the scanner sees the spend on-chain.
+        // Looked up by raw-tx hex — broadcasting an unrelated tx marks
+        // nothing. If the tx were ever dropped from the mempool, a full
+        // rescan rebuilds spent-tracking from chain truth.
+        let nfs = match state
+            .pending_spent_notes
+            .iter()
+            .position(|(k, _)| *k == raw_tx_hex)
+        {
+            Some(pos) => state.pending_spent_notes.remove(pos).1,
+            None => Vec::new(),
+        };
+        if !nfs.is_empty() {
+            match state.ensure_db() {
+                Ok(db) => {
+                    let mut marked = 0u32;
+                    for nf in &nfs {
+                        if db.mark_note_spent(nf).unwrap_or(false) {
+                            marked += 1;
+                        }
+                    }
+                    info!("Broadcast success: marked {} input note(s) spent", marked);
+                }
+                Err(e) => log::warn!("Broadcast: could not mark notes spent: {}", e),
+            }
+        }
+    }
+
     match any_accepted {
         Some(txid) => Ok(serde_json::json!({ "txid": txid })),
+        // No fresh accept, but at least one node already has the tx: the
+        // broadcast succeeded (possibly on a prior attempt). Callers take the
+        // authoritative txid from finalize, not from here.
+        None if already_known => {
+            info!("Broadcast: transaction already in mempool — treating as success");
+            Ok(serde_json::json!({ "txid": "" }))
+        }
         None => Err(anyhow::anyhow!(
             "All nodes rejected the transaction. Last: {}",
             last_err

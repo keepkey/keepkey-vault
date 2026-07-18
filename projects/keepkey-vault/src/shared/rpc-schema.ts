@@ -492,6 +492,10 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       'swap-cmd': SwapUiCommand
       'scan-progress': { percent: number; scannedHeight: number; tipHeight: number; blocksPerSec: number; etaSeconds: number }
       'balance-updated': ChainBalance
+      /** A scheduled post-tx Orchard rescan finished (shield/deshield/z2z).
+       *  Frontend should re-pull the zcash chain balance so the dashboard
+       *  reconciles spent notes / new outputs without user action. */
+      'zcash-rescan-complete': { syncedTo: number | null; notesFound: number }
       /** The engine's background history scan (fired on every device-ready)
        *  finished. The activity UI refetches on this so freshly-indexed txs
        *  replace the "No indexed activity yet" placeholder without a manual

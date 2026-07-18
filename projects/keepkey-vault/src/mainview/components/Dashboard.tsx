@@ -105,6 +105,26 @@ const DASHBOARD_ANIMATIONS = `
 	}
 `
 
+/** Shielded portion of a chain's tokens (zZEC) — same denomination as the
+ *  chain coin, so displays fold it into the coin amount and break it out as
+ *  its own "shielded" field. Zero for every chain without shielded tokens. */
+function shieldedPortion(bal?: ChainBalance): { amount: number; usd: number } {
+	let amount = 0, usd = 0
+	for (const t of bal?.tokens ?? []) {
+		if (t.type === 'shielded') { amount += parseFloat(t.balance || '0'); usd += t.balanceUsd || 0 }
+	}
+	return { amount, usd }
+}
+
+/** Tiny shield glyph for the shielded-balance field. */
+function ShieldGlyph({ size = 9 }: { size?: number }) {
+	return (
+		<svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+			<path d="M12 2l8 3v6c0 5.2-3.4 8.6-8 11-4.6-2.4-8-5.8-8-11V5z" />
+		</svg>
+	)
+}
+
 /* localStorage key for user's preferred portfolio view. */
 const DASHBOARD_VIEW_KEY = 'keepkey.dashboard.view'
 type DashboardView = 'orbital' | 'donut'
@@ -490,6 +510,8 @@ function ChainDetailOrbital({
 		.slice(0, 8)
 
 	const nativeBal = balance?.balance || '0'
+	const shielded = shieldedPortion(balance)
+	const combinedBal = parseFloat(nativeBal) + shielded.amount
 
 	return (
 		<Box position="relative" w={`${size}px`} h={`${size}px`} mx="auto" my="2">
@@ -563,12 +585,20 @@ function ChainDetailOrbital({
 					letterSpacing="-0.02em"
 					lineHeight="1"
 				>
-					{formatBalance(nativeBal)} {chain.symbol}
+					{formatBalance(String(combinedBal))} {chain.symbol}
 				</Text>
-				{nativeBalanceUsd > 0 && (
+				{(nativeBalanceUsd + shielded.usd) > 0 && (
 					<Text fontSize="13px" color="var(--text-2)" fontWeight="400">
-						≈ ${nativeBalanceUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+						≈ ${(nativeBalanceUsd + shielded.usd).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
 					</Text>
+				)}
+				{shielded.amount > 0 && (
+					<Flex align="center" justify="center" gap="1" mt="0.5">
+						<ShieldGlyph size={11} />
+						<Text fontSize="12px" color="var(--gold)" fontWeight="500">
+							{formatBalance(String(shielded.amount))} shielded · {formatBalance(nativeBal)} transparent
+						</Text>
+					</Flex>
 				)}
 			</Box>
 
@@ -1231,6 +1261,16 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 		return onRpcMessage("stream-status", (s) => setStreamStatus(s))
 	}, [])
 
+	// A scheduled post-tx Orchard rescan finished — re-pull the zcash row so
+	// spent notes / new outputs reconcile without user action. getBalance
+	// pushes 'balance-updated' itself, which the handler below merges.
+	useEffect(() => {
+		return onRpcMessage("zcash-rescan-complete", () => {
+			rpcRequest("getBalance", { chainId: "zcash" }).catch((e: any) =>
+				console.warn("[zcash] post-rescan balance refresh failed:", e?.message))
+		})
+	}, [])
+
 	// Live balance sync: merge single-chain updates from backend (e.g. AssetPage refresh)
 	useEffect(() => {
 		return onRpcMessage("balance-updated", (updated: ChainBalance) => {
@@ -1632,11 +1672,16 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 						const usdNum = clean?.usd || 0
 						const hasBalance = balNum > 0 || usdNum > 0
 						const tokenCount = clean?.cleanTokenCount || 0
+						// Shielded ZEC is the chain's own coin, just in a different pool —
+						// fold it into the displayed amount so "0 ZEC" never sits next to
+						// a nonzero USD total when the value is all shielded.
+						const shielded = shieldedPortion(bal)
 						// Low-gas: tokens are stranded on the chain but the NATIVE
 						// balance can't pay network fees — every family, not just EVM
 						// (TRC-20 needs TRX, ERC-20 needs ETH, SPL needs SOL, …).
+						// Shielded funds pay their own fees, so they're never stranded.
 						const nativeUsd = bal?.nativeBalanceUsd ?? 0
-						const lowGas = nativeUsd < 1 && (usdNum - nativeUsd) > 1
+						const lowGas = nativeUsd < 1 && (usdNum - nativeUsd - shielded.usd) > 1
 						const isActive = drilledChainId === chain.id
 						// Per-account (BIP44) sub-rows: BTC accountIndex or EVM addressIndex.
 						// Only chains that have multiple funded accounts/addresses get a drop-down.
@@ -1712,7 +1757,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 										</Flex>
 										<Flex align="baseline" justify="space-between" gap="2" mt="0.5">
 											<Text fontSize="12px" color="var(--text-2)" lineHeight="1.3" truncate>
-												{hasBalance ? `${formatBalance(bal?.balance || '0')} ${chain.symbol}` : t("noBalance")}
+												{hasBalance ? `${formatBalance(String(balNum + shielded.amount))} ${chain.symbol}` : t("noBalance")}
 											</Text>
 											{lowGas && (
 												<Flex
@@ -1735,6 +1780,14 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 												</Text>
 											)}
 										</Flex>
+										{shielded.amount > 0 && (
+											<Flex align="center" gap="1" mt="0.5">
+												<ShieldGlyph />
+												<Text fontSize="10px" color="var(--text-2)" lineHeight="1">
+													{privateModeEnabled ? "••••" : formatBalance(String(shielded.amount))} shielded
+												</Text>
+											</Flex>
+										)}
 									</Box>
 								</Flex>
 							</Box>
