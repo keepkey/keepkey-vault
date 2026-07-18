@@ -1261,6 +1261,16 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 		return onRpcMessage("stream-status", (s) => setStreamStatus(s))
 	}, [])
 
+	// A scheduled post-tx Orchard rescan finished — re-pull the zcash row so
+	// spent notes / new outputs reconcile without user action. getBalance
+	// pushes 'balance-updated' itself, which the handler below merges.
+	useEffect(() => {
+		return onRpcMessage("zcash-rescan-complete", () => {
+			rpcRequest("getBalance", { chainId: "zcash" }).catch((e: any) =>
+				console.warn("[zcash] post-rescan balance refresh failed:", e?.message))
+		})
+	}, [])
+
 	// Live balance sync: merge single-chain updates from backend (e.g. AssetPage refresh)
 	useEffect(() => {
 		return onRpcMessage("balance-updated", (updated: ChainBalance) => {

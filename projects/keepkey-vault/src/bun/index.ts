@@ -1369,6 +1369,7 @@ const restCallbacks: RestApiCallbacks = {
 	// the loop. The device still gates every signature. NOOP substage push.
 	getSwapQuoteHeadless: (params) => headlessSwapQuote(params),
 	executeSwapHeadless: (params) => headlessExecuteSwap(params, () => { /* headless: no WebView substage */ }),
+	zcashSchedulePostTxRescans: () => schedulePostZcashTxRescans(),
 	zcashPreSendGate: async (account: number) => {
 		// Same fail-closed preflight the RPC send path runs: prove the FVK belongs
 		// to the connected device (purges stale state on mismatch) THEN catch the
@@ -1675,6 +1676,35 @@ function maybeStartBackgroundWalletVerification(): void {
 			zcashBackgroundVerifyInFlight = false
 		}
 	})()
+}
+
+/** After a private tx broadcasts (shield/deshield/z2z), the wallet DB only
+ * learns the on-chain truth from scanning the mined block (~75s block time
+ * plus propagation). The broadcast already marked spent notes optimistically;
+ * these delayed incremental scans pick up NEW notes (change, shield outputs)
+ * and reconcile anything the optimistic pass missed. Scans go straight to the
+ * sidecar — no device round-trip; the wallet was verified by the tx that just
+ * completed — and each one nudges the frontend to re-pull the zcash row.
+ * ponytail: fixed 20s/95s/200s schedule; switch to block-header push if these
+ * windows ever prove too coarse. */
+function schedulePostZcashTxRescans(): void {
+	for (const delayMs of [20_000, 95_000, 200_000]) {
+		setTimeout(async () => {
+			try {
+				if (!zcashPrivacyEnabled || !hasFvkLoaded() || isZcashSendInFlight()) return
+				const result = await scanOrchardNotes()
+				if (result?.synced_to != null) updateSyncedTo(result.synced_to)
+				try {
+					rpc.send['zcash-rescan-complete']({
+						syncedTo: result?.synced_to ?? null,
+						notesFound: result?.notes_found ?? 0,
+					})
+				} catch { /* webview not ready */ }
+			} catch (e: any) {
+				console.warn('[zcash] post-tx rescan failed (non-fatal):', e?.message || e)
+			}
+		}, delayMs)
+	}
 }
 
 // ── Shared swap engine entrypoints ───────────────────────────────────
@@ -5103,6 +5133,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					memo: params.memo,
 				}, { signWrap, onProgress })
 				try { rpc.send['send-progress']({ step: 'complete', detail: result.txid }) } catch { /* webview not ready */ }
+				schedulePostZcashTxRescans()
 				return result
 			},
 			zcashTransparentBalance: async (params) => {
@@ -5159,6 +5190,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					account,
 				}, { signWrap, onProgress })
 				try { rpc.send['shield-progress']({ step: 'complete', detail: result.txid }) } catch { /* webview not ready */ }
+				schedulePostZcashTxRescans()
 				return result
 			},
 
@@ -5187,6 +5219,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					account,
 				}, { signWrap, onProgress })
 				try { rpc.send['deshield-progress']({ step: 'complete', detail: result.txid }) } catch { /* webview not ready */ }
+				schedulePostZcashTxRescans()
 				return result
 			},
 

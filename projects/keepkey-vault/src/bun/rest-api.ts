@@ -87,6 +87,9 @@ export interface RestApiCallbacks {
    *  Proves the cached Orchard FVK belongs to the connected device before
    *  exposing any shielded balance from the local sidecar database. */
   zcashVerifyWallet?: (account: number) => Promise<void>
+  /** Schedule delayed post-tx Orchard rescans (shield/deshield/z2z) so the
+   *  local note DB reconciles with the chain without user action. */
+  zcashSchedulePostTxRescans?: () => void
   /** Returns initialized Pioneer client (for debug endpoints) */
   getPioneer?: () => Promise<any>
   /** Returns the active Pioneer API base URL */
@@ -4135,6 +4138,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             { recipient: body.recipient, amount: body.amount, memo: body.memo, account },
             { signWrap: <T,>(fn: () => Promise<T>) => emuWrap(fn, details) },
           )
+          callbacks?.zcashSchedulePostTxRescans?.()
           return json(result)
         }
 
@@ -4166,6 +4170,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const { deshieldZec } = await import('./txbuilder/zcash-deshield')
           const result = await deshieldZec(wallet, { recipient: body.recipient!, amount: body.amount!, account },
             { signWrap: <T,>(fn: () => Promise<T>) => emuWrap(fn, details) })
+          callbacks?.zcashSchedulePostTxRescans?.()
           return json(result)
         }
 
@@ -4196,6 +4201,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const { shieldZec } = await import('./txbuilder/zcash-shield')
           const result = await shieldZec(wallet, pioneer, { amount: body.amount!, account },
             { signWrap: <T,>(fn: () => Promise<T>) => emuWrap(fn, details) })
+          callbacks?.zcashSchedulePostTxRescans?.()
           return json(result)
         }
 
