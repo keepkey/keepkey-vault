@@ -332,7 +332,19 @@ function parseSingleQuote(
   // Minimum sell amount — solvers/protocols may refuse amounts below this floor
   // Check multiple field names across the response layers (Pioneer schema varies by swapper)
   const minAmountInRaw = quote.minAmountIn ?? best.minAmountIn ?? raw.min_amount_in ?? raw.minAmountIn
-  const minAmountIn: string | undefined = minAmountInRaw != null ? String(minAmountInRaw) : undefined
+  let minAmountIn: string | undefined = minAmountInRaw != null ? String(minAmountInRaw) : undefined
+  // THORChain-family routes publish recommended_min_amount_in — the floor
+  // below which fixed outbound fees dominate and the chain refunds the swap
+  // ("Emit asset less than price limit", minus another outbound fee). It is
+  // ALWAYS 1e8 base units of the sell asset regardless of chain; only trusted
+  // for THORChain routes — other swappers' units vary, so no generic fallback.
+  if (!minAmountIn && /thor|maya/i.test(`${integration} ${swapper ?? ''}`)) {
+    const rec = raw.recommended_min_amount_in ?? quote.recommended_min_amount_in ?? best.recommended_min_amount_in
+    const recNum = rec != null ? Number(rec) : NaN
+    if (Number.isFinite(recNum) && recNum > 0) {
+      minAmountIn = (recNum / 1e8).toFixed(8).replace(/\.?0+$/, '')
+    }
+  }
 
   // For NEAR Intents ERC-20 routes, Pioneer embeds the 1Click deposit address in
   // txParams.recipientAddress (same as quote.meta.depositAddress). This is the

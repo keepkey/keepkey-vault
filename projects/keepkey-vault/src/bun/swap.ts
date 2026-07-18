@@ -349,6 +349,33 @@ export async function getSwapQuote(params: SwapQuoteParams): Promise<SwapQuote> 
     : (result.integration || 'unknown')
   swapLog(`${TAG} Quote: ${result.expectedOutput} (${route}), memo=${result.memo || 'NONE'}, router=${result.router || 'NONE'}, expiry=${result.expiry}`)
 
+  // ── Refund-risk boundaries (every route) ──────────────────────────────
+  // A protocol refunds when the emitted amount lands below the memo's price
+  // limit — and the refund itself burns another outbound fee (observed:
+  // $17.76 BTC→ETH came back as $14.52). Two unit-safe gates at quote time:
+  //
+  // 1. Fees eating the slippage allowance. totalBps is basis points across
+  //    every integration. If quoted fees >= the slippage tolerance, the swap
+  //    only completes when the price moves in our favor during confirmation —
+  //    on small amounts the fixed outbound fee guarantees a refund instead.
+  const feeBps = Number(result.fees?.totalBps) || 0
+  if (feeBps >= slippageBps) {
+    throw new Error(
+      `Swap amount too low: quoted fees (${(feeBps / 100).toFixed(2)}%) meet or exceed the ` +
+      `slippage allowance (${(slippageBps / 100).toFixed(2)}%), so the protocol would refund ` +
+      `this swap on-chain — minus another network fee. Increase the amount.`
+    )
+  }
+  // 2. Route-declared minimum sell amount — enforced for ALL integrations
+  //    (previously only the NEAR Intents block checked it, so THORChain
+  //    routes sailed past their recommended_min_amount_in).
+  if (result.minAmountIn && parseFloat(params.amount) < parseFloat(result.minAmountIn)) {
+    throw new Error(
+      `Amount below this route's minimum (~${result.minAmountIn}). ` +
+      `Smaller deposits are systematically refunded after fees.`
+    )
+  }
+
   // NEAR Intents: solver-network minimum amount check for ALL source chains.
   // Solvers must front the destination-chain gas and wait for source confirmations;
   // amounts below their profitability floor are systematically refunded.
