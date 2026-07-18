@@ -736,7 +736,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 				</Flex>
 
 				{/* Content */}
-				<VStack gap="3" align="stretch" p="4">
+				<VStack gap="3" align="stretch" p="4" pb="16">
 
 					{/* ── Language & Currency ─────────────────────────── */}
 					<Section title={t("language")} defaultOpen={false}>
@@ -887,6 +887,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 								>
 									{installingEmu ? "Installing…" : "Change Version…"}
 								</Button>
+								{emuInstallMsg && <Text fontSize="xs" color="kk.textSecondary">{emuInstallMsg}</Text>}
 							</Flex>
 
 							{/* ── Wallet (seed) switcher — pick a different saved seed ── */}
@@ -1735,10 +1736,15 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 									</Flex>
 									{appSettings.emulatorEnabled && (
 										<Flex align="center" gap="3" pl="44px" wrap="wrap">
-											<Button size="xs" variant="outline" onClick={() => emuFileRef.current?.click()} disabled={installingEmu}>
-												{installingEmu ? "Installing…" : `Install ${IS_WINDOWS ? "libkkemu.dll" : "libkkemu.dylib"}…`}
-											</Button>
-											{emuInstallMsg && <Text fontSize="xs" color="kk.textSecondary">{emuInstallMsg}</Text>}
+											<Text
+												fontSize="xs"
+												color="kk.gold"
+												cursor="pointer"
+												textDecoration="underline"
+												onClick={() => rpcRequest('openUrl', { url: "https://keepkey.com/emulator" }).catch((e: any) => console.warn('[openUrl]', e?.message))}
+											>
+												Get the emulator at keepkey.com/emulator
+											</Text>
 										</Flex>
 									)}
 								</VStack>
