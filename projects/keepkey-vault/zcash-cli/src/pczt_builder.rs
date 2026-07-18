@@ -162,6 +162,10 @@ pub struct PcztState {
     pub sighash: [u8; 32],
     pub branch_id: u32,
     pub signing_request: SigningRequest,
+    /// Nullifiers of the notes this tx spends — marked spent in the wallet DB
+    /// once the tx broadcasts, so the balance drops immediately instead of
+    /// double-counting until the scanner sees the spend on-chain.
+    pub spent_nullifiers: Vec<[u8; 32]>,
 }
 
 /// Build a PCZT and extract the signing request.
@@ -181,6 +185,7 @@ pub async fn build_pczt(
 ) -> Result<PcztState> {
     let mut rng = OsRng;
     let total_input: u64 = notes.iter().map(|n| n.value).sum();
+    let spent_nullifiers: Vec<[u8; 32]> = notes.iter().map(|n| n.nullifier).collect();
 
     // ZIP-317: fee depends on number of Orchard actions.
     // n_outputs = 1 (recipient) + 1 (change) — but we don't know if there's
@@ -972,6 +977,7 @@ pub async fn build_pczt(
         sighash,
         branch_id,
         signing_request,
+        spent_nullifiers,
     })
 }
 
@@ -2185,6 +2191,8 @@ pub struct DeshieldPcztState {
     pub branch_id: u32,
     pub orchard_signing_request: SigningRequest,
     pub transparent_outputs: Vec<zip244::TransparentOutput>,
+    /// Nullifiers of the notes this tx spends — see PcztState::spent_nullifiers.
+    pub spent_nullifiers: Vec<[u8; 32]>,
 }
 
 /// Build a deshield PCZT: Orchard spends → transparent output.
@@ -2204,6 +2212,7 @@ pub async fn build_deshield_pczt(
 ) -> Result<DeshieldPcztState> {
     let mut rng = OsRng;
     let total_input: u64 = notes.iter().map(|n| n.value).sum();
+    let spent_nullifiers: Vec<[u8; 32]> = notes.iter().map(|n| n.nullifier).collect();
 
     let n_spends = notes.len();
 
@@ -2750,6 +2759,7 @@ pub async fn build_deshield_pczt(
         branch_id,
         orchard_signing_request: signing_request,
         transparent_outputs,
+        spent_nullifiers,
     })
 }
 
