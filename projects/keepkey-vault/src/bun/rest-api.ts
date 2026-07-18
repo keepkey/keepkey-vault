@@ -4263,6 +4263,10 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           auth.requireAuth(req)
           const body = await parseRequest(req, S.ZcashBroadcastRequest)
           const result = await broadcastShieldedTx(body.raw_tx)
+          // Broadcast marked the tx's input notes spent — schedule the same
+          // reconciliation rescans the one-shot send paths get, or split-flow
+          // callers see an understated balance until change notes are found.
+          callbacks?.zcashSchedulePostTxRescans?.()
           return json(result)
         }
 

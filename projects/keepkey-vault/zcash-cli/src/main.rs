@@ -34,10 +34,12 @@ struct State {
     pending_shield_pczt: Option<pczt_builder::ShieldPcztState>,
     /// Pending deshield (Orchard → transparent) PCZT state waiting for signatures
     pending_deshield_pczt: Option<pczt_builder::DeshieldPcztState>,
-    /// Nullifiers spent by the most recently finalized tx — marked spent in the
-    /// wallet DB when that tx broadcasts, so the shielded balance drops
-    /// immediately instead of double-counting until the next chain scan.
-    last_spent_nullifiers: Vec<[u8; 32]>,
+    /// Spent-note nullifiers keyed by finalized raw-tx hex — marked spent in
+    /// the wallet DB when THAT transaction broadcasts, so the shielded balance
+    /// drops immediately instead of double-counting until the next chain scan.
+    /// Keyed (not global) so a failed or interleaved finalize can never mark
+    /// another transaction's notes. Bounded to the most recent few entries.
+    pending_spent_notes: Vec<(String, Vec<[u8; 32]>)>,
 }
 
 impl State {
@@ -48,7 +50,7 @@ impl State {
             pending_pczt: None,
             pending_shield_pczt: None,
             pending_deshield_pczt: None,
-            last_spent_nullifiers: Vec::new(),
+            pending_spent_notes: Vec::new(),
         }
     }
 
@@ -60,7 +62,7 @@ impl State {
             pending_pczt: None,
             pending_shield_pczt: None,
             pending_deshield_pczt: None,
-            last_spent_nullifiers: Vec::new(),
+            pending_spent_notes: Vec::new(),
         }
     }
 
@@ -563,6 +565,22 @@ async fn handle_scan(state: &mut State, params: &Value) -> Result<Value> {
     }))
 }
 
+/// Remember which notes a finalized tx spends, keyed by its raw-tx hex.
+/// Called only AFTER finalization succeeds, so an aborted finalize records
+/// nothing. Bounded so abandoned (never-broadcast) entries can't accumulate.
+fn record_pending_spent(state: &mut State, raw_tx_hex: String, nullifiers: Vec<[u8; 32]>) {
+    const MAX_PENDING_SPENT: usize = 4;
+    if nullifiers.is_empty() {
+        return;
+    }
+    state.pending_spent_notes.retain(|(k, _)| *k != raw_tx_hex);
+    state.pending_spent_notes.push((raw_tx_hex, nullifiers));
+    let len = state.pending_spent_notes.len();
+    if len > MAX_PENDING_SPENT {
+        state.pending_spent_notes.drain(..len - MAX_PENDING_SPENT);
+    }
+}
+
 async fn handle_balance(state: &mut State, _params: &Value) -> Result<Value> {
     let db = state.ensure_db()?;
     let balance = db.get_balance()?;
@@ -694,7 +712,7 @@ async fn handle_finalize(state: &mut State, params: &Value) -> Result<Value> {
         signatures.push(sig_bytes);
     }
 
-    state.last_spent_nullifiers = pczt_state.spent_nullifiers.clone();
+    let spent_nullifiers = pczt_state.spent_nullifiers.clone();
 
     let (raw_tx, txid) = pczt_builder::finalize_pczt(
         pczt_state.pczt_bundle,
@@ -702,6 +720,7 @@ async fn handle_finalize(state: &mut State, params: &Value) -> Result<Value> {
         pczt_state.branch_id,
         &signatures,
     )?;
+    record_pending_spent(state, hex::encode(&raw_tx), spent_nullifiers);
 
     Ok(serde_json::json!({
         "raw_tx": hex::encode(&raw_tx),
@@ -857,11 +876,6 @@ async fn handle_finalize_shield(state: &mut State, params: &Value) -> Result<Val
         .and_then(|v| v.as_str())
         .map(|s| hex::decode(s).unwrap_or_default());
 
-    /* Shield spends transparent UTXOs, not Orchard notes — clear any stale
-     * nullifier list from a prior z2z/deshield so this broadcast can't mark
-     * unrelated notes spent. */
-    state.last_spent_nullifiers.clear();
-
     let (raw_tx, txid) = pczt_builder::finalize_shield_pczt(
         shield_state,
         &transparent_sigs,
@@ -997,9 +1011,10 @@ async fn handle_finalize_deshield(state: &mut State, params: &Value) -> Result<V
         orchard_sigs.push(hex::decode(sig_hex)?);
     }
 
-    state.last_spent_nullifiers = deshield_state.spent_nullifiers.clone();
+    let spent_nullifiers = deshield_state.spent_nullifiers.clone();
 
     let (raw_tx, txid) = pczt_builder::finalize_deshield_pczt(deshield_state, &orchard_sigs)?;
+    record_pending_spent(state, hex::encode(&raw_tx), spent_nullifiers);
 
     Ok(serde_json::json!({
         "raw_tx": hex::encode(&raw_tx),
@@ -1457,12 +1472,20 @@ async fn handle_broadcast(state: &mut State, params: &Value) -> Result<Value> {
         }
     }
     if any_accepted.is_some() || already_known {
-        // Optimistically mark the tx's input notes spent so the shielded
+        // Optimistically mark THIS tx's input notes spent so the shielded
         // balance drops now instead of double-counting (old notes + new
         // transparent output) until the scanner sees the spend on-chain.
-        // If the tx were ever dropped from the mempool, a full rescan
-        // rebuilds spent-tracking from chain truth.
-        let nfs = std::mem::take(&mut state.last_spent_nullifiers);
+        // Looked up by raw-tx hex — broadcasting an unrelated tx marks
+        // nothing. If the tx were ever dropped from the mempool, a full
+        // rescan rebuilds spent-tracking from chain truth.
+        let nfs = match state
+            .pending_spent_notes
+            .iter()
+            .position(|(k, _)| *k == raw_tx_hex)
+        {
+            Some(pos) => state.pending_spent_notes.remove(pos).1,
+            None => Vec::new(),
+        };
         if !nfs.is_empty() {
             match state.ensure_db() {
                 Ok(db) => {
