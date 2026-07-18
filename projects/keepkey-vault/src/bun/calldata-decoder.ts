@@ -400,8 +400,19 @@ const ADDR = {
   ZX_EXCHANGE_PROXY: '0xdef1c0ded9bec7f1a1670819833240f027b25eff', // 0x transformERC20 / sellToUniswap
   UNISWAP_V2_ROUTER: '0x7a250d5630b4cf539739df2c5dacb4c659f2488d', // 0x liquid add/remove + approve-to-router
   SALARY_PROXY:      '0xbd6a40bb904aea5a49c59050b5395f7484a4203d', // saproxy withdrawFromSalary
-  THOR_ROUTER:       '0xd37bbe5744d730a1d98d8dc97c42f0ca46ad7146',
+  THOR_ROUTER:       '0xd37bbe5744d730a1d98d8dc97c42f0ca46ad7146', // Ethereum
+  THOR_ROUTER_AVAX:  '0x00dc6100103bc402d490aee3f9a5560cbd91f1d4', // Avalanche C-Chain
   MAYA_ROUTER:       '0xd89dce570de35a6f42d3bca7dba50a6d89bfc2a2',
+}
+
+// THORChain's Router lives at a DIFFERENT address on each EVM chain, so the
+// clear-sign pin is (address, chainId) together — mirrors thor_router_for_chain
+// in firmware ethereum_contracts/thortx.c. Keep this in lockstep with that
+// switch; a chain listed here but not there (or vice versa) makes the overlay
+// mispredict clear-signability. chainId defaults to 1 (Ethereum) when absent.
+const THOR_ROUTER_BY_CHAIN: Record<number, string> = {
+  1:     ADDR.THOR_ROUTER,
+  43114: ADDR.THOR_ROUTER_AVAX,
 }
 
 // selector → the ONE contract address the firmware pins that selector to.
@@ -426,7 +437,7 @@ const ERC20_NATIVE = new Set(['0xa9059cbb', '0x095ea7b3'])
  * ERC-20 transfer/approve path in ethereum.c. Contract-address pinning matters:
  * the same selector to a DIFFERENT address is NOT clear-signed by the device.
  */
-export function firmwareClearSigns(to?: string, data?: string, _chainId?: number): boolean {
+export function firmwareClearSigns(to?: string, data?: string, chainId?: number): boolean {
   if (!to || !data || data.length < 10) return false
   const selector = data.slice(0, 10).toLowerCase()
   const dest = to.toLowerCase()
@@ -439,7 +450,10 @@ export function firmwareClearSigns(to?: string, data?: string, _chainId?: number
   if (ERC20_NATIVE.has(selector) && (data.length - 2) === 136) return true
 
   if (THOR_MAYA_DEPOSIT.has(selector)) {
-    return dest === ADDR.THOR_ROUTER || dest === ADDR.MAYA_ROUTER
+    // THORChain's router is chain-specific (see THOR_ROUTER_BY_CHAIN); Maya's
+    // single ETH router is accepted regardless of chain.
+    const thorRouter = THOR_ROUTER_BY_CHAIN[chainId ?? 1]
+    return (thorRouter != null && dest === thorRouter) || dest === ADDR.MAYA_ROUTER
   }
   const pinned = FIRMWARE_PINNED[selector]
   return pinned != null && dest === pinned
