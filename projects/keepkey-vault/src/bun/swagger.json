@@ -5143,6 +5143,30 @@
           "System"
         ]
       }
+    },
+    "/mcp": {
+      "post": {
+        "operationId": "McpJsonRpc",
+        "summary": "MCP endpoint for AI agents (JSON-RPC 2.0, not REST)",
+        "description": "Model Context Protocol server (Streamable HTTP). Speaks JSON-RPC 2.0: initialize, ping, tools/list, tools/call. The tool catalog lives in the KeepKey browser extension and is proxied live - call tools/list for the source of truth; this spec deliberately does not duplicate it. Auth: the same bearer pairing key as the REST API. Loopback callers only, and any request carrying an Origin or Sec-Fetch-Site header is rejected (browsers excluded). Connect an agent: claude mcp add --transport http keepkey http://localhost:1646/mcp --header \"Authorization: Bearer <pairing key>\". Full documentation: https://docs.keepkey.com/docs/bex/mcp",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "JSON-RPC 2.0 request envelope",
+                "example": { "jsonrpc": "2.0", "id": 1, "method": "tools/list" }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "JSON-RPC 2.0 response envelope (result or error)" },
+          "401": { "description": "Missing or invalid pairing key" },
+          "403": { "description": "Non-loopback caller, or request came from a browser" }
+        }
+      }
     }
   },
   "components": {
