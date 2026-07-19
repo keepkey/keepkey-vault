@@ -9,7 +9,7 @@
  * Module-singleton style, matching event-stream.ts.
  */
 
-type BridgeSocket = { send(data: string): void; close(): void }
+type BridgeSocket = { send(data: string): void; close(code?: number, reason?: string): void }
 
 type PendingCall = {
   resolve: (value: unknown) => void
@@ -24,8 +24,19 @@ export interface BridgeError {
 
 const CALL_TIMEOUT_MS = 30_000 // BEX may need to wake its service worker + hit the wallet
 
+/**
+ * How long the slot-holder may go silent before we treat it as dead and let a
+ * newcomer take over. Must stay comfortably above the BEX heartbeat (20s, see
+ * mcpBridge.ts HEARTBEAT_MS) so a live extension is never judged stale.
+ */
+const STALE_MS = 45_000
+
+/** Close code sent to a second BEX instance that tried to take a held slot. */
+export const SLOT_TAKEN_CLOSE_CODE = 4409
+
 let sock: BridgeSocket | null = null
 let connectedAt: number | null = null
+let lastSeenAt = 0
 const pending = new Map<string, PendingCall>()
 
 export function bridgeConnected(): boolean {
@@ -37,8 +48,18 @@ export function bridgeStatus(): { connected: boolean; connectedAt: number | null
 }
 
 export function onBexOpen(ws: BridgeSocket): void {
-  // Single BEX per vault: a new connection replaces the old (SW restart case).
+  // Single BEX per vault. The newcomer only wins if the incumbent has gone
+  // silent (SW restart whose close frame never arrived). A LIVE incumbent keeps
+  // the slot: two extension instances — e.g. the same extension installed in two
+  // Chrome profiles — otherwise evict each other on every reconnect, and each
+  // MCP tool call then lands on whichever wallet happens to hold the slot at
+  // that instant. Silent nondeterministic routing of signing requests.
   if (sock && sock !== ws) {
+    if (Date.now() - lastSeenAt < STALE_MS) {
+      try { ws.close(SLOT_TAKEN_CLOSE_CODE, 'bridge slot held by another KeepKey instance') } catch { /* already gone */ }
+      console.log('[BEX-BRIDGE] refused a second extension instance — slot already held')
+      return
+    }
     try { sock.close() } catch { /* already gone */ }
     // Fail calls still outstanding on the replaced socket NOW — the old
     // socket's close event hits the `sock !== ws` guard in onBexClose and
@@ -48,6 +69,7 @@ export function onBexOpen(ws: BridgeSocket): void {
   }
   sock = ws
   connectedAt = Date.now()
+  lastSeenAt = connectedAt
   console.log('[BEX-BRIDGE] extension connected')
 }
 
@@ -59,7 +81,10 @@ export function onBexClose(ws: BridgeSocket): void {
   console.log('[BEX-BRIDGE] extension disconnected')
 }
 
-export function onBexMessage(_ws: BridgeSocket, raw: string | Buffer): void {
+export function onBexMessage(ws: BridgeSocket, raw: string | Buffer): void {
+  // Any frame from the slot-holder is proof of life, heartbeat pings included —
+  // they carry no id and fall out below, but they still keep the slot fresh.
+  if (ws === sock) lastSeenAt = Date.now()
   let msg: any
   try {
     msg = JSON.parse(String(raw))
