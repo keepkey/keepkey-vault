@@ -50,6 +50,106 @@ below is about not wasting reconnects and telling the user what is going on.
 
 ---
 
+## Task 0 — the transparency contract: if MCP touches a page, the page says so
+
+**Priority: highest. This is a product invariant, not a feature.**
+
+### The rule
+
+> Any MCP operation that touches a web page must be visible in that page, every
+> time, without the agent having to remember to announce it.
+
+### Why it is currently only half-true
+
+The overlay (`pages/content/src/agentOverlay.ts`) is intact and needs **no**
+extra permissions — plain DOM in the isolated world of a content script that is
+already declaratively injected on `<all_urls>` at `document_start`. Confirmed:
+the `scripting` permission dropped in `b3e3126` was only ever for
+`chrome.scripting.executeScript` into tabs predating extension load. It has
+nothing to do with the overlay. **Do not re-add `scripting` for UI reasons.**
+
+The gap is *coverage*. The overlay fires from `showThen()`, which has exactly
+three callers (`pages/content/src/agentDom.ts:399,406,425`): `clicking`,
+`typing`, `selecting`. Every other page-touching tool draws nothing:
+
+- `bex_navigate` — moves the user's tab, silently
+- `bex_read_page`, `bex_snapshot`, `bex_find` — read page content, silently
+- `bex_screenshot` — captures the tab, silently
+- `bex_console`, `bex_network`, `bex_perf`, `bex_storage` — read page state
+  (`bex_storage` reads localStorage), silently
+- `bex_bring_to_front` — moves the user's window, silently
+
+Reading a user's page and screenshotting it are exactly the operations that most
+need to be visible. A live session showed the user watching a tab, expecting the
+driving UI, and correctly seeing nothing — because that session only ever
+navigated, snapshotted and read.
+
+### Where to enforce it
+
+There is one choke point already: `executeBrowserTool(tool, args)`
+(`chrome-extension/src/background/browserTools.ts:400`), a single switch over
+every `bex_*` tool. Announce there, once, rather than at each call site:
+
+```ts
+// The UI itself, and browser-level calls that touch no page.
+const NO_ANNOUNCE = new Set(['bex_panel', 'bex_tabs'])
+
+export async function executeBrowserTool(tool: string, args: any): Promise<any> {
+  if (!NO_ANNOUNCE.has(tool)) await announce(tool, args) // must never throw
+  switch (tool) { /* unchanged */ }
+}
+```
+
+`announce()` resolves the target tab the same way the tool will
+(`resolveTab(args?.tabId)`), then posts one message to that tab's content script
+so the overlay raises the banner and logs a caption — `reading page`,
+`navigating`, `capturing screenshot`. No pointer, since these have no target
+element; the existing `showThen()` pointer stays as the richer treatment for
+click/type/select. Announce is the floor, not a replacement.
+
+Enforcing at the dispatcher rather than per-tool is the whole point: a tool
+added later is covered by construction, and the only way to bypass it is to
+handle a tool outside `executeBrowserTool` — which the test below catches.
+
+### Keep the banner up for the whole session
+
+`BANNER_IDLE_MS = 8000` (`agentOverlay.ts:18`) hides the banner after 8s of
+quiet. A hardware-wallet confirmation routinely exceeds that, so today the "MCP
+is driving" banner disappears at precisely the moment the agent is waiting on a
+signature — the highest-stakes, longest-silence part of the flow. Keep it up
+while any MCP call is in flight and until an explicit end-of-session
+(`bex_panel` with `level: 'done'`), rather than on an activity timer.
+
+### The test that keeps it from rotting
+
+Structural enforcement is what makes this durable, so pair the wrapper with a
+registry test:
+
+- Enumerate every tool the extension advertises via `bex_list_tools`.
+- Assert each is either handled inside `executeBrowserTool` **and** not in
+  `NO_ANNOUNCE`, or is in `NO_ANNOUNCE` with a comment saying why.
+- A new tool then fails the test until its author makes an explicit, reviewed
+  choice about visibility.
+
+Without this, the contract degrades to "remember to call the overlay", which is
+exactly the state that produced the current gap.
+
+### One decision needed (not mine to make)
+
+Some tools work on a tab with **no content script** — the pre-existing-tab case
+created by dropping `scripting`. `bex_screenshot`, `bex_navigate` and
+`bex_bring_to_front` would still function there, but with **no way to show the
+indicator**. Two options:
+
+1. **Strict** — refuse, with `reload the page so the driving indicator can be
+   shown`. The contract genuinely holds: no invisible driving, ever. Cost:
+   screenshotting a pre-existing tab starts failing.
+2. **Lenient** — allow, and report the invisibility in the tool result so the
+   agent must tell the user.
+
+Strict is the honest reading of "users need transparency". Confirm before
+building, since option 1 is a behaviour break.
+
 ## Task 1 — treat close code 4409 as terminal (small, do this first)
 
 **File:** `chrome-extension/src/background/mcpBridge.ts`, the `socket.onclose`
