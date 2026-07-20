@@ -2202,12 +2202,16 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         }
 
         if (path === '/hive/sign-operations' && method === 'POST') {
-          // STAGED: the HiveSignOperations (1616/1617) firmware handler ships in
-          // 7.15.0 via the rc10 stack (fw #307), but the ">=7.15.0" gate below
-          // can't distinguish an early 7.15.0-rc without it — such a device passes
-          // the gate then rejects the unknown message. This endpoint must not be
-          // treated as released until FINAL 7.15.0 firmware + live-device sign
-          // smoke pass (tracked in HIVE-STATUS). It is correct code against rc10+.
+          // Live-device signed on 7.15.0-rc15 (fw 23ef39c0, EmulatorZcash): the
+          // phase-1/2/3 op table round-trips, including limit_order_create /
+          // limit_order_cancel — see keepkey-sdk tests/hive/phase3-ops.js.
+          //
+          // KNOWN GATE LIMITATION: requireChainSupport('hive') only compares
+          // ">=7.15.0", which every 7.15.0-rc reports. An rc predating the
+          // HiveSignOperations handler (1616/1617, fw #307 / rc10) or the
+          // phase-3 ops (fw #315 / rc15) therefore passes the gate and then
+          // rejects the message on-device. There is no finer-grained capability
+          // flag to check; the device error is the backstop.
           auth.requireAuth(req)
           if (getSetting('hive_enabled') !== '1') return json({ error: 'Hive is disabled' }, 403)
           const fwBlock = requireChainSupport('hive')
