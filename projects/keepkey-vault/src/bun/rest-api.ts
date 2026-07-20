@@ -2179,10 +2179,11 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           // Default to the posting role — Keychain signBuffer is overwhelmingly
           // dApp login, which verifies against the account's posting authority.
           const addressNList = body.addressNList || body.address_n || hiveRolePath('posting', 0)
+          const { hiveMessagePreview } = await import('./emulator-confirm-details')
           const result = await emuWrap(() => (wallet as any).hiveSignMessage({
             addressNList,
             message: new Uint8Array(messageBytes),
-          }), { operation: 'hiveSignMessage', chain: 'HIVE' })
+          }), { operation: 'hiveSignMessage', opLabel: 'Sign Message', chain: 'Hive', memo: hiveMessagePreview(messageBytes) })
           if (!result?.signature) throw new HttpError(500, 'Hive sign-message: device returned no signature')
           const sigBytes = result.signature instanceof Uint8Array ? Buffer.from(result.signature) : Buffer.from(String(result.signature), 'hex')
           const pubBytes = result.publicKey instanceof Uint8Array ? Buffer.from(result.publicKey) : Buffer.from(String(result.publicKey), 'hex')
@@ -2237,11 +2238,12 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
           // Role from op tier unless the caller pinned a path
           const addressNList = body.addressNList || body.address_n || hiveRolePath(serialized.tier, 0)
+          const { hiveConfirmDetails } = await import('./emulator-confirm-details')
           const result: any = await emuWrap(() => (wallet as any).hiveSignOperations({
             addressNList,
             chainId: txParams.chainId,
             serializedTx: new Uint8Array(serialized.serializedTx),
-          }), { operation: 'hiveSignOperations', chain: 'HIVE' })
+          }), hiveConfirmDetails('hiveSignOperations', body.operations))
           if (!result?.signature) throw new HttpError(500, 'Hive sign-operations: device returned no signature')
           const sigBytes = result.signature instanceof Uint8Array ? Buffer.from(result.signature) : Buffer.from(String(result.signature), 'hex')
           // Return the expiration derived from the SIGNED expirationUnix (the value
