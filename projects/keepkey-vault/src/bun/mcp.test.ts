@@ -5,9 +5,9 @@
  *
  * Run: bun test src/bun/mcp.test.ts
  */
-import { describe, test, expect, afterEach } from 'bun:test'
+import { describe, test, expect, afterEach, setSystemTime } from 'bun:test'
 import { handleMcpRequest } from './mcp'
-import { callBex, onBexOpen, onBexClose, onBexMessage, bridgeConnected } from './bex-bridge'
+import { callBex, onBexOpen, onBexClose, onBexMessage, bridgeConnected, SLOT_TAKEN_CLOSE_CODE } from './bex-bridge'
 
 const call = async (body: unknown, headers?: Record<string, string>) => {
   const req = new Request('http://localhost:1646/mcp', {
@@ -191,22 +191,67 @@ describe('MCP dumb pipe (bridge UP)', () => {
 })
 
 describe('BEX bridge call lifecycle', () => {
-  const fakeWs = () => ({ sent: [] as string[], closed: false, send(d: string) { this.sent.push(d) }, close() { this.closed = true } })
+  const fakeWs = () => ({
+    sent: [] as string[],
+    closed: false,
+    closeCode: 0,
+    send(d: string) { this.sent.push(d) },
+    close(code?: number) { this.closed = true; this.closeCode = code ?? 0 },
+  })
+
+  afterEach(() => setSystemTime()) // undo any clock travel
 
   test('callBex with no socket rejects fast, no pending leak', async () => {
     expect(bridgeConnected()).toBe(false)
     await expect(callBex('bex_status', {})).rejects.toMatchObject({ code: 'bridge_disconnected' })
   })
 
-  test('replacing the socket fails the old socket in-flight calls immediately', async () => {
+  test('a LIVE incumbent keeps the slot — a second extension instance is refused', async () => {
+    // Regression: two Chrome profiles each running the extension used to evict
+    // each other on every reconnect, so tool calls landed on a nondeterministic
+    // wallet. The newcomer must lose, and must be told why (close code 4409).
     const ws1 = fakeWs()
     onBexOpen(ws1 as any)
-    const inflight = callBex('bex_accounts', {}) // sent over ws1, now pending
+    const inflight = callBex('bex_accounts', {}) // sent over ws1, stays pending
     const ws2 = fakeWs()
-    onBexOpen(ws2 as any) // replaces ws1 — must reject ws1's pending now, not after 30s
+    onBexOpen(ws2 as any)
+    expect(ws2.closed).toBe(true)
+    expect(ws2.closeCode).toBe(SLOT_TAKEN_CLOSE_CODE)
+    expect(ws1.closed).toBe(false) // incumbent untouched
+    expect(ws1.sent.length).toBe(1)
+
+    onBexClose(ws1 as any) // cleanup shared module state
+    await expect(inflight).rejects.toMatchObject({ code: 'bridge_disconnected' })
+    expect(bridgeConnected()).toBe(false)
+  })
+
+  test('a heartbeat keeps the incumbent fresh past the stale window', () => {
+    const ws1 = fakeWs()
+    onBexOpen(ws1 as any)
+    setSystemTime(new Date(Date.now() + 40_000))
+    onBexMessage(ws1 as any, JSON.stringify({ ping: 1 })) // no id — dropped, but proof of life
+    setSystemTime(new Date(Date.now() + 40_000)) // 80s since open, 40s since ping
+
+    const ws2 = fakeWs()
+    onBexOpen(ws2 as any)
+    expect(ws2.closeCode).toBe(SLOT_TAKEN_CLOSE_CODE)
+    expect(ws1.closed).toBe(false)
+    onBexClose(ws1 as any)
+  })
+
+  test('a SILENT incumbent is replaced, and its in-flight calls fail immediately', async () => {
+    // The SW-restart case whose close frame never arrived. Without this the
+    // bridge would wedge until the dead socket happened to be noticed.
+    const ws1 = fakeWs()
+    onBexOpen(ws1 as any)
+    const inflight = callBex('bex_accounts', {})
+    setSystemTime(new Date(Date.now() + 60_000)) // past STALE_MS, no frames from ws1
+
+    const ws2 = fakeWs()
+    onBexOpen(ws2 as any) // takes over — must reject ws1's pending now, not after 30s
     await expect(inflight).rejects.toMatchObject({ code: 'bridge_disconnected' })
     expect(ws1.closed).toBe(true)
-    onBexClose(ws2 as any) // cleanup shared module state
+    onBexClose(ws2 as any)
     expect(bridgeConnected()).toBe(false)
   })
 })
