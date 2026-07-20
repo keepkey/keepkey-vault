@@ -291,6 +291,62 @@ describe('comment_options beneficiary rules (finding #6)', () => {
   })
 })
 
+describe('limit_order_create expiration (Graphene time_point_sec)', () => {
+  // hived's JSON form is a zone-less ISO string, and that is what real dApps
+  // send. The whole phase-3 suite below uses unix ints, so this shape was never
+  // exercised until a live hivehub.dev market order hit
+  // "expiration out of uint32 range: NaN".
+  const ISO = '2026-08-16T21:44:55'
+  const UNIX = Math.floor(Date.UTC(2026, 7, 16, 21, 44, 55) / 1000)
+  const base = {
+    owner: 'bithighlander22', orderid: 1784583895,
+    amount_to_sell: '1.000 HIVE', min_to_receive: '0.048 HBD',
+    fill_or_kill: true,
+  }
+  const withExp = (expiration: any) => sign(['limit_order_create', { ...base, expiration }]).serializedTx
+
+  test('the exact payload that failed in the field now serializes', () => {
+    expect(() => withExp(ISO)).not.toThrow()
+  })
+
+  test('ISO and its unix equivalent produce identical bytes', () => {
+    expect(withExp(ISO).equals(withExp(UNIX))).toBe(true)
+  })
+
+  test('a zone-less timestamp is UTC, not host-local', () => {
+    // The bug this guards: JS parses the zone-less date-time form as LOCAL
+    // time, so on a non-UTC host the signed expiration would silently drift by
+    // the UTC offset. TZ is set for the whole run in the package script; assert
+    // against an explicitly-UTC constant so a local-time regression fails here
+    // regardless of where the test runs.
+    // expiration is the op's last field; one trailing varint(0) (tx extensions)
+    // follows it, so it sits at [-5, -1).
+    const bytes = withExp(ISO)
+    expect(bytes.subarray(bytes.length - 5, bytes.length - 1).readUInt32LE()).toBe(UNIX)
+  })
+
+  test('an explicit offset is honored, not double-shifted', () => {
+    expect(withExp('2026-08-16T21:44:55Z').equals(withExp(UNIX))).toBe(true)
+    // +02:00 means the same instant is two hours EARLIER in UTC.
+    expect(withExp('2026-08-16T23:44:55+02:00').equals(withExp(UNIX))).toBe(true)
+  })
+
+  test('numeric strings are accepted as unix seconds', () => {
+    expect(withExp(String(UNIX)).equals(withExp(UNIX))).toBe(true)
+  })
+
+  test('an unparseable expiration is rejected with a message that says what is wanted', () => {
+    for (const bad of [undefined, null, '', 'tomorrow', {}, NaN]) {
+      expect(() => withExp(bad), `accepted ${JSON.stringify(bad)}`)
+        .toThrow(/expiration must be unix seconds or an ISO 8601 UTC timestamp|out of uint32 range/)
+    }
+  })
+
+  test('a pre-1970 timestamp is rejected rather than wrapping to a huge uint32', () => {
+    expect(() => withExp('1969-12-31T23:59:59')).toThrow(/out of uint32 range/)
+  })
+})
+
 describe('phase-3: internal market (limit orders)', () => {
   // Same vector as the firmware unit test Hive.LimitOrderCreateRetainsEveryDisplayedField
   const CREATE = {

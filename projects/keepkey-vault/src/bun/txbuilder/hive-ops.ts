@@ -71,6 +71,36 @@ function boolByte(v: any, what: string): Buffer {
   return Buffer.from([v ? 1 : 0])
 }
 
+/**
+ * Graphene `time_point_sec` → unix seconds.
+ *
+ * On the wire it is a uint32, but hived's JSON representation — and therefore
+ * what every Hive library and dApp sends — is an ISO 8601 string with NO zone
+ * suffix: "2026-08-16T21:44:55". Number() on that is NaN, which is what a real
+ * hivehub.dev market order hit.
+ *
+ * The 'Z' is appended deliberately. Graphene timestamps are always UTC, but JS
+ * parses the zone-less date-time form as LOCAL time (ES2015+), so on a host in
+ * e.g. America/Denver a naive Date.parse would sign an expiration six hours off
+ * the one the user was shown. Wrong-but-plausible is worse than rejected.
+ *
+ * Integers and numeric strings are accepted as unix seconds — the SDK tests and
+ * some direct REST callers use that form.
+ */
+function timePointSec(v: any, what: string): number {
+  if (typeof v === 'number') return v
+  if (typeof v === 'string') {
+    const s = v.trim()
+    if (/^\d+$/.test(s)) return Number(s)
+    // Only append Z when no explicit offset is present — a caller that DID
+    // specify one (…Z or …+02:00) means it, and must not be double-shifted.
+    const hasZone = /(?:Z|[+-]\d{2}:?\d{2})$/.test(s)
+    const ms = Date.parse(hasZone ? s : `${s}Z`)
+    if (Number.isFinite(ms)) return Math.floor(ms / 1000)
+  }
+  throw new Error(`${what} must be unix seconds or an ISO 8601 UTC timestamp (got ${JSON.stringify(v)})`)
+}
+
 // int64 LE amount + u8 precision + 7-byte NUL-padded symbol (append_asset
 // layout). Precisions are fixed per symbol: HIVE/HBD = 3, VESTS = 6.
 const ASSET_PRECISION: Record<string, number> = { HIVE: 3, HBD: 3, VESTS: 6 }
@@ -195,7 +225,7 @@ function serializeOp([name, p]: HiveOpTuple): { bytes: Buffer; tier: 'posting' |
           u32(Number(p.orderid), 'limit_order_create orderid'),
           sell, recv,
           boolByte(p.fill_or_kill, 'limit_order_create fill_or_kill'),
-          u32(Number(p.expiration), 'limit_order_create expiration'),
+          u32(timePointSec(p.expiration, 'limit_order_create expiration'), 'limit_order_create expiration'),
         ]),
         tier: 'active',
       }
