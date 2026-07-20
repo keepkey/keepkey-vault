@@ -13,6 +13,7 @@ import type {
   EthVerifyMessageParams,
   BtcSignTxParams,
   CosmosAminoSignParams,
+  HiveSignOperationsParams,
   XrpSignTxParams,
   BnbSignTxParams,
   SolanaSignTxParams,
@@ -327,6 +328,10 @@ export class KeepKeySdk {
     /** Derive a TON address. */
     tonGetAddress: (params: AddressRequest): Promise<{ address: string }> =>
       this.client.post('/addresses/ton', params),
+
+    /** Derive a Hive (SLIP-0048) address. */
+    hiveGetAddress: (params: AddressRequest): Promise<{ address: string }> =>
+      this.client.post('/addresses/hive', params),
   }
 
   // ═══════════════════════════════════════════════════════════════════
@@ -448,6 +453,20 @@ export class KeepKeySdk {
     /** Sign an Osmosis `MsgSwapExactAmountIn` (swap). */
     osmosisSignAminoSwap: (params: CosmosAminoSignParams): Promise<SignedTx> =>
       this.client.post('/osmosis/sign-amino-swap', params),
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // hive — Hive (SLIP-0048) signing
+  // ═══════════════════════════════════════════════════════════════════
+
+  /** Hive generic clear-sign op-table signing (fw 7.15.0+). */
+  hive = {
+    /**
+     * Sign 1–4 Hive operations against the device clear-sign op table.
+     * Requires the vault's `hive_enabled` setting and firmware >= 7.15.0.
+     */
+    hiveSignOperations: (params: HiveSignOperationsParams): Promise<SignedTx> =>
+      this.client.post('/hive/sign-operations', params),
   }
 
   // ═══════════════════════════════════════════════════════════════════

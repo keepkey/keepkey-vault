@@ -1,5 +1,5 @@
 import { VaultClient } from './client';
-import type { SdkConfig, DeviceFeatures, DeviceInfo, SignedTx, AddressRequest, EthSignTxParams, LoadClearsignSignerParams, LoadClearsignSignerResult, EthSignTypedDataParams, EthSignMessageParams, EthVerifyMessageParams, BtcSignTxParams, CosmosAminoSignParams, XrpSignTxParams, BnbSignTxParams, SolanaSignTxParams, SolanaSignOffchainMessageParams, SolanaOffchainMessageSignatureResult, TronSignTxParams, TronSignMessageParams, TronMessageSignatureResult, TronVerifyMessageParams, TronSignTypedHashParams, TronTypedDataSignatureResult, TonSignTxParams, TonSignMessageParams, TonMessageSignatureResult, TonBuildTransferParams, TonBuildTransferResult, TonFinalizeTransferParams, TonFinalizeTransferResult, GetPublicKeyRequest, BatchPubkeysPath, ApplySettingsParams, HealthResponse, SupportedAsset, PortfolioBalancesParams, MarketInfoParams, SearchAssetsParams, ListUnspentParams, PubkeyInfoParams, TxHistoryParams, BroadcastParams, NetworkIdParams, NetworkAddressParams, TokenDecimalsParams, StakingParams, SwapQuoteParams, SweepScanParams, SweepScanStatus, SweepExecuteParams, SweepExecuteResult } from './types';
+import type { SdkConfig, DeviceFeatures, DeviceInfo, SignedTx, AddressRequest, EthSignTxParams, LoadClearsignSignerParams, LoadClearsignSignerResult, EthSignTypedDataParams, EthSignMessageParams, EthVerifyMessageParams, BtcSignTxParams, CosmosAminoSignParams, HiveSignOperationsParams, XrpSignTxParams, BnbSignTxParams, SolanaSignTxParams, SolanaSignOffchainMessageParams, SolanaOffchainMessageSignatureResult, TronSignTxParams, TronSignMessageParams, TronMessageSignatureResult, TronVerifyMessageParams, TronSignTypedHashParams, TronTypedDataSignatureResult, TonSignTxParams, TonSignMessageParams, TonMessageSignatureResult, TonBuildTransferParams, TonBuildTransferResult, TonFinalizeTransferParams, TonFinalizeTransferResult, GetPublicKeyRequest, BatchPubkeysPath, ApplySettingsParams, HealthResponse, SupportedAsset, PortfolioBalancesParams, MarketInfoParams, SearchAssetsParams, ListUnspentParams, PubkeyInfoParams, TxHistoryParams, BroadcastParams, NetworkIdParams, NetworkAddressParams, TokenDecimalsParams, StakingParams, SwapQuoteParams, SweepScanParams, SweepScanStatus, SweepExecuteParams, SweepExecuteResult } from './types';
 export { SdkError } from './client';
 export * from './types';
 /**
@@ -218,6 +218,10 @@ export declare class KeepKeySdk {
         tonGetAddress: (params: AddressRequest) => Promise<{
             address: string;
         }>;
+        /** Derive a Hive (SLIP-0048) address. */
+        hiveGetAddress: (params: AddressRequest) => Promise<{
+            address: string;
+        }>;
     };
     /** Ethereum and EVM-compatible signing (sign-tx, sign-message, EIP-712). */
     eth: {
@@ -281,6 +285,14 @@ export declare class KeepKeySdk {
         osmosisSignAminoLpAdd: (params: CosmosAminoSignParams) => Promise<SignedTx>;
         /** Sign an Osmosis `MsgSwapExactAmountIn` (swap). */
         osmosisSignAminoSwap: (params: CosmosAminoSignParams) => Promise<SignedTx>;
+    };
+    /** Hive generic clear-sign op-table signing (fw 7.15.0+). */
+    hive: {
+        /**
+         * Sign 1–4 Hive operations against the device clear-sign op table.
+         * Requires the vault's `hive_enabled` setting and firmware >= 7.15.0.
+         */
+        hiveSignOperations: (params: HiveSignOperationsParams) => Promise<SignedTx>;
     };
     /** THORChain signing (RUNE transfers and deposits for swaps). */
     thorchain: {

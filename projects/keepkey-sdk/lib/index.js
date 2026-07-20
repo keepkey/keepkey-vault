@@ -148,6 +148,8 @@ class KeepKeySdk {
             tronGetAddress: (params) => this.client.post('/addresses/tron', params),
             /** Derive a TON address. */
             tonGetAddress: (params) => this.client.post('/addresses/ton', params),
+            /** Derive a Hive (SLIP-0048) address. */
+            hiveGetAddress: (params) => this.client.post('/addresses/hive', params),
         };
         // ═══════════════════════════════════════════════════════════════════
         // eth — Ethereum / EVM signing
@@ -223,6 +225,17 @@ class KeepKeySdk {
             osmosisSignAminoLpAdd: (params) => this.client.post('/osmosis/sign-amino-lp-add', params),
             /** Sign an Osmosis `MsgSwapExactAmountIn` (swap). */
             osmosisSignAminoSwap: (params) => this.client.post('/osmosis/sign-amino-swap', params),
+        };
+        // ═══════════════════════════════════════════════════════════════════
+        // hive — Hive (SLIP-0048) signing
+        // ═══════════════════════════════════════════════════════════════════
+        /** Hive generic clear-sign op-table signing (fw 7.15.0+). */
+        this.hive = {
+            /**
+             * Sign 1–4 Hive operations against the device clear-sign op table.
+             * Requires the vault's `hive_enabled` setting and firmware >= 7.15.0.
+             */
+            hiveSignOperations: (params) => this.client.post('/hive/sign-operations', params),
         };
         // ═══════════════════════════════════════════════════════════════════
         // thorchain — THORChain signing

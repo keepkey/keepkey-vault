@@ -144,6 +144,12 @@ export interface CosmosAminoSignParams {
     signDoc: any;
     signerAddress: string;
 }
+export interface HiveSignOperationsParams {
+    address_n?: number[];
+    addressNList?: number[];
+    /** condenser-style tuples: [["limit_order_create", {...}], ...] — max 4, single tier */
+    operations: [string, Record<string, any>][];
+}
 export interface XrpSignTxParams {
     [key: string]: any;
 }
