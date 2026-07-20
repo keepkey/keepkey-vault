@@ -345,6 +345,59 @@ describe('limit_order_create expiration (Graphene time_point_sec)', () => {
   test('a pre-1970 timestamp is rejected rather than wrapping to a huge uint32', () => {
     expect(() => withExp('1969-12-31T23:59:59')).toThrow(/out of uint32 range/)
   })
+
+  // Date.parse is permissive in ways that CHANGE the value being signed. A
+  // timestamp the user never wrote must be rejected, not normalised.
+  test('impossible calendar dates are rejected, not rolled forward', () => {
+    // Date.parse('2026-02-30T12:00:00') silently yields 2026-03-02.
+    expect(() => withExp('2026-02-30T12:00:00')).toThrow(/not a real calendar date/)
+    expect(() => withExp('2026-04-31T12:00:00')).toThrow(/not a real calendar date/)
+    expect(() => withExp('2026-13-01T12:00:00')).toThrow(/month out of range/)
+    expect(() => withExp('2026-00-10T12:00:00')).toThrow(/month out of range/)
+    expect(() => withExp('2026-01-00T12:00:00')).toThrow(/not a real calendar date/)
+  })
+
+  test('leap years are judged correctly, not by a blanket Feb-29 rule', () => {
+    expect(() => withExp('2028-02-29T12:00:00')).not.toThrow()   // divisible by 4
+    expect(() => withExp('2000-02-29T12:00:00')).not.toThrow()   // 400-year exception
+    expect(() => withExp('2026-02-29T12:00:00')).toThrow(/not a real calendar date/)
+    expect(() => withExp('2100-02-29T12:00:00')).toThrow(/not a real calendar date/) // century, not leap
+  })
+
+  test('out-of-range times are rejected', () => {
+    expect(() => withExp('2026-08-16T24:00:00')).toThrow(/time out of range/)
+    expect(() => withExp('2026-08-16T21:60:00')).toThrow(/time out of range/)
+    expect(() => withExp('2026-08-16T21:44:60')).toThrow(/time out of range/)
+  })
+
+  test('non-ISO date formats are rejected rather than guessed at', () => {
+    // All of these are accepted by Date.parse despite the promised ISO form —
+    // and 08/16/2026 vs 16/08/2026 is ambiguous between locales.
+    for (const bad of [
+      'August 16, 2026', '08/16/2026', '2026/08/16', '16-08-2026',
+      'Sun Aug 16 2026', '2026-08-16T21:44:55 GMT+0200',
+    ]) {
+      expect(() => withExp(bad), `accepted ${JSON.stringify(bad)}`)
+        .toThrow(/must be unix seconds or an ISO 8601 UTC timestamp/)
+    }
+  })
+
+  test('a two-digit year is not silently mapped into the 1900s', () => {
+    // Date.UTC(26, …) means 1926. The 4-digit grammar rejects the short form
+    // outright rather than signing a century-old expiration.
+    expect(() => withExp('26-08-16T21:44:55')).toThrow(/must be unix seconds or an ISO/)
+  })
+
+  test('seconds are optional and fractional seconds are tolerated', () => {
+    // hived does not emit either, but neither changes the instant.
+    expect(withExp('2026-08-16T21:44').equals(
+      withExp(Math.floor(Date.UTC(2026, 7, 16, 21, 44, 0) / 1000)))).toBe(true)
+    expect(withExp('2026-08-16T21:44:55.123').equals(withExp(UNIX))).toBe(true)
+  })
+
+  test('a non-integer number of seconds is rejected', () => {
+    expect(() => withExp(1700003600.5)).toThrow(/whole number of seconds/)
+  })
 })
 
 describe('phase-3: internal market (limit orders)', () => {
