@@ -155,3 +155,156 @@ export function evmConfirmDetails(operation: string, fallbackChain: string, para
     memo: `data ${selector}${decoded ? '' : ' (unrecognized)'}`,
   }
 }
+
+// ── Hive ────────────────────────────────────────────────────────────────
+//
+// /hive/sign-operations sends the device a pre-serialized Graphene blob, so
+// unlike every other chain the confirm dialog has no params to read amounts
+// out of — without this it showed "Hive Sign Operations / Chain: HIVE" and
+// nothing else, for a tx that may carry up to four distinct operations. The
+// caller passes the ORIGINAL op array (the same one it serialized) purely for
+// display; nothing here feeds the serializer.
+//
+// Multi-screen ops (claim_reward_balance is 2 screens, limit_order_create 2,
+// comment_options 2 + one per beneficiary) raise one prompt PER firmware
+// ButtonRequest, so the same summary is shown on each press. That is intended:
+// the OLED behind it is what changes, and it stays authoritative.
+
+/** Human label per op — same wording the extension's approval card uses. */
+const HIVE_OP_LABELS: Record<string, string> = {
+  vote: 'Vote',
+  comment: 'Post / Comment',
+  comment_options: 'Payout Options',
+  custom_json: 'Custom JSON',
+  transfer_to_vesting: 'Power Up',
+  withdraw_vesting: 'Power Down',
+  delegate_vesting_shares: 'Delegate HP',
+  transfer_to_savings: 'Savings Deposit',
+  transfer_from_savings: 'Savings Withdraw',
+  claim_reward_balance: 'Claim Rewards',
+  convert: 'Convert HBD',
+  account_update2: 'Update Profile',
+  limit_order_create: 'Market Order',
+  limit_order_cancel: 'Cancel Order',
+}
+
+/**
+ * The counterparty account an op acts on, and what to call it. Returns null
+ * when an op has no meaningful counterparty (claim, cancel, profile update) —
+ * better to show no "To:" row than to forge one from the signer's own name.
+ */
+function hiveCounterparty(name: string, p: any): { to: string; toLabel: string } | null {
+  const at = (v: any) => (typeof v === 'string' && v ? `@${v}` : null)
+  switch (name) {
+    case 'vote': {
+      const a = at(p?.author)
+      return a ? { to: `${a}/${p?.permlink ?? ''}`, toLabel: 'Post' } : null
+    }
+    case 'comment_options': {
+      const a = at(p?.author)
+      return a ? { to: `${a}/${p?.permlink ?? ''}`, toLabel: 'Post' } : null
+    }
+    case 'transfer_to_vesting': {
+      // to may be "" meaning self — say so rather than showing an empty row.
+      const a = at(p?.to)
+      return { to: a ?? 'self', toLabel: 'To' }
+    }
+    case 'transfer_to_savings':
+    case 'transfer_from_savings': {
+      const a = at(p?.to)
+      return a ? { to: a, toLabel: 'To' } : null
+    }
+    case 'delegate_vesting_shares': {
+      const a = at(p?.delegatee)
+      return a ? { to: a, toLabel: 'Delegatee' } : null
+    }
+    default:
+      return null
+  }
+}
+
+/** The amount an op moves, verbatim as serialized (already a Hive asset string). */
+function hiveValue(name: string, p: any): string | undefined {
+  const asset = (v: any) => (typeof v === 'string' && v ? v : undefined)
+  switch (name) {
+    case 'transfer_to_vesting':
+    case 'transfer_to_savings':
+    case 'transfer_from_savings':
+    case 'convert':
+      return asset(p?.amount)
+    case 'withdraw_vesting':
+    case 'delegate_vesting_shares':
+      return asset(p?.vesting_shares)
+    case 'limit_order_create':
+      return asset(p?.amount_to_sell) && asset(p?.min_to_receive)
+        ? `${p.amount_to_sell} → ${p.min_to_receive}`
+        : asset(p?.amount_to_sell)
+    case 'claim_reward_balance': {
+      // Only the non-zero rewards — a claim is typically 2 of 3, and printing
+      // "0.000 HIVE" alongside the real one buries it.
+      const parts = [p?.reward_hive, p?.reward_hbd, p?.reward_vests]
+        .filter((v: any) => typeof v === 'string' && v && !/^0(\.0+)? /.test(v))
+      return parts.length ? parts.join(' + ') : undefined
+    }
+    case 'vote':
+      return Number.isFinite(Number(p?.weight)) ? `${(Number(p.weight) / 100).toFixed(0)}%` : undefined
+    default:
+      return undefined
+  }
+}
+
+/**
+ * Build confirm details for a Hive operation batch.
+ *
+ * `ops` is the condenser-style [[name, params], …] array. A single op gets the
+ * full treatment (label, counterparty, amount); a batch names the count and
+ * lists the ops, since one dialog cannot honestly claim a single recipient for
+ * four operations.
+ */
+export function hiveConfirmDetails(operation: string, ops: any): EmulatorConfirmDetails {
+  const list: Array<[string, any]> = Array.isArray(ops)
+    ? ops.filter((o: any) => Array.isArray(o) && typeof o[0] === 'string')
+    : []
+
+  if (list.length === 0) {
+    // Unparseable/absent — say nothing rather than guess. The OLED still shows
+    // the real thing; this dialog just adds no claim of its own.
+    return { operation, chain: 'Hive' }
+  }
+
+  if (list.length === 1) {
+    const [name, p] = list[0]
+    const party = hiveCounterparty(name, p)
+    return {
+      operation,
+      opLabel: HIVE_OP_LABELS[name] ?? name,
+      chain: 'Hive',
+      ...(party ? { to: party.to, toLabel: party.toLabel } : {}),
+      value: hiveValue(name, p),
+      memo: name, // the raw op name, so an unlabeled op is still identifiable
+    }
+  }
+
+  return {
+    operation,
+    opLabel: `${list.length} Hive operations`,
+    chain: 'Hive',
+    memo: list.map(([name]) => HIVE_OP_LABELS[name] ?? name).join(' · '),
+  }
+}
+
+/**
+ * One-line preview of a Hive signBuffer payload for the confirm dialog.
+ *
+ * Keychain signBuffer is overwhelmingly dApp login, where the message names the
+ * site and account being logged into — the single fact worth showing. Binary
+ * payloads are reported as a byte count rather than rendered as mojibake.
+ */
+export function hiveMessagePreview(messageBytes: ArrayLike<number>): string {
+  const bytes = Buffer.from(Array.from(messageBytes))
+  const txt = bytes.toString('utf8')
+  // Round-trip check: a lossy decode means it was not UTF-8 text.
+  if (!Buffer.from(txt, 'utf8').equals(bytes)) return `${bytes.length} bytes (binary)`
+  const oneLine = txt.replace(/\s+/g, ' ').trim()
+  return oneLine.length > 64 ? `${oneLine.slice(0, 64)}…` : oneLine
+}
