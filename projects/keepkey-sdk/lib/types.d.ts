@@ -150,6 +150,32 @@ export interface HiveSignOperationsParams {
     /** condenser-style tuples: [["limit_order_create", {...}], ...] — max 4, single tier */
     operations: [string, Record<string, any>][];
 }
+export interface HiveSignTransferParams {
+    /** SLIP-0048 path; defaults to the active role m/48'/13'/1'/0'/0' */
+    address_n?: number[];
+    addressNList?: number[];
+    ref_block_num: number;
+    ref_block_prefix: number;
+    /** Unix seconds (TaPoS expiration) */
+    expiration: number;
+    from: string;
+    to: string;
+    /** Integer milli-units (3 decimals): 1.000 HIVE = 1000 */
+    amount: number;
+    asset_symbol?: 'HIVE' | 'HBD';
+    /** Firmware rejects memos > 440 chars */
+    memo?: string;
+    /** 32-byte chain id hex; firmware defaults to Hive mainnet */
+    chain_id?: string;
+}
+export interface HiveSignMessageParams {
+    /** SLIP-0048 path; defaults to the posting role m/48'/13'/4'/0'/0' (dApp login) */
+    address_n?: number[];
+    addressNList?: number[];
+    /** UTF-8 text by default; pass is_text=false to send hex bytes */
+    message: string;
+    is_text?: boolean;
+}
 export interface XrpSignTxParams {
     [key: string]: any;
 }

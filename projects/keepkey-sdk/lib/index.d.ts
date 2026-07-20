@@ -1,5 +1,5 @@
 import { VaultClient } from './client';
-import type { SdkConfig, DeviceFeatures, DeviceInfo, SignedTx, AddressRequest, EthSignTxParams, LoadClearsignSignerParams, LoadClearsignSignerResult, EthSignTypedDataParams, EthSignMessageParams, EthVerifyMessageParams, BtcSignTxParams, CosmosAminoSignParams, HiveSignOperationsParams, XrpSignTxParams, BnbSignTxParams, SolanaSignTxParams, SolanaSignOffchainMessageParams, SolanaOffchainMessageSignatureResult, TronSignTxParams, TronSignMessageParams, TronMessageSignatureResult, TronVerifyMessageParams, TronSignTypedHashParams, TronTypedDataSignatureResult, TonSignTxParams, TonSignMessageParams, TonMessageSignatureResult, TonBuildTransferParams, TonBuildTransferResult, TonFinalizeTransferParams, TonFinalizeTransferResult, GetPublicKeyRequest, BatchPubkeysPath, ApplySettingsParams, HealthResponse, SupportedAsset, PortfolioBalancesParams, MarketInfoParams, SearchAssetsParams, ListUnspentParams, PubkeyInfoParams, TxHistoryParams, BroadcastParams, NetworkIdParams, NetworkAddressParams, TokenDecimalsParams, StakingParams, SwapQuoteParams, SweepScanParams, SweepScanStatus, SweepExecuteParams, SweepExecuteResult } from './types';
+import type { SdkConfig, DeviceFeatures, DeviceInfo, SignedTx, AddressRequest, EthSignTxParams, LoadClearsignSignerParams, LoadClearsignSignerResult, EthSignTypedDataParams, EthSignMessageParams, EthVerifyMessageParams, BtcSignTxParams, CosmosAminoSignParams, HiveSignOperationsParams, HiveSignTransferParams, HiveSignMessageParams, XrpSignTxParams, BnbSignTxParams, SolanaSignTxParams, SolanaSignOffchainMessageParams, SolanaOffchainMessageSignatureResult, TronSignTxParams, TronSignMessageParams, TronMessageSignatureResult, TronVerifyMessageParams, TronSignTypedHashParams, TronTypedDataSignatureResult, TonSignTxParams, TonSignMessageParams, TonMessageSignatureResult, TonBuildTransferParams, TonBuildTransferResult, TonFinalizeTransferParams, TonFinalizeTransferResult, GetPublicKeyRequest, BatchPubkeysPath, ApplySettingsParams, HealthResponse, SupportedAsset, PortfolioBalancesParams, MarketInfoParams, SearchAssetsParams, ListUnspentParams, PubkeyInfoParams, TxHistoryParams, BroadcastParams, NetworkIdParams, NetworkAddressParams, TokenDecimalsParams, StakingParams, SwapQuoteParams, SweepScanParams, SweepScanStatus, SweepExecuteParams, SweepExecuteResult } from './types';
 export { SdkError } from './client';
 export * from './types';
 /**
@@ -293,6 +293,13 @@ export declare class KeepKeySdk {
          * Requires the vault's `hive_enabled` setting and firmware >= 7.15.0.
          */
         hiveSignOperations: (params: HiveSignOperationsParams) => Promise<SignedTx>;
+        /** Sign a Hive transfer op (dedicated path — caller supplies the TaPoS header). */
+        hiveSignTransfer: (params: HiveSignTransferParams) => Promise<SignedTx>;
+        /** Keychain signBuffer — sign SHA256(message) on-device (dApp login). */
+        hiveSignMessage: (params: HiveSignMessageParams) => Promise<{
+            signature: string;
+            public_key?: string;
+        }>;
     };
     /** THORChain signing (RUNE transfers and deposits for swaps). */
     thorchain: {

@@ -236,6 +236,10 @@ class KeepKeySdk {
              * Requires the vault's `hive_enabled` setting and firmware >= 7.15.0.
              */
             hiveSignOperations: (params) => this.client.post('/hive/sign-operations', params),
+            /** Sign a Hive transfer op (dedicated path — caller supplies the TaPoS header). */
+            hiveSignTransfer: (params) => this.client.post('/hive/sign-transfer', params),
+            /** Keychain signBuffer — sign SHA256(message) on-device (dApp login). */
+            hiveSignMessage: (params) => this.client.post('/hive/sign-message', params),
         };
         // ═══════════════════════════════════════════════════════════════════
         // thorchain — THORChain signing

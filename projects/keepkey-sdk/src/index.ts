@@ -14,6 +14,8 @@ import type {
   BtcSignTxParams,
   CosmosAminoSignParams,
   HiveSignOperationsParams,
+  HiveSignTransferParams,
+  HiveSignMessageParams,
   XrpSignTxParams,
   BnbSignTxParams,
   SolanaSignTxParams,
@@ -467,6 +469,14 @@ export class KeepKeySdk {
      */
     hiveSignOperations: (params: HiveSignOperationsParams): Promise<SignedTx> =>
       this.client.post('/hive/sign-operations', params),
+
+    /** Sign a Hive transfer op (dedicated path — caller supplies the TaPoS header). */
+    hiveSignTransfer: (params: HiveSignTransferParams): Promise<SignedTx> =>
+      this.client.post('/hive/sign-transfer', params),
+
+    /** Keychain signBuffer — sign SHA256(message) on-device (dApp login). */
+    hiveSignMessage: (params: HiveSignMessageParams): Promise<{ signature: string; public_key?: string }> =>
+      this.client.post('/hive/sign-message', params),
   }
 
   // ═══════════════════════════════════════════════════════════════════
