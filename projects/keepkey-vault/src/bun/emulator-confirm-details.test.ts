@@ -128,4 +128,53 @@ describe('hiveMessagePreview', () => {
     const bin = Buffer.from([0xff, 0xfe, 0x00, 0x01])
     expect(hiveMessagePreview(bin)).toBe('4 bytes (binary)')
   })
+
+  it('reports VALID-UTF-8 control bytes as binary, not invisible text', () => {
+    // 00 01 02 03 is well-formed UTF-8, so a decode round-trip alone accepts
+    // it and the dialog would show an empty-looking message for a payload the
+    // device is being asked to sign.
+    expect(hiveMessagePreview(Buffer.from([0x00, 0x01, 0x02, 0x03]))).toBe('4 bytes (binary)')
+    // Embedded NUL inside otherwise-printable text.
+    expect(hiveMessagePreview(Buffer.from([0x61, 0x62, 0x00, 0x63, 0x64]))).toBe('5 bytes (binary)')
+  })
+
+  it('reports bidi/zero-width controls as binary — they spoof what is read', () => {
+    // U+202E RIGHT-TO-LEFT OVERRIDE reorders the rendered string, so the text
+    // shown can differ from the bytes signed.
+    const rlo = Buffer.from('user‮exe.gnp', 'utf8')
+    expect(hiveMessagePreview(rlo)).toBe(`${rlo.length} bytes (binary)`)
+    // U+200B ZERO WIDTH SPACE — invisible, so "alice" and "al​ice" look identical.
+    const zwsp = Buffer.from('al​ice', 'utf8')
+    expect(hiveMessagePreview(zwsp)).toBe(`${zwsp.length} bytes (binary)`)
+  })
+
+  it('still accepts ordinary whitespace and non-ASCII text', () => {
+    expect(hiveMessagePreview(Buffer.from('line1\nline2\tend', 'utf8'))).toBe('line1 line2 end')
+    expect(hiveMessagePreview(Buffer.from('gm 🛹 skatehive', 'utf8'))).toBe('gm 🛹 skatehive')
+  })
+
+  it('reports whitespace-only payloads as binary rather than an empty dialog', () => {
+    expect(hiveMessagePreview(Buffer.from('   \n\t ', 'utf8'))).toBe('6 bytes (binary)')
+  })
+})
+
+describe('vote weight formatting', () => {
+  const pct = (weight: number) =>
+    hiveConfirmDetails('hiveSignOperations', [
+      ['vote', { voter: 'alice', author: 'bob', permlink: 'p', weight }],
+    ] as any).value
+
+  it('does not round fractional basis-point weights to a wrong percentage', () => {
+    // toFixed(0) reported these as 0%, 1% and -1% — misstating the vote.
+    expect(pct(1)).toBe('0.01%')
+    expect(pct(50)).toBe('0.5%')
+    expect(pct(-50)).toBe('-0.5%')
+  })
+
+  it('keeps whole percentages clean', () => {
+    expect(pct(10000)).toBe('100%')
+    expect(pct(-10000)).toBe('-100%')
+    expect(pct(0)).toBe('0%')
+    expect(pct(500)).toBe('5%')
+  })
 })

@@ -246,8 +246,15 @@ function hiveValue(name: string, p: any): string | undefined {
         .filter((v: any) => typeof v === 'string' && v && !/^0(\.0+)? /.test(v))
       return parts.length ? parts.join(' + ') : undefined
     }
-    case 'vote':
-      return Number.isFinite(Number(p?.weight)) ? `${(Number(p.weight) / 100).toFixed(0)}%` : undefined
+    case 'vote': {
+      // Weight is basis points (-10000..10000), so 1bp = 0.01%. toFixed(0)
+      // would round a real 0.5% vote to "1%" and a 0.01% vote to "0%" —
+      // misreporting the value being signed. Keep up to two decimals and drop
+      // trailing zeros so whole percentages still read as "100%".
+      const w = Number(p?.weight)
+      if (!Number.isFinite(w)) return undefined
+      return `${Number((w / 100).toFixed(2))}%`
+    }
     default:
       return undefined
   }
@@ -303,8 +310,21 @@ export function hiveConfirmDetails(operation: string, ops: any): EmulatorConfirm
 export function hiveMessagePreview(messageBytes: ArrayLike<number>): string {
   const bytes = Buffer.from(Array.from(messageBytes))
   const txt = bytes.toString('utf8')
+  const binary = `${bytes.length} bytes (binary)`
   // Round-trip check: a lossy decode means it was not UTF-8 text.
-  if (!Buffer.from(txt, 'utf8').equals(bytes)) return `${bytes.length} bytes (binary)`
+  if (!Buffer.from(txt, 'utf8').equals(bytes)) return binary
+  // A round-trip alone is not enough: 00 01 02 03 and embedded NULs are VALID
+  // UTF-8, so they survive it and would render as invisible "text". Bidi and
+  // other format controls are worse than invisible — they reorder what the
+  // user reads, so a payload could display as something other than what is
+  // signed. Anything carrying control or format characters is reported by
+  // byte count instead of rendered.
+  //   \p{C} = control, format, surrogate, private-use, unassigned
+  // Tab/newline/CR are ordinary whitespace in a login message and are folded
+  // to spaces below, so they are dropped before the test rather than exempted
+  // inside it (a trailing \p{C} in one pattern would match them too).
+  if (/\p{C}/u.test(txt.replace(/[\t\n\r]/g, ''))) return binary
   const oneLine = txt.replace(/\s+/g, ' ').trim()
+  if (!oneLine) return binary
   return oneLine.length > 64 ? `${oneLine.slice(0, 64)}…` : oneLine
 }
