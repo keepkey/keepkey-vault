@@ -6,6 +6,8 @@
  * (3), withdraw_vesting (4), convert (8), comment_options (19),
  * transfer_to/from_savings (32/33), claim_reward_balance (39),
  * delegate_vesting_shares (40), account_update2 (43, metadata-only).
+ * Phase-3 ops: limit_order_create (5), limit_order_cancel (6) — the internal
+ * market, required for in-wallet HIVE/HBD swaps.
  *
  * Byte-exact mirror of hived's condenser serialization and the independent
  * python-keepkey test serializer (test_msg_hive.py _op_* helpers). The
@@ -21,6 +23,8 @@ const OP_VOTE = 0
 const OP_COMMENT = 1
 const OP_TRANSFER_TO_VESTING = 3
 const OP_WITHDRAW_VESTING = 4
+const OP_LIMIT_ORDER_CREATE = 5
+const OP_LIMIT_ORDER_CANCEL = 6
 const OP_CONVERT = 8
 const OP_CUSTOM_JSON = 18
 const OP_COMMENT_OPTIONS = 19
@@ -171,6 +175,37 @@ function serializeOp([name, p]: HiveOpTuple): { bytes: Buffer; tier: 'posting' |
           varint(OP_WITHDRAW_VESTING),
           str(p.account),
           asset(p.vesting_shares, ['VESTS'], 'withdraw_vesting vesting_shares'),
+        ]),
+        tier: 'active',
+      }
+    case 'limit_order_create': {
+      const sell = positiveAsset(p.amount_to_sell, ['HIVE', 'HBD'], 'limit_order_create amount_to_sell')
+      const recv = positiveAsset(p.min_to_receive, ['HIVE', 'HBD'], 'limit_order_create min_to_receive')
+      // A same-symbol order is a no-op trade on screen but still burns the
+      // fill; firmware refuses it, reject here for a clearer message.
+      if (sell.subarray(9, 16).equals(recv.subarray(9, 16))) {
+        throw new Error('limit_order_create: amount_to_sell and min_to_receive symbols must differ')
+      }
+      // expiration is unbounded here: the device has no RTC and the only cost
+      // of a stale/far-future value is an on-chain rejection, not a bad sign.
+      return {
+        bytes: Buffer.concat([
+          varint(OP_LIMIT_ORDER_CREATE),
+          str(p.owner),
+          u32(Number(p.orderid), 'limit_order_create orderid'),
+          sell, recv,
+          boolByte(p.fill_or_kill, 'limit_order_create fill_or_kill'),
+          u32(Number(p.expiration), 'limit_order_create expiration'),
+        ]),
+        tier: 'active',
+      }
+    }
+    case 'limit_order_cancel':
+      return {
+        bytes: Buffer.concat([
+          varint(OP_LIMIT_ORDER_CANCEL),
+          str(p.owner),
+          u32(Number(p.orderid), 'limit_order_cancel orderid'),
         ]),
         tier: 'active',
       }
