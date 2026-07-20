@@ -290,3 +290,64 @@ describe('comment_options beneficiary rules (finding #6)', () => {
       .not.toThrow()
   })
 })
+
+describe('phase-3: internal market (limit orders)', () => {
+  // Same vector as the firmware unit test Hive.LimitOrderCreateRetainsEveryDisplayedField
+  const CREATE = {
+    owner: 'alice', orderid: 42,
+    amount_to_sell: '1.500 HIVE', min_to_receive: '0.400 HBD',
+    fill_or_kill: true, expiration: 1700003600,
+  }
+  const u32le = (n: number) => { const b = Buffer.alloc(4); b.writeUInt32LE(n); return b }
+
+  test('limit_order_create byte layout', () => {
+    const { serializedTx, tier } = sign(['limit_order_create', CREATE])
+    expect(tier).toBe('active')
+    expect(serializedTx.equals(txBytes(1,
+      Buffer.from([5]), vstr('alice'), u32le(42),
+      vasset(1500n, 3, 'HIVE'), vasset(400n, 3, 'HBD'),
+      Buffer.from([1]), u32le(1700003600),
+    ))).toBe(true)
+  })
+
+  test('limit_order_cancel byte layout', () => {
+    const { serializedTx, tier } = sign(['limit_order_cancel', { owner: 'alice', orderid: 42 }])
+    expect(tier).toBe('active')
+    expect(serializedTx.equals(txBytes(1,
+      Buffer.from([6]), vstr('alice'), u32le(42),
+    ))).toBe(true)
+  })
+
+  test('fill_or_kill false serializes as 0', () => {
+    const { serializedTx } = sign(['limit_order_create', { ...CREATE, fill_or_kill: false }])
+    expect(serializedTx[serializedTx.length - 6]).toBe(0)
+  })
+
+  // Degenerate orders the firmware rejects — mirrored host-side for a clearer error
+  test('same symbol on both sides is rejected', () => {
+    expect(() => sign(['limit_order_create', { ...CREATE, min_to_receive: '0.400 HIVE' }]))
+      .toThrow(/symbols must differ/)
+  })
+  test('zero amount_to_sell is rejected', () => {
+    expect(() => sign(['limit_order_create', { ...CREATE, amount_to_sell: '0.000 HIVE' }]))
+      .toThrow(/greater than zero/)
+  })
+  test('zero min_to_receive is rejected', () => {
+    expect(() => sign(['limit_order_create', { ...CREATE, min_to_receive: '0.000 HBD' }]))
+      .toThrow(/greater than zero/)
+  })
+  test('VESTS never trades on the internal market', () => {
+    expect(() => sign(['limit_order_create', { ...CREATE, amount_to_sell: '1.500000 VESTS' }]))
+      .toThrow(/must be HIVE or HBD/)
+  })
+  test('non-boolean fill_or_kill is rejected', () => {
+    expect(() => sign(['limit_order_create', { ...CREATE, fill_or_kill: 1 }]))
+      .toThrow(/must be a boolean/)
+  })
+  test('cannot share a tx with posting-tier ops', () => {
+    expect(() => sign(
+      ['limit_order_cancel', { owner: 'alice', orderid: 1 }],
+      ['vote', { voter: 'alice', author: 'bob', permlink: 'p', weight: 10000 }],
+    )).toThrow(/Cannot mix posting-tier and active-tier/)
+  })
+})
