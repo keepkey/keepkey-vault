@@ -71,6 +71,90 @@ function boolByte(v: any, what: string): Buffer {
   return Buffer.from([v ? 1 : 0])
 }
 
+/**
+ * Graphene `time_point_sec` → unix seconds.
+ *
+ * On the wire it is a uint32, but hived's JSON representation — and therefore
+ * what every Hive library and dApp sends — is an ISO 8601 string with NO zone
+ * suffix: "2026-08-16T21:44:55". Number() on that is NaN, which is what a real
+ * hivehub.dev market order hit.
+ *
+ * The 'Z' is appended deliberately. Graphene timestamps are always UTC, but JS
+ * parses the zone-less date-time form as LOCAL time (ES2015+), so on a host in
+ * e.g. America/Denver a naive Date.parse would sign an expiration six hours off
+ * the one the user was shown. Wrong-but-plausible is worse than rejected.
+ *
+ * Integers and numeric strings are accepted as unix seconds — the SDK tests and
+ * some direct REST callers use that form.
+ *
+ * The grammar is matched explicitly rather than handed to Date.parse, which is
+ * permissive in ways that silently change the value being signed:
+ *   "2026-02-30T12:00:00" → Date.parse rolls it to 2026-03-02
+ *   "August 16, 2026" / "08/16/2026" → accepted despite not being ISO at all
+ * A timestamp the user never wrote must be rejected, not normalised.
+ */
+const ISO_TIMESTAMP =
+  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?(?:\.\d{1,9})?(Z|[+-]\d{2}:?\d{2})?$/
+
+function daysInMonth(year: number, month: number): number {
+  // month is 1-12. Feb: Gregorian leap rule.
+  if (month === 2) {
+    const leap = (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0
+    return leap ? 29 : 28
+  }
+  return [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1]
+}
+
+function timePointSec(v: any, what: string): number {
+  if (typeof v === 'number') {
+    if (Number.isInteger(v)) return v
+    // NaN/Infinity are "numbers" that say nothing about intent — they fall
+    // through to the generic message below alongside null/undefined/{}.
+    if (Number.isFinite(v)) throw new Error(`${what} must be a whole number of seconds (got ${v})`)
+  }
+  if (typeof v === 'string') {
+    const s = v.trim()
+    if (/^\d+$/.test(s)) return Number(s)
+
+    const m = ISO_TIMESTAMP.exec(s)
+    if (m) {
+      const [, yy, mo, dd, hh, mi, ss, zone] = m
+      const year = Number(yy), month = Number(mo), day = Number(dd)
+      const hour = Number(hh), minute = Number(mi), second = Number(ss ?? '0')
+
+      // Calendar-component validation. Without this, 2026-02-30 matches the
+      // grammar and Date would roll it forward into March.
+      if (month < 1 || month > 12) throw new Error(`${what}: month out of range in "${s}"`)
+      if (day < 1 || day > daysInMonth(year, month)) {
+        throw new Error(`${what}: "${s}" is not a real calendar date`)
+      }
+      if (hour > 23 || minute > 59 || second > 59) {
+        throw new Error(`${what}: time out of range in "${s}"`)
+      }
+
+      // A caller that specified an offset means it and must not be shifted
+      // again; a zone-less timestamp is UTC, because Graphene timestamps
+      // always are. JS would parse the zone-less form as LOCAL time, so on a
+      // host in e.g. America/Denver a naive parse signs an expiration six
+      // hours off the one the user was shown.
+      let offsetMinutes = 0
+      if (zone && zone !== 'Z') {
+        const sign = zone[0] === '-' ? -1 : 1
+        const digits = zone.slice(1).replace(':', '')
+        offsetMinutes = sign * (Number(digits.slice(0, 2)) * 60 + Number(digits.slice(2, 4)))
+      }
+
+      // setUTCFullYear rather than Date.UTC: the latter maps years 0-99 into
+      // 1900+year, so "0026-08-16T…" would silently become 1926.
+      const dt = new Date(0)
+      dt.setUTCFullYear(year, month - 1, day)
+      dt.setUTCHours(hour, minute, second, 0)
+      return Math.floor(dt.getTime() / 1000) - offsetMinutes * 60
+    }
+  }
+  throw new Error(`${what} must be unix seconds or an ISO 8601 UTC timestamp (got ${JSON.stringify(v)})`)
+}
+
 // int64 LE amount + u8 precision + 7-byte NUL-padded symbol (append_asset
 // layout). Precisions are fixed per symbol: HIVE/HBD = 3, VESTS = 6.
 const ASSET_PRECISION: Record<string, number> = { HIVE: 3, HBD: 3, VESTS: 6 }
@@ -195,7 +279,7 @@ function serializeOp([name, p]: HiveOpTuple): { bytes: Buffer; tier: 'posting' |
           u32(Number(p.orderid), 'limit_order_create orderid'),
           sell, recv,
           boolByte(p.fill_or_kill, 'limit_order_create fill_or_kill'),
-          u32(Number(p.expiration), 'limit_order_create expiration'),
+          u32(timePointSec(p.expiration, 'limit_order_create expiration'), 'limit_order_create expiration'),
         ]),
         tier: 'active',
       }
