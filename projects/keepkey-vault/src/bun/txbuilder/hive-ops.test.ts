@@ -17,11 +17,16 @@ function vstr(s: string): Buffer {
   return Buffer.concat([Buffer.from([b.length]), b])
 }
 
+// Call sites pass the DISPLAY symbol; hived serializes the pre-rebrand names,
+// so this is where "HIVE" becomes "STEEM". Pinned by the hived golden vector
+// at the bottom of this file.
+const WIRE: Record<string, string> = { HIVE: 'STEEM', HBD: 'SBD' }
+
 function vasset(amount: bigint, precision: number, symbol: string): Buffer {
   const out = Buffer.alloc(16)
   out.writeBigInt64LE(amount)
   out.writeUInt8(precision, 8)
-  out.write(symbol, 9, 'ascii')
+  out.write(WIRE[symbol] ?? symbol, 9, 'ascii')
   return out
 }
 
@@ -458,5 +463,58 @@ describe('phase-3: internal market (limit orders)', () => {
       ['limit_order_cancel', { owner: 'alice', orderid: 1 }],
       ['vote', { voter: 'alice', author: 'bob', permlink: 'p', weight: 10000 }],
     )).toThrow(/Cannot mix posting-tier and active-tier/)
+  })
+})
+
+/**
+ * Golden vectors from hived itself, not from our own understanding of the
+ * format:
+ *
+ *   curl -X POST https://api.hive.blog -H 'Content-Type: application/json' \
+ *     -d '{"jsonrpc":"2.0","method":"condenser_api.get_transaction_hex",
+ *          "params":[<tx>],"id":1}'
+ *
+ * This serializer and the firmware parser were byte-exact mirrors of each
+ * other while both disagreed with the chain — we wrote "HIVE"/"HBD" where
+ * hived writes "STEEM"/"SBD". Every test passed and every signature was
+ * rejected on-chain as "missing required active authority", because hived
+ * re-serializes the operation and recovers a key from different bytes.
+ * Vectors the chain produced are the only ones that can catch that.
+ *
+ * get_transaction_hex emits a whole transaction, so its output ends with the
+ * `signatures` array count; the digest preimage stops after the extensions
+ * varint, so the trailing "00" is dropped below.
+ */
+describe('hived golden vectors', () => {
+  const GOLDEN_HEADER = { refBlockNum: 4660, refBlockPrefix: 0xdeadbeef, expirationUnix: 0x5fffaa40 }
+
+  test('limit_order_create matches hived byte for byte', () => {
+    const { serializedTx } = serializeHiveOpsTx({
+      ...GOLDEN_HEADER,
+      operations: [['limit_order_create', {
+        owner: 'alice', orderid: 42,
+        amount_to_sell: '1.500 HIVE', min_to_receive: '0.400 HBD',
+        fill_or_kill: true, expiration: 0x6553f5b0,
+      }]],
+    })
+    expect(serializedTx.toString('hex')).toBe(
+      '3412efbeadde40aaff5f010505616c6963652a000000dc05000000000000' +
+      '03535445454d00009001000000000000035342440000000001b0f5536500',
+    )
+  })
+
+  test('claim_reward_balance matches hived byte for byte', () => {
+    const { serializedTx } = serializeHiveOpsTx({
+      refBlockNum: 0, refBlockPrefix: 0, expirationUnix: 0x5fffaa40,
+      operations: [['claim_reward_balance', {
+        account: 'alice',
+        reward_hive: '1.000 HIVE', reward_hbd: '2.000 HBD', reward_vests: '3.000000 VESTS',
+      }]],
+    })
+    expect(serializedTx.toString('hex')).toBe(
+      '00000000000040aaff5f012705616c696365e803000000000000035354' +
+      '45454d0000d0070000000000000353424400000000c0c62d0000000000' +
+      '065645535453000000',
+    )
   })
 })

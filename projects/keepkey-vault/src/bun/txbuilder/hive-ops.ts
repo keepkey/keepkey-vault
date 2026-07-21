@@ -159,6 +159,14 @@ function timePointSec(v: any, what: string): number {
 // layout). Precisions are fixed per symbol: HIVE/HBD = 3, VESTS = 6.
 const ASSET_PRECISION: Record<string, number> = { HIVE: 3, HBD: 3, VESTS: 6 }
 
+// The 2020 rebrand renamed the tokens but NOT their serialization: hived still
+// encodes HIVE as "STEEM" and HBD as "SBD" (verify with
+// condenser_api.get_transaction_hex). Emitting the display spelling makes the
+// device sign bytes hived re-serializes differently, so signature recovery
+// yields a key in no authority and the node reports the deeply unhelpful
+// "missing required active authority". Firmware maps these back for the OLED.
+const WIRE_SYMBOL: Record<string, string> = { HIVE: 'STEEM', HBD: 'SBD' }
+
 function asset(input: any, allowed: string[], what: string): Buffer {
   const m = /^(\d+)\.(\d+) ([A-Z]+)$/.exec(String(input ?? ''))
   if (!m) throw new Error(`${what}: malformed asset "${input}" — expected "0.000 SYMBOL"`)
@@ -174,7 +182,7 @@ function asset(input: any, allowed: string[], what: string): Buffer {
   const out = Buffer.alloc(16)
   out.writeBigInt64LE(amount)
   out.writeUInt8(precision, 8)
-  out.write(symbol, 9, 'ascii')
+  out.write(WIRE_SYMBOL[symbol] ?? symbol, 9, 'ascii')
   return out
 }
 
