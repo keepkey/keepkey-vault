@@ -138,6 +138,7 @@ import { generateReport, reportToPdfBuffer, reportToCsv } from "./reports"
 import { startAudit, startBtcScan, getAudit, getAuditBtcRaw, getAuditEntry, dismissAudit, markAuditsStale, type AuditDeps } from "./audit-engine"
 import { chainSupportsDeepScan, chainSupportsLevelScan, chainLevelPath, deriveAddressParams, extractAddress, parseNativeScanResult, parseEvmScanResult, utxoAccountScriptPaths, explorerAddressUrl, pathToBip32, parseBip32Path } from "./chain-scan"
 import { extractTransactionsFromReport, toCoinTrackerCsv, toZenLedgerCsv } from "./tax-export"
+import { assetData as discoveryAssetData } from "@pioneer-platform/pioneer-discovery"
 import * as os from "os"
 import * as path from "path"
 import { EVM_RPC_URLS, getTokenMetadata, broadcastEvmTx } from "./evm-rpc"
@@ -2882,7 +2883,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 
 			// ── Pioneer integration (batch portfolio API) ────────────────
-			getBalances: async ({ forceRefresh = false } = {}) => {
+			getBalances: async ({ forceRefresh = false, swapDestCaips = [] }: { forceRefresh?: boolean; swapDestCaips?: string[] } = {}) => {
 				if (!engine.wallet) throw new Error('No device connected')
 
 				// Initialize Pioneer client — isolate failure so device derivation still works
@@ -3105,7 +3106,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const results: ChainBalance[] = []
 				try {
 					if (!pioneer) throw (pioneerInitError || new Error('Pioneer client not available'))
-					const extraContracts = getCustomTokens().map(ct => ({
+					const extraContracts: Array<{ networkId: string; contractAddress: string; decimals: number; symbol?: string; name?: string; icon?: string }> = getCustomTokens().map(ct => ({
 						networkId: ct.networkId,
 						contractAddress: ct.contractAddress,
 						decimals: ct.decimals,
@@ -3113,6 +3114,50 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						name: ct.name,
 						icon: ct.iconUrl,
 					}))
+					// Post-swap reconcile: for a just-received EVM token (swap output),
+					// force Pioneer to do a direct on-chain balanceOf via extraContracts —
+					// the indexed (Zapper) source lags a few blocks after a swap and can
+					// return a stale pre-swap balance marked fresh, which would persist.
+					const discoveryLookup = discoveryAssetData as unknown as Record<string, { symbol?: string; name?: string; icon?: string; decimals?: number }>
+					for (const destCaip of swapDestCaips) {
+						const m = /^(eip155:\d+)\/erc20:(0x[0-9a-fA-F]{40})$/.exec(destCaip)
+						if (!m) continue
+						const [, destNetworkId, destContract] = m
+						if (extraContracts.some(c => c.networkId === destNetworkId && c.contractAddress.toLowerCase() === destContract.toLowerCase())) continue
+						const entry = discoveryLookup[destCaip] || discoveryLookup[destCaip.toLowerCase()]
+						let decimals: number | undefined = typeof entry?.decimals === 'number' ? entry.decimals : undefined
+						let symbol = entry?.symbol
+						let name = entry?.name
+						if (decimals === undefined) {
+							// Discovery gap — fall back to a previously cached row for this token
+							// (even a stale balance carries the correct on-chain decimals).
+							try {
+								const cachedForDecimals = getCachedBalances(engine.getDeviceState().deviceId || 'unknown')
+								for (const cb of cachedForDecimals?.balances || []) {
+									const tok = cb.tokens?.find(t => t.caip?.toLowerCase() === destCaip.toLowerCase())
+									if (typeof tok?.decimals === 'number') {
+										decimals = tok.decimals
+										symbol = symbol || tok.symbol
+										name = name || tok.name
+										break
+									}
+								}
+							} catch { /* fall through */ }
+						}
+						if (decimals === undefined) {
+							console.warn(`[getBalances] Post-swap reconcile: unknown decimals for ${destCaip} — skipping extraContracts entry`)
+							continue
+						}
+						console.log(`[getBalances] Post-swap reconcile: forcing on-chain balanceOf for ${symbol || destContract} (${destCaip})`)
+						extraContracts.push({
+							networkId: destNetworkId,
+							contractAddress: destContract,
+							decimals,
+							symbol,
+							name,
+							icon: entry?.icon,
+						})
+					}
 					// Self-host: when a BTC node is active, BTC balances come from the
 					// node (below), NOT Pioneer — so exclude BTC xpubs from the Pioneer
 					// chunk. Non-BTC chains + price still use Pioneer. kind==='pioneer'

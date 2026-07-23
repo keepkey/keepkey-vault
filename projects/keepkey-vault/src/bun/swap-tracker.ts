@@ -105,6 +105,10 @@ const SWAP_DEBUG = ((): boolean => {
 })()
 const swapLog = (...args: any[]): void => { if (SWAP_DEBUG) console.log(...args) }
 
+/** All-zero tx hash (with or without 0x prefix). Some provider rows carry a
+ *  zeroed placeholder before the real outbound is known — never a real txid. */
+const isAllZeroTxHash = (h: unknown): boolean => typeof h === 'string' && /^(0x)?0+$/.test(h)
+
 /** Infer a reasonable confirmation count from persisted status when the DB lacks a confirmations column.
  *  These are conservative lower-bounds — the next poll will replace them with real data. */
 export function inferConfirmationsFromStatus(status: SwapTrackingStatus): number {
@@ -540,9 +544,17 @@ function applyRemoteSwapData(swap: PendingSwap, remoteSwap: any): void {
   const confirmations = ignoreNonFinalPioneer ? swap.confirmations : (remoteSwap.confirmations ?? swap.confirmations)
   const outboundConfirmations = remoteSwap.outboundConfirmations
   const outboundRequiredConfirmations = remoteSwap.outboundRequiredConfirmations
-  const outboundTxid = remoteSwap.thorchainData?.outboundTxHash
+  const rawOutboundTxid = remoteSwap.thorchainData?.outboundTxHash
     || remoteSwap.mayachainData?.outboundTxHash
     || remoteSwap.relayData?.outTxHashes?.[0]
+  // Malformed provider rows have been seen carrying an all-zero outbound hash
+  // (paired with a bogus received amount) — treat the hash as not-yet-known
+  // and don't trust the received amount from the same response.
+  const outboundHashIsPlaceholder = isAllZeroTxHash(rawOutboundTxid)
+  const outboundTxid = (rawOutboundTxid && !outboundHashIsPlaceholder) ? rawOutboundTxid : undefined
+  if (outboundHashIsPlaceholder) {
+    console.warn(`${TAG} Ignoring placeholder all-zero outbound hash for ${swap.txid.slice(0, 10)}... — treating outbound as not yet known`)
+  }
   // Pioneer surfaces the detected underlying protocol in `details.protocol.protocol`.
   // If the quote-time parse missed `swapper` (common for aggregator routes where
   // ShapeShift's response shape varies), this is the authoritative value.
@@ -652,7 +664,10 @@ function applyRemoteSwapData(swap: PendingSwap, remoteSwap: any): void {
       swap.estimatedTime = timeEstimate.total_swap_seconds
     }
 
-    const receivedOutput: string | undefined = (remoteSwap.buyAsset?.amount && parseFloat(remoteSwap.buyAsset.amount) > 0)
+    // Reject amounts <= 0 / NaN, and reject any amount from a response whose
+    // outbound hash was a zeroed placeholder — that row is malformed and its
+    // received amount cannot be trusted (a later poll carries the real value).
+    const receivedOutput: string | undefined = (!outboundHashIsPlaceholder && remoteSwap.buyAsset?.amount && parseFloat(remoteSwap.buyAsset.amount) > 0)
       ? remoteSwap.buyAsset.amount
       : undefined
     // No CACAO rescale here — Pioneer now reports CACAO at its native 10 decimals.
