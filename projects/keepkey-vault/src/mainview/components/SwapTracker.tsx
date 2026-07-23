@@ -84,7 +84,7 @@ export function SwapTracker() {
       // Trigger balance refresh for both chains when swap completes
       if (swap.status === 'completed' || swap.status === 'refunded') {
         window.dispatchEvent(new CustomEvent('keepkey-swap-completed', {
-          detail: { fromChainId: swap.fromChainId, toChainId: swap.toChainId }
+          detail: { fromChainId: swap.fromChainId, toChainId: swap.toChainId, toCaip: swap.toCaip }
         }))
       }
     })

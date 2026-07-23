@@ -1066,7 +1066,9 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 
 	// Manual refresh: fetch live data from Pioneer API
 	// forceRefresh=true bypasses Pioneer's balance cache — only pass it on explicit user action
-	const refreshBalances = useCallback(async (forceRefresh = false) => {
+	// swapDestCaip: CAIP-19 of a just-received swap output token — forwarded so the
+	// backend asks Pioneer for a direct on-chain balanceOf (indexers lag post-swap).
+	const refreshBalances = useCallback(async (forceRefresh = false, swapDestCaip?: string) => {
 		// Watch-only: no device, so re-fetch from Pioneer using cached addresses.
 		if (watchOnly) {
 			if (loadingBalancesRef.current) return
@@ -1103,7 +1105,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 		setLoadingBalances(true)
 
 		try {
-			const result = await rpcRequest<ChainBalance[]>('getBalances', { forceRefresh }, 200000)
+			const result = await rpcRequest<ChainBalance[]>('getBalances', swapDestCaip ? { forceRefresh, swapDestCaips: [swapDestCaip] } : { forceRefresh }, 200000)
 			if (result && gen === refreshGenRef.current) {
 				const tokenTotal = result.reduce((n, b) => n + (b.tokens?.length || 0), 0)
 				const balTotal = result.reduce((n, b) => n + (b.balanceUsd || 0), 0)
@@ -1241,11 +1243,15 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 	useEffect(() => {
 		let t1: ReturnType<typeof setTimeout>
 		let t2: ReturnType<typeof setTimeout>
-		const handler = () => {
+		const handler = (e: Event) => {
 			console.log('[Dashboard] Swap completed — force-refreshing balances')
-			refreshBalances(true)
-			t1 = setTimeout(() => refreshBalances(true), 30000)
-			t2 = setTimeout(() => refreshBalances(true), 90000)
+			// EVM token output: pass its CAIP so Pioneer does a direct on-chain
+			// balanceOf instead of trusting the (still-lagging) indexer.
+			const toCaip: string | undefined = (e as CustomEvent).detail?.toCaip
+			const destTokenCaip = typeof toCaip === 'string' && toCaip.includes('/erc20:') ? toCaip : undefined
+			refreshBalances(true, destTokenCaip)
+			t1 = setTimeout(() => refreshBalances(true, destTokenCaip), 30000)
+			t2 = setTimeout(() => refreshBalances(true, destTokenCaip), 90000)
 		}
 		window.addEventListener('keepkey-swap-completed', handler)
 		return () => {

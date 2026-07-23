@@ -90,7 +90,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       hiveSignTx: { params: any; response: any }
 
       // ── Pioneer integration ─────────────────────────────────────────
-      getBalances: { params: { forceRefresh?: boolean }; response: ChainBalance[] }
+      getBalances: { params: { forceRefresh?: boolean; swapDestCaips?: string[] }; response: ChainBalance[] }
       /** forceRefresh defaults to TRUE (user-clicked refresh / tx pushes must bypass
        *  Pioneer's cache). Pass false only when Pioneer's cache is known-fresh. */
       getBalance: { params: { chainId: string; forceRefresh?: boolean }; response: ChainBalance }

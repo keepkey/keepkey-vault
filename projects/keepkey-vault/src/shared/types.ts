@@ -1155,6 +1155,9 @@ export interface PendingSwap {
   outboundConfirmations?: number
   outboundRequiredConfirmations?: number
   outboundTxid?: string
+  /** Provider returned a placeholder outbound id with terminal status. The UI
+   *  keeps polling for a bounded window until the real hash/amount arrives. */
+  trackingMetadataPending?: boolean
   createdAt: number       // unix ms
   updatedAt: number       // unix ms
   completedAt?: number    // unix ms — when terminal status reached

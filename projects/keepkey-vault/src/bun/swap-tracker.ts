@@ -30,6 +30,7 @@ import { assetData as discoveryAssetData } from '@pioneer-platform/pioneer-disco
 import { VAULT_CHAIN_TO_THOR } from '../shared/swap-discovery'
 import { extractRelayRequestId } from '../shared/relay-utils'
 import { classifySwapOutcome, type MidgardActionsResponse } from './swap/classify'
+import { selectOutboundTxid } from '../shared/swap-tracker-guards'
 
 /** Resolve display data from a CAIP-19. CAIP is the only identifier the swap
  *  layer accepts; symbols / asset names / display names are derived here for
@@ -540,9 +541,27 @@ function applyRemoteSwapData(swap: PendingSwap, remoteSwap: any): void {
   const confirmations = ignoreNonFinalPioneer ? swap.confirmations : (remoteSwap.confirmations ?? swap.confirmations)
   const outboundConfirmations = remoteSwap.outboundConfirmations
   const outboundRequiredConfirmations = remoteSwap.outboundRequiredConfirmations
-  const outboundTxid = remoteSwap.thorchainData?.outboundTxHash
-    || remoteSwap.mayachainData?.outboundTxHash
-    || remoteSwap.relayData?.outTxHashes?.[0]
+  const { outboundTxid, placeholderOnly: outboundHashIsPlaceholder } = selectOutboundTxid([
+    remoteSwap.thorchainData?.outboundTxHash,
+    remoteSwap.mayachainData?.outboundTxHash,
+    remoteSwap.relayData?.outTxHashes?.[0],
+  ])
+  // Malformed provider rows have been seen carrying an all-zero outbound hash
+  // (paired with a bogus received amount) — treat the hash as not-yet-known
+  // and don't trust the received amount from the same response.
+  if (outboundHashIsPlaceholder) {
+    console.warn(`${TAG} Ignoring placeholder all-zero outbound hash for ${swap.txid.slice(0, 10)}... — treating outbound as not yet known`)
+  }
+  // Once a provider has admitted its terminal metadata is a placeholder, keep
+  // that state until a real outbound id arrives. This survives subsequent rows
+  // that omit the field entirely and lets the UI perform bounded repair polls.
+  const nextTrackingMetadataPending = newStatus === 'failed' || newStatus === 'refunded'
+    ? false
+    : outboundTxid
+      ? false
+      : outboundHashIsPlaceholder
+        ? true
+        : !!swap.trackingMetadataPending
   // Pioneer surfaces the detected underlying protocol in `details.protocol.protocol`.
   // If the quote-time parse missed `swapper` (common for aggregator routes where
   // ShapeShift's response shape varies), this is the authoritative value.
@@ -564,6 +583,11 @@ function applyRemoteSwapData(swap: PendingSwap, remoteSwap: any): void {
   const errorMsg = remoteSwap.error?.userMessage || remoteSwap.error?.message
     || (remoteSwap.error ? String(remoteSwap.error) : undefined)
   const timeEstimate = remoteSwap.timeEstimate
+  // Reject amounts <= 0 / NaN, and reject any amount from a provider row whose
+  // outbound metadata is still known to be a placeholder.
+  const receivedOutput: string | undefined = (!nextTrackingMetadataPending && remoteSwap.buyAsset?.amount && parseFloat(remoteSwap.buyAsset.amount) > 0)
+    ? remoteSwap.buyAsset.amount
+    : undefined
 
   // ── Inbound (input tx) on-chain location + timing ──
   // Pioneer records where the INPUT tx landed under `blockchainTxData`, the
@@ -622,6 +646,8 @@ function applyRemoteSwapData(swap: PendingSwap, remoteSwap: any): void {
     confirmations !== swap.confirmations ||
     (outboundConfirmations !== undefined && outboundConfirmations !== swap.outboundConfirmations) ||
     (acceptOutboundTxid && outboundTxid && outboundTxid !== swap.outboundTxid) ||
+    nextTrackingMetadataPending !== !!swap.trackingMetadataPending ||
+    (receivedOutput !== undefined && receivedOutput !== swap.receivedOutput) ||
     (detectedSwapper && detectedSwapper !== swap.swapper) ||
     shouldClearSwapper ||
     inboundDataChanged
@@ -633,6 +659,7 @@ function applyRemoteSwapData(swap: PendingSwap, remoteSwap: any): void {
     if (outboundConfirmations !== undefined) swap.outboundConfirmations = outboundConfirmations
     if (outboundRequiredConfirmations !== undefined) swap.outboundRequiredConfirmations = outboundRequiredConfirmations
     if (acceptOutboundTxid && outboundTxid) swap.outboundTxid = outboundTxid
+    swap.trackingMetadataPending = nextTrackingMetadataPending
     if (shouldClearSwapper) swap.swapper = undefined
     if (errorMsg) swap.error = errorMsg
     if (detectedSwapper && !swap.swapper) swap.swapper = detectedSwapper
@@ -652,9 +679,6 @@ function applyRemoteSwapData(swap: PendingSwap, remoteSwap: any): void {
       swap.estimatedTime = timeEstimate.total_swap_seconds
     }
 
-    const receivedOutput: string | undefined = (remoteSwap.buyAsset?.amount && parseFloat(remoteSwap.buyAsset.amount) > 0)
-      ? remoteSwap.buyAsset.amount
-      : undefined
     // No CACAO rescale here — Pioneer now reports CACAO at its native 10 decimals.
     // (Mirrors the parseQuoteResponse fix; see that comment for history of PR #192's
     // obsolete /100 correction.)
@@ -695,7 +719,7 @@ function applyRemoteSwapData(swap: PendingSwap, remoteSwap: any): void {
     pushUpdate(swap)
 
     if (isFinal) {
-      if (newStatus === 'completed' && swap.deviceId) {
+      if (newStatus === 'completed' && !swap.trackingMetadataPending && swap.deviceId) {
         try {
           recordSwap({
             deviceId: swap.deviceId,
@@ -755,6 +779,10 @@ function readSwapFromDb(txid: string, deviceId?: string, walletId?: string): Pen
     errorActionable: r.errorActionable,
     errorElapsedMinutes: r.errorElapsedMinutes,
     midgardClassified: !!(r.outboundChainId || r.refundReason),
+    trackingMetadataPending: r.status === 'completed' && (
+      selectOutboundTxid([r.outboundTxid]).placeholderOnly ||
+      (!r.outboundTxid && !r.receivedOutput)
+    ),
   }
 }
 

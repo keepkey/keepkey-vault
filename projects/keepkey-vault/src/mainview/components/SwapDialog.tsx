@@ -29,6 +29,7 @@ import { useEvmAddresses } from "../hooks/useEvmAddresses"
 import { AssetPickerDialog } from "./AssetPickerDialog"
 import { networkDisplayName, ellipsizeCaip, parseCaip } from "../../shared/swap-discovery"
 import { isSymbolSquatter } from "../../shared/symbolSquatter"
+import { shouldRetryCompletedSwapMetadata } from "../../shared/swap-tracker-guards"
 import { KeepKeyDevice, RouteMap, SpinningDevice } from "./v3"
 import calculatingGif from "../assets/swap/calculating.gif"
 import shiftingGif from "../assets/swap/shifting.gif"
@@ -964,10 +965,12 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     if (!txid || phase !== 'submitted') return
     let cancelled = false
     let timer: ReturnType<typeof setTimeout> | null = null
+    let completedMetadataPolls = 0
     const tick = async () => {
       if (cancelled) return
+      let snap: PendingSwap | null = null
       try {
-        const snap = await rpcRequest<any>('refreshSwap', { txid })
+        snap = await rpcRequest<PendingSwap | null>('refreshSwap', { txid })
         // Guard after the await — dialog may have closed or switched txids.
         if (cancelled) return
         // Apply fields that the tracker only pushes once (nearTxHash, relayRequestId)
@@ -977,7 +980,12 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
         applyInboundSnap(snap)
       } catch { /* swap-update push will retry on next tick */ }
       if (cancelled) return
-      const s = liveStatusRef.current
+      const s = snap?.status || liveStatusRef.current
+      if (shouldRetryCompletedSwapMetadata(s, snap?.trackingMetadataPending, completedMetadataPolls)) {
+        completedMetadataPolls += 1
+        timer = setTimeout(tick, 10_000)
+        return
+      }
       if (s === 'completed' || s === 'failed' || s === 'refunded') return
       timer = setTimeout(tick, 10_000)
     }
@@ -1070,7 +1078,12 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     playCompletionSound()
     setTimeout(() => setShowConfetti(false), 1500)
     // Fetch updated balances to show before/after diff
-    rpcRequest<ChainBalance[]>('getBalances', undefined, 120000)
+    const swapDestCaip = toAsset?.chainFamily === 'evm' && toAsset.contractAddress ? toAsset.caip : undefined
+    rpcRequest<ChainBalance[]>(
+      'getBalances',
+      swapDestCaip ? { forceRefresh: true, swapDestCaips: [swapDestCaip] } : { forceRefresh: true },
+      120000,
+    )
       .then((result) => {
         if (!result || !fromAsset || !toAsset) return
         const fromCb = result.find(b => b.chainId === fromAsset.chainId)
