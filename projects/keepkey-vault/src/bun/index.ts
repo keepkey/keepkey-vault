@@ -139,6 +139,7 @@ import { startAudit, startBtcScan, getAudit, getAuditBtcRaw, getAuditEntry, dism
 import { chainSupportsDeepScan, chainSupportsLevelScan, chainLevelPath, deriveAddressParams, extractAddress, parseNativeScanResult, parseEvmScanResult, utxoAccountScriptPaths, explorerAddressUrl, pathToBip32, parseBip32Path } from "./chain-scan"
 import { extractTransactionsFromReport, toCoinTrackerCsv, toZenLedgerCsv } from "./tax-export"
 import { assetData as discoveryAssetData } from "@pioneer-platform/pioneer-discovery"
+import { prioritizeExtraContracts, type PortfolioExtraContract } from "./portfolio-extra-contracts"
 import * as os from "os"
 import * as path from "path"
 import { EVM_RPC_URLS, getTokenMetadata, broadcastEvmTx } from "./evm-rpc"
@@ -3106,7 +3107,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const results: ChainBalance[] = []
 				try {
 					if (!pioneer) throw (pioneerInitError || new Error('Pioneer client not available'))
-					const extraContracts: Array<{ networkId: string; contractAddress: string; decimals: number; symbol?: string; name?: string; icon?: string }> = getCustomTokens().map(ct => ({
+					const customContracts: PortfolioExtraContract[] = getCustomTokens().map(ct => ({
 						networkId: ct.networkId,
 						contractAddress: ct.contractAddress,
 						decimals: ct.decimals,
@@ -3114,6 +3115,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						name: ct.name,
 						icon: ct.iconUrl,
 					}))
+					const swapDestinationContracts: PortfolioExtraContract[] = []
 					// Post-swap reconcile: for a just-received EVM token (swap output),
 					// force Pioneer to do a direct on-chain balanceOf via extraContracts —
 					// the indexed (Zapper) source lags a few blocks after a swap and can
@@ -3123,11 +3125,14 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						const m = /^(eip155:\d+)\/erc20:(0x[0-9a-fA-F]{40})$/.exec(destCaip)
 						if (!m) continue
 						const [, destNetworkId, destContract] = m
-						if (extraContracts.some(c => c.networkId === destNetworkId && c.contractAddress.toLowerCase() === destContract.toLowerCase())) continue
+						const matchingCustom = customContracts.find(c =>
+							c.networkId.toLowerCase() === destNetworkId.toLowerCase() &&
+							c.contractAddress.toLowerCase() === destContract.toLowerCase()
+						)
 						const entry = discoveryLookup[destCaip] || discoveryLookup[destCaip.toLowerCase()]
-						let decimals: number | undefined = typeof entry?.decimals === 'number' ? entry.decimals : undefined
-						let symbol = entry?.symbol
-						let name = entry?.name
+						let decimals: number | undefined = typeof entry?.decimals === 'number' ? entry.decimals : matchingCustom?.decimals
+						let symbol = entry?.symbol || matchingCustom?.symbol
+						let name = entry?.name || matchingCustom?.name
 						if (decimals === undefined) {
 							// Discovery gap — fall back to a previously cached row for this token
 							// (even a stale balance carries the correct on-chain decimals).
@@ -3149,15 +3154,19 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							continue
 						}
 						console.log(`[getBalances] Post-swap reconcile: forcing on-chain balanceOf for ${symbol || destContract} (${destCaip})`)
-						extraContracts.push({
+						swapDestinationContracts.push({
 							networkId: destNetworkId,
 							contractAddress: destContract,
 							decimals,
 							symbol,
 							name,
-							icon: entry?.icon,
+							icon: entry?.icon || matchingCustom?.icon,
 						})
 					}
+					// Pioneer processes at most 20 extra contracts. Swap outputs must
+					// stay ahead of the user's custom-token list or the reconciliation
+					// request can be silently truncated.
+					const extraContracts = prioritizeExtraContracts(swapDestinationContracts, customContracts)
 					// Self-host: when a BTC node is active, BTC balances come from the
 					// node (below), NOT Pioneer — so exclude BTC xpubs from the Pioneer
 					// chunk. Non-BTC chains + price still use Pioneer. kind==='pioneer'
