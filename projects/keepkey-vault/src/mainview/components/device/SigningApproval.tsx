@@ -11,6 +11,7 @@ interface SigningApprovalProps {
 	phase: 'approve' | 'sending-payload' | 'device-confirm'
 	onApprove: () => void
 	onReject: () => void
+	onCancel: () => void
 }
 
 const METHOD_LABEL_KEYS: Record<string, string> = {
@@ -559,7 +560,7 @@ function TypedDataSection({ decoded, t }: { decoded: EIP712DecodedInfo; t: (k: s
 // Main Component
 // ═══════════════════════════════════════════════════════════════════════
 
-export function SigningApproval({ request, phase, onApprove, onReject }: SigningApprovalProps) {
+export function SigningApproval({ request, phase, onApprove, onReject, onCancel }: SigningApprovalProps) {
 	const { t } = useTranslation("device")
 	const [elapsed, setElapsed] = useState(0)
 	const [advancedModeEnabled, setAdvancedModeEnabled] = useState(request.advancedModeEnabled ?? false)
@@ -699,6 +700,9 @@ export function SigningApproval({ request, phase, onApprove, onReject }: Signing
 							/>
 						))}
 					</Flex>
+					<Button variant="solid" colorScheme="red" size="lg" width="100%" minH="52px" onClick={onCancel}>
+						{t("signing.cancel", "Cancel")}
+					</Button>
 				</VStack>
 			</Box>
 		)
@@ -750,6 +754,9 @@ export function SigningApproval({ request, phase, onApprove, onReject }: Signing
 							/>
 						))}
 					</Flex>
+					<Button variant="solid" colorScheme="red" size="lg" width="100%" minH="52px" onClick={onCancel}>
+						{t("signing.cancel", "Cancel")}
+					</Button>
 				</VStack>
 			</Box>
 		)

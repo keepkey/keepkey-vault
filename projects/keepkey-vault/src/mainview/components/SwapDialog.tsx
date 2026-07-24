@@ -26,10 +26,20 @@ import { ProviderBadge, ProverChip, resolveProvider } from "./ProviderBadge"
 import { getSwapperAnimation } from "../lib/swapper-animations"
 import { computeDustWarning, shouldWarnHighSlippage, computeEffectiveSlippageBps } from "../../shared/swap-warnings"
 import { useEvmAddresses } from "../hooks/useEvmAddresses"
+import { useDeviceState } from "../hooks/useDeviceState"
+import { versionCompare } from "../../shared/firmware-versions"
 import { AssetPickerDialog } from "./AssetPickerDialog"
 import { networkDisplayName, ellipsizeCaip, parseCaip } from "../../shared/swap-discovery"
 import { isSymbolSquatter } from "../../shared/symbolSquatter"
 import { shouldRetryCompletedSwapMetadata } from "../../shared/swap-tracker-guards"
+import {
+  DEFAULT_SLIPPAGE_BPS,
+  MAX_SLIPPAGE_BPS,
+  MIN_SLIPPAGE_BPS,
+  SLIPPAGE_PRESETS_BPS,
+  normalizeSlippageBps,
+  parseCustomSlippagePercent,
+} from "../../shared/slippage"
 import { KeepKeyDevice, RouteMap, SpinningDevice } from "./v3"
 import calculatingGif from "../assets/swap/calculating.gif"
 import shiftingGif from "../assets/swap/shifting.gif"
@@ -139,6 +149,15 @@ function nativePriceUsd(balance: ChainBalance): number {
   if (!Number.isFinite(bal) || bal <= 0) return 0
   const nativeUsd = nativeUsdValue(balance)
   return nativeUsd > 0 ? nativeUsd / bal : 0
+}
+
+// nativePriceUsd(cb) is the chain GAS asset's price (nativeBalanceUsd / balance).
+// It's only a valid price for `asset` when `asset` IS that native asset. THORChain
+// / Cosmos sub-denoms (TCY, RUJI, xRUJI, secured assets) share the chain's single
+// ChainBalance but trade at their own price — pricing them as native values them at
+// the gas asset (e.g. 102 TCY @ RUNE's $0.42 = $43 instead of the real ~$12).
+function balanceIsForAsset(cb: ChainBalance, asset: SwapAsset): boolean {
+  return !!cb.symbol && !!asset.symbol && cb.symbol.toUpperCase() === asset.symbol.toUpperCase()
 }
 
 // Extended-pubkey prefix regex. Used in two places: (1) the UTXO destination
@@ -728,6 +747,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   const { t } = useTranslation("swap")
   const { fmtCompact, symbol: fiatSymbol } = useFiat()
   const { evmAddresses } = useEvmAddresses()
+  const { firmwareVersion } = useDeviceState()
   // Local EVM address selection — scoped to this dialog so switching here doesn't
   // mutate the global selected index in AssetPage. null = use global selectedIndex.
   const [evmAddressIndexOverride, setEvmAddressIndexOverride] = useState<number | null>(null)
@@ -772,11 +792,11 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   // only then do we offer Retry. Deterministic errors (pool unavailable, amount
   // below minimum) are not retryable: retrying just repeats the same failure.
   const [quoteRetryable, setQuoteRetryable] = useState(false)
-  // Solana blind-signing gate: when a Solana swap is blocked by the device's
-  // disabled AdvancedMode policy, phase flips to 'blind-signing-required' and
-  // this drives the enable page.
+  // Solana opaque-signing gate: a Relay route without signed ClearSign metadata
+  // flips to a route-specific, one-request consent page.
   const [enablingBlindSign, setEnablingBlindSign] = useState(false)
   const [blindSignError, setBlindSignError] = useState<string | null>(null)
+  const [allowSolanaBlindSigning, setAllowSolanaBlindSigning] = useState(false)
   const [txid, setTxid] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   // Bump to force the quote useEffect to re-run with the same inputs (used by
@@ -790,15 +810,36 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     try {
       const raw = localStorage.getItem('swap.slippageBps')
       const n = raw ? parseInt(raw, 10) : NaN
-      if (Number.isFinite(n) && n >= 10 && n <= 5000) return n
+      if (Number.isFinite(n) && n >= MIN_SLIPPAGE_BPS && n <= MAX_SLIPPAGE_BPS) return n
     } catch { /* localStorage unavailable */ }
-    return 100 // 1% default
+    return DEFAULT_SLIPPAGE_BPS
   })
   const setSlippageBps = useCallback((bps: number) => {
-    const clamped = Math.max(10, Math.min(5000, Math.round(bps)))
+    const clamped = normalizeSlippageBps(bps)
     setSlippageBpsState(clamped)
     try { localStorage.setItem('swap.slippageBps', String(clamped)) } catch { /* ignore */ }
   }, [])
+  const [customSlippageOpen, setCustomSlippageOpen] = useState(false)
+  const [customSlippageInput, setCustomSlippageInput] = useState(() => (slippageBps / 100).toString())
+  const [customSlippageError, setCustomSlippageError] = useState<string | null>(null)
+
+  const openCustomSlippage = useCallback(() => {
+    setCustomSlippageInput((slippageBps / 100).toString())
+    setCustomSlippageError(null)
+    setCustomSlippageOpen(true)
+  }, [slippageBps])
+
+  const updateCustomSlippage = useCallback((raw: string) => {
+    setCustomSlippageInput(raw)
+    const parsed = parseCustomSlippagePercent(raw)
+    if (!parsed.ok) {
+      setCustomSlippageError(parsed.error)
+      return false
+    }
+    setCustomSlippageError(null)
+    setSlippageBps(parsed.bps)
+    return true
+  }, [setSlippageBps])
 
   // ── ExecuteSwap substage (retro #1 fix) ────────────────────────
   // Coarse `phase` is approving/signing/broadcasting. For ERC-20 swaps that
@@ -1516,7 +1557,9 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
         const token = candidate.tokens?.find(t => t.contractAddress?.toLowerCase() === fromAsset.contractAddress?.toLowerCase())
         return (token?.priceUsd || 0) > 0
       }
-      return nativePriceUsd(candidate) > 0
+      // Prefer the candidate that actually represents this asset (e.g. the RUJI
+      // ChainBalance passed as a prop) over the chain's aggregated native balance.
+      return balanceIsForAsset(candidate, fromAsset) && nativePriceUsd(candidate) > 0
     }) || cachedBalance || propBalance
     if (!cb) { swapLog(`[SWAP-PRICE] fromPriceUsd: no balance for chainId=${fromAsset.chainId}`); return 0 }
     // Token assets: only ever use the token's own price. Falling through to the
@@ -1533,6 +1576,12 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     const bal = parseFloat(cb.balance)
     const nativeUsd = nativeUsdValue(cb)
     swapLog(`[SWAP-PRICE] fromPriceUsd: ${fromAsset.symbol} chainId=${fromAsset.chainId} bal=${bal} nativeUsd=${nativeUsd} nativeBalanceUsd=${cb.nativeBalanceUsd} balanceUsd=${cb.balanceUsd} tokens=${cb.tokens?.length || 0}`)
+    // Never apply the chain's native price to a non-native sub-denom — return 0
+    // so the caller degrades (or the TO side derives price from the quote ratio).
+    if (!balanceIsForAsset(cb, fromAsset)) {
+      swapLog(`[SWAP-PRICE] fromPriceUsd: ${fromAsset.symbol} is not the native asset of ${cb.symbol} balance — returning 0`)
+      return 0
+    }
     const result = nativePriceUsd(cb)
     swapLog(`[SWAP-PRICE] fromPriceUsd RESULT: $${result}`)
     return result
@@ -1552,6 +1601,13 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     const bal = parseFloat(cb.balance)
     const nativeUsd = nativeUsdValue(cb)
     swapLog(`[SWAP-PRICE] toPriceUsdFromBalance: ${toAsset.symbol} chainId=${toAsset.chainId} bal=${bal} nativeUsd=${nativeUsd} nativeBalanceUsd=${cb.nativeBalanceUsd} balanceUsd=${cb.balanceUsd} tokens=${cb.tokens?.length || 0}`)
+    // Non-native THORChain/Cosmos denom (TCY, RUJI, …) received into a chain whose
+    // ChainBalance is the gas asset (RUNE): the native price is NOT this asset's
+    // price. Return 0 so toPriceUsd derives it from the quote ratio + fromPriceUsd.
+    if (!balanceIsForAsset(cb, toAsset)) {
+      swapLog(`[SWAP-PRICE] toPriceUsdFromBalance: ${toAsset.symbol} is not the native asset of ${cb.symbol} balance — returning 0`)
+      return 0
+    }
     const result = nativePriceUsd(cb)
     swapLog(`[SWAP-PRICE] toPriceUsdFromBalance RESULT: $${result}`)
     return result
@@ -1788,6 +1844,25 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   // address that didn't come from the user's wallet. Wait for the UTXO
   // resolver to populate a real receive address.
   const toAddressIsXpub = !!toAddress && !useCustomAddress && XPUB_RE.test(toAddress)
+
+  // One-time opaque consent is tied to the exact quoted route and user inputs.
+  // Any amount/address/slippage/serialized-transaction change invalidates it.
+  const solanaOpaqueConsentKey = [
+    fromAsset?.caip,
+    toAsset?.caip,
+    amount,
+    slippageBps,
+    fromAddress,
+    toAddress,
+    quote?.relayTx?.serializedTx,
+  ].join('|')
+  const previousSolanaOpaqueConsentKey = useRef(solanaOpaqueConsentKey)
+  useEffect(() => {
+    if (previousSolanaOpaqueConsentKey.current !== solanaOpaqueConsentKey) {
+      previousSolanaOpaqueConsentKey.current = solanaOpaqueConsentKey
+      setAllowSolanaBlindSigning(false)
+    }
+  }, [solanaOpaqueConsentKey])
   const canQuote = !!(fromAsset && toAsset && !sameAsset && validAmount && fromAddress && toAddress && !toAddressIsXpub && !exceedsBalance && !exceedsSafeMax && !customAddressError)
 
   // Human reason a quote can't fire right now, but ONLY for the cases that
@@ -2121,6 +2196,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
         integration: liveQuote.integration,
         swapper: liveQuote.swapper,
         relayTx: liveQuote.relayTx,
+        allowSolanaBlindSigning,
         // Same as the preview build: synthesized token sources need the
         // picker's decimals — Pioneer's available-assets won't have them.
         tokenDecimals: isTokenCaip(fromAsset.caip!) ? normalizeDecimals(fromAsset.decimals) ?? undefined : undefined,
@@ -2128,11 +2204,25 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
 
       setTxid(result.txid)
       setPhase('submitted')
-      window.dispatchEvent(new CustomEvent('keepkey-swap-executed'))
+      window.dispatchEvent(new CustomEvent('keepkey-swap-executed', {
+        detail: {
+          txid: result.txid,
+          fromChainId: fromAsset.chainId,
+          toChainId: toAsset.chainId,
+          fromCaip: fromAsset.caip,
+          toCaip: toAsset.caip,
+          fromSymbol: fromAsset.symbol,
+          toSymbol: toAsset.symbol,
+          expectedOutput: liveQuote.expectedOutput,
+          // Custom destinations intentionally leave the connected wallet. Do
+          // not wait for an output that should never appear in its portfolio.
+          isWalletDestination: !useCustomAddress,
+        },
+      }))
     } catch (e: any) {
       const raw = e?.message || ''
-      // Solana swap blocked because the device's blind-signing (AdvancedMode)
-      // policy is off — show the dedicated enable page instead of an error.
+      // This exact Relay payload has no signed ClearSign descriptor and needs
+      // route-specific, one-request opaque consent.
       if (raw.includes(SOLANA_BLIND_SIGNING_REQUIRED)) {
         setBlindSignError(null)
         setPhase('blind-signing-required')
@@ -2158,7 +2248,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       setError(friendly)
       setPhase('review')
     }
-  }, [quote, quoteFetchedAt, fromAsset, toAsset, sendAmount, sendIsMax, fromBalance, fromAddress, toAddress, slippageBps, balances, phase, previewLoading, previewError, previewBuild])
+  }, [quote, quoteFetchedAt, fromAsset, toAsset, sendAmount, sendIsMax, fromBalance, fromAddress, toAddress, slippageBps, balances, phase, previewLoading, previewError, previewBuild, allowSolanaBlindSigning, useCustomAddress])
 
   // ── Reset ─────────────────────────────────────────────────────────
   const reset = useCallback(() => {
@@ -2174,6 +2264,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     setError(null)
     setBlindSignError(null)
     setEnablingBlindSign(false)
+    setAllowSolanaBlindSigning(false)
     setTxid(null)
     setBeforeFromBal(null)
     setBeforeToBal(null)
@@ -2211,27 +2302,17 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     setError(t('swapCancelled', 'Swap cancelled — confirm again or change inputs'))
   }, [phase, t])
 
-  // Enable the device's AdvancedMode (blind-signing) policy so Solana swaps can
-  // be signed. applyPolicy prompts the user to confirm on device. On success we
-  // return to review so the user re-verifies the quote before signing.
+  // Authorize only the pending Solana transaction to use the opaque fallback.
+  // The authorization travels with one SolanaSignTx request and does not mutate
+  // the device's persistent, global AdvancedMode policy.
   const handleEnableBlindSigning = useCallback(async () => {
     setEnablingBlindSign(true)
     setBlindSignError(null)
-    try {
-      await rpcRequest('applyPolicy', { policyName: 'AdvancedMode', enabled: true }, 60000)
-      setError(null)
-      setPhase('review')
-    } catch (e: any) {
-      const raw = e?.message || ''
-      setBlindSignError(
-        /cancel/i.test(raw)
-          ? t('blindSignDeclined', 'Declined on device — blind signing was not enabled.')
-          : (raw || t('blindSignEnableFailed', 'Failed to enable blind signing on the device.')),
-      )
-    } finally {
-      setEnablingBlindSign(false)
-    }
-  }, [t])
+    setAllowSolanaBlindSigning(true)
+    setError(null)
+    setPhase('review')
+    setEnablingBlindSign(false)
+  }, [])
 
   const copyTxid = useCallback(() => {
     if (!txid) return
@@ -3582,10 +3663,10 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
 
               <VStack gap="2" align="center" maxW="420px">
                 <Text fontSize="lg" fontWeight="700" color="kk.textPrimary" textAlign="center">
-                  {t('blindSignTitle', 'Enable Blind Signing for Solana')}
+                  {t('solanaOpaqueTitle', 'One-time Blind Signing for Solana')}
                 </Text>
                 <Text fontSize="sm" color="kk.textSecondary" textAlign="center" lineHeight="1.5">
-                  {t('blindSignBody', 'Solana swaps use a versioned transaction your KeepKey cannot fully decode, so it must be blind-signed. This is turned off by default. Enabling it switches on Advanced Mode (blind signing) on your device — you will be asked to confirm the change on the device.')}
+                  {t('solanaOpaqueBody', 'This Relay transaction uses a custom Solana program and lookup-table accounts that your KeepKey cannot fully verify. No signed ClearSign descriptor was supplied for the route, so this transaction requires the opaque fallback.')}
                 </Text>
               </VStack>
 
@@ -3597,7 +3678,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                   </svg>
                 </Box>
                 <Text fontSize="11px" color="kk.textMuted" lineHeight="1.4">
-                  {t('blindSignCaveat', 'Blind signing means the device shows a generic prompt instead of decoded details. Only proceed for swaps you initiated here. You can turn it back off in Device Settings → Signing Policy.')}
+                  {t('solanaOpaqueCaveat', 'Blind signing means the device shows a generic prompt instead of authenticated swap details. This approval applies only to this transaction and does not enable global Advanced Mode. Confirm only the swap you reviewed here.')}
                 </Text>
               </Flex>
 
@@ -3616,10 +3697,10 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                 </Button>
                 <Button size="sm" flex="1" bg="kk.gold" color="black" fontWeight="600"
                   loading={enablingBlindSign}
-                  loadingText={t('blindSignConfirmOnDevice', 'Confirm on device…')}
+                  loadingText={t('blindSignPreparing', 'Preparing…')}
                   _hover={{ opacity: 0.9 }}
                   onClick={handleEnableBlindSigning}>
-                  {t('blindSignEnable', 'Enable Blind Signing')}
+                  {t('solanaOpaqueAllowOnce', 'Allow Once')}
                 </Button>
               </Flex>
             </VStack>
@@ -3970,11 +4051,14 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                 )
               })()}
 
-              {/* TRON blind-sign warning OR verify-on-device note */}
-              {fromAsset.chainFamily === 'tron' ? (
+              {/* Firmware 7.15+ parses native TRX and TRC-20 transfers from the
+                  signed raw_data. Only older firmware gets the legacy generic
+                  warning; TRON as the destination never affects source signing. */}
+              {fromAsset.chainFamily === 'tron' &&
+              (!firmwareVersion || versionCompare(firmwareVersion, '7.15.0') < 0) ? (
                 <Flex align="center" gap="2" bg="rgba(251,146,60,0.08)" border="1px solid" borderColor="rgba(251,146,60,0.3)" px="3" py="1.5" borderRadius="lg" w="full">
                   <Text fontSize="10px" color="var(--gold)">
-                    {t("tronBlindSignWarning", "Your KeepKey will display a generic Tron transaction prompt — it cannot decode the THORChain swap. Verify the amounts, vault, and memo above before approving on device.")}
+                    {t("tronLegacySigningWarning", "Firmware before 7.15 may show a generic Tron prompt. Update firmware for native TRX and TRC-20 ClearSign details, or verify the complete payload above before approving.")}
                   </Text>
                 </Flex>
               ) : (
@@ -4594,14 +4678,17 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
               </Box>
 
               {/* Slippage tolerance — visible whenever a swap target is selected.
-                  Bps math: 50 = 0.5%, 100 = 1%, 300 = 3%. Custom prompts for a value. */}
+                  Bps math: 50 = 0.5%, 100 = 1%, 300 = 3%. Custom uses an inline
+                  controlled input because native window.prompt is unavailable in
+                  some Electron/WebView builds. */}
               {fromAsset && toAsset && (
-                <Flex align="center" justify="space-between" gap="2" px="1" py="1">
-                  <Text fontSize="10px" color="kk.textMuted" fontWeight="600" textTransform="uppercase" letterSpacing="0.05em">
-                    {t("slippage") || "Slippage"}
-                  </Text>
-                  <HStack gap="1">
-                    {[50, 100, 300].map(bps => {
+                <VStack align="stretch" gap="1" px="1" py="1">
+                  <Flex align="center" justify="space-between" gap="2">
+                    <Text fontSize="10px" color="kk.textMuted" fontWeight="600" textTransform="uppercase" letterSpacing="0.05em">
+                      {t("slippage") || "Slippage"}
+                    </Text>
+                    <HStack gap="1">
+                    {SLIPPAGE_PRESETS_BPS.map(bps => {
                       const active = slippageBps === bps
                       return (
                         <Box key={bps} as="button" px="2" py="0.5" borderRadius="md"
@@ -4610,32 +4697,72 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                           border="1px solid" borderColor={active ? "kk.gold" : "rgba(255,255,255,0.08)"}
                           fontSize="10px" fontWeight="700" cursor="pointer"
                           _hover={{ borderColor: active ? "kk.gold" : "rgba(233,196,106,0.4)" }}
-                          onClick={() => setSlippageBps(bps)}>
+                          onClick={() => {
+                            setCustomSlippageOpen(false)
+                            setCustomSlippageError(null)
+                            setSlippageBps(bps)
+                          }}>
                           {(bps / 100).toFixed(bps < 100 ? 1 : 0)}%
                         </Box>
                       )
                     })}
-                    <Box as="button" px="2" py="0.5" borderRadius="md"
-                      bg={![50, 100, 300].includes(slippageBps) ? "kk.gold" : "rgba(255,255,255,0.03)"}
-                      color={![50, 100, 300].includes(slippageBps) ? "black" : "kk.textSecondary"}
-                      border="1px solid"
-                      borderColor={![50, 100, 300].includes(slippageBps) ? "kk.gold" : "rgba(255,255,255,0.08)"}
-                      fontSize="10px" fontWeight="700" cursor="pointer"
-                      _hover={{ borderColor: "rgba(233,196,106,0.4)" }}
-                      onClick={() => {
-                        const raw = prompt(`${t("slippage") || "Slippage"} %`, (slippageBps / 100).toString())
-                        if (raw == null) return
-                        const pct = parseFloat(raw)
-                        if (!Number.isFinite(pct) || pct <= 0 || pct > 50) {
-                          alert("Enter a percentage between 0.1 and 50")
-                          return
-                        }
-                        setSlippageBps(Math.round(pct * 100))
-                      }}>
-                      {![50, 100, 300].includes(slippageBps) ? `${(slippageBps / 100).toFixed(2)}%` : (t("custom") || "Custom")}
-                    </Box>
-                  </HStack>
-                </Flex>
+                    {customSlippageOpen ? (
+                      <Flex
+                        align="center"
+                        h="24px"
+                        w="82px"
+                        px="1.5"
+                        borderRadius="md"
+                        bg="rgba(0,0,0,0.28)"
+                        border="1px solid"
+                        borderColor={customSlippageError ? "kk.error" : "kk.gold"}
+                      >
+                        <Input
+                          autoFocus
+                          aria-label={t("customSlippage", "Custom slippage percentage")}
+                          value={customSlippageInput}
+                          onChange={(e) => updateCustomSlippage(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' && updateCustomSlippage(customSlippageInput)) {
+                              setCustomSlippageOpen(false)
+                            } else if (e.key === 'Escape') {
+                              setCustomSlippageOpen(false)
+                              setCustomSlippageError(null)
+                            }
+                          }}
+                          inputMode="decimal"
+                          fontSize="10px"
+                          fontWeight="700"
+                          color="kk.textPrimary"
+                          p="0"
+                          h="20px"
+                          minW="0"
+                          border="0"
+                          outline="none"
+                          _focus={{ boxShadow: "none", border: "0" }}
+                        />
+                        <Text fontSize="10px" color="kk.textMuted">%</Text>
+                      </Flex>
+                    ) : (
+                      <Box as="button" px="2" py="0.5" borderRadius="md"
+                        bg={!SLIPPAGE_PRESETS_BPS.includes(slippageBps as typeof SLIPPAGE_PRESETS_BPS[number]) ? "kk.gold" : "rgba(255,255,255,0.03)"}
+                        color={!SLIPPAGE_PRESETS_BPS.includes(slippageBps as typeof SLIPPAGE_PRESETS_BPS[number]) ? "black" : "kk.textSecondary"}
+                        border="1px solid"
+                        borderColor={!SLIPPAGE_PRESETS_BPS.includes(slippageBps as typeof SLIPPAGE_PRESETS_BPS[number]) ? "kk.gold" : "rgba(255,255,255,0.08)"}
+                        fontSize="10px" fontWeight="700" cursor="pointer"
+                        _hover={{ borderColor: "rgba(233,196,106,0.4)" }}
+                        onClick={openCustomSlippage}>
+                        {!SLIPPAGE_PRESETS_BPS.includes(slippageBps as typeof SLIPPAGE_PRESETS_BPS[number])
+                          ? `${(slippageBps / 100).toFixed(2)}%`
+                          : (t("custom") || "Custom")}
+                      </Box>
+                    )}
+                    </HStack>
+                  </Flex>
+                  {customSlippageError && (
+                    <Text fontSize="9px" color="kk.error" textAlign="right">{customSlippageError}</Text>
+                  )}
+                </VStack>
               )}
 
               {/* Review Swap button — only when quote is ready. Gradient

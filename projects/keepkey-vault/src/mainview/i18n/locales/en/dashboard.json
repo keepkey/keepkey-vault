@@ -44,5 +44,9 @@
 	"loadingConnect": "Connecting to your KeepKey",
 	"loadingSync": "Syncing balances across chains",
 	"loadingPrices": "Fetching the latest prices",
-	"tokensCount": "+{{count}} tokens"
+	"tokensCount": "+{{count}} tokens",
+	"swapBalanceSyncTitle": "Swap complete — syncing {{symbol}} balance",
+	"swapBalanceSyncDesc": "Keeping your last verified balances visible until the new funds are independently confirmed.",
+	"swapBalanceUnconfirmedTitle": "Couldn't confirm your {{symbol}} balance yet",
+	"swapBalanceUnconfirmedDesc": "The swap completed on-chain. Your balance service hasn't reported the new funds yet — check the block explorer if it doesn't appear shortly."
 }

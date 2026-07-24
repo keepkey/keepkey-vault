@@ -33,10 +33,21 @@ import { useDashboardView } from "../lib/dashboardViewContext"
 import { useFiat } from "../lib/fiat-context"
 import { ViewPickerButton } from "./ViewPickerMenu"
 import { DashboardLoading } from "./DashboardLoading"
+import { AssetIcon } from "./AssetIcon"
 import { categorizeTokens } from "../../shared/spamFilter"
 import { useBtcAccounts } from "../hooks/useBtcAccounts"
 import { useEvmAddresses } from "../hooks/useEvmAddresses"
 import type { ChainBalance, CustomChain, TokenVisibilityStatus, AppSettings, TokenBalance, PendingSwap, SwapStatusUpdate, AuditPortfolioSnapshot } from "../../shared/types"
+import {
+	beginSwapBalanceReconciliation,
+	completeSwapBalanceReconciliation,
+	observeBalanceRefresh,
+	protectedBalanceChainIds,
+	mergeTrustedBalanceSnapshot,
+	shouldReplaceBalanceSnapshot,
+	type BalanceReconciliation,
+	type SwapExecutionBalanceDetail,
+} from "../../shared/balance-reconciliation"
 import { playChaChing } from "../lib/sounds"
 
 /** Error boundary wrapping AssetPage — ensures user can always go back to Dashboard */
@@ -423,14 +434,11 @@ function TokenSatellite({
 			cursor="pointer"
 			aria-label={tok.symbol}
 		>
-			<Image
-				src={iconUrl}
+			<AssetIcon
+				caip={tok.caip}
+				iconUrl={tok.icon}
 				alt={tok.symbol}
-				w="100%"
-				h="100%"
-				borderRadius="full"
-				bg="var(--ink-2)"
-				boxShadow={`0 0 0 1px var(--line), 0 6px 18px -8px ${glow}`}
+				size={sat}
 			/>
 			{isHover && (
 				<Box
@@ -720,6 +728,19 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 		setSelectedChain(chain)
 	}, [watchOnly])
 	const [balances, setBalances] = useState<Map<string, ChainBalance>>(new Map())
+	const balancesRef = useRef(balances)
+	useEffect(() => { balancesRef.current = balances }, [balances])
+	const [balanceReconciliations, setBalanceReconciliations] = useState<BalanceReconciliation[]>([])
+	const balanceReconciliationsRef = useRef<BalanceReconciliation[]>([])
+	const externalDestinationTxidsRef = useRef(new Set<string>())
+	const completedReconciliationTxidsRef = useRef(new Set<string>())
+	const commitBalanceReconciliations = useCallback((
+		update: BalanceReconciliation[] | ((current: BalanceReconciliation[]) => BalanceReconciliation[]),
+	) => {
+		const next = typeof update === 'function' ? update(balanceReconciliationsRef.current) : update
+		balanceReconciliationsRef.current = next
+		setBalanceReconciliations(next)
+	}, [])
 	// Per-account (BTC) and per-address (EVM) balances for the sidebar account drop-down.
 	// The Bun side already derives + tracks these; we only render what's already there.
 	const { btcAccounts: btcAccountSet, selectXpub: btcSelectXpub } = useBtcAccounts()
@@ -767,6 +788,28 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 	// Used by full refreshes to skip chains that received a fresher per-chain update while
 	// the bulk request was in-flight (prevents old getBalances response from overwriting newer data).
 	const chainLastUpdatedRef = useRef(new Map<string, number>())
+
+	// Capture a destination baseline as soon as a swap is broadcast. This must
+	// happen before any post-transaction portfolio refresh can replace the
+	// source-chain row with an indexer snapshot that does not contain the output.
+	useEffect(() => {
+		const handler = (event: Event) => {
+			const detail = (event as CustomEvent<SwapExecutionBalanceDetail>).detail
+			if (!detail?.txid) return
+			if (detail.isWalletDestination === false) {
+				externalDestinationTxidsRef.current.add(detail.txid)
+				return
+			}
+			const record = beginSwapBalanceReconciliation(detail, balancesRef.current)
+			if (!record) return
+			commitBalanceReconciliations(current => [
+				...current.filter(item => item.txid !== record.txid),
+				record,
+			])
+		}
+		window.addEventListener('keepkey-swap-executed', handler)
+		return () => window.removeEventListener('keepkey-swap-executed', handler)
+	}, [commitBalanceReconciliations])
 
 	// Fetch pending swaps on mount and keep them live via swap-update messages.
 	// Non-terminal swaps mean funds are in-flight — we surface a banner so the
@@ -1066,9 +1109,9 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 
 	// Manual refresh: fetch live data from Pioneer API
 	// forceRefresh=true bypasses Pioneer's balance cache — only pass it on explicit user action
-	// swapDestCaip: CAIP-19 of a just-received swap output token — forwarded so the
-	// backend asks Pioneer for a direct on-chain balanceOf (indexers lag post-swap).
-	const refreshBalances = useCallback(async (forceRefresh = false, swapDestCaip?: string) => {
+	// swapDestCaips: CAIP-19 ids of just-received swap outputs — forwarded so the
+	// backend can verify token balances directly while portfolio indexers catch up.
+	const refreshBalances = useCallback(async (forceRefresh = false, swapDestCaips: string[] = []) => {
 		// Watch-only: no device, so re-fetch from Pioneer using cached addresses.
 		if (watchOnly) {
 			if (loadingBalancesRef.current) return
@@ -1077,9 +1120,14 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 			try {
 				const result = await rpcRequest<ChainBalance[] | null>('refreshWatchOnlyBalances', watchOnlyDeviceId ? { deviceId: watchOnlyDeviceId } : undefined, 200000)
 				if (result) {
-					const map = new Map<string, ChainBalance>()
-					for (const b of result) map.set(b.chainId, b)
-					setBalances(map)
+					setBalances(prev => {
+						const map = new Map(prev)
+						for (const b of result) {
+							if (shouldReplaceBalanceSnapshot(map.get(b.chainId), b, false)) map.set(b.chainId, b)
+						}
+						balancesRef.current = map
+						return map
+					})
 					setCacheUpdatedAt(Date.now())
 					setHasEverRefreshed(true)
 					clearPioneerError()
@@ -1105,7 +1153,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 		setLoadingBalances(true)
 
 		try {
-			const result = await rpcRequest<ChainBalance[]>('getBalances', swapDestCaip ? { forceRefresh, swapDestCaips: [swapDestCaip] } : { forceRefresh }, 200000)
+			const result = await rpcRequest<ChainBalance[]>('getBalances', swapDestCaips.length ? { forceRefresh, swapDestCaips } : { forceRefresh }, 200000)
 			if (result && gen === refreshGenRef.current) {
 				const tokenTotal = result.reduce((n, b) => n + (b.tokens?.length || 0), 0)
 				const balTotal = result.reduce((n, b) => n + (b.balanceUsd || 0), 0)
@@ -1119,14 +1167,24 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 						}
 					}
 				}
-				// Merge: skip chains where a per-chain balance-updated arrived AFTER this
-				// full refresh started — that single-chain data is fresher than our bulk result.
+				const reconciled = observeBalanceRefresh(balanceReconciliationsRef.current, result)
+				const protectedChains = protectedBalanceChainIds(reconciled)
+				commitBalanceReconciliations(reconciled)
+				// Merge only trusted rows. Stale/degraded data remains available to
+				// explain the fault, but never replaces a last-known-good snapshot.
+				// A swap destination stays protected until its output is confirmed.
 				setBalances(prev => {
 					const map = new Map(prev)
 					for (const b of result) {
 						if ((chainLastUpdatedRef.current.get(b.chainId) ?? 0) > refreshStartedAt) continue
-						map.set(b.chainId, b)
+						const merged = mergeTrustedBalanceSnapshot(
+							map.get(b.chainId),
+							b,
+							protectedChains.has(b.chainId),
+						)
+						if (merged) map.set(b.chainId, merged)
 					}
+					balancesRef.current = map
 					return map
 				})
 				setCacheUpdatedAt(Date.now())
@@ -1145,7 +1203,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 			loadingBalancesRef.current = false
 			setLoadingBalances(false)
 		}
-	}, [watchOnly, watchOnlyDeviceId, clearPioneerError, stagePioneerError])
+	}, [watchOnly, watchOnlyDeviceId, clearPioneerError, stagePioneerError, commitBalanceReconciliations])
 
 	// Phase 2 trigger — window focus: catch long idle periods. If the last live
 	// fetch is older than 5 min, force-refresh on return to the window.
@@ -1237,29 +1295,61 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 		}
 	}, [forceRefresh, initialLoaded, hasEverRefreshed, loadingBalances, refreshBalances, onForceRefreshConsumed])
 
-	// Auto-refresh balances when a swap completes (both chains affected).
-	// Force-refresh bypasses Pioneer's balance cache since we know balances changed.
-	// Delayed retries catch Pioneer's indexer lag (1-2 blocks after confirmation).
+	// A protocol can report terminal before its portfolio index has observed the
+	// output. Keep the reconciliation banner and last trusted chain snapshot
+	// until a confirmed response (or direct token RPC check) proves the asset.
 	useEffect(() => {
-		let t1: ReturnType<typeof setTimeout>
-		let t2: ReturnType<typeof setTimeout>
-		const handler = (e: Event) => {
-			console.log('[Dashboard] Swap completed — force-refreshing balances')
-			// EVM token output: pass its CAIP so Pioneer does a direct on-chain
-			// balanceOf instead of trusting the (still-lagging) indexer.
-			const toCaip: string | undefined = (e as CustomEvent).detail?.toCaip
-			const destTokenCaip = typeof toCaip === 'string' && toCaip.includes('/erc20:') ? toCaip : undefined
-			refreshBalances(true, destTokenCaip)
-			t1 = setTimeout(() => refreshBalances(true, destTokenCaip), 30000)
-			t2 = setTimeout(() => refreshBalances(true, destTokenCaip), 90000)
+		const timers = new Set<ReturnType<typeof setTimeout>>()
+		const reconcileSwap = (swap: PendingSwap) => {
+			if (swap?.status !== 'completed' && swap?.status !== 'refunded') return
+			if (!swap?.txid || completedReconciliationTxidsRef.current.has(swap.txid)) return
+			completedReconciliationTxidsRef.current.add(swap.txid)
+			const externalDestination = externalDestinationTxidsRef.current.has(swap.txid)
+			if (!externalDestination) {
+				const existing = balanceReconciliationsRef.current.find(item => item.txid === swap.txid)
+				const completed = completeSwapBalanceReconciliation(existing, swap, balancesRef.current)
+				commitBalanceReconciliations(current => [
+					...current.filter(item => item.txid !== completed.txid),
+					completed,
+				])
+			}
+			const reconcileCaip = swap.status === 'refunded' ? swap.fromCaip : swap.toCaip
+			const assets = reconcileCaip ? [reconcileCaip] : []
+			console.log(`[Dashboard] Swap terminal — reconciling ${reconcileCaip || swap.toChainId}`)
+			refreshBalances(true, assets)
+			for (const delay of [30_000, 90_000]) {
+				const timer = setTimeout(() => {
+					timers.delete(timer)
+					refreshBalances(true, assets)
+				}, delay)
+				timers.add(timer)
+			}
 		}
+		const handler = (e: Event) => {
+			const detail = (e as CustomEvent<PendingSwap & { swap?: PendingSwap }>).detail
+			reconcileSwap(detail?.swap || detail)
+		}
+		const unsubscribe = onRpcMessage('swap-complete', reconcileSwap)
 		window.addEventListener('keepkey-swap-completed', handler)
 		return () => {
+			unsubscribe()
 			window.removeEventListener('keepkey-swap-completed', handler)
-			clearTimeout(t1)
-			clearTimeout(t2)
+			for (const timer of timers) clearTimeout(timer)
 		}
-	}, [refreshBalances])
+	}, [refreshBalances, commitBalanceReconciliations])
+
+	// Keep retrying at a low cadence if a terminal swap is still waiting on a
+	// trusted balance response after the eager 0/30/90-second refreshes.
+	useEffect(() => {
+		const waiting = balanceReconciliations.filter(item => item.terminal && !item.observed && !item.expired)
+		if (watchOnly || waiting.length === 0) return
+		const timer = setTimeout(() => {
+			if (!loadingBalancesRef.current) {
+				refreshBalances(true, waiting.flatMap(item => item.assetCaip ? [item.assetCaip] : []))
+			}
+		}, 120_000)
+		return () => clearTimeout(timer)
+	}, [balanceReconciliations, watchOnly, refreshBalances])
 
 
 	// SSE stream status updates from backend
@@ -1282,21 +1372,31 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 		return onRpcMessage("balance-updated", (updated: ChainBalance) => {
 			const receivedAt = Date.now()
 			chainLastUpdatedRef.current.set(updated.chainId, receivedAt)
+			const reconciled = observeBalanceRefresh(balanceReconciliationsRef.current, [updated])
+			const protectedChains = protectedBalanceChainIds(reconciled)
+			commitBalanceReconciliations(reconciled)
 			setBalances(prev => {
+				const merged = mergeTrustedBalanceSnapshot(
+					prev.get(updated.chainId),
+					updated,
+					protectedChains.has(updated.chainId),
+				)
+				if (!merged) return prev
 				const old = prev.get(updated.chainId)
 				const oldUsd = old?.balanceUsd ?? 0
-				const newUsd = updated.balanceUsd ?? 0
+				const newUsd = merged.balanceUsd ?? 0
 				// Cha-ching when balance increased
 				if (newUsd > oldUsd && oldUsd > 0) {
 					playChaChing()
 				}
 				const next = new Map(prev)
-				next.set(updated.chainId, updated)
+				next.set(updated.chainId, merged)
+				balancesRef.current = next
 				return next
 			})
 			setCacheUpdatedAt(receivedAt)
 		})
-	}, [])
+	}, [commitBalanceReconciliations])
 
 	// Seed-staleness purge: the backend detected the wallet data belonged to a
 	// DIFFERENT seed than the device (passphrase toggle, hidden↔standard
@@ -1307,13 +1407,17 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 		return onRpcMessage("wallet-data-purged", ({ reason }: { reason: string }) => {
 			console.warn(`[Dashboard] Wallet data purged (${reason}) — clearing displayed balances`)
 			chainLastUpdatedRef.current.clear()
+			commitBalanceReconciliations([])
+			externalDestinationTxidsRef.current.clear()
+			completedReconciliationTxidsRef.current.clear()
+			balancesRef.current = new Map()
 			setBalances(new Map())
 			// If a fetch is already in flight it self-heals (the purge ran at its
 			// start, before any derivation) and its result repopulates the cleared
 			// map. Otherwise force-refresh now.
 			if (!loadingBalancesRef.current) refreshBalances(true)
 		})
-	}, [refreshBalances])
+	}, [refreshBalances, commitBalanceReconciliations])
 
 	const cleanBalanceUsd = useMemo(() => {
 		const overrides = new Map(
@@ -2036,6 +2140,86 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 				</Flex>
 			)}
 
+			{/* Protocol completion and portfolio reconciliation are distinct.
+			    Keep this non-dismissible until a trusted balance confirms output. */}
+			{balanceReconciliations
+				.filter(item => item.terminal && !item.observed && !item.expired)
+				.map(item => (
+					<Box
+						key={`balance-reconcile-${item.txid}`}
+						mb="2"
+						px="3"
+						py="2.5"
+						bg="rgba(233,196,106,0.07)"
+						border="1px solid"
+						borderColor="rgba(233,196,106,0.28)"
+						borderRadius="lg"
+					>
+						<Flex align="center" gap="2">
+							<Spinner size="xs" color="kk.gold" flexShrink={0} />
+							<Box flex="1">
+								<Text fontSize="11px" color="kk.gold" fontWeight="600">
+									{t("swapBalanceSyncTitle", {
+										symbol: item.symbol,
+										defaultValue: `Swap complete — syncing ${item.symbol} balance`,
+									})}
+								</Text>
+								<Text fontSize="10px" color="kk.textMuted">
+									{t("swapBalanceSyncDesc", {
+										defaultValue: "Keeping your last verified balances visible until the new funds are independently confirmed.",
+									})}
+								</Text>
+							</Box>
+						</Flex>
+					</Box>
+				))}
+
+			{/* Ceiling reached: we couldn't independently confirm the output within
+			    the reconciliation window (e.g. a lagging single-node indexer).
+			    Stop spinning, surface the real balance, and let the user dismiss. */}
+			{balanceReconciliations
+				.filter(item => item.terminal && !item.observed && item.expired)
+				.map(item => (
+					<Box
+						key={`balance-reconcile-expired-${item.txid}`}
+						mb="2"
+						px="3"
+						py="2.5"
+						bg="rgba(233,196,106,0.07)"
+						border="1px solid"
+						borderColor="rgba(233,196,106,0.28)"
+						borderRadius="lg"
+					>
+						<Flex align="center" gap="2">
+							<Box flex="1">
+								<Text fontSize="11px" color="kk.gold" fontWeight="600">
+									{t("swapBalanceUnconfirmedTitle", {
+										symbol: item.symbol,
+										defaultValue: `Couldn't confirm your ${item.symbol} balance yet`,
+									})}
+								</Text>
+								<Text fontSize="10px" color="kk.textMuted">
+									{t("swapBalanceUnconfirmedDesc", {
+										defaultValue: "The swap completed on-chain. Your balance service hasn't reported the new funds yet — check the block explorer if it doesn't appear shortly.",
+									})}
+								</Text>
+							</Box>
+							<Box
+								as="button"
+								aria-label="Dismiss"
+								onClick={() => commitBalanceReconciliations(current => current.filter(r => r.txid !== item.txid))}
+								fontSize="14px"
+								color="kk.textMuted"
+								px="1"
+								flexShrink={0}
+								_hover={{ color: "kk.gold" }}
+							>
+								✕
+							</Box>
+						</Flex>
+					</Box>
+				))}
+
 			{/* In-flight swap banners — shown when funds are in a pending swap so
 			    users don't think their balance is missing */}
 			{activeSwaps.map(swap => (
@@ -2740,14 +2924,12 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 														border="0"
 														title={tok.name || tok.symbol}
 													>
-														<Image
-															src={tok.icon || getAssetIcon(tok.caip)}
+														<AssetIcon
+															caip={tok.caip}
+															iconUrl={tok.icon}
+															chainCaip={dchain.caip}
 															alt={tok.symbol}
-															w="26px"
-															h="26px"
-															borderRadius="full"
-															flexShrink={0}
-															bg="var(--ink-2)"
+															size={26}
 														/>
 														<Box flex="1" minW="0" textAlign="left">
 															<Text fontSize="13px" fontWeight="600" color="var(--text-0)" lineHeight="1.2" truncate>

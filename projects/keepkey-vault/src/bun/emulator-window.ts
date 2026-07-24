@@ -648,7 +648,8 @@ function buildEmulatorHTML(bridgePort: number): string {
     color: #e0e0e0;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     user-select: none;
-    overflow: hidden;
+    overflow-x: hidden;
+    overflow-y: auto;
     display: flex;
     flex-direction: column;
     height: 100vh;
@@ -679,19 +680,21 @@ function buildEmulatorHTML(bridgePort: number): string {
     text-transform: uppercase;
   }
   .display-area {
-    flex: 1;
+    flex: 0 0 auto;
     display: flex;
     flex-direction: column;
     align-items: center;
-    justify-content: center;
-    padding: 12px;
+    justify-content: flex-start;
+    padding: 12px 12px 4px;
   }
   .oled {
     background: #000;
     border: 2px solid #333;
     border-radius: 4px;
-    width: 320px;
-    height: 80px;
+    width: min(320px, calc(100vw - 24px));
+    height: auto;
+    aspect-ratio: 4 / 1;
+    flex: 0 0 auto;
     position: relative;
     overflow: hidden;
   }
@@ -719,7 +722,9 @@ function buildEmulatorHTML(bridgePort: number): string {
   .idle-text { color: #666; font-size: 12px; }
   .confirm-meta {
     display: none;
-    padding: 8px 14px 4px;
+    width: min(320px, calc(100vw - 24px));
+    margin: 0 auto;
+    padding: 6px 0 2px;
     font-family: 'Courier New', monospace;
     font-size: 11px;
     line-height: 1.5;
@@ -730,7 +735,15 @@ function buildEmulatorHTML(bridgePort: number): string {
   .confirm-meta .op-label { color: #4fc3f7; font-weight: bold; font-size: 13px; margin-bottom: 4px; }
   .confirm-meta .detail { color: #ccc; font-size: 11px; }
   .confirm-meta .addr { color: #81c784; font-size: 11px; word-break: break-all; }
-  .buttons { display: none; padding: 10px 16px 14px; gap: 12px; justify-content: center; }
+  .buttons {
+    display: none;
+    width: min(320px, calc(100vw - 24px));
+    margin: 0 auto;
+    padding: 6px 0 12px;
+    gap: 12px;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
   .buttons.visible { display: flex; }
   .btn {
     padding: 8px 24px; border: none; border-radius: 6px;

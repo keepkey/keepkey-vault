@@ -7,8 +7,9 @@ import type { ChainDef } from "../../shared/chains"
 import { CHAINS, BTC_SCRIPT_TYPES, btcAccountPath, isChainSupported } from "../../shared/chains"
 import type { ChainBalance, TokenBalance, TokenVisibilityStatus, AppSettings, SwapAsset } from "../../shared/types"
 import { VAULT_CHAIN_TO_THOR } from "../../shared/swap-discovery"
-import { getAssetIcon, caipToIcon } from "../../shared/assetLookup"
+import { getAssetIcon } from "../../shared/assetLookup"
 import { AnimatedUsd } from "./AnimatedUsd"
+import { AssetIcon } from "./AssetIcon"
 import { formatBalance } from "../lib/formatting"
 import { useFiat } from "../lib/fiat-context"
 import { ReceiveView } from "./ReceiveView"
@@ -656,14 +657,12 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 						_hover={{ opacity: 0.8 }}
 						onClick={() => { setSelectedToken(tok); setView('send') }}
 					>
-						<Image
-							src={tok.icon || caipToIcon(tok.caip)}
+						<AssetIcon
+							caip={tok.caip}
+							iconUrl={tok.icon}
+							chainCaip={chain.caip}
 							alt={tok.symbol}
-							w="24px"
-							h="24px"
-							borderRadius="full"
-							flexShrink={0}
-							bg="gray.700"
+							size={24}
 						/>
 						<Box>
 							<HStack gap="1">
@@ -821,15 +820,12 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 
 						{selectedToken ? (
 							<>
-								<Image
-									src={selectedToken.icon || caipToIcon(selectedToken.caip)}
+								<AssetIcon
+									caip={selectedToken.caip}
+									iconUrl={selectedToken.icon}
+									chainCaip={chain.caip}
 									alt={selectedToken.symbol}
-									w={{ base: "44px", md: "52px" }}
-									h={{ base: "44px", md: "52px" }}
-									borderRadius="full"
-									flexShrink={0}
-									bg="transparent"
-									boxShadow="0 0 0 1px rgba(255,255,255,0.06)"
+									size={52}
 								/>
 								<Box flex="1" minW="0">
 									<Flex align="baseline" gap="2" flexWrap="wrap">

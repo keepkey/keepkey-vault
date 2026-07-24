@@ -10,6 +10,56 @@ import { COIN_MAP_LONG } from '@pioneer-platform/pioneer-coins'
 
 const TAG = '[swap]'
 
+function decodeStrictBase64(value: unknown, field: string, maxBytes: number): string {
+  if (typeof value !== 'string' || value.length === 0) {
+    throw new Error(`Invalid Solana ClearSign metadata: missing ${field}`)
+  }
+  const normalized = value.replace(/\s+/g, '')
+  if (!/^[A-Za-z0-9+/]*={0,2}$/.test(normalized) || normalized.length % 4 !== 0) {
+    throw new Error(`Invalid Solana ClearSign metadata: ${field} is not base64`)
+  }
+  const bytes = Buffer.from(normalized, 'base64')
+  if (bytes.length === 0 || bytes.length > maxBytes) {
+    throw new Error(
+      `Invalid Solana ClearSign metadata: ${field} must be 1..${maxBytes} bytes`,
+    )
+  }
+  return normalized
+}
+
+/** Extract the provider-signed KKSOLSW1 envelope without manufacturing trust in
+ * the Vault. Missing metadata means the device retains its opaque fallback;
+ * partially supplied or malformed metadata rejects the quote to prevent a
+ * silent ClearSign downgrade. */
+function parseSolanaSwapMetadata(...candidates: unknown[]): RelayTxParams['solanaSwapMetadata'] {
+  const candidate = candidates.find((value) => value != null)
+  if (candidate == null) return undefined
+  if (typeof candidate !== 'object') {
+    throw new Error('Invalid Solana ClearSign metadata: expected an object')
+  }
+  const metadata = candidate as Record<string, unknown>
+  const payload = decodeStrictBase64(
+    metadata.payload ?? metadata.signedPayload ?? metadata.signed_payload,
+    'payload',
+    320,
+  )
+  const signature = decodeStrictBase64(
+    metadata.signature,
+    'signature',
+    64,
+  )
+  if (Buffer.from(signature, 'base64').length !== 64) {
+    throw new Error('Invalid Solana ClearSign metadata: signature must be 64 bytes')
+  }
+  const signerKeyId = Number(
+    metadata.signerKeyId ?? metadata.signer_key_id ?? metadata.keyId ?? metadata.key_id,
+  )
+  if (!Number.isInteger(signerKeyId) || signerKeyId < 0 || signerKeyId > 3) {
+    throw new Error('Invalid Solana ClearSign metadata: signerKeyId must be 0..3')
+  }
+  return { payload, signature, signerKeyId }
+}
+
 // ── Asset mapping helpers ───────────────────────────────────────────
 
 /** True for assets that swap via a THORChain/Maya MsgDeposit (no inbound vault
@@ -209,6 +259,14 @@ function parseSingleQuote(
   let relayTx: RelayTxParams | undefined
 
   if (hasSolanaPrebuiltTx) {
+    const solanaSwapMetadata = parseSolanaSwapMetadata(
+      txParams.solanaSwapMetadata,
+      txParams.solana_swap_metadata,
+      txParams.clearSignMetadata,
+      txParams.clearsign_metadata,
+      quote.solanaSwapMetadata,
+      quote.meta?.solanaSwapMetadata,
+    )
     relayTx = {
       to: txParams.recipientAddress || '',
       data: '0x',
@@ -216,6 +274,7 @@ function parseSingleQuote(
       gasLimit: undefined,
       chainId: 0,
       serializedTx: txParams.serializedTx,
+      solanaSwapMetadata,
     }
     console.log(`${TAG} ${integration} (${swapper}) — Solana prebuilt tx extracted (recipient=${txParams.recipientAddress})`)
   } else if (hasPrebuiltTx) {

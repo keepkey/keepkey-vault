@@ -425,6 +425,23 @@ function App() {
 		setSigningPhaseTracked('approve')
 	}, [clearSigningConfirmTimer, setSigningPhaseTracked, signingRequest])
 
+	const handleCancelSign = useCallback(async () => {
+		if (!signingRequest) return
+		clearSigningConfirmTimer()
+		signingPayloadStartedAt.current = null
+		try {
+			// This sends the protocol Cancel message to the device, releasing the
+			// transport even when the REST caller is blocked on confirmation.
+			await rpcRequest("cancelDeviceSigning", undefined, 5000)
+		} catch (e) {
+			console.error("cancelDeviceSigning:", e)
+		} finally {
+			signingRequestRef.current = null
+			setSigningRequest(null)
+			setSigningPhaseTracked('approve')
+		}
+	}, [clearSigningConfirmTimer, setSigningPhaseTracked, signingRequest])
+
 	// ── Paired Apps panel ───────────────────────────────────────────
 	const [pairedAppsOpen, setPairedAppsOpen] = useState(false)
 
@@ -779,7 +796,7 @@ function App() {
 	// PIN is highest priority (z-index 2010) — must show above signing
 	// approval so users can unlock a PIN-locked device during API signing.
 	const signingOverlay = signingRequest ? (
-		<SigningApproval request={signingRequest} phase={signingPhase} onApprove={handleApproveSign} onReject={handleRejectSign} />
+		<SigningApproval request={signingRequest} phase={signingPhase} onApprove={handleApproveSign} onReject={handleRejectSign} onCancel={handleCancelSign} />
 	) : null
 
 	const pairingOverlay = pairRequest ? (
