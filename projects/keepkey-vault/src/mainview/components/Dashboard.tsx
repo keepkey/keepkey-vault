@@ -40,11 +40,13 @@ import { useEvmAddresses } from "../hooks/useEvmAddresses"
 import type { ChainBalance, CustomChain, TokenVisibilityStatus, AppSettings, TokenBalance, PendingSwap, SwapStatusUpdate, AuditPortfolioSnapshot } from "../../shared/types"
 import {
 	beginSwapBalanceReconciliation,
-	completeSwapBalanceReconciliation,
+	reconcileTerminalSwapBalance,
+	expireBalanceReconciliations,
 	observeBalanceRefresh,
 	protectedBalanceChainIds,
 	mergeTrustedBalanceSnapshot,
 	shouldReplaceBalanceSnapshot,
+	RECONCILIATION_CEILING_MS,
 	type BalanceReconciliation,
 	type SwapExecutionBalanceDetail,
 } from "../../shared/balance-reconciliation"
@@ -1301,17 +1303,22 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 	useEffect(() => {
 		const timers = new Set<ReturnType<typeof setTimeout>>()
 		const reconcileSwap = (swap: PendingSwap) => {
-			if (swap?.status !== 'completed' && swap?.status !== 'refunded') return
+			if (swap?.status !== 'completed' && swap?.status !== 'refunded' && swap?.status !== 'failed') return
 			if (!swap?.txid || completedReconciliationTxidsRef.current.has(swap.txid)) return
 			completedReconciliationTxidsRef.current.add(swap.txid)
+			if (swap.status === 'failed') {
+				commitBalanceReconciliations(current =>
+					reconcileTerminalSwapBalance(current, swap, balancesRef.current),
+				)
+				externalDestinationTxidsRef.current.delete(swap.txid)
+				console.log(`[Dashboard] Swap failed — released balance reconciliation for ${swap.txid}`)
+				return
+			}
 			const externalDestination = externalDestinationTxidsRef.current.has(swap.txid)
 			if (!externalDestination) {
-				const existing = balanceReconciliationsRef.current.find(item => item.txid === swap.txid)
-				const completed = completeSwapBalanceReconciliation(existing, swap, balancesRef.current)
-				commitBalanceReconciliations(current => [
-					...current.filter(item => item.txid !== completed.txid),
-					completed,
-				])
+				commitBalanceReconciliations(current =>
+					reconcileTerminalSwapBalance(current, swap, balancesRef.current),
+				)
 			}
 			const reconcileCaip = swap.status === 'refunded' ? swap.fromCaip : swap.toCaip
 			const assets = reconcileCaip ? [reconcileCaip] : []
@@ -1338,17 +1345,32 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 		}
 	}, [refreshBalances, commitBalanceReconciliations])
 
+	// Expire reconciliation protection at its wall-clock deadline even if every
+	// balance refresh fails or a refresh is still active. Network state must not
+	// control the 15-minute UI/protection ceiling.
+	useEffect(() => {
+		const waiting = balanceReconciliations.filter(item => item.terminal && !item.observed && !item.expired)
+		if (waiting.length === 0) return
+		const nextDeadline = Math.min(...waiting.map(
+			item => (item.completedAt ?? item.startedAt) + RECONCILIATION_CEILING_MS,
+		))
+		const timer = setTimeout(() => {
+			commitBalanceReconciliations(current => expireBalanceReconciliations(current))
+		}, Math.max(0, nextDeadline - Date.now()) + 1)
+		return () => clearTimeout(timer)
+	}, [balanceReconciliations, commitBalanceReconciliations])
+
 	// Keep retrying at a low cadence if a terminal swap is still waiting on a
 	// trusted balance response after the eager 0/30/90-second refreshes.
 	useEffect(() => {
 		const waiting = balanceReconciliations.filter(item => item.terminal && !item.observed && !item.expired)
 		if (watchOnly || waiting.length === 0) return
-		const timer = setTimeout(() => {
+		const timer = setInterval(() => {
 			if (!loadingBalancesRef.current) {
 				refreshBalances(true, waiting.flatMap(item => item.assetCaip ? [item.assetCaip] : []))
 			}
 		}, 120_000)
-		return () => clearTimeout(timer)
+		return () => clearInterval(timer)
 	}, [balanceReconciliations, watchOnly, refreshBalances])
 
 

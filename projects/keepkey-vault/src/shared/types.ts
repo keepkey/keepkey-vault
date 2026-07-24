@@ -580,6 +580,9 @@ export interface SigningRequestInfo {
   needsBlindSigning?: boolean
   /** true when the UI must enable AdvancedMode before allowing approval */
   requiresAdvancedMode?: boolean
+  /** true when this request needs a separate, explicit one-shot opaque-signing
+   * consent in the Vault UI. External callers cannot set the device flag. */
+  requiresBlindSigningConsent?: boolean
   /** true when device AdvancedMode policy is currently enabled */
   advancedModeEnabled?: boolean
   /** Device firmware version string e.g. "7.14.0" — used to gate blind-signing UI */
@@ -616,6 +619,8 @@ export interface SolanaTxDecodedInstruction {
 }
 export interface SolanaTxDecodedInfo {
   version: 'legacy' | 'v0'
+  /** Static accounts embedded in the message (firmware currently reviews at most 32). */
+  staticAccountCount: number
   instructions: SolanaTxDecodedInstruction[]
   /** base58 ALT pubkeys referenced by the tx. Empty for legacy. */
   altPubkeys: string[]

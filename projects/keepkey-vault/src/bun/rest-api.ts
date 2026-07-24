@@ -29,6 +29,7 @@ import { parseSolanaTx, SolanaTxParseError } from './solana-tx'
 import { signSolanaWireTransaction } from './solana-signing'
 import { buildSolanaDecodedInfo } from './solana-clearsign'
 import { buildSolanaMessageDecodedInfo } from './solana-message-preview'
+import { requiresSolanaBlindSigningConsent } from './solana-consent'
 import { createRpcAltFetcher, DEFAULT_SOLANA_RPC_ENDPOINT } from './solana-alt'
 import {
   buildTonTransfer,
@@ -56,9 +57,15 @@ export interface EmuSigningDetails {
   memo?: string
 }
 
+export interface SigningApprovalDecision {
+  approved: boolean
+  /** Explicit Vault UI consent for this request only. */
+  allowBlindSigning?: boolean
+}
+
 export interface RestApiCallbacks {
   onApiLog: (entry: ApiLogEntry) => void
-  onSigningRequest: (info: SigningRequestInfo) => Promise<boolean>
+  onSigningRequest: (info: SigningRequestInfo) => Promise<SigningApprovalDecision>
   onSigningDismissed?: (id: string) => void
   onPairRequest: (info: { name: string; url: string; imageUrl: string }) => void
   onPairDismissed?: () => void
@@ -1446,6 +1453,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
       // actual handler completes (success or failure), not when the user clicks approve.
       let activeSigningId: string | undefined
       let activeSigningInfo: SigningRequestInfo | undefined
+      let activeAllowBlindSigning = false
 
       try {
         // ═══════════════════════════════════════════════════════════════
@@ -1754,6 +1762,13 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               } else {
                 signingInfo.solanaDecodeError = 'missing raw_tx payload'
               }
+              signingInfo.requiresBlindSigningConsent = requiresSolanaBlindSigningConsent(
+                signingInfo.solanaDecoded,
+                preview.swapMetadata !== undefined,
+              )
+              if (signingInfo.requiresBlindSigningConsent) {
+                signingInfo.needsBlindSigning = true
+              }
             } else if (
               path === '/tron/sign-message'
               || path === '/ton/sign-message'
@@ -1901,13 +1916,21 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             console.warn('[rest-api] Failed to read AdvancedMode policy:', e?.message || e)
           }
 
-          const approved = await callbacks.onSigningRequest(signingInfo)
-          if (!approved) {
+          // Track before waiting so rejection, timeout, or a malformed approval
+          // decision still dismisses the Vault overlay in the request finally.
+          activeSigningId = id
+          const approval = await callbacks.onSigningRequest(signingInfo)
+          if (!approval.approved) {
             return json({ error: 'Signing rejected by user' }, 403)
           }
-          // Approved — track ID + decoded info so handlers can pass metadata to device
-          activeSigningId = id
+          if (signingInfo.requiresBlindSigningConsent && !approval.allowBlindSigning) {
+            return json({ error: 'One-shot blind-signing consent required' }, 403)
+          }
+          // Approved — retain decoded info so handlers can pass metadata to device.
           activeSigningInfo = signingInfo
+          activeAllowBlindSigning =
+            signingInfo.requiresBlindSigningConsent === true
+            && approval.allowBlindSigning === true
         }
 
         // ── List paired apps (public — shows connected dApps, keys stripped) ──
@@ -2677,19 +2700,29 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
           // Both legacy and v0 messages use SolanaSignTx. The helper removes
           // the signature wrapper, forwards the transaction-bound KKSOLSW1
-          // descriptor (or explicit one-shot fallback) unchanged, then splices
+          // descriptor unchanged, or adds a one-shot opaque fallback only when
+          // the Vault UI returned explicit consent, then splices
           // the returned signature back into the original wire transaction.
           const result = await signSolanaWireTransaction(
             {
               addressNList,
               rawTx: body.raw_tx,
               swapMetadata: body.swapMetadata,
-              allowBlindSigning: body.allowBlindSigning === true,
+              allowBlindSigning: activeAllowBlindSigning,
             },
             (request) => emuWrap(
               () => wallet.solanaSignTx(request),
               { operation: 'solanaSignTx', chain: 'Solana' },
             ),
+            async (signerPath) => {
+              const derived = await wallet.solanaGetAddress({
+                addressNList: signerPath,
+                showDisplay: false,
+              })
+              const address = typeof derived === 'string' ? derived : derived?.address
+              if (!address) throw new Error('Device returned no Solana signer address')
+              return address
+            },
             'rest:solanaSignTx',
           )
           if (!result?.signature) return json(result)
@@ -4310,6 +4343,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         }
         activeSigningId = undefined
         activeSigningInfo = undefined
+        activeAllowBlindSigning = false
       }
     },
     // WS endpoint for the BEX agent bridge (/bex-bridge upgrade above).

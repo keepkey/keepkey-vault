@@ -175,8 +175,8 @@ export const SolanaSignRequest = z.object({
   raw_tx: z.string().min(1),
   /** Transaction-bound ClearSign metadata. Partial descriptors are rejected. */
   swapMetadata: SolanaSwapMetadata.optional(),
-  /** Explicit one-request opaque-signing consent; never changes device policy. */
-  allowBlindSigning: z.boolean().optional(),
+  // One-shot opaque-signing consent is intentionally not part of the public
+  // REST contract. Unknown fields are stripped; the Vault UI grants consent.
 }).strip()
 
 /** POST /tron/sign-transaction — sign a raw Tron transaction */

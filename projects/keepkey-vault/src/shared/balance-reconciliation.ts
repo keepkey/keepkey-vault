@@ -129,9 +129,59 @@ export function completeSwapBalanceReconciliation(
   }
 }
 
+/**
+ * Apply a protocol-terminal swap status to the reconciliation collection.
+ * Failed swaps have no destination output to observe, so their provisional
+ * record must be removed immediately instead of protecting a chain forever.
+ */
+export function reconcileTerminalSwapBalance(
+  records: BalanceReconciliation[],
+  swap: PendingSwap,
+  balances: Map<string, ChainBalance>,
+  now = Date.now(),
+): BalanceReconciliation[] {
+  if (swap.status === 'failed') {
+    return records.filter((record) => record.txid !== swap.txid)
+  }
+  if (swap.status !== 'completed' && swap.status !== 'refunded') return records
+
+  const existing = records.find((record) => record.txid === swap.txid)
+  const completed = completeSwapBalanceReconciliation(existing, swap, balances, now)
+  return [
+    ...records.filter((record) => record.txid !== completed.txid),
+    completed,
+  ]
+}
+
 function hasObservedIncrease(record: BalanceReconciliation, observedAmount: number): boolean {
   const tolerance = Math.max(1e-12, Math.abs(record.baselineAmount) * 1e-12)
   return observedAmount > record.baselineAmount + tolerance
+}
+
+/**
+ * Expire terminal reconciliation records solely from wall-clock time. This is
+ * intentionally independent of balance refreshes: an offline/failed indexer
+ * must not be able to keep a protected snapshot and spinner alive forever.
+ */
+export function expireBalanceReconciliations(
+  records: BalanceReconciliation[],
+  now = Date.now(),
+): BalanceReconciliation[] {
+  let changed = false
+  const next = records.map((record) => {
+    const since = record.completedAt ?? record.startedAt
+    if (
+      record.terminal
+      && !record.observed
+      && !record.expired
+      && now >= since + RECONCILIATION_CEILING_MS
+    ) {
+      changed = true
+      return { ...record, expired: true }
+    }
+    return record
+  })
+  return changed ? next : records
 }
 
 /**
@@ -162,15 +212,9 @@ export function observeBalanceRefresh(
       : record.lastObservedAmount
     const observed = record.observed
       || (observedAmount !== undefined && hasObservedIncrease(record, observedAmount))
-    // Give up protecting once the window elapses without an independent
-    // confirmation — otherwise a chronically-lagging indexer sticks the banner
-    // forever. Elapsed is measured from terminal (completedAt), else from start.
-    const since = record.completedAt ?? record.startedAt
-    const expired = record.expired || (record.terminal && !observed && now - since > RECONCILIATION_CEILING_MS)
     const updated: BalanceReconciliation = {
       ...record,
       observed,
-      expired,
       attempts: record.attempts + (balance ? 1 : 0),
       ...(observedAmount !== undefined ? { lastObservedAmount: observedAmount } : {}),
     }
@@ -181,7 +225,7 @@ export function observeBalanceRefresh(
     next.push(updated)
   }
 
-  return next
+  return expireBalanceReconciliations(next, now)
 }
 
 /**

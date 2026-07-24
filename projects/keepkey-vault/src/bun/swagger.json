@@ -3768,7 +3768,7 @@
       "post": {
         "operationId": "solana_signTransaction",
         "summary": "Sign a Solana transaction",
-        "description": "Sign a raw Solana transaction on the KeepKey device. raw_tx is a base64-encoded serialized transaction. Opaque cross-chain/versioned transactions should include provider-signed KKSOLSW1 swapMetadata so firmware can verify and display ClearSign details. allowBlindSigning is an explicit one-request fallback and does not change persistent Advanced Mode.",
+        "description": "Sign a raw Solana transaction on the KeepKey device. raw_tx is a base64-encoded serialized transaction. Opaque cross-chain/versioned transactions should include provider-signed KKSOLSW1 swapMetadata so firmware can verify and display ClearSign details. If opaque signing is still required, the Vault UI asks the user for one-request consent; REST callers cannot assert that consent.",
         "parameters": [],
         "requestBody": {
           "content": {
@@ -3811,10 +3811,6 @@
                       "signature",
                       "signerKeyId"
                     ]
-                  },
-                  "allowBlindSigning": {
-                    "type": "boolean",
-                    "description": "Authorize opaque signing for this request only; does not enable or persist Advanced Mode"
                   }
                 },
                 "required": [

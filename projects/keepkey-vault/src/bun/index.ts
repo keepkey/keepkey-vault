@@ -728,6 +728,16 @@ function getRpcUrl(chain: ChainDef): string | undefined {
 
 // ── REST API Server (on by default, can be disabled in Settings) ───────
 const auth = new AuthStore()
+// The REST caller cannot assert opaque-signing permission. The internal UI
+// approval RPC records the one request for which the user clicked "Allow once";
+// the awaiting REST callback consumes and deletes it immediately.
+const blindSigningApprovalIds = new Set<string>()
+async function requestSigningApprovalDecision(id: string) {
+	const approved = await auth.requestSigningApproval(id)
+	const allowBlindSigning = approved && blindSigningApprovalIds.has(id)
+	blindSigningApprovalIds.delete(id)
+	return { approved, allowBlindSigning: allowBlindSigning || undefined }
+}
 // Settings loaded lazily after DB init — defaults used until then
 let restApiEnabled = false
 let walletConnectEnabled = false
@@ -1022,55 +1032,29 @@ function getOrCreateWcManager(): WalletConnectManager {
 		},
 		solanaSignTransactionRaw: async ({ addressNList, signerAddress, transactionBase64 }) => {
 			if (!engine.wallet) throw new Error('Device disconnected')
-			const { parseSolanaTx, solanaMessageSlice, parseSolanaMessage } = await import('./solana-tx')
-			const bs58 = (await import('bs58')).default
-			const fullTx = Buffer.from(transactionBase64, 'base64')
-			const parsed = parseSolanaTx(fullTx)
-			const messageBytes = solanaMessageSlice(fullTx, parsed)
-
-			// Find which signer slot belongs to our account. Required signers are
-			// the first `numRequiredSignatures` entries of `staticAccounts`. If our
-			// pubkey isn't among them, this tx isn't ours to sign and writing to
-			// any slot would produce an invalid signed transaction.
-			const message = parseSolanaMessage(messageBytes)
-			const ourPubkey = bs58.decode(signerAddress)
-			if (ourPubkey.length !== 32) {
-				throw new Error(`Invalid signer address: bs58-decoded length ${ourPubkey.length} (expected 32)`)
+			const result = await signSolanaWireTransaction(
+				{ addressNList, rawTx: transactionBase64 },
+				(deviceParams) => engine.wallet!.solanaSignTx(deviceParams),
+				async (signerPath) => {
+					const derived = await engine.wallet!.solanaGetAddress({
+						addressNList: signerPath,
+						showDisplay: false,
+					})
+					const address = typeof derived === 'string' ? derived : derived?.address
+					if (!address) throw new Error('Device returned no Solana signer address')
+					if (address !== signerAddress) {
+						throw new Error(`Derived Solana signer ${address} does not match wallet account ${signerAddress}`)
+					}
+					return address
+				},
+				'walletconnect:solanaSignTransaction',
+			)
+			if (!result?.signature || !result.serializedTx) {
+				throw new Error('Device returned no Solana transaction signature')
 			}
-			let signerIdx = -1
-			for (let i = 0; i < message.header.numRequiredSignatures; i++) {
-				const acct = message.staticAccounts[i]
-				if (acct && acct.length === ourPubkey.length && Buffer.from(acct).equals(Buffer.from(ourPubkey))) {
-					signerIdx = i
-					break
-				}
-			}
-			if (signerIdx < 0) {
-				throw new Error(`Wallet account ${signerAddress} is not a required signer for this transaction`)
-			}
-
-			// Both legacy and v0 transaction messages go through SolanaSignTx.
-			// Firmware is the authority for verified/opaque/malformed
-			// classification and signer-in-transaction validation.
-			const result = await engine.wallet.solanaSignTx({
-				addressNList,
-				rawTx: Buffer.from(messageBytes).toString('base64'),
-			})
-			if (!result?.signature) throw new Error('Device returned no Solana transaction signature')
-			const sigBytes: Uint8Array = result.signature instanceof Uint8Array
-				? result.signature
-				: Buffer.from(result.signature, 'base64')
-			if (sigBytes.length !== 64) throw new Error(`Unexpected signature length ${sigBytes.length}`)
-
-			const slotOffset = parsed.sigStart + signerIdx * 64
-			if (fullTx.length < slotOffset + 64) {
-				throw new Error('Raw tx too short to hold our signer slot')
-			}
-			const out = Buffer.from(fullTx)
-			for (let i = 0; i < 64; i++) out[slotOffset + i] = sigBytes[i]
 			return {
-				transactionBase64: out.toString('base64'),
-				signatureBase64: Buffer.from(sigBytes).toString('base64'),
+				transactionBase64: result.serializedTx,
+				signatureBase64: Buffer.from(result.signature).toString('base64'),
 			}
 		},
 		requestSigningApproval: async (info) => {
@@ -1078,7 +1062,7 @@ function getOrCreateWcManager(): WalletConnectManager {
 			try { rpc.send['signing-request'](info) } catch { /* webview not ready */ }
 			acquireWindowFocus()
 			try {
-				return await auth.requestSigningApproval(info.id)
+				return (await requestSigningApprovalDecision(info.id)).approved
 			} finally {
 				releaseWindowFocus()
 			}
@@ -1341,7 +1325,7 @@ const restCallbacks: RestApiCallbacks = {
 		try { rpc.send['signing-request'](info) } catch { /* webview not ready */ }
 		acquireWindowFocus()
 		try {
-			return await auth.requestSigningApproval(info.id)
+			return await requestSigningApprovalDecision(info.id)
 		} finally {
 			releaseWindowFocus()
 		}
@@ -2588,6 +2572,15 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							{ operation: 'solanaSignTx', chain: 'Solana' },
 						)
 						: engine.wallet!.solanaSignTx(deviceParams),
+					async (addressNList) => {
+						const derived = await engine.wallet!.solanaGetAddress({
+							addressNList,
+							showDisplay: false,
+						})
+						const address = typeof derived === 'string' ? derived : derived?.address
+						if (!address) throw new Error('Device returned no Solana signer address')
+						return address
+					},
 					'solanaSignTx',
 				)
 			},
@@ -5353,9 +5346,14 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				auth.rejectPairing()
 			},
 			approveSigningRequest: async (params) => {
-				if (!auth.approveSigningRequest(params.id)) throw new Error('No pending signing request with that id')
+				if (params.allowBlindSigning === true) blindSigningApprovalIds.add(params.id)
+				if (!auth.approveSigningRequest(params.id)) {
+					blindSigningApprovalIds.delete(params.id)
+					throw new Error('No pending signing request with that id')
+				}
 			},
 			rejectSigningRequest: async (params) => {
+				blindSigningApprovalIds.delete(params.id)
 				if (!auth.rejectSigningRequest(params.id)) throw new Error('No pending signing request with that id')
 			},
 			listPairedApps: async () => {

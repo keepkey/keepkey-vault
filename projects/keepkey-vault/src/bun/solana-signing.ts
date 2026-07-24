@@ -1,6 +1,13 @@
-import { parseSolanaTx, solanaMessageSlice, SolanaTxParseError } from './solana-tx'
+import bs58 from 'bs58'
+import {
+  parseSolanaMessage,
+  parseSolanaTx,
+  solanaMessageSlice,
+  SolanaTxParseError,
+} from './solana-tx'
 
 export type SolanaDeviceSigner = (params: any) => Promise<any>
+export type SolanaAddressDeriver = (addressNList: number[]) => Promise<string>
 
 /**
  * Route a serialized Solana transaction through the transaction-specific
@@ -11,6 +18,7 @@ export type SolanaDeviceSigner = (params: any) => Promise<any>
 export async function signSolanaWireTransaction(
   unsignedTx: any,
   signWithDevice: SolanaDeviceSigner,
+  deriveSignerAddress: SolanaAddressDeriver,
   logPrefix = 'signTx:solana',
 ): Promise<any> {
   const fullTx = Buffer.from(
@@ -29,6 +37,43 @@ export async function signSolanaWireTransaction(
   }
 
   const messageBytes = solanaMessageSlice(fullTx, parsed)
+  const message = parseSolanaMessage(messageBytes)
+  if (message.header.numRequiredSignatures !== parsed.sigCount) {
+    throw new Error(
+      `[${logPrefix}] Signature count mismatch: wrapper declares ${parsed.sigCount}, ` +
+      `message requires ${message.header.numRequiredSignatures}`,
+    )
+  }
+
+  const addressNList = unsignedTx.addressNList || unsignedTx.address_n
+  if (!Array.isArray(addressNList)) {
+    throw new Error(`[${logPrefix}] addressNList is required to select the signer slot`)
+  }
+  const signerAddress = await deriveSignerAddress(addressNList)
+  let signerPublicKey: Uint8Array
+  try {
+    signerPublicKey = bs58.decode(signerAddress)
+  } catch {
+    throw new Error(`[${logPrefix}] Invalid derived signer address`)
+  }
+  if (signerPublicKey.length !== 32) {
+    throw new Error(
+      `[${logPrefix}] Invalid derived signer address length ${signerPublicKey.length} (expected 32)`,
+    )
+  }
+
+  // Required signers are the first N static message accounts. Find the slot
+  // belonging to this address before asking the device to sign; slot zero may
+  // already contain a cosigner signature in a multisig transaction.
+  const signerIndex = message.staticAccounts
+    .slice(0, message.header.numRequiredSignatures)
+    .findIndex((account) => Buffer.from(account).equals(Buffer.from(signerPublicKey)))
+  if (signerIndex < 0) {
+    throw new Error(
+      `[${logPrefix}] Derived wallet account ${signerAddress} is not a required transaction signer`,
+    )
+  }
+
   const deviceParams = {
     ...unsignedTx,
     rawTx: Buffer.from(messageBytes).toString('base64'),
@@ -49,10 +94,11 @@ export async function signSolanaWireTransaction(
   }
 
   const rawBytes = Buffer.from(fullTx)
-  if (rawBytes.length < parsed.sigStart + 64) {
-    throw new Error(`[${logPrefix}] Raw tx too short to hold signature`)
+  const slotOffset = parsed.sigStart + signerIndex * 64
+  if (rawBytes.length < slotOffset + 64) {
+    throw new Error(`[${logPrefix}] Raw tx too short to hold signer slot ${signerIndex}`)
   }
-  for (let i = 0; i < 64; i++) rawBytes[parsed.sigStart + i] = sigBytes[i]
+  for (let i = 0; i < 64; i++) rawBytes[slotOffset + i] = sigBytes[i]
 
   return {
     signature: sigBytes,

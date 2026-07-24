@@ -628,6 +628,12 @@ export async function signTx(
       return signSolanaWireTransaction(
         unsignedTx,
         (deviceParams) => wallet.solanaSignTx(deviceParams),
+        async (addressNList) => {
+          const derived = await wallet.solanaGetAddress({ addressNList, showDisplay: false })
+          const address = typeof derived === 'string' ? derived : derived?.address
+          if (!address) throw new Error('Device returned no Solana signer address')
+          return address
+        },
       )
     }
     case 'tron': {

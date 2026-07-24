@@ -4,9 +4,12 @@ import {
   balanceAmountForAsset,
   beginSwapBalanceReconciliation,
   completeSwapBalanceReconciliation,
+  expireBalanceReconciliations,
   mergeTrustedBalanceSnapshot,
   observeBalanceRefresh,
   protectedBalanceChainIds,
+  reconcileTerminalSwapBalance,
+  RECONCILIATION_CEILING_MS,
   shouldReplaceBalanceSnapshot,
 } from '../src/shared/balance-reconciliation'
 
@@ -32,6 +35,86 @@ function solanaBalance(usdt?: string, syncState: ChainBalance['syncState'] = 'co
 }
 
 describe('post-swap balance reconciliation', () => {
+  test('failed swaps immediately discard their provisional record and release the chain', () => {
+    const balances = new Map([['solana', solanaBalance('4')]])
+    const record = beginSwapBalanceReconciliation({
+      txid: 'tx-failed',
+      fromChainId: 'bitcoin',
+      toChainId: 'solana',
+      toCaip: SOL_USDT,
+      fromSymbol: 'BTC',
+      toSymbol: 'USDT',
+    }, balances, 100)!
+
+    expect(protectedBalanceChainIds([record]).has('solana')).toBe(true)
+    const reconciled = reconcileTerminalSwapBalance([record], {
+      txid: 'tx-failed',
+      fromAsset: 'BTC.BTC',
+      toAsset: 'SOL.USDT',
+      fromSymbol: 'BTC',
+      toSymbol: 'USDT',
+      fromChainId: 'bitcoin',
+      toChainId: 'solana',
+      toCaip: SOL_USDT,
+      fromAmount: '0.001',
+      expectedOutput: '10',
+      memo: '',
+      inboundAddress: '',
+      integration: 'nearIntents',
+      status: 'failed',
+      confirmations: 0,
+      createdAt: 1,
+      updatedAt: 2,
+      estimatedTime: 30,
+    } satisfies PendingSwap, balances, 200)
+
+    expect(reconciled).toEqual([])
+    expect(protectedBalanceChainIds(reconciled).has('solana')).toBe(false)
+  })
+
+  test('wall-clock expiry releases protection without any balance refresh', () => {
+    const balances = new Map([['solana', solanaBalance('4')]])
+    const pending = beginSwapBalanceReconciliation({
+      txid: 'tx-offline',
+      fromChainId: 'bitcoin',
+      toChainId: 'solana',
+      toCaip: SOL_USDT,
+      fromSymbol: 'BTC',
+      toSymbol: 'USDT',
+    }, balances, 100)!
+    const terminal = completeSwapBalanceReconciliation(pending, {
+      txid: 'tx-offline',
+      fromAsset: 'BTC.BTC',
+      toAsset: 'SOL.USDT',
+      fromSymbol: 'BTC',
+      toSymbol: 'USDT',
+      fromChainId: 'bitcoin',
+      toChainId: 'solana',
+      toCaip: SOL_USDT,
+      fromAmount: '0.001',
+      expectedOutput: '10',
+      memo: '',
+      inboundAddress: '',
+      integration: 'nearIntents',
+      status: 'completed',
+      confirmations: 1,
+      createdAt: 1,
+      updatedAt: 2,
+      estimatedTime: 30,
+    } satisfies PendingSwap, balances, 200)
+
+    expect(expireBalanceReconciliations(
+      [terminal],
+      200 + RECONCILIATION_CEILING_MS - 1,
+    )[0].expired).not.toBe(true)
+    const expired = expireBalanceReconciliations(
+      [terminal],
+      200 + RECONCILIATION_CEILING_MS,
+    )
+    expect(expired[0].expired).toBe(true)
+    expect(protectedBalanceChainIds(expired).has('solana')).toBe(false)
+  })
+
   test('protects a same-chain snapshot while SPL output is still missing', () => {
     const before = new Map([['solana', solanaBalance()]])
     const record = beginSwapBalanceReconciliation({

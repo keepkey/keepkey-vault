@@ -394,7 +394,7 @@ function App() {
 		})
 	}, [clearSigningConfirmTimer, setSigningPhaseTracked])
 
-	const handleApproveSign = useCallback(async () => {
+	const handleApproveSign = useCallback(async (approval?: { allowBlindSigning?: boolean }) => {
 		if (!signingRequest) return
 		clearSigningConfirmTimer()
 		signingPayloadStartedAt.current = Date.now()
@@ -403,7 +403,10 @@ function App() {
 		// to press the physical button.
 		setSigningPhaseTracked('sending-payload')
 		try {
-			await rpcRequest("approveSigningRequest", { id: signingRequest.id })
+			await rpcRequest("approveSigningRequest", {
+				id: signingRequest.id,
+				...(approval?.allowBlindSigning === true ? { allowBlindSigning: true } : {}),
+			})
 		} catch (e) {
 			console.error("approveSign:", e)
 			clearSigningConfirmTimer()
