@@ -12,7 +12,7 @@ import { sendShielded, type ShieldedSendParams } from './zcash-shielded'
 import { buildTonTransfer, assembleTonSignedBoc, getTonSeqno, getTonWalletState, broadcastTonBoc, type TonBuildResult } from './ton'
 import { buildHiveTransfer, broadcastHiveTx } from './hive'
 import { SOLANA_LAMPORTS_PER_SIGNATURE, solanaTransferLamportsForAmount } from './solana'
-import { parseSolanaTx, solanaMessageSlice, SolanaTxParseError } from '../solana-tx'
+import { signSolanaWireTransaction } from '../solana-signing'
 import { getBtcBackend } from '../btc-backend'
 
 /** BTC mainnet — the only UTXO chain that broadcasts via a self-host node. */
@@ -445,17 +445,10 @@ export async function buildTx(
           console.warn(`[buildTx] TRON fee estimate failed, displaying fee_limit: ${e.message}`)
         }
 
-        // Intentionally do NOT pass `toAddress`/`amount` for TRC-20.
-        // Firmware 7.14's TRON FSM has only a TransferContract clear-sign
-        // path — given those fields it shows "Send <amount> TRX to
-        // <to_address>" regardless of the actual contract being called. For a
-        // TRC-20 transfer that means the device shows "Send 1 TRX to <USDT
-        // contract>" when the user is actually sending 1 USDT to a recipient
-        // — accurate to the bytes signed but a misleading interpretation. By
-        // omitting the hint fields the firmware falls back to the generic
-        // "Really sign this TRON transaction?" prompt, which matches the
-        // SwapDialog blind-sign warning text. Once firmware adds TRC-20
-        // clear-signing, populate proper hint fields here.
+        // Firmware 7.15+ parses TriggerSmartContract directly from raw_data,
+        // including the TRC-20 recipient, uint256 amount, owner, fee limit, and
+        // memo. Do not add host hint fields: the signed protobuf remains the
+        // single source of truth for ClearSign.
         const tronUnsignedTx = {
           addressNList: chain.defaultPath,
           rawTx: tronGridTx.raw_data_hex,
@@ -627,71 +620,21 @@ export async function signTx(
     case 'xrp':
       return wallet.rippleSignTx(unsignedTx)
     case 'solana': {
-      // KeepKey firmware message type 752 (SolanaSignTx) parses LEGACY messages
-      // only. For versioned (v0) messages we route the exact message bytes
-      // through type 754 (SolanaSignMessage), preserving the 0x80 prefix and
-      // payload. Same logic as the solanaSignTx RPC handler in bun/index.ts —
-      // duplicated here because the swap path calls hdwallet directly and
-      // bypasses the RPC wrapper. Without this, Pioneer-built v0 swap txs
-      // (Solana inbound to THORChain etc.) hit "Malformed Solana transaction"
-      // from the device.
-      const fullTx = Buffer.from(
-        typeof unsignedTx.rawTx === 'string'
-          ? unsignedTx.rawTx
-          : Buffer.from(unsignedTx.rawTx).toString('base64'),
-        'base64',
+      // Transaction bytes always use firmware message type 752 (SolanaSignTx).
+      // Current firmware parses legacy and v0 messages, classifies them as
+      // verified/opaque/malformed, verifies the derived signer even for
+      // parseable opaque payloads, and rejects malformed transactions. Routing
+      // v0 through SolanaSignMessage loses those transaction-specific checks.
+      return signSolanaWireTransaction(
+        unsignedTx,
+        (deviceParams) => wallet.solanaSignTx(deviceParams),
+        async (addressNList) => {
+          const derived = await wallet.solanaGetAddress({ addressNList, showDisplay: false })
+          const address = typeof derived === 'string' ? derived : derived?.address
+          if (!address) throw new Error('Device returned no Solana signer address')
+          return address
+        },
       )
-      let parsed
-      try {
-        parsed = parseSolanaTx(fullTx)
-      } catch (err) {
-        if (err instanceof SolanaTxParseError) throw new Error(`[signTx:solana] ${err.message}`)
-        throw err
-      }
-      console.debug(`[signTx:solana] signing tx versioned=${parsed.isVersioned} sigCount=${parsed.sigCount} fullTx=${fullTx.length}B`)
-
-      let sigBytes: Uint8Array
-      if (parsed.isVersioned) {
-        const messageBytes = solanaMessageSlice(fullTx, parsed)
-        console.debug(`[signTx:solana] v0 — routing through solanaSignMessage (${messageBytes.length}B incl. 0x80 prefix)`)
-        const msgRes = await wallet.solanaSignMessage({
-          addressNList: unsignedTx.addressNList,
-          message: messageBytes,
-          showDisplay: true,
-        })
-        const sig = msgRes?.signature
-        if (!sig) throw new Error('[signTx:solana] v0: device returned no signature')
-        sigBytes = sig instanceof Uint8Array ? sig : Buffer.from(sig, 'base64')
-      } else {
-        // Legacy: hdwallet expects the message bytes (no sig section), not the full tx.
-        const deviceParams = {
-          ...unsignedTx,
-          rawTx: Buffer.from(fullTx.subarray(parsed.messageStart)).toString('base64'),
-        }
-        const result = await wallet.solanaSignTx(deviceParams)
-        if (!result?.signature) {
-          // Device returned a non-signature result — pass through (preserves
-          // the existing legacy behaviour for callers expecting that shape).
-          console.debug(`[signTx:solana] legacy result has no signature, passing through`)
-          return result
-        }
-        sigBytes = result.signature instanceof Uint8Array
-          ? result.signature
-          : Buffer.from(result.signature, 'base64')
-      }
-
-      if (sigBytes.length !== 64) {
-        throw new Error(`[signTx:solana] Unexpected signature length ${sigBytes.length}`)
-      }
-      // Splice the signature into the first sig slot of the original wire-format tx.
-      const rawBytes = Buffer.from(fullTx)
-      if (rawBytes.length < parsed.sigStart + 64) {
-        throw new Error('[signTx:solana] Raw tx too short to hold signature')
-      }
-      for (let i = 0; i < 64; i++) rawBytes[parsed.sigStart + i] = sigBytes[i]
-      const serializedTx = rawBytes.toString('base64')
-      console.debug(`[signTx:solana] assembled signed tx ${rawBytes.length}B (versioned=${parsed.isVersioned})`)
-      return { signature: sigBytes, serializedTx }
     }
     case 'tron': {
       // hdwallet returns { signature, serializedTx, ... } but does NOT echo

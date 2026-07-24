@@ -3768,7 +3768,7 @@
       "post": {
         "operationId": "solana_signTransaction",
         "summary": "Sign a Solana transaction",
-        "description": "Sign a raw Solana transaction on the KeepKey device. The raw_tx is a base64-encoded serialized Solana transaction.",
+        "description": "Sign a raw Solana transaction on the KeepKey device. raw_tx is a base64-encoded serialized transaction. Opaque cross-chain/versioned transactions should include provider-signed KKSOLSW1 swapMetadata so firmware can verify and display ClearSign details. If opaque signing is still required, the Vault UI asks the user for one-request consent; REST callers cannot assert that consent.",
         "parameters": [],
         "requestBody": {
           "content": {
@@ -3785,6 +3785,32 @@
                   "raw_tx": {
                     "type": "string",
                     "description": "Base64-encoded raw Solana transaction"
+                  },
+                  "swapMetadata": {
+                    "type": "object",
+                    "description": "Transaction-bound KKSOLSW1 ClearSign descriptor signed by a device-trusted metadata key.",
+                    "additionalProperties": false,
+                    "properties": {
+                      "payload": {
+                        "type": "string",
+                        "description": "Base64-encoded canonical KKSOLSW1 descriptor"
+                      },
+                      "signature": {
+                        "type": "string",
+                        "description": "Base64-encoded 64-byte compact secp256k1 signature over SHA256(payload)"
+                      },
+                      "signerKeyId": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 3,
+                        "description": "Trusted device ClearSign signer slot"
+                      }
+                    },
+                    "required": [
+                      "payload",
+                      "signature",
+                      "signerKeyId"
+                    ]
                   }
                 },
                 "required": [

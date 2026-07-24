@@ -38,6 +38,84 @@ export interface SolanaTokenMeta {
   iconUrl?: string
 }
 
+export interface SolanaTokenBalance {
+  amount: string
+  decimals: number
+}
+
+function formatTokenBaseUnits(value: bigint, decimals: number): string {
+  if (decimals <= 0) return value.toString()
+  const padded = value.toString().padStart(decimals + 1, '0')
+  const whole = padded.slice(0, -decimals)
+  const fraction = padded.slice(-decimals).replace(/0+$/, '')
+  return fraction ? `${whole}.${fraction}` : whole
+}
+
+/**
+ * Direct, indexer-independent SPL balance lookup used after a swap completes.
+ * An owner can have multiple token accounts for one mint, so sum raw base units
+ * and only format after every account has been included.
+ */
+export async function getSolanaTokenBalance(
+  owner: string,
+  mint: string,
+  endpoint: string = DEFAULT_SOLANA_RPC_ENDPOINT,
+  fetchImpl: typeof fetch = fetch,
+): Promise<SolanaTokenBalance> {
+  if (!SOLANA_MINT_RE.test(mint)) throw new Error(`Invalid Solana mint: ${mint}`)
+  const res = await fetchImpl(endpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'getTokenAccountsByOwner',
+      params: [owner, { mint }, { encoding: 'jsonParsed', commitment: 'confirmed' }],
+    }),
+    signal: AbortSignal.timeout(8000),
+  })
+  if (!res.ok) throw new Error(`Solana RPC balance lookup failed (${res.status})`)
+  const body = await res.json() as {
+    error?: { message?: string }
+    result?: {
+      value?: Array<{
+        account?: {
+          data?: {
+            parsed?: {
+              info?: {
+                tokenAmount?: { amount?: string; decimals?: number }
+              }
+            }
+          }
+        }
+      }>
+    }
+  }
+  if (body.error) throw new Error(body.error.message || 'Solana RPC balance lookup failed')
+
+  let total = 0n
+  let decimals: number | undefined
+  for (const entry of body.result?.value || []) {
+    const tokenAmount = entry.account?.data?.parsed?.info?.tokenAmount
+    if (!tokenAmount || !/^\d+$/.test(tokenAmount.amount || '')) continue
+    if (typeof tokenAmount.decimals !== 'number') continue
+    if (decimals !== undefined && decimals !== tokenAmount.decimals) {
+      throw new Error(`Solana RPC returned inconsistent decimals for ${mint}`)
+    }
+    decimals = tokenAmount.decimals
+    total += BigInt(tokenAmount.amount!)
+  }
+
+  // A wallet with no account for this mint legitimately returns [] and carries
+  // no decimals. Resolve the mint so callers still receive an honest zero.
+  if (decimals === undefined) {
+    const meta = await getMintInfo(endpoint, mint).catch(() => null)
+    if (!meta) throw new Error(`Could not resolve decimals for Solana mint ${mint}`)
+    decimals = meta.decimals
+  }
+  return { amount: formatTokenBaseUnits(total, decimals), decimals }
+}
+
 /** On-chain validation + decimals. Returns null when the address isn't a real
  *  SPL/Token-2022 mint. Surfaces Token-2022 inline metadata when present. */
 async function getMintInfo(endpoint: string, mint: string): Promise<{

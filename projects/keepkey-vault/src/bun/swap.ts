@@ -41,6 +41,12 @@ const isBitcoin = (c: ChainDef) => c.networkId === BTC_NETWORK_ID
 // CAIP namespace parser is shared with the picker so a future namespace
 // addition (Solana SPL, etc.) only needs editing in one place.
 import { parseCaip } from '../shared/swap-discovery'
+import {
+  DEFAULT_SLIPPAGE_BPS,
+  MAX_SLIPPAGE_BPS,
+  MIN_SLIPPAGE_BPS,
+  normalizeSlippageBps,
+} from '../shared/slippage'
 
 /** True for ERC-20 / BEP-20 / TRC-20 token sources. */
 function isTokenCaip(caip: string): boolean {
@@ -277,11 +283,14 @@ export async function getSwapQuote(params: SwapQuoteParams): Promise<SwapQuote> 
   // volatile pair). Anything outside [10, 5000] bps is clamped to that range.
   // Default to 100 bps (1%) when caller omits the field.
   if (params.slippageBps === 0) {
-    throw new Error('Slippage of 0 is not allowed — choose a tolerance between 0.1% and 50%')
+    throw new Error(
+      `Slippage of 0 is not allowed — choose a tolerance between ` +
+      `${MIN_SLIPPAGE_BPS / 100}% and ${MAX_SLIPPAGE_BPS / 100}%`,
+    )
   }
   const slippageBps = params.slippageBps == null
-    ? 100
-    : Math.max(10, Math.min(5000, Math.round(params.slippageBps)))
+    ? DEFAULT_SLIPPAGE_BPS
+    : normalizeSlippageBps(params.slippageBps)
 
   const pioneer = await getPioneer()
 
@@ -363,7 +372,8 @@ export async function getSwapQuote(params: SwapQuoteParams): Promise<SwapQuote> 
     throw new Error(
       `Swap amount too low: quoted fees (${(feeBps / 100).toFixed(2)}%) meet or exceed the ` +
       `slippage allowance (${(slippageBps / 100).toFixed(2)}%), so the protocol would refund ` +
-      `this swap on-chain — minus another network fee. Increase the amount.`
+      `this swap on-chain — minus another network fee. Increase the amount or choose Custom ` +
+      `slippage above ${(feeBps / 100).toFixed(2)}%.`
     )
   }
   // 2. Route-declared minimum sell amount — enforced for ALL integrations
@@ -648,7 +658,12 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
     // Skip the EVM-only buildRelaySwapTx and feed it straight to the Solana signer.
     if (fromChain.chainFamily === 'solana' && params.relayTx?.serializedTx) {
       swapLog(`${TAG} Relay Solana prebuilt tx — bypassing EVM relay builder`)
-      unsignedTx = { addressNList: fromChain.defaultPath, rawTx: params.relayTx.serializedTx }
+      unsignedTx = {
+        addressNList: fromChain.defaultPath,
+        rawTx: params.relayTx.serializedTx,
+        allowBlindSigning: params.allowSolanaBlindSigning === true,
+        swapMetadata: params.relayTx.solanaSwapMetadata,
+      }
     } else if (fromChain.chainFamily === 'tron') {
       // Tron has no nonces — buildRelaySwapTx is EVM-only. Route through TronGrid txbuilder.
       swapLog(`${TAG} Relay Tron prebuilt tx — bypassing EVM relay builder`)
@@ -853,15 +868,20 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
     unsignedTx = buildResult.unsignedTx
   }
 
-  // Solana swaps are v0 (versioned) txs the device can only blind-sign via
-  // solanaSignMessage. Firmware hard-gates that path behind the AdvancedMode
-  // policy (fsm_msg_solana.h) — when it's off the device shows a "Blocked"
-  // screen and returns a generic ActionCancelled whose real reason ("Message
-  // signing disabled by policy") is dropped by hdwallet's transport. Detect the
-  // disabled policy up front so the UI can prompt the user to enable blind
-  // signing instead of bouncing off an opaque device cancel. Only block when we
-  // positively know the policy is disabled; if unknown, let signing proceed.
-  if (fromChain.chainFamily === 'solana' && ctx.isAdvancedModeEnabled?.() === false) {
+  // Prebuilt Relay Solana payloads currently use a custom program plus
+  // lookup-table accounts. Without a transaction-bound ClearSign descriptor the
+  // device must classify that exact route as opaque. Ask for explicit one-shot
+  // consent before the hardware prompt, but do not block other Solana or v0
+  // transactions that firmware can natively ClearSign.
+  const needsOpaqueSolanaFallback =
+    fromChain.chainFamily === 'solana' &&
+    !!params.relayTx?.serializedTx &&
+    !params.relayTx.solanaSwapMetadata
+  if (
+    needsOpaqueSolanaFallback &&
+    ctx.isAdvancedModeEnabled?.() !== true &&
+    params.allowSolanaBlindSigning !== true
+  ) {
     throw new Error(SOLANA_BLIND_SIGNING_REQUIRED)
   }
 

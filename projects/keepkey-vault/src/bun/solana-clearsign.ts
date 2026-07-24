@@ -81,6 +81,7 @@ export async function buildSolanaDecodedInfo(
 
   return {
     version: parsedMsg.version,
+    staticAccountCount: parsedMsg.staticAccounts.length,
     instructions,
     altPubkeys,
     altResolutionIncomplete: altResolutionIncomplete || undefined,

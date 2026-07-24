@@ -9,8 +9,9 @@ import { versionCompare } from "../../../shared/firmware-versions"
 interface SigningApprovalProps {
 	request: SigningRequestInfo
 	phase: 'approve' | 'sending-payload' | 'device-confirm'
-	onApprove: () => void
+	onApprove: (approval?: { allowBlindSigning?: boolean }) => void
 	onReject: () => void
+	onCancel: () => void
 }
 
 const METHOD_LABEL_KEYS: Record<string, string> = {
@@ -228,6 +229,60 @@ function SolanaBlindSignBanner({ t }: { t: (k: string, f?: string) => string }) 
 					"This is a versioned (v0) Solana transaction. The KeepKey firmware cannot parse it, so the device screen will show only an opaque hash instead of per-instruction details. Only approve if you fully trust this dApp.",
 				)}
 			</Text>
+		</Flex>
+	)
+}
+
+function SolanaBlindSigningConsent({
+	granted,
+	onGrant,
+	t,
+}: {
+	granted: boolean
+	onGrant: () => void
+	t: (k: string, f?: string) => string
+}) {
+	return (
+		<Flex
+			direction="column" gap="2" w="100%"
+			bg={granted ? "rgba(34,197,94,0.1)" : "rgba(239,68,68,0.15)"}
+			border="1px solid"
+			borderColor={granted ? "rgba(34,197,94,0.4)" : "rgba(239,68,68,0.6)"}
+			borderRadius="lg" px="3" py="2"
+		>
+			<Flex align="center" gap="2">
+				<Box flex="1">
+					<Text fontSize="2xs" fontWeight="700" color={granted ? "var(--teal)" : "var(--rose)"}>
+						{granted
+							? t("signing.solanaBlindSignAllowedOnce", "Blind signing allowed for this request")
+							: t("signing.solanaBlindSignConsentTitle", "Opaque Solana transaction")}
+					</Text>
+					<Text fontSize="2xs" color="kk.textSecondary">
+						{t(
+							"signing.solanaBlindSignConsentDescription",
+							"The Vault and device cannot fully verify this transaction. Only continue if you trust the requesting app and independently verified the payload. This permission applies once.",
+						)}
+					</Text>
+				</Box>
+				{!granted && (
+					<Box
+						as="button"
+						px="3"
+						py="1"
+						borderRadius="full"
+						bg="rgba(229,62,62,0.3)"
+						color="#F56565"
+						fontSize="2xs"
+						fontWeight="700"
+						cursor="pointer"
+						_hover={{ bg: "rgba(229,62,62,0.5)" }}
+						flexShrink={0}
+						onClick={onGrant}
+					>
+						{t("signing.allowBlindSigningOnce", "Allow once")}
+					</Box>
+				)}
+			</Flex>
 		</Flex>
 	)
 }
@@ -559,12 +614,17 @@ function TypedDataSection({ decoded, t }: { decoded: EIP712DecodedInfo; t: (k: s
 // Main Component
 // ═══════════════════════════════════════════════════════════════════════
 
-export function SigningApproval({ request, phase, onApprove, onReject }: SigningApprovalProps) {
+export function SigningApproval({ request, phase, onApprove, onReject, onCancel }: SigningApprovalProps) {
 	const { t } = useTranslation("device")
 	const [elapsed, setElapsed] = useState(0)
 	const [advancedModeEnabled, setAdvancedModeEnabled] = useState(request.advancedModeEnabled ?? false)
 	const [enablingPolicy, setEnablingPolicy] = useState(false)
 	const [advancedModeError, setAdvancedModeError] = useState<string | null>(null)
+	// Bind consent to the signing id instead of carrying a boolean between
+	// renders. A new request can never inherit the previous request's grant,
+	// even for the render before effects run.
+	const [blindSigningConsentRequestId, setBlindSigningConsentRequestId] = useState<string | null>(null)
+	const blindSigningConsentGranted = blindSigningConsentRequestId === request.id
 
 	// Only show blind-signing warnings on firmware 7.14.0+
 	const fwSupportsBlindSignGate = request.firmwareVersion
@@ -605,9 +665,14 @@ export function SigningApproval({ request, phase, onApprove, onReject }: Signing
 		request.chain === 'solana'
 	const isSimpleTransfer =
 		!hasCalldata && !request.typedDataDecoded && !request.ethMessageDecoded && !request.solanaMessageDecoded && !isSolanaRequest
-	const advancedModeRequired = isSolanaSignMessage || !!request.requiresAdvancedMode || (fwSupportsBlindSignGate && !!request.needsBlindSigning)
+	const blindSigningConsentRequired = !!request.requiresBlindSigningConsent
+	const advancedModeRequired =
+		isSolanaSignMessage
+		|| !!request.requiresAdvancedMode
+		|| (fwSupportsBlindSignGate && !!request.needsBlindSigning && !blindSigningConsentRequired)
 	const advancedModeBlocked = advancedModeRequired && !advancedModeEnabled
-	const approveDisabled = enablingPolicy || advancedModeBlocked
+	const blindSigningConsentBlocked = blindSigningConsentRequired && !blindSigningConsentGranted
+	const approveDisabled = enablingPolicy || advancedModeBlocked || blindSigningConsentBlocked
 
 	const [showAdvancedConfirm, setShowAdvancedConfirm] = useState(false)
 
@@ -629,17 +694,29 @@ export function SigningApproval({ request, phase, onApprove, onReject }: Signing
 		setShowAdvancedConfirm(false)
 	}, [showAdvancedConfirm, t])
 
+	const submitApproval = useCallback(() => {
+		if (approveDisabled) return
+		onApprove({
+			allowBlindSigning: blindSigningConsentRequired && blindSigningConsentGranted,
+		})
+	}, [
+		approveDisabled,
+		blindSigningConsentGranted,
+		blindSigningConsentRequired,
+		onApprove,
+	])
+
 	useEffect(() => {
 		const handler = (e: KeyboardEvent) => {
 			if (e.key === "Enter" && phase === 'approve') {
 				e.preventDefault()
-				if (!approveDisabled) onApprove()
+				submitApproval()
 			}
 			if (e.key === "Escape" && phase === 'approve') { e.preventDefault(); onReject() }
 		}
 		document.addEventListener("keydown", handler)
 		return () => document.removeEventListener("keydown", handler)
-	}, [onApprove, onReject, phase, approveDisabled])
+	}, [onReject, phase, submitApproval])
 
 	useEffect(() => {
 		if (phase !== 'approve') return
@@ -699,6 +776,9 @@ export function SigningApproval({ request, phase, onApprove, onReject }: Signing
 							/>
 						))}
 					</Flex>
+					<Button variant="solid" colorScheme="red" size="lg" width="100%" minH="52px" onClick={onCancel}>
+						{t("signing.cancel", "Cancel")}
+					</Button>
 				</VStack>
 			</Box>
 		)
@@ -750,6 +830,9 @@ export function SigningApproval({ request, phase, onApprove, onReject }: Signing
 							/>
 						))}
 					</Flex>
+					<Button variant="solid" colorScheme="red" size="lg" width="100%" minH="52px" onClick={onCancel}>
+						{t("signing.cancel", "Cancel")}
+					</Button>
 				</VStack>
 			</Box>
 		)
@@ -835,6 +918,14 @@ export function SigningApproval({ request, phase, onApprove, onReject }: Signing
 						: <SolanaDecodeFailureBanner error={request.solanaDecodeError} t={t} />
 				)}
 
+				{blindSigningConsentRequired && (
+					<SolanaBlindSigningConsent
+						granted={blindSigningConsentGranted}
+						onGrant={() => setBlindSigningConsentRequestId(request.id)}
+						t={t}
+					/>
+				)}
+
 				{/* ── Two-column: decoded info (left) + tx details (right) ── */}
 				<Flex w="100%" gap="3" direction={{ base: "column", sm: "row" }}>
 					{/* Left: decoded calldata, typed data, Solana tx, or message payload */}
@@ -882,10 +973,14 @@ export function SigningApproval({ request, phase, onApprove, onReject }: Signing
 						flex="1" bg="kk.gold"
 						color="black" fontWeight="600" size="md"
 						_hover={{ bg: "kk.goldHover" }}
-						onClick={onApprove} disabled={approveDisabled}
+						onClick={submitApproval} disabled={approveDisabled}
 						cursor={approveDisabled ? "not-allowed" : "pointer"}
 					>
-						{advancedModeBlocked ? t("signing.enableAdvancedModeFirst", "Enable Advanced Mode to approve") : t("signing.approve")}
+						{advancedModeBlocked
+							? t("signing.enableAdvancedModeFirst", "Enable Advanced Mode to approve")
+							: blindSigningConsentBlocked
+								? t("signing.allowBlindSigningOnceFirst", "Choose Allow once to approve")
+								: t("signing.approve")}
 					</Button>
 					<Button
 						flex="1" variant="ghost" color="kk.textSecondary"

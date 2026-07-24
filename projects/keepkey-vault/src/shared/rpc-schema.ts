@@ -184,7 +184,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       // ── Pairing & Signing approval ───────────────────────────────────
       approvePairing: { params: void; response: { apiKey: string } }
       rejectPairing: { params: void; response: void }
-      approveSigningRequest: { params: { id: string }; response: void }
+      approveSigningRequest: { params: { id: string; allowBlindSigning?: boolean }; response: void }
       rejectSigningRequest: { params: { id: string }; response: void }
       listPairedApps: { params: void; response: PairedAppInfo[] }
       revokePairing: { params: { apiKey: string }; response: void }

@@ -108,7 +108,7 @@ process.on('unhandledRejection', (reason) => {
 import { EngineController, withTimeout } from "./engine-controller"
 import { runUsbDiagnostic as runUsbDiagnosticProbe } from "./windows-usb-probe"
 import { startRestApi, clearFeaturesCache, setUiActive, uiHeartbeat, type RestApiCallbacks } from "./rest-api"
-import { parseSolanaTx, SolanaTxParseError, solanaMessageSlice } from "./solana-tx"
+import { signSolanaWireTransaction } from "./solana-signing"
 import { AuthStore } from "./auth"
 import { getPioneer, getPioneerApiBase, resetPioneer, DEFAULT_API_BASE, getQueryKey as getPioneerQueryKey } from "./pioneer"
 import { setBtcBackendOffline, setBtcNodeConfig, setBtcNodeDeviceEligible, isBtcNodeActive, getBtcBackend, broadcastBtcTx } from "./btc-backend"
@@ -728,6 +728,16 @@ function getRpcUrl(chain: ChainDef): string | undefined {
 
 // ── REST API Server (on by default, can be disabled in Settings) ───────
 const auth = new AuthStore()
+// The REST caller cannot assert opaque-signing permission. The internal UI
+// approval RPC records the one request for which the user clicked "Allow once";
+// the awaiting REST callback consumes and deletes it immediately.
+const blindSigningApprovalIds = new Set<string>()
+async function requestSigningApprovalDecision(id: string) {
+	const approved = await auth.requestSigningApproval(id)
+	const allowBlindSigning = approved && blindSigningApprovalIds.has(id)
+	blindSigningApprovalIds.delete(id)
+	return { approved, allowBlindSigning: allowBlindSigning || undefined }
+}
 // Settings loaded lazily after DB init — defaults used until then
 let restApiEnabled = false
 let walletConnectEnabled = false
@@ -1022,58 +1032,29 @@ function getOrCreateWcManager(): WalletConnectManager {
 		},
 		solanaSignTransactionRaw: async ({ addressNList, signerAddress, transactionBase64 }) => {
 			if (!engine.wallet) throw new Error('Device disconnected')
-			const { parseSolanaTx, solanaMessageSlice, parseSolanaMessage } = await import('./solana-tx')
-			const bs58 = (await import('bs58')).default
-			const fullTx = Buffer.from(transactionBase64, 'base64')
-			const parsed = parseSolanaTx(fullTx)
-			const messageBytes = solanaMessageSlice(fullTx, parsed)
-
-			// Find which signer slot belongs to our account. Required signers are
-			// the first `numRequiredSignatures` entries of `staticAccounts`. If our
-			// pubkey isn't among them, this tx isn't ours to sign and writing to
-			// any slot would produce an invalid signed transaction.
-			const message = parseSolanaMessage(messageBytes)
-			const ourPubkey = bs58.decode(signerAddress)
-			if (ourPubkey.length !== 32) {
-				throw new Error(`Invalid signer address: bs58-decoded length ${ourPubkey.length} (expected 32)`)
+			const result = await signSolanaWireTransaction(
+				{ addressNList, rawTx: transactionBase64 },
+				(deviceParams) => engine.wallet!.solanaSignTx(deviceParams),
+				async (signerPath) => {
+					const derived = await engine.wallet!.solanaGetAddress({
+						addressNList: signerPath,
+						showDisplay: false,
+					})
+					const address = typeof derived === 'string' ? derived : derived?.address
+					if (!address) throw new Error('Device returned no Solana signer address')
+					if (address !== signerAddress) {
+						throw new Error(`Derived Solana signer ${address} does not match wallet account ${signerAddress}`)
+					}
+					return address
+				},
+				'walletconnect:solanaSignTransaction',
+			)
+			if (!result?.signature || !result.serializedTx) {
+				throw new Error('Device returned no Solana transaction signature')
 			}
-			let signerIdx = -1
-			for (let i = 0; i < message.header.numRequiredSignatures; i++) {
-				const acct = message.staticAccounts[i]
-				if (acct && acct.length === ourPubkey.length && Buffer.from(acct).equals(Buffer.from(ourPubkey))) {
-					signerIdx = i
-					break
-				}
-			}
-			if (signerIdx < 0) {
-				throw new Error(`Wallet account ${signerAddress} is not a required signer for this transaction`)
-			}
-
-			let sigBytes: Uint8Array
-			if (parsed.isVersioned) {
-				const msgRes = await engine.wallet.solanaSignMessage({ addressNList, message: messageBytes, showDisplay: true })
-				const sig = msgRes?.signature
-				if (!sig) throw new Error('Device returned no signature for v0 tx')
-				sigBytes = sig instanceof Uint8Array ? sig : Buffer.from(sig, 'base64')
-			} else {
-				const result = await engine.wallet.solanaSignTx({
-					addressNList,
-					rawTx: Buffer.from(fullTx.subarray(parsed.messageStart)).toString('base64'),
-				})
-				if (!result?.signature) throw new Error('Device returned no signature for legacy tx')
-				sigBytes = result.signature instanceof Uint8Array ? result.signature : Buffer.from(result.signature, 'base64')
-			}
-			if (sigBytes.length !== 64) throw new Error(`Unexpected signature length ${sigBytes.length}`)
-
-			const slotOffset = parsed.sigStart + signerIdx * 64
-			if (fullTx.length < slotOffset + 64) {
-				throw new Error('Raw tx too short to hold our signer slot')
-			}
-			const out = Buffer.from(fullTx)
-			for (let i = 0; i < 64; i++) out[slotOffset + i] = sigBytes[i]
 			return {
-				transactionBase64: out.toString('base64'),
-				signatureBase64: Buffer.from(sigBytes).toString('base64'),
+				transactionBase64: result.serializedTx,
+				signatureBase64: Buffer.from(result.signature).toString('base64'),
 			}
 		},
 		requestSigningApproval: async (info) => {
@@ -1081,7 +1062,7 @@ function getOrCreateWcManager(): WalletConnectManager {
 			try { rpc.send['signing-request'](info) } catch { /* webview not ready */ }
 			acquireWindowFocus()
 			try {
-				return await auth.requestSigningApproval(info.id)
+				return (await requestSigningApprovalDecision(info.id)).approved
 			} finally {
 				releaseWindowFocus()
 			}
@@ -1344,7 +1325,7 @@ const restCallbacks: RestApiCallbacks = {
 		try { rpc.send['signing-request'](info) } catch { /* webview not ready */ }
 		acquireWindowFocus()
 		try {
-			return await auth.requestSigningApproval(info.id)
+			return await requestSigningApprovalDecision(info.id)
 		} finally {
 			releaseWindowFocus()
 		}
@@ -1877,6 +1858,15 @@ async function headlessExecuteSwap(params: ExecuteSwapParams, pushSubStage: (sta
 		const fw = engine.getDeviceState().firmwareVersion
 		if (!thorchainBankTokenFirmwareOK(params.fromCaip, fw)) {
 			throw new Error(`TCY / RUJI swaps require KeepKey firmware ${THORCHAIN_BANK_TOKEN_MIN_FW}+ (device has ${fw || 'unknown'}). Update your firmware.`)
+		}
+	}
+	if (params.fromCaip?.startsWith('solana:') && params.relayTx?.serializedTx) {
+		const fw = engine.getDeviceState().firmwareVersion
+		if (!fw || versionCompare(fw, '7.15.0') < 0) {
+			throw new Error(
+				`Versioned Solana swaps require KeepKey firmware 7.15.0+ ` +
+				`(device has ${fw || 'unknown'}). Update your firmware before signing.`,
+			)
 		}
 	}
 
@@ -2571,68 +2561,28 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 				console.debug(`[solanaSignTx] RPC call received`)
 
-				// Pioneer returns full serialized tx: [compact-u16:sigCount][sig0(64)]...[sigN(64)][message]
-				// See solana-tx.ts for the wire-format contract + malformed-input rejection rules.
 				if (!params.rawTx) {
 					throw new Error('[solanaSignTx] rawTx is required')
 				}
-				const fullTx = Buffer.from(
-					typeof params.rawTx === 'string' ? params.rawTx : Buffer.from(params.rawTx).toString('base64'),
-					'base64',
+				return signSolanaWireTransaction(
+					params,
+					(deviceParams) => engine.isEmulator
+						? emuSigningOp(
+							() => engine.wallet!.solanaSignTx(deviceParams),
+							{ operation: 'solanaSignTx', chain: 'Solana' },
+						)
+						: engine.wallet!.solanaSignTx(deviceParams),
+					async (addressNList) => {
+						const derived = await engine.wallet!.solanaGetAddress({
+							addressNList,
+							showDisplay: false,
+						})
+						const address = typeof derived === 'string' ? derived : derived?.address
+						if (!address) throw new Error('Device returned no Solana signer address')
+						return address
+					},
+					'solanaSignTx',
 				)
-				let parsed
-				try {
-					parsed = parseSolanaTx(fullTx)
-				} catch (err) {
-					if (err instanceof SolanaTxParseError) throw new Error(`[solanaSignTx] ${err.message}`)
-					throw err
-				}
-
-				// KeepKey firmware message type 752 (SolanaSignTx) parses legacy
-				// messages only. Versioned (v0) messages are signed via type
-				// 754 (SolanaSignMessage) over the exact message bytes — the
-				// 0x80 prefix and v0 payload are preserved, producing an
-				// Ed25519 signature valid for the original v0 transaction.
-				// The device shows a generic "sign message" prompt; users
-				// review the parsed tx in the Vault approval dialog.
-				let sigBytes: Uint8Array
-				if (parsed.isVersioned) {
-					const messageBytes = solanaMessageSlice(fullTx, parsed)
-					console.debug(`[solanaSignTx] v0 tx detected — routing through solanaSignMessage (${messageBytes.length}B message incl. 0x80 prefix)`)
-					const msgRes = engine.isEmulator
-						? await emuSigningOp(() => engine.wallet!.solanaSignMessage({ addressNList: params.addressNList, message: messageBytes, showDisplay: true }), { operation: 'solanaSignTx', opLabel: 'Solana Sign Transaction (v0)', chain: 'Solana' })
-						: await engine.wallet.solanaSignMessage({ addressNList: params.addressNList, message: messageBytes, showDisplay: true })
-					const sig = msgRes?.signature
-					if (!sig) throw new Error('[solanaSignTx] v0: device returned no signature')
-					sigBytes = sig instanceof Uint8Array ? sig : Buffer.from(sig, 'base64')
-				} else {
-					const deviceParams = {
-						...params,
-						rawTx: Buffer.from(fullTx.subarray(parsed.messageStart)).toString('base64'),
-					}
-					console.debug(`[solanaSignTx] legacy — fullTx=${fullTx.length}B sigCount=${parsed.sigCount} messageStart=${parsed.messageStart}`)
-					const result = engine.isEmulator
-						? await emuSigningOp(() => engine.wallet!.solanaSignTx(deviceParams), { operation: 'solanaSignTx', chain: 'Solana' })
-						: await engine.wallet.solanaSignTx(deviceParams)
-					if (!result?.signature) return result
-					sigBytes = result.signature instanceof Uint8Array
-						? result.signature
-						: Buffer.from(result.signature, 'base64')
-				}
-
-				// Assemble signed tx: write sig into the first sig slot
-				// (starts at `parsed.sigStart`, 64 bytes).
-				if (sigBytes.length !== 64) {
-					throw new Error(`[solanaSignTx] Unexpected signature length ${sigBytes.length}`)
-				}
-				const rawBytes = Buffer.from(fullTx)
-				if (rawBytes.length < parsed.sigStart + 64) {
-					throw new Error('[solanaSignTx] Raw tx too short to hold signature')
-				}
-				for (let i = 0; i < 64; i++) rawBytes[parsed.sigStart + i] = sigBytes[i]
-				const assembled = rawBytes.toString('base64')
-				console.debug(`[solanaSignTx] Assembled signed tx: ${rawBytes.length}B (versioned=${parsed.isVersioned})`)
-				return { signature: sigBytes, serializedTx: assembled }
 			},
 			solanaSignMessage: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
@@ -3251,6 +3201,65 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					)
 					console.log(`[getBalances] effectivePubkeys: ${effectivePubkeys.length}/${pubkeys.length} — chains: ${[...new Set(effectivePubkeys.map(p => p.chainId))].join(', ')}`)
 					const allEntries = chunkResults.flatMap(r => r.entries)
+					// A completed SPL swap can beat Pioneer's portfolio indexer by
+					// several seconds. Query the mint directly on Solana so the first
+					// post-swap refresh can prove the output exists instead of briefly
+					// presenting "source gone, destination missing".
+					const directlyConfirmedAssetsByChain = new Map<string, Set<string>>()
+					for (const destCaip of swapDestCaips) {
+						const match = /^(solana:[^/]+)\/(?:token|spl):([1-9A-HJ-NP-Za-km-z]{32,44})$/.exec(destCaip)
+						if (!match) continue
+						const [, networkId, mint] = match
+						const owner = pubkeys.find(p => p.chainId === 'solana')?.pubkey
+						if (!owner) continue
+						try {
+							const { getSolanaTokenBalance } = await import('./solana-token')
+							const direct = await getSolanaTokenBalance(
+								owner,
+								mint,
+								getSetting('solana_rpc_endpoint') || undefined,
+							)
+							const directAmount = Number.parseFloat(direct.amount)
+							const existing = allEntries.find((entry: any) => {
+								const entryCaip = String(entry?.caip || '')
+								const entryMint = /\/(?:token|spl):([^/]+)$/.exec(entryCaip)?.[1]
+									|| String(entry?.contract || entry?.contractAddress || '')
+								return entryMint === mint
+									&& String(entry?.networkId || entryCaip.split('/')[0]).toLowerCase() === networkId.toLowerCase()
+							})
+							const catalogEntry = discoveryLookup[destCaip]
+								|| discoveryLookup[destCaip.replace('/spl:', '/token:')]
+							const existingAmount = Number.parseFloat(String(existing?.balance ?? '0')) || 0
+							const priceUsd = Number(existing?.priceUsd ?? 0) || 0
+							const directEntry = {
+								...(existing || {}),
+								caip: destCaip,
+								networkId,
+								pubkey: owner,
+								address: owner,
+								contract: mint,
+								type: 'token',
+								symbol: existing?.symbol || catalogEntry?.symbol || `${mint.slice(0, 4)}…${mint.slice(-4)}`,
+								name: existing?.name || catalogEntry?.name || 'SPL Token',
+								icon: existing?.icon || catalogEntry?.icon,
+								decimals: direct.decimals,
+								balance: direct.amount,
+								priceUsd,
+								valueUsd: directAmount * priceUsd,
+							}
+							if (existing) Object.assign(existing, directEntry)
+							else allEntries.push(directEntry)
+							const confirmed = directlyConfirmedAssetsByChain.get('solana') || new Set<string>()
+							confirmed.add(destCaip)
+							directlyConfirmedAssetsByChain.set('solana', confirmed)
+							console.log(`[getBalances] Post-swap reconcile: direct SPL ${directEntry.symbol} balance=${direct.amount}`)
+							if (existingAmount > directAmount) {
+								console.warn(`[getBalances] Direct SPL balance is below indexed balance (${directAmount} < ${existingAmount}); direct chain value wins`)
+							}
+						} catch (e: any) {
+							console.warn(`[getBalances] Post-swap SPL reconcile failed for ${destCaip}:`, e?.message)
+						}
+					}
 					// Self-host: BTC balances from the node, produced in Pioneer's entry shape
 					// so the BTC loop below processes them identically. Price still via Pioneer
 					// (GetMarketInfo — price isn't node data). A node failure for an xpub is
@@ -3635,7 +3644,13 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					// available — fall back to xpub only if Pioneer didn't return an address.
 					// confirmedChainIds: chains where Pioneer returned a real response (not a failed chunk).
 					// These are allowed to write 0 to the cache — genuine empty balance, not a transient failure.
-					const confirmedChainIds = new Set(effectivePubkeys.map(p => p.chainId))
+					const confirmedChainIds = new Set(
+						[...new Set(pubkeys.map(p => p.chainId))].filter(chainId =>
+							pubkeys
+								.filter(p => p.chainId === chainId)
+								.every(p => !failedPubkeySetForDb.has(`${p.caip}:${p.pubkey}`))
+						)
+					)
 					// BTC is aggregated from multiple pubkeys — it's confirmed only if ALL its pubkeys succeeded.
 					const btcConfirmed = btcPubkeyEntries.every(e => !failedPubkeySetForDb.has(`${e.caip}:${e.pubkey}`))
 					if (btcConfirmed) confirmedChainIds.add('bitcoin')
@@ -3723,6 +3738,15 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						let unresolvedFaultCount = 0
 						for (const f of portfolioMeta.failures) { const ch = caipToChain(f.caip); if (ch) degradedChainIds.add(ch.id); else unresolvedFaultCount++ }
 						for (const s of portfolioMeta.staleChains) { const ch = caipToChain(s.caip); if (ch) staleChainIds.add(ch.id); else unresolvedFaultCount++ }
+						for (const result of results) {
+							result.syncState = degradedChainIds.has(result.chainId)
+								? 'degraded'
+								: staleChainIds.has(result.chainId)
+									? 'stale'
+									: 'confirmed'
+							const directAssets = directlyConfirmedAssetsByChain.get(result.chainId)
+							if (directAssets?.size) result.confirmedAssetCaips = [...directAssets]
+						}
 						const staleMinutes = portfolioMeta.staleChains.length
 							? Math.floor(Math.max(...portfolioMeta.staleChains.map(s => s.ageMs || 0)) / 60000)
 							: 0
@@ -5322,9 +5346,14 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				auth.rejectPairing()
 			},
 			approveSigningRequest: async (params) => {
-				if (!auth.approveSigningRequest(params.id)) throw new Error('No pending signing request with that id')
+				if (params.allowBlindSigning === true) blindSigningApprovalIds.add(params.id)
+				if (!auth.approveSigningRequest(params.id)) {
+					blindSigningApprovalIds.delete(params.id)
+					throw new Error('No pending signing request with that id')
+				}
 			},
 			rejectSigningRequest: async (params) => {
+				blindSigningApprovalIds.delete(params.id)
 				if (!auth.rejectSigningRequest(params.id)) throw new Error('No pending signing request with that id')
 			},
 			listPairedApps: async () => {

@@ -155,6 +155,65 @@ const FIXTURE_ASSETS_FLAT = {
 // ── Quote parsing tests ─────────────────────────────────────────────
 
 describe('parseQuoteResponse', () => {
+  test('carries a complete signed Solana swap descriptor into the prebuilt transaction', () => {
+    const payload = Buffer.from('KKSOLSW1-test-payload').toString('base64')
+    const signature = Buffer.alloc(64, 0x5a).toString('base64')
+    const resp = {
+      data: [{
+        integration: 'shapeshiftSwap',
+        quote: {
+          swapper: 'Relay',
+          buyAmount: '100',
+          amountOutMin: '95',
+          txs: [{
+            txParams: {
+              serializedTx: Buffer.from([0, 1, 2, 3]).toString('base64'),
+              recipientAddress: 'TRecipient',
+              solanaSwapMetadata: { payload, signature, signerKeyId: 2 },
+            },
+          }],
+        },
+      }],
+    }
+    const result = parseQuoteResponse(resp, {
+      fromCaip: 'solana:5eykt4usfv8p8njdtrepy1vzqkqzkvdp/slip44:501',
+      toCaip: 'tron:0x2b6653dc/slip44:195',
+      slippageBps: 500,
+    })
+    expect(result.relayTx?.solanaSwapMetadata).toEqual({
+      payload,
+      signature,
+      signerKeyId: 2,
+    })
+  })
+
+  test('rejects partial Solana ClearSign metadata instead of downgrading to blind signing', () => {
+    const resp = {
+      data: [{
+        integration: 'shapeshiftSwap',
+        quote: {
+          swapper: 'Relay',
+          buyAmount: '100',
+          txs: [{
+            txParams: {
+              serializedTx: Buffer.from([0, 1, 2, 3]).toString('base64'),
+              recipientAddress: 'TRecipient',
+              solanaSwapMetadata: {
+                payload: Buffer.from('KKSOLSW1-test').toString('base64'),
+                signerKeyId: 0,
+              },
+            },
+          }],
+        },
+      }],
+    }
+    expect(() => parseQuoteResponse(resp, {
+      fromCaip: 'solana:5eykt4usfv8p8njdtrepy1vzqkqzkvdp/slip44:501',
+      toCaip: 'tron:0x2b6653dc/slip44:195',
+      slippageBps: 500,
+    })).toThrow('missing signature')
+  })
+
   // CAIP-only — Pioneer's Quote endpoint is the source of truth for routing.
   const baseParams = { fromCaip: 'eip155:8453/slip44:60', toCaip: 'eip155:1/slip44:60', slippageBps: 300 }
 

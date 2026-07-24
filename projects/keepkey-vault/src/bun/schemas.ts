@@ -160,10 +160,23 @@ export const XrpSignRequest = z.object({
 }).strip()
 
 /** POST /solana/sign-transaction — sign a raw Solana transaction */
+export const SolanaSwapMetadata = z.object({
+  /** Base64-encoded canonical KKSOLSW1 descriptor. */
+  payload: z.string().min(1),
+  /** Base64-encoded 64-byte compact secp256k1 signature over SHA256(payload). */
+  signature: z.string().min(1),
+  /** Device ClearSign signer slot (0 = built-in, 1..3 = user-loaded). */
+  signerKeyId: z.number().int().min(0).max(3),
+}).strict()
+
 export const SolanaSignRequest = z.object({
   address_n: z.array(z.number().int()).optional(),
   addressNList: z.array(z.number().int()).optional(),
   raw_tx: z.string().min(1),
+  /** Transaction-bound ClearSign metadata. Partial descriptors are rejected. */
+  swapMetadata: SolanaSwapMetadata.optional(),
+  // One-shot opaque-signing consent is intentionally not part of the public
+  // REST contract. Unknown fields are stripped; the Vault UI grants consent.
 }).strip()
 
 /** POST /tron/sign-transaction — sign a raw Tron transaction */

@@ -9,6 +9,7 @@
  * This module lazy-loads the 4.6MB asset data on first use to avoid
  * blocking initial render.
  */
+import offlineAssetIconsJson from './offlineAssetIcons.json'
 
 interface SlimAssetEntry {
   symbol: string
@@ -75,6 +76,19 @@ const LOCAL_ICONS: Record<string, string> = {
   'bip122:000000000019d6689c085ae165831e93/slip44:0': `data:image/svg+xml,${encodeURIComponent(BITCOIN_SVG)}`,
   'bip122:00040fe8ec8471911baa1db1266ea15d/orchard:shielded': `data:image/svg+xml,${encodeURIComponent(ZCASH_SHIELDED_SVG)}`,
 }
+const OFFLINE_ASSET_ICONS = offlineAssetIconsJson as Record<string, string>
+
+function bundledIconForCaip(caip: string): string | undefined {
+  const normalized = caip.startsWith('eip155:') ? caip.toLowerCase() : caip
+  const filename = OFFLINE_ASSET_ICONS[normalized]
+    || OFFLINE_ASSET_ICONS[normalized.replace('/spl:', '/token:')]
+  return filename ? `./assets/token-icons/${filename}` : undefined
+}
+
+/** True when an icon resolves to data packaged inside the desktop build. */
+export function isBundledAssetIcon(url: string | undefined): boolean {
+  return !!url && (url.startsWith('data:') || url.startsWith('./assets/token-icons/'))
+}
 
 /** Derive the keepkey.info icon URL from a CAIP identifier.
  *  Bundled LOCAL_ICONS win — several components call this directly rather
@@ -82,6 +96,8 @@ const LOCAL_ICONS: Record<string, string> = {
  *  offline-critical ones (BTC) must resolve at every call site. */
 export function caipToIcon(caip: string): string {
   if (LOCAL_ICONS[caip]) return LOCAL_ICONS[caip]
+  const bundled = bundledIconForCaip(caip)
+  if (bundled) return bundled
   return `https://api.keepkey.info/coins/${btoa(caip).replace(/=+$/, '')}.png`
 }
 
@@ -116,6 +132,8 @@ export function isKnownAsset(caip: string): boolean {
 /** Look up just the icon URL for a CAIP */
 export function getAssetIcon(caip: string): string {
   if (LOCAL_ICONS[caip]) return LOCAL_ICONS[caip]
+  const bundled = bundledIconForCaip(caip)
+  if (bundled) return bundled
   const map = getAssetMap()
   if (!map) return caipToIcon(caip)
   const entry = map[caip]

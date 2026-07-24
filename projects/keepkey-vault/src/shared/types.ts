@@ -162,6 +162,14 @@ export interface ChainBalance {
    */
   defiPositions?: DefiPosition[]
   updatedAt?: number    // unix ms — when this chain's balance was last confirmed non-zero from Pioneer
+  /**
+   * Confidence of the current refresh result. Degraded/stale rows are useful
+   * for disclosure, but must not replace a last-known-good balance snapshot
+   * during post-transaction reconciliation.
+   */
+  syncState?: 'confirmed' | 'stale' | 'degraded'
+  /** Assets verified directly against a chain RPC during this refresh. */
+  confirmedAssetCaips?: string[]
 }
 
 // DeFi position. The server-side merged path (includeDefi=true) is the
@@ -572,6 +580,9 @@ export interface SigningRequestInfo {
   needsBlindSigning?: boolean
   /** true when the UI must enable AdvancedMode before allowing approval */
   requiresAdvancedMode?: boolean
+  /** true when this request needs a separate, explicit one-shot opaque-signing
+   * consent in the Vault UI. External callers cannot set the device flag. */
+  requiresBlindSigningConsent?: boolean
   /** true when device AdvancedMode policy is currently enabled */
   advancedModeEnabled?: boolean
   /** Device firmware version string e.g. "7.14.0" — used to gate blind-signing UI */
@@ -608,6 +619,8 @@ export interface SolanaTxDecodedInstruction {
 }
 export interface SolanaTxDecodedInfo {
   version: 'legacy' | 'v0'
+  /** Static accounts embedded in the message (firmware currently reviews at most 32). */
+  staticAccountCount: number
   instructions: SolanaTxDecodedInstruction[]
   /** base58 ALT pubkeys referenced by the tx. Empty for legacy. */
   altPubkeys: string[]
@@ -1015,6 +1028,14 @@ export interface RelayTxParams {
   /** Base64-encoded Solana v0 VersionedTransaction (Relay SOL→EVM bridge).
    *  When present, swap.ts uses rawTx path instead of EVM calldata path. */
   serializedTx?: string
+  /** Optional transaction-bound Solana ClearSign attestation supplied by the
+   *  quote provider. The device verifies the signature and exact message hash
+   *  before displaying cross-chain swap semantics. */
+  solanaSwapMetadata?: {
+    payload: string             // base64 canonical KKSOLSW1 descriptor
+    signature: string           // base64 compact secp256k1 signature (64 bytes)
+    signerKeyId: number         // trusted ClearSign key slot (0..3)
+  }
 }
 
 /** Quote response from Pioneer (aggregated across DEXes) */
@@ -1092,10 +1113,14 @@ export interface ExecuteSwapParams {
   toAddressOverride?: string      // pre-resolved destination address (skips defaultPath derivation)
   fromEvmAddressIndex?: number    // EVM address derivation index (0 = default m/44'/60'/0'/0/0)
   integration?: string            // DEX source (relay quotes skip memo+router flow)
+  swapper?: string                // underlying protocol when integration is an aggregator
   relayTx?: RelayTxParams         // pre-built tx for relay/bridge integrations
   tokenDecimals?: number          // source-token decimals from the picker asset — needed for
                                   // token sources Pioneer's available-assets doesn't list (e.g.
                                   // SPL USDT); Pioneer's canonical value still wins when present
+  /** Explicit consent for this one Solana transaction to use the opaque signing
+   *  fallback. It does not change the device's persistent AdvancedMode policy. */
+  allowSolanaBlindSigning?: boolean
 }
 
 export type SwapProviderStatus = 'ok' | 'degraded' | 'offline' | 'unknown'
