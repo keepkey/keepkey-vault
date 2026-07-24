@@ -10,6 +10,32 @@ import { COIN_MAP_LONG } from '@pioneer-platform/pioneer-coins'
 
 const TAG = '[swap]'
 
+/** THORChain accepts up to 250 bytes globally, but UTXO deposits encode the
+ * memo in a single OP_RETURN output and the KeepKey signer supports 80 bytes.
+ * Keep this source-aware so an otherwise valid quote cannot survive preview
+ * and then fail only after the user confirms on-device. */
+export const GLOBAL_SWAP_MEMO_MAX_BYTES = 250
+export const UTXO_SWAP_MEMO_MAX_BYTES = 80
+
+export function swapMemoLimitForSource(fromCaip: string): number {
+  return fromCaip.startsWith('bip122:')
+    ? UTXO_SWAP_MEMO_MAX_BYTES
+    : GLOBAL_SWAP_MEMO_MAX_BYTES
+}
+
+export function assertSwapMemoFitsSource(memo: string, fromCaip: string): void {
+  if (!memo) return
+  const byteLength = Buffer.byteLength(memo, 'utf8')
+  const limit = swapMemoLimitForSource(fromCaip)
+  if (byteLength <= limit) return
+
+  const source = fromCaip.startsWith('bip122:') ? 'UTXO source chain' : 'swap protocol'
+  throw new Error(
+    `Swap route memo is too long for this ${source} ` +
+    `(${byteLength} bytes; maximum ${limit}). Refresh the quote or choose another route.`,
+  )
+}
+
 function decodeStrictBase64(value: unknown, field: string, maxBytes: number): string {
   if (typeof value !== 'string' || value.length === 0) {
     throw new Error(`Invalid Solana ClearSign metadata: missing ${field}`)
@@ -175,7 +201,8 @@ export function parseQuoteResponse(
 
 /** Parse ONE Pioneer quote entry into SwapQuote. Throws when the quote is not
  *  buildable (zero/empty output, missing inbound address, EVM inbound for a
- *  UTXO source, or no memo/calldata/deposit instruction). */
+ *  UTXO source, source-chain memo overflow, or no memo/calldata/deposit
+ *  instruction). */
 function parseSingleQuote(
   best: any,
   params: { fromCaip: string; toCaip: string; slippageBps?: number },
@@ -301,6 +328,7 @@ function parseSingleQuote(
   // Memo lives in txParams (Pioneer constructs it), fallback to raw
   // Relay quotes don't use memos — the calldata IS the swap instruction
   const memo = txParams.memo || quote.memo || raw.memo || ''
+  assertSwapMemoFitsSource(memo, params.fromCaip)
   // Router: raw.router or txParams.recipientAddress (Pioneer sets recipient = router for EVM)
   const router = raw.router || quote.router || txParams.recipientAddress
   // Vault/inbound address — check both snake_case and camelCase across all layers

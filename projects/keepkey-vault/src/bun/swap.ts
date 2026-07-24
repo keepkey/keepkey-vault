@@ -22,7 +22,12 @@ import { normalizeBchAddress } from './txbuilder'
 // history rows without CAIP). The swap quote/execute path no longer uses it —
 // vault is CAIP-native end-to-end.
 export { parseAssetsResponse, parseQuoteResponse, assetToCaip } from './swap-parsing'
-import { parseQuoteResponse, parseAssetsResponse, isNativeDepositCaip } from './swap-parsing'
+import {
+  assertSwapMemoFitsSource,
+  parseQuoteResponse,
+  parseAssetsResponse,
+  isNativeDepositCaip,
+} from './swap-parsing'
 
 const TAG = '[swap]'
 
@@ -109,12 +114,6 @@ const DEPOSIT_GAS_LIMITS: Record<string, bigint> = {
   arbitrum: 300000n,  // Arbitrum gas units != mainnet gas units
   optimism: 200000n,
 }
-
-/** Memo length limits — THORChain global limit is 250 bytes.
- *  THORNode constructs memos optimized for source chain constraints (e.g. short
- *  asset names like AVAX.USDT instead of AVAX.USDT-0x...) so we trust the memo
- *  from Pioneer/THORNode and only enforce the THORChain protocol limit. */
-const MEMO_LIMIT = 250
 
 // Router/inbound-address validation belongs in pioneer-router (which runs
 // each integration's own checks before returning a quote). The vault trusts
@@ -630,12 +629,7 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
   const isMemolessTransfer = (fromIsUtxo || fromIsSolana) && !!params.inboundAddress && !params.memo
   if (!params.inboundAddress && !isNativeDeposit && !hasPrebuiltTx) throw new Error('Missing inbound vault address from quote')
   if (!params.memo && !hasPrebuiltTx && !isMemolessTransfer) throw new Error('Missing swap memo from quote')
-  if (params.memo) {
-    const memoByteLength = Buffer.byteLength(params.memo, 'utf8')
-    if (memoByteLength > MEMO_LIMIT) {
-      throw new Error(`Swap memo too long (${memoByteLength} bytes, THORChain max ${MEMO_LIMIT})`)
-    }
-  }
+  assertSwapMemoFitsSource(params.memo, params.fromCaip)
 
   swapLog(`${TAG} Executing: ${params.fromCaip} → ${params.toCaip}, amount=${params.amount}`)
   if (hasPrebuiltTx) {
@@ -1005,6 +999,7 @@ export async function previewSwapBuild(
   const isMemolessTransfer = (fromIsUtxoPreview || fromIsSolanaPreview) && !!params.inboundAddress && !params.memo
   if (!params.inboundAddress && !isNativeDeposit && !hasPrebuiltTx) throw new Error('Missing inbound vault address from quote')
   if (!params.memo && !hasPrebuiltTx && !isMemolessTransfer) throw new Error('Missing swap memo from quote')
+  assertSwapMemoFitsSource(params.memo, params.fromCaip)
 
   const pioneer = await getPioneer()
 

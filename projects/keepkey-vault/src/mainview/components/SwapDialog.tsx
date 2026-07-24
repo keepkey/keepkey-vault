@@ -2240,6 +2240,8 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
         friendly = t("approvalReverted", "Approval reverted on-chain — swap aborted to protect funds")
       } else if (/Insufficient.*for gas|insufficient funds/i.test(raw)) {
         friendly = t("insufficientGas", "Not enough gas in the source chain's native asset")
+      } else if (/OP_RETURN.*(?:character count|too .* high)|memo is too long/i.test(raw)) {
+        friendly = t("swapMemoTooLong", "This route returned a memo that is too long for the source chain. Refresh the quote or choose another route.")
       } else if (/nonce|fetch nonce/i.test(raw)) {
         friendly = t("nonceError", "Network error fetching nonce — retry in a moment")
       } else if (/timed out|ETIMEDOUT|fetch failed|network/i.test(raw)) {

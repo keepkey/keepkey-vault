@@ -7,7 +7,11 @@
  * Run: bun test __tests__/swap-parsing.test.ts
  */
 import { describe, test, expect } from 'bun:test'
-import { parseQuoteResponse, parseAssetsResponse } from '../src/bun/swap-parsing'
+import {
+  assertSwapMemoFitsSource,
+  parseQuoteResponse,
+  parseAssetsResponse,
+} from '../src/bun/swap-parsing'
 
 // ── Fixtures: Real Pioneer SDK response shapes ──────────────────────
 
@@ -323,6 +327,38 @@ describe('parseQuoteResponse', () => {
     const result = parseQuoteResponse(FIXTURE_BTC_TO_ETH_QUOTE, params)
     // 1.25 * (1 - 85/10000) = 1.25 * 0.9915 = 1.239375
     expect(parseFloat(result.minimumOutput)).toBeCloseTo(1.239375, 4)
+  })
+
+  test('BTC → USDT: skips an overlong full-contract memo for a compact route', () => {
+    const btcCaip = 'bip122:000000000019d6689c085ae165831e93/slip44:0'
+    const usdtCaip = 'eip155:1/erc20:0xdac17f958d2ee523a2206206994597c13d831ec7'
+    const destination = `0x${'a'.repeat(40)}`
+    const fullMemo = `=:ETH.USDT-0XDAC17F958D2EE523A2206206994597C13D831EC7:${destination}:323592379572:keep:30`
+    const compactMemo = `=:ETH.USDT:${destination}:323592379572:keep:30`
+    const quote = (memo: string, buyAmount: string) => ({
+      integration: 'thorchain',
+      quote: {
+        buyAmount,
+        raw: { inbound_address: 'bc1qvaultaddress' },
+        txs: [{ txParams: { memo, vaultAddress: 'bc1qvaultaddress' } }],
+      },
+    })
+
+    expect(Buffer.byteLength(fullMemo, 'utf8')).toBeGreaterThan(80)
+    expect(Buffer.byteLength(compactMemo, 'utf8')).toBeLessThanOrEqual(80)
+    const result = parseQuoteResponse(
+      { data: [quote(fullMemo, '100'), quote(compactMemo, '99')] },
+      { fromCaip: btcCaip, toCaip: usdtCaip, slippageBps: 300 },
+    )
+    expect(result.memo).toBe(compactMemo)
+    expect(result.expectedOutput).toBe('99')
+  })
+
+  test('UTXO memo limit is measured in bytes, not JavaScript characters', () => {
+    const btcCaip = 'bip122:000000000019d6689c085ae165831e93/slip44:0'
+    expect(() => assertSwapMemoFitsSource('a'.repeat(80), btcCaip)).not.toThrow()
+    expect(() => assertSwapMemoFitsSource('é'.repeat(41), btcCaip))
+      .toThrow(/82 bytes; maximum 80/)
   })
 
   // Minimal response (fields at top-level quote, no raw/txs)
