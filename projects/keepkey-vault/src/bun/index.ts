@@ -143,7 +143,7 @@ import { prioritizeExtraContracts, type PortfolioExtraContract } from "./portfol
 import * as os from "os"
 import * as path from "path"
 import { EVM_RPC_URLS, getTokenMetadata, broadcastEvmTx } from "./evm-rpc"
-import type { ChainBalance, TokenBalance, CustomToken, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, EvmAddressSet, Bip85SeedMeta, StakingPosition, SwapAsset, AuditToken, DefiPosition } from "../shared/types"
+import type { ChainBalance, TokenBalance, CustomToken, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, EvmAddressSet, Bip85SeedMeta, StakingPosition, SwapAsset, AuditToken, DefiPosition, RecentActivity } from "../shared/types"
 import type { VaultRPCSchema } from "../shared/rpc-schema"
 
 // L3 fix: withTimeout imported from engine-controller (was duplicated here)
@@ -352,8 +352,33 @@ function isTokenEntry(entry: any): boolean {
 	return isTokenByCaip || isTokenByType
 }
 
+/* Restore the canonical casing of a CAIP's network part.
+ *
+ * Pioneer lowercases the network id on token CAIPs, but Solana and Tron
+ * network ids are base58 and case-SENSITIVE. The damaged CAIP then flows
+ * everywhere it is used as a key — most visibly the icon URL, which is
+ * base64(caip), so USDT-on-Solana 403s on the CDN while the correctly-cased
+ * key serves fine. Map any case-insensitive match back onto the chain's own
+ * spelling; leave anything unrecognised untouched. EVM ids are digits, so
+ * this is a no-op for them. */
+let canonicalNetworkIds: Map<string, string> | null = null
+function canonicalizeCaipNetwork(caip: string): string {
+	if (!caip) return caip
+	const slash = caip.indexOf('/')
+	if (slash < 0) return caip
+	const prefix = caip.slice(0, slash)
+	if (!canonicalNetworkIds) {
+		canonicalNetworkIds = new Map(
+			getAllChains().map(c => [c.networkId.toLowerCase(), c.networkId]),
+		)
+	}
+	const canonical = canonicalNetworkIds.get(prefix.toLowerCase())
+	return canonical && canonical !== prefix ? canonical + caip.slice(slash) : caip
+}
+
 function parseTokenEntry(tok: any): TokenBalance {
 	const tokNetworkId = (tok.networkId || '').toLowerCase()
+	const caip = canonicalizeCaipNetwork(tok.caip || '')
 	const caipPrefix = ((tok.caip || '').split('/')[0]).toLowerCase()
 	const contractMatch = (tok.caip || '').match(CONTRACT_CAIP_RE)
 	return {
@@ -362,7 +387,7 @@ function parseTokenEntry(tok: any): TokenBalance {
 		balance: String(tok.balance ?? '0'),
 		balanceUsd: Number(tok.valueUsd ?? 0),
 		priceUsd: Number(tok.priceUsd ?? 0),
-		caip: tok.caip || '',
+		caip,
 		contractAddress: contractMatch?.[2] || tok.contract || undefined,
 		networkId: tokNetworkId || caipPrefix,
 		icon: tok.icon || undefined,
@@ -449,6 +474,62 @@ async function fetchShieldedZecToken(zecPriceUsd: number): Promise<TokenBalance 
 		console.warn('[balances] Shielded balance fetch failed:', e?.message || e)
 		return null
 	}
+}
+
+/**
+ * Relabel Zcash pool-crossing txs in activity rows at read time. Blockbook
+ * can't see shielded value, so for a shield tx it reports fee = inputs −
+ * transparent outputs (inflated by the whole shielded amount) and often the
+ * wrong direction. The sidecar knows which txids created Orchard notes for
+ * us: a t-history row whose txid also created notes is a shield (has our
+ * t-inputs, `from` set) or an unshield (no t-inputs, the note is change).
+ * Never persisted — the DB keeps blockbook's raw view.
+ */
+async function relabelZcashShieldedRows(rows: RecentActivity[]): Promise<RecentActivity[]> {
+	if (!zcashPrivacyEnabled || !hasFvkLoaded()) return rows
+	if (!rows.some(r => r.chainId === 'zcash' || r.chain === 'ZEC')) return rows
+	let notes: Array<{ txid: string | null; value: number }>
+	try {
+		const { getZcashTransactions } = await import('./zcash-sidecar')
+		notes = (await getZcashTransactions())?.transactions || []
+	} catch { return rows } // sidecar not running — show blockbook's view unmodified
+	// Index note values under both hex byte orders: the sidecar emits
+	// lightwalletd's internal order while blockbook uses display order, and an
+	// upstream keepkey-zcash fix may flip the sidecar to display order.
+	const reverseHex = (h: string) => h.match(/../g)?.reverse().join('') ?? h
+	const noteSumByTxid = new Map<string, number>()
+	for (const n of notes) {
+		if (!n.txid || n.txid.length !== 64) continue
+		const t = n.txid.toLowerCase()
+		noteSumByTxid.set(t, (noteSumByTxid.get(t) || 0) + n.value)
+		const r = reverseHex(t)
+		noteSumByTxid.set(r, (noteSumByTxid.get(r) || 0) + n.value)
+	}
+	if (noteSumByTxid.size === 0) return rows
+	return rows.map(row => {
+		if (row.chainId !== 'zcash' && row.chain !== 'ZEC') return row
+		// Only fix blockbook-derived rows. Vault-recorded rows (source app/api,
+		// incl. z→z sends whose change note would otherwise read as an unshield)
+		// are already truthful — logZcashShieldedActivity wrote them.
+		if (row.source !== 'scan') return row
+		const noteSum = row.txid ? noteSumByTxid.get(row.txid.toLowerCase()) : undefined
+		if (noteSum != null) {
+			if (row.from) {
+				// Shield: what entered the pool is the sum of notes we received;
+				// scan-row amounts are base units (zatoshis).
+				return { ...row, type: 'shield' as const, amount: String(noteSum), fee: undefined }
+			}
+			// Unshield with change: transparent amount is right; the scan fee is
+			// garbage (blockbook can't see the shielded inputs).
+			return { ...row, type: 'unshield' as const, fee: undefined }
+		}
+		// No note of ours in this tx, but a transparent receive with NO visible
+		// sender can only come out of the shielded pool (every t→t tx has
+		// inputs blockbook would report as `from`) — an unshield that left no
+		// change note, e.g. a max-amount send to our own t-addr.
+		if (row.type === 'receive' && !row.from) return { ...row, type: 'unshield' as const, fee: undefined }
+		return row
+	})
 }
 
 // ── Desktop update — open keepkey.com "update your app" page ──
@@ -1498,6 +1579,63 @@ function zecAmount(zatoshi: any): string | undefined {
 	return (n / 1e8).toFixed(8).replace(/\.?0+$/, '') + ' ZEC'
 }
 
+// Zcash own-wallet address-book rows store the account XPUB (not a send
+// target), so the picker used to hide every own-device ZEC wallet. Derive the
+// index-0 transparent address (m/.../0/0 — the same one the receive page
+// shows) so other devices' ZEC wallets are pickable. Pure derivation, cached
+// per xpub since the book reloads on every picker open.
+const zcashTAddrFromXpub = (() => {
+	const cache = new Map<string, string | null>()
+	return async (xpub: string): Promise<string | null> => {
+		if (cache.has(xpub)) return cache.get(xpub)!
+		let addr: string | null = null
+		try {
+			const { HDKey } = await import('@scure/bip32')
+			const { sha256 } = await import('@noble/hashes/sha256')
+			const { ripemd160 } = await import('@noble/hashes/ripemd160')
+			const bs58 = (await import('bs58')).default
+			const pub = HDKey.fromExtendedKey(xpub).derive('m/0/0').publicKey
+			if (pub) {
+				const h160 = ripemd160(sha256(pub))
+				const payload = new Uint8Array(2 + h160.length)
+				payload.set([0x1c, 0xb8]) // ZEC transparent P2PKH version → "t1…"
+				payload.set(h160, 2)
+				const checksum = sha256(sha256(payload)).slice(0, 4)
+				const full = new Uint8Array(payload.length + 4)
+				full.set(payload)
+				full.set(checksum, payload.length)
+				addr = bs58.encode(full)
+			}
+		} catch (e: any) {
+			console.warn('[addressbook] zcash t-addr derivation failed:', e?.message)
+		}
+		cache.set(xpub, addr)
+		return addr
+	}
+})()
+
+// Record a shielded-flow broadcast in the activity feed. Blockbook can NEVER
+// see a z→z send (no transparent addresses touched) and misreads shield/
+// unshield value flows, so the vault is the only source of truth for these —
+// without this record a private send is invisible in history forever.
+// Same privacy rule as broadcastTx: DB write is standard-wallet only
+// (api_log is part of hidden-wallet deniability), UI push always.
+function logZcashShieldedActivity(activityType: 'broadcast' | 'shield' | 'unshield', txid: string, amountZat: number, to?: string) {
+	if (!txid) return
+	const scope = getWalletDbScope()
+	const n = Number(amountZat)
+	const meta = {
+		// Human units, no suffix — app-source rows render amount verbatim + symbol.
+		value: Number.isFinite(n) ? (n / 1e8).toFixed(8).replace(/\.?0+$/, '') : undefined,
+		to,
+		chainId: 'zcash',
+		chainSymbol: 'ZEC',
+	}
+	const logEntry: ApiLogEntry = { ...(scope || {}), method: 'RPC', route: `zcashShielded/${activityType}`, timestamp: Date.now(), durationMs: 0, status: 200, appName: 'vault', txid, chain: 'ZEC', activityType, responseBody: meta }
+	if (scope && !engine.isPassphraseWallet) insertApiLog(logEntry)
+	try { rpc.send['api-log'](logEntry) } catch { /* webview not ready */ }
+}
+
 // Race engine.getEmulatorMnemonic() against a 3s deadline. The DebugLink
 // read can hang on the dylib path (documented in emu-7.15-debugging.md),
 // and a hung verify must NOT block create/import/loadDevice forever — but
@@ -1932,6 +2070,7 @@ async function headlessExecuteSwap(params: ExecuteSwapParams, pushSubStage: (sta
 			: (fn) => fn(),
 		pushSubStage,
 		isAdvancedModeEnabled: getAdvancedModeEnabled,
+		getSolanaRpcEndpoint: () => getSetting('solana_rpc_endpoint') || undefined,
 	})
 	const scope = getWalletDbScope()
 	// Register swap for tracking (non-blocking)
@@ -5211,6 +5350,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					memo: params.memo,
 				}, { signWrap, onProgress })
 				try { rpc.send['send-progress']({ step: 'complete', detail: result.txid }) } catch { /* webview not ready */ }
+				logZcashShieldedActivity('broadcast', result.txid, params.amount, params.recipient)
 				schedulePostZcashTxRescans()
 				return result
 			},
@@ -5268,6 +5408,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					account,
 				}, { signWrap, onProgress })
 				try { rpc.send['shield-progress']({ step: 'complete', detail: result.txid }) } catch { /* webview not ready */ }
+				logZcashShieldedActivity('shield', result.txid, params.amount)
 				schedulePostZcashTxRescans()
 				return result
 			},
@@ -5297,6 +5438,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					account,
 				}, { signWrap, onProgress })
 				try { rpc.send['deshield-progress']({ step: 'complete', detail: result.txid }) } catch { /* webview not ready */ }
+				logZcashShieldedActivity('unshield', result.txid, params.amount, params.recipient)
 				schedulePostZcashTxRescans()
 				return result
 			},
@@ -5903,6 +6045,14 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// own = every device's wallets (cross-device); external = all explicitly-saved
 				// contacts (cross-wallet; R4 opt-in — history-only recipients stay hidden).
 				const own = getAddressBookList({ kind: 'own', networkId, search })
+				// ZEC own rows hold an xpub — swap in the derived index-0 t-addr so
+				// they're actual send targets (other devices' wallets included).
+				for (const e of own) {
+					if (e.chainId === 'zcash' && /^xpub/.test(e.address)) {
+						const t = await zcashTAddrFromXpub(e.address)
+						if (t) e.address = t
+					}
+				}
 				const external = getAddressBookList({ kind: 'external', networkId, search, savedOnly: true })
 				return [...own, ...external].map(e => ({ ...e, deviceLabel: labels[e.deviceId] || e.deviceLabel }))
 			},
@@ -6452,10 +6602,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// PRIVACY: Don't expose standard-wallet activity during hidden sessions.
 				// Hidden sessions get the RAM-only session store instead (populated by
 				// scanChainHistory's live fetch below) — display without persistence.
-				if (engine.isPassphraseWallet) return getSessionActivity(params?.limit || 50, params?.chainId)
+				if (engine.isPassphraseWallet) return relabelZcashShieldedRows(getSessionActivity(params?.limit || 50, params?.chainId))
 				const scope = getWalletDbScope()
 				if (!scope) return []
-				return getRecentActivityFromLog(params?.limit || 50, params?.chainId, scope.deviceId, scope.walletId)
+				return relabelZcashShieldedRows(getRecentActivityFromLog(params?.limit || 50, params?.chainId, scope.deviceId, scope.walletId))
 			},
 			getActivityScanState: async () => ({ running: activityScanRunning }),
 			scanChainHistory: async (params) => {
