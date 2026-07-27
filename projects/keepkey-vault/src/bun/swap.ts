@@ -12,6 +12,7 @@ import { CHAINS, BTC_SCRIPT_TYPES, btcAccountPath } from '../shared/chains'
 import type { ChainDef } from '../shared/chains'
 import type { SwapAsset, SwapQuote, SwapQuoteParams, ExecuteSwapParams, SwapResult } from '../shared/types'
 import { SOLANA_BLIND_SIGNING_REQUIRED } from '../shared/types'
+import { findEvmSchema } from './evm-schema-registry'
 import { getPioneer } from './pioneer'
 import { encodeDepositWithExpiry, encodeApprove, parseUnits, toHex } from './txbuilder/evm'
 import { getEvmGasPrice, getEvmFeeData, getEvmNonce, getEvmBalance, getErc20Allowance, getErc20Balance, getErc20Decimals, broadcastEvmTx, waitForTxReceipt, estimateGas } from './evm-rpc'
@@ -549,6 +550,8 @@ export interface SwapContext {
    *  Returns undefined when unknown (no cached features / policy not reported).
    *  Used to gate Solana swaps, which can only blind-sign. */
   isAdvancedModeEnabled?: () => boolean | undefined
+  /** User's configured Solana RPC, for the host-side outflow check. */
+  getSolanaRpcEndpoint?: () => string | undefined
 }
 
 /** Sentinel no-op for SwapContext.pushSubStage in REST/headless paths. */
@@ -876,7 +879,97 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
     ctx.isAdvancedModeEnabled?.() !== true &&
     params.allowSolanaBlindSigning !== true
   ) {
-    throw new Error(SOLANA_BLIND_SIGNING_REQUIRED)
+    // The device can't verify this transaction, so check it here instead:
+    // simulate against an independent RPC and report what actually leaves the
+    // wallet. This catches a quote server that built a transaction differing
+    // from the quote the user approved. It is NOT device verification — a
+    // compromised host could fake it — so the UI must say "checked on this
+    // computer", never "verified". Best-effort: a failed check reports
+    // unknown and still requires explicit consent.
+    let outflow: string | undefined
+    try {
+      const { checkSolanaOutflow } = await import('./solana-outflow')
+      const { DEFAULT_SOLANA_RPC_ENDPOINT, createRpcAltFetcher } = await import('./solana-alt')
+      const endpoint = ctx.getSolanaRpcEndpoint?.() || DEFAULT_SOLANA_RPC_ENDPOINT
+      // For a token-source swap the SOL balance barely moves — the tokens are
+      // what leave. Watch the source mint's accounts or the report is
+      // misleadingly reassuring.
+      const sourceMint = params.fromCaip?.includes('/token:')
+        ? params.fromCaip.split('/token:')[1]
+        : undefined
+      const r = await checkSolanaOutflow(params.relayTx!.serializedTx!, fromAddress, sourceMint, endpoint)
+
+      // Name WHY the device can't clear-sign this. Firmware has three
+      // independent triggers (unknown program / lookup-table accounts /
+      // unchecked SPL Transfer with no mint) and the generic "confirm this
+      // transaction" prompt hides which one fired — so decode host-side and
+      // say it out loud. Diagnostic only; never a security claim.
+      let reason: string | undefined
+      let decoded: string[] | undefined
+      try {
+        const { buildSolanaDecodedInfo } = await import('./solana-clearsign')
+        const d = await buildSolanaDecodedInfo(params.relayTx!.serializedTx!, createRpcAltFetcher(endpoint))
+        const unknownPrograms = d.instructions
+          .filter(i => i.status === 'unknown-program')
+          .map(i => i.programName || i.programId)
+        const parts: string[] = []
+        if (unknownPrograms.length) parts.push(`unrecognized program(s): ${[...new Set(unknownPrograms)].join(', ')}`)
+        if (d.altPubkeys.length) parts.push(`${d.altPubkeys.length} lookup table(s)`)
+        const uncheckedTransfer = d.instructions.some(
+          i => /token/i.test(i.programName || '') && /^transfer$/i.test(i.instructionName || ''))
+        if (uncheckedTransfer) parts.push('SPL Transfer without a mint (unchecked)')
+        reason = parts.join('; ') || undefined
+
+        // Programs in the registry decode fully — show the user what each
+        // instruction actually does, which is the "amount and destination"
+        // the device itself can't reach for these routes.
+        decoded = d.instructions
+          .filter(i => i.status === 'known')
+          .map(i => {
+            const amt = i.args.find(a => a.name === 'amount')?.value
+            // Match the destination label EXACTLY. A loose /to\b/ also matches
+            // "refundTo" — which is the sender's own address — and .find()
+            // returns it first, so the panel showed you sending to yourself.
+            const dest = i.accounts.find(a => /^(vault|destination|recipient)$/i.test(a.label || ''))?.pubkey
+            return [
+              `${i.programName}: ${i.instructionName}`,
+              amt ? `amount ${amt}` : null,
+              dest ? `→ ${dest.slice(0, 6)}…${dest.slice(-4)}` : null,
+            ].filter(Boolean).join(' · ')
+          })
+        if (!decoded.length) decoded = undefined
+
+        swapLog(`${TAG} opaque Solana tx — ${reason || 'reason undetermined'}; instructions: ` +
+          d.instructions.map(i => `${i.programName || i.programId}/${i.instructionName || i.status}`).join(', '))
+      } catch (e: any) {
+        swapLog(`${TAG} opaque-reason decode failed: ${e?.message}`)
+      }
+
+      // Decimals + symbol so the panel shows "100 USDT", not raw base units.
+      // (This branch sits outside the builder block that resolves asset meta,
+      // so look it up here rather than reaching for an out-of-scope binding.)
+      const srcMeta = (await getSwapAssets()).find(a => a.caip === params.fromCaip)
+      const srcDecimals = srcMeta?.decimals ?? params.tokenDecimals
+      outflow = JSON.stringify({
+        solAfter: r.solLamportsAfter.toString(),
+        tokensAfter: r.tokensAfter.map(t => ({
+          mint: t.mint,
+          amount: t.amountAfter.toString(),
+          decimals: srcDecimals,
+          symbol: srcMeta?.symbol,
+        })),
+        spending: params.amount,
+        spendingSymbol: srcMeta?.symbol,
+        unavailable: r.unavailable,
+        reason,
+        decoded,
+      })
+    } catch (e: any) {
+      swapLog(`${TAG} outflow check failed: ${e?.message}`)
+    }
+    throw new Error(outflow
+      ? `${SOLANA_BLIND_SIGNING_REQUIRED} ${outflow}`
+      : SOLANA_BLIND_SIGNING_REQUIRED)
   }
 
   // 4. Sign on device (user confirms tx details on hardware wallet)
@@ -1432,6 +1525,18 @@ async function buildRelaySwapTx(
     to: relay.to,
     value: toHex(effectiveRelayValue),
     data: relay.data,
+  }
+
+  // Attach a signed v2 clear-sign schema when one covers this exact
+  // (chain, contract, selector). The schema names the method and its args but
+  // no amounts and no tx hash, so the device decodes the values from the
+  // calldata it is about to sign — turning a blind-sign prompt into a labelled
+  // review. Absent or mismatched: nothing is attached and behaviour is
+  // unchanged, so this can never block a swap.
+  const evmSchema = findEvmSchema(chainId, relay.to, relay.data)
+  if (evmSchema) {
+    unsignedTx.txMetadata = { signedPayload: evmSchema.signedPayload, keyId: evmSchema.keyId }
+    swapLog(`${TAG} clear-sign schema attached: ${evmSchema.method} (keyId=${evmSchema.keyId})`)
   }
 
   // EIP-1559 fields — use signedFeePerGas (relay's quoted cap) so the signed tx
