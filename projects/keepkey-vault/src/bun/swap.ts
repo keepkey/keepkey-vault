@@ -13,6 +13,7 @@ import type { ChainDef } from '../shared/chains'
 import type { SwapAsset, SwapQuote, SwapQuoteParams, ExecuteSwapParams, SwapResult } from '../shared/types'
 import { SOLANA_BLIND_SIGNING_REQUIRED } from '../shared/types'
 import { findEvmSchema } from './evm-schema-registry'
+import { findSolanaSchema } from './solana-schema-registry'
 import { getPioneer } from './pioneer'
 import { encodeDepositWithExpiry, encodeApprove, parseUnits, toHex } from './txbuilder/evm'
 import { getEvmGasPrice, getEvmFeeData, getEvmNonce, getEvmBalance, getErc20Allowance, getErc20Balance, getErc20Decimals, broadcastEvmTx, waitForTxReceipt, estimateGas } from './evm-rpc'
@@ -655,11 +656,23 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
     // Skip the EVM-only buildRelaySwapTx and feed it straight to the Solana signer.
     if (fromChain.chainFamily === 'solana' && params.relayTx?.serializedTx) {
       swapLog(`${TAG} Relay Solana prebuilt tx — bypassing EVM relay builder`)
+      // A signed KKSOLSC1 schema lets the device decode this instruction —
+      // program, amount, destination — instead of showing a blind-sign prompt.
+      // findSolanaSchema declines when the message still carries lookup
+      // tables, since firmware will not apply a schema to accounts that are
+      // absent from the signed bytes.
+      const solSchema = findSolanaSchema(params.relayTx.serializedTx)
+      if (solSchema) {
+        swapLog(`${TAG} clear-sign schema attached: ${solSchema.program}/${solSchema.instruction} (keyId=${solSchema.signerKeyId})`)
+      }
       unsignedTx = {
         addressNList: fromChain.defaultPath,
         rawTx: params.relayTx.serializedTx,
         allowBlindSigning: params.allowSolanaBlindSigning === true,
         swapMetadata: params.relayTx.solanaSwapMetadata,
+        ...(solSchema
+          ? { schema: { payload: solSchema.payload, signature: solSchema.signature, signerKeyId: solSchema.signerKeyId } }
+          : {}),
       }
     } else if (fromChain.chainFamily === 'tron') {
       // Tron has no nonces — buildRelaySwapTx is EVM-only. Route through TronGrid txbuilder.
@@ -873,7 +886,10 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
   const needsOpaqueSolanaFallback =
     fromChain.chainFamily === 'solana' &&
     !!params.relayTx?.serializedTx &&
-    !params.relayTx.solanaSwapMetadata
+    !params.relayTx.solanaSwapMetadata &&
+    // A reusable schema lets the device read this instruction, so no
+    // blind-sign consent is needed.
+    !findSolanaSchema(params.relayTx.serializedTx)
   if (
     needsOpaqueSolanaFallback &&
     ctx.isAdvancedModeEnabled?.() !== true &&
