@@ -1764,7 +1764,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               }
               signingInfo.requiresBlindSigningConsent = requiresSolanaBlindSigningConsent(
                 signingInfo.solanaDecoded,
-                preview.swapMetadata !== undefined,
+                preview.swapMetadata !== undefined || preview.schema !== undefined,
               )
               if (signingInfo.requiresBlindSigningConsent) {
                 signingInfo.needsBlindSigning = true
@@ -2708,6 +2708,10 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               addressNList,
               rawTx: body.raw_tx,
               swapMetadata: body.swapMetadata,
+              // Reusable KKSOLSC1 instruction schema — signed once per
+              // program+instruction, so the device can decode this call
+              // without a per-transaction attestation.
+              schema: body.schema,
               allowBlindSigning: activeAllowBlindSigning,
             },
             (request) => emuWrap(
