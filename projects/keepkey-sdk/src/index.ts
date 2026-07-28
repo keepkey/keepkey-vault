@@ -357,7 +357,9 @@ export class KeepKeySdk {
      * key in slot 3) so `ethSignTransaction`'s `txMetadata` blobs verify.
      */
     loadClearsignSigner: (params: LoadClearsignSignerParams): Promise<LoadClearsignSignerResult> =>
-      this.client.post('/eth/clearsign/load-signer', params),
+      // Blocks on a physical trust-screen confirmation; the 30s default aborts
+      // mid-review and looks like a device failure.
+      this.client.post('/eth/clearsign/load-signer', params, this.client.signingTimeoutMs),
 
     /** Sign a personal message (`eth_sign` / `personal_sign`). */
     ethSignMessage: (params: EthSignMessageParams): Promise<any> =>
