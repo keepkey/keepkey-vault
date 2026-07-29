@@ -17,6 +17,13 @@ Repo root assumed: `/Users/highlander/WebstormProjects/keepkey-stack`
 - **Next.** (a) a KeepKey that *issues* clear-sign signatures, (b) certificate chains so
   onboarding a provider doesn't need a firmware release. (b) needs a spec before code.
 
+**Update 2026-07-29.** (a) is built: firmware PR **#323** (`feat/clearsign-attestor-v2`,
+fork develop) + device-protocol `feat/clearsign-attestor-v2`. Builds clean and 379/379 unit
+tests pass in both the flag-on and default-off configurations; **on-device/emulator Gate-3
+screenshots of the three confirm screens are still owed before merge.** (b) now has a
+written proposal at `docs/spec-clearsign-certificate-chains.md` — still unimplemented and
+still needs security-model review, per §5.
+
 ---
 
 ## 1. What shipped
