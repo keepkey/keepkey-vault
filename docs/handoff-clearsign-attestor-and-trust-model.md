@@ -23,7 +23,16 @@ tests pass in both the flag-on and default-off configurations. **Gate 3 is done*
 emulator OLED captures and the harness that produced them are in
 `docs/evidence/clearsign-attestor-gate3/`. It caught two real truncation bugs (the
 discriminator rendered off the screen entirely; batched labels scrolled off at max
-length), both fixed in #323; confirm screens are now one label each. (b) now has a
+length), both fixed in #323; confirm screens are now one label each.
+
+**Phase 2 of the trust model is now built too:** firmware PR **#324**
+(`feat/clearsign-builtin-anchor`, stacked on #323) fills the built-in key table that
+phase 1 deliberately left empty. A blob or schema signed by a baked anchor verifies
+with no `LoadClearsignSigner` and no per-boot prompt, presenting as *Insight Verified*
+rather than a host-chosen identity; `LoadClearsignSigner` is refused on a slot that has
+an anchor. **No production key is baked** — that needs the custody decision (whose seed
+holds it) and belongs to a release. Emulator proof and the harness are in
+`docs/evidence/clearsign-builtin-anchor/`. (b) now has a
 written proposal at `docs/spec-clearsign-certificate-chains.md` — still unimplemented and
 still needs security-model review, per §5.
 
