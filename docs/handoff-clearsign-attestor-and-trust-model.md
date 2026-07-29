@@ -19,8 +19,11 @@ Repo root assumed: `/Users/highlander/WebstormProjects/keepkey-stack`
 
 **Update 2026-07-29.** (a) is built: firmware PR **#323** (`feat/clearsign-attestor-v2`,
 fork develop) + device-protocol `feat/clearsign-attestor-v2`. Builds clean and 379/379 unit
-tests pass in both the flag-on and default-off configurations; **on-device/emulator Gate-3
-screenshots of the three confirm screens are still owed before merge.** (b) now has a
+tests pass in both the flag-on and default-off configurations. **Gate 3 is done** —
+emulator OLED captures and the harness that produced them are in
+`docs/evidence/clearsign-attestor-gate3/`. It caught two real truncation bugs (the
+discriminator rendered off the screen entirely; batched labels scrolled off at max
+length), both fixed in #323; confirm screens are now one label each. (b) now has a
 written proposal at `docs/spec-clearsign-certificate-chains.md` — still unimplemented and
 still needs security-model review, per §5.
 
