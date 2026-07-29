@@ -30,9 +30,19 @@ length), both fixed in #323; confirm screens are now one label each.
 phase 1 deliberately left empty. A blob or schema signed by a baked anchor verifies
 with no `LoadClearsignSigner` and no per-boot prompt, presenting as *Insight Verified*
 rather than a host-chosen identity; `LoadClearsignSigner` is refused on a slot that has
-an anchor. **No production key is baked** — that needs the custody decision (whose seed
-holds it) and belongs to a release. Emulator proof and the harness are in
-`docs/evidence/clearsign-builtin-anchor/`. (b) now has a
+an anchor. **No production key is baked** — that is a release step, not a code step.
+Emulator proof and the harness are in `docs/evidence/clearsign-builtin-anchor/`.
+
+**The bootstrap is not circular.** The issuing firmware bakes no key, so it ships first;
+the key is read off the issuing device afterwards and baked into the verifying release.
+The only ordering rule that bites is the bootloader's: `should_restore()`
+(`tools/bootloader/usb_flash.c:135`) restores the storage sector only when the old and
+new images have **matching signedness**. Signed→signed preserves the seed, so the
+existing signing device keeps its seed when the attestor image is flashed onto it —
+which is why `release.yml` now builds `attestor` as a third signed variant beside
+`full` and `bitcoin-only` rather than leaving the issuer on a local unsigned build
+(a one-way door: it could never move to signed without losing the key). The signing
+step must set `SIG_FLAG != 0` and use non-expired keys, or install wipes the device. (b) now has a
 written proposal at `docs/spec-clearsign-certificate-chains.md` — still unimplemented and
 still needs security-model review, per §5.
 
