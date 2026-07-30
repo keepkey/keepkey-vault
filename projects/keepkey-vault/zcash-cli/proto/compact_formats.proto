@@ -4,6 +4,7 @@ package cash.z.wallet.sdk.rpc;
 message ChainMetadata {
     uint32 saplingCommitmentTreeSize = 1;
     uint32 orchardCommitmentTreeSize = 2;
+    uint32 ironwoodCommitmentTreeSize = 3;
 }
 
 message CompactBlock {
@@ -26,6 +27,9 @@ message CompactTx {
     repeated CompactOrchardAction actions = 6;
     repeated CompactTxIn vin = 7;
     repeated TxOut vout = 8;
+    // Ironwood reuses the Orchard compact action encoding, but has a distinct
+    // note commitment tree and nullifier set from NU6.3 onward.
+    repeated CompactOrchardAction ironwoodActions = 9;
 }
 
 message CompactTxIn {

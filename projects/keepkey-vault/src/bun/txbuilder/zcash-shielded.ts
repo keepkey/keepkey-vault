@@ -1,5 +1,5 @@
 /**
- * Zcash Orchard shielded transaction builder.
+ * Zcash Orchard-family shielded transaction builder (Ironwood from NU6.3).
  *
  * Orchestrates the three-way flow: sidecar (crypto) + device (signing) + sidecar (finalize).
  *
@@ -51,6 +51,7 @@ export async function displayOrchardAddressOnDevice(wallet: any, account: number
 
 export interface SigningRequest {
 	n_actions: number
+	pool: "orchard" | "ironwood"
 	account: number
 	branch_id: number
 	sighash: string
@@ -58,6 +59,7 @@ export interface SigningRequest {
 		header: string
 		transparent: string
 		orchard: string
+		ironwood: string
 	}
 	header_fields?: {
 		tx_version: number

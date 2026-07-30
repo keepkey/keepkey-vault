@@ -64,7 +64,7 @@ pub fn digest_orchard(bundle: &orchard::Bundle<orchard::bundle::Authorized, i64>
     data.extend_from_slice(&compact_hash);
     data.extend_from_slice(&memos_hash);
     data.extend_from_slice(&noncompact_hash);
-    data.push(bundle.flags().to_byte());
+    data.push(bundle.flag_byte());
     data.extend_from_slice(&bundle.value_balance().to_le_bytes());
     data.extend_from_slice(&bundle.anchor().to_bytes());
 
@@ -136,7 +136,7 @@ where
     orchard_data.extend_from_slice(&compact_hash);
     orchard_data.extend_from_slice(&memos_hash);
     orchard_data.extend_from_slice(&noncompact_hash);
-    orchard_data.push(bundle.flags().to_byte());
+    orchard_data.push(bundle.flag_byte());
     orchard_data.extend_from_slice(&(*bundle.value_balance()).into().to_le_bytes());
     orchard_data.extend_from_slice(&bundle.anchor().to_bytes());
 

@@ -8,9 +8,35 @@ use log::{debug, info};
 use rusqlite::{params, Connection};
 use std::path::PathBuf;
 
+/// Orchard-family value pool containing a note. Orchard and Ironwood reuse
+/// viewing keys and action encodings, but have separate trees and nullifiers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShieldedPool {
+    Orchard,
+    Ironwood,
+}
+
+impl ShieldedPool {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Orchard => "orchard",
+            Self::Ironwood => "ironwood",
+        }
+    }
+
+    fn from_str(value: &str) -> Option<Self> {
+        match value {
+            "orchard" => Some(Self::Orchard),
+            "ironwood" => Some(Self::Ironwood),
+            _ => None,
+        }
+    }
+}
+
 /// A scanned Orchard note with all fields needed to reconstruct it for spending.
 #[derive(Debug, Clone)]
 pub struct ScannedNote {
+    pub pool: ShieldedPool,
     pub value: u64,
     pub recipient: Vec<u8>, // 43-byte Orchard address
     pub rho: [u8; 32],
@@ -36,6 +62,7 @@ pub struct NoteRecord {
     pub nullifier: [u8; 32],
     pub txid: Option<[u8; 32]>,
     pub action_index: u32,
+    pub pool: ShieldedPool,
 }
 
 /// A spendable (unspent) note with its database ID.
@@ -53,6 +80,7 @@ pub struct SpendableNote {
     pub tx_index: u32,
     pub action_index: u32,
     pub position: Option<u64>,
+    pub pool: ShieldedPool,
 }
 
 pub struct WalletDb {
@@ -106,7 +134,8 @@ impl WalletDb {
                 tx_index INTEGER NOT NULL,
                 action_index INTEGER NOT NULL,
                 is_spent INTEGER NOT NULL DEFAULT 0,
-                position INTEGER
+                position INTEGER,
+                pool TEXT NOT NULL DEFAULT 'orchard'
             );
 
             CREATE TABLE IF NOT EXISTS scan_state (
@@ -181,6 +210,26 @@ impl WalletDb {
             info!("Migrated notes table: added txid column");
         }
 
+        // NU6.3 migration: rows created before this column existed are
+        // historical Orchard notes.
+        let has_pool = self
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('notes') WHERE name='pool'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap_or(0);
+        if has_pool == 0 {
+            self.conn
+                .execute(
+                    "ALTER TABLE notes ADD COLUMN pool TEXT NOT NULL DEFAULT 'orchard'",
+                    [],
+                )
+                .context("Failed to add shielded pool column")?;
+            info!("Migrated notes table: added pool column");
+        }
+
         debug!("Database schema initialized");
         Ok(())
     }
@@ -217,8 +266,8 @@ impl WalletDb {
     /// Returns true if the note was inserted, false if it already exists (duplicate nullifier).
     pub fn insert_note(&self, note: &ScannedNote) -> Result<bool> {
         let result = self.conn.execute(
-            "INSERT OR IGNORE INTO notes (value, recipient, rho, rseed, cmx, nullifier, block_height, tx_index, action_index, txid, memo)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            "INSERT OR IGNORE INTO notes (value, recipient, rho, rseed, cmx, nullifier, block_height, tx_index, action_index, txid, memo, pool)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             params![
                 note.value as i64,
                 note.recipient,
@@ -231,6 +280,7 @@ impl WalletDb {
                 note.action_index as i64,
                 note.txid.as_ref().map(|t| t.as_slice()),
                 note.memo.as_deref(),
+                note.pool.as_str(),
             ],
         ).context("Failed to insert note")?;
 
@@ -263,18 +313,32 @@ impl WalletDb {
     /// after a small reorg, or lightwalletd's tree state may lag the cmx scan.
     /// Industry default is 10 confirmations (matches zcashd / ywallet).
     pub fn get_spendable_notes(&self, max_block_height: Option<u64>) -> Result<Vec<SpendableNote>> {
+        self.get_spendable_notes_for_pool(max_block_height, None)
+    }
+
+    /// Get spendable notes from a specific Orchard-family pool. Pool selection
+    /// is explicit because a normal transaction cannot silently combine the
+    /// two independent commitment trees.
+    pub fn get_spendable_notes_for_pool(
+        &self,
+        max_block_height: Option<u64>,
+        pool: Option<ShieldedPool>,
+    ) -> Result<Vec<SpendableNote>> {
         // Single statement form using a sentinel: when max is None, pass i64::MAX
         // as the bound so the WHERE clause matches every row. Avoids the dance
         // of building two different prepared statements with different param
         // arity.
         let max_h = max_block_height.map(|h| h as i64).unwrap_or(i64::MAX);
         let mut stmt = self.conn.prepare(
-            "SELECT id, value, recipient, rho, rseed, cmx, nullifier, block_height, tx_index, action_index, position
-             FROM notes WHERE is_spent = 0 AND block_height <= ?1 ORDER BY value DESC"
+            "SELECT id, value, recipient, rho, rseed, cmx, nullifier, block_height, tx_index, action_index, position, pool
+             FROM notes
+             WHERE is_spent = 0 AND block_height <= ?1
+               AND (?2 IS NULL OR pool = ?2)
+             ORDER BY value DESC"
         )?;
 
         let notes = stmt
-            .query_map(params![max_h], |row| {
+            .query_map(params![max_h, pool.map(ShieldedPool::as_str)], |row| {
                 let rho_blob: Vec<u8> = row.get(3)?;
                 let rseed_blob: Vec<u8> = row.get(4)?;
                 let cmx_blob: Vec<u8> = row.get(5)?;
@@ -305,6 +369,10 @@ impl WalletDb {
                 rseed.copy_from_slice(&rseed_blob);
                 cmx.copy_from_slice(&cmx_blob);
                 nullifier.copy_from_slice(&nf_blob);
+                let pool_string: String = row.get(11)?;
+                let pool = ShieldedPool::from_str(&pool_string).ok_or_else(|| {
+                    rusqlite::Error::InvalidColumnType(11, pool_string, rusqlite::types::Type::Text)
+                })?;
 
                 Ok(SpendableNote {
                     id: row.get(0)?,
@@ -318,6 +386,7 @@ impl WalletDb {
                     tx_index: row.get::<_, i64>(8)? as u32,
                     action_index: row.get::<_, i64>(9)? as u32,
                     position: row.get::<_, Option<i64>>(10)?.map(|p| p as u64),
+                    pool,
                 })
             })?
             .collect::<std::result::Result<Vec<_>, _>>()
@@ -351,9 +420,9 @@ impl WalletDb {
     }
 
     /// Get notes that have a txid but no memo (candidates for backfill).
-    pub fn get_notes_without_memo(&self) -> Result<Vec<(i64, [u8; 32], u64, u32)>> {
+    pub fn get_notes_without_memo(&self) -> Result<Vec<(i64, [u8; 32], u64, u32, ShieldedPool)>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, txid, block_height, action_index FROM notes WHERE memo IS NULL AND txid IS NOT NULL"
+            "SELECT id, txid, block_height, action_index, pool FROM notes WHERE memo IS NULL AND txid IS NOT NULL"
         )?;
         let rows = stmt
             .query_map([], |row| {
@@ -362,11 +431,16 @@ impl WalletDb {
                 if txid_blob.len() == 32 {
                     txid.copy_from_slice(&txid_blob);
                 }
+                let pool_string: String = row.get(4)?;
+                let pool = ShieldedPool::from_str(&pool_string).ok_or_else(|| {
+                    rusqlite::Error::InvalidColumnType(4, pool_string, rusqlite::types::Type::Text)
+                })?;
                 Ok((
                     row.get::<_, i64>(0)?,
                     txid,
                     row.get::<_, i64>(2)? as u64,
                     row.get::<_, i64>(3)? as u32,
+                    pool,
                 ))
             })?
             .collect::<std::result::Result<Vec<_>, _>>()
@@ -377,7 +451,7 @@ impl WalletDb {
     /// Get all notes for transaction history display.
     pub fn get_all_notes(&self) -> Result<Vec<NoteRecord>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, value, block_height, tx_index, is_spent, memo, nullifier, txid, action_index
+            "SELECT id, value, block_height, tx_index, is_spent, memo, nullifier, txid, action_index, pool
              FROM notes ORDER BY block_height DESC, tx_index DESC"
         )?;
         let notes = stmt
@@ -397,6 +471,10 @@ impl WalletDb {
                         None
                     }
                 });
+                let pool_string: String = row.get(9)?;
+                let pool = ShieldedPool::from_str(&pool_string).ok_or_else(|| {
+                    rusqlite::Error::InvalidColumnType(9, pool_string, rusqlite::types::Type::Text)
+                })?;
                 Ok(NoteRecord {
                     id: row.get(0)?,
                     value: row.get::<_, i64>(1)? as u64,
@@ -407,6 +485,7 @@ impl WalletDb {
                     nullifier,
                     txid,
                     action_index: row.get::<_, i64>(8)? as u32,
+                    pool,
                 })
             })?
             .collect::<std::result::Result<Vec<_>, _>>()
@@ -424,6 +503,23 @@ impl WalletDb {
         if balance < 0 {
             return Err(anyhow::anyhow!(
                 "Corrupt wallet state: negative balance sum ({})",
+                balance
+            ));
+        }
+        Ok(balance as u64)
+    }
+
+    /// Return the balance of one Orchard-family value pool.
+    pub fn get_balance_for_pool(&self, pool: ShieldedPool) -> Result<u64> {
+        let balance: i64 = self.conn.query_row(
+            "SELECT COALESCE(SUM(value), 0) FROM notes WHERE is_spent = 0 AND pool = ?1",
+            params![pool.as_str()],
+            |row| row.get(0),
+        )?;
+        if balance < 0 {
+            return Err(anyhow::anyhow!(
+                "Corrupt wallet state: negative {} balance sum ({})",
+                pool.as_str(),
                 balance
             ));
         }
