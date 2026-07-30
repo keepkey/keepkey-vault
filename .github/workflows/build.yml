@@ -59,6 +59,18 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
+      - name: Install protobuf compiler
+        shell: bash
+        run: |
+          if command -v protoc >/dev/null 2>&1; then
+            protoc --version
+          elif [ "${{ runner.os }}" = "macOS" ]; then
+            brew install protobuf
+          else
+            sudo apt-get update
+            sudo apt-get install -y protobuf-compiler
+          fi
+
       - name: Install Yarn
         run: npm install -g yarn
 
@@ -74,7 +86,7 @@ jobs:
           path: |
             modules/hdwallet/node_modules
             modules/hdwallet/packages/*/dist
-          key: hdwallet-${{ runner.os }}-${{ hashFiles('modules/hdwallet/yarn.lock') }}
+          key: hdwallet-${{ runner.os }}-${{ hashFiles('modules/hdwallet/yarn.lock', 'modules/device-protocol/*.proto', 'modules/device-protocol/*.options') }}
 
       - name: Cache vault node_modules
         uses: actions/cache@v4
@@ -92,12 +104,23 @@ jobs:
             projects/keepkey-vault/zcash-cli/target
           key: zcash-cli-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('projects/keepkey-vault/zcash-cli/Cargo.lock') }}
 
+      - name: Build canonical device protocol
+        shell: bash
+        run: |
+          cd modules/device-protocol
+          npm install --ignore-scripts --package-lock=false
+          npm install --ignore-scripts --package-lock=false --no-save google-protobuf@3.21.4
+          npm run build:js
+          cd ../..
+          node projects/keepkey-vault/scripts/postprocess-device-protocol.mjs modules/device-protocol
+          node projects/keepkey-vault/scripts/verify-zcash-ironwood-protocol.mjs modules/device-protocol
+
       - name: Build modules (hdwallet + proto-tx-builder)
         shell: bash
         run: |
           cd modules/hdwallet
           yarn install --frozen-lockfile
-          yarn tsc --build
+          yarn build
 
           cd ../proto-tx-builder
           bun install
@@ -105,46 +128,10 @@ jobs:
           npx tsc -p .
           test -f dist/index.js
 
-      - name: Populate device-protocol lib/
+      - name: Verify pinned device-protocol lib/
         shell: bash
         run: |
-          # device-protocol/lib/ is gitignored — protobuf build output.
-          # Copy pre-built lib/ from hdwallet's resolved npm copy.
-          # hdwallet's yarn.lock pins the exact device-protocol version it was
-          # built/tested against, so its lib/ is the correct wire format.
-          if [ -f modules/device-protocol/lib/messages_pb.js ]; then
-            echo "device-protocol lib/ already present"
-            exit 0
-          fi
-
-          HDWALLET_DP="modules/hdwallet/node_modules/@keepkey/device-protocol"
-
-          if [ ! -d "$HDWALLET_DP" ] || [ ! -f "$HDWALLET_DP/lib/messages_pb.js" ]; then
-            echo "FATAL: device-protocol lib/ missing and no hdwallet copy available"
-            echo "Build on macOS first: cd modules/device-protocol && npm install && npm run build"
-            exit 1
-          fi
-
-          SUBMOD_VER=$(node -p "require('./modules/device-protocol/package.json').version" 2>/dev/null || echo "unknown")
-          HDWALLET_VER=$(node -p "require('./$HDWALLET_DP/package.json').version" 2>/dev/null || echo "unknown")
-          echo "Submodule package.json: $SUBMOD_VER"
-          echo "hdwallet resolved npm:  $HDWALLET_VER"
-          if [ "$SUBMOD_VER" != "$HDWALLET_VER" ]; then
-            echo "WARNING: version strings differ (git vs npm) — this is expected when"
-            echo "the npm publish was from a version-bump commit not on the submodule branch."
-            echo "Using hdwallet's resolved copy (it matches what hdwallet was built against)."
-          fi
-
-          echo "Copying lib/ from hdwallet's resolved device-protocol..."
-          rm -rf modules/device-protocol/lib
-          cp -r "$HDWALLET_DP/lib" modules/device-protocol/lib
-          JS_COUNT=$(ls modules/device-protocol/lib/*.js 2>/dev/null | wc -l)
-          echo "Done — $JS_COUNT JS files"
-          if [ "$JS_COUNT" -lt 1 ]; then
-            echo "FATAL: cp succeeded but 0 JS files in lib/ — cache may be stale"
-            echo "Try clearing the hdwallet cache or rebuild locally"
-            exit 1
-          fi
+          node projects/keepkey-vault/scripts/verify-zcash-ironwood-protocol.mjs modules/device-protocol
 
       - name: Install vault dependencies
         # --frozen-lockfile: install exactly what bun.lock pins. Without it, bun
@@ -153,10 +140,6 @@ jobs:
         # `lib/chains.json` subpath import and breaks the vite build.
         run: cd projects/keepkey-vault && bun install --frozen-lockfile
         shell: bash
-
-      - name: Install protoc (macOS)
-        if: runner.os == 'macOS'
-        run: brew install protobuf
 
       - name: Install Linux packaging tools
         if: runner.os == 'Linux'

@@ -65,9 +65,21 @@ const FORCE_EXTERNAL = new Set([
 for (const [name, pkgDir] of aliases) {
   if (name === '@keepkey/device-protocol') {
     const msgPb = join(pkgDir, 'lib', 'messages_pb.js')
+    const zcashPb = join(pkgDir, 'lib', 'messages-zcash_pb.js')
     if (!existsSync(msgPb)) {
       console.error('[bundle-backend] FATAL: @keepkey/device-protocol/lib/messages_pb.js is MISSING')
-      console.error('[bundle-backend] Build it first: cd modules/device-protocol && npm install && npm run build')
+      console.error('[bundle-backend] Build it first: make modules-build')
+      process.exit(1)
+    }
+    if (!existsSync(zcashPb)) {
+      console.error('[bundle-backend] FATAL: @keepkey/device-protocol/lib/messages-zcash_pb.js is MISSING')
+      console.error('[bundle-backend] Build it first: make modules-build')
+      process.exit(1)
+    }
+    const zcashSource = readFileSync(zcashPb, 'utf8')
+    if (!zcashSource.includes('setShieldedPool') || !zcashSource.includes('setIronwoodDigest')) {
+      console.error('[bundle-backend] FATAL: stale Zcash protocol build — Ironwood fields 19/20 are missing')
+      console.error('[bundle-backend] Rebuild the exact pinned protocol: make modules-build')
       process.exit(1)
     }
     console.log('[bundle-backend] Verified: device-protocol/lib/messages_pb.js present')
