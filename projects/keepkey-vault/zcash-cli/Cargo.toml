@@ -28,16 +28,15 @@ env_logger = "0.11"
 # BLAKE2b for ZIP-244 sighash computation
 blake2b_simd = "1.0"
 
-# Zcash crates — NU6.2 cohort (all published 2026-06-03). orchard 0.14 ships
-# the FixedPostNu6_2 Orchard circuit; every prior version is yanked and builds
-# pre-fork proofs that current Zebra/zcashd nodes reject ("could not validate
-# orchard proof"). These versions must be upgraded together.
-orchard = "0.14"
-zcash_address = "0.12"
-zcash_protocol = "0.9"
-zcash_note_encryption = "0.4"
-zcash_primitives = "0.28"
-zcash_keys = "0.14"
+# Zcash crates — NU6.3 cohort. These versions add the post-NU6.3 Orchard
+# circuit, the Ironwood value pool, v3 (quantum-recoverable) note plaintexts,
+# and transaction-v6 serialization/digests. Keep this cohort in lockstep.
+orchard = "0.15.4"
+zcash_address = "0.13"
+zcash_protocol = "0.10.3"
+zcash_note_encryption = "0.4.2"
+zcash_primitives = "0.30"
+zcash_keys = "0.16.1"
 
 # Lightwalletd gRPC client
 tonic = { version = "0.12", features = ["tls", "tls-roots"] }
@@ -53,7 +52,7 @@ rand = "0.8"
 pasta_curves = "0.5"
 ff = "0.13"
 incrementalmerkletree = "0.8"
-shardtree = "0.6"
+shardtree = "0.7"
 
 # ZIP-32 key derivation types
 zip32 = "0.2"

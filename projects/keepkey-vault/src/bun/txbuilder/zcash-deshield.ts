@@ -1,5 +1,5 @@
 /**
- * Zcash Orchard → transparent deshielding transaction builder.
+ * Zcash Ironwood → transparent deshielding transaction builder.
  *
  * Orchestrates the flow:
  *   1. Sidecar builds deshield PCZT (Orchard spends + transparent output)
@@ -26,7 +26,8 @@ interface DeshieldBuildResult {
 		account: number
 		branch_id: number
 		sighash: string
-		digests: { header: string; transparent: string; orchard: string }
+		pool: "orchard" | "ironwood"
+		digests: { header: string; transparent: string; orchard: string; ironwood: string }
 		header_fields?: { tx_version: number; version_group_id: number; lock_time: number; expiry_height: number }
 		bundle_meta: { flags: number; value_balance: number; anchor: string }
 		actions: Array<{
@@ -45,7 +46,7 @@ interface DeshieldBuildResult {
 let deshieldInProgress = false
 
 /**
- * Full deshield flow: Orchard shielded pool → transparent ZEC.
+ * Full deshield flow: Ironwood shielded pool → transparent ZEC.
  *
  * @param wallet - hdwallet instance with zcashSignPczt method
  * @param params - Deshield parameters
@@ -108,10 +109,10 @@ async function _deshieldZecInner(
 	}, 600000) // Halo2 proof can take a while
 
 	const sr = buildResult.orchard_signing_request
-	console.log(`[zcash-deshield] PCZT built: ${sr.n_actions} Orchard actions`)
+	console.log(`[zcash-deshield] PCZT built: ${sr.n_actions} ${sr.pool} actions`)
 	console.log(`[zcash-deshield] Display: ${buildResult.display.amount} → ${buildResult.display.action}`)
 
-	// 2. Device signs Orchard actions (same as shielded send — no transparent signing needed).
+	// 2. Device signs Ironwood actions (no transparent signing needed).
 	// The transparent output MUST be declared and streamed: the firmware recomputes the
 	// transparent digest from plaintext (reviewing the t-address + amount on-device) and
 	// derives the sighash from it. Omitting it makes the device sign against the EMPTY
@@ -132,9 +133,9 @@ async function _deshieldZecInner(
 		throw new Error("Device did not return signatures")
 	}
 
-	console.log(`[zcash-deshield] Got ${signatures.length} Orchard signatures`)
+	console.log(`[zcash-deshield] Got ${signatures.length} Ironwood signatures`)
 
-	// 3. Finalize via sidecar — only Orchard signatures, no transparent sigs
+	// 3. Finalize via sidecar — only Ironwood signatures, no transparent sigs
 	console.log("[zcash-deshield] Finalizing deshield transaction...")
 	const { raw_tx, txid } = await sendCommand("finalize_deshield", {
 		orchard_signatures: signatures,
