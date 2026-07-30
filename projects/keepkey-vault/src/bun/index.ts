@@ -4654,7 +4654,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (rpcUrl) {
 					const serialized = params.signedTx?.serializedTx || params.signedTx?.serialized || (typeof params.signedTx === 'string' ? params.signedTx : undefined)
 					if (!serialized || typeof serialized !== 'string') throw new Error(`Cannot extract serialized tx from: ${JSON.stringify(params.signedTx).slice(0, 200)}`)
-					const txid = await broadcastEvmTx(rpcUrl, serialized)
+					// Custom EVM chains sign from the selected EVM account, so that is
+					// the address the signature must recover to.
+					const expectedFrom = evmAddresses.getSelectedAddress()?.address
+					if (!expectedFrom) throw new Error('Cannot verify signer: no EVM address selected')
+					const txid = await broadcastEvmTx(rpcUrl, serialized, expectedFrom)
 					result = { txid }
 				} else {
 					const pioneer = await getPioneer()
