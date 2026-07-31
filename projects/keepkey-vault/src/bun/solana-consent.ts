@@ -5,6 +5,7 @@ const TOKEN_PROGRAM = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA'
 const TOKEN_2022_PROGRAM = 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb'
 const ATA_PROGRAM = 'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL'
 const COMPUTE_BUDGET_PROGRAM = 'ComputeBudget111111111111111111111111111111'
+const MEMO_V2_PROGRAM = 'MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr'
 
 /**
  * This is deliberately an allowlist, not "anything the host registry knows".
@@ -13,6 +14,15 @@ const COMPUTE_BUDGET_PROGRAM = 'ComputeBudget111111111111111111111111111111'
  * intentionally remain opaque on-device.
  */
 function firmwareClearSigns(instruction: SolanaTxDecodedInstruction): boolean {
+  // Memo v2 intentionally has no instruction discriminator in the discovery
+  // registry, so it is classified as a known program with an unknown ix even
+  // though firmware safely renders the entire payload as text.
+  if (
+    instruction.programId === MEMO_V2_PROGRAM
+    && instruction.status === 'known-program-unknown-ix'
+  ) {
+    return true
+  }
   if (instruction.status !== 'known' || instruction.note) return false
 
   switch (instruction.programId) {

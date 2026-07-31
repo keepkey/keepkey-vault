@@ -2712,6 +2712,10 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               // program+instruction, so the device can decode this call
               // without a per-transaction attestation.
               schema: body.schema,
+              // x402 payment intent is never trusted directly: the signing
+              // helper matches network, sponsor, mint, amount, authority and
+              // destination ATA against the exact v0 message first.
+              x402: body.x402,
               allowBlindSigning: activeAllowBlindSigning,
             },
             (request) => emuWrap(

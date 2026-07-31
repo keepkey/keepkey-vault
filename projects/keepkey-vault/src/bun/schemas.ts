@@ -183,6 +183,22 @@ export const SolanaInstructionSchema = z.object({
   signerKeyId: z.number().int().min(0).max(3),
 }).strict()
 
+/** x402 v2 SVM exact PaymentRequirements needed for device-verifiable payTo. */
+export const SolanaX402Requirements = z.object({
+  scheme: z.literal('exact'),
+  network: z.literal('solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp'),
+  asset: z.string().min(32).max(44),
+  amount: z.string().regex(/^\d+$/),
+  payTo: z.string().min(32).max(44),
+  maxTimeoutSeconds: z.number().int().positive(),
+  extra: z.object({
+    feePayer: z.string().min(32).max(44),
+    memo: z.string().optional(),
+    recentBlockhash: z.string().min(32).max(44).optional(),
+    lastValidBlockHeight: z.string().regex(/^\d+$/).optional(),
+  }).strict(),
+}).strict()
+
 export const SolanaSignRequest = z.object({
   address_n: z.array(z.number().int()).optional(),
   addressNList: z.array(z.number().int()).optional(),
@@ -191,6 +207,11 @@ export const SolanaSignRequest = z.object({
   swapMetadata: SolanaSwapMetadata.optional(),
   /** Reusable, signer-attested instruction schema. Partial schemas rejected. */
   schema: SolanaInstructionSchema.optional(),
+  /**
+   * Optional x402 PaymentRequirements. Vault cross-checks these fields against
+   * the signed zero-LUT v0 bytes before forwarding device display metadata.
+   */
+  x402: SolanaX402Requirements.optional(),
   // One-shot opaque-signing consent is intentionally not part of the public
   // REST contract. Unknown fields are stripped; the Vault UI grants consent.
 }).strip()

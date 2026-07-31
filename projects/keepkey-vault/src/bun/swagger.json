@@ -3768,7 +3768,7 @@
       "post": {
         "operationId": "solana_signTransaction",
         "summary": "Sign a Solana transaction",
-        "description": "Sign a raw Solana transaction on the KeepKey device. raw_tx is a base64-encoded serialized transaction. Opaque cross-chain/versioned transactions should include provider-signed KKSOLSW1 swapMetadata so firmware can verify and display ClearSign details. If opaque signing is still required, the Vault UI asks the user for one-request consent; REST callers cannot assert that consent.",
+        "description": "Sign a raw Solana transaction on the KeepKey device. raw_tx is a base64-encoded serialized transaction. Self-contained v0 transactions are routed through the firmware transaction parser. An x402 caller may include the exact PaymentRequirements object so Vault can bind sponsor, mint, amount, signer and recipient ATA to the signed bytes before the device displays the verified merchant owner. Transactions that use address lookup tables remain behind explicit one-request blind-signing consent.",
         "parameters": [],
         "requestBody": {
           "content": {
@@ -3785,6 +3785,31 @@
                   "raw_tx": {
                     "type": "string",
                     "description": "Base64-encoded raw Solana transaction"
+                  },
+                  "x402": {
+                    "type": "object",
+                    "description": "Optional x402 v2 SVM exact PaymentRequirements. Vault validates every payment field against the signed zero-LUT v0 message before forwarding device display metadata.",
+                    "additionalProperties": false,
+                    "properties": {
+                      "scheme": { "type": "string", "enum": ["exact"] },
+                      "network": { "type": "string", "enum": ["solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"] },
+                      "amount": { "type": "string", "pattern": "^\\d+$" },
+                      "asset": { "type": "string", "description": "Base58 SPL token mint" },
+                      "payTo": { "type": "string", "description": "Base58 merchant owner public key" },
+                      "maxTimeoutSeconds": { "type": "integer", "minimum": 1 },
+                      "extra": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "feePayer": { "type": "string", "description": "Base58 sponsor public key" },
+                          "memo": { "type": "string", "description": "Optional seller-defined UTF-8 memo" },
+                          "recentBlockhash": { "type": "string" },
+                          "lastValidBlockHeight": { "type": "string", "pattern": "^\\d+$" }
+                        },
+                        "required": ["feePayer"]
+                      }
+                    },
+                    "required": ["scheme", "network", "amount", "asset", "payTo", "maxTimeoutSeconds", "extra"]
                   },
                   "swapMetadata": {
                     "type": "object",
