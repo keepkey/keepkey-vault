@@ -95,9 +95,10 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
        *  Pioneer's cache). Pass false only when Pioneer's cache is known-fresh. */
       getBalance: { params: { chainId: string; forceRefresh?: boolean }; response: ChainBalance }
       buildTx: { params: BuildTxParams; response: BuildTxResult }
-      // `to`/`amount`/`symbol`/`caip`/`fromAddress` are optional and used only to
-      // populate the Address Book (R3/R4/R7). Callers that omit them broadcast
-      // exactly as before and create no entry.
+      // `to`/`amount`/`symbol`/`caip`/`fromAddress` populate the Address Book
+      // (R3/R4/R7). `fromAddress` is also required when broadcasting a custom
+      // EVM chain so the recovered signer is checked against the signed request
+      // rather than mutable UI selection.
       broadcastTx: { params: { chainId: string; signedTx: any; to?: string; amount?: string; fee?: string; symbol?: string; caip?: string; fromAddress?: string }; response: BroadcastResult }
 
       // ── DeFi positions (Zapper) ──────────────────────────────────────

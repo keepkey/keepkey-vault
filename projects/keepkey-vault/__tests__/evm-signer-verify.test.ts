@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { ethers } from 'ethers'
-import { verifyEvmSigner } from '../src/bun/evm-rpc'
+import { EvmSignerVerificationError, verifyEvmSigner } from '../src/bun/evm-rpc'
 
 // Fixed key so the expectations below are stable; funds never touch this.
 const TEST_KEY = '0x4c0883a69102937d6231471b5dbb6204fe5129617082792ae468d01a3f362318'
@@ -40,11 +40,13 @@ describe('verifyEvmSigner', () => {
     const signed = await signLargeCalldataTx()
     const someoneElse = ethers.Wallet.createRandom().address
 
+    await expect(verifyEvmSigner(signed, someoneElse)).rejects.toBeInstanceOf(EvmSignerVerificationError)
     await expect(verifyEvmSigner(signed, someoneElse)).rejects.toThrow(/recovered signer/i)
     await expect(verifyEvmSigner(signed, someoneElse)).rejects.toThrow(/7\.14\.1/)
   })
 
   test('rejects unparseable bytes rather than letting them through', async () => {
+    await expect(verifyEvmSigner('0xdeadbeef', wallet.address)).rejects.toBeInstanceOf(EvmSignerVerificationError)
     await expect(verifyEvmSigner('0xdeadbeef', wallet.address)).rejects.toThrow(/could not be parsed/i)
   })
 })

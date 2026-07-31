@@ -202,6 +202,13 @@ export async function estimateGas(
  * Failing loudly before broadcast turns a silently-stuck transaction (and, on
  * a swap, a spent approval with no swap) into an actionable error.
  */
+export class EvmSignerVerificationError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'EvmSignerVerificationError'
+  }
+}
+
 export async function verifyEvmSigner(signedTxHex: string, expectedFrom: string): Promise<void> {
   const hex = signedTxHex.startsWith('0x') ? signedTxHex : `0x${signedTxHex}`
   const { ethers } = await import('ethers')
@@ -210,14 +217,14 @@ export async function verifyEvmSigner(signedTxHex: string, expectedFrom: string)
   try {
     recovered = ethers.utils.parseTransaction(hex).from ?? ''
   } catch (e: any) {
-    throw new Error(
+    throw new EvmSignerVerificationError(
       `Refusing to broadcast: the signed transaction could not be parsed (${e?.message ?? e}). ` +
       `This usually means the device returned a malformed signature.`,
     )
   }
 
   if (!recovered || recovered.toLowerCase() !== expectedFrom.toLowerCase()) {
-    throw new Error(
+    throw new EvmSignerVerificationError(
       `Refusing to broadcast: recovered signer ${recovered || '(none)'} ≠ expected ${expectedFrom}. ` +
       `The signed bytes do not represent a transaction from your account. ` +
       `If this transaction has large contract data, update your KeepKey to firmware 7.14.1 or later.`,
