@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next"
 import { CHAINS, customChainToChainDef, isChainSupported, type ChainDef } from "../../shared/chains"
 import { isBitcoinOnlyVariant } from "../../shared/flags"
 import { versionCompare } from "../../shared/firmware-versions"
-import { formatBalance } from "../lib/formatting"
+import { formatBalance, hasNonZeroBalance } from "../lib/formatting"
 import { AnimatedUsd } from "./AnimatedUsd"
 import { getAssetIcon, registerCustomAsset } from "../../shared/assetLookup"
 import { AssetPage } from "./AssetPage"
@@ -2534,9 +2534,15 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 								const agg = balances.get(drilledChainId)
 								const isEvm = dchain.chainFamily === 'evm'
 								const fundedAddrs = isEvm
-									? evmAddressSet.addresses.filter(a => (a.chainBalances?.[drilledChainId]?.balanceUsd ?? 0) > 0)
+									? evmAddressSet.addresses.filter(a => {
+										const cb = a.chainBalances?.[drilledChainId]
+										return (cb?.balanceUsd ?? 0) > 0 || hasNonZeroBalance(cb?.balance)
+									})
 									: []
-								const hasAggregate = (agg?.balanceUsd ?? 0) > 0
+								// Chains whose price feed is missing (e.g. Arbitrum native ETH)
+								// report balanceUsd 0 while still holding funds. Gate on the
+								// token amount so held funds never render as "no balance".
+								const hasAggregate = (agg?.balanceUsd ?? 0) > 0 || hasNonZeroBalance(agg?.balance)
 								return (
 									<Flex direction="column" align="center" justify="center" gap="4" maxW="360px" textAlign="center">
 										<Image

@@ -55,9 +55,9 @@ $(DEVICE_PROTOCOL_BUILD_STAMP): $(DEVICE_PROTOCOL_INPUTS) $(SUBMODULES_STAMP) | 
 # --- Module Builds (hdwallet + proto-tx-builder from source) ---
 
 $(PROTO_INSTALL_STAMP): modules/proto-tx-builder/package.json modules/proto-tx-builder/yarn.lock $(SUBMODULES_STAMP) | $(STAMP_DIR)
-	cd modules/proto-tx-builder && bun install
 	@# Init the nested osmosis-frontend submodule (provides Cosmos/Osmosis proto codegen)
 	cd modules/proto-tx-builder && git submodule update --init osmosis-frontend
+	cd modules/proto-tx-builder && yarn install --frozen-lockfile
 	@touch $@
 
 $(PROTO_BUILD_STAMP): $(PROTO_BUILD_INPUTS) $(PROTO_INSTALL_STAMP) | $(STAMP_DIR)
@@ -345,7 +345,7 @@ dmg: verify-arch
 test: test-zcash-cli test-unit
 
 test-unit:
-	cd $(PROJECT_DIR) && bun test __tests__/swap-parsing.test.ts __tests__/engine-state-machine.test.ts __tests__/device-switch.test.ts __tests__/wizard-messaging.test.ts __tests__/solana-tx.test.ts __tests__/solana-message-parser.test.ts __tests__/solana-instruction-decoder.test.ts __tests__/solana-alt.test.ts __tests__/solana-spl-decimals.test.ts __tests__/ton-build.test.ts __tests__/tron-memo-inject.test.ts __tests__/audit-coverage.test.ts __tests__/chain-scan.test.ts __tests__/recovery-ownership.test.ts src/bun/mcp.test.ts src/bun/txbuilder/hive-ops.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/evm-signer-verify.test.ts __tests__/swap-parsing.test.ts __tests__/engine-state-machine.test.ts __tests__/device-switch.test.ts __tests__/wizard-messaging.test.ts __tests__/solana-tx.test.ts __tests__/solana-message-parser.test.ts __tests__/solana-instruction-decoder.test.ts __tests__/solana-alt.test.ts __tests__/solana-spl-decimals.test.ts __tests__/ton-build.test.ts __tests__/tron-memo-inject.test.ts __tests__/audit-coverage.test.ts __tests__/chain-scan.test.ts __tests__/recovery-ownership.test.ts src/bun/mcp.test.ts src/bun/txbuilder/hive-ops.test.ts
 
 test-integration: test-rest
 

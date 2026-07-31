@@ -13,6 +13,7 @@ import type { SessionTypes, SignClientTypes } from '@walletconnect/types'
 import bs58 from 'bs58'
 import type { SigningRequestInfo, WcSessionInfo } from '../shared/types'
 import { evmAddressPath } from './evm-addresses'
+import { verifyEvmSigner } from './evm-rpc'
 import { parseSolanaTx } from './solana-tx'
 import { buildSolanaMessageDecodedInfo } from './solana-message-preview'
 
@@ -915,6 +916,12 @@ export class WalletConnectManager {
       if (!result?.serialized) {
         throw new Error('Device did not return serialized transaction')
       }
+
+      // Verify before the bytes leave the vault — whether we broadcast them or
+      // hand them back to the dApp to broadcast itself. A signature over a
+      // mangled pre-image is accepted by RPC nodes and then silently dropped
+      // from the mempool; see verifyEvmSigner in evm-rpc.ts.
+      await verifyEvmSigner(result.serialized, from)
 
       if (broadcast) {
         const txHash = await this.rpcCall(effectiveChainId, 'eth_sendRawTransaction', [result.serialized])

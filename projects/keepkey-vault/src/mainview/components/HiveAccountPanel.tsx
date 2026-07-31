@@ -34,6 +34,21 @@ function Confetti() {
 type Avail = { success: boolean; available: boolean; reason?: string }
 type CreateResp = { status: number; success?: boolean; txid?: string; username?: string; error?: string; retryAfter?: number }
 
+// Chakra's bare `variant="outline"` resolves to the gray palette's light-mode
+// pair (dark text on a bright border), which inverts against the glass card.
+// Every other outline button in the app passes colors explicitly; these match
+// that idiom using the v3 tokens this panel already speaks.
+const outlineBtn = {
+	color: "var(--text-1)",
+	borderColor: "var(--line-2)",
+	bg: "rgba(255, 255, 255, 0.03)",
+	_hover: {
+		color: "var(--text-0)",
+		borderColor: "rgba(255, 255, 255, 0.22)",
+		bg: "rgba(255, 255, 255, 0.07)",
+	},
+} as const
+
 // Standalone copy-icon button with its own transient "copied" state.
 function CopyBtn({ value, label }: { value: string; label: string }) {
 	const [copied, setCopied] = useState(false)
@@ -93,7 +108,7 @@ export function HiveAccountPanel({ activeKey, color, loading, deriveError, onRet
 		if (deriveError || !loading) return (
 			<Box className="v3-glass-card" p="4" mt="4">
 				<Text fontSize="13px" color="var(--text-2)">{deriveError || "Couldn't derive your Hive key from the device."}</Text>
-				{onRetryDerive && <Button mt="3" size="sm" variant="outline" onClick={onRetryDerive}>Retry</Button>}
+				{onRetryDerive && <Button mt="3" size="sm" variant="outline" {...outlineBtn} onClick={onRetryDerive}>Retry</Button>}
 			</Box>
 		)
 		return <Flex justify="center" py="10"><Spinner color={color} /></Flex>
@@ -104,7 +119,7 @@ export function HiveAccountPanel({ activeKey, color, loading, deriveError, onRet
 	if (state === "error") return (
 		<Box className="v3-glass-card" p="4" mt="4">
 			<Text fontSize="13px" color="var(--text-2)">Couldn't reach the Hive account service. Try again shortly.</Text>
-			<Button mt="3" size="sm" variant="outline" onClick={refresh}>Retry</Button>
+			<Button mt="3" size="sm" variant="outline" {...outlineBtn} onClick={refresh}>Retry</Button>
 		</Box>
 	)
 
@@ -128,20 +143,8 @@ export function HiveAccountPanel({ activeKey, color, loading, deriveError, onRet
 					{ label: "Hive.blog", url: `https://hive.blog/@${account.name}` },
 					{ label: "Ecency", url: `https://ecency.com/@${account.name}` },
 				].map(l => (
-					<Button key={l.label} size="xs" variant="outline" gap="1.5"
-						h="32px" px="3" borderRadius="full"
-						bg="rgba(255,255,255,0.06)"
-						borderColor="rgba(255,255,255,0.24)"
-						color="var(--text-0)" fontWeight="600"
-						_hover={{
-							bg: "rgba(227,19,55,0.16)",
-							borderColor: color,
-							color: "#FFFFFF",
-							transform: "translateY(-1px)",
-						}}
-						_active={{ bg: "rgba(227,19,55,0.24)", transform: "translateY(0)" }}
-						_focusVisible={{ outline: `2px solid ${color}`, outlineOffset: "2px" }}
-						transition="background 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease"
+					<Button key={l.label} size="xs" variant="outline" {...outlineBtn}
+						gap="1.5" h="32px" px="3" borderRadius="full" fontWeight="600"
 						aria-label={`Open ${l.label} profile`}
 						onClick={() => rpcRequest("openUrl", { url: l.url }).catch(() => {})}>
 						{l.label}<Box as={FaExternalLinkAlt} fontSize="9px" color="currentColor" opacity="0.8" />

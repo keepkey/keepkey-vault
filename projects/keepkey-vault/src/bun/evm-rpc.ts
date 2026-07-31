@@ -184,8 +184,65 @@ export async function estimateGas(
   }
 }
 
-export async function broadcastEvmTx(rpcUrl: string, signedTxHex: string): Promise<string> {
+/**
+ * Assert that a device-signed transaction actually recovers to the account we
+ * asked the device to sign for. Throws (before any broadcast) when it doesn't.
+ *
+ * This is not paranoia about a compromised device — it catches signatures that
+ * are cryptographically valid over the *wrong pre-image*. KeepKey firmware
+ * 7.x.0 through 7.14.0 hashes the EIP-1559 empty access-list byte (0xC0) too
+ * early, so for any tx whose calldata exceeds the 1024-byte single-chunk limit
+ * the byte lands mid-stream instead of closing the RLP body. The resulting
+ * signature passes every check an RPC node makes, so the broadcast is
+ * ACCEPTED — and then the tx is dropped from the mempool forever, because the
+ * address it recovers to has no balance and the wrong nonce. Fixed in
+ * firmware 7.14.1; the stable release channel still ships an affected build,
+ * so the guard has to live here.
+ *
+ * Failing loudly before broadcast turns a silently-stuck transaction (and, on
+ * a swap, a spent approval with no swap) into an actionable error.
+ */
+export class EvmSignerVerificationError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'EvmSignerVerificationError'
+  }
+}
+
+export async function verifyEvmSigner(signedTxHex: string, expectedFrom: string): Promise<void> {
   const hex = signedTxHex.startsWith('0x') ? signedTxHex : `0x${signedTxHex}`
+  const { ethers } = await import('ethers')
+
+  let recovered: string
+  try {
+    recovered = ethers.utils.parseTransaction(hex).from ?? ''
+  } catch (e: any) {
+    throw new EvmSignerVerificationError(
+      `Refusing to broadcast: the signed transaction could not be parsed (${e?.message ?? e}). ` +
+      `This usually means the device returned a malformed signature.`,
+    )
+  }
+
+  if (!recovered || recovered.toLowerCase() !== expectedFrom.toLowerCase()) {
+    throw new EvmSignerVerificationError(
+      `Refusing to broadcast: recovered signer ${recovered || '(none)'} ≠ expected ${expectedFrom}. ` +
+      `The signed bytes do not represent a transaction from your account. ` +
+      `If this transaction has large contract data, update your KeepKey to firmware 7.14.1 or later.`,
+    )
+  }
+}
+
+/**
+ * Broadcast a signed EVM transaction.
+ *
+ * `expectedFrom` is required on purpose: every caller here is broadcasting
+ * bytes that came back from the device, and a silently mis-signed tx is
+ * unrecoverable once it leaves. Making the parameter mandatory means a new
+ * broadcast path cannot forget the check — see verifyEvmSigner for why.
+ */
+export async function broadcastEvmTx(rpcUrl: string, signedTxHex: string, expectedFrom: string): Promise<string> {
+  const hex = signedTxHex.startsWith('0x') ? signedTxHex : `0x${signedTxHex}`
+  await verifyEvmSigner(hex, expectedFrom)
   const result = await ethRpc(rpcUrl, 'eth_sendRawTransaction', [hex])
   return result
 }
