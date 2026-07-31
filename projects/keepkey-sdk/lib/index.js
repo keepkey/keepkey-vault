@@ -168,7 +168,10 @@ class KeepKeySdk {
              * Firmware 7.15.0+. Used to trust a metadata-signing key (e.g. a CI test
              * key in slot 3) so `ethSignTransaction`'s `txMetadata` blobs verify.
              */
-            loadClearsignSigner: (params) => this.client.post('/eth/clearsign/load-signer', params),
+            loadClearsignSigner: (params) =>
+            // Blocks on a physical trust-screen confirmation; the 30s default aborts
+            // mid-review and looks like a device failure.
+            this.client.post('/eth/clearsign/load-signer', params, this.client.signingTimeoutMs),
             /** Sign a personal message (`eth_sign` / `personal_sign`). */
             ethSignMessage: (params) => this.client.post('/eth/sign', params),
             /** Sign an EIP-712 typed data structure. */
@@ -280,10 +283,18 @@ class KeepKeySdk {
         // ═══════════════════════════════════════════════════════════════════
         // solana — Solana signing
         // ═══════════════════════════════════════════════════════════════════
-        /** Solana signing (supports SPL tokens). */
+        /** Solana signing (supports SPL tokens and transaction-bound ClearSign metadata). */
         this.solana = {
-            /** Sign a Solana transaction. `raw_tx` must be the base64-encoded serialized transaction. */
-            solanaSignTransaction: (params) => this.client.post('/solana/sign-transaction', params),
+            /**
+             * Sign a Solana transaction. `raw_tx` is the base64-encoded serialized
+             * transaction. Opaque cross-chain/versioned transactions should include a
+             * provider-signed KKSOLSW1 `swapMetadata` descriptor; firmware verifies its
+             * binding before displaying ClearSign swap details.
+             */
+            solanaSignTransaction: (params) =>
+            // Device confirmation can span several screens (schema-decoded args,
+            // accounts, priority fee); the 30s default aborts mid-review.
+            this.client.post('/solana/sign-transaction', params, this.client.signingTimeoutMs),
             /**
              * Sign a Solana off-chain message with domain separation. Firmware
              * builds the spec envelope (`\xff` || "solana offchain" || version ||

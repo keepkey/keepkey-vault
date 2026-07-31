@@ -12,6 +12,9 @@ const { KeepKeySdk } = require('../lib/index')
 /** m/44'/60'/0'/0/0 as BIP-44 hardened array */
 const ETH_PATH = [0x80000000 + 44, 0x80000000 + 60, 0x80000000, 0, 0]
 
+/** m/44'/501'/0'/0' — KeepKey's standard Solana path */
+const SOLANA_PATH = [0x80000000 + 44, 0x80000000 + 501, 0x80000000, 0x80000000]
+
 /** Standard EVM chain IDs */
 const CHAINS = {
   ETH: 1,
@@ -115,6 +118,6 @@ function erc20Approve(spender, amount) {
 
 module.exports = {
   getSdk, assert, assertThrows, summary, run,
-  ETH_PATH, CHAINS, SEL,
+  ETH_PATH, SOLANA_PATH, CHAINS, SEL,
   toHex, padAddress, padUint256, erc20Transfer, erc20Approve,
 }

@@ -182,10 +182,53 @@ export interface XrpSignTxParams {
 export interface BnbSignTxParams {
     [key: string]: any;
 }
+export interface SolanaSwapMetadata {
+    /**
+     * Base64-encoded canonical KKSOLSW1 descriptor. The descriptor binds the
+     * displayed swap claims to SHA256 of the exact Solana message being signed.
+     */
+    payload: string;
+    /** Base64-encoded 64-byte compact secp256k1 signature over SHA256(payload). */
+    signature: string;
+    /** Trusted device ClearSign signer slot (0 = built-in, 1..3 = user-loaded). */
+    signerKeyId: number;
+}
 export interface SolanaSignTxParams {
     address_n?: number[];
     addressNList?: number[];
     raw_tx: string;
+    /**
+     * Provider-signed, transaction-bound ClearSign descriptor. Descriptor
+     * construction and signing happen off-device; firmware independently verifies
+     * its signer, exact message hash, program ID, and instruction discriminator.
+     */
+    swapMetadata?: SolanaSwapMetadata;
+    /**
+     * Authorize opaque signing for this request only. This is a compatibility
+     * fallback when ClearSign metadata is unavailable and does not enable or
+     * persist device Advanced Mode.
+     */
+    allowBlindSigning?: boolean;
+    /**
+     * Signer-attested KKSOLSC1 instruction schema. Unlike {@link swapMetadata}
+     * this is NOT tied to one transaction — it describes how to read a
+     * program's instruction, so one signature covers every future call to that
+     * program and the device decodes the values from the bytes it signs.
+     */
+    schema?: SolanaInstructionSchema;
+}
+/**
+ * A reusable, signer-attested description of one program instruction. Same
+ * field shape as {@link SolanaSwapMetadata} so both pass through the Vault
+ * unchanged.
+ */
+export interface SolanaInstructionSchema {
+    /** Base64-encoded canonical KKSOLSC1 schema payload. */
+    payload: string;
+    /** Base64-encoded 64-byte compact secp256k1 signature over SHA256(payload). */
+    signature: string;
+    /** ClearSign signer slot that attested the schema (0-3). */
+    signerKeyId: number;
 }
 export interface TronSignTxParams {
     addressNList: number[];

@@ -62,6 +62,34 @@ async function run() {
   console.log('\n4. Type re-exports (JS has no runtime types, just verify no import crash)')
   assert('Module loaded without errors', true)
 
+  // 5. Solana ClearSign request forwarding (no vault/device)
+  console.log('\n5. Solana ClearSign request forwarding')
+  const calls = []
+  const fakeClient = {
+    post: async (path, body) => {
+      calls.push({ path, body })
+      return { signature: 'test-signature', serializedTx: 'test-transaction' }
+    },
+  }
+  // TypeScript's private constructor is compile-time-only; direct construction
+  // here keeps this transport contract test fully offline.
+  const sdk = new KeepKeySdk(fakeClient)
+  const solanaRequest = {
+    addressNList: [0x8000002c, 0x800001f5, 0x80000000, 0x80000000],
+    raw_tx: 'AQAAAA==',
+    swapMetadata: {
+      payload: Buffer.from('KKSOLSW1-test').toString('base64'),
+      signature: Buffer.alloc(64, 1).toString('base64'),
+      signerKeyId: 3,
+    },
+    allowBlindSigning: true,
+  }
+  const forwarded = await sdk.solana.solanaSignTransaction(solanaRequest)
+  assert('uses /solana/sign-transaction', calls[0].path === '/solana/sign-transaction')
+  assert('forwards the exact KKSOLSW1 descriptor', calls[0].body.swapMetadata === solanaRequest.swapMetadata)
+  assert('forwards one-request fallback consent', calls[0].body.allowBlindSigning === true)
+  assert('returns the signing response', forwarded.serializedTx === 'test-transaction')
+
   // Summary
   console.log(`\n=== Results: ${passed} passed, ${failed} failed ===\n`)
   process.exit(failed > 0 ? 1 : 0)

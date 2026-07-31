@@ -25,6 +25,7 @@
     "build": "npm run bundle:openapi && tsc",
     "prepublishOnly": "npm run build",
     "test": "npm run build && node __tests__/test.js",
+    "test:solana-clearsign:offline": "npm run build && node tests/solana-clearsign/offline-descriptor.js",
     "test:chain": "npm run build && node tests/run-all.js chain",
     "test:sweep": "npm run build && node tests/run-all.js sweep",
     "test:all": "npm run build && node tests/run-all.js",

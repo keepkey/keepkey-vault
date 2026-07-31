@@ -325,9 +325,14 @@ export declare class KeepKeySdk {
         /** Sign a BNB Beacon Chain transaction. */
         binanceSignTransaction: (params: BnbSignTxParams) => Promise<SignedTx>;
     };
-    /** Solana signing (supports SPL tokens). */
+    /** Solana signing (supports SPL tokens and transaction-bound ClearSign metadata). */
     solana: {
-        /** Sign a Solana transaction. `raw_tx` must be the base64-encoded serialized transaction. */
+        /**
+         * Sign a Solana transaction. `raw_tx` is the base64-encoded serialized
+         * transaction. Opaque cross-chain/versioned transactions should include a
+         * provider-signed KKSOLSW1 `swapMetadata` descriptor; firmware verifies its
+         * binding before displaying ClearSign swap details.
+         */
         solanaSignTransaction: (params: SolanaSignTxParams) => Promise<SignedTx>;
         /**
          * Sign a Solana off-chain message with domain separation. Firmware
