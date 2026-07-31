@@ -100,8 +100,8 @@ jobs:
           yarn tsc --build
 
           cd ../proto-tx-builder
-          yarn install --frozen-lockfile
           git submodule update --init osmosis-frontend
+          yarn install --frozen-lockfile
           npx tsc -p .
           test -f dist/index.js
 
