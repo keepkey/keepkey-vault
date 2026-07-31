@@ -44,9 +44,7 @@ submodules: $(SUBMODULES_STAMP)
 
 $(DEVICE_PROTOCOL_BUILD_STAMP): $(DEVICE_PROTOCOL_INPUTS) $(SUBMODULES_STAMP) | $(STAMP_DIR)
 	@echo "=== device-protocol: installing + building ==="
-	cd modules/device-protocol && npm install --ignore-scripts --package-lock=false
-	cd modules/device-protocol && npm install --ignore-scripts --package-lock=false --no-save google-protobuf@3.21.4
-	cd modules/device-protocol && npm run build:js
+	cd modules/device-protocol && npm ci
 	node $(PROJECT_DIR)/scripts/postprocess-device-protocol.mjs modules/device-protocol
 	node $(PROJECT_DIR)/scripts/verify-zcash-ironwood-protocol.mjs modules/device-protocol
 	@test -f modules/device-protocol/lib/messages_pb.js || (echo "ERROR: device-protocol build failed (messages_pb.js missing)"; exit 1)

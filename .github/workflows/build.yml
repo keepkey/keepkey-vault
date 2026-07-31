@@ -59,18 +59,6 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      - name: Install protobuf compiler
-        shell: bash
-        run: |
-          if command -v protoc >/dev/null 2>&1; then
-            protoc --version
-          elif [ "${{ runner.os }}" = "macOS" ]; then
-            brew install protobuf
-          else
-            sudo apt-get update
-            sudo apt-get install -y protobuf-compiler
-          fi
-
       - name: Install Yarn
         run: npm install -g yarn
 
@@ -108,9 +96,8 @@ jobs:
         shell: bash
         run: |
           cd modules/device-protocol
-          npm install --ignore-scripts --package-lock=false
-          npm install --ignore-scripts --package-lock=false --no-save google-protobuf@3.21.4
-          npm run build:js
+          npm ci
+          test -s lib/messages_pb.js
           cd ../..
           node projects/keepkey-vault/scripts/postprocess-device-protocol.mjs modules/device-protocol
           node projects/keepkey-vault/scripts/verify-zcash-ironwood-protocol.mjs modules/device-protocol
