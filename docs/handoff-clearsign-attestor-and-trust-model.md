@@ -1,5 +1,17 @@
 # Clear-sign: what shipped, what was rejected, and what's next (Handoff, 2026-07-29)
 
+> **Release-direction update (later 2026-07-29; supersedes the packaging and
+> presentation recommendations below).** The attestor is now part of the
+> regular firmware rather than a separate build variant. This release still
+> bakes no production ClearSign key: all attestor operations, runtime signer
+> loading, and runtime metadata consumption require Advanced Mode; loaded keys
+> remain RAM-only and are cleared when Advanced Mode is disabled. Runtime
+> metadata is additive—it no longer suppresses EVM raw calldata or Solana's
+> unverified-transaction warning. Vault exposes the workflow through the
+> Advanced-only ClearSign Studio and exports a reproducible JSON evidence log.
+> See `projects/keepkey-vault/docs/CLEARSIGN-STUDIO.md` for the current release
+> boundary and test matrix.
+
 Relay swaps now clear-sign on device in both directions, verified on real hardware.
 This handoff covers what landed, one design that was **rejected after review** (and why
 the reasoning matters), and the two pieces of remaining work.
