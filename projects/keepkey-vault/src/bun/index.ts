@@ -4654,7 +4654,12 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (rpcUrl) {
 					const serialized = params.signedTx?.serializedTx || params.signedTx?.serialized || (typeof params.signedTx === 'string' ? params.signedTx : undefined)
 					if (!serialized || typeof serialized !== 'string') throw new Error(`Cannot extract serialized tx from: ${JSON.stringify(params.signedTx).slice(0, 200)}`)
-					const txid = await broadcastEvmTx(rpcUrl, serialized)
+					// Build/sign/broadcast are separate RPC calls. The selected account
+					// can change between them, so verification must use the address that
+					// was attached to this signed request.
+					const expectedFrom = params.fromAddress
+					if (!expectedFrom) throw new Error('Cannot verify signer: signed EVM request has no fromAddress')
+					const txid = await broadcastEvmTx(rpcUrl, serialized, expectedFrom)
 					result = { txid }
 				} else {
 					const pioneer = await getPioneer()

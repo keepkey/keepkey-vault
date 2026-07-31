@@ -16,7 +16,7 @@ import { findEvmSchema } from './evm-schema-registry'
 import { findSolanaSchema } from './solana-schema-registry'
 import { getPioneer } from './pioneer'
 import { encodeDepositWithExpiry, encodeApprove, parseUnits, toHex } from './txbuilder/evm'
-import { getEvmGasPrice, getEvmFeeData, getEvmNonce, getEvmBalance, getErc20Allowance, getErc20Balance, getErc20Decimals, broadcastEvmTx, waitForTxReceipt, estimateGas } from './evm-rpc'
+import { getEvmGasPrice, getEvmFeeData, getEvmNonce, getEvmBalance, getErc20Allowance, getErc20Balance, getErc20Decimals, broadcastEvmTx, EvmSignerVerificationError, waitForTxReceipt, estimateGas } from './evm-rpc'
 import * as txb from './txbuilder'
 import { normalizeBchAddress } from './txbuilder'
 // Re-export pure parsing functions (used by tests + this module)
@@ -708,7 +708,7 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
         const rpcUrl = getRpcUrl(fromChain)
         stage('approve-broadcasting')
         if (rpcUrl) {
-          approvalTxid = await broadcastEvmTx(rpcUrl, approveHex)
+          approvalTxid = await broadcastEvmTx(rpcUrl, approveHex, fromAddress)
           swapLog(`${TAG} Relay-path approve broadcast: ${approvalTxid}`)
           stage('approve-waiting-receipt')
           const receipt = await waitForTxReceipt(rpcUrl, approvalTxid, 180_000)
@@ -1017,9 +1017,14 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
       throw new Error(`Cannot extract serialized tx from signed result: ${JSON.stringify(signedTx).slice(0, 200)}`)
     }
     try {
-      txid = await broadcastEvmTx(swapRpcUrl, serializedHex)
+      txid = await broadcastEvmTx(swapRpcUrl, serializedHex, fromAddress)
       swapLog(`${TAG} Broadcast via direct RPC: ${txid}`)
     } catch (directErr: any) {
+      // A signer-verification failure is a local safety decision, not an RPC
+      // availability problem. Never route the rejected bytes around the guard
+      // through Pioneer.
+      if (directErr instanceof EvmSignerVerificationError) throw directErr
+
       // The pre-sign balance check in buildRelaySwapTx already verified
       // value + gas <= native balance against this same RPC URL. So a node
       // "insufficient funds" here is NOT a real gas shortage — it's a stale
@@ -1883,7 +1888,7 @@ async function buildEvmSwapTx(
       // Broadcast approve tx
       if (rpcUrl) {
         stage('approve-broadcasting')
-        approvalTxid = await broadcastEvmTx(rpcUrl, approveHex)
+        approvalTxid = await broadcastEvmTx(rpcUrl, approveHex, fromAddress)
         swapLog(`${TAG} Approve tx broadcast (direct RPC): ${approvalTxid}`)
 
         // Wait for approval receipt before building deposit — prevents nonce gap if approval reverts.
