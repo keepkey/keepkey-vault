@@ -1146,7 +1146,7 @@ export function ZcashPrivacyTab() {
 				<section>
 					<div className="page-head">
 						<h2>Receive ZEC</h2>
-						<p>Share this address. Senders pay into your Orchard pool automatically.</p>
+						<p>Share this unified address. New shielded funds enter the Ironwood pool.</p>
 					</div>
 
 					<div className="card">

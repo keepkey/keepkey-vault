@@ -7,6 +7,7 @@
 mod pczt_builder;
 mod scanner;
 mod wallet_db;
+mod zip229;
 mod zip244;
 
 use anyhow::Result;
@@ -584,6 +585,8 @@ fn record_pending_spent(state: &mut State, raw_tx_hex: String, nullifiers: Vec<[
 async fn handle_balance(state: &mut State, _params: &Value) -> Result<Value> {
     let db = state.ensure_db()?;
     let balance = db.get_balance()?;
+    let orchard_balance = db.get_balance_for_pool(wallet_db::ShieldedPool::Orchard)?;
+    let ironwood_balance = db.get_balance_for_pool(wallet_db::ShieldedPool::Ironwood)?;
     let (total, unspent) = db.get_note_count()?;
     let synced_to = db.last_scanned_height()?;
 
@@ -593,12 +596,15 @@ async fn handle_balance(state: &mut State, _params: &Value) -> Result<Value> {
     // "Max" button) need this view so they don't propose amounts the builder
     // would later reject as "all unspent notes are within N confs".
     let max_h = synced_to.unwrap_or(0).saturating_sub(MIN_CONFIRMATIONS);
-    let spendable_notes = db.get_spendable_notes(Some(max_h))?;
+    let spendable_notes =
+        db.get_spendable_notes_for_pool(Some(max_h), Some(wallet_db::ShieldedPool::Ironwood))?;
     let spendable_confirmed: u64 = spendable_notes.iter().map(|n| n.value).sum();
     let spendable_count = spendable_notes.len() as u64;
 
     Ok(serde_json::json!({
         "confirmed": balance,
+        "orchard_confirmed": orchard_balance,
+        "ironwood_confirmed": ironwood_balance,
         "pending": 0,
         "notes_total": total,
         "notes_unspent": unspent,
@@ -651,11 +657,16 @@ async fn handle_build_pczt(state: &mut State, params: &Value) -> Result<Value> {
     let max_block_height = tip.saturating_sub(MIN_CONFIRMATIONS);
 
     let db = state.ensure_db()?;
-    let notes = db.get_spendable_notes(Some(max_block_height))?;
+    let notes = db.get_spendable_notes_for_pool(
+        Some(max_block_height),
+        Some(wallet_db::ShieldedPool::Ironwood),
+    )?;
     if notes.is_empty() {
         // Either truly empty, or every note is too recent. Distinguish so the
         // user sees an actionable message instead of "no spendable notes".
-        let total_unspent = db.get_spendable_notes(None)?.len();
+        let total_unspent = db
+            .get_spendable_notes_for_pool(None, Some(wallet_db::ShieldedPool::Ironwood))?
+            .len();
         if total_unspent > 0 {
             return Err(anyhow::anyhow!(
                 "All {} unspent notes are within {} confirmations of the chain tip ({}). \
@@ -826,7 +837,7 @@ async fn handle_build_shield_pczt(state: &mut State, params: &Value) -> Result<V
         "display": {
             "amount": format!("{:.8} ZEC", amount as f64 / 1e8),
             "fee": format!("{:.8} ZEC", fee as f64 / 1e8),
-            "action": "Shield to Orchard"
+            "action": "Shield to Ironwood"
         }
     });
 
@@ -928,9 +939,14 @@ async fn handle_build_deshield_pczt(state: &mut State, params: &Value) -> Result
     let max_block_height = tip.saturating_sub(MIN_CONFIRMATIONS);
 
     let db = state.ensure_db()?;
-    let notes = db.get_spendable_notes(Some(max_block_height))?;
+    let notes = db.get_spendable_notes_for_pool(
+        Some(max_block_height),
+        Some(wallet_db::ShieldedPool::Ironwood),
+    )?;
     if notes.is_empty() {
-        let total_unspent = db.get_spendable_notes(None)?.len();
+        let total_unspent = db
+            .get_spendable_notes_for_pool(None, Some(wallet_db::ShieldedPool::Ironwood))?
+            .len();
         if total_unspent > 0 {
             return Err(anyhow::anyhow!(
                 "All {} unspent notes are within {} confirmations of the chain tip ({}). \
@@ -1074,6 +1090,7 @@ async fn handle_get_transactions(state: &mut State, _params: &Value) -> Result<V
                 "nullifier": hex::encode(&n.nullifier),
                 "txid": txid_hex,
                 "action_index": n.action_index,
+                "pool": n.pool.as_str(),
             })
         })
         .collect();
@@ -1101,9 +1118,9 @@ async fn handle_backfill_memos(state: &mut State, _params: &Value) -> Result<Val
     let mut client = scanner::LightwalletClient::connect(None).await?;
     let mut count = 0u32;
 
-    for (note_id, txid, _height, action_idx) in &pending {
+    for (note_id, txid, _height, action_idx, pool) in &pending {
         match client
-            .fetch_and_decrypt_memo(&txid, *action_idx as usize, &fvk)
+            .fetch_and_decrypt_memo(&txid, *action_idx as usize, &fvk, *pool)
             .await
         {
             Ok(Some(memo)) => {
@@ -1453,7 +1470,10 @@ async fn handle_broadcast(state: &mut State, params: &Value) -> Result<Value> {
                         || lower.contains("already in block chain")
                         || lower.contains("txn-already-known")
                     {
-                        info!("Broadcast to {}: transaction already known to the network", url);
+                        info!(
+                            "Broadcast to {}: transaction already known to the network",
+                            url
+                        );
                         already_known = true;
                     } else {
                         log::error!("Broadcast REJECTED by {}: {}", url, e);
@@ -1464,7 +1484,10 @@ async fn handle_broadcast(state: &mut State, params: &Value) -> Result<Value> {
                 // SendTransaction must not strand an already-signed tx forever —
                 // record the timeout and move on to the next node.
                 Err(_) => {
-                    log::warn!("Broadcast to {} timed out after 15s — trying next node", url);
+                    log::warn!(
+                        "Broadcast to {} timed out after 15s — trying next node",
+                        url
+                    );
                     last_err = format!("{}: send_transaction timed out after 15s", url);
                 }
             },
@@ -1977,6 +2000,7 @@ mod tests {
         // Insert a note so we can detect a reset
         let db = state.db.as_ref().unwrap();
         db.insert_note(&wallet_db::ScannedNote {
+            pool: wallet_db::ShieldedPool::Orchard,
             value: 100000,
             recipient: vec![0u8; 43],
             rho: [1u8; 32],
@@ -2019,6 +2043,7 @@ mod tests {
             .as_ref()
             .unwrap()
             .insert_note(&wallet_db::ScannedNote {
+                pool: wallet_db::ShieldedPool::Orchard,
                 value: 100000,
                 recipient: vec![0u8; 43],
                 rho: [1u8; 32],

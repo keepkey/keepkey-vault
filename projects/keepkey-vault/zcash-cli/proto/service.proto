@@ -89,6 +89,7 @@ message GetAddressUtxosReplyList {
 enum ShieldedProtocol {
     sapling = 0;
     orchard = 1;
+    ironwood = 2;
 }
 
 message SubtreeRoot {
@@ -110,6 +111,7 @@ message TreeState {
     uint32 time = 4;
     string saplingTree = 5;
     string orchardTree = 6;
+    string ironwoodTree = 7;
 }
 
 service CompactTxStreamer {
