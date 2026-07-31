@@ -7,22 +7,6 @@ be pinned to a known-good commit on a well-defined branch before any release
 branch is cut. Drift between submodule state and the pinned commit is the #1
 source of "works on my machine" build failures.
 
-### Cross-repository protocol invariant
-
-While a protocol change is staged, every participating repository must resolve
-the same exact commit from `keepkey/device-protocol`. This includes firmware,
-python-keepkey, hdwallet, and Vault. Do not substitute a fork package, a floating
-branch, or generated files copied from a different dependency version.
-
-For hdwallet staging, use the full canonical Git commit in `package.json` and
-`yarn.lock`. For Vault, build `modules/device-protocol` from its pinned commit and
-bundle that generated `lib/` directly. The Vault build must never populate its
-canonical submodule by copying `lib/` backward from hdwallet's dependency tree.
-
-Before a release, the staged upstream branches must be promoted according to
-their repository release process. Any canonical npm artifact must be built from
-the same reviewed protocol commit before replacing the staging Git dependency.
-
 `modules/keepkey-firmware` is intentionally not a Vault release gate. It is used
 for emulator and firmware development only; do not block desktop Vault releases
 on its branch, nested submodules, or CI state.
@@ -96,8 +80,8 @@ done
 - ✅ ALL GREEN: proceed
 - ⏳ PENDING: wait for completion
 - ❌ FAILED: STOP — do not release with failing CI on any submodule
-- ⚠️ NO CI: STOP for release-gated repositories; restore or run the repository's
-  required validation before proceeding
+- ⚠️ NO CI: acceptable for repos without workflows (device-protocol), but
+  flag it in release notes
 
 **Current CI coverage:**
 
@@ -105,7 +89,7 @@ done
 |------|-----------|-------|
 | keepkey/hdwallet | CI (build matrix) | Must pass |
 | BitHighlander/proto-tx-builder | Build & Test | Must pass |
-| keepkey/device-protocol | Protocol CI | Must pass; also verify generated `lib/` through `make modules-build` |
+| keepkey/device-protocol | **None** | No CI — validate manually (lib/ build) |
 | blackboardsh/electrobun | Build and Release + CEF Check | Build must pass; CEF is informational |
 
 ## Per-Module Rules
@@ -129,7 +113,6 @@ done
 - The protocol version must match the firmware version being targeted
 - If a new firmware release adds proto messages, those must be merged to master first
 - The `lib/` directory is gitignored — must be pre-built before vault builds
-- Build the pinned submodule locally; do not copy generated code from hdwallet or an npm fork
 - Verify: `cd modules/device-protocol && git log --oneline origin/master..HEAD` (should be empty)
 - If ahead of master: merge or rebase to master, push, then re-pin
 

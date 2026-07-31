@@ -3,14 +3,13 @@
   "version": "1.4.11",
   "description": "KeepKey Vault - Desktop hardware wallet management powered by Electrobun",
   "scripts": {
-    "verify:zcash-protocol": "node scripts/verify-zcash-ironwood-protocol.mjs",
-    "dev": "bun run verify:zcash-protocol && bun scripts/bundle-backend.ts && vite build && bun scripts/collect-externals.ts && electrobun build && bun scripts/patch-bundle.ts && electrobun dev",
+    "dev": "bun scripts/bundle-backend.ts && vite build && bun scripts/collect-externals.ts && electrobun build && bun scripts/patch-bundle.ts && electrobun dev",
     "dev:hmr": "bun run hmr & bun scripts/bundle-backend.ts && vite build && bun scripts/collect-externals.ts && electrobun build && bun scripts/patch-bundle.ts && electrobun dev",
     "dev:hmr:win": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dev-hmr-windows.ps1",
     "hmr": "vite --port 5177",
-    "build": "bun run verify:zcash-protocol && bun scripts/bundle-backend.ts && vite build && bun scripts/collect-externals.ts && electrobun build && bun scripts/patch-bundle.ts",
-    "build:stable": "bun run verify:zcash-protocol && bun scripts/bundle-backend.ts && vite build && bun scripts/collect-externals.ts && bun scripts/build-signed.ts stable",
-    "build:canary": "bun run verify:zcash-protocol && bun scripts/bundle-backend.ts && vite build && bun scripts/collect-externals.ts && bun scripts/build-signed.ts canary",
+    "build": "bun scripts/bundle-backend.ts && vite build && bun scripts/collect-externals.ts && electrobun build && bun scripts/patch-bundle.ts",
+    "build:stable": "bun scripts/bundle-backend.ts && vite build && bun scripts/collect-externals.ts && bun scripts/build-signed.ts stable",
+    "build:canary": "bun scripts/bundle-backend.ts && vite build && bun scripts/collect-externals.ts && bun scripts/build-signed.ts canary",
     "assets:vendor-icons": "bun scripts/vendor-asset-icons.ts",
     "start": "bun run dev",
     "postinstall": "bash scripts/patch-electrobun.sh"

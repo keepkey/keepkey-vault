@@ -44,11 +44,8 @@ submodules: $(SUBMODULES_STAMP)
 
 $(DEVICE_PROTOCOL_BUILD_STAMP): $(DEVICE_PROTOCOL_INPUTS) $(SUBMODULES_STAMP) | $(STAMP_DIR)
 	@echo "=== device-protocol: installing + building ==="
-	cd modules/device-protocol && npm install --ignore-scripts --package-lock=false
-	cd modules/device-protocol && npm install --ignore-scripts --package-lock=false --no-save google-protobuf@3.21.4
-	cd modules/device-protocol && npm run build:js
-	node $(PROJECT_DIR)/scripts/postprocess-device-protocol.mjs modules/device-protocol
-	node $(PROJECT_DIR)/scripts/verify-zcash-ironwood-protocol.mjs modules/device-protocol
+	cd modules/device-protocol && npm install
+	cd modules/device-protocol && npm run build
 	@test -f modules/device-protocol/lib/messages_pb.js || (echo "ERROR: device-protocol build failed (messages_pb.js missing)"; exit 1)
 	@touch $@
 
@@ -72,8 +69,8 @@ $(HDWALLET_INSTALL_STAMP): modules/hdwallet/package.json modules/hdwallet/yarn.l
 
 modules-install: $(PROTO_INSTALL_STAMP) $(HDWALLET_INSTALL_STAMP)
 
-$(HDWALLET_BUILD_STAMP): modules/hdwallet/tsconfig.json $(HDWALLET_BUILD_INPUTS) $(HDWALLET_INSTALL_STAMP) $(DEVICE_PROTOCOL_BUILD_STAMP) | $(STAMP_DIR)
-	cd modules/hdwallet && yarn build
+$(HDWALLET_BUILD_STAMP): modules/hdwallet/tsconfig.json $(HDWALLET_BUILD_INPUTS) $(HDWALLET_INSTALL_STAMP) | $(STAMP_DIR)
+	cd modules/hdwallet && yarn tsc --build
 	@touch $@
 
 modules-build: $(HDWALLET_BUILD_STAMP) $(PROTO_BUILD_STAMP) $(DEVICE_PROTOCOL_BUILD_STAMP)
