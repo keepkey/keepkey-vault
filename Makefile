@@ -52,7 +52,7 @@ $(DEVICE_PROTOCOL_BUILD_STAMP): $(DEVICE_PROTOCOL_INPUTS) $(SUBMODULES_STAMP) | 
 # --- Module Builds (hdwallet + proto-tx-builder from source) ---
 
 $(PROTO_INSTALL_STAMP): modules/proto-tx-builder/package.json modules/proto-tx-builder/yarn.lock $(SUBMODULES_STAMP) | $(STAMP_DIR)
-	cd modules/proto-tx-builder && bun install
+	cd modules/proto-tx-builder && yarn install --frozen-lockfile
 	@# Init the nested osmosis-frontend submodule (provides Cosmos/Osmosis proto codegen)
 	cd modules/proto-tx-builder && git submodule update --init osmosis-frontend
 	@touch $@

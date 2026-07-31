@@ -2,7 +2,7 @@ name: Build KeepKey Vault
 
 on:
   push:
-    branches: [master, 'release/*']
+    branches: [master, develop, 'release/*']
     # NOTE: deliberately NOT triggering on tag push. action-gh-release creates
     # the v* tag when it creates the draft release, which used to trigger a
     # SECOND CI run on the tag ref. That rerun rebuilt the unsigned macOS x64
@@ -11,7 +11,7 @@ on:
     # placed. v1.2.16 release hit this and had to be manually repaired.
     # If you ever need to re-run CI on a tag, use workflow_dispatch.
   pull_request:
-    branches: [master, 'release/*']
+    branches: [master, develop, 'release/*']
   workflow_dispatch:
 
 concurrency:
@@ -66,7 +66,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: modules/proto-tx-builder/node_modules
-          key: proto-tx-builder-${{ runner.os }}-${{ hashFiles('modules/proto-tx-builder/package.json') }}
+          key: proto-tx-builder-${{ runner.os }}-${{ hashFiles('modules/proto-tx-builder/package.json', 'modules/proto-tx-builder/yarn.lock') }}
 
       - name: Cache hdwallet
         uses: actions/cache@v4
@@ -100,7 +100,7 @@ jobs:
           yarn tsc --build
 
           cd ../proto-tx-builder
-          bun install
+          yarn install --frozen-lockfile
           git submodule update --init osmosis-frontend
           npx tsc -p .
           test -f dist/index.js
