@@ -17,6 +17,7 @@
 import * as fs from "fs"
 import * as os from "os"
 import * as path from "path"
+import { createHash, randomUUID } from "crypto"
 
 /**
  * hdwallet returns signature/pubkey fields as `Uint8Array | string`
@@ -26,6 +27,28 @@ import * as path from "path"
  */
 const bytesToHex = (v: Uint8Array | string): string =>
 	v instanceof Uint8Array ? Buffer.from(v).toString('hex') : v
+
+function clearsignFingerprint(publicKey: Uint8Array): string {
+	return createHash('sha256').update(Buffer.from(publicKey)).digest('hex').slice(0, 8)
+}
+
+function parseClearsignHex(value: string, field: string, expectedBytes?: number): Uint8Array {
+	const normalized = String(value || '').trim().replace(/^0x/i, '').replace(/\s+/g, '')
+	if (!normalized || normalized.length % 2 !== 0 || !/^[0-9a-f]+$/i.test(normalized)) {
+		throw new Error(`${field} must be even-length hexadecimal`)
+	}
+	const bytes = new Uint8Array(Buffer.from(normalized, 'hex'))
+	if (expectedBytes !== undefined && bytes.length !== expectedBytes) {
+		throw new Error(`${field} must be exactly ${expectedBytes} bytes`)
+	}
+	return bytes
+}
+
+function requireClearsignAdvancedMode(): void {
+	if (getAdvancedModeEnabled() !== true) {
+		throw new Error('ClearSign Studio requires AdvancedMode on the connected device')
+	}
+}
 
 const LOG_DIR = (process.platform === 'win32' ? process.env.LOCALAPPDATA : (process.env.HOME + "/Library/Application Support")) + "/com.keepkey.vault"
 const LOG_FILE = LOG_DIR + "/vault-backend.log"
@@ -131,7 +154,7 @@ import { EvmAddressManager, evmAddressPath } from "./evm-addresses"
 import { shouldResetManagersOnReady, nextReadyDeviceId } from "../shared/device-switch"
 import { isManagerSeedStale } from "../shared/seed-reconcile"
 import { WalletConnectManager } from "./walletconnect"
-import { initDb, factoryResetDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, setCustomTokenIcon as dbSetCustomTokenIcon, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility, insertApiLog, getApiLogs, clearApiLogs, setCachedBalances, getCachedBalances, updateCachedBalance, clearBalances, deleteCachedChainBalance, saveCachedPubkey, getLatestDeviceSnapshot, getCachedPubkeys, saveReport, getReportsList, getReportById, deleteReport, reportExists, getSwapHistory, getSwapHistoryStats, getSwapHistoryByTxid, getBip85Seeds, saveBip85Seed, deleteBip85Seed, clearCachedPubkeys, getRecentActivityFromLog, getPioneerServers, addPioneerServerDb, removePioneerServerDb, syncOwnAddressBook, recordOutbound, getAddressBookList, updateAddressBookEntry, deleteAddressBookEntry, getAddressBookHistory, getDeviceLabelMap, getBalancesForOwnSeed, addExternalEntry, matchAddressBook } from "./db"
+import { initDb, factoryResetDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, setCustomTokenIcon as dbSetCustomTokenIcon, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility, insertApiLog, getApiLogs, clearApiLogs, setCachedBalances, getCachedBalances, updateCachedBalance, clearBalances, deleteCachedChainBalance, saveCachedPubkey, getLatestDeviceSnapshot, getCachedPubkeys, saveReport, getReportsList, getReportById, deleteReport, reportExists, getSwapHistory, getSwapHistoryStats, getSwapHistoryByTxid, getBip85Seeds, saveBip85Seed, deleteBip85Seed, clearCachedPubkeys, getRecentActivityFromLog, getPioneerServers, addPioneerServerDb, removePioneerServerDb, syncOwnAddressBook, recordOutbound, getAddressBookList, updateAddressBookEntry, deleteAddressBookEntry, getAddressBookHistory, getDeviceLabelMap, getBalancesForOwnSeed, addExternalEntry, matchAddressBook, insertClearSignEvent, getClearSignEvents } from "./db"
 import type { OwnAddressSeed } from "./db"
 import { rectifyWallet, getLedgerSummary, getLedgerJournals } from "./ledger"
 import { generateReport, reportToPdfBuffer, reportToCsv } from "./reports"
@@ -140,10 +163,11 @@ import { chainSupportsDeepScan, chainSupportsLevelScan, chainLevelPath, deriveAd
 import { extractTransactionsFromReport, toCoinTrackerCsv, toZenLedgerCsv } from "./tax-export"
 import { assetData as discoveryAssetData } from "@pioneer-platform/pioneer-discovery"
 import { prioritizeExtraContracts, type PortfolioExtraContract } from "./portfolio-extra-contracts"
+import { buildSolanaSchema, inspectSolanaSchema } from "./clearsign-studio"
 import * as os from "os"
 import * as path from "path"
 import { EVM_RPC_URLS, getTokenMetadata, broadcastEvmTx } from "./evm-rpc"
-import type { ChainBalance, TokenBalance, CustomToken, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, EvmAddressSet, Bip85SeedMeta, StakingPosition, SwapAsset, AuditToken, DefiPosition, RecentActivity } from "../shared/types"
+import type { ChainBalance, TokenBalance, CustomToken, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, EvmAddressSet, Bip85SeedMeta, StakingPosition, SwapAsset, AuditToken, DefiPosition, RecentActivity, ClearSignEvent, ClearSignSolanaSchemaArtifact } from "../shared/types"
 import type { VaultRPCSchema } from "../shared/rpc-schema"
 
 // L3 fix: withTimeout imported from engine-controller (was duplicated here)
@@ -712,6 +736,26 @@ const perf = (label: string) => console.log(`[PERF] +${Date.now() - BOOT_START}m
 
 // ── Engine Controller (constructors are lightweight — no I/O) ────────
 const engine = new EngineController()
+
+/**
+ * ClearSign evidence is device-scoped and local-only. Hidden/passphrase
+ * wallets retain the existing no-disk-persistence privacy guarantee; callers
+ * still receive an ephemeral event id so their device operation is unchanged.
+ */
+function recordClearSignEvent(
+	event: Omit<ClearSignEvent, 'id' | 'createdAt' | 'deviceId' | 'firmwareVersion'>,
+): ClearSignEvent {
+	const device = engine.getDeviceState()
+	const complete: ClearSignEvent = {
+		...event,
+		id: randomUUID(),
+		createdAt: Date.now(),
+		deviceId: device.deviceId,
+		firmwareVersion: device.firmwareVersion,
+	}
+	if (engine.isPassphraseWallet) return complete
+	return insertClearSignEvent(complete)
+}
 const btcAccounts = new BtcAccountManager()
 const evmAddresses = new EvmAddressManager()
 // Last deviceId we saw reach 'ready'. The managers above are kept across
@@ -2071,6 +2115,11 @@ async function headlessExecuteSwap(params: ExecuteSwapParams, pushSubStage: (sta
 		pushSubStage,
 		isAdvancedModeEnabled: getAdvancedModeEnabled,
 		getSolanaRpcEndpoint: () => getSetting('solana_rpc_endpoint') || undefined,
+		onClearSignEvent: (event) => recordClearSignEvent({
+			kind: 'transaction',
+			source: 'vault-rpc',
+			...event,
+		}),
 	})
 	const scope = getWalletDbScope()
 	// Register swap for tracking (non-blocking)
@@ -2389,7 +2438,132 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			// ── Wallet operations (hdwallet pass-through) ─────────────
 			getFeatures: async () => {
 				if (!engine.wallet) throw new Error('No device connected')
-				return await engine.wallet.getFeatures()
+				return await engine.refreshFeaturesSnapshot()
+			},
+			clearsignGetStudioStatus: async () => ({
+				advancedMode: getAdvancedModeEnabled() === true,
+				firmwareVersion: engine.getDeviceState().firmwareVersion,
+			}),
+			clearsignAttestorGetPublicKey: async () => {
+				if (!engine.wallet) throw new Error('No device connected')
+				requireClearsignAdvancedMode()
+				const publicKey = await (engine.wallet as any).clearsignAttestorGetPublicKey() as Uint8Array
+				return { publicKey: Buffer.from(publicKey).toString('hex'), fingerprint: clearsignFingerprint(publicKey) }
+			},
+			clearsignBuildSolanaSchema: async (params) => buildSolanaSchema(params),
+			clearsignInspectSolanaSchema: async (params) => inspectSolanaSchema(params.payload),
+			clearsignAttestorSign: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				requireClearsignAdvancedMode()
+				let artifact: ClearSignSolanaSchemaArtifact | undefined
+				let sentToDevice = false
+				try {
+					artifact = inspectSolanaSchema(params.payload)
+					const payload = new Uint8Array(Buffer.from(artifact.payload, 'hex'))
+					const attest = () => (engine.wallet as any).clearsignAttestorSign(payload)
+					sentToDevice = true
+					const result = engine.isEmulator
+						? await emuSigningOp(attest, { operation: 'clearsignAttestorSign', opLabel: 'Attest ClearSign schema', chain: 'Solana' })
+						: await attest()
+					const publicKey = result.publicKey as Uint8Array
+					const signature = Buffer.from(result.signature as Uint8Array).toString('hex')
+					const publicKeyHex = Buffer.from(publicKey).toString('hex')
+					const fingerprint = clearsignFingerprint(publicKey)
+					const event = recordClearSignEvent({
+						kind: 'schema-attestation',
+						outcome: 'signed',
+						source: 'studio',
+						chain: 'Solana',
+						format: artifact.format,
+						label: `${artifact.draft.programName} · ${artifact.draft.instructionName}`,
+						payload: artifact.payload,
+						signature,
+						publicKey: publicKeyHex,
+						fingerprint,
+						sentToDevice: true,
+						request: { schema: artifact.draft, byteLength: artifact.byteLength, coverageBytes: artifact.coverageBytes },
+					})
+					return { payload: artifact.payload, signature, publicKey: publicKeyHex, fingerprint, eventId: event.id }
+				} catch (cause: any) {
+					const error = cause?.message || String(cause)
+					const raw = String(params.payload || '').trim().replace(/^0x/i, '').replace(/\s+/g, '')
+					recordClearSignEvent({
+						kind: 'schema-attestation',
+						outcome: 'blocked',
+						source: 'studio',
+						chain: 'Solana',
+						format: artifact?.format || 'KKSOLSC1',
+						label: artifact ? `${artifact.draft.programName} · ${artifact.draft.instructionName}` : 'Rejected schema payload',
+						payload: artifact?.payload || raw.slice(0, 2048),
+						sentToDevice,
+						request: artifact ? { schema: artifact.draft, byteLength: artifact.byteLength, coverageBytes: artifact.coverageBytes } : undefined,
+						error,
+					})
+					throw cause
+				}
+			},
+			clearsignLoadSessionSigner: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				requireClearsignAdvancedMode()
+				let alias = String(params.alias || '').trim()
+				let publicKey: Uint8Array | undefined
+				let sentToDevice = false
+				try {
+					if (!Number.isInteger(params.keyId) || params.keyId < 0 || params.keyId > 3) {
+						throw new Error('Signer slot must be an integer from 0 to 3')
+					}
+					if (!alias || alias.length > 31 || !/^[A-Za-z0-9 _-]+$/.test(alias)) {
+						throw new Error('Alias must be 1-31 letters, digits, spaces, hyphens, or underscores')
+					}
+					publicKey = parseClearsignHex(params.publicKey, 'Public key', 33)
+					const load = () => (engine.wallet as any).loadClearsignSigner({
+						keyId: params.keyId,
+						pubkey: publicKey,
+						alias,
+					})
+					sentToDevice = true
+					if (engine.isEmulator) {
+						await emuSigningOp(load, { operation: 'clearsignLoadSessionSigner', opLabel: `Trust ${alias} for this session` })
+					} else {
+						await load()
+					}
+					const fingerprint = clearsignFingerprint(publicKey)
+					const event = recordClearSignEvent({
+						kind: 'signer-load',
+						outcome: 'loaded',
+						source: 'studio',
+						label: alias,
+						publicKey: Buffer.from(publicKey).toString('hex'),
+						fingerprint,
+						keyId: params.keyId,
+						sentToDevice: true,
+					})
+					return { ok: true as const, keyId: params.keyId, alias, fingerprint, eventId: event.id }
+				} catch (cause: any) {
+					const error = cause?.message || String(cause)
+					recordClearSignEvent({
+						kind: 'signer-load',
+						outcome: 'blocked',
+						source: 'studio',
+						label: alias || 'Rejected signer',
+						publicKey: publicKey ? Buffer.from(publicKey).toString('hex') : String(params.publicKey || '').slice(0, 256),
+						fingerprint: publicKey ? clearsignFingerprint(publicKey) : undefined,
+						keyId: Number.isInteger(params.keyId) ? params.keyId : undefined,
+						sentToDevice,
+						error,
+					})
+					throw cause
+				}
+			},
+			clearsignListEvents: async (params) => {
+				requireClearsignAdvancedMode()
+				if (engine.isPassphraseWallet) return []
+				const currentDeviceId = params?.scope === 'all' ? undefined : engine.getDeviceState().deviceId
+				return getClearSignEvents({
+					limit: params?.limit,
+					outcome: params?.outcome,
+					deviceId: currentDeviceId,
+				})
 			},
 			applyPolicy: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
@@ -2597,17 +2771,48 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			ethSignTx: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
-				if (engine.isEmulator) {
-					// Honest dialog: decode params.data so a token transfer shows the real
-					// recipient+amount (not the contract + 0x0), an approval is labeled, and
-					// a contract call isn't forged as a "To:" recipient. Display-only.
-					const { evmConfirmDetails } = await import('./emulator-confirm-details')
-					return emuSigningOp(
-						() => engine.wallet!.ethSignTx(params),
-						evmConfirmDetails('ethSignTx', 'Ethereum', params),
-					)
+				const signedPayload = (params as any)?.txMetadata?.signedPayload
+				const payload = signedPayload instanceof Uint8Array
+					? Buffer.from(signedPayload).toString('hex')
+					: signedPayload != null ? String(signedPayload) : undefined
+				const request = {
+					keyId: (params as any)?.txMetadata?.keyId,
+					chainId: (params as any)?.chainId,
+					to: (params as any)?.to,
+					dataSelector: typeof (params as any)?.data === 'string' ? (params as any).data.slice(0, 10) : undefined,
 				}
-				return await engine.wallet.ethSignTx(params)
+				let sentToDevice = false
+				try {
+					const sign = () => {
+						sentToDevice = true
+						return engine.wallet!.ethSignTx(params)
+					}
+					let result: any
+					if (engine.isEmulator) {
+						// Honest dialog: decode params.data so a token transfer shows the real
+						// recipient+amount (not the contract + 0x0), an approval is labeled, and
+						// a contract call isn't forged as a "To:" recipient. Display-only.
+						const { evmConfirmDetails } = await import('./emulator-confirm-details')
+						result = await emuSigningOp(sign, evmConfirmDetails('ethSignTx', 'Ethereum', params))
+					} else {
+						result = await sign()
+					}
+					if (payload) recordClearSignEvent({
+						kind: 'transaction', outcome: 'signed', source: 'vault-rpc', chain: 'Ethereum',
+						format: 'EVM_TX_METADATA', label: 'EVM ClearSign transaction', payload,
+						keyId: Number.isInteger(request.keyId) ? request.keyId : undefined,
+						sentToDevice, request,
+					})
+					return result
+				} catch (cause: any) {
+					if (payload) recordClearSignEvent({
+						kind: 'transaction', outcome: 'blocked', source: 'vault-rpc', chain: 'Ethereum',
+						format: 'EVM_TX_METADATA', label: 'Blocked EVM ClearSign transaction', payload,
+						keyId: Number.isInteger(request.keyId) ? request.keyId : undefined,
+						sentToDevice, request, error: cause?.message || String(cause),
+					})
+					throw cause
+				}
 			},
 			ethSignMessage: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
@@ -2703,25 +2908,58 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!params.rawTx) {
 					throw new Error('[solanaSignTx] rawTx is required')
 				}
-				return signSolanaWireTransaction(
-					params,
-					(deviceParams) => engine.isEmulator
-						? emuSigningOp(
-							() => engine.wallet!.solanaSignTx(deviceParams),
-							{ operation: 'solanaSignTx', chain: 'Solana' },
-						)
-						: engine.wallet!.solanaSignTx(deviceParams),
-					async (addressNList) => {
-						const derived = await engine.wallet!.solanaGetAddress({
-							addressNList,
-							showDisplay: false,
-						})
-						const address = typeof derived === 'string' ? derived : derived?.address
-						if (!address) throw new Error('Device returned no Solana signer address')
-						return address
-					},
-					'solanaSignTx',
-				)
+				const schema = (params as any)?.schema
+				let artifact: ClearSignSolanaSchemaArtifact | undefined
+				if (schema?.payload) {
+					try { artifact = inspectSolanaSchema(Buffer.from(String(schema.payload), 'base64').toString('hex')) } catch { /* device will enforce it */ }
+				}
+				const payload = artifact?.payload || (schema?.payload ? String(schema.payload) : undefined)
+				const request = schema ? {
+					signerKeyId: schema.signerKeyId,
+					txHash: createHash('sha256').update(Buffer.from(String((params as any).rawTx || ''), 'base64')).digest('hex'),
+				} : undefined
+				let sentToDevice = false
+				try {
+					const result = await signSolanaWireTransaction(
+						params,
+						(deviceParams) => {
+							sentToDevice = true
+							return engine.isEmulator
+								? emuSigningOp(
+									() => engine.wallet!.solanaSignTx(deviceParams),
+									{ operation: 'solanaSignTx', chain: 'Solana' },
+								)
+								: engine.wallet!.solanaSignTx(deviceParams)
+						},
+						async (addressNList) => {
+							const derived = await engine.wallet!.solanaGetAddress({
+								addressNList,
+								showDisplay: false,
+							})
+							const address = typeof derived === 'string' ? derived : derived?.address
+							if (!address) throw new Error('Device returned no Solana signer address')
+							return address
+						},
+						'solanaSignTx',
+					)
+					if (payload) recordClearSignEvent({
+						kind: 'transaction', outcome: 'signed', source: 'vault-rpc', chain: 'Solana',
+						format: artifact?.format || 'KKSOLSC1',
+						label: artifact ? `${artifact.draft.programName} · ${artifact.draft.instructionName}` : 'Solana ClearSign transaction',
+						payload, keyId: Number.isInteger(schema?.signerKeyId) ? schema.signerKeyId : undefined,
+						sentToDevice, request,
+					})
+					return result
+				} catch (cause: any) {
+					if (payload) recordClearSignEvent({
+						kind: 'transaction', outcome: 'blocked', source: 'vault-rpc', chain: 'Solana',
+						format: artifact?.format || 'KKSOLSC1',
+						label: artifact ? `${artifact.draft.programName} · ${artifact.draft.instructionName}` : 'Blocked Solana ClearSign transaction',
+						payload, keyId: Number.isInteger(schema?.signerKeyId) ? schema.signerKeyId : undefined,
+						sentToDevice, request, error: cause?.message || String(cause),
+					})
+					throw cause
+				}
 			},
 			solanaSignMessage: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')

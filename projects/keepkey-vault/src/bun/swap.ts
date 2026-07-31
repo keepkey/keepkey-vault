@@ -553,6 +553,18 @@ export interface SwapContext {
   isAdvancedModeEnabled?: () => boolean | undefined
   /** User's configured Solana RPC, for the host-side outflow check. */
   getSolanaRpcEndpoint?: () => string | undefined
+  /** Durable ClearSign evidence sink owned by Vault (no-op for callers that do not persist). */
+  onClearSignEvent?: (event: {
+    outcome: 'signed' | 'blocked'
+    chain: string
+    format: string
+    label: string
+    payload: string
+    keyId?: number
+    sentToDevice: boolean
+    request?: Record<string, unknown>
+    error?: string
+  }) => void
 }
 
 /** Sentinel no-op for SwapContext.pushSubStage in REST/headless paths. */
@@ -560,7 +572,7 @@ export const NOOP_PUSH_SUBSTAGE = (_stage: SwapSubStage): void => { /* intention
 
 /** Execute a swap: build tx, sign on device, broadcast */
 export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): Promise<SwapResult> {
-  const { wallet, getAllChains, getRpcUrl, getBtcXpub, getAllBtcXpubs, wrapSign, pushSubStage } = ctx
+  const { wallet, getAllChains, getRpcUrl, getBtcXpub, getAllBtcXpubs, wrapSign, pushSubStage, onClearSignEvent } = ctx
   const stage = (s: SwapSubStage) => { try { pushSubStage(s) } catch { /* never block on push */ } }
 
   // Resolve source chain
@@ -992,12 +1004,50 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
   swapLog(`${TAG} Signing ${fromChain.chainFamily} tx via ${fromChain.signMethod}...`)
   stage('swap-signing')
   let signedTx: any
+  const clearSignMaterial = unsignedTx?.schema?.payload
+    ? {
+        payload: String(unsignedTx.schema.payload),
+        format: 'KKSOLSC1_BASE64',
+        keyId: unsignedTx.schema.signerKeyId,
+        label: `ClearSign ${fromChain.coin} swap`,
+      }
+    : unsignedTx?.txMetadata?.signedPayload
+      ? {
+          payload: unsignedTx.txMetadata.signedPayload instanceof Uint8Array
+            ? Buffer.from(unsignedTx.txMetadata.signedPayload).toString('hex')
+            : String(unsignedTx.txMetadata.signedPayload),
+          format: 'EVM_TX_METADATA',
+          keyId: unsignedTx.txMetadata.keyId,
+          label: `ClearSign ${fromChain.coin} swap`,
+        }
+      : undefined
+  const clearSignRequest = clearSignMaterial ? {
+    fromCaip: params.fromCaip,
+    toCaip: params.toCaip,
+    integration: params.integration,
+    swapper: params.swapper,
+  } : undefined
+  let clearSignSentToDevice = false
   try {
     signedTx = await wrapSign(
-      () => txb.signTx(wallet, fromChain, unsignedTx),
+      () => {
+        clearSignSentToDevice = true
+        return txb.signTx(wallet, fromChain, unsignedTx)
+      },
       { operation: 'swap', chain: fromChain.coin, to: params.inboundAddress, value: params.amount, memo: params.memo },
     )
+    if (clearSignMaterial) onClearSignEvent?.({
+      outcome: 'signed', chain: fromChain.coin, ...clearSignMaterial,
+      keyId: Number.isInteger(clearSignMaterial.keyId) ? clearSignMaterial.keyId : undefined,
+      sentToDevice: clearSignSentToDevice, request: clearSignRequest,
+    })
   } catch (e: any) {
+    if (clearSignMaterial) onClearSignEvent?.({
+      outcome: 'blocked', chain: fromChain.coin, ...clearSignMaterial,
+      keyId: Number.isInteger(clearSignMaterial.keyId) ? clearSignMaterial.keyId : undefined,
+      sentToDevice: clearSignSentToDevice, request: clearSignRequest,
+      error: e?.message || String(e),
+    })
     console.error(`${TAG} SIGN FAILED: ${e.message}`)
     console.error(`${TAG}   chain=${fromChain.id}, method=${fromChain.signMethod}`)
     console.error(`${TAG}   stack: ${e.stack?.split('\n').slice(0, 5).join('\n')}`)

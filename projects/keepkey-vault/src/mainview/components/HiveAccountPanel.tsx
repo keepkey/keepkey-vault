@@ -129,8 +129,22 @@ export function HiveAccountPanel({ activeKey, color, loading, deriveError, onRet
 					{ label: "Ecency", url: `https://ecency.com/@${account.name}` },
 				].map(l => (
 					<Button key={l.label} size="xs" variant="outline" gap="1.5"
+						h="32px" px="3" borderRadius="full"
+						bg="rgba(255,255,255,0.06)"
+						borderColor="rgba(255,255,255,0.24)"
+						color="var(--text-0)" fontWeight="600"
+						_hover={{
+							bg: "rgba(227,19,55,0.16)",
+							borderColor: color,
+							color: "#FFFFFF",
+							transform: "translateY(-1px)",
+						}}
+						_active={{ bg: "rgba(227,19,55,0.24)", transform: "translateY(0)" }}
+						_focusVisible={{ outline: `2px solid ${color}`, outlineOffset: "2px" }}
+						transition="background 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease"
+						aria-label={`Open ${l.label} profile`}
 						onClick={() => rpcRequest("openUrl", { url: l.url }).catch(() => {})}>
-						{l.label}<Box as={FaExternalLinkAlt} fontSize="9px" />
+						{l.label}<Box as={FaExternalLinkAlt} fontSize="9px" color="currentColor" opacity="0.8" />
 					</Button>
 				))}
 			</Flex>

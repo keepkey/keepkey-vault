@@ -544,6 +544,15 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 			loadPreviewActivity()
 		})
 	}, [loadPreviewActivity])
+
+	// In-app broadcasts (incl. shielded flows) push an api-log entry the moment
+	// they hit the chain — same pattern as ActivityTracker, so a fresh send/
+	// shield/unshield appears here without navigating away and back.
+	useEffect(() => {
+		return onRpcMessage('api-log', (entry) => {
+			if ((entry as any)?.activityType) loadPreviewActivity()
+		})
+	}, [loadPreviewActivity])
 	const isEvmChain = chain.chainFamily === 'evm'
 
 	// Toggle token visibility via RPC
@@ -578,6 +587,16 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 	const isZcash = chain.id === 'zcash'
 	const zcashShieldedDef = CHAINS.find(c => c.id === 'zcash-shielded')
 	const zcashShieldedSupported = isZcash && zcashShieldedDef && isChainSupported(zcashShieldedDef, firmwareVersion)
+	// The synthetic zZEC token (fetchShieldedZecToken). Its page must NOT show
+	// the transparent receive card or SendForm — a t-addr QR under a "Shielded
+	// ZEC" heading silently defeats the privacy feature. Everything shielded
+	// (z→z send, Orchard receive + device verify) lives in ZcashPrivacyTab.
+	const isShieldedToken = isZcash && !!selectedToken && selectedToken.type === 'shielded'
+
+	// Keep the (sole) Privacy pill lit while the shielded token page is open.
+	useEffect(() => {
+		if (isShieldedToken && zcashPrivacyEnabled && view !== "privacy") setView("privacy")
+	}, [isShieldedToken, zcashPrivacyEnabled, view])
 
 	// Pre-build a SwapAsset from the selected token so SwapDialog can use it
 	// directly without needing to find it in Pioneer's limited GetAvailableAssets list.
@@ -609,13 +628,13 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 		...(!selectedToken ? [{ id: "receive" as const, label: t("receive"), icon: (
 			<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19" /><polyline points="5 12 12 19 19 12" /></svg>
 		) }] : []),
-		...(!watchOnly ? [{ id: "send" as const, label: t("send"), icon: (
+		...(!watchOnly && !isShieldedToken ? [{ id: "send" as const, label: t("send"), icon: (
 			<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="19" x2="12" y2="5" /><polyline points="5 12 12 5 19 12" /></svg>
 		) }] : []),
-		...(!watchOnly && swappableChainIds.has(chain.id) ? [{ id: "swap" as const, label: t("swap"), icon: (
+		...(!watchOnly && swappableChainIds.has(chain.id) && !isShieldedToken ? [{ id: "swap" as const, label: t("swap"), icon: (
 			<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="17 1 21 5 17 9" /><path d="M3 11V9a4 4 0 0 1 4-4h14" /><polyline points="7 23 3 19 7 15" /><path d="M21 13v2a4 4 0 0 1-4 4H3" /></svg>
 		) }] : []),
-		...(!watchOnly && !selectedToken && zcashPrivacyEnabled && zcashShieldedSupported ? [{ id: "privacy" as const, label: t("privacy"), icon: (
+		...(!watchOnly && (!selectedToken || isShieldedToken) && zcashPrivacyEnabled && zcashShieldedSupported ? [{ id: "privacy" as const, label: t("privacy"), icon: (
 			<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>
 		) }] : []),
 	]
@@ -1187,7 +1206,14 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 
 				{/* Content */}
 				<Box className="v3-glass-card" borderRadius="var(--r-lg)" p={{ base: "4", md: "6" }} minH="280px">
-					{view === "send" ? (
+					{isShieldedToken && zcashPrivacyEnabled ? (
+						// zZEC page: all send/receive surfaces are shielded-only. Never fall
+						// through to SendForm/ReceiveView — those expose the transparent
+						// t-addr + xpub under a "Shielded ZEC" heading.
+						<Suspense fallback={<Spinner size="sm" color="kk.gold" />}>
+							<ZcashPrivacyTab initialPage={safeInitial === "send" ? "send" : "receive"} />
+						</Suspense>
+					) : view === "send" ? (
 						isBtc && !btcSelected?.xpubData ? (
 							<Flex align="center" justify="center" minH="200px">
 								<Spinner size="sm" color="kk.gold" mr="2" />

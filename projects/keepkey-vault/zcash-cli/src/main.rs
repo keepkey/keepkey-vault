@@ -601,11 +601,17 @@ async fn handle_balance(state: &mut State, _params: &Value) -> Result<Value> {
     let spendable_confirmed: u64 = spendable_notes.iter().map(|n| n.value).sum();
     let spendable_count = spendable_notes.len() as u64;
 
+    // Immature slice: unspent notes still inside the MIN_CONFIRMATIONS window
+    // (e.g. change from a just-broadcast unshield). `confirmed` stays the total
+    // — portfolio consumers sum it — while UIs subtract `pending` to show what
+    // is actually spendable now.
+    let pending = balance.saturating_sub(spendable_confirmed);
+
     Ok(serde_json::json!({
         "confirmed": balance,
         "orchard_confirmed": orchard_balance,
         "ironwood_confirmed": ironwood_balance,
-        "pending": 0,
+        "pending": pending,
         "notes_total": total,
         "notes_unspent": unspent,
         "spendable_confirmed": spendable_confirmed,
