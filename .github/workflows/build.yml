@@ -59,6 +59,10 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
+      - name: Install protobuf compiler for zcash-cli (macOS)
+        if: runner.os == 'macOS'
+        run: brew install protobuf
+
       - name: Install Yarn
         run: npm install -g yarn
 
