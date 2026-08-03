@@ -35,6 +35,11 @@ export const AddressRequest = z.object({
   script_type: z.string().optional(),
 }).passthrough()
 
+/** POST /system/info/get-entropy */
+export const GetEntropyRequest = z.object({
+  size: z.number().int().min(1).max(8192),
+}).strict()
+
 /** POST /auth/pair */
 export const PairRequest = z.object({
   name: z.string().min(1),

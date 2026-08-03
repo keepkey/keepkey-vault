@@ -295,6 +295,7 @@ function formatFeatures(f: any): any {
     model: f.model,
     firmware_variant: f.firmwareVariant,
     firmware_hash: decodeB64(f.firmwareHash),
+    supports_taproot: f.supportsTaproot === true,
     no_backup: f.noBackup,
     wipe_code_protection: f.wipeCodeProtection,
     auto_lock_delay_ms: f.autoLockDelayMs,
@@ -1949,10 +1950,12 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.AddressRequest)
+          const sd = showDisplay(body.show_display)
           const cacheKey = scopedKey(engine, 'utxo', body)
           const cached = addressCache.get(cacheKey)
-          if (cached) return json({ address: cached })
-          const sd = showDisplay(body.show_display)
+          // A trusted-display request must always reach the device. Returning
+          // a cached value would silently skip the confirmation it requested.
+          if (cached && !sd) return json({ address: cached })
           const result = await emuWrap(() => wallet.btcGetAddress({
             addressNList: body.address_n,
             coin: body.coin || 'Bitcoin',
@@ -3044,6 +3047,28 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const wallet = requireWallet(engine)
           const features = await getCachedFeatures(wallet)
           return json(validateResponse(formatFeatures(features), S.FeaturesResponse, path))
+        }
+
+        if (path === '/system/info/get-entropy' && method === 'POST') {
+          auth.requireAuth(req)
+          const wallet = requireWallet(engine)
+          const body = await parseRequest(req, S.GetEntropyRequest)
+          const entropy = await emuWrap(
+            () => (wallet as any).getEntropy(body.size),
+            { operation: 'getEntropy', opLabel: 'Generate Entropy', chain: 'Device' },
+          )
+          if (!(entropy instanceof Uint8Array) || entropy.length !== body.size) {
+            throw new HttpError(500, `Device returned ${entropy?.length ?? 0} entropy bytes; expected ${body.size}`)
+          }
+          return new Response(Buffer.from(entropy), {
+            status: 200,
+            headers: {
+              ...corsHeaders(req),
+              'Content-Type': 'application/octet-stream',
+              'Content-Length': String(entropy.length),
+              'Cache-Control': 'no-store',
+            },
+          })
         }
 
         if (path === '/system/info/get-public-key' && method === 'POST') {

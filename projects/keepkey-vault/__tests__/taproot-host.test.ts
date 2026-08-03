@@ -3,7 +3,7 @@ import { addressToScriptPubKeyHex } from '../src/bun/txbuilder/utxo'
 import { BtcAccountManager } from '../src/bun/btc-accounts'
 import { btcTaprootSupported, supportedBtcScriptTypes } from '../src/shared/chains'
 import { generatePathMatrix } from '../src/bun/sweep-engine'
-import { ListUnspentRequest, PortfolioBalancesRequest, TxHistoryRequest } from '../src/bun/schemas'
+import { GetEntropyRequest, ListUnspentRequest, PortfolioBalancesRequest, TxHistoryRequest } from '../src/bun/schemas'
 
 const BIP350_P2TR = 'bc1p0xlxvlhemja6c4dqv22uapctqupfhlxm9h8z3k2e72q4k9hcz7vqzk5jj0'
 const BIP350_P2TR_SCRIPT = '512079be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798'
@@ -70,5 +70,15 @@ describe('Taproot discovery consumers', () => {
     expect(TxHistoryRequest.parse({
       queries: [{ caip: 'bip122:bitcoin/slip44:0', pubkey: 'xpub-test', scriptType: 'p2tr' }],
     }).queries[0].scriptType).toBe('p2tr')
+  })
+})
+
+describe('RC24 entropy host contract', () => {
+  test('accepts only whole-byte requests in the firmware 1..8192 range', () => {
+    expect(GetEntropyRequest.parse({ size: 1 }).size).toBe(1)
+    expect(GetEntropyRequest.parse({ size: 8192 }).size).toBe(8192)
+    expect(() => GetEntropyRequest.parse({ size: 0 })).toThrow()
+    expect(() => GetEntropyRequest.parse({ size: 8193 })).toThrow()
+    expect(() => GetEntropyRequest.parse({ size: 1.5 })).toThrow()
   })
 })
