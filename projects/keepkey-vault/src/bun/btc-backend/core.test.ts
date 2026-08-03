@@ -4,6 +4,7 @@
  * if wrong). No network. Run: bun src/bun/btc-backend/core.test.ts
  */
 import { xpubToDescriptorParts, descriptorFor, btcToSats, feerateToSatVb, parseDescriptor, coreUtxoPath } from './core'
+import { utxoDiscoveryKey, unwrapUtxoDiscoveryKey } from './types'
 
 let pass = 0
 function eq(a: any, b: any, msg: string) {
@@ -17,6 +18,9 @@ const ZPUB = 'zpub6rFR7y4Q2AijBEqTUquhVz398htDFrtymD9xYYfG1m4wAcvPhXNfE3EfH1r1AD
 const parts = xpubToDescriptorParts(ZPUB)
 eq(parts.script, 'wpkh', 'zpub → wpkh script')
 ok(parts.stdXpub.startsWith('xpub'), 'zpub re-encoded to standard xpub prefix')
+const taprootParts = xpubToDescriptorParts(parts.stdXpub, 'p2tr')
+eq(taprootParts.script, 'tr', 'explicit p2tr + plain xpub → tr script')
+eq(taprootParts.stdXpub, parts.stdXpub, 'taproot preserves standard xpub bytes')
 
 // Unsupported version bytes must throw, not silently mis-scan
 let threw = false
@@ -27,6 +31,12 @@ ok(threw, 'garbage xpub throws')
 eq(descriptorFor('wpkh', 'XP', 0), 'wpkh(XP/0/*)', 'wpkh receive descriptor')
 eq(descriptorFor('sh_wpkh', 'XP', 1), 'sh(wpkh(XP/1/*))', 'sh(wpkh) change descriptor')
 eq(descriptorFor('pkh', 'XP', 0), 'pkh(XP/0/*)', 'pkh descriptor')
+eq(descriptorFor('tr', 'XP', 1), 'tr(XP/1/*)', 'taproot change descriptor')
+
+eq(utxoDiscoveryKey('XP', 'p2tr'), 'tr(XP)', 'P2TR discovery wraps plain xpub')
+eq(utxoDiscoveryKey('tr(XP)', 'p2tr'), 'tr(XP)', 'P2TR discovery wrapping is idempotent')
+eq(utxoDiscoveryKey('XP', 'p2wpkh'), 'XP', 'non-P2TR discovery leaves xpub unchanged')
+eq(unwrapUtxoDiscoveryKey('tr(XP)'), 'XP', 'discovery descriptor unwraps to plain xpub')
 
 // BTC float → integer sats (the classic rounding trap)
 eq(btcToSats(0.00099705), 99705, 'btcToSats sub-BTC')
@@ -49,6 +59,9 @@ eq(shwpkh.scriptType, 'p2sh-p2wpkh', 'sh(wpkh) desc → p2sh-p2wpkh')
 const pkh = parseDescriptor("pkh([abcd1234/44'/0'/0'/0/2]0289ab)#cs")
 eq(pkh.path, "m/44'/0'/0'/0/2", 'pkh desc → path')
 eq(pkh.scriptType, 'p2pkh', 'pkh desc → p2pkh')
+const tr = parseDescriptor("tr([abcd1234/86'/0'/0'/0/3]0289ab)#cs")
+eq(tr.path, "m/86'/0'/0'/0/3", 'tr desc → path')
+eq(tr.scriptType, 'p2tr', 'tr desc → p2tr')
 const none = parseDescriptor(undefined)
 ok(none.path === undefined && none.scriptType === undefined, 'undefined desc → empty')
 
@@ -58,6 +71,7 @@ eq(coreUtxoPath('wpkh([abcd1234/0/18]0289ab)#cs', 'wpkh'), "m/84'/0'/0'/0/18", '
 eq(coreUtxoPath('wpkh([abcd1234/1/4]0289ab)#cs', 'wpkh'), "m/84'/0'/0'/1/4", 'change branch preserved')
 eq(coreUtxoPath('pkh([abcd1234/0/2]0289ab)#cs', 'pkh'), "m/44'/0'/0'/0/2", 'legacy → purpose 44')
 eq(coreUtxoPath('sh(wpkh([abcd1234/0/7]0289ab))#cs', 'sh_wpkh'), "m/49'/0'/0'/0/7", 'wrapped segwit → purpose 49')
+eq(coreUtxoPath('tr([abcd1234/1/6]0289ab)#cs', 'tr'), "m/86'/0'/0'/1/6", 'taproot → purpose 86')
 // Already-full origin (if Core ever echoes it) still collapses to account-0 form.
 eq(coreUtxoPath("wpkh([abcd1234/84'/0'/0'/0/9]0289ab)#cs", 'wpkh'), "m/84'/0'/0'/0/9", 'full origin → last two segments')
 ok(coreUtxoPath('wpkh(0289ab)#cs', 'wpkh') === undefined, 'no origin → undefined (falls back to enrichment)')

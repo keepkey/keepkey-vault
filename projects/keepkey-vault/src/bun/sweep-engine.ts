@@ -8,7 +8,7 @@
  * Workflow: generate path matrix → derive addresses from device →
  *   check balances via Pioneer → build sweep tx → sign → broadcast.
  */
-import { BTC_SCRIPT_TYPES, btcAccountPath } from '../shared/chains'
+import { btcScriptTypes, btcTaprootSupported, btcAccountPath } from '../shared/chains'
 import { getBackendForNetwork } from './btc-backend'
 import coinSelectSplit from 'coinselect/split'
 
@@ -21,6 +21,7 @@ const STANDARD_COMBOS = new Set([
   '44:p2pkh',
   '49:p2sh-p2wpkh',
   '84:p2wpkh',
+  '86:p2tr',
 ])
 
 // ── Types ──────────────────────────────────────────────────────────
@@ -70,6 +71,8 @@ export interface SweepScanConfig {
   gapLimitReceive?: number        // Category B receive depth (default 5)
   gapLimitChange?: number         // change-branch depth for Cat B + Cat C (default 1)
   higherReceiveLimit?: number     // Category C receive depth (default 3)
+  /** Internal capability gate; startScan derives this from the connected device. */
+  includeTaproot?: boolean
 }
 
 // Live per-path progress, emitted as each path is derived/checked so the UI can
@@ -118,10 +121,11 @@ export function generatePathMatrix(config: SweepScanConfig): PathEntry[] {
   const gapChange = Math.max(config.gapLimitChange ?? 1, 0)
   const higherReceive = Math.max(config.higherReceiveLimit ?? 3, 1)
 
-  const scriptTypes = BTC_SCRIPT_TYPES.map(st => st.scriptType)
+  const supportedTypes = btcScriptTypes(config.includeTaproot)
+  const scriptTypes = supportedTypes.map(st => st.scriptType)
 
   // Category A: Account-level keys (3-element paths)
-  for (const st of BTC_SCRIPT_TYPES) {
+  for (const st of supportedTypes) {
     for (let acct = acctMin; acct <= acctMax; acct++) {
       const acctPath = btcAccountPath(st.purpose, acct) // 3-element
       for (const encodeAs of scriptTypes) {
@@ -137,7 +141,7 @@ export function generatePathMatrix(config: SweepScanConfig): PathEntry[] {
 
   // Category B: Purpose/scriptType mismatches (5-element paths)
   for (let acct = 0; acct < mismatchAccts; acct++) {
-    for (const st of BTC_SCRIPT_TYPES) {
+    for (const st of supportedTypes) {
       for (const encodeAs of scriptTypes) {
         // Skip standard combos
         if (STANDARD_COMBOS.has(`${st.purpose}:${encodeAs}`)) continue
@@ -161,7 +165,7 @@ export function generatePathMatrix(config: SweepScanConfig): PathEntry[] {
   const currentMax = config.currentMaxAccount ?? 0
   const higherLimit = config.higherAccountScanLimit ?? Math.min(currentMax + 10, 19)
   for (let acct = currentMax + 1; acct <= higherLimit; acct++) {
-    for (const st of BTC_SCRIPT_TYPES) {
+    for (const st of supportedTypes) {
       // Standard combo: purpose matches scriptType
       // Probe receive indices 0..higherReceive-1 + change to catch funds beyond first address
       for (let idx = 0; idx < higherReceive; idx++) {
@@ -242,7 +246,7 @@ async function fetchTxHex(txid: string, networkId: string = BTC_NETWORK_ID): Pro
 
 export async function startScan(wallet: any, config: SweepScanConfig = {}, onProgress?: SweepProgressFn): Promise<string> {
   const id = crypto.randomUUID()
-  const matrix = generatePathMatrix(config)
+  const matrix = generatePathMatrix({ ...config, includeTaproot: await btcTaprootSupported(wallet) })
 
   const scan: SweepScan = {
     id,

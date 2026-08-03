@@ -43,6 +43,7 @@ export interface DeviceFeatures {
   model: string
   firmware_variant: string
   firmware_hash: string
+  supports_taproot?: boolean
   no_backup: boolean
   wipe_code_protection: boolean
   auto_lock_delay_ms: number
@@ -58,6 +59,7 @@ export interface DeviceInfo {
 
 export interface SignedTx {
   serializedTx?: string
+  signatures?: string[]
   r?: string
   s?: string
   v?: number

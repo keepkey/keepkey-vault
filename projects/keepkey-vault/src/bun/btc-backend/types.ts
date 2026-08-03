@@ -35,12 +35,25 @@ export interface BtcBackend {
   /** history=false → e.g. a pruned Core node via scantxoutset (balance+UTXO only). */
   readonly capabilities: { history: boolean; push: boolean }
 
-  /** UTXOs for an xpub (gap scan) or a single address. Pioneer accepts either. */
-  listUnspent(q: { network: string; xpub?: string; address?: string }): Promise<BtcUtxo[]>
+  /** UTXOs for an xpub (gap scan) or a single address. scriptType is mandatory
+   * in practice for P2TR because BIP86 uses the same xpub version as BIP44. */
+  listUnspent(q: { network: string; xpub?: string; address?: string; scriptType?: string }): Promise<BtcUtxo[]>
   feeRate(network: string): Promise<BtcFeeRates>
   broadcast(q: { network: string; rawTxHex: string }): Promise<{ txid: string }>
   rawTxHex(q: { network: string; txid: string }): Promise<string | undefined>
 
   /** Tip height for a "Test connection" health check. Optional — only self-host needs it. */
   tipHeight?(): Promise<number>
+}
+
+/** Blockbook's canonical BIP86 account identifier. A bare xpub cannot carry
+ * P2TR intent because BIP86 intentionally kept the BIP32 `xpub` version bytes. */
+export function utxoDiscoveryKey(xpub: string, scriptType?: string): string {
+  if (scriptType !== 'p2tr' || xpub.startsWith('tr(')) return xpub
+  return `tr(${xpub})`
+}
+
+export function unwrapUtxoDiscoveryKey(key: string): string {
+  const match = /^tr\((.+)\)$/.exec(key)
+  return match?.[1] || key
 }

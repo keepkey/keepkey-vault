@@ -167,6 +167,10 @@ export class KeepKeySdk {
       getFeatures: (): Promise<DeviceFeatures> =>
         this.client.post('/system/info/get-features'),
 
+      /** Return `size` fresh bytes from the device hardware RNG (1..8192). */
+      getEntropy: (size: number): Promise<Uint8Array> =>
+        this.client.postBytes('/system/info/get-entropy', { size }, this.client.signingTimeoutMs),
+
       /** List all connected KeepKey devices. */
       getDevices: (): Promise<{ devices: DeviceInfo[]; total: number }> =>
         this.client.get('/api/v2/devices'),
@@ -285,7 +289,11 @@ export class KeepKeySdk {
   address = {
     /** Derive a UTXO (BTC/LTC/BCH/DOGE/DASH) address. */
     utxoGetAddress: (params: AddressRequest): Promise<{ address: string }> =>
-      this.client.post('/addresses/utxo', params),
+      this.client.post(
+        '/addresses/utxo',
+        params,
+        params.show_display ? this.client.signingTimeoutMs : undefined,
+      ),
 
     /** Derive an Ethereum (or EVM-compatible) address. */
     ethGetAddress: (params: AddressRequest): Promise<{ address: string }> =>
@@ -382,7 +390,7 @@ export class KeepKeySdk {
   btc = {
     /** Sign a UTXO transaction (BTC, LTC, BCH, DOGE, DASH, etc.). */
     btcSignTransaction: (params: BtcSignTxParams): Promise<SignedTx> =>
-      this.client.post('/utxo/sign-transaction', params),
+      this.client.post('/utxo/sign-transaction', params, this.client.signingTimeoutMs),
   }
 
   // ═══════════════════════════════════════════════════════════════════

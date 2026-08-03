@@ -74,9 +74,14 @@ export function extractAddress(result: any): string {
  * defaultPath[1]. Deriving the xpub per account lets Pioneer gap-scan the whole
  * account tree server-side — far faster than walking individual addresses.
  */
-export function utxoAccountScriptPaths(chain: ChainDef, account: number): Array<{ scriptType: string; path: number[] }> {
+export function utxoAccountScriptPaths(chain: ChainDef, account: number, includeBitcoinTaproot = false): Array<{ scriptType: string; path: number[] }> {
   const scriptTypes = (chain.id === 'litecoin' || chain.id === 'bitcoin')
-    ? [{ scriptType: 'p2pkh', purpose: 44 }, { scriptType: 'p2sh-p2wpkh', purpose: 49 }, { scriptType: 'p2wpkh', purpose: 84 }]
+    ? [
+      { scriptType: 'p2pkh', purpose: 44 },
+      { scriptType: 'p2sh-p2wpkh', purpose: 49 },
+      { scriptType: 'p2wpkh', purpose: 84 },
+      ...(chain.id === 'bitcoin' && includeBitcoinTaproot ? [{ scriptType: 'p2tr', purpose: 86 }] : []),
+    ]
     : [{ scriptType: chain.scriptType || 'p2pkh', purpose: 44 }]
   const out = scriptTypes.map(st => ({
     scriptType: st.scriptType,

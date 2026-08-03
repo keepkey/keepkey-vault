@@ -4,7 +4,7 @@ import { Box, Flex, Text, Button, Image, VStack, HStack, IconButton, Spinner } f
 import { FaPlus, FaEye, FaEyeSlash, FaShieldAlt, FaCheck, FaCopy, FaTag, FaChevronDown, FaChevronUp } from "react-icons/fa"
 import { rpcRequest, onRpcMessage } from "../lib/rpc"
 import type { ChainDef } from "../../shared/chains"
-import { CHAINS, BTC_SCRIPT_TYPES, btcAccountPath, isChainSupported } from "../../shared/chains"
+import { CHAINS, btcScriptTypeConfig, btcAccountPath, isChainSupported } from "../../shared/chains"
 import type { ChainBalance, TokenBalance, TokenVisibilityStatus, AppSettings, SwapAsset } from "../../shared/types"
 import { VAULT_CHAIN_TO_THOR } from "../../shared/swap-discovery"
 import { getAssetIcon } from "../../shared/assetLookup"
@@ -218,7 +218,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 	const btcSelected = useMemo(() => {
 		if (!isBtc || !btcAccounts.selectedXpub) return null
 		const { accountIndex, scriptType } = btcAccounts.selectedXpub
-		const stConfig = BTC_SCRIPT_TYPES.find(s => s.scriptType === scriptType)
+		const stConfig = btcScriptTypeConfig(scriptType)
 		if (!stConfig) return null
 		const accountPath = btcAccountPath(stConfig.purpose, accountIndex)
 		const fullPath = [...accountPath, btcChangeIndex, btcAddressIndex]
@@ -332,7 +332,10 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 			?.xpub
 		if (!xpub) return
 		let cancelled = false
-		rpcRequest<{ receiveIndex: number; changeIndex: number }>('getBtcAddressIndices', { xpub }, 30000)
+		rpcRequest<{ receiveIndex: number; changeIndex: number }>('getBtcAddressIndices', {
+			xpub,
+			scriptType: btcAccounts.selectedXpub?.scriptType ?? 'p2wpkh',
+		}, 30000)
 			.then((indices) => {
 				if (cancelled) return
 				setPioneerIndices(indices)

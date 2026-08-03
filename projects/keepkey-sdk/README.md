@@ -92,6 +92,24 @@ import spec from 'keepkey-vault-sdk/openapi/swagger.json'
 
 Use it with Swagger UI, Redoc, or any OpenAPI-compatible tool.
 
+## RC24 hardware acceptance
+
+The RC24 gate runs through the production SDK → Vault → hdwallet → KeepKey
+path. It is interactive, never wipes or loads a device, never broadcasts, and
+is excluded from normal test runs unless its hardware guard and one explicit
+phase are supplied.
+
+```bash
+RC24_EXPECT_FIRMWARE_HASH=<sha256> KEEPKEY_API_KEY=... npm run test:rc24:hardware -- taproot
+RC24_EXPECT_FIRMWARE_HASH=<sha256> KEEPKEY_API_KEY=... npm run test:rc24:hardware -- p2wpkh-control
+RC24_EXPECT_FIRMWARE_HASH=<sha256> KEEPKEY_API_KEY=... npm run test:rc24:hardware -- locked-entropy
+RC24_EXPECT_FIRMWARE_HASH=<sha256> KEEPKEY_API_KEY=... npm run test:rc24:hardware -- entropy-budget
+```
+
+Run `locked-entropy` on an initialized PIN-protected test device. Run
+`entropy-budget` only on a disposable, uninitialized device immediately after
+a power cycle. The runner itself never changes device initialization state.
+
 ## Security
 
 - Every signing operation requires the user to confirm on the KeepKey hardware device.

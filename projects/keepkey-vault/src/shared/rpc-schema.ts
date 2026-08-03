@@ -121,7 +121,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       getBtcAccounts: { params: void; response: BtcAccountSet }
       addBtcAccount: { params: void; response: BtcAccountSet }
       setBtcSelectedXpub: { params: { accountIndex: number; scriptType: BtcScriptType }; response: void }
-      getBtcAddressIndices: { params: { xpub: string }; response: { receiveIndex: number; changeIndex: number } }
+      getBtcAddressIndices: { params: { xpub: string; scriptType: BtcScriptType }; response: { receiveIndex: number; changeIndex: number } }
 
       // ── UTXO altcoin multi-account (LTC/DOGE/DASH/…) ───────────────────
       // Persist a discovered account's xpubs to the device-scoped pubkey cache
