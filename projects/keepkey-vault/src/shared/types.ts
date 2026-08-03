@@ -291,11 +291,11 @@ export interface ZcashTransaction {
 }
 
 // ── Bitcoin multi-account types ─────────────────────────────────────────
-export type BtcScriptType = 'p2pkh' | 'p2sh-p2wpkh' | 'p2wpkh'
+export type BtcScriptType = 'p2pkh' | 'p2sh-p2wpkh' | 'p2wpkh' | 'p2tr'
 
 export interface BtcXpub {
   scriptType: BtcScriptType
-  purpose: number              // 44, 49, or 84
+  purpose: number              // 44, 49, 84, or 86
   path: number[]               // [purpose+H, 0+H, account+H]
   xpub: string                 // xpub/ypub/zpub string
   xpubPrefix: 'xpub' | 'ypub' | 'zpub'
@@ -305,7 +305,7 @@ export interface BtcXpub {
 
 export interface BtcAccount {
   accountIndex: number
-  xpubs: BtcXpub[]             // always 3 (one per script type)
+  xpubs: BtcXpub[]             // 3 legacy types, plus P2TR when firmware advertises it
   totalBalanceUsd: number
 }
 
@@ -369,7 +369,7 @@ export interface AddressBookEntry {
   address: string            // recipient/own address (normalized); xpub for own UTXO rows
   label?: string
   derivationPath?: string    // own rows — label binds to path, survives re-derive
-  scriptType?: string        // own UTXO rows (p2pkh|p2sh-p2wpkh|p2wpkh)
+  scriptType?: string        // own UTXO rows (p2pkh|p2sh-p2wpkh|p2wpkh|p2tr)
   addressIndex?: number      // own EVM index / BTC account index
   firstSeenTxid?: string     // external rows — txid that introduced the recipient
   note?: string

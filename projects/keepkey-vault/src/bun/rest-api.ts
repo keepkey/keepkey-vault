@@ -31,6 +31,7 @@ import { buildSolanaDecodedInfo } from './solana-clearsign'
 import { buildSolanaMessageDecodedInfo } from './solana-message-preview'
 import { requiresSolanaBlindSigningConsent } from './solana-consent'
 import { createRpcAltFetcher, DEFAULT_SOLANA_RPC_ENDPOINT } from './solana-alt'
+import { utxoDiscoveryKey } from './btc-backend/types'
 import {
   buildTonTransfer,
   assembleTonSignedBoc,
@@ -3330,7 +3331,13 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           // UTXO (xpubs) and non-EVM address-based entries
           for (const pk of cachedPks) {
             const caip = chainIdToCaip.get(pk.chainId) || ''
-            if (pk.xpub) pubkeys.push({ caip, pubkey: pk.xpub, label: `${pk.chainId}:xpub` })
+            if (pk.xpub) pubkeys.push({
+              caip,
+              pubkey: pk.chainId === 'bitcoin'
+                ? utxoDiscoveryKey(pk.xpub, pk.scriptType || 'p2pkh')
+                : pk.xpub,
+              label: `${pk.chainId}:xpub`,
+            })
             else if (pk.address) pubkeys.push({ caip, pubkey: pk.address, label: `${pk.chainId}:addr` })
           }
 

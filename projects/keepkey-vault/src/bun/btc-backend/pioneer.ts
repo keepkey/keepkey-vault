@@ -6,14 +6,15 @@
  */
 import { getPioneer } from '../pioneer'
 import type { BtcBackend } from './types'
+import { utxoDiscoveryKey } from './types'
 import { unwrapUtxos, normalizeUtxo, normalizeFeeRates, extractTxid } from './normalize'
 
 export const PioneerBackend: BtcBackend = {
   kind: 'pioneer',
   capabilities: { history: true, push: true },
 
-  async listUnspent({ network, xpub, address }) {
-    const key = xpub ?? address
+  async listUnspent({ network, xpub, address, scriptType }) {
+    const key = xpub ? utxoDiscoveryKey(xpub, scriptType) : address
     if (!key) return []
     const pioneer = await getPioneer()
     const resp = await pioneer.ListUnspent({ network, xpub: key })

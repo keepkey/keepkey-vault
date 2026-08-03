@@ -11,6 +11,7 @@
  * out. getrawtransaction needs txindex=1 (for spending legacy inputs).
  */
 import type { BtcBackend, BtcUtxo, BtcFeeRates } from './types'
+import { unwrapUtxoDiscoveryKey, utxoDiscoveryKey } from './types'
 import bs58check from 'bs58check'
 
 export interface CoreConfig {
@@ -47,24 +48,33 @@ const utxoCache = new Map<string, { at: number; utxos: BtcUtxo[] }>()
 
 /** SLIP-132 version bytes → the script function Core needs. We re-encode to a
  *  standard xpub (0x0488b21e) so Core's descriptor parser accepts it. */
-const SLIP132_SCRIPT: Record<string, 'wpkh' | 'sh_wpkh' | 'pkh'> = {
+type ScriptKind = 'wpkh' | 'sh_wpkh' | 'pkh' | 'tr'
+
+const SLIP132_SCRIPT: Record<string, Exclude<ScriptKind, 'tr'>> = {
   '0488b21e': 'pkh',     // xpub  — legacy p2pkh
   '049d7cb2': 'sh_wpkh', // ypub  — p2sh-wrapped segwit
   '04b24746': 'wpkh',    // zpub  — native segwit
 }
 
-export function xpubToDescriptorParts(xpub: string): { stdXpub: string; script: 'wpkh' | 'sh_wpkh' | 'pkh' } {
-  const data = Buffer.from(bs58check.decode(xpub))
+export function xpubToDescriptorParts(xpub: string, scriptType?: string): { stdXpub: string; script: ScriptKind } {
+  const explicitTaproot = scriptType === 'p2tr' || xpub.startsWith('tr(')
+  const data = Buffer.from(bs58check.decode(unwrapUtxoDiscoveryKey(xpub)))
   const version = data.subarray(0, 4).toString('hex')
-  const script = SLIP132_SCRIPT[version]
-  if (!script) throw new Error(`Unsupported xpub version bytes ${version} — self-host supports mainnet xpub/ypub/zpub`)
+  const script = explicitTaproot ? 'tr' : SLIP132_SCRIPT[version]
+  if (!script) throw new Error(`Unsupported xpub version bytes ${version} — self-host supports mainnet xpub/ypub/zpub and explicit P2TR`)
+  if (explicitTaproot && version !== '0488b21e') {
+    throw new Error(`Taproot requires a standard mainnet xpub (found version bytes ${version})`)
+  }
   const std = Buffer.concat([Buffer.from('0488b21e', 'hex'), data.subarray(4)])
   return { stdXpub: bs58check.encode(std), script }
 }
 
-export function descriptorFor(script: 'wpkh' | 'sh_wpkh' | 'pkh', xpub: string, branch: number): string {
+export function descriptorFor(script: ScriptKind, xpub: string, branch: number): string {
   const inner = `${xpub}/${branch}/*`
-  return script === 'wpkh' ? `wpkh(${inner})` : script === 'sh_wpkh' ? `sh(wpkh(${inner}))` : `pkh(${inner})`
+  return script === 'wpkh' ? `wpkh(${inner})`
+    : script === 'sh_wpkh' ? `sh(wpkh(${inner}))`
+    : script === 'tr' ? `tr(${inner})`
+    : `pkh(${inner})`
 }
 
 /** Core reports amounts in BTC (float); UTXO values are integer sats. */
@@ -76,18 +86,21 @@ export function btcToSats(amount: number): number {
  *  e.g. `wpkh([fp/84h/0h/0h/0/18]02ab..)#cs`. Pull out the m/… path (needed to
  *  sign) and the scriptType (from the descriptor wrapper). Core emits hardened as
  *  `h` OR `'` depending on version — normalize both to `'`. */
-const DESC_SCRIPT: Record<string, string> = { wpkh: 'p2wpkh', 'sh(wpkh': 'p2sh-p2wpkh', pkh: 'p2pkh' }
+const DESC_SCRIPT: Record<string, string> = { wpkh: 'p2wpkh', 'sh(wpkh': 'p2sh-p2wpkh', pkh: 'p2pkh', tr: 'p2tr' }
 export function parseDescriptor(desc?: string): { path?: string; scriptType?: string } {
   if (!desc) return {}
   const origin = desc.match(/\[[0-9a-fA-F]{8}((?:\/\d+[h']?)+)\]/)
   const path = origin ? `m${origin[1].replace(/h/g, "'")}` : undefined
-  const wrapper = desc.startsWith('sh(wpkh') ? 'sh(wpkh' : desc.startsWith('wpkh') ? 'wpkh' : desc.startsWith('pkh') ? 'pkh' : undefined
+  const wrapper = desc.startsWith('sh(wpkh') ? 'sh(wpkh'
+    : desc.startsWith('wpkh') ? 'wpkh'
+    : desc.startsWith('pkh') ? 'pkh'
+    : desc.startsWith('tr') ? 'tr'
+    : undefined
   return { path, scriptType: wrapper ? DESC_SCRIPT[wrapper] : undefined }
 }
 
-const SCRIPT_TO_TYPE = { wpkh: 'p2wpkh', sh_wpkh: 'p2sh-p2wpkh', pkh: 'p2pkh' } as const
-const SCRIPT_PURPOSE = { wpkh: 84, sh_wpkh: 49, pkh: 44 } as const
-type ScriptKind = keyof typeof SCRIPT_PURPOSE
+const SCRIPT_TO_TYPE = { wpkh: 'p2wpkh', sh_wpkh: 'p2sh-p2wpkh', pkh: 'p2pkh', tr: 'p2tr' } as const
+const SCRIPT_PURPOSE = { wpkh: 84, sh_wpkh: 49, pkh: 44, tr: 86 } as const
 
 /** Core scans an account-level xpub, so scantxoutset reports paths RELATIVE to it
  *  (e.g. m/0/18 — just branch/index). Rebuild the full BIP44/49/84 path with account
@@ -216,8 +229,8 @@ export function makeCoreBackend(cfg: CoreConfig): BtcBackend {
     kind: 'core',
     capabilities: { history: false, push: true }, // scantxoutset = balance+UTXO only, no history
 
-    async listUnspent({ xpub, address }) {
-      const key = xpub || address
+    async listUnspent({ xpub, address, scriptType }) {
+      const key = xpub ? utxoDiscoveryKey(xpub, scriptType) : address
       if (!key) return []
       const hit = utxoCache.get(key)
       if (hit && Date.now() - hit.at < SCAN_CACHE_TTL) return hit.utxos
@@ -225,7 +238,7 @@ export function makeCoreBackend(cfg: CoreConfig): BtcBackend {
       if (address) {
         utxos = await withLegacyHex(await scan([`addr(${address})`], 1))
       } else {
-        const { stdXpub, script } = xpubToDescriptorParts(xpub!)
+        const { stdXpub, script } = xpubToDescriptorParts(xpub!, scriptType)
         utxos = await withLegacyHex(await scan([descriptorFor(script, stdXpub, 0), descriptorFor(script, stdXpub, 1)], 1000, script))
       }
       utxoCache.set(key, { at: Date.now(), utxos })

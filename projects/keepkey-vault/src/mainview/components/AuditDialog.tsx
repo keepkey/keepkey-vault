@@ -76,6 +76,7 @@ function scriptLabel(st: string): string {
   if (st === 'p2pkh') return 'Legacy'
   if (st === 'p2sh-p2wpkh') return 'SegWit'
   if (st === 'p2wpkh') return 'Native SegWit'
+  if (st === 'p2tr') return 'Taproot'
   return st
 }
 

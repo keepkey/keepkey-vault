@@ -15,6 +15,7 @@ import type { ReportData, ReportSection, ChainBalance } from '../shared/types'
 import { getLatestDeviceSnapshot, getCachedPubkeys, getSetting } from './db'
 import { getPioneer } from './pioneer'
 import { CHAINS } from '../shared/chains'
+import { utxoDiscoveryKey } from './btc-backend/types'
 
 const BTC_NETWORK_ID = CHAINS.find(c => c.id === 'bitcoin')!.networkId
 
@@ -38,9 +39,9 @@ function safeRoundSats(value: unknown): number {
 
 // ── Pioneer API Helpers (via SDK client) ─────────────────────────────
 
-async function fetchPubkeyInfo(xpub: string): Promise<any> {
+async function fetchPubkeyInfo(xpub: string, scriptType?: string): Promise<any> {
 	const pioneer = await getPioneer()
-	const resp = await pioneer.GetPubkeyInfo({ network: BTC_NETWORK_ID, xpub })
+	const resp = await pioneer.GetPubkeyInfo({ network: BTC_NETWORK_ID, xpub: utxoDiscoveryKey(xpub, scriptType) })
 	const result = resp?.data || resp
 	if (typeof result !== 'object' || result === null) {
 		console.warn('[Report] fetchPubkeyInfo: unexpected response shape, returning empty object')
@@ -49,8 +50,9 @@ async function fetchPubkeyInfo(xpub: string): Promise<any> {
 	return result
 }
 
-async function fetchTxHistory(xpub: string, caip: string): Promise<any[]> {
+async function fetchTxHistory(xpub: string, caip: string, scriptType?: string): Promise<any[]> {
 	const pioneer = await getPioneer()
+	const discoveryKey = utxoDiscoveryKey(xpub, scriptType)
 
 	// Pioneer's tx history is async: first call triggers a background worker and
 	// returns { transactions: [], loading: true }. We poll up to 3 times (5s apart)
@@ -59,7 +61,7 @@ async function fetchTxHistory(xpub: string, caip: string): Promise<any[]> {
 	const RETRY_DELAY = 5000
 
 	for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-		const resp = await pioneer.GetTransactionHistory({ queries: [{ pubkey: xpub, caip }] })
+		const resp = await pioneer.GetTransactionHistory({ queries: [{ pubkey: discoveryKey, caip }] })
 		const data = resp?.data || resp
 		if (typeof data !== 'object' || data === null) {
 			console.warn('[Report] fetchTxHistory: unexpected response shape:', typeof data)
@@ -164,7 +166,7 @@ function buildCachedPubkeysSection(
 	// BTC xpubs from BtcAccountManager (always have full xpub + scriptType)
 	if (btcXpubs && btcXpubs.length > 0) {
 		const scriptTypeMap: Record<string, string> = {
-			'p2pkh': 'Legacy (P2PKH)', 'p2sh-p2wpkh': 'SegWit (P2SH-P2WPKH)', 'p2wpkh': 'Native SegWit (P2WPKH)',
+			'p2pkh': 'Legacy (P2PKH)', 'p2sh-p2wpkh': 'SegWit (P2SH-P2WPKH)', 'p2wpkh': 'Native SegWit (P2WPKH)', 'p2tr': 'Taproot (P2TR)',
 		}
 		sections.push({
 			title: `4. BTC XPUBs (${btcXpubs.length})`,
@@ -280,7 +282,7 @@ async function buildBtcSections(
 	for (const x of btcXpubs) {
 		if (!x.xpub) continue
 		try {
-			const info = await fetchPubkeyInfo(x.xpub)
+			const info = await fetchPubkeyInfo(x.xpub, x.scriptType)
 			const tokens = info.tokens || []
 			const used = tokens.filter((t: any) => (t.transfers || 0) > 0)
 			xpubInfos.push({
@@ -363,7 +365,7 @@ async function buildBtcSections(
 	for (const x of btcXpubs) {
 		if (!x.xpub) continue
 		try {
-			const txs = await fetchTxHistory(x.xpub, BTC_CAIP)
+			const txs = await fetchTxHistory(x.xpub, BTC_CAIP, x.scriptType)
 			for (const tx of txs) {
 				if (!seenTxids.has(tx.txid)) {
 					seenTxids.add(tx.txid)
@@ -594,7 +596,7 @@ export async function generateReport(opts: GenerateReportOptions): Promise<Repor
 				let totalSats = 0
 				for (const x of btcXpubs) {
 					if (!x.xpub) continue
-					const info = await fetchPubkeyInfo(x.xpub)
+					const info = await fetchPubkeyInfo(x.xpub, x.scriptType)
 					totalSats += Math.round(Number(info.balance || 0))
 				}
 				if (totalSats > 0) {

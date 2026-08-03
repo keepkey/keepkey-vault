@@ -9,6 +9,7 @@
  * a tailnet/localhost blockbook needs none.
  */
 import type { BtcBackend, BtcUtxo, BtcFeeRates } from './types'
+import { utxoDiscoveryKey } from './types'
 
 export interface BlockbookConfig {
   url: string                          // base, no trailing slash — e.g. http://host:9130
@@ -19,7 +20,7 @@ export interface BlockbookConfig {
 const DEFAULT_TIMEOUT = 30_000
 
 /** BIP32 purpose → scriptType, e.g. m/84'/… → p2wpkh. */
-const PURPOSE_SCRIPT: Record<string, string> = { '44': 'p2pkh', '49': 'p2sh-p2wpkh', '84': 'p2wpkh' }
+const PURPOSE_SCRIPT: Record<string, string> = { '44': 'p2pkh', '49': 'p2sh-p2wpkh', '84': 'p2wpkh', '86': 'p2tr' }
 function scriptTypeFromPath(path?: string): string | undefined {
   const m = path?.match(/^m\/(\d+)'/)
   return m ? PURPOSE_SCRIPT[m[1]] : undefined
@@ -59,8 +60,8 @@ export function makeBlockbookBackend(cfg: BlockbookConfig): BtcBackend {
     kind: 'blockbook',
     capabilities: { history: true, push: true },
 
-    async listUnspent({ xpub, address }) {
-      const key = xpub ?? address
+    async listUnspent({ xpub, address, scriptType }) {
+      const key = xpub ? utxoDiscoveryKey(xpub, scriptType) : address
       if (!key) return []
       const raw = await bbFetch(cfg, `/api/v2/utxo/${encodeURIComponent(key)}`)
       const utxos = (Array.isArray(raw) ? raw : [])

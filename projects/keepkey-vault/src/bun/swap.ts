@@ -8,7 +8,7 @@
  *
  * NO direct THORNode or other third-party calls — fail fast if Pioneer is down.
  */
-import { CHAINS, BTC_SCRIPT_TYPES, btcAccountPath } from '../shared/chains'
+import { CHAINS, supportedBtcScriptTypes, btcAccountPath } from '../shared/chains'
 import type { ChainDef } from '../shared/chains'
 import type { SwapAsset, SwapQuote, SwapQuoteParams, ExecuteSwapParams, SwapResult } from '../shared/types'
 import { SOLANA_BLIND_SIGNING_REQUIRED } from '../shared/types'
@@ -539,7 +539,7 @@ export interface SwapContext {
   wallet: SwapWallet
   getAllChains: () => ChainDef[]
   getRpcUrl: (chain: ChainDef) => string | undefined
-  getBtcXpub: () => { xpub: string; accountPath?: number[] } | undefined  // selected BTC xpub + account path
+  getBtcXpub: () => { xpub: string; scriptType: string; accountPath?: number[] } | undefined  // selected BTC xpub + account metadata
   getAllBtcXpubs: () => Array<{ xpub: string; scriptType: string; accountPath: number[] }>  // all funded BTC xpubs
   /** Wrap signing ops for emulator (shows confirm UI). Pass-through on real device. */
   wrapSign: (fn: () => Promise<any>, details: { operation: string; chain?: string; to?: string; value?: string; memo?: string }) => Promise<any>
@@ -733,11 +733,12 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
   // ── UTXO chains: send to vault, memo in OP_RETURN ──
   } else if (fromChain.chainFamily === 'utxo') {
     let xpub: string | undefined
+    let scriptTypeOverride: string | undefined
     let accountPath: number[] | undefined
     let allXpubs: Array<{ xpub: string; scriptType: string; accountPath: number[] }> | undefined
 
     if (isBitcoin(fromChain)) {
-      // BTC: aggregate UTXOs from ALL funded xpubs (p2pkh + p2sh-p2wpkh + p2wpkh)
+      // BTC: aggregate UTXOs from every device-supported account type.
       try {
         allXpubs = getAllBtcXpubs()
         if (allXpubs.length > 0) {
@@ -745,6 +746,7 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
           // Primary xpub for change address = selected, or first funded
           const btcInfo = getBtcXpub()
           xpub = btcInfo?.xpub || allXpubs[0].xpub
+          scriptTypeOverride = btcInfo?.scriptType || allXpubs[0].scriptType
           accountPath = btcInfo?.accountPath || allXpubs[0].accountPath
         }
       } catch { /* BTC account manager not ready */ }
@@ -752,16 +754,17 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
         // Fallback: single selected xpub
         try {
           const btcInfo = getBtcXpub()
-          if (btcInfo) { xpub = btcInfo.xpub; accountPath = btcInfo.accountPath }
+          if (btcInfo) { xpub = btcInfo.xpub; scriptTypeOverride = btcInfo.scriptType; accountPath = btcInfo.accountPath }
         } catch {}
       }
       if (!xpub) {
         // Lazy-init: btcAccountManager hasn't been hydrated (user opened swap
-        // without visiting BTC dashboard first). Derive ALL three scriptTypes
-        // (Legacy/SegWit/NativeSegWit) from device — funds may live on any.
+        // without visiting BTC dashboard first). Derive every supported account
+        // type; P2TR is included only when firmware advertises the capability.
         // Without this we'd fall through to the chain.scriptType fallback below
         // which is `p2pkh` (Legacy) and miss every modern wallet.
-        const paths = BTC_SCRIPT_TYPES.map(st => ({
+        const btcScriptTypes = await supportedBtcScriptTypes(wallet)
+        const paths = btcScriptTypes.map(st => ({
           addressNList: btcAccountPath(st.purpose, 0),
           coin: 'Bitcoin',
           scriptType: st.scriptType,
@@ -769,13 +772,14 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
         }))
         const results = await wallet.getPublicKeys(paths)
         const derived: Array<{ xpub: string; scriptType: string; accountPath: number[] }> = []
-        for (let i = 0; i < BTC_SCRIPT_TYPES.length; i++) {
+        for (let i = 0; i < btcScriptTypes.length; i++) {
           const xp = results?.[i]?.xpub
-          if (xp) derived.push({ xpub: xp, scriptType: BTC_SCRIPT_TYPES[i].scriptType, accountPath: paths[i].addressNList })
+          if (xp) derived.push({ xpub: xp, scriptType: btcScriptTypes[i].scriptType, accountPath: paths[i].addressNList })
         }
         if (derived.length > 0) {
           const native = derived.find(d => d.scriptType === 'p2wpkh') || derived[0]
           xpub = native.xpub
+          scriptTypeOverride = native.scriptType
           accountPath = native.accountPath
           allXpubs = derived
           swapLog(`${TAG} BTC lazy-derive: ${derived.length} scriptTypes from device (primary=${native.scriptType})`)
@@ -806,6 +810,7 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
       fromAddress,
       xpub,
       allXpubs,
+      scriptTypeOverride,
       accountPath,
     })
     unsignedTx = buildResult.unsignedTx
@@ -1143,6 +1148,7 @@ export async function previewSwapBuild(
   }
   if (fromChain.chainFamily === 'utxo') {
     let xpub: string | undefined
+    let scriptTypeOverride: string | undefined
     let accountPath: number[] | undefined
     let allXpubs: Array<{ xpub: string; scriptType: string; accountPath: number[] }> | undefined
     if (isBitcoin(fromChain)) {
@@ -1151,6 +1157,7 @@ export async function previewSwapBuild(
         if (allXpubs.length > 0) {
           const btcInfo = getBtcXpub()
           xpub = btcInfo?.xpub || allXpubs[0].xpub
+          scriptTypeOverride = btcInfo?.scriptType || allXpubs[0].scriptType
           accountPath = btcInfo?.accountPath || allXpubs[0].accountPath
         }
       } catch { /* BTC account manager not ready */ }
@@ -1162,13 +1169,14 @@ export async function previewSwapBuild(
       // standalone ZEC sends worked because they take a different code path.
       if (!xpub) {
         const btcInfo = (() => { try { return getBtcXpub() } catch { return undefined } })()
-        if (btcInfo) { xpub = btcInfo.xpub; accountPath = btcInfo.accountPath }
+        if (btcInfo) { xpub = btcInfo.xpub; scriptTypeOverride = btcInfo.scriptType; accountPath = btcInfo.accountPath }
       }
     }
     if (!xpub && isBitcoin(fromChain)) {
-      // Lazy-init: same as executeSwap — derive all 3 BTC scriptTypes when
+      // Lazy-init: same as executeSwap — derive all supported BTC scriptTypes when
       // btcAccountManager is empty. See executeSwap path for rationale.
-      const paths = BTC_SCRIPT_TYPES.map(st => ({
+      const btcScriptTypes = await supportedBtcScriptTypes(wallet)
+      const paths = btcScriptTypes.map(st => ({
         addressNList: btcAccountPath(st.purpose, 0),
         coin: 'Bitcoin',
         scriptType: st.scriptType,
@@ -1176,13 +1184,14 @@ export async function previewSwapBuild(
       }))
       const results = await wallet.getPublicKeys(paths)
       const derived: Array<{ xpub: string; scriptType: string; accountPath: number[] }> = []
-      for (let i = 0; i < BTC_SCRIPT_TYPES.length; i++) {
+      for (let i = 0; i < btcScriptTypes.length; i++) {
         const xp = results?.[i]?.xpub
-        if (xp) derived.push({ xpub: xp, scriptType: BTC_SCRIPT_TYPES[i].scriptType, accountPath: paths[i].addressNList })
+        if (xp) derived.push({ xpub: xp, scriptType: btcScriptTypes[i].scriptType, accountPath: paths[i].addressNList })
       }
       if (derived.length > 0) {
         const native = derived.find(d => d.scriptType === 'p2wpkh') || derived[0]
         xpub = native.xpub
+        scriptTypeOverride = native.scriptType
         accountPath = native.accountPath
         allXpubs = derived
       }
@@ -1198,7 +1207,7 @@ export async function previewSwapBuild(
     }
     const buildResult = await txb.buildTx(pioneer, fromChain, {
       chainId: fromChain.id, to: params.inboundAddress, amount: params.amount, memo: params.memo,
-      feeLevel: params.feeLevel, isMax: params.isMax, fromAddress, xpub, allXpubs, accountPath,
+      feeLevel: params.feeLevel, isMax: params.isMax, fromAddress, xpub, allXpubs, scriptTypeOverride, accountPath,
     })
     return { unsignedTx: buildResult.unsignedTx }
   }
