@@ -4,7 +4,7 @@ import { Box, Flex, Text, Button, Image, VStack, HStack, IconButton, Spinner } f
 import { FaPlus, FaEye, FaEyeSlash, FaShieldAlt, FaCheck, FaCopy, FaTag, FaChevronDown, FaChevronUp } from "react-icons/fa"
 import { rpcRequest, onRpcMessage } from "../lib/rpc"
 import type { ChainDef } from "../../shared/chains"
-import { CHAINS, BTC_SCRIPT_TYPES, btcAccountPath, isChainSupported } from "../../shared/chains"
+import { CHAINS, btcScriptTypeConfig, btcAccountPath, isChainSupported } from "../../shared/chains"
 import type { ChainBalance, TokenBalance, TokenVisibilityStatus, AppSettings, SwapAsset } from "../../shared/types"
 import { VAULT_CHAIN_TO_THOR } from "../../shared/swap-discovery"
 import { getAssetIcon } from "../../shared/assetLookup"
@@ -218,7 +218,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 	const btcSelected = useMemo(() => {
 		if (!isBtc || !btcAccounts.selectedXpub) return null
 		const { accountIndex, scriptType } = btcAccounts.selectedXpub
-		const stConfig = BTC_SCRIPT_TYPES.find(s => s.scriptType === scriptType)
+		const stConfig = btcScriptTypeConfig(scriptType)
 		if (!stConfig) return null
 		const accountPath = btcAccountPath(stConfig.purpose, accountIndex)
 		const fullPath = [...accountPath, btcChangeIndex, btcAddressIndex]
@@ -332,7 +332,10 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 			?.xpub
 		if (!xpub) return
 		let cancelled = false
-		rpcRequest<{ receiveIndex: number; changeIndex: number }>('getBtcAddressIndices', { xpub }, 30000)
+		rpcRequest<{ receiveIndex: number; changeIndex: number }>('getBtcAddressIndices', {
+			xpub,
+			scriptType: btcAccounts.selectedXpub?.scriptType ?? 'p2wpkh',
+		}, 30000)
 			.then((indices) => {
 				if (cancelled) return
 				setPioneerIndices(indices)
@@ -1036,6 +1039,17 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 										)}
 									</Flex>
 
+									{activeBalance.utxoMaturity && parseFloat(activeBalance.utxoMaturity.lockedBalance) > 0 && (
+										<Flex align="center" justify="flex-end" gap="1.5" mt="1">
+											<Text fontSize="10px" color="var(--gold)" fontFamily="mono" fontWeight="700">
+												Locked · {activeBalance.utxoMaturity.nextUnlockConfirmations}/{activeBalance.utxoMaturity.requiredConfirmations} blocks
+											</Text>
+											<Text fontSize="9px" color="var(--text-3)" fontFamily="mono">
+												{formatBalance(activeBalance.utxoMaturity.lockedBalance)} {chain.symbol}
+											</Text>
+										</Flex>
+									)}
+
 									{/* Multi-address total — only when funds are spread across
 									    >1 address on this chain. */}
 									{showEvmMultiTotal && (
@@ -1101,6 +1115,16 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 								<AnimatedUsd value={cleanBalanceUsd} prefix="≈ " fontSize="13px" fontFamily="mono" color="var(--text-2)" fontWeight="400" />
 							)}
 						</Flex>
+						{activeBalance.utxoMaturity && parseFloat(activeBalance.utxoMaturity.lockedBalance) > 0 && (
+							<Flex display={{ base: "flex", sm: "none" }} align="center" gap="1.5" mb="2">
+								<Text fontSize="10px" color="var(--gold)" fontFamily="mono" fontWeight="700">
+									Locked · {activeBalance.utxoMaturity.nextUnlockConfirmations}/{activeBalance.utxoMaturity.requiredConfirmations} blocks
+								</Text>
+								<Text fontSize="9px" color="var(--text-3)" fontFamily="mono">
+									{formatBalance(activeBalance.utxoMaturity.lockedBalance)} {chain.symbol}
+								</Text>
+							</Flex>
+						)}
 						{showEvmMultiTotal && (
 							<Flex display={{ base: "flex", sm: "none" }} align="center" gap="1" mb="3">
 								<Text fontSize="9px" color="kk.gold" lineHeight="1">⬡⬡</Text>

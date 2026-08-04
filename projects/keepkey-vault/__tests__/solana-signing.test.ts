@@ -39,7 +39,7 @@ function wireTransaction(
 }
 
 describe('Solana transaction signing route', () => {
-  test('REST schema preserves a complete descriptor but strips caller-asserted blind consent', () => {
+  test('REST schema preserves ClearSign and x402 display metadata but strips caller-asserted blind consent', () => {
     const swapMetadata = {
       payload: Buffer.from('KKSOLSW1-test').toString('base64'),
       signature: Buffer.alloc(64, 1).toString('base64'),
@@ -49,10 +49,37 @@ describe('Solana transaction signing route', () => {
       raw_tx: wireTransaction().rawTx,
       addressNList: ADDRESS_N,
       swapMetadata,
+      tokenInfo: [{
+        mint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+        symbol: 'USDC',
+        decimals: 6,
+      }],
+      tokenRecipientOwners: ['AX1TzKChJ7fhCqwUHmMbwAM8KpdYivZLKE3a4VfYk4sx'],
       allowBlindSigning: true,
     })
     expect(parsed.swapMetadata).toEqual(swapMetadata)
+    expect(parsed.tokenInfo).toEqual([{
+      mint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+      symbol: 'USDC',
+      decimals: 6,
+    }])
+    expect(parsed.tokenRecipientOwners).toEqual(['AX1TzKChJ7fhCqwUHmMbwAM8KpdYivZLKE3a4VfYk4sx'])
     expect('allowBlindSigning' in parsed).toBe(false)
+  })
+
+  test('REST schema rejects malformed x402 token display metadata', () => {
+    expect(() => SolanaSignRequest.parse({
+      raw_tx: wireTransaction().rawTx,
+      tokenInfo: [{ mint: 'mint', symbol: 'TOO-LONG-TOKEN', decimals: 6 }],
+    })).toThrow()
+    expect(() => SolanaSignRequest.parse({
+      raw_tx: wireTransaction().rawTx,
+      tokenInfo: [{ mint: 'mint', symbol: 'USDC', decimals: 6, signerKeyId: 3 }],
+    })).toThrow()
+    expect(() => SolanaSignRequest.parse({
+      raw_tx: wireTransaction().rawTx,
+      tokenRecipientOwners: ['1', '2', '3', '4', '5'],
+    })).toThrow()
   })
 
   test('REST schema rejects partial or out-of-range descriptors', () => {
@@ -135,6 +162,8 @@ describe('Solana transaction signing route', () => {
       rawTx: wire.rawTx,
       allowBlindSigning: true,
       swapMetadata,
+      tokenInfo: [{ mint: bs58.encode(Buffer.alloc(32, 0x55)), symbol: 'USDC', decimals: 6 }],
+      tokenRecipientOwners: [bs58.encode(Buffer.alloc(32, 0x66))],
     }
     const result = await signSolanaWireTransaction(
       unsignedTx,
@@ -146,6 +175,8 @@ describe('Solana transaction signing route', () => {
     expect(Buffer.from(deviceRequest.rawTx, 'base64')).toEqual(wire.message)
     expect(deviceRequest.allowBlindSigning).toBe(true)
     expect(deviceRequest.swapMetadata).toEqual(swapMetadata)
+    expect(deviceRequest.tokenInfo).toEqual(unsignedTx.tokenInfo)
+    expect(deviceRequest.tokenRecipientOwners).toEqual(unsignedTx.tokenRecipientOwners)
     expect(Buffer.from(result.signature)).toEqual(Buffer.from(signature))
     expect(Buffer.from(result.serializedTx, 'base64').subarray(1, 65)).toEqual(Buffer.from(signature))
   })

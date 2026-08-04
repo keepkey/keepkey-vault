@@ -60,6 +60,7 @@ export function initDb() {
         address     TEXT NOT NULL DEFAULT '',
         tokens_json TEXT,
         defi_positions_json TEXT,
+        utxo_maturity_json TEXT,
         updated_at  INTEGER NOT NULL,
         PRIMARY KEY (device_id, chain_id)
       )
@@ -68,6 +69,9 @@ export function initDb() {
     // predate the GetPortfolioBalances includeDefi merge.
     try {
       db.exec(`ALTER TABLE balances ADD COLUMN defi_positions_json TEXT`)
+    } catch { /* column already exists */ }
+    try {
+      db.exec(`ALTER TABLE balances ADD COLUMN utxo_maturity_json TEXT`)
     } catch { /* column already exists */ }
 
     db.exec(`
@@ -549,8 +553,8 @@ export function getCachedBalances(deviceId: string): { balances: ChainBalance[];
   try {
     if (!db) return null
     const rows = db.query(
-      'SELECT chain_id, symbol, balance, balance_usd, address, tokens_json, defi_positions_json, updated_at FROM balances WHERE device_id = ?'
-    ).all(deviceId) as Array<{ chain_id: string; symbol: string; balance: string; balance_usd: number; address: string; tokens_json: string | null; defi_positions_json: string | null; updated_at: number }>
+      'SELECT chain_id, symbol, balance, balance_usd, address, tokens_json, defi_positions_json, utxo_maturity_json, updated_at FROM balances WHERE device_id = ?'
+    ).all(deviceId) as Array<{ chain_id: string; symbol: string; balance: string; balance_usd: number; address: string; tokens_json: string | null; defi_positions_json: string | null; utxo_maturity_json: string | null; updated_at: number }>
     if (!rows || rows.length === 0) return null
     let maxUpdatedAt = 0
     const balances = rows.map(r => {
@@ -568,6 +572,9 @@ export function getCachedBalances(deviceId: string): { balances: ChainBalance[];
       }
       if (r.defi_positions_json) {
         try { entry.defiPositions = JSON.parse(r.defi_positions_json) } catch { /* corrupt JSON, skip defi */ }
+      }
+      if (r.utxo_maturity_json) {
+        try { entry.utxoMaturity = JSON.parse(r.utxo_maturity_json) } catch { /* corrupt JSON, skip maturity */ }
       }
       // Native = balanceUsd − tokens − defi. We can't reconstruct it perfectly
       // because the live path doesn't separately persist nativeBalanceUsd, but
@@ -593,8 +600,8 @@ export function setCachedBalances(deviceId: string, balances: ChainBalance[], co
     const now = Date.now()
     // Guarded upsert: keep existing non-zero if Pioneer didn't respond for this chain.
     const stmtGuarded = db.prepare(
-      `INSERT INTO balances (device_id, chain_id, symbol, balance, balance_usd, address, tokens_json, defi_positions_json, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO balances (device_id, chain_id, symbol, balance, balance_usd, address, tokens_json, defi_positions_json, utxo_maturity_json, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(device_id, chain_id) DO UPDATE SET
          symbol     = excluded.symbol,
          address    = CASE WHEN excluded.address != '' THEN excluded.address ELSE address END,
@@ -602,12 +609,13 @@ export function setCachedBalances(deviceId: string, balances: ChainBalance[], co
          balance_usd= CASE WHEN CAST(excluded.balance_usd AS REAL) > 0 THEN excluded.balance_usd ELSE balance_usd END,
          tokens_json= CASE WHEN CAST(excluded.balance_usd AS REAL) > 0 THEN excluded.tokens_json ELSE tokens_json END,
          defi_positions_json = CASE WHEN CAST(excluded.balance_usd AS REAL) > 0 THEN excluded.defi_positions_json ELSE defi_positions_json END,
+         utxo_maturity_json = CASE WHEN CAST(excluded.balance_usd AS REAL) > 0 THEN excluded.utxo_maturity_json ELSE utxo_maturity_json END,
          updated_at = CASE WHEN CAST(excluded.balance_usd AS REAL) > 0 THEN excluded.updated_at  ELSE updated_at  END`
     )
     // Forced upsert: Pioneer confirmed this chain — always write, even if balance=0.
     const stmtForced = db.prepare(
-      `INSERT INTO balances (device_id, chain_id, symbol, balance, balance_usd, address, tokens_json, defi_positions_json, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO balances (device_id, chain_id, symbol, balance, balance_usd, address, tokens_json, defi_positions_json, utxo_maturity_json, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(device_id, chain_id) DO UPDATE SET
          symbol      = excluded.symbol,
          address     = CASE WHEN excluded.address != '' THEN excluded.address ELSE address END,
@@ -615,13 +623,15 @@ export function setCachedBalances(deviceId: string, balances: ChainBalance[], co
          balance_usd = excluded.balance_usd,
          tokens_json = excluded.tokens_json,
          defi_positions_json = excluded.defi_positions_json,
+         utxo_maturity_json = excluded.utxo_maturity_json,
          updated_at  = excluded.updated_at`
     )
     const tx = db.transaction(() => {
       for (const b of balances) {
         const tokensJson = b.tokens && b.tokens.length > 0 ? JSON.stringify(b.tokens) : null
         const defiJson = b.defiPositions && b.defiPositions.length > 0 ? JSON.stringify(b.defiPositions) : null
-        const args = [deviceId, b.chainId, b.symbol, b.balance, b.balanceUsd, b.address, tokensJson, defiJson, now] as const
+        const maturityJson = b.utxoMaturity ? JSON.stringify(b.utxoMaturity) : null
+        const args = [deviceId, b.chainId, b.symbol, b.balance, b.balanceUsd, b.address, tokensJson, defiJson, maturityJson, now] as const
         if (confirmedChainIds?.has(b.chainId)) {
           stmtForced.run(...args)
         } else {
@@ -642,10 +652,11 @@ export function updateCachedBalance(deviceId: string, balance: ChainBalance, for
     if (!db) return
     const tokensJson = balance.tokens && balance.tokens.length > 0 ? JSON.stringify(balance.tokens) : null
     const defiJson = balance.defiPositions && balance.defiPositions.length > 0 ? JSON.stringify(balance.defiPositions) : null
+    const maturityJson = balance.utxoMaturity ? JSON.stringify(balance.utxoMaturity) : null
     if (force) {
       db.run(
-        `INSERT INTO balances (device_id, chain_id, symbol, balance, balance_usd, address, tokens_json, defi_positions_json, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO balances (device_id, chain_id, symbol, balance, balance_usd, address, tokens_json, defi_positions_json, utxo_maturity_json, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(device_id, chain_id) DO UPDATE SET
            symbol      = excluded.symbol,
            address     = CASE WHEN excluded.address != '' THEN excluded.address ELSE address END,
@@ -653,13 +664,14 @@ export function updateCachedBalance(deviceId: string, balance: ChainBalance, for
            balance_usd = excluded.balance_usd,
            tokens_json = excluded.tokens_json,
            defi_positions_json = excluded.defi_positions_json,
+           utxo_maturity_json = excluded.utxo_maturity_json,
            updated_at  = excluded.updated_at`,
-        [deviceId, balance.chainId, balance.symbol, balance.balance, balance.balanceUsd, balance.address, tokensJson, defiJson, Date.now()]
+        [deviceId, balance.chainId, balance.symbol, balance.balance, balance.balanceUsd, balance.address, tokensJson, defiJson, maturityJson, Date.now()]
       )
     } else {
       db.run(
-        `INSERT INTO balances (device_id, chain_id, symbol, balance, balance_usd, address, tokens_json, defi_positions_json, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO balances (device_id, chain_id, symbol, balance, balance_usd, address, tokens_json, defi_positions_json, utxo_maturity_json, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(device_id, chain_id) DO UPDATE SET
            symbol     = excluded.symbol,
            address    = CASE WHEN excluded.address != '' THEN excluded.address ELSE address END,
@@ -667,8 +679,9 @@ export function updateCachedBalance(deviceId: string, balance: ChainBalance, for
            balance_usd= CASE WHEN CAST(excluded.balance_usd AS REAL) > 0 THEN excluded.balance_usd ELSE balance_usd END,
            tokens_json= CASE WHEN CAST(excluded.balance_usd AS REAL) > 0 THEN excluded.tokens_json ELSE tokens_json END,
            defi_positions_json = CASE WHEN CAST(excluded.balance_usd AS REAL) > 0 THEN excluded.defi_positions_json ELSE defi_positions_json END,
+           utxo_maturity_json = CASE WHEN CAST(excluded.balance_usd AS REAL) > 0 THEN excluded.utxo_maturity_json ELSE utxo_maturity_json END,
            updated_at = CASE WHEN CAST(excluded.balance_usd AS REAL) > 0 THEN excluded.updated_at  ELSE updated_at  END`,
-        [deviceId, balance.chainId, balance.symbol, balance.balance, balance.balanceUsd, balance.address, tokensJson, defiJson, Date.now()]
+        [deviceId, balance.chainId, balance.symbol, balance.balance, balance.balanceUsd, balance.address, tokensJson, defiJson, maturityJson, Date.now()]
       )
     }
   } catch (e: any) {

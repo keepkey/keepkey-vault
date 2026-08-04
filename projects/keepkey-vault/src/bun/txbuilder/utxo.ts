@@ -7,12 +7,13 @@
 import coinSelect from 'coinselect'
 // @ts-ignore — coinselect/split has no types
 import coinSelectSplit from 'coinselect/split'
-// @ts-ignore — bech32 has no default export types for Bun
-import * as bech32 from 'bech32'
+import { bech32, bech32m } from '@scure/base'
 // @ts-ignore
 import bs58check from 'bs58check'
 import type { ChainDef } from '../../shared/chains'
+import { filterSpendableZcashUtxos, summarizeZcashMaturity, ZCASH_MIN_CONFIRMATIONS } from '../../shared/zcash-maturity'
 import { getBtcBackend } from '../btc-backend'
+import { utxoDiscoveryKey } from '../btc-backend/types'
 
 /** BTC mainnet — the ONLY UTXO chain that routes to a self-host node; every other
  *  coin (LTC/DOGE/BCH/Dash/Zcash) stays on Pioneer. */
@@ -87,26 +88,39 @@ const COIN_TYPE: Record<string, number> = {
 
 // Purpose by scriptType
 const PURPOSE: Record<string, number> = {
-  p2pkh: 44, 'p2sh-p2wpkh': 49, p2wpkh: 84,
+  p2pkh: 44, 'p2sh-p2wpkh': 49, p2wpkh: 84, p2tr: 86,
 }
 
 // Reverse: purpose → scriptType (for deriving scriptType from UTXO paths)
 const PURPOSE_TO_SCRIPT: Record<number, string> = {
-  44: 'p2pkh', 49: 'p2sh-p2wpkh', 84: 'p2wpkh',
+  44: 'p2pkh', 49: 'p2sh-p2wpkh', 84: 'p2wpkh', 86: 'p2tr',
 }
 
 // Convert a Bitcoin address to its scriptPubKey hex (for matching UTXOs by script)
-function addressToScriptPubKeyHex(address: string): string | undefined {
+export function addressToScriptPubKeyHex(address: string): string | undefined {
   try {
     if (address.startsWith('bc1') || address.startsWith('tb1') ||
         address.startsWith('ltc1') || address.startsWith('tltc1')) {
-      // Bech32 (native segwit p2wpkh or p2wsh)
-      const decoded = bech32.decode(address)
-      const program = bech32.fromWords(decoded.words.slice(1))
+      // BIP173 v0 uses Bech32; BIP350 v1+ (including P2TR) uses Bech32m.
+      // Decode with both, then enforce the checksum variant required by the
+      // witness version so a v1 address with an old Bech32 checksum is rejected.
+      let decoded: { prefix: string; words: number[] }
+      let isBech32m = false
+      try {
+        decoded = bech32.decode(address)
+      } catch {
+        decoded = bech32m.decode(address)
+        isBech32m = true
+      }
+      const version = decoded.words[0]
+      if (version == null || version < 0 || version > 16) return undefined
+      if ((version === 0 && isBech32m) || (version > 0 && !isBech32m)) return undefined
+      const program = (isBech32m ? bech32m : bech32).fromWords(decoded.words.slice(1))
+      if (program.length < 2 || program.length > 40) return undefined
+      if (version === 0 && program.length !== 20 && program.length !== 32) return undefined
       const hex = Buffer.from(Uint8Array.from(program)).toString('hex')
-      if (program.length === 20) return `0014${hex}` // p2wpkh
-      if (program.length === 32) return `0020${hex}` // p2wsh
-      return undefined
+      const versionOpcode = version === 0 ? '00' : (0x50 + version).toString(16).padStart(2, '0')
+      return `${versionOpcode}${program.length.toString(16).padStart(2, '0')}${hex}`
     }
     // Zcash t1... (P2PKH) and t3... (P2SH) — 2-byte version prefix
     if (address.startsWith('t1') || address.startsWith('t3')) {
@@ -224,7 +238,7 @@ async function fetchUtxosForXpub(
   console.log(`${TAG} Fetching UTXOs: network=${network}, xpub=${xpub.slice(0, 20)}...`)
   if (btcSelfHostActive(network)) {
     const backend = getBtcBackend()
-    const raw = await backend.listUnspent({ network, xpub })
+    const raw = await backend.listUnspent({ network, xpub, scriptType: defaultScriptType })
     const utxos = raw.map((u) => ({
       txid: u.txid, vout: u.vout, value: Number(u.value),
       path: u.path, address: u.address, hex: u.hex,
@@ -234,7 +248,8 @@ async function fetchUtxosForXpub(
     console.log(`${TAG} ${xpub.slice(0, 8)}...: ${utxos.length} UTXOs via self-host ${backend.kind}, ${utxos.reduce((s, u) => s + u.value, 0) / 1e8}`)
     return utxos
   }
-  const resp = await pioneer.ListUnspent({ network, xpub })
+  const discoveryKey = utxoDiscoveryKey(xpub, defaultScriptType)
+  const resp = await pioneer.ListUnspent({ network, xpub: discoveryKey })
   console.log(`${TAG} ListUnspent raw: ${JSON.stringify(resp)?.slice(0, 300)}`)
   const utxos = unwrapUtxoResponse(resp)
   for (const u of utxos) {
@@ -254,13 +269,13 @@ async function fetchUtxosForXpub(
 export async function estimateUtxoFee(
   pioneer: any,
   chain: ChainDef,
-  params: Pick<BuildUtxoParams, 'to' | 'amount' | 'feeLevel' | 'isMax' | 'xpub' | 'allXpubs' | 'accountPath' | 'satPerVByte' | 'memo'>,
+  params: Pick<BuildUtxoParams, 'to' | 'amount' | 'feeLevel' | 'isMax' | 'xpub' | 'allXpubs' | 'scriptTypeOverride' | 'accountPath' | 'satPerVByte' | 'memo'>,
 ): Promise<{ feeSat: number; netSat: number } | null> {
   try {
-    const { to, feeLevel = 5, isMax = false, xpub, allXpubs, accountPath, satPerVByte, memo } = params
+    const { to, feeLevel = 5, isMax = false, xpub, allXpubs, scriptTypeOverride, accountPath, satPerVByte, memo } = params
     const primaryXpub = xpub || allXpubs?.[0]?.xpub
     if (!primaryXpub) return null
-    const scriptType = getScriptTypeFromXpub(primaryXpub) || chain.scriptType || 'p2pkh'
+    const scriptType = scriptTypeOverride || getScriptTypeFromXpub(primaryXpub) || chain.scriptType || 'p2pkh'
 
     let utxos: any[]
     if (allXpubs && allXpubs.length > 0) {
@@ -271,6 +286,7 @@ export async function estimateUtxoFee(
     } else {
       utxos = await fetchUtxosForXpub(pioneer, chain.networkId, primaryXpub, scriptType, accountPath)
     }
+    if (chain.id === 'zcash') utxos = filterSpendableZcashUtxos(utxos)
     if (!utxos.length) return null
 
     const feeRates = await resolveFeeRates(pioneer, chain)
@@ -347,6 +363,24 @@ export async function buildUtxoTx(
     }
   } else {
     utxos = await fetchUtxosForXpub(pioneer, chain.networkId, primaryXpub, scriptType, accountPath || undefined)
+  }
+  if (chain.id === 'zcash') {
+    const maturity = summarizeZcashMaturity(utxos)
+    const allZcashUtxos = utxos
+    utxos = filterSpendableZcashUtxos(allZcashUtxos)
+    if (maturity.lockedCount > 0) {
+      console.log(
+        `${TAG} ZEC maturity: ${utxos.length} spendable, ${maturity.lockedCount} locked ` +
+        `(${maturity.nextUnlockConfirmations ?? 0}/${ZCASH_MIN_CONFIRMATIONS} confirmations)`,
+      )
+    }
+    if (utxos.length === 0 && maturity.lockedCount > 0) {
+      throw new Error(
+        `Zcash funds are locked while confirming ` +
+        `(${maturity.nextUnlockConfirmations ?? 0}/${ZCASH_MIN_CONFIRMATIONS} blocks). ` +
+        `Wait for ${ZCASH_MIN_CONFIRMATIONS} confirmations and try again.`,
+      )
+    }
   }
   if (!utxos.length) throw new Error(`No confirmed UTXOs found for ${chain.coin}. If you recently sent or received ${chain.symbol}, the transaction may still be confirming — please wait and try again.`)
 
@@ -468,9 +502,12 @@ export async function buildUtxoTx(
   // a live input path. Upgrade path: query the node's used-address set if reuse bites.
   const btcSelfHost = btcSelfHostActive(chain.networkId)
   // Always query primaryXpub for change-address discovery, plus all funded xpubs for path enrichment
-  const xpubsToQuery = btcSelfHost ? [] : allXpubs?.length
-    ? [...new Set([primaryXpub, ...allXpubs.map(x => x.xpub)])]
-    : [primaryXpub]
+  const queryCandidates = allXpubs?.length
+    ? [{ xpub: primaryXpub, scriptType }, ...allXpubs.map(x => ({ xpub: x.xpub, scriptType: x.scriptType }))]
+    : [{ xpub: primaryXpub, scriptType }]
+  const xpubsToQuery = btcSelfHost ? [] : [...new Map(
+    queryCandidates.map(q => [utxoDiscoveryKey(q.xpub, q.scriptType), q]),
+  ).values()]
   if (btcSelfHost) {
     let maxUsed = -1
     for (const u of utxos) {
@@ -483,9 +520,11 @@ export async function buildUtxoTx(
     changeAddressIndex = maxUsed + 1
     console.log(`${TAG} Self-host change index from UTXOs: ${changeAddressIndex}`)
   }
-  for (const qXpub of xpubsToQuery) {
+  for (const query of xpubsToQuery) {
+    const qXpub = query.xpub
+    const discoveryKey = utxoDiscoveryKey(qXpub, query.scriptType)
     try {
-      const pubkeyInfo = (await pioneer.GetPubkeyInfo({ network: chain.networkId, xpub: qXpub }))?.data
+      const pubkeyInfo = (await pioneer.GetPubkeyInfo({ network: chain.networkId, xpub: discoveryKey }))?.data
       if (pubkeyInfo?.tokens) {
         let maxUsed = -1
         for (const token of pubkeyInfo.tokens) {
@@ -668,7 +707,7 @@ export async function buildUtxoTx(
       // ponytail: rots at every NU activation — if ZEC sends suddenly fail
       // ScriptInvalid on all nodes, update this first (the sidecar's
       // ZcashSignPCZT log line prints the current live value).
-      branchId: 0x5437f330,   // NU6.2 (current Zcash mainnet, 2026)
+      branchId: 0x37a5165b,   // NU6.3 / Ironwood (current Zcash mainnet)
       expiry: 0,
     } : {}),
     fee: String(fee / 10 ** chain.decimals),

@@ -33,6 +33,7 @@ import { buildSolanaDecodedInfo } from './solana-clearsign'
 import { buildSolanaMessageDecodedInfo } from './solana-message-preview'
 import { requiresSolanaBlindSigningConsent } from './solana-consent'
 import { createRpcAltFetcher, DEFAULT_SOLANA_RPC_ENDPOINT } from './solana-alt'
+import { utxoDiscoveryKey } from './btc-backend/types'
 import {
   buildTonTransfer,
   assembleTonSignedBoc,
@@ -272,6 +273,10 @@ function formatFeatures(f: any): any {
     return undefined
   }
 
+  const versionSupportsTaproot =
+    Number(f.majorVersion) > 7 ||
+    (Number(f.majorVersion) === 7 && Number(f.minorVersion) >= 15)
+
   return {
     vendor: f.vendor,
     major_version: f.majorVersion,
@@ -296,6 +301,10 @@ function formatFeatures(f: any): any {
     model: f.model,
     firmware_variant: f.firmwareVariant,
     firmware_hash: decodeB64(f.firmwareHash),
+    // The current Features protobuf has no explicit Taproot bit. Keep an
+    // explicit REST capability for SDK callers and fall back to the first
+    // firmware release that implements BIP86/P2TR.
+    supports_taproot: f.supportsTaproot ?? versionSupportsTaproot,
     no_backup: f.noBackup,
     wipe_code_protection: f.wipeCodeProtection,
     auto_lock_delay_ms: f.autoLockDelayMs,
@@ -1958,10 +1967,13 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.AddressRequest)
+          const sd = showDisplay(body.show_display)
           const cacheKey = scopedKey(engine, 'utxo', body)
           const cached = addressCache.get(cacheKey)
-          if (cached) return json({ address: cached })
-          const sd = showDisplay(body.show_display)
+          // A trusted-display request must always reach the device. Returning
+          // a cached value would silently skip the very confirmation the
+          // caller requested.
+          if (cached && !sd) return json({ address: cached })
           const result = await emuWrap(() => wallet.btcGetAddress({
             addressNList: body.address_n,
             coin: body.coin || 'Bitcoin',
@@ -2774,6 +2786,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
                 // program+instruction, so the device can decode this call
                 // without a per-transaction attestation.
                 schema: body.schema,
+                tokenInfo: body.tokenInfo,
+                tokenRecipientOwners: body.tokenRecipientOwners,
                 allowBlindSigning: activeAllowBlindSigning,
               },
               (request) => {
@@ -3126,6 +3140,28 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           return json(validateResponse(formatFeatures(features), S.FeaturesResponse, path))
         }
 
+        if (path === '/system/info/get-entropy' && method === 'POST') {
+          auth.requireAuth(req)
+          const wallet = requireWallet(engine)
+          const body = await parseRequest(req, S.GetEntropyRequest)
+          const entropy = await emuWrap(
+            () => (wallet as any).getEntropy(body.size),
+            { operation: 'getEntropy', opLabel: 'Generate Entropy', chain: 'Device' },
+          )
+          if (!(entropy instanceof Uint8Array) || entropy.length !== body.size) {
+            throw new HttpError(500, `Device returned ${entropy?.length ?? 0} entropy bytes; expected ${body.size}`)
+          }
+          return new Response(Buffer.from(entropy), {
+            status: 200,
+            headers: {
+              ...corsHeaders(req),
+              'Content-Type': 'application/octet-stream',
+              'Content-Length': String(entropy.length),
+              'Cache-Control': 'no-store',
+            },
+          })
+        }
+
         if (path === '/system/info/get-public-key' && method === 'POST') {
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
@@ -3411,7 +3447,13 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           // UTXO (xpubs) and non-EVM address-based entries
           for (const pk of cachedPks) {
             const caip = chainIdToCaip.get(pk.chainId) || ''
-            if (pk.xpub) pubkeys.push({ caip, pubkey: pk.xpub, label: `${pk.chainId}:xpub` })
+            if (pk.xpub) pubkeys.push({
+              caip,
+              pubkey: pk.chainId === 'bitcoin'
+                ? utxoDiscoveryKey(pk.xpub, pk.scriptType || 'p2pkh')
+                : pk.xpub,
+              label: `${pk.chainId}:xpub`,
+            })
             else if (pk.address) pubkeys.push({ caip, pubkey: pk.address, label: `${pk.chainId}:addr` })
           }
 

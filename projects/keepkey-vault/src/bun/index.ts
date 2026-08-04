@@ -146,10 +146,11 @@ import { buildTx, broadcastTx } from "./txbuilder"
 import { buildCosmosStakingTx, buildCosmosNameRegTx } from "./txbuilder/cosmos"
 import { initializeOrchardFromDevice, scanOrchardNotes, getShieldedBalance, sendShielded, ensureFvkLoaded, displayOrchardAddressOnDevice } from "./txbuilder/zcash-shielded"
 import { isSidecarReady, startSidecar, stopSidecar, wipeSidecarWalletDb, hasFvkLoaded, getCachedFvk, onScanProgress, getScanState, updateSyncedTo, beginZcashSend, endZcashSend, isZcashSendInFlight } from "./zcash-sidecar"
-import { CHAINS, customChainToChainDef, isChainSupported, hiveRolePath } from "../shared/chains"
+import { CHAINS, customChainToChainDef, isChainSupported, hiveRolePath, supportedBtcScriptTypes, btcTaprootSupported } from "../shared/chains"
 import { versionCompare } from "../shared/firmware-versions"
 import type { ChainDef } from "../shared/chains"
 import { BtcAccountManager } from "./btc-accounts"
+import { utxoDiscoveryKey, unwrapUtxoDiscoveryKey } from "./btc-backend/types"
 import { EvmAddressManager, evmAddressPath } from "./evm-addresses"
 import { shouldResetManagersOnReady, nextReadyDeviceId } from "../shared/device-switch"
 import { isManagerSeedStale } from "../shared/seed-reconcile"
@@ -167,8 +168,9 @@ import { buildSolanaSchema, inspectSolanaSchema } from "./clearsign-studio"
 import * as os from "os"
 import * as path from "path"
 import { EVM_RPC_URLS, getTokenMetadata, broadcastEvmTx } from "./evm-rpc"
-import type { ChainBalance, TokenBalance, CustomToken, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, EvmAddressSet, Bip85SeedMeta, StakingPosition, SwapAsset, AuditToken, DefiPosition, RecentActivity, ClearSignEvent, ClearSignSolanaSchemaArtifact } from "../shared/types"
+import type { ChainBalance, TokenBalance, CustomToken, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, EvmAddressSet, Bip85SeedMeta, StakingPosition, SwapAsset, AuditToken, DefiPosition, RecentActivity, ClearSignEvent, ClearSignSolanaSchemaArtifact, UtxoMaturity } from "../shared/types"
 import type { VaultRPCSchema } from "../shared/rpc-schema"
+import { formatZatAsZec, summarizeZcashMaturity, ZCASH_MIN_CONFIRMATIONS } from "../shared/zcash-maturity"
 
 // L3 fix: withTimeout imported from engine-controller (was duplicated here)
 const PIONEER_TIMEOUT_MS = 60_000
@@ -200,6 +202,56 @@ function chunkArray<T>(items: T[], size: number): T[][] {
 	const chunks: T[][] = []
 	for (let i = 0; i < items.length; i += size) chunks.push(items.slice(i, i + size))
 	return chunks
+}
+
+function unwrapListUnspent(resp: any): any[] {
+	return Array.isArray(resp) ? resp
+		: Array.isArray(resp?.data) ? resp.data
+		: Array.isArray(resp?.data?.data) ? resp.data.data
+		: Array.isArray(resp?.utxos) ? resp.utxos
+		: []
+}
+
+/**
+ * Fetch the same transparent UTXO set that Send/Swap consumes and summarize
+ * its ten-block Zcash gate. Any failed xpub makes the summary unavailable; a
+ * partial result must never make funds appear spendable or locked incorrectly.
+ */
+async function getZcashUtxoMaturity(
+	pioneer: any,
+	xpubs: string[],
+	tipHeight?: number | null,
+): Promise<UtxoMaturity | undefined> {
+	if (xpubs.length === 0) return undefined
+	const settled = await Promise.allSettled(
+		xpubs.map(xpub => pioneer.ListUnspent({ network: 'ZEC', xpub })),
+	)
+	if (settled.some(result => result.status === 'rejected')) {
+		console.warn('[zcash-maturity] ListUnspent failed for one or more xpubs; omitting lock metadata')
+		return undefined
+	}
+
+	const seen = new Set<string>()
+	const utxos: any[] = []
+	for (const result of settled as PromiseFulfilledResult<any>[]) {
+		for (const utxo of unwrapListUnspent(result.value)) {
+			const key = utxo?.txid != null && (utxo?.vout != null || utxo?.outputIndex != null)
+				? `${utxo.txid}:${utxo.vout ?? utxo.outputIndex}`
+				: null
+			if (key && seen.has(key)) continue
+			if (key) seen.add(key)
+			utxos.push(utxo)
+		}
+	}
+
+	const summary = summarizeZcashMaturity(utxos, tipHeight)
+	return {
+		requiredConfirmations: ZCASH_MIN_CONFIRMATIONS,
+		spendableBalance: formatZatAsZec(summary.spendableZat),
+		lockedBalance: formatZatAsZec(summary.lockedZat),
+		lockedUtxoCount: summary.lockedCount,
+		nextUnlockConfirmations: summary.nextUnlockConfirmations ?? 0,
+	}
 }
 
 async function mapWithConcurrency<T, R>(
@@ -2101,7 +2153,7 @@ async function headlessExecuteSwap(params: ExecuteSwapParams, pushSubStage: (sta
 		getBtcXpub: () => {
 			if (btcAccounts.isInitialized) {
 				const selected = btcAccounts.getSelectedXpub()
-				if (selected) return { xpub: selected.xpub, accountPath: selected.path }
+				if (selected) return { xpub: selected.xpub, scriptType: selected.scriptType, accountPath: selected.path }
 			}
 			return undefined
 		},
@@ -3282,7 +3334,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				}
 
 				// 2. Derive non-UTXO addresses (one device call per chain — unavoidable)
-				const pubkeys: Array<{ caip: string; pubkey: string; chainId: string; symbol: string; networkId: string }> = []
+				const pubkeys: Array<{ caip: string; pubkey: string; chainId: string; symbol: string; networkId: string; sourcePubkey?: string; scriptType?: string }> = []
 
 				for (let i = 0; i < utxoPubKeyPaths.length; i++) {
 					const xpub = xpubResults?.[i]?.xpub
@@ -3364,16 +3416,21 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						const cachedPks = getCachedPubkeys(devId)
 						const btcPks = cachedPks.filter(p => p.chainId === 'bitcoin' && p.xpub)
 						if (btcPks.length > 0) {
-							btcPubkeyEntries = btcPks.map(p => ({ caip: btcChain.caip, pubkey: p.xpub }))
+							btcPubkeyEntries = btcPks.map(p => ({ caip: btcChain.caip, pubkey: p.xpub, scriptType: (p.scriptType || 'p2pkh') as any }))
 							console.log(`[getBalances] BTC xpubs from cached_pubkeys DB fallback: ${btcPubkeyEntries.length}`)
 						}
 					}
 				}
 
 				// Track BTC entries separately for per-xpub balance update
-				const btcPubkeySet = new Set(btcPubkeyEntries.map(e => e.pubkey))
 				for (const entry of btcPubkeyEntries) {
-					pubkeys.push({ caip: entry.caip, pubkey: entry.pubkey, chainId: 'bitcoin', symbol: 'BTC', networkId: btcChain.networkId })
+					pubkeys.push({
+						caip: entry.caip,
+						pubkey: utxoDiscoveryKey(entry.pubkey, entry.scriptType),
+						sourcePubkey: entry.pubkey,
+						scriptType: entry.scriptType,
+						chainId: 'bitcoin', symbol: 'BTC', networkId: btcChain.networkId,
+					})
 				}
 
 				// ── Address Book: mirror own-wallet addresses (R2) ──────────────
@@ -3649,13 +3706,14 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							btcPriceUsd = Number(md?.priceUsd ?? md?.price ?? 0) || 0
 						} catch (e: any) { console.warn('[getBalances] BTC price fetch failed (USD may show 0):', e?.message) }
 						for (const e of btcPubkeyEntries) {
+							const queryPubkey = utxoDiscoveryKey(e.pubkey, e.scriptType)
 							try {
-								const utxos = await btcBackend.listUnspent({ network: btcChain.networkId, xpub: e.pubkey })
+								const utxos = await btcBackend.listUnspent({ network: btcChain.networkId, xpub: e.pubkey, scriptType: e.scriptType })
 								const sats = utxos.reduce((sum, u) => sum + u.value, 0)
 								const btc = sats / 1e8
-								allEntries.push({ caip: btcChain.caip, pubkey: e.pubkey, chainId: 'bitcoin', networkId: btcChain.networkId, symbol: 'BTC', type: 'native', balance: btc.toFixed(8), valueUsd: btc * btcPriceUsd, address: undefined })
+								allEntries.push({ caip: btcChain.caip, pubkey: queryPubkey, chainId: 'bitcoin', networkId: btcChain.networkId, symbol: 'BTC', type: 'native', balance: btc.toFixed(8), valueUsd: btc * btcPriceUsd, address: undefined })
 							} catch (err: any) {
-								failedPubkeySetForDb.add(`${btcChain.caip}:${e.pubkey}`)
+								failedPubkeySetForDb.add(`${btcChain.caip}:${queryPubkey}`)
 								console.warn(`[getBalances] self-host node BTC balance failed for ${e.pubkey.slice(0, 16)}…: ${err?.message}`)
 							}
 						}
@@ -3845,8 +3903,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					for (const entry of pubkeys) {
 						const isFailedEntry = failedPubkeySetForDb.has(`${entry.caip}:${entry.pubkey}`)
 						if (entry.chainId === 'bitcoin') {
+							const sourceXpub = entry.sourcePubkey || unwrapUtxoDiscoveryKey(entry.pubkey)
 							// Find the Pioneer response for this xpub
 							const match = pureNatives.find((d: any) => d.pubkey === entry.pubkey)
+								|| pureNatives.find((d: any) => d.pubkey === sourceXpub)
 								|| pureNatives.find((d: any) => d.caip === entry.caip && d.address === entry.pubkey)
 							console.debug(`[getBalances] BTC match for ${entry.pubkey?.substring(0, 20)}...: ${match ? `balance=${match.balance}, usd=${match.valueUsd}` : 'NO MATCH'}`)
 							const bal = parseFloat(String(match?.balance ?? '0'))
@@ -3856,18 +3916,18 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							// Prefer address from user's selected xpub type for display + swaps
 							if (match?.address) {
 								if (!btcFallbackAddress) btcFallbackAddress = match.address
-								if (selectedXpubStr && entry.pubkey === selectedXpubStr) btcSelectedAddress = match.address
+								if (selectedXpubStr && sourceXpub === selectedXpubStr) btcSelectedAddress = match.address
 							}
 							// Update per-xpub balance in BtcAccountManager + persist to cache.
 							// PRIVACY: Skip DB write for hidden passphrase wallets.
 							// Skip if this entry came from a failed chunk (don't persist zeros).
 							const xpubBal = String(match?.balance ?? '0')
 							if (!isFailedEntry) {
-								btcAccounts.updateXpubBalance(entry.pubkey, xpubBal, usd)
+								btcAccounts.updateXpubBalance(sourceXpub, xpubBal, usd)
 								try {
 									const devId = engine.getDeviceState().deviceId
 									// force=true: Pioneer responded for this xpub — write even if balance is 0 to clear stale cache
-									if (devId && !engine.isPassphraseWallet) saveCachedPubkey(devId, 'bitcoin', entry.pubkey, entry.pubkey, match?.address || '', '', xpubBal, usd, true)
+									if (devId && !engine.isPassphraseWallet) saveCachedPubkey(devId, 'bitcoin', sourceXpub, sourceXpub, match?.address || '', entry.scriptType || '', xpubBal, usd, true)
 								} catch { /* non-fatal */ }
 							}
 							continue
@@ -3997,6 +4057,26 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							nativeBalanceUsd: btcTotalUsd,
 							address: btcAddress || btcAccounts.getSelectedXpub()?.xpub || btcPubkeyEntries[0]?.pubkey || '',
 						})
+					}
+
+					// Zcash's portfolio balance includes every transparent UTXO, but only
+					// outputs with ten confirmations are spendable. Attach the ListUnspent
+					// split used by the builder so every frontend surface can show total,
+					// available, and block progress without inventing its own policy.
+					{
+						const zcashEntry = results.find(r => r.chainId === 'zcash')
+						const zcashXpubs = pubkeys.filter(p => p.chainId === 'zcash').map(p => p.pubkey)
+						if (zcashEntry && zcashXpubs.length > 0) {
+							try {
+								zcashEntry.utxoMaturity = await getZcashUtxoMaturity(
+									pioneer,
+									zcashXpubs,
+									getScanState().syncedTo,
+								)
+							} catch (e: any) {
+								console.warn('[getBalances] Zcash maturity lookup failed:', e?.message || e)
+							}
+						}
 					}
 
 					// Attach shielded ZEC as a synthetic token under native Zcash
@@ -4242,7 +4322,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const { truth: liveSeedIdentity } = await ensureManagersForSeed('getBalance')
 
 				// Build pubkey list — EVM chains send ALL multi-address entries, others send one
-				const pubkeys: Array<{ caip: string; pubkey: string }> = []
+				const pubkeys: Array<{ caip: string; pubkey: string; sourcePubkey?: string; scriptType?: string }> = []
 				let displayAddress = '' // address shown in UI / used for swaps
 
 				if (chain.id === 'bitcoin') {
@@ -4260,7 +4340,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							const cachedPks = getCachedPubkeys(devId)
 							const btcPks = cachedPks.filter(p => p.chainId === 'bitcoin' && p.xpub)
 							if (btcPks.length > 0) {
-								btcPubkeyEntries = btcPks.map(p => ({ caip: chain.caip, pubkey: p.xpub }))
+								btcPubkeyEntries = btcPks.map(p => ({ caip: chain.caip, pubkey: p.xpub, scriptType: (p.scriptType || 'p2pkh') as any }))
 								console.log(`[getBalance] BTC xpubs from cached_pubkeys DB fallback: ${btcPubkeyEntries.length}`)
 							}
 						}
@@ -4273,9 +4353,14 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						}])
 						const xpub = result?.[0]?.xpub || ''
 						if (!xpub) throw new Error(`Could not derive xpub for ${chain.coin}`)
-						btcPubkeyEntries = [{ caip: chain.caip, pubkey: xpub }]
+						btcPubkeyEntries = [{ caip: chain.caip, pubkey: xpub, scriptType: (chain.scriptType || 'p2wpkh') as any }]
 					}
-					for (const entry of btcPubkeyEntries) pubkeys.push({ caip: entry.caip, pubkey: entry.pubkey })
+					for (const entry of btcPubkeyEntries) pubkeys.push({
+						caip: entry.caip,
+						pubkey: utxoDiscoveryKey(entry.pubkey, entry.scriptType),
+						sourcePubkey: entry.pubkey,
+						scriptType: entry.scriptType,
+					})
 					// displayAddress left empty — UTXO: frontend auto-derives from device
 				} else if (chain.chainFamily === 'utxo') {
 					// Non-BTC UTXO: derive account-0 xpubs via the shared helper (standard
@@ -4345,6 +4430,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				let balance = '0', balanceUsd = 0, address = displayAddress
 				let tokens: TokenBalance[] | undefined
 				let chainDefiPositions: DefiPosition[] | undefined
+				let utxoMaturity: UtxoMaturity | undefined
 				// True once Pioneer answered with NON-degraded data — gates the force
 				// cache overwrite below (degraded responses must not clobber the cache).
 				let pioneerConfirmed = false
@@ -4456,8 +4542,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					const evmNativeByPubkey = new Map<string, { balance: number; usd: number }>()
 
 					for (const pk of pubkeys) {
+						const sourcePubkey = pk.sourcePubkey || unwrapUtxoDiscoveryKey(pk.pubkey)
 						// Find ONE matching native entry for this requested pubkey (no double-counting)
 						const match = pureNatives.find((d: any) => d.pubkey === pk.pubkey)
+							|| pureNatives.find((d: any) => d.pubkey === sourcePubkey)
 							|| pureNatives.find((d: any) => d.caip === pk.caip && d.address === pk.pubkey)
 							|| pureNatives.find((d: any) => d.address?.toLowerCase() === pk.pubkey.toLowerCase())
 						const bal = parseFloat(String(match?.balance ?? '0'))
@@ -4470,17 +4558,17 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						if (match?.address) {
 							if (!fallbackPkAddress) fallbackPkAddress = match.address
 							// BTC: prefer selected xpub's address; non-BTC UTXO: first (only) xpub
-							if (isBtc && selectedXpubStr && pk.pubkey === selectedXpubStr) selectedPkAddress = match.address
+							if (isBtc && selectedXpubStr && sourcePubkey === selectedXpubStr) selectedPkAddress = match.address
 							if (!isBtc && isUtxo) selectedPkAddress = match.address
 						}
 
 						if (isBtc) {
 							const xpubBal = String(match?.balance ?? '0')
-							btcAccounts.updateXpubBalance(pk.pubkey, xpubBal, usd)
+							btcAccounts.updateXpubBalance(sourcePubkey, xpubBal, usd)
 							// PRIVACY: Skip DB write for hidden passphrase wallets.
 							try {
 								const devId = engine.getDeviceState().deviceId
-								if (devId && !engine.isPassphraseWallet) saveCachedPubkey(devId, 'bitcoin', pk.pubkey, pk.pubkey, match?.address || '', '', xpubBal, usd, pioneerConfirmed)
+								if (devId && !engine.isPassphraseWallet) saveCachedPubkey(devId, 'bitcoin', sourcePubkey, sourcePubkey, match?.address || '', pk.scriptType || '', xpubBal, usd, pioneerConfirmed)
 							} catch { /* non-fatal */ }
 						}
 					}
@@ -4605,6 +4693,17 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					try { rpc.send['pioneer-error']({ message, url: getPioneerApiBase() }) } catch { /* webview not ready */ }
 					throw new Error(`Balance server error: ${message}`)
 				}
+				if (chain.id === 'zcash') {
+					try {
+						utxoMaturity = await getZcashUtxoMaturity(
+							pioneer,
+							pubkeys.map(p => p.pubkey),
+							getScanState().syncedTo,
+						)
+					} catch (e: any) {
+						console.warn('[getBalance] Zcash maturity lookup failed:', e?.message || e)
+					}
+				}
 				// If Pioneer failed or returned no address, preserve the cached address
 				// so we don't wipe a previously good address from the shared cache (Finding 3)
 				if (!address && cachedAddress) address = cachedAddress
@@ -4620,6 +4719,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					address,
 					tokens,
 					defiPositions: chainDefiPositions,
+					utxoMaturity,
 				}
 
 				// Update single-chain cache + push to frontend so Dashboard stays in sync.
@@ -5227,14 +5327,17 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				btcAccounts.setSelectedXpub(params.accountIndex, params.scriptType)
 			},
 			getBtcAddressIndices: async (params) => {
-				const { xpub } = params
+				const { xpub, scriptType } = params
 				if (!xpub) throw new Error('xpub required')
 				const pioneer = await getPioneer()
 				let receiveIndex = 0
 				let changeIndex = 0
 				try {
 					const btcNetworkId = CHAINS.find(c => c.id === 'bitcoin')!.networkId
-					const resp = await withTimeout(pioneer.GetPubkeyInfo({ network: btcNetworkId, xpub }), PIONEER_TIMEOUT_MS, 'GetPubkeyInfo')
+					const resp = await withTimeout(pioneer.GetPubkeyInfo({
+						network: btcNetworkId,
+						xpub: utxoDiscoveryKey(xpub, scriptType),
+					}), PIONEER_TIMEOUT_MS, 'GetPubkeyInfo')
 					const tokens = resp?.data?.tokens || []
 					let maxReceive = -1
 					let maxChange = -1
@@ -5618,6 +5721,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					pendingZat: totals.pendingZat,
 					matureCount: totals.matureCount,
 					pendingCount: totals.pendingCount,
+					nextUnlockConfirmations: totals.nextUnlockConfirmations,
+					requiredConfirmations: ZCASH_MIN_CONFIRMATIONS,
 				}
 			},
 			zcashShieldZec: async (params) => {
@@ -5778,12 +5883,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 				const pubkeys: any[] = []
 
-				// ── BTC: all 3 script types ──
-				const btcScripts = [
-					{ scriptType: 'p2pkh', purpose: 44, type: 'xpub', note: 'Bitcoin Legacy' },
-					{ scriptType: 'p2sh-p2wpkh', purpose: 49, type: 'ypub', note: 'Bitcoin SegWit' },
-					{ scriptType: 'p2wpkh', purpose: 84, type: 'zpub', note: 'Bitcoin Native SegWit' },
-				]
+				// ── BTC: every device-supported account type ──
+				const btcScripts = (await supportedBtcScriptTypes(wallet)).map(s => ({
+					...s, type: s.xpubPrefix, note: `Bitcoin ${s.label}`,
+				}))
 				const btcChain = builtinChains.find(c => c.id === 'bitcoin')
 				const btcNetwork = btcChain?.networkId || 'bip122:000000000019d6689c085ae165831e93'
 				for (const s of btcScripts) {
@@ -5801,7 +5904,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 								path: pathToString(addressNList),
 								pathMaster: pathToString(addressNListMaster),
 								scriptType: s.scriptType,
-								available_scripts_types: ['p2pkh', 'p2sh', 'p2wpkh', 'p2sh-p2wpkh'],
+								available_scripts_types: [...btcScripts.map(x => x.scriptType), 'p2sh'],
 								note: s.note, context,
 								networks: [btcNetwork],
 								addressNList, addressNListMaster,
@@ -6683,7 +6786,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					getBtcXpub: () => {
 						if (btcAccounts.isInitialized) {
 							const selected = btcAccounts.getSelectedXpub()
-							if (selected) return { xpub: selected.xpub, accountPath: selected.path }
+							if (selected) return { xpub: selected.xpub, scriptType: selected.scriptType, accountPath: selected.path }
 						}
 						return undefined
 					},
@@ -6998,7 +7101,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// 1. Reconstruct the pubkey list from cache (no device available)
 				const allChains = getAllChains()
 				const chainById = new Map(allChains.map(c => [c.id, c]))
-				const pubkeys: Array<{ caip: string; pubkey: string; chainId: string; symbol: string; networkId: string }> = []
+				const pubkeys: Array<{ caip: string; pubkey: string; sourcePubkey?: string; chainId: string; symbol: string; networkId: string }> = []
 
 				const cached = getCachedBalances(deviceId)
 				for (const b of cached?.balances ?? []) {
@@ -7012,7 +7115,12 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const btcChain = chainById.get('bitcoin')
 				if (btcChain) {
 					for (const p of getCachedPubkeys(deviceId).filter(p => p.chainId === 'bitcoin' && p.xpub)) {
-						pubkeys.push({ caip: btcChain.caip, pubkey: p.xpub, chainId: 'bitcoin', symbol: 'BTC', networkId: btcChain.networkId })
+						pubkeys.push({
+							caip: btcChain.caip,
+							pubkey: utxoDiscoveryKey(p.xpub, p.scriptType || 'p2pkh'),
+							sourcePubkey: p.xpub,
+							chainId: 'bitcoin', symbol: 'BTC', networkId: btcChain.networkId,
+						})
 					}
 				}
 
@@ -7110,6 +7218,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				for (const entry of pubkeys) {
 					if (entry.chainId === 'bitcoin') {
 						const match = pureNatives.find((d: any) => d.pubkey === entry.pubkey)
+							|| pureNatives.find((d: any) => d.pubkey === entry.sourcePubkey)
 							|| pureNatives.find((d: any) => d.caip === entry.caip && d.address === entry.pubkey)
 						btcBalance += parseFloat(String(match?.balance ?? '0'))
 						btcUsd += Number(match?.valueUsd ?? 0)
@@ -7421,6 +7530,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!chain) throw new Error(`Unknown chain: ${params.chainId}`)
 				if (chain.chainFamily !== 'utxo') throw new Error(`${chain.symbol} is not a UTXO chain`)
 				const captured = engine.wallet
+				const includeBitcoinTaproot = chain.id === 'bitcoin' && await btcTaprootSupported(captured)
 				const count = Math.min(Math.max(params.count ?? 3, 1), 10)
 				const from = Math.max(params.fromLevel ?? 0, 0)
 				const prefix = (chain.caip || '').split('/')[0]
@@ -7428,7 +7538,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				for (let i = 0; i < count; i++) {
 					if (engine.wallet !== captured) break // device changed — stop
 					const account = from + i
-					const sps = utxoAccountScriptPaths(chain, account)
+					const sps = utxoAccountScriptPaths(chain, account, includeBitcoinTaproot)
 					// Derive every script type's xpub (legacy/segwit/native-segwit) and
 					// keep them aligned to their path so the UI can show each as proof.
 					let xpubMeta: Array<{ scriptType: string; xpub: string; pathStr: string }> = []
@@ -7442,7 +7552,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						continue
 					}
 					if (!xpubMeta.length) continue
-					const xpubs = xpubMeta.map(m => m.xpub)
+					const xpubs = xpubMeta.map(m => utxoDiscoveryKey(m.xpub, m.scriptType))
 					let native = '0', hasBalance = false, balanceError = false
 					try {
 						const pioneer = await getPioneer()

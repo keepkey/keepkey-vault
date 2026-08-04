@@ -71,7 +71,17 @@ export interface AssetEntry {
   /** True for native chain assets, false for tokens. */
   isNative: boolean
   /** Holdings — present iff user has a balance for this asset on the connected chain. */
-  balance?: { amount: string; usd: number }
+  balance?: {
+    /** Total held amount, including confirmation-locked UTXOs. */
+    amount: string
+    usd: number
+    /** Amount transaction builders may consume now. Defaults to amount. */
+    spendableAmount?: string
+    spendableUsd?: number
+    lockedAmount?: string
+    nextUnlockConfirmations?: number
+    requiredConfirmations?: number
+  }
   /** Asset name in THORChain format (BTC.BTC, ETH.USDT-0x...) — only present if Pioneer reports it as swappable. */
   swappableAsset?: string
   /** SwapAsset reference — only present if Pioneer's GetAvailableAssets included it. */
@@ -522,13 +532,24 @@ export async function buildAssetEntries(input: BuildEntriesInput): Promise<Asset
   for (const c of CHAINS) {
     if (c.caip) chainIdToCaip.set(c.id, c.caip)
   }
-  const balanceByCaip = new Map<string, { amount: string; usd: number }>()
+  const balanceByCaip = new Map<string, NonNullable<AssetEntry['balance']>>()
   for (const cb of input.balances) {
     const nativeCaip = chainIdToCaip.get(cb.chainId)
     if (nativeCaip) {
+      const totalAmount = Number.parseFloat(cb.balance || '0')
+      const spendableAmount = Number.parseFloat(cb.utxoMaturity?.spendableBalance ?? cb.balance ?? '0')
+      const nativeUsd = cb.nativeBalanceUsd ?? 0
+      const spendableUsd = totalAmount > 0
+        ? nativeUsd * Math.max(0, Math.min(1, spendableAmount / totalAmount))
+        : 0
       balanceByCaip.set(nativeCaip, {
         amount: cb.balance,
-        usd: cb.nativeBalanceUsd ?? 0,
+        usd: nativeUsd,
+        spendableAmount: cb.utxoMaturity?.spendableBalance,
+        spendableUsd: cb.utxoMaturity ? spendableUsd : undefined,
+        lockedAmount: cb.utxoMaturity?.lockedBalance,
+        nextUnlockConfirmations: cb.utxoMaturity?.nextUnlockConfirmations,
+        requiredConfirmations: cb.utxoMaturity?.requiredConfirmations,
       })
     }
     if (cb.tokens) {

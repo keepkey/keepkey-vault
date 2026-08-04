@@ -211,6 +211,7 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 	// see why the chain-level balance differs from what's shieldable now.
 	const [transparentBalanceZat, setTransparentBalanceZat] = useState<number | null>(null)
 	const [transparentPendingZat, setTransparentPendingZat] = useState<number>(0)
+	const [transparentLockProgress, setTransparentLockProgress] = useState<{ current: number; required: number } | null>(null)
 	const [transparentBalanceLoading, setTransparentBalanceLoading] = useState(false)
 	const [deshieldAmount, setDeshieldAmount] = useState("")
 	const [deshielding, setDeshielding] = useState(false)
@@ -434,14 +435,20 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 			const r = await rpcRequest<{
 				address: string; balanceZat: number; pendingZat: number
 				matureCount: number; pendingCount: number
+				nextUnlockConfirmations: number | null; requiredConfirmations: number
 			}>("zcashTransparentBalance", undefined, 20000)
 			setTransparentBalanceZat(Number.isFinite(r.balanceZat) && r.balanceZat >= 0 ? r.balanceZat : 0)
 			setTransparentPendingZat(Number.isFinite(r.pendingZat) && r.pendingZat >= 0 ? r.pendingZat : 0)
+			setTransparentLockProgress(r.pendingZat > 0 ? {
+				current: r.nextUnlockConfirmations ?? 0,
+				required: r.requiredConfirmations || 10,
+			} : null)
 			if (r.address && !myTransparentAddr) setMyTransparentAddr(r.address)
 		} catch (e) {
 			console.warn("[ZcashPrivacyTab] failed to fetch shieldable t-addr balance:", e)
 			setTransparentBalanceZat(null)
 			setTransparentPendingZat(0)
+			setTransparentLockProgress(null)
 		}
 		setTransparentBalanceLoading(false)
 	}, [myTransparentAddr])
@@ -1020,7 +1027,7 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 								</div>
 								{transparentPendingZat > 0 && (
 									<div className="pending-note">
-										+{formatZec(transparentPendingZat)} ZEC pending — UTXOs need 10 confirmations before they can be shielded (reorg safety). Refresh in a few minutes.
+										Locked · {transparentLockProgress?.current ?? 0}/{transparentLockProgress?.required ?? 10} blocks — {formatZec(transparentPendingZat)} ZEC waiting for confirmations.
 									</div>
 								)}
 								<div className="field-grid">

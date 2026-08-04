@@ -290,7 +290,7 @@ function FromPicker({ entries, onSelect, fmtCompact, privateModeEnabled, balance
     )
   }, [held, search, chainFilter])
 
-  const totalUsd = held.reduce((s, e) => s + (e.balance?.usd ?? 0), 0)
+  const totalUsd = held.reduce((s, e) => s + (e.balance?.spendableUsd ?? e.balance?.usd ?? 0), 0)
 
   return (
     <>
@@ -399,6 +399,7 @@ function HeldTile({ entry: e, onSelect, fmtCompact, privateModeEnabled }: {
   const chainName = networkDisplayName(e.chainId)
   const selectable = isRowSelectable(e)
   const color = chainColorForCaip2(e.chainId)
+  const locked = Number.parseFloat(e.balance?.lockedAmount || '0') > 0
 
   return (
     <Box
@@ -443,6 +444,16 @@ function HeldTile({ entry: e, onSelect, fmtCompact, privateModeEnabled }: {
           {e.balance!.amount}
         </Text>
         <Text fontSize="11px" fontWeight="500" color="kk.textSecondary" fontVariantNumeric="tabular-nums">{privateModeEnabled ? "••••••" : fmtCompact(e.balance!.usd)}</Text>
+        {locked && (
+          <Box mt="1.5">
+            <Text fontSize="9px" color="var(--gold)" fontWeight="700" fontFamily="mono" lineHeight="1.3">
+              Locked · {e.balance!.nextUnlockConfirmations ?? 0}/{e.balance!.requiredConfirmations ?? 10} blocks
+            </Text>
+            <Text fontSize="9px" color="kk.textMuted" fontFamily="mono" lineHeight="1.3">
+              {e.balance!.spendableAmount ?? '0'} available
+            </Text>
+          </Box>
+        )}
         {/* Full CAIP */}
         <Text fontSize="8px" color="kk.textMuted" fontFamily="mono" mt="1.5" whiteSpace="nowrap" opacity={0.6}>
           {ellipsizeCaip(e.caip)}

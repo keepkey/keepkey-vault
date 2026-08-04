@@ -1,7 +1,8 @@
 import { withTimeout } from './engine-controller'
 import { getPioneer } from './pioneer'
 import { apiLogScanTxidExists, insertApiLog, updateApiLogTxMeta } from './db'
-import { BTC_SCRIPT_TYPES, btcAccountPath, isChainSupported, type ChainDef } from '../shared/chains'
+import { supportedBtcScriptTypes, btcAccountPath, isChainSupported, type ChainDef } from '../shared/chains'
+import { utxoDiscoveryKey } from './btc-backend/types'
 import type { ActivityType, RecentActivity } from '../shared/types'
 
 const PIONEER_TIMEOUT_MS = 60_000
@@ -138,8 +139,9 @@ function unwrapHistoryTransactions(resp: any): any[] {
 
 async function deriveHistoryQueries(wallet: any, chain: ChainDef, accountIndex: number): Promise<HistoryQuery[]> {
   if (chain.chainFamily === 'utxo') {
+    const btcScriptTypes = chain.id === 'bitcoin' ? await supportedBtcScriptTypes(wallet) : []
     const paths = chain.id === 'bitcoin'
-      ? BTC_SCRIPT_TYPES.map(st => ({
+      ? btcScriptTypes.map(st => ({
         addressNList: btcAccountPath(st.purpose, accountIndex),
         scriptType: st.scriptType,
         label: `account-${accountIndex}-${st.scriptType}`,
@@ -161,7 +163,7 @@ async function deriveHistoryQueries(wallet: any, chain: ChainDef, accountIndex: 
     return paths
       .map((p, i) => ({
         caip: chain.caip,
-        pubkey: String(results?.[i]?.xpub || ''),
+        pubkey: results?.[i]?.xpub ? utxoDiscoveryKey(String(results[i].xpub), p.scriptType) : '',
         label: p.label,
         path: addressNListToBIP32(p.addressNList),
         scriptType: p.scriptType,

@@ -58,9 +58,23 @@ const SWAP_DEBUG = ((): boolean => {
 const swapLog = (...args: any[]): void => { if (SWAP_DEBUG) console.log(...args) }
 
 // Chain CAIP for the network badge — only set for tokens (native assets
-// would just duplicate the main logo).
-const chainBadgeCaip = (asset: SwapAsset): string | undefined =>
-  asset.contractAddress ? CHAINS.find(c => c.id === asset.chainId)?.caip : undefined
+// would just duplicate the main logo). Resumed swaps may only have a token
+// CAIP, without contractAddress, so the CAIP namespace is authoritative.
+const chainBadgeCaip = (asset: SwapAsset): string | undefined => {
+  const token = asset.caip ? isTokenCaip(asset.caip) : !!asset.contractAddress
+  return token ? CHAINS.find(c => c.id === asset.chainId)?.caip : undefined
+}
+
+// SwapAsset.chainId is Vault's internal id ("base"), while
+// networkDisplayName expects CAIP-2 ("eip155:8453"). Prefer the ChainDef and
+// fall back to the CAIP so completion/resume screens always say which network
+// a same-symbol token belongs to (USDC on Base vs USDC on Ethereum).
+const assetNetworkDisplayName = (asset: SwapAsset): string => {
+  const chainDef = CHAINS.find(c => c.id === asset.chainId)
+  if (chainDef) return chainDef.coin
+  const caip2 = asset.caip?.split('/')[0]
+  return networkDisplayName(caip2 || asset.chainId)
+}
 
 // ERC-20 approve(spender,amount) selector
 const ERC20_APPROVE_SELECTOR = '0x095ea7b3'
@@ -766,6 +780,8 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
 
   const [fromAsset, setFromAsset] = useState<SwapAsset | null>(null)
   const [toAsset, setToAsset] = useState<SwapAsset | null>(null)
+  const fromNetworkName = fromAsset ? assetNetworkDisplayName(fromAsset) : ''
+  const toNetworkName = toAsset ? assetNetworkDisplayName(toAsset) : ''
   useEffect(() => { onOutputAssetChange?.(toAsset?.chainId ?? null) }, [toAsset?.chainId, onOutputAssetChange])
   // Which side opened the asset picker — null when closed. Single shared
   // AssetPickerDialog rendered at modal-over-modal z-index for both sides.
@@ -1466,6 +1482,11 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
         if (!fromAsset.contractAddress) return chainBal.balance
       }
     }
+    // The AssetPage prop is the live Dashboard row. Prefer its maturity split
+    // over a potentially older SQLite snapshot when opening Zcash Swap.
+    if (balance && chain && fromAsset.chainId === chain.id && !fromAsset.contractAddress && balance.utxoMaturity) {
+      return balance.utxoMaturity.spendableBalance
+    }
     // Check cached balances (aggregated per-chain from getBalances RPC)
     const cb = balances.find(b => b.chainId === fromAsset.chainId)
     if (cb) {
@@ -1475,14 +1496,21 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
         )
         if (token) return token.balance
       }
-      if (!fromAsset.contractAddress) return cb.balance
+      if (!fromAsset.contractAddress) return cb.utxoMaturity?.spendableBalance ?? cb.balance
     }
     // Fall back to prop balance only when cache has no entry for this chain
     if (balance && chain && fromAsset.chainId === chain.id && !fromAsset.contractAddress) {
-      return balance.balance
+      return balance.utxoMaturity?.spendableBalance ?? balance.balance
     }
     return null
   }, [fromAsset, balance, chain, balances, evmAddresses, effectiveEvmIndex])
+
+  const fromUtxoMaturity = useMemo(() => {
+    if (!fromAsset || fromAsset.contractAddress) return undefined
+    const propBalance = balance && chain && fromAsset.chainId === chain.id ? balance : undefined
+    const cachedBalance = balances.find(b => b.chainId === fromAsset.chainId)
+    return propBalance?.utxoMaturity ?? cachedBalance?.utxoMaturity
+  }, [fromAsset, balance, chain, balances])
 
   /* Native account-model MAX fee reservation — frontend pre-clamps the balance
    * by a conservative fee reserve so the displayed, quoted, and submitted
@@ -2781,12 +2809,17 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                           style={{ boxShadow: '0 0 8px rgba(139,227,196,0.30)' }} />
                         <Text>{t("youReceived", "You received")}</Text>
                       </Flex>
-                      <Flex position="relative" align="baseline" gap="2.5">
+                      <Flex position="relative" align="center" gap="2.5" wrap="wrap">
+                        <AssetIcon caip={toAsset.caip} iconUrl={toAsset.icon}
+                          chainCaip={chainBadgeCaip(toAsset)} size={32} alt={`${toAsset.symbol} on ${toNetworkName}`} />
                         <Text fontFamily="mono" fontSize="30px" fontWeight={600} color="var(--gold)"
                           letterSpacing="-0.02em" lineHeight="1.05">
                           ~{quote?.expectedOutput ? formatBalance(quote.expectedOutput) : '—'}
                         </Text>
-                        <Text fontSize="16px" color="kk.textSecondary" fontWeight={500}>{toAsset.symbol}</Text>
+                        <VStack gap="0" align="flex-start">
+                          <Text fontSize="16px" color="kk.textPrimary" fontWeight={600}>{toAsset.symbol}</Text>
+                          <Text fontSize="11px" color="var(--teal)" fontWeight={600}>on {toNetworkName}</Text>
+                        </VStack>
                       </Flex>
                       {hasToPrice && quote?.expectedOutput && (
                         <Text position="relative" mt="1" fontSize="12px" color="kk.textMuted" fontFamily="mono">
@@ -2812,7 +2845,9 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                         <Text fontFamily="mono" color="kk.textPrimary" fontWeight={500}>
                           {displayAmount} {fromAsset.symbol}
                         </Text>
-                        <Text color="kk.textMuted" fontSize="11px">→ {toAsset.symbol}</Text>
+                        <Text color="kk.textMuted" fontSize="11px">
+                          on {fromNetworkName} → {toAsset.symbol} on <Text as="span" color="kk.textSecondary" fontWeight={600}>{toNetworkName}</Text>
+                        </Text>
                         <Box flex="1" />
                         {hasFromPrice && (
                           <Text color="kk.textMuted" fontFamily="mono" fontSize="11px">
@@ -2935,10 +2970,13 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                         {liveOutboundTxid && (
                           <Flex align="center" gap="2.5" py="2" minW="0"
                             style={{ borderTop: '1px dashed rgba(255,255,255,0.04)' }}>
-                            <Text fontSize="10px" color="var(--teal)" textTransform="uppercase"
-                              letterSpacing="0.06em" fontWeight={500} w="70px" flexShrink={0}>
-                              {t("outputTx", "Output Tx")}
-                            </Text>
+                            <VStack gap="0" align="flex-start" w="70px" flexShrink={0}>
+                              <Text fontSize="10px" color="var(--teal)" textTransform="uppercase"
+                                letterSpacing="0.06em" fontWeight={500}>
+                                {t("outputTx", "Output Tx")}
+                              </Text>
+                              <Text fontSize="9px" color="kk.textMuted">{toNetworkName}</Text>
+                            </VStack>
                             <Text fontFamily="mono" fontSize="11.5px" color="kk.textSecondary"
                               overflow="hidden" textOverflow="ellipsis" whiteSpace="nowrap" flex="1">
                               {liveOutboundTxid}
@@ -2955,7 +2993,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                                   <Button size="xs" variant="outline" borderColor="kk.border" color="kk.textSecondary"
                                     px="2" h="26px" fontSize="11px"
                                     onClick={() => rpcRequest('openUrl', { url }).catch(() => { })}>
-                                    Explorer
+                                    {toNetworkName} Explorer
                                   </Button>
                                 ) : null
                               })()}
@@ -2975,7 +3013,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                               </Text>
                               <Text fontSize="11px" color="kk.textMuted" flex="1"
                                 overflow="hidden" textOverflow="ellipsis" whiteSpace="nowrap">
-                                {t("trackerHint", "End-to-end status & quote breakdown")}
+                                Provider route tracking · destination is {toNetworkName}
                               </Text>
                               <Button size="xs" variant="outline" flexShrink={0}
                                 borderColor="rgba(139,227,196,0.32)" color="var(--teal)"
@@ -3023,7 +3061,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                               const d = (parseFloat(afterToBal) - parseFloat(beforeToBal)) * toPriceUsd
                               return (
                                 <>
-                                  <Text>{toAsset.symbol}</Text>
+                                  <Text>{toAsset.symbol} · {toNetworkName}</Text>
                                   <Text color={d < 0 ? "var(--rose)" : "var(--teal)"}>
                                     {d >= 0 ? '+' : '−'}{fmtCompact(Math.abs(d))}
                                   </Text>
@@ -3038,11 +3076,14 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                         <Box className="kk-acc-body" px="3.5" pt="1" pb="3"
                           style={{ borderTop: '1px dashed var(--line-1, rgba(255,255,255,0.08))' }}>
                           {/* From asset balance row */}
-                          <Box display="grid" gridTemplateColumns="84px 1fr auto" alignItems="center"
+                          <Box display="grid" gridTemplateColumns="104px 1fr auto" alignItems="center"
                             fontFamily="mono" fontSize="12px" py="1.5">
                             <HStack gap="2" style={{ fontFamily: 'var(--font-body, inherit)' }}>
                               <AssetIcon caip={fromAsset.caip} iconUrl={fromAsset.icon} size={16} alt={fromAsset.symbol} />
-                              <Text color="kk.textPrimary" fontWeight={500}>{fromAsset.symbol}</Text>
+                              <VStack gap="0" align="flex-start">
+                                <Text color="kk.textPrimary" fontWeight={500}>{fromAsset.symbol}</Text>
+                                <Text color="kk.textMuted" fontSize="9px">{fromNetworkName}</Text>
+                              </VStack>
                             </HStack>
                             <HStack gap="2" color="kk.textMuted" justify="center" minW="0">
                               <Text>{beforeFromBal ? formatBalance(beforeFromBal) : '—'}</Text>
@@ -3063,12 +3104,15 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                             </VStack>
                           </Box>
                           {/* To asset balance row */}
-                          <Box display="grid" gridTemplateColumns="84px 1fr auto" alignItems="center"
+                          <Box display="grid" gridTemplateColumns="104px 1fr auto" alignItems="center"
                             fontFamily="mono" fontSize="12px" py="1.5"
                             style={{ borderTop: '1px dashed rgba(255,255,255,0.04)' }}>
                             <HStack gap="2" style={{ fontFamily: 'var(--font-body, inherit)' }}>
-                              <AssetIcon caip={toAsset.caip} iconUrl={toAsset.icon} size={16} alt={toAsset.symbol} />
-                              <Text color="kk.textPrimary" fontWeight={500}>{toAsset.symbol}</Text>
+                              <AssetIcon caip={toAsset.caip} iconUrl={toAsset.icon} chainCaip={chainBadgeCaip(toAsset)} size={16} alt={`${toAsset.symbol} on ${toNetworkName}`} />
+                              <VStack gap="0" align="flex-start">
+                                <Text color="kk.textPrimary" fontWeight={500}>{toAsset.symbol}</Text>
+                                <Text color="var(--teal)" fontSize="9px">{toNetworkName}</Text>
+                              </VStack>
                             </HStack>
                             <HStack gap="2" color="kk.textMuted" justify="center" minW="0">
                               <Text>{beforeToBal ? formatBalance(beforeToBal) : '—'}</Text>
@@ -3302,6 +3346,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                   {hasFromPrice && (
                     <Text fontSize="xs" color="kk.textMuted">{fmtCompact(parseFloat(displayAmount) * fromPriceUsd)}</Text>
                   )}
+                  <Text fontSize="10px" color="kk.textMuted">on {fromNetworkName}</Text>
                 </VStack>
                 <Text color="var(--gold)" fontSize="md" fontWeight="700">&rarr;</Text>
                 <VStack gap="0.5">
@@ -3314,6 +3359,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                   {hasToPrice && quote?.expectedOutput && (
                     <Text fontSize="xs" color="kk.textMuted">{fmtCompact(parseFloat(quote.expectedOutput) * toPriceUsd)}</Text>
                   )}
+                  <Text fontSize="10px" color="var(--teal)" fontWeight={600}>on {toNetworkName}</Text>
                 </VStack>
               </Flex>
 
@@ -4273,6 +4319,16 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                           </Text>
                           {fromBalance && hasFromPrice && (
                             <Text fontSize="11px" color="kk.textSecondary" fontWeight="500">{fmtCompact(parseFloat(fromBalance) * fromPriceUsd)}</Text>
+                          )}
+                          {fromUtxoMaturity && parseFloat(fromUtxoMaturity.lockedBalance) > 0 && (
+                            <Box mt="1">
+                              <Text fontSize="10px" color="var(--gold)" fontFamily="mono" fontWeight="700">
+                                Locked · {fromUtxoMaturity.nextUnlockConfirmations}/{fromUtxoMaturity.requiredConfirmations} blocks
+                              </Text>
+                              <Text fontSize="9px" color="kk.textMuted" fontFamily="mono">
+                                {formatBalance(fromUtxoMaturity.lockedBalance)} {fromAsset.symbol} waiting
+                              </Text>
+                            </Box>
                           )}
                         </VStack>
                         <Flex gap="1" align="center">

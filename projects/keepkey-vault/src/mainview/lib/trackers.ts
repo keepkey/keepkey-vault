@@ -101,7 +101,7 @@ export function providerTrackerUrl(
   if (s.includes('near')) {
     const hash = opts?.nearTxHash
     if (!hash) return null // 1Click polling in flight; re-renders when it lands
-    return { url: `https://nearblocks.io/txns/${hash}`, label: 'View on NEAR', iconUrl: ICON.near }
+    return { url: `https://nearblocks.io/txns/${hash}`, label: 'NEAR Intents Track', iconUrl: ICON.near }
   }
 
   if (RELAY_KEYS.has(s)) {

@@ -2483,7 +2483,9 @@
                 "type": "object",
                 "properties": {
                   "size": {
-                    "$ref": "#/components/schemas/types.numeric.U32"
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 8192
                   }
                 },
                 "required": [
@@ -2574,7 +2576,8 @@
                     "enum": [
                       "p2pkh",
                       "p2wpkh",
-                      "p2sh-p2wpkh"
+                      "p2sh-p2wpkh",
+                      "p2tr"
                     ]
                   },
                   "coin_name": {
@@ -3811,6 +3814,51 @@
                       "signature",
                       "signerKeyId"
                     ]
+                  },
+                  "tokenInfo": {
+                    "type": "array",
+                    "maxItems": 4,
+                    "description": "SPL token metadata forwarded to firmware for verified TransferChecked display.",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "mint": {
+                          "type": "string",
+                          "description": "32-byte SPL mint encoded as base58, base64, or hex"
+                        },
+                        "symbol": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 12
+                        },
+                        "decimals": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 255
+                        },
+                        "signature": {
+                          "type": "string",
+                          "description": "Optional 64-byte token-definition attestation"
+                        },
+                        "signerKeyId": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 3
+                        }
+                      },
+                      "required": [
+                        "mint"
+                      ]
+                    }
+                  },
+                  "tokenRecipientOwners": {
+                    "type": "array",
+                    "maxItems": 4,
+                    "description": "Candidate merchant owners; firmware displays one only after matching ATA(owner, token program, mint) to the signed destination.",
+                    "items": {
+                      "type": "string"
+                    }
                   }
                 },
                 "required": [
@@ -5241,7 +5289,8 @@
           "p2sh",
           "external",
           "p2wpkh",
-          "p2sh-p2wpkh"
+          "p2sh-p2wpkh",
+          "p2tr"
         ]
       },
       "types.Bech32": {

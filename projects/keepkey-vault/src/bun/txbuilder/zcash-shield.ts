@@ -12,6 +12,7 @@
 
 import { sendCommand, isSidecarReady, startSidecar, getCachedFvk, getScanState, beginZcashSend, endZcashSend } from "../zcash-sidecar"
 import { initializeOrchardFromDevice } from "./zcash-shielded"
+import { summarizeZcashMaturity, ZCASH_MIN_CONFIRMATIONS } from "../../shared/zcash-maturity"
 
 /** Compute P2PKH scriptPubKey from compressed pubkey hex: OP_DUP OP_HASH160 <20> <HASH160> OP_EQUALVERIFY OP_CHECKSIG */
 async function p2pkhScriptPubKey(pubkeyHex: string): Promise<string> {
@@ -95,7 +96,7 @@ let shieldInProgress = false
 export type TxProgressStep = "building" | "signing" | "broadcasting" | "complete"
 export type TxProgressFn = (step: TxProgressStep, detail?: any) => void
 
-export const SHIELD_MIN_CONFIRMATIONS = 10
+export const SHIELD_MIN_CONFIRMATIONS = ZCASH_MIN_CONFIRMATIONS
 
 /** UTXO totals at a single transparent ZEC address, split by maturity.
  *
@@ -113,36 +114,28 @@ export async function getShieldableTransparentBalance(
 	pioneer: any,
 	transparentAddress: string,
 	tipHeight?: number | null,
-): Promise<{ matureZat: number; pendingZat: number; matureCount: number; pendingCount: number }> {
+): Promise<{
+	matureZat: number
+	pendingZat: number
+	matureCount: number
+	pendingCount: number
+	nextUnlockConfirmations: number | null
+}> {
 	const result = await pioneer.ListUnspent({ network: "ZEC", xpub: transparentAddress })
 	const utxoArray = Array.isArray(result) ? result
 		: Array.isArray(result?.data) ? result.data
+		: Array.isArray(result?.data?.data) ? result.data.data
 		: Array.isArray(result?.utxos) ? result.utxos
 		: []
 
-	let matureZat = 0, pendingZat = 0, matureCount = 0, pendingCount = 0
-	for (const u of utxoArray) {
-		const raw = String(u.value ?? u.amount ?? "0")
-		const value = raw.includes(".")
-			? Math.round(parseFloat(raw) * 1e8)
-			: parseInt(raw, 10)
-		if (isNaN(value) || value <= 0) continue
-
-		// Mirror the shield builder's confirmation gate so Available + Max stay
-		// honest: prefer Pioneer's `confirmations`, fall back to deriving from
-		// `height` against the sidecar's latest scanned tip. If neither is
-		// available, treat as mature (matches the builder's "don't block" rule).
-		let isMature = true
-		if (typeof u.confirmations === "number") {
-			isMature = u.confirmations >= SHIELD_MIN_CONFIRMATIONS
-		} else if (typeof u.height === "number" && tipHeight != null && u.height > 0) {
-			isMature = (tipHeight - u.height + 1) >= SHIELD_MIN_CONFIRMATIONS
-		}
-
-		if (isMature) { matureZat += value; matureCount++ }
-		else          { pendingZat += value; pendingCount++ }
+	const summary = summarizeZcashMaturity(utxoArray, tipHeight)
+	return {
+		matureZat: summary.spendableZat,
+		pendingZat: summary.lockedZat,
+		matureCount: summary.spendableCount,
+		pendingCount: summary.lockedCount,
+		nextUnlockConfirmations: summary.nextUnlockConfirmations,
 	}
-	return { matureZat, pendingZat, matureCount, pendingCount }
 }
 
 /** Convert a sidecar-returned txid to explorer/display order.

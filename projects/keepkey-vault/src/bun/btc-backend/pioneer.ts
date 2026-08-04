@@ -7,6 +7,7 @@
  * Response parsing lives in ./normalize (import-free, unit-tested).
  */
 import type { BtcBackend } from './types'
+import { utxoDiscoveryKey } from './types'
 import { unwrapUtxos, normalizeUtxo, normalizeFeeRates, extractTxid } from './normalize'
 
 async function getPioneerClient(): Promise<any> {
@@ -18,8 +19,8 @@ export const PioneerBackend: BtcBackend = {
   kind: 'pioneer',
   capabilities: { history: true, push: true },
 
-  async listUnspent({ network, xpub, address }) {
-    const key = xpub ?? address
+  async listUnspent({ network, xpub, address, scriptType }) {
+    const key = xpub ? utxoDiscoveryKey(xpub, scriptType) : address
     if (!key) return []
     const pioneer = await getPioneerClient()
     const resp = await pioneer.ListUnspent({ network, xpub: key })

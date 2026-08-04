@@ -610,6 +610,16 @@ function ChainDetailOrbital({
 						</Text>
 					</Flex>
 				)}
+				{balance?.utxoMaturity && parseFloat(balance.utxoMaturity.lockedBalance) > 0 && (
+					<Flex direction="column" align="center" mt="0.5">
+						<Text fontSize="11px" color="var(--gold)" fontFamily="mono" fontWeight="700">
+							Locked · {balance.utxoMaturity.nextUnlockConfirmations}/{balance.utxoMaturity.requiredConfirmations} blocks
+						</Text>
+						<Text fontSize="10px" color="var(--text-3)" fontFamily="mono">
+							{formatBalance(balance.utxoMaturity.lockedBalance)} {chain.symbol} waiting
+						</Text>
+					</Flex>
+				)}
 			</Box>
 
 			{/* Token satellites — each pulls its glow color from its own icon. */}
@@ -1917,6 +1927,16 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 												<ShieldGlyph />
 												<Text fontSize="10px" color="var(--text-2)" lineHeight="1">
 													{privateModeEnabled ? "••••" : formatBalance(String(shielded.amount))} shielded
+												</Text>
+											</Flex>
+										)}
+										{bal?.utxoMaturity && parseFloat(bal.utxoMaturity.lockedBalance) > 0 && (
+											<Flex align="center" gap="1" mt="0.5">
+												<Text fontSize="9px" color="var(--gold)" fontFamily="mono" fontWeight="700" lineHeight="1">
+													Locked · {bal.utxoMaturity.nextUnlockConfirmations}/{bal.utxoMaturity.requiredConfirmations} blocks
+												</Text>
+												<Text fontSize="8px" color="var(--text-3)" fontFamily="mono" lineHeight="1">
+													{formatBalance(bal.utxoMaturity.lockedBalance)} {chain.symbol}
 												</Text>
 											</Flex>
 										)}

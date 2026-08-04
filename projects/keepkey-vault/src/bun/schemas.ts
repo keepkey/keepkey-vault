@@ -15,7 +15,7 @@ export const HexString = z.string().regex(/^0x[0-9a-fA-F]*$/)
 
 /** BTC input script type enum */
 export const BTCInputScriptType = z.enum([
-  'p2pkh', 'p2sh-p2wpkh', 'p2wpkh', 'p2sh', 'p2wsh',
+  'p2pkh', 'p2sh-p2wpkh', 'p2wpkh', 'p2tr', 'p2sh', 'p2wsh',
 ])
 
 /** Chain ID — accept string or number, keep as-is (rest-api.ts handles conversion) */
@@ -34,6 +34,11 @@ export const AddressRequest = z.object({
   coin: z.string().optional(),
   script_type: z.string().optional(),
 }).passthrough()
+
+/** POST /system/info/get-entropy */
+export const GetEntropyRequest = z.object({
+  size: z.number().int().min(1).max(8192),
+}).strict()
 
 /** POST /auth/pair */
 export const PairRequest = z.object({
@@ -183,6 +188,20 @@ export const SolanaInstructionSchema = z.object({
   signerKeyId: z.number().int().min(0).max(3),
 }).strict()
 
+export const SolanaTokenInfo = z.object({
+  /** 32-byte SPL mint encoded as base58, base64, or hex. */
+  mint: z.string().min(1),
+  /** Token display symbol; firmware caps this at 12 characters. */
+  symbol: z.string().min(1).max(12).optional(),
+  decimals: z.number().int().min(0).max(255).optional(),
+  /** Optional trusted token-definition attestation. */
+  signature: z.string().min(1).optional(),
+  signerKeyId: z.number().int().min(0).max(3).optional(),
+}).strict().refine(
+  value => (value.signature === undefined) === (value.signerKeyId === undefined),
+  { message: 'signature and signerKeyId must be supplied together' },
+)
+
 export const SolanaSignRequest = z.object({
   address_n: z.array(z.number().int()).optional(),
   addressNList: z.array(z.number().int()).optional(),
@@ -191,6 +210,10 @@ export const SolanaSignRequest = z.object({
   swapMetadata: SolanaSwapMetadata.optional(),
   /** Reusable, signer-attested instruction schema. Partial schemas rejected. */
   schema: SolanaInstructionSchema.optional(),
+  /** SPL token definitions used by firmware display policy (device max: 4). */
+  tokenInfo: z.array(SolanaTokenInfo).max(4).optional(),
+  /** Candidate owners for destination ATA verification (device max: 4). */
+  tokenRecipientOwners: z.array(z.string().min(1)).max(4).optional(),
   // One-shot opaque-signing consent is intentionally not part of the public
   // REST contract. Unknown fields are stripped; the Vault UI grants consent.
 }).strip()
@@ -526,7 +549,11 @@ export const GetPublicKeyResponse = z.object({
 // ═══════════════════════════════════════════════════════════════════════
 
 export const PortfolioBalancesRequest = z.object({
-  pubkeys: z.array(z.object({ caip: z.string(), pubkey: z.string() })).min(1),
+  pubkeys: z.array(z.object({
+    caip: z.string(),
+    pubkey: z.string(),
+    scriptType: BTCInputScriptType.optional(),
+  })).min(1),
 }).passthrough()
 
 export const MarketInfoRequest = z.object({
@@ -541,15 +568,21 @@ export const SearchAssetsRequest = z.object({
 export const ListUnspentRequest = z.object({
   network: z.string(),
   xpub: z.string(),
+  scriptType: BTCInputScriptType.optional(),
 }).passthrough()
 
 export const PubkeyInfoRequest = z.object({
   network: z.string(),
   xpub: z.string(),
+  scriptType: BTCInputScriptType.optional(),
 }).passthrough()
 
 export const TxHistoryRequest = z.object({
-  queries: z.array(z.object({ pubkey: z.string(), caip: z.string() })).min(1),
+  queries: z.array(z.object({
+    pubkey: z.string(),
+    caip: z.string(),
+    scriptType: BTCInputScriptType.optional(),
+  })).min(1),
 }).passthrough()
 
 export const BroadcastRequest = z.object({

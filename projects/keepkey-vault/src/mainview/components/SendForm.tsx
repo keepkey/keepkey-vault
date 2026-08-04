@@ -130,7 +130,10 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 	// Derived display values — token mode vs native mode
 	const isTokenSend = !!(token && token.caip && !token.caip.endsWith('/slip44:501') && (token.caip.includes('erc20') || token.caip.includes('/token:') || token.caip.includes('/spl:') || token.caip.includes('/trc20:') || token.caip.includes('/denom:')))
 	const displaySymbol = isTokenSend ? token!.symbol : chain.symbol
-	const displayBalance = isTokenSend ? token!.balance : (balance?.balance || '0')
+	const displayBalance = isTokenSend
+		? token!.balance
+		: (balance?.utxoMaturity?.spendableBalance ?? balance?.balance ?? '0')
+	const lockedNativeBalance = !isTokenSend ? balance?.utxoMaturity : undefined
 	// Fee controls: presets where a builder honors feeLevel; free-form custom only where
 	// the builder accepts an exact rate (EVM gas price/limit, UTXO sat/vByte).
 	const supportsFeePresets = chain.chainFamily === 'utxo' || chain.chainFamily === 'evm' || chain.chainFamily === 'cosmos'
@@ -266,7 +269,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 				feeLevel,
 				isMax,
 				caip: isTokenSend ? token!.caip : undefined,
-				nativeBalance: !isTokenSend ? balance?.balance : undefined,
+				nativeBalance: !isTokenSend ? displayBalance : undefined,
 				tokenBalance: isTokenSend ? token!.balance : undefined,
 				tokenDecimals: isTokenSend && token!.decimals != null ? token!.decimals : undefined,
 				xpubOverride: xpubOverride || undefined,
@@ -283,7 +286,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 			setError(e.message || t("failedToBuild"))
 		}
 		setLoading(false)
-	}, [chain, recipient, amount, memo, feeLevel, feeMode, supportsCustomFee, customGasPrice, customGasLimit, customSatPerVByte, isMax, addressValidation, exceedsBalance, isTokenSend, token, balance?.balance, xpubOverride, scriptTypeOverride, evmAddressIndex])
+	}, [chain, recipient, amount, memo, feeLevel, feeMode, supportsCustomFee, customGasPrice, customGasLimit, customSatPerVByte, isMax, addressValidation, exceedsBalance, isTokenSend, token, displayBalance, xpubOverride, scriptTypeOverride, evmAddressIndex])
 
 	const handleSign = useCallback(async () => {
 		if (!buildResult) return
@@ -464,6 +467,16 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 						</Text>
 					)}
 				</Flex>
+				{lockedNativeBalance && parseFloat(lockedNativeBalance.lockedBalance) > 0 && (
+					<Flex direction="column" align="center" mt="1">
+						<Text fontSize="10px" color="var(--gold)" fontFamily="mono" fontWeight="700">
+							Locked · {lockedNativeBalance.nextUnlockConfirmations}/{lockedNativeBalance.requiredConfirmations} blocks
+						</Text>
+						<Text fontSize="9px" color="kk.textMuted" fontFamily="mono">
+							{formatBalance(lockedNativeBalance.lockedBalance)} {chain.symbol} waiting for confirmations
+						</Text>
+					</Flex>
+				)}
 			</Flex>
 			{/* Gas balance hint for token sends */}
 			{isTokenSend && balance && (() => {

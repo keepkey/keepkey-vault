@@ -37,7 +37,41 @@ export const BTC_SCRIPT_TYPES: Array<{
   { scriptType: 'p2wpkh',      purpose: 84, xpubPrefix: 'zpub', label: 'Native SegWit',  addressPrefix: 'bc1' },
 ]
 
-/** Build a BIP44/49/84 account-level path: m/purpose'/0'/accountIndex' */
+/** BIP86 deliberately reuses ordinary xpub version bytes; script intent must
+ * travel separately (Pioneer/Blockbook use a `tr(xpub...)` descriptor). Keep
+ * this outside BTC_SCRIPT_TYPES so old firmware never receives a P2TR request
+ * from legacy call sites that iterate the historical three-account set. */
+export const BTC_TAPROOT_SCRIPT_TYPE = {
+  scriptType: 'p2tr', purpose: 86, xpubPrefix: 'xpub', label: 'Taproot', addressPrefix: 'bc1p',
+} as const
+
+export type BtcScriptTypeConfig = (typeof BTC_SCRIPT_TYPES)[number]
+
+export function btcScriptTypes(includeTaproot = false): BtcScriptTypeConfig[] {
+  return includeTaproot ? [...BTC_SCRIPT_TYPES, BTC_TAPROOT_SCRIPT_TYPE] : [...BTC_SCRIPT_TYPES]
+}
+
+/** Firmware is the authority for whether Taproot may be exposed. The hdwallet
+ * adapter first checks Bitcoin support and then requires Features.supportsTaproot
+ * to be exactly true. Missing methods/old firmware fail closed. */
+export async function btcTaprootSupported(wallet: any): Promise<boolean> {
+  if (typeof wallet?.btcSupportsScriptType !== 'function') return false
+  try {
+    return await wallet.btcSupportsScriptType('Bitcoin', 'p2tr') === true
+  } catch {
+    return false
+  }
+}
+
+export async function supportedBtcScriptTypes(wallet: any): Promise<BtcScriptTypeConfig[]> {
+  return btcScriptTypes(await btcTaprootSupported(wallet))
+}
+
+export function btcScriptTypeConfig(scriptType: BtcScriptType): BtcScriptTypeConfig | undefined {
+  return btcScriptTypes(true).find(entry => entry.scriptType === scriptType)
+}
+
+/** Build a BIP44/49/84/86 account-level path: m/purpose'/0'/accountIndex' */
 export function btcAccountPath(purpose: number, accountIndex: number): number[] {
   return [purpose + 0x80000000, 0x80000000, accountIndex + 0x80000000]
 }
