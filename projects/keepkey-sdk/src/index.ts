@@ -55,7 +55,21 @@ import type {
   SweepScanStatus,
   SweepExecuteParams,
   SweepExecuteResult,
+  X402EvmSigner,
+  X402EvmSignerParams,
+  X402SvmPaymentPayload,
+  X402SvmSignPaymentParams,
+  X402SvmSigner,
+  X402SvmSignerParams,
 } from './types'
+import {
+  assertX402Eip3009,
+  x402JsonSafe,
+  x402KitTransactionToWire,
+  x402SignatureHex,
+  x402SvmDisplayFields,
+  x402SvmSignatureBytes,
+} from './x402'
 
 export { SdkError } from './client'
 export * from './types'
@@ -166,6 +180,10 @@ export class KeepKeySdk {
       /** Get full device features — model, firmware version, PIN/passphrase state, policies. */
       getFeatures: (): Promise<DeviceFeatures> =>
         this.client.post('/system/info/get-features'),
+
+      /** Return `size` fresh bytes from the device hardware RNG (1..8192). */
+      getEntropy: (size: number): Promise<Uint8Array> =>
+        this.client.postBytes('/system/info/get-entropy', { size }, this.client.signingTimeoutMs),
 
       /** List all connected KeepKey devices. */
       getDevices: (): Promise<{ devices: DeviceInfo[]; total: number }> =>
@@ -285,7 +303,11 @@ export class KeepKeySdk {
   address = {
     /** Derive a UTXO (BTC/LTC/BCH/DOGE/DASH) address. */
     utxoGetAddress: (params: AddressRequest): Promise<{ address: string }> =>
-      this.client.post('/addresses/utxo', params),
+      this.client.post(
+        '/addresses/utxo',
+        params,
+        params.show_display ? this.client.signingTimeoutMs : undefined,
+      ),
 
     /** Derive an Ethereum (or EVM-compatible) address. */
     ethGetAddress: (params: AddressRequest): Promise<{ address: string }> =>
@@ -364,11 +386,11 @@ export class KeepKeySdk {
 
     /** Sign a personal message (`eth_sign` / `personal_sign`). */
     ethSignMessage: (params: EthSignMessageParams): Promise<any> =>
-      this.client.post('/eth/sign', params),
+      this.client.post('/eth/sign', params, this.client.signingTimeoutMs),
 
     /** Sign an EIP-712 typed data structure. */
     ethSignTypedData: (params: EthSignTypedDataParams): Promise<any> =>
-      this.client.post('/eth/sign-typed-data', params),
+      this.client.post('/eth/sign-typed-data', params, this.client.signingTimeoutMs),
 
     /** Verify an Ethereum personal message signature. Returns `true` if valid. */
     ethVerifyMessage: (params: EthVerifyMessageParams): Promise<boolean> =>
@@ -383,7 +405,7 @@ export class KeepKeySdk {
   btc = {
     /** Sign a UTXO transaction (BTC, LTC, BCH, DOGE, DASH, etc.). */
     btcSignTransaction: (params: BtcSignTxParams): Promise<SignedTx> =>
-      this.client.post('/utxo/sign-transaction', params),
+      this.client.post('/utxo/sign-transaction', params, this.client.signingTimeoutMs),
   }
 
   // ═══════════════════════════════════════════════════════════════════
@@ -567,6 +589,105 @@ export class KeepKeySdk {
       params: SolanaSignOffchainMessageParams,
     ): Promise<SolanaOffchainMessageSignatureResult> =>
       this.client.post('/solana/sign-offchain-message', params),
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // x402 — hardware-reviewed payment signer adapters
+  // ═══════════════════════════════════════════════════════════════════
+
+  /**
+   * x402 payment helpers. These reuse the normal EIP-712 and Solana
+   * transaction endpoints; they do not introduce a blind message-signing path.
+   */
+  x402 = {
+    evm: {
+      /**
+       * Create an official x402 `ClientEvmSigner` for the EIP-3009 exact
+       * scheme. BigInt values produced by viem/x402 are converted to their
+       * lossless decimal JSON representation before reaching Vault.
+       */
+      createSigner: async (params: X402EvmSignerParams = {}): Promise<X402EvmSigner> => {
+        const addressNList = params.addressNList
+          || params.address_n
+          || [0x8000002c, 0x8000003c, 0x80000000, 0, 0]
+        const { address } = await this.address.ethGetAddress({ address_n: addressNList })
+        if (!/^0x[0-9a-fA-F]{40}$/.test(address)) {
+          throw new Error('KeepKey returned an invalid EVM address')
+        }
+
+        return {
+          address: address as `0x${string}`,
+          signTypedData: async (message) => {
+            assertX402Eip3009(message, address)
+            const typedData = x402JsonSafe({
+              domain: message.domain,
+              types: message.types,
+              primaryType: message.primaryType,
+              message: message.message,
+            })
+            const result = await this.eth.ethSignTypedData({ address, typedData })
+            return x402SignatureHex(result)
+          },
+        }
+      },
+    },
+
+    svm: {
+      /**
+       * Sign a prebuilt x402 exact SVM payload. The mint and merchant owner
+       * come from PaymentRequirements; firmware independently checks the mint,
+       * TransferChecked decimals, and ATA(payTo, mint) before displaying them.
+       */
+      signPayment: async (params: X402SvmSignPaymentParams): Promise<X402SvmPaymentPayload> => {
+        const addressNList = params.addressNList
+          || params.address_n
+          || [0x8000002c, 0x800001f5, 0x80000000, 0x80000000]
+        const display = x402SvmDisplayFields(params.paymentRequirements, params.token)
+        const result = await this.solana.solanaSignTransaction({
+          addressNList,
+          raw_tx: params.transaction,
+          ...display,
+        })
+        if (typeof result.serializedTx !== 'string' || !result.serializedTx) {
+          throw new Error('KeepKey returned no signed Solana transaction')
+        }
+        return { transaction: result.serializedTx }
+      },
+
+      /**
+       * Create an official Solana Kit `TransactionPartialSigner` for one x402
+       * payment requirement. Kit supplies compiled v0 transactions; the adapter
+       * reconstructs their signature wrapper, preserves any sponsor signature,
+       * and returns only the KeepKey authority signature for Kit to merge.
+       */
+      createSigner: async (params: X402SvmSignerParams): Promise<X402SvmSigner> => {
+        const addressNList = params.addressNList
+          || params.address_n
+          || [0x8000002c, 0x800001f5, 0x80000000, 0x80000000]
+        const { address } = await this.address.solanaGetAddress({ address_n: addressNList })
+        if (!address) throw new Error('KeepKey returned no Solana address')
+        const display = x402SvmDisplayFields(params.paymentRequirements, params.token)
+
+        return {
+          address,
+          signTransactions: async (transactions, config) => {
+            const signatures: Array<Readonly<Record<string, any>>> = []
+            for (const transaction of transactions) {
+              if (config?.abortSignal?.aborted) {
+                throw config.abortSignal.reason || new Error('x402 SVM signing aborted')
+              }
+              const result = await this.solana.solanaSignTransaction({
+                addressNList,
+                raw_tx: x402KitTransactionToWire(transaction),
+                ...display,
+              })
+              signatures.push({ [address]: x402SvmSignatureBytes(result) })
+            }
+            return signatures
+          },
+        }
+      },
+    },
   }
 
   // ═══════════════════════════════════════════════════════════════════

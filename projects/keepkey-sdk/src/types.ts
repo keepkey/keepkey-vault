@@ -43,6 +43,7 @@ export interface DeviceFeatures {
   model: string
   firmware_variant: string
   firmware_hash: string
+  supports_taproot?: boolean
   no_backup: boolean
   wipe_code_protection: boolean
   auto_lock_delay_ms: number
@@ -58,6 +59,7 @@ export interface DeviceInfo {
 
 export interface SignedTx {
   serializedTx?: string
+  signatures?: string[]
   r?: string
   s?: string
   v?: number
@@ -138,6 +140,9 @@ export interface EthSignTypedDataParams {
 export interface EthSignMessageParams {
   address: string
   message: string
+  /** Defaults to m/44'/60'/0'/0/0 when omitted by Vault. */
+  address_n?: number[]
+  addressNList?: number[]
 }
 
 export interface EthVerifyMessageParams {
@@ -243,6 +248,31 @@ export interface SolanaSignTxParams {
    * program and the device decodes the values from the bytes it signs.
    */
   schema?: SolanaInstructionSchema
+  /**
+   * SPL mint metadata used by firmware to render TransferChecked amounts.
+   * Known mints are verified against the device table; unknown token symbols
+   * require a trusted signer attestation before firmware will display them.
+   */
+  tokenInfo?: SolanaTokenInfo[]
+  /**
+   * Candidate owners for SPL destination ATAs. Firmware displays an owner only
+   * after independently deriving ATA(owner, token program, mint) and matching
+   * it to the destination committed to by the transaction.
+   */
+  tokenRecipientOwners?: string[]
+}
+
+export interface SolanaTokenInfo {
+  /** Base58, base64, or hex-encoded 32-byte SPL mint public key. */
+  mint: string
+  /** Display symbol (max 12 characters). */
+  symbol?: string
+  /** Token precision committed to by TransferChecked (0-255). */
+  decimals?: number
+  /** Optional token-definition attestation (64-byte compact secp256k1). */
+  signature?: string
+  /** Trusted ClearSign signer slot for `signature` (0-3). */
+  signerKeyId?: number
 }
 
 /**
@@ -257,6 +287,88 @@ export interface SolanaInstructionSchema {
   signature: string
   /** ClearSign signer slot that attested the schema (0-3). */
   signerKeyId: number
+}
+
+// ── x402 Types ──────────────────────────────────────────────────────
+
+/** Official x402 EVM client signer shape (base EIP-3009 flow). */
+export interface X402EvmSigner {
+  readonly address: `0x${string}`
+  signTypedData(message: {
+    domain: Record<string, unknown>
+    types: Record<string, unknown>
+    primaryType: string
+    message: Record<string, unknown>
+  }): Promise<`0x${string}`>
+}
+
+export interface X402EvmSignerParams {
+  /** Defaults to m/44'/60'/0'/0/0. */
+  address_n?: number[]
+  addressNList?: number[]
+}
+
+/** The signed SVM payload shape carried by x402 exact payments. */
+export interface X402SvmPaymentPayload {
+  transaction: string
+}
+
+/** Fields from an x402 SVM PaymentRequirements object that bind display data. */
+export interface X402SvmPaymentRequirements {
+  /** SPL mint address. */
+  asset: string
+  /** Merchant owner address; firmware verifies its destination ATA offline. */
+  payTo: string
+}
+
+export interface X402SvmTokenDisplay {
+  /** Token symbol expected on device (for example `USDC`). */
+  symbol: string
+  /** Token precision expected on device (for example `6` for USDC). */
+  decimals: number
+  /** Optional token-definition attestation for a mint not built into firmware. */
+  signature?: string
+  /** Trusted ClearSign signer slot for `signature` (0-3). */
+  signerKeyId?: number
+}
+
+export interface X402SvmSignPaymentParams {
+  /** Base64 wire transaction from an x402 exact SVM payload. */
+  transaction: string
+  paymentRequirements: X402SvmPaymentRequirements
+  token: X402SvmTokenDisplay
+  /** Defaults to m/44'/501'/0'/0'. */
+  address_n?: number[]
+  addressNList?: number[]
+}
+
+/**
+ * Structural subset of a Solana Kit transaction passed to TransactionSigner.
+ * Branded Kit byte/address types are intentionally represented by their
+ * dependency-free runtime forms so this SDK keeps zero runtime dependencies.
+ */
+export interface X402SvmKitTransaction {
+  readonly messageBytes: ArrayLike<number>
+  readonly signatures: Readonly<Record<string, ArrayLike<number> | null>>
+}
+
+/** Official Solana Kit TransactionPartialSigner-compatible shape. */
+export interface X402SvmSigner {
+  // `any` is deliberate at the external branded-type boundary: at runtime Kit
+  // addresses are strings, while importing its brand would add a dependency.
+  readonly address: any
+  signTransactions(
+    transactions: readonly X402SvmKitTransaction[],
+    config?: { abortSignal?: AbortSignal; minContextSlot?: bigint | number },
+  ): Promise<readonly Readonly<Record<string, any>>[]>
+}
+
+export interface X402SvmSignerParams {
+  paymentRequirements: X402SvmPaymentRequirements
+  token: X402SvmTokenDisplay
+  /** Defaults to m/44'/501'/0'/0'. */
+  address_n?: number[]
+  addressNList?: number[]
 }
 
 // ── Tron Types ─────────────────────────────────────────────────────

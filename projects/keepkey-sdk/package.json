@@ -26,6 +26,9 @@
     "prepublishOnly": "npm run build",
     "test": "npm run build && node __tests__/test.js",
     "test:solana-clearsign:offline": "npm run build && node tests/solana-clearsign/offline-descriptor.js",
+    "test:x402:blockrun-solana": "npm run build && node tests/x402/blockrun-solana-image.js",
+    "test:x402:venice": "npm run build && node tests/x402/venice-image.js",
+    "test:rc23:hardware": "npm run build && RC23_HARDWARE_TEST=1 node tests/rc23/hardware.js",
     "test:chain": "npm run build && node tests/run-all.js chain",
     "test:sweep": "npm run build && node tests/run-all.js sweep",
     "test:all": "npm run build && node tests/run-all.js",
@@ -55,6 +58,10 @@
   "author": "KeepKey",
   "license": "MIT",
   "devDependencies": {
+    "@solana/kit": "^5.5.1",
+    "@x402/core": "^2.20.0",
+    "@x402/evm": "^2.20.0",
+    "@x402/svm": "^2.20.0",
     "ethers": "^6.16.0",
     "typescript": "^5.5.0"
   }

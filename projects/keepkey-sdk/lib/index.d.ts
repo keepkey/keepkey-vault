@@ -1,5 +1,5 @@
 import { VaultClient } from './client';
-import type { SdkConfig, DeviceFeatures, DeviceInfo, SignedTx, AddressRequest, EthSignTxParams, LoadClearsignSignerParams, LoadClearsignSignerResult, EthSignTypedDataParams, EthSignMessageParams, EthVerifyMessageParams, BtcSignTxParams, CosmosAminoSignParams, HiveSignOperationsParams, HiveSignTransferParams, HiveSignMessageParams, XrpSignTxParams, BnbSignTxParams, SolanaSignTxParams, SolanaSignOffchainMessageParams, SolanaOffchainMessageSignatureResult, TronSignTxParams, TronSignMessageParams, TronMessageSignatureResult, TronVerifyMessageParams, TronSignTypedHashParams, TronTypedDataSignatureResult, TonSignTxParams, TonSignMessageParams, TonMessageSignatureResult, TonBuildTransferParams, TonBuildTransferResult, TonFinalizeTransferParams, TonFinalizeTransferResult, GetPublicKeyRequest, BatchPubkeysPath, ApplySettingsParams, HealthResponse, SupportedAsset, PortfolioBalancesParams, MarketInfoParams, SearchAssetsParams, ListUnspentParams, PubkeyInfoParams, TxHistoryParams, BroadcastParams, NetworkIdParams, NetworkAddressParams, TokenDecimalsParams, StakingParams, SwapQuoteParams, SweepScanParams, SweepScanStatus, SweepExecuteParams, SweepExecuteResult } from './types';
+import type { SdkConfig, DeviceFeatures, DeviceInfo, SignedTx, AddressRequest, EthSignTxParams, LoadClearsignSignerParams, LoadClearsignSignerResult, EthSignTypedDataParams, EthSignMessageParams, EthVerifyMessageParams, BtcSignTxParams, CosmosAminoSignParams, HiveSignOperationsParams, HiveSignTransferParams, HiveSignMessageParams, XrpSignTxParams, BnbSignTxParams, SolanaSignTxParams, SolanaSignOffchainMessageParams, SolanaOffchainMessageSignatureResult, TronSignTxParams, TronSignMessageParams, TronMessageSignatureResult, TronVerifyMessageParams, TronSignTypedHashParams, TronTypedDataSignatureResult, TonSignTxParams, TonSignMessageParams, TonMessageSignatureResult, TonBuildTransferParams, TonBuildTransferResult, TonFinalizeTransferParams, TonFinalizeTransferResult, GetPublicKeyRequest, BatchPubkeysPath, ApplySettingsParams, HealthResponse, SupportedAsset, PortfolioBalancesParams, MarketInfoParams, SearchAssetsParams, ListUnspentParams, PubkeyInfoParams, TxHistoryParams, BroadcastParams, NetworkIdParams, NetworkAddressParams, TokenDecimalsParams, StakingParams, SwapQuoteParams, SweepScanParams, SweepScanStatus, SweepExecuteParams, SweepExecuteResult, X402EvmSigner, X402EvmSignerParams, X402SvmPaymentPayload, X402SvmSignPaymentParams, X402SvmSigner, X402SvmSignerParams } from './types';
 export { SdkError } from './client';
 export * from './types';
 /**
@@ -54,6 +54,8 @@ export declare class KeepKeySdk {
         info: {
             /** Get full device features — model, firmware version, PIN/passphrase state, policies. */
             getFeatures: () => Promise<DeviceFeatures>;
+            /** Return `size` fresh bytes from the device hardware RNG (1..8192). */
+            getEntropy: (size: number) => Promise<Uint8Array>;
             /** List all connected KeepKey devices. */
             getDevices: () => Promise<{
                 devices: DeviceInfo[];
@@ -346,6 +348,35 @@ export declare class KeepKeySdk {
          * and verify against it, NOT against the bare message.
          */
         solanaSignOffchainMessage: (params: SolanaSignOffchainMessageParams) => Promise<SolanaOffchainMessageSignatureResult>;
+    };
+    /**
+     * x402 payment helpers. These reuse the normal EIP-712 and Solana
+     * transaction endpoints; they do not introduce a blind message-signing path.
+     */
+    x402: {
+        evm: {
+            /**
+             * Create an official x402 `ClientEvmSigner` for the EIP-3009 exact
+             * scheme. BigInt values produced by viem/x402 are converted to their
+             * lossless decimal JSON representation before reaching Vault.
+             */
+            createSigner: (params?: X402EvmSignerParams) => Promise<X402EvmSigner>;
+        };
+        svm: {
+            /**
+             * Sign a prebuilt x402 exact SVM payload. The mint and merchant owner
+             * come from PaymentRequirements; firmware independently checks the mint,
+             * TransferChecked decimals, and ATA(payTo, mint) before displaying them.
+             */
+            signPayment: (params: X402SvmSignPaymentParams) => Promise<X402SvmPaymentPayload>;
+            /**
+             * Create an official Solana Kit `TransactionPartialSigner` for one x402
+             * payment requirement. Kit supplies compiled v0 transactions; the adapter
+             * reconstructs their signature wrapper, preserves any sponsor signature,
+             * and returns only the KeepKey authority signature for Kit to merge.
+             */
+            createSigner: (params: X402SvmSignerParams) => Promise<X402SvmSigner>;
+        };
     };
     /** TRON (TRX) signing, including TRC-20 tokens. */
     tron: {

@@ -83,6 +83,24 @@ class VaultClient {
             throw new SdkError(resp.status, await resp.text());
         return resp.json();
     }
+    /** POST request returning raw bytes (for example hardware RNG output). */
+    async postBytes(path, body, timeoutMs) {
+        const request = () => fetch(`${this.baseUrl}${path}`, {
+            method: 'POST',
+            headers: this.headers(),
+            body: body !== undefined ? JSON.stringify(body) : undefined,
+            signal: this.signal(timeoutMs),
+        });
+        let resp = await request();
+        if (resp.status === 403 && this.apiKey) {
+            const rePaired = await this.tryRePair();
+            if (rePaired)
+                resp = await request();
+        }
+        if (!resp.ok)
+            throw new SdkError(resp.status, await resp.text());
+        return new Uint8Array(await resp.arrayBuffer());
+    }
     /** DELETE request */
     async delete(path) {
         const resp = await fetch(`${this.baseUrl}${path}`, {
