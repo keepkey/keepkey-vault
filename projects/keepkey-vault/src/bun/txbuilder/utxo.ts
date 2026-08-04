@@ -18,6 +18,25 @@ import { utxoDiscoveryKey } from '../btc-backend/types'
 /** BTC mainnet — the ONLY UTXO chain that routes to a self-host node; every other
  *  coin (LTC/DOGE/BCH/Dash/Zcash) stays on Pioneer. */
 const BTC_NETWORK_ID = 'bip122:000000000019d6689c085ae165831e93'
+
+/** Chain tip for maturity checks.
+ *
+ *  Pioneer's UTXO indexer may report `confirmations` directly or only `height`;
+ *  without a tip the height-only case yields unknown confirmations, which the
+ *  maturity helpers treat as spendable. Every other caller passes this, so the
+ *  builder must too — otherwise it selects immature outputs the UI has already
+ *  told the user are locked.
+ *
+ *  Loaded lazily: ../zcash-sidecar owns a sidecar process, and importing this
+ *  builder has to stay side-effect-free (see btc-backend/pioneer.ts). */
+async function zcashTipHeight(): Promise<number | null> {
+  try {
+    const { getScanState } = await import('../zcash-sidecar')
+    return getScanState().syncedTo ?? null
+  } catch {
+    return null
+  }
+}
 const btcSelfHostActive = (networkId: string) =>
   networkId === BTC_NETWORK_ID && getBtcBackend().kind !== 'pioneer'
 
@@ -286,7 +305,7 @@ export async function estimateUtxoFee(
     } else {
       utxos = await fetchUtxosForXpub(pioneer, chain.networkId, primaryXpub, scriptType, accountPath)
     }
-    if (chain.id === 'zcash') utxos = filterSpendableZcashUtxos(utxos)
+    if (chain.id === 'zcash') utxos = filterSpendableZcashUtxos(utxos, await zcashTipHeight())
     if (!utxos.length) return null
 
     const feeRates = await resolveFeeRates(pioneer, chain)
@@ -365,9 +384,10 @@ export async function buildUtxoTx(
     utxos = await fetchUtxosForXpub(pioneer, chain.networkId, primaryXpub, scriptType, accountPath || undefined)
   }
   if (chain.id === 'zcash') {
-    const maturity = summarizeZcashMaturity(utxos)
+    const tipHeight = await zcashTipHeight()
+    const maturity = summarizeZcashMaturity(utxos, tipHeight)
     const allZcashUtxos = utxos
-    utxos = filterSpendableZcashUtxos(allZcashUtxos)
+    utxos = filterSpendableZcashUtxos(allZcashUtxos, tipHeight)
     if (maturity.lockedCount > 0) {
       console.log(
         `${TAG} ZEC maturity: ${utxos.length} spendable, ${maturity.lockedCount} locked ` +
