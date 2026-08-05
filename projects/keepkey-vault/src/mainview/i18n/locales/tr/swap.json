@@ -49,7 +49,7 @@
 	"approvingToken": "Token onaylanıyor...",
 	"approvalRequired": "KeepKey'de token onayı bekleniyor...",
 	"enterAmount": "Fiyat teklifi almak için miktar girin",
-	"notSupported": "{{coin}} takasları henüz THORChain tarafından desteklenmiyor.",
+	"notSupported": "Şu anda {{coin}} için kullanılabilir bir takas rotası yok.",
 	"copied": "Kopyalandı",
 	"copy": "Kopyala",
 	"youSend": "Gönderiyorsunuz",

@@ -49,7 +49,7 @@
 	"approvingToken": "Token goedkeuren...",
 	"approvalRequired": "Wachten op tokengoedkeuring op KeepKey...",
 	"enterAmount": "Voer een bedrag in voor een offerte",
-	"notSupported": "{{coin}}-ruilen worden nog niet ondersteund door THORChain.",
+	"notSupported": "Er is momenteel geen ruilroute beschikbaar voor {{coin}}.",
 	"copied": "Gekopieerd",
 	"copy": "Kopiëren",
 	"youSend": "Je verzendt",

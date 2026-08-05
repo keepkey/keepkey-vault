@@ -104,7 +104,7 @@
 	"approvingToken": "Aprovando token...",
 	"approvalRequired": "Aguardando aprovação do token no seu KeepKey...",
 	"enterAmount": "Insira uma quantia para obter uma cotação",
-	"notSupported": "Trocas de {{coin}} ainda não são suportadas via THORChain.",
+	"notSupported": "No momento não há rota de troca disponível para {{coin}}.",
 	"copied": "Copiado",
 	"copy": "Copiar",
 	"youSend": "Você envia",

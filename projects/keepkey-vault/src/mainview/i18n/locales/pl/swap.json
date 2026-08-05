@@ -49,7 +49,7 @@
 	"approvingToken": "Zatwierdzanie tokena...",
 	"approvalRequired": "Oczekiwanie na zatwierdzenie tokena na KeepKey...",
 	"enterAmount": "Wprowadź kwotę, aby uzyskać wycenę",
-	"notSupported": "Wymiany {{coin}} nie są jeszcze obsługiwane przez THORChain.",
+	"notSupported": "Obecnie nie ma dostępnej trasy wymiany dla {{coin}}.",
 	"copied": "Skopiowano",
 	"copy": "Kopiuj",
 	"youSend": "Wysyłasz",
