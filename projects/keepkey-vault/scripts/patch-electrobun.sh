@@ -74,3 +74,22 @@ if [ -f "$EBUN_CJS" ]; then
       ;;
   esac
 fi
+
+# Patch Electrobun's RPC dispatcher so a non-Error throw still produces a
+# response packet. hdwallet throws decoded protobuf Failure objects (plain
+# objects whose .message is {code, message}); upstream does
+#   if (!(error instanceof Error)) throw error;
+# which sends NO response at all — the renderer's request then hangs until its
+# own timeout and the device's real reason ("Enable AdvancedMode to blind-sign",
+# "PIN invalid", …) is lost. Normalize instead of re-throwing.
+for RPC_TS in node_modules/electrobun/dist/api/shared/rpc.ts node_modules/electrobun/dist-macos-arm64/api/shared/rpc.ts; do
+  [ -f "$RPC_TS" ] || continue
+  if grep -q 'kkDeviceErrorText' "$RPC_TS"; then
+    echo "[patch-electrobun] rpc.ts device-error normalization already patched ($RPC_TS)"
+  elif grep -q 'if (!(error instanceof Error)) throw error;' "$RPC_TS"; then
+    sed_in_place 's|if (!(error instanceof Error)) throw error;|if (!(error instanceof Error)) { const kkDeviceErrorText = (e: any): string => typeof e === "string" ? e : typeof e?.message === "string" ? e.message : typeof e?.message?.message === "string" ? e.message.message : String(e); error = new Error(kkDeviceErrorText(error)); }|g' "$RPC_TS"
+    echo "[patch-electrobun] Patched rpc.ts device-error normalization ($RPC_TS)"
+  else
+    echo "[patch-electrobun] WARNING: rpc.ts error pattern not found in $RPC_TS — Electrobun may have changed"
+  fi
+done

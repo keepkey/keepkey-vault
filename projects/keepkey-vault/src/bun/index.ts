@@ -2164,9 +2164,14 @@ async function deriveChainAddress(wallet: any, chain: ChainDef): Promise<string 
 }
 
 // ── RPC Bridge (Electrobun UI ↔ Bun) ─────────────────────────────────
+
 const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 	maxRequestTime: 1_800_000, // 30 minutes — generous for device-interactive ops, but not infinite
 	handlers: {
+		// NOTE: device Failures are plain objects, not Errors. Electrobun's
+		// dispatcher drops non-Error throws without sending a response (see
+		// scripts/patch-electrobun.sh, which normalizes them), so handlers here
+		// may throw device failures without hanging the renderer.
 		requests: {
 			// ── Device lifecycle ──────────────────────────────────────
 			getDeviceState: async () => engine.getDeviceState(),
