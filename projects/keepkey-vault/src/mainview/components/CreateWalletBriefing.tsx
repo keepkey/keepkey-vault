@@ -60,12 +60,19 @@ const PRACTICES: string[] = [
 export function CreateWalletBriefing({
 	open,
 	wordCount,
+	diceEntropy,
+	onToggleDice,
+	diceSupported,
 	onRunRngTest,
 	onConfirm,
 	onCancel,
 }: {
 	open: boolean
 	wordCount: number
+	diceEntropy: boolean
+	onToggleDice: (v: boolean) => void
+	/** Firmware >= 7.15.0. Older devices reject the unknown field outright. */
+	diceSupported: boolean
 	onRunRngTest: () => void
 	onConfirm: () => void
 	onCancel: () => void
@@ -162,6 +169,62 @@ export function CreateWalletBriefing({
 							Run test
 						</Button>
 					</Flex>
+
+					{diceSupported && (
+						<Flex
+							as="label"
+							mt="3"
+							px="3"
+							py="2.5"
+							gap="3"
+							align="flex-start"
+							cursor="pointer"
+							borderRadius="lg"
+							bg={diceEntropy ? "rgba(233,196,106,0.10)" : "rgba(255,255,255,0.03)"}
+							borderWidth="1px"
+							borderColor={diceEntropy ? "rgba(233,196,106,0.40)" : "rgba(255,255,255,0.08)"}
+							onClick={(e: React.MouseEvent) => {
+								e.preventDefault()
+								onToggleDice(!diceEntropy)
+							}}
+						>
+							<Box
+								mt="1px"
+								w="16px"
+								h="16px"
+								flexShrink={0}
+								borderRadius="4px"
+								borderWidth="1px"
+								borderColor={diceEntropy ? "var(--gold)" : "rgba(255,255,255,0.25)"}
+								bg={diceEntropy ? "var(--gold)" : "transparent"}
+							>
+								{diceEntropy && (
+									<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+										<polyline
+											points="3.5,8.5 6.5,11.5 12.5,4.5"
+											fill="none"
+											stroke="black"
+											strokeWidth="2.5"
+											strokeLinecap="round"
+											strokeLinejoin="round"
+										/>
+									</svg>
+								)}
+							</Box>
+							<Box>
+								<Text fontSize="xs" fontWeight="600" color="white">
+									Add my own dice rolls
+								</Text>
+								<Text fontSize="2xs" color="kk.textSecondary" lineHeight="tall">
+									Roll a physical die and enter {wordCount === 12 ? 50 : wordCount === 18 ? 75 : 99}{" "}
+									results on the device itself, mixed into step 1. The rolls never touch this
+									computer — that is the point, since typing them here would hand them to
+									anything watching. Slower, and worth it if you do not want to rely on the
+									device's randomness alone.
+								</Text>
+							</Box>
+						</Flex>
+					)}
 
 					<Flex mt="5" gap="2" justify="flex-end">
 						<Button size="sm" variant="ghost" onClick={onCancel}>Back</Button>
