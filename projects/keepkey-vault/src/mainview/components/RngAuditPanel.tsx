@@ -14,10 +14,30 @@ import type { RngAuditReport } from "../../shared/types"
  * "entropy verified" badge that would be false comfort.
  */
 
-/** Firmware grants 64 KB per boot with no button press; past that every 1 KB
- *  request needs a physical confirmation, so this is the only size that runs
- *  unattended today. Larger pulls need the firmware bulk-audit unlock. */
+/** Firmware grants this much per boot with no button press. Past it the
+ *  device asks once (firmware >= 7.15.0 with the bulk-audit unlock) and then
+ *  streams unmetered while it stays uninitialized. */
 const PRESS_FREE_BYTES = 64 * 1024
+
+/** Measured through this RPC path: ~6.5 KB/s. Only used for the estimate. */
+const BYTES_PER_SEC = 6.5 * 1024
+
+const SIZES = [64 * 1024, 256 * 1024, 1024 * 1024, 4 * 1024 * 1024, 8 * 1024 * 1024]
+
+function label(bytes: number): string {
+	return bytes >= 1024 * 1024 ? `${bytes / 1024 / 1024} MB` : `${bytes / 1024} KB`
+}
+
+/** Same formula the analyser uses: blocks^2 / 2^33, blocks = bytes/4. */
+function expectedCollisions(bytes: number): number {
+	const blocks = Math.floor(bytes / 4)
+	return (blocks * blocks) / 2 ** 33
+}
+
+function duration(bytes: number): string {
+	const s = Math.round(bytes / BYTES_PER_SEC)
+	return s < 90 ? `~${s}s` : `~${Math.round(s / 60)} min`
+}
 
 function Row({ label, value, muted }: { label: string; value: string; muted?: boolean }) {
 	return (
@@ -29,6 +49,7 @@ function Row({ label, value, muted }: { label: string; value: string; muted?: bo
 }
 
 export function RngAuditPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
+	const [sizeIdx, setSizeIdx] = useState(0)
 	const [running, setRunning] = useState(false)
 	const [progress, setProgress] = useState(0)
 	const [report, setReport] = useState<RngAuditReport | null>(null)
@@ -52,7 +73,7 @@ export function RngAuditPanel({ open, onClose }: { open: boolean; onClose: () =>
 		try {
 			// 0 timeout: the device may require a button press per request once
 			// the press-free budget is spent.
-			setReport(await rpcRequest("rngAuditRun", { bytes: PRESS_FREE_BYTES }, 0))
+			setReport(await rpcRequest("rngAuditRun", { bytes: SIZES[sizeIdx] }, 0))
 		} catch (e) {
 			setError(e instanceof Error ? e.message : String(e))
 		} finally {
@@ -82,8 +103,8 @@ export function RngAuditPanel({ open, onClose }: { open: boolean; onClose: () =>
 				>
 					<Text fontSize="md" fontWeight="700" color="kk.textPrimary">RNG health test</Text>
 					<Text fontSize="xs" color="kk.textSecondary" mt="1">
-						Pulls {PRESS_FREE_BYTES / 1024} KB from the device's random number generator and checks it
-						for stuck, repeated, or grossly biased output.
+						Pulls entropy from the device's random number generator and checks it for stuck,
+						repeated, or grossly biased output.
 					</Text>
 
 					<Box mt="3" px="3" py="2" borderRadius="10px" bg="rgba(233,196,106,0.06)" border="1px solid rgba(233,196,106,0.18)">
@@ -93,6 +114,60 @@ export function RngAuditPanel({ open, onClose }: { open: boolean; onClose: () =>
 							randomness is unpredictable — only that it is not obviously broken.
 						</Text>
 					</Box>
+
+					{!running && !report && (
+						<Box mt="4">
+							<Flex justify="space-between" align="baseline" mb="1">
+								<Text fontSize="xs" color="kk.textSecondary">Sample size</Text>
+								<Text fontSize="xs" fontFamily="mono" color="kk.textPrimary">
+									{label(SIZES[sizeIdx])} · {duration(SIZES[sizeIdx])}
+								</Text>
+							</Flex>
+
+							{/* Native range input: no slider dependency, and it is keyboard
+							    accessible for free. Discrete indices, not raw bytes. */}
+							<Box
+								as="input"
+								// @ts-expect-error -- Chakra's polymorphic props do not model input attrs
+								type="range"
+								min={0}
+								max={SIZES.length - 1}
+								step={1}
+								value={sizeIdx}
+								onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSizeIdx(Number(e.target.value))}
+								w="100%"
+								style={{ accentColor: "#e9c46a" }}
+							/>
+
+							<Flex justify="space-between" mt="0.5">
+								{SIZES.map((b, i) => (
+									<Text
+										key={b}
+										fontSize="2xs"
+										color={i === sizeIdx ? "var(--gold)" : "kk.textMuted"}
+										cursor="pointer"
+										onClick={() => setSizeIdx(i)}
+									>
+										{label(b)}
+									</Text>
+								))}
+							</Flex>
+
+							<Text fontSize="2xs" color="kk.textSecondary" mt="2" lineHeight="tall">
+								{expectedCollisions(SIZES[sizeIdx]) >= 1
+									? `At this size the collision positive control expects ~${expectedCollisions(SIZES[sizeIdx]).toFixed(0)} hits, so the result is meaningful — it can tell a working detector from a broken one.`
+									: `At this size the collision positive control expects only ${expectedCollisions(SIZES[sizeIdx]).toFixed(2)} hits, so finding none proves nothing. Pick 1 MB or more for that check to carry information.`}
+							</Text>
+
+							{SIZES[sizeIdx] > PRESS_FREE_BYTES && (
+								<Text fontSize="2xs" color="kk.textSecondary" mt="1.5" lineHeight="tall">
+									Past {label(PRESS_FREE_BYTES)} the device asks for one button press, then
+									streams the rest unmetered. Requires firmware 7.15.0+ and an uninitialized
+									device; on older firmware every kilobyte needs its own press.
+								</Text>
+							)}
+						</Box>
+					)}
 
 					{running && (
 						<Box mt="4">
@@ -171,7 +246,7 @@ export function RngAuditPanel({ open, onClose }: { open: boolean; onClose: () =>
 							onClick={run}
 							disabled={running}
 						>
-							{running ? "Running…" : report ? "Run again" : "Run test"}
+							{running ? "Running…" : report ? "Run again" : `Run ${label(SIZES[sizeIdx])} test`}
 						</Button>
 					</Flex>
 				</Box>
