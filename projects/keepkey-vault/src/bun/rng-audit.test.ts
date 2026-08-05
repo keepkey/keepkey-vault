@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 import { createHash, randomBytes } from 'crypto'
-import { analyzeEntropy, collectAndAnalyze, MAX_CHUNK_BYTES, verdictSummary } from './rng-audit'
+import { analyzeEntropy, collectAndAnalyze, linearComplexity, LINEAR_COMPLEXITY_BITS, MAX_CHUNK_BYTES, toBits, verdictSummary } from './rng-audit'
 
 const sha = (b: Uint8Array) => createHash('sha256').update(b).digest('hex')
 const analyze = (b: Uint8Array) => analyzeEntropy(b, sha(b))
@@ -201,5 +201,83 @@ describe('honesty contract', () => {
 		const failed = report.checks.filter((c) => c.status === 'fail')
 		expect(failed.map((c) => c.id)).toContain('repeated-blocks')
 		expect(report.failures.length).toBe(failed.length)
+	})
+})
+
+describe('linear complexity (Berlekamp-Massey)', () => {
+	/** Bits from an LFSR of the given degree — what a dead analog source
+	 *  leaves behind while the digital post-processing keeps clocking. */
+	const lfsrBits = (degree: number, n: number): Uint8Array => {
+		let reg = 1
+		const taps = (1 << degree) | 1 | (1 << (degree - 1))
+		const out = new Uint8Array(n)
+		for (let i = 0; i < n; i++) {
+			const bit = reg & 1
+			out[i] = bit
+			reg >>= 1
+			if (bit) reg ^= taps >> 1
+		}
+		return out
+	}
+
+	it('reports about n/2 for random bits', () => {
+		const n = 2048
+		const l = linearComplexity(toBits(new Uint8Array(randomBytes(n / 8)), n))
+		// Expected n/2; allow generous slack for a single sample.
+		expect(l).toBeGreaterThan(n / 2 - 80)
+		expect(l).toBeLessThan(n / 2 + 80)
+	})
+
+	it('collapses to the register size for LFSR output', () => {
+		// THE failure this test exists for: uniform, unbiased, collision-correct
+		// output that is nonetheless a linear recurrence and fully predictable.
+		for (const degree of [17, 23, 31]) {
+			const l = linearComplexity(lfsrBits(degree, 2048))
+			expect(l).toBeLessThanOrEqual(degree + 1)
+			expect(l).toBeLessThan(100) // nowhere near n/2 = 1024
+		}
+	})
+
+	it('an LFSR stream still passes the naive statistics', () => {
+		// Proves the other checks cannot see this, so the test earns its place.
+		const bits = lfsrBits(31, 512 * 1024 * 8)
+		const bytes = new Uint8Array(512 * 1024)
+		for (let i = 0; i < bits.length; i++) if (bits[i]) bytes[i >> 3] |= 0x80 >> (i & 7)
+
+		const report = analyze(bytes)
+		const byId = (id: string) => report.checks.find((c) => c.id === id)!
+		expect(byId('bit-balance').status).toBe('pass')
+		expect(byId('byte-coverage').status).toBe('pass')
+
+		// ...while linear complexity sees it immediately.
+		expect(linearComplexity(toBits(bytes, LINEAR_COMPLEXITY_BITS))).toBeLessThan(200)
+	})
+
+	it('handles an all-zero stream without hanging', () => {
+		expect(linearComplexity(new Uint8Array(512))).toBe(0)
+	})
+
+	it('is wired in as a check that catches what the others miss', () => {
+		// End-to-end: the analyser itself must fail an LFSR stream, not just
+		// the standalone function.
+		let reg = 1
+		const bytes = new Uint8Array(128 * 1024)
+		for (let i = 0; i < bytes.length * 8; i++) {
+			const bit = reg & 1
+			if (bit) bytes[i >> 3] |= 0x80 >> (i & 7)
+			reg >>= 1
+			if (bit) reg ^= 0x40000000 | 0x10000000
+		}
+
+		const report = analyze(bytes)
+		const lc = report.checks.find((c) => c.id === 'linear-complexity')!
+		expect(lc.status).toBe('fail')
+		expect(report.verdict).toBe('failed')
+	})
+
+	it('does not run below its minimum sample', () => {
+		const lc = analyze(new Uint8Array(randomBytes(256))).checks
+			.find((c) => c.id === 'linear-complexity')!
+		expect(lc.status).toBe('not-run')
 	})
 })
