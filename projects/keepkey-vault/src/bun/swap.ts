@@ -8,7 +8,7 @@
  *
  * NO direct THORNode or other third-party calls — fail fast if Pioneer is down.
  */
-import { CHAINS, supportedBtcScriptTypes, btcAccountPath } from '../shared/chains'
+import { CHAINS, supportedBtcScriptTypes, btcAccountPath, evmAddressPath } from '../shared/chains'
 import type { ChainDef } from '../shared/chains'
 import type { SwapAsset, SwapQuote, SwapQuoteParams, ExecuteSwapParams, SwapResult } from '../shared/types'
 import { SOLANA_BLIND_SIGNING_REQUIRED } from '../shared/types'
@@ -575,7 +575,7 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
   let fromAddress = params.fromAddressOverride
   if (!fromAddress) {
     const fromPath = fromChain.chainFamily === 'evm' && params.fromEvmAddressIndex != null
-      ? [0x8000002C, 0x8000003C, 0x80000000, 0, params.fromEvmAddressIndex]
+      ? evmAddressPath(params.fromEvmAddressIndex)
       : fromChain.defaultPath
     const addrParams: any = {
       addressNList: fromPath,
@@ -1097,7 +1097,7 @@ export async function previewSwapBuild(
   let fromAddress = params.fromAddressOverride
   if (!fromAddress) {
     const fromPath = fromChain.chainFamily === 'evm' && params.fromEvmAddressIndex != null
-      ? [0x8000002C, 0x8000003C, 0x80000000, 0, params.fromEvmAddressIndex]
+      ? evmAddressPath(params.fromEvmAddressIndex)
       : fromChain.defaultPath
     const addrParams: any = {
       addressNList: fromPath,
@@ -1241,7 +1241,7 @@ async function buildRelaySwapTx(
 ): Promise<{ unsignedTx: any; approveTx?: any; fromAmountBaseUnits?: string; allowance?: { current: string; required: string; sufficient: boolean; spender: string; tokenContract: string }; balance?: { current: string; required: string; sufficient: boolean; tokenContract?: string } }> {
   const relay = params.relayTx!
   const evmSigningPath = params.fromEvmAddressIndex != null
-    ? [0x8000002C, 0x8000003C, 0x80000000, 0, params.fromEvmAddressIndex]
+    ? evmAddressPath(params.fromEvmAddressIndex)
     : fromChain.defaultPath
   console.log(`${TAG} buildRelaySwapTx: relay.value=${relay.value} relay.gasLimit=${relay.gasLimit} relay.maxFeePerGas=${relay.maxFeePerGas} relay.maxPriorityFeePerGas=${relay.maxPriorityFeePerGas}`)
 
@@ -1653,7 +1653,7 @@ async function buildEvmSwapTx(
   if (!routerAddress) throw new Error('EVM swaps require a router/inboundAddress from the quote')
 
   const evmSigningPath = params.fromEvmAddressIndex != null
-    ? [0x8000002C, 0x8000003C, 0x80000000, 0, params.fromEvmAddressIndex]
+    ? evmAddressPath(params.fromEvmAddressIndex)
     : fromChain.defaultPath
 
   // Use expiry from quote if available, otherwise 1 hour from now

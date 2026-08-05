@@ -6,6 +6,7 @@
  * Supports native ETH transfers and ERC-20 token transfers.
  */
 import type { ChainDef } from '../../shared/chains'
+import { evmAddressPath } from '../../shared/chains'
 import { tokenMaxSpendableBaseUnits } from '../../shared/max-send'
 import { getEvmGasPrice, getEvmNonce, getEvmBalance } from '../evm-rpc'
 
@@ -116,9 +117,12 @@ export async function buildEvmTx(
     } catch { /* ignore non-numeric override */ }
   }
 
-  // Derive addressNList from addressIndex (multi-address) or fall back to chain.defaultPath
+  // Derive addressNList from addressIndex (multi-address) or fall back to chain.defaultPath.
+  // MUST be evmAddressPath (account-hardened, m/44'/60'/N'/0/0): the from-address,
+  // nonce and balance are resolved at that path — a mismatched signing path makes
+  // the device sign as a different address and the tx never lands for the user.
   const addressNList = addressIndex != null
-    ? [0x8000002C, 0x8000003C, 0x80000000, 0, addressIndex]
+    ? evmAddressPath(addressIndex)
     : chain.defaultPath
 
   if (isErc20) console.log(`${TAG} ERC-20 token transfer: ${caip}`)
