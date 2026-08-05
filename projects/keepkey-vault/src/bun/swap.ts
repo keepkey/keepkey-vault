@@ -12,6 +12,7 @@ import { CHAINS, supportedBtcScriptTypes, btcAccountPath, evmAddressPath } from 
 import type { ChainDef } from '../shared/chains'
 import type { SwapAsset, SwapQuote, SwapQuoteParams, ExecuteSwapParams, SwapResult } from '../shared/types'
 import { SOLANA_BLIND_SIGNING_REQUIRED } from '../shared/types'
+import { toDeviceError, deviceErrorMessage } from '../shared/device-error'
 import { findEvmSchema } from './evm-schema-registry'
 import { findSolanaSchema } from './solana-schema-registry'
 import { getPioneer } from './pioneer'
@@ -1003,10 +1004,13 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
       { operation: 'swap', chain: fromChain.coin, to: params.inboundAddress, value: params.amount, memo: params.memo },
     )
   } catch (e: any) {
-    console.error(`${TAG} SIGN FAILED: ${e.message}`)
+    // hdwallet throws the decoded protobuf Failure object, not an Error — log
+    // and rethrow the unwrapped reason so it survives the RPC boundary.
+    const reason = deviceErrorMessage(e)
+    console.error(`${TAG} SIGN FAILED: ${reason}`)
     console.error(`${TAG}   chain=${fromChain.id}, method=${fromChain.signMethod}`)
-    console.error(`${TAG}   stack: ${e.stack?.split('\n').slice(0, 5).join('\n')}`)
-    throw e
+    if (e instanceof Error && e.stack) console.error(`${TAG}   stack: ${e.stack.split('\n').slice(0, 5).join('\n')}`)
+    throw toDeviceError(e)
   }
   swapLog(`${TAG} Sign complete, serialized=${!!signedTx?.serialized || !!signedTx?.serializedTx}`)
 

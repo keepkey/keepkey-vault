@@ -796,6 +796,11 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   // flips to a route-specific, one-request consent page.
   const [enablingBlindSign, setEnablingBlindSign] = useState(false)
   const [blindSignError, setBlindSignError] = useState<string | null>(null)
+  // 'host'   — our own pre-flight consent gate (relay tx we can't verify here)
+  // 'device' — the DEVICE refused: its AdvancedMode policy is off. One-shot
+  //            consent does not help there (older firmware ignores the
+  //            per-request flag), so the only remedy is enabling the policy.
+  const [blindSignCause, setBlindSignCause] = useState<'host' | 'device'>('host')
   const [allowSolanaBlindSigning, setAllowSolanaBlindSigning] = useState(false)
   const [txid, setTxid] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
@@ -2225,6 +2230,17 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       // route-specific, one-request opaque consent.
       if (raw.includes(SOLANA_BLIND_SIGNING_REQUIRED)) {
         setBlindSignError(null)
+        setBlindSignCause('host')
+        setPhase('blind-signing-required')
+        return
+      }
+      // The DEVICE refused: firmware requires its AdvancedMode policy for any
+      // transaction it cannot verify. Which transactions those are is
+      // firmware-specific, so we react to the refusal rather than predicting
+      // it — correct on every version, old and new.
+      if (/AdvancedMode/i.test(raw)) {
+        setBlindSignError(null)
+        setBlindSignCause('device')
         setPhase('blind-signing-required')
         return
       }
@@ -2310,11 +2326,27 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   const handleEnableBlindSigning = useCallback(async () => {
     setEnablingBlindSign(true)
     setBlindSignError(null)
-    setAllowSolanaBlindSigning(true)
+    if (blindSignCause === 'device') {
+      // Persistent device policy. The device demands a button confirm AND a
+      // full PIN re-entry (it ignores the session PIN cache), so this is not
+      // instant — hence the 60s budget and the "on device" copy.
+      try {
+        await rpcRequest('applyPolicy', { policyName: 'AdvancedMode', enabled: true }, 60000)
+      } catch (e: any) {
+        const msg = e?.message || ''
+        setBlindSignError(/cancel|denied|rejected/i.test(msg)
+          ? t('blindSignDeclined', 'Declined on device — blind signing was not enabled.')
+          : (msg || t('blindSignEnableFailed', 'Failed to enable blind signing on the device.')))
+        setEnablingBlindSign(false)
+        return
+      }
+    } else {
+      setAllowSolanaBlindSigning(true)
+    }
     setError(null)
     setPhase('review')
     setEnablingBlindSign(false)
-  }, [])
+  }, [blindSignCause, t])
 
   const copyTxid = useCallback(() => {
     if (!txid) return
@@ -3665,10 +3697,14 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
 
               <VStack gap="2" align="center" maxW="420px">
                 <Text fontSize="lg" fontWeight="700" color="kk.textPrimary" textAlign="center">
-                  {t('solanaOpaqueTitle', 'One-time Blind Signing for Solana')}
+                  {blindSignCause === 'device'
+                    ? t('deviceBlindSignTitle', 'Your KeepKey needs blind signing enabled')
+                    : t('solanaOpaqueTitle', 'One-time Blind Signing for Solana')}
                 </Text>
                 <Text fontSize="sm" color="kk.textSecondary" textAlign="center" lineHeight="1.5">
-                  {t('solanaOpaqueBody', 'This Relay transaction uses a custom Solana program and lookup-table accounts that your KeepKey cannot fully verify. No signed ClearSign descriptor was supplied for the route, so this transaction requires the opaque fallback.')}
+                  {blindSignCause === 'device'
+                    ? t('deviceBlindSignBody', 'The device could not read this transaction well enough to show you what it does, and it refuses to sign anything it cannot display unless you turn on Advanced Mode. Newer firmware can read more transaction types, so this may not be needed after an update.')
+                    : t('solanaOpaqueBody', 'This Relay transaction uses a custom Solana program and lookup-table accounts that your KeepKey cannot fully verify. No signed ClearSign descriptor was supplied for the route, so this transaction requires the opaque fallback.')}
                 </Text>
               </VStack>
 
@@ -3680,7 +3716,9 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                   </svg>
                 </Box>
                 <Text fontSize="11px" color="kk.textMuted" lineHeight="1.4">
-                  {t('solanaOpaqueCaveat', 'Blind signing means the device shows a generic prompt instead of authenticated swap details. This approval applies only to this transaction and does not enable global Advanced Mode. Confirm only the swap you reviewed here.')}
+                  {blindSignCause === 'device'
+                    ? t('deviceBlindSignCaveat', 'This stays on until you turn it off in Device Settings, and it applies to every app that uses this KeepKey — not just this swap. The device will ask you to confirm and to re-enter your PIN. Only continue for a swap you have reviewed here.')
+                    : t('solanaOpaqueCaveat', 'Blind signing means the device shows a generic prompt instead of authenticated swap details. This approval applies only to this transaction and does not enable global Advanced Mode. Confirm only the swap you reviewed here.')}
                 </Text>
               </Flex>
 
@@ -3702,7 +3740,9 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                   loadingText={t('blindSignPreparing', 'Preparing…')}
                   _hover={{ opacity: 0.9 }}
                   onClick={handleEnableBlindSigning}>
-                  {t('solanaOpaqueAllowOnce', 'Allow Once')}
+                  {blindSignCause === 'device'
+                    ? t('deviceBlindSignEnable', 'Enable on device')
+                    : t('solanaOpaqueAllowOnce', 'Allow Once')}
                 </Button>
               </Flex>
             </VStack>
