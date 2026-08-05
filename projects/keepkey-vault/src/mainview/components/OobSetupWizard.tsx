@@ -17,6 +17,7 @@ import holdAndConnectRaw from '../assets/svg/hold-and-connect.svg?raw'
 import { useFirmwareUpdate } from '../hooks/useFirmwareUpdate'
 import { useDeviceState } from '../hooks/useDeviceState'
 import { CreateWalletBriefing } from './CreateWalletBriefing'
+import { SecurityStepPage } from './SecurityStepPage'
 import { RngAuditPanel } from './RngAuditPanel'
 import { rpcRequest, onRpcMessage } from '../lib/rpc'
 import type { FirmwareAnalysis, FirmwareProgress } from '../../shared/types'
@@ -61,6 +62,8 @@ type WizardStep =
   | 'bootloader'
   | 'firmware'
   | 'init-choose'
+  | 'sec-randomness'
+  | 'sec-dice'
   | 'init-progress'
   | 'init-label'
   | 'verify-seed'
@@ -73,6 +76,8 @@ const STEP_SEQUENCE: WizardStep[] = [
   'bootloader',
   'firmware',
   'init-choose',
+  'sec-randomness',
+  'sec-dice',
   'init-progress',
   'init-label',
   'verify-seed',
@@ -89,6 +94,8 @@ const stepToVisibleId: Record<WizardStep, string | null> = {
   'bootloader': 'bootloader',
   'firmware': 'firmware',
   'init-choose': 'init-choose',
+  'sec-randomness': 'init-choose',
+  'sec-dice': 'init-choose',
   'init-progress': 'init-choose',
   'init-label': 'init-choose',
   'verify-seed': 'init-choose',
@@ -155,6 +162,8 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
     'bootloader': t('stepDescriptions.bootloader'),
     'firmware': t('stepDescriptions.firmware'),
     'init-choose': t('stepDescriptions.initChoose'),
+    'sec-randomness': t('stepDescriptions.secRandomness', { defaultValue: 'Verify device randomness' }),
+    'sec-dice': t('stepDescriptions.secDice', { defaultValue: 'Add your own dice rolls' }),
     'init-progress': t('stepDescriptions.initProgress'),
     'init-label': t('stepDescriptions.initLabel'),
     'verify-seed': t('stepDescriptions.verifySeed', { defaultValue: 'Verify your recovery phrase' }),
@@ -2010,6 +2019,26 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
               </VStack>
             )}
 
+            {/* ═══════ SECURITY: VERIFY RANDOMNESS (optional) ═══════ */}
+            {step === 'sec-randomness' && (
+              <SecurityStepPage
+                step="randomness"
+                rollCount={wordCount === 12 ? 50 : wordCount === 18 ? 75 : 99}
+                onAccept={() => setRngAuditOpen(true)}
+                onSkip={() => setStep('sec-dice')}
+              />
+            )}
+
+            {/* ═══════════ SECURITY: DICE (optional) ════════════════ */}
+            {step === 'sec-dice' && (
+              <SecurityStepPage
+                step="dice"
+                rollCount={wordCount === 12 ? 50 : wordCount === 18 ? 75 : 99}
+                onAccept={() => { setDiceEntropy(true); setStep('init-progress'); void handleCreateWallet() }}
+                onSkip={() => { setDiceEntropy(false); setStep('init-progress'); void handleCreateWallet() }}
+              />
+            )}
+
             {/* ═══════════════ INIT: CHOOSE ═════════════════════════ */}
             {step === 'init-choose' && (
               <VStack gap={3} w="100%">
@@ -3069,9 +3098,24 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
         diceSupported={diceSupported}
         onRunRngTest={() => setRngAuditOpen(true)}
         onCancel={() => setBriefingOpen(false)}
-        onConfirm={() => { setBriefingOpen(false); handleCreateWallet() }}
+        onConfirm={() => {
+          setBriefingOpen(false)
+          // Randomness first, then dice: audit the source BEFORE adding to it,
+          // or the audit measures the wrong thing. Devices too old for dice
+          // skip straight to generation.
+          setStep(diceSupported ? 'sec-randomness' : 'init-progress')
+          if (!diceSupported) void handleCreateWallet()
+        }}
       />
-      <RngAuditPanel open={rngAuditOpen} onClose={() => setRngAuditOpen(false)} />
+      <RngAuditPanel
+        open={rngAuditOpen}
+        onClose={() => {
+          setRngAuditOpen(false)
+          // Closing the audit from its own step advances the ceremony; opened
+          // from the briefing it just returns there.
+          if (step === 'sec-randomness') setStep('sec-dice')
+        }}
+      />
     </Flex>
   )
 }
