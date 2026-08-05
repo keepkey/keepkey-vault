@@ -974,7 +974,11 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 			}
 			// Hard error supersedes any soft-fault banner.
 			setPortfolioFault(null)
-			stagePioneerError({ message: p.message, url: p.url })
+			// Boundary guard: message is rendered as a React child, and a non-string
+			// payload (e.g. a {code, message} JSON-RPC error) would crash the tree.
+			const message = typeof p.message === 'string' ? p.message : JSON.stringify(p.message)
+			if (typeof p.message !== 'string') console.error('[Dashboard] pioneer-error carried non-string message:', p.message)
+			stagePioneerError({ message, url: p.url })
 		})
 	}, [stagePioneerError])
 

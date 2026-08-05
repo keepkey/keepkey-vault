@@ -2983,10 +2983,15 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				try {
 					pioneer = await getPioneer()
 				} catch (e: any) {
-					pioneerInitError = e instanceof Error ? e : new Error(e?.message || String(e))
-					console.warn('[getBalances] Pioneer init failed (will return zero balances):', e.message)
+					// e.message is not always a string: upstream JSON-RPC/hdwallet failures
+					// carry {code, message} objects, which crash React if rendered raw.
+					const pioneerMsg = typeof e?.message === 'string' ? e.message
+						: typeof e?.message?.message === 'string' ? e.message.message
+						: String(e)
+					pioneerInitError = e instanceof Error ? e : new Error(pioneerMsg)
+					console.warn('[getBalances] Pioneer init failed (will return zero balances):', pioneerMsg)
 					// Notify UI so user can change server or get support
-					try { rpc.send['pioneer-error']({ message: e.message, url: getPioneerApiBase() }) } catch { /* webview not ready */ }
+					try { rpc.send['pioneer-error']({ message: pioneerMsg, url: getPioneerApiBase() }) } catch { /* webview not ready */ }
 				}
 
 				const wallet = engine.wallet as any
