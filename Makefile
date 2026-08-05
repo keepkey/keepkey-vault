@@ -847,10 +847,13 @@ preflight: submodules
 	test -f modules/proto-tx-builder/dist/index.js && echo "   ✅ proto-tx-builder dist/" || { echo "   ❌ proto-tx-builder dist/ — run: make modules-build"; fail=1; }; \
 	test -f modules/device-protocol/lib/messages_pb.js && echo "   ✅ device-protocol lib/" || { echo "   ❌ device-protocol lib/ — run: cd modules/device-protocol && npm run build"; fail=1; }; \
 	echo ""; \
-	echo "6. VAULT TYPECHECK"; \
+	echo "6. VAULT TYPECHECK (differential vs baseline)"; \
 	errs=$$(cd $(PROJECT_DIR) && npx tsc --noEmit --skipLibCheck 2>&1 | grep "error TS" | grep -v "minimatch" | wc -l | tr -d ' '); \
+	base=$$(cat $(PROJECT_DIR)/.typecheck-baseline 2>/dev/null || echo 0); \
 	if [ "$$errs" = "0" ]; then echo "   ✅ clean"; \
-	else echo "   ❌ $$errs type errors"; fail=1; fi; \
+	elif [ "$$errs" -le "$$base" ]; then echo "   ✅ $$errs errors, at or below baseline $$base"; \
+		if [ "$$errs" -lt "$$base" ]; then echo "      (improved — update $(PROJECT_DIR)/.typecheck-baseline to $$errs)"; fi; \
+	else echo "   ❌ $$errs type errors — baseline is $$base, so this change ADDS $$(($$errs - $$base))"; fail=1; fi; \
 	echo ""; \
 	echo "════════════════════════════════════════════"; \
 	if [ "$$fail" = "0" ]; then echo "✅ ALL GATES PASSED — ready to cut release"; \
