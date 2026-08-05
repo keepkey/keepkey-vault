@@ -171,6 +171,7 @@ import { EVM_RPC_URLS, getTokenMetadata, broadcastEvmTx } from "./evm-rpc"
 import type { ChainBalance, TokenBalance, CustomToken, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, EvmAddressSet, Bip85SeedMeta, StakingPosition, SwapAsset, AuditToken, DefiPosition, RecentActivity, ClearSignEvent, ClearSignSolanaSchemaArtifact, UtxoMaturity } from "../shared/types"
 import type { VaultRPCSchema } from "../shared/rpc-schema"
 import { formatZatAsZec, summarizeZcashMaturity, ZCASH_MIN_CONFIRMATIONS } from "../shared/zcash-maturity"
+import { collectAndAnalyze, MAX_CHUNK_BYTES } from "./rng-audit"
 
 // L3 fix: withTimeout imported from engine-controller (was duplicated here)
 const PIONEER_TIMEOUT_MS = 60_000
@@ -2491,6 +2492,21 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			getFeatures: async () => {
 				if (!engine.wallet) throw new Error('No device connected')
 				return await engine.refreshFeaturesSnapshot()
+			},
+			rngAuditRun: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				const bytes = Number(params?.bytes)
+				if (!Number.isInteger(bytes) || bytes < MAX_CHUNK_BYTES || bytes > 8 * 1024 * 1024) {
+					throw new Error(`rngAuditRun: bytes must be an integer in [${MAX_CHUNK_BYTES}, 8388608]`)
+				}
+				const wallet = engine.wallet as any
+				return await collectAndAnalyze(
+					(size) => wallet.getEntropy(size),
+					bytes,
+					(collected, total) => {
+						try { rpc.send['rng-audit-progress']({ collected, total }) } catch {}
+					},
+				)
 			},
 			clearsignGetStudioStatus: async () => ({
 				advancedMode: getAdvancedModeEnabled() === true,

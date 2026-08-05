@@ -1,5 +1,5 @@
 import type { ElectrobunRPCSchema } from 'electrobun/bun'
-import type { DeviceStateInfo, FirmwareProgress, FirmwareAnalysis, FatalEvent, PinRequest, CharacterRequest, ChainBalance, BuildTxParams, BuildTxResult, BroadcastResult, BtcAccountSet, BtcScriptType, EvmAddressSet, CustomToken, CustomChain, AppSettings, PioneerServer, BtcGetAddressParams, EthGetAddressParams, EthSignTxParams, BtcSignTxParams, GetPublicKeysParams, UpdateInfo, UpdateStatus, TokenVisibilityStatus, PairingRequestInfo, PairedAppInfo, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, ReportMeta, ReportData, AuditReport, AuditPortfolioSnapshot, AuditMode, AuditDerivedAddress, AuditInspectResult, SwapAsset, SwapQuote, SwapQuoteParams, ExecuteSwapParams, SwapResult, SwapHealth, PendingSwap, SwapStatusUpdate, SwapHistoryRecord, SwapHistoryFilter, SwapHistoryStats, SwapUiState, SwapUiCommand, RecentActivity, BuildStakingTxParams, StakingPosition, DefiPosition, NameInfo, NameQuote, BuildNameRegTxParams, ZcashTransaction, EmulatorStatus, EmulatorWalletInfo, RegisteredDevice, WcSessionInfo, AddressBookEntry, AddressBookFilter, AddressBookTx, UsbDiagnosticReport, ClearSignEvent, ClearSignSolanaSchemaArtifact, ClearSignSolanaSchemaDraft } from './types'
+import type { DeviceStateInfo, FirmwareProgress, FirmwareAnalysis, FatalEvent, PinRequest, CharacterRequest, ChainBalance, BuildTxParams, BuildTxResult, BroadcastResult, BtcAccountSet, BtcScriptType, EvmAddressSet, CustomToken, CustomChain, AppSettings, PioneerServer, BtcGetAddressParams, EthGetAddressParams, EthSignTxParams, BtcSignTxParams, GetPublicKeysParams, UpdateInfo, UpdateStatus, TokenVisibilityStatus, PairingRequestInfo, PairedAppInfo, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, ReportMeta, ReportData, AuditReport, AuditPortfolioSnapshot, AuditMode, AuditDerivedAddress, AuditInspectResult, SwapAsset, SwapQuote, SwapQuoteParams, ExecuteSwapParams, SwapResult, SwapHealth, PendingSwap, SwapStatusUpdate, SwapHistoryRecord, SwapHistoryFilter, SwapHistoryStats, SwapUiState, SwapUiCommand, RecentActivity, BuildStakingTxParams, StakingPosition, DefiPosition, NameInfo, NameQuote, BuildNameRegTxParams, ZcashTransaction, EmulatorStatus, EmulatorWalletInfo, RegisteredDevice, WcSessionInfo, AddressBookEntry, AddressBookFilter, AddressBookTx, UsbDiagnosticReport, ClearSignEvent, ClearSignSolanaSchemaArtifact, ClearSignSolanaSchemaDraft, RngAuditReport } from './types'
 
 /**
  * RPC Schema for Bun ↔ WebView communication.
@@ -39,6 +39,10 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       // ── Wallet operations (hdwallet pass-through) ─────────────────
       getFeatures: { params: void; response: any }
       ping: { params: { msg?: string }; response: any }
+      // RNG health test — pulls entropy from the device and scores it. Device
+      // interactive past the firmware's press-free budget, so call with a 0
+      // timeout. See src/bun/rng-audit.ts for what the result can/cannot prove.
+      rngAuditRun: { params: { bytes: number }; response: RngAuditReport }
       // Advanced-mode developer surface for creating and loading RAM-only
       // ClearSign identities. No endpoint persists a trust anchor.
       clearsignGetStudioStatus: { params: void; response: { advancedMode: boolean; firmwareVersion?: string } }
@@ -435,6 +439,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
     messages: {
       'device-state': DeviceStateInfo
       'firmware-progress': FirmwareProgress
+      'rng-audit-progress': { collected: number; total: number }
       'pin-request': PinRequest
       'character-request': CharacterRequest
       'passphrase-request': Record<string, never>

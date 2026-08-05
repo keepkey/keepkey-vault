@@ -12,6 +12,7 @@ import { versionCompare } from "../../shared/firmware-versions"
 import { isBitcoinOnlyVariant } from "../../shared/flags"
 import { SelfHostNodePanel } from "./SelfHostNodePanel"
 import { ClearSignStudio } from "./ClearSignStudio"
+import { RngAuditPanel } from "./RngAuditPanel"
 
 interface DevicePolicy {
 	policyName?: string
@@ -188,6 +189,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 	const [resetConfirm, setResetConfirm] = useState(false)
 	const [resetting, setResetting] = useState(false)
 	const [clearSignStudioOpen, setClearSignStudioOpen] = useState(false)
+	const [rngAuditOpen, setRngAuditOpen] = useState(false)
 	const panelRef = useRef<HTMLDivElement>(null)
 
 	// Fetch device features + app settings when drawer opens
@@ -611,7 +613,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 			// Refresh features to reflect the new state
 			const updated = await rpcRequest<DeviceFeatures>("getFeatures")
 			setFeatures(updated)
-			if (policyName === "AdvancedMode" && !enable) setClearSignStudioOpen(false)
+			if (policyName === "AdvancedMode" && !enable) { setClearSignStudioOpen(false); setRngAuditOpen(false) }
 		} catch (e: any) { console.error("applyPolicy:", e) }
 		setTogglingPolicy("")
 	}, [])
@@ -1258,6 +1260,18 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 											<Text fontSize="xs" color="kk.textSecondary" mt="0.5">Attest schemas, load a RAM-only signer, and export test evidence.</Text>
 										</Box>
 										<Button size="sm" variant="outline" borderColor="rgba(233,196,106,0.45)" color="kk.gold" onClick={() => setClearSignStudioOpen(true)}>Open Studio</Button>
+									</Flex>
+								</Box>
+							)}
+
+							{isPolicyEnabled("AdvancedMode") && (
+								<Box px="3" py="3" borderRadius="12px" bg="rgba(233,196,106,0.06)" border="1px solid rgba(233,196,106,0.18)">
+									<Flex align="center" justify="space-between" gap="3">
+										<Box>
+											<Text fontSize="sm" color="kk.textPrimary" fontWeight="600">RNG health test</Text>
+											<Text fontSize="xs" color="kk.textSecondary" mt="0.5">Pull 64 KB from the device RNG and check it for stuck, repeated, or biased output.</Text>
+										</Box>
+										<Button size="sm" variant="outline" borderColor="rgba(233,196,106,0.45)" color="kk.gold" onClick={() => setRngAuditOpen(true)}>Run test</Button>
 									</Flex>
 								</Box>
 							)}
@@ -1943,6 +1957,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 
 				</VStack>
 			</Box>
+			<RngAuditPanel open={rngAuditOpen} onClose={() => setRngAuditOpen(false)} />
 			<ClearSignStudio
 				open={clearSignStudioOpen}
 				onClose={() => setClearSignStudioOpen(false)}
