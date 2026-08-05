@@ -26,6 +26,19 @@ let reconnectAttempts = 0
 const MAX_RECONNECT_DELAY = 10000
 const MAX_RECONNECT_ATTEMPTS = 50
 
+/** Electrobun serializes a thrown value's `.message` verbatim, and hdwallet
+ *  failures carry a decoded protobuf Failure OBJECT there ({code, message}).
+ *  Normalize to the human string ("Action cancelled") instead of letting
+ *  "[object Object]" reach an error banner. */
+function rpcErrorText(e: unknown): string {
+  if (typeof e === 'string' && e) return e
+  const m = (e as any)?.message
+  if (typeof m === 'string') return m
+  if (e == null) return 'RPC request failed'
+  console.error('[rpc] non-string error payload:', e)
+  try { return JSON.stringify(e) } catch { return String(e) }
+}
+
 // Handle incoming packets from the Bun process
 function handlePacket(packet: RPCPacket) {
   if (packet.type === 'response') {
@@ -36,7 +49,7 @@ function handlePacket(packet: RPCPacket) {
       if (packet.success) {
         pending.resolve(packet.payload)
       } else {
-        pending.reject(new Error(packet.error || 'RPC request failed'))
+        pending.reject(new Error(rpcErrorText(packet.error)))
       }
     }
     return
