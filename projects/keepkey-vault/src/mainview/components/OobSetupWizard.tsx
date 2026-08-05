@@ -20,6 +20,8 @@ import { rpcRequest, onRpcMessage } from '../lib/rpc'
 import type { FirmwareAnalysis, FirmwareProgress } from '../../shared/types'
 import { FirmwareUpgradePreview } from './FirmwareUpgradePreview'
 import { ReproducibleBuildNotice } from './ReproducibleBuildNotice'
+import { DocsLink } from './DocsLink'
+import { DOCS_LINKS } from '../../shared/docs-links'
 import { TutorialPage } from './TutorialCards'
 import { LanguagePicker } from '../i18n/LanguageSelector'
 import { BITCOIN_ONLY_ONBOARDING } from '../../shared/flags'
@@ -817,6 +819,16 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
     const timer = setTimeout(() => onComplete(), 5000)
     return () => clearTimeout(timer)
   }, [step, onComplete])
+
+  // Docs article for the current step. Screens without a dedicated page fall
+  // back to nothing rather than dumping the user on a generic hub.
+  const stepDocsUrl: Partial<Record<WizardStep, string>> = {
+    'init-choose': DOCS_LINKS.createOrRecover,
+    'create-briefing': DOCS_LINKS.createOrRecover,
+    'init-progress': DOCS_LINKS.creatingWallet,
+    'init-label': DOCS_LINKS.deviceName,
+    'verify-seed': DOCS_LINKS.verifyBackup,
+  }
 
   // ── Navigation ─────────────────────────────────────────────────────────
 
@@ -2089,7 +2101,7 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
                               {t('initChoose.entropyNote', { defaultValue: 'Added seed length does not improve overall wallet entropy.' })}{' '}
                               <Text
                                 as="a"
-                                href="https://keepkey.com/blog/why_does_keepkey_only_generate_12_words_"
+                                href={DOCS_LINKS.seedLengthEntropy}
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 color={HIGHLIGHT}
@@ -2764,6 +2776,9 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
                     : t('footer.settingUpWallet')}
             </Text>
             <HStack gap={3}>
+              {/* Docs article for this screen — the page quotes this screen's
+                  copy verbatim so it is recognisable on arrival. */}
+              {stepDocsUrl[step] && <DocsLink href={stepDocsUrl[step]!} color="kk.textMuted" />}
               {showPrevious && (
                 <Button
                   size="sm"
