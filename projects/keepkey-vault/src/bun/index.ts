@@ -8115,6 +8115,11 @@ engine.on('state-change', (state) => {
 			stopSidecar()
 			console.log(`[settings] Zcash privacy auto-disabled — firmware ${fw || 'unknown'} < 7.15.0`)
 		}
+		if (hiveEnabled && (!fw || versionCompare(fw, '7.15.0') < 0)) {
+			hiveEnabled = false
+			setSetting('hive_enabled', '0')
+			console.log(`[settings] Hive auto-disabled — firmware ${fw || 'unknown'} < 7.15.0`)
+		}
 	}
 	if (state.state === 'ready' && !pioneerSocket) {
 		pioneerSocket = new PioneerSocket({
