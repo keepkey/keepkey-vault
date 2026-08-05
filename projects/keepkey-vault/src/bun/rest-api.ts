@@ -5,6 +5,7 @@ import type { SigningRequestInfo, ApiLogEntry, EIP712DecodedInfo } from '../shar
 import { decodeEIP712 } from './eip712-decoder'
 import { decodeCalldata, firmwareClearSigns } from './calldata-decoder'
 import { CHAINS, isChainSupported, hiveRolePath } from '../shared/chains'
+import { versionCompare } from '../shared/firmware-versions'
 import { isBitcoinOnlyVariant } from '../shared/flags'
 import {
   initializeOrchardFromDevice, scanOrchardNotes, getShieldedBalance,
@@ -2428,6 +2429,14 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const body = await parseRequest(req, S.LoadClearsignSignerRequest)
           const pubkey = parseHex(body.pubkey, 'pubkey')
           if (pubkey.length !== 33) throw new HttpError(400, `pubkey must be 33 bytes, got ${pubkey.length}`)
+          // Explicit firmware gate: the pinned hdwallet always has the method,
+          // so the typeof check below never fires for KeepKey wallets and old
+          // firmware would surface a raw 'Unknown message' device failure
+          // instead of this intended 501.
+          const fwv = engine.getDeviceState().firmwareVersion
+          if (!fwv || versionCompare(fwv, '7.15.0') < 0) {
+            throw new HttpError(501, `LoadClearsignSigner requires firmware 7.15.0+ (device has ${fwv || 'unknown'})`)
+          }
           if (typeof (wallet as any).loadClearsignSigner !== 'function') {
             throw new HttpError(501, 'Connected device does not support LoadClearsignSigner (requires firmware 7.15.0+)')
           }
@@ -3053,12 +3062,34 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.GetEntropyRequest)
-          const entropy = await emuWrap(
-            () => (wallet as any).getEntropy(body.size),
-            { operation: 'getEntropy', opLabel: 'Generate Entropy', chain: 'Device' },
-          )
-          if (!(entropy instanceof Uint8Array) || entropy.length !== body.size) {
-            throw new HttpError(500, `Device returned ${entropy?.length ?? 0} entropy bytes; expected ${body.size}`)
+          // Chunked collection: the device answers one GetEntropy message at a
+          // time — 8192 bytes on firmware with the bulk-audit unlock (7.15+),
+          // 1024 on everything older. A short FIRST reply reveals the cap and
+          // we adapt instead of failing the whole request; a short reply
+          // mid-stream is a real error.
+          const ENTROPY_MAX_CHUNK = 8192
+          const ENTROPY_MIN_CHUNK = 1024
+          let chunkSize = ENTROPY_MAX_CHUNK
+          const entropy = new Uint8Array(body.size)
+          let collected = 0
+          while (collected < body.size) {
+            const want = Math.min(chunkSize, body.size - collected)
+            const chunk = await emuWrap(
+              () => (wallet as any).getEntropy(want),
+              { operation: 'getEntropy', opLabel: 'Generate Entropy', chain: 'Device' },
+            )
+            if (!(chunk instanceof Uint8Array) || chunk.length === 0 || chunk.length > want) {
+              throw new HttpError(500, `Device returned ${(chunk as any)?.length ?? 0} entropy bytes; expected ${want}`)
+            }
+            if (chunk.length < want) {
+              if (collected === 0 && chunk.length >= ENTROPY_MIN_CHUNK) {
+                chunkSize = chunk.length // older firmware cap discovered
+              } else {
+                throw new HttpError(500, `Device returned ${chunk.length} entropy bytes; expected ${want}`)
+              }
+            }
+            entropy.set(chunk, collected)
+            collected += chunk.length
           }
           return new Response(Buffer.from(entropy), {
             status: 200,
