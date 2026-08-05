@@ -19,8 +19,9 @@ import type { RngAuditReport } from "../../shared/types"
  *  streams unmetered while it stays uninitialized. */
 const PRESS_FREE_BYTES = 64 * 1024
 
-/** Measured through this RPC path: ~6.5 KB/s. Only used for the estimate. */
-const BYTES_PER_SEC = 6.5 * 1024
+/** Observed throughput with 8192-byte chunks (~23.7 KB/s measured on
+ *  hardware). Only used for the estimate shown before a run. */
+const BYTES_PER_SEC = 23.7 * 1024
 
 const SIZES = [64 * 1024, 256 * 1024, 1024 * 1024, 4 * 1024 * 1024, 8 * 1024 * 1024]
 
@@ -188,23 +189,55 @@ export function RngAuditPanel({ open, onClose }: { open: boolean; onClose: () =>
 
 					{report && s && (
 						<Box mt="4">
-							<Text
-								fontSize="sm"
-								fontWeight="700"
-								color={report.verdict === "healthy" ? "kk.textPrimary" : "#e66464"}
-							>
-								{report.verdict === "healthy" ? "No failures detected" : "FAILED"}
-							</Text>
+							{(() => {
+								const ran = report.checks.filter((c) => c.status !== "not-run")
+								const skipped = report.checks.length - ran.length
+								const failed = report.checks.filter((c) => c.status === "fail").length
+								return (
+									<>
+										<Text fontSize="sm" fontWeight="700" color={failed ? "#e66464" : "kk.textPrimary"}>
+											{failed
+												? `${failed} check${failed === 1 ? "" : "s"} failed`
+												: `${ran.length - failed} check${ran.length - failed === 1 ? "" : "s"} passed`}
+											{/* Never imply the skipped ones passed. */}
+											{skipped > 0 && (
+												<Text as="span" fontWeight="500" color="kk.textSecondary">
+													{` · ${skipped} not run`}
+												</Text>
+											)}
+										</Text>
 
-							{report.failures.length > 0 && (
-								<VStack align="stretch" gap="1" mt="2">
-									{report.failures.map((f) => (
-										<Text key={f} fontSize="xs" color="#e66464">• {f}</Text>
-									))}
-								</VStack>
-							)}
+										<VStack align="stretch" gap="1.5" mt="2.5">
+											{report.checks.map((c) => (
+												<Flex key={c.id} gap="2.5" align="flex-start">
+													<Text
+														fontSize="xs"
+														w="14px"
+														flexShrink={0}
+														textAlign="center"
+														color={c.status === "pass" ? "kk.success" : c.status === "fail" ? "#e66464" : "kk.textMuted"}
+													>
+														{c.status === "pass" ? "\u2713" : c.status === "fail" ? "\u2717" : "\u2013"}
+													</Text>
+													<Box>
+														<Text fontSize="xs" color={c.status === "not-run" ? "kk.textMuted" : "kk.textPrimary"}>
+															{c.label}
+														</Text>
+														<Text fontSize="2xs" color="kk.textSecondary" lineHeight="1.5">
+															{c.detail}
+														</Text>
+													</Box>
+												</Flex>
+											))}
+										</VStack>
+									</>
+								)
+							})()}
 
-							<Box mt="3" pt="2" borderTop="1px solid rgba(255,255,255,0.06)">
+							<Box as="details" mt="3" pt="2" borderTop="1px solid rgba(255,255,255,0.06)">
+								<Box as="summary" cursor="pointer" mb="1">
+									<Text as="span" fontSize="xs" color="kk.textSecondary">Advanced details</Text>
+								</Box>
 								<Row label="Sample size" value={`${(s.bytes / 1024).toFixed(0)} KB`} />
 								<Row label="Shannon entropy" value={`${s.shannonBitsPerByte.toFixed(5)} bits/byte`} />
 								<Row label="Bit balance (ideal 0.5)" value={s.onesFraction.toFixed(5)} />

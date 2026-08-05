@@ -1563,11 +1563,33 @@ export interface RngAuditStats {
   collisionControlUsable: boolean
 }
 
+/**
+ * A check reports THREE states, never two. Several checks need a minimum
+ * sample before they mean anything, and reporting a skipped check as a pass
+ * is the single most misleading thing this feature could do -- it puts a
+ * green tick on evidence that was never gathered.
+ */
+export type RngCheckStatus = 'pass' | 'fail' | 'not-run'
+
+export interface RngCheck {
+  id: string
+  /** Short label for the ceremony list, e.g. "Repeated blocks". */
+  label: string
+  status: RngCheckStatus
+  /** Human-readable outcome, or why it could not run. */
+  detail: string
+}
+
 export interface RngAuditReport {
   stats: RngAuditStats
+  /** Every check, in the order it is presented. */
+  checks: RngCheck[]
   /** Every check that failed; empty when healthy. */
   failures: string[]
   /** SHA-256 of the collected sample, so a report can be tied to its bytes. */
   sampleSha256: string
+  /** 'healthy' means nothing FAILED -- not that everything ran. */
   verdict: 'healthy' | 'failed'
+  /** Bytes actually requested per device call, discovered at runtime. */
+  chunkBytes?: number
 }

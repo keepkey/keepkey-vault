@@ -19,21 +19,26 @@
 
 import { createHash } from 'crypto'
 
-import type { RngAuditReport, RngAuditStats } from '../shared/types'
+import type { RngAuditReport, RngAuditStats, RngCheck, RngCheckStatus } from '../shared/types'
 
-export type { RngAuditReport, RngAuditStats }
+export type { RngAuditReport, RngAuditStats, RngCheck, RngCheckStatus }
 
 /**
- * Hard device limit: firmware declares `Entropy.entropy max_size:1024`
- * (messages.options) and hdwallet's getEntropy() is a single message with no
- * chunking, so a larger ask silently comes back short.
+ * Largest chunk we will ask for. The device caps the reply at its own
+ * compiled `Entropy.entropy` max_size and simply returns fewer bytes, so the
+ * real limit is discovered at runtime rather than assumed:
  *
- * NOTE: the REST schema (schemas.ts GetEntropyRequest) still allows up to
- * 8192, which can never succeed — rest-api.ts rejects the short reply with
- * "Device returned 1024 entropy bytes; expected N". That mismatch predates
- * this module; it is not something to copy.
+ *   firmware with 2f9269f64 (the 7.15 RNG work) -> 8192
+ *   everything older                            -> 1024
+ *
+ * Asking for 8192 and adapting to a short FIRST reply gets 8x the throughput
+ * on current firmware while still working on old devices. hdwallet's
+ * getEntropy() is one message per call with no chunking of its own.
  */
-export const MAX_CHUNK_BYTES = 1024
+export const MAX_CHUNK_BYTES = 8192
+
+/** Floor for the adaptive probe — every shipped firmware allows at least this. */
+export const MIN_CHUNK_BYTES = 1024
 
 /**
  * Firmware grants this much entropy per boot with no button press. Past it,
@@ -119,40 +124,71 @@ export function analyzeEntropy(sample: Uint8Array, sampleSha256: string): RngAud
     collisionControlUsable: expected4 >= 1,
   }
 
-  const failures: string[] = []
-  if (repeated8 > 0) {
-    failures.push(`${repeated8} repeated 8-byte block(s) — the RNG is stuck or output is being replayed`)
+  // Every check reports pass / fail / not-run. A check whose sample is too
+  // small is NOT a pass -- saying so would put a green tick on evidence that
+  // was never gathered, which is the most misleading thing this code could do.
+  const checks: RngCheck[] = []
+  const add = (id: string, label: string, status: RngCheckStatus, detail: string) =>
+    checks.push({ id, label, status, detail })
+
+  add('repeated-blocks', 'Repeated blocks',
+    repeated8 > 0 ? 'fail' : 'pass',
+    repeated8 > 0
+      ? `${repeated8} repeated 8-byte block(s) — the RNG is stuck or output is being replayed`
+      : 'No 8-byte block occurred twice')
+
+  if (n >= 4096) {
+    add('byte-coverage', 'Byte coverage', distinct < 256 ? 'fail' : 'pass',
+      distinct < 256 ? `only ${distinct}/256 byte values observed` : 'All 256 byte values seen')
+  } else {
+    add('byte-coverage', 'Byte coverage', 'not-run', 'Needs at least 4 KB')
   }
-  if (n >= 4096 && distinct < 256) {
-    failures.push(`only ${distinct}/256 byte values observed`)
+
+  if (n >= 65536) {
+    // Chi-square 5% critical value for 255 dof is ~293.2; 0.1% is ~330.5. Use
+    // the looser bound so a healthy device does not trip on ordinary variance.
+    add('chi-square', 'Byte distribution', chi > 330.5 ? 'fail' : 'pass',
+      chi > 330.5
+        ? `chi-square ${chi.toFixed(1)} exceeds the 0.1% critical value (330.5)`
+        : `chi-square ${chi.toFixed(1)}, within expected variation`)
+
+    const bias = Math.abs(stats.onesFraction - 0.5)
+    add('bit-balance', 'Bit balance', bias > 0.01 ? 'fail' : 'pass',
+      bias > 0.01
+        ? `bit balance ${stats.onesFraction.toFixed(4)} is more than 1% off 0.5`
+        : `${stats.onesFraction.toFixed(5)} of bits set`)
+
+    add('longest-run', 'Longest run', longestRun > 64 ? 'fail' : 'pass',
+      longestRun > 64
+        ? `longest identical-bit run is ${longestRun}`
+        : `${longestRun} identical bits, unremarkable`)
+  } else {
+    add('chi-square', 'Byte distribution', 'not-run', 'Needs at least 64 KB')
+    add('bit-balance', 'Bit balance', 'not-run', 'Needs at least 64 KB')
+    add('longest-run', 'Longest run', 'not-run', 'Needs at least 64 KB')
   }
-  // Chi-square 5% critical value for 255 dof is ~293.2; 0.1% is ~330.5. Use
-  // the looser bound so a healthy device does not trip on ordinary variance.
-  if (n >= 65536 && chi > 330.5) {
-    failures.push(`byte distribution chi-square ${chi.toFixed(1)} exceeds the 0.1% critical value (330.5)`)
-  }
-  if (n >= 65536 && Math.abs(stats.onesFraction - 0.5) > 0.01) {
-    failures.push(`bit balance ${stats.onesFraction.toFixed(4)} is more than 1% off 0.5`)
-  }
-  if (n >= 65536 && longestRun > 64) {
-    failures.push(`longest identical-bit run is ${longestRun}`)
-  }
+
   if (stats.collisionControlUsable) {
     // Poisson-ish; flag only a gross departure in either direction. Far too few
     // collisions is as suspicious as too many — it can mean the detector is
     // broken or the stream is a permutation rather than random draws.
     const lo = expected4 / 4
     const hi = expected4 * 4
-    if (collisions4 < lo || collisions4 > hi) {
-      failures.push(
-        `4-byte collisions ${collisions4} far from the expected ${expected4.toFixed(1)} — ` +
-        `positive control failed`,
-      )
-    }
+    const bad = collisions4 < lo || collisions4 > hi
+    add('collision-control', 'Collision control', bad ? 'fail' : 'pass',
+      bad
+        ? `4-byte collisions ${collisions4} far from the expected ${expected4.toFixed(1)} — positive control failed`
+        : `${collisions4} observed vs ${expected4.toFixed(0)} expected — the detector demonstrably works`)
+  } else {
+    add('collision-control', 'Collision control', 'not-run',
+      `Only ${expected4.toFixed(2)} collisions expected at this size, so a zero result would prove nothing. Needs about 1 MB.`)
   }
+
+  const failures = checks.filter((c) => c.status === 'fail').map((c) => c.detail)
 
   return {
     stats,
+    checks,
     failures,
     sampleSha256,
     verdict: failures.length === 0 ? 'healthy' : 'failed',
@@ -200,24 +236,38 @@ export async function collectAndAnalyze(
   const hash = createHash('sha256')
   const sample = new Uint8Array(totalBytes)
   let collected = 0
+  let chunkBytes = Math.min(MAX_CHUNK_BYTES, totalBytes)
 
   while (collected < totalBytes) {
-    const want = Math.min(MAX_CHUNK_BYTES, totalBytes - collected)
+    const want = Math.min(chunkBytes, totalBytes - collected)
     const chunk = await getEntropy(want)
-    // Never pad or truncate silently — a short reply means the device or the
-    // transport is not doing what we asked, and analysing padded zeros would
-    // manufacture a failure (or hide one).
-    if (!(chunk instanceof Uint8Array) || chunk.length !== want) {
-      throw new Error(
-        `device returned ${chunk?.length ?? 0} bytes for a ${want}-byte request ` +
-        `(collected ${collected}/${totalBytes})`,
-      )
+
+    if (!(chunk instanceof Uint8Array) || chunk.length === 0) {
+      throw new Error(`device returned no entropy for a ${want}-byte request (collected ${collected}/${totalBytes})`)
     }
+
+    if (chunk.length !== want) {
+      // A short reply on the FIRST call is the device telling us its cap --
+      // older firmware maxes at 1024. Adopt it and keep the bytes. A short
+      // reply later is a genuine anomaly and must not be papered over, since
+      // analysing padded or truncated data would invent a result.
+      const isFirstCall = collected === 0
+      if (isFirstCall && chunk.length >= MIN_CHUNK_BYTES && chunk.length < want) {
+        chunkBytes = chunk.length
+      } else {
+        throw new Error(
+          `device returned ${chunk.length} bytes for a ${want}-byte request ` +
+          `(collected ${collected}/${totalBytes})`,
+        )
+      }
+    }
+
     sample.set(chunk, collected)
     hash.update(chunk)
-    collected += want
+    collected += chunk.length
     onProgress?.(collected, totalBytes)
   }
 
-  return analyzeEntropy(sample, hash.digest('hex'))
+  const report = analyzeEntropy(sample, hash.digest('hex'))
+  return { ...report, chunkBytes }
 }
