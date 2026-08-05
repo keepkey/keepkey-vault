@@ -1,6 +1,7 @@
 import { Box, Button, Flex, HStack, Text, VStack } from "@chakra-ui/react"
 import { FaChevronRight, FaDice, FaFingerprint, FaLock, FaWaveSquare } from "react-icons/fa"
 import { useTranslation } from "react-i18next"
+import { CARD_CSS } from "./TutorialCards"
 
 /**
  * The two OPTIONAL security steps between choosing "create wallet" and the
@@ -150,7 +151,8 @@ export function SecurityStepPage({
   const d = defs[step]
 
   return (
-    <VStack gap={4} w="100%" maxW="400px" mx="auto">
+    <VStack gap={4} w="100%" maxW="400px" mx="auto" css={{ animation: "tutorialFadeIn 0.3s ease-out" }}>
+      <style>{CARD_CSS}</style>
       <Box
         w="100%"
         bg="rgba(255,255,255,0.03)"
@@ -175,7 +177,7 @@ export function SecurityStepPage({
         <VStack gap={4}>
           <HStack gap={6} justify="center" align="center">
             <Box opacity={0.7}>{d.icon3}</Box>
-            <Box>{d.icon1}</Box>
+            <Box css={{ animation: "tutorialPulse 2s ease-in-out infinite" }}>{d.icon1}</Box>
             <Box>{d.icon2}</Box>
           </HStack>
 
