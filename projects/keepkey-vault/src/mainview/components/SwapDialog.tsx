@@ -2331,7 +2331,11 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       // full PIN re-entry (it ignores the session PIN cache), so this is not
       // instant — hence the 60s budget and the "on device" copy.
       try {
-        await rpcRequest('applyPolicy', { policyName: 'AdvancedMode', enabled: true }, 60000)
+        // 0 = no timeout: this blocks on an on-device confirm AND a full
+        // scrambled-matrix PIN re-entry (the device ignores the session cache).
+        // A 60s budget could reject while the device still completes the write,
+        // leaving the policy ON while the UI claims it failed.
+        await rpcRequest('applyPolicy', { policyName: 'AdvancedMode', enabled: true }, 0)
       } catch (e: any) {
         const msg = e?.message || ''
         setBlindSignError(/cancel|denied|rejected/i.test(msg)
@@ -3722,7 +3726,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                 </Box>
                 <Text fontSize="11px" color="kk.textMuted" lineHeight="1.4">
                   {blindSignCause === 'device'
-                    ? t('deviceBlindSignCaveat', 'This stays on until you turn it off in Device Settings, and it applies to every app that uses this KeepKey — not just this swap. The device will ask you to confirm and to re-enter your PIN. Only continue for a swap you have reviewed here.')
+                    ? t('deviceBlindSignCaveat', 'This stays on until you turn it off in Device Settings, and it applies to every app that uses this KeepKey — not just this swap. It also turns off the safety check this app runs on transactions your device cannot read: future swaps like this one will go straight to the device without showing you what leaves your wallet. The device will ask you to confirm and to re-enter your PIN.')
                     : t('solanaOpaqueCaveat', 'Blind signing means the device shows a generic prompt instead of authenticated swap details. This approval applies only to this transaction and does not enable global Advanced Mode. Confirm only the swap you reviewed here.')}
                 </Text>
               </Flex>

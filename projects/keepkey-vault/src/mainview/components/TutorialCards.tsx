@@ -6,6 +6,8 @@
  */
 import { Box, Text, VStack, HStack, Flex, Button, Spinner } from '@chakra-ui/react'
 import { useTranslation } from 'react-i18next'
+import { DOCS_LINKS } from '../../shared/docs-links'
+import { DocsLink } from './DocsLink'
 import {
   FaLock, FaEyeSlash, FaKey, FaPen, FaShieldAlt, FaKeyboard,
   FaCheckCircle, FaDesktop, FaPlug, FaCog, FaUserSecret,
@@ -138,11 +140,15 @@ interface TutorialCard {
   // Hides the Skip button — the user must make a choice and continue. Skipping
   // earlier cards routes here (see OobSetupWizard) so this card can't be bypassed.
   nonSkippable?: boolean
+  // docs.keepkey.com article for this card. The page quotes this card's copy
+  // verbatim, so the user recognises where they came from.
+  helpUrl?: string
 }
 
 const PRE_CARDS: TutorialCard[] = [
   {
     titleKey: 'tutorial.cards.pin.title',
+    helpUrl: DOCS_LINKS.pinScrambled,
     bodyKey: 'tutorial.cards.pin.body',
     accent: 'var(--gold)',
     icon1: <FaLock size={28} color="var(--gold)" />,
@@ -151,6 +157,7 @@ const PRE_CARDS: TutorialCard[] = [
   },
   {
     titleKey: 'tutorial.cards.words.title',
+    helpUrl: DOCS_LINKS.recoveryWords,
     bodyKey: 'tutorial.cards.words.body',
     accent: '#FC8181',
     icon1: <FaKey size={28} color="var(--rose)" />,
@@ -159,6 +166,7 @@ const PRE_CARDS: TutorialCard[] = [
   },
   {
     titleKey: 'tutorial.cards.recovery.title',
+    helpUrl: DOCS_LINKS.cipherRecovery,
     bodyKey: 'tutorial.cards.recovery.body',
     accent: '#23DCC8',
     icon1: <FaShieldAlt size={28} color="var(--teal)" />,
@@ -170,6 +178,7 @@ const PRE_CARDS: TutorialCard[] = [
 const POST_CARDS: TutorialCard[] = [
   {
     titleKey: 'tutorial.cards.deviceScreen.title',
+    helpUrl: DOCS_LINKS.deviceScreen,
     bodyKey: 'tutorial.cards.deviceScreen.body',
     accent: '#48BB78',
     icon1: <FaCheckCircle size={28} color="var(--teal)" />,
@@ -183,6 +192,7 @@ const POST_CARDS: TutorialCard[] = [
   },
   {
     titleKey: 'tutorial.cards.appConnections.title',
+    helpUrl: DOCS_LINKS.appConnections,
     bodyKey: 'tutorial.cards.appConnections.body',
     accent: '#627EEA',
     icon1: <FaPlug size={28} color="#627EEA" />,
@@ -191,6 +201,7 @@ const POST_CARDS: TutorialCard[] = [
   },
   {
     titleKey: 'tutorial.cards.hiddenWallets.title',
+    helpUrl: DOCS_LINKS.hiddenWallets,
     bodyKey: 'tutorial.cards.hiddenWallets.body',
     accent: '#8B5CF6',
     icon1: <FaUserSecret size={28} color="#8B5CF6" />,
@@ -336,10 +347,13 @@ export function TutorialPage({ type, cardIndex, onNext, onSkip, passphraseEnable
         )}
       </VStack>
 
-      {/* Step counter */}
-      <Text fontSize="2xs" color="gray.600">
-        {t('tutorial.stepCounter', { current: cardIndex + 1, total: cards.length })}
-      </Text>
+      {/* Step counter + docs link for this card */}
+      <HStack gap={3} align="center">
+        <Text fontSize="2xs" color="gray.600">
+          {t('tutorial.stepCounter', { current: cardIndex + 1, total: cards.length })}
+        </Text>
+        {card.helpUrl && <DocsLink href={card.helpUrl} color="gray.600" />}
+      </HStack>
     </VStack>
   )
 }

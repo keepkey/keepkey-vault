@@ -90,6 +90,11 @@ for RPC_TS in node_modules/electrobun/dist/api/shared/rpc.ts node_modules/electr
     sed_in_place 's|if (!(error instanceof Error)) throw error;|if (!(error instanceof Error)) { const kkDeviceErrorText = (e: any): string => typeof e === "string" ? e : typeof e?.message === "string" ? e.message : typeof e?.message?.message === "string" ? e.message.message : String(e); error = new Error(kkDeviceErrorText(error)); }|g' "$RPC_TS"
     echo "[patch-electrobun] Patched rpc.ts device-error normalization ($RPC_TS)"
   else
-    echo "[patch-electrobun] WARNING: rpc.ts error pattern not found in $RPC_TS — Electrobun may have changed"
+    echo "[patch-electrobun] ERROR: rpc.ts error pattern not found in $RPC_TS."
+    echo "[patch-electrobun] Electrobun changed its RPC dispatcher. Without this patch a device"
+    echo "[patch-electrobun] Failure (a plain object, not an Error) produces NO response packet:"
+    echo "[patch-electrobun] every device error hangs the renderer until its own timeout."
+    echo "[patch-electrobun] Re-point the sed at the new dispatcher before shipping."
+    exit 1
   fi
 done
