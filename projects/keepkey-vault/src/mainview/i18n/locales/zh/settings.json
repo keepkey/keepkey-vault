@@ -76,8 +76,6 @@
 	"signingPolicy": "签名策略",
 	"advancedMode": "高级模式",
 	"advancedModeDescription": "允许签署带有任意合约数据的 EVM 交易（如 Uniswap、DeFi）。",
-	"experimentalFeatures": "实验性",
-	"experimentalFeaturesDescription": "启用实验性固件功能。",
 	"featureFlags": "功能开关",
 	"walletConnectFeature": "WalletConnect",
 	"walletConnectFeatureDescription": "通过 WalletConnect 协议连接 dApps。",

@@ -99,8 +99,6 @@
 	"signingPolicy": "นโยบายการลงนาม",
 	"advancedMode": "โหมดขั้นสูง",
 	"advancedModeDescription": "อนุญาตให้ลงนามธุรกรรม EVM ที่มีข้อมูลสัญญาแบบกำหนดเอง (เช่น Uniswap, DeFi)",
-	"experimentalFeatures": "ทดลอง",
-	"experimentalFeaturesDescription": "เปิดใช้งานฟีเจอร์เฟิร์มแวร์เชิงทดลอง",
 	"walletConnectFeature": "WalletConnect",
 	"walletConnectFeatureDescription": "เชื่อมต่อกับ dApps ผ่านโปรโตคอล WalletConnect",
 	"zcashPrivacyFeature": "ความเป็นส่วนตัวแบบป้องกันของ Zcash",
