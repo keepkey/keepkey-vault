@@ -443,6 +443,7 @@ test-emu-python:
 	sleep 1; \
 	echo "Running python-keepkey tests..."; \
 	cd modules/keepkey-firmware/deps/python-keepkey/tests && \
+	KK_FORCE_UDP=1 \
 	PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python \
 	python3 -m pytest \
 		test_basic.py \
