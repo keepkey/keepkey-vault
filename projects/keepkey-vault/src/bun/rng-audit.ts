@@ -184,6 +184,23 @@ export function analyzeEntropy(sample: Uint8Array, sampleSha256: string): RngAud
       `Only ${expected4.toFixed(2)} collisions expected at this size, so a zero result would prove nothing. Needs about 1 MB.`)
   }
 
+  // Linear complexity. For random bits this sits within a couple of units of
+  // bits/2 -- the distribution is famously tight (variance ~1.06), so a
+  // threshold 100 below the mean is ~100 sigma and cannot false-positive,
+  // while a free-running LFSR lands two orders of magnitude below it.
+  if (n * 8 >= LINEAR_COMPLEXITY_BITS) {
+    const lc = linearComplexity(toBits(sample, LINEAR_COMPLEXITY_BITS))
+    const floor = LINEAR_COMPLEXITY_BITS / 2 - 100
+    add('linear-complexity', 'Linear complexity', lc < floor ? 'fail' : 'pass',
+      lc < floor
+        ? `shortest generating LFSR is ${lc} bits for a ${LINEAR_COMPLEXITY_BITS}-bit sample ` +
+          `(expected ~${LINEAR_COMPLEXITY_BITS / 2}) — the stream is a linear recurrence and predictable`
+        : `${lc} of an expected ~${LINEAR_COMPLEXITY_BITS / 2} — no linear recurrence`)
+  } else {
+    add('linear-complexity', 'Linear complexity', 'not-run',
+      `Needs at least ${LINEAR_COMPLEXITY_BITS / 8} bytes`)
+  }
+
   const failures = checks.filter((c) => c.status === 'fail').map((c) => c.detail)
 
   return {
@@ -271,3 +288,59 @@ export async function collectAndAnalyze(
   const report = analyzeEntropy(sample, hash.digest('hex'))
   return { ...report, chunkBytes }
 }
+
+/**
+ * Berlekamp–Massey linear complexity over GF(2).
+ *
+ * Returns the length of the shortest LFSR that generates `bits`. This matters
+ * to us specifically because we apply NO software conditioning: GetEntropy
+ * returns STM32 RNG_DR verbatim, which is ring-oscillator noise clocked into
+ * an LFSR. If the analog source dies while that LFSR keeps free-running, the
+ * output stays uniform, unbiased, collision-correct — and passes every other
+ * check in this file — while being a pure linear recurrence that is
+ * predictable from ~2L bits.
+ *
+ * For genuinely random input the expected complexity is ~n/2. For a degraded
+ * LFSR of degree L it collapses to L. That gap is enormous and unmissable.
+ *
+ * NB: a device that hashed its RNG output before returning it would defeat
+ * this test entirely — the conditioner would look like maximal complexity no
+ * matter what fed it. Our rawness is the asset.
+ */
+export function linearComplexity(bits: Uint8Array): number {
+  const n = bits.length
+  const c = new Uint8Array(n)
+  const b = new Uint8Array(n)
+  c[0] = 1
+  b[0] = 1
+  let l = 0
+  let m = -1
+
+  for (let i = 0; i < n; i++) {
+    let d = bits[i]
+    for (let j = 1; j <= l; j++) d ^= c[j] & bits[i - j]
+    if (d === 0) continue
+
+    const t = c.slice(0, l + 1)
+    const shift = i - m
+    for (let j = 0; j + shift < n; j++) c[j + shift] ^= b[j]
+
+    if (2 * l <= i) {
+      l = i + 1 - l
+      m = i
+      b.fill(0)
+      b.set(t)
+    }
+  }
+  return l
+}
+
+/** Unpack the first `count` bits of `bytes`, MSB first. */
+export function toBits(bytes: Uint8Array, count: number): Uint8Array {
+  const out = new Uint8Array(count)
+  for (let i = 0; i < count; i++) out[i] = (bytes[i >> 3] >> (7 - (i & 7))) & 1
+  return out
+}
+
+/** Bits fed to the linear-complexity check. O(n^2), so keep it bounded. */
+export const LINEAR_COMPLEXITY_BITS = 4096
