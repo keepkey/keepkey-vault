@@ -45,6 +45,12 @@ submodules: $(SUBMODULES_STAMP)
 $(DEVICE_PROTOCOL_BUILD_STAMP): $(DEVICE_PROTOCOL_INPUTS) $(SUBMODULES_STAMP) | $(STAMP_DIR)
 	@echo "=== device-protocol: installing + building ==="
 	cd modules/device-protocol && npm install
+	@# Bin-link collision guard: BOTH the `pbjs` package (evanw's, a dep) and
+	@# `protobufjs` (whose CLI the build:json flags actually belong to —
+	@# `--keep-case -t json`) install a .bin/pbjs. Which one wins the link is
+	@# an npm implementation detail that flipped under newer npm/Node, making
+	@# build:json fail on `reserved` inside enums. Force the right target.
+	cd modules/device-protocol && ln -sf ../protobufjs/bin/pbjs node_modules/.bin/pbjs
 	cd modules/device-protocol && npm run build
 	@test -f modules/device-protocol/lib/messages_pb.js || (echo "ERROR: device-protocol build failed (messages_pb.js missing)"; exit 1)
 	@touch $@
