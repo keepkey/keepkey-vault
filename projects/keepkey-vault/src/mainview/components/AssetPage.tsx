@@ -4,7 +4,7 @@ import { Box, Flex, Text, Button, Image, VStack, HStack, IconButton, Spinner } f
 import { FaPlus, FaEye, FaEyeSlash, FaShieldAlt, FaCheck, FaCopy, FaTag, FaChevronDown, FaChevronUp } from "react-icons/fa"
 import { rpcRequest, onRpcMessage } from "../lib/rpc"
 import type { ChainDef } from "../../shared/chains"
-import { CHAINS, btcScriptTypeConfig, btcAccountPath, isChainSupported } from "../../shared/chains"
+import { CHAINS, btcScriptTypeConfig, btcAccountPath, evmAddressPath, isChainSupported } from "../../shared/chains"
 import type { ChainBalance, TokenBalance, TokenVisibilityStatus, AppSettings, SwapAsset } from "../../shared/types"
 import { VAULT_CHAIN_TO_THOR } from "../../shared/swap-discovery"
 import { getAssetIcon } from "../../shared/assetLookup"
@@ -373,7 +373,10 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 			}
 			previousEvmSelectedIndex.current = selected.addressIndex
 			setAddress(selected.address)
-			setCurrentPath([0x8000002C, 0x8000003C, 0x80000000, 0, selected.addressIndex])
+			// Must match the path the address was derived at (evmAddressPath, account-
+			// hardened) — the old address-index literal made verify-on-device show a
+			// DIFFERENT address than the one on screen.
+			setCurrentPath(evmAddressPath(selected.addressIndex))
 		}
 	}, [isEvm, evmAddresses.selectedIndex, evmAddresses.addresses, watchOnly])
 

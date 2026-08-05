@@ -143,7 +143,7 @@ import { assetData as discoveryAssetData } from "@pioneer-platform/pioneer-disco
 import { prioritizeExtraContracts, type PortfolioExtraContract } from "./portfolio-extra-contracts"
 import * as os from "os"
 import * as path from "path"
-import { EVM_RPC_URLS, getTokenMetadata, broadcastEvmTx } from "./evm-rpc"
+import { EVM_RPC_URLS, getTokenMetadata, broadcastEvmTx, verifyEvmSigner } from "./evm-rpc"
 import type { ChainBalance, TokenBalance, CustomToken, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, EvmAddressSet, Bip85SeedMeta, StakingPosition, SwapAsset, AuditToken, DefiPosition, RecentActivity } from "../shared/types"
 import type { VaultRPCSchema } from "../shared/rpc-schema"
 
@@ -4678,6 +4678,16 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					const txid = await broadcastEvmTx(rpcUrl, serialized, expectedFrom)
 					result = { txid }
 				} else {
+					// Same fail-closed signer check the custom-chain branch gets from
+					// broadcastEvmTx: a signing-path/from-address mismatch must be caught
+					// BEFORE the tx leaves, not discovered as a send that never lands.
+					if (chain.chainFamily === 'evm') {
+						const serialized = params.signedTx?.serializedTx || params.signedTx?.serialized || (typeof params.signedTx === 'string' ? params.signedTx : undefined)
+						if (!serialized || typeof serialized !== 'string') throw new Error(`Cannot extract serialized tx from: ${JSON.stringify(params.signedTx).slice(0, 200)}`)
+						const expectedFrom = params.fromAddress
+						if (!expectedFrom) throw new Error('Cannot verify signer: signed EVM request has no fromAddress')
+						await verifyEvmSigner(serialized, expectedFrom)
+					}
 					const pioneer = await getPioneer()
 					result = await broadcastTx(pioneer, chain, params.signedTx)
 				}
