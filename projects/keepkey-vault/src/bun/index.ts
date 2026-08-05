@@ -8317,6 +8317,9 @@ engine.on('button-request', () => {
 engine.on('recovery-error', (err) => {
 	try { rpc.send['recovery-error'](err) } catch { /* webview not ready yet */ }
 })
+engine.on('reset-error', (err) => {
+	try { rpc.send['reset-error'](err) } catch { /* webview not ready yet */ }
+})
 
 // BtcAccountManager change events → push to WebView
 btcAccounts.on('change', (set) => {

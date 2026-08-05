@@ -173,6 +173,13 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
 
   // Dev: load-device dialog
   const [devLoadOpen, setDevLoadOpen] = useState(false)
+  // Classified resetDevice failure (pin-mismatch / cancelled). Rendered as an
+  // explain-and-retry card on init-progress instead of ejecting to init-choose.
+  const [createError, setCreateError] = useState<{ errorType: 'pin-mismatch' | 'cancelled' | 'unknown'; message: string } | null>(null)
+  // The engine emits 'reset-error' just before the resetDevice RPC rejects, so
+  // by the time the catch runs this ref already holds the classification.
+  const lastResetErrorRef = useRef<{ errorType: 'pin-mismatch' | 'cancelled' | 'unknown'; message: string } | null>(null)
+  useEffect(() => onRpcMessage('reset-error', (e) => { lastResetErrorRef.current = e }), [])
   const [devSeed, setDevSeed] = useState('')
   const [devAcknowledged, setDevAcknowledged] = useState(false)
 
@@ -638,6 +645,8 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
     setSetupType('create')
     setStep('init-progress')
     setSetupError(null)
+    setCreateError(null)
+    lastResetErrorRef.current = null
     try {
       if (isEmulator) {
         // Emulator: generate mnemonic on backend, load device, then display
@@ -656,6 +665,15 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
       }, DEVICE_INTERACTION_TIMEOUT)
       setStep('init-label')
     } catch (err) {
+      // PIN mismatch and on-device cancel are recoverable: stay in the create
+      // flow and explain, instead of ejecting to init-choose with a raw error.
+      // Cast: TS keeps the `= null` narrowing on ref.current across the await,
+      // but the rpc handler has repopulated it by the time the RPC rejects.
+      const classified = lastResetErrorRef.current as { errorType: 'pin-mismatch' | 'cancelled' | 'unknown'; message: string } | null
+      if (classified && (classified.errorType === 'pin-mismatch' || classified.errorType === 'cancelled')) {
+        setCreateError(classified)
+        return
+      }
       setSetupError(err instanceof Error ? err.message : t('initProgress.failedToCreate'))
       setStep('init-choose')
     }
@@ -2143,7 +2161,65 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
             {/* ═══════════════ INIT: IN PROGRESS ═══════════════════ */}
             {step === 'init-progress' && (
               <VStack gap={4} textAlign="center" w="100%" maxW="480px" mx="auto">
+                {/* ── Recoverable failure: explain and retry, don't eject ── */}
+                {createError && (
+                  <VStack gap={4} w="100%" maxW="400px" mx="auto">
+                    <Box
+                      w="100%"
+                      bg="rgba(255,255,255,0.03)"
+                      border="1px solid"
+                      borderColor="rgba(233,196,106,0.33)"
+                      borderRadius="2xl"
+                      p={6}
+                    >
+                      <VStack gap={3}>
+                        <FaExclamationTriangle color="var(--gold)" size={26} />
+                        <Text fontSize="xl" fontWeight="800" color="white" textAlign="center" letterSpacing="-0.02em">
+                          {createError.errorType === 'pin-mismatch'
+                            ? t('initProgress.pinMismatchTitle', { defaultValue: "The two PINs didn't match" })
+                            : t('initProgress.createCancelledTitle', { defaultValue: 'Setup stopped on the device' })}
+                        </Text>
+                        <Text fontSize="sm" color="gray.400" textAlign="center" lineHeight="1.6">
+                          {createError.errorType === 'pin-mismatch'
+                            ? t('initProgress.pinMismatchDetail', {
+                                defaultValue:
+                                  'You enter your new PIN twice on the scrambled keypad. The second entry is deliberate: it proves you read the cipher correctly, so you cannot lock yourself in with a PIN you never intended. The two entries came out different, so nothing was saved — no PIN, no wallet.',
+                              })
+                            : t('initProgress.createCancelledDetail', {
+                                defaultValue:
+                                  'The device reported the action was cancelled before setup finished. Nothing was saved — no PIN, no wallet.',
+                              })}
+                        </Text>
+                      </VStack>
+                    </Box>
+                    <VStack gap={2} w="100%">
+                      <Button
+                        w="100%"
+                        size="md"
+                        bg="var(--gold)"
+                        color="black"
+                        fontWeight="700"
+                        _hover={{ opacity: 0.9 }}
+                        onClick={() => void handleCreateWallet()}
+                      >
+                        {t('initProgress.tryPinAgain', { defaultValue: 'Try again' })}
+                      </Button>
+                      <Button
+                        w="100%"
+                        size="sm"
+                        variant="ghost"
+                        color="gray.500"
+                        fontWeight="500"
+                        onClick={() => { setCreateError(null); setStep('init-choose') }}
+                      >
+                        {t('initProgress.backToChoose', { defaultValue: 'Back' })}
+                      </Button>
+                    </VStack>
+                  </VStack>
+                )}
+
                 {/* ── Spinner + "look at device" (or emulator window) ─────── */}
+                {!createError && (
                 <>
                   <Spinner size="lg" color={HIGHLIGHT} borderWidth="3px" />
                     <VStack gap={1}>
@@ -2199,6 +2275,7 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
                       </Box>
                     )}
                 </>
+                )}
 
                 {setupError && (
                   <Box w="100%" p={3} bg="rgba(224,140,123,0.10)" borderRadius="lg" borderWidth="1px" borderColor="red.500">
