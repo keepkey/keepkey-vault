@@ -1675,7 +1675,7 @@ export class EngineController extends EventEmitter {
 
   // ── Wallet Setup Operations ────────────────────────────────────────────
 
-  async resetDevice(opts: { wordCount: 12 | 18 | 24; pin: boolean; passphrase: boolean }) {
+  async resetDevice(opts: { wordCount: 12 | 18 | 24; pin: boolean; passphrase: boolean; diceEntropy?: boolean }) {
     if (!this.wallet) throw new Error('No device connected')
     this.setupInProgress = true
     this.pinRequestCount = 0
@@ -1686,6 +1686,9 @@ export class EngineController extends EventEmitter {
         pin: opts.pin,
         passphrase: opts.passphrase,
         autoLockDelayMs: 600000, // 10 min — user writes down seed words on device
+        // Device-side dice entry. Only sent when asked: firmware older than
+        // 7.15.0 has no such field and rejects unknown ones.
+        ...(opts.diceEntropy ? { diceEntropy: true } : {}),
       })
       this.cachedFeatures = await this.wallet.getFeatures()
       this.updateState(this.deriveState(this.cachedFeatures))

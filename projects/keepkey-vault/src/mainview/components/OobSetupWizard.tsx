@@ -174,6 +174,7 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
   const [showCreateAdvanced, setShowCreateAdvanced] = useState(false)
   const [rngAuditOpen, setRngAuditOpen] = useState(false)
   const [briefingOpen, setBriefingOpen] = useState(false)
+  const [diceEntropy, setDiceEntropy] = useState(false)
 
   // Emulator state — moved below deviceStatus declaration
 
@@ -254,6 +255,15 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
   const isEmulator = deviceStatus.isEmulator ?? false
 
   // Bootloader skip is only safe on firmware >= 6.1.1.
+  // ResetDevice.dice_entropy only exists in firmware 7.15.0+. Older devices
+  // reject the unknown field, so the option must not even be offered.
+  const diceSupported = (() => {
+    const fv = deviceStatus.firmwareVersion
+    if (!fv) return false
+    const [maj, min] = fv.split('.').map(Number)
+    return maj > 7 || (maj === 7 && min >= 15)
+  })()
+
   // In bootloader mode we don't know the FW version — never allow skip.
   const canSkipBootloader = (() => {
     if (inBootloader) return false
@@ -714,6 +724,7 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
         wordCount,
         pin: true,
         passphrase: false,
+        diceEntropy,
       }, DEVICE_INTERACTION_TIMEOUT)
       setStep('init-label')
     } catch (err) {
@@ -3053,6 +3064,9 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
       <CreateWalletBriefing
         open={briefingOpen && !rngAuditOpen}
         wordCount={wordCount}
+        diceEntropy={diceEntropy}
+        onToggleDice={setDiceEntropy}
+        diceSupported={diceSupported}
         onRunRngTest={() => setRngAuditOpen(true)}
         onCancel={() => setBriefingOpen(false)}
         onConfirm={() => { setBriefingOpen(false); handleCreateWallet() }}

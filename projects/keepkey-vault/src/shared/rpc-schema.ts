@@ -20,7 +20,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       flashFirmware: { params: void; response: void }
       analyzeFirmware: { params: { data: string }; response: FirmwareAnalysis }
       flashCustomFirmware: { params: { data: string }; response: void }
-      resetDevice: { params: { wordCount: 12 | 18 | 24; pin: boolean; passphrase: boolean }; response: void }
+      resetDevice: { params: { wordCount: 12 | 18 | 24; pin: boolean; passphrase: boolean; diceEntropy?: boolean }; response: void }
       recoverDevice: { params: { wordCount: 12 | 18 | 24; pin: boolean; passphrase: boolean }; response: void }
       loadDevice: { params: { mnemonic: string; pin?: string; passphrase?: boolean; label?: string }; response: void }
       verifySeed: { params: { wordCount: 12 | 18 | 24 }; response: { success: boolean; message: string } }
