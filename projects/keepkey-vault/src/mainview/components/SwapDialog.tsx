@@ -2524,8 +2524,13 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
             boxShadow: "0 0 0 1px rgba(255,255,255,0.06), 0 24px 60px -16px rgba(0,0,0,0.8), 0 4px 12px -4px rgba(0,0,0,0.5)",
           }}
         >
-          <Flex justify="center"><ProviderBadge swapper="thorchain" size={32} variant="compact" /></Flex>
-          <Text fontSize="sm" color="kk.textMuted" mt="3">{t("notSupported", { coin: chain.coin })}</Text>
+          {/* No provider badge: the swappable-asset list is a union across
+              providers (THORChain, Maya, Relay, …), so a missing asset is not
+              any single provider's limitation. */}
+          <Text fontSize="sm" color="kk.textMuted">{t("notSupported", { coin: chain.coin })}</Text>
+          <Text fontSize="xs" color="kk.textMuted" mt="2" opacity={0.75}>
+            {t("notSupportedHint", "Routes come from our swap providers and change over time — this asset may become available later.")}
+          </Text>
           <Button size="sm" mt="4" variant="ghost" color="kk.textSecondary" px="4" py="2" onClick={handleClose}>{t("close")}</Button>
         </Box>
       </Box>

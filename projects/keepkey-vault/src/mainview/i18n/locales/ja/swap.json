@@ -104,7 +104,7 @@
 	"approvingToken": "トークンを承認中...",
 	"approvalRequired": "KeepKeyでトークン承認を待機中...",
 	"enterAmount": "見積もりを取得するには金額を入力してください",
-	"notSupported": "{{coin}}のスワップはまだTHORChain経由でサポートされていません。",
+	"notSupported": "現在、{{coin}}に利用できるスワップ経路がありません。",
 	"copied": "コピーしました",
 	"copy": "コピー",
 	"youSend": "送金額",
