@@ -1692,6 +1692,22 @@ export class EngineController extends EventEmitter {
       })
       this.cachedFeatures = await this.wallet.getFeatures()
       this.updateState(this.deriveState(this.cachedFeatures))
+    } catch (err: any) {
+      const rawMessage = extractErrorMessage(err)
+      // Two PIN matrix prompts (NewFirst + NewSecond) followed by ActionCancelled
+      // is the firmware's PIN-mismatch signature — the reset aborts before any
+      // seed words are shown, so nothing was saved. One prompt or none means the
+      // user declined on the device. Read the count here: finally zeroes it.
+      let message = rawMessage
+      let errorType: 'pin-mismatch' | 'cancelled' | 'unknown' = 'unknown'
+      if (rawMessage.includes('Action cancelled') && this.pinRequestCount >= 2) {
+        message = 'PINs did not match. Both entries must be identical.'
+        errorType = 'pin-mismatch'
+      } else if (rawMessage.includes('Action cancelled')) {
+        errorType = 'cancelled'
+      }
+      this.emit('reset-error', { message, errorType })
+      throw err
     } finally {
       this.setupInProgress = false
       this.pinRequestCount = 0
@@ -1735,14 +1751,17 @@ export class EngineController extends EventEmitter {
         return this.recoverDevice(opts, _retryCount + 1)
       }
 
-      // Terminal error — clean up
+      // Terminal error — clean up. Capture the PIN prompt count BEFORE zeroing
+      // it: the classifier below reads it, and reading after the reset made the
+      // pin-mismatch branch unreachable.
       this.setupInProgress = false
+      const pinRequests = this.pinRequestCount
       this.pinRequestCount = 0
 
       // Classify the failure for user-friendly messaging
       let message = rawMessage
       let errorType: 'pin-mismatch' | 'invalid-mnemonic' | 'bad-words' | 'word-not-found' | 'cancelled' | 'unknown' = 'unknown'
-      if (rawMessage.includes('Action cancelled') && this.pinRequestCount >= 2) {
+      if (rawMessage.includes('Action cancelled') && pinRequests >= 2) {
         message = 'PINs did not match. Both entries must be identical.'
         errorType = 'pin-mismatch'
       } else if (rawMessage.includes('Action cancelled')) {

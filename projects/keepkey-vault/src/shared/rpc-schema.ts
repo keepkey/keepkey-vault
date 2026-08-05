@@ -445,6 +445,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       'passphrase-request': Record<string, never>
       'pin-error': Record<string, never>
       'recovery-error': { message: string; errorType: 'pin-mismatch' | 'invalid-mnemonic' | 'bad-words' | 'word-not-found' | 'cancelled' | 'unknown'; autoRetrying?: boolean }
+      'reset-error': { message: string; errorType: 'pin-mismatch' | 'cancelled' | 'unknown' }
       'btc-accounts-update': BtcAccountSet
       'evm-addresses-update': EvmAddressSet
 'update-status': UpdateStatus

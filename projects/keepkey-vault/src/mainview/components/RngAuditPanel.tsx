@@ -49,7 +49,55 @@ function Row({ label, value, muted }: { label: string; value: string; muted?: bo
 	)
 }
 
-export function RngAuditPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
+/** Animated pass/fail mark: circle draws, then the check (or cross) draws.
+ *  Pure SVG + CSS — no animation library, honours prefers-reduced-motion. */
+function VerdictMark({ ok }: { ok: boolean }) {
+	const color = ok ? "#23DCC8" : "#e66464"
+	return (
+		<Flex justify="center" mb="3">
+			<svg
+				width="72"
+				height="72"
+				viewBox="0 0 64 64"
+				aria-hidden="true"
+				style={ok ? { filter: "drop-shadow(0 0 14px rgba(35,220,200,0.35))" } : undefined}
+			>
+				<style>{`
+					@keyframes rngDraw { to { stroke-dashoffset: 0; } }
+					@keyframes rngPop { from { transform: scale(0.85); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+					.rngPop { transform-origin: 32px 32px; animation: rngPop 240ms ease-out both; }
+					.rngCircle { stroke-dasharray: 176; stroke-dashoffset: 176; animation: rngDraw 600ms ease-out 120ms forwards; }
+					.rngStroke { stroke-dasharray: 40; stroke-dashoffset: 40; animation: rngDraw 350ms ease-out 550ms forwards; }
+					@media (prefers-reduced-motion: reduce) {
+						.rngPop, .rngCircle, .rngStroke { animation: none; stroke-dashoffset: 0; opacity: 1; }
+					}
+				`}</style>
+				<g className="rngPop">
+					<circle className="rngCircle" cx="32" cy="32" r="28" fill="none" stroke={color} strokeWidth="3" strokeLinecap="round" />
+					{ok ? (
+						<path className="rngStroke" d="M20 33 L28 41 L44 24" fill="none" stroke={color} strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
+					) : (
+						<>
+							<path className="rngStroke" d="M24 24 L40 40" fill="none" stroke={color} strokeWidth="4" strokeLinecap="round" />
+							<path className="rngStroke" d="M40 24 L24 40" fill="none" stroke={color} strokeWidth="4" strokeLinecap="round" />
+						</>
+					)}
+				</g>
+			</svg>
+		</Flex>
+	)
+}
+
+export function RngAuditPanel({
+	open,
+	onClose,
+	onVerdict,
+}: {
+	open: boolean
+	onClose: () => void
+	/** Fires once per completed run, so the caller can gate on the outcome. */
+	onVerdict?: (verdict: RngAuditReport["verdict"]) => void
+}) {
 	const [sizeIdx, setSizeIdx] = useState(0)
 	const [running, setRunning] = useState(false)
 	const [progress, setProgress] = useState(0)
@@ -74,7 +122,9 @@ export function RngAuditPanel({ open, onClose }: { open: boolean; onClose: () =>
 		try {
 			// 0 timeout: the device may require a button press per request once
 			// the press-free budget is spent.
-			setReport(await rpcRequest("rngAuditRun", { bytes: SIZES[sizeIdx] }, 0))
+			const r = await rpcRequest("rngAuditRun", { bytes: SIZES[sizeIdx] }, 0)
+			setReport(r)
+			onVerdict?.(r.verdict)
 		} catch (e) {
 			setError(e instanceof Error ? e.message : String(e))
 		} finally {
@@ -189,23 +239,31 @@ export function RngAuditPanel({ open, onClose }: { open: boolean; onClose: () =>
 
 					{report && s && (
 						<Box mt="4">
+							<VerdictMark ok={report.verdict === "healthy"} />
 							{(() => {
 								const ran = report.checks.filter((c) => c.status !== "not-run")
 								const skipped = report.checks.length - ran.length
 								const failed = report.checks.filter((c) => c.status === "fail").length
 								return (
 									<>
-										<Text fontSize="sm" fontWeight="700" color={failed ? "#e66464" : "kk.textPrimary"}>
-											{failed
-												? `${failed} check${failed === 1 ? "" : "s"} failed`
-												: `${ran.length - failed} check${ran.length - failed === 1 ? "" : "s"} passed`}
-											{/* Never imply the skipped ones passed. */}
-											{skipped > 0 && (
-												<Text as="span" fontWeight="500" color="kk.textSecondary">
-													{` · ${skipped} not run`}
-												</Text>
-											)}
+										<Text fontSize="md" fontWeight="800" textAlign="center" color={failed ? "#e66464" : "kk.success"}>
+											{failed ? "Health test failed" : "Health test passed"}
 										</Text>
+										<Text fontSize="xs" fontWeight="500" textAlign="center" color="kk.textSecondary" mt="0.5">
+											{failed
+												? `${failed} of ${ran.length} check${ran.length === 1 ? "" : "s"} failed`
+												: `${ran.length} check${ran.length === 1 ? "" : "s"} passed`}
+											{/* Never imply the skipped ones passed. */}
+											{skipped > 0 && ` · ${skipped} not run`}
+										</Text>
+										{report.verdict === "failed" && (
+											<Box mt="3" px="3" py="2" borderRadius="10px" bg="rgba(230,100,100,0.08)" border="1px solid rgba(230,100,100,0.3)">
+												<Text fontSize="xs" fontWeight="600" color="kk.textPrimary">
+													Do not create a wallet with this device. Its generator produced output
+													that real randomness never produces.
+												</Text>
+											</Box>
+										)}
 
 										<VStack align="stretch" gap="1.5" mt="2.5">
 											{report.checks.map((c) => (
@@ -269,18 +327,38 @@ export function RngAuditPanel({ open, onClose }: { open: boolean; onClose: () =>
 						</Box>
 					)}
 
+					{/* Pass -> Continue is the primary action; fail -> re-run or close
+					    (closing lands on the wizard's blocked screen). */}
 					<Flex mt="5" gap="2" justify="flex-end">
-						<Button size="sm" variant="ghost" onClick={onClose} disabled={running}>Close</Button>
-						<Button
-							size="sm"
-							variant="outline"
-							borderColor="rgba(233,196,106,0.45)"
-							color="kk.gold"
-							onClick={run}
-							disabled={running}
-						>
-							{running ? "Running…" : report ? "Run again" : `Run ${label(SIZES[sizeIdx])} test`}
-						</Button>
+						{report?.verdict === "healthy" ? (
+							<>
+								<Button size="sm" variant="ghost" onClick={run}>Run again</Button>
+								<Button
+									size="sm"
+									bg="var(--gold)"
+									color="black"
+									fontWeight="600"
+									_hover={{ bg: "#D4BC6A" }}
+									onClick={onClose}
+								>
+									Continue
+								</Button>
+							</>
+						) : (
+							<>
+								<Button size="sm" variant="ghost" onClick={onClose} disabled={running}>Close</Button>
+								<Button
+									size="sm"
+									variant="outline"
+									borderColor="rgba(233,196,106,0.45)"
+									color="kk.gold"
+									onClick={run}
+									disabled={running}
+								>
+									{running ? "Running…" : report ? "Run again" : `Run ${label(SIZES[sizeIdx])} test`}
+								</Button>
+							</>
+						)}
 					</Flex>
 				</Box>
 			</Flex>

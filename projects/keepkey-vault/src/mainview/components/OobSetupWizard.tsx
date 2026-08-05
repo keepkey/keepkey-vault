@@ -60,6 +60,7 @@ type WizardStep =
   | 'bootloader'
   | 'firmware'
   | 'init-choose'
+  | 'create-briefing'
   | 'sec-randomness'
   | 'sec-dice'
   | 'init-progress'
@@ -74,6 +75,7 @@ const STEP_SEQUENCE: WizardStep[] = [
   'bootloader',
   'firmware',
   'init-choose',
+  'create-briefing',
   'sec-randomness',
   'sec-dice',
   'init-progress',
@@ -92,6 +94,7 @@ const stepToVisibleId: Record<WizardStep, string | null> = {
   'bootloader': 'bootloader',
   'firmware': 'firmware',
   'init-choose': 'init-choose',
+  'create-briefing': 'init-choose',
   'sec-randomness': 'init-choose',
   'sec-dice': 'init-choose',
   'init-progress': 'init-choose',
@@ -160,6 +163,7 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
     'bootloader': t('stepDescriptions.bootloader'),
     'firmware': t('stepDescriptions.firmware'),
     'init-choose': t('stepDescriptions.initChoose'),
+    'create-briefing': t('stepDescriptions.createBriefing', { defaultValue: 'Before you create a wallet' }),
     'sec-randomness': t('stepDescriptions.secRandomness', { defaultValue: 'Verify device randomness' }),
     'sec-dice': t('stepDescriptions.secDice', { defaultValue: 'Add your own dice rolls' }),
     'init-progress': t('stepDescriptions.initProgress'),
@@ -180,7 +184,16 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
   // Advanced seed length toggle for create wallet
   const [showCreateAdvanced, setShowCreateAdvanced] = useState(false)
   const [rngAuditOpen, setRngAuditOpen] = useState(false)
-  const [briefingOpen, setBriefingOpen] = useState(false)
+  // Last completed audit outcome. 'failed' hard-blocks wallet creation until a
+  // re-run comes back healthy — a failed generator means predictable keys.
+  const [rngVerdict, setRngVerdict] = useState<'healthy' | 'failed' | null>(null)
+  // Classified resetDevice failure (pin-mismatch / cancelled). Rendered as an
+  // explain-and-retry card on init-progress instead of ejecting to init-choose.
+  const [createError, setCreateError] = useState<{ errorType: 'pin-mismatch' | 'cancelled' | 'unknown'; message: string } | null>(null)
+  // The engine emits 'reset-error' just before the resetDevice RPC rejects, so
+  // by the time the catch runs this ref already holds the classification.
+  const lastResetErrorRef = useRef<{ errorType: 'pin-mismatch' | 'cancelled' | 'unknown'; message: string } | null>(null)
+  useEffect(() => onRpcMessage('reset-error', (e) => { lastResetErrorRef.current = e }), [])
   const [diceEntropy, setDiceEntropy] = useState(false)
 
   // Emulator state — moved below deviceStatus declaration
@@ -313,6 +326,15 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
     if (deviceStatus.state === 'needs_init' || deviceStatus.state === 'ready') {
       setSetupError(null)
     }
+  }, [deviceStatus.state])
+
+  // ── Audit verdict dies with the cable ──────────────────────────────────
+  // The verdict describes the physically-present device. After a disconnect
+  // we cannot tell what was plugged back in (uninitialized devices lack a
+  // stable deviceId), so pass and fail both reset. The durable form of this
+  // gate is the firmware-side fault latch, not host state.
+  useEffect(() => {
+    if (deviceStatus.state === 'disconnected') setRngVerdict(null)
   }, [deviceStatus.state])
 
   // ── Welcome → user clicks to advance ───────────────────────────────────
@@ -658,9 +680,17 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
   const DEVICE_INTERACTION_TIMEOUT = 0
 
   const handleCreateWallet = async () => {
+    // Hard gate, not presentation: every path that creates a wallet funnels
+    // through here, so a failed randomness audit blocks all of them.
+    if (rngVerdict === 'failed') {
+      setStep('sec-randomness')
+      return
+    }
     setSetupType('create')
     setStep('init-progress')
     setSetupError(null)
+    setCreateError(null)
+    lastResetErrorRef.current = null
     try {
       if (isEmulator) {
         // Emulator: generate mnemonic on backend, load device, then display
@@ -680,6 +710,15 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
       }, DEVICE_INTERACTION_TIMEOUT)
       setStep('init-label')
     } catch (err) {
+      // PIN mismatch and on-device cancel are recoverable: stay in the create
+      // flow and explain, instead of ejecting to init-choose with a raw error.
+      // Cast: TS keeps the `= null` narrowing on ref.current across the await,
+      // but the rpc handler has repopulated it by the time the RPC rejects.
+      const classified = lastResetErrorRef.current as { errorType: 'pin-mismatch' | 'cancelled' | 'unknown'; message: string } | null
+      if (classified && (classified.errorType === 'pin-mismatch' || classified.errorType === 'cancelled')) {
+        setCreateError(classified)
+        return
+      }
       setSetupError(err instanceof Error ? err.message : t('initProgress.failedToCreate'))
       setStep('init-choose')
     }
@@ -787,8 +826,11 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
   // L7 fix: prevent navigating back to already-completed steps
   const showPrevious = !['intro', 'welcome', 'complete', 'init-progress', 'verify-seed', 'security-tips'].includes(step)
   // L4 fix: hide Next on firmware step for OOB devices (firmware is required)
+  // Security steps carry their own Accept/Skip actions; a footer Next would
+  // bypass them (and from sec-dice would land on init-progress with no RPC in
+  // flight — a spinner that never resolves).
   const showNext =
-    !['intro', 'bootloader', 'init-choose', 'init-progress', 'init-label', 'verify-seed', 'security-tips', 'complete'].includes(step) &&
+    !['intro', 'bootloader', 'init-choose', 'create-briefing', 'sec-randomness', 'sec-dice', 'init-progress', 'init-label', 'verify-seed', 'security-tips', 'complete'].includes(step) &&
     !(step === 'firmware' && (updateState === 'updating' || updateState === 'complete')) &&
     !(step === 'firmware' && isOobDevice)
 
@@ -1931,8 +1973,64 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
               </VStack>
             )}
 
+            {/* ═══════════ CREATE: BRIEFING ═════════════════════════ */}
+            {step === 'create-briefing' && (
+              <CreateWalletBriefing
+                wordCount={wordCount}
+                onConfirm={() => {
+                  // A failed audit from an earlier attempt lands on the blocked
+                  // screen — even on devices too old for dice, which otherwise
+                  // skip straight to generation.
+                  if (rngVerdict === 'failed') {
+                    setStep('sec-randomness')
+                    return
+                  }
+                  // Randomness first, then dice: audit the source BEFORE adding
+                  // to it, or the audit measures the wrong thing. Devices too
+                  // old for dice skip straight to generation.
+                  setStep(diceSupported ? 'sec-randomness' : 'init-progress')
+                  if (!diceSupported) void handleCreateWallet()
+                }}
+              />
+            )}
+
             {/* ═══════ SECURITY: VERIFY RANDOMNESS (optional) ═══════ */}
-            {step === 'sec-randomness' && (
+            {step === 'sec-randomness' && rngVerdict === 'failed' && (
+              <VStack gap={4} w="100%" maxW="400px" mx="auto">
+                <Box
+                  w="100%"
+                  bg="rgba(230,100,100,0.06)"
+                  border="1px solid"
+                  borderColor="rgba(230,100,100,0.4)"
+                  borderRadius="2xl"
+                  p={6}
+                >
+                  <VStack gap={3}>
+                    <Text fontSize="xl" fontWeight="800" color="#e66464" textAlign="center" letterSpacing="-0.02em">
+                      {t('security.randomness.failedTitle', { defaultValue: 'Do not use this device' })}
+                    </Text>
+                    <Text fontSize="sm" color="gray.400" textAlign="center" lineHeight="1.6">
+                      {t('security.randomness.failedLead', {
+                        defaultValue:
+                          'The randomness audit found output this device should never produce. Every key it generates could be predictable, so wallet creation is blocked. Re-run the audit to confirm, and contact support@keepkey.com if it fails again.',
+                      })}
+                    </Text>
+                  </VStack>
+                </Box>
+                <Button
+                  w="100%"
+                  size="md"
+                  bg="#e66464"
+                  color="black"
+                  fontWeight="700"
+                  _hover={{ opacity: 0.9 }}
+                  onClick={() => setRngAuditOpen(true)}
+                >
+                  {t('security.randomness.rerun', { defaultValue: 'Run the audit again' })}
+                </Button>
+              </VStack>
+            )}
+            {step === 'sec-randomness' && rngVerdict !== 'failed' && (
               <SecurityStepPage
                 step="randomness"
                 rollCount={wordCount === 12 ? 50 : wordCount === 18 ? 75 : 99}
@@ -2083,7 +2181,7 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
                         transition="all 0.15s ease"
                         onClick={(e: React.MouseEvent) => {
                           e.stopPropagation()
-                          setBriefingOpen(true)
+                          setStep('create-briefing')
                         }}
                       >
                         {t('initChoose.createWallet')}
@@ -2187,7 +2285,65 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
             {/* ═══════════════ INIT: IN PROGRESS ═══════════════════ */}
             {step === 'init-progress' && (
               <VStack gap={4} textAlign="center" w="100%" maxW="480px" mx="auto">
+                {/* ── Recoverable failure: explain and retry, don't eject ── */}
+                {createError && (
+                  <VStack gap={4} w="100%" maxW="400px" mx="auto">
+                    <Box
+                      w="100%"
+                      bg="rgba(255,255,255,0.03)"
+                      border="1px solid"
+                      borderColor="rgba(233,196,106,0.33)"
+                      borderRadius="2xl"
+                      p={6}
+                    >
+                      <VStack gap={3}>
+                        <FaExclamationTriangle color="var(--gold)" size={26} />
+                        <Text fontSize="xl" fontWeight="800" color="white" textAlign="center" letterSpacing="-0.02em">
+                          {createError.errorType === 'pin-mismatch'
+                            ? t('initProgress.pinMismatchTitle', { defaultValue: "The two PINs didn't match" })
+                            : t('initProgress.createCancelledTitle', { defaultValue: 'Setup stopped on the device' })}
+                        </Text>
+                        <Text fontSize="sm" color="gray.400" textAlign="center" lineHeight="1.6">
+                          {createError.errorType === 'pin-mismatch'
+                            ? t('initProgress.pinMismatchDetail', {
+                                defaultValue:
+                                  'You enter your new PIN twice on the scrambled keypad. The second entry is deliberate: it proves you read the cipher correctly, so you cannot lock yourself in with a PIN you never intended. The two entries came out different, so nothing was saved — no PIN, no wallet.',
+                              })
+                            : t('initProgress.createCancelledDetail', {
+                                defaultValue:
+                                  'The device reported the action was cancelled before setup finished. Nothing was saved — no PIN, no wallet.',
+                              })}
+                        </Text>
+                      </VStack>
+                    </Box>
+                    <VStack gap={2} w="100%">
+                      <Button
+                        w="100%"
+                        size="md"
+                        bg="var(--gold)"
+                        color="black"
+                        fontWeight="700"
+                        _hover={{ opacity: 0.9 }}
+                        onClick={() => void handleCreateWallet()}
+                      >
+                        {t('initProgress.tryPinAgain', { defaultValue: 'Try again' })}
+                      </Button>
+                      <Button
+                        w="100%"
+                        size="sm"
+                        variant="ghost"
+                        color="gray.500"
+                        fontWeight="500"
+                        onClick={() => { setCreateError(null); setStep('init-choose') }}
+                      >
+                        {t('initProgress.backToChoose', { defaultValue: 'Back' })}
+                      </Button>
+                    </VStack>
+                  </VStack>
+                )}
+
                 {/* ── Spinner + "look at device" (or emulator window) ─────── */}
+                {!createError && (
                 <>
                   <Spinner size="lg" color={HIGHLIGHT} borderWidth="3px" />
                     <VStack gap={1}>
@@ -2243,6 +2399,7 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
                       </Box>
                     )}
                 </>
+                )}
 
                 {setupError && (
                   <Box w="100%" p={3} bg="rgba(224,140,123,0.10)" borderRadius="lg" borderWidth="1px" borderColor="red.500">
@@ -2926,30 +3083,14 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
         </Flex>
       )}
 
-      <CreateWalletBriefing
-        open={briefingOpen && !rngAuditOpen}
-        wordCount={wordCount}
-        diceEntropy={diceEntropy}
-        onToggleDice={setDiceEntropy}
-        diceSupported={diceSupported}
-        onRunRngTest={() => setRngAuditOpen(true)}
-        onCancel={() => setBriefingOpen(false)}
-        onConfirm={() => {
-          setBriefingOpen(false)
-          // Randomness first, then dice: audit the source BEFORE adding to it,
-          // or the audit measures the wrong thing. Devices too old for dice
-          // skip straight to generation.
-          setStep(diceSupported ? 'sec-randomness' : 'init-progress')
-          if (!diceSupported) void handleCreateWallet()
-        }}
-      />
       <RngAuditPanel
         open={rngAuditOpen}
+        onVerdict={setRngVerdict}
         onClose={() => {
           setRngAuditOpen(false)
-          // Closing the audit from its own step advances the ceremony; opened
-          // from the briefing it just returns there.
-          if (step === 'sec-randomness') setStep('sec-dice')
+          // Closing the audit advances the ceremony — unless the run failed,
+          // in which case the step shows the blocked screen.
+          if (step === 'sec-randomness' && rngVerdict !== 'failed') setStep('sec-dice')
         }}
       />
     </Flex>
