@@ -1999,15 +1999,13 @@ async function headlessExecuteSwap(params: ExecuteSwapParams, pushSubStage: (sta
 			throw new Error(`TCY / RUJI swaps require KeepKey firmware ${THORCHAIN_BANK_TOKEN_MIN_FW}+ (device has ${fw || 'unknown'}). Update your firmware.`)
 		}
 	}
-	if (params.fromCaip?.startsWith('solana:') && params.relayTx?.serializedTx) {
-		const fw = engine.getDeviceState().firmwareVersion
-		if (!fw || versionCompare(fw, '7.15.0') < 0) {
-			throw new Error(
-				`Versioned Solana swaps require KeepKey firmware 7.15.0+ ` +
-				`(device has ${fw || 'unknown'}). Update your firmware before signing.`,
-			)
-		}
-	}
+	// NOTE: there is deliberately NO firmware version gate for versioned Solana
+	// swaps. Firmware 7.14.x already parses v0 messages (solana.c inspectTx
+	// accepts version 0 and only returns OPAQUE for versions it doesn't know),
+	// and anything it can't verify falls through to the AdvancedMode blind-sign
+	// path — which is exactly what the needsOpaqueSolanaFallback consent flow in
+	// swap.ts drives, independent of firmware version. A hard version check here
+	// told 7.14.1 users to update for a capability they already had.
 
 	const { executeSwap } = await import('./swap')
 	const { trackSwap, isTrackerInitialized, initSwapTracker } = await import('./swap-tracker')
