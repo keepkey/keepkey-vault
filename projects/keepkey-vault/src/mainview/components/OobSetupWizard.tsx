@@ -16,6 +16,8 @@ import {
 import holdAndConnectRaw from '../assets/svg/hold-and-connect.svg?raw'
 import { useFirmwareUpdate } from '../hooks/useFirmwareUpdate'
 import { useDeviceState } from '../hooks/useDeviceState'
+import { CreateWalletBriefing } from './CreateWalletBriefing'
+import { RngAuditPanel } from './RngAuditPanel'
 import { rpcRequest, onRpcMessage } from '../lib/rpc'
 import type { FirmwareAnalysis, FirmwareProgress } from '../../shared/types'
 import { FirmwareUpgradePreview } from './FirmwareUpgradePreview'
@@ -170,6 +172,8 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
   const [showReadMore, setShowReadMore] = useState(false)
   // Advanced seed length toggle for create wallet
   const [showCreateAdvanced, setShowCreateAdvanced] = useState(false)
+  const [rngAuditOpen, setRngAuditOpen] = useState(false)
+  const [briefingOpen, setBriefingOpen] = useState(false)
 
   // Emulator state — moved below deviceStatus declaration
 
@@ -2127,7 +2131,7 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
                         transition="all 0.15s ease"
                         onClick={(e: React.MouseEvent) => {
                           e.stopPropagation()
-                          handleCreateWallet()
+                          setBriefingOpen(true)
                         }}
                       >
                         {t('initChoose.createWallet')}
@@ -3045,6 +3049,15 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
           </Box>
         </Flex>
       )}
+
+      <CreateWalletBriefing
+        open={briefingOpen && !rngAuditOpen}
+        wordCount={wordCount}
+        onRunRngTest={() => setRngAuditOpen(true)}
+        onCancel={() => setBriefingOpen(false)}
+        onConfirm={() => { setBriefingOpen(false); handleCreateWallet() }}
+      />
+      <RngAuditPanel open={rngAuditOpen} onClose={() => setRngAuditOpen(false)} />
     </Flex>
   )
 }
