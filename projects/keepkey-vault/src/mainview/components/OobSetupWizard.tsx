@@ -180,6 +180,10 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
   // by the time the catch runs this ref already holds the classification.
   const lastResetErrorRef = useRef<{ errorType: 'pin-mismatch' | 'cancelled' | 'unknown'; message: string } | null>(null)
   useEffect(() => onRpcMessage('reset-error', (e) => { lastResetErrorRef.current = e }), [])
+  // Set when the device-state effect below advances past init-progress. The
+  // resetDevice RPC severed by a replug may settle (or reject) much later —
+  // the catch must not yank the user back after we already moved on.
+  const createAdvancedRef = useRef(false)
   const [devSeed, setDevSeed] = useState('')
   const [devAcknowledged, setDevAcknowledged] = useState(false)
 
@@ -298,6 +302,22 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
       setSetupError(null)
     }
   }, [deviceStatus.state])
+
+  // ── Create-flow replug recovery ────────────────────────────────────────
+  // A detach/re-attach during ResetDevice severs the in-flight RPC without
+  // rejecting it (transport calls don't settle on disconnect), stranding the
+  // wizard on the "Creating Wallet..." spinner even though the device
+  // finished and reports ready. The device is the source of truth: a READY
+  // state while we're on the create spinner means the wallet exists — advance.
+  // Emulator excluded: emulatorCreateWallet loads the device (state → ready)
+  // and then BLOCKS until the words are acknowledged in the emulator window —
+  // advancing on ready there would skip past the seed display.
+  useEffect(() => {
+    if (step === 'init-progress' && setupType === 'create' && !isEmulator && deviceStatus.state === 'ready' && !createError) {
+      createAdvancedRef.current = true
+      setStep('init-label')
+    }
+  }, [step, setupType, isEmulator, deviceStatus.state, createError])
 
   // ── Welcome → user clicks to advance ───────────────────────────────────
   // Only enable "Get Started" when real device features are available.
@@ -647,6 +667,7 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
     setSetupError(null)
     setCreateError(null)
     lastResetErrorRef.current = null
+    createAdvancedRef.current = false
     try {
       if (isEmulator) {
         // Emulator: generate mnemonic on backend, load device, then display
@@ -665,6 +686,12 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
       }, DEVICE_INTERACTION_TIMEOUT)
       setStep('init-label')
     } catch (err) {
+      // The device-state effect already advanced (wallet exists, RPC was a
+      // zombie severed by a replug) — a late rejection must not eject the user.
+      if (createAdvancedRef.current) {
+        console.warn('[wizard] resetDevice RPC settled after device-state advance — ignoring:', err)
+        return
+      }
       // PIN mismatch and on-device cancel are recoverable: stay in the create
       // flow and explain, instead of ejecting to init-choose with a raw error.
       // Cast: TS keeps the `= null` narrowing on ref.current across the await,
