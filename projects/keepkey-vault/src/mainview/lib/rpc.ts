@@ -31,9 +31,9 @@ const MAX_RECONNECT_ATTEMPTS = 50
  *  Normalize to the human string ("Action cancelled") instead of letting
  *  "[object Object]" reach an error banner. */
 function rpcErrorText(e: unknown): string {
-  if (typeof e === 'string' && e) return e
+  if (typeof e === 'string') return e || 'RPC request failed'
   const m = (e as any)?.message
-  if (typeof m === 'string') return m
+  if (typeof m === 'string') return m || 'RPC request failed'
   if (e == null) return 'RPC request failed'
   console.error('[rpc] non-string error payload:', e)
   try { return JSON.stringify(e) } catch { return String(e) }

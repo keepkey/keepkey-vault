@@ -184,6 +184,10 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
   // resetDevice RPC severed by a replug may settle (or reject) much later —
   // the catch must not yank the user back after we already moved on.
   const createAdvancedRef = useRef(false)
+  // Evidence that this create actually lost the device (the only situation the
+  // auto-advance is meant to rescue), and which device it started on.
+  const sawCreateDisconnectRef = useRef(false)
+  const createDeviceIdRef = useRef<string | null>(null)
   const [devSeed, setDevSeed] = useState('')
   const [devAcknowledged, setDevAcknowledged] = useState(false)
 
@@ -312,12 +316,31 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
   // Emulator excluded: emulatorCreateWallet loads the device (state → ready)
   // and then BLOCKS until the words are acknowledged in the emulator window —
   // advancing on ready there would skip past the seed display.
+  // Only a create that actually LOST the device may auto-advance. Without this
+  // evidence gate, plugging in a second, already-initialized KeepKey mid-create
+  // reads as 'ready' and the wizard would declare success for a wallet that was
+  // never created — skipping the seed-backup screen entirely.
   useEffect(() => {
-    if (step === 'init-progress' && setupType === 'create' && !isEmulator && deviceStatus.state === 'ready' && !createError) {
+    if (step !== 'init-progress' || setupType !== 'create') return
+    if (deviceStatus.state === 'disconnected' || deviceStatus.state === 'connected_unpaired') {
+      sawCreateDisconnectRef.current = true
+    }
+  }, [step, setupType, deviceStatus.state])
+
+  useEffect(() => {
+    if (
+      step === 'init-progress' && setupType === 'create' && !isEmulator &&
+      deviceStatus.state === 'ready' && !createError &&
+      sawCreateDisconnectRef.current &&
+      // Same physical device the create started on. A hot-swap to another
+      // initialized device must never be mistaken for our wallet.
+      (!createDeviceIdRef.current || !deviceStatus.deviceId || createDeviceIdRef.current === deviceStatus.deviceId)
+    ) {
       createAdvancedRef.current = true
+      sawCreateDisconnectRef.current = false
       setStep('init-label')
     }
-  }, [step, setupType, isEmulator, deviceStatus.state, createError])
+  }, [step, setupType, isEmulator, deviceStatus.state, deviceStatus.deviceId, createError])
 
   // ── Welcome → user clicks to advance ───────────────────────────────────
   // Only enable "Get Started" when real device features are available.
@@ -668,6 +691,8 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
     setCreateError(null)
     lastResetErrorRef.current = null
     createAdvancedRef.current = false
+    sawCreateDisconnectRef.current = false
+    createDeviceIdRef.current = deviceStatus.deviceId || null
     try {
       if (isEmulator) {
         // Emulator: generate mnemonic on backend, load device, then display
@@ -707,6 +732,10 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
   }
 
   const handleDevLoadDevice = async () => {
+    // Shares init-progress + setupType 'create' with the real flow, so it must
+    // reset the same guards or a stale ref decides its error handling.
+    createAdvancedRef.current = false
+    sawCreateDisconnectRef.current = false
     const words = devSeed.trim()
     if (!words || words.split(/\s+/).length < 12) return
     setDevLoadOpen(false)
@@ -806,7 +835,9 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
   }, [step, onComplete])
 
   // L7 fix: prevent navigating back to already-completed steps
-  const showPrevious = !['intro', 'welcome', 'complete', 'init-progress', 'verify-seed', 'security-tips'].includes(step)
+  // init-label excluded: its Previous target is init-progress, which the
+  // create-recovery effect immediately pushes forward again — a no-op bounce.
+  const showPrevious = !['intro', 'welcome', 'complete', 'init-progress', 'init-label', 'verify-seed', 'security-tips'].includes(step)
   // L4 fix: hide Next on firmware step for OOB devices (firmware is required)
   const showNext =
     !['intro', 'bootloader', 'init-choose', 'init-progress', 'init-label', 'verify-seed', 'security-tips', 'complete'].includes(step) &&
@@ -2342,6 +2373,20 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
                     {t('initLabel.giveAName')}
                   </Text>
                 </VStack>
+
+                {/* The write-down warning lives on init-progress, which we may
+                    have left automatically after a replug. Repeat it here so no
+                    path through creation ends without this having been said. */}
+                {setupType === 'create' && (
+                  <Box w="100%" p={3} bg="rgba(224,140,123,0.10)" borderRadius="lg" borderWidth="1px" borderColor="var(--rose)">
+                    <HStack gap={2} justify="center">
+                      <FaExclamationTriangle color="var(--rose)" size={14} />
+                      <Text fontSize="xs" color="var(--rose)" fontWeight="600" textAlign="center">
+                        {t('initLabel.writeDownReminder', { defaultValue: 'Make sure your recovery phrase is written on paper before you continue — you will not be shown those words again.' })}
+                      </Text>
+                    </HStack>
+                  </Box>
+                )}
 
                 <Input
                   placeholder={t('initLabel.placeholder')}
