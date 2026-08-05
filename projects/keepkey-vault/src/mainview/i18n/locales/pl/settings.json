@@ -99,8 +99,6 @@
 	"signingPolicy": "Polityka podpisywania",
 	"advancedMode": "Tryb zaawansowany",
 	"advancedModeDescription": "Zezwól na podpisywanie transakcji EVM z dowolnymi danymi kontraktu (np. Uniswap, DeFi).",
-	"experimentalFeatures": "Eksperymentalne",
-	"experimentalFeaturesDescription": "Włącz eksperymentalne funkcje oprogramowania.",
 	"walletConnectFeature": "WalletConnect",
 	"walletConnectFeatureDescription": "Łącz się z aplikacjami dApps przez protokół WalletConnect.",
 	"zcashPrivacyFeature": "Prywatność osłonięta Zcash",

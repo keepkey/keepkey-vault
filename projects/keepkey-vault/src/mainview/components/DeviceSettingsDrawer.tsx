@@ -1247,31 +1247,6 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 								/>
 							</Flex>
 
-							{/* Experimental features */}
-							<Flex
-								align="center"
-								justify="space-between"
-								py="3"
-							>
-								<Flex align="center" gap="3">
-									<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(130,100,250,0.1)">
-										<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#8264FA" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-											<path d="M9 3H5a2 2 0 0 0-2 2v4m6-6h10a2 2 0 0 1 2 2v4M9 3v18m0 0h10a2 2 0 0 0 2-2v-4M9 21H5a2 2 0 0 1-2-2v-4" />
-										</svg>
-									</Flex>
-									<Box>
-										<Text fontSize="md" color="kk.textPrimary" fontWeight="500">{t("experimentalFeatures")}</Text>
-										<Text fontSize="sm" color="kk.textSecondary" mt="0.5">
-											{t("experimentalFeaturesDescription")}
-										</Text>
-									</Box>
-								</Flex>
-								<Toggle
-									checked={isPolicyEnabled("Experimental")}
-									onChange={(v) => handleTogglePolicy("Experimental", v)}
-									disabled={togglingPolicy === "Experimental" || !features}
-								/>
-							</Flex>
 						</VStack>
 					</Section>
 
