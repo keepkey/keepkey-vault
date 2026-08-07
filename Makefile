@@ -846,6 +846,9 @@ preflight: submodules
 	test -f modules/hdwallet/packages/hdwallet-keepkey/dist/typeRegistry.js && echo "   ✅ hdwallet dist/" || { echo "   ❌ hdwallet dist/ — run: make modules-build"; fail=1; }; \
 	test -f modules/proto-tx-builder/dist/index.js && echo "   ✅ proto-tx-builder dist/" || { echo "   ❌ proto-tx-builder dist/ — run: make modules-build"; fail=1; }; \
 	test -f modules/device-protocol/lib/messages_pb.js && echo "   ✅ device-protocol lib/" || { echo "   ❌ device-protocol lib/ — run: cd modules/device-protocol && npm run build"; fail=1; }; \
+	node $(PROJECT_DIR)/scripts/verify-zcash-ironwood-protocol.mjs modules/device-protocol >/dev/null 2>&1 \
+		&& echo "   ✅ device-protocol Ironwood fields" \
+		|| { echo "   ❌ device-protocol pin is missing Ironwood fields 19/20"; fail=1; }; \
 	echo ""; \
 	echo "6. VAULT TYPECHECK (differential vs baseline)"; \
 	errs=$$(cd $(PROJECT_DIR) && npx tsc --noEmit --skipLibCheck 2>&1 | grep "error TS" | grep -v "minimatch" | wc -l | tr -d ' '); \
