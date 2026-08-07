@@ -268,10 +268,10 @@ async function fetchUtxosForXpub(
 export async function estimateUtxoFee(
   pioneer: any,
   chain: ChainDef,
-  params: Pick<BuildUtxoParams, 'to' | 'amount' | 'feeLevel' | 'isMax' | 'xpub' | 'allXpubs' | 'scriptTypeOverride' | 'accountPath' | 'satPerVByte'>,
+  params: Pick<BuildUtxoParams, 'to' | 'amount' | 'feeLevel' | 'isMax' | 'xpub' | 'allXpubs' | 'scriptTypeOverride' | 'accountPath' | 'satPerVByte' | 'memo'>,
 ): Promise<{ feeSat: number; netSat: number } | null> {
   try {
-    const { to, feeLevel = 5, isMax = false, xpub, allXpubs, scriptTypeOverride, accountPath, satPerVByte } = params
+    const { to, feeLevel = 5, isMax = false, xpub, allXpubs, scriptTypeOverride, accountPath, satPerVByte, memo } = params
     const primaryXpub = xpub || allXpubs?.[0]?.xpub
     if (!primaryXpub) return null
     const scriptType = scriptTypeOverride || getScriptTypeFromXpub(primaryXpub) || chain.scriptType || 'p2pkh'
@@ -305,7 +305,9 @@ export async function estimateUtxoFee(
     // buildUtxoTx will actually produce — otherwise the re-quote under-estimates
     // the fee and the deposit address is quoted for more than we can deliver.
     if (chain.id === 'zcash') {
-      const logicalActions = Math.max(result.inputs.length, result.outputs?.length ?? 1)
+      // Same memo-output accounting as buildUtxoTx — OP_RETURN adds a vout.
+      const memoOut = memo && memo.trim() ? 1 : 0
+      const logicalActions = Math.max(result.inputs.length, (result.outputs?.length ?? 1) + memoOut)
       const zip317Fee = 5000 * Math.max(2, logicalActions)
       if (feeSat < zip317Fee) feeSat = zip317Fee
     }
@@ -432,7 +434,12 @@ export async function buildUtxoTx(
   // logical_actions = max(transparent_inputs, transparent_outputs)
   // coinselect uses sat/byte which produces fees far below the ZIP-317 floor.
   if (chain.id === 'zcash') {
-    const logicalActions = Math.max(inputs.length, outputs.length)
+    // +1 output when a memo is present: the OP_RETURN vout is appended at
+    // broadcast time (opReturnData below), AFTER coin selection — and ZIP-317
+    // counts every transparent output. Missing it left memo txs exactly one
+    // action unpaid → node rejects with "tx unpaid action limit exceeded".
+    const memoOut = memo && memo.trim() ? 1 : 0
+    const logicalActions = Math.max(inputs.length, outputs.length + memoOut)
     const zip317Fee = 5000 * Math.max(2, logicalActions)
     if (fee < zip317Fee) {
       const increase = zip317Fee - fee

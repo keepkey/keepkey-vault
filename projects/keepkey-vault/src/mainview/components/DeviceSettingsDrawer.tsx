@@ -11,6 +11,7 @@ import type { DeviceStateInfo, AppSettings, EmulatorWalletInfo } from "../../sha
 import { versionCompare } from "../../shared/firmware-versions"
 import { isBitcoinOnlyVariant } from "../../shared/flags"
 import { SelfHostNodePanel } from "./SelfHostNodePanel"
+import { ClearSignStudio } from "./ClearSignStudio"
 
 interface DevicePolicy {
 	policyName?: string
@@ -186,6 +187,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 	const [switchingServer, setSwitchingServer] = useState("")
 	const [resetConfirm, setResetConfirm] = useState(false)
 	const [resetting, setResetting] = useState(false)
+	const [clearSignStudioOpen, setClearSignStudioOpen] = useState(false)
 	const panelRef = useRef<HTMLDivElement>(null)
 
 	// Fetch device features + app settings when drawer opens
@@ -609,6 +611,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 			// Refresh features to reflect the new state
 			const updated = await rpcRequest<DeviceFeatures>("getFeatures")
 			setFeatures(updated)
+			if (policyName === "AdvancedMode" && !enable) setClearSignStudioOpen(false)
 		} catch (e: any) { console.error("applyPolicy:", e) }
 		setTogglingPolicy("")
 	}, [])
@@ -1247,6 +1250,17 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 								/>
 							</Flex>
 
+							{isPolicyEnabled("AdvancedMode") && (
+								<Box px="3" py="3" borderRadius="12px" bg="rgba(233,196,106,0.06)" border="1px solid rgba(233,196,106,0.18)">
+									<Flex align="center" justify="space-between" gap="3">
+										<Box>
+											<Text fontSize="sm" color="kk.textPrimary" fontWeight="600">ClearSign Studio</Text>
+											<Text fontSize="xs" color="kk.textSecondary" mt="0.5">Attest schemas, load a RAM-only signer, and export test evidence.</Text>
+										</Box>
+										<Button size="sm" variant="outline" borderColor="rgba(233,196,106,0.45)" color="kk.gold" onClick={() => setClearSignStudioOpen(true)}>Open Studio</Button>
+									</Flex>
+								</Box>
+							)}
 						</VStack>
 					</Section>
 
@@ -1903,6 +1917,12 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 
 				</VStack>
 			</Box>
+			<ClearSignStudio
+				open={clearSignStudioOpen}
+				onClose={() => setClearSignStudioOpen(false)}
+				advancedMode={isPolicyEnabled("AdvancedMode")}
+				firmwareVersion={deviceState.firmwareVersion}
+			/>
 		</>
 	)
 }

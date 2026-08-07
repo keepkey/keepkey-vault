@@ -55,6 +55,33 @@ else
   echo "[patch-electrobun] $EBUN_CLI not found, skipping (expected during CI or fresh install)"
 fi
 
+# Retry initEncryption when crypto.subtle isn't ready yet (preload race).
+# On slow startups the preload user-script can run while the webview is still
+# in a transient context (about:blank before views:// is established) where
+# crypto.subtle is undefined — importKey throws, __electrobun_encrypt/decrypt
+# never install, and ALL bun<->webview RPC is dead (blank window / "import key
+# broke"). Bounded 100ms x 50 retry wins the race; logs loudly if crypto.subtle
+# never appears.
+for COMPILED in \
+  node_modules/electrobun/dist/api/bun/preload/.generated/compiled.ts \
+  node_modules/electrobun/dist-macos-arm64/api/bun/preload/.generated/compiled.ts; do
+  [ -f "$COMPILED" ] || continue
+  if grep -q '__ebInitEncRetry' "$COMPILED"; then
+    echo "[patch-electrobun] encryption retry already patched ($COMPILED)"
+  else
+    bun -e '
+const fs = require("fs");
+const f = process.argv[1];
+let s = fs.readFileSync(f, "utf8");
+const target = String.raw`initEncryption().catch((err) => console.error(\"Failed to initialize encryption:\", err));`;
+const replacement = String.raw`var __ebInitEncRetry = (attempt) => initEncryption().catch((err) => { if (attempt < 50) { setTimeout(() => __ebInitEncRetry(attempt + 1), 100); } else { console.error(\"Failed to initialize encryption (crypto.subtle unavailable after 5s):\", err); } }); __ebInitEncRetry(0);`;
+if (!s.includes(target)) { console.error("initEncryption pattern not found in " + f); process.exit(1); }
+fs.writeFileSync(f, s.replaceAll(target, replacement));
+console.log("[patch-electrobun] Patched encryption retry (" + f + ")");
+' "$COMPILED" || echo "[patch-electrobun] WARNING: encryption retry pattern not found in $COMPILED — Electrobun may have changed"
+  fi
+done
+
 # Patch electrobun CLI bootstrap to use --force-local with tar on Windows only.
 # Without this, tar interprets the "C:" in Windows paths as a remote host.
 # macOS tar does NOT support --force-local — applying it breaks CI macOS builds.

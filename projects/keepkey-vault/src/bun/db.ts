@@ -8,7 +8,8 @@ import { Database } from 'bun:sqlite'
 import { Utils } from 'electrobun/bun'
 import { join, dirname } from 'node:path'
 import { mkdirSync, unlinkSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
-import type { ChainBalance, CustomToken, CustomChain, PairedAppInfo, ApiLogEntry, ReportMeta, ReportData, SwapHistoryRecord, SwapHistoryFilter, SwapTrackingStatus, SwapHistoryStats, Bip85SeedMeta, PioneerServer, AddressBookEntry, AddressBookTx, AddressBookFilter, AddressBookKind } from '../shared/types'
+import { randomUUID } from 'crypto'
+import type { ChainBalance, CustomToken, CustomChain, PairedAppInfo, ApiLogEntry, ReportMeta, ReportData, SwapHistoryRecord, SwapHistoryFilter, SwapTrackingStatus, SwapHistoryStats, Bip85SeedMeta, PioneerServer, AddressBookEntry, AddressBookTx, AddressBookFilter, AddressBookKind, ClearSignEvent } from '../shared/types'
 
 const SCHEMA_VERSION = '10'
 
@@ -395,6 +396,36 @@ export function initDb() {
     `)
     db.exec(`CREATE INDEX IF NOT EXISTS idx_addressbook_tx_entry ON addressbook_tx(entry_id, broadcast_at DESC)`)
     db.exec(`CREATE INDEX IF NOT EXISTS idx_addressbook_tx_device ON addressbook_tx(device_id)`)
+
+    // ── ClearSign Studio evidence (local-only, additive) ────────────────
+    // Keep this independent from api_log: ClearSign evidence must survive
+    // generic audit-log pruning and stores only the descriptor/attestation,
+    // never a seed, private key, or full raw transaction.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS clearsign_events (
+        id               TEXT PRIMARY KEY,
+        created_at       INTEGER NOT NULL,
+        device_id        TEXT,
+        firmware_version TEXT,
+        kind             TEXT NOT NULL,
+        outcome          TEXT NOT NULL,
+        source           TEXT NOT NULL,
+        chain            TEXT,
+        format           TEXT,
+        label            TEXT,
+        payload          TEXT,
+        signature        TEXT,
+        public_key       TEXT,
+        fingerprint      TEXT,
+        key_id           INTEGER,
+        sent_to_device   INTEGER NOT NULL DEFAULT 0,
+        request_json     TEXT,
+        error            TEXT
+      )
+    `)
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_clearsign_events_created ON clearsign_events(created_at DESC)`)
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_clearsign_events_device ON clearsign_events(device_id, created_at DESC)`)
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_clearsign_events_outcome ON clearsign_events(outcome, created_at DESC)`)
 
     // ── Double-entry accounting ledger (additive — never dropped on version bump) ──
     db.exec(`
@@ -969,6 +1000,114 @@ export function clearPairings() {
   }
 }
 
+// ── ClearSign Studio evidence ─────────────────────────────────────────
+
+export type NewClearSignEvent = Omit<ClearSignEvent, 'id' | 'createdAt'> & {
+  id?: string
+  createdAt?: number
+}
+
+/** Persist one local ClearSign result and return the exact stored shape. */
+export function insertClearSignEvent(input: NewClearSignEvent): ClearSignEvent {
+  const entry: ClearSignEvent = {
+    ...input,
+    id: input.id || randomUUID(),
+    createdAt: input.createdAt || Date.now(),
+  }
+  try {
+    if (!db) return entry
+    db.run(
+      `INSERT INTO clearsign_events (
+        id, created_at, device_id, firmware_version, kind, outcome, source,
+        chain, format, label, payload, signature, public_key, fingerprint,
+        key_id, sent_to_device, request_json, error
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        entry.id,
+        entry.createdAt,
+        entry.deviceId || null,
+        entry.firmwareVersion || null,
+        entry.kind,
+        entry.outcome,
+        entry.source,
+        entry.chain || null,
+        entry.format || null,
+        entry.label || null,
+        entry.payload || null,
+        entry.signature || null,
+        entry.publicKey || null,
+        entry.fingerprint || null,
+        entry.keyId ?? null,
+        entry.sentToDevice ? 1 : 0,
+        entry.request ? JSON.stringify(entry.request) : null,
+        entry.error || null,
+      ],
+    )
+  } catch (e: any) {
+    console.warn('[db] insertClearSignEvent failed:', e.message)
+  }
+  return entry
+}
+
+export function getClearSignEvents(filter: {
+  limit?: number
+  deviceId?: string
+  outcome?: ClearSignEvent['outcome']
+} = {}): ClearSignEvent[] {
+  try {
+    if (!db) return []
+    const clauses: string[] = []
+    const values: Array<string | number> = []
+    if (filter.deviceId) {
+      clauses.push('device_id = ?')
+      values.push(filter.deviceId)
+    }
+    if (filter.outcome) {
+      clauses.push('outcome = ?')
+      values.push(filter.outcome)
+    }
+    const limit = Math.max(1, Math.min(1000, Math.floor(filter.limit || 250)))
+    values.push(limit)
+    const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : ''
+    const rows = db.query(
+      `SELECT id, created_at, device_id, firmware_version, kind, outcome, source,
+              chain, format, label, payload, signature, public_key, fingerprint,
+              key_id, sent_to_device, request_json, error
+         FROM clearsign_events ${where}
+        ORDER BY created_at DESC LIMIT ?`,
+    ).all(...values) as Array<Record<string, any>>
+    return rows.map((row) => {
+      let request: Record<string, unknown> | undefined
+      if (row.request_json) {
+        try { request = JSON.parse(row.request_json) } catch { /* corrupt row: omit request */ }
+      }
+      return {
+        id: row.id,
+        createdAt: row.created_at,
+        deviceId: row.device_id || undefined,
+        firmwareVersion: row.firmware_version || undefined,
+        kind: row.kind,
+        outcome: row.outcome,
+        source: row.source,
+        chain: row.chain || undefined,
+        format: row.format || undefined,
+        label: row.label || undefined,
+        payload: row.payload || undefined,
+        signature: row.signature || undefined,
+        publicKey: row.public_key || undefined,
+        fingerprint: row.fingerprint || undefined,
+        keyId: row.key_id ?? undefined,
+        sentToDevice: row.sent_to_device === 1,
+        request,
+        error: row.error || undefined,
+      } as ClearSignEvent
+    })
+  } catch (e: any) {
+    console.warn('[db] getClearSignEvents failed:', e.message)
+    return []
+  }
+}
+
 // ── API Audit Log ──────────────────────────────────────────────────────
 
 const MAX_API_LOG_ROWS = 5000
@@ -1225,7 +1364,7 @@ export function updateApiLogTxMeta(
   }
 }
 
-const VALID_ACTIVITY_TYPES = new Set(['send', 'receive', 'swap', 'sign', 'message', 'approve', 'broadcast'])
+const VALID_ACTIVITY_TYPES = new Set(['send', 'receive', 'swap', 'sign', 'message', 'approve', 'broadcast', 'shield', 'unshield'])
 
 /** Query api_log entries that have activity_type set + swap_history, merged by timestamp */
 // Collapse two api_log rows describing the SAME on-chain txid into one record
@@ -1294,7 +1433,7 @@ export function getRecentActivityFromLog(limit = 50, chainFilter?: string, devic
         type: (VALID_ACTIVITY_TYPES.has(r.activity_type) ? (r.activity_type === 'broadcast' ? 'send' : r.activity_type) : 'sign') as ActivityType,
         source: isScan ? 'scan' : (r.method === 'RPC' ? 'app' : 'api') as ActivitySource,
         appName: r.method === 'RPC' ? undefined : (isScan ? undefined : r.app_name),
-        status: isScan ? 'broadcast' : (r.activity_type === 'broadcast' || r.activity_type === 'swap' ? 'broadcast' : 'signed'),
+        status: isScan ? 'broadcast' : (['broadcast', 'swap', 'shield', 'unshield'].includes(r.activity_type) ? 'broadcast' : 'signed'),
         createdAt: r.timestamp,
         confirmations: meta?.confirmations ?? undefined,
         blockHeight: meta?.blockHeight ?? undefined,

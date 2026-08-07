@@ -144,13 +144,13 @@ function ensureStylesInjected() {
 	document.head.appendChild(style)
 }
 
-export function ZcashPrivacyTab() {
+export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 	const { t } = useTranslation(["asset", "addressbook", "common"])
 	const { locale: fiatLocale } = useFiat()
 
 	useEffect(() => { ensureStylesInjected() }, [])
 
-	const [page, setPage] = useState<Page>("send")
+	const [page, setPage] = useState<Page>(initialPage ?? "send")
 
 	const [status, setStatus] = useState<SidecarStatus>("checking")
 	const [starting, setStarting] = useState(false)
@@ -765,10 +765,13 @@ export function ZcashPrivacyTab() {
 				<div className="main">
 					<div className="lbl">Shielded balance</div>
 					<div className="amount">
-						{balance ? formatZec(balance.confirmed) : "—"}
+						{/* confirmed = total across all unspent notes; pending = immature
+						  slice (<10 confs, e.g. change from a fresh unshield). Show the
+						  mature number big so it matches what's actually spendable. */}
+						{balance ? formatZec(Math.max(0, balance.confirmed - balance.pending)) : "—"}
 						<span className="ticker">ZEC</span>
 						{balance && balance.pending > 0 && (
-							<span className="pending">+ {formatZec(balance.pending)} pending</span>
+							<span className="pending">+ {formatZec(balance.pending)} maturing</span>
 						)}
 					</div>
 					{scanInFlight && scanProgress ? (
@@ -1072,6 +1075,11 @@ export function ZcashPrivacyTab() {
 									{balance && (
 										<span className="balance-hint">
 											after fee · {balance.spendable_notes_count ?? 0} spendable notes
+										</span>
+									)}
+									{balance && balance.pending > 0 && (
+										<span className="balance-hint">
+											{formatZec(balance.pending)} ZEC maturing — spendable after {balance.min_confirmations ?? 10} confirmations
 										</span>
 									)}
 								</div>
