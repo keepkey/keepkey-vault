@@ -348,7 +348,7 @@ dmg: verify-arch
 test: test-zcash-cli test-unit
 
 test-unit:
-	cd $(PROJECT_DIR) && bun test __tests__/evm-signer-verify.test.ts __tests__/swap-parsing.test.ts __tests__/engine-state-machine.test.ts __tests__/device-switch.test.ts __tests__/wizard-messaging.test.ts __tests__/solana-tx.test.ts __tests__/solana-message-parser.test.ts __tests__/solana-instruction-decoder.test.ts __tests__/solana-alt.test.ts __tests__/solana-spl-decimals.test.ts __tests__/ton-build.test.ts __tests__/tron-memo-inject.test.ts __tests__/audit-coverage.test.ts __tests__/chain-scan.test.ts __tests__/taproot-host.test.ts __tests__/recovery-ownership.test.ts src/bun/mcp.test.ts src/bun/txbuilder/hive-ops.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/evm-signer-verify.test.ts __tests__/swap-parsing.test.ts __tests__/engine-state-machine.test.ts __tests__/device-switch.test.ts __tests__/wizard-messaging.test.ts __tests__/solana-tx.test.ts __tests__/solana-message-parser.test.ts __tests__/solana-instruction-decoder.test.ts __tests__/solana-alt.test.ts __tests__/solana-spl-decimals.test.ts __tests__/ton-build.test.ts __tests__/tron-memo-inject.test.ts __tests__/audit-coverage.test.ts __tests__/chain-scan.test.ts __tests__/taproot-host.test.ts __tests__/recovery-ownership.test.ts __tests__/evm-x402.test.ts __tests__/solana-x402.test.ts src/bun/mcp.test.ts src/bun/txbuilder/hive-ops.test.ts
 	cd $(PROJECT_DIR) && bun src/bun/btc-backend/core.test.ts
 
 test-integration: test-rest

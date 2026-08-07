@@ -73,6 +73,33 @@ interface KnownDescriptor {
 }
 
 const KNOWN_DESCRIPTORS: KnownDescriptor[] = [
+  // x402 EVM exact — EIP-3009 TransferWithAuthorization. The facilitator pays
+  // gas, while these signed fields bind the payer, merchant, amount and window.
+  {
+    match: (td) => {
+      if (td.primaryType !== 'TransferWithAuthorization') return false
+      const fields = td.types?.TransferWithAuthorization
+      const expected = [
+        ['from', 'address'],
+        ['to', 'address'],
+        ['value', 'uint256'],
+        ['validAfter', 'uint256'],
+        ['validBefore', 'uint256'],
+        ['nonce', 'bytes32'],
+      ]
+      return Array.isArray(fields) && fields.length === expected.length &&
+        expected.every(([name, type], i) => fields[i]?.name === name && fields[i]?.type === type)
+    },
+    operationName: 'x402 EIP-3009 Payment',
+    extract: (msg) => [
+      { label: 'From', value: formatValue(msg.from, 'address'), format: 'address', raw: msg.from },
+      { label: 'Pay To', value: formatValue(msg.to, 'address'), format: 'address', raw: msg.to },
+      { label: 'Value', value: formatValue(msg.value, 'amount'), format: 'amount', raw: msg.value },
+      { label: 'Valid After', value: formatValue(msg.validAfter, 'datetime'), format: 'datetime', raw: msg.validAfter },
+      { label: 'Valid Before', value: formatValue(msg.validBefore, 'datetime'), format: 'datetime', raw: msg.validBefore },
+      { label: 'Nonce', value: formatValue(msg.nonce, 'hex'), format: 'hex', raw: msg.nonce },
+    ],
+  },
   // Uniswap Permit2 — PermitSingle
   {
     match: (td) =>
