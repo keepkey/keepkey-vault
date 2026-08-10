@@ -43,8 +43,10 @@ export function AddressBookPicker({ networkId, chainFamily, entryFilter, renderT
   const matches = useMemo(() => {
     const q = search.trim().toLowerCase()
     return entries
-      // UTXO own rows store an xpub (not a sendable address) — never offer them.
-      .filter(e => chainFamily !== "utxo" || e.kind === "external")
+      // UTXO own rows store an xpub (not a sendable address) — hide those. ZEC
+      // own rows arrive with a derived t-addr (backend listAddressBook), so
+      // anything that isn't an extended key is a real send target.
+      .filter(e => chainFamily !== "utxo" || e.kind === "external" || !/^[xyz]pub/i.test(e.address))
       .filter(e => !entryFilter || entryFilter(e))
       .filter(e => !q || e.label?.toLowerCase().includes(q) || e.address.toLowerCase().includes(q))
   }, [entries, chainFamily, entryFilter, search])
