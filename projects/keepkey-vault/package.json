@@ -1,6 +1,6 @@
 {
   "name": "keepkey-vault",
-  "version": "1.5.1",
+  "version": "1.5.2",
   "description": "KeepKey Vault - Desktop hardware wallet management powered by Electrobun",
   "scripts": {
     "dev": "bun scripts/bundle-backend.ts && vite build && bun scripts/collect-externals.ts && electrobun build && bun scripts/patch-bundle.ts && electrobun dev",
@@ -35,7 +35,7 @@
     "@walletconnect/web3wallet": "^1.16.1",
     "bip39": "^3.1.0",
     "coinselect": "^3.1.13",
-    "electrobun": "1.13.1",
+    "electrobun": "1.18.1",
     "ethers": "5",
     "i18next": "^25.8.13",
     "i18next-resources-to-backend": "^1.2.1",
