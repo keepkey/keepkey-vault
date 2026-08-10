@@ -15,7 +15,7 @@ export const HexString = z.string().regex(/^0x[0-9a-fA-F]*$/)
 
 /** BTC input script type enum */
 export const BTCInputScriptType = z.enum([
-  'p2pkh', 'p2sh-p2wpkh', 'p2wpkh', 'p2sh', 'p2wsh',
+  'p2pkh', 'p2sh-p2wpkh', 'p2wpkh', 'p2tr', 'p2sh', 'p2wsh',
 ])
 
 /** Chain ID — accept string or number, keep as-is (rest-api.ts handles conversion) */
@@ -34,6 +34,11 @@ export const AddressRequest = z.object({
   coin: z.string().optional(),
   script_type: z.string().optional(),
 }).passthrough()
+
+/** POST /system/info/get-entropy */
+export const GetEntropyRequest = z.object({
+  size: z.number().int().min(1).max(8192),
+}).strict()
 
 /** POST /auth/pair */
 export const PairRequest = z.object({
@@ -72,6 +77,25 @@ export const EthSignTransactionRequest = z.object({
 }).strip().refine(
   d => d.from || d.addressNList || d.address_n_list,
   { message: 'Missing from address or addressNList' },
+)
+
+/** POST /eth/clearsign/load-signer — load a runtime clear-sign signer (RAM-only, user-confirmed) */
+export const LoadClearsignSignerRequest = z.object({
+  keyId: z.number().int().min(1).max(3),          // slot 0 = built-in production key, not loadable
+  pubkey: z.string().regex(/^(0x)?[0-9a-fA-F]{66}$/), // 33-byte compressed secp256k1 hex
+  alias: z.string().min(1).max(31).regex(/^[A-Za-z0-9 _-]+$/), // shown on the device trust screen
+  // Optional identity logo (1bpp mono RLE, <=384 bytes hex) + its dimensions;
+  // shown on the trust screen and led before every clear-sign it vouches for.
+  icon: z.string().regex(/^(0x)?[0-9a-fA-F]{2,768}$/).optional(),
+  iconWidth: z.number().int().min(1).max(64).optional(),
+  iconHeight: z.number().int().min(1).max(64).optional(),
+  // Persist the identity in device flash across reboots (until WipeDevice).
+  persist: z.boolean().optional(),
+}).strip().refine(
+  // icon + its dimensions travel together: firmware rejects an icon without
+  // dimensions, and dimensions without an icon are silently dropped.
+  (v) => [v.icon, v.iconWidth, v.iconHeight].filter((x) => x !== undefined).length % 3 === 0,
+  { message: 'icon, iconWidth, and iconHeight must all be present or all absent' },
 )
 
 /** POST /eth/sign-typed-data */
@@ -141,10 +165,60 @@ export const XrpSignRequest = z.object({
 }).strip()
 
 /** POST /solana/sign-transaction — sign a raw Solana transaction */
+export const SolanaSwapMetadata = z.object({
+  /** Base64-encoded canonical KKSOLSW1 descriptor. */
+  payload: z.string().min(1),
+  /** Base64-encoded 64-byte compact secp256k1 signature over SHA256(payload). */
+  signature: z.string().min(1),
+  /** Device ClearSign signer slot (0 = built-in, 1..3 = user-loaded). */
+  signerKeyId: z.number().int().min(0).max(3),
+}).strict()
+
+/**
+ * Reusable KKSOLSC1 instruction schema. Unlike the swap descriptor this is not
+ * bound to one transaction — it describes how to read a program's instruction,
+ * so one signature serves every future call to that program.
+ */
+export const SolanaInstructionSchema = z.object({
+  /** Base64-encoded canonical KKSOLSC1 schema payload. */
+  payload: z.string().min(1),
+  /** Base64-encoded 64-byte compact secp256k1 signature over SHA256(payload). */
+  signature: z.string().min(1),
+  /** Device ClearSign signer slot (0 = built-in, 1..3 = user-loaded). */
+  signerKeyId: z.number().int().min(0).max(3),
+}).strict()
+
+/** x402 v2 SVM exact PaymentRequirements needed for device-verifiable payTo. */
+export const SolanaX402Requirements = z.object({
+  scheme: z.literal('exact'),
+  network: z.literal('solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp'),
+  asset: z.string().min(32).max(44),
+  amount: z.string().regex(/^\d+$/),
+  payTo: z.string().min(32).max(44),
+  maxTimeoutSeconds: z.number().int().positive(),
+  extra: z.object({
+    feePayer: z.string().min(32).max(44),
+    memo: z.string().optional(),
+    recentBlockhash: z.string().min(32).max(44).optional(),
+    lastValidBlockHeight: z.string().regex(/^\d+$/).optional(),
+  }).strict(),
+}).strict()
+
 export const SolanaSignRequest = z.object({
   address_n: z.array(z.number().int()).optional(),
   addressNList: z.array(z.number().int()).optional(),
   raw_tx: z.string().min(1),
+  /** Transaction-bound ClearSign metadata. Partial descriptors are rejected. */
+  swapMetadata: SolanaSwapMetadata.optional(),
+  /** Reusable, signer-attested instruction schema. Partial schemas rejected. */
+  schema: SolanaInstructionSchema.optional(),
+  /**
+   * Optional x402 PaymentRequirements. Vault cross-checks these fields against
+   * the signed zero-LUT v0 bytes before forwarding device display metadata.
+   */
+  x402: SolanaX402Requirements.optional(),
+  // One-shot opaque-signing consent is intentionally not part of the public
+  // REST contract. Unknown fields are stripped; the Vault UI grants consent.
 }).strip()
 
 /** POST /tron/sign-transaction — sign a raw Tron transaction */
@@ -163,6 +237,47 @@ export const TonSignRequest = z.object({
   raw_tx: z.string().min(1),
   to_address: z.string().optional(),  // enables clear-sign on device
   amount: z.string().optional(),      // amount in nanoTON — enables clear-sign on device
+}).strip()
+
+/** POST /hive/sign-message — Keychain signBuffer: sign SHA256(message bytes) on-device (fw 7.15.0+) */
+export const HiveSignMessageRequest = z.object({
+  /** SLIP-0048 path; defaults to posting role m/48'/13'/4'/0'/0' (dApp login) */
+  address_n: z.array(z.number().int()).optional(),
+  addressNList: z.array(z.number().int()).optional(),
+  /** Message payload. Default: UTF-8 text. If is_text=false, hex (optional 0x). */
+  message: z.string().min(1),
+  is_text: z.boolean().optional(),
+}).strip()
+
+/** POST /hive/sign-operations — generic parsed-op signing over the device clear-sign op table (fw 7.15.0+) */
+export const HiveSignOperationsRequest = z.object({
+  /** SLIP-0048 path; role auto-selected from op tier when omitted */
+  address_n: z.array(z.number().int()).optional(),
+  addressNList: z.array(z.number().int()).optional(),
+  /** condenser-style tuples: [["vote", {...}], ...] — max 4, single tier */
+  operations: z.array(z.tuple([z.string(), z.record(z.string(), z.any())])).min(1).max(4),
+}).strip()
+
+/** POST /hive/sign-transfer — Graphene transfer op, serialized + signed on-device (fw 7.15.0+) */
+export const HiveSignTransferRequest = z.object({
+  /** SLIP-0048 path; defaults to active role m/48'/13'/1'/0'/0' */
+  address_n: z.array(z.number().int()).optional(),
+  addressNList: z.array(z.number().int()).optional(),
+  ref_block_num: z.number().int().min(0).max(0xffff),
+  ref_block_prefix: z.number().int().min(0).max(0xffffffff),
+  /** Unix seconds (TaPoS expiration) */
+  expiration: z.number().int().min(0),
+  from: z.string().min(1).max(16),
+  to: z.string().min(1).max(16),
+  /** Integer milli-units (3 decimals): 1.000 HIVE = 1000. Capped at
+   *  MAX_SAFE_INTEGER — .int() alone admits floats like 1e20 that are already
+   *  precision-mangled before serialization. */
+  amount: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
+  asset_symbol: z.enum(['HIVE', 'HBD']).optional(),
+  /** Firmware rejects memos > 440 chars */
+  memo: z.string().max(440).optional(),
+  /** 32-byte chain id hex override; firmware defaults to Hive mainnet (beeab0de…) */
+  chain_id: z.string().regex(/^[0-9a-fA-F]{64}$/).optional(),
 }).strip()
 
 // ── Message-signing surface (firmware 7.14.1+) ──────────────────────
@@ -334,9 +449,13 @@ export const SendPinRequest = z.object({
   pin: z.string().min(1),
 }).passthrough()
 
-/** POST /system/recovery/character — one ciphered character during cipher recovery */
+/** POST /system/recovery/character — one ciphered character during cipher recovery.
+ *  `seq` is the value the caller last read from GET /system/recovery/state; the
+ *  server rejects the send (409) if it no longer matches the device's current
+ *  CharacterRequest, so a stale/duplicated/reordered send can't corrupt the word. */
 export const SendCharacterRequest = z.object({
   character: z.string().min(1).max(1),
+  seq: z.number().int().min(0),
 }).passthrough()
 
 // ── Zcash Shielded (Orchard) ─────────────────────────────────────────
@@ -433,7 +552,11 @@ export const GetPublicKeyResponse = z.object({
 // ═══════════════════════════════════════════════════════════════════════
 
 export const PortfolioBalancesRequest = z.object({
-  pubkeys: z.array(z.object({ caip: z.string(), pubkey: z.string() })).min(1),
+  pubkeys: z.array(z.object({
+    caip: z.string(),
+    pubkey: z.string(),
+    scriptType: BTCInputScriptType.optional(),
+  })).min(1),
 }).passthrough()
 
 export const MarketInfoRequest = z.object({
@@ -448,15 +571,21 @@ export const SearchAssetsRequest = z.object({
 export const ListUnspentRequest = z.object({
   network: z.string(),
   xpub: z.string(),
+  scriptType: BTCInputScriptType.optional(),
 }).passthrough()
 
 export const PubkeyInfoRequest = z.object({
   network: z.string(),
   xpub: z.string(),
+  scriptType: BTCInputScriptType.optional(),
 }).passthrough()
 
 export const TxHistoryRequest = z.object({
-  queries: z.array(z.object({ pubkey: z.string(), caip: z.string() })).min(1),
+  queries: z.array(z.object({
+    pubkey: z.string(),
+    caip: z.string(),
+    scriptType: BTCInputScriptType.optional(),
+  })).min(1),
 }).passthrough()
 
 export const BroadcastRequest = z.object({

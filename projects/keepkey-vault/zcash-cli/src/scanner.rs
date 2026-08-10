@@ -12,10 +12,10 @@ use tonic::transport::{Channel, ClientTlsConfig};
 use orchard::keys::{FullViewingKey, PreparedIncomingViewingKey, Scope};
 use orchard::note::ExtractedNoteCommitment;
 use orchard::note::Nullifier;
-use orchard::note_encryption::{CompactAction, OrchardDomain};
+use orchard::note_encryption::{CompactAction, IronwoodDomain, OrchardDomain};
 use zcash_note_encryption::{try_compact_note_decryption, try_note_decryption, EphemeralKeyBytes};
 
-use crate::wallet_db::{ScannedNote, WalletDb};
+use crate::wallet_db::{ScannedNote, ShieldedPool, WalletDb};
 
 /// A transparent UTXO from lightwalletd.
 #[derive(Debug, Clone)]
@@ -163,9 +163,32 @@ impl LightwalletClient {
         start_index: u32,
         max_entries: u32,
     ) -> Result<Vec<(u32, [u8; 32], u64)>> {
+        self.get_pool_subtree_roots(ShieldedPool::Orchard, start_index, max_entries)
+            .await
+    }
+
+    pub async fn get_ironwood_subtree_roots(
+        &mut self,
+        start_index: u32,
+        max_entries: u32,
+    ) -> Result<Vec<(u32, [u8; 32], u64)>> {
+        self.get_pool_subtree_roots(ShieldedPool::Ironwood, start_index, max_entries)
+            .await
+    }
+
+    async fn get_pool_subtree_roots(
+        &mut self,
+        pool: ShieldedPool,
+        start_index: u32,
+        max_entries: u32,
+    ) -> Result<Vec<(u32, [u8; 32], u64)>> {
+        let shielded_protocol = match pool {
+            ShieldedPool::Orchard => proto::ShieldedProtocol::Orchard,
+            ShieldedPool::Ironwood => proto::ShieldedProtocol::Ironwood,
+        };
         let request = proto::GetSubtreeRootsArg {
             start_index,
-            shielded_protocol: proto::ShieldedProtocol::Orchard as i32,
+            shielded_protocol: shielded_protocol as i32,
             max_entries,
         };
 
@@ -189,8 +212,9 @@ impl LightwalletClient {
         }
 
         info!(
-            "Fetched {} Orchard subtree roots (start_index={})",
+            "Fetched {} {} subtree roots (start_index={})",
             roots.len(),
+            pool.as_str(),
             start_index
         );
         Ok(roots)
@@ -200,6 +224,20 @@ impl LightwalletClient {
     /// Returns the orchardCommitmentTreeSize from ChainMetadata at that height.
     #[allow(dead_code)]
     pub async fn get_tree_state(&mut self, height: u64) -> Result<(u64, String)> {
+        self.get_pool_tree_state(height, ShieldedPool::Orchard)
+            .await
+    }
+
+    pub async fn get_ironwood_tree_state(&mut self, height: u64) -> Result<(u64, String)> {
+        self.get_pool_tree_state(height, ShieldedPool::Ironwood)
+            .await
+    }
+
+    async fn get_pool_tree_state(
+        &mut self,
+        height: u64,
+        pool: ShieldedPool,
+    ) -> Result<(u64, String)> {
         let request = proto::BlockId {
             height,
             hash: vec![],
@@ -212,12 +250,17 @@ impl LightwalletClient {
             .context("GetTreeState failed")?;
 
         let state = response.into_inner();
+        let tree = match pool {
+            ShieldedPool::Orchard => state.orchard_tree,
+            ShieldedPool::Ironwood => state.ironwood_tree,
+        };
         info!(
-            "Tree state at height {}: orchard_tree len={}",
+            "Tree state at height {}: {}_tree len={}",
             height,
-            state.orchard_tree.len()
+            pool.as_str(),
+            tree.len()
         );
-        Ok((state.height, state.orchard_tree))
+        Ok((state.height, tree))
     }
 
     /// Get the Orchard anchor (tree root) at the latest block.
@@ -232,11 +275,20 @@ impl LightwalletClient {
     ///   1. Start: combine left and right (or left and empty)
     ///   2. For each parent level: combine parent (or empty) with current
     pub async fn get_orchard_anchor(&mut self, height: u64) -> Result<[u8; 32]> {
-        let (_, tree_hex) = self.get_tree_state(height).await?;
+        self.get_pool_anchor(height, ShieldedPool::Orchard).await
+    }
+
+    pub async fn get_ironwood_anchor(&mut self, height: u64) -> Result<[u8; 32]> {
+        self.get_pool_anchor(height, ShieldedPool::Ironwood).await
+    }
+
+    async fn get_pool_anchor(&mut self, height: u64, pool: ShieldedPool) -> Result<[u8; 32]> {
+        let (_, tree_hex) = self.get_pool_tree_state(height, pool).await?;
 
         if tree_hex.is_empty() {
             return Err(anyhow::anyhow!(
-                "Empty Orchard tree state at height {}",
+                "Empty {} tree state at height {}",
+                pool.as_str(),
                 height
             ));
         }
@@ -245,7 +297,8 @@ impl LightwalletClient {
             hex::decode(&tree_hex).map_err(|e| anyhow::anyhow!("Invalid tree state hex: {}", e))?;
 
         info!(
-            "Parsing Orchard CommitmentTree ({} bytes) at height {}",
+            "Parsing {} CommitmentTree ({} bytes) at height {}",
+            pool.as_str(),
             tree_bytes.len(),
             height
         );
@@ -416,7 +469,7 @@ impl LightwalletClient {
         }
 
         let anchor_bytes = current.to_bytes();
-        info!("Orchard anchor: {}", hex::encode(&anchor_bytes));
+        info!("{} anchor: {}", pool.as_str(), hex::encode(&anchor_bytes));
         Ok(anchor_bytes)
     }
 
@@ -424,6 +477,25 @@ impl LightwalletClient {
     /// Returns Vec of (block_height, Vec of (tx_index, Vec of cmx_bytes)).
     pub async fn fetch_block_actions(
         &mut self,
+        start_height: u64,
+        end_height: u64,
+    ) -> Result<Vec<(u64, Vec<(u32, Vec<[u8; 32]>)>)>> {
+        self.fetch_pool_block_actions(ShieldedPool::Orchard, start_height, end_height)
+            .await
+    }
+
+    pub async fn fetch_ironwood_block_actions(
+        &mut self,
+        start_height: u64,
+        end_height: u64,
+    ) -> Result<Vec<(u64, Vec<(u32, Vec<[u8; 32]>)>)>> {
+        self.fetch_pool_block_actions(ShieldedPool::Ironwood, start_height, end_height)
+            .await
+    }
+
+    async fn fetch_pool_block_actions(
+        &mut self,
+        pool: ShieldedPool,
         start_height: u64,
         end_height: u64,
     ) -> Result<Vec<(u64, Vec<(u32, Vec<[u8; 32]>)>)>> {
@@ -451,7 +523,11 @@ impl LightwalletClient {
             let mut txs = Vec::new();
             for tx in &block.vtx {
                 let mut cmxs = Vec::new();
-                for action in &tx.actions {
+                let actions = match pool {
+                    ShieldedPool::Orchard => &tx.actions,
+                    ShieldedPool::Ironwood => &tx.ironwood_actions,
+                };
+                for action in actions {
                     if action.cmx.len() == 32 {
                         let mut cmx = [0u8; 32];
                         cmx.copy_from_slice(&action.cmx);
@@ -470,9 +546,10 @@ impl LightwalletClient {
             .flat_map(|(_, txs)| txs.iter().map(|(_, cmxs)| cmxs.len()))
             .sum();
         info!(
-            "Fetched {} blocks with {} total Orchard actions ({} to {})",
+            "Fetched {} blocks with {} total {} actions ({} to {})",
             blocks.len(),
             total_actions,
+            pool.as_str(),
             start_height,
             end_height
         );
@@ -482,6 +559,16 @@ impl LightwalletClient {
     /// Get the Orchard commitment tree size at a given block height by fetching
     /// the compact block's ChainMetadata.
     pub async fn get_orchard_tree_size_at(&mut self, height: u64) -> Result<u64> {
+        self.get_pool_tree_size_at(height, ShieldedPool::Orchard)
+            .await
+    }
+
+    pub async fn get_ironwood_tree_size_at(&mut self, height: u64) -> Result<u64> {
+        self.get_pool_tree_size_at(height, ShieldedPool::Ironwood)
+            .await
+    }
+
+    async fn get_pool_tree_size_at(&mut self, height: u64, pool: ShieldedPool) -> Result<u64> {
         let request = proto::BlockId {
             height,
             hash: vec![],
@@ -496,10 +583,13 @@ impl LightwalletClient {
         let block = response.into_inner();
         let size = block
             .chain_metadata
-            .map(|m| m.orchard_commitment_tree_size as u64)
+            .map(|m| match pool {
+                ShieldedPool::Orchard => m.orchard_commitment_tree_size as u64,
+                ShieldedPool::Ironwood => m.ironwood_commitment_tree_size as u64,
+            })
             .unwrap_or(0);
 
-        debug!("Orchard tree size at height {}: {}", height, size);
+        debug!("{} tree size at height {}: {}", pool.as_str(), height, size);
         Ok(size)
     }
 
@@ -575,15 +665,17 @@ impl LightwalletClient {
         txid: &[u8; 32],
         action_index: usize,
         fvk: &FullViewingKey,
+        pool: ShieldedPool,
     ) -> Result<Option<[u8; 512]>> {
         let raw_tx = self.get_transaction(txid).await?;
-        let actions = parse_orchard_actions_from_raw_tx(&raw_tx)?;
+        let actions = parse_shielded_actions_from_raw_tx(&raw_tx, pool)?;
 
         if action_index >= actions.len() {
             return Err(anyhow::anyhow!(
-                "Action index {} out of range (tx has {} Orchard actions)",
+                "Action index {} out of range (tx has {} {} actions)",
                 action_index,
-                actions.len()
+                actions.len(),
+                pool.as_str(),
             ));
         }
 
@@ -593,11 +685,23 @@ impl LightwalletClient {
         for scope in &[Scope::External, Scope::Internal] {
             let ivk = fvk.to_ivk(*scope);
             let prepared_ivk = PreparedIncomingViewingKey::new(&ivk);
-            let domain = OrchardDomain::for_action(action);
-
-            if let Some((_note, _addr, memo)) = try_note_decryption(&domain, &prepared_ivk, action)
-            {
-                return Ok(Some(memo));
+            match pool {
+                ShieldedPool::Orchard => {
+                    let domain = OrchardDomain::for_action(action);
+                    if let Some((_note, _addr, memo)) =
+                        try_note_decryption(&domain, &prepared_ivk, action)
+                    {
+                        return Ok(Some(memo));
+                    }
+                }
+                ShieldedPool::Ironwood => {
+                    let domain = IronwoodDomain::for_action(action);
+                    if let Some((_note, _addr, memo)) =
+                        try_note_decryption(&domain, &prepared_ivk, action)
+                    {
+                        return Ok(Some(memo));
+                    }
+                }
             }
         }
 
@@ -706,68 +810,75 @@ impl LightwalletClient {
                 blocks_scanned += 1;
 
                 for tx in &block.vtx {
-                    for (action_idx, action) in tx.actions.iter().enumerate() {
-                        // Check nullifier — does this action spend one of our notes?
-                        if action.nullifier.len() == 32 {
-                            let mut nf_bytes = [0u8; 32];
-                            nf_bytes.copy_from_slice(&action.nullifier);
-                            if db.mark_note_spent(&nf_bytes)? {
-                                spent_notes += 1;
+                    for (pool, actions) in [
+                        (ShieldedPool::Orchard, tx.actions.as_slice()),
+                        (ShieldedPool::Ironwood, tx.ironwood_actions.as_slice()),
+                    ] {
+                        for (action_idx, action) in actions.iter().enumerate() {
+                            // Check nullifier — does this action spend one of our notes?
+                            if action.nullifier.len() == 32 {
+                                let mut nf_bytes = [0u8; 32];
+                                nf_bytes.copy_from_slice(&action.nullifier);
+                                if db.mark_note_spent(&nf_bytes)? {
+                                    spent_notes += 1;
+                                }
                             }
-                        }
 
-                        // Try to decrypt — is this action a note to us?
-                        // Try External scope first (received notes), then Internal (change notes)
-                        let decrypted = try_decrypt_action(action, &prepared_ivk_ext)
-                            .or_else(|| try_decrypt_action(action, &prepared_ivk_int));
-                        if let Some((note, addr)) = decrypted {
-                            let value = note.value().inner();
-                            let recipient_bytes = addr.to_raw_address_bytes().to_vec();
+                            // Try to decrypt — is this action a note to us?
+                            // Try External scope first (received notes), then Internal (change notes)
+                            let decrypted = try_decrypt_action(action, &prepared_ivk_ext, pool)
+                                .or_else(|| try_decrypt_action(action, &prepared_ivk_int, pool));
+                            if let Some((note, addr)) = decrypted {
+                                let value = note.value().inner();
+                                let recipient_bytes = addr.to_raw_address_bytes().to_vec();
 
-                            let nf = note.nullifier(fvk);
-                            let mut nf_bytes = [0u8; 32];
-                            nf_bytes.copy_from_slice(&nf.to_bytes());
+                                let nf = note.nullifier(fvk);
+                                let mut nf_bytes = [0u8; 32];
+                                nf_bytes.copy_from_slice(&nf.to_bytes());
 
-                            let mut rho_bytes = [0u8; 32];
-                            rho_bytes.copy_from_slice(&note.rho().to_bytes());
+                                let mut rho_bytes = [0u8; 32];
+                                rho_bytes.copy_from_slice(&note.rho().to_bytes());
 
-                            let mut rseed_bytes = [0u8; 32];
-                            rseed_bytes.copy_from_slice(note.rseed().as_bytes());
+                                let mut rseed_bytes = [0u8; 32];
+                                rseed_bytes.copy_from_slice(note.rseed().as_bytes());
 
-                            let mut cmx_bytes = [0u8; 32];
-                            cmx_bytes.copy_from_slice(&action.cmx);
+                                let mut cmx_bytes = [0u8; 32];
+                                cmx_bytes.copy_from_slice(&action.cmx);
 
-                            // Capture txid for later memo backfill
-                            let txid = if tx.txid.len() == 32 {
-                                let mut arr = [0u8; 32];
-                                arr.copy_from_slice(&tx.txid);
-                                Some(arr)
-                            } else {
-                                None
-                            };
+                                // Capture txid for later memo backfill
+                                let txid = if tx.txid.len() == 32 {
+                                    let mut arr = [0u8; 32];
+                                    arr.copy_from_slice(&tx.txid);
+                                    Some(arr)
+                                } else {
+                                    None
+                                };
 
-                            let scanned = ScannedNote {
-                                value,
-                                recipient: recipient_bytes,
-                                rho: rho_bytes,
-                                rseed: rseed_bytes,
-                                cmx: cmx_bytes,
-                                nullifier: nf_bytes,
-                                block_height: block.height,
-                                tx_index: tx.index as u32,
-                                action_index: action_idx as u32,
-                                txid,
-                                memo: None, // Filled in during backfill (compact blocks lack memos)
-                            };
-
-                            if db.insert_note(&scanned)? {
-                                new_notes += 1;
-                                info!(
-                                    "Found note: {} ZAT ({:.8} ZEC) in block {}",
+                                let scanned = ScannedNote {
+                                    pool,
                                     value,
-                                    value as f64 / 1e8,
-                                    block.height,
-                                );
+                                    recipient: recipient_bytes,
+                                    rho: rho_bytes,
+                                    rseed: rseed_bytes,
+                                    cmx: cmx_bytes,
+                                    nullifier: nf_bytes,
+                                    block_height: block.height,
+                                    tx_index: tx.index as u32,
+                                    action_index: action_idx as u32,
+                                    txid,
+                                    memo: None, // Filled in during backfill (compact blocks lack memos)
+                                };
+
+                                if db.insert_note(&scanned)? {
+                                    new_notes += 1;
+                                    info!(
+                                        "Found {} note: {} ZAT ({:.8} ZEC) in block {}",
+                                        pool.as_str(),
+                                        value,
+                                        value as f64 / 1e8,
+                                        block.height,
+                                    );
+                                }
                             }
                         }
                     }
@@ -807,6 +918,7 @@ impl LightwalletClient {
 fn try_decrypt_action(
     action: &proto::CompactOrchardAction,
     prepared_ivk: &PreparedIncomingViewingKey,
+    pool: ShieldedPool,
 ) -> Option<(orchard::Note, orchard::Address)> {
     if action.nullifier.len() != 32
         || action.cmx.len() != 32
@@ -840,9 +952,16 @@ fn try_decrypt_action(
         enc_ciphertext,
     );
 
-    let domain = OrchardDomain::for_compact_action(&compact);
-
-    try_compact_note_decryption(&domain, prepared_ivk, &compact)
+    match pool {
+        ShieldedPool::Orchard => {
+            let domain = OrchardDomain::for_compact_action(&compact);
+            try_compact_note_decryption(&domain, prepared_ivk, &compact)
+        }
+        ShieldedPool::Ironwood => {
+            let domain = IronwoodDomain::for_compact_action(&compact);
+            try_compact_note_decryption(&domain, prepared_ivk, &compact)
+        }
+    }
 }
 
 pub struct OrchardScanResult {
@@ -900,7 +1019,8 @@ fn read_compact_size(data: &[u8]) -> Result<(u64, usize)> {
     }
 }
 
-/// Parse a v5 Zcash transaction and extract Orchard actions with full ciphertext.
+/// Parse a v5/v6 Zcash transaction and extract an Orchard-family pool's actions
+/// with full ciphertext.
 /// This allows `try_note_decryption` to recover the 512-byte memo field.
 ///
 /// v5 layout:
@@ -908,7 +1028,10 @@ fn read_compact_size(data: &[u8]) -> Result<(u64, usize)> {
 ///   transparent inputs/outputs (variable)
 ///   sapling spends/outputs (variable)
 ///   orchard actions (variable — what we want)
-pub fn parse_orchard_actions_from_raw_tx(raw: &[u8]) -> Result<Vec<Action<()>>> {
+pub fn parse_shielded_actions_from_raw_tx(
+    raw: &[u8],
+    pool: ShieldedPool,
+) -> Result<Vec<Action<()>>> {
     if raw.len() < 20 {
         return Err(anyhow::anyhow!(
             "Transaction too short: {} bytes",
@@ -917,9 +1040,15 @@ pub fn parse_orchard_actions_from_raw_tx(raw: &[u8]) -> Result<Vec<Action<()>>> 
     }
 
     let version = u32::from_le_bytes([raw[0], raw[1], raw[2], raw[3]]);
-    if version != 0x80000005 {
+    if version != 0x80000005 && version != crate::zip229::TX_VERSION {
         return Err(anyhow::anyhow!(
-            "Not a v5 transaction (version=0x{:08x})",
+            "Not a v5/v6 transaction (version=0x{:08x})",
+            version
+        ));
+    }
+    if pool == ShieldedPool::Ironwood && version != crate::zip229::TX_VERSION {
+        return Err(anyhow::anyhow!(
+            "Ironwood actions require transaction v6 (version=0x{:08x})",
             version
         ));
     }
@@ -1080,120 +1209,112 @@ pub fn parse_orchard_actions_from_raw_tx(raw: &[u8]) -> Result<Vec<Action<()>>> 
             })?;
     }
 
-    // Now parse Orchard actions
-    let (n_orchard_actions, sz) = read_compact_size(&raw[offset..])?;
-    offset += sz;
+    let orchard_actions = parse_orchard_family_bundle(raw, &mut offset, "Orchard")?;
+    let actions = match pool {
+        ShieldedPool::Orchard => orchard_actions,
+        ShieldedPool::Ironwood => parse_orchard_family_bundle(raw, &mut offset, "Ironwood")?,
+    };
 
-    if n_orchard_actions == 0 {
-        return Ok(Vec::new());
-    }
+    debug!(
+        "Parsed {} {} actions from raw tx ({} bytes)",
+        actions.len(),
+        pool.as_str(),
+        raw.len()
+    );
+    Ok(actions)
+}
 
-    // Cap the pre-allocation against a malicious lightwalletd: a crafted compact_size
-    // could request a huge Vec and OOM-abort the sidecar before the per-iteration
-    // bounds check runs. Each action is >= 820 bytes, so the remaining buffer bounds
-    // the real count (CC-1).
-    let max_actions = raw.len().saturating_sub(offset) / 820;
-    if n_orchard_actions as usize > max_actions {
+/// Parse and advance over one Orchard-family bundle, including authorizing data.
+/// This is shared by the Orchard and Ironwood slots in transaction v6.
+fn parse_orchard_family_bundle(
+    raw: &[u8],
+    offset: &mut usize,
+    pool_name: &str,
+) -> Result<Vec<Action<()>>> {
+    let (n_actions, sz) = read_compact_size(raw.get(*offset..).ok_or_else(|| {
+        anyhow::anyhow!("Missing {} action count at offset {}", pool_name, *offset)
+    })?)?;
+    *offset = offset
+        .checked_add(sz)
+        .ok_or_else(|| anyhow::anyhow!("Offset overflow reading {} count", pool_name))?;
+
+    let max_actions = raw.len().saturating_sub(*offset) / 820;
+    if n_actions as usize > max_actions {
         return Err(anyhow::anyhow!(
-            "Declared {} Orchard actions but the buffer holds at most {}",
-            n_orchard_actions,
+            "Declared {} {} actions but the buffer holds at most {}",
+            n_actions,
+            pool_name,
             max_actions
         ));
     }
-    let mut actions: Vec<Action<()>> = Vec::with_capacity(n_orchard_actions as usize);
+    let mut actions = Vec::with_capacity(n_actions as usize);
 
-    for _ in 0..n_orchard_actions {
-        if offset + 820 > raw.len() {
+    for _ in 0..n_actions {
+        let end = offset
+            .checked_add(820)
+            .ok_or_else(|| anyhow::anyhow!("Offset overflow reading {} action", pool_name))?;
+        if end > raw.len() {
             return Err(anyhow::anyhow!(
-                "Not enough bytes for Orchard action at offset {} (need 820, have {})",
-                offset,
-                raw.len() - offset
+                "Not enough bytes for {} action at offset {}",
+                pool_name,
+                *offset
             ));
         }
 
-        // cv_net: 32 bytes
+        let action_bytes = &raw[*offset..end];
+        *offset = end;
         let mut cv_bytes = [0u8; 32];
-        cv_bytes.copy_from_slice(&raw[offset..offset + 32]);
-        offset += 32;
-
-        // nullifier: 32 bytes
+        cv_bytes.copy_from_slice(&action_bytes[..32]);
         let mut nf_bytes = [0u8; 32];
-        nf_bytes.copy_from_slice(&raw[offset..offset + 32]);
-        offset += 32;
-
-        // rk: 32 bytes
+        nf_bytes.copy_from_slice(&action_bytes[32..64]);
         let mut rk_bytes = [0u8; 32];
-        rk_bytes.copy_from_slice(&raw[offset..offset + 32]);
-        offset += 32;
-
-        // cmx: 32 bytes
+        rk_bytes.copy_from_slice(&action_bytes[64..96]);
         let mut cmx_bytes = [0u8; 32];
-        cmx_bytes.copy_from_slice(&raw[offset..offset + 32]);
-        offset += 32;
-
-        // epk: 32 bytes
+        cmx_bytes.copy_from_slice(&action_bytes[96..128]);
         let mut epk_bytes = [0u8; 32];
-        epk_bytes.copy_from_slice(&raw[offset..offset + 32]);
-        offset += 32;
-
-        // enc_ciphertext: 580 bytes
+        epk_bytes.copy_from_slice(&action_bytes[128..160]);
         let mut enc_ciphertext = [0u8; 580];
-        enc_ciphertext.copy_from_slice(&raw[offset..offset + 580]);
-        offset += 580;
-
-        // out_ciphertext: 80 bytes
+        enc_ciphertext.copy_from_slice(&action_bytes[160..740]);
         let mut out_ciphertext = [0u8; 80];
-        out_ciphertext.copy_from_slice(&raw[offset..offset + 80]);
-        offset += 80;
+        out_ciphertext.copy_from_slice(&action_bytes[740..820]);
 
-        // Construct Action<()>
-        let nf = Nullifier::from_bytes(&nf_bytes);
-        if bool::from(nf.is_none()) {
+        let Some(nf) = Nullifier::from_bytes(&nf_bytes).into_option() else {
             continue;
-        }
-
-        let cmx = ExtractedNoteCommitment::from_bytes(&cmx_bytes);
-        if bool::from(cmx.is_none()) {
-            continue;
-        }
-
-        let cv_net = ValueCommitment::from_bytes(&cv_bytes);
-        if bool::from(cv_net.is_none()) {
-            continue;
-        }
-
-        let rk: redpallas::VerificationKey<SpendAuth> = match rk_bytes.try_into() {
-            Ok(k) => k,
-            Err(_) => continue,
         };
-
+        let Some(cmx) = ExtractedNoteCommitment::from_bytes(&cmx_bytes).into_option() else {
+            continue;
+        };
+        let Some(cv_net) = ValueCommitment::from_bytes(&cv_bytes).into_option() else {
+            continue;
+        };
+        let Ok(rk): Result<redpallas::VerificationKey<SpendAuth>, _> = rk_bytes.try_into() else {
+            continue;
+        };
         let encrypted_note = TransmittedNoteCiphertext {
             epk_bytes,
             enc_ciphertext,
             out_ciphertext,
         };
-
-        // orchard 0.14: from_parts validates the parts and returns a Result.
-        // A malformed action from a raw tx is skipped, matching the other
-        // parse-failure `continue`s above.
-        let action = match Action::from_parts(
-            nf.unwrap(),
-            rk,
-            cmx.unwrap(),
-            encrypted_note,
-            cv_net.unwrap(),
-            (),
-        ) {
-            Ok(a) => a,
-            Err(_) => continue,
-        };
-        actions.push(action);
+        if let Ok(action) = Action::from_parts(nf, rk, cmx, encrypted_note, cv_net, ()) {
+            actions.push(action);
+        }
     }
 
-    debug!(
-        "Parsed {} Orchard actions from raw tx ({} bytes)",
-        actions.len(),
-        raw.len()
-    );
+    if n_actions > 0 {
+        // flags + value balance + anchor
+        *offset = offset
+            .checked_add(41)
+            .filter(|end| *end <= raw.len())
+            .ok_or_else(|| anyhow::anyhow!("Truncated {} bundle metadata", pool_name))?;
+        let (proof_len, proof_len_size) = read_compact_size(&raw[*offset..])?;
+        *offset = offset
+            .checked_add(proof_len_size)
+            .and_then(|o| o.checked_add(proof_len as usize))
+            .and_then(|o| o.checked_add(n_actions as usize * 64))
+            .and_then(|o| o.checked_add(64))
+            .filter(|end| *end <= raw.len())
+            .ok_or_else(|| anyhow::anyhow!("Truncated {} authorizing data", pool_name))?;
+    }
+
     Ok(actions)
 }

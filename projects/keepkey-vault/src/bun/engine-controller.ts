@@ -5,7 +5,9 @@ import * as core from '@keepkey/hdwallet-core'
 import { HIDKeepKeyAdapter } from '@keepkey/hdwallet-keepkey-nodehid'
 import { NodeWebUSBKeepKeyAdapter } from '@keepkey/hdwallet-keepkey-nodewebusb'
 import { usb } from 'usb'
-import { saveDeviceSnapshot, saveEmulatorWalletMeta } from './db'
+import { saveDeviceSnapshot, saveEmulatorWalletMeta, clearNonBitcoinBalances } from './db'
+import { HttpError } from './auth'
+import { isBitcoinOnlyVariant } from '../shared/flags'
 import type { DeviceStateInfo, ActiveTransport, UpdatePhase, DeviceState, FirmwareManifest, PinRequestType, Bip85DeriveParams, Bip85DisplayResult } from '../shared/types'
 import { resolveOndeviceFirmwareVersion } from '../shared/firmware-versions'
 import { EmulatorKeepKeyAdapter } from './emulator-transport'
@@ -148,6 +150,17 @@ export class EngineController extends EventEmitter {
   private lastCharacterRequest: { wordPos: number; characterPos: number } | null = null
   private characterRequestSeq = 0
   private recoveryActive = false // true only while a recover/reset flow drives the cipher
+  // Identity (bearer apiKey) of the REST/SDK client that started the active
+  // cipher recovery. Only that client may drive character input — a second
+  // paired client (or a stray parallel request) must not inject or reorder
+  // recovery characters. null when recovery is UI-driven or not running.
+  private recoveryOwner: string | null = null
+  // Highest character seq already accepted this recovery session, and an
+  // in-flight guard — together they serialize character sends so two
+  // concurrent same-seq sends can't both reach the device (the claim is set
+  // synchronously before the await, so the second request sees it).
+  private lastAcceptedCharSeq = -1
+  private recoverySendInFlight = false
   private pinRequestCount = 0
   // Tracks whether promptPin() → getPublicKeys() is still awaiting resolution.
   // While active, sendPin/sendPassphrase must NOT call getFeatures — that would
@@ -415,6 +428,14 @@ export class EngineController extends EventEmitter {
           const label = this.cachedFeatures.label || ''
           const fwVer = this.extractVersion(this.cachedFeatures)
           saveDeviceSnapshot(deviceId, label, fwVer, JSON.stringify(this.cachedFeatures))
+          // Bitcoin-only firmware is seed-locked to BTC — it can't derive or hold
+          // any other chain. Purge multi-chain balances cached from this device's
+          // prior firmware, else the dashboard sums phantom balances (e.g. an ETH
+          // address this firmware can't produce) into the "All Chains" total.
+          if (deviceId !== 'unknown' && isBitcoinOnlyVariant(this.cachedFeatures.firmwareVariant)) {
+            const removed = clearNonBitcoinBalances(deviceId)
+            if (removed) console.log(`[Engine] btc-only ${deviceId}: purged ${removed} stale non-BTC cached balances`)
+          }
         } catch { /* never block on cache failure */ }
 
         // Check if the seed changed since last session — emits 'seed-changed'
@@ -1470,12 +1491,20 @@ export class EngineController extends EventEmitter {
       bootloaderVersion: effectiveBlVersion || blVersion,
       latestFirmware: this.latestFirmware,
       latestBootloader: this.latestBootloader,
+      latestFirmwareHash: this.getChannelEntry()?.firmware?.hash,
+      latestFirmwareBitcoinOnlyHash: this.getChannelEntry()?.firmwareBitcoinOnly?.hash,
+      firmwareChannel: this.alphaFirmware && this.manifest?.beta ? 'beta' : 'latest',
       bootloaderMode,
       needsBootloaderUpdate: needsBl,
       needsFirmwareUpdate: needsFw,
       needsInit: !initialized,
       initialized,
       passphraseProtection: features?.passphraseProtection ?? false,
+      // Firmware variant, straight from the device Features. "KeepKeyBTC"/"EmulatorBTC"
+      // = bitcoin-only firmware; "bitcoin-only-locked" = multi-chain firmware
+      // refusing a btc-only seed (wipe required); else multi-chain. Drives the
+      // BTC-only UI restriction (see isBitcoinOnlyVariant).
+      firmwareVariant: features?.firmwareVariant || undefined,
       // In bootloader mode the device can't report `initialized` — use firmware
       // hash presence instead. If firmware bytes exist on flash, the device has
       // been set up before and entered bootloader for an update (not OOB).
@@ -1555,7 +1584,7 @@ export class EngineController extends EventEmitter {
       this.emit('firmware-progress', { percent: 30, message: 'Confirm on device, then erasing current firmware...' })
       await this.wallet.firmwareErase()
 
-      this.emit('firmware-progress', { percent: 50, message: 'Uploading bootloader...' })
+      this.emit('firmware-progress', { percent: 50, message: 'Look at your KeepKey — confirm to upload the bootloader…' })
       await this.wallet.firmwareUpload(firmware)
 
       this.emit('firmware-progress', { percent: 90, message: 'Bootloader updated, rebooting...' })
@@ -1577,32 +1606,40 @@ export class EngineController extends EventEmitter {
     }
   }
 
-  async startFirmwareUpdate() {
+  async startFirmwareUpdate(bitcoinOnly = false) {
     if (!this.wallet) throw new Error('No device connected')
     this.updatePhase = 'flashing'
     this.emit('state-change', this.getDeviceState())
     this.emit('firmware-progress', { percent: 0, message: 'Starting firmware update...' })
 
     try {
+      // Pick the manifest entry for the chosen variant. Bitcoin-only lives in a
+      // separate manifest field (firmwareBitcoinOnly) and REQUIRES a manifest
+      // entry — there's no github fallback for it.
       const channel = this.getChannelEntry()
+      const fwEntry = bitcoinOnly ? channel?.firmwareBitcoinOnly : channel?.firmware
+      if (bitcoinOnly && !fwEntry) {
+        throw new Error('Bitcoin-only firmware is not available in this build (no manifest entry)')
+      }
       this.emit('firmware-progress', { percent: 10, message: 'Loading firmware...' })
-      const firmware = channel
-        ? await this.loadBinary(channel.firmware.url)
+      const firmware = fwEntry
+        ? await this.loadBinary(fwEntry.url)
         : Buffer.from(await (await fetch(`https://github.com/keepkey/keepkey-firmware/releases/download/v${this.latestFirmware}/firmware.keepkey.bin`)).arrayBuffer())
 
       // Binary integrity check — compare file hash against manifest.
       // If the binary starts with "KPKY" magic bytes, strip the 256-byte container
       // header before hashing — the manifest hash covers only the payload.
-      if (channel?.firmware?.hash) {
+      if (fwEntry?.hash) {
         const hasKpkyHeader = firmware.length >= 256
           && firmware[0] === 0x4B && firmware[1] === 0x50
           && firmware[2] === 0x4B && firmware[3] === 0x59 // "KPKY"
         const hashPayload = hasKpkyHeader ? firmware.subarray(256) : firmware
         const downloadedHash = sha256Hex(hashPayload)
-        if (downloadedHash !== channel.firmware.hash) {
-          throw new Error(`Firmware binary integrity check failed: expected ${channel.firmware.hash}, got ${downloadedHash}`)
+        if (downloadedHash !== fwEntry.hash) {
+          throw new Error(`Firmware binary integrity check failed: expected ${fwEntry.hash}, got ${downloadedHash}`)
         }
         console.log(`[Engine] Firmware binary integrity verified${hasKpkyHeader ? ' (KPKY header stripped)' : ''}`)
+        this.emit('firmware-progress', { percent: 20, message: `Binary verified — sha256 matches the pinned release hash (${downloadedHash.slice(0, 16)}…)` })
       }
 
       // See note in startBootloaderUpdate: no JS timeout can cover a readSync
@@ -1610,7 +1647,7 @@ export class EngineController extends EventEmitter {
       this.emit('firmware-progress', { percent: 30, message: 'Confirm on device, then erasing current firmware...' })
       await this.wallet.firmwareErase()
 
-      this.emit('firmware-progress', { percent: 50, message: 'Uploading firmware...' })
+      this.emit('firmware-progress', { percent: 50, message: 'Look at your KeepKey — confirm the upload if prompted (unsigned firmware needs on-device approval)…' })
       await this.wallet.firmwareUpload(firmware)
 
       this.emit('firmware-progress', { percent: 90, message: 'Firmware updated, rebooting...' })
@@ -1652,6 +1689,22 @@ export class EngineController extends EventEmitter {
       })
       this.cachedFeatures = await this.wallet.getFeatures()
       this.updateState(this.deriveState(this.cachedFeatures))
+    } catch (err: any) {
+      const rawMessage = extractErrorMessage(err)
+      // Two PIN matrix prompts (NewFirst + NewSecond) followed by ActionCancelled
+      // is the firmware's PIN-mismatch signature — the reset aborts before any
+      // seed words are shown, so nothing was saved. One prompt or none means the
+      // user declined on the device. Read the count here: finally zeroes it.
+      let message = rawMessage
+      let errorType: 'pin-mismatch' | 'cancelled' | 'unknown' = 'unknown'
+      if (rawMessage.includes('Action cancelled') && this.pinRequestCount >= 2) {
+        message = 'PINs did not match. Both entries must be identical.'
+        errorType = 'pin-mismatch'
+      } else if (rawMessage.includes('Action cancelled')) {
+        errorType = 'cancelled'
+      }
+      this.emit('reset-error', { message, errorType })
+      throw err
     } finally {
       this.setupInProgress = false
       this.pinRequestCount = 0
@@ -1695,14 +1748,17 @@ export class EngineController extends EventEmitter {
         return this.recoverDevice(opts, _retryCount + 1)
       }
 
-      // Terminal error — clean up
+      // Terminal error — clean up. Capture the PIN prompt count BEFORE zeroing
+      // it: the classifier below reads it, and reading after the reset made the
+      // pin-mismatch branch unreachable.
       this.setupInProgress = false
+      const pinRequests = this.pinRequestCount
       this.pinRequestCount = 0
 
       // Classify the failure for user-friendly messaging
       let message = rawMessage
       let errorType: 'pin-mismatch' | 'invalid-mnemonic' | 'bad-words' | 'word-not-found' | 'cancelled' | 'unknown' = 'unknown'
-      if (rawMessage.includes('Action cancelled') && this.pinRequestCount >= 2) {
+      if (rawMessage.includes('Action cancelled') && pinRequests >= 2) {
         message = 'PINs did not match. Both entries must be identical.'
         errorType = 'pin-mismatch'
       } else if (rawMessage.includes('Action cancelled')) {
@@ -1985,11 +2041,116 @@ export class EngineController extends EventEmitter {
     }
   }
 
-  /** Marks a cipher-recovery/reset flow active. The REST recover-device handler
-   *  wraps the call so /system/recovery/state reports active only while entry is
-   *  in progress. (seq stays monotonic so callers can sync on the next request.) */
-  setRecoveryActive(active: boolean) {
-    this.recoveryActive = active
+  /** Begin a REST/SDK-driven cipher recovery owned by `ownerId` (the caller's
+   *  bearer apiKey). Sets setupInProgress so syncState()/getFeatures() back off
+   *  the transport — a concurrent GetFeatures corrupts the CharacterAck flow
+   *  (see syncState). The REST recover-device handler wraps wallet.recover()
+   *  between this and endRecovery(). */
+  beginRecovery(ownerId: string) {
+    // Reject a concurrent start: without this, a second recover-device call
+    // would overwrite recoveryOwner and steal the lock while the first device
+    // operation is still running (and the first's finally would then clear the
+    // second's session).
+    if (this.recoveryActive || this.setupInProgress || this.verifyInProgress) {
+      throw new HttpError(409, 'Another device setup or recovery is already in progress')
+    }
+    this.setupInProgress = true
+    this.recoveryActive = true
+    this.recoveryOwner = ownerId
+    this.pinRequestCount = 0
+    // Fresh session: clear the outstanding CharacterRequest so no send is
+    // accepted until the device actually asks for this session's first
+    // character. characterRequestSeq is deliberately NOT reset — it stays
+    // MONOTONIC across sessions, so a stale seq from a prior recovery is always
+    // < the current seq (rejected by the strict-equality check) and there is no
+    // seq==0 window that would accept a character before the device requests one.
+    this.lastCharacterRequest = null
+    this.recoverySendInFlight = false
+  }
+
+  /** End a REST/SDK-driven recovery (success or failure). */
+  endRecovery() {
+    this.setupInProgress = false
+    this.recoveryActive = false
+    this.recoveryOwner = null
+    this.recoverySendInFlight = false
+    this.pinRequestCount = 0
+  }
+
+  /** Single atomic path for EVERY recovery acknowledgement (character / delete /
+   *  done). All three share one in-flight guard so competing HTTP requests can't
+   *  race or double-send unlocked CharacterAcks. Owner + seq checks and the
+   *  seq-claim run synchronously before the await, so a second concurrent call
+   *  sees the claim (or the guard) and is rejected with 409. A character is
+   *  additionally refused until the device has actually issued a CharacterRequest
+   *  (lastCharacterRequest present) — otherwise a send at the initial seq would
+   *  corrupt the transport before the device asks for anything. */
+  async submitRecoveryAck(
+    ownerId: string,
+    action: 'character' | 'delete' | 'done',
+    opts: { character?: string; expectedSeq?: number } = {},
+  ) {
+    // done has no seq; delete may pin one; character requires one.
+    this.assertRecoveryOwner(ownerId, action === 'done' ? undefined : opts.expectedSeq)
+    // NO acknowledgement of any kind (character, delete, or done) before the
+    // device has actually issued a CharacterRequest — an out-of-turn CharacterAck
+    // during the recover-confirm window corrupts the in-flight recover() loop.
+    if (!this.lastCharacterRequest) {
+      throw new HttpError(409, 'Device has not requested a character yet')
+    }
+    if (action === 'character') {
+      if (opts.expectedSeq === undefined) {
+        throw new HttpError(400, 'character requires seq')
+      }
+      if (opts.expectedSeq <= this.lastAcceptedCharSeq) {
+        throw new HttpError(409, `Recovery seq ${opts.expectedSeq} was already sent`)
+      }
+    }
+    if (this.recoverySendInFlight) {
+      throw new HttpError(409, 'A recovery acknowledgement is already in flight')
+    }
+    this.recoverySendInFlight = true
+    const prevAcceptedCharSeq = this.lastAcceptedCharSeq
+    if (action === 'character') this.lastAcceptedCharSeq = opts.expectedSeq! // claim before the await
+    try {
+      if (action === 'character') await this.sendCharacter(opts.character!)
+      else if (action === 'delete') await this.sendCharacterDelete()
+      else await this.sendCharacterDone()
+    } catch (err) {
+      // The send never reached the device (transport error) — roll the seq claim
+      // back so a legitimate retry at the same (still-current) seq isn't wedged
+      // as "already sent" until a disconnect.
+      this.lastAcceptedCharSeq = prevAcceptedCharSeq
+      throw err
+    } finally {
+      this.recoverySendInFlight = false
+    }
+  }
+
+  /** Gate a recovery character mutation to the initiating client and, when the
+   *  caller passes the seq it last saw, to that exact CharacterRequest — so a
+   *  stale, duplicated, or reordered send (or one from another paired client)
+   *  is rejected instead of silently corrupting the decoded word. Throws
+   *  HttpError(409) on any mismatch. */
+  assertRecoveryOwner(ownerId: string, expectedSeq?: number) {
+    if (!this.recoveryActive || !this.recoveryOwner) {
+      throw new HttpError(409, 'No cipher recovery is in progress')
+    }
+    if (this.recoveryOwner !== ownerId) {
+      throw new HttpError(409, 'Cipher recovery is owned by a different client')
+    }
+    if (expectedSeq !== undefined && expectedSeq !== this.characterRequestSeq) {
+      throw new HttpError(
+        409,
+        `Stale recovery seq: expected ${this.characterRequestSeq}, got ${expectedSeq}`,
+      )
+    }
+  }
+
+  /** True when `ownerId` may read live recovery state (owner, or no active
+   *  recovery so there is nothing owned to protect). */
+  canReadRecoveryState(ownerId: string): boolean {
+    return !this.recoveryActive || this.recoveryOwner === ownerId
   }
 
   /** Clear recovery progress — called on disconnect so /system/recovery/state
@@ -1997,7 +2158,14 @@ export class EngineController extends EventEmitter {
   private resetRecoveryState() {
     this.lastCharacterRequest = null
     this.characterRequestSeq = 0
+    this.lastAcceptedCharSeq = -1
+    this.recoverySendInFlight = false
     this.recoveryActive = false
+    this.recoveryOwner = null
+    // A device yanked mid-recovery also drops the transport lock; the REST
+    // handler's finally will call endRecovery() too, but clear it here so a
+    // UI-path recovery interrupted by unplug doesn't wedge setupInProgress.
+    this.setupInProgress = false
   }
 
   resetUpdatePhase() {
@@ -2024,6 +2192,7 @@ export class EngineController extends EventEmitter {
     isDowngrade: boolean
     isSameVersion: boolean
     willWipeDevice: boolean
+    isBitcoinOnly: boolean
   } {
     const fileSize = data.length
     const hasKpkyHeader = data.length >= 256
@@ -2078,6 +2247,12 @@ export class EngineController extends EventEmitter {
       }
     }
 
+    // Bitcoin-only variant detection. The BITCOIN_ONLY firmware build compiles in
+    // the literal "KeepKeyBTC"/"EmulatorBTC" (fsm_msg_common.h, under #if BITCOIN_ONLY);
+    // a full build never contains it. This is the only reliable signal at flash
+    // time — the device can't report firmware_variant until it boots the new fw.
+    const isBitcoinOnly = /KeepKeyBTC|EmulatorBTC/.test(payload.toString('latin1'))
+
     // Device state — distinguish bootloader mode from firmware mode
     const isBootloaderMode = this.cachedFeatures?.bootloaderMode === true
     // Use resolved BL version (hash→version from manifest) when raw features lack it
@@ -2122,6 +2297,7 @@ export class EngineController extends EventEmitter {
       isDowngrade,
       isSameVersion,
       willWipeDevice,
+      isBitcoinOnly,
     }
   }
 
@@ -2191,7 +2367,19 @@ export class EngineController extends EventEmitter {
    * passphrase toggle / reconnect, so the guard re-reads the device instead of
    * trusting session state. Returns null if no wallet or derivation fails.
    */
-  async deriveSeedIdentity(): Promise<string | null> {
+  /**
+   * Stable per-seed fingerprint. ETH primary address (m/44'/60'/0'/0/0) on
+   * multi-chain firmware; btc-only firmware REFUSES ETH derivation, so fall back
+   * to a fixed BTC address (m/84'/0'/0'/0/0, prefixed `btc:` so it can never
+   * collide with an eth address). Deterministic per seed either way — which is
+   * all the seed-change / wallet-scope / sweep-replay guards need.
+   *
+   * ponytail: a seed used first on multi-chain firmware then on btc-only (same
+   * seed, different variant) fingerprints differently across the two. Harmless —
+   * it emits a false "seed changed" (caches reset, fresh data reloads); it never
+   * signs or loses funds. Revisit only if variant-swap-on-one-seed is a real flow.
+   */
+  private async deriveSeedFingerprint(): Promise<string | null> {
     if (!this.wallet) return null
     try {
       const result = await (this.wallet as any).ethGetAddress({
@@ -2199,12 +2387,37 @@ export class EngineController extends EventEmitter {
         showDisplay: false,
       })
       const addr = (typeof result === 'string' ? result : result?.address)?.toLowerCase()
-      if (addr) this.seedEthAddress = addr
-      return addr || null
+      if (addr) return addr
     } catch (err: any) {
-      console.warn('[Engine] deriveSeedIdentity failed (non-fatal):', err?.message)
+      console.warn('[Engine] seed fingerprint (eth) failed:', err?.message)
+    }
+    // ETH produced no address — it threw, OR resolved undefined/{}/address-less.
+    // Only btc-only firmware legitimately REFUSES ETH; on multi-chain firmware a
+    // missing ETH address is a transient transport/USB hiccup, and flipping to the
+    // btc: fingerprint would trigger a false "seed changed" purge. Multi-chain here
+    // is uncertain → return null. (Guard sits AFTER the attempt so it catches the
+    // resolve-empty case too, not just thrown errors.)
+    if (!isBitcoinOnlyVariant(this.cachedFeatures?.firmwareVariant)) {
+      console.warn('[Engine] seed fingerprint: ETH unavailable on multi-chain fw — uncertain, returning null')
       return null
     }
+    try {
+      const result = await (this.wallet as any).btcGetAddress({
+        addressNList: [0x80000000 + 84, 0x80000000 + 0, 0x80000000 + 0, 0, 0],
+        coin: 'Bitcoin', scriptType: 'p2wpkh', showDisplay: false,
+      })
+      const addr = (typeof result === 'string' ? result : result?.address)
+      return addr ? `btc:${addr.toLowerCase()}` : null
+    } catch (err: any) {
+      console.warn('[Engine] seed fingerprint (btc fallback) failed:', err?.message)
+      return null
+    }
+  }
+
+  async deriveSeedIdentity(): Promise<string | null> {
+    const addr = await this.deriveSeedFingerprint()
+    if (addr) this.seedEthAddress = addr
+    return addr
   }
 
   /**
@@ -2216,11 +2429,7 @@ export class EngineController extends EventEmitter {
   private async deriveHiddenWalletScopeInMemory(): Promise<void> {
     if (!this.wallet || !this.hiddenWalletActive) return
     try {
-      const result = await (this.wallet as any).ethGetAddress({
-        addressNList: [0x80000000 + 44, 0x80000000 + 60, 0x80000000 + 0, 0, 0],
-        showDisplay: false,
-      })
-      const addr = (typeof result === 'string' ? result : result?.address)?.toLowerCase()
+      const addr = await this.deriveSeedFingerprint()
       if (!addr) return
       this.seedEthAddress = addr // RAM only — never written to disk for hidden wallets
       this.emit('wallet-scope-ready', { deviceId: this.cachedFeatures?.deviceId || 'unknown', seedAddress: addr })
@@ -2237,13 +2446,9 @@ export class EngineController extends EventEmitter {
   async checkSeedIdentity(): Promise<void> {
     if (!this.wallet) return
     try {
-      const result = await (this.wallet as any).ethGetAddress({
-        addressNList: [0x80000000 + 44, 0x80000000 + 60, 0x80000000 + 0, 0, 0],
-        showDisplay: false,
-      })
-      const addr = (typeof result === 'string' ? result : result?.address)?.toLowerCase()
+      const addr = await this.deriveSeedFingerprint()
       if (!addr) {
-        console.warn('[Engine] checkSeedIdentity: could not derive ETH address')
+        console.warn('[Engine] checkSeedIdentity: could not derive seed fingerprint')
         return
       }
       this.seedEthAddress = addr
@@ -2303,13 +2508,9 @@ export class EngineController extends EventEmitter {
       return
     }
 
-    let addr: string | undefined
+    let addr: string | null = null
     try {
-      const result = await (probeWallet as any).ethGetAddress({
-        addressNList: [0x80000000 + 44, 0x80000000 + 60, 0x80000000 + 0, 0, 0],
-        showDisplay: false,
-      })
-      addr = (typeof result === 'string' ? result : result?.address)?.toLowerCase()
+      addr = await this.deriveSeedFingerprint()
     } catch (err: any) {
       console.warn('[Engine] Reconnect probe failed — staying conservative:', err?.message)
       return
@@ -2373,6 +2574,14 @@ export class EngineController extends EventEmitter {
    */
   async flashCustomFirmware(data: Buffer) {
     if (!this.wallet) throw new Error('No device connected')
+    // Firmware can only be written in bootloader (updater) mode. Erasing a
+    // wallet-mode device stalls the synchronous HID read (see firmwareErase
+    // note below) — the flash hangs on "do not unplug" with no recovery. Fail
+    // fast with an actionable message instead. The UI gates on this too, but
+    // guard here so any RPC caller can't brick the flow.
+    if (this.cachedFeatures?.bootloaderMode !== true) {
+      throw new Error('Device is not in bootloader mode. Unplug your KeepKey, hold the button, and plug it back in while holding to enter bootloader mode, then try again.')
+    }
     this.updatePhase = 'flashing'
     this.emit('state-change', this.getDeviceState())
     this.emit('firmware-progress', { percent: 0, message: 'Preparing custom firmware...' })
@@ -2383,7 +2592,7 @@ export class EngineController extends EventEmitter {
       this.emit('firmware-progress', { percent: 20, message: 'Confirm on device, then erasing current firmware...' })
       await this.wallet.firmwareErase()
 
-      this.emit('firmware-progress', { percent: 50, message: 'Uploading firmware...' })
+      this.emit('firmware-progress', { percent: 50, message: 'Look at your KeepKey — confirm the upload if prompted (unsigned firmware needs on-device approval)…' })
       await this.wallet.firmwareUpload(data)
 
       this.emit('firmware-progress', { percent: 90, message: 'Firmware uploaded, rebooting...' })

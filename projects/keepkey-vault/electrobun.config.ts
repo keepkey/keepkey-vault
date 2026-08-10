@@ -63,6 +63,13 @@ export default {
 				"com.apple.security.cs.allow-unsigned-executable-memory": true,
 				"com.apple.security.cs.disable-library-validation": true,
 				"com.apple.security.cs.allow-dyld-environment-variables": true,
+				// QR scanning (QrScannerOverlay -> getUserMedia). Under the hardened
+				// runtime the camera is blocked without this entitlement, and macOS
+				// kills the process if Info.plist has no NSCameraUsageDescription.
+				// Must stay `true`: Electrobun writes a string value straight into
+				// entitlements.plist as <string>, which codesign rejects here. The
+				// human-readable prompt copy is set in scripts/prune-app-bundle.ts.
+				"com.apple.security.device.camera": true,
 			},
 		},
 		linux: {

@@ -53,6 +53,8 @@ class KeepKeySdk {
             info: {
                 /** Get full device features — model, firmware version, PIN/passphrase state, policies. */
                 getFeatures: () => this.client.post('/system/info/get-features'),
+                /** Return `size` fresh bytes from the device hardware RNG (1..8192). */
+                getEntropy: (size) => this.client.postBytes('/system/info/get-entropy', { size }, this.client.signingTimeoutMs),
                 /** List all connected KeepKey devices. */
                 getDevices: () => this.client.get('/api/v2/devices'),
                 /** List assets supported by the connected device. */
@@ -95,10 +97,17 @@ class KeepKeySdk {
                  * character the user "typed". A finalized word that isn't in the BIP-39
                  * wordlist makes the in-flight `recoverDevice()` promise reject with
                  * "Word not found in BIP39 wordlist".
+                 *
+                 * `seq` is the value last read from `getRecoveryState()`. The vault pins
+                 * the send to that exact CharacterRequest and to the client that started
+                 * recovery — a stale, reordered, or foreign send is rejected with 409
+                 * rather than silently corrupting the decoded word.
                  */
-                sendCharacter: (character) => this.client.post('/system/recovery/character', { character }),
-                /** Delete the last character entered during cipher recovery. */
-                sendCharacterDelete: () => this.client.post('/system/recovery/character/delete', {}),
+                sendCharacter: (character, seq) => this.client.post('/system/recovery/character', { character, seq }),
+                /** Delete the last character entered during cipher recovery. Pass the
+                 *  current `seq` (from `getRecoveryState()`) to pin the delete; the
+                 *  initiating-client check applies either way. */
+                sendCharacterDelete: (seq) => this.client.post('/system/recovery/character/delete', seq === undefined ? {} : { seq }),
                 /** Finalize cipher-recovery word/seed entry (equivalent to pressing "next"). */
                 sendCharacterDone: () => this.client.post('/system/recovery/character/done', {}),
                 /** Current cipher-recovery state. `seq` advances each time the device asks
@@ -118,7 +127,7 @@ class KeepKeySdk {
          */
         this.address = {
             /** Derive a UTXO (BTC/LTC/BCH/DOGE/DASH) address. */
-            utxoGetAddress: (params) => this.client.post('/addresses/utxo', params),
+            utxoGetAddress: (params) => this.client.post('/addresses/utxo', params, params.show_display ? this.client.signingTimeoutMs : undefined),
             /** Derive an Ethereum (or EVM-compatible) address. */
             ethGetAddress: (params) => this.client.post('/addresses/eth', params),
             /** Derive a Cosmos Hub (ATOM) address. */
@@ -141,6 +150,8 @@ class KeepKeySdk {
             tronGetAddress: (params) => this.client.post('/addresses/tron', params),
             /** Derive a TON address. */
             tonGetAddress: (params) => this.client.post('/addresses/ton', params),
+            /** Derive a Hive (SLIP-0048) address. */
+            hiveGetAddress: (params) => this.client.post('/addresses/hive', params),
         };
         // ═══════════════════════════════════════════════════════════════════
         // eth — Ethereum / EVM signing
@@ -149,6 +160,20 @@ class KeepKeySdk {
         this.eth = {
             /** Sign an Ethereum or EVM transaction. Supports legacy and EIP-1559. */
             ethSignTransaction: (params) => this.client.post('/eth/sign-transaction', params),
+            /**
+             * Load an EVM clear-sign signer into a device key slot (user-confirmed on
+             * device). The device shows a trust screen naming the alias + pubkey
+             * fingerprint. Default is RAM-only (dropped on reboot — reload per session);
+             * pass `persist: true` to keep it in device flash across reboots (until
+             * WipeDevice). An optional `icon` (+ `iconWidth`/`iconHeight`) renders the
+             * identity's logo on the trust screen and every clear-sign it vouches for.
+             * Firmware 7.15.0+. Used to trust a metadata-signing key (e.g. a CI test
+             * key in slot 3) so `ethSignTransaction`'s `txMetadata` blobs verify.
+             */
+            loadClearsignSigner: (params) =>
+            // Blocks on a physical trust-screen confirmation; the 30s default aborts
+            // mid-review and looks like a device failure.
+            this.client.post('/eth/clearsign/load-signer', params, this.client.signingTimeoutMs),
             /** Sign a personal message (`eth_sign` / `personal_sign`). */
             ethSignMessage: (params) => this.client.post('/eth/sign', params),
             /** Sign an EIP-712 typed data structure. */
@@ -162,7 +187,7 @@ class KeepKeySdk {
         /** Bitcoin and UTXO chain signing. */
         this.btc = {
             /** Sign a UTXO transaction (BTC, LTC, BCH, DOGE, DASH, etc.). */
-            btcSignTransaction: (params) => this.client.post('/utxo/sign-transaction', params),
+            btcSignTransaction: (params) => this.client.post('/utxo/sign-transaction', params, this.client.signingTimeoutMs),
         };
         // ═══════════════════════════════════════════════════════════════════
         // cosmos — Cosmos Hub signing
@@ -207,6 +232,21 @@ class KeepKeySdk {
             osmosisSignAminoSwap: (params) => this.client.post('/osmosis/sign-amino-swap', params),
         };
         // ═══════════════════════════════════════════════════════════════════
+        // hive — Hive (SLIP-0048) signing
+        // ═══════════════════════════════════════════════════════════════════
+        /** Hive generic clear-sign op-table signing (fw 7.15.0+). */
+        this.hive = {
+            /**
+             * Sign 1–4 Hive operations against the device clear-sign op table.
+             * Requires the vault's `hive_enabled` setting and firmware >= 7.15.0.
+             */
+            hiveSignOperations: (params) => this.client.post('/hive/sign-operations', params),
+            /** Sign a Hive transfer op (dedicated path — caller supplies the TaPoS header). */
+            hiveSignTransfer: (params) => this.client.post('/hive/sign-transfer', params),
+            /** Keychain signBuffer — sign SHA256(message) on-device (dApp login). */
+            hiveSignMessage: (params) => this.client.post('/hive/sign-message', params),
+        };
+        // ═══════════════════════════════════════════════════════════════════
         // thorchain — THORChain signing
         // ═══════════════════════════════════════════════════════════════════
         /** THORChain signing (RUNE transfers and deposits for swaps). */
@@ -245,10 +285,18 @@ class KeepKeySdk {
         // ═══════════════════════════════════════════════════════════════════
         // solana — Solana signing
         // ═══════════════════════════════════════════════════════════════════
-        /** Solana signing (supports SPL tokens). */
+        /** Solana signing (supports SPL tokens and transaction-bound ClearSign metadata). */
         this.solana = {
-            /** Sign a Solana transaction. `raw_tx` must be the base64-encoded serialized transaction. */
-            solanaSignTransaction: (params) => this.client.post('/solana/sign-transaction', params),
+            /**
+             * Sign a Solana transaction. `raw_tx` is the base64-encoded serialized
+             * transaction. Opaque cross-chain/versioned transactions should include a
+             * provider-signed KKSOLSW1 `swapMetadata` descriptor; firmware verifies its
+             * binding before displaying ClearSign swap details.
+             */
+            solanaSignTransaction: (params) =>
+            // Device confirmation can span several screens (schema-decoded args,
+            // accounts, priority fee); the 30s default aborts mid-review.
+            this.client.post('/solana/sign-transaction', params, this.client.signingTimeoutMs),
             /**
              * Sign a Solana off-chain message with domain separation. Firmware
              * builds the spec envelope (`\xff` || "solana offchain" || version ||

@@ -58,6 +58,11 @@ export const FIRMWARE_VERSION_MAP: FirmwareVersionInfo[] = [
       },
       {
         title: 'Hive Support',
+        // comingSoon until the Hive firmware batch actually ships in a tagged
+        // build — the 7.15.0 rc line does not contain it yet, and a custom
+        // build detected as 7.15.0 would otherwise advertise it as present.
+        // Flip to false in the release that lands the Hive firmware stack.
+        comingSoon: true,
         description: 'Send, receive, and sign Hive transactions with sponsor-backed account onboarding.',
         chains: ['hive'],
         color: '#E31337',
@@ -170,6 +175,10 @@ export function getUpgradeVersions(from: string | null, to: string): FirmwareVer
  *
  * Used to resolve firmware version in bootloader mode where the device can't
  * report version numbers. Unknown hashes indicate custom/unsigned firmware.
+ *
+ * ponytail: the bitcoin-only firmware variant is a parallel lineage with its
+ * OWN full-file hashes. Add its per-version entries here once a signed btc-only
+ * asset is published, else btc-only reads as custom/unsigned in bootloader mode.
  */
 export const ONDEVICE_FIRMWARE_HASHES: Record<string, string> = {
   'd380357b7403064d7b1ea963dc56032239541a21ef0b7e08082fb36ed470de82': 'v6.0.0',

@@ -49,7 +49,7 @@
 	"approvingToken": "Đang phê duyệt token...",
 	"approvalRequired": "Đang đợi phê duyệt token trên KeepKey...",
 	"enterAmount": "Nhập số lượng để lấy báo giá",
-	"notSupported": "Đổi {{coin}} chưa được THORChain hỗ trợ.",
+	"notSupported": "Hiện không có tuyến hoán đổi khả dụng cho {{coin}}.",
 	"copied": "Đã sao chép",
 	"copy": "Sao chép",
 	"youSend": "Bạn gửi",

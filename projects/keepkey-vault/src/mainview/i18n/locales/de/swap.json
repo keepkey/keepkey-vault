@@ -104,7 +104,7 @@
 	"approvingToken": "Token wird freigegeben…",
 	"approvalRequired": "Warten auf Token-Freigabe auf Ihrem KeepKey…",
 	"enterAmount": "Betrag eingeben, um ein Angebot zu erhalten",
-	"notSupported": "{{coin}}-Swaps werden über THORChain noch nicht unterstützt.",
+	"notSupported": "Für {{coin}} ist derzeit keine Swap-Route verfügbar.",
 	"copied": "Kopiert",
 	"copy": "Kopieren",
 	"youSend": "Sie senden",

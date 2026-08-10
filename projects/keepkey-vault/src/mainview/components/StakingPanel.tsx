@@ -803,6 +803,11 @@ function UndelegateDialog({ isOpen, onClose, chain, delegations, onSuccess, watc
 
 export function StakingPanel({ chain, address, availableBalance, watchOnly }: StakingPanelProps) {
 	const { t } = useTranslation("staking")
+	// fmtCompact is used at the totals row and per-position values below; only
+	// the nested DelegateDialog called useFiat(), so any NON-EMPTY positions
+	// response threw "fmtCompact is not defined" and crashed the asset page.
+	// Masked until now because the staking endpoint returned [] for everyone.
+	const { fmtCompact } = useFiat()
 	const [positions, setPositions] = useState<StakingPosition[]>([])
 	const [loading, setLoading] = useState(false)
 	const [error, setError] = useState<string | null>(null)

@@ -1,5 +1,5 @@
 import type { ElectrobunRPCSchema } from 'electrobun/bun'
-import type { DeviceStateInfo, FirmwareProgress, FirmwareAnalysis, FatalEvent, PinRequest, CharacterRequest, ChainBalance, BuildTxParams, BuildTxResult, BroadcastResult, BtcAccountSet, BtcScriptType, EvmAddressSet, CustomToken, CustomChain, AppSettings, PioneerServer, BtcGetAddressParams, EthGetAddressParams, EthSignTxParams, BtcSignTxParams, GetPublicKeysParams, UpdateInfo, UpdateStatus, TokenVisibilityStatus, PairingRequestInfo, PairedAppInfo, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, ReportMeta, ReportData, AuditReport, AuditPortfolioSnapshot, AuditMode, AuditDerivedAddress, AuditInspectResult, SwapAsset, SwapQuote, SwapQuoteParams, ExecuteSwapParams, SwapResult, SwapHealth, PendingSwap, SwapStatusUpdate, SwapHistoryRecord, SwapHistoryFilter, SwapHistoryStats, SwapUiState, SwapUiCommand, RecentActivity, BuildStakingTxParams, StakingPosition, DefiPosition, NameInfo, NameQuote, BuildNameRegTxParams, ZcashTransaction, EmulatorStatus, EmulatorWalletInfo, RegisteredDevice, WcSessionInfo, AddressBookEntry, AddressBookFilter, AddressBookTx, UsbDiagnosticReport, ScreenCaptureResult } from './types'
+import type { DeviceStateInfo, FirmwareProgress, FirmwareAnalysis, FatalEvent, PinRequest, CharacterRequest, ChainBalance, BuildTxParams, BuildTxResult, BroadcastResult, BtcAccountSet, BtcScriptType, EvmAddressSet, CustomToken, CustomChain, AppSettings, PioneerServer, BtcGetAddressParams, EthGetAddressParams, EthSignTxParams, BtcSignTxParams, GetPublicKeysParams, UpdateInfo, UpdateStatus, TokenVisibilityStatus, PairingRequestInfo, PairedAppInfo, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, ReportMeta, ReportData, AuditReport, AuditPortfolioSnapshot, AuditMode, AuditDerivedAddress, AuditInspectResult, SwapAsset, SwapQuote, SwapQuoteParams, ExecuteSwapParams, SwapResult, SwapHealth, PendingSwap, SwapStatusUpdate, SwapHistoryRecord, SwapHistoryFilter, SwapHistoryStats, SwapUiState, SwapUiCommand, RecentActivity, BuildStakingTxParams, StakingPosition, DefiPosition, NameInfo, NameQuote, BuildNameRegTxParams, ZcashTransaction, EmulatorStatus, EmulatorWalletInfo, RegisteredDevice, WcSessionInfo, AddressBookEntry, AddressBookFilter, AddressBookTx, UsbDiagnosticReport, ClearSignEvent, ClearSignSolanaSchemaArtifact, ClearSignSolanaSchemaDraft } from './types'
 
 /**
  * RPC Schema for Bun ↔ WebView communication.
@@ -16,7 +16,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       getDeviceState: { params: void; response: DeviceStateInfo }
       retryConnect: { params: void; response: void }
       startBootloaderUpdate: { params: void; response: void }
-      startFirmwareUpdate: { params: void; response: void }
+      startFirmwareUpdate: { params: { bitcoinOnly?: boolean }; response: void }
       flashFirmware: { params: void; response: void }
       analyzeFirmware: { params: { data: string }; response: FirmwareAnalysis }
       flashCustomFirmware: { params: { data: string }; response: void }
@@ -39,15 +39,19 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       // ── Wallet operations (hdwallet pass-through) ─────────────────
       getFeatures: { params: void; response: any }
       ping: { params: { msg?: string }; response: any }
+      // Advanced-mode developer surface for creating and loading RAM-only
+      // ClearSign identities. No endpoint persists a trust anchor.
+      clearsignGetStudioStatus: { params: void; response: { advancedMode: boolean; firmwareVersion?: string } }
+      clearsignAttestorGetPublicKey: { params: void; response: { publicKey: string; fingerprint: string } }
+      clearsignBuildSolanaSchema: { params: ClearSignSolanaSchemaDraft; response: ClearSignSolanaSchemaArtifact }
+      clearsignInspectSolanaSchema: { params: { payload: string }; response: ClearSignSolanaSchemaArtifact }
+      clearsignAttestorSign: { params: { payload: string }; response: { payload: string; signature: string; publicKey: string; fingerprint: string; eventId: string } }
+      clearsignLoadSessionSigner: { params: { keyId: number; publicKey: string; alias: string }; response: { ok: true; keyId: number; alias: string; fingerprint: string; eventId: string } }
+      clearsignListEvents: { params: { limit?: number; outcome?: ClearSignEvent['outcome']; scope?: 'current-device' | 'all' } | void; response: ClearSignEvent[] }
       // Open a URL in the user's default browser (escapes the WebView).
       // The system WebView blocks target=_blank, so explorer/docs links
       // route through here instead. Bun shells out to the OS-native opener.
       openExternal: { params: { url: string }; response: { ok: true } }
-      // Capture all displays with the OS-native screenshot tool so the webview
-      // can scan them for a QR code (the "scan screen" option). Minimizes the
-      // vault window during capture. macOS returns a permission error until
-      // Screen Recording is granted (see src/bun/screen-capture.ts).
-      captureScreens: { params: void; response: ScreenCaptureResult }
       wipeDevice: { params: void; response: any }
       // Sends a Cancel message to the device — aborts whatever confirm/PIN/
       // passphrase prompt is on screen and frees the transport lock so the
@@ -95,14 +99,15 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       hiveSignTx: { params: any; response: any }
 
       // ── Pioneer integration ─────────────────────────────────────────
-      getBalances: { params: { forceRefresh?: boolean }; response: ChainBalance[] }
+      getBalances: { params: { forceRefresh?: boolean; swapDestCaips?: string[] }; response: ChainBalance[] }
       /** forceRefresh defaults to TRUE (user-clicked refresh / tx pushes must bypass
        *  Pioneer's cache). Pass false only when Pioneer's cache is known-fresh. */
       getBalance: { params: { chainId: string; forceRefresh?: boolean }; response: ChainBalance }
       buildTx: { params: BuildTxParams; response: BuildTxResult }
-      // `to`/`amount`/`symbol`/`caip`/`fromAddress` are optional and used only to
-      // populate the Address Book (R3/R4/R7). Callers that omit them broadcast
-      // exactly as before and create no entry.
+      // `to`/`amount`/`symbol`/`caip`/`fromAddress` populate the Address Book
+      // (R3/R4/R7). `fromAddress` is also required when broadcasting a custom
+      // EVM chain so the recovered signer is checked against the signed request
+      // rather than mutable UI selection.
       broadcastTx: { params: { chainId: string; signedTx: any; to?: string; amount?: string; fee?: string; symbol?: string; caip?: string; fromAddress?: string }; response: BroadcastResult }
 
       // ── DeFi positions (Zapper) ──────────────────────────────────────
@@ -125,7 +130,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       getBtcAccounts: { params: void; response: BtcAccountSet }
       addBtcAccount: { params: void; response: BtcAccountSet }
       setBtcSelectedXpub: { params: { accountIndex: number; scriptType: BtcScriptType }; response: void }
-      getBtcAddressIndices: { params: { xpub: string }; response: { receiveIndex: number; changeIndex: number } }
+      getBtcAddressIndices: { params: { xpub: string; scriptType: BtcScriptType }; response: { receiveIndex: number; changeIndex: number } }
 
       // ── UTXO altcoin multi-account (LTC/DOGE/DASH/…) ───────────────────
       // Persist a discovered account's xpubs to the device-scoped pubkey cache
@@ -189,7 +194,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       // ── Pairing & Signing approval ───────────────────────────────────
       approvePairing: { params: void; response: { apiKey: string } }
       rejectPairing: { params: void; response: void }
-      approveSigningRequest: { params: { id: string }; response: void }
+      approveSigningRequest: { params: { id: string; allowBlindSigning?: boolean }; response: void }
       rejectSigningRequest: { params: { id: string }; response: void }
       listPairedApps: { params: void; response: PairedAppInfo[] }
       revokePairing: { params: { apiKey: string }; response: void }
@@ -209,11 +214,16 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       // ── App Settings ──────────────────────────────────────────────────
       getAppSettings: { params: void; response: AppSettings }
       markPassphraseIntroShown: { params: void; response: AppSettings }
+      markBtcOnboardingShown: { params: void; response: AppSettings }
       setRestApiEnabled: { params: { enabled: boolean }; response: AppSettings }
       setPioneerApiBase: { params: { url: string }; response: AppSettings }
       setFiatCurrency: { params: { currency: string }; response: AppSettings }
       setNumberLocale: { params: { locale: string }; response: AppSettings }
       setWalletConnectEnabled: { params: { enabled: boolean }; response: AppSettings }
+      setOfflineMode: { params: { enabled: boolean }; response: AppSettings }
+      setBtcNode: { params: { enabled: boolean; type: 'blockbook' | 'core'; url: string; rpcUser?: string; rpcPass?: string }; response: AppSettings }
+      testBtcNode: { params: { type: 'blockbook' | 'core'; url: string; rpcUser?: string; rpcPass?: string }; response: { ok: boolean; error?: string; chain?: string; blocks?: number; pruned?: boolean; txindex?: boolean; inSync?: boolean; detectedType?: 'blockbook' | 'core' } }
+      getBtcNodeStatus: { params: void; response: { active: boolean; kind?: 'blockbook' | 'core'; ok?: boolean; error?: string; height?: number; headers?: number; syncing?: boolean; progress?: number } }
       setBip85Enabled: { params: { enabled: boolean }; response: AppSettings }
       setZcashPrivacyEnabled: { params: { enabled: boolean }; response: AppSettings }
       setHiveEnabled: { params: { enabled: boolean }; response: AppSettings }
@@ -367,6 +377,13 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       emulatorSwitchWallet: { params: { name: string }; response: EmulatorStatus }
       /** Install a libkkemu.dylib from a base64-encoded payload into ~/.keepkey/emulator/. macOS only. */
       emulatorInstallDylib: { params: { data: string }; response: { path: string; size: number; emulatorEnabled: boolean } }
+      /** Wipes the active flash and loads a freshly generated mnemonic. */
+      emulatorCreateWallet: { params: { wordCount?: 12 | 18 | 24 }; response: { seedDisplayed: true } }
+      emulatorGetMnemonic: { params: void; response: string | null }
+      /** Emulator-only: read the saved mnemonic for the active flash, for backup display. */
+      emulatorRevealSeed: { params: void; response: { mnemonic: string; flashName: string } }
+      /** Emulator-only: capture the current OLED frame as a PNG on disk (visual proof for automated test drivers). */
+      emulatorCaptureFrame: { params: { label?: string; dir?: string } | void; response: { path: string } }
 
       // ── WalletConnect (native v2) ────────────────────────────────────
       wcPair: { params: { uri: string }; response: void }
@@ -398,6 +415,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       applyUpdate: { params: void; response: void }
       getUpdateInfo: { params: void; response: UpdateInfo | null }
       getAppVersion: { params: void; response: { version: string; channel: string } }
+      pingPioneer: { params: void; response: { online: boolean } }
       // ── REST API UI-active gate ────────────────────────────────
       // Frontend signals whether the Vault UI window is open so the REST API
       // (port 1646) won't serve pubkeys/addresses to 3rd-party apps unless
@@ -422,6 +440,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       'passphrase-request': Record<string, never>
       'pin-error': Record<string, never>
       'recovery-error': { message: string; errorType: 'pin-mismatch' | 'invalid-mnemonic' | 'bad-words' | 'word-not-found' | 'cancelled' | 'unknown'; autoRetrying?: boolean }
+      'reset-error': { message: string; errorType: 'pin-mismatch' | 'cancelled' | 'unknown' }
       'btc-accounts-update': BtcAccountSet
       'evm-addresses-update': EvmAddressSet
 'update-status': UpdateStatus
@@ -484,6 +503,10 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       'swap-cmd': SwapUiCommand
       'scan-progress': { percent: number; scannedHeight: number; tipHeight: number; blocksPerSec: number; etaSeconds: number }
       'balance-updated': ChainBalance
+      /** A scheduled post-tx Orchard rescan finished (shield/deshield/z2z).
+       *  Frontend should re-pull the zcash chain balance so the dashboard
+       *  reconciles spent notes / new outputs without user action. */
+      'zcash-rescan-complete': { syncedTo: number | null; notesFound: number }
       /** The engine's background history scan (fired on every device-ready)
        *  finished. The activity UI refetches on this so freshly-indexed txs
        *  replace the "No indexed activity yet" placeholder without a manual

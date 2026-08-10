@@ -8,13 +8,16 @@
  *
  * NO direct THORNode or other third-party calls — fail fast if Pioneer is down.
  */
-import { CHAINS, BTC_SCRIPT_TYPES, btcAccountPath } from '../shared/chains'
+import { CHAINS, supportedBtcScriptTypes, btcAccountPath, evmAddressPath } from '../shared/chains'
 import type { ChainDef } from '../shared/chains'
 import type { SwapAsset, SwapQuote, SwapQuoteParams, ExecuteSwapParams, SwapResult } from '../shared/types'
 import { SOLANA_BLIND_SIGNING_REQUIRED } from '../shared/types'
+import { toDeviceError, deviceErrorMessage } from '../shared/device-error'
+import { findEvmSchema } from './evm-schema-registry'
+import { findSolanaSchema } from './solana-schema-registry'
 import { getPioneer } from './pioneer'
 import { encodeDepositWithExpiry, encodeApprove, parseUnits, toHex } from './txbuilder/evm'
-import { getEvmGasPrice, getEvmFeeData, getEvmNonce, getEvmBalance, getErc20Allowance, getErc20Balance, getErc20Decimals, broadcastEvmTx, waitForTxReceipt, estimateGas } from './evm-rpc'
+import { getEvmGasPrice, getEvmFeeData, getEvmNonce, getEvmBalance, getErc20Allowance, getErc20Balance, getErc20Decimals, broadcastEvmTx, EvmSignerVerificationError, waitForTxReceipt, estimateGas } from './evm-rpc'
 import * as txb from './txbuilder'
 import { normalizeBchAddress } from './txbuilder'
 // Re-export pure parsing functions (used by tests + this module)
@@ -22,7 +25,12 @@ import { normalizeBchAddress } from './txbuilder'
 // history rows without CAIP). The swap quote/execute path no longer uses it —
 // vault is CAIP-native end-to-end.
 export { parseAssetsResponse, parseQuoteResponse, assetToCaip } from './swap-parsing'
-import { parseQuoteResponse, parseAssetsResponse, isNativeDepositCaip } from './swap-parsing'
+import {
+  assertSwapMemoFitsSource,
+  parseQuoteResponse,
+  parseAssetsResponse,
+  isNativeDepositCaip,
+} from './swap-parsing'
 
 const TAG = '[swap]'
 
@@ -41,6 +49,12 @@ const isBitcoin = (c: ChainDef) => c.networkId === BTC_NETWORK_ID
 // CAIP namespace parser is shared with the picker so a future namespace
 // addition (Solana SPL, etc.) only needs editing in one place.
 import { parseCaip } from '../shared/swap-discovery'
+import {
+  DEFAULT_SLIPPAGE_BPS,
+  MAX_SLIPPAGE_BPS,
+  MIN_SLIPPAGE_BPS,
+  normalizeSlippageBps,
+} from '../shared/slippage'
 
 /** True for ERC-20 / BEP-20 / TRC-20 token sources. */
 function isTokenCaip(caip: string): boolean {
@@ -103,12 +117,6 @@ const DEPOSIT_GAS_LIMITS: Record<string, bigint> = {
   arbitrum: 300000n,  // Arbitrum gas units != mainnet gas units
   optimism: 200000n,
 }
-
-/** Memo length limits — THORChain global limit is 250 bytes.
- *  THORNode constructs memos optimized for source chain constraints (e.g. short
- *  asset names like AVAX.USDT instead of AVAX.USDT-0x...) so we trust the memo
- *  from Pioneer/THORNode and only enforce the THORChain protocol limit. */
-const MEMO_LIMIT = 250
 
 // Router/inbound-address validation belongs in pioneer-router (which runs
 // each integration's own checks before returning a quote). The vault trusts
@@ -277,11 +285,14 @@ export async function getSwapQuote(params: SwapQuoteParams): Promise<SwapQuote> 
   // volatile pair). Anything outside [10, 5000] bps is clamped to that range.
   // Default to 100 bps (1%) when caller omits the field.
   if (params.slippageBps === 0) {
-    throw new Error('Slippage of 0 is not allowed — choose a tolerance between 0.1% and 50%')
+    throw new Error(
+      `Slippage of 0 is not allowed — choose a tolerance between ` +
+      `${MIN_SLIPPAGE_BPS / 100}% and ${MAX_SLIPPAGE_BPS / 100}%`,
+    )
   }
   const slippageBps = params.slippageBps == null
-    ? 100
-    : Math.max(10, Math.min(5000, Math.round(params.slippageBps)))
+    ? DEFAULT_SLIPPAGE_BPS
+    : normalizeSlippageBps(params.slippageBps)
 
   const pioneer = await getPioneer()
 
@@ -348,6 +359,34 @@ export async function getSwapQuote(params: SwapQuoteParams): Promise<SwapQuote> 
     ? `${result.swapper} via ${result.integration}`
     : (result.integration || 'unknown')
   swapLog(`${TAG} Quote: ${result.expectedOutput} (${route}), memo=${result.memo || 'NONE'}, router=${result.router || 'NONE'}, expiry=${result.expiry}`)
+
+  // ── Refund-risk boundaries (every route) ──────────────────────────────
+  // A protocol refunds when the emitted amount lands below the memo's price
+  // limit — and the refund itself burns another outbound fee (observed:
+  // $17.76 BTC→ETH came back as $14.52). Two unit-safe gates at quote time:
+  //
+  // 1. Fees eating the slippage allowance. totalBps is basis points across
+  //    every integration. If quoted fees >= the slippage tolerance, the swap
+  //    only completes when the price moves in our favor during confirmation —
+  //    on small amounts the fixed outbound fee guarantees a refund instead.
+  const feeBps = Number(result.fees?.totalBps) || 0
+  if (feeBps >= slippageBps) {
+    throw new Error(
+      `Swap amount too low: quoted fees (${(feeBps / 100).toFixed(2)}%) meet or exceed the ` +
+      `slippage allowance (${(slippageBps / 100).toFixed(2)}%), so the protocol would refund ` +
+      `this swap on-chain — minus another network fee. Increase the amount or choose Custom ` +
+      `slippage above ${(feeBps / 100).toFixed(2)}%.`
+    )
+  }
+  // 2. Route-declared minimum sell amount — enforced for ALL integrations
+  //    (previously only the NEAR Intents block checked it, so THORChain
+  //    routes sailed past their recommended_min_amount_in).
+  if (result.minAmountIn && parseFloat(params.amount) < parseFloat(result.minAmountIn)) {
+    throw new Error(
+      `Amount below this route's minimum (~${result.minAmountIn}). ` +
+      `Smaller deposits are systematically refunded after fees.`
+    )
+  }
 
   // NEAR Intents: solver-network minimum amount check for ALL source chains.
   // Solvers must front the destination-chain gas and wait for source confirmations;
@@ -501,7 +540,7 @@ export interface SwapContext {
   wallet: SwapWallet
   getAllChains: () => ChainDef[]
   getRpcUrl: (chain: ChainDef) => string | undefined
-  getBtcXpub: () => { xpub: string; accountPath?: number[] } | undefined  // selected BTC xpub + account path
+  getBtcXpub: () => { xpub: string; scriptType: string; accountPath?: number[] } | undefined  // selected BTC xpub + account metadata
   getAllBtcXpubs: () => Array<{ xpub: string; scriptType: string; accountPath: number[] }>  // all funded BTC xpubs
   /** Wrap signing ops for emulator (shows confirm UI). Pass-through on real device. */
   wrapSign: (fn: () => Promise<any>, details: { operation: string; chain?: string; to?: string; value?: string; memo?: string }) => Promise<any>
@@ -513,6 +552,20 @@ export interface SwapContext {
    *  Returns undefined when unknown (no cached features / policy not reported).
    *  Used to gate Solana swaps, which can only blind-sign. */
   isAdvancedModeEnabled?: () => boolean | undefined
+  /** User's configured Solana RPC, for the host-side outflow check. */
+  getSolanaRpcEndpoint?: () => string | undefined
+  /** Durable ClearSign evidence sink owned by Vault (no-op for callers that do not persist). */
+  onClearSignEvent?: (event: {
+    outcome: 'signed' | 'blocked'
+    chain: string
+    format: string
+    label: string
+    payload: string
+    keyId?: number
+    sentToDevice: boolean
+    request?: Record<string, unknown>
+    error?: string
+  }) => void
 }
 
 /** Sentinel no-op for SwapContext.pushSubStage in REST/headless paths. */
@@ -520,7 +573,7 @@ export const NOOP_PUSH_SUBSTAGE = (_stage: SwapSubStage): void => { /* intention
 
 /** Execute a swap: build tx, sign on device, broadcast */
 export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): Promise<SwapResult> {
-  const { wallet, getAllChains, getRpcUrl, getBtcXpub, getAllBtcXpubs, wrapSign, pushSubStage } = ctx
+  const { wallet, getAllChains, getRpcUrl, getBtcXpub, getAllBtcXpubs, wrapSign, pushSubStage, onClearSignEvent } = ctx
   const stage = (s: SwapSubStage) => { try { pushSubStage(s) } catch { /* never block on push */ } }
 
   // Resolve source chain
@@ -535,7 +588,7 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
   let fromAddress = params.fromAddressOverride
   if (!fromAddress) {
     const fromPath = fromChain.chainFamily === 'evm' && params.fromEvmAddressIndex != null
-      ? [0x8000002C, 0x8000003C, 0x80000000, 0, params.fromEvmAddressIndex]
+      ? evmAddressPath(params.fromEvmAddressIndex)
       : fromChain.defaultPath
     const addrParams: any = {
       addressNList: fromPath,
@@ -593,12 +646,7 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
   const isMemolessTransfer = (fromIsUtxo || fromIsSolana) && !!params.inboundAddress && !params.memo
   if (!params.inboundAddress && !isNativeDeposit && !hasPrebuiltTx) throw new Error('Missing inbound vault address from quote')
   if (!params.memo && !hasPrebuiltTx && !isMemolessTransfer) throw new Error('Missing swap memo from quote')
-  if (params.memo) {
-    const memoByteLength = Buffer.byteLength(params.memo, 'utf8')
-    if (memoByteLength > MEMO_LIMIT) {
-      throw new Error(`Swap memo too long (${memoByteLength} bytes, THORChain max ${MEMO_LIMIT})`)
-    }
-  }
+  assertSwapMemoFitsSource(params.memo, params.fromCaip)
 
   swapLog(`${TAG} Executing: ${params.fromCaip} → ${params.toCaip}, amount=${params.amount}`)
   if (hasPrebuiltTx) {
@@ -621,7 +669,24 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
     // Skip the EVM-only buildRelaySwapTx and feed it straight to the Solana signer.
     if (fromChain.chainFamily === 'solana' && params.relayTx?.serializedTx) {
       swapLog(`${TAG} Relay Solana prebuilt tx — bypassing EVM relay builder`)
-      unsignedTx = { addressNList: fromChain.defaultPath, rawTx: params.relayTx.serializedTx }
+      // A signed KKSOLSC1 schema lets the device decode this instruction —
+      // program, amount, destination — instead of showing a blind-sign prompt.
+      // findSolanaSchema declines when the message still carries lookup
+      // tables, since firmware will not apply a schema to accounts that are
+      // absent from the signed bytes.
+      const solSchema = findSolanaSchema(params.relayTx.serializedTx)
+      if (solSchema) {
+        swapLog(`${TAG} clear-sign schema attached: ${solSchema.program}/${solSchema.instruction} (keyId=${solSchema.signerKeyId})`)
+      }
+      unsignedTx = {
+        addressNList: fromChain.defaultPath,
+        rawTx: params.relayTx.serializedTx,
+        allowBlindSigning: params.allowSolanaBlindSigning === true,
+        swapMetadata: params.relayTx.solanaSwapMetadata,
+        ...(solSchema
+          ? { schema: { payload: solSchema.payload, signature: solSchema.signature, signerKeyId: solSchema.signerKeyId } }
+          : {}),
+      }
     } else if (fromChain.chainFamily === 'tron') {
       // Tron has no nonces — buildRelaySwapTx is EVM-only. Route through TronGrid txbuilder.
       swapLog(`${TAG} Relay Tron prebuilt tx — bypassing EVM relay builder`)
@@ -656,7 +721,7 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
         const rpcUrl = getRpcUrl(fromChain)
         stage('approve-broadcasting')
         if (rpcUrl) {
-          approvalTxid = await broadcastEvmTx(rpcUrl, approveHex)
+          approvalTxid = await broadcastEvmTx(rpcUrl, approveHex, fromAddress)
           swapLog(`${TAG} Relay-path approve broadcast: ${approvalTxid}`)
           stage('approve-waiting-receipt')
           const receipt = await waitForTxReceipt(rpcUrl, approvalTxid, 180_000)
@@ -681,11 +746,12 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
   // ── UTXO chains: send to vault, memo in OP_RETURN ──
   } else if (fromChain.chainFamily === 'utxo') {
     let xpub: string | undefined
+    let scriptTypeOverride: string | undefined
     let accountPath: number[] | undefined
     let allXpubs: Array<{ xpub: string; scriptType: string; accountPath: number[] }> | undefined
 
     if (isBitcoin(fromChain)) {
-      // BTC: aggregate UTXOs from ALL funded xpubs (p2pkh + p2sh-p2wpkh + p2wpkh)
+      // BTC: aggregate UTXOs from every device-supported account type.
       try {
         allXpubs = getAllBtcXpubs()
         if (allXpubs.length > 0) {
@@ -693,6 +759,7 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
           // Primary xpub for change address = selected, or first funded
           const btcInfo = getBtcXpub()
           xpub = btcInfo?.xpub || allXpubs[0].xpub
+          scriptTypeOverride = btcInfo?.scriptType || allXpubs[0].scriptType
           accountPath = btcInfo?.accountPath || allXpubs[0].accountPath
         }
       } catch { /* BTC account manager not ready */ }
@@ -700,16 +767,17 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
         // Fallback: single selected xpub
         try {
           const btcInfo = getBtcXpub()
-          if (btcInfo) { xpub = btcInfo.xpub; accountPath = btcInfo.accountPath }
+          if (btcInfo) { xpub = btcInfo.xpub; scriptTypeOverride = btcInfo.scriptType; accountPath = btcInfo.accountPath }
         } catch {}
       }
       if (!xpub) {
         // Lazy-init: btcAccountManager hasn't been hydrated (user opened swap
-        // without visiting BTC dashboard first). Derive ALL three scriptTypes
-        // (Legacy/SegWit/NativeSegWit) from device — funds may live on any.
+        // without visiting BTC dashboard first). Derive every supported account
+        // type; P2TR is included only when firmware advertises the capability.
         // Without this we'd fall through to the chain.scriptType fallback below
         // which is `p2pkh` (Legacy) and miss every modern wallet.
-        const paths = BTC_SCRIPT_TYPES.map(st => ({
+        const btcScriptTypes = await supportedBtcScriptTypes(wallet)
+        const paths = btcScriptTypes.map(st => ({
           addressNList: btcAccountPath(st.purpose, 0),
           coin: 'Bitcoin',
           scriptType: st.scriptType,
@@ -717,13 +785,14 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
         }))
         const results = await wallet.getPublicKeys(paths)
         const derived: Array<{ xpub: string; scriptType: string; accountPath: number[] }> = []
-        for (let i = 0; i < BTC_SCRIPT_TYPES.length; i++) {
+        for (let i = 0; i < btcScriptTypes.length; i++) {
           const xp = results?.[i]?.xpub
-          if (xp) derived.push({ xpub: xp, scriptType: BTC_SCRIPT_TYPES[i].scriptType, accountPath: paths[i].addressNList })
+          if (xp) derived.push({ xpub: xp, scriptType: btcScriptTypes[i].scriptType, accountPath: paths[i].addressNList })
         }
         if (derived.length > 0) {
           const native = derived.find(d => d.scriptType === 'p2wpkh') || derived[0]
           xpub = native.xpub
+          scriptTypeOverride = native.scriptType
           accountPath = native.accountPath
           allXpubs = derived
           swapLog(`${TAG} BTC lazy-derive: ${derived.length} scriptTypes from device (primary=${native.scriptType})`)
@@ -754,6 +823,7 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
       fromAddress,
       xpub,
       allXpubs,
+      scriptTypeOverride,
       accountPath,
     })
     unsignedTx = buildResult.unsignedTx
@@ -826,32 +896,171 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
     unsignedTx = buildResult.unsignedTx
   }
 
-  // Solana swaps are v0 (versioned) txs the device can only blind-sign via
-  // solanaSignMessage. Firmware hard-gates that path behind the AdvancedMode
-  // policy (fsm_msg_solana.h) — when it's off the device shows a "Blocked"
-  // screen and returns a generic ActionCancelled whose real reason ("Message
-  // signing disabled by policy") is dropped by hdwallet's transport. Detect the
-  // disabled policy up front so the UI can prompt the user to enable blind
-  // signing instead of bouncing off an opaque device cancel. Only block when we
-  // positively know the policy is disabled; if unknown, let signing proceed.
-  if (fromChain.chainFamily === 'solana' && ctx.isAdvancedModeEnabled?.() === false) {
-    throw new Error(SOLANA_BLIND_SIGNING_REQUIRED)
+  // Prebuilt Relay Solana payloads currently use a custom program plus
+  // lookup-table accounts. Without a transaction-bound ClearSign descriptor the
+  // device must classify that exact route as opaque. Ask for explicit one-shot
+  // consent before the hardware prompt, but do not block other Solana or v0
+  // transactions that firmware can natively ClearSign.
+  const needsOpaqueSolanaFallback =
+    fromChain.chainFamily === 'solana' &&
+    !!params.relayTx?.serializedTx &&
+    !params.relayTx.solanaSwapMetadata &&
+    // A reusable schema lets the device read this instruction, so no
+    // blind-sign consent is needed.
+    !findSolanaSchema(params.relayTx.serializedTx)
+  if (
+    needsOpaqueSolanaFallback &&
+    ctx.isAdvancedModeEnabled?.() !== true &&
+    params.allowSolanaBlindSigning !== true
+  ) {
+    // The device can't verify this transaction, so check it here instead:
+    // simulate against an independent RPC and report what actually leaves the
+    // wallet. This catches a quote server that built a transaction differing
+    // from the quote the user approved. It is NOT device verification — a
+    // compromised host could fake it — so the UI must say "checked on this
+    // computer", never "verified". Best-effort: a failed check reports
+    // unknown and still requires explicit consent.
+    let outflow: string | undefined
+    try {
+      const { checkSolanaOutflow } = await import('./solana-outflow')
+      const { DEFAULT_SOLANA_RPC_ENDPOINT, createRpcAltFetcher } = await import('./solana-alt')
+      const endpoint = ctx.getSolanaRpcEndpoint?.() || DEFAULT_SOLANA_RPC_ENDPOINT
+      // For a token-source swap the SOL balance barely moves — the tokens are
+      // what leave. Watch the source mint's accounts or the report is
+      // misleadingly reassuring.
+      const sourceMint = params.fromCaip?.includes('/token:')
+        ? params.fromCaip.split('/token:')[1]
+        : undefined
+      const r = await checkSolanaOutflow(params.relayTx!.serializedTx!, fromAddress, sourceMint, endpoint)
+
+      // Name WHY the device can't clear-sign this. Firmware has three
+      // independent triggers (unknown program / lookup-table accounts /
+      // unchecked SPL Transfer with no mint) and the generic "confirm this
+      // transaction" prompt hides which one fired — so decode host-side and
+      // say it out loud. Diagnostic only; never a security claim.
+      let reason: string | undefined
+      let decoded: string[] | undefined
+      try {
+        const { buildSolanaDecodedInfo } = await import('./solana-clearsign')
+        const d = await buildSolanaDecodedInfo(params.relayTx!.serializedTx!, createRpcAltFetcher(endpoint))
+        const unknownPrograms = d.instructions
+          .filter(i => i.status === 'unknown-program')
+          .map(i => i.programName || i.programId)
+        const parts: string[] = []
+        if (unknownPrograms.length) parts.push(`unrecognized program(s): ${[...new Set(unknownPrograms)].join(', ')}`)
+        if (d.altPubkeys.length) parts.push(`${d.altPubkeys.length} lookup table(s)`)
+        const uncheckedTransfer = d.instructions.some(
+          i => /token/i.test(i.programName || '') && /^transfer$/i.test(i.instructionName || ''))
+        if (uncheckedTransfer) parts.push('SPL Transfer without a mint (unchecked)')
+        reason = parts.join('; ') || undefined
+
+        // Programs in the registry decode fully — show the user what each
+        // instruction actually does, which is the "amount and destination"
+        // the device itself can't reach for these routes.
+        decoded = d.instructions
+          .filter(i => i.status === 'known')
+          .map(i => {
+            const amt = i.args.find(a => a.name === 'amount')?.value
+            // Match the destination label EXACTLY. A loose /to\b/ also matches
+            // "refundTo" — which is the sender's own address — and .find()
+            // returns it first, so the panel showed you sending to yourself.
+            const dest = i.accounts.find(a => /^(vault|destination|recipient)$/i.test(a.label || ''))?.pubkey
+            return [
+              `${i.programName}: ${i.instructionName}`,
+              amt ? `amount ${amt}` : null,
+              dest ? `→ ${dest.slice(0, 6)}…${dest.slice(-4)}` : null,
+            ].filter(Boolean).join(' · ')
+          })
+        if (!decoded.length) decoded = undefined
+
+        swapLog(`${TAG} opaque Solana tx — ${reason || 'reason undetermined'}; instructions: ` +
+          d.instructions.map(i => `${i.programName || i.programId}/${i.instructionName || i.status}`).join(', '))
+      } catch (e: any) {
+        swapLog(`${TAG} opaque-reason decode failed: ${e?.message}`)
+      }
+
+      // Decimals + symbol so the panel shows "100 USDT", not raw base units.
+      // (This branch sits outside the builder block that resolves asset meta,
+      // so look it up here rather than reaching for an out-of-scope binding.)
+      const srcMeta = (await getSwapAssets()).find(a => a.caip === params.fromCaip)
+      const srcDecimals = srcMeta?.decimals ?? params.tokenDecimals
+      outflow = JSON.stringify({
+        solAfter: r.solLamportsAfter.toString(),
+        tokensAfter: r.tokensAfter.map(t => ({
+          mint: t.mint,
+          amount: t.amountAfter.toString(),
+          decimals: srcDecimals,
+          symbol: srcMeta?.symbol,
+        })),
+        spending: params.amount,
+        spendingSymbol: srcMeta?.symbol,
+        unavailable: r.unavailable,
+        reason,
+        decoded,
+      })
+    } catch (e: any) {
+      swapLog(`${TAG} outflow check failed: ${e?.message}`)
+    }
+    throw new Error(outflow
+      ? `${SOLANA_BLIND_SIGNING_REQUIRED} ${outflow}`
+      : SOLANA_BLIND_SIGNING_REQUIRED)
   }
 
   // 4. Sign on device (user confirms tx details on hardware wallet)
   swapLog(`${TAG} Signing ${fromChain.chainFamily} tx via ${fromChain.signMethod}...`)
   stage('swap-signing')
   let signedTx: any
+  const clearSignMaterial = unsignedTx?.schema?.payload
+    ? {
+        payload: String(unsignedTx.schema.payload),
+        format: 'KKSOLSC1_BASE64',
+        keyId: unsignedTx.schema.signerKeyId,
+        label: `ClearSign ${fromChain.coin} swap`,
+      }
+    : unsignedTx?.txMetadata?.signedPayload
+      ? {
+          payload: unsignedTx.txMetadata.signedPayload instanceof Uint8Array
+            ? Buffer.from(unsignedTx.txMetadata.signedPayload).toString('hex')
+            : String(unsignedTx.txMetadata.signedPayload),
+          format: 'EVM_TX_METADATA',
+          keyId: unsignedTx.txMetadata.keyId,
+          label: `ClearSign ${fromChain.coin} swap`,
+        }
+      : undefined
+  const clearSignRequest = clearSignMaterial ? {
+    fromCaip: params.fromCaip,
+    toCaip: params.toCaip,
+    integration: params.integration,
+    swapper: params.swapper,
+  } : undefined
+  let clearSignSentToDevice = false
   try {
     signedTx = await wrapSign(
-      () => txb.signTx(wallet, fromChain, unsignedTx),
+      () => {
+        clearSignSentToDevice = true
+        return txb.signTx(wallet, fromChain, unsignedTx)
+      },
       { operation: 'swap', chain: fromChain.coin, to: params.inboundAddress, value: params.amount, memo: params.memo },
     )
+    if (clearSignMaterial) onClearSignEvent?.({
+      outcome: 'signed', chain: fromChain.coin, ...clearSignMaterial,
+      keyId: Number.isInteger(clearSignMaterial.keyId) ? clearSignMaterial.keyId : undefined,
+      sentToDevice: clearSignSentToDevice, request: clearSignRequest,
+    })
   } catch (e: any) {
-    console.error(`${TAG} SIGN FAILED: ${e.message}`)
+    // hdwallet throws the decoded protobuf Failure object, not an Error — log
+    // and rethrow the unwrapped reason so it survives the RPC boundary.
+    const reason = deviceErrorMessage(e)
+    if (clearSignMaterial) onClearSignEvent?.({
+      outcome: 'blocked', chain: fromChain.coin, ...clearSignMaterial,
+      keyId: Number.isInteger(clearSignMaterial.keyId) ? clearSignMaterial.keyId : undefined,
+      sentToDevice: clearSignSentToDevice, request: clearSignRequest,
+      error: reason,
+    })
+    console.error(`${TAG} SIGN FAILED: ${reason}`)
     console.error(`${TAG}   chain=${fromChain.id}, method=${fromChain.signMethod}`)
-    console.error(`${TAG}   stack: ${e.stack?.split('\n').slice(0, 5).join('\n')}`)
-    throw e
+    if (e instanceof Error && e.stack) console.error(`${TAG}   stack: ${e.stack.split('\n').slice(0, 5).join('\n')}`)
+    throw toDeviceError(e)
   }
   swapLog(`${TAG} Sign complete, serialized=${!!signedTx?.serialized || !!signedTx?.serializedTx}`)
 
@@ -867,9 +1076,14 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
       throw new Error(`Cannot extract serialized tx from signed result: ${JSON.stringify(signedTx).slice(0, 200)}`)
     }
     try {
-      txid = await broadcastEvmTx(swapRpcUrl, serializedHex)
+      txid = await broadcastEvmTx(swapRpcUrl, serializedHex, fromAddress)
       swapLog(`${TAG} Broadcast via direct RPC: ${txid}`)
     } catch (directErr: any) {
+      // A signer-verification failure is a local safety decision, not an RPC
+      // availability problem. Never route the rejected bytes around the guard
+      // through Pioneer.
+      if (directErr instanceof EvmSignerVerificationError) throw directErr
+
       // The pre-sign balance check in buildRelaySwapTx already verified
       // value + gas <= native balance against this same RPC URL. So a node
       // "insufficient funds" here is NOT a real gas shortage — it's a stale
@@ -937,7 +1151,7 @@ export async function previewSwapBuild(
   let fromAddress = params.fromAddressOverride
   if (!fromAddress) {
     const fromPath = fromChain.chainFamily === 'evm' && params.fromEvmAddressIndex != null
-      ? [0x8000002C, 0x8000003C, 0x80000000, 0, params.fromEvmAddressIndex]
+      ? evmAddressPath(params.fromEvmAddressIndex)
       : fromChain.defaultPath
     const addrParams: any = {
       addressNList: fromPath,
@@ -958,6 +1172,7 @@ export async function previewSwapBuild(
   const isMemolessTransfer = (fromIsUtxoPreview || fromIsSolanaPreview) && !!params.inboundAddress && !params.memo
   if (!params.inboundAddress && !isNativeDeposit && !hasPrebuiltTx) throw new Error('Missing inbound vault address from quote')
   if (!params.memo && !hasPrebuiltTx && !isMemolessTransfer) throw new Error('Missing swap memo from quote')
+  assertSwapMemoFitsSource(params.memo, params.fromCaip)
 
   const pioneer = await getPioneer()
 
@@ -987,6 +1202,7 @@ export async function previewSwapBuild(
   }
   if (fromChain.chainFamily === 'utxo') {
     let xpub: string | undefined
+    let scriptTypeOverride: string | undefined
     let accountPath: number[] | undefined
     let allXpubs: Array<{ xpub: string; scriptType: string; accountPath: number[] }> | undefined
     if (isBitcoin(fromChain)) {
@@ -995,6 +1211,7 @@ export async function previewSwapBuild(
         if (allXpubs.length > 0) {
           const btcInfo = getBtcXpub()
           xpub = btcInfo?.xpub || allXpubs[0].xpub
+          scriptTypeOverride = btcInfo?.scriptType || allXpubs[0].scriptType
           accountPath = btcInfo?.accountPath || allXpubs[0].accountPath
         }
       } catch { /* BTC account manager not ready */ }
@@ -1006,13 +1223,14 @@ export async function previewSwapBuild(
       // standalone ZEC sends worked because they take a different code path.
       if (!xpub) {
         const btcInfo = (() => { try { return getBtcXpub() } catch { return undefined } })()
-        if (btcInfo) { xpub = btcInfo.xpub; accountPath = btcInfo.accountPath }
+        if (btcInfo) { xpub = btcInfo.xpub; scriptTypeOverride = btcInfo.scriptType; accountPath = btcInfo.accountPath }
       }
     }
     if (!xpub && isBitcoin(fromChain)) {
-      // Lazy-init: same as executeSwap — derive all 3 BTC scriptTypes when
+      // Lazy-init: same as executeSwap — derive all supported BTC scriptTypes when
       // btcAccountManager is empty. See executeSwap path for rationale.
-      const paths = BTC_SCRIPT_TYPES.map(st => ({
+      const btcScriptTypes = await supportedBtcScriptTypes(wallet)
+      const paths = btcScriptTypes.map(st => ({
         addressNList: btcAccountPath(st.purpose, 0),
         coin: 'Bitcoin',
         scriptType: st.scriptType,
@@ -1020,13 +1238,14 @@ export async function previewSwapBuild(
       }))
       const results = await wallet.getPublicKeys(paths)
       const derived: Array<{ xpub: string; scriptType: string; accountPath: number[] }> = []
-      for (let i = 0; i < BTC_SCRIPT_TYPES.length; i++) {
+      for (let i = 0; i < btcScriptTypes.length; i++) {
         const xp = results?.[i]?.xpub
-        if (xp) derived.push({ xpub: xp, scriptType: BTC_SCRIPT_TYPES[i].scriptType, accountPath: paths[i].addressNList })
+        if (xp) derived.push({ xpub: xp, scriptType: btcScriptTypes[i].scriptType, accountPath: paths[i].addressNList })
       }
       if (derived.length > 0) {
         const native = derived.find(d => d.scriptType === 'p2wpkh') || derived[0]
         xpub = native.xpub
+        scriptTypeOverride = native.scriptType
         accountPath = native.accountPath
         allXpubs = derived
       }
@@ -1042,7 +1261,7 @@ export async function previewSwapBuild(
     }
     const buildResult = await txb.buildTx(pioneer, fromChain, {
       chainId: fromChain.id, to: params.inboundAddress, amount: params.amount, memo: params.memo,
-      feeLevel: params.feeLevel, isMax: params.isMax, fromAddress, xpub, allXpubs, accountPath,
+      feeLevel: params.feeLevel, isMax: params.isMax, fromAddress, xpub, allXpubs, scriptTypeOverride, accountPath,
     })
     return { unsignedTx: buildResult.unsignedTx }
   }
@@ -1076,7 +1295,7 @@ async function buildRelaySwapTx(
 ): Promise<{ unsignedTx: any; approveTx?: any; fromAmountBaseUnits?: string; allowance?: { current: string; required: string; sufficient: boolean; spender: string; tokenContract: string }; balance?: { current: string; required: string; sufficient: boolean; tokenContract?: string } }> {
   const relay = params.relayTx!
   const evmSigningPath = params.fromEvmAddressIndex != null
-    ? [0x8000002C, 0x8000003C, 0x80000000, 0, params.fromEvmAddressIndex]
+    ? evmAddressPath(params.fromEvmAddressIndex)
     : fromChain.defaultPath
   console.log(`${TAG} buildRelaySwapTx: relay.value=${relay.value} relay.gasLimit=${relay.gasLimit} relay.maxFeePerGas=${relay.maxFeePerGas} relay.maxPriorityFeePerGas=${relay.maxPriorityFeePerGas}`)
 
@@ -1392,6 +1611,18 @@ async function buildRelaySwapTx(
     data: relay.data,
   }
 
+  // Attach a signed v2 clear-sign schema when one covers this exact
+  // (chain, contract, selector). The schema names the method and its args but
+  // no amounts and no tx hash, so the device decodes the values from the
+  // calldata it is about to sign — turning a blind-sign prompt into a labelled
+  // review. Absent or mismatched: nothing is attached and behaviour is
+  // unchanged, so this can never block a swap.
+  const evmSchema = findEvmSchema(chainId, relay.to, relay.data)
+  if (evmSchema) {
+    unsignedTx.txMetadata = { signedPayload: evmSchema.signedPayload, keyId: evmSchema.keyId }
+    swapLog(`${TAG} clear-sign schema attached: ${evmSchema.method} (keyId=${evmSchema.keyId})`)
+  }
+
   // EIP-1559 fields — use signedFeePerGas (relay's quoted cap) so the signed tx
   // matches the balance check above. Using the live-bumped cap here while checking
   // against the quoted cap would allow a tx that the account cannot cover.
@@ -1476,7 +1707,7 @@ async function buildEvmSwapTx(
   if (!routerAddress) throw new Error('EVM swaps require a router/inboundAddress from the quote')
 
   const evmSigningPath = params.fromEvmAddressIndex != null
-    ? [0x8000002C, 0x8000003C, 0x80000000, 0, params.fromEvmAddressIndex]
+    ? evmAddressPath(params.fromEvmAddressIndex)
     : fromChain.defaultPath
 
   // Use expiry from quote if available, otherwise 1 hour from now
@@ -1720,7 +1951,7 @@ async function buildEvmSwapTx(
       // Broadcast approve tx
       if (rpcUrl) {
         stage('approve-broadcasting')
-        approvalTxid = await broadcastEvmTx(rpcUrl, approveHex)
+        approvalTxid = await broadcastEvmTx(rpcUrl, approveHex, fromAddress)
         swapLog(`${TAG} Approve tx broadcast (direct RPC): ${approvalTxid}`)
 
         // Wait for approval receipt before building deposit — prevents nonce gap if approval reverts.

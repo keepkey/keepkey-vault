@@ -10,6 +10,82 @@ import { COIN_MAP_LONG } from '@pioneer-platform/pioneer-coins'
 
 const TAG = '[swap]'
 
+/** THORChain accepts up to 250 bytes globally, but UTXO deposits encode the
+ * memo in a single OP_RETURN output and the KeepKey signer supports 80 bytes.
+ * Keep this source-aware so an otherwise valid quote cannot survive preview
+ * and then fail only after the user confirms on-device. */
+export const GLOBAL_SWAP_MEMO_MAX_BYTES = 250
+export const UTXO_SWAP_MEMO_MAX_BYTES = 80
+
+export function swapMemoLimitForSource(fromCaip: string): number {
+  return fromCaip.startsWith('bip122:')
+    ? UTXO_SWAP_MEMO_MAX_BYTES
+    : GLOBAL_SWAP_MEMO_MAX_BYTES
+}
+
+export function assertSwapMemoFitsSource(memo: string, fromCaip: string): void {
+  if (!memo) return
+  const byteLength = Buffer.byteLength(memo, 'utf8')
+  const limit = swapMemoLimitForSource(fromCaip)
+  if (byteLength <= limit) return
+
+  const source = fromCaip.startsWith('bip122:') ? 'UTXO source chain' : 'swap protocol'
+  throw new Error(
+    `Swap route memo is too long for this ${source} ` +
+    `(${byteLength} bytes; maximum ${limit}). Refresh the quote or choose another route.`,
+  )
+}
+
+function decodeStrictBase64(value: unknown, field: string, maxBytes: number): string {
+  if (typeof value !== 'string' || value.length === 0) {
+    throw new Error(`Invalid Solana ClearSign metadata: missing ${field}`)
+  }
+  const normalized = value.replace(/\s+/g, '')
+  if (!/^[A-Za-z0-9+/]*={0,2}$/.test(normalized) || normalized.length % 4 !== 0) {
+    throw new Error(`Invalid Solana ClearSign metadata: ${field} is not base64`)
+  }
+  const bytes = Buffer.from(normalized, 'base64')
+  if (bytes.length === 0 || bytes.length > maxBytes) {
+    throw new Error(
+      `Invalid Solana ClearSign metadata: ${field} must be 1..${maxBytes} bytes`,
+    )
+  }
+  return normalized
+}
+
+/** Extract the provider-signed KKSOLSW1 envelope without manufacturing trust in
+ * the Vault. Missing metadata means the device retains its opaque fallback;
+ * partially supplied or malformed metadata rejects the quote to prevent a
+ * silent ClearSign downgrade. */
+function parseSolanaSwapMetadata(...candidates: unknown[]): RelayTxParams['solanaSwapMetadata'] {
+  const candidate = candidates.find((value) => value != null)
+  if (candidate == null) return undefined
+  if (typeof candidate !== 'object') {
+    throw new Error('Invalid Solana ClearSign metadata: expected an object')
+  }
+  const metadata = candidate as Record<string, unknown>
+  const payload = decodeStrictBase64(
+    metadata.payload ?? metadata.signedPayload ?? metadata.signed_payload,
+    'payload',
+    320,
+  )
+  const signature = decodeStrictBase64(
+    metadata.signature,
+    'signature',
+    64,
+  )
+  if (Buffer.from(signature, 'base64').length !== 64) {
+    throw new Error('Invalid Solana ClearSign metadata: signature must be 64 bytes')
+  }
+  const signerKeyId = Number(
+    metadata.signerKeyId ?? metadata.signer_key_id ?? metadata.keyId ?? metadata.key_id,
+  )
+  if (!Number.isInteger(signerKeyId) || signerKeyId < 0 || signerKeyId > 3) {
+    throw new Error('Invalid Solana ClearSign metadata: signerKeyId must be 0..3')
+  }
+  return { payload, signature, signerKeyId }
+}
+
 // ── Asset mapping helpers ───────────────────────────────────────────
 
 /** True for assets that swap via a THORChain/Maya MsgDeposit (no inbound vault
@@ -125,7 +201,8 @@ export function parseQuoteResponse(
 
 /** Parse ONE Pioneer quote entry into SwapQuote. Throws when the quote is not
  *  buildable (zero/empty output, missing inbound address, EVM inbound for a
- *  UTXO source, or no memo/calldata/deposit instruction). */
+ *  UTXO source, source-chain memo overflow, or no memo/calldata/deposit
+ *  instruction). */
 function parseSingleQuote(
   best: any,
   params: { fromCaip: string; toCaip: string; slippageBps?: number },
@@ -209,6 +286,14 @@ function parseSingleQuote(
   let relayTx: RelayTxParams | undefined
 
   if (hasSolanaPrebuiltTx) {
+    const solanaSwapMetadata = parseSolanaSwapMetadata(
+      txParams.solanaSwapMetadata,
+      txParams.solana_swap_metadata,
+      txParams.clearSignMetadata,
+      txParams.clearsign_metadata,
+      quote.solanaSwapMetadata,
+      quote.meta?.solanaSwapMetadata,
+    )
     relayTx = {
       to: txParams.recipientAddress || '',
       data: '0x',
@@ -216,6 +301,7 @@ function parseSingleQuote(
       gasLimit: undefined,
       chainId: 0,
       serializedTx: txParams.serializedTx,
+      solanaSwapMetadata,
     }
     console.log(`${TAG} ${integration} (${swapper}) — Solana prebuilt tx extracted (recipient=${txParams.recipientAddress})`)
   } else if (hasPrebuiltTx) {
@@ -242,6 +328,7 @@ function parseSingleQuote(
   // Memo lives in txParams (Pioneer constructs it), fallback to raw
   // Relay quotes don't use memos — the calldata IS the swap instruction
   const memo = txParams.memo || quote.memo || raw.memo || ''
+  assertSwapMemoFitsSource(memo, params.fromCaip)
   // Router: raw.router or txParams.recipientAddress (Pioneer sets recipient = router for EVM)
   const router = raw.router || quote.router || txParams.recipientAddress
   // Vault/inbound address — check both snake_case and camelCase across all layers
@@ -332,7 +419,19 @@ function parseSingleQuote(
   // Minimum sell amount — solvers/protocols may refuse amounts below this floor
   // Check multiple field names across the response layers (Pioneer schema varies by swapper)
   const minAmountInRaw = quote.minAmountIn ?? best.minAmountIn ?? raw.min_amount_in ?? raw.minAmountIn
-  const minAmountIn: string | undefined = minAmountInRaw != null ? String(minAmountInRaw) : undefined
+  let minAmountIn: string | undefined = minAmountInRaw != null ? String(minAmountInRaw) : undefined
+  // THORChain-family routes publish recommended_min_amount_in — the floor
+  // below which fixed outbound fees dominate and the chain refunds the swap
+  // ("Emit asset less than price limit", minus another outbound fee). It is
+  // ALWAYS 1e8 base units of the sell asset regardless of chain; only trusted
+  // for THORChain routes — other swappers' units vary, so no generic fallback.
+  if (!minAmountIn && /thor|maya/i.test(`${integration} ${swapper ?? ''}`)) {
+    const rec = raw.recommended_min_amount_in ?? quote.recommended_min_amount_in ?? best.recommended_min_amount_in
+    const recNum = rec != null ? Number(rec) : NaN
+    if (Number.isFinite(recNum) && recNum > 0) {
+      minAmountIn = (recNum / 1e8).toFixed(8).replace(/\.?0+$/, '')
+    }
+  }
 
   // For NEAR Intents ERC-20 routes, Pioneer embeds the 1Click deposit address in
   // txParams.recipientAddress (same as quote.meta.depositAddress). This is the

@@ -99,6 +99,17 @@ let pendingSeedAck: {
 } | null = null
 
 /**
+ * Pending screen capture — resolved when the webview posts back the current
+ * oledCanvas as a PNG data URL. Reuses the canvas's existing 1bpp-unpack
+ * logic (onDisplayUpdate) instead of re-implementing PNG encoding on the Bun
+ * side; the webview always has the last-rendered frame, capture or not.
+ */
+let pendingCapture: {
+  id: string
+  resolve: (dataUrl: string) => void
+} | null = null
+
+/**
  * True once the webview has POSTed /_emu/ready. Until then, `sendToWindow`
  * drops messages — calling executeJavascript on a not-yet-loaded WebView
  * crashes the WebContent process (EXC_BREAKPOINT in WebPageProxy launch).
@@ -112,6 +123,11 @@ function startBridge(): number {
     port: 0, // OS picks a free port
     hostname: '127.0.0.1', // localhost only — bridge carries confirm/reject decisions
     reusePort: true,
+    // A confirmation response can resume firmware work (signature generation,
+    // flash encryption, and ring-buffer cleanup) before Bun flushes the small
+    // HTTP response. Keep the localhost bridge alive across that work instead
+    // of emitting Bun's default 10-second request timeout after a valid click.
+    idleTimeout: 120,
     fetch(req) {
       const url = new URL(req.url)
 
@@ -139,6 +155,16 @@ function startBridge(): number {
           pendingSeedAck = null
         }
         return new Response('ok', { headers: { 'Access-Control-Allow-Origin': '*' } })
+      }
+
+      if (url.pathname === '/_emu/capture' && req.method === 'POST') {
+        return req.json().then((body: any) => {
+          if (pendingCapture && pendingCapture.id === body.id) {
+            pendingCapture.resolve(body.dataUrl)
+            pendingCapture = null
+          }
+          return new Response('ok', { headers: { 'Access-Control-Allow-Origin': '*' } })
+        })
       }
 
       // CORS preflight
@@ -335,6 +361,45 @@ export async function displaySeedWords(mnemonic: string): Promise<void> {
 export function dismissSeedDisplay(): void {
   sendToWindow('seed-dismiss', {})
   sendToWindow('emu-state', { state: 'idle' })
+}
+
+// ── Screen capture ───────────────────────────────────────────────────────
+
+const CAPTURE_TIMEOUT_MS = 5_000
+
+/**
+ * Grab whatever is currently on the emulator's OLED as a PNG data URL — for
+ * an automated test driver to save alongside a txid as visual proof of what
+ * the device actually showed. Reads the webview's live canvas rather than
+ * the raw frame ring, so it captures exactly what a human looking at the
+ * window would see (including the "no real display yet" idle placeholder).
+ */
+export async function captureCurrentFrame(): Promise<string> {
+  if (!emuWindow || !viewReady) {
+    throw new Error(`Emulator window not ready (emuWindow=${!!emuWindow} viewReady=${viewReady}) — cannot capture`)
+  }
+
+  const id = `cap-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  return new Promise<string>((resolve, reject) => {
+    if (pendingCapture) pendingCapture = null // stale request — drop it, no one is awaiting it anymore
+
+    const timer = setTimeout(() => {
+      if (pendingCapture?.id === id) pendingCapture = null
+      reject(new Error('Screen capture timed out — emulator webview did not respond'))
+    }, CAPTURE_TIMEOUT_MS)
+
+    pendingCapture = {
+      id,
+      resolve: (dataUrl: string) => { clearTimeout(timer); resolve(dataUrl) },
+    }
+
+    const delivered = sendToWindow('capture-request', { id })
+    if (!delivered) {
+      clearTimeout(timer)
+      pendingCapture = null
+      reject(new Error('Failed to deliver capture request to emulator webview'))
+    }
+  })
 }
 
 // ── Interactive confirm ─────────────────────────────────────────────────
@@ -588,7 +653,8 @@ function buildEmulatorHTML(bridgePort: number): string {
     color: #e0e0e0;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     user-select: none;
-    overflow: hidden;
+    overflow-x: hidden;
+    overflow-y: auto;
     display: flex;
     flex-direction: column;
     height: 100vh;
@@ -619,19 +685,21 @@ function buildEmulatorHTML(bridgePort: number): string {
     text-transform: uppercase;
   }
   .display-area {
-    flex: 1;
+    flex: 0 0 auto;
     display: flex;
     flex-direction: column;
     align-items: center;
-    justify-content: center;
-    padding: 12px;
+    justify-content: flex-start;
+    padding: 12px 12px 4px;
   }
   .oled {
     background: #000;
     border: 2px solid #333;
     border-radius: 4px;
-    width: 320px;
-    height: 80px;
+    width: min(320px, calc(100vw - 24px));
+    height: auto;
+    aspect-ratio: 4 / 1;
+    flex: 0 0 auto;
     position: relative;
     overflow: hidden;
   }
@@ -659,7 +727,9 @@ function buildEmulatorHTML(bridgePort: number): string {
   .idle-text { color: #666; font-size: 12px; }
   .confirm-meta {
     display: none;
-    padding: 8px 14px 4px;
+    width: min(320px, calc(100vw - 24px));
+    margin: 0 auto;
+    padding: 6px 0 2px;
     font-family: 'Courier New', monospace;
     font-size: 11px;
     line-height: 1.5;
@@ -670,7 +740,15 @@ function buildEmulatorHTML(bridgePort: number): string {
   .confirm-meta .op-label { color: #4fc3f7; font-weight: bold; font-size: 13px; margin-bottom: 4px; }
   .confirm-meta .detail { color: #ccc; font-size: 11px; }
   .confirm-meta .addr { color: #81c784; font-size: 11px; word-break: break-all; }
-  .buttons { display: none; padding: 10px 16px 14px; gap: 12px; justify-content: center; }
+  .buttons {
+    display: none;
+    width: min(320px, calc(100vw - 24px));
+    margin: 0 auto;
+    padding: 6px 0 12px;
+    gap: 12px;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
   .buttons.visible { display: flex; }
   .btn {
     padding: 8px 24px; border: none; border-radius: 6px;
@@ -757,6 +835,7 @@ function buildEmulatorHTML(bridgePort: number): string {
       if (packet.id === 'confirm-dismiss') onConfirmDismiss();
       if (packet.id === 'seed-display') onSeedDisplay(packet.payload);
       if (packet.id === 'seed-dismiss') onSeedDismiss();
+      if (packet.id === 'capture-request') onCaptureRequest(packet.payload);
     }
   };
 
@@ -864,6 +943,11 @@ function buildEmulatorHTML(bridgePort: number): string {
     if (!hasRealDisplay) {
       oled.innerHTML = '<div class="idle-text">KeepKey Emulator Ready</div>';
     }
+  }
+
+  function onCaptureRequest(data) {
+    var dataUrl = oledCanvas.toDataURL('image/png');
+    postBridge('/_emu/capture', { id: data.id, dataUrl: dataUrl });
   }
 
   function esc(str) {

@@ -28,6 +28,7 @@
 
 import bs58 from 'bs58'
 import { solanaPrograms as solanaProgramsData } from '@pioneer-platform/pioneer-discovery'
+import localPrograms from './solana-programs-local.json'
 
 // ── Registry shape ────────────────────────────────────────────────────
 
@@ -65,7 +66,16 @@ export interface SolanaProgramRegistry {
 }
 
 // The JSON is imported as `any`; narrow it so callers get completion.
-export const PROGRAM_REGISTRY: SolanaProgramRegistry = solanaProgramsData as unknown as SolanaProgramRegistry
+// Local entries win over the published pioneer-discovery registry so a newly
+// decoded program (e.g. a bridge router) reaches the review UI without waiting
+// on a package release. Contribute the same entry upstream and drop it here
+// once a published version carries it.
+export const PROGRAM_REGISTRY: SolanaProgramRegistry = {
+  programs: {
+    ...(solanaProgramsData as unknown as SolanaProgramRegistry).programs,
+    ...(localPrograms as unknown as SolanaProgramRegistry).programs,
+  },
+}
 
 // ── Decoded-output types ──────────────────────────────────────────────
 

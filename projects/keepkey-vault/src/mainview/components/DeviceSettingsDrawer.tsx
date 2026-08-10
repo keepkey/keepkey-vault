@@ -5,10 +5,13 @@ import { useTranslation } from "react-i18next"
 import { LanguageSelector } from "../i18n/LanguageSelector"
 import { CurrencySelector } from "./CurrencySelector"
 import { rpcRequest, onRpcMessage } from "../lib/rpc"
-import { IS_MAC } from "../lib/platform"
+import { IS_MAC, IS_WINDOWS } from "../lib/platform"
 import { Z } from "../lib/z-index"
-import type { DeviceStateInfo, AppSettings } from "../../shared/types"
+import type { DeviceStateInfo, AppSettings, EmulatorWalletInfo } from "../../shared/types"
 import { versionCompare } from "../../shared/firmware-versions"
+import { isBitcoinOnlyVariant } from "../../shared/flags"
+import { SelfHostNodePanel } from "./SelfHostNodePanel"
+import { ClearSignStudio } from "./ClearSignStudio"
 
 interface DevicePolicy {
 	policyName?: string
@@ -39,6 +42,8 @@ interface DeviceSettingsDrawerProps {
 	onOpenPairedApps?: () => void
 	onOpenMobilePairing?: () => void
 	onRestApiChanged?: (enabled: boolean) => void
+	/** Self-host node connected (tested OK + saved) — parent closes the drawer and runs the walkthrough. */
+	onNodeConnected?: () => void
 	onWordCountChange?: (count: 12 | 18 | 24) => void
 }
 
@@ -142,7 +147,7 @@ function VerificationBadge({ verified, t }: { verified?: boolean; t: (key: strin
 
 // ── Main Component ──────────────────────────────────────────────────
 
-export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpdate, onDownloadUpdate, onApplyUpdate, updatePhase, updateVersion, appVersion, onOpenAuditLog, onOpenPairedApps, onOpenMobilePairing, onRestApiChanged, onWordCountChange }: DeviceSettingsDrawerProps) {
+export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpdate, onDownloadUpdate, onApplyUpdate, updatePhase, updateVersion, appVersion, onOpenAuditLog, onOpenPairedApps, onOpenMobilePairing, onRestApiChanged, onNodeConnected, onWordCountChange }: DeviceSettingsDrawerProps) {
 	const { t } = useTranslation("settings")
 	const [features, setFeatures] = useState<DeviceFeatures | null>(null)
 	const [featuresError, setFeaturesError] = useState(false)
@@ -161,7 +166,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 	const [removePinConfirm, setRemovePinConfirm] = useState(false)
 	const [togglingPassphrase, setTogglingPassphrase] = useState(false)
 	const [togglingPolicy, setTogglingPolicy] = useState("")
-	const [appSettings, setAppSettings] = useState<AppSettings>({ restApiEnabled: false, pioneerApiBase: '', pioneerServers: [], activePioneerServer: '', fiatCurrency: 'USD', numberLocale: 'en-US', walletConnectEnabled: false, bip85Enabled: false, zcashPrivacyEnabled: false, hiveEnabled: false, emulatorEnabled: false, preReleaseUpdates: false, alphaFirmware: false, privateModeEnabled: false })
+	const [appSettings, setAppSettings] = useState<AppSettings>({ restApiEnabled: false, pioneerApiBase: '', pioneerServers: [], activePioneerServer: '', fiatCurrency: 'USD', numberLocale: 'en-US', walletConnectEnabled: false, bip85Enabled: false, zcashPrivacyEnabled: false, hiveEnabled: false, emulatorEnabled: false, offlineMode: false, btcNodeEnabled: false, btcNodeType: 'blockbook', btcNodeUrl: '', btcOnboardingShown: false, preReleaseUpdates: false, alphaFirmware: false, privateModeEnabled: false })
 	const [togglingRestApi, setTogglingRestApi] = useState(false)
 	const [windowFocusState, setWindowFocusState] = useState<{ refs: number; alwaysOnTop: boolean } | null>(null)
 	const [releasingWindowFocus, setReleasingWindowFocus] = useState(false)
@@ -182,6 +187,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 	const [switchingServer, setSwitchingServer] = useState("")
 	const [resetConfirm, setResetConfirm] = useState(false)
 	const [resetting, setResetting] = useState(false)
+	const [clearSignStudioOpen, setClearSignStudioOpen] = useState(false)
 	const panelRef = useRef<HTMLDivElement>(null)
 
 	// Fetch device features + app settings when drawer opens
@@ -350,6 +356,143 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 		setTogglingEmulator(false)
 	}, [])
 
+	const [togglingOffline, setTogglingOffline] = useState(false)
+	const toggleOffline = useCallback(async (enabled: boolean) => {
+		setTogglingOffline(true)
+		try {
+			const result = await rpcRequest<AppSettings>("setOfflineMode", { enabled }, 10000)
+			setAppSettings(result)
+		} catch (e: any) { console.error("setOfflineMode:", e) }
+		setTogglingOffline(false)
+	}, [])
+
+	// File-picker install of the emulator library. Drag-drop is the other path,
+	// but it's unreliable on Windows (Electrobun raw-input handling swallows OS
+	// file drops — see WINDOWS-QUIRKS.md), so a Browse button is the dependable
+	// route there. Reuses the same backend RPC the drop handler uses; the backend
+	// validates the PE/Mach-O header and normalizes the filename to libkkemu.<ext>.
+	const emuFileRef = useRef<HTMLInputElement>(null)
+	const [installingEmu, setInstallingEmu] = useState(false)
+	const [emuInstallMsg, setEmuInstallMsg] = useState<string | null>(null)
+	const handleEmuFilePick = useCallback(async (input: HTMLInputElement) => {
+		const file = input.files?.[0]
+		input.value = "" // let the user re-pick the same file after a failure
+		if (!file) return
+		const wantExt = IS_WINDOWS ? ".dll" : ".dylib"
+		if (!file.name.toLowerCase().endsWith(wantExt)) {
+			setEmuInstallMsg(`Pick a libkkemu${wantExt} file`)
+			return
+		}
+		setInstallingEmu(true); setEmuInstallMsg(null)
+		try {
+			const bytes = new Uint8Array(await file.arrayBuffer())
+			const CHUNK = 8192
+			let binary = ""
+			for (let i = 0; i < bytes.length; i += CHUNK) binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK))
+			await rpcRequest("emulatorInstallDylib", { data: btoa(binary) }, 30000)
+			// Backend auto-enables the emulator; nudge the app to re-pull settings.
+			window.dispatchEvent(new Event("keepkey-settings-changed"))
+			// First-time install (no existing wallets) — DeviceGrid only shows a
+			// Start card for wallets emulatorListWallets returns, so with none it
+			// has nothing to click. Bootstrap one, same as the drag-drop path.
+			const wallets = await rpcRequest<Array<{ name: string }>>("emulatorListWallets").catch(() => [])
+			if (wallets.length === 0) {
+				try { await rpcRequest("emulatorPair", undefined, 10000) } catch { /* may already be paired */ }
+				await rpcRequest("emulatorInit", { flashName: "default" }, 30000)
+				setEmuInstallMsg("Installed and started.")
+			} else {
+				setEmuInstallMsg("Installed. Start the emulator from the device list.")
+			}
+		} catch (err: any) {
+			setEmuInstallMsg(err?.message || "Install failed")
+		}
+		setInstallingEmu(false)
+	}, [])
+
+	// Emulator wallet (seed) management — switch between saved seeds, generate
+	// or import a new one for the active flash, and reveal the active seed for
+	// backup. All ops are only reachable while deviceState.isEmulator is true
+	// (the Section below is gated on it); emulatorRevealSeed also hard-gates
+	// server-side on engine.isEmulator so it can never fire against real hardware.
+	const [emuWallets, setEmuWallets] = useState<EmulatorWalletInfo[]>([])
+	const [showSeedTools, setShowSeedTools] = useState(false)
+	const [newSeedWordCount, setNewSeedWordCount] = useState<12 | 18 | 24>(12)
+	const [creatingNewSeed, setCreatingNewSeed] = useState(false)
+	const [switchingWallet, setSwitchingWallet] = useState(false)
+	const [importMnemonic, setImportMnemonic] = useState("")
+	const [importingSeed, setImportingSeed] = useState(false)
+	const [revealedSeed, setRevealedSeed] = useState<string | null>(null)
+	const [revealingSeed, setRevealingSeed] = useState(false)
+	const [emuSeedMsg, setEmuSeedMsg] = useState<string | null>(null)
+
+	const reloadEmuWallets = useCallback(async () => {
+		try { setEmuWallets(await rpcRequest<EmulatorWalletInfo[]>("emulatorListWallets", undefined, 10000)) }
+		catch (e: any) { console.error("emulatorListWallets:", e?.message); setEmuSeedMsg(`Wallet list refresh failed: ${e?.message || e}`) }
+	}, [])
+
+	useEffect(() => {
+		if (deviceState.isEmulator) reloadEmuWallets()
+	}, [deviceState.isEmulator, reloadEmuWallets])
+
+	const activeEmuWalletName = emuWallets.find((w) => w.isActive)?.name || "default"
+
+	// A revealed mnemonic belongs to whichever wallet was active when it was
+	// read — clear it the moment the active wallet changes for ANY reason,
+	// including a switch initiated from DeviceGrid's own picker (which calls
+	// emulatorSwitchWallet directly, bypassing switchEmuWallet below).
+	useEffect(() => { setRevealedSeed(null) }, [activeEmuWalletName])
+
+	// Wipe/Stop/Delete/Switch/New-Seed/Import-Seed all mutate the same live
+	// flash + dylib handle — mutually exclusive so a second click mid-flight
+	// can't race two stopEmulator/initEmulator/loadDevice sequences.
+	const emuBusy = wiping || switchingWallet || creatingNewSeed || importingSeed
+
+	const switchEmuWallet = useCallback(async (name: string) => {
+		if (name === activeEmuWalletName) return
+		setSwitchingWallet(true); setEmuSeedMsg(null)
+		try {
+			await rpcRequest("emulatorSwitchWallet", { name }, 30000)
+			await reloadEmuWallets()
+		} catch (e: any) { setEmuSeedMsg(e?.message || "Switch failed") }
+		setSwitchingWallet(false)
+	}, [activeEmuWalletName, reloadEmuWallets])
+
+	const generateNewSeed = useCallback(async () => {
+		if (!confirm(`Wipe "${activeEmuWalletName}" and load a fresh ${newSeedWordCount}-word seed?`)) return
+		setCreatingNewSeed(true); setEmuSeedMsg(null); setRevealedSeed(null)
+		try {
+			await rpcRequest("emulatorCreateWallet", { wordCount: newSeedWordCount }, 30000)
+			setEmuSeedMsg("New seed loaded. Use Reveal Seed below to back it up.")
+			await reloadEmuWallets()
+		} catch (e: any) { setEmuSeedMsg(e?.message || "Seed generation failed") }
+		setCreatingNewSeed(false)
+	}, [activeEmuWalletName, newSeedWordCount, reloadEmuWallets])
+
+	const importCustomSeed = useCallback(async () => {
+		const mnemonic = importMnemonic.trim()
+		const wc = mnemonic.split(/\s+/).filter(Boolean).length
+		if (![12, 18, 24].includes(wc)) { setEmuSeedMsg(`Expected 12, 18, or 24 words, got ${wc}`); return }
+		if (!confirm(`Wipe "${activeEmuWalletName}" and load this seed?`)) return
+		setImportingSeed(true); setEmuSeedMsg(null); setRevealedSeed(null)
+		try {
+			await rpcRequest("emulatorImportWallet", { name: activeEmuWalletName, mnemonic }, 30000)
+			setImportMnemonic("")
+			setEmuSeedMsg("Seed imported.")
+			await reloadEmuWallets()
+		} catch (e: any) { setEmuSeedMsg(e?.message || "Import failed") }
+		setImportingSeed(false)
+	}, [activeEmuWalletName, importMnemonic, reloadEmuWallets])
+
+	const revealSeed = useCallback(async () => {
+		if (revealedSeed) { setRevealedSeed(null); return }
+		setRevealingSeed(true); setEmuSeedMsg(null)
+		try {
+			const result = await rpcRequest<{ mnemonic: string; flashName: string }>("emulatorRevealSeed", undefined, 10000)
+			setRevealedSeed(result.mnemonic)
+		} catch (e: any) { setEmuSeedMsg(e?.message || "Reveal failed") }
+		setRevealingSeed(false)
+	}, [revealedSeed])
+
 	const togglePreRelease = useCallback(async (enabled: boolean) => {
 		setTogglingPreRelease(true)
 		try {
@@ -468,6 +611,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 			// Refresh features to reflect the new state
 			const updated = await rpcRequest<DeviceFeatures>("getFeatures")
 			setFeatures(updated)
+			if (policyName === "AdvancedMode" && !enable) setClearSignStudioOpen(false)
 		} catch (e: any) { console.error("applyPolicy:", e) }
 		setTogglingPolicy("")
 	}, [])
@@ -520,6 +664,18 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 
 	return (
 		<>
+			{/* Hidden dylib file picker — shared by the Settings "Install…" button
+			    and the Emulator section's "Change Version…" button. Lives at the
+			    drawer top level (always mounted) so neither button depends on the
+			    other section's render condition. */}
+			<input
+				ref={emuFileRef}
+				type="file"
+				accept={IS_WINDOWS ? ".dll" : ".dylib"}
+				style={{ display: "none" }}
+				onChange={(e) => handleEmuFilePick(e.currentTarget)}
+			/>
+
 			{/* Backdrop */}
 			{open && (
 				<Box
@@ -583,7 +739,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 				</Flex>
 
 				{/* Content */}
-				<VStack gap="3" align="stretch" p="4">
+				<VStack gap="3" align="stretch" p="4" pb="16">
 
 					{/* ── Language & Currency ─────────────────────────── */}
 					<Section title={t("language")} defaultOpen={false}>
@@ -673,7 +829,8 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 								</Box>
 								<InfoRow label="Mode" value="In-Process (dylib FFI)" />
 								<InfoRow label="Transport" value="Ring Buffer" />
-								<InfoRow label="Flash" value={deviceState.deviceId?.split(":")[0]?.slice(0, 12) + "..." || "—"} />
+								<InfoRow label="Firmware" value={deviceState.firmwareVersion || "—"} />
+								<InfoRow label="Flash" value={activeEmuWalletName} />
 								<InfoRow label="Seed ID" value={deviceState.deviceId?.includes(":") ? deviceState.deviceId.split(":")[1] : "—"} />
 							</VStack>
 
@@ -683,13 +840,13 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 									_hover={{ borderColor: "orange.400", color: "orange.400" }}
 									onClick={async () => {
 										try {
-											setWiping(true)
+											setWiping(true); setRevealedSeed(null)
 											await rpcRequest("wipeDevice", undefined, 30000)
 										} catch (e: any) {
 											console.error("Emulator wipe failed:", e?.message)
 										} finally { setWiping(false) }
 									}}
-									disabled={wiping}
+									disabled={wiping || emuBusy}
 								>
 									{wiping ? "Wiping..." : "Wipe Emulator"}
 								</Button>
@@ -697,12 +854,14 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 									size="sm" variant="outline" borderColor="kk.border" color="kk.textSecondary" px="4" py="2"
 									_hover={{ borderColor: "kk.error", color: "kk.error" }}
 									onClick={async () => {
+										setRevealedSeed(null)
 										try {
 											await rpcRequest("emulatorStop", undefined, 10000)
 										} catch (e: any) {
 											console.error("Emulator stop failed:", e?.message)
 										}
 									}}
+									disabled={emuBusy}
 								>
 									Stop Emulator
 								</Button>
@@ -711,6 +870,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 									_hover={{ borderColor: "kk.error", color: "kk.error" }}
 									onClick={async () => {
 										if (!confirm("Delete flash and stop? This erases the emulator seed.")) return
+										setRevealedSeed(null)
 										try {
 											await rpcRequest("emulatorStop", undefined, 10000)
 											await rpcRequest("emulatorDeleteFlash", { name: "default" }, 5000)
@@ -718,10 +878,103 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 											console.error("Flash delete failed:", e?.message)
 										}
 									}}
+									disabled={emuBusy}
 								>
 									Delete Flash
 								</Button>
+								<Button
+									size="sm" variant="outline" borderColor="kk.border" color="kk.textSecondary" px="4" py="2"
+									_hover={{ borderColor: "kk.gold", color: "kk.gold" }}
+									onClick={() => emuFileRef.current?.click()}
+									disabled={installingEmu || emuBusy}
+								>
+									{installingEmu ? "Installing…" : "Change Version…"}
+								</Button>
+								{emuInstallMsg && <Text fontSize="xs" color="kk.textSecondary">{emuInstallMsg}</Text>}
 							</Flex>
+
+							{/* ── Wallet (seed) switcher — pick a different saved seed ── */}
+							{emuWallets.length > 1 && (
+								<Flex align="center" gap="2" mt="3" wrap="wrap">
+									<Text fontSize="xs" color="kk.textMuted">Wallet:</Text>
+									<Box
+										as="select"
+										value={activeEmuWalletName}
+										onChange={(e: React.ChangeEvent<HTMLSelectElement>) => switchEmuWallet(e.target.value)}
+										disabled={emuBusy}
+										bg="var(--ink-1)" color="kk.textPrimary" borderWidth="1px" borderColor="kk.border"
+										borderRadius="md" fontSize="xs" px="2" py="1"
+									>
+										{emuWallets.map((w) => (
+											<option key={w.name} value={w.name}>{w.label || w.name}{w.firmwareVersion ? ` (fw ${w.firmwareVersion})` : ""}</option>
+										))}
+									</Box>
+								</Flex>
+							)}
+
+							{/* ── Seed tools — adjust or reveal the active wallet's seed ── */}
+							<Box mt="3">
+								<Box as="button" fontSize="xs" color="kk.textMuted" cursor="pointer" _hover={{ color: "kk.textSecondary" }} onClick={() => setShowSeedTools(!showSeedTools)}>
+									{showSeedTools ? "- Hide seed tools" : "+ Seed tools (generate / import / reveal)"}
+								</Box>
+								{showSeedTools && (
+									<VStack align="stretch" gap="3" mt="2" p="3" bg="rgba(255,255,255,0.03)" borderRadius="md">
+										<Box bg="rgba(229,62,62,0.08)" border="1px solid" borderColor="rgba(229,62,62,0.3)" borderRadius="md" px="3" py="2">
+											<Text fontSize="xs" color="red.300" fontWeight="600">
+												Emulator-only. These actions wipe the active flash and never touch real hardware.
+											</Text>
+										</Box>
+
+										{/* Generate a new random seed */}
+										<Flex align="center" gap="2" wrap="wrap">
+											<Flex gap="1">
+												{([12, 18, 24] as const).map((wc) => (
+													<Box
+														key={wc} as="button" px="2" py="1" borderRadius="md" fontSize="xs" fontWeight="500" cursor="pointer"
+														bg={newSeedWordCount === wc ? "kk.gold" : "rgba(255,255,255,0.06)"}
+														color={newSeedWordCount === wc ? "black" : "kk.textSecondary"}
+														onClick={() => setNewSeedWordCount(wc)}
+													>
+														{wc}
+													</Box>
+												))}
+											</Flex>
+											<Button size="xs" variant="outline" onClick={generateNewSeed} disabled={emuBusy}>
+												{creatingNewSeed ? "Generating…" : "New Seed"}
+											</Button>
+										</Flex>
+
+										{/* Import a custom seed */}
+										<VStack align="stretch" gap="1">
+											<Box
+												as="textarea"
+												value={importMnemonic}
+												onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setImportMnemonic(e.target.value)}
+												placeholder="Paste a 12/18/24-word mnemonic to load onto the active wallet"
+												w="100%" rows={2} p={2} bg="var(--ink-1)" color="white" borderWidth="1px" borderColor="gray.700"
+												borderRadius="md" fontSize="xs" fontFamily="mono" resize="none"
+											/>
+											<Button size="xs" variant="outline" alignSelf="flex-start" onClick={importCustomSeed} disabled={emuBusy || !importMnemonic.trim()}>
+												{importingSeed ? "Importing…" : "Import Seed"}
+											</Button>
+										</VStack>
+
+										{/* Reveal the active seed for backup */}
+										<VStack align="stretch" gap="1">
+											<Button size="xs" variant="outline" alignSelf="flex-start" onClick={revealSeed} disabled={revealingSeed}>
+												{revealingSeed ? "Reading…" : revealedSeed ? "Hide Seed" : "Reveal Seed (Backup)"}
+											</Button>
+											{revealedSeed && (
+												<Box bg="var(--ink-1)" borderWidth="1px" borderColor="kk.gold" borderRadius="md" p={2}>
+													<Text fontSize="xs" fontFamily="mono" color="kk.textPrimary" wordBreak="break-word">{revealedSeed}</Text>
+												</Box>
+											)}
+										</VStack>
+
+										{emuSeedMsg && <Text fontSize="xs" color="kk.textSecondary">{emuSeedMsg}</Text>}
+									</VStack>
+								)}
+							</Box>
 						</Section>
 					)}
 
@@ -997,31 +1250,17 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 								/>
 							</Flex>
 
-							{/* Experimental features */}
-							<Flex
-								align="center"
-								justify="space-between"
-								py="3"
-							>
-								<Flex align="center" gap="3">
-									<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(130,100,250,0.1)">
-										<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#8264FA" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-											<path d="M9 3H5a2 2 0 0 0-2 2v4m6-6h10a2 2 0 0 1 2 2v4M9 3v18m0 0h10a2 2 0 0 0 2-2v-4M9 21H5a2 2 0 0 1-2-2v-4" />
-										</svg>
+							{isPolicyEnabled("AdvancedMode") && (
+								<Box px="3" py="3" borderRadius="12px" bg="rgba(233,196,106,0.06)" border="1px solid rgba(233,196,106,0.18)">
+									<Flex align="center" justify="space-between" gap="3">
+										<Box>
+											<Text fontSize="sm" color="kk.textPrimary" fontWeight="600">ClearSign Studio</Text>
+											<Text fontSize="xs" color="kk.textSecondary" mt="0.5">Attest schemas, load a RAM-only signer, and export test evidence.</Text>
+										</Box>
+										<Button size="sm" variant="outline" borderColor="rgba(233,196,106,0.45)" color="kk.gold" onClick={() => setClearSignStudioOpen(true)}>Open Studio</Button>
 									</Flex>
-									<Box>
-										<Text fontSize="md" color="kk.textPrimary" fontWeight="500">{t("experimentalFeatures")}</Text>
-										<Text fontSize="sm" color="kk.textSecondary" mt="0.5">
-											{t("experimentalFeaturesDescription")}
-										</Text>
-									</Box>
-								</Flex>
-								<Toggle
-									checked={isPolicyEnabled("Experimental")}
-									onChange={(v) => handleTogglePolicy("Experimental", v)}
-									disabled={togglingPolicy === "Experimental" || !features}
-								/>
-							</Flex>
+								</Box>
+							)}
 						</VStack>
 					</Section>
 
@@ -1315,9 +1554,43 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 						</VStack>
 					</Section>
 
+					{/* ── Bitcoin node (self-host) — btc-only devices ─── */}
+					{isBitcoinOnlyVariant(deviceState.firmwareVariant) && (
+						<Section title="Bitcoin node" defaultOpen={true}>
+							<SelfHostNodePanel settings={appSettings} onChange={setAppSettings} onConnected={onNodeConnected} />
+						</Section>
+					)}
+
 					{/* ── Feature Flags ──────────────────────────────── */}
 					<Section title={t("featureFlags")} defaultOpen={false}>
 						<VStack gap="4" align="stretch">
+							{/* Offline (airplane) mode toggle */}
+							<Flex justify="space-between" align="center">
+								<Flex align="center" gap="3">
+									<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(224,140,123,0.1)">
+										<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--rose)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+											<line x1="2" y1="2" x2="22" y2="22" />
+											<path d="M8.5 16.5a5 5 0 0 1 7 0" />
+											<path d="M2 8.82a15 15 0 0 1 4.17-2.65" />
+											<path d="M10.66 5c4.01-.36 8.14.9 11.34 3.76" />
+											<path d="M16.85 11.25a10 10 0 0 1 2.22 1.68" />
+											<line x1="12" y1="20" x2="12.01" y2="20" />
+										</svg>
+									</Flex>
+									<Box>
+										<Text fontSize="md" color="kk.textPrimary" fontWeight="500">{t("offlineMode", { defaultValue: "Offline mode" })}</Text>
+										<Text fontSize="sm" color="kk.textSecondary" mt="0.5">
+											{t("offlineModeDescription", { defaultValue: "Airplane mode — no network. Device, addresses, and signing still work; balances, history, and broadcast are disabled." })}
+										</Text>
+									</Box>
+								</Flex>
+								<Toggle
+									checked={appSettings.offlineMode}
+									onChange={toggleOffline}
+									disabled={togglingOffline}
+								/>
+							</Flex>
+
 							{/* WalletConnect toggle */}
 							<Flex justify="space-between" align="center">
 								<Flex align="center" gap="3">
@@ -1424,30 +1697,46 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 								)
 							})()}
 
-							{/* Emulator toggle — macOS-only dev tool, default off */}
-							{IS_MAC && (
-								<Flex justify="space-between" align="center">
-									<Flex align="center" gap="3">
-										<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(168,85,247,0.1)">
-											<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#A855F7" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-												<rect x="4" y="2" width="16" height="20" rx="2" />
-												<line x1="8" y1="6" x2="16" y2="6" />
-												<line x1="12" y1="18" x2="12.01" y2="18" />
-											</svg>
+							{/* Emulator toggle — dev tool, default off. Supported on macOS
+							    (Keychain) and Windows (DPAPI); Linux has no key store wired up. */}
+							{(IS_MAC || IS_WINDOWS) && (
+								<VStack align="stretch" gap="2">
+									<Flex justify="space-between" align="center">
+										<Flex align="center" gap="3">
+											<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(168,85,247,0.1)">
+												<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#A855F7" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+													<rect x="4" y="2" width="16" height="20" rx="2" />
+													<line x1="8" y1="6" x2="16" y2="6" />
+													<line x1="12" y1="18" x2="12.01" y2="18" />
+												</svg>
+											</Flex>
+											<Box>
+												<Text fontSize="md" color="kk.textPrimary" fontWeight="500">Emulator</Text>
+												<Text fontSize="sm" color="kk.textSecondary" mt="0.5">
+													Run a KeepKey firmware emulator locally for development and testing.
+												</Text>
+											</Box>
 										</Flex>
-										<Box>
-											<Text fontSize="md" color="kk.textPrimary" fontWeight="500">Emulator</Text>
-											<Text fontSize="sm" color="kk.textSecondary" mt="0.5">
-												Run a KeepKey firmware emulator locally for development and testing. macOS only.
-											</Text>
-										</Box>
+										<Toggle
+											checked={appSettings.emulatorEnabled}
+											onChange={toggleEmulator}
+											disabled={togglingEmulator}
+										/>
 									</Flex>
-									<Toggle
-										checked={appSettings.emulatorEnabled}
-										onChange={toggleEmulator}
-										disabled={togglingEmulator}
-									/>
-								</Flex>
+									{appSettings.emulatorEnabled && (
+										<Flex align="center" gap="3" pl="44px" wrap="wrap">
+											<Text
+												fontSize="xs"
+												color="kk.gold"
+												cursor="pointer"
+												textDecoration="underline"
+												onClick={() => rpcRequest('openUrl', { url: "https://keepkey.com/emulator" }).catch((e: any) => console.warn('[openUrl]', e?.message))}
+											>
+												Get the emulator at keepkey.com/emulator
+											</Text>
+										</Flex>
+									)}
+								</VStack>
 							)}
 						</VStack>
 					</Section>
@@ -1628,6 +1917,12 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 
 				</VStack>
 			</Box>
+			<ClearSignStudio
+				open={clearSignStudioOpen}
+				onClose={() => setClearSignStudioOpen(false)}
+				advancedMode={isPolicyEnabled("AdvancedMode")}
+				firmwareVersion={deviceState.firmwareVersion}
+			/>
 		</>
 	)
 }

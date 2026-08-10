@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react"
 import { Box, Flex, Text, Button, Spinner, IconButton, Input } from "@chakra-ui/react"
-import { FaCopy, FaCheck, FaTimes, FaChevronDown, FaChevronUp } from "react-icons/fa"
+import { FaCopy, FaCheck, FaTimes, FaChevronDown, FaChevronUp, FaExternalLinkAlt } from "react-icons/fa"
 import { rpcRequest } from "../lib/rpc"
 
 type RoleKeys = { owner: string; active: string; posting: string; memo: string }
@@ -33,6 +33,32 @@ function Confetti() {
 }
 type Avail = { success: boolean; available: boolean; reason?: string }
 type CreateResp = { status: number; success?: boolean; txid?: string; username?: string; error?: string; retryAfter?: number }
+
+// Chakra's bare `variant="outline"` resolves to the gray palette's light-mode
+// pair (dark text on a bright border), which inverts against the glass card.
+// Every other outline button in the app passes colors explicitly; these match
+// that idiom using the v3 tokens this panel already speaks.
+const outlineBtn = {
+	color: "var(--text-1)",
+	borderColor: "var(--line-2)",
+	bg: "rgba(255, 255, 255, 0.03)",
+	_hover: {
+		color: "var(--text-0)",
+		borderColor: "rgba(255, 255, 255, 0.22)",
+		bg: "rgba(255, 255, 255, 0.07)",
+	},
+} as const
+
+// Standalone copy-icon button with its own transient "copied" state.
+function CopyBtn({ value, label }: { value: string; label: string }) {
+	const [copied, setCopied] = useState(false)
+	return (
+		<IconButton aria-label={label} size="xs" variant="ghost" flexShrink="0"
+			onClick={() => { navigator.clipboard.writeText(value); setCopied(true); setTimeout(() => setCopied(false), 1200) }}>
+			<Box as={copied ? FaCheck : FaCopy} fontSize="13px" color={copied ? "#34D399" : "var(--text-3)"} />
+		</IconButton>
+	)
+}
 
 function KeyRow({ label, value }: { label: string; value: string }) {
 	const [copied, setCopied] = useState(false)
@@ -82,7 +108,7 @@ export function HiveAccountPanel({ activeKey, color, loading, deriveError, onRet
 		if (deriveError || !loading) return (
 			<Box className="v3-glass-card" p="4" mt="4">
 				<Text fontSize="13px" color="var(--text-2)">{deriveError || "Couldn't derive your Hive key from the device."}</Text>
-				{onRetryDerive && <Button mt="3" size="sm" variant="outline" onClick={onRetryDerive}>Retry</Button>}
+				{onRetryDerive && <Button mt="3" size="sm" variant="outline" {...outlineBtn} onClick={onRetryDerive}>Retry</Button>}
 			</Box>
 		)
 		return <Flex justify="center" py="10"><Spinner color={color} /></Flex>
@@ -93,19 +119,36 @@ export function HiveAccountPanel({ activeKey, color, loading, deriveError, onRet
 	if (state === "error") return (
 		<Box className="v3-glass-card" p="4" mt="4">
 			<Text fontSize="13px" color="var(--text-2)">Couldn't reach the Hive account service. Try again shortly.</Text>
-			<Button mt="3" size="sm" variant="outline" onClick={refresh}>Retry</Button>
+			<Button mt="3" size="sm" variant="outline" {...outlineBtn} onClick={refresh}>Retry</Button>
 		</Box>
 	)
 
 	if (state === "has" && account) return (
 		<Box className="v3-glass-card" p="4" mt="4">
 			<Text fontSize="11px" color="var(--text-3)" textTransform="uppercase" letterSpacing="0.18em">Hive Account</Text>
-			<Text fontSize="22px" fontWeight="700" color="var(--text-0)" mt="1">@{account.name}</Text>
+			<Flex align="center" gap="1" mt="1">
+				<Text fontSize="22px" fontWeight="700" color="var(--text-0)">@{account.name}</Text>
+				<CopyBtn value={account.name} label="copy Hive account name" />
+			</Flex>
 			<Flex gap="6" mt="3" wrap="wrap">
 				<Box><Text fontSize="11px" color="var(--text-3)">HIVE</Text><Text fontSize="14px" fontFamily="mono" color="var(--text-1)">{account.hive}</Text></Box>
 				<Box><Text fontSize="11px" color="var(--text-3)">HBD</Text><Text fontSize="14px" fontFamily="mono" color="var(--text-1)">{account.hbd}</Text></Box>
 				{account.hp != null && <Box><Text fontSize="11px" color="var(--text-3)">HP</Text><Text fontSize="14px" fontFamily="mono" color="var(--text-1)">{account.hp}</Text></Box>}
 				{account.rcPercent != null && <Box><Text fontSize="11px" color="var(--text-3)">RC</Text><Text fontSize="14px" fontFamily="mono" color="var(--text-1)">{account.rcPercent}%</Text></Box>}
+			</Flex>
+			<Flex gap="2" mt="4" wrap="wrap" align="center">
+				<Text fontSize="11px" color="var(--text-3)" textTransform="uppercase" letterSpacing="0.18em" mr="1">Profile</Text>
+				{[
+					{ label: "PeakD", url: `https://peakd.com/@${account.name}` },
+					{ label: "Hive.blog", url: `https://hive.blog/@${account.name}` },
+					{ label: "Ecency", url: `https://ecency.com/@${account.name}` },
+				].map(l => (
+					<Button key={l.label} size="xs" variant="outline" gap="1.5" px="2.5" fontWeight="500" {...outlineBtn}
+						aria-label={`Open ${l.label} profile`}
+						onClick={() => rpcRequest("openUrl", { url: l.url }).catch(() => {})}>
+						{l.label}<Box as={FaExternalLinkAlt} fontSize="9px" opacity="0.55" />
+					</Button>
+				))}
 			</Flex>
 		</Box>
 	)

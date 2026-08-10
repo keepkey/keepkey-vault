@@ -4,6 +4,7 @@ import { Box, Flex, Text, Input, Button } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
 import { rpcRequest } from "../lib/rpc"
 import { CHAINS, getExplorerTxUrl, caipToNetworkId } from "../../shared/chains"
+import { isBitcoinOnlyVariant } from "../../shared/flags"
 import { useAddressBook } from "../hooks/useAddressBook"
 import { useDeviceState } from "../hooks/useDeviceState"
 import { AddressIdenticon } from "./AddressIdenticon"
@@ -32,8 +33,16 @@ interface DisplayEntry extends AddressBookEntry {
  *  a per-address outbound-history drilldown (R7). */
 export function AddressBookView() {
   const { t } = useTranslation("addressbook")
-  const { entries, loading, seeding, saveLabel, remove } = useAddressBook()
+  const { entries: allEntries, loading, seeding, saveLabel, remove } = useAddressBook()
   const deviceState = useDeviceState()
+  // btc-only device: non-BTC entries are dead weight (can't send to them) and the
+  // chain filter offers chains the device can't use. Scope to Bitcoin at the source;
+  // this also collapses the network-filter row (allChainsPresent drops to ≤1).
+  const btcOnly = isBitcoinOnlyVariant(deviceState.firmwareVariant)
+  const entries = useMemo(
+    () => (btcOnly ? allEntries.filter(e => e.chainId === "bitcoin") : allEntries),
+    [allEntries, btcOnly],
+  )
   // "Connected" = device attached & identified (anything but disconnected/error, with an id).
   const connectedDeviceId = (deviceState.deviceId && deviceState.state !== "disconnected" && deviceState.state !== "error")
     ? deviceState.deviceId

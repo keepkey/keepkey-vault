@@ -1,18 +1,17 @@
 /**
  * Calldata decoder — decodes EVM transaction calldata into human-readable fields
- * for the signing approval UI.
+ * for the signing approval UI. Fully vendored/local — no network round-trip.
  *
- * Three tiers:
- * 1. Pioneer client SDK — DecodeCalldata + SignDescriptor (remote, comprehensive)
- * 2. Local fallback for common ERC-20 functions (transfer, approve, transferFrom)
- * 3. Unknown — selector only
+ * Two tiers:
+ * 1. Local decoders for common contracts (ERC-20, Uniswap, THORChain, 0x, …)
+ * 2. Unknown — selector only
  *
- * All Pioneer calls go through @pioneer-platform/pioneer-client via getPioneer().
- * The only exception is /descriptors/sign which is not yet in the public swagger
- * spec — that uses a direct fetch until the spec is regenerated.
+ * (Pioneer's remote /descriptors/decode + /descriptors/sign are gone — the
+ *  per-tx online signer was removed by design, and both endpoints now 404.
+ *  Firmware clear-signing is driven off the vendored `firmwareClearSigns`
+ *  allowlist below, which mirrors the device's own `ethereum_contractHandled`.)
  */
 import type { CalldataDecodedInfo, CalldataDecodedField } from '../shared/types'
-import { getPioneer, getPioneerApiBase } from './pioneer'
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -31,12 +30,6 @@ function formatUint256(raw: string): string {
   } catch {
     return raw
   }
-}
-
-// ── Chain ID → CAIP-2 mapping ────────────────────────────────────────────
-
-function chainIdToNetworkId(chainId: number): string {
-  return `eip155:${chainId}`
 }
 
 // ── Local ERC-20 decoder (offline fallback) ──────────────────────────────
@@ -392,118 +385,80 @@ export function decodeCalldataLocal(
   return null
 }
 
-// ── Pioneer SDK calls ───────────────────────────────────────────────────
-
-interface PioneerDecodeResponse {
-  success: boolean
-  dappName: string
-  contractName: string
-  method: string
-  selector: string
-  functionType?: string
-  args: Array<{ name: string; type: string; value: string; format?: string }>
+// ── Firmware clear-sign allowlist (mirrors device ethereum_contractHandled) ──
+//
+// rc3 firmware clear-signs a contract call WITHOUT AdvancedMode and WITHOUT any
+// signed-metadata blob ONLY for the pinned (selector, to) pairs below, plus a
+// standard 68-byte ERC-20 transfer/approve. Anything else the device blind-signs
+// (hard "Blocked" unless AdvancedMode is on). The signing overlay MUST gate off
+// THIS — not off "did our decoder recognize the calldata" — otherwise it either
+// under-warns (Uniswap/1inch/relay look verified but the device blind-signs) or
+// over-forces global AdvancedMode on txs the device would clear-sign natively
+// (the drain vector PR #261/#303 closed). Addresses copied from firmware
+// lib/firmware/ethereum_contracts/*.{c,h} on origin/develop (the rc3 line).
+const ADDR = {
+  ZX_EXCHANGE_PROXY: '0xdef1c0ded9bec7f1a1670819833240f027b25eff', // 0x transformERC20 / sellToUniswap
+  UNISWAP_V2_ROUTER: '0x7a250d5630b4cf539739df2c5dacb4c659f2488d', // 0x liquid add/remove + approve-to-router
+  SALARY_PROXY:      '0xbd6a40bb904aea5a49c59050b5395f7484a4203d', // saproxy withdrawFromSalary
+  THOR_ROUTER:       '0xd37bbe5744d730a1d98d8dc97c42f0ca46ad7146', // Ethereum
+  THOR_ROUTER_AVAX:  '0x00dc6100103bc402d490aee3f9a5560cbd91f1d4', // Avalanche C-Chain
+  MAYA_ROUTER:       '0xd89dce570de35a6f42d3bca7dba50a6d89bfc2a2',
 }
 
-interface PioneerSignResponse {
-  success: boolean
-  signedPayload: string      // base64 signed insight blob
-  keyId: number
-  classification: 'VERIFIED' | 'UNKNOWN'
-  dappName?: string
-  contractName?: string
-  method?: string
-  txHash?: string            // the sighash the blob is bound to (== device's sighash)
+// THORChain's Router lives at a DIFFERENT address on each EVM chain, so the
+// clear-sign pin is (address, chainId) together — mirrors thor_router_for_chain
+// in firmware ethereum_contracts/thortx.c. Keep this in lockstep with that
+// switch; a chain listed here but not there (or vice versa) makes the overlay
+// mispredict clear-signability. chainId defaults to 1 (Ethereum) when absent.
+const THOR_ROUTER_BY_CHAIN: Record<number, string> = {
+  1:     ADDR.THOR_ROUTER,
+  43114: ADDR.THOR_ROUTER_AVAX,
 }
+
+// selector → the ONE contract address the firmware pins that selector to.
+const FIRMWARE_PINNED: Record<string, string> = {
+  '0x415565b0': ADDR.ZX_EXCHANGE_PROXY, // transformERC20
+  '0xd9627aa4': ADDR.ZX_EXCHANGE_PROXY, // sellToUniswap (0x)
+  '0xf305d719': ADDR.UNISWAP_V2_ROUTER, // addLiquidityETH
+  '0x02751cec': ADDR.UNISWAP_V2_ROUTER, // removeLiquidityETH
+  '0xfea7c53f': ADDR.SALARY_PROXY,      // withdrawFromSalary
+  '0x1fece7b4': ADDR.THOR_ROUTER,       // THORChain deposit
+  '0x44bc937b': ADDR.THOR_ROUTER,       // THORChain depositWithExpiry
+}
+// THOR/Maya share both deposit selectors — accept either router for either.
+const THOR_MAYA_DEPOSIT = new Set(['0x1fece7b4', '0x44bc937b'])
+
+/** ERC-20 transfer/approve the firmware renders natively (standard 68-byte). */
+const ERC20_NATIVE = new Set(['0xa9059cbb', '0x095ea7b3'])
 
 /**
- * The full unsigned-tx fields /descriptors/sign needs to bind the blob to the
- * exact sighash the device will sign. MUST be byte-identical to the values
- * later passed to ethSignTx — any drift and rc3 firmware refuses the blob.
+ * True iff the rc3 device clear-signs this tx natively (no AdvancedMode, no
+ * signed blob). Mirrors firmware `ethereum_contractHandled` + the standard
+ * ERC-20 transfer/approve path in ethereum.c. Contract-address pinning matters:
+ * the same selector to a DIFFERENT address is NOT clear-signed by the device.
  */
-export interface EvmUnsignedTxFields {
-  nonce: string | number
-  gasLimit: string | number
-  value: string | number
-  gasPrice?: string | number
-  maxFeePerGas?: string | number
-  maxPriorityFeePerGas?: string | number
-}
+export function firmwareClearSigns(to?: string, data?: string, chainId?: number): boolean {
+  if (!to || !data || data.length < 10) return false
+  const selector = data.slice(0, 10).toLowerCase()
+  const dest = to.toLowerCase()
 
-/**
- * Decode calldata via pioneer-client SDK (DecodeCalldata operationId).
- * 3s timeout — non-blocking for signing flow.
- */
-async function fetchPioneerDecode(
-  networkId: string,
-  contractAddress: string,
-  data: string
-): Promise<PioneerDecodeResponse | null> {
-  try {
-    const pioneer = await Promise.race([
-      getPioneer(),
-      new Promise<null>((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000)),
-    ])
-    if (!pioneer?.DecodeCalldata) return null
+  // Standard ERC-20 transfer/approve: 4-byte selector + 2 32-byte words = 68B.
+  // ponytail: firmware also requires the token be in its built-in registry
+  // (unknown tokens hard-block); we can't cheaply mirror that list, so an exotic
+  // token defers to the device's own "enable AdvancedMode" prompt — benign UX,
+  // never an under-warn. Upgrade path: ship the token list into Vault.
+  if (ERC20_NATIVE.has(selector) && (data.length - 2) === 136) return true
 
-    const resp = await Promise.race([
-      pioneer.DecodeCalldata({ networkId, contractAddress, data }),
-      new Promise<null>((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000)),
-    ])
-    const result = resp?.data as PioneerDecodeResponse | undefined
-    return result?.success ? result : null
-  } catch {
-    // Pioneer not ready, timeout, or method missing — fall through to local
-    return null
+  if (THOR_MAYA_DEPOSIT.has(selector)) {
+    // THORChain's router is chain-specific (see THOR_ROUTER_BY_CHAIN); Maya's
+    // single ETH router is accepted regardless of chain.
+    const thorRouter = THOR_ROUTER_BY_CHAIN[chainId ?? 1]
+    return (thorRouter != null && dest === thorRouter) || dest === ADDR.MAYA_ROUTER
   }
-}
-
-/**
- * Fetch signed insight blob from Pioneer.
- *
- * NOTE: SignDescriptor is not yet in the public swagger spec so pioneer-client
- * doesn't auto-generate the method. Using direct fetch until the Pioneer server
- * regenerates its spec (tsoa spec-and-routes). Once the spec includes
- * operationId "SignDescriptor", switch to: pioneer.SignDescriptor({...})
- */
-async function fetchPioneerSignedBlob(
-  chainId: number,
-  contractAddress: string,
-  data: string,
-  tx?: EvmUnsignedTxFields
-): Promise<PioneerSignResponse | null> {
-  // The blob's tx_hash covers nonce/gas/value/fees — without the full tx the
-  // server 400s (and any blob it could make would fail the rc3 hash binding).
-  if (!tx) return null
-  const request = { chainId, contractAddress, data, ...tx }
-  try {
-    // Try SDK first (available once spec is regenerated)
-    const pioneer = await Promise.race([
-      getPioneer(),
-      new Promise<null>((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000)),
-    ])
-    if (pioneer?.SignDescriptor) {
-      const resp = await Promise.race([
-        pioneer.SignDescriptor(request),
-        new Promise<null>((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000)),
-      ])
-      const result = resp?.data as PioneerSignResponse | undefined
-      return (result?.success && result.signedPayload) ? result : null
-    }
-
-    // Fallback: direct fetch until spec is regenerated
-    const base = getPioneerApiBase()
-    const resp = await fetch(`${base}/api/v1/descriptors/sign`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(request),
-      signal: AbortSignal.timeout(3000),
-    })
-    if (!resp.ok) return null
-    const result = await resp.json() as PioneerSignResponse
-    return (result.success && result.signedPayload) ? result : null
-  } catch {
-    return null
-  }
+  const pinned = FIRMWARE_PINNED[selector]
+  return pinned != null && dest === pinned
+  // ponytail: MakerDAO (address+param gated, rare) intentionally omitted → those
+  // over-warn as blind. Add if a MakerDAO clear-sign flow actually shows up.
 }
 
 // ── Main decode function ─────────────────────────────────────────────────
@@ -511,72 +466,14 @@ async function fetchPioneerSignedBlob(
 export async function decodeCalldata(
   contractAddress: string,
   data: string,
-  chainId?: number,
-  tx?: EvmUnsignedTxFields,
+  _chainId?: number,
 ): Promise<CalldataDecodedInfo | null> {
   // Skip if no calldata or just a bare transfer (no data)
   if (!data || data === '0x' || data.length < 10) return null
 
   const selector = data.slice(0, 10).toLowerCase()
 
-  // Tier 1: Try Pioneer SDK — fetch decode + signed blob in parallel
-  // Default to Ethereum mainnet (1) when chainId is missing — most contract
-  // calls target mainnet, and omitting chainId shouldn't skip Pioneer entirely.
-  const resolvedChainId = chainId || 1
-  if (resolvedChainId) {
-    const networkId = chainIdToNetworkId(resolvedChainId)
-    const [pioneer, signedBlobRaw] = await Promise.all([
-      fetchPioneerDecode(networkId, contractAddress, data),
-      fetchPioneerSignedBlob(resolvedChainId, contractAddress, data, tx),
-    ])
-
-    // Only attach VERIFIED blobs. An OPAQUE/UNKNOWN blob doesn't enable
-    // clear-sign — rc3 fail-closes on it — and attaching it would just mask
-    // the honest "unverified contract call" state from the UI/device paths.
-    const signedBlob = signedBlobRaw?.classification === 'VERIFIED' ? signedBlobRaw : null
-    if (signedBlobRaw) {
-      console.log(`[calldata] Pioneer /sign: classification=${signedBlobRaw.classification} keyId=${signedBlobRaw.keyId} txHash=${signedBlobRaw.txHash ?? '(n/a)'} attach=${!!signedBlob}`)
-    }
-
-    if (pioneer) {
-      const fields: CalldataDecodedField[] = pioneer.args.map((arg) => ({
-        name: arg.name,
-        type: arg.type,
-        value: arg.value,
-        format: mapFormat(arg.type, arg.format),
-      }))
-
-      return {
-        dappName: pioneer.dappName,
-        contractName: pioneer.contractName,
-        method: pioneer.method,
-        selector,
-        functionType: pioneer.functionType,
-        fields,
-        source: 'pioneer',
-        signedInsightBlob: signedBlob?.signedPayload,
-        insightKeyId: signedBlob?.keyId,
-        insightClassification: signedBlobRaw?.classification,
-      }
-    }
-
-    // Pioneer decode failed but we got a VERIFIED blob — still useful
-    if (signedBlob) {
-      return {
-        dappName: signedBlob.dappName || 'Unknown',
-        contractName: signedBlob.contractName || contractAddress,
-        method: signedBlob.method || `Unknown (${selector})`,
-        selector,
-        fields: [],
-        source: 'pioneer',
-        signedInsightBlob: signedBlob.signedPayload,
-        insightKeyId: signedBlob.keyId,
-        insightClassification: signedBlob.classification,
-      }
-    }
-  }
-
-  // Tier 2: Local decoders (offline, instant)
+  // Tier 1: Local decoders (offline, instant)
   for (const decoder of LOCAL_DECODERS) {
     if (selector === decoder.selector && data.length >= 10) {
       // Derive dApp name from method — DeFi protocols get their own name
@@ -599,7 +496,7 @@ export async function decodeCalldata(
     }
   }
 
-  // Tier 3: Unknown — return selector only
+  // Tier 2: Unknown — return selector only
   return {
     dappName: 'Unknown',
     contractName: contractAddress,
@@ -608,15 +505,4 @@ export async function decodeCalldata(
     fields: [],
     source: 'none',
   }
-}
-
-function mapFormat(solidityType: string, apiFormat?: string): CalldataDecodedField['format'] {
-  if (apiFormat) {
-    if (apiFormat.includes('AMOUNT')) return 'amount'
-    if (apiFormat.includes('EIP55') || apiFormat.includes('ADDRESS')) return 'address'
-  }
-  if (solidityType === 'address') return 'address'
-  if (solidityType.startsWith('uint') || solidityType.startsWith('int')) return 'amount'
-  if (solidityType.startsWith('bytes')) return 'hex'
-  return 'raw'
 }

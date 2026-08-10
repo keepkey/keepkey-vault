@@ -1,6 +1,6 @@
 {
   "name": "keepkey-vault",
-  "version": "1.4.11",
+  "version": "1.5.2",
   "description": "KeepKey Vault - Desktop hardware wallet management powered by Electrobun",
   "scripts": {
     "dev": "bun scripts/bundle-backend.ts && vite build && bun scripts/collect-externals.ts && electrobun build && bun scripts/patch-bundle.ts && electrobun dev",
@@ -10,6 +10,7 @@
     "build": "bun scripts/bundle-backend.ts && vite build && bun scripts/collect-externals.ts && electrobun build && bun scripts/patch-bundle.ts",
     "build:stable": "bun scripts/bundle-backend.ts && vite build && bun scripts/collect-externals.ts && bun scripts/build-signed.ts stable",
     "build:canary": "bun scripts/bundle-backend.ts && vite build && bun scripts/collect-externals.ts && bun scripts/build-signed.ts canary",
+    "assets:vendor-icons": "bun scripts/vendor-asset-icons.ts",
     "start": "bun run dev",
     "postinstall": "bash scripts/patch-electrobun.sh"
   },
@@ -25,6 +26,7 @@
     "@pioneer-platform/pioneer-client": "^11.1.0",
     "@pioneer-platform/pioneer-coins": "^11.0.0",
     "@pioneer-platform/pioneer-discovery": "10.3.1",
+    "@scure/base": "1.2.6",
     "bs58": "^6.0.0",
     "@walletconnect/core": "^2.23.9",
     "@walletconnect/jsonrpc-utils": "^1.0.8",
@@ -33,7 +35,7 @@
     "@walletconnect/web3wallet": "^1.16.1",
     "bip39": "^3.1.0",
     "coinselect": "^3.1.13",
-    "electrobun": "1.13.1",
+    "electrobun": "1.18.1",
     "ethers": "5",
     "i18next": "^25.8.13",
     "i18next-resources-to-backend": "^1.2.1",

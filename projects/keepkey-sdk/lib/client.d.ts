@@ -21,6 +21,8 @@ export declare class VaultClient {
     get<T = any>(path: string, timeoutMs?: number): Promise<T>;
     /** POST request */
     post<T = any>(path: string, body?: any, timeoutMs?: number): Promise<T>;
+    /** POST request returning raw bytes (for example hardware RNG output). */
+    postBytes(path: string, body?: any, timeoutMs?: number): Promise<Uint8Array>;
     /** DELETE request */
     delete<T = any>(path: string): Promise<T>;
     /** Pair with the vault — user must approve on the device UI */

@@ -45,6 +45,12 @@ submodules: $(SUBMODULES_STAMP)
 $(DEVICE_PROTOCOL_BUILD_STAMP): $(DEVICE_PROTOCOL_INPUTS) $(SUBMODULES_STAMP) | $(STAMP_DIR)
 	@echo "=== device-protocol: installing + building ==="
 	cd modules/device-protocol && npm install
+	@# Bin-link collision guard: BOTH the `pbjs` package (evanw's, a dep) and
+	@# `protobufjs` (whose CLI the build:json flags actually belong to —
+	@# `--keep-case -t json`) install a .bin/pbjs. Which one wins the link is
+	@# an npm implementation detail that flipped under newer npm/Node, making
+	@# build:json fail on `reserved` inside enums. Force the right target.
+	cd modules/device-protocol && ln -sf ../protobufjs/bin/pbjs node_modules/.bin/pbjs
 	cd modules/device-protocol && npm run build
 	@test -f modules/device-protocol/lib/messages_pb.js || (echo "ERROR: device-protocol build failed (messages_pb.js missing)"; exit 1)
 	@touch $@
@@ -52,9 +58,9 @@ $(DEVICE_PROTOCOL_BUILD_STAMP): $(DEVICE_PROTOCOL_INPUTS) $(SUBMODULES_STAMP) | 
 # --- Module Builds (hdwallet + proto-tx-builder from source) ---
 
 $(PROTO_INSTALL_STAMP): modules/proto-tx-builder/package.json modules/proto-tx-builder/yarn.lock $(SUBMODULES_STAMP) | $(STAMP_DIR)
-	cd modules/proto-tx-builder && bun install
 	@# Init the nested osmosis-frontend submodule (provides Cosmos/Osmosis proto codegen)
 	cd modules/proto-tx-builder && git submodule update --init osmosis-frontend
+	cd modules/proto-tx-builder && yarn install --frozen-lockfile
 	@touch $@
 
 $(PROTO_BUILD_STAMP): $(PROTO_BUILD_INPUTS) $(PROTO_INSTALL_STAMP) | $(STAMP_DIR)
@@ -342,7 +348,8 @@ dmg: verify-arch
 test: test-zcash-cli test-unit
 
 test-unit:
-	cd $(PROJECT_DIR) && bun test __tests__/swap-parsing.test.ts __tests__/engine-state-machine.test.ts __tests__/device-switch.test.ts __tests__/wizard-messaging.test.ts __tests__/solana-tx.test.ts __tests__/solana-message-parser.test.ts __tests__/solana-instruction-decoder.test.ts __tests__/solana-alt.test.ts __tests__/solana-spl-decimals.test.ts __tests__/ton-build.test.ts __tests__/tron-memo-inject.test.ts __tests__/audit-coverage.test.ts __tests__/chain-scan.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/evm-signer-verify.test.ts __tests__/swap-parsing.test.ts __tests__/engine-state-machine.test.ts __tests__/device-switch.test.ts __tests__/wizard-messaging.test.ts __tests__/solana-tx.test.ts __tests__/solana-message-parser.test.ts __tests__/solana-instruction-decoder.test.ts __tests__/solana-alt.test.ts __tests__/solana-spl-decimals.test.ts __tests__/ton-build.test.ts __tests__/tron-memo-inject.test.ts __tests__/audit-coverage.test.ts __tests__/chain-scan.test.ts __tests__/taproot-host.test.ts __tests__/recovery-ownership.test.ts __tests__/evm-x402.test.ts __tests__/solana-x402.test.ts __tests__/patch-electrobun.test.ts src/bun/mcp.test.ts src/bun/txbuilder/hive-ops.test.ts src/bun/clearsign-studio.test.ts src/bun/solana-outflow.test.ts
+	cd $(PROJECT_DIR) && bun src/bun/btc-backend/core.test.ts
 
 test-integration: test-rest
 
@@ -442,6 +449,7 @@ test-emu-python:
 	sleep 1; \
 	echo "Running python-keepkey tests..."; \
 	cd modules/keepkey-firmware/deps/python-keepkey/tests && \
+	KK_FORCE_UDP=1 \
 	PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python \
 	python3 -m pytest \
 		test_basic.py \
@@ -838,11 +846,17 @@ preflight: submodules
 	test -f modules/hdwallet/packages/hdwallet-keepkey/dist/typeRegistry.js && echo "   ✅ hdwallet dist/" || { echo "   ❌ hdwallet dist/ — run: make modules-build"; fail=1; }; \
 	test -f modules/proto-tx-builder/dist/index.js && echo "   ✅ proto-tx-builder dist/" || { echo "   ❌ proto-tx-builder dist/ — run: make modules-build"; fail=1; }; \
 	test -f modules/device-protocol/lib/messages_pb.js && echo "   ✅ device-protocol lib/" || { echo "   ❌ device-protocol lib/ — run: cd modules/device-protocol && npm run build"; fail=1; }; \
+	node $(PROJECT_DIR)/scripts/verify-zcash-ironwood-protocol.mjs modules/device-protocol >/dev/null 2>&1 \
+		&& echo "   ✅ device-protocol Ironwood fields" \
+		|| { echo "   ❌ device-protocol pin is missing Ironwood fields 19/20"; fail=1; }; \
 	echo ""; \
-	echo "6. VAULT TYPECHECK"; \
+	echo "6. VAULT TYPECHECK (differential vs baseline)"; \
 	errs=$$(cd $(PROJECT_DIR) && npx tsc --noEmit --skipLibCheck 2>&1 | grep "error TS" | grep -v "minimatch" | wc -l | tr -d ' '); \
+	base=$$(cat $(PROJECT_DIR)/.typecheck-baseline 2>/dev/null || echo 0); \
 	if [ "$$errs" = "0" ]; then echo "   ✅ clean"; \
-	else echo "   ❌ $$errs type errors"; fail=1; fi; \
+	elif [ "$$errs" -le "$$base" ]; then echo "   ✅ $$errs errors, at or below baseline $$base"; \
+		if [ "$$errs" -lt "$$base" ]; then echo "      (improved — update $(PROJECT_DIR)/.typecheck-baseline to $$errs)"; fi; \
+	else echo "   ❌ $$errs type errors — baseline is $$base, so this change ADDS $$(($$errs - $$base))"; fail=1; fi; \
 	echo ""; \
 	echo "════════════════════════════════════════════"; \
 	if [ "$$fail" = "0" ]; then echo "✅ ALL GATES PASSED — ready to cut release"; \

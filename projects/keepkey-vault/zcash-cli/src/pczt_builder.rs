@@ -16,9 +16,10 @@ use incrementalmerkletree::Retention;
 use orchard::primitives::redpallas::{self, SpendAuth};
 use orchard::{
     builder::{Builder, BundleType},
+    bundle::BundleVersion,
     circuit::{ProvingKey, VerifyingKey},
     keys::{FullViewingKey, Scope},
-    note::{ExtractedNoteCommitment, RandomSeed, Rho},
+    note::{ExtractedNoteCommitment, NoteVersion, RandomSeed, Rho},
     tree::MerkleHashOrchard,
     value::NoteValue,
     Address, Anchor, Note,
@@ -33,6 +34,11 @@ use crate::zip244;
 const ZIP317_MARGINAL_FEE: u64 = 5000;
 /// ZIP-317 grace actions — minimum baseline (2 actions are "free").
 const ZIP317_GRACE_ACTIONS: u64 = 2;
+
+/// The legacy Orchard bundle version used by v5 construction before NU6.3.
+/// NU6.3-facing flows use `orchard_v3()` or `ironwood_v3()` explicitly.
+const LEGACY_ORCHARD_BUNDLE_VERSION: BundleVersion = BundleVersion::orchard_v2();
+const IRONWOOD_BUNDLE_VERSION: BundleVersion = BundleVersion::ironwood_v3();
 
 /// Compute ZIP-317 fee for an Orchard-only transaction.
 /// fee = marginal_fee × max(grace_actions, logical_actions)
@@ -109,6 +115,8 @@ pub struct HeaderFields {
 /// The signing request sent to Electrobun, which forwards fields to the device.
 #[derive(Debug, Serialize)]
 pub struct SigningRequest {
+    /// Orchard-family value pool carried by `actions` and `bundle_meta`.
+    pub pool: &'static str,
     pub n_actions: u32,
     pub account: u32,
     pub branch_id: u32,
@@ -130,6 +138,8 @@ pub struct DigestFields {
     // sapling omitted — clear-signing firmware rejects sapling_digest if set
     #[serde(with = "hex_bytes")]
     pub orchard: Vec<u8>,
+    #[serde(with = "hex_bytes", skip_serializing_if = "Vec::is_empty")]
+    pub ironwood: Vec<u8>,
 }
 
 #[derive(Debug, Serialize)]
@@ -162,6 +172,10 @@ pub struct PcztState {
     pub sighash: [u8; 32],
     pub branch_id: u32,
     pub signing_request: SigningRequest,
+    /// Nullifiers of the notes this tx spends — marked spent in the wallet DB
+    /// once the tx broadcasts, so the balance drops immediately instead of
+    /// double-counting until the scanner sees the spend on-chain.
+    pub spent_nullifiers: Vec<[u8; 32]>,
 }
 
 /// Build a PCZT and extract the signing request.
@@ -180,7 +194,23 @@ pub async fn build_pczt(
     memo: Option<String>,
 ) -> Result<PcztState> {
     let mut rng = OsRng;
+    if branch_id != crate::zip229::NU6_3_BRANCH_ID {
+        return Err(anyhow::anyhow!(
+            "Ironwood transactions require NU6.3 branch 0x{:08x}; node reported 0x{:08x}",
+            crate::zip229::NU6_3_BRANCH_ID,
+            branch_id
+        ));
+    }
+    if notes
+        .iter()
+        .any(|note| note.pool != crate::wallet_db::ShieldedPool::Ironwood)
+    {
+        return Err(anyhow::anyhow!(
+            "Normal private sends can only consume Ironwood notes. Migrate legacy Orchard funds first."
+        ));
+    }
     let total_input: u64 = notes.iter().map(|n| n.value).sum();
+    let spent_nullifiers: Vec<[u8; 32]> = notes.iter().map(|n| n.nullifier).collect();
 
     // ZIP-317: fee depends on number of Orchard actions.
     // n_outputs = 1 (recipient) + 1 (change) — but we don't know if there's
@@ -206,7 +236,7 @@ pub async fn build_pczt(
     let ak_bytes = &fvk_bytes[..32];
     debug!("FVK ak (first 4 bytes): {}", hex::encode(&ak_bytes[..4]));
 
-    info!("Building Orchard transaction:");
+    info!("Building Ironwood transaction-v6:");
     info!("  Inputs:  {} ZAT from {} notes", total_input, notes.len());
     info!("  Amount:  {} ZAT", amount);
     info!("  Fee:     {} ZAT", fee);
@@ -226,7 +256,7 @@ pub async fn build_pczt(
         } else {
             let tree_size_before = if spendable.block_height > 0 {
                 lwd_client
-                    .get_orchard_tree_size_at(spendable.block_height - 1)
+                    .get_ironwood_tree_size_at(spendable.block_height - 1)
                     .await?
             } else {
                 0
@@ -244,15 +274,9 @@ pub async fn build_pczt(
 
     // Step 2: Fetch all subtree roots + chain tip height
     let lwd_tip_height = lwd_client.get_latest_block_height().await?;
-    let subtree_roots = lwd_client.get_subtree_roots(0, 0).await?;
+    let subtree_roots = lwd_client.get_ironwood_subtree_roots(0, 0).await?;
     let num_shards = subtree_roots.len();
-    info!("Chain has {} completed Orchard subtree shards", num_shards);
-
-    if subtree_roots.is_empty() {
-        return Err(anyhow::anyhow!(
-            "No Orchard subtree roots available from lightwalletd"
-        ));
-    }
+    info!("Chain has {} completed Ironwood subtree shards", num_shards);
 
     // Build cmx lookup for detecting note positions during tree walk
     let note_cmx_set: std::collections::HashMap<[u8; 32], usize> =
@@ -316,23 +340,24 @@ pub async fn build_pczt(
         // The previous shard's completing block may contain actions that belong
         // to THIS shard (cross-boundary). We must include them.
         let (fetch_start_height, actions_to_skip) = if *shard_idx == 0 {
-            (1687104u64, 0u64) // Orchard activation — no prior shard
+            (3428143u64, 0u64) // Ironwood activation — no prior shard
         } else {
             let prev_completing = subtree_roots
                 .iter()
                 .find(|(idx, _, _)| *idx == shard_idx - 1)
                 .map(|(_, _, h)| *h)
-                .unwrap_or(1687104);
+                .unwrap_or(3428143);
 
             let tree_size_before_completing = if prev_completing > 0 {
                 lwd_client
-                    .get_orchard_tree_size_at(prev_completing - 1)
+                    .get_ironwood_tree_size_at(prev_completing - 1)
                     .await?
             } else {
                 0
             };
-            let tree_size_after_completing =
-                lwd_client.get_orchard_tree_size_at(prev_completing).await?;
+            let tree_size_after_completing = lwd_client
+                .get_ironwood_tree_size_at(prev_completing)
+                .await?;
 
             let plan = plan_incomplete_shard_fetch(
                 prev_completing,
@@ -397,7 +422,9 @@ pub async fn build_pczt(
         let mut global_action_counter = 0u64;
         'block_fetch: while current_height <= shard_end_height {
             let end = std::cmp::min(current_height + chunk_size - 1, shard_end_height);
-            let blocks = lwd_client.fetch_block_actions(current_height, end).await?;
+            let blocks = lwd_client
+                .fetch_ironwood_block_actions(current_height, end)
+                .await?;
 
             for (block_height, txs) in &blocks {
                 for (tx_idx, cmxs) in txs {
@@ -472,18 +499,18 @@ pub async fn build_pczt(
     // loop above walks it to the tip (shard_end_pos = u64::MAX), so a second
     // pass here would double-append. This mirrors build_deshield_pczt.
     let last_completed_shard = num_shards as u32;
-    let last_completed_height = subtree_roots.last().map(|(_, _, h)| *h).unwrap_or(1687104);
+    let last_completed_height = subtree_roots.last().map(|(_, _, h)| *h).unwrap_or(3428143);
     if !note_shards.contains(&last_completed_shard) && lwd_tip_height > last_completed_height {
         let shard_start_pos = (last_completed_shard as u64) * SHARD_SIZE;
         let tree_size_before_completing = if last_completed_height > 0 {
             lwd_client
-                .get_orchard_tree_size_at(last_completed_height - 1)
+                .get_ironwood_tree_size_at(last_completed_height - 1)
                 .await?
         } else {
             0
         };
         let tree_size_after_completing = lwd_client
-            .get_orchard_tree_size_at(last_completed_height)
+            .get_ironwood_tree_size_at(last_completed_height)
             .await?;
         let plan = plan_incomplete_shard_fetch(
             last_completed_height,
@@ -502,7 +529,9 @@ pub async fn build_pczt(
         let mut global_action_counter = 0u64;
         while current_height <= lwd_tip_height {
             let end = std::cmp::min(current_height + chunk_size - 1, lwd_tip_height);
-            let blocks = lwd_client.fetch_block_actions(current_height, end).await?;
+            let blocks = lwd_client
+                .fetch_ironwood_block_actions(current_height, end)
+                .await?;
 
             for (_block_height, txs) in &blocks {
                 for (_tx_idx, cmxs) in txs {
@@ -534,7 +563,7 @@ pub async fn build_pczt(
     }
 
     // Verify leaf count against lightwalletd's tree size
-    let expected_tree_size = lwd_client.get_orchard_tree_size_at(lwd_tip_height).await?;
+    let expected_tree_size = lwd_client.get_ironwood_tree_size_at(lwd_tip_height).await?;
     // Our tree should cover positions 0..(num_shards * SHARD_SIZE - 1) via shard roots
     // plus individually-inserted leaves for the incomplete shard.
     // The total tree size is: (completed shards) * SHARD_SIZE + leaves_in_incomplete_shard
@@ -574,6 +603,7 @@ pub async fn build_pczt(
             NoteValue::from_raw(spendable.value),
             rho,
             rseed,
+            NoteVersion::V3,
         )
         .into_option()
         .ok_or_else(|| anyhow::anyhow!("Failed to reconstruct note {}", i))?;
@@ -605,9 +635,9 @@ pub async fn build_pczt(
     // If the ShardTree reconstruction produced the wrong root, the tx will be
     // rejected with "unknown Orchard anchor" — catch that here instead.
     let expected_anchor = lwd_client
-        .get_orchard_anchor(lwd_tip_height)
+        .get_ironwood_anchor(lwd_tip_height)
         .await
-        .context("Failed to fetch authoritative Orchard anchor from lightwalletd")?;
+        .context("Failed to fetch authoritative Ironwood anchor from lightwalletd")?;
     info!(
         "Expected anchor (lwd tip {}): {}",
         lwd_tip_height,
@@ -632,7 +662,10 @@ pub async fn build_pczt(
         // Diagnostic: check if the completed-shards-only root matches lightwalletd
         // at the completing height of the last completed shard
         if let Some((_, _, last_completing_height)) = subtree_roots.last() {
-            match lwd_client.get_orchard_anchor(*last_completing_height).await {
+            match lwd_client
+                .get_ironwood_anchor(*last_completing_height)
+                .await
+            {
                 Ok(anchor_at_last_shard) => {
                     // Build a tree with only completed shard roots (no individual leaves)
                     let mut diag_tree: ShardTree<MemoryShardStore<MerkleHashOrchard, u32>, 32, 16> =
@@ -676,7 +709,7 @@ pub async fn build_pczt(
         }
 
         return Err(anyhow::anyhow!(
-            "Orchard anchor mismatch: ShardTree={} vs lightwalletd={}. \
+            "Ironwood anchor mismatch: ShardTree={} vs lightwalletd={}. \
              The tree reconstruction is wrong.",
             hex::encode(&computed_anchor_bytes),
             hex::encode(&expected_anchor),
@@ -690,7 +723,13 @@ pub async fn build_pczt(
     );
 
     // Step 7: Build PCZT bundle — add spends sorted by position
-    let mut builder = Builder::new(BundleType::DEFAULT, anchor);
+    let mut builder = Builder::new(
+        BundleType::DEFAULT,
+        IRONWOOD_BUNDLE_VERSION,
+        IRONWOOD_BUNDLE_VERSION.default_flags(),
+        anchor,
+    )
+    .map_err(|e| anyhow::anyhow!("Failed to initialize Ironwood builder: {:?}", e))?;
 
     let mut sorted_notes: Vec<(u64, usize)> = note_positions
         .iter()
@@ -801,14 +840,15 @@ pub async fn build_pczt(
         .build_for_pczt(&mut rng)
         .map_err(|e| anyhow::anyhow!("Failed to build PCZT: {:?}", e))?;
 
-    // Step 3: Compute ZIP-244 digests
+    // Step 3: Compute transaction-v6 / ZIP-229 digests.
     let effects_bundle = pczt_bundle
         .extract_effects::<i64>()
         .map_err(|e| anyhow::anyhow!("Failed to extract effects: {:?}", e))?
         .ok_or_else(|| anyhow::anyhow!("Empty effects bundle"))?;
 
-    let digests = zip244::compute_zip244_digests_effects(&effects_bundle, branch_id, 0, 0);
-    let sighash = zip244::compute_sighash(&digests, branch_id);
+    let digests =
+        crate::zip229::compute_digests_hybrid(&effects_bundle, &[], &[], branch_id, 0, 0)?;
+    let sighash = crate::zip229::compute_sighash(&digests, branch_id);
 
     // ── DEBUG: Log all digest components ──
     debug!("DEBUG sighash:     {}", hex::encode(&sighash));
@@ -824,6 +864,10 @@ pub async fn build_pczt(
     debug!(
         "DEBUG orchard:     {}",
         hex::encode(&digests.orchard_digest)
+    );
+    debug!(
+        "DEBUG ironwood:    {}",
+        hex::encode(&digests.ironwood_digest)
     );
 
     // Log effects rk before randomization
@@ -851,7 +895,7 @@ pub async fn build_pczt(
 
     // Step 5: Generate Halo2 proof
     info!("Generating Halo2 proof (this may take a while on first run)...");
-    let pk = ProvingKey::build();
+    let pk = ProvingKey::build(IRONWOOD_BUNDLE_VERSION.circuit_version());
     pczt_bundle
         .create_proof(&pk, &mut rng)
         .map_err(|e| anyhow::anyhow!("Proof generation failed: {:?}", e))?;
@@ -934,11 +978,12 @@ pub async fn build_pczt(
         });
     }
 
-    let orchard_flags = effects_bundle.flags().to_byte() as u32;
-    let orchard_value_balance: i64 = *effects_bundle.value_balance();
-    let orchard_anchor_bytes = effects_bundle.anchor().to_bytes();
+    let ironwood_flags = effects_bundle.flag_byte() as u32;
+    let ironwood_value_balance: i64 = *effects_bundle.value_balance();
+    let ironwood_anchor_bytes = effects_bundle.anchor().to_bytes();
 
     let signing_request = SigningRequest {
+        pool: "ironwood",
         n_actions: n_actions as u32,
         account,
         branch_id,
@@ -947,17 +992,18 @@ pub async fn build_pczt(
             header: digests.header_digest.to_vec(),
             transparent: digests.transparent_digest.to_vec(),
             orchard: digests.orchard_digest.to_vec(),
+            ironwood: digests.ironwood_digest.to_vec(),
         },
         header_fields: HeaderFields {
-            tx_version: 5,
-            version_group_id: 0x26A7270A,
+            tx_version: 6,
+            version_group_id: crate::zip229::VERSION_GROUP_ID,
             lock_time: 0,
             expiry_height: 0,
         },
         bundle_meta: BundleMeta {
-            flags: orchard_flags,
-            value_balance: orchard_value_balance,
-            anchor: orchard_anchor_bytes.to_vec(),
+            flags: ironwood_flags,
+            value_balance: ironwood_value_balance,
+            anchor: ironwood_anchor_bytes.to_vec(),
         },
         actions: action_fields,
         display: DisplayInfo {
@@ -972,10 +1018,11 @@ pub async fn build_pczt(
         sighash,
         branch_id,
         signing_request,
+        spent_nullifiers,
     })
 }
 
-/// Apply device signatures to the PCZT and produce the final v5 transaction bytes.
+/// Apply device signatures to the PCZT and produce the final v6 Ironwood transaction.
 pub fn finalize_pczt(
     mut pczt_bundle: orchard::pczt::Bundle,
     sighash: [u8; 32],
@@ -1066,103 +1113,20 @@ pub fn finalize_pczt(
         .apply_binding_signature(sighash, &mut rng)
         .ok_or_else(|| anyhow::anyhow!("Binding signature verification failed"))?;
 
-    // In-process proof verification — catches circuit constraint violations BEFORE
-    // broadcast. If this fails, the chain rejects with "could not validate orchard
-    // proof". The shield path already does this; the z→z spend path did not, so the
-    // only signal was the opaque consensus rejection. Now we get the real halo2 error
-    // locally and know it's the proof (not serialization) for an aged deep-shard spend.
-    let vk = VerifyingKey::build();
-    authorized_bundle.verify_proof(&vk).map_err(|e| {
-        anyhow::anyhow!(
-            "Local Orchard proof verification FAILED (would be rejected on-chain): {:?}",
-            e
-        )
-    })?;
-    info!("Local Orchard proof verification: PASSED");
+    let ironwood_digest = crate::zip229::digest_bundle_authorized(&authorized_bundle)?;
+    validate_hybrid_ironwood_consensus(
+        "Private send",
+        &authorized_bundle,
+        sighash,
+        branch_id,
+        &[],
+        &[],
+        ironwood_digest,
+    )?;
 
-    // FULL consensus check: proof + spend-auth sigs + binding sig together, the
-    // exact thing zebra runs. verify_proof() above only covers the zk proof and
-    // always passes for a self-consistent bundle — it can't catch a binding-sig
-    // or sighash problem. Run the BatchValidator with the SAME sighash the device
-    // signed AND with the sighash recomputed from the final tx; a divergence in
-    // outcome localizes the bug to the sighash. If both pass, the chain rejection
-    // is consensus STATE (already-spent nullifier / unknown anchor), not our tx.
-    {
-        let mut bv = orchard::bundle::BatchValidator::new();
-        bv.add_bundle(&authorized_bundle, sighash);
-        let ok_signing = bv.validate(&VerifyingKey::build(), OsRng);
-        info!(
-            "BatchValidator (proof+sigs+binding, signing sighash): {}",
-            if ok_signing { "PASS" } else { "FAIL" }
-        );
-        // FAIL-CLOSED: a FAIL here is exactly what the chain runs — proof, spend-auth
-        // sigs, and binding sig together. Broadcasting past it just burns a doomed tx
-        // and surfaces as the opaque "could not validate orchard proof" rejection.
-        if !ok_signing {
-            return Err(anyhow::anyhow!(
-                "BatchValidator FAILED under the device-signed sighash — proof/spend-auth/\
-                 binding signatures are inconsistent; the network would reject this tx. \
-                 Aborting before broadcast."
-            ));
-        }
-
-        // Recompute the consensus sighash from the FINAL authorized bundle.
-        let cs_header = zip244::digest_header(branch_id, 0, 0);
-        let cs_orchard = zip244::digest_orchard(&authorized_bundle);
-        let cs_digests = zip244::Zip244Digests {
-            header_digest: cs_header,
-            transparent_digest: zip244::EMPTY_TRANSPARENT_DIGEST,
-            sapling_digest: zip244::EMPTY_SAPLING_DIGEST,
-            orchard_digest: cs_orchard,
-        };
-        let consensus_sighash = zip244::compute_sighash(&cs_digests, branch_id);
-        if consensus_sighash != sighash {
-            // The chain recomputes the sighash from the tx and checks sigs against
-            // it. The device signed a DIFFERENT sighash, so on-chain verification
-            // is guaranteed to fail — abort rather than broadcast a doomed tx.
-            log::error!(
-                "SIGHASH DIVERGENCE: device signed {} but final-tx consensus sighash is {}",
-                hex::encode(&sighash),
-                hex::encode(&consensus_sighash)
-            );
-            let mut bv2 = orchard::bundle::BatchValidator::new();
-            bv2.add_bundle(&authorized_bundle, consensus_sighash);
-            let ok_consensus = bv2.validate(&VerifyingKey::build(), OsRng);
-            info!(
-                "BatchValidator (consensus sighash): {}",
-                if ok_consensus { "PASS" } else { "FAIL" }
-            );
-            return Err(anyhow::anyhow!(
-                "Consensus sighash {} diverges from the device-signed sighash {} \
-                 (BatchValidator under consensus sighash: {}). The network computes the \
-                 consensus sighash, so this tx is doomed. Aborting before broadcast.",
-                hex::encode(&consensus_sighash),
-                hex::encode(&sighash),
-                if ok_consensus { "PASS" } else { "FAIL" },
-            ));
-        } else {
-            info!(
-                "Signing sighash == consensus sighash ({})",
-                hex::encode(&sighash)
-            );
-        }
-    }
-
-    // Serialize as v5 transaction
-    let tx_bytes = serialize_v5_shielded_tx(&authorized_bundle, branch_id)?;
-
-    // Compute txid per ZIP-244: BLAKE2b("ZcashTxHash_" || branch_id,
-    //   header_digest || transparent_digest || sapling_digest || orchard_digest)
-    // For pure shielded: transparent_digest = EMPTY, sapling_digest = EMPTY
-    let header_digest = zip244::digest_header(branch_id, 0, 0);
-    let orchard_digest = zip244::digest_orchard(&authorized_bundle);
-    let txid_digests = zip244::Zip244Digests {
-        header_digest,
-        transparent_digest: zip244::EMPTY_TRANSPARENT_DIGEST,
-        sapling_digest: zip244::EMPTY_SAPLING_DIGEST,
-        orchard_digest,
-    };
-    let txid_hash = zip244::compute_sighash(&txid_digests, branch_id);
+    let tx_bytes =
+        serialize_v6_ironwood_hybrid_tx(&authorized_bundle, &[], &[], &[], branch_id, None)?;
+    let txid_hash = crate::zip229::compute_txid(ironwood_digest, &[], &[], branch_id, 0, 0);
     let txid = hex::encode(&txid_hash);
 
     info!(
@@ -1182,7 +1146,8 @@ fn validate_hybrid_orchard_consensus(
     transparent_outputs: &[zip244::TransparentOutput],
     expected_orchard_digest: [u8; 32],
 ) -> Result<[u8; 32]> {
-    let vk = VerifyingKey::build();
+    let circuit_version = authorized_bundle.bundle_version().circuit_version();
+    let vk = VerifyingKey::build(circuit_version);
     authorized_bundle.verify_proof(&vk).map_err(|e| {
         anyhow::anyhow!(
             "{} local Orchard proof verification FAILED (would be rejected on-chain): {:?}",
@@ -1192,9 +1157,10 @@ fn validate_hybrid_orchard_consensus(
     })?;
     info!("{} local Orchard proof verification: PASSED", context);
 
-    let mut bv = orchard::bundle::BatchValidator::new();
-    bv.add_bundle(authorized_bundle, signing_sighash);
-    let ok_signing = bv.validate(&vk, OsRng);
+    let mut bv = orchard::bundle::BatchValidator::new(&vk);
+    bv.add_bundle(authorized_bundle, signing_sighash)
+        .map_err(|e| anyhow::anyhow!("Batch validation setup failed: {:?}", e))?;
+    let ok_signing = bv.validate(OsRng);
     info!(
         "{} BatchValidator (proof+sigs+binding, signing sighash): {}",
         context,
@@ -1242,9 +1208,10 @@ fn validate_hybrid_orchard_consensus(
             hex::encode(signing_sighash),
             hex::encode(consensus_sighash)
         );
-        let mut bv2 = orchard::bundle::BatchValidator::new();
-        bv2.add_bundle(authorized_bundle, consensus_sighash);
-        let ok_consensus = bv2.validate(&vk, OsRng);
+        let mut bv2 = orchard::bundle::BatchValidator::new(&vk);
+        bv2.add_bundle(authorized_bundle, consensus_sighash)
+            .map_err(|e| anyhow::anyhow!("Batch validation setup failed: {:?}", e))?;
+        let ok_consensus = bv2.validate(OsRng);
         return Err(anyhow::anyhow!(
             "{} consensus sighash {} diverges from device-signed sighash {} \
              (BatchValidator under consensus sighash: {}). The network computes the \
@@ -1312,7 +1279,7 @@ fn serialize_v5_shielded_tx(
     }
 
     // Orchard flags
-    tx.push(bundle.flags().to_byte());
+    tx.push(bundle.flag_byte());
 
     // valueBalanceOrchard (i64, 8 bytes LE)
     tx.extend_from_slice(&bundle.value_balance().to_le_bytes());
@@ -1424,7 +1391,7 @@ pub struct ShieldPcztState {
     pub transparent_signing_inputs: Vec<TransparentSigningInput>,
 }
 
-/// Build a shield PCZT: transparent inputs → Orchard output.
+/// Build a shield PCZT: transparent inputs → Ironwood output (NU6.3).
 ///
 /// Creates an Orchard bundle with output only (builder auto-creates dummy spend),
 /// computes ZIP-244 hybrid digests, and returns per-input transparent sighashes.
@@ -1497,14 +1464,15 @@ pub async fn build_shield_pczt(
         });
     }
 
-    // Build Orchard bundle with output only (shielding — no spends from Orchard pool).
+    // Build an Ironwood bundle with output only. NU6.3 forbids a negative
+    // Orchard value balance, so all newly shielded value must enter Ironwood.
     // Must use BundleType::DEFAULT (enableSpends=true) because ZIP-225 requires it
     // for non-coinbase transactions.
     //
     // We need a REAL chain anchor for the Halo2 proof to verify.
-    // Build a ShardTree from subtree roots to get the current Orchard tree root.
+    // Build a ShardTree from subtree roots to get the current Ironwood tree root.
     // For output-only (no real spends), we don't need witnesses — just the root.
-    let subtree_roots = lwd_client.get_subtree_roots(0, 0).await?;
+    let subtree_roots = lwd_client.get_ironwood_subtree_roots(0, 0).await?;
     info!(
         "Fetched {} subtree roots for anchor computation",
         subtree_roots.len()
@@ -1537,20 +1505,22 @@ pub async fn build_shield_pczt(
     use orchard::note::ExtractedNoteCommitment;
 
     let last_completed_shard = subtree_roots.len() as u32;
-    let last_completed_height = subtree_roots.last().map(|(_, _, h)| *h).unwrap_or(1687104);
+    // Mainnet NU6.3 activation. Before the first completed subtree there is no
+    // subtree-root height to use as the lower scan boundary.
+    let last_completed_height = subtree_roots.last().map(|(_, _, h)| *h).unwrap_or(3428143);
     let tip = lwd_client.get_latest_block_height().await?;
 
     if tip > last_completed_height {
         let shard_start_pos = (last_completed_shard as u64) * (1 << 16);
         let tree_size_before_completing = if last_completed_height > 0 {
             lwd_client
-                .get_orchard_tree_size_at(last_completed_height - 1)
+                .get_ironwood_tree_size_at(last_completed_height - 1)
                 .await?
         } else {
             0
         };
         let tree_size_after_completing = lwd_client
-            .get_orchard_tree_size_at(last_completed_height)
+            .get_ironwood_tree_size_at(last_completed_height)
             .await?;
         let fetch_plan = plan_incomplete_shard_fetch(
             last_completed_height,
@@ -1588,7 +1558,9 @@ pub async fn build_shield_pczt(
 
         while current_height <= tip {
             let end = std::cmp::min(current_height + chunk_size - 1, tip);
-            let blocks = lwd_client.fetch_block_actions(current_height, end).await?;
+            let blocks = lwd_client
+                .fetch_ironwood_block_actions(current_height, end)
+                .await?;
 
             for (_block_height, txs) in &blocks {
                 for (_tx_idx, cmxs) in txs {
@@ -1630,28 +1602,34 @@ pub async fn build_shield_pczt(
         .ok_or_else(|| anyhow::anyhow!("Empty tree root"))?;
     let anchor: Anchor = tree_root.into();
     info!(
-        "Using Orchard anchor (from chain subtree roots): {}",
+        "Using Ironwood anchor (from chain subtree roots): {}",
         hex::encode(&anchor.to_bytes())
     );
 
     let expected_anchor = lwd_client
-        .get_orchard_anchor(tip)
+        .get_ironwood_anchor(tip)
         .await
-        .context("Failed to fetch authoritative Orchard anchor from lightwalletd")?;
+        .context("Failed to fetch authoritative Ironwood anchor from lightwalletd")?;
     if anchor.to_bytes() != expected_anchor {
         return Err(anyhow::anyhow!(
-            "Shield Orchard anchor mismatch: reconstructed={} vs lightwalletd={} at tip {}",
+            "Shield Ironwood anchor mismatch: reconstructed={} vs lightwalletd={} at tip {}",
             hex::encode(anchor.to_bytes()),
             hex::encode(expected_anchor),
             tip,
         ));
     }
     info!(
-        "Shield Orchard anchor verified against lightwalletd: {}",
+        "Shield Ironwood anchor verified against lightwalletd: {}",
         hex::encode(&expected_anchor)
     );
 
-    let mut builder = Builder::new(BundleType::DEFAULT, anchor);
+    let mut builder = Builder::new(
+        BundleType::DEFAULT,
+        IRONWOOD_BUNDLE_VERSION,
+        IRONWOOD_BUNDLE_VERSION.default_flags(),
+        anchor,
+    )
+    .map_err(|e| anyhow::anyhow!("Failed to initialize Ironwood builder: {:?}", e))?;
 
     let recipient = fvk.address_at(0u32, Scope::External);
 
@@ -1669,7 +1647,7 @@ pub async fn build_shield_pczt(
             NoteValue::from_raw(amount),
             memo_bytes,
         )
-        .map_err(|e| anyhow::anyhow!("Failed to add Orchard output: {:?}", e))?;
+        .map_err(|e| anyhow::anyhow!("Failed to add Ironwood output: {:?}", e))?;
 
     let (mut pczt_bundle, _) = builder
         .build_for_pczt(&mut rng)
@@ -1681,17 +1659,17 @@ pub async fn build_shield_pczt(
         .map_err(|e| anyhow::anyhow!("Failed to extract effects: {:?}", e))?
         .ok_or_else(|| anyhow::anyhow!("Empty effects bundle"))?;
 
-    // Compute ZIP-244 hybrid digests (real transparent + Orchard)
-    let digests = zip244::compute_zip244_digests_hybrid(
+    // Compute ZIP-229 v6 digests (real transparent + Ironwood; empty Orchard).
+    let digests = crate::zip229::compute_digests_hybrid(
         &effects_bundle,
         &zip_inputs,
         &zip_outputs,
         branch_id,
         0,
         0,
-    );
+    )?;
 
-    let sighash = zip244::compute_sighash(&digests, branch_id);
+    let sighash = crate::zip229::compute_sighash(&digests, branch_id);
 
     info!("Hybrid digests computed:");
     info!("  header:      {}", hex::encode(&digests.header_digest));
@@ -1701,6 +1679,7 @@ pub async fn build_shield_pczt(
     );
     info!("  sapling:     {}", hex::encode(&digests.sapling_digest));
     info!("  orchard:     {}", hex::encode(&digests.orchard_digest));
+    info!("  ironwood:    {}", hex::encode(&digests.ironwood_digest));
     info!("  sighash:     {}", hex::encode(&sighash));
 
     // Compute per-input transparent sighashes
@@ -1714,13 +1693,11 @@ pub async fn build_shield_pczt(
 
     let mut transparent_signing: Vec<TransparentSigningInput> = Vec::new();
     for (i, input) in zip_inputs.iter().enumerate() {
-        let input_sighash = zip244::compute_transparent_sig_hash(
+        let input_sighash = crate::zip229::compute_transparent_sig_hash(
             i,
             &zip_inputs,
             &zip_outputs,
-            &digests.orchard_digest,
-            &digests.header_digest,
-            &digests.sapling_digest,
+            &digests,
             branch_id,
         );
 
@@ -1736,19 +1713,19 @@ pub async fn build_shield_pczt(
         });
     }
 
-    // Finalize IO + proof for the Orchard bundle
+    // Finalize IO + proof for the Ironwood bundle.
     pczt_bundle
         .finalize_io(sighash, &mut rng)
         .map_err(|e| anyhow::anyhow!("IO finalization failed: {:?}", e))?;
 
     info!("Generating Halo2 proof for shield tx...");
-    let pk = ProvingKey::build();
+    let pk = ProvingKey::build(IRONWOOD_BUNDLE_VERSION.circuit_version());
     pczt_bundle
         .create_proof(&pk, &mut rng)
         .map_err(|e| anyhow::anyhow!("Proof generation failed: {:?}", e))?;
     info!("Proof generated");
 
-    // Extract Orchard signing fields
+    // Extract Ironwood signing fields.
     let n_actions = pczt_bundle.actions().len();
     let mut action_fields: Vec<ActionFields> = Vec::new();
 
@@ -1828,11 +1805,12 @@ pub async fn build_shield_pczt(
         });
     }
 
-    let orchard_flags = effects_bundle.flags().to_byte() as u32;
-    let orchard_value_balance: i64 = *effects_bundle.value_balance();
-    let orchard_anchor_bytes = effects_bundle.anchor().to_bytes();
+    let ironwood_flags = effects_bundle.flag_byte() as u32;
+    let ironwood_value_balance: i64 = *effects_bundle.value_balance();
+    let ironwood_anchor_bytes = effects_bundle.anchor().to_bytes();
 
     let orchard_signing_request = SigningRequest {
+        pool: "ironwood",
         n_actions: n_actions as u32,
         account,
         branch_id,
@@ -1841,23 +1819,24 @@ pub async fn build_shield_pczt(
             header: digests.header_digest.to_vec(),
             transparent: digests.transparent_digest.to_vec(),
             orchard: digests.orchard_digest.to_vec(),
+            ironwood: digests.ironwood_digest.to_vec(),
         },
         header_fields: HeaderFields {
-            tx_version: 5,
-            version_group_id: 0x26A7270A,
+            tx_version: 6,
+            version_group_id: crate::zip229::VERSION_GROUP_ID,
             lock_time: 0,
             expiry_height: 0,
         },
         bundle_meta: BundleMeta {
-            flags: orchard_flags,
-            value_balance: orchard_value_balance,
-            anchor: orchard_anchor_bytes.to_vec(),
+            flags: ironwood_flags,
+            value_balance: ironwood_value_balance,
+            anchor: ironwood_anchor_bytes.to_vec(),
         },
         actions: action_fields,
         display: DisplayInfo {
             amount: format!("{:.8} ZEC", amount as f64 / 1e8),
             fee: format!("{:.8} ZEC", fee as f64 / 1e8),
-            to: "Orchard (self-shield)".to_string(),
+            to: "Ironwood (self-shield)".to_string(),
         },
     };
 
@@ -1938,30 +1917,31 @@ pub fn finalize_shield_pczt(
         .apply_binding_signature(sighash, &mut rng)
         .ok_or_else(|| anyhow::anyhow!("Binding signature verification failed"))?;
 
-    let effects_orchard_digest: [u8; 32] = state
+    let effects_ironwood_digest: [u8; 32] = state
         .orchard_signing_request
         .digests
-        .orchard
+        .ironwood
         .as_slice()
         .try_into()
         .map_err(|_| {
             anyhow::anyhow!(
-                "Shield signing request Orchard digest must be 32 bytes, got {}",
-                state.orchard_signing_request.digests.orchard.len(),
+                "Shield signing request Ironwood digest must be 32 bytes, got {}",
+                state.orchard_signing_request.digests.ironwood.len(),
             )
         })?;
-    let orchard_digest = validate_hybrid_orchard_consensus(
+    let ironwood_digest = validate_hybrid_ironwood_consensus(
         "Shield",
         &authorized_bundle,
         state.sighash,
         state.branch_id,
         &state.transparent_inputs,
         &state.transparent_outputs,
-        effects_orchard_digest,
+        effects_ironwood_digest,
     )?;
 
-    // Serialize as hybrid v5 transaction
-    let tx_bytes = serialize_v5_hybrid_tx(
+    // Serialize as a hybrid v6 transaction with an empty Orchard slot and an
+    // authorized Ironwood slot.
+    let tx_bytes = serialize_v6_ironwood_hybrid_tx(
         &authorized_bundle,
         &state.transparent_inputs,
         &state.transparent_outputs,
@@ -1970,19 +1950,14 @@ pub fn finalize_shield_pczt(
         compressed_pubkey,
     )?;
 
-    // Compute txid per ZIP-244: BLAKE2b("ZcashTxHash_" || branch_id,
-    //   header_digest || transparent_digest(txid ver) || sapling_digest || orchard_digest)
-    // Note: txid uses the NON-sig transparent_digest (no hash_type, no txin_sig_digest)
-    let header_digest = zip244::digest_header(state.branch_id, 0, 0);
-    let transparent_txid_digest =
-        zip244::digest_transparent_txid(&state.transparent_inputs, &state.transparent_outputs);
-    let txid_digests = zip244::Zip244Digests {
-        header_digest,
-        transparent_digest: transparent_txid_digest,
-        sapling_digest: zip244::EMPTY_SAPLING_DIGEST,
-        orchard_digest,
-    };
-    let txid_hash = zip244::compute_sighash(&txid_digests, state.branch_id);
+    let txid_hash = crate::zip229::compute_txid(
+        ironwood_digest,
+        &state.transparent_inputs,
+        &state.transparent_outputs,
+        state.branch_id,
+        0,
+        0,
+    );
     let txid = hex::encode(&txid_hash);
 
     info!("Shield tx built: {} bytes, txid: {}", tx_bytes.len(), txid);
@@ -2049,6 +2024,179 @@ fn plan_orchard_signature_application(
         n_actions,
         n_real_spends
     ))
+}
+
+/// Fail-closed validation for an authorized Ironwood bundle and the complete
+/// transaction-v6 sighash that the device signed.
+fn validate_hybrid_ironwood_consensus(
+    context: &str,
+    authorized_bundle: &orchard::Bundle<orchard::bundle::Authorized, i64>,
+    signing_sighash: [u8; 32],
+    branch_id: u32,
+    transparent_inputs: &[zip244::TransparentInput],
+    transparent_outputs: &[zip244::TransparentOutput],
+    expected_ironwood_digest: [u8; 32],
+) -> Result<[u8; 32]> {
+    if authorized_bundle.bundle_version() != IRONWOOD_BUNDLE_VERSION {
+        return Err(anyhow::anyhow!(
+            "{} expected an Ironwood v3 bundle, got {:?}",
+            context,
+            authorized_bundle.bundle_version()
+        ));
+    }
+
+    let vk = VerifyingKey::build(IRONWOOD_BUNDLE_VERSION.circuit_version());
+    authorized_bundle.verify_proof(&vk).map_err(|e| {
+        anyhow::anyhow!(
+            "{} local Ironwood proof verification FAILED: {:?}",
+            context,
+            e
+        )
+    })?;
+
+    let mut validator = orchard::bundle::BatchValidator::new(&vk);
+    validator
+        .add_bundle(authorized_bundle, signing_sighash)
+        .map_err(|e| anyhow::anyhow!("{} batch setup failed: {:?}", context, e))?;
+    if !validator.validate(OsRng) {
+        return Err(anyhow::anyhow!(
+            "{} Ironwood proof/signature/binding validation failed",
+            context
+        ));
+    }
+
+    let ironwood_digest = crate::zip229::digest_bundle_authorized(authorized_bundle)?;
+    if ironwood_digest != expected_ironwood_digest {
+        return Err(anyhow::anyhow!(
+            "{} Ironwood digest changed after authorization: effects={} authorized={}",
+            context,
+            hex::encode(expected_ironwood_digest),
+            hex::encode(ironwood_digest)
+        ));
+    }
+
+    let consensus_digests = crate::zip229::Zip229Digests {
+        header_digest: crate::zip229::digest_header(branch_id, 0, 0),
+        transparent_digest: zip244::digest_transparent_sig_for_orchard(
+            transparent_inputs,
+            transparent_outputs,
+        ),
+        sapling_digest: zip244::EMPTY_SAPLING_DIGEST,
+        orchard_digest: crate::zip229::empty_orchard_digest(),
+        ironwood_digest,
+    };
+    let consensus_sighash = crate::zip229::compute_sighash(&consensus_digests, branch_id);
+    if consensus_sighash != signing_sighash {
+        return Err(anyhow::anyhow!(
+            "{} transaction-v6 consensus sighash {} diverges from signed sighash {}",
+            context,
+            hex::encode(consensus_sighash),
+            hex::encode(signing_sighash)
+        ));
+    }
+
+    info!(
+        "{} Ironwood proof, bundle digest, and transaction-v6 sighash verified",
+        context
+    );
+    Ok(ironwood_digest)
+}
+
+/// Serialize a transaction-v6 hybrid with transparent components and an
+/// Ironwood bundle. The Orchard bundle slot is encoded first and is empty.
+fn serialize_v6_ironwood_hybrid_tx(
+    bundle: &orchard::Bundle<orchard::bundle::Authorized, i64>,
+    transparent_inputs: &[zip244::TransparentInput],
+    transparent_outputs: &[zip244::TransparentOutput],
+    transparent_signatures: &[Vec<u8>],
+    branch_id: u32,
+    compressed_pubkey: Option<&[u8]>,
+) -> Result<Vec<u8>> {
+    if bundle.bundle_version() != IRONWOOD_BUNDLE_VERSION {
+        return Err(anyhow::anyhow!(
+            "Refusing to serialize a non-Ironwood bundle in the v6 Ironwood slot"
+        ));
+    }
+    if transparent_signatures.len() < transparent_inputs.len() {
+        return Err(anyhow::anyhow!(
+            "Not enough transparent signatures: got {} but need {}",
+            transparent_signatures.len(),
+            transparent_inputs.len()
+        ));
+    }
+
+    let mut tx = Vec::new();
+    tx.extend_from_slice(&crate::zip229::TX_VERSION.to_le_bytes());
+    tx.extend_from_slice(&crate::zip229::VERSION_GROUP_ID.to_le_bytes());
+    tx.extend_from_slice(&branch_id.to_le_bytes());
+    tx.extend_from_slice(&0u32.to_le_bytes());
+    tx.extend_from_slice(&0u32.to_le_bytes());
+
+    write_compact_size(&mut tx, transparent_inputs.len() as u64);
+    for (index, input) in transparent_inputs.iter().enumerate() {
+        tx.extend_from_slice(&input.prevout_hash);
+        tx.extend_from_slice(&input.prevout_index.to_le_bytes());
+
+        let signature = &transparent_signatures[index];
+        let pubkey = compressed_pubkey
+            .ok_or_else(|| anyhow::anyhow!("Compressed pubkey required for P2PKH scriptSig"))?;
+        if pubkey.len() != 33 || signature.len() + 1 > 75 {
+            return Err(anyhow::anyhow!(
+                "Invalid P2PKH signature or public key length"
+            ));
+        }
+        let mut script_sig = Vec::with_capacity(signature.len() + pubkey.len() + 3);
+        script_sig.push((signature.len() + 1) as u8);
+        script_sig.extend_from_slice(signature);
+        script_sig.push(0x01);
+        script_sig.push(pubkey.len() as u8);
+        script_sig.extend_from_slice(pubkey);
+        write_compact_size(&mut tx, script_sig.len() as u64);
+        tx.extend_from_slice(&script_sig);
+        tx.extend_from_slice(&input.sequence.to_le_bytes());
+    }
+
+    write_compact_size(&mut tx, transparent_outputs.len() as u64);
+    for output in transparent_outputs {
+        tx.extend_from_slice(&(output.value as i64).to_le_bytes());
+        write_compact_size(&mut tx, output.script_pubkey.len() as u64);
+        tx.extend_from_slice(&output.script_pubkey);
+    }
+
+    tx.push(0); // Sapling spends
+    tx.push(0); // Sapling outputs
+    tx.push(0); // Orchard actions (empty v6 Orchard slot)
+
+    write_orchard_family_bundle(&mut tx, bundle);
+    Ok(tx)
+}
+
+fn write_orchard_family_bundle(
+    tx: &mut Vec<u8>,
+    bundle: &orchard::Bundle<orchard::bundle::Authorized, i64>,
+) {
+    write_compact_size(tx, bundle.actions().len() as u64);
+    for action in bundle.actions() {
+        tx.extend_from_slice(&action.cv_net().to_bytes());
+        tx.extend_from_slice(&action.nullifier().to_bytes());
+        tx.extend_from_slice(&<[u8; 32]>::from(action.rk()));
+        tx.extend_from_slice(&action.cmx().to_bytes());
+        tx.extend_from_slice(action.encrypted_note().epk_bytes.as_ref());
+        tx.extend_from_slice(&action.encrypted_note().enc_ciphertext);
+        tx.extend_from_slice(&action.encrypted_note().out_ciphertext);
+    }
+    tx.push(bundle.flag_byte());
+    tx.extend_from_slice(&bundle.value_balance().to_le_bytes());
+    tx.extend_from_slice(&bundle.anchor().to_bytes());
+    let proof = bundle.authorization().proof().as_ref();
+    write_compact_size(tx, proof.len() as u64);
+    tx.extend_from_slice(proof);
+    for action in bundle.actions() {
+        tx.extend_from_slice(&<[u8; 64]>::from(action.authorization()));
+    }
+    tx.extend_from_slice(&<[u8; 64]>::from(
+        bundle.authorization().binding_signature(),
+    ));
 }
 
 /// Serialize a v5 transaction with both transparent and Orchard components.
@@ -2135,7 +2283,7 @@ fn serialize_v5_hybrid_tx(
         tx.extend_from_slice(&action.encrypted_note().out_ciphertext);
     }
 
-    tx.push(bundle.flags().to_byte());
+    tx.push(bundle.flag_byte());
     tx.extend_from_slice(&bundle.value_balance().to_le_bytes());
     tx.extend_from_slice(&bundle.anchor().to_bytes());
 
@@ -2185,6 +2333,8 @@ pub struct DeshieldPcztState {
     pub branch_id: u32,
     pub orchard_signing_request: SigningRequest,
     pub transparent_outputs: Vec<zip244::TransparentOutput>,
+    /// Nullifiers of the notes this tx spends — see PcztState::spent_nullifiers.
+    pub spent_nullifiers: Vec<[u8; 32]>,
 }
 
 /// Build a deshield PCZT: Orchard spends → transparent output.
@@ -2203,9 +2353,41 @@ pub async fn build_deshield_pczt(
     _db: &crate::wallet_db::WalletDb,
 ) -> Result<DeshieldPcztState> {
     let mut rng = OsRng;
+    if branch_id != crate::zip229::NU6_3_BRANCH_ID {
+        return Err(anyhow::anyhow!(
+            "Ironwood transactions require NU6.3 branch 0x{:08x}; node reported 0x{:08x}",
+            crate::zip229::NU6_3_BRANCH_ID,
+            branch_id
+        ));
+    }
+    if notes
+        .iter()
+        .any(|note| note.pool != crate::wallet_db::ShieldedPool::Ironwood)
+    {
+        return Err(anyhow::anyhow!(
+            "Deshield can only consume Ironwood notes. Migrate legacy Orchard funds first."
+        ));
+    }
     let total_input: u64 = notes.iter().map(|n| n.value).sum();
+    let spent_nullifiers: Vec<[u8; 32]> = notes.iter().map(|n| n.nullifier).collect();
 
     let n_spends = notes.len();
+
+    // Firmware caps a signing session at ZCASH_MAX_ACTIONS (16) Orchard
+    // actions and rejects at ZcashSignPCZT — but only after we'd already
+    // spent minutes on tree building + Halo2 proving. Fail fast instead.
+    // ponytail: no note selection — consolidate via a z2z self-send first.
+    const FIRMWARE_MAX_ACTIONS: usize = 16;
+    if n_spends > FIRMWARE_MAX_ACTIONS {
+        return Err(anyhow::anyhow!(
+            "Deshield would spend {} notes but the device supports at most {} \
+             Orchard actions per transaction. Consolidate notes with a shielded \
+             send to your own address first.",
+            n_spends,
+            FIRMWARE_MAX_ACTIONS
+        ));
+    }
+
     let fee = zip317_deshield_fee(n_spends);
 
     let needed = amount
@@ -2225,7 +2407,7 @@ pub async fn build_deshield_pczt(
     info!("  Inputs:  {} ZAT from {} notes", total_input, notes.len());
     info!("  Amount:  {} ZAT → transparent", amount);
     info!("  Fee:     {} ZAT", fee);
-    info!("  Change:  {} ZAT → Orchard", change);
+    info!("  Change:  {} ZAT → Ironwood", change);
 
     // Build transparent output
     let script_pubkey_bytes = hex::decode(&transparent_output.script_pubkey)?;
@@ -2247,7 +2429,7 @@ pub async fn build_deshield_pczt(
         } else {
             let tree_size_before = if spendable.block_height > 0 {
                 lwd_client
-                    .get_orchard_tree_size_at(spendable.block_height - 1)
+                    .get_ironwood_tree_size_at(spendable.block_height - 1)
                     .await?
             } else {
                 0
@@ -2264,14 +2446,8 @@ pub async fn build_deshield_pczt(
     }
 
     let lwd_tip_height = lwd_client.get_latest_block_height().await?;
-    let subtree_roots = lwd_client.get_subtree_roots(0, 0).await?;
+    let subtree_roots = lwd_client.get_ironwood_subtree_roots(0, 0).await?;
     let num_shards = subtree_roots.len();
-
-    if subtree_roots.is_empty() {
-        return Err(anyhow::anyhow!(
-            "No Orchard subtree roots available from lightwalletd"
-        ));
-    }
 
     let note_cmx_set: std::collections::HashMap<[u8; 32], usize> =
         notes.iter().enumerate().map(|(i, n)| (n.cmx, i)).collect();
@@ -2319,22 +2495,23 @@ pub async fn build_deshield_pczt(
         let shard_start_pos = (*shard_idx as u64) * SHARD_SIZE;
 
         let (fetch_start_height, actions_to_skip) = if *shard_idx == 0 {
-            (1687104u64, 0u64)
+            (crate::zip229::NU6_3_ACTIVATION_HEIGHT, 0u64)
         } else {
             let prev_completing = subtree_roots
                 .iter()
                 .find(|(idx, _, _)| *idx == shard_idx - 1)
                 .map(|(_, _, h)| *h)
-                .unwrap_or(1687104);
+                .unwrap_or(crate::zip229::NU6_3_ACTIVATION_HEIGHT);
             let tree_size_before_completing = if prev_completing > 0 {
                 lwd_client
-                    .get_orchard_tree_size_at(prev_completing - 1)
+                    .get_ironwood_tree_size_at(prev_completing - 1)
                     .await?
             } else {
                 0
             };
-            let tree_size_after_completing =
-                lwd_client.get_orchard_tree_size_at(prev_completing).await?;
+            let tree_size_after_completing = lwd_client
+                .get_ironwood_tree_size_at(prev_completing)
+                .await?;
             let plan = plan_incomplete_shard_fetch(
                 prev_completing,
                 shard_start_pos,
@@ -2371,7 +2548,9 @@ pub async fn build_deshield_pczt(
         let mut global_action_counter = 0u64;
         'block_fetch: while current_height <= shard_end_height {
             let end = std::cmp::min(current_height + chunk_size - 1, shard_end_height);
-            let blocks = lwd_client.fetch_block_actions(current_height, end).await?;
+            let blocks = lwd_client
+                .fetch_ironwood_block_actions(current_height, end)
+                .await?;
 
             for (_block_height, txs) in &blocks {
                 for (_tx_idx, cmxs) in txs {
@@ -2423,18 +2602,21 @@ pub async fn build_deshield_pczt(
     // = u64::MAX, shard_end_height = lwd_tip_height), so a second pass here
     // would double-append leaves.
     let last_completed_shard = subtree_roots.len() as u32;
-    let last_completed_height = subtree_roots.last().map(|(_, _, h)| *h).unwrap_or(1687104);
+    let last_completed_height = subtree_roots
+        .last()
+        .map(|(_, _, h)| *h)
+        .unwrap_or(crate::zip229::NU6_3_ACTIVATION_HEIGHT);
     if !note_shards.contains(&last_completed_shard) && lwd_tip_height > last_completed_height {
         let shard_start_pos = (last_completed_shard as u64) * SHARD_SIZE;
         let tree_size_before_completing = if last_completed_height > 0 {
             lwd_client
-                .get_orchard_tree_size_at(last_completed_height - 1)
+                .get_ironwood_tree_size_at(last_completed_height - 1)
                 .await?
         } else {
             0
         };
         let tree_size_after_completing = lwd_client
-            .get_orchard_tree_size_at(last_completed_height)
+            .get_ironwood_tree_size_at(last_completed_height)
             .await?;
         let plan = plan_incomplete_shard_fetch(
             last_completed_height,
@@ -2453,7 +2635,9 @@ pub async fn build_deshield_pczt(
         let mut global_action_counter = 0u64;
         while current_height <= lwd_tip_height {
             let end = std::cmp::min(current_height + chunk_size - 1, lwd_tip_height);
-            let blocks = lwd_client.fetch_block_actions(current_height, end).await?;
+            let blocks = lwd_client
+                .fetch_ironwood_block_actions(current_height, end)
+                .await?;
 
             for (_block_height, txs) in &blocks {
                 for (_tx_idx, cmxs) in txs {
@@ -2506,6 +2690,7 @@ pub async fn build_deshield_pczt(
             NoteValue::from_raw(spendable.value),
             rho,
             rseed,
+            NoteVersion::V3,
         )
         .into_option()
         .ok_or_else(|| anyhow::anyhow!("Failed to reconstruct note {}", i))?;
@@ -2526,10 +2711,10 @@ pub async fn build_deshield_pczt(
         .ok_or_else(|| anyhow::anyhow!("Empty Merkle tree"))?;
 
     let computed_anchor_bytes = root.to_bytes();
-    let expected_anchor = lwd_client.get_orchard_anchor(lwd_tip_height).await?;
+    let expected_anchor = lwd_client.get_ironwood_anchor(lwd_tip_height).await?;
     if computed_anchor_bytes != expected_anchor {
         return Err(anyhow::anyhow!(
-            "Orchard anchor mismatch: computed={} vs expected={}",
+            "Ironwood anchor mismatch: computed={} vs expected={}",
             hex::encode(&computed_anchor_bytes),
             hex::encode(&expected_anchor),
         ));
@@ -2538,7 +2723,13 @@ pub async fn build_deshield_pczt(
 
     // ── Build PCZT bundle ──────────────────────────────────────────
 
-    let mut builder = Builder::new(BundleType::DEFAULT, anchor);
+    let mut builder = Builder::new(
+        BundleType::DEFAULT,
+        IRONWOOD_BUNDLE_VERSION,
+        IRONWOOD_BUNDLE_VERSION.default_flags(),
+        anchor,
+    )
+    .map_err(|e| anyhow::anyhow!("Failed to initialize Ironwood builder: {:?}", e))?;
 
     let mut sorted_notes: Vec<(u64, usize)> = note_positions
         .iter()
@@ -2606,29 +2797,29 @@ pub async fn build_deshield_pczt(
         .build_for_pczt(&mut rng)
         .map_err(|e| anyhow::anyhow!("Failed to build PCZT: {:?}", e))?;
 
-    // ── Compute ZIP-244 digests (hybrid: transparent outputs + Orchard) ──
+    // ── Compute ZIP-229 digests (hybrid: transparent outputs + Ironwood) ──
 
     let effects_bundle = pczt_bundle
         .extract_effects::<i64>()
         .map_err(|e| anyhow::anyhow!("Failed to extract effects: {:?}", e))?
         .ok_or_else(|| anyhow::anyhow!("Empty effects bundle"))?;
 
-    let digests = zip244::compute_zip244_digests_hybrid(
+    let digests = crate::zip229::compute_digests_hybrid(
         &effects_bundle,
         &[],
         &transparent_outputs,
         branch_id,
         0,
         0,
-    );
-    let sighash = zip244::compute_sighash(&digests, branch_id);
+    )?;
+    let sighash = crate::zip229::compute_sighash(&digests, branch_id);
 
     pczt_bundle
         .finalize_io(sighash, &mut rng)
         .map_err(|e| anyhow::anyhow!("IO finalization failed: {:?}", e))?;
 
     info!("Generating Halo2 proof for deshield...");
-    let pk = ProvingKey::build();
+    let pk = ProvingKey::build(IRONWOOD_BUNDLE_VERSION.circuit_version());
     pczt_bundle
         .create_proof(&pk, &mut rng)
         .map_err(|e| anyhow::anyhow!("Proof generation failed: {:?}", e))?;
@@ -2647,8 +2838,11 @@ pub async fn build_deshield_pczt(
             .unwrap_or_else(|| vec![0u8; 32]);
         let cv_net_bytes = pczt_bundle.actions()[i].cv_net().to_bytes().to_vec();
         let is_spend = pczt_bundle.actions()[i].spend().spend_auth_sig().is_none();
+        // Firmware verifies the OUTPUT note commitment per action
+        // (cmx = commit(recipient, value, rseed, rho)) — always send
+        // output.value(), not spend.value(). Same as build_pczt.
         let value = pczt_bundle.actions()[i]
-            .spend()
+            .output()
             .value()
             .map(|v| v.inner())
             .unwrap_or(0);
@@ -2666,6 +2860,17 @@ pub async fn build_deshield_pczt(
         }
         let rk_bytes: [u8; 32] = effects_action.rk().into();
 
+        // Every Orchard action carries a spend+output pair; the firmware
+        // requires recipient+rseed on EVERY action to recompute cmx before
+        // signing. The PCZT stores the plaintext directly — read it, same
+        // as build_pczt / build_shield_pczt.
+        let out = pczt_bundle.actions()[i].output();
+        let orchard_recipient = out
+            .recipient()
+            .as_ref()
+            .map(|addr| hex::encode(addr.to_raw_address_bytes()));
+        let orchard_rseed = out.rseed().as_ref().map(|rs| hex::encode(rs.as_bytes()));
+
         action_fields.push(ActionFields {
             index: i as u32,
             alpha: alpha_bytes,
@@ -2680,12 +2885,13 @@ pub async fn build_deshield_pczt(
             out_ciphertext: effects_action.encrypted_note().out_ciphertext.to_vec(),
             value,
             is_spend,
-            recipient: None,
-            rseed: None,
+            recipient: orchard_recipient,
+            rseed: orchard_rseed,
         });
     }
 
     let signing_request = SigningRequest {
+        pool: "ironwood",
         n_actions: n_actions as u32,
         account,
         branch_id,
@@ -2694,15 +2900,16 @@ pub async fn build_deshield_pczt(
             header: digests.header_digest.to_vec(),
             transparent: digests.transparent_digest.to_vec(),
             orchard: digests.orchard_digest.to_vec(),
+            ironwood: digests.ironwood_digest.to_vec(),
         },
         header_fields: HeaderFields {
-            tx_version: 5,
-            version_group_id: 0x26A7270A,
+            tx_version: 6,
+            version_group_id: crate::zip229::VERSION_GROUP_ID,
             lock_time: 0,
             expiry_height: 0,
         },
         bundle_meta: BundleMeta {
-            flags: effects_bundle.flags().to_byte() as u32,
+            flags: effects_bundle.flag_byte() as u32,
             value_balance: *effects_bundle.value_balance(),
             anchor: effects_bundle.anchor().to_bytes().to_vec(),
         },
@@ -2720,10 +2927,11 @@ pub async fn build_deshield_pczt(
         branch_id,
         orchard_signing_request: signing_request,
         transparent_outputs,
+        spent_nullifiers,
     })
 }
 
-/// Finalize a deshield PCZT: apply Orchard signatures, serialize hybrid v5 tx.
+/// Finalize a deshield PCZT: apply Ironwood signatures, serialize hybrid v6 tx.
 ///
 /// No transparent signatures needed — deshield has no transparent inputs.
 pub fn finalize_deshield_pczt(
@@ -2786,30 +2994,31 @@ pub fn finalize_deshield_pczt(
         .apply_binding_signature(sighash, &mut rng)
         .ok_or_else(|| anyhow::anyhow!("Binding signature verification failed"))?;
 
-    let effects_orchard_digest: [u8; 32] = state
+    let effects_ironwood_digest: [u8; 32] = state
         .orchard_signing_request
         .digests
-        .orchard
+        .ironwood
         .as_slice()
         .try_into()
         .map_err(|_| {
             anyhow::anyhow!(
-                "Deshield signing request Orchard digest must be 32 bytes, got {}",
-                state.orchard_signing_request.digests.orchard.len(),
+                "Deshield signing request Ironwood digest must be 32 bytes, got {}",
+                state.orchard_signing_request.digests.ironwood.len(),
             )
         })?;
-    let orchard_digest = validate_hybrid_orchard_consensus(
+    let ironwood_digest = validate_hybrid_ironwood_consensus(
         "Deshield",
         &authorized_bundle,
         state.sighash,
         state.branch_id,
         &[],
         &state.transparent_outputs,
-        effects_orchard_digest,
+        effects_ironwood_digest,
     )?;
 
-    // Serialize as hybrid v5 tx: no transparent inputs, transparent outputs, Orchard bundle
-    let tx_bytes = serialize_v5_hybrid_tx(
+    // Serialize as hybrid v6 tx: no transparent inputs, transparent outputs,
+    // an empty Orchard slot, and the authorized Ironwood bundle.
+    let tx_bytes = serialize_v6_ironwood_hybrid_tx(
         &authorized_bundle,
         &[], // no transparent inputs
         &state.transparent_outputs,
@@ -2818,16 +3027,14 @@ pub fn finalize_deshield_pczt(
         None, // no pubkey needed (no transparent inputs)
     )?;
 
-    // Compute txid
-    let header_digest = zip244::digest_header(state.branch_id, 0, 0);
-    let transparent_txid_digest = zip244::digest_transparent_txid(&[], &state.transparent_outputs);
-    let txid_digests = zip244::Zip244Digests {
-        header_digest,
-        transparent_digest: transparent_txid_digest,
-        sapling_digest: zip244::EMPTY_SAPLING_DIGEST,
-        orchard_digest,
-    };
-    let txid_hash = zip244::compute_sighash(&txid_digests, state.branch_id);
+    let txid_hash = crate::zip229::compute_txid(
+        ironwood_digest,
+        &[],
+        &state.transparent_outputs,
+        state.branch_id,
+        0,
+        0,
+    );
     let txid = hex::encode(&txid_hash);
 
     info!(
@@ -2844,6 +3051,7 @@ pub fn finalize_deshield_pczt(
 mod tests {
     use super::{
         plan_incomplete_shard_fetch, plan_orchard_signature_application, IncompleteShardFetchPlan,
+        LEGACY_ORCHARD_BUNDLE_VERSION,
     };
     use incrementalmerkletree::Retention;
     use orchard::tree::MerkleHashOrchard;
@@ -2855,6 +3063,71 @@ mod tests {
         buf[..8].copy_from_slice(&i.to_le_bytes());
         // This produces a valid Pallas base field element for all small i
         MerkleHashOrchard::from_bytes(&buf).unwrap()
+    }
+
+    /// Deshield streams EVERY action's output part to the firmware, which
+    /// recomputes cmx = commit(recipient, value, rseed, rho) before signing.
+    /// Regression: build_deshield_pczt sent recipient/rseed = None and
+    /// spend().value() — firmware rejected with "Missing Orchard output
+    /// metadata". This pins the orchard-crate guarantee the fix relies on:
+    /// build_for_pczt populates recipient/rseed/value on every output part,
+    /// INCLUDING dummy/padding outputs.
+    #[test]
+    fn test_pczt_output_parts_carry_recipient_rseed_value_even_for_dummies() {
+        use orchard::builder::{Builder, BundleType};
+        use orchard::keys::{FullViewingKey, Scope, SpendingKey};
+        use orchard::value::NoteValue;
+        use orchard::Anchor;
+        use rand::rngs::OsRng;
+
+        let sk: SpendingKey = Option::<SpendingKey>::from(SpendingKey::from_bytes([7u8; 32]))
+            .expect("valid spending key");
+        let fvk = FullViewingKey::from(&sk);
+        let recipient = fvk.address_at(0u32, Scope::External);
+
+        let mut builder = Builder::new(
+            BundleType::DEFAULT,
+            LEGACY_ORCHARD_BUNDLE_VERSION,
+            LEGACY_ORCHARD_BUNDLE_VERSION.default_flags(),
+            Anchor::empty_tree(),
+        )
+        .unwrap();
+        let mut memo = [0u8; 512];
+        memo[0] = 0xF6;
+        builder
+            .add_output(None, recipient, NoteValue::from_raw(1000), memo)
+            .expect("add_output");
+
+        let (bundle, _) = builder.build_for_pczt(&mut OsRng).expect("build_for_pczt");
+        assert!(
+            bundle.actions().len() >= 2,
+            "BundleType::DEFAULT must pad to at least 2 actions"
+        );
+
+        let mut real_outputs = 0;
+        for (i, action) in bundle.actions().iter().enumerate() {
+            let out = action.output();
+            assert!(
+                out.recipient().is_some(),
+                "action {} output part missing recipient",
+                i
+            );
+            assert!(
+                out.rseed().is_some(),
+                "action {} output part missing rseed",
+                i
+            );
+            let value = out
+                .value()
+                .map(|v| v.inner())
+                .expect("output part missing value");
+            if value == 1000 {
+                real_outputs += 1;
+            } else {
+                assert_eq!(value, 0, "dummy output must have zero value");
+            }
+        }
+        assert_eq!(real_outputs, 1, "exactly one real output expected");
     }
 
     /// ZIP-317 §3 + BundleType::DEFAULT padding. The chain counts orchard
@@ -3682,15 +3955,18 @@ mod tests {
         use incrementalmerkletree::{Address, Position};
 
         let shard_size: u64 = 1 << 4; // 16
-        let n_complete = 3u64;        // shards 0,1,2 complete
-        let note_shard = 1u64;        // note in a completed shard BELOW shard 2
+        let n_complete = 3u64; // shards 0,1,2 complete
+        let note_shard = 1u64; // note in a completed shard BELOW shard 2
         let note_pos = note_shard * shard_size + 5;
-        let incomplete = 7u64;        // frontier leaves in shard 3
+        let incomplete = 7u64; // frontier leaves in shard 3
 
         let shard_root = |s: u64| -> [u8; 32] {
             let mut st: ShardTree<MemoryShardStore<MerkleHashOrchard, u32>, 4, 4> =
                 ShardTree::new(MemoryShardStore::empty(), 100);
-            for j in 0..shard_size { st.append(test_leaf(s * shard_size + j), Retention::Ephemeral).unwrap(); }
+            for j in 0..shard_size {
+                st.append(test_leaf(s * shard_size + j), Retention::Ephemeral)
+                    .unwrap();
+            }
             st.checkpoint(0u32).unwrap();
             st.root_at_checkpoint_id(&0u32).unwrap().unwrap().to_bytes()
         };
@@ -3702,19 +3978,36 @@ mod tests {
             if s == note_shard {
                 for j in 0..shard_size {
                     let i = s * shard_size + j;
-                    let r = if i == note_pos { Retention::Marked } else { Retention::Ephemeral };
+                    let r = if i == note_pos {
+                        Retention::Marked
+                    } else {
+                        Retention::Ephemeral
+                    };
                     tree.append(test_leaf(i), r).unwrap();
                 }
             } else {
                 let root = MerkleHashOrchard::from_bytes(&shard_root(s)).unwrap();
-                tree.insert(Address::above_position(4.into(), Position::from(s * shard_size)), root).unwrap();
+                tree.insert(
+                    Address::above_position(4.into(), Position::from(s * shard_size)),
+                    root,
+                )
+                .unwrap();
             }
         }
-        for j in 0..incomplete { tree.append(test_leaf(n_complete * shard_size + j), Retention::Ephemeral).unwrap(); }
+        for j in 0..incomplete {
+            tree.append(test_leaf(n_complete * shard_size + j), Retention::Ephemeral)
+                .unwrap();
+        }
 
         let ckpt = u32::MAX;
         tree.checkpoint(ckpt).unwrap();
-        assert_witness_recomputes_root(&mut tree, note_pos, test_leaf(note_pos), ckpt, "note_in_lower_completed_shard");
+        assert_witness_recomputes_root(
+            &mut tree,
+            note_pos,
+            test_leaf(note_pos),
+            ckpt,
+            "note_in_lower_completed_shard",
+        );
     }
 
     /// Mirrors the deshield builder's tree shape: insert N-1 completed shard
@@ -3954,8 +4247,11 @@ mod tests {
 // is direction-specific, this is where it shows up.
 
 #[cfg(test)]
-mod roundtrip_v5_tests {
-    use super::{serialize_v5_hybrid_tx, serialize_v5_shielded_tx};
+mod transaction_roundtrip_tests {
+    use super::{
+        serialize_v5_hybrid_tx, serialize_v5_shielded_tx, serialize_v6_ironwood_hybrid_tx,
+    };
+    use crate::zip229;
     use crate::zip244::{
         self, TransparentInput, TransparentOutput, Zip244Digests, EMPTY_SAPLING_DIGEST,
         EMPTY_TRANSPARENT_DIGEST,
@@ -4087,11 +4383,15 @@ mod roundtrip_v5_tests {
             .expect("synthetic action parts are well-formed")
     }
 
-    fn synthetic_bundle(n_actions: usize, value_balance: i64) -> orchard::Bundle<Authorized, i64> {
+    fn synthetic_bundle_for_version(
+        n_actions: usize,
+        value_balance: i64,
+        bundle_version: orchard::bundle::BundleVersion,
+    ) -> orchard::Bundle<Authorized, i64> {
         assert!(n_actions >= 1);
         let actions: Vec<_> = (0..n_actions).map(|_| synthetic_action()).collect();
         let actions_ne = NonEmpty::from_vec(actions).unwrap();
-        let flags = Flags::from_byte(0x03).unwrap();
+        let flags = Flags::from_byte(0x03, bundle_version).unwrap();
         let anchor = Anchor::from_bytes(TV_CMX).unwrap();
         let effects = orchard::Bundle::<_, i64>::from_parts(
             actions_ne,
@@ -4099,8 +4399,10 @@ mod roundtrip_v5_tests {
             value_balance,
             anchor,
             orchard::bundle::EffectsOnly,
-        );
-        let proof = Proof::new(vec![0u8; 1500]);
+            bundle_version,
+        )
+        .expect("synthetic bundle parts are well-formed");
+        let proof = Proof::new(vec![0u8; Proof::expected_proof_size(n_actions)]);
         let binding_sig: redpallas::Signature<redpallas::Binding> = [0xcd; 64].into();
         let spend_auth_sig: redpallas::Signature<redpallas::SpendAuth> = [0xab; 64].into();
         // Graft authorizing data on, transitioning EffectsOnly → Authorized.
@@ -4108,6 +4410,25 @@ mod roundtrip_v5_tests {
             &mut (),
             |_, _, ()| spend_auth_sig.clone(),
             |_, _| Authorized::from_parts(proof, binding_sig),
+        )
+    }
+
+    fn synthetic_bundle(n_actions: usize, value_balance: i64) -> orchard::Bundle<Authorized, i64> {
+        synthetic_bundle_for_version(
+            n_actions,
+            value_balance,
+            orchard::bundle::BundleVersion::orchard_v2(),
+        )
+    }
+
+    fn synthetic_ironwood_bundle(
+        n_actions: usize,
+        value_balance: i64,
+    ) -> orchard::Bundle<Authorized, i64> {
+        synthetic_bundle_for_version(
+            n_actions,
+            value_balance,
+            orchard::bundle::BundleVersion::ironwood_v3(),
         )
     }
 
@@ -4298,6 +4619,57 @@ mod roundtrip_v5_tests {
              with the canonical reference; this is the bug deshield broadcasts hit"
         );
     }
+
+    /// The consensus regression that motivated Ironwood support: transparent
+    /// value enters the new v6 Ironwood slot, while the v6 Orchard slot stays
+    /// empty. The canonical parser and ZIP-229 txid must agree with our bytes.
+    #[test]
+    fn roundtrip_v6_hybrid_ironwood_shield() {
+        let bundle = synthetic_ironwood_bundle(1, 100_000);
+        let inputs = vec![TransparentInput {
+            prevout_hash: [0x22; 32],
+            prevout_index: 1,
+            value: 105_000,
+            script_pubkey: p2pkh_script([0xca; 20]),
+            sequence: 0xffff_ffff,
+        }];
+        let synth_sig = vec![0u8; 71];
+        let synth_pubkey = [0x03u8; 33];
+        let tx_bytes = serialize_v6_ironwood_hybrid_tx(
+            &bundle,
+            &inputs,
+            &[],
+            &[synth_sig],
+            zip229::NU6_3_BRANCH_ID,
+            Some(&synth_pubkey),
+        )
+        .unwrap();
+
+        let parsed = Transaction::read(&tx_bytes[..], BranchId::Nu6_3)
+            .expect("canonical reader must accept our v6 Ironwood shield bytes");
+        assert!(
+            parsed.orchard_bundle().is_none(),
+            "legacy Orchard slot must be empty"
+        );
+        assert_eq!(
+            parsed
+                .ironwood_bundle()
+                .expect("Ironwood bundle present")
+                .actions()
+                .len(),
+            bundle.actions().len(),
+            "Ironwood action count round-tripped",
+        );
+
+        let ironwood_digest = zip229::digest_bundle_authorized(&bundle).unwrap();
+        let ours =
+            zip229::compute_txid(ironwood_digest, &inputs, &[], zip229::NU6_3_BRANCH_ID, 0, 0);
+        assert_eq!(
+            *parsed.txid().as_ref(),
+            ours,
+            "v6 Ironwood shield txid differs from the canonical reference"
+        );
+    }
 }
 
 /// Batch-validate a saved live transaction using orchard 0.10.2's BatchValidator.
@@ -4355,9 +4727,13 @@ mod batch_validate_test {
         let ob = parsed.orchard_bundle().expect("orchard bundle present");
         println!("anchor: {}", hex::encode(ob.anchor().to_bytes()));
 
-        let mut validator = BatchValidator::new();
-        validator.add_bundle(ob, sighash_arr);
-        let result = validator.validate(&VerifyingKey::build(), OsRng);
+        let vk =
+            VerifyingKey::build(orchard::bundle::BundleVersion::orchard_v2().circuit_version());
+        let mut validator = BatchValidator::new(&vk);
+        validator
+            .add_bundle(ob, sighash_arr)
+            .expect("saved bundle version must match validator");
+        let result = validator.validate(OsRng);
         println!(
             "BatchValidator (T.1 sighash): {}",
             if result { "PASS" } else { "FAIL" }

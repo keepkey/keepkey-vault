@@ -104,7 +104,7 @@
 	"approvingToken": "正在授权代币...",
 	"approvalRequired": "正在等待您 KeepKey 上的代币授权...",
 	"enterAmount": "输入数量以获取报价",
-	"notSupported": "{{coin}} 兑换目前尚不支持通过 THORChain 进行。",
+	"notSupported": "目前没有可用于 {{coin}} 的兑换路线。",
 	"copied": "已复制",
 	"copy": "复制",
 	"youSend": "您发送",

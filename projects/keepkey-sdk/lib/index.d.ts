@@ -1,5 +1,5 @@
 import { VaultClient } from './client';
-import type { SdkConfig, DeviceFeatures, DeviceInfo, SignedTx, AddressRequest, EthSignTxParams, EthSignTypedDataParams, EthSignMessageParams, EthVerifyMessageParams, BtcSignTxParams, CosmosAminoSignParams, XrpSignTxParams, BnbSignTxParams, SolanaSignTxParams, SolanaSignOffchainMessageParams, SolanaOffchainMessageSignatureResult, TronSignTxParams, TronSignMessageParams, TronMessageSignatureResult, TronVerifyMessageParams, TronSignTypedHashParams, TronTypedDataSignatureResult, TonSignTxParams, TonSignMessageParams, TonMessageSignatureResult, TonBuildTransferParams, TonBuildTransferResult, TonFinalizeTransferParams, TonFinalizeTransferResult, GetPublicKeyRequest, BatchPubkeysPath, ApplySettingsParams, HealthResponse, SupportedAsset, PortfolioBalancesParams, MarketInfoParams, SearchAssetsParams, ListUnspentParams, PubkeyInfoParams, TxHistoryParams, BroadcastParams, NetworkIdParams, NetworkAddressParams, TokenDecimalsParams, StakingParams, SwapQuoteParams, SweepScanParams, SweepScanStatus, SweepExecuteParams, SweepExecuteResult } from './types';
+import type { SdkConfig, DeviceFeatures, DeviceInfo, SignedTx, AddressRequest, EthSignTxParams, LoadClearsignSignerParams, LoadClearsignSignerResult, EthSignTypedDataParams, EthSignMessageParams, EthVerifyMessageParams, BtcSignTxParams, CosmosAminoSignParams, HiveSignOperationsParams, HiveSignTransferParams, HiveSignMessageParams, XrpSignTxParams, BnbSignTxParams, SolanaSignTxParams, SolanaSignOffchainMessageParams, SolanaOffchainMessageSignatureResult, TronSignTxParams, TronSignMessageParams, TronMessageSignatureResult, TronVerifyMessageParams, TronSignTypedHashParams, TronTypedDataSignatureResult, TonSignTxParams, TonSignMessageParams, TonMessageSignatureResult, TonBuildTransferParams, TonBuildTransferResult, TonFinalizeTransferParams, TonFinalizeTransferResult, GetPublicKeyRequest, BatchPubkeysPath, ApplySettingsParams, HealthResponse, SupportedAsset, PortfolioBalancesParams, MarketInfoParams, SearchAssetsParams, ListUnspentParams, PubkeyInfoParams, TxHistoryParams, BroadcastParams, NetworkIdParams, NetworkAddressParams, TokenDecimalsParams, StakingParams, SwapQuoteParams, SweepScanParams, SweepScanStatus, SweepExecuteParams, SweepExecuteResult } from './types';
 export { SdkError } from './client';
 export * from './types';
 /**
@@ -54,6 +54,8 @@ export declare class KeepKeySdk {
         info: {
             /** Get full device features — model, firmware version, PIN/passphrase state, policies. */
             getFeatures: () => Promise<DeviceFeatures>;
+            /** Return `size` fresh bytes from the device hardware RNG (1..8192). */
+            getEntropy: (size: number) => Promise<Uint8Array>;
             /** List all connected KeepKey devices. */
             getDevices: () => Promise<{
                 devices: DeviceInfo[];
@@ -133,12 +135,19 @@ export declare class KeepKeySdk {
              * character the user "typed". A finalized word that isn't in the BIP-39
              * wordlist makes the in-flight `recoverDevice()` promise reject with
              * "Word not found in BIP39 wordlist".
+             *
+             * `seq` is the value last read from `getRecoveryState()`. The vault pins
+             * the send to that exact CharacterRequest and to the client that started
+             * recovery — a stale, reordered, or foreign send is rejected with 409
+             * rather than silently corrupting the decoded word.
              */
-            sendCharacter: (character: string) => Promise<{
+            sendCharacter: (character: string, seq: number) => Promise<{
                 success: boolean;
             }>;
-            /** Delete the last character entered during cipher recovery. */
-            sendCharacterDelete: () => Promise<{
+            /** Delete the last character entered during cipher recovery. Pass the
+             *  current `seq` (from `getRecoveryState()`) to pin the delete; the
+             *  initiating-client check applies either way. */
+            sendCharacterDelete: (seq?: number) => Promise<{
                 success: boolean;
             }>;
             /** Finalize cipher-recovery word/seed entry (equivalent to pressing "next"). */
@@ -211,11 +220,26 @@ export declare class KeepKeySdk {
         tonGetAddress: (params: AddressRequest) => Promise<{
             address: string;
         }>;
+        /** Derive a Hive (SLIP-0048) address. */
+        hiveGetAddress: (params: AddressRequest) => Promise<{
+            address: string;
+        }>;
     };
     /** Ethereum and EVM-compatible signing (sign-tx, sign-message, EIP-712). */
     eth: {
         /** Sign an Ethereum or EVM transaction. Supports legacy and EIP-1559. */
         ethSignTransaction: (params: EthSignTxParams) => Promise<SignedTx>;
+        /**
+         * Load an EVM clear-sign signer into a device key slot (user-confirmed on
+         * device). The device shows a trust screen naming the alias + pubkey
+         * fingerprint. Default is RAM-only (dropped on reboot — reload per session);
+         * pass `persist: true` to keep it in device flash across reboots (until
+         * WipeDevice). An optional `icon` (+ `iconWidth`/`iconHeight`) renders the
+         * identity's logo on the trust screen and every clear-sign it vouches for.
+         * Firmware 7.15.0+. Used to trust a metadata-signing key (e.g. a CI test
+         * key in slot 3) so `ethSignTransaction`'s `txMetadata` blobs verify.
+         */
+        loadClearsignSigner: (params: LoadClearsignSignerParams) => Promise<LoadClearsignSignerResult>;
         /** Sign a personal message (`eth_sign` / `personal_sign`). */
         ethSignMessage: (params: EthSignMessageParams) => Promise<any>;
         /** Sign an EIP-712 typed data structure. */
@@ -264,6 +288,21 @@ export declare class KeepKeySdk {
         /** Sign an Osmosis `MsgSwapExactAmountIn` (swap). */
         osmosisSignAminoSwap: (params: CosmosAminoSignParams) => Promise<SignedTx>;
     };
+    /** Hive generic clear-sign op-table signing (fw 7.15.0+). */
+    hive: {
+        /**
+         * Sign 1–4 Hive operations against the device clear-sign op table.
+         * Requires the vault's `hive_enabled` setting and firmware >= 7.15.0.
+         */
+        hiveSignOperations: (params: HiveSignOperationsParams) => Promise<SignedTx>;
+        /** Sign a Hive transfer op (dedicated path — caller supplies the TaPoS header). */
+        hiveSignTransfer: (params: HiveSignTransferParams) => Promise<SignedTx>;
+        /** Keychain signBuffer — sign SHA256(message) on-device (dApp login). */
+        hiveSignMessage: (params: HiveSignMessageParams) => Promise<{
+            signature: string;
+            public_key?: string;
+        }>;
+    };
     /** THORChain signing (RUNE transfers and deposits for swaps). */
     thorchain: {
         /** Sign a THORChain `MsgSend` transfer. */
@@ -288,9 +327,14 @@ export declare class KeepKeySdk {
         /** Sign a BNB Beacon Chain transaction. */
         binanceSignTransaction: (params: BnbSignTxParams) => Promise<SignedTx>;
     };
-    /** Solana signing (supports SPL tokens). */
+    /** Solana signing (supports SPL tokens and transaction-bound ClearSign metadata). */
     solana: {
-        /** Sign a Solana transaction. `raw_tx` must be the base64-encoded serialized transaction. */
+        /**
+         * Sign a Solana transaction. `raw_tx` is the base64-encoded serialized
+         * transaction. Opaque cross-chain/versioned transactions should include a
+         * provider-signed KKSOLSW1 `swapMetadata` descriptor; firmware verifies its
+         * binding before displaying ClearSign swap details.
+         */
         solanaSignTransaction: (params: SolanaSignTxParams) => Promise<SignedTx>;
         /**
          * Sign a Solana off-chain message with domain separation. Firmware

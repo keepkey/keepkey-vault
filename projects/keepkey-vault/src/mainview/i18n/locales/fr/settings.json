@@ -76,8 +76,6 @@
 	"signingPolicy": "Politique de signature",
 	"advancedMode": "Mode avancé",
 	"advancedModeDescription": "Autoriser la signature de transactions EVM avec des données de contrat arbitraires (ex. Uniswap, DeFi).",
-	"experimentalFeatures": "Expérimental",
-	"experimentalFeaturesDescription": "Activer les fonctionnalités expérimentales du firmware.",
 	"featureFlags": "Indicateurs de fonctionnalités",
 	"walletConnectFeature": "WalletConnect",
 	"walletConnectFeatureDescription": "Se connecter aux dApps via le protocole WalletConnect.",

@@ -1,11 +1,12 @@
 /**
  * BtcAccountManager — manages multi-account BTC xpub lifecycle.
  *
- * Each "account" contains 3 xpubs (Legacy/SegWit/NativeSegWit).
+ * Each "account" contains the 3 established xpubs, plus BIP86 when the
+ * connected firmware explicitly advertises Taproot support.
  * The user can add accounts (0, 1, 2, …) and select which xpub to use for receive/send.
  */
 import { EventEmitter } from 'events'
-import { BTC_SCRIPT_TYPES, btcAccountPath } from '../shared/chains'
+import { supportedBtcScriptTypes, btcAccountPath } from '../shared/chains'
 import type { BtcScriptType, BtcXpub, BtcAccount, BtcAccountSet } from '../shared/types'
 
 export class BtcAccountManager extends EventEmitter {
@@ -15,7 +16,7 @@ export class BtcAccountManager extends EventEmitter {
   /** Set after getBalances calls updateXpubBalance — prevents getBtcAccounts from stomping live data with stale DB rows. */
   pioneerFetched = false
 
-  /** Initialize account 0 with 3 xpubs from the device. Concurrent calls coalesce into one. */
+  /** Initialize account 0 with the device-supported BTC account types. */
   async initialize(wallet: any): Promise<BtcAccountSet> {
     if (this.initPromise) return this.initPromise
     this.initPromise = this._doInitialize(wallet)
@@ -44,12 +45,13 @@ export class BtcAccountManager extends EventEmitter {
     return set
   }
 
-  /** Fetch 3 xpubs for a given account index in a single batch device call. */
+  /** Fetch supported xpubs for a given account index in a single batch device call. */
   private async fetchAccount(wallet: any, accountIndex: number): Promise<void> {
     // Safety: skip if this account index already exists (prevents race-condition duplicates)
     if (this.accounts.some(a => a.accountIndex === accountIndex)) return
 
-    const paths = BTC_SCRIPT_TYPES.map(st => ({
+    const scriptTypes = await supportedBtcScriptTypes(wallet)
+    const paths = scriptTypes.map(st => ({
       addressNList: btcAccountPath(st.purpose, accountIndex),
       coin: 'Bitcoin',
       scriptType: st.scriptType,
@@ -61,7 +63,7 @@ export class BtcAccountManager extends EventEmitter {
     // Re-check after await (another call may have added it while we were waiting)
     if (this.accounts.some(a => a.accountIndex === accountIndex)) return
 
-    const xpubs: BtcXpub[] = BTC_SCRIPT_TYPES.map((st, i) => ({
+    const xpubs: BtcXpub[] = scriptTypes.map((st, i) => ({
       scriptType: st.scriptType,
       purpose: st.purpose,
       path: btcAccountPath(st.purpose, accountIndex),
@@ -79,11 +81,11 @@ export class BtcAccountManager extends EventEmitter {
   }
 
   /** Return all pubkey entries for Pioneer balance lookup (all xpubs across all accounts). */
-  getAllPubkeyEntries(btcCaip: string): Array<{ caip: string; pubkey: string }> {
-    const entries: Array<{ caip: string; pubkey: string }> = []
+  getAllPubkeyEntries(btcCaip: string): Array<{ caip: string; pubkey: string; scriptType: BtcScriptType }> {
+    const entries: Array<{ caip: string; pubkey: string; scriptType: BtcScriptType }> = []
     for (const account of this.accounts) {
       for (const xp of account.xpubs) {
-        if (xp.xpub) entries.push({ caip: btcCaip, pubkey: xp.xpub })
+        if (xp.xpub) entries.push({ caip: btcCaip, pubkey: xp.xpub, scriptType: xp.scriptType })
       }
     }
     return entries

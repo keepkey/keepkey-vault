@@ -76,8 +76,6 @@
 	"signingPolicy": "署名ポリシー",
 	"advancedMode": "詳細モード",
 	"advancedModeDescription": "任意のコントラクトデータを含むEVMトランザクションの署名を許可します（例：Uniswap、DeFi）。",
-	"experimentalFeatures": "実験的機能",
-	"experimentalFeaturesDescription": "実験的なファームウェア機能を有効にします。",
 	"featureFlags": "機能フラグ",
 	"walletConnectFeature": "WalletConnect",
 	"walletConnectFeatureDescription": "WalletConnectプロトコルでdAppsに接続します。",

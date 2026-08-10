@@ -9,9 +9,9 @@
  * The badge is also auto-suppressed below `size={24}` since it would render
  * as visual mush at very small sizes.
  */
-import { useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { Box, Image, Text } from "@chakra-ui/react"
-import { caipToIcon, getAssetIcon } from "../../shared/assetLookup"
+import { caipToIcon, getAssetIcon, isBundledAssetIcon } from "../../shared/assetLookup"
 
 interface AssetIconProps {
   /** Asset CAIP (token CAIP for ERC-20s, chain CAIP for natives) */
@@ -37,12 +37,25 @@ const FALLBACK_BG = "rgba(255,255,255,0.06)"
  *  positioned <Text> with overflow:hidden + the symbol initial gives a
  *  predictable shape at every size. */
 export function AssetIcon({ caip, iconUrl, chainCaip, size, alt, ring }: AssetIconProps) {
-  const mainSrc = iconUrl || (caip ? getAssetIcon(caip) : undefined)
+  const lookupSrc = caip ? getAssetIcon(caip) : undefined
+  const mainSources = useMemo(() => {
+    // Packaged assets win over remote metadata. For uncatalogued assets, try
+    // the metadata URL first and then KeepKey's CAIP-derived CDN URL.
+    const candidates = isBundledAssetIcon(lookupSrc)
+      ? [lookupSrc, iconUrl]
+      : [iconUrl, lookupSrc]
+    return candidates.filter((item, index): item is string =>
+      !!item && candidates.indexOf(item) === index)
+  }, [iconUrl, lookupSrc])
   const showBadge = !!chainCaip && chainCaip !== caip && size >= 24
   const badgeSize = Math.max(12, Math.round(size * 0.38))
-  const [mainBroken, setMainBroken] = useState(false)
+  const [mainAttempt, setMainAttempt] = useState(0)
   const [badgeBroken, setBadgeBroken] = useState(false)
   const initial = (alt || '?').trim().charAt(0).toUpperCase() || '?'
+  const mainSrc = mainSources[mainAttempt]
+
+  useEffect(() => { setMainAttempt(0) }, [caip, iconUrl])
+  useEffect(() => { setBadgeBroken(false) }, [chainCaip])
 
   return (
     <Box position="relative" display="inline-flex" flexShrink={0} w={`${size}px`} h={`${size}px`}>
@@ -58,13 +71,14 @@ export function AssetIcon({ caip, iconUrl, chainCaip, size, alt, ring }: AssetIc
         justifyContent="center"
         position="relative"
       >
-        {mainSrc && !mainBroken ? (
+        {mainSrc ? (
           <Image
             src={mainSrc}
             alt=""
             w="100%"
             h="100%"
-            onError={() => setMainBroken(true)}
+            objectFit="cover"
+            onError={() => setMainAttempt(attempt => attempt + 1)}
           />
         ) : (
           <Text

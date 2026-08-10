@@ -2483,7 +2483,9 @@
                 "type": "object",
                 "properties": {
                   "size": {
-                    "$ref": "#/components/schemas/types.numeric.U32"
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 8192
                   }
                 },
                 "required": [
@@ -2574,7 +2576,8 @@
                     "enum": [
                       "p2pkh",
                       "p2wpkh",
-                      "p2sh-p2wpkh"
+                      "p2sh-p2wpkh",
+                      "p2tr"
                     ]
                   },
                   "coin_name": {
@@ -3768,7 +3771,7 @@
       "post": {
         "operationId": "solana_signTransaction",
         "summary": "Sign a Solana transaction",
-        "description": "Sign a raw Solana transaction on the KeepKey device. The raw_tx is a base64-encoded serialized Solana transaction.",
+        "description": "Sign a raw Solana transaction on the KeepKey device. raw_tx is a base64-encoded serialized transaction. Self-contained v0 transactions are routed through the firmware transaction parser. An x402 caller may include the exact PaymentRequirements object so Vault can bind sponsor, mint, amount, signer and recipient ATA to the signed bytes before the device displays the verified merchant owner. Transactions that use address lookup tables remain behind explicit one-request blind-signing consent.",
         "parameters": [],
         "requestBody": {
           "content": {
@@ -3785,6 +3788,57 @@
                   "raw_tx": {
                     "type": "string",
                     "description": "Base64-encoded raw Solana transaction"
+                  },
+                  "x402": {
+                    "type": "object",
+                    "description": "Optional x402 v2 SVM exact PaymentRequirements. Vault validates every payment field against the signed zero-LUT v0 message before forwarding device display metadata.",
+                    "additionalProperties": false,
+                    "properties": {
+                      "scheme": { "type": "string", "enum": ["exact"] },
+                      "network": { "type": "string", "enum": ["solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"] },
+                      "amount": { "type": "string", "pattern": "^\\d+$" },
+                      "asset": { "type": "string", "description": "Base58 SPL token mint" },
+                      "payTo": { "type": "string", "description": "Base58 merchant owner public key" },
+                      "maxTimeoutSeconds": { "type": "integer", "minimum": 1 },
+                      "extra": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "feePayer": { "type": "string", "description": "Base58 sponsor public key" },
+                          "memo": { "type": "string", "description": "Optional seller-defined UTF-8 memo" },
+                          "recentBlockhash": { "type": "string" },
+                          "lastValidBlockHeight": { "type": "string", "pattern": "^\\d+$" }
+                        },
+                        "required": ["feePayer"]
+                      }
+                    },
+                    "required": ["scheme", "network", "amount", "asset", "payTo", "maxTimeoutSeconds", "extra"]
+                  },
+                  "swapMetadata": {
+                    "type": "object",
+                    "description": "Transaction-bound KKSOLSW1 ClearSign descriptor signed by a device-trusted metadata key.",
+                    "additionalProperties": false,
+                    "properties": {
+                      "payload": {
+                        "type": "string",
+                        "description": "Base64-encoded canonical KKSOLSW1 descriptor"
+                      },
+                      "signature": {
+                        "type": "string",
+                        "description": "Base64-encoded 64-byte compact secp256k1 signature over SHA256(payload)"
+                      },
+                      "signerKeyId": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 3,
+                        "description": "Trusted device ClearSign signer slot"
+                      }
+                    },
+                    "required": [
+                      "payload",
+                      "signature",
+                      "signerKeyId"
+                    ]
                   }
                 },
                 "required": [
@@ -5143,6 +5197,30 @@
           "System"
         ]
       }
+    },
+    "/mcp": {
+      "post": {
+        "operationId": "McpJsonRpc",
+        "summary": "MCP endpoint for AI agents (JSON-RPC 2.0, not REST)",
+        "description": "Model Context Protocol server (Streamable HTTP). Speaks JSON-RPC 2.0: initialize, ping, tools/list, tools/call. The tool catalog lives in the KeepKey browser extension and is proxied live - call tools/list for the source of truth; this spec deliberately does not duplicate it. Auth: the same bearer pairing key as the REST API. Loopback callers only, and any request carrying an Origin or Sec-Fetch-Site header is rejected (browsers excluded). Connect an agent: claude mcp add --transport http keepkey http://localhost:1646/mcp --header \"Authorization: Bearer <pairing key>\". Full documentation: https://docs.keepkey.com/docs/bex/mcp",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "JSON-RPC 2.0 request envelope",
+                "example": { "jsonrpc": "2.0", "id": 1, "method": "tools/list" }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "JSON-RPC 2.0 response envelope (result or error)" },
+          "401": { "description": "Missing or invalid pairing key" },
+          "403": { "description": "Non-loopback caller, or request came from a browser" }
+        }
+      }
     }
   },
   "components": {
@@ -5191,7 +5269,8 @@
           "p2sh",
           "external",
           "p2wpkh",
-          "p2sh-p2wpkh"
+          "p2sh-p2wpkh",
+          "p2tr"
         ]
       },
       "types.Bech32": {
@@ -6275,6 +6354,10 @@
           "firmware_variant": {
             "description": "Firmware variant",
             "type": "string"
+          },
+          "supports_taproot": {
+            "description": "Firmware explicitly advertises BIP86/P2TR support",
+            "type": "boolean"
           },
           "model": {
             "description": "device hardware model",

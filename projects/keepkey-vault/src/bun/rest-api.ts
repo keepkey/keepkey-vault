@@ -2,11 +2,13 @@ import type { EngineController } from './engine-controller'
 import type { AuthStore } from './auth'
 import { HttpError } from './auth'
 import type { SigningRequestInfo, ApiLogEntry, EIP712DecodedInfo } from '../shared/types'
+import type { ClearSignEvent } from '../shared/types'
+import { createHash } from 'crypto'
 import { decodeEIP712 } from './eip712-decoder'
-import { decodeCalldata, type EvmUnsignedTxFields } from './calldata-decoder'
-import { CHAINS, isChainSupported } from '../shared/chains'
-import { EVM_INSIGHT } from '../shared/flags'
+import { decodeCalldata, firmwareClearSigns } from './calldata-decoder'
+import { CHAINS, isChainSupported, hiveRolePath } from '../shared/chains'
 import { versionCompare } from '../shared/firmware-versions'
+import { isBitcoinOnlyVariant } from '../shared/flags'
 import {
   initializeOrchardFromDevice, scanOrchardNotes, getShieldedBalance,
   buildShieldedTx, finalizeShieldedTx, broadcastShieldedTx,
@@ -22,14 +24,17 @@ import { handleV2DataRoute } from './rest-pioneer'
 import { handleSwapRoute } from './rest-swap'
 import { handleSweepRoute } from './rest-sweep'
 import { handleLedgerRoute } from './rest-ledger'
-import { getSetting, findApiLogs, getApiLogById, getRecentActivityFromLog, getSwapHistory, getSwapHistoryByTxid, getSwapHistoryStats, getCachedBalances, getCachedPubkeys, getAllTokenVisibility, getTokensByVisibility, setTokenVisibility, removeTokenVisibility } from './db'
+import { getSetting, findApiLogs, getApiLogById, getRecentActivityFromLog, getSwapHistory, getSwapHistoryByTxid, getSwapHistoryStats, getCachedBalances, getCachedPubkeys, getAllTokenVisibility, getTokensByVisibility, setTokenVisibility, removeTokenVisibility, insertClearSignEvent } from './db'
 import { detectSpamToken, categorizeTokens } from '../shared/spamFilter'
 import { rebuildActivityHistory, type ActivityHistoryRebuildOptions } from './activity-history'
 import type { SwapTrackingStatus } from '../shared/types'
-import { parseSolanaTx, SolanaTxParseError, solanaMessageSlice } from './solana-tx'
+import { parseSolanaTx, SolanaTxParseError } from './solana-tx'
+import { signSolanaWireTransaction } from './solana-signing'
 import { buildSolanaDecodedInfo } from './solana-clearsign'
 import { buildSolanaMessageDecodedInfo } from './solana-message-preview'
+import { requiresSolanaBlindSigningConsent } from './solana-consent'
 import { createRpcAltFetcher, DEFAULT_SOLANA_RPC_ENDPOINT } from './solana-alt'
+import { utxoDiscoveryKey } from './btc-backend/types'
 import {
   buildTonTransfer,
   assembleTonSignedBoc,
@@ -40,6 +45,8 @@ import {
   type TonBuildResult,
 } from './txbuilder/ton'
 import { usb } from 'usb'
+import { handleMcpRequest } from './mcp'
+import { onBexOpen, onBexClose, onBexMessage } from './bex-bridge'
 
 export interface EmuSigningDetails {
   operation: string
@@ -54,9 +61,15 @@ export interface EmuSigningDetails {
   memo?: string
 }
 
+export interface SigningApprovalDecision {
+  approved: boolean
+  /** Explicit Vault UI consent for this request only. */
+  allowBlindSigning?: boolean
+}
+
 export interface RestApiCallbacks {
   onApiLog: (entry: ApiLogEntry) => void
-  onSigningRequest: (info: SigningRequestInfo) => Promise<boolean>
+  onSigningRequest: (info: SigningRequestInfo) => Promise<SigningApprovalDecision>
   onSigningDismissed?: (id: string) => void
   onPairRequest: (info: { name: string; url: string; imageUrl: string }) => void
   onPairDismissed?: () => void
@@ -86,6 +99,9 @@ export interface RestApiCallbacks {
    *  Proves the cached Orchard FVK belongs to the connected device before
    *  exposing any shielded balance from the local sidecar database. */
   zcashVerifyWallet?: (account: number) => Promise<void>
+  /** Schedule delayed post-tx Orchard rescans (shield/deshield/z2z) so the
+   *  local note DB reconciles with the chain without user action. */
+  zcashSchedulePostTxRescans?: () => void
   /** Returns initialized Pioneer client (for debug endpoints) */
   getPioneer?: () => Promise<any>
   /** Returns the active Pioneer API base URL */
@@ -282,6 +298,7 @@ function formatFeatures(f: any): any {
     model: f.model,
     firmware_variant: f.firmwareVariant,
     firmware_hash: decodeB64(f.firmwareHash),
+    supports_taproot: f.supportsTaproot === true,
     no_backup: f.noBackup,
     wipe_code_protection: f.wipeCodeProtection,
     auto_lock_delay_ms: f.autoLockDelayMs,
@@ -687,6 +704,16 @@ function getSwaggerUiHtml(): string {
         block until the user confirms or rejects on the KeepKey.
       </div>
 
+      <h2>AI Agents (MCP)</h2>
+      <p>AI agents connect over the Model Context Protocol at
+         <code>POST /mcp</code> (JSON-RPC, not REST) to inspect wallet state and
+         drive the KeepKey browser extension. Same pairing key as the REST API:</p>
+<pre><code><span class="kw">claude</span> mcp add --transport http keepkey http://localhost:1646/mcp \\
+  --header <span class="str">"Authorization: Bearer YOUR_API_KEY"</span></code></pre>
+      <p>The tool catalog is served live from the extension &mdash; call
+         <code>tools/list</code> for the source of truth. Full docs:
+         <a href="https://docs.keepkey.com/docs/bex/mcp">docs.keepkey.com/docs/bex/mcp</a></p>
+
       <h2>Clear Signing</h2>
       <p>EVM contract calls are decoded on-device in human-readable form:</p>
       <table>
@@ -1059,20 +1086,24 @@ const startTime = Date.now()
 const ROUTE_TO_CHAIN: Record<string, string> = {
   eth: 'ETH', utxo: 'BTC', cosmos: 'ATOM', osmosis: 'OSMO',
   thorchain: 'RUNE', mayachain: 'CACAO', xrp: 'XRP',
-  solana: 'SOL', tron: 'TRX', ton: 'TON',
+  solana: 'SOL', tron: 'TRX', ton: 'TON', hive: 'HIVE',
 }
 
 export function startRestApi(engine: EngineController, auth: AuthStore, port = 1646, callbacks?: RestApiCallbacks) {
-  // EVM clear-signing (insight): OFF by default, and only on firmware >= 7.15.0.
-  // getDeviceState() is an in-memory read (cachedFeatures); `?? '0.0.0'` fails closed.
-  const evmInsightEnabled = (): boolean =>
-    EVM_INSIGHT && versionCompare(engine.getDeviceState().firmwareVersion ?? '0.0.0', '7.15.0') >= 0
   const getWalletDbScope = (): { deviceId: string; walletId: string } | null => {
     const deviceId = engine.getDeviceState().deviceId
     if (!deviceId) return null
     const seedId = engine.currentSeedEthAddress?.toLowerCase()
     if (!seedId) return null
     return { deviceId, walletId: `${deviceId}:${seedId}` }
+  }
+
+  const recordRestClearSignEvent = (
+    event: Omit<ClearSignEvent, 'id' | 'createdAt' | 'deviceId' | 'firmwareVersion'>,
+  ) => {
+    if (engine.isPassphraseWallet) return
+    const device = engine.getDeviceState()
+    insertClearSignEvent({ ...event, deviceId: device.deviceId, firmwareVersion: device.firmwareVersion })
   }
 
   // Device-swap detection: if deviceId changes between two `ready` states,
@@ -1110,17 +1141,22 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
     return fn()
   }
 
-  /** Return 501 if firmware doesn't meet the chain's minFirmware requirement. */
-  function requireChainSupport(chainId: string): Response | null {
-    const chain = CHAINS.find(c => c.id === chainId)
-    if (!chain?.minFirmware) return null
-    const fw = engine.getDeviceState().firmwareVersion
-    if (!fw || !isChainSupported(chain, fw)) {
-      return json({ error: `${chain.symbol} requires firmware ≥ ${chain.minFirmware} (device has ${fw ?? 'unknown'})` }, 501)
-    }
-    return null
+  /** Non-Bitcoin address-derivation endpoints. Bitcoin-only firmware can't
+   *  derive any of these — Pioneer still polls them during portfolio sync, so
+   *  we short-circuit them (below) instead of hitting the device, which would
+   *  return "Unknown message" and flood the log. `/addresses/utxo` is BTC. */
+  const NON_BTC_ADDRESS_PATHS = new Set([
+    '/addresses/cosmos', '/addresses/osmosis', '/addresses/eth', '/addresses/tendermint',
+    '/addresses/thorchain', '/addresses/mayachain', '/addresses/xrp', '/addresses/solana',
+    '/addresses/tron', '/addresses/ton', '/addresses/hive',
+  ])
+
+  /** True when the connected device runs bitcoin-only firmware. */
+  function deviceIsBitcoinOnly(): boolean {
+    return isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant)
   }
 
+  /** Return 501 if firmware doesn't meet the chain's minFirmware requirement. */
   /** Normalize showDisplay to boolean (undefined → false). */
   function showDisplay(requested: boolean | undefined): boolean {
     return requested ?? false
@@ -1129,11 +1165,33 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
   const server = Bun.serve({
     port,
     maxRequestBodySize: 1024 * 1024, // 1 MB max (addresses/signing payloads are small)
-    async fetch(req) {
+    // Keep Bun's default idle timeout for the server as a whole (so idle/
+    // unauthenticated connections still get reaped) — but lift it per-request
+    // for human-gated device operations below, where the response legitimately
+    // blocks while the user confirms on the device. Without that, Bun closes
+    // the socket mid-confirm ("other side closed" → the device cancels the
+    // confirm and returns home), which killed the second consecutive sign.
+    async fetch(req, server) {
       const url = new URL(req.url)
       const path = url.pathname
       const method = req.method
       const requestStart = Date.now()
+
+      // Human-gated device ops (signing + the clear-sign trust confirm) block
+      // the socket while the user presses the physical button. Disable the idle
+      // timeout for just these requests, not the whole server.
+      if (method === 'POST' && (SIGNING_ROUTES.has(path) || path === '/eth/clearsign/load-signer')) {
+        server.timeout(req, 0)
+      }
+
+      // Bitcoin-only firmware can't derive any non-Bitcoin chain. Pioneer still
+      // polls these address endpoints during portfolio sync — short-circuit with
+      // 501 before touching the device, which would otherwise reject the message
+      // ("Unknown message") and flood the log with multi-chain spam.
+      if (method === 'POST' && NON_BTC_ADDRESS_PATHS.has(path) && deviceIsBitcoinOnly()) {
+        return new Response(JSON.stringify({ error: 'not available on bitcoin-only firmware' }),
+          { status: 501, headers: { 'Content-Type': 'application/json', ...corsHeaders(req) } })
+      }
 
       // Resolve app info from bearer token (or 'public')
       const resolveAppInfo = (): { appName: string; imageUrl: string } => {
@@ -1211,7 +1269,97 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         return resp
       }
 
-      // CORS preflight
+      // Firmware gate for chain routes. Lives INSIDE the request scope because
+      // it returns via the per-request json() helper (CORS + audit logging) —
+      // defined at server scope it threw "json is not defined" the moment the
+      // gate actually fired (observed on POST /addresses/hive).
+      function requireChainSupport(chainId: string): Response | null {
+        const chain = CHAINS.find(c => c.id === chainId)
+        if (!chain?.minFirmware) return null
+        const fw = engine.getDeviceState().firmwareVersion
+        if (!fw || !isChainSupported(chain, fw)) {
+          return json({ error: `${chain.symbol} requires firmware ≥ ${chain.minFirmware} (device has ${fw ?? 'unknown'})` }, 501)
+        }
+        return null
+      }
+
+      // ── MCP agent bridge (EPIC_mcp_agent_bridge.md, keepkey-client) ──
+      // LOOPBACK + LOCAL-AGENT ONLY, handled BEFORE the shared CORS/OPTIONS
+      // path below so /mcp owns its own preflight and never inherits the
+      // permissive wildcard CORS the rest of the (bearer-authed) API uses.
+      //
+      // A loopback peer IP is NOT a trust boundary against web pages: a
+      // fetch() from ANY site the user visits has peer 127.0.0.1 because the
+      // browser runs locally. /mcp carries no bearer token (so `claude mcp
+      // add` stays zero-config), so browsers are excluded two other ways:
+      //   1. reject any non-local Origin — the MCP Streamable-HTTP
+      //      DNS-rebinding defense. A local CLI agent sends no Origin; every
+      //      browser request (incl. a DNS-rebound public page pointing at
+      //      127.0.0.1) carries one.
+      //   2. never emit ACAO:* / Allow-Private-Network on /mcp — without them
+      //      a browser can neither read the response nor clear Chrome's PNA
+      //      preflight. The BEX Agent-mode toggle is a second gate, not the only one.
+      // /bex-bridge stays token-gated (the extension is a chrome-extension://
+      // origin needing a valid pairing key; https→ws://localhost is
+      // mixed-content-blocked for web pages regardless).
+      if (path === '/mcp' || path === '/bex-bridge') {
+        const ip = server.requestIP(req)?.address
+        const isLoopback = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1'
+        if (!isLoopback) {
+          return new Response(JSON.stringify({ error: 'loopback only' }),
+            { status: 403, headers: { 'Content-Type': 'application/json' } })
+        }
+
+        if (path === '/bex-bridge') {
+          // BEX authenticates with its existing pairing key. Browser WebSocket
+          // can't set an Authorization header, so the key arrives as ?token=.
+          const token = url.searchParams.get('token') || auth.extractBearerToken(req)
+          if (!token || !auth.validate(token)) {
+            return new Response('Unauthorized', { status: 401 })
+          }
+          if (server.upgrade(req)) return undefined as any
+          return new Response('WebSocket upgrade failed', { status: 400 })
+        }
+
+        // /mcp is BEARER-AUTHENTICATED with the same pairing API keys as the
+        // rest of the REST API (see the auth.requireAuth below) AND excludes all
+        // browser traffic. Both matter: a localhost-origin allowlist is not a
+        // boundary because the vault serves browser content at its OWN origin
+        // (the /wc dApp reverse-proxy below, the Swagger UI that loads remote JS
+        // from unpkg) which runs as http://localhost:1646 — and such content may
+        // even hold the user's bearer token. A browser attaches an `Origin`
+        // header to every non-GET request (incl. same-origin POST) and
+        // `Sec-Fetch-Site` to every request, and JS cannot strip either (both are
+        // forbidden header names); a non-browser agent sends neither.
+        if (req.headers.get('origin') !== null || req.headers.get('sec-fetch-site') !== null) {
+          return new Response(JSON.stringify({ error: '/mcp is not reachable from a browser' }),
+            { status: 403, headers: { 'Content-Type': 'application/json' } })
+        }
+        if (method === 'OPTIONS') return new Response(null, { status: 204 }) // deliberately no CORS grant
+        if (method === 'POST') {
+          // Require a valid pairing bearer token — configure the agent with
+          //   claude mcp add keepkey --transport http http://localhost:1646/mcp \
+          //     --header "Authorization: Bearer <pairing-key>"
+          //
+          // requireAuth signals failure by THROWING HttpError, and this whole
+          // /mcp block runs before the try/catch further down that turns an
+          // HttpError into its status — Bun.serve has no top-level `error`
+          // handler either, so an uncaught throw escapes fetch() and the agent
+          // gets a dropped socket ("fetch failed") instead of 401. Catch here.
+          try {
+            auth.requireAuth(req)
+          } catch (err: any) {
+            return new Response(JSON.stringify({ error: err?.message || 'Unauthorized' }),
+              { status: typeof err?.status === 'number' ? err.status : 401,
+                headers: { 'Content-Type': 'application/json' } })
+          }
+          return handleMcpRequest(req, {})
+        }
+        return new Response(JSON.stringify({ error: 'POST only' }),
+          { status: 405, headers: { 'Content-Type': 'application/json' } })
+      }
+
+      // CORS preflight (all other paths — bearer-token-authed API)
       if (method === 'OPTIONS') {
         return new Response(null, { status: 204, headers: corsHeaders(req) })
       }
@@ -1318,6 +1466,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
       // actual handler completes (success or failure), not when the user clicks approve.
       let activeSigningId: string | undefined
       let activeSigningInfo: SigningRequestInfo | undefined
+      let activeAllowBlindSigning = false
 
       try {
         // ═══════════════════════════════════════════════════════════════
@@ -1626,6 +1775,13 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               } else {
                 signingInfo.solanaDecodeError = 'missing raw_tx payload'
               }
+              signingInfo.requiresBlindSigningConsent = requiresSolanaBlindSigningConsent(
+                signingInfo.solanaDecoded,
+                preview.swapMetadata !== undefined || preview.schema !== undefined,
+              )
+              if (signingInfo.requiresBlindSigningConsent) {
+                signingInfo.needsBlindSigning = true
+              }
             } else if (
               path === '/tron/sign-message'
               || path === '/ton/sign-message'
@@ -1711,48 +1867,41 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               signingInfo.chainId = preview.chainId || preview.chain_id
               signingInfo.data = preview.data   // full data — UI handles display
 
-              // Clear-signing: decode calldata via Pioneer descriptor API + local fallback
+              // Clear-signing: decode calldata locally (vendored, no network) for
+              // the UI, and gate blind-signing off what the FIRMWARE clear-signs.
               if (preview.data && preview.data.length >= 10 && preview.to) {
+                const chainIdNum = typeof signingInfo.chainId === 'string'
+                  ? (signingInfo.chainId.startsWith('0x') ? parseInt(signingInfo.chainId, 16) : parseInt(signingInfo.chainId, 10))
+                  : signingInfo.chainId
                 try {
-                  const chainIdNum = typeof signingInfo.chainId === 'string'
-                    ? (signingInfo.chainId.startsWith('0x') ? parseInt(signingInfo.chainId, 16) : parseInt(signingInfo.chainId, 10))
-                    : signingInfo.chainId
-                  // Full unsigned tx for the pioneer signed blob. MUST mirror the
-                  // msg construction in the /eth/sign-transaction handler exactly
-                  // (same defaults, same fee-field selection) — the blob's tx_hash
-                  // is bound to the sighash over these fields, and rc3 firmware
-                  // refuses the blob if it doesn't match what the device signs.
-                  // Gated: only fetch a Pioneer signed blob when insight is enabled +
-                  // fw >= 7.15. Off → txFields stays undefined → fetchPioneerSignedBlob
-                  // short-circuits to null (no /descriptors/sign call). Local decode +
-                  // needsBlindSigning below stay live on all firmware.
-                  let txFields: EvmUnsignedTxFields | undefined
-                  if (evmInsightEnabled() && path === '/eth/sign-transaction') {
-                    txFields = {
-                      nonce: preview.nonce || '0x0',
-                      gasLimit: preview.gas || preview.gasLimit || '0x5208',
-                      value: preview.value || '0x0',
-                    }
-                    if (preview.maxFeePerGas || preview.max_fee_per_gas) {
-                      txFields.maxFeePerGas = preview.maxFeePerGas || preview.max_fee_per_gas
-                      // Handler sends '0x' (canonical empty) to the device for a
-                      // zero priority fee; send pioneer '0x0' — ethers RLP-encodes
-                      // zero as empty too, so both sides hash identically.
-                      const prio = preview.maxPriorityFeePerGas || preview.max_priority_fee_per_gas
-                      txFields.maxPriorityFeePerGas = (!prio || /^0x0*$/.test(prio)) ? '0x0' : prio
-                    } else {
-                      txFields.gasPrice = preview.gasPrice || preview.gas_price || '0x0'
-                    }
-                  }
-                  signingInfo.calldataDecoded = await decodeCalldata(preview.to, preview.data, chainIdNum, txFields) ?? undefined
+                  signingInfo.calldataDecoded = await decodeCalldata(preview.to, preview.data, chainIdNum) ?? undefined
                   console.log(`[REST] Calldata decoded:`, JSON.stringify(signingInfo.calldataDecoded, null, 2))
                 } catch (e) { console.warn('[REST] Calldata decode failed:', e) }
 
-                // Determine if this tx needs blind signing:
-                // Has calldata AND calldata is not fully decoded (source is 'none' or missing)
-                const decoded = signingInfo.calldataDecoded
-                signingInfo.needsBlindSigning = !decoded || decoded.source === 'none'
-                console.log(`[REST] needsBlindSigning=${signingInfo.needsBlindSigning}, source=${decoded?.source}`)
+                // Caller supplied a runtime-signer blob directly (LoadClearsignSigner
+                // flow — the /eth/sign-transaction handler below honors this at
+                // priority 1). The device verifies it against the loaded signer and
+                // clear-signs regardless of what the firmware natively handles.
+                if (preview.txMetadata?.signedPayload) {
+                  signingInfo.calldataDecoded = {
+                    dappName: 'Unknown', contractName: 'Unknown', method: '(runtime signer)',
+                    selector: preview.data.slice(0, 10), fields: [], source: 'none',
+                    ...signingInfo.calldataDecoded,
+                    signedInsightBlob: preview.txMetadata.signedPayload,
+                    insightKeyId: preview.txMetadata.keyId,
+                  }
+                  signingInfo.needsBlindSigning = false
+                  console.log(`[REST] needsBlindSigning=false (caller-provided runtime-signer blob, keyId=${preview.txMetadata.keyId})`)
+                } else {
+                  // Needs blind signing unless the firmware clear-signs it natively.
+                  // Keyed off the device's own allowlist (firmwareClearSigns), NOT
+                  // whether our decoder recognized the calldata — a contract we can
+                  // decode (Uniswap/1inch) but the firmware can't still blind-signs,
+                  // and forcing global AdvancedMode on a firmware-clearsignable tx
+                  // re-opens the drain vector (PR #261/#303).
+                  signingInfo.needsBlindSigning = !firmwareClearSigns(preview.to, preview.data, chainIdNum)
+                  console.log(`[REST] needsBlindSigning=${signingInfo.needsBlindSigning} (firmwareClearSigns=${!signingInfo.needsBlindSigning}, decoder source=${signingInfo.calldataDecoded?.source})`)
+                }
               }
             }
           } catch (e: any) {
@@ -1780,13 +1929,21 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             console.warn('[rest-api] Failed to read AdvancedMode policy:', e?.message || e)
           }
 
-          const approved = await callbacks.onSigningRequest(signingInfo)
-          if (!approved) {
+          // Track before waiting so rejection, timeout, or a malformed approval
+          // decision still dismisses the Vault overlay in the request finally.
+          activeSigningId = id
+          const approval = await callbacks.onSigningRequest(signingInfo)
+          if (!approval.approved) {
             return json({ error: 'Signing rejected by user' }, 403)
           }
-          // Approved — track ID + decoded info so handlers can pass metadata to device
-          activeSigningId = id
+          if (signingInfo.requiresBlindSigningConsent && !approval.allowBlindSigning) {
+            return json({ error: 'One-shot blind-signing consent required' }, 403)
+          }
+          // Approved — retain decoded info so handlers can pass metadata to device.
           activeSigningInfo = signingInfo
+          activeAllowBlindSigning =
+            signingInfo.requiresBlindSigningConsent === true
+            && approval.allowBlindSigning === true
         }
 
         // ── List paired apps (public — shows connected dApps, keys stripped) ──
@@ -1804,10 +1961,12 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.AddressRequest)
+          const sd = showDisplay(body.show_display)
           const cacheKey = scopedKey(engine, 'utxo', body)
           const cached = addressCache.get(cacheKey)
-          if (cached) return json({ address: cached })
-          const sd = showDisplay(body.show_display)
+          // A trusted-display request must always reach the device. Returning
+          // a cached value would silently skip the confirmation it requested.
+          if (cached && !sd) return json({ address: cached })
           const result = await emuWrap(() => wallet.btcGetAddress({
             addressNList: body.address_n,
             coin: body.coin || 'Bitcoin',
@@ -2042,6 +2201,138 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           return json({ address })
         }
 
+        if (path === '/hive/sign-message' && method === 'POST') {
+          auth.requireAuth(req)
+          // Same gates as /addresses/hive: feature flag + firmware ≥ 7.15.0
+          if (getSetting('hive_enabled') !== '1') return json({ error: 'Hive is disabled' }, 403)
+          const fwBlock = requireChainSupport('hive')
+          if (fwBlock) return fwBlock
+          const wallet = requireWallet(engine)
+          const body = await parseRequest(req, S.HiveSignMessageRequest)
+          const messageBytes = body.is_text === false
+            ? Buffer.from(body.message.replace(/^0x/, ''), 'hex')
+            : Buffer.from(body.message, 'utf8')
+          if (messageBytes.length === 0 || messageBytes.length > 1024) {
+            throw new HttpError(400, 'Hive message must be 1–1024 bytes')
+          }
+          // Default to the posting role — Keychain signBuffer is overwhelmingly
+          // dApp login, which verifies against the account's posting authority.
+          const addressNList = body.addressNList || body.address_n || hiveRolePath('posting', 0)
+          const { hiveMessagePreview } = await import('./emulator-confirm-details')
+          const result = await emuWrap(() => (wallet as any).hiveSignMessage({
+            addressNList,
+            message: new Uint8Array(messageBytes),
+          }), { operation: 'hiveSignMessage', opLabel: 'Sign Message', chain: 'Hive', memo: hiveMessagePreview(messageBytes) })
+          if (!result?.signature) throw new HttpError(500, 'Hive sign-message: device returned no signature')
+          const sigBytes = result.signature instanceof Uint8Array ? Buffer.from(result.signature) : Buffer.from(String(result.signature), 'hex')
+          const pubBytes = result.publicKey instanceof Uint8Array ? Buffer.from(result.publicKey) : Buffer.from(String(result.publicKey), 'hex')
+          // STM encoding: 'STM' + base58(pub33 || ripemd160(pub33)[0:4])
+          let stm = ''
+          if (pubBytes.length === 33) {
+            const { ripemd160 } = await import('@noble/hashes/ripemd160')
+            const bs58 = (await import('bs58')).default
+            const checksum = Buffer.from(ripemd160(pubBytes)).subarray(0, 4)
+            stm = 'STM' + bs58.encode(Buffer.concat([pubBytes, checksum]))
+          }
+          return json({
+            signature: sigBytes.toString('hex'),
+            public_key: stm,
+          })
+        }
+
+        if (path === '/hive/sign-operations' && method === 'POST') {
+          // Live-device signed on 7.15.0-rc15 (fw 23ef39c0, EmulatorZcash): the
+          // phase-1/2/3 op table round-trips, including limit_order_create /
+          // limit_order_cancel — see keepkey-sdk tests/hive/phase3-ops.js.
+          //
+          // KNOWN GATE LIMITATION: requireChainSupport('hive') only compares
+          // ">=7.15.0", which every 7.15.0-rc reports. An rc predating the
+          // HiveSignOperations handler (1616/1617, fw #307 / rc10) or the
+          // phase-3 ops (fw #315 / rc15) therefore passes the gate and then
+          // rejects the message on-device. There is no finer-grained capability
+          // flag to check; the device error is the backstop.
+          auth.requireAuth(req)
+          if (getSetting('hive_enabled') !== '1') return json({ error: 'Hive is disabled' }, 403)
+          const fwBlock = requireChainSupport('hive')
+          if (fwBlock) return fwBlock
+          const wallet = requireWallet(engine)
+          const body = await parseRequest(req, S.HiveSignOperationsRequest)
+
+          // Header (TaPoS) from Pioneer — the exact values the device signs
+          // are returned to the caller so broadcast reuses the same tx.
+          const pioneerBase = (callbacks?.getPioneerApiBase?.() || 'https://api.keepkey.info').replace(/\/$/, '')
+          const txParams = await fetch(`${pioneerBase}/api/v1/hive/tx-params`, {
+            signal: AbortSignal.timeout(20_000),
+          }).then(r => r.json()) as any
+          if (!txParams?.success) throw new HttpError(502, `Hive tx-params failed: ${txParams?.error || 'unknown'}`)
+
+          const { serializeHiveOpsTx } = await import('./txbuilder/hive-ops')
+          let serialized
+          try {
+            serialized = serializeHiveOpsTx({
+              refBlockNum: txParams.refBlockNum,
+              refBlockPrefix: txParams.refBlockPrefix,
+              expirationUnix: txParams.expirationUnix,
+              operations: body.operations as any,
+            })
+          } catch (e: any) {
+            throw new HttpError(400, e?.message || 'Hive ops serialization failed')
+          }
+
+          // Role from op tier unless the caller pinned a path
+          const addressNList = body.addressNList || body.address_n || hiveRolePath(serialized.tier, 0)
+          const { hiveConfirmDetails } = await import('./emulator-confirm-details')
+          const result: any = await emuWrap(() => (wallet as any).hiveSignOperations({
+            addressNList,
+            chainId: txParams.chainId,
+            serializedTx: new Uint8Array(serialized.serializedTx),
+          }), hiveConfirmDetails('hiveSignOperations', body.operations))
+          if (!result?.signature) throw new HttpError(500, 'Hive sign-operations: device returned no signature')
+          const sigBytes = result.signature instanceof Uint8Array ? Buffer.from(result.signature) : Buffer.from(String(result.signature), 'hex')
+          // Return the expiration derived from the SIGNED expirationUnix (the value
+          // baked into the serialized header), NOT Pioneer's separate expirationIso —
+          // if the two ever diverge, a caller broadcasting the ISO would reconstruct a
+          // different transaction than the one the device signed (invalid signature).
+          const signedExpirationIso = new Date(txParams.expirationUnix * 1000).toISOString().replace(/\.\d{3}Z$/, '')
+          return json({
+            signature: sigBytes.toString('hex'),
+            ref_block_num: txParams.refBlockNum,
+            ref_block_prefix: txParams.refBlockPrefix,
+            expiration: signedExpirationIso,
+            operations: body.operations,
+          })
+        }
+
+        if (path === '/hive/sign-transfer' && method === 'POST') {
+          auth.requireAuth(req)
+          // Same gates as /addresses/hive: feature flag + firmware ≥ 7.15.0
+          if (getSetting('hive_enabled') !== '1') return json({ error: 'Hive is disabled' }, 403)
+          const fwBlock = requireChainSupport('hive')
+          if (fwBlock) return fwBlock
+          const wallet = requireWallet(engine)
+          const body = await parseRequest(req, S.HiveSignTransferRequest)
+          const addressNList = body.addressNList || body.address_n || hiveRolePath('active', 0)
+          const result = await emuWrap(() => (wallet as any).hiveSignTx({
+            addressNList,
+            chainId: body.chain_id,
+            refBlockNum: body.ref_block_num,
+            refBlockPrefix: body.ref_block_prefix,
+            expiration: body.expiration,
+            from: body.from,
+            to: body.to,
+            amount: body.amount,
+            decimals: 3, // HIVE and HBD are both 3-decimal; matches the RPC path (txbuilder/hive.ts)
+            assetSymbol: body.asset_symbol || 'HIVE',
+            memo: body.memo,
+          }), { operation: 'hiveSignTx', chain: 'HIVE', to: body.to, value: String(body.amount) })
+          if (!result?.signature) throw new HttpError(500, 'Hive sign: device returned no signature')
+          const toHexStr = (v: any) => v instanceof Uint8Array ? Buffer.from(v).toString('hex') : String(v)
+          return json({
+            signature: toHexStr(result.signature),
+            serialized_tx: toHexStr(result.serializedTx),
+          })
+        }
+
         // ── ETH SIGNING (4 endpoints) ────────────────────────────────
         if (path === '/eth/sign-transaction' && method === 'POST') {
           auth.requireAuth(req)
@@ -2097,54 +2388,135 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           }
 
           // ── EVM Clear-Signing: attach signed metadata blob for device OLED ──
-          // Gated OFF by default + fw >= 7.15. This is the device-facing chokepoint:
-          // the caller-provided branch reads the blob straight from the request body,
-          // independent of the fetch gate above, so it MUST be gated here on its own —
-          // otherwise a caller could inject a blob and force clear-sign while disabled.
           // Priority: 1) caller provides txMetadata in request body (test fixtures)
           //           2) Pioneer signedInsightBlob from calldata decoder
           //           3) none — device falls back to raw hex
-          if (evmInsightEnabled()) {
-            if (body.txMetadata && body.txMetadata.signedPayload) {
+          if (body.txMetadata && body.txMetadata.signedPayload) {
+            msg.txMetadata = {
+              signedPayload: body.txMetadata.signedPayload,
+              keyId: body.txMetadata.keyId ?? 0,
+            }
+            console.log(`[REST] EVM clear-sign: using caller-provided blob (${String(body.txMetadata.signedPayload).length} chars, keyId=${msg.txMetadata.keyId})`)
+          } else {
+            const decoded = activeSigningInfo?.calldataDecoded
+            if (decoded?.signedInsightBlob) {
+              // Pioneer emits the blob as base64, but hdwallet's ethSignTx
+              // arrayify()s a STRING signedPayload as hex ("0x"+s) → a base64
+              // string throws "invalid hexadecimal string" before the device
+              // sees anything. Hand it the raw bytes (Uint8Array branch) so the
+              // encoding is unambiguous.
               msg.txMetadata = {
-                signedPayload: body.txMetadata.signedPayload,
-                keyId: body.txMetadata.keyId ?? 0,
+                signedPayload: new Uint8Array(Buffer.from(decoded.signedInsightBlob, 'base64')),
+                keyId: decoded.insightKeyId,
               }
-              console.log(`[REST] EVM clear-sign: using caller-provided blob (${String(body.txMetadata.signedPayload).length} chars, keyId=${msg.txMetadata.keyId})`)
+              console.log(`[REST] EVM clear-sign: using Pioneer blob (keyId=${decoded.insightKeyId}, ${msg.txMetadata.signedPayload.length} bytes)`)
             } else {
-              const decoded = activeSigningInfo?.calldataDecoded
-              if (decoded?.signedInsightBlob) {
-                // Pioneer emits the blob as base64, but hdwallet's ethSignTx
-                // arrayify()s a STRING signedPayload as hex ("0x"+s) → a base64
-                // string throws "invalid hexadecimal string" before the device
-                // sees anything. Hand it the raw bytes (Uint8Array branch) so the
-                // encoding is unambiguous.
-                msg.txMetadata = {
-                  signedPayload: new Uint8Array(Buffer.from(decoded.signedInsightBlob, 'base64')),
-                  keyId: decoded.insightKeyId,
-                }
-                console.log(`[REST] EVM clear-sign: using Pioneer blob (keyId=${decoded.insightKeyId}, ${msg.txMetadata.signedPayload.length} bytes)`)
-              } else {
-                console.log('[REST] EVM clear-sign: no metadata blob — device will show raw hex')
-              }
+              console.log('[REST] EVM clear-sign: no metadata blob — device will show raw hex')
             }
           }
 
-          // Replacer: txMetadata.signedPayload is a Uint8Array — default stringify
-          // emits one line per byte, flooding the log with the whole blob.
-          console.log('[REST] ethSignTx hdwallet payload:', JSON.stringify(msg, (_k, v) => v instanceof Uint8Array ? `Uint8Array(${v.length})` : v, 2))
+          console.log('[REST] ethSignTx hdwallet payload:', JSON.stringify(msg, null, 2))
+          const clearSignPayload = msg.txMetadata?.signedPayload instanceof Uint8Array
+            ? Buffer.from(msg.txMetadata.signedPayload).toString('hex')
+            : msg.txMetadata?.signedPayload != null ? String(msg.txMetadata.signedPayload) : undefined
+          const clearSignRequest = {
+            keyId: msg.txMetadata?.keyId,
+            chainId: msg.chainId,
+            to: msg.to,
+            dataSelector: typeof msg.data === 'string' ? msg.data.slice(0, 10) : undefined,
+          }
+          let clearSignSentToDevice = false
           try {
             // Honest confirm dialog: decode msg.data so token/contract calls
             // don't show the contract as recipient or 0x0/hex-wei as amount.
             const { evmConfirmDetails } = await import('./emulator-confirm-details')
-            const result = await emuWrap(() => wallet.ethSignTx(msg), evmConfirmDetails('ethSignTx', 'Ethereum', msg))
+            const result = await emuWrap(() => {
+              clearSignSentToDevice = true
+              return wallet.ethSignTx(msg)
+            }, evmConfirmDetails('ethSignTx', 'Ethereum', msg))
             console.log('[REST] ethSignTx result:', JSON.stringify(result))
+            if (clearSignPayload) recordRestClearSignEvent({
+              kind: 'transaction', outcome: 'signed', source: 'rest-api', chain: 'Ethereum',
+              format: 'EVM_TX_METADATA', label: 'EVM ClearSign transaction', payload: clearSignPayload,
+              keyId: Number.isInteger(clearSignRequest.keyId) ? clearSignRequest.keyId : undefined,
+              sentToDevice: clearSignSentToDevice, request: clearSignRequest,
+            })
             return json(validateResponse(result, S.EthSignTransactionResponse, path))
           } catch (err: any) {
+            if (clearSignPayload) recordRestClearSignEvent({
+              kind: 'transaction', outcome: 'blocked', source: 'rest-api', chain: 'Ethereum',
+              format: 'EVM_TX_METADATA', label: 'Blocked EVM ClearSign transaction', payload: clearSignPayload,
+              keyId: Number.isInteger(clearSignRequest.keyId) ? clearSignRequest.keyId : undefined,
+              sentToDevice: clearSignSentToDevice, request: clearSignRequest,
+              error: err?.message || String(err),
+            })
             // Distinguish user cancellation / device rejection from actual failures
             const errMsg = String(err?.message || err || '').toLowerCase()
             if (errMsg.includes('cancel') || errMsg.includes('rejected') || errMsg.includes('denied') || errMsg.includes('action cancelled')) {
               return json({ error: 'User cancelled signing on device' }, 403)
+            }
+            throw err
+          }
+        }
+
+        if (path === '/eth/clearsign/load-signer' && method === 'POST') {
+          auth.requireAuth(req)
+          const wallet = requireWallet(engine)
+          const body = await parseRequest(req, S.LoadClearsignSignerRequest)
+          const pubkey = parseHex(body.pubkey, 'pubkey')
+          if (pubkey.length !== 33) throw new HttpError(400, `pubkey must be 33 bytes, got ${pubkey.length}`)
+          // Explicit firmware gate: the pinned hdwallet always has the method,
+          // so the typeof check below never fires for KeepKey wallets and old
+          // firmware would surface a raw 'Unknown message' device failure
+          // instead of this intended 501.
+          const fwv = engine.getDeviceState().firmwareVersion
+          if (!fwv || versionCompare(fwv, '7.15.0') < 0) {
+            throw new HttpError(501, `LoadClearsignSigner requires firmware 7.15.0+ (device has ${fwv || 'unknown'})`)
+          }
+          if (typeof (wallet as any).loadClearsignSigner !== 'function') {
+            throw new HttpError(501, 'Connected device does not support LoadClearsignSigner (requires firmware 7.15.0+)')
+          }
+          const icon = body.icon ? parseHex(body.icon, 'icon') : undefined
+          if (icon && icon.length > 384) throw new HttpError(400, `icon must be <= 384 bytes, got ${icon.length}`)
+          console.log(`[REST] clearsign load-signer: slot=${body.keyId} alias="${body.alias}" pubkey=${body.pubkey}`
+            + `${icon ? ` icon=${icon.length}B ${body.iconWidth}x${body.iconHeight}` : ''}${body.persist ? ' persist' : ''}`)
+          let clearSignSentToDevice = false
+          const signerFingerprint = createHash('sha256').update(Buffer.from(pubkey)).digest('hex').slice(0, 8)
+          try {
+            // Loading a signer raises a mandatory on-device "Trust signer" confirm.
+            // On the emulator that button press must be armed via emuWrap (interactive
+            // approve), exactly like the signing routes — otherwise the OLED shows the
+            // trust screen but no green button ever appears and the call hangs.
+            // emuWrap is a transparent no-op on real hardware.
+            await emuWrap(
+              () => {
+                clearSignSentToDevice = true
+                return (wallet as any).loadClearsignSigner({
+                  keyId: body.keyId, pubkey, alias: body.alias,
+                  icon, iconWidth: body.iconWidth, iconHeight: body.iconHeight,
+                  persist: body.persist === true,
+                })
+              },
+              { operation: 'loadClearsignSigner', opLabel: 'Trust Signer', chain: 'Ethereum' },
+            )
+            recordRestClearSignEvent({
+              kind: 'signer-load', outcome: 'loaded', source: 'rest-api', chain: 'Ethereum',
+              label: body.alias, publicKey: Buffer.from(pubkey).toString('hex'), fingerprint: signerFingerprint,
+              keyId: body.keyId, sentToDevice: clearSignSentToDevice,
+              request: { persist: body.persist === true, iconBytes: icon?.length || 0 },
+            })
+            return json({ ok: true, keyId: body.keyId, alias: body.alias })
+          } catch (err: any) {
+            recordRestClearSignEvent({
+              kind: 'signer-load', outcome: 'blocked', source: 'rest-api', chain: 'Ethereum',
+              label: body.alias, publicKey: Buffer.from(pubkey).toString('hex'), fingerprint: signerFingerprint,
+              keyId: body.keyId, sentToDevice: clearSignSentToDevice,
+              request: { persist: body.persist === true, iconBytes: icon?.length || 0 },
+              error: err?.message || String(err),
+            })
+            const errMsg = String(err?.message || err || '').toLowerCase()
+            if (errMsg.includes('cancel') || errMsg.includes('rejected') || errMsg.includes('denied') || errMsg.includes('action cancelled')) {
+              return json({ error: 'User rejected clear-sign signer on device' }, 403)
             }
             throw err
           }
@@ -2197,6 +2569,20 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             signature: body.signature,
           })
           return json(result)
+        }
+
+        // ── EMULATOR (external test-driver support) ──────────────────
+        // The RPC surface (emulatorCaptureFrame, emulatorSwitchWallet, etc.)
+        // is only reachable from inside the app's own webview↔bun bridge —
+        // an external script (e.g. the mainnet test suite) has no path to
+        // it. Expose just the screen capture here since it's read-only and
+        // safe; wallet-switching / tx-building stay RPC-only for now.
+        if (path === '/emulator/capture' && method === 'POST') {
+          auth.requireAuth(req)
+          if (!engine.isEmulator) throw new HttpError(400, 'Screen capture is emulator-only')
+          const { captureCurrentFrame } = await import('./emulator-window')
+          const dataUrl = await captureCurrentFrame()
+          return json({ dataUrl })
         }
 
         // ── UTXO SIGNING (1 endpoint) ────────────────────────────────
@@ -2369,64 +2755,83 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const body = await parseRequest(req, S.SolanaSignRequest)
           const addressNList = pickAddressNList(body, DEFAULT_SOLANA_ADDRESS_N)
 
-          // Pioneer returns full serialized tx: [compact-u16:sigCount][sig0(64)]...[sigN(64)][message]
-          // Firmware expects just the message bytes. See solana-tx.ts for the
-          // wire-format contract and malformed-input rejection rules.
+          // Validate the serialized wrapper here so malformed client input is a
+          // 400 rather than a generic device/route failure.
           const fullTx = Buffer.from(body.raw_tx, 'base64')
-          let parsed
           try {
-            parsed = parseSolanaTx(fullTx)
+            parseSolanaTx(fullTx)
           } catch (err) {
             if (err instanceof SolanaTxParseError) throw new HttpError(400, err.message)
             throw err
           }
-          // KeepKey firmware message type 752 (SolanaSignTx) parses legacy
-          // messages only. For versioned (v0) messages we route the exact
-          // message bytes — including the 0x80 prefix — through type 754
-          // (SolanaSignMessage), which signs raw bytes with Ed25519 over the
-          // user's Solana key. The resulting 64-byte signature is valid for
-          // the original v0 tx because Solana computes signatures over the
-          // message payload (not the wrapper).
-          //
-          // Trade-off: the device displays a generic "sign message" prompt
-          // rather than a parsed-tx summary. Users must review the resolved
-          // accounts/amounts in the Vault approval dialog. Full on-device
-          // parsing of v0 + ALT display is a firmware-side follow-up.
-          let sigBytes: Uint8Array
-          if (parsed.isVersioned) {
-            const messageBytes = solanaMessageSlice(fullTx, parsed)
-            const msgResult = await emuWrap(() => wallet.solanaSignMessage({
-              addressNList,
-              message: Buffer.from(messageBytes).toString('base64'),
-              showDisplay: body.show_display !== false,
-            }), { operation: 'solanaSignMessage', chain: 'Solana' })
-            const sig = msgResult?.signature
-            if (!sig) throw new HttpError(500, 'Solana v0 sign: device returned no signature')
-            sigBytes = sig instanceof Uint8Array ? sig : Buffer.from(sig, 'base64')
-          } else {
-            const deviceRawTx = Buffer.from(fullTx.subarray(parsed.messageStart)).toString('base64')
-            const result = await emuWrap(() => wallet.solanaSignTx({
-              addressNList,
-              rawTx: deviceRawTx,
-            }), { operation: 'solanaSignTx', chain: 'Solana' })
-            if (!result?.signature) return json(result)
-            sigBytes = result.signature instanceof Uint8Array
-              ? result.signature
-              : Buffer.from(result.signature, 'base64')
-          }
 
-          // Assemble signed tx: write the real signature into the first sig
-          // slot (starts at `parsed.sigStart`, 64 bytes long). Same layout
-          // for legacy and v0 because the wrapper format is identical.
-          if (sigBytes.length !== 64) {
-            throw new HttpError(500, `Solana sign: unexpected signature length ${sigBytes.length}`)
+          // Both legacy and v0 messages use SolanaSignTx. The helper removes
+          // the signature wrapper, forwards the transaction-bound KKSOLSW1
+          // descriptor unchanged, or adds a one-shot opaque fallback only when
+          // the Vault UI returned explicit consent, then splices
+          // the returned signature back into the original wire transaction.
+          const clearSignPayload = body.schema?.payload ? String(body.schema.payload) : undefined
+          const clearSignRequest = body.schema ? {
+            signerKeyId: body.schema.signerKeyId,
+            txHash: createHash('sha256').update(fullTx).digest('hex'),
+          } : undefined
+          let clearSignSentToDevice = false
+          let result: any
+          try {
+            result = await signSolanaWireTransaction(
+              {
+                addressNList,
+                rawTx: body.raw_tx,
+                swapMetadata: body.swapMetadata,
+                // Reusable KKSOLSC1 instruction schema — signed once per
+                // program+instruction, so the device can decode this call
+                // without a per-transaction attestation.
+                schema: body.schema,
+                // x402 payment intent is never trusted directly: the signing
+                // helper matches network, sponsor, mint, amount, authority and
+                // destination ATA against the exact v0 message first.
+                x402: body.x402,
+                allowBlindSigning: activeAllowBlindSigning,
+              },
+              (request) => {
+                clearSignSentToDevice = true
+                return emuWrap(
+                  () => wallet.solanaSignTx(request),
+                  { operation: 'solanaSignTx', chain: 'Solana' },
+                )
+              },
+              async (signerPath) => {
+                const derived = await wallet.solanaGetAddress({
+                  addressNList: signerPath,
+                  showDisplay: false,
+                })
+                const address = typeof derived === 'string' ? derived : derived?.address
+                if (!address) throw new Error('Device returned no Solana signer address')
+                return address
+              },
+              'rest:solanaSignTx',
+            )
+            if (clearSignPayload) recordRestClearSignEvent({
+              kind: 'transaction', outcome: 'signed', source: 'rest-api', chain: 'Solana',
+              format: 'KKSOLSC1_BASE64', label: 'Solana ClearSign transaction', payload: clearSignPayload,
+              keyId: Number.isInteger(body.schema?.signerKeyId) ? body.schema!.signerKeyId : undefined,
+              sentToDevice: clearSignSentToDevice, request: clearSignRequest,
+            })
+          } catch (err: any) {
+            if (clearSignPayload) recordRestClearSignEvent({
+              kind: 'transaction', outcome: 'blocked', source: 'rest-api', chain: 'Solana',
+              format: 'KKSOLSC1_BASE64', label: 'Blocked Solana ClearSign transaction', payload: clearSignPayload,
+              keyId: Number.isInteger(body.schema?.signerKeyId) ? body.schema!.signerKeyId : undefined,
+              sentToDevice: clearSignSentToDevice, request: clearSignRequest,
+              error: err?.message || String(err),
+            })
+            throw err
           }
-          const rawBytes = Buffer.from(body.raw_tx, 'base64')
-          if (rawBytes.length < parsed.sigStart + 64) {
-            throw new HttpError(500, 'Solana sign: raw tx too short to hold signature')
-          }
-          for (let i = 0; i < 64; i++) rawBytes[parsed.sigStart + i] = sigBytes[i]
-          return json({ signature: Buffer.from(sigBytes).toString('base64'), serializedTx: rawBytes.toString('base64') })
+          if (!result?.signature) return json(result)
+          return json({
+            signature: Buffer.from(result.signature).toString('base64'),
+            serializedTx: result.serializedTx,
+          })
         }
 
         // ── SOLANA MESSAGE SIGNING (firmware type 754) ──────────────────
@@ -2738,6 +3143,50 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           return json(validateResponse(formatFeatures(features), S.FeaturesResponse, path))
         }
 
+        if (path === '/system/info/get-entropy' && method === 'POST') {
+          auth.requireAuth(req)
+          const wallet = requireWallet(engine)
+          const body = await parseRequest(req, S.GetEntropyRequest)
+          // Chunked collection: the device answers one GetEntropy message at a
+          // time — 8192 bytes on firmware with the bulk-audit unlock (7.15+),
+          // 1024 on everything older. A short FIRST reply reveals the cap and
+          // we adapt instead of failing the whole request; a short reply
+          // mid-stream is a real error.
+          const ENTROPY_MAX_CHUNK = 8192
+          const ENTROPY_MIN_CHUNK = 1024
+          let chunkSize = ENTROPY_MAX_CHUNK
+          const entropy = new Uint8Array(body.size)
+          let collected = 0
+          while (collected < body.size) {
+            const want = Math.min(chunkSize, body.size - collected)
+            const chunk = await emuWrap(
+              () => (wallet as any).getEntropy(want),
+              { operation: 'getEntropy', opLabel: 'Generate Entropy', chain: 'Device' },
+            )
+            if (!(chunk instanceof Uint8Array) || chunk.length === 0 || chunk.length > want) {
+              throw new HttpError(500, `Device returned ${(chunk as any)?.length ?? 0} entropy bytes; expected ${want}`)
+            }
+            if (chunk.length < want) {
+              if (collected === 0 && chunk.length >= ENTROPY_MIN_CHUNK) {
+                chunkSize = chunk.length // older firmware cap discovered
+              } else {
+                throw new HttpError(500, `Device returned ${chunk.length} entropy bytes; expected ${want}`)
+              }
+            }
+            entropy.set(chunk, collected)
+            collected += chunk.length
+          }
+          return new Response(Buffer.from(entropy), {
+            status: 200,
+            headers: {
+              ...corsHeaders(req),
+              'Content-Type': 'application/octet-stream',
+              'Content-Length': String(entropy.length),
+              'Cache-Control': 'no-store',
+            },
+          })
+        }
+
         if (path === '/system/info/get-public-key' && method === 'POST') {
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
@@ -3023,7 +3472,13 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           // UTXO (xpubs) and non-EVM address-based entries
           for (const pk of cachedPks) {
             const caip = chainIdToCaip.get(pk.chainId) || ''
-            if (pk.xpub) pubkeys.push({ caip, pubkey: pk.xpub, label: `${pk.chainId}:xpub` })
+            if (pk.xpub) pubkeys.push({
+              caip,
+              pubkey: pk.chainId === 'bitcoin'
+                ? utxoDiscoveryKey(pk.xpub, pk.scriptType || 'p2pkh')
+                : pk.xpub,
+              label: `${pk.chainId}:xpub`,
+            })
             else if (pk.address) pubkeys.push({ caip, pubkey: pk.address, label: `${pk.chainId}:addr` })
           }
 
@@ -3173,6 +3628,9 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             // ── Address-type paths (non-UTXO: XRP, ETH, Cosmos, etc.) ──
             // SDK sends type='address' for chains that need actual addresses, not xpubs.
             if (p.type === 'address') {
+              // Bitcoin-only firmware can't derive any non-UTXO chain — this whole
+              // branch. Skip quietly (the device would reject with "Unknown message").
+              if (deviceIsBitcoinOnly()) continue
               const primaryNetwork = (p.networks || [])[0] || ''
               const addrCacheKey = scopedKey(engine, 'batch-addr', { n: p.address_n, net: primaryNetwork })
               const cachedAddr = addressCache.get(addrCacheKey)
@@ -3647,10 +4105,15 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         }
 
         if (path === '/system/initialize/recover-device' && method === 'POST') {
-          auth.requireAuth(req)
+          const client = auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.RecoverDeviceRequest)
-          engine.setRecoveryActive(true)
+          // beginRecovery sets setupInProgress so syncState()/getFeatures()
+          // back off the transport — a concurrent GetFeatures corrupts the
+          // CharacterAck exchange (engine syncState comment). It also binds
+          // this recovery to the calling client so no other paired app can
+          // drive the character input.
+          engine.beginRecovery(client.apiKey)
           try {
             await wallet.recover({
               entropy: body.word_count ? ({ 12: 128, 18: 192, 24: 256 } as Record<number, number>)[body.word_count] || 128 : 128,
@@ -3660,7 +4123,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               autoLockDelayMs: 600000,
             })
           } finally {
-            engine.setRecoveryActive(false)
+            engine.endRecovery()
           }
           featuresCache = null
           return json({ success: true })
@@ -3676,9 +4139,16 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         }
 
         if (path === '/system/recovery/pin' && method === 'POST') {
-          auth.requireAuth(req)
+          const client = auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.SendPinRequest)
+          // During an owned recovery, only the initiating client may send the
+          // recovery PIN — otherwise a second paired client could inject PIN
+          // acknowledgements into someone else's flow. (When no REST recovery
+          // is active this is a no-op, so other PIN flows are unaffected.)
+          if (!engine.canReadRecoveryState(client.apiKey)) {
+            throw new HttpError(409, 'Cipher recovery is owned by a different client')
+          }
           await wallet.sendPin(body.pin)
           return json({ success: true })
         }
@@ -3687,32 +4157,45 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         // on the OLED and the host relays the ciphered characters (CharacterAck).
         // Mirrors /system/recovery/pin. The recover-device call rejects with
         // "Word not found in BIP39 wordlist" when a finalized word is invalid.
+        // Only the client that started recovery may drive it, and (when it
+        // sends the seq it last read from /state) the send is pinned to that
+        // exact CharacterRequest — a stale/reordered/foreign send is a 409, not
+        // a silently corrupted word. Input goes through engine.sendCharacter*,
+        // which additionally guards on setupInProgress.
         if (path === '/system/recovery/character' && method === 'POST') {
-          auth.requireAuth(req)
-          const wallet = requireWallet(engine)
+          const client = auth.requireAuth(req)
           const body = await parseRequest(req, S.SendCharacterRequest)
-          await wallet.sendCharacter(body.character)
+          // All three acks share ONE atomic, in-flight-guarded engine path, so
+          // no two competing requests can race or double-send a CharacterAck.
+          await engine.submitRecoveryAck(client.apiKey, 'character', { character: body.character, expectedSeq: body.seq })
           return json({ success: true })
         }
 
         if (path === '/system/recovery/character/delete' && method === 'POST') {
-          auth.requireAuth(req)
-          const wallet = requireWallet(engine)
-          await wallet.sendCharacterDelete()
+          const client = auth.requireAuth(req)
+          // seq optional here (delete is corrective) — tolerate an empty body
+          // rather than forcing JSON like parseRequest does.
+          const body = (await req.json().catch(() => ({}))) as { seq?: unknown }
+          const seq = typeof body.seq === 'number' ? body.seq : undefined
+          await engine.submitRecoveryAck(client.apiKey, 'delete', { expectedSeq: seq })
           return json({ success: true })
         }
 
         if (path === '/system/recovery/character/done' && method === 'POST') {
-          auth.requireAuth(req)
-          const wallet = requireWallet(engine)
-          await wallet.sendCharacterDone()
+          const client = auth.requireAuth(req)
+          await engine.submitRecoveryAck(client.apiKey, 'done')
           return json({ success: true })
         }
 
         // Current cipher-recovery state. `seq` advances each time the device asks
         // for the next character, so a caller can sync sends with the device.
+        // While a recovery is active, only its owning client may read live
+        // positions — a second paired app must not observe the flow.
         if (path === '/system/recovery/state' && method === 'GET') {
-          auth.requireAuth(req)
+          const client = auth.requireAuth(req)
+          if (!engine.canReadRecoveryState(client.apiKey)) {
+            throw new HttpError(409, 'Cipher recovery is owned by a different client')
+          }
           return json(engine.getRecoveryState())
         }
 
@@ -3825,6 +4308,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             { recipient: body.recipient, amount: body.amount, memo: body.memo, account },
             { signWrap: <T,>(fn: () => Promise<T>) => emuWrap(fn, details) },
           )
+          callbacks?.zcashSchedulePostTxRescans?.()
           return json(result)
         }
 
@@ -3856,6 +4340,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const { deshieldZec } = await import('./txbuilder/zcash-deshield')
           const result = await deshieldZec(wallet, { recipient: body.recipient!, amount: body.amount!, account },
             { signWrap: <T,>(fn: () => Promise<T>) => emuWrap(fn, details) })
+          callbacks?.zcashSchedulePostTxRescans?.()
           return json(result)
         }
 
@@ -3886,6 +4371,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const { shieldZec } = await import('./txbuilder/zcash-shield')
           const result = await shieldZec(wallet, pioneer, { amount: body.amount!, account },
             { signWrap: <T,>(fn: () => Promise<T>) => emuWrap(fn, details) })
+          callbacks?.zcashSchedulePostTxRescans?.()
           return json(result)
         }
 
@@ -3947,6 +4433,10 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           auth.requireAuth(req)
           const body = await parseRequest(req, S.ZcashBroadcastRequest)
           const result = await broadcastShieldedTx(body.raw_tx)
+          // Broadcast marked the tx's input notes spent — schedule the same
+          // reconciliation rescans the one-shot send paths get, or split-flow
+          // callers see an understated balance until change notes are found.
+          callbacks?.zcashSchedulePostTxRescans?.()
           return json(result)
         }
 
@@ -4005,7 +4495,14 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         }
         activeSigningId = undefined
         activeSigningInfo = undefined
+        activeAllowBlindSigning = false
       }
+    },
+    // WS endpoint for the BEX agent bridge (/bex-bridge upgrade above).
+    websocket: {
+      open(ws) { onBexOpen(ws) },
+      message(ws, data) { onBexMessage(ws, data as string | Buffer) },
+      close(ws) { onBexClose(ws) },
     },
   })
 

@@ -1,5 +1,5 @@
 /**
- * Zcash transparent → Orchard shielding transaction builder.
+ * Zcash transparent → Ironwood shielding transaction builder.
  *
  * Orchestrates the flow:
  *   1. Fetch transparent UTXOs (via Pioneer)
@@ -78,12 +78,12 @@ interface ShieldBuildResult {
 	transparent_inputs: TransparentSigningInput[]
 	transparent_outputs?: Array<{ index: number; value: number; script_pubkey: string }>
 	orchard_signing_request: any
-	digests: { header: string; transparent: string; orchard: string }
+	digests: { header: string; transparent: string; orchard: string; ironwood: string }
 	display: { amount: string; fee: string; action: string }
 }
 
 /**
- * Full shield flow: transparent ZEC → Orchard shielded pool.
+ * Full shield flow: transparent ZEC → Ironwood shielded pool.
  *
  * @param wallet - hdwallet instance with zcashSignPczt + Pioneer access
  * @param pioneer - Pioneer API client for UTXO lookup
@@ -424,13 +424,13 @@ async function _shieldZecInner(
 		account,
 	}, 600000) // Halo2 proof can take a while
 
-	console.log(`[zcash-shield] Shield PCZT built: ${buildResult.transparent_inputs.length} transparent inputs, ${buildResult.orchard_signing_request.n_actions} Orchard actions`)
+	console.log(`[zcash-shield] Shield PCZT built: ${buildResult.transparent_inputs.length} transparent inputs, ${buildResult.orchard_signing_request.n_actions} Ironwood actions`)
 
-	// 5. Device signs — two-phase: Orchard first, then transparent
+	// 5. Device signs — two-phase: Ironwood plus transparent authorization
 	//
 	// The hybrid signing protocol (ZcashTransparentInput/ZcashTransparentSig)
 	// requires firmware support that may not be present. Check first and
-	// fall back to Orchard-only signing with a clear error for transparent.
+	// fail with a clear error if transparent authorization is unavailable.
 	console.log("[zcash-shield] Requesting device signatures...")
 	opts?.onProgress?.("signing")
 
@@ -444,15 +444,24 @@ async function _shieldZecInner(
 		header_fields: buildResult.orchard_signing_request.header_fields,
 		transparent_outputs: buildResult.transparent_outputs,
 		transparent_inputs: hasTransparentInputs
-			? buildResult.transparent_inputs.map((ti: any) => ({
-				index: ti.index,
-				addressNList: ti.address_path,
-				amount: ti.amount,
-				prevout_txid: ti.prevout_txid,
-				prevout_index: ti.prevout_index,
-				sequence: ti.sequence,
-				script_pubkey: ti.script_pubkey,
-			}))
+			? buildResult.transparent_inputs.map((ti: any) => {
+				// hdwallet's TransparentInput is camelCase; the sidecar speaks
+				// snake_case. A silent mismatch here reaches the device as an
+				// input with no prevout/script and fails as "Invalid transparent
+				// input data" — validate before mapping, throw on missing.
+				if (!ti.prevout_txid || ti.prevout_index === undefined || !ti.script_pubkey) {
+					throw new Error(`Sidecar transparent input ${ti.index} missing prevout_txid/prevout_index/script_pubkey`)
+				}
+				return {
+					index: ti.index,
+					addressNList: ti.address_path,
+					amount: ti.amount,
+					prevoutTxid: ti.prevout_txid,
+					prevoutIndex: ti.prevout_index,
+					sequence: ti.sequence,
+					scriptPubkey: ti.script_pubkey,
+				}
+			})
 			: undefined,
 	}
 
@@ -476,7 +485,7 @@ async function _shieldZecInner(
 	const transparentSigs: string[] = (signatures as any)._transparentSignatures || []
 	const orchardSigs: string[] = signatures
 
-	console.log(`[zcash-shield] Got ${transparentSigs.length} transparent sigs, ${orchardSigs.length} Orchard sigs`)
+	console.log(`[zcash-shield] Got ${transparentSigs.length} transparent sigs, ${orchardSigs.length} Ironwood sigs`)
 	if (transparentSigs.length > 0) {
 		console.log(`[zcash-shield] Transparent sig[0]: ${transparentSigs[0]?.slice(0, 40)}...`)
 	}

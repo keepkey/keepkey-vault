@@ -6,11 +6,16 @@ import type {
   SignedTx,
   AddressRequest,
   EthSignTxParams,
+  LoadClearsignSignerParams,
+  LoadClearsignSignerResult,
   EthSignTypedDataParams,
   EthSignMessageParams,
   EthVerifyMessageParams,
   BtcSignTxParams,
   CosmosAminoSignParams,
+  HiveSignOperationsParams,
+  HiveSignTransferParams,
+  HiveSignMessageParams,
   XrpSignTxParams,
   BnbSignTxParams,
   SolanaSignTxParams,
@@ -162,6 +167,10 @@ export class KeepKeySdk {
       getFeatures: (): Promise<DeviceFeatures> =>
         this.client.post('/system/info/get-features'),
 
+      /** Return `size` fresh bytes from the device hardware RNG (1..8192). */
+      getEntropy: (size: number): Promise<Uint8Array> =>
+        this.client.postBytes('/system/info/get-entropy', { size }, this.client.signingTimeoutMs),
+
       /** List all connected KeepKey devices. */
       getDevices: (): Promise<{ devices: DeviceInfo[]; total: number }> =>
         this.client.get('/api/v2/devices'),
@@ -240,13 +249,20 @@ export class KeepKeySdk {
        * character the user "typed". A finalized word that isn't in the BIP-39
        * wordlist makes the in-flight `recoverDevice()` promise reject with
        * "Word not found in BIP39 wordlist".
+       *
+       * `seq` is the value last read from `getRecoveryState()`. The vault pins
+       * the send to that exact CharacterRequest and to the client that started
+       * recovery — a stale, reordered, or foreign send is rejected with 409
+       * rather than silently corrupting the decoded word.
        */
-      sendCharacter: (character: string): Promise<{ success: boolean }> =>
-        this.client.post('/system/recovery/character', { character }),
+      sendCharacter: (character: string, seq: number): Promise<{ success: boolean }> =>
+        this.client.post('/system/recovery/character', { character, seq }),
 
-      /** Delete the last character entered during cipher recovery. */
-      sendCharacterDelete: (): Promise<{ success: boolean }> =>
-        this.client.post('/system/recovery/character/delete', {}),
+      /** Delete the last character entered during cipher recovery. Pass the
+       *  current `seq` (from `getRecoveryState()`) to pin the delete; the
+       *  initiating-client check applies either way. */
+      sendCharacterDelete: (seq?: number): Promise<{ success: boolean }> =>
+        this.client.post('/system/recovery/character/delete', seq === undefined ? {} : { seq }),
 
       /** Finalize cipher-recovery word/seed entry (equivalent to pressing "next"). */
       sendCharacterDone: (): Promise<{ success: boolean }> =>
@@ -273,7 +289,11 @@ export class KeepKeySdk {
   address = {
     /** Derive a UTXO (BTC/LTC/BCH/DOGE/DASH) address. */
     utxoGetAddress: (params: AddressRequest): Promise<{ address: string }> =>
-      this.client.post('/addresses/utxo', params),
+      this.client.post(
+        '/addresses/utxo',
+        params,
+        params.show_display ? this.client.signingTimeoutMs : undefined,
+      ),
 
     /** Derive an Ethereum (or EVM-compatible) address. */
     ethGetAddress: (params: AddressRequest): Promise<{ address: string }> =>
@@ -318,6 +338,10 @@ export class KeepKeySdk {
     /** Derive a TON address. */
     tonGetAddress: (params: AddressRequest): Promise<{ address: string }> =>
       this.client.post('/addresses/ton', params),
+
+    /** Derive a Hive (SLIP-0048) address. */
+    hiveGetAddress: (params: AddressRequest): Promise<{ address: string }> =>
+      this.client.post('/addresses/hive', params),
   }
 
   // ═══════════════════════════════════════════════════════════════════
@@ -329,6 +353,21 @@ export class KeepKeySdk {
     /** Sign an Ethereum or EVM transaction. Supports legacy and EIP-1559. */
     ethSignTransaction: (params: EthSignTxParams): Promise<SignedTx> =>
       this.client.post('/eth/sign-transaction', params),
+
+    /**
+     * Load an EVM clear-sign signer into a device key slot (user-confirmed on
+     * device). The device shows a trust screen naming the alias + pubkey
+     * fingerprint. Default is RAM-only (dropped on reboot — reload per session);
+     * pass `persist: true` to keep it in device flash across reboots (until
+     * WipeDevice). An optional `icon` (+ `iconWidth`/`iconHeight`) renders the
+     * identity's logo on the trust screen and every clear-sign it vouches for.
+     * Firmware 7.15.0+. Used to trust a metadata-signing key (e.g. a CI test
+     * key in slot 3) so `ethSignTransaction`'s `txMetadata` blobs verify.
+     */
+    loadClearsignSigner: (params: LoadClearsignSignerParams): Promise<LoadClearsignSignerResult> =>
+      // Blocks on a physical trust-screen confirmation; the 30s default aborts
+      // mid-review and looks like a device failure.
+      this.client.post('/eth/clearsign/load-signer', params, this.client.signingTimeoutMs),
 
     /** Sign a personal message (`eth_sign` / `personal_sign`). */
     ethSignMessage: (params: EthSignMessageParams): Promise<any> =>
@@ -351,7 +390,7 @@ export class KeepKeySdk {
   btc = {
     /** Sign a UTXO transaction (BTC, LTC, BCH, DOGE, DASH, etc.). */
     btcSignTransaction: (params: BtcSignTxParams): Promise<SignedTx> =>
-      this.client.post('/utxo/sign-transaction', params),
+      this.client.post('/utxo/sign-transaction', params, this.client.signingTimeoutMs),
   }
 
   // ═══════════════════════════════════════════════════════════════════
@@ -429,6 +468,28 @@ export class KeepKeySdk {
   }
 
   // ═══════════════════════════════════════════════════════════════════
+  // hive — Hive (SLIP-0048) signing
+  // ═══════════════════════════════════════════════════════════════════
+
+  /** Hive generic clear-sign op-table signing (fw 7.15.0+). */
+  hive = {
+    /**
+     * Sign 1–4 Hive operations against the device clear-sign op table.
+     * Requires the vault's `hive_enabled` setting and firmware >= 7.15.0.
+     */
+    hiveSignOperations: (params: HiveSignOperationsParams): Promise<SignedTx> =>
+      this.client.post('/hive/sign-operations', params),
+
+    /** Sign a Hive transfer op (dedicated path — caller supplies the TaPoS header). */
+    hiveSignTransfer: (params: HiveSignTransferParams): Promise<SignedTx> =>
+      this.client.post('/hive/sign-transfer', params),
+
+    /** Keychain signBuffer — sign SHA256(message) on-device (dApp login). */
+    hiveSignMessage: (params: HiveSignMessageParams): Promise<{ signature: string; public_key?: string }> =>
+      this.client.post('/hive/sign-message', params),
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
   // thorchain — THORChain signing
   // ═══════════════════════════════════════════════════════════════════
 
@@ -484,11 +545,18 @@ export class KeepKeySdk {
   // solana — Solana signing
   // ═══════════════════════════════════════════════════════════════════
 
-  /** Solana signing (supports SPL tokens). */
+  /** Solana signing (supports SPL tokens and transaction-bound ClearSign metadata). */
   solana = {
-    /** Sign a Solana transaction. `raw_tx` must be the base64-encoded serialized transaction. */
+    /**
+     * Sign a Solana transaction. `raw_tx` is the base64-encoded serialized
+     * transaction. Opaque cross-chain/versioned transactions should include a
+     * provider-signed KKSOLSW1 `swapMetadata` descriptor; firmware verifies its
+     * binding before displaying ClearSign swap details.
+     */
     solanaSignTransaction: (params: SolanaSignTxParams): Promise<SignedTx> =>
-      this.client.post('/solana/sign-transaction', params),
+      // Device confirmation can span several screens (schema-decoded args,
+      // accounts, priority fee); the 30s default aborts mid-review.
+      this.client.post('/solana/sign-transaction', params, this.client.signingTimeoutMs),
 
     /**
      * Sign a Solana off-chain message with domain separation. Firmware

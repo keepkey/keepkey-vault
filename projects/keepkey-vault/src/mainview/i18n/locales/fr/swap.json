@@ -104,7 +104,7 @@
 	"approvingToken": "Approbation du jeton...",
 	"approvalRequired": "En attente de l'approbation du jeton sur votre KeepKey...",
 	"enterAmount": "Saisissez un montant pour obtenir un devis",
-	"notSupported": "Les échanges de {{coin}} ne sont pas encore pris en charge via THORChain.",
+	"notSupported": "Aucune route d'échange n'est disponible pour {{coin}} pour le moment.",
 	"copied": "Copié",
 	"copy": "Copier",
 	"youSend": "Vous envoyez",

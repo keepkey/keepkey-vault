@@ -9,6 +9,7 @@ import type { AuthStore } from './auth'
 import { getPioneer } from './pioneer'
 import { parseRequest } from './validate'
 import * as S from './schemas'
+import { utxoDiscoveryKey } from './btc-backend/types'
 
 const TAG = '[rest-v2]'
 
@@ -31,7 +32,9 @@ export async function handleV2DataRoute(
       auth.requireAuth(req)
       const body = await parseRequest(req, S.PortfolioBalancesRequest)
       const pioneer = await getPioneer()
-      const resp = await pioneer.GetPortfolioBalances({ pubkeys: body.pubkeys }, { forceRefresh: true })
+      const resp = await pioneer.GetPortfolioBalances({
+        pubkeys: body.pubkeys.map(p => ({ caip: p.caip, pubkey: utxoDiscoveryKey(p.pubkey, p.scriptType) })),
+      }, { forceRefresh: true })
       return json({ data: resp?.data || resp })
     }
 
@@ -66,7 +69,10 @@ export async function handleV2DataRoute(
       auth.requireAuth(req)
       const body = await parseRequest(req, S.ListUnspentRequest)
       const pioneer = await getPioneer()
-      const resp = await pioneer.ListUnspent({ network: body.network, xpub: body.xpub })
+      const resp = await pioneer.ListUnspent({
+        network: body.network,
+        xpub: utxoDiscoveryKey(body.xpub, body.scriptType),
+      })
       return json({ data: resp?.data || resp })
     }
 
@@ -74,7 +80,10 @@ export async function handleV2DataRoute(
       auth.requireAuth(req)
       const body = await parseRequest(req, S.PubkeyInfoRequest)
       const pioneer = await getPioneer()
-      const resp = await pioneer.GetPubkeyInfo({ network: body.network, xpub: body.xpub })
+      const resp = await pioneer.GetPubkeyInfo({
+        network: body.network,
+        xpub: utxoDiscoveryKey(body.xpub, body.scriptType),
+      })
       return json({ data: resp?.data || resp })
     }
 
@@ -84,7 +93,9 @@ export async function handleV2DataRoute(
       auth.requireAuth(req)
       const body = await parseRequest(req, S.TxHistoryRequest)
       const pioneer = await getPioneer()
-      const resp = await pioneer.GetTransactionHistory({ queries: body.queries })
+      const resp = await pioneer.GetTransactionHistory({
+        queries: body.queries.map(q => ({ caip: q.caip, pubkey: utxoDiscoveryKey(q.pubkey, q.scriptType) })),
+      })
       return json({ data: resp?.data || resp })
     }
 

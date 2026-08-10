@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react"
 import { Box, Flex, Text, Button } from "@chakra-ui/react"
 import { FaPlus, FaCheck, FaChevronDown } from "react-icons/fa"
 import { useTranslation } from "react-i18next"
-import { BTC_SCRIPT_TYPES } from "../../shared/chains"
+import { BTC_SCRIPT_TYPES, btcScriptTypeConfig } from "../../shared/chains"
 import { formatBalance } from "../lib/formatting"
 import { AnimatedUsd } from "./AnimatedUsd"
 import type { BtcAccountSet, BtcScriptType } from "../../shared/types"
@@ -83,8 +83,9 @@ export function BtcXpubSelector({ btcAccounts, onSelectXpub, onAddAccount, addin
 
       {/* Script type pills */}
       <Flex gap="1.5" flexWrap="wrap">
-        {BTC_SCRIPT_TYPES.map(st => {
-          const xpubData = activeAccount.xpubs.find(x => x.scriptType === st.scriptType)
+        {activeAccount.xpubs.map(xpubData => {
+          const st = btcScriptTypeConfig(xpubData.scriptType)
+          if (!st) return null
           const isSelected = selAcct === activeAccount.accountIndex && selScript === st.scriptType
           const hasBtcBalance = xpubData ? parseFloat(xpubData.balance || '0') > 0 : false
 
@@ -166,7 +167,7 @@ function CompactBtcSelector({
     }
   }, [accountOpen, scriptOpen])
 
-  const activeScript = BTC_SCRIPT_TYPES.find(s => s.scriptType === selScript) || BTC_SCRIPT_TYPES[0]
+  const activeScript = btcScriptTypeConfig(selScript) || BTC_SCRIPT_TYPES[0]
   const activeScriptXpub = activeAccount.xpubs.find(x => x.scriptType === activeScript.scriptType)
   const activeScriptBalance = activeScriptXpub ? formatBalance(activeScriptXpub.balance) : '0'
 
@@ -326,8 +327,9 @@ function CompactBtcSelector({
             className="v3-glass-card-overlay electrobun-webkit-app-region-no-drag"
             py="1.5"
           >
-            {BTC_SCRIPT_TYPES.map(st => {
-              const xpub = activeAccount.xpubs.find(x => x.scriptType === st.scriptType)
+            {activeAccount.xpubs.map(xpub => {
+              const st = btcScriptTypeConfig(xpub.scriptType)
+              if (!st) return null
               const hasBal = xpub ? parseFloat(xpub.balance || '0') > 0 : false
               const isSel = selScript === st.scriptType
               return (

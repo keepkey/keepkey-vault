@@ -7,11 +7,18 @@
 import coinSelect from 'coinselect'
 // @ts-ignore — coinselect/split has no types
 import coinSelectSplit from 'coinselect/split'
-// @ts-ignore — bech32 has no default export types for Bun
-import * as bech32 from 'bech32'
+import { bech32, bech32m } from '@scure/base'
 // @ts-ignore
 import bs58check from 'bs58check'
 import type { ChainDef } from '../../shared/chains'
+import { getBtcBackend } from '../btc-backend'
+import { utxoDiscoveryKey } from '../btc-backend/types'
+
+/** BTC mainnet — the ONLY UTXO chain that routes to a self-host node; every other
+ *  coin (LTC/DOGE/BCH/Dash/Zcash) stays on Pioneer. */
+const BTC_NETWORK_ID = 'bip122:000000000019d6689c085ae165831e93'
+const btcSelfHostActive = (networkId: string) =>
+  networkId === BTC_NETWORK_ID && getBtcBackend().kind !== 'pioneer'
 
 // @ts-ignore — CJS module, no types
 const cashaddrLib = require('@shapeshiftoss/bitcoinjs-lib/src/cashaddr')
@@ -80,26 +87,39 @@ const COIN_TYPE: Record<string, number> = {
 
 // Purpose by scriptType
 const PURPOSE: Record<string, number> = {
-  p2pkh: 44, 'p2sh-p2wpkh': 49, p2wpkh: 84,
+  p2pkh: 44, 'p2sh-p2wpkh': 49, p2wpkh: 84, p2tr: 86,
 }
 
 // Reverse: purpose → scriptType (for deriving scriptType from UTXO paths)
 const PURPOSE_TO_SCRIPT: Record<number, string> = {
-  44: 'p2pkh', 49: 'p2sh-p2wpkh', 84: 'p2wpkh',
+  44: 'p2pkh', 49: 'p2sh-p2wpkh', 84: 'p2wpkh', 86: 'p2tr',
 }
 
 // Convert a Bitcoin address to its scriptPubKey hex (for matching UTXOs by script)
-function addressToScriptPubKeyHex(address: string): string | undefined {
+export function addressToScriptPubKeyHex(address: string): string | undefined {
   try {
     if (address.startsWith('bc1') || address.startsWith('tb1') ||
         address.startsWith('ltc1') || address.startsWith('tltc1')) {
-      // Bech32 (native segwit p2wpkh or p2wsh)
-      const decoded = bech32.decode(address)
-      const program = bech32.fromWords(decoded.words.slice(1))
+      // BIP173 v0 uses Bech32; BIP350 v1+ (including P2TR) uses Bech32m.
+      // Decode with both, then enforce the checksum variant required by the
+      // witness version so a v1 address with an old Bech32 checksum is rejected.
+      let decoded: { prefix: string; words: number[] }
+      let isBech32m = false
+      try {
+        decoded = bech32.decode(address)
+      } catch {
+        decoded = bech32m.decode(address)
+        isBech32m = true
+      }
+      const version = decoded.words[0]
+      if (version == null || version < 0 || version > 16) return undefined
+      if ((version === 0 && isBech32m) || (version > 0 && !isBech32m)) return undefined
+      const program = (isBech32m ? bech32m : bech32).fromWords(decoded.words.slice(1))
+      if (program.length < 2 || program.length > 40) return undefined
+      if (version === 0 && program.length !== 20 && program.length !== 32) return undefined
       const hex = Buffer.from(Uint8Array.from(program)).toString('hex')
-      if (program.length === 20) return `0014${hex}` // p2wpkh
-      if (program.length === 32) return `0020${hex}` // p2wsh
-      return undefined
+      const versionOpcode = version === 0 ? '00' : (0x50 + version).toString(16).padStart(2, '0')
+      return `${versionOpcode}${program.length.toString(16).padStart(2, '0')}${hex}`
     }
     // Zcash t1... (P2PKH) and t3... (P2SH) — 2-byte version prefix
     if (address.startsWith('t1') || address.startsWith('t3')) {
@@ -182,13 +202,53 @@ function unwrapUtxoResponse(resp: any): any[] {
     : []
 }
 
+/** Resolve fee rates (sat/vByte). BTC self-host reads the node; everything else
+ *  uses Pioneer's fee API (sat/kB → sat/vB conversion), falling back to defaults. */
+async function resolveFeeRates(
+  pioneer: any, chain: ChainDef,
+): Promise<{ slow: number; average: number; fast: number }> {
+  if (HARDCODED_FEES[chain.networkId]) return HARDCODED_FEES[chain.networkId]
+  if (btcSelfHostActive(chain.networkId)) {
+    try { return await getBtcBackend().feeRate(chain.networkId) }
+    catch { return DEFAULT_FEES[chain.networkId] || { slow: 3, average: 5, fast: 15 } }
+  }
+  try {
+    const feeResp = pioneer.GetFeeRateByNetwork
+      ? await pioneer.GetFeeRateByNetwork({ networkId: chain.networkId })
+      : await pioneer.GetFeeRate({ networkId: chain.networkId })
+    const data = feeResp?.data || {}
+    const vals = [data.slow, data.average, data.fast, data.fastest].filter(Boolean)
+    const needsConversion = vals.some((v: number) => v > 500) // sat/kB → sat/vB
+    return {
+      slow: (data.slow || data.average || 5) / (needsConversion ? 1000 : 1),
+      average: (data.average || data.fast || 10) / (needsConversion ? 1000 : 1),
+      fast: (data.fastest || data.fast || data.average || 15) / (needsConversion ? 1000 : 1),
+    }
+  } catch {
+    return DEFAULT_FEES[chain.networkId] || { slow: 3, average: 5, fast: 15 }
+  }
+}
+
 /** Fetch UTXOs for a single xpub, tag each with its scriptType and source accountPath */
 async function fetchUtxosForXpub(
   pioneer: any, network: string, xpub: string, defaultScriptType: string,
   sourceAccountPath?: number[],
 ): Promise<any[]> {
   console.log(`${TAG} Fetching UTXOs: network=${network}, xpub=${xpub.slice(0, 20)}...`)
-  const resp = await pioneer.ListUnspent({ network, xpub })
+  if (btcSelfHostActive(network)) {
+    const backend = getBtcBackend()
+    const raw = await backend.listUnspent({ network, xpub, scriptType: defaultScriptType })
+    const utxos = raw.map((u) => ({
+      txid: u.txid, vout: u.vout, value: Number(u.value),
+      path: u.path, address: u.address, hex: u.hex,
+      scriptType: u.scriptType || (u.path ? getScriptTypeFromPath(u.path) : undefined) || defaultScriptType,
+      ...(sourceAccountPath ? { _sourceAccountPath: sourceAccountPath } : {}),
+    }))
+    console.log(`${TAG} ${xpub.slice(0, 8)}...: ${utxos.length} UTXOs via self-host ${backend.kind}, ${utxos.reduce((s, u) => s + u.value, 0) / 1e8}`)
+    return utxos
+  }
+  const discoveryKey = utxoDiscoveryKey(xpub, defaultScriptType)
+  const resp = await pioneer.ListUnspent({ network, xpub: discoveryKey })
   console.log(`${TAG} ListUnspent raw: ${JSON.stringify(resp)?.slice(0, 300)}`)
   const utxos = unwrapUtxoResponse(resp)
   for (const u of utxos) {
@@ -208,13 +268,13 @@ async function fetchUtxosForXpub(
 export async function estimateUtxoFee(
   pioneer: any,
   chain: ChainDef,
-  params: Pick<BuildUtxoParams, 'to' | 'amount' | 'feeLevel' | 'isMax' | 'xpub' | 'allXpubs' | 'accountPath' | 'satPerVByte'>,
+  params: Pick<BuildUtxoParams, 'to' | 'amount' | 'feeLevel' | 'isMax' | 'xpub' | 'allXpubs' | 'scriptTypeOverride' | 'accountPath' | 'satPerVByte' | 'memo'>,
 ): Promise<{ feeSat: number; netSat: number } | null> {
   try {
-    const { to, feeLevel = 5, isMax = false, xpub, allXpubs, accountPath, satPerVByte } = params
+    const { to, feeLevel = 5, isMax = false, xpub, allXpubs, scriptTypeOverride, accountPath, satPerVByte, memo } = params
     const primaryXpub = xpub || allXpubs?.[0]?.xpub
     if (!primaryXpub) return null
-    const scriptType = getScriptTypeFromXpub(primaryXpub) || chain.scriptType || 'p2pkh'
+    const scriptType = scriptTypeOverride || getScriptTypeFromXpub(primaryXpub) || chain.scriptType || 'p2pkh'
 
     let utxos: any[]
     if (allXpubs && allXpubs.length > 0) {
@@ -227,26 +287,7 @@ export async function estimateUtxoFee(
     }
     if (!utxos.length) return null
 
-    let feeRates: { slow: number; average: number; fast: number }
-    if (HARDCODED_FEES[chain.networkId]) {
-      feeRates = HARDCODED_FEES[chain.networkId]
-    } else {
-      try {
-        const feeResp = pioneer.GetFeeRateByNetwork
-          ? await pioneer.GetFeeRateByNetwork({ networkId: chain.networkId })
-          : await pioneer.GetFeeRate({ networkId: chain.networkId })
-        const data = feeResp?.data || {}
-        const vals = [data.slow, data.average, data.fast, data.fastest].filter(Boolean)
-        const needsConversion = vals.some((v: number) => v > 500)
-        feeRates = {
-          slow: (data.slow || data.average || 5) / (needsConversion ? 1000 : 1),
-          average: (data.average || data.fast || 10) / (needsConversion ? 1000 : 1),
-          fast: (data.fastest || data.fast || data.average || 15) / (needsConversion ? 1000 : 1),
-        }
-      } catch {
-        feeRates = DEFAULT_FEES[chain.networkId] || { slow: 3, average: 5, fast: 15 }
-      }
-    }
+    const feeRates = await resolveFeeRates(pioneer, chain)
     const effectiveFeeRate = satPerVByte && satPerVByte > 0
       ? Math.max(1, Math.ceil(satPerVByte))
       : Math.max(3, Math.ceil(feeLevel <= 2 ? feeRates.slow : feeLevel <= 4 ? feeRates.average : feeRates.fast))
@@ -264,7 +305,9 @@ export async function estimateUtxoFee(
     // buildUtxoTx will actually produce — otherwise the re-quote under-estimates
     // the fee and the deposit address is quoted for more than we can deliver.
     if (chain.id === 'zcash') {
-      const logicalActions = Math.max(result.inputs.length, result.outputs?.length ?? 1)
+      // Same memo-output accounting as buildUtxoTx — OP_RETURN adds a vout.
+      const memoOut = memo && memo.trim() ? 1 : 0
+      const logicalActions = Math.max(result.inputs.length, (result.outputs?.length ?? 1) + memoOut)
       const zip317Fee = 5000 * Math.max(2, logicalActions)
       if (feeSat < zip317Fee) feeSat = zip317Fee
     }
@@ -332,31 +375,7 @@ export async function buildUtxoTx(
   }
 
   // 2. Get fee rate
-  let feeRates: { slow: number; average: number; fast: number }
-
-  if (HARDCODED_FEES[chain.networkId]) {
-    feeRates = HARDCODED_FEES[chain.networkId]
-  } else {
-    try {
-      const feeResp = pioneer.GetFeeRateByNetwork
-        ? await pioneer.GetFeeRateByNetwork({ networkId: chain.networkId })
-        : await pioneer.GetFeeRate({ networkId: chain.networkId })
-      const data = feeResp?.data || {}
-
-      // Detect sat/kB → convert to sat/byte
-      const vals = [data.slow, data.average, data.fast, data.fastest].filter(Boolean)
-      const needsConversion = vals.some((v: number) => v > 500)
-
-      feeRates = {
-        slow: (data.slow || data.average || 5) / (needsConversion ? 1000 : 1),
-        average: (data.average || data.fast || 10) / (needsConversion ? 1000 : 1),
-        fast: (data.fastest || data.fast || data.average || 15) / (needsConversion ? 1000 : 1),
-      }
-    } catch {
-      feeRates = DEFAULT_FEES[chain.networkId] || { slow: 3, average: 5, fast: 15 }
-      console.warn(`${TAG} Fee API failed, using defaults for ${chain.coin}`)
-    }
-  }
+  const feeRates = await resolveFeeRates(pioneer, chain)
 
   const effectiveFeeRate = satPerVByte && satPerVByte > 0
     ? Math.max(1, Math.ceil(satPerVByte)) // custom rate — user's explicit choice (consensus floors still apply below)
@@ -415,7 +434,12 @@ export async function buildUtxoTx(
   // logical_actions = max(transparent_inputs, transparent_outputs)
   // coinselect uses sat/byte which produces fees far below the ZIP-317 floor.
   if (chain.id === 'zcash') {
-    const logicalActions = Math.max(inputs.length, outputs.length)
+    // +1 output when a memo is present: the OP_RETURN vout is appended at
+    // broadcast time (opReturnData below), AFTER coin selection — and ZIP-317
+    // counts every transparent output. Missing it left memo txs exactly one
+    // action unpaid → node rejects with "tx unpaid action limit exceeded".
+    const memoOut = memo && memo.trim() ? 1 : 0
+    const logicalActions = Math.max(inputs.length, outputs.length + memoOut)
     const zip317Fee = 5000 * Math.max(2, logicalActions)
     if (fee < zip317Fee) {
       const increase = zip317Fee - fee
@@ -450,13 +474,37 @@ export async function buildUtxoTx(
   //    Aggregate across all xpubs when multi-xpub mode
   let changeAddressIndex = 0
   const addressToPath = new Map<string, string>()
+  // BTC self-host: no Pioneer metadata. UTXOs already carry `path` (Blockbook/Core
+  // provide it), so the address→path enrichment below is a no-op; we only need the
+  // next change index. Derive it from unspent change UTXOs (path .../1/N).
+  // ponytail: under-counts only if a change addr was used then fully spent → address
+  // reuse (privacy), never fund loss; the collision loop below still prevents reusing
+  // a live input path. Upgrade path: query the node's used-address set if reuse bites.
+  const btcSelfHost = btcSelfHostActive(chain.networkId)
   // Always query primaryXpub for change-address discovery, plus all funded xpubs for path enrichment
-  const xpubsToQuery = allXpubs?.length
-    ? [...new Set([primaryXpub, ...allXpubs.map(x => x.xpub)])]
-    : [primaryXpub]
-  for (const qXpub of xpubsToQuery) {
+  const queryCandidates = allXpubs?.length
+    ? [{ xpub: primaryXpub, scriptType }, ...allXpubs.map(x => ({ xpub: x.xpub, scriptType: x.scriptType }))]
+    : [{ xpub: primaryXpub, scriptType }]
+  const xpubsToQuery = btcSelfHost ? [] : [...new Map(
+    queryCandidates.map(q => [utxoDiscoveryKey(q.xpub, q.scriptType), q]),
+  ).values()]
+  if (btcSelfHost) {
+    let maxUsed = -1
+    for (const u of utxos) {
+      const parts = (u.path || '').split('/')
+      if (parts.length === 6 && parts[4] === '1') {
+        const idx = parseInt(parts[5], 10)
+        if (!isNaN(idx) && idx > maxUsed) maxUsed = idx
+      }
+    }
+    changeAddressIndex = maxUsed + 1
+    console.log(`${TAG} Self-host change index from UTXOs: ${changeAddressIndex}`)
+  }
+  for (const query of xpubsToQuery) {
+    const qXpub = query.xpub
+    const discoveryKey = utxoDiscoveryKey(qXpub, query.scriptType)
     try {
-      const pubkeyInfo = (await pioneer.GetPubkeyInfo({ network: chain.networkId, xpub: qXpub }))?.data
+      const pubkeyInfo = (await pioneer.GetPubkeyInfo({ network: chain.networkId, xpub: discoveryKey }))?.data
       if (pubkeyInfo?.tokens) {
         let maxUsed = -1
         for (const token of pubkeyInfo.tokens) {
@@ -631,7 +679,15 @@ export async function buildUtxoTx(
     ...(chain.coin === 'Zcash' ? {
       overwintered: true,
       versionGroupId: 0x892F2085,
-      branchId: 0x4dec4df0,   // NU6.1 (current Zcash mainnet)
+      // Consensus branch id baked into the ZIP-243 transparent sighash. A
+      // stale value makes every node reject the tx as ScriptInvalid (the
+      // signature commits to the wrong branch), so this MUST track Zcash
+      // network upgrades. The shielded paths get it live from the sidecar;
+      // this transparent path has no sidecar dependency, hence a constant.
+      // ponytail: rots at every NU activation — if ZEC sends suddenly fail
+      // ScriptInvalid on all nodes, update this first (the sidecar's
+      // ZcashSignPCZT log line prints the current live value).
+      branchId: 0x5437f330,   // NU6.2 (current Zcash mainnet, 2026)
       expiry: 0,
     } : {}),
     fee: String(fee / 10 ** chain.decimals),

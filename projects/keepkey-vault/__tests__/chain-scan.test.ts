@@ -237,4 +237,11 @@ describe('utxoAccountScriptPaths — per-account xpub paths for UTXO altcoins', 
   test('a chain whose receive convention matches a standard entry gets no duplicate', () => {
     expect(utxoAccountScriptPaths(DOGE, 0)).toHaveLength(1)
   })
+
+  test('Bitcoin BIP86 is capability-gated and uses m/86\'/0\'/account\'', () => {
+    expect(utxoAccountScriptPaths(BTC, 2).map(x => x.scriptType)).toEqual(['p2pkh', 'p2sh-p2wpkh', 'p2wpkh'])
+    const enabled = utxoAccountScriptPaths(BTC, 2, true)
+    expect(enabled.map(x => x.scriptType)).toEqual(['p2pkh', 'p2sh-p2wpkh', 'p2wpkh', 'p2tr'])
+    expect(enabled[3].path).toEqual([0x80000056, 0x80000000, 0x80000002])
+  })
 })

@@ -11,6 +11,7 @@ import {
   FaChevronDown,
   FaChevronUp,
   FaFolderOpen,
+  FaBitcoin,
 } from 'react-icons/fa'
 import holdAndConnectRaw from '../assets/svg/hold-and-connect.svg?raw'
 import { useFirmwareUpdate } from '../hooks/useFirmwareUpdate'
@@ -18,8 +19,12 @@ import { useDeviceState } from '../hooks/useDeviceState'
 import { rpcRequest, onRpcMessage } from '../lib/rpc'
 import type { FirmwareAnalysis, FirmwareProgress } from '../../shared/types'
 import { FirmwareUpgradePreview } from './FirmwareUpgradePreview'
+import { ReproducibleBuildNotice } from './ReproducibleBuildNotice'
+import { DocsLink } from './DocsLink'
+import { DOCS_LINKS } from '../../shared/docs-links'
 import { TutorialPage } from './TutorialCards'
 import { LanguagePicker } from '../i18n/LanguageSelector'
+import { BITCOIN_ONLY_ONBOARDING } from '../../shared/flags'
 
 // ── Design tokens ───────────────────────────────────────────────────────────
 const HIGHLIGHT = 'green.500'
@@ -122,6 +127,9 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
   const [applyingTipPassphrase, setApplyingTipPassphrase] = useState(false)
   // Synchronous in-flight guard (state updates are async — mirrors applyingLabelRef).
   const applyingTipPassphraseRef = useRef(false)
+  // Bitcoin-only vs Multi-coin firmware choice (flag-gated, OOB-only). One-way:
+  // a btc-only seed is locked to btc-only firmware. Default multi = current behavior.
+  const [coinMode, setCoinMode] = useState<'multi' | 'bitcoin-only'>('multi')
   const [setupType, setSetupType] = useState<'create' | 'recover' | null>(null)
   const [wordCount, setWordCount] = useState<12 | 18 | 24>(12)
   const [deviceLabel, setDeviceLabel] = useState('')
@@ -167,6 +175,21 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
 
   // Dev: load-device dialog
   const [devLoadOpen, setDevLoadOpen] = useState(false)
+  // Classified resetDevice failure (pin-mismatch / cancelled). Rendered as an
+  // explain-and-retry card on init-progress instead of ejecting to init-choose.
+  const [createError, setCreateError] = useState<{ errorType: 'pin-mismatch' | 'cancelled' | 'unknown'; message: string } | null>(null)
+  // The engine emits 'reset-error' just before the resetDevice RPC rejects, so
+  // by the time the catch runs this ref already holds the classification.
+  const lastResetErrorRef = useRef<{ errorType: 'pin-mismatch' | 'cancelled' | 'unknown'; message: string } | null>(null)
+  useEffect(() => onRpcMessage('reset-error', (e) => { lastResetErrorRef.current = e }), [])
+  // Set when the device-state effect below advances past init-progress. The
+  // resetDevice RPC severed by a replug may settle (or reject) much later —
+  // the catch must not yank the user back after we already moved on.
+  const createAdvancedRef = useRef(false)
+  // Evidence that this create actually lost the device (the only situation the
+  // auto-advance is meant to rescue), and which device it started on.
+  const sawCreateDisconnectRef = useRef(false)
+  const createDeviceIdRef = useRef<string | null>(null)
   const [devSeed, setDevSeed] = useState('')
   const [devAcknowledged, setDevAcknowledged] = useState(false)
 
@@ -285,6 +308,41 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
       setSetupError(null)
     }
   }, [deviceStatus.state])
+
+  // ── Create-flow replug recovery ────────────────────────────────────────
+  // A detach/re-attach during ResetDevice severs the in-flight RPC without
+  // rejecting it (transport calls don't settle on disconnect), stranding the
+  // wizard on the "Creating Wallet..." spinner even though the device
+  // finished and reports ready. The device is the source of truth: a READY
+  // state while we're on the create spinner means the wallet exists — advance.
+  // Emulator excluded: emulatorCreateWallet loads the device (state → ready)
+  // and then BLOCKS until the words are acknowledged in the emulator window —
+  // advancing on ready there would skip past the seed display.
+  // Only a create that actually LOST the device may auto-advance. Without this
+  // evidence gate, plugging in a second, already-initialized KeepKey mid-create
+  // reads as 'ready' and the wizard would declare success for a wallet that was
+  // never created — skipping the seed-backup screen entirely.
+  useEffect(() => {
+    if (step !== 'init-progress' || setupType !== 'create') return
+    if (deviceStatus.state === 'disconnected' || deviceStatus.state === 'connected_unpaired') {
+      sawCreateDisconnectRef.current = true
+    }
+  }, [step, setupType, deviceStatus.state])
+
+  useEffect(() => {
+    if (
+      step === 'init-progress' && setupType === 'create' && !isEmulator &&
+      deviceStatus.state === 'ready' && !createError &&
+      sawCreateDisconnectRef.current &&
+      // Same physical device the create started on. A hot-swap to another
+      // initialized device must never be mistaken for our wallet.
+      (!createDeviceIdRef.current || !deviceStatus.deviceId || createDeviceIdRef.current === deviceStatus.deviceId)
+    ) {
+      createAdvancedRef.current = true
+      sawCreateDisconnectRef.current = false
+      setStep('init-label')
+    }
+  }, [step, setupType, isEmulator, deviceStatus.state, deviceStatus.deviceId, createError])
 
   // ── Welcome → user clicks to advance ───────────────────────────────────
   // Only enable "Get Started" when real device features are available.
@@ -632,6 +690,11 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
     setSetupType('create')
     setStep('init-progress')
     setSetupError(null)
+    setCreateError(null)
+    lastResetErrorRef.current = null
+    createAdvancedRef.current = false
+    sawCreateDisconnectRef.current = false
+    createDeviceIdRef.current = deviceStatus.deviceId || null
     try {
       if (isEmulator) {
         // Emulator: generate mnemonic on backend, load device, then display
@@ -650,12 +713,31 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
       }, DEVICE_INTERACTION_TIMEOUT)
       setStep('init-label')
     } catch (err) {
+      // The device-state effect already advanced (wallet exists, RPC was a
+      // zombie severed by a replug) — a late rejection must not eject the user.
+      if (createAdvancedRef.current) {
+        console.warn('[wizard] resetDevice RPC settled after device-state advance — ignoring:', err)
+        return
+      }
+      // PIN mismatch and on-device cancel are recoverable: stay in the create
+      // flow and explain, instead of ejecting to init-choose with a raw error.
+      // Cast: TS keeps the `= null` narrowing on ref.current across the await,
+      // but the rpc handler has repopulated it by the time the RPC rejects.
+      const classified = lastResetErrorRef.current as { errorType: 'pin-mismatch' | 'cancelled' | 'unknown'; message: string } | null
+      if (classified && (classified.errorType === 'pin-mismatch' || classified.errorType === 'cancelled')) {
+        setCreateError(classified)
+        return
+      }
       setSetupError(err instanceof Error ? err.message : t('initProgress.failedToCreate'))
       setStep('init-choose')
     }
   }
 
   const handleDevLoadDevice = async () => {
+    // Shares init-progress + setupType 'create' with the real flow, so it must
+    // reset the same guards or a stale ref decides its error handling.
+    createAdvancedRef.current = false
+    sawCreateDisconnectRef.current = false
     const words = devSeed.trim()
     if (!words || words.split(/\s+/).length < 12) return
     setDevLoadOpen(false)
@@ -738,6 +820,16 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
     return () => clearTimeout(timer)
   }, [step, onComplete])
 
+  // Docs article for the current step. Screens without a dedicated page fall
+  // back to nothing rather than dumping the user on a generic hub.
+  const stepDocsUrl: Partial<Record<WizardStep, string>> = {
+    'init-choose': DOCS_LINKS.createOrRecover,
+    'create-briefing': DOCS_LINKS.createOrRecover,
+    'init-progress': DOCS_LINKS.creatingWallet,
+    'init-label': DOCS_LINKS.deviceName,
+    'verify-seed': DOCS_LINKS.verifyBackup,
+  }
+
   // ── Navigation ─────────────────────────────────────────────────────────
 
   const handlePrevious = useCallback(() => {
@@ -755,7 +847,9 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
   }, [step, onComplete])
 
   // L7 fix: prevent navigating back to already-completed steps
-  const showPrevious = !['intro', 'welcome', 'complete', 'init-progress', 'verify-seed', 'security-tips'].includes(step)
+  // init-label excluded: its Previous target is init-progress, which the
+  // create-recovery effect immediately pushes forward again — a no-op bounce.
+  const showPrevious = !['intro', 'welcome', 'complete', 'init-progress', 'init-label', 'verify-seed', 'security-tips'].includes(step)
   // L4 fix: hide Next on firmware step for OOB devices (firmware is required)
   const showNext =
     !['intro', 'bootloader', 'init-choose', 'init-progress', 'init-label', 'verify-seed', 'security-tips', 'complete'].includes(step) &&
@@ -1369,7 +1463,69 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
                       <FirmwareUpgradePreview
                         currentVersion={deviceStatus.resolvedFwVersion?.replace(/^v/, '') || deviceStatus.firmwareVersion || null}
                         targetVersion={deviceStatus.latestFirmware}
+                        isBitcoinOnly={coinMode === 'bitcoin-only'}
                       />
+                    )}
+
+                    {/* Reproducible-build claim + pinned hash the download is verified
+                        against. Only shown when a pinned hash exists (the manifest-less
+                        fallback path installs without a hash check) and for the 'latest'
+                        channel — beta/alpha builds have no tagged release to verify against. */}
+                    {(() => {
+                      // Verify against the binary actually being installed: the
+                      // Bitcoin-only choice flashes a different file with its own hash.
+                      const pinnedHash = coinMode === 'bitcoin-only'
+                        ? deviceStatus.latestFirmwareBitcoinOnlyHash
+                        : deviceStatus.latestFirmwareHash
+                      return deviceStatus.latestFirmware && pinnedHash && deviceStatus.firmwareChannel !== 'beta' && (
+                        <ReproducibleBuildNotice
+                          version={deviceStatus.latestFirmware}
+                          payloadHash={pinnedHash}
+                        />
+                      )
+                    })()}
+
+                    {/* Bitcoin-only vs Multi-coin — OOB (fresh device) only, gated by flag.
+                        Once full firmware is installed, switching to btc-only is a separate
+                        firmware flow (future Settings action) — out of scope here. The
+                        seed-lock (band 10017) makes this one-way; the warning below spells
+                        that out. */}
+                    {BITCOIN_ONLY_ONBOARDING && isOobDevice && (
+                      <VStack w="100%" gap={2}>
+                        {([
+                          { id: 'multi', icon: FaWallet, title: t('coinMode.multiTitle', { defaultValue: 'Multi-coin' }), desc: t('coinMode.multiDesc', { defaultValue: 'Bitcoin, Ethereum, and all supported assets.' }) },
+                          { id: 'bitcoin-only', icon: FaBitcoin, title: t('coinMode.btcTitle', { defaultValue: 'Bitcoin-only' }), desc: t('coinMode.btcDesc', { defaultValue: 'Bitcoin only. Smaller attack surface.' }) },
+                        ] as const).map((opt) => {
+                          const selected = coinMode === opt.id
+                          const Icon = opt.icon
+                          return (
+                            <Box
+                              key={opt.id}
+                              w="100%" p={3} borderRadius="lg" cursor="pointer"
+                              borderWidth="2px"
+                              borderColor={selected ? 'var(--teal)' : 'kk.border'}
+                              bg={selected ? 'rgba(72,187,120,0.08)' : 'kk.cardBg'}
+                              onClick={() => setCoinMode(opt.id)}
+                            >
+                              <HStack gap={3}>
+                                <Icon color={selected ? 'var(--teal)' : 'var(--chakra-colors-kk-textSecondary)'} size={20} />
+                                <VStack gap={0.5} align="start">
+                                  <Text fontSize="sm" fontWeight="700" color="white">{opt.title}</Text>
+                                  <Text fontSize="xs" color="kk.textSecondary">{opt.desc}</Text>
+                                </VStack>
+                              </HStack>
+                            </Box>
+                          )
+                        })}
+                        {coinMode === 'bitcoin-only' && (
+                          <HStack w="100%" p={2} gap={2} borderRadius="md" bg="rgba(237,137,54,0.12)" align="start">
+                            <FaExclamationTriangle color="var(--chakra-colors-yellow-400)" size={14} style={{ flexShrink: 0, marginTop: 2 }} />
+                            <Text fontSize="xs" color="yellow.300">
+                              {t('coinMode.warning', { defaultValue: 'This is one-way. A Bitcoin-only wallet cannot later hold ETH or other assets without wiping the device and reinstalling multi-coin firmware.' })}
+                            </Text>
+                          </HStack>
+                        )}
+                      </VStack>
                     )}
 
                     <Button
@@ -1381,7 +1537,7 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
                       _hover={{ bg: '#D4BC6A', transform: 'translateY(-1px)', boxShadow: '0 4px 12px rgba(233,196,106, 0.3)' }}
                       _active={{ transform: 'scale(0.98)' }}
                       transition="all 0.15s ease"
-                      onClick={() => startFirmwareUpdate(deviceStatus.latestFirmware || undefined)}
+                      onClick={() => startFirmwareUpdate(coinMode === 'bitcoin-only')}
                     >
                       {t('firmware.installLatestFirmware', { version: deviceStatus.latestFirmware || '?' })}
                     </Button>
@@ -1945,7 +2101,7 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
                               {t('initChoose.entropyNote', { defaultValue: 'Added seed length does not improve overall wallet entropy.' })}{' '}
                               <Text
                                 as="a"
-                                href="https://keepkey.com/blog/why_does_keepkey_only_generate_12_words_"
+                                href={DOCS_LINKS.seedLengthEntropy}
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 color={HIGHLIGHT}
@@ -2075,7 +2231,65 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
             {/* ═══════════════ INIT: IN PROGRESS ═══════════════════ */}
             {step === 'init-progress' && (
               <VStack gap={4} textAlign="center" w="100%" maxW="480px" mx="auto">
+                {/* ── Recoverable failure: explain and retry, don't eject ── */}
+                {createError && (
+                  <VStack gap={4} w="100%" maxW="400px" mx="auto">
+                    <Box
+                      w="100%"
+                      bg="rgba(255,255,255,0.03)"
+                      border="1px solid"
+                      borderColor="rgba(233,196,106,0.33)"
+                      borderRadius="2xl"
+                      p={6}
+                    >
+                      <VStack gap={3}>
+                        <FaExclamationTriangle color="var(--gold)" size={26} />
+                        <Text fontSize="xl" fontWeight="800" color="white" textAlign="center" letterSpacing="-0.02em">
+                          {createError.errorType === 'pin-mismatch'
+                            ? t('initProgress.pinMismatchTitle', { defaultValue: "The two PINs didn't match" })
+                            : t('initProgress.createCancelledTitle', { defaultValue: 'Setup stopped on the device' })}
+                        </Text>
+                        <Text fontSize="sm" color="gray.400" textAlign="center" lineHeight="1.6">
+                          {createError.errorType === 'pin-mismatch'
+                            ? t('initProgress.pinMismatchDetail', {
+                                defaultValue:
+                                  'You enter your new PIN twice on the scrambled keypad. The second entry is deliberate: it proves you read the cipher correctly, so you cannot lock yourself in with a PIN you never intended. The two entries came out different, so nothing was saved — no PIN, no wallet.',
+                              })
+                            : t('initProgress.createCancelledDetail', {
+                                defaultValue:
+                                  'The device reported the action was cancelled before setup finished. Nothing was saved — no PIN, no wallet.',
+                              })}
+                        </Text>
+                      </VStack>
+                    </Box>
+                    <VStack gap={2} w="100%">
+                      <Button
+                        w="100%"
+                        size="md"
+                        bg="var(--gold)"
+                        color="black"
+                        fontWeight="700"
+                        _hover={{ opacity: 0.9 }}
+                        onClick={() => void handleCreateWallet()}
+                      >
+                        {t('initProgress.tryPinAgain', { defaultValue: 'Try again' })}
+                      </Button>
+                      <Button
+                        w="100%"
+                        size="sm"
+                        variant="ghost"
+                        color="gray.500"
+                        fontWeight="500"
+                        onClick={() => { setCreateError(null); setStep('init-choose') }}
+                      >
+                        {t('initProgress.backToChoose', { defaultValue: 'Back' })}
+                      </Button>
+                    </VStack>
+                  </VStack>
+                )}
+
                 {/* ── Spinner + "look at device" (or emulator window) ─────── */}
+                {!createError && (
                 <>
                   <Spinner size="lg" color={HIGHLIGHT} borderWidth="3px" />
                     <VStack gap={1}>
@@ -2131,6 +2345,7 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
                       </Box>
                     )}
                 </>
+                )}
 
                 {setupError && (
                   <Box w="100%" p={3} bg="rgba(224,140,123,0.10)" borderRadius="lg" borderWidth="1px" borderColor="red.500">
@@ -2170,6 +2385,20 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
                     {t('initLabel.giveAName')}
                   </Text>
                 </VStack>
+
+                {/* The write-down warning lives on init-progress, which we may
+                    have left automatically after a replug. Repeat it here so no
+                    path through creation ends without this having been said. */}
+                {setupType === 'create' && (
+                  <Box w="100%" p={3} bg="rgba(224,140,123,0.10)" borderRadius="lg" borderWidth="1px" borderColor="var(--rose)">
+                    <HStack gap={2} justify="center">
+                      <FaExclamationTriangle color="var(--rose)" size={14} />
+                      <Text fontSize="xs" color="var(--rose)" fontWeight="600" textAlign="center">
+                        {t('initLabel.writeDownReminder', { defaultValue: 'Make sure your recovery phrase is written on paper before you continue — you will not be shown those words again.' })}
+                      </Text>
+                    </HStack>
+                  </Box>
+                )}
 
                 <Input
                   placeholder={t('initLabel.placeholder')}
@@ -2547,6 +2776,9 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
                     : t('footer.settingUpWallet')}
             </Text>
             <HStack gap={3}>
+              {/* Docs article for this screen — the page quotes this screen's
+                  copy verbatim so it is recognisable on arrival. */}
+              {stepDocsUrl[step] && <DocsLink href={stepDocsUrl[step]!} color="kk.textMuted" />}
               {showPrevious && (
                 <Button
                   size="sm"

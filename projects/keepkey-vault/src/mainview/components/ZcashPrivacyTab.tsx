@@ -144,13 +144,13 @@ function ensureStylesInjected() {
 	document.head.appendChild(style)
 }
 
-export function ZcashPrivacyTab() {
+export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 	const { t } = useTranslation(["asset", "addressbook", "common"])
 	const { locale: fiatLocale } = useFiat()
 
 	useEffect(() => { ensureStylesInjected() }, [])
 
-	const [page, setPage] = useState<Page>("send")
+	const [page, setPage] = useState<Page>(initialPage ?? "send")
 
 	const [status, setStatus] = useState<SidecarStatus>("checking")
 	const [starting, setStarting] = useState(false)
@@ -620,6 +620,18 @@ export function ZcashPrivacyTab() {
 		return Math.max(0, spendable - fee)
 	}, [balance])
 
+	// Deshield max — mirrors zip317_deshield_fee in pczt_builder.rs: the
+	// transparent output adds one logical action on top of the (≥2 padded)
+	// Orchard actions, so fee = 5000 * (max(2, n_spends) + 1).
+	const deshieldMaxZatoshis = useMemo(() => {
+		if (!balance) return 0
+		const spendable = balance.spendable_confirmed ?? 0
+		if (spendable <= 0) return 0
+		const nSpends = Math.max(1, balance.spendable_notes_count ?? 1)
+		const fee = 5000 * (Math.max(2, nSpends) + 1)
+		return Math.max(0, spendable - fee)
+	}, [balance])
+
 	// Shield max — transparent balance minus the ZIP-317 fee for shielding.
 	// Shield is one transparent input → 2 padded Orchard outputs (logical
 	// actions = 2 transparent + 2 orchard = 4); fee = 5000 * max(2, 4) = 20000.
@@ -753,10 +765,13 @@ export function ZcashPrivacyTab() {
 				<div className="main">
 					<div className="lbl">Shielded balance</div>
 					<div className="amount">
-						{balance ? formatZec(balance.confirmed) : "—"}
+						{/* confirmed = total across all unspent notes; pending = immature
+						  slice (<10 confs, e.g. change from a fresh unshield). Show the
+						  mature number big so it matches what's actually spendable. */}
+						{balance ? formatZec(Math.max(0, balance.confirmed - balance.pending)) : "—"}
 						<span className="ticker">ZEC</span>
 						{balance && balance.pending > 0 && (
-							<span className="pending">+ {formatZec(balance.pending)} pending</span>
+							<span className="pending">+ {formatZec(balance.pending)} maturing</span>
 						)}
 					</div>
 					{scanInFlight && scanProgress ? (
@@ -1055,11 +1070,16 @@ export function ZcashPrivacyTab() {
 								<div className="balance-row">
 									<span>Available shielded</span>
 									<strong>
-										{balance ? `${formatZec(spendableMaxZatoshis)} ZEC` : "—"}
+										{balance ? `${formatZec(deshieldMaxZatoshis)} ZEC` : "—"}
 									</strong>
 									{balance && (
 										<span className="balance-hint">
 											after fee · {balance.spendable_notes_count ?? 0} spendable notes
+										</span>
+									)}
+									{balance && balance.pending > 0 && (
+										<span className="balance-hint">
+											{formatZec(balance.pending)} ZEC maturing — spendable after {balance.min_confirmations ?? 10} confirmations
 										</span>
 									)}
 								</div>
@@ -1102,8 +1122,8 @@ export function ZcashPrivacyTab() {
 										<span className="suffix">ZEC</span>
 										<button
 											className="max"
-											onClick={() => setDeshieldAmount(formatZec(spendableMaxZatoshis))}
-											disabled={spendableMaxZatoshis === 0}
+											onClick={() => setDeshieldAmount(formatZec(deshieldMaxZatoshis))}
+											disabled={deshieldMaxZatoshis === 0}
 										>Max</button>
 									</div>
 								</div>
@@ -1134,7 +1154,7 @@ export function ZcashPrivacyTab() {
 				<section>
 					<div className="page-head">
 						<h2>Receive ZEC</h2>
-						<p>Share this address. Senders pay into your Orchard pool automatically.</p>
+						<p>Share this unified address. New shielded funds enter the Ironwood pool.</p>
 					</div>
 
 					<div className="card">

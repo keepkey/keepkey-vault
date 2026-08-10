@@ -9,8 +9,9 @@ import { versionCompare } from "../../../shared/firmware-versions"
 interface SigningApprovalProps {
 	request: SigningRequestInfo
 	phase: 'approve' | 'sending-payload' | 'device-confirm'
-	onApprove: () => void
+	onApprove: (approval?: { allowBlindSigning?: boolean }) => void
 	onReject: () => void
+	onCancel: () => void
 }
 
 const METHOD_LABEL_KEYS: Record<string, string> = {
@@ -40,9 +41,13 @@ const METHOD_LABEL_KEYS: Record<string, string> = {
 }
 
 const SIGNING_ANIMATIONS = `
+	/* Deliberately restrained: a signing prompt should read as serious, not
+	   alarming. The old 24px/48px throb washed the card edge out and made the
+	   hex payload hard to scan. This keeps a faint gold presence that breathes
+	   instead of pulsing. */
 	@keyframes signingPulseGlow {
-		0%, 100% { box-shadow: 0 0 8px 2px rgba(233,196,106,0.4); }
-		50% { box-shadow: 0 0 24px 8px rgba(233,196,106,0.7), 0 0 48px 16px rgba(233,196,106,0.15); }
+		0%, 100% { box-shadow: 0 0 0 1px rgba(233,196,106,0.10), 0 16px 44px -12px rgba(0,0,0,0.75); }
+		50% { box-shadow: 0 0 10px 1px rgba(233,196,106,0.18), 0 16px 44px -12px rgba(0,0,0,0.75); }
 	}
 	@keyframes signingFlashBorder {
 		0%, 100% { border-color: rgba(233,196,106,0.5); }
@@ -232,6 +237,60 @@ function SolanaBlindSignBanner({ t }: { t: (k: string, f?: string) => string }) 
 	)
 }
 
+function SolanaBlindSigningConsent({
+	granted,
+	onGrant,
+	t,
+}: {
+	granted: boolean
+	onGrant: () => void
+	t: (k: string, f?: string) => string
+}) {
+	return (
+		<Flex
+			direction="column" gap="2" w="100%"
+			bg={granted ? "rgba(34,197,94,0.1)" : "rgba(239,68,68,0.15)"}
+			border="1px solid"
+			borderColor={granted ? "rgba(34,197,94,0.4)" : "rgba(239,68,68,0.6)"}
+			borderRadius="lg" px="3" py="2"
+		>
+			<Flex align="center" gap="2">
+				<Box flex="1">
+					<Text fontSize="2xs" fontWeight="700" color={granted ? "var(--teal)" : "var(--rose)"}>
+						{granted
+							? t("signing.solanaBlindSignAllowedOnce", "Blind signing allowed for this request")
+							: t("signing.solanaBlindSignConsentTitle", "Opaque Solana transaction")}
+					</Text>
+					<Text fontSize="2xs" color="kk.textSecondary">
+						{t(
+							"signing.solanaBlindSignConsentDescription",
+							"The Vault and device cannot fully verify this transaction. Only continue if you trust the requesting app and independently verified the payload. This permission applies once.",
+						)}
+					</Text>
+				</Box>
+				{!granted && (
+					<Box
+						as="button"
+						px="3"
+						py="1"
+						borderRadius="full"
+						bg="rgba(229,62,62,0.3)"
+						color="#F56565"
+						fontSize="2xs"
+						fontWeight="700"
+						cursor="pointer"
+						_hover={{ bg: "rgba(229,62,62,0.5)" }}
+						flexShrink={0}
+						onClick={onGrant}
+					>
+						{t("signing.allowBlindSigningOnce", "Allow once")}
+					</Box>
+				)}
+			</Flex>
+		</Flex>
+	)
+}
+
 function SolanaUnsafeMessageBanner({ classification, t }: {
 	classification?: SolanaMessageDecodedInfo['classification']; t: (k: string, f?: string) => string
 }) {
@@ -313,6 +372,127 @@ function CalldataSection({ decoded, t }: { decoded: CalldataDecodedInfo; t: (k: 
 					{t("signing.functionType", "Type")}: {decoded.functionType}
 				</Text>
 			)}
+		</VStack>
+	)
+}
+
+// ── Raw calldata inspector (Etherscan-style hex / decoded toggle) ─────
+
+type CalldataWord = { index: number; hex: string; asAddress?: string; asUint?: string }
+
+/**
+ * ABI-less calldata split, mirroring Etherscan's "Decode Input Data" default
+ * view. Without an ABI we cannot name parameters, but the 4-byte selector plus
+ * indexed 32-byte words is exactly what makes a blind-signing payload auditable:
+ * a reviewer can spot recipient addresses and amounts in the argument slots.
+ *
+ * Heuristics per word (both may be shown; neither is authoritative):
+ *   - 12 leading zero bytes + 20 non-zero bytes  -> likely an address
+ *   - fits in a JS-safe integer                  -> show the decimal value
+ *
+ * Dynamic types (offsets, arrays, bytes) still appear as words, matching how
+ * Etherscan renders them when no ABI is available.
+ */
+function decodeRawCalldata(data: string): { selector: string; words: CalldataWord[]; trailing?: string } | null {
+	const hex = data.startsWith("0x") || data.startsWith("0X") ? data.slice(2) : data
+	if (!/^[0-9a-fA-F]*$/.test(hex) || hex.length < 8) return null
+
+	const selector = "0x" + hex.slice(0, 8)
+	const body = hex.slice(8)
+	const words: CalldataWord[] = []
+	const fullWords = Math.floor(body.length / 64)
+
+	for (let i = 0; i < fullWords; i++) {
+		const word = body.slice(i * 64, i * 64 + 64)
+		const w: CalldataWord = { index: i, hex: "0x" + word }
+		if (/^0{24}/.test(word) && !/^0{64}$/.test(word)) {
+			w.asAddress = "0x" + word.slice(24)
+		}
+		// Only surface a decimal when it round-trips exactly — a truncated
+		// big number is worse than no number at all.
+		const asBig = BigInt("0x" + word)
+		if (asBig <= BigInt(Number.MAX_SAFE_INTEGER)) w.asUint = asBig.toString()
+		words.push(w)
+	}
+
+	const rest = body.slice(fullWords * 64)
+	return { selector, words, trailing: rest.length ? "0x" + rest : undefined }
+}
+
+function CalldataInspector({ data, t }: { data: string; t: (k: string, f?: string) => string }) {
+	const [view, setView] = useState<"hex" | "decoded">("hex")
+	const parsed = view === "decoded" ? decodeRawCalldata(data) : null
+
+	return (
+		<VStack gap="1.5" w="100%" align="stretch">
+			<Flex gap="3" w="100%" align="center">
+				<Text fontSize="2xs" color="kk.textMuted" flexShrink={0} minW="60px">
+					{t("signing.data", "Data")}
+				</Text>
+				<Flex gap="1" ml="auto">
+					{(["hex", "decoded"] as const).map(mode => (
+						<Button
+							key={mode} size="2xs" h="5" px="2" minW="0" variant="ghost"
+							fontSize="2xs" fontWeight={view === mode ? "600" : "400"}
+							color={view === mode ? "kk.gold" : "kk.textMuted"}
+							bg={view === mode ? "rgba(233,196,106,0.12)" : "transparent"}
+							_hover={{ color: "kk.gold" }}
+							onClick={() => setView(mode)}
+						>
+							{mode === "hex" ? t("signing.dataHex", "Hex") : t("signing.dataDecoded", "Decoded")}
+						</Button>
+					))}
+				</Flex>
+			</Flex>
+
+			<Box bg="rgba(0,0,0,0.35)" borderRadius="lg" p="2" maxH="220px" overflowY="auto" w="100%">
+				{view === "hex" || !parsed ? (
+					<Text fontSize="2xs" fontFamily="mono" color="kk.textPrimary" wordBreak="break-all">
+						{view === "decoded" && !parsed
+							? t("signing.dataNotDecodable", "Payload is not valid hex calldata — showing raw value.") + " " + data
+							: data}
+					</Text>
+				) : (
+					<VStack gap="1" align="stretch">
+						<Flex gap="2" align="baseline">
+							<Text fontSize="2xs" color="kk.textMuted" minW="52px">
+								{t("signing.selector", "Selector")}
+							</Text>
+							<Text fontSize="2xs" fontFamily="mono" color="kk.gold" fontWeight="600">{parsed.selector}</Text>
+						</Flex>
+						{parsed.words.map(w => (
+							<Flex key={w.index} gap="2" align="baseline" borderTop="1px solid" borderColor="rgba(255,255,255,0.06)" pt="1">
+								<Text fontSize="2xs" color="kk.textMuted" minW="52px" flexShrink={0}>[{w.index}]</Text>
+								<VStack gap="0" align="stretch" flex="1" minW="0">
+									<Text fontSize="2xs" fontFamily="mono" color="kk.textSecondary" wordBreak="break-all">{w.hex}</Text>
+									{(w.asAddress || w.asUint) && (
+										<Flex gap="3" flexWrap="wrap">
+											{w.asAddress && (
+												<Text fontSize="2xs" fontFamily="mono" color="kk.textPrimary">
+													{t("signing.asAddress", "addr")}: {w.asAddress}
+												</Text>
+											)}
+											{w.asUint && (
+												<Text fontSize="2xs" fontFamily="mono" color="kk.textPrimary">
+													{t("signing.asUint", "uint")}: {w.asUint}
+												</Text>
+											)}
+										</Flex>
+									)}
+								</VStack>
+							</Flex>
+						))}
+						{parsed.trailing && (
+							<Flex gap="2" align="baseline" borderTop="1px solid" borderColor="rgba(255,255,255,0.06)" pt="1">
+								<Text fontSize="2xs" color="orange.300" minW="52px" flexShrink={0}>
+									{t("signing.trailing", "extra")}
+								</Text>
+								<Text fontSize="2xs" fontFamily="mono" color="orange.300" wordBreak="break-all">{parsed.trailing}</Text>
+							</Flex>
+						)}
+					</VStack>
+				)}
+			</Box>
 		</VStack>
 	)
 }
@@ -559,12 +739,17 @@ function TypedDataSection({ decoded, t }: { decoded: EIP712DecodedInfo; t: (k: s
 // Main Component
 // ═══════════════════════════════════════════════════════════════════════
 
-export function SigningApproval({ request, phase, onApprove, onReject }: SigningApprovalProps) {
+export function SigningApproval({ request, phase, onApprove, onReject, onCancel }: SigningApprovalProps) {
 	const { t } = useTranslation("device")
 	const [elapsed, setElapsed] = useState(0)
 	const [advancedModeEnabled, setAdvancedModeEnabled] = useState(request.advancedModeEnabled ?? false)
 	const [enablingPolicy, setEnablingPolicy] = useState(false)
 	const [advancedModeError, setAdvancedModeError] = useState<string | null>(null)
+	// Bind consent to the signing id instead of carrying a boolean between
+	// renders. A new request can never inherit the previous request's grant,
+	// even for the render before effects run.
+	const [blindSigningConsentRequestId, setBlindSigningConsentRequestId] = useState<string | null>(null)
+	const blindSigningConsentGranted = blindSigningConsentRequestId === request.id
 
 	// Only show blind-signing warnings on firmware 7.14.0+
 	const fwSupportsBlindSignGate = request.firmwareVersion
@@ -578,10 +763,13 @@ export function SigningApproval({ request, phase, onApprove, onReject }: Signing
 
 	let trustLevel: 'verified' | 'known' | 'unknown' = 'verified'
 	if (hasCalldata) {
+		// needsBlindSigning is authoritative: it mirrors what the FIRMWARE
+		// clear-signs. A contract our decoder recognizes (source 'local') but the
+		// firmware blind-signs (e.g. Uniswap) must still read 'unknown' — the badge
+		// can't claim "known" for a tx the device shows as raw hex.
 		if (hasSignedBlob) trustLevel = 'verified'
-		else if (decoded?.source === 'pioneer') trustLevel = 'known'
-		else if (decoded?.source === 'local') trustLevel = 'known'
 		else if (request.needsBlindSigning) trustLevel = 'unknown'
+		else if (decoded?.source === 'pioneer' || decoded?.source === 'local') trustLevel = 'known'
 	}
 	if (request.typedDataDecoded) {
 		trustLevel = request.typedDataDecoded.isKnownType ? 'verified' : 'known'
@@ -602,9 +790,14 @@ export function SigningApproval({ request, phase, onApprove, onReject }: Signing
 		request.chain === 'solana'
 	const isSimpleTransfer =
 		!hasCalldata && !request.typedDataDecoded && !request.ethMessageDecoded && !request.solanaMessageDecoded && !isSolanaRequest
-	const advancedModeRequired = isSolanaSignMessage || !!request.requiresAdvancedMode || (fwSupportsBlindSignGate && !!request.needsBlindSigning)
+	const blindSigningConsentRequired = !!request.requiresBlindSigningConsent
+	const advancedModeRequired =
+		isSolanaSignMessage
+		|| !!request.requiresAdvancedMode
+		|| (fwSupportsBlindSignGate && !!request.needsBlindSigning && !blindSigningConsentRequired)
 	const advancedModeBlocked = advancedModeRequired && !advancedModeEnabled
-	const approveDisabled = enablingPolicy || advancedModeBlocked
+	const blindSigningConsentBlocked = blindSigningConsentRequired && !blindSigningConsentGranted
+	const approveDisabled = enablingPolicy || advancedModeBlocked || blindSigningConsentBlocked
 
 	const [showAdvancedConfirm, setShowAdvancedConfirm] = useState(false)
 
@@ -626,17 +819,29 @@ export function SigningApproval({ request, phase, onApprove, onReject }: Signing
 		setShowAdvancedConfirm(false)
 	}, [showAdvancedConfirm, t])
 
+	const submitApproval = useCallback(() => {
+		if (approveDisabled) return
+		onApprove({
+			allowBlindSigning: blindSigningConsentRequired && blindSigningConsentGranted,
+		})
+	}, [
+		approveDisabled,
+		blindSigningConsentGranted,
+		blindSigningConsentRequired,
+		onApprove,
+	])
+
 	useEffect(() => {
 		const handler = (e: KeyboardEvent) => {
 			if (e.key === "Enter" && phase === 'approve') {
 				e.preventDefault()
-				if (!approveDisabled) onApprove()
+				submitApproval()
 			}
 			if (e.key === "Escape" && phase === 'approve') { e.preventDefault(); onReject() }
 		}
 		document.addEventListener("keydown", handler)
 		return () => document.removeEventListener("keydown", handler)
-	}, [onApprove, onReject, phase, approveDisabled])
+	}, [onReject, phase, submitApproval])
 
 	useEffect(() => {
 		if (phase !== 'approve') return
@@ -660,9 +865,9 @@ export function SigningApproval({ request, phase, onApprove, onReject }: Signing
 			>
 				<style>{SIGNING_ANIMATIONS}</style>
 				<VStack
-					bg="kk.cardBg" border="2px solid" borderColor="kk.gold" borderRadius="2xl"
+					bg="kk.cardBg" border="1px solid" borderColor="rgba(233,196,106,0.45)" borderRadius="2xl"
 					p="8" gap="5" maxW="400px" w="90vw" textAlign="center"
-					css={{ animation: "signingCardIn 0.3s ease-out, signingPulseGlow 2s ease-in-out infinite 0.3s" }}
+					css={{ animation: "signingCardIn 0.3s ease-out, signingPulseGlow 4s ease-in-out infinite 0.3s" }}
 				>
 					<Flex justify="center">
 						<Box
@@ -696,6 +901,9 @@ export function SigningApproval({ request, phase, onApprove, onReject }: Signing
 							/>
 						))}
 					</Flex>
+					<Button variant="solid" colorScheme="red" size="lg" width="100%" minH="52px" onClick={onCancel}>
+						{t("signing.cancel", "Cancel")}
+					</Button>
 				</VStack>
 			</Box>
 		)
@@ -711,9 +919,9 @@ export function SigningApproval({ request, phase, onApprove, onReject }: Signing
 			>
 				<style>{SIGNING_ANIMATIONS}</style>
 				<VStack
-					bg="kk.cardBg" border="2px solid" borderColor="kk.gold" borderRadius="2xl"
+					bg="kk.cardBg" border="1px solid" borderColor="rgba(233,196,106,0.45)" borderRadius="2xl"
 					p="8" gap="5" maxW="400px" w="90vw" textAlign="center"
-					css={{ animation: "signingCardIn 0.3s ease-out, signingPulseGlow 2s ease-in-out infinite 0.3s" }}
+					css={{ animation: "signingCardIn 0.3s ease-out, signingPulseGlow 4s ease-in-out infinite 0.3s" }}
 				>
 					<Flex justify="center">
 						<Box
@@ -747,6 +955,9 @@ export function SigningApproval({ request, phase, onApprove, onReject }: Signing
 							/>
 						))}
 					</Flex>
+					<Button variant="solid" colorScheme="red" size="lg" width="100%" minH="52px" onClick={onCancel}>
+						{t("signing.cancel", "Cancel")}
+					</Button>
 				</VStack>
 			</Box>
 		)
@@ -762,14 +973,14 @@ export function SigningApproval({ request, phase, onApprove, onReject }: Signing
 		>
 			<style>{SIGNING_ANIMATIONS}</style>
 			<VStack
-				bg="kk.cardBg" border="2px solid"
-				borderColor={advancedModeBlocked ? "rgba(245,163,59,0.6)" : "kk.gold"}
+				bg="kk.cardBg" border="1px solid"
+				borderColor={advancedModeBlocked ? "rgba(245,163,59,0.45)" : "rgba(233,196,106,0.45)"}
 				borderRadius="2xl" p="6" gap="3"
-				maxW="640px" w="95vw" maxH="90vh" overflowY="auto"
-				css={{ animation: "signingCardIn 0.3s ease-out, signingPulseGlow 2s ease-in-out infinite 0.3s" }}
+				maxW="640px" w="95vw" maxH="90vh"
+				css={{ animation: "signingCardIn 0.3s ease-out, signingPulseGlow 4s ease-in-out infinite 0.3s" }}
 			>
 				{/* ── Header row: badge + app + method + timer + trust ── */}
-				<Flex w="100%" justify="space-between" align="center" flexWrap="wrap" gap="2">
+				<Flex w="100%" justify="space-between" align="center" flexWrap="wrap" gap="2" flexShrink="0">
 					<Flex align="center" gap="2">
 						<Text fontSize="xs" fontWeight="700" color="kk.gold" textTransform="uppercase" letterSpacing="wider"
 							css={{ animation: "signingBadgePulse 1.5s ease-in-out infinite" }}
@@ -801,8 +1012,14 @@ export function SigningApproval({ request, phase, onApprove, onReject }: Signing
 					</Flex>
 				</Flex>
 
+				{/* Scroll region. Only the reviewable content scrolls — the header
+				    above and the action buttons below stay pinned, so a large
+				    calldata blob can never push Approve/Reject out of reach.
+				    minH=0 is required for a flex child to shrink below its
+				    content height and actually scroll. */}
+				<VStack flex="1" minH="0" overflowY="auto" w="100%" gap="3">
 				{/* ── Method ── */}
-				<Text fontSize="sm" fontWeight="600" color="white">{methodLabel}</Text>
+				<Text fontSize="sm" fontWeight="600" color="white" alignSelf="flex-start">{methodLabel}</Text>
 
 				{/* ── AdvancedMode gate ── */}
 				{advancedModeRequired && (
@@ -830,6 +1047,14 @@ export function SigningApproval({ request, phase, onApprove, onReject }: Signing
 					(request.method === '/solana/sign-transaction-blind' || request.method === '/solana/sign-and-send-blind')
 						? <SolanaBlindSignBanner t={t} />
 						: <SolanaDecodeFailureBanner error={request.solanaDecodeError} t={t} />
+				)}
+
+				{blindSigningConsentRequired && (
+					<SolanaBlindSigningConsent
+						granted={blindSigningConsentGranted}
+						onGrant={() => setBlindSigningConsentRequestId(request.id)}
+						t={t}
+					/>
 				)}
 
 				{/* ── Two-column: decoded info (left) + tx details (right) ── */}
@@ -863,7 +1088,7 @@ export function SigningApproval({ request, phase, onApprove, onReject }: Signing
 								<Row label="Value" value={request.value} />
 								{request.chainId !== undefined && <Row label="ChainID" value={String(request.chainId)} />}
 								{request.data && (!decoded || decoded.source === 'none') && (
-									<Row label="Data" value={request.data} />
+									<CalldataInspector data={request.data} t={t} />
 								)}
 							</VStack>
 						</Box>
@@ -872,17 +1097,22 @@ export function SigningApproval({ request, phase, onApprove, onReject }: Signing
 
 				{/* ── Full raw payload (collapsible) ── */}
 				<RawPayload data={request.rawRequestBody} label="Full Request Payload" />
+				</VStack>
 
-				{/* ── Action buttons ── */}
-				<Flex gap="3" w="100%">
+				{/* ── Action buttons (pinned below the scroll region) ── */}
+				<Flex gap="3" w="100%" flexShrink="0">
 					<Button
 						flex="1" bg="kk.gold"
 						color="black" fontWeight="600" size="md"
 						_hover={{ bg: "kk.goldHover" }}
-						onClick={onApprove} disabled={approveDisabled}
+						onClick={submitApproval} disabled={approveDisabled}
 						cursor={approveDisabled ? "not-allowed" : "pointer"}
 					>
-						{advancedModeBlocked ? t("signing.enableAdvancedModeFirst", "Enable Advanced Mode to approve") : t("signing.approve")}
+						{advancedModeBlocked
+							? t("signing.enableAdvancedModeFirst", "Enable Advanced Mode to approve")
+							: blindSigningConsentBlocked
+								? t("signing.allowBlindSigningOnceFirst", "Choose Allow once to approve")
+								: t("signing.approve")}
 					</Button>
 					<Button
 						flex="1" variant="ghost" color="kk.textSecondary"

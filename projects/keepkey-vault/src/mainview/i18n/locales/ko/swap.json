@@ -104,7 +104,7 @@
 	"approvingToken": "토큰 승인 중...",
 	"approvalRequired": "KeepKey에서 토큰 승인을 기다리는 중...",
 	"enterAmount": "견적을 받으려면 수량을 입력하세요",
-	"notSupported": "{{coin}} 스왑은 아직 THORChain을 통해 지원되지 않습니다.",
+	"notSupported": "현재 {{coin}}에 사용할 수 있는 스왑 경로가 없습니다.",
 	"copied": "복사됨",
 	"copy": "복사",
 	"youSend": "보내는 금액",

@@ -26,8 +26,20 @@ import { ProviderBadge, ProverChip, resolveProvider } from "./ProviderBadge"
 import { getSwapperAnimation } from "../lib/swapper-animations"
 import { computeDustWarning, shouldWarnHighSlippage, computeEffectiveSlippageBps } from "../../shared/swap-warnings"
 import { useEvmAddresses } from "../hooks/useEvmAddresses"
+import { useDeviceState } from "../hooks/useDeviceState"
+import { versionCompare } from "../../shared/firmware-versions"
 import { AssetPickerDialog } from "./AssetPickerDialog"
 import { networkDisplayName, ellipsizeCaip, parseCaip } from "../../shared/swap-discovery"
+import { isSymbolSquatter } from "../../shared/symbolSquatter"
+import { shouldRetryCompletedSwapMetadata } from "../../shared/swap-tracker-guards"
+import {
+  DEFAULT_SLIPPAGE_BPS,
+  MAX_SLIPPAGE_BPS,
+  MIN_SLIPPAGE_BPS,
+  SLIPPAGE_PRESETS_BPS,
+  normalizeSlippageBps,
+  parseCustomSlippagePercent,
+} from "../../shared/slippage"
 import { KeepKeyDevice, RouteMap, SpinningDevice } from "./v3"
 import calculatingGif from "../assets/swap/calculating.gif"
 import shiftingGif from "../assets/swap/shifting.gif"
@@ -70,6 +82,11 @@ const NATIVE_EVM_GAS_RESERVE: Record<string, number> = {
   'eip155:43114': 0.005,    // Avalanche C-Chain
 }
 const NATIVE_EVM_GAS_RESERVE_DEFAULT = 0.001
+
+/** THORChain/Midgard reports an all-zero hash for an outbound leg that hasn't
+ *  been scheduled/observed yet. It's a "no tx" sentinel, not a real txid —
+ *  reject it so the UI never renders a bogus OUTPUT TX / explorer link. */
+const isRealHash = (h?: string | null): h is string => !!h && !/^(0x)?0+$/i.test(h)
 type NativeMaxReserveMode = 'safe' | 'closer'
 const NATIVE_EVM_CLOSER_RESERVE_FACTOR = 0.35
 const NATIVE_EVM_CLOSER_RESERVE_FLOOR: Record<string, number> = {
@@ -132,6 +149,15 @@ function nativePriceUsd(balance: ChainBalance): number {
   if (!Number.isFinite(bal) || bal <= 0) return 0
   const nativeUsd = nativeUsdValue(balance)
   return nativeUsd > 0 ? nativeUsd / bal : 0
+}
+
+// nativePriceUsd(cb) is the chain GAS asset's price (nativeBalanceUsd / balance).
+// It's only a valid price for `asset` when `asset` IS that native asset. THORChain
+// / Cosmos sub-denoms (TCY, RUJI, xRUJI, secured assets) share the chain's single
+// ChainBalance but trade at their own price — pricing them as native values them at
+// the gas asset (e.g. 102 TCY @ RUNE's $0.42 = $43 instead of the real ~$12).
+function balanceIsForAsset(cb: ChainBalance, asset: SwapAsset): boolean {
+  return !!cb.symbol && !!asset.symbol && cb.symbol.toUpperCase() === asset.symbol.toUpperCase()
 }
 
 // Extended-pubkey prefix regex. Used in two places: (1) the UTXO destination
@@ -497,9 +523,11 @@ function GreenCountUp({ value, prefix = '', suffix = '', color = 'var(--teal)', 
   return (
     <Text as="span" color={color} fontSize={fontSize} display="inline-flex" alignItems="center"
       style={{ animation: 'kkBounceUp 0.5s ease-out' }}>
-      {prefix}
+      {/* whiteSpace:pre — inline-flex collapses the leading space in prefix/suffix
+          (e.g. " SOLANA"), which glued the amount to the symbol: "…291.85SOLANA" */}
+      {prefix && <Text as="span" whiteSpace="pre">{prefix}</Text>}
       <CountUp key={num} start={0} end={num} decimals={decimals} duration={duration} separator="," preserveValue={false} />
-      {suffix}
+      {suffix && <Text as="span" whiteSpace="pre">{suffix}</Text>}
     </Text>
   )
 }
@@ -585,6 +613,10 @@ function AssetSelector({ label, selected, onOpenPicker, disabled }: AssetSelecto
 
   /* ── Selected asset → big prominent display ── */
   if (selected) {
+    // Symbol squatter: an unverified token wearing a major chain's ticker/name
+    // (e.g. an ERC-20 that calls itself "SOLANA"). Strip its server icon so it
+    // can't wear the native logo, and warn — see shared/symbolSquatter.
+    const squatter = isSymbolSquatter(selected.caip, selected.symbol)
     return (
       <Box>
         <Flex justify="space-between" align="center" mb="3">
@@ -611,11 +643,11 @@ function AssetSelector({ label, selected, onOpenPicker, disabled }: AssetSelecto
             style={{ animation: 'kkLogoFloat 3s ease-in-out infinite, kkLogoGlow 3s ease-in-out infinite' }}>
             <AssetIcon
               caip={selected.caip}
-              iconUrl={selected.icon}
+              iconUrl={squatter ? undefined : selected.icon}
               chainCaip={chainBadgeCaip(selected)}
               size={80}
               alt={selected.symbol}
-              ring="rgba(139,227,196,0.28)"
+              ring={squatter ? "rgba(255,107,107,0.5)" : "rgba(139,227,196,0.28)"}
             />
           </Box>
           {(() => {
@@ -645,6 +677,15 @@ function AssetSelector({ label, selected, onOpenPicker, disabled }: AssetSelecto
                 {selected.caip && (
                   <Text fontSize="9px" fontFamily="mono" color="kk.textMuted" opacity={0.6} whiteSpace="nowrap" textAlign="center">
                     {ellipsizeCaip(selected.caip)}
+                  </Text>
+                )}
+                {/* Symbol-squatter warning — a token impersonating a native coin's name */}
+                {squatter && (
+                  <Text fontSize="10px" fontWeight="700" color="#ff6b6b" textAlign="center" maxW="220px" lineHeight="1.3" mt="0.5">
+                    {t("symbolSquatterWarning", {
+                      defaultValue: "⚠ Unverified token using the “{{symbol}}” name — this is NOT the native coin. Verify the contract above.",
+                      symbol: selected.symbol,
+                    })}
                   </Text>
                 )}
               </VStack>
@@ -706,6 +747,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   const { t } = useTranslation("swap")
   const { fmtCompact, symbol: fiatSymbol } = useFiat()
   const { evmAddresses } = useEvmAddresses()
+  const { firmwareVersion } = useDeviceState()
   // Local EVM address selection — scoped to this dialog so switching here doesn't
   // mutate the global selected index in AssetPage. null = use global selectedIndex.
   const [evmAddressIndexOverride, setEvmAddressIndexOverride] = useState<number | null>(null)
@@ -750,11 +792,27 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   // only then do we offer Retry. Deterministic errors (pool unavailable, amount
   // below minimum) are not retryable: retrying just repeats the same failure.
   const [quoteRetryable, setQuoteRetryable] = useState(false)
-  // Solana blind-signing gate: when a Solana swap is blocked by the device's
-  // disabled AdvancedMode policy, phase flips to 'blind-signing-required' and
-  // this drives the enable page.
+  // Solana opaque-signing gate: a Relay route without signed ClearSign metadata
+  // flips to a route-specific, one-request consent page.
   const [enablingBlindSign, setEnablingBlindSign] = useState(false)
   const [blindSignError, setBlindSignError] = useState<string | null>(null)
+  // 'host'   — our own pre-flight consent gate (relay tx we can't verify here)
+  // 'device' — the DEVICE refused: its AdvancedMode policy is off. One-shot
+  //            consent does not help there (older firmware ignores the
+  //            per-request flag), so the only remedy is enabling the policy.
+  const [blindSignCause, setBlindSignCause] = useState<'host' | 'device'>('host')
+  const [outflowCheck, setOutflowCheck] = useState<
+    {
+      solAfter: string
+      tokensAfter: { mint: string; amount: string; decimals?: number; symbol?: string }[]
+      spending?: string
+      spendingSymbol?: string
+      unavailable?: string
+      reason?: string
+      decoded?: string[]
+    } | null
+  >(null)
+  const [allowSolanaBlindSigning, setAllowSolanaBlindSigning] = useState(false)
   const [txid, setTxid] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   // Bump to force the quote useEffect to re-run with the same inputs (used by
@@ -768,15 +826,36 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     try {
       const raw = localStorage.getItem('swap.slippageBps')
       const n = raw ? parseInt(raw, 10) : NaN
-      if (Number.isFinite(n) && n >= 10 && n <= 5000) return n
+      if (Number.isFinite(n) && n >= MIN_SLIPPAGE_BPS && n <= MAX_SLIPPAGE_BPS) return n
     } catch { /* localStorage unavailable */ }
-    return 100 // 1% default
+    return DEFAULT_SLIPPAGE_BPS
   })
   const setSlippageBps = useCallback((bps: number) => {
-    const clamped = Math.max(10, Math.min(5000, Math.round(bps)))
+    const clamped = normalizeSlippageBps(bps)
     setSlippageBpsState(clamped)
     try { localStorage.setItem('swap.slippageBps', String(clamped)) } catch { /* ignore */ }
   }, [])
+  const [customSlippageOpen, setCustomSlippageOpen] = useState(false)
+  const [customSlippageInput, setCustomSlippageInput] = useState(() => (slippageBps / 100).toString())
+  const [customSlippageError, setCustomSlippageError] = useState<string | null>(null)
+
+  const openCustomSlippage = useCallback(() => {
+    setCustomSlippageInput((slippageBps / 100).toString())
+    setCustomSlippageError(null)
+    setCustomSlippageOpen(true)
+  }, [slippageBps])
+
+  const updateCustomSlippage = useCallback((raw: string) => {
+    setCustomSlippageInput(raw)
+    const parsed = parseCustomSlippagePercent(raw)
+    if (!parsed.ok) {
+      setCustomSlippageError(parsed.error)
+      return false
+    }
+    setCustomSlippageError(null)
+    setSlippageBps(parsed.bps)
+    return true
+  }, [setSlippageBps])
 
   // ── ExecuteSwap substage (retro #1 fix) ────────────────────────
   // Coarse `phase` is approving/signing/broadcasting. For ERC-20 swaps that
@@ -902,7 +981,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       if (update.confirmations !== undefined) setLiveConfirmations(update.confirmations)
       if (update.outboundConfirmations !== undefined) setLiveOutboundConfirmations(update.outboundConfirmations)
       if (update.outboundRequiredConfirmations !== undefined) setLiveOutboundRequired(update.outboundRequiredConfirmations)
-      if (update.outboundTxid) setLiveOutboundTxid(update.outboundTxid)
+      if (isRealHash(update.outboundTxid)) setLiveOutboundTxid(update.outboundTxid)
       if (update.swapper) setLiveSwapper(update.swapper)
       if (update.relayRequestId) setLiveRelayRequestId(update.relayRequestId)
       if (update.outboundChainId) setLiveOutboundChainId(update.outboundChainId)
@@ -943,10 +1022,12 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     if (!txid || phase !== 'submitted') return
     let cancelled = false
     let timer: ReturnType<typeof setTimeout> | null = null
+    let completedMetadataPolls = 0
     const tick = async () => {
       if (cancelled) return
+      let snap: PendingSwap | null = null
       try {
-        const snap = await rpcRequest<any>('refreshSwap', { txid })
+        snap = await rpcRequest<PendingSwap | null>('refreshSwap', { txid })
         // Guard after the await — dialog may have closed or switched txids.
         if (cancelled) return
         // Apply fields that the tracker only pushes once (nearTxHash, relayRequestId)
@@ -956,7 +1037,12 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
         applyInboundSnap(snap)
       } catch { /* swap-update push will retry on next tick */ }
       if (cancelled) return
-      const s = liveStatusRef.current
+      const s = snap?.status || liveStatusRef.current
+      if (shouldRetryCompletedSwapMetadata(s, snap?.trackingMetadataPending, completedMetadataPolls)) {
+        completedMetadataPolls += 1
+        timer = setTimeout(tick, 10_000)
+        return
+      }
       if (s === 'completed' || s === 'failed' || s === 'refunded') return
       timer = setTimeout(tick, 10_000)
     }
@@ -1049,7 +1135,12 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     playCompletionSound()
     setTimeout(() => setShowConfetti(false), 1500)
     // Fetch updated balances to show before/after diff
-    rpcRequest<ChainBalance[]>('getBalances', undefined, 120000)
+    const swapDestCaip = toAsset?.chainFamily === 'evm' && toAsset.contractAddress ? toAsset.caip : undefined
+    rpcRequest<ChainBalance[]>(
+      'getBalances',
+      swapDestCaip ? { forceRefresh: true, swapDestCaips: [swapDestCaip] } : { forceRefresh: true },
+      120000,
+    )
       .then((result) => {
         if (!result || !fromAsset || !toAsset) return
         const fromCb = result.find(b => b.chainId === fromAsset.chainId)
@@ -1257,6 +1348,18 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     }
   }, [assets, chain, initialFromCaip, initialFromAsset])
 
+  // Default the output to the input chain's native gas asset for a TOKEN input
+  // (e.g. USDT mainnet → ETH) when no output is chosen yet. Opening swap from a
+  // token page shouldn't land on a blank output; native inputs keep their own
+  // DEFAULT_OUTPUT above. Runs once assets are loaded (the initialFromAsset fast
+  // path sets fromAsset before assets arrive, so we can't do it inline there).
+  useEffect(() => {
+    if (!fromAsset || toAsset || assets.length === 0) return
+    if (!fromAsset.contractAddress) return // native input handled by DEFAULT_OUTPUT
+    const nativeOut = assets.find(a => a.chainId === fromAsset.chainId && !a.contractAddress)
+    if (nativeOut) setToAsset(nativeOut)
+  }, [fromAsset, toAsset, assets])
+
   // ── Resume from swap history ──────────────────────────────────────
   const hasResumedRef = useRef<string | null>(null)
   // Clear resume guard when dialog closes so re-clicking same swap works
@@ -1302,7 +1405,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     setLiveConfirmations(resumeSwap.confirmations)
     if (resumeSwap.outboundConfirmations !== undefined) setLiveOutboundConfirmations(resumeSwap.outboundConfirmations)
     if (resumeSwap.outboundRequiredConfirmations !== undefined) setLiveOutboundRequired(resumeSwap.outboundRequiredConfirmations)
-    if (resumeSwap.outboundTxid) setLiveOutboundTxid(resumeSwap.outboundTxid)
+    if (isRealHash(resumeSwap.outboundTxid)) setLiveOutboundTxid(resumeSwap.outboundTxid)
     if (resumeSwap.relayRequestId) setLiveRelayRequestId(resumeSwap.relayRequestId)
     // Seed outbound chain + refund reason from the persisted record so a
     // refund's explorer link points at the source chain on first render —
@@ -1470,7 +1573,9 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
         const token = candidate.tokens?.find(t => t.contractAddress?.toLowerCase() === fromAsset.contractAddress?.toLowerCase())
         return (token?.priceUsd || 0) > 0
       }
-      return nativePriceUsd(candidate) > 0
+      // Prefer the candidate that actually represents this asset (e.g. the RUJI
+      // ChainBalance passed as a prop) over the chain's aggregated native balance.
+      return balanceIsForAsset(candidate, fromAsset) && nativePriceUsd(candidate) > 0
     }) || cachedBalance || propBalance
     if (!cb) { swapLog(`[SWAP-PRICE] fromPriceUsd: no balance for chainId=${fromAsset.chainId}`); return 0 }
     // Token assets: only ever use the token's own price. Falling through to the
@@ -1487,6 +1592,12 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     const bal = parseFloat(cb.balance)
     const nativeUsd = nativeUsdValue(cb)
     swapLog(`[SWAP-PRICE] fromPriceUsd: ${fromAsset.symbol} chainId=${fromAsset.chainId} bal=${bal} nativeUsd=${nativeUsd} nativeBalanceUsd=${cb.nativeBalanceUsd} balanceUsd=${cb.balanceUsd} tokens=${cb.tokens?.length || 0}`)
+    // Never apply the chain's native price to a non-native sub-denom — return 0
+    // so the caller degrades (or the TO side derives price from the quote ratio).
+    if (!balanceIsForAsset(cb, fromAsset)) {
+      swapLog(`[SWAP-PRICE] fromPriceUsd: ${fromAsset.symbol} is not the native asset of ${cb.symbol} balance — returning 0`)
+      return 0
+    }
     const result = nativePriceUsd(cb)
     swapLog(`[SWAP-PRICE] fromPriceUsd RESULT: $${result}`)
     return result
@@ -1506,6 +1617,13 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     const bal = parseFloat(cb.balance)
     const nativeUsd = nativeUsdValue(cb)
     swapLog(`[SWAP-PRICE] toPriceUsdFromBalance: ${toAsset.symbol} chainId=${toAsset.chainId} bal=${bal} nativeUsd=${nativeUsd} nativeBalanceUsd=${cb.nativeBalanceUsd} balanceUsd=${cb.balanceUsd} tokens=${cb.tokens?.length || 0}`)
+    // Non-native THORChain/Cosmos denom (TCY, RUJI, …) received into a chain whose
+    // ChainBalance is the gas asset (RUNE): the native price is NOT this asset's
+    // price. Return 0 so toPriceUsd derives it from the quote ratio + fromPriceUsd.
+    if (!balanceIsForAsset(cb, toAsset)) {
+      swapLog(`[SWAP-PRICE] toPriceUsdFromBalance: ${toAsset.symbol} is not the native asset of ${cb.symbol} balance — returning 0`)
+      return 0
+    }
     const result = nativePriceUsd(cb)
     swapLog(`[SWAP-PRICE] toPriceUsdFromBalance RESULT: $${result}`)
     return result
@@ -1742,6 +1860,25 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   // address that didn't come from the user's wallet. Wait for the UTXO
   // resolver to populate a real receive address.
   const toAddressIsXpub = !!toAddress && !useCustomAddress && XPUB_RE.test(toAddress)
+
+  // One-time opaque consent is tied to the exact quoted route and user inputs.
+  // Any amount/address/slippage/serialized-transaction change invalidates it.
+  const solanaOpaqueConsentKey = [
+    fromAsset?.caip,
+    toAsset?.caip,
+    amount,
+    slippageBps,
+    fromAddress,
+    toAddress,
+    quote?.relayTx?.serializedTx,
+  ].join('|')
+  const previousSolanaOpaqueConsentKey = useRef(solanaOpaqueConsentKey)
+  useEffect(() => {
+    if (previousSolanaOpaqueConsentKey.current !== solanaOpaqueConsentKey) {
+      previousSolanaOpaqueConsentKey.current = solanaOpaqueConsentKey
+      setAllowSolanaBlindSigning(false)
+    }
+  }, [solanaOpaqueConsentKey])
   const canQuote = !!(fromAsset && toAsset && !sameAsset && validAmount && fromAddress && toAddress && !toAddressIsXpub && !exceedsBalance && !exceedsSafeMax && !customAddressError)
 
   // Human reason a quote can't fire right now, but ONLY for the cases that
@@ -2075,6 +2212,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
         integration: liveQuote.integration,
         swapper: liveQuote.swapper,
         relayTx: liveQuote.relayTx,
+        allowSolanaBlindSigning,
         // Same as the preview build: synthesized token sources need the
         // picker's decimals — Pioneer's available-assets won't have them.
         tokenDecimals: isTokenCaip(fromAsset.caip!) ? normalizeDecimals(fromAsset.decimals) ?? undefined : undefined,
@@ -2082,13 +2220,46 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
 
       setTxid(result.txid)
       setPhase('submitted')
-      window.dispatchEvent(new CustomEvent('keepkey-swap-executed'))
+      window.dispatchEvent(new CustomEvent('keepkey-swap-executed', {
+        detail: {
+          txid: result.txid,
+          fromChainId: fromAsset.chainId,
+          toChainId: toAsset.chainId,
+          fromCaip: fromAsset.caip,
+          toCaip: toAsset.caip,
+          fromSymbol: fromAsset.symbol,
+          toSymbol: toAsset.symbol,
+          expectedOutput: liveQuote.expectedOutput,
+          // Custom destinations intentionally leave the connected wallet. Do
+          // not wait for an output that should never appear in its portfolio.
+          isWalletDestination: !useCustomAddress,
+        },
+      }))
     } catch (e: any) {
       const raw = e?.message || ''
-      // Solana swap blocked because the device's blind-signing (AdvancedMode)
-      // policy is off — show the dedicated enable page instead of an error.
+      // This exact Relay payload has no signed ClearSign descriptor and needs
+      // route-specific, one-request opaque consent.
       if (raw.includes(SOLANA_BLIND_SIGNING_REQUIRED)) {
         setBlindSignError(null)
+        setBlindSignCause('host')
+        // The backend appends a host-side outflow check (what this transaction
+        // actually moves out of the wallet, per an independent RPC simulation).
+        // Absent or unparseable → the panel just omits the figures.
+        try {
+          const json = raw.slice(raw.indexOf(SOLANA_BLIND_SIGNING_REQUIRED) + SOLANA_BLIND_SIGNING_REQUIRED.length).trim()
+          setOutflowCheck(json ? JSON.parse(json) : null)
+        } catch { setOutflowCheck(null) }
+        setPhase('blind-signing-required')
+        return
+      }
+      // The DEVICE refused: firmware requires its AdvancedMode policy for any
+      // transaction it cannot verify. Which transactions those are is
+      // firmware-specific, so we react to the refusal rather than predicting
+      // it — correct on every version, old and new.
+      if (/AdvancedMode/i.test(raw)) {
+        setBlindSignError(null)
+        setBlindSignCause('device')
+        setOutflowCheck(null)
         setPhase('blind-signing-required')
         return
       }
@@ -2104,6 +2275,8 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
         friendly = t("approvalReverted", "Approval reverted on-chain — swap aborted to protect funds")
       } else if (/Insufficient.*for gas|insufficient funds/i.test(raw)) {
         friendly = t("insufficientGas", "Not enough gas in the source chain's native asset")
+      } else if (/OP_RETURN.*(?:character count|too .* high)|memo is too long/i.test(raw)) {
+        friendly = t("swapMemoTooLong", "This route returned a memo that is too long for the source chain. Refresh the quote or choose another route.")
       } else if (/nonce|fetch nonce/i.test(raw)) {
         friendly = t("nonceError", "Network error fetching nonce — retry in a moment")
       } else if (/timed out|ETIMEDOUT|fetch failed|network/i.test(raw)) {
@@ -2112,7 +2285,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       setError(friendly)
       setPhase('review')
     }
-  }, [quote, quoteFetchedAt, fromAsset, toAsset, sendAmount, sendIsMax, fromBalance, fromAddress, toAddress, slippageBps, balances, phase, previewLoading, previewError, previewBuild])
+  }, [quote, quoteFetchedAt, fromAsset, toAsset, sendAmount, sendIsMax, fromBalance, fromAddress, toAddress, slippageBps, balances, phase, previewLoading, previewError, previewBuild, allowSolanaBlindSigning, useCustomAddress])
 
   // ── Reset ─────────────────────────────────────────────────────────
   const reset = useCallback(() => {
@@ -2128,6 +2301,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     setError(null)
     setBlindSignError(null)
     setEnablingBlindSign(false)
+    setAllowSolanaBlindSigning(false)
     setTxid(null)
     setBeforeFromBal(null)
     setBeforeToBal(null)
@@ -2165,27 +2339,38 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     setError(t('swapCancelled', 'Swap cancelled — confirm again or change inputs'))
   }, [phase, t])
 
-  // Enable the device's AdvancedMode (blind-signing) policy so Solana swaps can
-  // be signed. applyPolicy prompts the user to confirm on device. On success we
-  // return to review so the user re-verifies the quote before signing.
+  // Turn on the device's AdvancedMode (Blind Signing) policy. There is no
+  // per-transaction exception on shipped firmware, so the opaque Solana route
+  // only signs once the global policy is on — it stays on until the user turns
+  // it off in Device Settings. Raises an enable-policy confirm on the device.
   const handleEnableBlindSigning = useCallback(async () => {
     setEnablingBlindSign(true)
     setBlindSignError(null)
-    try {
-      await rpcRequest('applyPolicy', { policyName: 'AdvancedMode', enabled: true }, 60000)
-      setError(null)
-      setPhase('review')
-    } catch (e: any) {
-      const raw = e?.message || ''
-      setBlindSignError(
-        /cancel/i.test(raw)
+    if (blindSignCause === 'device') {
+      // Persistent device policy. The device demands a button confirm AND a
+      // full PIN re-entry (it ignores the session PIN cache), so this is not
+      // instant — hence the 60s budget and the "on device" copy.
+      try {
+        // 0 = no timeout: this blocks on an on-device confirm AND a full
+        // scrambled-matrix PIN re-entry (the device ignores the session cache).
+        // A 60s budget could reject while the device still completes the write,
+        // leaving the policy ON while the UI claims it failed.
+        await rpcRequest('applyPolicy', { policyName: 'AdvancedMode', enabled: true }, 0)
+      } catch (e: any) {
+        const msg = e?.message || ''
+        setBlindSignError(/cancel|denied|rejected/i.test(msg)
           ? t('blindSignDeclined', 'Declined on device — blind signing was not enabled.')
-          : (raw || t('blindSignEnableFailed', 'Failed to enable blind signing on the device.')),
-      )
-    } finally {
-      setEnablingBlindSign(false)
+          : (msg || t('blindSignEnableFailed', 'Failed to enable blind signing on the device.')))
+        setEnablingBlindSign(false)
+        return
+      }
+    } else {
+      setAllowSolanaBlindSigning(true)
     }
-  }, [t])
+    setError(null)
+    setPhase('review')
+    setEnablingBlindSign(false)
+  }, [blindSignCause, t])
 
   const copyTxid = useCallback(() => {
     if (!txid) return
@@ -2363,8 +2548,13 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
             boxShadow: "0 0 0 1px rgba(255,255,255,0.06), 0 24px 60px -16px rgba(0,0,0,0.8), 0 4px 12px -4px rgba(0,0,0,0.5)",
           }}
         >
-          <Flex justify="center"><ProviderBadge swapper="thorchain" size={32} variant="compact" /></Flex>
-          <Text fontSize="sm" color="kk.textMuted" mt="3">{t("notSupported", { coin: chain.coin })}</Text>
+          {/* No provider badge: the swappable-asset list is a union across
+              providers (THORChain, Maya, Relay, …), so a missing asset is not
+              any single provider's limitation. */}
+          <Text fontSize="sm" color="kk.textMuted">{t("notSupported", { coin: chain.coin })}</Text>
+          <Text fontSize="xs" color="kk.textMuted" mt="2" opacity={0.75}>
+            {t("notSupportedHint", "Routes come from our swap providers and change over time — this asset may become available later.")}
+          </Text>
           <Button size="sm" mt="4" variant="ghost" color="kk.textSecondary" px="4" py="2" onClick={handleClose}>{t("close")}</Button>
         </Box>
       </Box>
@@ -3536,12 +3726,78 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
 
               <VStack gap="2" align="center" maxW="420px">
                 <Text fontSize="lg" fontWeight="700" color="kk.textPrimary" textAlign="center">
-                  {t('blindSignTitle', 'Enable Blind Signing for Solana')}
+                  {blindSignCause === 'device'
+                    ? t('deviceBlindSignTitle', 'Your KeepKey needs blind signing enabled')
+                    : t('solanaOpaqueTitle', 'One-time Blind Signing for Solana')}
                 </Text>
                 <Text fontSize="sm" color="kk.textSecondary" textAlign="center" lineHeight="1.5">
-                  {t('blindSignBody', 'Solana swaps use a versioned transaction your KeepKey cannot fully decode, so it must be blind-signed. This is turned off by default. Enabling it switches on Advanced Mode (blind signing) on your device — you will be asked to confirm the change on the device.')}
+                  {blindSignCause === 'device'
+                    ? t('deviceBlindSignBody', 'The device could not read this transaction well enough to show you what it does, and it refuses to sign anything it cannot display unless you turn on Advanced Mode. Newer firmware can read more transaction types, so this may not be needed after an update.')
+                    : t('solanaOpaqueBody', 'This Relay transaction uses a custom Solana program and lookup-table accounts that your KeepKey cannot fully verify. No signed ClearSign descriptor was supplied for the route, so this transaction requires the opaque fallback.')}
                 </Text>
               </VStack>
+
+              {/* Host-side outflow check: what this transaction actually moves.
+                  Deliberately NOT presented as verification — the device cannot
+                  confirm it, so the wording stays "checked on this computer". */}
+              {outflowCheck && (
+                <Box bg="var(--ink-1)" border="1px solid var(--ink-3)" borderRadius="lg" px="3" py="2.5" maxW="420px" w="full">
+                  <Text fontSize="10px" color="kk.textMuted" textTransform="uppercase" letterSpacing="0.06em" mb="1.5">
+                    {t('solanaOutflowHeader', 'Checked on this computer')}
+                  </Text>
+                  {outflowCheck.unavailable ? (
+                    <Text fontSize="xs" color="kk.textSecondary" lineHeight="1.5">
+                      {t('solanaOutflowUnknown', 'Could not determine what this transaction does')} — {outflowCheck.unavailable}
+                    </Text>
+                  ) : (
+                    <>
+                      <Text fontSize="xs" color="kk.textPrimary" lineHeight="1.6">
+                        {t('solanaOutflowAfter', 'After this transaction your wallet holds')}:{' '}
+                        <strong>{(Number(outflowCheck.solAfter) / 1e9).toFixed(6)} SOL</strong>
+                        {outflowCheck.tokensAfter.map(tk => {
+                          const d = tk.decimals ?? 0
+                          const amt = d > 0 ? (Number(tk.amount) / 10 ** d).toFixed(Math.min(d, 6)) : tk.amount
+                          return (
+                            <span key={tk.mint}>
+                              {' + '}<strong>{amt} {tk.symbol || `${tk.mint.slice(0, 4)}…${tk.mint.slice(-4)}`}</strong>
+                            </span>
+                          )
+                        })}
+                      </Text>
+                      {outflowCheck.spending && (
+                        <Text fontSize="11px" color="kk.textSecondary" mt="1">
+                          {t('solanaOutflowSpending', 'You approved spending')}: {outflowCheck.spending} {outflowCheck.spendingSymbol || ''}
+                        </Text>
+                      )}
+                      {Number(outflowCheck.solAfter) / 1e9 < 0.001 && (
+                        <Text fontSize="xs" color="kk.error" mt="1.5" fontWeight="600">
+                          {t('solanaOutflowDrain', 'Warning: this leaves your wallet empty. Do not sign unless that is what you intended.')}
+                        </Text>
+                      )}
+                    </>
+                  )}
+                  {outflowCheck.decoded?.length ? (
+                    <Box mt="2" pt="2" borderTop="1px solid var(--ink-3)">
+                      <Text fontSize="10px" color="kk.textMuted" textTransform="uppercase" letterSpacing="0.06em" mb="1">
+                        {t('solanaDecodedHeader', 'What this transaction does')}
+                      </Text>
+                      {outflowCheck.decoded.map((line, i) => (
+                        <Text key={i} fontSize="11px" color="kk.textPrimary" lineHeight="1.5" fontFamily="mono">
+                          {line}
+                        </Text>
+                      ))}
+                    </Box>
+                  ) : null}
+                  {outflowCheck.reason && (
+                    <Text fontSize="11px" color="kk.textSecondary" mt="2" lineHeight="1.45">
+                      {t('solanaOpaqueReason', 'Your KeepKey cannot read this transaction because of')}: {outflowCheck.reason}
+                    </Text>
+                  )}
+                  <Text fontSize="10px" color="kk.textMuted" mt="1.5" lineHeight="1.4">
+                    {t('solanaOutflowCaveat', 'Simulated against a Solana node from this computer. Your KeepKey cannot confirm these figures.')}
+                  </Text>
+                </Box>
+              )}
 
               {/* Security caveat */}
               <Flex align="flex-start" gap="2" bg="var(--ink-1)" border="1px solid var(--ink-3)" borderRadius="lg" px="3" py="2.5" maxW="420px">
@@ -3551,7 +3807,9 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                   </svg>
                 </Box>
                 <Text fontSize="11px" color="kk.textMuted" lineHeight="1.4">
-                  {t('blindSignCaveat', 'Blind signing means the device shows a generic prompt instead of decoded details. Only proceed for swaps you initiated here. You can turn it back off in Device Settings → Signing Policy.')}
+                  {blindSignCause === 'device'
+                    ? t('deviceBlindSignCaveat', 'This stays on until you turn it off in Device Settings, and it applies to every app that uses this KeepKey — not just this swap. It also turns off the safety check this app runs on transactions your device cannot read: future swaps like this one will go straight to the device without showing you what leaves your wallet. The device will ask you to confirm and to re-enter your PIN.')
+                    : t('solanaOpaqueCaveat', 'Blind signing means the device shows a generic prompt instead of authenticated swap details. This approval applies only to this transaction and does not enable global Advanced Mode. Confirm only the swap you reviewed here.')}
                 </Text>
               </Flex>
 
@@ -3573,7 +3831,9 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                   loadingText={t('blindSignConfirmOnDevice', 'Confirm on device…')}
                   _hover={{ opacity: 0.9 }}
                   onClick={handleEnableBlindSigning}>
-                  {t('blindSignEnable', 'Enable Blind Signing')}
+                  {blindSignCause === 'device'
+                    ? t('deviceBlindSignEnable', 'Enable on device')
+                    : t('solanaOpaqueAllowOnce', 'Allow Once')}
                 </Button>
               </Flex>
             </VStack>
@@ -3672,21 +3932,29 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
               </Box>
 
               {fromAsset.chainFamily === 'evm' && (
-                <Box w="full" bg="rgba(255,255,255,0.02)" border="1px solid" borderColor={auditPayloadReady ? "rgba(139,227,196,0.22)" : "rgba(233,196,106,0.28)"} borderRadius="lg" px="3" py="2">
-                  <Flex align="center" justify="space-between" mb="2" gap="2">
+                <Box as="details" className="kk-acc" w="full" bg="rgba(255,255,255,0.02)" border="1px solid" borderColor={auditPayloadReady ? "rgba(139,227,196,0.22)" : "rgba(233,196,106,0.28)"} borderRadius="lg" overflow="hidden">
+                  <Box as="summary" px="3" py="2"
+                    display="flex" alignItems="center" justifyContent="space-between" gap="2"
+                    _hover={{ bg: "rgba(255,255,255,0.03)" }} style={{ transition: 'background 120ms ease-out' }}>
                     <Text fontSize="11px" fontWeight="700" color="kk.textPrimary">
                       {t("evmSummary", "EVM summary")}
                     </Text>
-                    <Text fontSize="10px" fontFamily="mono" color={auditPayloadReady ? "var(--teal)" : "var(--gold)"}>
-                      {previewLoading
-                        ? t("payloadBuilding", "building payload")
-                        : previewError
-                          ? t("payloadFailed", "payload failed")
-                          : auditPayloadReady
-                            ? t("payloadReady", "payload ready")
-                            : t("payloadRequiredShort", "payload required")}
-                    </Text>
-                  </Flex>
+                    <Flex align="center" gap="2" color="kk.textMuted">
+                      <Text fontSize="10px" fontFamily="mono" color={auditPayloadReady ? "var(--teal)" : "var(--gold)"}>
+                        {previewLoading
+                          ? t("payloadBuilding", "building payload")
+                          : previewError
+                            ? t("payloadFailed", "payload failed")
+                            : auditPayloadReady
+                              ? t("payloadReady", "payload ready")
+                              : t("payloadRequiredShort", "payload required")}
+                      </Text>
+                      <svg className="kk-acc-chev" width="14" height="14" viewBox="0 0 16 16" fill="none">
+                        <path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    </Flex>
+                  </Box>
+                  <Box className="kk-acc-body" px="3" pt="1" pb="2">
                   <VStack gap="2" align="stretch">
                     {previewLoading && (
                       <Text fontSize="10px" color="kk.textMuted">{t("buildingPayloadDetail", "Building the exact transaction payload for review...")}</Text>
@@ -3712,6 +3980,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                       />
                     )}
                   </VStack>
+                  </Box>
                 </Box>
               )}
 
@@ -3915,11 +4184,14 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                 )
               })()}
 
-              {/* TRON blind-sign warning OR verify-on-device note */}
-              {fromAsset.chainFamily === 'tron' ? (
+              {/* Firmware 7.15+ parses native TRX and TRC-20 transfers from the
+                  signed raw_data. Only older firmware gets the legacy generic
+                  warning; TRON as the destination never affects source signing. */}
+              {fromAsset.chainFamily === 'tron' &&
+              (!firmwareVersion || versionCompare(firmwareVersion, '7.15.0') < 0) ? (
                 <Flex align="center" gap="2" bg="rgba(251,146,60,0.08)" border="1px solid" borderColor="rgba(251,146,60,0.3)" px="3" py="1.5" borderRadius="lg" w="full">
                   <Text fontSize="10px" color="var(--gold)">
-                    {t("tronBlindSignWarning", "Your KeepKey will display a generic Tron transaction prompt — it cannot decode the THORChain swap. Verify the amounts, vault, and memo above before approving on device.")}
+                    {t("tronLegacySigningWarning", "Firmware before 7.15 may show a generic Tron prompt. Update firmware for native TRX and TRC-20 ClearSign details, or verify the complete payload above before approving.")}
                   </Text>
                 </Flex>
               ) : (
@@ -4539,14 +4811,17 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
               </Box>
 
               {/* Slippage tolerance — visible whenever a swap target is selected.
-                  Bps math: 50 = 0.5%, 100 = 1%, 300 = 3%. Custom prompts for a value. */}
+                  Bps math: 50 = 0.5%, 100 = 1%, 300 = 3%. Custom uses an inline
+                  controlled input because native window.prompt is unavailable in
+                  some Electron/WebView builds. */}
               {fromAsset && toAsset && (
-                <Flex align="center" justify="space-between" gap="2" px="1" py="1">
-                  <Text fontSize="10px" color="kk.textMuted" fontWeight="600" textTransform="uppercase" letterSpacing="0.05em">
-                    {t("slippage") || "Slippage"}
-                  </Text>
-                  <HStack gap="1">
-                    {[50, 100, 300].map(bps => {
+                <VStack align="stretch" gap="1" px="1" py="1">
+                  <Flex align="center" justify="space-between" gap="2">
+                    <Text fontSize="10px" color="kk.textMuted" fontWeight="600" textTransform="uppercase" letterSpacing="0.05em">
+                      {t("slippage") || "Slippage"}
+                    </Text>
+                    <HStack gap="1">
+                    {SLIPPAGE_PRESETS_BPS.map(bps => {
                       const active = slippageBps === bps
                       return (
                         <Box key={bps} as="button" px="2" py="0.5" borderRadius="md"
@@ -4555,32 +4830,72 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                           border="1px solid" borderColor={active ? "kk.gold" : "rgba(255,255,255,0.08)"}
                           fontSize="10px" fontWeight="700" cursor="pointer"
                           _hover={{ borderColor: active ? "kk.gold" : "rgba(233,196,106,0.4)" }}
-                          onClick={() => setSlippageBps(bps)}>
+                          onClick={() => {
+                            setCustomSlippageOpen(false)
+                            setCustomSlippageError(null)
+                            setSlippageBps(bps)
+                          }}>
                           {(bps / 100).toFixed(bps < 100 ? 1 : 0)}%
                         </Box>
                       )
                     })}
-                    <Box as="button" px="2" py="0.5" borderRadius="md"
-                      bg={![50, 100, 300].includes(slippageBps) ? "kk.gold" : "rgba(255,255,255,0.03)"}
-                      color={![50, 100, 300].includes(slippageBps) ? "black" : "kk.textSecondary"}
-                      border="1px solid"
-                      borderColor={![50, 100, 300].includes(slippageBps) ? "kk.gold" : "rgba(255,255,255,0.08)"}
-                      fontSize="10px" fontWeight="700" cursor="pointer"
-                      _hover={{ borderColor: "rgba(233,196,106,0.4)" }}
-                      onClick={() => {
-                        const raw = prompt(`${t("slippage") || "Slippage"} %`, (slippageBps / 100).toString())
-                        if (raw == null) return
-                        const pct = parseFloat(raw)
-                        if (!Number.isFinite(pct) || pct <= 0 || pct > 50) {
-                          alert("Enter a percentage between 0.1 and 50")
-                          return
-                        }
-                        setSlippageBps(Math.round(pct * 100))
-                      }}>
-                      {![50, 100, 300].includes(slippageBps) ? `${(slippageBps / 100).toFixed(2)}%` : (t("custom") || "Custom")}
-                    </Box>
-                  </HStack>
-                </Flex>
+                    {customSlippageOpen ? (
+                      <Flex
+                        align="center"
+                        h="24px"
+                        w="82px"
+                        px="1.5"
+                        borderRadius="md"
+                        bg="rgba(0,0,0,0.28)"
+                        border="1px solid"
+                        borderColor={customSlippageError ? "kk.error" : "kk.gold"}
+                      >
+                        <Input
+                          autoFocus
+                          aria-label={t("customSlippage", "Custom slippage percentage")}
+                          value={customSlippageInput}
+                          onChange={(e) => updateCustomSlippage(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' && updateCustomSlippage(customSlippageInput)) {
+                              setCustomSlippageOpen(false)
+                            } else if (e.key === 'Escape') {
+                              setCustomSlippageOpen(false)
+                              setCustomSlippageError(null)
+                            }
+                          }}
+                          inputMode="decimal"
+                          fontSize="10px"
+                          fontWeight="700"
+                          color="kk.textPrimary"
+                          p="0"
+                          h="20px"
+                          minW="0"
+                          border="0"
+                          outline="none"
+                          _focus={{ boxShadow: "none", border: "0" }}
+                        />
+                        <Text fontSize="10px" color="kk.textMuted">%</Text>
+                      </Flex>
+                    ) : (
+                      <Box as="button" px="2" py="0.5" borderRadius="md"
+                        bg={!SLIPPAGE_PRESETS_BPS.includes(slippageBps as typeof SLIPPAGE_PRESETS_BPS[number]) ? "kk.gold" : "rgba(255,255,255,0.03)"}
+                        color={!SLIPPAGE_PRESETS_BPS.includes(slippageBps as typeof SLIPPAGE_PRESETS_BPS[number]) ? "black" : "kk.textSecondary"}
+                        border="1px solid"
+                        borderColor={!SLIPPAGE_PRESETS_BPS.includes(slippageBps as typeof SLIPPAGE_PRESETS_BPS[number]) ? "kk.gold" : "rgba(255,255,255,0.08)"}
+                        fontSize="10px" fontWeight="700" cursor="pointer"
+                        _hover={{ borderColor: "rgba(233,196,106,0.4)" }}
+                        onClick={openCustomSlippage}>
+                        {!SLIPPAGE_PRESETS_BPS.includes(slippageBps as typeof SLIPPAGE_PRESETS_BPS[number])
+                          ? `${(slippageBps / 100).toFixed(2)}%`
+                          : (t("custom") || "Custom")}
+                      </Box>
+                    )}
+                    </HStack>
+                  </Flex>
+                  {customSlippageError && (
+                    <Text fontSize="9px" color="kk.error" textAlign="right">{customSlippageError}</Text>
+                  )}
+                </VStack>
               )}
 
               {/* Review Swap button — only when quote is ready. Gradient

@@ -1,0 +1,27 @@
+{
+  "$notes": "Vault-local Solana program schemas, merged OVER @pioneer-platform/pioneer-discovery at load time (see solana-instruction-decoder.ts). Adding a program here makes the clear-signing review UI decode it immediately, without waiting on a pioneer-discovery release. Entries here should also be contributed upstream to pioneer-discovery/src/solana-programs.json so other clients get them; once a published version carries the program, the entry can be dropped from this file. Same shape as the upstream registry.",
+  "programs": {
+    "99vQwtBwYtrqqD9YSXbdum3KBdxPAVxYTaQ3cfnJSrN2": {
+      "name": "Relay Bridge",
+      "category": "bridge",
+      "website": "https://relay.link",
+      "description": "Relay cross-chain bridge. Deposits the origin asset into a Relay vault; the matching payout on the destination chain is Relay's off-chain obligation and is NOT verifiable from this instruction. Layout confirmed against live api.relay.link quotes 2026-07-27: the u64 amount tracked the requested input exactly across 0.5 / 0.123456789 / 0.999 SOL.",
+      "discriminator": {
+        "encoding": "anchor",
+        "offset": 0,
+        "length": 8
+      },
+      "instructions": {
+        "0d9e0ddf5fd51c06": {
+          "name": "depositNative",
+          "description": "Deposit native SOL to a Relay vault for a cross-chain fill.",
+          "accounts": ["config", "depositor", "refundTo", "vault", "systemProgram"],
+          "args": [
+            { "name": "amount", "type": "u64" },
+            { "name": "orderId", "type": "bytes" }
+          ]
+        }
+      }
+    }
+  }
+}

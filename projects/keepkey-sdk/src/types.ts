@@ -43,6 +43,7 @@ export interface DeviceFeatures {
   model: string
   firmware_variant: string
   firmware_hash: string
+  supports_taproot?: boolean
   no_backup: boolean
   wipe_code_protection: boolean
   auto_lock_delay_ms: number
@@ -58,6 +59,7 @@ export interface DeviceInfo {
 
 export interface SignedTx {
   serializedTx?: string
+  signatures?: string[]
   r?: string
   s?: string
   v?: number
@@ -92,6 +94,42 @@ export interface EthSignTxParams {
   maxFeePerGas?: string
   maxPriorityFeePerGas?: string
   chainId?: number
+  /**
+   * EVM clear-signing metadata (firmware 7.15.0+). A signed blob, bound to this
+   * tx's exact sighash, sent as EthereumTxMetadata before signing so the device
+   * shows decoded contract-call info instead of raw hex. `keyId` names the
+   * device key slot the blob is signed against (0 = built-in production key;
+   * 3 = a runtime signer loaded via `loadClearsignSigner`).
+   */
+  txMetadata?: {
+    signedPayload: string
+    keyId?: number
+  }
+}
+
+/** Params for `eth.loadClearsignSigner` — POST /eth/clearsign/load-signer. */
+export interface LoadClearsignSignerParams {
+  /** Device key slot 1-3 (0 = built-in production key, not loadable). */
+  keyId: number
+  /** 33-byte compressed secp256k1 pubkey, hex (with or without 0x). */
+  pubkey: string
+  /** Signer label shown on the device trust screen. `[A-Za-z0-9 _-]`, 1-31 chars. */
+  alias: string
+  /** Optional identity logo: 1bpp mono RLE bitmap as hex, <= 384 bytes. Shown on
+   *  the trust screen and led before every clear-sign the identity vouches for.
+   *  `icon`, `iconWidth`, and `iconHeight` must be supplied together — the REST
+   *  layer rejects a half-specified icon. */
+  icon?: string
+  iconWidth?: number
+  iconHeight?: number
+  /** Persist the identity in device flash across reboots (until WipeDevice). */
+  persist?: boolean
+}
+
+export interface LoadClearsignSignerResult {
+  ok: true
+  keyId: number
+  alias: string
 }
 
 export interface EthSignTypedDataParams {
@@ -125,6 +163,42 @@ export interface CosmosAminoSignParams {
   signerAddress: string
 }
 
+// ── Hive Types ───────────────────────────────────────────────────────
+export interface HiveSignOperationsParams {
+  address_n?: number[]
+  addressNList?: number[]
+  /** condenser-style tuples: [["limit_order_create", {...}], ...] — max 4, single tier */
+  operations: [string, Record<string, any>][]
+}
+
+export interface HiveSignTransferParams {
+  /** SLIP-0048 path; defaults to the active role m/48'/13'/1'/0'/0' */
+  address_n?: number[]
+  addressNList?: number[]
+  ref_block_num: number
+  ref_block_prefix: number
+  /** Unix seconds (TaPoS expiration) */
+  expiration: number
+  from: string
+  to: string
+  /** Integer milli-units (3 decimals): 1.000 HIVE = 1000 */
+  amount: number
+  asset_symbol?: 'HIVE' | 'HBD'
+  /** Firmware rejects memos > 440 chars */
+  memo?: string
+  /** 32-byte chain id hex; firmware defaults to Hive mainnet */
+  chain_id?: string
+}
+
+export interface HiveSignMessageParams {
+  /** SLIP-0048 path; defaults to the posting role m/48'/13'/4'/0'/0' (dApp login) */
+  address_n?: number[]
+  addressNList?: number[]
+  /** UTF-8 text by default; pass is_text=false to send hex bytes */
+  message: string
+  is_text?: boolean
+}
+
 // ── XRP Types ───────────────────────────────────────────────────────
 export interface XrpSignTxParams {
   [key: string]: any
@@ -136,10 +210,55 @@ export interface BnbSignTxParams {
 }
 
 // ── Solana Types ────────────────────────────────────────────────────
+export interface SolanaSwapMetadata {
+  /**
+   * Base64-encoded canonical KKSOLSW1 descriptor. The descriptor binds the
+   * displayed swap claims to SHA256 of the exact Solana message being signed.
+   */
+  payload: string
+  /** Base64-encoded 64-byte compact secp256k1 signature over SHA256(payload). */
+  signature: string
+  /** Trusted device ClearSign signer slot (0 = built-in, 1..3 = user-loaded). */
+  signerKeyId: number
+}
+
 export interface SolanaSignTxParams {
   address_n?: number[]
   addressNList?: number[]
   raw_tx: string  // base64-encoded raw transaction
+  /**
+   * Provider-signed, transaction-bound ClearSign descriptor. Descriptor
+   * construction and signing happen off-device; firmware independently verifies
+   * its signer, exact message hash, program ID, and instruction discriminator.
+   */
+  swapMetadata?: SolanaSwapMetadata
+  /**
+   * Authorize opaque signing for this request only. This is a compatibility
+   * fallback when ClearSign metadata is unavailable and does not enable or
+   * persist device Advanced Mode.
+   */
+  allowBlindSigning?: boolean
+  /**
+   * Signer-attested KKSOLSC1 instruction schema. Unlike {@link swapMetadata}
+   * this is NOT tied to one transaction — it describes how to read a
+   * program's instruction, so one signature covers every future call to that
+   * program and the device decodes the values from the bytes it signs.
+   */
+  schema?: SolanaInstructionSchema
+}
+
+/**
+ * A reusable, signer-attested description of one program instruction. Same
+ * field shape as {@link SolanaSwapMetadata} so both pass through the Vault
+ * unchanged.
+ */
+export interface SolanaInstructionSchema {
+  /** Base64-encoded canonical KKSOLSC1 schema payload. */
+  payload: string
+  /** Base64-encoded 64-byte compact secp256k1 signature over SHA256(payload). */
+  signature: string
+  /** ClearSign signer slot that attested the schema (0-3). */
+  signerKeyId: number
 }
 
 // ── Tron Types ─────────────────────────────────────────────────────

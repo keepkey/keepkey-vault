@@ -113,7 +113,7 @@ export function ActivityTracker() {
       fetchActivities()
       if (swap.status === 'completed' || swap.status === 'refunded') {
         window.dispatchEvent(new CustomEvent('keepkey-swap-completed', {
-          detail: { fromChainId: swap.fromChainId, toChainId: swap.toChainId }
+          detail: { ...swap, swap }
         }))
       }
     })

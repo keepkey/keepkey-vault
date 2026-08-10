@@ -6,6 +6,7 @@
  */
 import Pioneer from '@pioneer-platform/pioneer-client'
 import { getSetting, setSetting } from './db'
+import { instrumentPortfolio } from './perf-telemetry'
 
 export const DEFAULT_API_BASE = 'https://api.keepkey.info'
 
@@ -80,7 +81,14 @@ export async function getPioneer(): Promise<any> {
       const client = new Pioneer(specUrl, { queryKey: qk, timeout: 60000, overrideHost })
       pioneerInstance = await client.init()
       if (!pioneerInstance) throw new Error('Pioneer client init returned null')
+      // Honesty guard: block BTC→Pioneer calls whenever a self-host node is enabled.
+      const { installPioneerGuard } = await import('./pioneer-guard')
+      installPioneerGuard(pioneerInstance)
       console.log('[Pioneer] Client initialized successfully')
+
+      // Stopwatch every portfolio load and report vault-vs-API timings
+      // (see src/bun/perf-telemetry.ts). Best-effort, never blocks a load.
+      instrumentPortfolio(pioneerInstance, { apiBase: base, queryKey: qk })
 
       // Register queryKey with Pioneer so SSE auth passes (best-effort, non-fatal).
       // Username must be 3-32 chars — derive a stable short slug from the key.

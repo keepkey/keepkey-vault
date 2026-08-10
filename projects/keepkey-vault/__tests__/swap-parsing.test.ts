@@ -7,7 +7,11 @@
  * Run: bun test __tests__/swap-parsing.test.ts
  */
 import { describe, test, expect } from 'bun:test'
-import { parseQuoteResponse, parseAssetsResponse } from '../src/bun/swap-parsing'
+import {
+  assertSwapMemoFitsSource,
+  parseQuoteResponse,
+  parseAssetsResponse,
+} from '../src/bun/swap-parsing'
 
 // ── Fixtures: Real Pioneer SDK response shapes ──────────────────────
 
@@ -155,12 +159,90 @@ const FIXTURE_ASSETS_FLAT = {
 // ── Quote parsing tests ─────────────────────────────────────────────
 
 describe('parseQuoteResponse', () => {
+  test('carries a complete signed Solana swap descriptor into the prebuilt transaction', () => {
+    const payload = Buffer.from('KKSOLSW1-test-payload').toString('base64')
+    const signature = Buffer.alloc(64, 0x5a).toString('base64')
+    const resp = {
+      data: [{
+        integration: 'shapeshiftSwap',
+        quote: {
+          swapper: 'Relay',
+          buyAmount: '100',
+          amountOutMin: '95',
+          txs: [{
+            txParams: {
+              serializedTx: Buffer.from([0, 1, 2, 3]).toString('base64'),
+              recipientAddress: 'TRecipient',
+              solanaSwapMetadata: { payload, signature, signerKeyId: 2 },
+            },
+          }],
+        },
+      }],
+    }
+    const result = parseQuoteResponse(resp, {
+      fromCaip: 'solana:5eykt4usfv8p8njdtrepy1vzqkqzkvdp/slip44:501',
+      toCaip: 'tron:0x2b6653dc/slip44:195',
+      slippageBps: 500,
+    })
+    expect(result.relayTx?.solanaSwapMetadata).toEqual({
+      payload,
+      signature,
+      signerKeyId: 2,
+    })
+  })
+
+  test('rejects partial Solana ClearSign metadata instead of downgrading to blind signing', () => {
+    const resp = {
+      data: [{
+        integration: 'shapeshiftSwap',
+        quote: {
+          swapper: 'Relay',
+          buyAmount: '100',
+          txs: [{
+            txParams: {
+              serializedTx: Buffer.from([0, 1, 2, 3]).toString('base64'),
+              recipientAddress: 'TRecipient',
+              solanaSwapMetadata: {
+                payload: Buffer.from('KKSOLSW1-test').toString('base64'),
+                signerKeyId: 0,
+              },
+            },
+          }],
+        },
+      }],
+    }
+    expect(() => parseQuoteResponse(resp, {
+      fromCaip: 'solana:5eykt4usfv8p8njdtrepy1vzqkqzkvdp/slip44:501',
+      toCaip: 'tron:0x2b6653dc/slip44:195',
+      slippageBps: 500,
+    })).toThrow('missing signature')
+  })
+
   // CAIP-only — Pioneer's Quote endpoint is the source of truth for routing.
   const baseParams = { fromCaip: 'eip155:8453/slip44:60', toCaip: 'eip155:1/slip44:60', slippageBps: 300 }
 
   test('BASE → ETH: extracts memo from txParams', () => {
     const result = parseQuoteResponse(FIXTURE_BASE_TO_ETH_QUOTE, baseParams)
     expect(result.memo).toBe('=:ETH.ETH:0xdest123:245000/3/0:kk:0')
+  })
+
+  test('THORChain recommended_min_amount_in converts 1e8 base units to decimal minAmountIn', () => {
+    // 27472 sats input got refunded on-chain ("Emit asset less than price
+    // limit") because nothing enforced THORNode's floor. 50000 base units of
+    // the sell asset = 0.0005 decimal — a unit slip here (comparing 1e8
+    // against a human amount) would make the guard block every swap.
+    const fixture = JSON.parse(JSON.stringify(FIXTURE_BASE_TO_ETH_QUOTE))
+    fixture.data.data[0].quote.raw.recommended_min_amount_in = '50000'
+    const result = parseQuoteResponse(fixture, baseParams)
+    expect(result.minAmountIn).toBe('0.0005')
+  })
+
+  test('recommended_min_amount_in ignored for non-THORChain swappers (unknown units)', () => {
+    const fixture = JSON.parse(JSON.stringify(FIXTURE_BASE_TO_ETH_QUOTE))
+    fixture.data.data[0].integration = 'relay'
+    fixture.data.data[0].quote.raw.recommended_min_amount_in = '50000'
+    const result = parseQuoteResponse(fixture, baseParams)
+    expect(result.minAmountIn).toBeUndefined()
   })
 
   test('BASE → ETH: extracts router from raw', () => {
@@ -245,6 +327,38 @@ describe('parseQuoteResponse', () => {
     const result = parseQuoteResponse(FIXTURE_BTC_TO_ETH_QUOTE, params)
     // 1.25 * (1 - 85/10000) = 1.25 * 0.9915 = 1.239375
     expect(parseFloat(result.minimumOutput)).toBeCloseTo(1.239375, 4)
+  })
+
+  test('BTC → USDT: skips an overlong full-contract memo for a compact route', () => {
+    const btcCaip = 'bip122:000000000019d6689c085ae165831e93/slip44:0'
+    const usdtCaip = 'eip155:1/erc20:0xdac17f958d2ee523a2206206994597c13d831ec7'
+    const destination = `0x${'a'.repeat(40)}`
+    const fullMemo = `=:ETH.USDT-0XDAC17F958D2EE523A2206206994597C13D831EC7:${destination}:323592379572:keep:30`
+    const compactMemo = `=:ETH.USDT:${destination}:323592379572:keep:30`
+    const quote = (memo: string, buyAmount: string) => ({
+      integration: 'thorchain',
+      quote: {
+        buyAmount,
+        raw: { inbound_address: 'bc1qvaultaddress' },
+        txs: [{ txParams: { memo, vaultAddress: 'bc1qvaultaddress' } }],
+      },
+    })
+
+    expect(Buffer.byteLength(fullMemo, 'utf8')).toBeGreaterThan(80)
+    expect(Buffer.byteLength(compactMemo, 'utf8')).toBeLessThanOrEqual(80)
+    const result = parseQuoteResponse(
+      { data: [quote(fullMemo, '100'), quote(compactMemo, '99')] },
+      { fromCaip: btcCaip, toCaip: usdtCaip, slippageBps: 300 },
+    )
+    expect(result.memo).toBe(compactMemo)
+    expect(result.expectedOutput).toBe('99')
+  })
+
+  test('UTXO memo limit is measured in bytes, not JavaScript characters', () => {
+    const btcCaip = 'bip122:000000000019d6689c085ae165831e93/slip44:0'
+    expect(() => assertSwapMemoFitsSource('a'.repeat(80), btcCaip)).not.toThrow()
+    expect(() => assertSwapMemoFitsSource('é'.repeat(41), btcCaip))
+      .toThrow(/82 bytes; maximum 80/)
   })
 
   // Minimal response (fields at top-level quote, no raw/txs)

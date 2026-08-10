@@ -49,7 +49,7 @@
 	"approvingToken": "กำลังอนุมัติโทเค็น...",
 	"approvalRequired": "กำลังรออนุมัติโทเค็นบน KeepKey...",
 	"enterAmount": "ป้อนจำนวนเพื่อขอใบเสนอราคา",
-	"notSupported": "การแลกเปลี่ยน {{coin}} ยังไม่รองรับโดย THORChain",
+	"notSupported": "ขณะนี้ไม่มีเส้นทางแลกเปลี่ยนสำหรับ {{coin}}",
 	"copied": "คัดลอกแล้ว",
 	"copy": "คัดลอก",
 	"youSend": "คุณส่ง",
