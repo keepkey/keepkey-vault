@@ -123,6 +123,11 @@ function startBridge(): number {
     port: 0, // OS picks a free port
     hostname: '127.0.0.1', // localhost only — bridge carries confirm/reject decisions
     reusePort: true,
+    // A confirmation response can resume firmware work (signature generation,
+    // flash encryption, and ring-buffer cleanup) before Bun flushes the small
+    // HTTP response. Keep the localhost bridge alive across that work instead
+    // of emitting Bun's default 10-second request timeout after a valid click.
+    idleTimeout: 120,
     fetch(req) {
       const url = new URL(req.url)
 

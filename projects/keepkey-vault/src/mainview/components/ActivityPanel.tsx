@@ -35,6 +35,8 @@ const TYPE_CONFIG: Record<string, { label: string; color: string }> = {
   sign: { label: 'Signed', color: '#627EEA' },
   message: { label: 'Message', color: '#8247E5' },
   approve: { label: 'Approve', color: '#e08c7b' },
+  shield: { label: 'Shield', color: '#6ee787' },
+  unshield: { label: 'Unshield', color: '#e9c46a' },
 }
 
 const STATUS_CONFIG: Record<string, { label: string; color: string }> = {

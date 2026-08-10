@@ -801,6 +801,17 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   //            consent does not help there (older firmware ignores the
   //            per-request flag), so the only remedy is enabling the policy.
   const [blindSignCause, setBlindSignCause] = useState<'host' | 'device'>('host')
+  const [outflowCheck, setOutflowCheck] = useState<
+    {
+      solAfter: string
+      tokensAfter: { mint: string; amount: string; decimals?: number; symbol?: string }[]
+      spending?: string
+      spendingSymbol?: string
+      unavailable?: string
+      reason?: string
+      decoded?: string[]
+    } | null
+  >(null)
   const [allowSolanaBlindSigning, setAllowSolanaBlindSigning] = useState(false)
   const [txid, setTxid] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
@@ -2231,6 +2242,13 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       if (raw.includes(SOLANA_BLIND_SIGNING_REQUIRED)) {
         setBlindSignError(null)
         setBlindSignCause('host')
+        // The backend appends a host-side outflow check (what this transaction
+        // actually moves out of the wallet, per an independent RPC simulation).
+        // Absent or unparseable → the panel just omits the figures.
+        try {
+          const json = raw.slice(raw.indexOf(SOLANA_BLIND_SIGNING_REQUIRED) + SOLANA_BLIND_SIGNING_REQUIRED.length).trim()
+          setOutflowCheck(json ? JSON.parse(json) : null)
+        } catch { setOutflowCheck(null) }
         setPhase('blind-signing-required')
         return
       }
@@ -2241,6 +2259,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       if (/AdvancedMode/i.test(raw)) {
         setBlindSignError(null)
         setBlindSignCause('device')
+        setOutflowCheck(null)
         setPhase('blind-signing-required')
         return
       }
@@ -2320,9 +2339,10 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     setError(t('swapCancelled', 'Swap cancelled — confirm again or change inputs'))
   }, [phase, t])
 
-  // Authorize only the pending Solana transaction to use the opaque fallback.
-  // The authorization travels with one SolanaSignTx request and does not mutate
-  // the device's persistent, global AdvancedMode policy.
+  // Turn on the device's AdvancedMode (Blind Signing) policy. There is no
+  // per-transaction exception on shipped firmware, so the opaque Solana route
+  // only signs once the global policy is on — it stays on until the user turns
+  // it off in Device Settings. Raises an enable-policy confirm on the device.
   const handleEnableBlindSigning = useCallback(async () => {
     setEnablingBlindSign(true)
     setBlindSignError(null)
@@ -3717,6 +3737,68 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                 </Text>
               </VStack>
 
+              {/* Host-side outflow check: what this transaction actually moves.
+                  Deliberately NOT presented as verification — the device cannot
+                  confirm it, so the wording stays "checked on this computer". */}
+              {outflowCheck && (
+                <Box bg="var(--ink-1)" border="1px solid var(--ink-3)" borderRadius="lg" px="3" py="2.5" maxW="420px" w="full">
+                  <Text fontSize="10px" color="kk.textMuted" textTransform="uppercase" letterSpacing="0.06em" mb="1.5">
+                    {t('solanaOutflowHeader', 'Checked on this computer')}
+                  </Text>
+                  {outflowCheck.unavailable ? (
+                    <Text fontSize="xs" color="kk.textSecondary" lineHeight="1.5">
+                      {t('solanaOutflowUnknown', 'Could not determine what this transaction does')} — {outflowCheck.unavailable}
+                    </Text>
+                  ) : (
+                    <>
+                      <Text fontSize="xs" color="kk.textPrimary" lineHeight="1.6">
+                        {t('solanaOutflowAfter', 'After this transaction your wallet holds')}:{' '}
+                        <strong>{(Number(outflowCheck.solAfter) / 1e9).toFixed(6)} SOL</strong>
+                        {outflowCheck.tokensAfter.map(tk => {
+                          const d = tk.decimals ?? 0
+                          const amt = d > 0 ? (Number(tk.amount) / 10 ** d).toFixed(Math.min(d, 6)) : tk.amount
+                          return (
+                            <span key={tk.mint}>
+                              {' + '}<strong>{amt} {tk.symbol || `${tk.mint.slice(0, 4)}…${tk.mint.slice(-4)}`}</strong>
+                            </span>
+                          )
+                        })}
+                      </Text>
+                      {outflowCheck.spending && (
+                        <Text fontSize="11px" color="kk.textSecondary" mt="1">
+                          {t('solanaOutflowSpending', 'You approved spending')}: {outflowCheck.spending} {outflowCheck.spendingSymbol || ''}
+                        </Text>
+                      )}
+                      {Number(outflowCheck.solAfter) / 1e9 < 0.001 && (
+                        <Text fontSize="xs" color="kk.error" mt="1.5" fontWeight="600">
+                          {t('solanaOutflowDrain', 'Warning: this leaves your wallet empty. Do not sign unless that is what you intended.')}
+                        </Text>
+                      )}
+                    </>
+                  )}
+                  {outflowCheck.decoded?.length ? (
+                    <Box mt="2" pt="2" borderTop="1px solid var(--ink-3)">
+                      <Text fontSize="10px" color="kk.textMuted" textTransform="uppercase" letterSpacing="0.06em" mb="1">
+                        {t('solanaDecodedHeader', 'What this transaction does')}
+                      </Text>
+                      {outflowCheck.decoded.map((line, i) => (
+                        <Text key={i} fontSize="11px" color="kk.textPrimary" lineHeight="1.5" fontFamily="mono">
+                          {line}
+                        </Text>
+                      ))}
+                    </Box>
+                  ) : null}
+                  {outflowCheck.reason && (
+                    <Text fontSize="11px" color="kk.textSecondary" mt="2" lineHeight="1.45">
+                      {t('solanaOpaqueReason', 'Your KeepKey cannot read this transaction because of')}: {outflowCheck.reason}
+                    </Text>
+                  )}
+                  <Text fontSize="10px" color="kk.textMuted" mt="1.5" lineHeight="1.4">
+                    {t('solanaOutflowCaveat', 'Simulated against a Solana node from this computer. Your KeepKey cannot confirm these figures.')}
+                  </Text>
+                </Box>
+              )}
+
               {/* Security caveat */}
               <Flex align="flex-start" gap="2" bg="var(--ink-1)" border="1px solid var(--ink-3)" borderRadius="lg" px="3" py="2.5" maxW="420px">
                 <Box color="var(--gold)" flexShrink={0} mt="0.5">
@@ -3746,7 +3828,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                 </Button>
                 <Button size="sm" flex="1" bg="kk.gold" color="black" fontWeight="600"
                   loading={enablingBlindSign}
-                  loadingText={t('blindSignPreparing', 'Preparing…')}
+                  loadingText={t('blindSignConfirmOnDevice', 'Confirm on device…')}
                   _hover={{ opacity: 0.9 }}
                   onClick={handleEnableBlindSigning}>
                   {blindSignCause === 'device'

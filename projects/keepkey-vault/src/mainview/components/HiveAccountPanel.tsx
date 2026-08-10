@@ -144,6 +144,7 @@ export function HiveAccountPanel({ activeKey, color, loading, deriveError, onRet
 					{ label: "Ecency", url: `https://ecency.com/@${account.name}` },
 				].map(l => (
 					<Button key={l.label} size="xs" variant="outline" gap="1.5" px="2.5" fontWeight="500" {...outlineBtn}
+						aria-label={`Open ${l.label} profile`}
 						onClick={() => rpcRequest("openUrl", { url: l.url }).catch(() => {})}>
 						{l.label}<Box as={FaExternalLinkAlt} fontSize="9px" opacity="0.55" />
 					</Button>

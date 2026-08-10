@@ -2,6 +2,8 @@ import type { EngineController } from './engine-controller'
 import type { AuthStore } from './auth'
 import { HttpError } from './auth'
 import type { SigningRequestInfo, ApiLogEntry, EIP712DecodedInfo } from '../shared/types'
+import type { ClearSignEvent } from '../shared/types'
+import { createHash } from 'crypto'
 import { decodeEIP712 } from './eip712-decoder'
 import { decodeCalldata, firmwareClearSigns } from './calldata-decoder'
 import { CHAINS, isChainSupported, hiveRolePath } from '../shared/chains'
@@ -22,7 +24,7 @@ import { handleV2DataRoute } from './rest-pioneer'
 import { handleSwapRoute } from './rest-swap'
 import { handleSweepRoute } from './rest-sweep'
 import { handleLedgerRoute } from './rest-ledger'
-import { getSetting, findApiLogs, getApiLogById, getRecentActivityFromLog, getSwapHistory, getSwapHistoryByTxid, getSwapHistoryStats, getCachedBalances, getCachedPubkeys, getAllTokenVisibility, getTokensByVisibility, setTokenVisibility, removeTokenVisibility } from './db'
+import { getSetting, findApiLogs, getApiLogById, getRecentActivityFromLog, getSwapHistory, getSwapHistoryByTxid, getSwapHistoryStats, getCachedBalances, getCachedPubkeys, getAllTokenVisibility, getTokensByVisibility, setTokenVisibility, removeTokenVisibility, insertClearSignEvent } from './db'
 import { detectSpamToken, categorizeTokens } from '../shared/spamFilter'
 import { rebuildActivityHistory, type ActivityHistoryRebuildOptions } from './activity-history'
 import type { SwapTrackingStatus } from '../shared/types'
@@ -1094,6 +1096,14 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
     const seedId = engine.currentSeedEthAddress?.toLowerCase()
     if (!seedId) return null
     return { deviceId, walletId: `${deviceId}:${seedId}` }
+  }
+
+  const recordRestClearSignEvent = (
+    event: Omit<ClearSignEvent, 'id' | 'createdAt' | 'deviceId' | 'firmwareVersion'>,
+  ) => {
+    if (engine.isPassphraseWallet) return
+    const device = engine.getDeviceState()
+    insertClearSignEvent({ ...event, deviceId: device.deviceId, firmwareVersion: device.firmwareVersion })
   }
 
   // Device-swap detection: if deviceId changes between two `ready` states,
@@ -2406,14 +2416,40 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           }
 
           console.log('[REST] ethSignTx hdwallet payload:', JSON.stringify(msg, null, 2))
+          const clearSignPayload = msg.txMetadata?.signedPayload instanceof Uint8Array
+            ? Buffer.from(msg.txMetadata.signedPayload).toString('hex')
+            : msg.txMetadata?.signedPayload != null ? String(msg.txMetadata.signedPayload) : undefined
+          const clearSignRequest = {
+            keyId: msg.txMetadata?.keyId,
+            chainId: msg.chainId,
+            to: msg.to,
+            dataSelector: typeof msg.data === 'string' ? msg.data.slice(0, 10) : undefined,
+          }
+          let clearSignSentToDevice = false
           try {
             // Honest confirm dialog: decode msg.data so token/contract calls
             // don't show the contract as recipient or 0x0/hex-wei as amount.
             const { evmConfirmDetails } = await import('./emulator-confirm-details')
-            const result = await emuWrap(() => wallet.ethSignTx(msg), evmConfirmDetails('ethSignTx', 'Ethereum', msg))
+            const result = await emuWrap(() => {
+              clearSignSentToDevice = true
+              return wallet.ethSignTx(msg)
+            }, evmConfirmDetails('ethSignTx', 'Ethereum', msg))
             console.log('[REST] ethSignTx result:', JSON.stringify(result))
+            if (clearSignPayload) recordRestClearSignEvent({
+              kind: 'transaction', outcome: 'signed', source: 'rest-api', chain: 'Ethereum',
+              format: 'EVM_TX_METADATA', label: 'EVM ClearSign transaction', payload: clearSignPayload,
+              keyId: Number.isInteger(clearSignRequest.keyId) ? clearSignRequest.keyId : undefined,
+              sentToDevice: clearSignSentToDevice, request: clearSignRequest,
+            })
             return json(validateResponse(result, S.EthSignTransactionResponse, path))
           } catch (err: any) {
+            if (clearSignPayload) recordRestClearSignEvent({
+              kind: 'transaction', outcome: 'blocked', source: 'rest-api', chain: 'Ethereum',
+              format: 'EVM_TX_METADATA', label: 'Blocked EVM ClearSign transaction', payload: clearSignPayload,
+              keyId: Number.isInteger(clearSignRequest.keyId) ? clearSignRequest.keyId : undefined,
+              sentToDevice: clearSignSentToDevice, request: clearSignRequest,
+              error: err?.message || String(err),
+            })
             // Distinguish user cancellation / device rejection from actual failures
             const errMsg = String(err?.message || err || '').toLowerCase()
             if (errMsg.includes('cancel') || errMsg.includes('rejected') || errMsg.includes('denied') || errMsg.includes('action cancelled')) {
@@ -2444,6 +2480,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           if (icon && icon.length > 384) throw new HttpError(400, `icon must be <= 384 bytes, got ${icon.length}`)
           console.log(`[REST] clearsign load-signer: slot=${body.keyId} alias="${body.alias}" pubkey=${body.pubkey}`
             + `${icon ? ` icon=${icon.length}B ${body.iconWidth}x${body.iconHeight}` : ''}${body.persist ? ' persist' : ''}`)
+          let clearSignSentToDevice = false
+          const signerFingerprint = createHash('sha256').update(Buffer.from(pubkey)).digest('hex').slice(0, 8)
           try {
             // Loading a signer raises a mandatory on-device "Trust signer" confirm.
             // On the emulator that button press must be armed via emuWrap (interactive
@@ -2451,15 +2489,31 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             // trust screen but no green button ever appears and the call hangs.
             // emuWrap is a transparent no-op on real hardware.
             await emuWrap(
-              () => (wallet as any).loadClearsignSigner({
-                keyId: body.keyId, pubkey, alias: body.alias,
-                icon, iconWidth: body.iconWidth, iconHeight: body.iconHeight,
-                persist: body.persist === true,
-              }),
+              () => {
+                clearSignSentToDevice = true
+                return (wallet as any).loadClearsignSigner({
+                  keyId: body.keyId, pubkey, alias: body.alias,
+                  icon, iconWidth: body.iconWidth, iconHeight: body.iconHeight,
+                  persist: body.persist === true,
+                })
+              },
               { operation: 'loadClearsignSigner', opLabel: 'Trust Signer', chain: 'Ethereum' },
             )
+            recordRestClearSignEvent({
+              kind: 'signer-load', outcome: 'loaded', source: 'rest-api', chain: 'Ethereum',
+              label: body.alias, publicKey: Buffer.from(pubkey).toString('hex'), fingerprint: signerFingerprint,
+              keyId: body.keyId, sentToDevice: clearSignSentToDevice,
+              request: { persist: body.persist === true, iconBytes: icon?.length || 0 },
+            })
             return json({ ok: true, keyId: body.keyId, alias: body.alias })
           } catch (err: any) {
+            recordRestClearSignEvent({
+              kind: 'signer-load', outcome: 'blocked', source: 'rest-api', chain: 'Ethereum',
+              label: body.alias, publicKey: Buffer.from(pubkey).toString('hex'), fingerprint: signerFingerprint,
+              keyId: body.keyId, sentToDevice: clearSignSentToDevice,
+              request: { persist: body.persist === true, iconBytes: icon?.length || 0 },
+              error: err?.message || String(err),
+            })
             const errMsg = String(err?.message || err || '').toLowerCase()
             if (errMsg.includes('cancel') || errMsg.includes('rejected') || errMsg.includes('denied') || errMsg.includes('action cancelled')) {
               return json({ error: 'User rejected clear-sign signer on device' }, 403)
@@ -2716,36 +2770,63 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           // descriptor unchanged, or adds a one-shot opaque fallback only when
           // the Vault UI returned explicit consent, then splices
           // the returned signature back into the original wire transaction.
-          const result = await signSolanaWireTransaction(
-            {
-              addressNList,
-              rawTx: body.raw_tx,
-              swapMetadata: body.swapMetadata,
-              // Reusable KKSOLSC1 instruction schema — signed once per
-              // program+instruction, so the device can decode this call
-              // without a per-transaction attestation.
-              schema: body.schema,
-              // x402 payment intent is never trusted directly: the signing
-              // helper matches network, sponsor, mint, amount, authority and
-              // destination ATA against the exact v0 message first.
-              x402: body.x402,
-              allowBlindSigning: activeAllowBlindSigning,
-            },
-            (request) => emuWrap(
-              () => wallet.solanaSignTx(request),
-              { operation: 'solanaSignTx', chain: 'Solana' },
-            ),
-            async (signerPath) => {
-              const derived = await wallet.solanaGetAddress({
-                addressNList: signerPath,
-                showDisplay: false,
-              })
-              const address = typeof derived === 'string' ? derived : derived?.address
-              if (!address) throw new Error('Device returned no Solana signer address')
-              return address
-            },
-            'rest:solanaSignTx',
-          )
+          const clearSignPayload = body.schema?.payload ? String(body.schema.payload) : undefined
+          const clearSignRequest = body.schema ? {
+            signerKeyId: body.schema.signerKeyId,
+            txHash: createHash('sha256').update(fullTx).digest('hex'),
+          } : undefined
+          let clearSignSentToDevice = false
+          let result: any
+          try {
+            result = await signSolanaWireTransaction(
+              {
+                addressNList,
+                rawTx: body.raw_tx,
+                swapMetadata: body.swapMetadata,
+                // Reusable KKSOLSC1 instruction schema — signed once per
+                // program+instruction, so the device can decode this call
+                // without a per-transaction attestation.
+                schema: body.schema,
+                // x402 payment intent is never trusted directly: the signing
+                // helper matches network, sponsor, mint, amount, authority and
+                // destination ATA against the exact v0 message first.
+                x402: body.x402,
+                allowBlindSigning: activeAllowBlindSigning,
+              },
+              (request) => {
+                clearSignSentToDevice = true
+                return emuWrap(
+                  () => wallet.solanaSignTx(request),
+                  { operation: 'solanaSignTx', chain: 'Solana' },
+                )
+              },
+              async (signerPath) => {
+                const derived = await wallet.solanaGetAddress({
+                  addressNList: signerPath,
+                  showDisplay: false,
+                })
+                const address = typeof derived === 'string' ? derived : derived?.address
+                if (!address) throw new Error('Device returned no Solana signer address')
+                return address
+              },
+              'rest:solanaSignTx',
+            )
+            if (clearSignPayload) recordRestClearSignEvent({
+              kind: 'transaction', outcome: 'signed', source: 'rest-api', chain: 'Solana',
+              format: 'KKSOLSC1_BASE64', label: 'Solana ClearSign transaction', payload: clearSignPayload,
+              keyId: Number.isInteger(body.schema?.signerKeyId) ? body.schema!.signerKeyId : undefined,
+              sentToDevice: clearSignSentToDevice, request: clearSignRequest,
+            })
+          } catch (err: any) {
+            if (clearSignPayload) recordRestClearSignEvent({
+              kind: 'transaction', outcome: 'blocked', source: 'rest-api', chain: 'Solana',
+              format: 'KKSOLSC1_BASE64', label: 'Blocked Solana ClearSign transaction', payload: clearSignPayload,
+              keyId: Number.isInteger(body.schema?.signerKeyId) ? body.schema!.signerKeyId : undefined,
+              sentToDevice: clearSignSentToDevice, request: clearSignRequest,
+              error: err?.message || String(err),
+            })
+            throw err
+          }
           if (!result?.signature) return json(result)
           return json({
             signature: Buffer.from(result.signature).toString('base64'),
