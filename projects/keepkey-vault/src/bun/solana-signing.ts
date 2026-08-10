@@ -5,6 +5,7 @@ import {
   solanaMessageSlice,
   SolanaTxParseError,
 } from './solana-tx'
+import { prepareSolanaX402DeviceMetadata } from './solana-x402'
 
 export type SolanaDeviceSigner = (params: any) => Promise<any>
 export type SolanaAddressDeriver = (addressNList: number[]) => Promise<string>
@@ -74,8 +75,12 @@ export async function signSolanaWireTransaction(
     )
   }
 
+  const x402Metadata = unsignedTx.x402
+    ? prepareSolanaX402DeviceMetadata(message, unsignedTx.x402, signerPublicKey)
+    : undefined
   const deviceParams = {
     ...unsignedTx,
+    ...(x402Metadata || {}),
     rawTx: Buffer.from(messageBytes).toString('base64'),
   }
   console.debug(

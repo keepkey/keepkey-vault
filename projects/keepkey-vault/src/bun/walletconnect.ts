@@ -14,8 +14,9 @@ import bs58 from 'bs58'
 import type { SigningRequestInfo, WcSessionInfo } from '../shared/types'
 import { evmAddressPath } from './evm-addresses'
 import { verifyEvmSigner } from './evm-rpc'
-import { parseSolanaTx } from './solana-tx'
 import { buildSolanaMessageDecodedInfo } from './solana-message-preview'
+import { buildSolanaDecodedInfo } from './solana-clearsign'
+import { requiresSolanaBlindSigningConsent } from './solana-consent'
 
 function base64ToBase58(base64: string): string {
   return bs58.encode(Buffer.from(base64, 'base64'))
@@ -48,16 +49,30 @@ function assertChainIdMatches(txChainId: unknown, sessionChainId: number) {
   }
 }
 
-/** Versioned (v0+) Solana transactions cannot be parsed by current firmware,
- *  so they are signed via the message-signing path — i.e. blind-signed. We
- *  surface this in the approval method name so the UI can render a stronger
- *  warning. Returns false (treat as legacy) if the tx fails to parse, since
- *  legacy is the safer fallback (forces the firmware tx-parse path). */
-function isVersionedSolanaTx(transactionBase64: string): boolean {
+/** Attach the same clear-sign preview and conservative firmware-policy gate
+ *  used by the REST route. x402's v0 transaction has no lookup tables, so its
+ *  full preview is available without an RPC read. Transactions that do use an
+ *  ALT remain explicitly opaque in WalletConnect until the accounts can be
+ *  independently resolved. */
+async function attachSolanaTransactionPreview(
+  signingInfo: SigningRequestInfo,
+  transactionBase64: string,
+): Promise<void> {
   try {
-    return parseSolanaTx(Buffer.from(transactionBase64, 'base64')).isVersioned
-  } catch {
-    return false
+    signingInfo.solanaDecoded = await buildSolanaDecodedInfo(
+      transactionBase64,
+      async (pubkeys) => pubkeys.map(() => null),
+    )
+  } catch (e: any) {
+    signingInfo.solanaDecodeError = `${e?.name || 'Error'}: ${e?.message || String(e)}`
+  }
+
+  signingInfo.requiresBlindSigningConsent = requiresSolanaBlindSigningConsent(
+    signingInfo.solanaDecoded,
+    false,
+  )
+  if (signingInfo.requiresBlindSigningConsent) {
+    signingInfo.needsBlindSigning = true
   }
 }
 
@@ -683,17 +698,14 @@ export class WalletConnectManager {
         const signingId = crypto.randomUUID()
         const signingInfo: SigningRequestInfo = {
           id: signingId,
-          // v0+ versioned txs hit the message-signing path on the device — the
-          // firmware can't display program/account details, so this is blind.
-          method: isVersionedSolanaTx(transaction)
-            ? '/solana/sign-transaction-blind'
-            : '/solana/sign-transaction',
+          method: '/solana/sign-transaction',
           appName,
           chain: 'solana',
           from: account.address,
           chainId: 0,
           data: transaction,
         }
+        await attachSolanaTransactionPreview(signingInfo, transaction)
         const approved = await this.callbacks.requestSigningApproval(signingInfo)
         if (!approved) throw new Error('User rejected signing')
         try {
@@ -717,15 +729,14 @@ export class WalletConnectManager {
         const signingId = crypto.randomUUID()
         const signingInfo: SigningRequestInfo = {
           id: signingId,
-          method: isVersionedSolanaTx(transaction)
-            ? '/solana/sign-and-send-blind'
-            : '/solana/sign-and-send',
+          method: '/solana/sign-and-send',
           appName,
           chain: 'solana',
           from: account.address,
           chainId: 0,
           data: transaction,
         }
+        await attachSolanaTransactionPreview(signingInfo, transaction)
         const approved = await this.callbacks.requestSigningApproval(signingInfo)
         if (!approved) throw new Error('User rejected signing')
         try {
