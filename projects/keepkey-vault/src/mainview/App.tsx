@@ -144,7 +144,9 @@ function App() {
 		// the new state without waiting for the user to reopen settings.
 		window.addEventListener("keepkey-settings-changed", refreshSettings)
 		return () => window.removeEventListener("keepkey-settings-changed", refreshSettings)
-	}, [])
+		// hiveEnabled is derived from the connected device's firmware, so refetch
+		// whenever the reported version changes (connect / swap / upgrade).
+	}, [deviceState.firmwareVersion])
 
 	// Re-offer a skipped firmware update on every reconnect: clear the skip flag
 	// once the device is fully unplugged so the next connect routes back through

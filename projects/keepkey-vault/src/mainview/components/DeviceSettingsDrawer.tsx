@@ -172,8 +172,6 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 	const [releasingWindowFocus, setReleasingWindowFocus] = useState(false)
 	const [togglingWalletConnect, setTogglingWalletConnect] = useState(false)
 	const [togglingBip85, setTogglingBip85] = useState(false)
-	const [togglingZcashPrivacy, setTogglingZcashPrivacy] = useState(false)
-	const [togglingHive, setTogglingHive] = useState(false)
 	const [togglingEmulator, setTogglingEmulator] = useState(false)
 	const [togglingPreRelease, setTogglingPreRelease] = useState(false)
 	const [togglingAlphaFirmware, setTogglingAlphaFirmware] = useState(false)
@@ -327,24 +325,6 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 			setAppSettings(result)
 		} catch (e: any) { console.error("setBip85Enabled:", e) }
 		setTogglingBip85(false)
-	}, [])
-
-	const toggleZcashPrivacy = useCallback(async (enabled: boolean) => {
-		setTogglingZcashPrivacy(true)
-		try {
-			const result = await rpcRequest<AppSettings>("setZcashPrivacyEnabled", { enabled }, 10000)
-			setAppSettings(result)
-		} catch (e: any) { console.error("setZcashPrivacyEnabled:", e) }
-		setTogglingZcashPrivacy(false)
-	}, [])
-
-	const toggleHive = useCallback(async (enabled: boolean) => {
-		setTogglingHive(true)
-		try {
-			const result = await rpcRequest<AppSettings>("setHiveEnabled", { enabled }, 10000)
-			setAppSettings(result)
-		} catch (e: any) { console.error("setHiveEnabled:", e) }
-		setTogglingHive(false)
 	}, [])
 
 	const toggleEmulator = useCallback(async (enabled: boolean) => {
@@ -1643,59 +1623,8 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 								)
 							})()}
 
-							{/* Zcash Shielded Privacy toggle — requires firmware >= 7.15.0 */}
-							{(() => {
-								const zcashFwOk = !!deviceState.firmwareVersion && versionCompare(deviceState.firmwareVersion, '7.15.0') >= 0
-								return (
-									<Flex justify="space-between" align="center" opacity={zcashFwOk ? 1 : 0.45}>
-										<Flex align="center" gap="3">
-											<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(245,163,59,0.1)">
-												<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#F5A33B" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-													<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-												</svg>
-											</Flex>
-											<Box>
-												<Text fontSize="md" color="kk.textPrimary" fontWeight="500">{t("zcashPrivacyFeature")}</Text>
-												<Text fontSize="sm" color={zcashFwOk ? "kk.textSecondary" : "kk.textTertiary"} mt="0.5">
-													{zcashFwOk ? t("zcashPrivacyFeatureDescription") : "Requires firmware 7.15.0 or later"}
-												</Text>
-											</Box>
-										</Flex>
-										<Toggle
-											checked={zcashFwOk && appSettings.zcashPrivacyEnabled}
-											onChange={toggleZcashPrivacy}
-											disabled={!zcashFwOk || togglingZcashPrivacy}
-										/>
-									</Flex>
-								)
-							})()}
-
-							{/* Hive toggle — requires firmware >= 7.15.0 */}
-							{(() => {
-								const hiveFwOk = !!deviceState.firmwareVersion && versionCompare(deviceState.firmwareVersion, '7.15.0') >= 0
-								return (
-									<Flex justify="space-between" align="center" opacity={hiveFwOk ? 1 : 0.45}>
-										<Flex align="center" gap="3">
-											<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(227,19,55,0.1)">
-												<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#E31337" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-													<path d="M12 2l8 4.5v9L12 22l-8-6.5v-9z" />
-												</svg>
-											</Flex>
-											<Box>
-												<Text fontSize="md" color="kk.textPrimary" fontWeight="500">Hive</Text>
-												<Text fontSize="sm" color={hiveFwOk ? "kk.textSecondary" : "kk.textTertiary"} mt="0.5">
-													{hiveFwOk ? "Enable the Hive blockchain" : "Requires firmware 7.15.0 or later"}
-												</Text>
-											</Box>
-										</Flex>
-										<Toggle
-											checked={hiveFwOk && appSettings.hiveEnabled}
-											onChange={toggleHive}
-											disabled={!hiveFwOk || togglingHive}
-										/>
-									</Flex>
-								)
-							})()}
+							{/* Zcash + Hive have no toggles — both turn on automatically on
+							    firmware >= 7.15.0 (derived in bun/index.ts on device ready). */}
 
 							{/* Emulator toggle — dev tool, default off. Supported on macOS
 							    (Keychain) and Windows (DPAPI); Linux has no key store wired up. */}

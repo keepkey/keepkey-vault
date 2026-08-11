@@ -722,8 +722,8 @@ export interface AppSettings {
   numberLocale: string           // number formatting locale (default 'en-US')
   walletConnectEnabled: boolean   // feature flag: WalletConnect dApp support (default OFF)
   bip85Enabled: boolean          // feature flag: BIP-85 derived seeds (default OFF)
-  zcashPrivacyEnabled: boolean   // feature flag: Zcash shielded/privacy (default OFF, locked)
-  hiveEnabled: boolean           // feature flag: Hive blockchain (default OFF, requires firmware >= 7.15.0)
+  zcashPrivacyEnabled: boolean   // read-only capability: Zcash shielded/privacy — auto-ON when firmware >= 7.15.0
+  hiveEnabled: boolean           // read-only capability: Hive blockchain — auto-ON when firmware >= 7.15.0
   emulatorEnabled: boolean       // feature flag: macOS emulator surface (default OFF — dev-only)
   offlineMode: boolean           // airplane mode: zero outbound network; BTC data ops throw OFFLINE (default OFF)
   btcNodeEnabled: boolean        // self-host: route BTC data to the user's own node instead of Pioneer (default OFF)

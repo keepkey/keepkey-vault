@@ -6117,18 +6117,6 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				console.log('[settings] BIP-85 enabled:', params.enabled)
 				return getAppSettings()
 			},
-			setHiveEnabled: async (params) => {
-				// Hive requires firmware >= 7.15.0 (matches minFirmware in shared/chains.ts).
-				const fwVer = engine.getDeviceState().firmwareVersion
-				if (params.enabled && (!fwVer || versionCompare(fwVer, '7.15.0') < 0)) {
-					console.warn(`[settings] Hive blocked — firmware ${fwVer || 'unknown'} < 7.15.0`)
-					return getAppSettings()
-				}
-				hiveEnabled = params.enabled
-				setSetting('hive_enabled', params.enabled ? '1' : '0')
-				console.log('[settings] Hive enabled:', params.enabled)
-				return getAppSettings()
-			},
 			setEmulatorEnabled: async (params) => {
 				// Refuse to enable on platforms with no emulator support. The
 				// emulator runs on macOS (Keychain) and Windows (DPAPI); Linux
@@ -6156,33 +6144,6 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				emulatorEnabled = params.enabled
 				setSetting('emulator_enabled', params.enabled ? '1' : '0')
 				console.log('[settings] Emulator enabled:', params.enabled)
-				return getAppSettings()
-			},
-			setZcashPrivacyEnabled: async (params) => {
-				// Must match shared/chains.ts (zcash + zcash-shielded both at 7.15.0)
-				// and the helpers in txbuilder/zcash-shield.ts that require
-				// ZcashTransparentInput support (also 7.15.0). Letting users enable
-				// the feature on 7.14.0 only to have every action fail downstream is
-				// worse than blocking it here.
-				const fwVer = engine.getDeviceState().firmwareVersion
-				if (params.enabled && (!fwVer || versionCompare(fwVer, '7.15.0') < 0)) {
-					console.warn(`[settings] Zcash privacy blocked — firmware ${fwVer || 'unknown'} < 7.15.0`)
-					return getAppSettings()
-				}
-				zcashPrivacyEnabled = params.enabled
-				setSetting('zcash_privacy_enabled', params.enabled ? '1' : '0')
-				console.log('[settings] Zcash privacy enabled:', params.enabled)
-				if (params.enabled) {
-					if (!isSidecarReady()) {
-						console.log('[zcash] Starting sidecar on feature enable...')
-						try { await startSidecar() } catch (e: any) {
-							console.error('[zcash] Sidecar failed to start:', e.message)
-						}
-					}
-				} else {
-					console.log('[zcash] Stopping sidecar on feature disable...')
-					stopSidecar()
-				}
 				return getAppSettings()
 			},
 			setPreReleaseUpdates: async (params) => {
@@ -8348,16 +8309,25 @@ engine.on('state-change', (state) => {
 			setSetting('bip85_enabled', '0')
 			console.log(`[settings] BIP-85 auto-disabled — firmware ${fw || 'unknown'} < 7.16.0`)
 		}
-		if (zcashPrivacyEnabled && (!fw || versionCompare(fw, '7.15.0') < 0)) {
-			zcashPrivacyEnabled = false
-			setSetting('zcash_privacy_enabled', '0')
-			stopSidecar()
-			console.log(`[settings] Zcash privacy auto-disabled — firmware ${fw || 'unknown'} < 7.15.0`)
+		// Zcash + Hive are capabilities, not user toggles: ON whenever the
+		// connected device runs firmware >= 7.15.0, OFF otherwise. The setting
+		// row is kept as a mirror of the derived value so the getSetting() gates
+		// in rest-api.ts keep reading the same answer from one source.
+		const has715 = !!fw && versionCompare(fw, '7.15.0') >= 0
+		if (zcashPrivacyEnabled !== has715) {
+			zcashPrivacyEnabled = has715
+			setSetting('zcash_privacy_enabled', has715 ? '1' : '0')
+			console.log(`[settings] Zcash privacy auto-${has715 ? 'enabled' : 'disabled'} — firmware ${fw || 'unknown'}`)
+			if (!has715) stopSidecar()
+			else if (!isSidecarReady()) {
+				console.log('[zcash] Starting sidecar on firmware capability detect...')
+				startSidecar().catch((e: any) => console.error('[zcash] Sidecar failed to start:', e.message))
+			}
 		}
-		if (hiveEnabled && (!fw || versionCompare(fw, '7.15.0') < 0)) {
-			hiveEnabled = false
-			setSetting('hive_enabled', '0')
-			console.log(`[settings] Hive auto-disabled — firmware ${fw || 'unknown'} < 7.15.0`)
+		if (hiveEnabled !== has715) {
+			hiveEnabled = has715
+			setSetting('hive_enabled', has715 ? '1' : '0')
+			console.log(`[settings] Hive auto-${has715 ? 'enabled' : 'disabled'} — firmware ${fw || 'unknown'}`)
 		}
 	}
 	if (state.state === 'ready' && !pioneerSocket) {
