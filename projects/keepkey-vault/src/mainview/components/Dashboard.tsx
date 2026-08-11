@@ -944,7 +944,9 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 			.catch(() => {})
 	}, [])
 
-	useEffect(() => { refreshFeatureFlags() }, [refreshFeatureFlags])
+	// Zcash/Hive are derived from the connected device's firmware — refetch when
+	// the reported version changes, not just on mount.
+	useEffect(() => { refreshFeatureFlags() }, [refreshFeatureFlags, firmwareVersion])
 
 	useEffect(() => {
 		window.addEventListener('keepkey-settings-changed', refreshFeatureFlags)

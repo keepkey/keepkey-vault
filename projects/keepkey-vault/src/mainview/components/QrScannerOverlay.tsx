@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react"
+import { createPortal } from "react-dom"
 import { Box, Flex, Text, Button } from "@chakra-ui/react"
 import jsQR from "jsqr"
 
@@ -136,15 +137,20 @@ export function QrScannerOverlay({ onScan, onClose }: QrScannerOverlayProps) {
 		}
 	}, [processFile])
 
-	return (
+	// Portal to <body>: `position: fixed` resolves against the nearest
+	// transformed/filtered ancestor, not the viewport, so rendering in place
+	// left the overlay offset by that ancestor's origin (SendForm, WalletConnect
+	// and ZcashPrivacyTab all mount under animated containers).
+	return createPortal(
 		<Flex
 			position="fixed"
-			top={0} left={0}
-			w="100vw" h="100vh"
+			inset={0}
 			bg="blackAlpha.900"
 			align="center" justify="center"
 			zIndex={2000}
 			direction="column"
+			overflowY="auto"
+			py="6"
 		>
 			<Text fontSize="lg" fontWeight="bold" color="white" mb="4">
 				Scan QR Code
@@ -270,6 +276,7 @@ export function QrScannerOverlay({ onScan, onClose }: QrScannerOverlayProps) {
 			>
 				Cancel
 			</Button>
-		</Flex>
+		</Flex>,
+		document.body
 	)
 }

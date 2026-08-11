@@ -321,6 +321,27 @@ export function TutorialPage({ type, cardIndex, onNext, onSkip, passphraseEnable
               </Text>
             </VStack>
           )}
+
+          {/* Docs article for this card — inside the card and styled as an
+              accent pill so it reads as a real action, not footer chrome. */}
+          {card.helpUrl && (
+            <DocsLink
+              href={card.helpUrl}
+              color={card.accent}
+              fontSize="sm"
+              fontWeight="600"
+              textDecoration="none"
+              border="1px solid"
+              borderColor={`${card.accent}55`}
+              borderRadius="full"
+              bg={`${card.accent}12`}
+              px={4}
+              py={2}
+              mt={1}
+              transition="all 0.15s ease"
+              _hover={{ bg: `${card.accent}22`, borderColor: card.accent, color: card.accent }}
+            />
+          )}
         </VStack>
       </Box>
 
@@ -347,13 +368,10 @@ export function TutorialPage({ type, cardIndex, onNext, onSkip, passphraseEnable
         )}
       </VStack>
 
-      {/* Step counter + docs link for this card */}
-      <HStack gap={3} align="center">
-        <Text fontSize="2xs" color="gray.600">
-          {t('tutorial.stepCounter', { current: cardIndex + 1, total: cards.length })}
-        </Text>
-        {card.helpUrl && <DocsLink href={card.helpUrl} color="gray.600" />}
-      </HStack>
+      {/* Step counter — the docs link now lives inside the card above. */}
+      <Text fontSize="2xs" color="gray.600">
+        {t('tutorial.stepCounter', { current: cardIndex + 1, total: cards.length })}
+      </Text>
     </VStack>
   )
 }

@@ -225,8 +225,8 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       testBtcNode: { params: { type: 'blockbook' | 'core'; url: string; rpcUser?: string; rpcPass?: string }; response: { ok: boolean; error?: string; chain?: string; blocks?: number; pruned?: boolean; txindex?: boolean; inSync?: boolean; detectedType?: 'blockbook' | 'core' } }
       getBtcNodeStatus: { params: void; response: { active: boolean; kind?: 'blockbook' | 'core'; ok?: boolean; error?: string; height?: number; headers?: number; syncing?: boolean; progress?: number } }
       setBip85Enabled: { params: { enabled: boolean }; response: AppSettings }
-      setZcashPrivacyEnabled: { params: { enabled: boolean }; response: AppSettings }
-      setHiveEnabled: { params: { enabled: boolean }; response: AppSettings }
+      // Zcash + Hive have no setters — both are derived from the connected
+      // device's firmware (>= 7.15.0) in the device-ready handler in bun/index.ts.
       setEmulatorEnabled: { params: { enabled: boolean }; response: AppSettings }
       setPreReleaseUpdates: { params: { enabled: boolean }; response: AppSettings }
       setAlphaFirmware: { params: { enabled: boolean }; response: AppSettings }
