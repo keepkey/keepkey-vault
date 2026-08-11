@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { buildUtxoTx } from './utxo'
+import { buildUtxoTx, zcashBranchId } from './utxo'
 
 const ZCASH = {
 	id: 'zcash',
@@ -50,12 +50,10 @@ describe('transparent Zcash transaction policy', () => {
 			xpub: 'xpub-test',
 		})
 
-		// NU6.2 — what this branch of the builder actually emits. The upstream
-		// dice/RNG branch asserted 0x37a5165b (NU6.3 "Ironwood"), but moving the
-		// consensus branch ID is a network-upgrade decision of its own and is not
-		// part of the maturity work; adopting NU6.3 should fail this line loudly
-		// so it gets changed deliberately rather than riding along.
-		expect(tx.branchId).toBe(0x5437f330)
+		// NU6.3 "Ironwood" — active on mainnet since height 3,428,143
+		// (2026-07-28). With no sidecar tip the builder assumes the newest
+		// known upgrade, which is what this path hits.
+		expect(tx.branchId).toBe(0x37a5165b)
 		expect(tx.inputs).toHaveLength(1)
 		expect(tx.inputs[0].amount).toBe('14727242')
 		expect(tx.outputs[0].amount).toBe('14717242')
@@ -77,5 +75,32 @@ describe('transparent Zcash transaction policy', () => {
 			isMax: true,
 			xpub: 'xpub-test',
 		})).rejects.toThrow('4/10 blocks')
+	})
+})
+
+// A hardcoded NU6.2 constant outlived Ironwood's activation here and broke
+// every transparent send with ScriptInvalid, because the signature commits to
+// the branch ID. These pin the boundary so the next upgrade flips on height
+// instead of on someone noticing.
+describe('Zcash consensus branch selection', () => {
+	it('uses Ironwood at and above its activation height', () => {
+		expect(zcashBranchId(3_428_143)).toBe(0x37a5165b)
+		expect(zcashBranchId(3_500_000)).toBe(0x37a5165b)
+	})
+
+	it('uses NU6.2 in the block before Ironwood activates', () => {
+		expect(zcashBranchId(3_428_142)).toBe(0x5437f330)
+	})
+
+	it('walks back through earlier upgrades', () => {
+		expect(zcashBranchId(3_364_600)).toBe(0x5437f330) // NU6.2
+		expect(zcashBranchId(3_146_400)).toBe(0x4dec4df0) // NU6.1
+		expect(zcashBranchId(2_726_400)).toBe(0xc8e71055) // NU6
+		expect(zcashBranchId(1_687_104)).toBe(0xc2d6d0b4) // NU5
+	})
+
+	it('assumes the newest upgrade when no tip is available', () => {
+		// Guessing old is the failure that survives every future activation.
+		expect(zcashBranchId(null)).toBe(0x37a5165b)
 	})
 })

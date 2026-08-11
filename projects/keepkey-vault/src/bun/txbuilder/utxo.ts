@@ -38,6 +38,38 @@ async function zcashTipHeight(): Promise<number | null> {
   }
 }
 
+/** Zcash consensus branch IDs by mainnet activation height, newest first.
+ *
+ *  The branch ID is baked into the ZIP-243 transparent sighash, so a stale one
+ *  makes every node reject the tx as ScriptInvalid — the signature commits to
+ *  the wrong branch. Values and heights are from zcash_protocol's consensus.rs
+ *  (`BranchId::branch_id` / `activation_height`), the same crate the sidecar
+ *  builds against.
+ *
+ *  This is a table rather than a constant because a constant already rotted
+ *  here: NU6.2 was hardcoded, Ironwood activated at 3,428,143 on 2026-07-28,
+ *  and transparent sends broke silently. Adding the next upgrade's row ahead
+ *  of its activation lets the switch happen on its own at the right height. */
+const ZCASH_BRANCH_IDS: ReadonlyArray<{ activationHeight: number; branchId: number; name: string }> = [
+  { activationHeight: 3_428_143, branchId: 0x37a5165b, name: 'NU6.3 Ironwood' },
+  { activationHeight: 3_364_600, branchId: 0x5437f330, name: 'NU6.2' },
+  { activationHeight: 3_146_400, branchId: 0x4dec4df0, name: 'NU6.1' },
+  { activationHeight: 2_726_400, branchId: 0xc8e71055, name: 'NU6' },
+  { activationHeight: 1_687_104, branchId: 0xc2d6d0b4, name: 'NU5' },
+]
+
+/** Branch ID in force at `tipHeight`.
+ *
+ *  With no tip (sidecar not running — transparent sends do not require it) we
+ *  assume the newest known upgrade is live. Both a too-old and a too-new guess
+ *  fail the same way, at broadcast, but guessing old is the failure that
+ *  persists silently through every future upgrade. Guessing new self-corrects
+ *  the moment the table gains a row. */
+export function zcashBranchId(tipHeight: number | null): number {
+  if (tipHeight == null) return ZCASH_BRANCH_IDS[0].branchId
+  return (ZCASH_BRANCH_IDS.find(u => tipHeight >= u.activationHeight) ?? ZCASH_BRANCH_IDS[0]).branchId
+}
+
 const btcSelfHostActive = (networkId: string) =>
   networkId === BTC_NETWORK_ID && getBtcBackend().kind !== 'pioneer'
 
@@ -347,6 +379,9 @@ export async function buildUtxoTx(
   params: BuildUtxoParams,
 ) {
   const { memo, feeLevel = 5, isMax = false, xpub, allXpubs, scriptTypeOverride, accountPath, satPerVByte } = params
+  // Chain tip for ZEC maturity + consensus branch selection; null when the
+  // sidecar isn't running, which transparent sends don't require.
+  let zcashTip: number | null = null
   // BCH: NEAR Intents (and some other providers) return legacy P2PKH/P2SH addresses
   // (starting with '1'/'3'). The KeepKey firmware requires cashaddr format — convert.
   const to = chain.id === 'bitcoincash' ? normalizeBchAddress(params.to) : params.to
@@ -387,7 +422,8 @@ export async function buildUtxoTx(
     utxos = await fetchUtxosForXpub(pioneer, chain.networkId, primaryXpub, scriptType, accountPath || undefined)
   }
   if (chain.id === 'zcash') {
-    const tipHeight = await zcashTipHeight()
+    zcashTip = await zcashTipHeight()
+    const tipHeight = zcashTip
     const maturity = summarizeZcashMaturity(utxos, tipHeight)
     const allZcashUtxos = utxos
     utxos = filterSpendableZcashUtxos(allZcashUtxos, tipHeight)
@@ -725,14 +761,11 @@ export async function buildUtxoTx(
       overwintered: true,
       versionGroupId: 0x892F2085,
       // Consensus branch id baked into the ZIP-243 transparent sighash. A
-      // stale value makes every node reject the tx as ScriptInvalid (the
-      // signature commits to the wrong branch), so this MUST track Zcash
-      // network upgrades. The shielded paths get it live from the sidecar;
-      // this transparent path has no sidecar dependency, hence a constant.
-      // ponytail: rots at every NU activation — if ZEC sends suddenly fail
-      // ScriptInvalid on all nodes, update this first (the sidecar's
-      // ZcashSignPCZT log line prints the current live value).
-      branchId: 0x5437f330,   // NU6.2 (current Zcash mainnet, 2026)
+      // stale value makes every node reject the tx as ScriptInvalid, because
+      // the signature commits to the wrong branch. Selected by chain tip from
+      // ZCASH_BRANCH_IDS rather than hardcoded — the previous constant said
+      // NU6.2 and outlived Ironwood's activation, silently breaking sends.
+      branchId: zcashBranchId(zcashTip),
       expiry: 0,
     } : {}),
     fee: String(fee / 10 ** chain.decimals),
