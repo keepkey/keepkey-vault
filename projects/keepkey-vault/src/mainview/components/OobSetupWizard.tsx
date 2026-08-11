@@ -189,13 +189,6 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
   // Last completed audit outcome. 'failed' hard-blocks wallet creation until a
   // re-run comes back healthy — a failed generator means predictable keys.
   const [rngVerdict, setRngVerdict] = useState<'healthy' | 'failed' | null>(null)
-  // Classified resetDevice failure (pin-mismatch / cancelled). Rendered as an
-  // explain-and-retry card on init-progress instead of ejecting to init-choose.
-  const [createError, setCreateError] = useState<{ errorType: 'pin-mismatch' | 'cancelled' | 'unknown'; message: string } | null>(null)
-  // The engine emits 'reset-error' just before the resetDevice RPC rejects, so
-  // by the time the catch runs this ref already holds the classification.
-  const lastResetErrorRef = useRef<{ errorType: 'pin-mismatch' | 'cancelled' | 'unknown'; message: string } | null>(null)
-  useEffect(() => onRpcMessage('reset-error', (e) => { lastResetErrorRef.current = e }), [])
   const [diceEntropy, setDiceEntropy] = useState(false)
 
   // Emulator state — moved below deviceStatus declaration
