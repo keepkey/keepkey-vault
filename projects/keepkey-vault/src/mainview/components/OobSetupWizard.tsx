@@ -270,8 +270,12 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
   const isEmulator = deviceStatus.isEmulator ?? false
 
   // Bootloader skip is only safe on firmware >= 6.1.1.
-  // ResetDevice.dice_entropy only exists in firmware 7.15.0+. Older devices
-  // reject the unknown field, so the option must not even be offered.
+  // ResetDevice.dice_entropy only exists in firmware 7.15.0+. Older devices do
+  // NOT reject the unknown field — nanopb skips it (pb_decode.c "No match
+  // found, skip data") — so an ungated request would succeed and quietly
+  // produce an ordinary RNG-only seed. This gate is load-bearing, not
+  // cosmetic: it must stay even though hdwallet now also refuses. Unknown
+  // firmware version reports false so it fails closed.
   const diceSupported = (() => {
     const fv = deviceStatus.firmwareVersion
     if (!fv) return false
