@@ -10,7 +10,7 @@
 	branch = release/7.14.0
 [submodule "modules/device-protocol"]
 	path = modules/device-protocol
-	url = https://github.com/keepkey/device-protocol
+	url = https://github.com/BitHighlander/device-protocol
 [submodule "modules/electrobun"]
 	path = modules/electrobun
 	url = https://github.com/blackboardsh/electrobun.git

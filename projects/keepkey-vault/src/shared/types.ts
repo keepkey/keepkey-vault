@@ -1521,3 +1521,60 @@ export interface UsbDiagnosticReport {
   /** Copy-ready plain-text report for pasting into a support request. */
   text: string
 }
+
+/**
+ * RNG health-test results. These are HEALTH tests, not an entropy measurement:
+ * a strong PRNG seeded with a tiny hidden state passes all of them. See
+ * src/bun/rng-audit.ts for what each check can and cannot prove.
+ */
+export interface RngAuditStats {
+  bytes: number
+  /** Shannon entropy of the byte distribution, bits/byte (8.0 is ideal). */
+  shannonBitsPerByte: number
+  /** Fraction of bits set; 0.5 is ideal. */
+  onesFraction: number
+  /** Chi-square over the 256 byte values (255 degrees of freedom). */
+  chiSquare: number
+  /** Longest run of identical bits seen. */
+  longestBitRun: number
+  /** Distinct byte values observed (256 for any healthy sample of size). */
+  distinctBytes: number
+  /** Repeated 8-byte blocks — any hit is a hard failure (stuck/replayed RNG). */
+  repeatedBlocks8: number
+  /** Observed vs expected 4-byte collisions: the positive control. */
+  collisions4: number
+  expectedCollisions4: number
+  /** False when the sample is too small for the control to mean anything. */
+  collisionControlUsable: boolean
+}
+
+/**
+ * A check reports THREE states, never two. Several checks need a minimum
+ * sample before they mean anything, and reporting a skipped check as a pass
+ * is the single most misleading thing this feature could do -- it puts a
+ * green tick on evidence that was never gathered.
+ */
+export type RngCheckStatus = 'pass' | 'fail' | 'not-run'
+
+export interface RngCheck {
+  id: string
+  /** Short label for the ceremony list, e.g. "Repeated blocks". */
+  label: string
+  status: RngCheckStatus
+  /** Human-readable outcome, or why it could not run. */
+  detail: string
+}
+
+export interface RngAuditReport {
+  stats: RngAuditStats
+  /** Every check, in the order it is presented. */
+  checks: RngCheck[]
+  /** Every check that failed; empty when healthy. */
+  failures: string[]
+  /** SHA-256 of the collected sample, so a report can be tied to its bytes. */
+  sampleSha256: string
+  /** 'healthy' means nothing FAILED -- not that everything ran. */
+  verdict: 'healthy' | 'failed'
+  /** Bytes actually requested per device call, discovered at runtime. */
+  chunkBytes?: number
+}

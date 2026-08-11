@@ -15,7 +15,9 @@ import {
 } from 'react-icons/fa'
 
 // ── Shared card animations ────────────────────────────────────────────
-const CARD_CSS = `
+// Also used by SecurityStepPage and CreateWalletBriefing so the whole
+// create-wallet ceremony animates like the tutorial cards.
+export const CARD_CSS = `
   @keyframes tutorialFadeIn {
     0% { opacity: 0; transform: translateY(12px); }
     100% { opacity: 1; transform: translateY(0); }

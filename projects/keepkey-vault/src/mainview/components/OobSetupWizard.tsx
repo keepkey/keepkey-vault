@@ -16,6 +16,9 @@ import {
 import holdAndConnectRaw from '../assets/svg/hold-and-connect.svg?raw'
 import { useFirmwareUpdate } from '../hooks/useFirmwareUpdate'
 import { useDeviceState } from '../hooks/useDeviceState'
+import { CreateWalletBriefing } from './CreateWalletBriefing'
+import { SecurityStepPage } from './SecurityStepPage'
+import { RngAuditPanel } from './RngAuditPanel'
 import { rpcRequest, onRpcMessage } from '../lib/rpc'
 import type { FirmwareAnalysis, FirmwareProgress } from '../../shared/types'
 import { FirmwareUpgradePreview } from './FirmwareUpgradePreview'
@@ -59,6 +62,9 @@ type WizardStep =
   | 'bootloader'
   | 'firmware'
   | 'init-choose'
+  | 'create-briefing'
+  | 'sec-randomness'
+  | 'sec-dice'
   | 'init-progress'
   | 'init-label'
   | 'verify-seed'
@@ -71,6 +77,9 @@ const STEP_SEQUENCE: WizardStep[] = [
   'bootloader',
   'firmware',
   'init-choose',
+  'create-briefing',
+  'sec-randomness',
+  'sec-dice',
   'init-progress',
   'init-label',
   'verify-seed',
@@ -87,6 +96,9 @@ const stepToVisibleId: Record<WizardStep, string | null> = {
   'bootloader': 'bootloader',
   'firmware': 'firmware',
   'init-choose': 'init-choose',
+  'create-briefing': 'init-choose',
+  'sec-randomness': 'init-choose',
+  'sec-dice': 'init-choose',
   'init-progress': 'init-choose',
   'init-label': 'init-choose',
   'verify-seed': 'init-choose',
@@ -153,6 +165,9 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
     'bootloader': t('stepDescriptions.bootloader'),
     'firmware': t('stepDescriptions.firmware'),
     'init-choose': t('stepDescriptions.initChoose'),
+    'create-briefing': t('stepDescriptions.createBriefing', { defaultValue: 'Before you create a wallet' }),
+    'sec-randomness': t('stepDescriptions.secRandomness', { defaultValue: 'Verify device randomness' }),
+    'sec-dice': t('stepDescriptions.secDice', { defaultValue: 'Add your own dice rolls' }),
     'init-progress': t('stepDescriptions.initProgress'),
     'init-label': t('stepDescriptions.initLabel'),
     'verify-seed': t('stepDescriptions.verifySeed', { defaultValue: 'Verify your recovery phrase' }),
@@ -170,6 +185,11 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
   const [showReadMore, setShowReadMore] = useState(false)
   // Advanced seed length toggle for create wallet
   const [showCreateAdvanced, setShowCreateAdvanced] = useState(false)
+  const [rngAuditOpen, setRngAuditOpen] = useState(false)
+  // Last completed audit outcome. 'failed' hard-blocks wallet creation until a
+  // re-run comes back healthy — a failed generator means predictable keys.
+  const [rngVerdict, setRngVerdict] = useState<'healthy' | 'failed' | null>(null)
+  const [diceEntropy, setDiceEntropy] = useState(false)
 
   // Emulator state — moved below deviceStatus declaration
 
@@ -250,6 +270,15 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
   const isEmulator = deviceStatus.isEmulator ?? false
 
   // Bootloader skip is only safe on firmware >= 6.1.1.
+  // ResetDevice.dice_entropy only exists in firmware 7.15.0+. Older devices
+  // reject the unknown field, so the option must not even be offered.
+  const diceSupported = (() => {
+    const fv = deviceStatus.firmwareVersion
+    if (!fv) return false
+    const [maj, min] = fv.split('.').map(Number)
+    return maj > 7 || (maj === 7 && min >= 15)
+  })()
+
   // In bootloader mode we don't know the FW version — never allow skip.
   const canSkipBootloader = (() => {
     if (inBootloader) return false
@@ -343,6 +372,15 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
       setStep('init-label')
     }
   }, [step, setupType, isEmulator, deviceStatus.state, deviceStatus.deviceId, createError])
+
+  // ── Audit verdict dies with the cable ──────────────────────────────────
+  // The verdict describes the physically-present device. After a disconnect
+  // we cannot tell what was plugged back in (uninitialized devices lack a
+  // stable deviceId), so pass and fail both reset. The durable form of this
+  // gate is the firmware-side fault latch, not host state.
+  useEffect(() => {
+    if (deviceStatus.state === 'disconnected') setRngVerdict(null)
+  }, [deviceStatus.state])
 
   // ── Welcome → user clicks to advance ───────────────────────────────────
   // Only enable "Get Started" when real device features are available.
@@ -687,6 +725,12 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
   const DEVICE_INTERACTION_TIMEOUT = 0
 
   const handleCreateWallet = async () => {
+    // Hard gate, not presentation: every path that creates a wallet funnels
+    // through here, so a failed randomness audit blocks all of them.
+    if (rngVerdict === 'failed') {
+      setStep('sec-randomness')
+      return
+    }
     setSetupType('create')
     setStep('init-progress')
     setSetupError(null)
@@ -710,6 +754,7 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
         wordCount,
         pin: true,
         passphrase: false,
+        diceEntropy,
       }, DEVICE_INTERACTION_TIMEOUT)
       setStep('init-label')
     } catch (err) {
@@ -851,8 +896,11 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
   // create-recovery effect immediately pushes forward again — a no-op bounce.
   const showPrevious = !['intro', 'welcome', 'complete', 'init-progress', 'init-label', 'verify-seed', 'security-tips'].includes(step)
   // L4 fix: hide Next on firmware step for OOB devices (firmware is required)
+  // Security steps carry their own Accept/Skip actions; a footer Next would
+  // bypass them (and from sec-dice would land on init-progress with no RPC in
+  // flight — a spinner that never resolves).
   const showNext =
-    !['intro', 'bootloader', 'init-choose', 'init-progress', 'init-label', 'verify-seed', 'security-tips', 'complete'].includes(step) &&
+    !['intro', 'bootloader', 'init-choose', 'create-briefing', 'sec-randomness', 'sec-dice', 'init-progress', 'init-label', 'verify-seed', 'security-tips', 'complete'].includes(step) &&
     !(step === 'firmware' && (updateState === 'updating' || updateState === 'complete')) &&
     !(step === 'firmware' && isOobDevice)
 
@@ -1995,6 +2043,82 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
               </VStack>
             )}
 
+            {/* ═══════════ CREATE: BRIEFING ═════════════════════════ */}
+            {step === 'create-briefing' && (
+              <CreateWalletBriefing
+                wordCount={wordCount}
+                onConfirm={() => {
+                  // A failed audit from an earlier attempt lands on the blocked
+                  // screen — even on devices too old for dice, which otherwise
+                  // skip straight to generation.
+                  if (rngVerdict === 'failed') {
+                    setStep('sec-randomness')
+                    return
+                  }
+                  // Randomness first, then dice: audit the source BEFORE adding
+                  // to it, or the audit measures the wrong thing. Devices too
+                  // old for dice skip straight to generation.
+                  setStep(diceSupported ? 'sec-randomness' : 'init-progress')
+                  if (!diceSupported) void handleCreateWallet()
+                }}
+              />
+            )}
+
+            {/* ═══════ SECURITY: VERIFY RANDOMNESS (optional) ═══════ */}
+            {step === 'sec-randomness' && rngVerdict === 'failed' && (
+              <VStack gap={4} w="100%" maxW="400px" mx="auto">
+                <Box
+                  w="100%"
+                  bg="rgba(230,100,100,0.06)"
+                  border="1px solid"
+                  borderColor="rgba(230,100,100,0.4)"
+                  borderRadius="2xl"
+                  p={6}
+                >
+                  <VStack gap={3}>
+                    <Text fontSize="xl" fontWeight="800" color="#e66464" textAlign="center" letterSpacing="-0.02em">
+                      {t('security.randomness.failedTitle', { defaultValue: 'Do not use this device' })}
+                    </Text>
+                    <Text fontSize="sm" color="gray.400" textAlign="center" lineHeight="1.6">
+                      {t('security.randomness.failedLead', {
+                        defaultValue:
+                          'The randomness audit found output this device should never produce. Every key it generates could be predictable, so wallet creation is blocked. Re-run the audit to confirm, and contact support@keepkey.com if it fails again.',
+                      })}
+                    </Text>
+                  </VStack>
+                </Box>
+                <Button
+                  w="100%"
+                  size="md"
+                  bg="#e66464"
+                  color="black"
+                  fontWeight="700"
+                  _hover={{ opacity: 0.9 }}
+                  onClick={() => setRngAuditOpen(true)}
+                >
+                  {t('security.randomness.rerun', { defaultValue: 'Run the audit again' })}
+                </Button>
+              </VStack>
+            )}
+            {step === 'sec-randomness' && rngVerdict !== 'failed' && (
+              <SecurityStepPage
+                step="randomness"
+                rollCount={wordCount === 12 ? 50 : wordCount === 18 ? 75 : 99}
+                onAccept={() => setRngAuditOpen(true)}
+                onSkip={() => setStep('sec-dice')}
+              />
+            )}
+
+            {/* ═══════════ SECURITY: DICE (optional) ════════════════ */}
+            {step === 'sec-dice' && (
+              <SecurityStepPage
+                step="dice"
+                rollCount={wordCount === 12 ? 50 : wordCount === 18 ? 75 : 99}
+                onAccept={() => { setDiceEntropy(true); setStep('init-progress'); void handleCreateWallet() }}
+                onSkip={() => { setDiceEntropy(false); setStep('init-progress'); void handleCreateWallet() }}
+              />
+            )}
+
             {/* ═══════════════ INIT: CHOOSE ═════════════════════════ */}
             {step === 'init-choose' && (
               <VStack gap={3} w="100%">
@@ -2127,7 +2251,7 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
                         transition="all 0.15s ease"
                         onClick={(e: React.MouseEvent) => {
                           e.stopPropagation()
-                          handleCreateWallet()
+                          setStep('create-briefing')
                         }}
                       >
                         {t('initChoose.createWallet')}
@@ -3045,6 +3169,17 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
           </Box>
         </Flex>
       )}
+
+      <RngAuditPanel
+        open={rngAuditOpen}
+        onVerdict={setRngVerdict}
+        onClose={() => {
+          setRngAuditOpen(false)
+          // Closing the audit advances the ceremony — unless the run failed,
+          // in which case the step shows the blocked screen.
+          if (step === 'sec-randomness' && rngVerdict !== 'failed') setStep('sec-dice')
+        }}
+      />
     </Flex>
   )
 }

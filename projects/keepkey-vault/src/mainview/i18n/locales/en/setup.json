@@ -136,6 +136,9 @@
 		"seedLength": "Seed length",
 		"words": "words",
 		"entropyNote": "Added seed length does not improve overall wallet entropy.",
+		"testRngTitle": "Check this device first (optional)",
+		"testRngBody": "Run a health test on the random number generator that will create your seed. Only available before setup.",
+		"testRngAction": "Run test",
 		"learnMore": "Learn more",
 		"howManyWords": "How many words in your seed?"
 	},
