@@ -1895,7 +1895,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 										</Flex>
 										<Flex align="baseline" justify="space-between" gap="2" mt="0.5">
 											<Text fontSize="12px" color="var(--text-2)" lineHeight="1.3" truncate>
-												{hasBalance ? `${formatBalance(String(balNum + shielded.amount))} ${chain.symbol}` : t("noBalance")}
+												{`${formatBalance(String(balNum + shielded.amount))} ${chain.symbol}`}
 											</Text>
 											{lowGas && (
 												<Flex
