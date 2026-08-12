@@ -25,7 +25,7 @@
     "@keepkey/proto-tx-builder": "file:../../modules/proto-tx-builder",
     "@pioneer-platform/pioneer-client": "^11.1.0",
     "@pioneer-platform/pioneer-coins": "^11.0.0",
-    "@pioneer-platform/pioneer-discovery": "10.3.1",
+    "@pioneer-platform/pioneer-discovery": "10.3.2",
     "@scure/base": "1.2.6",
     "bs58": "^6.0.0",
     "@walletconnect/core": "^2.23.9",
