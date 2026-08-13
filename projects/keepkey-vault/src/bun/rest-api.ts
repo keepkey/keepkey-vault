@@ -8,7 +8,7 @@ import { decodeEIP712 } from './eip712-decoder'
 import { decodeCalldata, firmwareClearSigns } from './calldata-decoder'
 import { CHAINS, isChainSupported, hiveRolePath } from '../shared/chains'
 import { versionCompare } from '../shared/firmware-versions'
-import { isBitcoinOnlyVariant } from '../shared/flags'
+import { isBitcoinOnlyVariant, DEFAULT_AUTO_LOCK_MS } from '../shared/flags'
 import {
   initializeOrchardFromDevice, scanOrchardNotes, getShieldedBalance,
   buildShieldedTx, finalizeShieldedTx, broadcastShieldedTx,
@@ -4098,7 +4098,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             label: body.label || 'KeepKey',
             pin: body.pin_protection ?? true,
             passphrase: body.passphrase_protection ?? false,
-            autoLockDelayMs: 600000,
+            autoLockDelayMs: DEFAULT_AUTO_LOCK_MS,
           })
           featuresCache = null
           return json({ success: true })
@@ -4120,7 +4120,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               label: body.label || 'KeepKey',
               pin: body.pin_protection ?? true,
               passphrase: body.passphrase_protection ?? false,
-              autoLockDelayMs: 600000,
+              autoLockDelayMs: DEFAULT_AUTO_LOCK_MS,
             })
           } finally {
             engine.endRecovery()

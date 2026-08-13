@@ -7,7 +7,7 @@ import { NodeWebUSBKeepKeyAdapter } from '@keepkey/hdwallet-keepkey-nodewebusb'
 import { usb } from 'usb'
 import { saveDeviceSnapshot, saveEmulatorWalletMeta, clearNonBitcoinBalances } from './db'
 import { HttpError } from './auth'
-import { isBitcoinOnlyVariant } from '../shared/flags'
+import { isBitcoinOnlyVariant, DEFAULT_AUTO_LOCK_MS } from '../shared/flags'
 import type { DeviceStateInfo, ActiveTransport, UpdatePhase, DeviceState, FirmwareManifest, PinRequestType, Bip85DeriveParams, Bip85DisplayResult } from '../shared/types'
 import { resolveOndeviceFirmwareVersion } from '../shared/firmware-versions'
 import { EmulatorKeepKeyAdapter } from './emulator-transport'
@@ -1719,7 +1719,7 @@ export class EngineController extends EventEmitter {
         label: 'KeepKey',
         pin: opts.pin,
         passphrase: opts.passphrase,
-        autoLockDelayMs: 600000, // 10 min — user writes down seed words on device
+        autoLockDelayMs: DEFAULT_AUTO_LOCK_MS,
         // Device-side dice entry. Only sent when asked: firmware older than
         // 7.15.0 has no such field and rejects unknown ones.
         ...(opts.diceEntropy ? { diceEntropy: true } : {}),
@@ -1763,7 +1763,7 @@ export class EngineController extends EventEmitter {
         label: 'KeepKey',
         pin: opts.pin,
         passphrase: opts.passphrase,
-        autoLockDelayMs: 600000, // 10 min — recovery requires extended user interaction
+        autoLockDelayMs: DEFAULT_AUTO_LOCK_MS,
       })
       this.cachedFeatures = await this.wallet!.getFeatures()
       this.updateState(this.deriveState(this.cachedFeatures))

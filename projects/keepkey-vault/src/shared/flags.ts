@@ -34,3 +34,29 @@ export const BITCOIN_ONLY_ONBOARDING = false
  */
 export const isBitcoinOnlyVariant = (variant?: string): boolean =>
   variant === 'KeepKeyBTC' || variant === 'EmulatorBTC'
+
+/**
+ * Idle auto-lock delay written to the device at setup, in milliseconds.
+ *
+ * This is an IDLE timer that only runs while the device is powered: after this
+ * long with no interaction, the device clears its cached PIN and re-prompts.
+ * Unplugging locks the device immediately regardless — the PIN cache lives in
+ * RAM and dies with power — so this value has no bearing on a disconnected
+ * device.
+ *
+ * Firmware clamps to a 30s minimum (storage.c storage_setAutoLockDelayMs) and
+ * has no maximum below the uint32 millisecond ceiling (~49 days). Users can
+ * change it per-device in Settings → Security; this constant is only the value
+ * a freshly set-up or recovered device starts with.
+ */
+export const DEFAULT_AUTO_LOCK_MS = 3_600_000 // 1 hour
+
+/** Choices offered in Settings → Security. Firmware minimum is 30s. */
+export const AUTO_LOCK_CHOICES: ReadonlyArray<{ ms: number; labelKey: string }> = [
+	{ ms: 60_000, labelKey: '1 minute' },
+	{ ms: 600_000, labelKey: '10 minutes' },
+	{ ms: 1_800_000, labelKey: '30 minutes' },
+	{ ms: 3_600_000, labelKey: '1 hour' },
+	{ ms: 14_400_000, labelKey: '4 hours' },
+	{ ms: 86_400_000, labelKey: '24 hours' },
+]

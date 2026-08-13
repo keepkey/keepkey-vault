@@ -6,6 +6,7 @@ import { LanguageSelector } from "../i18n/LanguageSelector"
 import { CurrencySelector } from "./CurrencySelector"
 import { rpcRequest, onRpcMessage } from "../lib/rpc"
 import { IS_MAC, IS_WINDOWS } from "../lib/platform"
+import { AUTO_LOCK_CHOICES, DEFAULT_AUTO_LOCK_MS } from "../../shared/flags"
 import { Z } from "../lib/z-index"
 import type { DeviceStateInfo, AppSettings, EmulatorWalletInfo } from "../../shared/types"
 import { versionCompare } from "../../shared/firmware-versions"
@@ -27,6 +28,7 @@ interface DeviceFeatures {
 	u2fCounter?: number
 	policiesList?: DevicePolicy[]
 	policies?: DevicePolicy[]
+	autoLockDelayMs?: number
 }
 
 interface DeviceSettingsDrawerProps {
@@ -558,6 +560,25 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 		rpcRequest<DeviceFeatures>("getFeatures").then(setFeatures).catch(() => {})
 	}, [])
 
+	const [savingAutoLock, setSavingAutoLock] = useState(false)
+	const handleAutoLockChange = useCallback(async (ms: number) => {
+		setSavingAutoLock(true)
+		try {
+			// The device shows a confirm screen with the new delay in seconds.
+			await rpcRequest("applySettings", { autoLockDelayMs: ms }, 60000)
+			const f = await rpcRequest<DeviceFeatures>("getFeatures")
+			setFeatures(f)
+		} catch (e: any) {
+			console.error("autoLock:", e)
+			// Declined on device (or failed) — re-read so the select snaps back to
+			// what the device actually holds rather than the value we optimistically
+			// showed.
+			rpcRequest<DeviceFeatures>("getFeatures").then(setFeatures).catch(() => {})
+		} finally {
+			setSavingAutoLock(false)
+		}
+	}, [])
+
 	const handleTogglePassphrase = useCallback(async (enable: boolean) => {
 		setTogglingPassphrase(true)
 		try {
@@ -1077,6 +1098,58 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 									{changingPin ? "..." : t("addPin")}
 								</Box>
 							)}
+						</Flex>
+
+						{/* ── Auto-lock row ──────────────────────── */}
+						<Flex
+							align="center"
+							justify="space-between"
+							py="3"
+							borderBottom="1px solid"
+							borderColor="rgba(255,255,255,0.06)"
+						>
+							<Flex align="center" gap="3">
+								<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(233,196,106,0.1)">
+									<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+										<circle cx="12" cy="12" r="10" />
+										<polyline points="12 6 12 12 16 14" />
+									</svg>
+								</Flex>
+								<Box>
+									<Text fontSize="md" color="kk.textPrimary" fontWeight="500">{t("autoLock", { defaultValue: "Auto-lock" })}</Text>
+									<Text fontSize="sm" color="kk.textSecondary" mt="0.5">
+										{t("autoLockHint", { defaultValue: "Idle time before the device re-asks for your PIN. Unplugging always locks it immediately." })}
+									</Text>
+								</Box>
+							</Flex>
+							<select
+								disabled={savingAutoLock || !features}
+								value={String(features?.autoLockDelayMs ?? DEFAULT_AUTO_LOCK_MS)}
+								onChange={(e) => handleAutoLockChange(Number(e.target.value))}
+								style={{
+									padding: "6px 12px",
+									borderRadius: "999px",
+									background: "rgba(233,196,106,0.12)",
+									color: "var(--gold)",
+									fontSize: "12px",
+									fontWeight: 500,
+									border: "none",
+									cursor: savingAutoLock ? "not-allowed" : "pointer",
+									opacity: savingAutoLock ? 0.5 : 1,
+								}}
+							>
+								{/* A device may already hold a value we do not offer (set by an
+								    older build or another host) — show it so the select never
+								    silently misreports what the device is actually using. */}
+								{!AUTO_LOCK_CHOICES.some(c => c.ms === (features?.autoLockDelayMs ?? DEFAULT_AUTO_LOCK_MS)) && (
+									<option value={String(features?.autoLockDelayMs)}>
+										{Math.round((features?.autoLockDelayMs ?? 0) / 60000)} min
+									</option>
+								)}
+								{AUTO_LOCK_CHOICES.map(c => (
+									<option key={c.ms} value={String(c.ms)}>{c.labelKey}</option>
+								))}
+							</select>
 						</Flex>
 
 						{/* ── Passphrase row ─────────────────────── */}
