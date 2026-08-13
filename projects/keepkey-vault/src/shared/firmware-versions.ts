@@ -51,6 +51,17 @@ export const FIRMWARE_VERSION_MAP: FirmwareVersionInfo[] = [
         icon: 'chain',
       },
       {
+        // Not cosmetic and not optional: on 7.14.1 and earlier, EIP-1559
+        // transactions on any chain with chainId >= 256 hash only the low byte
+        // of the chain id, so the signature recovers to a stranger's address
+        // and the transaction is rejected. Base/Arbitrum/Avalanche are all
+        // affected. This is the concrete answer to "why should I update?".
+        title: 'EVM signing fix (Base, Arbitrum, Avalanche)',
+        description: 'Fixes transaction signing on networks with large chain IDs. On earlier firmware these transactions were rejected by the network.',
+        color: '#627EEA',
+        icon: 'feature',
+      },
+      {
         title: 'Transaction Insight',
         description: 'Human-readable transaction details shown on-device before signing — know exactly what you\'re approving.',
         color: '#805AD5',
@@ -58,11 +69,11 @@ export const FIRMWARE_VERSION_MAP: FirmwareVersionInfo[] = [
       },
       {
         title: 'Hive Support',
-        // comingSoon until the Hive firmware batch actually ships in a tagged
-        // build — the 7.15.0 rc line does not contain it yet, and a custom
-        // build detected as 7.15.0 would otherwise advertise it as present.
-        // Flip to false in the release that lands the Hive firmware stack.
-        comingSoon: true,
+        // Landed: v7.15.0-rc28 (f31a7437e) carries lib/firmware/hive.c and
+        // registers all 7 Hive handlers in messagemap.def (HiveGetPublicKey(s),
+        // HiveSignTx, HiveSignAccountCreate/Update, HiveSignMessage,
+        // HiveSignOperations). Verified against the tag, not the branch.
+        comingSoon: false,
         description: 'Send, receive, and sign Hive transactions with sponsor-backed account onboarding.',
         chains: ['hive'],
         color: '#E31337',
@@ -173,6 +184,17 @@ export function getUpgradeVersions(from: string | null, to: string): FirmwareVer
  * full-file SHA-256 of the downloadable .bin. This is different from the
  * manifest's hashes.firmware which are payload-only (skip 256-byte KPKY header).
  *
+ * Every entry is reproducible from a published release asset:
+ *   bun scripts/verify-firmware-hashes.ts
+ * CI gates on that script. Two entries were wrong when it was first run
+ * (v7.5.1 and v7.14.1 -- the then-current shipping release), which is the
+ * argument for never hand-adding a row here again.
+ *
+ * NOTE: the releases' HASHES.txt labels the PAYLOAD hash (tail -c +257) as
+ * the "device-verifiable build hash". That label is misleading -- the
+ * payload hash is for comparing a reproducible build against the signed
+ * release. The device reports the FULL-FILE hash.
+ *
  * Used to resolve firmware version in bootloader mode where the device can't
  * report version numbers. Unknown hashes indicate custom/unsigned firmware.
  *
@@ -205,17 +227,22 @@ export const ONDEVICE_FIRMWARE_HASHES: Record<string, string> = {
   'efcdcb32f199110e9a38010bc48d2acc66da89d41fb30c7d0b64c1ef74c90359': 'v7.3.2',
   '43472b6fc1a3c9a2546ba771af830005f5758acbd9ea0679d4f20d480f63a040': 'v7.4.0',
   '08b1153a6e9ba5f45776094d62c8d055632d414a38f0c70acd1e751229bf097c': 'v7.5.0',
-  'fdd10f5cf6469655c82c8259f075cdb3c704a93eb691072e3fa8ba5b4c4cafc4': 'v7.5.1',
+  '8b39576047c2a69155893afaf675ad9ac71affca3ea786b2eca5500ce8df389b': 'v7.5.1',
   'a94ba237468243929e0363a1bd2f48914580abfe2a90abbb533b0a201c434d54': 'v7.5.2',
   'b4022a002278d1c00ccea54eb4d03934542ac509d03d77c0b7a8b8485b731f11': 'v7.6.0',
   '1eb79470f73e40464d5e689e5008dddb47e7eb53bc87c50b1de4f3f150ed36bf': 'v7.7.0',
   '31c1cdd945a7331e01b3cced866cb28add5b49eef87c2bbc08370e5aa7daf9bf': 'v7.8.0',
-  '387ec4c8d3dcc83df8707aa0129eeb44e824c3797fb629a493be845327669da1': 'v7.9.0',
+    // v7.9.0 REMOVED, do not re-add. It was never released -- there is no such
+  // tag in keepkey-firmware (tags go v7.8.0 -> v7.9.1) and no artifact anywhere
+  // that reproduces the hash it carried (387ec4c8...). It arrived in a bulk UI
+  // commit, and a hash nobody can recompute is exactly what this table must not
+  // contain: its only possible effect was to mark some unknown firmware as an
+  // official release that does not exist.
   'fc13cb3a405fdee342ebd0d945403b334f0c43ba19771fdabd0e81caf85a63f7': 'v7.9.1',
   '24cca93ef5e7907dc6d8405b8ab9800d4e072dd9259138cf7679107985b88137': 'v7.9.3',
   '518ad41643ee8a0aa6a6422f8534ac94f56cd65bc637aea4db7f3fdbb53255c3': 'v7.10.0',
   '446fd7ac54e0ba2d54ed1d98ef9455b01f6b9be50de7db817a50e9a3cf0c6e3d': 'v7.14.0',
-  '32155c112ba698cee0d1c97542ca67475facf822a7e261549e0d520e4c645f4d': 'v7.14.1',
+  'f40fe1b74949a9e091269536b27cd53bbb8a5c1c428a6c36ff7d5c6bf6845f46': 'v7.14.1',
   // v7.14.0 unsigned builds (custom firmware)
   '75dc509a90f70a1f0025a9c5451532f407c4f78df5ef7d1d7b9b2ef9b9740e19': 'v7.14.0-solana',
   '02def01217709269ff39c2c4745179e45c9c6892b19299de6cdd2f2becfddc87': 'v7.14.0-bip85',
