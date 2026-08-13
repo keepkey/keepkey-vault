@@ -63,7 +63,13 @@ export const FIRMWARE_VERSION_MAP: FirmwareVersionInfo[] = [
       },
       {
         title: 'Transaction Insight',
-        description: 'Human-readable transaction details shown on-device before signing — know exactly what you\'re approving.',
+        // Phase 1 ships with NO built-in verification keys: signers are loaded
+        // at runtime and the device labels them "NOT verified by KeepKey"
+        // (firmware signed_metadata.c). So this is a readability feature, not
+        // an authenticity one — "know exactly what you're approving" claimed
+        // the authenticity the device's own warning screen exists to deny.
+        // Phase 2 pins an anchor and the claim can strengthen then.
+        description: 'Contract calls decoded on-device before signing, so you read a description instead of raw hex. The device shows who provided the description and marks it unverified.',
         color: '#805AD5',
         icon: 'feature',
       },
