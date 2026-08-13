@@ -135,7 +135,7 @@
 		"recoverWallet": "Cüzdanı kurtar",
 		"seedLength": "Seed uzunluğu",
 		"words": "kelime",
-		"entropyNote": "Seed uzunluğunu artırmak cüzdanın genel entropisini iyileştirmez.",
+		"entropyNote": "Bitcoin'in temel standardı 128 bittir (12 kelime). 256 bit seed'ler desteklenir ancak önerilmez.",
 		"learnMore": "Daha fazla bilgi",
 		"howManyWords": "Seed’inizde kaç kelime var?"
 	},

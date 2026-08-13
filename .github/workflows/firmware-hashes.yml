@@ -1,0 +1,42 @@
+# ONDEVICE_FIRMWARE_HASHES is a table of security claims: "a device reporting
+# this hash is running release vX.Y.Z". Two of its rows were wrong when this
+# check was first written -- including v7.14.1, the then-current shipping
+# release -- because nothing had ever recomputed them. Hand-verification does
+# not survive contact with a release cycle; this does.
+
+name: Firmware hashes
+
+on:
+  pull_request:
+    # Path filter on purpose: the script downloads ~20 MB across 35 releases,
+    # which has no business running on a CSS change.
+    paths:
+      - 'projects/keepkey-vault/src/shared/firmware-versions.ts'
+      - 'projects/keepkey-vault/scripts/verify-firmware-hashes.ts'
+      - '.github/workflows/firmware-hashes.yml'
+  # The schedule is the half that matters. A new firmware release does not
+  # touch this repo, so no PR trigger can ever notice that the table has gone
+  # stale -- the unpinned-release check only runs if something runs it.
+  schedule:
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+
+jobs:
+  verify:
+    name: Verify pinned firmware hashes
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.3.5'
+
+      - name: Recompute every pinned hash from its published release
+        working-directory: projects/keepkey-vault
+        env:
+          # Lifts the API's 60/hour unauthenticated limit so the
+          # unpinned-release check runs instead of skipping itself.
+          GITHUB_TOKEN: ${{ github.token }}
+        run: bun scripts/verify-firmware-hashes.ts

@@ -135,7 +135,7 @@
 		"recoverWallet": "กู้คืนกระเป๋า",
 		"seedLength": "ความยาว seed",
 		"words": "คำ",
-		"entropyNote": "การเพิ่มความยาว seed ไม่ได้เพิ่ม entropy โดยรวมของกระเป๋า",
+		"entropyNote": "มาตรฐานหลักของ Bitcoin คือ 128 บิต (12 คำ) รองรับ seed แบบ 256 บิต แต่ไม่แนะนำ",
 		"learnMore": "เรียนรู้เพิ่มเติม",
 		"howManyWords": "seed ของคุณมีกี่คำ?"
 	},

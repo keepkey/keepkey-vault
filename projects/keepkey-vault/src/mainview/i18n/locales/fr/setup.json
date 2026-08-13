@@ -135,7 +135,7 @@
 		"recoverWallet": "Récupérer le portefeuille",
 		"seedLength": "Longueur de la graine",
 		"words": "mots",
-		"entropyNote": "Ajouter des mots n’améliore pas l’entropie globale du portefeuille.",
+		"entropyNote": "La norme de base de Bitcoin est de 128 bits (12 mots). Les seeds de 256 bits sont prises en charge, mais déconseillées.",
 		"learnMore": "En savoir plus",
 		"howManyWords": "Combien de mots contient votre graine ?"
 	},

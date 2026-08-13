@@ -56,7 +56,13 @@ export interface DeviceStateInfo {
   resolvedFwVersion?: string  // firmware version resolved from on-device hash (bootloader mode only)
   firmwareHash?: string
   bootloaderHash?: string
+  /** true = on-device hash matches an official release; false = hash not
+   *  recognised; undefined = firmware reported no hash. Never treat undefined
+   *  as verified. */
   firmwareVerified?: boolean
+  /** Release tag the on-device hash resolves to, e.g. "v7.14.1". Suffixed tags
+   *  (v7.14.0-zcash) are recognised in-house builds, not official releases. */
+  firmwareRelease?: string
   bootloaderVerified?: boolean
   error?: string | null
   isEmulator: boolean

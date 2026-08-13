@@ -135,7 +135,7 @@
 		"recoverWallet": "恢复钱包",
 		"seedLength": "Seed 长度",
 		"words": "个词",
-		"entropyNote": "增加 seed 长度不会提升钱包的整体熵。",
+		"entropyNote": "比特币的核心标准是 128 位（12 个词）。256 位 seed 受支持，但不推荐。",
 		"learnMore": "了解更多",
 		"howManyWords": "你的 seed 有多少个词？"
 	},

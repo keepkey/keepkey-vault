@@ -1,5 +1,7 @@
 import { Box, Button, Flex, HStack, Text, VStack } from "@chakra-ui/react"
 import { FaChevronRight, FaKey, FaLock } from "react-icons/fa"
+import { rpcRequest } from "../lib/rpc"
+import { DOCS_LINKS } from "../../shared/docs-links"
 import { CARD_CSS } from "./TutorialCards"
 
 /**
@@ -35,9 +37,11 @@ function WordGrid() {
 
 export function CreateWalletBriefing({
 	wordCount,
+	onWordCountChange,
 	onConfirm,
 }: {
 	wordCount: number
+	onWordCountChange: (wc: 12 | 18 | 24) => void
 	onConfirm: () => void
 }) {
 	return (
@@ -87,6 +91,49 @@ export function CreateWalletBriefing({
 						own screen — this computer never sees them. The words are the wallet: write them
 						on paper and never type them anywhere. A PIN protects the device, not the words.
 					</Text>
+
+					<VStack gap="1.5" w="100%">
+						<Text fontSize="xs" color="gray.500">Seed length</Text>
+						<Flex gap="2">
+							{([12, 18, 24] as const).map((wc) => (
+								<Box
+									key={wc}
+									as="button"
+									px="3"
+									py="1"
+									borderRadius="md"
+									fontSize="xs"
+									fontWeight="600"
+									cursor="pointer"
+									bg={wordCount === wc ? GOLD : "rgba(255,255,255,0.06)"}
+									color={wordCount === wc ? "black" : "gray.400"}
+									borderWidth="1px"
+									borderColor={wordCount === wc ? GOLD : "transparent"}
+									transition="all 0.15s"
+									onClick={() => onWordCountChange(wc)}
+								>
+									{wc} words
+								</Box>
+							))}
+						</Flex>
+						{/* ponytail: only nag when they leave the 128-bit default */}
+						{wordCount !== 12 && (
+							<Text fontSize="2xs" color="gray.500" textAlign="center" lineHeight="tall" maxW="320px">
+								{"Bitcoin's core standard is 128-bit (12 words). 256-bit seeds are supported but not recommended. "}
+								{/* target="_blank" is a dead click in Electrobun — go through the RPC. */}
+								<Text
+									as="button"
+									color={GOLD}
+									textDecoration="underline"
+									onClick={() => {
+										rpcRequest("openUrl", { url: DOCS_LINKS.seedLengthEntropy }).catch(() => {})
+									}}
+								>
+									Learn more
+								</Text>
+							</Text>
+						)}
+					</VStack>
 				</VStack>
 			</Box>
 
