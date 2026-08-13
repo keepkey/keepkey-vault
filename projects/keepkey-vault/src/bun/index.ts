@@ -5008,7 +5008,12 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					if (chain.networkId === 'bip122:000000000019d6689c085ae165831e93' && getBtcBackend().kind !== 'pioneer') {
 						return { feeRate: await getBtcBackend().feeRate(chain.networkId), unit: 'sat/byte' }
 					}
-					const resp = await withTimeout(pioneer.GetFeeRateByNetwork({ networkId: chain.networkId }), PIONEER_TIMEOUT_MS, 'GetFeeRateByNetwork')
+					// Same client-version fallback as btc-backend/pioneer.ts.
+					const resp: any = await withTimeout(
+						typeof pioneer.GetFeeRateByNetwork === 'function'
+							? pioneer.GetFeeRateByNetwork({ networkId: chain.networkId })
+							: pioneer.GetFeeRate({ networkId: chain.networkId }),
+						PIONEER_TIMEOUT_MS, 'GetFeeRateByNetwork')
 					return { feeRate: resp?.data, unit: 'sat/byte' }
 				} else if (chain.chainFamily === 'evm') {
 					const resp = await withTimeout(pioneer.GetGasPriceByNetwork({ networkId: chain.networkId }), PIONEER_TIMEOUT_MS, 'GetGasPriceByNetwork')

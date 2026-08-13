@@ -113,7 +113,12 @@ export async function handleV2DataRoute(
       auth.requireAuth(req)
       const body = await parseRequest(req, S.NetworkIdRequest)
       const pioneer = await getPioneer()
-      const resp = await pioneer.GetFeeRateByNetwork({ networkId: body.networkId })
+      // Older Pioneer clients expose GetFeeRate instead. btc-backend/pioneer.ts
+      // and txbuilder/utxo.ts already fall back; this route did not, so it 500'd
+      // with "GetFeeRateByNetwork is not a function" against those clients.
+      const resp = typeof pioneer.GetFeeRateByNetwork === 'function'
+        ? await pioneer.GetFeeRateByNetwork({ networkId: body.networkId })
+        : await pioneer.GetFeeRate({ networkId: body.networkId })
       return json({ data: resp?.data || resp })
     }
 
