@@ -8295,6 +8295,10 @@ engine.on('state-change', (state) => {
 		// addresses immediately, rather than showing them until the next re-init.
 		try { rpc.send['btc-accounts-update'](btcAccounts.toAccountSet()) } catch { /* webview not ready yet */ }
 		try { rpc.send['evm-addresses-update'](evmAddresses.toAddressSet()) } catch { /* webview not ready yet */ }
+		// Same for the portfolio: without this the dashboard keeps rendering
+		// device-A's balances until the next poll. The frontend handler clears
+		// them and immediately refreshes for device B.
+		try { rpc.send['wallet-data-purged']({ reason: 'device-swap' }) } catch { /* webview not ready yet */ }
 	}
 	lastReadyDeviceId = nextReadyDeviceId(state, lastReadyDeviceId)
 	// Seed-staleness guard (event-driven leg): once the engine has classified the

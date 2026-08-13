@@ -278,7 +278,16 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
   // ambiguous/partial features read must not let it walk into the create flow
   // unchallenged. Guards the confirm below.
   const everSeenInitializedRef = useRef(false)
-  if (deviceStatus.initialized) everSeenInitializedRef.current = true
+  if (deviceStatus.initialized) {
+    everSeenInitializedRef.current = true
+  } else if (deviceStatus.state === 'needs_init' && !deviceStatus.bootloaderMode) {
+    // …but the flag guards AMBIGUOUS reads, not this one. `needs_init` in app
+    // mode is a complete features read that explicitly says initialized=false —
+    // the wallet is genuinely gone (wipe, or a flash that cleared storage).
+    // Leaving the flag set makes the wipe-confirm accuse the user of destroying
+    // a wallet that no longer exists.
+    everSeenInitializedRef.current = false
+  }
   const [showCreateWipeConfirm, setShowCreateWipeConfirm] = useState(false)
   const inBootloader = deviceStatus.bootloaderMode
   const isOobDevice = deviceStatus.isOob
@@ -506,6 +515,10 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
 
     // Device is back — route based on fresh state
     if (s === 'bootloader' && needsBootloader) return // stay, user can retry
+    // Updater mode: `firmwareVersion`/`needsInit` describe the BOOTLOADER, not a
+    // wallet. Routing on them lands on "Set Up Your Wallet" for a device that
+    // can't create one. Next step is always flashing firmware.
+    if (inBootloader) { setStep('firmware'); return }
     if (needsFirmware) {
       setStep('firmware')
     } else if (needsInit) {
@@ -513,7 +526,17 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
     } else {
       onComplete()
     }
-  }, [step, rebootPhase, deviceStatus.firmwareVersion, deviceStatus.state, needsBootloader, needsFirmware, needsInit, onComplete])
+  }, [step, rebootPhase, deviceStatus.firmwareVersion, deviceStatus.state, needsBootloader, needsFirmware, needsInit, inBootloader, onComplete])
+
+  // Backstop: the device entered updater mode while the wizard was already on a
+  // wallet-setup step (post-flash reboot, manual BL entry, replug). Nothing else
+  // pulls it back, so the create/recover choice sits there over a bootloader.
+  useEffect(() => {
+    if (!inBootloader) return
+    if (step === 'init-choose' || step === 'create-briefing' || step === 'sec-randomness' || step === 'sec-dice') {
+      setStep('firmware')
+    }
+  }, [inBootloader, step])
 
   useEffect(() => {
     return () => {
@@ -740,7 +763,11 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
   // No timeout for device-interactive ops — user can take as long as needed
   const DEVICE_INTERACTION_TIMEOUT = 0
 
-  const handleCreateWallet = async () => {
+  // `dice` is passed explicitly by the sec-dice step: it calls setDiceEntropy()
+  // and this function in the same handler, so the state update hasn't landed yet
+  // and the closed-over `diceEntropy` is still the previous render's value. That
+  // silently created RNG-only wallets for users who chose dice.
+  const handleCreateWallet = async (dice: boolean = diceEntropy) => {
     // Hard gate, not presentation: every path that creates a wallet funnels
     // through here, so a failed randomness audit blocks all of them.
     if (rngVerdict === 'failed') {
@@ -770,7 +797,7 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
         wordCount,
         pin: true,
         passphrase: false,
-        diceEntropy,
+        diceEntropy: dice,
       }, DEVICE_INTERACTION_TIMEOUT)
       setStep('init-label')
     } catch (err) {
@@ -2161,8 +2188,8 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
               <SecurityStepPage
                 step="dice"
                 rollCount={wordCount === 12 ? 50 : wordCount === 18 ? 75 : 99}
-                onAccept={() => { setDiceEntropy(true); setStep('init-progress'); void handleCreateWallet() }}
-                onSkip={() => { setDiceEntropy(false); setStep('init-progress'); void handleCreateWallet() }}
+                onAccept={() => { setDiceEntropy(true); setStep('init-progress'); void handleCreateWallet(true) }}
+                onSkip={() => { setDiceEntropy(false); setStep('init-progress'); void handleCreateWallet(false) }}
               />
             )}
 

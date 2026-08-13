@@ -2524,7 +2524,11 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 					position="relative"
 					zIndex={1}
 				>
-					{hasAnyBalance ? (() => {
+					{/* `|| drilledChainId`: hasAnyBalance is false on a fresh wallet (every
+					    chain $0), which fenced off the drilled-chain zero-state below and
+					    dropped through to a `null` — picking a chain rendered a blank
+					    panel. A picked chain always has something to say, funded or not. */}
+					{(hasAnyBalance || drilledChainId) ? (() => {
 						// Drilled into a chain that holds nothing (no native, no tokens):
 						// drilledChainTokensChartData is already [] in that case. Show an
 						// explicit $0.00 / "no balance" state instead of a near-invisible
@@ -2754,9 +2758,13 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 								}}
 							/>
 						)
-					})() : (loadingBalances || !initialLoaded) && !pioneerError ? (
+					{/* Loading UI only before the FIRST answer. After that, a background
+					    refresh must not replace the hero with a progress bar — an empty
+					    wallet auto-refreshes on mount, and gating on `loadingBalances`
+					    made "$0" flip back to a loading state the user never asked for. */}
+					})() : !initialLoaded && !pioneerError ? (
 						<DashboardLoading />
-					) : !loadingBalances && initialLoaded && !pioneerError && !drilledChainId ? (
+					) : initialLoaded && !pioneerError && !drilledChainId ? (
 						<Flex direction="column" align="center" gap="3" textAlign="center" maxW="400px" mx="auto" py="4">
 							<Box
 								w="48px" h="48px" borderRadius="full"

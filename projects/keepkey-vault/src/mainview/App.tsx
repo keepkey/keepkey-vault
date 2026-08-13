@@ -649,6 +649,10 @@ function App() {
 						setWatchOnlyAvailable(true)
 						setWatchOnlyLabel(res.deviceLabel || "")
 						setWatchOnlyLastSynced(res.lastSynced || 0)
+						// Unplugging shouldn't dump the user back to the splash screen with
+						// their portfolio gone. Cached data exists → show it, read-only.
+						// The else-branch below auto-exits the moment a device reconnects.
+						setWatchOnlyMode(true)
 					}
 				})
 				.catch(() => {})
