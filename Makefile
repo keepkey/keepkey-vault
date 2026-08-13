@@ -362,6 +362,18 @@ test-rest:
 test-sign-gating:
 	cd $(PROJECT_DIR) && bun test __tests__/rest-sign-gating.test.ts
 
+# --- keepkey-sdk device suites ---
+# Drives the REST SDK against a REAL device via the running vault on :1646.
+# No blockchain and no Pioneer: the signing suites use committed fixtures, so
+# every suite except tests/chain/* works offline. Expect device confirmations.
+#   make test-sdk                 # everything (54 suites)
+#   make test-sdk filter=evm      # only suites whose path contains "evm"
+filter =
+test-sdk:
+	@curl -sf -m 3 http://localhost:1646/api/health >/dev/null || \
+		(echo "ERROR: vault REST not answering on :1646. Start the vault first."; exit 1)
+	cd projects/keepkey-sdk && npm run build --silent && node tests/run-all.js $(filter)
+
 test-emu:
 	@test -f $(HOME)/.keepkey/emulator/libkkemu.dylib || \
 		(echo "ERROR: emulator not installed. Run: make build-emulator"; exit 1)
