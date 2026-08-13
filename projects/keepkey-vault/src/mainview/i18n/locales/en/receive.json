@@ -13,5 +13,11 @@
 	"noAddressDerived": "No address derived yet",
 	"deriveAddress": "Derive Address",
 	"watchOnlyNoAddress": "No cached address. Connect your device to view receive addresses.",
-	"account": "Account {{index}}"
+	"account": "Account {{index}}",
+	"btcAccountType": {
+		"recommendation": "Not sure? Use Native SegWit (bc1…) — it has the lowest fees and is supported by every modern wallet and exchange.",
+		"learnMore": "Learn more",
+		"hide": "Hide",
+		"explainer": "All three hold real bitcoin from the same recovery phrase — they are different address formats, not different wallets, and switching between them never puts funds at risk. Native SegWit (bc1…) costs the least to spend. SegWit (3…) is a middle ground for older services that reject bc1 addresses. Legacy (1…) is the original format: it works everywhere but costs the most in fees. If you are receiving from a service that rejects your address, pick the format it accepts — your coins stay accessible under all three."
+	}
 }

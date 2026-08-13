@@ -10,7 +10,8 @@
 		"initLabel": "Name your device",
 		"complete": "Setup complete!",
 		"verifySeed": "Verify your recovery phrase",
-		"securityTips": "Security tips"
+		"securityTips": "Security tips",
+		"updateDone": "Update complete"
 	},
 	"visibleSteps": {
 		"bootloader": "Bootloader",
@@ -122,7 +123,10 @@
 		"autoRebooting": "Your device is restarting...",
 		"autoRebootingDetail": "Your KeepKey will restart automatically with the new firmware. This usually takes a few seconds.",
 		"waitingForDevice": "Waiting for your device...",
-		"wipeAndFlash": "Wipe & Flash"
+		"wipeAndFlash": "Wipe & Flash",
+		"whyUpdate": "Updates fix security issues and add support for new coins and features.",
+		"skipForNow": "Skip for now",
+		"skipIsSafe": "Skipping is safe. Nothing on your device changes — your wallet, funds and recovery phrase stay exactly as they are, and you can update any time."
 	},
 	"initChoose": {
 		"title": "Set Up Your Wallet",
@@ -135,12 +139,16 @@
 		"recoverWallet": "Recover Wallet",
 		"seedLength": "Seed length",
 		"words": "words",
-		"entropyNote": "Added seed length does not improve overall wallet entropy.",
+		"entropyNote": "Bitcoin's core standard is 128-bit (12 words). 256-bit seeds are supported but not recommended.",
 		"testRngTitle": "Check this device first (optional)",
 		"testRngBody": "Run a health test on the random number generator that will create your seed. Only available before setup.",
 		"testRngAction": "Run test",
 		"learnMore": "Learn more",
-		"howManyWords": "How many words in your seed?"
+		"howManyWords": "How many words in your seed?",
+		"wipeConfirmTitle": "This device already has a wallet",
+		"wipeConfirmBody": "Creating a new wallet replaces the one on this device. Anything held by the current wallet is only recoverable from its recovery phrase. If you were just updating firmware, you do not need to do this — go back.",
+		"wipeConfirmCancel": "Go back",
+		"wipeConfirmProceed": "Replace wallet"
 	},
 	"initProgress": {
 		"creatingWallet": "Creating Wallet...",
@@ -239,5 +247,10 @@
 			"visible": "visible",
 			"hidden": "hidden"
 		}
+	},
+	"updateDone": {
+		"title": "Firmware updated",
+		"reassure": "Your wallet is untouched. Updating firmware never erases your recovery phrase, your accounts, or your funds — you do not need to restore anything.",
+		"continue": "Continue"
 	}
 }

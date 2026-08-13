@@ -23,6 +23,7 @@ import { rpcRequest, onRpcMessage } from '../lib/rpc'
 import type { FirmwareAnalysis, FirmwareProgress } from '../../shared/types'
 import { FirmwareUpgradePreview } from './FirmwareUpgradePreview'
 import { ReproducibleBuildNotice } from './ReproducibleBuildNotice'
+import { FirmwareAuthenticity } from './FirmwareAuthenticity'
 import { DocsLink } from './DocsLink'
 import { DOCS_LINKS } from '../../shared/docs-links'
 import { TutorialPage } from './TutorialCards'
@@ -57,6 +58,7 @@ const ANIMATIONS_CSS = `
 // ── Step definitions ────────────────────────────────────────────────────────
 
 type WizardStep =
+  | 'authenticity'
   | 'intro'
   | 'welcome'
   | 'bootloader'
@@ -69,9 +71,11 @@ type WizardStep =
   | 'init-label'
   | 'verify-seed'
   | 'security-tips'
+  | 'update-done'
   | 'complete'
 
 const STEP_SEQUENCE: WizardStep[] = [
+  'authenticity',
   'intro',
   'welcome',
   'bootloader',
@@ -84,6 +88,7 @@ const STEP_SEQUENCE: WizardStep[] = [
   'init-label',
   'verify-seed',
   'security-tips',
+  'update-done',
   'complete',
 ]
 
@@ -91,6 +96,7 @@ const STEP_SEQUENCE: WizardStep[] = [
 
 // Map wizard steps → their visible step group
 const stepToVisibleId: Record<WizardStep, string | null> = {
+  'authenticity': null,
   'intro': null,
   'welcome': null,
   'bootloader': 'bootloader',
@@ -103,6 +109,7 @@ const stepToVisibleId: Record<WizardStep, string | null> = {
   'init-label': 'init-choose',
   'verify-seed': 'init-choose',
   'security-tips': null,
+  'update-done': null,
   'complete': null,
 }
 
@@ -130,7 +137,7 @@ const confettiPieces = Array.from({ length: 50 }, (_, i) => ({
 // ── Main Wizard ─────────────────────────────────────────────────────────────
 
 export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, onWordCountChange }: OobSetupWizardProps) {
-  const [step, setStep] = useState<WizardStep>('intro')
+  const [step, setStep] = useState<WizardStep>('authenticity')
   const [introCard, setIntroCard] = useState(0)
   const [tipCard, setTipCard] = useState(0)
   // Passphrase opt-in chosen on the (non-skippable) hidden-wallets tip card.
@@ -160,6 +167,7 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
   // L1 fix: removed unused setupLoading state (value was never read)
   const { t } = useTranslation('setup')
   const STEP_DESCRIPTIONS: Record<WizardStep, string> = {
+    'authenticity': '',
     'intro': '',
     'welcome': t('stepDescriptions.welcome'),
     'bootloader': t('stepDescriptions.bootloader'),
@@ -172,6 +180,7 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
     'init-label': t('stepDescriptions.initLabel'),
     'verify-seed': t('stepDescriptions.verifySeed', { defaultValue: 'Verify your recovery phrase' }),
     'security-tips': t('stepDescriptions.securityTips', { defaultValue: 'Security tips' }),
+    'update-done': t('stepDescriptions.updateDone', { defaultValue: 'Update complete' }),
     'complete': t('stepDescriptions.complete'),
   }
 
@@ -265,6 +274,12 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
   const needsBootloader = deviceStatus.needsBootloaderUpdate
   const needsFirmware = deviceStatus.needsFirmwareUpdate
   const needsInit = deviceStatus.needsInit
+  // Sticky for the session: once a device has told us it holds a wallet, a later
+  // ambiguous/partial features read must not let it walk into the create flow
+  // unchallenged. Guards the confirm below.
+  const everSeenInitializedRef = useRef(false)
+  if (deviceStatus.initialized) everSeenInitializedRef.current = true
+  const [showCreateWipeConfirm, setShowCreateWipeConfirm] = useState(false)
   const inBootloader = deviceStatus.bootloaderMode
   const isOobDevice = deviceStatus.isOob
   const isEmulator = deviceStatus.isEmulator ?? false
@@ -590,12 +605,12 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
     setRebootPhase('idle')
 
     if (s === 'bootloader') return // user can retry firmware flash
-    if (needsInit) {
-      setStep('init-choose')
-    } else {
-      setStep('complete')
-    }
-  }, [step, rebootPhase, deviceStatus.firmwareVersion, deviceStatus.state, needsInit])
+    // Never auto-navigate to "Create/Recover wallet" straight out of a firmware
+    // update. Landing on that screen unannounced reads as "my KeepKey was wiped"
+    // even when nothing happened to the seed. Always stop on the neutral
+    // update-done card; the user clicks through from there.
+    setStep('update-done')
+  }, [step, rebootPhase, deviceStatus.firmwareVersion, deviceStatus.state])
 
   // Post-flash auto-advance: after firmware was just flashed and device confirms
   // (user presses button on "unofficial firmware" screen), detect ready/needs_init
@@ -605,14 +620,11 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
     if (isRebooting) return // still waiting for reconnect
     const s = deviceStatus.state
     if (s === 'disconnected' || s === 'connected_unpaired' || s === 'error' || s === 'bootloader') return
-    // Device is now past bootloader — ready or needs init
+    // Device is now past bootloader. Stop on update-done rather than routing by
+    // needsInit — see the reboot effect above.
     setFirmwareJustFlashed(false)
-    if (needsInit) {
-      setStep('init-choose')
-    } else {
-      setStep('complete')
-    }
-  }, [step, firmwareJustFlashed, rebootPhase, deviceStatus.state, needsInit])
+    setStep('update-done')
+  }, [step, firmwareJustFlashed, rebootPhase, deviceStatus.state])
 
   const handleSkipFirmware = () => {
     if (needsInit) {
@@ -1034,8 +1046,21 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
           justifyContent="center"
           w="100%"
         >
-          <Box w="100%" maxW="800px">
+          {/* The authenticity screen is two columns of dense text; 800px squeezes it. */}
+          <Box w="100%" maxW={step === 'authenticity' ? '1100px' : '800px'}>
             {/* ═══════════════ INTRO (Pre-Tutorial) ═════════════════ */}
+            {/* ═══════════ FIRMWARE AUTHENTICITY ════════════════════ */}
+            {step === 'authenticity' && (
+              <FirmwareAuthenticity
+                firmwareHash={deviceStatus?.firmwareHash}
+                firmwareRelease={deviceStatus?.firmwareRelease}
+                firmwareVerified={deviceStatus?.firmwareVerified}
+                bootloaderHash={deviceStatus?.bootloaderHash}
+                bootloaderVerified={deviceStatus?.bootloaderVerified}
+                onContinue={() => setStep('intro')}
+              />
+            )}
+
             {step === 'intro' && (
               <TutorialPage
                 type="pre"
@@ -2031,18 +2056,35 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
                 )}
 
                 {updateState === 'idle' && !isOobDevice && !inBootloader && !isRebooting && !firmwareJustFlashed && (
-                  <Button
-                    w="100%"
-                    variant="ghost"
-                    color="kk.textMuted"
-                    size="sm"
-                    fontWeight="500"
-                    _hover={{ color: 'gray.200', bg: 'rgba(255,255,255,0.04)' }}
-                    transition="all 0.15s ease"
-                    onClick={handleSkipFirmware}
-                  >
-                    {t('firmware.skipUpdate')}
-                  </Button>
+                  <VStack gap={2} w="100%">
+                    {/* Users skip this dialog fearing an update will cost them their
+                        wallet, so say what an update buys and what skipping costs
+                        (nothing) instead of leaving a bare "Skip" to be guessed at. */}
+                    <Text fontSize="xs" color="kk.textMuted" textAlign="center" lineHeight="1.6">
+                      {t('firmware.whyUpdate', {
+                        defaultValue:
+                          'Updates fix security issues and add support for new coins and features.',
+                      })}
+                    </Text>
+                    <Button
+                      w="100%"
+                      variant="ghost"
+                      color="kk.textMuted"
+                      size="sm"
+                      fontWeight="500"
+                      _hover={{ color: 'gray.200', bg: 'rgba(255,255,255,0.04)' }}
+                      transition="all 0.15s ease"
+                      onClick={handleSkipFirmware}
+                    >
+                      {t('firmware.skipForNow', { defaultValue: 'Skip for now' })}
+                    </Button>
+                    <Text fontSize="xs" color="kk.textMuted" textAlign="center" lineHeight="1.6">
+                      {t('firmware.skipIsSafe', {
+                        defaultValue:
+                          'Skipping is safe. Nothing on your device changes — your wallet, funds and recovery phrase stay exactly as they are, and you can update any time.',
+                      })}
+                    </Text>
+                  </VStack>
                 )}
               </VStack>
             )}
@@ -2051,6 +2093,7 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
             {step === 'create-briefing' && (
               <CreateWalletBriefing
                 wordCount={wordCount}
+                onWordCountChange={setWordCount}
                 onConfirm={() => {
                   // A failed audit from an earlier attempt lands on the blocked
                   // screen — even on devices too old for dice, which otherwise
@@ -2141,6 +2184,47 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
                   </Box>
                 )}
 
+                {showCreateWipeConfirm && (
+                  <Box w="100%" p={4} bg="rgba(224,140,123,0.10)" borderRadius="14px" borderWidth="1px" borderColor="var(--rose)">
+                    <VStack gap={3} align="stretch">
+                      <Text fontSize="sm" fontWeight="700" color="var(--rose)">
+                        {t('initChoose.wipeConfirmTitle', { defaultValue: 'This device already has a wallet' })}
+                      </Text>
+                      <Text fontSize="xs" color="var(--rose)" lineHeight="1.6">
+                        {t('initChoose.wipeConfirmBody', {
+                          defaultValue:
+                            'Creating a new wallet replaces the one on this device. Anything held by the current wallet is only recoverable from its recovery phrase. If you were just updating firmware, you do not need to do this — go back.',
+                        })}
+                      </Text>
+                      <HStack gap={2} w="100%">
+                        <Button
+                          flex={1}
+                          size="sm"
+                          bg="var(--gold)"
+                          color="black"
+                          fontWeight="700"
+                          _hover={{ opacity: 0.9 }}
+                          onClick={() => setShowCreateWipeConfirm(false)}
+                        >
+                          {t('initChoose.wipeConfirmCancel', { defaultValue: 'Go back' })}
+                        </Button>
+                        <Button
+                          flex={1}
+                          size="sm"
+                          variant="outline"
+                          borderColor="var(--rose)"
+                          color="var(--rose)"
+                          fontWeight="600"
+                          _hover={{ bg: 'rgba(224,140,123,0.12)' }}
+                          onClick={() => { setShowCreateWipeConfirm(false); setStep('create-briefing') }}
+                        >
+                          {t('initChoose.wipeConfirmProceed', { defaultValue: 'Replace wallet' })}
+                        </Button>
+                      </HStack>
+                    </VStack>
+                  </Box>
+                )}
+
                 <HStack
                   gap={3}
                   w="100%"
@@ -2225,8 +2309,10 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
                                 </Box>
                               ))}
                             </Flex>
+                            {/* ponytail: only nag when they leave the 128-bit default */}
+                            {wordCount !== 12 && (
                             <Text fontSize="2xs" color="kk.textMuted" textAlign="center" lineHeight="tall" px="1">
-                              {t('initChoose.entropyNote', { defaultValue: 'Added seed length does not improve overall wallet entropy.' })}{' '}
+                              {t('initChoose.entropyNote', { defaultValue: "Bitcoin's core standard is 128-bit (12 words). 256-bit seeds are supported but not recommended." })}{' '}
                               <Text
                                 as="a"
                                 href={DOCS_LINKS.seedLengthEntropy}
@@ -2240,6 +2326,7 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
                                 {t('initChoose.learnMore', { defaultValue: 'Learn more' })}
                               </Text>
                             </Text>
+                            )}
                           </VStack>
                         )}
                       </Box>
@@ -2255,6 +2342,12 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
                         transition="all 0.15s ease"
                         onClick={(e: React.MouseEvent) => {
                           e.stopPropagation()
+                          // A device we've seen initialized is one click from a wipe
+                          // here. Make that click deliberate.
+                          if (everSeenInitializedRef.current) {
+                            setShowCreateWipeConfirm(true)
+                            return
+                          }
                           setStep('create-briefing')
                         }}
                       >
@@ -2833,6 +2926,46 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
               />
             )}
 
+            {/* ═══════════════ UPDATE DONE ══════════════════════════ */}
+            {step === 'update-done' && (
+              <VStack gap={5} w="100%" py={4}>
+                <Box
+                  bg="rgba(16,185,129,0.08)"
+                  border="1px solid rgba(16,185,129,0.28)"
+                  borderRadius="16px"
+                  px={5}
+                  py={5}
+                  w="100%"
+                >
+                  <VStack gap={3}>
+                    <Text fontSize="lg" fontWeight="700" color="white" textAlign="center">
+                      {t('updateDone.title', { defaultValue: 'Firmware updated' })}
+                    </Text>
+                    {/* The whole reason this screen exists: say plainly that the
+                        wallet survived, before the user can reach anything that
+                        mentions creating one. */}
+                    <Text fontSize="sm" color="gray.300" textAlign="center" lineHeight="1.6">
+                      {t('updateDone.reassure', {
+                        defaultValue:
+                          'Your wallet is untouched. Updating firmware never erases your recovery phrase, your accounts, or your funds — you do not need to restore anything.',
+                      })}
+                    </Text>
+                  </VStack>
+                </Box>
+                <Button
+                  w="100%"
+                  size="md"
+                  bg="var(--gold)"
+                  color="black"
+                  fontWeight="700"
+                  _hover={{ opacity: 0.9 }}
+                  onClick={() => setStep(needsInit ? 'init-choose' : 'complete')}
+                >
+                  {t('updateDone.continue', { defaultValue: 'Continue' })}
+                </Button>
+              </VStack>
+            )}
+
             {/* ═══════════════ COMPLETE ═════════════════════════════ */}
             {step === 'complete' && (
               <Box position="relative" w="100%" overflow="hidden">
@@ -2897,7 +3030,7 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
             <Text fontSize="sm" color="kk.textSecondary" fontWeight="500">
               {visibleIndex >= 0
                 ? t('footer.stepOf', { current: visibleIndex + 1, total: VISIBLE_STEPS.length })
-                : step === 'intro' || step === 'welcome'
+                : step === 'authenticity' || step === 'intro' || step === 'welcome'
                   ? ''
                   : step === 'security-tips'
                     ? t('footer.securityTips', { defaultValue: 'Security Tips' })
