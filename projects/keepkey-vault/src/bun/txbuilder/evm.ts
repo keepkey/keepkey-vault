@@ -211,11 +211,14 @@ export async function buildEvmTx(
     throw new Error(`Failed to fetch nonce for ${fromAddress} on ${chain.coin} — cannot safely build transaction`)
   }
 
-  // 3. Native balance (needed for gas in both native and ERC-20 paths)
-  let nativeBalance = 0n
+  // 3. Native balance (needed for gas in both native and ERC-20 paths).
+  //    A failed fetch is NOT a zero balance — fall back to Pioneer, then fail
+  //    loudly rather than reporting a funded account as empty.
+  let nativeBalance: bigint | undefined
   if (rpcUrl) {
     try { nativeBalance = await getEvmBalance(rpcUrl, fromAddress) } catch { console.warn(`${TAG} Direct RPC balance failed`) }
-  } else {
+  }
+  if (nativeBalance === undefined) {
     try {
       const balData = await pioneer.GetBalanceAddressByNetwork({ networkId: chain.networkId, address: fromAddress })
       const balStr = String(balData?.data?.nativeBalance || balData?.data?.balance || '0')
@@ -223,6 +226,9 @@ export async function buildEvmTx(
     } catch {
       console.warn(`${TAG} Balance API failed`)
     }
+  }
+  if (nativeBalance === undefined) {
+    throw new Error(`Unable to verify ${chain.symbol} balance for ${fromAddress} — cannot safely build transaction`)
   }
 
   // ── ERC-20 token transfer ───────────────────────────────────────────
