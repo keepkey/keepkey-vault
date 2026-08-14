@@ -2341,7 +2341,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
 
   // Turn on the device's AdvancedMode (Blind Signing) policy. There is no
   // per-transaction exception on shipped firmware, so the opaque Solana route
-  // only signs once the global policy is on. It is session state on 7.16+:
+  // only signs once the global policy is on. It is session state on 7.15+:
   // the device disarms it when it locks or is unplugged, so the user may be
   // asked again. Raises an enable-policy confirm on the device.
   const handleEnableBlindSigning = useCallback(async () => {
