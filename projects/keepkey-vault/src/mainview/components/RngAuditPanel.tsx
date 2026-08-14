@@ -320,8 +320,8 @@ export function RngAuditPanel({
 									The collision check is the positive control — the one test that proves the
 									detector works at all. At {(s.bytes / 1024).toFixed(0)} KB it expects{" "}
 									{s.expectedCollisions4.toFixed(2)} collisions, so finding none says nothing.
-									It needs a multi-megabyte sample, which the device cannot supply without a
-									button press per kilobyte until the firmware bulk-audit unlock ships.
+									Re-run at a larger size to make it meaningful: past the first 64 KB the
+									device asks once, then streams unmetered while it holds no seed.
 								</Text>
 							)}
 						</Box>
