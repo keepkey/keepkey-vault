@@ -16,7 +16,7 @@ import { toDeviceError, deviceErrorMessage } from '../shared/device-error'
 import { findEvmSchema } from './evm-schema-registry'
 import { findSolanaSchema } from './solana-schema-registry'
 import { getPioneer } from './pioneer'
-import { encodeDepositWithExpiry, encodeApprove, parseUnits, toHex } from './txbuilder/evm'
+import { encodeDepositWithExpiry, encodeApprove, parseUnits, toHex, readPioneerBalance } from './txbuilder/evm'
 import { getEvmGasPrice, getEvmFeeData, getEvmNonce, getEvmBalance, getErc20Allowance, getErc20Balance, getErc20Decimals, broadcastEvmTx, EvmSignerVerificationError, waitForTxReceipt, estimateGas } from './evm-rpc'
 import * as txb from './txbuilder'
 import { normalizeBchAddress } from './txbuilder'
@@ -1472,8 +1472,7 @@ async function buildRelaySwapTx(
     try {
       const pioneer = await getPioneer()
       const bd = await pioneer.GetBalanceAddressByNetwork({ networkId: fromChain.networkId, address: fromAddress })
-      const balStr = String(bd?.data?.nativeBalance || bd?.data?.balance || '0')
-      nativeBalance = parseUnits(balStr, fromChain.decimals)
+      nativeBalance = parseUnits(readPioneerBalance(bd, fromAddress), fromChain.decimals)
     } catch (e: any) {
       console.warn(`${TAG} Failed to fetch native balance via Pioneer for relay tx: ${e.message}`)
     }
@@ -1805,14 +1804,7 @@ async function buildEvmSwapTx(
   if (nativeBalance === undefined) {
     try {
       const bd = await pioneer.GetBalanceAddressByNetwork({ networkId: fromChain.networkId, address: fromAddress })
-      // No `|| '0'`: an HTTP 200 carrying no balance field is a malformed
-      // response, not an empty account. Falling through to 0 here would put
-      // back the exact bug this function is fixing.
-      const raw = bd?.data?.nativeBalance ?? bd?.data?.balance
-      if (raw == null || String(raw).trim() === '') {
-        throw new Error(`no balance field in Pioneer response for ${fromAddress}`)
-      }
-      nativeBalance = parseUnits(String(raw), fromChain.decimals)
+      nativeBalance = parseUnits(readPioneerBalance(bd, fromAddress), fromChain.decimals)
     } catch (e: any) {
       console.warn(`${TAG} Failed to fetch balance via Pioneer: ${e.message}`)
     }
