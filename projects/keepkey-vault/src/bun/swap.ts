@@ -1805,8 +1805,14 @@ async function buildEvmSwapTx(
   if (nativeBalance === undefined) {
     try {
       const bd = await pioneer.GetBalanceAddressByNetwork({ networkId: fromChain.networkId, address: fromAddress })
-      const balStr = String(bd?.data?.nativeBalance || bd?.data?.balance || '0')
-      nativeBalance = parseUnits(balStr, fromChain.decimals)
+      // No `|| '0'`: an HTTP 200 carrying no balance field is a malformed
+      // response, not an empty account. Falling through to 0 here would put
+      // back the exact bug this function is fixing.
+      const raw = bd?.data?.nativeBalance ?? bd?.data?.balance
+      if (raw == null || String(raw).trim() === '') {
+        throw new Error(`no balance field in Pioneer response for ${fromAddress}`)
+      }
+      nativeBalance = parseUnits(String(raw), fromChain.decimals)
     } catch (e: any) {
       console.warn(`${TAG} Failed to fetch balance via Pioneer: ${e.message}`)
     }

@@ -221,8 +221,13 @@ export async function buildEvmTx(
   if (nativeBalance === undefined) {
     try {
       const balData = await pioneer.GetBalanceAddressByNetwork({ networkId: chain.networkId, address: fromAddress })
-      const balStr = String(balData?.data?.nativeBalance || balData?.data?.balance || '0')
-      nativeBalance = parseUnits(balStr, 18)
+      // No `|| '0'`: an HTTP 200 carrying no balance field is a malformed
+      // response, not an empty account.
+      const raw = balData?.data?.nativeBalance ?? balData?.data?.balance
+      if (raw == null || String(raw).trim() === '') {
+        throw new Error(`no balance field in Pioneer response for ${fromAddress}`)
+      }
+      nativeBalance = parseUnits(String(raw), 18)
     } catch {
       console.warn(`${TAG} Balance API failed`)
     }
@@ -334,7 +339,11 @@ export async function buildEvmTx(
     if (amountWei <= 0n) throw new Error('Insufficient funds to cover gas fees')
   } else {
     amountWei = parseUnits(String(params.amount), 18)
-    if (amountWei + gasFee > nativeBalance && nativeBalance > 0n) {
+    // No `&& nativeBalance > 0n` escape hatch. That guard existed to keep a
+    // failed balance fetch (which used to land as 0n) from blocking a send —
+    // an unverifiable balance now throws above, so the only way to reach here
+    // with 0n is a genuinely empty account, which must fail this check.
+    if (amountWei + gasFee > nativeBalance) {
       throw new Error(
         `Insufficient funds: balance ${Number(nativeBalance) / 1e18} ${chain.symbol}, ` +
         `need ${Number(amountWei + gasFee) / 1e18} ${chain.symbol} (incl gas)`,
