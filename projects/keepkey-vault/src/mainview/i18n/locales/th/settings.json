@@ -98,7 +98,7 @@
 	},
 	"signingPolicy": "นโยบายการลงนาม",
 	"advancedMode": "โหมดขั้นสูง",
-	"advancedModeDescription": "อนุญาตให้ลงนามธุรกรรม EVM ที่มีข้อมูลสัญญาแบบกำหนดเอง (เช่น Uniswap, DeFi)",
+	"advancedModeDescription": "อนุญาตให้ลงนามธุรกรรม EVM ที่มีข้อมูลสัญญาใดก็ได้ (เช่น Uniswap, DeFi) จะปิดเองเมื่ออุปกรณ์ล็อกหรือถูกถอดออก",
 	"walletConnectFeature": "WalletConnect",
 	"walletConnectFeatureDescription": "เชื่อมต่อกับ dApps ผ่านโปรโตคอล WalletConnect",
 	"zcashPrivacyFeature": "ความเป็นส่วนตัวแบบป้องกันของ Zcash",

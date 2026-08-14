@@ -98,7 +98,7 @@
 	},
 	"signingPolicy": "Ondertekeningsbeleid",
 	"advancedMode": "Geavanceerde modus",
-	"advancedModeDescription": "Sta het ondertekenen van EVM-transacties met willekeurige contractgegevens toe (bijv. Uniswap, DeFi).",
+	"advancedModeDescription": "Sta het ondertekenen van EVM-transacties met willekeurige contractgegevens toe (bijv. Uniswap, DeFi). Schakelt uit zodra het apparaat wordt vergrendeld of losgekoppeld.",
 	"walletConnectFeature": "WalletConnect",
 	"walletConnectFeatureDescription": "Maak verbinding met dApps via het WalletConnect-protocol.",
 	"zcashPrivacyFeature": "Zcash afgeschermde privacy",

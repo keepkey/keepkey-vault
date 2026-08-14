@@ -75,7 +75,7 @@
 	},
 	"signingPolicy": "서명 정책",
 	"advancedMode": "고급 모드",
-	"advancedModeDescription": "임의의 컨트랙트 데이터(예: Uniswap, DeFi)가 포함된 EVM 트랜잭션 서명을 허용합니다.",
+	"advancedModeDescription": "임의의 컨트랙트 데이터가 포함된 EVM 트랜잭션 서명을 허용합니다(예: Uniswap, DeFi). 기기가 잠기거나 분리되면 자동으로 꺼집니다.",
 	"featureFlags": "기능 플래그",
 	"walletConnectFeature": "WalletConnect",
 	"walletConnectFeatureDescription": "WalletConnect 프로토콜을 통해 dApp에 연결합니다.",

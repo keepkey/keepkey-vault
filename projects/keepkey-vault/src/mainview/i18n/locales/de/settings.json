@@ -75,7 +75,7 @@
 	},
 	"signingPolicy": "Signatur-Richtlinie",
 	"advancedMode": "Erweiterter Modus",
-	"advancedModeDescription": "Signieren von EVM-Transaktionen mit beliebigen Vertragsdaten erlauben (z. B. Uniswap, DeFi).",
+	"advancedModeDescription": "Erlaubt das Signieren von EVM-Transaktionen mit beliebigen Vertragsdaten (z. B. Uniswap, DeFi). Wird deaktiviert, sobald das Gerät gesperrt oder getrennt wird.",
 	"featureFlags": "Funktions-Flags",
 	"walletConnectFeature": "WalletConnect",
 	"walletConnectFeatureDescription": "Über das WalletConnect-Protokoll mit dApps verbinden.",

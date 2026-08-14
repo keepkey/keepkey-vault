@@ -1178,7 +1178,8 @@ export interface ExecuteSwapParams {
                                   // token sources Pioneer's available-assets doesn't list (e.g.
                                   // SPL USDT); Pioneer's canonical value still wins when present
   /** Explicit consent for this one Solana transaction to use the opaque signing
-   *  fallback. It does not change the device's persistent AdvancedMode policy. */
+   *  fallback. It does not change the device's AdvancedMode policy, which is
+   *  session state on 7.16+ (disarmed on lock or unplug). */
   allowSolanaBlindSigning?: boolean
 }
 

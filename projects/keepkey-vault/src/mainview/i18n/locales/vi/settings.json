@@ -98,7 +98,7 @@
 	},
 	"signingPolicy": "Chính sách ký",
 	"advancedMode": "Chế độ nâng cao",
-	"advancedModeDescription": "Cho phép ký giao dịch EVM với dữ liệu hợp đồng tùy ý (ví dụ: Uniswap, DeFi).",
+	"advancedModeDescription": "Cho phép ký giao dịch EVM với dữ liệu hợp đồng tùy ý (ví dụ Uniswap, DeFi). Tự tắt khi thiết bị bị khóa hoặc rút ra.",
 	"walletConnectFeature": "WalletConnect",
 	"walletConnectFeatureDescription": "Kết nối với dApps qua giao thức WalletConnect.",
 	"zcashPrivacyFeature": "Quyền riêng tư ẩn danh Zcash",

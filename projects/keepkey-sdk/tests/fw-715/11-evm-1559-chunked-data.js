@@ -30,9 +30,13 @@
  * pressing cancel rather than the gate firing.
  *
  * So this suite requires an explicit opt-in. Enable AdvancedMode on the device,
- * run with KK_ALLOW_BLIND=1, then turn AdvancedMode back OFF:
+ * then run with KK_ALLOW_BLIND=1:
  *
  *     KK_ALLOW_BLIND=1 node tests/fw-715/11-evm-1559-chunked-data.js
+ *
+ * On firmware that scopes AdvancedMode to the session it disarms itself when the
+ * device locks or is unplugged, so there is nothing to turn back off. On older
+ * firmware the policy persists — turn it off by hand there.
  *
  * Skipping is not a coverage hole: python-keepkey drives the same chunked path
  * against the emulator with no gate in the way.
@@ -46,8 +50,8 @@ if (!process.env.KK_ALLOW_BLIND) {
   console.log('\n=== EVM 1559 chunked data — SKIPPED (needs blind-sign opt-in) ===\n')
   console.log('  Calldata over 1024 bytes cannot be decoded on-device, so this tx')
   console.log('  hits the blind-sign gate. Do not disable that gate casually.')
-  console.log('  To run: enable AdvancedMode, re-run with KK_ALLOW_BLIND=1, then')
-  console.log('  turn AdvancedMode back OFF.')
+  console.log('  To run: enable AdvancedMode, re-run with KK_ALLOW_BLIND=1.')
+  console.log('  Session-scoped firmware disarms it on lock/unplug by itself.')
   console.log('  No device interaction performed.\n')
   process.exit(0)
 }

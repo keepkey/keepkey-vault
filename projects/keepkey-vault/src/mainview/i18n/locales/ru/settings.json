@@ -75,7 +75,7 @@
 	},
 	"signingPolicy": "Политика подписи",
 	"advancedMode": "Расширенный режим",
-	"advancedModeDescription": "Разрешить подпись EVM-транзакций с произвольными данными контракта (например, Uniswap, DeFi).",
+	"advancedModeDescription": "Разрешает подписывать EVM-транзакции с произвольными данными контракта (например, Uniswap, DeFi). Отключается при блокировке или отсоединении устройства.",
 	"featureFlags": "Флаги функций",
 	"walletConnectFeature": "WalletConnect",
 	"walletConnectFeatureDescription": "Подключение к dApps по протоколу WalletConnect.",

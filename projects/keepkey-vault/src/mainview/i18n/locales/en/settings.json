@@ -45,7 +45,7 @@
 	"checkFailed": "Check failed",
 	"signingPolicy": "Signing Policy",
 	"advancedMode": "Advanced Mode",
-	"advancedModeDescription": "Allow signing EVM transactions with arbitrary contract data (e.g. Uniswap, DeFi).",
+	"advancedModeDescription": "Allow signing EVM transactions with arbitrary contract data (e.g. Uniswap, DeFi). Turns itself off when the device locks or is unplugged.",
 	"featureFlags": "Feature Flags",
 	"walletConnectFeature": "WalletConnect",
 	"walletConnectFeatureDescription": "Connect to dApps via WalletConnect protocol.",
