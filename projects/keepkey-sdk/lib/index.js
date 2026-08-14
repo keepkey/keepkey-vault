@@ -159,7 +159,7 @@ class KeepKeySdk {
         /** Ethereum and EVM-compatible signing (sign-tx, sign-message, EIP-712). */
         this.eth = {
             /** Sign an Ethereum or EVM transaction. Supports legacy and EIP-1559. */
-            ethSignTransaction: (params) => this.client.post('/eth/sign-transaction', params),
+            ethSignTransaction: (params) => this.client.post('/eth/sign-transaction', params, this.client.signingTimeoutMs),
             /**
              * Load an EVM clear-sign signer into a device key slot (user-confirmed on
              * device). The device shows a trust screen naming the alias + pubkey
@@ -170,14 +170,14 @@ class KeepKeySdk {
              * Firmware 7.15.0+. Used to trust a metadata-signing key (e.g. a CI test
              * key in slot 3) so `ethSignTransaction`'s `txMetadata` blobs verify.
              */
-            loadClearsignSigner: (params) =>
+            loadClearsignSigner: (params) => 
             // Blocks on a physical trust-screen confirmation; the 30s default aborts
             // mid-review and looks like a device failure.
             this.client.post('/eth/clearsign/load-signer', params, this.client.signingTimeoutMs),
             /** Sign a personal message (`eth_sign` / `personal_sign`). */
-            ethSignMessage: (params) => this.client.post('/eth/sign', params),
+            ethSignMessage: (params) => this.client.post('/eth/sign', params, this.client.signingTimeoutMs),
             /** Sign an EIP-712 typed data structure. */
-            ethSignTypedData: (params) => this.client.post('/eth/sign-typed-data', params),
+            ethSignTypedData: (params) => this.client.post('/eth/sign-typed-data', params, this.client.signingTimeoutMs),
             /** Verify an Ethereum personal message signature. Returns `true` if valid. */
             ethVerifyMessage: (params) => this.client.post('/eth/verify', params),
         };
@@ -195,17 +195,17 @@ class KeepKeySdk {
         /** Cosmos Hub amino signing (transfer, staking, IBC). */
         this.cosmos = {
             /** Sign a generic Cosmos amino message. */
-            cosmosSignAmino: (params) => this.client.post('/cosmos/sign-amino', params),
+            cosmosSignAmino: (params) => this.client.post('/cosmos/sign-amino', params, this.client.signingTimeoutMs),
             /** Sign a Cosmos `MsgDelegate`. */
-            cosmosSignAminoDelegate: (params) => this.client.post('/cosmos/sign-amino-delegate', params),
+            cosmosSignAminoDelegate: (params) => this.client.post('/cosmos/sign-amino-delegate', params, this.client.signingTimeoutMs),
             /** Sign a Cosmos `MsgUndelegate`. */
-            cosmosSignAminoUndelegate: (params) => this.client.post('/cosmos/sign-amino-undelegate', params),
+            cosmosSignAminoUndelegate: (params) => this.client.post('/cosmos/sign-amino-undelegate', params, this.client.signingTimeoutMs),
             /** Sign a Cosmos `MsgBeginRedelegate`. */
-            cosmosSignAminoRedelegate: (params) => this.client.post('/cosmos/sign-amino-redelegate', params),
+            cosmosSignAminoRedelegate: (params) => this.client.post('/cosmos/sign-amino-redelegate', params, this.client.signingTimeoutMs),
             /** Sign a Cosmos `MsgWithdrawDelegatorReward` for all delegations. */
-            cosmosSignAminoWithdrawRewards: (params) => this.client.post('/cosmos/sign-amino-withdraw-delegator-rewards-all', params),
+            cosmosSignAminoWithdrawRewards: (params) => this.client.post('/cosmos/sign-amino-withdraw-delegator-rewards-all', params, this.client.signingTimeoutMs),
             /** Sign a Cosmos IBC `MsgTransfer`. */
-            cosmosSignAminoIbcTransfer: (params) => this.client.post('/cosmos/sign-amino-ibc-transfer', params),
+            cosmosSignAminoIbcTransfer: (params) => this.client.post('/cosmos/sign-amino-ibc-transfer', params, this.client.signingTimeoutMs),
         };
         // ═══════════════════════════════════════════════════════════════════
         // osmosis — Osmosis signing
@@ -213,23 +213,23 @@ class KeepKeySdk {
         /** Osmosis amino signing — transfer, staking, IBC, LP, swap. */
         this.osmosis = {
             /** Sign a generic Osmosis amino message. */
-            osmosisSignAmino: (params) => this.client.post('/osmosis/sign-amino', params),
+            osmosisSignAmino: (params) => this.client.post('/osmosis/sign-amino', params, this.client.signingTimeoutMs),
             /** Sign an Osmosis `MsgDelegate`. */
-            osmosisSignAminoDelegate: (params) => this.client.post('/osmosis/sign-amino-delegate', params),
+            osmosisSignAminoDelegate: (params) => this.client.post('/osmosis/sign-amino-delegate', params, this.client.signingTimeoutMs),
             /** Sign an Osmosis `MsgUndelegate`. */
-            osmosisSignAminoUndelegate: (params) => this.client.post('/osmosis/sign-amino-undelegate', params),
+            osmosisSignAminoUndelegate: (params) => this.client.post('/osmosis/sign-amino-undelegate', params, this.client.signingTimeoutMs),
             /** Sign an Osmosis `MsgBeginRedelegate`. */
-            osmosisSignAminoRedelegate: (params) => this.client.post('/osmosis/sign-amino-redelegate', params),
+            osmosisSignAminoRedelegate: (params) => this.client.post('/osmosis/sign-amino-redelegate', params, this.client.signingTimeoutMs),
             /** Sign an Osmosis `MsgWithdrawDelegatorReward` for all delegations. */
-            osmosisSignAminoWithdrawRewards: (params) => this.client.post('/osmosis/sign-amino-withdraw-delegator-rewards-all', params),
+            osmosisSignAminoWithdrawRewards: (params) => this.client.post('/osmosis/sign-amino-withdraw-delegator-rewards-all', params, this.client.signingTimeoutMs),
             /** Sign an Osmosis IBC `MsgTransfer`. */
-            osmosisSignAminoIbcTransfer: (params) => this.client.post('/osmosis/sign-amino-ibc-transfer', params),
+            osmosisSignAminoIbcTransfer: (params) => this.client.post('/osmosis/sign-amino-ibc-transfer', params, this.client.signingTimeoutMs),
             /** Sign an Osmosis `MsgExitPool` (remove liquidity). */
-            osmosisSignAminoLpRemove: (params) => this.client.post('/osmosis/sign-amino-lp-remove', params),
+            osmosisSignAminoLpRemove: (params) => this.client.post('/osmosis/sign-amino-lp-remove', params, this.client.signingTimeoutMs),
             /** Sign an Osmosis `MsgJoinPool` (add liquidity). */
-            osmosisSignAminoLpAdd: (params) => this.client.post('/osmosis/sign-amino-lp-add', params),
+            osmosisSignAminoLpAdd: (params) => this.client.post('/osmosis/sign-amino-lp-add', params, this.client.signingTimeoutMs),
             /** Sign an Osmosis `MsgSwapExactAmountIn` (swap). */
-            osmosisSignAminoSwap: (params) => this.client.post('/osmosis/sign-amino-swap', params),
+            osmosisSignAminoSwap: (params) => this.client.post('/osmosis/sign-amino-swap', params, this.client.signingTimeoutMs),
         };
         // ═══════════════════════════════════════════════════════════════════
         // hive — Hive (SLIP-0048) signing
@@ -240,11 +240,11 @@ class KeepKeySdk {
              * Sign 1–4 Hive operations against the device clear-sign op table.
              * Requires the vault's `hive_enabled` setting and firmware >= 7.15.0.
              */
-            hiveSignOperations: (params) => this.client.post('/hive/sign-operations', params),
+            hiveSignOperations: (params) => this.client.post('/hive/sign-operations', params, this.client.signingTimeoutMs),
             /** Sign a Hive transfer op (dedicated path — caller supplies the TaPoS header). */
-            hiveSignTransfer: (params) => this.client.post('/hive/sign-transfer', params),
+            hiveSignTransfer: (params) => this.client.post('/hive/sign-transfer', params, this.client.signingTimeoutMs),
             /** Keychain signBuffer — sign SHA256(message) on-device (dApp login). */
-            hiveSignMessage: (params) => this.client.post('/hive/sign-message', params),
+            hiveSignMessage: (params) => this.client.post('/hive/sign-message', params, this.client.signingTimeoutMs),
         };
         // ═══════════════════════════════════════════════════════════════════
         // thorchain — THORChain signing
@@ -252,9 +252,9 @@ class KeepKeySdk {
         /** THORChain signing (RUNE transfers and deposits for swaps). */
         this.thorchain = {
             /** Sign a THORChain `MsgSend` transfer. */
-            thorchainSignAminoTransfer: (params) => this.client.post('/thorchain/sign-amino-transfer', params),
+            thorchainSignAminoTransfer: (params) => this.client.post('/thorchain/sign-amino-transfer', params, this.client.signingTimeoutMs),
             /** Sign a THORChain `MsgDeposit` (used for swaps and loans). */
-            thorchainSignAminoDeposit: (params) => this.client.post('/thorchain/sign-amino-deposit', params),
+            thorchainSignAminoDeposit: (params) => this.client.post('/thorchain/sign-amino-deposit', params, this.client.signingTimeoutMs),
         };
         // ═══════════════════════════════════════════════════════════════════
         // mayachain — MAYAChain signing
@@ -262,9 +262,9 @@ class KeepKeySdk {
         /** MAYAChain signing (CACAO transfers and deposits). */
         this.mayachain = {
             /** Sign a MAYAChain `MsgSend` transfer. */
-            mayachainSignAminoTransfer: (params) => this.client.post('/mayachain/sign-amino-transfer', params),
+            mayachainSignAminoTransfer: (params) => this.client.post('/mayachain/sign-amino-transfer', params, this.client.signingTimeoutMs),
             /** Sign a MAYAChain `MsgDeposit` (used for swaps). */
-            mayachainSignAminoDeposit: (params) => this.client.post('/mayachain/sign-amino-deposit', params),
+            mayachainSignAminoDeposit: (params) => this.client.post('/mayachain/sign-amino-deposit', params, this.client.signingTimeoutMs),
         };
         // ═══════════════════════════════════════════════════════════════════
         // ripple — XRP signing
@@ -272,7 +272,7 @@ class KeepKeySdk {
         /** XRP (Ripple) signing. */
         this.ripple = {
             /** Sign an XRP payment transaction. */
-            xrpSignTransaction: (params) => this.client.post('/xrp/sign-transaction', params),
+            xrpSignTransaction: (params) => this.client.post('/xrp/sign-transaction', params, this.client.signingTimeoutMs),
         };
         // ═══════════════════════════════════════════════════════════════════
         // binance — BNB Beacon Chain signing
@@ -280,7 +280,7 @@ class KeepKeySdk {
         /** BNB Beacon Chain signing. */
         this.binance = {
             /** Sign a BNB Beacon Chain transaction. */
-            binanceSignTransaction: (params) => this.client.post('/bnb/sign-transaction', params),
+            binanceSignTransaction: (params) => this.client.post('/bnb/sign-transaction', params, this.client.signingTimeoutMs),
         };
         // ═══════════════════════════════════════════════════════════════════
         // solana — Solana signing
@@ -293,7 +293,7 @@ class KeepKeySdk {
              * provider-signed KKSOLSW1 `swapMetadata` descriptor; firmware verifies its
              * binding before displaying ClearSign swap details.
              */
-            solanaSignTransaction: (params) =>
+            solanaSignTransaction: (params) => 
             // Device confirmation can span several screens (schema-decoded args,
             // accounts, priority fee); the 30s default aborts mid-review.
             this.client.post('/solana/sign-transaction', params, this.client.signingTimeoutMs),
@@ -308,7 +308,7 @@ class KeepKeySdk {
              * bytes) are supported. Verifier MUST reconstruct the envelope locally
              * and verify against it, NOT against the bare message.
              */
-            solanaSignOffchainMessage: (params) => this.client.post('/solana/sign-offchain-message', params),
+            solanaSignOffchainMessage: (params) => this.client.post('/solana/sign-offchain-message', params, this.client.signingTimeoutMs),
         };
         // ═══════════════════════════════════════════════════════════════════
         // tron — TRON signing
@@ -316,7 +316,7 @@ class KeepKeySdk {
         /** TRON (TRX) signing, including TRC-20 tokens. */
         this.tron = {
             /** Sign a TRON transaction. `amount` is in sun (1 TRX = 1,000,000 sun). */
-            tronSignTransaction: (params) => this.client.post('/tron/sign-transaction', params),
+            tronSignTransaction: (params) => this.client.post('/tron/sign-transaction', params, this.client.signingTimeoutMs),
             /**
              * Sign a message under TIP-191 (TRON's analog of EIP-191 personal_sign):
              *   hash = keccak256("\x19TRON Signed Message:\n" + decimal(len) + msg)
@@ -325,7 +325,7 @@ class KeepKeySdk {
              * Pass `is_text=false` to send `message` as hex bytes; default treats
              * it as UTF-8.
              */
-            tronSignMessage: (params) => this.client.post('/tron/sign-message', params),
+            tronSignMessage: (params) => this.client.post('/tron/sign-message', params, this.client.signingTimeoutMs),
             /**
              * Verify a TIP-191 signature against the claimed Base58Check address.
              * The device recovers the secp256k1 pubkey, derives the canonical
@@ -341,7 +341,7 @@ class KeepKeySdk {
              * and signs with secp256k1. Both hashes must be exactly 32 bytes;
              * omit `message_hash` for primaryType="EIP712Domain".
              */
-            tronSignTypedHash: (params) => this.client.post('/tron/sign-typed-hash', params),
+            tronSignTypedHash: (params) => this.client.post('/tron/sign-typed-hash', params, this.client.signingTimeoutMs),
         };
         // ═══════════════════════════════════════════════════════════════════
         // ton — TON signing
@@ -349,7 +349,7 @@ class KeepKeySdk {
         /** TON signing (supports Jettons). */
         this.ton = {
             /** Sign a TON transaction. `raw_tx` must be the base64- or hex-encoded raw transaction. */
-            tonSignTransaction: (params) => this.client.post('/ton/sign-transaction', params),
+            tonSignTransaction: (params) => this.client.post('/ton/sign-transaction', params, this.client.signingTimeoutMs),
             /**
              * Bare Ed25519 over message bytes. NO domain separation — firmware
              * fences this behind the `AdvancedMode` policy. With the policy
@@ -360,7 +360,7 @@ class KeepKeySdk {
              * envelope (separate endpoint, not yet implemented) which carries
              * proper domain separation and doesn't need the policy gate.
              */
-            tonSignMessage: (params) => this.client.post('/ton/sign-message', params),
+            tonSignMessage: (params) => this.client.post('/ton/sign-message', params, this.client.signingTimeoutMs),
             /**
              * Build an unsigned TON v4R2 transfer. Fetches seqno and wallet
              * state from TonCenter, constructs the body cell, and returns the
