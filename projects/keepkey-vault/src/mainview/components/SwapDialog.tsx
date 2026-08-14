@@ -2341,8 +2341,9 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
 
   // Turn on the device's AdvancedMode (Blind Signing) policy. There is no
   // per-transaction exception on shipped firmware, so the opaque Solana route
-  // only signs once the global policy is on — it stays on until the user turns
-  // it off in Device Settings. Raises an enable-policy confirm on the device.
+  // only signs once the global policy is on. It is session state on 7.15+:
+  // the device disarms it when it locks or is unplugged, so the user may be
+  // asked again. Raises an enable-policy confirm on the device.
   const handleEnableBlindSigning = useCallback(async () => {
     setEnablingBlindSign(true)
     setBlindSignError(null)
@@ -3808,7 +3809,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                 </Box>
                 <Text fontSize="11px" color="kk.textMuted" lineHeight="1.4">
                   {blindSignCause === 'device'
-                    ? t('deviceBlindSignCaveat', 'This stays on until you turn it off in Device Settings, and it applies to every app that uses this KeepKey — not just this swap. It also turns off the safety check this app runs on transactions your device cannot read: future swaps like this one will go straight to the device without showing you what leaves your wallet. The device will ask you to confirm and to re-enter your PIN.')
+                    ? t('deviceBlindSignCaveat', 'This stays on until the device locks or is unplugged, and it applies to every app that uses this KeepKey — not just this swap. It also turns off the safety check this app runs on transactions your device cannot read: future swaps like this one will go straight to the device without showing you what leaves your wallet. The device will ask you to confirm and to re-enter your PIN.')
                     : t('solanaOpaqueCaveat', 'Blind signing means the device shows a generic prompt instead of authenticated swap details. This approval applies only to this transaction and does not enable global Advanced Mode. Confirm only the swap you reviewed here.')}
                 </Text>
               </Flex>

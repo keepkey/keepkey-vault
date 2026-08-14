@@ -126,6 +126,52 @@ export function BtcXpubSelector({ btcAccounts, onSelectXpub, onAddAccount, addin
           )
         })}
       </Flex>
+      <BtcAccountTypeHelp />
+    </Box>
+  )
+}
+
+/**
+ * "Which one is right?" is the single most common question on this control, and
+ * "there's no wrong answer" is a non-answer — users read it as the app dodging.
+ * Give a default, say what actually differs (fees and compatibility), and put
+ * the rest behind a link.
+ */
+function BtcAccountTypeHelp() {
+  const { t } = useTranslation("receive")
+  const [open, setOpen] = useState(false)
+  return (
+    <Box mt="1.5">
+      <Flex align="center" gap="1" flexWrap="wrap">
+        <Text fontSize="10px" color="kk.textMuted" lineHeight="1.5">
+          {t('btcAccountType.recommendation', {
+            defaultValue: 'Not sure? Use Native SegWit (bc1…) — it has the lowest fees and is supported by every modern wallet and exchange.',
+          })}
+        </Text>
+        <Text
+          as="button"
+          fontSize="10px"
+          color="kk.gold"
+          textDecoration="underline"
+          lineHeight="1.5"
+          onClick={() => setOpen(o => !o)}
+          _hover={{ opacity: 0.8 }}
+        >
+          {open
+            ? t('btcAccountType.hide', { defaultValue: 'Hide' })
+            : t('btcAccountType.learnMore', { defaultValue: 'Learn more' })}
+        </Text>
+      </Flex>
+      {open && (
+        <Box mt="1.5" p="2.5" bg="rgba(255,255,255,0.03)" border="1px solid" borderColor="kk.border" borderRadius="lg">
+          <Text fontSize="10px" color="kk.textSecondary" lineHeight="1.7">
+            {t('btcAccountType.explainer', {
+              defaultValue:
+                'All three hold real bitcoin from the same recovery phrase — they are different address formats, not different wallets, and switching between them never puts funds at risk. Native SegWit (bc1…) costs the least to spend. SegWit (3…) is a middle ground for older services that reject bc1 addresses. Legacy (1…) is the original format: it works everywhere but costs the most in fees. If you are receiving from a service that rejects your address, pick the format it accepts — your coins stay accessible under all three.',
+            })}
+          </Text>
+        </Box>
+      )}
     </Box>
   )
 }

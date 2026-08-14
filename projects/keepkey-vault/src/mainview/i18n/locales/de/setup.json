@@ -135,7 +135,7 @@
 		"recoverWallet": "Wallet wiederherstellen",
 		"seedLength": "Seed-Länge",
 		"words": "Wörter",
-		"entropyNote": "Eine längere Seed-Länge verbessert die Gesamtentropie der Wallet nicht.",
+		"entropyNote": "Der Kernstandard von Bitcoin ist 128 Bit (12 Wörter). 256-Bit-Seeds werden unterstützt, aber nicht empfohlen.",
 		"learnMore": "Mehr erfahren",
 		"howManyWords": "Wie viele Wörter hat Ihr Seed?"
 	},

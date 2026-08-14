@@ -135,7 +135,7 @@
 		"recoverWallet": "Recuperar carteira",
 		"seedLength": "Tamanho da seed",
 		"words": "palavras",
-		"entropyNote": "Adicionar palavras à seed não melhora a entropia geral da carteira.",
+		"entropyNote": "O padrão base do Bitcoin é de 128 bits (12 palavras). Seeds de 256 bits são suportadas, mas não recomendadas.",
 		"learnMore": "Saiba mais",
 		"howManyWords": "Quantas palavras há na sua seed?"
 	},

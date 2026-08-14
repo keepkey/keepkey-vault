@@ -75,7 +75,7 @@
 	},
 	"signingPolicy": "Criteri di firma",
 	"advancedMode": "Modalità avanzata",
-	"advancedModeDescription": "Consenti la firma di transazioni EVM con dati di contratto arbitrari (es. Uniswap, DeFi).",
+	"advancedModeDescription": "Consente di firmare transazioni EVM con dati di contratto arbitrari (es. Uniswap, DeFi). Si disattiva quando il dispositivo viene bloccato o scollegato.",
 	"featureFlags": "Flag funzionalità",
 	"walletConnectFeature": "WalletConnect",
 	"walletConnectFeatureDescription": "Connettiti alle dApp tramite il protocollo WalletConnect.",

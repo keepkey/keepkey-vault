@@ -135,7 +135,7 @@
 		"recoverWallet": "Wallet herstellen",
 		"seedLength": "Seed-lengte",
 		"words": "woorden",
-		"entropyNote": "Extra seed-lengte verbetert de totale wallet-entropie niet.",
+		"entropyNote": "De kernstandaard van Bitcoin is 128 bit (12 woorden). Seeds van 256 bit worden ondersteund, maar niet aanbevolen.",
 		"learnMore": "Meer informatie",
 		"howManyWords": "Hoeveel woorden zitten er in uw seed?"
 	},

@@ -467,8 +467,13 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 			</Flex>
 			{/* Gas balance hint for token sends */}
 			{isTokenSend && balance && (() => {
-				const nativeUsd = balance.nativeBalanceUsd ?? 0
-				const isLow = nativeUsd < 1
+				// ponytail: gate on the native balance itself, not on nativeBalanceUsd.
+				// That field is a subtraction (chain total − tokens − defi) and collapses to ~0
+				// whenever token USD is double-counted, which fired this warning on L2s where
+				// the user plainly had gas. Zero native = definitely can't pay gas; anything
+				// above that is left to buildEvmTx's real gasPrice*gasLimit check.
+				const nativeBal = parseFloat(balance.balance || '0')
+				const isLow = !(nativeBal > 0)
 				if (isLow) {
 					return (
 						<Box bg="rgba(224,140,123,0.10)" border="1px solid rgba(224,140,123,0.28)" borderRadius="14px" px="3.5" py="3">
@@ -482,14 +487,14 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 								You need {chain.symbol} to pay network fees. Deposit {chain.symbol} to send tokens on {chain.coin}.
 							</Text>
 							<Text fontSize="xs" fontFamily="mono" color="var(--rose)" mt="1">
-								{t("gas")}: {formatBalance(balance.balance)} {chain.symbol}
+								{t("balance", "Balance")}: {formatBalance(balance.balance)} {chain.symbol}
 							</Text>
 						</Box>
 					)
 				}
 				return (
 					<Flex justify="space-between" align="center" px="3">
-						<Text fontSize="10px" color="kk.textMuted">{t("gas")} ({chain.symbol})</Text>
+						<Text fontSize="10px" color="kk.textMuted">{t("balance", "Balance")} ({chain.symbol})</Text>
 						<Text fontSize="10px" fontFamily="mono" color="kk.textMuted">
 							{formatBalance(balance.balance)} {chain.symbol}
 						</Text>

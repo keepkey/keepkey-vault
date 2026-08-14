@@ -13,10 +13,63 @@ import bs58check from 'bs58check'
 import type { ChainDef } from '../../shared/chains'
 import { getBtcBackend } from '../btc-backend'
 import { utxoDiscoveryKey } from '../btc-backend/types'
+import { filterSpendableZcashUtxos, summarizeZcashMaturity, ZCASH_MIN_CONFIRMATIONS } from '../../shared/zcash-maturity'
 
 /** BTC mainnet — the ONLY UTXO chain that routes to a self-host node; every other
  *  coin (LTC/DOGE/BCH/Dash/Zcash) stays on Pioneer. */
 const BTC_NETWORK_ID = 'bip122:000000000019d6689c085ae165831e93'
+
+/** Chain tip for maturity checks.
+ *
+ *  Pioneer's UTXO indexer may report `confirmations` directly or only `height`;
+ *  without a tip the height-only case yields unknown confirmations, which the
+ *  maturity helpers treat as spendable. Every other caller passes this, so the
+ *  builder must too — otherwise it selects immature outputs the UI has already
+ *  told the user are locked.
+ *
+ *  Loaded lazily: ../zcash-sidecar owns a sidecar process, and importing this
+ *  builder has to stay side-effect-free (see btc-backend/pioneer.ts). */
+async function zcashTipHeight(): Promise<number | null> {
+  try {
+    const { getScanState } = await import('../zcash-sidecar')
+    return getScanState().syncedTo ?? null
+  } catch {
+    return null
+  }
+}
+
+/** Zcash consensus branch IDs by mainnet activation height, newest first.
+ *
+ *  The branch ID is baked into the ZIP-243 transparent sighash, so a stale one
+ *  makes every node reject the tx as ScriptInvalid — the signature commits to
+ *  the wrong branch. Values and heights are from zcash_protocol's consensus.rs
+ *  (`BranchId::branch_id` / `activation_height`), the same crate the sidecar
+ *  builds against.
+ *
+ *  This is a table rather than a constant because a constant already rotted
+ *  here: NU6.2 was hardcoded, Ironwood activated at 3,428,143 on 2026-07-28,
+ *  and transparent sends broke silently. Adding the next upgrade's row ahead
+ *  of its activation lets the switch happen on its own at the right height. */
+const ZCASH_BRANCH_IDS: ReadonlyArray<{ activationHeight: number; branchId: number; name: string }> = [
+  { activationHeight: 3_428_143, branchId: 0x37a5165b, name: 'NU6.3 Ironwood' },
+  { activationHeight: 3_364_600, branchId: 0x5437f330, name: 'NU6.2' },
+  { activationHeight: 3_146_400, branchId: 0x4dec4df0, name: 'NU6.1' },
+  { activationHeight: 2_726_400, branchId: 0xc8e71055, name: 'NU6' },
+  { activationHeight: 1_687_104, branchId: 0xc2d6d0b4, name: 'NU5' },
+]
+
+/** Branch ID in force at `tipHeight`.
+ *
+ *  With no tip (sidecar not running — transparent sends do not require it) we
+ *  assume the newest known upgrade is live. Both a too-old and a too-new guess
+ *  fail the same way, at broadcast, but guessing old is the failure that
+ *  persists silently through every future upgrade. Guessing new self-corrects
+ *  the moment the table gains a row. */
+export function zcashBranchId(tipHeight: number | null): number {
+  if (tipHeight == null) return ZCASH_BRANCH_IDS[0].branchId
+  return (ZCASH_BRANCH_IDS.find(u => tipHeight >= u.activationHeight) ?? ZCASH_BRANCH_IDS[0]).branchId
+}
+
 const btcSelfHostActive = (networkId: string) =>
   networkId === BTC_NETWORK_ID && getBtcBackend().kind !== 'pioneer'
 
@@ -174,6 +227,15 @@ function getScriptTypeFromPath(path: string): string | undefined {
   return PURPOSE_TO_SCRIPT[parseInt(match[1], 10)]
 }
 
+/** Derive scriptType from an account path's purpose element. Authoritative where
+ * the xpub prefix is not: BIP86 deliberately kept the ordinary `xpub` version
+ * bytes, so getScriptTypeFromXpub() answers p2pkh for a Taproot account and the
+ * change output would be built at m/44'. */
+export function getScriptTypeFromAccountPath(accountPath?: number[]): string | undefined {
+  if (!accountPath?.length) return undefined
+  return PURPOSE_TO_SCRIPT[accountPath[0] - 0x80000000]
+}
+
 export interface XpubInfo {
   xpub: string
   scriptType: string
@@ -274,7 +336,8 @@ export async function estimateUtxoFee(
     const { to, feeLevel = 5, isMax = false, xpub, allXpubs, scriptTypeOverride, accountPath, satPerVByte, memo } = params
     const primaryXpub = xpub || allXpubs?.[0]?.xpub
     if (!primaryXpub) return null
-    const scriptType = scriptTypeOverride || getScriptTypeFromXpub(primaryXpub) || chain.scriptType || 'p2pkh'
+    const scriptType = scriptTypeOverride || getScriptTypeFromAccountPath(accountPath)
+      || getScriptTypeFromXpub(primaryXpub) || chain.scriptType || 'p2pkh'
 
     let utxos: any[]
     if (allXpubs && allXpubs.length > 0) {
@@ -285,6 +348,9 @@ export async function estimateUtxoFee(
     } else {
       utxos = await fetchUtxosForXpub(pioneer, chain.networkId, primaryXpub, scriptType, accountPath)
     }
+    // Quote against the same set buildUtxoTx will actually spend, or the
+    // estimate covers immature outputs the build then refuses.
+    if (chain.id === 'zcash') utxos = filterSpendableZcashUtxos(utxos, await zcashTipHeight())
     if (!utxos.length) return null
 
     const feeRates = await resolveFeeRates(pioneer, chain)
@@ -323,6 +389,9 @@ export async function buildUtxoTx(
   params: BuildUtxoParams,
 ) {
   const { memo, feeLevel = 5, isMax = false, xpub, allXpubs, scriptTypeOverride, accountPath, satPerVByte } = params
+  // Chain tip for ZEC maturity + consensus branch selection; null when the
+  // sidecar isn't running, which transparent sends don't require.
+  let zcashTip: number | null = null
   // BCH: NEAR Intents (and some other providers) return legacy P2PKH/P2SH addresses
   // (starting with '1'/'3'). The KeepKey firmware requires cashaddr format — convert.
   const to = chain.id === 'bitcoincash' ? normalizeBchAddress(params.to) : params.to
@@ -330,10 +399,13 @@ export async function buildUtxoTx(
 
   if (!xpub && (!allXpubs || !allXpubs.length)) throw new Error(`${TAG} xpub required for UTXO chain ${chain.coin}`)
 
-  // scriptType resolution: explicit override > xpub prefix > chain default > p2pkh
+  // scriptType resolution: explicit override > account-path purpose > xpub prefix >
+  // chain default > p2pkh. The path outranks the prefix because a BIP86 account
+  // carries ordinary `xpub` bytes and would otherwise resolve to p2pkh.
   const primaryXpub = xpub || allXpubs![0].xpub
-  const scriptType = scriptTypeOverride || getScriptTypeFromXpub(primaryXpub) || chain.scriptType || 'p2pkh'
-  console.log(`${TAG} scriptType=${scriptType} (override=${scriptTypeOverride}, xpub-prefix=${getScriptTypeFromXpub(primaryXpub)}, chain-default=${chain.scriptType})`)
+  const scriptType = scriptTypeOverride || getScriptTypeFromAccountPath(accountPath)
+    || getScriptTypeFromXpub(primaryXpub) || chain.scriptType || 'p2pkh'
+  console.log(`${TAG} scriptType=${scriptType} (override=${scriptTypeOverride}, account-path=${getScriptTypeFromAccountPath(accountPath)}, xpub-prefix=${getScriptTypeFromXpub(primaryXpub)}, chain-default=${chain.scriptType})`)
   const coinType = COIN_TYPE[chain.id] ?? 0
   const purpose = PURPOSE[scriptType] ?? 84
 
@@ -361,6 +433,28 @@ export async function buildUtxoTx(
     }
   } else {
     utxos = await fetchUtxosForXpub(pioneer, chain.networkId, primaryXpub, scriptType, accountPath || undefined)
+  }
+  if (chain.id === 'zcash') {
+    zcashTip = await zcashTipHeight()
+    const tipHeight = zcashTip
+    const maturity = summarizeZcashMaturity(utxos, tipHeight)
+    const allZcashUtxos = utxos
+    utxos = filterSpendableZcashUtxos(allZcashUtxos, tipHeight)
+    if (maturity.lockedCount > 0) {
+      console.log(
+        `${TAG} ZEC maturity: ${utxos.length} spendable, ${maturity.lockedCount} locked ` +
+        `(${maturity.nextUnlockConfirmations ?? 0}/${ZCASH_MIN_CONFIRMATIONS} confirmations)`,
+      )
+    }
+    // Distinguish "locked, come back later" from "you have nothing" — the
+    // generic message below would send the user hunting for a missing balance.
+    if (utxos.length === 0 && maturity.lockedCount > 0) {
+      throw new Error(
+        `Zcash funds are locked while confirming ` +
+        `(${maturity.nextUnlockConfirmations ?? 0}/${ZCASH_MIN_CONFIRMATIONS} blocks). ` +
+        `Wait for ${ZCASH_MIN_CONFIRMATIONS} confirmations and try again.`,
+      )
+    }
   }
   if (!utxos.length) throw new Error(`No confirmed UTXOs found for ${chain.coin}. If you recently sent or received ${chain.symbol}, the transaction may still be confirming — please wait and try again.`)
 
@@ -680,14 +774,11 @@ export async function buildUtxoTx(
       overwintered: true,
       versionGroupId: 0x892F2085,
       // Consensus branch id baked into the ZIP-243 transparent sighash. A
-      // stale value makes every node reject the tx as ScriptInvalid (the
-      // signature commits to the wrong branch), so this MUST track Zcash
-      // network upgrades. The shielded paths get it live from the sidecar;
-      // this transparent path has no sidecar dependency, hence a constant.
-      // ponytail: rots at every NU activation — if ZEC sends suddenly fail
-      // ScriptInvalid on all nodes, update this first (the sidecar's
-      // ZcashSignPCZT log line prints the current live value).
-      branchId: 0x5437f330,   // NU6.2 (current Zcash mainnet, 2026)
+      // stale value makes every node reject the tx as ScriptInvalid, because
+      // the signature commits to the wrong branch. Selected by chain tip from
+      // ZCASH_BRANCH_IDS rather than hardcoded — the previous constant said
+      // NU6.2 and outlived Ironwood's activation, silently breaking sends.
+      branchId: zcashBranchId(zcashTip),
       expiry: 0,
     } : {}),
     fee: String(fee / 10 ** chain.decimals),

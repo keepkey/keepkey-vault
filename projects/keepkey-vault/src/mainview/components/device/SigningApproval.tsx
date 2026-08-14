@@ -134,7 +134,7 @@ function BlindSigningBanner({ enabled, confirming, onEnable, onCancel, t, title,
 					</Text>
 					<Text fontSize="2xs" color="kk.textSecondary">
 						{confirming
-							? (confirmDescription ?? t("signing.advancedModeWarning", "This permanently enables blind signing for ALL future transactions on this device. You can disable it later in Settings."))
+							? (confirmDescription ?? t("signing.advancedModeWarning", "This enables blind signing for ALL transactions until the device locks or is unplugged. You can also turn it off in Settings."))
 							: (description ?? t("signing.blindSigningDescription", "Enable Advanced Mode on device to sign unverified contract data."))}
 					</Text>
 				</Box>
@@ -171,7 +171,7 @@ function BlindSigningBanner({ enabled, confirming, onEnable, onCancel, t, title,
 						cursor="pointer" _hover={{ bg: "rgba(229,62,62,0.5)" }}
 						onClick={onEnable}
 					>
-						{t("signing.confirmEnable", "Yes, enable permanently")}
+						{t("signing.confirmEnable", "Yes, enable for this session")}
 					</Box>
 				</Flex>
 			)}

@@ -98,7 +98,7 @@
 	},
 	"signingPolicy": "İmzalama politikası",
 	"advancedMode": "Gelişmiş mod",
-	"advancedModeDescription": "EVM işlemlerinin rastgele sözleşme verileriyle imzalanmasına izin verir (örn. Uniswap, DeFi).",
+	"advancedModeDescription": "Rastgele sözleşme verisi içeren EVM işlemlerinin imzalanmasına izin verir (ör. Uniswap, DeFi). Cihaz kilitlendiğinde veya çıkarıldığında kendiliğinden kapanır.",
 	"walletConnectFeature": "WalletConnect",
 	"walletConnectFeatureDescription": "WalletConnect protokolü aracılığıyla dApp'lere bağlanın.",
 	"zcashPrivacyFeature": "Zcash korumalı gizlilik",

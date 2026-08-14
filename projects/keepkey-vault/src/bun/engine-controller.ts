@@ -7,7 +7,7 @@ import { NodeWebUSBKeepKeyAdapter } from '@keepkey/hdwallet-keepkey-nodewebusb'
 import { usb } from 'usb'
 import { saveDeviceSnapshot, saveEmulatorWalletMeta, clearNonBitcoinBalances } from './db'
 import { HttpError } from './auth'
-import { isBitcoinOnlyVariant } from '../shared/flags'
+import { isBitcoinOnlyVariant, DEFAULT_AUTO_LOCK_MS } from '../shared/flags'
 import type { DeviceStateInfo, ActiveTransport, UpdatePhase, DeviceState, FirmwareManifest, PinRequestType, Bip85DeriveParams, Bip85DisplayResult } from '../shared/types'
 import { resolveOndeviceFirmwareVersion } from '../shared/firmware-versions'
 import { EmulatorKeepKeyAdapter } from './emulator-transport'
@@ -16,6 +16,17 @@ import { getActiveFlashName, getEmulatorStatus } from './emulator'
 const KEEPKEY_VENDOR_ID = 0x2B24 // 11044
 // Firmware manifest lives in keepkey-vault (migrated from keepkey-desktop, which is now stale).
 const MANIFEST_URL = 'https://raw.githubusercontent.com/keepkey/keepkey-vault/master/firmware/releases.json'
+
+/**
+ * Official release tags. Two lineages ship from the same release: the default
+ * build (vX.Y.Z) and the bitcoin-only variant, which release.yml publishes with
+ * a `-bitcoin-only` suffix and which is a DIFFERENT binary with its own hash.
+ *
+ * The suffix allowlist is deliberate rather than a general `-.*`: the hash table
+ * also carries unsigned in-house builds (v7.14.0-zcash, -solana, -bip85) that
+ * must never read as official.
+ */
+const OFFICIAL_RELEASE_TAG = /^v\d+\.\d+\.\d+(-bitcoin-only)?$/
 
 /**
  * Locate firmware-bundle/ — copied into app by electrobun.config.ts (see firmware-bundle/README.md).
@@ -674,19 +685,33 @@ export class EngineController extends EventEmitter {
   }
 
   /**
-   * Verify device firmware/bootloader against the manifest registry.
+   * Verify device firmware/bootloader against known-good hashes.
    *
-   * Key insight from keepkey-desktop: the manifest's hashes.firmware contains
-   * SHA-256 of downloadable .bin files, NOT on-device hashes. But hashes.bootloader
-   * DOES contain on-device bootloader hashes. So:
-   *   - Bootloader: lookup device hash in manifest.hashes.bootloader (hash-based)
-   *   - Firmware: check if device version exists in manifest.hashes.firmware values (version-based)
+   * Firmware: the device reports SHA-256(meta_descriptor + app_code), which
+   * equals the full-file SHA-256 of the released .bin, and because the meta
+   * descriptor covers the signature slots that hash pins the exact signed
+   * artifact. It is looked up in ONDEVICE_FIRMWARE_HASHES, which is compiled
+   * into this bundle, so a compromised update server cannot rewrite it.
+   *
+   * This replaced a version-STRING check against the manifest. That check
+   * asked the device what version it was and believed the answer, so any
+   * modified firmware reporting "7.14.1" was marked verified. Do not
+   * reintroduce it: manifest.hashes.firmware holds payload-only hashes (the
+   * .bin minus its 256-byte KPKY header) and cannot be compared to what the
+   * device reports.
+   *
+   * SCOPE: corroboration, not proof. The running firmware self-reports this
+   * hash, so a hostile firmware can report anything. What actually refuses to
+   * boot unsigned firmware is the bootloader's signatures_ok(), on the device,
+   * every power-on. Bootloader hashes are looked up in the manifest, which
+   * does carry on-device bootloader hashes.
    */
   private verifyHashes(features: any): {
     firmwareHash?: string
     bootloaderHash?: string
     firmwareVerified?: boolean
     bootloaderVerified?: boolean
+    firmwareRelease?: string
   } {
     const fwHash = base64ToHex(features?.firmwareHash)
     const blHash = base64ToHex(features?.bootloaderHash)
@@ -694,21 +719,20 @@ export class EngineController extends EventEmitter {
     let firmwareVerified: boolean | undefined
     let bootloaderVerified: boolean | undefined
 
-    if (this.manifest?.hashes) {
-      // Bootloader: on-device hash matches manifest keys directly
-      if (blHash) {
-        bootloaderVerified = blHash in (this.manifest.hashes.bootloader || {})
-      }
-      // Firmware: manifest firmware hashes are .bin file hashes (different from on-device hash).
-      // Verify by checking if the device's version string appears as a known release.
-      const fwVersion = this.extractVersion(features)
-      if (fwVersion && fwVersion !== '0.0.0') {
-        const knownVersions = Object.values(this.manifest.hashes.firmware || {})
-        firmwareVerified = knownVersions.includes(`v${fwVersion}`)
-      }
+    // Left undefined when the device reports no hash — firmware too old to
+    // send one is "unknown", never "verified". Fail closed on a missing field.
+    const firmwareRelease = resolveOndeviceFirmwareVersion(fwHash) ?? undefined
+    if (fwHash) {
+      // The table also carries unsigned in-house builds (v7.14.0-zcash, ...)
+      // so recognising a hash is not the same as it being an official release.
+      firmwareVerified = !!firmwareRelease && OFFICIAL_RELEASE_TAG.test(firmwareRelease)
     }
 
-    return { firmwareHash: fwHash, bootloaderHash: blHash, firmwareVerified, bootloaderVerified }
+    if (blHash && this.manifest?.hashes) {
+      bootloaderVerified = blHash in (this.manifest.hashes.bootloader || {})
+    }
+
+    return { firmwareHash: fwHash, bootloaderHash: blHash, firmwareVerified, bootloaderVerified, firmwareRelease }
   }
 
   // ── State Sync (called on USB attach + startup) ────────────────────────
@@ -1427,7 +1451,16 @@ export class EngineController extends EventEmitter {
     // true so needsInit stays false. Without this, the OOB wizard sees needsInit=true
     // during the featureless gap between detach and re-pair, skipping straight to
     // "Create New Wallet" instead of waiting for bootloader/firmware steps.
-    const initialized = features ? (features.initialized ?? false) : true
+    // Only an EXPLICIT `initialized === false` means "this device has no wallet".
+    // `undefined` means we don't know yet (partial features read, e.g. mid-reboot
+    // after a firmware flash) and MUST NOT be read as "needs setup": that routed
+    // the OOB wizard to "Create New Wallet" on a device that was fine, which reads
+    // to the user as "my KeepKey was wiped". The two errors are not symmetric —
+    // wrongly offering setup terrifies people about lost funds, wrongly skipping it
+    // just means a genuine new device continues into the app and sets up from there.
+    // Fail closed. Genuine out-of-box devices are identified by `isOob` below,
+    // which uses firmware presence/version and does not depend on this field.
+    const initialized = features ? features.initialized !== false : true
 
     // Compute hashes + resolved firmware version up front — needed by both
     // the state summary and the needsFirmwareUpdate check in bootloader mode.
@@ -1513,6 +1546,7 @@ export class EngineController extends EventEmitter {
       firmwareHash: hashes.firmwareHash,
       bootloaderHash: hashes.bootloaderHash,
       firmwareVerified: hashes.firmwareVerified,
+      firmwareRelease: hashes.firmwareRelease,
       bootloaderVerified: hashes.bootloaderVerified,
       error: this.lastError,
       isEmulator: this.activeTransport === 'emulator',
@@ -1675,7 +1709,7 @@ export class EngineController extends EventEmitter {
 
   // ── Wallet Setup Operations ────────────────────────────────────────────
 
-  async resetDevice(opts: { wordCount: 12 | 18 | 24; pin: boolean; passphrase: boolean }) {
+  async resetDevice(opts: { wordCount: 12 | 18 | 24; pin: boolean; passphrase: boolean; diceEntropy?: boolean }) {
     if (!this.wallet) throw new Error('No device connected')
     this.setupInProgress = true
     this.pinRequestCount = 0
@@ -1685,7 +1719,10 @@ export class EngineController extends EventEmitter {
         label: 'KeepKey',
         pin: opts.pin,
         passphrase: opts.passphrase,
-        autoLockDelayMs: 600000, // 10 min — user writes down seed words on device
+        autoLockDelayMs: DEFAULT_AUTO_LOCK_MS,
+        // Device-side dice entry. Only sent when asked: firmware older than
+        // 7.15.0 has no such field and rejects unknown ones.
+        ...(opts.diceEntropy ? { diceEntropy: true } : {}),
       })
       this.cachedFeatures = await this.wallet.getFeatures()
       this.updateState(this.deriveState(this.cachedFeatures))
@@ -1726,7 +1763,7 @@ export class EngineController extends EventEmitter {
         label: 'KeepKey',
         pin: opts.pin,
         passphrase: opts.passphrase,
-        autoLockDelayMs: 600000, // 10 min — recovery requires extended user interaction
+        autoLockDelayMs: DEFAULT_AUTO_LOCK_MS,
       })
       this.cachedFeatures = await this.wallet!.getFeatures()
       this.updateState(this.deriveState(this.cachedFeatures))

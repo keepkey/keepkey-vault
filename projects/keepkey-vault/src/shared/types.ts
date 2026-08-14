@@ -56,7 +56,13 @@ export interface DeviceStateInfo {
   resolvedFwVersion?: string  // firmware version resolved from on-device hash (bootloader mode only)
   firmwareHash?: string
   bootloaderHash?: string
+  /** true = on-device hash matches an official release; false = hash not
+   *  recognised; undefined = firmware reported no hash. Never treat undefined
+   *  as verified. */
   firmwareVerified?: boolean
+  /** Release tag the on-device hash resolves to, e.g. "v7.14.1". Suffixed tags
+   *  (v7.14.0-zcash) are recognised in-house builds, not official releases. */
+  firmwareRelease?: string
   bootloaderVerified?: boolean
   error?: string | null
   isEmulator: boolean
@@ -722,8 +728,8 @@ export interface AppSettings {
   numberLocale: string           // number formatting locale (default 'en-US')
   walletConnectEnabled: boolean   // feature flag: WalletConnect dApp support (default OFF)
   bip85Enabled: boolean          // feature flag: BIP-85 derived seeds (default OFF)
-  zcashPrivacyEnabled: boolean   // feature flag: Zcash shielded/privacy (default OFF, locked)
-  hiveEnabled: boolean           // feature flag: Hive blockchain (default OFF, requires firmware >= 7.15.0)
+  zcashPrivacyEnabled: boolean   // read-only capability: Zcash shielded/privacy — auto-ON when firmware >= 7.15.0
+  hiveEnabled: boolean           // read-only capability: Hive blockchain — auto-ON when firmware >= 7.15.0
   emulatorEnabled: boolean       // feature flag: macOS emulator surface (default OFF — dev-only)
   offlineMode: boolean           // airplane mode: zero outbound network; BTC data ops throw OFFLINE (default OFF)
   btcNodeEnabled: boolean        // self-host: route BTC data to the user's own node instead of Pioneer (default OFF)
@@ -1172,7 +1178,8 @@ export interface ExecuteSwapParams {
                                   // token sources Pioneer's available-assets doesn't list (e.g.
                                   // SPL USDT); Pioneer's canonical value still wins when present
   /** Explicit consent for this one Solana transaction to use the opaque signing
-   *  fallback. It does not change the device's persistent AdvancedMode policy. */
+   *  fallback. It does not change the device's AdvancedMode policy, which is
+   *  session state on 7.15+ (disarmed on lock or unplug). */
   allowSolanaBlindSigning?: boolean
 }
 
@@ -1520,4 +1527,61 @@ export interface UsbDiagnosticReport {
   guidance: string
   /** Copy-ready plain-text report for pasting into a support request. */
   text: string
+}
+
+/**
+ * RNG health-test results. These are HEALTH tests, not an entropy measurement:
+ * a strong PRNG seeded with a tiny hidden state passes all of them. See
+ * src/bun/rng-audit.ts for what each check can and cannot prove.
+ */
+export interface RngAuditStats {
+  bytes: number
+  /** Shannon entropy of the byte distribution, bits/byte (8.0 is ideal). */
+  shannonBitsPerByte: number
+  /** Fraction of bits set; 0.5 is ideal. */
+  onesFraction: number
+  /** Chi-square over the 256 byte values (255 degrees of freedom). */
+  chiSquare: number
+  /** Longest run of identical bits seen. */
+  longestBitRun: number
+  /** Distinct byte values observed (256 for any healthy sample of size). */
+  distinctBytes: number
+  /** Repeated 8-byte blocks — any hit is a hard failure (stuck/replayed RNG). */
+  repeatedBlocks8: number
+  /** Observed vs expected 4-byte collisions: the positive control. */
+  collisions4: number
+  expectedCollisions4: number
+  /** False when the sample is too small for the control to mean anything. */
+  collisionControlUsable: boolean
+}
+
+/**
+ * A check reports THREE states, never two. Several checks need a minimum
+ * sample before they mean anything, and reporting a skipped check as a pass
+ * is the single most misleading thing this feature could do -- it puts a
+ * green tick on evidence that was never gathered.
+ */
+export type RngCheckStatus = 'pass' | 'fail' | 'not-run'
+
+export interface RngCheck {
+  id: string
+  /** Short label for the ceremony list, e.g. "Repeated blocks". */
+  label: string
+  status: RngCheckStatus
+  /** Human-readable outcome, or why it could not run. */
+  detail: string
+}
+
+export interface RngAuditReport {
+  stats: RngAuditStats
+  /** Every check, in the order it is presented. */
+  checks: RngCheck[]
+  /** Every check that failed; empty when healthy. */
+  failures: string[]
+  /** SHA-256 of the collected sample, so a report can be tied to its bytes. */
+  sampleSha256: string
+  /** 'healthy' means nothing FAILED -- not that everything ran. */
+  verdict: 'healthy' | 'failed'
+  /** Bytes actually requested per device call, discovered at runtime. */
+  chunkBytes?: number
 }

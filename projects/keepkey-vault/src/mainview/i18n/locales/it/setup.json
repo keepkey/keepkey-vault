@@ -135,7 +135,7 @@
 		"recoverWallet": "Recupera portafoglio",
 		"seedLength": "Lunghezza seed",
 		"words": "parole",
-		"entropyNote": "Aumentare la lunghezza del seed non migliora l’entropia complessiva del wallet.",
+		"entropyNote": "Lo standard di base di Bitcoin è a 128 bit (12 parole). I seed a 256 bit sono supportati, ma sconsigliati.",
 		"learnMore": "Scopri di più",
 		"howManyWords": "Quante parole ci sono nel tuo seed?"
 	},

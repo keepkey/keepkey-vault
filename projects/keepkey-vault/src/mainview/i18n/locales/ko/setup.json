@@ -135,7 +135,7 @@
 		"recoverWallet": "지갑 복구",
 		"seedLength": "Seed 길이",
 		"words": "단어",
-		"entropyNote": "Seed 길이를 늘려도 전체 지갑 엔트로피는 향상되지 않습니다.",
+		"entropyNote": "비트코인의 기본 표준은 128비트(12단어)입니다. 256비트 seed도 지원되지만 권장하지 않습니다.",
 		"learnMore": "자세히 알아보기",
 		"howManyWords": "Seed는 몇 단어인가요?"
 	},

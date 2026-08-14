@@ -98,7 +98,7 @@
 	},
 	"signingPolicy": "Polityka podpisywania",
 	"advancedMode": "Tryb zaawansowany",
-	"advancedModeDescription": "Zezwól na podpisywanie transakcji EVM z dowolnymi danymi kontraktu (np. Uniswap, DeFi).",
+	"advancedModeDescription": "Zezwala na podpisywanie transakcji EVM z dowolnymi danymi kontraktu (np. Uniswap, DeFi). Wyłącza się, gdy urządzenie zostanie zablokowane lub odłączone.",
 	"walletConnectFeature": "WalletConnect",
 	"walletConnectFeatureDescription": "Łącz się z aplikacjami dApps przez protokół WalletConnect.",
 	"zcashPrivacyFeature": "Prywatność osłonięta Zcash",

@@ -135,7 +135,7 @@
 		"recoverWallet": "ウォレットを復元",
 		"seedLength": "seed の長さ",
 		"words": "語",
-		"entropyNote": "seed の長さを増やしても、ウォレット全体のエントロピーは向上しません。",
+		"entropyNote": "Bitcoin の基本仕様は 128 ビット（12 語）です。256 ビットの seed もサポートされていますが、推奨されません。",
 		"learnMore": "詳細を見る",
 		"howManyWords": "seed は何語ですか？"
 	},

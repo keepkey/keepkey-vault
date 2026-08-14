@@ -6,12 +6,14 @@ import { LanguageSelector } from "../i18n/LanguageSelector"
 import { CurrencySelector } from "./CurrencySelector"
 import { rpcRequest, onRpcMessage } from "../lib/rpc"
 import { IS_MAC, IS_WINDOWS } from "../lib/platform"
+import { AUTO_LOCK_CHOICES, DEFAULT_AUTO_LOCK_MS } from "../../shared/flags"
 import { Z } from "../lib/z-index"
 import type { DeviceStateInfo, AppSettings, EmulatorWalletInfo } from "../../shared/types"
 import { versionCompare } from "../../shared/firmware-versions"
 import { isBitcoinOnlyVariant } from "../../shared/flags"
 import { SelfHostNodePanel } from "./SelfHostNodePanel"
 import { ClearSignStudio } from "./ClearSignStudio"
+import { RngAuditPanel } from "./RngAuditPanel"
 
 interface DevicePolicy {
 	policyName?: string
@@ -26,6 +28,7 @@ interface DeviceFeatures {
 	u2fCounter?: number
 	policiesList?: DevicePolicy[]
 	policies?: DevicePolicy[]
+	autoLockDelayMs?: number
 }
 
 interface DeviceSettingsDrawerProps {
@@ -172,8 +175,6 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 	const [releasingWindowFocus, setReleasingWindowFocus] = useState(false)
 	const [togglingWalletConnect, setTogglingWalletConnect] = useState(false)
 	const [togglingBip85, setTogglingBip85] = useState(false)
-	const [togglingZcashPrivacy, setTogglingZcashPrivacy] = useState(false)
-	const [togglingHive, setTogglingHive] = useState(false)
 	const [togglingEmulator, setTogglingEmulator] = useState(false)
 	const [togglingPreRelease, setTogglingPreRelease] = useState(false)
 	const [togglingAlphaFirmware, setTogglingAlphaFirmware] = useState(false)
@@ -188,6 +189,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 	const [resetConfirm, setResetConfirm] = useState(false)
 	const [resetting, setResetting] = useState(false)
 	const [clearSignStudioOpen, setClearSignStudioOpen] = useState(false)
+	const [rngAuditOpen, setRngAuditOpen] = useState(false)
 	const panelRef = useRef<HTMLDivElement>(null)
 
 	// Fetch device features + app settings when drawer opens
@@ -327,24 +329,6 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 			setAppSettings(result)
 		} catch (e: any) { console.error("setBip85Enabled:", e) }
 		setTogglingBip85(false)
-	}, [])
-
-	const toggleZcashPrivacy = useCallback(async (enabled: boolean) => {
-		setTogglingZcashPrivacy(true)
-		try {
-			const result = await rpcRequest<AppSettings>("setZcashPrivacyEnabled", { enabled }, 10000)
-			setAppSettings(result)
-		} catch (e: any) { console.error("setZcashPrivacyEnabled:", e) }
-		setTogglingZcashPrivacy(false)
-	}, [])
-
-	const toggleHive = useCallback(async (enabled: boolean) => {
-		setTogglingHive(true)
-		try {
-			const result = await rpcRequest<AppSettings>("setHiveEnabled", { enabled }, 10000)
-			setAppSettings(result)
-		} catch (e: any) { console.error("setHiveEnabled:", e) }
-		setTogglingHive(false)
 	}, [])
 
 	const toggleEmulator = useCallback(async (enabled: boolean) => {
@@ -576,6 +560,25 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 		rpcRequest<DeviceFeatures>("getFeatures").then(setFeatures).catch(() => {})
 	}, [])
 
+	const [savingAutoLock, setSavingAutoLock] = useState(false)
+	const handleAutoLockChange = useCallback(async (ms: number) => {
+		setSavingAutoLock(true)
+		try {
+			// The device shows a confirm screen with the new delay in seconds.
+			await rpcRequest("applySettings", { autoLockDelayMs: ms }, 60000)
+			const f = await rpcRequest<DeviceFeatures>("getFeatures")
+			setFeatures(f)
+		} catch (e: any) {
+			console.error("autoLock:", e)
+			// Declined on device (or failed) — re-read so the select snaps back to
+			// what the device actually holds rather than the value we optimistically
+			// showed.
+			rpcRequest<DeviceFeatures>("getFeatures").then(setFeatures).catch(() => {})
+		} finally {
+			setSavingAutoLock(false)
+		}
+	}, [])
+
 	const handleTogglePassphrase = useCallback(async (enable: boolean) => {
 		setTogglingPassphrase(true)
 		try {
@@ -611,7 +614,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 			// Refresh features to reflect the new state
 			const updated = await rpcRequest<DeviceFeatures>("getFeatures")
 			setFeatures(updated)
-			if (policyName === "AdvancedMode" && !enable) setClearSignStudioOpen(false)
+			if (policyName === "AdvancedMode" && !enable) { setClearSignStudioOpen(false); setRngAuditOpen(false) }
 		} catch (e: any) { console.error("applyPolicy:", e) }
 		setTogglingPolicy("")
 	}, [])
@@ -1097,6 +1100,58 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 							)}
 						</Flex>
 
+						{/* ── Auto-lock row ──────────────────────── */}
+						<Flex
+							align="center"
+							justify="space-between"
+							py="3"
+							borderBottom="1px solid"
+							borderColor="rgba(255,255,255,0.06)"
+						>
+							<Flex align="center" gap="3">
+								<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(233,196,106,0.1)">
+									<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+										<circle cx="12" cy="12" r="10" />
+										<polyline points="12 6 12 12 16 14" />
+									</svg>
+								</Flex>
+								<Box>
+									<Text fontSize="md" color="kk.textPrimary" fontWeight="500">{t("autoLock", { defaultValue: "Auto-lock" })}</Text>
+									<Text fontSize="sm" color="kk.textSecondary" mt="0.5">
+										{t("autoLockHint", { defaultValue: "Idle time before the device re-asks for your PIN. Unplugging always locks it immediately." })}
+									</Text>
+								</Box>
+							</Flex>
+							<select
+								disabled={savingAutoLock || !features}
+								value={String(features?.autoLockDelayMs ?? DEFAULT_AUTO_LOCK_MS)}
+								onChange={(e) => handleAutoLockChange(Number(e.target.value))}
+								style={{
+									padding: "6px 12px",
+									borderRadius: "999px",
+									background: "rgba(233,196,106,0.12)",
+									color: "var(--gold)",
+									fontSize: "12px",
+									fontWeight: 500,
+									border: "none",
+									cursor: savingAutoLock ? "not-allowed" : "pointer",
+									opacity: savingAutoLock ? 0.5 : 1,
+								}}
+							>
+								{/* A device may already hold a value we do not offer (set by an
+								    older build or another host) — show it so the select never
+								    silently misreports what the device is actually using. */}
+								{!AUTO_LOCK_CHOICES.some(c => c.ms === (features?.autoLockDelayMs ?? DEFAULT_AUTO_LOCK_MS)) && (
+									<option value={String(features?.autoLockDelayMs)}>
+										{Math.round((features?.autoLockDelayMs ?? 0) / 60000)} min
+									</option>
+								)}
+								{AUTO_LOCK_CHOICES.map(c => (
+									<option key={c.ms} value={String(c.ms)}>{c.labelKey}</option>
+								))}
+							</select>
+						</Flex>
+
 						{/* ── Passphrase row ─────────────────────── */}
 						<Flex
 							align="center"
@@ -1258,6 +1313,18 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 											<Text fontSize="xs" color="kk.textSecondary" mt="0.5">Attest schemas, load a RAM-only signer, and export test evidence.</Text>
 										</Box>
 										<Button size="sm" variant="outline" borderColor="rgba(233,196,106,0.45)" color="kk.gold" onClick={() => setClearSignStudioOpen(true)}>Open Studio</Button>
+									</Flex>
+								</Box>
+							)}
+
+							{isPolicyEnabled("AdvancedMode") && (
+								<Box px="3" py="3" borderRadius="12px" bg="rgba(233,196,106,0.06)" border="1px solid rgba(233,196,106,0.18)">
+									<Flex align="center" justify="space-between" gap="3">
+										<Box>
+											<Text fontSize="sm" color="kk.textPrimary" fontWeight="600">RNG health test</Text>
+											<Text fontSize="xs" color="kk.textSecondary" mt="0.5">Pull 64 KB from the device RNG and check it for stuck, repeated, or biased output.</Text>
+										</Box>
+										<Button size="sm" variant="outline" borderColor="rgba(233,196,106,0.45)" color="kk.gold" onClick={() => setRngAuditOpen(true)}>Run test</Button>
 									</Flex>
 								</Box>
 							)}
@@ -1643,59 +1710,8 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 								)
 							})()}
 
-							{/* Zcash Shielded Privacy toggle — requires firmware >= 7.15.0 */}
-							{(() => {
-								const zcashFwOk = !!deviceState.firmwareVersion && versionCompare(deviceState.firmwareVersion, '7.15.0') >= 0
-								return (
-									<Flex justify="space-between" align="center" opacity={zcashFwOk ? 1 : 0.45}>
-										<Flex align="center" gap="3">
-											<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(245,163,59,0.1)">
-												<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#F5A33B" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-													<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-												</svg>
-											</Flex>
-											<Box>
-												<Text fontSize="md" color="kk.textPrimary" fontWeight="500">{t("zcashPrivacyFeature")}</Text>
-												<Text fontSize="sm" color={zcashFwOk ? "kk.textSecondary" : "kk.textTertiary"} mt="0.5">
-													{zcashFwOk ? t("zcashPrivacyFeatureDescription") : "Requires firmware 7.15.0 or later"}
-												</Text>
-											</Box>
-										</Flex>
-										<Toggle
-											checked={zcashFwOk && appSettings.zcashPrivacyEnabled}
-											onChange={toggleZcashPrivacy}
-											disabled={!zcashFwOk || togglingZcashPrivacy}
-										/>
-									</Flex>
-								)
-							})()}
-
-							{/* Hive toggle — requires firmware >= 7.15.0 */}
-							{(() => {
-								const hiveFwOk = !!deviceState.firmwareVersion && versionCompare(deviceState.firmwareVersion, '7.15.0') >= 0
-								return (
-									<Flex justify="space-between" align="center" opacity={hiveFwOk ? 1 : 0.45}>
-										<Flex align="center" gap="3">
-											<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(227,19,55,0.1)">
-												<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#E31337" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-													<path d="M12 2l8 4.5v9L12 22l-8-6.5v-9z" />
-												</svg>
-											</Flex>
-											<Box>
-												<Text fontSize="md" color="kk.textPrimary" fontWeight="500">Hive</Text>
-												<Text fontSize="sm" color={hiveFwOk ? "kk.textSecondary" : "kk.textTertiary"} mt="0.5">
-													{hiveFwOk ? "Enable the Hive blockchain" : "Requires firmware 7.15.0 or later"}
-												</Text>
-											</Box>
-										</Flex>
-										<Toggle
-											checked={hiveFwOk && appSettings.hiveEnabled}
-											onChange={toggleHive}
-											disabled={!hiveFwOk || togglingHive}
-										/>
-									</Flex>
-								)
-							})()}
+							{/* Zcash + Hive have no toggles — both turn on automatically on
+							    firmware >= 7.15.0 (derived in bun/index.ts on device ready). */}
 
 							{/* Emulator toggle — dev tool, default off. Supported on macOS
 							    (Keychain) and Windows (DPAPI); Linux has no key store wired up. */}
@@ -1917,6 +1933,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 
 				</VStack>
 			</Box>
+			<RngAuditPanel open={rngAuditOpen} onClose={() => setRngAuditOpen(false)} />
 			<ClearSignStudio
 				open={clearSignStudioOpen}
 				onClose={() => setClearSignStudioOpen(false)}

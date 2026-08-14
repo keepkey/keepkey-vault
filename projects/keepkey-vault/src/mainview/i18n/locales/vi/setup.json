@@ -135,7 +135,7 @@
 		"recoverWallet": "Khôi phục ví",
 		"seedLength": "Độ dài seed",
 		"words": "từ",
-		"entropyNote": "Tăng độ dài seed không cải thiện entropy tổng thể của ví.",
+		"entropyNote": "Chuẩn cốt lõi của Bitcoin là 128 bit (12 từ). Seed 256 bit được hỗ trợ nhưng không được khuyến nghị.",
 		"learnMore": "Tìm hiểu thêm",
 		"howManyWords": "Seed của bạn có bao nhiêu từ?"
 	},

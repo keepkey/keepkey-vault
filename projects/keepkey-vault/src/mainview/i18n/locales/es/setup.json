@@ -135,7 +135,7 @@
 		"recoverWallet": "Recuperar billetera",
 		"seedLength": "Longitud de semilla",
 		"words": "palabras",
-		"entropyNote": "Agregar más palabras no mejora la entropía general de la billetera.",
+		"entropyNote": "El estándar base de Bitcoin es de 128 bits (12 palabras). Las seeds de 256 bits son compatibles, pero no se recomiendan.",
 		"learnMore": "Más información",
 		"howManyWords": "¿Cuántas palabras tiene tu semilla?"
 	},

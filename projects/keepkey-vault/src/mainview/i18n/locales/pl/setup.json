@@ -135,7 +135,7 @@
 		"recoverWallet": "Odzyskaj portfel",
 		"seedLength": "Długość seeda",
 		"words": "słów",
-		"entropyNote": "Dodatkowa długość seeda nie poprawia ogólnej entropii portfela.",
+		"entropyNote": "Podstawowy standard Bitcoina to 128 bitów (12 słów). Seedy 256-bitowe są obsługiwane, ale niezalecane.",
 		"learnMore": "Dowiedz się więcej",
 		"howManyWords": "Ile słów ma twój seed?"
 	},
