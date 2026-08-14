@@ -3,6 +3,7 @@ import { Box, Flex, Text, Spinner, Image, Button } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
 import { CHAINS, customChainToChainDef, isChainSupported, type ChainDef } from "../../shared/chains"
 import { isBitcoinOnlyVariant } from "../../shared/flags"
+import { balanceDisplayState } from "../../shared/balance-display-state"
 import { versionCompare } from "../../shared/firmware-versions"
 import { formatBalance, hasNonZeroBalance } from "../lib/formatting"
 import { AnimatedUsd } from "./AnimatedUsd"
@@ -1670,6 +1671,17 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 	// needs adding — that's what the "Add chain" button below does.
 	const sidebarChains = sortedChains
 
+	// The "All Chains" total may only be shown once every row it sums has
+	// actually answered. The old test was `balances.size === 0`, which is far
+	// stricter than "all rows known": with a BTC-only cache and a refresh in
+	// flight it rendered a confident total above nine spinning rows.
+	const anyChainPending = sidebarChains.some(c => balanceDisplayState({
+		hasEntry: balances.has(c.id),
+		syncState: balances.get(c.id)?.syncState,
+		loadingBalances,
+		initialLoaded,
+	}) === 'pending')
+
 	// Is data stale? (loaded from cache but haven't refreshed yet this session)
 	const isStale = !hasEverRefreshed && !loadingBalances
 
@@ -1799,7 +1811,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 							</Box>
 							<Box flex="1" minW="0">
 								<Text fontSize="14px" fontWeight="600" color="var(--text-0)" lineHeight="1.2">All Chains</Text>
-								{balances.size === 0 && (loadingBalances || !initialLoaded) ? (
+								{anyChainPending ? (
 									<Spinner size="xs" color="kk.gold" mt="1" />
 								) : (
 									<Text fontSize="14px" color="var(--text-1)" fontWeight="500" lineHeight="1.3" letterSpacing="-0.01em">
@@ -1812,9 +1824,18 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 
 					{sidebarChains.map((chain) => {
 						const bal = balances.get(chain.id)
-						// No answer for this chain yet and one is still coming — show a
-						// spinner rather than a confident "0", which reads as "empty".
-						const pending = !bal && (loadingBalances || !initialLoaded)
+						// Three states, not two. A spinner covers "an answer is still
+						// coming"; it does NOT cover "the fetch settled and this chain
+						// never arrived", which is what a partial portfolio response
+						// leaves behind. That case renders "—", not a confident "0".
+						const displayState = balanceDisplayState({
+							hasEntry: !!bal,
+							syncState: bal?.syncState,
+							loadingBalances,
+							initialLoaded,
+						})
+						const pending = displayState === 'pending'
+						const unknown = displayState === 'unknown'
 						const clean = cleanBalanceUsd.get(chain.id)
 						const balNum = parseFloat(bal?.balance || '0')
 						const usdNum = clean?.usd || 0
@@ -1888,7 +1909,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 								_hover={{ bg: "kk.cardBg", borderColor: `${chain.color}50` }}
 								cursor="pointer"
 								transition="all 0.15s"
-								opacity={hasBalance || pending ? 1 : 0.55}
+								opacity={hasBalance || pending || unknown ? 1 : 0.55}
 							>
 								<Flex align="center" gap="3">
 									<Image src={getAssetIcon(chain.caip)} alt={chain.symbol} w="32px" h="32px" borderRadius="full" flexShrink={0} bg={chain.color} />
@@ -1909,6 +1930,15 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 													<Spinner size="xs" color="kk.gold" />
 													<Text fontSize="12px" color="var(--text-2)" lineHeight="1.3">{chain.symbol}</Text>
 												</Flex>
+											) : unknown ? (
+												<Text
+													fontSize="12px"
+													color="var(--text-2)"
+													lineHeight="1.3"
+													title={`${chain.coin} balance unavailable — the last refresh could not reach this chain`}
+												>
+													{`— ${chain.symbol}`}
+												</Text>
 											) : (
 												<Text fontSize="12px" color="var(--text-2)" lineHeight="1.3" truncate>
 													{`${formatBalance(String(balNum + shielded.amount))} ${chain.symbol}`}
