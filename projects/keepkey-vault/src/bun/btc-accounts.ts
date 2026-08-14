@@ -45,12 +45,32 @@ export class BtcAccountManager extends EventEmitter {
     return set
   }
 
+  // Taproot (p2tr) xpub derivation is gated off at the account level. Some firmware
+  // (observed on 7.15.0 RC) advertises supportsTaproot but never answers the
+  // GETPUBLICKEY for the p2tr / purpose-86 path. Because the KeepKey transport
+  // serializes calls (callInProgress) and its WebUSB readChunk has no timeout, one
+  // unanswered p2tr request wedges EVERY subsequent device call — balances, address
+  // display, signing — and blanked the whole BTC script-type selector (the account
+  // never populated). Until the transport gains a real read timeout so a stalling
+  // request fails gracefully instead of wedging, derive only the established types.
+  // Flip to true once that transport hardening lands.
+  private static readonly DERIVE_TAPROOT_XPUB = false
+
   /** Fetch supported xpubs for a given account index in a single batch device call. */
   private async fetchAccount(wallet: any, accountIndex: number): Promise<void> {
     // Safety: skip if this account index already exists (prevents race-condition duplicates)
     if (this.accounts.some(a => a.accountIndex === accountIndex)) return
 
-    const scriptTypes = await supportedBtcScriptTypes(wallet)
+    // Established types (p2pkh / p2sh-p2wpkh / p2wpkh) always; Taproot only when the
+    // transport can attempt it without wedging (see DERIVE_TAPROOT_XPUB above).
+    const advertised = await supportedBtcScriptTypes(wallet)
+    const scriptTypes = BtcAccountManager.DERIVE_TAPROOT_XPUB
+      ? advertised
+      : advertised.filter(st => st.scriptType !== 'p2tr')
+    if (advertised.length !== scriptTypes.length) {
+      console.log(`[btc-accounts] account ${accountIndex}: firmware advertises Taproot, but p2tr xpub derivation is gated off (transport has no read timeout) — deriving ${scriptTypes.map(s => s.scriptType).join(',')}`)
+    }
+
     const paths = scriptTypes.map(st => ({
       addressNList: btcAccountPath(st.purpose, accountIndex),
       coin: 'Bitcoin',
