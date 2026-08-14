@@ -227,6 +227,15 @@ function getScriptTypeFromPath(path: string): string | undefined {
   return PURPOSE_TO_SCRIPT[parseInt(match[1], 10)]
 }
 
+/** Derive scriptType from an account path's purpose element. Authoritative where
+ * the xpub prefix is not: BIP86 deliberately kept the ordinary `xpub` version
+ * bytes, so getScriptTypeFromXpub() answers p2pkh for a Taproot account and the
+ * change output would be built at m/44'. */
+export function getScriptTypeFromAccountPath(accountPath?: number[]): string | undefined {
+  if (!accountPath?.length) return undefined
+  return PURPOSE_TO_SCRIPT[accountPath[0] - 0x80000000]
+}
+
 export interface XpubInfo {
   xpub: string
   scriptType: string
@@ -327,7 +336,8 @@ export async function estimateUtxoFee(
     const { to, feeLevel = 5, isMax = false, xpub, allXpubs, scriptTypeOverride, accountPath, satPerVByte, memo } = params
     const primaryXpub = xpub || allXpubs?.[0]?.xpub
     if (!primaryXpub) return null
-    const scriptType = scriptTypeOverride || getScriptTypeFromXpub(primaryXpub) || chain.scriptType || 'p2pkh'
+    const scriptType = scriptTypeOverride || getScriptTypeFromAccountPath(accountPath)
+      || getScriptTypeFromXpub(primaryXpub) || chain.scriptType || 'p2pkh'
 
     let utxos: any[]
     if (allXpubs && allXpubs.length > 0) {
@@ -389,10 +399,13 @@ export async function buildUtxoTx(
 
   if (!xpub && (!allXpubs || !allXpubs.length)) throw new Error(`${TAG} xpub required for UTXO chain ${chain.coin}`)
 
-  // scriptType resolution: explicit override > xpub prefix > chain default > p2pkh
+  // scriptType resolution: explicit override > account-path purpose > xpub prefix >
+  // chain default > p2pkh. The path outranks the prefix because a BIP86 account
+  // carries ordinary `xpub` bytes and would otherwise resolve to p2pkh.
   const primaryXpub = xpub || allXpubs![0].xpub
-  const scriptType = scriptTypeOverride || getScriptTypeFromXpub(primaryXpub) || chain.scriptType || 'p2pkh'
-  console.log(`${TAG} scriptType=${scriptType} (override=${scriptTypeOverride}, xpub-prefix=${getScriptTypeFromXpub(primaryXpub)}, chain-default=${chain.scriptType})`)
+  const scriptType = scriptTypeOverride || getScriptTypeFromAccountPath(accountPath)
+    || getScriptTypeFromXpub(primaryXpub) || chain.scriptType || 'p2pkh'
+  console.log(`${TAG} scriptType=${scriptType} (override=${scriptTypeOverride}, account-path=${getScriptTypeFromAccountPath(accountPath)}, xpub-prefix=${getScriptTypeFromXpub(primaryXpub)}, chain-default=${chain.scriptType})`)
   const coinType = COIN_TYPE[chain.id] ?? 0
   const purpose = PURPOSE[scriptType] ?? 84
 
