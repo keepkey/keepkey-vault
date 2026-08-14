@@ -5841,6 +5841,18 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// from another passphrase session must never be exported to the relay.
 				const { truth: pairingSeed } = await ensureManagersForSeed('generateMobilePairing')
 
+				// FAIL CLOSED. reconcileSeedManagers() is a no-op on a null identity
+				// (`if (!truth) return false`) — it cannot tell a stale manager from a
+				// fresh one without something to compare against. Every other caller
+				// only reads balances with that ambiguity; this one UPLOADS to the
+				// relay, so an inconclusive check here would publish the previous
+				// wallet's xpubs and addresses after a passphrase or seed change that
+				// happened to coincide with a USB hiccup. Unverifiable seed → no
+				// export. The user replugs and pairs again.
+				if (!pairingSeed) {
+					throw new Error('Could not verify which wallet is connected — refusing to build a pairing payload. Reconnect your KeepKey and try again.')
+				}
+
 				// ── BTC: every known account × device-supported script type ──
 				const btcChain = builtinChains.find(c => c.id === 'bitcoin')
 				const btcNetwork = btcChain?.networkId || 'bip122:000000000019d6689c085ae165831e93'
