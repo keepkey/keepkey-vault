@@ -1792,19 +1792,33 @@ async function buildEvmSwapTx(
     throw new Error(`Failed to fetch nonce for ${fromAddress} on ${fromChain.id} — cannot safely build swap transaction`)
   }
 
-  let nativeBalance = 0n
+  // A failed balance fetch is NOT a zero balance. Try RPC, then Pioneer, then
+  // give up loudly — defaulting to 0n produced "Insufficient ETH: need 1.65,
+  // have 0" on funded accounts whenever the public RPC hiccuped. Same posture
+  // as buildRelaySwapTx.
+  let nativeBalance: bigint | undefined
   if (rpcUrl) {
     try { nativeBalance = await getEvmBalance(rpcUrl, fromAddress) } catch (e: any) {
       console.warn(`${TAG} Failed to fetch native balance via RPC: ${e.message}`)
     }
-  } else {
+  }
+  if (nativeBalance === undefined) {
     try {
       const bd = await pioneer.GetBalanceAddressByNetwork({ networkId: fromChain.networkId, address: fromAddress })
-      const balStr = String(bd?.data?.nativeBalance || bd?.data?.balance || '0')
-      nativeBalance = parseUnits(balStr, 18)
+      // No `|| '0'`: an HTTP 200 carrying no balance field is a malformed
+      // response, not an empty account. Falling through to 0 here would put
+      // back the exact bug this function is fixing.
+      const raw = bd?.data?.nativeBalance ?? bd?.data?.balance
+      if (raw == null || String(raw).trim() === '') {
+        throw new Error(`no balance field in Pioneer response for ${fromAddress}`)
+      }
+      nativeBalance = parseUnits(String(raw), fromChain.decimals)
     } catch (e: any) {
       console.warn(`${TAG} Failed to fetch balance via Pioneer: ${e.message}`)
     }
+  }
+  if (nativeBalance === undefined) {
+    throw new Error(`Unable to verify ${fromChain.symbol} balance for ${fromAddress} — refusing to build the swap. Check your connection and try again.`)
   }
 
   let approvalTxid: string | undefined
