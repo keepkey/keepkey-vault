@@ -1728,8 +1728,11 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 		<Flex w="100%" pt="2" align="stretch" gap={{ base: 0, md: 3 }} px={{ base: 0, md: 3 }} minH="100%">
 			<style>{DASHBOARD_ANIMATIONS}</style>
 
-			{/* ── Sidebar: chains list (replaces the cards grid) ───────────── */}
-			{hasUsableBalanceSnapshot && (
+			{/* ── Sidebar: chains list (replaces the cards grid) ─────────────
+			    Always rendered, even before the first balance answer: the chain
+			    set is known from firmware alone, so hiding it until Pioneer
+			    replied made the app look empty on every cold start. Rows whose
+			    balance hasn't landed yet show a spinner instead of "0". */}
 				<Box
 					className="kk-sidebar-scroll"
 					w={{ base: "260px", md: "320px" }}
@@ -1796,15 +1799,22 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 							</Box>
 							<Box flex="1" minW="0">
 								<Text fontSize="14px" fontWeight="600" color="var(--text-0)" lineHeight="1.2">All Chains</Text>
-								<Text fontSize="14px" color="var(--text-1)" fontWeight="500" lineHeight="1.3" letterSpacing="-0.01em">
-									{privateModeEnabled ? "••••••" : `$${totalUsd.toLocaleString('en-US', { maximumFractionDigits: 2 })}`}
-								</Text>
+								{balances.size === 0 && (loadingBalances || !initialLoaded) ? (
+									<Spinner size="xs" color="kk.gold" mt="1" />
+								) : (
+									<Text fontSize="14px" color="var(--text-1)" fontWeight="500" lineHeight="1.3" letterSpacing="-0.01em">
+										{privateModeEnabled ? "••••••" : `$${totalUsd.toLocaleString('en-US', { maximumFractionDigits: 2 })}`}
+									</Text>
+								)}
 							</Box>
 						</Flex>
 					</Box>
 
 					{sidebarChains.map((chain) => {
 						const bal = balances.get(chain.id)
+						// No answer for this chain yet and one is still coming — show a
+						// spinner rather than a confident "0", which reads as "empty".
+						const pending = !bal && (loadingBalances || !initialLoaded)
 						const clean = cleanBalanceUsd.get(chain.id)
 						const balNum = parseFloat(bal?.balance || '0')
 						const usdNum = clean?.usd || 0
@@ -1878,7 +1888,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 								_hover={{ bg: "kk.cardBg", borderColor: `${chain.color}50` }}
 								cursor="pointer"
 								transition="all 0.15s"
-								opacity={hasBalance ? 1 : 0.55}
+								opacity={hasBalance || pending ? 1 : 0.55}
 							>
 								<Flex align="center" gap="3">
 									<Image src={getAssetIcon(chain.caip)} alt={chain.symbol} w="32px" h="32px" borderRadius="full" flexShrink={0} bg={chain.color} />
@@ -1894,9 +1904,16 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 											)}
 										</Flex>
 										<Flex align="baseline" justify="space-between" gap="2" mt="0.5">
-											<Text fontSize="12px" color="var(--text-2)" lineHeight="1.3" truncate>
-												{`${formatBalance(String(balNum + shielded.amount))} ${chain.symbol}`}
-											</Text>
+											{pending ? (
+												<Flex align="center" gap="1.5">
+													<Spinner size="xs" color="kk.gold" />
+													<Text fontSize="12px" color="var(--text-2)" lineHeight="1.3">{chain.symbol}</Text>
+												</Flex>
+											) : (
+												<Text fontSize="12px" color="var(--text-2)" lineHeight="1.3" truncate>
+													{`${formatBalance(String(balNum + shielded.amount))} ${chain.symbol}`}
+												</Text>
+											)}
 											{lowGas && (
 												<Flex
 													as="span"
@@ -2013,7 +2030,6 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 						</Box>
 					)}
 				</Box>
-			)}
 
 			<Flex flex="1" direction="column" minW="0" px={{ base: 2, md: 4 }} w="100%">
 
