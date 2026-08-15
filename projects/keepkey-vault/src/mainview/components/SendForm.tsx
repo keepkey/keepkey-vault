@@ -132,11 +132,12 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 	const isTokenSend = !!(token && token.caip && !token.caip.endsWith('/slip44:501') && (token.caip.includes('erc20') || token.caip.includes('/token:') || token.caip.includes('/spl:') || token.caip.includes('/trc20:') || token.caip.includes('/denom:')))
 	const displaySymbol = isTokenSend ? token!.symbol : chain.symbol
 	const displayBalance = isTokenSend ? token!.balance : (balance?.balance || '0')
-	// The chain's balance fetch failed, so `displayBalance` is a placeholder
-	// zero, not a figure. Token sends inherit it: the token rows hang off the
-	// same chain entry. Every readout below has to say "we don't know" rather
-	// than "you have none" — the second is a claim we cannot back.
-	const balanceUnverified = isBalanceUnverified(balance)
+	// No entry, or the chain's fetch failed: `displayBalance` is a placeholder
+	// zero, not a figure. Every readout below has to say "we don't know" rather
+	// than "you have none" — the second is a claim we cannot back. Token sends
+	// pass their caip so a token the backend proved directly over RPC keeps its
+	// real figure even while its parent chain is degraded.
+	const balanceUnverified = isBalanceUnverified(balance, isTokenSend ? token?.caip : chain.caip)
 	// Fee controls: presets where a builder honors feeLevel; free-form custom only where
 	// the builder accepts an exact rate (EVM gas price/limit, UTXO sat/vByte).
 	const supportsFeePresets = chain.chainFamily === 'utxo' || chain.chainFamily === 'evm' || chain.chainFamily === 'cosmos'

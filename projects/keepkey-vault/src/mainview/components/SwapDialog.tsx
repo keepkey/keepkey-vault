@@ -18,6 +18,7 @@ import type { ChainDef } from "../../shared/chains"
 import { nativeMaxSpendableAmount, normalizeDecimals, tokenMaxSpendableAmount } from "../../shared/max-send"
 import { getAssetIcon } from "../../shared/assetLookup"
 import { validateAddress } from "../../shared/address-validation"
+import { isBalanceUnverified } from "../../shared/balance-display-state"
 import type { SwapAsset, SwapQuote, ChainBalance, CustomToken, SwapStatusUpdate, SwapTrackingStatus, PendingSwap, SwapUiState, SwapUiCommand, SwapHealth } from "../../shared/types"
 import { SOLANA_BLIND_SIGNING_REQUIRED } from "../../shared/types"
 import { Z } from "../lib/z-index"
@@ -1454,8 +1455,23 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   }, [open, resumeSwap])
 
   // ── Derived values ────────────────────────────────────────────────
+  /* The from-chain's balance fetch failed, so every figure derived from it —
+   * the per-address EVM entry included — is a placeholder, not an amount. The
+   * MAX arithmetic below would otherwise quote it as spendable.
+   *
+   * Only a present-but-degraded entry counts here: fromBalance already returns
+   * null when no entry exists at all, so that case needs no help. Passing the
+   * caip preserves the exception that matters — a token proven directly over
+   * RPC keeps its real figure even while its parent chain is degraded, which
+   * is exactly what mergeTrustedBalanceSnapshot merges through. */
+  const fromBalanceUnverified = useMemo(() => {
+    if (!fromAsset) return false
+    const cb = balances.find(b => b.chainId === fromAsset.chainId)
+    return !!cb && isBalanceUnverified(cb, fromAsset.caip)
+  }, [fromAsset, balances])
+
   const fromBalance = useMemo(() => {
-    if (!fromAsset) return null
+    if (!fromAsset || fromBalanceUnverified) return null
     // For EVM assets, use the effective address's per-chain balance so the
     // spendable amount reflects the address that will actually sign.
     if (fromAsset.chainFamily === 'evm' && evmAddresses.addresses.length > 0) {
@@ -1487,7 +1503,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       return balance.balance
     }
     return null
-  }, [fromAsset, balance, chain, balances, evmAddresses, effectiveEvmIndex])
+  }, [fromAsset, fromBalanceUnverified, balance, chain, balances, evmAddresses, effectiveEvmIndex])
 
   /* Native account-model MAX fee reservation — frontend pre-clamps the balance
    * by a conservative fee reserve so the displayed, quoted, and submitted
@@ -1511,7 +1527,9 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
    * not a gate: staked/delegated resources (TRON energy) can make fees free
    * without any native balance, so blocking would false-positive. */
   const fromChainLowGas = useMemo(() => {
-    if (!fromAsset) return null
+    // A degraded chain reports 0 native, which reads as "dust" and fires this
+    // warning at someone whose gas account is fine. No verdict without a number.
+    if (!fromAsset || fromBalanceUnverified) return null
     const isToken = fromAsset.caip ? isTokenCaip(fromAsset.caip) : !!fromAsset.contractAddress
     if (!isToken) return null
     // Mirror fromBalance: EVM swaps sign from the SELECTED address, so judge
@@ -1540,7 +1558,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       coin: chainDef?.coin ?? fromAsset.chainId,
       balance: nativeBalance,
     }
-  }, [fromAsset, balances, evmAddresses, effectiveEvmIndex])
+  }, [fromAsset, fromBalanceUnverified, balances, evmAddresses, effectiveEvmIndex])
 
   /* Resolved (amount, isMax) tuple to send to the backend. For fee-reserved native
    * and token-precision-reserved MAX the amount is already clamped, so isMax
@@ -1549,7 +1567,9 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
    * math runs. */
   const sendAmount = useMemo(() => {
     if (!isMax) return amount
-    return nativeFeeReservedMaxAmount ?? tokenPrecisionReservedMaxAmount ?? (fromBalance || '0')
+    // `|| '0'` here meant an unverifiable balance submitted a 0-amount MAX swap.
+    // Empty instead: no amount, so nothing downstream quotes or signs one.
+    return nativeFeeReservedMaxAmount ?? tokenPrecisionReservedMaxAmount ?? (fromBalance ?? '')
   }, [isMax, amount, nativeFeeReservedMaxAmount, tokenPrecisionReservedMaxAmount, fromBalance])
 
   const sendIsMax = isMax && nativeFeeReservedMaxAmount === null && tokenPrecisionReservedMaxAmount === null
@@ -4472,6 +4492,14 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                       </Flex>
                       {exceedsBalance && (
                         <Text fontSize="10px" color="kk.error" mt="1" fontWeight="600">{t("insufficientBalance")}</Text>
+                      )}
+                      {fromBalanceUnverified && fromAsset && (
+                        <Text fontSize="10px" color="kk.gold" mt="1" fontWeight="600">
+                          {t("balanceUnverified", {
+                            defaultValue: "{{symbol}} balance unavailable — the last refresh could not reach this chain, so MAX is unavailable. Enter an amount, or refresh and try again.",
+                            symbol: fromAsset.symbol,
+                          })}
+                        </Text>
                       )}
                       {exceedsSafeMax && fromAsset && (
                         <Text fontSize="10px" color="kk.gold" mt="1" fontWeight="600">

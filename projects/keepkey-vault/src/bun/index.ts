@@ -1965,7 +1965,7 @@ async function headlessSwapQuote(params: SwapQuoteParams): Promise<SwapQuote> {
 			let estXpub: string | undefined
 			let estAccountPath: number[] | undefined
 			if (fromChain?.id === 'bitcoin') {
-				estXpubs = btcAccounts.isInitialized ? btcAccounts.getFundedXpubs() : []
+				estXpubs = btcAccounts.isInitialized ? btcAccounts.getSpendableXpubs() : []
 			} else if (fromChain) {
 				const results = await (engine.wallet as any).getPublicKeys([{
 					addressNList: fromChain.defaultPath.slice(0, 3),
@@ -2105,7 +2105,7 @@ async function headlessExecuteSwap(params: ExecuteSwapParams, pushSubStage: (sta
 			return undefined
 		},
 		getAllBtcXpubs: () => {
-			if (btcAccounts.isInitialized) return btcAccounts.getFundedXpubs()
+			if (btcAccounts.isInitialized) return btcAccounts.getSpendableXpubs()
 			return []
 		},
 		wrapSign: engine.isEmulator
@@ -6699,7 +6699,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						return undefined
 					},
 					getAllBtcXpubs: () => {
-						if (btcAccounts.isInitialized) return btcAccounts.getFundedXpubs()
+						if (btcAccounts.isInitialized) return btcAccounts.getSpendableXpubs()
 						return []
 					},
 					wrapSign: (fn) => fn(), // unused in preview

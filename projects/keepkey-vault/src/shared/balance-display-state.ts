@@ -11,6 +11,8 @@
  * a zero. Here it is cosmetic rather than financial, but it is the number a
  * user decides to top up or move funds against.
  */
+import { normalizeAssetCaip } from './balance-reconciliation'
+
 export type BalanceDisplayState = 'pending' | 'unknown' | 'known'
 
 export interface BalanceDisplayInput {
@@ -37,10 +39,26 @@ export function balanceDisplayState(input: BalanceDisplayInput): BalanceDisplayS
 
 /**
  * Same rule as the 'degraded' branch above, for the screens that hold one
- * chain's balance and have no notion of a global load state — the send form's
- * balance readout and its gas warning, which otherwise read the placeholder
- * zero as "this account is empty" and say so.
+ * chain's balance and have no notion of a global load state — the send form
+ * and the swap dialog, which otherwise read a placeholder zero as "this
+ * account is empty" and say so.
  */
-export function isBalanceUnverified(balance?: { syncState?: BalanceDisplayInput['syncState'] }): boolean {
-  return balance?.syncState === 'degraded'
+export function isBalanceUnverified(
+  balance?: { syncState?: BalanceDisplayInput['syncState']; confirmedAssetCaips?: string[] },
+  assetCaip?: string,
+): boolean {
+  // A missing entry is not a verified zero. balanceDisplayState never returns
+  // 'known' without one, and these screens have no load state to tell "still
+  // coming" from "never arrived" — either way we do not have a number. The
+  // always-visible chain list (#410) makes this reachable: Send opens for a
+  // chain that has no entry yet, and `balance?.balance || '0'` printed a
+  // confident zero for it.
+  if (!balance) return true
+  if (balance.syncState !== 'degraded') return false
+  // A degraded chain can still carry an asset proven directly over RPC —
+  // mergeTrustedBalanceSnapshot merges exactly those tokens through. That
+  // asset's figure is real even when its chain's aggregate is not.
+  if (!assetCaip) return true
+  const wanted = normalizeAssetCaip(assetCaip)
+  return !balance.confirmedAssetCaips?.some(caip => normalizeAssetCaip(caip) === wanted)
 }

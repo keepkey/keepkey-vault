@@ -15,6 +15,7 @@ import { describe, test, expect } from 'bun:test'
 import { buildCosmosTx, readCosmosBalance } from '../src/bun/txbuilder/cosmos'
 import { buildUtxoTx, estimateUtxoFee } from '../src/bun/txbuilder/utxo'
 import { isBalanceUnverified } from '../src/shared/balance-display-state'
+import { BtcAccountManager } from '../src/bun/btc-accounts'
 
 describe('readCosmosBalance', () => {
   test('reads a real balance', () => {
@@ -93,14 +94,82 @@ describe('buildCosmosTx token MAX with a frontend balance', () => {
 })
 
 describe('isBalanceUnverified', () => {
-  test('only degraded is unverified', () => {
+  test('a degraded entry is unverified', () => {
     expect(isBalanceUnverified({ syncState: 'degraded' })).toBe(true)
     expect(isBalanceUnverified({ syncState: 'confirmed' })).toBe(false)
     // Stale is old, not unknown — it has its own messaging and stays a figure.
     expect(isBalanceUnverified({ syncState: 'stale' })).toBe(false)
-    // Cached and legacy rows carry no syncState and are real numbers.
+  })
+
+  test('an entry with no syncState is a real number', () => {
+    // Cached and legacy rows carry no syncState. Blanking them would wipe every
+    // balance on a cold start, which is the opposite of the bug being fixed.
     expect(isBalanceUnverified({})).toBe(false)
-    expect(isBalanceUnverified(undefined)).toBe(false)
+  })
+
+  test('NO entry is unverified, not zero', () => {
+    // balanceDisplayState never returns 'known' without an entry, and the send
+    // form has no load state to tell "still coming" from "never arrived".
+    // Reachable since #410: the chain list is always visible, so Send opens for
+    // a chain with no entry and `balance?.balance || '0'` printed a firm 0.
+    expect(isBalanceUnverified(undefined)).toBe(true)
+  })
+
+  test('a directly-confirmed asset survives its chain being degraded', () => {
+    // mergeTrustedBalanceSnapshot merges RPC-proven tokens through a degraded
+    // chain, so that token's figure is real even when the aggregate is not.
+    const spl = 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/spl:EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'
+    const degradedWithProof = { syncState: 'degraded' as const, confirmedAssetCaips: [spl] }
+    expect(isBalanceUnverified(degradedWithProof, spl)).toBe(false)
+    // Anything else on that chain is still unverified.
+    expect(isBalanceUnverified(degradedWithProof, 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/slip44:501')).toBe(true)
+    expect(isBalanceUnverified(degradedWithProof)).toBe(true)
+  })
+
+  test('EVM caips compare case-insensitively, non-EVM byte-for-byte', () => {
+    const lower = 'eip155:1/erc20:0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48'
+    const mixed = 'eip155:1/erc20:0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'
+    expect(isBalanceUnverified({ syncState: 'degraded', confirmedAssetCaips: [lower] }, mixed)).toBe(false)
+  })
+})
+
+// ── The upstream filter that hid failures from the builder ───────────────────
+
+describe('BtcAccountManager.getSpendableXpubs', () => {
+  const seed = (xpubs: any[]) => {
+    const mgr = new BtcAccountManager()
+    ;(mgr as any).accounts = [{ accountIndex: 0, totalBalanceUsd: 0, xpubs }]
+    return mgr
+  }
+
+  test('a cached zero is not proof of an empty account', () => {
+    // This getter used to filter on `parseFloat(xp.balance) > 0` (as
+    // getFundedXpubs). A degraded chain's cached balance IS '0', so the
+    // account was dropped before buildUtxoTx could try it — every remaining
+    // ListUnspent succeeded, unreachableXpubs stayed 0, and MAX swept a subset
+    // while believing it had swept the wallet. The completeness guard added in
+    // the previous commit never saw the account it was meant to catch.
+    const mgr = seed([
+      { xpub: 'xpub-funded', scriptType: 'p2wpkh', path: [0x80000054, 0x80000000, 0x80000000], balance: '0.5', balanceUsd: 1 },
+      { xpub: 'xpub-degraded', scriptType: 'p2tr', path: [0x80000056, 0x80000000, 0x80000000], balance: '0', balanceUsd: 0 },
+    ])
+    expect(mgr.getSpendableXpubs().map(x => x.xpub)).toEqual(['xpub-funded', 'xpub-degraded'])
+  })
+
+  test('carries scriptType and accountPath through for each xpub', () => {
+    const mgr = seed([
+      { xpub: 'xpub-a', scriptType: 'p2tr', path: [0x80000056, 0x80000000, 0x80000000], balance: '0', balanceUsd: 0 },
+    ])
+    expect(mgr.getSpendableXpubs()).toEqual([
+      { xpub: 'xpub-a', scriptType: 'p2tr', accountPath: [0x80000056, 0x80000000, 0x80000000] },
+    ])
+  })
+
+  test('still skips entries with no xpub string', () => {
+    const mgr = seed([
+      { xpub: '', scriptType: 'p2wpkh', path: [0x80000054, 0x80000000, 0x80000000], balance: '0', balanceUsd: 0 },
+    ])
+    expect(mgr.getSpendableXpubs()).toEqual([])
   })
 })
 
