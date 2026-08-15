@@ -687,7 +687,13 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
       // the user to opt in. Perverse otherwise: a route WITHOUT a schema works
       // (consent -> blind sign) while a route WITH one dies.
       const solSchemaAvailable = findSolanaSchema(params.relayTx.serializedTx)
-      const solSchema = ctx.isAdvancedModeEnabled?.() === false ? undefined : solSchemaAvailable
+      // Withheld in two cases: AdvancedMode off (verification cannot succeed --
+      // loaded signers are only honoured with it on), and after the user has
+      // explicitly consented to blind signing (re-attaching would refuse again
+      // and loop).
+      const solSchema = (ctx.isAdvancedModeEnabled?.() === false || params.allowSolanaBlindSigning === true)
+        ? undefined
+        : solSchemaAvailable
       if (solSchemaAvailable && !solSchema) {
         swapLog(`${TAG} clear-sign schema withheld: AdvancedMode is off, the device could not verify it`)
       }
@@ -1084,14 +1090,46 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
     swapper: params.swapper,
   } : undefined
   let clearSignSentToDevice = false
+  const signOnDevice = (tx: any) => wrapSign(
+    () => {
+      clearSignSentToDevice = true
+      return txb.signTx(wallet, fromChain, tx)
+    },
+    { operation: 'swap', chain: fromChain.coin, to: params.inboundAddress, value: params.amount, memo: params.memo },
+  )
   try {
-    signedTx = await wrapSign(
-      () => {
-        clearSignSentToDevice = true
-        return txb.signTx(wallet, fromChain, unsignedTx)
-      },
-      { operation: 'swap', chain: fromChain.coin, to: params.inboundAddress, value: params.amount, memo: params.memo },
-    )
+    try {
+      signedTx = await signOnDevice(unsignedTx)
+    } catch (e: any) {
+      // The device refused the SCHEMA, not the transaction.
+      //
+      // Predicting whether it can verify our schema is unwinnable: it needs a
+      // signer loaded in RAM, Vault does not track which are loaded, and both
+      // that and AdvancedMode die on power cycle. Worse, gating on AdvancedMode
+      // alone inverts — turning AdvancedMode ON re-enables attachment, so the
+      // user fixes one refusal and immediately earns another.
+      //
+      // So stop predicting and react. Firmware validates schema material BEFORE
+      // it draws any confirm screen (fsm_msg_solana.h), so this failure cost the
+      // user nothing and they saw nothing. Drop the schema and sign the very
+      // same bytes the ordinary way. The schema was only ever an enhancement —
+      // better screens — and must never be the reason a swap cannot proceed.
+      if (unsignedTx?.schema && /Invalid Solana instruction schema/i.test(deviceErrorMessage(e))) {
+        // Do NOT silently re-sign without the schema. Dropping it means this
+        // transaction gets blind-signed, and the opaque-consent panel exists to
+        // show the user what it actually moves (host-side outflow simulation)
+        // before that happens. Skipping straight past it would trade a gate for
+        // a silent downgrade, which is worse.
+        //
+        // Ask instead. On the retry params.allowSolanaBlindSigning is true,
+        // which suppresses schema attachment above -- otherwise the schema would
+        // be re-attached, refused again, and the flow would loop.
+        swapLog(`${TAG} device refused the clear-sign schema — requesting blind-sign consent`)
+        throw new Error(SOLANA_BLIND_SIGNING_REQUIRED)
+      } else {
+        throw e
+      }
+    }
     if (clearSignMaterial) onClearSignEvent?.({
       outcome: 'signed', chain: fromChain.coin, ...clearSignMaterial,
       keyId: Number.isInteger(clearSignMaterial.keyId) ? clearSignMaterial.keyId : undefined,
