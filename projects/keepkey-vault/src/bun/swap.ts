@@ -675,7 +675,22 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
       // findSolanaSchema declines when the message still carries lookup
       // tables, since firmware will not apply a schema to accounts that are
       // absent from the signed bytes.
-      const solSchema = findSolanaSchema(params.relayTx.serializedTx)
+      // A schema the device CANNOT verify is worse than no schema at all.
+      // Firmware fails the whole request ("Invalid Solana instruction schema",
+      // fsm_msg_solana.h:803) and deliberately never degrades to blind signing:
+      // "Present-but-invalid schema material fails the request". Verification
+      // needs a signer loaded in RAM, and loaded signers are only honoured with
+      // AdvancedMode on -- so with AdvancedMode known-off it is a GUARANTEED
+      // hard reject, worded as if the transaction were malformed.
+      //
+      // Dropping it here routes into the opaque-consent path below, which asks
+      // the user to opt in. Perverse otherwise: a route WITHOUT a schema works
+      // (consent -> blind sign) while a route WITH one dies.
+      const solSchemaAvailable = findSolanaSchema(params.relayTx.serializedTx)
+      const solSchema = ctx.isAdvancedModeEnabled?.() === false ? undefined : solSchemaAvailable
+      if (solSchemaAvailable && !solSchema) {
+        swapLog(`${TAG} clear-sign schema withheld: AdvancedMode is off, the device could not verify it`)
+      }
       if (solSchema) {
         swapLog(`${TAG} clear-sign schema attached: ${solSchema.program}/${solSchema.instruction} (keyId=${solSchema.signerKeyId})`)
       }
@@ -908,7 +923,9 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
     !params.relayTx.solanaSwapMetadata &&
     // A reusable schema lets the device read this instruction, so no
     // blind-sign consent is needed.
-    !findSolanaSchema(params.relayTx.serializedTx)
+    // Must mirror the attach decision above: a schema we withheld is not a
+    // schema the device will use, so the opaque path still applies.
+    !(ctx.isAdvancedModeEnabled?.() !== false && findSolanaSchema(params.relayTx.serializedTx))
   if (
     needsOpaqueSolanaFallback &&
     ctx.isAdvancedModeEnabled?.() !== true &&
