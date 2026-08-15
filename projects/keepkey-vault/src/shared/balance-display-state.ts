@@ -34,3 +34,13 @@ export function balanceDisplayState(input: BalanceDisplayInput): BalanceDisplayS
   // separately. Only 'degraded' means the value cannot be trusted as a figure.
   return input.syncState === 'degraded' ? 'unknown' : 'known'
 }
+
+/**
+ * Same rule as the 'degraded' branch above, for the screens that hold one
+ * chain's balance and have no notion of a global load state — the send form's
+ * balance readout and its gas warning, which otherwise read the placeholder
+ * zero as "this account is empty" and say so.
+ */
+export function isBalanceUnverified(balance?: { syncState?: BalanceDisplayInput['syncState'] }): boolean {
+  return balance?.syncState === 'degraded'
+}

@@ -14,6 +14,7 @@ import { caipToNetworkId } from "../../shared/chains"
 import type { ChainDef } from "../../shared/chains"
 import type { ChainBalance, TokenBalance, BuildTxResult, BroadcastResult, AddressBookEntry } from "../../shared/types"
 import { validateAddress } from "../../shared/address-validation"
+import { isBalanceUnverified } from "../../shared/balance-display-state"
 
 type SendPhase = 'input' | 'built' | 'signed' | 'broadcast'
 
@@ -131,6 +132,11 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 	const isTokenSend = !!(token && token.caip && !token.caip.endsWith('/slip44:501') && (token.caip.includes('erc20') || token.caip.includes('/token:') || token.caip.includes('/spl:') || token.caip.includes('/trc20:') || token.caip.includes('/denom:')))
 	const displaySymbol = isTokenSend ? token!.symbol : chain.symbol
 	const displayBalance = isTokenSend ? token!.balance : (balance?.balance || '0')
+	// The chain's balance fetch failed, so `displayBalance` is a placeholder
+	// zero, not a figure. Token sends inherit it: the token rows hang off the
+	// same chain entry. Every readout below has to say "we don't know" rather
+	// than "you have none" — the second is a claim we cannot back.
+	const balanceUnverified = isBalanceUnverified(balance)
 	// Fee controls: presets where a builder honors feeLevel; free-form custom only where
 	// the builder accepts an exact rate (EVM gas price/limit, UTXO sat/vByte).
 	const supportsFeePresets = chain.chainFamily === 'utxo' || chain.chainFamily === 'evm' || chain.chainFamily === 'cosmos'
@@ -450,15 +456,17 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 						fontWeight="600"
 						color="kk.textPrimary"
 						letterSpacing="-0.01em"
-						title={`${displayBalance} ${displaySymbol}`}
+						title={balanceUnverified
+							? `${chain.coin} balance unavailable — the last refresh could not reach this chain`
+							: `${displayBalance} ${displaySymbol}`}
 						cursor="help"
 					>
-						{formatBalance(displayBalance)}
+						{balanceUnverified ? "—" : formatBalance(displayBalance)}
 					</Text>
 					<Text fontSize={{ base: "12px", md: "13px" }} fontFamily="mono" color="kk.textMuted" letterSpacing="0.04em">
 						{displaySymbol}
 					</Text>
-					{hasPrice && (
+					{hasPrice && !balanceUnverified && (
 						<Text fontSize="12px" fontFamily="mono" color="kk.textMuted" ml="2">
 							{fmtCompact(parseFloat(displayBalance) * pricePerUnit)}
 						</Text>
@@ -473,7 +481,10 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 				// the user plainly had gas. Zero native = definitely can't pay gas; anything
 				// above that is left to buildEvmTx's real gasPrice*gasLimit check.
 				const nativeBal = parseFloat(balance.balance || '0')
-				const isLow = !(nativeBal > 0)
+				// An unverified balance is a placeholder zero, so `!(0 > 0)` fired
+				// this warning on accounts holding plenty of gas and sent the user
+				// off to deposit more. A failed lookup earns no verdict at all.
+				const isLow = !balanceUnverified && !(nativeBal > 0)
 				if (isLow) {
 					return (
 						<Box bg="rgba(224,140,123,0.10)" border="1px solid rgba(224,140,123,0.28)" borderRadius="14px" px="3.5" py="3">
@@ -495,8 +506,13 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 				return (
 					<Flex justify="space-between" align="center" px="3">
 						<Text fontSize="10px" color="kk.textMuted">{t("balance", "Balance")} ({chain.symbol})</Text>
-						<Text fontSize="10px" fontFamily="mono" color="kk.textMuted">
-							{formatBalance(balance.balance)} {chain.symbol}
+						<Text
+							fontSize="10px"
+							fontFamily="mono"
+							color="kk.textMuted"
+							title={balanceUnverified ? `${chain.coin} balance unavailable — the last refresh could not reach this chain` : undefined}
+						>
+							{balanceUnverified ? "—" : formatBalance(balance.balance)} {chain.symbol}
 						</Text>
 					</Flex>
 				)

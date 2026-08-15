@@ -187,8 +187,14 @@ export async function buildCosmosTx(
     if (isToken) {
       // Token MAX: send the whole token balance. The native fee is paid from the
       // chain's native coin (rune), a separate balance — so no reserve here.
-      const balStr = params.tokenBalance
-        ?? readCosmosBalance(
+      // Trust the frontend's balance only when it is an actual figure. `??`
+      // let a displayed '0' win outright — and '0' is exactly what the UI holds
+      // for a chain whose balance fetch failed, so the guard below was skipped
+      // by the one input most likely to be wrong. buildEvmTx and the Solana
+      // path both gate on `> 0` and re-fetch otherwise; match them.
+      const balStr = params.tokenBalance && parseFloat(params.tokenBalance) > 0
+        ? params.tokenBalance
+        : readCosmosBalance(
           await pioneer.GetPortfolioBalances({ pubkeys: [{ caip: params.caip, pubkey: fromAddress }] }, { forceRefresh: true }),
           `${chain.coin} token`,
         )

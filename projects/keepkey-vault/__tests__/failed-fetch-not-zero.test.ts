@@ -12,8 +12,9 @@
  * Run: bun test __tests__/failed-fetch-not-zero.test.ts
  */
 import { describe, test, expect } from 'bun:test'
-import { readCosmosBalance } from '../src/bun/txbuilder/cosmos'
+import { buildCosmosTx, readCosmosBalance } from '../src/bun/txbuilder/cosmos'
 import { buildUtxoTx, estimateUtxoFee } from '../src/bun/txbuilder/utxo'
+import { isBalanceUnverified } from '../src/shared/balance-display-state'
 
 describe('readCosmosBalance', () => {
   test('reads a real balance', () => {
@@ -44,6 +45,62 @@ describe('readCosmosBalance', () => {
   test('throws on null/undefined shapes rather than reading through them', () => {
     expect(() => readCosmosBalance({}, 'RUNE')).toThrow('Unable to verify')
     expect(() => readCosmosBalance(undefined, 'RUNE')).toThrow('Unable to verify')
+  })
+})
+
+// ── The frontend-supplied balance can bypass the guard above ─────────────────
+
+const THOR = {
+  id: 'thorchain', coin: 'THORChain', symbol: 'RUNE',
+  caip: 'cosmos:thorchain-mainnet-v1/slip44:931',
+  decimals: 8, denom: 'rune', chainId: 'thorchain-1',
+  defaultPath: [0x8000002c, 0x800003a3, 0x80000000, 0, 0],
+} as any
+const THOR_FROM = 'thor1g9el7lzjwh9yun2c4jjzhy09j98vkhfxfhgnzx'
+const TCY_CAIP = 'cosmos:thorchain-mainnet-v1/denom:tcy'
+
+const cosmosPioneer = (balances: any[]) => ({
+  GetAccountInfo: async () => ({ data: { account: { account_number: '17', sequence: '2' } } }),
+  GetPortfolioBalances: async () => ({ data: { balances } }),
+})
+
+const tokenMax = (pioneer: any, tokenBalance?: string) => buildCosmosTx(pioneer, THOR, {
+  to: THOR_FROM, amount: '0', fromAddress: THOR_FROM, isMax: true, caip: TCY_CAIP, tokenBalance,
+} as any)
+
+describe('buildCosmosTx token MAX with a frontend balance', () => {
+  test('a frontend "0" does not win over the fetch — that is the degraded value', async () => {
+    // What the send form holds for a chain whose fetch failed. `??` treated the
+    // string '0' as a supplied balance, so readCosmosBalance never ran and the
+    // user got "Amount must be greater than zero" on a funded account.
+    const err = await tokenMax(cosmosPioneer([]), '0').catch((e: Error) => e)
+    expect(err.message).toContain('Unable to verify')
+    expect(err.message).not.toContain('greater than zero')
+  })
+
+  test('a frontend "0" falls through to a balance the server can confirm', async () => {
+    const tx = await tokenMax(cosmosPioneer([{ balance: '50' }]), '0')
+    expect(tx.tx.msg[0].value.amount[0].amount).toBe('5000000000')
+  })
+
+  test('a real frontend balance is still trusted (no extra round trip)', async () => {
+    const tx = await tokenMax({
+      GetAccountInfo: async () => ({ data: { account: { account_number: '17', sequence: '2' } } }),
+      GetPortfolioBalances: async () => { throw new Error('must not be called') },
+    }, '12.5')
+    expect(tx.tx.msg[0].value.amount[0].amount).toBe('1250000000')
+  })
+})
+
+describe('isBalanceUnverified', () => {
+  test('only degraded is unverified', () => {
+    expect(isBalanceUnverified({ syncState: 'degraded' })).toBe(true)
+    expect(isBalanceUnverified({ syncState: 'confirmed' })).toBe(false)
+    // Stale is old, not unknown — it has its own messaging and stays a figure.
+    expect(isBalanceUnverified({ syncState: 'stale' })).toBe(false)
+    // Cached and legacy rows carry no syncState and are real numbers.
+    expect(isBalanceUnverified({})).toBe(false)
+    expect(isBalanceUnverified(undefined)).toBe(false)
   })
 })
 
