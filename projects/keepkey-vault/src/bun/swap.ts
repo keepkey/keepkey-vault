@@ -11,7 +11,7 @@
 import { CHAINS, supportedBtcScriptTypes, btcAccountPath, evmAddressPath } from '../shared/chains'
 import type { ChainDef } from '../shared/chains'
 import type { SwapAsset, SwapQuote, SwapQuoteParams, ExecuteSwapParams, SwapResult } from '../shared/types'
-import { SOLANA_BLIND_SIGNING_REQUIRED } from '../shared/types'
+import { SOLANA_BLIND_SIGNING_REQUIRED, evmAdvancedModeRequiredMessage } from '../shared/types'
 import { toDeviceError, deviceErrorMessage } from '../shared/device-error'
 import { findEvmSchema } from './evm-schema-registry'
 import { firmwareClearSigns } from './calldata-decoder'
@@ -1034,12 +1034,9 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
     ctx.isAdvancedModeEnabled?.() === false
   ) {
     swapLog(`${TAG} EVM blind-sign gate: to=${unsignedTx.to} selector=${String(unsignedTx.data).slice(0, 10)} — AdvancedMode is off`)
-    throw new Error(
-      `This ${fromChain.coin} swap has to be blind-signed — the device cannot decode this contract call, ` +
-      `and it refuses to blind-sign unless AdvancedMode is enabled. ` +
-      `Enable AdvancedMode on your KeepKey, then try the swap again. ` +
-      `Note it switches itself back off when the device reboots.`,
-    )
+    // Message content is load-bearing: SwapDialog routes on /AdvancedMode/i to
+    // the opt-in panel instead of a dead error. See evmAdvancedModeRequiredMessage.
+    throw new Error(evmAdvancedModeRequiredMessage(fromChain.coin))
   }
 
   // 4. Sign on device (user confirms tx details on hardware wallet)
