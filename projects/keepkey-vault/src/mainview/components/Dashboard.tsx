@@ -1675,12 +1675,18 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 	// actually answered. The old test was `balances.size === 0`, which is far
 	// stricter than "all rows known": with a BTC-only cache and a refresh in
 	// flight it rendered a confident total above nine spinning rows.
-	const anyChainPending = sidebarChains.some(c => balanceDisplayState({
+	const sidebarChainStates = sidebarChains.map(c => balanceDisplayState({
 		hasEntry: balances.has(c.id),
 		syncState: balances.get(c.id)?.syncState,
 		loadingBalances,
 		initialLoaded,
-	}) === 'pending')
+	}))
+	const anyChainPending = sidebarChainStates.includes('pending')
+	// An unknown row contributes 0 to totalUsd, so the sum is a floor, not a
+	// total — showing it bare would reassert the same confident zero the rows
+	// below just stopped claiming. It can't spin like `pending` does: a chain
+	// the backend keeps failing would spin forever. Mark it instead.
+	const anyChainUnknown = sidebarChainStates.includes('unknown')
 
 	// Is data stale? (loaded from cache but haven't refreshed yet this session)
 	const isStale = !hasEverRefreshed && !loadingBalances
@@ -1814,8 +1820,17 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 								{anyChainPending ? (
 									<Spinner size="xs" color="kk.gold" mt="1" />
 								) : (
-									<Text fontSize="14px" color="var(--text-1)" fontWeight="500" lineHeight="1.3" letterSpacing="-0.01em">
-										{privateModeEnabled ? "••••••" : `$${totalUsd.toLocaleString('en-US', { maximumFractionDigits: 2 })}`}
+									<Text
+										fontSize="14px"
+										color="var(--text-1)"
+										fontWeight="500"
+										lineHeight="1.3"
+										letterSpacing="-0.01em"
+										title={anyChainUnknown ? "At least this much — one or more chains could not be reached, so their balances are missing from the total" : undefined}
+									>
+										{privateModeEnabled
+											? "••••••"
+											: `${anyChainUnknown ? '≥ ' : ''}$${totalUsd.toLocaleString('en-US', { maximumFractionDigits: 2 })}`}
 									</Text>
 								)}
 							</Box>

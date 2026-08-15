@@ -9,6 +9,25 @@ import type { ChainDef } from '../../shared/chains'
 
 const TAG = '[txbuilder:cosmos]'
 
+/**
+ * Read a balance out of a Pioneer GetPortfolioBalances response.
+ *
+ * The `?? '0'` this replaces is the same failed-fetch-reads-as-zero bug fixed
+ * for EVM in #411/#414 (see readPioneerBalance in ./evm). Every call site here
+ * is a MAX send, so a missing balance became `0 - fee` → clamped to 0 → the
+ * user hit MAX on a funded account and was told "Amount must be greater than
+ * zero". Fails closed, but names the wrong cause and hides a server fault.
+ *
+ * A real numeric 0 is a verified empty account and passes through untouched.
+ */
+export function readCosmosBalance(resp: any, context: string): string {
+  const raw = resp?.data?.balances?.[0]?.balance
+  if (raw === undefined || raw === null || String(raw).trim() === '') {
+    throw new Error(`Unable to verify ${context} balance: the balance server returned no balance field`)
+  }
+  return String(raw)
+}
+
 /** Convert a decimal string (e.g. "1.5") to base units using integer math only. */
 function toBaseUnits(displayAmount: string, decimals: number): bigint {
   const parts = displayAmount.split('.')
@@ -168,12 +187,21 @@ export async function buildCosmosTx(
     if (isToken) {
       // Token MAX: send the whole token balance. The native fee is paid from the
       // chain's native coin (rune), a separate balance — so no reserve here.
-      const balStr = params.tokenBalance
-        ?? String((await pioneer.GetPortfolioBalances({ pubkeys: [{ caip: params.caip, pubkey: fromAddress }] }, { forceRefresh: true }))?.data?.balances?.[0]?.balance ?? '0')
+      // Trust the frontend's balance only when it is an actual figure. `??`
+      // let a displayed '0' win outright — and '0' is exactly what the UI holds
+      // for a chain whose balance fetch failed, so the guard below was skipped
+      // by the one input most likely to be wrong. buildEvmTx and the Solana
+      // path both gate on `> 0` and re-fetch otherwise; match them.
+      const balStr = params.tokenBalance && parseFloat(params.tokenBalance) > 0
+        ? params.tokenBalance
+        : readCosmosBalance(
+          await pioneer.GetPortfolioBalances({ pubkeys: [{ caip: params.caip, pubkey: fromAddress }] }, { forceRefresh: true }),
+          `${chain.coin} token`,
+        )
       baseAmount = toBaseUnits(String(balStr), amountDecimals)
     } else {
       const balResp = await pioneer.GetPortfolioBalances({ pubkeys: [{ caip: chain.caip, pubkey: fromAddress }] }, { forceRefresh: true })
-      const balStr = String((balResp?.data?.balances || [])[0]?.balance ?? '0')
+      const balStr = readCosmosBalance(balResp, chain.coin)
       const balBase = toBaseUnits(balStr, chain.decimals)
       const feeBase = maxFeeReserveBase(chain, BigInt(fee.amount[0]?.amount || '0'))
       baseAmount = balBase - feeBase
@@ -282,7 +310,7 @@ export async function buildCosmosStakingTx(
   if (isMax) {
     // Delegate all available balance minus the network fee (matches buildCosmosTx send-max)
     const balResp = await pioneer.GetPortfolioBalances({ pubkeys: [{ caip: chain.caip, pubkey: fromAddress }] }, { forceRefresh: true })
-    const balStr = String((balResp?.data?.balances || [])[0]?.balance ?? '0')
+    const balStr = readCosmosBalance(balResp, chain.coin)
     const balBase = toBaseUnits(balStr, chain.decimals)
     // Same headroom rationale as buildCosmosTx (see maxFeeReserveBase). This
     // builder doesn't apply a feeLevel multiplier, so fee.amount is the actual
