@@ -426,8 +426,36 @@ if (-not $SkipBuild) {
 
     Write-Step "Building hdwallet"
     Push-Location (Join-Path $RepoRoot "modules\hdwallet")
-    yarn install
-    if ($LASTEXITCODE -ne 0) { throw "yarn install failed for hdwallet (exit $LASTEXITCODE)" }
+    # Windows: hdwallet-keepkey depends on @keepkey/device-protocol as a GIT dependency.
+    # yarn builds git deps by running their `prepare`, which here is
+    #   mkdir -p ./lib && grpc_tools_node_protoc --plugin=protoc-gen-ts=./node_modules/.bin/protoc-gen-ts ...
+    # That fails on Windows: `mkdir -p` is invalid under cmd.exe, and even under bash native
+    # protoc cannot exec the extensionless plugin wrapper ("%1 is not a valid Win32 application").
+    # yarn (even with --ignore-scripts) still runs git-dep prepare and returns non-zero, but by
+    # then node_modules is fully linked. Tolerate ONLY that specific prepare failure, seed the
+    # git-dep's gitignored lib/ from the top-level device-protocol lib (same pinned commit ->
+    # identical output), and treat `yarn build` (tsc) as the real gate.
+    $ErrorActionPreference = 'Continue'
+    $hdwInstallOutput = yarn install 2>&1
+    $hdwInstallExit = $LASTEXITCODE
+    $ErrorActionPreference = 'Stop'
+    if ($hdwInstallExit -ne 0) {
+        $hdwInstallText = @($hdwInstallOutput) -join "`n"
+        if ($hdwInstallText -match 'device-protocol@' -and $hdwInstallText -match 'build:js') {
+            Write-Warning "hdwallet yarn install exited $hdwInstallExit on the device-protocol git-dep prepare (Windows protoc/mkdir limitation); seeding lib/ from top-level and continuing."
+        } else {
+            Write-Host $hdwInstallText -ForegroundColor Gray
+            throw "yarn install failed for hdwallet (exit $hdwInstallExit)"
+        }
+    }
+    $DpNestedLib = Join-Path (Get-Location) "node_modules\@keepkey\device-protocol\lib"
+    $DpTopLib = Join-Path $RepoRoot "modules\device-protocol\lib"
+    if (-not (Test-Path (Join-Path $DpTopLib "messages_pb.js"))) {
+        throw "Top-level device-protocol lib missing at $DpTopLib -- build it before running (see WINDOWS-BUILD-QUIRKS.md quirk 8)."
+    }
+    New-Item -ItemType Directory -Force -Path $DpNestedLib | Out-Null
+    Copy-Item -Path (Join-Path $DpTopLib "*") -Destination $DpNestedLib -Recurse -Force
+    Write-Host "  Seeded hdwallet @keepkey/device-protocol/lib from top-level device-protocol (pinned commit)"
     yarn build
     if ($LASTEXITCODE -ne 0) { throw "yarn build failed for hdwallet (exit $LASTEXITCODE)" }
     Pop-Location
@@ -456,6 +484,24 @@ if (-not $SkipBuild) {
     $ZcashCliDir = Join-Path $ProjectDir "zcash-cli"
     if (Test-Path $ZcashCliDir) {
         Push-Location $ZcashCliDir
+        # zcash-cli/build.rs uses tonic-build/prost, which needs a system `protoc`.
+        # Windows has none on PATH by default, so resolve one: honor an existing
+        # $env:PROTOC, else protoc on PATH, else the protoc.exe bundled with
+        # grpc-tools in device-protocol's node_modules (always present for the build).
+        if (-not ($env:PROTOC -and (Test-Path $env:PROTOC))) {
+            $protocCmd = Get-Command protoc.exe -ErrorAction SilentlyContinue
+            if ($protocCmd) {
+                $env:PROTOC = $protocCmd.Source
+            } else {
+                $bundledProtoc = Join-Path $RepoRoot "modules\device-protocol\node_modules\grpc-tools\bin\protoc.exe"
+                if (Test-Path $bundledProtoc) {
+                    $env:PROTOC = $bundledProtoc
+                } else {
+                    throw "protoc not found for zcash-cli build. Set `$env:PROTOC or install protobuf-compiler. Bundled fallback missing at $bundledProtoc (run the device-protocol install first)."
+                }
+            }
+        }
+        Write-Host "  Using protoc: $env:PROTOC"
         cargo build --release
         if ($LASTEXITCODE -ne 0) { throw "cargo build --release failed for zcash-cli" }
         Pop-Location
