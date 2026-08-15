@@ -14,6 +14,7 @@ import type { SwapAsset, SwapQuote, SwapQuoteParams, ExecuteSwapParams, SwapResu
 import { SOLANA_BLIND_SIGNING_REQUIRED } from '../shared/types'
 import { toDeviceError, deviceErrorMessage } from '../shared/device-error'
 import { findEvmSchema } from './evm-schema-registry'
+import { firmwareClearSigns } from './calldata-decoder'
 import { findSolanaSchema } from './solana-schema-registry'
 import { getPioneer } from './pioneer'
 import { encodeDepositWithExpiry, encodeApprove, parseUnits, toHex, readPioneerBalance } from './txbuilder/evm'
@@ -1004,6 +1005,41 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
     throw new Error(outflow
       ? `${SOLANA_BLIND_SIGNING_REQUIRED} ${outflow}`
       : SOLANA_BLIND_SIGNING_REQUIRED)
+  }
+
+  // Same shape as the Solana gate above, for EVM contract calls the firmware
+  // cannot decode (relay/aggregator routes are the common case — they are not
+  // in the device's pinned allowlist, see firmwareClearSigns).
+  //
+  // Clear-signing is NOT an alternative here today. Metadata verification needs
+  // a runtime-loaded signer, and loading one ALSO requires AdvancedMode
+  // (firmware fsm_msg_ethereum.h + signed_metadata.c); there is no built-in
+  // trust anchor yet — docs/security/clearsign-key-delegation-roadmap.md tracks
+  // the delegation work that would remove this requirement.
+  //
+  // Without this check the device renders "Blocked", replies ActionCancelled,
+  // and hdwallet's transport (transport.ts) constructs a bare
+  // `new core.ActionCancelled()` that DISCARDS the firmware's reason string
+  // ("Blind signing disabled by policy"). The user is then shown a generic
+  // "Action cancelled" — indistinguishable from having pressed Cancel — for a
+  // policy refusal they were never told about. Check before we prompt, so the
+  // message names the actual blocker.
+  if (
+    fromChain.chainFamily === 'evm' &&
+    typeof unsignedTx?.data === 'string' && unsignedTx.data.length > 2 &&
+    !firmwareClearSigns(unsignedTx.to, unsignedTx.data, Number(unsignedTx.chainId)) &&
+    // Only when we KNOW it is off. `undefined` means the policy was not
+    // reported (no cached features), and guessing would block a swap the
+    // device would have signed.
+    ctx.isAdvancedModeEnabled?.() === false
+  ) {
+    swapLog(`${TAG} EVM blind-sign gate: to=${unsignedTx.to} selector=${String(unsignedTx.data).slice(0, 10)} — AdvancedMode is off`)
+    throw new Error(
+      `This ${fromChain.coin} swap has to be blind-signed — the device cannot decode this contract call, ` +
+      `and it refuses to blind-sign unless AdvancedMode is enabled. ` +
+      `Enable AdvancedMode on your KeepKey, then try the swap again. ` +
+      `Note it switches itself back off when the device reboots.`,
+    )
   }
 
   // 4. Sign on device (user confirms tx details on hardware wallet)
