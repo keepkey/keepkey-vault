@@ -344,6 +344,9 @@ export async function estimateUtxoFee(
       const settled = await Promise.allSettled(
         allXpubs.map(x => fetchUtxosForXpub(pioneer, chain.networkId, x.xpub, x.scriptType, x.accountPath))
       )
+      // A partial set produces a confidently wrong fee and net-spendable figure.
+      // Callers already degrade gracefully on null, so no estimate beats a lie.
+      if (settled.some(r => r.status === 'rejected')) return null
       utxos = settled.flatMap(r => r.status === 'fulfilled' ? r.value : [])
     } else {
       utxos = await fetchUtxosForXpub(pioneer, chain.networkId, primaryXpub, scriptType, accountPath)
@@ -417,6 +420,11 @@ export async function buildUtxoTx(
 
   // 1. Fetch UTXOs — aggregate from all xpubs if provided, otherwise single xpub
   let utxos: any[]
+  // Tolerating a failed xpub (below) keeps a send buildable, but it also means
+  // `utxos` may be a strict subset of what the wallet holds. Every downstream
+  // statement about the total has to know that, or it asserts a number it
+  // cannot back — the same failed-fetch-reads-as-zero class as #411/#414.
+  let unreachableXpubs = 0
   if (allXpubs && allXpubs.length > 0) {
     console.log(`${TAG} Multi-xpub aggregation: ${allXpubs.length} xpubs`)
     // Finding 5: tolerate individual xpub failures — use allSettled
@@ -428,8 +436,18 @@ export async function buildUtxoTx(
       if (settled[i].status === 'fulfilled') {
         utxos.push(...(settled[i] as PromiseFulfilledResult<any[]>).value)
       } else {
+        unreachableXpubs++
         console.warn(`${TAG} ListUnspent failed for ${allXpubs[i].xpub.slice(0, 12)}...: ${(settled[i] as PromiseRejectedResult).reason?.message}`)
       }
+    }
+    // "Send max" means "spend everything". With an account we could not read,
+    // the sweep would silently leave those coins behind and still call itself
+    // max — a wrong amount signed by the user, not merely a wrong message.
+    if (unreachableXpubs > 0 && isMax) {
+      throw new Error(
+        `Cannot send max: ${unreachableXpubs} of ${allXpubs.length} ${chain.coin} accounts could not be reached, ` +
+        `so the full balance is unknown. Try again once the balance server responds.`,
+      )
     }
   } else {
     utxos = await fetchUtxosForXpub(pioneer, chain.networkId, primaryXpub, scriptType, accountPath || undefined)
@@ -455,6 +473,15 @@ export async function buildUtxoTx(
         `Wait for ${ZCASH_MIN_CONFIRMATIONS} confirmations and try again.`,
       )
     }
+  }
+  // An empty set means "you have nothing" only when we actually managed to look.
+  // Otherwise the "still confirming" advice below invents an explanation for a
+  // network failure and sends the user off to wait for a nonexistent tx.
+  if (!utxos.length && unreachableXpubs > 0) {
+    throw new Error(
+      `Unable to read your ${chain.coin} balance — ${unreachableXpubs} account lookup(s) failed. ` +
+      `This is a balance server problem, not an empty wallet. Try again in a moment.`,
+    )
   }
   if (!utxos.length) throw new Error(`No confirmed UTXOs found for ${chain.coin}. If you recently sent or received ${chain.symbol}, the transaction may still be confirming — please wait and try again.`)
 
@@ -487,6 +514,16 @@ export async function buildUtxoTx(
 
   if (!result?.inputs) {
     const total = utxos.reduce((s: number, u: any) => s + u.value, 0)
+    // "have X" is a claim about the whole wallet. With an unreachable account
+    // it is a claim about a subset, and the user gets told they are short on a
+    // wallet that is not — exactly the "Insufficient ETH ... have 0" report
+    // that started this. Name the gap instead of quoting a number.
+    if (total < satoshis && unreachableXpubs > 0) {
+      throw new Error(
+        `Cannot verify your ${chain.coin} balance — ${unreachableXpubs} account lookup(s) failed, ` +
+        `so the ${total / 1e8} ${chain.symbol} found so far may not be all of it. Try again in a moment.`,
+      )
+    }
     if (total < satoshis) throw new Error(`Insufficient funds: have ${total / 1e8}, need ${satoshis / 1e8} ${chain.symbol}`)
     throw new Error('Coin selection failed (possibly high fees)')
   }
