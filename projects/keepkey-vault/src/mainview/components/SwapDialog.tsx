@@ -18,7 +18,7 @@ import type { ChainDef } from "../../shared/chains"
 import { nativeMaxSpendableAmount, normalizeDecimals, tokenMaxSpendableAmount } from "../../shared/max-send"
 import { getAssetIcon } from "../../shared/assetLookup"
 import { validateAddress } from "../../shared/address-validation"
-import { isBalanceUnverified } from "../../shared/balance-display-state"
+import { isBalanceUnverified, selectBalanceEntry } from "../../shared/balance-display-state"
 import type { SwapAsset, SwapQuote, ChainBalance, CustomToken, SwapStatusUpdate, SwapTrackingStatus, PendingSwap, SwapUiState, SwapUiCommand, SwapHealth } from "../../shared/types"
 import { SOLANA_BLIND_SIGNING_REQUIRED } from "../../shared/types"
 import { Z } from "../lib/z-index"
@@ -1455,20 +1455,35 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   }, [open, resumeSwap])
 
   // ── Derived values ────────────────────────────────────────────────
-  /* The from-chain's balance fetch failed, so every figure derived from it —
-   * the per-address EVM entry included — is a placeholder, not an amount. The
-   * MAX arithmetic below would otherwise quote it as spendable.
-   *
-   * Only a present-but-degraded entry counts here: fromBalance already returns
-   * null when no entry exists at all, so that case needs no help. Passing the
-   * caip preserves the exception that matters — a token proven directly over
-   * RPC keeps its real figure even while its parent chain is degraded, which
-   * is exactly what mergeTrustedBalanceSnapshot merges through. */
-  const fromBalanceUnverified = useMemo(() => {
-    if (!fromAsset) return false
-    const cb = balances.find(b => b.chainId === fromAsset.chainId)
-    return !!cb && isBalanceUnverified(cb, fromAsset.caip)
-  }, [fromAsset, balances])
+  /* The entry fromBalance will actually READ, so confidence is judged against
+   * the same object the amount comes from. Judging only `balances` while
+   * fromBalance fell through to the `balance` prop meant a degraded prop
+   * passed a check that never looked at it: with any non-empty cache missing
+   * this chain (so the dialog skips its live fetch), the prop's placeholder
+   * zero drove Available/USD/MAX, and an account-model balance could be
+   * pre-clamped and submitted with sendIsMax=false — past the builder's own
+   * MAX verification. Both selectors must resolve the source identically. */
+  const fromBalanceEntry = useMemo(
+    () => fromAsset ? selectBalanceEntry(balances, balance, fromAsset.chainId) : undefined,
+    [fromAsset, balances, balance],
+  )
+
+  /* Confidence in the ASSET being swapped. A token proven directly over RPC
+   * keeps its real figure even while its parent chain is degraded — exactly
+   * what mergeTrustedBalanceSnapshot merges through. */
+  const fromBalanceUnverified = useMemo(
+    () => !!fromAsset && !!fromBalanceEntry && isBalanceUnverified(fromBalanceEntry, fromAsset.caip),
+    [fromAsset, fromBalanceEntry],
+  )
+
+  /* Confidence in the chain's NATIVE balance, which is a different question:
+   * a directly-confirmed SPL token says nothing about the SOL that pays for
+   * the transfer. Sharing one boolean let a verified token re-enable the
+   * low-gas verdict against a native balance still sitting at placeholder 0. */
+  const fromNativeUnverified = useMemo(() => {
+    if (!fromAsset || !fromBalanceEntry) return false
+    return isBalanceUnverified(fromBalanceEntry, CHAINS.find(c => c.id === fromAsset.chainId)?.caip)
+  }, [fromAsset, fromBalanceEntry])
 
   const fromBalance = useMemo(() => {
     if (!fromAsset || fromBalanceUnverified) return null
@@ -1498,12 +1513,12 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       }
       if (!fromAsset.contractAddress) return cb.balance
     }
-    // Fall back to prop balance only when cache has no entry for this chain
-    if (balance && chain && fromAsset.chainId === chain.id && !fromAsset.contractAddress) {
-      return balance.balance
-    }
+    // Fall back to the SAME entry the confidence check judged. Re-deriving the
+    // fallback here is what let a degraded prop be read after a cache-only check
+    // had already declared the balance trustworthy.
+    if (fromBalanceEntry && !fromAsset.contractAddress) return fromBalanceEntry.balance
     return null
-  }, [fromAsset, fromBalanceUnverified, balance, chain, balances, evmAddresses, effectiveEvmIndex])
+  }, [fromAsset, fromBalanceUnverified, fromBalanceEntry, balances, evmAddresses, effectiveEvmIndex])
 
   /* Native account-model MAX fee reservation — frontend pre-clamps the balance
    * by a conservative fee reserve so the displayed, quoted, and submitted
@@ -1528,8 +1543,10 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
    * without any native balance, so blocking would false-positive. */
   const fromChainLowGas = useMemo(() => {
     // A degraded chain reports 0 native, which reads as "dust" and fires this
-    // warning at someone whose gas account is fine. No verdict without a number.
-    if (!fromAsset || fromBalanceUnverified) return null
+    // warning at someone whose gas account is fine. No verdict without a
+    // number — and it must be the NATIVE number: a directly-confirmed SPL
+    // token clears fromBalanceUnverified while SOL itself is still unknown.
+    if (!fromAsset || fromNativeUnverified) return null
     const isToken = fromAsset.caip ? isTokenCaip(fromAsset.caip) : !!fromAsset.contractAddress
     if (!isToken) return null
     // Mirror fromBalance: EVM swaps sign from the SELECTED address, so judge
@@ -1558,7 +1575,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       coin: chainDef?.coin ?? fromAsset.chainId,
       balance: nativeBalance,
     }
-  }, [fromAsset, fromBalanceUnverified, balances, evmAddresses, effectiveEvmIndex])
+  }, [fromAsset, fromNativeUnverified, balances, evmAddresses, effectiveEvmIndex])
 
   /* Resolved (amount, isMax) tuple to send to the backend. For fee-reserved native
    * and token-precision-reserved MAX the amount is already clamped, so isMax

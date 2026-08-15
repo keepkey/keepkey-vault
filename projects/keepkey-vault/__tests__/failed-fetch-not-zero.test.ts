@@ -2,19 +2,28 @@
  * "A failed lookup is not a zero" — the non-EVM half of the class.
  *
  * #411/#414 fixed this for EVM (getEvmBalance, readPioneerBalance). That sweep
- * never left the EVM builders. These cover the two places it also lived:
+ * never left the EVM builders. These cover where else it lived:
  *
- *   - txbuilder/cosmos.ts — `?? '0'` on all three MAX balance reads
+ *   - txbuilder/cosmos.ts — `?? '0'` on all three MAX balance reads, plus a
+ *                           frontend '0' that walked past the guard
  *   - txbuilder/utxo.ts   — Promise.allSettled silently dropping an xpub whose
  *                           ListUnspent failed, after which every statement
  *                           about the total describes a subset
+ *   - btc-accounts.ts     — a cached-balance filter that hid the failed account
+ *                           from the builder's completeness check entirely
+ *   - balance-display-state — the predicates the send form and swap dialog use
+ *                           to decide what they may claim
+ *
+ * The screens themselves are NOT covered: there is no React render harness in
+ * this repo, so the wiring from these predicates into SendForm/SwapDialog is
+ * verified by reading, not by test.
  *
  * Run: bun test __tests__/failed-fetch-not-zero.test.ts
  */
 import { describe, test, expect } from 'bun:test'
 import { buildCosmosTx, readCosmosBalance } from '../src/bun/txbuilder/cosmos'
 import { buildUtxoTx, estimateUtxoFee } from '../src/bun/txbuilder/utxo'
-import { isBalanceUnverified } from '../src/shared/balance-display-state'
+import { isBalanceUnverified, selectBalanceEntry } from '../src/shared/balance-display-state'
 import { BtcAccountManager } from '../src/bun/btc-accounts'
 
 describe('readCosmosBalance', () => {
@@ -130,6 +139,59 @@ describe('isBalanceUnverified', () => {
     const lower = 'eip155:1/erc20:0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48'
     const mixed = 'eip155:1/erc20:0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'
     expect(isBalanceUnverified({ syncState: 'degraded', confirmedAssetCaips: [lower] }, mixed)).toBe(false)
+  })
+})
+
+// ── The two UI-derived states, as the screens actually compose them ──────────
+
+const SOL_NATIVE = 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/slip44:501'
+const SOL_USDC = 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/spl:EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'
+
+describe('a verified token is not proof of the native gas balance', () => {
+  // SendForm and SwapDialog both derive two booleans from one entry. Sharing
+  // one let a directly-confirmed SPL token clear the flag that also gated the
+  // low-gas warning — so "deposit SOL to send tokens" came back for a wallet
+  // whose SOL balance was still an unfetched placeholder zero.
+  const degradedChainProvenToken = {
+    chainId: 'solana', syncState: 'degraded' as const, confirmedAssetCaips: [SOL_USDC],
+  }
+
+  test('the token being sent is verified', () => {
+    expect(isBalanceUnverified(degradedChainProvenToken, SOL_USDC)).toBe(false)
+  })
+
+  test('the native coin that pays the fee is NOT', () => {
+    expect(isBalanceUnverified(degradedChainProvenToken, SOL_NATIVE)).toBe(true)
+  })
+})
+
+describe('confidence is judged against the entry the amount is read from', () => {
+  // SwapDialog checked its internal `balances` array but fromBalance fell
+  // through to the `balance` prop. With any non-empty cache missing this chain
+  // — which also makes the dialog skip its live fetch — a degraded prop passed
+  // a check that never looked at it, and its zero drove Available/USD/MAX.
+  const degradedProp = { chainId: 'solana', syncState: 'degraded' as const }
+
+  test('a degraded prop is caught when the cache has no entry for the chain', () => {
+    const cacheMissingSolana = [{ chainId: 'bitcoin', syncState: 'confirmed' as const }]
+    const entry = selectBalanceEntry(cacheMissingSolana, degradedProp, 'solana')
+    expect(entry).toBe(degradedProp)
+    expect(isBalanceUnverified(entry, SOL_NATIVE)).toBe(true)
+  })
+
+  test('the cached entry still wins when it has one', () => {
+    const cacheWithSolana = [{ chainId: 'solana', syncState: 'confirmed' as const }]
+    const entry = selectBalanceEntry(cacheWithSolana, degradedProp, 'solana')
+    expect(isBalanceUnverified(entry, SOL_NATIVE)).toBe(false)
+  })
+
+  test('a prop for a different chain is not borrowed', () => {
+    const prop = { chainId: 'bitcoin', syncState: 'degraded' as const }
+    expect(selectBalanceEntry([], prop, 'solana')).toBeUndefined()
+  })
+
+  test('no cache and no prop yields nothing to read or judge', () => {
+    expect(selectBalanceEntry([], undefined, 'solana')).toBeUndefined()
   })
 })
 

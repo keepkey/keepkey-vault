@@ -38,10 +38,33 @@ export function balanceDisplayState(input: BalanceDisplayInput): BalanceDisplayS
 }
 
 /**
+ * The one balance entry a screen must BOTH judge and read from.
+ *
+ * SwapDialog judged its cached `balances` array but let the amount fall through
+ * to the `balance` prop, so a degraded prop cleared a check that never examined
+ * it — and with any non-empty cache missing the selected chain (which also
+ * makes the dialog skip its live fetch) that placeholder zero drove
+ * Available/USD/MAX. Confidence and figure have to resolve to the same object,
+ * so both go through this.
+ */
+export function selectBalanceEntry<T extends { chainId?: string }>(
+  cached: readonly T[],
+  fallback: T | undefined,
+  chainId: string,
+): T | undefined {
+  return cached.find(entry => entry.chainId === chainId)
+    ?? (fallback?.chainId === chainId ? fallback : undefined)
+}
+
+/**
  * Same rule as the 'degraded' branch above, for the screens that hold one
  * chain's balance and have no notion of a global load state — the send form
  * and the swap dialog, which otherwise read a placeholder zero as "this
  * account is empty" and say so.
+ *
+ * Callers needing both an asset verdict and a native-gas verdict must call this
+ * twice with different caips. One shared boolean let a directly-confirmed SPL
+ * token vouch for a SOL balance nobody had fetched.
  */
 export function isBalanceUnverified(
   balance?: { syncState?: BalanceDisplayInput['syncState']; confirmedAssetCaips?: string[] },
