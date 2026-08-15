@@ -3613,6 +3613,38 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					// presenting "source gone, destination missing".
 					const directlyConfirmedAssetsByChain = new Map<string, Set<string>>()
 					for (const destCaip of swapDestCaips) {
+						// Native SOL has no mint, so the SPL branch below skipped it entirely and a
+						// swap INTO SOL got no direct confirmation at all — it waited on Pioneer's
+						// indexer and kept showing the pre-swap balance across refreshes.
+						const nativeMatch = /^(solana:[^/]+)\/slip44:501$/i.exec(destCaip)
+						if (nativeMatch) {
+							const [, nativeNetworkId] = nativeMatch
+							const nativeOwner = pubkeys.find(p => p.chainId === 'solana')?.pubkey
+							if (!nativeOwner) continue
+							try {
+								const { getSolanaNativeBalance } = await import('./solana-token')
+								const direct = await getSolanaNativeBalance(nativeOwner, getSetting('solana_rpc_endpoint') || undefined)
+								// Pioneer lowercases Solana network ids in its responses while the vault
+								// derives them mixed-case, so this comparison MUST fold case or the entry
+								// never matches and the freshly-read balance is silently dropped.
+								const existing = allEntries.find((entry: any) => {
+									const entryCaip = String(entry?.caip || '')
+									if (!/\/slip44:501$/i.test(entryCaip)) return false
+									const entryNet = String(entry?.networkId || entryCaip.split('/')[0])
+									return entryNet.toLowerCase() === nativeNetworkId.toLowerCase()
+								})
+								const directAmount = Number.parseFloat(direct.amount)
+								const priceUsd = Number(existing?.priceUsd ?? 0) || 0
+								if (existing) Object.assign(existing, { balance: direct.amount, decimals: direct.decimals, valueUsd: directAmount * priceUsd })
+								const confirmedNative = directlyConfirmedAssetsByChain.get('solana') || new Set<string>()
+								confirmedNative.add(destCaip)
+								directlyConfirmedAssetsByChain.set('solana', confirmedNative)
+								console.log(`[getBalances] Post-swap reconcile: direct SOL balance ${direct.amount}`)
+							} catch (e: any) {
+								console.warn(`[getBalances] Direct SOL balance lookup failed: ${e?.message || e}`)
+							}
+							continue
+						}
 						const match = /^(solana:[^/]+)\/(?:token|spl):([1-9A-HJ-NP-Za-km-z]{32,44})$/.exec(destCaip)
 						if (!match) continue
 						const [, networkId, mint] = match

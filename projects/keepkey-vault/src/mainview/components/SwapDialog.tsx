@@ -1689,6 +1689,17 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
 
   const hasFromPrice = fromPriceUsd > 0
   const hasToPrice = toPriceUsd > 0
+  /* True when toPriceUsd came from the quote ratio rather than an independent
+   * price. In that case the "≈ $X" under the received amount is NOT a valuation
+   * of the output — substitute the fallback and it collapses:
+   *
+   *     outAmt × (inAmt / outAmt) × fromPriceUsd  ≡  inAmt × fromPriceUsd
+   *
+   * i.e. it restates what was SENT, for any output value whatsoever. A quote
+   * that returned 232,196,097,603.76 SOL still printed a perfectly plausible
+   * "$49.06", because that figure never depended on the amount it appeared to
+   * be pricing. Suppress it rather than let a wrong amount look corroborated. */
+  const toPriceIsDerived = toPriceUsdFromBalance <= 0 && toPriceUsd > 0
   const nativeMaxReserveDisplay = useMemo(() => {
     if (!isFeeReservedNativeMax || !fromAsset || !fromBalance || nativeFeeReservedMaxAmount === null) return null
     const balanceAmount = parseFloat(fromBalance)
@@ -2863,7 +2874,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                         </Text>
                         <Text fontSize="16px" color="kk.textSecondary" fontWeight={500}>{toAsset.symbol}</Text>
                       </Flex>
-                      {hasToPrice && quote?.expectedOutput && (
+                      {hasToPrice && !toPriceIsDerived && quote?.expectedOutput && (
                         <Text position="relative" mt="1" fontSize="12px" color="kk.textMuted" fontFamily="mono">
                           ≈ {fmtCompact(parseFloat(quote.expectedOutput) * toPriceUsd)}
                           {hasFromPrice && (() => {
