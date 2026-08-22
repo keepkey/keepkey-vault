@@ -186,6 +186,14 @@ const CONFIGS: ChainConfig[] = [
     explorerAddressUrl: 'https://gnosisscan.io/address/{{address}}',
   },
   {
+    id: 'robinhood', chain: 'RHD' as any, coin: 'Robinhood', symbol: 'ETH',
+    chainFamily: 'evm', color: '#00C805',
+    rpcMethod: 'ethGetAddress', signMethod: 'ethSignTx',
+    defaultPath: [0x8000002C, 0x8000003C, 0x80000000, 0, 0], chainId: '4663',
+    explorerTxUrl: 'https://robinhoodchain.blockscout.com/tx/{{txid}}',
+    explorerAddressUrl: 'https://robinhoodchain.blockscout.com/address/{{address}}',
+  },
+  {
     id: 'monad', chain: Chain.Monad, coin: 'Monad', symbol: 'MON',
     chainFamily: 'evm', color: '#1F70FF',
     rpcMethod: 'ethGetAddress', signMethod: 'ethSignTx',
@@ -344,18 +352,21 @@ const CONFIGS: ChainConfig[] = [
 // Fallbacks for chains not fully covered by pioneer-caip
 const CAIP_FALLBACKS: Record<string, string> = {
   GNO: 'eip155:100/slip44:60',
+  RHD: 'eip155:4663/slip44:60',
   TRX: 'tron:27Lqcw/slip44:195',
   TON: 'ton:-239/slip44:607',
   HIVE: 'hive:beeab0de/slip44:1275',
 }
 const NETWORKID_FALLBACKS: Record<string, string> = {
   GNO: 'eip155:100',
+  RHD: 'eip155:4663',
   TRX: 'tron:27Lqcw',
   TON: 'ton:-239',
   HIVE: 'hive:beeab0de',
 }
 const DECIMAL_FALLBACKS: Record<string, number> = {
   GNO: 18,
+  RHD: 18,
   TRX: 6,
   TON: 9,
   HIVE: 3,
