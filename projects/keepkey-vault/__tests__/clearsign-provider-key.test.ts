@@ -15,16 +15,38 @@
  */
 import { describe, test, expect } from 'bun:test'
 import { createHash } from 'crypto'
+import { mkdtempSync, readFileSync, rmSync, statSync } from 'fs'
+import { tmpdir } from 'os'
+import { join } from 'path'
 import {
   deriveProviderKey,
   providerFingerprint,
   buildProviderKeyFile,
+  validateProviderCeremony,
+  writeProviderKeyFile,
   PROVIDER_KEY_PATH,
   PROVIDER_KEY_WARNING,
 } from '../src/shared/clearsign-provider-key'
 
 // BIP-39 test vector mnemonic. NEVER a real provider key.
 const ABANDON = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'
+
+describe('validateProviderCeremony', () => {
+  test('binds the mnemonic word count to the requested device ceremony', () => {
+    expect(validateProviderCeremony({ childMnemonic: ABANDON, wordCount: 12, index: 0 })).toBe(ABANDON)
+    expect(() => validateProviderCeremony({ childMnemonic: ABANDON, wordCount: 24, index: 0 }))
+      .toThrow('has 12 words; expected 24')
+  })
+
+  test('accepts only supported BIP-85 word counts and non-hardened indices', () => {
+    expect(() => validateProviderCeremony({ childMnemonic: ABANDON, wordCount: 15, index: 0 }))
+      .toThrow('12, 18, or 24')
+    expect(() => validateProviderCeremony({ childMnemonic: ABANDON, wordCount: 12, index: -1 }))
+      .toThrow('integer from 0')
+    expect(() => validateProviderCeremony({ childMnemonic: ABANDON, wordCount: 12, index: 0x80000000 }))
+      .toThrow('2147483647')
+  })
+})
 
 describe('deriveProviderKey', () => {
   test('is deterministic — the whole point of a repeatable ceremony', () => {
@@ -120,5 +142,38 @@ describe('buildProviderKeyFile', () => {
 
   test('is versioned, so a later format change is detectable', () => {
     expect(file.format).toBe('keepkey-clearsign-provider-key-v1')
+  })
+})
+
+describe('writeProviderKeyFile', () => {
+  const file = buildProviderKeyFile({
+    key: deriveProviderKey(ABANDON),
+    alias: 'Pioneer',
+    bip85WordCount: 12,
+    bip85Index: 0,
+    createdAt: '2026-08-15T00:00:00.000Z',
+  })
+
+  test('creates the secret owner-only from its first byte', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'keepkey-provider-key-'))
+    const filePath = join(dir, 'provider.json')
+    try {
+      writeProviderKeyFile(filePath, file)
+      expect(JSON.parse(readFileSync(filePath, 'utf8'))).toEqual(file)
+      if (process.platform !== 'win32') expect(statSync(filePath).mode & 0o777).toBe(0o600)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test('refuses to overwrite an existing path', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'keepkey-provider-key-'))
+    const filePath = join(dir, 'provider.json')
+    try {
+      writeProviderKeyFile(filePath, file)
+      expect(() => writeProviderKeyFile(filePath, file)).toThrow()
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })

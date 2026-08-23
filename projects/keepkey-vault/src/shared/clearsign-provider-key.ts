@@ -20,6 +20,7 @@
 import { mnemonicToSeedSync, validateMnemonic } from 'bip39'
 import { utils as ethersUtils } from 'ethers'
 import { createHash } from 'crypto'
+import { closeSync, fsyncSync, openSync, writeFileSync } from 'fs'
 
 /**
  * The BIP-85 child mnemonic IS the key material, so the provider key is that
@@ -38,6 +39,33 @@ export interface ProviderKey {
   publicKeyHex: string
   /** 8 hex chars. Must equal what the device shows on the trust prompt. */
   fingerprint: string
+}
+
+export const PROVIDER_BIP85_WORD_COUNTS = [12, 18, 24] as const
+
+/**
+ * Bind the host-entered mnemonic to the exact ceremony the device was asked
+ * to perform. Without this check, a stale mnemonic can be saved with plausible
+ * but false word-count/index provenance.
+ */
+export function validateProviderCeremony(opts: {
+  childMnemonic: string
+  wordCount: number
+  index: number
+}): string {
+  if (!PROVIDER_BIP85_WORD_COUNTS.includes(opts.wordCount as 12 | 18 | 24)) {
+    throw new Error('BIP-85 word count must be 12, 18, or 24')
+  }
+  if (!Number.isSafeInteger(opts.index) || opts.index < 0 || opts.index > 0x7fffffff) {
+    throw new Error('BIP-85 index must be an integer from 0 to 2147483647')
+  }
+
+  const mnemonic = String(opts.childMnemonic || '').trim().replace(/\s+/g, ' ').toLowerCase()
+  const actualWordCount = mnemonic ? mnemonic.split(' ').length : 0
+  if (actualWordCount !== opts.wordCount) {
+    throw new Error(`BIP-85 mnemonic has ${actualWordCount} words; expected ${opts.wordCount}`)
+  }
+  return mnemonic
 }
 
 /**
@@ -123,5 +151,21 @@ export function buildProviderKeyFile(opts: {
     fingerprint: opts.key.fingerprint,
     privateKeyHex: opts.key.privateKeyHex,
     warning: PROVIDER_KEY_WARNING,
+  }
+}
+
+/**
+ * Create a plaintext provider-key file without a world-readable interval.
+ * `wx` also refuses to follow/overwrite an existing path, which prevents a
+ * repeated ceremony or symlink from replacing another file unexpectedly.
+ */
+export function writeProviderKeyFile(filePath: string, file: ProviderKeyFile): void {
+  let fd: number | undefined
+  try {
+    fd = openSync(filePath, 'wx', 0o600)
+    writeFileSync(fd, JSON.stringify(file, null, 2), { encoding: 'utf8' })
+    fsyncSync(fd)
+  } finally {
+    if (fd !== undefined) closeSync(fd)
   }
 }

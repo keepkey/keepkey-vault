@@ -166,7 +166,12 @@ import { extractTransactionsFromReport, toCoinTrackerCsv, toZenLedgerCsv } from 
 import { assetData as discoveryAssetData } from "@pioneer-platform/pioneer-discovery"
 import { prioritizeExtraContracts, type PortfolioExtraContract } from "./portfolio-extra-contracts"
 import { buildSolanaSchema, inspectSolanaSchema } from "./clearsign-studio"
-import { buildProviderKeyFile, deriveProviderKey } from "../shared/clearsign-provider-key"
+import {
+	buildProviderKeyFile,
+	deriveProviderKey,
+	validateProviderCeremony,
+	writeProviderKeyFile,
+} from "../shared/clearsign-provider-key"
 import { EVM_RPC_URLS, getTokenMetadata, broadcastEvmTx, verifyEvmSigner } from "./evm-rpc"
 import type { ChainBalance, TokenBalance, CustomToken, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, EvmAddressSet, Bip85SeedMeta, StakingPosition, SwapAsset, AuditToken, DefiPosition, RecentActivity, ClearSignEvent, ClearSignSolanaSchemaArtifact } from "../shared/types"
 import type { VaultRPCSchema } from "../shared/rpc-schema"
@@ -2580,7 +2585,12 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!alias || alias.length > 31 || !/^[A-Za-z0-9 _-]+$/.test(alias)) {
 					throw new Error('Alias must be 1-31 letters, digits, spaces, hyphens, or underscores')
 				}
-				const key = deriveProviderKey(params.childMnemonic)
+				const childMnemonic = validateProviderCeremony({
+					childMnemonic: params.childMnemonic,
+					wordCount: params.wordCount,
+					index: params.index,
+				})
+				const key = deriveProviderKey(childMnemonic)
 				// PRIVACY: don't stamp a hidden wallet's fingerprint into a file on disk.
 				let deviceFingerprint: string | undefined
 				if (!engine.isPassphraseWallet) {
@@ -2596,8 +2606,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				})
 				const slug = alias.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
 				const filePath = path.join(os.homedir(), 'Downloads', `keepkey-provider-${slug}-${key.fingerprint}.json`)
-				await Bun.write(filePath, JSON.stringify(file, null, 2))
-				fs.chmodSync(filePath, 0o600)
+				writeProviderKeyFile(filePath, file)
 				// Private key stays on disk — the renderer only ever sees the public half.
 				return { publicKeyHex: key.publicKeyHex, fingerprint: key.fingerprint, filePath }
 			},
