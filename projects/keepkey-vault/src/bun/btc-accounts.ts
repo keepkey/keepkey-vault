@@ -117,24 +117,37 @@ export class BtcAccountManager extends EventEmitter {
     return account?.xpubs.find(x => x.scriptType === this.selectedXpub.scriptType)
   }
 
-  /** Get ALL xpubs with non-zero balance (for UTXO aggregation in sends/swaps). */
-  getFundedXpubs(): Array<{ xpub: string; scriptType: string; accountPath: number[] }> {
+  /** Every xpub, for UTXO aggregation in sends/swaps.
+   *
+   *  This used to filter on `parseFloat(xp.balance) > 0` and was named
+   *  getFundedXpubs. `xp.balance` is the CACHED balance, and a cached zero is
+   *  not proof of an empty account — it is also what a chain whose balance
+   *  fetch failed looks like. Filtering here dropped that account before the
+   *  builder could see it, so buildUtxoTx's every-lookup-succeeded check
+   *  (`unreachableXpubs`) stayed at zero and a MAX swept a subset of the
+   *  wallet while believing it had swept all of it. Same bypass shape as the
+   *  frontend `tokenBalance: '0'` one, a layer further upstream.
+   *
+   *  The cost of dropping the filter is one ListUnspent per genuinely empty
+   *  xpub, which returns [] and adds nothing. The builder decides what is
+   *  spendable; this method's job is only to say what exists. */
+  getSpendableXpubs(): Array<{ xpub: string; scriptType: string; accountPath: number[] }> {
     const result: Array<{ xpub: string; scriptType: string; accountPath: number[] }> = []
     for (const account of this.accounts) {
       for (const xp of account.xpubs) {
-        if (xp.xpub && parseFloat(xp.balance) > 0) {
+        if (xp.xpub) {
           result.push({ xpub: xp.xpub, scriptType: xp.scriptType, accountPath: xp.path })
         }
       }
     }
-    const all = this.accounts.flatMap(a => a.xpubs).filter(x => x.xpub)
-    console.log(`[btc-accounts] getFundedXpubs: ${result.length}/${all.length} funded — ${all.map(x => `${x.scriptType}=${x.balance}`).join(', ')}`)
+    const funded = this.accounts.flatMap(a => a.xpubs).filter(x => x.xpub && parseFloat(x.balance) > 0)
+    console.log(`[btc-accounts] getSpendableXpubs: ${result.length} xpubs (${funded.length} with a cached non-zero balance) — ${result.length ? this.accounts.flatMap(a => a.xpubs).filter(x => x.xpub).map(x => `${x.scriptType}=${x.balance}`).join(', ') : 'none'}`)
     return result
   }
 
   /** All xpubs across all accounts with derivation metadata — used to seed
-   *  own-wallet Address Book entries (R2). Unlike getFundedXpubs() this includes
-   *  unfunded xpubs so a fresh wallet still appears in the book. */
+   *  own-wallet Address Book entries (R2). Unlike getSpendableXpubs() this
+   *  carries accountIndex, which the book needs for labelling. */
   getAllXpubMeta(): Array<{ xpub: string; scriptType: BtcScriptType; accountIndex: number; path: number[] }> {
     const out: Array<{ xpub: string; scriptType: BtcScriptType; accountIndex: number; path: number[] }> = []
     for (const account of this.accounts) {

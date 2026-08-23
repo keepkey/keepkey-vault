@@ -119,7 +119,11 @@ export async function getErc20Decimals(rpcUrl: string, tokenContract: string): P
 
 export async function getEvmBalance(rpcUrl: string, address: string): Promise<bigint> {
   const result = await ethRpc(rpcUrl, 'eth_getBalance', [address, 'latest'])
-  return BigInt(result || '0x0')
+  // No `|| '0x0'` fallback: a missing result means the RPC failed, not that the
+  // account is empty. Reporting it as zero surfaced as "Insufficient ETH:
+  // need 1.65, have 0" on funded accounts. Throw so callers can fall back.
+  if (typeof result !== 'string') throw new Error(`eth_getBalance returned no result for ${address}`)
+  return BigInt(result)
 }
 
 export async function getEvmGasPrice(rpcUrl: string): Promise<bigint> {

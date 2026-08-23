@@ -146,7 +146,7 @@ import { buildTx, broadcastTx } from "./txbuilder"
 import { buildCosmosStakingTx, buildCosmosNameRegTx } from "./txbuilder/cosmos"
 import { initializeOrchardFromDevice, scanOrchardNotes, getShieldedBalance, sendShielded, ensureFvkLoaded, displayOrchardAddressOnDevice } from "./txbuilder/zcash-shielded"
 import { isSidecarReady, startSidecar, stopSidecar, wipeSidecarWalletDb, hasFvkLoaded, getCachedFvk, onScanProgress, getScanState, updateSyncedTo, beginZcashSend, endZcashSend, isZcashSendInFlight } from "./zcash-sidecar"
-import { CHAINS, customChainToChainDef, isChainSupported, hiveRolePath, supportedBtcScriptTypes, btcTaprootSupported } from "../shared/chains"
+import { CHAINS, customChainToChainDef, isChainSupported, hiveRolePath, btcTaprootSupported } from "../shared/chains"
 import { versionCompare } from "../shared/firmware-versions"
 import type { ChainDef } from "../shared/chains"
 import { BtcAccountManager } from "./btc-accounts"
@@ -161,6 +161,7 @@ import { rectifyWallet, getLedgerSummary, getLedgerJournals } from "./ledger"
 import { generateReport, reportToPdfBuffer, reportToCsv } from "./reports"
 import { startAudit, startBtcScan, getAudit, getAuditBtcRaw, getAuditEntry, dismissAudit, markAuditsStale, type AuditDeps } from "./audit-engine"
 import { chainSupportsDeepScan, chainSupportsLevelScan, chainLevelPath, deriveAddressParams, extractAddress, parseNativeScanResult, parseEvmScanResult, utxoAccountScriptPaths, explorerAddressUrl, pathToBip32, parseBip32Path } from "./chain-scan"
+import { btcPairingEntries, utxoPairingEntries, evmPairingEntries, type UtxoXpub } from "./pairing-pubkeys"
 import { extractTransactionsFromReport, toCoinTrackerCsv, toZenLedgerCsv } from "./tax-export"
 import { assetData as discoveryAssetData } from "@pioneer-platform/pioneer-discovery"
 import { prioritizeExtraContracts, type PortfolioExtraContract } from "./portfolio-extra-contracts"
@@ -1964,7 +1965,7 @@ async function headlessSwapQuote(params: SwapQuoteParams): Promise<SwapQuote> {
 			let estXpub: string | undefined
 			let estAccountPath: number[] | undefined
 			if (fromChain?.id === 'bitcoin') {
-				estXpubs = btcAccounts.isInitialized ? btcAccounts.getFundedXpubs() : []
+				estXpubs = btcAccounts.isInitialized ? btcAccounts.getSpendableXpubs() : []
 			} else if (fromChain) {
 				const results = await (engine.wallet as any).getPublicKeys([{
 					addressNList: fromChain.defaultPath.slice(0, 3),
@@ -2104,7 +2105,7 @@ async function headlessExecuteSwap(params: ExecuteSwapParams, pushSubStage: (sta
 			return undefined
 		},
 		getAllBtcXpubs: () => {
-			if (btcAccounts.isInitialized) return btcAccounts.getFundedXpubs()
+			if (btcAccounts.isInitialized) return btcAccounts.getSpendableXpubs()
 			return []
 		},
 		wrapSign: engine.isEmulator
@@ -3612,6 +3613,38 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					// presenting "source gone, destination missing".
 					const directlyConfirmedAssetsByChain = new Map<string, Set<string>>()
 					for (const destCaip of swapDestCaips) {
+						// Native SOL has no mint, so the SPL branch below skipped it entirely and a
+						// swap INTO SOL got no direct confirmation at all — it waited on Pioneer's
+						// indexer and kept showing the pre-swap balance across refreshes.
+						const nativeMatch = /^(solana:[^/]+)\/slip44:501$/i.exec(destCaip)
+						if (nativeMatch) {
+							const [, nativeNetworkId] = nativeMatch
+							const nativeOwner = pubkeys.find(p => p.chainId === 'solana')?.pubkey
+							if (!nativeOwner) continue
+							try {
+								const { getSolanaNativeBalance } = await import('./solana-token')
+								const direct = await getSolanaNativeBalance(nativeOwner, getSetting('solana_rpc_endpoint') || undefined)
+								// Pioneer lowercases Solana network ids in its responses while the vault
+								// derives them mixed-case, so this comparison MUST fold case or the entry
+								// never matches and the freshly-read balance is silently dropped.
+								const existing = allEntries.find((entry: any) => {
+									const entryCaip = String(entry?.caip || '')
+									if (!/\/slip44:501$/i.test(entryCaip)) return false
+									const entryNet = String(entry?.networkId || entryCaip.split('/')[0])
+									return entryNet.toLowerCase() === nativeNetworkId.toLowerCase()
+								})
+								const directAmount = Number.parseFloat(direct.amount)
+								const priceUsd = Number(existing?.priceUsd ?? 0) || 0
+								if (existing) Object.assign(existing, { balance: direct.amount, decimals: direct.decimals, valueUsd: directAmount * priceUsd })
+								const confirmedNative = directlyConfirmedAssetsByChain.get('solana') || new Set<string>()
+								confirmedNative.add(destCaip)
+								directlyConfirmedAssetsByChain.set('solana', confirmedNative)
+								console.log(`[getBalances] Post-swap reconcile: direct SOL balance ${direct.amount}`)
+							} catch (e: any) {
+								console.warn(`[getBalances] Direct SOL balance lookup failed: ${e?.message || e}`)
+							}
+							continue
+						}
 						const match = /^(solana:[^/]+)\/(?:token|spl):([1-9A-HJ-NP-Za-km-z]{32,44})$/.exec(destCaip)
 						if (!match) continue
 						const [, networkId, mint] = match
@@ -5834,39 +5867,38 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 				const pubkeys: any[] = []
 
-				// ── BTC: every device-supported account type ──
-				const btcScripts = (await supportedBtcScriptTypes(wallet)).map(s => ({
-					...s, type: s.xpubPrefix, note: `Bitcoin ${s.label}`,
-				}))
-				const btcChain = builtinChains.find(c => c.id === 'bitcoin')
-				const btcNetwork = btcChain?.networkId || 'bip122:000000000019d6689c085ae165831e93'
-				for (const s of btcScripts) {
-					try {
-						const addressNList = [s.purpose + 0x80000000, 0x80000000, 0x80000000]
-						const addressNListMaster = [...addressNList, 0, 0]
-						const result = await wallet.getPublicKeys([{
-							addressNList, coin: 'Bitcoin', scriptType: s.scriptType, curve: 'secp256k1',
-						}])
-						const xpub = result?.[0]?.xpub
-						if (xpub && typeof xpub === 'string') {
-							pubkeys.push({
-								type: s.type, pubkey: xpub, master: xpub,
-								address: xpub, // SDK expects address field
-								path: pathToString(addressNList),
-								pathMaster: pathToString(addressNListMaster),
-								scriptType: s.scriptType,
-								available_scripts_types: [...btcScripts.map(x => x.scriptType), 'p2sh'],
-								note: s.note, context,
-								networks: [btcNetwork],
-								addressNList, addressNListMaster,
-							})
-						}
-					} catch (e: any) { console.warn(`[mobilePairing] BTC ${s.scriptType} failed:`, e.message) }
+				// The managers below hold the wallet's KNOWN accounts (not just account
+				// 0), so the paired phone sees the same portfolio the desktop does
+				// (#406). Reconcile against the live seed first — a manager left over
+				// from another passphrase session must never be exported to the relay.
+				const { truth: pairingSeed } = await ensureManagersForSeed('generateMobilePairing')
+
+				// FAIL CLOSED. reconcileSeedManagers() is a no-op on a null identity
+				// (`if (!truth) return false`) — it cannot tell a stale manager from a
+				// fresh one without something to compare against. Every other caller
+				// only reads balances with that ambiguity; this one UPLOADS to the
+				// relay, so an inconclusive check here would publish the previous
+				// wallet's xpubs and addresses after a passphrase or seed change that
+				// happened to coincide with a USB hiccup. Unverifiable seed → no
+				// export. The user replugs and pairs again.
+				if (!pairingSeed) {
+					throw new Error('Could not verify which wallet is connected — refusing to build a pairing payload. Reconnect your KeepKey and try again.')
 				}
 
-				// ── Non-BTC UTXO chains: batch xpub derivation ──
+				// ── BTC: every known account × device-supported script type ──
+				const btcChain = builtinChains.find(c => c.id === 'bitcoin')
+				const btcNetwork = btcChain?.networkId || 'bip122:000000000019d6689c085ae165831e93'
+				try {
+					if (!btcAccounts.isInitialized) await btcAccounts.initialize(wallet)
+					const btcMeta = btcAccounts.getAllXpubMeta()
+					if (btcMeta.length === 0) console.warn('[mobilePairing] BTC: no xpubs from account manager')
+					pubkeys.push(...btcPairingEntries(btcMeta, btcNetwork, context))
+				} catch (e: any) { console.warn('[mobilePairing] BTC xpubs failed:', e.message) }
+
+				// ── Non-BTC UTXO chains: account 0 (batch) + tracked accounts > 0 ──
 				const utxoChains = builtinChains.filter(c => c.chainFamily === 'utxo' && c.id !== 'bitcoin')
 				if (utxoChains.length > 0) {
+					const utxoXpubs: UtxoXpub[] = []
 					try {
 						const xpubResults = await wallet.getPublicKeys(utxoChains.map(c => ({
 							addressNList: accountPath(c.defaultPath), coin: c.coin,
@@ -5876,45 +5908,41 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							const xpub = xpubResults?.[i]?.xpub
 							if (xpub && typeof xpub === 'string') {
 								const chain = utxoChains[i]
-								const addressNList = accountPath(chain.defaultPath)
-								const addressNListMaster = [...addressNList, 0, 0]
-								pubkeys.push({
-									type: 'xpub', pubkey: xpub, master: xpub,
-									address: xpub,
-									path: pathToString(addressNList),
-									pathMaster: pathToString(addressNListMaster),
-									scriptType: chain.scriptType,
-									available_scripts_types: [chain.scriptType || 'p2pkh'],
-									note: `${chain.symbol} Default path`, context,
-									networks: [chain.networkId],
-									addressNList, addressNListMaster,
-								})
+								utxoXpubs.push({ chainId: chain.id, xpub, scriptType: chain.scriptType, path: accountPath(chain.defaultPath) })
 							}
 						}
 					} catch (e: any) { console.warn('[mobilePairing] UTXO xpub batch failed:', e.message) }
+
+					// Accounts beyond 0 persisted by the audit "track" action
+					// (addUtxoAccount). Device-scoped and never written for passphrase
+					// wallets, so reading them here is hidden-safe — mirrors getBalances.
+					const utxoDevId = engine.getDeviceState().deviceId
+					if (utxoDevId && !engine.isPassphraseWallet) {
+						const utxoIds = new Set(utxoChains.map(c => c.id))
+						for (const pk of getCachedPubkeys(utxoDevId)) {
+							if (!utxoIds.has(pk.chainId) || !pk.xpub) continue
+							const path = parseBip32Path(pk.path)
+							if (!path || path.length < 3) continue // bitcoin rows key the xpub in `path`
+							utxoXpubs.push({ chainId: pk.chainId, xpub: pk.xpub, scriptType: pk.scriptType, path })
+						}
+					}
+					pubkeys.push(...utxoPairingEntries(utxoXpubs, utxoChains, context))
 				}
 
-				// ── EVM chains: derive ONCE, emit with all EVM networkIds + wildcard ──
+				// ── EVM chains: every tracked address index, all EVM networkIds + wildcard ──
 				const evmChains = builtinChains.filter(c => c.chainFamily === 'evm')
 				if (evmChains.length > 0) {
 					try {
-						const addressNList = [0x8000002C, 0x8000003C, 0x80000000]
-						const addressNListMaster = [0x8000002C, 0x8000003C, 0x80000000, 0, 0]
-						const result = await wallet.ethGetAddress({ addressNList: addressNListMaster, showDisplay: false, coin: 'Ethereum' })
-						const address = typeof result === 'string' ? result : result?.address
-						if (address && typeof address === 'string') {
-							const evmNetworks = [...evmChains.map(c => c.networkId), 'eip155:*']
-							pubkeys.push({
-								type: 'address', pubkey: address, master: address, address,
-								path: pathToString(addressNList),
-								pathMaster: pathToString(addressNListMaster),
-								note: 'ETH primary (default)', context,
-								networks: evmNetworks,
-								addressNList, addressNListMaster,
-							})
-						}
+						if (!evmAddresses.isInitialized) await evmAddresses.initialize(wallet)
+						const tracked = evmAddresses.toAddressSet().addresses
+						if (tracked.length === 0) console.warn('[mobilePairing] EVM: no addresses from index manager')
+						const evmNetworks = [...evmChains.map(c => c.networkId), 'eip155:*']
+						pubkeys.push(...evmPairingEntries(tracked, evmNetworks, context))
 					} catch (e: any) { console.warn('[mobilePairing] EVM address failed:', e.message) }
 				}
+
+				// Managers now reflect the connected seed — arm the staleness stamp.
+				stampManagers(pairingSeed)
 
 				// ── Non-EVM, non-UTXO chains: individual address derivation ──
 				const otherChains = builtinChains.filter(c =>
@@ -6703,7 +6731,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						return undefined
 					},
 					getAllBtcXpubs: () => {
-						if (btcAccounts.isInitialized) return btcAccounts.getFundedXpubs()
+						if (btcAccounts.isInitialized) return btcAccounts.getSpendableXpubs()
 						return []
 					},
 					wrapSign: (fn) => fn(), // unused in preview
