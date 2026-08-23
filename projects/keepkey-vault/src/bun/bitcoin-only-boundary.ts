@@ -2,12 +2,6 @@ import { SIGNING_ROUTES } from './signing-routes'
 
 const BITCOIN_COIN_NAMES = new Set(['Bitcoin', 'Testnet'])
 
-const NON_BITCOIN_ADDRESS_ROUTES = new Set([
-  '/addresses/cosmos', '/addresses/osmosis', '/addresses/eth', '/addresses/tendermint',
-  '/addresses/thorchain', '/addresses/mayachain', '/addresses/xrp', '/addresses/solana',
-  '/addresses/tron', '/addresses/ton', '/addresses/hive',
-])
-
 /** Bitcoin-only firmware contains exactly the Bitcoin mainnet and testnet coin
  * definitions. Missing coin fields use Bitcoin at the REST handlers. */
 export function bitcoinOnlyCoinAllowed(coin: unknown): boolean {
@@ -27,7 +21,7 @@ export function bitcoinOnlyRejection(
 ): string | null {
   if (method !== 'POST') return null
 
-  if (NON_BITCOIN_ADDRESS_ROUTES.has(path)) {
+  if (path.startsWith('/addresses/') && path !== '/addresses/utxo') {
     return 'address route is not available on bitcoin-only firmware'
   }
 

@@ -29,6 +29,7 @@ describe('Bitcoin-only REST boundary', () => {
     ]) {
       expect(bitcoinOnlyRejection('POST', path, {})).not.toBeNull()
     }
+    expect(bitcoinOnlyRejection('POST', '/addresses/future-altcoin', {})).not.toBeNull()
   })
 
   test('fences ClearSign management and ceremony routes', () => {

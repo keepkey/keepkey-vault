@@ -160,6 +160,11 @@ async function connect() {
   check('Vault reports a connected device', health.device_connected === true)
   check('device runs the expected alpha version', version === expectedVersion, version)
   check('physical firmware identifies as KeepKeyBTC', features.firmware_variant === 'KeepKeyBTC', features.firmware_variant)
+  check(
+    'device reports a 32-byte firmware hash',
+    typeof features.firmware_hash === 'string' && /^[0-9a-f]{64}$/i.test(features.firmware_hash),
+    String(features.firmware_hash),
+  )
   check('device firmware hash matches the exact artifact', features.firmware_hash.toLowerCase() === expectedHash.toLowerCase())
   check('Vault exposes Taproot capability', features.supports_taproot === true)
   check('device is initialized before non-destructive wallet tests', features.initialized === true)
