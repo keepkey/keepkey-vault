@@ -140,6 +140,7 @@ const RELAY_CHAINS = new Set<string>([
   'eip155:137',        // Polygon
   'eip155:143',        // Monad
   'eip155:146',        // Sonic
+  'eip155:4663',       // Robinhood Chain — live in Relay's public chain list (api.relay.link/chains, 2026-08)
   'eip155:169',        // Manta Pacific
   'eip155:324',        // zkSync Era
   'eip155:5000',       // Mantle
@@ -177,9 +178,9 @@ const CHAINFLIP_CHAINS = new Set<string>([
 const SHAPESHIFT_CHAINS = new Set<string>([
   'eip155:1', 'eip155:10', 'eip155:56', 'eip155:100',
   'eip155:137', 'eip155:143', 'eip155:146', 'eip155:169',
-  'eip155:324', 'eip155:5000', 'eip155:8453', 'eip155:34443',
-  'eip155:42161', 'eip155:42220', 'eip155:43114', 'eip155:59144',
-  'eip155:80094', 'eip155:81457', 'eip155:534352',
+  'eip155:324', 'eip155:4663', 'eip155:5000', 'eip155:8453',
+  'eip155:34443', 'eip155:42161', 'eip155:42220', 'eip155:43114',
+  'eip155:59144', 'eip155:80094', 'eip155:81457', 'eip155:534352',
   'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp',               // SOL — LiFi
 ])
 
