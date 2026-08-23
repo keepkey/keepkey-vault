@@ -45,11 +45,12 @@ function openUrl(url: string) {
  *   "device"   the hardware enforced it; no host software was involved
  */
 type Actor = "checked" | "verify" | "device"
+type Tone = "success" | "warning" | "neutral"
 
 const ACTOR_LABEL: Record<Actor, string> = {
-	checked: "checked by Vault",
-	verify: "verify it yourself",
-	device: "enforced on the device",
+	checked: "Vault checked",
+	verify: "You can verify",
+	device: "Device enforced",
 }
 
 function TrustRow({
@@ -57,27 +58,28 @@ function TrustRow({
 	title,
 	body,
 	action,
+	tone = "neutral",
 }: {
 	actor: Actor
 	title: string
 	body: string
 	action?: { label: string; url: string }
+	tone?: Tone
 }) {
-	// Green is reserved for what we actually verified. The other two are real
-	// guarantees, just not ours to assert, so they read as neutral.
-	const color = actor === "checked" ? GREEN : "gray.500"
+	const color = tone === "success" ? GREEN : tone === "warning" ? AMBER : "gray.500"
 	return (
 		<HStack gap="2.5" align="start" w="100%">
 			<Box mt="3px" flexShrink={0} w="6px" h="6px" borderRadius="full" bg={color} />
 			<VStack gap="0.5" align="start" flex="1" minW={0}>
-				<HStack gap="2">
+				<HStack gap="2" flexWrap="wrap">
 					<Text fontSize="xs" fontWeight="600" color="gray.200">{title}</Text>
 					<Text fontSize="2xs" color={color}>{ACTOR_LABEL[actor]}</Text>
 				</HStack>
-				<Text fontSize="2xs" color="gray.500" lineHeight="tall">{body}</Text>
+				<Text fontSize="2xs" color="gray.500" lineHeight="1.5">{body}</Text>
 				{action && (
 					<Box
 						as="button"
+						type="button"
 						fontSize="2xs"
 						color={GOLD}
 						textDecoration="underline"
@@ -128,31 +130,31 @@ export function FirmwareAuthenticity({
 
 	const headline =
 		verdict === "verified"
-			? `Running ${firmwareRelease}`
+			? firmwareRelease ? `Firmware ${firmwareRelease} verified` : "Firmware verified"
 			: verdict === "unrecognized"
-				? "We don't recognise this build"
-				: "This firmware doesn't report a hash"
+				? "Firmware not in the release list"
+				: "Firmware can't be checked"
 
 	const body =
 		verdict === "verified"
-			? "The firmware hash your device reports matches a published KeepKey release. You can check that yourself below."
+			? "The hash reported by your device matches a published KeepKey release."
 			: verdict === "unrecognized"
-				? "The hash your device reports isn't in the list built into this app. That happens for in-house and bitcoin-only builds we haven't pinned yet, and it also happens for modified firmware. Compare the hash below against the release you expect, and check what your device showed when it powered on."
-				: "This firmware version is too old to report its hash, so we can't check it from here. The bootloader still verified its signature at power-on."
+				? "This may be a custom, Bitcoin-only, or modified build. Compare its hash with the build you expected, and confirm the device showed no warning at startup."
+				: "This firmware is too old to report its hash. The bootloader still checks firmware signatures before startup."
 
 	return (
-		<VStack gap={4} w="100%" mx="auto">
+		<VStack gap={3} w="100%" mx="auto">
 			<Box
 				w="100%"
 				bg="rgba(255,255,255,0.03)"
 				border="1px solid"
 				borderColor={`${GOLD}33`}
 				borderRadius="2xl"
-				p={{ base: 5, md: 6 }}
+				p={{ base: 4, md: 5 }}
 			>
 				{/* Two columns on a real window: verdict + hashes on the left, the
 				    trust chain and the commands on the right. One column below md. */}
-				<SimpleGrid columns={{ base: 1, md: 2 }} gap={{ base: 4, md: 8 }} alignItems="start">
+				<SimpleGrid columns={{ base: 1, md: 2 }} gap={{ base: 4, md: 6 }} alignItems="start">
 				<VStack gap={3} align="stretch">
 					<HStack gap={3} align="center">
 						<Box color={accent}><FaShieldAlt size={22} /></Box>
@@ -172,21 +174,21 @@ export function FirmwareAuthenticity({
 								fontWeight="700"
 								letterSpacing="0.08em"
 							>
-								DEV BUILD
+								UNLISTED
 							</Box>
 						)}
 					</HStack>
 
-					<Text fontSize="sm" color="gray.400" lineHeight="1.6">
+					<Text fontSize="sm" color="gray.400" lineHeight="1.5">
 						{body}
 					</Text>
 
 					<Box h="1px" bg="whiteAlpha.100" />
 
-					{firmwareHash && <HashRow label="Firmware hash (reported by device)" value={firmwareHash} />}
+					{firmwareHash && <HashRow label="Firmware · reported by device" value={firmwareHash} />}
 					{bootloaderHash && (
 						<HashRow
-							label={`Bootloader hash${bootloaderVerified === true ? " — known" : bootloaderVerified === false ? " — unrecognised" : ""}`}
+							label={`Bootloader${bootloaderVerified === true ? " · known" : bootloaderVerified === false ? " · unrecognized" : ""}`}
 							value={bootloaderHash}
 						/>
 					)}
@@ -196,11 +198,14 @@ export function FirmwareAuthenticity({
 					<VStack gap="3" align="stretch">
 						<TrustRow
 							actor="checked"
-							title="Matches an official release"
+							title="Release match"
+							tone={verdict === "verified" ? "success" : verdict === "unrecognized" ? "warning" : "neutral"}
 							body={
 								verdict === "verified"
-									? `The hash above is the full-file SHA-256 of the published ${firmwareRelease} binary. Download it and run sha256sum to get the same value.`
-									: "The hash above does not match any release pinned in this app."
+									? `The reported hash matches the published ${firmwareRelease ?? "KeepKey"} binary.`
+									: verdict === "unrecognized"
+										? "No release bundled with this version of Vault has the reported hash."
+										: "Vault could not compare this firmware with its release list."
 							}
 							action={
 								verdict === "verified" && firmwareRelease
@@ -208,20 +213,19 @@ export function FirmwareAuthenticity({
 											label: `Open the ${firmwareRelease} release`,
 											url: `https://github.com/keepkey/keepkey-firmware/releases/tag/${firmwareRelease}`,
 									  }
-									: undefined
+									: verdict === "unrecognized"
+										? {
+												label: "View firmware releases",
+												url: "https://github.com/keepkey/keepkey-firmware/releases",
+											}
+										: undefined
 							}
 						/>
 
 						<TrustRow
 							actor="verify"
-							title="Built from public source"
-							body={
-								"Releases are built deterministically, so anyone can rebuild this binary " +
-								"from the public source and get the same bytes. Vault cannot check that for " +
-								"you — it is the one link you have to walk yourself, or take from an " +
-								"independent reproducer. Note this proves the binary matches the source, " +
-								"not that the source is free of bugs."
-							}
+							title="Reproducible build"
+							body="Rebuild the public source and compare it with the release. A match confirms the binary came from that source—not that the source is bug-free."
 							action={{
 								label: "How to reproduce the build",
 								url: "https://github.com/keepkey/keepkey-firmware/blob/master/docs/ReproducibleBuilds.md",
@@ -230,14 +234,8 @@ export function FirmwareAuthenticity({
 
 						<TrustRow
 							actor="device"
-							title="Authorised by the bootloader"
-							body={
-								"Before it runs anything, your KeepKey checks the firmware carries three " +
-								"distinct valid KeepKey signatures. That check is the one that actually " +
-								"stops unsigned firmware, and no software on this computer takes part in " +
-								"it. If it ever fails, the device says so on its own screen and makes you " +
-								"press the button before it will boot."
-							}
+							title="Bootloader signature"
+							body="Your KeepKey requires three valid KeepKey signatures before booting. If that check fails, the device warns you and requires confirmation."
 						/>
 					</VStack>
 
@@ -253,7 +251,7 @@ export function FirmwareAuthenticity({
 							cursor="pointer"
 							_marker={{ color: "gray.600" }}
 						>
-							Check it yourself
+							Manual verification
 						</Text>
 						<Box h="1.5" />
 
@@ -261,26 +259,22 @@ export function FirmwareAuthenticity({
 							sha256sum firmware.keepkey.bin
 						</Text>
 						<Text fontSize="2xs" color="gray.600" mb="2" lineHeight="1.5">
-							On the release binary. Must equal the firmware hash above — that is
-							release → device.
+							Run on the release binary. It must match the firmware hash shown here.
 						</Text>
 
 						<Text fontSize="2xs" fontFamily="mono" color="gray.300">
 							tail -c +257 firmware.keepkey.bin | sha256sum
 						</Text>
 						<Text fontSize="2xs" color="gray.600" lineHeight="1.5">
-							On both the release binary and your own build — that is source →
-							release. Your build has no signatures in its 256-byte header, so both
-							sides skip it. This is <Text as="span" color="gray.400">not</Text> the
-							hash the device reports.
+							Run on the release and your own build to compare unsigned app code.
+							This is <Text as="span" color="gray.400">not</Text> the device-reported hash.
 						</Text>
 					</Box>
 
 					{/* The limit is the feature. Do not compress it into the tick. */}
 					<Text fontSize="2xs" color="gray.600" lineHeight="tall">
-						Only the first line was checked here, and it compares what the firmware
-						reports about itself against a list built into this app. Treat it as
-						corroboration, not proof.
+						Vault compares a hash reported by the firmware with an offline release list.
+						Use it as a cross-check, not independent proof.
 					</Text>
 				</VStack>
 				</SimpleGrid>
@@ -298,7 +292,7 @@ export function FirmwareAuthenticity({
 				onClick={onContinue}
 			>
 				<Flex gap={2} align="center" justify="center">
-					<Text>Continue</Text>
+					<Text>{verdict === "unrecognized" ? "Continue with this build" : "Continue"}</Text>
 					<FaChevronRight size={10} />
 				</Flex>
 			</Button>

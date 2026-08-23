@@ -937,13 +937,13 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
   // L7 fix: prevent navigating back to already-completed steps
   // init-label excluded: its Previous target is init-progress, which the
   // create-recovery effect immediately pushes forward again — a no-op bounce.
-  const showPrevious = !['intro', 'welcome', 'complete', 'init-progress', 'init-label', 'verify-seed', 'security-tips'].includes(step)
+  const showPrevious = !['authenticity', 'intro', 'welcome', 'complete', 'init-progress', 'init-label', 'verify-seed', 'security-tips'].includes(step)
   // L4 fix: hide Next on firmware step for OOB devices (firmware is required)
   // Security steps carry their own Accept/Skip actions; a footer Next would
   // bypass them (and from sec-dice would land on init-progress with no RPC in
   // flight — a spinner that never resolves).
   const showNext =
-    !['intro', 'bootloader', 'init-choose', 'create-briefing', 'sec-randomness', 'sec-dice', 'init-progress', 'init-label', 'verify-seed', 'security-tips', 'complete'].includes(step) &&
+    !['authenticity', 'intro', 'bootloader', 'init-choose', 'create-briefing', 'sec-randomness', 'sec-dice', 'init-progress', 'init-label', 'verify-seed', 'security-tips', 'complete'].includes(step) &&
     !(step === 'firmware' && (updateState === 'updating' || updateState === 'complete')) &&
     !(step === 'firmware' && isOobDevice)
 
@@ -3052,7 +3052,7 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
         </Box>
 
         {/* ── Footer ─────────────────────────────────────────────────── */}
-        <Box px={5} py={3} borderTopWidth="1px" borderColor="rgba(233,196,106, 0.2)">
+        <Box display={step === 'authenticity' ? 'none' : undefined} px={5} py={3} borderTopWidth="1px" borderColor="rgba(233,196,106, 0.2)">
           <HStack justify="space-between">
             <Text fontSize="sm" color="kk.textSecondary" fontWeight="500">
               {visibleIndex >= 0
