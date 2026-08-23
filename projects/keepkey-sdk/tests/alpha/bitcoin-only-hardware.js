@@ -61,7 +61,8 @@ const NON_BTC_SIGNING_ROUTES = [
   '/osmosis/sign-amino-lp-add', '/osmosis/sign-amino-swap',
   '/thorchain/sign-amino-transfer', '/thorchain/sign-amino-deposit',
   '/mayachain/sign-amino-transfer', '/mayachain/sign-amino-deposit',
-  '/api/v2/swap/execute',
+  '/api/v2/swap/open', '/api/v2/swap/set', '/api/v2/swap/quote',
+  '/api/v2/swap/execute', '/api/v2/swap/close',
   '/eth/clearsign/load-signer', '/eth/clearsign/sign-alpha-delegate-certificate',
 ]
 
@@ -311,10 +312,12 @@ async function verifyApp() {
     'Did startup show the orange “Bitcoin-Only KeepKey” splash?',
     'Does the portfolio show Bitcoin only, with no Add Chain control?',
     'Are ShapeShift and WalletConnect absent from the top navigation?',
+    'Is the WalletConnect toggle absent from Settings, with no ClearSign, Zcash, Hive, custom-chain, or swap control exposed?',
     'Does Settings contain the Bitcoin node section with Pioneer, self-hosted node, and offline choices?',
     'If first-run onboarding was eligible, did it offer exactly Pioneer, self-hosted node, and offline mode?',
     'After disconnect and reconnect, did Vault remain Bitcoin-only without altcoin cards or altcoin device prompts?',
     'During idle portfolio refresh, were there no repeated “Unknown message” device errors from altcoin polling?',
+    'Did the activity list and address book contain only Bitcoin rows, with no stale altcoin data from an earlier full-firmware session?',
   ]
   for (const observation of observations) await attest(observation)
   evidence.app = { observations: observations.map(name => ({ name, confirmed: true })) }

@@ -68,6 +68,21 @@ The runner fails before wallet testing unless all three identities agree:
 - The app presents the Bitcoin-only splash/navigation/portfolio/settings and
   stays restricted across disconnect/reconnect.
 
+The Vault candidate also has executable host-boundary coverage beyond REST:
+
+- every privileged renderer RPC is wrapped before dispatch; chain-specific
+  prefixes, non-Bitcoin `chainId` values, generic UTXO coin names, xpub batches,
+  ClearSign, swaps, and WalletConnect pairing fail before handler side effects;
+- portfolio, history, report, mobile-pairing, audit, watch-only, cached-balance,
+  and address-book reads are Bitcoin-scoped at their source;
+- a full-firmware → Bitcoin-only transition resets in-memory account managers
+  and removes persisted non-Bitcoin balances and xpubs;
+- existing WalletConnect sessions are destroyed, queued deep links discarded,
+  and each device-signing callback independently re-checks the live firmware
+  variant while teardown is in progress;
+- Zcash/Hive capability startup is disabled for Bitcoin-only firmware even when
+  its semantic version would otherwise enable those services.
+
 The synthetic prevouts do not exist, so signed transactions cannot be
 broadcast. Evidence is written with mode `0600`, including the exact artifact,
 firmware identity, addresses, serialized-transaction hashes, and operator
@@ -94,6 +109,37 @@ Legacy P2PKH signing is intentionally not faked by the runner: firmware requires
 the full previous transaction for a legacy input. Cover it with a real funded
 test UTXO or add a structurally valid offline previous-transaction fixture. Do
 not weaken that requirement merely to make a synthetic test pass.
+
+### Hot-transition regression (required once)
+
+This catches state that a cold-start test cannot see:
+
+1. On the same disposable device and seed, boot full firmware, load the
+   portfolio, save one non-Bitcoin address-book row, and establish a disposable
+   WalletConnect session.
+2. Flash the exact Bitcoin-only candidate without restarting Vault.
+3. Confirm Vault returns to the Bitcoin tab, closes WalletConnect, and the dApp
+   session is disconnected rather than merely hidden.
+4. Confirm no non-Bitcoin balance, xpub, activity, address-book row, swap,
+   ClearSign, Zcash, Hive, Add Chain, or WalletConnect control remains visible.
+5. Leave Vault idle through two portfolio refresh intervals and confirm the
+   device receives no altcoin `Unknown message` probes.
+6. Disconnect/reconnect and repeat the visibility and idle checks.
+7. Return to full firmware and confirm full-firmware features return normally;
+   this proves the restriction follows device identity rather than permanently
+   corrupting the app's global preferences.
+
+Record screenshots of the full-firmware before state and Bitcoin-only after
+state, plus the dApp-side WalletConnect disconnect. Never use a production seed.
+
+## Host verification already completed
+
+- Bitcoin-only policy: 16 tests, 116 assertions.
+- Bitcoin backend: Core 35 assertions, normalization 16, device-only 5.
+- Taproot builder: P2TR input/change and BIP86 account-path selection, 3 cases.
+- hdwallet Taproot: 8 tests, 28 assertions covering protocol enums, BIP86
+  display/xpub requests, capability gating, and Schnorr input requirements.
+- production Bun backend bundle and Vite renderer build both complete.
 
 ## Merge gate
 

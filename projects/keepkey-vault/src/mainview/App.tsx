@@ -169,6 +169,16 @@ function App() {
 		return () => clearTimeout(t)
 	}, [deviceState.state, deviceState.firmwareVariant])
 
+	// A firmware swap can occur while Vault is sitting on Explore or has an old
+	// WalletConnect panel open. Move to the only valid portfolio and close the
+	// multi-chain surface as soon as the device reports its BTC-only identity.
+	useEffect(() => {
+		if (!isBitcoinOnlyVariant(deviceState.firmwareVariant)) return
+		setActiveTab("vault")
+		setWcPanelOpen(false)
+		setWcUri(null)
+	}, [deviceState.firmwareVariant])
+
 	// ── REST API UI-active handshake ─────────────────────────────────
 	// The Bun process refuses to serve pubkeys/addresses on port 1646 unless
 	// the Vault UI signals it's open + heartbeats regularly. `viewDeviceId`
@@ -494,14 +504,14 @@ function App() {
 	useEffect(() => {
 		return onRpcMessage("wc-deep-link-pair", (data) => {
 			const { uri } = data as { uri: string }
-			if (!walletConnectEnabled) {
+			if (!walletConnectEnabled || isBitcoinOnlyVariant(deviceState.firmwareVariant)) {
 				setWcNotSupportedOpen(true)
 				return
 			}
 			setWcUri(uri)
 			setWcPanelOpen(true)
 		})
-	}, [walletConnectEnabled])
+	}, [walletConnectEnabled, deviceState.firmwareVariant])
 
 	// Force-open the panel whenever a pair proposal arrives. The pair-approval
 	// modal lives inside WalletConnectPanel and renders nothing while the panel
@@ -558,7 +568,7 @@ function App() {
 	useEffect(() => {
 		rpcRequest<string | null>("getPendingDeepLink").then(uri => {
 			if (uri) {
-				if (walletConnectEnabled) {
+				if (walletConnectEnabled && !isBitcoinOnlyVariant(deviceState.firmwareVariant)) {
 					// Set URI and open panel — panel's auto-pair effect handles pairing + errors
 					setWcUri(uri)
 					setWcPanelOpen(true)
@@ -569,7 +579,7 @@ function App() {
 				rpcRequest("consumePendingDeepLink").catch(() => {})
 			}
 		}).catch(() => {})
-	}, [walletConnectEnabled])
+	}, [walletConnectEnabled, deviceState.firmwareVariant])
 
 	// ── Character request overlay (cipher recovery) ─────────────────
 	const [charRequest, setCharRequest] = useState<{ wordPos: number; characterPos: number } | null>(null)

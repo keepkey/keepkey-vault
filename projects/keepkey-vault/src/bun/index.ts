@@ -136,6 +136,7 @@ import { AuthStore } from "./auth"
 import { getPioneer, getPioneerApiBase, resetPioneer, DEFAULT_API_BASE, getQueryKey as getPioneerQueryKey } from "./pioneer"
 import { setBtcBackendOffline, setBtcNodeConfig, setBtcNodeDeviceEligible, isBtcNodeActive, getBtcBackend, broadcastBtcTx } from "./btc-backend"
 import { isBitcoinOnlyVariant } from "../shared/flags"
+import { bitcoinOnlyBalanceList, bitcoinOnlyChainList, bitcoinOnlySnapshot, enforceBitcoinOnlyRpcBoundary } from "./bitcoin-only-boundary"
 import { fetchDefiPositions } from "./zapper"
 import { loadSupportedChains } from "../shared/swap-support-matrix"
 import { PioneerSocket } from "./pioneer-socket"
@@ -775,6 +776,7 @@ const evmAddresses = new EvmAddressManager()
 // passes through 'disconnected', so nulling there would skip the reset). See
 // src/shared/device-switch.ts for the pure decision + invariants.
 let lastReadyDeviceId: string | null = null
+let lastReadyFirmwareVariant: string | null = null
 
 function attachSigningPolicySnapshot(info: SigningRequestInfo): SigningRequestInfo {
 	const features = engine.getCachedFeaturesSnapshot()
@@ -1063,10 +1065,12 @@ function getOrCreateWcManager(): WalletConnectManager {
 	if (wcManager) return wcManager
 	wcManager = new WalletConnectManager({
 		getEvmAddressInfo: () => {
+			if (isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant)) return null
 			const sel = evmAddresses.getSelectedAddress()
 			return sel ? { address: sel.address, addressIndex: sel.addressIndex } : null
 		},
 		ensureEvmAddressInfo: async () => {
+			if (isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant)) return null
 			if (!engine.wallet) return null
 			if (!evmAddresses.isInitialized) {
 				try { await evmAddresses.initialize(engine.wallet) }
@@ -1075,10 +1079,11 @@ function getOrCreateWcManager(): WalletConnectManager {
 			const sel = evmAddresses.getSelectedAddress()
 			return sel ? { address: sel.address, addressIndex: sel.addressIndex } : null
 		},
-		ethSignTx: (params) => { if (!engine.wallet) throw new Error('Device disconnected'); return engine.wallet.ethSignTx(params) },
-		ethSignMessage: (params) => { if (!engine.wallet) throw new Error('Device disconnected'); return engine.wallet.ethSignMessage(params) },
-		ethSignTypedData: (params) => { if (!engine.wallet) throw new Error('Device disconnected'); return engine.wallet.ethSignTypedData(params) },
+		ethSignTx: (params) => { if (isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant)) throw new Error('WalletConnect is not available on bitcoin-only firmware'); if (!engine.wallet) throw new Error('Device disconnected'); return engine.wallet.ethSignTx(params) },
+		ethSignMessage: (params) => { if (isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant)) throw new Error('WalletConnect is not available on bitcoin-only firmware'); if (!engine.wallet) throw new Error('Device disconnected'); return engine.wallet.ethSignMessage(params) },
+		ethSignTypedData: (params) => { if (isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant)) throw new Error('WalletConnect is not available on bitcoin-only firmware'); if (!engine.wallet) throw new Error('Device disconnected'); return engine.wallet.ethSignTypedData(params) },
 		getCosmosAccountInfo: async (caipChain) => {
+			if (isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant)) return null
 			if (!engine.wallet) return null
 			// Only cosmoshub-4 supported in v1; THOR/Maya/Osmosis use the cosmos
 			// namespace too but need different signers and bech32 prefixes — follow-up.
@@ -1103,6 +1108,7 @@ function getOrCreateWcManager(): WalletConnectManager {
 			}
 		},
 		cosmosSignAmino: async ({ addressNList, signDoc }) => {
+			if (isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant)) throw new Error('WalletConnect is not available on bitcoin-only firmware')
 			if (!engine.wallet) throw new Error('Device disconnected')
 			// Translate WC StdSignDoc → hdwallet CosmosSignTx.
 			// StdSignDoc: { chain_id, account_number, sequence, fee, msgs, memo }
@@ -1129,6 +1135,7 @@ function getOrCreateWcManager(): WalletConnectManager {
 			return { signatureBase64 }
 		},
 		getSolanaAccountInfo: async (caipChain) => {
+			if (isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant)) return null
 			if (!engine.wallet) return null
 			if (caipChain !== 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp') return null
 			// Solana uses ed25519 with a 4-element fully hardened path m/44'/501'/0'/0'
@@ -1145,6 +1152,7 @@ function getOrCreateWcManager(): WalletConnectManager {
 			}
 		},
 		solanaSignMessageRaw: async ({ addressNList, messageBase58 }) => {
+			if (isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant)) throw new Error('WalletConnect is not available on bitcoin-only firmware')
 			if (!engine.wallet) throw new Error('Device disconnected')
 			const bs58 = (await import('bs58')).default
 			const messageBytes = Buffer.from(bs58.decode(messageBase58))
@@ -1163,6 +1171,7 @@ function getOrCreateWcManager(): WalletConnectManager {
 			return await broadcastBtcTx(pioneer, networkId, serialized)
 		},
 		solanaSignTransactionRaw: async ({ addressNList, signerAddress, transactionBase64 }) => {
+			if (isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant)) throw new Error('WalletConnect is not available on bitcoin-only firmware')
 			if (!engine.wallet) throw new Error('Device disconnected')
 			const result = await signSolanaWireTransaction(
 				{ addressNList, rawTx: transactionBase64 },
@@ -2227,7 +2236,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 		// dispatcher drops non-Error throws without sending a response (see
 		// scripts/patch-electrobun.sh, which normalizes them), so handlers here
 		// may throw device failures without hanging the renderer.
-		requests: {
+		requests: enforceBitcoinOnlyRpcBoundary(
+			() => isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant),
+			{
 			// ── Device lifecycle ──────────────────────────────────────
 			getDeviceState: async () => engine.getDeviceState(),
 			retryConnect: async () => { await engine.retryConnect() },
@@ -3309,7 +3320,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// Filter chains by firmware version — don't derive addresses for unsupported chains
 				// Zcash (transparent + shielded) gated behind feature flag
 				const fwVersion = engine.getDeviceState().firmwareVersion
-				const allChains = getAllChains().filter(c => {
+				const bitcoinOnly = isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant)
+				if (bitcoinOnly) swapDestCaips = []
+				const allChains = bitcoinOnlyChainList(getAllChains(), bitcoinOnly).filter(c => {
 					if (!isChainSupported(c, fwVersion)) return false
 					if ((c.id === 'zcash' || c.id === 'zcash-shielded') && !zcashPrivacyEnabled) return false
 					if (c.id === 'hive' && !hiveEnabled) return false
@@ -3372,7 +3385,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const evmChains = nonUtxoChains.filter(c => c.chainFamily === 'evm')
 				const nonEvmChains = nonUtxoChains.filter(c => c.chainFamily !== 'evm')
 
-				if (!evmAddresses.isInitialized) {
+				if (evmChains.length > 0 && !evmAddresses.isInitialized) {
 					try { await evmAddresses.initialize(wallet) } catch (e: any) {
 						console.warn('[getBalances] EVM addresses init failed:', e.message)
 					}
@@ -3499,7 +3512,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const results: ChainBalance[] = []
 				try {
 					if (!pioneer) throw (pioneerInitError || new Error('Pioneer client not available'))
-					const customContracts: PortfolioExtraContract[] = getCustomTokens().map(ct => ({
+					const customContracts: PortfolioExtraContract[] = (bitcoinOnly ? [] : getCustomTokens()).map(ct => ({
 						networkId: ct.networkId,
 						contractAddress: ct.contractAddress,
 						decimals: ct.decimals,
@@ -5892,7 +5905,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 				// Only use built-in CHAINS (not custom chains — those may lack rpc methods)
 				const fwVersion = engine.getDeviceState().firmwareVersion
-				const builtinChains = CHAINS.filter(c => {
+				const bitcoinOnly = isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant)
+				const builtinChains = bitcoinOnlyChainList(CHAINS, bitcoinOnly).filter(c => {
 					if (!isChainSupported(c, fwVersion)) return false
 					// Zcash: gated by feature flag, not by hidden (hidden keeps it off Dashboard grid)
 					if (c.id === 'zcash' || c.id === 'zcash-shielded') return zcashPrivacyEnabled
@@ -6185,6 +6199,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return { active: true as const, kind: 'blockbook' as const, ok: r.ok, error: r.error, height: r.blocks, syncing: r.ok ? r.inSync === false : undefined }
 			},
 			setWalletConnectEnabled: async (params) => {
+				if (params.enabled && isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant)) {
+					throw new Error('WalletConnect is not available on bitcoin-only firmware')
+				}
 				walletConnectEnabled = params.enabled
 				setSetting('walletconnect_enabled', params.enabled ? '1' : '0')
 				console.log('[settings] WalletConnect enabled:', params.enabled)
@@ -6362,11 +6379,12 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// (a write) is gated, since hidden sessions persist nothing new.
 				if (!engine.isPassphraseWallet) { try { seedOwnFromCache() } catch { /* never block the read */ } }
 				const labels = getDeviceLabelMap()
+				const bitcoinOnly = isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant)
 				const networkId = params?.networkId
 				const search = params?.search
 				// own = every device's wallets (cross-device); external = all explicitly-saved
 				// contacts (cross-wallet; R4 opt-in — history-only recipients stay hidden).
-				const own = getAddressBookList({ kind: 'own', networkId, search })
+				const own = getAddressBookList({ kind: 'own', networkId, search, chainId: bitcoinOnly ? 'bitcoin' : undefined })
 				// ZEC own rows hold an xpub — swap in the derived index-0 t-addr so
 				// they're actual send targets (other devices' wallets included).
 				for (const e of own) {
@@ -6375,7 +6393,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						if (t) e.address = t
 					}
 				}
-				const external = getAddressBookList({ kind: 'external', networkId, search, savedOnly: true })
+				const external = getAddressBookList({ kind: 'external', networkId, search, savedOnly: true, chainId: bitcoinOnly ? 'bitcoin' : undefined })
 				return [...own, ...external].map(e => ({ ...e, deviceLabel: labels[e.deviceId] || e.deviceLabel }))
 			},
 			addAddressBook: async (params) => {
@@ -6434,7 +6452,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 				// Get cached balances for report data
 				const cached = getCachedBalances(deviceId)
-				const balances = cached?.balances || []
+				const balances = bitcoinOnlyBalanceList(cached?.balances || [], isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant))
 				if (balances.length === 0) {
 					throw new Error('No cached balances available. Please refresh your portfolio first.')
 				}
@@ -6924,10 +6942,16 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// PRIVACY: Don't expose standard-wallet activity during hidden sessions.
 				// Hidden sessions get the RAM-only session store instead (populated by
 				// scanChainHistory's live fetch below) — display without persistence.
-				if (engine.isPassphraseWallet) return relabelZcashShieldedRows(getSessionActivity(params?.limit || 50, params?.chainId))
+				if (engine.isPassphraseWallet) {
+					const rows = relabelZcashShieldedRows(getSessionActivity(params?.limit || 50, params?.chainId))
+					return isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant)
+						? rows.filter(row => row.chainId === 'bitcoin' || row.chain === 'BTC') : rows
+				}
 				const scope = getWalletDbScope()
 				if (!scope) return []
-				return relabelZcashShieldedRows(getRecentActivityFromLog(params?.limit || 50, params?.chainId, scope.deviceId, scope.walletId))
+				const rows = relabelZcashShieldedRows(getRecentActivityFromLog(params?.limit || 50, params?.chainId, scope.deviceId, scope.walletId))
+				return isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant)
+					? rows.filter(row => row.chainId === 'bitcoin' || row.chain === 'BTC') : rows
 			},
 			getActivityScanState: async () => ({ running: activityScanRunning }),
 			scanChainHistory: async (params) => {
@@ -6947,7 +6971,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					const result = await rebuildActivityHistory({
 						wallet: engine.wallet,
 						scope,
-						chains: getAllChains().filter(c => c.id !== 'hive' || hiveEnabled),
+						chains: bitcoinOnlyChainList(getAllChains(), isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant)).filter(c => c.id !== 'hive' || hiveEnabled),
 						firmwareVersion: engine.getDeviceState().firmwareVersion,
 						options: { chainId: params.chainId, dryRun: true, collectRows: true },
 					})
@@ -6963,7 +6987,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const result = await rebuildActivityHistory({
 					wallet: engine.wallet,
 					scope,
-					chains: getAllChains().filter(c => c.id !== 'hive' || hiveEnabled),
+					chains: bitcoinOnlyChainList(getAllChains(), isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant)).filter(c => c.id !== 'hive' || hiveEnabled),
 					firmwareVersion: engine.getDeviceState().firmwareVersion,
 					options: { chainId: params.chainId },
 				})
@@ -7000,7 +7024,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				//   - other hidden chains stay internal-only
 				// Without this, freshly-enabled chains are never flagged as missing and
 				// the dashboard never auto-refreshes them into the cache.
-				const supportedChains = getAllChains().filter(c => {
+				const bitcoinOnly = isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant)
+				const supportedChains = bitcoinOnlyChainList(getAllChains(), bitcoinOnly).filter(c => {
 					if (!isChainSupported(c, fwVersion)) return false
 					if (c.id === 'zcash-shielded') return false
 					if (c.id === 'zcash') return zcashPrivacyEnabled
@@ -7036,7 +7061,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// Stale cache from a prior 7.14+ session can contain Solana/TRON/TON
 				// entries — without this filter they bleed into the swap FROM picker,
 				// letting the user select them and then hitting a device signing error.
-				const filteredBalances = result.balances.filter(b => {
+				const filteredBalances = bitcoinOnlyBalanceList(result.balances, bitcoinOnly).filter(b => {
 					const chain = getAllChains().find(c => c.id === b.chainId)
 					if (!chain) return true // keep unknowns (tokens)
 					if (chain.id === 'hive' && !hiveEnabled) return false // honor feature flag — drop stale Hive rows
@@ -7058,7 +7083,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					: getLatestDeviceSnapshot()
 				if (!snap) return null
 				const result = getCachedBalances(snap.deviceId)
-				return result?.balances ?? null
+				return result ? bitcoinOnlyBalanceList(result.balances, bitcoinOnlySnapshot(snap.featuresJson)) : null
 			},
 			// Re-fetch watch-only balances from Pioneer using addresses reconstructed
 			// from cache — NO device required. Self-contained: deliberately does NOT
@@ -7075,12 +7100,13 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const deviceId = snap.deviceId
 
 				// 1. Reconstruct the pubkey list from cache (no device available)
-				const allChains = getAllChains()
+				const snapshotBitcoinOnly = bitcoinOnlySnapshot(snap.featuresJson)
+				const allChains = bitcoinOnlyChainList(getAllChains(), snapshotBitcoinOnly)
 				const chainById = new Map(allChains.map(c => [c.id, c]))
 				const pubkeys: Array<{ caip: string; pubkey: string; sourcePubkey?: string; chainId: string; symbol: string; networkId: string }> = []
 
 				const cached = getCachedBalances(deviceId)
-				for (const b of cached?.balances ?? []) {
+				for (const b of bitcoinOnlyBalanceList(cached?.balances ?? [], snapshotBitcoinOnly)) {
 					if (b.chainId === 'bitcoin') continue // cached BTC address isn't the xpub — handled below
 					if (!b.address) continue
 					const chain = chainById.get(b.chainId)
@@ -7248,7 +7274,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					? getDeviceSnapshotById(params.deviceId)
 					: getLatestDeviceSnapshot()
 				if (!snap) return []
-				return getCachedPubkeys(snap.deviceId)
+				const pubkeys = getCachedPubkeys(snap.deviceId)
+				return bitcoinOnlySnapshot(snap.featuresJson) ? pubkeys.filter(p => p.chainId === 'bitcoin') : pubkeys
 			},
 
 			// ── Registered devices (device history) ─────────────────
@@ -7372,7 +7399,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (engine.getDeviceState().state !== 'ready') throw new Error('Device not ready')
 				const wallet = engine.wallet
 				const fwVersion = engine.getDeviceState().firmwareVersion
-				const enabledChains = getAllChains().filter(c => {
+				const bitcoinOnly = isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant)
+				const enabledChains = bitcoinOnlyChainList(getAllChains(), bitcoinOnly).filter(c => {
 					if (!isChainSupported(c, fwVersion)) return false
 					if ((c.id === 'zcash' || c.id === 'zcash-shielded') && !zcashPrivacyEnabled) return false
 					if (c.id === 'hive' && !hiveEnabled) return false
@@ -8311,8 +8339,8 @@ udevadm trigger --subsystem-match=usb --attr-match=idVendor=2b24 || udevadm trig
 			windowGetFrame: async () => { if (!_mainWindow) throw new Error('Window not ready'); return _mainWindow.getFrame() },
 			windowSetPosition: async ({ x, y }) => { _mainWindow?.setPosition(x, y) },
 			windowSetFrame: async ({ x, y, width, height }) => { _mainWindow?.setFrame(x, y, width, height) },
-		},
-		messages: {},
+			}),
+			messages: {},
 	},
 })
 
@@ -8335,11 +8363,24 @@ let pendingDeepLinkUri: string | null = null
 // Push engine events to WebView
 engine.on('state-change', (state) => {
 	try { rpc.send['device-state'](state) } catch { /* webview not ready yet */ }
+	const bitcoinOnly = isBitcoinOnlyVariant(state.firmwareVariant)
 	// Scope the self-host node to the connected device: only a btc-only device may
 	// use the (global) persisted node. A multichain device — which can't even see
 	// the node control to disable it — keeps its BTC on Pioneer. Absent variant
 	// (connecting/disconnected) → suppressed.
-	setBtcNodeDeviceEligible(isBitcoinOnlyVariant(state.firmwareVariant))
+	setBtcNodeDeviceEligible(bitcoinOnly)
+	// Hiding WalletConnect is not enough: a persisted session remains capable of
+	// delivering signing requests. Drop every live session on the transition to
+	// Bitcoin-only and discard queued deep links. Device callbacks independently
+	// re-check the variant so the asynchronous teardown has no signing window.
+	if (bitcoinOnly) {
+		pendingDeepLinkUri = null
+		if (wcManager) {
+			const staleManager = wcManager
+			wcManager = null
+			staleManager.destroy().catch(e => console.warn('[WC] bitcoin-only shutdown failed:', e?.message || e))
+		}
+	}
 	// Device-to-device swap: a *different* device just reached 'ready'. Reset the
 	// in-memory account managers so device B re-derives its own xpubs/addresses
 	// instead of reusing device A's (the existing `if (!isInitialized)` guards
@@ -8352,8 +8393,11 @@ engine.on('state-change', (state) => {
 	// cold-start race that sank the prior attempt. We do NOT clear DB caches here
 	// (they are deviceId-scoped and self-correct); that stays exclusive to the
 	// seed-changed handler. See src/shared/device-switch.ts.
-	if (shouldResetManagersOnReady(state, lastReadyDeviceId)) {
-		console.warn(`[Vault] Device swap ${lastReadyDeviceId} → ${state.deviceId}: resetting in-memory account managers`)
+	const deviceChanged = shouldResetManagersOnReady(state, lastReadyDeviceId)
+	const variantChanged = state.state === 'ready' && !!state.firmwareVariant
+		&& !!lastReadyFirmwareVariant && state.firmwareVariant !== lastReadyFirmwareVariant
+	if (deviceChanged || variantChanged) {
+		console.warn(`[Vault] Device/firmware identity changed (${lastReadyDeviceId}/${lastReadyFirmwareVariant} → ${state.deviceId}/${state.firmwareVariant}): resetting in-memory account managers`)
 		resetSeedManagers()
 		// Device-to-device swap is exactly the case `seed-changed` does NOT catch.
 		// Force Zcash to re-prove the cached FVK against the NEW device before any
@@ -8370,6 +8414,7 @@ engine.on('state-change', (state) => {
 		try { rpc.send['wallet-data-purged']({ reason: 'device-swap' }) } catch { /* webview not ready yet */ }
 	}
 	lastReadyDeviceId = nextReadyDeviceId(state, lastReadyDeviceId)
+	if (state.state === 'ready' && state.firmwareVariant) lastReadyFirmwareVariant = state.firmwareVariant
 	// Seed-staleness guard (event-driven leg): once the engine has classified the
 	// session and derived the seed identity (checkSeedIdentity / hidden-wallet
 	// scope derive / reconnect probe — all re-emit state-change after setting it),
@@ -8384,7 +8429,7 @@ engine.on('state-change', (state) => {
 	// Replay any WC deep link that was queued while no device was connected.
 	// Without this, a deep link delivered before the device was ready would
 	// sit in pendingDeepLinkUri until the next mount of WalletConnectPanel.
-	if (state.state === 'ready' && pendingDeepLinkUri && walletConnectEnabled) {
+	if (state.state === 'ready' && pendingDeepLinkUri && walletConnectEnabled && !bitcoinOnly) {
 		const uri = pendingDeepLinkUri
 		pendingDeepLinkUri = null
 		try { rpc.send['wc-deep-link-pair']({ uri }) }
@@ -8402,7 +8447,7 @@ engine.on('state-change', (state) => {
 		// connected device runs firmware >= 7.15.0, OFF otherwise. The setting
 		// row is kept as a mirror of the derived value so the getSetting() gates
 		// in rest-api.ts keep reading the same answer from one source.
-		const has715 = !!fw && versionCompare(fw, '7.15.0') >= 0
+		const has715 = !bitcoinOnly && !!fw && versionCompare(fw, '7.15.0') >= 0
 		if (zcashPrivacyEnabled !== has715) {
 			zcashPrivacyEnabled = has715
 			setSetting('zcash_privacy_enabled', has715 ? '1' : '0')
@@ -8495,7 +8540,7 @@ engine.on('state-change', (state) => {
 			rebuildActivityHistory({
 				wallet: engine.wallet,
 				scope,
-				chains: getAllChains().filter(c => c.id !== 'hive' || hiveEnabled),
+				chains: bitcoinOnlyChainList(getAllChains(), bitcoinOnly).filter(c => c.id !== 'hive' || hiveEnabled),
 				firmwareVersion: engine.getDeviceState().firmwareVersion,
 			}).then(result => {
 				console.log(`[activity] Auto-scan complete: ${result.totals.inserted} new txs across ${result.totals.chains} chains`)
@@ -8934,7 +8979,11 @@ function handleKeepKeyUrl(url: string) {
 	console.log('[Vault] URL handler:', url)
 	const wcUri = getWalletConnectUri(url)
 	if (wcUri) {
-		if (walletConnectEnabled && engine.wallet) {
+		const bitcoinOnly = isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant)
+		if (bitcoinOnly) {
+			pendingDeepLinkUri = null
+			try { rpc.send['walletconnect-uri'](wcUri) } catch {}
+		} else if (walletConnectEnabled && engine.wallet) {
 			// Hand the URI to the panel so it mounts *before* the WC
 			// session_proposal arrives. The pair-approval modal lives inside
 			// WalletConnectPanel; pairing directly from here while the panel
