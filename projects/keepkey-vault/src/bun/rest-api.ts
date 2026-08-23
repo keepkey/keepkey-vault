@@ -20,6 +20,11 @@ import { join } from 'path'
 import * as S from './schemas'
 import { parseRequest, validateResponse } from './validate'
 import { SIGNING_ROUTES, requiredSigningFields } from './signing-routes'
+import {
+  bitcoinOnlyCoinAllowed,
+  bitcoinOnlyCoinList,
+  bitcoinOnlyRejection,
+} from './bitcoin-only-boundary'
 import { handleV2DataRoute } from './rest-pioneer'
 import { handleSwapRoute } from './rest-swap'
 import { handleSweepRoute } from './rest-sweep'
@@ -1141,16 +1146,6 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
     return fn()
   }
 
-  /** Non-Bitcoin address-derivation endpoints. Bitcoin-only firmware can't
-   *  derive any of these — Pioneer still polls them during portfolio sync, so
-   *  we short-circuit them (below) instead of hitting the device, which would
-   *  return "Unknown message" and flood the log. `/addresses/utxo` is BTC. */
-  const NON_BTC_ADDRESS_PATHS = new Set([
-    '/addresses/cosmos', '/addresses/osmosis', '/addresses/eth', '/addresses/tendermint',
-    '/addresses/thorchain', '/addresses/mayachain', '/addresses/xrp', '/addresses/solana',
-    '/addresses/tron', '/addresses/ton', '/addresses/hive',
-  ])
-
   /** True when the connected device runs bitcoin-only firmware. */
   function deviceIsBitcoinOnly(): boolean {
     return isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant)
@@ -1184,12 +1179,19 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         server.timeout(req, 0)
       }
 
-      // Bitcoin-only firmware can't derive any non-Bitcoin chain. Pioneer still
-      // polls these address endpoints during portfolio sync — short-circuit with
-      // 501 before touching the device, which would otherwise reject the message
-      // ("Unknown message") and flood the log with multi-chain spam.
-      if (method === 'POST' && NON_BTC_ADDRESS_PATHS.has(path) && deviceIsBitcoinOnly()) {
-        return new Response(JSON.stringify({ error: 'not available on bitcoin-only firmware' }),
+      // Fail before auth approval UI and before device dispatch. Dedicated
+      // altcoin routes are rejected by path; generic UTXO/xpub routes are
+      // rejected by their requested coin. Malformed bodies continue to their
+      // normal schema validation instead of being misreported as BTC-only.
+      if (method === 'POST' && deviceIsBitcoinOnly()) {
+        let boundaryBody: Record<string, unknown> | undefined
+        if (path === '/addresses/utxo'
+          || path === '/utxo/sign-transaction'
+          || path === '/system/info/get-public-key') {
+          boundaryBody = await req.clone().json().catch(() => undefined)
+        }
+        const rejection = bitcoinOnlyRejection(method, path, boundaryBody)
+        if (rejection) return new Response(JSON.stringify({ error: rejection }),
           { status: 501, headers: { 'Content-Type': 'application/json', ...corsHeaders(req) } })
       }
 
@@ -3716,6 +3718,13 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             }
 
             // ── xpub/ypub/zpub-type paths (UTXO chains) ──
+            const coinType = p.address_n.length >= 2 ? (p.address_n[1] >= 0x80000000 ? p.address_n[1] - 0x80000000 : p.address_n[1]) : 0
+            const rawCoin = p.coin || SLIP44_TO_COIN[coinType] || 'Bitcoin'
+            const coin = TICKER_TO_COIN[rawCoin] || rawCoin
+            // Filter before the cache lookup. The same physical device id may
+            // have cached altcoin xpubs before being flashed BTC-only.
+            if (deviceIsBitcoinOnly() && !bitcoinOnlyCoinAllowed(coin)) continue
+
             const cacheKey = scopedKey(engine, 'batch-pubkey', { address_n: p.address_n, script_type: p.script_type })
             const cached = pubkeyCache.get(cacheKey)
             if (cached) {
@@ -3732,9 +3741,6 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               })
               continue
             }
-            const coinType = p.address_n.length >= 2 ? (p.address_n[1] >= 0x80000000 ? p.address_n[1] - 0x80000000 : p.address_n[1]) : 0
-            const rawCoin = p.coin || SLIP44_TO_COIN[coinType] || 'Bitcoin'
-            const coin = TICKER_TO_COIN[rawCoin] || rawCoin
             try {
               const result = await wallet.getPublicKeys([{
                 addressNList: p.address_n,
@@ -4021,7 +4027,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         // ═══════════════════════════════════════════════════════════════
         if (path === '/system/info/list-coins' && method === 'POST') {
           auth.requireAuth(req)
-          return json(CHAINS.map(c => ({
+          const visibleChains = deviceIsBitcoinOnly() ? bitcoinOnlyCoinList(CHAINS) : CHAINS
+          return json(visibleChains.map(c => ({
             coin_name: c.coin,
             coin_shortcut: c.symbol,
             chain: c.chain,
