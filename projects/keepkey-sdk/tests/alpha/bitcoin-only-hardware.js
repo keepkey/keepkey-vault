@@ -110,6 +110,87 @@ function sha256(bytes) {
   return createHash('sha256').update(bytes).digest('hex')
 }
 
+function decodeBase58Check(address) {
+  const alphabet = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
+  let value = 0n
+  for (const character of address) {
+    const digit = alphabet.indexOf(character)
+    if (digit < 0) throw new Error(`invalid base58 character in ${address}`)
+    value = value * 58n + BigInt(digit)
+  }
+  let hex = value.toString(16)
+  if (hex.length % 2) hex = `0${hex}`
+  const decoded = value === 0n ? Buffer.alloc(0) : Buffer.from(hex, 'hex')
+  let leadingZeroes = 0
+  while (address[leadingZeroes] === '1') leadingZeroes++
+  const bytes = Buffer.concat([Buffer.alloc(leadingZeroes), decoded])
+  if (bytes.length < 5) throw new Error('base58check payload is too short')
+  const payload = bytes.subarray(0, -4)
+  const checksum = bytes.subarray(-4)
+  const first = createHash('sha256').update(payload).digest()
+  const expected = createHash('sha256').update(first).digest().subarray(0, 4)
+  if (!checksum.equals(expected)) throw new Error(`invalid base58check checksum for ${address}`)
+  return payload
+}
+
+function p2pkhScript(address) {
+  const payload = decodeBase58Check(address)
+  if (payload.length !== 21 || payload[0] !== 0) throw new Error(`${address} is not a Bitcoin mainnet P2PKH address`)
+  return Buffer.concat([Buffer.from('76a914', 'hex'), payload.subarray(1), Buffer.from('88ac', 'hex')]).toString('hex')
+}
+
+function parseBitcoinTransaction(serializedHex) {
+  const bytes = Buffer.from(serializedHex, 'hex')
+  let offset = 0
+  const take = (length) => {
+    if (!Number.isSafeInteger(length) || length < 0 || offset + length > bytes.length) {
+      throw new Error(`truncated transaction at byte ${offset} (need ${length})`)
+    }
+    const result = bytes.subarray(offset, offset + length)
+    offset += length
+    return result
+  }
+  const readU32 = () => {
+    const value = take(4).readUInt32LE(0)
+    return value
+  }
+  const readVarInt = () => {
+    const prefix = take(1)[0]
+    if (prefix < 0xfd) return prefix
+    if (prefix === 0xfd) return take(2).readUInt16LE(0)
+    if (prefix === 0xfe) return take(4).readUInt32LE(0)
+    const value = take(8).readBigUInt64LE(0)
+    if (value > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error('transaction varint exceeds safe integer range')
+    return Number(value)
+  }
+
+  const version = readU32()
+  const segwit = bytes[offset] === 0 && bytes[offset + 1] !== 0
+  if (segwit) take(2)
+  const inputs = Array.from({ length: readVarInt() }, () => {
+    const txid = Buffer.from(take(32)).reverse().toString('hex')
+    const vout = readU32()
+    const scriptSig = take(readVarInt()).toString('hex')
+    const sequence = readU32()
+    return { txid, vout, scriptSig, sequence }
+  })
+  const outputs = Array.from({ length: readVarInt() }, () => ({
+    amount: take(8).readBigUInt64LE(0),
+    script: take(readVarInt()).toString('hex'),
+  }))
+  if (segwit) {
+    for (let i = 0; i < inputs.length; i++) {
+      const items = readVarInt()
+      for (let j = 0; j < items; j++) take(readVarInt())
+    }
+  }
+  const locktime = readU32()
+  if (offset !== bytes.length) throw new Error(`transaction has ${bytes.length - offset} trailing bytes`)
+  return { version, segwit, inputs, outputs, locktime }
+}
+
+const BURN_OUTPUT_SCRIPT = p2pkhScript(BURN_ADDRESS)
+
 function pass(name, details) {
   console.log(`  PASS ${name}${details ? ` — ${details}` : ''}`)
   evidence.checks.push({ name, passed: true, ...(details ? { details } : {}) })
@@ -200,6 +281,20 @@ async function verifyRestBoundary(sdk) {
   await expect501('/addresses/utxo', { address_n: bipPath(44), coin: 'Litecoin' })
   await expect501('/utxo/sign-transaction', { coin: 'Dogecoin', inputs: [{}], outputs: [{}] })
   await expect501('/system/info/get-public-key', { address_n: bipPath(44), coin_name: 'Zcash' })
+  await expect501('/api/v1/activity/rebuild', { chainId: 'ethereum' })
+
+  const batch = await sdk.xpub.getPublicKeys([
+    { address_n: [HARDENED + 44, HARDENED + 60, HARDENED], type: 'address', networks: ['eip155:1'] },
+    { address_n: [HARDENED + 44, HARDENED + 2, HARDENED], type: 'xpub', coin: 'Litecoin' },
+    { address_n: [HARDENED + 84, HARDENED, HARDENED], type: 'xpub', coin: 'Bitcoin', script_type: 'p2wpkh' },
+  ])
+  check('batch derivation reports all requested paths', batch.total_requested === 3, String(batch.total_requested))
+  check('batch derivation returns only the Bitcoin path', batch.pubkeys.length === 1, `returned ${batch.pubkeys.length}`)
+  check('batch derivation returns a Bitcoin xpub', typeof batch.pubkeys[0]?.pubkey === 'string' && batch.pubkeys[0].pubkey.length > 0)
+  evidence.batch_derivation = {
+    requested: ['Ethereum address', 'Litecoin xpub', 'Bitcoin BIP84 xpub'],
+    returned: batch.pubkeys.map(entry => ({ path: entry.path, type: entry.type, scriptType: entry.scriptType })),
+  }
 
   const coins = await sdk.system.info.listCoins()
   check('coin listing is not empty', Array.isArray(coins) && coins.length > 0)
@@ -213,7 +308,8 @@ async function verifyRestBoundary(sdk) {
   evidence.non_btc_routes = {
     addresses: NON_BTC_ADDRESS_ROUTES,
     signing: NON_BTC_SIGNING_ROUTES,
-    generic_coin_routes: ['/addresses/utxo', '/utxo/sign-transaction', '/system/info/get-public-key'],
+    generic_coin_routes: ['/addresses/utxo', '/utxo/sign-transaction', '/system/info/get-public-key', '/api/pubkeys/batch'],
+    activity_routes: ['/api/v1/activity/rebuild'],
     expected_status: 501,
     listed_coins: coins.map(coin => coin.coin_name),
   }
@@ -281,6 +377,16 @@ async function verifySigning(sdk) {
     if (testCase.scriptType === 'p2tr') {
       check('Taproot signature is 64-byte Schnorr', signed.signatures[0].length === 128)
     }
+    const parsed = parseBitcoinTransaction(signed.serializedTx)
+    check(`${testCase.name} serialized version is 2`, parsed.version === 2, String(parsed.version))
+    check(`${testCase.name} serialized locktime is 0`, parsed.locktime === 0, String(parsed.locktime))
+    check(`${testCase.name} serialized exactly one input`, parsed.inputs.length === 1, String(parsed.inputs.length))
+    check(`${testCase.name} serialized the requested prevout`, parsed.inputs[0]?.txid === tx.inputs[0].txid && parsed.inputs[0]?.vout === 0)
+    check(`${testCase.name} serialized the requested sequence`, parsed.inputs[0]?.sequence === tx.inputs[0].sequence)
+    check(`${testCase.name} serialized exactly one output`, parsed.outputs.length === 1, String(parsed.outputs.length))
+    check(`${testCase.name} serialized exactly 70000 sats`, parsed.outputs[0]?.amount === 70000n, String(parsed.outputs[0]?.amount))
+    check(`${testCase.name} serialized the BitcoinEater script`, parsed.outputs[0]?.script === BURN_OUTPUT_SCRIPT, parsed.outputs[0]?.script)
+    check(`${testCase.name} input/output difference is exactly the displayed 10000-sat fee`, BigInt(tx.inputs[0].amount) - parsed.outputs[0].amount === 10000n)
     await attest(`Did Vault and KeepKey both show the exact ${testCase.name} destination, amount, and fee before approval?`)
     evidence.signing.push({
       name: testCase.name,
@@ -289,11 +395,14 @@ async function verifySigning(sdk) {
       synthetic_prevout: tx.inputs[0].txid,
       serialized_sha256: sha256(Buffer.from(signed.serializedTx, 'hex')),
       signature_bytes: signed.signatures[0].length / 2,
+      parsed_output_sats: parsed.outputs[0].amount.toString(),
+      parsed_output_script: parsed.outputs[0].script,
+      parsed_fee_sats: (BigInt(tx.inputs[0].amount) - parsed.outputs[0].amount).toString(),
       display_confirmed: true,
     })
   }
 
-  console.log('\nCancellation: reject the next Taproot signing request on KeepKey.')
+  console.log('\nCancellation: approve the Vault gate, then reject the next Taproot signing request on KeepKey.')
   let rejected = false
   let rejection = ''
   try {
@@ -302,7 +411,7 @@ async function verifySigning(sdk) {
     rejected = true
     rejection = String(error && error.message ? error.message : error)
   }
-  check('physical cancellation rejects the SDK promise', rejected, rejection)
+  check('physical cancellation rejects the SDK promise with cancellation semantics', rejected && /cancel|reject|denied/i.test(rejection), rejection)
   evidence.cancellation = { rejected, error: rejection }
 }
 

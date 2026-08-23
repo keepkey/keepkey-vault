@@ -134,7 +134,8 @@ state, plus the dApp-side WalletConnect disconnect. Never use a production seed.
 
 ## Host verification already completed
 
-- Bitcoin-only policy: 16 tests, 116 assertions.
+- Bitcoin-only policy: 18 tests, including activity-store filtering and the
+  renderer/REST dispatch boundaries.
 - Bitcoin backend: Core 35 assertions, normalization 16, device-only 5.
 - Taproot builder: P2TR input/change and BIP86 account-path selection, 3 cases.
 - hdwallet Taproot: 8 tests, 28 assertions covering protocol enums, BIP86

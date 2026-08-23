@@ -21,6 +21,9 @@ import * as S from './schemas'
 import { parseRequest, validateResponse } from './validate'
 import { SIGNING_ROUTES, requiredSigningFields } from './signing-routes'
 import {
+  bitcoinOnlyActivityList,
+  bitcoinOnlyBalanceList,
+  bitcoinOnlyChainList,
   bitcoinOnlyCoinAllowed,
   bitcoinOnlyCoinList,
   bitcoinOnlyRejection,
@@ -3287,7 +3290,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const ds = engine.getDeviceState()
           if (!ds.deviceId) return json({ devices: [], total_value_usd: 0 })
           const cached = engine.isPassphraseWallet ? null : getCachedBalances(ds.deviceId)
-          const totalUsd = cached ? cached.balances.reduce((sum, b) => sum + b.balanceUsd, 0) : 0
+          const balances = bitcoinOnlyBalanceList(cached?.balances || [], deviceIsBitcoinOnly())
+          const totalUsd = balances.reduce((sum, b) => sum + b.balanceUsd, 0)
           return json({
             devices: [{ state: ds.state }],
             total_value_usd: totalUsd,
@@ -3302,7 +3306,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             return json({ error: 'Device not found' }, 404)
           }
           const cached = engine.isPassphraseWallet ? null : getCachedBalances(ds.deviceId)
-          const totalUsd = cached ? cached.balances.reduce((sum, b) => sum + b.balanceUsd, 0) : 0
+          const balances = bitcoinOnlyBalanceList(cached?.balances || [], deviceIsBitcoinOnly())
+          const totalUsd = balances.reduce((sum, b) => sum + b.balanceUsd, 0)
           return json({
             device_id: ds.deviceId,
             state: ds.state,
@@ -3793,12 +3798,12 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           if (!Number.isFinite(limit)) {
             throw new HttpError(400, 'Invalid limit: must be a number')
           }
-          const entries = getRecentActivityFromLog(
+          const entries = bitcoinOnlyActivityList(getRecentActivityFromLog(
             Math.min(Math.max(limit, 1), 500),
             q.get('chainId') || q.get('chain') || undefined,
             scope.deviceId,
             scope.walletId,
-          )
+          ), deviceIsBitcoinOnly())
           return json({ entries, count: entries.length })
         }
 
@@ -3818,7 +3823,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             }
             return n
           }
-          const entries = findApiLogs({
+          const entries = bitcoinOnlyActivityList(findApiLogs({
             ...scope,
             route:        q.get('route')         || undefined,
             activityType: q.get('activityType')  || undefined,
@@ -3828,7 +3833,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             until:        parseNumParam('until'),
             limit:        parseNumParam('limit'),
             offset:       parseNumParam('offset'),
-          })
+          }), deviceIsBitcoinOnly())
           return json({ entries, count: entries.length })
         }
 
@@ -3848,6 +3853,9 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             ...(Array.isArray(body.chainIds) ? body.chainIds : []),
             ...(typeof body.chainId === 'string' ? [body.chainId] : []),
           ]
+          if (deviceIsBitcoinOnly() && chainIds.some(id => id !== 'bitcoin' && id !== 'BTC')) {
+            throw new HttpError(501, 'non-Bitcoin activity rebuild is not available on bitcoin-only firmware')
+          }
           const unknown = chainIds.filter(id => !CHAINS.some(c => c.id === id || c.symbol === id))
           if (unknown.length > 0) {
             return json({ error: `Unknown chain id(s): ${unknown.join(', ')}` }, 400)
@@ -3855,7 +3863,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const result = await rebuildActivityHistory({
             wallet,
             scope,
-            chains: CHAINS,
+            chains: bitcoinOnlyChainList(CHAINS, deviceIsBitcoinOnly()),
             firmwareVersion: engine.getDeviceState().firmwareVersion,
             options: body,
           })

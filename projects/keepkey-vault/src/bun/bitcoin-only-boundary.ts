@@ -147,6 +147,18 @@ export function bitcoinOnlyBalanceList<T extends { chainId: string }>(balances: 
   return enabled ? balances.filter(balance => balance.chainId === 'bitcoin') : balances
 }
 
+/** Activity rows come from two stores: rebuilt history uses `chainId`, while
+ * REST/signing audit rows use the display symbol in `chain`. Fail closed when
+ * the current firmware is Bitcoin-only so stale multichain rows from the same
+ * device cannot leak back through a secondary host API. */
+export function bitcoinOnlyActivityList<T extends { chainId?: string | null; chain?: string | null }>(
+  rows: T[],
+  enabled: boolean,
+): T[] {
+  if (!enabled) return rows
+  return rows.filter(row => row.chainId === 'bitcoin' || row.chain === 'BTC' || row.chain === 'Bitcoin')
+}
+
 export function bitcoinOnlySnapshot(featuresJson: string | undefined): boolean {
   if (!featuresJson) return false
   try {

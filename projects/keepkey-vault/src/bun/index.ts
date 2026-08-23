@@ -136,7 +136,7 @@ import { AuthStore } from "./auth"
 import { getPioneer, getPioneerApiBase, resetPioneer, DEFAULT_API_BASE, getQueryKey as getPioneerQueryKey } from "./pioneer"
 import { setBtcBackendOffline, setBtcNodeConfig, setBtcNodeDeviceEligible, isBtcNodeActive, getBtcBackend, broadcastBtcTx } from "./btc-backend"
 import { isBitcoinOnlyVariant } from "../shared/flags"
-import { bitcoinOnlyBalanceList, bitcoinOnlyChainList, bitcoinOnlySnapshot, enforceBitcoinOnlyRpcBoundary } from "./bitcoin-only-boundary"
+import { bitcoinOnlyActivityList, bitcoinOnlyBalanceList, bitcoinOnlyChainList, bitcoinOnlySnapshot, enforceBitcoinOnlyRpcBoundary } from "./bitcoin-only-boundary"
 import { fetchDefiPositions } from "./zapper"
 import { loadSupportedChains } from "../shared/swap-support-matrix"
 import { PioneerSocket } from "./pioneer-socket"
@@ -6355,10 +6355,13 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			// ── API Audit Log ────────────────────────────────────────
 			getApiLogs: async (params) => {
 				// PRIVACY: Don't expose standard-wallet activity logs during hidden sessions.
-				if (engine.isPassphraseWallet) return []
-				const scope = getWalletDbScope()
-				if (!scope) return []
-				return getApiLogs(params?.limit ?? 200, params?.offset ?? 0, scope.deviceId, scope.walletId)
+					if (engine.isPassphraseWallet) return []
+					const scope = getWalletDbScope()
+					if (!scope) return []
+					return bitcoinOnlyActivityList(
+						getApiLogs(params?.limit ?? 200, params?.offset ?? 0, scope.deviceId, scope.walletId),
+						isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant),
+					)
 			},
 			clearApiLogs: async () => {
 				const scope = getWalletDbScope()

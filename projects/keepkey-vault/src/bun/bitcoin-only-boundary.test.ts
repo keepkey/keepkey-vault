@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  bitcoinOnlyActivityList,
   bitcoinOnlyBalanceList,
   bitcoinOnlyChainList,
   bitcoinOnlyCoinAllowed,
@@ -136,6 +137,19 @@ describe('Bitcoin-only REST boundary', () => {
     expect(bitcoinOnlyChainList(chains, false)).toEqual(chains)
     expect(bitcoinOnlyBalanceList(balances, true)).toEqual([{ chainId: 'bitcoin' }])
     expect(bitcoinOnlyBalanceList(balances, false)).toEqual(balances)
+  })
+
+  test('filters both activity-store row shapes to Bitcoin', () => {
+    const rows = [
+      { id: 1, chainId: 'bitcoin' },
+      { id: 2, chainId: 'ethereum' },
+      { id: 3, chain: 'BTC' },
+      { id: 4, chain: 'ETH' },
+      { id: 5, chain: 'Bitcoin' },
+      { id: 6 },
+    ]
+    expect(bitcoinOnlyActivityList(rows, true).map(row => row.id)).toEqual([1, 3, 5])
+    expect(bitcoinOnlyActivityList(rows, false)).toEqual(rows)
   })
 
   test('recognizes bitcoin-only watch-only snapshots', () => {
