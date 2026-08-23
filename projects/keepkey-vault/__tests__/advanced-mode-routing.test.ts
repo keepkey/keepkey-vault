@@ -20,6 +20,7 @@
  * Run: bun test __tests__/advanced-mode-routing.test.ts
  */
 import { describe, test, expect } from 'bun:test'
+import { readFileSync } from 'fs'
 import { evmAdvancedModeRequiredMessage, SOLANA_BLIND_SIGNING_REQUIRED } from '../src/shared/types'
 
 /** Verbatim from SwapDialog.tsx — keep in sync with the branch it mirrors. */
@@ -77,5 +78,25 @@ describe('the routing predicate itself', () => {
     // Solana routes on an exact sentinel, not on content, because it carries a
     // JSON outflow payload appended to the message.
     expect(SOLANA_BLIND_SIGNING_REQUIRED).toBe('SOLANA_BLIND_SIGNING_REQUIRED')
+  })
+})
+
+describe('Solana schema fallback preserves the outflow check', () => {
+  const swapSource = readFileSync(new URL('../src/bun/swap.ts', import.meta.url), 'utf8')
+
+  test('both predicted and device-refused fallbacks use the shared safety helper', () => {
+    const calls = swapSource.match(/throw await buildSolanaBlindSignRequirement\(\)/g) || []
+    expect(calls).toHaveLength(2)
+  })
+
+  test('the shared helper runs the outflow simulation before building the sentinel', () => {
+    const helperStart = swapSource.indexOf('const buildSolanaBlindSignRequirement')
+    const helperEnd = swapSource.indexOf('\n  if (\n    needsOpaqueSolanaFallback', helperStart)
+    const helper = swapSource.slice(helperStart, helperEnd)
+    expect(helperStart).toBeGreaterThan(-1)
+    expect(helperEnd).toBeGreaterThan(helperStart)
+    expect(helper).toContain('checkSolanaOutflow')
+    expect(helper).toContain('SOLANA_BLIND_SIGNING_REQUIRED')
+    expect(helper.indexOf('checkSolanaOutflow')).toBeLessThan(helper.indexOf('SOLANA_BLIND_SIGNING_REQUIRED'))
   })
 })

@@ -932,11 +932,7 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
     // Must mirror the attach decision above: a schema we withheld is not a
     // schema the device will use, so the opaque path still applies.
     !(ctx.isAdvancedModeEnabled?.() !== false && findSolanaSchema(params.relayTx.serializedTx))
-  if (
-    needsOpaqueSolanaFallback &&
-    ctx.isAdvancedModeEnabled?.() !== true &&
-    params.allowSolanaBlindSigning !== true
-  ) {
+  const buildSolanaBlindSignRequirement = async (): Promise<Error> => {
     // The device can't verify this transaction, so check it here instead:
     // simulate against an independent RPC and report what actually leaves the
     // wallet. This catches a quote server that built a transaction differing
@@ -1025,9 +1021,16 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
     } catch (e: any) {
       swapLog(`${TAG} outflow check failed: ${e?.message}`)
     }
-    throw new Error(outflow
+    return new Error(outflow
       ? `${SOLANA_BLIND_SIGNING_REQUIRED} ${outflow}`
       : SOLANA_BLIND_SIGNING_REQUIRED)
+  }
+  if (
+    needsOpaqueSolanaFallback &&
+    ctx.isAdvancedModeEnabled?.() !== true &&
+    params.allowSolanaBlindSigning !== true
+  ) {
+    throw await buildSolanaBlindSignRequirement()
   }
 
   // Same shape as the Solana gate above, for EVM contract calls the firmware
@@ -1124,8 +1127,8 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
         // Ask instead. On the retry params.allowSolanaBlindSigning is true,
         // which suppresses schema attachment above -- otherwise the schema would
         // be re-attached, refused again, and the flow would loop.
-        swapLog(`${TAG} device refused the clear-sign schema — requesting blind-sign consent`)
-        throw new Error(SOLANA_BLIND_SIGNING_REQUIRED)
+        swapLog(`${TAG} device refused the clear-sign schema — checking outflow before requesting blind-sign consent`)
+        throw await buildSolanaBlindSignRequirement()
       } else {
         throw e
       }
