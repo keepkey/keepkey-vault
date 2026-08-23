@@ -2313,7 +2313,15 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       }
       // User-friendly categorization. Order: device-rejected first (most common during sign), then on-chain reverts, then network/RPC.
       let friendly = raw || t("errorSwap")
-      if (/User rejected|user denied|device.*reject/i.test(raw)) {
+      // Firmware fails a schema it cannot verify outright and never degrades to
+      // blind signing (fsm_msg_solana.h). Verification needs a signer loaded in
+      // RAM. The backend now withholds the schema when AdvancedMode is off, so
+      // reaching here means AdvancedMode is ON but no signer is armed for this
+      // session -- which the raw message blames on the transaction instead.
+      if (/Invalid Solana instruction schema/i.test(raw)) {
+        friendly = t("solanaSchemaUnverified",
+          "Clear-signing isn't armed on this device this session, so it couldn't verify the swap details. Load the ClearSign signer in Settings, then try again.")
+      } else if (/User rejected|user denied|device.*reject/i.test(raw)) {
         friendly = t("deviceRejected", "Cancelled on device — no transaction was sent")
       } else if (/Review timed out|review timeout/i.test(raw)) {
         friendly = t("reviewTimeout", "Review timed out — no transaction was sent")
