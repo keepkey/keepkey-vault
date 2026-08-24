@@ -188,6 +188,15 @@ describe('Bitcoin-only REST boundary', () => {
     expect(bitcoinOnlyRpcRejection('getPublicKeys', {
       paths: [{ coin: 'Bitcoin' }, { coin: 'Testnet' }],
     })).toBeNull()
+    expect(bitcoinOnlyRpcRejection('getPublicKeys', {
+      paths: [{ type: 'address', networks: ['eip155:1'] }],
+    })).not.toBeNull()
+    expect(bitcoinOnlyRpcRejection('getPublicKeys', {
+      paths: [{ coin: 'Bitcoin', type: 'xpub', networks: ['eip155:1'] }],
+    })).not.toBeNull()
+    expect(bitcoinOnlyRpcRejection('getPublicKeys', {
+      paths: [{ coin: 'Bitcoin', type: 'xpub', networks: ['bip122:000000000019d6689c085ae165831e93'] }],
+    })).toBeNull()
   })
 
   test('fences dynamic altcoin market and token-state RPC', () => {

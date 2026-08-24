@@ -160,9 +160,15 @@ export function bitcoinOnlyRpcRejection(method: string, params?: any): string | 
   }
 
   if (method === 'getPublicKeys' && Array.isArray(params?.paths)) {
-    const unavailable = params.paths.find((path: any) => !bitcoinOnlyCoinAllowed(path?.coin))
+    const unavailable = params.paths.find((path: any) => {
+      if (!path || !BITCOIN_COIN_NAMES.has(path.coin)) return true
+      if (path.type === 'address') return true
+      return Array.isArray(path.networks)
+        && path.networks.some((network: unknown) =>
+          typeof network === 'string' && !BITCOIN_NETWORK_IDS.has(network))
+    })
     if (unavailable) {
-      return `coin ${String(unavailable.coin)} is not available on bitcoin-only firmware`
+      return 'public-key request is not available on bitcoin-only firmware'
     }
   }
 
