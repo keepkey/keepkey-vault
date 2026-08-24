@@ -67,6 +67,29 @@ const NON_BTC_SIGNING_ROUTES = [
   '/eth/clearsign/load-signer', '/eth/clearsign/sign-alpha-delegate-certificate',
 ]
 
+const NON_BTC_READ_ROUTES = [
+  '/api/zcash/shielded/status',
+  '/api/v1/swaps', '/api/v1/swaps/stats', '/api/v1/swap/discovery',
+  '/api/debug/portfolio', '/api/debug/portfolio/tokens',
+  '/api/debug/pioneer-audit', '/api/debug/token-visibility',
+  '/api/v2/assets/available',
+  '/wc', '/mcp', '/bex-bridge',
+]
+
+const NON_BTC_DATA_REQUESTS = [
+  ['/eth/verify', {}],
+  ['/ton/build-transfer', {}],
+  ['/tron/verify-message', {}],
+  ['/api/v2/portfolio/balances', { pubkeys: [{ caip: 'eip155:1/slip44:60', pubkey: '0xdead' }] }],
+  ['/api/v2/market/info', { caips: ['eip155:1/slip44:60'] }],
+  ['/api/v2/tx/history', { queries: [{ caip: 'eip155:1/slip44:60', pubkey: '0xdead' }] }],
+  ['/api/v2/utxo/unspent', { network: 'bip122:12a765e31ffd4059bada1e25190f6e98', xpub: 'xpub-invalid' }],
+  ['/api/v2/network/fee-rate', { networkId: 'eip155:1' }],
+  ['/api/v2/network/gas-price', { networkId: 'eip155:1' }],
+  ['/api/v2/assets/search', { q: 'ethereum' }],
+  ['/api/v2/staking/positions', { network: 'ethereum', address: '0xdead' }],
+]
+
 if (process.env.BTC_ALPHA_HARDWARE_TEST !== '1') {
   console.log('  SKIP alpha/bitcoin-only-hardware.js (set BTC_ALPHA_HARDWARE_TEST=1 and choose a phase)')
   process.exit(0)
@@ -267,9 +290,10 @@ async function connect() {
 
 async function verifyRestBoundary(sdk) {
   const failures = []
-  async function expect501(route, body) {
+  async function expect501(route, body, method = 'POST') {
     try {
-      await sdk.getClient().post(route, body)
+      if (method === 'GET') await sdk.getClient().get(route)
+      else await sdk.getClient().post(route, body)
       failures.push(`${route}: unexpectedly succeeded`)
     } catch (error) {
       if (error && error.status === 501 && /not available on bitcoin-only firmware/i.test(error.message)) {
@@ -284,6 +308,8 @@ async function verifyRestBoundary(sdk) {
     await expect501(route, { address_n: bipPath(44), show_display: false })
   }
   for (const route of NON_BTC_SIGNING_ROUTES) await expect501(route, {})
+  for (const route of NON_BTC_READ_ROUTES) await expect501(route, undefined, 'GET')
+  for (const [route, body] of NON_BTC_DATA_REQUESTS) await expect501(route, body)
   await expect501('/addresses/utxo', { address_n: bipPath(44), coin: 'Litecoin' })
   await expect501('/utxo/sign-transaction', { coin: 'Dogecoin', inputs: [{}], outputs: [{}] })
   await expect501('/system/info/get-public-key', { address_n: bipPath(44), coin_name: 'Zcash' })
@@ -316,6 +342,8 @@ async function verifyRestBoundary(sdk) {
     signing: NON_BTC_SIGNING_ROUTES,
     generic_coin_routes: ['/addresses/utxo', '/utxo/sign-transaction', '/system/info/get-public-key', '/api/pubkeys/batch'],
     activity_routes: ['/api/v1/activity/rebuild'],
+    read_routes: NON_BTC_READ_ROUTES,
+    data_routes: NON_BTC_DATA_REQUESTS.map(([route]) => route),
     expected_status: 501,
     listed_coins: coins.map(coin => coin.coin_name),
   }
