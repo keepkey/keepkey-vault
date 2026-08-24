@@ -44,6 +44,7 @@ const NON_BTC_ADDRESS_ROUTES = [
   '/addresses/tron',
   '/addresses/ton',
   '/addresses/hive',
+  '/addresses/bnb',
 ]
 
 const NON_BTC_SIGNING_ROUTES = [
@@ -65,6 +66,7 @@ const NON_BTC_SIGNING_ROUTES = [
   '/api/v2/swap/open', '/api/v2/swap/set', '/api/v2/swap/quote',
   '/api/v2/swap/execute', '/api/v2/swap/close',
   '/eth/clearsign/load-signer', '/eth/clearsign/sign-alpha-delegate-certificate',
+  '/bnb/sign-transaction',
 ]
 
 const NON_BTC_READ_ROUTES = [

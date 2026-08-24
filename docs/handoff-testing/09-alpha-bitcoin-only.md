@@ -159,7 +159,7 @@ state, plus the dApp-side WalletConnect disconnect. Never use a production seed.
 
 ## Host verification already completed
 
-- Bitcoin-only policy: 25 tests / 183 assertions, including
+- Bitcoin-only policy: 25 tests / 188 assertions, including
   activity/ledger/report filtering,
   watch-only snapshot authority, address-book history filtering, and the
   renderer/REST/Pioneer dispatch boundaries.

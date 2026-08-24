@@ -11,12 +11,12 @@ const BITCOIN_ASSET_CAIPS = new Set([
 ])
 const NON_BITCOIN_RPC_PREFIXES = [
   'clearsign', 'eth', 'cosmos', 'thorchain', 'mayachain', 'osmosis',
-  'xrp', 'solana', 'tron', 'ton', 'hive', 'zcash',
+  'xrp', 'solana', 'tron', 'ton', 'hive', 'zcash', 'bnb', 'binance',
 ]
 
 const NON_BITCOIN_REST_PREFIXES = [
   '/eth/', '/cosmos/', '/thorchain/', '/mayachain/', '/osmosis/',
-  '/xrp/', '/solana/', '/tron/', '/ton/', '/hive/', '/api/zcash/',
+  '/xrp/', '/solana/', '/tron/', '/ton/', '/hive/', '/bnb/', '/api/zcash/',
 ]
 
 const BITCOIN_ONLY_DISABLED_REST_PREFIXES = [

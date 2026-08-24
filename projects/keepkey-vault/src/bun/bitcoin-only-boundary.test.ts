@@ -53,7 +53,7 @@ describe('Bitcoin-only REST boundary', () => {
       '/cosmos/sign-amino', '/osmosis/sign-amino-swap',
       '/thorchain/sign-amino-transfer', '/mayachain/sign-amino-deposit',
       '/xrp/sign-transaction', '/solana/sign-message', '/tron/verify-message',
-      '/ton/build-transfer', '/hive/sign-message',
+      '/ton/build-transfer', '/hive/sign-message', '/bnb/sign-transaction',
       '/api/zcash/shielded/status', '/api/zcash/shielded/build',
     ]) {
       expect(bitcoinOnlyRejection(path.endsWith('/status') ? 'GET' : 'POST', path, {})).not.toBeNull()
@@ -167,7 +167,8 @@ describe('Bitcoin-only REST boundary', () => {
   test('fences chain-specific renderer RPC before dispatch', () => {
     for (const method of [
       'ethGetAddress', 'solanaSignTx', 'cosmosSignTx', 'zcashShieldedSend',
-      'clearsignAttestorSign', 'getEvmAddresses', 'executeSwap', 'getSwapQuote', 'wcPair',
+      'clearsignAttestorSign', 'bnbGetAddress', 'binanceSignTransaction',
+      'getEvmAddresses', 'executeSwap', 'getSwapQuote', 'wcPair',
     ]) {
       expect(bitcoinOnlyRpcRejection(method, {})).not.toBeNull()
     }
