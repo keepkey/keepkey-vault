@@ -9,6 +9,7 @@ import {
   bitcoinOnlyLedgerJournalList,
   bitcoinOnlyLedgerSummaryList,
   bitcoinOnlyPendingSigningRejection,
+  bitcoinOnlyPublicKeyPathAllowed,
   bitcoinOnlyRejection,
   bitcoinOnlyReportAllowed,
   bitcoinOnlyRpcRejection,
@@ -198,6 +199,12 @@ describe('Bitcoin-only REST boundary', () => {
     expect(bitcoinOnlyRpcRejection('getPublicKeys', {
       paths: [{ coin: 'Bitcoin', type: 'xpub', networks: ['bip122:000000000019d6689c085ae165831e93'] }],
     })).toBeNull()
+    expect(bitcoinOnlyPublicKeyPathAllowed({
+      coin: 'Bitcoin', type: 'xpub', networks: ['eip155:1'],
+    })).toBe(false)
+    expect(bitcoinOnlyPublicKeyPathAllowed({
+      coin: 'Bitcoin', type: 'xpub', networks: ['bip122:000000000019d6689c085ae165831e93'],
+    })).toBe(true)
   })
 
   test('fences dynamic altcoin market and token-state RPC', () => {

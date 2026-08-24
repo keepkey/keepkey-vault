@@ -320,13 +320,14 @@ async function verifyRestBoundary(sdk) {
   const batch = await sdk.xpub.getPublicKeys([
     { address_n: [HARDENED + 44, HARDENED + 60, HARDENED], type: 'address', networks: ['eip155:1'] },
     { address_n: [HARDENED + 44, HARDENED + 2, HARDENED], type: 'xpub', coin: 'Litecoin' },
+    { address_n: [HARDENED + 84, HARDENED, HARDENED], type: 'xpub', coin: 'Bitcoin', networks: ['eip155:1'] },
     { address_n: [HARDENED + 84, HARDENED, HARDENED], type: 'xpub', coin: 'Bitcoin', script_type: 'p2wpkh' },
   ])
-  check('batch derivation reports all requested paths', batch.total_requested === 3, String(batch.total_requested))
+  check('batch derivation reports all requested paths', batch.total_requested === 4, String(batch.total_requested))
   check('batch derivation returns only the Bitcoin path', batch.pubkeys.length === 1, `returned ${batch.pubkeys.length}`)
   check('batch derivation returns a Bitcoin xpub', typeof batch.pubkeys[0]?.pubkey === 'string' && batch.pubkeys[0].pubkey.length > 0)
   evidence.batch_derivation = {
-    requested: ['Ethereum address', 'Litecoin xpub', 'Bitcoin BIP84 xpub'],
+    requested: ['Ethereum address', 'Litecoin xpub', 'Bitcoin xpub mislabeled as Ethereum', 'Bitcoin BIP84 xpub'],
     returned: batch.pubkeys.map(entry => ({ path: entry.path, type: entry.type, scriptType: entry.scriptType })),
   }
 

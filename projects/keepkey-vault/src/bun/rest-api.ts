@@ -26,6 +26,7 @@ import {
   bitcoinOnlyChainList,
   bitcoinOnlyCoinAllowed,
   bitcoinOnlyCoinList,
+  bitcoinOnlyPublicKeyPathAllowed,
   bitcoinOnlyRejection,
 } from './bitcoin-only-boundary'
 import { handleV2DataRoute } from './rest-pioneer'
@@ -3731,7 +3732,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             const coin = TICKER_TO_COIN[rawCoin] || rawCoin
             // Filter before the cache lookup. The same physical device id may
             // have cached altcoin xpubs before being flashed BTC-only.
-            if (deviceIsBitcoinOnly() && !bitcoinOnlyCoinAllowed(coin)) continue
+            if (deviceIsBitcoinOnly() && !bitcoinOnlyPublicKeyPathAllowed({ ...p, coin })) continue
 
             const cacheKey = scopedKey(engine, 'batch-pubkey', { address_n: p.address_n, script_type: p.script_type })
             const cached = pubkeyCache.get(cacheKey)

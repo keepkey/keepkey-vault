@@ -46,6 +46,17 @@ export function bitcoinOnlyCoinAllowed(coin: unknown): boolean {
   return coin === undefined || BITCOIN_COIN_NAMES.has(coin as string)
 }
 
+/** Validate a public-key request after any route-specific coin inference. A
+ * Bitcoin xpub must not be returned under an altcoin network label: callers
+ * use that metadata to decide which wallet/account the key belongs to. */
+export function bitcoinOnlyPublicKeyPathAllowed(path: any): boolean {
+  if (!path || !BITCOIN_COIN_NAMES.has(path.coin)) return false
+  if (path.type === 'address') return false
+  return !Array.isArray(path.networks)
+    || path.networks.every((network: unknown) =>
+      typeof network !== 'string' || BITCOIN_NETWORK_IDS.has(network))
+}
+
 function validButUnavailableCoin(coin: unknown): boolean {
   return typeof coin === 'string' && !bitcoinOnlyCoinAllowed(coin)
 }
@@ -160,13 +171,7 @@ export function bitcoinOnlyRpcRejection(method: string, params?: any): string | 
   }
 
   if (method === 'getPublicKeys' && Array.isArray(params?.paths)) {
-    const unavailable = params.paths.find((path: any) => {
-      if (!path || !BITCOIN_COIN_NAMES.has(path.coin)) return true
-      if (path.type === 'address') return true
-      return Array.isArray(path.networks)
-        && path.networks.some((network: unknown) =>
-          typeof network === 'string' && !BITCOIN_NETWORK_IDS.has(network))
-    })
+    const unavailable = params.paths.find((path: any) => !bitcoinOnlyPublicKeyPathAllowed(path))
     if (unavailable) {
       return 'public-key request is not available on bitcoin-only firmware'
     }
