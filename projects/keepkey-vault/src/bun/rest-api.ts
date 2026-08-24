@@ -1183,13 +1183,15 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         server.timeout(req, 0)
       }
 
-      // Fail before auth approval UI and before device dispatch. Dedicated
-      // altcoin routes are rejected by path; generic UTXO/xpub routes are
-      // rejected by their requested coin. Malformed bodies continue to their
-      // normal schema validation instead of being misreported as BTC-only.
-      if (method === 'POST' && deviceIsBitcoinOnly()) {
+      // Fail before auth approval UI, stale-state reads, network access, and
+      // device dispatch. Dedicated altcoin feature families are rejected for
+      // every HTTP method; generic POST routes are rejected by requested coin.
+      // Malformed bodies continue to normal schema validation instead of being
+      // misreported as BTC-only.
+      if (deviceIsBitcoinOnly()) {
         let boundaryBody: Record<string, unknown> | undefined
-        if (path === '/addresses/utxo'
+        if ((method === 'POST' && path.startsWith('/api/v2/'))
+          || path === '/addresses/utxo'
           || path === '/utxo/sign-transaction'
           || path === '/system/info/get-public-key') {
           boundaryBody = await req.clone().json().catch(() => undefined)
@@ -3885,8 +3887,11 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             return json({ error: 'Invalid id' }, 400)
           }
           const entry = getApiLogById(id, scope.deviceId, scope.walletId)
-          if (!entry) return json({ error: 'Not found' }, 404)
-          return json(entry)
+          const visible = entry
+            ? bitcoinOnlyActivityList([entry], deviceIsBitcoinOnly())[0]
+            : undefined
+          if (!visible) return json({ error: 'Not found' }, 404)
+          return json(visible)
         }
 
         // ═══════════════════════════════════════════════════════════════

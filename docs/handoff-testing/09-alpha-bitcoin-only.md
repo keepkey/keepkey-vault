@@ -90,6 +90,11 @@ The Vault candidate also has executable host-boundary coverage beyond REST:
   variant while teardown is in progress;
 - Zcash/Hive capability startup is disabled for Bitcoin-only firmware even when
   its semantic version would otherwise enable those services.
+- authenticated direct REST reads cannot recover stale altcoin activity by ID,
+  swap history/discovery, token visibility, or raw debug portfolio state;
+- generic Pioneer v2 routes accept only Bitcoin mainnet/testnet CAIPs and
+  network IDs, while multichain catalogs, account-state queries, and staking
+  are rejected before network access.
 
 The synthetic prevouts do not exist, so signed transactions cannot be
 broadcast. Evidence is written with mode `0600`, including the exact artifact,
@@ -152,9 +157,10 @@ state, plus the dApp-side WalletConnect disconnect. Never use a production seed.
 
 ## Host verification already completed
 
-- Bitcoin-only policy: 22 tests, including activity/ledger/report filtering,
+- Bitcoin-only policy: 25 tests / 183 assertions, including
+  activity/ledger/report filtering,
   watch-only snapshot authority, address-book history filtering, and the
-  renderer/REST dispatch boundaries.
+  renderer/REST/Pioneer dispatch boundaries.
 - Bitcoin backend: Core 35 assertions, normalization 16, device-only 5.
 - Taproot builder: P2TR input/change and BIP86 account-path selection, 3 cases.
 - hdwallet Taproot: 8 tests, 28 assertions covering protocol enums, BIP86

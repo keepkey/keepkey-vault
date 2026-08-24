@@ -47,15 +47,28 @@ describe('Bitcoin-only REST boundary', () => {
     expect(bitcoinOnlyRejection('POST', '/addresses/future-altcoin', {})).not.toBeNull()
   })
 
-  test('fences ClearSign management and ceremony routes', () => {
-    for (const path of ['/eth/clearsign/load-signer', '/eth/clearsign/sign-alpha-delegate-certificate']) {
-      expect(bitcoinOnlyRejection('POST', path, {})).not.toBeNull()
+  test('fences every dedicated altcoin REST family, including non-signing helpers', () => {
+    for (const path of [
+      '/eth/clearsign/load-signer', '/eth/verify',
+      '/cosmos/sign-amino', '/osmosis/sign-amino-swap',
+      '/thorchain/sign-amino-transfer', '/mayachain/sign-amino-deposit',
+      '/xrp/sign-transaction', '/solana/sign-message', '/tron/verify-message',
+      '/ton/build-transfer', '/hive/sign-message',
+      '/api/zcash/shielded/status', '/api/zcash/shielded/build',
+    ]) {
+      expect(bitcoinOnlyRejection(path.endsWith('/status') ? 'GET' : 'POST', path, {})).not.toBeNull()
     }
   })
 
-  test('fences the complete REST swap-control family', () => {
+  test('fences swap control, stale history, and discovery routes', () => {
     for (const path of ['/api/v2/swap/open', '/api/v2/swap/set', '/api/v2/swap/quote', '/api/v2/swap/execute', '/api/v2/swap/close']) {
       expect(bitcoinOnlyRejection('POST', path, {})).not.toBeNull()
+    }
+    for (const path of [
+      '/api/v1/swaps', '/api/v1/swaps/stats', '/api/v1/swaps/old-txid',
+      '/api/v1/swap/availability/eip155%3A1', '/api/v1/swap/discovery',
+    ]) {
+      expect(bitcoinOnlyRejection('GET', path)).not.toBeNull()
     }
   })
 
@@ -79,8 +92,67 @@ describe('Bitcoin-only REST boundary', () => {
     expect(bitcoinOnlyRejection('POST', '/system/info/get-public-key', { coin_name: 'Dogecoin' })).not.toBeNull()
   })
 
-  test('does not affect non-POST requests', () => {
-    expect(bitcoinOnlyRejection('GET', '/addresses/eth')).toBeNull()
+  test('fences multichain read surfaces but leaves Bitcoin and neutral reads alone', () => {
+    for (const path of [
+      '/api/debug/portfolio', '/api/debug/portfolio/tokens',
+      '/api/debug/pioneer-audit', '/api/debug/token-visibility',
+      '/wc', '/wc/connect',
+    ]) {
+      expect(bitcoinOnlyRejection('GET', path)).not.toBeNull()
+    }
+    expect(bitcoinOnlyRejection('GET', '/api/portfolio')).toBeNull()
+    expect(bitcoinOnlyRejection('GET', '/api/v1/activity')).toBeNull()
+  })
+
+  test('constrains generic Pioneer data routes to Bitcoin inputs', () => {
+    const btcNetwork = 'bip122:000000000019d6689c085ae165831e93'
+    const btcAsset = `${btcNetwork}/slip44:0`
+    const ethNetwork = 'eip155:1'
+    const ethAsset = `${ethNetwork}/slip44:60`
+
+    expect(bitcoinOnlyRejection('POST', '/api/v2/portfolio/balances', {
+      pubkeys: [{ caip: btcAsset }, { caip: ethAsset }],
+    })).not.toBeNull()
+    expect(bitcoinOnlyRejection('POST', '/api/v2/portfolio/balances', {
+      pubkeys: [{ caip: btcAsset }],
+    })).toBeNull()
+    expect(bitcoinOnlyRejection('POST', '/api/v2/market/info', {
+      caips: [btcAsset, ethAsset],
+    })).not.toBeNull()
+    expect(bitcoinOnlyRejection('POST', '/api/v2/tx/history', {
+      queries: [{ caip: ethAsset }],
+    })).not.toBeNull()
+
+    for (const path of [
+      '/api/v2/utxo/unspent', '/api/v2/utxo/pubkey-info',
+    ]) {
+      expect(bitcoinOnlyRejection('POST', path, { network: ethNetwork })).not.toBeNull()
+      expect(bitcoinOnlyRejection('POST', path, { network: btcNetwork })).toBeNull()
+    }
+    for (const path of ['/api/v2/tx/broadcast', '/api/v2/network/fee-rate']) {
+      expect(bitcoinOnlyRejection('POST', path, { networkId: ethNetwork })).not.toBeNull()
+      expect(bitcoinOnlyRejection('POST', path, { networkId: btcNetwork })).toBeNull()
+    }
+  })
+
+  test('disables Pioneer multichain catalogs and account-state routes', () => {
+    for (const [method, path] of [
+      ['GET', '/api/v2/assets/available'],
+      ['POST', '/api/v2/assets/search'],
+      ['POST', '/api/v2/network/gas-price'],
+      ['POST', '/api/v2/network/nonce'],
+      ['POST', '/api/v2/network/balance'],
+      ['POST', '/api/v2/network/token-decimals'],
+      ['POST', '/api/v2/staking/positions'],
+    ]) {
+      expect(bitcoinOnlyRejection(method, path, {})).not.toBeNull()
+    }
+  })
+
+  test('leaves malformed Pioneer bodies to schema validation', () => {
+    expect(bitcoinOnlyRejection('POST', '/api/v2/portfolio/balances', { pubkeys: 'bad' })).toBeNull()
+    expect(bitcoinOnlyRejection('POST', '/api/v2/market/info', { caips: null })).toBeNull()
+    expect(bitcoinOnlyRejection('POST', '/api/v2/utxo/unspent', { network: 42 })).toBeNull()
   })
 
   test('filters coin listings to Bitcoin networks', () => {

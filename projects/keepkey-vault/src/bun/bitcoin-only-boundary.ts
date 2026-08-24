@@ -14,6 +14,20 @@ const NON_BITCOIN_RPC_PREFIXES = [
   'xrp', 'solana', 'tron', 'ton', 'hive', 'zcash',
 ]
 
+const NON_BITCOIN_REST_PREFIXES = [
+  '/eth/', '/cosmos/', '/thorchain/', '/mayachain/', '/osmosis/',
+  '/xrp/', '/solana/', '/tron/', '/ton/', '/hive/', '/api/zcash/',
+]
+
+const BITCOIN_ONLY_DISABLED_REST_PREFIXES = [
+  '/api/v1/swaps', '/api/v1/swap/', '/api/v2/swap',
+  '/api/debug/portfolio', '/api/debug/pioneer-audit',
+  '/api/debug/token-visibility',
+  '/api/v2/assets/', '/api/v2/network/gas-price',
+  '/api/v2/network/nonce', '/api/v2/network/balance',
+  '/api/v2/network/token-decimals', '/api/v2/staking/',
+]
+
 const NON_BITCOIN_RPC_METHODS = new Set([
   'getDefiPositions', 'getStakingPositions', 'buildDelegateTx',
   'buildUndelegateTx', 'lookupName', 'getNameQuote',
@@ -43,18 +57,22 @@ export function bitcoinOnlyRejection(
   path: string,
   body?: Record<string, unknown>,
 ): string | null {
+  if (NON_BITCOIN_REST_PREFIXES.some(prefix => path.startsWith(prefix))) {
+    return 'non-Bitcoin route is not available on bitcoin-only firmware'
+  }
+
+  if (BITCOIN_ONLY_DISABLED_REST_PREFIXES.some(prefix => path.startsWith(prefix))) {
+    return 'non-Bitcoin feature is not available on bitcoin-only firmware'
+  }
+
+  if (path === '/wc' || path.startsWith('/wc/')) {
+    return 'WalletConnect is not available on bitcoin-only firmware'
+  }
+
   if (method !== 'POST') return null
 
   if (path.startsWith('/addresses/') && path !== '/addresses/utxo') {
     return 'address route is not available on bitcoin-only firmware'
-  }
-
-  if (path.startsWith('/eth/clearsign/')) {
-    return 'ClearSign is not available on bitcoin-only firmware'
-  }
-
-  if (path.startsWith('/api/v2/swap')) {
-    return 'swaps are not available on bitcoin-only firmware'
   }
 
   if (SIGNING_ROUTES.has(path) && path !== '/utxo/sign-transaction') {
@@ -69,6 +87,41 @@ export function bitcoinOnlyRejection(
 
   if (path === '/system/info/get-public-key' && validButUnavailableCoin(body?.coin_name)) {
     return `coin ${String(body?.coin_name)} is not available on bitcoin-only firmware`
+  }
+
+  const unavailableAsset = (assets: unknown): unknown => Array.isArray(assets)
+    ? assets.find(asset => typeof asset === 'string' && !BITCOIN_ASSET_CAIPS.has(asset))
+    : undefined
+  const unavailablePubkeyAsset = (pubkeys: unknown): unknown => {
+    if (!Array.isArray(pubkeys)) return undefined
+    const entry = pubkeys.find((pubkey: unknown) => {
+      if (typeof pubkey !== 'object' || pubkey === null || !('caip' in pubkey)) return false
+      const caip = (pubkey as { caip?: unknown }).caip
+      return typeof caip === 'string' && !BITCOIN_ASSET_CAIPS.has(caip)
+    }) as { caip?: unknown } | undefined
+    return entry?.caip
+  }
+
+  let unavailable: unknown
+  if (path === '/api/v2/portfolio/balances') unavailable = unavailablePubkeyAsset(body?.pubkeys)
+  if (path === '/api/v2/market/info') unavailable = unavailableAsset(body?.caips)
+  if (path === '/api/v2/tx/history') unavailable = unavailablePubkeyAsset(body?.queries)
+  if (unavailable !== undefined) {
+    return `asset ${String(unavailable)} is not available on bitcoin-only firmware`
+  }
+
+  if (path === '/api/v2/utxo/unspent'
+    || path === '/api/v2/utxo/pubkey-info') {
+    if (typeof body?.network === 'string' && !BITCOIN_NETWORK_IDS.has(body.network)) {
+      return `network ${body.network} is not available on bitcoin-only firmware`
+    }
+  }
+
+  if (path === '/api/v2/tx/broadcast'
+    || path === '/api/v2/network/fee-rate') {
+    if (typeof body?.networkId === 'string' && !BITCOIN_NETWORK_IDS.has(body.networkId)) {
+      return `network ${body.networkId} is not available on bitcoin-only firmware`
+    }
   }
 
   return null
