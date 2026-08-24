@@ -201,3 +201,20 @@ export function bitcoinOnlySnapshot(featuresJson: string | undefined): boolean {
     return false
   }
 }
+
+/** A connected Bitcoin-only device remains the authority even when the caller
+ * selects an older full-firmware snapshot for watch-only display. Without this
+ * union, stale snapshot metadata can re-enable altcoin portfolio requests. */
+export function bitcoinOnlyWatchOnlyScope(
+  currentDeviceBitcoinOnly: boolean,
+  snapshotFeaturesJson: string | undefined,
+): boolean {
+  return currentDeviceBitcoinOnly || bitcoinOnlySnapshot(snapshotFeaturesJson)
+}
+
+export function bitcoinOnlyAddressBookHistoryList<T extends { caip: string }>(
+  rows: T[],
+  enabled: boolean,
+): T[] {
+  return enabled ? rows.filter(row => BITCOIN_ASSET_CAIPS.has(row.caip)) : rows
+}

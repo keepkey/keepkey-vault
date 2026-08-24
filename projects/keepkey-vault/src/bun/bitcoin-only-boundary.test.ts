@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  bitcoinOnlyAddressBookHistoryList,
   bitcoinOnlyActivityList,
   bitcoinOnlyBalanceList,
   bitcoinOnlyChainList,
@@ -11,6 +12,7 @@ import {
   bitcoinOnlyReportAllowed,
   bitcoinOnlyRpcRejection,
   bitcoinOnlySnapshot,
+  bitcoinOnlyWatchOnlyScope,
   enforceBitcoinOnlyRpcBoundary,
 } from './bitcoin-only-boundary'
 import { SIGNING_ROUTES } from './signing-routes'
@@ -189,6 +191,24 @@ describe('Bitcoin-only REST boundary', () => {
     expect(bitcoinOnlySnapshot(JSON.stringify({ firmware_variant: 'EmulatorBTC' }))).toBe(true)
     expect(bitcoinOnlySnapshot(JSON.stringify({ firmwareVariant: 'KeepKey' }))).toBe(false)
     expect(bitcoinOnlySnapshot('{broken')).toBe(false)
+  })
+
+  test('keeps the current Bitcoin-only device authoritative over stale watch-only snapshots', () => {
+    const fullSnapshot = JSON.stringify({ firmwareVariant: 'KeepKey' })
+    const bitcoinSnapshot = JSON.stringify({ firmwareVariant: 'KeepKeyBTC' })
+    expect(bitcoinOnlyWatchOnlyScope(true, fullSnapshot)).toBe(true)
+    expect(bitcoinOnlyWatchOnlyScope(false, bitcoinSnapshot)).toBe(true)
+    expect(bitcoinOnlyWatchOnlyScope(false, fullSnapshot)).toBe(false)
+  })
+
+  test('filters stale address-book history by Bitcoin asset', () => {
+    const rows = [
+      { id: 1, caip: 'bip122:000000000019d6689c085ae165831e93/slip44:0' },
+      { id: 2, caip: 'eip155:1/slip44:60' },
+      { id: 3, caip: 'bip122:000000000933ea01ad0ee984209779ba/slip44:1' },
+    ]
+    expect(bitcoinOnlyAddressBookHistoryList(rows, true).map(row => row.id)).toEqual([1, 3])
+    expect(bitcoinOnlyAddressBookHistoryList(rows, false)).toEqual(rows)
   })
 
   test('fences non-Bitcoin address-book networks', () => {

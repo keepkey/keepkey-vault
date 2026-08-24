@@ -136,7 +136,7 @@ import { AuthStore } from "./auth"
 import { getPioneer, getPioneerApiBase, resetPioneer, setPioneerOffline, DEFAULT_API_BASE, getQueryKey as getPioneerQueryKey } from "./pioneer"
 import { setBtcBackendOffline, setBtcNodeConfig, setBtcNodeDeviceEligible, isBtcNodeActive, getBtcBackend, broadcastBtcTx } from "./btc-backend"
 import { isBitcoinOnlyVariant } from "../shared/flags"
-import { bitcoinOnlyActivityList, bitcoinOnlyBalanceList, bitcoinOnlyChainList, bitcoinOnlyLedgerJournalList, bitcoinOnlyLedgerSummaryList, bitcoinOnlyReportAllowed, bitcoinOnlySnapshot, enforceBitcoinOnlyRpcBoundary } from "./bitcoin-only-boundary"
+import { bitcoinOnlyActivityList, bitcoinOnlyAddressBookHistoryList, bitcoinOnlyBalanceList, bitcoinOnlyChainList, bitcoinOnlyLedgerJournalList, bitcoinOnlyLedgerSummaryList, bitcoinOnlyReportAllowed, bitcoinOnlyWatchOnlyScope, enforceBitcoinOnlyRpcBoundary } from "./bitcoin-only-boundary"
 import { assertOnline } from "./offline-policy"
 import { setPerfTelemetryOffline } from "./perf-telemetry"
 import { fetchDefiPositions } from "./zapper"
@@ -153,7 +153,7 @@ import { CHAINS, customChainToChainDef, isChainSupported, hiveRolePath, btcTapro
 import { versionCompare } from "../shared/firmware-versions"
 import type { ChainDef } from "../shared/chains"
 import { BtcAccountManager } from "./btc-accounts"
-import { unwrapUtxoDiscoveryKey } from "./btc-backend/types"
+import { unwrapUtxoDiscoveryKey, utxoDiscoveryKey } from "./btc-backend/types"
 import { EvmAddressManager, evmAddressPath } from "./evm-addresses"
 import { shouldResetManagersOnReady, nextReadyDeviceId } from "../shared/device-switch"
 import { isManagerSeedStale } from "../shared/seed-reconcile"
@@ -6517,7 +6517,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				try { rpc.send['addressbook-changed']({}) } catch { /* webview not ready */ }
 			},
 			getAddressBookHistory: async (params) => {
-				return getAddressBookHistory(params.entryId, null)
+				return bitcoinOnlyAddressBookHistoryList(
+					getAddressBookHistory(params.entryId, null),
+					isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant),
+				)
 			},
 
 			// ── Accounting ledger ────────────────────────────────────
@@ -7211,7 +7214,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					: getLatestDeviceSnapshot()
 				if (!snap) return null
 				const result = getCachedBalances(snap.deviceId)
-				return result ? bitcoinOnlyBalanceList(result.balances, bitcoinOnlySnapshot(snap.featuresJson)) : null
+				const bitcoinOnly = bitcoinOnlyWatchOnlyScope(
+					isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant),
+					snap.featuresJson,
+				)
+				return result ? bitcoinOnlyBalanceList(result.balances, bitcoinOnly) : null
 			},
 			// Re-fetch watch-only balances from Pioneer using addresses reconstructed
 			// from cache — NO device required. Self-contained: deliberately does NOT
@@ -7229,7 +7236,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const deviceId = snap.deviceId
 
 				// 1. Reconstruct the pubkey list from cache (no device available)
-				const snapshotBitcoinOnly = bitcoinOnlySnapshot(snap.featuresJson)
+				const snapshotBitcoinOnly = bitcoinOnlyWatchOnlyScope(
+					isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant),
+					snap.featuresJson,
+				)
 				const allChains = bitcoinOnlyChainList(getAllChains(), snapshotBitcoinOnly)
 				const chainById = new Map(allChains.map(c => [c.id, c]))
 				const pubkeys: Array<{ caip: string; pubkey: string; sourcePubkey?: string; chainId: string; symbol: string; networkId: string }> = []
@@ -7404,7 +7414,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					: getLatestDeviceSnapshot()
 				if (!snap) return []
 				const pubkeys = getCachedPubkeys(snap.deviceId)
-				return bitcoinOnlySnapshot(snap.featuresJson) ? pubkeys.filter(p => p.chainId === 'bitcoin') : pubkeys
+				return bitcoinOnlyWatchOnlyScope(
+					isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant),
+					snap.featuresJson,
+				) ? pubkeys.filter(p => p.chainId === 'bitcoin') : pubkeys
 			},
 
 			// ── Registered devices (device history) ─────────────────
