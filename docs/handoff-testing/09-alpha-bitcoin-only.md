@@ -64,7 +64,10 @@ The runner fails before wallet testing unless all three identities agree:
   correct mainnet encoding.
 - Each of those four addresses is shown on the physical OLED, compared
   character-for-character and by QR, and matches the non-display derivation.
-- Nested SegWit, native SegWit, and Taproot sign offline synthetic transactions.
+- Legacy, nested SegWit, native SegWit, and Taproot sign offline synthetic
+  transactions. The legacy case supplies a complete, structurally valid
+  nonexistent previous transaction whose output belongs to the derived BIP44
+  address.
 - Vault and the device independently display the expected destination, amount,
   and fee.
 - Device rejection propagates as a rejected SDK promise.
@@ -120,10 +123,10 @@ handling, insufficient funds, cancellation at the Vault gate, cancellation on
 the device, PIN-locked reconnect, passphrase account separation, and unplugging
 during address display and signing.
 
-Legacy P2PKH signing is intentionally not faked by the runner: firmware requires
-the full previous transaction for a legacy input. Cover it with a real funded
-test UTXO or add a structurally valid offline previous-transaction fixture. Do
-not weaken that requirement merely to make a synthetic test pass.
+The legacy P2PKH case must keep supplying the complete previous transaction.
+Reducing it to only a txid/amount would bypass the legacy streaming path and is
+not acceptable evidence, even if a future host shim made that request appear to
+pass.
 
 ### Hot-transition regression (required once)
 

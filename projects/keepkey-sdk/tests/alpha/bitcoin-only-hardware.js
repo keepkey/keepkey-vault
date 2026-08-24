@@ -26,6 +26,7 @@ const ADDRESS_CASES = [
 ]
 
 const SIGN_CASES = [
+  { name: 'BIP44 legacy', purpose: 44, scriptType: 'p2pkh', legacy: true },
   { name: 'BIP49 nested SegWit', purpose: 49, scriptType: 'p2sh-p2wpkh', prevoutByte: '33' },
   { name: 'BIP84 native SegWit', purpose: 84, scriptType: 'p2wpkh', prevoutByte: '44' },
   { name: 'BIP86 Taproot', purpose: 86, scriptType: 'p2tr', prevoutByte: '55' },
@@ -108,6 +109,11 @@ const evidence = {
 
 function sha256(bytes) {
   return createHash('sha256').update(bytes).digest('hex')
+}
+
+function hash256(bytes) {
+  const first = createHash('sha256').update(bytes).digest()
+  return createHash('sha256').update(first).digest()
 }
 
 function decodeBase58Check(address) {
@@ -348,7 +354,7 @@ function syntheticTransaction(testCase) {
     version: 2,
     locktime: 0,
     inputs: [{
-      txid: testCase.prevoutByte.repeat(32),
+      txid: testCase.prevoutByte ? testCase.prevoutByte.repeat(32) : '',
       vout: 0,
       addressNList: bipPath(testCase.purpose),
       amount: '80000',
@@ -364,10 +370,40 @@ function syntheticTransaction(testCase) {
   }
 }
 
+function syntheticLegacyPrevout(address) {
+  const amount = Buffer.alloc(8)
+  amount.writeBigUInt64LE(80000n)
+  const script = Buffer.from(p2pkhScript(address), 'hex')
+  const raw = Buffer.concat([
+    Buffer.from('0100000001', 'hex'),
+    Buffer.alloc(32),
+    Buffer.from('ffffffff0100ffffffff01', 'hex'),
+    amount,
+    Buffer.from([script.length]),
+    script,
+    Buffer.alloc(4),
+  ])
+  return {
+    hex: raw.toString('hex'),
+    txid: Buffer.from(hash256(raw)).reverse().toString('hex'),
+  }
+}
+
 async function verifySigning(sdk) {
   evidence.signing = []
   for (const testCase of SIGN_CASES) {
     const tx = syntheticTransaction(testCase)
+    if (testCase.legacy) {
+      const source = await sdk.address.utxoGetAddress({
+        address_n: bipPath(testCase.purpose),
+        coin: 'Bitcoin',
+        script_type: testCase.scriptType,
+        show_display: false,
+      })
+      const prevout = syntheticLegacyPrevout(source.address)
+      tx.inputs[0].txid = prevout.txid
+      tx.inputs[0].hex = prevout.hex
+    }
     console.log(`\n${testCase.name}: offline synthetic prevout; this transaction cannot be broadcast.`)
     console.log('Vault and KeepKey must independently show 0.00070000 BTC to the BitcoinEater address and a 0.00010000 BTC fee.')
     await attest(`Ready to begin the ${testCase.name} signing check?`)
@@ -406,7 +442,9 @@ async function verifySigning(sdk) {
   let rejected = false
   let rejection = ''
   try {
-    await sdk.btc.btcSignTransaction(syntheticTransaction(SIGN_CASES[2]))
+    const taproot = SIGN_CASES.find(testCase => testCase.scriptType === 'p2tr')
+    if (!taproot) throw new Error('Taproot signing case is missing from the acceptance runner')
+    await sdk.btc.btcSignTransaction(syntheticTransaction(taproot))
   } catch (error) {
     rejected = true
     rejection = String(error && error.message ? error.message : error)
