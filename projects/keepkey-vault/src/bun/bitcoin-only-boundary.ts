@@ -69,6 +69,10 @@ export function bitcoinOnlyRejection(
     return 'WalletConnect is not available on bitcoin-only firmware'
   }
 
+  if (path === '/mcp' || path === '/bex-bridge') {
+    return 'multichain agent bridge is not available on bitcoin-only firmware'
+  }
+
   if (method !== 'POST') return null
 
   if (path.startsWith('/addresses/') && path !== '/addresses/utxo') {

@@ -96,7 +96,7 @@ describe('Bitcoin-only REST boundary', () => {
     for (const path of [
       '/api/debug/portfolio', '/api/debug/portfolio/tokens',
       '/api/debug/pioneer-audit', '/api/debug/token-visibility',
-      '/wc', '/wc/connect',
+      '/wc', '/wc/connect', '/mcp', '/bex-bridge',
     ]) {
       expect(bitcoinOnlyRejection('GET', path)).not.toBeNull()
     }

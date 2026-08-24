@@ -92,6 +92,8 @@ The Vault candidate also has executable host-boundary coverage beyond REST:
   its semantic version would otherwise enable those services.
 - authenticated direct REST reads cannot recover stale altcoin activity by ID,
   swap history/discovery, token visibility, or raw debug portfolio state;
+- the MCP/BEX agent bridge is closed because its extension-owned tool catalog
+  and historical multichain results cannot be sanitized by Vault;
 - generic Pioneer v2 routes accept only Bitcoin mainnet/testnet CAIPs and
   network IDs, while multichain catalogs, account-state queries, and staking
   are rejected before network access.
