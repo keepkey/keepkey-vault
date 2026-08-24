@@ -1,7 +1,8 @@
 # Alpha Bitcoin-only acceptance
 
 Owner: BTC-only test lead  
-Target: `alpha`, after firmware PR #535 (Bitcoin-only ARM identity fix) is included  
+Target: `alpha`, after firmware PR #534 (including merged #535 and its follow-up fixes) is included
+
 Safety: the automated runner never wipes, resets, recovers, loads, changes settings, or broadcasts
 
 ## Release blocker found before device testing
@@ -19,9 +20,10 @@ Consequences on physical hardware:
   probes to reach a firmware that cannot service them.
 - Flash-time inspection could not distinguish the Bitcoin-only image.
 
-Firmware PR #535 fixes physical identity and adds a CI assertion over the actual
-flashable ARM artifact. Do not spend physical-device time on an artifact that
-predates that PR's merged head, has a red Bitcoin-only ARM job, or does not
+Firmware PR #534 now carries #535's physical-identity fix and adds a CI
+assertion over the actual flashable ARM artifact. Do not spend physical-device
+time on an artifact that predates #534's final green head, has a red Bitcoin-only
+ARM job, or does not
 embed `KeepKeyBTC\0`.
 
 ## Candidate preparation
@@ -76,6 +78,8 @@ The Vault candidate also has executable host-boundary coverage beyond REST:
   ClearSign, swaps, and WalletConnect pairing fail before handler side effects;
 - portfolio, history, report, mobile-pairing, audit, watch-only, cached-balance,
   and address-book reads are Bitcoin-scoped at their source;
+- dynamic market/token requests and stale full-firmware ledger/report records
+  are fenced while the Bitcoin-only device is connected;
 - a full-firmware → Bitcoin-only transition resets in-memory account managers
   and removes persisted non-Bitcoin balances and xpubs;
 - existing WalletConnect sessions are destroyed, queued deep links discarded,
@@ -145,7 +149,7 @@ state, plus the dApp-side WalletConnect disconnect. Never use a production seed.
 
 ## Host verification already completed
 
-- Bitcoin-only policy: 18 tests, including activity-store filtering and the
+- Bitcoin-only policy: 20 tests, including activity/ledger/report filtering and the
   renderer/REST dispatch boundaries.
 - Bitcoin backend: Core 35 assertions, normalization 16, device-only 5.
 - Taproot builder: P2TR input/change and BIP86 account-path selection, 3 cases.
