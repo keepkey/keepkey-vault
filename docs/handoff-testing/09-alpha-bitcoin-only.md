@@ -170,6 +170,10 @@ state, plus the dApp-side WalletConnect disconnect. Never use a production seed.
   renderer/REST/Pioneer dispatch boundaries, queued-approval revalidation, and
   batch-xpub network validation.
 - Focused host matrix: 33 tests / 213 assertions.
+- The Linux packaging workflow now runs the broader executable gate: 41 Bun
+  tests / 232 expectations plus 87 standalone backend/policy assertions and a
+  syntax check of the physical runner. Packaging green is no longer the only
+  automated Vault signal.
 - Bitcoin backend: Core 35 assertions, normalization 16, device-only 5.
 - Taproot builder: P2TR input/change and BIP86 account-path selection, 3 cases.
 - hdwallet Taproot: 8 tests, 28 assertions covering protocol enums, BIP86

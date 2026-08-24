@@ -154,6 +154,25 @@ jobs:
         run: cd projects/keepkey-vault && bun install --frozen-lockfile
         shell: bash
 
+      - name: Test Bitcoin-only host boundary (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          cd projects/keepkey-vault
+          bun test \
+            src/bun/bitcoin-only-boundary.test.ts \
+            src/bun/perf-telemetry-offline.test.ts \
+            src/bun/txbuilder/utxo-selfhost-policy.test.ts \
+            src/bun/txbuilder/utxo-taproot.test.ts \
+            __tests__/taproot-host.test.ts
+          bun src/bun/btc-backend/address-discovery.test.ts
+          bun src/bun/btc-backend/core.test.ts
+          bun src/bun/btc-backend/normalize.test.ts
+          bun src/bun/btc-backend/device-only.test.ts
+          bun src/bun/offline-policy.test.ts
+          bun src/bun/pioneer-guard.test.ts
+          node --check ../keepkey-sdk/tests/alpha/bitcoin-only-hardware.js
+
       - name: Install protoc (macOS)
         if: runner.os == 'macOS'
         run: brew install protobuf
