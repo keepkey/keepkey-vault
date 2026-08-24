@@ -97,6 +97,11 @@ The Vault candidate also has executable host-boundary coverage beyond REST:
 - generic Pioneer v2 routes accept only Bitcoin mainnet/testnet CAIPs and
   network IDs, while multichain catalogs, account-state queries, and staking
   are rejected before network access.
+- a signing request queued under full firmware is revalidated against the live
+  device at approval time, so swapping to Bitcoin-only firmware cannot carry an
+  already-open Litecoin or altcoin approval across the transition;
+- batch xpub requests validate both the coin and every declared network, so a
+  Bitcoin xpub cannot be returned under an Ethereum or other altcoin label.
 
 The synthetic prevouts do not exist, so signed transactions cannot be
 broadcast. Evidence is written with mode `0600`, including the exact artifact,
@@ -159,10 +164,12 @@ state, plus the dApp-side WalletConnect disconnect. Never use a production seed.
 
 ## Host verification already completed
 
-- Bitcoin-only policy: 25 tests / 191 assertions, including
+- Bitcoin-only policy: 26 tests / 197 assertions, including
   activity/ledger/report filtering,
   watch-only snapshot authority, address-book history filtering, and the
-  renderer/REST/Pioneer dispatch boundaries.
+  renderer/REST/Pioneer dispatch boundaries, queued-approval revalidation, and
+  batch-xpub network validation.
+- Focused host matrix: 33 tests / 213 assertions.
 - Bitcoin backend: Core 35 assertions, normalization 16, device-only 5.
 - Taproot builder: P2TR input/change and BIP86 account-path selection, 3 cases.
 - hdwallet Taproot: 8 tests, 28 assertions covering protocol enums, BIP86
