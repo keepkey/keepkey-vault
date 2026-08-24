@@ -5,7 +5,10 @@ import {
   bitcoinOnlyChainList,
   bitcoinOnlyCoinAllowed,
   bitcoinOnlyCoinList,
+  bitcoinOnlyLedgerJournalList,
+  bitcoinOnlyLedgerSummaryList,
   bitcoinOnlyRejection,
+  bitcoinOnlyReportAllowed,
   bitcoinOnlyRpcRejection,
   bitcoinOnlySnapshot,
   enforceBitcoinOnlyRpcBoundary,
@@ -112,6 +115,16 @@ describe('Bitcoin-only REST boundary', () => {
     })).toBeNull()
   })
 
+  test('fences dynamic altcoin market and token-state RPC', () => {
+    const btc = 'bip122:000000000019d6689c085ae165831e93/slip44:0'
+    const eth = 'eip155:1/slip44:60'
+    expect(bitcoinOnlyRpcRejection('getMarketData', { caips: [btc] })).toBeNull()
+    expect(bitcoinOnlyRpcRejection('getMarketData', { caips: [btc, eth] })).not.toBeNull()
+    for (const method of ['setTokenVisibility', 'removeTokenVisibility', 'getTokenVisibilityMap']) {
+      expect(bitcoinOnlyRpcRejection(method, { caip: eth })).not.toBeNull()
+    }
+  })
+
   test('blocks enabling WalletConnect but permits teardown', () => {
     expect(bitcoinOnlyRpcRejection('setWalletConnectEnabled', { enabled: true })).not.toBeNull()
     expect(bitcoinOnlyRpcRejection('setWalletConnectEnabled', { enabled: false })).toBeNull()
@@ -150,6 +163,25 @@ describe('Bitcoin-only REST boundary', () => {
     ]
     expect(bitcoinOnlyActivityList(rows, true).map(row => row.id)).toEqual([1, 3, 5])
     expect(bitcoinOnlyActivityList(rows, false)).toEqual(rows)
+  })
+
+  test('filters stale full-firmware ledger and report state', () => {
+    const summary = [
+      { id: 1, chainId: 'bitcoin' },
+      { id: 2, chainId: 'ethereum' },
+    ]
+    expect(bitcoinOnlyLedgerSummaryList(summary, true)).toEqual([{ id: 1, chainId: 'bitcoin' }])
+
+    const journals = [
+      { id: 1, postings: [{ asset: 'BTC' }, { asset: 'ETH' }] },
+      { id: 2, postings: [{ asset: 'ETH' }] },
+    ]
+    expect(bitcoinOnlyLedgerJournalList(journals, true)).toEqual([
+      { id: 1, postings: [{ asset: 'BTC' }] },
+    ])
+    expect(bitcoinOnlyReportAllowed('all', true)).toBe(false)
+    expect(bitcoinOnlyReportAllowed('bitcoin', true)).toBe(true)
+    expect(bitcoinOnlyReportAllowed('all', false)).toBe(true)
   })
 
   test('recognizes bitcoin-only watch-only snapshots', () => {

@@ -5,6 +5,10 @@ const BITCOIN_NETWORK_IDS = new Set([
   'bip122:000000000019d6689c085ae165831e93',
   'bip122:000000000933ea01ad0ee984209779ba',
 ])
+const BITCOIN_ASSET_CAIPS = new Set([
+  'bip122:000000000019d6689c085ae165831e93/slip44:0',
+  'bip122:000000000933ea01ad0ee984209779ba/slip44:1',
+])
 const NON_BITCOIN_RPC_PREFIXES = [
   'clearsign', 'eth', 'cosmos', 'thorchain', 'mayachain', 'osmosis',
   'xrp', 'solana', 'tron', 'ton', 'hive', 'zcash',
@@ -19,6 +23,7 @@ const NON_BITCOIN_RPC_METHODS = new Set([
   'removeCustomToken', 'getCustomTokens', 'setCustomTokenIcon',
   'addCustomChain', 'removeCustomChain', 'getCustomChains',
   'executeSwap', 'previewSwapBuild', 'wcPair', 'wcApprovePair',
+  'setTokenVisibility', 'removeTokenVisibility', 'getTokenVisibilityMap',
 ])
 
 /** Bitcoin-only firmware contains exactly the Bitcoin mainnet and testnet coin
@@ -104,6 +109,14 @@ export function bitcoinOnlyRpcRejection(method: string, params?: any): string | 
     }
   }
 
+  if (method === 'getMarketData' && Array.isArray(params?.caips)) {
+    const unavailable = params.caips.find((caip: unknown) =>
+      typeof caip === 'string' && !BITCOIN_ASSET_CAIPS.has(caip))
+    if (unavailable) {
+      return `asset ${String(unavailable)} is not available on bitcoin-only firmware`
+    }
+  }
+
   if (method === 'setWalletConnectEnabled' && params?.enabled === true) {
     return 'WalletConnect is not available on bitcoin-only firmware'
   }
@@ -157,6 +170,23 @@ export function bitcoinOnlyActivityList<T extends { chainId?: string | null; cha
 ): T[] {
   if (!enabled) return rows
   return rows.filter(row => row.chainId === 'bitcoin' || row.chain === 'BTC' || row.chain === 'Bitcoin')
+}
+
+export function bitcoinOnlyLedgerSummaryList<T extends { chainId: string }>(rows: T[], enabled: boolean): T[] {
+  return enabled ? rows.filter(row => row.chainId === 'bitcoin') : rows
+}
+
+export function bitcoinOnlyLedgerJournalList<
+  T extends { postings: Array<{ asset: string }> },
+>(rows: T[], enabled: boolean): T[] {
+  if (!enabled) return rows
+  return rows
+    .map(row => ({ ...row, postings: row.postings.filter(posting => posting.asset === 'BTC') }))
+    .filter(row => row.postings.length > 0) as T[]
+}
+
+export function bitcoinOnlyReportAllowed(chain: string | undefined, enabled: boolean): boolean {
+  return !enabled || chain === 'bitcoin'
 }
 
 export function bitcoinOnlySnapshot(featuresJson: string | undefined): boolean {

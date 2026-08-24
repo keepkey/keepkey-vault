@@ -136,7 +136,7 @@ import { AuthStore } from "./auth"
 import { getPioneer, getPioneerApiBase, resetPioneer, setPioneerOffline, DEFAULT_API_BASE, getQueryKey as getPioneerQueryKey } from "./pioneer"
 import { setBtcBackendOffline, setBtcNodeConfig, setBtcNodeDeviceEligible, isBtcNodeActive, getBtcBackend, broadcastBtcTx } from "./btc-backend"
 import { isBitcoinOnlyVariant } from "../shared/flags"
-import { bitcoinOnlyActivityList, bitcoinOnlyBalanceList, bitcoinOnlyChainList, bitcoinOnlySnapshot, enforceBitcoinOnlyRpcBoundary } from "./bitcoin-only-boundary"
+import { bitcoinOnlyActivityList, bitcoinOnlyBalanceList, bitcoinOnlyChainList, bitcoinOnlyLedgerJournalList, bitcoinOnlyLedgerSummaryList, bitcoinOnlyReportAllowed, bitcoinOnlySnapshot, enforceBitcoinOnlyRpcBoundary } from "./bitcoin-only-boundary"
 import { assertOnline } from "./offline-policy"
 import { setPerfTelemetryOffline } from "./perf-telemetry"
 import { fetchDefiPositions } from "./zapper"
@@ -6524,12 +6524,18 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			getLedgerSummary: async () => {
 				const deviceId = engine.getDeviceState().deviceId
 				if (!deviceId) return []
-				return getLedgerSummary(deviceId)
+				return bitcoinOnlyLedgerSummaryList(
+					getLedgerSummary(deviceId),
+					isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant),
+				)
 			},
 			getLedgerJournals: async ({ limit }: { limit?: number }) => {
 				const deviceId = engine.getDeviceState().deviceId
 				if (!deviceId) return []
-				return getLedgerJournals(deviceId, limit ?? 50)
+				return bitcoinOnlyLedgerJournalList(
+					getLedgerJournals(deviceId, limit ?? 50),
+					isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant),
+				)
 			},
 
 			// ── Reports ─────────────────────────────────────────────
@@ -6550,6 +6556,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				}
 
 				const reportId = `rpt_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+				const reportChain = isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant) ? 'bitcoin' : 'all'
 
 				// Get cached balances for report data
 				const cached = getCachedBalances(deviceId)
@@ -6598,7 +6605,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const deviceLabel = engine.getDeviceState().label || 'KeepKey'
 
 				// Save placeholder (lod=5 always)
-				saveReport(deviceId, reportId, 'all', 5, 0, 'generating', '{}')
+				saveReport(deviceId, reportId, reportChain, 5, 0, 'generating', '{}')
 
 				// Send initial progress
 				try { rpc.send['report-progress']({ id: reportId, message: 'Starting...', percent: 0 }) } catch {}
@@ -6617,7 +6624,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					const totalUsd = balances.reduce((s, b) => s + (b.balanceUsd || 0), 0)
 					// M7: Only save final result if report wasn't deleted during generation
 					if (reportExists(reportId)) {
-						saveReport(deviceId, reportId, 'all', 5, totalUsd, 'complete', JSON.stringify(reportData))
+						saveReport(deviceId, reportId, reportChain, 5, totalUsd, 'complete', JSON.stringify(reportData))
 					}
 
 					try { rpc.send['report-progress']({ id: reportId, message: 'Complete', percent: 100 }) } catch {}
@@ -6632,7 +6639,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				} catch (e: any) {
 					// M9: Sanitize error messages — strip auth keys and URLs
 					const safeMsg = e.message?.replace(/key:[^\s"',}]+/gi, 'key:***').replace(/https?:\/\/[^\s"',}]+/gi, '<url>') || 'Report generation failed'
-					saveReport(deviceId, reportId, 'all', 5, 0, 'error', '{}', safeMsg)
+					saveReport(deviceId, reportId, reportChain, 5, 0, 'error', '{}', safeMsg)
 					try { rpc.send['report-progress']({ id: reportId, message: `Error: ${safeMsg}`, percent: 100 }) } catch {}
 					throw new Error(safeMsg)
 				}
@@ -6643,7 +6650,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (engine.isPassphraseWallet) return []
 				const deviceId = engine.getDeviceState().deviceId
 				if (!deviceId) return []
-				return getReportsList(deviceId)
+				const bitcoinOnly = isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant)
+				return getReportsList(deviceId).filter(report => bitcoinOnlyReportAllowed(report.chain, bitcoinOnly))
 			},
 
 			// H1: Scope getReport/deleteReport to the current device
@@ -6651,7 +6659,12 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (engine.isPassphraseWallet) return null
 				const deviceId = engine.getDeviceState().deviceId
 				if (!deviceId) throw new Error('No device connected')
-				return getReportById(params.id, deviceId)
+				const report = getReportById(params.id, deviceId)
+				if (!report) return null
+				return bitcoinOnlyReportAllowed(
+					report.meta.chain,
+					isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant),
+				) ? report : null
 			},
 
 			deleteReport: async (params) => {
@@ -6667,6 +6680,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!deviceId) throw new Error('No device connected')
 				const report = getReportById(params.id, deviceId)
 				if (!report) throw new Error('Report not found')
+				if (!bitcoinOnlyReportAllowed(report.meta.chain, isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant))) {
+					throw new Error('This report contains full-firmware data and is unavailable while a Bitcoin-only device is connected.')
+				}
 
 				const dateSuffix = new Date(report.meta.createdAt).toISOString().split('T')[0]
 				const year = new Date(report.meta.createdAt).getFullYear()
