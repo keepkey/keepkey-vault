@@ -136,7 +136,7 @@ import { AuthStore } from "./auth"
 import { getPioneer, getPioneerApiBase, resetPioneer, setPioneerOffline, DEFAULT_API_BASE, getQueryKey as getPioneerQueryKey } from "./pioneer"
 import { setBtcBackendOffline, setBtcNodeConfig, setBtcNodeDeviceEligible, isBtcNodeActive, getBtcBackend, broadcastBtcTx } from "./btc-backend"
 import { isBitcoinOnlyVariant } from "../shared/flags"
-import { bitcoinOnlyActivityList, bitcoinOnlyAddressBookHistoryList, bitcoinOnlyBalanceList, bitcoinOnlyChainList, bitcoinOnlyLedgerJournalList, bitcoinOnlyLedgerSummaryList, bitcoinOnlyReportAllowed, bitcoinOnlyWatchOnlyScope, enforceBitcoinOnlyRpcBoundary } from "./bitcoin-only-boundary"
+import { bitcoinOnlyActivityList, bitcoinOnlyAddressBookHistoryList, bitcoinOnlyBalanceList, bitcoinOnlyChainList, bitcoinOnlyLedgerJournalList, bitcoinOnlyLedgerSummaryList, bitcoinOnlyPendingSigningRejection, bitcoinOnlyReportAllowed, bitcoinOnlyWatchOnlyScope, enforceBitcoinOnlyRpcBoundary } from "./bitcoin-only-boundary"
 import { assertOnline } from "./offline-policy"
 import { setPerfTelemetryOffline } from "./perf-telemetry"
 import { fetchDefiPositions } from "./zapper"
@@ -872,6 +872,7 @@ const auth = new AuthStore()
 // approval RPC records the one request for which the user clicked "Allow once";
 // the awaiting REST callback consumes and deletes it immediately.
 const blindSigningApprovalIds = new Set<string>()
+const pendingSigningApprovalInfo = new Map<string, SigningRequestInfo>()
 async function requestSigningApprovalDecision(id: string) {
 	const approved = await auth.requestSigningApproval(id)
 	const allowBlindSigning = approved && blindSigningApprovalIds.has(id)
@@ -1476,11 +1477,13 @@ const restCallbacks: RestApiCallbacks = {
 	},
 	onSigningRequest: async (info: SigningRequestInfo) => {
 		attachSigningPolicySnapshot(info)
+		pendingSigningApprovalInfo.set(info.id, info)
 		try { rpc.send['signing-request'](info) } catch { /* webview not ready */ }
 		acquireWindowFocus()
 		try {
 			return await requestSigningApprovalDecision(info.id)
 		} finally {
+			pendingSigningApprovalInfo.delete(info.id)
 			releaseWindowFocus()
 		}
 	},
@@ -5942,6 +5945,14 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				auth.rejectPairing()
 			},
 			approveSigningRequest: async (params) => {
+				if (isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant)) {
+					const rejection = bitcoinOnlyPendingSigningRejection(pendingSigningApprovalInfo.get(params.id))
+					if (rejection) {
+						blindSigningApprovalIds.delete(params.id)
+						auth.rejectSigningRequest(params.id)
+						throw new Error(rejection)
+					}
+				}
 				if (params.allowBlindSigning === true) blindSigningApprovalIds.add(params.id)
 				if (!auth.approveSigningRequest(params.id)) {
 					blindSigningApprovalIds.delete(params.id)

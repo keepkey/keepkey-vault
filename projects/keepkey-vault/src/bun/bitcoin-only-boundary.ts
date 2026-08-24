@@ -193,6 +193,17 @@ export function bitcoinOnlyRpcRejection(method: string, params?: any): string | 
   return null
 }
 
+/** Revalidate a queued REST signing request at approval time. A request can be
+ * queued with multi-coin firmware attached and approved after the user swaps
+ * to a Bitcoin-only device, so the request-time boundary alone is not enough.
+ * Missing context fails closed: approval must never outlive its audit payload. */
+export function bitcoinOnlyPendingSigningRejection(
+  request?: { method: string; rawRequestBody?: Record<string, unknown> },
+): string | null {
+  if (!request) return 'signing request context is unavailable on bitcoin-only firmware'
+  return bitcoinOnlyRejection('POST', request.method, request.rawRequestBody)
+}
+
 type RpcHandler = (...args: any[]) => any
 
 /** Wrap every renderer RPC handler once. This keeps the check ahead of handler

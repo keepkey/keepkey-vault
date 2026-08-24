@@ -8,6 +8,7 @@ import {
   bitcoinOnlyCoinList,
   bitcoinOnlyLedgerJournalList,
   bitcoinOnlyLedgerSummaryList,
+  bitcoinOnlyPendingSigningRejection,
   bitcoinOnlyRejection,
   bitcoinOnlyReportAllowed,
   bitcoinOnlyRpcRejection,
@@ -225,6 +226,22 @@ describe('Bitcoin-only REST boundary', () => {
     expect(calls).toBe(0)
     expect(await handlers.btcSignTx({ coin: 'Bitcoin' })).toBe('signed')
     expect(calls).toBe(1)
+  })
+
+  test('revalidates queued signing requests against the device present at approval', () => {
+    expect(bitcoinOnlyPendingSigningRejection({
+      method: '/utxo/sign-transaction',
+      rawRequestBody: { coin: 'Bitcoin' },
+    })).toBeNull()
+    expect(bitcoinOnlyPendingSigningRejection({
+      method: '/utxo/sign-transaction',
+      rawRequestBody: { coin: 'Litecoin' },
+    })).not.toBeNull()
+    expect(bitcoinOnlyPendingSigningRejection({
+      method: '/eth/sign-transaction',
+      rawRequestBody: {},
+    })).not.toBeNull()
+    expect(bitcoinOnlyPendingSigningRejection()).not.toBeNull()
   })
 
   test('filters automatic chain and cached-balance inputs at source', () => {
