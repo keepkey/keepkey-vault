@@ -10,6 +10,7 @@ import { getPioneer } from './pioneer'
 import { parseRequest } from './validate'
 import * as S from './schemas'
 import { utxoDiscoveryKey } from './btc-backend/types'
+import { assertPioneerSuccess } from './btc-backend/normalize'
 
 const TAG = '[rest-v2]'
 
@@ -35,6 +36,7 @@ export async function handleV2DataRoute(
       const resp = await pioneer.GetPortfolioBalances({
         pubkeys: body.pubkeys.map(p => ({ caip: p.caip, pubkey: utxoDiscoveryKey(p.pubkey, p.scriptType) })),
       }, { forceRefresh: true })
+      assertPioneerSuccess(resp, 'GetPortfolioBalances')
       return json({ data: resp?.data || resp })
     }
 
@@ -43,6 +45,7 @@ export async function handleV2DataRoute(
       const body = await parseRequest(req, S.MarketInfoRequest)
       const pioneer = await getPioneer()
       const resp = await pioneer.GetMarketInfo(body.caips)
+      assertPioneerSuccess(resp, 'GetMarketInfo')
       return json({ data: resp?.data || resp })
     }
 
@@ -73,6 +76,7 @@ export async function handleV2DataRoute(
         network: body.network,
         xpub: utxoDiscoveryKey(body.xpub, body.scriptType),
       })
+      assertPioneerSuccess(resp, 'ListUnspent')
       return json({ data: resp?.data || resp })
     }
 
@@ -84,6 +88,7 @@ export async function handleV2DataRoute(
         network: body.network,
         xpub: utxoDiscoveryKey(body.xpub, body.scriptType),
       })
+      assertPioneerSuccess(resp, 'GetPubkeyInfo')
       return json({ data: resp?.data || resp })
     }
 
@@ -96,6 +101,7 @@ export async function handleV2DataRoute(
       const resp = await pioneer.GetTransactionHistory({
         queries: body.queries.map(q => ({ caip: q.caip, pubkey: utxoDiscoveryKey(q.pubkey, q.scriptType) })),
       })
+      assertPioneerSuccess(resp, 'GetTransactionHistory')
       return json({ data: resp?.data || resp })
     }
 
@@ -104,6 +110,7 @@ export async function handleV2DataRoute(
       const body = await parseRequest(req, S.BroadcastRequest)
       const pioneer = await getPioneer()
       const resp = await pioneer.Broadcast({ networkId: body.networkId, serialized: body.serialized })
+      assertPioneerSuccess(resp, 'Broadcast')
       return json({ data: resp?.data || resp })
     }
 
@@ -119,6 +126,7 @@ export async function handleV2DataRoute(
       const resp = typeof pioneer.GetFeeRateByNetwork === 'function'
         ? await pioneer.GetFeeRateByNetwork({ networkId: body.networkId })
         : await pioneer.GetFeeRate({ networkId: body.networkId })
+      assertPioneerSuccess(resp, 'GetFeeRate')
       return json({ data: resp?.data || resp })
     }
 

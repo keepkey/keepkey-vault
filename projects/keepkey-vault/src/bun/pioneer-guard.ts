@@ -10,7 +10,10 @@
  * Leaf module (no imports) so both pioneer.ts and btc-backend/index.ts can use it
  * without an import cycle.
  */
-const BTC_NETWORK_ID = 'bip122:000000000019d6689c085ae165831e93'
+const BTC_NETWORK_IDS = new Set([
+  'bip122:000000000019d6689c085ae165831e93',
+  'bip122:000000000933ea01ad0ee984209779ba',
+])
 
 // Pioneer methods FULLY replaced by the BtcBackend seam — forbidden for BTC when a
 // node is on. Address discovery and history are included: Bitcoin Core cannot
@@ -20,7 +23,7 @@ const BTC_NETWORK_ID = 'bip122:000000000019d6689c085ae165831e93'
 const GUARDED = [
   'ListUnspent', 'GetFeeRateByNetwork', 'GetFeeRate', 'Broadcast',
   'GetPubkeyInfo', 'GetTransactionHistory', 'GetPortfolioBalances',
-  'GetBalanceAddressByNetwork', 'UtxoLookup',
+  'GetBalanceAddressByNetwork', 'LookupUtxoTx', 'UtxoLookup',
 ]
 
 let active = false
@@ -32,7 +35,7 @@ export function setPioneerGuardActive(v: boolean): void {
 
 function isBtcArg(arg: any): boolean {
   const network = arg?.network ?? arg?.networkId ?? arg?.caip
-  if (typeof network === 'string' && (network === BTC_NETWORK_ID || network.startsWith(`${BTC_NETWORK_ID}/`))) return true
+  if (typeof network === 'string' && [...BTC_NETWORK_IDS].some(id => network === id || network.startsWith(`${id}/`))) return true
   for (const list of [arg?.queries, arg?.pubkeys]) {
     if (Array.isArray(list) && list.some((entry: any) => isBtcArg(entry))) return true
   }

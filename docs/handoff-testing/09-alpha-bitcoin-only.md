@@ -121,6 +121,11 @@ test wallet and make an explicit spending decision before these cases:
 | Self-hosted Bitcoin Core | Same four accounts; manually select/verify receive index | No-change/send-max build only | One minimal-value no-change transaction, if deliberately funded for it | No Pioneer chain-data fallback; Core UTXOs, fees, txid, and post-confirm balance agree; history and automatic change discovery are explicitly unavailable |
 | Offline | Cached account plus manually selected/verified receive index | Device address derivation and raw/synthetic signing only | Build, history, sweep, swap, report, and broadcast must reject | No outbound sockets after airplane mode is enabled; cached balances remain readable and device address/signing still work |
 
+Pioneer server/client follow-up is tracked in
+[`../handoff-pioneer-alpha-bitcoin-only.md`](../handoff-pioneer-alpha-bitcoin-only.md).
+Mainnet Pioneer testing may proceed, but do not claim Pioneer-backed testnet or
+degraded-backend correctness until that handoff's acceptance gate passes.
+
 Bitcoin Core's `scantxoutset` sees only the current UTXO set. It cannot prove
 that an empty address was previously spent from, so it cannot safely choose the
 next unused receive index or reconstruct transaction history. Vault must show
