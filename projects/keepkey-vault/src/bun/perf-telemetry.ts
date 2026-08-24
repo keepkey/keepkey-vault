@@ -90,6 +90,23 @@ export function buildRecord(opts: {
 let cfg: { apiBase: string; queryKey: string } | null = null
 const buffer: PerfRecord[] = []
 let flushTimer: ReturnType<typeof setInterval> | null = null
+let offline = false
+
+function startFlushTimer(): void {
+  if (offline || flushTimer || !cfg) return
+  flushTimer = setInterval(() => void flush(), FLUSH_INTERVAL_MS)
+  if (typeof (flushTimer as any).unref === 'function') (flushTimer as any).unref()
+}
+
+export function setPerfTelemetryOffline(value: boolean): void {
+  offline = value
+  if (offline && flushTimer) {
+    clearInterval(flushTimer)
+    flushTimer = null
+  } else if (!offline) {
+    startFlushTimer()
+  }
+}
 
 export function pushRecord(rec: PerfRecord): void {
   buffer.push(rec)
@@ -105,7 +122,7 @@ export function recentPerfRecords(n = 20): PerfRecord[] {
 let flushInFlight = false
 
 export async function flush(): Promise<void> {
-  if (!cfg || buffer.length === 0 || flushInFlight) return
+  if (offline || !cfg || buffer.length === 0 || flushInFlight) return
   flushInFlight = true
   const records = buffer.slice() // clear only on success — a failed flush retries next cycle
   try {
@@ -129,10 +146,7 @@ export async function flush(): Promise<void> {
  */
 export function instrumentPortfolio(client: any, options: { apiBase: string; queryKey: string }): void {
   cfg = options
-  if (!flushTimer) {
-    flushTimer = setInterval(() => void flush(), FLUSH_INTERVAL_MS)
-    if (typeof (flushTimer as any).unref === 'function') (flushTimer as any).unref()
-  }
+  startFlushTimer()
   if (typeof client?.GetPortfolioBalances !== 'function' || client.__perfInstrumented) return
   const orig = client.GetPortfolioBalances.bind(client)
   client.GetPortfolioBalances = async (...args: any[]) => {

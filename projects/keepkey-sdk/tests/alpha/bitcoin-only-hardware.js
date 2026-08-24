@@ -427,6 +427,10 @@ async function verifyApp() {
     'After disconnect and reconnect, did Vault remain Bitcoin-only without altcoin cards or altcoin device prompts?',
     'During idle portfolio refresh, were there no repeated “Unknown message” device errors from altcoin polling?',
     'Did the activity list and address book contain only Bitcoin rows, with no stale altcoin data from an earlier full-firmware session?',
+    'With offline mode enabled, did cached balance and device address derivation remain available while history, build, broadcast, sweep, swap, and report actions rejected as OFFLINE?',
+    'While offline mode was enabled, did an OS-level connection monitor show no outbound Pioneer, Blockbook, Core, update, or relay connections?',
+    'In Bitcoin Core mode, did Receive warn that address history/index discovery is unavailable instead of silently claiming index 0 is unused?',
+    'In self-hosted mode, did disabling or breaking the configured node fail visibly without any Pioneer chain-data fallback?',
   ]
   for (const observation of observations) await attest(observation)
   evidence.app = { observations: observations.map(name => ({ name, confirmed: true })) }

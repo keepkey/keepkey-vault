@@ -10,6 +10,7 @@
  */
 import type { BtcBackend, BtcUtxo, BtcFeeRates } from './types'
 import { utxoDiscoveryKey } from './types'
+import { addressIndicesFromTokens } from './address-discovery'
 
 export interface BlockbookConfig {
   url: string                          // base, no trailing slash — e.g. http://host:9130
@@ -96,6 +97,15 @@ export function makeBlockbookBackend(cfg: BlockbookConfig): BtcBackend {
 
     async rawTxHex({ txid }) {
       try { return (await bbFetch(cfg, `/api/v2/tx-specific/${txid}`))?.hex } catch { return undefined }
+    },
+
+    async addressIndices({ xpub, scriptType }) {
+      const key = utxoDiscoveryKey(xpub, scriptType)
+      const data = await bbFetch(
+        cfg,
+        `/api/v2/xpub/${encodeURIComponent(key)}?details=tokenBalances&tokens=used&pageSize=1`,
+      )
+      return addressIndicesFromTokens(data?.tokens || [], 'blockbook')
     },
 
     async tipHeight() {

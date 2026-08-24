@@ -31,6 +31,7 @@ import {
 import { handleV2DataRoute } from './rest-pioneer'
 import { handleSwapRoute } from './rest-swap'
 import { handleSweepRoute } from './rest-sweep'
+import { isOfflineNetworkRoute } from './offline-policy'
 import { handleLedgerRoute } from './rest-ledger'
 import { getSetting, findApiLogs, getApiLogById, getRecentActivityFromLog, getSwapHistory, getSwapHistoryByTxid, getSwapHistoryStats, getCachedBalances, getCachedPubkeys, getAllTokenVisibility, getTokensByVisibility, setTokenVisibility, removeTokenVisibility, insertClearSignEvent } from './db'
 import { detectSpamToken, categorizeTokens } from '../shared/spamFilter'
@@ -3839,6 +3840,9 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/api/v1/activity/rebuild' && method === 'POST') {
           auth.requireAuth(req)
+          if (getSetting('offline_mode') === '1' && isOfflineNetworkRoute(path, method)) {
+            throw new HttpError(503, 'OFFLINE: activity rebuild is disabled in offline mode')
+          }
           if (engine.isPassphraseWallet) {
             return json({ error: 'Activity rebuild is not available for passphrase-protected wallets' }, 403)
           }
@@ -4466,18 +4470,27 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         // the dedicated handler instead of falling through to the legacy
         // pioneer-passthrough quote endpoint.
         if (path.startsWith('/api/v2/swap')) {
+          if (getSetting('offline_mode') === '1' && isOfflineNetworkRoute(path, method)) {
+            throw new HttpError(503, 'OFFLINE: swap routes are disabled in offline mode')
+          }
           const resp = await handleSwapRoute(path, method, req, auth, json, callbacks)
           if (resp) return resp
         }
 
         // ── REST v2 data routes (balances, market, UTXOs, etc.) ──
         if (path.startsWith('/api/v2/') && !path.startsWith('/api/v2/devices') && !path.startsWith('/api/v2/sweep/') && !path.startsWith('/api/v2/swap')) {
+          if (getSetting('offline_mode') === '1' && isOfflineNetworkRoute(path, method)) {
+            throw new HttpError(503, 'OFFLINE: network data routes are disabled in offline mode')
+          }
           const resp = await handleV2DataRoute(path, method, req, auth, json)
           if (resp) return resp
         }
 
         // ── BTC Sweep tool ──────────────────────────────────────────
         if (path.startsWith('/api/v2/sweep/')) {
+          if (getSetting('offline_mode') === '1' && isOfflineNetworkRoute(path, method)) {
+            throw new HttpError(503, 'OFFLINE: sweep routes are disabled in offline mode')
+          }
           const resp = await handleSweepRoute(path, method, req, engine, auth, json, callbacks)
           if (resp) return resp
         }

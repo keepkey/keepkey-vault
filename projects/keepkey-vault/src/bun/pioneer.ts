@@ -29,6 +29,11 @@ const MIN_RETRY_DELAY = 5000 // 5s minimum between init retries
 let pioneerInstance: any = null
 let initPromise: Promise<any> | null = null
 let lastInitAttempt = 0
+let offline = false
+
+export function setPioneerOffline(value: boolean): void {
+  offline = value
+}
 
 /** Resolve the Pioneer API base URL (no trailing slash). */
 export function getPioneerApiBase(): string {
@@ -45,6 +50,7 @@ export function resetPioneer(): void {
 }
 
 export async function getPioneer(): Promise<any> {
+  if (offline) throw new Error('OFFLINE: Pioneer is disabled in offline (airplane) mode')
   if (pioneerInstance) return pioneerInstance
 
   // Deduplicate concurrent init calls
@@ -56,6 +62,7 @@ export async function getPioneer(): Promise<any> {
   if (lastInitAttempt > 0 && timeSinceLast < MIN_RETRY_DELAY) {
     await new Promise(r => setTimeout(r, MIN_RETRY_DELAY - timeSinceLast))
   }
+  if (offline) throw new Error('OFFLINE: Pioneer is disabled in offline (airplane) mode')
 
   lastInitAttempt = Date.now()
 
@@ -81,6 +88,10 @@ export async function getPioneer(): Promise<any> {
       const client = new Pioneer(specUrl, { queryKey: qk, timeout: 60000, overrideHost })
       pioneerInstance = await client.init()
       if (!pioneerInstance) throw new Error('Pioneer client init returned null')
+      if (offline) {
+        pioneerInstance = null
+        throw new Error('OFFLINE: Pioneer initialization was cancelled by offline mode')
+      }
       // Honesty guard: block BTC→Pioneer calls whenever a self-host node is enabled.
       const { installPioneerGuard } = await import('./pioneer-guard')
       installPioneerGuard(pioneerInstance)

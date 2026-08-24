@@ -1,7 +1,7 @@
 # Alpha Bitcoin-only acceptance
 
 Owner: BTC-only test lead  
-Target: `alpha`, after the Bitcoin-only identity fix from firmware commit `80078493` is included  
+Target: `alpha`, after firmware PR #535 (Bitcoin-only ARM identity fix) is included  
 Safety: the automated runner never wipes, resets, recovers, loads, changes settings, or broadcasts
 
 ## Release blocker found before device testing
@@ -19,9 +19,10 @@ Consequences on physical hardware:
   probes to reach a firmware that cannot service them.
 - Flash-time inspection could not distinguish the Bitcoin-only image.
 
-Firmware commit `80078493` fixes physical identity and adds a CI assertion over
-the actual flashable ARM artifact. Do not spend physical-device time on an
-artifact that predates this commit or does not embed `KeepKeyBTC\0`.
+Firmware PR #535 fixes physical identity and adds a CI assertion over the actual
+flashable ARM artifact. Do not spend physical-device time on an artifact that
+predates that PR's merged head, has a red Bitcoin-only ARM job, or does not
+embed `KeepKeyBTC\0`.
 
 ## Candidate preparation
 
@@ -97,8 +98,18 @@ test wallet and make an explicit spending decision before these cases:
 | Mode | Receive/discovery | Build and review | Broadcast | Required observation |
 |---|---|---|---|---|
 | Pioneer | BIP44/49/84/86 accounts | Small P2WPKH and P2TR sends | One minimal-value transaction | Correct UTXO selection, change path, amount, fee, txid, and post-confirm balance |
-| Self-hosted Bitcoin Core | Same four accounts | Small P2WPKH send | One minimal-value transaction | No Pioneer fallback; node health and history agree with Core |
-| Offline | Cached account plus receive | Build/sign imported or prepared transaction | Must remain disabled | No balance/history/broadcast network traffic; address and device signing still work |
+| Self-hosted Blockbook | Same four accounts; next-unused indexes from Blockbook | Small P2WPKH and P2TR sends | One minimal-value transaction | No Pioneer chain-data fallback; Blockbook history and post-confirm balance agree |
+| Self-hosted Bitcoin Core | Same four accounts; manually select/verify receive index | No-change/send-max build only | One minimal-value no-change transaction, if deliberately funded for it | No Pioneer chain-data fallback; Core UTXOs, fees, txid, and post-confirm balance agree; history and automatic change discovery are explicitly unavailable |
+| Offline | Cached account plus manually selected/verified receive index | Device address derivation and raw/synthetic signing only | Build, history, sweep, swap, report, and broadcast must reject | No outbound sockets after airplane mode is enabled; cached balances remain readable and device address/signing still work |
+
+Bitcoin Core's `scantxoutset` sees only the current UTXO set. It cannot prove
+that an empty address was previously spent from, so it cannot safely choose the
+next unused receive index or reconstruct transaction history. Vault must show
+that limitation and must not consult Pioneer behind the node. Full self-hosted
+history/index discovery requires Blockbook (or future descriptor-wallet import
+and rescan support); a silent index-0 default is a test failure. A normal Core
+send that would create change must fail before device signing rather than reuse
+a guessed change address.
 
 Also test RBF on a disposable transaction, high-fee rejection/warning, dust
 handling, insufficient funds, cancellation at the Vault gate, cancellation on

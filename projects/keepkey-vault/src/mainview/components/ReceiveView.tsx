@@ -23,6 +23,7 @@ interface ReceiveViewProps {
 	isBtc?: boolean
 	btcChangeIndex?: 0 | 1
 	btcAddressIndex?: number
+	btcAddressWarning?: string
 	onBtcChangeIndex?: (v: 0 | 1) => void
 	onBtcAddressIndex?: (v: number) => void
 	// TON bounceable toggle
@@ -145,7 +146,7 @@ function PillToggle<T extends string | number>({
 
 export function ReceiveView({
 	chain, address, loading, error, currentPath, onDerive, scriptType, xpub,
-	isBtc, btcChangeIndex = 0, btcAddressIndex = 0, onBtcChangeIndex, onBtcAddressIndex,
+	isBtc, btcChangeIndex = 0, btcAddressIndex = 0, btcAddressWarning, onBtcChangeIndex, onBtcAddressIndex,
 	isTon, tonBounceable = false, onTonBounceableChange, watchOnly = false,
 }: ReceiveViewProps) {
 	const { t } = useTranslation("receive")
@@ -321,18 +322,19 @@ export function ReceiveView({
 					{/* BTC: receive/change toggle + index stepper — needs the device to derive
 					    each index, so hidden in watch-only (cached address only). */}
 					{!watchOnly && isBtc && onBtcChangeIndex && (
-						<Flex align="center" gap="3" flexWrap="wrap">
-							<PillToggle
-								options={[
-									{ value: 0, label: t("receive") },
-									{ value: 1, label: t("change", { ns: "common" }) },
-								]}
-								value={btcChangeIndex}
-								onChange={(v) => onBtcChangeIndex(v as 0 | 1)}
-							/>
+						<Flex direction="column" align="flex-start" gap="2">
+							<Flex align="center" gap="3" flexWrap="wrap">
+								<PillToggle
+									options={[
+										{ value: 0, label: t("receive") },
+										{ value: 1, label: t("change", { ns: "common" }) },
+									]}
+									value={btcChangeIndex}
+									onChange={(v) => onBtcChangeIndex(v as 0 | 1)}
+								/>
 
-							{onBtcAddressIndex && (
-								<Flex align="center" gap="2">
+								{onBtcAddressIndex && (
+									<Flex align="center" gap="2">
 									<Text fontSize="10px" color="var(--text-3)" textTransform="uppercase" letterSpacing="0.18em" fontWeight="500">
 										{t("index")}
 									</Text>
@@ -390,7 +392,13 @@ export function ReceiveView({
 									<Text fontSize="10px" fontFamily="mono" color="var(--text-3)" letterSpacing="0.02em">
 										({t("remaining", { remaining })})
 									</Text>
-								</Flex>
+									</Flex>
+								)}
+							</Flex>
+							{btcAddressWarning && (
+								<Text fontSize="11px" color="orange.300" lineHeight="1.45">
+									{btcAddressWarning}
+								</Text>
 							)}
 						</Flex>
 					)}

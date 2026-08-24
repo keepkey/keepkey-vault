@@ -132,6 +132,7 @@ export class EngineController extends EventEmitter {
   private latestBootloader = FALLBACK_BOOTLOADER
   private manifest: FirmwareManifest | null = null
   private alphaFirmware = false
+  private offlineMode = false
   private syncing = false
   private lastError: string | null = null
   private retryTimer: ReturnType<typeof setTimeout> | null = null
@@ -524,9 +525,19 @@ export class EngineController extends EventEmitter {
 
   // ── Firmware Manifest ──────────────────────────────────────────────────
 
+  setOfflineMode(value: boolean) {
+    this.offlineMode = value
+  }
+
   private async fetchFirmwareManifest() {
     // Always load bundled manifest first — guaranteed to exist, ships inside signed DMG.
     const bundled = this.loadBundledManifest()
+    if (this.offlineMode) {
+      console.log('[Engine] Offline mode — using bundled firmware manifest without a network request')
+      this.manifest = this.mergeManifests(bundled, null)
+      this.applyChannel()
+      return
+    }
     // Try remote — newer versions may exist between vault releases.
     let remote: FirmwareManifest | null = null
     try {

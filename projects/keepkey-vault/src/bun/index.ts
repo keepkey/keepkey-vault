@@ -133,10 +133,12 @@ import { runUsbDiagnostic as runUsbDiagnosticProbe } from "./windows-usb-probe"
 import { startRestApi, clearFeaturesCache, setUiActive, uiHeartbeat, type RestApiCallbacks } from "./rest-api"
 import { signSolanaWireTransaction } from "./solana-signing"
 import { AuthStore } from "./auth"
-import { getPioneer, getPioneerApiBase, resetPioneer, DEFAULT_API_BASE, getQueryKey as getPioneerQueryKey } from "./pioneer"
+import { getPioneer, getPioneerApiBase, resetPioneer, setPioneerOffline, DEFAULT_API_BASE, getQueryKey as getPioneerQueryKey } from "./pioneer"
 import { setBtcBackendOffline, setBtcNodeConfig, setBtcNodeDeviceEligible, isBtcNodeActive, getBtcBackend, broadcastBtcTx } from "./btc-backend"
 import { isBitcoinOnlyVariant } from "../shared/flags"
 import { bitcoinOnlyActivityList, bitcoinOnlyBalanceList, bitcoinOnlyChainList, bitcoinOnlySnapshot, enforceBitcoinOnlyRpcBoundary } from "./bitcoin-only-boundary"
+import { assertOnline } from "./offline-policy"
+import { setPerfTelemetryOffline } from "./perf-telemetry"
 import { fetchDefiPositions } from "./zapper"
 import { loadSupportedChains } from "../shared/swap-support-matrix"
 import { PioneerSocket } from "./pioneer-socket"
@@ -151,7 +153,7 @@ import { CHAINS, customChainToChainDef, isChainSupported, hiveRolePath, btcTapro
 import { versionCompare } from "../shared/firmware-versions"
 import type { ChainDef } from "../shared/chains"
 import { BtcAccountManager } from "./btc-accounts"
-import { utxoDiscoveryKey, unwrapUtxoDiscoveryKey } from "./btc-backend/types"
+import { unwrapUtxoDiscoveryKey } from "./btc-backend/types"
 import { EvmAddressManager, evmAddressPath } from "./evm-addresses"
 import { shouldResetManagersOnReady, nextReadyDeviceId } from "../shared/device-switch"
 import { isManagerSeedStale } from "../shared/seed-reconcile"
@@ -813,6 +815,20 @@ evmAddresses.canPersist = () => !engine.isPassphraseWallet
 let customChainDefs: ChainDef[] = []
 let dbReady = false
 
+async function initSwapTrackerIfAllowed(): Promise<void> {
+	if (offlineMode) return
+	const { initSwapTracker } = await import('./swap-tracker')
+	await initSwapTracker((msg: string, data: any) => {
+		try {
+			if (msg === 'swap-update') rpc.send['swap-update'](data)
+			else if (msg === 'swap-complete') rpc.send['swap-complete'](data)
+			else console.error(`[swap-tracker] Unknown message: ${msg}`)
+		} catch (e: any) {
+			console.warn(`[swap-tracker] Failed to send '${msg}':`, e.message)
+		}
+	}, { getDeviceId: () => getWalletDbScope()?.deviceId, getWalletId: () => getWalletDbScope()?.walletId })
+}
+
 function deferredInit() {
 	perf('deferredInit start')
 	initDb()
@@ -828,18 +844,8 @@ function deferredInit() {
 	// rehydrate pending swaps from history on cold boot — they'd stall until
 	// executeSwap lazy-init kicks in.
 	loadSettings()
-	loadSupportedChains(getPioneerApiBase()).catch(() => { /* static fallback handles it */ })
-	import('./swap-tracker').then(async ({ initSwapTracker }) => {
-		await initSwapTracker((msg: string, data: any) => {
-			try {
-				if (msg === 'swap-update') rpc.send['swap-update'](data)
-				else if (msg === 'swap-complete') rpc.send['swap-complete'](data)
-				else console.error(`[swap-tracker] Unknown message: ${msg}`)
-			} catch (e: any) {
-				console.warn(`[swap-tracker] Failed to send '${msg}':`, e.message)
-			}
-		}, { getDeviceId: () => getWalletDbScope()?.deviceId, getWalletId: () => getWalletDbScope()?.walletId })
-	}).catch((e) => {
+	if (!offlineMode) loadSupportedChains(getPioneerApiBase()).catch(() => { /* static fallback handles it */ })
+	initSwapTrackerIfAllowed().catch((e) => {
 		console.error('[swap-tracker] Failed to initialize swap tracker (swaps will be unavailable):', e.message || e)
 	})
 }
@@ -911,6 +917,10 @@ let preReleaseUpdates = false
 let alphaFirmware = false
 let privateModeEnabled = false
 
+function requireOnline(operation: string): void {
+	assertOnline(offlineMode, operation)
+}
+
 function loadSettings() {
 	restApiEnabled = getSetting('rest_api_enabled') === '1'
 	walletConnectEnabled = getSetting('walletconnect_enabled') === '1'
@@ -923,6 +933,9 @@ function loadSettings() {
 	privateModeEnabled = getSetting('private_mode_enabled') === '1'
 	offlineMode = getSetting('offline_mode') === '1'
 	setBtcBackendOffline(offlineMode)
+	setPioneerOffline(offlineMode)
+	setPerfTelemetryOffline(offlineMode)
+	engine.setOfflineMode(offlineMode)
 	loadBtcNodeConfig()
 
 	// Normalize emulator flag on platforms with no emulator support. The
@@ -1895,6 +1908,7 @@ function schedulePostZcashTxRescans(): void {
 // the in-app RPC path pushes to the WebView; the REST path passes NOOP.
 // The device still gates every signature in both paths.
 async function headlessSwapQuote(params: SwapQuoteParams): Promise<SwapQuote> {
+	requireOnline('swap quote')
 	const { getSwapQuote } = await import('./swap')
 
 	// Firmware gate (see buildTx): selling a THORChain/Maya bank token (TCY,
@@ -2046,6 +2060,7 @@ async function headlessSwapQuote(params: SwapQuoteParams): Promise<SwapQuote> {
 }
 
 async function headlessExecuteSwap(params: ExecuteSwapParams, pushSubStage: (stage: SwapSubStage) => void): Promise<SwapResult> {
+	requireOnline('swap execution')
 	if (!engine.wallet) throw new Error('No device connected')
 
 	// Firmware gate ENFORCED at execute time, not just quote time: /api/v2/swap/
@@ -2242,8 +2257,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			// ── Device lifecycle ──────────────────────────────────────
 			getDeviceState: async () => engine.getDeviceState(),
 			retryConnect: async () => { await engine.retryConnect() },
-			startBootloaderUpdate: async () => { await engine.startBootloaderUpdate() },
-			startFirmwareUpdate: async (params: { bitcoinOnly?: boolean }) => { await engine.startFirmwareUpdate(params?.bitcoinOnly) },
+			startBootloaderUpdate: async () => { requireOnline('bootloader update'); await engine.startBootloaderUpdate() },
+			startFirmwareUpdate: async (params: { bitcoinOnly?: boolean }) => { requireOnline('firmware update'); await engine.startFirmwareUpdate(params?.bitcoinOnly) },
 			flashFirmware: async () => { await engine.flashFirmware() },
 			analyzeFirmware: async (params) => {
 				if (params.data.length > 10_000_000) throw new Error('Firmware data too large (max ~7.5MB)')
@@ -3279,6 +3294,16 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			// ── Pioneer integration (batch portfolio API) ────────────────
 			getBalances: async ({ forceRefresh = false, swapDestCaips = [] }: { forceRefresh?: boolean; swapDestCaips?: string[] } = {}) => {
 				if (!engine.wallet) throw new Error('No device connected')
+				if (offlineMode) {
+					if (engine.isPassphraseWallet) return []
+					const deviceId = engine.getDeviceState().deviceId
+					if (!deviceId) return []
+					const cached = getCachedBalances(deviceId)
+					return bitcoinOnlyBalanceList(
+						cached?.balances || [],
+						isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant),
+					)
+				}
 
 				// Initialize Pioneer client — isolate failure so device derivation still works
 				let pioneer: any = null
@@ -4323,6 +4348,12 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!engine.wallet) throw new Error('No device connected')
 				const chain = getAllChains().find(c => c.id === params.chainId)
 				if (!chain) throw new Error(`Unknown chain: ${params.chainId}`)
+				if (offlineMode) {
+					const deviceId = engine.getDeviceState().deviceId
+					const cached = !engine.isPassphraseWallet && deviceId ? getCachedBalances(deviceId) : null
+					return cached?.balances.find(balance => balance.chainId === chain.id)
+						|| { chainId: chain.id, symbol: chain.symbol, balance: '0', balanceUsd: 0, address: '' }
+				}
 				// forceRefresh defaults TRUE: single-chain fetches are user-clicked
 				// refreshes, post-send resyncs, or tx pushes — chain state changed, so
 				// Pioneer's cache must be bypassed. Callers pass false only when the
@@ -4346,7 +4377,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					console.warn(`[getBalance] ${chain.id}: firmware does not implement ${chain.rpcMethod} — returning empty balance`)
 					return { chainId: chain.id, symbol: chain.symbol, balance: '0', balanceUsd: 0, address: '' }
 				}
-				const pioneer = await getPioneer()
+				const bitcoinSelfHost = chain.id === 'bitcoin' && getBtcBackend().kind !== 'pioneer'
+				const pioneer = bitcoinSelfHost ? {} : await getPioneer()
 				const wallet = engine.wallet as any
 
 				// Shared seed-staleness boundary — a single-chain refresh (AssetPage,
@@ -4496,23 +4528,56 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					// Other families can't have Zapper apps and the extra round-trip is wasted.
 					if (isEvm) portfolioBody.includeDefi = true
 					let resp: any
-					try {
-						resp = await withTimeout(
-							pioneer.GetPortfolioBalances(portfolioBody, { forceRefresh }),
-							PIONEER_TIMEOUT_MS,
-							'GetPortfolioBalances'
-						)
-					} catch (err: any) {
-						if (!extraContracts.length || !isExtraContractsSchemaError(err)) throw err
-						console.warn(`[getBalance] ${chain.coin}: Pioneer rejected extraContracts; retrying without custom tokens`)
-						resp = await withTimeout(
-							pioneer.GetPortfolioBalances(
-								{ pubkeys: portfolioBody.pubkeys, ...(isEvm ? { includeDefi: true } : {}) },
-								{ forceRefresh }
-							),
-							PIONEER_TIMEOUT_MS,
-							'GetPortfolioBalances'
-						)
+					if (bitcoinSelfHost) {
+						const backend = getBtcBackend()
+						let priceUsd = 0
+						try {
+							const marketPioneer = await getPioneer()
+							const market: any = await withTimeout(marketPioneer.GetMarketInfo([chain.caip]), PIONEER_TIMEOUT_MS, 'GetMarketInfo(BTC)')
+							const row = Array.isArray(market?.data) ? market.data[0] : (Array.isArray(market) ? market[0] : market?.data ?? market)
+							priceUsd = Number(row?.priceUsd ?? row?.price ?? 0) || 0
+						} catch (error: any) {
+							console.warn('[getBalance] BTC price fetch failed (USD may show 0):', error?.message)
+						}
+						const nodeEntries = await Promise.all(pubkeys.map(async (entry) => {
+							const sourceXpub = entry.sourcePubkey || unwrapUtxoDiscoveryKey(entry.pubkey)
+							const utxos = await backend.listUnspent({
+								network: chain.networkId,
+								xpub: sourceXpub,
+								scriptType: entry.scriptType,
+							})
+							const btc = utxos.reduce((sum, utxo) => sum + utxo.value, 0) / 1e8
+							return {
+								caip: chain.caip,
+								pubkey: entry.pubkey,
+								chainId: 'bitcoin',
+								networkId: chain.networkId,
+								symbol: 'BTC',
+								type: 'native',
+								balance: btc.toFixed(8),
+								valueUsd: btc * priceUsd,
+							}
+						}))
+						resp = { data: { balances: nodeEntries } }
+					} else {
+						try {
+							resp = await withTimeout(
+								pioneer.GetPortfolioBalances(portfolioBody, { forceRefresh }),
+								PIONEER_TIMEOUT_MS,
+								'GetPortfolioBalances'
+							)
+						} catch (err: any) {
+							if (!extraContracts.length || !isExtraContractsSchemaError(err)) throw err
+							console.warn(`[getBalance] ${chain.coin}: Pioneer rejected extraContracts; retrying without custom tokens`)
+							resp = await withTimeout(
+								pioneer.GetPortfolioBalances(
+									{ pubkeys: portfolioBody.pubkeys, ...(isEvm ? { includeDefi: true } : {}) },
+									{ forceRefresh }
+								),
+								PIONEER_TIMEOUT_MS,
+								'GetPortfolioBalances'
+							)
+						}
 					}
 					const { entries: allEntries, meta: portfolioMeta, defiPositions: respDefiPositions } = unwrapPortfolioResponse(resp)
 					const rawDefiPositions: ServerDefiPosition[] = respDefiPositions || []
@@ -4528,7 +4593,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						} catch { /* webview not ready */ }
 					}
 
-					console.log(`[getBalance] ${chain.coin}: ${allEntries.length} entries from Pioneer (${pubkeys.length} pubkeys)`)
+					console.log(`[getBalance] ${chain.coin}: ${allEntries.length} entries from ${bitcoinSelfHost ? getBtcBackend().kind : 'Pioneer'} (${pubkeys.length} pubkeys)`)
 
 					// Pioneer may return cross-chain data with forceRefresh — filter to THIS chain
 					// AND to the pubkeys we actually requested (prevents same-network contamination).
@@ -4720,6 +4785,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						}
 					}
 				} catch (e: any) {
+					if (bitcoinSelfHost) {
+						throw new Error(`Self-host node balance error: ${e?.message || e}`)
+					}
 					const message = getPioneerPortfolioErrorMessage(e)
 					console.warn(`[getBalance] ${chain.coin} portfolio failed:`, message)
 					try { rpc.send['pioneer-error']({ message, url: getPioneerApiBase() }) } catch { /* webview not ready */ }
@@ -4784,6 +4852,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			buildTx: async (params) => {
 				console.debug(`[buildTx] isMax=${params.isMax} chainId=${params.chainId}`)
 				if (!engine.wallet) throw new Error('No device connected')
+				requireOnline('build transaction')
 				const chain = getAllChains().find(c => c.id === params.chainId)
 				if (!chain) throw new Error(`Unknown chain: ${params.chainId}`)
 
@@ -4799,7 +4868,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					}
 				}
 
-				const pioneer = await getPioneer()
+				const bitcoinSelfHost = chain.id === 'bitcoin' && getBtcBackend().kind !== 'pioneer'
+				const pioneer = bitcoinSelfHost ? {} : await getPioneer()
 
 				// Seed-staleness boundary on the SIGNING path. params (xpubOverride,
 				// evmAddressIndex, amount, recipient) were prepared against the UI's
@@ -5001,6 +5071,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 
 			broadcastTx: async (params) => {
+				requireOnline('broadcast transaction')
 				if (!params.signedTx) throw new Error('Missing signedTx payload')
 				const chain = getAllChains().find(c => c.id === params.chainId)
 				if (!chain) throw new Error(`Unknown chain: ${params.chainId}`)
@@ -5075,21 +5146,23 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 
 			getMarketData: async (params) => {
+				requireOnline('market data')
 				const pioneer = await getPioneer()
 				const resp = await withTimeout(pioneer.GetMarketInfo(params.caips), PIONEER_TIMEOUT_MS, 'GetMarketInfo')
 				return resp?.data || []
 			},
 
 			getFees: async (params) => {
+				requireOnline('fee data')
 				const chain = getAllChains().find(c => c.id === params.chainId)
 				if (!chain) throw new Error(`Unknown chain: ${params.chainId}`)
-				const pioneer = await getPioneer()
 
 				if (chain.chainFamily === 'utxo') {
 					// BTC self-host: fees from the node, not Pioneer.
 					if (chain.networkId === 'bip122:000000000019d6689c085ae165831e93' && getBtcBackend().kind !== 'pioneer') {
 						return { feeRate: await getBtcBackend().feeRate(chain.networkId), unit: 'sat/byte' }
 					}
+					const pioneer = await getPioneer()
 					// Same client-version fallback as btc-backend/pioneer.ts.
 					const resp: any = await withTimeout(
 						typeof pioneer.GetFeeRateByNetwork === 'function'
@@ -5098,6 +5171,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						PIONEER_TIMEOUT_MS, 'GetFeeRateByNetwork')
 					return { feeRate: resp?.data, unit: 'sat/byte' }
 				} else if (chain.chainFamily === 'evm') {
+					const pioneer = await getPioneer()
 					const resp = await withTimeout(pioneer.GetGasPriceByNetwork({ networkId: chain.networkId }), PIONEER_TIMEOUT_MS, 'GetGasPriceByNetwork')
 					return { gasPrice: resp?.data, unit: 'gwei' }
 				} else {
@@ -5364,35 +5438,34 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			getBtcAddressIndices: async (params) => {
 				const { xpub, scriptType } = params
 				if (!xpub) throw new Error('xpub required')
-				const pioneer = await getPioneer()
-				let receiveIndex = 0
-				let changeIndex = 0
+				const backend = getBtcBackend()
+				if (!backend.addressIndices) {
+					const mode = backend.kind === 'core' ? 'Bitcoin Core scantxoutset' : 'offline mode'
+					return {
+						receiveIndex: 0,
+						changeIndex: 0,
+						discoveryAvailable: false,
+						source: backend.kind,
+						warning: `${mode} cannot prove which addresses were previously used. Index 0 is shown as a manual starting point; verify or select the intended index before receiving.`,
+					}
+				}
 				try {
 					const btcNetworkId = CHAINS.find(c => c.id === 'bitcoin')!.networkId
-					const resp = await withTimeout(pioneer.GetPubkeyInfo({
-						network: btcNetworkId,
-						xpub: utxoDiscoveryKey(xpub, scriptType),
-					}), PIONEER_TIMEOUT_MS, 'GetPubkeyInfo')
-					const tokens = resp?.data?.tokens || []
-					let maxReceive = -1
-					let maxChange = -1
-					for (const token of tokens) {
-						if (token.path && token.transfers > 0) {
-							const parts = token.path.split('/')
-							if (parts.length === 6) {
-								const idx = parseInt(parts[5], 10)
-								if (isNaN(idx)) continue
-								if (parts[4] === '0' && idx > maxReceive) maxReceive = idx
-								if (parts[4] === '1' && idx > maxChange) maxChange = idx
-							}
-						}
-					}
-					receiveIndex = maxReceive + 1
-					changeIndex = maxChange + 1
+					return await withTimeout(
+						backend.addressIndices({ network: btcNetworkId, xpub, scriptType }),
+						PIONEER_TIMEOUT_MS,
+						`${backend.kind} address discovery`,
+					)
 				} catch (e: any) {
-					console.warn('[getBtcAddressIndices] GetPubkeyInfo failed:', e.message)
+					console.warn(`[getBtcAddressIndices] ${backend.kind} discovery failed:`, e.message)
+					return {
+						receiveIndex: 0,
+						changeIndex: 0,
+						discoveryAvailable: false,
+						source: backend.kind,
+						warning: `Address history lookup failed. Index 0 is not proven unused; verify or select the intended index before receiving.`,
+					}
 				}
-				return { receiveIndex, changeIndex }
 			},
 
 			// ── EVM multi-address ────────────────────────────────────
@@ -5889,6 +5962,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 			// ── Mobile pairing (relay via vault.keepkey.com) ─────────
 			generateMobilePairing: async () => {
+				requireOnline('mobile pairing')
 				if (!engine.wallet) throw new Error('No device connected')
 				const wallet = engine.wallet as any
 
@@ -6101,6 +6175,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return getAppSettings()
 			},
 			setPioneerApiBase: async (params) => {
+				requireOnline('Pioneer server configuration')
 				const url = (params.url || '').trim()
 				if (url && !/^https?:\/\//i.test(url)) {
 					throw new Error('URL must start with http:// or https://')
@@ -6132,12 +6207,26 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				offlineMode = params.enabled
 				setSetting('offline_mode', params.enabled ? '1' : '0')
 				setBtcBackendOffline(offlineMode)
+				setPioneerOffline(offlineMode)
+				setPerfTelemetryOffline(offlineMode)
+				engine.setOfflineMode(offlineMode)
+				if (offlineMode) {
+					pioneerSocket?.stop()
+					pioneerSocket = null
+					clearPioneerEventDebounce()
+					stopEventStream()
+				} else {
+					startPioneerSocketIfAllowed()
+					loadSupportedChains(getPioneerApiBase()).catch(() => { /* static fallback handles it */ })
+					initSwapTrackerIfAllowed().catch((e) => console.warn('[swap-tracker] Reconnect init failed:', e.message || e))
+				}
 				console.log('[settings] Offline (airplane) mode:', params.enabled)
 				return getAppSettings()
 			},
 			// Self-host Bitcoin node. Persist url/auth/enabled and re-point the
 			// BtcBackend. Empty url with enabled=false clears it → back to Pioneer.
 			setBtcNode: async (params) => {
+				if (params.enabled) requireOnline('Bitcoin node configuration')
 				// Only overwrite each credential when provided — lets the user toggle
 				// enable without re-typing (undefined = keep existing).
 				if (params.enabled && params.url) {
@@ -6172,6 +6261,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			// the type (Blockbook vs Core) so the user doesn't have to get the port right;
 			// detectedType tells the UI which one actually answered.
 			testBtcNode: async (params) => {
+				requireOnline('Bitcoin node test')
 				const user = params.rpcUser !== undefined ? params.rpcUser : (getSetting('btc_node_rpc_user') || '')
 				const pass = params.rpcPass !== undefined ? params.rpcPass : (getSetting('btc_node_rpc_pass') || '')
 				const auth = user || pass ? `${user}:${pass}` : undefined
@@ -6181,6 +6271,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			// Live status of the ACTIVE self-host node (for the bottom status bar).
 			// active:false when no node is enabled → the bar hides.
 			getBtcNodeStatus: async () => {
+				requireOnline('Bitcoin node status')
 				// Actual eligibility, not the raw persisted setting: a saved node is
 				// suppressed on a multichain device (nodeActive gate), so the status bar
 				// must show inactive there rather than probing + claiming "self-host active".
@@ -6284,6 +6375,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 
 			addPioneerServer: async (params) => {
+				requireOnline('Pioneer server test')
 				const url = (params.url || '').trim().replace(/\/+$/, '')
 				const label = (params.label || '').trim()
 				if (!url || !/^https?:\/\//i.test(url)) throw new Error('URL must start with http:// or https://')
@@ -6319,6 +6411,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return getAppSettings()
 			},
 			setActivePioneerServer: async (params) => {
+				requireOnline('Pioneer server test')
 				const url = (params.url || '').trim().replace(/\/+$/, '')
 				if (!url) throw new Error('URL is required')
 				// Verify the server exists in our list
@@ -6441,8 +6534,13 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 			// ── Reports ─────────────────────────────────────────────
 			generateReport: async () => {
+				requireOnline('report generation')
 				const deviceId = engine.getDeviceState().deviceId
 				if (!deviceId) throw new Error('No device connected')
+				const reportBackend = getBtcBackend()
+				if (reportBackend.kind !== 'pioneer') {
+					throw new Error(`Detailed BTC reports are unavailable with the ${reportBackend.kind} backend because Vault cannot silently use Pioneer for address history.`)
+				}
 
 				// PRIVACY: Reports read from DB cache, which is intentionally empty
 				// for passphrase wallets. Generating a report would either fail or
@@ -6620,6 +6718,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 			// ── Swap (quote cache for tracker) ──────────────────────
 			getSwappableChainIds: async () => {
+				requireOnline('swap asset discovery')
 				const { getSwapAssets } = await import('./swap')
 				const assets = await getSwapAssets()
 				const fw = engine.getDeviceState().firmwareVersion
@@ -6632,13 +6731,18 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				)
 				return [...chainIds]
 			},
-			getSwapAssets: async () => deviceSwapAssets(),
+			getSwapAssets: async () => {
+				requireOnline('swap asset discovery')
+				return deviceSwapAssets()
+			},
 			searchSwapAssets: async (params) => {
+				requireOnline('swap asset search')
 				const { searchDiscoveryAssets } = await import('./swap')
 				return searchDiscoveryAssets(params.query)
 			},
 
 			getSwapHealth: async () => {
+				requireOnline('swap health')
 				const base = await (await import('./pioneer')).getPioneerApiBase()
 				try {
 					const resp = await fetch(`${base}/api/v1/swap/health`, { signal: AbortSignal.timeout(8000) })
@@ -6864,6 +6968,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				}
 			},
 			refreshSwap: async (params) => {
+				requireOnline('swap refresh')
 				// PRIVACY via scoping, NOT a blanket passphrase block. A hidden session
 				// must still refresh ITS OWN in-memory swaps (they're skipPersist, so
 				// the live poll is the only thing that can advance them to completed —
@@ -6958,9 +7063,13 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			getActivityScanState: async () => ({ running: activityScanRunning }),
 			scanChainHistory: async (params) => {
+				requireOnline('activity history')
 				const chain = getAllChains().find(c => c.id === params.chainId)
 				if (!chain) throw new Error(`Unknown chain: ${params.chainId}`)
 				if (!engine.wallet) throw new Error('No device connected')
+				if (chain.id === 'bitcoin' && getBtcBackend().kind !== 'pioneer') {
+					throw new Error(`Bitcoin history is unavailable with the ${getBtcBackend().kind} backend; Vault will not fall back to Pioneer.`)
+				}
 
 				// PRIVACY: hidden sessions never write api_log — but the server lookup
 				// only needs an address. Fetch the same Pioneer history live (dryRun)
@@ -7095,6 +7204,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			// no addressbook sync (those need device-derived state). Good enough for a
 			// read-only snapshot view; do not use this path for signing/sends.
 			refreshWatchOnlyBalances: async (params) => {
+				requireOnline('watch-only balance refresh')
 				const { getDeviceSnapshotById } = await import('./db')
 				const snap = params?.deviceId
 					? getDeviceSnapshotById(params.deviceId)
@@ -7293,6 +7403,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 			// ── Sweep (non-standard BTC path recovery) ──────────────
 			sweepScan: async (params) => {
+				requireOnline('sweep scan')
 				if (!engine.wallet) throw new Error('No device connected')
 				const { startScan, getScan } = await import('./sweep-engine')
 				// Capture the signing guard BEFORE starting the scan worker — USB is
@@ -7398,6 +7509,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 			// ── Balance Audit (multi-chain "where's my money" wizard) ────
 			auditStart: async (params) => {
+				requireOnline('balance audit')
 				if (!engine.wallet) throw new Error('No device connected')
 				if (engine.getDeviceState().state !== 'ready') throw new Error('Device not ready')
 				const wallet = engine.wallet
@@ -8241,6 +8353,7 @@ udevadm trigger --subsystem-match=usb --attr-match=idVendor=2b24 || udevadm trig
 
 			// ── App Updates ──────────────────────────────────────────
 			checkForUpdate: async () => {
+				requireOnline('update check')
 				const localVer = await Updater.localInfo.version()
 
 				// Always use GitHub API to check for updates.
@@ -8293,6 +8406,7 @@ udevadm trigger --subsystem-match=usb --attr-match=idVendor=2b24 || udevadm trig
 				}
 			},
 			downloadUpdate: async () => {
+				requireOnline('app update download')
 				if (process.platform === 'win32' || process.platform === 'darwin') {
 					openUpdatePage()
 					return
@@ -8318,6 +8432,7 @@ udevadm trigger --subsystem-match=usb --attr-match=idVendor=2b24 || udevadm trig
 			// a thrown fetch (DNS/socket/timeout) = offline. Skipped by the client
 			// when offline mode is on, so this never fires in airplane mode.
 			pingPioneer: async () => {
+				if (offlineMode) return { online: false }
 				try {
 					await fetch(getPioneerApiBase(), { method: 'HEAD', signal: AbortSignal.timeout(4000) })
 					return { online: true }
@@ -8362,6 +8477,54 @@ sendFatal = (source, err) => {
 // can synchronously emit 'ready', and the listener's deep-link replay path
 // would TDZ on this binding if it were declared near the URL handler.
 let pendingDeepLinkUri: string | null = null
+
+function onPioneerSocketEvent(event: string, data: unknown): void {
+	// ONLY 'transaction:incoming'. Balance-update events echo Vault's own queries
+	// and would create a self-sustaining refresh loop.
+	if (event !== 'transaction:incoming' || offlineMode) return
+	let d: any = data
+	if (typeof d === 'string') {
+		try { d = JSON.parse(d) } catch { return }
+	}
+	const address = d?.address ?? d?.pubkey ?? undefined
+	const txid = d?.txid ?? d?.tx?.txid ?? undefined
+	if (txidRecentlyPushed(txid)) return
+	const rawType = d?.type
+	const type = rawType === 'incoming' || rawType === 'outgoing' ? rawType
+		: rawType === 'confirmation_update' ? 'confirmed' as const
+		: undefined
+	const allChains = [...CHAINS, ...customChainDefs]
+	let chain: string | undefined
+	for (const cand of [d?.caip, d?.networkId, d?.chain]) {
+		if (typeof cand !== 'string' || !cand) continue
+		if (cand.includes('/')) { chain = cand; break }
+		const def = allChains.find(c => c.networkId === cand || c.id === cand)
+		if (def) { chain = def.caip; break }
+	}
+	if (!chain) return
+	const networkId = chain.split('/')[0]
+	const pending = pioneerEventDebounce.get(networkId)
+	if (pending) clearTimeout(pending.timer)
+	const mergedType = pending?.payload.type === 'incoming' ? 'incoming' : type
+	const payload = { chain, address, txid, type: mergedType }
+	pioneerEventDebounce.set(networkId, { payload, timer: setTimeout(() => {
+		pioneerEventDebounce.delete(networkId)
+		if (offlineMode) return
+		console.log(`[PioneerSocket] push event '${event}' chain=${chain} type=${mergedType} → forwarding`)
+		try { rpc.send['tx-push-received'](payload) } catch { /* webview not ready */ }
+	}, 2000) })
+}
+
+function startPioneerSocketIfAllowed(): void {
+	if (offlineMode || pioneerSocket || engine.getDeviceState().state !== 'ready') return
+	pioneerSocket = new PioneerSocket({
+		queryKey: getPioneerQueryKey(),
+		onEvent: onPioneerSocketEvent,
+		onConnect: () => console.log('[PioneerSocket] connected to Pioneer'),
+		onDisconnect: () => console.log('[PioneerSocket] disconnected from Pioneer'),
+	})
+	pioneerSocket.start()
+}
 
 // Push engine events to WebView
 engine.on('state-change', (state) => {
@@ -8467,76 +8630,14 @@ engine.on('state-change', (state) => {
 			console.log(`[settings] Hive auto-${has715 ? 'enabled' : 'disabled'} — firmware ${fw || 'unknown'}`)
 		}
 	}
-	if (state.state === 'ready' && !pioneerSocket) {
-		pioneerSocket = new PioneerSocket({
-			queryKey: getPioneerQueryKey(),
-			onEvent: (event, data) => {
-				// ONLY 'transaction:incoming'. Pioneer also emits 'balance:update' /
-				// 'balance:cache:update' — but those fire from INSIDE its
-				// GetPortfolioBalances controller, per pubkey, to the requesting
-				// user's own socket (balance.controller.ts:776/788/798, :974): they
-				// are echoes of the vault's own queries, not background-worker
-				// signals. Consuming them creates a self-sustaining refresh loop
-				// (each getBalance → echo → getBalance, with device USB traffic per
-				// cycle). Re-add only after Pioneer separates genuine worker pushes
-				// from per-request emits — see docs/handoff-pioneer-hive-push-refresh.md.
-				if (event !== 'transaction:incoming') return
-				// Some payloads arrive JSON-STRINGIFIED (server emit style varies) —
-				// parse both shapes.
-				let d: any = data
-				if (typeof d === 'string') {
-					try { d = JSON.parse(d) } catch { return }
-				}
-				const address = d?.address ?? d?.pubkey ?? undefined
-				const txid = d?.txid ?? d?.tx?.txid ?? undefined
-				// The SSE leg usually delivers the same tx first — don't double-toast
-				// or double-fetch it.
-				if (txidRecentlyPushed(txid)) return
-				// The server reuses the 'transaction:incoming' event name for
-				// confirmation updates; map its payload type into the schema union.
-				const rawType = d?.type
-				const type = rawType === 'incoming' || rawType === 'outgoing' ? rawType
-					: rawType === 'confirmation_update' ? 'confirmed' as const
-					: undefined
-				// Normalize to a canonical CAIP-19 string. Prefer explicit caip, then
-				// networkId — the server's 'chain' field is symbol-ish ("ETH") and
-				// ambiguous (ETH = Ethereum, Arbitrum, Optimism, Base), so it's only
-				// consulted for CAIP/id-shaped values, never as a symbol.
-				const allChains = [...CHAINS, ...customChainDefs]
-				let chain: string | undefined
-				for (const cand of [d?.caip, d?.networkId, d?.chain]) {
-					if (typeof cand !== 'string' || !cand) continue
-					if (cand.includes('/')) { chain = cand; break } // already CAIP-19
-					// CAIP-2 (networkId like "eip155:1") or internal id like "ethereum"
-					const def = allChains.find(c => c.networkId === cand || c.id === cand)
-					if (def) { chain = def.caip; break }
-				}
-				if (!chain) return
-				// Debounce per network (CAIP-2 prefix) so rapid-fire events on the same
-				// network collapse into one refresh. When replacing a pending forward,
-				// keep 'incoming' if either had it — a confirmation update arriving in
-				// the window must not eat the incoming-payment toast.
-				const networkId = chain.split('/')[0]
-				const pending = pioneerEventDebounce.get(networkId)
-				if (pending) clearTimeout(pending.timer)
-				const mergedType = pending?.payload.type === 'incoming' ? 'incoming' : type
-				const payload = { chain, address, txid, type: mergedType }
-				pioneerEventDebounce.set(networkId, { payload, timer: setTimeout(() => {
-					pioneerEventDebounce.delete(networkId)
-					console.log(`[PioneerSocket] push event '${event}' chain=${chain} type=${mergedType} → forwarding`)
-					try { rpc.send['tx-push-received'](payload) } catch { /* webview not ready */ }
-				}, 2000) })
-			},
-			onConnect: () => console.log('[PioneerSocket] connected to Pioneer'),
-			onDisconnect: () => console.log('[PioneerSocket] disconnected from Pioneer'),
-		})
-		pioneerSocket.start()
-	}
-	if (state.state === 'ready' && !engine.isPassphraseWallet) {
+	if (state.state === 'ready') startPioneerSocketIfAllowed()
+	const btcOnlySelfHost = isBitcoinOnlyVariant(state.firmwareVariant) && getBtcBackend().kind !== 'pioneer'
+	if (state.state === 'ready' && !engine.isPassphraseWallet && !offlineMode && !btcOnlySelfHost) {
 		// Fire-and-forget background history scan on every ready transition (startup + reconnect).
 		// 3s delay lets wallet address derivation settle before hitting Pioneer.
 		activityScanRunning = true
 		setTimeout(() => {
+			if (offlineMode) { activityScanRunning = false; return }
 			const scope = getWalletDbScope()
 			if (!scope || !engine.wallet) { activityScanRunning = false; return }
 			console.log('[activity] Auto-scanning history on device ready...')
@@ -8874,8 +8975,9 @@ Updater.localInfo.version().then(v => { appVersionCache = v }).catch(() => {})
 // - Windows: no update.json is published, so Electrobun check always 404s
 // - macOS: update.json version is stale (generated before release is published)
 Updater.localInfo.channel().then(ch => {
-	if (ch !== 'dev') {
+	if (ch !== 'dev' && !offlineMode) {
 		setTimeout(async () => {
+			if (offlineMode) return
 			try {
 				const localVer = await Updater.localInfo.version()
 				if (!localVer) return

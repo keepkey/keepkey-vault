@@ -7,6 +7,7 @@
 import type { BtcBackend } from './types'
 import { utxoDiscoveryKey } from './types'
 import { unwrapUtxos, normalizeUtxo, normalizeFeeRates, extractTxid } from './normalize'
+import { addressIndicesFromTokens } from './address-discovery'
 
 // Keep pure consumers of btc-backend/index.ts (transaction building, path
 // generation, and their unit tests) from eagerly loading the Pioneer → DB →
@@ -50,5 +51,11 @@ export const PioneerBackend: BtcBackend = {
     const resp = await pioneer.UtxoLookup({ networkId: network, txid })
     const d = resp?.data || resp
     return d?.hex || d?.tx?.hex || undefined
+  },
+
+  async addressIndices({ network, xpub, scriptType }) {
+    const pioneer = await getPioneerClient()
+    const resp = await pioneer.GetPubkeyInfo({ network, xpub: utxoDiscoveryKey(xpub, scriptType) })
+    return addressIndicesFromTokens(resp?.data?.tokens || resp?.tokens || [], 'pioneer')
   },
 }

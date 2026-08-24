@@ -5,8 +5,7 @@
  * loudly instead of silently "cheating" back to Pioneer.
  *
  * Scope: only Bitcoin (matched by networkId in the call args). Other UTXO coins
- * (LTC/DOGE/BCH/Dash/Zcash) and price/history (GetMarketInfo/GetTransactionHistory —
- * the documented Task-2/3 exceptions) pass through untouched.
+ * (LTC/DOGE/BCH/Dash/Zcash) and price data pass through untouched.
  *
  * Leaf module (no imports) so both pioneer.ts and btc-backend/index.ts can use it
  * without an import cycle.
@@ -14,11 +13,15 @@
 const BTC_NETWORK_ID = 'bip122:000000000019d6689c085ae165831e93'
 
 // Pioneer methods FULLY replaced by the BtcBackend seam — forbidden for BTC when a
-// node is on. Deliberately excludes GetPubkeyInfo: the send path already skips it
-// (change index is derived from UTXOs), but receive-address discovery + reports still
-// use it for BTC and have no node equivalent yet (Task 3), so blocking it globally
-// would break those. The money path (UTXOs/fees/broadcast) is what must never cheat.
-const GUARDED = ['ListUnspent', 'GetFeeRateByNetwork', 'GetFeeRate', 'Broadcast']
+// node is on. Address discovery and history are included: Bitcoin Core cannot
+// answer them from scantxoutset, and silently consulting Pioneer would make the
+// self-host/offline privacy claim false. Blockbook supplies its own xpub-native
+// discovery through BtcBackend instead.
+const GUARDED = [
+  'ListUnspent', 'GetFeeRateByNetwork', 'GetFeeRate', 'Broadcast',
+  'GetPubkeyInfo', 'GetTransactionHistory', 'GetPortfolioBalances',
+  'GetBalanceAddressByNetwork', 'UtxoLookup',
+]
 
 let active = false
 /** Set from btc-backend when the node/offline state changes. */
@@ -28,7 +31,12 @@ export function setPioneerGuardActive(v: boolean): void {
 }
 
 function isBtcArg(arg: any): boolean {
-  return (arg?.network ?? arg?.networkId) === BTC_NETWORK_ID
+  const network = arg?.network ?? arg?.networkId ?? arg?.caip
+  if (typeof network === 'string' && (network === BTC_NETWORK_ID || network.startsWith(`${BTC_NETWORK_ID}/`))) return true
+  for (const list of [arg?.queries, arg?.pubkeys]) {
+    if (Array.isArray(list) && list.some((entry: any) => isBtcArg(entry))) return true
+  }
+  return false
 }
 
 /** Patch the client's guarded methods in place (idempotent — safe to call repeatedly). */

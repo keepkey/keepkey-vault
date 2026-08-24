@@ -37,6 +37,14 @@ import { detectSpamToken, categorizeTokens, type SpamResult } from "../../shared
 
 type AssetView = "receive" | "send" | "privacy"
 
+type BtcAddressIndexResult = {
+	receiveIndex: number
+	changeIndex: number
+	discoveryAvailable: boolean
+	source: 'pioneer' | 'blockbook' | 'core' | 'electrum' | 'esplora' | 'device-only'
+	warning?: string
+}
+
 // Litecoin script types — same trio as Bitcoin, standard purpose per type.
 const LTC_SCRIPT_TYPES = [
 	{ scriptType: 'p2pkh', purpose: 44, label: 'Legacy', prefix: 'L' },
@@ -211,8 +219,9 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 	// BTC address index state: change (0=receive, 1=change) and address index
 	const [btcChangeIndex, setBtcChangeIndex] = useState<0 | 1>(0)
 	const [btcAddressIndex, setBtcAddressIndex] = useState(0)
-	// Cache Pioneer-reported indices so we don't re-fetch on every toggle
-	const [pioneerIndices, setPioneerIndices] = useState<{ receiveIndex: number; changeIndex: number } | null>(null)
+	// Cache backend-reported indices so we don't re-fetch on every toggle.
+	// Core/offline return an explicit unavailable result — never a silent Pioneer fallback.
+	const [btcAddressIndices, setBtcAddressIndices] = useState<BtcAddressIndexResult | null>(null)
 
 	// Derive active BTC script type config and path from selected xpub + change/index
 	const btcSelected = useMemo(() => {
@@ -317,7 +326,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 	// already-open Receive tab would keep showing the previous wallet's address.
 	}, [btcSelected?.scriptType, btcSelected?.fullPath?.[2], btcChangeIndex, btcAddressIndex, btcSelected?.xpubData?.xpub]) // eslint-disable-line react-hooks/exhaustive-deps
 
-	// Fetch next unused address indices from Pioneer API when xpub selection changes
+	// Fetch next unused address indices from the active BTC backend when xpub selection changes.
 	// Cancellation guard prevents stale responses from snapping to wrong index (Finding 4)
 	const prevScriptRef = useMemo(() => btcAccounts.selectedXpub?.scriptType, [btcAccounts.selectedXpub?.scriptType])
 	const prevAcctRef = useMemo(() => btcAccounts.selectedXpub?.accountIndex, [btcAccounts.selectedXpub?.accountIndex])
@@ -325,35 +334,35 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 		if (!isBtc) return
 		setBtcChangeIndex(0)
 		setBtcAddressIndex(0)
-		setPioneerIndices(null)
+		setBtcAddressIndices(null)
 		const xpub = btcAccounts.accounts
 			.find(a => a.accountIndex === (btcAccounts.selectedXpub?.accountIndex ?? 0))
 			?.xpubs.find(x => x.scriptType === (btcAccounts.selectedXpub?.scriptType ?? 'p2wpkh'))
 			?.xpub
 		if (!xpub) return
 		let cancelled = false
-		rpcRequest<{ receiveIndex: number; changeIndex: number }>('getBtcAddressIndices', {
+		rpcRequest<BtcAddressIndexResult>('getBtcAddressIndices', {
 			xpub,
 			scriptType: btcAccounts.selectedXpub?.scriptType ?? 'p2wpkh',
 		}, 30000)
 			.then((indices) => {
 				if (cancelled) return
-				setPioneerIndices(indices)
+				setBtcAddressIndices(indices)
 				setBtcAddressIndex(indices.receiveIndex)
 			})
 			.catch(e => console.warn('[AssetPage] getBtcAddressIndices failed:', e.message))
 		return () => { cancelled = true }
 	}, [prevScriptRef, prevAcctRef]) // eslint-disable-line react-hooks/exhaustive-deps
 
-	// When toggling Receive/Change, set index to the cached Pioneer value
+	// When toggling Receive/Change, set index to the active backend's cached value.
 	const handleBtcChangeIndex = useCallback((v: 0 | 1) => {
 		setBtcChangeIndex(v)
-		if (pioneerIndices) {
-			setBtcAddressIndex(v === 0 ? pioneerIndices.receiveIndex : pioneerIndices.changeIndex)
+		if (btcAddressIndices) {
+			setBtcAddressIndex(v === 0 ? btcAddressIndices.receiveIndex : btcAddressIndices.changeIndex)
 		} else {
 			setBtcAddressIndex(0)
 		}
-	}, [pioneerIndices])
+	}, [btcAddressIndices])
 
 	// When EVM selected index changes, update address from the cached value. When
 	// the cache empties — a device swap resets the backend managers and pushes an
@@ -1261,6 +1270,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 							isBtc={isBtc}
 							btcChangeIndex={btcChangeIndex}
 							btcAddressIndex={btcAddressIndex}
+							btcAddressWarning={btcAddressIndices?.discoveryAvailable === false ? btcAddressIndices.warning : undefined}
 							onBtcChangeIndex={handleBtcChangeIndex}
 							onBtcAddressIndex={setBtcAddressIndex}
 							isTon={isTon}
