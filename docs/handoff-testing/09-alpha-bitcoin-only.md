@@ -1,6 +1,6 @@
 # Alpha Bitcoin-only acceptance
 
-Owner: BTC-only test lead  
+Owner: BTC-only test lead
 Target: `alpha`, after firmware PR #534 (including merged #535 and its follow-up fixes) is included
 
 Safety: the automated runner never wipes, resets, recovers, loads, changes settings, or broadcasts
