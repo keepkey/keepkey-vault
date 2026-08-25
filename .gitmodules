@@ -7,7 +7,7 @@
 [submodule "modules/keepkey-firmware"]
 	path = modules/keepkey-firmware
 	url = https://github.com/BitHighlander/keepkey-firmware
-	branch = release/7.14.0
+	branch = alpha
 [submodule "modules/device-protocol"]
 	path = modules/device-protocol
 	url = https://github.com/BitHighlander/device-protocol
