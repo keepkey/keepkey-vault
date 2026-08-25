@@ -4,16 +4,9 @@ import bs58 from 'bs58'
 import {
   ALPHA_DELEGATE_FINGERPRINT,
   ALPHA_DELEGATE_PUBLIC_KEY,
-  CLEARSIGN_SCOPE_ETHEREUM,
   CLEARSIGN_SCOPE_SOLANA,
   inspectAlphaCertificate,
 } from '../src/bun/clearsign-alpha-ceremony'
-import {
-  buildCertifiedEvmEnvelope,
-  CERTIFIED_METADATA_KEY_ID,
-  findCertifiedEvmSchemaByShape,
-  findCertifiedEvmSchemaSpec,
-} from '../src/bun/evm-certified-schema'
 import { signCertifiedSolanaLutAttestation } from '../src/bun/solana-certified-lut'
 import { signCertifiedSolanaSchema, CERTIFIED_SOLANA_CATALOG } from '../src/bun/solana-certified-schema'
 import { resolveCanonicalLutAccounts } from '../src/bun/solana-lut-resolver'
@@ -50,15 +43,8 @@ async function loadCertificateHex(hexEnv: string, fileEnv: string): Promise<stri
   return hex.replace(/^0x/i, '')
 }
 
-const evmCertificateHex = await loadCertificateHex('CLEARSIGN_CERTIFICATE_HEX', 'CLEARSIGN_CERTIFICATE_FILE')
 const solanaCertificateHex = await loadCertificateHex('CLEARSIGN_SOLANA_CERTIFICATE_HEX', 'CLEARSIGN_SOLANA_CERTIFICATE_FILE')
-if (!evmCertificateHex && !solanaCertificateHex) {
-  throw new Error('at least one of CLEARSIGN_CERTIFICATE_HEX/FILE or CLEARSIGN_SOLANA_CERTIFICATE_HEX/FILE is required')
-}
-const evmCertificate = evmCertificateHex ? inspectAlphaCertificate(evmCertificateHex) : undefined
-if (evmCertificate && evmCertificate.chainId !== CLEARSIGN_SCOPE_ETHEREUM) {
-  throw new Error(`CLEARSIGN_CERTIFICATE_HEX is scoped to ${evmCertificate.chainId}, expected Ethereum (${CLEARSIGN_SCOPE_ETHEREUM})`)
-}
+if (!solanaCertificateHex) throw new Error('CLEARSIGN_SOLANA_CERTIFICATE_HEX/FILE is required')
 const solanaCertificate = solanaCertificateHex ? inspectAlphaCertificate(solanaCertificateHex) : undefined
 if (solanaCertificate && solanaCertificate.chainId !== CLEARSIGN_SCOPE_SOLANA) {
   throw new Error(`CLEARSIGN_SOLANA_CERTIFICATE_HEX is scoped to ${solanaCertificate.chainId}, expected Solana (${CLEARSIGN_SCOPE_SOLANA})`)
@@ -84,51 +70,15 @@ const server = Bun.serve({
     }
     if (request.method === 'GET' && url.pathname === '/signer') {
       return json({
-        alias: evmCertificate?.alias || solanaCertificate?.alias,
+        alias: solanaCertificate?.alias,
         fingerprint: signer.fingerprint,
         publicKeyHex: signer.publicKeyHex,
-        keyId: CERTIFIED_METADATA_KEY_ID,
-        scopes: [
-          evmCertificate ? CLEARSIGN_SCOPE_ETHEREUM : undefined,
-          solanaCertificate ? CLEARSIGN_SCOPE_SOLANA : undefined,
-        ].filter(Boolean),
+        keyId: 0x80,
+        scopes: [CLEARSIGN_SCOPE_SOLANA],
       })
     }
     if (request.method === 'POST' && (url.pathname === '/v1/evm/schema' || url.pathname === '/sign')) {
-      if (!evmCertificateHex) return json({ error: 'this signer has no Ethereum-scoped certificate loaded' }, 501)
-      const contentLength = Number(request.headers.get('content-length') || 0)
-      if (contentLength > 64 * 1024) return json({ error: 'request too large' }, 413)
-      let body: any
-      try {
-        body = await request.json()
-      } catch {
-        return json({ error: 'invalid JSON' }, 400)
-      }
-      const chainId = Number(body?.chainId)
-      const contract = String(body?.contract || body?.to || '')
-      const data = String(body?.data || '')
-      const spec = body?.selector !== undefined
-        ? findCertifiedEvmSchemaByShape(chainId, contract, String(body.selector), Number(body.calldataLength))
-        : findCertifiedEvmSchemaSpec(chainId, contract, data)
-      if (!spec) {
-        return json({ classification: 'OPAQUE', error: 'contract, selector, or calldata shape is not in the reviewed catalog' }, 422)
-      }
-      try {
-        const signed = buildCertifiedEvmEnvelope(spec, evmCertificateHex, signer.privateKeyHex)
-        return json({
-          success: true,
-          classification: 'VERIFIED',
-          version: 3,
-          ...signed,
-          method: spec.method,
-          chainId: spec.chainId,
-          contract: spec.contract,
-          selector: spec.selector,
-          expectedCalldataLength: spec.expectedCalldataLength,
-        })
-      } catch (error: any) {
-        return json({ error: error?.message || 'could not build certified schema' }, 500)
-      }
+      return json({ error: 'this signer is scoped to Solana only' }, 501)
     }
     if (request.method === 'POST' && url.pathname === '/v1/solana/certify') {
       if (!solanaCertificateHex) return json({ error: 'this signer has no Solana-scoped certificate loaded' }, 501)
@@ -230,5 +180,4 @@ const server = Bun.serve({
 })
 
 console.log(`[clearsign] local signer ready at http://${server.hostname}:${server.port}`)
-console.log(`[clearsign] delegate ${evmCertificate?.alias || solanaCertificate?.alias} · ${signer.fingerprint}`
-  + ` (scopes: ${[evmCertificate && 'ethereum', solanaCertificate && 'solana'].filter(Boolean).join(', ')})`)
+console.log(`[clearsign] delegate ${solanaCertificate?.alias} · ${signer.fingerprint} (scopes: solana)`)

@@ -17,7 +17,10 @@ import { findEvmSchema } from './evm-schema-registry'
 import { firmwareClearSigns } from './calldata-decoder'
 import { findSolanaSchema } from './solana-schema-registry'
 import { findCertifiedSolanaProof } from './solana-certified-registry'
-import { hasCompleteCertifiedSolanaEnvelope } from './solana-certified-policy'
+import {
+  hasCompleteCertifiedSolanaEnvelope,
+  supportsCertifiedClearSign,
+} from './solana-certified-policy'
 import { getPioneer } from './pioneer'
 import { encodeDepositWithExpiry, encodeApprove, parseUnits, toHex, readPioneerBalance } from './txbuilder/evm'
 import { getEvmGasPrice, getEvmFeeData, getEvmNonce, getEvmBalance, getErc20Allowance, getErc20Balance, getErc20Decimals, broadcastEvmTx, EvmSignerVerificationError, waitForTxReceipt, estimateGas } from './evm-rpc'
@@ -555,6 +558,8 @@ export interface SwapContext {
    *  Returns undefined when unknown (no cached features / policy not reported).
    *  Used to gate Solana swaps, which can only blind-sign. */
   isAdvancedModeEnabled?: () => boolean | undefined
+  /** Connected device firmware. Certified ClearSign authority starts at 7.16. */
+  getFirmwareVersion?: () => string | undefined
   /** User's configured Solana RPC, for the host-side outflow check. */
   getSolanaRpcEndpoint?: () => string | undefined
   /** Durable ClearSign evidence sink owned by Vault (no-op for callers that do not persist). */
@@ -694,13 +699,18 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
       // A routine catalog miss or unavailable service falls through to the
       // existing runtime-schema/explicit-consent path.
       let certifiedProof: Awaited<ReturnType<typeof findCertifiedSolanaProof>> = undefined
-      try {
-        certifiedProof = await findCertifiedSolanaProof(
-          params.relayTx.serializedTx,
-          'relayDepositNative',
-        )
-      } catch (err: any) {
-        swapLog(`${TAG} certified Solana ClearSign proof unavailable: ${err?.message || err}`)
+      const firmwareVersion = ctx.getFirmwareVersion?.()
+      if (supportsCertifiedClearSign(firmwareVersion)) {
+        try {
+          certifiedProof = await findCertifiedSolanaProof(
+            params.relayTx.serializedTx,
+            'relayDepositNative',
+          )
+        } catch (err: any) {
+          swapLog(`${TAG} certified Solana ClearSign proof unavailable: ${err?.message || err}`)
+        }
+      } else {
+        swapLog(`${TAG} certified Solana ClearSign skipped: firmware ${firmwareVersion || 'unknown'} < 7.16.0`)
       }
       if (certifiedProof) {
         const shape = certifiedProof.lutProof

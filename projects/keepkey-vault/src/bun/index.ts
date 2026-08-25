@@ -2119,6 +2119,7 @@ async function headlessExecuteSwap(params: ExecuteSwapParams, pushSubStage: (sta
 			: (fn) => fn(),
 		pushSubStage,
 		isAdvancedModeEnabled: getAdvancedModeEnabled,
+		getFirmwareVersion: () => engine.getDeviceState().firmwareVersion,
 		getSolanaRpcEndpoint: () => getSetting('solana_rpc_endpoint') || undefined,
 		onClearSignEvent: (event) => recordClearSignEvent({
 			kind: 'transaction',

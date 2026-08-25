@@ -1,6 +1,20 @@
 import { describe, expect, test } from 'bun:test'
 
-import { hasCompleteCertifiedSolanaEnvelope } from './solana-certified-policy'
+import {
+  CERTIFIED_CLEARSIGN_MIN_FW,
+  hasCompleteCertifiedSolanaEnvelope,
+  supportsCertifiedClearSign,
+} from './solana-certified-policy'
+
+describe('supportsCertifiedClearSign', () => {
+  test('defaults on at 7.16 and remains off for older or unknown firmware', () => {
+    expect(CERTIFIED_CLEARSIGN_MIN_FW).toBe('7.16.0')
+    expect(supportsCertifiedClearSign('7.16.0')).toBe(true)
+    expect(supportsCertifiedClearSign('7.16.1')).toBe(true)
+    expect(supportsCertifiedClearSign('7.15.9')).toBe(false)
+    expect(supportsCertifiedClearSign(undefined)).toBe(false)
+  })
+})
 
 describe('hasCompleteCertifiedSolanaEnvelope', () => {
   const schema = { payload: 'aa', signature: 'bb', signerKeyId: 0x80 }

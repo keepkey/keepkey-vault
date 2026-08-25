@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 
-import { findCertifiedSolanaProof } from './solana-certified-registry'
+import {
+  DEFAULT_CLEARSIGN_SERVICE_URL,
+  findCertifiedSolanaProof,
+} from './solana-certified-registry'
 
 const originalFetch = globalThis.fetch
 const originalServiceUrl = process.env.CLEARSIGN_SERVICE_URL
@@ -25,6 +28,19 @@ afterEach(() => {
 })
 
 describe('findCertifiedSolanaProof', () => {
+  test('uses the signer by default without an enable flag', async () => {
+    delete process.env.CLEARSIGN_SERVICE_URL
+    let requestedUrl = ''
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      requestedUrl = String(input)
+      return verifiedResponse()
+    }) as typeof fetch
+
+    const result = await findCertifiedSolanaProof('unsigned-fixture', 'relayDepositNative')
+    expect(requestedUrl).toBe(`${DEFAULT_CLEARSIGN_SERVICE_URL}/v1/solana/certify`)
+    expect(result?.schema.signerKeyId).toBe(0x80)
+  })
+
   test('accepts a schema-only certified response for a self-contained transaction', async () => {
     process.env.CLEARSIGN_SERVICE_URL = 'http://127.0.0.1:1647/'
     globalThis.fetch = (async () => verifiedResponse()) as typeof fetch

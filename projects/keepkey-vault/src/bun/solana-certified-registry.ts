@@ -11,6 +11,13 @@
  */
 import { CERTIFIED_SOLANA_CATALOG } from './solana-certified-schema'
 
+/**
+ * Alpha's signer is a loopback service by default. An operator may override
+ * this when the same fail-closed API is deployed remotely, but ClearSign is
+ * never disabled merely because an environment variable was omitted.
+ */
+export const DEFAULT_CLEARSIGN_SERVICE_URL = 'http://127.0.0.1:1647'
+
 export interface CertifiedSolanaProof {
   /** Present only when the message actually references address lookup tables. */
   lutProof?: {
@@ -67,8 +74,9 @@ export async function findCertifiedSolanaProof(
   catalogKey: string,
 ): Promise<CertifiedSolanaProof | undefined> {
   if (!(catalogKey in CERTIFIED_SOLANA_CATALOG)) return undefined
-  const base = String(process.env.CLEARSIGN_SERVICE_URL || '').trim().replace(/\/+$/, '')
-  if (!base) return undefined
+  const base = String(process.env.CLEARSIGN_SERVICE_URL || DEFAULT_CLEARSIGN_SERVICE_URL)
+    .trim()
+    .replace(/\/+$/, '')
 
   let response: Response
   try {
