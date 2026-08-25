@@ -6,6 +6,7 @@ import {
   solanaSchemaCoverage,
   signCertifiedSolanaSchema,
   CERTIFIED_SOLANA_CATALOG,
+  ARG_LAMPORTS,
 } from './solana-certified-schema'
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -28,6 +29,7 @@ describe('serializeSolanaSchema', () => {
 
   test('coverage exactly matches the real 48-byte Relay instruction data', () => {
     expect(solanaSchemaCoverage(CERTIFIED_SOLANA_CATALOG.relayDepositNative)).toBe(48)
+    expect(CERTIFIED_SOLANA_CATALOG.relayDepositNative.args?.[0].type).toBe(ARG_LAMPORTS)
   })
 
   test('the SDK fixture round-trip-decodes what we serialize', () => {

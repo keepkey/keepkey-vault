@@ -36,8 +36,15 @@ export const ARG_U64 = 1
 export const ARG_U8 = 2
 export const ARG_PUBKEY = 3
 export const ARG_OPAQUE32 = 4
+export const ARG_LAMPORTS = 5
 
-const ARG_WIDTH: Record<number, number> = { [ARG_U64]: 8, [ARG_U8]: 1, [ARG_PUBKEY]: 32, [ARG_OPAQUE32]: 32 }
+const ARG_WIDTH: Record<number, number> = {
+  [ARG_U64]: 8,
+  [ARG_U8]: 1,
+  [ARG_PUBKEY]: 32,
+  [ARG_OPAQUE32]: 32,
+  [ARG_LAMPORTS]: 8,
+}
 
 export interface SolanaSchemaArg {
   type: number
@@ -178,7 +185,7 @@ export const CERTIFIED_SOLANA_CATALOG: Record<string, SolanaSchemaSpec> = {
     programName: 'Relay Bridge',
     instructionName: 'depositNative',
     args: [
-      { type: ARG_U64, label: 'Amount' },
+      { type: ARG_LAMPORTS, label: 'Amount' },
       { type: ARG_OPAQUE32, label: 'Order' },
     ],
     accounts: [{ index: 3, label: 'Vault' }],
