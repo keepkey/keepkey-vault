@@ -39,30 +39,40 @@ function wireTransaction(
 }
 
 describe('Solana transaction signing route', () => {
-  test('REST schema preserves a complete descriptor but strips caller-asserted blind consent', () => {
-    const swapMetadata = {
-      payload: Buffer.from('KKSOLSW1-test').toString('base64'),
+  test('REST schema preserves a complete LUT proof but strips caller-asserted blind consent', () => {
+    const lutProof = {
+      accounts: [Buffer.alloc(32, 2).toString('base64')],
       signature: Buffer.alloc(64, 1).toString('base64'),
       signerKeyId: 3,
     }
     const parsed = SolanaSignRequest.parse({
       raw_tx: wireTransaction().rawTx,
       addressNList: ADDRESS_N,
-      swapMetadata,
+      lutProof,
       allowBlindSigning: true,
     })
-    expect(parsed.swapMetadata).toEqual(swapMetadata)
+    expect(parsed.lutProof).toEqual(lutProof)
     expect('allowBlindSigning' in parsed).toBe(false)
   })
 
-  test('REST schema rejects partial or out-of-range descriptors', () => {
+  test('REST schema rejects partial, out-of-range, and mixed-certified proofs', () => {
     expect(() => SolanaSignRequest.parse({
       raw_tx: wireTransaction().rawTx,
-      swapMetadata: { payload: 'S0tTT0xTVzE=', signerKeyId: 3 },
+      lutProof: { accounts: [Buffer.alloc(32).toString('base64')], signerKeyId: 3 },
     })).toThrow()
     expect(() => SolanaSignRequest.parse({
       raw_tx: wireTransaction().rawTx,
-      swapMetadata: { payload: 'S0tTT0xTVzE=', signature: 'AA==', signerKeyId: 4 },
+      lutProof: { accounts: ['AA=='], signature: 'AA==', signerKeyId: 4 },
+    })).toThrow()
+    expect(() => SolanaSignRequest.parse({
+      raw_tx: wireTransaction().rawTx,
+      schema: { payload: 'AA==', signature: 'AA==', signerKeyId: 0x80 },
+    })).toThrow()
+    expect(() => SolanaSignRequest.parse({
+      raw_tx: wireTransaction().rawTx,
+      certificate: 'AA==',
+      schema: { payload: 'AA==', signature: 'AA==', signerKeyId: 0x80 },
+      lutProof: { accounts: ['AA=='], signature: 'AA==', signerKeyId: 3 },
     })).toThrow()
   })
 

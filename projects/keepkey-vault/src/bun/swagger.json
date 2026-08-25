@@ -3771,7 +3771,7 @@
       "post": {
         "operationId": "solana_signTransaction",
         "summary": "Sign a Solana transaction",
-        "description": "Sign a raw Solana transaction on the KeepKey device. raw_tx is a base64-encoded serialized transaction. Self-contained v0 transactions are routed through the firmware transaction parser. An x402 caller may include the exact PaymentRequirements object so Vault can bind sponsor, mint, amount, signer and recipient ATA to the signed bytes before the device displays the verified merchant owner. Transactions that use address lookup tables remain behind explicit one-request blind-signing consent.",
+        "description": "Sign a raw Solana transaction on the KeepKey device. raw_tx is a base64-encoded serialized transaction. Self-contained legacy/v0 transactions may use a root-certified instruction schema; v0 transactions with address lookups additionally require a transaction-bound LUT proof. An x402 caller may include the exact PaymentRequirements object so Vault can bind sponsor, mint, amount, signer and recipient ATA to the signed bytes before the device displays the verified merchant owner. Unsupported routes remain behind explicit one-request blind-signing consent.",
         "parameters": [],
         "requestBody": {
           "content": {
@@ -3814,31 +3814,48 @@
                     },
                     "required": ["scheme", "network", "amount", "asset", "payTo", "maxTimeoutSeconds", "extra"]
                   },
-                  "swapMetadata": {
+                  "lutProof": {
                     "type": "object",
-                    "description": "Transaction-bound KKSOLSW1 ClearSign descriptor signed by a device-trusted metadata key.",
+                    "description": "Transaction-bound proof of the canonical accounts resolved from address lookup tables. Omit for self-contained messages.",
                     "additionalProperties": false,
                     "properties": {
-                      "payload": {
-                        "type": "string",
-                        "description": "Base64-encoded canonical KKSOLSW1 descriptor"
+                      "accounts": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 8,
+                        "items": { "type": "string" },
+                        "description": "Base64-encoded 32-byte accounts in canonical writable-then-readonly order"
                       },
                       "signature": {
                         "type": "string",
-                        "description": "Base64-encoded 64-byte compact secp256k1 signature over SHA256(payload)"
+                        "description": "64-byte compact secp256k1 signature (hex or base64)"
                       },
                       "signerKeyId": {
                         "type": "integer",
-                        "minimum": 0,
-                        "maximum": 3,
-                        "description": "Trusted device ClearSign signer slot"
+                        "enum": [0, 1, 2, 3, 128],
+                        "description": "Runtime signer slot 0-3, or 128 for a root-certified delegate"
                       }
                     },
                     "required": [
-                      "payload",
+                      "accounts",
                       "signature",
                       "signerKeyId"
                     ]
+                  },
+                  "schema": {
+                    "type": "object",
+                    "description": "Reusable signed KKSOLSC1 instruction schema.",
+                    "additionalProperties": false,
+                    "properties": {
+                      "payload": { "type": "string", "description": "Schema bytes (hex or base64)" },
+                      "signature": { "type": "string", "description": "64-byte compact secp256k1 signature (hex or base64)" },
+                      "signerKeyId": { "type": "integer", "enum": [0, 1, 2, 3, 128] }
+                    },
+                    "required": ["payload", "signature", "signerKeyId"]
+                  },
+                  "certificate": {
+                    "type": "string",
+                    "description": "139-byte KeepKey root certificate (hex or base64), required exactly when signerKeyId is 128"
                   }
                 },
                 "required": [

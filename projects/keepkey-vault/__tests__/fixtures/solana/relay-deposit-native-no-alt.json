@@ -1,0 +1,22 @@
+{
+  "_comment": "Real Relay Bridge depositNative v0 transaction returned by the public Pioneer quote API for the operator's repeatedly tested SOL-to-ETH route on 2026-08-24 America/Chicago (2026-08-25 UTC). This is the production shape that exposed the schema-only certification gap: all five instruction accounts are static and the message has zero address lookup entries. The blockhash is intentionally stale; tests inspect unsigned message structure and never broadcast it.",
+  "rawTxBase64": "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAAQADBew5eaTca0Ab0EUXGhifJoVvq56rdVYCFPlysu3BZDAPZpY7N+WB3BSg9XPu7ejlSiV9g9CCxUqyCMv/0dwqcMp5Jok3js1R2AQG6wyqO2J5W+sQtsXclrwuDfA8v+4av74+bShdLuljNRtt7rCh6WyIFDXM1FCyZF8kzCeWC+5HAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADZbbn2IvhA/9qXQwII3bx5UNLB6kXsycKTMVHAKWPzhgECBQMAAAEEMA2eDd9f1RwG8HVjOwAAAAADcE3qKl65z5ji9iWpYIDfHwxcJMzsOm2IJ7OrJcCxGAA=",
+  "expected": {
+    "version": "v0",
+    "wireBytes": 320,
+    "staticAccounts": [
+      "Gu83nVMD8qh948D1vqe8UPoUHaFuSwcHrvNHetcM4Xux",
+      "7uTT8Xi5RWXzy7h9XL244GRgEycDYDhLjr3ZyNdXi8pZ",
+      "99vQwtBwYtrqqD9YSXbdum3KBdxPAVxYTaQ3cfnJSrN2",
+      "Dodg2HifwU8rmaVVyMyUZDGTRbqAJTyVYxXPwcbNpBKc",
+      "11111111111111111111111111111111"
+    ],
+    "altEntries": 0,
+    "programId": "99vQwtBwYtrqqD9YSXbdum3KBdxPAVxYTaQ3cfnJSrN2",
+    "instructionAccountIndices": [3, 0, 0, 1, 4],
+    "instructionDiscriminatorHex": "0d9e0ddf5fd51c06",
+    "instructionDataLen": 48,
+    "amountLamports": "996374000",
+    "vault": "7uTT8Xi5RWXzy7h9XL244GRgEycDYDhLjr3ZyNdXi8pZ"
+  }
+}

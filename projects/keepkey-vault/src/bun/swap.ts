@@ -16,6 +16,8 @@ import { toDeviceError, deviceErrorMessage } from '../shared/device-error'
 import { findEvmSchema } from './evm-schema-registry'
 import { firmwareClearSigns } from './calldata-decoder'
 import { findSolanaSchema } from './solana-schema-registry'
+import { findCertifiedSolanaProof } from './solana-certified-registry'
+import { hasCompleteCertifiedSolanaEnvelope } from './solana-certified-policy'
 import { getPioneer } from './pioneer'
 import { encodeDepositWithExpiry, encodeApprove, parseUnits, toHex, readPioneerBalance } from './txbuilder/evm'
 import { getEvmGasPrice, getEvmFeeData, getEvmNonce, getEvmBalance, getErc20Allowance, getErc20Balance, getErc20Decimals, broadcastEvmTx, EvmSignerVerificationError, waitForTxReceipt, estimateGas } from './evm-rpc'
@@ -686,15 +688,36 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
       // Dropping it here routes into the opaque-consent path below, which asks
       // the user to opt in. Perverse otherwise: a route WITHOUT a schema works
       // (consent -> blind sign) while a route WITH one dies.
+      // The certified signer understands both real Relay shapes: v0 messages
+      // with address-table entries receive schema + LUT proof + certificate;
+      // self-contained legacy/v0 messages receive schema + certificate only.
+      // A routine catalog miss or unavailable service falls through to the
+      // existing runtime-schema/explicit-consent path.
+      let certifiedProof: Awaited<ReturnType<typeof findCertifiedSolanaProof>> = undefined
+      try {
+        certifiedProof = await findCertifiedSolanaProof(
+          params.relayTx.serializedTx,
+          'relayDepositNative',
+        )
+      } catch (err: any) {
+        swapLog(`${TAG} certified Solana ClearSign proof unavailable: ${err?.message || err}`)
+      }
+      if (certifiedProof) {
+        const shape = certifiedProof.lutProof
+          ? `${certifiedProof.lutProof.accounts.length} LUT accounts`
+          : 'self-contained message (no LUT proof)'
+        swapLog(`${TAG} certified Solana ClearSign proof attached: ${shape}`)
+      }
+
       const solSchemaAvailable = findSolanaSchema(params.relayTx.serializedTx)
       // Withheld in two cases: AdvancedMode off (verification cannot succeed --
       // loaded signers are only honoured with it on), and after the user has
       // explicitly consented to blind signing (re-attaching would refuse again
       // and loop).
-      const solSchema = (ctx.isAdvancedModeEnabled?.() === false || params.allowSolanaBlindSigning === true)
+      const solSchema = (certifiedProof || ctx.isAdvancedModeEnabled?.() === false || params.allowSolanaBlindSigning === true)
         ? undefined
         : solSchemaAvailable
-      if (solSchemaAvailable && !solSchema) {
+      if (solSchemaAvailable && !solSchema && !certifiedProof) {
         swapLog(`${TAG} clear-sign schema withheld: AdvancedMode is off, the device could not verify it`)
       }
       if (solSchema) {
@@ -704,7 +727,13 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
         addressNList: fromChain.defaultPath,
         rawTx: params.relayTx.serializedTx,
         allowBlindSigning: params.allowSolanaBlindSigning === true,
-        swapMetadata: params.relayTx.solanaSwapMetadata,
+        ...(certifiedProof
+          ? {
+              ...(certifiedProof.lutProof ? { lutProof: certifiedProof.lutProof } : {}),
+              schema: certifiedProof.schema,
+              certificate: certifiedProof.certificate,
+            }
+          : {}),
         ...(solSchema
           ? { schema: { payload: solSchema.payload, signature: solSchema.signature, signerKeyId: solSchema.signerKeyId } }
           : {}),
@@ -918,15 +947,16 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
     unsignedTx = buildResult.unsignedTx
   }
 
-  // Prebuilt Relay Solana payloads currently use a custom program plus
-  // lookup-table accounts. Without a transaction-bound ClearSign descriptor the
-  // device must classify that exact route as opaque. Ask for explicit one-shot
-  // consent before the hardware prompt, but do not block other Solana or v0
-  // transactions that firmware can natively ClearSign.
+  // Prebuilt Relay Solana payloads use a custom program. Some real routes are
+  // self-contained v0 messages; others resolve accounts through lookup tables.
+  // Without a complete certified envelope (or a usable runtime schema), the
+  // device must classify the route as opaque. Ask for explicit one-shot consent
+  // before the hardware prompt, but do not block transactions firmware can
+  // natively ClearSign.
   const needsOpaqueSolanaFallback =
     fromChain.chainFamily === 'solana' &&
     !!params.relayTx?.serializedTx &&
-    !params.relayTx.solanaSwapMetadata &&
+    !hasCompleteCertifiedSolanaEnvelope(unsignedTx) &&
     // A reusable schema lets the device read this instruction, so no
     // blind-sign consent is needed.
     // Must mirror the attach decision above: a schema we withheld is not a
