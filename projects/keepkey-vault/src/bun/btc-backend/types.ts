@@ -30,6 +30,16 @@ export interface BtcFeeRates {
   fast: number
 }
 
+export interface BtcAddressIndices {
+  receiveIndex: number
+  changeIndex: number
+  /** False means the returned zeroes are conservative defaults, not proof that
+   * address 0 is unused. The UI must surface this before an address is copied. */
+  discoveryAvailable: boolean
+  source: BtcBackendKind
+  warning?: string
+}
+
 export interface BtcBackend {
   readonly kind: BtcBackendKind
   /** history=false → e.g. a pruned Core node via scantxoutset (balance+UTXO only). */
@@ -41,6 +51,10 @@ export interface BtcBackend {
   feeRate(network: string): Promise<BtcFeeRates>
   broadcast(q: { network: string; rawTxHex: string }): Promise<{ txid: string }>
   rawTxHex(q: { network: string; txid: string }): Promise<string | undefined>
+
+  /** Next-unused receive/change indexes require address history, not just the
+   * current UTXO set. Core's scantxoutset backend deliberately omits this. */
+  addressIndices?(q: { network: string; xpub: string; scriptType?: string }): Promise<BtcAddressIndices>
 
   /** Tip height for a "Test connection" health check. Optional — only self-host needs it. */
   tipHeight?(): Promise<number>

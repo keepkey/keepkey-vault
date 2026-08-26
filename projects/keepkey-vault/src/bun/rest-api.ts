@@ -20,9 +20,19 @@ import { join } from 'path'
 import * as S from './schemas'
 import { parseRequest, validateResponse } from './validate'
 import { SIGNING_ROUTES, requiredSigningFields } from './signing-routes'
+import {
+  bitcoinOnlyActivityList,
+  bitcoinOnlyBalanceList,
+  bitcoinOnlyChainList,
+  bitcoinOnlyCoinAllowed,
+  bitcoinOnlyCoinList,
+  bitcoinOnlyPublicKeyPathAllowed,
+  bitcoinOnlyRejection,
+} from './bitcoin-only-boundary'
 import { handleV2DataRoute } from './rest-pioneer'
 import { handleSwapRoute } from './rest-swap'
 import { handleSweepRoute } from './rest-sweep'
+import { isOfflineNetworkRoute } from './offline-policy'
 import { handleLedgerRoute } from './rest-ledger'
 import { getSetting, findApiLogs, getApiLogById, getRecentActivityFromLog, getSwapHistory, getSwapHistoryByTxid, getSwapHistoryStats, getCachedBalances, getCachedPubkeys, getAllTokenVisibility, getTokensByVisibility, setTokenVisibility, removeTokenVisibility, insertClearSignEvent } from './db'
 import { detectSpamToken, categorizeTokens } from '../shared/spamFilter'
@@ -1141,16 +1151,6 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
     return fn()
   }
 
-  /** Non-Bitcoin address-derivation endpoints. Bitcoin-only firmware can't
-   *  derive any of these — Pioneer still polls them during portfolio sync, so
-   *  we short-circuit them (below) instead of hitting the device, which would
-   *  return "Unknown message" and flood the log. `/addresses/utxo` is BTC. */
-  const NON_BTC_ADDRESS_PATHS = new Set([
-    '/addresses/cosmos', '/addresses/osmosis', '/addresses/eth', '/addresses/tendermint',
-    '/addresses/thorchain', '/addresses/mayachain', '/addresses/xrp', '/addresses/solana',
-    '/addresses/tron', '/addresses/ton', '/addresses/hive',
-  ])
-
   /** True when the connected device runs bitcoin-only firmware. */
   function deviceIsBitcoinOnly(): boolean {
     return isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant)
@@ -1184,12 +1184,21 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         server.timeout(req, 0)
       }
 
-      // Bitcoin-only firmware can't derive any non-Bitcoin chain. Pioneer still
-      // polls these address endpoints during portfolio sync — short-circuit with
-      // 501 before touching the device, which would otherwise reject the message
-      // ("Unknown message") and flood the log with multi-chain spam.
-      if (method === 'POST' && NON_BTC_ADDRESS_PATHS.has(path) && deviceIsBitcoinOnly()) {
-        return new Response(JSON.stringify({ error: 'not available on bitcoin-only firmware' }),
+      // Fail before auth approval UI, stale-state reads, network access, and
+      // device dispatch. Dedicated altcoin feature families are rejected for
+      // every HTTP method; generic POST routes are rejected by requested coin.
+      // Malformed bodies continue to normal schema validation instead of being
+      // misreported as BTC-only.
+      if (deviceIsBitcoinOnly()) {
+        let boundaryBody: Record<string, unknown> | undefined
+        if ((method === 'POST' && path.startsWith('/api/v2/'))
+          || path === '/addresses/utxo'
+          || path === '/utxo/sign-transaction'
+          || path === '/system/info/get-public-key') {
+          boundaryBody = await req.clone().json().catch(() => undefined)
+        }
+        const rejection = bitcoinOnlyRejection(method, path, boundaryBody)
+        if (rejection) return new Response(JSON.stringify({ error: rejection }),
           { status: 501, headers: { 'Content-Type': 'application/json', ...corsHeaders(req) } })
       }
 
@@ -3286,7 +3295,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const ds = engine.getDeviceState()
           if (!ds.deviceId) return json({ devices: [], total_value_usd: 0 })
           const cached = engine.isPassphraseWallet ? null : getCachedBalances(ds.deviceId)
-          const totalUsd = cached ? cached.balances.reduce((sum, b) => sum + b.balanceUsd, 0) : 0
+          const balances = bitcoinOnlyBalanceList(cached?.balances || [], deviceIsBitcoinOnly())
+          const totalUsd = balances.reduce((sum, b) => sum + b.balanceUsd, 0)
           return json({
             devices: [{ state: ds.state }],
             total_value_usd: totalUsd,
@@ -3301,7 +3311,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             return json({ error: 'Device not found' }, 404)
           }
           const cached = engine.isPassphraseWallet ? null : getCachedBalances(ds.deviceId)
-          const totalUsd = cached ? cached.balances.reduce((sum, b) => sum + b.balanceUsd, 0) : 0
+          const balances = bitcoinOnlyBalanceList(cached?.balances || [], deviceIsBitcoinOnly())
+          const totalUsd = balances.reduce((sum, b) => sum + b.balanceUsd, 0)
           return json({
             device_id: ds.deviceId,
             state: ds.state,
@@ -3717,6 +3728,13 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             }
 
             // ── xpub/ypub/zpub-type paths (UTXO chains) ──
+            const coinType = p.address_n.length >= 2 ? (p.address_n[1] >= 0x80000000 ? p.address_n[1] - 0x80000000 : p.address_n[1]) : 0
+            const rawCoin = p.coin || SLIP44_TO_COIN[coinType] || 'Bitcoin'
+            const coin = TICKER_TO_COIN[rawCoin] || rawCoin
+            // Filter before the cache lookup. The same physical device id may
+            // have cached altcoin xpubs before being flashed BTC-only.
+            if (deviceIsBitcoinOnly() && !bitcoinOnlyPublicKeyPathAllowed({ ...p, coin })) continue
+
             const cacheKey = scopedKey(engine, 'batch-pubkey', { address_n: p.address_n, script_type: p.script_type })
             const cached = pubkeyCache.get(cacheKey)
             if (cached) {
@@ -3733,9 +3751,6 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               })
               continue
             }
-            const coinType = p.address_n.length >= 2 ? (p.address_n[1] >= 0x80000000 ? p.address_n[1] - 0x80000000 : p.address_n[1]) : 0
-            const rawCoin = p.coin || SLIP44_TO_COIN[coinType] || 'Bitcoin'
-            const coin = TICKER_TO_COIN[rawCoin] || rawCoin
             try {
               const result = await wallet.getPublicKeys([{
                 addressNList: p.address_n,
@@ -3788,12 +3803,12 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           if (!Number.isFinite(limit)) {
             throw new HttpError(400, 'Invalid limit: must be a number')
           }
-          const entries = getRecentActivityFromLog(
+          const entries = bitcoinOnlyActivityList(getRecentActivityFromLog(
             Math.min(Math.max(limit, 1), 500),
             q.get('chainId') || q.get('chain') || undefined,
             scope.deviceId,
             scope.walletId,
-          )
+          ), deviceIsBitcoinOnly())
           return json({ entries, count: entries.length })
         }
 
@@ -3813,7 +3828,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             }
             return n
           }
-          const entries = findApiLogs({
+          const entries = bitcoinOnlyActivityList(findApiLogs({
             ...scope,
             route:        q.get('route')         || undefined,
             activityType: q.get('activityType')  || undefined,
@@ -3823,12 +3838,15 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             until:        parseNumParam('until'),
             limit:        parseNumParam('limit'),
             offset:       parseNumParam('offset'),
-          })
+          }), deviceIsBitcoinOnly())
           return json({ entries, count: entries.length })
         }
 
         if (path === '/api/v1/activity/rebuild' && method === 'POST') {
           auth.requireAuth(req)
+          if (getSetting('offline_mode') === '1' && isOfflineNetworkRoute(path, method)) {
+            throw new HttpError(503, 'OFFLINE: activity rebuild is disabled in offline mode')
+          }
           if (engine.isPassphraseWallet) {
             return json({ error: 'Activity rebuild is not available for passphrase-protected wallets' }, 403)
           }
@@ -3843,6 +3861,9 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             ...(Array.isArray(body.chainIds) ? body.chainIds : []),
             ...(typeof body.chainId === 'string' ? [body.chainId] : []),
           ]
+          if (deviceIsBitcoinOnly() && chainIds.some(id => id !== 'bitcoin' && id !== 'BTC')) {
+            throw new HttpError(501, 'non-Bitcoin activity rebuild is not available on bitcoin-only firmware')
+          }
           const unknown = chainIds.filter(id => !CHAINS.some(c => c.id === id || c.symbol === id))
           if (unknown.length > 0) {
             return json({ error: `Unknown chain id(s): ${unknown.join(', ')}` }, 400)
@@ -3850,7 +3871,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const result = await rebuildActivityHistory({
             wallet,
             scope,
-            chains: CHAINS,
+            chains: bitcoinOnlyChainList(CHAINS, deviceIsBitcoinOnly()),
             firmwareVersion: engine.getDeviceState().firmwareVersion,
             options: body,
           })
@@ -3868,8 +3889,11 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             return json({ error: 'Invalid id' }, 400)
           }
           const entry = getApiLogById(id, scope.deviceId, scope.walletId)
-          if (!entry) return json({ error: 'Not found' }, 404)
-          return json(entry)
+          const visible = entry
+            ? bitcoinOnlyActivityList([entry], deviceIsBitcoinOnly())[0]
+            : undefined
+          if (!visible) return json({ error: 'Not found' }, 404)
+          return json(visible)
         }
 
         // ═══════════════════════════════════════════════════════════════
@@ -4022,7 +4046,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         // ═══════════════════════════════════════════════════════════════
         if (path === '/system/info/list-coins' && method === 'POST') {
           auth.requireAuth(req)
-          return json(CHAINS.map(c => ({
+          const visibleChains = deviceIsBitcoinOnly() ? bitcoinOnlyCoinList(CHAINS) : CHAINS
+          return json(visibleChains.map(c => ({
             coin_name: c.coin,
             coin_shortcut: c.symbol,
             chain: c.chain,
@@ -4452,18 +4477,27 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         // the dedicated handler instead of falling through to the legacy
         // pioneer-passthrough quote endpoint.
         if (path.startsWith('/api/v2/swap')) {
+          if (getSetting('offline_mode') === '1' && isOfflineNetworkRoute(path, method)) {
+            throw new HttpError(503, 'OFFLINE: swap routes are disabled in offline mode')
+          }
           const resp = await handleSwapRoute(path, method, req, auth, json, callbacks)
           if (resp) return resp
         }
 
         // ── REST v2 data routes (balances, market, UTXOs, etc.) ──
         if (path.startsWith('/api/v2/') && !path.startsWith('/api/v2/devices') && !path.startsWith('/api/v2/sweep/') && !path.startsWith('/api/v2/swap')) {
+          if (getSetting('offline_mode') === '1' && isOfflineNetworkRoute(path, method)) {
+            throw new HttpError(503, 'OFFLINE: network data routes are disabled in offline mode')
+          }
           const resp = await handleV2DataRoute(path, method, req, auth, json)
           if (resp) return resp
         }
 
         // ── BTC Sweep tool ──────────────────────────────────────────
         if (path.startsWith('/api/v2/sweep/')) {
+          if (getSetting('offline_mode') === '1' && isOfflineNetworkRoute(path, method)) {
+            throw new HttpError(503, 'OFFLINE: sweep routes are disabled in offline mode')
+          }
           const resp = await handleSweepRoute(path, method, req, engine, auth, json, callbacks)
           if (resp) return resp
         }

@@ -12,6 +12,7 @@ import { bech32, bech32m } from '@scure/base'
 import bs58check from 'bs58check'
 import type { ChainDef } from '../../shared/chains'
 import { getBtcBackend } from '../btc-backend'
+import type { BtcBackend } from '../btc-backend'
 import { utxoDiscoveryKey } from '../btc-backend/types'
 import { filterSpendableZcashUtxos, summarizeZcashMaturity, ZCASH_MIN_CONFIRMATIONS } from '../../shared/zcash-maturity'
 
@@ -272,7 +273,9 @@ async function resolveFeeRates(
   if (HARDCODED_FEES[chain.networkId]) return HARDCODED_FEES[chain.networkId]
   if (btcSelfHostActive(chain.networkId)) {
     try { return await getBtcBackend().feeRate(chain.networkId) }
-    catch { return DEFAULT_FEES[chain.networkId] || { slow: 3, average: 5, fast: 15 } }
+    catch (error: any) {
+      throw new Error(`Self-host fee lookup failed; refusing to guess a fee rate: ${error?.message || error}`)
+    }
   }
   try {
     const feeResp = pioneer.GetFeeRateByNetwork
@@ -289,6 +292,25 @@ async function resolveFeeRates(
   } catch {
     return DEFAULT_FEES[chain.networkId] || { slow: 3, average: 5, fast: 15 }
   }
+}
+
+export async function selfHostChangeIndex(
+  backend: Pick<BtcBackend, 'kind' | 'addressIndices'>,
+  query: { network: string; xpub: string; scriptType?: string },
+  needsChange: boolean,
+): Promise<number> {
+  if (!needsChange) return 0
+  if (!backend.addressIndices) {
+    throw new Error(
+      `${backend.kind} cannot prove an unused change address from the current UTXO set. ` +
+      `Use Blockbook for normal sends, or construct a no-change transaction. Vault will not reuse a guessed change index.`,
+    )
+  }
+  const discovered = await backend.addressIndices(query)
+  if (!discovered.discoveryAvailable || !Number.isSafeInteger(discovered.changeIndex) || discovered.changeIndex < 0) {
+    throw new Error(`${backend.kind} did not return a trustworthy unused change index; refusing to build the transaction.`)
+  }
+  return discovered.changeIndex
 }
 
 /** Fetch UTXOs for a single xpub, tag each with its scriptType and source accountPath */
@@ -606,11 +628,10 @@ export async function buildUtxoTx(
   let changeAddressIndex = 0
   const addressToPath = new Map<string, string>()
   // BTC self-host: no Pioneer metadata. UTXOs already carry `path` (Blockbook/Core
-  // provide it), so the address→path enrichment below is a no-op; we only need the
-  // next change index. Derive it from unspent change UTXOs (path .../1/N).
-  // ponytail: under-counts only if a change addr was used then fully spent → address
-  // reuse (privacy), never fund loss; the collision loop below still prevents reusing
-  // a live input path. Upgrade path: query the node's used-address set if reuse bites.
+  // provide it), so the address→path enrichment below is a no-op. Change discovery
+  // must still use full address history: deriving from current UTXOs can reuse an
+  // address that was previously spent. Blockbook supports it; Core scantxoutset does
+  // not, so a Core transaction requiring change fails closed.
   const btcSelfHost = btcSelfHostActive(chain.networkId)
   // Always query primaryXpub for change-address discovery, plus all funded xpubs for path enrichment
   const queryCandidates = allXpubs?.length
@@ -620,16 +641,13 @@ export async function buildUtxoTx(
     queryCandidates.map(q => [utxoDiscoveryKey(q.xpub, q.scriptType), q]),
   ).values()]
   if (btcSelfHost) {
-    let maxUsed = -1
-    for (const u of utxos) {
-      const parts = (u.path || '').split('/')
-      if (parts.length === 6 && parts[4] === '1') {
-        const idx = parseInt(parts[5], 10)
-        if (!isNaN(idx) && idx > maxUsed) maxUsed = idx
-      }
-    }
-    changeAddressIndex = maxUsed + 1
-    console.log(`${TAG} Self-host change index from UTXOs: ${changeAddressIndex}`)
+    const backend = getBtcBackend()
+    changeAddressIndex = await selfHostChangeIndex(
+      backend,
+      { network: chain.networkId, xpub: primaryXpub, scriptType },
+      outputs.some((output: any) => !output.address),
+    )
+    console.log(`${TAG} Self-host change index via ${backend.kind}: ${changeAddressIndex}`)
   }
   for (const query of xpubsToQuery) {
     const qXpub = query.xpub

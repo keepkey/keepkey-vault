@@ -1658,8 +1658,9 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 								/>
 							</Flex>
 
-							{/* WalletConnect toggle */}
-							<Flex justify="space-between" align="center">
+							{/* WalletConnect is an altcoin signing surface. A persisted global
+							    setting must not re-expose it on Bitcoin-only firmware. */}
+							{!isBitcoinOnlyVariant(deviceState.firmwareVariant) && <Flex justify="space-between" align="center">
 								<Flex align="center" gap="3">
 									<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(59,153,252,0.1)">
 										<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#3B99FC" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -1680,7 +1681,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 									onChange={toggleWalletConnect}
 									disabled={togglingWalletConnect}
 								/>
-							</Flex>
+							</Flex>}
 
 							{/* BIP-85 Derived Seeds toggle — requires firmware >= 7.16.0 */}
 							{(() => {
