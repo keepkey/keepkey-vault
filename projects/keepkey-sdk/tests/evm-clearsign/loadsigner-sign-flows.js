@@ -11,7 +11,8 @@
  * with the new hdwallet loadClearsignSigner + route. Sign-only, no broadcast,
  * no wipe. The signer is RAM-only — reload if the device reboots.
  *
- * The complete 51-flow corpus is addressable without turning one run into a
+ * The frozen 51-flow Python-parity corpus plus separately sourced 2026 SDK
+ * additions are addressable without turning one run into a
  * multi-hour approval ceremony. Select a comma-separated list, or page through
  * it with CLEARSIGN_START + CLEARSIGN_LIMIT. The default is the first five.
  *
@@ -22,9 +23,9 @@
  *   node tests/evm-clearsign/loadsigner-sign-flows.js
  */
 const { run, ETH_PATH } = require('../_helpers')
-const { GOLDEN, buildFlowBlob, CI_TEST_PUBKEY, CI_SIGNER_ALIAS, TEST_KEY_ID } = require('../_clearsign')
+const { ALL_FLOWS, buildFlowBlob, CI_TEST_PUBKEY, CI_SIGNER_ALIAS, TEST_KEY_ID } = require('../_clearsign')
 
-const ALL_FLOWS = Object.keys(GOLDEN.flows).sort()
+const FLOW_KEYS = Object.keys(ALL_FLOWS).sort()
 
 function integerEnv(name, fallback) {
   const raw = process.env[name]
@@ -37,25 +38,25 @@ function integerEnv(name, fallback) {
 function selectedFlows() {
   const named = (process.env.CLEARSIGN_FLOW || '').split(',').map(value => value.trim()).filter(Boolean)
   if (named.length) {
-    const unknown = named.filter(key => !GOLDEN.flows[key])
+    const unknown = named.filter(key => !ALL_FLOWS[key])
     if (unknown.length) throw new Error(`Unknown CLEARSIGN_FLOW: ${unknown.join(', ')}`)
     return named
   }
   const start = integerEnv('CLEARSIGN_START', 0)
   const limit = integerEnv('CLEARSIGN_LIMIT', 5)
-  return ALL_FLOWS.slice(start, start + limit)
+  return FLOW_KEYS.slice(start, start + limit)
 }
 
 if (process.env.CLEARSIGN_LIST === '1') {
-  console.log(`Legacy runtime-signer ClearSign corpus (${ALL_FLOWS.length} flows):`)
-  ALL_FLOWS.forEach((key, index) => console.log(`${String(index).padStart(2, ' ')}  ${key}`))
+  console.log(`Runtime-signer ClearSign corpus (${FLOW_KEYS.length} flows):`)
+  FLOW_KEYS.forEach((key, index) => console.log(`${String(index).padStart(2, ' ')}  ${key}`))
   process.exit(0)
 }
 
 const FLOWS = selectedFlows()
 if (!FLOWS.length) throw new Error('Selected ClearSign batch is empty')
 
-run(`clear-sign: load CI signer + sign ${FLOWS.length}/${ALL_FLOWS.length} legacy flows`, async (getSdk, assert) => {
+run(`clear-sign: load CI signer + sign ${FLOWS.length}/${FLOW_KEYS.length} flows`, async (getSdk, assert) => {
   const sdk = await getSdk()
 
   const { address } = await sdk.address.ethGetAddress({ address_n: ETH_PATH })
@@ -73,6 +74,7 @@ run(`clear-sign: load CI signer + sign ${FLOWS.length}/${ALL_FLOWS.length} legac
     const { tx, blobHex, keyId, flow } = buildFlowBlob(key)
     console.log(`\n  [${key}] ${flow.method}  to=${tx.to}`)
     console.log(`    args: ${flow.args.map(a => a.name).join(', ')}`)
+    if (flow.sources?.length) console.log(`    source: ${flow.sources[0]}`)
     console.log('    >>> APPROVE the clear-sign pages on device <<<')
     const result = await sdk.eth.ethSignTransaction({
       ...tx,
