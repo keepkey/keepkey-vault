@@ -1,0 +1,13 @@
+name = "keepkey-clearsign"
+main = "src/index.ts"
+account_id = "53185d258559a5dae7d6fa6225cc46ba"
+compatibility_date = "2026-08-23"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = true
+
+[vars]
+CLEARSIGN_ENVIRONMENT = "production"
+CLEARSIGN_SOLANA_RPC_ENDPOINT = "https://api.mainnet-beta.solana.com"
+
+[observability]
+enabled = true

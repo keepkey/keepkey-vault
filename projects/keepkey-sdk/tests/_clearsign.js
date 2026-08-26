@@ -57,6 +57,18 @@ function sighashLegacy(to, value, data, chainId) {
   return keccak_256(rlpList(items))
 }
 
+// Keep the frozen 51-flow Python parity corpus intact and layer independently
+// sourced 2026 SDK fixtures on top. Their txHash is derived here with the same
+// implementation used by buildFlowBlob, then independently rechecked by the
+// vendored offline gate.
+const VENDORED_FLOWS = require('./fixtures/evm-clearsign-vendored')
+for (const flow of Object.values(VENDORED_FLOWS)) {
+  flow.txHash = Buffer.from(sighashLegacy(
+    hex(flow.to), BigInt(flow.value), hex(flow.calldata), flow.chainId,
+  )).toString('hex')
+}
+const ALL_FLOWS = { ...GOLDEN.flows, ...VENDORED_FLOWS }
+
 function serializeMetadata(f) {
   const name = new TextEncoder().encode(f.methodName)
   const parts = [Uint8Array.from([0x01]), be(f.chainId, 4), f.contractAddress, f.selector, f.txHash,
@@ -82,7 +94,7 @@ function signBlob(payload, priv) {
  * /eth/sign-transaction; the device recomputes the same sighash the blob binds.
  */
 function buildFlowBlob(key) {
-  const flow = GOLDEN.flows[key]
+  const flow = ALL_FLOWS[key]
   if (!flow) throw new Error(`unknown flow: ${key}`)
   const to = hex(flow.to), data = hex(flow.calldata)
   const jsHash = sighashLegacy(to, flow.value, data, flow.chainId)
@@ -113,5 +125,6 @@ function buildFlowBlob(key) {
 
 module.exports = {
   GOLDEN, buildFlowBlob, sighashLegacy, serializeMetadata, signBlob,
+  ALL_FLOWS, VENDORED_FLOWS,
   CI_TEST_PUBKEY, CI_SIGNER_ALIAS, TEST_KEY_ID, TEST_PRIV,
 }

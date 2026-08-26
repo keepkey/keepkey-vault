@@ -11,6 +11,9 @@
     "build:stable": "bun scripts/bundle-backend.ts && vite build && bun scripts/collect-externals.ts && bun scripts/build-signed.ts stable",
     "build:canary": "bun scripts/bundle-backend.ts && vite build && bun scripts/collect-externals.ts && bun scripts/build-signed.ts canary",
     "assets:vendor-icons": "bun scripts/vendor-asset-icons.ts",
+    "clearsign:worker:test": "bun test clearsign-worker/src/index.test.ts",
+    "clearsign:worker:dev": "wrangler dev --config clearsign-worker/wrangler.toml",
+    "clearsign:worker:deploy": "wrangler deploy --config clearsign-worker/wrangler.toml",
     "start": "bun run dev",
     "postinstall": "bash scripts/patch-electrobun.sh"
   },

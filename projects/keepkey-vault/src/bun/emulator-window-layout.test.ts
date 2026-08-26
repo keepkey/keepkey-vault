@@ -37,4 +37,13 @@ describe('emulator window layout', () => {
     expect(metadataRule).toContain('width: min(320px, calc(100vw - 24px))')
     expect(buttonsRule).toContain('width: min(320px, calc(100vw - 24px))')
   })
+
+  test('does not steal a queued transport response after a confirmed operation', () => {
+    const gatedConfirm = html.match(
+      /export async function emuGatedConfirm[\s\S]*?export async function emuInteractiveConfirm/,
+    )?.[0] ?? ''
+
+    expect(gatedConfirm).toContain('await saveEmulatorState()')
+    expect(gatedConfirm).not.toContain('flushRingBuffers')
+  })
 })
