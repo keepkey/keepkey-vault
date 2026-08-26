@@ -3,7 +3,7 @@
  *
  * 1. Loads the CI test signer (pubkey == firmware slot 3) at runtime via the new
  *    POST /eth/clearsign/load-signer route  →  DEVICE CONFIRM (trust screen).
- * 2. For each flagship flow: builds the metadata blob bound to the tx's real
+ * 2. For each selected flow: builds the metadata blob bound to the tx's real
  *    sighash (tests/_clearsign.js, byte-parity-proven offline) and signs via
  *    /eth/sign-transaction with txMetadata  →  DEVICE CONFIRM (clear-sign pages).
  *
@@ -11,20 +11,57 @@
  * with the new hdwallet loadClearsignSigner + route. Sign-only, no broadcast,
  * no wipe. The signer is RAM-only — reload if the device reboots.
  *
- * Run: KEEPKEY_API_KEY=… node tests/evm-clearsign/loadsigner-sign-flows.js
+ * The complete 51-flow corpus is addressable without turning one run into a
+ * multi-hour approval ceremony. Select a comma-separated list, or page through
+ * it with CLEARSIGN_START + CLEARSIGN_LIMIT. The default is the first five.
+ *
+ * List only: CLEARSIGN_LIST=1 node tests/evm-clearsign/loadsigner-sign-flows.js
+ * Run batch: KEEPKEY_API_KEY=… CLEARSIGN_START=0 CLEARSIGN_LIMIT=5 \
+ *   node tests/evm-clearsign/loadsigner-sign-flows.js
+ * Named: KEEPKEY_API_KEY=… CLEARSIGN_FLOW=aave-v3-supply,erc20-transfer \
+ *   node tests/evm-clearsign/loadsigner-sign-flows.js
  */
 const { run, ETH_PATH } = require('../_helpers')
-const { buildFlowBlob, CI_TEST_PUBKEY, CI_SIGNER_ALIAS, TEST_KEY_ID } = require('../_clearsign')
+const { GOLDEN, buildFlowBlob, CI_TEST_PUBKEY, CI_SIGNER_ALIAS, TEST_KEY_ID } = require('../_clearsign')
 
-// Flagship tranche: STRING + TOKEN_AMOUNT + ADDRESS (aave), token transfer,
-// and an UNLIMITED approval render. Expand to the full 51 once green.
-const FLOWS = ['aave-v3-supply', 'erc20-transfer', 'erc20-approve-unlimited']
+const ALL_FLOWS = Object.keys(GOLDEN.flows).sort()
 
-run('clear-sign: load CI signer + sign flagship flows', async (getSdk, assert) => {
+function integerEnv(name, fallback) {
+  const raw = process.env[name]
+  if (raw === undefined || raw === '') return fallback
+  const value = Number(raw)
+  if (!Number.isSafeInteger(value) || value < 0) throw new Error(`${name} must be a non-negative integer`)
+  return value
+}
+
+function selectedFlows() {
+  const named = (process.env.CLEARSIGN_FLOW || '').split(',').map(value => value.trim()).filter(Boolean)
+  if (named.length) {
+    const unknown = named.filter(key => !GOLDEN.flows[key])
+    if (unknown.length) throw new Error(`Unknown CLEARSIGN_FLOW: ${unknown.join(', ')}`)
+    return named
+  }
+  const start = integerEnv('CLEARSIGN_START', 0)
+  const limit = integerEnv('CLEARSIGN_LIMIT', 5)
+  return ALL_FLOWS.slice(start, start + limit)
+}
+
+if (process.env.CLEARSIGN_LIST === '1') {
+  console.log(`Legacy runtime-signer ClearSign corpus (${ALL_FLOWS.length} flows):`)
+  ALL_FLOWS.forEach((key, index) => console.log(`${String(index).padStart(2, ' ')}  ${key}`))
+  process.exit(0)
+}
+
+const FLOWS = selectedFlows()
+if (!FLOWS.length) throw new Error('Selected ClearSign batch is empty')
+
+run(`clear-sign: load CI signer + sign ${FLOWS.length}/${ALL_FLOWS.length} legacy flows`, async (getSdk, assert) => {
   const sdk = await getSdk()
 
   const { address } = await sdk.address.ethGetAddress({ address_n: ETH_PATH })
   console.log(`  Device ETH address: ${address}`)
+  console.log(`  Batch: ${FLOWS.join(', ')}`)
+  console.log('  Lane: legacy transaction-bound metadata; raw review remains mandatory.')
 
   console.log(`\n  Loading CI signer into slot ${TEST_KEY_ID}, alias "${CI_SIGNER_ALIAS}"`)
   console.log(`  pubkey ${CI_TEST_PUBKEY}`)
