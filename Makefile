@@ -407,6 +407,11 @@ test-emu:
 EMU_FW_DIR := modules/keepkey-firmware
 EMU_BUILD_DIR := $(EMU_FW_DIR)/build-emu
 EMU_INSTALL_DIR := $(HOME)/.keepkey/emulator
+# Vault's developer emulator must carry the same alpha ClearSign root as the
+# firmware CI emulator. A rootless build is deliberately fail-closed, but it
+# cannot exercise certified 7.16 flows and otherwise looks healthy until the
+# first certificate reaches the device.
+EMU_CLEARSIGN_ALPHA_ROOT ?= ON
 
 build-emulator:
 	@echo "=== Building emulator from current $(EMU_FW_DIR) checkout ==="
@@ -428,11 +433,14 @@ build-emulator:
 		if [ -x "$$PINNED/protoc" ]; then export PATH="$$PINNED:$$PYBIN:$$NANOPB_DIR/generator:$$PATH"; \
 		else export PATH="$$PYBIN:$$NANOPB_DIR/generator:$$PATH"; fi; \
 		cmake .. -DKK_EMULATOR=ON -DKK_DEBUG_LINK=ON -DKK_BUILD_DYLIB=ON \
+			-DKK_CLEARSIGN_ALPHA_ROOT=$(EMU_CLEARSIGN_ALPHA_ROOT) \
 			-DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
 			-DNANOPB_DIR="$$NANOPB_DIR" \
 			-DNANOPB_PLUGIN="$$(command -v protoc-gen-nanopb)" \
 			-DCMAKE_C_FLAGS="-DPB_NO_PACKED_STRUCTS=1" \
 			-DCMAKE_CXX_FLAGS="-DPB_NO_PACKED_STRUCTS=1" && \
+		grep -qx 'KK_CLEARSIGN_ALPHA_ROOT:BOOL=$(EMU_CLEARSIGN_ALPHA_ROOT)' CMakeCache.txt || \
+			{ echo "ERROR: emulator ClearSign root configuration did not stick"; exit 1; }; \
 		make -j$$(sysctl -n hw.ncpu) kkemu kkemulator_dylib
 	mkdir -p $(EMU_INSTALL_DIR)
 	@if [ -f $(EMU_BUILD_DIR)/lib/libkkemu.dylib ]; then \

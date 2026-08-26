@@ -1,0 +1,24 @@
+{
+  "_comment": "Real Relay Bridge depositNative v0 transaction captured from a live api.relay.link quote (2026-05-25, vault-backend.log). References exactly one lookup table. resolvedAccounts were fetched live from Solana mainnet RPC (getMultipleAccounts) on 2026-08-24 and are pinned here so tests never depend on live RPC or live Relay routing again — see docs/RETRO-SOLANA-CERTIFIED-2026-08-24-NIGHT.md.",
+  "rawTxBase64": "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAAQABAknL0n6jdoRjXT9vjGxiCoMawcf5IBHOm3MGcougVNJieSaJN47NUdgEBusMqjtieVvrELbF3Ja8Lg3wPL/uGr8LKszBn1FCanRmyhqFxJjim1RgJzYy4thHuHrPacWu8gEBBQMAAAIEMA2eDd9f1RwG8KmtHAAAAADWISE/xmJkDHVqCjr1QZgKLfqgLF1bT9AcPMG1UWeANQH5CleX0p1W2E0BwNC64/nFjEaXTuuVyg5P1Sf64f/vAgECAgEO",
+  "expected": {
+    "version": "v0",
+    "staticAccounts": ["5y52MbSDL1WWVSHczGef8CjQwRwbVynbYVqSkkmdwcEM", "99vQwtBwYtrqqD9YSXbdum3KBdxPAVxYTaQ3cfnJSrN2"],
+    "altTable": "Hm9fUgcn7qwDaiNTFiGh6pNtVATgnaRcmK6Bbx6EMZfP",
+    "writableIndices": [2],
+    "readonlyIndices": [1, 14],
+    "instructionDiscriminatorHex": "0d9e0ddf5fd51c06",
+    "instructionDataLen": 48
+  },
+  "resolvedAccountsBase64": {
+    "_comment": "Keyed by ALT index. Real values from live mainnet resolution — index 14's account happened to be all-zero bytes on-chain.",
+    "1": "vj5tKF0u6WM1G23usKHpbIgUNczUULJkXyTMJ5YL7kc=",
+    "2": "ZpY7N+WB3BSg9XPu7ejlSiV9g9CCxUqyCMv/0dwqcMo=",
+    "14": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+  },
+  "expectedCanonicalOrderBase64": [
+    "ZpY7N+WB3BSg9XPu7ejlSiV9g9CCxUqyCMv/0dwqcMo=",
+    "vj5tKF0u6WM1G23usKHpbIgUNczUULJkXyTMJ5YL7kc=",
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+  ]
+}

@@ -35,9 +35,10 @@ const ARG_U64 = 1
 const ARG_U8 = 2
 const ARG_PUBKEY = 3
 const ARG_OPAQUE32 = 4
+const ARG_LAMPORTS = 5
 
 /** Byte width each arg consumes in the instruction data (solana_schemaArgWidth). */
-const ARG_WIDTH = { [ARG_U64]: 8, [ARG_U8]: 1, [ARG_PUBKEY]: 32, [ARG_OPAQUE32]: 32 }
+const ARG_WIDTH = { [ARG_U64]: 8, [ARG_U8]: 1, [ARG_PUBKEY]: 32, [ARG_OPAQUE32]: 32, [ARG_LAMPORTS]: 8 }
 
 /**
  * REAL Relay bridge instructions, captured from api.relay.link on 2026-07-27.
@@ -227,6 +228,7 @@ function decodeArgs(schema, data) {
     let value
     switch (arg.type) {
       case ARG_U64:
+      case ARG_LAMPORTS:
         value = buf.readBigUInt64LE(off)
         break
       case ARG_U8:
@@ -278,7 +280,7 @@ const CATALOG = {
     programName: 'Relay Bridge',
     instructionName: 'depositNative',
     args: [
-      { type: ARG_U64, label: 'Amount' },
+      { type: ARG_LAMPORTS, label: 'Amount' },
       { type: ARG_OPAQUE32, label: 'Order' },
     ],
     accounts: [{ index: 3, label: 'Vault' }],
@@ -318,6 +320,7 @@ module.exports = {
   ARG_U8,
   ARG_PUBKEY,
   ARG_OPAQUE32,
+  ARG_LAMPORTS,
   ARG_WIDTH,
   RELAY_PROGRAM_B58,
   RELAY_NATIVE_DISC,
