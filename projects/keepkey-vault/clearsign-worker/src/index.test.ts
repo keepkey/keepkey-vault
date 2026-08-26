@@ -38,7 +38,7 @@ const post = (path: string, body: unknown, env: Record<string, string> = {}) => 
 }, env)
 
 describe('ClearSign Worker public surface', () => {
-  it('reports online but fail-closed until both scopes are provisioned', async () => {
+  it('reports online but fail-closed until at least one scope is provisioned', async () => {
     const health = await (await fetchWorker('/health')).json() as any
     expect(health.ok).toBe(true)
     expect(health.ready).toBe(false)

@@ -35,8 +35,9 @@ npx wrangler secret put CLEARSIGN_CERTIFICATE_HEX --config clearsign-worker/wran
 npx wrangler secret put CLEARSIGN_SOLANA_CERTIFICATE_HEX --config clearsign-worker/wrangler.toml
 ```
 
-`/ready` returns 200 only when the delegate key matches fingerprint `a9531b9d`
-and both root-signed, scope-correct certificates are active. Before pointing
-Vault at a new deployment, test exact positive routes and tampered chain,
-contract, selector, instruction length, program, lookup table, certificate,
-and signature cases.
+`/ready` returns 200 when the delegate key matches fingerprint `a9531b9d` and
+at least one root-signed, scope-correct certificate is active. `/v1/status`
+reports Ethereum and Solana readiness separately; an unprovisioned scope always
+fails closed. Before pointing Vault at a new deployment, test exact positive
+routes and tampered chain, contract, selector, instruction length, program,
+lookup table, certificate, and signature cases.

@@ -134,7 +134,7 @@ function provisioning(env: Env) {
   }
 
   return {
-    ready: Boolean(evmCertificate && solanaCertificate && privateKeyValid),
+    ready: Boolean((evmCertificate || solanaCertificate) && privateKeyValid),
     evmReady: Boolean(evmCertificate && privateKeyValid),
     solanaReady: Boolean(solanaCertificate && privateKeyValid),
     evmCertificate,
@@ -152,8 +152,8 @@ function publicStatus(env: Env, origin: string) {
     environment: env.CLEARSIGN_ENVIRONMENT || 'production',
     status: state.ready ? 'ready' : 'provisioning',
     message: state.ready
-      ? 'KeepKey can authenticate supported Ethereum and Solana transaction descriptions without blind signing.'
-      : 'The service is online, but one or more certified signing scopes are not active yet.',
+      ? 'KeepKey can authenticate transaction descriptions for every scope marked ready below, without blind signing.'
+      : 'The service is online, but no certified signing scope is active yet.',
     endpoints: {
       status: `${origin}/v1/status`,
       catalog: `${origin}/v1/catalog`,
