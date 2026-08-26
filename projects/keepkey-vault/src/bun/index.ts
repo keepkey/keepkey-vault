@@ -7082,14 +7082,12 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// scanChainHistory's live fetch below) — display without persistence.
 				if (engine.isPassphraseWallet) {
 					const rows = relabelZcashShieldedRows(getSessionActivity(params?.limit || 50, params?.chainId))
-					return isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant)
-						? rows.filter(row => row.chainId === 'bitcoin' || row.chain === 'BTC') : rows
+					return bitcoinOnlyActivityList(rows, isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant))
 				}
 				const scope = getWalletDbScope()
 				if (!scope) return []
 				const rows = relabelZcashShieldedRows(getRecentActivityFromLog(params?.limit || 50, params?.chainId, scope.deviceId, scope.walletId))
-				return isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant)
-					? rows.filter(row => row.chainId === 'bitcoin' || row.chain === 'BTC') : rows
+				return bitcoinOnlyActivityList(rows, isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant))
 			},
 			getActivityScanState: async () => ({ running: activityScanRunning }),
 			scanChainHistory: async (params) => {
