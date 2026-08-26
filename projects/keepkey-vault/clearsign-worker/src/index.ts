@@ -181,7 +181,7 @@ function publicStatus(env: Env, origin: string) {
       note: 'Solana lookup-table certification sends the unsigned transaction to this service so it can resolve and bind the exact accounts. No seed, private key, PIN, passphrase, or device signature is sent.',
     },
     catalogEntries: reviewedCatalog().length,
-    provisioning: state.ready ? [] : state.issues,
+    provisioning: state.issues,
     provenance: PROVENANCE,
   }
 }

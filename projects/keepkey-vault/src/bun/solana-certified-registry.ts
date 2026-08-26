@@ -12,11 +12,11 @@
 import { CERTIFIED_SOLANA_CATALOG } from './solana-certified-schema'
 
 /**
- * Alpha's signer is a loopback service by default. An operator may override
- * this when the same fail-closed API is deployed remotely, but ClearSign is
- * never disabled merely because an environment variable was omitted.
+ * Release builds use KeepKey's production ClearSign service by default. Local
+ * development can override it with CLEARSIGN_SERVICE_URL; either endpoint is
+ * untrusted input and the device still verifies every certificate and proof.
  */
-export const DEFAULT_CLEARSIGN_SERVICE_URL = 'http://127.0.0.1:1647'
+export const DEFAULT_CLEARSIGN_SERVICE_URL = 'https://keepkey-clearsign.bithighlander.workers.dev'
 
 export interface CertifiedSolanaProof {
   /** Present only when the message actually references address lookup tables. */
@@ -84,7 +84,7 @@ export async function findCertifiedSolanaProof(
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ rawTx: rawTxBase64, catalogKey }),
-      signal: AbortSignal.timeout(5_000),
+      signal: AbortSignal.timeout(10_000),
     })
   } catch (error: any) {
     throw new Error(`ClearSign verification service is unavailable: ${error?.message || 'connection failed'}`)
