@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test'
 
 import {
+  buildEvmSchemaBody,
   buildEvmV2SchemaBody,
   CERTIFIED_EVM_CATALOG,
   CERTIFIED_METADATA_KEY_ID,
@@ -13,6 +14,7 @@ const DATA =
   '0x49290c1c' +
   '000000000000000000000000909ef6b32dfdc12ca86aa710b54c991af3c5f82e' +
   '8a2c121197efc95c42f53142ab409735ee353287f877ed4d351f63094d5bfcb1'
+const PORTALS = '0xbf5A7F3629fB325E2a8453D595AB103465F75E62'
 
 describe('7.16 certified EVM schemas', () => {
   it('serializes the Relay schema with a delegate sentinel trailer', () => {
@@ -35,5 +37,16 @@ describe('7.16 certified EVM schemas', () => {
     expect(findCertifiedEvmSchemaByShape(1, TO, '0x49290c1c', 68)?.method).toBe('bridgeDeposit')
     expect(findCertifiedEvmSchemaByShape(1, TO, '0x49290c1c', 100)).toBeUndefined()
     expect(findCertifiedEvmSchemaByShape(1, TO, '0xdeadbeef', 68)).toBeUndefined()
+  })
+
+  it('serializes and bounds the firmware-owned Portals dynamic decoder', () => {
+    const spec = findCertifiedEvmSchemaByShape(1, PORTALS, '0xa2e42c65', 1476)
+    expect(spec?.method).toBe('Portals swap')
+    expect(findCertifiedEvmSchemaByShape(1, PORTALS, '0xa2e42c65', 1477)).toBeUndefined()
+    expect(findCertifiedEvmSchemaByShape(1, PORTALS, '0xa2e42c65', 16_420)).toBeUndefined()
+    const body = buildEvmSchemaBody(spec!)
+    expect(body[0]).toBe(0x04)
+    expect(body.includes(Buffer.from('Portals swap', 'ascii'))).toBe(true)
+    expect(body[body.length - 1]).toBe(CERTIFIED_METADATA_KEY_ID)
   })
 })

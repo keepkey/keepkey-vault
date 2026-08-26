@@ -14,6 +14,8 @@ import type { SwapAsset, SwapQuote, SwapQuoteParams, ExecuteSwapParams, SwapResu
 import { SOLANA_BLIND_SIGNING_REQUIRED, evmAdvancedModeRequiredMessage } from '../shared/types'
 import { toDeviceError, deviceErrorMessage } from '../shared/device-error'
 import { findEvmSchema } from './evm-schema-registry'
+import { findCertifiedEvmEnvelope } from './evm-certified-registry'
+import { isCertifiedEvmMetadata } from './evm-certified-schema'
 import { firmwareClearSigns } from './calldata-decoder'
 import { findSolanaSchema } from './solana-schema-registry'
 import { findCertifiedSolanaProof } from './solana-certified-registry'
@@ -1094,6 +1096,7 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
     fromChain.chainFamily === 'evm' &&
     typeof unsignedTx?.data === 'string' && unsignedTx.data.length > 2 &&
     !firmwareClearSigns(unsignedTx.to, unsignedTx.data, Number(unsignedTx.chainId)) &&
+    !isCertifiedEvmMetadata(unsignedTx.txMetadata) &&
     // Only when we KNOW it is off. `undefined` means the policy was not
     // reported (no cached features), and guessing would block a swap the
     // device would have signed.
@@ -1747,7 +1750,8 @@ async function buildRelaySwapTx(
   // calldata it is about to sign — turning a blind-sign prompt into a labelled
   // review. Absent or mismatched: nothing is attached and behaviour is
   // unchanged, so this can never block a swap.
-  const evmSchema = findEvmSchema(chainId, relay.to, relay.data)
+  const certifiedEvmSchema = await findCertifiedEvmEnvelope(chainId, relay.to, relay.data)
+  const evmSchema = certifiedEvmSchema || findEvmSchema(chainId, relay.to, relay.data)
   if (evmSchema) {
     unsignedTx.txMetadata = { signedPayload: evmSchema.signedPayload, keyId: evmSchema.keyId }
     swapLog(`${TAG} clear-sign schema attached: ${evmSchema.method} (keyId=${evmSchema.keyId})`)

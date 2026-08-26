@@ -1,8 +1,9 @@
 # KeepKey ClearSign Worker
 
-Production-facing 7.16 certified-description service for the reviewed Relay
-catalog on Ethereum and Solana. It publishes status and provenance, refuses
-unknown transaction shapes, and signs only with Cloudflare encrypted secrets.
+Production-facing 7.16 certified-description service for reviewed Relay and
+Portals actions on Ethereum and Solana. It publishes status and provenance,
+refuses unknown transaction shapes, and signs only with Cloudflare encrypted
+secrets.
 
 The delegate private key never belongs in this repository, `wrangler.toml`, a
 command argument, or a Worker variable. The two public certificates are also
@@ -11,7 +12,8 @@ stored as secrets so provisioning is atomic and consistent across deployments.
 ## What leaves Vault
 
 - Ethereum sends `chainId`, contract, selector, and calldata length. It does
-  not send transaction arguments or calldata.
+  not send transaction arguments or calldata. KeepKey decodes the real values;
+  the service cannot supply them.
 - Solana sends the unsigned transaction and reviewed catalog id. The service
   parses the transaction, resolves its lookup-table accounts from Solana RPC,
   and signs a binding to the exact message. Seeds, private keys, PINs,

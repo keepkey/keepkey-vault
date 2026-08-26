@@ -42,6 +42,8 @@ const PROVENANCE = {
   vault: 'https://github.com/keepkey/keepkey-vault',
   protocol: 'https://docs.relay.link/references/protocol/how-it-works',
   protocolSecurity: 'https://docs.relay.link/references/protocol/security',
+  portals: 'https://docs.portals.fi/',
+  portalsRouter: 'https://eth.blockscout.com/address/0xbf5A7F3629fB325E2a8453D595AB103465F75E62?tab=contract',
 } as const
 
 const commonHeaders = {
@@ -65,15 +67,17 @@ function reviewedCatalog() {
     id: `eip155:${spec.chainId}:${spec.contract}:${spec.selector}`,
     family: 'evm',
     network: 'Ethereum',
-    protocol: 'Relay',
-    maintainedBy: 'Relay',
-    action: 'Deposit funds for a cross-chain swap',
+    protocol: spec.protocol || 'Relay',
+    maintainedBy: spec.maintainedBy || 'Relay',
+    action: spec.action || 'Deposit funds for a cross-chain swap',
     method: spec.method,
     contract: spec.contract,
     selector: spec.selector,
-    calldataLength: spec.expectedCalldataLength,
-    fieldsShownByKeepKey: spec.args.map((arg) => arg.name),
-    provenance: { protocol: PROVENANCE.protocol, security: PROVENANCE.protocolSecurity },
+    ...(spec.expectedCalldataLength !== undefined
+      ? { calldataLength: spec.expectedCalldataLength }
+      : { calldataLength: { min: spec.minimumCalldataLength, max: spec.maximumCalldataLength, alignment: 'selector + ABI words' } }),
+    fieldsShownByKeepKey: spec.displayFields || spec.args.map((arg) => arg.name),
+    provenance: spec.provenance || { protocol: PROVENANCE.protocol, security: PROVENANCE.protocolSecurity },
   }))
   const solana = Object.entries(CERTIFIED_SOLANA_CATALOG).map(([key, spec]) => ({
     id: `solana:${key}`,
@@ -200,8 +204,8 @@ function home(env: Env, origin: string): Response {
 <body><main><span class="pill">${escapeHtml(status.status)}</span><h1>KeepKey ClearSign</h1><p class="muted">Human-readable transaction details, authenticated by the KeepKey in your hand.</p>
 <section class="card"><h2>What happens</h2><p>${escapeHtml(status.message)}</p><p>The service recognizes a reviewed protocol action and signs a description. Your KeepKey independently checks the root certificate, signer fingerprint, program or contract, decoded fields, and the exact transaction binding. You still approve the final transaction on the device.</p></section>
 <section class="card"><h2>Trust status</h2><dl><dt>Device label</dt><dd>${escapeHtml(status.trust.label)}</dd><dt>Signer</dt><dd>${escapeHtml(status.trust.signerAlias)} · ${escapeHtml(status.trust.signerFingerprint)}</dd><dt>Ethereum</dt><dd>${escapeHtml(status.scopes.ethereum)}</dd><dt>Solana</dt><dd>${escapeHtml(status.scopes.solana)}</dd><dt>Earliest certificate expiry</dt><dd>${escapeHtml(status.trust.certificateExpiresAt || 'Pending')}</dd></dl></section>
-<section class="card"><h2>Reviewed protocols</h2><p><strong>Relay</strong> · Ethereum and Solana deposits for cross-chain swaps.</p><p>Only exact catalog matches are certified. Unknown programs, contracts, selectors, instruction sizes, or lookup-table accounts are refused.</p><a href="/v1/catalog">View the machine-readable catalog</a></section>
-<section class="card"><h2>Privacy and provenance</h2><p>Ethereum requests contain only transaction shape. Solana lookup-table requests contain the unsigned transaction so this service can resolve and bind its accounts. Wallet seeds, private keys, PINs, passphrases, and device signatures never leave your KeepKey. This service writes no transaction database.</p><p><a href="${PROVENANCE.protocol}">How Relay works</a> · <a href="${PROVENANCE.protocolSecurity}">Relay security</a> · <a href="${PROVENANCE.firmware}">KeepKey firmware</a> · <a href="${PROVENANCE.vault}">Vault source</a></p></section>
+<section class="card"><h2>Reviewed protocols</h2><p><strong>Relay</strong> · Ethereum and Solana deposits for cross-chain swaps.</p><p><strong>Portals</strong> · Native ETH swaps through the verified Ethereum router. KeepKey reads the output token, minimum output, recipient, and input amount from the transaction itself.</p><p>Only exact catalog matches are certified. Unknown programs, contracts, selectors, instruction sizes, or lookup-table accounts are refused.</p><a href="/v1/catalog">View the machine-readable catalog</a></section>
+<section class="card"><h2>Privacy and provenance</h2><p>Ethereum requests contain only transaction shape. Solana lookup-table requests contain the unsigned transaction so this service can resolve and bind its accounts. Wallet seeds, private keys, PINs, passphrases, and device signatures never leave your KeepKey. This service writes no transaction database.</p><p><a href="${PROVENANCE.protocol}">How Relay works</a> · <a href="${PROVENANCE.protocolSecurity}">Relay security</a> · <a href="${PROVENANCE.portals}">Portals documentation</a> · <a href="${PROVENANCE.portalsRouter}">Verified Portals router</a> · <a href="${PROVENANCE.firmware}">KeepKey firmware</a> · <a href="${PROVENANCE.vault}">Vault source</a></p></section>
 </main></body></html>`
   return new Response(html, {
     headers: {
@@ -269,7 +273,7 @@ export default {
       }
       try {
         const signed = buildCertifiedEvmEnvelope(spec, env.CLEARSIGN_CERTIFICATE_HEX, env.CLEARSIGN_DELEGATE_PRIVATE_KEY)
-        return json({ success: true, classification: 'VERIFIED', version: 3, ...signed, method: spec.method, chainId: spec.chainId, contract: spec.contract, selector: spec.selector, expectedCalldataLength: spec.expectedCalldataLength, provenance: PROVENANCE })
+        return json({ success: true, classification: 'VERIFIED', version: 3, ...signed, method: spec.method, chainId: spec.chainId, contract: spec.contract, selector: spec.selector, expectedCalldataLength: spec.expectedCalldataLength, decoder: spec.decoder, provenance: spec.provenance || PROVENANCE })
       } catch {
         return json({ error: 'certified Ethereum schema could not be produced' }, 500)
       }

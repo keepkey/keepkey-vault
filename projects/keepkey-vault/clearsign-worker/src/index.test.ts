@@ -55,11 +55,11 @@ describe('ClearSign Worker public surface', () => {
     const response = await fetchWorker('/v1/catalog')
     const body = await response.json() as any
     expect(response.status).toBe(200)
-    expect(body.entries).toHaveLength(3)
-    expect(body.entries.map((entry: any) => entry.family)).toEqual(['evm', 'solana', 'solana'])
+    expect(body.entries).toHaveLength(4)
+    expect(body.entries.map((entry: any) => entry.family)).toEqual(['evm', 'evm', 'solana', 'solana'])
     for (const entry of body.entries) {
-      expect(entry.protocol).toBe('Relay')
-      expect(entry.provenance.protocol).toContain('docs.relay.link')
+      expect(['Relay', 'Portals']).toContain(entry.protocol)
+      expect(entry.provenance.protocol).toMatch(/^https:\/\//)
     }
   })
 
@@ -82,6 +82,23 @@ describe('ClearSign Worker public surface', () => {
     })
     expect(response.status).toBe(503)
     expect((await response.json() as any).classification).toBe('UNAVAILABLE')
+  })
+
+  it('recognizes the dynamic Portals shape but rejects non-word-aligned calldata', async () => {
+    const exact = await post('/v1/evm/schema', {
+      chainId: 1,
+      contract: '0xbf5A7F3629fB325E2a8453D595AB103465F75E62',
+      selector: '0xa2e42c65',
+      calldataLength: 1476,
+    })
+    expect(exact.status).toBe(503)
+    const malformed = await post('/v1/evm/schema', {
+      chainId: 1,
+      contract: '0xbf5A7F3629fB325E2a8453D595AB103465F75E62',
+      selector: '0xa2e42c65',
+      calldataLength: 1477,
+    })
+    expect(malformed.status).toBe(422)
   })
 
   it('parses and exact-matches a reviewed Solana instruction before provisioning', async () => {

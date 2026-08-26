@@ -15,6 +15,7 @@ export const EVM_ARG_ADDRESS = 1
 export const EVM_ARG_AMOUNT = 2
 export const EVM_ARG_BYTES = 3
 export const EVM_ARG_TOKEN_AMOUNT = 5
+export const EVM_DECODER_PORTALS_NATIVE_ORDER_V1 = 1
 
 export interface EvmSchemaArg {
   name: string
@@ -29,7 +30,17 @@ export interface EvmSchemaSpec {
   selector: string
   method: string
   args: EvmSchemaArg[]
-  expectedCalldataLength: number
+  /** Fixed v2 schemas account for every byte exactly. */
+  expectedCalldataLength?: number
+  /** v4 schemas select a reviewed firmware decoder for dynamic calldata. */
+  decoder?: number
+  minimumCalldataLength?: number
+  maximumCalldataLength?: number
+  displayFields?: string[]
+  protocol?: string
+  maintainedBy?: string
+  action?: string
+  provenance?: Record<string, string>
 }
 
 export const CERTIFIED_EVM_CATALOG: Record<string, EvmSchemaSpec> = {
@@ -43,6 +54,24 @@ export const CERTIFIED_EVM_CATALOG: Record<string, EvmSchemaSpec> = {
       { name: 'orderId', format: EVM_ARG_BYTES },
     ],
     expectedCalldataLength: 68,
+  },
+  '1:0xbf5a7f3629fb325e2a8453d595ab103465f75e62:0xa2e42c65': {
+    chainId: 1,
+    contract: '0xbf5A7F3629fB325E2a8453D595AB103465F75E62',
+    selector: '0xa2e42c65',
+    method: 'Portals swap',
+    args: [],
+    decoder: EVM_DECODER_PORTALS_NATIVE_ORDER_V1,
+    minimumCalldataLength: 452,
+    maximumCalldataLength: 16_388,
+    displayFields: ['Output token', 'Minimum output', 'Recipient', 'Native input amount'],
+    protocol: 'Portals',
+    maintainedBy: 'Portals',
+    action: 'Swap native ETH through the Portals router',
+    provenance: {
+      protocol: 'https://docs.portals.fi/',
+      verifiedContract: 'https://eth.blockscout.com/address/0xbf5A7F3629fB325E2a8453D595AB103465F75E62?tab=contract',
+    },
   },
 }
 
@@ -110,19 +139,44 @@ export function findCertifiedEvmSchemaByShape(
   const normalizedSelector = selector.toLowerCase()
   if (!/^0x[0-9a-f]{8}$/.test(normalizedSelector)) return undefined
   const spec = CERTIFIED_EVM_CATALOG[`${chainId}:${contract.toLowerCase()}:${normalizedSelector}`]
-  if (!spec || calldataLength !== spec.expectedCalldataLength) return undefined
+  if (!spec) return undefined
+  if (spec.expectedCalldataLength !== undefined) {
+    if (calldataLength !== spec.expectedCalldataLength) return undefined
+  } else {
+    if (!spec.decoder || spec.minimumCalldataLength === undefined || spec.maximumCalldataLength === undefined) return undefined
+    if (calldataLength < spec.minimumCalldataLength || calldataLength > spec.maximumCalldataLength) return undefined
+    if ((calldataLength - 4) % 32 !== 0) return undefined
+  }
   return spec
 }
 
-/** Serialize the inner v2 schema. Values are decoded from calldata on-device. */
-export function buildEvmV2SchemaBody(spec: EvmSchemaSpec): Buffer {
+/** Serialize a device-decoded v2 or v4 schema. */
+export function buildEvmSchemaBody(spec: EvmSchemaSpec): Buffer {
   if (!Number.isInteger(spec.chainId) || spec.chainId <= 0 || spec.chainId > 0xffffffff) {
     throw new Error('schema chainId must be a nonzero uint32')
+  }
+  const method = ascii(spec.method, 64, 'method')
+  if (spec.decoder !== undefined) {
+    if (spec.decoder !== EVM_DECODER_PORTALS_NATIVE_ORDER_V1 || spec.args.length !== 0) {
+      throw new Error('unsupported EVM dynamic decoder')
+    }
+    if (spec.minimumCalldataLength === undefined || spec.maximumCalldataLength === undefined) {
+      throw new Error('dynamic schema requires calldata bounds')
+    }
+    return Buffer.concat([
+      u8(0x04),
+      be32(spec.chainId),
+      hexBytes(spec.contract, 20, 'contract'),
+      hexBytes(spec.selector, 4, 'selector'),
+      be16(method.length),
+      method,
+      u8(spec.decoder),
+      u8(1), be32(0), u8(CERTIFIED_METADATA_KEY_ID),
+    ])
   }
   if (spec.expectedCalldataLength !== 4 + 32 * spec.args.length) {
     throw new Error('schema argument widths do not account for the complete calldata')
   }
-  const method = ascii(spec.method, 64, 'method')
   const parts: Buffer[] = [
     u8(0x02),
     be32(spec.chainId),
@@ -150,6 +204,9 @@ export function buildEvmV2SchemaBody(spec: EvmSchemaSpec): Buffer {
   return Buffer.concat(parts)
 }
 
+/** Backwards-compatible name retained for existing v2 callers/tests. */
+export const buildEvmV2SchemaBody = buildEvmSchemaBody
+
 export function buildCertifiedEvmEnvelope(
   spec: EvmSchemaSpec,
   certificateHex: string,
@@ -167,7 +224,7 @@ export function buildCertifiedEvmEnvelope(
     throw new Error(`delegate private key does not match reviewed signer ${ALPHA_DELEGATE_FINGERPRINT}`)
   }
 
-  const body = buildEvmV2SchemaBody(spec)
+  const body = buildEvmSchemaBody(spec)
   const digest = createHash('sha256').update(body).digest('hex')
   const signature = signingKey.signDigest(`0x${digest}`)
   const compact = Buffer.concat([
