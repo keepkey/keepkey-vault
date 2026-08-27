@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 
 import { findCertifiedEvmEnvelope } from './evm-certified-registry'
+import { DEFAULT_CLEARSIGN_SERVICE_URL } from './solana-certified-registry'
 
 const originalFetch = globalThis.fetch
 const originalServiceUrl = process.env.CLEARSIGN_SERVICE_URL
@@ -28,6 +29,19 @@ function verified(overrides: Record<string, unknown> = {}) {
 }
 
 describe('findCertifiedEvmEnvelope', () => {
+  test('uses the production signer after a GUI relaunch with no shell environment', async () => {
+    delete process.env.CLEARSIGN_SERVICE_URL
+    let requestedUrl = ''
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      requestedUrl = String(input)
+      return verified()
+    }) as typeof fetch
+
+    const result = await findCertifiedEvmEnvelope(1, TO, DATA)
+    expect(requestedUrl).toBe(`${DEFAULT_CLEARSIGN_SERVICE_URL}/v1/evm/schema`)
+    expect(result?.keyId).toBe(0x80)
+  })
+
   test('sends only the privacy-preserving transaction shape', async () => {
     process.env.CLEARSIGN_SERVICE_URL = 'http://127.0.0.1:1647/'
     let requestBody: any
