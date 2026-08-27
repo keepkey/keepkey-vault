@@ -145,9 +145,10 @@ import { addSessionActivity, getSessionActivity, clearSessionActivity } from "./
 import { buildTx, broadcastTx } from "./txbuilder"
 import { buildCosmosStakingTx, buildCosmosNameRegTx } from "./txbuilder/cosmos"
 import { initializeOrchardFromDevice, scanOrchardNotes, getShieldedBalance, sendShielded, ensureFvkLoaded, displayOrchardAddressOnDevice } from "./txbuilder/zcash-shielded"
-import { isSidecarReady, startSidecar, stopSidecar, wipeSidecarWalletDb, hasFvkLoaded, getCachedFvk, onScanProgress, getScanState, updateSyncedTo, beginZcashSend, endZcashSend, isZcashSendInFlight } from "./zcash-sidecar"
+import { findZcashCliBinary, isSidecarReady, startSidecar, stopSidecar, wipeSidecarWalletDb, hasFvkLoaded, getCachedFvk, onScanProgress, getScanState, updateSyncedTo, beginZcashSend, endZcashSend, isZcashSendInFlight } from "./zcash-sidecar"
 import { CHAINS, customChainToChainDef, isChainSupported, hiveRolePath, btcTaprootSupported } from "../shared/chains"
 import { versionCompare } from "../shared/firmware-versions"
+import { supportsZcashPrivacyBuild } from "./zcash-capability"
 import type { ChainDef } from "../shared/chains"
 import { BtcAccountManager } from "./btc-accounts"
 import { utxoDiscoveryKey, unwrapUtxoDiscoveryKey } from "./btc-backend/types"
@@ -913,7 +914,13 @@ function loadSettings() {
 	restApiEnabled = getSetting('rest_api_enabled') === '1'
 	walletConnectEnabled = getSetting('walletconnect_enabled') === '1'
 	bip85Enabled = getSetting('bip85_enabled') === '1'
-	zcashPrivacyEnabled = getSetting('zcash_privacy_enabled') === '1'
+	const storedZcashPrivacyEnabled = getSetting('zcash_privacy_enabled') === '1'
+	const zcashSidecarAvailable = !!findZcashCliBinary()
+	zcashPrivacyEnabled = storedZcashPrivacyEnabled && zcashSidecarAvailable
+	if (storedZcashPrivacyEnabled && !zcashSidecarAvailable) {
+		console.warn('[settings] Zcash privacy disabled — this build does not include a compatible zcash-cli sidecar')
+		setSetting('zcash_privacy_enabled', '0')
+	}
 	hiveEnabled = getSetting('hive_enabled') === '1'
 	emulatorEnabled = getSetting('emulator_enabled') === '1'
 	preReleaseUpdates = getSetting('pre_release_updates') === '1'
@@ -8399,16 +8406,21 @@ engine.on('state-change', (state) => {
 			setSetting('bip85_enabled', '0')
 			console.log(`[settings] BIP-85 auto-disabled — firmware ${fw || 'unknown'} < 7.16.0`)
 		}
-		// Zcash + Hive are capabilities, not user toggles: ON whenever the
-		// connected device runs firmware >= 7.15.0, OFF otherwise. The setting
-		// row is kept as a mirror of the derived value so the getSetting() gates
-		// in rest-api.ts keep reading the same answer from one source.
+		// Zcash + Hive are capabilities, not user toggles. Both require firmware
+		// >= 7.15.0; Zcash privacy additionally requires the native sidecar to be
+		// present in this app build. The setting row mirrors the derived value so
+		// the getSetting() gates in rest-api.ts read the same answer.
 		const has715 = !!fw && versionCompare(fw, '7.15.0') >= 0
-		if (zcashPrivacyEnabled !== has715) {
-			zcashPrivacyEnabled = has715
-			setSetting('zcash_privacy_enabled', has715 ? '1' : '0')
-			console.log(`[settings] Zcash privacy auto-${has715 ? 'enabled' : 'disabled'} — firmware ${fw || 'unknown'}`)
-			if (!has715) stopSidecar()
+		const zcashSidecarBinary = findZcashCliBinary()
+		const hasZcashPrivacy = supportsZcashPrivacyBuild(fw, zcashSidecarBinary)
+		if (zcashPrivacyEnabled !== hasZcashPrivacy) {
+			zcashPrivacyEnabled = hasZcashPrivacy
+			setSetting('zcash_privacy_enabled', hasZcashPrivacy ? '1' : '0')
+			const reason = !has715
+				? `firmware ${fw || 'unknown'}`
+				: 'compatible zcash-cli sidecar missing from this build'
+			console.log(`[settings] Zcash privacy auto-${hasZcashPrivacy ? 'enabled' : 'disabled'} — ${reason}`)
+			if (!hasZcashPrivacy) stopSidecar()
 			else if (!isSidecarReady()) {
 				console.log('[zcash] Starting sidecar on firmware capability detect...')
 				startSidecar().catch((e: any) => console.error('[zcash] Sidecar failed to start:', e.message))

@@ -747,7 +747,7 @@ export interface AppSettings {
   numberLocale: string           // number formatting locale (default 'en-US')
   walletConnectEnabled: boolean   // feature flag: WalletConnect dApp support (default OFF)
   bip85Enabled: boolean          // feature flag: BIP-85 derived seeds (default OFF)
-  zcashPrivacyEnabled: boolean   // read-only capability: Zcash shielded/privacy — auto-ON when firmware >= 7.15.0
+  zcashPrivacyEnabled: boolean   // read-only capability: auto-ON when firmware >= 7.15.0 and this build includes zcash-cli
   hiveEnabled: boolean           // read-only capability: Hive blockchain — auto-ON when firmware >= 7.15.0
   emulatorEnabled: boolean       // feature flag: macOS emulator surface (default OFF — dev-only)
   offlineMode: boolean           // airplane mode: zero outbound network; BTC data ops throw OFFLINE (default OFF)

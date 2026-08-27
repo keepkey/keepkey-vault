@@ -340,12 +340,22 @@ jobs:
             fi
           done
 
-          # Remove zcash-cli from x64 bundle (Zcash shielded not supported on Intel)
+          # The ARM64 release must contain the shielded sidecar. Intel does not
+          # support it yet, so the x64 derivative removes it and Vault gates the
+          # privacy capability on the binary being present at runtime.
           ZCASH_DEST=$(find "$APP" -name "zcash-cli" -type f | head -1)
-          if [ -n "$ZCASH_DEST" ]; then
-            rm "$ZCASH_DEST"
-            echo "  zcash-cli: removed (Intel not supported)"
+          if [ -z "$ZCASH_DEST" ]; then
+            echo "::error::ARM64 source app is missing zcash-cli"
+            exit 1
           fi
+          ZCASH_ARCH=$(lipo -archs "$ZCASH_DEST" 2>/dev/null || echo "non-macho")
+          echo "  zcash-cli source: $ZCASH_ARCH"
+          if [[ "$ZCASH_ARCH" != *"arm64"* ]]; then
+            echo "::error::ARM64 source app contains incompatible zcash-cli ($ZCASH_ARCH)"
+            exit 1
+          fi
+          rm "$ZCASH_DEST"
+          echo "  zcash-cli: removed (Intel not supported; privacy capability will stay disabled)"
 
           # Verify key binaries are now x86_64
           echo "Verifying swapped binaries:"
