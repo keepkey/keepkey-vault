@@ -182,9 +182,9 @@ jobs:
         run: make test-unit
         shell: bash
 
-      - name: Install protoc (macOS)
+      - name: Install emulator native toolchain (macOS)
         if: runner.os == 'macOS'
-        run: brew install protobuf mingw-w64
+        run: brew install mingw-w64
 
       - name: Build and audit firmware 7.16 emulator libraries
         if: runner.os == 'macOS'
