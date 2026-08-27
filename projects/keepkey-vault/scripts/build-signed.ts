@@ -8,10 +8,23 @@
  * Our shim at scripts/zip adds -q (quiet) to suppress per-file output.
  */
 import { join } from 'node:path'
+import { existsSync } from 'node:fs'
 
 const env = process.argv[2] || 'stable'
 const scriptsDir = join(import.meta.dir)
 const currentPath = process.env.PATH || ''
+
+// Stable/canary packages for supported emulator hosts must never silently ship
+// without the pinned library. Developer `bun run build` remains optional.
+if (process.platform === 'darwin' || process.platform === 'win32') {
+  const lib = process.platform === 'win32' ? 'libkkemu.dll' : 'libkkemu.dylib'
+  const staged = join(import.meta.dir, '..', 'emulator-bundle', lib)
+  if (!existsSync(staged)) {
+    console.error(`[release] Missing bundled emulator: ${staged}`)
+    console.error('[release] Run make build-emulator-release (macOS) or stage the CI-built Windows DLL.')
+    process.exit(1)
+  }
+}
 
 const result = Bun.spawnSync(
   ['electrobun', 'build', `--env=${env}`],

@@ -10,6 +10,8 @@ The build, signing, and installer steps are all driven by **one PowerShell scrip
 
 ```powershell
 # From the repo root (PowerShell 5.1+), USB EV signing token plugged in:
+# First download the matching CI artifact's emulator-build-input DLL and save it as:
+# projects\keepkey-vault\emulator-bundle\libkkemu.dll
 .\scripts\preflight-windows.ps1 -Strict
 .\scripts\build-windows-production.ps1
 ```
@@ -52,6 +54,10 @@ A fully provisioned build machine. If this is a fresh box, follow [`WINDOWS-DEV-
 **Repo state**:
 - Clean checkout on the release branch (e.g. `release/X.Y.Z`) with all expected submodules initialized — the script handles submodule init itself, but a dirty tree will produce a dirty build
 - `modules/device-protocol/lib/messages_pb.js` **must exist** (see [The device-protocol pitfall](#the-device-protocol-pitfall) below)
+- `projects/keepkey-vault/emulator-bundle/libkkemu.dll` must be the
+  `emulator-build-input-libkkemu-7.16.0-win-x64.dll` from the matching commit's
+  macOS CI artifact. The build rejects a missing/non-PE DLL and verifies that
+  Electrobun copied the exact SHA-256 into the app.
 
 ---
 
@@ -68,7 +74,10 @@ Only initializes the modules the build actually needs:
 - `modules/proto-tx-builder`
 - `modules/device-protocol`
 
-`modules/keepkey-firmware` is not initialized by the Windows Vault build; it is emulator/firmware work only and is not a Vault packaging gate.
+The Windows machine does not compile firmware. CI cross-builds the DLL from the
+Vault's exact firmware gitlink, verifies 7.16.0, the ClearSign alpha root, all
+12 FFI exports, and system-only imports. The PowerShell build consumes that
+verified DLL and Authenticode-signs the copy inside the app.
 
 ### 3. device-protocol `lib/` verification (lines ~269-283)
 Checks that `modules/device-protocol/lib/messages_pb.js` is present. If missing, the script aborts with instructions. This file is gitignored — see [The device-protocol pitfall](#the-device-protocol-pitfall).
@@ -298,6 +307,7 @@ Before tagging and uploading:
 - [ ] Working tree is clean on the release branch (`git status` is empty)
 - [ ] `package.json` version matches the intended release
 - [ ] `modules/device-protocol/lib/messages_pb.js` is present
+- [ ] Matching CI DLL is staged at `projects\keepkey-vault\emulator-bundle\libkkemu.dll`
 - [ ] EV token plugged in, unlocked, certificate visible
 - [ ] Run `.\scripts\preflight-windows.ps1 -Strict`
 - [ ] Run `.\scripts\build-windows-production.ps1`
@@ -310,3 +320,5 @@ Before tagging and uploading:
 - [ ] Compare `SHA256SUMS-windows.txt` against the `.zip` hash
 - [ ] Upload the **`.zip`** (NOT a bare `.exe`) and `SHA256SUMS-windows.txt` to the GitHub release
 - [ ] Run the installed app, pair a real device, confirm `vault-backend.log` has the expected boot lines
+- [ ] Add an emulator without dropping a DLL; confirm it boots and reports firmware 7.16.0
+- [ ] On the emulator, run certified ETH→SOL ClearSign; labelled review appears and no Advanced Mode prompt is shown

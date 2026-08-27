@@ -10,9 +10,8 @@
  *     ├─ emulator.ts (this)    — flash lifecycle, FFI bridge
  *     └─ libkkemu.dylib        — firmware as shared library (loaded via bun:ffi)
  *
- * The dylib is user-installed at ~/.keepkey/emulator/libkkemu.dylib —
- * dropped onto the app via FileDropZone, or copied there by `make
- * build-emulator`. No channel/version system: one slot, one binary.
+ * Release builds carry a verified 7.16 library at Resources/app/emulator/.
+ * A library dropped into ~/.keepkey/emulator remains an explicit override.
  */
 import { dlopen, FFIType, ptr } from 'bun:ffi'
 import { join } from 'path'
@@ -25,6 +24,7 @@ import {
 } from './emulator-keychain'
 import { startEmulatorWatchdog, stopEmulatorWatchdog } from './emulator-watchdog'
 import type { EmulatorStatus, EmulatorProcessState } from '../shared/types'
+import { emulatorLibFilename, resolveEmulatorLibPath } from './emulator-library'
 
 const TAG = '[emulator]'
 const FLASH_SIZE = 1048576  // 1 MB
@@ -40,9 +40,7 @@ function getEmulatorBinDir(): string {
 
 /** Platform filename for the firmware shared library the vault loads via FFI. */
 export function getLibFilename(): string {
-  if (process.platform === 'win32') return 'libkkemu.dll'
-  if (process.platform === 'linux') return 'libkkemu.so'
-  return 'libkkemu.dylib'
+  return emulatorLibFilename()
 }
 
 /** Path to the user-installed emulator library. May not exist yet. */
@@ -50,9 +48,14 @@ export function getDylibPath(): string {
   return join(getEmulatorBinDir(), getLibFilename())
 }
 
-/** True when the user has installed a dylib. */
+/** True when either a user override or bundled release library is available. */
 export function isDylibInstalled(): boolean {
-  return existsSync(getDylibPath())
+  return getRuntimeDylibPath() !== null
+}
+
+/** User override first, then the library shipped inside the release bundle. */
+export function getRuntimeDylibPath(): string | null {
+  return resolveEmulatorLibPath({ importDir: import.meta.dir })
 }
 
 // ── FFI Handle ──────────────────────────────────────────────────────────
@@ -142,11 +145,11 @@ export function initEmulator(flashName = 'default'): EmulatorStatus {
 
     // 1. Locate dylib BEFORE touching flash — failing early avoids creating
     // an orphan flash file when the user hasn't installed an emulator yet.
-    const dylibPath = getDylibPath()
-    if (!isDylibInstalled()) {
+    const dylibPath = getRuntimeDylibPath()
+    if (!dylibPath) {
       const lib = getLibFilename()
       const how = process.platform === 'win32' ? 'make build-emulator-windows' : 'make build-emulator'
-      throw new Error(`No emulator installed. Drop a ${lib} onto the window or run: ${how}`)
+      throw new Error(`Bundled emulator missing. Drop a ${lib} onto the window or run: ${how}`)
     }
 
     // 2. Decrypt flash

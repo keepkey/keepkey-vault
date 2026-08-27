@@ -95,6 +95,8 @@ $ProjectDir = Join-Path $RepoRoot "projects\keepkey-vault"
 $BuildDir = Join-Path $ProjectDir "_build\dev-win-x64\keepkey-vault-dev"
 $ExtModulesDir = Join-Path $ProjectDir "_build\_ext_modules"
 $AppNodeModulesDir = Join-Path $BuildDir "Resources\app\node_modules"
+$EmulatorDllSource = Join-Path $ProjectDir "emulator-bundle\libkkemu.dll"
+$BundledEmulatorDll = Join-Path $BuildDir "Resources\app\emulator\libkkemu.dll"
 $ArtifactsDir = Join-Path $RepoRoot $OutputDir
 
 # Read version from package.json
@@ -359,6 +361,17 @@ Assert-Command "bun"
 Assert-Command "yarn"
 Write-Success "Build tools available (git, bun, yarn)"
 
+if (-not $SkipBuild) {
+    if (-not (Test-Path $EmulatorDllSource)) {
+        throw "Pinned 7.16 emulator DLL missing at $EmulatorDllSource.`nDownload emulator-build-input-libkkemu-7.16.0-win-x64.dll from the matching macOS CI artifact, rename it to libkkemu.dll, and place it in emulator-bundle before building."
+    }
+    $emuHeader = [System.IO.File]::ReadAllBytes($EmulatorDllSource)
+    if ($emuHeader.Length -lt 2 -or $emuHeader[0] -ne 0x4D -or $emuHeader[1] -ne 0x5A) {
+        throw "Emulator build input is not a Windows PE DLL (MZ header missing): $EmulatorDllSource"
+    }
+    Write-Success "Pinned 7.16 emulator DLL staged: $EmulatorDllSource"
+}
+
 # Check certificate (if signing)
 if (-not $SkipSign) {
     $cert = Get-ChildItem -Path "Cert:\CurrentUser\My" -ErrorAction SilentlyContinue |
@@ -387,8 +400,8 @@ if (-not $SkipSign) {
 if (-not $SkipBuild) {
     Write-Step "Updating git submodules (selective)"
     Push-Location $RepoRoot
-    # Only init the submodules Vault packaging actually needs. Firmware is
-    # emulator-only for Vault releases and is intentionally not a build gate.
+    # Compile only host-side submodules here. The verified firmware DLL is a
+    # required CI build input checked above, so Windows does not compile it.
     git submodule update --init modules/hdwallet
     git submodule update --init modules/proto-tx-builder
     git submodule update --init modules/device-protocol
@@ -573,6 +586,17 @@ if (-not (Test-Path $BuildDir)) {
 if (-not (Test-Path $ExtModulesDir)) {
     throw "External modules staging directory not found: $ExtModulesDir`nRun without -SkipBuild to regenerate collect-externals output."
 }
+if (-not (Test-Path $BundledEmulatorDll)) {
+    throw "Release gate failed: Electrobun did not bundle the 7.16 emulator at $BundledEmulatorDll"
+}
+if (-not $SkipBuild) {
+    $sourceHash = (Get-FileHash $EmulatorDllSource -Algorithm SHA256).Hash
+    $bundleHash = (Get-FileHash $BundledEmulatorDll -Algorithm SHA256).Hash
+    if ($sourceHash -ne $bundleHash) {
+        throw "Release gate failed: bundled emulator hash differs from the verified CI build input"
+    }
+}
+Write-Success "Verified bundled Windows emulator: $BundledEmulatorDll"
 
 # ============================================================================
 # Sign Executables and DLLs

@@ -1,10 +1,17 @@
 import type { ElectrobunConfig } from "electrobun";
+import { existsSync } from "node:fs";
 import pkg from "./package.json";
 
 const isWindows = process.platform === "win32";
 const isMac = process.platform === "darwin";
 const arch = process.arch; // 'arm64' or 'x64'
 if (isMac) console.log(`[electrobun] Building for macOS ${arch}`);
+const emulatorSource = isWindows
+	? "emulator-bundle/libkkemu.dll"
+	: isMac ? "emulator-bundle/libkkemu.dylib" : null;
+const emulatorCopy = emulatorSource && existsSync(emulatorSource)
+	? { [emulatorSource]: `emulator/${emulatorSource.split('/').pop()}` }
+	: {};
 
 export default {
 	app: {
@@ -50,6 +57,9 @@ export default {
 			// so tampering with any binary breaks Apple's signature. Provides an offline
 			// floor when the remote manifest is unreachable. See firmware-bundle/README.md.
 			"firmware-bundle": "firmware-bundle",
+			// Release builds preflight this file before Electrobun runs. Keeping the
+			// config conditional preserves emulator-free developer builds on Linux.
+			...emulatorCopy,
 			// Zcash privacy engine sidecar (Rust binary -- .exe on Windows)
 			[isWindows ? "zcash-cli/target/release/zcash-cli.exe" : "zcash-cli/target/release/zcash-cli"]: isWindows ? "zcash-cli.exe" : "zcash-cli",
 		},

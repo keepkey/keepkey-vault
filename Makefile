@@ -22,7 +22,7 @@ include .env
 export ELECTROBUN_DEVELOPER_ID ELECTROBUN_TEAMID ELECTROBUN_APPLEID ELECTROBUN_APPLEIDPASS
 endif
 
-.PHONY: install dev dev-hmr build build-stable build-canary build-signed prune-bundle dmg clean help vault sign-check verify verify-entitlements publish release upload-dmg upload-all-dmgs sign-release sign-release-intel verify-arch submodules modules-install modules-build modules-clean audit build-zcash-cli build-zcash-cli-debug build-zcash-cli-intel test test-unit test-rest test-sign-gating test-zcash-cli test-emu build-intel build-signed-intel build-electrobun-x64-core publish-electrobun-x64-core build-electrobun-linux-x64-core publish-electrobun-linux-x64-core preflight build-emulator build-emulator-windows clean-emulator test-emu-python
+.PHONY: install dev dev-hmr build build-stable build-canary build-signed prune-bundle dmg clean help vault sign-check verify verify-entitlements publish release upload-dmg upload-all-dmgs sign-release sign-release-intel verify-arch submodules modules-install modules-build modules-clean audit build-zcash-cli build-zcash-cli-debug build-zcash-cli-intel test test-unit test-rest test-sign-gating test-zcash-cli test-emu build-intel build-signed-intel build-electrobun-x64-core publish-electrobun-x64-core build-electrobun-linux-x64-core publish-electrobun-linux-x64-core preflight build-emulator build-emulator-windows build-emulator-macos-release build-emulator-release clean-emulator test-emu-python
 
 # --- Submodules (auto-init on fresh worktrees/clones) ---
 
@@ -30,10 +30,9 @@ $(STAMP_DIR):
 	@mkdir -p $(STAMP_DIR)
 
 $(SUBMODULES_STAMP): .gitmodules | $(STAMP_DIR)
-	@git submodule update --init modules/hdwallet modules/proto-tx-builder modules/device-protocol modules/electrobun
+	@git submodule update --init modules/hdwallet modules/proto-tx-builder modules/device-protocol modules/electrobun modules/keepkey-firmware
 	@# Fetch Vault runtime/build submodules so upstream-behind checks see latest commits.
-	@# Firmware is emulator-only for Vault releases and is intentionally not a gate here.
-	@for mod in modules/hdwallet modules/proto-tx-builder modules/device-protocol modules/electrobun; do \
+	@for mod in modules/hdwallet modules/proto-tx-builder modules/device-protocol modules/electrobun modules/keepkey-firmware; do \
 		git -C "$$mod" fetch --all --prune 2>/dev/null || true; \
 	done
 	@touch $@
@@ -306,6 +305,7 @@ prune-bundle:
 #    Clearing the stamps forces modules-build from the pinned source before the vault install copies it.
 build-signed: sign-check
 	@rm -f $(ZCASH_CLI_STAMP) $(PROTO_BUILD_STAMP) $(HDWALLET_BUILD_STAMP) $(DEVICE_PROTOCOL_BUILD_STAMP)
+	$(MAKE) build-emulator-macos-release
 	$(MAKE) build-stable audit prune-bundle dmg
 	@echo ""
 	@echo "=== Build complete ==="
@@ -348,7 +348,7 @@ dmg: verify-arch
 test: test-zcash-cli test-unit
 
 test-unit:
-	cd $(PROJECT_DIR) && bun test __tests__/evm-signer-verify.test.ts __tests__/evm-balance-fetch.test.ts __tests__/swap-parsing.test.ts __tests__/engine-state-machine.test.ts __tests__/device-switch.test.ts __tests__/wizard-messaging.test.ts __tests__/solana-tx.test.ts __tests__/solana-message-parser.test.ts __tests__/solana-instruction-decoder.test.ts __tests__/solana-alt.test.ts __tests__/solana-spl-decimals.test.ts __tests__/ton-build.test.ts __tests__/tron-memo-inject.test.ts __tests__/audit-coverage.test.ts __tests__/chain-scan.test.ts __tests__/pairing-pubkeys.test.ts __tests__/balance-display-state.test.ts __tests__/failed-fetch-not-zero.test.ts __tests__/advanced-mode-routing.test.ts __tests__/clearsign-provider-key.test.ts __tests__/firmware-clearsign-gate.test.ts __tests__/taproot-host.test.ts __tests__/recovery-ownership.test.ts __tests__/evm-x402.test.ts __tests__/solana-x402.test.ts __tests__/patch-electrobun.test.ts src/bun/mcp.test.ts src/bun/rng-audit.test.ts src/shared/zcash-maturity.test.ts src/bun/txbuilder/utxo-zcash.test.ts src/bun/txbuilder/utxo-taproot.test.ts src/bun/txbuilder/hive-ops.test.ts src/bun/clearsign-studio.test.ts src/bun/solana-outflow.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/evm-signer-verify.test.ts __tests__/evm-balance-fetch.test.ts __tests__/swap-parsing.test.ts __tests__/engine-state-machine.test.ts __tests__/device-switch.test.ts __tests__/wizard-messaging.test.ts __tests__/solana-tx.test.ts __tests__/solana-message-parser.test.ts __tests__/solana-instruction-decoder.test.ts __tests__/solana-alt.test.ts __tests__/solana-spl-decimals.test.ts __tests__/ton-build.test.ts __tests__/tron-memo-inject.test.ts __tests__/audit-coverage.test.ts __tests__/chain-scan.test.ts __tests__/pairing-pubkeys.test.ts __tests__/balance-display-state.test.ts __tests__/failed-fetch-not-zero.test.ts __tests__/advanced-mode-routing.test.ts __tests__/clearsign-provider-key.test.ts __tests__/firmware-clearsign-gate.test.ts __tests__/taproot-host.test.ts __tests__/recovery-ownership.test.ts __tests__/evm-x402.test.ts __tests__/solana-x402.test.ts __tests__/patch-electrobun.test.ts src/bun/emulator-library.test.ts src/bun/mcp.test.ts src/bun/rng-audit.test.ts src/shared/zcash-maturity.test.ts src/bun/txbuilder/utxo-zcash.test.ts src/bun/txbuilder/utxo-taproot.test.ts src/bun/txbuilder/hive-ops.test.ts src/bun/clearsign-studio.test.ts src/bun/solana-outflow.test.ts
 	cd $(PROJECT_DIR) && bun src/bun/btc-backend/core.test.ts
 	# Script-style suites (own runner + process.exit — must NOT join the `bun test`
 	# list above, where the exit would cut the run short). cosmos.test.ts was green
@@ -461,8 +461,16 @@ build-emulator:
 # standalone UDP `kkemu` binary (gated out on Windows). Requires mingw-w64:
 #   macOS: brew install mingw-w64   |   Linux: apt-get install mingw-w64
 build-emulator-windows:
-	cd $(EMU_FW_DIR) && git submodule update --init --recursive
+	cd $(EMU_FW_DIR) && git submodule update --init code-signing-keys deps/crypto/trezor-firmware deps/device-protocol deps/googletest deps/qrenc/QR-Code-generator deps/sca-hardening/SecAESSTM32
 	bash scripts/build-emulator-windows.sh
+
+# Release deliverables: universal macOS dylib plus Windows x64 DLL. Both scripts
+# bind to the Vault's exact firmware gitlink and reject anything but 7.16.
+build-emulator-macos-release:
+	cd $(EMU_FW_DIR) && git submodule update --init code-signing-keys deps/crypto/trezor-firmware deps/device-protocol deps/googletest deps/qrenc/QR-Code-generator deps/sca-hardening/SecAESSTM32
+	bash scripts/build-emulator-macos-release.sh
+
+build-emulator-release: build-emulator-macos-release build-emulator-windows
 
 # Run python-keepkey consistency tests against the locally-built kkemu binary.
 test-emu-python:
@@ -815,7 +823,8 @@ help:
 	@echo "  make clean          - Remove all build artifacts and node_modules"
 	@echo "  make preflight      - Pre-release validation (pins, CI, builds, typecheck)"
 	@echo ""
-	@echo "Emulator (developer feature, macOS only):"
+	@echo "Emulator:"
+	@echo "  make build-emulator-release - Build + audit bundled 7.16 macOS universal and Windows x64 libraries"
 	@echo "  make build-emulator        - Build kkemu+libkkemu from current firmware submodule checkout"
 	@echo "                               and install to ~/.keepkey/emulator/"
 	@echo "  make test-emu-python       - Run python-keepkey UDP tests against the installed kkemu"
@@ -829,7 +838,7 @@ preflight: submodules
 	@echo ""
 	@echo "1. SUBMODULE PINS"
 	@fail=0; \
-	for mod in modules/hdwallet modules/proto-tx-builder modules/device-protocol modules/electrobun; do \
+	for mod in modules/hdwallet modules/proto-tx-builder modules/device-protocol modules/electrobun modules/keepkey-firmware; do \
 		pinned=$$(git ls-tree HEAD "$$mod" | awk '{print substr($$3,1,12)}'); \
 		actual=$$(cd "$$mod" && git rev-parse --short=12 HEAD 2>/dev/null); \
 		if [ "$$pinned" = "$$actual" ]; then echo "   ✅ $$mod"; \
@@ -837,7 +846,9 @@ preflight: submodules
 	done; \
 	echo ""; \
 	echo "2. FIRMWARE SUBMODULE"; \
-	echo "   ⚠️  Skipped for Vault release gating (emulator/firmware work only)"; \
+	fw_version=$$(awk '$$1 == "VERSION" { print $$2; exit }' modules/keepkey-firmware/CMakeLists.txt); \
+	if [ "$$fw_version" = "7.16.0" ]; then echo "   ✅ bundled emulator firmware 7.16.0"; \
+	else echo "   ❌ bundled emulator firmware is $$fw_version, expected 7.16.0"; fail=1; fi; \
 	echo ""; \
 	echo "3. UPSTREAM BEHIND"; \
 	for pair in "modules/hdwallet|origin/master" "modules/proto-tx-builder|origin/main" "modules/device-protocol|origin/master" "modules/electrobun|origin/main"; do \

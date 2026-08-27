@@ -38,6 +38,11 @@ firmware/emulators/7.14.0-*/
 
 # Emulator build directory
 modules/keepkey-firmware/build-emu/
+modules/keepkey-firmware/build-emu-*/
+
+# Release-staged emulator libraries (rebuilt from the pinned firmware gitlink)
+projects/keepkey-vault/emulator-bundle/*.dylib
+projects/keepkey-vault/emulator-bundle/*.dll
 
 # Release artifacts (belong in GitHub Releases, not the repo)
 release-windows/
