@@ -397,7 +397,7 @@ export function decodeCalldataLocal(
 // (the drain vector PR #261/#303 closed). Addresses copied from firmware
 // lib/firmware/ethereum_contracts/*.{c,h} on origin/develop (the rc3 line).
 const ADDR = {
-  ZX_EXCHANGE_PROXY: '0xdef1c0ded9bec7f1a1670819833240f027b25eff', // 0x transformERC20 / sellToUniswap
+  ZX_EXCHANGE_PROXY: '0xdef1c0ded9bec7f1a1670819833240f027b25eff', // 0x sellToUniswap
   UNISWAP_V2_ROUTER: '0x7a250d5630b4cf539739df2c5dacb4c659f2488d', // 0x liquid add/remove + approve-to-router
   SALARY_PROXY:      '0xbd6a40bb904aea5a49c59050b5395f7484a4203d', // saproxy withdrawFromSalary
   THOR_ROUTER:       '0xd37bbe5744d730a1d98d8dc97c42f0ca46ad7146', // Ethereum
@@ -417,7 +417,6 @@ const THOR_ROUTER_BY_CHAIN: Record<number, string> = {
 
 // selector → the ONE contract address the firmware pins that selector to.
 const FIRMWARE_PINNED: Record<string, string> = {
-  '0x415565b0': ADDR.ZX_EXCHANGE_PROXY, // transformERC20
   '0xd9627aa4': ADDR.ZX_EXCHANGE_PROXY, // sellToUniswap (0x)
   '0xf305d719': ADDR.UNISWAP_V2_ROUTER, // addLiquidityETH
   '0x02751cec': ADDR.UNISWAP_V2_ROUTER, // removeLiquidityETH
