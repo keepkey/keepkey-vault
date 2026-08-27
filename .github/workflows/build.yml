@@ -56,6 +56,7 @@ jobs:
               deps/crypto/trezor-firmware \
               deps/device-protocol \
               deps/googletest \
+              deps/python-keepkey \
               deps/qrenc/QR-Code-generator \
               deps/sca-hardening/SecAESSTM32
           fi

@@ -37,6 +37,8 @@ SOURCE_SHA="$(git -C "$FW_DIR" rev-parse HEAD)"
 echo "=== Windows emulator DLL cross-compile ==="
 command -v x86_64-w64-mingw32-gcc >/dev/null 2>&1 || {
   echo "ERROR: x86_64-w64-mingw32-gcc not found. Install: brew install mingw-w64"; exit 1; }
+[ -f "$FW_DIR/deps/python-keepkey/keepkeylib/eth/ethereum_tokens.py" ] || {
+  echo "ERROR: firmware deps/python-keepkey submodule is not initialized"; exit 1; }
 echo "    MinGW:  $(x86_64-w64-mingw32-gcc --version | head -1)"
 
 # --- Pinned host build toolchain (matches firmware CI dylib job) -------------
