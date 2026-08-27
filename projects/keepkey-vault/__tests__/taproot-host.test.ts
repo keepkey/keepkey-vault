@@ -4,9 +4,6 @@ import { BtcAccountManager } from '../src/bun/btc-accounts'
 import { btcTaprootSupported, supportedBtcScriptTypes } from '../src/shared/chains'
 import { generatePathMatrix } from '../src/bun/sweep-engine'
 import { GetEntropyRequest, ListUnspentRequest, PortfolioBalancesRequest, TxHistoryRequest } from '../src/bun/schemas'
-import { BTCInputScriptType, BTCOutputScriptType } from '../../../modules/hdwallet/packages/hdwallet-core/src/bitcoin'
-import { translateInputScriptType, translateOutputScriptType } from '../../../modules/hdwallet/packages/hdwallet-keepkey/src/utils'
-import * as DeviceTypes from '@keepkey/device-protocol/lib/types_pb'
 
 const BIP350_P2TR = 'bc1p0xlxvlhemja6c4dqv22uapctqupfhlxm9h8z3k2e72q4k9hcz7vqzk5jj0'
 const BIP350_P2TR_SCRIPT = '512079be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798'
@@ -83,14 +80,24 @@ describe('firmware capability gate', () => {
 })
 
 describe('pinned hdwallet Taproot wire contract', () => {
-  test('the parent repository pin can encode P2TR public-key and change requests', () => {
-    // Import the checked-out submodule source directly. This is intentionally
-    // not a mock and not Vault's string union: a parent gitlink rollback must
-    // fail this release test before an app can be packaged.
-    expect(BTCInputScriptType.SpendTaproot).toBe('p2tr')
-    expect(BTCOutputScriptType.PayToTaproot).toBe('p2tr')
-    expect(translateInputScriptType(BTCInputScriptType.SpendTaproot)).toBe(DeviceTypes.InputScriptType.SPENDTAPROOT)
-    expect(translateOutputScriptType(BTCOutputScriptType.PayToTaproot)).toBe(DeviceTypes.OutputScriptType.PAYTOTAPROOT)
+  test('the parent repository pin can encode P2TR public-key and change requests', async () => {
+    // Read the checked-out gitlink sources instead of importing generated jspb.
+    // CI intentionally does not npm-install the device-protocol submodule, and
+    // a source-contract test should not gain a hidden google-protobuf runtime
+    // dependency. These assertions still fail on the regressed hdwallet pin:
+    // it lacks the core enum values and both KeepKey wire mappings.
+    const [coreBitcoin, keepkeyUtils, protocolTypes] = await Promise.all([
+      Bun.file(new URL('../../../modules/hdwallet/packages/hdwallet-core/src/bitcoin.ts', import.meta.url)).text(),
+      Bun.file(new URL('../../../modules/hdwallet/packages/hdwallet-keepkey/src/utils.ts', import.meta.url)).text(),
+      Bun.file(new URL('../../../modules/device-protocol/types.proto', import.meta.url)).text(),
+    ])
+
+    expect(coreBitcoin).toMatch(/SpendTaproot\s*=\s*["']p2tr["']/)
+    expect(coreBitcoin).toMatch(/PayToTaproot\s*=\s*["']p2tr["']/)
+    expect(keepkeyUtils).toMatch(/case core\.BTCInputScriptType\.SpendTaproot:\s*return Types\.InputScriptType\.SPENDTAPROOT;/)
+    expect(keepkeyUtils).toMatch(/case core\.BTCOutputScriptType\.PayToTaproot:\s*return Types\.OutputScriptType\.PAYTOTAPROOT;/)
+    expect(protocolTypes).toMatch(/SPENDTAPROOT\s*=\s*5/)
+    expect(protocolTypes).toMatch(/PAYTOTAPROOT\s*=\s*6/)
   })
 })
 
