@@ -17,6 +17,8 @@ command -v cmake >/dev/null || { echo "ERROR: cmake is required"; exit 1; }
 command -v lipo >/dev/null || { echo "ERROR: lipo is required"; exit 1; }
 [ -f "$FW_DIR/deps/python-keepkey/keepkeylib/eth/ethereum_tokens.py" ] || {
   echo "ERROR: firmware deps/python-keepkey submodule is not initialized"; exit 1; }
+[ -d "$FW_DIR/deps/python-keepkey/keepkeylib/eth/ethereum-lists/src/tokens" ] || {
+  echo "ERROR: python-keepkey ethereum-lists submodule is not initialized"; exit 1; }
 
 SOURCE_VERSION="$(awk '$1 == "VERSION" { print $2; exit }' "$FW_DIR/CMakeLists.txt")"
 [ "$SOURCE_VERSION" = "$EXPECTED_VERSION" ] || {

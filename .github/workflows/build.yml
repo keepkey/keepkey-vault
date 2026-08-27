@@ -59,6 +59,8 @@ jobs:
               deps/python-keepkey \
               deps/qrenc/QR-Code-generator \
               deps/sca-hardening/SecAESSTM32
+            git -C modules/keepkey-firmware/deps/python-keepkey submodule update --init \
+              keepkeylib/eth/ethereum-lists
           fi
 
       - name: Setup Bun

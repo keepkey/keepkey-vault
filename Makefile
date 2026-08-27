@@ -462,12 +462,14 @@ build-emulator:
 #   macOS: brew install mingw-w64   |   Linux: apt-get install mingw-w64
 build-emulator-windows:
 	cd $(EMU_FW_DIR) && git submodule update --init code-signing-keys deps/crypto/trezor-firmware deps/device-protocol deps/googletest deps/python-keepkey deps/qrenc/QR-Code-generator deps/sca-hardening/SecAESSTM32
+	cd $(EMU_FW_DIR)/deps/python-keepkey && git submodule update --init keepkeylib/eth/ethereum-lists
 	bash scripts/build-emulator-windows.sh
 
 # Release deliverables: universal macOS dylib plus Windows x64 DLL. Both scripts
 # bind to the Vault's exact firmware gitlink and reject anything but 7.16.
 build-emulator-macos-release:
 	cd $(EMU_FW_DIR) && git submodule update --init code-signing-keys deps/crypto/trezor-firmware deps/device-protocol deps/googletest deps/python-keepkey deps/qrenc/QR-Code-generator deps/sca-hardening/SecAESSTM32
+	cd $(EMU_FW_DIR)/deps/python-keepkey && git submodule update --init keepkeylib/eth/ethereum-lists
 	bash scripts/build-emulator-macos-release.sh
 
 build-emulator-release: build-emulator-macos-release build-emulator-windows
