@@ -187,7 +187,9 @@ jobs:
 
       - name: Install emulator native toolchain (macOS)
         if: runner.os == 'macOS'
-        run: brew install mingw-w64
+        # Homebrew protoc remains required by the pre-existing Rust Zcash
+        # sidecar; emulator builds separately use their pinned protoc 21.12.
+        run: brew install protobuf mingw-w64
 
       - name: Build and audit firmware 7.16 emulator libraries
         if: runner.os == 'macOS'
