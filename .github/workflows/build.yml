@@ -154,6 +154,13 @@ jobs:
         run: cd projects/keepkey-vault && bun install --frozen-lockfile
         shell: bash
 
+      - name: Run Vault unit and submodule-contract tests
+        # Must run after building the pinned modules. The suite imports critical
+        # hdwallet wire translators directly, so an incompatible gitlink fails
+        # here instead of producing a package with missing account controls.
+        run: make test-unit
+        shell: bash
+
       - name: Install protoc (macOS)
         if: runner.os == 'macOS'
         run: brew install protobuf

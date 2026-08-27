@@ -4,6 +4,9 @@ import { BtcAccountManager } from '../src/bun/btc-accounts'
 import { btcTaprootSupported, supportedBtcScriptTypes } from '../src/shared/chains'
 import { generatePathMatrix } from '../src/bun/sweep-engine'
 import { GetEntropyRequest, ListUnspentRequest, PortfolioBalancesRequest, TxHistoryRequest } from '../src/bun/schemas'
+import { BTCInputScriptType, BTCOutputScriptType } from '../../../modules/hdwallet/packages/hdwallet-core/src/bitcoin'
+import { translateInputScriptType, translateOutputScriptType } from '../../../modules/hdwallet/packages/hdwallet-keepkey/src/utils'
+import * as DeviceTypes from '@keepkey/device-protocol/lib/types_pb'
 
 const BIP350_P2TR = 'bc1p0xlxvlhemja6c4dqv22uapctqupfhlxm9h8z3k2e72q4k9hcz7vqzk5jj0'
 const BIP350_P2TR_SCRIPT = '512079be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798'
@@ -51,6 +54,43 @@ describe('firmware capability gate', () => {
         ['p2tr', 86, 0x80000056],
       ])
     expect(set.selectedXpub).toEqual({ accountIndex: 0, scriptType: 'p2wpkh' })
+  })
+
+  test('an incompatible optional P2TR adapter cannot erase the required account types', async () => {
+    const manager = new BtcAccountManager()
+    await manager.initialize({
+      // Reproduces the regressed adapter contract: it claimed support before
+      // its GetPublicKey wire translator understood p2tr.
+      btcSupportsScriptType: async (_coin: string, scriptType: string) => scriptType === 'p2tr',
+      getPublicKeys: async (paths: any[]) => {
+        if (paths.some(p => p.scriptType === 'p2tr')) throw new Error('unhandled InputSriptType enum: p2tr')
+        return paths.map((p, i) => ({ xpub: `xpub-${p.scriptType}-${i}` }))
+      },
+    })
+
+    expect(manager.toAccountSet().accounts[0].xpubs.map(x => x.scriptType))
+      .toEqual(['p2pkh', 'p2sh-p2wpkh', 'p2wpkh'])
+  })
+
+  test('missing required xpubs fail with an actionable error', async () => {
+    const manager = new BtcAccountManager()
+    await expect(manager.initialize({
+      btcSupportsScriptType: async () => false,
+      getPublicKeys: async (paths: any[]) => paths.map((p, i) => i === 1 ? null : { xpub: `xpub-${p.scriptType}-${i}` }),
+    })).rejects.toThrow('missing required script types: p2sh-p2wpkh')
+    expect(manager.toAccountSet().accounts).toEqual([])
+  })
+})
+
+describe('pinned hdwallet Taproot wire contract', () => {
+  test('the parent repository pin can encode P2TR public-key and change requests', () => {
+    // Import the checked-out submodule source directly. This is intentionally
+    // not a mock and not Vault's string union: a parent gitlink rollback must
+    // fail this release test before an app can be packaged.
+    expect(BTCInputScriptType.SpendTaproot).toBe('p2tr')
+    expect(BTCOutputScriptType.PayToTaproot).toBe('p2tr')
+    expect(translateInputScriptType(BTCInputScriptType.SpendTaproot)).toBe(DeviceTypes.InputScriptType.SPENDTAPROOT)
+    expect(translateOutputScriptType(BTCOutputScriptType.PayToTaproot)).toBe(DeviceTypes.OutputScriptType.PAYTOTAPROOT)
   })
 })
 

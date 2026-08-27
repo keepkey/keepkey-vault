@@ -874,7 +874,14 @@ preflight: submodules
 		&& echo "   ✅ device-protocol Ironwood fields" \
 		|| { echo "   ❌ device-protocol pin is missing Ironwood fields 19/20"; fail=1; }; \
 	echo ""; \
-	echo "6. VAULT TYPECHECK (differential vs baseline)"; \
+	echo "6. HOST/SUBMODULE CONTRACT TESTS"; \
+	if (cd $(PROJECT_DIR) && bun test __tests__/taproot-host.test.ts >/dev/null 2>&1); then \
+		echo "   ✅ Bitcoin account + pinned hdwallet Taproot contract"; \
+	else \
+		echo "   ❌ Bitcoin/hdwallet contract failed — run: cd $(PROJECT_DIR) && bun test __tests__/taproot-host.test.ts"; fail=1; \
+	fi; \
+	echo ""; \
+	echo "7. VAULT TYPECHECK (differential vs baseline)"; \
 	errs=$$(cd $(PROJECT_DIR) && npx tsc --noEmit --skipLibCheck 2>&1 | grep "error TS" | grep -v "minimatch" | wc -l | tr -d ' '); \
 	base=$$(cat $(PROJECT_DIR)/.typecheck-baseline 2>/dev/null || echo 0); \
 	if [ "$$errs" = "0" ]; then echo "   ✅ clean"; \

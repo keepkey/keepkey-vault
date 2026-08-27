@@ -45,29 +45,69 @@ export class BtcAccountManager extends EventEmitter {
     return set
   }
 
-  /** Fetch supported xpubs for a given account index in a single batch device call. */
+  /** Fetch the three established xpubs first, then optional capabilities.
+   *
+   *  Taproot is deliberately isolated from the required batch. A parent-repo
+   *  submodule rollback once paired Vault's P2TR discovery with an older
+   *  hdwallet translator: the adapter claimed P2TR support, then threw while
+   *  encoding it. Because all four paths shared one getPublicKeys call, that
+   *  optional failure erased the historical three accounts and the selector
+   *  rendered as an unexplained blank. Required account types fail loudly;
+   *  optional account types degrade without taking Bitcoin offline. */
   private async fetchAccount(wallet: any, accountIndex: number): Promise<void> {
     // Safety: skip if this account index already exists (prevents race-condition duplicates)
     if (this.accounts.some(a => a.accountIndex === accountIndex)) return
 
-    const scriptTypes = await supportedBtcScriptTypes(wallet)
-    const paths = scriptTypes.map(st => ({
+    const supportedScriptTypes = await supportedBtcScriptTypes(wallet)
+    const requiredScriptTypes = supportedScriptTypes.filter(st => st.scriptType !== 'p2tr')
+    const optionalScriptTypes = supportedScriptTypes.filter(st => st.scriptType === 'p2tr')
+    const requiredPaths = requiredScriptTypes.map(st => ({
       addressNList: btcAccountPath(st.purpose, accountIndex),
       coin: 'Bitcoin',
       scriptType: st.scriptType,
       curve: 'secp256k1',
     }))
 
-    const results = await wallet.getPublicKeys(paths)
+    const requiredResults = await wallet.getPublicKeys(requiredPaths)
+    const missingRequired = requiredScriptTypes
+      .filter((_, i) => !requiredResults?.[i]?.xpub)
+      .map(st => st.scriptType)
+    if (missingRequired.length > 0) {
+      throw new Error(
+        `Bitcoin account ${accountIndex} xpub derivation incomplete; missing required script types: ${missingRequired.join(', ')}`,
+      )
+    }
+
+    const derived: Array<{ config: (typeof supportedScriptTypes)[number]; result: any }> =
+      requiredScriptTypes.map((config, i) => ({ config, result: requiredResults[i] }))
+
+    for (const config of optionalScriptTypes) {
+      const path = {
+        addressNList: btcAccountPath(config.purpose, accountIndex),
+        coin: 'Bitcoin',
+        scriptType: config.scriptType,
+        curve: 'secp256k1',
+      }
+      try {
+        const optionalResults = await wallet.getPublicKeys([path])
+        if (!optionalResults?.[0]?.xpub) {
+          console.warn(`[btc-accounts] Optional ${config.scriptType} xpub was not returned for account ${accountIndex}; continuing with required Bitcoin account types`)
+          continue
+        }
+        derived.push({ config, result: optionalResults[0] })
+      } catch (e: any) {
+        console.warn(`[btc-accounts] Optional ${config.scriptType} xpub derivation failed for account ${accountIndex}; continuing with required Bitcoin account types: ${e?.message || String(e)}`)
+      }
+    }
 
     // Re-check after await (another call may have added it while we were waiting)
     if (this.accounts.some(a => a.accountIndex === accountIndex)) return
 
-    const xpubs: BtcXpub[] = scriptTypes.map((st, i) => ({
+    const xpubs: BtcXpub[] = derived.map(({ config: st, result }) => ({
       scriptType: st.scriptType,
       purpose: st.purpose,
       path: btcAccountPath(st.purpose, accountIndex),
-      xpub: results?.[i]?.xpub || '',
+      xpub: result.xpub,
       xpubPrefix: st.xpubPrefix,
       balance: '0',
       balanceUsd: 0,

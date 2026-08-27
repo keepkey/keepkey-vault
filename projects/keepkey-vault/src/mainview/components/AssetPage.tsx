@@ -107,7 +107,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 
 	// BTC multi-account support
 	const isBtc = chain.id === 'bitcoin'
-	const { btcAccounts, selectXpub, addAccount, refresh: refreshBtcAccounts, loading: btcLoading } = useBtcAccounts()
+	const { btcAccounts, selectXpub, addAccount, refresh: refreshBtcAccounts, loading: btcLoading, error: btcAccountsError } = useBtcAccounts()
 
 	// Single-chain refresh. Always forced (bun getBalance passes forceRefresh:true
 	// to Pioneer). The result is NOT kept locally: the backend pushes the identical
@@ -1135,13 +1135,40 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 						{/* Account selectors call device/backend account RPCs and mix live
 						    wallet account state with the cached receive address — hidden
 						    in watch-only. */}
-						{!watchOnly && isBtc && btcAccounts.accounts.length > 0 && (
-							<BtcXpubSelector
-								btcAccounts={btcAccounts}
-								onSelectXpub={selectXpub}
-								onAddAccount={addAccount}
-								addingAccount={btcLoading}
-							/>
+						{!watchOnly && isBtc && (
+							btcAccounts.accounts.length > 0 ? (
+								<BtcXpubSelector
+									btcAccounts={btcAccounts}
+									onSelectXpub={selectXpub}
+									onAddAccount={addAccount}
+									addingAccount={btcLoading}
+								/>
+							) : btcLoading ? (
+								<Flex align="center" gap="2" minH="38px" color="var(--text-2)">
+									<Spinner size="xs" color="var(--gold)" />
+									<Text fontSize="12px">Loading Bitcoin account types…</Text>
+								</Flex>
+							) : (
+								<Flex
+									align={{ base: "stretch", sm: "center" }}
+									direction={{ base: "column", sm: "row" }}
+									gap="2"
+									p="2.5"
+									border="1px solid rgba(245,101,101,0.35)"
+									borderRadius="10px"
+									bg="rgba(245,101,101,0.06)"
+								>
+									<Box flex="1" minW="0">
+										<Text fontSize="12px" fontWeight="600" color="red.300">Bitcoin account types unavailable</Text>
+										<Text fontSize="10px" color="var(--text-2)" title={btcAccountsError || undefined} truncate>
+											{btcAccountsError || "Vault did not receive the required Bitcoin xpubs."}
+										</Text>
+									</Box>
+									<Button size="xs" variant="outline" color="red.200" borderColor="rgba(245,101,101,0.45)" onClick={() => void refreshBtcAccounts()}>
+										Retry
+									</Button>
+								</Flex>
+							)
 						)}
 						{!watchOnly && !isHiddenWallet && isAltUtxo && (
 							<UtxoAccountSelector
