@@ -6,9 +6,13 @@ const isWindows = process.platform === "win32";
 const isMac = process.platform === "darwin";
 const arch = process.arch; // 'arm64' or 'x64'
 if (isMac) console.log(`[electrobun] Building for macOS ${arch}`);
-const emulatorSource = isWindows
+const certifiedEmulatorSource = isWindows
 	? "emulator-bundle/libkkemu.dll"
 	: isMac ? "emulator-bundle/libkkemu.dylib" : null;
+// Local Developer-ID builds stage a signed copy after verifying the immutable
+// certified artifact. CI/unsigned builds continue to embed the certified bytes
+// directly. Keeping the signed copy separate preserves source hash verification.
+const emulatorSource = process.env.KEEPKEY_EMULATOR_SOURCE || certifiedEmulatorSource;
 const emulatorCopy = emulatorSource && existsSync(emulatorSource)
 	? { [emulatorSource]: `emulator/${emulatorSource.split('/').pop()}` }
 	: {};
