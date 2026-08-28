@@ -573,7 +573,7 @@ export async function emuGatedConfirm(
   delegate: ConfirmDelegate | null,
   opts: { interactive: true; details: EmulatorConfirmDetails } | { interactive: false },
 ): Promise<any> {
-  const { saveEmulatorState, flushRingBuffers } = await import('./emulator')
+  const { saveEmulatorState } = await import('./emulator')
   const { writeDecision } = await import('./emulator-transport')
 
   let rejected = false
@@ -621,7 +621,12 @@ export async function emuGatedConfirm(
     throw e
   } finally {
     if (delegate) delegate.onButtonRequest = prevHandler
-    flushRingBuffers() // drain any late output so the next op reads clean
+    // Do not drain the transport here. fn() owns its complete request/response
+    // exchange and releases hdwallet's transport lock before this finally runs.
+    // A queued request can therefore acquire the lock and receive its response
+    // in this gap; draining globally would steal that response and strand the
+    // queued call until its read timeout. This happened when a background
+    // getFeatures followed an EIP-712 sign, blocking the next sign for 240s.
     sendDismiss()
   }
 }

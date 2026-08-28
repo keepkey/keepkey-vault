@@ -963,6 +963,10 @@ function App() {
 							<DeviceGrid
 								onViewPortfolio={(id, label) => { setWatchOnlyDeviceId(id); setWatchOnlyLabel(label); setWatchOnlyMode(true) }}
 								onReady={() => setGridReady(true)}
+								onEnableEmulator={async () => {
+									const settings = await rpcRequest<AppSettings>('setEmulatorEnabled', { enabled: true }, 10000)
+									setEmulatorEnabled(settings.emulatorEnabled)
+								}}
 								emulatorEnabled={emulatorEnabled}
 							/>
 							{/* Windows: a connected KeepKey can be invisible to the app if WinUSB

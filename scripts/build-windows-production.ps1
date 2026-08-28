@@ -95,6 +95,8 @@ $ProjectDir = Join-Path $RepoRoot "projects\keepkey-vault"
 $BuildDir = Join-Path $ProjectDir "_build\dev-win-x64\keepkey-vault-dev"
 $ExtModulesDir = Join-Path $ProjectDir "_build\_ext_modules"
 $AppNodeModulesDir = Join-Path $BuildDir "Resources\app\node_modules"
+$EmulatorDllSource = Join-Path $ProjectDir "emulator-bundle\libkkemu.dll"
+$BundledEmulatorDll = Join-Path $BuildDir "Resources\app\emulator\libkkemu.dll"
 $ArtifactsDir = Join-Path $RepoRoot $OutputDir
 
 # Read version from package.json
@@ -359,6 +361,17 @@ Assert-Command "bun"
 Assert-Command "yarn"
 Write-Success "Build tools available (git, bun, yarn)"
 
+if (-not $SkipBuild) {
+    if (-not (Test-Path $EmulatorDllSource)) {
+        throw "Pinned 7.16 emulator DLL missing at $EmulatorDllSource.`nDownload emulator-build-input-libkkemu-7.16.0-win-x64.dll from the matching macOS CI artifact, rename it to libkkemu.dll, and place it in emulator-bundle before building."
+    }
+    $emuHeader = [System.IO.File]::ReadAllBytes($EmulatorDllSource)
+    if ($emuHeader.Length -lt 2 -or $emuHeader[0] -ne 0x4D -or $emuHeader[1] -ne 0x5A) {
+        throw "Emulator build input is not a Windows PE DLL (MZ header missing): $EmulatorDllSource"
+    }
+    Write-Success "Pinned 7.16 emulator DLL staged: $EmulatorDllSource"
+}
+
 # Check certificate (if signing)
 if (-not $SkipSign) {
     $cert = Get-ChildItem -Path "Cert:\CurrentUser\My" -ErrorAction SilentlyContinue |
@@ -387,8 +400,8 @@ if (-not $SkipSign) {
 if (-not $SkipBuild) {
     Write-Step "Updating git submodules (selective)"
     Push-Location $RepoRoot
-    # Only init the submodules Vault packaging actually needs. Firmware is
-    # emulator-only for Vault releases and is intentionally not a build gate.
+    # Compile only host-side submodules here. The verified firmware DLL is a
+    # required CI build input checked above, so Windows does not compile it.
     git submodule update --init modules/hdwallet
     git submodule update --init modules/proto-tx-builder
     git submodule update --init modules/device-protocol
@@ -426,8 +439,36 @@ if (-not $SkipBuild) {
 
     Write-Step "Building hdwallet"
     Push-Location (Join-Path $RepoRoot "modules\hdwallet")
-    yarn install
-    if ($LASTEXITCODE -ne 0) { throw "yarn install failed for hdwallet (exit $LASTEXITCODE)" }
+    # Windows: hdwallet-keepkey depends on @keepkey/device-protocol as a GIT dependency.
+    # yarn builds git deps by running their `prepare`, which here is
+    #   mkdir -p ./lib && grpc_tools_node_protoc --plugin=protoc-gen-ts=./node_modules/.bin/protoc-gen-ts ...
+    # That fails on Windows: `mkdir -p` is invalid under cmd.exe, and even under bash native
+    # protoc cannot exec the extensionless plugin wrapper ("%1 is not a valid Win32 application").
+    # yarn (even with --ignore-scripts) still runs git-dep prepare and returns non-zero, but by
+    # then node_modules is fully linked. Tolerate ONLY that specific prepare failure, seed the
+    # git-dep's gitignored lib/ from the top-level device-protocol lib (same pinned commit ->
+    # identical output), and treat `yarn build` (tsc) as the real gate.
+    $ErrorActionPreference = 'Continue'
+    $hdwInstallOutput = yarn install 2>&1
+    $hdwInstallExit = $LASTEXITCODE
+    $ErrorActionPreference = 'Stop'
+    if ($hdwInstallExit -ne 0) {
+        $hdwInstallText = @($hdwInstallOutput) -join "`n"
+        if ($hdwInstallText -match 'device-protocol@' -and $hdwInstallText -match 'build:js') {
+            Write-Warning "hdwallet yarn install exited $hdwInstallExit on the device-protocol git-dep prepare (Windows protoc/mkdir limitation); seeding lib/ from top-level and continuing."
+        } else {
+            Write-Host $hdwInstallText -ForegroundColor Gray
+            throw "yarn install failed for hdwallet (exit $hdwInstallExit)"
+        }
+    }
+    $DpNestedLib = Join-Path (Get-Location) "node_modules\@keepkey\device-protocol\lib"
+    $DpTopLib = Join-Path $RepoRoot "modules\device-protocol\lib"
+    if (-not (Test-Path (Join-Path $DpTopLib "messages_pb.js"))) {
+        throw "Top-level device-protocol lib missing at $DpTopLib -- build it before running (see WINDOWS-BUILD-QUIRKS.md quirk 8)."
+    }
+    New-Item -ItemType Directory -Force -Path $DpNestedLib | Out-Null
+    Copy-Item -Path (Join-Path $DpTopLib "*") -Destination $DpNestedLib -Recurse -Force
+    Write-Host "  Seeded hdwallet @keepkey/device-protocol/lib from top-level device-protocol (pinned commit)"
     yarn build
     if ($LASTEXITCODE -ne 0) { throw "yarn build failed for hdwallet (exit $LASTEXITCODE)" }
     Pop-Location
@@ -456,6 +497,24 @@ if (-not $SkipBuild) {
     $ZcashCliDir = Join-Path $ProjectDir "zcash-cli"
     if (Test-Path $ZcashCliDir) {
         Push-Location $ZcashCliDir
+        # zcash-cli/build.rs uses tonic-build/prost, which needs a system `protoc`.
+        # Windows has none on PATH by default, so resolve one: honor an existing
+        # $env:PROTOC, else protoc on PATH, else the protoc.exe bundled with
+        # grpc-tools in device-protocol's node_modules (always present for the build).
+        if (-not ($env:PROTOC -and (Test-Path $env:PROTOC))) {
+            $protocCmd = Get-Command protoc.exe -ErrorAction SilentlyContinue
+            if ($protocCmd) {
+                $env:PROTOC = $protocCmd.Source
+            } else {
+                $bundledProtoc = Join-Path $RepoRoot "modules\device-protocol\node_modules\grpc-tools\bin\protoc.exe"
+                if (Test-Path $bundledProtoc) {
+                    $env:PROTOC = $bundledProtoc
+                } else {
+                    throw "protoc not found for zcash-cli build. Set `$env:PROTOC or install protobuf-compiler. Bundled fallback missing at $bundledProtoc (run the device-protocol install first)."
+                }
+            }
+        }
+        Write-Host "  Using protoc: $env:PROTOC"
         cargo build --release
         if ($LASTEXITCODE -ne 0) { throw "cargo build --release failed for zcash-cli" }
         Pop-Location
@@ -527,6 +586,17 @@ if (-not (Test-Path $BuildDir)) {
 if (-not (Test-Path $ExtModulesDir)) {
     throw "External modules staging directory not found: $ExtModulesDir`nRun without -SkipBuild to regenerate collect-externals output."
 }
+if (-not (Test-Path $BundledEmulatorDll)) {
+    throw "Release gate failed: Electrobun did not bundle the 7.16 emulator at $BundledEmulatorDll"
+}
+if (-not $SkipBuild) {
+    $sourceHash = (Get-FileHash $EmulatorDllSource -Algorithm SHA256).Hash
+    $bundleHash = (Get-FileHash $BundledEmulatorDll -Algorithm SHA256).Hash
+    if ($sourceHash -ne $bundleHash) {
+        throw "Release gate failed: bundled emulator hash differs from the verified CI build input"
+    }
+}
+Write-Success "Verified bundled Windows emulator: $BundledEmulatorDll"
 
 # ============================================================================
 # Sign Executables and DLLs

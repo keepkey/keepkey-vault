@@ -165,13 +165,13 @@ export const XrpSignRequest = z.object({
 }).strip()
 
 /** POST /solana/sign-transaction — sign a raw Solana transaction */
-export const SolanaSwapMetadata = z.object({
-  /** Base64-encoded canonical KKSOLSW1 descriptor. */
-  payload: z.string().min(1),
-  /** Base64-encoded 64-byte compact secp256k1 signature over SHA256(payload). */
+export const SolanaLutProof = z.object({
+  /** Base64-encoded 32-byte keys in canonical writable-then-readonly order. */
+  accounts: z.array(z.string().min(1)).min(1).max(8),
+  /** Base64-encoded 64-byte signature over the transaction-bound LUT preimage. */
   signature: z.string().min(1),
-  /** Device ClearSign signer slot (0 = built-in, 1..3 = user-loaded). */
-  signerKeyId: z.number().int().min(0).max(3),
+  /** Runtime slot 0-3, or the root-certified delegate sentinel. */
+  signerKeyId: z.union([z.number().int().min(0).max(3), z.literal(0x80)]),
 }).strict()
 
 /**
@@ -185,7 +185,7 @@ export const SolanaInstructionSchema = z.object({
   /** Base64-encoded 64-byte compact secp256k1 signature over SHA256(payload). */
   signature: z.string().min(1),
   /** Device ClearSign signer slot (0 = built-in, 1..3 = user-loaded). */
-  signerKeyId: z.number().int().min(0).max(3),
+  signerKeyId: z.union([z.number().int().min(0).max(3), z.literal(0x80)]),
 }).strict()
 
 /** x402 v2 SVM exact PaymentRequirements needed for device-verifiable payTo. */
@@ -208,10 +208,12 @@ export const SolanaSignRequest = z.object({
   address_n: z.array(z.number().int()).optional(),
   addressNList: z.array(z.number().int()).optional(),
   raw_tx: z.string().min(1),
-  /** Transaction-bound ClearSign metadata. Partial descriptors are rejected. */
-  swapMetadata: SolanaSwapMetadata.optional(),
+  /** Transaction-bound LUT account proof. Omitted for self-contained messages. */
+  lutProof: SolanaLutProof.optional(),
   /** Reusable, signer-attested instruction schema. Partial schemas rejected. */
   schema: SolanaInstructionSchema.optional(),
+  /** 139-byte KeepKey root certificate (hex or base64). */
+  certificate: z.string().min(1).optional(),
   /**
    * Optional x402 PaymentRequirements. Vault cross-checks these fields against
    * the signed zero-LUT v0 bytes before forwarding device display metadata.
@@ -219,7 +221,22 @@ export const SolanaSignRequest = z.object({
   x402: SolanaX402Requirements.optional(),
   // One-shot opaque-signing consent is intentionally not part of the public
   // REST contract. Unknown fields are stripped; the Vault UI grants consent.
-}).strip()
+}).strip().refine(
+  (v) => {
+    const signerIds = [v.lutProof?.signerKeyId, v.schema?.signerKeyId]
+      .filter((id): id is number => id !== undefined)
+    const certified = signerIds.some(id => id === 0x80)
+    const runtime = signerIds.some(id => id !== 0x80)
+    return !runtime || !certified
+  },
+  { message: 'runtime and root-certified Solana signer IDs cannot be mixed' },
+).refine(
+  (v) => {
+    const certified = v.lutProof?.signerKeyId === 0x80 || v.schema?.signerKeyId === 0x80
+    return certified === (v.certificate !== undefined)
+  },
+  { message: 'certificate is required exactly when lutProof or schema uses signerKeyId 0x80' },
+)
 
 /** POST /tron/sign-transaction — sign a raw Tron transaction */
 export const TronSignRequest = z.object({

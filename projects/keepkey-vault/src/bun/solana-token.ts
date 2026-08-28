@@ -51,6 +51,50 @@ function formatTokenBaseUnits(value: bigint, decimals: number): string {
   return fraction ? `${whole}.${fraction}` : whole
 }
 
+/** Lamports per SOL. Native SOL is always 9 decimals — it is not a mint and
+ *  has no on-chain decimals field to read. */
+export const SOLANA_NATIVE_DECIMALS = 9
+
+/**
+ * Direct, indexer-independent NATIVE SOL balance lookup.
+ *
+ * The SPL version below only answers for a mint. A swap whose destination is
+ * native SOL (`solana:<net>/slip44:501`) has no mint, so it had no direct
+ * confirmation path at all and fell back entirely to Pioneer's portfolio
+ * indexer — which lags a completed swap by seconds to minutes. The dashboard
+ * kept showing the pre-swap balance across refreshes with nothing to say why.
+ */
+export async function getSolanaNativeBalance(
+  owner: string,
+  endpoint: string = DEFAULT_SOLANA_RPC_ENDPOINT,
+  fetchImpl: typeof fetch = fetch,
+): Promise<SolanaTokenBalance> {
+  const res = await fetchImpl(endpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'getBalance',
+      params: [owner, { commitment: 'confirmed' }],
+    }),
+    signal: AbortSignal.timeout(8000),
+  })
+  if (!res.ok) throw new Error(`Solana RPC balance lookup failed (${res.status})`)
+  const body = await res.json() as { error?: { message?: string }; result?: { value?: number } }
+  if (body.error) throw new Error(body.error.message || 'Solana RPC balance lookup failed')
+  const lamports = body.result?.value
+  // A funded-but-empty account legitimately reports 0. `undefined` means the
+  // node did not answer the question — never report that as an empty wallet.
+  if (typeof lamports !== 'number' || !Number.isFinite(lamports)) {
+    throw new Error('Solana RPC returned no balance value')
+  }
+  return {
+    amount: formatTokenBaseUnits(BigInt(lamports), SOLANA_NATIVE_DECIMALS),
+    decimals: SOLANA_NATIVE_DECIMALS,
+  }
+}
+
 /**
  * Direct, indexer-independent SPL balance lookup used after a swap completes.
  * An owner can have multiple token accounts for one mint, so sum raw base units

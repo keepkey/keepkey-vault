@@ -11,12 +11,20 @@
 import { CHAINS, supportedBtcScriptTypes, btcAccountPath, evmAddressPath } from '../shared/chains'
 import type { ChainDef } from '../shared/chains'
 import type { SwapAsset, SwapQuote, SwapQuoteParams, ExecuteSwapParams, SwapResult } from '../shared/types'
-import { SOLANA_BLIND_SIGNING_REQUIRED } from '../shared/types'
+import { SOLANA_BLIND_SIGNING_REQUIRED, evmAdvancedModeRequiredMessage } from '../shared/types'
 import { toDeviceError, deviceErrorMessage } from '../shared/device-error'
 import { findEvmSchema } from './evm-schema-registry'
+import { findCertifiedEvmEnvelope } from './evm-certified-registry'
+import { isCertifiedEvmMetadata } from './evm-certified-schema'
+import { firmwareClearSigns } from './calldata-decoder'
 import { findSolanaSchema } from './solana-schema-registry'
+import { findCertifiedSolanaProof } from './solana-certified-registry'
+import {
+  hasCompleteCertifiedSolanaEnvelope,
+  supportsCertifiedClearSign,
+} from './solana-certified-policy'
 import { getPioneer } from './pioneer'
-import { encodeDepositWithExpiry, encodeApprove, parseUnits, toHex } from './txbuilder/evm'
+import { encodeDepositWithExpiry, encodeApprove, parseUnits, toHex, readPioneerBalance } from './txbuilder/evm'
 import { getEvmGasPrice, getEvmFeeData, getEvmNonce, getEvmBalance, getErc20Allowance, getErc20Balance, getErc20Decimals, broadcastEvmTx, EvmSignerVerificationError, waitForTxReceipt, estimateGas } from './evm-rpc'
 import * as txb from './txbuilder'
 import { normalizeBchAddress } from './txbuilder'
@@ -552,6 +560,8 @@ export interface SwapContext {
    *  Returns undefined when unknown (no cached features / policy not reported).
    *  Used to gate Solana swaps, which can only blind-sign. */
   isAdvancedModeEnabled?: () => boolean | undefined
+  /** Connected device firmware. Certified ClearSign authority starts at 7.16. */
+  getFirmwareVersion?: () => string | undefined
   /** User's configured Solana RPC, for the host-side outflow check. */
   getSolanaRpcEndpoint?: () => string | undefined
   /** Durable ClearSign evidence sink owned by Vault (no-op for callers that do not persist). */
@@ -674,7 +684,54 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
       // findSolanaSchema declines when the message still carries lookup
       // tables, since firmware will not apply a schema to accounts that are
       // absent from the signed bytes.
-      const solSchema = findSolanaSchema(params.relayTx.serializedTx)
+      // A schema the device CANNOT verify is worse than no schema at all.
+      // Firmware fails the whole request ("Invalid Solana instruction schema",
+      // fsm_msg_solana.h:803) and deliberately never degrades to blind signing:
+      // "Present-but-invalid schema material fails the request". Verification
+      // needs a signer loaded in RAM, and loaded signers are only honoured with
+      // AdvancedMode on -- so with AdvancedMode known-off it is a GUARANTEED
+      // hard reject, worded as if the transaction were malformed.
+      //
+      // Dropping it here routes into the opaque-consent path below, which asks
+      // the user to opt in. Perverse otherwise: a route WITHOUT a schema works
+      // (consent -> blind sign) while a route WITH one dies.
+      // The certified signer understands both real Relay shapes: v0 messages
+      // with address-table entries receive schema + LUT proof + certificate;
+      // self-contained legacy/v0 messages receive schema + certificate only.
+      // A routine catalog miss or unavailable service falls through to the
+      // existing runtime-schema/explicit-consent path.
+      let certifiedProof: Awaited<ReturnType<typeof findCertifiedSolanaProof>> = undefined
+      const firmwareVersion = ctx.getFirmwareVersion?.()
+      if (supportsCertifiedClearSign(firmwareVersion)) {
+        try {
+          certifiedProof = await findCertifiedSolanaProof(
+            params.relayTx.serializedTx,
+            'relayDepositNative',
+          )
+        } catch (err: any) {
+          swapLog(`${TAG} certified Solana ClearSign proof unavailable: ${err?.message || err}`)
+        }
+      } else {
+        swapLog(`${TAG} certified Solana ClearSign skipped: firmware ${firmwareVersion || 'unknown'} < 7.16.0`)
+      }
+      if (certifiedProof) {
+        const shape = certifiedProof.lutProof
+          ? `${certifiedProof.lutProof.accounts.length} LUT accounts`
+          : 'self-contained message (no LUT proof)'
+        swapLog(`${TAG} certified Solana ClearSign proof attached: ${shape}`)
+      }
+
+      const solSchemaAvailable = findSolanaSchema(params.relayTx.serializedTx)
+      // Withheld in two cases: AdvancedMode off (verification cannot succeed --
+      // loaded signers are only honoured with it on), and after the user has
+      // explicitly consented to blind signing (re-attaching would refuse again
+      // and loop).
+      const solSchema = (certifiedProof || ctx.isAdvancedModeEnabled?.() === false || params.allowSolanaBlindSigning === true)
+        ? undefined
+        : solSchemaAvailable
+      if (solSchemaAvailable && !solSchema && !certifiedProof) {
+        swapLog(`${TAG} clear-sign schema withheld: AdvancedMode is off, the device could not verify it`)
+      }
       if (solSchema) {
         swapLog(`${TAG} clear-sign schema attached: ${solSchema.program}/${solSchema.instruction} (keyId=${solSchema.signerKeyId})`)
       }
@@ -682,7 +739,13 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
         addressNList: fromChain.defaultPath,
         rawTx: params.relayTx.serializedTx,
         allowBlindSigning: params.allowSolanaBlindSigning === true,
-        swapMetadata: params.relayTx.solanaSwapMetadata,
+        ...(certifiedProof
+          ? {
+              ...(certifiedProof.lutProof ? { lutProof: certifiedProof.lutProof } : {}),
+              schema: certifiedProof.schema,
+              certificate: certifiedProof.certificate,
+            }
+          : {}),
         ...(solSchema
           ? { schema: { payload: solSchema.payload, signature: solSchema.signature, signerKeyId: solSchema.signerKeyId } }
           : {}),
@@ -896,23 +959,22 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
     unsignedTx = buildResult.unsignedTx
   }
 
-  // Prebuilt Relay Solana payloads currently use a custom program plus
-  // lookup-table accounts. Without a transaction-bound ClearSign descriptor the
-  // device must classify that exact route as opaque. Ask for explicit one-shot
-  // consent before the hardware prompt, but do not block other Solana or v0
-  // transactions that firmware can natively ClearSign.
+  // Prebuilt Relay Solana payloads use a custom program. Some real routes are
+  // self-contained v0 messages; others resolve accounts through lookup tables.
+  // Without a complete certified envelope (or a usable runtime schema), the
+  // device must classify the route as opaque. Ask for explicit one-shot consent
+  // before the hardware prompt, but do not block transactions firmware can
+  // natively ClearSign.
   const needsOpaqueSolanaFallback =
     fromChain.chainFamily === 'solana' &&
     !!params.relayTx?.serializedTx &&
-    !params.relayTx.solanaSwapMetadata &&
+    !hasCompleteCertifiedSolanaEnvelope(unsignedTx) &&
     // A reusable schema lets the device read this instruction, so no
     // blind-sign consent is needed.
-    !findSolanaSchema(params.relayTx.serializedTx)
-  if (
-    needsOpaqueSolanaFallback &&
-    ctx.isAdvancedModeEnabled?.() !== true &&
-    params.allowSolanaBlindSigning !== true
-  ) {
+    // Must mirror the attach decision above: a schema we withheld is not a
+    // schema the device will use, so the opaque path still applies.
+    !(ctx.isAdvancedModeEnabled?.() !== false && findSolanaSchema(params.relayTx.serializedTx))
+  const buildSolanaBlindSignRequirement = async (): Promise<Error> => {
     // The device can't verify this transaction, so check it here instead:
     // simulate against an independent RPC and report what actually leaves the
     // wallet. This catches a quote server that built a transaction differing
@@ -1001,9 +1063,49 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
     } catch (e: any) {
       swapLog(`${TAG} outflow check failed: ${e?.message}`)
     }
-    throw new Error(outflow
+    return new Error(outflow
       ? `${SOLANA_BLIND_SIGNING_REQUIRED} ${outflow}`
       : SOLANA_BLIND_SIGNING_REQUIRED)
+  }
+  if (
+    needsOpaqueSolanaFallback &&
+    ctx.isAdvancedModeEnabled?.() !== true &&
+    params.allowSolanaBlindSigning !== true
+  ) {
+    throw await buildSolanaBlindSignRequirement()
+  }
+
+  // Same shape as the Solana gate above, for EVM contract calls the firmware
+  // cannot decode (relay/aggregator routes are the common case — they are not
+  // in the device's pinned allowlist, see firmwareClearSigns).
+  //
+  // Clear-signing is NOT an alternative here today. Metadata verification needs
+  // a runtime-loaded signer, and loading one ALSO requires AdvancedMode
+  // (firmware fsm_msg_ethereum.h + signed_metadata.c); there is no built-in
+  // trust anchor yet — docs/security/clearsign-key-delegation-roadmap.md tracks
+  // the delegation work that would remove this requirement.
+  //
+  // Without this check the device renders "Blocked", replies ActionCancelled,
+  // and hdwallet's transport (transport.ts) constructs a bare
+  // `new core.ActionCancelled()` that DISCARDS the firmware's reason string
+  // ("Blind signing disabled by policy"). The user is then shown a generic
+  // "Action cancelled" — indistinguishable from having pressed Cancel — for a
+  // policy refusal they were never told about. Check before we prompt, so the
+  // message names the actual blocker.
+  if (
+    fromChain.chainFamily === 'evm' &&
+    typeof unsignedTx?.data === 'string' && unsignedTx.data.length > 2 &&
+    !firmwareClearSigns(unsignedTx.to, unsignedTx.data, Number(unsignedTx.chainId)) &&
+    !isCertifiedEvmMetadata(unsignedTx.txMetadata) &&
+    // Only when we KNOW it is off. `undefined` means the policy was not
+    // reported (no cached features), and guessing would block a swap the
+    // device would have signed.
+    ctx.isAdvancedModeEnabled?.() === false
+  ) {
+    swapLog(`${TAG} EVM blind-sign gate: to=${unsignedTx.to} selector=${String(unsignedTx.data).slice(0, 10)} — AdvancedMode is off`)
+    // Message content is load-bearing: SwapDialog routes on /AdvancedMode/i to
+    // the opt-in panel instead of a dead error. See evmAdvancedModeRequiredMessage.
+    throw new Error(evmAdvancedModeRequiredMessage(fromChain.coin))
   }
 
   // 4. Sign on device (user confirms tx details on hardware wallet)
@@ -1034,14 +1136,46 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
     swapper: params.swapper,
   } : undefined
   let clearSignSentToDevice = false
+  const signOnDevice = (tx: any) => wrapSign(
+    () => {
+      clearSignSentToDevice = true
+      return txb.signTx(wallet, fromChain, tx)
+    },
+    { operation: 'swap', chain: fromChain.coin, to: params.inboundAddress, value: params.amount, memo: params.memo },
+  )
   try {
-    signedTx = await wrapSign(
-      () => {
-        clearSignSentToDevice = true
-        return txb.signTx(wallet, fromChain, unsignedTx)
-      },
-      { operation: 'swap', chain: fromChain.coin, to: params.inboundAddress, value: params.amount, memo: params.memo },
-    )
+    try {
+      signedTx = await signOnDevice(unsignedTx)
+    } catch (e: any) {
+      // The device refused the SCHEMA, not the transaction.
+      //
+      // Predicting whether it can verify our schema is unwinnable: it needs a
+      // signer loaded in RAM, Vault does not track which are loaded, and both
+      // that and AdvancedMode die on power cycle. Worse, gating on AdvancedMode
+      // alone inverts — turning AdvancedMode ON re-enables attachment, so the
+      // user fixes one refusal and immediately earns another.
+      //
+      // So stop predicting and react. Firmware validates schema material BEFORE
+      // it draws any confirm screen (fsm_msg_solana.h), so this failure cost the
+      // user nothing and they saw nothing. Drop the schema and sign the very
+      // same bytes the ordinary way. The schema was only ever an enhancement —
+      // better screens — and must never be the reason a swap cannot proceed.
+      if (unsignedTx?.schema && /Invalid Solana instruction schema/i.test(deviceErrorMessage(e))) {
+        // Do NOT silently re-sign without the schema. Dropping it means this
+        // transaction gets blind-signed, and the opaque-consent panel exists to
+        // show the user what it actually moves (host-side outflow simulation)
+        // before that happens. Skipping straight past it would trade a gate for
+        // a silent downgrade, which is worse.
+        //
+        // Ask instead. On the retry params.allowSolanaBlindSigning is true,
+        // which suppresses schema attachment above -- otherwise the schema would
+        // be re-attached, refused again, and the flow would loop.
+        swapLog(`${TAG} device refused the clear-sign schema — checking outflow before requesting blind-sign consent`)
+        throw await buildSolanaBlindSignRequirement()
+      } else {
+        throw e
+      }
+    }
     if (clearSignMaterial) onClearSignEvent?.({
       outcome: 'signed', chain: fromChain.coin, ...clearSignMaterial,
       keyId: Number.isInteger(clearSignMaterial.keyId) ? clearSignMaterial.keyId : undefined,
@@ -1472,8 +1606,7 @@ async function buildRelaySwapTx(
     try {
       const pioneer = await getPioneer()
       const bd = await pioneer.GetBalanceAddressByNetwork({ networkId: fromChain.networkId, address: fromAddress })
-      const balStr = String(bd?.data?.nativeBalance || bd?.data?.balance || '0')
-      nativeBalance = parseUnits(balStr, fromChain.decimals)
+      nativeBalance = parseUnits(readPioneerBalance(bd, fromAddress), fromChain.decimals)
     } catch (e: any) {
       console.warn(`${TAG} Failed to fetch native balance via Pioneer for relay tx: ${e.message}`)
     }
@@ -1617,7 +1750,8 @@ async function buildRelaySwapTx(
   // calldata it is about to sign — turning a blind-sign prompt into a labelled
   // review. Absent or mismatched: nothing is attached and behaviour is
   // unchanged, so this can never block a swap.
-  const evmSchema = findEvmSchema(chainId, relay.to, relay.data)
+  const certifiedEvmSchema = await findCertifiedEvmEnvelope(chainId, relay.to, relay.data)
+  const evmSchema = certifiedEvmSchema || findEvmSchema(chainId, relay.to, relay.data)
   if (evmSchema) {
     unsignedTx.txMetadata = { signedPayload: evmSchema.signedPayload, keyId: evmSchema.keyId }
     swapLog(`${TAG} clear-sign schema attached: ${evmSchema.method} (keyId=${evmSchema.keyId})`)
@@ -1792,19 +1926,26 @@ async function buildEvmSwapTx(
     throw new Error(`Failed to fetch nonce for ${fromAddress} on ${fromChain.id} — cannot safely build swap transaction`)
   }
 
-  let nativeBalance = 0n
+  // A failed balance fetch is NOT a zero balance. Try RPC, then Pioneer, then
+  // give up loudly — defaulting to 0n produced "Insufficient ETH: need 1.65,
+  // have 0" on funded accounts whenever the public RPC hiccuped. Same posture
+  // as buildRelaySwapTx.
+  let nativeBalance: bigint | undefined
   if (rpcUrl) {
     try { nativeBalance = await getEvmBalance(rpcUrl, fromAddress) } catch (e: any) {
       console.warn(`${TAG} Failed to fetch native balance via RPC: ${e.message}`)
     }
-  } else {
+  }
+  if (nativeBalance === undefined) {
     try {
       const bd = await pioneer.GetBalanceAddressByNetwork({ networkId: fromChain.networkId, address: fromAddress })
-      const balStr = String(bd?.data?.nativeBalance || bd?.data?.balance || '0')
-      nativeBalance = parseUnits(balStr, 18)
+      nativeBalance = parseUnits(readPioneerBalance(bd, fromAddress), fromChain.decimals)
     } catch (e: any) {
       console.warn(`${TAG} Failed to fetch balance via Pioneer: ${e.message}`)
     }
+  }
+  if (nativeBalance === undefined) {
+    throw new Error(`Unable to verify ${fromChain.symbol} balance for ${fromAddress} — refusing to build the swap. Check your connection and try again.`)
   }
 
   let approvalTxid: string | undefined

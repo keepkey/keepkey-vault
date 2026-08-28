@@ -50,17 +50,13 @@ let cachedReleaseBlock: number | null = null
  *
  * Throws if the binary cannot be found anywhere.
  */
-function getBinaryPath(): string {
-	// Allow explicit override
-	if (process.env.ZCASH_CLI_BIN && existsSync(process.env.ZCASH_CLI_BIN)) {
-		return process.env.ZCASH_CLI_BIN
-	}
-
+function getBinaryCandidates(): string[] {
 	// On Windows, Rust produces zcash-cli.exe
 	const isWin = process.platform === "win32"
 	const bin = isWin ? "zcash-cli.exe" : "zcash-cli"
 
 	const candidates: string[] = []
+	if (process.env.ZCASH_CLI_BIN) candidates.push(process.env.ZCASH_CLI_BIN)
 
 	// 1. cwd-relative (works if cwd is the project root)
 	const cwdRoot = process.cwd()
@@ -87,17 +83,29 @@ function getBinaryPath(): string {
 	// 5. Fallback: walk further up in case bundle structure differs
 	const appBundleDir = resolve(import.meta.dir, "..", "..", "..")
 	candidates.push(join(appBundleDir, bin))
+	return candidates
+}
 
-	console.log(`[zcash-sidecar] Searching for binary (cwd=${cwdRoot}, import.meta.dir=${import.meta.dir})`)
+/** Resolve the sidecar without throwing. Release capability checks use this
+ * before advertising Orchard support; an x64 macOS bundle intentionally has
+ * no sidecar and must degrade to transparent Zcash instead of exposing a
+ * privacy-engine button that can only fail. */
+export function findZcashCliBinary(): string | undefined {
+	return getBinaryCandidates().find(p => existsSync(p))
+}
+
+function getBinaryPath(): string {
+	const candidates = getBinaryCandidates()
+
+	console.log(`[zcash-sidecar] Searching for binary (cwd=${process.cwd()}, import.meta.dir=${import.meta.dir})`)
 	for (const p of candidates) {
 		console.log(`[zcash-sidecar]   ${existsSync(p) ? 'FOUND' : 'miss'}: ${p}`)
 	}
 
-	for (const p of candidates) {
-		if (existsSync(p)) {
-			console.log(`[zcash-sidecar] Found binary: ${p}`)
-			return p
-		}
+	const found = findZcashCliBinary()
+	if (found) {
+		console.log(`[zcash-sidecar] Found binary: ${found}`)
+		return found
 	}
 
 	const searched = candidates.map(p => `  - ${p}`).join("\n")

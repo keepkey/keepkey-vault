@@ -26,6 +26,7 @@ const RUNE     = 'cosmos:thorchain-mainnet-v1/slip44:931'
 const MONAD    = 'eip155:99999/slip44:60'  // truly-unknown EVM (Monad mainnet eip155:143 is now supported)
 const TRON     = 'tron:27Lqcw/slip44:195'
 const TON      = 'ton:-239/slip44:607'
+const ROBINHOOD = 'eip155:4663/slip44:60'
 
 describe('assessAvailability — natives', () => {
   test('BTC native is swappable on THORChain + Mayachain + ChainFlip', () => {
@@ -81,6 +82,13 @@ describe('assessAvailability — natives', () => {
   test('Monad mainnet (eip155:143) → swappable via Relay + ShapeShift', () => {
     // Verified live 2026-05 by probing pioneer-server's /quote endpoint.
     const a = assessAvailability('eip155:143/slip44:60')
+    expect(a.status).toBe('swappable')
+    expect(a.providers).toContain('relay')
+    expect(a.providers).toContain('shapeshift')
+  })
+
+  test('Robinhood Chain native ETH → swappable via Relay + ShapeShift', () => {
+    const a = assessAvailability(ROBINHOOD)
     expect(a.status).toBe('swappable')
     expect(a.providers).toContain('relay')
     expect(a.providers).toContain('shapeshift')

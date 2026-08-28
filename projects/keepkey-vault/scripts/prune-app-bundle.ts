@@ -450,6 +450,26 @@ if (existsSync(infoPlistPath)) {
   }
 }
 
+// Emulator releases are a two-architecture contract: CI converts this arm64
+// app archive into the Intel archive later, so a thin dylib here would produce
+// an Intel app that installs successfully but fails at dlopen time.
+const bundledEmulator = join(resourcesDir, 'app', 'emulator', 'libkkemu.dylib')
+if (!existsSync(bundledEmulator)) {
+  console.error(`[prune-bundle] ERROR: bundled 7.16 emulator missing: ${bundledEmulator}`)
+  process.exit(1)
+}
+const emuArchs = Bun.spawnSync(['lipo', '-archs', bundledEmulator])
+if (emuArchs.exitCode !== 0) {
+  console.error(`[prune-bundle] ERROR: cannot inspect bundled emulator: ${emuArchs.stderr.toString()}`)
+  process.exit(1)
+}
+const emuArchText = emuArchs.stdout.toString().trim()
+if (!emuArchText.includes('arm64') || !emuArchText.includes('x86_64')) {
+  console.error(`[prune-bundle] ERROR: bundled emulator is not universal: ${emuArchText}`)
+  process.exit(1)
+}
+console.log(`[prune-bundle] Verified bundled emulator architectures: ${emuArchText}`)
+
 // Re-sign native binaries after pruning (signatures may have been invalidated)
 const DEVELOPER_ID = process.env.ELECTROBUN_DEVELOPER_ID
 const TEAM_ID = process.env.ELECTROBUN_TEAMID
@@ -474,7 +494,7 @@ if (DEVELOPER_ID && TEAM_ID) {
       }
     } catch {}
   }
-  signBinaries(nmDir)
+  signBinaries(resourcesDir)
   console.log(`[prune-bundle] Re-signed ${signedCount} native binaries`)
 }
 

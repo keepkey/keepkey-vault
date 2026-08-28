@@ -1,0 +1,38 @@
+{
+  "version": "7.16.0",
+  "source": {
+    "repository": "keepkey/keepkey-vault",
+    "runId": 33047449262,
+    "headSha": "7f802ba261fadebe71ee794042d0ac89d564a82d",
+    "artifactId": 9636414855,
+    "artifactName": "keepkey-vault-macos-7f802ba261fadebe71ee794042d0ac89d564a82d",
+    "artifactDigest": "sha256:62f2f4a829290552b1f6d45260644f9e6227ff3bac9d4ff2af51098db9d3112d",
+    "macArchive": "stable-macos-x64-keepkey-vault.app.tar.zst",
+    "macLibraryPath": "keepkey-vault.app/Contents/Resources/app/emulator/libkkemu.dylib",
+    "windowsLibrary": "emulator-build-input-libkkemu-7.16.0-win-x64.dll"
+  },
+  "files": {
+    "libkkemu.dylib": {
+      "sha256": "4494fb6494a9340f6bf7eec9920fdafcd48ab9f8839e9ef2b60238ff336e55a3",
+      "architectures": ["arm64", "x86_64"]
+    },
+    "libkkemu.dll": {
+      "sha256": "611d6b51427c0d22eaac568ebc10405bab353e60805205000f808466f0ea5354",
+      "architecture": "x86_64"
+    }
+  },
+  "requiredSymbols": [
+    "kkemu_init",
+    "kkemu_shutdown",
+    "kkemu_write",
+    "kkemu_read",
+    "kkemu_poll",
+    "kkemu_is_running",
+    "kkemu_pop_frame",
+    "kkemu_start",
+    "kkemu_stop",
+    "kkemu_lock",
+    "kkemu_unlock",
+    "kkemu_trylock"
+  ]
+}

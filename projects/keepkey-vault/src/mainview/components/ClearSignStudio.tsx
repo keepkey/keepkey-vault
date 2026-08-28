@@ -35,8 +35,8 @@ const ARG_TYPES: Array<{ value: ClearSignSolanaArgType; label: string; width: st
 	{ value: "opaque32", label: "Opaque 32", width: "32B" },
 ]
 
-type StudioTab = "author" | "signer" | "evidence"
-type BusyAction = "identity" | "build" | "inspect" | "attest" | "load" | "history" | ""
+type StudioTab = "author" | "provider" | "signer" | "evidence"
+type BusyAction = "identity" | "build" | "inspect" | "attest" | "load" | "history" | "bip85" | "derive" | ""
 
 type Attestation = {
 	payload: string
@@ -123,6 +123,10 @@ export function ClearSignStudio({ open, onClose, advancedMode, firmwareVersion }
 	const [history, setHistory] = useState<ClearSignEvent[]>([])
 	const [historyFilter, setHistoryFilter] = useState<"all" | "signed" | "blocked">("all")
 	const [expandedEvent, setExpandedEvent] = useState<string | null>(null)
+	const [wordCount, setWordCount] = useState<12 | 18 | 24>(12)
+	const [bip85Index, setBip85Index] = useState(0)
+	const [childMnemonic, setChildMnemonic] = useState("")
+	const [providerKey, setProviderKey] = useState<{ publicKeyHex: string; fingerprint: string; filePath: string } | null>(null)
 	const [busy, setBusy] = useState<BusyAction>("")
 	const [error, setError] = useState("")
 	const [notice, setNotice] = useState("")
@@ -254,6 +258,40 @@ export function ClearSignStudio({ open, onClose, advancedMode, firmwareVersion }
 		}
 	}, [alias, publicKeyInput, refreshHistory, slot])
 
+	const showChildSeed = useCallback(async () => {
+		setBusy("bip85")
+		setError("")
+		setNotice("")
+		try {
+			await rpcRequest("getBip85Mnemonic", { wordCount, index: bip85Index }, 0)
+			setNotice(`Look at your KeepKey: the ${wordCount}-word child seed for index ${bip85Index} is on screen. Type it below, then let the screen clear.`)
+		} catch (cause: any) {
+			setError(cause?.message || String(cause))
+		} finally {
+			setBusy("")
+		}
+	}, [bip85Index, wordCount])
+
+	const deriveProvider = useCallback(async () => {
+		setBusy("derive")
+		setError("")
+		setNotice("")
+		try {
+			const result = await rpcRequest<{ publicKeyHex: string; fingerprint: string; filePath: string }>(
+				"clearsignDeriveProviderKey",
+				{ childMnemonic, alias, wordCount, index: bip85Index },
+			)
+			setProviderKey(result)
+			setChildMnemonic("")
+			setNotice(`Provider key ${result.fingerprint} written to ${result.filePath}. The words are cleared from this screen.`)
+		} catch (cause: any) {
+			setProviderKey(null)
+			setError(cause?.message || String(cause))
+		} finally {
+			setBusy("")
+		}
+	}, [alias, bip85Index, childMnemonic, wordCount])
+
 	const copy = useCallback(async (name: string, value: string) => {
 		if (await copyText(value)) {
 			setCopied(name)
@@ -298,9 +336,9 @@ export function ClearSignStudio({ open, onClose, advancedMode, firmwareVersion }
 				</Flex>
 
 				<Flex px={{ base: "4", md: "6" }} py="2.5" gap="2" borderBottom="1px solid var(--line)" bg="rgba(0,0,0,0.10)" overflowX="auto">
-					{(["author", "signer", "evidence"] as StudioTab[]).map(value => (
+					{(["author", "provider", "signer", "evidence"] as StudioTab[]).map(value => (
 						<Button key={value} size="sm" variant={tab === value ? "solid" : "ghost"} bg={tab === value ? "var(--gold)" : undefined} color={tab === value ? "#15110a" : "var(--text-1)"} onClick={() => setTab(value)}>
-							{value === "author" ? "Author & attest" : value === "signer" ? "Load identity" : `Evidence (${history.length})`}
+							{value === "author" ? "Author & attest" : value === "provider" ? "Create provider key" : value === "signer" ? "Load identity" : `Evidence (${history.length})`}
 						</Button>
 					))}
 				</Flex>
@@ -391,6 +429,32 @@ export function ClearSignStudio({ open, onClose, advancedMode, firmwareVersion }
 										{attestation && <Flex gap="2" mt="3"><Button flex="1" size="xs" variant="outline" borderColor="var(--line)" onClick={() => copy("bundle", signedBundle)}>{copied === "bundle" ? "Copied" : "Copy signed bundle"}</Button><Button flex="1" size="xs" variant="ghost" color="var(--gold)" onClick={() => setTab("signer")}>Load this identity →</Button></Flex>}
 									</Box>
 								</VStack>
+							</Flex>
+						)}
+
+						{tab === "provider" && (
+							<Flex gap="4" direction={{ base: "column", lg: "row" }}>
+								<Box flex="1" p="4" borderRadius="14px" bg="var(--ink-0)" border="1px solid var(--line)">
+									<Text fontSize="12px" fontWeight="700" color="var(--text-0)">1 · Derive a child seed on the device</Text>
+									<Text fontSize="11px" color="var(--text-2)" mt="1">BIP-85 gives no custody: the key ends up hot inside a live service. What it gives is a ceremony you can repeat and audit from device + index instead of a key file of unexplained origin.</Text>
+									<Box mt="3"><FieldLabel hint="shown on device when the signer is loaded">Provider alias</FieldLabel><Input value={alias} onChange={event => { setAlias(event.target.value); setProviderKey(null) }} maxLength={31} size="sm" bg="rgba(0,0,0,0.18)" /></Box>
+									<Flex gap="1" align="center" mt="3"><Text fontSize="10px" color="var(--text-2)" mr="2">Words</Text>{([12, 18, 24] as const).map(value => <Button key={value} size="xs" minW="38px" variant={wordCount === value ? "solid" : "outline"} bg={wordCount === value ? "var(--gold)" : undefined} color={wordCount === value ? "#15110a" : "var(--text-1)"} onClick={() => { setWordCount(value); setProviderKey(null) }}>{value}</Button>)}</Flex>
+									<Box mt="3"><FieldLabel hint="same index always re-derives the same key">Index</FieldLabel><Input type="number" min={0} value={bip85Index} onChange={event => { setBip85Index(Math.max(0, Number(event.target.value) || 0)); setProviderKey(null) }} size="sm" w="140px" bg="rgba(0,0,0,0.18)" /></Box>
+									<Button mt="4" w="full" size="sm" variant="outline" borderColor="var(--line)" onClick={showChildSeed} loading={busy === "bip85"} disabled={!!busy}>Show child seed on device</Button>
+									<Text fontSize="10px" color="var(--text-2)" mt="3">The words are displayed on the KeepKey screen only — they never cross USB. Read them off the device and type them below.</Text>
+								</Box>
+
+								<Box flex="1" p="4" borderRadius="14px" bg="var(--ink-0)" border="1px solid var(--line)">
+									<Text fontSize="12px" fontWeight="700" color="var(--text-0)">2 · Type the words back</Text>
+									<Text fontSize="11px" color="var(--text-2)" mt="1">A typo fails the BIP-39 checksum rather than deriving a plausible key whose fingerprint never matches any device.</Text>
+									<Box mt="3"><FieldLabel hint="12, 18 or 24 words">BIP-85 child mnemonic</FieldLabel><Textarea value={childMnemonic} onChange={event => { setChildMnemonic(event.target.value); setProviderKey(null) }} rows={4} fontSize="11px" bg="rgba(0,0,0,0.18)" spellCheck={false} autoComplete="off" /></Box>
+									<Button mt="3" w="full" size="sm" bg="var(--gold)" color="#15110a" onClick={deriveProvider} loading={busy === "derive"} disabled={!!busy || !childMnemonic.trim() || !alias.trim()}>Derive provider key</Button>
+									<Box mt="3" p="3" bg="rgba(255,255,255,0.025)" borderRadius="10px"><VStack align="stretch" gap="2"><ResultRow label="Fingerprint" value={providerKey?.fingerprint} /><ResultRow label="Public key" value={providerKey ? shortHex(providerKey.publicKeyHex) : undefined} /><ResultRow label="Key file" value={providerKey?.filePath} /></VStack></Box>
+									{providerKey && <>
+										<Text fontSize="10px" color="var(--gold)" mt="3">The key file holds a live signing key in plaintext. It can mislabel what a transaction appears to do under this alias; it can never conceal one, and never removes the raw review.</Text>
+										<Flex gap="2" mt="3"><Button flex="1" size="xs" variant="outline" borderColor="var(--line)" onClick={() => copy("providerKey", providerKey.publicKeyHex)}>{copied === "providerKey" ? "Copied" : "Copy public key"}</Button><Button flex="1" size="xs" variant="ghost" color="var(--gold)" onClick={() => { setPublicKeyInput(providerKey.publicKeyHex); setIdentity({ publicKey: providerKey.publicKeyHex, fingerprint: providerKey.fingerprint }); setLoaded(false); setTab("signer") }}>Load this identity →</Button></Flex>
+									</>}
+								</Box>
 							</Flex>
 						)}
 

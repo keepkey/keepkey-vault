@@ -22,7 +22,7 @@ include .env
 export ELECTROBUN_DEVELOPER_ID ELECTROBUN_TEAMID ELECTROBUN_APPLEID ELECTROBUN_APPLEIDPASS
 endif
 
-.PHONY: install dev dev-hmr build build-stable build-canary build-signed prune-bundle dmg clean help vault sign-check verify verify-entitlements publish release upload-dmg upload-all-dmgs sign-release sign-release-intel verify-arch submodules modules-install modules-build modules-clean audit build-zcash-cli build-zcash-cli-debug build-zcash-cli-intel test test-unit test-rest test-sign-gating test-zcash-cli test-emu build-intel build-signed-intel build-electrobun-x64-core publish-electrobun-x64-core build-electrobun-linux-x64-core publish-electrobun-linux-x64-core preflight build-emulator build-emulator-windows clean-emulator test-emu-python
+.PHONY: install dev dev-hmr build build-stable build-canary build-signed prune-bundle dmg clean help vault sign-check verify verify-entitlements publish release upload-dmg upload-all-dmgs sign-release sign-release-intel verify-arch submodules modules-install modules-build modules-clean audit build-zcash-cli build-zcash-cli-debug build-zcash-cli-intel test test-unit test-rest test-sign-gating test-zcash-cli test-emu build-intel build-signed-intel build-electrobun-x64-core publish-electrobun-x64-core build-electrobun-linux-x64-core publish-electrobun-linux-x64-core preflight build-emulator build-emulator-windows build-emulator-macos-release build-emulator-release clean-emulator test-emu-python
 
 # --- Submodules (auto-init on fresh worktrees/clones) ---
 
@@ -31,8 +31,7 @@ $(STAMP_DIR):
 
 $(SUBMODULES_STAMP): .gitmodules | $(STAMP_DIR)
 	@git submodule update --init modules/hdwallet modules/proto-tx-builder modules/device-protocol modules/electrobun
-	@# Fetch Vault runtime/build submodules so upstream-behind checks see latest commits.
-	@# Firmware is emulator-only for Vault releases and is intentionally not a gate here.
+	@# Firmware pinning is outside Vault release scope. Fetch runtime/build modules only.
 	@for mod in modules/hdwallet modules/proto-tx-builder modules/device-protocol modules/electrobun; do \
 		git -C "$$mod" fetch --all --prune 2>/dev/null || true; \
 	done
@@ -306,6 +305,7 @@ prune-bundle:
 #    Clearing the stamps forces modules-build from the pinned source before the vault install copies it.
 build-signed: sign-check
 	@rm -f $(ZCASH_CLI_STAMP) $(PROTO_BUILD_STAMP) $(HDWALLET_BUILD_STAMP) $(DEVICE_PROTOCOL_BUILD_STAMP)
+	@node scripts/verify-certified-emulator.mjs
 	$(MAKE) build-stable audit prune-bundle dmg
 	@echo ""
 	@echo "=== Build complete ==="
@@ -348,8 +348,12 @@ dmg: verify-arch
 test: test-zcash-cli test-unit
 
 test-unit:
-	cd $(PROJECT_DIR) && bun test __tests__/evm-signer-verify.test.ts __tests__/swap-parsing.test.ts __tests__/engine-state-machine.test.ts __tests__/device-switch.test.ts __tests__/wizard-messaging.test.ts __tests__/solana-tx.test.ts __tests__/solana-message-parser.test.ts __tests__/solana-instruction-decoder.test.ts __tests__/solana-alt.test.ts __tests__/solana-spl-decimals.test.ts __tests__/ton-build.test.ts __tests__/tron-memo-inject.test.ts __tests__/audit-coverage.test.ts __tests__/chain-scan.test.ts __tests__/taproot-host.test.ts __tests__/recovery-ownership.test.ts __tests__/evm-x402.test.ts __tests__/solana-x402.test.ts __tests__/patch-electrobun.test.ts src/bun/mcp.test.ts src/bun/rng-audit.test.ts src/shared/zcash-maturity.test.ts src/bun/txbuilder/utxo-zcash.test.ts src/bun/txbuilder/utxo-taproot.test.ts src/bun/txbuilder/hive-ops.test.ts src/bun/clearsign-studio.test.ts src/bun/solana-outflow.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/evm-signer-verify.test.ts __tests__/evm-balance-fetch.test.ts __tests__/swap-parsing.test.ts __tests__/engine-state-machine.test.ts __tests__/device-switch.test.ts __tests__/wizard-messaging.test.ts __tests__/solana-tx.test.ts __tests__/solana-message-parser.test.ts __tests__/solana-instruction-decoder.test.ts __tests__/solana-alt.test.ts __tests__/solana-spl-decimals.test.ts __tests__/ton-build.test.ts __tests__/tron-memo-inject.test.ts __tests__/audit-coverage.test.ts __tests__/chain-scan.test.ts __tests__/pairing-pubkeys.test.ts __tests__/balance-display-state.test.ts __tests__/failed-fetch-not-zero.test.ts __tests__/advanced-mode-routing.test.ts __tests__/clearsign-provider-key.test.ts __tests__/firmware-clearsign-gate.test.ts __tests__/taproot-host.test.ts __tests__/solana-hdwallet-contract.test.ts __tests__/recovery-ownership.test.ts __tests__/evm-x402.test.ts __tests__/solana-x402.test.ts __tests__/patch-electrobun.test.ts src/bun/emulator-library.test.ts src/bun/mcp.test.ts src/bun/rng-audit.test.ts src/shared/zcash-maturity.test.ts src/bun/zcash-capability.test.ts src/bun/zcash-sidecar-path.test.ts src/bun/txbuilder/utxo-zcash.test.ts src/bun/txbuilder/utxo-taproot.test.ts src/bun/txbuilder/hive-ops.test.ts src/bun/clearsign-studio.test.ts src/bun/solana-outflow.test.ts
 	cd $(PROJECT_DIR) && bun src/bun/btc-backend/core.test.ts
+	# Script-style suites (own runner + process.exit — must NOT join the `bun test`
+	# list above, where the exit would cut the run short). cosmos.test.ts was green
+	# but unwired, so its 10 assertions had never guarded a release.
+	cd $(PROJECT_DIR) && bun src/bun/txbuilder/cosmos.test.ts
 
 test-integration: test-rest
 
@@ -403,6 +407,11 @@ test-emu:
 EMU_FW_DIR := modules/keepkey-firmware
 EMU_BUILD_DIR := $(EMU_FW_DIR)/build-emu
 EMU_INSTALL_DIR := $(HOME)/.keepkey/emulator
+# Vault's developer emulator must carry the same alpha ClearSign root as the
+# firmware CI emulator. A rootless build is deliberately fail-closed, but it
+# cannot exercise certified 7.16 flows and otherwise looks healthy until the
+# first certificate reaches the device.
+EMU_CLEARSIGN_ALPHA_ROOT ?= ON
 
 build-emulator:
 	@echo "=== Building emulator from current $(EMU_FW_DIR) checkout ==="
@@ -424,11 +433,14 @@ build-emulator:
 		if [ -x "$$PINNED/protoc" ]; then export PATH="$$PINNED:$$PYBIN:$$NANOPB_DIR/generator:$$PATH"; \
 		else export PATH="$$PYBIN:$$NANOPB_DIR/generator:$$PATH"; fi; \
 		cmake .. -DKK_EMULATOR=ON -DKK_DEBUG_LINK=ON -DKK_BUILD_DYLIB=ON \
+			-DKK_CLEARSIGN_ALPHA_ROOT=$(EMU_CLEARSIGN_ALPHA_ROOT) \
 			-DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
 			-DNANOPB_DIR="$$NANOPB_DIR" \
 			-DNANOPB_PLUGIN="$$(command -v protoc-gen-nanopb)" \
 			-DCMAKE_C_FLAGS="-DPB_NO_PACKED_STRUCTS=1" \
 			-DCMAKE_CXX_FLAGS="-DPB_NO_PACKED_STRUCTS=1" && \
+		grep -qx 'KK_CLEARSIGN_ALPHA_ROOT:BOOL=$(EMU_CLEARSIGN_ALPHA_ROOT)' CMakeCache.txt || \
+			{ echo "ERROR: emulator ClearSign root configuration did not stick"; exit 1; }; \
 		make -j$$(sysctl -n hw.ncpu) kkemu kkemulator_dylib
 	mkdir -p $(EMU_INSTALL_DIR)
 	@if [ -f $(EMU_BUILD_DIR)/lib/libkkemu.dylib ]; then \
@@ -449,8 +461,18 @@ build-emulator:
 # standalone UDP `kkemu` binary (gated out on Windows). Requires mingw-w64:
 #   macOS: brew install mingw-w64   |   Linux: apt-get install mingw-w64
 build-emulator-windows:
-	cd $(EMU_FW_DIR) && git submodule update --init --recursive
+	cd $(EMU_FW_DIR) && git submodule update --init code-signing-keys deps/crypto/trezor-firmware deps/device-protocol deps/googletest deps/python-keepkey deps/qrenc/QR-Code-generator deps/sca-hardening/SecAESSTM32
+	cd $(EMU_FW_DIR)/deps/python-keepkey && git submodule update --init keepkeylib/eth/ethereum-lists
 	bash scripts/build-emulator-windows.sh
+
+# Release deliverables: universal macOS dylib plus Windows x64 DLL. Both scripts
+# bind to the Vault's exact firmware gitlink and reject anything but 7.16.
+build-emulator-macos-release:
+	cd $(EMU_FW_DIR) && git submodule update --init code-signing-keys deps/crypto/trezor-firmware deps/device-protocol deps/googletest deps/python-keepkey deps/qrenc/QR-Code-generator deps/sca-hardening/SecAESSTM32
+	cd $(EMU_FW_DIR)/deps/python-keepkey && git submodule update --init keepkeylib/eth/ethereum-lists
+	bash scripts/build-emulator-macos-release.sh
+
+build-emulator-release: build-emulator-macos-release build-emulator-windows
 
 # Run python-keepkey consistency tests against the locally-built kkemu binary.
 test-emu-python:
@@ -803,7 +825,8 @@ help:
 	@echo "  make clean          - Remove all build artifacts and node_modules"
 	@echo "  make preflight      - Pre-release validation (pins, CI, builds, typecheck)"
 	@echo ""
-	@echo "Emulator (developer feature, macOS only):"
+	@echo "Emulator:"
+	@echo "  make build-emulator-release - Build + audit bundled 7.16 macOS universal and Windows x64 libraries"
 	@echo "  make build-emulator        - Build kkemu+libkkemu from current firmware submodule checkout"
 	@echo "                               and install to ~/.keepkey/emulator/"
 	@echo "  make test-emu-python       - Run python-keepkey UDP tests against the installed kkemu"
@@ -824,10 +847,11 @@ preflight: submodules
 		else echo "   ❌ $$mod DRIFT (pin=$$pinned actual=$$actual)"; fail=1; fi; \
 	done; \
 	echo ""; \
-	echo "2. FIRMWARE SUBMODULE"; \
-	echo "   ⚠️  Skipped for Vault release gating (emulator/firmware work only)"; \
+	echo "2. CERTIFIED EMULATOR ARTIFACTS"; \
+	if node scripts/verify-certified-emulator.mjs >/dev/null 2>&1; then echo "   ✅ certified emulator 7.16.0 hashes and ABI"; \
+	else echo "   ❌ certified emulator artifacts missing or invalid — run scripts/stage-certified-emulator.sh <artifact-dir>"; fail=1; fi; \
 	echo ""; \
-	echo "3. UPSTREAM BEHIND"; \
+	echo "3. CANONICAL BRANCHES"; \
 	for pair in "modules/hdwallet|origin/master" "modules/proto-tx-builder|origin/main" "modules/device-protocol|origin/master" "modules/electrobun|origin/main"; do \
 		mod="$${pair%%|*}"; ref="$${pair##*|}"; \
 		behind=$$(cd "$$mod" && git rev-list --count HEAD.."$$ref" 2>/dev/null || echo "?"); \
@@ -836,7 +860,7 @@ preflight: submodules
 	done; \
 	echo ""; \
 	echo "4. CI STATUS (checks pinned commit, falls back to fork repo for cross-fork PRs)"; \
-	for pair in "modules/hdwallet|keepkey/hdwallet|keepkey/hdwallet" "modules/proto-tx-builder|BitHighlander/proto-tx-builder|BitHighlander/proto-tx-builder" "modules/device-protocol|keepkey/device-protocol|keepkey/device-protocol" "modules/electrobun|blackboardsh/electrobun|blackboardsh/electrobun"; do \
+	for pair in "modules/hdwallet|keepkey/hdwallet|keepkey/hdwallet" "modules/proto-tx-builder|BitHighlander/proto-tx-builder|BitHighlander/proto-tx-builder" "modules/device-protocol|BitHighlander/device-protocol|BitHighlander/device-protocol" "modules/electrobun|blackboardsh/electrobun|blackboardsh/electrobun"; do \
 		mod=$$(echo "$$pair" | cut -d'|' -f1); \
 		repo=$$(echo "$$pair" | cut -d'|' -f2); \
 		fork=$$(echo "$$pair" | cut -d'|' -f3); \
@@ -862,7 +886,14 @@ preflight: submodules
 		&& echo "   ✅ device-protocol Ironwood fields" \
 		|| { echo "   ❌ device-protocol pin is missing Ironwood fields 19/20"; fail=1; }; \
 	echo ""; \
-	echo "6. VAULT TYPECHECK (differential vs baseline)"; \
+	echo "6. HOST/SUBMODULE CONTRACT TESTS"; \
+	if (cd $(PROJECT_DIR) && bun test __tests__/taproot-host.test.ts >/dev/null 2>&1); then \
+		echo "   ✅ Bitcoin account + pinned hdwallet Taproot contract"; \
+	else \
+		echo "   ❌ Bitcoin/hdwallet contract failed — run: cd $(PROJECT_DIR) && bun test __tests__/taproot-host.test.ts"; fail=1; \
+	fi; \
+	echo ""; \
+	echo "7. VAULT TYPECHECK (differential vs baseline)"; \
 	errs=$$(cd $(PROJECT_DIR) && npx tsc --noEmit --skipLibCheck 2>&1 | grep "error TS" | grep -v "minimatch" | wc -l | tr -d ' '); \
 	base=$$(cat $(PROJECT_DIR)/.typecheck-baseline 2>/dev/null || echo 0); \
 	if [ "$$errs" = "0" ]; then echo "   ✅ clean"; \

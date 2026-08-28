@@ -19,6 +19,27 @@ export function parseUnits(amount: string, decimals: number): bigint {
   return BigInt(whole + padded)
 }
 
+/** Pull a balance string out of a Pioneer balance response, or throw.
+ *
+ *  A response that arrives with no balance field is a FAILED LOOKUP, not an
+ *  empty account. Every caller here feeds a signing decision, so the two must
+ *  never be conflated: `|| '0'` is how a funded wallet ends up reported as
+ *  "have 0" — or worse, on the relay path, as "your quote was built for a
+ *  different address". Callers catch this and fall through to their own
+ *  "unable to verify" error. */
+export function readPioneerBalance(resp: any, context: string): string {
+  // Try both field names before giving up — the old `a || b || '0'` chain fell
+  // through a blank `nativeBalance` to `balance`, and only the `'0'` tail was
+  // wrong. Keep the fallthrough, drop the invented zero. A numeric 0 is a
+  // VERIFIED empty account and must survive.
+  for (const raw of [resp?.data?.nativeBalance, resp?.data?.balance]) {
+    if (raw == null) continue
+    const s = String(raw).trim()
+    if (s !== '') return s
+  }
+  throw new Error(`no balance field in Pioneer response for ${context}`)
+}
+
 export const toHex = (value: bigint | number): string => {
   let hex = BigInt(value).toString(16)
   if (hex.length % 2) hex = '0' + hex
@@ -211,18 +232,23 @@ export async function buildEvmTx(
     throw new Error(`Failed to fetch nonce for ${fromAddress} on ${chain.coin} — cannot safely build transaction`)
   }
 
-  // 3. Native balance (needed for gas in both native and ERC-20 paths)
-  let nativeBalance = 0n
+  // 3. Native balance (needed for gas in both native and ERC-20 paths).
+  //    A failed fetch is NOT a zero balance — fall back to Pioneer, then fail
+  //    loudly rather than reporting a funded account as empty.
+  let nativeBalance: bigint | undefined
   if (rpcUrl) {
     try { nativeBalance = await getEvmBalance(rpcUrl, fromAddress) } catch { console.warn(`${TAG} Direct RPC balance failed`) }
-  } else {
+  }
+  if (nativeBalance === undefined) {
     try {
       const balData = await pioneer.GetBalanceAddressByNetwork({ networkId: chain.networkId, address: fromAddress })
-      const balStr = String(balData?.data?.nativeBalance || balData?.data?.balance || '0')
-      nativeBalance = parseUnits(balStr, 18)
+      nativeBalance = parseUnits(readPioneerBalance(balData, fromAddress), 18)
     } catch {
       console.warn(`${TAG} Balance API failed`)
     }
+  }
+  if (nativeBalance === undefined) {
+    throw new Error(`Unable to verify ${chain.symbol} balance for ${fromAddress} — cannot safely build transaction`)
   }
 
   // ── ERC-20 token transfer ───────────────────────────────────────────
@@ -280,7 +306,7 @@ export async function buildEvmTx(
             address: fromAddress,
             contractAddress,
           })
-          tokBalStr = String(tokBalResp?.data?.balance || '0')
+          tokBalStr = readPioneerBalance(tokBalResp, `${contractAddress} balance`)
           console.log(`${TAG} Fetched token balance from API for max: ${tokBalStr}`)
         } catch (e: any) {
           throw new Error(`Cannot fetch token balance for max send: ${e.message}`)
@@ -328,7 +354,11 @@ export async function buildEvmTx(
     if (amountWei <= 0n) throw new Error('Insufficient funds to cover gas fees')
   } else {
     amountWei = parseUnits(String(params.amount), 18)
-    if (amountWei + gasFee > nativeBalance && nativeBalance > 0n) {
+    // No `&& nativeBalance > 0n` escape hatch. That guard existed to keep a
+    // failed balance fetch (which used to land as 0n) from blocking a send —
+    // an unverifiable balance now throws above, so the only way to reach here
+    // with 0n is a genuinely empty account, which must fail this check.
+    if (amountWei + gasFee > nativeBalance) {
       throw new Error(
         `Insufficient funds: balance ${Number(nativeBalance) / 1e18} ${chain.symbol}, ` +
         `need ${Number(amountWei + gasFee) / 1e18} ${chain.symbol} (incl gas)`,

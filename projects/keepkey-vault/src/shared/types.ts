@@ -5,6 +5,25 @@
 // instead of a generic error.
 export const SOLANA_BLIND_SIGNING_REQUIRED = 'SOLANA_BLIND_SIGNING_REQUIRED'
 
+// EVM sibling of the above. The device will not blind-sign a contract call it
+// cannot decode unless AdvancedMode is on, and relay/aggregator routes are not
+// in its clear-sign allowlist.
+//
+// This one routes by CONTENT, not a token: SwapDialog tests /AdvancedMode/i on
+// the raw message and opens the opt-in panel (whose Enable button calls
+// applyPolicy) rather than showing a dead error. That deliberately also catches
+// refusals worded by the firmware itself, so it works on versions we have not
+// seen. The cost is that the routing depends on a phrase.
+//
+// MUST therefore contain the literal "AdvancedMode". Reword the rest freely;
+// drop that word and the opt-in silently degrades back to a reject, which is
+// the exact failure this replaced. Pinned by __tests__/advanced-mode-routing.test.ts.
+export function evmAdvancedModeRequiredMessage(coin: string): string {
+  return `This ${coin} swap has to be blind-signed \u2014 the device cannot decode this `
+    + `contract call, and it will not blind-sign unless AdvancedMode is on. `
+    + `Turn on AdvancedMode to continue. It switches back off when the device reboots.`
+}
+
 // Device state types
 export type DeviceState = 'disconnected' | 'connected_unpaired' | 'error' | 'bootloader' | 'needs_firmware' | 'needs_init' | 'needs_pin' | 'needs_passphrase' | 'ready'
 export type UpdatePhase = 'idle' | 'entering_bootloader' | 'flashing' | 'rebooting'
@@ -728,7 +747,7 @@ export interface AppSettings {
   numberLocale: string           // number formatting locale (default 'en-US')
   walletConnectEnabled: boolean   // feature flag: WalletConnect dApp support (default OFF)
   bip85Enabled: boolean          // feature flag: BIP-85 derived seeds (default OFF)
-  zcashPrivacyEnabled: boolean   // read-only capability: Zcash shielded/privacy — auto-ON when firmware >= 7.15.0
+  zcashPrivacyEnabled: boolean   // read-only capability: auto-ON when firmware >= 7.15.0 and this build includes zcash-cli
   hiveEnabled: boolean           // read-only capability: Hive blockchain — auto-ON when firmware >= 7.15.0
   emulatorEnabled: boolean       // feature flag: macOS emulator surface (default OFF — dev-only)
   offlineMode: boolean           // airplane mode: zero outbound network; BTC data ops throw OFFLINE (default OFF)

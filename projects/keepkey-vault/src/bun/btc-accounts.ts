@@ -45,29 +45,69 @@ export class BtcAccountManager extends EventEmitter {
     return set
   }
 
-  /** Fetch supported xpubs for a given account index in a single batch device call. */
+  /** Fetch the three established xpubs first, then optional capabilities.
+   *
+   *  Taproot is deliberately isolated from the required batch. A parent-repo
+   *  submodule rollback once paired Vault's P2TR discovery with an older
+   *  hdwallet translator: the adapter claimed P2TR support, then threw while
+   *  encoding it. Because all four paths shared one getPublicKeys call, that
+   *  optional failure erased the historical three accounts and the selector
+   *  rendered as an unexplained blank. Required account types fail loudly;
+   *  optional account types degrade without taking Bitcoin offline. */
   private async fetchAccount(wallet: any, accountIndex: number): Promise<void> {
     // Safety: skip if this account index already exists (prevents race-condition duplicates)
     if (this.accounts.some(a => a.accountIndex === accountIndex)) return
 
-    const scriptTypes = await supportedBtcScriptTypes(wallet)
-    const paths = scriptTypes.map(st => ({
+    const supportedScriptTypes = await supportedBtcScriptTypes(wallet)
+    const requiredScriptTypes = supportedScriptTypes.filter(st => st.scriptType !== 'p2tr')
+    const optionalScriptTypes = supportedScriptTypes.filter(st => st.scriptType === 'p2tr')
+    const requiredPaths = requiredScriptTypes.map(st => ({
       addressNList: btcAccountPath(st.purpose, accountIndex),
       coin: 'Bitcoin',
       scriptType: st.scriptType,
       curve: 'secp256k1',
     }))
 
-    const results = await wallet.getPublicKeys(paths)
+    const requiredResults = await wallet.getPublicKeys(requiredPaths)
+    const missingRequired = requiredScriptTypes
+      .filter((_, i) => !requiredResults?.[i]?.xpub)
+      .map(st => st.scriptType)
+    if (missingRequired.length > 0) {
+      throw new Error(
+        `Bitcoin account ${accountIndex} xpub derivation incomplete; missing required script types: ${missingRequired.join(', ')}`,
+      )
+    }
+
+    const derived: Array<{ config: (typeof supportedScriptTypes)[number]; result: any }> =
+      requiredScriptTypes.map((config, i) => ({ config, result: requiredResults[i] }))
+
+    for (const config of optionalScriptTypes) {
+      const path = {
+        addressNList: btcAccountPath(config.purpose, accountIndex),
+        coin: 'Bitcoin',
+        scriptType: config.scriptType,
+        curve: 'secp256k1',
+      }
+      try {
+        const optionalResults = await wallet.getPublicKeys([path])
+        if (!optionalResults?.[0]?.xpub) {
+          console.warn(`[btc-accounts] Optional ${config.scriptType} xpub was not returned for account ${accountIndex}; continuing with required Bitcoin account types`)
+          continue
+        }
+        derived.push({ config, result: optionalResults[0] })
+      } catch (e: any) {
+        console.warn(`[btc-accounts] Optional ${config.scriptType} xpub derivation failed for account ${accountIndex}; continuing with required Bitcoin account types: ${e?.message || String(e)}`)
+      }
+    }
 
     // Re-check after await (another call may have added it while we were waiting)
     if (this.accounts.some(a => a.accountIndex === accountIndex)) return
 
-    const xpubs: BtcXpub[] = scriptTypes.map((st, i) => ({
+    const xpubs: BtcXpub[] = derived.map(({ config: st, result }) => ({
       scriptType: st.scriptType,
       purpose: st.purpose,
       path: btcAccountPath(st.purpose, accountIndex),
-      xpub: results?.[i]?.xpub || '',
+      xpub: result.xpub,
       xpubPrefix: st.xpubPrefix,
       balance: '0',
       balanceUsd: 0,
@@ -117,24 +157,37 @@ export class BtcAccountManager extends EventEmitter {
     return account?.xpubs.find(x => x.scriptType === this.selectedXpub.scriptType)
   }
 
-  /** Get ALL xpubs with non-zero balance (for UTXO aggregation in sends/swaps). */
-  getFundedXpubs(): Array<{ xpub: string; scriptType: string; accountPath: number[] }> {
+  /** Every xpub, for UTXO aggregation in sends/swaps.
+   *
+   *  This used to filter on `parseFloat(xp.balance) > 0` and was named
+   *  getFundedXpubs. `xp.balance` is the CACHED balance, and a cached zero is
+   *  not proof of an empty account — it is also what a chain whose balance
+   *  fetch failed looks like. Filtering here dropped that account before the
+   *  builder could see it, so buildUtxoTx's every-lookup-succeeded check
+   *  (`unreachableXpubs`) stayed at zero and a MAX swept a subset of the
+   *  wallet while believing it had swept all of it. Same bypass shape as the
+   *  frontend `tokenBalance: '0'` one, a layer further upstream.
+   *
+   *  The cost of dropping the filter is one ListUnspent per genuinely empty
+   *  xpub, which returns [] and adds nothing. The builder decides what is
+   *  spendable; this method's job is only to say what exists. */
+  getSpendableXpubs(): Array<{ xpub: string; scriptType: string; accountPath: number[] }> {
     const result: Array<{ xpub: string; scriptType: string; accountPath: number[] }> = []
     for (const account of this.accounts) {
       for (const xp of account.xpubs) {
-        if (xp.xpub && parseFloat(xp.balance) > 0) {
+        if (xp.xpub) {
           result.push({ xpub: xp.xpub, scriptType: xp.scriptType, accountPath: xp.path })
         }
       }
     }
-    const all = this.accounts.flatMap(a => a.xpubs).filter(x => x.xpub)
-    console.log(`[btc-accounts] getFundedXpubs: ${result.length}/${all.length} funded — ${all.map(x => `${x.scriptType}=${x.balance}`).join(', ')}`)
+    const funded = this.accounts.flatMap(a => a.xpubs).filter(x => x.xpub && parseFloat(x.balance) > 0)
+    console.log(`[btc-accounts] getSpendableXpubs: ${result.length} xpubs (${funded.length} with a cached non-zero balance) — ${result.length ? this.accounts.flatMap(a => a.xpubs).filter(x => x.xpub).map(x => `${x.scriptType}=${x.balance}`).join(', ') : 'none'}`)
     return result
   }
 
   /** All xpubs across all accounts with derivation metadata — used to seed
-   *  own-wallet Address Book entries (R2). Unlike getFundedXpubs() this includes
-   *  unfunded xpubs so a fresh wallet still appears in the book. */
+   *  own-wallet Address Book entries (R2). Unlike getSpendableXpubs() this
+   *  carries accountIndex, which the book needs for labelling. */
   getAllXpubMeta(): Array<{ xpub: string; scriptType: BtcScriptType; accountIndex: number; path: number[] }> {
     const out: Array<{ xpub: string; scriptType: BtcScriptType; accountIndex: number; path: number[] }> = []
     for (const account of this.accounts) {

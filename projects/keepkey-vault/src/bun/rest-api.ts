@@ -1777,7 +1777,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               }
               signingInfo.requiresBlindSigningConsent = requiresSolanaBlindSigningConsent(
                 signingInfo.solanaDecoded,
-                preview.swapMetadata !== undefined || preview.schema !== undefined,
+                preview.lutProof !== undefined || preview.schema !== undefined,
               )
               if (signingInfo.requiresBlindSigningConsent) {
                 signingInfo.needsBlindSigning = true
@@ -2767,7 +2767,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
           // Both legacy and v0 messages use SolanaSignTx. The helper removes
           // the signature wrapper, forwards the transaction-bound KKSOLSW1
-          // descriptor unchanged, or adds a one-shot opaque fallback only when
+          // proof unchanged, or adds a one-shot opaque fallback only when
           // the Vault UI returned explicit consent, then splices
           // the returned signature back into the original wire transaction.
           const clearSignPayload = body.schema?.payload ? String(body.schema.payload) : undefined
@@ -2782,7 +2782,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               {
                 addressNList,
                 rawTx: body.raw_tx,
-                swapMetadata: body.swapMetadata,
+                lutProof: body.lutProof,
+                certificate: body.certificate,
                 // Reusable KKSOLSC1 instruction schema — signed once per
                 // program+instruction, so the device can decode this call
                 // without a per-transaction attestation.

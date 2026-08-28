@@ -52,6 +52,53 @@ describe('firmware capability gate', () => {
       ])
     expect(set.selectedXpub).toEqual({ accountIndex: 0, scriptType: 'p2wpkh' })
   })
+
+  test('an incompatible optional P2TR adapter cannot erase the required account types', async () => {
+    const manager = new BtcAccountManager()
+    await manager.initialize({
+      // Reproduces the regressed adapter contract: it claimed support before
+      // its GetPublicKey wire translator understood p2tr.
+      btcSupportsScriptType: async (_coin: string, scriptType: string) => scriptType === 'p2tr',
+      getPublicKeys: async (paths: any[]) => {
+        if (paths.some(p => p.scriptType === 'p2tr')) throw new Error('unhandled InputSriptType enum: p2tr')
+        return paths.map((p, i) => ({ xpub: `xpub-${p.scriptType}-${i}` }))
+      },
+    })
+
+    expect(manager.toAccountSet().accounts[0].xpubs.map(x => x.scriptType))
+      .toEqual(['p2pkh', 'p2sh-p2wpkh', 'p2wpkh'])
+  })
+
+  test('missing required xpubs fail with an actionable error', async () => {
+    const manager = new BtcAccountManager()
+    await expect(manager.initialize({
+      btcSupportsScriptType: async () => false,
+      getPublicKeys: async (paths: any[]) => paths.map((p, i) => i === 1 ? null : { xpub: `xpub-${p.scriptType}-${i}` }),
+    })).rejects.toThrow('missing required script types: p2sh-p2wpkh')
+    expect(manager.toAccountSet().accounts).toEqual([])
+  })
+})
+
+describe('pinned hdwallet Taproot wire contract', () => {
+  test('the parent repository pin can encode P2TR public-key and change requests', async () => {
+    // Read the checked-out gitlink sources instead of importing generated jspb.
+    // CI intentionally does not npm-install the device-protocol submodule, and
+    // a source-contract test should not gain a hidden google-protobuf runtime
+    // dependency. These assertions still fail on the regressed hdwallet pin:
+    // it lacks the core enum values and both KeepKey wire mappings.
+    const [coreBitcoin, keepkeyUtils, protocolTypes] = await Promise.all([
+      Bun.file(new URL('../../../modules/hdwallet/packages/hdwallet-core/src/bitcoin.ts', import.meta.url)).text(),
+      Bun.file(new URL('../../../modules/hdwallet/packages/hdwallet-keepkey/src/utils.ts', import.meta.url)).text(),
+      Bun.file(new URL('../../../modules/device-protocol/types.proto', import.meta.url)).text(),
+    ])
+
+    expect(coreBitcoin).toMatch(/SpendTaproot\s*=\s*["']p2tr["']/)
+    expect(coreBitcoin).toMatch(/PayToTaproot\s*=\s*["']p2tr["']/)
+    expect(keepkeyUtils).toMatch(/case core\.BTCInputScriptType\.SpendTaproot:\s*return Types\.InputScriptType\.SPENDTAPROOT;/)
+    expect(keepkeyUtils).toMatch(/case core\.BTCOutputScriptType\.PayToTaproot:\s*return Types\.OutputScriptType\.PAYTOTAPROOT;/)
+    expect(protocolTypes).toMatch(/SPENDTAPROOT\s*=\s*5/)
+    expect(protocolTypes).toMatch(/PAYTOTAPROOT\s*=\s*6/)
+  })
 })
 
 describe('Taproot discovery consumers', () => {
