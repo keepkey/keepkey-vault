@@ -995,11 +995,58 @@ if (-not $installerParts) { throw "No installer parts (setup.exe/.bin) found to 
 $zipPath = Join-Path $ArtifactsDir "KeepKey-Vault-$Version-win-x64-setup.zip"
 Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
 Compress-Archive -Path $installerParts.FullName -DestinationPath $zipPath -CompressionLevel Optimal
-# Drop the loose parts so ONLY the .zip is uploaded — a bare setup.exe won't run
-# without its .bin siblings anyway, and leaving the SAC-blocked single exe around
-# invites shipping the broken artifact.
-$installerParts | Remove-Item -Force
 Write-Success "Created: $(Split-Path $zipPath -Leaf) ($([math]::Round((Get-Item $zipPath).Length / 1MB, 1)) MB)"
+
+# ----------------------------------------------------------------------------
+# ALSO build a single self-extracting .exe (parity with the pre-1.5.0 one-file
+# UX, WITHOUT the SAC break). The zip works but users who "Run" it straight from
+# Explorer's archive view get only setup.exe in a temp dir -- its setup-*.bin
+# siblings stay behind -> "setup-0.bin is missing". IExpress (Windows built-in;
+# Microsoft's wextract stub) packs setup.exe + setup-*.bin into ONE exe that
+# extracts them TOGETHER to %TEMP% and runs setup.exe. We EV-sign the result, so
+# an Application Control (SAC/WDAC) machine only ever evaluates signed code --
+# validated on a SAC-Enforce box: signed SFX runs, extracts, launches the signed
+# setup.exe, no 3077/3033. Shipped ALONGSIDE the .zip (the .zip stays the
+# extract-first fallback). Unsigned SFX IS blocked by SAC, so -SkipSign yields no
+# usable single-exe -- the .zip remains the only artifact then.
+Write-Step "Building self-extracting installer .exe (IExpress)"
+$sfxStaging = Join-Path $ArtifactsDir "_sfx_stage"
+Remove-Item $sfxStaging -Recurse -Force -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Force -Path $sfxStaging | Out-Null
+$installerParts | ForEach-Object { Copy-Item $_.FullName -Destination $sfxStaging }
+$partNames = @($installerParts | Sort-Object Name | Select-Object -ExpandProperty Name)
+$setupExeName = @($partNames | Where-Object { $_ -like '*.exe' })[0]
+$sfxTmp = Join-Path $ArtifactsDir "KeepKey-Vault-$Version-win-x64-setup-sfx.exe"
+Remove-Item $sfxTmp -Force -ErrorAction SilentlyContinue
+$sedPath = Join-Path $sfxStaging "installer.sed"
+$strFiles = for ($i = 0; $i -lt $partNames.Count; $i++) { "FILE$i=`"$($partNames[$i])`"" }
+$srcRefs  = for ($i = 0; $i -lt $partNames.Count; $i++) { "%FILE$i%=" }
+$sedLines = @(
+    '[Version]', 'Class=IEXPRESS', 'SEDVersion=3',
+    '[Options]', 'PackagePurpose=InstallApp', 'ShowInstallProgramWindow=0',
+    'HideExtractAnimation=1', 'UseLongFileName=1', 'InsideCompressed=0', 'RebootMode=N',
+    'TargetName=%TargetName%', 'FriendlyName=%FriendlyName%', 'AppLaunched=%AppLaunched%',
+    'PostInstallCmd=%PostInstallCmd%', 'SourceFiles=SourceFiles',
+    '[Strings]', "TargetName=$sfxTmp", "FriendlyName=$AppName $Version Setup",
+    "AppLaunched=$setupExeName", 'PostInstallCmd=<None>'
+) + $strFiles + @('[SourceFiles]', "SourceFiles0=$sfxStaging", '[SourceFiles0]') + $srcRefs
+$sedLines | Out-File -FilePath $sedPath -Encoding ASCII
+& "$env:WINDIR\System32\iexpress.exe" /N /Q /M $sedPath | Out-Null
+if (-not (Test-Path $sfxTmp)) { throw "IExpress did not produce the self-extracting exe at $sfxTmp" }
+
+# Drop the loose parts now that they live inside BOTH the .zip and the SFX exe.
+$installerParts | Remove-Item -Force
+# The signed single-exe takes the canonical ...-setup.exe name (freed above).
+$sfxFinal = Join-Path $ArtifactsDir "KeepKey-Vault-$Version-win-x64-setup.exe"
+Move-Item $sfxTmp $sfxFinal -Force
+Remove-Item $sfxStaging -Recurse -Force -ErrorAction SilentlyContinue
+if (-not $SkipSign) {
+    if (-not (Sign-File -FilePath $sfxFinal -Description "$AppName Setup")) {
+        if (-not $AllowSignFailures) { throw "Failed to sign the self-extracting installer exe" }
+        Write-Warning "Self-extracting exe is UNSIGNED -- SAC will block it; ship the .zip only."
+    }
+}
+Write-Success "Created: $(Split-Path $sfxFinal -Leaf) ($([math]::Round((Get-Item $sfxFinal).Length / 1MB, 1)) MB)"
 
 # ============================================================================
 # Generate Checksums
@@ -1050,8 +1097,10 @@ if (-not $SkipSign) {
     }
     Write-Host ""
     Write-Host "Next steps:" -ForegroundColor Yellow
-    Write-Host "  1. Test on a Smart App Control (Enforce) machine: extract the .zip, run setup.exe" -ForegroundColor Gray
-    Write-Host "  2. Upload the .zip (NOT a bare .exe) to the GitHub release" -ForegroundColor Gray
+    Write-Host "  1. Test on a Smart App Control (Enforce) machine: run the self-extracting" -ForegroundColor Gray
+    Write-Host "     setup.exe (it must extract to %TEMP% and launch the inner setup.exe), AND" -ForegroundColor Gray
+    Write-Host "     the .zip path (extract all, run setup.exe). Both must reach the wizard." -ForegroundColor Gray
+    Write-Host "  2. Upload BOTH KeepKey-Vault-$Version-win-x64-setup.exe and .zip to the release" -ForegroundColor Gray
     Write-Host "  3. Verify SmartScreen/Smart App Control does not block it" -ForegroundColor Gray
 } else {
     Write-Host "WARNING: Artifacts are NOT signed - test build only" -ForegroundColor Yellow
