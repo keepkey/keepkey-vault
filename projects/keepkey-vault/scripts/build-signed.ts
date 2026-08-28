@@ -21,7 +21,7 @@ if (process.platform === 'darwin' || process.platform === 'win32') {
   const staged = join(import.meta.dir, '..', 'emulator-bundle', lib)
   if (!existsSync(staged)) {
     console.error(`[release] Missing bundled emulator: ${staged}`)
-    console.error('[release] Run make build-emulator-release (macOS) or stage the CI-built Windows DLL.')
+    console.error('[release] Stage the certified emulator artifact with scripts/stage-certified-emulator.sh <artifact-dir>.')
     process.exit(1)
   }
 }

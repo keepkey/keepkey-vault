@@ -30,9 +30,9 @@ $(STAMP_DIR):
 	@mkdir -p $(STAMP_DIR)
 
 $(SUBMODULES_STAMP): .gitmodules | $(STAMP_DIR)
-	@git submodule update --init modules/hdwallet modules/proto-tx-builder modules/device-protocol modules/electrobun modules/keepkey-firmware
-	@# Fetch Vault runtime/build submodules so upstream-behind checks see latest commits.
-	@for mod in modules/hdwallet modules/proto-tx-builder modules/device-protocol modules/electrobun modules/keepkey-firmware; do \
+	@git submodule update --init modules/hdwallet modules/proto-tx-builder modules/device-protocol modules/electrobun
+	@# Firmware pinning is outside Vault release scope. Fetch runtime/build modules only.
+	@for mod in modules/hdwallet modules/proto-tx-builder modules/device-protocol modules/electrobun; do \
 		git -C "$$mod" fetch --all --prune 2>/dev/null || true; \
 	done
 	@touch $@
@@ -840,19 +840,18 @@ preflight: submodules
 	@echo ""
 	@echo "1. SUBMODULE PINS"
 	@fail=0; \
-	for mod in modules/hdwallet modules/proto-tx-builder modules/device-protocol modules/electrobun modules/keepkey-firmware; do \
+	for mod in modules/hdwallet modules/proto-tx-builder modules/device-protocol modules/electrobun; do \
 		pinned=$$(git ls-tree HEAD "$$mod" | awk '{print substr($$3,1,12)}'); \
 		actual=$$(cd "$$mod" && git rev-parse --short=12 HEAD 2>/dev/null); \
 		if [ "$$pinned" = "$$actual" ]; then echo "   ✅ $$mod"; \
 		else echo "   ❌ $$mod DRIFT (pin=$$pinned actual=$$actual)"; fail=1; fi; \
 	done; \
 	echo ""; \
-	echo "2. FIRMWARE SUBMODULE"; \
-	fw_version=$$(awk '$$1 == "VERSION" { print $$2; exit }' modules/keepkey-firmware/CMakeLists.txt); \
-	if [ "$$fw_version" = "7.16.0" ]; then echo "   ✅ bundled emulator firmware 7.16.0"; \
-	else echo "   ❌ bundled emulator firmware is $$fw_version, expected 7.16.0"; fail=1; fi; \
+	echo "2. CERTIFIED EMULATOR ARTIFACTS"; \
+	if node scripts/verify-certified-emulator.mjs >/dev/null 2>&1; then echo "   ✅ certified emulator 7.16.0 hashes and ABI"; \
+	else echo "   ❌ certified emulator artifacts missing or invalid — run scripts/stage-certified-emulator.sh <artifact-dir>"; fail=1; fi; \
 	echo ""; \
-	echo "3. UPSTREAM BEHIND"; \
+	echo "3. CANONICAL BRANCHES"; \
 	for pair in "modules/hdwallet|origin/master" "modules/proto-tx-builder|origin/main" "modules/device-protocol|origin/master" "modules/electrobun|origin/main"; do \
 		mod="$${pair%%|*}"; ref="$${pair##*|}"; \
 		behind=$$(cd "$$mod" && git rev-list --count HEAD.."$$ref" 2>/dev/null || echo "?"); \
@@ -861,7 +860,7 @@ preflight: submodules
 	done; \
 	echo ""; \
 	echo "4. CI STATUS (checks pinned commit, falls back to fork repo for cross-fork PRs)"; \
-	for pair in "modules/hdwallet|keepkey/hdwallet|keepkey/hdwallet" "modules/proto-tx-builder|BitHighlander/proto-tx-builder|BitHighlander/proto-tx-builder" "modules/device-protocol|keepkey/device-protocol|keepkey/device-protocol" "modules/electrobun|blackboardsh/electrobun|blackboardsh/electrobun"; do \
+	for pair in "modules/hdwallet|keepkey/hdwallet|keepkey/hdwallet" "modules/proto-tx-builder|BitHighlander/proto-tx-builder|BitHighlander/proto-tx-builder" "modules/device-protocol|BitHighlander/device-protocol|BitHighlander/device-protocol" "modules/electrobun|blackboardsh/electrobun|blackboardsh/electrobun"; do \
 		mod=$$(echo "$$pair" | cut -d'|' -f1); \
 		repo=$$(echo "$$pair" | cut -d'|' -f2); \
 		fork=$$(echo "$$pair" | cut -d'|' -f3); \
