@@ -966,6 +966,15 @@ function App() {
 								onEnableEmulator={async () => {
 									const settings = await rpcRequest<AppSettings>('setEmulatorEnabled', { enabled: true }, 10000)
 									setEmulatorEnabled(settings.emulatorEnabled)
+									// Enabling the flag alone is a dead end on first run: with no flash
+									// images DeviceGrid has nothing to show and the Start card vanishes.
+									// Bootstrap and boot a default emulator wallet so "Start emulator"
+									// actually starts one (mirrors the DeviceSettingsDrawer install path).
+									const wallets = await rpcRequest<Array<{ name: string }>>('emulatorListWallets').catch(() => [])
+									if (wallets.length === 0) {
+										try { await rpcRequest('emulatorPair', undefined, 10000) } catch { /* may already be paired */ }
+										await rpcRequest('emulatorInit', { flashName: 'default' }, 30000)
+									}
 								}}
 								emulatorEnabled={emulatorEnabled}
 							/>
