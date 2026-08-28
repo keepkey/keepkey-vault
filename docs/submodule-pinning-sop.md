@@ -7,9 +7,15 @@ be pinned to a known-good commit on a well-defined branch before any release
 branch is cut. Drift between submodule state and the pinned commit is the #1
 source of "works on my machine" build failures.
 
-`modules/keepkey-firmware` is intentionally not a Vault release gate. It is used
-for emulator and firmware development only; do not block desktop Vault releases
-on its branch, nested submodules, or CI state.
+`modules/keepkey-firmware` is intentionally not a Vault release gate. Do not
+inspect, clean, checkout, reset, fetch, or re-pin it while preparing a Vault
+release. Its branch, version, nested submodules, CI state, and gitlink drift are
+outside the desktop release decision.
+
+The emulator shipped inside Vault is a separate release artifact gate. A Vault
+release must contain the approved `libkkemu` artifact set, but that requirement
+never authorizes changing the firmware gitlink. See
+[`docs/emulator-release-sop.md`](./emulator-release-sop.md).
 
 ## Submodule Inventory
 
@@ -17,14 +23,14 @@ on its branch, nested submodules, or CI state.
 |--------|------|-----------------|---------|
 | **hdwallet** | `keepkey/hdwallet` | `master` | HD wallet core + KeepKey adapter (lodash/rxjs removed) |
 | **proto-tx-builder** | `BitHighlander/proto-tx-builder` | `main` | Cosmos/Thorchain/Maya TX builder (`@keepkey/proto-tx-builder`) |
-| **device-protocol** | `keepkey/device-protocol` | `master` | Protobuf message definitions — **must match firmware release** |
+| **device-protocol** | `BitHighlander/device-protocol` | `master` | Canonical Vault protocol fork and published `@bithighlander/device-protocol` package |
 | **electrobun** | `blackboardsh/electrobun` | `main` | Desktop framework fork/runtime used by Vault |
 
 Ignored for Vault releases:
 
 | Module | Repo | Purpose |
 |--------|------|---------|
-| **keepkey-firmware** | `BitHighlander/keepkey-firmware` | Emulator build and firmware test fixtures only. Ignore for Vault packaging/release gating. |
+| **keepkey-firmware** | `BitHighlander/keepkey-firmware` | Firmware source and development fixtures. Never reconcile or re-pin it during a Vault release. The separately certified bundled emulator artifacts have their own gate. |
 
 ## Pre-Release Pinning Checklist
 
@@ -50,7 +56,7 @@ done
 ```
 
 **All release-gated modules must show `[OK]` and `dirty=0` before cutting a
-release branch. Ignore `modules/keepkey-firmware` for Vault packaging.**
+release branch. Do not include `modules/keepkey-firmware` in this check.**
 
 ```bash
 # 4. Verify CI is green on every pinned commit
@@ -59,7 +65,7 @@ echo "=== CI Status on Pinned Commits ==="
 declare -A REPOS=(
   ["modules/hdwallet"]="keepkey/hdwallet"
   ["modules/proto-tx-builder"]="BitHighlander/proto-tx-builder"
-  ["modules/device-protocol"]="keepkey/device-protocol"
+  ["modules/device-protocol"]="BitHighlander/device-protocol"
   ["modules/electrobun"]="blackboardsh/electrobun"
 )
 for mod in "${!REPOS[@]}"; do
@@ -80,8 +86,8 @@ done
 - ✅ ALL GREEN: proceed
 - ⏳ PENDING: wait for completion
 - ❌ FAILED: STOP — do not release with failing CI on any submodule
-- ⚠️ NO CI: acceptable for repos without workflows (device-protocol), but
-  flag it in release notes
+- ⚠️ NO CI: acceptable only for repos documented without workflows; it is not
+  acceptable for `BitHighlander/device-protocol`
 
 **Current CI coverage:**
 
@@ -89,7 +95,7 @@ done
 |------|-----------|-------|
 | keepkey/hdwallet | CI (build matrix) | Must pass |
 | BitHighlander/proto-tx-builder | Build & Test | Must pass |
-| keepkey/device-protocol | **None** | No CI — validate manually (lib/ build) |
+| BitHighlander/device-protocol | Build & Publish + Protocol CI | Both validation jobs must pass; the exact fork commit must be published |
 | blackboardsh/electrobun | Build and Release + CEF Check | Build must pass; CEF is informational |
 
 ## Per-Module Rules
@@ -109,19 +115,31 @@ done
 
 ### device-protocol (`master`)
 
-- **Must be synced to upstream `keepkey/device-protocol` master before release**
-- The protocol version must match the firmware version being targeted
-- If a new firmware release adds proto messages, those must be merged to master first
+- **Must come from `BitHighlander/device-protocol` fork `master`**
+- **Never reconcile, merge, publish, or gate against `keepkey/device-protocol`**
+- The generated protocol library must satisfy the Vault runtime contract
+- Required protocol changes must be merged to the fork `master` first
+- The package must be published as `@bithighlander/device-protocol` from the exact pinned fork commit
 - The `lib/` directory is gitignored — must be pre-built before vault builds
-- Verify: `cd modules/device-protocol && git log --oneline origin/master..HEAD` (should be empty)
-- If ahead of master: merge or rebase to master, push, then re-pin
+- Verify the remote first: `git submodule sync -- modules/device-protocol && git -C modules/device-protocol remote get-url origin`
+- The remote must be `https://github.com/BitHighlander/device-protocol`
+- Verify the fork branch: `cd modules/device-protocol && git fetch origin master && git log --oneline origin/master..HEAD` (should be empty)
+- Verify publication: fork tag `v<version>` must resolve to the pinned commit,
+  the registry repository must be the BitHighlander fork, and a local dry-run
+  pack from the pinned commit must match the registry `dist.integrity`. If npm
+  records `gitHead`, it must also equal the pinned commit.
 
 ### keepkey-firmware (ignored for Vault releases)
 
 - Not a desktop Vault release gate.
-- Do not run recursive firmware submodule checks during Vault release prep.
-- Do not block Vault packaging on firmware branch, nested submodules, or firmware CI.
-- Only initialize and validate this repo when building the emulator or changing firmware fixtures.
+- Do not run firmware status, version, branch, behind/ahead, CI, or recursive
+  nested-submodule checks during Vault release prep.
+- Never checkout, reset, clean, fetch, merge, or re-pin this submodule to make a
+  Vault release pass.
+- A missing or incorrect bundled emulator stops the Vault release at the
+  emulator artifact gate; it is not repaired by changing this gitlink.
+- Firmware changes and emulator artifact production happen in their own
+  workflow, outside the Vault release procedure.
 
 ### electrobun (`main`)
 
@@ -139,7 +157,7 @@ derivation for months because the pin wasn't updated.
 behind upstream:**
 
 ```bash
-echo "=== Commits behind upstream ==="
+echo "=== Commits behind canonical branches ==="
 for mod in modules/hdwallet modules/proto-tx-builder modules/device-protocol modules/electrobun; do
   branch=$(cd "$mod" && git remote show origin 2>/dev/null | grep 'HEAD branch' | awk '{print $NF}')
   [ -z "$branch" ] && branch="master"
@@ -197,12 +215,13 @@ created until all release-gated submodules show `[OK]` and `dirty=0`.
 Before `git checkout -b release/X.Y.Z develop`:
 
 1. Run the pinning checklist (all OK, all clean)
-2. **Run the upstream-behind check** — review and pull any bug fixes
-3. Verify `device-protocol` is on upstream master (not alpha/feature branch)
+2. **Run the canonical-branch-behind check** — review and pull any bug fixes
+3. Verify `device-protocol` is on `BitHighlander/device-protocol` fork master and that the exact commit is published as `@bithighlander/device-protocol`
 4. Verify `electrobun` is on `main` HEAD
 5. Verify `hdwallet` is on `master` with lodash/rxjs removal
-6. Ignore `modules/keepkey-firmware` unless this release explicitly changes emulator/firmware fixtures
-7. Run `make build-stable` to confirm build succeeds with current pins
+6. Do not inspect or modify `modules/keepkey-firmware`.
+7. Run the bundled emulator artifact gate in `docs/emulator-release-sop.md`.
+8. Run `make build-stable` to confirm build succeeds with current runtime pins.
 
 ### Post-Release
 
@@ -220,8 +239,5 @@ After release is published:
 | device-protocol | `bf8646b8` | `master` | Current vault pin; generated `lib/` still must be present on the build machine |
 | electrobun | `73519358` | `main` | Current vault pin |
 
-Ignored for Vault release gating:
-
-| Module | Pinned To | Status |
-|--------|-----------|--------|
-| keepkey-firmware | `11d97d40` | Emulator/firmware fixture repo only; do not block Vault release on it |
+`modules/keepkey-firmware` is intentionally omitted. Its pin is not inventory
+for a Vault release and must not be changed by this SOP.
