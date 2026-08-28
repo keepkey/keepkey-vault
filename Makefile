@@ -305,7 +305,7 @@ prune-bundle:
 #    Clearing the stamps forces modules-build from the pinned source before the vault install copies it.
 build-signed: sign-check
 	@rm -f $(ZCASH_CLI_STAMP) $(PROTO_BUILD_STAMP) $(HDWALLET_BUILD_STAMP) $(DEVICE_PROTOCOL_BUILD_STAMP)
-	$(MAKE) build-emulator-macos-release
+	@node scripts/verify-certified-emulator.mjs
 	$(MAKE) build-stable audit prune-bundle dmg
 	@echo ""
 	@echo "=== Build complete ==="
