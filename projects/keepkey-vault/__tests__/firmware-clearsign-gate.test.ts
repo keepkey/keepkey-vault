@@ -34,7 +34,7 @@ describe('firmwareClearSigns mirrors the rc3 native clear-sign allowlist', () =>
   })
 
   test('0x proxy methods only at the pinned ExchangeProxy/router', () => {
-    expect(firmwareClearSigns(ZX, '0x415565b0' + word)).toBe(true)   // transformERC20
+    expect(firmwareClearSigns(ZX, '0x415565b0' + word)).toBe(false)  // transformERC20
     expect(firmwareClearSigns(ZX, '0xd9627aa4' + word)).toBe(true)   // sellToUniswap
     expect(firmwareClearSigns(UNIV2, '0xf305d719' + word)).toBe(true) // addLiquidityETH
     expect(firmwareClearSigns(RANDOM, '0x415565b0' + word)).toBe(false)
