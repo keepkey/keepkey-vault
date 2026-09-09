@@ -5,6 +5,7 @@
  * Returns an object ready for hdwallet's btcSignTx().
  */
 import coinSelect from 'coinselect'
+import { selectZcashCoins } from './zcash-coinselect'
 // @ts-ignore — coinselect/split has no types
 import coinSelectSplit from 'coinselect/split'
 import { bech32, bech32m } from '@scure/base'
@@ -253,6 +254,7 @@ export interface BuildUtxoParams {
   scriptTypeOverride?: string // BTC multi-account: override chain default scriptType
   accountPath?: number[] // BTC multi-account: account-level path [purpose+H, coinType+H, account+H]
   satPerVByte?: number   // custom (free-form) fee rate — overrides feeLevel preset
+  isSwapDeposit?: boolean
 }
 
 /** Unwrap Pioneer ListUnspent response (handles Swagger/Axios double-wrapping) */
@@ -362,7 +364,9 @@ export async function estimateUtxoFee(
       : Math.max(3, Math.ceil(feeLevel <= 2 ? feeRates.slow : feeLevel <= 4 ? feeRates.average : feeRates.fast))
 
     const satoshis = parseDecimalToInt(params.amount, chain.decimals)
-    const result = isMax
+    const result = chain.id === 'zcash'
+      ? selectZcashCoins(utxos, to, satoshis, effectiveFeeRate, isMax, memo)
+      : isMax
       ? coinSelectSplit(utxos, [{ address: to }], effectiveFeeRate)
       : coinSelect(utxos, [{ address: to, value: satoshis }], effectiveFeeRate)
 
@@ -391,7 +395,7 @@ export async function buildUtxoTx(
   chain: ChainDef,
   params: BuildUtxoParams,
 ) {
-  const { memo, feeLevel = 5, isMax = false, xpub, allXpubs, scriptTypeOverride, accountPath, satPerVByte } = params
+  const { memo, feeLevel = 5, isMax = false, xpub, allXpubs, scriptTypeOverride, accountPath, satPerVByte, isSwapDeposit = false } = params
   // Chain tip for ZEC maturity + consensus branch selection; null when the
   // sidecar isn't running, which transparent sends don't require.
   let zcashTip: number | null = null
@@ -508,7 +512,9 @@ export async function buildUtxoTx(
 
   // 3. Coin selection (string-based to avoid float precision loss)
   const satoshis = parseDecimalToInt(params.amount, chain.decimals)
-  const result = isMax
+  const result = chain.id === 'zcash'
+      ? selectZcashCoins(utxos, to, satoshis, effectiveFeeRate, isMax, memo, isSwapDeposit)
+      : isMax
     ? coinSelectSplit(utxos, [{ address: to }], effectiveFeeRate)
     : coinSelect(utxos, [{ address: to, value: satoshis }], effectiveFeeRate)
 

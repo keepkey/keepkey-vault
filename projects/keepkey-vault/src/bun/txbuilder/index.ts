@@ -116,6 +116,7 @@ export async function buildTx(
         scriptTypeOverride: params.scriptTypeOverride,
         accountPath: params.accountPath,
         satPerVByte: params.satPerVByte,
+        isSwapDeposit: params.isSwapDeposit,
       })
       const { fee: utxoFee, ...utxoTx } = utxoResult
       return { unsignedTx: utxoTx, fee: utxoFee }
@@ -634,6 +635,8 @@ export async function signTx(
           if (!address) throw new Error('Device returned no Solana signer address')
           return address
         },
+        'signTx:solana',
+        () => wallet.getFirmwareVersion?.(),
       )
     }
     case 'tron': {
