@@ -1,32 +1,24 @@
 /**
- * Minimal EVM JSON-RPC utilities for direct node interaction.
- * Used for custom token metadata lookups and custom chain operations.
+ * EVM operations. Built-in chains pass a CAIP-2 network ID and use Pioneer.
+ * Only explicitly configured custom chains pass a direct RPC URL.
  */
+import { pioneerEvmRpc, pioneerTokenMetadata } from './pioneer-evm'
 
-export const EVM_RPC_URLS: Record<string, string> = {
-  '1': 'https://ethereum-rpc.publicnode.com',
-  '137': 'https://polygon-rpc.com',
-  '42161': 'https://arb1.arbitrum.io/rpc',
-  '10': 'https://mainnet.optimism.io',
-  '43114': 'https://api.avax.network/ext/bc/C/rpc',
-  '56': 'https://bsc-dataseed.binance.org',
-  '8453': 'https://mainnet.base.org',
-  '143': 'https://rpc.monad.xyz',
-  '2868': 'https://rpc.hyperliquid.xyz',
-}
+export const isPioneerEvmSource = (source: string): boolean => source.startsWith('eip155:')
 
 async function ethCall(rpcUrl: string, to: string, data: string): Promise<string> {
-  const resp = await fetch(rpcUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_call', params: [{ to, data }, 'latest'] }),
-  })
-  const json = await resp.json() as { result?: string; error?: { message: string } }
-  if (json.error) throw new Error(json.error.message)
-  return json.result || '0x'
+  return (await ethRpc(rpcUrl, 'eth_call', [{ to, data }, 'latest'])) || '0x'
 }
 
 async function ethRpc(rpcUrl: string, method: string, params: any[]): Promise<any> {
+  if (isPioneerEvmSource(rpcUrl)) {
+    const { getPioneer } = await import('./pioneer')
+    try {
+      return await pioneerEvmRpc(await getPioneer(), rpcUrl, method, params)
+    } catch (error: any) {
+      throw new Error(`Pioneer ${method} (${rpcUrl}): ${error?.message || error}`)
+    }
+  }
   const resp = await fetch(rpcUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -57,6 +49,10 @@ const NAME_SIG = '0x06fdde03'
 const DECIMALS_SIG = '0x313ce567'
 
 export async function getTokenMetadata(rpcUrl: string, contractAddress: string): Promise<{ symbol: string; name: string; decimals: number }> {
+  if (isPioneerEvmSource(rpcUrl)) {
+    const { getPioneer } = await import('./pioneer')
+    return pioneerTokenMetadata(await getPioneer(), rpcUrl, contractAddress)
+  }
   const [symbolHex, nameHex, decimalsHex] = await Promise.all([
     ethCall(rpcUrl, contractAddress, SYMBOL_SIG),
     ethCall(rpcUrl, contractAddress, NAME_SIG),
@@ -115,7 +111,7 @@ export async function getErc20Decimals(rpcUrl: string, tokenContract: string): P
   return Number(BigInt(result))
 }
 
-// ── Direct RPC methods for custom chains ─────────────────────────────
+// ── EVM operations (Pioneer network ID or explicit custom RPC URL) ────
 
 export async function getEvmBalance(rpcUrl: string, address: string): Promise<bigint> {
   const result = await ethRpc(rpcUrl, 'eth_getBalance', [address, 'latest'])
@@ -146,6 +142,9 @@ export async function getEvmGasPrice(rpcUrl: string): Promise<bigint> {
  *  the txs that triggered it. Real-world incident: 2026-05-11, network base
  *  fee climbed from ~1.3 to 4.5 gwei within minutes, all 2x-buffer txs stalled. */
 export async function getEvmFeeData(rpcUrl: string): Promise<{ maxFeePerGas: bigint; maxPriorityFeePerGas: bigint } | null> {
+  // Pioneer currently exposes gas price, not feeHistory. Relay quotes retain
+  // their EIP-1559 fields; other callers use Pioneer's legacy gas price.
+  if (isPioneerEvmSource(rpcUrl)) return null
   try {
     const hist = await ethRpc(rpcUrl, 'eth_feeHistory', ['0x4', 'latest', [60]])
     const baseFees = (hist?.baseFeePerGas || []).map((h: string) => BigInt(h))
@@ -170,7 +169,10 @@ export async function getEvmFeeData(rpcUrl: string): Promise<{ maxFeePerGas: big
 
 export async function getEvmNonce(rpcUrl: string, address: string): Promise<number> {
   const result = await ethRpc(rpcUrl, 'eth_getTransactionCount', [address, 'latest'])
-  return Number(BigInt(result || '0x0'))
+  if (typeof result !== 'string' || !/^0x[0-9a-f]+$/i.test(result)) throw new Error('EVM nonce lookup returned no valid result')
+  const nonce = Number(BigInt(result))
+  if (!Number.isSafeInteger(nonce)) throw new Error('EVM nonce exceeds the supported range')
+  return nonce
 }
 
 /** Estimate gas for a tx, returning fallback on failure. Adds 20% buffer. */
@@ -179,6 +181,9 @@ export async function estimateGas(
   tx: { to: string; from: string; data: string; value?: string },
   fallbackGas: bigint,
 ): Promise<bigint> {
+  // No gas-estimation endpoint in Pioneer's current API. Use the caller's
+  // explicit gas limit until one is available; never bypass its node pool.
+  if (isPioneerEvmSource(rpcUrl)) return fallbackGas
   try {
     const result = await ethRpc(rpcUrl, 'eth_estimateGas', [tx])
     const estimated = BigInt(result || '0x0')
