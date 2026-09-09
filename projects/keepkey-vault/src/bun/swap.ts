@@ -13,19 +13,14 @@ import type { ChainDef } from '../shared/chains'
 import type { SwapAsset, SwapQuote, SwapQuoteParams, ExecuteSwapParams, SwapResult } from '../shared/types'
 import { SOLANA_BLIND_SIGNING_REQUIRED, evmAdvancedModeRequiredMessage } from '../shared/types'
 import { toDeviceError, deviceErrorMessage } from '../shared/device-error'
-import { findEvmSchema } from './evm-schema-registry'
-import { findCertifiedEvmEnvelope } from './evm-certified-registry'
-import { isCertifiedEvmMetadata } from './evm-certified-schema'
-import { firmwareClearSigns } from './calldata-decoder'
+import { resolveEvmSchema } from './evm-schema-registry'
+import { evmCallRequiresAdvancedMode } from './evm-signing-policy'
 import { findSolanaSchema } from './solana-schema-registry'
 import { findCertifiedSolanaProof } from './solana-certified-registry'
-import {
-  hasCompleteCertifiedSolanaEnvelope,
-  supportsCertifiedClearSign,
-} from './solana-certified-policy'
+import { hasCompleteCertifiedSolanaEnvelope, supportsCertifiedClearSign } from './solana-certified-policy'
 import { getPioneer } from './pioneer'
 import { encodeDepositWithExpiry, encodeApprove, parseUnits, toHex, readPioneerBalance } from './txbuilder/evm'
-import { getEvmGasPrice, getEvmFeeData, getEvmNonce, getEvmBalance, getErc20Allowance, getErc20Balance, getErc20Decimals, broadcastEvmTx, EvmSignerVerificationError, waitForTxReceipt, estimateGas } from './evm-rpc'
+import { getEvmGasPrice, getEvmFeeData, getEvmNonce, getEvmBalance, getErc20Allowance, getErc20Balance, getErc20Decimals, broadcastEvmTx, EvmSignerVerificationError, waitForTxReceipt, estimateGas, isPioneerEvmSource } from './evm-rpc'
 import * as txb from './txbuilder'
 import { normalizeBchAddress } from './txbuilder'
 // Re-export pure parsing functions (used by tests + this module)
@@ -547,7 +542,7 @@ export type SwapSubStage =
 export interface SwapContext {
   wallet: SwapWallet
   getAllChains: () => ChainDef[]
-  getRpcUrl: (chain: ChainDef) => string | undefined
+  getEvmRpcSource: (chain: ChainDef) => string | undefined
   getBtcXpub: () => { xpub: string; scriptType: string; accountPath?: number[] } | undefined  // selected BTC xpub + account metadata
   getAllBtcXpubs: () => Array<{ xpub: string; scriptType: string; accountPath: number[] }>  // all funded BTC xpubs
   /** Wrap signing ops for emulator (shows confirm UI). Pass-through on real device. */
@@ -560,7 +555,6 @@ export interface SwapContext {
    *  Returns undefined when unknown (no cached features / policy not reported).
    *  Used to gate Solana swaps, which can only blind-sign. */
   isAdvancedModeEnabled?: () => boolean | undefined
-  /** Connected device firmware. Certified ClearSign authority starts at 7.16. */
   getFirmwareVersion?: () => string | undefined
   /** User's configured Solana RPC, for the host-side outflow check. */
   getSolanaRpcEndpoint?: () => string | undefined
@@ -583,7 +577,7 @@ export const NOOP_PUSH_SUBSTAGE = (_stage: SwapSubStage): void => { /* intention
 
 /** Execute a swap: build tx, sign on device, broadcast */
 export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): Promise<SwapResult> {
-  const { wallet, getAllChains, getRpcUrl, getBtcXpub, getAllBtcXpubs, wrapSign, pushSubStage, onClearSignEvent } = ctx
+  const { wallet, getAllChains, getEvmRpcSource, getBtcXpub, getAllBtcXpubs, wrapSign, pushSubStage, onClearSignEvent } = ctx
   const stage = (s: SwapSubStage) => { try { pushSubStage(s) } catch { /* never block on push */ } }
 
   // Resolve source chain
@@ -695,30 +689,26 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
       // Dropping it here routes into the opaque-consent path below, which asks
       // the user to opt in. Perverse otherwise: a route WITHOUT a schema works
       // (consent -> blind sign) while a route WITH one dies.
-      // The certified signer understands both real Relay shapes: v0 messages
-      // with address-table entries receive schema + LUT proof + certificate;
-      // self-contained legacy/v0 messages receive schema + certificate only.
-      // A routine catalog miss or unavailable service falls through to the
-      // existing runtime-schema/explicit-consent path.
-      let certifiedProof: Awaited<ReturnType<typeof findCertifiedSolanaProof>> = undefined
+      //
+      // Certified path first: a KeepKey root certificate authorizes firmware
+      // to trust the resolved LUT accounts directly, so — unlike the
+      // runtime-signer schema below — it needs no AdvancedMode and works even
+      // when the message still carries lookup tables. Never blocks the
+      // fallback: a service outage or a route outside the reviewed catalog
+      // just drops through to the existing behavior unchanged.
+      let certifiedProof: Awaited<ReturnType<typeof findCertifiedSolanaProof>>
       const firmwareVersion = ctx.getFirmwareVersion?.()
       if (supportsCertifiedClearSign(firmwareVersion)) {
         try {
-          certifiedProof = await findCertifiedSolanaProof(
-            params.relayTx.serializedTx,
-            'relayDepositNative',
-          )
+          certifiedProof = await findCertifiedSolanaProof(params.relayTx.serializedTx, isTokenCaip(params.fromCaip) ? 'relayDepositToken' : 'relayDepositNative')
         } catch (err: any) {
-          swapLog(`${TAG} certified Solana ClearSign proof unavailable: ${err?.message || err}`)
+          console.warn(`${TAG} certified Solana ClearSign proof unavailable: ${err?.message || err}`)
         }
       } else {
-        swapLog(`${TAG} certified Solana ClearSign skipped: firmware ${firmwareVersion || 'unknown'} < 7.16.0`)
+        console.info(`${TAG} certified Solana ClearSign unsupported by firmware ${firmwareVersion || 'unknown'}; using the existing consent flow`)
       }
       if (certifiedProof) {
-        const shape = certifiedProof.lutProof
-          ? `${certifiedProof.lutProof.accounts.length} LUT accounts`
-          : 'self-contained message (no LUT proof)'
-        swapLog(`${TAG} certified Solana ClearSign proof attached: ${shape}`)
+        console.info(`${TAG} certified Solana ClearSign proof attached (${certifiedProof.lutProof?.accounts.length || 0} LUT accounts)`)
       }
 
       const solSchemaAvailable = findSolanaSchema(params.relayTx.serializedTx)
@@ -726,7 +716,7 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
       // loaded signers are only honoured with it on), and after the user has
       // explicitly consented to blind signing (re-attaching would refuse again
       // and loop).
-      const solSchema = (certifiedProof || ctx.isAdvancedModeEnabled?.() === false || params.allowSolanaBlindSigning === true)
+      const solSchema = certifiedProof || ctx.isAdvancedModeEnabled?.() === false || params.allowSolanaBlindSigning === true
         ? undefined
         : solSchemaAvailable
       if (solSchemaAvailable && !solSchema && !certifiedProof) {
@@ -735,16 +725,20 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
       if (solSchema) {
         swapLog(`${TAG} clear-sign schema attached: ${solSchema.program}/${solSchema.instruction} (keyId=${solSchema.signerKeyId})`)
       }
+      if (params.relayTx.solanaSwapMetadata && !certifiedProof) {
+        // The old host model called protobuf fields 5-7 "swap metadata".
+        // Firmware 7.16 defines those fields as a repeated LUT account list,
+        // its signature, and signer id. Sending the obsolete envelope would
+        // be ignored as a malformed LUT list and must never count as verified
+        // ClearSign coverage or suppress the explicit blind-sign consent.
+        swapLog(`${TAG} obsolete Solana swap metadata withheld: 7.16 requires a LUT account attestation`)
+      }
       unsignedTx = {
         addressNList: fromChain.defaultPath,
         rawTx: params.relayTx.serializedTx,
         allowBlindSigning: params.allowSolanaBlindSigning === true,
         ...(certifiedProof
-          ? {
-              ...(certifiedProof.lutProof ? { lutProof: certifiedProof.lutProof } : {}),
-              schema: certifiedProof.schema,
-              certificate: certifiedProof.certificate,
-            }
+          ? { ...(certifiedProof.lutProof ? { lutProof: certifiedProof.lutProof } : {}), schema: certifiedProof.schema, certificate: certifiedProof.certificate }
           : {}),
         ...(solSchema
           ? { schema: { payload: solSchema.payload, signature: solSchema.signature, signerKeyId: solSchema.signerKeyId } }
@@ -764,7 +758,7 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
       })
       unsignedTx = buildResult.unsignedTx
     } else {
-      const result = await buildRelaySwapTx(params, fromChain, fromAddress, getRpcUrl, isErc20Source, /* previewMode */ false)
+      const result = await buildRelaySwapTx(params, fromChain, fromAddress, getEvmRpcSource, isErc20Source, /* previewMode */ false, supportsCertifiedClearSign(ctx.getFirmwareVersion?.()))
       unsignedTx = result.unsignedTx
       fromAmountBaseUnits = result.fromAmountBaseUnits
 
@@ -781,7 +775,7 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
           : (signedApprove?.serializedTx || signedApprove?.serialized || '')
         if (!approveHex) throw new Error('Failed to extract serialized approve tx (relay path)')
         if (!approveHex.startsWith('0x')) approveHex = '0x' + approveHex
-        const rpcUrl = getRpcUrl(fromChain)
+        const rpcUrl = getEvmRpcSource(fromChain)
         stage('approve-broadcasting')
         if (rpcUrl) {
           approvalTxid = await broadcastEvmTx(rpcUrl, approveHex, fromAddress)
@@ -802,7 +796,7 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
 
   // ── EVM chains: MUST use router contract depositWithExpiry() ──
   } else if (fromChain.chainFamily === 'evm') {
-    const result = await buildEvmSwapTx(params, fromChain, fromAddress, pioneer, getRpcUrl, isErc20Source, wallet, /* previewMode */ false, stage)
+    const result = await buildEvmSwapTx(params, fromChain, fromAddress, pioneer, getEvmRpcSource, isErc20Source, wallet, /* previewMode */ false, stage)
     unsignedTx = result.unsignedTx
     approvalTxid = result.approvalTxid
 
@@ -883,6 +877,7 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
       memo: params.memo,
       feeLevel: params.feeLevel,
       isMax: params.isMax,
+      isSwapDeposit: true,
       fromAddress,
       xpub,
       allXpubs,
@@ -959,15 +954,16 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
     unsignedTx = buildResult.unsignedTx
   }
 
-  // Prebuilt Relay Solana payloads use a custom program. Some real routes are
-  // self-contained v0 messages; others resolve accounts through lookup tables.
-  // Without a complete certified envelope (or a usable runtime schema), the
-  // device must classify the route as opaque. Ask for explicit one-shot consent
-  // before the hardware prompt, but do not block transactions firmware can
-  // natively ClearSign.
+  // Prebuilt Relay Solana payloads currently use a custom program plus
+  // lookup-table accounts. Without a transaction-bound ClearSign descriptor the
+  // device must classify that exact route as opaque. Ask for explicit one-shot
+  // consent before the hardware prompt, but do not block other Solana or v0
+  // transactions that firmware can natively ClearSign.
   const needsOpaqueSolanaFallback =
     fromChain.chainFamily === 'solana' &&
     !!params.relayTx?.serializedTx &&
+    // Both self-contained and LUT-backed certified messages bypass the host
+    // opaque gate; firmware still authenticates every certificate/signature.
     !hasCompleteCertifiedSolanaEnvelope(unsignedTx) &&
     // A reusable schema lets the device read this instruction, so no
     // blind-sign consent is needed.
@@ -1077,13 +1073,10 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
 
   // Same shape as the Solana gate above, for EVM contract calls the firmware
   // cannot decode (relay/aggregator routes are the common case — they are not
-  // in the device's pinned allowlist, see firmwareClearSigns).
+  // in the device's pinned allowlist).
   //
-  // Clear-signing is NOT an alternative here today. Metadata verification needs
-  // a runtime-loaded signer, and loading one ALSO requires AdvancedMode
-  // (firmware fsm_msg_ethereum.h + signed_metadata.c); there is no built-in
-  // trust anchor yet — docs/security/clearsign-key-delegation-roadmap.md tracks
-  // the delegation work that would remove this requirement.
+  // A 7.16 root-certified envelope is the one alternative to AdvancedMode.
+  // Runtime/self-service metadata is annotation-only and remains gated.
   //
   // Without this check the device renders "Blocked", replies ActionCancelled,
   // and hdwallet's transport (transport.ts) constructs a bare
@@ -1094,13 +1087,13 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
   // message names the actual blocker.
   if (
     fromChain.chainFamily === 'evm' &&
-    typeof unsignedTx?.data === 'string' && unsignedTx.data.length > 2 &&
-    !firmwareClearSigns(unsignedTx.to, unsignedTx.data, Number(unsignedTx.chainId)) &&
-    !isCertifiedEvmMetadata(unsignedTx.txMetadata) &&
-    // Only when we KNOW it is off. `undefined` means the policy was not
-    // reported (no cached features), and guessing would block a swap the
-    // device would have signed.
-    ctx.isAdvancedModeEnabled?.() === false
+    evmCallRequiresAdvancedMode(
+      unsignedTx?.to,
+      unsignedTx?.data,
+      Number(unsignedTx?.chainId),
+      ctx.isAdvancedModeEnabled?.(),
+      unsignedTx?.txMetadata,
+    )
   ) {
     swapLog(`${TAG} EVM blind-sign gate: to=${unsignedTx.to} selector=${String(unsignedTx.data).slice(0, 10)} — AdvancedMode is off`)
     // Message content is load-bearing: SwapDialog routes on /AdvancedMode/i to
@@ -1109,7 +1102,7 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
   }
 
   // 4. Sign on device (user confirms tx details on hardware wallet)
-  swapLog(`${TAG} Signing ${fromChain.chainFamily} tx via ${fromChain.signMethod}...`)
+  console.info(`${TAG} policy passed; signing ${fromChain.chainFamily} via ${fromChain.signMethod} (advancedMode=${ctx.isAdvancedModeEnabled?.() ?? 'unknown'}, metadataKey=${unsignedTx?.txMetadata?.keyId ?? 'none'})`)
   stage('swap-signing')
   let signedTx: any
   const clearSignMaterial = unsignedTx?.schema?.payload
@@ -1198,10 +1191,11 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
   }
   swapLog(`${TAG} Sign complete, serialized=${!!signedTx?.serialized || !!signedTx?.serializedTx}`)
 
-  // 5. Broadcast — prefer direct RPC for EVM chains (Pioneer relay can silently drop txs)
+  // 5. Broadcast — built-in EVM chains use Pioneer; custom chains use the
+  // explicitly configured node. Both verify the recovered signer first.
   stage('swap-broadcasting')
   let txid: string
-  const swapRpcUrl = fromChain.chainFamily === 'evm' ? getRpcUrl(fromChain) : undefined
+  const swapRpcUrl = fromChain.chainFamily === 'evm' ? getEvmRpcSource(fromChain) : undefined
   if (swapRpcUrl && fromChain.chainFamily === 'evm') {
     // Extract serialized tx hex from signed result
     const serializedHex: string | undefined = typeof signedTx === 'string' ? signedTx
@@ -1211,12 +1205,15 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
     }
     try {
       txid = await broadcastEvmTx(swapRpcUrl, serializedHex, fromAddress)
-      swapLog(`${TAG} Broadcast via direct RPC: ${txid}`)
+      swapLog(`${TAG} Broadcast via ${isPioneerEvmSource(swapRpcUrl) ? 'Pioneer' : 'custom RPC'}: ${txid}`)
     } catch (directErr: any) {
       // A signer-verification failure is a local safety decision, not an RPC
       // availability problem. Never route the rejected bytes around the guard
       // through Pioneer.
       if (directErr instanceof EvmSignerVerificationError) throw directErr
+      // The built-in path already called Pioneer. Preserve its error rather
+      // than submitting the same transaction to the same service a second time.
+      if (isPioneerEvmSource(swapRpcUrl)) throw directErr
 
       // The pre-sign balance check in buildRelaySwapTx already verified
       // value + gas <= native balance against this same RPC URL. So a node
@@ -1272,7 +1269,7 @@ export async function previewSwapBuild(
   params: ExecuteSwapParams,
   ctx: SwapContext,
 ): Promise<{ approveTx?: any; unsignedTx: any; allowance?: { current: string; required: string; sufficient: boolean; spender: string; tokenContract: string }; balance?: { current: string; required: string; sufficient: boolean; tokenContract?: string } }> {
-  const { wallet, getAllChains, getRpcUrl, getBtcXpub, getAllBtcXpubs } = ctx
+  const { wallet, getAllChains, getEvmRpcSource, getBtcXpub, getAllBtcXpubs } = ctx
 
   const allChains = getAllChains()
   const fromChain = allChains.find(c => c.id === params.fromChainId)
@@ -1327,11 +1324,11 @@ export async function previewSwapBuild(
       })
       return { unsignedTx: buildResult.unsignedTx }
     }
-    const result = await buildRelaySwapTx(params, fromChain, fromAddress, getRpcUrl, isErc20Source, /* previewMode */ true)
+    const result = await buildRelaySwapTx(params, fromChain, fromAddress, getEvmRpcSource, isErc20Source, /* previewMode */ true, supportsCertifiedClearSign(ctx.getFirmwareVersion?.()))
     return { unsignedTx: result.unsignedTx, approveTx: result.approveTx, allowance: result.allowance, balance: result.balance }
   }
   if (fromChain.chainFamily === 'evm') {
-    const result = await buildEvmSwapTx(params, fromChain, fromAddress, pioneer, getRpcUrl, isErc20Source, wallet, /* previewMode */ true)
+    const result = await buildEvmSwapTx(params, fromChain, fromAddress, pioneer, getEvmRpcSource, isErc20Source, wallet, /* previewMode */ true)
     return { unsignedTx: result.unsignedTx, approveTx: result.approveTx, allowance: result.allowance, balance: result.balance }
   }
   if (fromChain.chainFamily === 'utxo') {
@@ -1395,7 +1392,7 @@ export async function previewSwapBuild(
     }
     const buildResult = await txb.buildTx(pioneer, fromChain, {
       chainId: fromChain.id, to: params.inboundAddress, amount: params.amount, memo: params.memo,
-      feeLevel: params.feeLevel, isMax: params.isMax, fromAddress, xpub, allXpubs, scriptTypeOverride, accountPath,
+      feeLevel: params.feeLevel, isMax: params.isMax, isSwapDeposit: true, fromAddress, xpub, allXpubs, scriptTypeOverride, accountPath,
     })
     return { unsignedTx: buildResult.unsignedTx }
   }
@@ -1423,9 +1420,10 @@ async function buildRelaySwapTx(
   params: ExecuteSwapParams,
   fromChain: ChainDef,
   fromAddress: string,
-  getRpcUrl: (chain: ChainDef) => string | undefined,
+  getEvmRpcSource: (chain: ChainDef) => string | undefined,
   isErc20Source = false,
-  _previewMode = false,  // reserved — caller (executeSwap vs previewSwapBuild) handles signing/broadcasting
+  previewMode = false,
+  certifiedMetadataSupported = false,
 ): Promise<{ unsignedTx: any; approveTx?: any; fromAmountBaseUnits?: string; allowance?: { current: string; required: string; sufficient: boolean; spender: string; tokenContract: string }; balance?: { current: string; required: string; sufficient: boolean; tokenContract?: string } }> {
   const relay = params.relayTx!
   const evmSigningPath = params.fromEvmAddressIndex != null
@@ -1447,13 +1445,14 @@ async function buildRelaySwapTx(
   }
 
   const chainId = expectedChainId
-  const rpcUrl = getRpcUrl(fromChain)
+  const rpcUrl = getEvmRpcSource(fromChain)
 
   // Fetch nonce (relay tx doesn't include it)
   let nonce: number | undefined
   if (rpcUrl) {
     try { nonce = await getEvmNonce(rpcUrl, fromAddress) } catch (e: any) {
-      console.warn(`${TAG} Failed to fetch nonce via RPC for relay tx: ${e.message}`)
+      console.warn(`${TAG} Failed to fetch nonce via EVM service for relay tx: ${e.message}`)
+      if (isPioneerEvmSource(rpcUrl)) throw e
     }
   }
   if (nonce === undefined) {
@@ -1599,7 +1598,8 @@ async function buildRelaySwapTx(
     try {
       nativeBalance = await getEvmBalance(rpcUrl, fromAddress)
     } catch (e: any) {
-      console.warn(`${TAG} Failed to fetch native balance via RPC for relay tx: ${e.message}`)
+      console.warn(`${TAG} Failed to fetch native balance via EVM service for relay tx: ${e.message}`)
+      if (isPioneerEvmSource(rpcUrl)) throw e
     }
   }
   if (nativeBalance === undefined) {
@@ -1744,17 +1744,24 @@ async function buildRelaySwapTx(
     data: relay.data,
   }
 
-  // Attach a signed v2 clear-sign schema when one covers this exact
-  // (chain, contract, selector). The schema names the method and its args but
-  // no amounts and no tx hash, so the device decodes the values from the
-  // calldata it is about to sign — turning a blind-sign prompt into a labelled
-  // review. Absent or mismatched: nothing is attached and behaviour is
-  // unchanged, so this can never block a swap.
-  const certifiedEvmSchema = await findCertifiedEvmEnvelope(chainId, relay.to, relay.data)
-  const evmSchema = certifiedEvmSchema || findEvmSchema(chainId, relay.to, relay.data)
+  // Older firmware uses the ordinary signing/Advanced Mode path, without a
+  // metadata preflight that its firmware may not implement.
+  // Certified envelopes require supported firmware; a device rejection on
+  // that path still fails closed and never silently drops the certificate.
+  // Quote preview must resolve the same certified schema as execution. The
+  // approval UI is built from this preview; attaching only during execution
+  // makes a verified call look blind and asks the user for Advanced Mode
+  // before the live signer ever runs. resolveEvmSchema sends only the reviewed
+  // shape (chain, contract, selector, byte length), never calldata arguments.
+  const selector = String(relay.data || '').slice(0, 10).toLowerCase()
+  const calldataLength = String(relay.data || '').replace(/^0x/i, '').length / 2
+  console.info(`${TAG} ClearSign lookup (${previewMode ? 'preview' : 'execute'}): chain=${chainId} selector=${selector} bytes=${calldataLength} certifiedSupported=${certifiedMetadataSupported}`)
+  const evmSchema = await resolveEvmSchema(chainId, relay.to, relay.data, certifiedMetadataSupported)
   if (evmSchema) {
     unsignedTx.txMetadata = { signedPayload: evmSchema.signedPayload, keyId: evmSchema.keyId }
-    swapLog(`${TAG} clear-sign schema attached: ${evmSchema.method} (keyId=${evmSchema.keyId})`)
+    console.info(`${TAG} clear-sign schema attached: ${evmSchema.method} (keyId=${evmSchema.keyId}, source=${evmSchema.source || 'local-test'})`)
+  } else {
+    console.info(`${TAG} ClearSign lookup complete: no metadata; device policy still applies`)
   }
 
   // EIP-1559 fields — use signedFeePerGas (relay's quoted cap) so the signed tx
@@ -1829,7 +1836,7 @@ async function buildEvmSwapTx(
   fromChain: ChainDef,
   fromAddress: string,
   pioneer: any,
-  getRpcUrl: (chain: ChainDef) => string | undefined,
+  getEvmRpcSource: (chain: ChainDef) => string | undefined,
   isErc20Source: boolean,
   wallet: any,
   previewMode = false,
@@ -1849,7 +1856,7 @@ async function buildEvmSwapTx(
     ? params.expiry
     : Math.floor(Date.now() / 1000) + 3600
   const chainId = parseInt(fromChain.chainId || '1', 10)
-  const rpcUrl = getRpcUrl(fromChain)
+  const rpcUrl = getEvmRpcSource(fromChain)
 
   // Fetch gas price (preferring EIP-1559), nonce, native balance.
   // EIP-1559 path: maxFeePerGas + maxPriorityFeePerGas, used on chains that support eth_feeHistory.
@@ -1912,6 +1919,7 @@ async function buildEvmSwapTx(
   if (rpcUrl) {
     try { nonce = await getEvmNonce(rpcUrl, fromAddress) } catch (e: any) {
       console.warn(`${TAG} Failed to fetch nonce via RPC: ${e.message}`)
+      if (isPioneerEvmSource(rpcUrl)) throw e
     }
   }
   if (nonce === undefined) {
@@ -1934,6 +1942,7 @@ async function buildEvmSwapTx(
   if (rpcUrl) {
     try { nativeBalance = await getEvmBalance(rpcUrl, fromAddress) } catch (e: any) {
       console.warn(`${TAG} Failed to fetch native balance via RPC: ${e.message}`)
+      if (isPioneerEvmSource(rpcUrl)) throw e
     }
   }
   if (nativeBalance === undefined) {
@@ -1968,7 +1977,7 @@ async function buildEvmSwapTx(
     if (rpcUrl) {
       try {
         tokenDecimals = await getErc20Decimals(rpcUrl, tokenContract)
-        swapLog(`${TAG} Token decimals (direct RPC): ${tokenDecimals}`)
+        swapLog(`${TAG} Token decimals (EVM service): ${tokenDecimals}`)
       } catch (e: any) {
         console.warn(`${TAG} Direct RPC decimals failed: ${e.message}, trying Pioneer...`)
         try {
@@ -2093,7 +2102,7 @@ async function buildEvmSwapTx(
       if (rpcUrl) {
         stage('approve-broadcasting')
         approvalTxid = await broadcastEvmTx(rpcUrl, approveHex, fromAddress)
-        swapLog(`${TAG} Approve tx broadcast (direct RPC): ${approvalTxid}`)
+        swapLog(`${TAG} Approve tx broadcast (EVM service): ${approvalTxid}`)
 
         // Wait for approval receipt before building deposit — prevents nonce gap if approval reverts.
         // 180s tolerates busy mainnet (some hours: pending pool 30-60s, then mining).

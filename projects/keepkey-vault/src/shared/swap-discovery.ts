@@ -538,6 +538,17 @@ export async function buildAssetEntries(input: BuildEntriesInput): Promise<Asset
     }
   }
 
+  // Keep token balances that are not in the discovery catalog. This is common
+  // for newer/long-tail SPL tokens: Pioneer can report a held balance before
+  // its catalog or swap list has been updated. The picker must still show the
+  // asset so the user can inspect it or paste/select it for a transfer.
+  const balanceOnlyTokens = new Map<string, { amount: string; usd: number; symbol: string; name: string; decimals?: number; icon?: string }>()
+  for (const cb of input.balances) {
+    for (const tok of cb.tokens || []) {
+      if (tok.caip) balanceOnlyTokens.set(canonicalizeCaip(tok.caip), { amount: tok.balance, usd: tok.balanceUsd || 0, symbol: tok.symbol, name: tok.name, decimals: tok.decimals, icon: tok.icon })
+    }
+  }
+
   // Canonicalize keys so duplicate chain encodings collapse. pioneer-discovery
   // has 3 TRX entries (tron:27Lqcw, tron:27lqcw, tron:0x2b6653dc); without
   // this dedupe the picker rendered all three.
@@ -623,6 +634,30 @@ export async function buildAssetEntries(input: BuildEntriesInput): Promise<Asset
       iconUrl: ct.iconUrl,
       isNative: false,
       balance: balanceByCaip.get(caip),
+      swappable: undefined,
+      swappableAsset: undefined,
+      availability: assessWithFirmware(caip, input.firmwareVersion),
+    })
+  }
+
+  for (const [caip, balance] of balanceOnlyTokens) {
+    if (seen.has(caip)) continue
+    const slash = caip.indexOf('/')
+    if (slash < 0) continue
+    const chainCaip2 = caip.slice(0, slash)
+    const parsed = parseCaip(caip)
+    if (!parsed.isToken) continue
+    const tokenAddress = parsed.contractAddress || 'token'
+    seen.add(caip)
+    entries.push({
+      caip,
+      symbol: balance.symbol || `${tokenAddress.slice(0, 4)}…${tokenAddress.slice(-4)}`,
+      name: balance.name || 'Token',
+      chainId: chainCaip2,
+      decimals: balance.decimals ?? 0,
+      iconUrl: balance.icon,
+      isNative: false,
+      balance,
       swappable: undefined,
       swappableAsset: undefined,
       availability: assessWithFirmware(caip, input.firmwareVersion),

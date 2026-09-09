@@ -50,6 +50,69 @@ function requireClearsignAdvancedMode(): void {
 	}
 }
 
+const AUTHENTICATOR_SLOT_COUNT = 10
+
+function normalizeAuthenticatorLabel(value: unknown, field: string): string {
+	const normalized = String(value || '').trim()
+	if (!normalized) throw new Error(`${field} is required`)
+	if (/[:\x00-\x1f\x7f]/.test(normalized)) {
+		throw new Error(`${field} cannot contain a colon or control character`)
+	}
+	if (Buffer.byteLength(normalized, 'utf8') > 11) {
+		throw new Error(`${field} is limited to 11 characters by the current firmware`)
+	}
+	return normalized
+}
+
+function normalizeAuthenticatorSecret(value: unknown): string {
+	const normalized = String(value || '').toUpperCase().replace(/[\s-]+/g, '')
+	if (!normalized) throw new Error('Authenticator secret is required')
+	if (!/^[A-Z2-7]+={0,6}$/.test(normalized)) {
+		throw new Error('Authenticator secret must be RFC 4648 Base32')
+	}
+	const unpadded = normalized.replace(/=+$/, '')
+	const decodedBytes = Math.floor(unpadded.length * 5 / 8)
+	if (decodedBytes < 16) throw new Error('Authenticator secret must contain at least 128 bits')
+	if (decodedBytes > 20) throw new Error('Authenticator secret exceeds the firmware\'s 20-byte limit')
+	return unpadded
+}
+
+function authenticatorErrorMessage(cause: unknown): string {
+	if (cause instanceof Error) return cause.message
+	if (typeof cause === 'string') return cause
+	if (cause && typeof cause === 'object') {
+		const value = cause as Record<string, unknown>
+		for (const key of ['message', 'msg', 'error', 'reason']) {
+			if (typeof value[key] === 'string') return value[key]
+		}
+		// hdwallet rejects device failures as an Event whose `message` field is
+		// the protobuf's plain object (for example, message.message contains the
+		// firmware's "Account not found" text).
+		if (value.message && typeof value.message === 'object') {
+			const nested = value.message as Record<string, unknown>
+			for (const key of ['message', 'msg', 'error', 'reason']) {
+				if (typeof nested[key] === 'string') return nested[key]
+			}
+		}
+	}
+	return String(cause)
+}
+
+async function settleAuthenticatorTransport(wallet: any): Promise<void> {
+	// Legacy Authenticator lookups report an empty slot as Failure_ActionCancelled.
+	// hdwallet intentionally propagates that failure to the next queued call, so
+	// consume it with a harmless ping before allowing a mutation to begin.
+	for (let attempt = 0; attempt < 2; attempt++) {
+		try {
+			await wallet.ping({ msg: 'authenticator-ready', passphrase: false })
+			return
+		} catch (cause) {
+			if (attempt === 0 && /Action cancelled|Account not found/i.test(authenticatorErrorMessage(cause))) continue
+			throw cause
+		}
+	}
+}
+
 const LOG_DIR = (process.platform === 'win32' ? process.env.LOCALAPPDATA : (process.env.HOME + "/Library/Application Support")) + "/com.keepkey.vault"
 const LOG_FILE = LOG_DIR + "/vault-backend.log"
 try { fs.mkdirSync(LOG_DIR, { recursive: true }) } catch {}
@@ -73,8 +136,9 @@ function _writeLogSync(line: string): void {
 
 const _ts = () => new Date().toISOString()
 const _fmt = (...args: any[]) => args.map(a => typeof a === 'object' ? JSON.stringify(a, null, 2) : String(a)).join(' ')
-const _origLog = console.log, _origWarn = console.warn, _origError = console.error
+const _origLog = console.log, _origInfo = console.info, _origWarn = console.warn, _origError = console.error
 console.log = (...args: any[]) => { _writeLogSync(`[${_ts()}] ${_fmt(...args)}\n`); _origLog(...args) }
+console.info = (...args: any[]) => { _writeLogSync(`[${_ts()}] INFO: ${_fmt(...args)}\n`); _origInfo(...args) }
 console.warn = (...args: any[]) => { _writeLogSync(`[${_ts()}] WARN: ${_fmt(...args)}\n`); _origWarn(...args) }
 console.error = (...args: any[]) => { _writeLogSync(`[${_ts()}] ERR: ${_fmt(...args)}\n`); _origError(...args) }
 _writeLogSync(`\n=== New session: ${_ts()} ===\n`)
@@ -133,10 +197,10 @@ import { runUsbDiagnostic as runUsbDiagnosticProbe } from "./windows-usb-probe"
 import { startRestApi, clearFeaturesCache, setUiActive, uiHeartbeat, type RestApiCallbacks } from "./rest-api"
 import { signSolanaWireTransaction } from "./solana-signing"
 import { AuthStore } from "./auth"
-import { getPioneer, getPioneerApiBase, resetPioneer, DEFAULT_API_BASE, getQueryKey as getPioneerQueryKey } from "./pioneer"
+import { ensurePioneerQueryKeyRegistered, getPioneer, getPioneerApiBase, resetPioneer, DEFAULT_API_BASE, getQueryKey as getPioneerQueryKey } from "./pioneer"
 import { setBtcBackendOffline, setBtcNodeConfig, setBtcNodeDeviceEligible, isBtcNodeActive, getBtcBackend, broadcastBtcTx } from "./btc-backend"
 import { isBitcoinOnlyVariant } from "../shared/flags"
-import { fetchDefiPositions } from "./zapper"
+import { fetchDefiPositions } from "./zerion"
 import { loadSupportedChains } from "../shared/swap-support-matrix"
 import { PioneerSocket } from "./pioneer-socket"
 import { startEventStream, stopEventStream, type AddressEntry } from "./event-stream"
@@ -173,7 +237,9 @@ import {
 	validateProviderCeremony,
 	writeProviderKeyFile,
 } from "../shared/clearsign-provider-key"
-import { EVM_RPC_URLS, getTokenMetadata, broadcastEvmTx, verifyEvmSigner } from "./evm-rpc"
+import { getTokenMetadata, broadcastEvmTx, verifyEvmSigner } from "./evm-rpc"
+import { evmSourceForChain } from "./pioneer-evm"
+import { deviceErrorMessage } from "../shared/device-error"
 import type { ChainBalance, TokenBalance, CustomToken, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, EvmAddressSet, Bip85SeedMeta, StakingPosition, SwapAsset, AuditToken, DefiPosition, RecentActivity, ClearSignEvent, ClearSignSolanaSchemaArtifact } from "../shared/types"
 import type { VaultRPCSchema } from "../shared/rpc-schema"
 import { collectAndAnalyze, MAX_CHUNK_BYTES } from "./rng-audit"
@@ -848,15 +914,15 @@ function getAllChains(): ChainDef[] {
 	return [...CHAINS, ...customChainDefs]
 }
 
-/** Lookup RPC URL for a chain (custom chains from DB on miss, built-in chains from EVM_RPC_URLS) */
-function getRpcUrl(chain: ChainDef): string | undefined {
+/** Built-in EVM chains use Pioneer by network ID. Custom chains use only the
+ * RPC URL the user explicitly configured. Never embed public node URLs here. */
+function getEvmRpcSource(chain: ChainDef): string | undefined {
 	// Custom chains: query DB only for custom chain IDs (avoids per-call overhead for built-in chains)
 	if (chain.id.startsWith('evm-custom-')) {
 		const stored = getCustomChains().find(c => `evm-custom-${c.chainId}` === chain.id)
-		if (stored) return stored.rpcUrl
+		return evmSourceForChain(chain, stored?.rpcUrl)
 	}
-	// Built-in chains: lookup from EVM_RPC_URLS
-	return chain.chainId ? EVM_RPC_URLS[chain.chainId] : undefined
+	return evmSourceForChain(chain)
 }
 
 // ── REST API Server (on by default, can be disabled in Settings) ───────
@@ -1187,6 +1253,7 @@ function getOrCreateWcManager(): WalletConnectManager {
 					return address
 				},
 				'walletconnect:solanaSignTransaction',
+				() => engine.getDeviceState().firmwareVersion,
 			)
 			if (!result?.signature || !result.serializedTx) {
 				throw new Error('Device returned no Solana transaction signature')
@@ -1581,7 +1648,7 @@ async function emuSigningOp(
 	details: { operation: string; opLabel?: string; chain?: string; to?: string; toLabel?: string; value?: string; fee?: string; memo?: string },
 ): Promise<any> {
 	const { emuInteractiveConfirm } = await import('./emulator-window')
-	return emuInteractiveConfirm(fn, details, engine.emuDelegate)
+	return emuInteractiveConfirm(fn, details, engine.emuDelegate, (engine.wallet as any)?.transport)
 }
 
 // F5: best-effort confirm fields for the Cosmos-family tx shape (Cosmos/THOR/
@@ -1965,7 +2032,6 @@ async function headlessSwapQuote(params: SwapQuoteParams): Promise<SwapQuote> {
 	// shortfall. Fix: re-quote with the actual net delivery amount.
 	if (
 		quote.swapper === 'NEAR Intents'
-		&& params.isMax
 		&& params.fromCaip.startsWith('bip122:')
 		&& engine.wallet
 	) {
@@ -2020,7 +2086,7 @@ async function headlessSwapQuote(params: SwapQuoteParams): Promise<SwapQuote> {
 						? { allXpubs: estXpubs }
 						: { xpub: estXpub, accountPath: estAccountPath }),
 				})
-				if (est && est.feeSat > 0) {
+				if (est && est.feeSat > 0 && est.netSat > 0 && (est.netSat / 10 ** fromChain.decimals) < Number(params.amount)) {
 					const netAmount = (est.netSat / 1e8).toFixed(8)
 					console.log(`[swap] NEAR Intents sendMax: re-quoting ${fromChain.symbol} with net ${netAmount} (fee=${est.feeSat} sat)`)
 					quote = { ...await getSwapQuote({ ...params, amount: netAmount, isMax: false }), netFromAmount: netAmount }
@@ -2098,7 +2164,6 @@ async function headlessExecuteSwap(params: ExecuteSwapParams, pushSubStage: (sta
 	let execParams = params
 	if (
 		cachedQuote?.netFromAmount
-		&& params.isMax
 		&& params.fromCaip.startsWith('bip122:')
 		&& (params.swapper === 'NEAR Intents' || params.integration === 'nearIntents')
 	) {
@@ -2109,7 +2174,7 @@ async function headlessExecuteSwap(params: ExecuteSwapParams, pushSubStage: (sta
 	const result = await executeSwap(execParams, {
 		wallet: engine.wallet,
 		getAllChains,
-		getRpcUrl,
+		getEvmRpcSource,
 		getBtcXpub: () => {
 			if (btcAccounts.isInitialized) {
 				const selected = btcAccounts.getSelectedXpub()
@@ -2133,6 +2198,9 @@ async function headlessExecuteSwap(params: ExecuteSwapParams, pushSubStage: (sta
 			source: 'vault-rpc',
 			...event,
 		}),
+	}).catch((error: any) => {
+		console.error(`[swap] execute failed (${params.fromChainId}): ${deviceErrorMessage(error)}`)
+		throw error
 	})
 	const scope = getWalletDbScope()
 	// Register swap for tracking (non-blocking)
@@ -2654,6 +2722,100 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!engine.wallet) throw new Error('No device connected')
 				return await engine.wallet.ping({ msg: params.msg || 'pong', passphrase: false })
 			},
+			authenticatorListAccounts: async () => {
+				if (!engine.wallet) throw new Error('No device connected')
+				const list = async () => {
+					const accounts: Array<{ slot: number; issuer: string; account: string }> = []
+					for (let slot = 0; slot < AUTHENTICATOR_SLOT_COUNT; slot++) {
+						try {
+							// passphrase=true selects hdwallet's long interactive timeout. The
+							// firmware authenticator handler performs its own PIN/passphrase gate.
+							const result = await engine.wallet!.ping({
+								msg: `\x17getAccount:${slot}`,
+								passphrase: true,
+							})
+							const separator = result.msg.indexOf(':')
+							if (separator <= 0) {
+								console.warn(`[authenticator] slot ${slot} returned an unparseable account label`)
+								continue
+							}
+							accounts.push({
+								slot,
+								issuer: result.msg.slice(0, separator),
+								account: result.msg.slice(separator + 1),
+							})
+						} catch (cause) {
+							const message = authenticatorErrorMessage(cause)
+							if (/Account not found|Slot request out of range/i.test(message)) continue
+							throw cause
+						}
+					}
+					return accounts
+				}
+				return engine.isEmulator
+					? await emuSigningOp(list, { operation: 'authenticatorListAccounts', opLabel: 'Unlock authenticator accounts' })
+					: await list()
+			},
+			authenticatorAddAccount: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				const issuer = normalizeAuthenticatorLabel(params.issuer, 'Issuer')
+				const account = normalizeAuthenticatorLabel(params.account, 'Account')
+				const secret = normalizeAuthenticatorSecret(params.secret)
+				await settleAuthenticatorTransport(engine.wallet)
+				const add = () => engine.wallet!.ping({
+					msg: `\x15initializeAuth:${issuer}:${account}:${secret}`,
+					passphrase: true,
+				})
+				if (engine.isEmulator) {
+					await emuSigningOp(add, { operation: 'authenticatorAddAccount', opLabel: `Add ${issuer} authenticator account` })
+				} else {
+					await add()
+				}
+			},
+			authenticatorGenerateOtp: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				const issuer = normalizeAuthenticatorLabel(params.issuer, 'Issuer')
+				const account = normalizeAuthenticatorLabel(params.account, 'Account')
+				const interval = 30
+				const seconds = Math.floor(Date.now() / 1000)
+				const timeSlice = Math.floor(seconds / interval)
+				const timeRemaining = interval - (seconds % interval)
+				await settleAuthenticatorTransport(engine.wallet)
+				const generate = () => engine.wallet!.ping({
+					msg: `\x16generateOTPFrom:${issuer}:${account}:${timeSlice}:${timeRemaining}`,
+					passphrase: true,
+				})
+				if (engine.isEmulator) {
+					await emuSigningOp(generate, { operation: 'authenticatorGenerateOtp', opLabel: `Show ${issuer} verification code` })
+				} else {
+					await generate()
+				}
+			},
+			authenticatorRemoveAccount: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				const issuer = normalizeAuthenticatorLabel(params.issuer, 'Issuer')
+				const account = normalizeAuthenticatorLabel(params.account, 'Account')
+				await settleAuthenticatorTransport(engine.wallet)
+				const remove = () => engine.wallet!.ping({
+					msg: `\x18removeAccount:${issuer}:${account}`,
+					passphrase: true,
+				})
+				if (engine.isEmulator) {
+					await emuSigningOp(remove, { operation: 'authenticatorRemoveAccount', opLabel: `Remove ${issuer} authenticator account` })
+				} else {
+					await remove()
+				}
+			},
+			authenticatorWipe: async () => {
+				if (!engine.wallet) throw new Error('No device connected')
+				await settleAuthenticatorTransport(engine.wallet)
+				const wipe = () => engine.wallet!.ping({ msg: '\x19wipeAuthdata:', passphrase: true })
+				if (engine.isEmulator) {
+					await emuSigningOp(wipe, { operation: 'authenticatorWipe', opLabel: 'Delete every device-resident authenticator account' })
+				} else {
+					await wipe()
+				}
+			},
 			openExternal: async (params) => {
 				// Validate up front — only open http(s) URLs, never local file://
 				// or javascript: schemes. The WebView passes user-visible URLs
@@ -3004,6 +3166,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							return address
 						},
 						'solanaSignTx',
+						() => engine.getDeviceState().firmwareVersion,
 					)
 					if (payload) recordClearSignEvent({
 						kind: 'transaction', outcome: 'signed', source: 'vault-rpc', chain: 'Solana',
@@ -3168,6 +3331,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!engine.wallet) throw new Error('No device connected')
 				const username = params?.username
 				if (!username) throw new Error('hiveCreateAccount requires a username')
+				if (!await ensurePioneerQueryKeyRegistered()) throw new Error('Pioneer query-key registration failed')
 				const wallet = engine.wallet as any
 				const accountIndex = params?.accountIndex ?? 0
 
@@ -3229,7 +3393,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const base = getPioneerApiBase()
 				const resp = await fetch(`${base}/api/v1/hive/create-account`, {
 					method: 'POST',
-					headers: { 'content-type': 'application/json' },
+					headers: { 'content-type': 'application/json', Authorization: getPioneerQueryKey() },
 					body: JSON.stringify({
 						username,
 						ownerKey: keys.owner, activeKey: keys.active,
@@ -3518,7 +3682,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					const swapDestinationContracts: PortfolioExtraContract[] = []
 					// Post-swap reconcile: for a just-received EVM token (swap output),
 					// force Pioneer to do a direct on-chain balanceOf via extraContracts —
-					// the indexed (Zapper) source lags a few blocks after a swap and can
+					// the indexed (Zerion) source lags a few blocks after a swap and can
 					// return a stale pre-swap balance marked fresh, which would persist.
 					const discoveryLookup = discoveryAssetData as unknown as Record<string, { symbol?: string; name?: string; icon?: string; decimals?: number }>
 					for (const destCaip of swapDestCaips) {
@@ -3577,9 +3741,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					const pubkeyChunks = chunkArray(pubkeysForPioneer, PIONEER_PORTFOLIO_CHUNK_SIZE)
 					const chunkResults = pubkeyChunks.length === 0 ? [] : await withTimeout(
 						mapWithConcurrency(pubkeyChunks, PIONEER_PORTFOLIO_MAX_CONCURRENCY, async (chunk, i) => {
-							// Opt the dashboard refresh into the server's DeFi merge. Server-side
-							// is cached, so the per-pubkey Zapper lookup is typically a Redis
-							// read; misses degrade to [] without blocking balances. Pre-v1.4
+							// Opt the dashboard refresh into the server's Zerion DeFi merge. The
+							// gateway serves its PostgreSQL-backed demand cache; misses degrade to
+							// [] without blocking balances. Pre-v1.4
 							// servers ignore the field and return the legacy shape unchanged.
 							const chunkBody: any = { pubkeys: chunk.map(p => ({ caip: p.caip, pubkey: p.pubkey })), includeDefi: true }
 							if (extraContracts.length > 0) chunkBody.extraContracts = extraContracts
@@ -3604,12 +3768,42 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 									)
 								}
 								const { entries, meta, defiPositions } = unwrapPortfolioResponse(resp)
-								return { entries, meta, defiPositions, error: null as string | null }
+								return { entries, meta, defiPositions, error: null as string | null, failed: null as typeof chunk | null }
 							} catch (err: any) {
 								const sampleChains = chunk.map((p: any) => String(p.caip || '').split('/')[0]).join(', ')
 								const error = getPioneerPortfolioErrorMessage(err)
 								console.warn(`[getBalances] Portfolio chunk ${i + 1}/${pubkeyChunks.length} failed (${sampleChains}):`, error)
-								return { entries: [] as any[], meta: null as PortfolioMeta | null, defiPositions: null as ServerDefiPosition[] | null, error }
+								if (chunk.length === 1) {
+									return { entries: [] as any[], meta: null as PortfolioMeta | null, defiPositions: null as ServerDefiPosition[] | null, error, failed: chunk }
+								}
+								// One sick chain (or a 503 on the whole request) must not brand all 8
+								// chains in the chunk degraded — that's what made the banner list 14
+								// chains for ~3 real faults. Re-ask per pubkey so the blame lands on
+								// the chains that actually failed. One extra round, only on failure.
+								// ponytail: retried without extraContracts — the retry exists to
+								// attribute the failure and salvage native balances, not custom tokens.
+								const singles = await Promise.all(chunk.map(async (p: any) => {
+									try {
+										const resp = await withTimeout(
+											pioneer.GetPortfolioBalances({ pubkeys: [{ caip: p.caip, pubkey: p.pubkey }], includeDefi: true }, { forceRefresh }),
+											PIONEER_PORTFOLIO_CHUNK_TIMEOUT_MS,
+											`GetPortfolioBalances retry ${p.caip}`
+										)
+										return { p, ...unwrapPortfolioResponse(resp), bad: false }
+									} catch (e: any) {
+										console.warn(`[getBalances] Per-chain retry failed for ${p.caip}:`, getPioneerPortfolioErrorMessage(e))
+										return { p, entries: [] as any[], meta: null as PortfolioMeta | null, defiPositions: null as ServerDefiPosition[] | null, bad: true }
+									}
+								}))
+								const failed = singles.filter(s => s.bad).map(s => s.p)
+								console.warn(`[getBalances] Chunk ${i + 1} split-retry: ${chunk.length - failed.length}/${chunk.length} recovered`)
+								return {
+									entries: singles.flatMap(s => s.entries),
+									meta: mergeMetas(singles.map(s => s.meta).filter(Boolean) as PortfolioMeta[]),
+									defiPositions: singles.flatMap(s => s.defiPositions || []),
+									error: failed.length > 0 ? error : null,
+									failed,
+								}
 							}
 						}),
 						PIONEER_PORTFOLIO_TOTAL_TIMEOUT_MS,
@@ -3625,7 +3819,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						console.warn(`[getBalances] Partial portfolio response: ${succeeded}/${pubkeyChunks.length} chunks succeeded — failed chains will show 0`)
 						for (let i = 0; i < chunkResults.length; i++) {
 							if (chunkResults[i].error) {
-								const chains = pubkeyChunks[i].map((p: any) => p.chainId || String(p.caip).split(':')[0]).join(', ')
+								const chains = (chunkResults[i].failed ?? pubkeyChunks[i]).map((p: any) => p.chainId || String(p.caip).split(':')[0]).join(', ')
 								console.warn(`[getBalances] Chunk ${i + 1} failed — excluded chains: ${chains}`)
 							}
 						}
@@ -3637,7 +3831,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						const failedPubkeySet = new Set<string>()
 						for (let i = 0; i < chunkResults.length; i++) {
 							if (chunkResults[i].error) {
-								for (const p of pubkeyChunks[i]) failedPubkeySet.add(`${p.caip}:${p.pubkey}`)
+								// `failed` is the per-chain retry's verdict — only the pubkeys that
+								// failed twice. Absent (single-pubkey chunk / older path) → whole chunk.
+								for (const p of (chunkResults[i].failed ?? pubkeyChunks[i])) failedPubkeySet.add(`${p.caip}:${p.pubkey}`)
 							}
 						}
 						effectivePubkeys = pubkeys.filter(p => !failedPubkeySet.has(`${p.caip}:${p.pubkey}`))
@@ -4083,7 +4279,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							symbol: agg.symbol,
 							balance: agg.balance > 0 ? agg.balance.toFixed(18).replace(/0+$/, '').replace(/\.$/, '') : '0',
 							// Chain total folds DeFi in so the dashboard $ keeps parity
-							// with zapper.xyz net worth. Wallet tokens are no longer
+							// with the indexed Zerion position total. Wallet tokens are no longer
 							// suppressed, so a wallet-held app-token (e.g. stETH) that the
 							// position also reports can double-count — accepted as the
 							// lesser evil vs hiding sendable balances (see note above).
@@ -4260,16 +4456,14 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				}
 
 				// ── Start SSE event stream for real-time tx notifications ──
-				// Build address list: EVM individual accounts + non-UTXO non-EVM chains.
-				// BTC/LTC/DOGE xpubs are excluded — watchtower derives and watches those server-side.
+				// Build one watch list for every provider-backed chain. UTXO entries are
+				// xpubs (including script-type discovery keys for BTC); the self-contained
+				// gateway watches them only for the lifetime of this SSE connection.
 				const streamAddresses: AddressEntry[] = []
 				for (const a of evmAddresses.toAddressSet().addresses) {
 					if (a.address && a.networkId) streamAddresses.push({ address: a.address, networkId: a.networkId })
 				}
 				for (const p of pubkeys) {
-					if (p.caip.startsWith('bip122:')) continue // UTXO — skip xpubs
-					if (p.pubkey.startsWith('xpub') || p.pubkey.startsWith('ypub') || p.pubkey.startsWith('zpub') ||
-					    p.pubkey.startsWith('dgub') || p.pubkey.startsWith('Ltub') || p.pubkey.startsWith('Mtub')) continue
 					if (p.networkId && p.pubkey) streamAddresses.push({ address: p.pubkey, networkId: p.networkId })
 				}
 				if (streamAddresses.length > 0) {
@@ -4488,7 +4682,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					const portfolioBody: any = { pubkeys: pubkeys.map(p => ({ caip: p.caip, pubkey: p.pubkey })) }
 					if (extraContracts.length > 0) portfolioBody.extraContracts = extraContracts
 					// Single-chain refresh: only worth fetching DeFi for EVM chains.
-					// Other families can't have Zapper apps and the extra round-trip is wasted.
+					// Other families cannot have Zerion EVM positions; skip that round-trip.
 					if (isEvm) portfolioBody.includeDefi = true
 					let resp: any
 					try {
@@ -4926,7 +5120,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					}
 				}
 
-				const rpcUrl = chain.id.startsWith('evm-custom-') ? getRpcUrl(chain) : undefined
+				const rpcUrl = chain.id.startsWith('evm-custom-') ? getEvmRpcSource(chain) : undefined
 				const evmIdx = chain.chainFamily === 'evm' ? (params.evmAddressIndex ?? evmAddresses.getSelectedAddress()?.addressIndex ?? 0) : undefined
 
 				// TON: derive Ed25519 public key for wallet deployment (StateInit)
@@ -5003,7 +5197,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				let result: { txid: string }
 
 				// Custom chains: broadcast via direct RPC
-				const rpcUrl = chain.id.startsWith('evm-custom-') ? getRpcUrl(chain) : undefined
+				const rpcUrl = chain.id.startsWith('evm-custom-') ? getEvmRpcSource(chain) : undefined
 				if (rpcUrl) {
 					const serialized = params.signedTx?.serializedTx || params.signedTx?.serialized || (typeof params.signedTx === 'string' ? params.signedTx : undefined)
 					if (!serialized || typeof serialized !== 'string') throw new Error(`Cannot extract serialized tx from: ${JSON.stringify(params.signedTx).slice(0, 200)}`)
@@ -5100,8 +5294,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				}
 			},
 
-			// ── DeFi positions (Zapper) ───────────────────────────────
-			// Live-fetched per EVM address from the KeepKey Zapper proxy.
+			// ── DeFi positions (Zerion) ───────────────────────────────
+			// Live-fetched per EVM address from the authenticated Zerion gateway.
 			// Display-only and not persisted — supplementary to the Pioneer
 			// token list, so failures degrade to an empty section.
 			getDefiPositions: async (params) => {
@@ -5441,7 +5635,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				}
 
 				if (!chain.chainId) throw new Error('Chain has no EVM chainId')
-				const rpcUrl = getRpcUrl(chain) || EVM_RPC_URLS[chain.chainId]
+				const rpcUrl = getEvmRpcSource(chain)
 				if (!rpcUrl) throw new Error(`No RPC URL for chain ${chain.coin}`)
 				const addr = params.contractAddress.trim()
 				if (!/^0x[a-fA-F0-9]{40}$/.test(addr)) throw new Error('Invalid contract address')
@@ -6687,18 +6881,14 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				}
 				const lower = raw.toLowerCase()
 
-				/* When the user specifies a chainId, only probe that one. Otherwise
-				 * try every EVM RPC we have configured in parallel — direct
-				 * on-chain ERC20 reads (name/symbol/decimals) work even for
-				 * tokens Pioneer hasn't indexed yet. */
+				/* Pioneer resolves token metadata on-chain, including unindexed
+				 * tokens. Probe built-in EVM networks or the requested custom chain. */
+				const allChains = getAllChains()
 				const chainsToProbe = params.chainId
 					? [params.chainId.replace(/^eip155:/, '')]
-					: Object.keys(EVM_RPC_URLS)
+					: CHAINS.filter(c => c.chainFamily === 'evm' && c.chainId).map(c => c.chainId!)
 
-				const allChains = getAllChains()
 				const hits = (await Promise.all(chainsToProbe.map(async (numericId) => {
-					const rpcUrl = EVM_RPC_URLS[numericId]
-					if (!rpcUrl) return null
 					// Resolve vault's internal chain id (e.g. 'base') from the EIP-155
 					// network id. SwapAsset.chainId per types.ts is the vault id, NOT
 					// CAIP-2 — every downstream consumer (balance lookup, addCustomToken
@@ -6709,6 +6899,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					const networkId = `eip155:${numericId}`
 					const vaultChain = allChains.find(c => c.networkId === networkId)
 					if (!vaultChain) return null
+					const rpcUrl = getEvmRpcSource(vaultChain)
+					if (!rpcUrl) return null
 					try {
 						const meta = await withTimeout(
 							getTokenMetadata(rpcUrl, lower),
@@ -6766,7 +6958,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return previewSwapBuild(params, {
 					wallet: engine.wallet,
 					getAllChains,
-					getRpcUrl,
+					getEvmRpcSource,
 					getBtcXpub: () => {
 						if (btcAccounts.isInitialized) {
 							const selected = btcAccounts.getSelectedXpub()
@@ -6780,6 +6972,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					},
 					wrapSign: (fn) => fn(), // unused in preview
 					pushSubStage: NOOP_PUSH_SUBSTAGE,
+					getFirmwareVersion: () => engine.getDeviceState().firmwareVersion,
+				}).catch((error: any) => {
+					console.error(`[swap] preview failed (${params.fromChainId}): ${deviceErrorMessage(error)}`)
+					throw error
 				})
 			},
 

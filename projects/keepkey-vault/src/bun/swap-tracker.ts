@@ -208,6 +208,7 @@ function rehydrateActiveSwaps(deviceId?: string, walletId?: string): void {
           estimatedTime: r.estimatedTimeSeconds,
           slippageBps: r.slippageBps,
           relayRequestId: r.relayRequestId,
+          providerQuoteId: r.providerQuoteId,
           nearTxHash: r.nearTxHash,
           inboundBlockNumber: r.inboundBlockNumber,
           inboundBlockHash: r.inboundBlockHash,
@@ -323,6 +324,7 @@ export function trackSwap(
     estimatedTime: quote.estimatedTime,
     slippageBps: quote.slippageBps,
     relayRequestId,
+    providerQuoteId: quote.providerQuoteId,
     nearIntentsDepositAddress: quote.nearIntentsDepositAddress,
     fromAmountBaseUnits: result.fromAmountBaseUnits,
   }
@@ -362,6 +364,7 @@ export function trackSwap(
     estimatedTimeSeconds: quote.estimatedTime || 0,
     approvalTxid: result.approvalTxid,
     relayRequestId,
+    providerQuoteId: quote.providerQuoteId,
   }
   // PRIVACY: Skip DB write for passphrase wallets — swap still tracked in-memory for UI.
   if (opts?.skipPersist) {
@@ -480,6 +483,10 @@ async function registerWithPioneer(swap: PendingSwap): Promise<void> {
     },
     quote: {
       id: swap.txid,
+      ...(swap.providerQuoteId ? {
+        quoteId: swap.providerQuoteId,
+        raw: { source: 'shapeshift', quoteId: swap.providerQuoteId },
+      } : {}),
       integration,
       expectedAmountOut: swap.expectedOutput,
       minimumAmountOut: swap.expectedOutput,
@@ -891,10 +898,11 @@ export async function refreshSwap(txid: string, deviceId?: string, walletId?: st
   // Pioneer registration often fails for NEAR Intents swaps (400 at broadcast
   // time), so GetPendingSwap returns not_found forever. 1Click is the
   // authoritative source — check it on every refresh until terminal.
-  if ((isNearIntentsSwap(swap) || swap.integration === 'nearIntents') && !isTerminalSwapStatus(swap.status) && swap.inboundAddress) {
+  const oneClickDepositAddress = swap.nearIntentsDepositAddress || swap.inboundAddress
+  if ((isNearIntentsSwap(swap) || swap.integration === 'nearIntents') && !isTerminalSwapStatus(swap.status) && oneClickDepositAddress) {
     try {
       const resp = await fetch(
-        `https://1click.chaindefuser.com/v0/status?depositAddress=${encodeURIComponent(swap.inboundAddress)}`,
+        `https://1click.chaindefuser.com/v0/status?depositAddress=${encodeURIComponent(oneClickDepositAddress)}`,
         { signal: AbortSignal.timeout(8000) },
       )
       if (resp.ok) {
