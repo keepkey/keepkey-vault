@@ -23,7 +23,7 @@ include .env
 export ELECTROBUN_DEVELOPER_ID ELECTROBUN_TEAMID ELECTROBUN_APPLEID ELECTROBUN_APPLEIDPASS
 endif
 
-.PHONY: install dev dev-hmr build build-stable build-canary build-signed prune-bundle dmg clean help vault sign-check verify verify-entitlements publish release upload-dmg upload-all-dmgs sign-release sign-release-intel verify-arch audit-macos-bundle submodules modules-install modules-build modules-clean audit build-zcash-cli build-zcash-cli-debug build-zcash-cli-intel test test-unit test-rest test-sign-gating test-zcash-cli test-emu build-intel build-signed-intel build-electrobun-x64-core build-electrobun-arm64-core prepare-electrobun-arm64-core publish-electrobun-x64-core build-electrobun-linux-x64-core publish-electrobun-linux-x64-core preflight build-emulator build-emulator-windows build-emulator-macos-release build-emulator-release clean-emulator test-emu-python
+.PHONY: install dev dev-hmr build build-stable build-canary build-signed patch-arm64-release-tar prune-bundle dmg clean help vault sign-check verify verify-entitlements publish release upload-dmg upload-all-dmgs sign-release sign-release-intel verify-arch audit-macos-bundle submodules modules-install modules-build modules-clean audit build-zcash-cli build-zcash-cli-debug build-zcash-cli-intel test test-unit test-rest test-sign-gating test-zcash-cli test-emu build-intel build-signed-intel build-electrobun-x64-core build-electrobun-arm64-core prepare-electrobun-arm64-core publish-electrobun-x64-core build-electrobun-linux-x64-core publish-electrobun-linux-x64-core preflight build-emulator build-emulator-windows build-emulator-macos-release build-emulator-release clean-emulator test-emu-python
 
 # --- Submodules (auto-init on fresh worktrees/clones) ---
 
@@ -340,11 +340,21 @@ build-signed: sign-check
 	@rm -f $(ZCASH_CLI_STAMP) $(PROTO_BUILD_STAMP) $(HDWALLET_BUILD_STAMP) $(DEVICE_PROTOCOL_BUILD_STAMP)
 	@node scripts/verify-certified-emulator.mjs
 	$(MAKE) prepare-electrobun-arm64-core
-	$(MAKE) build-stable audit prune-bundle dmg
+	$(MAKE) build-stable audit prune-bundle
+	# Electrobun refreshes its downloaded core while packaging, so apply the
+	# certified macOS 13 helpers to the assembled app and re-sign it afterward.
+	$(MAKE) prepare-electrobun-arm64-core patch-arm64-release-tar dmg
 	@echo ""
 	@echo "=== Build complete ==="
 	@echo "DMG: $(PROJECT_DIR)/artifacts/$(DMG_NAME)"
 	@ls -lh $(PROJECT_DIR)/artifacts/$(DMG_NAME)
+
+patch-arm64-release-tar: sign-check
+	./scripts/patch-arm64-release-tar.sh \
+		"$(PROJECT_DIR)/artifacts/stable-macos-arm64-keepkey-vault.app.tar.zst" \
+		"$(PROJECT_DIR)/node_modules/electrobun/dist-macos-arm64" \
+		"$(PROJECT_DIR)/entitlements.plist" \
+		"$(MACOS_DEPLOYMENT_TARGET)"
 
 # Create a proper DMG from the fully-extracted app (workaround for Electrobun self-extractor bug)
 dmg: verify-arch
