@@ -5,6 +5,7 @@
 // the SwapDialog directly. Per-provider art can branch here later.
 
 import calculatingGif from "../assets/swap/calculating.gif"
+import relayLogo from "../assets/providers/relay.svg"
 
 function normalize(raw: string | undefined | null): string {
   return (raw || "").toLowerCase().replace(/[\s_.-]/g, "")
@@ -14,6 +15,10 @@ export function getSwapperAnimation(
   swapper?: string | null,
   integration?: string | null,
 ): string {
-  const _key = normalize(swapper) || normalize(integration)
+  const key = normalize(swapper) || normalize(integration)
+  // SVG provider marks are inlined by Vite, so they remain reliable inside
+  // WKWebView's SVG foreignObject. Emitted GIF URLs can be unavailable under
+  // the packaged views:// scheme and must not leave a broken-image glyph.
+  if (key === "relay" || key === "relaylink" || key === "relayexchange") return relayLogo
   return calculatingGif
 }

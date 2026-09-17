@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 import { Box, Flex, Text, Button } from "@chakra-ui/react"
-import { FaPlus, FaCheck, FaChevronDown } from "react-icons/fa"
+import { FaPlus, FaCheck, FaChevronDown, FaTimes, FaExclamationTriangle } from "react-icons/fa"
 import { useTranslation } from "react-i18next"
 import { BTC_SCRIPT_TYPES, btcScriptTypeConfig } from "../../shared/chains"
 import { formatBalance } from "../lib/formatting"
@@ -154,24 +154,112 @@ function BtcAccountTypeHelp() {
           color="kk.gold"
           textDecoration="underline"
           lineHeight="1.5"
-          onClick={() => setOpen(o => !o)}
+          onClick={() => setOpen(true)}
           _hover={{ opacity: 0.8 }}
         >
-          {open
-            ? t('btcAccountType.hide', { defaultValue: 'Hide' })
-            : t('btcAccountType.learnMore', { defaultValue: 'Learn more' })}
+          {t('btcAccountType.learnMore', { defaultValue: 'Learn more' })}
         </Text>
       </Flex>
-      {open && (
-        <Box mt="1.5" p="2.5" bg="rgba(255,255,255,0.03)" border="1px solid" borderColor="kk.border" borderRadius="lg">
-          <Text fontSize="10px" color="kk.textSecondary" lineHeight="1.7">
-            {t('btcAccountType.explainer', {
-              defaultValue:
-                'All three hold real bitcoin from the same recovery phrase — they are different address formats, not different wallets, and switching between them never puts funds at risk. Native SegWit (bc1…) costs the least to spend. SegWit (3…) is a middle ground for older services that reject bc1 addresses. Legacy (1…) is the original format: it works everywhere but costs the most in fees. If you are receiving from a service that rejects your address, pick the format it accepts — your coins stay accessible under all three.',
-            })}
-          </Text>
+      {open && <BitcoinScriptTypeDialog onClose={() => setOpen(false)} />}
+    </Box>
+  )
+}
+
+const SCRIPT_TYPE_GUIDE = [
+  {
+    name: 'Legacy', standard: 'P2PKH', address: '1…', introduced: '2009',
+    fee: '~148 vB per input', feeLabel: 'Highest fees', compatibility: 'Universal compatibility',
+    detail: 'The original Bitcoin address format. Use it only when a service does not accept newer address types.',
+  },
+  {
+    name: 'Nested SegWit', standard: 'P2SH-P2WPKH', address: '3…', introduced: '2017',
+    fee: '~91 vB per input', feeLabel: 'Lower fees', compatibility: 'Excellent compatibility',
+    detail: 'SegWit wrapped for older software. A useful fallback when a sender rejects bc1 addresses.',
+  },
+  {
+    name: 'Native SegWit', standard: 'P2WPKH / Bech32', address: 'bc1q…', introduced: '2017',
+    fee: '~68 vB per input', feeLabel: 'Low fees', compatibility: 'Broad modern support',
+    detail: 'The best default for most people: efficient, widely supported, and less expensive to spend.',
+    recommended: true,
+  },
+  {
+    name: 'Taproot', standard: 'P2TR / Bech32m', address: 'bc1p…', introduced: '2021',
+    fee: '~58 vB per key-path input', feeLabel: 'Lowest key-path fees', compatibility: 'Support still varies',
+    detail: 'Efficient and privacy-friendly for supported transactions, but some exchanges, wallets, and services still cannot send to bc1p addresses.',
+    warning: true,
+  },
+]
+
+function BitcoinScriptTypeDialog({ onClose }: { onClose: () => void }) {
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose() }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [onClose])
+
+  return (
+    <Box
+      position="fixed" inset="0" zIndex={12000} bg="rgba(2,3,6,0.82)" backdropFilter="blur(10px)"
+      display="flex" alignItems="center" justifyContent="center" p={{ base: '3', md: '8' }}
+      onMouseDown={event => { if (event.target === event.currentTarget) onClose() }}
+      role="dialog" aria-modal="true" aria-labelledby="bitcoin-script-guide-title"
+    >
+      <Box
+        w="100%" maxW="880px" maxH="88vh" overflowY="auto" borderRadius="2xl"
+        bg="rgba(15,17,21,0.98)" border="1px solid rgba(233,196,106,0.28)"
+        boxShadow="0 28px 90px rgba(0,0,0,0.65)" p={{ base: '4', md: '6' }}
+      >
+        <Flex justify="space-between" align="flex-start" gap="4" mb="5">
+          <Box>
+            <Text id="bitcoin-script-guide-title" fontSize={{ base: 'xl', md: '2xl' }} fontWeight="700" color="kk.textPrimary">
+              Bitcoin address types
+            </Text>
+            <Text mt="1" fontSize="sm" color="kk.textSecondary" maxW="680px" lineHeight="1.6">
+              These are separate accounts derived from the same recovery phrase. Funds remain yours in every account; the format mainly changes fees and service compatibility.
+            </Text>
+          </Box>
+          <Box as="button" aria-label="Close" onClick={onClose} color="kk.textMuted" p="2" borderRadius="lg" _hover={{ color: 'white', bg: 'rgba(255,255,255,0.06)' }}>
+            <Box as={FaTimes} />
+          </Box>
+        </Flex>
+
+        <Box display="grid" gridTemplateColumns={{ base: '1fr', md: 'repeat(2, 1fr)' }} gap="3">
+          {SCRIPT_TYPE_GUIDE.map(item => (
+            <Box key={item.standard} position="relative" p="4" borderRadius="xl" bg="rgba(255,255,255,0.025)" border="1px solid" borderColor={item.recommended ? 'rgba(233,196,106,0.55)' : 'kk.border'}>
+              {item.recommended && (
+                <Text position="absolute" top="3" right="3" fontSize="9px" fontWeight="700" letterSpacing="0.08em" color="kk.gold" textTransform="uppercase">Recommended</Text>
+              )}
+              <Flex align="baseline" gap="2" pr={item.recommended ? '24' : '0'}>
+                <Text fontSize="md" fontWeight="700" color="kk.textPrimary">{item.name}</Text>
+                <Text fontSize="11px" fontFamily="mono" color="kk.gold">{item.address}</Text>
+              </Flex>
+              <Text mt="0.5" fontSize="10px" fontFamily="mono" color="kk.textMuted">{item.standard} · introduced {item.introduced}</Text>
+              <Flex mt="3" gap="2" flexWrap="wrap">
+                <Box px="2" py="1" borderRadius="md" bg="rgba(139,227,196,0.08)">
+                  <Text fontSize="10px" color="var(--teal)">{item.feeLabel} · {item.fee}</Text>
+                </Box>
+                <Box px="2" py="1" borderRadius="md" bg="rgba(255,255,255,0.05)">
+                  <Text fontSize="10px" color="kk.textSecondary">{item.compatibility}</Text>
+                </Box>
+              </Flex>
+              <Text mt="3" fontSize="12px" color="kk.textSecondary" lineHeight="1.6">{item.detail}</Text>
+              {item.warning && (
+                <Flex mt="3" gap="2" align="flex-start" p="2.5" borderRadius="lg" bg="rgba(246,173,85,0.08)" border="1px solid rgba(246,173,85,0.22)">
+                  <Box as={FaExclamationTriangle} color="orange.300" fontSize="11px" mt="0.5" flexShrink={0} />
+                  <Text fontSize="10px" color="orange.200" lineHeight="1.5">Confirm the sending service supports Taproot or bc1p before using this address.</Text>
+                </Flex>
+              )}
+            </Box>
+          ))}
         </Box>
-      )}
+
+        <Text mt="4" fontSize="10px" color="kk.textMuted" lineHeight="1.5">
+          Input sizes are typical spending estimates, not quoted transaction fees. Your final fee also depends on the number and type of inputs and outputs, transaction structure, and the current fee rate.
+        </Text>
+        <Flex justify="flex-end" mt="5">
+          <Button size="sm" bg="kk.gold" color="black" _hover={{ bg: 'kk.goldHover' }} onClick={onClose}>Got it</Button>
+        </Flex>
+      </Box>
     </Box>
   )
 }

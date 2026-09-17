@@ -3,6 +3,7 @@ import { getPioneer } from './pioneer'
 import { apiLogScanTxidExists, insertApiLog, updateApiLogTxMeta } from './db'
 import { supportedBtcScriptTypes, btcAccountPath, isChainSupported, type ChainDef } from '../shared/chains'
 import { utxoDiscoveryKey } from './btc-backend/types'
+import { getBtcBackend } from './btc-backend'
 import type { ActivityType, RecentActivity } from '../shared/types'
 
 const PIONEER_TIMEOUT_MS = 60_000
@@ -292,15 +293,28 @@ export async function rebuildActivityHistory(params: {
       result.totals.queries += queries.length
 
       for (const query of queries) {
-        const resp = await withTimeout(
-          pioneer.GetTransactionHistory(
-            { queries: [{ pubkey: query.pubkey, caip: query.caip }] },
-            options.forceRefresh ? { forceRefresh: true } : undefined,
-          ),
-          PIONEER_TIMEOUT_MS,
-          `GetTransactionHistory(${chain.symbol}:${query.label})`,
-        )
-        const txs = unwrapHistoryTransactions(resp)
+        let txs: any[]
+        const btcBackend = chain.id === 'bitcoin' ? getBtcBackend() : null
+        if (btcBackend && btcBackend.kind !== 'pioneer') {
+          if (!btcBackend.transactionHistory) {
+            throw new Error('Bitcoin Core provides balances and spendable outputs, but not full wallet history. Switch to Blockbook to import historical transactions.')
+          }
+          txs = await withTimeout(
+            btcBackend.transactionHistory({ network: chain.networkId, xpub: query.pubkey, scriptType: query.scriptType }),
+            PIONEER_TIMEOUT_MS,
+            `BlockbookHistory(${query.label})`,
+          )
+        } else {
+          const resp = await withTimeout(
+            pioneer.GetTransactionHistory(
+              { queries: [{ pubkey: query.pubkey, caip: query.caip }] },
+              options.forceRefresh ? { forceRefresh: true } : undefined,
+            ),
+            PIONEER_TIMEOUT_MS,
+            `GetTransactionHistory(${chain.symbol}:${query.label})`,
+          )
+          txs = unwrapHistoryTransactions(resp)
+        }
         chainResult.queries.push({
           label: query.label,
           pubkeyPreview: previewKey(query.pubkey),

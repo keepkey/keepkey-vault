@@ -11,7 +11,7 @@
  * caller supplies `centerImageUrl`. We fall back to a small gold-ringed
  * glyph circle so unknown providers still render something readable.
  */
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 interface TokenSlot {
 	iconUrl?: string;
@@ -47,6 +47,8 @@ function integrationGlyph(name?: string): string {
 }
 
 export function RouteMap({ from, to, integration, centerImageUrl, animate = true, caption }: RouteMapProps) {
+	const [centerImageFailed, setCenterImageFailed] = useState(false);
+	useEffect(() => setCenterImageFailed(false), [centerImageUrl]);
 	// 600x180 viewBox: from-token at (60, 90), centerpiece at (300, 90) sized
 	// 128x128, to-token at (540, 90), label at y=174.
 	const path = "M 60 90 Q 200 30 300 90 T 540 90";
@@ -93,7 +95,7 @@ export function RouteMap({ from, to, integration, centerImageUrl, animate = true
 
 				{/* Centerpiece — branded swap animation when available, glyph ring otherwise.
 				    Sized 128px so it reads as the hero of the route. */}
-				{centerImageUrl ? (
+				{centerImageUrl && !centerImageFailed ? (
 					<>
 						{/* Soft halo behind the centerpiece — picks up brand accent */}
 						<circle cx={cx} cy={cy} r={half + 2} fill="var(--ink-2)" stroke="var(--gold)" strokeWidth="1" opacity="0.7" />
@@ -104,6 +106,7 @@ export function RouteMap({ from, to, integration, centerImageUrl, animate = true
 							<img
 								src={centerImageUrl}
 								alt=""
+								onError={() => setCenterImageFailed(true)}
 								style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "50%" }}
 							/>
 						</foreignObject>

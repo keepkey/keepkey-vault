@@ -26,6 +26,7 @@ const NameRegistrationPanel = lazy(() => import("./NameRegistrationPanel").then(
 
 import { SweepDialog } from "./SweepDialog"
 import { ActivityTable, TxDetailDialog, recentFirst, nativePriceByChain, type TxDetail } from "./ActivityPanel"
+import { ReportDialog } from "./ReportDialog"
 import { useRecentActivity } from "../hooks/useRecentActivity"
 import { BtcXpubSelector } from "./BtcXpubSelector"
 import { UtxoAccountSelector } from "./UtxoAccountSelector"
@@ -36,6 +37,14 @@ import { AddTokenDialog } from "./AddTokenDialog"
 import { detectSpamToken, categorizeTokens, type SpamResult } from "../../shared/spamFilter"
 
 type AssetView = "receive" | "send" | "privacy"
+
+type BtcAddressIndexResult = {
+	receiveIndex: number
+	changeIndex: number
+	discoveryAvailable: boolean
+	source: 'pioneer' | 'blockbook' | 'core' | 'electrum' | 'esplora' | 'device-only'
+	warning?: string
+}
 
 // Litecoin script types — same trio as Bitcoin, standard purpose per type.
 const LTC_SCRIPT_TYPES = [
@@ -211,8 +220,10 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 	// BTC address index state: change (0=receive, 1=change) and address index
 	const [btcChangeIndex, setBtcChangeIndex] = useState<0 | 1>(0)
 	const [btcAddressIndex, setBtcAddressIndex] = useState(0)
-	// Cache Pioneer-reported indices so we don't re-fetch on every toggle
-	const [pioneerIndices, setPioneerIndices] = useState<{ receiveIndex: number; changeIndex: number } | null>(null)
+	const [btcAddressDiscoveryLoading, setBtcAddressDiscoveryLoading] = useState(false)
+	// Cache backend-reported indices so we don't re-fetch on every toggle.
+	// Core/offline return an explicit unavailable result — never a silent Pioneer fallback.
+	const [btcAddressIndices, setBtcAddressIndices] = useState<BtcAddressIndexResult | null>(null)
 
 	// Derive active BTC script type config and path from selected xpub + change/index
 	const btcSelected = useMemo(() => {
@@ -317,43 +328,48 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 	// already-open Receive tab would keep showing the previous wallet's address.
 	}, [btcSelected?.scriptType, btcSelected?.fullPath?.[2], btcChangeIndex, btcAddressIndex, btcSelected?.xpubData?.xpub]) // eslint-disable-line react-hooks/exhaustive-deps
 
-	// Fetch next unused address indices from Pioneer API when xpub selection changes
+	// Fetch next unused address indices from the active BTC backend when xpub selection changes.
 	// Cancellation guard prevents stale responses from snapping to wrong index (Finding 4)
-	const prevScriptRef = useMemo(() => btcAccounts.selectedXpub?.scriptType, [btcAccounts.selectedXpub?.scriptType])
-	const prevAcctRef = useMemo(() => btcAccounts.selectedXpub?.accountIndex, [btcAccounts.selectedXpub?.accountIndex])
+	const selectedBtcScriptType = btcAccounts.selectedXpub?.scriptType
+	const selectedBtcAccountIndex = btcAccounts.selectedXpub?.accountIndex
+	const selectedBtcXpub = btcAccounts.accounts
+		.find(a => a.accountIndex === (selectedBtcAccountIndex ?? 0))
+		?.xpubs.find(x => x.scriptType === (selectedBtcScriptType ?? 'p2wpkh'))
+		?.xpub
 	useEffect(() => {
 		if (!isBtc) return
 		setBtcChangeIndex(0)
-		setBtcAddressIndex(0)
-		setPioneerIndices(null)
-		const xpub = btcAccounts.accounts
-			.find(a => a.accountIndex === (btcAccounts.selectedXpub?.accountIndex ?? 0))
-			?.xpubs.find(x => x.scriptType === (btcAccounts.selectedXpub?.scriptType ?? 'p2wpkh'))
-			?.xpub
-		if (!xpub) return
+		setBtcAddressIndices(null)
+		if (!selectedBtcXpub) return
 		let cancelled = false
-		rpcRequest<{ receiveIndex: number; changeIndex: number }>('getBtcAddressIndices', {
-			xpub,
-			scriptType: btcAccounts.selectedXpub?.scriptType ?? 'p2wpkh',
+		// Never expose a fallback/stale address while history discovery is in
+		// flight. It could be an already-used address from this or another xpub.
+		setBtcAddressDiscoveryLoading(true)
+		rpcRequest<BtcAddressIndexResult>('getBtcAddressIndices', {
+			xpub: selectedBtcXpub,
+			scriptType: selectedBtcScriptType ?? 'p2wpkh',
 		}, 30000)
 			.then((indices) => {
 				if (cancelled) return
-				setPioneerIndices(indices)
+				setBtcAddressIndices(indices)
 				setBtcAddressIndex(indices.receiveIndex)
 			})
 			.catch(e => console.warn('[AssetPage] getBtcAddressIndices failed:', e.message))
+			.finally(() => { if (!cancelled) setBtcAddressDiscoveryLoading(false) })
 		return () => { cancelled = true }
-	}, [prevScriptRef, prevAcctRef]) // eslint-disable-line react-hooks/exhaustive-deps
+	// Re-run after every successful balance sync. A receive address that was
+	// unused when the page opened may have become used since the prior scan.
+	}, [isBtc, selectedBtcScriptType, selectedBtcAccountIndex, selectedBtcXpub, lastSyncedAt])
 
-	// When toggling Receive/Change, set index to the cached Pioneer value
+	// When toggling Receive/Change, set index to the active backend's cached value.
 	const handleBtcChangeIndex = useCallback((v: 0 | 1) => {
 		setBtcChangeIndex(v)
-		if (pioneerIndices) {
-			setBtcAddressIndex(v === 0 ? pioneerIndices.receiveIndex : pioneerIndices.changeIndex)
+		if (btcAddressIndices) {
+			setBtcAddressIndex(v === 0 ? btcAddressIndices.receiveIndex : btcAddressIndices.changeIndex)
 		} else {
 			setBtcAddressIndex(0)
 		}
-	}, [pioneerIndices])
+	}, [btcAddressIndices])
 
 	// When EVM selected index changes, update address from the cached value. When
 	// the cache empties — a device swap resets the backend managers and pushes an
@@ -520,6 +536,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 	)).slice(0, 5), [allActivities, chain.id, chain.symbol])
 	const [previewPrices, setPreviewPrices] = useState<Record<string, number>>({})
 	const [activityDetail, setActivityDetail] = useState<TxDetail | null>(null)
+	const [showReports, setShowReports] = useState(false)
 	const [activityScanning, setActivityScanning] = useState(false)
 
 	useEffect(() => {
@@ -1258,7 +1275,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 						<ReceiveView
 							chain={chain}
 							address={address}
-							loading={loading}
+							loading={loading || btcAddressDiscoveryLoading}
 							error={deriveError}
 							currentPath={isBtc && btcSelected ? btcSelected.fullPath : currentPath}
 							onDerive={deriveAddress}
@@ -1267,6 +1284,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 							isBtc={isBtc}
 							btcChangeIndex={btcChangeIndex}
 							btcAddressIndex={btcAddressIndex}
+							btcAddressWarning={btcAddressIndices?.discoveryAvailable === false ? btcAddressIndices.warning : undefined}
 							onBtcChangeIndex={handleBtcChangeIndex}
 							onBtcAddressIndex={setBtcAddressIndex}
 							isTon={isTon}
@@ -1430,6 +1448,17 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 						<Text fontSize="11px" fontWeight="500" color="var(--text-3)" textTransform="uppercase" letterSpacing="0.18em">
 							Recent Activity{previewActivities.length > 0 && ` · ${previewActivities.length}`}
 						</Text>
+						<Flex align="center" gap="3">
+						{isBtc && !watchOnly && !isHiddenWallet && (
+							<Box
+								as="button" fontSize="11px" color="var(--gold)" fontWeight="500"
+								cursor="pointer" _hover={{ opacity: 0.75 }} transition="opacity 0.15s"
+								onClick={() => setShowReports(true)}
+								className="electrobun-webkit-app-region-no-drag"
+							>
+								Reports
+							</Box>
+						)}
 						{onViewActivity && (
 							<Box
 								as="button"
@@ -1451,6 +1480,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 								</svg>
 							</Box>
 						)}
+						</Flex>
 					</Flex>
 
 					{previewActivities.length === 0 ? (
@@ -1571,6 +1601,8 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 					onClose={() => setActivityDetail(null)}
 				/>
 			)}
+
+			{showReports && <ReportDialog onClose={() => setShowReports(false)} />}
 		</Flex>
 	)
 }

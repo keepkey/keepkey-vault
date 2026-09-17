@@ -263,6 +263,10 @@ export function TxDetailDialog({ detail, onClose, nativePrices }: { detail: TxDe
     // Only build address explorer links for a single address (not "addr +N" fan-out summaries).
     const explorerAddrUrl = a.to && !a.to.includes(' ') && chainDef?.explorerAddressUrl ? chainDef.explorerAddressUrl.replace('{{address}}', a.to) : null
     const explorerFromUrl = a.from && !a.from.includes(' ') && chainDef?.explorerAddressUrl ? chainDef.explorerAddressUrl.replace('{{address}}', a.from) : null
+    const verificationLinks = a.txid && chainDef?.id === 'bitcoin' ? [
+      { label: 'Mempool.space', url: `https://mempool.space/tx/${a.txid.replace(/^0x/i, '')}` },
+      { label: 'Blockchair', url: `https://blockchair.com/bitcoin/transaction/${a.txid.replace(/^0x/i, '')}` },
+    ] : explorerUrl ? [{ label: 'Block explorer', url: explorerUrl }] : []
     const required = getRequiredConfs(chainSymbol)
 
     return (
@@ -270,14 +274,15 @@ export function TxDetailDialog({ detail, onClose, nativePrices }: { detail: TxDe
         <Box position="absolute" inset="0" bg="blackAlpha.700" />
         <Box
           position="relative" bg="kk.cardBg" border="1px solid" borderColor="kk.border"
-          borderRadius="xl" w="440px" maxW="95vw" maxH="85vh" overflow="auto"
+          borderRadius="xl" w="620px" maxW="95vw" maxH="88vh" overflow="auto"
           onClick={e => e.stopPropagation()}
           boxShadow="0 12px 40px rgba(0,0,0,0.6)"
           style={{ animation: 'kkTxDetailFadeIn 0.15s ease-out' }}
         >
           {/* Header */}
           <Flex px="5" py="3" borderBottom="1px solid" borderColor="kk.border" align="center" justify="space-between">
-            <HStack gap="2">
+            <HStack gap="2" flexWrap="wrap">
+			  <Text fontSize="sm" fontWeight="700" color="kk.textPrimary" mr="1">Transaction details</Text>
               <Box px="2" py="0.5" borderRadius="md" fontSize="xs" fontWeight="700" bg={`${typeConf.color}22`} color={typeConf.color}>{typeConf.label}</Box>
               {a.type === 'swap' && a.swapStatus ? (
                 <SwapStatusBadge status={a.swapStatus} />
@@ -349,21 +354,25 @@ export function TxDetailDialog({ detail, onClose, nativePrices }: { detail: TxDe
             <TxDetailRow label="Time" value={formatFullDate(a.createdAt)} />
 
             {/* Explorer button */}
-            {explorerUrl && (
+            {verificationLinks.length > 0 && (
               <Box mt="3">
-                <Flex
-                  as="button" w="100%" justify="center" align="center" gap="2"
-                  bg="rgba(139,227,196,0.10)" border="1px solid" borderColor="rgba(139,227,196,0.30)"
-                  borderRadius="lg" py="2" cursor="pointer"
-                  _hover={{ bg: 'rgba(139,227,196,0.18)' }} transition="all 0.15s"
-                  onClick={() => rpcRequest('openUrl', { url: explorerUrl }).catch(() => {})}
-                >
-                  <Text fontSize="xs" fontWeight="600" color="var(--teal)">View on Explorer</Text>
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--teal)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-                    <polyline points="15 3 21 3 21 9" />
-                    <line x1="10" y1="14" x2="21" y2="3" />
-                  </svg>
+                <Text fontSize="10px" color="kk.textMuted" mb="2">Verify independently on a third-party block explorer</Text>
+                <Flex gap="2" wrap="wrap">
+                  {verificationLinks.map(link => (
+                    <Flex
+                      key={link.url} as="button" flex="1" minW="150px" justify="center" align="center" gap="2"
+                      bg="rgba(139,227,196,0.10)" border="1px solid" borderColor="rgba(139,227,196,0.30)"
+                      borderRadius="lg" py="2" cursor="pointer"
+                      _hover={{ bg: 'rgba(139,227,196,0.18)' }} transition="all 0.15s"
+                      onClick={() => rpcRequest('openUrl', { url: link.url }).catch(() => {})}
+                    >
+                      <Text fontSize="xs" fontWeight="600" color="var(--teal)">{link.label}</Text>
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--teal)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                        <polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" />
+                      </svg>
+                    </Flex>
+                  ))}
                 </Flex>
               </Box>
             )}

@@ -8,8 +8,9 @@
  * Cloudflare-Access service token for a gated public URL (e.g. btc-nodes.keepkey.info);
  * a tailnet/localhost blockbook needs none.
  */
-import type { BtcBackend, BtcUtxo, BtcFeeRates } from './types'
+import type { BtcBackend, BtcUtxo, BtcFeeRates, BtcHistoryTx } from './types'
 import { utxoDiscoveryKey } from './types'
+import { addressIndicesFromTokens } from './address-discovery'
 
 export interface BlockbookConfig {
   url: string                          // base, no trailing slash — e.g. http://host:9130
@@ -28,6 +29,44 @@ function scriptTypeFromPath(path?: string): string | undefined {
 
 function base(cfg: BlockbookConfig): string {
   return cfg.url.replace(/\/+$/, '')
+}
+
+function addressesOf(row: any): string[] {
+  return Array.isArray(row?.addresses) ? row.addresses.map(String).filter(Boolean) : []
+}
+
+function sumValues(rows: any[], predicate: (row: any) => boolean): number {
+  return rows.reduce((sum, row) => sum + (predicate(row) ? (parseInt(row?.value, 10) || 0) : 0), 0)
+}
+
+/** Convert a Blockbook xpub transaction into the neutral history shape consumed
+ * by Activity. `tokens` is Blockbook's complete list of addresses belonging to
+ * the queried xpub, so input ownership can be determined without leaking data
+ * to another service. */
+export function normalizeBlockbookHistoryTx(tx: any, ownAddresses: Set<string>): BtcHistoryTx | null {
+  const txid = String(tx?.txid || '').trim()
+  if (!txid) return null
+  const vin = Array.isArray(tx?.vin) ? tx.vin : []
+  const vout = Array.isArray(tx?.vout) ? tx.vout : []
+  const isOwn = (row: any) => row?.isOwn === true || addressesOf(row).some(address => ownAddresses.has(address))
+  const ownIn = sumValues(vin, isOwn)
+  const ownOut = sumValues(vout, isOwn)
+  const sent = ownIn > ownOut
+  const externalInputs = vin.filter(row => !isOwn(row)).flatMap(addressesOf)
+  const ownInputs = vin.filter(isOwn).flatMap(addressesOf)
+  const externalOutputs = vout.filter(row => !isOwn(row)).flatMap(addressesOf)
+  const ownOutputs = vout.filter(isOwn).flatMap(addressesOf)
+  return {
+    txid,
+    timestamp: Number(tx.blockTime) || undefined,
+    confirmations: typeof tx.confirmations === 'number' ? tx.confirmations : undefined,
+    blockHeight: Number(tx.blockHeight) || undefined,
+    value: String(Math.abs(ownOut - ownIn)),
+    fee: tx.fees != null ? String(tx.fees) : undefined,
+    direction: sent ? 'sent' : 'received',
+    from: sent ? ownInputs : externalInputs,
+    to: sent ? externalOutputs : ownOutputs,
+  }
 }
 
 async function bbFetch(cfg: BlockbookConfig, path: string, init?: RequestInit): Promise<any> {
@@ -96,6 +135,60 @@ export function makeBlockbookBackend(cfg: BlockbookConfig): BtcBackend {
 
     async rawTxHex({ txid }) {
       try { return (await bbFetch(cfg, `/api/v2/tx-specific/${txid}`))?.hex } catch { return undefined }
+    },
+
+    async transactionHistory({ xpub, scriptType }) {
+      const key = utxoDiscoveryKey(xpub, scriptType)
+      const transactions: BtcHistoryTx[] = []
+      let page = 1
+      let totalPages = 1
+      do {
+        const data = await bbFetch(
+          cfg,
+          `/api/v2/xpub/${encodeURIComponent(key)}?details=txs&tokens=used&page=${page}&pageSize=1000`,
+        )
+        const ownAddresses = new Set<string>(
+          (Array.isArray(data?.tokens) ? data.tokens : [])
+            .filter((token: any) => token?.type === 'XPUBAddress' || token?.standard === 'XPUBAddress')
+            .map((token: any) => String(token?.name || ''))
+            .filter(Boolean),
+        )
+        for (const tx of Array.isArray(data?.transactions) ? data.transactions : []) {
+          const normalized = normalizeBlockbookHistoryTx(tx, ownAddresses)
+          if (normalized) transactions.push(normalized)
+        }
+        totalPages = Math.max(1, Number(data?.totalPages) || 1)
+        page++
+      } while (page <= totalPages)
+      return transactions
+    },
+
+    async accountInfo({ xpub, scriptType }) {
+      const key = utxoDiscoveryKey(xpub, scriptType)
+      const data = await bbFetch(
+        cfg,
+        `/api/v2/xpub/${encodeURIComponent(key)}?details=tokenBalances&tokens=used&pageSize=1`,
+      )
+      return {
+        balance: String(data?.balance ?? '0'),
+        totalReceived: String(data?.totalReceived ?? '0'),
+        totalSent: String(data?.totalSent ?? '0'),
+        txs: Number(data?.txs) || 0,
+        tokens: (Array.isArray(data?.tokens) ? data.tokens : []).map((token: any) => ({
+          name: String(token?.name || ''),
+          path: token?.path ? String(token.path) : undefined,
+          transfers: Number(token?.transfers) || 0,
+        })).filter((token: any) => token.name),
+      }
+    },
+
+    async addressIndices({ xpub, scriptType }) {
+      const key = utxoDiscoveryKey(xpub, scriptType)
+      const data = await bbFetch(
+        cfg,
+        `/api/v2/xpub/${encodeURIComponent(key)}?details=tokenBalances&tokens=used&pageSize=1`,
+      )
+      return addressIndicesFromTokens(data?.tokens || [], 'blockbook')
     },
 
     async tipHeight() {

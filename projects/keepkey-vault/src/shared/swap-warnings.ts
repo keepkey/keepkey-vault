@@ -13,6 +13,13 @@ export const DUST_FEE_SEVERE_PCT = 25
 /** Effective slippage % above which we warn the user. Effective = max(market, tolerance). */
 export const HIGH_SLIPPAGE_PCT = 3
 
+/** Quote guard emitted when fixed route fees consume the selected slippage
+ * allowance. This is an expected small-swap constraint, not an application
+ * failure, so callers should render it as advisory/warning UI. */
+export function isSmallSwapQuoteWarning(message?: string | null): boolean {
+  return /^Swap amount too low:\s*quoted fees\b/i.test(message?.trim() || '')
+}
+
 export type DustWarning = {
   severe: boolean
   /** % of input lost to fees+spread (0–100) */

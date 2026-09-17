@@ -14,6 +14,7 @@ import type { SwapAsset, SwapQuote, SwapQuoteParams, ExecuteSwapParams, SwapResu
 import { SOLANA_BLIND_SIGNING_REQUIRED, evmAdvancedModeRequiredMessage } from '../shared/types'
 import { toDeviceError, deviceErrorMessage } from '../shared/device-error'
 import { resolveEvmSchema } from './evm-schema-registry'
+import { resolveRuntimeEvmMetadata, type RuntimeEvmSigner } from './evm-runtime-metadata'
 import { evmCallRequiresAdvancedMode } from './evm-signing-policy'
 import { findSolanaSchema } from './solana-schema-registry'
 import { findCertifiedSolanaProof } from './solana-certified-registry'
@@ -758,9 +759,23 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
       })
       unsignedTx = buildResult.unsignedTx
     } else {
-      const result = await buildRelaySwapTx(params, fromChain, fromAddress, getEvmRpcSource, isErc20Source, /* previewMode */ false, supportsCertifiedClearSign(ctx.getFirmwareVersion?.()))
+      const certifiedSupported = supportsCertifiedClearSign(ctx.getFirmwareVersion?.())
+      const runtimeSupported = !certifiedSupported && ctx.isAdvancedModeEnabled?.() === true
+      const result = await buildRelaySwapTx(params, fromChain, fromAddress, getEvmRpcSource, isErc20Source, /* previewMode */ false, certifiedSupported, runtimeSupported)
       unsignedTx = result.unsignedTx
       fromAmountBaseUnits = result.fromAmountBaseUnits
+
+      // Firmware 7.15 recognizes only keys explicitly trusted into a RAM slot.
+      // This is never silent: LoadClearsignSigner displays alias + fingerprint
+      // and "NOT verified by KeepKey" for mandatory device approval.
+      if (result.runtimeSigner) {
+        const signer = result.runtimeSigner
+        swapLog(`${TAG} requesting 7.15 runtime signer trust: ${signer.alias} (${signer.fingerprint})`)
+        await wrapSign(
+          () => wallet.loadClearsignSigner({ keyId: signer.keyId, pubkey: Uint8Array.from(Buffer.from(signer.publicKeyHex, 'hex')), alias: signer.alias }),
+          { operation: 'loadClearsignSigner', chain: fromChain.coin },
+        )
+      }
 
       // ERC-20 relay txs may need an approval to the router (THORChain Router,
       // 0x exchange proxy, etc.) — without it the router's transferFrom call
@@ -1327,7 +1342,9 @@ export async function previewSwapBuild(
       })
       return { unsignedTx: buildResult.unsignedTx }
     }
-    const result = await buildRelaySwapTx(params, fromChain, fromAddress, getEvmRpcSource, isErc20Source, /* previewMode */ true, supportsCertifiedClearSign(ctx.getFirmwareVersion?.()))
+    const certifiedSupported = supportsCertifiedClearSign(ctx.getFirmwareVersion?.())
+    const runtimeSupported = !certifiedSupported && ctx.isAdvancedModeEnabled?.() === true
+    const result = await buildRelaySwapTx(params, fromChain, fromAddress, getEvmRpcSource, isErc20Source, /* previewMode */ true, certifiedSupported, runtimeSupported)
     return { unsignedTx: result.unsignedTx, approveTx: result.approveTx, allowance: result.allowance, balance: result.balance }
   }
   if (fromChain.chainFamily === 'evm') {
@@ -1427,7 +1444,8 @@ async function buildRelaySwapTx(
   isErc20Source = false,
   previewMode = false,
   certifiedMetadataSupported = false,
-): Promise<{ unsignedTx: any; approveTx?: any; fromAmountBaseUnits?: string; allowance?: { current: string; required: string; sufficient: boolean; spender: string; tokenContract: string }; balance?: { current: string; required: string; sufficient: boolean; tokenContract?: string } }> {
+  runtimeMetadataSupported = false,
+): Promise<{ unsignedTx: any; runtimeSigner?: RuntimeEvmSigner; approveTx?: any; fromAmountBaseUnits?: string; allowance?: { current: string; required: string; sufficient: boolean; spender: string; tokenContract: string }; balance?: { current: string; required: string; sufficient: boolean; tokenContract?: string } }> {
   const relay = params.relayTx!
   const evmSigningPath = params.fromEvmAddressIndex != null
     ? evmAddressPath(params.fromEvmAddressIndex)
@@ -1552,6 +1570,7 @@ async function buildRelaySwapTx(
       }
     }
   }
+
   if (!maxFeePerGas && !gasPrice) {
     // No RPC available — last-resort Pioneer + floor
     try {
@@ -1782,6 +1801,19 @@ async function buildRelaySwapTx(
     unsignedTx.maxPriorityFeePerGas = maxPriorityFeePerGas || toHex(1_000_000n)
   }
 
+  // Runtime metadata is transaction-bound, so resolve it only after every
+  // signed field (including the final fee model and any adjusted nonce/value)
+  // has been placed on the transaction.
+  let runtimeSigner: RuntimeEvmSigner | undefined
+  if (!unsignedTx.txMetadata && runtimeMetadataSupported) {
+    const runtime = await resolveRuntimeEvmMetadata(unsignedTx)
+    if (runtime) {
+      unsignedTx.txMetadata = { signedPayload: runtime.signedPayload, keyId: runtime.keyId }
+      runtimeSigner = runtime.signer
+      console.info(`${TAG} 7.15 runtime ClearSign metadata attached (slot=${runtime.keyId}, signer=${runtime.signer.fingerprint})`)
+    }
+  }
+
   // Sanity guard — ERC-20 sources ALWAYS need calldata (transferFrom or
   // approveAndDeposit). An empty data field on an ERC-20 relay tx means we'd
   // broadcast a plain 0-value transfer with no swap instruction.
@@ -1829,7 +1861,7 @@ async function buildRelaySwapTx(
     }
   }
 
-  return { unsignedTx, approveTx: pendingApproveTx, allowance: allowanceInfo, balance: balanceInfo, fromAmountBaseUnits }
+  return { unsignedTx, runtimeSigner, approveTx: pendingApproveTx, allowance: allowanceInfo, balance: balanceInfo, fromAmountBaseUnits }
 }
 
 // ── EVM swap tx building (extracted for readability) ────────────────

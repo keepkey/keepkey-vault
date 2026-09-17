@@ -25,7 +25,7 @@ import { Z } from "../lib/z-index"
 import { providerTrackerUrl } from "../lib/trackers"
 import { ProviderBadge, ProverChip, resolveProvider } from "./ProviderBadge"
 import { getSwapperAnimation } from "../lib/swapper-animations"
-import { computeDustWarning, shouldWarnHighSlippage, computeEffectiveSlippageBps } from "../../shared/swap-warnings"
+import { computeDustWarning, shouldWarnHighSlippage, computeEffectiveSlippageBps, isSmallSwapQuoteWarning } from "../../shared/swap-warnings"
 import { useEvmAddresses } from "../hooks/useEvmAddresses"
 import { useDeviceState } from "../hooks/useDeviceState"
 import { versionCompare } from "../../shared/firmware-versions"
@@ -789,6 +789,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   // receive slot) — re-derives a missing destination address then requotes.
   const [manualQuoting, setManualQuoting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const errorIsWarning = isSmallSwapQuoteWarning(error)
   // Whether the current `error` came from a retryable cause (a quote timeout) —
   // only then do we offer Retry. Deterministic errors (pool unavailable, amount
   // below minimum) are not retryable: retrying just repeats the same failure.
@@ -4269,10 +4270,10 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
               )}
 
               {error && (
-                <Box bg="rgba(224,140,123,0.10)" border="1px solid" borderColor="kk.error" borderRadius="lg" px="3" py="2" w="full">
+                <Box bg={errorIsWarning ? "rgba(251,146,60,0.08)" : "rgba(224,140,123,0.10)"} border="1px solid" borderColor={errorIsWarning ? "rgba(251,146,60,0.3)" : "kk.error"} borderRadius="lg" px="3" py="2" w="full">
                   <Flex justify="space-between" align="center" gap="2">
-                    <Text fontSize="xs" color="kk.error" flex="1">{error}</Text>
-                    <Button size="xs" variant="ghost" color="kk.error" px="1.5" onClick={() => setError(null)}>
+                    <Text fontSize="xs" color={errorIsWarning ? "var(--gold)" : "kk.error"} flex="1">{error}</Text>
+                    <Button size="xs" variant="ghost" color={errorIsWarning ? "var(--gold)" : "kk.error"} px="1.5" onClick={() => setError(null)}>
                       {t("dismiss")}
                     </Button>
                   </Flex>
@@ -5018,14 +5019,15 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                 <Text fontSize="10px" color="kk.textMuted" textAlign="center">{t("enterAmount")}</Text>
               )}
 
-              {/* Error — show Retry ONLY for a retryable cause (quote timeout)
+              {/* Quote feedback — expected small-swap constraints use warning
+                  styling; operational failures remain red. Show Retry ONLY for a retryable cause (quote timeout)
                   and while params are still valid, since clicking it re-fires
                   getSwapQuote via the requoteTick effect. Deterministic errors
                   (pool unavailable, amount below minimum) get no Retry. */}
               {error && (
-                <Box bg="rgba(224,140,123,0.10)" border="1px solid" borderColor="kk.error" borderRadius="lg" p="2">
+                <Box bg={errorIsWarning ? "rgba(251,146,60,0.08)" : "rgba(224,140,123,0.10)"} border="1px solid" borderColor={errorIsWarning ? "rgba(251,146,60,0.3)" : "kk.error"} borderRadius="lg" p="2">
                   <Flex justify="space-between" align="center" gap="2">
-                    <Text fontSize="10px" color="kk.error" flex="1">{error}</Text>
+                    <Text fontSize="10px" color={errorIsWarning ? "var(--gold)" : "kk.error"} flex="1">{error}</Text>
                     {quoteRetryable && canQuote && (
                       <Button size="xs" variant="ghost" color="kk.error" px="1.5" minW="auto"
                         _hover={{ bg: "rgba(224,140,123,0.18)" }}

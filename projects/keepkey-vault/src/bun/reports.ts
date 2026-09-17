@@ -16,6 +16,7 @@ import { getLatestDeviceSnapshot, getCachedPubkeys, getSetting } from './db'
 import { getPioneer } from './pioneer'
 import { CHAINS } from '../shared/chains'
 import { utxoDiscoveryKey } from './btc-backend/types'
+import { getBtcBackend } from './btc-backend'
 
 const BTC_NETWORK_ID = CHAINS.find(c => c.id === 'bitcoin')!.networkId
 
@@ -40,6 +41,11 @@ function safeRoundSats(value: unknown): number {
 // ── Pioneer API Helpers (via SDK client) ─────────────────────────────
 
 async function fetchPubkeyInfo(xpub: string, scriptType?: string): Promise<any> {
+	const backend = getBtcBackend()
+	if (backend.kind !== 'pioneer') {
+		if (!backend.accountInfo) throw new Error(`${backend.kind} does not provide indexed account summaries`)
+		return backend.accountInfo({ network: BTC_NETWORK_ID, xpub, scriptType })
+	}
 	const pioneer = await getPioneer()
 	const resp = await pioneer.GetPubkeyInfo({ network: BTC_NETWORK_ID, xpub: utxoDiscoveryKey(xpub, scriptType) })
 	const result = resp?.data || resp
@@ -51,6 +57,11 @@ async function fetchPubkeyInfo(xpub: string, scriptType?: string): Promise<any> 
 }
 
 async function fetchTxHistory(xpub: string, caip: string, scriptType?: string): Promise<any[]> {
+	const backend = getBtcBackend()
+	if (backend.kind !== 'pioneer') {
+		if (!backend.transactionHistory) throw new Error(`${backend.kind} does not provide indexed transaction history`)
+		return backend.transactionHistory({ network: BTC_NETWORK_ID, xpub, scriptType })
+	}
 	const pioneer = await getPioneer()
 	const discoveryKey = utxoDiscoveryKey(xpub, scriptType)
 

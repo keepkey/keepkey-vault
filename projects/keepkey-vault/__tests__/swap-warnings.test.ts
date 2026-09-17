@@ -13,10 +13,24 @@ import {
   computeDustWarning,
   computeEffectiveSlippageBps,
   shouldWarnHighSlippage,
+  isSmallSwapQuoteWarning,
   DUST_FEE_WARNING_PCT,
   DUST_FEE_SEVERE_PCT,
   HIGH_SLIPPAGE_PCT,
 } from '../src/shared/swap-warnings'
+
+describe('small-swap quote warning classification', () => {
+  test('classifies the fee-versus-slippage guard as an advisory warning', () => {
+    expect(isSmallSwapQuoteWarning(
+      'Swap amount too low: quoted fees (1.46%) meet or exceed the slippage allowance (1.00%).',
+    )).toBe(true)
+  })
+
+  test('does not downgrade unrelated failures', () => {
+    expect(isSmallSwapQuoteWarning('Swap service unavailable')).toBe(false)
+    expect(isSmallSwapQuoteWarning(null)).toBe(false)
+  })
+})
 
 describe('computeDustWarning', () => {
   test('profitable swap (loss < threshold) → null', () => {

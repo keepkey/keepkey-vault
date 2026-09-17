@@ -16,6 +16,7 @@ import { DeviceOnlyBackend } from './device-only'
 import { makeCoreBackend } from './core'
 import { makeBlockbookBackend } from './blockbook'
 import { setPioneerGuardActive } from '../pioneer-guard'
+import { assertPioneerSuccess, extractTxid } from './normalize'
 
 /** Persisted self-host node config. Blockbook (xpub-native, what Pioneer speaks)
  *  or Bitcoin Core (scantxoutset). */
@@ -83,6 +84,9 @@ const BTC_NETWORK_ID = 'bip122:000000000019d6689c085ae165831e93'
  *  or a BTC Core node silently returns nothing for their addresses. Use this
  *  anywhere the network isn't guaranteed to be Bitcoin (e.g. the audit sweep). */
 export function getBackendForNetwork(networkId: string): BtcBackend {
+  // Offline is global, not a mainnet-only preference. No UTXO network may
+  // retain a Pioneer path merely because it does not match the local BTC node.
+  if (offlineMode) return DeviceOnlyBackend
   return networkId === BTC_NETWORK_ID ? getBtcBackend() : PioneerBackend
 }
 
@@ -90,13 +94,14 @@ export function getBackendForNetwork(networkId: string): BtcBackend {
  *  Unifies every BTC broadcast site (send / sweep / REST) so none can silently cheat
  *  past the node. Returns the txid. */
 export async function broadcastBtcTx(pioneer: any, networkId: string, serialized: string): Promise<string> {
-  if (networkId === BTC_NETWORK_ID && getBtcBackend().kind !== 'pioneer') {
-    return (await getBtcBackend().broadcast({ network: networkId, rawTxHex: serialized })).txid
+  const backend = getBackendForNetwork(networkId)
+  if (backend.kind !== 'pioneer') {
+    return (await backend.broadcast({ network: networkId, rawTxHex: serialized })).txid
   }
   const resp = await pioneer.Broadcast({ networkId, serialized })
-  const data = resp?.data ?? resp
-  const txid = data?.txid || data?.tx_hash || data?.hash
-  if (!txid) throw new Error(`Broadcast failed: ${JSON.stringify(data).slice(0, 200)}`)
+  assertPioneerSuccess(resp, 'Broadcast')
+  const txid = extractTxid(resp)
+  if (!txid) throw new Error(`Broadcast failed: ${JSON.stringify(resp?.data ?? resp).slice(0, 200)}`)
   return String(txid)
 }
 
