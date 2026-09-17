@@ -244,6 +244,7 @@ prepare-electrobun-arm64-core: install
 	ACTUAL_SHA=$$(shasum -a 256 "$$WORK/$$CORE_PATH" | awk '{print $$1}'); \
 	test "$$ACTUAL_SHA" = "$$CORE_SHA" || \
 		{ echo "ERROR: certified ARM64 Electrobun core hash mismatch"; exit 1; }; \
+	mkdir -p $(PROJECT_DIR)/node_modules/electrobun/dist-macos-arm64; \
 	tar xzf "$$WORK/$$CORE_PATH" \
 		-C $(PROJECT_DIR)/node_modules/electrobun/dist-macos-arm64
 
