@@ -291,7 +291,7 @@ jobs:
         run: |
           echo "=== Creating x86_64 variant from ARM64 build ==="
 
-          # Download the immutable x64 Electrobun core from keepkey/keepkey-vault releases.
+          # Download the immutable x64 Electrobun core from keepkey/electrobun releases.
           # Built from pinned upstream source on a native Intel GitHub runner.
           # Targets macOS 13.0+, Bun 1.3.13, adhoc-signed binaries.
           #
@@ -305,13 +305,13 @@ jobs:
           # The release description includes the submodule version it was built from.
           SUBMOD_VER=$(cd modules/electrobun && git describe --tags --always 2>/dev/null || git rev-parse --short HEAD)
           echo "Electrobun submodule: $SUBMOD_VER, x64 core tag: $X64_CORE_TAG"
-          RELEASE_NOTES=$(gh release view "$X64_CORE_TAG" --repo keepkey/keepkey-vault --json body --jq '.body' 2>/dev/null || echo "")
+          RELEASE_NOTES=$(gh release view "$X64_CORE_TAG" --repo keepkey/electrobun --json body --jq '.body' 2>/dev/null || echo "")
           if [ -n "$RELEASE_NOTES" ] && ! echo "$RELEASE_NOTES" | grep -q "$SUBMOD_VER"; then
             echo "::warning::x64 core ($X64_CORE_TAG) may not match submodule ($SUBMOD_VER). Run 'make publish-electrobun-x64-core' and update X64_CORE_TAG."
           fi
 
-          echo "Downloading Electrobun x64 core from keepkey/keepkey-vault @ $X64_CORE_TAG..."
-          curl -fsSL "https://github.com/keepkey/keepkey-vault/releases/download/${X64_CORE_TAG}/electrobun-core-darwin-x64.tar.gz" \
+          echo "Downloading Electrobun x64 core from keepkey/electrobun @ $X64_CORE_TAG..."
+          curl -fsSL "https://github.com/keepkey/electrobun/releases/download/${X64_CORE_TAG}/electrobun-core-darwin-x64.tar.gz" \
             -o /tmp/electrobun-core-x64.tar.gz
           echo "${X64_CORE_SHA256}  /tmp/electrobun-core-x64.tar.gz" | shasum -a 256 -c -
           mkdir -p /tmp/electrobun-x64

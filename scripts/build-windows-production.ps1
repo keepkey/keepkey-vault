@@ -983,7 +983,10 @@ if (-not $SkipSign) {
     if (-not (Test-Path $InnoSignScript)) {
         throw "Inno signing helper not found: $InnoSignScript"
     }
-    $innoSignCommand = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$InnoSignScript`" -SignToolPath `"$SIGNTOOL`" -Thumbprint `"$Thumbprint`" -FilePath `$f"
+    # ISCC parses the /S value itself after PowerShell constructs argv. Literal
+    # quotes split the command into extra script arguments on Windows; Inno's
+    # $q placeholder preserves quotes until it invokes the signing command.
+    $innoSignCommand = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `$q$InnoSignScript`$q -SignToolPath `$q$SIGNTOOL`$q -Thumbprint `$q$Thumbprint`$q -FilePath `$f"
     $isccArgs = @(
         "/DEnableSigning=1",
         "/Skeepkey=$innoSignCommand"

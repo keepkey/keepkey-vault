@@ -216,7 +216,7 @@ build-signed-intel:
 #   make publish-electrobun-x64-core
 # Then update X64_CORE_TAG in .github/workflows/build.yml to match.
 
-ELECTROBUN_X64_REPO ?= keepkey/keepkey-vault
+ELECTROBUN_X64_REPO ?= keepkey/electrobun
 # Tag format: electrobun-x64-core-vN — increment N when rebuilding
 ELECTROBUN_X64_TAG ?= electrobun-x64-core-v7
 
