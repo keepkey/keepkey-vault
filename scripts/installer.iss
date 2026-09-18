@@ -69,8 +69,9 @@ Source: "{#MySourceDir}\KeepKeyVault.exe"; DestDir: "{app}"; Flags: ignoreversio
 Source: "{#MySourceDir}\KeepKeyVault.exe.manifest"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#MySourceDir}\bin\*"; DestDir: "{app}\bin"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#MySourceDir}\Resources\*"; DestDir: "{app}\Resources"; Flags: ignoreversion recursesubdirs createallsubdirs
-; WebView2 bootstrapper — extracted to temp, deleted after install
-Source: "{#MySourceDir}\MicrosoftEdgeWebview2Setup.exe"; DestDir: "{tmp}"; Flags: ignoreversion deleteafterinstall
+; Full offline WebView2 runtime installer. The old Evergreen bootstrapper could
+; silently fail behind proxies or Edge Update policy, leaving a splash-only app.
+Source: "{#MySourceDir}\MicrosoftEdgeWebView2RuntimeInstallerX64.exe"; DestDir: "{tmp}"; Flags: ignoreversion deleteafterinstall
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\Resources\app-real.ico"
@@ -78,9 +79,6 @@ Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\Resources\app-real.ico"; Tasks: desktopicon
 
 [Run]
-; Always install/update WebView2 Runtime (required on Windows 10, pre-installed on Windows 11).
-; The bootstrapper is a no-op if already present and up-to-date.
-Filename: "{tmp}\MicrosoftEdgeWebview2Setup.exe"; Parameters: "/silent /install"; StatusMsg: "Installing WebView2 Runtime..."; Flags: waituntilterminated
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
 
 [Code]
@@ -93,6 +91,54 @@ begin
   Pf := Lowercase(ExpandConstant('{commonpf}'));
   Pf32 := Lowercase(ExpandConstant('{commonpf32}'));
   Result := ((Pf <> '') and (Pos(Pf, L) = 1)) or ((Pf32 <> '') and (Pos(Pf32, L) = 1));
+end;
+
+function WebView2InstalledIn(Root: String): Boolean;
+var
+  FindRec: TFindRec;
+  ApplicationDir: String;
+begin
+  Result := False;
+  ApplicationDir := AddBackslash(Root) + 'Microsoft\EdgeWebView\Application';
+  if FindFirst(ApplicationDir + '\*', FindRec) then
+  begin
+    try
+      repeat
+        if ((FindRec.Attributes and FILE_ATTRIBUTE_DIRECTORY) <> 0) and
+           (FindRec.Name <> '.') and (FindRec.Name <> '..') and
+           FileExists(ApplicationDir + '\' + FindRec.Name + '\msedgewebview2.exe') then
+        begin
+          Result := True;
+          Exit;
+        end;
+      until not FindNext(FindRec);
+    finally
+      FindClose(FindRec);
+    end;
+  end;
+end;
+
+function WebView2Installed(): Boolean;
+begin
+  Result := WebView2InstalledIn(ExpandConstant('{commonpf32}')) or
+            WebView2InstalledIn(ExpandConstant('{localappdata}'));
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  ResultCode: Integer;
+  InstallerPath: String;
+begin
+  if (CurStep <> ssPostInstall) or WebView2Installed() then
+    Exit;
+
+  ResultCode := -1;
+  InstallerPath := ExpandConstant('{tmp}\MicrosoftEdgeWebView2RuntimeInstallerX64.exe');
+  WizardForm.StatusLabel.Caption := 'Installing the Microsoft WebView2 Runtime...';
+  if (not Exec(InstallerPath, '/silent /install', '', SW_HIDE, ewWaitUntilTerminated, ResultCode)) or
+     (not WebView2Installed()) then
+    RaiseException('Microsoft WebView2 Runtime could not be installed (exit code ' +
+      IntToStr(ResultCode) + '). KeepKey Vault was not launched because WebView2 is required.');
 end;
 
 function InitializeSetup(): Boolean;
