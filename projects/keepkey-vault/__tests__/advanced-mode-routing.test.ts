@@ -100,3 +100,21 @@ describe('Solana schema fallback preserves the outflow check', () => {
     expect(helper.indexOf('checkSolanaOutflow')).toBeLessThan(helper.indexOf('SOLANA_BLIND_SIGNING_REQUIRED'))
   })
 })
+
+describe('REST Solana opaque transactions require AdvancedMode before approval', () => {
+  // Firmware refuses an opaque Solana tx unless the AdvancedMode POLICY is on,
+  // and hdwallet never forwards allowBlindSigning to the device. So the Vault's
+  // one-shot consent can never make the device sign by itself; the approval
+  // window must require the policy up front. Regression: a user approved
+  // "Allow once" + Approve and then got "Enable AdvancedMode to blind-sign".
+  const restSource = readFileSync(new URL('../src/bun/rest-api.ts', import.meta.url), 'utf8')
+
+  test('consent-required Solana transactions also set requiresAdvancedMode', () => {
+    const start = restSource.indexOf('if (signingInfo.requiresBlindSigningConsent) {')
+    const end = restSource.indexOf('}', start)
+    const block = restSource.slice(start, end)
+    expect(start).toBeGreaterThan(-1)
+    expect(block).toContain('signingInfo.needsBlindSigning = true')
+    expect(block).toContain('signingInfo.requiresAdvancedMode = true')
+  })
+})

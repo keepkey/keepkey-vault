@@ -1848,6 +1848,13 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               )
               if (signingInfo.requiresBlindSigningConsent) {
                 signingInfo.needsBlindSigning = true
+                // The device refuses every opaque Solana transaction unless the
+                // AdvancedMode policy is on (fsm_msgSolanaSignTx, "Enable
+                // AdvancedMode to blind-sign"), and hdwallet never forwards
+                // allowBlindSigning to it. The one-shot consent alone cannot
+                // make the device sign, so require the policy up front instead
+                // of letting the user approve twice and then fail on-device.
+                signingInfo.requiresAdvancedMode = true
               }
             } else if (
               path === '/tron/sign-message'
