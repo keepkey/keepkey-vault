@@ -1,8 +1,19 @@
 # Handoff — BEX side of the bridge slot-eviction fix
 
-> **Superseded (2026-09-19):** the vault now accepts every extension instance
-> (one per Chrome profile) and routes by an explicit `browser` arg — see
-> `src/bun/bex-bridge.ts`. Nothing is refused with 4409 any more.
+> **Partly superseded (2026-09-19, vault PR #448):** the vault now accepts
+> every extension instance (one per Chrome profile) and routes by an explicit
+> `browser` arg — see `src/bun/bex-bridge.ts`. Nothing is refused with 4409 any
+> more.
+>
+> - **Obsolete:** the single-slot rule under "What the vault now does",
+>   Task 1, Task 2, and Task 3's "different id and incumbent live → refuse
+>   with 4409" rule.
+> - **Done:** Task 0 landed in keepkey-client (#129, `announceContract.test.ts`).
+> - **Still wanted: Task 3**, the persisted per-profile instance id sent on
+>   connect, under a new vault rule: the same instance id always gets the same
+>   `browser` id, and nothing is refused. Until then `browser` ids are per
+>   connection with a per-run suffix (`b1-<run>`), so an id from before a vault
+>   restart fails with `unknown_browser` rather than reaching another profile.
 
 **Owner repo:** `/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-client`
 **Paired vault PR:** https://github.com/keepkey/keepkey-vault/pull/372 (merged into `develop` → `bex-bridge.ts`)
@@ -235,6 +246,9 @@ id — do them together.
    be the same value on every call. Two values means two instances are still
    being served.
 
-Vault-side regression tests for the slot rule live in
+Vault-side regression tests for the multi-client bridge (every instance
+accepted, per-instance call failure, stale pruning, ids unique across vault
+restarts) live in
 `/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-vault/src/bun/mcp.test.ts`
-under `describe('BEX bridge call lifecycle')`.
+under `describe('BEX bridge call lifecycle')`; `browser` routing is covered
+under `describe('MCP dumb pipe (bridge UP)')`.

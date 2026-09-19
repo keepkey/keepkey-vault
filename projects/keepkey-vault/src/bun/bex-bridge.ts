@@ -8,11 +8,14 @@
  * and it answers {id, result|error}.
  *
  * MULTI-CLIENT: every connected instance is a "browser" with a vault-assigned
- * id (b1, b2, …). A call names its target with `browser`; with exactly one
+ * id (b1-<run>, …). A call names its target with `browser`; with exactly one
  * connected it may be omitted. With several connected and none named, the call
  * is REFUSED (browser_ambiguous) — never routed to an arbitrary instance, since
  * that would silently send a signing request to a nondeterministically chosen
  * wallet (the bug the old single-slot eviction caused).
+ *
+ * Ids carry a per-run suffix, so one learned before a vault restart fails with
+ * unknown_browser instead of reaching whichever profile reconnected first.
  *
  * ponytail: ids are per connection, so an MV3 service-worker restart gives that
  * profile a new id. If agents need ids that survive restarts, have the BEX send
@@ -55,6 +58,7 @@ type Client = BrowserInfo & { ws: BridgeSocket }
 const clients = new Map<BridgeSocket, Client>()
 const pending = new Map<string, PendingCall>()
 let nextId = 1
+const RUN = crypto.randomUUID().slice(0, 6) // ids never repeat across vault runs
 
 /** Live clients, oldest first. Drops any that have gone silent. */
 function liveClients(): Client[] {
@@ -87,7 +91,7 @@ export function bridgeStatus(): { connected: boolean; connectedAt: number | null
 
 export function onBexOpen(ws: BridgeSocket): void {
   const now = Date.now()
-  const browser = `b${nextId++}`
+  const browser = `b${nextId++}-${RUN}`
   clients.set(ws, { ws, browser, connectedAt: now, lastSeenAt: now })
   console.log(`[BEX-BRIDGE] extension connected as ${browser} (${clients.size} connected)`)
 }
@@ -142,15 +146,15 @@ function resolveClient(browser?: string): Client | BridgeError {
 }
 
 /** Forward one tool call to a BEX instance. Rejects with a structured BridgeError — never hangs. */
-export function callBex(tool: string, args: unknown, browser?: string): Promise<unknown> {
+export function callBex(tool: string, args: unknown, browser?: string, timeoutMs = CALL_TIMEOUT_MS): Promise<unknown> {
   const target = resolveClient(browser)
   if (!('ws' in target)) return Promise.reject<unknown>(target)
   const id = crypto.randomUUID()
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       pending.delete(id)
-      reject({ code: 'bridge_timeout', message: `BEX ${target.browser} did not answer ${tool} within ${CALL_TIMEOUT_MS}ms` })
-    }, CALL_TIMEOUT_MS)
+      reject({ code: 'bridge_timeout', message: `BEX ${target.browser} did not answer ${tool} within ${timeoutMs}ms` })
+    }, timeoutMs)
     pending.set(id, { ws: target.ws, resolve, reject, timer })
     try {
       target.ws.send(JSON.stringify({ id, tool, args: args ?? {} }))

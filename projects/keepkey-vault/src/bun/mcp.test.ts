@@ -196,6 +196,30 @@ describe('MCP dumb pipe (bridge UP)', () => {
     }
   })
 
+  test('a browser that never answers costs tools/list and bex_browsers a short probe, not 30s', async () => {
+    // Regression: tools/list asked only the OLDEST browser and waited the full
+    // 30s call timeout, then served the fallback catalog even with a healthy
+    // browser connected; bex_browsers waited 30s on it too.
+    const silent: any = { send() {}, close() {} } // heartbeats, never answers a call
+    const live = fakeBex({ bex_list_tools: { tools: [{ name: 'bex_click' }] }, bex_status: { ok: true } })
+    onBexOpen(silent) // oldest
+    onBexOpen(live as any)
+    try {
+      const [list, browsers] = await Promise.all([
+        call({ jsonrpc: '2.0', id: 30, method: 'tools/list' }),
+        call({ jsonrpc: '2.0', id: 31, method: 'tools/call', params: { name: 'bex_browsers' } }),
+      ])
+      // The live browser's catalog, not FALLBACK_TOOLS.
+      expect(list.json.result.tools.map((t: any) => t.name)).toEqual(['bex_browsers', 'bex_click'])
+      const rows = JSON.parse(browsers.json.result.content[0].text).browsers
+      expect(rows[0].error).toMatch(/did not answer bex_status/)
+      expect(rows[1].status).toEqual({ ok: true })
+    } finally {
+      onBexClose(silent)
+      onBexClose(live as any)
+    }
+  }, 10_000) // the 30s call timeout would blow this
+
   test('a content-block result passes through untouched (image is not stringified)', async () => {
     const shot = { content: [{ type: 'image', data: 'AAAA', mimeType: 'image/jpeg' }] }
     const ws = open = fakeBex({ bex_screenshot: shot })
@@ -259,6 +283,29 @@ describe('BEX bridge call lifecycle', () => {
     onBexClose(ws1 as any)
     onBexClose(ws2 as any)
     expect(bridgeConnected()).toBe(false)
+  })
+
+  test('an id from a previous vault run is unknown_browser, never another profile', async () => {
+    // Regression: ids restarted at b1 on every vault start, so after a restart
+    // an agent's saved "b1" silently reached whichever profile reconnected
+    // first. A fresh module instance stands in for the restarted vault.
+    const vaultRun = (tag: string) => import(`./bex-bridge.ts?run=${tag}`)
+    const before = await vaultRun('before-restart')
+    const after = await vaultRun('after-restart')
+    const profileA = fakeWs(), profileB = fakeWs()
+    before.onBexOpen(profileA as any)
+    const saved = before.listBrowsers()[0].browser
+    after.onBexOpen(profileB as any) // the other profile wins the reconnect race
+    const fresh = after.listBrowsers()[0].browser
+    try {
+      expect(fresh.split('-')[0]).toBe(saved.split('-')[0]) // same slot: both runs counted from 1
+      expect(fresh).not.toBe(saved)
+      await expect(after.callBex('bex_accounts', {}, saved)).rejects.toMatchObject({ code: 'unknown_browser' })
+      expect(profileB.sent.length).toBe(0)
+    } finally {
+      before.onBexClose(profileA as any)
+      after.onBexClose(profileB as any)
+    }
   })
 
   test("closing one instance fails only ITS in-flight calls", async () => {
