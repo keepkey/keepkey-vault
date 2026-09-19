@@ -14,9 +14,16 @@ stored as secrets so provisioning is atomic and consistent across deployments.
 - Ethereum sends `chainId`, contract, selector, and calldata length. It does
   not send transaction arguments or calldata. KeepKey decodes the real values;
   the service cannot supply them.
-- Solana sends the unsigned transaction and reviewed catalog id. The service
-  parses the transaction, resolves its lookup-table accounts from Solana RPC,
-  and signs a binding to the exact message. Seeds, private keys, PINs,
+- Solana sends the unsigned transaction and, optionally, a reviewed catalog
+  id. Without one, the service finds the single catalog entry whose program,
+  discriminator, and exact instruction length match, and certifies it only
+  when the firmware's certified rule applies (at most 8 instructions, and
+  every other instruction a ComputeBudget, Memo, or static System transfer);
+  anything else gets 422 and stays on the opaque path. It parses the
+  transaction, resolves its lookup-table accounts from Solana RPC, and signs a
+  binding to the exact message. For each token amount the matched schema
+  shows, it attests the mint's immutable on-chain symbol and decimals when the
+  mint is eligible; otherwise KeepKey shows the raw amount and full mint. Seeds, private keys, PINs,
   passphrases, and device signatures never leave KeepKey.
 
 The Worker writes no transaction database. Cloudflare's platform-level

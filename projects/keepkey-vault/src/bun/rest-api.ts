@@ -44,7 +44,7 @@ import { parseSolanaTx, SolanaTxParseError } from './solana-tx'
 import { signSolanaWireTransaction } from './solana-signing'
 import { buildSolanaDecodedInfo } from './solana-clearsign'
 import { buildSolanaMessageDecodedInfo } from './solana-message-preview'
-import { requiresSolanaBlindSigningConsent } from './solana-consent'
+import { buildRestSolanaSignRequest, routeExternalSolanaTransaction, type CertifiedSolanaProof } from './solana-certified-registry'
 import { createRpcAltFetcher, DEFAULT_SOLANA_RPC_ENDPOINT } from './solana-alt'
 import { utxoDiscoveryKey } from './btc-backend/types'
 import {
@@ -1515,6 +1515,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
       let activeSigningId: string | undefined
       let activeSigningInfo: SigningRequestInfo | undefined
       let activeAllowBlindSigning = false
+      // Certified envelope found for this request's raw_tx before approval.
+      let activeSolanaCertified: { rawTx: string; proof: CertifiedSolanaProof } | undefined
 
       try {
         // ═══════════════════════════════════════════════════════════════
@@ -1842,12 +1844,32 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               } else {
                 signingInfo.solanaDecodeError = 'missing raw_tx payload'
               }
-              signingInfo.requiresBlindSigningConsent = requiresSolanaBlindSigningConsent(
+              // Dapps rarely send certified material. Before approval, ask the
+              // ClearSign service to recognize the exact bytes; a complete
+              // certified envelope is decoded and verified by the device, so it
+              // needs neither one-shot consent nor AdvancedMode. No match or an
+              // unavailable service keeps the opaque path below unchanged.
+              const route = await routeExternalSolanaTransaction(
                 signingInfo.solanaDecoded,
-                preview.lutProof !== undefined || preview.schema !== undefined,
+                preview,
+                engine.getDeviceState().firmwareVersion,
               )
+              signingInfo.requiresBlindSigningConsent = route.requiresBlindSigningConsent
+              if (route.certifiedProof && typeof preview.raw_tx === 'string') {
+                activeSolanaCertified = { rawTx: preview.raw_tx, proof: route.certifiedProof }
+                // The device decodes this call from the certified schema. The
+                // sign handler refuses if that material is gone at sign time.
+                signingInfo.deviceClearSigns = true
+              }
               if (signingInfo.requiresBlindSigningConsent) {
                 signingInfo.needsBlindSigning = true
+                // The device refuses every opaque Solana transaction unless the
+                // AdvancedMode policy is on (fsm_msgSolanaSignTx, "Enable
+                // AdvancedMode to blind-sign"), and hdwallet never forwards
+                // allowBlindSigning to it. The one-shot consent alone cannot
+                // make the device sign, so require the policy up front instead
+                // of letting the user approve twice and then fail on-device.
+                signingInfo.requiresAdvancedMode = true
               }
             } else if (
               path === '/tron/sign-message'
@@ -2846,30 +2868,23 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           // proof unchanged, or adds a one-shot opaque fallback only when
           // the Vault UI returned explicit consent, then splices
           // the returned signature back into the original wire transaction.
-          const clearSignPayload = body.schema?.payload ? String(body.schema.payload) : undefined
-          const clearSignRequest = body.schema ? {
-            signerKeyId: body.schema.signerKeyId,
+          // Caller material wins; the pre-approval lookup only ran without it.
+          const signRequest = buildRestSolanaSignRequest(body, addressNList, {
+            certified: activeSolanaCertified,
+            routedCertified: activeSigningInfo?.deviceClearSigns === true,
+            allowBlindSigning: activeAllowBlindSigning,
+          })
+          const schema = signRequest.schema
+          const clearSignPayload = schema?.payload ? String(schema.payload) : undefined
+          const clearSignRequest = schema ? {
+            signerKeyId: schema.signerKeyId,
             txHash: createHash('sha256').update(fullTx).digest('hex'),
           } : undefined
           let clearSignSentToDevice = false
           let result: any
           try {
             result = await signSolanaWireTransaction(
-              {
-                addressNList,
-                rawTx: body.raw_tx,
-                lutProof: body.lutProof,
-                certificate: body.certificate,
-                // Reusable KKSOLSC1 instruction schema — signed once per
-                // program+instruction, so the device can decode this call
-                // without a per-transaction attestation.
-                schema: body.schema,
-                // x402 payment intent is never trusted directly: the signing
-                // helper matches network, sponsor, mint, amount, authority and
-                // destination ATA against the exact v0 message first.
-                x402: body.x402,
-                allowBlindSigning: activeAllowBlindSigning,
-              },
+              signRequest,
               (request) => {
                 clearSignSentToDevice = true
                 return emuWrap(
@@ -2891,14 +2906,14 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             if (clearSignPayload) recordRestClearSignEvent({
               kind: 'transaction', outcome: 'signed', source: 'rest-api', chain: 'Solana',
               format: 'KKSOLSC1_BASE64', label: 'Solana ClearSign transaction', payload: clearSignPayload,
-              keyId: Number.isInteger(body.schema?.signerKeyId) ? body.schema!.signerKeyId : undefined,
+              keyId: Number.isInteger(schema?.signerKeyId) ? schema!.signerKeyId : undefined,
               sentToDevice: clearSignSentToDevice, request: clearSignRequest,
             })
           } catch (err: any) {
             if (clearSignPayload) recordRestClearSignEvent({
               kind: 'transaction', outcome: 'blocked', source: 'rest-api', chain: 'Solana',
               format: 'KKSOLSC1_BASE64', label: 'Blocked Solana ClearSign transaction', payload: clearSignPayload,
-              keyId: Number.isInteger(body.schema?.signerKeyId) ? body.schema!.signerKeyId : undefined,
+              keyId: Number.isInteger(schema?.signerKeyId) ? schema!.signerKeyId : undefined,
               sentToDevice: clearSignSentToDevice, request: clearSignRequest,
               error: err?.message || String(err),
             })
@@ -4608,6 +4623,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         activeSigningId = undefined
         activeSigningInfo = undefined
         activeAllowBlindSigning = false
+        activeSolanaCertified = undefined
       }
     },
     // WS endpoint for the BEX agent bridge (/bex-bridge upgrade above).

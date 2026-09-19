@@ -20,4 +20,20 @@ describe('pinned hdwallet certified Solana contract', () => {
 		expect(keepkeySolana).toContain('encodeLengthDelimited(13, certificate)')
 		expect(keepkeySolana).not.toContain('msg.swapMetadata')
 	})
+
+	test('forwards certified token identities, including their delegate signature', async () => {
+		// Certified TOKEN_AMOUNT display depends on SolanaSignTx.token_info (4)
+		// carrying SolanaTokenInfo.signature (4) and signer_key_id (5). A pin
+		// that dropped either would silently fall back to raw amounts.
+		const [coreSolana, keepkeySolana] = await Promise.all([
+			Bun.file(new URL('../../../modules/hdwallet/packages/hdwallet-core/src/solana.ts', import.meta.url)).text(),
+			Bun.file(new URL('../../../modules/hdwallet/packages/hdwallet-keepkey/src/solana.ts', import.meta.url)).text(),
+		])
+		expect(coreSolana).toMatch(/tokenInfo\?: SolanaTokenInfo\[\]/)
+		expect(coreSolana).toMatch(/signature\?: Uint8Array \| string/)
+		expect(coreSolana).toMatch(/signerKeyId\?: number/)
+		expect(keepkeySolana).toContain('extraFields.push(encodeLengthDelimited(4, encodeSolanaTokenInfo(tokenInfo)))')
+		expect(keepkeySolana).toContain('fields.push(encodeLengthDelimited(4, signature))')
+		expect(keepkeySolana).toContain('fields.push(encodeVarintField(5, info.signerKeyId))')
+	})
 })

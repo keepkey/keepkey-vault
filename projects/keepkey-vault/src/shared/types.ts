@@ -663,7 +663,9 @@ export interface SigningRequestInfo {
   /** true when tx has calldata that cannot be fully decoded — device will show blind-signing warning */
   needsBlindSigning?: boolean
   /** firmwareClearSigns(to, data, chainId): the device's own allowlist decodes
-   *  this call. Unlike needsBlindSigning, a caller-supplied blob never sets it. */
+   *  this call. Unlike needsBlindSigning, a caller-supplied blob never sets it.
+   *  REST Solana: Vault found a certified ClearSign schema for these exact
+   *  bytes, which the device verifies and decodes (no opaque consent asked). */
   deviceClearSigns?: boolean
   /** true when the UI must enable AdvancedMode before allowing approval */
   requiresAdvancedMode?: boolean

@@ -23,7 +23,7 @@ include .env
 export ELECTROBUN_DEVELOPER_ID ELECTROBUN_TEAMID ELECTROBUN_APPLEID ELECTROBUN_APPLEIDPASS
 endif
 
-.PHONY: install dev dev-hmr build build-stable build-canary build-signed patch-arm64-release-tar prune-bundle dmg clean help vault sign-check verify verify-entitlements publish release upload-dmg upload-all-dmgs sign-release sign-release-intel verify-arch audit-macos-bundle submodules modules-install modules-build modules-clean audit build-zcash-cli build-zcash-cli-debug build-zcash-cli-intel test test-unit test-rest test-sign-gating test-zcash-cli test-emu build-intel build-signed-intel build-electrobun-x64-core build-electrobun-arm64-core prepare-electrobun-arm64-core publish-electrobun-x64-core build-electrobun-linux-x64-core publish-electrobun-linux-x64-core preflight build-emulator build-emulator-windows build-emulator-macos-release build-emulator-release clean-emulator test-emu-python
+.PHONY: clearsign-worker-test clearsign-worker-deploy install dev dev-hmr build build-stable build-canary build-signed patch-arm64-release-tar prune-bundle dmg clean help vault sign-check verify verify-entitlements publish release upload-dmg upload-all-dmgs sign-release sign-release-intel verify-arch audit-macos-bundle submodules modules-install modules-build modules-clean audit build-zcash-cli build-zcash-cli-debug build-zcash-cli-intel test test-unit test-rest test-sign-gating test-zcash-cli test-emu build-intel build-signed-intel build-electrobun-x64-core build-electrobun-arm64-core prepare-electrobun-arm64-core publish-electrobun-x64-core build-electrobun-linux-x64-core publish-electrobun-linux-x64-core preflight build-emulator build-emulator-windows build-emulator-macos-release build-emulator-release clean-emulator test-emu-python
 
 # --- Submodules (auto-init on fresh worktrees/clones) ---
 
@@ -391,12 +391,22 @@ dmg: verify-arch
 	spctl --assess --type open --context context:primary-signature --verbose=4 "$$DMG_OUT"; \
 	echo "DMG ready: $$DMG_OUT"
 
+# --- ClearSign Worker ---
+
+clearsign-worker-test:
+	cd $(PROJECT_DIR) && bun test clearsign-worker/src
+
+# Production, outward-facing. Tests gate the deploy.
+clearsign-worker-deploy: clearsign-worker-test
+	cd $(PROJECT_DIR) && wrangler deploy --config clearsign-worker/wrangler.toml --var CLEARSIGN_SOURCE_REVISION:$$(git rev-parse --short=9 HEAD)
+
 # --- Testing ---
 
 test: test-zcash-cli test-unit
 
 test-unit:
-	cd $(PROJECT_DIR) && bun test __tests__/evm-signer-verify.test.ts __tests__/evm-balance-fetch.test.ts __tests__/swap-parsing.test.ts __tests__/engine-state-machine.test.ts __tests__/device-switch.test.ts __tests__/wizard-messaging.test.ts __tests__/solana-tx.test.ts __tests__/solana-message-parser.test.ts __tests__/solana-instruction-decoder.test.ts __tests__/solana-alt.test.ts __tests__/solana-spl-decimals.test.ts __tests__/ton-build.test.ts __tests__/tron-memo-inject.test.ts __tests__/audit-coverage.test.ts __tests__/chain-scan.test.ts __tests__/pairing-pubkeys.test.ts __tests__/balance-display-state.test.ts __tests__/failed-fetch-not-zero.test.ts __tests__/advanced-mode-routing.test.ts __tests__/clearsign-provider-key.test.ts __tests__/firmware-clearsign-gate.test.ts __tests__/clearsign-risk.test.ts __tests__/taproot-host.test.ts __tests__/solana-hdwallet-contract.test.ts __tests__/recovery-ownership.test.ts __tests__/evm-x402.test.ts __tests__/solana-x402.test.ts __tests__/patch-electrobun.test.ts __tests__/tx-watch.test.ts __tests__/signed-tx-registry.test.ts src/bun/emulator-library.test.ts src/bun/mcp.test.ts src/bun/rng-audit.test.ts src/shared/zcash-maturity.test.ts src/bun/zcash-capability.test.ts src/bun/zcash-sidecar-path.test.ts src/bun/txbuilder/utxo-zcash.test.ts src/bun/txbuilder/utxo-taproot.test.ts src/bun/txbuilder/hive-ops.test.ts src/bun/clearsign-studio.test.ts src/bun/solana-outflow.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/evm-signer-verify.test.ts __tests__/evm-balance-fetch.test.ts __tests__/swap-parsing.test.ts __tests__/engine-state-machine.test.ts __tests__/device-switch.test.ts __tests__/wizard-messaging.test.ts __tests__/solana-tx.test.ts __tests__/solana-message-parser.test.ts __tests__/solana-instruction-decoder.test.ts __tests__/solana-alt.test.ts __tests__/solana-spl-decimals.test.ts __tests__/ton-build.test.ts __tests__/tron-memo-inject.test.ts __tests__/audit-coverage.test.ts __tests__/chain-scan.test.ts __tests__/pairing-pubkeys.test.ts __tests__/balance-display-state.test.ts __tests__/failed-fetch-not-zero.test.ts __tests__/advanced-mode-routing.test.ts __tests__/clearsign-provider-key.test.ts __tests__/firmware-clearsign-gate.test.ts __tests__/clearsign-risk.test.ts __tests__/taproot-host.test.ts __tests__/solana-hdwallet-contract.test.ts __tests__/recovery-ownership.test.ts __tests__/evm-x402.test.ts __tests__/solana-x402.test.ts __tests__/patch-electrobun.test.ts __tests__/tx-watch.test.ts __tests__/signed-tx-registry.test.ts src/bun/emulator-library.test.ts src/bun/mcp.test.ts src/bun/rng-audit.test.ts src/shared/zcash-maturity.test.ts src/bun/zcash-capability.test.ts src/bun/zcash-sidecar-path.test.ts src/bun/txbuilder/utxo-zcash.test.ts src/bun/txbuilder/utxo-taproot.test.ts src/bun/txbuilder/hive-ops.test.ts src/bun/clearsign-studio.test.ts src/bun/solana-outflow.test.ts src/bun/solana-certified-schema.test.ts __tests__/solana-certified-match.test.ts src/bun/solana-certified-registry.test.ts __tests__/solana-certified-routing.test.ts
+	$(MAKE) clearsign-worker-test
 	cd $(PROJECT_DIR) && bun src/bun/btc-backend/core.test.ts
 	# Script-style suites (own runner + process.exit — must NOT join the `bun test`
 	# list above, where the exit would cut the run short). cosmos.test.ts was green

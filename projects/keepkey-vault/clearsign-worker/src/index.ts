@@ -22,9 +22,11 @@ import {
   signCertifiedSolanaSchema,
   solanaSchemaCoverage,
 } from '../../src/bun/solana-certified-schema'
+import { certifiedSolanaSchemaApplies, solanaInstructionMatchesSchema } from '../../src/bun/solana-certified-match'
 import { resolveCanonicalLutAccounts } from '../../src/bun/solana-lut-resolver'
-import { createRpcAltFetcher, DEFAULT_SOLANA_RPC_ENDPOINT } from '../../src/bun/solana-alt'
+import { createResilientSolanaAltFetcher, solanaRpcHealth, SolanaRpcUnavailableError } from './solana-rpc'
 import { parseSolanaMessage, parseSolanaTx, solanaMessageSlice } from '../../src/bun/solana-tx'
+import { certifySchemaTokens } from './solana-token'
 
 interface Env {
   CLEARSIGN_ENVIRONMENT?: string
@@ -32,6 +34,9 @@ interface Env {
   CLEARSIGN_CERTIFICATE_HEX?: string
   CLEARSIGN_SOLANA_CERTIFICATE_HEX?: string
   CLEARSIGN_SOLANA_RPC_ENDPOINT?: string
+  CLEARSIGN_SOLANA_RPC_ENDPOINTS?: string
+  CLEARSIGN_SOURCE_REVISION?: string
+  CF_VERSION_METADATA?: { id: string; tag: string; timestamp: string }
 }
 
 const SERVICE = 'KeepKey ClearSign'
@@ -83,9 +88,9 @@ function reviewedCatalog() {
     id: `solana:${key}`,
     family: 'solana',
     network: 'Solana',
-    protocol: 'Relay',
-    maintainedBy: 'Relay',
-    action: 'Deposit funds for a cross-chain swap',
+    protocol: spec.protocol || 'Relay',
+    maintainedBy: spec.protocol || 'Relay',
+    action: spec.action || 'Deposit funds for a cross-chain swap',
     method: spec.instructionName,
     program: spec.programId,
     discriminator: spec.discriminator.toString('hex'),
@@ -94,7 +99,7 @@ function reviewedCatalog() {
       ...(spec.args || []).map((arg) => arg.label),
       ...(spec.accounts || []).map((account) => account.label),
     ],
-    provenance: { protocol: PROVENANCE.protocol, security: PROVENANCE.protocolSecurity },
+    provenance: spec.provenance || { protocol: PROVENANCE.protocol, security: PROVENANCE.protocolSecurity },
   }))
   return [...evm, ...solana]
 }
@@ -148,14 +153,20 @@ function provisioning(env: Env) {
   }
 }
 
-function publicStatus(env: Env, origin: string) {
+async function publicStatus(env: Env, origin: string) {
   const state = provisioning(env)
+  const rpc = state.solanaReady ? await solanaRpcHealth(env) : undefined
+  const dependencyUnavailable = rpc?.status === 'unavailable'
   const expires = [state.evmCertificate?.notAfter, state.solanaCertificate?.notAfter].filter(Boolean) as number[]
   return {
     service: SERVICE,
     environment: env.CLEARSIGN_ENVIRONMENT || 'production',
-    status: state.ready ? 'ready' : 'provisioning',
-    message: state.ready
+    status: !state.ready ? 'provisioning' : dependencyUnavailable ? 'degraded' : 'ready',
+    build: { sourceRevision: env.CLEARSIGN_SOURCE_REVISION || null, version: env.CF_VERSION_METADATA || null },
+    dependencies: { solanaRpc: rpc || { status: 'not-configured' } },
+    message: dependencyUnavailable
+      ? 'Solana lookup-table verification is temporarily unavailable. Ethereum signing remains independently available.'
+      : state.ready
       ? 'KeepKey can authenticate transaction descriptions for every scope marked ready below, without blind signing.'
       : 'The service is online, but no certified signing scope is active yet.',
     endpoints: {
@@ -166,7 +177,7 @@ function publicStatus(env: Env, origin: string) {
     },
     scopes: {
       ethereum: state.evmReady ? 'ready' : 'provisioning',
-      solana: state.solanaReady ? 'ready' : 'provisioning',
+      solana: !state.solanaReady ? 'provisioning' : dependencyUnavailable ? 'degraded' : 'ready',
     },
     trust: {
       label: state.ready ? 'Authenticated by KeepKey' : 'Certificate pending',
@@ -181,7 +192,7 @@ function publicStatus(env: Env, origin: string) {
     privacy: {
       applicationStorage: false,
       ethereumRequest: ['chainId', 'contract', 'selector', 'calldataLength'],
-      solanaRequest: ['unsigned transaction', 'reviewed catalog id'],
+      solanaRequest: ['unsigned transaction', 'reviewed catalog id (optional)'],
       note: 'Solana lookup-table certification sends the unsigned transaction to this service so it can resolve and bind the exact accounts. No seed, private key, PIN, passphrase, or device signature is sent.',
     },
     catalogEntries: reviewedCatalog().length,
@@ -196,15 +207,15 @@ function escapeHtml(value: unknown): string {
   })[character]!)
 }
 
-function home(env: Env, origin: string): Response {
-  const status = publicStatus(env, origin)
+async function home(env: Env, origin: string): Promise<Response> {
+  const status = await publicStatus(env, origin)
   const ready = status.status === 'ready'
   const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${SERVICE}</title><style>body{margin:0;background:#0b0d10;color:#eef2f5;font:15px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace}main{max-width:820px;margin:0 auto;padding:56px 24px}h1{font-size:28px;margin:0 0 8px}.muted{color:#929aa5}.card{border:1px solid #29313a;background:#11151a;border-radius:14px;padding:20px;margin:18px 0}.pill{display:inline-block;border:1px solid ${ready ? '#42d392' : '#e7b84b'};color:${ready ? '#42d392' : '#e7b84b'};border-radius:999px;padding:3px 10px;font-size:12px}dt{color:#929aa5}dd{margin:0 0 10px;word-break:break-all}a{color:#7dd3fc}code{color:#d9b75f}</style></head>
 <body><main><span class="pill">${escapeHtml(status.status)}</span><h1>KeepKey ClearSign</h1><p class="muted">Human-readable transaction details, authenticated by the KeepKey in your hand.</p>
 <section class="card"><h2>What happens</h2><p>${escapeHtml(status.message)}</p><p>The service recognizes a reviewed protocol action and signs a description. Your KeepKey independently checks the root certificate, signer fingerprint, program or contract, decoded fields, and the exact transaction binding. You still approve the final transaction on the device.</p></section>
 <section class="card"><h2>Trust status</h2><dl><dt>Device label</dt><dd>${escapeHtml(status.trust.label)}</dd><dt>Signer</dt><dd>${escapeHtml(status.trust.signerAlias)} · ${escapeHtml(status.trust.signerFingerprint)}</dd><dt>Ethereum</dt><dd>${escapeHtml(status.scopes.ethereum)}</dd><dt>Solana</dt><dd>${escapeHtml(status.scopes.solana)}</dd><dt>Earliest certificate expiry</dt><dd>${escapeHtml(status.trust.certificateExpiresAt || 'Pending')}</dd></dl></section>
-<section class="card"><h2>Reviewed protocols</h2><p><strong>Relay</strong> · Ethereum and Solana deposits for cross-chain swaps.</p><p><strong>Portals</strong> · Native ETH swaps through the verified Ethereum router. KeepKey reads the output token, minimum output, recipient, and input amount from the transaction itself.</p><p>Only exact catalog matches are certified. Unknown programs, contracts, selectors, instruction sizes, or lookup-table accounts are refused.</p><a href="/v1/catalog">View the machine-readable catalog</a></section>
+<section class="card"><h2>Reviewed protocols</h2><p><strong>Relay</strong> · Ethereum and Solana deposits for cross-chain swaps.</p><p><strong>Portals</strong> · Native ETH swaps through the verified Ethereum router. KeepKey reads the output token, minimum output, recipient, and input amount from the transaction itself.</p><p><strong>Pump AMM</strong> · Token buys with base output units, maximum quote input units, token mints, and receive/pay accounts decoded on your KeepKey.</p><p><strong>SoltoshiDICE</strong> · Blackjack table joins with the round, seat, token buy-in, session key, session length, allowance, and maximum wager decoded on your KeepKey.</p><p>Only exact catalog matches are certified. Unknown programs, contracts, selectors, instruction sizes, or lookup-table accounts are refused.</p><a href="/v1/catalog">View the machine-readable catalog</a></section>
 <section class="card"><h2>Privacy and provenance</h2><p>Ethereum requests contain only transaction shape. Solana lookup-table requests contain the unsigned transaction so this service can resolve and bind its accounts. Wallet seeds, private keys, PINs, passphrases, and device signatures never leave your KeepKey. This service writes no transaction database.</p><p><a href="${PROVENANCE.protocol}">How Relay works</a> · <a href="${PROVENANCE.protocolSecurity}">Relay security</a> · <a href="${PROVENANCE.portals}">Portals documentation</a> · <a href="${PROVENANCE.portalsRouter}">Verified Portals router</a> · <a href="${PROVENANCE.firmware}">KeepKey firmware</a> · <a href="${PROVENANCE.vault}">Vault source</a></p></section>
 </main></body></html>`
   return new Response(html, {
@@ -245,18 +256,18 @@ export default {
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: commonHeaders })
     if (request.method === 'GET' && url.pathname === '/') return home(env, url.origin)
     if (request.method === 'GET' && url.pathname === '/health') {
-      const state = provisioning(env)
-      return json({ ok: true, ready: state.ready, service: 'keepkey-clearsign', fingerprint: ALPHA_DELEGATE_FINGERPRINT })
+      const status = await publicStatus(env, url.origin)
+      return json({ ok: true, ready: status.status === 'ready', service: 'keepkey-clearsign', fingerprint: ALPHA_DELEGATE_FINGERPRINT, build: status.build, dependencies: status.dependencies })
     }
     if (request.method === 'GET' && (url.pathname === '/ready' || url.pathname === '/v1/status')) {
-      const status = publicStatus(env, url.origin)
+      const status = await publicStatus(env, url.origin)
       return json(status, url.pathname === '/ready' && status.status !== 'ready' ? 503 : 200)
     }
     if (request.method === 'GET' && url.pathname === '/v1/catalog') {
       return json({ version: 1, entries: reviewedCatalog(), provenance: PROVENANCE }, 200, 'public, max-age=300')
     }
     if (request.method === 'GET' && url.pathname === '/signer') {
-      const status = publicStatus(env, url.origin)
+      const status = await publicStatus(env, url.origin)
       return json({ status: status.status, alias: status.trust.signerAlias, fingerprint: ALPHA_DELEGATE_FINGERPRINT, publicKeyHex: ALPHA_DELEGATE_PUBLIC_KEY, keyId: CERTIFIED_METADATA_KEY_ID, scopes: status.scopes, certificateExpiresAt: status.trust.certificateExpiresAt })
     }
 
@@ -284,9 +295,10 @@ export default {
       try { body = await readJson(request) } catch (error: any) {
         return json({ error: error.message }, error.message === 'request too large' ? 413 : 400)
       }
-      const catalogKey = String(body?.catalogKey || '')
-      const spec = CERTIFIED_SOLANA_CATALOG[catalogKey]
-      if (!spec) return json({ classification: 'OPAQUE', error: 'catalogKey is not in the reviewed catalog' }, 422)
+      const requestedKey = body?.catalogKey === undefined ? undefined : String(body.catalogKey)
+      if (requestedKey !== undefined && !Object.hasOwn(CERTIFIED_SOLANA_CATALOG, requestedKey)) {
+        return json({ classification: 'OPAQUE', error: 'catalogKey is not in the reviewed catalog' }, 422)
+      }
 
       let fullTx: Buffer
       let messageBytes: Uint8Array
@@ -300,17 +312,40 @@ export default {
         return json({ classification: 'OPAQUE', error: error?.message || 'malformed Solana transaction' }, 422)
       }
 
-      const programBytes = Buffer.from(bs58.decode(spec.programId))
-      const expectedLength = solanaSchemaCoverage(spec)
-      const matchesInstruction = message.instructions.some((instruction) => {
-        const programKey = message.staticAccounts[instruction.programIdIndex]
-        if (!programKey || !Buffer.from(programKey).equals(programBytes)) return false
-        if ((spec.accounts || []).some((account) => account.index >= instruction.accountIndices.length)) return false
-        const data = Buffer.from(instruction.data)
-        return data.length === expectedLength && data.subarray(0, spec.discriminator.length).equals(spec.discriminator)
-      })
-      if (!matchesInstruction) {
-        return json({ classification: 'OPAQUE', error: `catalog entry ${catalogKey} does not exactly match an instruction in this transaction` }, 422)
+      const candidates = Object.entries(CERTIFIED_SOLANA_CATALOG).filter(([key]) => requestedKey === undefined || key === requestedKey)
+      // Every (entry, instruction) pair that matches. Firmware refuses a schema
+      // that matches two instructions, so exactly one pair may certify.
+      const matches = candidates.flatMap(([key, spec]) => message.instructions.filter((instruction) => {
+        if (!solanaInstructionMatchesSchema(message, instruction, spec)) return false
+        if (key === 'pumpAmmBuy') {
+          if (instruction.accountIndices.length < 23 || instruction.data[24] > 1) return false
+          // Pin the official IDL's fixed program accounts and required user
+          // signer; an arbitrary program label cannot certify another CPI.
+          const fixedAccounts: Record<number, string> = {
+            13: '11111111111111111111111111111111',
+            14: 'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL',
+            16: spec.programId,
+            22: 'pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ',
+          }
+          if (instruction.accountIndices[1] >= message.header.numRequiredSignatures) return false
+          for (const [index, expected] of Object.entries(fixedAccounts)) {
+            const account = message.staticAccounts[instruction.accountIndices[Number(index)]]
+            if (!account || bs58.encode(account) !== expected) return false
+          }
+        }
+        return true
+      }).map((instruction) => [key, spec, instruction] as const))
+      if (matches.length !== 1) {
+        return json({ classification: 'OPAQUE', error: 'transaction does not uniquely match a reviewed Solana catalog entry' }, 422)
+      }
+      const [catalogKey, spec, instruction] = matches[0]
+      // Without a catalog key this is a dapp's own transaction. The device
+      // refuses a certified envelope its certified rule does not apply to,
+      // with no blind-sign fallback, while the caller's opaque path could
+      // still sign it. So certify it only when that rule holds.
+      if (requestedKey === undefined &&
+          certifiedSolanaSchemaApplies(message, spec) !== message.instructions.indexOf(instruction)) {
+        return json({ classification: 'OPAQUE', error: 'firmware would not apply the reviewed schema to this transaction (instruction count or companion instructions)' }, 422)
       }
 
       const state = provisioning(env)
@@ -318,9 +353,11 @@ export default {
         return json({ classification: 'UNAVAILABLE', error: 'Solana certified signing is not provisioned' }, 503)
       }
 
+      let proofStage = 'schema'
       try {
         const schema = signCertifiedSolanaSchema(env.CLEARSIGN_SOLANA_CERTIFICATE_HEX, env.CLEARSIGN_DELEGATE_PRIVATE_KEY, spec)
         const response: any = {
+          catalogKey,
           success: true,
           classification: 'VERIFIED',
           schema: { payload: schema.schemaPayload, signature: schema.schemaSignature, signerKeyId: schema.keyId },
@@ -329,26 +366,36 @@ export default {
           fingerprint: schema.fingerprint,
           transactionShape: message.version,
           lookupTableCount: message.altEntries.length,
-          provenance: PROVENANCE,
+          provenance: spec.provenance || PROVENANCE,
         }
-        if (message.altEntries.length === 0) return json(response)
+        // Firmware indexes static accounts, then the resolved lookup accounts.
+        let accountKeys: Uint8Array[] = message.staticAccounts
+        if (message.altEntries.length > 0) {
+          proofStage = 'lookup-resolution'
+          const resolution = await resolveCanonicalLutAccounts(
+            message,
+            createResilientSolanaAltFetcher(env),
+          )
+          proofStage = 'lookup-signature'
+          const messageHash = createHash('sha256').update(messageBytes).digest()
+          const proof = signCertifiedSolanaLutAttestation(env.CLEARSIGN_SOLANA_CERTIFICATE_HEX, env.CLEARSIGN_DELEGATE_PRIVATE_KEY, messageHash, resolution.accounts)
+          response.lutProof = {
+            accounts: resolution.accounts.map((account) => account.toString('base64')),
+            signature: proof.lutSignature,
+            signerKeyId: proof.keyId,
+          }
+          response.writableCount = resolution.writableCount
+          response.readonlyCount = resolution.readonlyCount
+          accountKeys = [...message.staticAccounts, ...resolution.accounts]
+        }
 
-        const resolution = await resolveCanonicalLutAccounts(
-          message,
-          createRpcAltFetcher(env.CLEARSIGN_SOLANA_RPC_ENDPOINT || DEFAULT_SOLANA_RPC_ENDPOINT),
-        )
-        const messageHash = createHash('sha256').update(messageBytes).digest()
-        const proof = signCertifiedSolanaLutAttestation(env.CLEARSIGN_SOLANA_CERTIFICATE_HEX, env.CLEARSIGN_DELEGATE_PRIVATE_KEY, messageHash, resolution.accounts)
-        response.lutProof = {
-          accounts: resolution.accounts.map((account) => account.toString('base64')),
-          signature: proof.lutSignature,
-          signerKeyId: proof.keyId,
-        }
-        response.writableCount = resolution.writableCount
-        response.readonlyCount = resolution.readonlyCount
+        proofStage = 'token-identity'
+        Object.assign(response, await certifySchemaTokens(env, catalogKey, spec, instruction, accountKeys, env.CLEARSIGN_DELEGATE_PRIVATE_KEY))
         return json(response)
-      } catch {
-        return json({ error: 'certified Solana proof could not be produced' }, 500)
+      } catch (error) {
+        const code = error instanceof SolanaRpcUnavailableError ? error.code : 'SOLANA_PROOF_FAILED'
+        console.error(`[clearsign] Solana certification failed: stage=${proofStage} code=${code}`)
+        return json({ classification: 'UNAVAILABLE', code, error: error instanceof SolanaRpcUnavailableError ? error.message : 'certified Solana proof could not be produced' }, error instanceof SolanaRpcUnavailableError ? 503 : 500)
       }
     }
     return json({ error: 'not found' }, 404)

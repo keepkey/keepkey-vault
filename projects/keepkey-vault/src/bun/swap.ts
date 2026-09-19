@@ -17,7 +17,7 @@ import { resolveEvmSchema } from './evm-schema-registry'
 import { resolveRuntimeEvmMetadata, type RuntimeEvmSigner } from './evm-runtime-metadata'
 import { evmCallRequiresAdvancedMode } from './evm-signing-policy'
 import { findSolanaSchema } from './solana-schema-registry'
-import { findCertifiedSolanaProof } from './solana-certified-registry'
+import { certifiedSolanaProofApplies, findCertifiedSolanaProof } from './solana-certified-registry'
 import { hasCompleteCertifiedSolanaEnvelope, supportsCertifiedClearSign } from './solana-certified-policy'
 import { getPioneer } from './pioneer'
 import { encodeDepositWithExpiry, encodeApprove, parseUnits, toHex, readPioneerBalance } from './txbuilder/evm'
@@ -700,10 +700,18 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
       let certifiedProof: Awaited<ReturnType<typeof findCertifiedSolanaProof>>
       const firmwareVersion = ctx.getFirmwareVersion?.()
       if (supportsCertifiedClearSign(firmwareVersion)) {
+        const catalogKey = isTokenCaip(params.fromCaip) ? 'relayDepositToken' : 'relayDepositNative'
         try {
-          certifiedProof = await findCertifiedSolanaProof(params.relayTx.serializedTx, isTokenCaip(params.fromCaip) ? 'relayDepositToken' : 'relayDepositNative')
+          certifiedProof = await findCertifiedSolanaProof(params.relayTx.serializedTx, catalogKey)
         } catch (err: any) {
           console.warn(`${TAG} certified Solana ClearSign proof unavailable: ${err?.message || err}`)
+        }
+        // The service matches a catalogKey request without the firmware's
+        // companion rule. An envelope the device would not apply is a hard
+        // failure there, so it is dropped and the consent path below runs.
+        if (certifiedProof && !certifiedSolanaProofApplies(params.relayTx.serializedTx, catalogKey, certifiedProof)) {
+          console.info(`${TAG} certified Solana ClearSign proof dropped: the device would not apply ${catalogKey} to this transaction; using the existing consent flow`)
+          certifiedProof = undefined
         }
       } else {
         console.info(`${TAG} certified Solana ClearSign unsupported by firmware ${firmwareVersion || 'unknown'}; using the existing consent flow`)

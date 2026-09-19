@@ -209,7 +209,15 @@ export function assessSigningRisk(req: SigningRequestInfo): RiskAssessment | nul
     }
     if (unknown.length > 0) {
       const apps = [...new Set(unknown.map((i) => i.programName))].join(', ')
-      if (assets.length > 0 || d.altResolutionIncomplete) {
+      const canMoveFunds = assets.length > 0 || !!d.altResolutionIncomplete
+      if (req.deviceClearSigns) {
+        // Vault found a certified description of these exact bytes, which the
+        // device verifies and shows. The app code still runs, so the level
+        // stays what it would be.
+        add(canMoveFunds ? 'high' : 'medium', canMoveFunds
+          ? `Runs app code (${apps}) that is able to move your SOL or tokens. Your KeepKey shows this call's details from a KeepKey-certified description, so check the amounts on its screen.`
+          : `Runs app code (${apps}) that cannot move your SOL or tokens. Your KeepKey shows this call's details from a KeepKey-certified description. You only pay the network fee.`)
+      } else if (canMoveFunds) {
         add('high', `Runs app code KeepKey cannot read (${apps}). That code is able to move your SOL or tokens, and nobody can show you how much before you sign.`)
       } else {
         add('medium', `Runs app code KeepKey cannot read (${apps}), but it cannot move your SOL or tokens. You only pay the network fee.`)

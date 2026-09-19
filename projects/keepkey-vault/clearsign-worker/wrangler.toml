@@ -7,7 +7,11 @@ workers_dev = true
 
 [vars]
 CLEARSIGN_ENVIRONMENT = "production"
-CLEARSIGN_SOLANA_RPC_ENDPOINT = "https://api.mainnet-beta.solana.com"
+# Server-managed failover. Vault only talks to this ClearSign service.
+CLEARSIGN_SOLANA_RPC_ENDPOINTS = "https://api.mainnet-beta.solana.com,https://solana-rpc.publicnode.com"
+
+[version_metadata]
+binding = "CF_VERSION_METADATA"
 
 [observability]
 enabled = true
