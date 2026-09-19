@@ -7,7 +7,7 @@
  */
 import { describe, test, expect, afterEach, setSystemTime } from 'bun:test'
 import { handleMcpRequest } from './mcp'
-import { callBex, onBexOpen, onBexClose, onBexMessage, bridgeConnected, SLOT_TAKEN_CLOSE_CODE } from './bex-bridge'
+import { callBex, onBexOpen, onBexClose, onBexMessage, bridgeConnected, listBrowsers } from './bex-bridge'
 
 const call = async (body: unknown, headers?: Record<string, string>) => {
   const req = new Request('http://localhost:1646/mcp', {
@@ -151,7 +151,49 @@ describe('MCP dumb pipe (bridge UP)', () => {
     const ws = open = fakeBex({ bex_list_tools: { tools: [{ name: 'bex_screenshot' }, { name: 'bex_click' }] } })
     onBexOpen(ws as any)
     const { json } = await call({ jsonrpc: '2.0', id: 10, method: 'tools/list' })
-    expect(json.result.tools.map((t: any) => t.name)).toEqual(['bex_screenshot', 'bex_click'])
+    expect(json.result.tools.map((t: any) => t.name)).toEqual(['bex_browsers', 'bex_screenshot', 'bex_click'])
+    // Every BEX tool advertises the vault-owned `browser` routing arg.
+    expect(json.result.tools.slice(1).every((t: any) => t.inputSchema.properties.browser)).toBe(true)
+  })
+
+  test('two browsers: an unnamed call is refused, a named one routes, `browser` is stripped', async () => {
+    const seen: Array<{ who: string; args: any }> = []
+    const bex = (who: string) => {
+      const ws: any = {
+        send(raw: string) {
+          const { id, tool, args } = JSON.parse(raw)
+          seen.push({ who, args })
+          queueMicrotask(() => onBexMessage(ws, JSON.stringify({ id, result: { who, tool } })))
+        },
+        close() {},
+      }
+      return ws
+    }
+    const a = bex('A'), b = bex('B')
+    onBexOpen(a)
+    onBexOpen(b)
+    try {
+      const [ida, idb] = listBrowsers().map(x => x.browser)
+
+      const amb = await call({ jsonrpc: '2.0', id: 20, method: 'tools/call', params: { name: 'bex_tabs' } })
+      expect(amb.json.result.isError).toBe(true)
+      expect(JSON.parse(amb.json.result.content[0].text).error).toBe('browser_ambiguous')
+      expect(seen.length).toBe(0) // refused before anything was sent
+
+      const r = await call({ jsonrpc: '2.0', id: 21, method: 'tools/call', params: { name: 'bex_tabs', arguments: { browser: idb, action: 'list' } } })
+      expect(JSON.parse(r.json.result.content[0].text).who).toBe('B')
+      expect(seen).toEqual([{ who: 'B', args: { action: 'list' } }])
+
+      const bad = await call({ jsonrpc: '2.0', id: 22, method: 'tools/call', params: { name: 'bex_tabs', arguments: { browser: 'b999' } } })
+      expect(JSON.parse(bad.json.result.content[0].text).error).toBe('unknown_browser')
+
+      const list = await call({ jsonrpc: '2.0', id: 23, method: 'tools/call', params: { name: 'bex_browsers' } })
+      const { browsers } = JSON.parse(list.json.result.content[0].text)
+      expect(browsers.map((x: any) => [x.browser, x.status.who])).toEqual([[ida, 'A'], [idb, 'B']])
+    } finally {
+      onBexClose(a)
+      onBexClose(b)
+    }
   })
 
   test('a content-block result passes through untouched (image is not stringified)', async () => {
@@ -206,51 +248,74 @@ describe('BEX bridge call lifecycle', () => {
     await expect(callBex('bex_status', {})).rejects.toMatchObject({ code: 'bridge_disconnected' })
   })
 
-  test('a LIVE incumbent keeps the slot — a second extension instance is refused', async () => {
-    // Regression: two Chrome profiles each running the extension used to evict
-    // each other on every reconnect, so tool calls landed on a nondeterministic
-    // wallet. The newcomer must lose, and must be told why (close code 4409).
-    const ws1 = fakeWs()
+  test('a second extension instance is ACCEPTED alongside the first', async () => {
+    // Regression: the vault used to hold one slot, so a second Chrome profile
+    // with the extension was refused (4409) or evicted the first.
+    const ws1 = fakeWs(), ws2 = fakeWs()
     onBexOpen(ws1 as any)
-    const inflight = callBex('bex_accounts', {}) // sent over ws1, stays pending
-    const ws2 = fakeWs()
     onBexOpen(ws2 as any)
-    expect(ws2.closed).toBe(true)
-    expect(ws2.closeCode).toBe(SLOT_TAKEN_CLOSE_CODE)
-    expect(ws1.closed).toBe(false) // incumbent untouched
-    expect(ws1.sent.length).toBe(1)
-
-    onBexClose(ws1 as any) // cleanup shared module state
-    await expect(inflight).rejects.toMatchObject({ code: 'bridge_disconnected' })
+    expect(ws1.closed || ws2.closed).toBe(false)
+    expect(listBrowsers().length).toBe(2)
+    onBexClose(ws1 as any)
+    onBexClose(ws2 as any)
     expect(bridgeConnected()).toBe(false)
   })
 
-  test('a heartbeat keeps the incumbent fresh past the stale window', () => {
+  test("closing one instance fails only ITS in-flight calls", async () => {
+    const ws1 = fakeWs(), ws2 = fakeWs()
+    onBexOpen(ws1 as any)
+    onBexOpen(ws2 as any)
+    const [b1, b2] = listBrowsers().map(x => x.browser)
+    const on1 = callBex('bex_accounts', {}, b1)
+    const on2 = callBex('bex_accounts', {}, b2)
+    onBexClose(ws1 as any)
+    await expect(on1).rejects.toMatchObject({ code: 'bridge_disconnected' })
+    // ws2's call is still live — answer it.
+    const { id } = JSON.parse(ws2.sent[0])
+    onBexMessage(ws2 as any, JSON.stringify({ id, result: 'ok' }))
+    await expect(on2).resolves.toBe('ok')
+    onBexClose(ws2 as any)
+  })
+
+  test('an instance cannot answer a call sent to another', async () => {
+    const ws1 = fakeWs(), ws2 = fakeWs()
+    onBexOpen(ws1 as any)
+    onBexOpen(ws2 as any)
+    const [b1] = listBrowsers().map(x => x.browser)
+    const inflight = callBex('bex_status', {}, b1)
+    const { id } = JSON.parse(ws1.sent[0])
+    onBexMessage(ws2 as any, JSON.stringify({ id, result: 'spoofed' })) // ignored
+    onBexMessage(ws1 as any, JSON.stringify({ id, result: 'real' }))
+    await expect(inflight).resolves.toBe('real')
+    onBexClose(ws1 as any)
+    onBexClose(ws2 as any)
+  })
+
+  test('a heartbeat keeps an instance fresh past the stale window', () => {
     const ws1 = fakeWs()
     onBexOpen(ws1 as any)
     setSystemTime(new Date(Date.now() + 40_000))
     onBexMessage(ws1 as any, JSON.stringify({ ping: 1 })) // no id — dropped, but proof of life
     setSystemTime(new Date(Date.now() + 40_000)) // 80s since open, 40s since ping
-
-    const ws2 = fakeWs()
-    onBexOpen(ws2 as any)
-    expect(ws2.closeCode).toBe(SLOT_TAKEN_CLOSE_CODE)
+    expect(listBrowsers().length).toBe(1)
     expect(ws1.closed).toBe(false)
     onBexClose(ws1 as any)
   })
 
-  test('a SILENT incumbent is replaced, and its in-flight calls fail immediately', async () => {
-    // The SW-restart case whose close frame never arrived. Without this the
-    // bridge would wedge until the dead socket happened to be noticed.
+  test('a SILENT instance is dropped, so it never makes routing ambiguous, and its calls fail now', async () => {
+    // The SW-restart case whose close frame never arrived.
     const ws1 = fakeWs()
     onBexOpen(ws1 as any)
     const inflight = callBex('bex_accounts', {})
     setSystemTime(new Date(Date.now() + 60_000)) // past STALE_MS, no frames from ws1
 
     const ws2 = fakeWs()
-    onBexOpen(ws2 as any) // takes over — must reject ws1's pending now, not after 30s
+    onBexOpen(ws2 as any)
+    expect(listBrowsers().length).toBe(1) // ghost pruned
     await expect(inflight).rejects.toMatchObject({ code: 'bridge_disconnected' })
     expect(ws1.closed).toBe(true)
+    callBex('bex_status', {}).catch(() => {}) // unnamed call routes to the one live instance
+    expect(ws2.sent.length).toBe(1)
     onBexClose(ws2 as any)
     expect(bridgeConnected()).toBe(false)
   })

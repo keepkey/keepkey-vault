@@ -1,5 +1,9 @@
 # Handoff — BEX side of the bridge slot-eviction fix
 
+> **Superseded (2026-09-19):** the vault now accepts every extension instance
+> (one per Chrome profile) and routes by an explicit `browser` arg — see
+> `src/bun/bex-bridge.ts`. Nothing is refused with 4409 any more.
+
 **Owner repo:** `/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-client`
 **Paired vault PR:** https://github.com/keepkey/keepkey-vault/pull/372 (merged into `develop` → `bex-bridge.ts`)
 **Date:** 2026-07-19
