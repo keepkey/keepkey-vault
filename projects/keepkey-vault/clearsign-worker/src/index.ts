@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { utils as ethersUtils } from 'ethers'
+import { SigningKey, computePublicKey } from '@ethersproject/signing-key'
 import bs58 from 'bs58'
 
 import {
@@ -134,8 +134,8 @@ function provisioning(env: Env) {
     issues.push('delegate signing key invalid')
   } else {
     try {
-      const key = new ethersUtils.SigningKey(`0x${env.CLEARSIGN_DELEGATE_PRIVATE_KEY}`)
-      privateKeyValid = ethersUtils.computePublicKey(key.publicKey, true).slice(2).toLowerCase() === ALPHA_DELEGATE_PUBLIC_KEY
+      const key = new SigningKey(`0x${env.CLEARSIGN_DELEGATE_PRIVATE_KEY}`)
+      privateKeyValid = computePublicKey(key.publicKey, true).slice(2).toLowerCase() === ALPHA_DELEGATE_PUBLIC_KEY
       if (!privateKeyValid) issues.push('delegate signing key does not match reviewed fingerprint')
     } catch {
       issues.push('delegate signing key invalid')

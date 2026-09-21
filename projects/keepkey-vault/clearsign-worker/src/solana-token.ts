@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { utils } from 'ethers'
+import { SigningKey } from '@ethersproject/signing-key'
 import bs58 from 'bs58'
 import { createResilientSolanaAccountFetcher, solanaRpcEndpoints, type SolanaRpcConfig } from './solana-rpc'
 import { ARG_TOKEN_AMOUNT, CERTIFIED_SOLANA_CATALOG, type SolanaSchemaSpec } from '../../src/bun/solana-certified-schema'
@@ -72,7 +72,7 @@ export async function certifyPumpToken(env: SolanaRpcConfig, mint: string, deleg
   const token = await resolvePumpToken(env, mint, fetcher)
   if (!token) return undefined
   const digest = createHash('sha256').update(pumpTokenPreimage(token)).digest('hex')
-  const signed = new utils.SigningKey(`0x${delegateKey}`).signDigest(`0x${digest}`)
+  const signed = new SigningKey(`0x${delegateKey}`).signDigest(`0x${digest}`)
   return { ...token, signature: signed.r.slice(2) + signed.s.slice(2), signerKeyId: 0x80 }
 }
 
