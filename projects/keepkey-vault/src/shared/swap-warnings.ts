@@ -13,6 +13,45 @@ export const DUST_FEE_SEVERE_PCT = 25
 /** Effective slippage % above which we warn the user. Effective = max(market, tolerance). */
 export const HIGH_SLIPPAGE_PCT = 3
 
+export type LargeSwapLossWarning = {
+  lossPct: number
+  /** Loss in destination units when both assets represent the same coin. */
+  lostAsset?: number
+  /** Only present when an independent market price is available. */
+  lostUsd?: number
+  severe: boolean
+}
+
+/** Compare a quote with independent prices, or directly compare units for
+ * native ETH across EVM chains. A price inferred from the quote must never be
+ * passed here: it makes every quote appear to have zero loss. */
+export function computeLargeSwapLossWarning(input: {
+  inAmount: number
+  outAmount: number
+  fromPriceUsd?: number
+  toPriceUsd?: number
+  sameAssetUnits?: boolean
+}): LargeSwapLossWarning | null {
+  const { inAmount, outAmount, fromPriceUsd = 0, toPriceUsd = 0, sameAssetUnits = false } = input
+  if (!Number.isFinite(inAmount) || !Number.isFinite(outAmount) || inAmount <= 0 || outAmount <= 0) return null
+  const hasFromPrice = Number.isFinite(fromPriceUsd) && fromPriceUsd > 0
+  const hasToPrice = Number.isFinite(toPriceUsd) && toPriceUsd > 0
+  if (!sameAssetUnits && (!hasFromPrice || !hasToPrice)) return null
+  const inValue = sameAssetUnits ? inAmount : inAmount * fromPriceUsd
+  const outValue = sameAssetUnits ? outAmount : outAmount * toPriceUsd
+  const lossPct = ((inValue - outValue) / inValue) * 100
+  if (!Number.isFinite(lossPct) || lossPct < 0.5) return null
+  const lostAsset = sameAssetUnits ? inAmount - outAmount : undefined
+  const lostUsd = sameAssetUnits
+    ? hasFromPrice ? lostAsset! * fromPriceUsd : undefined
+    : inValue - outValue
+  // Warn on a meaningful dollar loss even when the percentage is below the
+  // old 10% dust threshold. Without USD, a 2% same-asset loss still warrants
+  // a warning; we cannot infer a dollar amount from the quote itself.
+  if (!(lostUsd !== undefined && lostUsd >= 100) && lossPct < 2) return null
+  return { lossPct, lostAsset, lostUsd, severe: lossPct >= 3 || (lostUsd !== undefined && lostUsd >= 1000) }
+}
+
 /** Quote guard emitted when fixed route fees consume the selected slippage
  * allowance. This is an expected small-swap constraint, not an application
  * failure, so callers should render it as advisory/warning UI. */

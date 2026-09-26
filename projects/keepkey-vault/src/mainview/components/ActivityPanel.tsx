@@ -12,6 +12,7 @@ import { CHAINS, getExplorerTxUrl } from "../../shared/chains"
 import { caipToIcon } from "../../shared/assetLookup"
 import { getRequiredConfs } from "../../shared/confirmations"
 import type { RecentActivity, PendingSwap, ChainBalance, SwapTrackingStatus } from "../../shared/types"
+import { isSwapFullySettled } from "../../shared/swap-settlement"
 
 interface ActivityPanelProps {
   open: boolean
@@ -389,7 +390,11 @@ export function TxDetailDialog({ detail, onClose, nativePrices }: { detail: TxDe
   // classifier-populated outboundChainId so refunded ETH→ZEC opens Etherscan,
   // not a Zcash explorer pointed at a non-existent hash.
   const outboundUrl = s.outboundTxid ? getExplorerTxUrl(s.outboundChainId || s.toChainId, s.outboundTxid) : null
-  const isFinal = s.status === 'completed' || s.status === 'failed' || s.status === 'refunded'
+  const settlementVerified = isSwapFullySettled({ status: s.status, integration: s.integration, swapper: s.swapper,
+    payouts: s.payouts, receivedOutput: s.receivedOutput, minimumOutput: s.minimumOutput })
+  const displayStatus = s.status === 'completed' && !settlementVerified ? 'output_confirming' : s.status
+  const isFinal = settlementVerified || s.status === 'failed' || s.status === 'refunded'
+  const showReceived = s.receivedOutput && (!/thor|maya/i.test(`${s.integration || ''} ${s.swapper || ''}`) || !!s.payouts?.length)
 
   return (
     <Box position="fixed" inset="0" zIndex={Z.dialog} display="flex" alignItems="center" justifyContent="center" onClick={onClose}>
@@ -406,7 +411,7 @@ export function TxDetailDialog({ detail, onClose, nativePrices }: { detail: TxDe
           <HStack gap="2">
             <Box px="2" py="0.5" borderRadius="md" fontSize="xs" fontWeight="700" bg="rgba(233,196,106,0.15)" color="var(--gold)">Swap</Box>
             <Text fontSize="sm" fontWeight="600" color="kk.textPrimary">{s.fromSymbol} &rarr; {s.toSymbol}</Text>
-            <SwapStatusBadge status={s.status} />
+            <SwapStatusBadge status={displayStatus} />
           </HStack>
           <Text as="button" fontSize="lg" color="kk.textMuted" _hover={{ color: 'kk.textPrimary' }} onClick={onClose}>&times;</Text>
         </Flex>
@@ -414,7 +419,10 @@ export function TxDetailDialog({ detail, onClose, nativePrices }: { detail: TxDe
         {/* Body */}
         <VStack px="5" py="4" gap="0" align="stretch">
           <TxDetailRow label="From" value={`${s.fromAmount} ${s.fromSymbol}`} />
-          <TxDetailRow label="Expected" value={`${s.expectedOutput} ${s.toSymbol}`} />
+          <TxDetailRow label="Originally quoted" value={`${s.expectedOutput} ${s.toSymbol}`} />
+          {showReceived && <TxDetailRow label={settlementVerified ? 'Reported received' : 'Partial payout'} value={`${s.receivedOutput} ${s.toSymbol}`} color="var(--teal)" />}
+          {s.status === 'completed' && !settlementVerified && <Text fontSize="xs" color="var(--gold)">Verifying all settlement payments before marking this swap done.</Text>}
+          {s.payouts?.map((payout, index) => <CopyableRow key={`${payout.txid}-${index}`} label={`Payment ${index + 1}: ${payout.amount} ${s.toSymbol}`} value={payout.txid} explorerUrl={getExplorerTxUrl(s.outboundChainId || s.toChainId, payout.txid)} />)}
           {s.integration && <TxDetailRow label="Integration" value={s.integration} />}
 
           <Box h="1px" bg="kk.border" my="2" />
@@ -628,6 +636,9 @@ export function ActivityTable({ activities, nativePrices, onSelect }: { activiti
 }
 
 export function SwapRow({ swap, onSelect }: { swap: PendingSwap; onSelect: (s: PendingSwap) => void }) {
+  const settlementVerified = isSwapFullySettled({ status: swap.status, integration: swap.integration, swapper: swap.swapper,
+    payouts: swap.payouts, receivedOutput: swap.receivedOutput, minimumOutput: swap.minimumOutput })
+  const displayStatus = swap.status === 'completed' && !settlementVerified ? 'output_confirming' : swap.status
   const [copied, setCopied] = useState(false)
   const handleCopy = (text: string) => { navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 1500) }
   const explorerUrl = getExplorerUrl(swap.fromSymbol, swap.txid)
@@ -651,7 +662,7 @@ export function SwapRow({ swap, onSelect }: { swap: PendingSwap; onSelect: (s: P
           {amountLine && <Text fontSize="2xs" color="whiteAlpha.500" mt="0.5" truncate>{amountLine}</Text>}
         </Box>
         <VStack gap="0.5" align="flex-end" flexShrink={0}>
-          <SwapStatusBadge status={swap.status} />
+          <SwapStatusBadge status={displayStatus} />
           <Text fontSize="2xs" color="whiteAlpha.300">{timeAgo(swap.createdAt)}</Text>
         </VStack>
       </Flex>
