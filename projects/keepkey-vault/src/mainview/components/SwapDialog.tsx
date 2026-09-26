@@ -25,6 +25,9 @@ import { Z } from "../lib/z-index"
 import { providerTrackerUrl } from "../lib/trackers"
 import { ProviderBadge, ProverChip, resolveProvider } from "./ProviderBadge"
 import { getSwapperAnimation } from "../lib/swapper-animations"
+import { assessSwapRisk } from "../../shared/swap-risk"
+import { isSwapFullySettled } from "../../shared/swap-settlement"
+import { SwapRiskReview } from "./SwapRiskReview"
 import { computeDustWarning, shouldWarnHighSlippage, computeEffectiveSlippageBps, isSmallSwapQuoteWarning } from "../../shared/swap-warnings"
 import { useEvmAddresses } from "../hooks/useEvmAddresses"
 import { useDeviceState } from "../hooks/useDeviceState"
@@ -888,6 +891,8 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   // Outbound chain may differ from toAsset.chainId — for refunds the outbound
   // is on the SOURCE chain. Populated from the Midgard classifier in the
   // tracker; falls back to toAsset.chainId when null.
+  const [livePayouts, setLivePayouts] = useState<NonNullable<PendingSwap['payouts']>>([])
+  const [liveReceivedOutput, setLiveReceivedOutput] = useState<string | undefined>()
   const [liveOutboundChainId, setLiveOutboundChainId] = useState<string | undefined>()
   const [liveRefundReason, setLiveRefundReason] = useState<string | undefined>()
   const [liveSwapper, setLiveSwapper] = useState<string | undefined>()
@@ -953,7 +958,10 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   }, [useCustomAddress, customToAddress, toAsset])
 
   // ── Derived terminal status (must be before effects that depend on them) ──
-  const isSwapComplete = liveStatus === 'completed'
+  const requiresSettlementEvidence = /thor|maya/i.test(`${quote?.integration || ''} ${resumeSwap?.integration || ''} ${liveSwapper || ''}`)
+  const isSwapComplete = isSwapFullySettled({ status: liveStatus, integration: quote?.integration || resumeSwap?.integration,
+    swapper: liveSwapper, payouts: livePayouts, receivedOutput: liveReceivedOutput,
+    minimumOutput: quote?.minimumOutput || resumeSwap?.minimumOutput })
   const isSwapFailed = liveStatus === 'failed' || liveStatus === 'refunded'
 
   // Seed the inbound/timing/error fields from a full refreshSwap snapshot.
@@ -962,6 +970,9 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   // and is the only place createdAt (the broadcast anchor) is available.
   const applyInboundSnap = useCallback((snap: any) => {
     if (!snap) return
+    if (snap.status) setLiveStatus(snap.status)
+    if (snap.payouts) setLivePayouts(snap.payouts)
+    if (snap.receivedOutput) setLiveReceivedOutput(snap.receivedOutput)
     if (snap.inboundBlockNumber != null && snap.inboundBlockNumber > 0) setLiveInboundBlockNumber(snap.inboundBlockNumber)
     if (snap.inboundBlockHash) setLiveInboundBlockHash(snap.inboundBlockHash)
     if (snap.inboundGasUsed) setLiveInboundGasUsed(snap.inboundGasUsed)
@@ -980,6 +991,8 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     const unsub1 = onRpcMessage('swap-update', (update: SwapStatusUpdate) => {
       if (update.txid !== txid) return
       setLiveStatus(update.status)
+      if (update.payouts) setLivePayouts(update.payouts)
+      if (update.receivedOutput) setLiveReceivedOutput(update.receivedOutput)
       if (update.confirmations !== undefined) setLiveConfirmations(update.confirmations)
       if (update.outboundConfirmations !== undefined) setLiveOutboundConfirmations(update.outboundConfirmations)
       if (update.outboundRequiredConfirmations !== undefined) setLiveOutboundRequired(update.outboundRequiredConfirmations)
@@ -1001,6 +1014,8 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
 
     const unsub2 = onRpcMessage('swap-complete', (swap: any) => {
       if (swap.txid !== txid) return
+      if (swap.payouts) setLivePayouts(swap.payouts)
+      if (swap.receivedOutput) setLiveReceivedOutput(swap.receivedOutput)
       setLiveStatus(swap.status || 'completed')
     })
 
@@ -1045,7 +1060,11 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
         timer = setTimeout(tick, 10_000)
         return
       }
-      if (s === 'completed' || s === 'failed' || s === 'refunded') return
+      // Old saved rows can say completed while only the quote was recorded as
+      // received. Keep checking until the settlement legs are available.
+      if (isSwapFullySettled({ status: s, integration: snap?.integration, swapper: snap?.swapper,
+        payouts: snap?.payouts, receivedOutput: snap?.receivedOutput, minimumOutput: snap?.minimumOutput })
+        || s === 'failed' || s === 'refunded') return
       timer = setTimeout(tick, 10_000)
     }
     tick()
@@ -1090,6 +1109,8 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   useEffect(() => {
     if (phase !== 'submitted') {
       setLiveStatus('pending')
+      setLivePayouts([])
+      setLiveReceivedOutput(undefined)
       setLiveConfirmations(0)
       setLiveOutboundConfirmations(undefined)
       setLiveOutboundRequired(undefined)
@@ -1173,7 +1194,8 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   // Step 2: Output (output_detected/output_confirming) — outbound tx
   // Step 3: Done (completed)
   const swapStep = useMemo(() => {
-    if (liveStatus === 'completed') return 3
+    if (isSwapComplete) return 3
+    if (liveStatus === 'completed' && requiresSettlementEvidence) return 2
     if (liveStatus === 'output_detected' || liveStatus === 'output_confirming' || liveStatus === 'output_confirmed') return 2
     if (liveStatus === 'confirming') return 1
     // Once the inbound tx has ANY confirmation it is mined and the protocol
@@ -1184,7 +1206,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     // Excludes failed/refunded: a mined-but-reverted tx must never read as progress.
     if (liveConfirmations > 0 && liveStatus !== 'failed' && liveStatus !== 'refunded') return 1
     return 0 // pending
-  }, [liveStatus, liveConfirmations])
+  }, [liveStatus, liveConfirmations, isSwapComplete, requiresSettlementEvidence])
 
   // ── Load cached balances ──────────────────────────────────────────
   // Cache-first; when the cache is null/empty (hidden wallets always — the
@@ -1411,6 +1433,8 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     setSentAmount(resumeSwap.fromAmount)
     setTxid(resumeSwap.txid)
     setLiveStatus(resumeSwap.status)
+    setLivePayouts(resumeSwap.payouts || [])
+    setLiveReceivedOutput(resumeSwap.receivedOutput)
     setLiveConfirmations(resumeSwap.confirmations)
     if (resumeSwap.outboundConfirmations !== undefined) setLiveOutboundConfirmations(resumeSwap.outboundConfirmations)
     if (resumeSwap.outboundRequiredConfirmations !== undefined) setLiveOutboundRequired(resumeSwap.outboundRequiredConfirmations)
@@ -2038,10 +2062,27 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     return () => { cancelled = true }
   }, [phase, quote, fromAsset, toAsset, sendAmount, sendIsMax, fromBalance, fromAddress, toAddress])
 
+  const swapRisk = assessSwapRisk({
+    inputAmount: parseFloat(sendAmount), expectedAmount: Number(quote?.expectedOutput),
+    minimumAmount: Number(quote?.minimumOutput), fromPriceUsd, toPriceUsd: toPriceUsdFromBalance,
+    sameAssetUnits: !!(fromAsset?.caip?.endsWith('/slip44:60') && toAsset?.caip?.endsWith('/slip44:60')
+      && fromAsset.chainFamily === 'evm' && toAsset.chainFamily === 'evm'
+      && !fromAsset.contractAddress && !toAsset.contractAddress),
+  })
+  const [riskAcceptedKey, setRiskAcceptedKey] = useState('')
+  const riskKey = JSON.stringify({ open, quote, quoteFetchedAt, from: fromAsset?.caip, to: toAsset?.caip, sendAmount, slippageBps, swapRisk })
+  const riskAcknowledged = riskAcceptedKey === riskKey
+  const riskLocked = swapRisk.blocked || (swapRisk.requiresAcknowledgment && !riskAcknowledged)
+  const riskPanel = quote && toAsset ? <SwapRiskReview risk={swapRisk}
+    expected={formatBalance(quote.expectedOutput)} minimum={formatBalance(quote.minimumOutput)} symbol={toAsset.symbol}
+    minimumSource={quote.minimumOutputSource} acknowledged={riskAcknowledged}
+    onAcknowledge={accepted => setRiskAcceptedKey(accepted ? riskKey : '')} /> : null
+
   const auditPayloadReady = !!previewBuild?.unsignedTx
   const previewBalanceBlocked = !!previewBuild?.balance && !previewBuild.balance.sufficient
   const reviewConfirmLocked =
     phase === 'review' && (
+      riskLocked ||
       refreshingQuote ||
       previewLoading ||
       !!previewError ||
@@ -2049,6 +2090,8 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       previewBalanceBlocked
     )
   const reviewConfirmLockLabel =
+    swapRisk.blocked ? "Route exceeds cost limit" :
+    riskLocked ? "Review and acknowledge trade cost" :
     refreshingQuote ? t("refreshingQuote", "Refreshing quote...") :
     previewLoading ? t("buildingPayload", "Building payload...") :
     previewError ? t("payloadUnavailableButton", "Payload unavailable") :
@@ -2170,6 +2213,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   // ── Execute swap ──────────────────────────────────────────────────
   const handleExecuteSwap = useCallback(async () => {
     if (!quote || !fromAsset || !toAsset) return
+    if (riskLocked) { setError(swapRisk.blocked ? 'This route exceeds the 5% cost limit for trades of $1,000 or more.' : 'Review and acknowledge the trade cost before signing.'); return }
     if (phase === 'review') {
       if (previewLoading) {
         setError(t("payloadStillBuilding", "Transaction payload is still building. Review it before confirming."))
@@ -2194,7 +2238,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     // between when the user first saw the quote and when they actually confirm.
     let liveQuote: SwapQuote = quote
     const age = Date.now() - (quoteFetchedAt || 0)
-    if (age > 60_000) {
+    if (age > swapRisk.quoteMaxAgeMs) {
       setRefreshingQuote(true)
       try {
         const refreshed = await rpcRequest<SwapQuote>('getSwapQuote', {
@@ -2352,7 +2396,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       setError(friendly)
       setPhase('review')
     }
-  }, [quote, quoteFetchedAt, fromAsset, toAsset, sendAmount, sendIsMax, fromBalance, fromAddress, toAddress, slippageBps, balances, phase, previewLoading, previewError, previewBuild, allowSolanaBlindSigning, useCustomAddress])
+  }, [quote, quoteFetchedAt, fromAsset, toAsset, sendAmount, sendIsMax, fromBalance, fromAddress, toAddress, slippageBps, balances, phase, previewLoading, previewError, previewBuild, allowSolanaBlindSigning, useCustomAddress, riskLocked, swapRisk.blocked, swapRisk.quoteMaxAgeMs])
 
   // ── Reset ─────────────────────────────────────────────────────────
   const reset = useCallback(() => {
@@ -2764,6 +2808,22 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
             </VStack>
           )}
 
+          {phase === 'submitted' && toAsset && livePayouts.length > 0 && (
+            <Box p="4" m="3" border="1px solid var(--teal)" borderRadius="lg">
+              <Text fontSize="13px" fontWeight="700">{isSwapComplete ? 'Settlement payouts' : 'Partial payout — settlement still in progress'}</Text>
+              <Text fontSize="12px" color="var(--teal)" mt="1">Total reported received: {liveReceivedOutput || '0'} {toAsset.symbol}</Text>
+              {!isSwapComplete && quote && <Text fontSize="11px" color="kk.textMuted" mt="1">Still expected: approximately {formatBalance(String(Math.max(0, Number(quote.expectedOutput) - Number(liveReceivedOutput || 0))))} {toAsset.symbol}. A partial payment is not the final swap output.</Text>}
+              {livePayouts.map((payout, index) => <Flex key={`${payout.txid}-${index}`} justify="space-between" mt="2" gap="3">
+                <Text fontSize="11px">Payment {index + 1}: {payout.amount} {toAsset.symbol}</Text>
+                <Box as="button" fontSize="11px" color="var(--teal)" textDecoration="underline" onClick={() => {
+                  const url = getExplorerTxUrl(liveOutboundChainId || toAsset.chainId, payout.txid)
+                  if (url) rpcRequest('openUrl', { url }).catch(() => {})
+                }}>View transaction</Box>
+              </Flex>)}
+              <Text fontSize="10px" color="kk.textMuted" mt="2">Reported by the settlement protocol. Explorer indexing and wallet balances can update later.</Text>
+            </Box>
+          )}
+
           {/* ── SUBMITTED — live tracking with step progress ──── */}
           {phase === 'submitted' && txid && fromAsset && toAsset && (
             isSwapComplete ? (
@@ -2884,21 +2944,21 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                         textTransform="uppercase" letterSpacing="0.10em">
                         <Box w="6px" h="6px" borderRadius="full" bg="var(--teal)"
                           style={{ boxShadow: '0 0 8px rgba(139,227,196,0.30)' }} />
-                        <Text>{t("youReceived", "You received")}</Text>
+                        <Text>{liveReceivedOutput ? t("youReceived", "You received") : "Quoted output — received amount unverified"}</Text>
                       </Flex>
                       <Flex position="relative" align="baseline" gap="2.5">
                         <Text fontFamily="mono" fontSize="30px" fontWeight={600} color="var(--gold)"
                           letterSpacing="-0.02em" lineHeight="1.05">
-                          ~{quote?.expectedOutput ? formatBalance(quote.expectedOutput) : '—'}
+                          {liveReceivedOutput ? formatBalance(liveReceivedOutput) : quote?.expectedOutput ? `~${formatBalance(quote.expectedOutput)}` : '—'}
                         </Text>
                         <Text fontSize="16px" color="kk.textSecondary" fontWeight={500}>{toAsset.symbol}</Text>
                       </Flex>
-                      {hasToPrice && !toPriceIsDerived && quote?.expectedOutput && (
+                      {hasToPrice && !toPriceIsDerived && liveReceivedOutput && (
                         <Text position="relative" mt="1" fontSize="12px" color="kk.textMuted" fontFamily="mono">
-                          ≈ {fmtCompact(parseFloat(quote.expectedOutput) * toPriceUsd)}
+                          ≈ {fmtCompact(parseFloat(liveReceivedOutput!) * toPriceUsd)}
                           {hasFromPrice && (() => {
                             const sentUsd = parseFloat(displayAmount || '0') * fromPriceUsd
-                            const recvUsd = parseFloat(quote.expectedOutput) * toPriceUsd
+                            const recvUsd = parseFloat(liveReceivedOutput!) * toPriceUsd
                             const net = recvUsd - sentUsd
                             if (!Number.isFinite(net) || Math.abs(net) < 0.005) return null
                             return ` · ${t("netVsSend", "net")} ${net >= 0 ? '+' : '−'}${fmtCompact(Math.abs(net))} ${t("vsSend", "vs send")}`
@@ -3231,7 +3291,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                     {isSwapComplete ? t("swapCompleted") : isSwapFailed ? t("swapFailed") : t("swapSubmitted")}
                   </Text>
                   {!isSwapComplete && !isSwapFailed && (
-                    <Text fontSize="xs" color="var(--gold)" fontWeight="500" mt="0.5">{t("waitingForConfirmations")}</Text>
+                    <Text fontSize="xs" color="var(--gold)" fontWeight="500" mt="0.5">{liveStatus === 'completed' && requiresSettlementEvidence ? 'Verifying the full payout' : livePayouts.length ? 'Partial payout received; settlement continues' : t("waitingForConfirmations")}</Text>
                   )}
                 </VStack>
                 <Box position="absolute" right="0" top="50%" transform="translateY(-50%)">
@@ -3979,10 +4039,10 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                     1 {fromAsset.symbol} = {formatBalance((parseFloat(quote.expectedOutput) / parseFloat(displayAmount || '1')).toString())} {toAsset.symbol}
                   </ReviewRow>
                   <ReviewRow label={t("expectedAfterFees", "Expected after fees")}>
-                    {formatBalance(quote.expectedOutput)} {toAsset.symbol}{hasToPrice ? ` (${fmtCompact(parseFloat(quote.expectedOutput) * toPriceUsd)})` : ''}
+                    {formatBalance(quote.expectedOutput)} {toAsset.symbol}{hasToPrice && !toPriceIsDerived ? ` (${fmtCompact(parseFloat(quote.expectedOutput) * toPriceUsd)})` : ''}
                   </ReviewRow>
                   <ReviewRow label={t("minimumAfterFeesSlippage", "Minimum receive after fees/slippage")} accent>
-                    {formatBalance(quote.minimumOutput)} {toAsset.symbol}{hasToPrice ? ` (${fmtCompact(parseFloat(quote.minimumOutput) * toPriceUsd)})` : ''}
+                    {formatBalance(quote.minimumOutput)} {toAsset.symbol}{hasToPrice && !toPriceIsDerived ? ` (${fmtCompact(parseFloat(quote.minimumOutput) * toPriceUsd)})` : ''}
                   </ReviewRow>
                   <ReviewRow label={t("protocolFee", "Protocol fee")}>
                     {formatQuoteAssetAmount(quote.fees.outbound, toAsset, quote.expectedOutput)} {toAsset.symbol} ({(quote.fees.totalBps / 100).toFixed(2)}%)
@@ -4221,6 +4281,14 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                 </Flex>
               )}
 
+              {quote.warning && (
+                <Flex align="center" gap="2" bg="rgba(251,146,60,0.08)" border="1px solid" borderColor="rgba(251,146,60,0.3)" px="3" py="2" borderRadius="lg" w="full">
+                  <Text fontSize="10px" color="var(--gold)">{quote.warning}</Text>
+                </Flex>
+              )}
+
+              {riskPanel}
+
               {/* Dust-fee warning — protocol fees + spread eat too much of the swap.
                   THORChain has fixed ~$1.20 BTC outbound fee that crushes small swaps:
                   $2 in → $1.78 out is 11% loss. Tier the warning so users understand:
@@ -4233,7 +4301,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                   inAmount: parseFloat(sendAmount) || 0,
                   outAmount: parseFloat(quote.expectedOutput || '0') || 0,
                   fromPriceUsd,
-                  toPriceUsd,
+                  toPriceUsd: toPriceIsDerived ? 0 : toPriceUsd,
                 })
                 if (!dust) return null
                 const { severe, lossPct, inUsd, lostUsd, recommendedMinUsd } = dust
@@ -4984,6 +5052,8 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                   )}
                 </VStack>
               )}
+
+              {phase === 'input' && quote && riskPanel}
 
               {/* Review Swap button — only when quote is ready. Gradient
                   matches the handoff CTA style: teal-2 → teal with a soft

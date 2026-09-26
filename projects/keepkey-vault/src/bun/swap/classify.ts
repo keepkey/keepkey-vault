@@ -31,6 +31,7 @@ export interface ClassifiedOutcome {
   outboundAmount: string | null
   /** Reason text from refund metadata, if present. */
   refundReason: string | null
+  payouts?: Array<{ txid: string; amount: string; asset: string; address?: string }>
 }
 
 const UNKNOWN: ClassifiedOutcome = {
@@ -58,6 +59,7 @@ function assetPrefixToChainId(prefix: string): string | null {
   if (byChain) return byChain.id
   // Maya-specific overrides where their naming differs from ours
   switch (sym) {
+    case 'BASE': return 'base'
     case 'GAIA': return 'cosmos'
     case 'THOR': return 'thorchain'
     case 'MAYA': return 'mayachain'
@@ -83,7 +85,7 @@ function chainPrefixFromAsset(asset: string): string | null {
 // Defined narrowly so future fields don't accidentally tighten the contract.
 
 interface MidgardCoin { amount: string; asset: string }
-interface MidgardLeg { address?: string; coins: MidgardCoin[]; txID: string; height?: string }
+interface MidgardLeg { address?: string; coins: MidgardCoin[]; txID: string; height?: string; affiliate?: boolean }
 interface MidgardAction {
   type?: string                  // 'swap' | 'refund' | …
   status?: string                // 'success' | 'pending' | …
@@ -112,10 +114,13 @@ export function classifySwapOutcome(response: MidgardActionsResponse | null | un
   if (!action) return UNKNOWN
 
   const inboundTxid = action.in?.[0]?.txID ?? null
-  const outboundLeg = action.out?.[0] ?? null
+  const payoutLegs = (action.out || []).filter(leg => !leg.affiliate && !!leg.txID)
+  const outboundLeg = payoutLegs[0] ?? null
   const outboundCoin = outboundLeg?.coins?.[0] ?? null
   const outboundAsset = outboundCoin?.asset ?? null
-  const outboundAmount = outboundCoin?.amount ?? null
+  const payouts = payoutLegs.flatMap(leg => leg.coins.filter(coin => coin.asset === outboundAsset && /^\d+$/.test(coin.amount))
+    .map(coin => ({ txid: leg.txID, amount: coin.amount, asset: coin.asset, address: leg.address })))
+  const outboundAmount = payouts.length ? payouts.reduce((sum, payout) => sum + BigInt(payout.amount), 0n).toString() : null
   const outboundTxid = outboundLeg?.txID ?? null
   const outboundChainId = outboundAsset
     ? assetPrefixToChainId(chainPrefixFromAsset(outboundAsset) || '')
@@ -145,10 +150,11 @@ export function classifySwapOutcome(response: MidgardActionsResponse | null | un
       return {
         status: 'pending',
         inboundTxid,
-        outboundTxid: null,
-        outboundAsset: null,
-        outboundChainId: null,
-        outboundAmount: null,
+        outboundTxid,
+        outboundAsset,
+        outboundChainId,
+        outboundAmount,
+        payouts,
         refundReason: null,
       }
     }
@@ -160,6 +166,7 @@ export function classifySwapOutcome(response: MidgardActionsResponse | null | un
         outboundAsset,
         outboundChainId,
         outboundAmount,
+        payouts,
         refundReason: null,
       }
     }
