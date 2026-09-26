@@ -83,13 +83,14 @@ interface AssetPageProps {
 	 * wallet's balances.
 	 */
 	watchOnly?: boolean
+	watchOnlyDeviceId?: string
 	/** Hidden (passphrase) wallet: UTXO altcoin accounts are never persisted, so hide the account selector. */
 	isHiddenWallet?: boolean
 	/** btc-only device uses this page AS the dashboard — there's nowhere to go "back" to, so hide the back arrow. */
 	hideBack?: boolean
 }
 
-export function AssetPage({ chain, balance, onBack, firmwareVersion, initialAction, initialToken, onViewActivity, watchOnly, isHiddenWallet, hideBack }: AssetPageProps) {
+export function AssetPage({ chain, balance, onBack, firmwareVersion, initialAction, initialToken, onViewActivity, watchOnly, watchOnlyDeviceId, isHiddenWallet, hideBack }: AssetPageProps) {
 	const { t } = useTranslation("asset")
 	const { fmtCompact, symbol: fiatSymbol } = useFiat()
 	// Watch-only mode never lands on a signing view, regardless of the
@@ -530,7 +531,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 	// Activity preview: this chain's newest rows from the live, uncapped list, so
 	// sends (in-app or REST), receives, swaps and confirmations show up here as
 	// they happen, and a quiet chain isn't pushed out by busier chains' rows.
-	const { activities: allActivities } = useRecentActivity()
+	const { activities: allActivities } = useRecentActivity(watchOnly, watchOnlyDeviceId)
 	const previewActivities = useMemo(() => recentFirst(allActivities.filter(a =>
 		a.chainId ? a.chainId === chain.id : (a.chain === chain.symbol || a.chain === chain.id)
 	)).slice(0, 5), [allActivities, chain.id, chain.symbol])

@@ -8,20 +8,24 @@ import type { RecentActivity, DeviceStateInfo } from "../../shared/types"
  * confirmations) and on wallet switch. Out-of-order responses are dropped so a
  * slow fetch can't overwrite a newer one or leak the previous wallet's rows.
  */
-export function useRecentActivity() {
+export function useRecentActivity(watchOnly = false, deviceId?: string) {
 	const [activities, setActivities] = useState<RecentActivity[]>([])
 	const [loaded, setLoaded] = useState(false)
+	const [error, setError] = useState<string | null>(null)
 	const seq = useRef(0)
 
 	const refresh = useCallback(() => {
 		const mine = ++seq.current
-		rpcRequest<RecentActivity[]>("getRecentActivity", undefined, 15000)
-			.then((rows) => { if (mine === seq.current && rows) setActivities(rows) })
-			.catch((err) => { console.warn("[activity] fetch failed:", err?.message) })
+		rpcRequest<RecentActivity[]>("getRecentActivity", watchOnly ? { watchOnly, deviceId } : undefined, 15000)
+			.then((rows) => { if (mine === seq.current && rows) { setActivities(rows); setError(null) } })
+			.catch((err) => { if (mine === seq.current) setError(err?.message || "History unavailable") })
 			.finally(() => { if (mine === seq.current) setLoaded(true) })
-	}, [])
+	}, [watchOnly, deviceId])
 
 	useEffect(() => {
+		setActivities([])
+		setLoaded(false)
+		setError(null)
 		refresh()
 		let lastKey = ""
 		const offChanged = onRpcMessage("activity-changed", refresh)
@@ -34,10 +38,10 @@ export function useRecentActivity() {
 				setActivities([])
 			}
 			lastKey = key
-			if (state.state === "ready" && state.deviceId) refresh()
+			if (watchOnly || (state.state === "ready" && state.deviceId)) refresh()
 		})
-		return () => { offChanged(); offState() }
+		return () => { seq.current++; offChanged(); offState() }
 	}, [refresh])
 
-	return { activities, loaded, refresh }
+	return { activities, loaded, refresh, error }
 }

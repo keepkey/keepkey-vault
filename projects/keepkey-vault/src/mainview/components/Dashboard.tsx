@@ -1700,9 +1700,12 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 		return (
 			<>
 				<ActivityPage
+					key={`${watchOnly ? "watch" : "live"}:${watchOnlyDeviceId || "latest"}`}
 					defaultChainId={activityDefaultChain}
+					watchOnly={watchOnly}
+					watchOnlyDeviceId={watchOnlyDeviceId}
 					onBack={() => setShowActivityPage(false)}
-					onResumeSwap={(swap) => setActivityResumeSwap(swap)}
+					onResumeSwap={watchOnly ? undefined : (swap) => setActivityResumeSwap(swap)}
 				/>
 				<Suspense fallback={null}>
 					<LazySwapDialog
@@ -1725,7 +1728,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 		if (btc) {
 			return (
 				<AssetPageErrorBoundary onBack={() => {}} chainName={btc.coin}>
-					<AssetPage chain={btc} balance={balances.get('bitcoin')} onBack={() => {}} hideBack firmwareVersion={firmwareVersion} onViewActivity={handleViewActivity} watchOnly={watchOnly} isHiddenWallet={isHiddenWallet} />
+					<AssetPage chain={btc} balance={balances.get('bitcoin')} onBack={() => {}} hideBack firmwareVersion={firmwareVersion} onViewActivity={handleViewActivity} watchOnly={watchOnly} watchOnlyDeviceId={watchOnlyDeviceId} isHiddenWallet={isHiddenWallet} />
 				</AssetPageErrorBoundary>
 			)
 		}
@@ -1737,7 +1740,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 			<AssetPageErrorBoundary onBack={() => setSelectedChain(null)} chainName={selectedChain.coin}>
 				{/* key: remount on chain switch — AssetPage's mount-only effects (address
 				    derive, initial view) must not leak chain A state into chain B */}
-				<AssetPage key={selectedChain.id} chain={selectedChain} balance={bal} onBack={() => { setSelectedChain(null); setSelectedChainAction(undefined); setSelectedChainInitialToken(undefined) }} firmwareVersion={firmwareVersion} initialAction={selectedChainAction} initialToken={selectedChainInitialToken} onViewActivity={handleViewActivity} watchOnly={watchOnly} isHiddenWallet={isHiddenWallet} />
+				<AssetPage key={selectedChain.id} chain={selectedChain} balance={bal} onBack={() => { setSelectedChain(null); setSelectedChainAction(undefined); setSelectedChainInitialToken(undefined) }} firmwareVersion={firmwareVersion} initialAction={selectedChainAction} initialToken={selectedChainInitialToken} onViewActivity={handleViewActivity} watchOnly={watchOnly} watchOnlyDeviceId={watchOnlyDeviceId} isHiddenWallet={isHiddenWallet} />
 			</AssetPageErrorBoundary>
 		)
 	}
