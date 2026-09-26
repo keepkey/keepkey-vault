@@ -1246,6 +1246,8 @@ export interface RelayTxParams {
 export interface SwapQuote {
   expectedOutput: string     // human-readable amount out
   minimumOutput: string      // after slippage
+  minimumOutputSource?: 'memo' | 'quote' | 'estimate'
+  requestedSlippageBps?: number
   inboundAddress: string     // vault address to send to
   router?: string            // EVM router contract (for depositWithExpiry)
   memo: string               // THORChain routing memo (empty for memoless integrations)
@@ -1373,7 +1375,8 @@ export interface PendingSwap {
   fromCaip?: string       // CAIP-19 — preserved so the resumed dialog can render the asset logo
   toCaip?: string
   fromAmount: string      // human-readable
-  expectedOutput: string  // human-readable (quote-time estimate; replaced with actual when received)
+  expectedOutput: string  // quote-time estimate; never replace with received output
+  payouts?: Array<{ txid: string; amount: string; asset: string; address?: string }>
   receivedOutput?: string // actual received amount (filled by Pioneer poll once outbound confirms)
   memo: string
   inboundAddress: string
@@ -1445,6 +1448,8 @@ export interface PendingSwap {
 
 export interface SwapStatusUpdate {
   txid: string
+  payouts?: PendingSwap['payouts']
+  receivedOutput?: string
   status: SwapTrackingStatus
   confirmations?: number
   outboundConfirmations?: number

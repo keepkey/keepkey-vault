@@ -1,0 +1,110 @@
+{
+	"actions": [
+		{
+			"date": "1790378659191278921",
+			"height": "27982722",
+			"in": [
+				{
+					"address": "0x27de622cc44c55b53caf299ecedccdab29ac98a8",
+					"coins": [
+						{
+							"amount": "375096577",
+							"asset": "ETH.ETH"
+						}
+					],
+					"txID": "5C3B317FD3ABF74826D25442118EB4F3F83536B407B0D54D873C270DE21C4170"
+				}
+			],
+			"metadata": {
+				"swap": {
+					"affiliateAddress": "keep",
+					"affiliateFee": "30",
+					"inPriceUSD": "2705.6100164714976",
+					"isStreamingSwap": true,
+					"liquidityFee": "3101681185",
+					"memo": "=:BASE.ETH:0x27de622cc44c55b53caF299eCedccdAB29aC98A8:361863598:keep:30",
+					"networkFees": [
+						{
+							"amount": "9287",
+							"asset": "BASE.ETH"
+						},
+						{
+							"amount": "9287",
+							"asset": "BASE.ETH"
+						}
+					],
+					"outPriceUSD": "2717.370187917759",
+					"streamingSwapMeta": {
+						"count": "1299",
+						"depositedCoin": {
+							"amount": "375096577",
+							"asset": "ETH.ETH"
+						},
+						"inCoin": {
+							"amount": "375096577",
+							"asset": "ETH.ETH"
+						},
+						"interval": "0",
+						"lastHeight": "27983589",
+						"outCoin": {
+							"amount": "372872625",
+							"asset": "BASE.ETH"
+						},
+						"outEstimation": "373570317",
+						"quantity": "1299"
+					},
+					"swapSlip": "20",
+					"swapTarget": "278571",
+					"txType": "swap"
+				}
+			},
+			"out": [
+				{
+					"address": "thor14jutklw4xaawvx0p90m45nur64mmhjz3me9q6q",
+					"affiliate": true,
+					"coins": [
+						{
+							"amount": "4574466815",
+							"asset": "THOR.RUNE"
+						}
+					],
+					"height": "27983590",
+					"txID": ""
+				},
+				{
+					"address": "0x27de622cc44c55b53caF299eCedccdAB29aC98A8",
+					"coins": [
+						{
+							"amount": "216728726",
+							"asset": "BASE.ETH"
+						}
+					],
+					"height": "27983601",
+					"txID": "DF36130FA9D8629601F2ADD85BDA0969A6BC248D83C8EBF9C4ABDEB423B441F7"
+				},
+				{
+					"address": "0x27de622cc44c55b53caF299eCedccdAB29aC98A8",
+					"coins": [
+						{
+							"amount": "155006707",
+							"asset": "BASE.ETH"
+						}
+					],
+					"height": "27983917",
+					"txID": "77869D8D8A2FB84A6F2F2EF2C80DDC68BDE2870984474938C893420E13FC489E"
+				}
+			],
+			"pools": [
+				"ETH.ETH",
+				"BASE.ETH"
+			],
+			"status": "success",
+			"type": "swap"
+		}
+	],
+	"count": "1",
+	"meta": {
+		"nextPageToken": "279827229000000302",
+		"prevPageToken": "279827229000000302"
+	}
+}

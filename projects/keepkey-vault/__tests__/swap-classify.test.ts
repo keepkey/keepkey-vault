@@ -12,8 +12,27 @@ import { describe, test, expect } from 'bun:test'
 import { classifySwapOutcome } from '../src/bun/swap/classify'
 import refundEthToZec from './fixtures/swap/maya-refund-eth-to-zec-7ce1.json'
 import completedZecToUsdc from './fixtures/swap/maya-completed-zec-to-usdc-a926.json'
+import splitEthToBase from './fixtures/swap/thor-split-eth-to-base-5c3b.json'
 
 describe('classifySwapOutcome', () => {
+  test('THORChain split payout sums both ETH payments and excludes the affiliate RUNE payment', () => {
+    const outcome = classifySwapOutcome(splitEthToBase)
+    expect(outcome.status).toBe('completed')
+    expect(outcome.outboundChainId).toBe('base')
+    expect(outcome.outboundAmount).toBe('371735433')
+    expect(outcome.payouts?.map(p => p.amount)).toEqual(['216728726', '155006707'])
+    expect(outcome.outboundTxid).toBe('DF36130FA9D8629601F2ADD85BDA0969A6BC248D83C8EBF9C4ABDEB423B441F7')
+  })
+
+  test('a partial payout remains pending and reports only the amount already paid', () => {
+    const pending = structuredClone(splitEthToBase)
+    pending.actions[0].status = 'pending'
+    pending.actions[0].out.pop()
+    const outcome = classifySwapOutcome(pending)
+    expect(outcome.status).toBe('pending')
+    expect(outcome.outboundAmount).toBe('216728726')
+    expect(outcome.payouts).toHaveLength(1)
+  })
   // ── Failure 2: ETH→ZEC refund (the live in-flight swap our UI mis-rendered)
   test('Maya refund (ETH→ZEC quote, refunded as ETH) is classified as refunded with source-chain outbound', () => {
     const result = classifySwapOutcome(refundEthToZec as any)
