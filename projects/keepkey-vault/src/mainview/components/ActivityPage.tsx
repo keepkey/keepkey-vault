@@ -189,6 +189,7 @@ export function ActivityPage({ defaultChainId, onBack, onResumeSwap, watchOnly =
   const { activities, loaded, error: historyError, refresh: fetchActivities } = useRecentActivity(watchOnly, watchOnlyDeviceId)
   const [pendingSwaps, setPendingSwaps] = useState<PendingSwap[]>([])
   const [availableChains, setAvailableChains] = useState<ChainBalance[]>([])
+  const [historyChains, setHistoryChains] = useState<string[]>([])
   const loading = !loaded
   const [scanning, setScanning] = useState(false)
   const [scanResult, setScanResult] = useState<string | null>(null)
@@ -213,6 +214,8 @@ export function ActivityPage({ defaultChainId, onBack, onResumeSwap, watchOnly =
     if (watchOnly) {
       rpcRequest<ChainBalance[] | null>('getWatchOnlyBalances', { deviceId: watchOnlyDeviceId })
         .then(rows => setAvailableChains(rows || [])).catch(() => setAvailableChains([]))
+      rpcRequest<string[]>('getWatchOnlyHistoryChains', { deviceId: watchOnlyDeviceId })
+        .then(chains => setHistoryChains(chains || [])).catch(() => setHistoryChains([]))
       return
     }
     rpcRequest<{ balances: ChainBalance[] } | null>('getCachedBalances')
@@ -323,7 +326,7 @@ export function ActivityPage({ defaultChainId, onBack, onResumeSwap, watchOnly =
     setScanning(true)
     setScanResult(null)
     try {
-      const chainsToScan = chainFilter ? [chainFilter] : watchOnly ? availableChains.map(c => c.chainId) : CHAINS.map(c => c.id)
+      const chainsToScan = chainFilter ? [chainFilter] : watchOnly ? historyChains : CHAINS.map(c => c.id)
       let failures = 0
       let lastError = ''
       let total = 0
@@ -343,7 +346,7 @@ export function ActivityPage({ defaultChainId, onBack, onResumeSwap, watchOnly =
       scanningRef.current = false
       setScanning(false)
     }
-  }, [chainFilter, fetchActivities, watchOnly, watchOnlyDeviceId, availableChains])
+  }, [chainFilter, fetchActivities, watchOnly, watchOnlyDeviceId, historyChains])
 
   useEffect(() => { setScanResult(null) }, [chainFilter])
 

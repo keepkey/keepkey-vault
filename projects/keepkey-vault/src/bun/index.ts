@@ -7596,6 +7596,13 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return bitcoinOnlyActivityList(rows, isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant))
 			},
 			getActivityScanState: async () => ({ running: activityScanRunning }),
+			getWatchOnlyHistoryChains: async (params) => {
+				const { snapshot, scope } = await getWatchOnlyHistoryContext(params?.deviceId)
+				const chains = bitcoinOnlyChainList(getAllChains(), bitcoinOnlyWatchOnlyScope(false, snapshot.featuresJson))
+				const balances = getCachedBalances(scope.deviceId)?.balances || []
+				const pubkeys = getCachedPubkeys(scope.deviceId)
+				return chains.filter(chain => cachedHistoryQueries(chain, balances, pubkeys).length > 0).map(chain => chain.id)
+			},
 			scanChainHistory: async (params) => {
 				requireOnline('activity history')
 				if (params.watchOnly) {
