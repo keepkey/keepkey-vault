@@ -294,10 +294,10 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       dismissSwap: { params: { txid: string }; response: void }
 
       // ── Swap History (SQLite-persisted) ─────────────────────────────
-      getSwapByTxid: { params: { txid: string }; response: PendingSwap | null }
+      getSwapByTxid: { params: { txid: string; watchOnly?: boolean; deviceId?: string }; response: PendingSwap | null }
       /** Single on-demand Pioneer poll for one swap. Used by SwapDialog while
        *  open — there is no background polling timer (by design). */
-      refreshSwap: { params: { txid: string; rescan?: boolean }; response: PendingSwap | null }
+      refreshSwap: { params: { txid: string; rescan?: boolean; watchOnly?: boolean; deviceId?: string }; response: PendingSwap | null }
       /** Read-only diagnostic for a single swap: local state + raw Pioneer
        *  response + rescan response, with protocol divergence flagged. Used
        *  by the SwapDialog "Debug" affordance and dev-tools introspection.
@@ -337,8 +337,8 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
 
       // ── Recent Activity ──────────────────────────────────────────────────
       // limit omitted = every row for the wallet (the activity list shows full history)
-      getRecentActivity: { params: { limit?: number; chainId?: string } | void; response: RecentActivity[] }
-      scanChainHistory: { params: { chainId: string }; response: { count: number } }
+      getRecentActivity: { params: { limit?: number; chainId?: string; watchOnly?: boolean; deviceId?: string } | void; response: RecentActivity[] }
+      scanChainHistory: { params: { chainId: string; watchOnly?: boolean; deviceId?: string }; response: { count: number } }
       // True while the engine's startup/background bulk history scan is in flight,
       // so the activity UI can show "Syncing…" instead of a false "no activity".
       getActivityScanState: { params: void; response: { running: boolean } }

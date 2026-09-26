@@ -219,6 +219,7 @@ import { loadSupportedChains } from "../shared/swap-support-matrix"
 import { PioneerSocket } from "./pioneer-socket"
 import { startEventStream, stopEventStream, type AddressEntry } from "./event-stream"
 import { rebuildActivityHistory, clearHistoryQueryCache } from "./activity-history"
+import { cachedHistoryQueries, watchOnlyWalletScope, watchOnlyBitcoinScope } from './watch-only-history'
 import { createTxWatch, MAX_WATCH_MS, UNSEEN_GIVE_UP_MS } from "./tx-watch"
 import { getRequiredConfs } from "../shared/confirmations"
 import { addSessionActivity, getSessionActivity, clearSessionActivity } from "./session-activity"
@@ -1387,6 +1388,19 @@ function getWalletDbScope(): { deviceId: string; walletId: string } | null {
 	const seedId = engine.currentSeedEthAddress?.toLowerCase()
 	if (!seedId) return null
 	return { deviceId, walletId: `${deviceId}:${seedId}` }
+}
+
+async function getWatchOnlyHistoryContext(deviceId?: string) {
+	if (engine.isPassphraseWallet) throw new Error('Watch-only history is unavailable during a hidden wallet session')
+	const { getDeviceSnapshotById } = await import('./db')
+	const snapshot = deviceId ? getDeviceSnapshotById(deviceId) : getLatestDeviceSnapshot()
+	if (!snapshot) throw new Error('No saved wallet available for history')
+	const bitcoinOnly = bitcoinOnlyWatchOnlyScope(false, snapshot.featuresJson)
+	const scope = bitcoinOnly
+		? watchOnlyBitcoinScope(snapshot.deviceId, getCachedPubkeys(snapshot.deviceId))
+		: watchOnlyWalletScope(snapshot.deviceId, getSetting(`seed_eth_${snapshot.deviceId}`))
+	if (!scope) throw new Error('Connect this wallet once to identify its saved transaction history')
+	return { snapshot, scope }
 }
 
 /** The seed identity (lowercased ETH idx0) under which the in-memory account
@@ -7426,7 +7440,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// fall back to the live tracker copy: a hidden walletId never matches a
 				// standard swap (DB lookup is walletId-scoped; in-memory filter too), so
 				// standard-wallet swaps stay invisible here.
-				const scope = getWalletDbScope()
+				const scope = params.watchOnly ? (await getWatchOnlyHistoryContext(params.deviceId)).scope : getWalletDbScope()
 				if (!scope) return null
 				const record = getSwapHistoryByTxid(params.txid, scope.deviceId, scope.walletId)
 				const { inferConfirmationsFromStatus, getPendingSwaps } = await import('./swap-tracker')
@@ -7495,7 +7509,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// never matches a standard swap's walletId — so standard-wallet swaps
 				// remain unreachable from here. Same posture as getPendingSwaps.
 				const { refreshSwap } = await import('./swap-tracker')
-				const scope = getWalletDbScope()
+				const scope = params.watchOnly ? (await getWatchOnlyHistoryContext(params.deviceId)).scope : getWalletDbScope()
 				if (!scope) return null
 				return await refreshSwap(params.txid, scope.deviceId, scope.walletId, params.rescan)
 			},
@@ -7564,6 +7578,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 			// ── Recent Activity (from api_log + swap_history) ────────
 			getRecentActivity: async (params) => {
+				if (params?.watchOnly) {
+					const { snapshot, scope } = await getWatchOnlyHistoryContext(params.deviceId)
+					const rows = getRecentActivityFromLog(params.limit, params.chainId, scope.deviceId, scope.walletId)
+					return bitcoinOnlyActivityList(rows, bitcoinOnlyWatchOnlyScope(isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant), snapshot.featuresJson))
+				}
 				// PRIVACY: Don't expose standard-wallet activity during hidden sessions.
 				// Hidden sessions get the RAM-only session store instead (populated by
 				// scanChainHistory's live fetch below) — display without persistence.
@@ -7579,6 +7598,26 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			getActivityScanState: async () => ({ running: activityScanRunning }),
 			scanChainHistory: async (params) => {
 				requireOnline('activity history')
+				if (params.watchOnly) {
+					const { snapshot, scope } = await getWatchOnlyHistoryContext(params.deviceId)
+					const chains = bitcoinOnlyChainList(getAllChains(), bitcoinOnlyWatchOnlyScope(isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant), snapshot.featuresJson))
+					const chain = chains.find(c => c.id === params.chainId)
+					if (!chain) throw new Error(`Unsupported chain: ${params.chainId}`)
+					const queries = cachedHistoryQueries(chain, getCachedBalances(scope.deviceId)?.balances || [], getCachedPubkeys(scope.deviceId))
+					if (!queries.length) throw new Error(`No saved public address for ${chain.symbol}`)
+					const result = await rebuildActivityHistory({
+						wallet: null, scope, chains: [chain], firmwareVersion: snapshot.firmwareVer,
+						cachedQueries: { [chain.id]: queries },
+						options: { chainId: chain.id, includeHidden: true, forceRefresh: true },
+						isCurrent: () => !engine.isPassphraseWallet
+							&& (bitcoinOnlyWatchOnlyScope(false, snapshot.featuresJson)
+								? watchOnlyBitcoinScope(scope.deviceId, getCachedPubkeys(scope.deviceId))
+								: watchOnlyWalletScope(scope.deviceId, getSetting(`seed_eth_${scope.deviceId}`)))?.walletId === scope.walletId,
+					})
+					if (result.totals.failedChains) throw new Error(result.chains.find(c => c.error)?.error || 'History scan failed')
+					notifyActivityChanged()
+					return { count: result.totals.inserted }
+				}
 				const chain = getAllChains().find(c => c.id === params.chainId)
 				if (!chain) throw new Error(`Unknown chain: ${params.chainId}`)
 				if (!engine.wallet) throw new Error('No device connected')

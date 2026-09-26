@@ -14,6 +14,8 @@ import { ReportDialog } from "./ReportDialog"
 
 interface ActivityPageProps {
   defaultChainId?: string
+  watchOnly?: boolean
+  watchOnlyDeviceId?: string
   onBack?: () => void
   onResumeSwap?: (swap: PendingSwap) => void
 }
@@ -182,9 +184,9 @@ function ChainFilterDropdown({
   )
 }
 
-export function ActivityPage({ defaultChainId, onBack, onResumeSwap }: ActivityPageProps) {
+export function ActivityPage({ defaultChainId, onBack, onResumeSwap, watchOnly = false, watchOnlyDeviceId }: ActivityPageProps) {
   // Every activity row (no cap), kept live by the backend's 'activity-changed' push.
-  const { activities, loaded, refresh: fetchActivities } = useRecentActivity()
+  const { activities, loaded, error: historyError, refresh: fetchActivities } = useRecentActivity(watchOnly, watchOnlyDeviceId)
   const [pendingSwaps, setPendingSwaps] = useState<PendingSwap[]>([])
   const [availableChains, setAvailableChains] = useState<ChainBalance[]>([])
   const loading = !loaded
@@ -201,16 +203,22 @@ export function ActivityPage({ defaultChainId, onBack, onResumeSwap }: ActivityP
 
 
   const fetchSwaps = useCallback(() => {
+    if (watchOnly) { setPendingSwaps([]); return }
     rpcRequest<PendingSwap[]>('getPendingSwaps', undefined, 5000)
       .then(r => { if (r) setPendingSwaps(r) })
       .catch(() => {})
-  }, [])
+  }, [watchOnly])
 
   const fetchChains = useCallback(() => {
+    if (watchOnly) {
+      rpcRequest<ChainBalance[] | null>('getWatchOnlyBalances', { deviceId: watchOnlyDeviceId })
+        .then(rows => setAvailableChains(rows || [])).catch(() => setAvailableChains([]))
+      return
+    }
     rpcRequest<{ balances: ChainBalance[] } | null>('getCachedBalances')
       .then(r => { if (r?.balances) setAvailableChains(r.balances) })
       .catch(() => {})
-  }, [])
+  }, [watchOnly, watchOnlyDeviceId])
 
   useEffect(() => {
     fetchSwaps()
@@ -315,15 +323,19 @@ export function ActivityPage({ defaultChainId, onBack, onResumeSwap }: ActivityP
     setScanning(true)
     setScanResult(null)
     try {
-      const chainsToScan = chainFilter ? [chainFilter] : CHAINS.map(c => c.id)
+      const chainsToScan = chainFilter ? [chainFilter] : watchOnly ? availableChains.map(c => c.chainId) : CHAINS.map(c => c.id)
+      let failures = 0
+      let lastError = ''
       let total = 0
       for (const chainId of chainsToScan) {
         try {
-          const result = await rpcRequest<{ count: number }>('scanChainHistory', { chainId }, 60000)
+          const result = await rpcRequest<{ count: number }>('scanChainHistory', { chainId, watchOnly, deviceId: watchOnlyDeviceId }, 60000)
           total += result?.count || 0
-        } catch { /* skip failing chains */ }
+        } catch (e: any) { failures++; lastError = e?.message || 'Scan failed' }
       }
-      setScanResult(total > 0 ? `+${total} tx${total > 1 ? 's' : ''}` : 'Up to date')
+      if (!chainsToScan.length) throw new Error('No saved addresses to scan')
+      if (failures === chainsToScan.length) throw new Error(lastError)
+      setScanResult(failures ? `${total} new · ${failures} chains failed` : total > 0 ? `+${total} tx${total > 1 ? 's' : ''}` : 'Up to date')
       fetchActivities()
     } catch (e: any) {
       setScanResult(e.message || 'Failed')
@@ -331,18 +343,19 @@ export function ActivityPage({ defaultChainId, onBack, onResumeSwap }: ActivityP
       scanningRef.current = false
       setScanning(false)
     }
-  }, [chainFilter, fetchActivities])
+  }, [chainFilter, fetchActivities, watchOnly, watchOnlyDeviceId, availableChains])
 
   useEffect(() => { setScanResult(null) }, [chainFilter])
 
   const fetchingSwapRef = useRef(false)
   const handleSelectActivity = useCallback((a: RecentActivity) => {
-    if (a.type === 'swap' && a.txid && onResumeSwap) {
+    if (a.type === 'swap' && a.txid) {
       if (fetchingSwapRef.current) return
       fetchingSwapRef.current = true
-      rpcRequest<PendingSwap | null>('getSwapByTxid', { txid: a.txid })
+      rpcRequest<PendingSwap | null>(watchOnly ? 'refreshSwap' : 'getSwapByTxid', { txid: a.txid, watchOnly, deviceId: watchOnlyDeviceId }, 60000)
         .then(swap => {
-          if (swap) onResumeSwap(swap)
+          if (swap && onResumeSwap) onResumeSwap(swap)
+          else if (swap) setSelectedDetail({ kind: 'swap', swap })
           else setSelectedDetail({ kind: 'activity', activity: a })
         })
         .catch(() => setSelectedDetail({ kind: 'activity', activity: a }))
@@ -350,7 +363,7 @@ export function ActivityPage({ defaultChainId, onBack, onResumeSwap }: ActivityP
     } else {
       setSelectedDetail({ kind: 'activity', activity: a })
     }
-  }, [onResumeSwap])
+  }, [onResumeSwap, watchOnly, watchOnlyDeviceId])
 
   const TYPE_PILLS = [
     { id: 'send', label: 'Sent' },
@@ -582,7 +595,7 @@ export function ActivityPage({ defaultChainId, onBack, onResumeSwap }: ActivityP
             <Text fontSize="13px" color="var(--text-3)" textAlign="center">
               {typeFilters.size > 0 || chainFilter || search
                 ? 'No activity matches your filters'
-                : 'No activity yet — click Rescan to load history.'}
+                : historyError || 'No activity yet — click Rescan to load history.'}
             </Text>
             {!chainFilter && !search && typeFilters.size === 0 && (
               <Box

@@ -27,7 +27,7 @@ export type ActivityHistoryRebuildOptions = {
     forceRefresh?: boolean
   }
 
-type HistoryQuery = {
+export type HistoryQuery = {
   caip: string
   pubkey: string
   label: string
@@ -234,6 +234,8 @@ export async function rebuildActivityHistory(params: {
   wallet: any
   scope: ActivityHistoryScope
   chains: ChainDef[]
+    /** Explicit cached queries for watch-only scans. Never falls back to USB. */
+    cachedQueries?: Record<string, HistoryQuery[]>
     firmwareVersion?: string
     options?: ActivityHistoryRebuildOptions
     /** False once the wallet session this scan started in is gone. A device derive
@@ -284,7 +286,7 @@ export async function rebuildActivityHistory(params: {
 
     try {
       const cacheKey = `${params.scope.walletId}|${chain.id}|${accountIndex}`
-      let queries = queryCache.get(cacheKey)
+      let queries = params.cachedQueries ? (params.cachedQueries[chain.id] || []) : queryCache.get(cacheKey)
       if (!queries) {
         queries = await deriveHistoryQueries(params.wallet, chain, accountIndex)
         if (params.isCurrent && !params.isCurrent()) throw new Error('Wallet session changed during scan')
