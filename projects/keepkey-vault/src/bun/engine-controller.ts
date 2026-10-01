@@ -174,6 +174,8 @@ export class EngineController extends EventEmitter {
   private lastAcceptedCharSeq = -1
   private recoverySendInFlight = false
   private pinRequestCount = 0
+  /** True from sendPin until the device answers it — a Failure in that window is the PIN verdict. */
+  private pinAwaitingResult = false
   // Tracks whether promptPin() → getPublicKeys() is still awaiting resolution.
   // While active, sendPin/sendPassphrase must NOT call getFeatures — that would
   // race with the pending getPublicKeys and cause transport "Unexpected message".
@@ -231,6 +233,7 @@ export class EngineController extends EventEmitter {
     if (!this.wallet?.transport) return
     const transport = this.wallet.transport
     transport.removeAllListeners(String(core.Events.PIN_REQUEST))
+    transport.removeAllListeners(core.Events.FAILURE)
     transport.removeAllListeners(String(core.Events.BUTTON_REQUEST))
     transport.removeAllListeners(String(core.Events.PASSPHRASE_REQUEST))
     transport.removeAllListeners("80")
@@ -252,6 +255,18 @@ export class EngineController extends EventEmitter {
       }
       console.log(`[Engine] PIN_REQUEST → type=${type} (count=${this.pinRequestCount}, setup=${this.setupInProgress})`)
       this.emit('pin-request', { type })
+    })
+
+    // Any Failure the device sends right after we sent a PIN is the device's
+    // verdict on that PIN — surface it, whichever call owned the transport.
+    // Failure_PinInvalid = 7 (device-protocol types.proto).
+    transport.on(core.Events.FAILURE, (ev: any) => {
+      const code = ev?.message?.code
+      const message = ev?.message?.message
+      console.warn(`[Engine] Device FAILURE code=${code} message="${message}" (pinAwaitingResult=${this.pinAwaitingResult}, state=${this.lastState})`)
+      if (!this.pinAwaitingResult) return
+      this.pinAwaitingResult = false
+      this.emit('pin-error', { code, message })
     })
 
     transport.on(String(core.Events.BUTTON_REQUEST), () => {
@@ -387,6 +402,7 @@ export class EngineController extends EventEmitter {
 
   private updateState(state: DeviceState) {
     this.lastState = state
+    if (state !== 'needs_pin') this.pinAwaitingResult = false
     console.log(`[Engine] State → ${state}`)
 
     // Reconnect detection: if the device reaches ready with a cached passphrase
@@ -488,11 +504,6 @@ export class EngineController extends EventEmitter {
           // lastState is already 'needs_pin', and updateState won't re-fire —
           // leaving the user with no PIN overlay while the device still needs PIN.
           if (this.lastState === 'needs_pin' && !this.promptPinActive) {
-            // Notify UI that the PIN attempt failed (wrong PIN entered)
-            if (this.pinRequestCount > 0) {
-              console.log('[Engine] PIN attempt failed — notifying UI')
-              this.emit('pin-error', {})
-            }
             setTimeout(() => {
               if (this.lastState === 'needs_pin' && !this.promptPinActive) {
                 console.log('[Engine] Retrying prompt-pin (device still locked)')
@@ -2027,6 +2038,8 @@ export class EngineController extends EventEmitter {
 
   async sendPin(pin: string) {
     if (!this.wallet) throw new Error('No device connected')
+    console.log(`[Engine] sendPin: ${pin.length} positions (pinRequests=${this.pinRequestCount}, promptPinActive=${this.promptPinActive})`)
+    this.pinAwaitingResult = true
     await this.wallet.sendPin(pin)
     // Don't call getFeatures if another operation owns the transport:
     // - setupInProgress: reset/recover is still running

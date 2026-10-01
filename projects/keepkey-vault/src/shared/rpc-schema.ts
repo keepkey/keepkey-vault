@@ -460,7 +460,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       'pin-request': PinRequest
       'character-request': CharacterRequest
       'passphrase-request': Record<string, never>
-      'pin-error': Record<string, never>
+      'pin-error': { code?: number; message?: string }
       'recovery-error': { message: string; errorType: 'pin-mismatch' | 'invalid-mnemonic' | 'bad-words' | 'word-not-found' | 'cancelled' | 'unknown'; autoRetrying?: boolean }
       'reset-error': { message: string; errorType: 'pin-mismatch' | 'cancelled' | 'unknown' }
       'btc-accounts-update': BtcAccountSet
