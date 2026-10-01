@@ -14,6 +14,7 @@ import { isBitcoinOnlyVariant } from "../../shared/flags"
 import { SelfHostNodePanel } from "./SelfHostNodePanel"
 import { ClearSignStudio } from "./ClearSignStudio"
 import { RngAuditPanel } from "./RngAuditPanel"
+import { BROWSER_AGENT_PROMPT, BROWSER_EXTENSION_URL, BROWSER_AGENT_DOCS_URL } from "../../shared/browser-agent-prompt"
 
 interface DevicePolicy {
 	policyName?: string
@@ -169,6 +170,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 	const [removePinConfirm, setRemovePinConfirm] = useState(false)
 	const [togglingPassphrase, setTogglingPassphrase] = useState(false)
 	const [togglingPolicy, setTogglingPolicy] = useState("")
+	const [browserPromptStatus, setBrowserPromptStatus] = useState("")
 	const [appSettings, setAppSettings] = useState<AppSettings>({ restApiEnabled: false, pioneerApiBase: '', pioneerServers: [], activePioneerServer: '', fiatCurrency: 'USD', numberLocale: 'en-US', walletConnectEnabled: false, bip85Enabled: false, zcashPrivacyEnabled: false, hiveEnabled: false, emulatorEnabled: false, offlineMode: false, btcNodeEnabled: false, btcNodeType: 'blockbook', btcNodeUrl: '', btcOnboardingShown: false, preReleaseUpdates: false, alphaFirmware: false, addressBookClearsignEnabled: false, privateModeEnabled: false, passphraseIntroShown: false })
 	const [togglingRestApi, setTogglingRestApi] = useState(false)
 	const [windowFocusState, setWindowFocusState] = useState<{ refs: number; alwaysOnTop: boolean } | null>(null)
@@ -1640,6 +1642,28 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 							</Flex>
 
 						</VStack>
+					</Section>
+
+					{/* ── Browser use ──────────────────────────────────── */}
+					<Section title="Browser use" defaultOpen={true}>
+						<Box>
+							<Text fontSize="sm" color="kk.textSecondary">
+								Use your existing Chrome profile with an agent. Install and pair the extension, enable its Agent Mode, then paste this prompt into your local agent. The prompt contains no credentials.
+							</Text>
+							<Flex gap="2" mt="3" flexWrap="wrap">
+								<Button size="sm" variant="outline" onClick={async () => {
+									try {
+										await navigator.clipboard.writeText(BROWSER_AGENT_PROMPT)
+										setBrowserPromptStatus("Copied. Paste into your local agent and describe your task.")
+									} catch {
+										setBrowserPromptStatus("Clipboard unavailable. Open the browser-use guide and copy the prompt there.")
+									}
+								}}>Copy browser-use prompt</Button>
+								<Button size="sm" variant="ghost" onClick={() => rpcRequest("openUrl", { url: BROWSER_EXTENSION_URL }).catch(() => setBrowserPromptStatus("Could not open Chrome Web Store. Use the install link in the guide."))}>Install Chrome extension</Button>
+								<Button size="sm" variant="ghost" onClick={() => rpcRequest("openUrl", { url: BROWSER_AGENT_DOCS_URL }).catch(() => setBrowserPromptStatus("Open docs.keepkey.com/docs/bex/mcp in your browser."))}>Browser-use guide</Button>
+							</Flex>
+							{browserPromptStatus && <Text role="status" fontSize="sm" color="kk.textSecondary" mt="2">{browserPromptStatus}</Text>}
+						</Box>
 					</Section>
 
 					{/* ── Bitcoin node (self-host) — btc-only devices ─── */}
