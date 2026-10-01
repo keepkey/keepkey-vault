@@ -154,6 +154,16 @@ jobs:
             exit 1
           fi
 
+      - name: Make google-protobuf resolvable from device-protocol lib/
+        shell: bash
+        run: |
+          # lib/*_pb.js require('google-protobuf'), resolved from
+          # modules/device-protocol/ upward, which has no node_modules in CI.
+          # Tests that import the lib directly (pin-unlock-timeout) need it.
+          mkdir -p modules/device-protocol/node_modules
+          ln -sfn "$PWD/modules/hdwallet/node_modules/google-protobuf" modules/device-protocol/node_modules/google-protobuf
+          test -f modules/device-protocol/node_modules/google-protobuf/package.json
+
       - name: Install vault dependencies
         # --frozen-lockfile: install exactly what bun.lock pins. Without it, bun
         # floats caret ranges to latest — e.g. @pioneer-platform/pioneer-discovery
