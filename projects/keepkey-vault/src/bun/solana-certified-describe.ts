@@ -16,6 +16,8 @@
  * service said.
  */
 import bs58 from 'bs58'
+import { formatCertifiedArg, shortAddr } from '../shared/clearsign-risk'
+
 
 import { certifiedSolanaSchemaApplies, findLocalCertifiedSolanaMatch } from './solana-certified-match'
 import {
@@ -33,6 +35,8 @@ import {
 import type { CertifiedSolanaProof } from './solana-certified-registry'
 import { parseSolanaMessage, parseSolanaTx, solanaMessageSlice, type ParsedSolanaMessage } from './solana-tx'
 import type { SolanaCertifiedArg, SolanaCertifiedDescription } from '../shared/types'
+
+const NATIVE_MINT = 'So11111111111111111111111111111111111111112'
 
 /** The account at an expanded index: static keys first, then the trusted LUT
  *  proof's keys — the order the firmware indexes them in. */
@@ -65,6 +69,10 @@ function readArg(
       return { ...base, kind: 'pubkey', raw: bs58.encode(Uint8Array.from(data.subarray(offset, offset + 32))) }
     case ARG_TOKEN_AMOUNT: {
       const mint = accounts(arg.mintAccount!)
+      // Firmware rule: the native (wrapped SOL) mint is SOL, no definition.
+      if (mint === NATIVE_MINT) {
+        return { ...base, kind: 'sol', raw: data.readBigUInt64LE(offset).toString() }
+      }
       // WHAT THE HOST ENFORCES, exactly. The delegate's token attestation
       // arrives with a signature, and nothing here verifies it — only the
       // device does. So a ticker is rendered only when that attestation AGREES
@@ -151,15 +159,28 @@ export function describeCertifiedSolanaTransaction(
   const args: SolanaCertifiedArg[] = []
   let offset = spec.discriminator.length
   for (const arg of spec.args ?? []) {
-    args.push(readArg(data, offset, arg,
-      (position) => accountAt(message, proof, instruction.accountIndices[position]), proof, spec.token))
+    const value = readArg(data, offset, arg,
+      (position) => accountAt(message, proof, instruction.accountIndices[position]), proof, spec.token)
+    args.push(arg.role ? { ...value, role: arg.role } : value)
     offset += ARG_WIDTH[arg.type]
   }
+
+  // The device's summary screen (SRS-7.16 R-7.1): the signed sentence with
+  // each placeholder replaced by the value read from these bytes.
+  const summary = spec.intent?.replace(/\{(a?)([0-9])\}/g, (_, account: string, digit: string) => {
+    const n = Number(digit)
+    if (account) {
+      const key = accountAt(message, proof, instruction.accountIndices[spec.accounts![n].index])
+      return key ? shortAddr(key) : '?'
+    }
+    return formatCertifiedArg(args[n])
+  })
 
   return {
     programId: spec.programId,
     programName: spec.programName,
     instructionName: spec.instructionName,
     args,
+    ...(summary !== undefined ? { summary } : {}),
   }
 }

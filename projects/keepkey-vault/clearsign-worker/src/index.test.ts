@@ -71,9 +71,9 @@ describe('ClearSign Worker public surface', () => {
     const response = await fetchWorker('/v1/catalog')
     const body = await response.json() as any
     expect(response.status).toBe(200)
-    expect(body.entries).toHaveLength(11)
+    expect(body.entries).toHaveLength(29)
     expect(body.entries.filter((entry: any) => entry.family === 'evm')).toHaveLength(2)
-    expect(body.entries.filter((entry: any) => entry.family === 'solana')).toHaveLength(9)
+    expect(body.entries.filter((entry: any) => entry.family === 'solana')).toHaveLength(27)
     for (const entry of body.entries) {
       expect(['Relay', 'Portals', 'Pump', 'SoltoshiDICE']).toContain(entry.protocol)
       expect(entry.provenance.protocol).toMatch(/^https:\/\//)
@@ -115,6 +115,16 @@ describe('ClearSign Worker public surface', () => {
     expect((await response.json() as any).classification).toBe('UNAVAILABLE')
   })
 
+  it('names only reviewed Universal Router deployments, and signs nothing unprovisioned', async () => {
+    const unknown = await post('/v1/evm/name', { chainId: 1, address: '0x0000000000000000000000000000000000000001' })
+    expect(unknown.status).toBe(422)
+    const router = await post('/v1/evm/name', { chainId: 1, address: '0x66a9893cC07D91D95644AEDD05D03f95e1dBA8Af' })
+    expect(router.status).toBe(503)
+    // A deployment on one chain is not a name on another.
+    const wrongChain = await post('/v1/evm/name', { chainId: 8453, address: '0x66a9893cC07D91D95644AEDD05D03f95e1dBA8Af' })
+    expect(wrongChain.status).toBe(422)
+  })
+
   it('recognizes the dynamic Portals shape but rejects non-word-aligned calldata', async () => {
     const exact = await post('/v1/evm/schema', {
       chainId: 1,
@@ -142,9 +152,14 @@ describe('ClearSign Worker public surface', () => {
   })
 
   it('without a catalog key, certifies a Pump buy only when firmware will apply the schema', async () => {
-    // 9 instructions, with ATA create, SyncNative and closeAccount beside the
-    // buy: the device would refuse a certified envelope, so it stays opaque.
-    const refused = await post('/v1/solana/certify', { rawTx: syntheticPumpBuy().rawTx })
+    // 9 instructions with the signer's own WSOL create, sync and close: the
+    // device applies the schema, so it reaches provisioning.
+    const full = await post('/v1/solana/certify', { rawTx: syntheticPumpBuy().rawTx })
+    expect(full.status).toBe(503)
+    // Closing the wrapped SOL to a non-signer: the device would refuse a
+    // certified envelope, so it stays opaque.
+    const stranger = editSolanaTx(syntheticPumpBuy().rawTx, (m) => { m.instructions[8].accountIndices = [5, 6, 0] })
+    const refused = await post('/v1/solana/certify', { rawTx: stranger })
     expect(refused.status).toBe(422)
     expect((await refused.json() as any).classification).toBe('OPAQUE')
     // The same buy beside ComputeBudget only is still discovered from its bytes.
@@ -188,11 +203,11 @@ describe('ClearSign Worker public surface', () => {
     expect((await post('/v1/solana/certify', { rawTx: joinFixture.rawTxBase64, catalogKey: 'pumpAmmBuy' })).status).toBe(422)
   })
 
-  it('without a catalog key, refuses a SoltoshiDICE join with an ATA-create companion', async () => {
+  it('without a catalog key, refuses a SoltoshiDICE join beside an ATA created for another owner', async () => {
     const withAtaCreate = editSolanaTx(joinFixture.rawTxBase64, (m) => {
       m.staticAccounts.push(Buffer.from(bs58.decode('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL')))
       m.header[2]++
-      m.instructions.splice(2, 0, { programIdIndex: m.staticAccounts.length - 1, accountIndices: [0, 6, 0, 8, 7, 12], data: Buffer.from([1]) })
+      m.instructions.splice(2, 0, { programIdIndex: m.staticAccounts.length - 1, accountIndices: [0, 6, 6, 8, 7, 12], data: Buffer.from([1]) })
     })
     const response = await post('/v1/solana/certify', { rawTx: withAtaCreate })
     expect(response.status).toBe(422)

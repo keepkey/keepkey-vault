@@ -1,4 +1,5 @@
 import type { EngineController } from './engine-controller'
+import { withPermit2SpenderName } from './permit2-spender-name'
 import type { AuthStore } from './auth'
 import { HttpError } from './auth'
 import { WalletCacheSession, WalletSessionChangedError, WalletSessionMap } from './wallet-session-cache'
@@ -2619,7 +2620,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           }
 
           try {
-            const result = await emuWrap(() => wallet.ethSignTypedData({ addressNList, typedData: body.typedData }), { operation: 'ethSignTypedData', chain: 'Ethereum' })
+            const params = await withPermit2SpenderName({ addressNList, typedData: body.typedData }, engine.getDeviceState().firmwareVersion)
+            const result = await emuWrap(() => wallet.ethSignTypedData(params), { operation: 'ethSignTypedData', chain: 'Ethereum' })
             return json(result)
           } catch (err: any) {
             // Distinguish user cancellation from actual failures

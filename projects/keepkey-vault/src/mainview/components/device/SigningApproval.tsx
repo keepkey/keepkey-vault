@@ -586,6 +586,15 @@ function CalldataInspector({ data, t }: { data: string; t: (k: string, f?: strin
  */
 // ponytail: English-only, like the risk-bar sentences next to it — i18n once
 // this wording has been read by real users.
+/** The device's own Limits wording for each v3 role (SRS-7.16 R-7.3). */
+const ROLE_TEXT: Record<number, string> = {
+	1: "You spend at most",
+	2: "You receive at least",
+	3: "You spend",
+	4: "You receive",
+	5: "Each use at most",
+}
+
 function CertifiedVouch({ certified, appName }: {
 	certified: NonNullable<SigningRequestInfo['solanaCertified']>
 	appName: string
@@ -605,8 +614,15 @@ function CertifiedVouch({ certified, appName }: {
 				</Text>
 			</Flex>
 			<Text fontSize="xs" fontWeight="600" color="white">
-				{certified.programName} — {certified.instructionName}
+				{certified.programName} — {certified.summary ?? certified.instructionName}
 			</Text>
+			{certified.args.some((a) => a.role) && (
+				<VStack gap="0.5" align="stretch" data-testid="certified-limits">
+					{certified.args.filter((a) => a.role).map((a, i) => (
+						<Row key={i} label={ROLE_TEXT[a.role!] ?? a.label} value={formatCertifiedArg(a, true)} />
+					))}
+				</VStack>
+			)}
 			<Row label="Program" value={certified.programId} />
 			{certified.args.map((a, i) => (
 				<Row key={i} label={a.label} value={formatCertifiedArg(a, true)} />
@@ -640,7 +656,12 @@ function formatArgValue(arg: { type: string; value: string }): string {
 	return arg.value
 }
 
-function SolanaDecodedSection({ decoded, t }: { decoded: SolanaTxDecodedInfo; t: (k: string, f?: string) => string }) {
+function SolanaDecodedSection({ decoded, t, certified }: {
+	decoded: SolanaTxDecodedInfo
+	t: (k: string, f?: string) => string
+	/** Present when the device clear-signs this call from a KeepKey-certified schema. */
+	certified?: SigningRequestInfo['solanaCertified']
+}) {
 	return (
 		<VStack gap="2" w="100%" bg="rgba(0,0,0,0.25)" borderRadius="xl" p="3" align="stretch">
 			<Flex gap="2" align="center" w="100%">
@@ -655,11 +676,15 @@ function SolanaDecodedSection({ decoded, t }: { decoded: SolanaTxDecodedInfo; t:
 				</Text>
 			</Flex>
 
-			{decoded.hasUnknownProgram && (
+			{decoded.hasUnknownProgram && (certified ? (
+				<Text fontSize="2xs" color="var(--teal)" bg="rgba(72,187,120,0.1)" px="2" py="1" borderRadius="md">
+					✓ {t("signing.solanaCertifiedProgram", "Decoded by your KeepKey from a KeepKey-certified schema:")} {certified.programName} — {certified.instructionName}
+				</Text>
+			) : (
 				<Text fontSize="2xs" color="orange.300" bg="rgba(255,140,0,0.1)" px="2" py="1" borderRadius="md">
 					⚠ {t("signing.solanaUnknownProgram", "Contains instructions from programs the Vault can't clear-sign.")}
 				</Text>
-			)}
+			))}
 			{decoded.altResolutionIncomplete && (
 				<Text fontSize="2xs" color="orange.300" bg="rgba(255,140,0,0.1)" px="2" py="1" borderRadius="md">
 					⚠ {t("signing.solanaAltIncomplete", "Some address lookup tables couldn't be resolved — account names may be missing.")}
@@ -1277,7 +1302,7 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 					{(request.solanaDecoded || request.solanaMessageDecoded || request.typedDataDecoded || request.ethMessageDecoded || (decoded && decoded.source !== 'none')) && (
 						<Box flex="1" minW="0">
 							{request.solanaDecoded
-								? <SolanaDecodedSection decoded={request.solanaDecoded} t={t} />
+								? <SolanaDecodedSection decoded={request.solanaDecoded} t={t} certified={request.solanaCertified} />
 								: request.solanaMessageDecoded
 									? <SolanaMessageSection decoded={request.solanaMessageDecoded} t={t} />
 									: request.typedDataDecoded

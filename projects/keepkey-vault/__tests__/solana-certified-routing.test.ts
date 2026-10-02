@@ -101,10 +101,10 @@ describe('routeExternalSolanaTransaction (REST pre-approval auto-lookup)', () =>
     const joinWithAtaCreate = editSolanaTx(joinRawTx, (m) => {
       m.staticAccounts.push(Buffer.from(bs58.decode('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL')))
       m.header[2]++
-      m.instructions.splice(2, 0, { programIdIndex: m.staticAccounts.length - 1, accountIndices: [0, 6, 0, 8, 7, 12], data: Buffer.from([1]) })
+      m.instructions.splice(2, 0, { programIdIndex: m.staticAccounts.length - 1, accountIndices: [0, 6, 6, 8, 7, 12], data: Buffer.from([1]) })
     })
-    // 9 instructions, with ATA create, SyncNative, and closeAccount beside the buy.
-    const pumpBuy = syntheticPumpBuy().rawTx
+    // A buy whose wrapped SOL is closed to someone other than the signer.
+    const pumpBuy = editSolanaTx(syntheticPumpBuy().rawTx, (m) => { m.instructions[8].accountIndices = [5, 6, 0] })
     for (const rawTx of [joinWithAtaCreate, pumpBuy]) {
       expect(await routeExternalSolanaTransaction(await decoded(rawTx), { raw_tx: rawTx }, '7.16.0'))
         .toEqual({ requiresBlindSigningConsent: true })

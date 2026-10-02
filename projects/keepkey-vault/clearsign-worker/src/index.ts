@@ -12,6 +12,9 @@ import {
 } from '../../src/bun/clearsign-alpha-ceremony'
 import {
   buildCertifiedEvmEnvelope,
+  buildCertifiedEvmNameEnvelope,
+  findEvmNameRecord,
+  UNIVERSAL_ROUTER_PROVENANCE,
   CERTIFIED_EVM_CATALOG,
   CERTIFIED_METADATA_KEY_ID,
   findCertifiedEvmSchemaByShape,
@@ -250,6 +253,13 @@ function decodeCanonicalBase64(value: unknown): Buffer {
   return decoded
 }
 
+/** PumpSwap AMM (official IDL): buy carries two volume accumulators before
+ * the fee config, so its fee program is at 22; sell's is at 20. */
+const PUMP_AMM_PINS: Record<string, { minAccounts: number, feeProgramIndex: number }> = {
+  pumpAmmBuy: { minAccounts: 23, feeProgramIndex: 22 },
+  pumpAmmSell: { minAccounts: 21, feeProgramIndex: 20 },
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url)
@@ -290,6 +300,26 @@ export default {
       }
     }
 
+    if (request.method === 'POST' && url.pathname === '/v1/evm/name') {
+      let body: any
+      try { body = await readJson(request) } catch (error: any) {
+        return json({ error: error.message }, error.message === 'request too large' ? 413 : 400)
+      }
+      const record = findEvmNameRecord(Number(body?.chainId), String(body?.address || ''))
+      if (!record) return json({ classification: 'OPAQUE', error: 'address is not in the reviewed name catalog' }, 422)
+      const state = provisioning(env)
+      if (!state.evmReady || !env.CLEARSIGN_CERTIFICATE_HEX || !env.CLEARSIGN_DELEGATE_PRIVATE_KEY) {
+        return json({ classification: 'UNAVAILABLE', error: 'Ethereum certified signing is not provisioned' }, 503)
+      }
+      try {
+        const signed = buildCertifiedEvmNameEnvelope(record, env.CLEARSIGN_CERTIFICATE_HEX, env.CLEARSIGN_DELEGATE_PRIVATE_KEY)
+        return json({ success: true, classification: 'VERIFIED', version: 6, ...signed, chainId: record.chainId, address: record.address, name: record.name, provenance: { source: UNIVERSAL_ROUTER_PROVENANCE, entry: record.source } })
+      } catch (error: any) {
+        // The only certificate held is scoped to one chain; other chains need their own.
+        return json({ classification: 'UNAVAILABLE', error: String(error?.message || 'name could not be certified') }, 422)
+      }
+    }
+
     if (request.method === 'POST' && url.pathname === '/v1/solana/certify') {
       let body: any
       try { body = await readJson(request) } catch (error: any) {
@@ -317,15 +347,17 @@ export default {
       // that matches two instructions, so exactly one pair may certify.
       const matches = candidates.flatMap(([key, spec]) => message.instructions.filter((instruction) => {
         if (!solanaInstructionMatchesSchema(message, instruction, spec)) return false
-        if (key === 'pumpAmmBuy') {
-          if (instruction.accountIndices.length < 23 || instruction.data[24] > 1) return false
+        const pump = PUMP_AMM_PINS[key]
+        if (pump) {
+          if (instruction.accountIndices.length < pump.minAccounts) return false
+          if (key === 'pumpAmmBuy' && instruction.data[24] > 1) return false
           // Pin the official IDL's fixed program accounts and required user
           // signer; an arbitrary program label cannot certify another CPI.
           const fixedAccounts: Record<number, string> = {
             13: '11111111111111111111111111111111',
             14: 'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL',
             16: spec.programId,
-            22: 'pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ',
+            [pump.feeProgramIndex]: 'pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ',
           }
           if (instruction.accountIndices[1] >= message.header.numRequiredSignatures) return false
           for (const [index, expected] of Object.entries(fixedAccounts)) {

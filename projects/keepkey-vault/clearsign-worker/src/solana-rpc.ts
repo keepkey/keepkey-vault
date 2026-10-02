@@ -3,6 +3,9 @@ import { ALT_PROGRAM_ID, parseAltAccountData, type AltAccountFetcher } from '../
 export interface SolanaRpcConfig {
   CLEARSIGN_SOLANA_RPC_ENDPOINTS?: string
   CLEARSIGN_SOLANA_RPC_ENDPOINT?: string
+  /** Secret: keyed provider URLs (the key lives in the URL), tried first.
+   * Public RPCs throttle Cloudflare's shared egress; a keyed one does not. */
+  CLEARSIGN_SOLANA_RPC_PRIVATE_ENDPOINTS?: string
 }
 
 export class SolanaRpcUnavailableError extends Error {
@@ -14,10 +17,11 @@ export class SolanaRpcUnavailableError extends Error {
 // or transaction data is used by this probe.
 const PROBE_TABLE = 'Hm9fUgcn7qwDaiNTFiGh6pNtVATgnaRcmK6Bbx6EMZfP'
 const TIMEOUT_MS = 1_800
-const MAX_PROVIDERS = 3
+const MAX_PROVIDERS = 4
 
 export function solanaRpcEndpoints(env: SolanaRpcConfig): string[] {
-  const raw = env.CLEARSIGN_SOLANA_RPC_ENDPOINTS || env.CLEARSIGN_SOLANA_RPC_ENDPOINT || ''
+  const raw = [env.CLEARSIGN_SOLANA_RPC_PRIVATE_ENDPOINTS,
+    env.CLEARSIGN_SOLANA_RPC_ENDPOINTS || env.CLEARSIGN_SOLANA_RPC_ENDPOINT].filter(Boolean).join(',')
   const endpoints = [...new Set(raw.split(',').map(s => s.trim()).filter(Boolean))]
   if (!endpoints.length || endpoints.length > MAX_PROVIDERS) throw new SolanaRpcUnavailableError()
   for (const endpoint of endpoints) {
@@ -35,7 +39,8 @@ interface RpcHealth {
 }
 const health = new Map<string, { value: RpcHealth; expiresAt: number }>()
 const pendingHealth = new Map<string, Promise<RpcHealth>>()
-const keyFor = (env: SolanaRpcConfig) => env.CLEARSIGN_SOLANA_RPC_ENDPOINTS || env.CLEARSIGN_SOLANA_RPC_ENDPOINT || ''
+const keyFor = (env: SolanaRpcConfig) =>
+  [env.CLEARSIGN_SOLANA_RPC_PRIVATE_ENDPOINTS, env.CLEARSIGN_SOLANA_RPC_ENDPOINTS || env.CLEARSIGN_SOLANA_RPC_ENDPOINT].join('|')
 
 /** Every request remains server-side. Fail over only between operator-configured
  * RPCs; never accept a node URL or resolved accounts from the transaction caller. */
