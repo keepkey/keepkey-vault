@@ -11,6 +11,7 @@ import { isBitcoinOnlyVariant, DEFAULT_AUTO_LOCK_MS } from '../shared/flags'
 import type { DeviceStateInfo, ActiveTransport, UpdatePhase, DeviceState, FirmwareManifest, PinRequestType, Bip85DeriveParams, Bip85DisplayResult } from '../shared/types'
 import { resolveOndeviceFirmwareVersion } from '../shared/firmware-versions'
 import { EmulatorKeepKeyAdapter } from './emulator-transport'
+import { forceReleaseWebUsb } from './webusb-recovery'
 import { getActiveFlashName, getEmulatorStatus } from './emulator'
 
 const KEEPKEY_VENDOR_ID = 0x2B24 // 11044
@@ -1080,6 +1081,12 @@ export class EngineController extends EventEmitter {
         if (this.lastState === 'disconnected') {
           this.updateState('connected_unpaired')
         }
+        // A previous wallet dropped with a transfer still pending leaves this
+        // (cached) device half-open; release it or pairing loops forever.
+        if (webUsbDevice.opened) {
+          console.warn('[Engine] WebUSB device already open before pairing — releasing stale handle')
+          await forceReleaseWebUsb(webUsbDevice)
+        }
         console.log('[Engine] WebUSB device found, attempting pairRawDevice...')
         try {
           const wallet = await withTimeout(
@@ -1098,7 +1105,7 @@ export class EngineController extends EventEmitter {
           console.warn('[Engine] WebUSB pair failed:', lastError)
           // Close the raw USB device so its `opened` flag resets — without this,
           // the next retry sees opened=true and throws "already-connected".
-          try { await webUsbDevice.close() } catch (_) {}
+          await forceReleaseWebUsb(webUsbDevice)
           if (isPermissionError(lastError)) {
             permissionDenied = true
             console.warn('[Engine] WebUSB open denied (likely missing udev rules), trying HID...')
