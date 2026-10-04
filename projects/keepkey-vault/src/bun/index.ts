@@ -239,7 +239,14 @@ import { EvmAddressManager, evmAddressPath } from "./evm-addresses"
 import { shouldResetManagersOnReady, nextReadyDeviceId } from "../shared/device-switch"
 import { isManagerSeedStale } from "../shared/seed-reconcile"
 import { WalletConnectManager } from "./walletconnect"
-import { initDb, factoryResetDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, setCustomTokenIcon as dbSetCustomTokenIcon, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility, insertApiLog, getApiLogs, clearApiLogs, setCachedBalances, getCachedBalances, updateCachedBalance, clearBalances, deleteCachedChainBalance, saveCachedPubkey, getLatestDeviceSnapshot, getCachedPubkeys, saveReport, getReportsList, getReportById, deleteReport, reportExists, getSwapHistory, getSwapHistoryStats, getSwapHistoryByTxid, getBip85Seeds, saveBip85Seed, deleteBip85Seed, clearCachedPubkeys, getRecentActivityFromLog, getPioneerServers, addPioneerServerDb, removePioneerServerDb, syncOwnAddressBook, recordOutbound, getAddressBookList, updateAddressBookEntry, deleteAddressBookEntry, getAddressBookHistory, getDeviceLabelMap, getBalancesForOwnSeed, addExternalEntry, matchAddressBook, insertClearSignEvent, getClearSignEvents } from "./db"
+import { auditUnknownClearSignShape } from "./clearsign-live-auditor"
+import { classifyEffectExposure, observeEvmCall, observeEvmTypedData, observeMalformedSolanaTransaction, observeSolanaTransaction } from "./clearsign-observation"
+import { getClearSignProtectionCaseStudies } from "./clearsign-case-studies"
+import { getEvmSimulationEndpoint, getEvmSimulationRpcUrls } from "./evm-simulation-config"
+import { initDb, factoryResetDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, setCustomTokenIcon as dbSetCustomTokenIcon, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility, insertApiLog, getApiLogs, clearApiLogs, setCachedBalances, getCachedBalances, updateCachedBalance, clearBalances, deleteCachedChainBalance, saveCachedPubkey, getLatestDeviceSnapshot, getCachedPubkeys, saveReport, getReportsList, getReportById, deleteReport, reportExists, getSwapHistory, getSwapHistoryStats, getSwapHistoryByTxid, getBip85Seeds, saveBip85Seed, deleteBip85Seed, clearCachedPubkeys, getRecentActivityFromLog, getPioneerServers, addPioneerServerDb, removePioneerServerDb, syncOwnAddressBook, recordOutbound, getAddressBookList, updateAddressBookEntry, deleteAddressBookEntry, getAddressBookHistory, getDeviceLabelMap, getBalancesForOwnSeed, addExternalEntry, matchAddressBook, insertClearSignEvent, getClearSignEvents, insertClearSignObservation, finalizeClearSignObservation, authenticateClearSignObservation, getClearSignCoverageSummary, getClearSignAuditJobs, enqueueClearSignAuditDemand } from "./db"
+import { getCentralAssetAuditHistory, getCentralClearSignStatus, getCentralContractAudit, submitCentralAssetReview, submitCentralContractReview } from './clearsign-central-client'
+import { buildCentralAssetReview, buildCentralContractReview } from './clearsign-central-review'
+import { getConfiguredReviewerIdentity, signCentralReview } from './clearsign-review-signer-client'
 import type { OwnAddressSeed } from "./db"
 import { rectifyWallet, getLedgerSummary, getLedgerJournals } from "./ledger"
 import { generateReport, reportToPdfBuffer, reportToCsv } from "./reports"
@@ -250,6 +257,12 @@ import { extractTransactionsFromReport, toCoinTrackerCsv, toZenLedgerCsv } from 
 import { assetData as discoveryAssetData } from "@pioneer-platform/pioneer-discovery"
 import { prioritizeExtraContracts, type PortfolioExtraContract } from "./portfolio-extra-contracts"
 import { buildSolanaSchema, inspectSolanaSchema } from "./clearsign-studio"
+import { resolvePromotedEvmArtifact, resolvePromotedSolanaArtifact } from "./clearsign-artifact-resolver"
+import { resolveEvmSchema } from "./evm-schema-registry"
+import { requestClearSignReview } from "./clearsign-review"
+import { resolveRuntimeEvmMetadata, supportsRuntimeEvmMetadata, type RuntimeEvmSigner } from "./evm-runtime-metadata"
+import { supportsCertifiedClearSign } from "./solana-certified-policy"
+import { createRpcAltFetcher } from "./solana-alt"
 import {
 	buildProviderKeyFile,
 	deriveProviderKey,
@@ -262,6 +275,7 @@ import { deviceErrorMessage } from "../shared/device-error"
 import type { ChainBalance, TokenBalance, CustomToken, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, EvmAddressSet, Bip85SeedMeta, StakingPosition, SwapAsset, AuditToken, DefiPosition, RecentActivity, ClearSignEvent, ClearSignSolanaSchemaArtifact } from "../shared/types"
 import type { VaultRPCSchema } from "../shared/rpc-schema"
 import { collectAndAnalyzeWithGate, MAX_CHUNK_BYTES } from "./rng-audit"
+import { withoutUnsupportedErc7730 } from '../shared/erc7730-support'
 import { buildCertificationRequest, buildContactProof, contactsFromEntries, CONTACT_DESTINATION, evmRecipient, type AddressBookCertification } from "./addressbook-clearsign"
 
 // L3 fix: withTimeout imported from engine-controller (was duplicated here)
@@ -1287,7 +1301,27 @@ function getOrCreateWcManager(): WalletConnectManager {
 			const pioneer = await getPioneer()
 			return await broadcastBtcTx(pioneer, networkId, serialized)
 		},
+		getSolanaRpcEndpoint: () => getSetting('solana_rpc_endpoint') || 'https://api.mainnet-beta.solana.com',
+		getEvmSimulationEndpoint,
 		getFirmwareVersion: () => engine.getDeviceState().firmwareVersion,
+		recordClearSignObservation: (draft) => {
+			if (engine.isPassphraseWallet) return undefined
+			const observation = insertClearSignObservation(draft, {
+				deviceId: engine.getDeviceState().deviceId,
+				source: 'walletconnect',
+			})
+			void auditUnknownClearSignShape(draft, {
+				evm: getEvmSimulationEndpoint(Number(draft.shape.chainId || 1)),
+				solana: getSetting('solana_rpc_endpoint') || 'https://api.mainnet-beta.solana.com',
+			})
+			return observation.id
+		},
+		finalizeClearSignObservation: (id, outcome, errorClass) => {
+			finalizeClearSignObservation(id, outcome, errorClass)
+		},
+		authenticateClearSignObservation: (id, source, authenticatedComponentCount, codeIdentityBound, promotionBundleHash) => {
+			authenticateClearSignObservation(id, source, authenticatedComponentCount, codeIdentityBound, promotionBundleHash)
+		},
 		solanaSignTransactionRaw: async ({ addressNList, signerAddress, transactionBase64 }) => {
 			if (isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant)) throw new Error('WalletConnect is not available on bitcoin-only firmware')
 			if (!engine.wallet) throw new Error('Device disconnected')
@@ -1315,6 +1349,7 @@ function getOrCreateWcManager(): WalletConnectManager {
 			return {
 				transactionBase64: result.serializedTx,
 				signatureBase64: Buffer.from(result.signature).toString('base64'),
+				clearSignPromotionBundleHash: result.clearSignPromotionBundleHash,
 			}
 		},
 		requestSigningApproval: async (info) => {
@@ -1373,6 +1408,7 @@ function getAppSettings() {
 		addressBookClearsignEnabled,
 		privateModeEnabled,
 		passphraseIntroShown: getSetting('passphrase_intro_shown') === '1',
+		evmSimulationRpcUrls: getEvmSimulationRpcUrls(),
 	}
 }
 
@@ -1608,6 +1644,13 @@ const restCallbacks: RestApiCallbacks = {
 		resolveChain: (networkId: string) => findChainByNetwork(networkId, undefined, getAllChains()),
 	onSigningRequest: async (info: SigningRequestInfo) => {
 		attachSigningPolicySnapshot(info)
+		// Local integration runs may bypass only the host preview gate so a test
+		// driver can inspect the real firmware screens one at a time. The device
+		// confirmation path remains interactive and unchanged.
+		if (process.env.KEEPKEY_TEST_APPROVE_HOST_SIGNING === '1') {
+			console.log(`[REST] Explicit test environment approved host signing gate for ${info.method}`)
+			return { approved: true }
+		}
 		pendingSigningApprovalInfo.set(info.id, info)
 		try { rpc.send['signing-request'](info) } catch { /* webview not ready */ }
 		acquireWindowFocus()
@@ -2442,6 +2485,55 @@ async function headlessExecuteSwap(params: ExecuteSwapParams, pushSubStage: (sta
 		isAdvancedModeEnabled: getAdvancedModeEnabled,
 		getFirmwareVersion: () => engine.getDeviceState().firmwareVersion,
 		getSolanaRpcEndpoint: () => getSetting('solana_rpc_endpoint') || undefined,
+		protectSign: async (input, sign) => {
+			if (engine.isPassphraseWallet || (input.chainFamily !== 'evm' && input.chainFamily !== 'solana')) return sign()
+			let draft: import('../shared/types').ClearSignObservationDraft
+			if (input.chainFamily === 'evm') {
+				const chainId = Number(input.tx.chainId || input.chainId || 1)
+				const { simulateEvmEffects } = await import('./evm-effects')
+				const simulation = await simulateEvmEffects({
+					chainId, from: input.from, to: input.tx.to, data: input.tx.data || '0x', value: input.tx.value || '0x0',
+					gas: input.tx.gas || input.tx.gasLimit, gasPrice: input.tx.gasPrice,
+					maxFeePerGas: input.tx.maxFeePerGas, maxPriorityFeePerGas: input.tx.maxPriorityFeePerGas, nonce: input.tx.nonce,
+				}, getEvmSimulationEndpoint(chainId))
+				draft = observeEvmCall({
+					chainId, to: input.tx.to, data: input.tx.data,
+					source: input.tx.erc7730 ? 'erc7730' : input.tx.txMetadata ? 'runtime' : 'none',
+					simulated: simulation.status === 'success',
+					simulationStatus: simulation.status,
+					exposureClass: classifyEffectExposure(simulation),
+				})
+				// Attachment presence is not authentication. Promote only after the
+				// device accepts the exact definition and transaction below.
+				draft.protectionLevel = simulation.status === 'success' ? 'P3' : 'P1'
+			} else {
+				const rawTx = input.tx.rawTx || input.tx.raw_tx
+				try {
+					const { simulateSolanaEffects } = await import('./solana-effects')
+					const simulation = await simulateSolanaEffects(rawTx, input.from, getSetting('solana_rpc_endpoint') || 'https://api.mainnet-beta.solana.com')
+					draft = observeSolanaTransaction({ rawTxBase64: rawTx, source: input.tx.schema ? 'runtime' : 'none', simulated: simulation.status === 'success', simulationStatus: simulation.status, exposureClass: classifyEffectExposure(simulation) })
+					draft.protectionLevel = simulation.status === 'success' ? 'P3' : 'P1'
+				} catch { draft = observeMalformedSolanaTransaction(String(rawTx || '')) }
+			}
+			const observation = insertClearSignObservation(draft, { deviceId: engine.getDeviceState().deviceId, source: 'vault-swap' })
+			void auditUnknownClearSignShape(draft, {
+				evm: draft.chain === 'Ethereum' ? getEvmSimulationEndpoint(Number(draft.shape.chainId || 1)) : undefined,
+				solana: getSetting('solana_rpc_endpoint') || 'https://api.mainnet-beta.solana.com',
+			})
+			try {
+				const result = await sign()
+				if (input.tx.erc7730 || input.tx.txMetadata || input.tx.schema || result?.clearSignPromotionBundleHash) authenticateClearSignObservation(
+					observation.id, input.tx.erc7730 ? 'erc7730' : input.tx.txMetadata?.keyId === 0x80 || result?.clearSignPromotionBundleHash ? 'certified' : 'runtime',
+					1, Boolean(result?.clearSignPromotionBundleHash), result?.clearSignPromotionBundleHash,
+				)
+				finalizeClearSignObservation(observation.id, 'signed')
+				return result
+			} catch (error: any) {
+				const rejected = /reject|cancel|denied/i.test(deviceErrorMessage(error))
+				finalizeClearSignObservation(observation.id, rejected ? 'rejected' : 'failed', rejected ? 'user-rejected' : 'device-or-transport')
+				throw error
+			}
+		},
 		onClearSignEvent: (event) => recordClearSignEvent({
 			kind: 'transaction',
 			source: 'vault-rpc',
@@ -2954,6 +3046,73 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					deviceId: currentDeviceId,
 				})
 			},
+			clearsignGetCoverage: async () => {
+				requireClearsignAdvancedMode()
+				if (engine.isPassphraseWallet) return {
+					totalRequests: 0, authenticatedRequests: 0, authenticatedPercent: 0,
+					byLevel: { P0: 0, P1: 0, P2: 0, P3: 0, P4: 0, P5: 0 },
+					byOutcome: { pending: 0, signed: 0, rejected: 0, 'timed-out': 0, 'policy-blocked': 0, failed: 0 },
+					bySimulation: { 'not-requested': 0, success: 0, revert: 0, incomplete: 0, unavailable: 0 },
+					simulation: { attemptedRequests: 0, successfulRequests: 0, successPercent: 0 },
+					byDefinitionResolution: Object.fromEntries(['not-checked', 'selected', 'invalid-request', 'no-artifact', 'shape-mismatch', 'revoked', 'expired', 'identity-unavailable', 'identity-stale', 'identity-changed', 'identity-mismatch', 'unsupported-alt'].map(status => [status, 0])) as any,
+					byExposure: { 'not-evaluated': 0, 'none-observed': 0, 'bounded-outflow': 0, 'delegated-authority': 0, 'unlimited-authority': 0, 'unknown-effects': 0 },
+					definitions: { checkedRequests: 0, selectedRequests: 0, refusedRequests: 0, noArtifactRequests: 0 },
+					auditQueue: { pending: 0, auditing: 0, evidenceReady: 0, covered: 0, failed: 0, identityChanged: 0, historicalIdentityChanges: 0 },
+					byChain: { Ethereum: { totalRequests: 0, authenticatedRequests: 0, authenticatedPercent: 0 }, Solana: { totalRequests: 0, authenticatedRequests: 0, authenticatedPercent: 0 } },
+					bySource: Object.fromEntries(['studio', 'vault-rpc', 'rest-api', 'walletconnect', 'vault-swap'].map(source => [source, { totalRequests: 0, authenticatedRequests: 0, authenticatedPercent: 0 }])) as any,
+					rolling: { last24Hours: { totalRequests: 0, authenticatedRequests: 0, authenticatedPercent: 0 }, last7Days: { totalRequests: 0, authenticatedRequests: 0, authenticatedPercent: 0 } },
+					topUnknown: [],
+				}
+				return getClearSignCoverageSummary()
+			},
+			clearsignListAuditJobs: async (params) => {
+				requireClearsignAdvancedMode()
+				if (engine.isPassphraseWallet) return []
+				return getClearSignAuditJobs(params?.limit)
+			},
+			clearsignGetCentralStatus: async () => {
+				requireClearsignAdvancedMode()
+				return getCentralClearSignStatus()
+			},
+			clearsignGetCentralAssetHistory: async (params) => {
+				requireClearsignAdvancedMode()
+				return getCentralAssetAuditHistory(params.caip)
+			},
+			clearsignBuildCentralAssetReview: async (params) => {
+				requireClearsignAdvancedMode()
+				return buildCentralAssetReview(params)
+			},
+			clearsignSignCentralReview: async (params) => {
+				requireClearsignAdvancedMode()
+				return signCentralReview(params)
+			},
+			clearsignGetConfiguredReviewerIdentity: async (params) => {
+				requireClearsignAdvancedMode()
+				return getConfiguredReviewerIdentity(params.role)
+			},
+			clearsignSubmitCentralAssetReview: async (params) => {
+				requireClearsignAdvancedMode()
+				return submitCentralAssetReview(params)
+			},
+			clearsignGetCentralContractAudit: async (params) => {
+				requireClearsignAdvancedMode()
+				return getCentralContractAudit(params.auditId)
+			},
+			clearsignBuildCentralContractReview: async (params) => {
+				requireClearsignAdvancedMode()
+				return buildCentralContractReview(params)
+			},
+			clearsignSubmitCentralContractReview: async (params) => {
+				requireClearsignAdvancedMode()
+				return submitCentralContractReview(params)
+			},
+			clearsignGetProtectionCaseStudies: async () => {
+				requireClearsignAdvancedMode()
+				return getClearSignProtectionCaseStudies({
+					solanaEndpoint: getSetting('solana_rpc_endpoint') || 'https://api.mainnet-beta.solana.com',
+				})
+			},
+			requestClearSignReview: async (params) => requestClearSignReview(Number(params.chainId), params.to, params.data),
 			applyPolicy: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
 				// applyPolicy raises an "ENABLE/DISABLE POLICY" confirm on the device
@@ -3254,32 +3413,98 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			ethSignTx: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
-				if (addressBookClearsignEnabled && supportsAddressBookClearsignFirmware() && !engine.isPassphraseWallet && !(params as any)?.txMetadata) {
+				params = withoutUnsupportedErc7730(params, 'ethSignTx')
+				const promotedResolution = resolvePromotedEvmArtifact(
+					Number((params as any)?.chainId), (params as any)?.to, (params as any)?.data,
+				)
+				let resolvedSchema: Awaited<ReturnType<typeof resolveEvmSchema>>
+				if (!(params as any)?.txMetadata && !(params as any)?.erc7730) {
+					try {
+						resolvedSchema = await resolveEvmSchema(
+							Number((params as any)?.chainId), (params as any)?.to, (params as any)?.data,
+							supportsCertifiedClearSign(engine.getDeviceState().firmwareVersion),
+						)
+					} catch (error: any) {
+						console.warn(`[ethSignTx] ClearSign schema lookup unavailable: ${error?.message || error}`)
+						throw error
+					}
+				}
+				let runtimeSigner: RuntimeEvmSigner | undefined
+				let effectiveParams: any = resolvedSchema ? {
+					...(params as any),
+					txMetadata: { signedPayload: resolvedSchema.signedPayload, keyId: resolvedSchema.keyId },
+				} : params
+				// Develop's address-book ClearSign: a device-certified contact label
+				// for a plain recipient. Only when no contract definition resolved.
+				let contactProofAttached = false
+				if (addressBookClearsignEnabled && supportsAddressBookClearsignFirmware() && !engine.isPassphraseWallet
+					&& !effectiveParams?.txMetadata && !effectiveParams?.erc7730) {
 					const certification = storedAddressBookCertification()
-					const recipient = evmRecipient(params)
+					const recipient = evmRecipient(effectiveParams)
 					if (certification && recipient) {
 						const proof = buildContactProof(certification, `eip155:${recipient.chainId}`, CONTACT_DESTINATION.EVM_ADDRESS, recipient.address)
 						if (proof) {
-							;(params as any).txMetadata = { signedPayload: proof }
+							effectiveParams = { ...effectiveParams, txMetadata: { signedPayload: proof } }
+							contactProofAttached = true
 							console.log(`[addressbook-clearsign] attached revision ${certification.revision} proof for ${recipient.address}`)
 						}
 					}
 				}
-				const signedPayload = (params as any)?.txMetadata?.signedPayload
+				// The browser-extension and WalletConnect paths converge here. On
+				// 7.15, an explicitly configured provider can bind a reviewed report
+				// to this exact final transaction. Loading its RAM signer is always a
+				// separate mandatory device trust screen; runtime metadata never
+				// silently acquires KeepKey-certified status or bypasses AdvancedMode.
+				if (!resolvedSchema && !effectiveParams?.txMetadata && !effectiveParams?.erc7730
+					&& supportsRuntimeEvmMetadata(engine.getDeviceState().firmwareVersion, getAdvancedModeEnabled() === true)) {
+					const runtime = await resolveRuntimeEvmMetadata(effectiveParams)
+					if (runtime) {
+						runtimeSigner = runtime.signer
+						effectiveParams = {
+							...effectiveParams,
+							txMetadata: { signedPayload: runtime.signedPayload, keyId: runtime.keyId },
+						}
+						const load = () => (engine.wallet as any).loadClearsignSigner({
+							keyId: runtime.signer.keyId,
+							pubkey: Uint8Array.from(Buffer.from(runtime.signer.publicKeyHex, 'hex')),
+							alias: runtime.signer.alias,
+						})
+						if (engine.isEmulator) await emuSigningOp(load, {
+							operation: 'loadClearsignSigner', opLabel: `Trust ${runtime.signer.alias} (${runtime.signer.fingerprint})`, chain: 'Ethereum',
+						})
+						else await load()
+					}
+				}
+				const signedPayload = effectiveParams?.txMetadata?.signedPayload
 				const payload = signedPayload instanceof Uint8Array
 					? Buffer.from(signedPayload).toString('hex')
 					: signedPayload != null ? String(signedPayload) : undefined
 				const request = {
-					keyId: (params as any)?.txMetadata?.keyId,
-					chainId: (params as any)?.chainId,
-					to: (params as any)?.to,
-					dataSelector: typeof (params as any)?.data === 'string' ? (params as any).data.slice(0, 10) : undefined,
+					keyId: effectiveParams?.txMetadata?.keyId,
+					chainId: effectiveParams?.chainId,
+					to: effectiveParams?.to,
+					dataSelector: typeof effectiveParams?.data === 'string' ? effectiveParams.data.slice(0, 10) : undefined,
 				}
 				let sentToDevice = false
+				let observationId: string | undefined
+				if (!engine.isPassphraseWallet) {
+					const definitionSource = effectiveParams?.erc7730 ? 'erc7730'
+						: contactProofAttached ? 'none'
+							: effectiveParams?.txMetadata?.keyId === 0x80 ? 'certified'
+								: effectiveParams?.txMetadata ? 'runtime' : 'none'
+					const draft = observeEvmCall({
+						chainId: Number(effectiveParams?.chainId || 1), to: effectiveParams?.to, data: effectiveParams?.data,
+						source: definitionSource,
+						definitionResolution: effectiveParams?.erc7730 || (effectiveParams?.txMetadata && !contactProofAttached)
+							? 'selected' : promotedResolution.status,
+					})
+					observationId = insertClearSignObservation(draft, { deviceId: engine.getDeviceState().deviceId, source: 'vault-rpc' }).id
+					void auditUnknownClearSignShape(draft, { evm: getEvmSimulationEndpoint(Number(draft.shape.chainId || 1)) })
+				}
 				try {
 					const sign = () => {
 						sentToDevice = true
-						return engine.wallet!.ethSignTx(params)
+						return engine.wallet!.ethSignTx(effectiveParams)
 					}
 					let result: any
 					if (engine.isEmulator) {
@@ -3287,7 +3512,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						// recipient+amount (not the contract + 0x0), an approval is labeled, and
 						// a contract call isn't forged as a "To:" recipient. Display-only.
 						const { evmConfirmDetails } = await import('./emulator-confirm-details')
-						result = await emuSigningOp(sign, evmConfirmDetails('ethSignTx', 'Ethereum', params))
+						result = await emuSigningOp(sign, evmConfirmDetails('ethSignTx', 'Ethereum', effectiveParams))
 					} else {
 						result = await sign()
 					}
@@ -3297,8 +3522,19 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						keyId: Number.isInteger(request.keyId) ? request.keyId : undefined,
 						sentToDevice, request,
 					})
-					return result
+					if (observationId && (effectiveParams?.erc7730 || (effectiveParams?.txMetadata && !contactProofAttached))) authenticateClearSignObservation(
+						observationId, effectiveParams.erc7730 ? 'erc7730' : effectiveParams.txMetadata?.keyId === 0x80 ? 'certified' : 'runtime',
+						1, resolvedSchema?.source === 'promoted-local', resolvedSchema?.bundleHash,
+					)
+					if (observationId) finalizeClearSignObservation(observationId, 'signed')
+					return resolvedSchema
+						? { ...result, clearSignPromotionBundleHash: (resolvedSchema as any).bundleHash }
+						: runtimeSigner ? { ...result, clearSignRuntimeSignerFingerprint: runtimeSigner.fingerprint } : result
 				} catch (cause: any) {
+					if (observationId) {
+						const rejected = /reject|cancel|denied/i.test(deviceErrorMessage(cause))
+						finalizeClearSignObservation(observationId, rejected ? 'rejected' : 'failed', rejected ? 'user-rejected' : 'device-or-transport')
+					}
 					if (payload) recordClearSignEvent({
 						kind: 'transaction', outcome: 'blocked', source: 'vault-rpc', chain: 'Ethereum',
 						format: 'EVM_TX_METADATA', label: 'Blocked EVM ClearSign transaction', payload,
@@ -3332,11 +3568,28 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			ethSignTypedData: async (rawParams) => {
 				if (!engine.wallet) throw new Error('No device connected')
 				const params = await withPermit2SpenderName(rawParams, engine.getDeviceState().firmwareVersion)
-				if (engine.isEmulator) return emuSigningOp(
-					() => engine.wallet!.ethSignTypedData(params),
-					{ operation: 'ethSignTypedData', chain: 'Ethereum' },
-				)
-				return await engine.wallet.ethSignTypedData(params)
+				let observationId: string | undefined
+				if (!engine.isPassphraseWallet) {
+					const draft = observeEvmTypedData({ typedData: (params as any)?.typedData, hostDecoded: true })
+					observationId = insertClearSignObservation(draft, { deviceId: engine.getDeviceState().deviceId, source: 'vault-rpc' }).id
+					void auditUnknownClearSignShape(draft, { evm: getEvmSimulationEndpoint(Number(draft.shape.chainId || 1)) })
+				}
+				try {
+					const result = engine.isEmulator
+						? await emuSigningOp(
+							() => engine.wallet!.ethSignTypedData(params),
+							{ operation: 'ethSignTypedData', chain: 'Ethereum' },
+						)
+						: await engine.wallet.ethSignTypedData(params)
+					if (observationId) finalizeClearSignObservation(observationId, 'signed')
+					return result
+				} catch (cause: any) {
+					if (observationId) {
+						const rejected = /reject|cancel|denied/i.test(deviceErrorMessage(cause))
+						finalizeClearSignObservation(observationId, rejected ? 'rejected' : 'failed', rejected ? 'user-rejected' : 'device-or-transport')
+					}
+					throw cause
+				}
 			},
 			ethVerifyMessage: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
@@ -3403,7 +3656,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!params.rawTx) {
 					throw new Error('[solanaSignTx] rawTx is required')
 				}
-				const schema = (params as any)?.schema
+				const promotedResolution = (params as any)?.schema
+					? undefined : resolvePromotedSolanaArtifact(String((params as any).rawTx))
+				const promoted = promotedResolution?.status === 'selected' ? promotedResolution.artifact : undefined
+				const schema = (params as any)?.schema || promoted?.schema
 				let artifact: ClearSignSolanaSchemaArtifact | undefined
 				if (schema?.payload) {
 					try { artifact = inspectSolanaSchema(Buffer.from(String(schema.payload), 'base64').toString('hex')) } catch { /* device will enforce it */ }
@@ -3414,6 +3670,18 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					txHash: createHash('sha256').update(Buffer.from(String((params as any).rawTx || ''), 'base64')).digest('hex'),
 				} : undefined
 				let sentToDevice = false
+				let observationId: string | undefined
+				if (!engine.isPassphraseWallet) {
+					try {
+						const draft = observeSolanaTransaction({
+							rawTxBase64: String((params as any).rawTx),
+							source: schema ? (promoted || (params as any)?.certificate ? 'certified' : 'runtime') : 'none',
+							definitionResolution: schema ? 'selected' : promotedResolution?.status || 'not-checked',
+						})
+						observationId = insertClearSignObservation(draft, { deviceId: engine.getDeviceState().deviceId, source: 'vault-rpc' }).id
+						void auditUnknownClearSignShape(draft, { solana: getSetting('solana_rpc_endpoint') || 'https://api.mainnet-beta.solana.com' })
+					} catch { /* malformed input is rejected by the signing helper */ }
+				}
 				try {
 					const result = await signSolanaWireTransaction(
 						params,
@@ -3438,6 +3706,12 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						'solanaSignTx',
 						() => engine.getDeviceState().firmwareVersion,
 					)
+					if (observationId && (schema || result?.clearSignPromotionBundleHash)) authenticateClearSignObservation(
+						observationId, promoted || result?.clearSignPromotionBundleHash || (params as any)?.certificate ? 'certified' : 'runtime',
+						1, Boolean(promoted || result?.clearSignPromotionBundleHash),
+						promoted?.bundleHash || result?.clearSignPromotionBundleHash,
+					)
+					if (observationId) finalizeClearSignObservation(observationId, 'signed')
 					if (payload) recordClearSignEvent({
 						kind: 'transaction', outcome: 'signed', source: 'vault-rpc', chain: 'Solana',
 						format: artifact?.format || 'KKSOLSC1',
@@ -3447,6 +3721,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					})
 					return result
 				} catch (cause: any) {
+					if (observationId) {
+						const rejected = /reject|cancel|denied/i.test(deviceErrorMessage(cause))
+						finalizeClearSignObservation(observationId, rejected ? 'rejected' : 'failed', rejected ? 'user-rejected' : 'device-or-transport')
+					}
 					if (payload) recordClearSignEvent({
 						kind: 'transaction', outcome: 'blocked', source: 'vault-rpc', chain: 'Solana',
 						format: artifact?.format || 'KKSOLSC1',
@@ -6769,6 +7047,34 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const r = await testBlockbookNode({ url })
 				return { active: true as const, kind: 'blockbook' as const, ok: r.ok, error: r.error, height: r.blocks, syncing: r.ok ? r.inSync === false : undefined }
 			},
+			setEvmSimulationRpc: async (params) => {
+				const chainId = Number(params.chainId)
+				if (!Number.isSafeInteger(chainId) || chainId <= 0) throw new Error('Chain ID must be a positive integer')
+				const url = String(params.url || '').trim()
+				const urls = getEvmSimulationRpcUrls()
+				if (!url) {
+					delete urls[String(chainId)]
+					setSetting('evm_simulation_rpc_urls', JSON.stringify(urls))
+					return getAppSettings()
+				}
+				requireOnline('EVM simulation RPC configuration')
+				let parsed: URL
+				try { parsed = new URL(url) } catch { throw new Error('Simulation RPC must be a valid URL') }
+				if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') throw new Error('Simulation RPC must use http:// or https://')
+				const response = await fetch(url, {
+					method: 'POST', headers: { 'content-type': 'application/json' },
+					body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_chainId', params: [] }),
+					signal: AbortSignal.timeout(5_000),
+				})
+				if (!response.ok) throw new Error(`Simulation RPC returned HTTP ${response.status}`)
+				const payload: any = await response.json()
+				if (payload.error || !payload.result) throw new Error(payload.error?.message || 'Simulation RPC did not return eth_chainId')
+				const actualChainId = Number(BigInt(payload.result))
+				if (actualChainId !== chainId) throw new Error(`RPC is chain ${actualChainId}, expected ${chainId}`)
+				urls[String(chainId)] = url
+				setSetting('evm_simulation_rpc_urls', JSON.stringify(urls))
+				return getAppSettings()
+			},
 			setWalletConnectEnabled: async (params) => {
 				if (params.enabled && isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant)) {
 					throw new Error('WalletConnect is not available on bitcoin-only firmware')
@@ -7410,7 +7716,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			previewSwapBuild: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
 				const { previewSwapBuild, NOOP_PUSH_SUBSTAGE } = await import('./swap')
-				return previewSwapBuild(params, {
+				const preview = await previewSwapBuild(params, {
 					wallet: engine.wallet,
 					getAllChains,
 					getEvmRpcSource,
@@ -7432,6 +7738,102 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					console.error(`[swap] preview failed (${params.fromChainId}): ${deviceErrorMessage(error)}`)
 					throw error
 				})
+				const fromChain = getAllChains().find(chain => chain.id === params.fromChainId)
+				const from = params.fromAddressOverride
+				try {
+					if (fromChain?.chainFamily === 'evm' && from) {
+						const [{ simulateEvmEffects }, { buildClearSignReport }] = await Promise.all([
+							import('./evm-effects'), import('../shared/clearsign-report'),
+						])
+						const caipChainId = Number(String(params.fromCaip || '').split(':')[1]?.split('/')[0])
+						const chainId = Number(preview.unsignedTx?.chainId || fromChain.chainId || caipChainId || 1)
+						const endpoint = getEvmRpcSource(fromChain) || `eip155:${chainId}`
+						const reportFor = async (tx: any) => {
+							if (!tx) return undefined
+							const artifactResolution = resolvePromotedEvmArtifact(chainId, tx.to, tx.data || '0x')
+							const promoted = artifactResolution.status === 'selected' ? artifactResolution.artifact : undefined
+							const simulation = await simulateEvmEffects({
+								chainId, from, to: tx.to, data: tx.data || '0x', value: tx.value || '0x0',
+								gas: tx.gas || tx.gasLimit, gasPrice: tx.gasPrice,
+								maxFeePerGas: tx.maxFeePerGas, maxPriorityFeePerGas: tx.maxPriorityFeePerGas, nonce: tx.nonce,
+							}, endpoint)
+							const report = buildClearSignReport({
+								requestedLevel: simulation.status === 'success' ? 'P3' : 'P1',
+								descriptor: {
+									source: promoted ? 'certified' : tx.erc7730 ? 'erc7730' : tx.txMetadata ? 'runtime' : 'none',
+									authenticated: false,
+									format: promoted ? 'EVM_METADATA' : tx.erc7730 ? 'ERC7730' : tx.txMetadata ? 'EVM_METADATA' : undefined,
+									label: promoted?.method, artifactHash: promoted?.bundleHash,
+									codeIdentityBound: Boolean(promoted), expiresAt: promoted?.expiresAt,
+									resolution: artifactResolution.status,
+								}, simulation,
+							})
+							if (!promoted) {
+								const draft = observeEvmCall({
+									chainId, to: tx.to, data: tx.data,
+									source: tx.erc7730 ? 'erc7730' : tx.txMetadata ? 'runtime' : 'none',
+									simulated: simulation.status === 'success', simulationStatus: simulation.status,
+									definitionResolution: artifactResolution.status,
+									exposureClass: classifyEffectExposure(simulation),
+								})
+								draft.protectionLevel = report.protectionLevel
+								enqueueClearSignAuditDemand(draft)
+								void auditUnknownClearSignShape(draft, { evm: endpoint })
+							}
+							return report
+						}
+						const [approval, transaction] = await Promise.all([reportFor(preview.approveTx), reportFor(preview.unsignedTx)])
+						preview.clearSignReports = { approval, transaction }
+					} else if (fromChain?.chainFamily === 'solana' && from && preview.unsignedTx?.rawTx) {
+						const [{ simulateSolanaEffects }, { buildClearSignReport, solanaDecodedReportFindings }, { buildSolanaDecodedInfo }] = await Promise.all([
+							import('./solana-effects'), import('../shared/clearsign-report'), import('./solana-clearsign'),
+						])
+						const solanaEndpoint = getSetting('solana_rpc_endpoint') || 'https://api.mainnet-beta.solana.com'
+						const simulation = await simulateSolanaEffects(preview.unsignedTx.rawTx, from, solanaEndpoint)
+						let decodedFindings = { findings: [], limitations: [] } as ReturnType<typeof solanaDecodedReportFindings>
+						try {
+							decodedFindings = solanaDecodedReportFindings(await buildSolanaDecodedInfo(
+								preview.unsignedTx.rawTx, createRpcAltFetcher(solanaEndpoint),
+							))
+						} catch {
+							decodedFindings.limitations.push({ code: 'SOLANA_HOST_DECODE_UNAVAILABLE', message: 'The bounded Solana instruction decoder could not analyze this transaction.', severity: 'warning' })
+						}
+						const artifactResolution = resolvePromotedSolanaArtifact(preview.unsignedTx.rawTx)
+						const promoted = artifactResolution.status === 'selected' ? artifactResolution.artifact : undefined
+						const report = buildClearSignReport({
+							requestedLevel: simulation.status === 'success' ? 'P3' : 'P1',
+							descriptor: {
+								source: promoted ? 'certified' : preview.unsignedTx.schema ? 'runtime' : 'none',
+								authenticated: false, format: promoted || preview.unsignedTx.schema ? 'KKSOLSC1' : undefined,
+								label: promoted?.label, artifactHash: promoted?.bundleHash,
+								codeIdentityBound: Boolean(promoted), expiresAt: promoted?.expiresAt,
+								resolution: artifactResolution.status,
+							},
+							simulation,
+							hostFindings: decodedFindings.findings,
+							hostLimitations: decodedFindings.limitations,
+						})
+						preview.clearSignReports = { transaction: report }
+						if (!promoted) {
+							let draft
+							try {
+								draft = observeSolanaTransaction({
+									rawTxBase64: preview.unsignedTx.rawTx,
+									source: preview.unsignedTx.schema ? 'runtime' : 'none',
+									simulated: simulation.status === 'success', simulationStatus: simulation.status,
+									definitionResolution: artifactResolution.status,
+									exposureClass: classifyEffectExposure(simulation),
+								})
+							} catch { draft = observeMalformedSolanaTransaction(preview.unsignedTx.rawTx) }
+							draft.protectionLevel = report.protectionLevel
+							enqueueClearSignAuditDemand(draft)
+							void auditUnknownClearSignShape(draft, { solana: getSetting('solana_rpc_endpoint') || 'https://api.mainnet-beta.solana.com' })
+						}
+					}
+				} catch (error: any) {
+					console.warn('[swap] ClearSign preview report unavailable:', error?.message || error)
+				}
+				return preview
 			},
 
 			// ── Swap History (SQLite-persisted) ─────────────────────
@@ -9570,6 +9972,24 @@ if (!restApiEnabled) console.log('[Vault] REST API disabled by user setting')
 perf('REST API applied, starting engine')
 engine.setAlphaFirmware(alphaFirmware)
 await engine.start()
+
+// Deterministic local integration-test entry point. Electrobun encrypts the
+// renderer RPC transport, so an external test driver cannot safely call the
+// emulator methods directly. Normal launches are unchanged; the operator must
+// explicitly name an existing flash in the process environment.
+const autostartEmulatorFlash = process.env.KEEPKEY_AUTOSTART_EMULATOR_FLASH
+if (autostartEmulatorFlash) {
+	if (!emulatorEnabled) throw new Error('KEEPKEY_AUTOSTART_EMULATOR_FLASH requires emulator_enabled=1')
+	const { validateFlashName } = await import('./emulator-keychain')
+	const flashName = validateFlashName(autostartEmulatorFlash)
+	const { initEmulator } = await import('./emulator')
+	const status = initEmulator(flashName)
+	if (status.state !== 'running') throw new Error(status.error || 'Emulator failed to start')
+	const { openEmulatorWindow } = await import('./emulator-window')
+	openEmulatorWindow()
+	await engine.connectEmulator()
+	console.log(`[emulator] Auto-started explicit flash ${flashName}`)
+}
 
 // Age out pending swaps older than 24h — prevents accumulation of test/failed
 // swaps as permanent dashboard banners. Deferred 5s so the DB is fully open.

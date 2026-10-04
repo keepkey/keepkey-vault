@@ -10,7 +10,9 @@ import {
   CERTIFIED_METADATA_KEY_ID,
   findCertifiedEvmSchemaByShape,
   findCertifiedEvmSchemaSpec,
+  buildCertifiedEvmEnvelope,
 } from './evm-certified-schema'
+import capturedEnvelope from '../../../../docs/clearsign-case-studies/uniswap-usdt/certified-response.json'
 
 const TO = '0x4cd00e387622c35bddb9b4c962c136462338bc31'
 const DATA =
@@ -18,8 +20,24 @@ const DATA =
   '000000000000000000000000909ef6b32dfdc12ca86aa710b54c991af3c5f82e' +
   '8a2c121197efc95c42f53142ab409735ee353287f877ed4d351f63094d5bfcb1'
 const PORTALS = '0xbf5A7F3629fB325E2a8453D595AB103465F75E62'
+const ACROSS = '0xe35e9842fceaCA96570B734083f4a58e8F7C5f2A'
 
 describe('7.16 certified EVM schemas', () => {
+  // Arbitrum USDT approve is described by the reviewed-token table (USDT0,
+  // Permit2-pinned or generic spender), not a static catalog entry.
+  const ARB_USDT = '0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9'
+  const permit2Approve = `0x095ea7b3${'000000000022d473030f116ddee9f6b43ac78ba3'.padStart(64, '0')}${'ff'.repeat(32)}`
+  it('refuses the captured mainnet certificate for the Arbitrum schema before using the delegate key', () => {
+    const spec = findCertifiedEvmSchemaSpec(42161, ARB_USDT, permit2Approve)!
+    const certificate = Buffer.from(capturedEnvelope.signedPayload.slice(2), 'hex').subarray(1, 140).toString('hex')
+    expect(() => buildCertifiedEvmEnvelope(spec, certificate, '00'.repeat(32))).toThrow(/scoped to 1, not chain 42161/)
+  })
+  it('binds Arbitrum USDT identity and allowance rendering metadata', () => {
+    const spec = findCertifiedEvmSchemaSpec(42161, ARB_USDT, `0x095ea7b3${'00'.repeat(64)}`)!
+    expect(spec.method).toBe('approve')
+    expect(spec.args[1]).toMatchObject({ name: 'Allowance', format: 5, decimals: 6, symbol: 'USDT0' })
+    expect(buildEvmSchemaBody(spec).includes(Buffer.from('USDT0'))).toBe(true)
+  })
   it('serializes the Relay schema with a delegate sentinel trailer', () => {
     const spec = CERTIFIED_EVM_CATALOG[`1:${TO}:0x49290c1c`]
     const body = buildEvmV2SchemaBody(spec)
@@ -82,6 +100,18 @@ describe('7.16 certified EVM schemas', () => {
     expect(body[0]).toBe(0x04)
     expect(body.includes(Buffer.from('Portals swap', 'ascii'))).toBe(true)
     expect(body[body.length - 1]).toBe(CERTIFIED_METADATA_KEY_ID)
+  })
+
+  it('selects the firmware-owned Across decoder for its non-padded ABI shape', () => {
+    const spec = findCertifiedEvmSchemaByShape(42161, ACROSS, '0x7b939232', 429)
+    expect(spec?.method).toBe('Across bridge')
+    expect(spec?.decoder).toBe(2)
+    expect(findCertifiedEvmSchemaByShape(1, ACROSS, '0x7b939232', 429)).toBeUndefined()
+    expect(findCertifiedEvmSchemaByShape(42161, ACROSS, '0x7b939232', 419)).toBeUndefined()
+    expect(findCertifiedEvmSchemaByShape(42161, ACROSS, '0x7b939232', 1025)).toBeUndefined()
+    const body = buildEvmSchemaBody(spec!)
+    expect(body[0]).toBe(0x04)
+    expect(body.includes(Buffer.from('Across bridge', 'ascii'))).toBe(true)
   })
 })
 

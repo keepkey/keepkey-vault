@@ -1,6 +1,6 @@
 import { DEFAULT_CLEARSIGN_SERVICE_URL } from './solana-certified-registry'
 import { approveSpender } from './evm-schema-registry'
-import { PERMIT2_ADDRESS } from './evm-certified-schema'
+import { findCertifiedEvmSchemaByShape, PERMIT2_ADDRESS } from './evm-certified-schema'
 
 export interface CertifiedEvmEnvelope {
   method: string
@@ -60,7 +60,13 @@ export async function findCertifiedEvmEnvelope(
     throw new Error(`ClearSign verification service returned HTTP ${response.status} without valid JSON`)
   }
   if (!response.ok) {
-    if (response.status === 422) return undefined
+    if (response.status === 422) {
+      const reviewed = findCertifiedEvmSchemaByShape(chainId, contract, selector, calldata.length / 2)
+      if (reviewed) {
+        throw new Error(`ClearSign certified description unavailable for ${reviewed.method}: the service catalog must be updated and its signed artifact provisioned before signing`)
+      }
+      return undefined
+    }
     throw new Error(`ClearSign verification service returned HTTP ${response.status}: ${result?.error || 'request failed'}`)
   }
 

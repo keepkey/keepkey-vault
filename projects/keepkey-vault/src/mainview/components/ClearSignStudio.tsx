@@ -3,6 +3,15 @@ import { Box, Button, Flex, Input, Text, Textarea, VStack } from "@chakra-ui/rea
 
 import type {
 	ClearSignEvent,
+	ClearSignCoverageSummary,
+	ClearSignAuditJob,
+	ClearSignCentralAssetAuditHistory,
+	ClearSignCentralAssetReview,
+	ClearSignCentralAssetReviewResult,
+	ClearSignCentralContractAudit,
+	ClearSignCentralContractReview,
+	ClearSignCentralStatus,
+	ClearSignProtectionCaseStudy,
 	ClearSignSolanaArgType,
 	ClearSignSolanaSchemaArtifact,
 	ClearSignSolanaSchemaDraft,
@@ -33,10 +42,11 @@ const ARG_TYPES: Array<{ value: ClearSignSolanaArgType; label: string; width: st
 	{ value: "u8", label: "u8", width: "1B" },
 	{ value: "pubkey", label: "Public key", width: "32B" },
 	{ value: "opaque32", label: "Opaque 32", width: "32B" },
+	{ value: "lamports", label: "Lamports", width: "8B" },
 ]
 
 type StudioTab = "author" | "provider" | "signer" | "evidence"
-type BusyAction = "identity" | "build" | "inspect" | "attest" | "load" | "history" | "bip85" | "derive" | ""
+type BusyAction = "identity" | "build" | "inspect" | "attest" | "load" | "history" | "asset-history" | "reviewer-identity" | "asset-review-build" | "asset-review-sign" | "asset-review" | "contract-audit" | "contract-review-build" | "contract-review-sign" | "contract-review" | "bip85" | "derive" | ""
 
 type Attestation = {
 	payload: string
@@ -121,12 +131,46 @@ export function ClearSignStudio({ open, onClose, advancedMode, firmwareVersion }
 	const [attestation, setAttestation] = useState<Attestation | null>(null)
 	const [loaded, setLoaded] = useState(false)
 	const [history, setHistory] = useState<ClearSignEvent[]>([])
+	const [coverage, setCoverage] = useState<ClearSignCoverageSummary | null>(null)
+	const [auditJobs, setAuditJobs] = useState<ClearSignAuditJob[]>([])
+	const [centralStatus, setCentralStatus] = useState<ClearSignCentralStatus | null>(null)
+	const [assetHistory, setAssetHistory] = useState<ClearSignCentralAssetAuditHistory[]>([])
+	const [selectedAsset, setSelectedAsset] = useState<string | null>(null)
+	const [assetReviewJson, setAssetReviewJson] = useState("")
+	const [reviewerPublicKey, setReviewerPublicKey] = useState("")
+	const [reviewerFingerprint, setReviewerFingerprint] = useState("")
+	const [reviewRole, setReviewRole] = useState<ClearSignCentralAssetReview['role']>("semantics-review")
+	const [reviewDecision, setReviewDecision] = useState<ClearSignCentralAssetReview['decision']>("approve")
+	const [reviewDigest, setReviewDigest] = useState("")
+	const [contractAudit, setContractAudit] = useState<ClearSignCentralContractAudit | null>(null)
+	const [contractReviewJson, setContractReviewJson] = useState("")
+	const [contractReviewDigest, setContractReviewDigest] = useState("")
+	const [caseStudies, setCaseStudies] = useState<ClearSignProtectionCaseStudy[]>([])
 	const [historyFilter, setHistoryFilter] = useState<"all" | "signed" | "blocked">("all")
 	const [expandedEvent, setExpandedEvent] = useState<string | null>(null)
 	const [wordCount, setWordCount] = useState<12 | 18 | 24>(12)
 	const [bip85Index, setBip85Index] = useState(0)
 	const [childMnemonic, setChildMnemonic] = useState("")
 	const [providerKey, setProviderKey] = useState<{ publicKeyHex: string; fingerprint: string; filePath: string } | null>(null)
+
+	const loadConfiguredReviewer = useCallback(async () => {
+		setBusy("reviewer-identity")
+		setError("")
+		try {
+			const identity = await rpcRequest<{ role: ClearSignCentralAssetReview['role']; publicKey: string; fingerprint: string }>(
+				"clearsignGetConfiguredReviewerIdentity", { role: reviewRole },
+			)
+			setReviewerPublicKey(identity.publicKey)
+			setReviewerFingerprint(identity.fingerprint)
+			setNotice(`Loaded configured ${identity.role} reviewer ${identity.fingerprint}.`)
+		} catch (cause: any) {
+			setReviewerPublicKey("")
+			setReviewerFingerprint("")
+			setError(cause?.message || String(cause))
+		} finally {
+			setBusy("")
+		}
+	}, [reviewRole])
 	const [busy, setBusy] = useState<BusyAction>("")
 	const [error, setError] = useState("")
 	const [notice, setNotice] = useState("")
@@ -141,14 +185,160 @@ export function ClearSignStudio({ open, onClose, advancedMode, firmwareVersion }
 		if (!advancedMode) return
 		if (showBusy) setBusy("history")
 		try {
-			const events = await rpcRequest<ClearSignEvent[]>("clearsignListEvents", { limit: 500, scope: "current-device" })
+			const [events, nextCoverage, jobs, studies, central] = await Promise.all([
+				rpcRequest<ClearSignEvent[]>("clearsignListEvents", { limit: 500, scope: "current-device" }),
+				rpcRequest<ClearSignCoverageSummary>("clearsignGetCoverage"),
+				rpcRequest<ClearSignAuditJob[]>("clearsignListAuditJobs", { limit: 20 }),
+				rpcRequest<ClearSignProtectionCaseStudy[]>("clearsignGetProtectionCaseStudies"),
+				rpcRequest<ClearSignCentralStatus>("clearsignGetCentralStatus"),
+			])
 			setHistory(events)
+			setCoverage(nextCoverage)
+			setAuditJobs(jobs)
+			setCaseStudies(studies)
+			setCentralStatus(central)
 		} catch (cause: any) {
 			if (showBusy) setError(cause?.message || String(cause))
 		} finally {
 			if (showBusy) setBusy("")
 		}
 	}, [advancedMode])
+
+	const inspectAssetEvidence = useCallback(async (caip: string) => {
+		setBusy("asset-history")
+		setError("")
+		try {
+			const audits = await rpcRequest<ClearSignCentralAssetAuditHistory[]>("clearsignGetCentralAssetHistory", { caip })
+			setSelectedAsset(caip)
+			setAssetHistory(audits)
+		} catch (cause: any) {
+			setError(cause?.message || String(cause))
+		} finally {
+			setBusy("")
+		}
+	}, [])
+
+	const submitAssetReview = useCallback(async () => {
+		setBusy("asset-review")
+		setError("")
+		setNotice("")
+		try {
+			const review = JSON.parse(assetReviewJson) as ClearSignCentralAssetReview
+			if (!selectedAsset || review.caip !== selectedAsset) throw new Error("Signed review asset does not match the selected candidate")
+			const currentHash = assetHistory[0]?.evidenceHash
+			if (!currentHash || review.evidenceHash !== currentHash) throw new Error("Signed review does not bind the current evidence hash")
+			const result = await rpcRequest<ClearSignCentralAssetReviewResult>("clearsignSubmitCentralAssetReview", review)
+			setNotice(`Review accepted: ${result.approvalStatus}; coverage remains ${result.coverageStatus}.`)
+			setAssetReviewJson("")
+			await refreshHistory()
+			await inspectAssetEvidence(selectedAsset)
+		} catch (cause: any) {
+			setError(cause?.message || String(cause))
+		} finally {
+			setBusy("")
+		}
+	}, [assetHistory, assetReviewJson, inspectAssetEvidence, refreshHistory, selectedAsset])
+
+	const buildAssetReviewStatement = useCallback(async () => {
+		if (!selectedAsset || !assetHistory[0]) return
+		setBusy("asset-review-build")
+		setError("")
+		try {
+			const result = await rpcRequest<{ statement: Omit<ClearSignCentralAssetReview, 'signature'>; digest: string }>("clearsignBuildCentralAssetReview", {
+				caip: selectedAsset, evidenceHash: assetHistory[0].evidenceHash, reviewerPublicKey, role: reviewRole, decision: reviewDecision,
+			})
+			setReviewDigest(result.digest)
+			setAssetReviewJson(JSON.stringify({ ...result.statement, signature: "" }, null, 2))
+			setNotice("Unsigned statement created. Sign the displayed SHA-256 digest with the authorized reviewer key, then paste the signature into the JSON.")
+		} catch (cause: any) {
+			setError(cause?.message || String(cause))
+		} finally {
+			setBusy("")
+		}
+	}, [assetHistory, reviewDecision, reviewRole, reviewerPublicKey, selectedAsset])
+
+	const signAssetReviewStatement = useCallback(async () => {
+		setBusy("asset-review-sign")
+		setError("")
+		setNotice("")
+		try {
+			const { signature: _signature, ...statement } = JSON.parse(assetReviewJson) as ClearSignCentralAssetReview
+			const signed = await rpcRequest<ClearSignCentralAssetReview>("clearsignSignCentralReview", statement)
+			setAssetReviewJson(JSON.stringify(signed, null, 2))
+			setNotice(`${signed.role} service signed the exact displayed asset review. Inspect it, then submit.`)
+		} catch (cause: any) {
+			setError(cause?.message || String(cause))
+		} finally {
+			setBusy("")
+		}
+	}, [assetReviewJson])
+
+	const inspectContractAudit = useCallback(async (auditId: string) => {
+		setBusy("contract-audit")
+		setError("")
+		try {
+			setContractAudit(await rpcRequest<ClearSignCentralContractAudit>("clearsignGetCentralContractAudit", { auditId }))
+			setContractReviewJson("")
+			setContractReviewDigest("")
+		} catch (cause: any) {
+			setError(cause?.message || String(cause))
+		} finally {
+			setBusy("")
+		}
+	}, [])
+
+	const buildContractReviewStatement = useCallback(async () => {
+		if (!contractAudit) return
+		setBusy("contract-review-build")
+		setError("")
+		try {
+			const result = await rpcRequest<{ statement: Omit<ClearSignCentralContractReview, 'signature'>; digest: string }>("clearsignBuildCentralContractReview", {
+				auditId: contractAudit.auditId, evidenceHash: contractAudit.evidenceHash, reviewerPublicKey,
+				role: reviewRole, decision: reviewDecision,
+			})
+			setContractReviewDigest(result.digest)
+			setContractReviewJson(JSON.stringify({ ...result.statement, signature: "" }, null, 2))
+			setNotice("Unsigned contract review created. Sign the displayed digest externally and paste only the recoverable signature into the JSON.")
+		} catch (cause: any) {
+			setError(cause?.message || String(cause))
+		} finally {
+			setBusy("")
+		}
+	}, [contractAudit, reviewDecision, reviewerPublicKey, reviewRole])
+
+	const signContractReviewStatement = useCallback(async () => {
+		setBusy("contract-review-sign")
+		setError("")
+		setNotice("")
+		try {
+			const { signature: _signature, ...statement } = JSON.parse(contractReviewJson) as ClearSignCentralContractReview
+			const signed = await rpcRequest<ClearSignCentralContractReview>("clearsignSignCentralReview", statement)
+			setContractReviewJson(JSON.stringify(signed, null, 2))
+			setNotice(`${signed.role} service signed the exact displayed contract review. Inspect it, then submit.`)
+		} catch (cause: any) {
+			setError(cause?.message || String(cause))
+		} finally {
+			setBusy("")
+		}
+	}, [contractReviewJson])
+
+	const submitContractReview = useCallback(async () => {
+		if (!contractAudit) return
+		setBusy("contract-review")
+		setError("")
+		try {
+			const review = JSON.parse(contractReviewJson) as ClearSignCentralContractReview
+			if (review.auditId !== contractAudit.auditId || review.evidenceHash !== contractAudit.evidenceHash) throw new Error("Signed review does not bind the selected current contract audit")
+			const result = await rpcRequest<Record<string, unknown>>("clearsignSubmitCentralContractReview", review)
+			setNotice(`Contract review accepted: ${String(result.status || "pending second role")}.`)
+			setContractReviewJson("")
+			await refreshHistory()
+		} catch (cause: any) {
+			setError(cause?.message || String(cause))
+		} finally {
+			setBusy("")
+		}
+	}, [contractAudit, contractReviewJson, refreshHistory])
 
 	useEffect(() => {
 		if (!open) return
@@ -368,9 +558,9 @@ export function ClearSignStudio({ open, onClose, advancedMode, firmwareVersion }
 												<Text fontSize="11px" color="var(--text-2)" mt="1">One schema describes one program + discriminator. Firmware requires exact byte coverage.</Text>
 											</Box>
 											<Button size="xs" variant="ghost" color="var(--gold)" onClick={() => { setDraft(RELAY_DRAFT); setPayload(RELAY_SCHEMA_FIXTURE); setArtifact(null) }}>Relay fixture</Button>
-										</Flex>
-										<VStack align="stretch" gap="3">
-											<Box><FieldLabel hint="base58 or 32-byte hex">Program ID</FieldLabel><Input value={draft.programId} onChange={event => setDraftField("programId", event.target.value)} size="sm" fontFamily="mono" bg="rgba(0,0,0,0.18)" /></Box>
+											</Flex>
+											<VStack align="stretch" gap="3">
+												<Box><FieldLabel hint="base58 or 32-byte hex">Program ID</FieldLabel><Input value={draft.programId} onChange={event => setDraftField("programId", event.target.value)} size="sm" fontFamily="mono" bg="rgba(0,0,0,0.18)" /></Box>
 											<Flex gap="3" direction={{ base: "column", md: "row" }}>
 												<Box flex="1"><FieldLabel hint="1–8 bytes hex">Discriminator</FieldLabel><Input value={draft.discriminator} onChange={event => setDraftField("discriminator", event.target.value)} size="sm" fontFamily="mono" bg="rgba(0,0,0,0.18)" /></Box>
 												<Box flex="1"><FieldLabel hint="max 20 ASCII">Program label</FieldLabel><Input value={draft.programName} onChange={event => setDraftField("programName", event.target.value)} maxLength={20} size="sm" bg="rgba(0,0,0,0.18)" /></Box>
@@ -480,6 +670,65 @@ export function ClearSignStudio({ open, onClose, advancedMode, firmwareVersion }
 						)}
 
 						{tab === "evidence" && (
+							<VStack align="stretch" gap="3">
+								<Box p="4" borderRadius="14px" bg="var(--ink-0)" border="1px solid var(--line)">
+									<Flex justify="space-between" align="start" gap="4" wrap="wrap">
+										<Box><Text fontSize="12px" fontWeight="700" color="var(--text-0)">Pioneer ecosystem control plane</Text><Text fontSize="10px" color="var(--text-2)" mt="1">Pinned global inventory and privacy-safe contract audit queue. Queue state is not signing authorization.</Text></Box>
+										<Box textAlign="right"><Text fontSize="22px" fontWeight="800" color={centralStatus?.complete ? "var(--teal)" : "var(--gold)"}>{centralStatus?.importedAssets ?? 0}</Text><Text fontSize="9px" color="var(--text-2)">of {centralStatus?.totalAssets ?? 0} assets indexed</Text></Box>
+									</Flex>
+									<Flex gap="2" mt="3" wrap="wrap">
+										<Box flex="1" minW="120px" p="2.5" borderRadius="8px" bg="rgba(255,255,255,0.025)"><Text fontSize="9px" color="var(--text-2)">Eligible on demand</Text><Text fontSize="14px" fontWeight="800" color="var(--teal)">{centralStatus?.byCoverage['eligible-on-demand'] ?? 0}</Text></Box>
+										<Box flex="1" minW="120px" p="2.5" borderRadius="8px" bg="rgba(255,255,255,0.025)"><Text fontSize="9px" color="var(--text-2)">Needs work</Text><Text fontSize="14px" fontWeight="800" color="var(--gold)">{centralStatus?.byCoverage['needs-work'] ?? 0}</Text></Box>
+										<Box flex="1" minW="120px" p="2.5" borderRadius="8px" bg="rgba(255,255,255,0.025)"><Text fontSize="9px" color="var(--text-2)">Certified EVM chains</Text><Text fontSize="14px" fontWeight="800" color="var(--text-0)">{centralStatus?.certificateChainIds.length ?? 0}</Text></Box>
+									</Flex>
+									<Text mt="3" fontSize="9px" color="var(--text-2)">Queue: pending {centralStatus?.contractQueue.pending ?? 0} · auditing {centralStatus?.contractQueue.auditing ?? 0} · awaiting approval {centralStatus?.contractQueue['awaiting-approval'] ?? 0} · approved {centralStatus?.contractQueue.approved ?? 0} · rejected {centralStatus?.contractQueue.rejected ?? 0}</Text>
+									<Text mt="1" fontSize="9px" color="var(--text-2)">Asset audits: pending {centralStatus?.byAssetAudit.pending ?? 0} · auditing {centralStatus?.byAssetAudit.auditing ?? 0} · candidates {centralStatus?.byAssetAudit.candidate ?? 0} · covered {centralStatus?.byAssetAudit.covered ?? 0} · rejected {centralStatus?.byAssetAudit.rejected ?? 0}</Text>
+									<Text mt="1" fontSize="9px" color="var(--text-2)">Asset approvals: pending {centralStatus?.byAssetApproval.pending ?? 0} · approved {centralStatus?.byAssetApproval.approved ?? 0} · rejected {centralStatus?.byAssetApproval.rejected ?? 0}</Text>
+									<Text mt="1" fontSize="9px" color={centralStatus?.sourceDrift ? "var(--rose)" : "var(--teal)"}>Pioneer source: {centralStatus?.sourceDrift ? "changed — dynamic signing paused for review" : centralStatus?.sourceObservation ? "current" : "not observed"}{centralStatus?.sourceObservation ? ` · checked ${new Date(centralStatus.sourceObservation.observedAt).toLocaleString()}` : ""}</Text>
+									<Text mt="1" fontSize="9px" color={centralStatus?.reviewPolicy?.ready ? "var(--teal)" : "var(--rose)"}>Review policy: {centralStatus?.reviewPolicy?.ready ? `${centralStatus.reviewPolicy.reviewers.length} authorized identities · distinct semantics and security roles ready` : "blocked — provision distinct semantics and security reviewer public keys"}</Text>
+									<VStack align="stretch" gap="2" mt="3">{centralStatus?.assetCandidates.slice(0, 10).map(asset => <Flex key={asset.caip} justify="space-between" gap="3" p="2.5" borderRadius="8px" bg="rgba(139,227,196,0.04)" border="1px solid rgba(139,227,196,0.12)"><Box minW="0"><Text fontSize="10px" fontWeight="700" color="var(--gold)">{asset.symbol || "Unknown token"} · {asset.approval_status === "approved" ? "approved evidence" : "awaiting review"}</Text><Text fontSize="9px" fontFamily="mono" color="var(--text-2)" wordBreak="break-all">{asset.caip}</Text><Text fontSize="8px" color="var(--text-2)">Evidence {asset.audit_evidence_hash?.slice(0, 12)}… · coverage remains {asset.coverage_status}</Text></Box><Box textAlign="right" flexShrink={0}><Text fontSize="9px" color="var(--text-2)">{asset.audit_attempts} audit{asset.audit_attempts === 1 ? "" : "s"}</Text>{asset.next_recheck_at ? <Text fontSize="8px" color="var(--text-2)">recheck {new Date(asset.next_recheck_at).toLocaleDateString()}</Text> : null}<Button mt="1.5" size="xs" variant="outline" onClick={() => void inspectAssetEvidence(asset.caip)} loading={busy === "asset-history" && selectedAsset === asset.caip} disabled={!!busy}>Inspect evidence</Button></Box></Flex>)}</VStack>
+									{selectedAsset && <Box mt="3" p="3" borderRadius="8px" bg="rgba(0,0,0,0.2)" border="1px solid var(--line)"><Flex justify="space-between" gap="3" align="center"><Box minW="0"><Text fontSize="10px" fontWeight="700" color="var(--text-0)">Immutable audit history</Text><Text fontSize="8px" fontFamily="mono" color="var(--text-2)" wordBreak="break-all">{selectedAsset}</Text></Box><Button size="xs" variant="outline" disabled={!assetHistory.length} onClick={async () => { const ok = await copyText(JSON.stringify({ caip: selectedAsset, audits: assetHistory }, null, 2)); setCopied(ok ? "asset-evidence" : ""); setNotice(ok ? "Audit evidence copied for offline review." : "Copy failed.") }}>{copied === "asset-evidence" ? "Copied" : "Copy review bundle"}</Button></Flex>{assetHistory.length === 0 ? <Text mt="2" fontSize="9px" color="var(--text-2)">No audit history returned.</Text> : assetHistory.map(audit => <Box key={audit.auditId} mt="2" p="2" borderRadius="6px" bg="rgba(255,255,255,0.025)"><Text fontSize="8px" color="var(--text-2)">{new Date(audit.submittedAt).toLocaleString()} · audit {audit.auditId}</Text><Text fontSize="8px" fontFamily="mono" color="var(--teal)" wordBreak="break-all">sha256 {audit.evidenceHash}</Text><Box as="pre" mt="2" fontSize="8px" color="var(--text-1)" whiteSpace="pre-wrap" wordBreak="break-all" maxH="220px" overflowY="auto">{JSON.stringify(audit.evidence, null, 2)}</Box></Box>)}<Box mt="3" pt="3" borderTop="1px solid var(--line)"><FieldLabel hint="compressed secp256k1">Reviewer public key</FieldLabel><Flex gap="2"><Input value={reviewerPublicKey} onChange={event => { setReviewerPublicKey(event.target.value); setReviewerFingerprint("") }} placeholder="02… or 03…" size="sm" fontFamily="mono" fontSize="9px" bg="rgba(0,0,0,0.18)" /><Button flexShrink={0} size="sm" variant="outline" borderColor="var(--teal)" color="var(--teal)" onClick={() => void loadConfiguredReviewer()} loading={busy === "reviewer-identity"} disabled={!!busy}>Use configured</Button></Flex>{reviewerFingerprint && <Text mt="1" fontSize="8px" color="var(--teal)">Configured fingerprint: {reviewerFingerprint}</Text>}<Flex gap="2" mt="2" wrap="wrap"><Button size="xs" variant={reviewRole === "semantics-review" ? "solid" : "outline"} onClick={() => { setReviewRole("semantics-review"); setReviewerPublicKey(""); setReviewerFingerprint("") }}>Semantics</Button><Button size="xs" variant={reviewRole === "security-review" ? "solid" : "outline"} onClick={() => { setReviewRole("security-review"); setReviewerPublicKey(""); setReviewerFingerprint("") }}>Security</Button><Button size="xs" variant={reviewDecision === "approve" ? "solid" : "outline"} onClick={() => setReviewDecision("approve")}>Approve</Button><Button size="xs" variant={reviewDecision === "reject" ? "solid" : "outline"} onClick={() => setReviewDecision("reject")}>Reject</Button><Button size="xs" bg="var(--teal)" color="#071510" onClick={() => void buildAssetReviewStatement()} loading={busy === "asset-review-build"} disabled={!!busy || !reviewerPublicKey.trim()}>Build statement</Button></Flex>{reviewDigest && <Box mt="2"><Text fontSize="8px" color="var(--text-2)">Digest to sign (SHA-256)</Text><Text fontSize="8px" fontFamily="mono" color="var(--teal)" wordBreak="break-all">{reviewDigest}</Text></Box>}<Box mt="2"><FieldLabel hint="signed outside Vault">Review statement JSON</FieldLabel><Textarea value={assetReviewJson} onChange={event => setAssetReviewJson(event.target.value)} placeholder='{"version":1,"caip":"…","evidenceHash":"…","reviewerPublicKey":"…","role":"semantics-review","decision":"approve","reviewedAt":0,"signature":"…"}' minH="110px" fontFamily="mono" fontSize="9px" bg="rgba(0,0,0,0.18)"/><Text mt="1.5" fontSize="8px" color="var(--text-2)">Vault checks the selected CAIP and latest evidence hash before submission. The worker independently recovers the signature and enforces the authorized reviewer role.</Text><Flex gap="2" mt="2" wrap="wrap"><Button size="xs" variant="outline" borderColor="var(--teal)" color="var(--teal)" onClick={() => void signAssetReviewStatement()} loading={busy === "asset-review-sign"} disabled={!!busy || !assetReviewJson.trim()}>Sign with configured reviewer</Button><Button size="xs" bg="var(--gold)" color="#15110a" onClick={() => void submitAssetReview()} loading={busy === "asset-review"} disabled={!!busy || !assetReviewJson.trim() || !assetHistory.length}>Submit signed review</Button></Flex></Box></Box></Box>}
+									<VStack align="stretch" gap="2" mt="3">{centralStatus?.requests.slice(0, 10).map(request => <Flex key={request.id} justify="space-between" gap="3" p="2.5" borderRadius="8px" bg="rgba(255,255,255,0.025)"><Box minW="0"><Text fontSize="10px" fontWeight="700" color={request.status === "rejected" ? "var(--rose)" : request.status === "awaiting-approval" ? "var(--gold)" : "var(--text-0)"}>{request.network} · {request.status}</Text><Text fontSize="9px" fontFamily="mono" color="var(--text-2)" wordBreak="break-all">{request.contract} · {request.selector} · {request.calldata_length} bytes</Text>{request.last_error && <Text fontSize="8px" color="var(--rose)">{request.last_error}</Text>}</Box><Box textAlign="right" flexShrink={0}><Text fontSize="13px" fontWeight="800" color="var(--gold)">{request.sightings}×</Text><Text fontSize="8px" color="var(--text-2)">{request.attempts} audits</Text>{request.current_audit_id && <Button mt="1.5" size="xs" variant="outline" onClick={() => void inspectContractAudit(request.current_audit_id!)} loading={busy === "contract-audit" && contractAudit?.auditId === request.current_audit_id} disabled={!!busy}>Inspect audit</Button>}</Box></Flex>)}</VStack>{contractAudit && <Box mt="3" p="3" borderRadius="8px" bg="rgba(0,0,0,0.2)" border="1px solid var(--line)"><Flex justify="space-between" gap="3" align="center"><Box minW="0"><Text fontSize="10px" fontWeight="700" color="var(--text-0)">Contract audit evidence</Text><Text fontSize="8px" fontFamily="mono" color="var(--text-2)" wordBreak="break-all">{contractAudit.auditId}</Text></Box><Button size="xs" variant="outline" onClick={async () => { const ok = await copyText(JSON.stringify(contractAudit, null, 2)); setCopied(ok ? "contract-evidence" : ""); setNotice(ok ? "Contract audit copied for offline review." : "Copy failed.") }}>{copied === "contract-evidence" ? "Copied" : "Copy audit"}</Button></Flex><Text mt="2" fontSize="8px" fontFamily="mono" color="var(--teal)" wordBreak="break-all">sha256 {contractAudit.evidenceHash}</Text><Box as="pre" mt="2" p="2" fontSize="8px" color="var(--text-1)" whiteSpace="pre-wrap" wordBreak="break-all" maxH="220px" overflowY="auto" bg="rgba(255,255,255,0.025)" borderRadius="6px">{JSON.stringify(contractAudit.evidence, null, 2)}</Box><Box mt="3" pt="3" borderTop="1px solid var(--line)"><FieldLabel hint="shared authorized reviewer identity">Reviewer public key</FieldLabel><Flex gap="2"><Input value={reviewerPublicKey} onChange={event => { setReviewerPublicKey(event.target.value); setReviewerFingerprint("") }} placeholder="02… or 03…" size="sm" fontFamily="mono" fontSize="9px" bg="rgba(0,0,0,0.18)" /><Button flexShrink={0} size="sm" variant="outline" borderColor="var(--teal)" color="var(--teal)" onClick={() => void loadConfiguredReviewer()} loading={busy === "reviewer-identity"} disabled={!!busy}>Use configured</Button></Flex>{reviewerFingerprint && <Text mt="1" fontSize="8px" color="var(--teal)">Configured fingerprint: {reviewerFingerprint}</Text>}<Flex gap="2" mt="2" wrap="wrap"><Button size="xs" variant={reviewRole === "semantics-review" ? "solid" : "outline"} onClick={() => { setReviewRole("semantics-review"); setReviewerPublicKey(""); setReviewerFingerprint("") }}>Semantics</Button><Button size="xs" variant={reviewRole === "security-review" ? "solid" : "outline"} onClick={() => { setReviewRole("security-review"); setReviewerPublicKey(""); setReviewerFingerprint("") }}>Security</Button><Button size="xs" variant={reviewDecision === "approve" ? "solid" : "outline"} onClick={() => setReviewDecision("approve")}>Approve</Button><Button size="xs" variant={reviewDecision === "reject" ? "solid" : "outline"} onClick={() => setReviewDecision("reject")}>Reject</Button><Button size="xs" bg="var(--teal)" color="#071510" onClick={() => void buildContractReviewStatement()} loading={busy === "contract-review-build"} disabled={!!busy || !reviewerPublicKey.trim()}>Build statement</Button></Flex>{contractReviewDigest && <Text mt="2" fontSize="8px" fontFamily="mono" color="var(--teal)" wordBreak="break-all">Digest: {contractReviewDigest}</Text>}<Textarea mt="2" value={contractReviewJson} onChange={event => setContractReviewJson(event.target.value)} placeholder='{"version":1,"auditId":"…","evidenceHash":"…","signature":"…"}' minH="110px" fontFamily="mono" fontSize="9px" bg="rgba(0,0,0,0.18)"/><Flex gap="2" mt="2" wrap="wrap"><Button size="xs" variant="outline" borderColor="var(--teal)" color="var(--teal)" onClick={() => void signContractReviewStatement()} loading={busy === "contract-review-sign"} disabled={!!busy || !contractReviewJson.trim()}>Sign with configured reviewer</Button><Button size="xs" bg="var(--gold)" color="#15110a" onClick={() => void submitContractReview()} loading={busy === "contract-review"} disabled={!!busy || !contractReviewJson.trim()}>Submit signed review</Button></Flex></Box></Box>}
+								</Box>
+								<Box p="4" borderRadius="14px" bg="var(--ink-0)" border="1px solid var(--line)">
+									<Flex justify="space-between" align="start" gap="4" wrap="wrap">
+										<Box><Text fontSize="12px" fontWeight="700" color="var(--text-0)">Live protection coverage</Text><Text fontSize="10px" color="var(--text-2)" mt="1">Every observed signing request is the denominator. P4/P5 means an authenticated definition reached the device.</Text></Box>
+										<Box textAlign="right"><Text fontSize="22px" fontWeight="800" color="var(--gold)">{coverage?.authenticatedPercent ?? 0}%</Text><Text fontSize="9px" color="var(--text-2)">{coverage?.authenticatedRequests ?? 0} of {coverage?.totalRequests ?? 0} requests</Text></Box>
+									</Flex>
+									<Flex gap="2" mt="3" wrap="wrap">{(["P0", "P1", "P2", "P3", "P4", "P5"] as const).map(level => <Box key={level} px="2.5" py="1.5" borderRadius="8px" bg="rgba(255,255,255,0.035)"><Text fontSize="9px" color="var(--text-2)">{level}</Text><Text fontSize="13px" fontWeight="700" color={level === "P4" || level === "P5" ? "var(--teal)" : "var(--text-0)"}>{coverage?.byLevel[level] ?? 0}</Text></Box>)}</Flex>
+									<Flex gap="2" mt="3" wrap="wrap">
+										{([['Ethereum', coverage?.byChain.Ethereum], ['Solana', coverage?.byChain.Solana], ['24 hours', coverage?.rolling.last24Hours], ['7 days', coverage?.rolling.last7Days]] as const).map(([label, slice]) => <Box key={label} flex="1" minW="110px" p="2.5" borderRadius="8px" bg="rgba(255,255,255,0.025)"><Text fontSize="9px" color="var(--text-2)">{label}</Text><Text fontSize="13px" fontWeight="700" color="var(--text-0)">{slice?.authenticatedPercent ?? 0}%</Text><Text fontSize="8px" color="var(--text-2)">{slice?.authenticatedRequests ?? 0}/{slice?.totalRequests ?? 0} authenticated</Text></Box>)}
+									</Flex>
+									<Flex gap="2" mt="2" wrap="wrap">{(['walletconnect', 'vault-rpc', 'vault-swap', 'rest-api'] as const).map(source => <Text key={source} fontSize="8px" color="var(--text-2)">{source}: {coverage?.bySource[source].authenticatedRequests ?? 0}/{coverage?.bySource[source].totalRequests ?? 0}</Text>)}</Flex>
+									<Flex justify="space-between" gap="3" mt="2" p="2.5" borderRadius="8px" bg="rgba(255,255,255,0.025)"><Box><Text fontSize="9px" color="var(--text-2)">Pre-sign simulation success</Text><Text fontSize="13px" fontWeight="700" color="var(--text-0)">{coverage?.simulation.successPercent ?? 0}%</Text></Box><Box textAlign="right"><Text fontSize="9px" color="var(--text-2)">{coverage?.simulation.successfulRequests ?? 0}/{coverage?.simulation.attemptedRequests ?? 0} attempts</Text><Text fontSize="8px" color="var(--text-2)">revert {coverage?.bySimulation.revert ?? 0} · incomplete {coverage?.bySimulation.incomplete ?? 0} · unavailable {coverage?.bySimulation.unavailable ?? 0}</Text></Box></Flex>
+									<Flex justify="space-between" gap="3" mt="2" p="2.5" borderRadius="8px" bg="rgba(255,255,255,0.025)"><Box><Text fontSize="9px" color="var(--text-2)">Definition resolution</Text><Text fontSize="13px" fontWeight="700" color="var(--text-0)">{coverage?.definitions.selectedRequests ?? 0}/{coverage?.definitions.checkedRequests ?? 0} selected</Text></Box><Box textAlign="right"><Text fontSize="9px" color="var(--rose)">{coverage?.definitions.refusedRequests ?? 0} refused</Text><Text fontSize="8px" color="var(--text-2)">{coverage?.definitions.noArtifactRequests ?? 0} had no artifact</Text></Box></Flex>
+									<Flex justify="space-between" gap="3" mt="2" p="2.5" borderRadius="8px" bg="rgba(255,255,255,0.025)"><Box><Text fontSize="9px" color="var(--text-2)">Authenticated instruction coverage</Text><Text fontSize="13px" fontWeight="700" color="var(--text-0)">{coverage?.componentCoverage?.authenticatedPercent ?? 0}%</Text></Box><Box textAlign="right"><Text fontSize="9px" color="var(--text-1)">{coverage?.componentCoverage?.authenticatedAppearances ?? 0}/{coverage?.componentCoverage?.totalAppearances ?? 0} components</Text><Text fontSize="8px" color="var(--text-2)">{coverage?.componentCoverage?.fullyAuthenticatedRequests ?? 0} full · {coverage?.componentCoverage?.partiallyAuthenticatedRequests ?? 0} partial requests</Text></Box></Flex>
+									<Flex justify="space-between" gap="3" mt="2" p="2.5" borderRadius="8px" bg="rgba(255,255,255,0.025)"><Box><Text fontSize="9px" color="var(--text-2)">Live audit pipeline</Text><Text fontSize="13px" fontWeight="700" color="var(--text-0)">{(coverage?.auditQueue.pending ?? 0) + (coverage?.auditQueue.auditing ?? 0)} queued/active</Text></Box><Box textAlign="right"><Text fontSize="9px" color={(coverage?.auditQueue.identityChanged ?? 0) ? "var(--rose)" : "var(--text-2)"}>{coverage?.auditQueue.identityChanged ?? 0} current · {coverage?.auditQueue.historicalIdentityChanges ?? 0} historical identity regressions</Text><Text fontSize="8px" color="var(--text-2)">{coverage?.auditQueue.evidenceReady ?? 0} evidence-ready · {coverage?.auditQueue.failed ?? 0} failed</Text></Box></Flex>
+								</Box>
+								<Box p="4" borderRadius="14px" bg="var(--ink-0)" border="1px solid var(--line)">
+									<Text fontSize="12px" fontWeight="700" color="var(--text-0)">Observed contract and instruction spectrum</Text>
+									<Text fontSize="10px" color="var(--text-2)" mt="1" mb="3">Individual EVM calls and Solana instructions ranked by appearances. This is demand, not a claim that each component is covered.</Text>
+									{!coverage?.topComponents?.length && <Text fontSize="11px" color="var(--text-2)">No component demand recorded yet.</Text>}
+									<VStack align="stretch" gap="2">{coverage?.topComponents?.slice(0, 10).map(component => <Flex key={component.componentKey} justify="space-between" gap="3" p="2.5" borderRadius="8px" bg="rgba(255,255,255,0.025)"><Box minW="0"><Text fontSize="10px" fontWeight="700" color="var(--text-0)">{component.chain} · {component.auditStatus || "not queued"}</Text><Text fontSize="9px" fontFamily="mono" color="var(--text-2)" wordBreak="break-all">{JSON.stringify(component.component)}</Text></Box><Box textAlign="right" flexShrink={0}><Text fontSize="14px" fontWeight="800" color="var(--gold)">{component.count}×</Text><Text fontSize="8px" color="var(--text-2)">{component.maxExposureClass}</Text></Box></Flex>)}</VStack>
+								</Box>
+								<Box p="4" borderRadius="14px" bg="var(--ink-0)" border="1px solid var(--line)">
+									<Text fontSize="12px" fontWeight="700" color="var(--text-0)">Real-world protection evidence</Text>
+									<Text fontSize="10px" color="var(--text-2)" mt="1" mb="3">Completed public transactions re-fetched from chain. These examples separate authenticated device claims from simulation and cross-chain promises.</Text>
+									<VStack align="stretch" gap="2">{caseStudies.map(study => <Box key={study.id} p="3" borderRadius="9px" bg="rgba(255,255,255,0.025)" border="1px solid" borderColor={study.status === "verified" ? "rgba(139,227,196,0.18)" : "rgba(224,140,123,0.28)"}>
+										<Flex justify="space-between" gap="3"><Box><Text fontSize="10px" fontWeight="800" color={study.status === "verified" ? "var(--teal)" : "var(--rose)"}>{study.status.toUpperCase()} · {study.chain} · {study.protectionLevel}</Text><Text fontSize="11px" fontWeight="700" color="var(--text-0)">{study.title}</Text></Box><Text fontSize="9px" color="var(--text-2)" textAlign="right">{study.stateReference ? `block/slot ${study.stateReference}` : "RPC unavailable"}</Text></Flex>
+										<Text mt="2" fontSize="9px" fontFamily="mono" color="var(--text-2)" wordBreak="break-all">{study.transactionId}</Text>
+										{study.facts.map((fact, index) => <Text key={`fact:${index}`} mt="1" fontSize="9px" color="var(--text-1)">Observed: {fact}</Text>)}
+										{study.protections.map((item, index) => <Text key={`protect:${index}`} mt="1" fontSize="9px" color="var(--teal)">Protects: {item}</Text>)}
+										{study.limits.map((item, index) => <Text key={`limit:${index}`} mt="1" fontSize="9px" color="var(--gold)">Limit: {item}</Text>)}
+									</Box>)}</VStack>
+								</Box>
+								<Box p="4" borderRadius="14px" bg="var(--ink-0)" border="1px solid var(--line)">
+									<Text fontSize="12px" fontWeight="700" color="var(--text-0)">Live audit queue</Text>
+									<Text fontSize="10px" color="var(--text-2)" mt="1" mb="2">Unknown request shapes, ranked by privacy-safe potential exposure and then frequency. Only public program/selector shape is retained.</Text>
+									<Text fontSize="8px" color="var(--text-2)" mb="3">Not evaluated {coverage?.byExposure['not-evaluated'] ?? 0} · unknown effects {coverage?.byExposure['unknown-effects'] ?? 0} · unlimited authority {coverage?.byExposure['unlimited-authority'] ?? 0} · bounded outflow {coverage?.byExposure['bounded-outflow'] ?? 0}</Text>
+									{auditJobs.filter(job => job.status !== "covered").length === 0 && <Text fontSize="11px" color="var(--text-2)">No unknown request shapes recorded yet.</Text>}
+									<VStack align="stretch" gap="2">{auditJobs.filter(job => job.status !== "covered").slice(0, 10).map(job => <Flex key={job.shapeKey} justify="space-between" gap="3" p="2.5" borderRadius="8px" bg="rgba(255,255,255,0.025)"><Box minW="0"><Text fontSize="10px" fontWeight="700" color="var(--text-0)">{job.chain} · {job.lastProtectionLevel} · {job.status}</Text><Text fontSize="9px" fontFamily="mono" color="var(--text-2)" wordBreak="break-all">{JSON.stringify(job.shape)}</Text>{job.evidence && <Box mt="2" pt="2" borderTop="1px solid var(--line)"><Text fontSize="9px" color="var(--teal)">Identity evidence at {job.evidence.stateReference || "provider head"}</Text>{job.evidence.identities.map(identity => <Text key={`${identity.role}:${identity.address}`} fontSize="9px" fontFamily="mono" color="var(--text-2)" wordBreak="break-all">{identity.role}: {identity.address}{identity.codeHash ? ` · ${shortHex(identity.codeHash, 10)}` : ""}{identity.upgradeAuthority ? ` · upgrade authority ${identity.upgradeAuthority}` : ""}</Text>)}{job.evidence.candidates?.map((candidate, index) => <Box key={`${candidate.source}:${candidate.address}:${index}`} mt="1.5" p="2" borderRadius="6px" bg="rgba(233,196,106,0.06)"><Text fontSize="9px" fontWeight="700" color="var(--gold)">Candidate only · {candidate.name}</Text><Text fontSize="9px" fontFamily="mono" color="var(--text-1)" wordBreak="break-all">{candidate.signature || candidate.selectorOrDiscriminator}</Text><Text fontSize="8px" color="var(--text-2)">{candidate.source} · {candidate.matchQuality || "unrated"} · requires fixtures and review</Text></Box>)}</Box>}{job.errorClass && <Text mt="1" fontSize="9px" color="var(--rose)">Audit: {job.errorClass}</Text>}</Box><Box textAlign="right" flexShrink={0}><Text fontSize="14px" fontWeight="800" color="var(--gold)">{job.requestCount}×</Text><Text fontSize="9px" color="var(--text-2)">{eventTime(job.lastSeenAt)}</Text><Text fontSize="9px" color="var(--text-2)">{job.attempts} audit{job.attempts === 1 ? "" : "s"}</Text></Box></Flex>)}</VStack>
+								</Box>
 							<Box p="4" borderRadius="14px" bg="var(--ink-0)" border="1px solid var(--line)">
 								<Flex justify="space-between" align={{ base: "start", md: "center" }} direction={{ base: "column", md: "row" }} gap="3" mb="4">
 									<Box><Text fontSize="12px" fontWeight="700" color="var(--text-0)">Device ClearSign evidence</Text><Text fontSize="10px" color="var(--text-2)" mt="1">Current device · newest first · local Vault database · full descriptor retained</Text></Box>
@@ -502,6 +751,7 @@ export function ClearSignStudio({ open, onClose, advancedMode, firmwareVersion }
 									})}
 								</VStack>
 							</Box>
+							</VStack>
 						)}
 
 						{notice && <Box px="3" py="2.5" borderRadius="10px" bg="rgba(139,227,196,0.08)" border="1px solid rgba(139,227,196,0.22)"><Text fontSize="11px" color="var(--teal)">{notice}</Text></Box>}

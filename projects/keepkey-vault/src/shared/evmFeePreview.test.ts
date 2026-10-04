@@ -7,11 +7,13 @@ test('legacy and EIP-1559 signing requests expose their maximum network fee', ()
   expect(evmMaxFee({ gasLimit: 'bad', gasPrice: '1000000000' }, 1)).toBeNull()
   expect(evmMaxFee({ gasLimit: '21000', gasPrice: '1000000000' }, 43114)).toBe('0.000021 AVAX')
   expect(evmMaxFee({ gasLimit: '21000', gasPrice: '1000000000' }, 8453)).toBe('0.000021 ETH')
+  expect(evmMaxFee({ gasLimit: '21000', gasPrice: '1000000000' }, 42161)).toBe('0.000021 ETH')
 })
 
-test('native signing value is readable on Ethereum, Base and Avalanche', () => {
+test('native signing value is readable on Ethereum, Arbitrum, Base and Avalanche', () => {
   expect(evmNativeValue('0x30927f74c9de0000', 1)).toBe('3.5 ETH')
   expect(evmNativeValue('0x69707ae16da8400', 8453)).toBe('0.47485673 ETH')
+  expect(evmNativeValue('1000000000000000000', 42161)).toBe('1 ETH')
   expect(evmNativeValue('0', 43114)).toBe('0 AVAX')
   expect(evmNativeValue('not-a-number', 1)).toBeNull()
 })

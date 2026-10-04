@@ -52,3 +52,10 @@ release-windows/
 emulator.img
 rmdir-result.txt
 *.bat
+
+# Developer worktrees, extracted firmware trees, and generated ClearSign inventory
+/.worktrees/
+/firmware-7.14.3-fixes/
+/firmware-7.15.0-2676ec4-full/
+/bun
+/docs/clearsign-ecosystem/assets.jsonl

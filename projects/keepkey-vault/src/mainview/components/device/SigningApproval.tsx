@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next"
 import { Z } from "../../lib/z-index"
 import { rpcRequest } from "../../lib/rpc"
 import type { SigningRequestInfo, EIP712DecodedInfo, CalldataDecodedInfo, SolanaTxDecodedInfo, EthMessageDecodedInfo, SolanaMessageDecodedInfo } from "../../../shared/types"
+import { evmContractIdentity } from "../../../shared/evm-contract-identity"
 import { versionCompare } from "../../../shared/firmware-versions"
 import { erc20Preview } from "../../../shared/erc20Preview"
 import { evmMaxFee, evmNativeValue } from "../../../shared/evmFeePreview"
@@ -13,6 +14,7 @@ import { decodeAcrossDepositV3 } from "../../../shared/acrossDeposit"
 import { utxoPreview } from "../../../shared/utxoPreview"
 import { cosmosDepositPreview } from "../../../shared/cosmosDepositPreview"
 import { assessSigningRisk, formatCertifiedArg, type RiskLevel } from "../../../shared/clearsign-risk"
+import { ClearSignReportCard } from "../ClearSignReportCard"
 
 interface SigningApprovalProps {
 	request: SigningRequestInfo
@@ -300,6 +302,44 @@ function SolanaBlindSigningConsent({
 	)
 }
 
+// ── Request a human clearsign review for an unknown contract call ─────
+
+function RequestClearSignReview({ request }: { request: SigningRequestInfo }) {
+	const { t } = useTranslation("device")
+	const [state, setState] = useState<"idle" | "sending" | "queued" | "failed">("idle")
+	const [error, setError] = useState<string>()
+	const data = String(request.data || "")
+	const chainId = Number(request.chainId)
+	if (request.method !== "/eth/sign-transaction" || !request.needsBlindSigning || request.clearSignReport?.definitionReview
+		|| !Number.isSafeInteger(chainId) || chainId < 1
+		|| !/^0x[0-9a-fA-F]{40}$/.test(String(request.to || "")) || !/^0x[0-9a-fA-F]{8}/.test(data)) return null
+	const submit = async () => {
+		setState("sending")
+		try {
+			await rpcRequest("requestClearSignReview", { chainId, to: String(request.to), data }, 15000)
+			setState("queued")
+		} catch (e: any) {
+			setError(e?.message || String(e))
+			setState("failed")
+		}
+	}
+	return (
+		<Flex direction="column" gap="1" w="100%" bg="rgba(0,0,0,0.2)" borderRadius="lg" px="3" py="2" data-clearsign-review-request={state}>
+			<Text fontSize="2xs" color="kk.textSecondary">
+				{state === "queued"
+					? t("signing.reviewQueued", "Requested. KeepKey reviewers will audit this contract; once published, future signings show a reviewed description and risk rating.")
+					: t("signing.reviewOffer", "KeepKey has not reviewed this contract. You can ask for a review. Only the contract address, function selector and call length are sent — not your address or amounts.")}
+			</Text>
+			{state === "failed" && <Text fontSize="2xs" color="var(--rose)">{error}</Text>}
+			{state !== "queued" && (
+				<Button size="xs" variant="outline" alignSelf="flex-start" onClick={submit} loading={state === "sending"}>
+					{t("signing.requestReview", "Request clearsign review")}
+				</Button>
+			)}
+		</Flex>
+	)
+}
+
 // ── Risk bar: level + the payload facts behind it ─────────────────────
 
 const RISK_STYLE: Record<RiskLevel, { color: string; filled: number }> = {
@@ -414,6 +454,12 @@ function CalldataSection({ decoded, request, t }: { decoded: CalldataDecodedInfo
 				</Text>
 			</Flex>
 			{erc20 && <Text fontSize="sm" fontWeight="700" color="kk.textPrimary" alignSelf="flex-start" wordBreak="break-word">{erc20.summary}</Text>}
+			{erc20 && <>
+				<Row label="Token" value={erc20.tokenIdentity || 'Unidentified token'} mono={false} />
+				<Row label="Token contract" value={erc20.tokenAddress} />
+				<Row label={erc20.counterpartyLabel} value={erc20.counterpartyIdentity || 'Unidentified address'} mono={false} />
+				<Row label={`${erc20.counterpartyLabel} address`} value={erc20.counterpartyAddress} />
+			</>}
 			{decoded.fields.map((field, i) => (
 				<Row key={i} label={field.name} value={field.name === 'Amount' && erc20 ? `${erc20.amount} (raw: ${erc20.rawAmount})` : field.value} />
 			))}
@@ -875,16 +921,21 @@ function EthMessageSection({ decoded, t }: {
 // ── Typed data section ────────────────────────────────────────────────
 
 function TypedDataSection({ decoded, t }: { decoded: EIP712DecodedInfo; t: (k: string, f?: string) => string }) {
+	const chainId = Number(decoded.domain.chainId || 0)
+	const identified = (value: string) => {
+		const identity = /^0x[0-9a-fA-F]{40}$/.test(value) ? evmContractIdentity(chainId, value) : undefined
+		return identity ? `${identity} · ${value}` : value
+	}
 	return (
 		<VStack gap="1.5" w="100%" bg="rgba(0,0,0,0.25)" borderRadius="xl" p="3">
 			<Text fontSize="2xs" fontWeight="600" color={decoded.isKnownType ? "kk.gold" : "kk.textSecondary"}>
 				{decoded.operationName}
 			</Text>
 			{decoded.domain.name && <Row label="Domain" value={decoded.domain.name} />}
-			{decoded.domain.verifyingContract && <Row label="Contract" value={decoded.domain.verifyingContract} />}
+			{decoded.domain.verifyingContract && <Row label="Contract" value={identified(decoded.domain.verifyingContract)} />}
 			{decoded.domain.chainId !== undefined && <Row label="Chain ID" value={String(decoded.domain.chainId)} />}
 			{decoded.fields.map((field, i) => (
-				<Row key={i} label={field.label} value={field.value} />
+				<Row key={i} label={field.label} value={identified(field.raw || field.value)} />
 			))}
 		</VStack>
 	)
@@ -946,8 +997,11 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 		// needsBlindSigning is the backend's prediction of what the device
 		// reviews natively (x402; canonical Permit2 PermitSingle on 7.16+).
 		// Everything else is signed as a bare hash under AdvancedMode — blind.
-		trustLevel = request.needsBlindSigning ? 'unknown'
-			: request.typedDataDecoded.isKnownType ? 'verified' : 'known'
+		// Firmware 7.15+ drives the EIP-712 traversal; older firmware has no
+		// structured typed-data path. A failed protocol identity is not verified.
+		const structuredEip712 = !!request.firmwareVersion && versionCompare(request.firmwareVersion, '7.15.0') >= 0
+		trustLevel = request.needsBlindSigning || !structuredEip712 ? 'unknown'
+			: request.typedDataDecoded.isKnownType && request.typedDataDecoded.protocolIdentityVerified !== false ? 'verified' : 'known'
 	}
 	if (acrossDeposit && trustLevel === 'unknown') trustLevel = 'known'
 
@@ -1257,8 +1311,10 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 					</Box>
 				)}
 
-				{/* Risk first, so it is read before any blind-signing consent. */}
+				{/* Report and risk first, so they are read before blind-sign consent. */}
+				<ClearSignReportCard report={request.clearSignReport} />
 				<RiskBar request={request} t={t} />
+				<RequestClearSignReview request={request} />
 
 				{/* What the certified description is, and what it is not. Below
 				    the risk bar on purpose: the verdict is read first, and this

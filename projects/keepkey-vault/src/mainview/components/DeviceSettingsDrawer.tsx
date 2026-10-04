@@ -171,7 +171,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 	const [togglingPassphrase, setTogglingPassphrase] = useState(false)
 	const [togglingPolicy, setTogglingPolicy] = useState("")
 	const [browserPromptStatus, setBrowserPromptStatus] = useState("")
-	const [appSettings, setAppSettings] = useState<AppSettings>({ restApiEnabled: false, pioneerApiBase: '', pioneerServers: [], activePioneerServer: '', fiatCurrency: 'USD', numberLocale: 'en-US', walletConnectEnabled: false, bip85Enabled: false, zcashPrivacyEnabled: false, hiveEnabled: false, emulatorEnabled: false, offlineMode: false, btcNodeEnabled: false, btcNodeType: 'blockbook', btcNodeUrl: '', btcOnboardingShown: false, preReleaseUpdates: false, alphaFirmware: false, addressBookClearsignEnabled: false, privateModeEnabled: false, passphraseIntroShown: false })
+	const [appSettings, setAppSettings] = useState<AppSettings>({ restApiEnabled: false, pioneerApiBase: '', pioneerServers: [], activePioneerServer: '', fiatCurrency: 'USD', numberLocale: 'en-US', walletConnectEnabled: false, bip85Enabled: false, zcashPrivacyEnabled: false, hiveEnabled: false, emulatorEnabled: false, offlineMode: false, btcNodeEnabled: false, btcNodeType: 'blockbook', btcNodeUrl: '', btcOnboardingShown: false, preReleaseUpdates: false, alphaFirmware: false, addressBookClearsignEnabled: false, privateModeEnabled: false, passphraseIntroShown: false, evmSimulationRpcUrls: {} })
 	const [togglingRestApi, setTogglingRestApi] = useState(false)
 	const [windowFocusState, setWindowFocusState] = useState<{ refs: number; alwaysOnTop: boolean } | null>(null)
 	const [releasingWindowFocus, setReleasingWindowFocus] = useState(false)
@@ -192,6 +192,10 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 	const [resetting, setResetting] = useState(false)
 	const [clearSignStudioOpen, setClearSignStudioOpen] = useState(false)
 	const [rngAuditOpen, setRngAuditOpen] = useState(false)
+	const [simulationChainId, setSimulationChainId] = useState('1')
+	const [simulationRpcUrl, setSimulationRpcUrl] = useState('')
+	const [savingSimulationRpc, setSavingSimulationRpc] = useState(false)
+	const [simulationRpcMessage, setSimulationRpcMessage] = useState<{ ok: boolean; text: string } | null>(null)
 	const panelRef = useRef<HTMLDivElement>(null)
 
 	// Fetch device features + app settings when drawer opens
@@ -215,6 +219,9 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 	useEffect(() => onRpcMessage('window-focus-changed', (state) => setWindowFocusState(state)), [])
 
 	useEffect(() => { setLabel(deviceState.label || "") }, [deviceState.label])
+	useEffect(() => {
+		setSimulationRpcUrl(appSettings.evmSimulationRpcUrls?.[simulationChainId] || '')
+	}, [appSettings.evmSimulationRpcUrls, simulationChainId])
 	useEffect(() => { if (!open) { setWipeConfirm(false); setRemovePinConfirm(false); setResetConfirm(false) } }, [open])
 
 	// Escape key closes drawer
@@ -228,6 +235,18 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 	useEffect(() => { if (open) panelRef.current?.focus() }, [open])
 
 	// ── Handlers ────────────────────────────────────────────────────
+	const saveSimulationRpc = useCallback(async () => {
+		setSavingSimulationRpc(true); setSimulationRpcMessage(null)
+		try {
+			const result = await rpcRequest<AppSettings>('setEvmSimulationRpc', {
+				chainId: Number(simulationChainId), url: simulationRpcUrl.trim(),
+			}, 10000)
+			setAppSettings(result)
+			setSimulationRpcMessage({ ok: true, text: simulationRpcUrl.trim() ? 'Verified and saved.' : 'Custom endpoint removed.' })
+		} catch (error: any) {
+			setSimulationRpcMessage({ ok: false, text: error?.message || 'Endpoint validation failed.' })
+		} finally { setSavingSimulationRpc(false) }
+	}, [simulationChainId, simulationRpcUrl])
 
 	const saveLabel = useCallback(async () => {
 		if (!label.trim()) return
@@ -1670,6 +1689,21 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 					{isBitcoinOnlyVariant(deviceState.firmwareVariant) && (
 						<Section title="Bitcoin node" defaultOpen={true}>
 							<SelfHostNodePanel settings={appSettings} onChange={setAppSettings} onConnected={onNodeConnected} />
+						</Section>
+					)}
+
+					{!isBitcoinOnlyVariant(deviceState.firmwareVariant) && (
+						<Section title="ClearSign simulation" defaultOpen={false}>
+							<VStack gap="3" align="stretch">
+								<Text fontSize="sm" color="kk.textSecondary">Use an explicit JSON-RPC provider for pre-sign execution, logs, and call traces. Vault verifies the chain ID before saving. Providers can observe transaction data.</Text>
+								<Flex gap="2">
+									<Input value={simulationChainId} onChange={(e) => setSimulationChainId(e.target.value.replace(/\D/g, ''))} placeholder="Chain ID" w="110px" />
+									<Input value={simulationRpcUrl} onChange={(e) => setSimulationRpcUrl(e.target.value)} placeholder="https://your-rpc.example" fontFamily="mono" />
+									<Button onClick={saveSimulationRpc} loading={savingSimulationRpc} disabled={!simulationChainId}>{simulationRpcUrl.trim() ? 'Verify & save' : 'Remove'}</Button>
+								</Flex>
+								{simulationRpcMessage && <Text fontSize="xs" color={simulationRpcMessage.ok ? 'green.300' : 'kk.error'}>{simulationRpcMessage.text}</Text>}
+								<Text fontSize="xs" color="kk.textMuted">Without a configured endpoint, Vault keeps the Pioneer fallback and explicitly marks unavailable or incomplete simulation evidence.</Text>
+							</VStack>
 						</Section>
 					)}
 

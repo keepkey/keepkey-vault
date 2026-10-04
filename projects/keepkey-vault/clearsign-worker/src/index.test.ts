@@ -71,13 +71,13 @@ describe('ClearSign Worker public surface', () => {
     const response = await fetchWorker('/v1/catalog')
     const body = await response.json() as any
     expect(response.status).toBe(200)
-    expect(body.entries).toHaveLength(71)
-    expect(body.entries.filter((entry: any) => entry.family === 'evm')).toHaveLength(44)
+    expect(body.entries).toHaveLength(72)
+    expect(body.entries.filter((entry: any) => entry.family === 'evm')).toHaveLength(45)
     expect(body.entries.filter((entry: any) => entry.protocol === 'Uniswap')).toHaveLength(9)
     expect(body.entries.filter((entry: any) => entry.protocol === 'ERC-20')).toHaveLength(33)
     expect(body.entries.filter((entry: any) => entry.family === 'solana')).toHaveLength(27)
     for (const entry of body.entries) {
-      expect(['Relay', 'Portals', 'Pump', 'SoltoshiDICE', 'ERC-20', 'Uniswap']).toContain(entry.protocol)
+      expect(['Relay', 'Portals', 'Across', 'Pump', 'SoltoshiDICE', 'ERC-20', 'Uniswap']).toContain(entry.protocol)
       expect(entry.provenance.protocol).toMatch(/^https:\/\//)
     }
     const join = body.entries.find((entry: any) => entry.id === 'solana:soltoshidiceBlackjackJoin')
@@ -123,7 +123,11 @@ describe('ClearSign Worker public surface', () => {
     const portals = evm.find((entry: any) => entry.protocol === 'Portals')
     expect(portals.screens).toEqual([])
     expect(portals.screensNote).toContain('cannot verify on 7.16')
-    for (const entry of evm.filter((e: any) => e.protocol !== 'Portals')) expect(entry.screens.length).toBeGreaterThan(3)
+    // Across is the same kind of decoder-only (no intent) entry.
+    const across = evm.find((entry: any) => entry.protocol === 'Across')
+    expect(across.screens).toEqual([])
+    expect(across.screensNote).toContain('cannot verify on 7.16')
+    for (const entry of evm.filter((e: any) => e.protocol !== 'Portals' && e.protocol !== 'Across')) expect(entry.screens.length).toBeGreaterThan(3)
   })
 
   it('EXPECTED-SCREENS.md states every Base USDC screen the catalog publishes', async () => {
@@ -270,6 +274,17 @@ describe('ClearSign Worker public surface', () => {
     expect(status.scopes.evmChains).toEqual([])
     const broken = await (await fetchWorker('/v1/status', undefined, { CLEARSIGN_EVM_CERTIFICATES_JSON: '{' })).json() as any
     expect(broken.status).toBe('provisioning')
+  })
+
+  it('catalogs the exact Arbitrum USDT Permit2 approval but fails closed without provisioning', async () => {
+    const response = await post('/v1/evm/schema', {
+      chainId: 42161,
+      contract: '0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9',
+      selector: '0x095ea7b3',
+      calldataLength: 68,
+    })
+    expect(response.status).toBe(503)
+    expect((await response.json() as any).classification).toBe('UNAVAILABLE')
   })
 
   it('recognizes the dynamic Portals shape but rejects non-word-aligned calldata', async () => {

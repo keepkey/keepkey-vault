@@ -14,7 +14,8 @@ export const CLEARSIGN_SCOPE_BASE = 8453
 export const CLEARSIGN_SCOPE_ARBITRUM = 42161
 // Firmware accepts any nonzero scope equal to the transaction's chain; this
 // list is the host's own review gate for which chains a certificate may name.
-const ALLOWED_SCOPES = new Set([CLEARSIGN_SCOPE_ETHEREUM, CLEARSIGN_SCOPE_SOLANA, CLEARSIGN_SCOPE_BASE, CLEARSIGN_SCOPE_ARBITRUM])
+export const CLEARSIGN_EVM_SCOPES = [1, 10, 56, 100, 130, 137, 5000, 8453, 42161, 42170, 43114, 80094, 81457] as const
+const ALLOWED_SCOPES = new Set<number>([CLEARSIGN_SCOPE_SOLANA, ...CLEARSIGN_EVM_SCOPES])
 
 const CERT_BODY_BYTES = 75
 const CERT_SIGNATURE_BYTES = 64

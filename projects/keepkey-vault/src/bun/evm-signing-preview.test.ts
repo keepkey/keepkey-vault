@@ -17,7 +17,8 @@ const RECIPIENT = '1111111111111111111111111111111111111111'
 const word = (hex: string) => hex.padStart(64, '0')
 const transfer = '0xa9059cbb' + word(RECIPIENT) + word('f4240')
 const approve = (spender: string) => '0x095ea7b3' + word(spender.replace(/^0x/, '')) + word('f4240')
-const PAYLOAD = `0x03${'ab'.repeat(200)}`
+// The envelope's certificate names chain 8453 at bytes 3..6 (schema registry checks it).
+const PAYLOAD = `0x03${'ab'.repeat(2)}00002105${'ab'.repeat(194)}`
 
 const info = (): SigningRequestInfo => ({ id: 't', method: '/eth/sign-transaction', appName: 'test' })
 
@@ -210,6 +211,10 @@ describe('certified Uniswap swap (0x07) attach', () => {
   function swapService(seen: any[], tamper?: (tokens: any[]) => any[]) {
     globalThis.fetch = (async (url: any, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body))
+      // Published-review lookup for an unknown call: none exists here.
+      if (String(url).endsWith('/v1/evm/schema')) {
+        return new Response(JSON.stringify({ classification: 'OPAQUE' }), { status: 422 })
+      }
       seen.push({ url: String(url), body })
       let tokens = reviewedSwapTokens(body.chainId, body.tokens)
       if (tamper) tokens = tamper(tokens)

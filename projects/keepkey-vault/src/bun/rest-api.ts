@@ -10,6 +10,7 @@ import { createHash } from 'crypto'
 import { decodeEIP712 } from './eip712-decoder'
 import { applyEvmTxPreview, evmPriorityFee, normalizeEvmChainId, typedDataNativelyReviewed } from './evm-signing-preview'
 import { CHAINS, isChainSupported, hiveRolePath, evmChainLabel } from '../shared/chains'
+import { getEvmSimulationEndpoint } from './evm-simulation-config'
 import { versionCompare } from '../shared/firmware-versions'
 import { isBitcoinOnlyVariant, DEFAULT_AUTO_LOCK_MS } from '../shared/flags'
 import {
@@ -38,7 +39,7 @@ import { handleSwapRoute } from './rest-swap'
 import { handleSweepRoute } from './rest-sweep'
 import { isOfflineNetworkRoute } from './offline-policy'
 import { handleLedgerRoute } from './rest-ledger'
-import { getSetting, findApiLogs, getApiLogById, getRecentActivityFromLog, getSwapHistory, getSwapHistoryByTxid, getSwapHistoryStats, getCachedBalances, getCachedPubkeys, getAllTokenVisibility, getTokensByVisibility, setTokenVisibility, removeTokenVisibility, insertClearSignEvent } from './db'
+import { getSetting, findApiLogs, getApiLogById, getRecentActivityFromLog, getSwapHistory, getSwapHistoryByTxid, getSwapHistoryStats, getCachedBalances, getCachedPubkeys, getAllTokenVisibility, getTokensByVisibility, setTokenVisibility, removeTokenVisibility, insertClearSignEvent, insertClearSignObservation, finalizeClearSignObservation, authenticateClearSignObservation, getClearSignCoverageSummary, getLegacyClearSignRows, getClearSignAuditJobs, getClearSignAuditJob, getClearSignAuditEvidence, enqueueClearSignAuditDemand, saveClearSignPromotionBundle, addClearSignPromotionReview, getClearSignPromotion, revokeClearSignPromotion, saveVerifiedClearSignArtifact, getVerifiedClearSignArtifacts, revokeVerifiedClearSignArtifact } from './db'
 import { detectSpamToken, categorizeTokens } from '../shared/spamFilter'
 import { rebuildActivityHistory, type ActivityHistoryRebuildOptions } from './activity-history'
 import type { SwapTrackingStatus } from '../shared/types'
@@ -65,6 +66,24 @@ import {
 import { usb } from 'usb'
 import { handleMcpRequest } from './mcp'
 import { onBexOpen, onBexClose, onBexMessage } from './bex-bridge'
+import { simulateEvmEffects } from './evm-effects'
+import { simulateSolanaEffects } from './solana-effects'
+import { buildClearSignReport, solanaDecodedReportFindings } from '../shared/clearsign-report'
+import { uniswapReportFindingsWithState } from './uniswap-report'
+import { classifyEffectExposure, observeEvmCall, observeEvmTypedData, observeMalformedSolanaTransaction, observeSolanaTransaction } from './clearsign-observation'
+import { auditUnknownClearSignShape } from './clearsign-live-auditor'
+import { clearSignIdentityHash, evaluateClearSignPromotion } from './clearsign-promotion'
+import { compilePromotedClearSignArtifact } from './clearsign-artifact-compiler'
+import { createClearSignFixturePlan } from './clearsign-fixture-plan'
+import { replayLegacyClearSignRows } from './clearsign-legacy-replay'
+import { importPromotedClearSignArtifact } from './clearsign-artifact-import'
+import { findPromotedEvmArtifact, findPromotedSolanaArtifact, resolvePromotedEvmArtifact, resolvePromotedSolanaArtifact } from './clearsign-artifact-resolver'
+import { resolveRuntimeEvmMetadata, supportsRuntimeEvmMetadata, type RuntimeEvmSigner } from './evm-runtime-metadata'
+import { supportsCertifiedClearSign } from './solana-certified-policy'
+import { measureLiveDeployment, resolveCertifiedEvmTransaction, resolveEvmSchema } from './evm-schema-registry'
+import { CERTIFIED_METADATA_KEY_ID } from './evm-certified-schema'
+import { findContractRating } from './clearsign-review'
+import { ERC7730_TRANSPORT_SUPPORTED } from '../shared/erc7730-support'
 
 export interface EmuSigningDetails {
   operation: string
@@ -1504,6 +1523,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
       let activeSigningId: string | undefined
       let activeSigningInfo: SigningRequestInfo | undefined
       let activeAllowBlindSigning = false
+      let activeClearSignObservationId: string | undefined
       // Certified envelope found for this request's raw_tx before approval.
       let activeSolanaCertified: { rawTx: string; proof: CertifiedSolanaProof } | undefined
 
@@ -1691,6 +1711,10 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const { appName } = resolveAppInfo()
           const id = crypto.randomUUID()
           const signingInfo: SigningRequestInfo = { id, method: path, appName }
+          // Device state is already cached by the engine and does not initiate
+          // USB traffic. Certified metadata must be resolved before approval,
+          // so establish firmware capability before building the preview.
+          signingInfo.firmwareVersion = engine.getDeviceState().firmwareVersion
 
           // Try to extract useful details from the body without consuming it
           // (we'll parse body again in the handler below — Bun caches it)
@@ -1812,8 +1836,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               // explicit warning in the UI rather than silently falling
               // back to an unflagged simple-transfer dialog.
               if (typeof preview.raw_tx === 'string') {
+                const endpoint = getSetting('solana_rpc_endpoint') || DEFAULT_SOLANA_RPC_ENDPOINT
                 try {
-                  const endpoint = getSetting('solana_rpc_endpoint') || DEFAULT_SOLANA_RPC_ENDPOINT
                   signingInfo.solanaDecoded = await buildSolanaDecodedInfo(
                     preview.raw_tx,
                     createRpcAltFetcher(endpoint),
@@ -1821,18 +1845,36 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
                 } catch (e: any) {
                   const errName = e?.name || 'Error'
                   const errMsg = e?.message || String(e)
-                  // Surface error with type prefix so the UI banner shows a
-                  // useful diagnostic ("SolanaTxParseError: ..." vs "TypeError:
-                  // fetch failed") instead of a bare string.
                   signingInfo.solanaDecodeError = `${errName}: ${errMsg}`
-                  // Full stack + raw tx goes to the vault log so we can
-                  // reproduce the failure locally — don't ship raw bytes to
-                  // the UI, but *do* leave a breadcrumb in the console.
                   console.warn(
                     '[REST] Solana decode failed:', errName, errMsg,
-                    '\n  raw_tx (base64):', preview.raw_tx,
+                    '\n  transaction fingerprint:', createHash('sha256').update(Buffer.from(preview.raw_tx, 'base64')).digest('hex'),
                     '\n  stack:', e?.stack,
                   )
+                }
+                try {
+                  const addressNList = pickAddressNList(preview, DEFAULT_SOLANA_ADDRESS_N)
+                  const wallet = requireWallet(engine)
+                  const derived = await wallet.solanaGetAddress({ addressNList, showDisplay: false })
+                  const owner = typeof derived === 'string' ? derived : derived?.address
+                  if (owner) {
+                    signingInfo.from = owner
+                    const simulation = await simulateSolanaEffects(preview.raw_tx, owner, endpoint)
+                    const decodedFindings = solanaDecodedReportFindings(signingInfo.solanaDecoded)
+                    signingInfo.clearSignReport = buildClearSignReport({
+                      requestedLevel: simulation.status === 'success' ? 'P3' : 'P1',
+                      descriptor: {
+                        source: preview.schema ? (preview.certificate ? 'certified' : 'runtime') : 'none',
+                        authenticated: false,
+                        format: preview.schema ? 'KKSOLSC1' : undefined,
+                      },
+                      simulation,
+                      hostFindings: decodedFindings.findings,
+                      hostLimitations: decodedFindings.limitations,
+                    })
+                  }
+                } catch (e: any) {
+                  console.warn('[REST] Solana effect report failed:', e?.message || e)
                 }
               } else {
                 signingInfo.solanaDecodeError = 'missing raw_tx payload'
@@ -1982,6 +2024,80 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
                 signingInfo, preview.to, preview.data, signingInfo.chainId,
                 engine.getDeviceState().firmwareVersion, preview.txMetadata,
               )
+              // Still blind after that: promoted local artifacts and certified
+              // exact-transaction envelopes (resolveEvmSchema /
+              // resolveCertifiedEvmTransaction). Resolved before approval and
+              // kept on signingInfo so the handler signs what the user reviewed.
+              // A lookup failure leaves the call on the blind / AdvancedMode path.
+              if (signingInfo.needsBlindSigning && preview.data && preview.data.length >= 10 && preview.to
+                && !preview.txMetadata?.signedPayload && supportsCertifiedClearSign(signingInfo.firmwareVersion)) {
+                const chainIdNum = Number(signingInfo.chainId)
+                try {
+                  const txForCertification = {
+                    chainId: chainIdNum, from: preview.from, to: preview.to, data: preview.data,
+                    value: preview.value || '0x0', nonce: preview.nonce || '0x0',
+                    gasLimit: preview.gas || preview.gasLimit || '0x5208',
+                    ...(preview.gasPrice || preview.gas_price ? { gasPrice: preview.gasPrice || preview.gas_price } : {
+                      maxFeePerGas: preview.maxFeePerGas || preview.max_fee_per_gas,
+                      maxPriorityFeePerGas: preview.maxPriorityFeePerGas || preview.max_priority_fee_per_gas || '0x0',
+                    }),
+                  }
+                  const certified = await resolveEvmSchema(chainIdNum, preview.to, preview.data, true)
+                    ?? await resolveCertifiedEvmTransaction(txForCertification)
+                  if (certified) {
+                    signingInfo.certifiedEvmSchema = certified
+                    signingInfo.deviceClearSigns = true
+                    signingInfo.needsBlindSigning = false
+                    console.log(`[REST] Approval preview authenticated by certified schema ${certified.method} (source=${certified.source || 'service'})`)
+                  }
+                } catch (error: any) {
+                  console.warn(`[REST] Certified approval preview unavailable, staying blind: ${error?.message || error}`)
+                }
+              }
+              if (path === '/eth/sign-transaction' && /^0x[0-9a-fA-F]{40}$/.test(String(preview.from || ''))) {
+                const chainIdNum = typeof signingInfo.chainId === 'string'
+                  ? (signingInfo.chainId.startsWith('0x') ? parseInt(signingInfo.chainId, 16) : parseInt(signingInfo.chainId, 10))
+                  : Number(signingInfo.chainId || 1)
+                const simulation = await simulateEvmEffects({
+                  chainId: chainIdNum,
+                  from: preview.from,
+                  to: preview.to,
+                  data: preview.data || '0x',
+                  value: preview.value || '0x0',
+                  gas: preview.gas || preview.gasLimit,
+                  gasPrice: preview.gasPrice || preview.gas_price,
+                  maxFeePerGas: preview.maxFeePerGas || preview.max_fee_per_gas,
+                  maxPriorityFeePerGas: preview.maxPriorityFeePerGas || preview.max_priority_fee_per_gas,
+                  nonce: preview.nonce,
+                }, getEvmSimulationEndpoint(chainIdNum))
+                const universalRouterFindings = await uniswapReportFindingsWithState(
+                  preview.data, chainIdNum, preview.to, preview.from, getEvmSimulationEndpoint(chainIdNum),
+                )
+                const certified = signingInfo.certifiedEvmSchema
+                // applyEvmTxPreview attaches a certified envelope as the decoded
+                // blob (keyId 0x80) instead of certifiedEvmSchema; it is the same
+                // device-verified description.
+                const certifiedBlob = !certified && !preview.txMetadata?.signedPayload
+                  && signingInfo.calldataDecoded?.insightKeyId === CERTIFIED_METADATA_KEY_ID
+                const deviceAuthenticated = signingInfo.deviceClearSigns === true || certifiedBlob
+                signingInfo.clearSignReport = buildClearSignReport({
+                  requestedLevel: deviceAuthenticated ? 'P4'
+                    : simulation.status === 'success' ? 'P3'
+                      : universalRouterFindings.complete ? 'P2' : 'P1',
+                  descriptor: {
+                    source: certified || certifiedBlob ? 'certified' : deviceAuthenticated ? 'native' : ERC7730_TRANSPORT_SUPPORTED && preview.erc7730 ? 'erc7730' : preview.txMetadata ? 'runtime' : 'none',
+                    authenticated: deviceAuthenticated,
+                    format: certified || certifiedBlob ? 'EVM_METADATA' : deviceAuthenticated ? 'FIRMWARE_NATIVE' : ERC7730_TRANSPORT_SUPPORTED && preview.erc7730 ? 'ERC7730' : preview.txMetadata ? 'EVM_METADATA' : undefined,
+                    label: certified?.method || (certifiedBlob ? signingInfo.calldataDecoded?.method : undefined) || (deviceAuthenticated ? `${signingInfo.calldataDecoded?.dappName || 'EVM'} ${signingInfo.calldataDecoded?.method || 'call'}` : undefined),
+                  },
+                  simulation,
+                  hostFindings: universalRouterFindings.findings,
+                  hostLimitations: universalRouterFindings.limitations,
+                  definitionReview: certified?.definitionReview,
+                  // Separate from clearsign: a human rating of the contract, app-only.
+                  rating: await findContractRating(chainIdNum, String(preview.to || ''), measureLiveDeployment),
+                })
+              }
             }
           } catch (e: any) {
             if (e instanceof HttpError) throw e
@@ -2002,20 +2118,86 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               // Pass firmware version so UI can gate blind-signing warnings (7.14.0+)
               if (features?.majorVersion) {
                 signingInfo.firmwareVersion = `${features.majorVersion}.${features.minorVersion}.${features.patchVersion}`
+                if (path === '/eth/sign-typed-data' && versionCompare(signingInfo.firmwareVersion, '7.15.0') >= 0) {
+                  // 7.15+ uses the device-driven structured EIP-712 stream;
+                  // these requests are not blind and do not require AdvancedMode.
+                  signingInfo.needsBlindSigning = false
+                  signingInfo.requiresAdvancedMode = false
+                }
               }
             }
           } catch (e: any) {
             console.warn('[rest-api] Failed to read AdvancedMode policy:', e?.message || e)
           }
+          // Firmware 7.15+ owns EIP-712 traversal and requests every struct and
+          // leaf it hashes. This capability comes from cached engine state even
+          // when the separate features/policy cache has not yet been populated.
+          if (path === '/eth/sign-typed-data' && supportsCertifiedClearSign(signingInfo.firmwareVersion)) {
+            signingInfo.needsBlindSigning = false
+            signingInfo.requiresAdvancedMode = false
+          }
 
           // Track before waiting so rejection, timeout, or a malformed approval
           // decision still dismisses the Vault overlay in the request finally.
           activeSigningId = id
+          if (!engine.isPassphraseWallet && (path === '/eth/sign-transaction' || path === '/eth/sign-typed-data' || path === '/solana/sign-transaction')) {
+            const report = signingInfo.clearSignReport
+            let draft = path === '/eth/sign-transaction'
+              ? observeEvmCall({
+                  chainId: Number(signingInfo.chainId || 1), to: signingInfo.to, data: signingInfo.data,
+                  source: report?.descriptor.source,
+                  hostDecoded: Boolean(signingInfo.calldataDecoded),
+                  simulated: report?.simulation.status === 'success',
+                  simulationStatus: report?.simulation.status,
+                  exposureClass: classifyEffectExposure(report?.simulation),
+                  definitionResolution: report?.descriptor.resolution,
+                })
+              : path === '/eth/sign-typed-data' && probeCheckBody?.typedData
+                ? observeEvmTypedData({
+                    typedData: probeCheckBody.typedData,
+                    chainId: Number(signingInfo.chainId || 1),
+                    hostDecoded: Boolean(signingInfo.typedDataDecoded),
+                  })
+              : path === '/solana/sign-transaction' && typeof probeCheckBody?.raw_tx === 'string'
+                ? (() => {
+                    try {
+                      return observeSolanaTransaction({
+                        rawTxBase64: probeCheckBody.raw_tx,
+                        source: report?.descriptor.source,
+                        hostDecoded: Boolean(signingInfo.solanaDecoded),
+                        simulated: report?.simulation.status === 'success',
+                        simulationStatus: report?.simulation.status,
+                        exposureClass: classifyEffectExposure(report?.simulation),
+                        definitionResolution: report?.descriptor.resolution,
+                      })
+                    } catch {
+                      return observeMalformedSolanaTransaction(probeCheckBody.raw_tx)
+                    }
+                  })()
+                : undefined
+            if (draft) {
+              if (report) draft.protectionLevel = report.protectionLevel
+              activeClearSignObservationId = insertClearSignObservation(draft, {
+                deviceId: engine.getDeviceState().deviceId,
+                source: 'rest-api',
+              }).id
+              void auditUnknownClearSignShape(draft, {
+                evm: getEvmSimulationEndpoint(Number(draft.shape.chainId || 1)),
+                solana: getSetting('solana_rpc_endpoint') || DEFAULT_SOLANA_RPC_ENDPOINT,
+              })
+            }
+          }
+          const approvalStartedAt = Date.now()
           const approval = await callbacks.onSigningRequest(signingInfo)
           if (!approval.approved) {
+            if (activeClearSignObservationId) finalizeClearSignObservation(
+              activeClearSignObservationId,
+              Date.now() - approvalStartedAt >= 119_000 ? 'timed-out' : 'rejected',
+            )
             return json({ error: 'Signing rejected by user' }, 403)
           }
           if (signingInfo.requiresBlindSigningConsent && !approval.allowBlindSigning) {
+            if (activeClearSignObservationId) finalizeClearSignObservation(activeClearSignObservationId, 'policy-blocked', 'blind-signing-consent')
             return json({ error: 'One-shot blind-signing consent required' }, 403)
           }
           // Approved — retain decoded info so handlers can pass metadata to device.
@@ -2401,6 +2583,219 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         }
 
         // ── ETH SIGNING (4 endpoints) ────────────────────────────────
+        if (path === '/clearsign/coverage' && method === 'GET') {
+          auth.requireAuth(req)
+          return json(getClearSignCoverageSummary())
+        }
+
+        if (path === '/clearsign/coverage/legacy-replay' && method === 'GET') {
+          auth.requireAuth(req)
+          const replayUrl = new URL(req.url)
+          const from = Number(replayUrl.searchParams.get('from'))
+          const to = Number(replayUrl.searchParams.get('to'))
+          try { return json(replayLegacyClearSignRows(getLegacyClearSignRows(from, to))) }
+          catch (error: any) { throw new HttpError(400, error?.message || 'Legacy replay rejected') }
+        }
+
+        if (path === '/clearsign/audit-jobs' && method === 'GET') {
+          auth.requireAuth(req)
+          return json(getClearSignAuditJobs())
+        }
+
+        if (path === '/clearsign/promotion/fixture-plan' && method === 'POST') {
+          auth.requireAuth(req)
+          const body = await parseRequest(req, S.ClearSignFixturePlanRequest)
+          try { return json(createClearSignFixturePlan(body)) }
+          catch (error: any) { throw new HttpError(400, error?.message || 'Fixture plan rejected') }
+        }
+
+        if (path === '/clearsign/promotion/bundle' && method === 'POST') {
+          auth.requireAuth(req)
+          const bundle = await parseRequest(req, S.ClearSignPromotionBundleRequest)
+          if (bundle.expiresAt - bundle.createdAt > 90 * 24 * 60 * 60 * 1000) throw new HttpError(400, 'Promotion bundle lifetime exceeds 90 days')
+          const evidence = getClearSignAuditEvidence(bundle.shapeKey)
+          if (!evidence) throw new HttpError(409, 'No completed audit evidence exists for this shape')
+          if (clearSignIdentityHash(evidence) !== bundle.identityHash) throw new HttpError(409, 'Promotion bundle does not match current deployed-code identity')
+          const candidateExists = evidence.candidates?.some(candidate =>
+            candidate.source === bundle.candidate.source
+            && candidate.address.toLowerCase() === bundle.candidate.address.toLowerCase()
+            && candidate.selectorOrDiscriminator.toLowerCase() === bundle.candidate.selectorOrDiscriminator.toLowerCase()
+            && candidate.name === bundle.candidate.name)
+          if (!candidateExists) throw new HttpError(409, 'Candidate is not present in the current audit evidence')
+          return json(saveClearSignPromotionBundle(bundle))
+        }
+
+        if (path === '/clearsign/promotion/review' && method === 'POST') {
+          auth.requireAuth(req)
+          const review = await parseRequest(req, S.ClearSignPromotionReviewRequest)
+          try { return json(addClearSignPromotionReview(review)) }
+          catch (error: any) { throw new HttpError(409, error?.message || 'Review rejected') }
+        }
+
+        if (path === '/clearsign/promotion/evaluate' && method === 'POST') {
+          auth.requireAuth(req)
+          const body = await parseRequest(req, S.ClearSignPromotionEvaluateRequest)
+          const record = getClearSignPromotion(body.bundleHash)
+          if (!record) throw new HttpError(404, 'Promotion bundle not found')
+          const evidence = getClearSignAuditEvidence(record.shapeKey)
+          if (!evidence) throw new HttpError(409, 'Current audit evidence unavailable')
+          return json(evaluateClearSignPromotion({
+            bundle: record.bundle, reviews: record.reviews, currentEvidence: evidence,
+            revokedBundleHashes: record.revokedAt ? [record.bundleHash] : [],
+          }))
+        }
+
+        if (path === '/clearsign/promotion/compile' && method === 'POST') {
+          auth.requireAuth(req)
+          const body = await parseRequest(req, S.ClearSignPromotionEvaluateRequest)
+          const record = getClearSignPromotion(body.bundleHash)
+          if (!record) throw new HttpError(404, 'Promotion bundle not found')
+          const job = getClearSignAuditJob(record.shapeKey)
+          if (!job?.evidence) throw new HttpError(409, 'Current audit evidence and observed shape are unavailable')
+          try {
+            return json(compilePromotedClearSignArtifact({
+              bundle: record.bundle, reviews: record.reviews, currentEvidence: job.evidence,
+              observedShape: job.shape, revoked: Boolean(record.revokedAt),
+            }))
+          } catch (error: any) { throw new HttpError(409, error?.message || 'Artifact compilation rejected') }
+        }
+
+        if (path === '/clearsign/promotion/revoke' && method === 'POST') {
+          auth.requireAuth(req)
+          const body = await parseRequest(req, S.ClearSignPromotionRevokeRequest)
+          try { return json(revokeClearSignPromotion(body.bundleHash, body.reason)) }
+          catch (error: any) { throw new HttpError(404, error?.message || 'Promotion bundle not found') }
+        }
+
+        if (path === '/clearsign/artifacts/import' && method === 'POST') {
+          auth.requireAuth(req)
+          const ceremony = await parseRequest(req, S.ClearSignArtifactImportRequest)
+          const record = getClearSignPromotion(ceremony.bundleHash)
+          if (!record) throw new HttpError(404, 'Promotion bundle not found')
+          const job = getClearSignAuditJob(record.shapeKey)
+          if (!job?.evidence) throw new HttpError(409, 'Current audit evidence and observed shape are unavailable')
+          try {
+            const artifact = importPromotedClearSignArtifact({
+              bundle: record.bundle, reviews: record.reviews, currentEvidence: job.evidence,
+              observedShape: job.shape, ceremony, revoked: Boolean(record.revokedAt),
+            })
+            return json(saveVerifiedClearSignArtifact(artifact))
+          } catch (error: any) { throw new HttpError(409, error?.message || 'Artifact import rejected') }
+        }
+
+        if (path === '/clearsign/artifacts' && method === 'GET') {
+          auth.requireAuth(req)
+          return json(getVerifiedClearSignArtifacts({ includeInactive: url.searchParams.get('includeInactive') === 'true' }))
+        }
+
+        if (path === '/clearsign/artifacts/revoke' && method === 'POST') {
+          auth.requireAuth(req)
+          const body = await parseRequest(req, S.ClearSignArtifactRevokeRequest)
+          try { revokeVerifiedClearSignArtifact(body.bundleHash, body.reason); return json({ ok: true }) }
+          catch (error: any) { throw new HttpError(404, error?.message || 'Verified artifact not found') }
+        }
+
+        if (path === '/clearsign/report' && method === 'POST') {
+          auth.requireAuth(req)
+          const body = await parseRequest(req, S.ClearSignReportRequest)
+          // A catalog the pinned transport cannot deliver is not a descriptor.
+          if (body.chain === 'evm' && !ERC7730_TRANSPORT_SUPPORTED) body.hasErc7730 = undefined
+          if (body.chain === 'evm') {
+            const artifactResolution = resolvePromotedEvmArtifact(body.chainId, body.to, body.data)
+            const promoted = artifactResolution.status === 'selected' ? artifactResolution.artifact : undefined
+            const simulation = await simulateEvmEffects({
+              chainId: body.chainId,
+              from: body.from,
+              to: body.to,
+              data: body.data,
+              value: body.value,
+              gas: body.gas,
+              gasPrice: body.gasPrice,
+              maxFeePerGas: body.maxFeePerGas,
+              maxPriorityFeePerGas: body.maxPriorityFeePerGas,
+              nonce: body.nonce,
+            }, getEvmSimulationEndpoint(body.chainId))
+            const universalRouterFindings = await uniswapReportFindingsWithState(
+              body.data || '0x', body.chainId, body.to, body.from, getEvmSimulationEndpoint(body.chainId),
+            )
+            const report = buildClearSignReport({
+              // A supplied descriptor becomes P4 only after the device verifies
+              // it during signing. This pre-sign endpoint never self-promotes.
+              requestedLevel: simulation.status === 'success' ? 'P3' : universalRouterFindings.complete ? 'P2' : 'P1',
+              descriptor: {
+                source: promoted ? 'certified' : body.hasErc7730 ? 'erc7730' : 'none',
+                authenticated: false,
+                format: promoted ? 'EVM_METADATA' : body.hasErc7730 ? 'ERC7730' : undefined,
+                label: promoted?.method,
+                artifactHash: promoted?.bundleHash,
+                codeIdentityBound: Boolean(promoted),
+                expiresAt: promoted?.expiresAt,
+                resolution: artifactResolution.status,
+              },
+              simulation,
+              hostFindings: universalRouterFindings.findings,
+              hostLimitations: universalRouterFindings.limitations,
+            })
+            if (!promoted) {
+              const draft = observeEvmCall({
+                chainId: body.chainId, to: body.to, data: body.data,
+                source: body.hasErc7730 ? 'erc7730' : 'none',
+                simulated: simulation.status === 'success', simulationStatus: simulation.status,
+                definitionResolution: artifactResolution.status,
+                exposureClass: classifyEffectExposure(simulation),
+              })
+              draft.protectionLevel = report.protectionLevel
+              enqueueClearSignAuditDemand(draft)
+              void auditUnknownClearSignShape(draft, { evm: getEvmSimulationEndpoint(body.chainId) })
+            }
+            return json(validateResponse(report, S.ClearSignReportResponse, path))
+          }
+          const endpoint = getSetting('solana_rpc_endpoint') || DEFAULT_SOLANA_RPC_ENDPOINT
+          const artifactResolution = resolvePromotedSolanaArtifact(body.raw_tx)
+          const promoted = artifactResolution.status === 'selected' ? artifactResolution.artifact : undefined
+          const simulation = await simulateSolanaEffects(body.raw_tx, body.owner, endpoint)
+          let decodedFindings = { findings: [], limitations: [] } as ReturnType<typeof solanaDecodedReportFindings>
+          try {
+            decodedFindings = solanaDecodedReportFindings(await buildSolanaDecodedInfo(body.raw_tx, createRpcAltFetcher(endpoint)))
+          } catch {
+            decodedFindings.limitations.push({
+              code: 'SOLANA_HOST_DECODE_UNAVAILABLE', message: 'The bounded Solana instruction decoder could not analyze this transaction.', severity: 'warning',
+            })
+          }
+          const report = buildClearSignReport({
+            requestedLevel: simulation.status === 'success' ? 'P3' : 'P1',
+            descriptor: {
+              source: promoted || body.hasCertifiedSchema ? 'certified' : 'none',
+              authenticated: false,
+              format: promoted || body.hasCertifiedSchema ? 'KKSOLSC1' : undefined,
+              label: promoted?.label,
+              artifactHash: promoted?.bundleHash,
+              codeIdentityBound: Boolean(promoted),
+              expiresAt: promoted?.expiresAt,
+              resolution: artifactResolution.status,
+            },
+            simulation,
+            hostFindings: decodedFindings.findings,
+            hostLimitations: decodedFindings.limitations,
+          })
+          if (!promoted) {
+            let draft
+            try {
+              draft = observeSolanaTransaction({
+                rawTxBase64: body.raw_tx,
+                source: body.hasCertifiedSchema ? 'certified' : 'none',
+                simulated: simulation.status === 'success', simulationStatus: simulation.status,
+                definitionResolution: artifactResolution.status,
+                exposureClass: classifyEffectExposure(simulation),
+              })
+            } catch { draft = observeMalformedSolanaTransaction(body.raw_tx) }
+            draft.protectionLevel = report.protectionLevel
+            enqueueClearSignAuditDemand(draft)
+            void auditUnknownClearSignShape(draft, { solana: endpoint })
+          }
+          return json(validateResponse(report, S.ClearSignReportResponse, path))
+        }
+
         if (path === '/eth/sign-transaction' && method === 'POST') {
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
@@ -2456,15 +2851,18 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           // ERC-7730 definitions are reusable signed catalog entries. The
           // device preloads the primary envelope, then requests bounded chunks
           // from this catalog while decoding this exact transaction.
-          if (body.erc7730) {
+          if (body.erc7730 && ERC7730_TRANSPORT_SUPPORTED) {
             msg.erc7730 = body.erc7730
             console.log(`[REST] ERC-7730 catalog attached (${body.erc7730.definitions.length} definitions)`)
+          } else if (body.erc7730) {
+            console.warn('[REST] ERC-7730 catalog ignored (NOT_IMPLEMENTED: pinned hdwallet has no ERC-7730 transport)')
           }
 
           // ── EVM Clear-Signing: attach signed metadata blob for device OLED ──
           // Priority: 1) caller provides txMetadata in request body (test fixtures)
           //           2) Pioneer signedInsightBlob from calldata decoder
           //           3) none — device falls back to raw hex
+          let runtimeSigner: RuntimeEvmSigner | undefined
           if (body.txMetadata && body.txMetadata.signedPayload) {
             msg.txMetadata = {
               signedPayload: body.txMetadata.signedPayload,
@@ -2472,8 +2870,23 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             }
             console.log(`[REST] EVM clear-sign: using caller-provided blob (${String(body.txMetadata.signedPayload).length} chars, keyId=${msg.txMetadata.keyId})`)
           } else {
+            const firmwareVersion = activeSigningInfo?.firmwareVersion
+            let certified: Awaited<ReturnType<typeof resolveEvmSchema>> = activeSigningInfo?.certifiedEvmSchema
+            if (!certified && supportsCertifiedClearSign(firmwareVersion)) {
+              try {
+                certified = await resolveEvmSchema(msg.chainId, msg.to, msg.data, true)
+              } catch (error: any) {
+                // A reviewed certified call must not lose authentication when
+                // its service or artifact is unavailable.
+                console.warn(`[REST] EVM certified schema lookup unavailable: ${error?.message || error}`)
+                throw error
+              }
+            }
             const decoded = activeSigningInfo?.calldataDecoded
-            if (decoded?.signedInsightBlob) {
+            if (certified) {
+              msg.txMetadata = { signedPayload: certified.signedPayload, keyId: certified.keyId }
+              console.log(`[REST] EVM clear-sign: certified schema ${certified.method} (source=${certified.source || 'service'})`)
+            } else if (decoded?.signedInsightBlob) {
               // Pioneer emits the blob as base64, but hdwallet's ethSignTx
               // arrayify()s a STRING signedPayload as hex ("0x"+s) → a base64
               // string throws "invalid hexadecimal string" before the device
@@ -2484,8 +2897,59 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
                 keyId: decoded.insightKeyId,
               }
               console.log(`[REST] EVM clear-sign: using Pioneer blob (keyId=${decoded.insightKeyId}, ${msg.txMetadata.signedPayload.length} bytes)`)
+            } else if (
+              supportsRuntimeEvmMetadata(activeSigningInfo?.firmwareVersion, activeSigningInfo?.advancedModeEnabled === true)
+            ) {
+              // The REST, browser-extension and WalletConnect routes must use
+              // the same exact-transaction runtime metadata path. A configured
+              // provider is authoritative: transport, identity, signing and
+              // device trust failures abort signing rather than silently
+              // degrading to raw blind signing.
+              const runtime = await resolveRuntimeEvmMetadata(msg)
+              if (runtime) {
+                runtimeSigner = runtime.signer
+                msg.txMetadata = {
+                  signedPayload: runtime.signedPayload,
+                  keyId: runtime.keyId,
+                }
+                console.log(`[REST] EVM clear-sign: runtime provider signer ${runtime.signer.fingerprint} (keyId=${runtime.keyId})`)
+              }
             } else {
               console.log('[REST] EVM clear-sign: no metadata blob — device will show raw hex')
+            }
+          }
+
+          if (runtimeSigner) {
+            if (typeof (wallet as any).loadClearsignSigner !== 'function') {
+              throw new HttpError(501, 'Connected device does not support LoadClearsignSigner (requires firmware 7.15.0+)')
+            }
+            let signerSentToDevice = false
+            try {
+              await emuWrap(
+                () => {
+                  signerSentToDevice = true
+                  return (wallet as any).loadClearsignSigner({
+                    keyId: runtimeSigner!.keyId,
+                    pubkey: Uint8Array.from(Buffer.from(runtimeSigner!.publicKeyHex, 'hex')),
+                    alias: runtimeSigner!.alias,
+                  })
+                },
+                { operation: 'loadClearsignSigner', opLabel: `Trust ${runtimeSigner.alias} (${runtimeSigner.fingerprint})`, chain: 'Ethereum' },
+              )
+              recordRestClearSignEvent({
+                kind: 'signer-load', outcome: 'loaded', source: 'rest-api', chain: 'Ethereum',
+                label: runtimeSigner.alias, publicKey: runtimeSigner.publicKeyHex, fingerprint: runtimeSigner.fingerprint,
+                keyId: runtimeSigner.keyId, sentToDevice: signerSentToDevice,
+                request: { persist: false, automatic: true },
+              })
+            } catch (err: any) {
+              recordRestClearSignEvent({
+                kind: 'signer-load', outcome: 'blocked', source: 'rest-api', chain: 'Ethereum',
+                label: runtimeSigner.alias, publicKey: runtimeSigner.publicKeyHex, fingerprint: runtimeSigner.fingerprint,
+                keyId: runtimeSigner.keyId, sentToDevice: signerSentToDevice,
+                request: { persist: false, automatic: true }, error: err?.message || String(err),
+              })
+              throw err
             }
           }
 
@@ -2516,7 +2980,18 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               keyId: Number.isInteger(clearSignRequest.keyId) ? clearSignRequest.keyId : undefined,
               sentToDevice: clearSignSentToDevice, request: clearSignRequest,
             })
-            return json(validateResponse(result, S.EthSignTransactionResponse, path))
+            if (activeClearSignObservationId && (msg.erc7730 || msg.txMetadata)) {
+              authenticateClearSignObservation(
+                activeClearSignObservationId,
+                msg.erc7730 ? 'erc7730' : msg.txMetadata?.keyId === 0x80 ? 'certified' : 'runtime',
+              )
+            }
+            if (activeClearSignObservationId) finalizeClearSignObservation(activeClearSignObservationId, 'signed')
+            // The report the approval window showed, built in the signing gate
+            // from this request's own body. A caller compares its
+            // transactionFingerprint with the report it displayed.
+            const signedReport = activeSigningInfo?.clearSignReport
+            return json(validateResponse(signedReport ? { ...(result as object), clearSignReport: signedReport } : result, S.EthSignTransactionResponse, path))
           } catch (err: any) {
             if (clearSignPayload) recordRestClearSignEvent({
               kind: 'transaction', outcome: 'blocked', source: 'rest-api', chain: evmChainName,
@@ -2525,6 +3000,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               sentToDevice: clearSignSentToDevice, request: clearSignRequest,
               error: err?.message || String(err),
             })
+            if (activeClearSignObservationId) finalizeClearSignObservation(activeClearSignObservationId, 'failed', 'device-or-transport')
             // Distinguish user cancellation / device rejection from actual failures
             const errMsg = String(err?.message || err || '').toLowerCase()
             if (errMsg.includes('cancel') || errMsg.includes('rejected') || errMsg.includes('denied') || errMsg.includes('action cancelled')) {
@@ -2615,13 +3091,16 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             const typedChainId = normalizeEvmChainId(body.typedData?.domain?.chainId)
             const chain = typedChainId ? evmChainLabel(typedChainId)?.name ?? `EVM chain ${typedChainId}` : 'Ethereum'
             const result = await emuWrap(() => wallet.ethSignTypedData(params), { operation: 'ethSignTypedData', chain })
+            if (activeClearSignObservationId) finalizeClearSignObservation(activeClearSignObservationId, 'signed')
             return json(result)
           } catch (err: any) {
             // Distinguish user cancellation from actual failures
             const msg = String(err?.message || err || '').toLowerCase()
             if (msg.includes('cancel') || msg.includes('rejected') || msg.includes('denied') || msg.includes('action cancelled')) {
+              if (activeClearSignObservationId) finalizeClearSignObservation(activeClearSignObservationId, 'rejected', 'user-rejected')
               return json({ error: 'User cancelled signing on device' }, 403)
             }
+            if (activeClearSignObservationId) finalizeClearSignObservation(activeClearSignObservationId, 'failed', 'device-or-transport')
             throw err
           }
         }
@@ -2661,6 +3140,16 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const { captureCurrentFrame } = await import('./emulator-window')
           const dataUrl = await captureCurrentFrame()
           return json({ dataUrl })
+        }
+        if (path === '/emulator/test-decision' && method === 'POST') {
+          auth.requireAuth(req)
+          if (process.env.KEEPKEY_TEST_EMULATOR_CONTROL !== '1') throw new HttpError(404, 'Not found')
+          if (!engine.isEmulator) throw new HttpError(400, 'Emulator control is emulator-only')
+          const body = await req.json() as any
+          if (typeof body?.approved !== 'boolean') throw new HttpError(400, 'approved must be boolean')
+          const { decidePendingEmulatorConfirm } = await import('./emulator-window')
+          if (!decidePendingEmulatorConfirm(body.approved)) throw new HttpError(409, 'No emulator confirmation is pending')
+          return json({ ok: true })
         }
 
         // ── UTXO SIGNING (1 endpoint) ────────────────────────────────
@@ -2889,6 +3378,16 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               keyId: Number.isInteger(schema?.signerKeyId) ? schema!.signerKeyId : undefined,
               sentToDevice: clearSignSentToDevice, request: clearSignRequest,
             })
+            if (activeClearSignObservationId && (schema || result.clearSignPromotionBundleHash)) {
+              authenticateClearSignObservation(
+                activeClearSignObservationId,
+                signRequest.certificate || result.clearSignPromotionBundleHash ? 'certified' : 'runtime',
+                1,
+                Boolean(result.clearSignPromotionBundleHash),
+                result.clearSignPromotionBundleHash,
+              )
+            }
+            if (activeClearSignObservationId) finalizeClearSignObservation(activeClearSignObservationId, 'signed')
           } catch (err: any) {
             if (clearSignPayload) recordRestClearSignEvent({
               kind: 'transaction', outcome: 'blocked', source: 'rest-api', chain: 'Solana',
@@ -2897,12 +3396,16 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               sentToDevice: clearSignSentToDevice, request: clearSignRequest,
               error: err?.message || String(err),
             })
+            if (activeClearSignObservationId) finalizeClearSignObservation(activeClearSignObservationId, 'failed', 'device-or-transport')
             throw err
           }
           if (!result?.signature) return json(result)
+          // Same report the approval window showed for this raw_tx (signing gate).
+          const signedReport = activeSigningInfo?.clearSignReport
           return json({
             signature: Buffer.from(result.signature).toString('base64'),
             serializedTx: result.serializedTx,
+            ...(signedReport ? { clearSignReport: signedReport } : {}),
           })
         }
 
@@ -4664,6 +5167,11 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           fwCode != null ? `(code ${fwCode})` : '')
         return json({ error: typeof fwMsg === 'string' ? fwMsg : 'Internal error', code: fwCode }, 500)
       } finally {
+        if (activeClearSignObservationId) {
+          // Conditional update: explicit outcomes above win; this closes only
+          // unexpected exits so no observation remains pending forever.
+          finalizeClearSignObservation(activeClearSignObservationId, 'failed', 'unfinalized-request')
+        }
         // Dismiss signing overlay AFTER the handler completes (success, error, or cancellation)
         if (activeSigningId && callbacks?.onSigningDismissed) {
           callbacks.onSigningDismissed(activeSigningId)
@@ -4671,6 +5179,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         activeSigningId = undefined
         activeSigningInfo = undefined
         activeAllowBlindSigning = false
+        activeClearSignObservationId = undefined
         activeSolanaCertified = undefined
       }
     },
