@@ -70,7 +70,7 @@ export function summarizeClearSignObservations(observations: ClearSignObservatio
   }
   const definitionStatuses: ClearSignDefinitionResolution[] = [
     'not-checked', 'selected', 'invalid-request', 'no-artifact', 'shape-mismatch', 'revoked', 'expired',
-    'identity-unavailable', 'identity-stale', 'identity-changed', 'identity-mismatch', 'unsupported-alt',
+    'identity-unavailable', 'identity-stale', 'identity-changed', 'identity-mismatch', 'unsupported-alt', 'reviewed-decoder',
   ]
   const byDefinitionResolution = Object.fromEntries(definitionStatuses.map(status => [status, 0])) as ClearSignCoverageSummary['byDefinitionResolution']
   const exposureClasses: ClearSignExposureClass[] = ['not-evaluated', 'none-observed', 'bounded-outflow', 'delegated-authority', 'unlimited-authority', 'unknown-effects']

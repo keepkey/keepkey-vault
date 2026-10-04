@@ -155,6 +155,7 @@ export type ClearSignObservationKind = 'evm-call' | 'evm-typed-data' | 'solana-t
 export type ClearSignSimulationStatus = 'not-requested' | 'success' | 'revert' | 'incomplete' | 'unavailable'
 export type ClearSignDefinitionResolution = 'not-checked' | 'selected' | 'invalid-request' | 'no-artifact' | 'shape-mismatch'
   | 'revoked' | 'expired' | 'identity-unavailable' | 'identity-stale' | 'identity-changed' | 'identity-mismatch' | 'unsupported-alt'
+  | 'reviewed-decoder'
 export type ClearSignExposureClass = 'not-evaluated' | 'none-observed' | 'bounded-outflow' | 'delegated-authority'
   | 'unlimited-authority' | 'unknown-effects'
 

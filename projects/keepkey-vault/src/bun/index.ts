@@ -3054,7 +3054,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					byOutcome: { pending: 0, signed: 0, rejected: 0, 'timed-out': 0, 'policy-blocked': 0, failed: 0 },
 					bySimulation: { 'not-requested': 0, success: 0, revert: 0, incomplete: 0, unavailable: 0 },
 					simulation: { attemptedRequests: 0, successfulRequests: 0, successPercent: 0 },
-					byDefinitionResolution: Object.fromEntries(['not-checked', 'selected', 'invalid-request', 'no-artifact', 'shape-mismatch', 'revoked', 'expired', 'identity-unavailable', 'identity-stale', 'identity-changed', 'identity-mismatch', 'unsupported-alt'].map(status => [status, 0])) as any,
+					byDefinitionResolution: Object.fromEntries(['not-checked', 'selected', 'invalid-request', 'no-artifact', 'shape-mismatch', 'revoked', 'expired', 'identity-unavailable', 'identity-stale', 'identity-changed', 'identity-mismatch', 'unsupported-alt', 'reviewed-decoder'].map(status => [status, 0])) as any,
 					byExposure: { 'not-evaluated': 0, 'none-observed': 0, 'bounded-outflow': 0, 'delegated-authority': 0, 'unlimited-authority': 0, 'unknown-effects': 0 },
 					definitions: { checkedRequests: 0, selectedRequests: 0, refusedRequests: 0, noArtifactRequests: 0 },
 					auditQueue: { pending: 0, auditing: 0, evidenceReady: 0, covered: 0, failed: 0, identityChanged: 0, historicalIdentityChanges: 0 },

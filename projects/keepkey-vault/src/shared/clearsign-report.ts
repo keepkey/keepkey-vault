@@ -11,6 +11,8 @@ export interface ClearSignDescriptorEvidence {
   expiresAt?: number
   resolution?: 'selected' | 'invalid-request' | 'no-artifact' | 'shape-mismatch' | 'revoked' | 'expired'
     | 'identity-unavailable' | 'identity-stale' | 'identity-changed' | 'identity-mismatch' | 'unsupported-alt'
+    /** No artifact; a reviewed, pinned local decoder read the call (display only). */
+    | 'reviewed-decoder'
 }
 
 /** Two EIP-712 approvals of the clearsign definition (device schema) for
@@ -109,7 +111,8 @@ export function buildClearSignReport(input: {
     message: 'The description is authenticated, but execution effects could not be completely simulated.',
     severity: 'warning',
   })
-  if (descriptor.resolution && descriptor.resolution !== 'selected' && descriptor.resolution !== 'no-artifact') limitations.push({
+  if (descriptor.resolution && descriptor.resolution !== 'selected' && descriptor.resolution !== 'no-artifact'
+    && descriptor.resolution !== 'reviewed-decoder') limitations.push({
     code: 'CLEARSIGN_DEFINITION_REFUSED',
     message: `A local ClearSign definition was not applied: ${descriptor.resolution}.`,
     severity: descriptor.resolution === 'revoked' || descriptor.resolution === 'identity-changed'

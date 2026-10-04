@@ -8,7 +8,8 @@ import { tronPreview } from './tron-preview'
 import type { ClearSignEvent } from '../shared/types'
 import { createHash } from 'crypto'
 import { decodeEIP712 } from './eip712-decoder'
-import { applyEvmTxPreview, evmPriorityFee, normalizeEvmChainId, typedDataNativelyReviewed } from './evm-signing-preview'
+import { evmPriorityFee, normalizeEvmChainId, typedDataNativelyReviewed } from './evm-signing-preview'
+import { buildEvmPresignReport, hostEvidenceLevel, prepareEvmTxSigningInfo, reviewedEvmDecodeLabel } from './evm-presign-report'
 import { CHAINS, isChainSupported, hiveRolePath, evmChainLabel } from '../shared/chains'
 import { getEvmSimulationEndpoint } from './evm-simulation-config'
 import { versionCompare } from '../shared/firmware-versions'
@@ -80,7 +81,7 @@ import { importPromotedClearSignArtifact } from './clearsign-artifact-import'
 import { findPromotedEvmArtifact, findPromotedSolanaArtifact, resolvePromotedEvmArtifact, resolvePromotedSolanaArtifact } from './clearsign-artifact-resolver'
 import { resolveRuntimeEvmMetadata, supportsRuntimeEvmMetadata, type RuntimeEvmSigner } from './evm-runtime-metadata'
 import { supportsCertifiedClearSign } from './solana-certified-policy'
-import { measureLiveDeployment, resolveCertifiedEvmTransaction, resolveEvmSchema } from './evm-schema-registry'
+import { measureLiveDeployment, resolveEvmSchema } from './evm-schema-registry'
 import { CERTIFIED_METADATA_KEY_ID } from './evm-certified-schema'
 import { findContractRating } from './clearsign-review'
 import { ERC7730_TRANSPORT_SUPPORTED } from '../shared/erc7730-support'
@@ -2019,41 +2020,9 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
               // Clear-signing: decode calldata locally (vendored, no network) for
               // the UI, and gate blind-signing off what the FIRMWARE clear-signs
-              // natively or a 7.16 KeepKey-certified schema covers.
-              await applyEvmTxPreview(
-                signingInfo, preview.to, preview.data, signingInfo.chainId,
-                engine.getDeviceState().firmwareVersion, preview.txMetadata,
-              )
-              // Still blind after that: promoted local artifacts and certified
-              // exact-transaction envelopes (resolveEvmSchema /
-              // resolveCertifiedEvmTransaction). Resolved before approval and
-              // kept on signingInfo so the handler signs what the user reviewed.
-              // A lookup failure leaves the call on the blind / AdvancedMode path.
-              if (signingInfo.needsBlindSigning && preview.data && preview.data.length >= 10 && preview.to
-                && !preview.txMetadata?.signedPayload && supportsCertifiedClearSign(signingInfo.firmwareVersion)) {
-                const chainIdNum = Number(signingInfo.chainId)
-                try {
-                  const txForCertification = {
-                    chainId: chainIdNum, from: preview.from, to: preview.to, data: preview.data,
-                    value: preview.value || '0x0', nonce: preview.nonce || '0x0',
-                    gasLimit: preview.gas || preview.gasLimit || '0x5208',
-                    ...(preview.gasPrice || preview.gas_price ? { gasPrice: preview.gasPrice || preview.gas_price } : {
-                      maxFeePerGas: preview.maxFeePerGas || preview.max_fee_per_gas,
-                      maxPriorityFeePerGas: preview.maxPriorityFeePerGas || preview.max_priority_fee_per_gas || '0x0',
-                    }),
-                  }
-                  const certified = await resolveEvmSchema(chainIdNum, preview.to, preview.data, true)
-                    ?? await resolveCertifiedEvmTransaction(txForCertification)
-                  if (certified) {
-                    signingInfo.certifiedEvmSchema = certified
-                    signingInfo.deviceClearSigns = true
-                    signingInfo.needsBlindSigning = false
-                    console.log(`[REST] Approval preview authenticated by certified schema ${certified.method} (source=${certified.source || 'service'})`)
-                  }
-                } catch (error: any) {
-                  console.warn(`[REST] Certified approval preview unavailable, staying blind: ${error?.message || error}`)
-                }
-              }
+              // natively or a 7.16 KeepKey-certified schema covers. Shared with
+              // POST /clearsign/report so both surfaces judge the same bytes alike.
+              await prepareEvmTxSigningInfo(signingInfo, preview, engine.getDeviceState().firmwareVersion)
               if (path === '/eth/sign-transaction' && /^0x[0-9a-fA-F]{40}$/.test(String(preview.from || ''))) {
                 const chainIdNum = typeof signingInfo.chainId === 'string'
                   ? (signingInfo.chainId.startsWith('0x') ? parseInt(signingInfo.chainId, 16) : parseInt(signingInfo.chainId, 10))
@@ -2082,13 +2051,12 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
                 const deviceAuthenticated = signingInfo.deviceClearSigns === true || certifiedBlob
                 signingInfo.clearSignReport = buildClearSignReport({
                   requestedLevel: deviceAuthenticated ? 'P4'
-                    : simulation.status === 'success' ? 'P3'
-                      : universalRouterFindings.complete ? 'P2' : 'P1',
+                    : hostEvidenceLevel(simulation, universalRouterFindings.complete, signingInfo),
                   descriptor: {
                     source: certified || certifiedBlob ? 'certified' : deviceAuthenticated ? 'native' : ERC7730_TRANSPORT_SUPPORTED && preview.erc7730 ? 'erc7730' : preview.txMetadata ? 'runtime' : 'none',
                     authenticated: deviceAuthenticated,
                     format: certified || certifiedBlob ? 'EVM_METADATA' : deviceAuthenticated ? 'FIRMWARE_NATIVE' : ERC7730_TRANSPORT_SUPPORTED && preview.erc7730 ? 'ERC7730' : preview.txMetadata ? 'EVM_METADATA' : undefined,
-                    label: certified?.method || (certifiedBlob ? signingInfo.calldataDecoded?.method : undefined) || (deviceAuthenticated ? `${signingInfo.calldataDecoded?.dappName || 'EVM'} ${signingInfo.calldataDecoded?.method || 'call'}` : undefined),
+                    label: certified?.method || (certifiedBlob ? signingInfo.calldataDecoded?.method : undefined) || (deviceAuthenticated ? `${signingInfo.calldataDecoded?.dappName || 'EVM'} ${signingInfo.calldataDecoded?.method || 'call'}` : reviewedEvmDecodeLabel(signingInfo)),
                   },
                   simulation,
                   hostFindings: universalRouterFindings.findings,
@@ -2718,23 +2686,23 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             const universalRouterFindings = await uniswapReportFindingsWithState(
               body.data || '0x', body.chainId, body.to, body.from, getEvmSimulationEndpoint(body.chainId),
             )
-            const report = buildClearSignReport({
-              // A supplied descriptor becomes P4 only after the device verifies
-              // it during signing. This pre-sign endpoint never self-promotes.
-              requestedLevel: simulation.status === 'success' ? 'P3' : universalRouterFindings.complete ? 'P2' : 'P1',
-              descriptor: {
-                source: promoted ? 'certified' : body.hasErc7730 ? 'erc7730' : 'none',
-                authenticated: false,
-                format: promoted ? 'EVM_METADATA' : body.hasErc7730 ? 'ERC7730' : undefined,
-                label: promoted?.method,
-                artifactHash: promoted?.bundleHash,
-                codeIdentityBound: Boolean(promoted),
-                expiresAt: promoted?.expiresAt,
-                resolution: artifactResolution.status,
-              },
+            // The same preview the Desktop builds before its signing overlay,
+            // against the connected device's firmware (none: the preview
+            // degrades to the no-certification path and the report says so).
+            const firmwareVersion = engine.getDeviceState().firmwareVersion
+            const signingInfo: SigningRequestInfo = {
+              id: 'report', method: '/eth/sign-transaction', appName: 'report', chain: 'eth',
+              from: body.from, to: body.to, value: body.value, chainId: body.chainId, data: body.data, firmwareVersion,
+            }
+            await prepareEvmTxSigningInfo(signingInfo, body, firmwareVersion)
+            const report = buildEvmPresignReport({
+              signingInfo,
+              deviceConnected: Boolean(firmwareVersion),
               simulation,
-              hostFindings: universalRouterFindings.findings,
-              hostLimitations: universalRouterFindings.limitations,
+              universalRouterFindings,
+              artifactResolution,
+              hasErc7730: body.hasErc7730,
+              rating: body.to ? await findContractRating(body.chainId, body.to, measureLiveDeployment) : undefined,
             })
             if (!promoted) {
               const draft = observeEvmCall({
