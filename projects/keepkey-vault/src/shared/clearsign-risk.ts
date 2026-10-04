@@ -173,6 +173,12 @@ function evmTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void) 
   const sel = data.slice(0, 10)
   const catalog = req.rawRequestBody?.erc7730
   const hasCatalog = typeof catalog === 'object' && catalog !== null
+  const fields = req.calldataDecoded?.fields ?? []
+  const field = (n: string) => fields.find((f) => f.name === n)?.value
+  // Set only for a reviewed Universal Router whose calldata decodes the way
+  // the device decodes it (evm-signing-preview uniswapSwapFields).
+  const urSwap = field('Protocol') === 'Uniswap Universal Router' && field('Action')?.startsWith('Swap ')
+    ? field('Action')!.replace(/^Swap /, 'Swaps ') : undefined
   if ((sel === '0x095ea7b3' || sel === '0x39509351') && addrWord(0) && num(1) !== null) {
     const spender = addrWord(0)!, v = num(1)!
     if (v === 0n) {
@@ -190,14 +196,18 @@ function evmTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void) 
       : `Sends ${num(1)} units of token ${to} to ${addrWord(0)}. This computer does not recognize this token.`)
   } else if (hasCatalog) {
     add('high', `The site attached a signed description of this call. This computer cannot check it; your KeepKey checks it and refuses if it is not genuine. The call can still use any token permission you already gave ${to}.`)
+  } else if (urSwap && req.calldataDecoded?.signedInsightBlob) {
+    // Every command decoded, and a signed description attached that the device
+    // verifies before it shows the swap: the amounts are on its screen, so
+    // this is a check, not a blind signature.
+    add('medium', `${urSwap} through the Uniswap Universal Router, a contract KeepKey has reviewed. Your KeepKey shows this swap on its screen from a signed description, and refuses it if that description is not genuine. Check the amounts there.`)
   } else if (!req.deviceClearSigns || KNOWN_SELECTORS.has(sel)) {
     // A known selector reaching here did not parse (dirty address word,
     // trailing bytes): the device may accept it by length alone.
     add('high', `Your KeepKey cannot show what this call to ${to} does. It can use any token permission you already gave that contract. You would be signing blind.`)
+    if (urSwap) add('low', `This computer reads it as: ${urSwap} through the Uniswap Universal Router. Your KeepKey will not confirm that.`)
   }
 
-  const fields = req.calldataDecoded?.fields ?? []
-  const field = (n: string) => fields.find((f) => f.name === n)?.value
   if (field('Action')?.startsWith('Swap ')) {
     const min = field('Minimum output')
     if (!min || min === 'No minimum specified' || /^0(?:\.0+)?\s/.test(min)) add('high', 'Sets no minimum, so this swap can pay you back almost nothing.')

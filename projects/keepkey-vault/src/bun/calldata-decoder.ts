@@ -24,6 +24,22 @@ function formatAddress(raw: string): string {
   return '0x' + addr
 }
 
+/** A unix-seconds deadline as this computer's local time plus how far off it
+ *  is ("16:45, in 20 min"); a date is added when it is not within 12 h. Not a
+ *  plausible timestamp: returned as the bare number. */
+export function formatDeadline(epoch: string, nowMs = Date.now()): string {
+  const secs = Number(epoch)
+  if (!(secs > 1e9 && secs < 1e11)) return epoch
+  const when = new Date(secs * 1000)
+  const deltaMin = Math.round((secs * 1000 - nowMs) / 60_000)
+  const abs = Math.abs(deltaMin)
+  const span = abs < 60 ? `${abs} min` : abs < 1440 ? `${Math.floor(abs / 60)} h ${abs % 60} min` : `${Math.floor(abs / 1440)} d`
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const time = `${pad(when.getHours())}:${pad(when.getMinutes())}`
+  const day = abs > 720 ? `${when.getFullYear()}-${pad(when.getMonth() + 1)}-${pad(when.getDate())} ` : ''
+  return `${day}${time}, ${deltaMin >= 0 ? `in ${span}` : `EXPIRED ${span} ago`}`
+}
+
 function formatUint256(raw: string): string {
   if (!raw || raw === '0x') return '0'
   try {
@@ -187,16 +203,13 @@ const LOCAL_DECODERS: LocalDecoder[] = [
     selector: '0x3593564c',
     method: 'Swap (Universal Router)',
     decode: (data) => {
-      // commands is a packed byte array — each byte is a command type
-      // inputs is an array of encoded params for each command
-      // deadline is the last 32 bytes before the dynamic data
-      const deadline = formatUint256('0x' + data.slice(74, 138))
-      const deadlineDate = Number(deadline) > 1e9 && Number(deadline) < 1e11
-        ? new Date(Number(deadline) * 1000).toISOString()
-        : deadline
+      // Head: word 0 = offset of commands, word 1 = offset of inputs, word 2 =
+      // deadline. (Reading word 1 showed the inputs offset, 0xa0 = "160".)
+      if (data.length < 202) return null
+      const deadline = formatUint256('0x' + data.slice(138, 202))
       return [
         { name: 'Protocol', type: 'string', value: 'Uniswap Universal Router', format: 'raw' },
-        { name: 'Deadline', type: 'uint256', value: deadlineDate, format: 'raw' },
+        { name: 'Deadline', type: 'uint256', value: formatDeadline(deadline), format: 'raw' },
       ]
     },
   },
@@ -206,12 +219,9 @@ const LOCAL_DECODERS: LocalDecoder[] = [
     method: 'Multicall (Uniswap V3)',
     decode: (data) => {
       const deadline = formatUint256('0x' + data.slice(10, 74))
-      const deadlineDate = Number(deadline) > 1e9 && Number(deadline) < 1e11
-        ? new Date(Number(deadline) * 1000).toISOString()
-        : deadline
       return [
         { name: 'Protocol', type: 'string', value: 'Uniswap V3 Router', format: 'raw' },
-        { name: 'Deadline', type: 'uint256', value: deadlineDate, format: 'raw' },
+        { name: 'Deadline', type: 'uint256', value: formatDeadline(deadline), format: 'raw' },
       ]
     },
   },
@@ -253,9 +263,7 @@ const LOCAL_DECODERS: LocalDecoder[] = [
       const deadline = formatUint256('0x' + data.slice(266, 330))
       const amountIn = formatUint256('0x' + data.slice(330, 394))
       const amountOutMin = formatUint256('0x' + data.slice(394, 458))
-      const deadlineDate = Number(deadline) > 1e9 && Number(deadline) < 1e11
-        ? new Date(Number(deadline) * 1000).toISOString()
-        : deadline
+      const deadlineDate = formatDeadline(deadline)
       return [
         { name: 'Token In', type: 'address', value: tokenIn, format: 'address' },
         { name: 'Token Out', type: 'address', value: tokenOut, format: 'address' },
@@ -513,7 +521,7 @@ export async function decodeCalldata(
       // Derive dApp name from method — DeFi protocols get their own name
       const method = decoder.method
       let dappName = 'ERC-20'
-      if (method.includes('Uniswap')) dappName = 'Uniswap'
+      if (method.includes('Uniswap') || method.includes('Universal Router')) dappName = 'Uniswap'
       else if (method.includes('1inch')) dappName = '1inch'
       else if (method.includes('THORChain')) dappName = 'THORChain'
       else if (method.includes('Wrap') || method.includes('Unwrap')) dappName = 'WETH'

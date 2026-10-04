@@ -298,3 +298,51 @@ describe('certified Uniswap swap (0x07) attach', () => {
     expect(s2.needsBlindSigning).toBe(true)
   })
 })
+
+// Real Base swap from the Uniswap app (fixture header names the tx). Its card
+// showed "Deadline: 160" (the inputs offset word) and "ERC-20" as the app.
+describe('Uniswap Universal Router card rows — real Base swap', () => {
+  const swap = require('../../__tests__/fixtures/uniswap/base-ur-usdc-to-eth-swap.json')
+  const { decodeCalldata, formatDeadline } = require('./calldata-decoder')
+  const DEADLINE = 1791151531
+
+  test('Deadline is the third head word, as local time; app is Uniswap', async () => {
+    const d = await decodeCalldata(swap.to, swap.data, swap.chainId)
+    expect(d.dappName).toBe('Uniswap')
+    const deadline = d.fields.find((f: any) => f.name === 'Deadline').value
+    expect(deadline).not.toBe('160')
+    expect(deadline).toBe(formatDeadline(String(DEADLINE)))
+  })
+
+  test('formatDeadline: local HH:MM and how far off', () => {
+    const at = (minutes: number) => (DEADLINE - minutes * 60) * 1000
+    expect(formatDeadline(String(DEADLINE), at(20))).toMatch(/^\d{2}:\d{2}, in 20 min$/)
+    expect(formatDeadline(String(DEADLINE), at(-5))).toMatch(/^\d{2}:\d{2}, EXPIRED 5 min ago$/)
+    expect(formatDeadline(String(DEADLINE), at(3 * 1440))).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}, in 3 d$/)
+    expect(formatDeadline('160')).toBe('160')
+  })
+
+  test('the decoded swap is on the card: amounts, tokens, recipient', async () => {
+    globalThis.fetch = (async () => { throw new Error('offline') }) as unknown as typeof fetch
+    const s: SigningRequestInfo = { ...info(), from: swap.from, to: swap.to, value: swap.value, data: swap.data, chainId: swap.chainId }
+    await applyEvmTxPreview(s, swap.to, swap.data, swap.chainId, '7.15.0')
+    const row = (n: string) => s.calldataDecoded?.fields.find((f) => f.name === n)?.value
+    // The swap's own floor is 0; UNWRAP_WETH carries the real one.
+    expect(row('Action')).toBe('Swap 300 USDC for at least 0.108123518386717195 ETH')
+    expect(row('You pay')).toBe('300 USDC')
+    expect(row('Minimum output')).toBe('0.108123518386717195 ETH')
+    expect(row('Recipient')).toBe(`${swap.from} (the signing account)`)
+    expect(row('Token warning')).toBeUndefined()
+    // Display only: the gate is unchanged.
+    expect(s.needsBlindSigning).toBe(true)
+  })
+
+  test('same calldata to an unreviewed contract gets no swap rows', async () => {
+    globalThis.fetch = (async () => { throw new Error('offline') }) as unknown as typeof fetch
+    const other = '0x1111111111111111111111111111111111111111'
+    const s: SigningRequestInfo = { ...info(), from: swap.from, to: other, value: swap.value, data: swap.data, chainId: swap.chainId }
+    await applyEvmTxPreview(s, other, swap.data, swap.chainId, '7.16.0')
+    expect(s.calldataDecoded?.fields.find((f) => f.name === 'Action')).toBeUndefined()
+    expect(s.needsBlindSigning).toBe(true)
+  })
+})
