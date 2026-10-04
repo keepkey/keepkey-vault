@@ -55,13 +55,19 @@ describe('7.16 alpha certificate ceremony', () => {
 
   it.each([
     ['wrong capability', { flags: 0 }],
-    ['wrong chain', { chain: 8453 }],
+    ['an unreviewed chain', { chain: 56 }],
     ['expired', { expiry: 1787270400 }],
     ['wrong delegate', { delegate: `02${'11'.repeat(32)}` }],
   ])('rejects %s', (_label, overrides) => {
     const body = bodyHex(overrides)
     const hash = ethersUtils.keccak256(`0x${body}`).slice(2)
     expect(() => inspectAlphaCertificateBody(body, hash, 1787500000)).toThrow()
+  })
+
+  it.each([8453, 42161])('accepts reviewed EVM chain %d', (chain) => {
+    const body = bodyHex({ chain })
+    const hash = ethersUtils.keccak256(`0x${body}`).slice(2)
+    expect(inspectAlphaCertificateBody(body, hash, 1787500000).chainId).toBe(chain)
   })
 
   it('rejects an independent hash mismatch', () => {

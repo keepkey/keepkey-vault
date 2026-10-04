@@ -10,7 +10,11 @@ export const CLEARSIGN_MIN_EXPIRY = 1787270400
 /** scope_id values this build is allowed to request/verify a certificate for. */
 export const CLEARSIGN_SCOPE_ETHEREUM = 1
 export const CLEARSIGN_SCOPE_SOLANA = 501
-const ALLOWED_SCOPES = new Set([CLEARSIGN_SCOPE_ETHEREUM, CLEARSIGN_SCOPE_SOLANA])
+export const CLEARSIGN_SCOPE_BASE = 8453
+export const CLEARSIGN_SCOPE_ARBITRUM = 42161
+// Firmware accepts any nonzero scope equal to the transaction's chain; this
+// list is the host's own review gate for which chains a certificate may name.
+const ALLOWED_SCOPES = new Set([CLEARSIGN_SCOPE_ETHEREUM, CLEARSIGN_SCOPE_SOLANA, CLEARSIGN_SCOPE_BASE, CLEARSIGN_SCOPE_ARBITRUM])
 
 const CERT_BODY_BYTES = 75
 const CERT_SIGNATURE_BYTES = 64

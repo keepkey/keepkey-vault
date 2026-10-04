@@ -1,4 +1,5 @@
 import type { EngineController } from './engine-controller'
+import { withPermit2SpenderName } from './permit2-spender-name'
 import type { AuthStore } from './auth'
 import { HttpError } from './auth'
 import { WalletCacheSession, WalletSessionChangedError, WalletSessionMap } from './wallet-session-cache'
@@ -7,8 +8,8 @@ import { tronPreview } from './tron-preview'
 import type { ClearSignEvent } from '../shared/types'
 import { createHash } from 'crypto'
 import { decodeEIP712 } from './eip712-decoder'
-import { decodeCalldata, firmwareClearSigns } from './calldata-decoder'
-import { CHAINS, isChainSupported, hiveRolePath } from '../shared/chains'
+import { applyEvmTxPreview, evmPriorityFee, normalizeEvmChainId, typedDataNativelyReviewed } from './evm-signing-preview'
+import { CHAINS, isChainSupported, hiveRolePath, evmChainLabel } from '../shared/chains'
 import { versionCompare } from '../shared/firmware-versions'
 import { isBitcoinOnlyVariant, DEFAULT_AUTO_LOCK_MS } from '../shared/flags'
 import {
@@ -44,7 +45,8 @@ import type { SwapTrackingStatus } from '../shared/types'
 import { parseSolanaTx, SolanaTxParseError } from './solana-tx'
 import { signSolanaWireTransaction } from './solana-signing'
 import { buildSolanaDecodedInfo } from './solana-clearsign'
-import { buildSolanaMessageDecodedInfo } from './solana-message-preview'
+import { buildSolanaMessageDecodedInfo, solanaSignerChangedError } from './solana-message-preview'
+import bs58 from 'bs58'
 import { assessSigningRisk } from '../shared/clearsign-risk'
 import { applyRestSolanaSigningGates, buildRestSolanaSignRequest, type CertifiedSolanaProof } from './solana-certified-registry'
 import { certifiedTokenIdentities, describeCertifiedSolanaTransaction } from './solana-certified-describe'
@@ -1702,14 +1704,19 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             if (path === '/eth/sign-typed-data') {
               // EIP-712: address + typedData structure (no from/to/value/data)
               signingInfo.from = preview.address
-              signingInfo.chainId = preview.typedData?.domain?.chainId ? Number(preview.typedData.domain.chainId) : undefined
+              signingInfo.chainId = normalizeEvmChainId(preview.typedData?.domain?.chainId)
               if (preview.typedData) {
                 signingInfo.typedDataDecoded = decodeEIP712(preview.typedData)
-                // hdwallet signs everything but x402 via EthereumSignTypedHash,
-                // which the device refuses unless AdvancedMode is on.
-                if (signingInfo.typedDataDecoded.operationName !== 'x402 EIP-3009 Payment') {
+                // hdwallet streams every document; the device reviews x402 and
+                // (7.16+) a canonical Permit2 PermitSingle natively. Anything
+                // else ends up hash-signed, which needs AdvancedMode.
+                const native = signingInfo.typedDataDecoded.operationName === 'x402 EIP-3009 Payment'
+                  || typedDataNativelyReviewed(preview.typedData, engine.getDeviceState().firmwareVersion)
+                if (!native) {
                   signingInfo.needsBlindSigning = true
                   signingInfo.requiresAdvancedMode = true
+                } else {
+                  signingInfo.needsBlindSigning = false
                 }
               }
             } else if (path === '/eth/sign') {
@@ -1777,9 +1784,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
                 const derived = await wallet.solanaGetAddress({ addressNList, showDisplay: false })
                 const derivedSigner = typeof derived === 'string' ? derived : derived?.address
                 if (derivedSigner) actualSigner = derivedSigner
-                if (claimedSigner && derivedSigner && claimedSigner !== derivedSigner) {
-                  throw new HttpError(400, 'Solana signer mismatch: claimed signer does not match address_n/addressNList')
-                }
+                const changed = solanaSignerChangedError(claimedSigner, derivedSigner)
+                if (changed) throw new HttpError(409, changed)
               } catch (e: any) {
                 if (e instanceof HttpError) throw e
                 console.warn('[REST] Could not derive Solana signer for preview:', e?.message || e)
@@ -1963,46 +1969,19 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               signingInfo.from = preview.from || preview.signerAddress
               signingInfo.to = preview.to
               signingInfo.value = preview.value
-              signingInfo.chainId = preview.chainId || preview.chain_id
+              // Browser-extension callers send hex ("0x2105"); normalize EVM ids
+              // once. Other routes keep their own id (e.g. "cosmoshub-4").
+              const rawChainId = preview.chainId || preview.chain_id
+              signingInfo.chainId = path.startsWith('/eth/') ? normalizeEvmChainId(rawChainId) : rawChainId
               signingInfo.data = preview.data   // full data — UI handles display
 
               // Clear-signing: decode calldata locally (vendored, no network) for
-              // the UI, and gate blind-signing off what the FIRMWARE clear-signs.
-              if (preview.data && preview.data.length >= 10 && preview.to) {
-                const chainIdNum = typeof signingInfo.chainId === 'string'
-                  ? (signingInfo.chainId.startsWith('0x') ? parseInt(signingInfo.chainId, 16) : parseInt(signingInfo.chainId, 10))
-                  : signingInfo.chainId
-                try {
-                  signingInfo.calldataDecoded = await decodeCalldata(preview.to, preview.data, chainIdNum) ?? undefined
-                  console.log(`[REST] Calldata decoded:`, JSON.stringify(signingInfo.calldataDecoded, null, 2))
-                } catch (e) { console.warn('[REST] Calldata decode failed:', e) }
-                signingInfo.deviceClearSigns = firmwareClearSigns(preview.to, preview.data, chainIdNum)
-
-                // Caller supplied a runtime-signer blob directly (LoadClearsignSigner
-                // flow — the /eth/sign-transaction handler below honors this at
-                // priority 1). The device verifies it against the loaded signer and
-                // clear-signs regardless of what the firmware natively handles.
-                if (preview.txMetadata?.signedPayload) {
-                  signingInfo.calldataDecoded = {
-                    dappName: 'Unknown', contractName: 'Unknown', method: '(runtime signer)',
-                    selector: preview.data.slice(0, 10), fields: [], source: 'none',
-                    ...signingInfo.calldataDecoded,
-                    signedInsightBlob: preview.txMetadata.signedPayload,
-                    insightKeyId: preview.txMetadata.keyId,
-                  }
-                  signingInfo.needsBlindSigning = false
-                  console.log(`[REST] needsBlindSigning=false (caller-provided runtime-signer blob, keyId=${preview.txMetadata.keyId})`)
-                } else {
-                  // Needs blind signing unless the firmware clear-signs it natively.
-                  // Keyed off the device's own allowlist (firmwareClearSigns), NOT
-                  // whether our decoder recognized the calldata — a contract we can
-                  // decode (Uniswap/1inch) but the firmware can't still blind-signs,
-                  // and forcing global AdvancedMode on a firmware-clearsignable tx
-                  // re-opens the drain vector (PR #261/#303).
-                  signingInfo.needsBlindSigning = !firmwareClearSigns(preview.to, preview.data, chainIdNum)
-                  console.log(`[REST] needsBlindSigning=${signingInfo.needsBlindSigning} (firmwareClearSigns=${!signingInfo.needsBlindSigning}, decoder source=${signingInfo.calldataDecoded?.source})`)
-                }
-              }
+              // the UI, and gate blind-signing off what the FIRMWARE clear-signs
+              // natively or a 7.16 KeepKey-certified schema covers.
+              await applyEvmTxPreview(
+                signingInfo, preview.to, preview.data, signingInfo.chainId,
+                engine.getDeviceState().firmwareVersion, preview.txMetadata,
+              )
             }
           } catch (e: any) {
             if (e instanceof HttpError) throw e
@@ -2469,8 +2448,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             // non-canonically → the tx recovers to the wrong signer and is
             // unbroadcastable (see keepkey-firmware eip1559-zero-priority fix). Send
             // empty for a zero/absent priority fee.
-            const prio = body.maxPriorityFeePerGas || body.max_priority_fee_per_gas
-            msg.maxPriorityFeePerGas = (!prio || /^0x0*$/.test(prio)) ? '0x' : prio
+            msg.maxPriorityFeePerGas = evmPriorityFee(body.maxPriorityFeePerGas || body.max_priority_fee_per_gas)
           } else {
             msg.gasPrice = body.gasPrice || body.gas_price || '0x0'
           }
@@ -2522,6 +2500,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             dataSelector: typeof msg.data === 'string' ? msg.data.slice(0, 10) : undefined,
           }
           let clearSignSentToDevice = false
+          const evmChainName = evmChainLabel(chainId)?.name ?? `EVM chain ${chainId}`
           try {
             // Honest confirm dialog: decode msg.data so token/contract calls
             // don't show the contract as recipient or 0x0/hex-wei as amount.
@@ -2529,10 +2508,10 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             const result = await emuWrap(() => {
               clearSignSentToDevice = true
               return wallet.ethSignTx(msg)
-            }, evmConfirmDetails('ethSignTx', 'Ethereum', msg))
+            }, evmConfirmDetails('ethSignTx', evmChainName, msg))
             console.log('[REST] ethSignTx result:', JSON.stringify(result))
             if (clearSignPayload) recordRestClearSignEvent({
-              kind: 'transaction', outcome: 'signed', source: 'rest-api', chain: 'Ethereum',
+              kind: 'transaction', outcome: 'signed', source: 'rest-api', chain: evmChainName,
               format: 'EVM_TX_METADATA', label: 'EVM ClearSign transaction', payload: clearSignPayload,
               keyId: Number.isInteger(clearSignRequest.keyId) ? clearSignRequest.keyId : undefined,
               sentToDevice: clearSignSentToDevice, request: clearSignRequest,
@@ -2540,7 +2519,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             return json(validateResponse(result, S.EthSignTransactionResponse, path))
           } catch (err: any) {
             if (clearSignPayload) recordRestClearSignEvent({
-              kind: 'transaction', outcome: 'blocked', source: 'rest-api', chain: 'Ethereum',
+              kind: 'transaction', outcome: 'blocked', source: 'rest-api', chain: evmChainName,
               format: 'EVM_TX_METADATA', label: 'Blocked EVM ClearSign transaction', payload: clearSignPayload,
               keyId: Number.isInteger(clearSignRequest.keyId) ? clearSignRequest.keyId : undefined,
               sentToDevice: clearSignSentToDevice, request: clearSignRequest,
@@ -2632,7 +2611,10 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           }
 
           try {
-            const result = await emuWrap(() => wallet.ethSignTypedData({ addressNList, typedData: body.typedData }), { operation: 'ethSignTypedData', chain: 'Ethereum' })
+            const params = await withPermit2SpenderName({ addressNList, typedData: body.typedData }, engine.getDeviceState().firmwareVersion)
+            const typedChainId = normalizeEvmChainId(body.typedData?.domain?.chainId)
+            const chain = typedChainId ? evmChainLabel(typedChainId)?.name ?? `EVM chain ${typedChainId}` : 'Ethereum'
+            const result = await emuWrap(() => wallet.ethSignTypedData(params), { operation: 'ethSignTypedData', chain })
             return json(result)
           } catch (err: any) {
             // Distinguish user cancellation from actual failures
@@ -2987,6 +2969,14 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.SolanaSignMessageRequest)
           const addressNList = body.addressNList || body.address_n || [0x8000002C, 0x800001F5, 0x80000000, 0x80000000]
+          // A dapp left on the pre-switch account would get a signature from a
+          // key it does not expect (pump.fun 401). Refuse before the device.
+          const claimedSigner = body.pubkey ?? body.address
+          if (claimedSigner) {
+            const derived = await wallet.solanaGetAddress({ addressNList, showDisplay: false })
+            const changed = solanaSignerChangedError(claimedSigner, typeof derived === 'string' ? derived : (derived as any)?.address)
+            if (changed) throw new HttpError(409, changed)
+          }
           const result = await emuWrap(() => wallet.solanaSignMessage({
             addressNList,
             message: body.message,
@@ -3000,6 +2990,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             publicKey: result.publicKey instanceof Uint8Array
               ? Buffer.from(result.publicKey).toString('base64')
               : result.publicKey,
+            // The signer's base58 address (= the ed25519 public key).
+            address: result.publicKey instanceof Uint8Array ? bs58.encode(result.publicKey) : undefined,
           })
         }
 

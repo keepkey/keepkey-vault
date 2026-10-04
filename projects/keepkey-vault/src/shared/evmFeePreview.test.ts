@@ -15,3 +15,12 @@ test('native signing value is readable on Ethereum, Base and Avalanche', () => {
   expect(evmNativeValue('0', 43114)).toBe('0 AVAX')
   expect(evmNativeValue('not-a-number', 1)).toBeNull()
 })
+
+test('native unit comes from the shared chain table for every built-in EVM chain', () => {
+  expect(evmNativeValue('1000000000000000000', 42161)).toBe('1 ETH')
+  expect(evmNativeValue('1000000000000000000', 10)).toBe('1 ETH')
+  expect(evmNativeValue('1000000000000000000', 56)).toBe('1 BNB')
+  expect(evmNativeValue('1000000000000000000', 100)).toBe('1 xDAI')
+  expect(evmNativeValue('1000000000000000000', 137)).toBe('1 MATIC')
+  expect(evmNativeValue('1000000000000000000', 999999)).toBe('1 native coin')
+})

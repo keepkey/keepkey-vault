@@ -17,9 +17,16 @@
 import registry from './evm-schemas-local.json'
 import { DEFAULT_CLEARSIGN_SERVICE_URL } from './solana-certified-registry'
 import {
+  buildEvmDecoderBody,
   CERTIFIED_METADATA_KEY_ID,
+  ERC20_APPROVE,
+  EVM_ARG_ADDRESS_PINNED,
   findCertifiedEvmSchemaSpec,
+  findReviewedUniversalRouter,
   isCertifiedEvmMetadata,
+  reviewedSwapTokens,
+  UR_METHOD,
+  type EvmSchemaSpec,
 } from './evm-certified-schema'
 
 export { isCertifiedEvmMetadata }
@@ -58,6 +65,24 @@ export function findEvmSchema(
   return schema
 }
 
+/**
+ * The spender of a standard 68-byte ERC-20 approve whose spender word is a
+ * clean address (high 12 bytes zero), else undefined. It is the only argument
+ * the schema service ever sees: it picks the Permit2-pinned or generic entry.
+ */
+export function approveSpender(data: string | undefined): string | undefined {
+  const calldata = String(data || '').replace(/^0x/i, '').toLowerCase()
+  if (calldata.length !== 136 || `0x${calldata.slice(0, 8)}` !== ERC20_APPROVE) return undefined
+  const word = calldata.slice(8, 72)
+  return /^0{24}[0-9a-f]{40}$/.test(word) ? `0x${word.slice(24)}` : undefined
+}
+
+/** The worker's catalog id for a spec (clearsign-worker evmEntryId). */
+export function evmCatalogEntryId(spec: Pick<EvmSchemaSpec, 'chainId' | 'contract' | 'selector' | 'args'>): string {
+  const pinned = spec.args.some((arg) => arg.format === EVM_ARG_ADDRESS_PINNED)
+  return `eip155:${spec.chainId}:${spec.contract}:${spec.selector}${pinned ? ':permit2' : ''}`.toLowerCase()
+}
+
 /** Fetch a KeepKey-certified v3 envelope from the isolated signer service. */
 export async function findCertifiedEvmSchema(
   chainId: number | undefined,
@@ -70,18 +95,21 @@ export async function findCertifiedEvmSchema(
     .trim()
     .replace(/\/+$/, '')
 
+  // Only an approve's spender leaves the host (it selects the entry).
+  const spender = approveSpender(data)
   let response: Response
   try {
     response = await fetch(`${base}/v1/evm/schema`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      // The service only needs the reviewed call shape. Do not send addresses,
+      // The service only needs the reviewed call shape. Do not send recipients,
       // order IDs, amounts, or any other calldata arguments off the host.
       body: JSON.stringify({
         chainId,
         contract: to,
         selector: spec.selector,
         calldataLength: spec.expectedCalldataLength,
+        ...(spender ? { spender } : {}),
       }),
       signal: AbortSignal.timeout(3_000),
     })
@@ -113,7 +141,10 @@ export async function findCertifiedEvmSchema(
     String(result?.selector || '').toLowerCase() !== spec.selector.toLowerCase() ||
     result?.method !== spec.method ||
     result?.expectedCalldataLength !== spec.expectedCalldataLength ||
-    result?.keyId !== CERTIFIED_METADATA_KEY_ID
+    result?.keyId !== CERTIFIED_METADATA_KEY_ID ||
+    // Older workers omit `entry`; when present it must be the entry we expect
+    // (e.g. the Permit2-pinned approve, not the generic one).
+    (result?.entry !== undefined && String(result.entry).toLowerCase() !== evmCatalogEntryId(spec))
   ) {
     throw new Error('ClearSign verification service response does not match the requested schema')
   }
@@ -123,6 +154,68 @@ export async function findCertifiedEvmSchema(
     signedPayload: result.signedPayload,
     expectedCalldataLength: spec.expectedCalldataLength,
     source: 'certified-service',
+  }
+}
+
+const serviceBase = () => String(process.env.CLEARSIGN_SERVICE_URL || DEFAULT_CLEARSIGN_SERVICE_URL).trim().replace(/\/+$/, '')
+
+/**
+ * Fetch a certified 0x07 Uniswap swap entry for (router, selector) naming
+ * exactly `tokens`. Undefined (no request) unless the router and every token
+ * are reviewed locally; undefined on 422. Only the router, selector and token
+ * addresses leave the host: no amounts, recipients or calldata. The returned
+ * body must be byte-identical to the one built here from the same reviewed
+ * table, so the service cannot substitute a token identity.
+ */
+export async function findCertifiedUniswapSwap(
+  chainId: number,
+  router: string,
+  selector: string,
+  tokens: string[],
+): Promise<Pick<SignedEvmSchema, 'method' | 'keyId' | 'signedPayload'> | undefined> {
+  const reviewed = findReviewedUniversalRouter(chainId, router)
+  const identities = reviewedSwapTokens(chainId, tokens)
+  if (!reviewed || !identities) return undefined
+  const expectedBody = buildEvmDecoderBody(chainId, reviewed.address, selector, identities)
+  let response: Response
+  try {
+    response = await fetch(`${serviceBase()}/v1/evm/swap`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ chainId, contract: reviewed.address, selector, tokens: identities.map((t) => t.address) }),
+      signal: AbortSignal.timeout(3_000),
+    })
+  } catch (error: any) {
+    throw new Error(`ClearSign verification service is unavailable: ${error?.message || 'connection failed'}`)
+  }
+  let result: any
+  try {
+    result = await response.json()
+  } catch {
+    throw new Error(`ClearSign verification service returned HTTP ${response.status} without valid JSON`)
+  }
+  if (!response.ok) {
+    if (response.status === 422) return undefined
+    throw new Error(`ClearSign verification service returned HTTP ${response.status}: ${result?.error || 'request failed'}`)
+  }
+  if (!isCertifiedEvmMetadata({ signedPayload: result?.signedPayload, keyId: result?.keyId })) {
+    throw new Error('ClearSign verification service returned a non-certified payload')
+  }
+  // 0x03 | certificate(139) | body | r,s,v(65)
+  const payload = Buffer.from(String(result.signedPayload).replace(/^0x/i, ''), 'hex')
+  if (
+    result?.classification !== 'VERIFIED' ||
+    result?.chainId !== chainId ||
+    String(result?.entry || '').toLowerCase() !== `eip155:${chainId}:${reviewed.address}:uniswap-ur` ||
+    payload.length !== 1 + 139 + expectedBody.length + 65 ||
+    !payload.subarray(140, 140 + expectedBody.length).equals(expectedBody)
+  ) {
+    throw new Error('ClearSign verification service response does not match the requested swap entry')
+  }
+  return {
+    method: UR_METHOD,
+    keyId: CERTIFIED_METADATA_KEY_ID,
+    signedPayload: result.signedPayload,
   }
 }
 

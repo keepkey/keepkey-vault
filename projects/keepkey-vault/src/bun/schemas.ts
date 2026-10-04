@@ -432,6 +432,10 @@ export const SolanaSignMessageRequest = z.object({
   addressNList: z.array(z.number().int()).optional(),
   message: z.string().min(1),
   show_display: z.boolean().optional(),
+  /** The account the dapp believes it is signing with (base58). When present
+   *  and different from the device's derived address → 409 (stale account). */
+  pubkey: z.string().optional(),
+  address: z.string().optional(),
 }).strip()
 
 

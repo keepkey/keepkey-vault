@@ -14,6 +14,7 @@ import bs58 from 'bs58'
 import type { SigningRequestInfo, WcSessionInfo } from '../shared/types'
 import { evmAddressPath } from './evm-addresses'
 import { verifyEvmSigner } from './evm-rpc'
+import { applyEvmTxPreview, evmPriorityFee } from './evm-signing-preview'
 import { buildSolanaMessageDecodedInfo } from './solana-message-preview'
 import { buildSolanaDecodedInfo } from './solana-clearsign'
 import { applySolanaSigningGates } from './solana-consent'
@@ -873,6 +874,9 @@ export class WalletConnectManager {
       data: tx.data,
       chainId: effectiveChainId,
     }
+    // Same calldata decode + verdict as REST: native firmware decode, else a
+    // 7.16 KeepKey-certified schema, else AdvancedMode (blind).
+    await applyEvmTxPreview(signingInfo, tx.to, tx.data, effectiveChainId, this.callbacks.getFirmwareVersion(), undefined, '[WC]')
 
     const approved = await this.callbacks.requestSigningApproval(signingInfo)
     if (!approved) throw new Error('User rejected signing')
@@ -911,13 +915,26 @@ export class WalletConnectManager {
       if (tx.maxFeePerGas) {
         msg.maxFeePerGas = tx.maxFeePerGas
         // Fetch tip if omitted — 0x0 works but produces slow txs
-        msg.maxPriorityFeePerGas = tx.maxPriorityFeePerGas
+        const prio = tx.maxPriorityFeePerGas
           ?? await this.rpcCall(effectiveChainId, 'eth_maxPriorityFeePerGas', []).catch(() => '0x59682F00') // 1.5 gwei fallback
+        // Canonical RLP needs a zero priority fee as the EMPTY string, not a
+        // 0x00 byte (same as REST /eth/sign-transaction) or the tx recovers to
+        // the wrong signer.
+        msg.maxPriorityFeePerGas = evmPriorityFee(prio)
       } else if (tx.gasPrice) {
         msg.gasPrice = tx.gasPrice
       } else {
         // Neither provided — fetch from network
         msg.gasPrice = await this.rpcCall(effectiveChainId, 'eth_gasPrice', [])
+      }
+
+      // Certified schema attached at preview time → hand the device its bytes.
+      const decoded = signingInfo.calldataDecoded
+      if (decoded?.signedInsightBlob) {
+        msg.txMetadata = {
+          signedPayload: new Uint8Array(Buffer.from(decoded.signedInsightBlob, 'base64')),
+          keyId: decoded.insightKeyId,
+        }
       }
 
       const result = await this.callbacks.ethSignTx(msg)

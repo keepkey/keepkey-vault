@@ -772,6 +772,9 @@ export interface SolanaCertifiedArg {
    *  means the amount must be shown in raw base units with the full mint. */
   symbol?: string
   decimals?: number
+  /** v3 role (1 spend-max, 2 receive-min, 3 spend-exact, 4 receive-exact,
+   *  5 per-use cap): what the device's Limits screen says about it. */
+  role?: number
 }
 
 /**
@@ -791,6 +794,9 @@ export interface SolanaCertifiedDescription {
   /** Signed display name of this instruction, e.g. "Cee-lo place bet". */
   instructionName: string
   args: SolanaCertifiedArg[]
+  /** v3: the delegate's sentence filled with these values, as the device's
+   *  first screen shows it (amounts in the units the host can confirm). */
+  summary?: string
 }
 
 /**

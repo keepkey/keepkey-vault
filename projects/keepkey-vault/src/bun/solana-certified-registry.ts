@@ -252,7 +252,10 @@ export async function prepareExternalSolanaProof(
     return undefined
   }
   const match = findLocalCertifiedSolanaMatch(message)
-  if (!match) return undefined
+  if (!match) {
+    console.log(`[REST] certified Solana: no local catalog match (${message.instructions.length} instructions) — opaque path`)
+    return undefined
+  }
 
   let proof: CertifiedSolanaProof | undefined
   try {
@@ -262,8 +265,10 @@ export async function prepareExternalSolanaProof(
     return undefined
   }
   if (!proof || !hasCompleteCertifiedSolanaEnvelope(proof) || !certifiedSolanaProofApplies(body.raw_tx, match.catalogKey, proof)) {
+    console.log(`[REST] certified Solana: ${match.catalogKey} matched locally but ${!proof ? 'the service returned no proof' : 'the envelope is incomplete or would not apply'} — opaque path`)
     return undefined
   }
+  console.log(`[REST] certified Solana: ${match.catalogKey} envelope ready (instruction ${match.instructionIndex}) — device clear-signs`)
   return proof
 }
 

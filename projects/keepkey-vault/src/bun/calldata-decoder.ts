@@ -13,6 +13,7 @@
  */
 import type { CalldataDecodedInfo, CalldataDecodedField } from '../shared/types'
 import { thorDepositFields } from './thor-swap-preview'
+import firmwareTokenTable from './firmware-token-table.json'
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -379,8 +380,9 @@ export function decodeCalldataLocal(
 // ── Firmware clear-sign allowlist (mirrors device ethereum_contractHandled) ──
 //
 // rc3 firmware clear-signs a contract call WITHOUT AdvancedMode and WITHOUT any
-// signed-metadata blob ONLY for the pinned (selector, to) pairs below, plus a
-// standard 68-byte ERC-20 transfer/approve. Anything else the device blind-signs
+// signed-metadata blob ONLY for the pinned (chain, selector, to) entries below,
+// plus a standard 68-byte ERC-20 transfer/approve of a token in its built-in
+// table (firmware-token-table.json). Anything else the device blind-signs
 // (hard "Blocked" unless AdvancedMode is on). The signing overlay MUST gate off
 // THIS — not off "did our decoder recognize the calldata" — otherwise it either
 // under-warns (Uniswap/1inch/relay look verified but the device blind-signs) or
@@ -399,23 +401,31 @@ const ADDR = {
 
 // THORChain's Router lives at a DIFFERENT address on each EVM chain, so the
 // clear-sign pin is (address, chainId) together — mirrors thor_router_for_chain
-// in firmware ethereum_contracts/thortx.c. Keep this in lockstep with that
-// switch; a chain listed here but not there (or vice versa) makes the overlay
-// mispredict clear-signability. Missing chainId is not a trusted mainnet pin.
+// in firmware ethereum_contracts/thortx.c, which knows chains 1 and 43114 ONLY.
+// Keep this in lockstep with that switch; a chain listed here but not there (or
+// vice versa) makes the overlay mispredict clear-signability. Missing chainId is
+// not a trusted mainnet pin.
 const THOR_ROUTER_BY_CHAIN: Record<number, string> = {
   1:     ADDR.THOR_ROUTER,
   43114: ADDR.THOR_ROUTER_AVAX,
-  8453:  ADDR.THOR_ROUTER_AVAX, // Base currently uses the same address
+}
+// Display-only: THORChain's Base router (same address as Avalanche's) decodes
+// for the overlay, but the firmware does not pin it, so it is NOT native.
+const THOR_ROUTER_DECODE_BY_CHAIN: Record<number, string> = {
+  ...THOR_ROUTER_BY_CHAIN,
+  8453: ADDR.THOR_ROUTER_AVAX,
 }
 
-// selector → the ONE contract address the firmware pins that selector to.
-const FIRMWARE_PINNED: Record<string, string> = {
-  '0xd9627aa4': ADDR.ZX_EXCHANGE_PROXY, // sellToUniswap (0x)
-  '0xf305d719': ADDR.UNISWAP_V2_ROUTER, // addLiquidityETH
-  '0x02751cec': ADDR.UNISWAP_V2_ROUTER, // removeLiquidityETH
-  '0xfea7c53f': ADDR.SALARY_PROXY,      // withdrawFromSalary
-  '0x1fece7b4': ADDR.THOR_ROUTER,       // THORChain deposit
-  '0x44bc937b': ADDR.THOR_ROUTER,       // THORChain depositWithExpiry
+// 0x Exchange Proxy chains — mirrors zx_isExchangeProxyChain in firmware
+// ethereum_contracts.c (Optimism deliberately absent: different proxy there).
+const ZX_EXCHANGE_PROXY_CHAINS = new Set([1, 56, 137, 8453, 42161, 43114])
+
+// selector → the ONE (contract, chains) the firmware pins that selector to.
+const FIRMWARE_PINNED: Record<string, { to: string; chains: Set<number> }> = {
+  '0xd9627aa4': { to: ADDR.ZX_EXCHANGE_PROXY, chains: ZX_EXCHANGE_PROXY_CHAINS }, // sellToUniswap (0x)
+  '0xf305d719': { to: ADDR.UNISWAP_V2_ROUTER, chains: new Set([1]) },             // addLiquidityETH
+  '0x02751cec': { to: ADDR.UNISWAP_V2_ROUTER, chains: new Set([1]) },             // removeLiquidityETH
+  '0xfea7c53f': { to: ADDR.SALARY_PROXY, chains: new Set([1]) },                  // withdrawFromSalary
 }
 // THOR/Maya share both deposit selectors — accept either router for either.
 const THOR_MAYA_DEPOSIT = new Set(['0x1fece7b4', '0x44bc937b'])
@@ -423,23 +433,37 @@ const THOR_MAYA_DEPOSIT = new Set(['0x1fece7b4', '0x44bc937b'])
 /** ERC-20 transfer/approve the firmware renders natively (standard 68-byte). */
 const ERC20_NATIVE = new Set(['0xa9059cbb', '0x095ea7b3'])
 
+/** (chainId:address) of every token in the firmware's built-in table —
+ *  generated from the firmware build (scripts/gen-firmware-token-table.ts). */
+const FIRMWARE_TOKENS: ReadonlySet<string> = new Set((firmwareTokenTable as { tokens: string[] }).tokens)
+
+/** Firmware ethereum_contractHandled only claims calldata that fits the first
+ *  1024-byte chunk (data_total == data_initial_chunk.size). */
+const FIRMWARE_INITIAL_CHUNK_BYTES = 1024
+
+/** True iff (chainId, token) is in the firmware's built-in token table. */
+export function firmwareKnowsToken(chainId: number | undefined, token: string | undefined): boolean {
+  return chainId != null && !!token && FIRMWARE_TOKENS.has(`${chainId}:${token.toLowerCase()}`)
+}
+
 /**
- * True iff the rc3 device clear-signs this tx natively (no AdvancedMode, no
+ * True iff the device clear-signs this tx natively (no AdvancedMode, no
  * signed blob). Mirrors firmware `ethereum_contractHandled` + the standard
- * ERC-20 transfer/approve path in ethereum.c. Contract-address pinning matters:
- * the same selector to a DIFFERENT address is NOT clear-signed by the device.
+ * ERC-20 transfer/approve path in ethereum.c. Contract-address AND chain
+ * pinning matter: the same selector to a DIFFERENT address, or the same
+ * address on a chain the firmware does not list, is NOT clear-signed.
  */
 export function firmwareClearSigns(to?: string, data?: string, chainId?: number): boolean {
   if (!to || !data || data.length < 10) return false
   const selector = data.slice(0, 10).toLowerCase()
   const dest = to.toLowerCase()
 
-  // Standard ERC-20 transfer/approve: 4-byte selector + 2 32-byte words = 68B.
-  // ponytail: firmware also requires the token be in its built-in registry
-  // (unknown tokens hard-block); we can't cheaply mirror that list, so an exotic
-  // token defers to the device's own "enable AdvancedMode" prompt — benign UX,
-  // never an under-warn. Upgrade path: ship the token list into Vault.
-  if (ERC20_NATIVE.has(selector) && (data.length - 2) === 136) return true
+  // Standard ERC-20 transfer/approve: 4-byte selector + 2 32-byte words = 68B,
+  // and only for a token the firmware's table knows ON THIS CHAIN — anything
+  // else is UnknownToken, which the device gates on AdvancedMode.
+  if (ERC20_NATIVE.has(selector) && (data.length - 2) === 136) return firmwareKnowsToken(chainId, dest)
+
+  if ((data.length - 2) / 2 > FIRMWARE_INITIAL_CHUNK_BYTES) return false
 
   if (THOR_MAYA_DEPOSIT.has(selector)) {
     // The firmware binds both protocols' router pins to an explicit chainId.
@@ -450,9 +474,9 @@ export function firmwareClearSigns(to?: string, data?: string, chainId?: number)
       (chainId === 1 && dest === ADDR.MAYA_ROUTER)
   }
   const pinned = FIRMWARE_PINNED[selector]
-  return pinned != null && dest === pinned
-  // ponytail: MakerDAO (address+param gated, rare) intentionally omitted → those
-  // over-warn as blind. Add if a MakerDAO clear-sign flow actually shows up.
+  return pinned != null && dest === pinned.to && chainId != null && pinned.chains.has(chainId)
+  // ponytail: MakerDAO (address+param gated, rare) and the 0x approve-to-LP-pair
+  // path intentionally omitted → those over-warn as blind. Add if a flow shows up.
 }
 
 // ── Main decode function ─────────────────────────────────────────────────
@@ -471,7 +495,7 @@ export async function decodeCalldata(
   // comes from the destination router, never from the selector or memo text.
   if (THOR_MAYA_DEPOSIT.has(selector)) {
     const dest = contractAddress.toLowerCase()
-    const thor = _chainId != null && THOR_ROUTER_BY_CHAIN[_chainId] === dest
+    const thor = _chainId != null && THOR_ROUTER_DECODE_BY_CHAIN[_chainId] === dest
     const maya = _chainId === 1 && (dest === ADDR.MAYA_ROUTER || dest === ADDR.MAYA_ROUTER_V4)
     const protocol = thor ? 'THORChain' : maya ? 'Mayachain' : null
     const fields = protocol ? thorDepositFields(data, _chainId, protocol) : null

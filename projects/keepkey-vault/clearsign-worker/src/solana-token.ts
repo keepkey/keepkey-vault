@@ -6,6 +6,7 @@ import { ARG_TOKEN_AMOUNT, CERTIFIED_SOLANA_CATALOG, type SolanaSchemaSpec } fro
 import type { SolanaInstruction } from '../../src/bun/solana-tx'
 
 export const TOKEN_2022 = 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb'
+const NATIVE_MINT = 'So11111111111111111111111111111111111111112'
 const identityCache = new Map<string, { token: NonNullable<ReturnType<typeof inspectPumpToken>>; expires: number }>()
 const pendingIdentity = new Map<string, Promise<ReturnType<typeof inspectPumpToken>>>()
 /** Token identities the reviewed catalog pins, by mint. A signed token
@@ -97,11 +98,11 @@ export async function certifySchemaTokens(
   delegateKey: string,
   fetcher: typeof fetch = fetch,
 ) {
-  const mintAccounts = catalogKey === 'pumpAmmBuy'
-    ? [3]
-    : (spec.args || []).filter(arg => arg.type === ARG_TOKEN_AMOUNT).map(arg => arg.mintAccount!)
+  void catalogKey
+  const mintAccounts = (spec.args || []).filter(arg => arg.type === ARG_TOKEN_AMOUNT).map(arg => arg.mintAccount!)
+  // The native (wrapped SOL) mint is SOL by firmware rule and needs no definition.
   const mints = [...new Set(mintAccounts.map(index => accountKeys[instruction.accountIndices[index]])
-    .filter(Boolean).map(key => bs58.encode(key)))]
+    .filter(Boolean).map(key => bs58.encode(key)))].filter(mint => mint !== NATIVE_MINT)
   if (!mints.length) return {}
   const tokenInfo = []
   for (const mint of mints.slice(0, MAX_TOKEN_INFO)) {

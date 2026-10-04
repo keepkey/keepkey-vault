@@ -1,4 +1,6 @@
 import { DEFAULT_CLEARSIGN_SERVICE_URL } from './solana-certified-registry'
+import { approveSpender } from './evm-schema-registry'
+import { PERMIT2_ADDRESS } from './evm-certified-schema'
 
 export interface CertifiedEvmEnvelope {
   method: string
@@ -27,6 +29,8 @@ export async function findCertifiedEvmEnvelope(
   const calldata = normalizedCalldata(String(data || ''))
   if (!chainId || !contract || !calldata || !/^0x[0-9a-f]{40}$/i.test(contract)) return undefined
   const selector = `0x${calldata.slice(0, 8).toLowerCase()}`
+  // Only an approve's spender leaves the host (it selects the entry).
+  const spender = approveSpender(calldata)
   const base = String(process.env.CLEARSIGN_SERVICE_URL || DEFAULT_CLEARSIGN_SERVICE_URL)
     .trim()
     .replace(/\/+$/, '')
@@ -41,6 +45,7 @@ export async function findCertifiedEvmEnvelope(
         contract,
         selector,
         calldataLength: calldata.length / 2,
+        ...(spender ? { spender } : {}),
       }),
       signal: AbortSignal.timeout(10_000),
     })
@@ -66,6 +71,11 @@ export async function findCertifiedEvmEnvelope(
     Number(result?.chainId) !== chainId ||
     String(result?.contract || '').toLowerCase() !== contract.toLowerCase() ||
     String(result?.selector || '').toLowerCase() !== selector ||
+    (spender !== undefined && result?.spender !== undefined &&
+      String(result.spender).toLowerCase() !== spender) ||
+    // Older workers omit `entry`; when present, the Permit2-pinned approve
+    // entry must come back exactly when we asked about a Permit2 spender.
+    (result?.entry !== undefined && /:permit2$/i.test(String(result.entry)) !== (spender === PERMIT2_ADDRESS)) ||
     payload.length <= 280 || payload.slice(0, 2).toLowerCase() !== '03' ||
     payload.length % 2 !== 0 || !/^[0-9a-f]+$/i.test(payload)
   ) {

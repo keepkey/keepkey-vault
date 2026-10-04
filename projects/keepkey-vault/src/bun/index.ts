@@ -14,6 +14,7 @@
 // Synchronous appendFileSync + fsync makes the log a faithful record of
 // what code executed, at the cost of a per-call sync. The throughput hit is
 // negligible for our log volume (~10–100 lines/sec at peak boot).
+import { withPermit2SpenderName } from './permit2-spender-name'
 import * as fs from "fs"
 import * as os from "os"
 import * as path from "path"
@@ -1197,7 +1198,7 @@ function getOrCreateWcManager(): WalletConnectManager {
 		},
 		ethSignTx: (params) => { if (isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant)) throw new Error('WalletConnect is not available on bitcoin-only firmware'); if (!engine.wallet) throw new Error('Device disconnected'); return engine.wallet.ethSignTx(params) },
 		ethSignMessage: (params) => { if (isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant)) throw new Error('WalletConnect is not available on bitcoin-only firmware'); if (!engine.wallet) throw new Error('Device disconnected'); return engine.wallet.ethSignMessage(params) },
-		ethSignTypedData: (params) => { if (isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant)) throw new Error('WalletConnect is not available on bitcoin-only firmware'); if (!engine.wallet) throw new Error('Device disconnected'); return engine.wallet.ethSignTypedData(params) },
+		ethSignTypedData: async (params) => { if (isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant)) throw new Error('WalletConnect is not available on bitcoin-only firmware'); if (!engine.wallet) throw new Error('Device disconnected'); return engine.wallet.ethSignTypedData(await withPermit2SpenderName(params, engine.getDeviceState().firmwareVersion)) },
 		getCosmosAccountInfo: async (caipChain) => {
 			if (isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant)) return null
 			if (!engine.wallet) return null
@@ -3327,8 +3328,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				}
 				return await engine.wallet.ethSignMessage(params)
 			},
-			ethSignTypedData: async (params) => {
+			ethSignTypedData: async (rawParams) => {
 				if (!engine.wallet) throw new Error('No device connected')
+				const params = await withPermit2SpenderName(rawParams, engine.getDeviceState().firmwareVersion)
 				if (engine.isEmulator) return emuSigningOp(
 					() => engine.wallet!.ethSignTypedData(params),
 					{ operation: 'ethSignTypedData', chain: 'Ethereum' },
