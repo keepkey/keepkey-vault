@@ -7,7 +7,7 @@ under the old CAIP (`cosmos:thorchain-1/slip44:ruji`) while the runtime CAIP is
 under **both** base64 keys (200 now).
 
 **Where:** CDN only (no code change). Source PNG:
-`/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-website-v7/public/images/chains/ruji.png`.
+`keepkey-stack/projects/keepkey-website-v7/public/images/chains/ruji.png`.
 CDN keys: `coins/Y29zbW9zOnRob3JjaGFpbi1tYWlubmV0LXYxL2Rlbm9tOngvcnVqaQ.png` +
 `coins/Y29zbW9zOnRob3JjaGFpbi0xL3NsaXA0NDpydWpp.png`.
 

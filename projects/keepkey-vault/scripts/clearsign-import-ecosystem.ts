@@ -1,5 +1,5 @@
 const service = process.env.CLEARSIGN_SERVICE_URL || 'https://keepkey-clearsign.bithighlander.workers.dev'
-const tokenPath = process.env.CLEARSIGN_ADMIN_TOKEN_FILE || '/Users/highlander/Library/Application Support/com.keepkey.vault/clearsign-admin-token'
+const tokenPath = process.env.CLEARSIGN_ADMIN_TOKEN_FILE || `${process.env.HOME}/Library/Application Support/com.keepkey.vault/clearsign-admin-token`
 const directory = process.argv[2] || '../../docs/clearsign-ecosystem'
 const token = (await Bun.file(tokenPath).text()).trim()
 const summary = await Bun.file(`${directory}/summary.json`).json()

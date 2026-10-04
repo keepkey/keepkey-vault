@@ -142,9 +142,9 @@ Run in order (see full command list at bottom). Record pass/fail.
 ## Local test sweep — exact commands (Phase 2)
 
 ```bash
-FW=/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11/modules/keepkey-firmware
-V11=/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11
-BEX=/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-client
+FW=keepkey-stack/projects/keepkey-vault-v11/modules/keepkey-firmware
+V11=keepkey-stack/projects/keepkey-vault-v11
+BEX=keepkey-stack/projects/keepkey-client
 
 # 1. firmware unit (docker ONLY — native macOS fails StorageRoundTrip Linux golden)
 cd $FW/scripts/emulator && docker compose up --build --exit-code-from firmware-unit firmware-unit
@@ -166,7 +166,7 @@ make -C $V11 preflight
 cd $BEX/chrome-extension && pnpm vitest run
 make -C $BEX type-check && make -C $BEX test && make -C $BEX lint && make -C $BEX build
 # 11. pioneer
-make -C /Users/highlander/WebstormProjects/keepkey-stack/projects/pioneer start && make -C .../pioneer test
+make -C keepkey-stack/projects/pioneer start && make -C .../pioneer test
 # 12. DEVICE Gate-3 (manual): get_features → AVAX clearsign OLED → Hive sign-ops OLED → recovery+wipe (replug!) → swap clearsign — screenshot each
 # 13. bex device e2e (device + vault hive endpoints + live pioneer)
 make -C $BEX e2e

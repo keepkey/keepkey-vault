@@ -3,7 +3,7 @@ import { utils } from 'ethers'
 
 const service = process.env.CLEARSIGN_SERVICE_URL || 'https://keepkey-clearsign.bithighlander.workers.dev'
 const endpoint = process.env.CLEARSIGN_TRON_RPC_ENDPOINT || 'https://api.trongrid.io'
-const tokenPath = process.env.CLEARSIGN_ADMIN_TOKEN_FILE || '/Users/highlander/Library/Application Support/com.keepkey.vault/clearsign-admin-token'
+const tokenPath = process.env.CLEARSIGN_ADMIN_TOKEN_FILE || `${process.env.HOME}/Library/Application Support/com.keepkey.vault/clearsign-admin-token`
 const token = (await Bun.file(tokenPath).text()).trim()
 if (token.length < 32) throw new Error('ClearSign operator credential is missing')
 const headers = { authorization: `Bearer ${token}`, 'content-type': 'application/json' }

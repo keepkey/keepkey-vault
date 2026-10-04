@@ -9,14 +9,14 @@
 All paths in this handoff are absolute. The vault project root is:
 
 ```
-/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-vault/
+keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-vault/
 ```
 
 ## What this is for
 
-The "Confirm" screen of every swap renders a centerpiece route map (`/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-vault/src/mainview/components/v3/RouteMap.tsx`): from-token → **swapper centerpiece** → to-token, with a gradient curve and a gold value-dot animating along the path. The centerpiece is the visual identity of the swap — it tells the user *who* is routing their value.
+The "Confirm" screen of every swap renders a centerpiece route map (`keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-vault/src/mainview/components/v3/RouteMap.tsx`): from-token → **swapper centerpiece** → to-token, with a gradient curve and a gold value-dot animating along the path. The centerpiece is the visual identity of the swap — it tells the user *who* is routing their value.
 
-We need one branded looping animation per supported swapper. Until each lands we render the existing ShapeShift animation (`/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-vault/src/mainview/assets/swap/shifting.gif`) as the universal fallback.
+We need one branded looping animation per supported swapper. Until each lands we render the existing ShapeShift animation (`keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-vault/src/mainview/assets/swap/shifting.gif`) as the universal fallback.
 
 ## Production spec (every animation)
 
@@ -31,7 +31,7 @@ We need one branded looping animation per supported swapper. Until each lands we
 | Motion vibe | Subtle continuous motion (rotation, pulse, particle drift). Avoid hard cuts or text — the SVG already prints the protocol name beneath |
 | Color | Lead with the brand accent in the table below; respect each protocol's existing brand identity |
 
-Place finished files at `/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-vault/src/mainview/assets/providers/animations/<key>.gif` using the **key** column below. Once a file exists, the wire-up in `/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-vault/src/mainview/lib/swapper-animations.ts` is a one-line `import` swap (replace `shapeshiftFallback` with `import x from "../assets/providers/animations/<key>.gif"`).
+Place finished files at `keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-vault/src/mainview/assets/providers/animations/<key>.gif` using the **key** column below. Once a file exists, the wire-up in `keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-vault/src/mainview/lib/swapper-animations.ts` is a one-line `import` swap (replace `shapeshiftFallback` with `import x from "../assets/providers/animations/<key>.gif"`).
 
 ## Provider list — the centerpiece roster
 
@@ -89,16 +89,16 @@ Anything that doesn't match falls back to `shapeshift` (which itself currently f
 
 ## Source-of-truth references
 
-- Provider brand registry (logos + accents): `/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-vault/src/mainview/components/ProviderBadge.tsx`
-- Animation registry (where the new files plug in): `/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-vault/src/mainview/lib/swapper-animations.ts`
-- Centerpiece component: `/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-vault/src/mainview/components/v3/RouteMap.tsx`
-- Call site (RouteMap usage in the Confirm screen): `/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-vault/src/mainview/components/SwapDialog.tsx`
-- Existing fallback: `/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-vault/src/mainview/assets/swap/shifting.gif`
+- Provider brand registry (logos + accents): `keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-vault/src/mainview/components/ProviderBadge.tsx`
+- Animation registry (where the new files plug in): `keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-vault/src/mainview/lib/swapper-animations.ts`
+- Centerpiece component: `keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-vault/src/mainview/components/v3/RouteMap.tsx`
+- Call site (RouteMap usage in the Confirm screen): `keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-vault/src/mainview/components/SwapDialog.tsx`
+- Existing fallback: `keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-vault/src/mainview/assets/swap/shifting.gif`
 
 ## Drop-in checklist
 
-1. Save GIF as `/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-vault/src/mainview/assets/providers/animations/<key>.gif` using the table key.
-2. In `/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-vault/src/mainview/lib/swapper-animations.ts`, replace `shapeshiftFallback` on that key's row with `import branded from "../assets/providers/animations/<key>.gif"`, then reference `branded`.
-3. Verify on a real swap (Confirm screen, rendered by `/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-vault/src/mainview/components/SwapDialog.tsx`) — the integration label below the centerpiece should match the animation; the gold value-dot should still travel through cleanly.
+1. Save GIF as `keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-vault/src/mainview/assets/providers/animations/<key>.gif` using the table key.
+2. In `keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-vault/src/mainview/lib/swapper-animations.ts`, replace `shapeshiftFallback` on that key's row with `import branded from "../assets/providers/animations/<key>.gif"`, then reference `branded`.
+3. Verify on a real swap (Confirm screen, rendered by `keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-vault/src/mainview/components/SwapDialog.tsx`) — the integration label below the centerpiece should match the animation; the gold value-dot should still travel through cleanly.
 
 That's the whole loop — once the assets exist the wire-up is mechanical.

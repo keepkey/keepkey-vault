@@ -15,7 +15,7 @@ screen and every per-tx confirm.
 
 ## Test (emulator, fastest)
 1. Emulator dylib from rc7 (handoff 12), reloaded in Vault; Vault has #342.
-2. `cd /Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-sdk`
+2. `cd keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-sdk`
    `KEEPKEY_API_KEY=… node tests/evm-clearsign/clearsign-signer-flows.js`
    (sends the Pioneer compass icon + `persist:true`).
 

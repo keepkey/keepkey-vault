@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto'
 const service = process.env.CLEARSIGN_SERVICE_URL || 'https://keepkey-clearsign.bithighlander.workers.dev'
 const endpoints = (process.env.CLEARSIGN_THORCHAIN_ENDPOINTS
   || 'https://api-thorchain.rorcual.xyz,https://thornode.ninerealms.com').split(',').map(value => value.trim()).filter(Boolean)
-const tokenPath = process.env.CLEARSIGN_ADMIN_TOKEN_FILE || '/Users/highlander/Library/Application Support/com.keepkey.vault/clearsign-admin-token'
+const tokenPath = process.env.CLEARSIGN_ADMIN_TOKEN_FILE || `${process.env.HOME}/Library/Application Support/com.keepkey.vault/clearsign-admin-token`
 const token = (await Bun.file(tokenPath).text()).trim()
 if (token.length < 32) throw new Error('ClearSign operator credential is missing')
 const headers = { authorization: `Bearer ${token}`, 'content-type': 'application/json' }

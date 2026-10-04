@@ -7,7 +7,7 @@ wait exceeded the socket idle window, Bun closed the connection
 home). Set `idleTimeout: 0` — device signing must not time out at the socket.
 
 **Where:** vault `#342` (OPEN) —
-`/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-vault/src/bun/rest-api.ts`
+`keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-vault/src/bun/rest-api.ts`
 (`Bun.serve({ idleTimeout: 0, … })`). Test helper: `CLEARSIGN_FLOW=<key>` runs a
 single flow in `clearsign-signer-flows.js`.
 

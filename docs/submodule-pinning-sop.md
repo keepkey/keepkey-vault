@@ -37,7 +37,7 @@ Ignored for Vault releases:
 Run this BEFORE creating a `release/X.Y.Z` branch:
 
 ```bash
-cd /Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11
+cd keepkey-stack/projects/keepkey-vault-v11
 
 # 1. Fetch Vault release-gated submodules only
 for mod in modules/hdwallet modules/proto-tx-builder modules/device-protocol modules/electrobun; do

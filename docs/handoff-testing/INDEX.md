@@ -23,10 +23,10 @@ Full paths per repo convention.
 - Emulator dylib: `~/.keepkey/emulator/libkkemu.dylib` must be built from a
   firmware branch that has **both** clear-sign AND the emu ABI (`kkemu_start`).
   That is `feat/clearsign-persistent-identity-icons` / `release/7.15.0-rc7`
-  (handoff 12). Rebuild: `cd /Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11 && make build-emulator`, then **reload the emulator in Vault**.
+  (handoff 12). Rebuild: `cd keepkey-stack/projects/keepkey-vault-v11 && make build-emulator`, then **reload the emulator in Vault**.
 - Vault on :1646 built from a checkout that has vault #342 (icon route +
   idle-timeout). `make vault` from
-  `/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11`.
+  `keepkey-stack/projects/keepkey-vault-v11`.
 - Real device: a `release/7.15.0-rc7` DEBUG_LINK build for the automated
   python/SDK suites (they wipe + load the public test seed — never real funds).
 

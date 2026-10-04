@@ -3,7 +3,7 @@
 **Date raised:** 2026-06-09
 **Ticket symptom window:** ~11:24 AM (user-reported local time — **confirm timezone**, then widen the search to roughly 10:00 AM–12:30 PM around it).
 **Server:** `api.keepkey.info` (Cloudflare-fronted: 104.21.13.95 / 172.67.132.200).
-**Pioneer monorepo:** `/Users/highlander/WebstormProjects/keepkey-stack/projects/pioneer`
+**Pioneer monorepo:** `keepkey-stack/projects/pioneer`
 
 ## What you're investigating
 

@@ -3,7 +3,7 @@ import { hostname } from 'node:os'
 import snapshot from '../../../.worktrees/keepkey-vault-solana-certified/projects/keepkey-vault/clearsign-worker/src/evm-discovery-snapshot.json'
 
 const service = process.env.CLEARSIGN_SERVICE_URL || 'https://keepkey-clearsign.bithighlander.workers.dev'
-const tokenPath = process.env.CLEARSIGN_ADMIN_TOKEN_FILE || '/Users/highlander/Library/Application Support/com.keepkey.vault/clearsign-admin-token'
+const tokenPath = process.env.CLEARSIGN_ADMIN_TOKEN_FILE || `${process.env.HOME}/Library/Application Support/com.keepkey.vault/clearsign-admin-token`
 const assetsPath = process.env.PIONEER_ASSETS_PATH || '../../../pioneer/modules/pioneer/pioneer-discovery/src/generatedAssetData.json'
 const denylistPath = process.env.PIONEER_DENYLIST_PATH || '../../../pioneer/modules/pioneer/pioneer-discovery/src/denylist.json'
 const token = (await Bun.file(tokenPath).text()).trim()

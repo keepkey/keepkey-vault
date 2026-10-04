@@ -1,6 +1,6 @@
 # Handoff: Pioneer — fetch failures silently return balance="0"
 
-Repo: `/Users/highlander/WebstormProjects/keepkey-stack/projects/pioneer`  
+Repo: `keepkey-stack/projects/pioneer`  
 Related vault PR: https://github.com/keepkey/keepkey-vault/pull/178  
 Priority: P1 — vault cannot distinguish "user spent to zero" from "RPC was down"
 

@@ -1,7 +1,7 @@
 import type { ClearSignCentralAssetAudit, ClearSignCentralAssetAuditHistory, ClearSignCentralAssetReview, ClearSignCentralAssetReviewResult, ClearSignCentralContractAudit, ClearSignCentralContractReview, ClearSignCentralRequest, ClearSignCentralStatus } from '../shared/types'
 
 const SERVICE = 'https://keepkey-clearsign.bithighlander.workers.dev'
-const TOKEN_PATH = '/Users/highlander/Library/Application Support/com.keepkey.vault/clearsign-admin-token'
+const TOKEN_PATH = process.env.CLEARSIGN_ADMIN_TOKEN_FILE || `${process.env.HOME}/Library/Application Support/com.keepkey.vault/clearsign-admin-token`
 
 async function json(url: string, init?: RequestInit): Promise<any> {
   const response = await fetch(url, { ...init, signal: AbortSignal.timeout(10_000) })

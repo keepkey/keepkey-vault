@@ -64,12 +64,12 @@ The vault degrades gracefully if the endpoint returns 404 — `startEventStream`
 
 ```bash
 # 1. Start pioneer on feat/pubkey-streaming branch
-cd /Users/highlander/WebstormProjects/keepkey-stack/projects/pioneer
+cd keepkey-stack/projects/pioneer
 git checkout feat/pubkey-streaming
 make start
 
 # 2. Start vault
-cd /Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11
+cd keepkey-stack/projects/keepkey-vault-v11
 make vault
 
 # 3. Trigger getBalances (click refresh or wait for auto-load)
@@ -98,5 +98,5 @@ curl http://localhost:9001/api/v1/events/stats
 
 ## Related handoffs
 
-- Pioneer server side: `/Users/highlander/WebstormProjects/keepkey-stack/projects/pioneer/HANDOFF-VAULT-EVENT-STREAMING.md`
+- Pioneer server side: `keepkey-stack/projects/pioneer/HANDOFF-VAULT-EVENT-STREAMING.md`
 - Pioneer WebSocket push (earlier approach): `docs/handoff-pioneer-push-events.md`
