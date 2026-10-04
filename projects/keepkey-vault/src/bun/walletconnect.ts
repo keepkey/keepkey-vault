@@ -877,20 +877,8 @@ export class WalletConnectManager {
       chainId,
     }
 
-    const observationId = this.callbacks.recordClearSignObservation(observeEvmTypedData({
-      typedData, chainId: signingInfo.chainId, hostDecoded: true,
-    }))
-    const approvalStartedAt = Date.now()
-    let approved: boolean
-    try { approved = await this.callbacks.requestSigningApproval(signingInfo) }
-    catch (error) {
-      if (observationId) this.callbacks.finalizeClearSignObservation(observationId, 'failed', 'approval-ui')
-      throw error
-    }
-    if (!approved) {
-      if (observationId) this.callbacks.finalizeClearSignObservation(observationId, Date.now() - approvalStartedAt >= 119_000 ? 'timed-out' : 'rejected')
-      throw new Error('User rejected signing')
-    }
+    const approved = await this.callbacks.requestSigningApproval(signingInfo)
+    if (!approved) throw new Error('User rejected signing')
 
     try {
       // hdwallet expects message as a hex string — pass through as-is
@@ -924,8 +912,20 @@ export class WalletConnectManager {
       typedDataDecoded: decodeEIP712(typedData),
     }
 
-    const approved = await this.callbacks.requestSigningApproval(signingInfo)
-    if (!approved) throw new Error('User rejected signing')
+    const observationId = this.callbacks.recordClearSignObservation(observeEvmTypedData({
+      typedData, chainId: signingInfo.chainId, hostDecoded: true,
+    }))
+    const approvalStartedAt = Date.now()
+    let approved: boolean
+    try { approved = await this.callbacks.requestSigningApproval(signingInfo) }
+    catch (error) {
+      if (observationId) this.callbacks.finalizeClearSignObservation(observationId, 'failed', 'approval-ui')
+      throw error
+    }
+    if (!approved) {
+      if (observationId) this.callbacks.finalizeClearSignObservation(observationId, Date.now() - approvalStartedAt >= 119_000 ? 'timed-out' : 'rejected')
+      throw new Error('User rejected signing')
+    }
 
     try {
       const result = await this.callbacks.ethSignTypedData({
