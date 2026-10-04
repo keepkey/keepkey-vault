@@ -14,6 +14,7 @@
  * the device screen stays the authority.
  */
 import { evmNativeValue } from './evmFeePreview'
+import { acrossDepositView, decodeAcrossDepositV3, type AcrossDepositV3 } from './acrossDeposit'
 import type {
   SigningRequestInfo,
   SimulatedHoldings,
@@ -171,6 +172,7 @@ function evmTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void) 
   }
 
   const sel = data.slice(0, 10)
+  const across = decodeAcrossDepositV3(to, data, chainId)
   const catalog = req.rawRequestBody?.erc7730
   const hasCatalog = typeof catalog === 'object' && catalog !== null
   const fields = req.calldataDecoded?.fields ?? []
@@ -201,6 +203,8 @@ function evmTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void) 
     // verifies before it shows the swap: the amounts are on its screen, so
     // this is a check, not a blind signature.
     add('medium', `${urSwap} through the Uniswap Universal Router, a contract KeepKey has reviewed. Your KeepKey shows this swap on its screen from a signed description, and refuses it if that description is not genuine. Check the amounts there.`)
+  } else if (across) {
+    acrossDeposit(across, req, add)
   } else if (!req.deviceClearSigns || KNOWN_SELECTORS.has(sel)) {
     // A known selector reaching here did not parse (dirty address word,
     // trailing bytes): the device may accept it by length alone.
@@ -213,6 +217,31 @@ function evmTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void) 
     if (!min || min === 'No minimum specified' || /^0(?:\.0+)?\s/.test(min)) add('high', 'Sets no minimum, so this swap can pay you back almost nothing.')
   }
   if (field('Token warning') || field('Input token warning')) add('high', 'Swaps a token KeepKey does not recognize. It may be a fake.')
+}
+
+/** A depositV3 to a pinned Across SpokePool. Decoded here only: the device
+ *  shows it as raw data, so the blind line stays and AdvancedMode still gates. */
+function acrossDeposit(d: AcrossDepositV3, req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void) {
+  const v = acrossDepositView(d)
+  const from = (req.from ?? '').toLowerCase()
+  let value: bigint | null = null
+  try { value = BigInt(req.value === undefined || req.value === '' || req.value === '0x' ? 0 : req.value) } catch { /* unreadable: no claim about it */ }
+  add('high', `Across bridge deposit to the Across SpokePool on ${d.pool.chain}. Your KeepKey cannot decode bridge deposits yet: its screen shows only raw data, so you are signing blind. Check these details here before approving.`)
+  if (value !== null && value > 0n) {
+    if (d.inputToken !== d.pool.wrappedNative.address || value !== d.inputAmount) {
+      add('high', `The coin sent with this call does not match the deposit (${v.sent}). The SpokePool will reject it and you would still pay the network fee.`)
+    }
+  } else if (value === 0n && d.inputAmount > 0n) {
+    add('medium', `Takes ${v.sent} from your balance, using the token permission you gave this SpokePool.`)
+  }
+  add('low', `A relayer pays ${v.received} to ${d.recipient} on ${v.destination} by ${v.fillDeadline}. If nobody fills it in time, the deposit is refunded to ${d.depositor}.`)
+  if (from && d.recipient !== from) add('high', `The bridged funds go to ${d.recipient}, which is NOT the account signing this (${from}).`)
+  if (from && d.depositor !== from) add('high', `Refunds go to ${d.depositor}, which is NOT the account signing this (${from}).`)
+  if (d.outputAmount === 0n) add('high', 'The recipient is set to receive nothing.')
+  if (!v.destinationKnown) add('medium', `This computer does not recognize destination ${v.destination}.`)
+  if (!v.inputTokenKnown || !v.outputTokenKnown) add('medium', 'This computer cannot name every token in this deposit; amounts are shown in base units.')
+  if (v.fee) add(v.feeBps !== null && v.feeBps > 300n ? 'medium' : 'low', `Bridge fee: ${v.fee}.`)
+  if (d.message !== '0x') add('high', `Also passes ${(d.message.length - 2) / 2} bytes of instructions that run at the recipient on ${v.destination}. This computer cannot read them.`)
 }
 
 function evmTypedData(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void) {

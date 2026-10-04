@@ -13,6 +13,7 @@
  */
 import type { CalldataDecodedInfo, CalldataDecodedField } from '../shared/types'
 import { thorDepositFields } from './thor-swap-preview'
+import { acrossDepositView, decodeAcrossDepositV3 } from '../shared/acrossDeposit'
 import firmwareTokenTable from './firmware-token-table.json'
 
 // ── Helpers ──────────────────────────────────────────────────────────────
@@ -513,6 +514,30 @@ export async function decodeCalldata(
     }
     return { dappName: 'Unknown', contractName: contractAddress,
       method: `Unknown (${selector})`, selector, fields: [], source: 'none' }
+  }
+
+  // Across SpokePool depositV3: only to a pinned pool on this chain, only a
+  // canonical encoding. Display only — the device still blind-signs it.
+  const across = decodeAcrossDepositV3(contractAddress, data, _chainId)
+  if (across) {
+    const v = acrossDepositView(across)
+    const fields: CalldataDecodedField[] = [
+      { name: 'Action', type: 'string', value: `Across bridge deposit: ${across.pool.chain} → ${v.destination}`, format: 'raw' },
+      { name: 'You send', type: 'uint256', value: `${v.sent} on ${across.pool.chain}`, format: 'amount' },
+      { name: 'Recipient gets', type: 'uint256', value: `${v.received} on ${v.destination}`, format: 'amount' },
+      { name: 'Recipient', type: 'address', value: across.recipient, format: 'address' },
+      { name: 'Refund to (depositor)', type: 'address', value: across.depositor, format: 'address' },
+      ...(v.fee ? [{ name: 'Bridge fee', type: 'uint256', value: v.fee, format: 'amount' as const }] : []),
+      { name: 'Fill deadline', type: 'uint32', value: v.fillDeadline, format: 'raw' },
+      { name: 'Exclusive relayer', type: 'address', value: v.exclusiveRelayer, format: 'raw' },
+      { name: 'Message to recipient', type: 'bytes', value: across.message === '0x' ? 'None' : `${(across.message.length - 2) / 2} bytes: ${across.message}`, format: 'hex' },
+      ...(v.integratorTag ? [{ name: 'Trailing bytes', type: 'bytes', value: v.integratorTag, format: 'hex' as const }] : []),
+      { name: 'SpokePool', type: 'address', value: `${across.pool.address} (Across, ${across.pool.chain})`, format: 'raw' },
+    ]
+    return {
+      dappName: 'Across', contractName: 'Across SpokePool', method: 'Bridge deposit (depositV3)',
+      selector, functionType: 'bridge', fields, source: 'local',
+    }
   }
 
   // Tier 1: Local decoders (offline, instant)

@@ -77,6 +77,8 @@
 		"signedVerified": "Signed & Verified",
 		"knownPattern": "Known Pattern",
 		"unverifiedContract": "Unverified Contract",
+		"acrossKnownContract": "Across SpokePool · device shows raw data",
+		"acrossAdvancedModeDescription": "Your KeepKey cannot decode Across bridge deposits yet and will show this call only as raw data. Check the decoded details here, then enable Advanced Mode on the device to sign it.",
 		"blindSigningRequired": "Blind Signing Required",
 		"blindSigningDescription": "This transaction contains contract data the device cannot fully parse. Enable Advanced Mode to sign.",
 		"enableNow": "Enable",
