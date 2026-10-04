@@ -16,6 +16,7 @@ import { toDeviceError, deviceErrorMessage } from '../shared/device-error'
 import { resolveEvmSchema } from './evm-schema-registry'
 import { resolveRuntimeEvmMetadata, supportsRuntimeEvmMetadata, type RuntimeEvmSigner } from './evm-runtime-metadata'
 import { evmCallRequiresAdvancedMode } from './evm-signing-policy'
+import { ERC7730_TRANSPORT_SUPPORTED } from '../shared/erc7730-support'
 import { findSolanaSchema } from './solana-schema-registry'
 import { certifiedSolanaProofApplies, findCertifiedSolanaProof } from './solana-certified-registry'
 import { hasCompleteCertifiedSolanaEnvelope, supportsCertifiedClearSign } from './solana-certified-policy'
@@ -1793,8 +1794,12 @@ async function buildRelaySwapTx(
   }
 
   if (relay.erc7730) {
-    unsignedTx.erc7730 = relay.erc7730
-    console.info(`${TAG} signed ERC-7730 catalog attached (${relay.erc7730.definitions.length} definitions)`)
+    if (ERC7730_TRANSPORT_SUPPORTED) {
+      unsignedTx.erc7730 = relay.erc7730
+      console.info(`${TAG} signed ERC-7730 catalog attached (${relay.erc7730.definitions.length} definitions)`)
+    } else {
+      console.warn(`${TAG} ERC-7730 catalog not attached (NOT_IMPLEMENTED: pinned hdwallet has no ERC-7730 transport)`)
+    }
   }
 
   // Older firmware uses the ordinary signing/Advanced Mode path, without a

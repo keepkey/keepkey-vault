@@ -80,6 +80,7 @@ import { resolveRuntimeEvmMetadata, supportsRuntimeEvmMetadata, type RuntimeEvmS
 import { supportsCertifiedClearSign } from './solana-certified-policy'
 import { measureLiveDeployment, resolveCertifiedEvmTransaction, resolveEvmSchema } from './evm-schema-registry'
 import { findContractRating } from './clearsign-review'
+import { ERC7730_TRANSPORT_SUPPORTED } from '../shared/erc7730-support'
 
 export interface EmuSigningDetails {
   operation: string
@@ -2085,9 +2086,9 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
                     : simulation.status === 'success' ? 'P3'
                       : universalRouterFindings.complete ? 'P2' : 'P1',
                   descriptor: {
-                    source: certified ? 'certified' : deviceAuthenticated ? 'native' : preview.erc7730 ? 'erc7730' : preview.txMetadata ? 'runtime' : 'none',
+                    source: certified ? 'certified' : deviceAuthenticated ? 'native' : ERC7730_TRANSPORT_SUPPORTED && preview.erc7730 ? 'erc7730' : preview.txMetadata ? 'runtime' : 'none',
                     authenticated: deviceAuthenticated,
-                    format: certified ? 'EVM_METADATA' : deviceAuthenticated ? 'FIRMWARE_NATIVE' : preview.erc7730 ? 'ERC7730' : preview.txMetadata ? 'EVM_METADATA' : undefined,
+                    format: certified ? 'EVM_METADATA' : deviceAuthenticated ? 'FIRMWARE_NATIVE' : ERC7730_TRANSPORT_SUPPORTED && preview.erc7730 ? 'ERC7730' : preview.txMetadata ? 'EVM_METADATA' : undefined,
                     label: certified?.method || (deviceAuthenticated ? `${signingInfo.calldataDecoded?.dappName || 'EVM'} ${signingInfo.calldataDecoded?.method || 'call'}` : undefined),
                   },
                   simulation,
@@ -2698,6 +2699,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         if (path === '/clearsign/report' && method === 'POST') {
           auth.requireAuth(req)
           const body = await parseRequest(req, S.ClearSignReportRequest)
+          // A catalog the pinned transport cannot deliver is not a descriptor.
+          if (body.chain === 'evm' && !ERC7730_TRANSPORT_SUPPORTED) body.hasErc7730 = undefined
           if (body.chain === 'evm') {
             const artifactResolution = resolvePromotedEvmArtifact(body.chainId, body.to, body.data)
             const promoted = artifactResolution.status === 'selected' ? artifactResolution.artifact : undefined
@@ -2850,9 +2853,11 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           // ERC-7730 definitions are reusable signed catalog entries. The
           // device preloads the primary envelope, then requests bounded chunks
           // from this catalog while decoding this exact transaction.
-          if (body.erc7730) {
+          if (body.erc7730 && ERC7730_TRANSPORT_SUPPORTED) {
             msg.erc7730 = body.erc7730
             console.log(`[REST] ERC-7730 catalog attached (${body.erc7730.definitions.length} definitions)`)
+          } else if (body.erc7730) {
+            console.warn('[REST] ERC-7730 catalog ignored (NOT_IMPLEMENTED: pinned hdwallet has no ERC-7730 transport)')
           }
 
           // ── EVM Clear-Signing: attach signed metadata blob for device OLED ──
@@ -2976,10 +2981,10 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               keyId: Number.isInteger(clearSignRequest.keyId) ? clearSignRequest.keyId : undefined,
               sentToDevice: clearSignSentToDevice, request: clearSignRequest,
             })
-            if (activeClearSignObservationId && (body.erc7730 || msg.txMetadata)) {
+            if (activeClearSignObservationId && (msg.erc7730 || msg.txMetadata)) {
               authenticateClearSignObservation(
                 activeClearSignObservationId,
-                body.erc7730 ? 'erc7730' : msg.txMetadata?.keyId === 0x80 ? 'certified' : 'runtime',
+                msg.erc7730 ? 'erc7730' : msg.txMetadata?.keyId === 0x80 ? 'certified' : 'runtime',
               )
             }
             if (activeClearSignObservationId) finalizeClearSignObservation(activeClearSignObservationId, 'signed')

@@ -21,6 +21,7 @@ import type {
   SolanaTxDecodedInstruction,
 } from './types'
 import { versionCompare } from './firmware-versions'
+import { ERC7730_TRANSPORT_SUPPORTED } from './erc7730-support'
 
 export type RiskLevel = 'low' | 'medium' | 'high' | 'critical'
 export interface RiskReason { level: RiskLevel; text: string }
@@ -174,7 +175,8 @@ function evmTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void) 
 
   const sel = data.slice(0, 10)
   const catalog = req.rawRequestBody?.erc7730
-  const hasCatalog = typeof catalog === 'object' && catalog !== null
+  // Without a transport the catalog never reaches the device: treat as absent.
+  const hasCatalog = ERC7730_TRANSPORT_SUPPORTED && typeof catalog === 'object' && catalog !== null
   if ((sel === '0x095ea7b3' || sel === '0x39509351') && addrWord(0) && num(1) !== null) {
     const spender = addrWord(0)!, v = num(1)!
     const canonicalUniswapSetup = chainId === 42161
