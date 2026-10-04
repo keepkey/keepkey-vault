@@ -5,6 +5,7 @@ import bs58 from 'bs58'
 import { normalizeEvmSimulation, simulateEvmEffects } from '../src/bun/evm-effects'
 import { normalizeSolanaSimulation, simulateSolanaEffects } from '../src/bun/solana-effects'
 import { buildClearSignReport, solanaDecodedReportFindings } from '../src/shared/clearsign-report'
+import { ClearSignReportResponse } from '../src/bun/schemas'
 
 const wallet = '0x1111111111111111111111111111111111111111'
 const other = '0x2222222222222222222222222222222222222222'
@@ -150,6 +151,21 @@ describe('Vault ClearSign effect reports', () => {
       source: 'authenticated-definition',
       statement: expect.stringContaining('firmware will independently decode'),
     }))
+  })
+
+  test('POST /clearsign/report response schema accepts the reports the route builds', () => {
+    const simulation = normalizeEvmSimulation(
+      { chainId: 1, from: wallet, to: other, input: '0x12345678' },
+      'http://rpc', '0x10', { status: '0x1', logs: [] }, { type: 'CALL', to: other },
+    )
+    const report = buildClearSignReport({
+      requestedLevel: 'P3',
+      descriptor: { source: 'none', authenticated: false, resolution: 'no-artifact' },
+      simulation,
+    })
+    const parsed = ClearSignReportResponse.safeParse(report)
+    expect(parsed.success).toBe(true)
+    expect(ClearSignReportResponse.safeParse({ ...report, protectionLevel: 'P9' }).success).toBe(false)
   })
 
   test('ClearSign Report exposes a fail-closed definition refusal', () => {

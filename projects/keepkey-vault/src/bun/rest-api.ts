@@ -2749,7 +2749,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               enqueueClearSignAuditDemand(draft)
               void auditUnknownClearSignShape(draft, { evm: getEvmSimulationEndpoint(body.chainId) })
             }
-            return json(report)
+            return json(validateResponse(report, S.ClearSignReportResponse, path))
           }
           const endpoint = getSetting('solana_rpc_endpoint') || DEFAULT_SOLANA_RPC_ENDPOINT
           const artifactResolution = resolvePromotedSolanaArtifact(body.raw_tx)
@@ -2794,7 +2794,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             enqueueClearSignAuditDemand(draft)
             void auditUnknownClearSignShape(draft, { solana: endpoint })
           }
-          return json(report)
+          return json(validateResponse(report, S.ClearSignReportResponse, path))
         }
 
         if (path === '/eth/sign-transaction' && method === 'POST') {

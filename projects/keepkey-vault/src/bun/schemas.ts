@@ -492,6 +492,49 @@ const ClearSignFixturePlanBase = {
   provenance: z.enum(['user-opt-in', 'operator-reproduction', 'public-chain']),
 }
 
+const ClearSignFinding = z.object({
+  code: z.string(), message: z.string(), severity: z.enum(['info', 'warning', 'danger']),
+})
+
+/** POST /clearsign/report response (shared/clearsign-report.ts ClearSignReport). */
+export const ClearSignReportResponse = z.object({
+  version: z.literal(1),
+  generatedAt: z.number(),
+  chain: z.enum(['Ethereum', 'Solana']),
+  transactionFingerprint: z.string(),
+  protectionLevel: z.enum(['P0', 'P1', 'P2', 'P3', 'P4', 'P5']),
+  headline: z.string(),
+  descriptor: z.object({
+    source: z.enum(['none', 'native', 'runtime', 'certified', 'erc7730']),
+    authenticated: z.boolean(),
+    format: z.enum(['ERC7730', 'EVM_METADATA', 'KKSOLSC1', 'FIRMWARE_NATIVE']).optional(),
+    label: z.string().optional(),
+    artifactHash: z.string().optional(),
+    codeIdentityBound: z.boolean().optional(),
+    expiresAt: z.number().optional(),
+    resolution: z.string().optional(),
+  }),
+  simulation: z.object({
+    version: z.literal(1),
+    chain: z.enum(['Ethereum', 'Solana']),
+    transactionFingerprint: z.string(),
+    status: z.enum(['success', 'revert', 'incomplete', 'unavailable']),
+    assetChanges: z.array(z.unknown()),
+    authorityChanges: z.array(z.unknown()),
+    invokedCode: z.array(z.unknown()),
+    warnings: z.array(ClearSignFinding),
+    unknowns: z.array(ClearSignFinding),
+  }).passthrough(),
+  findings: z.array(ClearSignFinding),
+  limitations: z.array(ClearSignFinding),
+  claims: z.array(z.object({
+    source: z.enum(['transaction-bytes', 'authenticated-definition', 'simulation']),
+    statement: z.string(),
+  })),
+  definitionReview: z.object({}).passthrough().optional(),
+  rating: z.object({}).passthrough().optional(),
+})
+
 /** Opt-in raw material is used only to create an ephemeral device-oracle plan. */
 export const ClearSignFixturePlanRequest = z.discriminatedUnion('chain', [
   z.object({
