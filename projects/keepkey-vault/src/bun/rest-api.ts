@@ -271,18 +271,31 @@ function isMostlyPrintable(text: string): boolean {
 
 // ── Features cache (10s TTL, matches keepkey-desktop) ──────────────────
 let featuresCache: { timestamp: number; data: any } | null = null
+let featuresInflight: Promise<any> | null = null
 const FEATURES_TTL_MS = 10_000
+// The device queue can be parked on a PIN or button prompt for minutes. Past
+// this, callers get the engine's last-known features instead of hanging.
+const FEATURES_BUSY_MS = 3_000
 
-async function getCachedFeatures(wallet: any): Promise<any> {
-  const sessionKey = walletCacheSession.key('features', null)
-  const now = Date.now()
-  if (featuresCache && (now - featuresCache.timestamp) < FEATURES_TTL_MS) {
+async function getCachedFeatures(wallet: any, snapshot?: any): Promise<any> {
+  if (featuresCache && (Date.now() - featuresCache.timestamp) < FEATURES_TTL_MS) {
     return featuresCache.data
   }
-  const features = await wallet.getFeatures()
-  walletCacheSession.assertCurrent(sessionKey)
-  featuresCache = { timestamp: now, data: features }
-  return features
+  // Single-flight: concurrent callers share one device read instead of each
+  // queueing another behind whatever holds the device (a retry storm otherwise).
+  if (!featuresInflight) {
+    const sessionKey = walletCacheSession.key('features', null)
+    featuresInflight = wallet.getFeatures()
+      .then((features: any) => {
+        walletCacheSession.assertCurrent(sessionKey)
+        // Stamp on completion: a slow read stamped at start arrived already expired.
+        featuresCache = { timestamp: Date.now(), data: features }
+        return features
+      })
+      .finally(() => { featuresInflight = null })
+  }
+  if (!snapshot) return featuresInflight
+  return Promise.race([featuresInflight, new Promise(r => setTimeout(() => r(snapshot), FEATURES_BUSY_MS))])
 }
 
 /** Clear features cache (call on device disconnect) */
@@ -3273,7 +3286,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         if (path === '/system/info/get-features' && method === 'POST') {
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
-          const features = await getCachedFeatures(wallet)
+          const features = await getCachedFeatures(wallet, engine.getCachedFeaturesSnapshot())
           return json(validateResponse(formatFeatures(features), S.FeaturesResponse, path))
         }
 
