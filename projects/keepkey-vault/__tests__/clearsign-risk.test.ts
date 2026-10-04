@@ -15,6 +15,7 @@ import { buildSolanaMessageDecodedInfo } from '../src/bun/solana-message-preview
 import { parseSolanaTx, solanaMessageSlice } from '../src/bun/solana-tx'
 import { assessSigningRisk } from '../src/shared/clearsign-risk'
 import type { SigningRequestInfo } from '../src/shared/types'
+import joinFixture from './fixtures/solana/soltoshidice-blackjack-join.json'
 
 const LOGIN_MESSAGE_B64 = 'U29sdG9zaGlESUNFIHdhbGxldApOZXR3b3JrOiBtYWlubmV0LWJldGE6Q3VUTHA3cERtTkdrRmdpNGFvaDhFZjFZU2pjMkJ6RUNRUkx6WXFhb1ZXQlI6NG5DbXB3bmU3aENvV1RTcEFkNTR1RU5tQ2dISnJIVHluNERNUENFTXB1bXAKU2Vzc2lvbjogY2E1ZWQ3YTgtNWRmMS00MWJmLTkxY2EtYzNkZTRjMWM1NmY2Ck5vbmNlOiAzN2M0MDY2Ny01NzZkLTQwNTQtOTA2NC02MTg2MTRhYjg4YzE='
 const TX1_B64 = 'AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAYJ7Dl5pNxrQBvQRRcaGJ8mhW+rnqt1VgIU+XKy7cFkMA+LZzzaLik+AiCrPgHStY7QVcnBsnYt1RVhKxDKzW40NrgTPK+soJctzdQsxyxkxmokWe10HSLNM0pp7sZO3eosAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAg+JYP7kag/aX3JhxSBLr/9dbITv9zclr5W8RVNHvjowF02rdo/npIS0+fAcrrAThIR97VGw7P8fmeJwQ9+Dk5hH08KOLLv/nnxPfLbW1x5bwW1Qqm7U/+OurmoNbG6qQDBkZv5SEXMv/srbpyw5vnvIzlu8X3EmssQ5s6QAAAALDgivSk/PrRPvj8/Z3HCXXrb8LgSnx2YRVApRzV257QTQBKpt9xx9nI6TgJCP4k4JahDgt0ODAlVydCDyS4WCcCBwAFAjBXBQAIBwAGBAECBQMDE2tr'
@@ -85,6 +86,21 @@ describe('assessSigningRisk — live session payloads', () => {
     const full = Buffer.from(TX2_B64, 'base64')
     const msg = Buffer.from(solanaMessageSlice(full, parseSolanaTx(full))).toString('base64')
     expect(assessSigningRisk(messageRequest(msg))!.level).toBe('critical')
+  })
+})
+
+describe('assessSigningRisk — certified Solana route', () => {
+  test('says the device shows the call instead of claiming nobody can read it', async () => {
+    const opaque = assessSigningRisk(await txRequest(joinFixture.rawTxBase64))!
+    const certified = assessSigningRisk({ ...(await txRequest(joinFixture.rawTxBase64)), deviceClearSigns: true })!
+    expect(opaque.reasons.map((r) => r.text).join('\n')).toContain('KeepKey cannot read (')
+    const text = certified.reasons.map((r) => r.text).join('\n')
+    expect(text).not.toContain('cannot read')
+    expect(text).not.toContain('nobody can show you how much')
+    expect(text).toContain('KeepKey-certified description')
+    // The session-key warning and the level are unchanged.
+    expect(text).toContain('permission to act for you')
+    expect(certified.level).toBe(opaque.level)
   })
 })
 

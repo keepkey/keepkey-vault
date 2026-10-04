@@ -8,7 +8,7 @@
 import type { ChainDef } from '../../shared/chains'
 import { evmAddressPath } from '../../shared/chains'
 import { tokenMaxSpendableBaseUnits } from '../../shared/max-send'
-import { estimateGas, getEvmGasPrice, getEvmNonce, getEvmBalance } from '../evm-rpc'
+import { ARBITRUM_ONE_RPC, estimateGas, getEvmGasPrice, getEvmNonce, getEvmBalance } from '../evm-rpc'
 
 const TAG = '[txbuilder:evm]'
 
@@ -127,6 +127,10 @@ export async function buildEvmTx(
   const amountNum = parseFloat(params.amount)
   const chainId = parseInt(chain.chainId || '1', 10)
   const isErc20 = !!(caip && caip.includes('erc20'))
+  // Built-in chains have no rpcUrl (Pioneer has no estimate endpoint), so
+  // Arbitrum — whose L1 data cost makes fixed limits fail — estimates against
+  // the same sequencer RPC it broadcasts to.
+  const gasRpc = rpcUrl || (chainId === 42161 ? ARBITRUM_ONE_RPC : undefined)
 
   // Custom gas-limit override (free-form). Floored at 21000 (the native minimum) to
   // avoid building an obviously invalid tx; the UI validates above this too.
@@ -254,10 +258,6 @@ export async function buildEvmTx(
   // ── ERC-20 token transfer ───────────────────────────────────────────
   if (isErc20) {
     const contractAddress = extractContractFromCaip(caip!)
-    // ERC-20 transfers need ~45-65k; 100k is the safe default. Only honor an override
-    // that RAISES the limit (e.g. tokens with transfer hooks) — never let a custom value
-    // lower it into an out-of-gas revert.
-    const gasLimit = gasLimitOverride && gasLimitOverride > 100000n ? gasLimitOverride : 100000n
 
     // Use frontend-provided decimals when available, otherwise fetch from API
     let tokenDecimals: number
@@ -278,16 +278,6 @@ export async function buildEvmTx(
       } catch (e: any) {
         throw new Error(`Cannot build ERC-20 tx: failed to fetch decimals for ${contractAddress} — ${e.message}`)
       }
-    }
-
-    const gasFee = gasPrice * gasLimit
-
-    // Validate native balance covers gas
-    if (nativeBalance < gasFee) {
-      throw new Error(
-        `Insufficient ${chain.symbol} for gas: have ${Number(nativeBalance) / 1e18}, ` +
-        `need ~${Number(gasFee) / 1e18} ${chain.symbol}`,
-      )
     }
 
     // Compute token amount in base units
@@ -323,6 +313,25 @@ export async function buildEvmTx(
 
     const txData = encodeTransferData(to, amountBaseUnits)
 
+    // ERC-20 transfers need ~45-65k on L1; 100k is the floor. Estimate the real
+    // call (Arbitrum adds L1 data gas on top) and only honor an override that
+    // RAISES the limit — never let a custom value lower it into an out-of-gas revert.
+    const erc20Floor = 100000n
+    const estimated = gasRpc
+      ? await estimateGas(gasRpc, { from: fromAddress, to: contractAddress, data: txData, value: '0x0' }, erc20Floor)
+      : erc20Floor
+    const minimumGas = estimated > erc20Floor ? estimated : erc20Floor
+    const gasLimit = gasLimitOverride && gasLimitOverride > minimumGas ? gasLimitOverride : minimumGas
+    const gasFee = gasPrice * gasLimit
+
+    // Validate native balance covers gas
+    if (nativeBalance < gasFee) {
+      throw new Error(
+        `Insufficient ${chain.symbol} for gas: have ${Number(nativeBalance) / 1e18}, ` +
+        `need ~${Number(gasFee) / 1e18} ${chain.symbol}`,
+      )
+    }
+
     return {
       chainId,
       addressNList,
@@ -347,8 +356,8 @@ export async function buildEvmTx(
   // transfer, so its sequencer rejects the Ethereum-only 21,000 limit.
   const networkFloor = chainId === 42161 ? 30000n + memoGas : intrinsicGas
   const requestedValue = isMax ? '0x0' : toHex(parseUnits(String(params.amount), 18))
-  const estimatedGas = rpcUrl
-    ? await estimateGas(rpcUrl, {
+  const estimatedGas = gasRpc
+    ? await estimateGas(gasRpc, {
         from: fromAddress,
         to,
         data: memo ? '0x' + memoBytes!.toString('hex') : '0x',

@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { utils as ethersUtils } from 'ethers'
+import { SigningKey, computePublicKey } from '@ethersproject/signing-key'
 import bs58 from 'bs58'
 
 import {
@@ -11,29 +11,32 @@ import {
   inspectAlphaCertificate,
 } from '../../src/bun/clearsign-alpha-ceremony'
 import {
-  buildEvmSchemaBody,
+  buildCertifiedEvmEnvelope,
   CERTIFIED_EVM_CATALOG,
   CERTIFIED_METADATA_KEY_ID,
   findCertifiedEvmSchemaByShape,
 } from '../../src/bun/evm-certified-schema'
+import { signCertifiedSolanaLutAttestation } from '../../src/bun/solana-certified-lut'
 import {
   CERTIFIED_SOLANA_CATALOG,
-  serializeSolanaSchema,
+  signCertifiedSolanaSchema,
   solanaSchemaCoverage,
 } from '../../src/bun/solana-certified-schema'
+import { certifiedSolanaSchemaApplies, solanaInstructionMatchesSchema } from '../../src/bun/solana-certified-match'
+import { resolveCanonicalLutAccounts } from '../../src/bun/solana-lut-resolver'
+import { createResilientSolanaAltFetcher, solanaRpcHealth, SolanaRpcUnavailableError } from './solana-rpc'
 import { parseSolanaMessage, parseSolanaTx, solanaMessageSlice } from '../../src/bun/solana-tx'
+import { certifySchemaTokens } from './solana-token'
 
 interface Env {
   CLEARSIGN_ENVIRONMENT?: string
-  /** Offline-produced, individually verified artifacts. No signing key is accepted. */
-  CLEARSIGN_ARTIFACTS_JSON?: string
-}
-
-interface StaticArtifactManifest {
-  version: 1
-  evm?: Record<string, string>
-  solana?: Record<string, { schema: { payload: string; signature: string; signerKeyId: number }; certificate: string }>
-  revoked?: string[]
+  CLEARSIGN_DELEGATE_PRIVATE_KEY?: string
+  CLEARSIGN_CERTIFICATE_HEX?: string
+  CLEARSIGN_SOLANA_CERTIFICATE_HEX?: string
+  CLEARSIGN_SOLANA_RPC_ENDPOINT?: string
+  CLEARSIGN_SOLANA_RPC_ENDPOINTS?: string
+  CLEARSIGN_SOURCE_REVISION?: string
+  CF_VERSION_METADATA?: { id: string; tag: string; timestamp: string }
 }
 
 const SERVICE = 'KeepKey ClearSign'
@@ -85,9 +88,9 @@ function reviewedCatalog() {
     id: `solana:${key}`,
     family: 'solana',
     network: 'Solana',
-    protocol: 'Relay',
-    maintainedBy: 'Relay',
-    action: 'Deposit funds for a cross-chain swap',
+    protocol: spec.protocol || 'Relay',
+    maintainedBy: spec.protocol || 'Relay',
+    action: spec.action || 'Deposit funds for a cross-chain swap',
     method: spec.instructionName,
     program: spec.programId,
     discriminator: spec.discriminator.toString('hex'),
@@ -96,94 +99,74 @@ function reviewedCatalog() {
       ...(spec.args || []).map((arg) => arg.label),
       ...(spec.accounts || []).map((account) => account.label),
     ],
-    provenance: { protocol: PROVENANCE.protocol, security: PROVENANCE.protocolSecurity },
+    provenance: spec.provenance || { protocol: PROVENANCE.protocol, security: PROVENANCE.protocolSecurity },
   }))
   return [...evm, ...solana]
 }
 
-function cleanHex(value: unknown, bytes: number | undefined, label: string): Buffer {
-  const clean = String(value || '').replace(/^0x/i, '')
-  if (!clean || !/^[0-9a-f]+$/i.test(clean) || clean.length % 2 || (bytes !== undefined && clean.length !== bytes * 2)) {
-    throw new Error(`${label} must be${bytes === undefined ? '' : ` ${bytes}-byte`} hex`)
-  }
-  return Buffer.from(clean, 'hex')
-}
-
-function compactSignatureMatches(payload: Buffer, signature: Buffer, publicKey: string, recovery?: number): boolean {
-  const digest = createHash('sha256').update(payload).digest('hex')
-  const r = `0x${signature.subarray(0, 32).toString('hex')}`
-  const s = `0x${signature.subarray(32, 64).toString('hex')}`
-  return (recovery === undefined ? [27, 28] : [recovery]).some((v) => {
-    try {
-      const recovered = ethersUtils.computePublicKey(ethersUtils.recoverPublicKey(`0x${digest}`, { r, s, v }), true).slice(2).toLowerCase()
-      return recovered === publicKey.toLowerCase()
-    } catch { return false }
-  })
-}
-
-function loadArtifacts(env: Env) {
+function provisioning(env: Env) {
   const issues: string[] = []
-  const evm = new Map<string, { signedPayload: string; certificate: ReturnType<typeof inspectAlphaCertificate> }>()
-  const solana = new Map<string, { schema: { payload: string; signature: string; signerKeyId: 128 }; certificate: string; certificateInfo: ReturnType<typeof inspectAlphaCertificate> }>()
-  let manifest: StaticArtifactManifest
-  try {
-    manifest = JSON.parse(env.CLEARSIGN_ARTIFACTS_JSON || '')
-    if (manifest.version !== 1 || (manifest.revoked && !Array.isArray(manifest.revoked))) throw new Error('unsupported manifest')
-  } catch {
-    return { ready: false, evmReady: false, solanaReady: false, evm, solana, certificates: [], issues: ['offline artifact manifest pending or invalid'] }
-  }
-  const revoked = new Set((manifest.revoked || []).map(String))
-  for (const [id, value] of Object.entries(manifest.evm || {})) {
+  let evmCertificate: ReturnType<typeof inspectAlphaCertificate> | undefined
+  let solanaCertificate: ReturnType<typeof inspectAlphaCertificate> | undefined
+
+  const inspectScope = (value: string | undefined, scope: number, label: string) => {
+    if (!value) {
+      issues.push(`${label} certificate pending`)
+      return undefined
+    }
     try {
-      if (revoked.has(id)) continue
-      const spec = CERTIFIED_EVM_CATALOG[id]
-      if (!spec) throw new Error('not in reviewed catalog')
-      const bytes = cleanHex(value, undefined, 'EVM envelope')
-      if (bytes[0] !== 3 || bytes.length < 1 + 139 + 65) throw new Error('invalid envelope')
-      const certificate = inspectAlphaCertificate(bytes.subarray(1, 140).toString('hex'))
-      if (certificate.chainId !== spec.chainId) throw new Error('wrong certificate scope')
-      const body = bytes.subarray(140, -65)
-      if (!body.equals(buildEvmSchemaBody(spec))) throw new Error('payload differs from reviewed catalog')
-      const signature = bytes.subarray(-65, -1)
-      if (!compactSignatureMatches(body, signature, certificate.delegatePublicKey, bytes[bytes.length - 1])) throw new Error('invalid delegate signature')
-      evm.set(id, { signedPayload: `0x${bytes.toString('hex')}`, certificate })
-    } catch (error: any) { issues.push(`EVM artifact ${id}: ${error?.message || 'invalid'}`) }
+      const certificate = inspectAlphaCertificate(value)
+      if (certificate.chainId !== scope) throw new Error('wrong scope')
+      return certificate
+    } catch {
+      issues.push(`${label} certificate invalid, expired, or wrong-scope`)
+      return undefined
+    }
   }
-  for (const [id, value] of Object.entries(manifest.solana || {})) {
+
+  evmCertificate = inspectScope(env.CLEARSIGN_CERTIFICATE_HEX, CLEARSIGN_SCOPE_ETHEREUM, 'Ethereum')
+  solanaCertificate = inspectScope(env.CLEARSIGN_SOLANA_CERTIFICATE_HEX, CLEARSIGN_SCOPE_SOLANA, 'Solana')
+
+  let privateKeyValid = false
+  if (!env.CLEARSIGN_DELEGATE_PRIVATE_KEY) {
+    issues.push('delegate signing key pending')
+  } else if (!/^[0-9a-fA-F]{64}$/.test(env.CLEARSIGN_DELEGATE_PRIVATE_KEY)) {
+    issues.push('delegate signing key invalid')
+  } else {
     try {
-      if (revoked.has(`solana:${id}`) || revoked.has(id)) continue
-      const spec = CERTIFIED_SOLANA_CATALOG[id]
-      if (!spec) throw new Error('not in reviewed catalog')
-      if (value.schema?.signerKeyId !== CERTIFIED_METADATA_KEY_ID) throw new Error('wrong signer key id')
-      const payload = cleanHex(value.schema?.payload, undefined, 'Solana schema payload')
-      if (!payload.equals(serializeSolanaSchema(spec))) throw new Error('payload differs from reviewed catalog')
-      const signature = cleanHex(value.schema?.signature, 64, 'Solana schema signature')
-      const certificateBytes = cleanHex(value.certificate, 139, 'Solana certificate')
-      const certificateInfo = inspectAlphaCertificate(certificateBytes.toString('hex'))
-      if (certificateInfo.chainId !== CLEARSIGN_SCOPE_SOLANA) throw new Error('wrong certificate scope')
-      if (!compactSignatureMatches(payload, signature, certificateInfo.delegatePublicKey)) throw new Error('invalid delegate signature')
-      solana.set(id, { schema: { payload: `0x${payload.toString('hex')}`, signature: `0x${signature.toString('hex')}`, signerKeyId: 128 }, certificate: `0x${certificateBytes.toString('hex')}`, certificateInfo })
-    } catch (error: any) { issues.push(`Solana artifact ${id}: ${error?.message || 'invalid'}`) }
+      const key = new SigningKey(`0x${env.CLEARSIGN_DELEGATE_PRIVATE_KEY}`)
+      privateKeyValid = computePublicKey(key.publicKey, true).slice(2).toLowerCase() === ALPHA_DELEGATE_PUBLIC_KEY
+      if (!privateKeyValid) issues.push('delegate signing key does not match reviewed fingerprint')
+    } catch {
+      issues.push('delegate signing key invalid')
+    }
   }
-  const certificates = [...evm.values()].map(value => value.certificate).concat([...solana.values()].map(value => value.certificateInfo))
 
   return {
-    ready: evm.size + solana.size > 0,
-    evmReady: evm.size > 0,
-    solanaReady: solana.size > 0,
-    evm, solana, certificates,
+    ready: Boolean((evmCertificate || solanaCertificate) && privateKeyValid),
+    evmReady: Boolean(evmCertificate && privateKeyValid),
+    solanaReady: Boolean(solanaCertificate && privateKeyValid),
+    evmCertificate,
+    solanaCertificate,
+    privateKeyValid,
     issues,
   }
 }
 
-function publicStatus(env: Env, origin: string) {
-  const state = loadArtifacts(env)
-  const expires = state.certificates.map(certificate => certificate.notAfter)
+async function publicStatus(env: Env, origin: string) {
+  const state = provisioning(env)
+  const rpc = state.solanaReady ? await solanaRpcHealth(env) : undefined
+  const dependencyUnavailable = rpc?.status === 'unavailable'
+  const expires = [state.evmCertificate?.notAfter, state.solanaCertificate?.notAfter].filter(Boolean) as number[]
   return {
     service: SERVICE,
     environment: env.CLEARSIGN_ENVIRONMENT || 'production',
-    status: state.ready ? 'ready' : 'provisioning',
-    message: state.ready
+    status: !state.ready ? 'provisioning' : dependencyUnavailable ? 'degraded' : 'ready',
+    build: { sourceRevision: env.CLEARSIGN_SOURCE_REVISION || null, version: env.CF_VERSION_METADATA || null },
+    dependencies: { solanaRpc: rpc || { status: 'not-configured' } },
+    message: dependencyUnavailable
+      ? 'Solana lookup-table verification is temporarily unavailable. Ethereum signing remains independently available.'
+      : state.ready
       ? 'KeepKey can authenticate transaction descriptions for every scope marked ready below, without blind signing.'
       : 'The service is online, but no certified signing scope is active yet.',
     endpoints: {
@@ -194,11 +177,11 @@ function publicStatus(env: Env, origin: string) {
     },
     scopes: {
       ethereum: state.evmReady ? 'ready' : 'provisioning',
-      solana: state.solanaReady ? 'ready' : 'provisioning',
+      solana: !state.solanaReady ? 'provisioning' : dependencyUnavailable ? 'degraded' : 'ready',
     },
     trust: {
       label: state.ready ? 'Authenticated by KeepKey' : 'Certificate pending',
-      signerAlias: state.certificates[0]?.alias || 'KeepKey Vault',
+      signerAlias: state.evmCertificate?.alias || state.solanaCertificate?.alias || 'KeepKey Vault',
       signerFingerprint: ALPHA_DELEGATE_FINGERPRINT,
       signerPublicKey: ALPHA_DELEGATE_PUBLIC_KEY,
       rootPublicKey: ALPHA_ROOT_PUBLIC_KEY,
@@ -209,12 +192,11 @@ function publicStatus(env: Env, origin: string) {
     privacy: {
       applicationStorage: false,
       ethereumRequest: ['chainId', 'contract', 'selector', 'calldataLength'],
-      solanaRequest: ['unsigned transaction', 'reviewed catalog id'],
-      note: 'Solana sends the unsigned transaction for exact reviewed-shape matching. Lookup-table transactions fail closed because this keyless service cannot create a transaction-bound account proof. No seed, private key, PIN, passphrase, or device signature is sent.',
+      solanaRequest: ['unsigned transaction', 'reviewed catalog id (optional)'],
+      note: 'Solana lookup-table certification sends the unsigned transaction to this service so it can resolve and bind the exact accounts. No seed, private key, PIN, passphrase, or device signature is sent.',
     },
     catalogEntries: reviewedCatalog().length,
     provisioning: state.issues,
-    distribution: { mode: 'offline-presigned', onlineSigningKey: false },
     provenance: PROVENANCE,
   }
 }
@@ -225,16 +207,16 @@ function escapeHtml(value: unknown): string {
   })[character]!)
 }
 
-function home(env: Env, origin: string): Response {
-  const status = publicStatus(env, origin)
+async function home(env: Env, origin: string): Promise<Response> {
+  const status = await publicStatus(env, origin)
   const ready = status.status === 'ready'
   const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${SERVICE}</title><style>body{margin:0;background:#0b0d10;color:#eef2f5;font:15px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace}main{max-width:820px;margin:0 auto;padding:56px 24px}h1{font-size:28px;margin:0 0 8px}.muted{color:#929aa5}.card{border:1px solid #29313a;background:#11151a;border-radius:14px;padding:20px;margin:18px 0}.pill{display:inline-block;border:1px solid ${ready ? '#42d392' : '#e7b84b'};color:${ready ? '#42d392' : '#e7b84b'};border-radius:999px;padding:3px 10px;font-size:12px}dt{color:#929aa5}dd{margin:0 0 10px;word-break:break-all}a{color:#7dd3fc}code{color:#d9b75f}</style></head>
 <body><main><span class="pill">${escapeHtml(status.status)}</span><h1>KeepKey ClearSign</h1><p class="muted">Human-readable transaction details, authenticated by the KeepKey in your hand.</p>
-<section class="card"><h2>What happens</h2><p>${escapeHtml(status.message)}</p><p>The service recognizes a reviewed protocol action and returns an offline-signed description. It has no signing key. Your KeepKey independently checks the root certificate, signer fingerprint, program or contract, decoded fields, and the exact transaction binding. You still approve the final transaction on the device.</p></section>
+<section class="card"><h2>What happens</h2><p>${escapeHtml(status.message)}</p><p>The service recognizes a reviewed protocol action and signs a description. Your KeepKey independently checks the root certificate, signer fingerprint, program or contract, decoded fields, and the exact transaction binding. You still approve the final transaction on the device.</p></section>
 <section class="card"><h2>Trust status</h2><dl><dt>Device label</dt><dd>${escapeHtml(status.trust.label)}</dd><dt>Signer</dt><dd>${escapeHtml(status.trust.signerAlias)} · ${escapeHtml(status.trust.signerFingerprint)}</dd><dt>Ethereum</dt><dd>${escapeHtml(status.scopes.ethereum)}</dd><dt>Solana</dt><dd>${escapeHtml(status.scopes.solana)}</dd><dt>Earliest certificate expiry</dt><dd>${escapeHtml(status.trust.certificateExpiresAt || 'Pending')}</dd></dl></section>
-<section class="card"><h2>Reviewed protocols</h2><p><strong>Relay</strong> · Ethereum and Solana deposits for cross-chain swaps.</p><p><strong>Portals</strong> · Native ETH swaps through the verified Ethereum router. KeepKey reads the output token, minimum output, recipient, and input amount from the transaction itself.</p><p>Only exact catalog matches are certified. Unknown programs, contracts, selectors, instruction sizes, or lookup-table accounts are refused.</p><a href="/v1/catalog">View the machine-readable catalog</a></section>
-<section class="card"><h2>Privacy and provenance</h2><p>Ethereum requests contain only transaction shape. Solana requests contain the unsigned transaction for exact shape matching; lookup-table transactions are refused because this service cannot sign their resolved accounts. Wallet seeds, private keys, PINs, passphrases, and device signatures never leave your KeepKey. This service writes no transaction database.</p><p><a href="${PROVENANCE.protocol}">How Relay works</a> · <a href="${PROVENANCE.protocolSecurity}">Relay security</a> · <a href="${PROVENANCE.portals}">Portals documentation</a> · <a href="${PROVENANCE.portalsRouter}">Verified Portals router</a> · <a href="${PROVENANCE.firmware}">KeepKey firmware</a> · <a href="${PROVENANCE.vault}">Vault source</a></p></section>
+<section class="card"><h2>Reviewed protocols</h2><p><strong>Relay</strong> · Ethereum and Solana deposits for cross-chain swaps.</p><p><strong>Portals</strong> · Native ETH swaps through the verified Ethereum router. KeepKey reads the output token, minimum output, recipient, and input amount from the transaction itself.</p><p><strong>Pump AMM</strong> · Token buys with base output units, maximum quote input units, token mints, and receive/pay accounts decoded on your KeepKey.</p><p><strong>SoltoshiDICE</strong> · Blackjack table joins with the round, seat, token buy-in, session key, session length, allowance, and maximum wager decoded on your KeepKey.</p><p>Only exact catalog matches are certified. Unknown programs, contracts, selectors, instruction sizes, or lookup-table accounts are refused.</p><a href="/v1/catalog">View the machine-readable catalog</a></section>
+<section class="card"><h2>Privacy and provenance</h2><p>Ethereum requests contain only transaction shape. Solana lookup-table requests contain the unsigned transaction so this service can resolve and bind its accounts. Wallet seeds, private keys, PINs, passphrases, and device signatures never leave your KeepKey. This service writes no transaction database.</p><p><a href="${PROVENANCE.protocol}">How Relay works</a> · <a href="${PROVENANCE.protocolSecurity}">Relay security</a> · <a href="${PROVENANCE.portals}">Portals documentation</a> · <a href="${PROVENANCE.portalsRouter}">Verified Portals router</a> · <a href="${PROVENANCE.firmware}">KeepKey firmware</a> · <a href="${PROVENANCE.vault}">Vault source</a></p></section>
 </main></body></html>`
   return new Response(html, {
     headers: {
@@ -274,18 +256,18 @@ export default {
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: commonHeaders })
     if (request.method === 'GET' && url.pathname === '/') return home(env, url.origin)
     if (request.method === 'GET' && url.pathname === '/health') {
-      const state = loadArtifacts(env)
-      return json({ ok: true, ready: state.ready, service: 'keepkey-clearsign', fingerprint: ALPHA_DELEGATE_FINGERPRINT })
+      const status = await publicStatus(env, url.origin)
+      return json({ ok: true, ready: status.status === 'ready', service: 'keepkey-clearsign', fingerprint: ALPHA_DELEGATE_FINGERPRINT, build: status.build, dependencies: status.dependencies })
     }
     if (request.method === 'GET' && (url.pathname === '/ready' || url.pathname === '/v1/status')) {
-      const status = publicStatus(env, url.origin)
+      const status = await publicStatus(env, url.origin)
       return json(status, url.pathname === '/ready' && status.status !== 'ready' ? 503 : 200)
     }
     if (request.method === 'GET' && url.pathname === '/v1/catalog') {
       return json({ version: 1, entries: reviewedCatalog(), provenance: PROVENANCE }, 200, 'public, max-age=300')
     }
     if (request.method === 'GET' && url.pathname === '/signer') {
-      const status = publicStatus(env, url.origin)
+      const status = await publicStatus(env, url.origin)
       return json({ status: status.status, alias: status.trust.signerAlias, fingerprint: ALPHA_DELEGATE_FINGERPRINT, publicKeyHex: ALPHA_DELEGATE_PUBLIC_KEY, keyId: CERTIFIED_METADATA_KEY_ID, scopes: status.scopes, certificateExpiresAt: status.trust.certificateExpiresAt })
     }
 
@@ -296,18 +278,16 @@ export default {
       }
       const spec = findCertifiedEvmSchemaByShape(Number(body?.chainId), String(body?.contract || body?.to || ''), String(body?.selector || ''), Number(body?.calldataLength))
       if (!spec) return json({ classification: 'OPAQUE', error: 'contract, selector, or calldata shape is not in the reviewed catalog' }, 422)
-      const state = loadArtifacts(env)
-      const id = `${spec.chainId}:${spec.contract.toLowerCase()}:${spec.selector.toLowerCase()}`
-      const artifact = state.evm.get(id)
-      if (!artifact) return json({ classification: 'UNAVAILABLE', error: 'No active offline-signed Ethereum artifact for this reviewed shape' }, 503)
-      return json({
-        success: true, classification: 'VERIFIED', version: 3,
-        signedPayload: artifact.signedPayload, keyId: CERTIFIED_METADATA_KEY_ID,
-        fingerprint: ALPHA_DELEGATE_FINGERPRINT, alias: artifact.certificate.alias,
-        method: spec.method, chainId: spec.chainId, contract: spec.contract,
-        selector: spec.selector, expectedCalldataLength: spec.expectedCalldataLength,
-        decoder: spec.decoder, provenance: spec.provenance || PROVENANCE,
-      })
+      const state = provisioning(env)
+      if (!state.evmReady || !env.CLEARSIGN_CERTIFICATE_HEX || !env.CLEARSIGN_DELEGATE_PRIVATE_KEY) {
+        return json({ classification: 'UNAVAILABLE', error: 'Ethereum certified signing is not provisioned' }, 503)
+      }
+      try {
+        const signed = buildCertifiedEvmEnvelope(spec, env.CLEARSIGN_CERTIFICATE_HEX, env.CLEARSIGN_DELEGATE_PRIVATE_KEY)
+        return json({ success: true, classification: 'VERIFIED', version: 3, ...signed, method: spec.method, chainId: spec.chainId, contract: spec.contract, selector: spec.selector, expectedCalldataLength: spec.expectedCalldataLength, decoder: spec.decoder, provenance: spec.provenance || PROVENANCE })
+      } catch {
+        return json({ error: 'certified Ethereum schema could not be produced' }, 500)
+      }
     }
 
     if (request.method === 'POST' && url.pathname === '/v1/solana/certify') {
@@ -315,9 +295,10 @@ export default {
       try { body = await readJson(request) } catch (error: any) {
         return json({ error: error.message }, error.message === 'request too large' ? 413 : 400)
       }
-      const catalogKey = String(body?.catalogKey || '')
-      const spec = CERTIFIED_SOLANA_CATALOG[catalogKey]
-      if (!spec) return json({ classification: 'OPAQUE', error: 'catalogKey is not in the reviewed catalog' }, 422)
+      const requestedKey = body?.catalogKey === undefined ? undefined : String(body.catalogKey)
+      if (requestedKey !== undefined && !Object.hasOwn(CERTIFIED_SOLANA_CATALOG, requestedKey)) {
+        return json({ classification: 'OPAQUE', error: 'catalogKey is not in the reviewed catalog' }, 422)
+      }
 
       let fullTx: Buffer
       let messageBytes: Uint8Array
@@ -331,32 +312,91 @@ export default {
         return json({ classification: 'OPAQUE', error: error?.message || 'malformed Solana transaction' }, 422)
       }
 
-      const programBytes = Buffer.from(bs58.decode(spec.programId))
-      const expectedLength = solanaSchemaCoverage(spec)
-      const matchesInstruction = message.instructions.some((instruction) => {
-        const programKey = message.staticAccounts[instruction.programIdIndex]
-        if (!programKey || !Buffer.from(programKey).equals(programBytes)) return false
-        if ((spec.accounts || []).some((account) => account.index >= instruction.accountIndices.length)) return false
-        const data = Buffer.from(instruction.data)
-        return data.length === expectedLength && data.subarray(0, spec.discriminator.length).equals(spec.discriminator)
-      })
-      if (!matchesInstruction) {
-        return json({ classification: 'OPAQUE', error: `catalog entry ${catalogKey} does not exactly match an instruction in this transaction` }, 422)
+      const candidates = Object.entries(CERTIFIED_SOLANA_CATALOG).filter(([key]) => requestedKey === undefined || key === requestedKey)
+      // Every (entry, instruction) pair that matches. Firmware refuses a schema
+      // that matches two instructions, so exactly one pair may certify.
+      const matches = candidates.flatMap(([key, spec]) => message.instructions.filter((instruction) => {
+        if (!solanaInstructionMatchesSchema(message, instruction, spec)) return false
+        if (key === 'pumpAmmBuy') {
+          if (instruction.accountIndices.length < 23 || instruction.data[24] > 1) return false
+          // Pin the official IDL's fixed program accounts and required user
+          // signer; an arbitrary program label cannot certify another CPI.
+          const fixedAccounts: Record<number, string> = {
+            13: '11111111111111111111111111111111',
+            14: 'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL',
+            16: spec.programId,
+            22: 'pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ',
+          }
+          if (instruction.accountIndices[1] >= message.header.numRequiredSignatures) return false
+          for (const [index, expected] of Object.entries(fixedAccounts)) {
+            const account = message.staticAccounts[instruction.accountIndices[Number(index)]]
+            if (!account || bs58.encode(account) !== expected) return false
+          }
+        }
+        return true
+      }).map((instruction) => [key, spec, instruction] as const))
+      if (matches.length !== 1) {
+        return json({ classification: 'OPAQUE', error: 'transaction does not uniquely match a reviewed Solana catalog entry' }, 422)
+      }
+      const [catalogKey, spec, instruction] = matches[0]
+      // Without a catalog key this is a dapp's own transaction. The device
+      // refuses a certified envelope its certified rule does not apply to,
+      // with no blind-sign fallback, while the caller's opaque path could
+      // still sign it. So certify it only when that rule holds.
+      if (requestedKey === undefined &&
+          certifiedSolanaSchemaApplies(message, spec) !== message.instructions.indexOf(instruction)) {
+        return json({ classification: 'OPAQUE', error: 'firmware would not apply the reviewed schema to this transaction (instruction count or companion instructions)' }, 422)
       }
 
-      const state = loadArtifacts(env)
-      const artifact = state.solana.get(catalogKey)
-      if (!artifact) return json({ classification: 'UNAVAILABLE', error: 'No active offline-signed Solana artifact for this reviewed shape' }, 503)
-      if (message.altEntries.length > 0) return json({
-        classification: 'UNAVAILABLE',
-        error: 'Lookup-table transactions require a transaction-bound account proof; the static artifact service has no online signing key',
-      }, 503)
-      return json({
-        success: true, classification: 'VERIFIED', schema: artifact.schema,
-        certificate: artifact.certificate, alias: artifact.certificateInfo.alias,
-        fingerprint: ALPHA_DELEGATE_FINGERPRINT, transactionShape: message.version,
-        lookupTableCount: 0, provenance: PROVENANCE,
-      })
+      const state = provisioning(env)
+      if (!state.solanaReady || !env.CLEARSIGN_SOLANA_CERTIFICATE_HEX || !env.CLEARSIGN_DELEGATE_PRIVATE_KEY) {
+        return json({ classification: 'UNAVAILABLE', error: 'Solana certified signing is not provisioned' }, 503)
+      }
+
+      let proofStage = 'schema'
+      try {
+        const schema = signCertifiedSolanaSchema(env.CLEARSIGN_SOLANA_CERTIFICATE_HEX, env.CLEARSIGN_DELEGATE_PRIVATE_KEY, spec)
+        const response: any = {
+          catalogKey,
+          success: true,
+          classification: 'VERIFIED',
+          schema: { payload: schema.schemaPayload, signature: schema.schemaSignature, signerKeyId: schema.keyId },
+          certificate: `0x${env.CLEARSIGN_SOLANA_CERTIFICATE_HEX.replace(/^0x/i, '')}`,
+          alias: schema.alias,
+          fingerprint: schema.fingerprint,
+          transactionShape: message.version,
+          lookupTableCount: message.altEntries.length,
+          provenance: spec.provenance || PROVENANCE,
+        }
+        // Firmware indexes static accounts, then the resolved lookup accounts.
+        let accountKeys: Uint8Array[] = message.staticAccounts
+        if (message.altEntries.length > 0) {
+          proofStage = 'lookup-resolution'
+          const resolution = await resolveCanonicalLutAccounts(
+            message,
+            createResilientSolanaAltFetcher(env),
+          )
+          proofStage = 'lookup-signature'
+          const messageHash = createHash('sha256').update(messageBytes).digest()
+          const proof = signCertifiedSolanaLutAttestation(env.CLEARSIGN_SOLANA_CERTIFICATE_HEX, env.CLEARSIGN_DELEGATE_PRIVATE_KEY, messageHash, resolution.accounts)
+          response.lutProof = {
+            accounts: resolution.accounts.map((account) => account.toString('base64')),
+            signature: proof.lutSignature,
+            signerKeyId: proof.keyId,
+          }
+          response.writableCount = resolution.writableCount
+          response.readonlyCount = resolution.readonlyCount
+          accountKeys = [...message.staticAccounts, ...resolution.accounts]
+        }
+
+        proofStage = 'token-identity'
+        Object.assign(response, await certifySchemaTokens(env, catalogKey, spec, instruction, accountKeys, env.CLEARSIGN_DELEGATE_PRIVATE_KEY))
+        return json(response)
+      } catch (error) {
+        const code = error instanceof SolanaRpcUnavailableError ? error.code : 'SOLANA_PROOF_FAILED'
+        console.error(`[clearsign] Solana certification failed: stage=${proofStage} code=${code}`)
+        return json({ classification: 'UNAVAILABLE', code, error: error instanceof SolanaRpcUnavailableError ? error.message : 'certified Solana proof could not be produced' }, error instanceof SolanaRpcUnavailableError ? 503 : 500)
+      }
     }
     return json({ error: 'not found' }, 404)
   },

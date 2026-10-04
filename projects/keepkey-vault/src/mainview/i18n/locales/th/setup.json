@@ -59,7 +59,7 @@
 		"listeningForBootloader": "กำลังฟังอุปกรณ์ในโหมด bootloader...",
 		"readyDetectBootloader": "ฉันพร้อมแล้ว — ตรวจจับ bootloader",
 		"skipBootloaderUpdate": "ข้ามการอัปเดต bootloader",
-		"verifyBackupHint": "KeepKey จะขอให้ตรวจสอบสำเนาสำรอง เราจะทำหลังจากอัปเดต — กดปุ่มค้างเพื่อข้ามตอนนี้",
+		"verifyBackupHint": "KeepKey จะถามว่าคุณมีวลีกู้คืนหรือไม่ในกรณีที่คีย์ส่วนตัวถูกลบ การกดปุ่มค้างหมายถึงตอบว่าใช่และเริ่มการอัปเดต — ยืนยันเฉพาะเมื่อคุณจดวลีกู้คืนไว้แล้วเท่านั้น",
 		"followDirectionsOnDevice": "ทำตามคำแนะนำบนอุปกรณ์",
 		"deviceWillGuide": "KeepKey ของคุณจะแนะนำคุณผ่านกระบวนการอัปเดต",
 		"bootloaderDetected": "ตรวจพบโหมด bootloader",

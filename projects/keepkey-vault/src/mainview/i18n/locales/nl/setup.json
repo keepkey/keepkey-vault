@@ -59,7 +59,7 @@
 		"listeningForBootloader": "Luisteren naar apparaat in bootloadermodus...",
 		"readyDetectBootloader": "Ik ben klaar — Detecteer bootloader",
 		"skipBootloaderUpdate": "Bootloader-update overslaan",
-		"verifyBackupHint": "Je KeepKey vraagt om een back-up te verifiëren. We doen dit na de update — houd de knop ingedrukt om dit nu over te slaan.",
+		"verifyBackupHint": "Je KeepKey vraagt of je je herstelzin hebt voor het geval je privésleutels worden gewist. De knop ingedrukt houden betekent ja en start de update — bevestig alleen als je je herstelzin hebt opgeschreven.",
 		"followDirectionsOnDevice": "Volg de aanwijzingen op het apparaat",
 		"deviceWillGuide": "Je KeepKey begeleidt je door het updateproces.",
 		"bootloaderDetected": "Bootloadermodus gedetecteerd",

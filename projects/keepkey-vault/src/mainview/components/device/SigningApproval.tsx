@@ -11,7 +11,7 @@ import { evmMaxFee, evmNativeValue } from "../../../shared/evmFeePreview"
 import { isRelayBridgeDeposit } from "../../../shared/relayBridgePreview"
 import { utxoPreview } from "../../../shared/utxoPreview"
 import { cosmosDepositPreview } from "../../../shared/cosmosDepositPreview"
-import { assessSigningRisk, type RiskLevel } from "../../../shared/clearsign-risk"
+import { assessSigningRisk, formatCertifiedArg, type RiskLevel } from "../../../shared/clearsign-risk"
 import { ClearSignReportCard } from "../ClearSignReportCard"
 
 interface SigningApprovalProps {
@@ -614,6 +614,58 @@ function CalldataInspector({ data, t }: { data: string; t: (k: string, f?: strin
 					</VStack>
 				)}
 			</Box>
+		</VStack>
+	)
+}
+
+// ── Certified ClearSign description ───────────────────────────────────
+
+/**
+ * What the ClearSign service recognised, and — just as important — what that
+ * recognition is NOT.
+ *
+ * The delegate's signature covers three things: the program's address, the name
+ * of this instruction, and the layout the values below were read at. It says
+ * nothing about the site that asked, about who receives the money, or about
+ * whether the program plays fair. The wording here has to survive being read by
+ * someone who wants it to mean "KeepKey says this is safe" — it must not.
+ */
+// ponytail: English-only, like the risk-bar sentences next to it — i18n once
+// this wording has been read by real users.
+function CertifiedVouch({ certified, appName }: {
+	certified: NonNullable<SigningRequestInfo['solanaCertified']>
+	appName: string
+}) {
+	return (
+		<VStack
+			gap="1.5" w="100%" align="stretch" px="3" py="2" borderRadius="lg"
+			bg="rgba(233,196,106,0.08)" border="1px solid rgba(233,196,106,0.35)"
+			data-testid="certified-vouch"
+		>
+			<Flex gap="2" align="center" justify="space-between" flexWrap="wrap">
+				<Text fontSize="2xs" fontWeight="700" color="kk.gold">
+					KeepKey ClearSign recognises this program
+				</Text>
+				<Text fontSize="2xs" color="kk.textMuted">
+					Asked for by {appName}
+				</Text>
+			</Flex>
+			<Text fontSize="xs" fontWeight="600" color="white">
+				{certified.programName} — {certified.instructionName}
+			</Text>
+			<Row label="Program" value={certified.programId} />
+			{certified.args.map((a, i) => (
+				<Row key={i} label={a.label} value={formatCertifiedArg(a, true)} />
+			))}
+			<Text fontSize="2xs" color="kk.textSecondary">
+				That signature covers the program's address, the name of this instruction and
+				the layout of the values above — nothing else. Your KeepKey checks the
+				signature itself and shows you the same values on its own screen.
+			</Text>
+			<Text fontSize="2xs" color="kk.textMuted">
+				It is not a check of this site, of where the money goes, or of whether the
+				program treats you fairly. The program's own code decides all of that.
+			</Text>
 		</VStack>
 	)
 }
@@ -1228,6 +1280,13 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 				<ClearSignReportCard report={request.clearSignReport} />
 				<RiskBar request={request} t={t} />
 				<RequestClearSignReview request={request} />
+
+				{/* What the certified description is, and what it is not. Below
+				    the risk bar on purpose: the verdict is read first, and this
+				    explains the name the verdict used. */}
+				{request.solanaCertified && (
+					<CertifiedVouch certified={request.solanaCertified} appName={safeAppName} />
+				)}
 
 				{/* ── AdvancedMode gate ── */}
 				{advancedModeRequired && (

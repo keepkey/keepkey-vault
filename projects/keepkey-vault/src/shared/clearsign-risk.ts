@@ -14,7 +14,12 @@
  * the device screen stays the authority.
  */
 import { evmNativeValue } from './evmFeePreview'
-import type { SigningRequestInfo, SolanaTxDecodedInstruction } from './types'
+import type {
+  SigningRequestInfo,
+  SimulatedHoldings,
+  SolanaCertifiedArg,
+  SolanaTxDecodedInstruction,
+} from './types'
 import { versionCompare } from './firmware-versions'
 
 export type RiskLevel = 'low' | 'medium' | 'high' | 'critical'
@@ -41,6 +46,67 @@ function units(raw: string, decimals: number): string {
 
 const arg = (ix: SolanaTxDecodedInstruction, name: string) => ix.args.find((a) => a.name === name)?.value
 const acct = (ix: SolanaTxDecodedInstruction, label: string) => ix.accounts.find((a) => a.label === label)?.pubkey
+
+// ── Certified Solana description + simulated holdings ────────────────
+// Both are rendered here so the approval overlay and any REST caller read the
+// same words for the same bytes.
+
+const SOL_DECIMALS = 9
+
+/** Exact d / h / min / s, the way the device screen spells a duration. */
+function duration(seconds: bigint): string {
+  const parts: string[] = []
+  const push = (value: bigint, unit: string) => { if (value > 0n) parts.push(`${value} ${unit}`) }
+  push(seconds / 86_400n, 'd')
+  push((seconds % 86_400n) / 3_600n, 'h')
+  push((seconds % 3_600n) / 60n, 'min')
+  push(seconds % 60n, 's')
+  return parts.length > 0 ? parts.join(' ') : '0 s'
+}
+
+/** An amount of a token, named only when its identity was attested. Without
+ *  that, raw base units and the mint — a ticker nobody signed for is exactly
+ *  how a fake token passes for a real one. */
+function tokenAmount(raw: string, mint?: string, symbol?: string, decimals?: number, full = false): string {
+  if (symbol && decimals !== undefined) return `${units(raw, decimals)} ${symbol}`
+  const of = mint ? ` of token ${full ? mint : shortAddr(mint)}` : ''
+  return `${BigInt(raw).toLocaleString('en-US')} base units${of}`
+}
+
+/** One argument of a certified description, in the units its signed type
+ *  fixes. `full` spells addresses out instead of shortening them. */
+export function formatCertifiedArg(a: SolanaCertifiedArg, full = false): string {
+  switch (a.kind) {
+    case 'sol': return `${units(a.raw, SOL_DECIMALS)} SOL`
+    case 'token': return tokenAmount(a.raw, a.mint, a.symbol, a.decimals, full)
+    case 'duration': return duration(BigInt(a.raw))
+    case 'pubkey': return full ? a.raw : shortAddr(a.raw)
+    case 'opaque': return full ? a.raw : `${a.raw.slice(0, 8)}…`
+    default: return BigInt(a.raw).toLocaleString('en-US')
+  }
+}
+
+/**
+ * What the wallet is left holding, as a sentence. An estimate from a
+ * simulation on this computer, and it says so: a failed check reads "could not
+ * simulate", never "no funds move".
+ */
+export function formatSimulatedHoldings(s: SimulatedHoldings): string {
+  // Each figure the simulation established, and only those: an absent SOL
+  // balance is one the simulation did not answer for, so it is left out of the
+  // sentence and `note` says why — printing 0 would state the opposite.
+  const holdings = [
+    ...(s.solLamportsAfter !== undefined ? [`${units(s.solLamportsAfter, SOL_DECIMALS)} SOL`] : []),
+    ...(s.tokensAfter ?? []).map((t) => tokenAmount(t.amountAfter, t.mint, t.symbol, t.decimals)),
+  ]
+  if (s.unavailable || holdings.length === 0) {
+    // The note survives an unavailable result: "the tokens were never looked
+    // up" and "the simulation then failed" are two separate facts.
+    return `This computer could not simulate this transaction (${s.unavailable ?? 'no result'}), so it cannot say what you would be left holding. That is not the same as "nothing moves".${s.note ? ` ${s.note}` : ''}`
+  }
+  const whose = s.owner ? `your account ${shortAddr(s.owner)} would hold` : 'you would hold'
+  return `Checked on this computer: if this goes through, ${whose} ${holdings.join(' and ')}.${s.note ? ` ${s.note}` : ''}`
+}
 
 /** Plain sentence for an instruction KeepKey fully understands, or null. */
 function describeKnown(ix: SolanaTxDecodedInstruction): RiskReason | null {
@@ -235,7 +301,19 @@ export function assessSigningRisk(req: SigningRequestInfo): RiskAssessment | nul
     }
     if (unknown.length > 0) {
       const apps = [...new Set(unknown.map((i) => i.programName))].join(', ')
-      if (assets.length > 0 || d.altResolutionIncomplete) {
+      const canMoveFunds = assets.length > 0 || !!d.altResolutionIncomplete
+      if (req.deviceClearSigns) {
+        // Vault found a certified description of these exact bytes, which the
+        // device verifies and shows. The app code still runs, so the level
+        // stays what it would be, and the certified name says what the call
+        // IS — it is not a statement that the call is safe.
+        const what = req.solanaCertified
+          ? `this call as "${req.solanaCertified.programName} — ${req.solanaCertified.instructionName}"`
+          : `this call's details`
+        add(canMoveFunds ? 'high' : 'medium', canMoveFunds
+          ? `Runs app code (${apps}) that is able to move your SOL or tokens. Your KeepKey shows ${what} from a KeepKey-certified description, so check the amounts on its screen.`
+          : `Runs app code (${apps}) that cannot move your SOL or tokens. Your KeepKey shows ${what} from a KeepKey-certified description. You only pay the network fee.`)
+      } else if (canMoveFunds) {
         add('high', `Runs app code KeepKey cannot read (${apps}). That code is able to move your SOL or tokens, and nobody can show you how much before you sign.`)
       } else {
         add('medium', `Runs app code KeepKey cannot read (${apps}), but it cannot move your SOL or tokens. You only pay the network fee.`)
@@ -245,6 +323,34 @@ export function assessSigningRisk(req: SigningRequestInfo): RiskAssessment | nul
       add('high', 'Part of this transaction is hidden and could not be looked up.')
     }
     if (reasons.length === 0) add('low', 'KeepKey can read every step of this transaction.')
+    // The amounts the signed description names, in its own labels, and what
+    // they add up to in SOL. Arithmetic over signed values — never a cap on
+    // what the program's own code can move.
+    if (req.solanaCertified && req.solanaCertified.args.length > 0) {
+      add('low', `The signed description says: ${req.solanaCertified.args.map((a) => `${a.label} ${formatCertifiedArg(a)}`).join(' · ')}.`)
+    }
+    // NOT A TOTAL, and it must not read as one. Two figures with two different
+    // provenances: the lamports the signed description names, read out of the
+    // instruction's own bytes, and the fee ceiling read from this
+    // transaction's ComputeBudget instructions. Account rent — which a program
+    // that opens an account charges, and which the SoltoshiDICE dapp's own
+    // warning puts alongside its 0.01 SOL deposit — is in neither, so a sum
+    // presented as "what this call puts up" understated the real ask by ~2x.
+    //
+    // The caveat belongs to the NAMED figure, not to the fee: an unresolved
+    // lookup table withholds the fee by design, and hanging the caveat off it
+    // left "SOL deposit 0.01 SOL" standing alone in exactly the case where the
+    // bytes are least complete.
+    const solArgs = (req.solanaCertified?.args ?? []).filter((a) => a.kind === 'sol')
+    const namedSol = solArgs.reduce((total, a) => total + BigInt(a.raw), 0n)
+    const fee = d.maxNetworkFeeLamports
+    if (namedSol > 0n) {
+      add('low', `SOL named in this call: ${units(namedSol.toString(), SOL_DECIMALS)} SOL (${solArgs.map((a) => a.label).join(' + ')}), ${fee
+        ? `plus up to ${units(fee, SOL_DECIMALS)} SOL of network fee`
+        : 'and the network fee could not be read from these bytes'}. Account rent is extra and is not in these bytes, so this is not the total SOL leaving your wallet, and it is not a limit on what the program can move.`)
+    } else if (fee) {
+      add('low', `Network fee: up to ${units(fee, SOL_DECIMALS)} SOL.`)
+    }
   } else if (req.method === '/eth/sign-transaction') {
     evmTx(req, add)
     if (reasons.length === 0) add('low', 'Your KeepKey decodes this call on its screen. Check the recipient and amount there.')
@@ -263,6 +369,11 @@ export function assessSigningRisk(req: SigningRequestInfo): RiskAssessment | nul
   } else {
     return null
   }
+
+  // Last, and deliberately at 'low': a simulation is an estimate this computer
+  // made, so it may add an answer but never change the verdict above. The level
+  // is the maximum over the reasons, so this line cannot move it either way.
+  if (req.simulatedOutflow) add('low', formatSimulatedHoldings(req.simulatedOutflow))
 
   const level = reasons.reduce<RiskLevel>(
     (max, r) => (ORDER.indexOf(r.level) > ORDER.indexOf(max) ? r.level : max), 'low')

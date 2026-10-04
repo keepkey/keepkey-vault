@@ -1,16 +1,17 @@
-import { useState, useMemo, useCallback } from "react"
+import { useState, useMemo, useCallback, useEffect } from "react"
 import type { ReactNode } from "react"
 import { Box, Flex, Text, Input, Button } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
 import { rpcRequest } from "../lib/rpc"
 import { CHAINS, getExplorerTxUrl, caipToNetworkId } from "../../shared/chains"
 import { isBitcoinOnlyVariant } from "../../shared/flags"
+import { versionCompare } from "../../shared/firmware-versions"
 import { useAddressBook } from "../hooks/useAddressBook"
 import { useDeviceState } from "../hooks/useDeviceState"
 import { AddressIdenticon } from "./AddressIdenticon"
 import { AssetIcon } from "./AssetIcon"
 import { AddAddressDialog } from "./AddAddressDialog"
-import type { AddressBookEntry, AddressBookTx } from "../../shared/types"
+import type { AddressBookEntry, AddressBookTx, AppSettings } from "../../shared/types"
 
 const chainById = new Map(CHAINS.map(c => [c.id, c]))
 const chainByNetwork = new Map(CHAINS.map(c => [c.networkId, c]))
@@ -51,6 +52,38 @@ export function AddressBookView() {
   const [chainFilter, setChainFilter] = useState<string>("all")
   const [activeTab, setActiveTab] = useState<string | null>(null)
   const [addOpen, setAddOpen] = useState(false)
+  const [clearSignEnabled, setClearSignEnabled] = useState(false)
+  const [certifying, setCertifying] = useState(false)
+  const [certificationNotice, setCertificationNotice] = useState("")
+
+  const clearSignSupported = !!deviceState.firmwareVersion && versionCompare(deviceState.firmwareVersion, "7.16.0") >= 0
+
+  useEffect(() => {
+    rpcRequest<AppSettings>("getAppSettings", undefined, 5000)
+      .then(settings => setClearSignEnabled(settings.addressBookClearsignEnabled))
+      .catch(() => {})
+  }, [])
+
+  const toggleClearSign = useCallback(async () => {
+    const enabled = !clearSignEnabled
+    const settings = await rpcRequest<AppSettings>("setAddressBookClearsignEnabled", { enabled }, 5000)
+    setClearSignEnabled(settings.addressBookClearsignEnabled)
+    setCertificationNotice(enabled ? "ClearSign enabled — certify after contact changes." : "")
+  }, [clearSignEnabled])
+
+  const certify = useCallback(async () => {
+    setCertifying(true)
+    setCertificationNotice("")
+    try {
+      const result = await rpcRequest<{ revision: number; count: number; fingerprint: string }>("certifyAddressBook", undefined, 0)
+      setCertificationNotice(`Certified ${result.count} contacts · revision ${result.revision} · ${result.fingerprint}`)
+    } catch (error: any) {
+      const message = error?.message || "Address Book certification failed"
+      setCertificationNotice(message)
+    } finally {
+      setCertifying(false)
+    }
+  }, [])
 
   // Collapse own EVM rows (same address across many eip155 networks) into one card,
   // keyed per device, retaining every member id + chain so ops aggregate correctly.
@@ -136,6 +169,14 @@ export function AddressBookView() {
     <Box maxW="760px" mx="auto" w="full" px="4">
       <Flex align="center" justify="space-between" mb="3" mt="2" gap="2">
         <Text fontSize="lg" fontWeight="700" color="var(--text-0)">{t("title", { defaultValue: "Address Book" })}</Text>
+        <Flex gap="2">
+        <Button size="sm" variant="outline" borderColor={clearSignEnabled ? "var(--teal)" : "var(--line)"} color={clearSignEnabled ? "var(--teal)" : "var(--text-2)"}
+                borderRadius="10px" px="3" h="34px" onClick={toggleClearSign} disabled={!clearSignSupported}
+                title={clearSignSupported ? undefined : "Address Book ClearSign requires connected firmware 7.16.0 or newer"}>
+          {clearSignEnabled ? "ClearSign on" : "Enable ClearSign"}
+        </Button>
+        {clearSignEnabled && <Button size="sm" variant="outline" borderColor="var(--teal)" color="var(--teal)" borderRadius="10px" px="3" h="34px"
+                onClick={certify} disabled={certifying || !clearSignSupported}>{certifying ? "Review on device…" : "Certify contacts"}</Button>}
         <Button size="sm" variant="outline" borderColor="var(--gold)" color="var(--gold)" borderRadius="10px" px="3" h="34px"
                 _hover={{ bg: "rgba(233,196,106,0.10)" }} onClick={() => setAddOpen(true)} flexShrink={0} title={t("addAddressHint", { defaultValue: "Add an address to your Address Book" })}>
           <Flex align="center" gap="1.5">
@@ -143,7 +184,10 @@ export function AddressBookView() {
             <Text fontSize="12.5px" fontWeight="700">{t("addAddress", { defaultValue: "Add Address" })}</Text>
           </Flex>
         </Button>
+        </Flex>
       </Flex>
+
+      {certificationNotice && <Text fontSize="11px" color="var(--text-2)" mb="3">{certificationNotice}</Text>}
 
       {/* Global network filter — above the tabs, persists across tab switches. */}
       {allChainsPresent.length > 1 && (

@@ -1,6 +1,7 @@
 import type { EngineController } from './engine-controller'
 import type { AuthStore } from './auth'
 import { HttpError } from './auth'
+import { WalletCacheSession, WalletSessionChangedError, WalletSessionMap } from './wallet-session-cache'
 import type { SigningRequestInfo, ApiLogEntry, EIP712DecodedInfo } from '../shared/types'
 import { tronPreview } from './tron-preview'
 import type { ClearSignEvent } from '../shared/types'
@@ -45,7 +46,10 @@ import { parseSolanaTx, SolanaTxParseError } from './solana-tx'
 import { signSolanaWireTransaction } from './solana-signing'
 import { buildSolanaDecodedInfo } from './solana-clearsign'
 import { buildSolanaMessageDecodedInfo } from './solana-message-preview'
-import { requiresSolanaBlindSigningConsent } from './solana-consent'
+import { assessSigningRisk } from '../shared/clearsign-risk'
+import { applyRestSolanaSigningGates, buildRestSolanaSignRequest, type CertifiedSolanaProof } from './solana-certified-registry'
+import { certifiedTokenIdentities, describeCertifiedSolanaTransaction } from './solana-certified-describe'
+import { simulateSolanaHoldings } from './solana-outflow'
 import { createRpcAltFetcher, DEFAULT_SOLANA_RPC_ENDPOINT } from './solana-alt'
 import { utxoDiscoveryKey } from './btc-backend/types'
 import {
@@ -287,11 +291,13 @@ let featuresCache: { timestamp: number; data: any } | null = null
 const FEATURES_TTL_MS = 10_000
 
 async function getCachedFeatures(wallet: any): Promise<any> {
+  const sessionKey = walletCacheSession.key('features', null)
   const now = Date.now()
   if (featuresCache && (now - featuresCache.timestamp) < FEATURES_TTL_MS) {
     return featuresCache.data
   }
   const features = await wallet.getFeatures()
+  walletCacheSession.assertCurrent(sessionKey)
   featuresCache = { timestamp: now, data: features }
   return features
 }
@@ -348,38 +354,26 @@ function formatFeatures(f: any): any {
 }
 
 // ── Public key cache (capped) ─────────────────────────────────────────
-const MAX_CACHE_SIZE = 500
-const pubkeyCache = new Map<string, any>()
+const walletCacheSession = new WalletCacheSession()
+const pubkeyCache = new WalletSessionMap<any>(walletCacheSession)
 
 // ── Address cache (capped) ────────────────────────────────────────────
-const addressCache = new Map<string, string>()
+const addressCache = new WalletSessionMap<string>(walletCacheSession)
 
-/** Evict oldest entries from a Map (uses insertion-order iteration). */
-function evictOldest<K, V>(cache: Map<K, V>, count: number) {
-  let removed = 0
-  for (const key of cache.keys()) {
-    if (removed >= count) break
-    cache.delete(key)
-    removed++
-  }
+/** Derivations are scoped to the active wallet session, including seed changes. */
+function scopedKey(engine: EngineController, prefix: string, body: unknown, wallet: unknown): string {
+  // Request parsing can yield while the engine replaces the wallet handle.
+  if (wallet !== engine.wallet) throw new WalletSessionChangedError()
+  return walletCacheSession.key(prefix, body)
 }
 
-/** Cache key scoped by device_id — prevents cross-device pubkey leakage.
- *  deviceId is read at call time from engine; if no device is connected,
- *  we still prefix with `none:` so orphan entries can be flushed together. */
-function scopedKey(engine: EngineController, prefix: string, body: unknown): string {
-  const deviceId = engine.getDeviceState().deviceId || 'none'
-  return `${deviceId}:${prefix}:${JSON.stringify(body)}`
-}
-
-/** Clear every pubkey cache entry. Call on device disconnect / device swap. */
+/** Invalidate both related caches and reject their in-flight derivations. */
 export function clearPubkeyCache() {
-  pubkeyCache.clear()
+  walletCacheSession.invalidate()
 }
 
-/** Clear every address cache entry. Call on device disconnect / device swap. */
 export function clearAddressCache() {
-  addressCache.clear()
+  walletCacheSession.invalidate()
 }
 
 // ── UI lifecycle signal ────────────────────────────────────────────────
@@ -1167,27 +1161,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
     insertClearSignEvent({ ...event, deviceId: device.deviceId, firmwareVersion: device.firmwareVersion })
   }
 
-  // Device-swap detection: if deviceId changes between two `ready` states,
-  // pubkey/address caches must be flushed or the old device's xpubs will
-  // leak. (lastDeviceId is also flushed on disconnect so a re-connect of the
-  // SAME device will repopulate from scratch.)
-  let lastDeviceId: string | null = null
-  engine.on('state-change', (state) => {
-    const nextId = state.deviceId ?? null
-    if (state.state === 'disconnected') {
-      clearFeaturesCache()
-      clearPubkeyCache()
-      clearAddressCache()
-      lastDeviceId = null
-      return
-    }
-    if (nextId && lastDeviceId && nextId !== lastDeviceId) {
-      clearFeaturesCache()
-      clearPubkeyCache()
-      clearAddressCache()
-    }
-    if (nextId) lastDeviceId = nextId
-  })
+  walletCacheSession.bind(engine, clearFeaturesCache)
 
   /**
    * Wrap a device operation for emulator safety.
@@ -1533,6 +1507,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
       let activeSigningInfo: SigningRequestInfo | undefined
       let activeAllowBlindSigning = false
       let activeClearSignObservationId: string | undefined
+      // Certified envelope found for this request's raw_tx before approval.
+      let activeSolanaCertified: { rawTx: string; proof: CertifiedSolanaProof } | undefined
 
       try {
         // ═══════════════════════════════════════════════════════════════
@@ -1882,19 +1858,55 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               } else {
                 signingInfo.solanaDecodeError = 'missing raw_tx payload'
               }
-              signingInfo.requiresBlindSigningConsent = requiresSolanaBlindSigningConsent(
-                signingInfo.solanaDecoded,
-                preview.lutProof !== undefined || preview.schema !== undefined,
+              // Dapps rarely send certified material. Before approval, ask the
+              // ClearSign service to recognize the exact bytes; a complete
+              // certified envelope is decoded and verified by the device, so it
+              // needs neither one-shot consent nor AdvancedMode. No match or an
+              // unavailable service keeps the opaque path unchanged: the device
+              // refuses an opaque transaction unless the AdvancedMode policy is
+              // on (fsm_msgSolanaSignTx, "Enable AdvancedMode to blind-sign"),
+              // and hdwallet never forwards allowBlindSigning to it, so the
+              // policy is asked for up front exactly where the connected
+              // firmware requires it.
+              const certifiedProof = await applyRestSolanaSigningGates(
+                signingInfo,
+                preview,
+                engine.getDeviceState().firmwareVersion,
               )
-              if (signingInfo.requiresBlindSigningConsent) {
-                signingInfo.needsBlindSigning = true
-                // The device refuses every opaque Solana transaction unless the
-                // AdvancedMode policy is on (fsm_msgSolanaSignTx, "Enable
-                // AdvancedMode to blind-sign"), and hdwallet never forwards
-                // allowBlindSigning to it. The one-shot consent alone cannot
-                // make the device sign, so require the policy up front instead
-                // of letting the user approve twice and then fail on-device.
-                signingInfo.requiresAdvancedMode = true
+              if (certifiedProof && typeof preview.raw_tx === 'string') {
+                activeSolanaCertified = { rawTx: preview.raw_tx, proof: certifiedProof }
+                // The device decodes this call from the certified schema. The
+                // sign handler refuses if that material is gone at sign time.
+                signingInfo.deviceClearSigns = true
+                // What the delegate's signature actually covers — the program
+                // id, the instruction name and the argument layout — read back
+                // from the reviewed entry the envelope was checked against, so
+                // the overlay shows the same values the device will.
+                signingInfo.solanaCertified = describeCertifiedSolanaTransaction(preview.raw_tx, certifiedProof)
+              }
+              // Every gate above is now decided. The simulation runs last, on
+              // purpose: it is an estimate from an RPC this computer chose, so
+              // it may add an answer ("you would be left holding X") but must
+              // never relax needsBlindSigning, requiresAdvancedMode,
+              // requiresBlindSigningConsent or deviceClearSigns.
+              if (typeof preview.raw_tx === 'string') {
+                signingInfo.simulatedOutflow = await simulateSolanaHoldings(
+                  preview.raw_tx,
+                  signingInfo.solanaDecoded,
+                  {
+                    endpoint: getSetting('solana_rpc_endpoint') || DEFAULT_SOLANA_RPC_ENDPOINT,
+                    // The identities the certified description established —
+                    // NOT certifiedProof.tokenInfo. Nothing on this computer
+                    // verifies the delegate's attestation, so a ticker is only
+                    // rendered where that attestation and the reviewed catalog
+                    // entry's own pin agree, and the description above is where
+                    // that comparison happens. Passing the attestation straight
+                    // through put an unchecked symbol and an unchecked decimal
+                    // point on the holdings line.
+                    verifiedTokens: certifiedTokenIdentities(signingInfo.solanaCertified),
+                    offline: getSetting('offline_mode') === '1',
+                  },
+                )
               }
             } else if (
               path === '/tron/sign-message'
@@ -2211,7 +2223,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.AddressRequest)
           const sd = showDisplay(body.show_display)
-          const cacheKey = scopedKey(engine, 'utxo', body)
+          const cacheKey = scopedKey(engine, 'utxo', body, wallet)
           const cached = addressCache.get(cacheKey)
           // A trusted-display request must always reach the device. Returning
           // a cached value would silently skip the confirmation it requested.
@@ -2223,7 +2235,6 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             showDisplay: sd,
           }), { operation: 'btcGetAddress', chain: 'Bitcoin' }, sd)
           const address = typeof result === 'string' ? result : result?.address || result
-          if (addressCache.size >= MAX_CACHE_SIZE) evictOldest(addressCache, Math.ceil(MAX_CACHE_SIZE * 0.2))
           addressCache.set(cacheKey, address)
           auth.saveAccount(String(address), body.address_n)
           return json({ address })
@@ -2233,7 +2244,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.AddressRequest)
-          const cacheKey = scopedKey(engine, 'cosmos', body)
+          const cacheKey = scopedKey(engine, 'cosmos', body, wallet)
           const cached = addressCache.get(cacheKey)
           if (cached) return json({ address: cached })
           const sd = showDisplay(body.show_display)
@@ -2242,7 +2253,6 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             showDisplay: sd,
           }), { operation: 'cosmosGetAddress', chain: 'Cosmos' }, sd)
           const address = typeof result === 'string' ? result : result?.address || result
-          if (addressCache.size >= MAX_CACHE_SIZE) evictOldest(addressCache, Math.ceil(MAX_CACHE_SIZE * 0.2))
           addressCache.set(cacheKey, address)
           auth.saveAccount(String(address), body.address_n)
           return json({ address })
@@ -2252,7 +2262,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.AddressRequest)
-          const cacheKey = scopedKey(engine, 'osmo', body)
+          const cacheKey = scopedKey(engine, 'osmo', body, wallet)
           const cached = addressCache.get(cacheKey)
           if (cached) return json({ address: cached })
           const sd = showDisplay(body.show_display)
@@ -2261,7 +2271,6 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             showDisplay: sd,
           }), { operation: 'osmosisGetAddress', chain: 'Osmosis' }, sd)
           const address = typeof result === 'string' ? result : result?.address || result
-          if (addressCache.size >= MAX_CACHE_SIZE) evictOldest(addressCache, Math.ceil(MAX_CACHE_SIZE * 0.2))
           addressCache.set(cacheKey, address)
           auth.saveAccount(String(address), body.address_n)
           return json({ address })
@@ -2271,7 +2280,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.AddressRequest)
-          const cacheKey = scopedKey(engine, 'eth', body)
+          const cacheKey = scopedKey(engine, 'eth', body, wallet)
           const cached = addressCache.get(cacheKey)
           if (cached) return json({ address: cached })
           const sd = showDisplay(body.show_display)
@@ -2280,7 +2289,6 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             showDisplay: sd,
           }), { operation: 'ethGetAddress', chain: 'Ethereum' }, sd)
           const address = typeof result === 'string' ? result : result?.address || result
-          if (addressCache.size >= MAX_CACHE_SIZE) evictOldest(addressCache, Math.ceil(MAX_CACHE_SIZE * 0.2))
           addressCache.set(cacheKey, address)
           auth.saveAccount(String(address), body.address_n)
           return json({ address })
@@ -2290,7 +2298,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.AddressRequest)
-          const cacheKey = scopedKey(engine, 'tendermint', body)
+          const cacheKey = scopedKey(engine, 'tendermint', body, wallet)
           const cached = addressCache.get(cacheKey)
           if (cached) return json({ address: cached })
           const sd = showDisplay(body.show_display)
@@ -2299,7 +2307,6 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             showDisplay: sd,
           }), { operation: 'cosmosGetAddress', chain: 'Cosmos' }, sd)
           const address = typeof result === 'string' ? result : result?.address || result
-          if (addressCache.size >= MAX_CACHE_SIZE) evictOldest(addressCache, Math.ceil(MAX_CACHE_SIZE * 0.2))
           addressCache.set(cacheKey, address)
           auth.saveAccount(String(address), body.address_n)
           return json({ address })
@@ -2309,7 +2316,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.AddressRequest)
-          const cacheKey = scopedKey(engine, 'thor', body)
+          const cacheKey = scopedKey(engine, 'thor', body, wallet)
           const cached = addressCache.get(cacheKey)
           if (cached) return json({ address: cached })
           const sd = showDisplay(body.show_display)
@@ -2318,7 +2325,6 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             showDisplay: sd,
           }), { operation: 'thorchainGetAddress', chain: 'THORChain' }, sd)
           const address = typeof result === 'string' ? result : result?.address || result
-          if (addressCache.size >= MAX_CACHE_SIZE) evictOldest(addressCache, Math.ceil(MAX_CACHE_SIZE * 0.2))
           addressCache.set(cacheKey, address)
           auth.saveAccount(String(address), body.address_n)
           return json({ address })
@@ -2328,7 +2334,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.AddressRequest)
-          const cacheKey = scopedKey(engine, 'maya', body)
+          const cacheKey = scopedKey(engine, 'maya', body, wallet)
           const cached = addressCache.get(cacheKey)
           if (cached) return json({ address: cached })
           const sd = showDisplay(body.show_display)
@@ -2337,7 +2343,6 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             showDisplay: sd,
           }), { operation: 'mayachainGetAddress', chain: 'Maya' }, sd)
           const address = typeof result === 'string' ? result : result?.address || result
-          if (addressCache.size >= MAX_CACHE_SIZE) evictOldest(addressCache, Math.ceil(MAX_CACHE_SIZE * 0.2))
           addressCache.set(cacheKey, address)
           auth.saveAccount(String(address), body.address_n)
           return json({ address })
@@ -2347,7 +2352,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.AddressRequest)
-          const cacheKey = scopedKey(engine, 'xrp', body)
+          const cacheKey = scopedKey(engine, 'xrp', body, wallet)
           const cached = addressCache.get(cacheKey)
           if (cached) return json({ address: cached })
           const sd = showDisplay(body.show_display)
@@ -2356,7 +2361,6 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             showDisplay: sd,
           }), { operation: 'xrpGetAddress', chain: 'XRP' }, sd)
           const address = typeof result === 'string' ? result : result?.address || result
-          if (addressCache.size >= MAX_CACHE_SIZE) evictOldest(addressCache, Math.ceil(MAX_CACHE_SIZE * 0.2))
           addressCache.set(cacheKey, address)
           auth.saveAccount(String(address), body.address_n)
           return json({ address })
@@ -2368,7 +2372,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           if (fwBlock) return fwBlock
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.AddressRequest)
-          const cacheKey = scopedKey(engine, 'sol', body)
+          const cacheKey = scopedKey(engine, 'sol', body, wallet)
           const cached = addressCache.get(cacheKey)
           if (cached) return json({ address: cached })
           const sd = showDisplay(body.show_display)
@@ -2377,7 +2381,6 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             showDisplay: sd,
           }), { operation: 'solanaGetAddress', chain: 'Solana' }, sd)
           const address = typeof result === 'string' ? result : (result as any)?.address || result
-          if (addressCache.size >= MAX_CACHE_SIZE) evictOldest(addressCache, Math.ceil(MAX_CACHE_SIZE * 0.2))
           addressCache.set(cacheKey, address)
           auth.saveAccount(String(address), body.address_n)
           return json({ address })
@@ -2389,7 +2392,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           if (fwBlock) return fwBlock
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.AddressRequest)
-          const cacheKey = scopedKey(engine, 'trx', body)
+          const cacheKey = scopedKey(engine, 'trx', body, wallet)
           const cached = addressCache.get(cacheKey)
           if (cached) return json({ address: cached })
           const sd = showDisplay(body.show_display)
@@ -2398,7 +2401,6 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             showDisplay: sd,
           }), { operation: 'tronGetAddress', chain: 'Tron' }, sd)
           const address = typeof result === 'string' ? result : (result as any)?.address || result
-          if (addressCache.size >= MAX_CACHE_SIZE) evictOldest(addressCache, Math.ceil(MAX_CACHE_SIZE * 0.2))
           addressCache.set(cacheKey, address)
           auth.saveAccount(String(address), body.address_n)
           return json({ address })
@@ -2410,7 +2412,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           if (fwBlock) return fwBlock
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.AddressRequest)
-          const cacheKey = scopedKey(engine, 'ton', body)
+          const cacheKey = scopedKey(engine, 'ton', body, wallet)
           const cached = addressCache.get(cacheKey)
           if (cached) return json({ address: cached })
           const sd = showDisplay(body.show_display)
@@ -2420,7 +2422,6 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             bounceable: false, // UQ prefix — safe for uninitialized wallets
           }), { operation: 'tonGetAddress', chain: 'TON' }, sd)
           const address = typeof result === 'string' ? result : (result as any)?.address || result
-          if (addressCache.size >= MAX_CACHE_SIZE) evictOldest(addressCache, Math.ceil(MAX_CACHE_SIZE * 0.2))
           addressCache.set(cacheKey, address)
           auth.saveAccount(String(address), body.address_n)
           return json({ address })
@@ -2434,7 +2435,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           if (fwBlock) return fwBlock
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.AddressRequest)
-          const cacheKey = scopedKey(engine, 'hive', body)
+          const cacheKey = scopedKey(engine, 'hive', body, wallet)
           const cached = addressCache.get(cacheKey)
           if (cached) return json({ address: cached })
           const sd = showDisplay(body.show_display)
@@ -2444,7 +2445,6 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             coin: 'Hive',
           }), { operation: 'hiveGetPublicKey', chain: 'HIVE' }, sd)
           const address = result?.publicKey || ''
-          if (addressCache.size >= MAX_CACHE_SIZE) evictOldest(addressCache, Math.ceil(MAX_CACHE_SIZE * 0.2))
           addressCache.set(cacheKey, address)
           auth.saveAccount(String(address), body.address_n)
           return json({ address })
@@ -3326,30 +3326,23 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           // proof unchanged, or adds a one-shot opaque fallback only when
           // the Vault UI returned explicit consent, then splices
           // the returned signature back into the original wire transaction.
-          const clearSignPayload = body.schema?.payload ? String(body.schema.payload) : undefined
-          const clearSignRequest = body.schema ? {
-            signerKeyId: body.schema.signerKeyId,
+          // Caller material wins; the pre-approval lookup only ran without it.
+          const signRequest = buildRestSolanaSignRequest(body, addressNList, {
+            certified: activeSolanaCertified,
+            routedCertified: activeSigningInfo?.deviceClearSigns === true,
+            allowBlindSigning: activeAllowBlindSigning,
+          })
+          const schema = signRequest.schema
+          const clearSignPayload = schema?.payload ? String(schema.payload) : undefined
+          const clearSignRequest = schema ? {
+            signerKeyId: schema.signerKeyId,
             txHash: createHash('sha256').update(fullTx).digest('hex'),
           } : undefined
           let clearSignSentToDevice = false
           let result: any
           try {
             result = await signSolanaWireTransaction(
-              {
-                addressNList,
-                rawTx: body.raw_tx,
-                lutProof: body.lutProof,
-                certificate: body.certificate,
-                // Reusable KKSOLSC1 instruction schema — signed once per
-                // program+instruction, so the device can decode this call
-                // without a per-transaction attestation.
-                schema: body.schema,
-                // x402 payment intent is never trusted directly: the signing
-                // helper matches network, sponsor, mint, amount, authority and
-                // destination ATA against the exact v0 message first.
-                x402: body.x402,
-                allowBlindSigning: activeAllowBlindSigning,
-              },
+              signRequest,
               (request) => {
                 clearSignSentToDevice = true
                 return emuWrap(
@@ -3371,13 +3364,13 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             if (clearSignPayload) recordRestClearSignEvent({
               kind: 'transaction', outcome: 'signed', source: 'rest-api', chain: 'Solana',
               format: 'KKSOLSC1_BASE64', label: 'Solana ClearSign transaction', payload: clearSignPayload,
-              keyId: Number.isInteger(body.schema?.signerKeyId) ? body.schema!.signerKeyId : undefined,
+              keyId: Number.isInteger(schema?.signerKeyId) ? schema!.signerKeyId : undefined,
               sentToDevice: clearSignSentToDevice, request: clearSignRequest,
             })
-            if (activeClearSignObservationId && (body.schema || result.clearSignPromotionBundleHash)) {
+            if (activeClearSignObservationId && (schema || result.clearSignPromotionBundleHash)) {
               authenticateClearSignObservation(
                 activeClearSignObservationId,
-                body.certificate || result.clearSignPromotionBundleHash ? 'certified' : 'runtime',
+                signRequest.certificate || result.clearSignPromotionBundleHash ? 'certified' : 'runtime',
                 1,
                 Boolean(result.clearSignPromotionBundleHash),
                 result.clearSignPromotionBundleHash,
@@ -3388,7 +3381,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             if (clearSignPayload) recordRestClearSignEvent({
               kind: 'transaction', outcome: 'blocked', source: 'rest-api', chain: 'Solana',
               format: 'KKSOLSC1_BASE64', label: 'Blocked Solana ClearSign transaction', payload: clearSignPayload,
-              keyId: Number.isInteger(body.schema?.signerKeyId) ? body.schema!.signerKeyId : undefined,
+              keyId: Number.isInteger(schema?.signerKeyId) ? schema!.signerKeyId : undefined,
               sentToDevice: clearSignSentToDevice, request: clearSignRequest,
               error: err?.message || String(err),
             })
@@ -3416,17 +3409,46 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const endpoint = getSetting('solana_rpc_endpoint') || DEFAULT_SOLANA_RPC_ENDPOINT
           try {
             const solanaDecoded = await buildSolanaDecodedInfo(body.raw_tx, createRpcAltFetcher(endpoint))
-            return json({
-              solanaDecoded,
-              requiresBlindSigningConsent: requiresSolanaBlindSigningConsent(solanaDecoded, false),
+            const requiresBlindSigningConsent = requiresSolanaBlindSigningConsent(solanaDecoded, false)
+            // Only now, with the consent verdict already fixed above, ask an RPC
+            // what the fee payer would be left holding. It is an estimate made
+            // on this computer and it answers the one question a decode of an
+            // opaque program cannot — including a wager that moves by CPI, with
+            // no transfer instruction in the bytes to read. It is returned as
+            // its own field and feeds no gate.
+            const simulatedOutflow = await simulateSolanaHoldings(body.raw_tx, solanaDecoded, {
+              endpoint, offline: getSetting('offline_mode') === '1',
             })
+            // The same sentences the vault's own approval overlay shows. Without
+            // them a caller has to invent its own wording for the same bytes,
+            // and two vocabularies for one transaction is how a user ends up
+            // reading a softer warning than the one this vault decided on.
+            // Note what is NOT here: deviceClearSigns. Whether the DEVICE can
+            // clear-sign depends on the certified lookup in the signing gate
+            // (a network round-trip, firmware-version-dependent), so a decode
+            // must not promise it.
+            const risk = assessSigningRisk({
+              id: 'decode', method: 'solana_decodeTransaction', appName: 'decode', chain: 'solana',
+              solanaDecoded, requiresBlindSigningConsent, simulatedOutflow,
+            } as any)
+            return json({ solanaDecoded, requiresBlindSigningConsent, risk, simulatedOutflow })
           } catch (e: any) {
             // Mirrors the signing gate: an explicit error, never a partial
             // decode dressed up as a summary. The caller must render this as a
             // refusal to review, not as "nothing is being moved".
             const solanaDecodeError = `${e?.name || 'Error'}: ${e?.message || String(e)}`
             console.warn('[REST] Solana decode failed:', solanaDecodeError, '\n  raw_tx (base64):', body.raw_tx)
-            return json({ solanaDecodeError, requiresBlindSigningConsent: true })
+            // Bytes this vault cannot read are the case where "what would I be
+            // left holding" matters most, so still ask — with no decode, the
+            // answer covers native SOL and says the token side went unchecked.
+            const simulatedOutflow = await simulateSolanaHoldings(body.raw_tx, undefined, {
+              endpoint, offline: getSetting('offline_mode') === '1',
+            })
+            const risk = assessSigningRisk({
+              id: 'decode', method: 'solana_decodeTransaction', appName: 'decode', chain: 'solana',
+              solanaDecodeError, requiresBlindSigningConsent: true, simulatedOutflow,
+            } as any)
+            return json({ solanaDecodeError, requiresBlindSigningConsent: true, risk, simulatedOutflow })
           }
         }
 
@@ -3787,7 +3809,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.GetPublicKeyRequest)
-          const cacheKey = scopedKey(engine, 'pubkey', body)
+          const cacheKey = scopedKey(engine, 'pubkey', body, wallet)
           const cached = pubkeyCache.get(cacheKey)
           if (cached) return json(cached)
           const sd = showDisplay(body.show_display)
@@ -3800,7 +3822,6 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           }]), { operation: 'getPublicKeys', chain: 'Bitcoin' }, sd)
           const xpub = result?.[0]?.xpub
           const out = { xpub }
-          if (pubkeyCache.size >= MAX_CACHE_SIZE) evictOldest(pubkeyCache, Math.ceil(MAX_CACHE_SIZE * 0.2))
           pubkeyCache.set(cacheKey, out)
           return json(validateResponse(out, S.GetPublicKeyResponse, path))
         }
@@ -4217,6 +4238,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.BatchPubkeysRequest)
+          const batchSessionKey = scopedKey(engine, 'batch-request', null, wallet)
           const paths = body.paths || []
           const results: any[] = []
 
@@ -4230,7 +4252,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               // branch. Skip quietly (the device would reject with "Unknown message").
               if (deviceIsBitcoinOnly()) continue
               const primaryNetwork = (p.networks || [])[0] || ''
-              const addrCacheKey = scopedKey(engine, 'batch-addr', { n: p.address_n, net: primaryNetwork })
+              const addrCacheKey = scopedKey(engine, 'batch-addr', { n: p.address_n, net: primaryNetwork }, wallet)
               const cachedAddr = addressCache.get(addrCacheKey)
               if (cachedAddr) {
                 results.push({
@@ -4291,7 +4313,6 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
                 }
 
                 if (address) {
-                  if (addressCache.size >= MAX_CACHE_SIZE) evictOldest(addressCache, Math.ceil(MAX_CACHE_SIZE * 0.2))
                   addressCache.set(addrCacheKey, address)
                   auth.saveAccount(address, addrNList)
                 }
@@ -4321,7 +4342,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             // have cached altcoin xpubs before being flashed BTC-only.
             if (deviceIsBitcoinOnly() && !bitcoinOnlyPublicKeyPathAllowed({ ...p, coin })) continue
 
-            const cacheKey = scopedKey(engine, 'batch-pubkey', { address_n: p.address_n, script_type: p.script_type })
+            const cacheKey = scopedKey(engine, 'batch-pubkey', { address_n: p.address_n, script_type: p.script_type }, wallet)
             const cached = pubkeyCache.get(cacheKey)
             if (cached) {
               results.push({
@@ -4347,7 +4368,6 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               }])
               const xpub = result?.[0]?.xpub || ''
               const out = { xpub }
-              if (pubkeyCache.size >= MAX_CACHE_SIZE) evictOldest(pubkeyCache, Math.ceil(MAX_CACHE_SIZE * 0.2))
               pubkeyCache.set(cacheKey, out)
               results.push({
                 pubkey: xpub,
@@ -4365,6 +4385,9 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             }
           }
 
+          // Reject a batch that spans two wallets, even if later items derive
+          // successfully after the old cache was invalidated.
+          walletCacheSession.assertCurrent(batchSessionKey)
           return json({
             pubkeys: results,
             cached_count: results.length,
@@ -5133,6 +5156,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         activeSigningInfo = undefined
         activeAllowBlindSigning = false
         activeClearSignObservationId = undefined
+        activeSolanaCertified = undefined
       }
     },
     // WS endpoint for the BEX agent bridge (/bex-bridge upgrade above).

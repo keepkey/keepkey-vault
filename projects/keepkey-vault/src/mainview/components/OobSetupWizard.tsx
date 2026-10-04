@@ -20,6 +20,7 @@ import { CreateWalletBriefing } from './CreateWalletBriefing'
 import { SecurityStepPage } from './SecurityStepPage'
 import { RngAuditPanel } from './RngAuditPanel'
 import { rpcRequest, onRpcMessage } from '../lib/rpc'
+import { requiresBackupConfirmation, updateDoneWalletMessage } from '../lib/update-safety'
 import type { FirmwareAnalysis, FirmwareProgress } from '../../shared/types'
 import { FirmwareUpgradePreview } from './FirmwareUpgradePreview'
 import { ReproducibleBuildNotice } from './ReproducibleBuildNotice'
@@ -259,6 +260,10 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
     return () => clearInterval(timer)
   }, [rebootPhase])
 
+  // "I have my recovery phrase" gate before any flash. An interrupted upload
+  // wipes the seed, so an initialized device must not be flashed without it.
+  const [backupConfirmed, setBackupConfirmed] = useState(false)
+
   // Hooks — use Electrobun RPC-based hooks
   const deviceStatus = useDeviceState()
   const {
@@ -288,6 +293,57 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
     // a wallet that no longer exists.
     everSeenInitializedRef.current = false
   }
+  // Bootloader mode can't report `initialized`; remember the last app-mode read
+  // so the backup gate knows whether this device holds a wallet (null = unknown).
+  const lastAppModeInitializedRef = useRef<boolean | null>(null)
+  if (!deviceStatus.bootloaderMode && deviceStatus.firmwareVersion) {
+    lastAppModeInitializedRef.current = deviceStatus.initialized
+  }
+  const needsBackupConfirm = requiresBackupConfirmation(deviceStatus, lastAppModeInitializedRef.current)
+  const backupBlocked = needsBackupConfirm && !backupConfirmed
+  // Custom flashes that show a wipe acknowledgement (which already asks for the
+  // seed backup) don't need the second checkbox.
+  const customFwWipeAck = !!customFwAnalysis && (customFwAnalysis.willWipeDevice || (!customFwAnalysis.isSigned && customFwAnalysis.isBootloaderMode))
+  const backupConfirmBox = needsBackupConfirm ? (
+    <Flex
+      as="label"
+      w="100%"
+      align="center"
+      gap={2}
+      cursor="pointer"
+      userSelect="none"
+      onClick={() => setBackupConfirmed(!backupConfirmed)}
+    >
+      <Box
+        w="16px" h="16px" borderRadius="sm" border="2px solid"
+        borderColor={backupConfirmed ? 'var(--gold)' : 'kk.textSecondary'}
+        bg={backupConfirmed ? 'var(--gold)' : 'transparent'}
+        display="flex" alignItems="center" justifyContent="center" flexShrink={0}
+      >
+        {backupConfirmed && (
+          <Text fontSize="2xs" color="black" lineHeight="1">&#10003;</Text>
+        )}
+      </Box>
+      <Text fontSize="xs" fontWeight="600" color="kk.textPrimary">
+        {t('firmware.backupConfirm', { defaultValue: 'I have my recovery phrase written down. If the update is interrupted, the wallet on this KeepKey is erased and can only be restored from it.' })}
+      </Text>
+    </Flex>
+  ) : null
+
+  // Time spent in the upload itself (not the reboot) — drives the "taking a
+  // long time" note. There is no JS-level timeout on the flash (see engine).
+  const isFlashing = updateState === 'updating' || customFwPhase === 'flashing'
+  const [flashElapsedMs, setFlashElapsedMs] = useState(0)
+  useEffect(() => {
+    if (!isFlashing) { setFlashElapsedMs(0); return }
+    const timer = setInterval(() => setFlashElapsedMs(prev => prev + 1000), 1000)
+    return () => clearInterval(timer)
+  }, [isFlashing])
+  const flashSlowNote = flashElapsedMs >= 5 * 60_000 ? (
+    <Text fontSize="2xs" color="yellow.200" textAlign="center">
+      {t('firmware.slowUpdate', { defaultValue: 'Taking a long time? Keep waiting and keep your KeepKey connected, and check its screen for a prompt to confirm. Unplugging before the update finishes erases the wallet on the device — you would need your recovery phrase to restore it.' })}
+    </Text>
+  ) : null
   const [showCreateWipeConfirm, setShowCreateWipeConfirm] = useState(false)
   const inBootloader = deviceStatus.bootloaderMode
   const isOobDevice = deviceStatus.isOob
@@ -1237,6 +1293,7 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
                       </Box>
                     )}
 
+                    {needsBootloader && backupConfirmBox}
                     {needsBootloader && (
                       <Button
                         w="100%"
@@ -1248,6 +1305,7 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
                         _active={{ transform: 'scale(0.98)' }}
                         transition="all 0.15s ease"
                         onClick={() => startBootloaderUpdate()}
+                        disabled={backupBlocked}
                       >
                         {t('bootloader.updateBootloaderTo', { version: deviceStatus.latestBootloader || '?' })}
                       </Button>
@@ -1474,6 +1532,7 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
                         </Text>
                       </HStack>
                     </Box>
+                    {flashSlowNote}
                   </VStack>
                 )}
 
@@ -1632,6 +1691,7 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
                       </VStack>
                     )}
 
+                    {backupConfirmBox}
                     <Button
                       w="100%"
                       size="md"
@@ -1642,6 +1702,7 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
                       _active={{ transform: 'scale(0.98)' }}
                       transition="all 0.15s ease"
                       onClick={() => startFirmwareUpdate(coinMode === 'bitcoin-only')}
+                      disabled={backupBlocked}
                     >
                       {t('firmware.installLatestFirmware', { version: deviceStatus.latestFirmware || '?' })}
                     </Button>
@@ -1862,6 +1923,9 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
                       </Box>
                     )}
 
+                    {/* The wipe acknowledgements above already cover the backup */}
+                    {!customFwWipeAck && backupConfirmBox}
+
                     <HStack gap={2} w="100%">
                       <Button
                         flex={1}
@@ -1896,7 +1960,8 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
                         onClick={handleCustomFlash}
                         disabled={
                           (customFwAnalysis.willWipeDevice && !customFwAcknowledged) ||
-                          (!customFwAnalysis.isSigned && customFwAnalysis.isBootloaderMode && !customFwAcknowledged)
+                          (!customFwAnalysis.isSigned && customFwAnalysis.isBootloaderMode && !customFwAcknowledged) ||
+                          (!customFwWipeAck && backupBlocked)
                         }
                       >
                         {customFwAnalysis.willWipeDevice ? t('firmware.wipeAndFlash', { defaultValue: 'Wipe & Flash' }) : t('firmware.flashFirmware')}
@@ -1922,6 +1987,7 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
                       />
                     </Box>
                     <Text fontSize="2xs" color="var(--rose)">{t('firmware.doNotUnplug')}</Text>
+                    {flashSlowNote}
                   </VStack>
                 )}
 
@@ -2032,6 +2098,7 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
                         <Text fontSize="2xs" color="var(--rose)">{t('firmware.doNotUnplug')}</Text>
                       </HStack>
                     </Box>
+                    {flashSlowNote}
                   </VStack>
                 )}
 
@@ -2968,15 +3035,26 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
                     <Text fontSize="lg" fontWeight="700" color="white" textAlign="center">
                       {t('updateDone.title', { defaultValue: 'Firmware updated' })}
                     </Text>
-                    {/* The whole reason this screen exists: say plainly that the
-                        wallet survived, before the user can reach anything that
-                        mentions creating one. */}
-                    <Text fontSize="sm" color="gray.300" textAlign="center" lineHeight="1.6">
-                      {t('updateDone.reassure', {
-                        defaultValue:
-                          'Your wallet is untouched. Updating firmware never erases your recovery phrase, your accounts, or your funds — you do not need to restore anything.',
-                      })}
-                    </Text>
+                    {/* Say plainly whether the wallet survived, before the user can
+                        reach anything that mentions creating one. Only claim it
+                        survived when the device says so — an interrupted upload
+                        wipes it, and then this card must not reassure. */}
+                    {updateDoneWalletMessage(deviceStatus) === 'kept' && (
+                      <Text fontSize="sm" color="gray.300" textAlign="center" lineHeight="1.6">
+                        {t('updateDone.reassure', {
+                          defaultValue:
+                            'Your update finished and your wallet is still on your KeepKey — you do not need to restore anything. An update only keeps your recovery phrase when it completes, so always have your recovery phrase written down before updating and never unplug your KeepKey during an update.',
+                        })}
+                      </Text>
+                    )}
+                    {updateDoneWalletMessage(deviceStatus) === 'empty' && (
+                      <Text fontSize="sm" color="gray.300" textAlign="center" lineHeight="1.6">
+                        {t('updateDone.empty', {
+                          defaultValue:
+                            'Your KeepKey has no wallet on it. If it held one before this update, restore it with your recovery phrase.',
+                        })}
+                      </Text>
+                    )}
                   </VStack>
                 </Box>
                 <Button

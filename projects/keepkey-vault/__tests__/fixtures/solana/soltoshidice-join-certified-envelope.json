@@ -1,0 +1,32 @@
+{
+  "_comment": "Real response of the production ClearSign Worker (https://keepkey-clearsign.bithighlander.workers.dev, source ee1488807, version dc2adba8) to POST /v1/solana/certify for soltoshidice-blackjack-join.json with catalogKey soltoshidiceBlackjackJoin, recorded field for field and re-checked against the live Worker on 2026-09-19. Public material, bound to no transaction: the delegate signature covers only the KKSOLSC1 schema, the TokenDef/2 signature only mint/program/decimals/symbol, and the certificate is the public scope-501 delegation. A kkemu built with the alpha ClearSign root signed a re-keyed copy of the join with this exact envelope, AdvancedMode off.",
+  "response": {
+    "catalogKey": "soltoshidiceBlackjackJoin",
+    "success": true,
+    "classification": "VERIFIED",
+    "schema": {
+      "payload": "0x4b4b534f4c53433102b0e08af4a4fcfad13ef8fcfd9dc70975eb6fc2e04a7c76611540a51cd5db9ed001510c536f6c746f736869444943450e426c61636b6a61636b206a6f696e080105526f756e6401085265766973696f6e02045365617406064275792d696e03030b53657373696f6e206b6579070a4578706972657320696e0609416c6c6f77616e63650306094d61782077616765720300",
+      "signature": "0x7302c703ce5fee498427bf87801384c21660f4d3451aef18549f2a31d8cd25611d99c94afcaeafcbd6a8d04c3c1b49232a77a2b949451ba84ff217c590c14700",
+      "signerKeyId": 128
+    },
+    "certificate": "0x0101000001f56c68c8804b6565704b6579205661756c74000000000000000000000000000000000000000342f5f9704494b3f9bd72295eecaf29d783d23ea02b2dc9f48abcd2e46d4850cfa2753fac6068a45747a32a4a39f249af72b55370f3491913b7fb9a80207d619b3b4fca6750fc1fdc790da5562b42a351e12cde3c0f084056a24ca8d1bf2c36b5",
+    "alias": "KeepKey Vault",
+    "fingerprint": "a9531b9d",
+    "transactionShape": "legacy",
+    "lookupTableCount": 0,
+    "provenance": {
+      "protocol": "https://explorer.solana.com/address/CuTLp7pDmNGkFgi4aoh8Ef1YSjc2BzECQRLzYqaoVWBR"
+    },
+    "tokenInfo": [
+      {
+        "mint": "4nCmpwne7hCoWTSpAd54uENmCgHJrHTyn4DMPCEMpump",
+        "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+        "symbol": "SDICE",
+        "decimals": 6,
+        "signature": "36ed412ef38eb9ade9a7ac3e5b60841f9d032ea870c7886b87155c202f2ecfa11fc87848280fea855881f9e34127fbd2dfb91c4ed556dbd54cd1fb18e279d41a",
+        "signerKeyId": 128
+      }
+    ],
+    "tokenMetadataStatus": "certified-on-chain"
+  }
+}

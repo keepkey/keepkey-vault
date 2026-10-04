@@ -59,7 +59,7 @@
 		"listeningForBootloader": "Bootloader modundaki cihaz dinleniyor...",
 		"readyDetectBootloader": "Hazırım — Bootloader'ı algıla",
 		"skipBootloaderUpdate": "Bootloader güncellemesini atla",
-		"verifyBackupHint": "KeepKey yedeklemeyi doğrulamanızı isteyecek. Bunu güncellemeden sonra yapacağız — şimdilik atlamak için düğmeyi basılı tutun.",
+		"verifyBackupHint": "KeepKey, özel anahtarlarınız silinirse diye kurtarma ifadenizin olup olmadığını soracak. Düğmeyi basılı tutmak evet anlamına gelir ve güncellemeyi başlatır — yalnızca kurtarma ifadenizi yazdıysanız onaylayın.",
 		"followDirectionsOnDevice": "Cihazdaki yönergeleri izleyin",
 		"deviceWillGuide": "KeepKey'iniz güncelleme sürecinde size rehberlik edecek.",
 		"bootloaderDetected": "Bootloader modu algılandı",

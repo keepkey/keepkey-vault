@@ -1007,6 +1007,12 @@ export interface SigningRequestInfo {
   solanaMessageDecoded?: SolanaMessageDecodedInfo
   /** Clear-signing: decoded Solana tx — per-instruction rows + resolved ALT accounts */
   solanaDecoded?: SolanaTxDecodedInfo
+  /** The certified ClearSign description the device will decode this Solana
+   *  transaction from. Present only alongside deviceClearSigns. */
+  solanaCertified?: SolanaCertifiedDescription
+  /** Post-transaction holdings from a simulation on this computer. An
+   *  estimate: it never relaxes a gate below and never sets deviceClearSigns. */
+  simulatedOutflow?: SimulatedHoldings
   /** Parsed only from the exact TRON raw_data protobuf bytes being signed. */
   tronDecoded?: TronTxPreview
   /**
@@ -1021,7 +1027,9 @@ export interface SigningRequestInfo {
   needsBlindSigning?: boolean
   /** The device can independently decode this call, either from its native
    *  allowlist or from authenticated, firmware-verified metadata. A
-   *  caller-supplied blob never sets this by itself. */
+   *  caller-supplied blob never sets this by itself.
+   *  REST Solana: Vault found a certified ClearSign schema for these exact
+   *  bytes, which the device verifies and decodes (no opaque consent asked). */
   deviceClearSigns?: boolean
   /** Certified metadata resolved before user approval. The signing handler
    *  reuses this exact envelope so approval and device review cannot drift. */
@@ -1108,6 +1116,77 @@ export interface SolanaTxDecodedInfo {
    *  also appears inside an unknown program's instruction data — the shape of
    *  "fund a session key and register it". */
   fundedKeysGivenToUnknownProgram?: string[]
+  /** Most the network can charge for this transaction, in lamports (decimal
+   *  string): the per-signature base fee plus the priority fee its own
+   *  ComputeBudget instructions ask for. Read from the signed bytes. */
+  maxNetworkFeeLamports?: string
+}
+
+// ── Certified Solana description ─────────────────────────────────────────
+
+/**
+ * One argument of the instruction a KeepKey-certified schema describes. The
+ * label and the position/type this value was read at are what the ClearSign
+ * delegate signed; the value itself comes from the transaction's own bytes.
+ */
+export interface SolanaCertifiedArg {
+  /** The label in the signed schema, e.g. "Wager". Never invented here. */
+  label: string
+  kind: 'number' | 'sol' | 'token' | 'pubkey' | 'opaque' | 'duration'
+  /** Decimal for numbers/amounts/seconds, base58 for a pubkey, hex for opaque. */
+  raw: string
+  /** token: the mint this amount is denominated in (base58). */
+  mint?: string
+  /** token: set ONLY when the delegate attested this mint's identity. Absent
+   *  means the amount must be shown in raw base units with the full mint. */
+  symbol?: string
+  decimals?: number
+}
+
+/**
+ * What a certified ClearSign envelope says about ONE instruction of a Solana
+ * transaction.
+ *
+ * The delegate's signature covers exactly this much: the program id, the
+ * program and instruction names, and the argument layout that fixes where each
+ * value below was read. It is NOT a statement about what the program does with
+ * those values, about the accounts the call names, or about the site that
+ * asked for it — presenting it as any of those would be a false guarantee.
+ */
+export interface SolanaCertifiedDescription {
+  programId: string
+  /** Signed display name of the program, e.g. "SoltoshiDICE". */
+  programName: string
+  /** Signed display name of this instruction, e.g. "Cee-lo place bet". */
+  instructionName: string
+  args: SolanaCertifiedArg[]
+}
+
+/**
+ * What the signer's accounts hold after this transaction, obtained by
+ * simulating it on this computer.
+ *
+ * An estimate from an RPC this computer chose, never a device guarantee and
+ * never a reason to relax a signing gate. `unavailable` means there is no
+ * answer at all — it must read as "could not check", never as "nothing moves".
+ */
+export interface SimulatedHoldings {
+  /** Fixed provenance label. The UI must show this wording, or its own
+   *  translation of it, next to every number below. */
+  label: 'checked on this computer'
+  /** The account these holdings belong to (base58) — the transaction's fee
+   *  payer. Absent when the transaction could not even be read. */
+  owner?: string
+  /** Lamports `owner` holds afterwards, decimal string. */
+  solLamportsAfter?: string
+  /** Token accounts of `owner` this transaction names, after it runs. */
+  tokensAfter?: Array<{ mint: string; amountAfter: string; symbol?: string; decimals?: number }>
+  /** Why there is no answer. Set ⇒ every balance field above is absent. */
+  unavailable?: string
+  /** An honest limit on what was watched, e.g. "tokens were not checked" or a
+   *  watched token account whose post-state came back unreadable. Independent
+   *  of `unavailable` — both can be set, and the copy must render both. */
+  note?: string
 }
 
 export interface ApiLogEntry {
@@ -1160,6 +1239,7 @@ export interface AppSettings {
   btcOnboardingShown: boolean    // one-time btc-only data-source onboarding seen (default false)
   preReleaseUpdates: boolean     // opt-in to pre-release auto-updates (default OFF)
   alphaFirmware: boolean         // opt-in to alpha firmware channel (manifest.beta) (default OFF)
+  addressBookClearsignEnabled: boolean // experimental device-certified contact labels (default OFF)
   privateModeEnabled: boolean    // hide portfolio totals from the UI (default OFF)
   passphraseIntroShown: boolean  // one-time passphrase/hidden-wallet intro dialog seen (default false)
   /** Explicit user-configured JSON-RPC endpoints used for pre-sign EVM simulation, keyed by decimal chain id. */
@@ -1537,6 +1617,8 @@ export interface RelayTxParams {
 export interface SwapQuote {
   expectedOutput: string     // human-readable amount out
   minimumOutput: string      // after slippage
+  minimumOutputSource?: 'memo' | 'quote' | 'estimate'
+  requestedSlippageBps?: number
   inboundAddress: string     // vault address to send to
   router?: string            // EVM router contract (for depositWithExpiry)
   memo: string               // THORChain routing memo (empty for memoless integrations)
@@ -1664,7 +1746,8 @@ export interface PendingSwap {
   fromCaip?: string       // CAIP-19 — preserved so the resumed dialog can render the asset logo
   toCaip?: string
   fromAmount: string      // human-readable
-  expectedOutput: string  // human-readable (quote-time estimate; replaced with actual when received)
+  expectedOutput: string  // quote-time estimate; never replace with received output
+  payouts?: Array<{ txid: string; amount: string; asset: string; address?: string }>
   receivedOutput?: string // actual received amount (filled by Pioneer poll once outbound confirms)
   memo: string
   inboundAddress: string
@@ -1736,6 +1819,8 @@ export interface PendingSwap {
 
 export interface SwapStatusUpdate {
   txid: string
+  payouts?: PendingSwap['payouts']
+  receivedOutput?: string
   status: SwapTrackingStatus
   confirmations?: number
   outboundConfirmations?: number

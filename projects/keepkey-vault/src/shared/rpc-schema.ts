@@ -259,6 +259,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       setEmulatorEnabled: { params: { enabled: boolean }; response: AppSettings }
       setPreReleaseUpdates: { params: { enabled: boolean }; response: AppSettings }
       setAlphaFirmware: { params: { enabled: boolean }; response: AppSettings }
+      setAddressBookClearsignEnabled: { params: { enabled: boolean }; response: AppSettings }
       setPrivateModeEnabled: { params: { enabled: boolean }; response: AppSettings }
       setEvmSimulationRpc: { params: { chainId: number; url: string }; response: AppSettings }
       addPioneerServer: { params: { url: string; label: string }; response: AppSettings }
@@ -310,10 +311,10 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       dismissSwap: { params: { txid: string }; response: void }
 
       // ── Swap History (SQLite-persisted) ─────────────────────────────
-      getSwapByTxid: { params: { txid: string }; response: PendingSwap | null }
+      getSwapByTxid: { params: { txid: string; watchOnly?: boolean; deviceId?: string }; response: PendingSwap | null }
       /** Single on-demand Pioneer poll for one swap. Used by SwapDialog while
        *  open — there is no background polling timer (by design). */
-      refreshSwap: { params: { txid: string; rescan?: boolean }; response: PendingSwap | null }
+      refreshSwap: { params: { txid: string; rescan?: boolean; watchOnly?: boolean; deviceId?: string }; response: PendingSwap | null }
       /** Read-only diagnostic for a single swap: local state + raw Pioneer
        *  response + rescan response, with protocol divergence flagged. Used
        *  by the SwapDialog "Debug" affordance and dev-tools introspection.
@@ -349,11 +350,13 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       updateAddressBook: { params: { id: string; label?: string; note?: string }; response: boolean }
       deleteAddressBook: { params: { id: string }; response: void }
       getAddressBookHistory: { params: { entryId: string }; response: AddressBookTx[] }
+      certifyAddressBook: { params: void; response: { revision: number; count: number; root: string; fingerprint: string } }
 
       // ── Recent Activity ──────────────────────────────────────────────────
       // limit omitted = every row for the wallet (the activity list shows full history)
-      getRecentActivity: { params: { limit?: number; chainId?: string } | void; response: RecentActivity[] }
-      scanChainHistory: { params: { chainId: string }; response: { count: number } }
+      getRecentActivity: { params: { limit?: number; chainId?: string; watchOnly?: boolean; deviceId?: string } | void; response: RecentActivity[] }
+      getWatchOnlyHistoryChains: { params: { deviceId?: string }; response: string[] }
+      scanChainHistory: { params: { chainId: string; watchOnly?: boolean; deviceId?: string }; response: { count: number } }
       // True while the engine's startup/background bulk history scan is in flight,
       // so the activity UI can show "Syncing…" instead of a false "no activity".
       getActivityScanState: { params: void; response: { running: boolean } }

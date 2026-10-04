@@ -96,15 +96,20 @@ const FALLBACK_TOOLS = [
 // bex_browsers is answered here — the BEX never sees either.
 const BROWSER_ARG = {
   type: 'string',
-  description: 'Which connected KeepKey browser (Chrome profile) to use, e.g. "b1" — see bex_browsers. Required only when more than one is connected.',
+  description: 'Which connected KeepKey browser (Chrome profile) to use, e.g. "b1-3f9a2c" — see bex_browsers. Required only when more than one is connected.',
 }
 
 const BROWSERS_TOOL = {
   name: 'bex_browsers',
   description:
-    'List the KeepKey browser instances connected to the vault — one per Chrome profile with Agent mode on — with each one\'s bex_status. Ids (b1, b2, …) are what you pass as `browser` to every other tool; they change when that extension reconnects. To tell profiles apart, call bex_tabs with each browser.',
+    'List the KeepKey browser instances connected to the vault — one per Chrome profile with Agent mode on — with each one\'s bex_status. Ids (e.g. b1-3f9a2c) are what you pass as `browser` to every other tool; they change when that extension reconnects or the vault restarts. To tell profiles apart, call bex_tabs with each browser.',
   inputSchema: { type: 'object', properties: {}, additionalProperties: false },
 }
+
+// tools/list and bex_browsers ask each browser for something it answers
+// instantly (catalog, status). One that stays silent this long is skipped, so a
+// hung client can't stall every agent for the full 30s call timeout.
+const PROBE_TIMEOUT_MS = 3_000
 
 /** Advertise `browser` on every tool, and add the vault-side bex_browsers. */
 function withBrowserArg(tools: any[]): any[] {
@@ -222,17 +227,20 @@ export async function handleMcpRequest(req: Request, cors: Record<string, string
     case 'tools/list': {
       // The BEX owns its catalog; we serve whatever it reports. This is what
       // keeps a new tool a one-repo change.
-      try {
-        // Any instance will do — they run the same extension. ponytail: if
-        // profiles ever run different BEX versions, the catalog is the oldest one's.
-        const { tools } = (await callBex('bex_list_tools', {}, listBrowsers()[0]?.browser)) as { tools: unknown[] }
-        return rpcResult(id, { tools: withBrowserArg(tools) }, cors)
-      } catch {
-        // Bridge down (BEX closed, or Agent mode off) — serve the static
-        // fallback so tools/list still succeeds. Note: a connected-but-
-        // unresponsive BEX costs the full CALL_TIMEOUT_MS before landing here.
-        return rpcResult(id, { tools: withBrowserArg(FALLBACK_TOOLS) }, cors)
+      // Any instance will do — they run the same extension — so ask the oldest,
+      // and the next if it doesn't answer. ponytail: if profiles ever run
+      // different BEX versions, the catalog is the first answerer's.
+      for (const { browser } of listBrowsers()) {
+        try {
+          const { tools } = (await callBex('bex_list_tools', {}, browser, PROBE_TIMEOUT_MS)) as { tools: unknown[] }
+          return rpcResult(id, { tools: withBrowserArg(tools) }, cors)
+        } catch {
+          // silent or broken — try the next browser
+        }
       }
+      // Bridge down (BEX closed, or Agent mode off) or no browser answered —
+      // serve the static fallback so tools/list still succeeds.
+      return rpcResult(id, { tools: withBrowserArg(FALLBACK_TOOLS) }, cors)
     }
 
     case 'tools/call': {
@@ -249,7 +257,7 @@ export async function handleMcpRequest(req: Request, cors: Record<string, string
       if (name === 'bex_browsers') {
         const browsers = await Promise.all(listBrowsers().map(async b => {
           try {
-            return { ...b, status: await callBex('bex_status', {}, b.browser) }
+            return { ...b, status: await callBex('bex_status', {}, b.browser, PROBE_TIMEOUT_MS) }
           } catch (e: any) {
             return { ...b, error: e?.message || String(e) }
           }

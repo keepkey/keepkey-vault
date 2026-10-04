@@ -2,16 +2,22 @@ import { describe, expect, it } from 'bun:test'
 import bs58 from 'bs58'
 
 import worker from './index'
+import { syntheticPumpBuy } from '../../scripts/fixtures/solana-pump'
+import { editSolanaTx } from '../../scripts/fixtures/solana-message'
+import joinFixture from '../../__tests__/fixtures/solana/soltoshidice-blackjack-join.json'
+import ceeloFixture from '../../__tests__/fixtures/solana/soltoshidice-ceelo-bet.json'
+import pokerRegistrationFixture from '../../__tests__/fixtures/solana/soltoshidice-register-poker-tournament.json'
+import livePokerFixture from '../../__tests__/fixtures/solana/soltoshidice-live-poker-session.json'
 
-// Public production Relay artifact. It contains only a root certificate and
-// signatures; the delegate private key is deliberately absent from this test
-// and from the worker's environment contract.
-const RELAY_EVM_ID = '1:0x4cd00e387622c35bddb9b4c962c136462338bc31:0x49290c1c'
-const RELAY_EVM_ENVELOPE = '030101000000016b359b004b6565704b657920416c706861203731360000000000000000000000000000000342f5f9704494b3f9bd72295eecaf29d783d23ea02b2dc9f48abcd2e46d4850cffc4364672f0172aa70ed21eacc2ea8bd0d333119ddf048b096686e1a8e56bda438f9e70b9cfc229a1e93e2d91846c31c4083d8b176e225d76341069dd22826cf02000000014cd00e387622c35bddb9b4c962c136462338bc3149290c1c000d6272696467654465706f73697402096465706f7369746f7201076f72646572496403010000000080500eca0f7b0521c5d0ee5f6ff406eca34e97bf9fa72c450a65a2248004c6c5107f9cc0a3c7816cedd06c3206a0c6e6242b228190a5b1da773561065c6f0e86cc1b'
+type Ix = { programIdIndex: number; accountIndices: number[]; data: Buffer }
 
-const artifactEnv = (overrides: Record<string, unknown> = {}) => ({
-  CLEARSIGN_ARTIFACTS_JSON: JSON.stringify({ version: 1, evm: { [RELAY_EVM_ID]: RELAY_EVM_ENVELOPE }, ...overrides }),
-})
+/** Re-serialize the real legacy SoltoshiDICE join, optionally edited. */
+const soltoshidiceJoin = (mutate?: (instructions: Ix[]) => void): string =>
+  editSolanaTx(joinFixture.rawTxBase64, (m) => mutate?.(m.instructions))
+
+/** Re-serialize the real legacy SoltoshiDICE Cee-lo bet, optionally edited. */
+const soltoshidiceCeeloBet = (mutate?: (instructions: Ix[]) => void): string =>
+  editSolanaTx(ceeloFixture.rawTxBase64, (m) => mutate?.(m.instructions))
 
 const fetchWorker = (path: string, init?: RequestInit, env: Record<string, string> = {}) =>
   worker.fetch(new Request(`https://clearsign.example${path}`, init), env)
@@ -65,12 +71,27 @@ describe('ClearSign Worker public surface', () => {
     const response = await fetchWorker('/v1/catalog')
     const body = await response.json() as any
     expect(response.status).toBe(200)
-    expect(body.entries).toHaveLength(5)
-    expect(body.entries.map((entry: any) => entry.family)).toEqual(['evm', 'evm', 'evm', 'solana', 'solana'])
+    expect(body.entries).toHaveLength(13)
+    expect(body.entries.filter((entry: any) => entry.family === 'evm')).toHaveLength(4)
+    expect(body.entries.filter((entry: any) => entry.family === 'solana')).toHaveLength(9)
     for (const entry of body.entries) {
-      expect(['Relay', 'Portals', 'Uniswap Permit2']).toContain(entry.protocol)
+      expect(['Relay', 'Portals', 'Uniswap Permit2', 'Across', 'Pump', 'SoltoshiDICE']).toContain(entry.protocol)
       expect(entry.provenance.protocol).toMatch(/^https:\/\//)
     }
+    const join = body.entries.find((entry: any) => entry.id === 'solana:soltoshidiceBlackjackJoin')
+    expect(join.instructionLength).toBe(82)
+    expect(join.discriminator).toBe('51')
+    // The Cee-lo bet: what the device will put on screen, in plain words.
+    const ceelo = body.entries.find((entry: any) => entry.id === 'solana:soltoshidiceCeeloBet')
+    expect(ceelo.instructionLength).toBe(26)
+    expect(ceelo.discriminator).toBe('36')
+    expect(ceelo.method).toBe('Cee-lo place bet')
+    expect(ceelo.action).toContain('refundable SOL deposit')
+    expect(ceelo.fieldsShownByKeepKey).toEqual(['Round', 'Wager', 'Protocol', 'SOL deposit'])
+    const registration = body.entries.find((entry: any) => entry.id === 'solana:soltoshidiceRegisterPokerTournament')
+    expect(registration.instructionLength).toBe(8)
+    expect(registration.method).toBe('Register tournament')
+    expect(registration.fieldsShownByKeepKey).toEqual(['Player', 'Arena', 'Tournament'])
   })
 
   it('rejects unknown EVM shapes before checking signer readiness', async () => {
@@ -94,7 +115,7 @@ describe('ClearSign Worker public surface', () => {
     expect((await response.json() as any).classification).toBe('UNAVAILABLE')
   })
 
-  it('catalogs the exact Arbitrum USDT Permit2 approval but fails closed without its artifact', async () => {
+  it('catalogs the exact Arbitrum USDT Permit2 approval but fails closed without provisioning', async () => {
     const response = await post('/v1/evm/schema', {
       chainId: 42161,
       contract: '0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9',
@@ -103,35 +124,6 @@ describe('ClearSign Worker public surface', () => {
     })
     expect(response.status).toBe(503)
     expect((await response.json() as any).classification).toBe('UNAVAILABLE')
-  })
-
-  it('serves a verified offline artifact byte-for-byte without an online signing key', async () => {
-    const env = artifactEnv()
-    const status = await (await fetchWorker('/v1/status', undefined, env)).json() as any
-    expect(status.status).toBe('ready')
-    expect(status.distribution).toEqual({ mode: 'offline-presigned', onlineSigningKey: false })
-    const response = await post('/v1/evm/schema', {
-      chainId: 1, contract: '0x4cd00e387622c35bddb9b4c962c136462338bc31',
-      selector: '0x49290c1c', calldataLength: 68,
-    }, env)
-    const body = await response.json() as any
-    expect(response.status).toBe(200)
-    expect(body.signedPayload).toBe(`0x${RELAY_EVM_ENVELOPE}`)
-  })
-
-  it('fails closed for substituted or revoked offline artifacts', async () => {
-    const substituted = `${RELAY_EVM_ENVELOPE.slice(0, -4)}00${RELAY_EVM_ENVELOPE.slice(-2)}`
-    const badEnv = { CLEARSIGN_ARTIFACTS_JSON: JSON.stringify({ version: 1, evm: { [RELAY_EVM_ID]: substituted } }) }
-    expect((await fetchWorker('/ready', undefined, badEnv)).status).toBe(503)
-    const badStatus = await (await fetchWorker('/v1/status', undefined, badEnv)).json() as any
-    expect(badStatus.provisioning.join(' ')).toMatch(/signature|payload/i)
-
-    const revokedEnv = artifactEnv({ revoked: [RELAY_EVM_ID] })
-    expect((await fetchWorker('/ready', undefined, revokedEnv)).status).toBe(503)
-    expect((await post('/v1/evm/schema', {
-      chainId: 1, contract: '0x4cd00e387622c35bddb9b4c962c136462338bc31',
-      selector: '0x49290c1c', calldataLength: 68,
-    }, revokedEnv)).status).toBe(503)
   })
 
   it('recognizes the dynamic Portals shape but rejects non-word-aligned calldata', async () => {
@@ -158,6 +150,116 @@ describe('ClearSign Worker public surface', () => {
     })
     expect(response.status).toBe(503)
     expect((await response.json() as any).classification).toBe('UNAVAILABLE')
+  })
+
+  it('without a catalog key, certifies a Pump buy only when firmware will apply the schema', async () => {
+    // 9 instructions, with ATA create, SyncNative and closeAccount beside the
+    // buy: the device would refuse a certified envelope, so it stays opaque.
+    const refused = await post('/v1/solana/certify', { rawTx: syntheticPumpBuy().rawTx })
+    expect(refused.status).toBe(422)
+    expect((await refused.json() as any).classification).toBe('OPAQUE')
+    // The same buy beside ComputeBudget only is still discovered from its bytes.
+    const bare = editSolanaTx(syntheticPumpBuy().rawTx, (m) => { m.instructions = [m.instructions[0], m.instructions[7]] })
+    const response = await post('/v1/solana/certify', { rawTx: bare })
+    expect(response.status).toBe(503)
+    expect((await response.json() as any).classification).toBe('UNAVAILABLE')
+    // An explicit catalog key keeps its existing behavior.
+    expect((await post('/v1/solana/certify', { rawTx: syntheticPumpBuy().rawTx, catalogKey: 'pumpAmmBuy' })).status).toBe(503)
+  })
+
+  it('rejects Pump layout, bool, fixed-program, and explicit catalog mismatches', async () => {
+    for (const options of [{ invalidBoolean: true }, { wrongFeeProgram: true }, { extraData: true }]) {
+      expect((await post('/v1/solana/certify', { rawTx: syntheticPumpBuy(undefined, options).rawTx, catalogKey: 'pumpAmmBuy' })).status).toBe(422)
+    }
+    expect((await post('/v1/solana/certify', { rawTx: syntheticPumpBuy().rawTx, catalogKey: 'relayDepositNative' })).status).toBe(422)
+  })
+
+  it('discovers the real SoltoshiDICE join from raw bytes without a client catalog key', async () => {
+    expect(soltoshidiceJoin()).toBe(joinFixture.rawTxBase64)
+    const response = await post('/v1/solana/certify', { rawTx: joinFixture.rawTxBase64 })
+    // Reached provisioning: the program, 0x51 tag, and exact 82-byte length matched.
+    expect(response.status).toBe(503)
+    expect((await response.json() as any).classification).toBe('UNAVAILABLE')
+    expect((await post('/v1/solana/certify', { rawTx: joinFixture.rawTxBase64, catalogKey: 'soltoshidiceBlackjackJoin' })).status).toBe(503)
+  })
+
+  it('refuses SoltoshiDICE joins that the reviewed schema does not describe exactly', async () => {
+    const join = (ixs: Ix[]) => ixs[2]
+    for (const mutate of [
+      (ixs: Ix[]) => { join(ixs).data = Buffer.concat([join(ixs).data, Buffer.from([0])]) }, // uncovered byte
+      (ixs: Ix[]) => { join(ixs).data = join(ixs).data.subarray(0, 81) }, // short
+      (ixs: Ix[]) => { join(ixs).data[0] = 0x50 }, // another instruction tag
+      (ixs: Ix[]) => { join(ixs).accountIndices = join(ixs).accountIndices.slice(0, 3) }, // no mint account 3
+      (ixs: Ix[]) => { ixs.push({ ...join(ixs) }) }, // two joins: firmware would refuse the ambiguity
+    ]) {
+      const response = await post('/v1/solana/certify', { rawTx: soltoshidiceJoin(mutate) })
+      expect(response.status).toBe(422)
+      expect((await response.json() as any).classification).toBe('OPAQUE')
+    }
+    expect((await post('/v1/solana/certify', { rawTx: joinFixture.rawTxBase64, catalogKey: 'pumpAmmBuy' })).status).toBe(422)
+  })
+
+  it('without a catalog key, refuses a SoltoshiDICE join with an ATA-create companion', async () => {
+    const withAtaCreate = editSolanaTx(joinFixture.rawTxBase64, (m) => {
+      m.staticAccounts.push(Buffer.from(bs58.decode('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL')))
+      m.header[2]++
+      m.instructions.splice(2, 0, { programIdIndex: m.staticAccounts.length - 1, accountIndices: [0, 6, 0, 8, 7, 12], data: Buffer.from([1]) })
+    })
+    const response = await post('/v1/solana/certify', { rawTx: withAtaCreate })
+    expect(response.status).toBe(422)
+    expect((await response.json() as any).classification).toBe('OPAQUE')
+    expect((await post('/v1/solana/certify', { rawTx: withAtaCreate, catalogKey: 'soltoshidiceBlackjackJoin' })).status).toBe(503)
+  })
+
+  it('discovers the real SoltoshiDICE Cee-lo bet from raw bytes, and not as the join', async () => {
+    expect(soltoshidiceCeeloBet()).toBe(ceeloFixture.rawTxBase64)
+    // Reached provisioning: the program, 0x36 tag, and exact 26-byte length
+    // matched, beside a ComputeBudget SetComputeUnitLimit companion.
+    const response = await post('/v1/solana/certify', { rawTx: ceeloFixture.rawTxBase64 })
+    expect(response.status).toBe(503)
+    expect((await response.json() as any).classification).toBe('UNAVAILABLE')
+    expect((await post('/v1/solana/certify', { rawTx: ceeloFixture.rawTxBase64, catalogKey: 'soltoshidiceCeeloBet' })).status).toBe(503)
+    // The two SoltoshiDICE entries share a program, so neither may claim the
+    // other's instruction.
+    expect((await post('/v1/solana/certify', { rawTx: ceeloFixture.rawTxBase64, catalogKey: 'soltoshidiceBlackjackJoin' })).status).toBe(422)
+    expect((await post('/v1/solana/certify', { rawTx: joinFixture.rawTxBase64, catalogKey: 'soltoshidiceCeeloBet' })).status).toBe(422)
+  })
+
+  it('discovers the captured poker registration from raw bytes', async () => {
+    const response = await post('/v1/solana/certify', { rawTx: pokerRegistrationFixture.rawTxBase64 })
+    expect(response.status).toBe(503)
+    expect((await response.json() as any).classification).toBe('UNAVAILABLE')
+    expect((await post('/v1/solana/certify', {
+      rawTx: pokerRegistrationFixture.rawTxBase64,
+      catalogKey: 'soltoshidiceRegisterPokerTournament',
+    })).status).toBe(503)
+  })
+
+  for (const [name, fixture] of Object.entries(livePokerFixture)) {
+    it(`discovers the captured live poker ${name} operation`, async () => {
+      const response = await post('/v1/solana/certify', { rawTx: fixture.rawTxBase64 })
+      expect(response.status).toBe(503)
+      expect((await response.json() as any).classification).toBe('UNAVAILABLE')
+      expect((await post('/v1/solana/certify', {
+        rawTx: fixture.rawTxBase64,
+        catalogKey: fixture.catalogKey,
+      })).status).toBe(503)
+    })
+  }
+
+  it('refuses Cee-lo bets that the reviewed schema does not describe exactly', async () => {
+    const bet = (ixs: Ix[]) => ixs[1]
+    for (const mutate of [
+      (ixs: Ix[]) => { bet(ixs).data = Buffer.concat([bet(ixs).data, Buffer.from([0])]) }, // uncovered byte
+      (ixs: Ix[]) => { bet(ixs).data = bet(ixs).data.subarray(0, 25) }, // short
+      (ixs: Ix[]) => { bet(ixs).data[0] = 0x29 }, // tag 41, the non-tournament bet: no entry yet
+      (ixs: Ix[]) => { bet(ixs).accountIndices = bet(ixs).accountIndices.slice(0, 5) }, // no mint account 5
+      (ixs: Ix[]) => { ixs.push({ ...bet(ixs) }) }, // two bets: firmware would refuse the ambiguity
+    ]) {
+      const response = await post('/v1/solana/certify', { rawTx: soltoshidiceCeeloBet(mutate) })
+      expect(response.status).toBe(422)
+      expect((await response.json() as any).classification).toBe('OPAQUE')
+    }
   })
 
   it('refuses malformed, wrong-program, wrong-length, and unknown Solana requests', async () => {

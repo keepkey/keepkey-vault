@@ -498,6 +498,15 @@ pub fn main() !void {
     if (ok != 0) {
         launcher_process = pi.hProcess;
         if (pi.hThread) |h| _ = CloseHandle(h);
+    } else {
+        // A missing/quarantined launcher should fail immediately instead of
+        // making the user stare at the splash screen for thirty seconds.
+        if (splash) |s| {
+            _ = KillTimer(s, TIMER_ID);
+            _ = DestroyWindow(s);
+        }
+        showStartupHelp(a, null);
+        return;
     }
     defer {
         if (launcher_process) |h| _ = CloseHandle(h);
@@ -509,6 +518,7 @@ pub fn main() !void {
     var msg_loop = MSG{};
     const start = @as(u32, @truncate(@as(u64, @bitCast(std.time.milliTimestamp()))));
     var startup_timed_out = false;
+    var launcher_exited = false;
     while (true) {
         while (PeekMessageW(&msg_loop, null, 0, 0, PM_REMOVE) != 0) {
             if (msg_loop.message == WM_QUIT) return;
@@ -516,6 +526,16 @@ pub fn main() !void {
             _ = DispatchMessageW(&msg_loop);
         }
         Sleep(16); // ~60fps
+        // If App Control or antivirus blocks a launcher dependency, Electrobun's
+        // launcher exits before a window exists. Surface that immediately and
+        // preserve its exit code in the clipboard report.
+        if (launcher_process) |process| {
+            var exit_code: DWORD = STILL_ACTIVE;
+            if (GetExitCodeProcess(process, &exit_code) != 0 and exit_code != STILL_ACTIVE) {
+                launcher_exited = true;
+                break;
+            }
+        }
         const now = @as(u32, @truncate(@as(u64, @bitCast(std.time.milliTimestamp()))));
         if (now -% start > 30000) {
             startup_timed_out = true;
@@ -523,7 +543,7 @@ pub fn main() !void {
         }
     }
 
-    if (startup_timed_out) {
+    if (startup_timed_out or launcher_exited) {
         if (splash) |s| {
             _ = KillTimer(s, TIMER_ID);
             _ = DestroyWindow(s);

@@ -6,6 +6,7 @@ import { IS_MAC, IS_WINDOWS } from "../lib/platform"
 import type { FirmwareAnalysis, FirmwareProgress } from "../../shared/types"
 import { FirmwareUpgradePreview } from "./FirmwareUpgradePreview"
 import { useDeviceState } from "../hooks/useDeviceState"
+import { requiresBackupConfirmation } from "../lib/update-safety"
 import holdAndConnectRaw from "../assets/svg/hold-and-connect.svg?raw"
 
 /**
@@ -35,6 +36,7 @@ export function FirmwareDropZone() {
 	const [error, setError] = useState<string | null>(null)
 	const [warningAcknowledged, setWarningAcknowledged] = useState(false)
 	const [wipeAcknowledged, setWipeAcknowledged] = useState(false)
+	const [backupConfirmed, setBackupConfirmed] = useState(false)
 	const dragCounter = useRef(0)
 	const phaseRef = useRef(phase)
 	phaseRef.current = phase
@@ -46,6 +48,10 @@ export function FirmwareDropZone() {
 	// moment the user finishes entering bootloader mode.
 	const deviceState = useDeviceState()
 	const inBootloader = deviceState.bootloaderMode === true
+	// An interrupted upload wipes the seed. Flashing happens in bootloader mode,
+	// which can't report whether a wallet exists, so this fails closed (only a
+	// device with no firmware on flash skips it).
+	const needsBackupConfirm = requiresBackupConfirmation(deviceState, null)
 
 	// Listen for firmware progress — only react when THIS component initiated the flash (C1 fix)
 	useEffect(() => {
@@ -199,6 +205,7 @@ export function FirmwareDropZone() {
 		// Never start a flash unless the device is actually in bootloader mode —
 		// otherwise firmwareErase hangs the HID read and looks like a freeze.
 		if (!inBootloader) return
+		if (needsBackupConfirm && !analysis?.willWipeDevice && !backupConfirmed) return
 		setPhase("flashing")
 		setProgress({ percent: 0, message: "Starting firmware flash..." })
 		try {
@@ -209,7 +216,7 @@ export function FirmwareDropZone() {
 			setError(err?.message || "Firmware flash failed")
 			setPhase("error")
 		}
-	}, [fileDataB64, inBootloader])
+	}, [fileDataB64, inBootloader, needsBackupConfirm, analysis, backupConfirmed])
 
 	const handleDismiss = useCallback(() => {
 		setPhase("idle")
@@ -220,6 +227,7 @@ export function FirmwareDropZone() {
 		setProgress(null)
 		setWarningAcknowledged(false)
 		setWipeAcknowledged(false)
+		setBackupConfirmed(false)
 	}, [])
 
 	// Don't render anything when idle and not dragging
@@ -609,6 +617,40 @@ export function FirmwareDropZone() {
 							</Box>
 						)}
 
+						{/* ── Recovery phrase confirmation (the wipe acknowledgement above already covers it) ── */}
+						{needsBackupConfirm && !analysis.willWipeDevice && (
+							<Flex
+								as="label"
+								mx="6" mb="3"
+								align="center"
+								gap="2"
+								cursor="pointer"
+								userSelect="none"
+								onClick={() => setBackupConfirmed(!backupConfirmed)}
+							>
+								<Box
+									w="18px" h="18px"
+									borderRadius="sm"
+									border="2px solid"
+									borderColor="kk.gold"
+									bg={backupConfirmed ? "kk.gold" : "transparent"}
+									display="flex"
+									alignItems="center"
+									justifyContent="center"
+									flexShrink={0}
+								>
+									{backupConfirmed && (
+										<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="black" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+											<polyline points="20 6 9 17 4 12" />
+										</svg>
+									)}
+								</Box>
+								<Text fontSize="xs" fontWeight="600" color="kk.textPrimary">
+									I have my recovery phrase written down. If the flash is interrupted, the wallet on this KeepKey is erased and can only be restored from it.
+								</Text>
+							</Flex>
+						)}
+
 						{/* ── GATE: device must be in bootloader mode to flash ── */}
 						{!inBootloader && (
 							<Box
@@ -673,6 +715,7 @@ export function FirmwareDropZone() {
 									!inBootloader
 									|| (analysis.willWipeDevice && !wipeAcknowledged)
 									|| (!analysis.isSigned && !analysis.willWipeDevice && !warningAcknowledged)
+									|| (needsBackupConfirm && !analysis.willWipeDevice && !backupConfirmed)
 								}
 							>
 								{!inBootloader

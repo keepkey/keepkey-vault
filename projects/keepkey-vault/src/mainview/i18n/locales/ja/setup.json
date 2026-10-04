@@ -59,7 +59,7 @@
 		"listeningForBootloader": "ブートローダーモードのデバイスを待機中...",
 		"readyDetectBootloader": "準備完了 — ブートローダーを検出",
 		"skipBootloaderUpdate": "ブートローダー更新をスキップ",
-		"verifyBackupHint": "KeepKeyでバックアップの確認を求められます。更新後に行いますので、今はボタンを長押ししてスキップしてください。",
+		"verifyBackupHint": "KeepKeyは、秘密鍵が消去された場合に備えてリカバリーフレーズを持っているかを確認します。ボタンを長押しすると「はい」と回答したことになり、更新が始まります。リカバリーフレーズを書き留めている場合のみ確認してください。",
 		"followDirectionsOnDevice": "デバイスの指示に従ってください",
 		"deviceWillGuide": "KeepKeyが更新プロセスをガイドします。",
 		"bootloaderDetected": "ブートローダーモードを検出しました",

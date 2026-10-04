@@ -221,6 +221,18 @@ describe('parseQuoteResponse', () => {
   // CAIP-only — Pioneer's Quote endpoint is the source of truth for routing.
   const baseParams = { fromCaip: 'eip155:8453/slip44:60', toCaip: 'eip155:1/slip44:60', slippageBps: 300 }
 
+  test('chooses the highest-output buildable provider, even when Pioneer lists it second', () => {
+    const fixture = JSON.parse(JSON.stringify(FIXTURE_BASE_TO_ETH_QUOTE))
+    const better = JSON.parse(JSON.stringify(fixture.data.data[0]))
+    better.integration = 'shapeshift'
+    better.quote.buyAmount = '0.00270'
+    better.quote.amountOutMin = '0.00260'
+    fixture.data.data.push(better)
+    const result = parseQuoteResponse(fixture, baseParams)
+    expect(result.integration).toBe('shapeshift')
+    expect(result.expectedOutput).toBe('0.00270')
+  })
+
   test('BASE → ETH: extracts memo from txParams', () => {
     const result = parseQuoteResponse(FIXTURE_BASE_TO_ETH_QUOTE, baseParams)
     expect(result.memo).toBe('=:ETH.ETH:0xdest123:245000/3/0:kk:0')
@@ -292,9 +304,10 @@ describe('parseQuoteResponse', () => {
     expect(result.integration).toBe('thorchain')
   })
 
-  test('BASE → ETH: minimumOutput from amountOutMin', () => {
+  test('BASE → ETH: actual memo limit takes precedence over normalized amountOutMin', () => {
     const result = parseQuoteResponse(FIXTURE_BASE_TO_ETH_QUOTE, baseParams)
-    expect(result.minimumOutput).toBe('0.00238')
+    expect(result.minimumOutput).toBe('0.00245')
+    expect(result.minimumOutputSource).toBe('memo')
   })
 
   // BTC → ETH (no router, memo in txParams)
@@ -322,11 +335,11 @@ describe('parseQuoteResponse', () => {
     expect(result.estimatedTime).toBe(900)
   })
 
-  test('BTC → ETH: minimumOutput calculated from slippage when no amountOutMin', () => {
+  test('BTC → ETH: displays the actual memo limit even when much looser than the quote', () => {
     const params = { fromCaip: 'bip122:000000000019d6689c085ae165831e93/slip44:0', toCaip: 'eip155:1/slip44:60', slippageBps: 300 }
     const result = parseQuoteResponse(FIXTURE_BTC_TO_ETH_QUOTE, params)
-    // 1.25 * (1 - 85/10000) = 1.25 * 0.9915 = 1.239375
-    expect(parseFloat(result.minimumOutput)).toBeCloseTo(1.239375, 4)
+    // This fixture encodes 125000 / 1e8; substituting a calculated limit hid the real risk.
+    expect(result.minimumOutput).toBe('0.00125')
   })
 
   test('BTC → USDT: skips an overlong full-contract memo for a compact route', () => {
@@ -606,7 +619,7 @@ describe('parseQuoteResponse', () => {
     expect(result.nearIntentsRefundTo).toBe(userSolAddr)
   })
 
-  test('NEAR Intents first in list — selected as best (Pioneer ranks it first)', () => {
+  test('selects a higher-output Chainflip route over first-listed NEAR Intents', () => {
     const btcCaip = 'bip122:000000000019d6689c085ae165831e93/slip44:0'
     const ethCaip = 'eip155:1/slip44:60'
     const resp = {
@@ -626,7 +639,7 @@ describe('parseQuoteResponse', () => {
       ],
     }
     const result = parseQuoteResponse(resp, { fromCaip: ethCaip, toCaip: btcCaip, slippageBps: 300 })
-    expect(result.swapper).toBe('NEAR Intents')
+    expect(result.swapper).toBe('Chainflip')
     expect(result.relayTx?.isDepositChannel).toBe(true)
   })
 

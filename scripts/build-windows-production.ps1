@@ -892,24 +892,42 @@ New-Item -ItemType Directory -Path $ArtifactsDir | Out-Null
 # Build Installer EXE with Inno Setup
 # ============================================================================
 
-Write-Step "Downloading WebView2 bootstrapper (for Windows 10 support)"
+Write-Step "Downloading offline WebView2 runtime installer"
 
-$WebView2Bootstrapper = Join-Path $BuildDir "MicrosoftEdgeWebview2Setup.exe"
-if (-not (Test-Path $WebView2Bootstrapper)) {
-    $webview2Url = "https://go.microsoft.com/fwlink/p/?LinkId=2124703"
-    Write-Host "    Downloading from Microsoft..." -ForegroundColor Gray
+# Do not rely on the 1.8 MB Evergreen bootstrapper here. It can fail behind a
+# corporate proxy or when Edge Update is disabled, while returning control to
+# Inno Setup and leaving users with a successful-looking install that can only
+# display the splash screen. The x64 standalone installer is self-contained.
+$WebView2Installer = Join-Path $BuildDir "MicrosoftEdgeWebView2RuntimeInstallerX64.exe"
+if (-not (Test-Path $WebView2Installer)) {
+    $webview2Url = "https://go.microsoft.com/fwlink/?linkid=2124701"
+    Write-Host "    Downloading the Microsoft x64 standalone installer..." -ForegroundColor Gray
     try {
-        Invoke-WebRequest -Uri $webview2Url -OutFile $WebView2Bootstrapper -UseBasicParsing
-        $sizeKB = [math]::Round((Get-Item $WebView2Bootstrapper).Length / 1024)
-        Write-Success "Downloaded WebView2 bootstrapper: ${sizeKB} KB"
+        Invoke-WebRequest -Uri $webview2Url -OutFile $WebView2Installer -UseBasicParsing
     } catch {
         $errMsg = $_.Exception.Message
-        Write-Warning "Failed to download WebView2 bootstrapper: $errMsg"
-        Write-Warning "Windows 10 users may need to install WebView2 manually"
+        Remove-Item -LiteralPath $WebView2Installer -Force -ErrorAction SilentlyContinue
+        throw "Failed to download the required offline WebView2 runtime installer: $errMsg"
     }
 } else {
-    Write-Success "WebView2 bootstrapper already exists"
+    Write-Success "Offline WebView2 runtime installer already exists"
 }
+$webviewInfo = Get-Item $WebView2Installer
+if ($webviewInfo.Length -lt 50MB) {
+    throw "WebView2 offline installer is unexpectedly small ($($webviewInfo.Length) bytes): $WebView2Installer"
+}
+$webviewStream = [System.IO.File]::OpenRead($WebView2Installer)
+try {
+    $first = $webviewStream.ReadByte()
+    $second = $webviewStream.ReadByte()
+} finally {
+    $webviewStream.Dispose()
+}
+if ($first -ne 0x4D -or $second -ne 0x5A) {
+    throw "WebView2 offline installer is not a Windows executable: $WebView2Installer"
+}
+$sizeMB = [math]::Round($webviewInfo.Length / 1MB, 1)
+Write-Success "Verified offline WebView2 runtime installer: ${sizeMB} MB"
 
 # ============================================================================
 # Build Installer EXE with Inno Setup

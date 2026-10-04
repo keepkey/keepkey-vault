@@ -9,12 +9,19 @@
  * calls using what these return.
  */
 import { evmAddressPath, type ChainDef } from '../shared/chains'
+import { versionCompare } from '../shared/firmware-versions'
 import type { AuditToken } from '../shared/types'
 
 // Families with no single-receive-address scheme custom-path derivation can walk:
 //  - zcash-shielded: Orchard FVK, not an address
 //  - hive: getPublicKey returns a key, not a spendable address
 const DEEP_SCAN_EXCLUDED = new Set(['zcash-shielded', 'hive'])
+
+/** DGB Taproot stays hidden unless both rollout controls are valid. */
+export function supportsDgbTaproot(featureEnabled: boolean, firmwareVersion?: string): boolean {
+  if (!featureEnabled || !firmwareVersion || !/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(firmwareVersion)) return false
+  return versionCompare(firmwareVersion, '7.17.0') >= 0
+}
 
 /** Custom-path derivation (auditDeriveCustom) is possible for a chain. */
 export function chainSupportsDeepScan(chain: ChainDef): boolean {
@@ -74,7 +81,12 @@ export function extractAddress(result: any): string {
  * defaultPath[1]. Deriving the xpub per account lets Pioneer gap-scan the whole
  * account tree server-side — far faster than walking individual addresses.
  */
-export function utxoAccountScriptPaths(chain: ChainDef, account: number, includeBitcoinTaproot = false): Array<{ scriptType: string; path: number[] }> {
+export function utxoAccountScriptPaths(
+  chain: ChainDef,
+  account: number,
+  includeBitcoinTaproot = false,
+  includeDgbTaproot = false,
+): Array<{ scriptType: string; path: number[] }> {
   const scriptTypes = (chain.id === 'litecoin' || chain.id === 'bitcoin')
     ? [
       { scriptType: 'p2pkh', purpose: 44 },
@@ -104,6 +116,9 @@ export function utxoAccountScriptPaths(chain: ChainDef, account: number, include
   // (vault-generated addresses are far more likely to hold funds there).
   if (chain.id === 'litecoin') {
     out.push({ scriptType: 'p2wpkh', path: [0x8000002C, chain.defaultPath[1], 0x80000000 + account] })
+  }
+  if (chain.id === 'digibyte' && includeDgbTaproot) {
+    out.push({ scriptType: 'p2tr', path: [0x80000000 + 86, chain.defaultPath[1], 0x80000000 + account] })
   }
   return out
 }

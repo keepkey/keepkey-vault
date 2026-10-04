@@ -11,6 +11,7 @@
 import { describe, test, expect } from 'bun:test'
 import {
   computeDustWarning,
+  computeLargeSwapLossWarning,
   computeEffectiveSlippageBps,
   shouldWarnHighSlippage,
   isSmallSwapQuoteWarning,
@@ -18,6 +19,32 @@ import {
   DUST_FEE_SEVERE_PCT,
   HIGH_SLIPPAGE_PCT,
 } from '../src/shared/swap-warnings'
+
+describe('large swap loss warning', () => {
+  test('warns on a $4,000 Base ETH to Ethereum ETH quote loss without a destination price', () => {
+    const warning = computeLargeSwapLossWarning({
+      inAmount: 100, outAmount: 98, fromPriceUsd: 2000,
+      toPriceUsd: 0, sameAssetUnits: true,
+    })
+    expect(warning?.lostUsd).toBe(4000)
+    expect(warning?.lossPct).toBeCloseTo(2)
+    expect(warning?.severe).toBe(true)
+  })
+
+  test('detects a large dollar loss below the old 10% dust threshold', () => {
+    const warning = computeLargeSwapLossWarning({
+      inAmount: 100, outAmount: 99.2, fromPriceUsd: 2000,
+      toPriceUsd: 0, sameAssetUnits: true,
+    })
+    expect(warning?.lostUsd).toBeCloseTo(1600)
+  })
+
+  test('requires independent prices for different assets', () => {
+    expect(computeLargeSwapLossWarning({
+      inAmount: 100, outAmount: 20, fromPriceUsd: 2000, toPriceUsd: 0,
+    })).toBeNull()
+  })
+})
 
 describe('small-swap quote warning classification', () => {
   test('classifies the fee-versus-slippage guard as an advisory warning', () => {

@@ -60,7 +60,7 @@
 		"listeningForBootloader": "Listening for device in bootloader mode...",
 		"readyDetectBootloader": "I'm Ready — Detect Bootloader",
 		"skipBootloaderUpdate": "Skip Bootloader Update",
-		"verifyBackupHint": "On the KeepKey, it will ask you to verify backup. We will do this after updating — hold the button to skip this for now.",
+		"verifyBackupHint": "Your KeepKey will ask whether you have your recovery sentence in case your private keys are erased. Holding the button answers yes and starts the update — only confirm if you have your recovery phrase written down.",
 		"followDirectionsOnDevice": "Follow directions on device",
 		"deviceWillGuide": "Your KeepKey will guide you through the update process.",
 		"bootloaderDetected": "Bootloader Mode Detected",
@@ -126,6 +126,8 @@
 		"wipeAndFlash": "Wipe & Flash",
 		"whyUpdate": "Updates fix security issues and add support for new coins and features.",
 		"skipForNow": "Skip for now",
+		"backupConfirm": "I have my recovery phrase written down. If the update is interrupted, the wallet on this KeepKey is erased and can only be restored from it.",
+		"slowUpdate": "Taking a long time? Keep waiting and keep your KeepKey connected, and check its screen for a prompt to confirm. Unplugging before the update finishes erases the wallet on the device — you would need your recovery phrase to restore it.",
 		"skipIsSafe": "Skipping is safe. Nothing on your device changes — your wallet, funds and recovery phrase stay exactly as they are, and you can update any time."
 	},
 	"initChoose": {
@@ -250,7 +252,8 @@
 	},
 	"updateDone": {
 		"title": "Firmware updated",
-		"reassure": "Your wallet is untouched. Updating firmware never erases your recovery phrase, your accounts, or your funds — you do not need to restore anything.",
+		"reassure": "Your update finished and your wallet is still on your KeepKey — you do not need to restore anything. An update only keeps your recovery phrase when it completes, so always have your recovery phrase written down before updating and never unplug your KeepKey during an update.",
+		"empty": "Your KeepKey has no wallet on it. If it held one before this update, restore it with your recovery phrase.",
 		"continue": "Continue"
 	}
 }

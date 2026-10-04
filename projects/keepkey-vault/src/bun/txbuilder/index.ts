@@ -1,7 +1,7 @@
 /**
  * TX builder dispatcher — routes to chain-family builder, signs, broadcasts.
  */
-import type { ChainDef } from '../../shared/chains'
+import { isTokenCaip, type ChainDef } from '../../shared/chains'
 import type { BuildTxParams } from '../../shared/types'
 import { decimalToBaseUnitsStrict, tokenMaxSpendableAmount, tokenMaxSpendableBaseUnits } from '../../shared/max-send'
 import { buildUtxoTx, type BuildUtxoParams, type XpubInfo } from './utxo'
@@ -14,6 +14,8 @@ import { buildHiveTransfer, broadcastHiveTx } from './hive'
 import { SOLANA_LAMPORTS_PER_SIGNATURE, solanaTransferLamportsForAmount } from './solana'
 import { signSolanaWireTransaction } from '../solana-signing'
 import { getBtcBackend } from '../btc-backend'
+import { canonicalTronAddress, decodeTronTransfer } from '../tron-preview'
+import { ARBITRUM_ONE_RPC } from '../evm-rpc'
 
 /** BTC mainnet — the only UTXO chain that broadcasts via a self-host node. */
 const BTC_NETWORK_ID = 'bip122:000000000019d6689c085ae165831e93'
@@ -25,22 +27,95 @@ export { normalizeBchAddress } from './utxo'
 
 const TRON_SUN_PER_TRX = 1_000_000n
 const TRON_NATIVE_MAX_RESERVE_SUN = TRON_SUN_PER_TRX * 11n / 10n
-const TRON_TOKEN_CAIP_RE = /^tron:[^/]+\/(?:token|trc20):(.+)$/i
-const TRON_BASE58_CONTRACT_RE = /^T[1-9A-HJ-NP-Za-km-z]{33}$/
+// `erc20` too: `tron:…/erc20:T…` CAIPs exist in swap data (swap-parsing.ts).
+const TRON_TOKEN_CAIP_RE = /^tron:[^/]+\/(?:token|trc20|erc20):(.+)$/i
 const KNOWN_TRON_CONTRACTS_BY_LOWERCASE = new Map([
   ['tr7nhqjekqxgtci8q8zy4pl8otszgjlj6t', 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t'],
 ])
+// USDT on TRON; pinned so a case-damaged CAIP for it stays sendable.
+// ponytail: one-entry map, add a token here only if Pioneer lowercases it too.
+const TRON_FEE_LIMIT_SUN = 100_000_000n
 
-/** Resolve a case-sensitive TRON token contract without ever falling back to TRX. */
-export function tronTokenContractFromCaip(caip?: string): string | null {
-  if (!caip) return null
+/** Base58 is case-sensitive: return the checksum-valid spelling, or null. */
+export function canonicalTronContract(supplied: string): string | null {
+  return canonicalTronAddress(supplied) ?? KNOWN_TRON_CONTRACTS_BY_LOWERCASE.get(supplied.toLowerCase()) ?? null
+}
+
+/** Repair a TRON token CAIP whose base58 contract arrived case-damaged from
+ * Pioneer (G3). Tries the entry's own `contract` field (if it is the same
+ * address, correctly cased), then the pinned map. Unrecoverable → returned
+ * as-is and logged; the builder refuses to send it. */
+export function canonicalizeTronTokenCaip(caip: string, contractHint?: string): string {
   const match = caip.match(TRON_TOKEN_CAIP_RE)
-  if (!match) return null
-  const supplied = match[1]
-  if (TRON_BASE58_CONTRACT_RE.test(supplied)) return supplied
-  const recovered = KNOWN_TRON_CONTRACTS_BY_LOWERCASE.get(supplied.toLowerCase())
-  if (recovered) return recovered
-  throw new Error(`Invalid case-sensitive TRON token contract in CAIP: ${caip}`)
+  if (!match || canonicalTronAddress(match[1])) return caip
+  const hinted = contractHint && contractHint.toLowerCase() === match[1].toLowerCase() ? canonicalTronAddress(contractHint) : null
+  const fixed = hinted ?? KNOWN_TRON_CONTRACTS_BY_LOWERCASE.get(match[1].toLowerCase())
+  if (!fixed) {
+    console.warn(`[tokens] TRON contract in ${caip} is not checksum-valid base58 — sends of it will be refused`)
+    return caip
+  }
+  return caip.slice(0, caip.length - match[1].length) + fixed
+}
+
+/** Resolve a case-sensitive TRON token contract without ever falling back to
+ * TRX: null ONLY for native intent (no CAIP / slip44); any token CAIP either
+ * resolves to a checksum-valid contract or throws. */
+export function tronTokenContractFromCaip(caip?: string): string | null {
+  if (!isTokenCaip(caip)) return null
+  const match = caip!.match(TRON_TOKEN_CAIP_RE)
+  if (!match) throw new Error(`Unrecognized TRON token CAIP — refusing to send as TRX: ${caip}`)
+  const contract = canonicalTronContract(match[1])
+  if (!contract) throw new Error(`Invalid case-sensitive TRON token contract in CAIP: ${caip}`)
+  return contract
+}
+
+/** Token CAIP shapes each family's builder actually parses. A token CAIP that
+ * doesn't match its family must throw — before this, an unmatched one fell
+ * through to the NATIVE path (signed TRX while the UI said USDT). */
+const TOKEN_CAIP_BY_FAMILY: Record<string, RegExp> = {
+  evm: /\/erc20:0x[0-9a-fA-F]{40}$/,
+  cosmos: /\/(?:denom|bank):.+$/,
+  solana: /\/(?:token|spl):[A-Za-z0-9]+$/,
+  tron: TRON_TOKEN_CAIP_RE,
+}
+
+/** G2: decode the exact bytes the device will sign and compare them to the
+ * send the user reviewed. Any mismatch blocks signing, naming the field. */
+export function assertTronPayload(rawHex: string, expected: {
+  owner: string; to: string; units: bigint; tokenContract?: string; memo?: string
+}): void {
+  let decoded
+  try { decoded = decodeTronTransfer(rawHex) } catch (e: any) {
+    throw new Error(`TRON payload rejected before signing: ${e.message}`)
+  }
+  const isToken = !!expected.tokenContract
+  const checks: Array<[string, unknown, unknown]> = [
+    ['transfer type', isToken ? 'TRC-20 transfer' : 'TRX transfer', decoded.kind],
+    ['owner', expected.owner, decoded.owner],
+    ['recipient', expected.to, decoded.to],
+    ['amount', expected.units, decoded.units],
+    ['token contract', expected.tokenContract, decoded.tokenContract],
+    ['memo', expected.memo || undefined, decoded.memo?.toString('utf8')],
+    ['fee_limit', isToken ? TRON_FEE_LIMIT_SUN : undefined, decoded.feeLimit],
+  ]
+  for (const [field, want, got] of checks) {
+    if (want !== got) throw new Error(`TRON payload mismatch on ${field} (expected ${String(want)}, got ${String(got)}) — refusing to sign`)
+  }
+}
+
+async function fetchTronTokenDecimals(owner: string, contract: string): Promise<number> {
+  const resp = await fetch('https://api.trongrid.io/wallet/triggerconstantcontract', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ owner_address: owner, contract_address: contract, function_selector: 'decimals()', parameter: '', visible: true }),
+  })
+  const data = await resp.json() as any
+  if (data?.Error) throw new Error(data.Error)
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+  const hex = data?.constant_result?.[0]
+  const decimals = hex ? Number(BigInt(`0x${hex}`)) : NaN
+  if (!Number.isInteger(decimals) || decimals < 0 || decimals > 36) throw new Error(`invalid decimals() result: ${hex}`)
+  return decimals
 }
 
 async function fetchTronNativeBalanceSun(address: string): Promise<bigint> {
@@ -119,6 +194,9 @@ export async function buildTx(
   chain: ChainDef,
   params: BuildTxParams & { fromAddress?: string; xpub?: string; allXpubs?: XpubInfo[]; rpcUrl?: string; accountPath?: number[]; evmAddressIndex?: number; publicKeyHex?: string; pioneerBaseUrl?: string; depositAsset?: string },
 ): Promise<{ unsignedTx: any; fee: string }> {
+  if (isTokenCaip(params.caip) && !TOKEN_CAIP_BY_FAMILY[chain.chainFamily]?.test(params.caip!)) {
+    throw new Error(`Unsupported ${chain.coin} token CAIP — refusing to send as native ${chain.symbol}: ${params.caip}`)
+  }
   switch (chain.chainFamily) {
     case 'utxo': {
       const utxoResult = await buildUtxoTx(pioneer, chain, {
@@ -314,10 +392,18 @@ export async function buildTx(
 
       // ── TRC-20 path (TriggerSmartContract → transfer(address,uint256)) ──
       if (isTrc20) {
-        // USDT-on-TRON has 6 decimals. If we add other TRC-20s later, look the
-        // value up rather than hard-coding — but for the THORChain MVP, USDT is
-        // the only token in scope.
-        const tokenDecimals = params.tokenDecimals ?? 6
+        // The contract's own decimals() is the truth — a hard-coded 6 signed
+        // the wrong amount for every non-USDT token. A caller-supplied value
+        // that disagrees means the review screen used the wrong scale: refuse.
+        let tokenDecimals: number
+        try {
+          tokenDecimals = await fetchTronTokenDecimals(params.fromAddress, tokenContractFromCaip)
+        } catch (e: any) {
+          throw new Error(`Cannot build TRC-20 tx: failed to read decimals for ${tokenContractFromCaip} — ${e.message}`)
+        }
+        if (params.tokenDecimals != null && params.tokenDecimals !== tokenDecimals) {
+          throw new Error(`TRC-20 decimals mismatch for ${tokenContractFromCaip}: asset list says ${params.tokenDecimals}, contract says ${tokenDecimals}`)
+        }
 
         // ABI-encode the `transfer(address,uint256)` parameter pair.
         // TronGrid's `function_selector` field tells it to prepend the 4-byte
@@ -383,7 +469,7 @@ export async function buildTx(
         // burning the full 30 TRX (e.g. tx c105241a…, 2026-07-02). 100 TRX
         // covers the worst case (~57 TRX at max factor) and matches
         // TronLink's current USDT default.
-        const FEE_LIMIT_SUN = 100_000_000
+        const FEE_LIMIT_SUN = Number(TRON_FEE_LIMIT_SUN)
 
         let tronGridTx: any
         try {
@@ -462,6 +548,10 @@ export async function buildTx(
         // including the TRC-20 recipient, uint256 amount, owner, fee limit, and
         // memo. Do not add host hint fields: the signed protobuf remains the
         // single source of truth for ClearSign.
+        assertTronPayload(tronGridTx.raw_data_hex, {
+          owner: params.fromAddress, to: params.to, units: tokenAmountBase,
+          tokenContract: tokenContractFromCaip, memo: params.memo,
+        })
         const tronUnsignedTx = {
           addressNList: chain.defaultPath,
           rawTx: tronGridTx.raw_data_hex,
@@ -519,6 +609,9 @@ export async function buildTx(
         throw new Error(`Tron tx build failed: ${e.message}`)
       }
 
+      assertTronPayload(tronGridTx.raw_data_hex, {
+        owner: params.fromAddress, to: params.to, units: sunAmountBig, memo: params.memo,
+      })
       const tronUnsignedTx = {
         addressNList: chain.defaultPath,
         rawTx: tronGridTx.raw_data_hex,
@@ -528,8 +621,9 @@ export async function buildTx(
         // Store full TronGrid response — broadcasttransaction needs raw_data JSON
         tronGridTx,
       }
-      // Tron: bandwidth is typically free for TRX transfers
-      return { unsignedTx: tronUnsignedTx, fee: params.isMax ? String(Number(TRON_NATIVE_MAX_RESERVE_SUN) / 1_000_000) : '0' }
+      // Never show 0: with no free bandwidth left the transfer burns TRX, and a
+      // new recipient costs 1 TRX to activate. Show the same upper bound max-send reserves.
+      return { unsignedTx: tronUnsignedTx, fee: String(Number(TRON_NATIVE_MAX_RESERVE_SUN) / 1_000_000) }
     }
 
     case 'ton': {
@@ -839,7 +933,7 @@ export async function broadcastTx(
   // locally calculated hash even when the sequencer rejected the transaction.
   // Submit to the sequencer RPC and require its accepted hash instead.
   if (chain.chainFamily === 'evm' && chain.chainId === '42161') {
-    const rpcUrl = 'https://arb1.arbitrum.io/rpc'
+    const rpcUrl = ARBITRUM_ONE_RPC
     const resp = await fetch(rpcUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

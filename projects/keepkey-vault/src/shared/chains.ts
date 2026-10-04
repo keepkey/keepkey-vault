@@ -471,3 +471,11 @@ export function customChainToChainDef(c: CustomChain): ChainDef {
     chainId: String(c.chainId),
   }
 }
+
+/** Send intent, decided once from the asset the user picked: every native
+ *  asset CAIP is `…/slip44:…`, so any other CAIP is a TOKEN send. The UI and
+ *  every builder use this one rule — a token CAIP a builder can't resolve must
+ *  throw, never fall through to a native transfer (TRON ticket, 2026-09). */
+export function isTokenCaip(caip?: string): boolean {
+  return !!caip && !/\/slip44:/i.test(caip)
+}

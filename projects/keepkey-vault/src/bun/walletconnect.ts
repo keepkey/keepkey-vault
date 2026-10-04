@@ -16,7 +16,7 @@ import { evmAddressPath } from './evm-addresses'
 import { verifyEvmSigner } from './evm-rpc'
 import { buildSolanaMessageDecodedInfo } from './solana-message-preview'
 import { buildSolanaDecodedInfo } from './solana-clearsign'
-import { requiresSolanaBlindSigningConsent } from './solana-consent'
+import { applySolanaSigningGates } from './solana-consent'
 import { simulateEvmEffects } from './evm-effects'
 import { simulateSolanaEffects } from './solana-effects'
 import { buildClearSignReport, solanaDecodedReportFindings } from '../shared/clearsign-report'
@@ -57,14 +57,15 @@ function assertChainIdMatches(txChainId: unknown, sessionChainId: number) {
   }
 }
 
-/** Attach the same clear-sign preview and conservative firmware-policy gate
- *  used by the REST route. x402's v0 transaction has no lookup tables, so its
- *  full preview is available without an RPC read. Transactions that do use an
- *  ALT remain explicitly opaque in WalletConnect until the accounts can be
- *  independently resolved. */
+/** Attach the same clear-sign preview and signing gates used by the REST
+ *  route. x402's v0 transaction has no lookup tables, so its full preview is
+ *  available without an RPC read. Transactions that do use an ALT remain
+ *  explicitly opaque in WalletConnect until the accounts can be independently
+ *  resolved. */
 async function attachSolanaTransactionPreview(
   signingInfo: SigningRequestInfo,
   transactionBase64: string,
+  firmwareVersion: string | undefined,
   owner?: string,
   endpoint?: string,
 ): Promise<void> {
@@ -77,13 +78,7 @@ async function attachSolanaTransactionPreview(
     signingInfo.solanaDecodeError = `${e?.name || 'Error'}: ${e?.message || String(e)}`
   }
 
-  signingInfo.requiresBlindSigningConsent = requiresSolanaBlindSigningConsent(
-    signingInfo.solanaDecoded,
-    false,
-  )
-  if (signingInfo.requiresBlindSigningConsent) {
-    signingInfo.needsBlindSigning = true
-  }
+  applySolanaSigningGates(signingInfo, transactionBase64, firmwareVersion)
   if (owner && endpoint) {
     const simulation = await simulateSolanaEffects(transactionBase64, owner, endpoint)
     const decodedFindings = solanaDecodedReportFindings(signingInfo.solanaDecoded)
@@ -183,6 +178,8 @@ export interface WcCallbacks {
   getSolanaAccountInfo: (caipChain: string) => Promise<{ address: string; addressNList: number[] } | null>
   /** Sign a Solana message (raw bytes, base58 per WC spec). Returns 64-byte ed25519 signature. */
   solanaSignMessageRaw: (params: { addressNList: number[]; messageBase58: string }) => Promise<{ signatureBase64: string }>
+  /** Connected device's firmware version, e.g. "7.15.0". Undefined if unknown. */
+  getFirmwareVersion: () => string | undefined
   /** Sign a Solana transaction (full base64 tx including empty sig slots). Returns assembled signed tx + signature. */
   solanaSignTransactionRaw: (params: { addressNList: number[]; signerAddress: string; transactionBase64: string }) => Promise<{ transactionBase64: string; signatureBase64: string; clearSignPromotionBundleHash?: string }>
   /** Broadcast a fully-signed serialized transaction via Pioneer. Returns the on-chain txid. */
@@ -191,7 +188,6 @@ export interface WcCallbacks {
   getSolanaRpcEndpoint: () => string
   /** Explicit per-chain endpoint for EVM simulation; Pioneer fallback is returned when unset. */
   getEvmSimulationEndpoint: (chainId: number) => string
-  getFirmwareVersion: () => string | undefined
   /** Local privacy-safe ClearSign demand telemetry. Hidden wallets return undefined. */
   recordClearSignObservation: (draft: ClearSignObservationDraft) => string | undefined
   authenticateClearSignObservation: (id: string, source: 'runtime' | 'certified' | 'erc7730', authenticatedComponentCount?: number, codeIdentityBound?: boolean, promotionBundleHash?: string) => void
@@ -735,7 +731,7 @@ export class WalletConnectManager {
           chainId: 0,
           data: transaction,
         }
-        await attachSolanaTransactionPreview(signingInfo, transaction, account.address, this.callbacks.getSolanaRpcEndpoint())
+        await attachSolanaTransactionPreview(signingInfo, transaction, this.callbacks.getFirmwareVersion(), account.address, this.callbacks.getSolanaRpcEndpoint())
         const observationId = this.recordSolanaObservation(signingInfo, transaction)
         const approvalStartedAt = Date.now()
         let approved: boolean
@@ -784,7 +780,7 @@ export class WalletConnectManager {
           chainId: 0,
           data: transaction,
         }
-        await attachSolanaTransactionPreview(signingInfo, transaction, account.address, this.callbacks.getSolanaRpcEndpoint())
+        await attachSolanaTransactionPreview(signingInfo, transaction, this.callbacks.getFirmwareVersion(), account.address, this.callbacks.getSolanaRpcEndpoint())
         const observationId = this.recordSolanaObservation(signingInfo, transaction)
         const approvalStartedAt = Date.now()
         let approved: boolean

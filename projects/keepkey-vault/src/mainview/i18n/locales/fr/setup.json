@@ -59,7 +59,7 @@
 		"listeningForBootloader": "Écoute de l'appareil en mode bootloader...",
 		"readyDetectBootloader": "Je suis prêt — Détecter le Bootloader",
 		"skipBootloaderUpdate": "Passer la mise à jour du bootloader",
-		"verifyBackupHint": "Sur le KeepKey, il vous sera demandé de vérifier la sauvegarde. Nous le ferons après la mise à jour — maintenez le bouton enfoncé pour passer cette étape pour l'instant.",
+		"verifyBackupHint": "Le KeepKey vous demandera si vous avez votre phrase de récupération au cas où vos clés privées seraient effacées. Maintenir le bouton enfoncé répond oui et lance la mise à jour — ne confirmez que si vous avez noté votre phrase de récupération.",
 		"followDirectionsOnDevice": "Suivez les instructions sur l'appareil",
 		"deviceWillGuide": "Votre KeepKey vous guidera tout au long du processus de mise à jour.",
 		"bootloaderDetected": "Mode Bootloader détecté",

@@ -10,7 +10,7 @@ import { QrScannerOverlay } from "./QrScannerOverlay"
 import { AddressBookPicker } from "./AddressBookPicker"
 import { AddressIdenticon } from "./AddressIdenticon"
 import { SaveRecipientDialog } from "./SaveRecipientDialog"
-import { caipToNetworkId } from "../../shared/chains"
+import { caipToNetworkId, isTokenCaip } from "../../shared/chains"
 import type { ChainDef } from "../../shared/chains"
 import type { ChainBalance, TokenBalance, BuildTxResult, BroadcastResult, AddressBookEntry } from "../../shared/types"
 import { validateAddress } from "../../shared/address-validation"
@@ -126,7 +126,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 	}, [chain.chainFamily, tokenCaip])
 
 	// Derived display values — token mode vs native mode
-	const isTokenSend = !!(token && token.caip && !token.caip.endsWith('/slip44:501') && (token.caip.includes('erc20') || token.caip.includes('/token:') || token.caip.includes('/spl:') || token.caip.includes('/trc20:') || token.caip.includes('/denom:')))
+	const isTokenSend = !!token && isTokenCaip(token.caip)
 	const displaySymbol = isTokenSend ? token!.symbol : chain.symbol
 	const displayBalance = isTokenSend ? token!.balance : (balance?.balance || '0')
 	// No entry, or the chain's fetch failed: `displayBalance` is a placeholder

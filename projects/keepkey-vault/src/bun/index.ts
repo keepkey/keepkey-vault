@@ -50,6 +50,17 @@ function requireClearsignAdvancedMode(): void {
 	}
 }
 
+function supportsAddressBookClearsignFirmware(): boolean {
+	const version = engine.getDeviceState().firmwareVersion
+	return Boolean(version && versionCompare(version, '7.16.0') >= 0)
+}
+
+function requireAddressBookClearsignFirmware(): void {
+	if (!supportsAddressBookClearsignFirmware()) {
+		throw new Error('Address Book ClearSign requires firmware 7.16.0 or newer')
+	}
+}
+
 const AUTHENTICATOR_SLOT_COUNT = 10
 
 function normalizeAuthenticatorLabel(value: unknown, field: string): string {
@@ -208,10 +219,11 @@ import { loadSupportedChains } from "../shared/swap-support-matrix"
 import { PioneerSocket } from "./pioneer-socket"
 import { startEventStream, stopEventStream, type AddressEntry } from "./event-stream"
 import { rebuildActivityHistory, clearHistoryQueryCache } from "./activity-history"
+import { cachedHistoryQueries, watchOnlyWalletScope, watchOnlyBitcoinScope } from './watch-only-history'
 import { createTxWatch, MAX_WATCH_MS, UNSEEN_GIVE_UP_MS } from "./tx-watch"
 import { getRequiredConfs } from "../shared/confirmations"
 import { addSessionActivity, getSessionActivity, clearSessionActivity } from "./session-activity"
-import { buildTx, broadcastTx } from "./txbuilder"
+import { buildTx, broadcastTx, canonicalizeTronTokenCaip } from "./txbuilder"
 import { buildCosmosStakingTx, buildCosmosNameRegTx } from "./txbuilder/cosmos"
 import { initializeOrchardFromDevice, scanOrchardNotes, getShieldedBalance, sendShielded, ensureFvkLoaded, displayOrchardAddressOnDevice } from "./txbuilder/zcash-shielded"
 import { findZcashCliBinary, isSidecarReady, startSidecar, stopSidecar, wipeSidecarWalletDb, hasFvkLoaded, getCachedFvk, onScanProgress, getScanState, updateSyncedTo, beginZcashSend, endZcashSend, isZcashSendInFlight } from "./zcash-sidecar"
@@ -238,7 +250,7 @@ import type { OwnAddressSeed } from "./db"
 import { rectifyWallet, getLedgerSummary, getLedgerJournals } from "./ledger"
 import { generateReport, reportToPdfBuffer, reportToCsv } from "./reports"
 import { startAudit, startBtcScan, getAudit, getAuditBtcRaw, getAuditEntry, dismissAudit, markAuditsStale, type AuditDeps } from "./audit-engine"
-import { chainSupportsDeepScan, chainSupportsLevelScan, chainLevelPath, deriveAddressParams, extractAddress, parseNativeScanResult, parseEvmScanResult, utxoAccountScriptPaths, explorerAddressUrl, pathToBip32, parseBip32Path } from "./chain-scan"
+import { chainSupportsDeepScan, chainSupportsLevelScan, chainLevelPath, deriveAddressParams, extractAddress, parseNativeScanResult, parseEvmScanResult, supportsDgbTaproot, utxoAccountScriptPaths, explorerAddressUrl, pathToBip32, parseBip32Path } from "./chain-scan"
 import { btcPairingEntries, utxoPairingEntries, evmPairingEntries, type UtxoXpub } from "./pairing-pubkeys"
 import { extractTransactionsFromReport, toCoinTrackerCsv, toZenLedgerCsv } from "./tax-export"
 import { assetData as discoveryAssetData } from "@pioneer-platform/pioneer-discovery"
@@ -262,6 +274,7 @@ import { deviceErrorMessage } from "../shared/device-error"
 import type { ChainBalance, TokenBalance, CustomToken, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, EvmAddressSet, Bip85SeedMeta, StakingPosition, SwapAsset, AuditToken, DefiPosition, RecentActivity, ClearSignEvent, ClearSignSolanaSchemaArtifact } from "../shared/types"
 import type { VaultRPCSchema } from "../shared/rpc-schema"
 import { collectAndAnalyzeWithGate, MAX_CHUNK_BYTES } from "./rng-audit"
+import { buildCertificationRequest, buildContactProof, contactsFromEntries, CONTACT_DESTINATION, evmRecipient, type AddressBookCertification } from "./addressbook-clearsign"
 
 // L3 fix: withTimeout imported from engine-controller (was duplicated here)
 const PIONEER_TIMEOUT_MS = 60_000
@@ -495,9 +508,9 @@ function canonicalizeCaipNetwork(caip: string): string {
 
 function parseTokenEntry(tok: any): TokenBalance {
 	const tokNetworkId = (tok.networkId || '').toLowerCase()
-	const caip = canonicalizeCaipNetwork(tok.caip || '')
+	const caip = canonicalizeTronTokenCaip(canonicalizeCaipNetwork(tok.caip || ''), tok.contract)
 	const caipPrefix = ((tok.caip || '').split('/')[0]).toLowerCase()
-	const contractMatch = (tok.caip || '').match(CONTRACT_CAIP_RE)
+	const contractMatch = caip.match(CONTRACT_CAIP_RE)
 	return {
 		symbol: tok.symbol || '???',
 		name: tok.name || tok.symbol || 'Unknown Token',
@@ -1000,7 +1013,18 @@ let zcashPurgeInFlight: Promise<void> | null = null
 let emulatorEnabled = false
 let preReleaseUpdates = false
 let alphaFirmware = false
+let addressBookClearsignEnabled = false
 let privateModeEnabled = false
+
+function storedAddressBookCertification(): AddressBookCertification | undefined {
+	const raw = getSetting('addressbook_clearsign_certification')
+	if (!raw) return undefined
+	try { return JSON.parse(raw) as AddressBookCertification } catch { return undefined }
+}
+
+function invalidateAddressBookCertification(): void {
+	setSetting('addressbook_clearsign_certification', '')
+}
 
 function requireOnline(operation: string): void {
 	assertOnline(offlineMode, operation)
@@ -1021,6 +1045,7 @@ function loadSettings() {
 	emulatorEnabled = getSetting('emulator_enabled') === '1'
 	preReleaseUpdates = getSetting('pre_release_updates') === '1'
 	alphaFirmware = getSetting('alpha_firmware') === '1'
+	addressBookClearsignEnabled = getSetting('addressbook_clearsign_enabled') === '1'
 	privateModeEnabled = getSetting('private_mode_enabled') === '1'
 	offlineMode = getSetting('offline_mode') === '1'
 	setBtcBackendOffline(offlineMode)
@@ -1378,6 +1403,7 @@ function getAppSettings() {
 		btcOnboardingShown: getSetting('btc_onboarding_shown') === '1',
 		preReleaseUpdates,
 		alphaFirmware,
+		addressBookClearsignEnabled,
 		privateModeEnabled,
 		passphraseIntroShown: getSetting('passphrase_intro_shown') === '1',
 		evmSimulationRpcUrls: getEvmSimulationRpcUrls(),
@@ -1397,6 +1423,19 @@ function getWalletDbScope(): { deviceId: string; walletId: string } | null {
 	const seedId = engine.currentSeedEthAddress?.toLowerCase()
 	if (!seedId) return null
 	return { deviceId, walletId: `${deviceId}:${seedId}` }
+}
+
+async function getWatchOnlyHistoryContext(deviceId?: string) {
+	if (engine.isPassphraseWallet) throw new Error('Watch-only history is unavailable during a hidden wallet session')
+	const { getDeviceSnapshotById } = await import('./db')
+	const snapshot = deviceId ? getDeviceSnapshotById(deviceId) : getLatestDeviceSnapshot()
+	if (!snapshot) throw new Error('No saved wallet available for history')
+	const bitcoinOnly = bitcoinOnlyWatchOnlyScope(false, snapshot.featuresJson)
+	const scope = bitcoinOnly
+		? watchOnlyBitcoinScope(snapshot.deviceId, getCachedPubkeys(snapshot.deviceId))
+		: watchOnlyWalletScope(snapshot.deviceId, getSetting(`seed_eth_${snapshot.deviceId}`))
+	if (!scope) throw new Error('Connect this wallet once to identify its saved transaction history')
+	return { snapshot, scope }
 }
 
 /** The seed identity (lowercased ETH idx0) under which the in-memory account
@@ -2520,7 +2559,7 @@ async function headlessExecuteSwap(params: ExecuteSwapParams, pushSubStage: (sta
 			expiry: cachedQuote?.expiry || params.expiry,
 			fees: cachedQuote?.fees || { affiliate: '0', outbound: '0', totalBps: 0 },
 			estimatedTime: cachedQuote?.estimatedTime || 600,
-			slippageBps: cachedQuote?.slippageBps || 300,
+			slippageBps: cachedQuote?.requestedSlippageBps ?? 100,
 			integration: cachedQuote?.integration || 'thorchain',
 			swapper: cachedQuote?.swapper,
 			nearIntentsDepositAddress: cachedQuote?.nearIntentsDepositAddress,
@@ -3391,6 +3430,22 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					...(params as any),
 					txMetadata: { signedPayload: resolvedSchema.signedPayload, keyId: resolvedSchema.keyId },
 				} : params
+				// Develop's address-book ClearSign: a device-certified contact label
+				// for a plain recipient. Only when no contract definition resolved.
+				let contactProofAttached = false
+				if (addressBookClearsignEnabled && supportsAddressBookClearsignFirmware() && !engine.isPassphraseWallet
+					&& !effectiveParams?.txMetadata && !effectiveParams?.erc7730) {
+					const certification = storedAddressBookCertification()
+					const recipient = evmRecipient(effectiveParams)
+					if (certification && recipient) {
+						const proof = buildContactProof(certification, `eip155:${recipient.chainId}`, CONTACT_DESTINATION.EVM_ADDRESS, recipient.address)
+						if (proof) {
+							effectiveParams = { ...effectiveParams, txMetadata: { signedPayload: proof } }
+							contactProofAttached = true
+							console.log(`[addressbook-clearsign] attached revision ${certification.revision} proof for ${recipient.address}`)
+						}
+					}
+				}
 				// The browser-extension and WalletConnect paths converge here. On
 				// 7.15, an explicitly configured provider can bind a reviewed report
 				// to this exact final transaction. Loading its RAM signer is always a
@@ -3430,12 +3485,13 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				let observationId: string | undefined
 				if (!engine.isPassphraseWallet) {
 					const definitionSource = effectiveParams?.erc7730 ? 'erc7730'
-						: effectiveParams?.txMetadata?.keyId === 0x80 ? 'certified'
-							: effectiveParams?.txMetadata ? 'runtime' : 'none'
+						: contactProofAttached ? 'none'
+							: effectiveParams?.txMetadata?.keyId === 0x80 ? 'certified'
+								: effectiveParams?.txMetadata ? 'runtime' : 'none'
 					const draft = observeEvmCall({
 						chainId: Number(effectiveParams?.chainId || 1), to: effectiveParams?.to, data: effectiveParams?.data,
 						source: definitionSource,
-						definitionResolution: effectiveParams?.erc7730 || effectiveParams?.txMetadata
+						definitionResolution: effectiveParams?.erc7730 || (effectiveParams?.txMetadata && !contactProofAttached)
 							? 'selected' : promotedResolution.status,
 					})
 					observationId = insertClearSignObservation(draft, { deviceId: engine.getDeviceState().deviceId, source: 'vault-rpc' }).id
@@ -3462,7 +3518,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						keyId: Number.isInteger(request.keyId) ? request.keyId : undefined,
 						sentToDevice, request,
 					})
-					if (observationId && (effectiveParams?.erc7730 || effectiveParams?.txMetadata)) authenticateClearSignObservation(
+					if (observationId && (effectiveParams?.erc7730 || (effectiveParams?.txMetadata && !contactProofAttached))) authenticateClearSignObservation(
 						observationId, effectiveParams.erc7730 ? 'erc7730' : effectiveParams.txMetadata?.keyId === 0x80 ? 'certified' : 'runtime',
 						1, resolvedSchema?.source === 'promoted-local', resolvedSchema?.bundleHash,
 					)
@@ -3978,6 +4034,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// Filter chains by firmware version — don't derive addresses for unsupported chains
 				// Zcash (transparent + shielded) gated behind feature flag
 				const fwVersion = engine.getDeviceState().firmwareVersion
+				const dgbTaprootEnabled = supportsDgbTaproot(process.env.FEATURE_TAPROOT_DGB === 'true', fwVersion)
 				const bitcoinOnly = isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant)
 				if (bitcoinOnly) swapDestCaips = []
 				const allChains = bitcoinOnlyChainList(getAllChains(), bitcoinOnly).filter(c => {
@@ -3994,7 +4051,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// all so Pioneer reports balances from every address type.
 				const utxoPubKeyPaths: Array<{ chain: typeof utxoChains[0]; scriptType: string; path: number[] }> = []
 				for (const c of utxoChains) {
-					for (const sp of utxoAccountScriptPaths(c, 0)) {
+					for (const sp of utxoAccountScriptPaths(c, 0, false, dgbTaprootEnabled)) {
 						utxoPubKeyPaths.push({ chain: c, scriptType: sp.scriptType, path: sp.path })
 					}
 				}
@@ -4018,7 +4075,15 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				for (let i = 0; i < utxoPubKeyPaths.length; i++) {
 					const xpub = xpubResults?.[i]?.xpub
 					const c = utxoPubKeyPaths[i].chain
-					if (xpub) pubkeys.push({ caip: c.caip, pubkey: xpub, chainId: c.id, symbol: c.symbol, networkId: c.networkId })
+					if (xpub) pubkeys.push({
+						caip: c.caip,
+						pubkey: utxoDiscoveryKey(xpub, utxoPubKeyPaths[i].scriptType),
+						sourcePubkey: xpub,
+						scriptType: utxoPubKeyPaths[i].scriptType,
+						chainId: c.id,
+						symbol: c.symbol,
+						networkId: c.networkId,
+					})
 				}
 
 				// Merge device-cached UTXO-altcoin xpubs beyond account 0 — persisted
@@ -5095,7 +5160,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					// Non-BTC UTXO: derive account-0 xpubs via the shared helper (standard
 					// script-type set + the chain's own receive convention — see
 					// utxoAccountScriptPaths for why the latter is load-bearing on LTC).
-					const sps = utxoAccountScriptPaths(chain, 0)
+					const includeDgbTaproot = chain.id === 'digibyte'
+						&& supportsDgbTaproot(process.env.FEATURE_TAPROOT_DGB === 'true', fwVersion)
+					const sps = utxoAccountScriptPaths(chain, 0, false, includeDgbTaproot)
 					const paths = sps.map(sp => ({
 						addressNList: sp.path,
 						coin: chain.coin, scriptType: sp.scriptType, curve: 'secp256k1',
@@ -5104,7 +5171,15 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					let anyXpub = false
 					for (let i = 0; i < sps.length; i++) {
 						const xpub = results?.[i]?.xpub
-						if (xpub) { pubkeys.push({ caip: chain.caip, pubkey: xpub }); anyXpub = true }
+						if (xpub) {
+							pubkeys.push({
+								caip: chain.caip,
+								pubkey: utxoDiscoveryKey(xpub, sps[i].scriptType),
+								sourcePubkey: xpub,
+								scriptType: sps[i].scriptType,
+							})
+							anyXpub = true
+						}
 					}
 					// Merge device-cached account-1+ xpubs (audit "track") so funds beyond
 					// account 0 are spendable. Device-scoped, never written for passphrase
@@ -7060,6 +7135,12 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				engine.syncState().catch(e => console.warn('[settings] syncState after alpha toggle failed:', e))
 				return getAppSettings()
 			},
+			setAddressBookClearsignEnabled: async (params) => {
+				addressBookClearsignEnabled = params.enabled
+				setSetting('addressbook_clearsign_enabled', params.enabled ? '1' : '0')
+				console.log('[settings] Address Book ClearSign:', params.enabled)
+				return getAppSettings()
+			},
 			setPrivateModeEnabled: async (params) => {
 				privateModeEnabled = params.enabled
 				setSetting('private_mode_enabled', params.enabled ? '1' : '0')
@@ -7209,17 +7290,24 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					networkId: chain.networkId, chainId: chain.id, chainFamily: chain.chainFamily,
 					address: params.address, label: params.label ?? null,
 				})
-				if (entry) { try { rpc.send['addressbook-changed']({}) } catch { /* webview not ready */ } }
+				if (entry) {
+					invalidateAddressBookCertification()
+					try { rpc.send['addressbook-changed']({}) } catch { /* webview not ready */ }
+				}
 				return entry
 			},
 			updateAddressBook: async (params) => {
 				// Global (wallet-agnostic) — edit any contact from any session.
 				const ok = updateAddressBookEntry(params.id, null, { label: params.label, note: params.note })
-				if (ok) { try { rpc.send['addressbook-changed']({}) } catch { /* webview not ready */ } }
+				if (ok) {
+					invalidateAddressBookCertification()
+					try { rpc.send['addressbook-changed']({}) } catch { /* webview not ready */ }
+				}
 				return ok
 			},
 			deleteAddressBook: async (params) => {
 				deleteAddressBookEntry(params.id, null)
+				invalidateAddressBookCertification()
 				try { rpc.send['addressbook-changed']({}) } catch { /* webview not ready */ }
 			},
 			getAddressBookHistory: async (params) => {
@@ -7227,6 +7315,30 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					getAddressBookHistory(params.entryId, null),
 					isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant),
 				)
+			},
+			certifyAddressBook: async () => {
+				if (!addressBookClearsignEnabled) throw new Error('Address Book ClearSign is not enabled')
+				if (!engine.wallet) throw new Error('No device connected')
+				requireAddressBookClearsignFirmware()
+				if (engine.isPassphraseWallet) throw new Error('Address Book certification is unavailable in a passphrase session')
+				const contacts = contactsFromEntries(getAddressBookList({ kind: 'external', savedOnly: true }))
+				if (!contacts.length) throw new Error('Add at least one labeled EVM contact before certifying')
+				const revision = Math.max(0, Number(getSetting('addressbook_clearsign_revision') || '0')) + 1
+				const built = buildCertificationRequest(contacts, revision)
+				const attest = () => (engine.wallet as any).clearsignAttestorSign(new Uint8Array(built.payload))
+				const result = engine.isEmulator
+					? await emuSigningOp(attest, { operation: 'clearsignAttestorSign', opLabel: 'Certify address book', chain: 'EVM' })
+					: await attest()
+				const publicKey = Buffer.from(result.publicKey as Uint8Array).toString('hex')
+				const signature = Buffer.from(result.signature as Uint8Array).toString('hex')
+				if (publicKey.length !== 66 || signature.length !== 128) throw new Error('Device returned an invalid address-book attestation')
+				const certification: AddressBookCertification = {
+					version: 1, revision, contacts, root: built.root.toString('hex'),
+					publicKey, signature, certifiedAt: Date.now(),
+				}
+				setSetting('addressbook_clearsign_certification', JSON.stringify(certification))
+				setSetting('addressbook_clearsign_revision', String(revision))
+				return { revision, count: contacts.length, root: certification.root, fingerprint: clearsignFingerprint(new Uint8Array(Buffer.from(publicKey, 'hex'))) }
 			},
 
 			// ── Accounting ledger ────────────────────────────────────
@@ -7728,7 +7840,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// fall back to the live tracker copy: a hidden walletId never matches a
 				// standard swap (DB lookup is walletId-scoped; in-memory filter too), so
 				// standard-wallet swaps stay invisible here.
-				const scope = getWalletDbScope()
+				const scope = params.watchOnly ? (await getWatchOnlyHistoryContext(params.deviceId)).scope : getWalletDbScope()
 				if (!scope) return null
 				const record = getSwapHistoryByTxid(params.txid, scope.deviceId, scope.walletId)
 				const { inferConfirmationsFromStatus, getPendingSwaps } = await import('./swap-tracker')
@@ -7762,8 +7874,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					fromCaip,
 					toCaip,
 					fromAmount: record?.fromAmount ?? live?.fromAmount,
-					expectedOutput: record ? (record.receivedOutput || record.quotedOutput) : (live?.receivedOutput || live?.expectedOutput),
-					receivedOutput: record?.receivedOutput ?? live?.receivedOutput,
+					expectedOutput: record?.quotedOutput ?? live?.expectedOutput,
+					payouts: live?.payouts,
+					receivedOutput: live?.receivedOutput ?? record?.receivedOutput,
 					memo: record?.memo ?? live?.memo,
 					inboundAddress: record?.inboundAddress ?? live?.inboundAddress,
 					router: record?.router ?? live?.router,
@@ -7797,7 +7910,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// never matches a standard swap's walletId — so standard-wallet swaps
 				// remain unreachable from here. Same posture as getPendingSwaps.
 				const { refreshSwap } = await import('./swap-tracker')
-				const scope = getWalletDbScope()
+				const scope = params.watchOnly ? (await getWatchOnlyHistoryContext(params.deviceId)).scope : getWalletDbScope()
 				if (!scope) return null
 				return await refreshSwap(params.txid, scope.deviceId, scope.walletId, params.rescan)
 			},
@@ -7866,6 +7979,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 			// ── Recent Activity (from api_log + swap_history) ────────
 			getRecentActivity: async (params) => {
+				if (params?.watchOnly) {
+					const { snapshot, scope } = await getWatchOnlyHistoryContext(params.deviceId)
+					const rows = getRecentActivityFromLog(params.limit, params.chainId, scope.deviceId, scope.walletId)
+					return bitcoinOnlyActivityList(rows, bitcoinOnlyWatchOnlyScope(isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant), snapshot.featuresJson))
+				}
 				// PRIVACY: Don't expose standard-wallet activity during hidden sessions.
 				// Hidden sessions get the RAM-only session store instead (populated by
 				// scanChainHistory's live fetch below) — display without persistence.
@@ -7879,8 +7997,35 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return bitcoinOnlyActivityList(rows, isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant))
 			},
 			getActivityScanState: async () => ({ running: activityScanRunning }),
+			getWatchOnlyHistoryChains: async (params) => {
+				const { snapshot, scope } = await getWatchOnlyHistoryContext(params?.deviceId)
+				const chains = bitcoinOnlyChainList(getAllChains(), bitcoinOnlyWatchOnlyScope(false, snapshot.featuresJson))
+				const balances = getCachedBalances(scope.deviceId)?.balances || []
+				const pubkeys = getCachedPubkeys(scope.deviceId)
+				return chains.filter(chain => cachedHistoryQueries(chain, balances, pubkeys).length > 0).map(chain => chain.id)
+			},
 			scanChainHistory: async (params) => {
 				requireOnline('activity history')
+				if (params.watchOnly) {
+					const { snapshot, scope } = await getWatchOnlyHistoryContext(params.deviceId)
+					const chains = bitcoinOnlyChainList(getAllChains(), bitcoinOnlyWatchOnlyScope(isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant), snapshot.featuresJson))
+					const chain = chains.find(c => c.id === params.chainId)
+					if (!chain) throw new Error(`Unsupported chain: ${params.chainId}`)
+					const queries = cachedHistoryQueries(chain, getCachedBalances(scope.deviceId)?.balances || [], getCachedPubkeys(scope.deviceId))
+					if (!queries.length) throw new Error(`No saved public address for ${chain.symbol}`)
+					const result = await rebuildActivityHistory({
+						wallet: null, scope, chains: [chain], firmwareVersion: snapshot.firmwareVer,
+						cachedQueries: { [chain.id]: queries },
+						options: { chainId: chain.id, includeHidden: true, forceRefresh: true },
+						isCurrent: () => !engine.isPassphraseWallet
+							&& (bitcoinOnlyWatchOnlyScope(false, snapshot.featuresJson)
+								? watchOnlyBitcoinScope(scope.deviceId, getCachedPubkeys(scope.deviceId))
+								: watchOnlyWalletScope(scope.deviceId, getSetting(`seed_eth_${scope.deviceId}`)))?.walletId === scope.walletId,
+					})
+					if (result.totals.failedChains) throw new Error(result.chains.find(c => c.error)?.error || 'History scan failed')
+					notifyActivityChanged()
+					return { count: result.totals.inserted }
+				}
 				const chain = getAllChains().find(c => c.id === params.chainId)
 				if (!chain) throw new Error(`Unknown chain: ${params.chainId}`)
 				if (!engine.wallet) throw new Error('No device connected')

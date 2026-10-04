@@ -59,7 +59,7 @@
 		"listeningForBootloader": "부트로더 모드의 기기를 대기 중...",
 		"readyDetectBootloader": "준비 완료 — 부트로더 감지",
 		"skipBootloaderUpdate": "부트로더 업데이트 건너뛰기",
-		"verifyBackupHint": "KeepKey에서 백업 확인을 요청할 것입니다. 업데이트 후에 진행할 것이므로 — 지금은 버튼을 길게 눌러 건너뛰세요.",
+		"verifyBackupHint": "KeepKey는 개인 키가 지워질 경우를 대비해 복구 문구를 가지고 있는지 묻습니다. 버튼을 길게 누르면 '예'로 응답하고 업데이트가 시작됩니다 — 복구 문구를 적어 두었을 때만 확인하세요.",
 		"followDirectionsOnDevice": "기기의 안내를 따르세요",
 		"deviceWillGuide": "KeepKey가 업데이트 과정을 안내합니다.",
 		"bootloaderDetected": "부트로더 모드 감지됨",
