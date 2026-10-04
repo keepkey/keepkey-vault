@@ -9,6 +9,7 @@ import { erc20Preview } from "../../../shared/erc20Preview"
 import { evmMaxFee, evmNativeValue } from "../../../shared/evmFeePreview"
 import { evmChainLabel } from "../../../shared/chains"
 import { isRelayBridgeDeposit } from "../../../shared/relayBridgePreview"
+import { decodeAcrossDepositV3 } from "../../../shared/acrossDeposit"
 import { utxoPreview } from "../../../shared/utxoPreview"
 import { cosmosDepositPreview } from "../../../shared/cosmosDepositPreview"
 import { assessSigningRisk, formatCertifiedArg, type RiskLevel } from "../../../shared/clearsign-risk"
@@ -102,12 +103,13 @@ function Row({ label, value, mono = true }: { label: string; value?: string; mon
 
 // ── Trust badge (inline) ──────────────────────────────────────────────
 
-function TrustBadge({ level, hasSigned, schemaOnly, t }: { level: 'verified' | 'known' | 'unknown'; hasSigned?: boolean; schemaOnly?: boolean; t: (k: string, f?: string) => string }) {
+function TrustBadge({ level, hasSigned, schemaOnly, label, t }: { level: 'verified' | 'known' | 'unknown'; hasSigned?: boolean; schemaOnly?: boolean; label?: string; t: (k: string, f?: string) => string }) {
 	const cfg = level === 'verified'
 		? { bg: "rgba(34,197,94,0.12)", border: "rgba(34,197,94,0.3)", color: "var(--teal)", label: schemaOnly ? "Call schema verified" : hasSigned ? t("signing.signedVerified", "Signed & Verified") : t("signing.verified", "Verified Contract") }
 		: level === 'known'
 			? { bg: "rgba(233,196,106,0.12)", border: "rgba(233,196,106,0.3)", color: "var(--gold)", label: t("signing.knownPattern", "Known Pattern") }
 			: { bg: "rgba(239,68,68,0.12)", border: "rgba(239,68,68,0.3)", color: "var(--rose)", label: t("signing.unverifiedContract", "Unverified Contract") }
+	if (label) cfg.label = label
 
 	return (
 		<Flex
@@ -917,6 +919,11 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 	const hasSignedBlob = !!decoded?.signedInsightBlob
 	const relayBridgeDeposit = request.method === '/eth/sign-transaction'
 		&& isRelayBridgeDeposit(request.to, request.data, request.chainId)
+	// A pinned Across SpokePool on this chain: name the contract instead of
+	// "Unverified Contract". The device still blind-signs it, so the
+	// AdvancedMode gate below is untouched.
+	const acrossDeposit = request.method === '/eth/sign-transaction'
+		? decodeAcrossDepositV3(request.to, request.data, request.chainId) : null
 	const utxo = request.method === '/utxo/sign-transaction' ? utxoPreview(request.rawRequestBody) : undefined
 	const cosmosDeposit = request.method === '/thorchain/sign-amino-deposit'
 		? cosmosDepositPreview(request.rawRequestBody, 'THORChain')
@@ -942,6 +949,7 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 		trustLevel = request.needsBlindSigning ? 'unknown'
 			: request.typedDataDecoded.isKnownType ? 'verified' : 'known'
 	}
+	if (acrossDeposit && trustLevel === 'unknown') trustLevel = 'known'
 
 	// Solana is never a "simple transfer". Transactions need a clear-sign
 	// preview; raw message signing is AdvancedMode-gated because it lacks the
@@ -1179,7 +1187,8 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 						  EVM verified-contract trust signal, so hide it there too.
 						*/}
 						{!isSimpleTransfer && !request.ethMessageDecoded && !isSolanaRequest && (
-							<TrustBadge level={trustLevel} hasSigned={hasSignedBlob} schemaOnly={relayBridgeDeposit} t={t} />
+							<TrustBadge level={trustLevel} hasSigned={hasSignedBlob} schemaOnly={relayBridgeDeposit}
+								label={acrossDeposit ? t("signing.acrossKnownContract", "Across SpokePool · device shows raw data") : undefined} t={t} />
 						)}
 						<Text fontSize="2xs" color={remaining <= 30 ? "red.400" : "kk.textMuted"} fontWeight={remaining <= 30 ? "600" : "400"}>
 							{timeStr}
@@ -1269,7 +1278,9 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 						title={isSolanaSignMessage ? t("signing.solanaAdvancedModeRequired", "Advanced Mode Required") : undefined}
 						description={isSolanaSignMessage
 							? t("signing.solanaAdvancedModeDescription", "Advanced Mode is off, so your KeepKey will reject this raw Solana message. Enable Advanced Mode here before approving.")
-							: undefined}
+							: acrossDeposit
+								? t("signing.acrossAdvancedModeDescription", "Your KeepKey cannot decode Across bridge deposits yet and will show this call only as raw data. Check the decoded details here, then enable Advanced Mode on the device to sign it.")
+								: undefined}
 						enableLabel={isSolanaSignMessage ? t("signing.enableAdvancedMode", "Enable Advanced Mode") : undefined}
 						error={advancedModeError}
 					/>
