@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test'
 import { utils as ethersUtils } from 'ethers'
 import bs58 from 'bs58'
 
-import { normalizeEvmSimulation, simulateEvmEffects } from '../src/bun/evm-effects'
+import { evmTxFingerprint, normalizeEvmSimulation, simulateEvmEffects } from '../src/bun/evm-effects'
 import { normalizeSolanaSimulation, simulateSolanaEffects } from '../src/bun/solana-effects'
 import { buildClearSignReport, solanaDecodedReportFindings } from '../src/shared/clearsign-report'
 import { ClearSignReportResponse } from '../src/bun/schemas'
@@ -260,5 +260,39 @@ describe('Vault ClearSign effect reports', () => {
     expect(config).toMatchObject({ sigVerify: false, replaceRecentBlockhash: true, innerInstructions: true })
     expect(report.assetChanges[0]?.delta).toBe('-10')
     expect(report.stateReference.blockOrSlot).toBe('42')
+  })
+})
+
+describe('evmTxFingerprint', () => {
+  // Real Base Uniswap swap from 2026-10-04: the pre-sign report got Uniswap's
+  // lowercase `from`, the signing path the extension's checksummed one, and the
+  // raw-string hash rejected an identical transaction.
+  const base = {
+    chainId: 8453,
+    from: '0x909ef6b32dfdc12ca86aa710b54c991af3c5f82e',
+    to: '0xd6145b2d3f379919e8cdeda7b97e37c4b2ca9c40',
+    data: '0x3593564c',
+    value: '0x0',
+    gas: '0x3ad76',
+    maxFeePerGas: '0xbebc21',
+    maxPriorityFeePerGas: '0x4c4b41',
+    nonce: '0x23',
+  }
+
+  test('same transaction, different spelling: same fingerprint', () => {
+    const fp = evmTxFingerprint(base)
+    expect(evmTxFingerprint({ ...base, from: '0x909Ef6B32DfDc12CA86aA710b54c991af3C5F82E' })).toBe(fp)
+    expect(evmTxFingerprint({ ...base, to: base.to.toUpperCase().replace('0X', '0x'), data: '0x3593564C' })).toBe(fp)
+    expect(evmTxFingerprint({ ...base, chainId: '0x2105' as any, value: '0x00', nonce: '35', gasPrice: undefined })).toBe(fp)
+    expect(evmTxFingerprint({ ...base, data: undefined, input: '0x3593564c' })).toBe(fp)
+  })
+
+  test('any real change: different fingerprint', () => {
+    const fp = evmTxFingerprint(base)
+    for (const change of [
+      { maxFeePerGas: '0xbebc22' }, { gas: '0x30396' }, { nonce: '0x24' }, { value: '0x1' },
+      { data: '0x3593564d' }, { to: '0x0000000000000000000000000000000000000001' }, { chainId: 1 },
+      { gasPrice: '0x895440', maxFeePerGas: undefined, maxPriorityFeePerGas: undefined },
+    ]) expect(evmTxFingerprint({ ...base, ...change } as any)).not.toBe(fp)
   })
 })

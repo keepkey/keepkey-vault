@@ -28,6 +28,34 @@ export interface EvmSimulationTx {
   nonce?: string
 }
 
+const QUANTITY_FIELDS = ['value', 'gas', 'gasPrice', 'maxFeePerGas', 'maxPriorityFeePerGas', 'nonce'] as const
+
+function quantity(v: unknown): string {
+  try { return '0x' + BigInt(v as string).toString(16) } catch { return String(v).toLowerCase() }
+}
+
+/**
+ * Fingerprint of WHAT is signed, not how a caller spelled it. The pre-sign
+ * report and the signing path receive the same tx from different callers
+ * (lowercase vs checksummed addresses, '0x0' vs '0x00', number vs hex
+ * chainId, absent vs undefined fields); hashing raw strings made identical
+ * transactions mismatch. Any real change (fees, gas, nonce, value, data,
+ * recipient) still changes the fingerprint.
+ */
+export function evmTxFingerprint(tx: EvmSimulationTx): string {
+  const normalized: Record<string, unknown> = {
+    chainId: Number(tx.chainId),
+    from: String(tx.from || '').toLowerCase(),
+    data: String(tx.input || tx.data || '0x').toLowerCase(),
+  }
+  if (tx.to) normalized.to = String(tx.to).toLowerCase()
+  for (const field of QUANTITY_FIELDS) {
+    const v = tx[field]
+    if (v !== undefined && v !== null && v !== '') normalized[field] = quantity(v)
+  }
+  return createHash('sha256').update(canonical(normalized)).digest('hex')
+}
+
 interface EvmLog { address?: string; topics?: string[]; data?: string }
 
 const addressTopic = (value: string | undefined): string | undefined => {
@@ -166,7 +194,7 @@ export function normalizeEvmSimulation(
   return {
     version: 1,
     chain: 'Ethereum',
-    transactionFingerprint: createHash('sha256').update(canonical(tx)).digest('hex'),
+    transactionFingerprint: evmTxFingerprint(tx),
     stateReference: { blockOrSlot: blockReference, endpoint },
     status: reverted ? 'revert' : unknowns.length ? 'incomplete' : 'success',
     assetChanges,
@@ -229,7 +257,7 @@ async function bindRuntimeCode(report: EffectReport, endpoint: string, blockTag:
 
 /** Simulate first; tracing is additive and may be unavailable on public RPCs. */
 export async function simulateEvmEffects(tx: EvmSimulationTx, endpoint: string): Promise<EffectReport> {
-  const fingerprint = createHash('sha256').update(canonical(tx)).digest('hex')
+  const fingerprint = evmTxFingerprint(tx)
   const call = { ...tx, input: tx.input || tx.data || '0x' } as Record<string, unknown>
   delete call.chainId
   delete call.data
