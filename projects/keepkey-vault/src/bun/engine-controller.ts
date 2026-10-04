@@ -11,6 +11,7 @@ import { isBitcoinOnlyVariant, DEFAULT_AUTO_LOCK_MS } from '../shared/flags'
 import type { DeviceStateInfo, ActiveTransport, UpdatePhase, DeviceState, FirmwareManifest, PinRequestType, Bip85DeriveParams, Bip85DisplayResult } from '../shared/types'
 import { resolveOndeviceFirmwareVersion } from '../shared/firmware-versions'
 import { EmulatorKeepKeyAdapter } from './emulator-transport'
+import { requestUnlock, isTransportTimeout, UNLOCK_TIMEOUT_MESSAGE } from './pin-unlock'
 import { getActiveFlashName, getEmulatorStatus } from './emulator'
 
 const KEEPKEY_VENDOR_ID = 0x2B24 // 11044
@@ -499,6 +500,13 @@ export class EngineController extends EventEmitter {
       setTimeout(() => {
         this.promptPin().catch(err => {
           console.warn('[Engine] Auto prompt-pin failed (expected if PIN flow interrupts):', err?.message)
+          // A timeout leaves the transport unusable; retrying would just
+          // reshow the PIN grid with no pending request. Tell the user.
+          if (isTransportTimeout(err)) {
+            this.lastError = UNLOCK_TIMEOUT_MESSAGE
+            this.updateState('error')
+            return
+          }
           // If device is still locked (wrong PIN, transport error, etc.), retry so
           // the PIN overlay re-appears.  Without this, promptPinActive stays false,
           // lastState is already 'needs_pin', and updateState won't re-fire —
@@ -2004,19 +2012,16 @@ export class EngineController extends EventEmitter {
    * The transport PIN_REQUEST event will fire, prompting the UI overlay.
    */
   async promptPin() {
-    if (!this.wallet) throw new Error('No device connected')
+    if (!this.wallet?.transport) throw new Error('No device connected')
     // getPublicKeys accesses the seed → triggers PinMatrixRequest on locked device.
     // It also triggers PASSPHRASE_REQUEST if passphrase protection is enabled.
     // Both are resolved via transport event handlers (sendPin/sendPassphrase).
     // While this promise is pending, sendPin/sendPassphrase must NOT call
     // getFeatures — that would race with getPublicKeys and cause FAILURE.
     this.promptPinActive = true
-    const promise = this.wallet.getPublicKeys([{
-      addressNList: [0x8000002C, 0x80000000, 0x80000000], // m/44'/0'/0'
-      curve: 'secp256k1',
-      showDisplay: false,
-      coin: 'Bitcoin',
-    }])
+    // Not wallet.getPublicKeys(): it uses a 5 s timeout, shorter than the
+    // firmware's post-failure PIN lockout wait (see pin-unlock.ts).
+    const promise = requestUnlock(this.wallet.transport)
     try {
       await promise
       // getPublicKeys completed — PIN (and passphrase if needed) were provided.
