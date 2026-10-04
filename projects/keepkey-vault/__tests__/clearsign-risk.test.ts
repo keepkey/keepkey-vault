@@ -240,6 +240,47 @@ describe('assessSigningRisk — EVM', () => {
   })
 })
 
+// Real Base Uniswap swap (fixtures/uniswap). The card said "Known Pattern"
+// beside a red "You would be signing blind" for the same request.
+describe('assessSigningRisk — reviewed Uniswap Universal Router swap', () => {
+  const swap = require('./fixtures/uniswap/base-ur-usdc-to-eth-swap.json')
+  const { applyEvmTxPreview } = require('../src/bun/evm-signing-preview')
+
+  async function swapRequest(to = swap.to): Promise<SigningRequestInfo> {
+    const original = globalThis.fetch
+    globalThis.fetch = (async () => { throw new Error('offline') }) as unknown as typeof fetch
+    const s = { id: 'u', method: '/eth/sign-transaction', appName: 't', from: swap.from, to, value: swap.value, data: swap.data, chainId: swap.chainId } as SigningRequestInfo
+    try { await applyEvmTxPreview(s, to, swap.data, swap.chainId, '7.15.0') } finally { globalThis.fetch = original }
+    return s
+  }
+
+  test('device verifies a signed swap description: MEDIUM, names the swap, not "blind"', async () => {
+    const s = await swapRequest()
+    s.calldataDecoded!.signedInsightBlob = 'AQID' // what attachCertifiedUniswapSwap sets on 7.16
+    const r = assessSigningRisk(s)!
+    expect(r.level).toBe('medium')
+    const text = r.reasons.map((x) => x.text).join('\n')
+    expect(text).toContain('Swaps 300 USDC for at least 0.108123518386717195 ETH through the Uniswap Universal Router')
+    expect(text).toContain('Your KeepKey shows this swap on its screen')
+    expect(text).not.toContain('blind')
+  })
+
+  test('no signed description (device blind-signs): stays HIGH, adds what this computer read', async () => {
+    const r = assessSigningRisk(await swapRequest())!
+    expect(r.level).toBe('high')
+    expect(r.reasons[0].text).toContain('You would be signing blind')
+    expect(r.reasons.map((x) => x.text).join('\n')).toContain('This computer reads it as: Swaps 300 USDC')
+  })
+
+  test('a signed blob on an unreviewed contract is not treated as a reviewed swap', async () => {
+    const s = await swapRequest('0x1111111111111111111111111111111111111111')
+    s.calldataDecoded!.signedInsightBlob = 'AQID'
+    const r = assessSigningRisk(s)!
+    expect(r.level).toBe('high')
+    expect(r.reasons[0].text).toContain('You would be signing blind')
+  })
+})
+
 describe('Solana plain-text rule (mirrors firmware solana_rawMessageIsPlainText)', () => {
   const { isPlainTextForSigner } = require('../src/bun/solana-message-preview')
   const SIGNER = 'Gu83nVMD8qh948D1vqe8UPoUHaFuSwcHrvNHetcM4Xux'

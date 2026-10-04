@@ -5,10 +5,10 @@
  *   needsAdvancedMode = !(firmwareNativelyDecodes || (fw >= 7.16 && certifiedPayloadAttached))
  * Runtime/provider metadata is annotation only and never relaxes the verdict.
  */
-import type { SigningRequestInfo } from '../shared/types'
-import { decodeCalldata, firmwareClearSigns } from './calldata-decoder'
+import type { CalldataDecodedField, SigningRequestInfo } from '../shared/types'
+import { decodeCalldata, firmwareClearSigns, formatDeadline } from './calldata-decoder'
 import { findCertifiedEvmSchema, findCertifiedUniswapSwap } from './evm-schema-registry'
-import { findReviewedUniversalRouter } from './evm-certified-schema'
+import { REVIEWED_EVM_TOKENS, findReviewedUniversalRouter } from './evm-certified-schema'
 import { urPrecheck } from './uniswap-ur'
 import { supportsCertifiedClearSign } from './solana-certified-policy'
 
@@ -75,6 +75,50 @@ function txValue(raw: unknown): bigint | undefined {
 }
 
 /**
+ * The swap a reviewed Universal Router call makes, as card rows: the same
+ * decode the device runs (urPrecheck), so a call it would not decode gets no
+ * rows. Token names come only from REVIEWED_EVM_TOKENS by chain:address; any
+ * other token is shown as raw units of its address with a "Token warning".
+ * Display only: it never sets or relaxes a signing gate.
+ */
+export function uniswapSwapFields(
+  chainId: number | undefined, router: string, data: string, value: unknown, from?: string,
+): CalldataDecodedField[] {
+  const v = txValue(value)
+  if (!chainId || v === undefined || !findReviewedUniversalRouter(chainId, router)) return []
+  const plan = urPrecheck(router, data, v)
+  if (!plan) return []
+  const s = plan.summary
+  const unknown: string[] = []
+  const amount = (raw: bigint, token: string, isEth: boolean) => {
+    const t = isEth ? { symbol: 'ETH', decimals: 18 } : REVIEWED_EVM_TOKENS[`${chainId}:${token}`]
+    if (!t) { unknown.push(token); return `${raw} base units of token ${token}` }
+    const scale = 10n ** BigInt(t.decimals)
+    const frac = (raw % scale).toString().padStart(t.decimals, '0').replace(/0+$/, '')
+    return `${raw / scale}${frac ? `.${frac}` : ''} ${t.symbol}`
+  }
+  const amountIn = amount(s.amountIn, s.tokenIn, s.inIsEth)
+  const amountOut = amount(s.amountOut, s.tokenOut, s.outIsEth)
+  const self = s.recipientIsSender || (!!from && s.recipient === from.toLowerCase())
+  const recipient = s.recipientIsSender ? 'the signing account' : `${s.recipient}${self ? ' (the signing account)' : ''}`
+  const row = (name: string, val: string): CalldataDecodedField => ({ name, type: 'string', value: val, format: 'raw' })
+  const rows = [
+    row('Action', s.exactIn
+      ? `Swap ${amountIn} for at least ${amountOut}${self ? '' : ` to ${s.recipient}`}`
+      : `Swap at most ${amountIn} for ${amountOut}${self ? '' : ` to ${s.recipient}`}`),
+    row(s.exactIn ? 'You pay' : 'You pay at most', amountIn),
+    // Exact-out delivers exactly this, so it is also the minimum (the
+    // "no minimum" risk rule reads this row).
+    row('Minimum output', amountOut),
+    row('Recipient', recipient),
+  ]
+  if (s.fee) rows.push(row('Fee', `${s.fee.bips / 100}% of the output to ${s.fee.recipient}`))
+  if (s.permit) rows.push(row('Permit2 allowance', `${amount(s.permit.amount, s.permit.token, false)} for the router, until ${formatDeadline(s.permit.expiration.toString())}`))
+  for (const t of [...new Set(unknown)]) rows.push(row('Token warning', `Token ${t} is not on KeepKey's reviewed list`))
+  return rows
+}
+
+/**
  * Attach a certified 0x07 Uniswap swap entry when `to` is a reviewed Universal
  * Router on 7.16+ and the calldata pre-checks as a shape the device decodes
  * (<= UR_MAX_CALLDATA bytes, supported command sequence) whose every named token is
@@ -133,6 +177,10 @@ export async function applyEvmTxPreview(
   try {
     signingInfo.calldataDecoded = await decodeCalldata(to, data, chainId) ?? undefined
   } catch (e) { console.warn(`${tag} Calldata decode failed:`, e) }
+  const swapRows = uniswapSwapFields(chainId, to, data, signingInfo.value, signingInfo.from)
+  if (swapRows.length > 0 && signingInfo.calldataDecoded) {
+    signingInfo.calldataDecoded.fields = [...swapRows, ...signingInfo.calldataDecoded.fields]
+  }
   signingInfo.deviceClearSigns = firmwareClearSigns(to, data, chainId)
 
   if (callerMetadata?.signedPayload) {
