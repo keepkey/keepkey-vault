@@ -201,6 +201,10 @@ export interface FirmwareAnalysis {
   isSameVersion: boolean
   willWipeDevice: boolean  // true when crossing signed/unsigned boundary in either direction (not in BL mode)
   isBitcoinOnly: boolean   // btc-only firmware variant, detected from the embedded KeepKeyBTC/EmulatorBTC string
+  /** firmware | bootloader-updater (rewrites the bootloader) | raw-bootloader / unknown (never flashable here) */
+  imageKind: 'firmware' | 'bootloader-updater' | 'raw-bootloader' | 'unknown'
+  /** The bootloader a bootloader-updater installs, or a raw bootloader image. */
+  embeddedBootloader?: { hash: string; version: string | null; official: boolean }
 }
 
 // Pioneer integration types

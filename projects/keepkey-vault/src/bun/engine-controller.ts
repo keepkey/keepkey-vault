@@ -1,5 +1,6 @@
 import { EventEmitter } from 'events'
 import { existsSync, readFileSync } from 'fs'
+import { classifyFirmwareImage, type EmbeddedBootloader, type FirmwareImageKind } from './firmware-image-kind'
 import * as path from 'path'
 import * as core from '@keepkey/hdwallet-core'
 import { HIDKeepKeyAdapter } from '@keepkey/hdwallet-keepkey-nodehid'
@@ -2259,8 +2260,11 @@ export class EngineController extends EventEmitter {
     isSameVersion: boolean
     willWipeDevice: boolean
     isBitcoinOnly: boolean
+    imageKind: FirmwareImageKind
+    embeddedBootloader?: EmbeddedBootloader
   } {
     const fileSize = data.length
+    const { kind: imageKind, embeddedBootloader } = classifyFirmwareImage(data, this.manifest?.hashes?.bootloader || {})
     const hasKpkyHeader = data.length >= 256
       && data[0] === 0x4B && data[1] === 0x50
       && data[2] === 0x4B && data[3] === 0x59 // "KPKY"
@@ -2285,14 +2289,6 @@ export class EngineController extends EventEmitter {
       if (fwVersion) {
         manifestSigned = true
         manifestVersion = fwVersion.replace(/^v/, '')
-      } else {
-        // Also check full-file hash (bootloader format)
-        const fullHash = sha256Hex(data)
-        const blVersion = this.manifest.hashes.bootloader?.[fullHash]
-        if (blVersion) {
-          manifestSigned = true
-          manifestVersion = blVersion.replace(/^v/, '')
-        }
       }
     }
 
@@ -2302,7 +2298,7 @@ export class EngineController extends EventEmitter {
     // Version detection: manifest version is authoritative.
     // Fallback: scan binary for "VERSION" marker followed by semver pattern.
     // KeepKey firmware embeds "VERSION7.10.0" (no space) as a string constant.
-    let detectedVersion = manifestVersion
+    let detectedVersion = manifestVersion ?? embeddedBootloader?.version ?? null
     if (!detectedVersion) {
       const versionPattern = /VERSION(\d+\.\d+\.\d+)/
       // Search in the payload as a string (ASCII-safe scan)
@@ -2364,6 +2360,8 @@ export class EngineController extends EventEmitter {
       isSameVersion,
       willWipeDevice,
       isBitcoinOnly,
+      imageKind,
+      embeddedBootloader,
     }
   }
 

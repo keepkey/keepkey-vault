@@ -2701,6 +2701,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				}
 				await engine.applySettings(params)
 			},
+			logOnboarding: async (params) => { console.log(`[Onboarding] ${String(params.event).slice(0, 200)}`) },
 			changePin: async () => { await engine.changePin() },
 			removePin: async () => { await engine.removePin() },
 			sendPin: async (params) => { await engine.sendPin(params.pin) },
