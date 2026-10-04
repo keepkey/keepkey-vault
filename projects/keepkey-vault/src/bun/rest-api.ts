@@ -2988,7 +2988,11 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               )
             }
             if (activeClearSignObservationId) finalizeClearSignObservation(activeClearSignObservationId, 'signed')
-            return json(validateResponse(result, S.EthSignTransactionResponse, path))
+            // The report the approval window showed, built in the signing gate
+            // from this request's own body. A caller compares its
+            // transactionFingerprint with the report it displayed.
+            const signedReport = activeSigningInfo?.clearSignReport
+            return json(validateResponse(signedReport ? { ...(result as object), clearSignReport: signedReport } : result, S.EthSignTransactionResponse, path))
           } catch (err: any) {
             if (clearSignPayload) recordRestClearSignEvent({
               kind: 'transaction', outcome: 'blocked', source: 'rest-api', chain: 'Ethereum',
@@ -3394,9 +3398,12 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             throw err
           }
           if (!result?.signature) return json(result)
+          // Same report the approval window showed for this raw_tx (signing gate).
+          const signedReport = activeSigningInfo?.clearSignReport
           return json({
             signature: Buffer.from(result.signature).toString('base64'),
             serializedTx: result.serializedTx,
+            ...(signedReport ? { clearSignReport: signedReport } : {}),
           })
         }
 

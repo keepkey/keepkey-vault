@@ -697,6 +697,8 @@ export const EthSignTransactionResponse = z.object({
   r: z.string(),
   s: z.string(),
   serialized: z.string(),
+  /** The ClearSign report shown at approval, when the signing gate built one. */
+  clearSignReport: ClearSignReportResponse.optional(),
 }).passthrough()
 
 /** UTXO sign-transaction response */
