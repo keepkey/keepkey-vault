@@ -24,8 +24,9 @@ import {
   buildEvmDecoderBody,
   CERTIFIED_METADATA_KEY_ID,
   ERC20_APPROVE,
-  EVM_ARG_ADDRESS_PINNED,
+  evmEntryId,
   findCertifiedEvmSchemaSpec,
+  relayDepositToken,
   findReviewedUniversalRouter,
   isCertifiedEvmMetadata,
   reviewedSwapTokens,
@@ -91,8 +92,7 @@ export function approveSpender(data: string | undefined): string | undefined {
 
 /** The worker's catalog id for a spec (clearsign-worker evmEntryId). */
 export function evmCatalogEntryId(spec: Pick<EvmSchemaSpec, 'chainId' | 'contract' | 'selector' | 'args'>): string {
-  const pinned = spec.args.some((arg) => arg.format === EVM_ARG_ADDRESS_PINNED)
-  return `eip155:${spec.chainId}:${spec.contract}:${spec.selector}${pinned ? ':permit2' : ''}`.toLowerCase()
+  return evmEntryId(spec).toLowerCase()
 }
 
 /** Fetch a KeepKey-certified v3 envelope from the isolated signer service. */
@@ -141,8 +141,10 @@ async function fetchCertifiedEvmSchema(
     .trim()
     .replace(/\/+$/, '')
 
-  // Only an approve's spender leaves the host (it selects the entry).
+  // Only an approve's spender, or a Relay depositErc20's token, leaves the
+  // host (each selects the entry).
   const spender = approveSpender(data)
+  const token = spec ? relayDepositToken(selector, calldata) : undefined
   let response: Response
   try {
     response = await fetch(`${base}/v1/evm/schema`, {
@@ -156,6 +158,7 @@ async function fetchCertifiedEvmSchema(
         selector,
         calldataLength: length,
         ...(spender ? { spender } : {}),
+        ...(token ? { token } : {}),
       }),
       signal: AbortSignal.timeout(reviewLookup ? 3_000 : 10_000),
     })

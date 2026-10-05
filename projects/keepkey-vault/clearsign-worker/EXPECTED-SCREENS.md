@@ -239,6 +239,54 @@ Reviewed routers (Uniswap `deploy-addresses` at commit `a9c574f6`):
 
 No Ethereum token is reviewed yet, so every Ethereum swap request is 422 today.
 
+## 5. Relay deposit (Relay Depository, inner version 0x05) — DRAFT, not deployed
+
+Contract `0x4cD00E387622C35bDDB9b4c962C136462338BC31` (one CREATE2 address;
+checked on chain 2026-10-05 on Ethereum, Optimism, BNB Chain, Polygon, Base,
+Arbitrum and Avalanche: code present, no proxy, bytecode contains
+`0x49290c1c` and `0xe8017952`). Calldata names what is deposited and who is
+credited; the destination chain, recipient and output are Relay's off-chain
+order and are not in the calldata, so no screen can state them.
+
+### 5a. depositErc20(address depositor, address token, uint256 amount, bytes32 id)
+
+Catalog id: `eip155:<chain>:0x4cd00e387622c35bddb9b4c962c136462338bc31:0xe8017952:<token>`.
+One entry per reviewed token (the table below), selected by the request's
+`token` (the calldata's token word). Exactly 132 bytes; calls with trailing
+integrator bytes (seen on Ethereum/Arbitrum, 140 B) are not matched.
+
+Arguments:
+- `depositor`: ADDRESS, role 0.
+- `token`: ADDRESS_PINNED (format 6) = the reviewed token, role 0. The device
+  refuses the entry if the calldata's token word differs, so the symbol and
+  decimals on the amount are always that token's.
+- `amount`: TOKEN_AMOUNT (the token's symbol/decimals), role 3 (spend exact).
+- `orderId`: BYTES, role 0.
+
+- Title: `Relay`
+- Template: `Bridge {2} through Relay for {0}; delivery is by Relay`
+
+Example, Base USDC:
+
+| # | Title | Body |
+|---|---|---|
+| 1 | Relay | Bridge 25 USDC through Relay for 0x909E...F82E; delivery is by Relay |
+| 2 | Limits | You spend / 25 USDC |
+| 3 | Contract | depositErc20 / 0x4cD00E387622C35bDDB9b4c962C136462338BC31 |
+| 4 | depositor | 0x909Ef6B32DfDc12CA86aA710b54c991af3C5F82E |
+| 5 | token | 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913 (A2) |
+| 6 | orderId | 32 bytes as hex, 2 pages |
+| 7 | KeepKey ClearSign | Described by KeepKey Alpha 716 a9531b9d / certified by KeepKey (A1) |
+
+Flag: WHO (`{0}` is the address Relay credits; it can differ from the
+signer), WHAT and LIMIT are present; WHY is only implied ("bridge").
+
+### 5b. depositNative(address depositor, bytes32 id) on Base and Arbitrum
+
+The Ethereum `bridgeDeposit` entry (below) on chains 8453 and 42161, under
+the ABI name `depositNative`. Same template and screens; Contract shows
+`depositNative`.
+
 ## Tokens covered (each gets entries 1, 2 and 3)
 
 For each token, the screens differ from the Base USDC example only in:

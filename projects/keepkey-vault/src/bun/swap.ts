@@ -1821,6 +1821,21 @@ async function buildRelaySwapTx(
   } else {
     console.info(`${TAG} ClearSign lookup complete: no metadata; device policy still applies`)
   }
+  // The approve that precedes an ERC-20 deposit is signed with ethSignTx too:
+  // give it the same certified lookup (a reviewed token's approve entry), or
+  // the device treats it as an unknown token's approve and gates it on
+  // AdvancedMode. A failed lookup leaves the device's ordinary policy.
+  if (pendingApproveTx) {
+    try {
+      const approveSchema = await resolveEvmSchema(chainId, pendingApproveTx.to, pendingApproveTx.data, certifiedMetadataSupported)
+      if (approveSchema) {
+        pendingApproveTx.txMetadata = { signedPayload: approveSchema.signedPayload, keyId: approveSchema.keyId }
+        console.info(`${TAG} clear-sign schema attached to approve: ${approveSchema.method} (keyId=${approveSchema.keyId}, source=${approveSchema.source || 'local-test'})`)
+      }
+    } catch (e: any) {
+      console.warn(`${TAG} approve ClearSign lookup failed (${e?.message || e}); device policy still applies`)
+    }
+  }
 
   // EIP-1559 fields — use signedFeePerGas (relay's quoted cap) so the signed tx
   // matches the balance check above. Using the live-bumped cap here while checking

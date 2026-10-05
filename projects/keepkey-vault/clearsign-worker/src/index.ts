@@ -31,12 +31,14 @@ import {
   ERC20_APPROVE,
   ERC20_TRANSFER,
   EVM_ARG_ADDRESS_PINNED,
+  evmEntryId,
   expectedEvmScreens,
   findCertifiedEvmSchemaByShape,
   findReviewedTokenSchema,
   PERMIT2_ADDRESS,
   PERMIT2_PROVENANCE,
   REVIEWED_EVM_TOKENS,
+  relayErc20DepositEntries,
   type EvmSchemaSpec,
 } from '../../src/bun/evm-certified-schema'
 import { signCertifiedSolanaLutAttestation } from '../../src/bun/solana-certified-lut'
@@ -125,12 +127,10 @@ function reviewedTokenEntries(): EvmSchemaSpec[] {
 
 const uniswapEntryId = (chainId: number, router: string) => `eip155:${chainId}:${router.toLowerCase()}:uniswap-ur`
 
-const isPinnedSpender = (spec: EvmSchemaSpec) => spec.args.some((arg) => arg.format === EVM_ARG_ADDRESS_PINNED)
-const evmEntryId = (spec: EvmSchemaSpec) =>
-  `eip155:${spec.chainId}:${spec.contract}:${spec.selector}${isPinnedSpender(spec) ? ':permit2' : ''}`
+const isPinnedSpender = (spec: EvmSchemaSpec) => spec.args.some((arg) => arg.format === EVM_ARG_ADDRESS_PINNED && arg.pinned?.toLowerCase() === PERMIT2_ADDRESS)
 
 function reviewedCatalog() {
-  const evm = [...Object.values(CERTIFIED_EVM_CATALOG), ...reviewedTokenEntries()].map((spec) => ({
+  const evm = [...Object.values(CERTIFIED_EVM_CATALOG), ...reviewedTokenEntries(), ...relayErc20DepositEntries()].map((spec) => ({
     id: evmEntryId(spec),
     family: 'evm',
     network: EVM_NETWORKS[spec.chainId] || `EVM ${spec.chainId}`,
@@ -298,9 +298,9 @@ async function publicStatus(env: Env, origin: string) {
     },
     privacy: {
       applicationStorage: false,
-      ethereumRequest: ['chainId', 'contract', 'selector', 'calldataLength', 'spender (ERC-20 approve only, optional)'],
+      ethereumRequest: ['chainId', 'contract', 'selector', 'calldataLength', 'spender (ERC-20 approve only, optional)', 'token (Relay depositErc20 only, optional)'],
       ethereumSwapRequest: ['chainId', 'router', 'selector', 'token addresses the device review names (Uniswap swap only)'],
-      ethereumNote: 'For an ERC-20 approve, the spender address may be sent so the service can return the matching description (Uniswap Permit2 or a generic approval). No amount or other argument is sent.',
+      ethereumNote: 'For an ERC-20 approve, the spender address may be sent so the service can return the matching description (Uniswap Permit2 or a generic approval); for a Relay depositErc20, the token address selects the entry for that token. No amount or other argument is sent.',
       solanaRequest: ['unsigned transaction', 'reviewed catalog id (optional)'],
       note: 'Solana lookup-table certification sends the unsigned transaction to this service so it can resolve and bind the exact accounts. No seed, private key, PIN, passphrase, or device signature is sent.',
     },
@@ -397,7 +397,12 @@ export default {
       if (spender !== undefined && !/^0x[0-9a-fA-F]{40}$/.test(spender)) {
         return json({ error: 'spender must be a 20-byte 0x address' }, 400)
       }
-      const spec = findCertifiedEvmSchemaByShape(Number(body?.chainId), String(body?.contract || body?.to || ''), String(body?.selector || ''), Number(body?.calldataLength), spender)
+      // Optional, Relay depositErc20 only: the token word picks the per-token entry.
+      const token = body?.token === undefined ? undefined : String(body.token)
+      if (token !== undefined && !/^0x[0-9a-fA-F]{40}$/.test(token)) {
+        return json({ error: 'token must be a 20-byte 0x address' }, 400)
+      }
+      const spec = findCertifiedEvmSchemaByShape(Number(body?.chainId), String(body?.contract || body?.to || ''), String(body?.selector || ''), Number(body?.calldataLength), spender, token)
       if (!spec) return json({ classification: 'OPAQUE', error: 'contract, selector, or calldata shape is not in the reviewed catalog' }, 422)
       const state = provisioning(env)
       const certificate = evmCertificateHex(env, spec.chainId)

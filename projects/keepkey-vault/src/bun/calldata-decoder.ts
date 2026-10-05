@@ -14,9 +14,18 @@
 import type { CalldataDecodedInfo, CalldataDecodedField } from '../shared/types'
 import { thorDepositFields } from './thor-swap-preview'
 import { acrossDepositView, decodeAcrossDepositV3 } from '../shared/acrossDeposit'
+import { RELAY_DEPOSITORY, decodeRelayDeposit, isZeroAddress } from '../shared/relayDeposit'
+import { REVIEWED_EVM_TOKENS } from './evm-certified-schema'
 import firmwareTokenTable from './firmware-token-table.json'
 
 // ── Helpers ──────────────────────────────────────────────────────────────
+
+/** Base units → decimal string at full precision, trailing zeros removed. */
+function tokenUnits(raw: bigint, decimals: number): string {
+  const scale = 10n ** BigInt(decimals)
+  const frac = (raw % scale).toString().padStart(decimals, '0').replace(/0+$/, '')
+  return `${raw / scale}${frac ? `.${frac}` : ''}`
+}
 
 function formatAddress(raw: string): string {
   if (!raw || raw === '0x') return ''
@@ -543,6 +552,33 @@ export async function decodeCalldata(
     ]
     return {
       dappName: 'Across', contractName: 'Across SpokePool', method: 'Bridge deposit (depositV3)',
+      selector, functionType: 'bridge', fields, source: 'local',
+    }
+  }
+
+  // Relay Depository deposit (in-app Relay swaps/bridges): only at the
+  // depository on a checked chain, only the exact ABI width. Display only:
+  // whether the device clear-signs it is decided by firmwareClearSigns and
+  // the certified catalog, never by this decode.
+  const relay = decodeRelayDeposit(contractAddress, data, _chainId)
+  if (relay) {
+    const token = relay.token ? REVIEWED_EVM_TOKENS[`${relay.chainId}:${relay.token}`] : undefined
+    const sent = relay.kind === 'native'
+      ? 'the native coin sent with this call (msg.value)'
+      : token ? `${tokenUnits(relay.amount!, token.decimals)} ${token.symbol}` : `${relay.amount} base units of token ${relay.token}`
+    const fields: CalldataDecodedField[] = [
+      { name: 'Action', type: 'string', value: `Relay deposit on ${relay.chain}: ${sent}`, format: 'raw' },
+      { name: 'You send', type: 'uint256', value: sent, format: 'amount' },
+      ...(relay.token ? [{ name: 'Token', type: 'address', value: `${relay.token}${token ? ` (${token.symbol})` : ''}`, format: 'address' as const }] : []),
+      { name: 'Credited to (depositor)', type: 'address', value: isZeroAddress(relay.depositor) ? 'the signing account (address(0))' : relay.depositor, format: 'address' },
+      { name: 'Relay order id', type: 'bytes32', value: relay.id, format: 'hex' },
+      { name: 'Destination', type: 'string', value: "Set by Relay's off-chain order (your quote); not in this call", format: 'raw' },
+      { name: 'Depository', type: 'address', value: `${RELAY_DEPOSITORY} (Relay Depository, ${relay.chain})`, format: 'raw' },
+      ...(relay.token && !token ? [{ name: 'Token warning', type: 'string', value: `Token ${relay.token} is not on KeepKey's reviewed list`, format: 'raw' as const }] : []),
+    ]
+    return {
+      dappName: 'Relay', contractName: 'Relay Depository',
+      method: relay.kind === 'native' ? 'Relay deposit (depositNative)' : 'Relay deposit (depositErc20)',
       selector, functionType: 'bridge', fields, source: 'local',
     }
   }

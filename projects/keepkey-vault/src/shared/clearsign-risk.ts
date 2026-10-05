@@ -15,6 +15,7 @@
  */
 import { evmNativeValue } from './evmFeePreview'
 import { acrossDepositView, decodeAcrossDepositV3, type AcrossDepositV3 } from './acrossDeposit'
+import { RELAY_DEPOSITORY, decodeRelayDeposit, isZeroAddress, type RelayDeposit } from './relayDeposit'
 import type {
   SigningRequestInfo,
   SimulatedHoldings,
@@ -185,8 +186,9 @@ function evmTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void) 
   // the device decodes it (evm-signing-preview uniswapSwapFields).
   const urSwap = field('Protocol') === 'Uniswap Universal Router' && field('Action')?.startsWith('Swap ')
     ? field('Action')!.replace(/^Swap /, 'Swaps ') : undefined
+  const relay = decodeRelayDeposit(to, data, chainId)
   if ((sel === '0x095ea7b3' || sel === '0x39509351') && addrWord(0) && num(1) !== null) {
-    const spender = addrWord(0)!, v = num(1)!
+    const spender = addrWord(0)! + (addrWord(0) === RELAY_DEPOSITORY ? ' (the Relay Depository)' : ''), v = num(1)!
     const canonicalUniswapSetup = chainId === 42161
       && to === '0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9'
       && spender === PERMIT2
@@ -217,6 +219,8 @@ function evmTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void) 
     add('medium', `${urSwap} through the Uniswap Universal Router, a contract KeepKey has reviewed. Your KeepKey shows this swap on its screen from a signed description, and refuses it if that description is not genuine. Check the amounts there.`)
   } else if (across) {
     acrossDeposit(across, req, add)
+  } else if (relay) {
+    relayDeposit(relay, req, field('You send'), add)
   } else if (!req.deviceClearSigns || KNOWN_SELECTORS.has(sel)) {
     // A known selector reaching here did not parse (dirty address word,
     // trailing bytes): the device may accept it by length alone.
@@ -229,6 +233,27 @@ function evmTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void) 
     if (!min || min === 'No minimum specified' || /^0(?:\.0+)?\s/.test(min)) add('high', 'Sets no minimum, so this swap can pay you back almost nothing.')
   }
   if (field('Token warning') || field('Input token warning')) add('high', 'Swaps a token KeepKey does not recognize. It may be a fake.')
+}
+
+/** A deposit to the Relay Depository. The calldata names what is sent and
+ *  who is credited; where it arrives is Relay's off-chain order. */
+function relayDeposit(d: RelayDeposit, req: SigningRequestInfo, decodedSent: string | undefined, add: (l: RiskLevel, t: string) => void) {
+  const sent = d.kind === 'native'
+    ? (evmNativeValue(req.value ?? '0', d.chainId) ?? 'the coin sent with this call')
+    : (decodedSent ?? `${d.amount} base units of token ${d.token}`)
+  const from = (req.from ?? '').toLowerCase()
+  const credited = isZeroAddress(d.depositor) || d.depositor === from ? 'your account' : d.depositor
+  const what = `Relay deposit on ${d.chain}: sends ${sent} to the Relay Depository, credited to ${credited}.`
+  // A KeepKey-certified envelope (keyId 0x80) the device verifies, attached
+  // by the preview; a caller's runtime blob is not one.
+  const certified = req.deviceClearSigns || (!!req.calldataDecoded?.signedInsightBlob && req.calldataDecoded.insightKeyId === 0x80)
+  if (certified) {
+    add('medium', `${what} Your KeepKey shows this deposit from a KeepKey-certified description and refuses it if that description is not genuine. Check the amount there.`)
+  } else {
+    add('high', `${what} Your KeepKey cannot decode this deposit: its screen shows only raw data, so you are signing blind. Check these details here before approving.`)
+  }
+  if (credited !== 'your account' && from) add('high', `The deposit is credited to ${d.depositor}, not to the signing account.`)
+  add('medium', "Where it arrives (destination chain, recipient and amount) is set by Relay's off-chain order, not by this transaction. Neither this computer nor your KeepKey can check it.")
 }
 
 /** A depositV3 to a pinned Across SpokePool. Decoded here only: the device

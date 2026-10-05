@@ -71,6 +71,93 @@ export interface EvmSchemaSpec {
   intent?: EvmIntent
 }
 
+/** Relay Depository: one CREATE2 address on every chain (checked on chain
+ * 2026-10-05; see shared/relayDeposit.ts). */
+export const RELAY_DEPOSITORY_ADDRESS = '0x4cd00e387622c35bddb9b4c962c136462338bc31'
+export const RELAY_DEPOSIT_NATIVE_SELECTOR = '0x49290c1c'
+export const RELAY_DEPOSIT_ERC20_SELECTOR = '0xe8017952'
+const RELAY_PROVENANCE = {
+  protocol: 'https://docs.relay.link/references/protocol/contracts/evm-depository',
+  deployment: 'https://basescan.org/address/0x4cD00E387622C35bDDB9b4c962C136462338BC31',
+}
+const RELAY_TEMPLATE_TAIL = 'through Relay for {0}; delivery is by Relay'
+
+function relayNativeEntries(chainIds: number[]): Record<string, EvmSchemaSpec> {
+  return Object.fromEntries(chainIds.map((chainId): [string, EvmSchemaSpec] => [`${chainId}:${RELAY_DEPOSITORY_ADDRESS}:${RELAY_DEPOSIT_NATIVE_SELECTOR}`, {
+    chainId,
+    contract: RELAY_DEPOSITORY_ADDRESS,
+    selector: RELAY_DEPOSIT_NATIVE_SELECTOR,
+    method: 'depositNative',
+    args: [
+      { name: 'depositor', format: EVM_ARG_ADDRESS },
+      { name: 'orderId', format: EVM_ARG_BYTES },
+    ],
+    expectedCalldataLength: 68,
+    protocol: 'Relay',
+    maintainedBy: 'Relay',
+    action: 'Deposit the native coin for a Relay cross-chain order',
+    provenance: RELAY_PROVENANCE,
+    intent: { title: 'Relay', template: `Bridge {v} ${RELAY_TEMPLATE_TAIL}`, valueRole: ROLE_SPEND_EXACT },
+  }]))
+}
+
+/**
+ * Relay depositErc20(depositor, token, amount, orderId) of a reviewed token:
+ * one entry per (chain, token), selected by the calldata's token word, which
+ * the entry pins (format 6) so the symbol and decimals on the amount are that
+ * token's. The device applies it only to exactly 132 bytes whose token word
+ * is that address; anything else stays on the blind path.
+ */
+export function findRelayErc20DepositSchema(
+  chainId: number,
+  contract: string,
+  selector: string,
+  calldataLength: number,
+  token?: string,
+): EvmSchemaSpec | undefined {
+  if (contract.toLowerCase() !== RELAY_DEPOSITORY_ADDRESS || selector !== RELAY_DEPOSIT_ERC20_SELECTOR || calldataLength !== 132 || !token) return undefined
+  const address = token.toLowerCase()
+  const identity = REVIEWED_EVM_TOKENS[`${chainId}:${address}`]
+  if (!identity) return undefined
+  return {
+    chainId,
+    contract: RELAY_DEPOSITORY_ADDRESS,
+    selector: RELAY_DEPOSIT_ERC20_SELECTOR,
+    method: 'depositErc20',
+    args: [
+      { name: 'depositor', format: EVM_ARG_ADDRESS },
+      { name: 'token', format: EVM_ARG_ADDRESS_PINNED, pinned: address },
+      { name: 'amount', format: EVM_ARG_TOKEN_AMOUNT, symbol: identity.symbol, decimals: identity.decimals, role: ROLE_SPEND_EXACT },
+      { name: 'orderId', format: EVM_ARG_BYTES },
+    ],
+    expectedCalldataLength: 132,
+    protocol: 'Relay',
+    maintainedBy: 'Relay',
+    action: `Deposit ${identity.symbol} for a Relay cross-chain order`,
+    provenance: RELAY_PROVENANCE,
+    intent: { title: 'Relay', template: `Bridge {2} ${RELAY_TEMPLATE_TAIL}`, valueRole: 0 },
+  }
+}
+
+/** Every reviewed-token depositErc20 entry (the worker's catalog listing). */
+export function relayErc20DepositEntries(): EvmSchemaSpec[] {
+  return Object.keys(REVIEWED_EVM_TOKENS).map((key) => {
+    const [chainId, token] = key.split(':')
+    return findRelayErc20DepositSchema(Number(chainId), RELAY_DEPOSITORY_ADDRESS, RELAY_DEPOSIT_ERC20_SELECTOR, 132, token)!
+  })
+}
+
+/**
+ * The catalog id for a spec, shared by the worker and Vault. An approve
+ * pinned to Permit2 ends ':permit2'; a Relay depositErc20 ends with its
+ * pinned token address; anything else is chain:contract:selector.
+ */
+export function evmEntryId(spec: Pick<EvmSchemaSpec, 'chainId' | 'contract' | 'selector' | 'args'>): string {
+  const pinned = spec.args.find((arg) => arg.format === EVM_ARG_ADDRESS_PINNED)?.pinned?.toLowerCase()
+  const suffix = !pinned ? '' : pinned === PERMIT2_ADDRESS ? ':permit2' : `:${pinned}`
+  return `eip155:${spec.chainId}:${spec.contract}:${spec.selector}${suffix}`
+}
+
 export const CERTIFIED_EVM_CATALOG: Record<string, EvmSchemaSpec> = {
   '1:0x4cd00e387622c35bddb9b4c962c136462338bc31:0x49290c1c': {
     chainId: 1,
@@ -88,6 +175,10 @@ export const CERTIFIED_EVM_CATALOG: Record<string, EvmSchemaSpec> = {
       valueRole: ROLE_SPEND_EXACT,
     },
   },
+  // Relay Depository depositNative on Base and Arbitrum: the same contract
+  // and description as the Ethereum entry above (whose method name,
+  // bridgeDeposit, predates the ABI name and stays as signed).
+  ...relayNativeEntries([8453, 42161]),
   '1:0xbf5a7f3629fb325e2a8453d595ab103465f75e62:0xa2e42c65': {
     chainId: 1,
     contract: '0xbf5A7F3629fB325E2a8453D595AB103465F75E62',
@@ -343,23 +434,35 @@ export function findCertifiedEvmSchemaSpec(
   // approve: the spender word picks pinned vs generic; a dirty word pins nothing.
   const word = calldata.slice(8, 72)
   const spender = selector === ERC20_APPROVE && /^0{24}[0-9a-f]{40}$/.test(word) ? `0x${word.slice(24)}` : undefined
-  return findCertifiedEvmSchemaByShape(chainId, contract, selector, calldata.length / 2, spender)
+  return findCertifiedEvmSchemaByShape(chainId, contract, selector, calldata.length / 2, spender, relayDepositToken(selector, calldata))
+}
+
+/** depositErc20's token word (a clean address), which selects its entry. */
+export function relayDepositToken(selector: string, calldataHex: string): string | undefined {
+  if (selector.toLowerCase() !== RELAY_DEPOSIT_ERC20_SELECTOR) return undefined
+  const word = calldataHex.replace(/^0x/i, '').toLowerCase().slice(72, 136)
+  return /^0{24}[0-9a-f]{40}$/.test(word) ? `0x${word.slice(24)}` : undefined
 }
 
 /** Match without sending transaction arguments to a remote schema service
- * (only an approve's spender address, which selects the description). */
+ * (only an approve's spender or a Relay depositErc20's token address, which
+ * select the description). */
 export function findCertifiedEvmSchemaByShape(
   chainId: number | undefined,
   contract: string | undefined,
   selector: string | undefined,
   calldataLength: number | undefined,
   spender?: string,
+  token?: string,
 ): EvmSchemaSpec | undefined {
   if (!chainId || !contract || !selector || !Number.isInteger(calldataLength)) return undefined
   const normalizedSelector = selector.toLowerCase()
   if (!/^0x[0-9a-f]{8}$/.test(normalizedSelector)) return undefined
   const spec = CERTIFIED_EVM_CATALOG[`${chainId}:${contract.toLowerCase()}:${normalizedSelector}`]
-  if (!spec) return findReviewedTokenSchema(chainId, contract, normalizedSelector, calldataLength!, spender)
+  if (!spec) {
+    return findReviewedTokenSchema(chainId, contract, normalizedSelector, calldataLength!, spender)
+      ?? findRelayErc20DepositSchema(chainId, contract, normalizedSelector, calldataLength!, token)
+  }
   if (spec.expectedCalldataLength !== undefined) {
     if (calldataLength !== spec.expectedCalldataLength) return undefined
   } else {

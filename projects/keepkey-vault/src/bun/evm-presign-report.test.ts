@@ -107,3 +107,127 @@ describe('POST /clearsign/report — Desktop parity', () => {
     expect(risk(r)[0]).toContain('You would be signing blind')
   })
 })
+
+// ── In-app swap card (buildEvmReportForTx, signerVerdict) ──────────────────
+// Real Relay transactions on Base (Blockscout, 2026-10-05) and the approve the
+// in-app swap builds before them (encodeApprove(relay.to, amount)).
+const relayFixtures = require('../../__tests__/fixtures/relay/depository-deposits.json')
+const RELAY = '0x4cd00e387622c35bddb9b4c962c136462338bc31'
+const BASE_USDC = '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913'
+const DEPOSIT = relayFixtures.transactions.find((t: any) => t.hash.startsWith('0xb397762233'))
+const APPROVE = {
+  chainId: 8453, from: DEPOSIT.from, to: BASE_USDC, value: '0x0',
+  data: `0x095ea7b3${RELAY.slice(2).padStart(64, '0')}${'2d4760d'.padStart(64, '0')}`,
+}
+
+/** The ClearSign service for reviewed shapes: the real catalog body inside a
+ * stand-in certificate and signature (the device, not Vault, checks those). */
+function catalogService(sent: any[]) {
+  const { findCertifiedEvmSchemaByShape, buildEvmSchemaBody, evmEntryId } = require('./evm-certified-schema')
+  return (async (url: any, init: any) => {
+    if (!String(url).endsWith('/v1/evm/schema')) throw new Error('offline')
+    const body = JSON.parse(init.body)
+    sent.push(body)
+    const spec = findCertifiedEvmSchemaByShape(body.chainId, body.contract, body.selector, body.calldataLength, body.spender, body.token)
+    if (!spec) return Response.json({ classification: 'OPAQUE' }, { status: 422 })
+    const certificate = Buffer.alloc(139, 0x11)
+    certificate.writeUInt32BE(spec.chainId, 2)
+    return Response.json({
+      classification: 'VERIFIED', keyId: 0x80, entry: evmEntryId(spec), method: spec.method,
+      chainId: spec.chainId, contract: spec.contract, selector: spec.selector, expectedCalldataLength: spec.expectedCalldataLength,
+      signedPayload: `0x03${certificate.toString('hex')}${buildEvmSchemaBody(spec).toString('hex')}${'22'.repeat(65)}`,
+    })
+  }) as unknown as typeof fetch
+}
+
+const inApp = async (tx: Tx, firmwareVersion: string | undefined) => {
+  const { buildEvmReportForTx } = await import('./evm-presign-report')
+  return (await buildEvmReportForTx({ tx, firmwareVersion, endpoint: 'http://127.0.0.1:9/', signerVerdict: true, measure: async () => { throw new Error('offline') } })).report
+}
+
+describe('in-app swap card — the Desktop signing verdict for the same bytes', () => {
+  test('approve of reviewed Base USDC to the Relay Depository: certified, P4, spender named', async () => {
+    const sent: any[] = []
+    globalThis.fetch = catalogService(sent)
+    const r = await inApp(APPROVE, '7.16.0')
+    expect(ClearSignReportResponse.safeParse(r).success).toBe(true)
+    expect(r.protectionLevel).toBe('P4')
+    expect(r.headline).toBe('Authenticated ClearSign description')
+    expect(r.descriptor).toMatchObject({ source: 'certified', authenticated: true, format: 'EVM_METADATA', label: 'approve' })
+    expect(sent).toEqual([{ chainId: 8453, contract: BASE_USDC, selector: '0x095ea7b3', calldataLength: 68, spender: RELAY }])
+    expect(risk(r).join('\n')).toContain(`Lets ${RELAY} (the Relay Depository) spend up to 47478285 units of token ${BASE_USDC}`)
+    expect(r.limitations.map((l) => l.code)).not.toContain('DEVICE_SHOWS_RAW_DATA')
+  })
+
+  test('real Relay depositErc20 on Base: certified per-token entry, P4, decoded rows', async () => {
+    const sent: any[] = []
+    globalThis.fetch = catalogService(sent)
+    const tx = { chainId: 8453, from: DEPOSIT.from, to: RELAY, value: '0x0', data: DEPOSIT.data }
+    const r = await inApp(tx, '7.16.0')
+    expect(r.protectionLevel).toBe('P4')
+    expect(r.descriptor).toMatchObject({ source: 'certified', authenticated: true, label: 'Relay deposit (depositErc20)', resolution: 'no-artifact' })
+    // Only the shape and the token that selects the entry leave the host.
+    expect(sent).toEqual([{ chainId: 8453, contract: RELAY, selector: '0xe8017952', calldataLength: 132, token: BASE_USDC }])
+    expect(risk(r)[0]).toBe('Relay deposit on Base: sends 47.478285 USDC to the Relay Depository, credited to your account. Your KeepKey shows this deposit from a KeepKey-certified description and refuses it if that description is not genuine. Check the amount there.')
+    expect(risk(r).join('\n')).toContain("set by Relay's off-chain order")
+    expect(rows(r)).toContain('Action: Relay deposit on Base: 47.478285 USDC')
+    expect(rows(r)).toContain(`Credited to (depositor): ${DEPOSIT.from}`)
+    expect(rows(r).some((x) => x.startsWith('Relay order id: 0x001c161a'))).toBe(true)
+  })
+
+  test('service unreachable: the deposit stays blind and says so, but is decoded (P2)', async () => {
+    const tx = { chainId: 8453, from: DEPOSIT.from, to: RELAY, value: '0x0', data: DEPOSIT.data }
+    const r = await inApp(tx, '7.16.0')
+    expect(r.protectionLevel).toBe('P2')
+    expect(r.descriptor).toMatchObject({ authenticated: false, label: 'Relay deposit', resolution: 'reviewed-decoder' })
+    expect(risk(r)[0]).toContain('Your KeepKey cannot decode this deposit')
+    expect(r.limitations.map((l) => l.code)).toContain('DEVICE_SHOWS_RAW_DATA')
+    const approve = await inApp(APPROVE, '7.16.0')
+    expect(approve.protectionLevel).toBe('P1')
+    expect(approve.limitations.map((l) => l.code)).toContain('DEVICE_SHOWS_RAW_DATA')
+  })
+
+  test('7.15 firmware: no certified path, never P4', async () => {
+    globalThis.fetch = catalogService([])
+    const r = await inApp({ chainId: 8453, from: DEPOSIT.from, to: RELAY, value: '0x0', data: DEPOSIT.data }, '7.15.0')
+    expect(r.protectionLevel).toBe('P2')
+    expect(r.descriptor.authenticated).toBe(false)
+  })
+
+  test('Uniswap UR swap: the same verdict and words as the Desktop overlay', async () => {
+    const r = await inApp(UR, '7.15.0')
+    expect(r.protectionLevel).toBe('P2')
+    expect(r.descriptor).toMatchObject({ source: 'none', authenticated: false, label: 'Uniswap Universal Router swap' })
+    const desktop = await desktopRisk(UR, '7.15.0')
+    expect(risk(r)).toEqual(desktop.reasons.map((x) => x.text))
+    expect(rows(r)).toContain('Action: Swap 300 USDC for at least 0.108123518386717195 ETH')
+  })
+
+  test('the overlay and the card share one verdict function', async () => {
+    const { evmSigningVerdict } = await import('./evm-presign-report')
+    globalThis.fetch = catalogService([])
+    const s: SigningRequestInfo = { id: 'd', method: '/eth/sign-transaction', appName: 'app', from: APPROVE.from, to: APPROVE.to, value: APPROVE.value, chainId: 8453, data: APPROVE.data, firmwareVersion: '7.16.0' }
+    await prepareEvmTxSigningInfo(s, APPROVE, '7.16.0')
+    const overlay = evmSigningVerdict(s, {}, await simulateEvmEffects(APPROVE, 'http://127.0.0.1:9/'), false)
+    const card = await inApp(APPROVE, '7.16.0')
+    expect(card.protectionLevel).toBe(overlay.requestedLevel)
+    expect(card.descriptor).toMatchObject(overlay.descriptor)
+  })
+})
+
+describe('Relay Depository decode — real calls', () => {
+  const { decodeRelayDeposit } = require('../shared/relayDeposit')
+  test('every exact-width deposit decodes; trailing bytes and other contracts do not', () => {
+    for (const t of relayFixtures.transactions) {
+      const d = decodeRelayDeposit(RELAY, t.data, t.chainId)
+      const width = (t.data.length - 2) / 2
+      if (width === 132 || width === 68) {
+        expect(d?.kind).toBe(width === 132 ? 'erc20' : 'native')
+        expect(d.depositor).toMatch(/^0x[0-9a-f]{40}$/)
+        if (d.kind === 'erc20') expect(BigInt(`0x${t.data.slice(138, 202)}`)).toBe(d.amount)
+      } else expect(d).toBeNull()
+      expect(decodeRelayDeposit('0x1111111111111111111111111111111111111111', t.data, t.chainId)).toBeNull()
+      expect(decodeRelayDeposit(RELAY, t.data, 100)).toBeNull()
+    }
+  })
+})

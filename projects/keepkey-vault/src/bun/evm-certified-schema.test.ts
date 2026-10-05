@@ -81,7 +81,10 @@ describe('7.16 certified EVM schemas', () => {
   it('matches only the complete reviewed Relay calldata shape', () => {
     expect(findCertifiedEvmSchemaSpec(1, TO, DATA)?.method).toBe('bridgeDeposit')
     expect(findCertifiedEvmSchemaSpec(1, TO, `${DATA}00`)).toBeUndefined()
-    expect(findCertifiedEvmSchemaSpec(8453, TO, DATA)).toBeUndefined()
+    // Base and Arbitrum carry the same depository entry under its ABI name;
+    // a chain with no certificate scope (Optimism) has none.
+    expect(findCertifiedEvmSchemaSpec(8453, TO, DATA)?.method).toBe('depositNative')
+    expect(findCertifiedEvmSchemaSpec(10, TO, DATA)).toBeUndefined()
     expect(findCertifiedEvmSchemaSpec(1, TO, `0xdeadbeef${DATA.slice(10)}`)).toBeUndefined()
   })
 
@@ -240,5 +243,59 @@ describe('reviewed ERC-20 token schemas', () => {
     expect(byShape(8453, usdc, '0x095ea7b3', 100)).toBeUndefined() // trailing calldata
     expect(byShape(42161, usdc, '0x095ea7b3', 68)).toBeUndefined() // other chain
     expect(byShape(1, '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48', '0x095ea7b3', 68)).toBeUndefined() // mainnet: firmware token table
+  })
+})
+
+describe('Relay depositErc20 (one entry per reviewed token)', () => {
+  const relay = require('../../__tests__/fixtures/relay/depository-deposits.json').transactions as Array<{ chainId: number; hash: string; data: string }>
+  const { evmEntryId, relayErc20DepositEntries, validateEvmIntent } = require('./evm-certified-schema')
+
+  it('selects the entry from the real calldata token word and pins it', () => {
+    const base = relay.find((t) => t.hash.startsWith('0xb397762233'))!
+    const spec = findCertifiedEvmSchemaSpec(8453, TO, base.data)!
+    expect(spec.method).toBe('depositErc20')
+    expect(spec.args.map((a) => a.name)).toEqual(['depositor', 'token', 'amount', 'orderId'])
+    expect(spec.args[1].pinned).toBe('0x833589fcd6edb6e08f4c7c32d4f71b54bda02913')
+    expect(spec.args[2]).toMatchObject({ symbol: 'USDC', decimals: 6, role: 3 })
+    expect(spec.intent).toMatchObject({ title: 'Relay', template: 'Bridge {2} through Relay for {0}; delivery is by Relay', valueRole: 0 })
+    expect(evmEntryId(spec)).toBe(`eip155:8453:${TO}:0xe8017952:0x833589fcd6edb6e08f4c7c32d4f71b54bda02913`)
+    const body = buildEvmSchemaBody(spec)
+    expect(body[0]).toBe(0x05)
+    // v0x05 arg block: name, format 6 + 20 pinned bytes, role 0.
+    expect(body.toString('hex')).toContain(`05${Buffer.from('token').toString('hex')}06${spec.args[1].pinned!.slice(2)}00`)
+  })
+
+  it('refuses unreviewed tokens, trailing bytes, dirty words and other chains', () => {
+    for (const t of relay.filter((t) => t.data.startsWith('0xe8017952'))) {
+      const width = (t.data.length - 2) / 2
+      const spec = findCertifiedEvmSchemaSpec(t.chainId, TO, t.data)
+      // Ethereum has no reviewed tokens; Arbitrum USDC and Base USDC do.
+      if (width !== 132 || t.chainId === 1) expect(spec).toBeUndefined()
+      else expect(spec?.method).toBe('depositErc20')
+    }
+    const base = relay.find((t) => t.hash.startsWith('0xb397762233'))!
+    const dirty = `${base.data.slice(0, 74)}ff${base.data.slice(76)}`
+    expect(findCertifiedEvmSchemaSpec(8453, TO, dirty)).toBeUndefined()
+    expect(findCertifiedEvmSchemaSpec(10, TO, base.data)).toBeUndefined()
+    expect(findCertifiedEvmSchemaSpec(8453, '0x1111111111111111111111111111111111111111', base.data)).toBeUndefined()
+    expect(findCertifiedEvmSchemaByShape(8453, TO, '0xe8017952', 132)).toBeUndefined()
+  })
+
+  it('every entry serializes and passes the firmware intent rules', () => {
+    const entries = relayErc20DepositEntries()
+    expect(entries).toHaveLength(11)
+    for (const spec of entries) {
+      expect(() => validateEvmIntent(spec, spec.intent!)).not.toThrow()
+      expect(buildEvmSchemaBody(spec).length).toBeLessThan(200)
+    }
+  })
+
+  it('depositNative on Base and Arbitrum uses the Ethereum description under the ABI name', () => {
+    for (const chainId of [8453, 42161]) {
+      const spec = findCertifiedEvmSchemaSpec(chainId, TO, DATA)!
+      expect(spec.method).toBe('depositNative')
+      expect(spec.intent).toEqual({ ...CERTIFIED_EVM_CATALOG[`1:${TO}:0x49290c1c`].intent!, valueRole: 3 })
+      expect(buildEvmSchemaBody(spec)[0]).toBe(0x05)
+    }
   })
 })

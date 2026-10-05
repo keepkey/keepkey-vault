@@ -7742,33 +7742,27 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const from = params.fromAddressOverride
 				try {
 					if (fromChain?.chainFamily === 'evm' && from) {
-						const [{ simulateEvmEffects }, { buildClearSignReport }] = await Promise.all([
-							import('./evm-effects'), import('../shared/clearsign-report'),
-						])
+						const { buildEvmReportForTx } = await import('./evm-presign-report')
 						const caipChainId = Number(String(params.fromCaip || '').split(':')[1]?.split('/')[0])
 						const chainId = Number(preview.unsignedTx?.chainId || fromChain.chainId || caipChainId || 1)
-						const endpoint = getEvmRpcSource(fromChain) || `eip155:${chainId}`
+						const endpoint = getEvmSimulationEndpoint(chainId)
+						const firmwareVersion = engine.getDeviceState().firmwareVersion
+						// The same preview, verdict and words the Desktop signing
+						// approval gives these exact bytes (evm-presign-report), not a
+						// separate artifact-only check. The tx is read as a dapp would
+						// send it; the certified lookup inside is the one the signer
+						// attaches, so the card and the device agree.
 						const reportFor = async (tx: any) => {
 							if (!tx) return undefined
-							const artifactResolution = resolvePromotedEvmArtifact(chainId, tx.to, tx.data || '0x')
-							const promoted = artifactResolution.status === 'selected' ? artifactResolution.artifact : undefined
-							const simulation = await simulateEvmEffects({
-								chainId, from, to: tx.to, data: tx.data || '0x', value: tx.value || '0x0',
-								gas: tx.gas || tx.gasLimit, gasPrice: tx.gasPrice,
-								maxFeePerGas: tx.maxFeePerGas, maxPriorityFeePerGas: tx.maxPriorityFeePerGas, nonce: tx.nonce,
-							}, endpoint)
-							const report = buildClearSignReport({
-								requestedLevel: simulation.status === 'success' ? 'P3' : 'P1',
-								descriptor: {
-									source: promoted ? 'certified' : tx.erc7730 ? 'erc7730' : tx.txMetadata ? 'runtime' : 'none',
-									authenticated: false,
-									format: promoted ? 'EVM_METADATA' : tx.erc7730 ? 'ERC7730' : tx.txMetadata ? 'EVM_METADATA' : undefined,
-									label: promoted?.method, artifactHash: promoted?.bundleHash,
-									codeIdentityBound: Boolean(promoted), expiresAt: promoted?.expiresAt,
-									resolution: artifactResolution.status,
-								}, simulation,
+							const { report, simulation, artifactResolution } = await buildEvmReportForTx({
+								tx: {
+									chainId, from, to: tx.to, data: tx.data || '0x', value: tx.value || '0x0',
+									gas: tx.gas, gasLimit: tx.gasLimit, gasPrice: tx.gasPrice,
+									maxFeePerGas: tx.maxFeePerGas, maxPriorityFeePerGas: tx.maxPriorityFeePerGas, nonce: tx.nonce,
+								},
+								firmwareVersion, endpoint, hasErc7730: Boolean(tx.erc7730), signerVerdict: true,
 							})
-							if (!promoted) {
+							if (artifactResolution.status !== 'selected') {
 								const draft = observeEvmCall({
 									chainId, to: tx.to, data: tx.data,
 									source: tx.erc7730 ? 'erc7730' : tx.txMetadata ? 'runtime' : 'none',

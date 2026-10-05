@@ -71,8 +71,9 @@ describe('ClearSign Worker public surface', () => {
     const response = await fetchWorker('/v1/catalog')
     const body = await response.json() as any
     expect(response.status).toBe(200)
-    expect(body.entries).toHaveLength(72)
-    expect(body.entries.filter((entry: any) => entry.family === 'evm')).toHaveLength(45)
+    expect(body.entries).toHaveLength(85) // 72 + Relay depositNative on Base/Arbitrum + 11 Relay depositErc20 (one per reviewed token)
+    expect(body.entries.filter((entry: any) => entry.family === 'evm')).toHaveLength(58)
+    expect(body.entries.filter((entry: any) => entry.family === 'evm' && entry.protocol === 'Relay')).toHaveLength(14)
     expect(body.entries.filter((entry: any) => entry.protocol === 'Uniswap')).toHaveLength(9)
     expect(body.entries.filter((entry: any) => entry.protocol === 'ERC-20')).toHaveLength(33)
     expect(body.entries.filter((entry: any) => entry.family === 'solana')).toHaveLength(27)
@@ -179,6 +180,26 @@ describe('ClearSign Worker public surface', () => {
     })
     expect(response.status).toBe(503)
     expect((await response.json() as any).classification).toBe('UNAVAILABLE')
+  })
+
+  it('selects a Relay depositErc20 entry by its reviewed token, and only then', async () => {
+    const shape = { chainId: 8453, contract: '0x4cd00e387622c35bddb9b4c962c136462338bc31', selector: '0xe8017952', calldataLength: 132 }
+    const USDC = '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913'
+    const ok = await post('/v1/evm/schema', { ...shape, token: USDC })
+    expect(ok.status).toBe(503) // reviewed; no Base certificate in the test env
+    expect(await ok.json()).toMatchObject({ classification: 'UNAVAILABLE', entry: `eip155:8453:${shape.contract}:0xe8017952:${USDC}` })
+    for (const bad of [
+      shape, // no token: nothing to pin
+      { ...shape, token: '0x41b481c3d2e3960f8f312212adfeecf6ce7c35ef' }, // unreviewed token
+      { ...shape, token: USDC, calldataLength: 140 }, // trailing bytes
+      { ...shape, token: USDC, chainId: 10 }, // no reviewed tokens there
+    ]) expect((await post('/v1/evm/schema', bad)).status).toBe(422)
+    expect((await post('/v1/evm/schema', { ...shape, token: '0x1234' })).status).toBe(400)
+    const body = await (await fetchWorker('/v1/catalog')).json() as any
+    const entry = body.entries.find((e: any) => e.id === `eip155:8453:${shape.contract}:0xe8017952:${USDC}`)
+    expect(entry).toMatchObject({ protocol: 'Relay', method: 'depositErc20', calldataLength: 132, title: 'Relay', template: 'Bridge {2} through Relay for {0}; delivery is by Relay' })
+    expect(entry.screens.map((s: any) => s.title)).toEqual(['Relay', 'Limits', 'Contract', 'depositor', 'token', 'orderId', 'KeepKey ClearSign'])
+    expect(entry.screens[1].body).toBe('You spend\n25 USDC')
   })
 
   it('lists one Uniswap swap entry per reviewed router, with the device review', async () => {
