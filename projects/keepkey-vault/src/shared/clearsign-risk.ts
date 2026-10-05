@@ -16,6 +16,7 @@
 import { evmNativeValue } from './evmFeePreview'
 import { acrossDepositView, decodeAcrossDepositV3, type AcrossDepositV3 } from './acrossDeposit'
 import { RELAY_DEPOSITORY, decodeRelayDeposit, isZeroAddress, type RelayDeposit } from './relayDeposit'
+import { REVIEWED_EVM_TOKENS } from './reviewed-evm-tokens'
 import type {
   SigningRequestInfo,
   SimulatedHoldings,
@@ -138,7 +139,10 @@ function describeKnown(ix: SolanaTxDecodedInstruction): RiskReason | null {
 // Addresses are shown in full: a 0x1234…abcd short form is cheap to grind
 // for address poisoning. ponytail: lowercase hex, add EIP-55 checksums later.
 
+// The reviewed token identities the certified entries use (Base USDC etc.),
+// plus the risk bar's own Ethereum stablecoins and its Arbitrum USDT wording.
 const EVM_TOKENS: Record<string, { symbol: string; decimals: number }> = {
+  ...REVIEWED_EVM_TOKENS,
   '1:0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48': { symbol: 'USDC', decimals: 6 },
   '1:0xdac17f958d2ee523a2206206994597c13d831ec7': { symbol: 'USDT', decimals: 6 },
   '42161:0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9': { symbol: 'USDT', decimals: 6 },

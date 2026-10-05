@@ -155,7 +155,8 @@ describe('in-app swap card — the Desktop signing verdict for the same bytes', 
     expect(r.headline).toBe('Authenticated ClearSign description')
     expect(r.descriptor).toMatchObject({ source: 'certified', authenticated: true, format: 'EVM_METADATA', label: 'approve' })
     expect(sent).toEqual([{ chainId: 8453, contract: BASE_USDC, selector: '0x095ea7b3', calldataLength: 68, spender: RELAY }])
-    expect(risk(r).join('\n')).toContain(`Lets ${RELAY} (the Relay Depository) spend up to 47478285 units of token ${BASE_USDC}`)
+    // The risk bar names reviewed Base tokens (was "47478285 units of token …").
+    expect(risk(r).join('\n')).toContain(`Lets ${RELAY} (the Relay Depository) spend up to 47.478285 USDC`)
     expect(r.limitations.map((l) => l.code)).not.toContain('DEVICE_SHOWS_RAW_DATA')
   })
 
@@ -201,6 +202,46 @@ describe('in-app swap card — the Desktop signing verdict for the same bytes', 
     const desktop = await desktopRisk(UR, '7.15.0')
     expect(risk(r)).toEqual(desktop.reasons.map((x) => x.text))
     expect(rows(r)).toContain('Action: Swap 300 USDC for at least 0.108123518386717195 ETH')
+  })
+
+  // THORChain-path approve (buildEvmSwapTx): encodeApprove(router, amount) on
+  // the token, then depositWithExpiry on the router.
+  const thorApprove = (chainId: number, token: string, router: string) => ({
+    chainId, from: DEPOSIT.from, to: token, value: '0x0',
+    data: `0x095ea7b3${router.slice(2).padStart(64, '0')}${'2d4760d'.padStart(64, '0')}`,
+  })
+
+  test('THORChain approve of a reviewed Base token: the certified generic approve, router in full', async () => {
+    const sent: any[] = []
+    globalThis.fetch = catalogService(sent)
+    const BASE_THOR_ROUTER = '0x00dc6100103bc402d490aee3f9a5560cbd91f1d4'
+    const tx = thorApprove(8453, BASE_USDC, BASE_THOR_ROUTER)
+    // What buildEvmSwapTx now attaches before the device sees the approve.
+    const { resolveEvmSchema } = await import('./evm-schema-registry')
+    const schema = await resolveEvmSchema(8453, tx.to, tx.data, true)
+    expect(schema).toMatchObject({ method: 'approve', keyId: 0x80, source: 'certified-service' })
+    const r = await inApp(tx, '7.16.0')
+    expect(r.protectionLevel).toBe('P4')
+    expect(r.descriptor).toMatchObject({ source: 'certified', authenticated: true, label: 'approve' })
+    expect(sent[0]).toEqual({ chainId: 8453, contract: BASE_USDC, selector: '0x095ea7b3', calldataLength: 68, spender: BASE_THOR_ROUTER })
+    expect(risk(r).join('\n')).toContain(`spend up to 47.478285 USDC`)
+  })
+
+  test('THORChain approve on Ethereum: no certified entry; native token table or honestly blind', async () => {
+    globalThis.fetch = catalogService([])
+    const { resolveEvmSchema } = await import('./evm-schema-registry')
+    const ETH_THOR_ROUTER = '0xd37bbe5744d730a1d98d8dc97c42f0ca46ad7146'
+    // USDC is in the firmware's own token table: the device decodes the approve.
+    const usdc = thorApprove(1, '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48', ETH_THOR_ROUTER)
+    expect(await resolveEvmSchema(1, usdc.to, usdc.data, true)).toBeUndefined()
+    expect((await inApp(usdc, '7.16.0')).descriptor).toMatchObject({ source: 'native', format: 'FIRMWARE_NATIVE' })
+    // WBTC has neither a reviewed identity nor a firmware entry: the card says blind.
+    const wbtc = thorApprove(1, '0x2260fac5e5542a773aa44fbcfeb4b9c62b8f6b3d', ETH_THOR_ROUTER)
+    expect(await resolveEvmSchema(1, wbtc.to, wbtc.data, true)).toBeUndefined()
+    const r = await inApp(wbtc, '7.16.0')
+    expect(r.protectionLevel).toBe('P1')
+    expect(r.descriptor.authenticated).toBe(false)
+    expect(r.limitations.map((l) => l.code)).toContain('DEVICE_SHOWS_RAW_DATA')
   })
 
   test('the overlay and the card share one verdict function', async () => {
