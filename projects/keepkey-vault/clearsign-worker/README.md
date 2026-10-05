@@ -43,9 +43,9 @@ Root key (offline, on a marked KeepKey)
 | Arbitrum (42161) | yes (root ceremony 2026-10-03) | ERC-20 approve/transfer for USDC, USDT0, WETH, DAI, WBTC |
 | Solana | yes | Pump AMM buy/sell; Relay deposits; SoltoshiDICE (session, tables, tournaments, Cee-lo) |
 
-An approve to Uniswap Permit2 reads "Let the Uniswap approval contract spend up
-to {amount} for trades you sign": the schema pins the Permit2 address, so the
-words are true by construction. Any other spender gets the generic "Token
+An approve to Uniswap Permit2 reads "Let Uniswap's shared approval contract,
+used by many apps, spend up to {amount} for trades you sign": the schema pins
+the Permit2 address, so the words are true by construction. Any other spender gets the generic "Token
 approval" entry. Name records (`/v1/evm/name`) cover Universal Router addresses.
 `GET /v1/catalog` is the authoritative list.
 

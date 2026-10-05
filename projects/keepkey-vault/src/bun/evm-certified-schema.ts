@@ -222,9 +222,10 @@ export const CERTIFIED_EVM_CATALOG: Record<string, EvmSchemaSpec> = {
  * Reviewed ERC-20 deployments. KeepKey names the amount with this symbol, so a
  * token is listed by address only, never looked up by symbol (look-alikes
  * share symbols). Each entry agrees across the Uniswap Labs Default list
- * v22.24.0 and the contract's own symbol()/decimals(), checked 2026-10-03.
- * Arbitrum USDT reports "USD₮0" on chain; the device needs ASCII, so it is
- * shown as the list's "USDT0".
+ * v22.24.0 and the contract's own symbol()/decimals(), checked 2026-10-03,
+ * except one symbol: Arbitrum USDT0's symbol() is "USD₮0" (not ASCII, which
+ * the device needs); "USDT0" is the list's ASCII transliteration. Its
+ * decimals() agrees.
  */
 export const REVIEWED_EVM_TOKENS: Record<string, { symbol: string; decimals: number }> = {
   '8453:0x833589fcd6edb6e08f4c7c32d4f71b54bda02913': { symbol: 'USDC', decimals: 6 },
@@ -250,10 +251,14 @@ export const ERC20_APPROVE = '0x095ea7b3'
 export const ERC20_TRANSFER = '0xa9059cbb'
 
 /** Owner rule: WHO / WHAT / WHY / LIMIT. No digits outside placeholders, so
- * "Permit2" cannot be named in a template; the pinned address names it. */
+ * "Permit2" cannot be named in a template; the pinned address names it.
+ * Permit2 is Uniswap's, but 1inch, 0x, CoW, Odos and others pull through it
+ * too, so the words say it is shared rather than "the Uniswap" contract.
+ * Changing this text changes the signed entry: a new signature (worker
+ * deploy now, the offline ceremony under D-018) and a new screen review. */
 export const PERMIT2_APPROVE_INTENT = {
-  title: 'Uniswap',
-  template: 'Let the Uniswap approval contract spend up to {1} for trades you sign',
+  title: 'Shared approval',
+  template: "Let Uniswap's shared approval contract, used by many apps, spend up to {1} for trades you sign",
 }
 export const GENERIC_APPROVE_INTENT = {
   title: 'Token approval',
@@ -290,7 +295,7 @@ export function findReviewedTokenSchema(
           { name: 'Spender', format: EVM_ARG_ADDRESS_PINNED, pinned: PERMIT2_ADDRESS },
           amount('Allowance', ROLE_ALLOWANCE),
         ],
-        action: `Approve ${token.symbol} for Uniswap (Permit2)`,
+        action: `Approve ${token.symbol} for Permit2 (Uniswap's shared approval contract)`,
         intent: { ...PERMIT2_APPROVE_INTENT, valueRole: 0 },
       }
     }

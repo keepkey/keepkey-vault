@@ -118,7 +118,10 @@ function reviewedTokenEntries(): EvmSchemaSpec[] {
         provenance: {
           protocol: 'https://eips.ethereum.org/EIPS/eip-20',
           tokenList: 'https://tokens.uniswap.org',
-          review: 'Uniswap Labs Default list v22.24.0 agrees with the contract symbol() and decimals(), 2026-10-03',
+          review: key === '42161:0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9'
+            // symbol() returns "USD₮0"; the device needs ASCII.
+            ? 'Symbol "USDT0" is the Uniswap Labs Default list v22.24.0 ASCII transliteration of the contract symbol() "USD₮0"; decimals() agrees, 2026-10-03'
+            : 'Uniswap Labs Default list v22.24.0 agrees with the contract symbol() and decimals(), 2026-10-03',
           ...(spec.args.some((arg) => arg.pinned) ? { spender: PERMIT2_PROVENANCE } : {}),
         },
       }))

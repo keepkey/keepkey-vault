@@ -61,21 +61,24 @@ Arguments:
 - `Spender`: ADDRESS_PINNED (6), set to Permit2, role 0.
 - `Allowance`: TOKEN_AMOUNT, role 5 (cap).
 
-- Title: `Uniswap`
-- Template: `Let the Uniswap approval contract spend up to {1} for trades you sign`
-  - WHO: the Uniswap approval contract. Permit2 is pinned by address and
-    shown in full on Details. A template cannot say "Permit2" because it
-    contains a digit.
+- Title: `Shared approval`
+- Template: `Let Uniswap's shared approval contract, used by many apps, spend up to {1} for trades you sign`
+  - WHO: Uniswap's shared approval contract (Permit2). Permit2 is pinned by
+    address and shown in full on Details. A template cannot say "Permit2"
+    because it contains a digit. Uniswap wrote and deployed it, but 1inch,
+    0x, CoW, Odos and others pull tokens through it too, so it is "shared",
+    not "the Uniswap approval contract" (changed 2026-10-05; needs a new
+    signature and this screen's review before it is live).
   - WHAT: spend the token.
-  - WHY: for trades you sign (neutral: other apps also use Permit2).
+  - WHY: for trades you sign (neutral: many apps use Permit2).
   - LIMIT: `{1}`, the allowance.
 
 Example, Base USDC:
 
 | # | Title | Body |
 |---|---|---|
-| 1 | Uniswap | Let the Uniswap approval contract spend up to 25 USDC for trades you sign |
-| 1 (unlimited) | Uniswap | Let the Uniswap approval contract spend up to UNLIMITED USDC for trades you sign |
+| 1 | Shared approval | Let Uniswap's shared approval contract, used by many apps, spend up to 25 USDC for trades you sign |
+| 1 (unlimited) | Shared approval | Let Uniswap's shared approval contract, used by many apps, spend up to UNLIMITED USDC for trades you sign |
 | 2 | Limits | Can spend up to / 25 USDC |
 | 2 (unlimited) | Limits | Can spend up to / UNLIMITED USDC |
 | 3 | Contract | approve / 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913 |
@@ -304,10 +307,13 @@ For each token, the screens differ from the Base USDC example only in:
 | Base | cbBTC | 8 | `0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf` |
 | Base | cbETH | 18 | `0x2Ae3F1Ec7F1F5012CFEab0185bfc7aa3cf0DEc22` |
 | Arbitrum | USDC | 6 | `0xaf88d065e77c8cC2239327C5EDb3A432268e5831` |
-| Arbitrum | USDT0 | 6 | `0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9` |
+| Arbitrum | USDT0 (1) | 6 | `0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9` |
 | Arbitrum | WETH | 18 | `0x82aF49447D8a07e3bd95BD0d56f35241523fBab1` |
 | Arbitrum | DAI | 18 | `0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1` |
 | Arbitrum | WBTC | 8 | `0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f` |
+
+(1) The contract's `symbol()` is `USD₮0`, which is not ASCII. `USDT0` is the
+Uniswap Labs Default list's ASCII transliteration; `decimals()` agrees.
 
 ## Existing entries (unchanged, flagged for owner review)
 

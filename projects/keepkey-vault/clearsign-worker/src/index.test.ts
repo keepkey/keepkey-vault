@@ -104,9 +104,9 @@ describe('ClearSign Worker public surface', () => {
     const usdc = '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913'
     const permit2 = evm.find((entry: any) => entry.id === `eip155:8453:${usdc}:0x095ea7b3:permit2`)
     expect(permit2.spender).toBe('0x000000000022d473030f116ddee9f6b43ac78ba3')
-    expect(permit2.screens.map((screen: any) => screen.title)).toEqual(['Uniswap', 'Limits', 'Contract', 'Spender', 'KeepKey ClearSign'])
-    expect(permit2.screens[0].body).toBe('Let the Uniswap approval contract spend up to 25 USDC for trades you sign')
-    expect(permit2.screens[0].unlimited).toBe('Let the Uniswap approval contract spend up to UNLIMITED USDC for trades you sign')
+    expect(permit2.screens.map((screen: any) => screen.title)).toEqual(['Shared approval', 'Limits', 'Contract', 'Spender', 'KeepKey ClearSign'])
+    expect(permit2.screens[0].body).toBe("Let Uniswap's shared approval contract, used by many apps, spend up to 25 USDC for trades you sign")
+    expect(permit2.screens[0].unlimited).toBe("Let Uniswap's shared approval contract, used by many apps, spend up to UNLIMITED USDC for trades you sign")
     expect(permit2.screens[1]).toMatchObject({ body: 'Can spend up to\n25 USDC', unlimited: 'Can spend up to\nUNLIMITED USDC' })
     expect(permit2.screens[3].body).toBe('0x000000000022D473030F116dDEE9F6B43aC78BA3')
     expect(permit2.screens[4].body).toBe('Described by KeepKey Alpha 716 a9531b9d\ncertified by KeepKey')
@@ -120,6 +120,13 @@ describe('ClearSign Worker public surface', () => {
       ['Recipient', '0x909Ef6B32DfDc12CA86aA710b54c991af3C5F82E'],
       ['KeepKey ClearSign', 'Described by KeepKey Alpha 716 a9531b9d\ncertified by KeepKey'],
     ])
+    // Arbitrum USDT0's symbol() is "USD₮0": the review must not claim it agrees.
+    const usdt0 = evm.filter((entry: any) => entry.id.startsWith('eip155:42161:0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9:'))
+    expect(usdt0).toHaveLength(3)
+    for (const entry of usdt0) {
+      expect(entry.provenance.review).toContain('transliteration of the contract symbol() "USD₮0"')
+      expect(entry.provenance.review).not.toContain('agrees with the contract symbol()')
+    }
     // Portals carries no intent and has no 7.16 decoder: no screens, flagged.
     const portals = evm.find((entry: any) => entry.protocol === 'Portals')
     expect(portals.screens).toEqual([])

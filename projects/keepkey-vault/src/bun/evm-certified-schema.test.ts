@@ -179,15 +179,15 @@ describe('reviewed ERC-20 token schemas', () => {
     expect(take(take(1)[0]).toString()).toBe('USDC')
     expect(take(1)[0]).toBe(6) // role: allowance
     expect(take(1)[0]).toBe(0) // value role
-    expect(take(take(1)[0]).toString()).toBe('Uniswap')
-    expect(take(take(1)[0]).toString()).toBe('Let the Uniswap approval contract spend up to {1} for trades you sign')
+    expect(take(take(1)[0]).toString()).toBe('Shared approval')
+    expect(take(take(1)[0]).toString()).toBe("Let Uniswap's shared approval contract, used by many apps, spend up to {1} for trades you sign")
     expect([...take(6)]).toEqual([1, 0, 0, 0, 0, CERTIFIED_METADATA_KEY_ID])
     expect(o).toBe(b.length)
   })
 
   it('routes approve by spender: Permit2 pinned, any other or absent generic', () => {
     const pinned = byShape(42161, '0xaf88d065e77c8cc2239327c5edb3a432268e5831', '0x095ea7b3', 68, PERMIT2)!
-    expect(pinned.intent?.title).toBe('Uniswap')
+    expect(pinned.intent?.title).toBe('Shared approval')
     expect(pinned.args[0]).toMatchObject({ format: 6, pinned: PERMIT2 })
     for (const spender of [undefined, '0x0000000000000000000000000000000000000001']) {
       const generic = byShape(42161, '0xaf88d065e77c8cc2239327c5edb3a432268e5831', '0x095ea7b3', 68, spender)!
@@ -200,7 +200,7 @@ describe('reviewed ERC-20 token schemas', () => {
     const word = (a: string) => a.replace(/^0x/, '').padStart(64, '0')
     const approve = (spender: string) => `0x095ea7b3${word(spender)}${'f'.repeat(64)}`
     const { findCertifiedEvmSchemaSpec: fromData } = require('./evm-certified-schema') as typeof import('./evm-certified-schema')
-    expect(fromData(8453, BASE_USDC, approve(PERMIT2))?.intent?.title).toBe('Uniswap')
+    expect(fromData(8453, BASE_USDC, approve(PERMIT2))?.intent?.title).toBe('Shared approval')
     expect(fromData(8453, BASE_USDC, approve('0x0000000000000000000000000000000000000001'))?.intent?.title).toBe('Token approval')
     // A dirty upper word pins nothing.
     expect(fromData(8453, BASE_USDC, `0x095ea7b3ff${word(PERMIT2).slice(2)}${'f'.repeat(64)}`)?.intent?.title).toBe('Token approval')
