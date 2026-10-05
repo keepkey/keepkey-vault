@@ -214,6 +214,13 @@ const LOCAL_DECODERS: LocalDecoder[] = [
       ]
     },
   },
+  // execute(bytes commands, bytes[] inputs): no deadline. The device decodes
+  // both selectors; the swap rows need this card to attach to.
+  {
+    selector: '0x24856bc3',
+    method: 'Swap (Universal Router)',
+    decode: () => [{ name: 'Protocol', type: 'string', value: 'Uniswap Universal Router', format: 'raw' }],
+  },
   // Uniswap V3 SwapRouter02 multicall(uint256 deadline, bytes[] data)
   {
     selector: '0x5ae401dc',

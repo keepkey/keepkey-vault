@@ -76,10 +76,13 @@ function txValue(raw: unknown): bigint | undefined {
 
 /**
  * The swap a reviewed Universal Router call makes, as card rows: the same
- * decode the device runs (urPrecheck), so a call it would not decode gets no
- * rows. Token names come only from REVIEWED_EVM_TOKENS by chain:address; any
+ * decode and token-flow review the device runs (urPrecheck), so a call it
+ * would not decode gets no rows, and a call it reviews gets the facts its
+ * screens state (signed_metadata_build_ur_review): what is paid, the minimum
+ * received, the recipient, the fee, the Permit2 allowance and every V4 pool
+ * hook. Token names come only from REVIEWED_EVM_TOKENS by chain:address; any
  * other token is shown as raw units of its address with a "Token warning".
- * Display only: it never sets or relaxes a signing gate.
+ * Advice checked on this computer (D-018): it never sets or relaxes a gate.
  */
 export function uniswapSwapFields(
   chainId: number | undefined, router: string, data: string, value: unknown, from?: string,
@@ -90,9 +93,11 @@ export function uniswapSwapFields(
   if (!plan) return []
   const s = plan.summary
   const unknown: string[] = []
-  const amount = (raw: bigint, token: string, isEth: boolean) => {
+  const amount = (raw: bigint, token: string, isEth: boolean, unlimitedAt?: bigint) => {
     const t = isEth ? { symbol: 'ETH', decimals: 18 } : REVIEWED_EVM_TOKENS[`${chainId}:${token}`]
     if (!t) { unknown.push(token); return `${raw} base units of token ${token}` }
+    // The device's ur_amount_text: a permit's all-ones uint160 reads UNLIMITED.
+    if (raw === unlimitedAt) return `UNLIMITED ${t.symbol}`
     const scale = 10n ** BigInt(t.decimals)
     const frac = (raw % scale).toString().padStart(t.decimals, '0').replace(/0+$/, '')
     return `${raw / scale}${frac ? `.${frac}` : ''} ${t.symbol}`
@@ -112,17 +117,24 @@ export function uniswapSwapFields(
     row('Minimum output', amountOut),
     row('Recipient', recipient),
   ]
-  if (s.fee) rows.push(row('Fee', `${s.fee.bips / 100}% of the output to ${s.fee.recipient}`))
-  if (s.permit) rows.push(row('Permit2 allowance', `${amount(s.permit.amount, s.permit.token, false)} for the router, until ${formatDeadline(s.permit.expiration.toString())}`))
+  if (s.fee) {
+    const pct = `${Math.floor(s.fee.bips / 100)}.${String(s.fee.bips % 100).padStart(2, '0')}%`
+    rows.push(row('Fee', `${pct} of the output to ${s.fee.recipient}`))
+  }
+  if (s.permit) rows.push(row('Permit2 allowance', `${amount(s.permit.amount, s.permit.token, false, (1n << 160n) - 1n)} for the router, until ${formatDeadline(s.permit.expiration.toString())}`))
+  // Uniswap v4 pools whose hook contract runs during the swap: every one, as
+  // the device shows them. The limits above hold whatever a hook does.
+  s.hooks.forEach((hook, i) => rows.push(row(s.hooks.length > 1 ? `Pool hook ${i + 1}/${s.hooks.length}` : 'Pool hook', `The swap runs this hook contract ${hook}`)))
   for (const t of [...new Set(unknown)]) rows.push(row('Token warning', `Token ${t} is not on KeepKey's reviewed list`))
+  rows.push(row('Preview', 'Checked on this computer. Your KeepKey screen is the final word.'))
   return rows
 }
 
 /**
  * Attach a certified 0x07 Uniswap swap entry when `to` is a reviewed Universal
- * Router on 7.16+ and the calldata pre-checks as a shape the device decodes
- * (<= UR_MAX_CALLDATA bytes, supported command sequence) whose every named token is
- * reviewed. The device refuses an incomplete entry with no fallback, so
+ * Router on 7.16+ and the calldata pre-checks as a call the device decodes and
+ * reviews (urPrecheck: any length, V4 only through UR 2.1.2 on Base) whose
+ * every named token is reviewed. The device refuses an incomplete entry with no fallback, so
  * anything short of that returns false (the AdvancedMode path).
  */
 export async function attachCertifiedUniswapSwap(

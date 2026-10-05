@@ -146,23 +146,31 @@ supplies only the router, the selector, the title `Uniswap`, and the identity
 (symbol, decimals) of every token the review names. Screens come from
 `signed_metadata_build_ur_review`.
 
-Applies only when:
+Applies only when (firmware `51f85368e`, `feat/716-ur-streaming`; D-019, D-021):
 - the call is to the entry's router on the entry's chain, with the entry's
   selector (`0x3593564c` execute with deadline, or `0x24856bc3` without);
-- the calldata is at most 1472 bytes (a call longer than the first signing
-  chunk is held and decoded after its last byte);
-- the commands, at most 4, are `[PERMIT2_PERMIT | WRAP_ETH] -> one of
-  V3_SWAP_EXACT_IN, V3_SWAP_EXACT_OUT, V2_SWAP_EXACT_IN, V2_SWAP_EXACT_OUT ->
-  [PAY_PORTION] -> [SWEEP | UNWRAP_WETH] -> [clean-up]`, with no allow-revert
-  flag, and a permit names this router as spender;
-- a split route is two exact-in swaps of the same pair, with the same
-  recipient and payer; a second swap of a different pair is refused;
-- a clean-up is one trailing `UNWRAP_WETH`, or `SWEEP` of ETH (token address
-  0), returning leftovers to the recipient the review names, and nowhere
-  else;
-- the entry carries an identity for the input token (unless ETH is wrapped
-  from msg.value), the output token (unless unwrapped to ETH), and the
-  Permit2 token. A missing identity is refused, not downgraded.
+- the calldata has any length: the device decodes it as its chunks arrive
+  and keeps no copy (7.16 builds before the streaming decoder held at most
+  1472 bytes);
+- every command is decoded (at most 6 plan steps), with no allow-revert flag,
+  and every offset points forward;
+- read as token flow through the router, the call says one thing: the user
+  pays with one asset (msg.value, wrapped or settled into a V4 pool, or one
+  token the swaps pull through Permit2, after an optional permit naming this
+  router as spender), and one asset reaches one recipient (from swaps, or by
+  `SWEEP` / `UNWRAP_WETH` of what the router holds). Swaps the router pays
+  for (split routes, multi-hop through V2/V3/V4 pools) cost the user nothing
+  extra; all swaps are exact-in or all exact-out; at most one fee;
+- a clean-up returns leftover ETH only to the recipient the review names;
+- `V4_SWAP` is decoded only for UR 2.1.2 on Base (`0xd6145b2D…9c40`): actions
+  `SWAP_EXACT_IN|SWAP_EXACT_OUT, SETTLE, [TAKE_PORTION,] TAKE` or
+  `SETTLE, SWAP_EXACT_IN, [TAKE_PORTION,] TAKE`, at most 4 PathKeys, empty
+  `hookData`, at most 3 distinct hook contracts (each shown); currency
+  `0x0…0` is native ETH;
+- the entry carries an identity for the paid token (unless ETH from
+  msg.value), the delivered token (unless ETH), and the Permit2 token, and
+  for nothing else: never native ETH, never a route's intermediate token;
+  1-4 identities. A missing identity is refused, not downgraded.
 
 `{in}` and `{out}` are `<amount> <SYM>`, at full precision (`ETH` when the
 router wraps msg.value or unwraps the output).
@@ -178,19 +186,24 @@ router wraps msg.value or unwraps the output).
 | 4 | Recipient | Output goes to / {recipient, full EIP-55} | output not to the sender |
 | 5 | Allowance | This router may spend up to {amount} until YYYY-MM-DD UTC | Permit2 permit |
 | 5 (unlimited) | Allowance | This router may spend up to UNLIMITED {SYM} until YYYY-MM-DD UTC | uint160 max permit |
-| 6 | Fee | x.xx% of the output to / {fee recipient, full EIP-55} | PAY_PORTION |
-| 7 | Contract | execute / {router, full EIP-55} | always |
-| 8 | KeepKey ClearSign | Described by KeepKey Alpha 716 a9531b9d / certified by KeepKey (A1) | always |
+| 6 | Fee | x.xx% of the output to / {fee recipient, full EIP-55} | PAY_PORTION, or a V4 swap's TAKE_PORTION |
+| 7 | Pool hook (`Pool hook {i}/{n}` with several) | The swap runs this hook contract / {hook, full EIP-55} | each V4 pool hook (UR 2.1.2 on Base only) |
+| 8 | Contract | execute / {router, full EIP-55} | always |
+| 9 | KeepKey ClearSign | Described by KeepKey Alpha 716 a9531b9d / certified by KeepKey (A1) | always |
 
 With a fee, the exact-input floor on screens 1 and 3 is the final step's
 minimum (what the user receives after the fee), not the swap's. Without a fee
 it is the larger of the swap minimum and the final step's minimum (apps often
 leave the swap's at 0).
 
-A split route shows the same screens with totals: {in} is the sum of both
-swaps' inputs, and {out} the sum of their minimums (each swap enforces its
-own). A clean-up step has no screen of its own: it returns only ETH, and only
-to the recipient already shown (screen 4, or the sender).
+{in} is the sum the user pays (msg.value with ETH); {out} is the sum of the
+minimums every delivery enforces: each swap that delivers to the recipient,
+plus what the router delivers (its `SWEEP` / `UNWRAP_WETH` minimums, or,
+with no `PAY_PORTION` and nothing spending it again, the larger of those and
+the minimums of the swaps that filled it; apps put the floor on one or the
+other). A V4 `TAKE_PORTION` fee comes out of its swap's minimum. A clean-up
+step has no screen of its own. Hooks cannot lower these limits: the router
+checks them after the swap.
 
 The entry is static: router, selector, title and token identities only,
 nothing from a particular transaction. Per owner decision D-018 (2026-10-04,

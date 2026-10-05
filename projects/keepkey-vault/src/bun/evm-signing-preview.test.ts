@@ -351,3 +351,75 @@ describe('Uniswap Universal Router card rows — real Base swap', () => {
     expect(s.needsBlindSigning).toBe(true)
   })
 })
+
+// Real Base UR 2.1.2 V4 calls from the firmware's D-021 sample, with the
+// firmware's own review (ur-firmware-parity.json.gz). Searched at test time.
+describe('Uniswap V4 through UR 2.1.2 — preview rows and certified attach', () => {
+  const { readFileSync } = require('node:fs')
+  const { urPrecheck } = require('./uniswap-ur')
+  const { buildEvmDecoderBody, reviewedSwapTokens, REVIEWED_EVM_TOKENS } = require('./evm-certified-schema')
+  const { uniswapSwapFields } = require('./evm-signing-preview')
+  const UR212 = '0xd6145b2d3f379919e8cdeda7b97e37c4b2ca9c40'
+  const fixture = JSON.parse(Buffer.from(Bun.gunzipSync(readFileSync(new URL('../../__tests__/fixtures/uniswap/ur-firmware-parity.json.gz', import.meta.url)))).toString())
+  const v4 = (Object.entries(fixture.calls) as [string, [string, string, string]][])
+    .filter(([key]) => key.startsWith('0x'))
+    .map(([tx, [, value, cd]]) => ({ tx, value: BigInt(`0x${value}`), data: `0x${cd}`, pre: urPrecheck(UR212, cd, BigInt(`0x${value}`)) }))
+    .filter((c) => c.pre?.plan.steps.some((s: any) => s.kind.startsWith('V4_SWAP')))
+  const allReviewed = (c: any) => c.pre.tokens.every((t: string) => REVIEWED_EVM_TOKENS[`8453:${t}`])
+  const ethIn = v4.find((c) => c.pre.summary.inIsEth && c.pre.plan.steps.length === 1 && allReviewed(c))!
+  const ethOut = v4.find((c) => c.pre.summary.outIsEth && allReviewed(c))!
+  const hooked = v4.find((c) => c.pre.summary.hooks.length > 0)!
+  const rows = (c: any, chainId = 8453, router = UR212) =>
+    Object.fromEntries(uniswapSwapFields(chainId, router, c.data, `0x${c.value.toString(16)}`).map((f: any) => [f.name, f.value]))
+
+  test('fixtures: the sample holds ETH-in, ETH-out and hooked V4 swaps', () => {
+    expect(ethIn && ethOut && hooked).toBeTruthy()
+  })
+
+  test('native ETH paid by msg.value: shown as ETH, never named in the entry', () => {
+    const r = rows(ethIn)
+    const s = ethIn.pre.summary
+    expect(r['You pay']).toMatch(/ ETH$/)
+    expect(r['Minimum output']).toEndWith(` ${REVIEWED_EVM_TOKENS[`8453:${s.tokenOut}`].symbol}`)
+    expect(r.Action).toStartWith(`Swap ${r['You pay']} for at least ${r['Minimum output']}`)
+    expect(r.Preview).toBe('Checked on this computer. Your KeepKey screen is the final word.')
+    expect(ethIn.pre.tokens).toEqual([s.tokenOut])
+  })
+
+  test('ETH delivered: the minimum is in ETH and only the paid token is named', () => {
+    expect(rows(ethOut)['Minimum output']).toMatch(/ ETH$/)
+    expect(ethOut.pre.tokens).toEqual([ethOut.pre.summary.tokenIn])
+  })
+
+  test('every pool hook is a row, as on the device', () => {
+    const r = rows(hooked)
+    const hooks = hooked.pre.summary.hooks as string[]
+    const shown = Object.entries(r).filter(([k]) => k.startsWith('Pool hook')).map(([, v]) => v)
+    expect(shown).toEqual(hooks.map((h) => `The swap runs this hook contract ${h}`))
+  })
+
+  test('fails closed off UR 2.1.2 on Base: no rows through UR 2.0, or on another chain', () => {
+    expect(rows(ethIn, 8453, '0x6ff5693b99212da76ad316178a184ab56d299b43')).toEqual({})
+    expect(rows(ethIn, 1)).toEqual({})
+  })
+
+  test('7.16 attach: the request names the delivered token only (no native ETH, no intermediates)', async () => {
+    const seen: any[] = []
+    globalThis.fetch = (async (url: any, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body))
+      if (!String(url).endsWith('/v1/evm/swap')) return new Response(JSON.stringify({ classification: 'OPAQUE' }), { status: 422 })
+      seen.push(body)
+      const tokens = reviewedSwapTokens(body.chainId, body.tokens)
+      const inner = buildEvmDecoderBody(body.chainId, body.contract, body.selector, tokens).toString('hex')
+      return new Response(JSON.stringify({
+        success: true, classification: 'VERIFIED', version: 7, keyId: 0x80, chainId: body.chainId,
+        entry: `eip155:${body.chainId}:${body.contract}:uniswap-ur`, contract: body.contract, selector: body.selector,
+        method: 'execute', signedPayload: `0x03${'cc'.repeat(139)}${inner}${'ee'.repeat(65)}`, tokens,
+      }), { status: 200 })
+    }) as typeof fetch
+    const s: SigningRequestInfo = { ...info(), value: `0x${ethIn.value.toString(16)}` }
+    await applyEvmTxPreview(s, UR212, ethIn.data, 8453, '7.16.0')
+    expect(s.needsBlindSigning).toBe(false)
+    expect(seen).toEqual([{ chainId: 8453, contract: UR212, selector: ethIn.data.slice(0, 10), tokens: [ethIn.pre.summary.tokenOut] }])
+  })
+})

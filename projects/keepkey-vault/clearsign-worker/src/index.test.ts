@@ -192,6 +192,13 @@ describe('ClearSign Worker public surface', () => {
     expect(entry.screens[0]).toMatchObject({ body: 'Swap {in} for at least {out}', exactOut: 'Swap at most {in} for {out}' })
     expect(entry.screens[6].body).toBe('execute\n0x6fF5693b99212Da76ad316178A184AB56D299b43')
     for (const s of entry.screens.filter((s: any) => ['Recipient', 'Allowance', 'Fee'].includes(s.title))) expect(s.when).toBeTruthy()
+    // V4 (and its hook screens) only through UR 2.1.2 on Base.
+    expect(entry.supportedShape).toContain('V4_SWAP refused')
+    const v4 = body.entries.find((e: any) => e.id === 'eip155:8453:0xd6145b2d3f379919e8cdeda7b97e37c4b2ca9c40:uniswap-ur')
+    expect(v4.screens.map((s: any) => s.title)).toEqual(['Uniswap', 'Limits', 'Limits', 'Recipient', 'Allowance', 'Fee', 'Pool hook', 'Contract', 'KeepKey ClearSign'])
+    expect(v4.screens[6]).toMatchObject({ body: 'The swap runs this hook contract\n{hook, full EIP-55}', numbered: 'Pool hook {i}/{n}' })
+    expect(v4.supportedShape).toContain('V4_SWAP: SWAP_EXACT_IN/OUT')
+    expect(v4.calldataLength).not.toHaveProperty('max')
     const status = await (await fetchWorker('/v1/status')).json() as any
     expect(status.endpoints.evmSwap).toBe('https://clearsign.example/v1/evm/swap')
   })
@@ -199,9 +206,8 @@ describe('ClearSign Worker public surface', () => {
   it('EXPECTED-SCREENS.md states every Uniswap swap screen the catalog publishes', async () => {
     const doc = await Bun.file(new URL('../EXPECTED-SCREENS.md', import.meta.url)).text()
     const body = await (await fetchWorker('/v1/catalog')).json() as any
-    const entry = body.entries.find((e: any) => e.id === 'eip155:8453:0x3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad:uniswap-ur')
-    for (const screen of entry.screens) {
-      for (const text of [screen.body, screen.exactOut, screen.unlimited].filter(Boolean)) {
+    for (const entry of body.entries.filter((e: any) => e.id.endsWith(':uniswap-ur'))) for (const screen of entry.screens) {
+      for (const text of [screen.body, screen.exactOut, screen.unlimited, screen.numbered].filter(Boolean)) {
         for (const line of text.split('\n')) expect(doc).toContain(line)
       }
     }

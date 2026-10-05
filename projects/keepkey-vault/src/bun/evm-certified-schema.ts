@@ -7,6 +7,7 @@ import {
   CLEARSIGN_SCOPE_ETHEREUM,
   inspectAlphaCertificate,
 } from './clearsign-alpha-ceremony'
+import { UR_V4_ROUTERS } from './uniswap-ur'
 
 export const CERTIFIED_METADATA_VERSION = 0x03
 export const CERTIFIED_METADATA_KEY_ID = 0x80
@@ -620,9 +621,10 @@ export const UR_MAX_TOKENS = 4
  * Addresses verbatim from Uniswap's deploy-addresses at the pinned commit in
  * UNIVERSAL_ROUTER_PROVENANCE (re-fetched 2026-10-03: unchanged on main).
  * Only the generations the firmware vectors and command layout were checked
- * against: UR 1.2 (V2 support), UR 2.0 and UR 2.1.2 (the v4 routers; V4_SWAP
- * 0x10 is not decoded, so v4-pool routes stay on the blind path). UR 2.1.2 is
- * the router the Uniswap app sends to; its vectors are real Base calls.
+ * against: UR 1.2 (V2 support), UR 2.0 and UR 2.1.2. UR 2.1.2 is the router
+ * the Uniswap app sends to; its vectors are real Base calls. V4_SWAP (0x10) is
+ * decoded only for UR 2.1.2 on Base (UR_V4_ROUTERS: its V4Router layout was
+ * checked against the verified source); elsewhere a V4 route is refused.
  */
 export const REVIEWED_UNIVERSAL_ROUTERS: EvmNameRecord[] = [
   { chainId: 8453, address: '0x3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad', name: 'Uniswap Universal Router', source: 'base.json UniversalRouterV1_2_V2Support' },
@@ -635,6 +637,11 @@ export const REVIEWED_UNIVERSAL_ROUTERS: EvmNameRecord[] = [
   { chainId: 42161, address: '0xa51afafe0263b40edaef0df8781ea9aa03e381a3', name: 'Uniswap Universal Router', source: 'arbitrum.json UniversalRouterV2' },
   { chainId: 42161, address: '0x2d01411773c8c24805306e89a41f7855c3c4fe65', name: 'Uniswap Universal Router', source: 'arbitrum.json UniversalRouterV2_1_2' },
 ]
+
+/** True when the device decodes V4_SWAP for this router (firmware V4_ROUTERS). */
+export function urV4Router(chainId: number | undefined, router: string | undefined): boolean {
+  return chainId === 8453 && (UR_V4_ROUTERS as readonly string[]).includes(String(router).toLowerCase())
+}
 
 export function findReviewedUniversalRouter(chainId: number | undefined, router: string | undefined): EvmNameRecord | undefined {
   if (!chainId || !router) return undefined
@@ -717,7 +724,8 @@ export function buildCertifiedEvmDecoderEnvelope(
  * placeholders: {in}/{out} are "<amount> <SYM>" ("ETH" when wrapped from
  * msg.value / unwrapped), read by the device from the calldata.
  */
-export function expectedUniswapScreens(chainId: number, router: string, alias = 'KeepKey Alpha 716'): Array<ExpectedScreen & { exactOut?: string; when?: string }> {
+export function expectedUniswapScreens(chainId: number, router: string, alias = 'KeepKey Alpha 716'): Array<ExpectedScreen & { exactOut?: string; numbered?: string; when?: string }> {
+  const v4 = urV4Router(chainId, router)
   return [
     { title: UR_TITLE, body: 'Swap {in} for at least {out}', exactOut: 'Swap at most {in} for {out}' },
     { title: 'Limits', body: 'You spend\n{in}', exactOut: 'You spend at most\n{in}' },
@@ -729,7 +737,18 @@ export function expectedUniswapScreens(chainId: number, router: string, alias = 
       unlimited: 'This router may spend up to UNLIMITED {SYM} until YYYY-MM-DD UTC',
       when: 'the call carries a Permit2 permit (spender must be this router)',
     },
-    { title: 'Fee', body: 'x.xx% of the output to\n{fee recipient, full EIP-55}', when: 'the call pays a portion of the output (PAY_PORTION)' },
+    {
+      title: 'Fee',
+      body: 'x.xx% of the output to\n{fee recipient, full EIP-55}',
+      when: v4 ? "the call pays a portion of the output (PAY_PORTION, or a V4 swap's TAKE_PORTION); at most one" : 'the call pays a portion of the output (PAY_PORTION); at most one',
+    },
+    // V4 pools are decoded only through this router (firmware V4_ROUTERS).
+    ...(v4 ? [{
+      title: 'Pool hook',
+      body: 'The swap runs this hook contract\n{hook, full EIP-55}',
+      numbered: 'Pool hook {i}/{n}',
+      when: 'the swap runs through a Uniswap v4 pool with a hook contract: one screen per distinct hook, at most 3 (hookData must be empty)',
+    }] : []),
     { title: 'Contract', body: `${UR_METHOD}\n${ethersUtils.getAddress(router)}` },
     {
       title: 'KeepKey ClearSign',

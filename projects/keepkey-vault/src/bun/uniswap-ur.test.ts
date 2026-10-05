@@ -8,7 +8,7 @@ import {
   reviewedSwapTokens,
   UNIVERSAL_ROUTER_PROVENANCE,
 } from './evm-certified-schema'
-import { urDecode, urPrecheck, urSummarize, urTokenSet, UR_MAX_CALLDATA } from './uniswap-ur'
+import { urDecode, urPrecheck, urSummarize, type UrPlan, type UrStep } from './uniswap-ur'
 
 /**
  * Real Base Universal Router calls, copied verbatim from the firmware unit test
@@ -32,12 +32,18 @@ const acceptedRows = (header.slice(0, header.indexOf('v4_rejected()')).match(/^ 
 const v4Rows = (v4Section.match(/^ {2}"[0-9a-f]+",?$/gm) || []).length
 
 const BASE_UR12 = '0x3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad'
+const BASE_UR212 = '0xd6145b2d3f379919e8cdeda7b97e37c4b2ca9c40'
+/** Firmware 7.16's held-calldata buffer, removed by the streaming decoder (D-021). */
+const OLD_BUFFER = 1472
 const BASE_USDC = '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913'
 const BASE_WETH = '0x4200000000000000000000000000000000000006'
 const hasKind = (v: Vec, kind: string) => v.steps.some((s) => s.kind === kind)
 const appShaped = accepted.filter((v) => hasKind(v, 'PERMIT2_PERMIT') || hasKind(v, 'WRAP_ETH'))
 
 describe('Uniswap UR pre-check against real Base swaps (firmware vectors)', () => {
+  // Every vector's full plan and review is checked against the firmware's own
+  // decoder in __tests__/uniswap-ur-firmware-parity.test.ts. These cases pin
+  // the rules by hand, from the vectors' own steps.
   it('parses the whole header', () => {
     expect(acceptedRows).toBeGreaterThan(0)
     expect(accepted).toHaveLength(acceptedRows)
@@ -48,10 +54,10 @@ describe('Uniswap UR pre-check against real Base swaps (firmware vectors)', () =
 
   it('decodes every accepted call step-for-step as the independent decoder did', () => {
     for (const v of accepted) {
-      const steps = urDecode(Buffer.from(v.calldata, 'hex'))
-      expect(steps, v.tx).not.toBeNull()
-      expect(steps!.map((s) => s.kind)).toEqual(v.steps.map((s) => s.kind))
-      steps!.forEach((got, i) => {
+      const plan = urDecode(Buffer.from(v.calldata, 'hex'))
+      expect(plan, v.tx).not.toBeNull()
+      expect(plan!.steps.map((s) => s.kind)).toEqual(v.steps.map((s) => s.kind))
+      plan!.steps.forEach((got, i) => {
         const want = v.steps[i]
         if (want.tokenIn) expect(got.tokenIn).toBe(`0x${want.tokenIn}`)
         if (want.tokenOut) expect(got.tokenOut).toBe(`0x${want.tokenOut}`)
@@ -61,113 +67,23 @@ describe('Uniswap UR pre-check against real Base swaps (firmware vectors)', () =
     }
   })
 
-  /*
-   * Mirrors firmware AppShapedSwapsSummarize: every app-shaped call (permit or
-   * wrap first) with one swap, or a split of two exact-in swaps of the same
-   * pair, summarizes: totals from the swaps, and the floor raised to a later
-   * unwrap/sweep minimum when there is no fee. A second swap of a different
-   * pair (a multi-hop through two pool versions) is refused. Expectations come
-   * from the vector steps, not from the summarizer.
-   */
-  it('app-shaped calls summarize as the firmware does: splits summed, clean-up floor, mixed pairs refused', () => {
-    const exactIn = (k: string) => k === 'V3_SWAP_EXACT_IN' || k === 'V2_SWAP_EXACT_IN'
-    const n = (h: string) => BigInt(`0x${h}`)
-    let permits = 0, wraps = 0, splits = 0, cleanups = 0, refused = 0
-    for (const v of appShaped) {
-      const steps = urDecode(Buffer.from(v.calldata, 'hex'))!
-      const value = n(v.value)
-      const s = urSummarize(steps, v.router, value)
-      const swaps = v.steps.filter((st) => st.kind.includes('_SWAP_'))
-      const samePair = swaps.length === 2 && exactIn(swaps[0].kind) && exactIn(swaps[1].kind) &&
-        swaps[0].tokenIn === swaps[1].tokenIn && swaps[0].tokenOut === swaps[1].tokenOut
-      if (swaps.length > 2 || (swaps.length === 2 && !samePair)) {
-        expect(s, v.tx).toBeNull()
-        refused++
-        continue
-      }
-      expect(s, v.tx).not.toBeNull()
-      const swap = swaps[0]
-      let amount = n(swap.amount), limit = n(swap.limit)
-      if (swaps.length === 2) {
-        amount += n(swaps[1].amount)
-        limit += n(swaps[1].limit)
-        splits++
-      }
-      const permit = hasKind(v, 'PERMIT2_PERMIT')
-      const wrap = hasKind(v, 'WRAP_ETH')
-      expect(s!.tokenIn).toBe(`0x${swap.tokenIn}`)
-      expect(s!.tokenOut).toBe(`0x${swap.tokenOut}`)
-      expect(!!s!.permit).toBe(permit)
-      expect(s!.inIsEth).toBe(wrap)
-      const tail = v.steps.filter((st) => st.kind === 'UNWRAP_WETH' || st.kind === 'SWEEP')
-      let floor = limit
-      for (const st of tail) if (!hasKind(v, 'PAY_PORTION') && n(st.amount) > floor) floor = n(st.amount)
-      if (tail.length === 2 || (tail.length === 1 && !s!.outIsEth && hasKind(v, 'UNWRAP_WETH'))) cleanups++
-      if (wrap) {
-        expect(s!.amountIn).toBe(value) // spends msg.value
-        wraps++
-      } else if (s!.exactIn) {
-        expect(s!.amountIn).toBe(amount)
-        expect(s!.amountOut).toBe(floor)
-      }
-      if (permit) permits++
-      // The entry must name every token the device review names.
-      const want = new Set([...(wrap ? [] : [swap.tokenIn]), ...(s!.outIsEth ? [] : [swap.tokenOut])].map((a) => `0x${a}`))
-      expect(new Set(urTokenSet(s!))).toEqual(want)
-      if (s!.outIsEth) expect(tail[0].kind).toBe('UNWRAP_WETH')
-    }
-    expect(permits).toBeGreaterThanOrEqual(30)
-    expect(wraps).toBeGreaterThanOrEqual(1)
-    expect(splits).toBeGreaterThanOrEqual(1)
-    expect(cleanups).toBeGreaterThanOrEqual(1)
-    expect(refused).toBeGreaterThanOrEqual(1)
-  })
-
-  it(`pre-check refuses a call longer than ${UR_MAX_CALLDATA} B (the device's held-calldata buffer)`, () => {
-    for (const v of appShaped) {
-      const value = BigInt(`0x${v.value}`)
-      const s = urSummarize(urDecode(Buffer.from(v.calldata, 'hex'))!, v.router, value)
-      const pre = urPrecheck(v.router, v.calldata, value)
-      if (v.calldata.length / 2 > UR_MAX_CALLDATA) {
-        expect(pre, v.tx).toBeNull()
-      } else {
-        expect(!!pre, v.tx).toBe(!!s)
-      }
-    }
-    expect(UR_MAX_CALLDATA).toBe(1472)
-  })
-
   // Flip one byte of a 0x address, as the firmware tests do in place.
   const flip = (a: string, byte: number) => {
     const b = Buffer.from(a.slice(2), 'hex'); b[byte] ^= 1
     return `0x${b.toString('hex')}`
   }
+  const planOf = (v: Vec) => urDecode(Buffer.from(v.calldata, 'hex'))!
+  const withStep = (p: UrPlan, k: number, edit: Partial<UrStep>): UrPlan => ({ ...p, steps: p.steps.map((st, i) => (i === k ? { ...st, ...edit } : st)) })
 
   it('the clean-up step returns ETH only to the recipient the review names', () => {
     const v = [...accepted].reverse().find((c) => c.steps.length >= 3 && c.steps[c.steps.length - 1].kind === 'SWEEP' &&
       (hasKind(c, 'PERMIT2_PERMIT') || hasKind(c, 'WRAP_ETH')))!
     expect(v).toBeDefined()
     const value = BigInt(`0x${v.value}`)
-    const steps = urDecode(Buffer.from(v.calldata, 'hex'))!
-    expect(urSummarize(steps, v.router, value), v.tx).not.toBeNull()
-    const last = steps.length - 1
-    const elsewhere = steps.map((st, k) => (k === last ? { ...st, recipient: flip(st.recipient!, 0) } : st))
-    expect(urSummarize(elsewhere, v.router, value)).toBeNull()
-    const aToken = steps.map((st, k) => (k === last ? { ...st, tokenIn: flip(st.tokenIn!, 19) } : st))
-    expect(urSummarize(aToken, v.router, value)).toBeNull() // sweeping a token, not ETH
-  })
-
-  it('a split\'s second swap must match the first: same pair, same recipient', () => {
-    const split = appShaped.find((c) => c.steps.filter((st) => st.kind.includes('_SWAP_')).length === 2 &&
-      urSummarize(urDecode(Buffer.from(c.calldata, 'hex'))!, c.router, BigInt(`0x${c.value}`)))!
-    expect(split, 'no same-pair split in the vectors').toBeDefined()
-    const value = BigInt(`0x${split.value}`)
-    const steps = urDecode(Buffer.from(split.calldata, 'hex'))!
-    const second = steps.map((st) => st.kind.includes('_SWAP_')).lastIndexOf(true)
-    const pair = steps.map((st, k) => (k === second ? { ...st, tokenOut: flip(st.tokenOut!, 19) } : st))
-    expect(urSummarize(pair, split.router, value)).toBeNull()
-    const to = steps.map((st, k) => (k === second ? { ...st, recipient: flip(st.recipient!, 0) } : st))
-    expect(urSummarize(to, split.router, value)).toBeNull()
+    const plan = planOf(v)
+    expect(urSummarize(plan, v.router, value), v.tx).not.toBeNull()
+    const last = plan.steps.length - 1
+    expect(urSummarize(withStep(plan, last, { recipient: flip(plan.steps[last].recipient, 0) }), v.router, value)).toBeNull()
   })
 
   it('exact-out ETH in: the refund goes only to the recipient, and the swap may not spend more than was sent', () => {
@@ -175,35 +91,31 @@ describe('Uniswap UR pre-check against real Base swaps (firmware vectors)', () =
       c.steps[1].kind.endsWith('_SWAP_EXACT_OUT') && c.steps[2].kind === 'UNWRAP_WETH')!
     expect(v).toBeDefined()
     const value = BigInt(`0x${v.value}`)
-    const steps = urDecode(Buffer.from(v.calldata, 'hex'))!
-    const s = urSummarize(steps, v.router, value)!
+    const plan = planOf(v)
+    const s = urSummarize(plan, v.router, value)!
     expect(s.inIsEth).toBe(true)
     expect(s.exactIn).toBe(false)
     expect(s.amountIn).toBe(value) // at most what was sent
-    expect(urSummarize([steps[0], steps[1], { ...steps[2], recipient: flip(steps[2].recipient!, 0) }], v.router, value)).toBeNull()
-    expect(urSummarize([steps[0], { ...steps[1], limit: (1n << 256n) - 1n }, steps[2]], v.router, value)).toBeNull()
+    expect(urSummarize(withStep(plan, 2, { recipient: flip(plan.steps[2].recipient, 0) }), v.router, value)).toBeNull()
+    expect(urSummarize(withStep(plan, 1, { limit: value + 1n }), v.router, value)).toBeNull()
   })
 
   it('the router\'s own address means "held by the router", like ADDRESS_THIS', () => {
     // Apps encode both; e.g. WRAP_ETH to the router's address, then a V3 swap.
-    const byAddress = appShaped.filter((v) => {
-      const steps = urDecode(Buffer.from(v.calldata, 'hex'))
-      return steps?.some((s) => (s.kind === 'WRAP_ETH' || s.kind.includes('_SWAP_')) && s.recipient === v.router)
-    })
+    const byAddress = appShaped.filter((v) => planOf(v).steps.some((s) => (s.kind === 'WRAP_ETH' || s.kind.includes('_SWAP_')) && s.recipient === v.router))
     expect(byAddress.length, 'no row in the sample sends funds to the router by address').toBeGreaterThan(0)
-    for (const v of byAddress.filter((v) => v.calldata.length / 2 <= UR_MAX_CALLDATA)) {
+    for (const v of byAddress) {
       const value = BigInt(`0x${v.value}`)
       expect(urPrecheck(v.router, v.calldata, value), v.tx).not.toBeNull()
       // Called through another router, that address is just a third party.
-      const steps = urDecode(Buffer.from(v.calldata, 'hex'))!
-      expect(urSummarize(steps, '0x6ff5693b99212da76ad316178a184ab56d299b43', value), v.tx).toBeNull()
+      expect(urSummarize(planOf(v), '0x6ff5693b99212da76ad316178a184ab56d299b43', value), v.tx).toBeNull()
     }
   })
 
-  it('rejects every V4 call, with no partial plan', () => {
+  it('the V4 vectors (UR 2.0 layout, no minHopPriceX36) are refused whole, as the device refuses them', () => {
     for (const hex of v4Rejected) {
       expect(urDecode(Buffer.from(hex, 'hex'))).toBeNull()
-      expect(urPrecheck(BASE_UR12, hex, 0n)).toBeNull()
+      expect(urPrecheck(BASE_UR212, hex, 0n)).toBeNull()
     }
   })
 
@@ -216,23 +128,23 @@ describe('Uniswap UR pre-check against real Base swaps (firmware vectors)', () =
     expect(pre.tokens).toEqual(['0x41b481c3d2e3960f8f312212adfeecf6ce7c35ef', BASE_USDC])
     expect(pre.summary.permit?.amount).toBe((1n << 160n) - 1n)
     expect(pre.summary.recipientIsSender).toBe(true)
+    expect(pre.summary.hooks).toEqual([])
   })
 
   it('refuses allow-revert flags, unknown commands, and truncation', () => {
     const flagged = cd(); flagged[commandsAt(flagged)] |= 0x80
     expect(urDecode(flagged)).toBeNull()
-    const v4 = cd(); v4[commandsAt(v4)] = 0x10
-    expect(urDecode(v4)).toBeNull()
+    const unknown = cd(); unknown[commandsAt(unknown)] = 0x02
+    expect(urDecode(unknown)).toBeNull()
     for (let cut = 1; cut < cd().length; cut += 31) expect(urDecode(cd().subarray(0, cd().length - cut))).toBeNull()
   })
 
-  it('refuses a permit for another spender, ETH sent beside a token swap, and oversize calldata', () => {
+  it('refuses a permit for another spender and ETH sent beside a token swap; ignores trailing bytes as abi.decode does', () => {
     const other = '0x6ff5693b99212da76ad316178a184ab56d299b43'
     expect(urPrecheck(other, permitSwap.calldata, 0n)).toBeNull() // permit names 0x3fc9..., not this router
     expect(urPrecheck(permitSwap.router, permitSwap.calldata, 1n)).toBeNull()
-    const padded = permitSwap.calldata + '00'.repeat(UR_MAX_CALLDATA - permitSwap.calldata.length / 2 + 1)
-    expect(urDecode(Buffer.from(padded, 'hex'))).not.toBeNull() // trailing bytes decode...
-    expect(urPrecheck(permitSwap.router, padded, 0n)).toBeNull() // ...but cannot fit the first chunk
+    const padded = permitSwap.calldata + '00'.repeat(OLD_BUFFER)
+    expect(urPrecheck(permitSwap.router, padded, 0n)?.tokens).toEqual(urPrecheck(permitSwap.router, permitSwap.calldata, 0n)!.tokens)
   })
 
   it('a wrap must spend exactly msg.value', () => {
@@ -241,8 +153,7 @@ describe('Uniswap UR pre-check against real Base swaps (firmware vectors)', () =
     expect(urPrecheck(wrap.router, wrap.calldata, value)?.tokens).toHaveLength(1)
     expect(urPrecheck(wrap.router, wrap.calldata, value + 1n)).toBeNull()
     expect(urPrecheck(wrap.router, wrap.calldata, 0n)).toBeNull()
-    const steps = urDecode(Buffer.from(wrap.calldata, 'hex'))!
-    expect(urSummarize(steps, wrap.router, value)?.tokenIn).toBe(BASE_WETH)
+    expect(urSummarize(planOf(wrap), wrap.router, value)?.tokenIn).toBe(BASE_WETH)
   })
 })
 
