@@ -1,6 +1,7 @@
 import { EventEmitter } from 'events'
 import { existsSync, readFileSync } from 'fs'
 import { classifyFirmwareImage, type EmbeddedBootloader, type FirmwareImageKind } from './firmware-image-kind'
+import { verifyFirmwareSignatures } from './firmware-signature'
 import * as path from 'path'
 import * as core from '@keepkey/hdwallet-core'
 import { HIDKeepKeyAdapter } from '@keepkey/hdwallet-keepkey-nodehid'
@@ -2280,12 +2281,11 @@ export class EngineController extends EventEmitter {
     const payload = hasKpkyHeader ? data.subarray(256) : data
     const payloadHash = sha256Hex(payload)
 
-    // Signed detection: KPKY header sigindex bytes at offsets 8-10.
-    // sigindex1 > 0 means at least one signature slot is filled → signed.
-    let headerSigned = false
-    if (hasKpkyHeader) {
-      headerSigned = data[8] !== 0 || data[9] !== 0 || data[10] !== 0
-    }
+    // Signed = the header's three signatures verify against KeepKey's release
+    // keys, as the bootloader checks them. Filled signature slots are not
+    // enough: a test-key build fills them too, and the official bootloader
+    // treats it as unsigned (and wipes the device crossing that boundary).
+    const headerSigned = hasKpkyHeader && verifyFirmwareSignatures(new Uint8Array(data))
 
     // Manifest lookup — provides version AND confirms official release
     let manifestSigned = false
