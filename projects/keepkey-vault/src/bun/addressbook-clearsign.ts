@@ -145,3 +145,48 @@ export function evmRecipient(params: any): { chainId: number; address: string } 
   const to = String(params?.to || '').toLowerCase()
   return /^0x[0-9a-f]{40}$/.test(to) ? { chainId, address: to } : undefined
 }
+
+// ── Device answers (firmware #951) ───────────────────────────────────────────
+// There is no capability flag for certified contacts: a 7.16 build without
+// #951 accepts the same messages and answers them differently. These read
+// those answers; nothing here guesses from the version number.
+
+const MESSAGETYPE_ETHEREUMMETADATAACK = 116
+/** EthereumMetadataAck.display_summary for an accepted contact proof. */
+export const CONTACT_VERIFIED_SUMMARY = 'Contact verified'
+
+/**
+ * Run `sign` and report whether the device acknowledged the contact proof
+ * hdwallet sends ahead of it with "Contact verified". hdwallet only logs the
+ * EthereumMetadataAck (and swallows the Failure a build without #951 returns),
+ * so the transport's per-message event is where the answer is visible. Only
+ * that exact answer counts: "Invalid contact", MALFORMED, a Failure or no
+ * answer at all mean the device showed no certified label.
+ */
+export async function signWithContactProofAck<T>(
+  transport: { on?: (event: string, fn: (e: any) => void) => unknown; off?: (event: string, fn: (e: any) => void) => unknown } | undefined,
+  sign: () => Promise<T>,
+): Promise<{ result: T; contactVerified: boolean }> {
+  let ack: { classification?: number; displaySummary?: string } | undefined
+  const listener = (event: any) => { if (!ack) ack = event?.message ?? {} }
+  const name = String(MESSAGETYPE_ETHEREUMMETADATAACK)
+  transport?.on?.(name, listener)
+  try {
+    const result = await sign()
+    return { result, contactVerified: ack?.classification === 1 && ack?.displaySummary === CONTACT_VERIFIED_SUMMARY }
+  } finally {
+    transport?.off?.(name, listener)
+  }
+}
+
+export const ADDRESS_BOOK_CERTIFY_UNSUPPORTED =
+  'This firmware build cannot certify contacts (it has no address-book ClearSign). Nothing was certified; sends still show the full address on the device.'
+
+/**
+ * A 7.16 build without #951 routes a KKABREQ1 request into the Solana schema
+ * attestor, which answers with one of these failures. A build with #951
+ * answers "Invalid address book" for a bad request instead, never these.
+ */
+export function isAddressBookCertifyUnsupported(message: string): boolean {
+  return /AdvancedMode required for schema attestation|Invalid schema|Attestor cannot review this schema version/i.test(message)
+}

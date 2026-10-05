@@ -62,6 +62,23 @@ function requireAddressBookClearsignFirmware(): void {
 	}
 }
 
+/**
+ * Certified contacts have no capability flag (firmware #951), and 7.16 test
+ * builds with and without it share a version. Rule: offer certification on
+ * >= 7.16.0; the first attempt is the probe. If the device answers the way a
+ * build without #951 does (isAddressBookCertifyUnsupported), remember it for
+ * this device and this exact firmware image (its hash), so a reflash re-probes.
+ */
+function addressBookFirmwareKey(): string | undefined {
+	const state = engine.getDeviceState()
+	return state.deviceId && state.firmwareHash ? `${state.deviceId}:${state.firmwareHash}` : undefined
+}
+
+function addressBookCertifyUnsupported(): boolean {
+	const key = addressBookFirmwareKey()
+	return Boolean(key && getSetting('addressbook_clearsign_unsupported') === key)
+}
+
 const AUTHENTICATOR_SLOT_COUNT = 10
 
 function normalizeAuthenticatorLabel(value: unknown, field: string): string {
@@ -276,7 +293,7 @@ import type { ChainBalance, TokenBalance, CustomToken, SigningRequestInfo, ApiLo
 import type { VaultRPCSchema } from "../shared/rpc-schema"
 import { collectAndAnalyzeWithGate, MAX_CHUNK_BYTES } from "./rng-audit"
 import { withoutUnsupportedErc7730 } from '../shared/erc7730-support'
-import { buildCertificationRequest, buildContactProof, contactsFromEntries, CONTACT_DESTINATION, evmRecipient, type AddressBookCertification } from "./addressbook-clearsign"
+import { ADDRESS_BOOK_CERTIFY_UNSUPPORTED, buildCertificationRequest, buildContactProof, contactsFromEntries, CONTACT_DESTINATION, evmRecipient, isAddressBookCertifyUnsupported, signWithContactProofAck, type AddressBookCertification } from "./addressbook-clearsign"
 
 // L3 fix: withTimeout imported from engine-controller (was duplicated here)
 const PIONEER_TIMEOUT_MS = 60_000
@@ -1406,6 +1423,7 @@ function getAppSettings() {
 		preReleaseUpdates,
 		alphaFirmware,
 		addressBookClearsignEnabled,
+		addressBookCertifyUnsupported: addressBookCertifyUnsupported(),
 		privateModeEnabled,
 		passphraseIntroShown: getSetting('passphrase_intro_shown') === '1',
 		evmSimulationRpcUrls: getEvmSimulationRpcUrls(),
@@ -3502,9 +3520,15 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					void auditUnknownClearSignShape(draft, { evm: getEvmSimulationEndpoint(Number(draft.shape.chainId || 1)) })
 				}
 				try {
-					const sign = () => {
+					let contactVerified = false
+					const sign = async () => {
 						sentToDevice = true
-						return engine.wallet!.ethSignTx(effectiveParams)
+						if (!contactProofAttached) return engine.wallet!.ethSignTx(effectiveParams)
+						// Only the device's "Contact verified" ack means it showed the label.
+						const signed = await signWithContactProofAck((engine.wallet as any)?.transport, () => engine.wallet!.ethSignTx(effectiveParams))
+						contactVerified = signed.contactVerified
+						console.log(`[addressbook-clearsign] device ${contactVerified ? 'verified the contact' : 'did not verify the contact proof; no certified label was shown'}`)
+						return signed.result
 					}
 					let result: any
 					if (engine.isEmulator) {
@@ -3518,7 +3542,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					}
 					if (payload) recordClearSignEvent({
 						kind: 'transaction', outcome: 'signed', source: 'vault-rpc', chain: 'Ethereum',
-						format: 'EVM_TX_METADATA', label: 'EVM ClearSign transaction', payload,
+						format: contactProofAttached ? 'ADDRESS_BOOK_PROOF' : 'EVM_TX_METADATA',
+						label: !contactProofAttached ? 'EVM ClearSign transaction'
+							: contactVerified ? 'Certified contact (device: Contact verified)' : 'Contact proof not verified by device',
+						payload,
 						keyId: Number.isInteger(request.keyId) ? request.keyId : undefined,
 						sentToDevice, request,
 					})
@@ -3529,7 +3556,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					if (observationId) finalizeClearSignObservation(observationId, 'signed')
 					return resolvedSchema
 						? { ...result, clearSignPromotionBundleHash: (resolvedSchema as any).bundleHash }
-						: runtimeSigner ? { ...result, clearSignRuntimeSignerFingerprint: runtimeSigner.fingerprint } : result
+						: runtimeSigner ? { ...result, clearSignRuntimeSignerFingerprint: runtimeSigner.fingerprint }
+							: contactVerified ? { ...result, addressBookContactVerified: true } : result
 				} catch (cause: any) {
 					if (observationId) {
 						const rejected = /reject|cancel|denied/i.test(deviceErrorMessage(cause))
@@ -3537,7 +3565,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					}
 					if (payload) recordClearSignEvent({
 						kind: 'transaction', outcome: 'blocked', source: 'vault-rpc', chain: 'Ethereum',
-						format: 'EVM_TX_METADATA', label: 'Blocked EVM ClearSign transaction', payload,
+						format: contactProofAttached ? 'ADDRESS_BOOK_PROOF' : 'EVM_TX_METADATA',
+						label: contactProofAttached ? 'Blocked send with contact proof' : 'Blocked EVM ClearSign transaction', payload,
 						keyId: Number.isInteger(request.keyId) ? request.keyId : undefined,
 						sentToDevice, request, error: cause?.message || String(cause),
 					})
@@ -7329,11 +7358,21 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const contacts = contactsFromEntries(getAddressBookList({ kind: 'external', savedOnly: true }))
 				if (!contacts.length) throw new Error('Add at least one labeled EVM contact before certifying')
 				const revision = Math.max(0, Number(getSetting('addressbook_clearsign_revision') || '0')) + 1
+				if (addressBookCertifyUnsupported()) throw new Error(ADDRESS_BOOK_CERTIFY_UNSUPPORTED)
 				const built = buildCertificationRequest(contacts, revision)
 				const attest = () => (engine.wallet as any).clearsignAttestorSign(new Uint8Array(built.payload))
-				const result = engine.isEmulator
-					? await emuSigningOp(attest, { operation: 'clearsignAttestorSign', opLabel: 'Certify address book', chain: 'EVM' })
-					: await attest()
+				let result: any
+				try {
+					result = engine.isEmulator
+						? await emuSigningOp(attest, { operation: 'clearsignAttestorSign', opLabel: 'Certify address book', chain: 'EVM' })
+						: await attest()
+				} catch (error: any) {
+					if (!isAddressBookCertifyUnsupported(deviceErrorMessage(error))) throw error
+					const key = addressBookFirmwareKey()
+					if (key) setSetting('addressbook_clearsign_unsupported', key)
+					console.warn(`[addressbook-clearsign] firmware cannot certify contacts: ${deviceErrorMessage(error)}`)
+					throw new Error(ADDRESS_BOOK_CERTIFY_UNSUPPORTED)
+				}
 				const publicKey = Buffer.from(result.publicKey as Uint8Array).toString('hex')
 				const signature = Buffer.from(result.signature as Uint8Array).toString('hex')
 				if (publicKey.length !== 66 || signature.length !== 128) throw new Error('Device returned an invalid address-book attestation')

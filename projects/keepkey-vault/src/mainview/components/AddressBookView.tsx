@@ -55,12 +55,14 @@ export function AddressBookView() {
   const [clearSignEnabled, setClearSignEnabled] = useState(false)
   const [certifying, setCertifying] = useState(false)
   const [certificationNotice, setCertificationNotice] = useState("")
+  // No capability flag exists: a failed probe on this firmware image disables certification.
+  const [certifyUnsupported, setCertifyUnsupported] = useState(false)
 
   const clearSignSupported = !!deviceState.firmwareVersion && versionCompare(deviceState.firmwareVersion, "7.16.0") >= 0
 
   useEffect(() => {
     rpcRequest<AppSettings>("getAppSettings", undefined, 5000)
-      .then(settings => setClearSignEnabled(settings.addressBookClearsignEnabled))
+      .then(settings => { setClearSignEnabled(settings.addressBookClearsignEnabled); setCertifyUnsupported(!!settings.addressBookCertifyUnsupported) })
       .catch(() => {})
   }, [])
 
@@ -80,6 +82,9 @@ export function AddressBookView() {
     } catch (error: any) {
       const message = error?.message || "Address Book certification failed"
       setCertificationNotice(message)
+      rpcRequest<AppSettings>("getAppSettings", undefined, 5000)
+        .then(settings => setCertifyUnsupported(!!settings.addressBookCertifyUnsupported))
+        .catch(() => {})
     } finally {
       setCertifying(false)
     }
@@ -176,7 +181,8 @@ export function AddressBookView() {
           {clearSignEnabled ? "ClearSign on" : "Enable ClearSign"}
         </Button>
         {clearSignEnabled && <Button size="sm" variant="outline" borderColor="var(--teal)" color="var(--teal)" borderRadius="10px" px="3" h="34px"
-                onClick={certify} disabled={certifying || !clearSignSupported}>{certifying ? "Review on device…" : "Certify contacts"}</Button>}
+                onClick={certify} disabled={certifying || !clearSignSupported || certifyUnsupported}
+                title={certifyUnsupported ? "This firmware build cannot certify contacts" : undefined}>{certifying ? "Review on device…" : "Certify contacts"}</Button>}
         <Button size="sm" variant="outline" borderColor="var(--gold)" color="var(--gold)" borderRadius="10px" px="3" h="34px"
                 _hover={{ bg: "rgba(233,196,106,0.10)" }} onClick={() => setAddOpen(true)} flexShrink={0} title={t("addAddressHint", { defaultValue: "Add an address to your Address Book" })}>
           <Flex align="center" gap="1.5">

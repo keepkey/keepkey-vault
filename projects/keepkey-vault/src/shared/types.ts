@@ -1251,6 +1251,8 @@ export interface AppSettings {
   preReleaseUpdates: boolean     // opt-in to pre-release auto-updates (default OFF)
   alphaFirmware: boolean         // opt-in to alpha firmware channel (manifest.beta) (default OFF)
   addressBookClearsignEnabled: boolean // experimental device-certified contact labels (default OFF)
+  /** This device's current firmware image answered a certification the way a build without certified contacts does. */
+  addressBookCertifyUnsupported?: boolean
   privateModeEnabled: boolean    // hide portfolio totals from the UI (default OFF)
   passphraseIntroShown: boolean  // one-time passphrase/hidden-wallet intro dialog seen (default false)
   /** Explicit user-configured JSON-RPC endpoints used for pre-sign EVM simulation, keyed by decimal chain id. */
