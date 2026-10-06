@@ -23,7 +23,7 @@ include .env
 export ELECTROBUN_DEVELOPER_ID ELECTROBUN_TEAMID ELECTROBUN_APPLEID ELECTROBUN_APPLEIDPASS
 endif
 
-.PHONY: clearsign-worker-test clearsign-worker-deploy install dev dev-hmr build build-stable build-canary build-signed patch-arm64-release-tar prune-bundle dmg clean help vault sign-check verify verify-entitlements publish release upload-dmg upload-all-dmgs sign-release sign-release-intel verify-arch audit-macos-bundle submodules modules-install modules-build modules-clean audit build-zcash-cli build-zcash-cli-debug build-zcash-cli-intel test test-unit test-rest test-sign-gating test-zcash-cli test-emu build-intel build-signed-intel build-electrobun-x64-core build-electrobun-arm64-core prepare-electrobun-arm64-core publish-electrobun-x64-core build-electrobun-linux-x64-core publish-electrobun-linux-x64-core preflight build-emulator build-emulator-windows build-emulator-macos-release build-emulator-release clean-emulator test-emu-python
+.PHONY: clearsign-worker-test clearsign-worker-deploy install dev dev-hmr build build-stable build-canary build-signed patch-arm64-release-tar prune-bundle dmg clean help vault sign-check verify verify-entitlements publish release upload-dmg upload-all-dmgs sign-release sign-release-intel verify-arch audit-macos-bundle submodules modules-install modules-build modules-clean audit build-zcash-cli build-zcash-cli-debug build-zcash-cli-intel test test-unit test-rest test-sign-gating test-zcash-cli test-emu build-intel build-signed-intel build-electrobun-x64-core build-electrobun-arm64-core prepare-electrobun-arm64-core publish-electrobun-x64-core build-electrobun-linux-x64-core preflight build-emulator build-emulator-windows build-emulator-macos-release build-emulator-release clean-emulator test-emu-python
 
 # --- Submodules (auto-init on fresh worktrees/clones) ---
 
@@ -270,30 +270,12 @@ publish-electrobun-x64-core: build-electrobun-x64-core
 # resulting Linux Vault bundle works on Debian 12, Ubuntu 22.04, RHEL 9, etc.
 # Upstream's prebuilt core ships against glibc 2.38, which excludes those.
 #
-# Local invocation only works on an actual Ubuntu 22.04 host (or via
-# `make publish-electrobun-linux-x64-core` which runs the GH workflow).
-
-ELECTROBUN_LINUX_REPO ?= keepkey/keepkey-vault
-ELECTROBUN_LINUX_TAG ?= electrobun-linux-x64-core-v1
-# Pin to the upstream electrobun ref that matches the npm runtime version.
-ELECTROBUN_LINUX_REF ?= v1.13.1
+# Local invocation only works on an actual Ubuntu 22.04 host. CI builds it in
+# the linux-core job of build.yml; it is never published as a release.
 
 build-electrobun-linux-x64-core:
-	@echo "Building Electrobun Linux x64 core (must run on ubuntu-22.04)..."
-	ELECTROBUN_REF=$(ELECTROBUN_LINUX_REF) ./scripts/build-electrobun-linux-x64-core.sh
-
-# Triggers the GitHub workflow that builds + publishes on ubuntu-22.04.
-# Direct local publish isn't supported because the .so must be built on Linux.
-publish-electrobun-linux-x64-core:
-	@echo "Dispatching publish-electrobun-linux-x64-core.yml on $(ELECTROBUN_LINUX_REPO)..."
-	gh workflow run publish-electrobun-linux-x64-core.yml \
-		--repo $(ELECTROBUN_LINUX_REPO) \
-		--field electrobun_ref=$(ELECTROBUN_LINUX_REF) \
-		--field release_tag=$(ELECTROBUN_LINUX_TAG)
-	@echo "Watch progress: https://github.com/$(ELECTROBUN_LINUX_REPO)/actions/workflows/publish-electrobun-linux-x64-core.yml"
-	@echo ""
-	@echo "Once published, the main build workflow will pick it up automatically"
-	@echo "(see ELECTROBUN_LINUX_CORE_TAG in .github/workflows/build.yml)."
+	@echo "Building Electrobun Linux x64 core from the pinned submodule (must run on ubuntu-22.04)..."
+	./scripts/build-electrobun-linux-x64-core.sh
 
 # --- Vault ---
 
