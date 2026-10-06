@@ -3,6 +3,8 @@
 # this Vault checkout. The universal binary is required because CI derives the
 # Intel app from the arm64 app archive after Electrobun packaging.
 set -euo pipefail
+# ClearSign alpha root public key (firmware clearsign_root.c; Desktop ALPHA_ROOT_PUBLIC_KEY).
+CLEARSIGN_ALPHA_ROOT_PUBKEY=02de9231b2094433235532fb1932e324a2c7304195e12e610c675cccbbd606dae7
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FW_DIR="$REPO_ROOT/modules/keepkey-firmware"
@@ -94,12 +96,15 @@ build_arch() {
     -DNANOPB_DIR="$NANOPB_DIR" \
     -DCMAKE_C_FLAGS="-DPB_NO_PACKED_STRUCTS=1" \
     -DCMAKE_CXX_FLAGS="-DPB_NO_PACKED_STRUCTS=1"
-  grep -qx 'KK_CLEARSIGN_ALPHA_ROOT:BOOL=ON' "$build_dir/CMakeCache.txt" || {
-    echo "ERROR: $arch emulator was configured without the ClearSign alpha root"; exit 1; }
   PATH="$PYBIN:$PATH:$NANOPB_DIR/generator" cmake --build "$build_dir" \
     --target kkemulator_dylib -j"$CPU_COUNT"
   test -f "$build_dir/lib/libkkemu.dylib" || {
     echo "ERROR: $arch libkkemu.dylib missing"; exit 1; }
+  # Check the artifact, not a build option: 7.16 compiles the alpha root into
+  # every build with no flag (KK_CLEARSIGN_ALPHA_ROOT was removed), so only the
+  # public key's bytes in the library prove it is there.
+  xxd -p "$build_dir/lib/libkkemu.dylib" | tr -d '\n' | grep -q "$CLEARSIGN_ALPHA_ROOT_PUBKEY" || {
+    echo "ERROR: $arch emulator does not contain the ClearSign alpha root"; exit 1; }
   minos="$(otool -l "$build_dir/lib/libkkemu.dylib" | awk '
     $1 == "cmd" { command = $2 }
     (command == "LC_BUILD_VERSION" && $1 == "minos") ||
