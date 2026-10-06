@@ -318,9 +318,8 @@ function App() {
 	}, [])
 
 	const handlePinWipe = useCallback(async () => {
-		try {
-			await rpcRequest("wipeDevice", undefined, 0)
-		} catch (e) { console.error("wipeDevice from PIN:", e) }
+		// Errors propagate to PinEntry, which shows them and keeps the overlay open.
+		await rpcRequest("wipeDevice", undefined, 0)
 		setPinRequestType(null)
 		setPinDismissed(true)
 		setPinFailed(false)

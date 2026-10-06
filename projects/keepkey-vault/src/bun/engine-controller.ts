@@ -181,6 +181,8 @@ export class EngineController extends EventEmitter {
   // While active, sendPin/sendPassphrase must NOT call getFeatures — that would
   // race with the pending getPublicKeys and cause transport "Unexpected message".
   private promptPinActive = false
+  /** Set by the wipeDevice RPC; stops the PIN auto-prompt from racing the wipe. */
+  wipeInProgress = false
 
   get isSyncing(): boolean { return this.syncing }
   get isEmulator(): boolean { return this.activeTransport === 'emulator' }
@@ -497,7 +499,7 @@ export class EngineController extends EventEmitter {
         this.updatePhase = 'idle'
         this.emit('state-change', this.getDeviceState())
       }
-      setTimeout(() => {
+      const autoPrompt = (): void => {
         this.promptPin().catch(err => {
           console.warn('[Engine] Auto prompt-pin failed (expected if PIN flow interrupts):', err?.message)
           // A timeout leaves the transport unusable; retrying would just
@@ -511,18 +513,17 @@ export class EngineController extends EventEmitter {
           // the PIN overlay re-appears.  Without this, promptPinActive stays false,
           // lastState is already 'needs_pin', and updateState won't re-fire —
           // leaving the user with no PIN overlay while the device still needs PIN.
-          if (this.lastState === 'needs_pin' && !this.promptPinActive) {
-            setTimeout(() => {
-              if (this.lastState === 'needs_pin' && !this.promptPinActive) {
-                console.log('[Engine] Retrying prompt-pin (device still locked)')
-                this.promptPin().catch(err2 => {
-                  console.warn('[Engine] Retry prompt-pin failed:', err2?.message)
-                })
-              }
-            }, 3000)
-          }
+          // Keep retrying for as long as the device stays locked — every wrong
+          // PIN lands here. Never while a wipe owns the transport.
+          setTimeout(() => {
+            if (this.lastState === 'needs_pin' && !this.promptPinActive && !this.wipeInProgress) {
+              console.log('[Engine] Retrying prompt-pin (device still locked)')
+              autoPrompt()
+            }
+          }, 3000)
         })
-      }, delay)
+      }
+      setTimeout(autoPrompt, delay)
     }
 
     // Same for needs_passphrase — device has passphrase protection but PIN is
@@ -2039,6 +2040,11 @@ export class EngineController extends EventEmitter {
     } finally {
       this.promptPinActive = false
     }
+  }
+
+  /** Re-issue the PIN prompt after something else (a failed wipe) cancelled it. */
+  repromptPin() {
+    if (this.lastState === 'needs_pin') this.updateState('needs_pin')
   }
 
   async sendPin(pin: string) {

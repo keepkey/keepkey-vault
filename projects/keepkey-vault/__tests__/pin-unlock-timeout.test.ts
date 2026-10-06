@@ -64,4 +64,18 @@ describe('engine-controller wiring', () => {
     const block = src.slice(start, src.indexOf("if (state === 'needs_passphrase')", start))
     expect(block).toMatch(/isTransportTimeout\(err\)[\s\S]*?this\.lastError = UNLOCK_TIMEOUT_MESSAGE[\s\S]*?this\.updateState\('error'\)/)
   })
+
+  // Every wrong PIN rejects promptPin. The retry used to be a one-shot, so the
+  // second wrong PIN left a grid with no pending device request.
+  test('auto prompt-pin retries every time, never during a wipe', () => {
+    const start = src.indexOf("if (state === 'needs_pin')")
+    const block = src.slice(start, src.indexOf("if (state === 'needs_passphrase')", start))
+    expect(block).toMatch(/const autoPrompt = [\s\S]*?!this\.wipeInProgress\)[\s\S]*?autoPrompt\(\)/)
+  })
+
+  test('a failed wipe brings the PIN prompt back', () => {
+    const index = readFileSync(path.join(import.meta.dir, '../src/bun/index.ts'), 'utf8')
+    const wipe = index.slice(index.indexOf('wipeDevice: async'), index.indexOf('getPublicKeys: async'))
+    expect(wipe).toMatch(/engine\.wipeInProgress = true[\s\S]*?catch \(e\)[\s\S]*?engine\.repromptPin\(\)[\s\S]*?throw e/)
+  })
 })

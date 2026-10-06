@@ -14,7 +14,7 @@ interface PinEntryProps {
 	requestSeq?: number
 	onSubmit: (pin: string) => void
 	onCancel: () => void
-	onWipe?: () => void
+	onWipe?: () => Promise<void>
 }
 
 const TITLE_KEYS: Record<PinRequestType, string> = {
@@ -70,6 +70,7 @@ export function PinEntry({ type = "current", failed, errorDetail, requestSeq, on
 	const [showWipeConfirm, setShowWipeConfirm] = useState(false)
 	const [wipeAcknowledged, setWipeAcknowledged] = useState(false)
 	const [wiping, setWiping] = useState(false)
+	const [wipeError, setWipeError] = useState<string | null>(null)
 
 	// Show error banner when failed prop becomes true
 	useEffect(() => {
@@ -89,7 +90,15 @@ export function PinEntry({ type = "current", failed, errorDetail, requestSeq, on
 	const handleWipe = useCallback(async () => {
 		if (!onWipe) return
 		setWiping(true)
-		onWipe()
+		setWipeError(null)
+		try {
+			await onWipe()
+		} catch (e: any) {
+			console.error("wipeDevice from PIN:", e)
+			setWipeError(e?.message || String(e))
+		} finally {
+			setWiping(false)
+		}
 	}, [onWipe])
 
 	const handleDigit = useCallback((digit: string) => {
@@ -388,6 +397,16 @@ export function PinEntry({ type = "current", failed, errorDetail, requestSeq, on
 								{wiping ? t("pin.wiping") : t("pin.wipeDevice")}
 							</Button>
 						</Flex>
+						{wiping && (
+							<Text fontSize="xs" color="kk.gold" mt="3">
+								{t("pin.wipeConfirmOnDevice")}
+							</Text>
+						)}
+						{wipeError && (
+							<Text fontSize="xs" color="kk.error" mt="3">
+								{t("pin.wipeFailed", { error: wipeError })}
+							</Text>
+						)}
 					</Box>
 				)}
 

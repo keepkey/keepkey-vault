@@ -14,6 +14,8 @@
 		"wipeAcknowledge": "I have backed up my recovery phrase and understand what I am doing",
 		"wipeDevice": "Wipe Device",
 		"wiping": "Wiping...",
+		"wipeConfirmOnDevice": "Press and hold the button on your KeepKey to confirm the wipe.",
+		"wipeFailed": "Wipe failed: {{error}}. Unplug and reconnect your KeepKey, then try again.",
 		"incorrectPin": "Incorrect PIN",
 		"tryAgainDescription": "Check your KeepKey screen and try again"
 	},
