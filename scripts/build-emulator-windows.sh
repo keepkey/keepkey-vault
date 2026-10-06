@@ -15,6 +15,8 @@
 #   macOS:  brew install mingw-w64
 #   Linux:  apt-get install mingw-w64
 set -euo pipefail
+# ClearSign alpha root public key (firmware clearsign_root.c; Desktop ALPHA_ROOT_PUBLIC_KEY).
+CLEARSIGN_ALPHA_ROOT_PUBKEY=02de9231b2094433235532fb1932e324a2c7304195e12e610c675cccbbd606dae7
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FW_DIR="$REPO_ROOT/modules/keepkey-firmware"
@@ -108,13 +110,15 @@ mkdir -p "$BUILD_DIR"
     -DCMAKE_C_FLAGS="-DPB_NO_PACKED_STRUCTS=1" \
     -DCMAKE_CXX_FLAGS="-DPB_NO_PACKED_STRUCTS=1" )
 
-grep -qx 'KK_CLEARSIGN_ALPHA_ROOT:BOOL=ON' "$BUILD_DIR/CMakeCache.txt" || {
-  echo "ERROR: Windows emulator was configured without the ClearSign alpha root"; exit 1; }
 
 ( cd "$FW_DIR" && cmake --build build-emu-win --target kkemulator_dylib -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)" )
 
 DLL="$(find "$BUILD_DIR" -name 'libkkemu.dll' -o -name 'kkemu.dll' | head -1)"
 if [ -n "$DLL" ] && [ -f "$DLL" ]; then
+  # Check the artifact, not a build option: 7.16 compiles the alpha root into
+  # every build with no flag (KK_CLEARSIGN_ALPHA_ROOT was removed).
+  xxd -p "$DLL" | tr -d '\n' | grep -q "$CLEARSIGN_ALPHA_ROOT_PUBKEY" || {
+    echo "ERROR: Windows emulator does not contain the ClearSign alpha root"; exit 1; }
   required_symbols=(
     kkemu_init kkemu_shutdown kkemu_write kkemu_read kkemu_poll
     kkemu_is_running kkemu_pop_frame kkemu_start kkemu_stop

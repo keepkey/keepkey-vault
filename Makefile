@@ -455,6 +455,8 @@ EMU_INSTALL_DIR := $(HOME)/.keepkey/emulator
 # cannot exercise certified 7.16 flows and otherwise looks healthy until the
 # first certificate reaches the device.
 EMU_CLEARSIGN_ALPHA_ROOT ?= ON
+# Checked in the built library (7.16 compiles the root in with no CMake flag).
+CLEARSIGN_ALPHA_ROOT_PUBKEY := 02de9231b2094433235532fb1932e324a2c7304195e12e610c675cccbbd606dae7
 
 build-emulator:
 	@echo "=== Building emulator from current $(EMU_FW_DIR) checkout ==="
@@ -482,11 +484,13 @@ build-emulator:
 			-DNANOPB_PLUGIN="$$(command -v protoc-gen-nanopb)" \
 			-DCMAKE_C_FLAGS="-DPB_NO_PACKED_STRUCTS=1" \
 			-DCMAKE_CXX_FLAGS="-DPB_NO_PACKED_STRUCTS=1" && \
-		grep -qx 'KK_CLEARSIGN_ALPHA_ROOT:BOOL=$(EMU_CLEARSIGN_ALPHA_ROOT)' CMakeCache.txt || \
-			{ echo "ERROR: emulator ClearSign root configuration did not stick"; exit 1; }; \
 		make -j$$(sysctl -n hw.ncpu) kkemu kkemulator_dylib
 	mkdir -p $(EMU_INSTALL_DIR)
 	@if [ -f $(EMU_BUILD_DIR)/lib/libkkemu.dylib ]; then \
+		if [ "$(EMU_CLEARSIGN_ALPHA_ROOT)" = "ON" ]; then \
+			xxd -p $(EMU_BUILD_DIR)/lib/libkkemu.dylib | tr -d '\n' | grep -q $(CLEARSIGN_ALPHA_ROOT_PUBKEY) || \
+				{ echo "ERROR: emulator does not contain the ClearSign alpha root"; exit 1; }; \
+		fi; \
 		cp $(EMU_BUILD_DIR)/lib/libkkemu.dylib $(EMU_INSTALL_DIR)/libkkemu.dylib; \
 		codesign --force --sign - $(EMU_INSTALL_DIR)/libkkemu.dylib; \
 		echo "    Dylib:  $(EMU_INSTALL_DIR)/libkkemu.dylib (ad-hoc signed)"; \
