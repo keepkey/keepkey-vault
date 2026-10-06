@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react"
+import { resolveAppPhase, showWatchOnly } from "../shared/app-phase"
 import { Box, Flex, Text, Button } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
 import { PinEntry } from "./components/device/PinEntry"
@@ -48,7 +49,6 @@ import { SwapRpcMount } from "./components/SwapRpcMount"
 import { NAV_CONTENT_OFFSET, NAV_CONTENT_OFFSET_WITH_BANNER } from "./layout"
 import type { PinRequestType, PairingRequestInfo, SigningRequestInfo, ApiLogEntry, AppSettings, EmulatorStatus, CustomChain } from "../shared/types"
 
-type AppPhase = "splash" | "claimed" | "setup" | "ready"
 type SigningPhase = "approve" | "sending-payload" | "device-confirm"
 
 const SIGNING_PAYLOAD_MIN_MS = 15000
@@ -832,19 +832,7 @@ function App() {
 
 	const oobLock = !wizardComplete && (setupInProgress || oobEnteredRef.current)
 
-	const phase: AppPhase =
-		// oobLock takes priority — during OOB, transient claim errors are expected
-		// (device reboots, brief LIBUSB_ERROR_ACCESS). Don't unmount the wizard.
-		oobLock ? "setup"
-		: isClaimed ? "claimed"
-		: ["disconnected", "connected_unpaired", "error"].includes(deviceState.state) ? "splash"
-		// Firmware update skipped this session — let the user into the app on the
-		// older firmware. TopNav keeps showing the "vX → vY" update reminder.
-		: firmwareSkipped && deviceState.state === "needs_firmware" ? "ready"
-		: !wizardComplete && ["bootloader", "needs_firmware", "needs_init"].includes(deviceState.state) ? "setup"
-		: deviceState.state === "ready" ? "ready"
-		: ["needs_pin", "needs_passphrase"].includes(deviceState.state) ? "splash"
-		: "splash"
+	const phase = resolveAppPhase({ state: deviceState.state, oobLock, isClaimed, firmwareSkipped, wizardComplete })
 
 	useEffect(() => {
 		rpcRequest("logOnboarding", { event: `phase=${phase} state=${deviceState.state} wizardComplete=${wizardComplete} setupInProgress=${setupInProgress} oobEntered=${oobEnteredRef.current} firmwareSkipped=${firmwareSkipped}` }).catch(() => {})
@@ -916,8 +904,8 @@ function App() {
 
 	const incomingTxToast = <IncomingTxToast tx={incomingTx} onDismiss={dismissIncomingTx} />
 
-	// Watch-only mode: render dashboard with cached data (read-only)
-	if (watchOnlyMode) {
+	// Watch-only mode: render dashboard with cached data (read-only) — never over setup
+	if (showWatchOnly(watchOnlyMode, phase)) {
 		return (
 			<>{resizeHandles}{updateBanner}{firmwareDropZone}
 				<Flex direction="column" h="100vh" bg="transparent" color="kk.textPrimary">
