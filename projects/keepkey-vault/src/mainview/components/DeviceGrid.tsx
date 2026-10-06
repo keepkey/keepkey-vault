@@ -16,7 +16,6 @@ import type { RegisteredDevice, EmulatorStatus, EmulatorWalletInfo } from "../..
 interface DeviceGridProps {
 	onViewPortfolio: (deviceId: string, label: string) => void
 	onReady?: () => void
-	onEnableEmulator?: () => Promise<void>
 	/** When false, no emulator UI is fetched or rendered (feature flag, default off). */
 	emulatorEnabled?: boolean
 }
@@ -26,7 +25,7 @@ const SUPPORT_URL = 'https://support.keepkey.com'
 
 let hasRevealedOnce = false // module-level: skip delay after first reveal (e.g. returning from X)
 
-export function DeviceGrid({ onViewPortfolio, onReady, onEnableEmulator, emulatorEnabled = false }: DeviceGridProps) {
+export function DeviceGrid({ onViewPortfolio, onReady, emulatorEnabled = false }: DeviceGridProps) {
 	const [devices, setDevices] = useState<RegisteredDevice[]>([])
 	const [emuWallets, setEmuWallets] = useState<EmulatorWalletInfo[]>([])
 	const [emuStatus, setEmuStatus] = useState<EmulatorStatus | null>(null)
@@ -129,18 +128,6 @@ export function DeviceGrid({ onViewPortfolio, onReady, onEnableEmulator, emulato
 		setConfirmDeleteEmu(null)
 	}, [refresh])
 
-	const handleEnableEmu = useCallback(async () => {
-		if (!onEnableEmulator) return
-		setLoading("emu:__enable")
-		setError(null)
-		try {
-			await onEnableEmulator()
-		} catch (e: any) {
-			setError(e?.message || String(e) || "Emulator could not be enabled")
-		}
-		setLoading(null)
-	}, [onEnableEmulator])
-
 	// ── Helpers ──────────────────────────────────────────────────────
 
 	function formatUsd(n: number): string {
@@ -163,38 +150,6 @@ export function DeviceGrid({ onViewPortfolio, onReady, onEnableEmulator, emulato
 
 	const emuRunning = emuStatus?.state === "running"
 	const hasContent = devices.length > 0 || emuWallets.length > 0
-
-	// Emulator entry point. Rendered identically in the empty-state hero AND the
-	// populated workspace so a Start-emulator affordance is ALWAYS reachable —
-	// registered devices (hasContent) must not hide it. Parity with macOS, where
-	// the emulator flow is always offered regardless of what's already in the DB.
-	const emulatorStartCard = (!emulatorEnabled && onEnableEmulator) ? (
-		<Box
-			w="100%"
-			maxW="440px"
-			borderRadius="18px"
-			border="1px solid rgba(168,85,247,0.28)"
-			bg="rgba(168,85,247,0.06)"
-			p="5"
-		>
-			<Flex align="center" gap="3">
-				<EmulatorIcon active={false} />
-				<Box flex="1" minW="0">
-					<Text fontSize="13px" fontWeight="600" color="var(--text-0)" mb="1">
-						Testing with an emulator?
-					</Text>
-					<Text fontSize="12px" color="var(--text-2)" lineHeight="1.5">
-						Open the local emulator wallet picker without connecting a USB device.
-					</Text>
-				</Box>
-			</Flex>
-			<Box mt="3">
-				<CardCta tone="teal" onClick={handleEnableEmu} loading={loading === "emu:__enable"}>
-					Start emulator
-				</CardCta>
-			</Box>
-		</Box>
-	) : null
 
 	useEffect(() => {
 		// Always notify parent once revealed — even when empty — so SplashScreen
@@ -237,14 +192,6 @@ export function DeviceGrid({ onViewPortfolio, onReady, onEnableEmulator, emulato
 						: 'Plug in your device with the supplied USB cable to start a session. View-only wallets will appear here once you’ve paired a device.'}
 				</Text>
 			</Flex>
-
-			{/* Emulator entry point in the populated workspace — always offered,
-			    never hidden by registered devices (parity with the empty state). */}
-			{hasContent && emulatorStartCard && (
-				<Flex justify="center" mb="4">
-					{emulatorStartCard}
-				</Flex>
-			)}
 
 			{/* Error banner */}
 			{error && (
@@ -289,7 +236,6 @@ export function DeviceGrid({ onViewPortfolio, onReady, onEnableEmulator, emulato
 							</Box>
 						</Flex>
 					</Box>
-					{emulatorStartCard}
 				</Flex>
 			)}
 

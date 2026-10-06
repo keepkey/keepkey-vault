@@ -2555,16 +2555,18 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
                   </Box>
                 </HStack>
 
-                <Text
-                  fontSize="2xs"
-                  color="kk.cardBgHover"
-                  cursor="pointer"
-                  textAlign="center"
-                  _hover={{ color: 'gray.500' }}
-                  onClick={() => setDevLoadOpen(true)}
-                >
-                  Developer: load seed
-                </Text>
+                {isEmulator && (
+                  <Text
+                    fontSize="2xs"
+                    color="kk.cardBgHover"
+                    cursor="pointer"
+                    textAlign="center"
+                    _hover={{ color: 'gray.500' }}
+                    onClick={() => setDevLoadOpen(true)}
+                  >
+                    Developer: load seed
+                  </Text>
+                )}
               </VStack>
             )}
 

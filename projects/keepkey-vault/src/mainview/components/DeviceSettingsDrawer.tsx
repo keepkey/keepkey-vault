@@ -1663,8 +1663,8 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 						</VStack>
 					</Section>
 
-					{/* ── Browser use ──────────────────────────────────── */}
-					<Section title="Browser use" defaultOpen={true}>
+					{/* ── Browser use — needs the REST API, so only shown once it is on ── */}
+					{appSettings.restApiEnabled && <Section title="Browser use" defaultOpen={false}>
 						<Box>
 							<Text fontSize="sm" color="kk.textSecondary">
 								Use your existing Chrome profile with an agent. Install and pair the extension, enable its Agent Mode, then paste this prompt into your local agent. The prompt contains no credentials.
@@ -1683,7 +1683,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 							</Flex>
 							{browserPromptStatus && <Text role="status" fontSize="sm" color="kk.textSecondary" mt="2">{browserPromptStatus}</Text>}
 						</Box>
-					</Section>
+					</Section>}
 
 					{/* ── Bitcoin node (self-host) — btc-only devices ─── */}
 					{isBitcoinOnlyVariant(deviceState.firmwareVariant) && (
@@ -1692,7 +1692,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 						</Section>
 					)}
 
-					{!isBitcoinOnlyVariant(deviceState.firmwareVariant) && (
+					{!isBitcoinOnlyVariant(deviceState.firmwareVariant) && isPolicyEnabled("AdvancedMode") && (
 						<Section title="ClearSign simulation" defaultOpen={false}>
 							<VStack gap="3" align="stretch">
 								<Text fontSize="sm" color="kk.textSecondary">Use an explicit JSON-RPC provider for pre-sign execution, logs, and call traces. Vault verifies the chain ID before saving. Providers can observe transaction data.</Text>

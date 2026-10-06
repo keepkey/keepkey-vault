@@ -175,12 +175,12 @@ export function AddressBookView() {
       <Flex align="center" justify="space-between" mb="3" mt="2" gap="2">
         <Text fontSize="lg" fontWeight="700" color="var(--text-0)">{t("title", { defaultValue: "Address Book" })}</Text>
         <Flex gap="2">
-        <Button size="sm" variant="outline" borderColor={clearSignEnabled ? "var(--teal)" : "var(--line)"} color={clearSignEnabled ? "var(--teal)" : "var(--text-2)"}
-                borderRadius="10px" px="3" h="34px" onClick={toggleClearSign} disabled={!clearSignSupported}
-                title={clearSignSupported ? undefined : "Address Book ClearSign requires connected firmware 7.16.0 or newer"}>
+        {/* Unreleased-firmware feature: absent, not teased, below 7.16. */}
+        {clearSignSupported && <Button size="sm" variant="outline" borderColor={clearSignEnabled ? "var(--teal)" : "var(--line)"} color={clearSignEnabled ? "var(--teal)" : "var(--text-2)"}
+                borderRadius="10px" px="3" h="34px" onClick={toggleClearSign}>
           {clearSignEnabled ? "ClearSign on" : "Enable ClearSign"}
-        </Button>
-        {clearSignEnabled && <Button size="sm" variant="outline" borderColor="var(--teal)" color="var(--teal)" borderRadius="10px" px="3" h="34px"
+        </Button>}
+        {clearSignEnabled && clearSignSupported && <Button size="sm" variant="outline" borderColor="var(--teal)" color="var(--teal)" borderRadius="10px" px="3" h="34px"
                 onClick={certify} disabled={certifying || !clearSignSupported || certifyUnsupported}
                 title={certifyUnsupported ? "This firmware build cannot certify contacts" : undefined}>{certifying ? "Review on device…" : "Certify contacts"}</Button>}
         <Button size="sm" variant="outline" borderColor="var(--gold)" color="var(--gold)" borderRadius="10px" px="3" h="34px"

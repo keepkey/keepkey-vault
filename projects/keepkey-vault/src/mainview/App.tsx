@@ -1012,19 +1012,6 @@ function App() {
 							<DeviceGrid
 								onViewPortfolio={(id, label) => { setWatchOnlyDeviceId(id); setWatchOnlyLabel(label); setWatchOnlyMode(true) }}
 								onReady={() => setGridReady(true)}
-								onEnableEmulator={async () => {
-									const settings = await rpcRequest<AppSettings>('setEmulatorEnabled', { enabled: true }, 10000)
-									setEmulatorEnabled(settings.emulatorEnabled)
-									// Enabling the flag alone is a dead end on first run: with no flash
-									// images DeviceGrid has nothing to show and the Start card vanishes.
-									// Bootstrap and boot a default emulator wallet so "Start emulator"
-									// actually starts one (mirrors the DeviceSettingsDrawer install path).
-									const wallets = await rpcRequest<Array<{ name: string }>>('emulatorListWallets').catch(() => [])
-									if (wallets.length === 0) {
-										try { await rpcRequest('emulatorPair', undefined, 10000) } catch { /* may already be paired */ }
-										await rpcRequest('emulatorInit', { flashName: 'default' }, 30000)
-									}
-								}}
 								emulatorEnabled={emulatorEnabled}
 							/>
 							{/* Windows: a connected KeepKey can be invisible to the app if WinUSB
@@ -1041,7 +1028,8 @@ function App() {
 		return (
 			<>{splashNav}{resizeHandles}{updateBanner}{firmwareDropZone}{signingOverlay}{pairingOverlay}{passphraseOverlay}{charOverlay}{pinOverlay}
 				<OobSetupWizard onComplete={() => { setWizardComplete(true); setSetupInProgress(false) }} onSkipFirmware={() => { setFirmwareSkipped(true); setWizardComplete(true); setSetupInProgress(false) }} onSetupInProgress={setSetupInProgress} onWordCountChange={setRecoveryWordCount} />
-				<Box position="fixed" right="24px" bottom="24px" zIndex={1900} textAlign="right">
+				{/* Developer-only: shown once the emulator is enabled in Settings. */}
+				{emulatorEnabled && <Box position="fixed" right="24px" bottom="24px" zIndex={1900} textAlign="right">
 					{emulatorStartError && <Text mb="2" maxW="340px" fontSize="12px" color="kk.error">{emulatorStartError}</Text>}
 					<Button
 						onClick={startEmulatorFromSetup}
@@ -1055,7 +1043,7 @@ function App() {
 					>
 						{startingEmulator ? "Starting Emulator…" : "Use Emulator"}
 					</Button>
-				</Box>
+				</Box>}
 			</>
 		)
 	}
