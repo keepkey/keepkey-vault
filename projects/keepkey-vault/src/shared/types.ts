@@ -83,6 +83,8 @@ export interface DeviceStateInfo {
    *  (v7.14.0-zcash) are recognised in-house builds, not official releases. */
   firmwareRelease?: string
   bootloaderVerified?: boolean
+  /** Release tag of a recognized bootloader, e.g. "v1.0.3". */
+  bootloaderRelease?: string
   error?: string | null
   isEmulator: boolean
   /** True when using a hidden wallet (non-empty passphrase). Reports and chain

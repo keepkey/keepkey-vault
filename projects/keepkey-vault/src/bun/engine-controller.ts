@@ -746,6 +746,7 @@ export class EngineController extends EventEmitter {
     firmwareVerified?: boolean
     bootloaderVerified?: boolean
     firmwareRelease?: string
+    bootloaderRelease?: string
   } {
     const fwHash = base64ToHex(features?.firmwareHash)
     const blHash = base64ToHex(features?.bootloaderHash)
@@ -762,11 +763,13 @@ export class EngineController extends EventEmitter {
       firmwareVerified = !!firmwareRelease && OFFICIAL_RELEASE_TAG.test(firmwareRelease)
     }
 
+    let bootloaderRelease: string | undefined
     if (blHash && this.manifest?.hashes) {
-      bootloaderVerified = blHash in (this.manifest.hashes.bootloader || {})
+      bootloaderRelease = this.manifest.hashes.bootloader?.[blHash]
+      bootloaderVerified = !!bootloaderRelease
     }
 
-    return { firmwareHash: fwHash, bootloaderHash: blHash, firmwareVerified, bootloaderVerified, firmwareRelease }
+    return { firmwareHash: fwHash, bootloaderHash: blHash, firmwareVerified, bootloaderVerified, firmwareRelease, bootloaderRelease }
   }
 
   // ── State Sync (called on USB attach + startup) ────────────────────────
@@ -1588,6 +1591,7 @@ export class EngineController extends EventEmitter {
       firmwareVerified: hashes.firmwareVerified,
       firmwareRelease: hashes.firmwareRelease,
       bootloaderVerified: hashes.bootloaderVerified,
+      bootloaderRelease: hashes.bootloaderRelease,
       error: this.lastError,
       isEmulator: this.activeTransport === 'emulator',
       isHiddenWallet: this.hiddenWalletActive,
