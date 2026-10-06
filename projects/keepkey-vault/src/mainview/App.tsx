@@ -1092,7 +1092,13 @@ function App() {
 				/>
 				<Flex flex="1" direction="column" overflow="auto" pt={showBanner ? NAV_CONTENT_OFFSET_WITH_BANNER : NAV_CONTENT_OFFSET} pb={bottomBar ? "38px" : "4"} transition="padding-top 0.2s">
 				{/* TopNav offset plus banner height when visible. */}
-					{activeTab === "vault" && <Dashboard onLoaded={handlePortfolioLoaded} onOpenSettings={() => setSettingsOpen(true)} firmwareVersion={deviceState.firmwareVersion} firmwareVariant={deviceState.firmwareVariant} forceRefresh={wizardComplete} onForceRefreshConsumed={() => setWizardComplete(false)} isHiddenWallet={deviceState.isHiddenWallet} />}
+					{/* Kept mounted while another tab is open: a remount re-ran the mount
+					    fetch, so coming back from Address Book refreshed balances every
+					    time (always for passphrase wallets, which keep no cache). Only
+					    the refresh button fetches. */}
+					<Flex flex="1" direction="column" display={activeTab === "vault" ? "flex" : "none"}>
+						<Dashboard onLoaded={handlePortfolioLoaded} onOpenSettings={() => setSettingsOpen(true)} firmwareVersion={deviceState.firmwareVersion} firmwareVariant={deviceState.firmwareVariant} forceRefresh={wizardComplete} onForceRefreshConsumed={() => setWizardComplete(false)} isHiddenWallet={deviceState.isHiddenWallet} />
+					</Flex>
 					{activeTab === "explore" && <AppStore onOpenApp={handleOpenApp} onOpenKeepKey={handleOpenKeepKey} />}
 					{activeTab === "addresses" && <AddressBookView />}
 				</Flex>
