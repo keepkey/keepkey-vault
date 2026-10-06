@@ -85,6 +85,13 @@ export interface DeviceStateInfo {
   bootloaderVerified?: boolean
   /** Release tag of a recognized bootloader, e.g. "v1.0.3". */
   bootloaderRelease?: string
+  /** True when the device-reported firmware hash names a bundled release file
+   *  whose KeepKey release signatures Desktop verified. Undefined: not checked. */
+  firmwareSignaturesVerified?: boolean
+  /** What setup/update would install, and whether that bundled file's KeepKey
+   *  release signatures verified. Absent when the file is not bundled. */
+  installFirmware?: { version: string; signed: boolean }
+  installBootloader?: { version: string; signed: boolean }
   error?: string | null
   isEmulator: boolean
   /** True when using a hidden wallet (non-empty passphrase). Reports and chain

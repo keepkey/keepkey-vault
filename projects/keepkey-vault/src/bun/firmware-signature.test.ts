@@ -2,7 +2,8 @@ import { describe, expect, test } from 'bun:test'
 import { existsSync, readFileSync } from 'fs'
 import { join } from 'path'
 
-import { verifyFirmwareSignatures } from './firmware-signature'
+import { scanBundledImages, verifyFirmwareSignatures } from './firmware-signature'
+import { resolveOndeviceFirmwareVersion } from '../shared/firmware-versions'
 
 const bundled = (version: string) => new Uint8Array(readFileSync(join(import.meta.dir, '../../firmware-bundle', version, 'firmware.keepkey.bin')))
 
@@ -33,5 +34,23 @@ describe('firmware signature verification (the "SIGNED" badge)', () => {
     const image = new Uint8Array(readFileSync(testImage))
     expect([image[8], image[9], image[10]]).toEqual([1, 2, 3])
     expect(verifyFirmwareSignatures(image)).toBe(false)
+  })
+})
+
+// Setup says "signed by KeepKey" for a device whose reported hash names a
+// bundled file. That only holds if the bundle is keyed by the hash the device
+// reports (full file, header included) and every shipped image verifies.
+describe('bundled release images', () => {
+  const images = scanBundledImages(join(import.meta.dir, '../../firmware-bundle'))
+  test('every shipped image carries valid KeepKey signatures', () => {
+    expect(images.size).toBeGreaterThanOrEqual(4)
+    for (const image of images.values()) expect(image).toEqual({ relPath: image.relPath, signed: true })
+  })
+  test('keys are the device-reported firmware hashes', () => {
+    const byPath = new Map([...images].map(([hash, image]) => [image.relPath, hash]))
+    for (const version of ['v7.10.0', 'v7.14.0', 'v7.14.1']) {
+      expect(resolveOndeviceFirmwareVersion(byPath.get(`${version}/firmware.keepkey.bin`))).toBe(version)
+    }
+    expect(byPath.has('bl_v2.1.4/blupdater.bin')).toBe(true)
   })
 })
