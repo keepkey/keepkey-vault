@@ -19,7 +19,7 @@
  * "genuine" — the factory firmware is replaced in the next step anyway.
  */
 import type { ComponentProps, ReactNode } from "react"
-import { Box, Button, Flex, HStack, Text, VStack } from "@chakra-ui/react"
+import { Box, Button, Flex, HStack, SimpleGrid, Text, VStack } from "@chakra-ui/react"
 import { FaCheck, FaChevronRight, FaKey, FaShieldAlt } from "react-icons/fa"
 import { rpcRequest } from "../lib/rpc"
 import { authenticityVerdict } from "../../shared/firmware-authenticity"
@@ -37,8 +37,8 @@ function openUrl(url: string) {
 /** Seal that draws itself once: ring, then tick. Static under reduced motion. */
 function Seal() {
 	return (
-		<Box position="relative" w="92px" h="92px" className="kkAuthSeal">
-			<svg width="92" height="92" viewBox="0 0 92 92" aria-hidden="true">
+		<Box position="relative" w="60px" h="60px" flexShrink={0} className="kkAuthSeal">
+			<svg width="60" height="60" viewBox="0 0 92 92" aria-hidden="true">
 				<circle cx="46" cy="46" r="40" fill="none" stroke="rgba(72,187,120,0.15)" strokeWidth="6" />
 				<circle className="kkAuthRing" cx="46" cy="46" r="40" fill="none" stroke={GREEN} strokeWidth="6"
 					strokeLinecap="round" transform="rotate(-90 46 46)" />
@@ -61,8 +61,8 @@ function CheckRow({ icon, tone, title, detail, who, index }: {
 }) {
 	const color = tone === "pass" ? GREEN : tone === "warn" ? AMBER : GOLD
 	return (
-		<HStack gap="3" align="start" w="100%" className="kkAuthRow" style={{ animationDelay: `${450 + index * 120}ms` }}>
-			<Flex flexShrink={0} w="28px" h="28px" borderRadius="full" align="center" justify="center"
+		<HStack gap="2.5" align="start" w="100%" className="kkAuthRow" style={{ animationDelay: `${450 + index * 120}ms` }}>
+			<Flex flexShrink={0} w="24px" h="24px" borderRadius="full" align="center" justify="center"
 				bg={`${color}1F`} color={color} border="1px solid" borderColor={`${color}55`}>
 				{icon}
 			</Flex>
@@ -71,7 +71,7 @@ function CheckRow({ icon, tone, title, detail, who, index }: {
 					<Text fontSize="sm" fontWeight="600" color="gray.100">{title}</Text>
 					<Text fontSize="2xs" color="gray.500" letterSpacing="0.04em" textTransform="uppercase">{who}</Text>
 				</HStack>
-				<Text fontSize="xs" color="gray.400" lineHeight="1.5">{detail}</Text>
+				<Text fontSize="xs" color="gray.400" lineHeight="1.4">{detail}</Text>
 			</VStack>
 		</HStack>
 	)
@@ -145,7 +145,7 @@ export function FirmwareAuthenticity({
 	const accent = passed ? GREEN : verdict === "unrecognized" ? AMBER : "gray.500"
 
 	return (
-		<VStack gap={4} w="100%" maxW="640px" mx="auto">
+		<VStack gap={3} w="100%" maxW="760px" mx="auto">
 			<style>{`
 				.kkAuthRing { stroke-dasharray: 252; stroke-dashoffset: 252; animation: kkAuthDraw 700ms ease-out 100ms forwards; }
 				.kkAuthTick { stroke-dasharray: 50; stroke-dashoffset: 50; animation: kkAuthDraw 350ms ease-out 650ms forwards; }
@@ -161,16 +161,18 @@ export function FirmwareAuthenticity({
 			`}</style>
 
 			<Box w="100%" bg="rgba(255,255,255,0.03)" border="1px solid" borderColor={passed ? `${GREEN}40` : `${GOLD}33`}
-				borderRadius="2xl" p={{ base: 5, md: 7 }}>
-				<VStack gap={5} align="stretch">
+				borderRadius="2xl" p={{ base: 4, md: 5 }}>
+				<VStack gap={4} align="stretch">
 					{passed ? (
-						<VStack gap={3}>
+						<HStack gap={4} align="center">
 							<Seal />
-							<Text fontSize="2xl" fontWeight="800" color="white" letterSpacing="-0.02em" textAlign="center">
-								{headline}
-							</Text>
-							<Text fontSize="sm" color="gray.400" textAlign="center" maxW="440px">{subline}</Text>
-						</VStack>
+							<VStack gap="0.5" align="start" minW={0}>
+								<Text fontSize="2xl" fontWeight="800" color="white" letterSpacing="-0.02em" lineHeight="1.15">
+									{headline}
+								</Text>
+								<Text fontSize="sm" color="gray.400">{subline}</Text>
+							</VStack>
+						</HStack>
 					) : (
 						<VStack gap={2} align="stretch">
 							<HStack gap={3} align="center">
@@ -187,13 +189,13 @@ export function FirmwareAuthenticity({
 						</VStack>
 					)}
 
-					<VStack gap={3.5} align="stretch">
+					<SimpleGrid columns={{ base: 1, md: 2 }} gapX={5} gapY={3}>
 						{rows.map((r, i) => <CheckRow key={r.title} index={i} {...r} />)}
-					</VStack>
+					</SimpleGrid>
 
 					{/* The limits and the do-it-yourself path stay one click away.
 					    ponytail: native <details> — no state, no animation lib. */}
-					<Box bg="rgba(0,0,0,0.25)" borderRadius="md" p={3} as="details">
+					<Box bg="rgba(0,0,0,0.25)" borderRadius="md" px={3} py={2} as="details">
 						<Text as="summary" fontSize="xs" color="gray.500" cursor="pointer" _marker={{ color: "gray.600" }}>
 							How this is checked
 						</Text>
