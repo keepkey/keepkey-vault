@@ -13,15 +13,16 @@ set -euo pipefail
 # Designed to run in CI on ubuntu-22.04. Will refuse to run elsewhere unless
 # ALLOW_NON_2204=1 is set (e.g. when iterating in a container).
 #
-# Pinned to upstream tag v1.13.1 by default (matches the npm `electrobun@1.13.1`
-# the runtime depends on). Override with ELECTROBUN_REF=<tag-or-branch>.
+# Builds the commit modules/electrobun is pinned to, so the core always matches
+# the runtime (a v1.13.1 core under electrobun 1.18.1 lacked 35 native symbols
+# and Linux would not start). Override with ELECTROBUN_REF=<tag-or-branch>.
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SUBMODULE="$REPO_ROOT/modules/electrobun"
 PKG_DIR="$SUBMODULE/package"
 OUTPUT_DIR="$REPO_ROOT/artifacts"
 TARBALL="$OUTPUT_DIR/electrobun-core-linux-x64.tar.gz"
-ELECTROBUN_REF="${ELECTROBUN_REF:-v1.13.1}"
+ELECTROBUN_REF="${ELECTROBUN_REF:-HEAD}"
 
 echo "=== Building Electrobun Linux x64 core ==="
 echo "Target ref:  $ELECTROBUN_REF"
