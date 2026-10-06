@@ -16,12 +16,12 @@ interface RecoveryWordEntryProps {
   errorType?: string | null
 }
 
+// Same grid as the KeepKey's own cipher screen: 2 rows of 13, a–m over n–z
+// (firmware app_layout.h CIPHER_ROWS / CIPHER_LETTER_BY_ROW), so the user
+// finds each letter where they just saw it on the device.
 const ALPHABET_ROWS = [
-  ["a", "b", "c", "d", "e", "f"],
-  ["g", "h", "i", "j", "k", "l"],
-  ["m", "n", "o", "p", "q", "r"],
-  ["s", "t", "u", "v", "w", "x"],
-  ["y", "z"],
+  "abcdefghijklm".split(""),
+  "nopqrstuvwxyz".split(""),
 ]
 
 const MAX_CHARS = 4
@@ -327,7 +327,7 @@ export function RecoveryWordEntry({
         border="1px solid"
         borderColor="kk.border"
         p="6"
-        maxW="480px"
+        maxW="760px"
         w="95%"
         boxShadow="0 8px 32px rgba(0,0,0,0.6)"
       >
@@ -441,13 +441,16 @@ export function RecoveryWordEntry({
         {/* Letter keyboard */}
         <VStack gap="2" mb="4">
           {ALPHABET_ROWS.map((row, i) => (
-            <Flex key={i} gap="2" justifyContent="center">
+            <Flex key={i} gap="1.5" justifyContent="center" w="100%">
               {row.map((letter) => (
                 <Button
                   key={letter}
                   onClick={() => handleChar(letter)}
-                  w="52px"
-                  h="44px"
+                  flex="1"
+                  minW="0"
+                  maxW="48px"
+                  h="48px"
+                  px="0"
                   bg="kk.cardBg"
                   border="1px solid"
                   borderColor="kk.border"
