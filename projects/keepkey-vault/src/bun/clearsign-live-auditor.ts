@@ -434,10 +434,17 @@ export async function auditSolanaIdentity(draft: ClearSignObservationDraft, endp
 }
 
 /** Enrich an unknown shape with reproducible public-chain identity evidence. Never promotes coverage. */
+// The auditor sends contract addresses to third parties (sourcify,
+// raw.githubusercontent, idl-one) and writes audit jobs to disk. Developer
+// tooling: off until the host opens the gate (emulator, online, no passphrase).
+let auditAllowed: () => boolean = () => false
+export function setClearSignAuditGate(gate: () => boolean): void { auditAllowed = gate }
+
 export async function auditUnknownClearSignShape(
   draft: ClearSignObservationDraft,
   endpoints: { evm?: string; solana?: string },
 ): Promise<void> {
+  if (!auditAllowed()) return
   // Keep the read-only evidence adapters independent from application/DB
   // startup. The persistence layer is needed only by this queue entry point.
   const { claimClearSignAuditJob, completeClearSignAuditJob, failClearSignAuditJob } = await import('./db')

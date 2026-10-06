@@ -256,7 +256,7 @@ import { EvmAddressManager, evmAddressPath } from "./evm-addresses"
 import { shouldResetManagersOnReady, nextReadyDeviceId } from "../shared/device-switch"
 import { isManagerSeedStale } from "../shared/seed-reconcile"
 import { WalletConnectManager } from "./walletconnect"
-import { auditUnknownClearSignShape } from "./clearsign-live-auditor"
+import { auditUnknownClearSignShape, setClearSignAuditGate } from "./clearsign-live-auditor"
 import { classifyEffectExposure, observeEvmCall, observeEvmTypedData, observeMalformedSolanaTransaction, observeSolanaTransaction } from "./clearsign-observation"
 import { getClearSignProtectionCaseStudies } from "./clearsign-case-studies"
 import { getEvmSimulationEndpoint, getEvmSimulationRpcUrls } from "./evm-simulation-config"
@@ -861,6 +861,7 @@ const perf = (label: string) => console.log(`[PERF] +${Date.now() - BOOT_START}m
 
 // ── Engine Controller (constructors are lightweight — no I/O) ────────
 const engine = new EngineController()
+setClearSignAuditGate(() => engine.isEmulator && !offlineMode && !engine.isPassphraseWallet)
 
 /**
  * ClearSign evidence is device-scoped and local-only. Hidden/passphrase
@@ -1665,7 +1666,8 @@ const restCallbacks: RestApiCallbacks = {
 		// Local integration runs may bypass only the host preview gate so a test
 		// driver can inspect the real firmware screens one at a time. The device
 		// confirmation path remains interactive and unchanged.
-		if (process.env.KEEPKEY_TEST_APPROVE_HOST_SIGNING === '1') {
+		// Emulator only: never skips the approval screen for a real device.
+		if (process.env.KEEPKEY_TEST_APPROVE_HOST_SIGNING === '1' && engine.isEmulator) {
 			console.log(`[REST] Explicit test environment approved host signing gate for ${info.method}`)
 			return { approved: true }
 		}

@@ -2058,7 +2058,7 @@ export class EngineController extends EventEmitter {
 
   async sendPin(pin: string) {
     if (!this.wallet) throw new Error('No device connected')
-    console.log(`[Engine] sendPin: ${pin.length} positions (pinRequests=${this.pinRequestCount}, promptPinActive=${this.promptPinActive})`)
+    console.log(`[Engine] sendPin (pinRequests=${this.pinRequestCount}, promptPinActive=${this.promptPinActive})`)
     this.pinAwaitingResult = true
     await this.wallet.sendPin(pin)
     // Don't call getFeatures if another operation owns the transport:
@@ -2293,20 +2293,16 @@ export class EngineController extends EventEmitter {
     // treats it as unsigned (and wipes the device crossing that boundary).
     const headerSigned = hasKpkyHeader && verifyFirmwareSignatures(new Uint8Array(data))
 
-    // Manifest lookup — provides version AND confirms official release
-    let manifestSigned = false
+    // Manifest lookup — version label only. The manifest hash skips the
+    // header that holds the signatures, so it cannot vouch for them.
     let manifestVersion: string | null = null
 
     if (this.manifest?.hashes) {
       const fwVersion = this.manifest.hashes.firmware?.[payloadHash]
-      if (fwVersion) {
-        manifestSigned = true
-        manifestVersion = fwVersion.replace(/^v/, '')
-      }
+      if (fwVersion) manifestVersion = fwVersion.replace(/^v/, '')
     }
 
-    // Combined: signed if header has signatures OR manifest recognizes the hash
-    const isSigned = headerSigned || manifestSigned
+    const isSigned = headerSigned
 
     // Version detection: manifest version is authoritative.
     // Fallback: scan binary for "VERSION" marker followed by semver pattern.
@@ -2374,7 +2370,9 @@ export class EngineController extends EventEmitter {
       willWipeDevice,
       isBitcoinOnly,
       imageKind,
-      embeddedBootloader,
+      // An official bootloader inside an updater that does not itself verify
+      // could be a decoy copy; only a signed updater vouches for it.
+      embeddedBootloader: embeddedBootloader && { ...embeddedBootloader, official: embeddedBootloader.official && headerSigned },
     }
   }
 
