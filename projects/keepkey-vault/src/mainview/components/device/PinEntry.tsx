@@ -4,6 +4,8 @@ import { useTranslation } from "react-i18next"
 import type { PinRequestType } from "../../../shared/types"
 import { KeepKeyUILogo } from "../logo/keepkey-ui"
 import { Z } from "../../lib/z-index"
+import { rpcRequest } from "../../lib/rpc"
+import { DOCS_LINKS } from "../../../shared/docs-links"
 
 interface PinEntryProps {
 	type?: PinRequestType
@@ -173,12 +175,28 @@ export function PinEntry({ type = "current", failed, errorDetail, requestSeq, on
 						"0 0 0 1px rgba(233,196,106,0.22), 0 0 40px -6px rgba(233,196,106,0.18), 0 24px 60px -16px rgba(0,0,0,0.8), 0 4px 12px -4px rgba(0,0,0,0.5)",
 				}}
 			>
+				{/* Setting a PIN is two entries; users who skim miss that and get stuck. */}
+				{type !== "current" && (
+					<Flex justify="center" mb="3">
+						<Text fontSize="xs" fontWeight="700" letterSpacing="0.08em" textTransform="uppercase"
+							color="kk.gold" border="1px solid" borderColor="rgba(233,196,106,0.45)" borderRadius="full" px="3" py="1">
+							{t("pin.setupStep", { step: type === "new-first" ? 1 : 2 })}
+						</Text>
+					</Flex>
+				)}
 				<Text fontSize="xl" fontWeight="bold" mb="2" textAlign="center" color="kk.textPrimary">
 					{t(TITLE_KEYS[type])}
 				</Text>
-				<Text color="kk.textSecondary" fontSize="sm" mb="6" textAlign="center">
+				<Text color="kk.textSecondary" fontSize="sm" mb="2" textAlign="center">
 					{t(DESCRIPTION_KEYS[type])}
 				</Text>
+				{/* openUrl RPC: target="_blank" is a dead click in Electrobun. */}
+				<Flex justify="center" mb="5">
+					<Box as="button" type="button" fontSize="xs" color="kk.gold" textDecoration="underline"
+						onClick={() => rpcRequest("openUrl", { url: DOCS_LINKS.pinScrambled }).catch(() => {})}>
+						{t("pin.howPinWorks")}
+					</Box>
+				</Flex>
 
 				{!showWipeConfirm && (<>
 				{/* Incorrect PIN error banner */}
