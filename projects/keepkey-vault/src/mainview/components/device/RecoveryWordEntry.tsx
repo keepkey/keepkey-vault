@@ -70,6 +70,12 @@ export function RecoveryWordEntry({
       prevWordPos.current = wordPos
       return () => clearTimeout(timer)
     }
+    if (wordPos < prevWordPos.current) {
+      // Back a word: the device dropped the word separator and is editing the
+      // previous word again, letters intact. Show as many as it reports.
+      setWordAccepted(false)
+      setCurrentChars(Array(characterPos).fill("\u2022"))
+    }
     prevWordPos.current = wordPos
   }, [wordPos])
 
@@ -92,11 +98,19 @@ export function RecoveryWordEntry({
     [currentChars.length, onCharacter],
   )
 
+  // On an empty word, Backspace goes back to the previous word: the device
+  // deletes the separating space (firmware recovery_delete_character, which
+  // also decrements its word count) and asks for the previous word again.
+  const canGoBackAWord = currentChars.length === 0 && wordPos > 0
   const handleBackspace = useCallback(() => {
-    if (currentChars.length === 0) return
+    if (wordAccepted) return
+    if (currentChars.length === 0) {
+      if (wordPos > 0) onDelete()
+      return
+    }
     setCurrentChars((prev) => prev.slice(0, -1))
     onDelete()
-  }, [currentChars.length, onDelete])
+  }, [currentChars.length, wordPos, wordAccepted, onDelete])
 
   const handleSubmitWord = useCallback(() => {
     if (isFinalWord) {
@@ -478,10 +492,10 @@ export function RecoveryWordEntry({
             borderColor="kk.border"
             color="kk.textSecondary"
             _hover={{ borderColor: "kk.gold", color: "kk.textPrimary" }}
-            disabled={currentChars.length === 0}
+            disabled={wordAccepted || (currentChars.length === 0 && wordPos === 0)}
             flex={1}
           >
-            {t('recovery.backspace')}
+            {canGoBackAWord ? t('recovery.previousWord', { n: wordPos }) : t('recovery.backspace')}
           </Button>
           <Button
             onClick={handleSubmitWord}
