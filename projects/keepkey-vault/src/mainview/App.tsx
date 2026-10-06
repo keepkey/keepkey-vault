@@ -59,6 +59,10 @@ function App() {
 	const update = useUpdateState()
 	const [wizardComplete, setWizardComplete] = useState(false)
 	const [setupInProgress, setSetupInProgress] = useState(false)
+	// Wallet generated during this session's setup: balances are known to be 0,
+	// so the dashboard shows 0 while it confirms instead of a wall of spinners.
+	const [freshWallet, setFreshWallet] = useState(false)
+	const handleWalletCreated = useCallback(() => setFreshWallet(true), [])
 	// Session-only firmware-update skip. When the user chooses "skip" in the OOB
 	// wizard's firmware step we let them into the app on the older firmware, but
 	// we deliberately never persist this — it resets on disconnect so the update
@@ -682,7 +686,7 @@ function App() {
 
 	// Reset portfolioLoaded only on disconnect (not transient state changes)
 	useEffect(() => {
-		if (deviceState.state === "disconnected") setPortfolioLoaded(false)
+		if (deviceState.state === "disconnected") { setPortfolioLoaded(false); setFreshWallet(false) }
 	}, [deviceState.state])
 
 	// Watch-only: note the cache when disconnected (tiles open it), auto-exit when a device connects
@@ -1013,7 +1017,7 @@ function App() {
 	if (phase === "setup") {
 		return (
 			<>{splashNav}{resizeHandles}{updateBanner}{firmwareDropZone}{signingOverlay}{pairingOverlay}{passphraseOverlay}{charOverlay}{pinOverlay}
-				<OobSetupWizard onComplete={() => { setWizardComplete(true); setSetupInProgress(false) }} onSkipFirmware={() => { setFirmwareSkipped(true); setWizardComplete(true); setSetupInProgress(false) }} onSetupInProgress={setSetupInProgress} onWordCountChange={setRecoveryWordCount} />
+				<OobSetupWizard onComplete={() => { setWizardComplete(true); setSetupInProgress(false) }} onSkipFirmware={() => { setFirmwareSkipped(true); setWizardComplete(true); setSetupInProgress(false) }} onSetupInProgress={setSetupInProgress} onWordCountChange={setRecoveryWordCount} onWalletCreated={handleWalletCreated} />
 				{/* Developer-only: shown once the emulator is enabled in Settings. */}
 				{emulatorEnabled && <Box position="fixed" right="24px" bottom="24px" zIndex={1900} textAlign="right">
 					{emulatorStartError && <Text mb="2" maxW="340px" fontSize="12px" color="kk.error">{emulatorStartError}</Text>}
@@ -1095,7 +1099,7 @@ function App() {
 					    time (always for passphrase wallets, which keep no cache). Only
 					    the refresh button fetches. */}
 					<Flex flex="1" direction="column" display={activeTab === "vault" ? "flex" : "none"}>
-						<Dashboard onLoaded={handlePortfolioLoaded} onOpenSettings={() => setSettingsOpen(true)} firmwareVersion={deviceState.firmwareVersion} firmwareVariant={deviceState.firmwareVariant} forceRefresh={wizardComplete} onForceRefreshConsumed={() => setWizardComplete(false)} isHiddenWallet={deviceState.isHiddenWallet} />
+						<Dashboard onLoaded={handlePortfolioLoaded} onOpenSettings={() => setSettingsOpen(true)} firmwareVersion={deviceState.firmwareVersion} firmwareVariant={deviceState.firmwareVariant} forceRefresh={wizardComplete} onForceRefreshConsumed={() => setWizardComplete(false)} isHiddenWallet={deviceState.isHiddenWallet} knownEmpty={freshWallet} />
 					</Flex>
 					{activeTab === "explore" && <AppStore onOpenApp={handleOpenApp} onOpenKeepKey={handleOpenKeepKey} />}
 					{activeTab === "addresses" && <AddressBookView />}
