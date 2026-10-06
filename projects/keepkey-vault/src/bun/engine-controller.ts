@@ -1999,13 +1999,15 @@ export class EngineController extends EventEmitter {
     // standard wallet derived earlier this session). Every subsequent
     // GetPublicKey/GetAddress — including "view address on device" — then shows the
     // wrong wallet until a physical reconnect power-cycles the device and clears the
-    // cache. ClearSession drops the cached seed + passphrase + PIN over USB, so the
-    // device re-prompts and re-derives from the correct seed with no reconnect needed.
-    // Skipped on the emulator: a ClearSession right after ApplySettings can leave a
+    // cache. Initialize drops the cached seed + passphrase (firmware
+    // session_clear(false)) but keeps the PIN, so the device re-derives from the
+    // correct seed and asks only for the passphrase. ClearSession would also drop
+    // the PIN, and the user entered the PIN once for ApplySettings and again here.
+    // Skipped on the emulator: a reset right after ApplySettings can leave a
     // stale ButtonAck in the ring buffer (emulators reconnect for clean state).
     if (opts.usePassphrase !== undefined && this.activeTransport !== 'emulator') {
-      await this.wallet.clearSession()
-      // Session is now empty — the device will re-prompt for PIN/passphrase. Drop our
+      await this.wallet.initialize()
+      // Seed + passphrase are gone — the device will re-prompt for the passphrase. Drop our
       // session classification so it's re-established on re-entry (sendPassphrase sets
       // hiddenWalletActive; deriveState routes through needs_pin → needs_passphrase).
       this.passphraseSetThisSession = false
