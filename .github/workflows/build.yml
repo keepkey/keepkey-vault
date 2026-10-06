@@ -945,10 +945,15 @@ jobs:
             echo "tag=v0.0.0-dev" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Download all artifacts
+      # Only the app's build artifacts. Everything downloaded here is uploaded to
+      # the release (artifacts/**/*), so a job-to-job hand-off artifact such as
+      # electrobun-core-linux-x64 must never match: it once shipped as a release
+      # asset because this step downloaded every artifact in the run.
+      - name: Download release artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
+          pattern: keepkey-vault-*
           merge-multiple: true
 
       - name: Generate combined checksums
