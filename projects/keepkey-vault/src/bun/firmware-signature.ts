@@ -1,4 +1,6 @@
 import { createHash } from 'crypto'
+import { readdirSync, readFileSync } from 'fs'
+import { join } from 'path'
 import { secp256k1 } from '@noble/curves/secp256k1'
 
 /**
@@ -39,4 +41,27 @@ export function verifyFirmwareSignatures(data: Uint8Array): boolean {
       return false
     }
   })
+}
+
+export interface BundledImage { relPath: string; signed: boolean }
+
+/**
+ * Every image shipped in firmware-bundle/<release>/, keyed by its full-file
+ * SHA-256. That is the hash a device reports for the firmware it runs (the
+ * 256-byte header, signature slots included, is part of it), so a device hash
+ * found here names an exact file whose signatures we checked. Read once by the
+ * caller; the bundle does not change at runtime.
+ */
+export function scanBundledImages(bundleDir: string): Map<string, BundledImage> {
+  const images = new Map<string, BundledImage>()
+  let releases: string[] = []
+  try { releases = readdirSync(bundleDir, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name) } catch { return images }
+  for (const release of releases) {
+    for (const name of readdirSync(join(bundleDir, release))) {
+      if (!name.endsWith('.bin')) continue
+      const data = new Uint8Array(readFileSync(join(bundleDir, release, name)))
+      images.set(createHash('sha256').update(data).digest('hex'), { relPath: `${release}/${name}`, signed: verifyFirmwareSignatures(data) })
+    }
+  }
+  return images
 }

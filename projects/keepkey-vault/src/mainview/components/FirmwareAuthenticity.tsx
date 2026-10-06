@@ -95,6 +95,9 @@ export function FirmwareAuthenticity({
 	bootloaderHash,
 	bootloaderVerified,
 	bootloaderRelease,
+	firmwareSignaturesVerified,
+	installFirmware,
+	installBootloader,
 	onContinue,
 }: {
 	firmwareHash?: string
@@ -103,6 +106,9 @@ export function FirmwareAuthenticity({
 	bootloaderHash?: string
 	bootloaderVerified?: boolean
 	bootloaderRelease?: string
+	firmwareSignaturesVerified?: boolean
+	installFirmware?: { version: string; signed: boolean }
+	installBootloader?: { version: string; signed: boolean }
 	onContinue: () => void
 }) {
 	const verdict = authenticityVerdict(firmwareHash, firmwareVerified, bootloaderVerified)
@@ -113,7 +119,9 @@ export function FirmwareAuthenticity({
 		: verdict === "unrecognized" ? "Firmware not in the release list" : "Firmware can't be checked"
 
 	const subline = verdict === "verified"
-		? `Firmware${firmwareRelease ? ` ${firmwareRelease}` : ""} matches an official KeepKey release.`
+		? firmwareSignaturesVerified
+			? `Firmware${firmwareRelease ? ` ${firmwareRelease}` : ""} is signed by KeepKey. Desktop verified its release signatures.`
+			: `Firmware${firmwareRelease ? ` ${firmwareRelease}` : ""} matches an official KeepKey release.`
 		: verdict === "genuine"
 			? `Its bootloader${bootloaderRelease ? ` ${bootloaderRelease}` : ""} matches an official KeepKey release.`
 			: verdict === "unrecognized"
@@ -129,11 +137,22 @@ export function FirmwareAuthenticity({
 			detail: "Not in the release list. Compare its hash with the bootloader you expected." })
 	}
 	if (verdict === "verified") {
-		rows.push({ icon: <FaCheck size={11} />, tone: "pass", title: "Firmware", who: "Desktop checked",
-			detail: `Official KeepKey release${firmwareRelease ? ` ${firmwareRelease}` : ""}.` })
+		rows.push({ icon: <FaCheck size={11} />, tone: "pass", title: firmwareSignaturesVerified ? "Firmware signed by KeepKey" : "Firmware", who: "Desktop checked",
+			detail: firmwareSignaturesVerified
+				? `${firmwareRelease ? `Release ${firmwareRelease} carries` : "Carries"} three valid KeepKey release signatures.`
+				: `Official KeepKey release${firmwareRelease ? ` ${firmwareRelease}` : ""}.` })
 	} else if (verdict === "genuine") {
-		rows.push({ icon: <FaChevronRight size={10} />, tone: "info", title: "Firmware", who: "Next step",
-			detail: "Your KeepKey ships with factory firmware. Desktop installs the latest official firmware next." })
+		// The factory firmware reports nothing to check, but what Desktop is about
+		// to install is in hand: its release signatures are verified right here.
+		const signedInstalls = [
+			installFirmware?.signed && `firmware ${installFirmware.version}`,
+			installBootloader?.signed && `bootloader ${installBootloader.version}`,
+		].filter(Boolean) as string[]
+		rows.push(signedInstalls.length
+			? { icon: <FaCheck size={11} />, tone: "pass", title: "Update signed by KeepKey", who: "Desktop checked",
+				detail: `Next, Desktop installs ${signedInstalls.join(" and ")}. Their KeepKey release signatures verified.` }
+			: { icon: <FaChevronRight size={10} />, tone: "info", title: "Firmware", who: "Next step",
+				detail: "Your KeepKey ships with factory firmware. Desktop installs the latest official firmware next." })
 	}
 	rows.push({ icon: <FaShieldAlt size={11} />, tone: passed ? "pass" : "info", title: "Signature check", who: "On the device",
 		detail: "Before it runs any firmware, your KeepKey checks it for KeepKey's release signatures and warns you if they are missing." })

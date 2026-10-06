@@ -1158,6 +1158,9 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
                 bootloaderHash={deviceStatus?.bootloaderHash}
                 bootloaderVerified={deviceStatus?.bootloaderVerified}
                 bootloaderRelease={deviceStatus?.bootloaderRelease}
+                firmwareSignaturesVerified={deviceStatus?.firmwareSignaturesVerified}
+                installFirmware={deviceStatus?.installFirmware}
+                installBootloader={deviceStatus?.installBootloader}
                 onContinue={() => setStep('intro')}
               />
             )}

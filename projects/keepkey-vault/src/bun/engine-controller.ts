@@ -1,7 +1,7 @@
 import { EventEmitter } from 'events'
 import { existsSync, readFileSync } from 'fs'
 import { classifyFirmwareImage, type EmbeddedBootloader, type FirmwareImageKind } from './firmware-image-kind'
-import { verifyFirmwareSignatures } from './firmware-signature'
+import { scanBundledImages, verifyFirmwareSignatures, type BundledImage } from './firmware-signature'
 import * as path from 'path'
 import * as core from '@keepkey/hdwallet-core'
 import { HIDKeepKeyAdapter } from '@keepkey/hdwallet-keepkey-nodehid'
@@ -653,6 +653,22 @@ export class EngineController extends EventEmitter {
   }
 
   /** Return the active channel entry (beta when alpha opt-in, else latest). */
+  private bundledImagesCache?: Map<string, BundledImage>
+  /** Bundled release images by full-file hash, signatures checked once. */
+  private bundledImages(): Map<string, BundledImage> {
+    return this.bundledImagesCache ??= scanBundledImages(getBundledFirmwareDir())
+  }
+
+  /** Signature status of a release Desktop would install. Undefined unless the
+   *  file ships in the bundle: a download is checked when it is fetched, not here. */
+  private installTarget(ref?: { version: string; url: string }): { version: string; signed: boolean } | undefined {
+    if (!ref) return undefined
+    for (const image of this.bundledImages().values()) {
+      if (image.relPath === ref.url) return { version: ref.version, signed: image.signed }
+    }
+    return undefined
+  }
+
   private getChannelEntry(): FirmwareManifest['latest'] | null {
     if (!this.manifest) return null
     if (this.alphaFirmware && this.manifest.beta) return this.manifest.beta
@@ -747,6 +763,7 @@ export class EngineController extends EventEmitter {
     bootloaderVerified?: boolean
     firmwareRelease?: string
     bootloaderRelease?: string
+    firmwareSignaturesVerified?: boolean
   } {
     const fwHash = base64ToHex(features?.firmwareHash)
     const blHash = base64ToHex(features?.bootloaderHash)
@@ -769,7 +786,11 @@ export class EngineController extends EventEmitter {
       bootloaderVerified = !!bootloaderRelease
     }
 
-    return { firmwareHash: fwHash, bootloaderHash: blHash, firmwareVerified, bootloaderVerified, firmwareRelease, bootloaderRelease }
+    // The device hash is the full-file hash, so a bundled match names the exact
+    // file — and that file's signatures are checkable here.
+    const firmwareSignaturesVerified = fwHash && this.bundledImages().get(fwHash)?.signed === true ? true : undefined
+
+    return { firmwareHash: fwHash, bootloaderHash: blHash, firmwareVerified, bootloaderVerified, firmwareRelease, bootloaderRelease, firmwareSignaturesVerified }
   }
 
   // ── State Sync (called on USB attach + startup) ────────────────────────
@@ -1592,6 +1613,9 @@ export class EngineController extends EventEmitter {
       firmwareRelease: hashes.firmwareRelease,
       bootloaderVerified: hashes.bootloaderVerified,
       bootloaderRelease: hashes.bootloaderRelease,
+      firmwareSignaturesVerified: hashes.firmwareSignaturesVerified,
+      installFirmware: this.installTarget(this.getChannelEntry()?.firmware),
+      installBootloader: this.installTarget(this.getChannelEntry()?.bootloader),
       error: this.lastError,
       isEmulator: this.activeTransport === 'emulator',
       isHiddenWallet: this.hiddenWalletActive,
