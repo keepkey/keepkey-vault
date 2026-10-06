@@ -8,6 +8,10 @@ import { Z } from "../../lib/z-index"
 interface PinEntryProps {
 	type?: PinRequestType
 	failed?: boolean
+	/** Device's Failure for the last PIN sent; code 7 = Failure_PinInvalid. */
+	errorDetail?: { code?: number; message?: string } | null
+	/** Bumps on every device PinMatrixRequest (new scramble). */
+	requestSeq?: number
 	onSubmit: (pin: string) => void
 	onCancel: () => void
 	onWipe?: () => void
@@ -59,7 +63,7 @@ const PIN_ANIMATIONS = `
  * The device screen shows scrambled numbers; the user taps
  * position-based buttons (1-9) on this grid.
  */
-export function PinEntry({ type = "current", failed, onSubmit, onCancel, onWipe }: PinEntryProps) {
+export function PinEntry({ type = "current", failed, errorDetail, requestSeq, onSubmit, onCancel, onWipe }: PinEntryProps) {
 	const { t } = useTranslation("device")
 	const [pin, setPin] = useState("")
 	const [showError, setShowError] = useState(false)
@@ -71,6 +75,9 @@ export function PinEntry({ type = "current", failed, onSubmit, onCancel, onWipe 
 	useEffect(() => {
 		if (failed) setShowError(true)
 	}, [failed])
+
+	// The device re-scrambles on every PinMatrixRequest, so a partial entry is stale.
+	useEffect(() => { setPin("") }, [requestSeq])
 
 	// Reset pin when type changes (e.g. new-first -> new-second)
 	useEffect(() => {
@@ -182,7 +189,9 @@ export function PinEntry({ type = "current", failed, onSubmit, onCancel, onWipe 
 							{t("pin.incorrectPin")}
 						</Text>
 						<Text fontSize="xs" color="kk.textSecondary" mt="1">
-							{t("pin.tryAgainDescription")}
+							{errorDetail?.code !== undefined && errorDetail.code !== 7 && errorDetail.message
+								? `Device: ${errorDetail.message}`
+								: t("pin.tryAgainDescription")}
 						</Text>
 					</Box>
 				)}

@@ -272,6 +272,8 @@ function App() {
 	const [pinRequestType, setPinRequestType] = useState<PinRequestType | null>(null)
 	const [pinDismissed, setPinDismissed] = useState(false)
 	const [pinFailed, setPinFailed] = useState(false)
+	const [pinErrorDetail, setPinErrorDetail] = useState<{ code?: number; message?: string } | null>(null)
+	const [pinRequestSeq, setPinRequestSeq] = useState(0)
 	const pinDismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
 	useEffect(() => {
@@ -279,6 +281,7 @@ function App() {
 			if (pinDismissTimer.current) { clearTimeout(pinDismissTimer.current); pinDismissTimer.current = null }
 			setPinDismissed(false) // new request from device resets dismiss
 			setPinRequestType(payload.type as PinRequestType)
+			setPinRequestSeq((n) => n + 1) // device re-scrambled its matrix — clear partial entry
 		})
 	}, [])
 
@@ -286,7 +289,8 @@ function App() {
 	// Reset pinFailed first so the false→true transition fires the
 	// useEffect inside PinEntry even if it was already true.
 	useEffect(() => {
-		return onRpcMessage("pin-error", () => {
+		return onRpcMessage("pin-error", (detail) => {
+			setPinErrorDetail(detail ?? null)
 			setPinFailed(false)
 			// Batch in next tick so React sees the transition
 			queueMicrotask(() => setPinFailed(true))
@@ -859,7 +863,7 @@ function App() {
 	) : null
 
 	const pinOverlay = pinRequestType && !passphraseRequested ? (
-		<PinEntry type={pinRequestType} failed={pinFailed} onSubmit={handlePinSubmit} onCancel={handlePinCancel} onWipe={handlePinWipe} />
+		<PinEntry type={pinRequestType} failed={pinFailed} errorDetail={pinErrorDetail} requestSeq={pinRequestSeq} onSubmit={handlePinSubmit} onCancel={handlePinCancel} onWipe={handlePinWipe} />
 	) : null
 
 	const charOverlay = (charRequest || recoveryError) ? (
