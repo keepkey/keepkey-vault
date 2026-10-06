@@ -12,6 +12,7 @@ import { HttpError } from './auth'
 import { isBitcoinOnlyVariant, DEFAULT_AUTO_LOCK_MS } from '../shared/flags'
 import type { DeviceStateInfo, ActiveTransport, UpdatePhase, DeviceState, FirmwareManifest, PinRequestType, Bip85DeriveParams, Bip85DisplayResult } from '../shared/types'
 import { resolveOndeviceFirmwareVersion } from '../shared/firmware-versions'
+import { flashWipeReason, type WipeReason } from '../shared/flash-wipe'
 import { EmulatorKeepKeyAdapter } from './emulator-transport'
 import { requestUnlock, isTransportTimeout, UNLOCK_TIMEOUT_MESSAGE } from './pin-unlock'
 import { forceReleaseWebUsb } from './webusb-recovery'
@@ -2303,6 +2304,7 @@ export class EngineController extends EventEmitter {
     isDowngrade: boolean
     isSameVersion: boolean
     willWipeDevice: boolean
+    wipeReason?: WipeReason
     isBitcoinOnly: boolean
     imageKind: FirmwareImageKind
     embeddedBootloader?: EmbeddedBootloader
@@ -2359,31 +2361,40 @@ export class EngineController extends EventEmitter {
     // Use resolved BL version (hash→version from manifest) when raw features lack it
     const deviceBootloaderVersion = this.getDeviceState().bootloaderVersion || this.cachedFeatures?.bootloaderVersion || null
 
-    // In bootloader mode, extractVersion() returns the BL version (not FW).
-    // The pre-existing firmware version is not available in bootloader mode.
+    // In bootloader mode, extractVersion() returns the BL version (not FW), but
+    // the bootloader still reports the INSTALLED firmware's hash (usb_flash.c
+    // handler_initialize, same meta+app hash as firmware mode), so the release
+    // table names it. An unrecognized hash stays unknown — never a guess.
     let currentFirmwareVersion: string | null = null
+    let currentFirmwareVerified: boolean | undefined
     if (this.cachedFeatures && !isBootloaderMode) {
       currentFirmwareVersion = this.extractVersion(this.cachedFeatures)
       if (currentFirmwareVersion === '0.0.0') currentFirmwareVersion = null
+      currentFirmwareVerified = this.verifyHashes(this.cachedFeatures).firmwareVerified
+    } else if (this.cachedFeatures) {
+      const installed = resolveOndeviceFirmwareVersion(base64ToHex(this.cachedFeatures.firmwareHash))
+      if (installed) {
+        currentFirmwareVersion = installed.match(/^v?(\d+\.\d+\.\d+)/)?.[1] ?? null
+        currentFirmwareVerified = OFFICIAL_RELEASE_TAG.test(installed)
+      }
     }
-
-    const currentFirmwareVerified = this.cachedFeatures && !isBootloaderMode
-      ? this.verifyHashes(this.cachedFeatures).firmwareVerified : undefined
 
     // Version comparison (only meaningful when we know both versions)
     let isDowngrade = false
     let isSameVersion = false
-    if (detectedVersion && currentFirmwareVersion) {
+    // Firmware images only: an updater's version is the BOOTLOADER's.
+    if (imageKind === 'firmware' && detectedVersion && currentFirmwareVersion) {
       isSameVersion = detectedVersion === currentFirmwareVersion
       isDowngrade = this.versionLessThan(detectedVersion, currentFirmwareVersion)
     }
 
-    // Crossing the signed/unsigned boundary in EITHER direction wipes the device.
-    // In bootloader mode we can't know the previous firmware state, so we can't determine this.
-    const willWipeDevice = !isBootloaderMode && (
-      (!isSigned && currentFirmwareVerified === true) ||   // signed → unsigned
-      (isSigned && currentFirmwareVerified === false)      // unsigned → signed
-    )
+    // Crossing the signed/unsigned boundary in EITHER direction wipes the device
+    // (bootloader should_restore). A downgrade wipes too: the older firmware
+    // finds a newer storage format at boot and resets it (owner policy: a
+    // downgrade wiping is expected; say so plainly). Unknown installed
+    // firmware claims neither.
+    const wipeReason = flashWipeReason({ isSigned, currentFirmwareVerified, isDowngrade })
+    const willWipeDevice = wipeReason !== undefined
 
     return {
       isSigned,
@@ -2398,6 +2409,7 @@ export class EngineController extends EventEmitter {
       isDowngrade,
       isSameVersion,
       willWipeDevice,
+      wipeReason,
       isBitcoinOnly,
       imageKind,
       // An official bootloader inside an updater that does not itself verify
