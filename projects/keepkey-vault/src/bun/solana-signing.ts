@@ -6,6 +6,7 @@ import {
   SolanaTxParseError,
 } from './solana-tx'
 import { prepareSolanaX402DeviceMetadata } from './solana-x402'
+import { findPromotedSolanaArtifact } from './clearsign-artifact-resolver'
 
 export type SolanaDeviceSigner = (params: any) => Promise<any>
 export type SolanaAddressDeriver = (addressNList: number[]) => Promise<string>
@@ -39,6 +40,12 @@ export async function signSolanaWireTransaction(
 
   const messageBytes = solanaMessageSlice(fullTx, parsed)
   const message = parseSolanaMessage(messageBytes)
+  const promoted = unsignedTx.schema ? undefined : findPromotedSolanaArtifact(
+    typeof unsignedTx.rawTx === 'string' ? unsignedTx.rawTx : Buffer.from(unsignedTx.rawTx).toString('base64'),
+  )
+  const effectiveUnsignedTx = promoted ? {
+    ...unsignedTx, schema: promoted.schema, certificate: promoted.certificate,
+  } : unsignedTx
   if (message.header.numRequiredSignatures !== parsed.sigCount) {
     throw new Error(
       `[${logPrefix}] Signature count mismatch: wrapper declares ${parsed.sigCount}, ` +
@@ -46,7 +53,7 @@ export async function signSolanaWireTransaction(
     )
   }
 
-  const addressNList = unsignedTx.addressNList || unsignedTx.address_n
+  const addressNList = effectiveUnsignedTx.addressNList || effectiveUnsignedTx.address_n
   if (!Array.isArray(addressNList)) {
     throw new Error(`[${logPrefix}] addressNList is required to select the signer slot`)
   }
@@ -75,11 +82,11 @@ export async function signSolanaWireTransaction(
     )
   }
 
-  const x402Metadata = unsignedTx.x402
-    ? prepareSolanaX402DeviceMetadata(message, unsignedTx.x402, signerPublicKey)
+  const x402Metadata = effectiveUnsignedTx.x402
+    ? prepareSolanaX402DeviceMetadata(message, effectiveUnsignedTx.x402, signerPublicKey)
     : undefined
   const deviceParams = {
-    ...unsignedTx,
+    ...effectiveUnsignedTx,
     ...(x402Metadata || {}),
     rawTx: Buffer.from(messageBytes).toString('base64'),
   }
@@ -108,5 +115,6 @@ export async function signSolanaWireTransaction(
   return {
     signature: sigBytes,
     serializedTx: rawBytes.toString('base64'),
+    ...(promoted ? { clearSignPromotionBundleHash: promoted.bundleHash } : {}),
   }
 }

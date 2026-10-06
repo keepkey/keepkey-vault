@@ -9,10 +9,6 @@ import type { EIP712DecodedField, EIP712DecodedInfo } from '../shared/types'
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
-function getNestedValue(obj: any, dotPath: string): any {
-  return dotPath.split('.').reduce((o, key) => o?.[key], obj)
-}
-
 function humanizeFieldName(name: string): string {
   // camelCase → Title Case: "maxFeePerGas" → "Max Fee Per Gas"
   return name
@@ -70,6 +66,117 @@ interface KnownDescriptor {
   match: (typedData: any) => boolean
   operationName: string
   extract: (message: any) => EIP712DecodedField[]
+  protocolIdentity?: (typedData: any, message: any) => boolean
+}
+
+function exactFields(typedData: any, typeName: string, expected: Array<[string, string]>): boolean {
+  const fields = typedData.types?.[typeName]
+  return Array.isArray(fields) && fields.length === expected.length &&
+    expected.every(([name, type], index) => fields[index]?.name === name && fields[index]?.type === type)
+}
+
+const isPermit2 = (typedData: any) =>
+  typedData.domain?.verifyingContract?.toLowerCase() === PERMIT2_ADDRESS
+
+const UNISWAPX_REACTORS: Record<string, Record<number, string[]>> = {
+  V3DutchOrder: {
+    1: ['0x0000000015757c461808ea25eb309638b62681cf'], 10: ['0x000000000923439a92dae8930613568824108631'],
+    56: ['0x00000000a55e50c71b70db3c8b58749cd1e18eb2'], 130: ['0x000000005af66799d1a6317714d66800f9ca1406'],
+    137: ['0x00000000bab6e234db8ad638b6a6395b7c499bc4'], 143: ['0x000000000ac008f7e07210cfb6648e40249232c2'],
+    196: ['0x000000005af66799d1a6317714d66800f9ca1406'], 480: ['0x00000000d714ea34028930b762e96bfbe50f42c2'],
+    1868: ['0x000000005af66799d1a6317714d66800f9ca1406'], 4217: ['0x00000000fc1e66c9f582566ead00108e55f1c0c6'],
+    4663: ['0x000000007a1c8e570011eedf86a2a35593013cba'], 5042: ['0x0000000015134054ea82ae0bb9fda66b36402c36'],
+    8453: ['0x000000008a8330b5d1f43a62bf4c673a49f27ba0'], 42161: ['0xb274d5f4b833b61b340b654d600a864fb604a87c'],
+    42220: ['0x00000000b8077fdf2281a80be96f6c282b5d943a'], 43114: ['0x00000000862ccf095823fc7576fa6c7e6b7385ef'],
+    81457: ['0x0000000086f50c5e1a2500602183d4390a7ffc98'], 7777777: ['0x000000002c9a3812e15cf233190992e9a57edb56'],
+  },
+  ExclusiveDutchOrder: { 1: ['0x6000da47483062a0d734ba3dc7576ce6a0b645c4'], 137: ['0x6000da47483062a0d734ba3dc7576ce6a0b645c4'] },
+  V2DutchOrder: { 1: ['0x00000011f84b9aa48e5f8aa8b9897600006289be'], 42161: ['0x1bd1aadc9e230626c44a139d7e70d842749351eb'] },
+  PriorityOrder: { 130: ['0x00000006021a6bce796be7ba509bbba71e956e37'], 8453: ['0x000000001ec5656dcdb24d90dfa42742738de729'] },
+  HybridOrder: { 1301: ['0x000000000c75276d956cc35218ca8f132d877957'] },
+}
+
+function verifiedUniswapXReactor(type: string, td: any, message: any): boolean {
+  const chainId = Number(td.domain?.chainId)
+  const reactor = String(message.witness?.info?.reactor || '').toLowerCase()
+  const spender = String(message.spender || '').toLowerCase()
+  return reactor === spender && Boolean(UNISWAPX_REACTORS[type]?.[chainId]?.includes(reactor))
+}
+
+function tokenPermissionFields(message: any, batch: boolean): EIP712DecodedField[] {
+  const permitted = batch
+    ? (Array.isArray(message.permitted) ? message.permitted : [])
+    : message.permitted ? [message.permitted] : []
+  const fields: EIP712DecodedField[] = []
+  permitted.forEach((item: any, index: number) => {
+    const prefix = permitted.length > 1 ? `[${index + 1}] ` : ''
+    fields.push(
+      { label: `${prefix}Token`, value: formatValue(item.token, 'address'), format: 'address', raw: item.token },
+      { label: `${prefix}Maximum Amount`, value: formatValue(item.amount, 'amount'), format: 'amount', raw: item.amount },
+    )
+  })
+  fields.push(
+    { label: 'Spender', value: formatValue(message.spender, 'address'), format: 'address', raw: message.spender },
+    { label: 'Nonce', value: formatValue(message.nonce, 'raw'), format: 'raw', raw: message.nonce },
+    { label: 'Deadline', value: formatValue(message.deadline, 'datetime'), format: 'datetime', raw: message.deadline },
+  )
+  return fields
+}
+
+const ORDER_INFO_FIELDS: Array<[string, string]> = [
+  ['reactor', 'address'], ['swapper', 'address'], ['nonce', 'uint256'], ['deadline', 'uint256'],
+  ['additionalValidationContract', 'address'], ['additionalValidationData', 'bytes'],
+]
+
+function exactPermitWitnessEnvelope(td: any, witnessType: string): boolean {
+  if (!isPermit2(td) || td.primaryType !== 'PermitWitnessTransferFrom' ||
+    !exactFields(td, 'TokenPermissions', [['token', 'address'], ['amount', 'uint256']])) return false
+  return exactFields(td, 'PermitWitnessTransferFrom', [
+    ['permitted', 'TokenPermissions'], ['spender', 'address'], ['nonce', 'uint256'],
+    ['deadline', 'uint256'], ['witness', witnessType],
+  ])
+}
+
+function exactWitnessEnvelope(td: any, witnessType: string): boolean {
+  return exactPermitWitnessEnvelope(td, witnessType) && exactFields(td, 'OrderInfo', ORDER_INFO_FIELDS)
+}
+
+function orderInfoFields(witness: any): EIP712DecodedField[] {
+  const info = witness?.info || {}
+  return [
+    { label: 'Reactor / Spender', value: formatValue(info.reactor, 'address'), format: 'address', raw: info.reactor },
+    { label: 'Swapper', value: formatValue(info.swapper, 'address'), format: 'address', raw: info.swapper },
+    { label: 'Order Deadline', value: formatValue(info.deadline, 'datetime'), format: 'datetime', raw: info.deadline },
+    { label: 'Order Nonce', value: formatValue(info.nonce, 'raw'), format: 'raw', raw: info.nonce },
+    { label: 'Extra Validation Contract', value: formatValue(info.additionalValidationContract, 'address'), format: 'address', raw: info.additionalValidationContract },
+  ]
+}
+
+function outputFields(outputs: any[], amountKeys: string[]): EIP712DecodedField[] {
+  const fields: EIP712DecodedField[] = []
+  ;(Array.isArray(outputs) ? outputs : []).forEach((output: any, index: number) => {
+    const prefix = `Output ${index + 1}`
+    fields.push(
+      { label: `${prefix} Token`, value: formatValue(output.token, 'address'), format: 'address', raw: output.token },
+      ...amountKeys.map(key => ({
+        label: `${prefix} ${humanizeFieldName(key)}`,
+        value: formatValue(output[key], 'amount'), format: 'amount' as const, raw: output[key],
+      })),
+      { label: `${prefix} Recipient`, value: formatValue(output.recipient, 'address'), format: 'address', raw: output.recipient },
+    )
+  })
+  return fields
+}
+
+function uniswapXBaseFields(message: any, inputToken: any, inputAmounts: Array<[string, any]>, outputs: any[], outputAmounts: string[]): EIP712DecodedField[] {
+  const witness = message.witness || {}
+  return [
+    ...tokenPermissionFields(message, false),
+    ...orderInfoFields(witness),
+    { label: 'Input Token', value: formatValue(inputToken, 'address'), format: 'address', raw: inputToken },
+    ...inputAmounts.map(([label, value]) => ({ label, value: formatValue(value, 'amount'), format: 'amount' as const, raw: value })),
+    ...outputFields(outputs, outputAmounts),
+  ]
 }
 
 const KNOWN_DESCRIPTORS: KnownDescriptor[] = [
@@ -102,9 +209,9 @@ const KNOWN_DESCRIPTORS: KnownDescriptor[] = [
   },
   // Uniswap Permit2 — PermitSingle
   {
-    match: (td) =>
-      td.domain?.verifyingContract?.toLowerCase() === PERMIT2_ADDRESS &&
-      td.primaryType === 'PermitSingle',
+    match: (td) => isPermit2(td) && td.primaryType === 'PermitSingle' &&
+      exactFields(td, 'PermitSingle', [['details', 'PermitDetails'], ['spender', 'address'], ['sigDeadline', 'uint256']]) &&
+      exactFields(td, 'PermitDetails', [['token', 'address'], ['amount', 'uint160'], ['expiration', 'uint48'], ['nonce', 'uint48']]),
     operationName: 'Permit2 (Single)',
     extract: (msg) => {
       const details = msg.details || {}
@@ -120,9 +227,9 @@ const KNOWN_DESCRIPTORS: KnownDescriptor[] = [
   },
   // Uniswap Permit2 — PermitBatch
   {
-    match: (td) =>
-      td.domain?.verifyingContract?.toLowerCase() === PERMIT2_ADDRESS &&
-      td.primaryType === 'PermitBatch',
+    match: (td) => isPermit2(td) && td.primaryType === 'PermitBatch' &&
+      exactFields(td, 'PermitBatch', [['details', 'PermitDetails[]'], ['spender', 'address'], ['sigDeadline', 'uint256']]) &&
+      exactFields(td, 'PermitDetails', [['token', 'address'], ['amount', 'uint160'], ['expiration', 'uint48'], ['nonce', 'uint48']]),
     operationName: 'Permit2 (Batch)',
     extract: (msg) => {
       const details = Array.isArray(msg.details) ? msg.details : []
@@ -141,6 +248,155 @@ const KNOWN_DESCRIPTORS: KnownDescriptor[] = [
       )
       return fields
     },
+  },
+  // Permit2 one-time signature transfers. Unlike allowance permits, the
+  // signed amount is a maximum and the calling spender chooses the actual
+  // recipient/amount in the subsequent contract call.
+  {
+    match: (td) => isPermit2(td) && td.primaryType === 'PermitTransferFrom' &&
+      exactFields(td, 'PermitTransferFrom', [['permitted', 'TokenPermissions'], ['spender', 'address'], ['nonce', 'uint256'], ['deadline', 'uint256']]) &&
+      exactFields(td, 'TokenPermissions', [['token', 'address'], ['amount', 'uint256']]),
+    operationName: 'Permit2 Signature Transfer',
+    extract: (msg) => tokenPermissionFields(msg, false),
+  },
+  {
+    match: (td) => isPermit2(td) && td.primaryType === 'PermitBatchTransferFrom' &&
+      exactFields(td, 'PermitBatchTransferFrom', [['permitted', 'TokenPermissions[]'], ['spender', 'address'], ['nonce', 'uint256'], ['deadline', 'uint256']]) &&
+      exactFields(td, 'TokenPermissions', [['token', 'address'], ['amount', 'uint256']]),
+    operationName: 'Permit2 Batch Signature Transfer',
+    extract: (msg) => tokenPermissionFields(msg, true),
+  },
+  // UniswapX V3 Dutch orders. Match every signed struct exactly: a familiar
+  // type name is not sufficient evidence for these auction semantics.
+  {
+    match: (td) => exactWitnessEnvelope(td, 'V3DutchOrder') &&
+      exactFields(td, 'V3DutchOrder', [['info', 'OrderInfo'], ['cosigner', 'address'], ['startingBaseFee', 'uint256'], ['baseInput', 'V3DutchInput'], ['baseOutputs', 'V3DutchOutput[]']]) &&
+      exactFields(td, 'V3DutchInput', [['token', 'address'], ['startAmount', 'uint256'], ['curve', 'NonlinearDutchDecay'], ['maxAmount', 'uint256'], ['adjustmentPerGweiBaseFee', 'uint256']]) &&
+      exactFields(td, 'V3DutchOutput', [['token', 'address'], ['startAmount', 'uint256'], ['curve', 'NonlinearDutchDecay'], ['recipient', 'address'], ['minAmount', 'uint256'], ['adjustmentPerGweiBaseFee', 'uint256']]) &&
+      exactFields(td, 'NonlinearDutchDecay', [['relativeBlocks', 'uint256'], ['relativeAmounts', 'int256[]']]),
+    operationName: 'UniswapX V3 Dutch Order',
+    protocolIdentity: (td, msg) => verifiedUniswapXReactor('V3DutchOrder', td, msg),
+    extract: (msg) => {
+      const order = msg.witness || {}
+      return [
+        ...uniswapXBaseFields(msg, order.baseInput?.token, [
+          ['Input Start Amount', order.baseInput?.startAmount],
+          ['Maximum Input', order.baseInput?.maxAmount],
+          ['Input Base-Fee Adjustment', order.baseInput?.adjustmentPerGweiBaseFee],
+        ], order.baseOutputs, ['startAmount', 'minAmount', 'adjustmentPerGweiBaseFee']),
+        { label: 'Cosigner', value: formatValue(order.cosigner, 'address'), format: 'address', raw: order.cosigner },
+        { label: 'Starting Base Fee', value: formatValue(order.startingBaseFee, 'amount'), format: 'amount', raw: order.startingBaseFee },
+      ]
+    },
+  },
+  // UniswapX Priority orders expose the priority-fee-dependent input/output
+  // slopes so the user can see that the signed result is not a fixed quote.
+  {
+    match: (td) => exactWitnessEnvelope(td, 'PriorityOrder') &&
+      exactFields(td, 'PriorityOrder', [['info', 'OrderInfo'], ['cosigner', 'address'], ['auctionStartBlock', 'uint256'], ['baselinePriorityFeeWei', 'uint256'], ['input', 'PriorityInput'], ['outputs', 'PriorityOutput[]']]) &&
+      exactFields(td, 'PriorityInput', [['token', 'address'], ['amount', 'uint256'], ['mpsPerPriorityFeeWei', 'uint256']]) &&
+      exactFields(td, 'PriorityOutput', [['token', 'address'], ['amount', 'uint256'], ['mpsPerPriorityFeeWei', 'uint256'], ['recipient', 'address']]),
+    operationName: 'UniswapX Priority Order',
+    protocolIdentity: (td, msg) => verifiedUniswapXReactor('PriorityOrder', td, msg),
+    extract: (msg) => {
+      const order = msg.witness || {}
+      return [
+        ...uniswapXBaseFields(msg, order.input?.token, [
+          ['Input Amount', order.input?.amount],
+          ['Input Priority-Fee Slope', order.input?.mpsPerPriorityFeeWei],
+        ], order.outputs, ['amount', 'mpsPerPriorityFeeWei']),
+        { label: 'Auction Start Block', value: formatValue(order.auctionStartBlock, 'raw'), format: 'raw', raw: order.auctionStartBlock },
+        { label: 'Baseline Priority Fee', value: formatValue(order.baselinePriorityFeeWei, 'amount'), format: 'amount', raw: order.baselinePriorityFeeWei },
+        { label: 'Cosigner', value: formatValue(order.cosigner, 'address'), format: 'address', raw: order.cosigner },
+      ]
+    },
+  },
+  {
+    match: (td) => exactWitnessEnvelope(td, 'ExclusiveDutchOrder') &&
+      exactFields(td, 'ExclusiveDutchOrder', [
+        ['info', 'OrderInfo'], ['decayStartTime', 'uint256'], ['decayEndTime', 'uint256'],
+        ['exclusiveFiller', 'address'], ['exclusivityOverrideBps', 'uint256'], ['inputToken', 'address'],
+        ['inputStartAmount', 'uint256'], ['inputEndAmount', 'uint256'], ['outputs', 'DutchOutput[]'],
+      ]) && exactFields(td, 'DutchOutput', [['token', 'address'], ['startAmount', 'uint256'], ['endAmount', 'uint256'], ['recipient', 'address']]),
+    operationName: 'UniswapX Exclusive Dutch Order',
+    protocolIdentity: (td, msg) => verifiedUniswapXReactor('ExclusiveDutchOrder', td, msg),
+    extract: (msg) => {
+      const order = msg.witness || {}
+      return [
+        ...uniswapXBaseFields(msg, order.inputToken, [['Input Start Amount', order.inputStartAmount], ['Maximum Input End Amount', order.inputEndAmount]], order.outputs, ['startAmount', 'endAmount']),
+        { label: 'Decay Starts', value: formatValue(order.decayStartTime, 'datetime'), format: 'datetime', raw: order.decayStartTime },
+        { label: 'Decay Ends', value: formatValue(order.decayEndTime, 'datetime'), format: 'datetime', raw: order.decayEndTime },
+        { label: 'Exclusive Filler', value: formatValue(order.exclusiveFiller, 'address'), format: 'address', raw: order.exclusiveFiller },
+        { label: 'Exclusivity Override Bps', value: formatValue(order.exclusivityOverrideBps, 'raw'), format: 'raw', raw: order.exclusivityOverrideBps },
+      ]
+    },
+  },
+  {
+    match: (td) => exactWitnessEnvelope(td, 'V2DutchOrder') &&
+      exactFields(td, 'V2DutchOrder', [
+        ['info', 'OrderInfo'], ['cosigner', 'address'], ['baseInputToken', 'address'],
+        ['baseInputStartAmount', 'uint256'], ['baseInputEndAmount', 'uint256'], ['baseOutputs', 'DutchOutput[]'],
+      ]) && exactFields(td, 'DutchOutput', [['token', 'address'], ['startAmount', 'uint256'], ['endAmount', 'uint256'], ['recipient', 'address']]),
+    operationName: 'UniswapX V2 Dutch Order',
+    protocolIdentity: (td, msg) => verifiedUniswapXReactor('V2DutchOrder', td, msg),
+    extract: (msg) => {
+      const order = msg.witness || {}
+      return [
+        ...uniswapXBaseFields(msg, order.baseInputToken, [['Input Start Amount', order.baseInputStartAmount], ['Maximum Input End Amount', order.baseInputEndAmount]], order.baseOutputs, ['startAmount', 'endAmount']),
+        { label: 'Cosigner', value: formatValue(order.cosigner, 'address'), format: 'address', raw: order.cosigner },
+      ]
+    },
+  },
+  {
+    match: (td) => exactPermitWitnessEnvelope(td, 'HybridOrder') &&
+      exactFields(td, 'OrderInfo', [
+        ['reactor', 'address'], ['swapper', 'address'], ['nonce', 'uint256'], ['deadline', 'uint256'],
+        ['preExecutionHook', 'address'], ['preExecutionHookData', 'bytes'], ['postExecutionHook', 'address'],
+        ['postExecutionHookData', 'bytes'], ['auctionResolver', 'address'],
+      ]) && exactFields(td, 'HybridOrder', [
+        ['info', 'OrderInfo'], ['cosigner', 'address'], ['input', 'HybridInput'], ['outputs', 'HybridOutput[]'],
+        ['auctionStartBlock', 'uint256'], ['baselinePriorityFee', 'uint256'], ['scalingFactor', 'uint256'], ['priceCurve', 'uint256[]'],
+      ]) && exactFields(td, 'HybridInput', [['token', 'address'], ['maxAmount', 'uint256']]) &&
+      exactFields(td, 'HybridOutput', [['token', 'address'], ['minAmount', 'uint256'], ['recipient', 'address']]),
+    operationName: 'UniswapX Hybrid Order',
+    protocolIdentity: (td, msg) => verifiedUniswapXReactor('HybridOrder', td, msg),
+    extract: (msg) => {
+      const order = msg.witness || {}
+      return [
+        ...uniswapXBaseFields(msg, order.input?.token, [['Maximum Input', order.input?.maxAmount]], order.outputs, ['minAmount']),
+        { label: 'Auction Start Block', value: formatValue(order.auctionStartBlock, 'raw'), format: 'raw', raw: order.auctionStartBlock },
+        { label: 'Baseline Priority Fee', value: formatValue(order.baselinePriorityFee, 'amount'), format: 'amount', raw: order.baselinePriorityFee },
+        { label: 'Scaling Factor', value: formatValue(order.scalingFactor, 'raw'), format: 'raw', raw: order.scalingFactor },
+        { label: 'Price Curve', value: formatValue(JSON.stringify(order.priceCurve || []), 'raw'), format: 'raw', raw: JSON.stringify(order.priceCurve || []) },
+        { label: 'Pre-execution Hook', value: formatValue(order.info?.preExecutionHook, 'address'), format: 'address', raw: order.info?.preExecutionHook },
+        { label: 'Post-execution Hook', value: formatValue(order.info?.postExecutionHook, 'address'), format: 'address', raw: order.info?.postExecutionHook },
+        { label: 'Auction Resolver', value: formatValue(order.info?.auctionResolver, 'address'), format: 'address', raw: order.info?.auctionResolver },
+      ]
+    },
+  },
+  // UniswapX orders use Permit2 witness transfer. The witness type is
+  // application-defined; retain its complete value while proving the fixed
+  // Permit2 envelope rather than pretending every witness is the same order.
+  {
+    match: (td) => {
+      if (!isPermit2(td) || !/^Permit(?:Batch)?WitnessTransferFrom$/.test(td.primaryType) ||
+        !exactFields(td, 'TokenPermissions', [['token', 'address'], ['amount', 'uint256']])) return false
+      const fields = td.types?.[td.primaryType]
+      const batch = td.primaryType === 'PermitBatchWitnessTransferFrom'
+      return Array.isArray(fields) && fields.length === 5 &&
+        fields[0]?.name === 'permitted' && fields[0]?.type === `TokenPermissions${batch ? '[]' : ''}` &&
+        fields[1]?.name === 'spender' && fields[1]?.type === 'address' &&
+        fields[2]?.name === 'nonce' && fields[2]?.type === 'uint256' &&
+        fields[3]?.name === 'deadline' && fields[3]?.type === 'uint256' &&
+        fields[4]?.name === 'witness' && typeof fields[4]?.type === 'string' &&
+        Array.isArray(td.types?.[fields[4].type])
+    },
+    operationName: 'Permit2 Witness Transfer (UniswapX-compatible)',
+    protocolIdentity: () => false,
+    extract: (msg) => [
+      ...tokenPermissionFields(msg, Array.isArray(msg.permitted)),
+      { label: 'Witness / Order', value: formatValue(JSON.stringify(msg.witness ?? msg), 'raw'), format: 'raw' },
+    ],
   },
   // ERC-2612 Permit (owner/spender/value/deadline)
   {
@@ -229,6 +485,7 @@ export function decodeEIP712(typedData: any): EIP712DecodedInfo {
         primaryType,
         fields: desc.extract(message),
         isKnownType: true,
+        protocolIdentityVerified: desc.protocolIdentity ? desc.protocolIdentity(typedData, message) : true,
       }
     }
   }
@@ -245,5 +502,6 @@ export function decodeEIP712(typedData: any): EIP712DecodedInfo {
     primaryType,
     fields: genericExtract(typedData),
     isKnownType: false,
+    protocolIdentityVerified: false,
   }
 }

@@ -8,11 +8,11 @@ ERC-20 transfer/approve, addLiquidityETH). Also adds the
 `POST /eth/clearsign/load-signer` REST route.
 
 **Where:** vault `#337` (MERGED, develop) —
-`/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-vault/src/bun/calldata-decoder.ts`,
+`keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-vault/src/bun/calldata-decoder.ts`,
 `rest-api.ts`, `SigningApproval.tsx`, `engine-controller.ts`, `FirmwareDropZone.tsx`.
 
 ## Test
-- Unit: `cd /Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-vault && bun test __tests__/firmware-clearsign-gate.test.ts` (7/7 — spoof guard, wrong-address rejection, ERC-20 path).
+- Unit: `cd keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-vault && bun test __tests__/firmware-clearsign-gate.test.ts` (7/7 — spoof guard, wrong-address rejection, ERC-20 path).
 - Device (rc7): drive real EVM txs and watch the trust badge / blind-sign gate.
 
 ## Verify

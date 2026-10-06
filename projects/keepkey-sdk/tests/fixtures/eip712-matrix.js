@@ -69,6 +69,75 @@ const fixtures = {
       },
     },
   },
+  'uniswapx-v3-dutch': {
+    purpose: 'Full UniswapX V3 Permit2 witness with nonlinear input/output curves and recipient bounds',
+    typedData: {
+      types: {
+        EIP712Domain: domain.filter(field => field.name !== 'version'),
+        TokenPermissions: [
+          { name: 'token', type: 'address' }, { name: 'amount', type: 'uint256' },
+        ],
+        OrderInfo: [
+          { name: 'reactor', type: 'address' }, { name: 'swapper', type: 'address' },
+          { name: 'nonce', type: 'uint256' }, { name: 'deadline', type: 'uint256' },
+          { name: 'additionalValidationContract', type: 'address' }, { name: 'additionalValidationData', type: 'bytes' },
+        ],
+        NonlinearDutchDecay: [
+          { name: 'relativeBlocks', type: 'uint256' }, { name: 'relativeAmounts', type: 'int256[]' },
+        ],
+        V3DutchInput: [
+          { name: 'token', type: 'address' }, { name: 'startAmount', type: 'uint256' },
+          { name: 'curve', type: 'NonlinearDutchDecay' }, { name: 'maxAmount', type: 'uint256' },
+          { name: 'adjustmentPerGweiBaseFee', type: 'uint256' },
+        ],
+        V3DutchOutput: [
+          { name: 'token', type: 'address' }, { name: 'startAmount', type: 'uint256' },
+          { name: 'curve', type: 'NonlinearDutchDecay' }, { name: 'recipient', type: 'address' },
+          { name: 'minAmount', type: 'uint256' }, { name: 'adjustmentPerGweiBaseFee', type: 'uint256' },
+        ],
+        V3DutchOrder: [
+          { name: 'info', type: 'OrderInfo' }, { name: 'cosigner', type: 'address' },
+          { name: 'startingBaseFee', type: 'uint256' }, { name: 'baseInput', type: 'V3DutchInput' },
+          { name: 'baseOutputs', type: 'V3DutchOutput[]' },
+        ],
+        PermitWitnessTransferFrom: [
+          { name: 'permitted', type: 'TokenPermissions' }, { name: 'spender', type: 'address' },
+          { name: 'nonce', type: 'uint256' }, { name: 'deadline', type: 'uint256' },
+          { name: 'witness', type: 'V3DutchOrder' },
+        ],
+      },
+      primaryType: 'PermitWitnessTransferFrom',
+      domain: { name: 'Permit2', chainId: 1, verifyingContract: ADDRESS.permit2 },
+      message: {
+        permitted: { token: ADDRESS.usdc, amount: '1100000000' },
+        spender: '0x0000000015757c461808EA25Eb309638B62681cf',
+        nonce: '424242', deadline: '1893456000',
+        witness: {
+          info: {
+            reactor: '0x0000000015757c461808EA25Eb309638B62681cf',
+            // Deliberately not the test device address, so a produced fixture
+            // signature cannot become an executable order.
+            swapper: ADDRESS.owner,
+            nonce: '424242', deadline: '1893456000',
+            additionalValidationContract: '0x0000000000000000000000000000000000000000',
+            additionalValidationData: '0x',
+          },
+          cosigner: ADDRESS.recipient,
+          startingBaseFee: '1000000000',
+          baseInput: {
+            token: ADDRESS.usdc, startAmount: '1000000000',
+            curve: { relativeBlocks: '10', relativeAmounts: ['0', '100000000'] },
+            maxAmount: '1100000000', adjustmentPerGweiBaseFee: '0',
+          },
+          baseOutputs: [{
+            token: ADDRESS.dai, startAmount: '950000000000000000000',
+            curve: { relativeBlocks: '10', relativeAmounts: ['0', '-50000000000000000000'] },
+            recipient: ADDRESS.recipient, minAmount: '900000000000000000000', adjustmentPerGweiBaseFee: '0',
+          }],
+        },
+      },
+    },
+  },
   'erc2612-usdc-permit': {
     purpose: 'ERC-2612 allowance with owner, spender, exact amount, nonce and deadline',
     typedData: {

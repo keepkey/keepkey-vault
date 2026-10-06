@@ -1,5 +1,7 @@
 import { EventEmitter } from 'events'
 import { existsSync, readFileSync } from 'fs'
+import { classifyFirmwareImage, type EmbeddedBootloader, type FirmwareImageKind } from './firmware-image-kind'
+import { verifyFirmwareSignatures } from './firmware-signature'
 import * as path from 'path'
 import * as core from '@keepkey/hdwallet-core'
 import { HIDKeepKeyAdapter } from '@keepkey/hdwallet-keepkey-nodehid'
@@ -2272,8 +2274,11 @@ export class EngineController extends EventEmitter {
     isSameVersion: boolean
     willWipeDevice: boolean
     isBitcoinOnly: boolean
+    imageKind: FirmwareImageKind
+    embeddedBootloader?: EmbeddedBootloader
   } {
     const fileSize = data.length
+    const { kind: imageKind, embeddedBootloader } = classifyFirmwareImage(data, this.manifest?.hashes?.bootloader || {})
     const hasKpkyHeader = data.length >= 256
       && data[0] === 0x4B && data[1] === 0x50
       && data[2] === 0x4B && data[3] === 0x59 // "KPKY"
@@ -2282,12 +2287,11 @@ export class EngineController extends EventEmitter {
     const payload = hasKpkyHeader ? data.subarray(256) : data
     const payloadHash = sha256Hex(payload)
 
-    // Signed detection: KPKY header sigindex bytes at offsets 8-10.
-    // sigindex1 > 0 means at least one signature slot is filled → signed.
-    let headerSigned = false
-    if (hasKpkyHeader) {
-      headerSigned = data[8] !== 0 || data[9] !== 0 || data[10] !== 0
-    }
+    // Signed = the header's three signatures verify against KeepKey's release
+    // keys, as the bootloader checks them. Filled signature slots are not
+    // enough: a test-key build fills them too, and the official bootloader
+    // treats it as unsigned (and wipes the device crossing that boundary).
+    const headerSigned = hasKpkyHeader && verifyFirmwareSignatures(new Uint8Array(data))
 
     // Manifest lookup — provides version AND confirms official release
     let manifestSigned = false
@@ -2298,14 +2302,6 @@ export class EngineController extends EventEmitter {
       if (fwVersion) {
         manifestSigned = true
         manifestVersion = fwVersion.replace(/^v/, '')
-      } else {
-        // Also check full-file hash (bootloader format)
-        const fullHash = sha256Hex(data)
-        const blVersion = this.manifest.hashes.bootloader?.[fullHash]
-        if (blVersion) {
-          manifestSigned = true
-          manifestVersion = blVersion.replace(/^v/, '')
-        }
       }
     }
 
@@ -2315,7 +2311,7 @@ export class EngineController extends EventEmitter {
     // Version detection: manifest version is authoritative.
     // Fallback: scan binary for "VERSION" marker followed by semver pattern.
     // KeepKey firmware embeds "VERSION7.10.0" (no space) as a string constant.
-    let detectedVersion = manifestVersion
+    let detectedVersion = manifestVersion ?? embeddedBootloader?.version ?? null
     if (!detectedVersion) {
       const versionPattern = /VERSION(\d+\.\d+\.\d+)/
       // Search in the payload as a string (ASCII-safe scan)
@@ -2377,6 +2373,8 @@ export class EngineController extends EventEmitter {
       isSameVersion,
       willWipeDevice,
       isBitcoinOnly,
+      imageKind,
+      embeddedBootloader,
     }
   }
 

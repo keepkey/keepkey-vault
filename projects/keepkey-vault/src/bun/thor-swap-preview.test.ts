@@ -21,9 +21,10 @@ test('canonical historical-style Thorchain swap shows terms in human units', () 
   expect(fields?.find(f => f.name === 'Memo (exact)')?.value).toBe(memo)
 })
 
-test('Base router is chain-pinned and native input uses Base ETH units', () => {
+test('Base router decodes in Base ETH units but is not firmware-native (thortx.c knows 1 + 43114)', () => {
   const router = '0x00dc6100103bc402d490aee3f9a5560cbd91f1d4'
-  expect(firmwareClearSigns(router, calldata, 8453)).toBe(true)
+  expect(firmwareClearSigns(router, calldata, 43114)).toBe(true)
+  expect(firmwareClearSigns(router, calldata, 8453)).toBe(false)
   expect(firmwareClearSigns(router, calldata, 1)).toBe(false)
   expect(firmwareClearSigns(router, calldata, 56)).toBe(false)
   const fields = thorDepositFields(calldata, 8453)

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { versionCompare } from '../shared/firmware-versions'
 
 export interface RuntimeEvmSigner {
   keyId: number
@@ -11,6 +12,13 @@ export interface RuntimeEvmMetadata {
   signedPayload: string
   keyId: number
   signer: RuntimeEvmSigner
+}
+
+/** RAM-signer reports remain available on certified-capable firmware. The
+ * certified catalog has priority, but it cannot be the reason an otherwise
+ * reviewable unknown transaction loses its explicitly user-trusted fallback. */
+export function supportsRuntimeEvmMetadata(firmwareVersion: string | undefined, advancedMode: boolean): boolean {
+  return advancedMode && !!firmwareVersion && versionCompare(firmwareVersion, '7.15.0') >= 0
 }
 
 /** Resolve transaction-bound metadata for the 7.15 RAM signer path. This is
@@ -37,7 +45,12 @@ export async function resolveRuntimeEvmMetadata(tx: any): Promise<RuntimeEvmMeta
   ])
   const signer: any = await signerResponse.json().catch(() => null)
   const signed: any = await signResponse.json().catch(() => null)
-  if (signResponse.status === 422) return undefined
+  if (signResponse.status === 422) {
+    const reason = typeof signed?.error === 'string' && signed.error.length <= 240
+      ? signed.error
+      : 'transaction is outside the provider coverage policy'
+    throw new Error(`7.15 ClearSign provider refused transaction: ${reason}`)
+  }
   if (!signerResponse.ok || !signResponse.ok) {
     throw new Error(`7.15 ClearSign provider unavailable (${signerResponse.status}/${signResponse.status})`)
   }

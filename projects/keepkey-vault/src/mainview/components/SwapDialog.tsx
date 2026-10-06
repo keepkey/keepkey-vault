@@ -31,6 +31,7 @@ import { SwapRiskReview } from "./SwapRiskReview"
 import { computeDustWarning, shouldWarnHighSlippage, computeEffectiveSlippageBps, isSmallSwapQuoteWarning } from "../../shared/swap-warnings"
 import { useEvmAddresses } from "../hooks/useEvmAddresses"
 import { useDeviceState } from "../hooks/useDeviceState"
+import { ClearSignReportCard } from "./ClearSignReportCard"
 import { versionCompare } from "../../shared/firmware-versions"
 import { AssetPickerDialog } from "./AssetPickerDialog"
 import { networkDisplayName, ellipsizeCaip, parseCaip } from "../../shared/swap-discovery"
@@ -216,6 +217,7 @@ type SwapPreviewBuild = {
   unsignedTx: any
   allowance?: { current: string; required: string; sufficient: boolean; spender: string; tokenContract: string }
   balance?: { current: string; required: string; sufficient: boolean; tokenContract?: string }
+  clearSignReports?: { approval?: import('../../shared/clearsign-report').ClearSignReport; transaction?: import('../../shared/clearsign-report').ClearSignReport }
 }
 
 const EVM_METHOD_LABELS: Record<string, string> = {
@@ -4004,6 +4006,9 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                   </Text>
                 )}
               </Box>
+
+              {previewBuild?.clearSignReports?.approval && <ClearSignReportCard report={previewBuild.clearSignReports.approval} title="Approval ClearSign Report" />}
+              {previewBuild?.clearSignReports?.transaction && <ClearSignReportCard report={previewBuild.clearSignReports.transaction} title="Swap ClearSign Report" />}
 
               {/* Animated route map — gold dot travels from-token →
                   integration → to-token. Shows the actual swap topology

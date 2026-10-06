@@ -8,7 +8,7 @@ but **no green approve button ever appears and the call hangs**. Now wrapped.
 `emuWrap` is a no-op on real hardware.
 
 **Where:** vault `#341` (MERGED, develop) —
-`/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-vault/src/bun/rest-api.ts`
+`keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-vault/src/bun/rest-api.ts`
 (the `/eth/clearsign/load-signer` handler now `emuWrap(() => wallet.loadClearsignSigner(...))`).
 
 ## Test

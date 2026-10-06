@@ -14,12 +14,17 @@
  * the device screen stays the authority.
  */
 import { evmNativeValue } from './evmFeePreview'
+import { acrossDepositView, decodeAcrossDepositV3, type AcrossDepositV3 } from './acrossDeposit'
+import { RELAY_DEPOSITORY, decodeRelayDeposit, isZeroAddress, type RelayDeposit } from './relayDeposit'
+import { REVIEWED_EVM_TOKENS } from './reviewed-evm-tokens'
 import type {
   SigningRequestInfo,
   SimulatedHoldings,
   SolanaCertifiedArg,
   SolanaTxDecodedInstruction,
 } from './types'
+import { versionCompare } from './firmware-versions'
+import { ERC7730_TRANSPORT_SUPPORTED } from './erc7730-support'
 
 export type RiskLevel = 'low' | 'medium' | 'high' | 'critical'
 export interface RiskReason { level: RiskLevel; text: string }
@@ -134,9 +139,13 @@ function describeKnown(ix: SolanaTxDecodedInstruction): RiskReason | null {
 // Addresses are shown in full: a 0x1234…abcd short form is cheap to grind
 // for address poisoning. ponytail: lowercase hex, add EIP-55 checksums later.
 
+// The reviewed token identities the certified entries use (Base USDC etc.),
+// plus the risk bar's own Ethereum stablecoins and its Arbitrum USDT wording.
 const EVM_TOKENS: Record<string, { symbol: string; decimals: number }> = {
+  ...REVIEWED_EVM_TOKENS,
   '1:0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48': { symbol: 'USDC', decimals: 6 },
   '1:0xdac17f958d2ee523a2206206994597c13d831ec7': { symbol: 'USDT', decimals: 6 },
+  '42161:0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9': { symbol: 'USDT', decimals: 6 },
 }
 const KNOWN_SELECTORS = new Set(['0x095ea7b3', '0x39509351', '0xa22cb465', '0xa9059cbb'])
 const PERMIT2 = '0x000000000022d473030f116ddee9f6b43ac78ba3'
@@ -171,14 +180,31 @@ function evmTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void) 
   }
 
   const sel = data.slice(0, 10)
+  const across = decodeAcrossDepositV3(to, data, chainId)
   const catalog = req.rawRequestBody?.erc7730
-  const hasCatalog = typeof catalog === 'object' && catalog !== null
+  // Without a transport the catalog never reaches the device: treat as absent.
+  const hasCatalog = ERC7730_TRANSPORT_SUPPORTED && typeof catalog === 'object' && catalog !== null
+  const fields = req.calldataDecoded?.fields ?? []
+  const field = (n: string) => fields.find((f) => f.name === n)?.value
+  // Set only for a reviewed Universal Router whose calldata decodes the way
+  // the device decodes it (evm-signing-preview uniswapSwapFields).
+  const urSwap = field('Protocol') === 'Uniswap Universal Router' && field('Action')?.startsWith('Swap ')
+    ? field('Action')!.replace(/^Swap /, 'Swaps ') : undefined
+  const relay = decodeRelayDeposit(to, data, chainId)
   if ((sel === '0x095ea7b3' || sel === '0x39509351') && addrWord(0) && num(1) !== null) {
-    const spender = addrWord(0)!, v = num(1)!
+    const spender = addrWord(0)! + (addrWord(0) === RELAY_DEPOSITORY ? ' (the Relay Depository)' : ''), v = num(1)!
+    const canonicalUniswapSetup = chainId === 42161
+      && to === '0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9'
+      && spender === PERMIT2
     if (v === 0n) {
       add(token ? 'low' : 'medium', `Removes ${spender}'s permission to spend your ${token?.symbol ?? `token ${to}`}.`)
+    } else if (canonicalUniswapSetup && v >= ALL_THRESHOLD) {
+      add('medium', 'Standard Uniswap setup: gives canonical Permit2 persistent access to your Arbitrum USDT. You can revoke this allowance later.')
     } else {
-      add('critical', `Lets ${spender} spend ${v >= ALL_THRESHOLD ? 'ALL of' : `up to ${amount(v)} of`} your ${token?.symbol ?? 'tokens'}, now and later, without asking you again.`)
+      const scope = v >= ALL_THRESHOLD
+        ? `ALL of your ${token?.symbol ?? `token at ${to}`}`
+        : `up to ${amount(v)}`
+      add('critical', `Lets ${spender} spend ${scope}, now and later, without asking you again.`)
     }
   } else if (sel === '0xa22cb465' && addrWord(0) && num(1) !== null) {
     add(num(1) === 0n ? 'low' : 'critical', num(1) === 0n
@@ -190,19 +216,73 @@ function evmTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void) 
       : `Sends ${num(1)} units of token ${to} to ${addrWord(0)}. This computer does not recognize this token.`)
   } else if (hasCatalog) {
     add('high', `The site attached a signed description of this call. This computer cannot check it; your KeepKey checks it and refuses if it is not genuine. The call can still use any token permission you already gave ${to}.`)
+  } else if (urSwap && req.calldataDecoded?.signedInsightBlob) {
+    // Every command decoded, and a signed description attached that the device
+    // verifies before it shows the swap: the amounts are on its screen, so
+    // this is a check, not a blind signature.
+    add('medium', `${urSwap} through the Uniswap Universal Router, a contract KeepKey has reviewed. Your KeepKey shows this swap on its screen from a signed description, and refuses it if that description is not genuine. Check the amounts there.`)
+  } else if (across) {
+    acrossDeposit(across, req, add)
+  } else if (relay) {
+    relayDeposit(relay, req, field('You send'), add)
   } else if (!req.deviceClearSigns || KNOWN_SELECTORS.has(sel)) {
     // A known selector reaching here did not parse (dirty address word,
     // trailing bytes): the device may accept it by length alone.
     add('high', `Your KeepKey cannot show what this call to ${to} does. It can use any token permission you already gave that contract. You would be signing blind.`)
+    if (urSwap) add('low', `This computer reads it as: ${urSwap} through the Uniswap Universal Router. Your KeepKey will not confirm that.`)
   }
 
-  const fields = req.calldataDecoded?.fields ?? []
-  const field = (n: string) => fields.find((f) => f.name === n)?.value
   if (field('Action')?.startsWith('Swap ')) {
     const min = field('Minimum output')
     if (!min || min === 'No minimum specified' || /^0(?:\.0+)?\s/.test(min)) add('high', 'Sets no minimum, so this swap can pay you back almost nothing.')
   }
   if (field('Token warning') || field('Input token warning')) add('high', 'Swaps a token KeepKey does not recognize. It may be a fake.')
+}
+
+/** A deposit to the Relay Depository. The calldata names what is sent and
+ *  who is credited; where it arrives is Relay's off-chain order. */
+function relayDeposit(d: RelayDeposit, req: SigningRequestInfo, decodedSent: string | undefined, add: (l: RiskLevel, t: string) => void) {
+  const sent = d.kind === 'native'
+    ? (evmNativeValue(req.value ?? '0', d.chainId) ?? 'the coin sent with this call')
+    : (decodedSent ?? `${d.amount} base units of token ${d.token}`)
+  const from = (req.from ?? '').toLowerCase()
+  const credited = isZeroAddress(d.depositor) || d.depositor === from ? 'your account' : d.depositor
+  const what = `Relay deposit on ${d.chain}: sends ${sent} to the Relay Depository, credited to ${credited}.`
+  // A KeepKey-certified envelope (keyId 0x80) the device verifies, attached
+  // by the preview; a caller's runtime blob is not one.
+  const certified = req.deviceClearSigns || (!!req.calldataDecoded?.signedInsightBlob && req.calldataDecoded.insightKeyId === 0x80)
+  if (certified) {
+    add('medium', `${what} Your KeepKey shows this deposit from a KeepKey-certified description and refuses it if that description is not genuine. Check the amount there.`)
+  } else {
+    add('high', `${what} Your KeepKey cannot decode this deposit: its screen shows only raw data, so you are signing blind. Check these details here before approving.`)
+  }
+  if (credited !== 'your account' && from) add('high', `The deposit is credited to ${d.depositor}, not to the signing account.`)
+  add('medium', "Where it arrives (destination chain, recipient and amount) is set by Relay's off-chain order, not by this transaction. Neither this computer nor your KeepKey can check it.")
+}
+
+/** A depositV3 to a pinned Across SpokePool. Decoded here only: the device
+ *  shows it as raw data, so the blind line stays and AdvancedMode still gates. */
+function acrossDeposit(d: AcrossDepositV3, req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void) {
+  const v = acrossDepositView(d)
+  const from = (req.from ?? '').toLowerCase()
+  let value: bigint | null = null
+  try { value = BigInt(req.value === undefined || req.value === '' || req.value === '0x' ? 0 : req.value) } catch { /* unreadable: no claim about it */ }
+  add('high', `Across bridge deposit to the Across SpokePool on ${d.pool.chain}. Your KeepKey cannot decode bridge deposits yet: its screen shows only raw data, so you are signing blind. Check these details here before approving.`)
+  if (value !== null && value > 0n) {
+    if (d.inputToken !== d.pool.wrappedNative.address || value !== d.inputAmount) {
+      add('high', `The coin sent with this call does not match the deposit (${v.sent}). The SpokePool will reject it and you would still pay the network fee.`)
+    }
+  } else if (value === 0n && d.inputAmount > 0n) {
+    add('medium', `Takes ${v.sent} from your balance, using the token permission you gave this SpokePool.`)
+  }
+  add('low', `A relayer pays ${v.received} to ${d.recipient} on ${v.destination} by ${v.fillDeadline}. If nobody fills it in time, the deposit is refunded to ${d.depositor}.`)
+  if (from && d.recipient !== from) add('high', `The bridged funds go to ${d.recipient}, which is NOT the account signing this (${from}).`)
+  if (from && d.depositor !== from) add('high', `Refunds go to ${d.depositor}, which is NOT the account signing this (${from}).`)
+  if (d.outputAmount === 0n) add('high', 'The recipient is set to receive nothing.')
+  if (!v.destinationKnown) add('medium', `This computer does not recognize destination ${v.destination}.`)
+  if (!v.inputTokenKnown || !v.outputTokenKnown) add('medium', 'This computer cannot name every token in this deposit; amounts are shown in base units.')
+  if (v.fee) add(v.feeBps !== null && v.feeBps > 300n ? 'medium' : 'low', `Bridge fee: ${v.fee}.`)
+  if (d.message !== '0x') add('high', `Also passes ${(d.message.length - 2) / 2} bytes of instructions that run at the recipient on ${v.destination}. This computer cannot read them.`)
 }
 
 function evmTypedData(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void) {
@@ -221,12 +301,28 @@ function evmTypedData(req: SigningRequestInfo, add: (l: RiskLevel, t: string) =>
     const raw = f('Value')?.raw ?? f('Amount')?.raw ?? d.fields.find((x) => /Amount$/.test(x.label))?.raw
     let all = f('Allowed')?.value === 'true'
     try { if (raw !== undefined) all ||= BigInt(raw) >= ALL_THRESHOLD } catch { /* odd amount: shown as "some of" */ }
-    const howMuch = all ? 'ALL of' : raw !== undefined ? `up to ${f('Value')?.value ?? f('Amount')?.value ?? raw} of` : 'some of'
-    add('critical', `Lets ${f('Spender')?.raw ?? 'another account'} spend ${howMuch} your tokens, now and later. This signature alone is enough; no transaction from you is needed.`)
+    const chainId = Number(d.domain.chainId)
+    const spender = String(f('Spender')?.raw || '').toLowerCase()
+    const token = String(f('Token')?.raw || '').toLowerCase()
+    const officialArbitrumUniswap = d.primaryType === 'PermitSingle' && d.isKnownType
+      && d.protocolIdentityVerified !== false && chainId === 42161 && contract === PERMIT2
+      && spender === '0x2d01411773c8c24805306e89a41f7855c3c4fe65'
+      && token === '0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9'
+    if (officialArbitrumUniswap) {
+      add('medium', `Allows the official Uniswap Universal Router to spend ${all ? 'an unlimited amount of' : 'up to'} Arbitrum USDT through Permit2 until ${f('Expiration')?.value || 'the displayed expiration'}. Review the swap amount on the following transaction.`)
+    } else {
+      const howMuch = all ? 'ALL of' : raw !== undefined ? `up to ${f('Value')?.value ?? f('Amount')?.value ?? raw} of` : 'some of'
+      add('critical', `Lets ${f('Spender')?.raw ?? 'another account'} spend ${howMuch} your tokens, now and later. This signature alone is enough; no transaction from you is needed.`)
+    }
   } else if (/^(OrderComponents|BulkOrder)$/.test(d.primaryType)) {
     add('critical', 'This is a marketplace order. Anyone holding this signature can take the listed items at the price in the order.')
   }
-  add('high', 'Your KeepKey can only show a code (hash) for this signature, not what it says. You would be signing blind.')
+  const structured = !!req.firmwareVersion && versionCompare(req.firmwareVersion, '7.15.0') >= 0
+  if (structured) {
+    add('low', 'Your KeepKey will request and display the structured fields that it hashes for this signature.')
+  } else {
+    add('high', 'Your KeepKey can only show a code (hash) for this signature, not what it says. You would be signing blind.')
+  }
 }
 
 function evmMessage(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void) {
@@ -328,6 +424,12 @@ export function assessSigningRisk(req: SigningRequestInfo): RiskAssessment | nul
   } else if (req.method === '/eth/sign-transaction') {
     evmTx(req, add)
     if (reasons.length === 0) add('low', 'Your KeepKey decodes this call on its screen. Check the recipient and amount there.')
+    // A verified human rating can only add a reason, so it can only raise the level.
+    const rating = req.clearSignReport?.rating
+    if (rating) {
+      add(rating.riskLevel, `An auditor rates this contract ${rating.riskLevel} risk: ${rating.riskReasons[0] || 'see findings'}.`
+        + (rating.raterPinned ? '' : ' The rater is not yet pinned in this Vault.'))
+    }
   } else if (req.method === '/eth/sign-typed-data') {
     evmTypedData(req, add)
   } else if (req.method === '/eth/sign') {

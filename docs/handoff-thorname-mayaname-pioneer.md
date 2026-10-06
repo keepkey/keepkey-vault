@@ -1,6 +1,6 @@
 # Handoff: Pioneer support for THORName / MAYAName registration
 
-**For:** a Pioneer agent (`/Users/highlander/WebstormProjects/keepkey-stack/projects/pioneer`)
+**For:** a Pioneer agent (`keepkey-stack/projects/pioneer`)
 **Consumer:** keepkey-vault-v11 "Register Name" feature on the THORChain/Maya asset page.
 **Date:** 2026-06-05
 

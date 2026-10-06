@@ -36,3 +36,11 @@ describe('server-side Solana RPC failover', () => {
     expect(solanaRpcEndpoints({CLEARSIGN_SOLANA_RPC_ENDPOINT:'https://operator.example/path'})).toEqual(['https://operator.example/path'])
   })
 })
+
+it('a keyed (secret) provider is tried before the public ones', () => {
+  expect(solanaRpcEndpoints({
+    CLEARSIGN_SOLANA_RPC_PRIVATE_ENDPOINTS: 'https://keyed.example/?api-key=x',
+    CLEARSIGN_SOLANA_RPC_ENDPOINTS: 'https://primary.example,https://backup.example',
+  })).toEqual(['https://keyed.example/?api-key=x', 'https://primary.example', 'https://backup.example'])
+  expect(solanaRpcEndpoints({ CLEARSIGN_SOLANA_RPC_ENDPOINTS: 'https://primary.example' })).toEqual(['https://primary.example'])
+})

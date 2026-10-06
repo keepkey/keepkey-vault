@@ -92,8 +92,9 @@ export async function pioneerEvmRpc(pioneer: any, networkId: string, method: str
       return txid
     }
     case 'eth_call': {
-      const { to: contractAddress, data: calldata } = params[0] ?? {}
-      if (typeof calldata !== 'string' || !/^0x[0-9a-f]+$/i.test(calldata)) throw new Error('Invalid ERC-20 calldata')
+      const { to: contractAddress, data, input } = params[0] ?? {}
+      const calldata = input ?? data
+      if (typeof calldata !== 'string' || !/^0x[0-9a-f]+$/i.test(calldata)) throw new Error('Invalid EVM call data')
       const selector = calldata.slice(0, 10).toLowerCase()
       const addressAt = (offset: number) => `0x${calldata.slice(offset + 24, offset + 64)}`
       let result: string

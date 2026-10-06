@@ -1,11 +1,12 @@
+import { evmChainLabel } from './chains'
+
 const parse = (value: unknown): bigint | null => {
   if (typeof value !== 'string' && typeof value !== 'number') return null
   const raw = String(value)
   if (!/^(?:0x[0-9a-fA-F]+|\d+)$/.test(raw)) return null
   try { return BigInt(raw) } catch { return null }
 }
-const unit = (chainId?: number): string => chainId === 1 || chainId === 8453
-  ? 'ETH' : chainId === 43114 ? 'AVAX' : 'native coin'
+const unit = (chainId?: number): string => evmChainLabel(chainId)?.symbol ?? 'native coin'
 const formatWei = (wei: bigint, chainId?: number): string => {
   const whole = wei / 10n ** 18n
   const fraction = (wei % 10n ** 18n).toString().padStart(18, '0').replace(/0+$/, '')

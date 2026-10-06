@@ -314,6 +314,20 @@ export function parseSolanaMessage(bytes: Uint8Array): ParsedSolanaMessage {
     )
   }
 
+  const expandedAccountCount = staticAccounts.length + altEntries.reduce(
+    (count, entry) => count + entry.writableIndices.length + entry.readonlyIndices.length,
+    0,
+  )
+  for (let i = 0; i < instructions.length; i++) {
+    const instruction = instructions[i]
+    if (instruction.programIdIndex >= expandedAccountCount) {
+      throw new SolanaTxParseError(`Instruction ${i}: program id index ${instruction.programIdIndex} exceeds expanded account list`)
+    }
+    const invalid = instruction.accountIndices.find(index => index >= expandedAccountCount)
+    if (invalid !== undefined) {
+      throw new SolanaTxParseError(`Instruction ${i}: account index ${invalid} exceeds expanded account list`)
+    }
+  }
+
   return { version, header, staticAccounts, recentBlockhash, instructions, altEntries }
 }
-

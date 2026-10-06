@@ -1,7 +1,7 @@
 # Design — Node-backend isolation, self-host, and offline-first
 
 **Branch context:** `btc-only` (rides draft PR #353 → develop).
-**Vault code:** `/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-vault/`
+**Vault code:** `keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-vault/`
 **Status:** research + design. Nothing built. Decide the phase plan at the bottom before writing code.
 
 ---

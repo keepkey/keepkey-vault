@@ -16,7 +16,7 @@ function fail(message) {
 
 function main() {
   const keys = Object.keys(VENDORED_FLOWS)
-  if (keys.length !== 8) fail(`expected 8 vendored flows, got ${keys.length}`)
+  if (keys.length !== 10) fail(`expected 10 vendored flows, got ${keys.length}`)
 
   const pubkey = secp256k1.getPublicKey(TEST_PRIV, true)
   if (Buffer.from(pubkey).toString('hex') !== GOLDEN.testPubKey) fail('test signer pubkey drifted')

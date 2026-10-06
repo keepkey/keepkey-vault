@@ -15,7 +15,7 @@
 >   connection with a per-run suffix (`b1-<run>`), so an id from before a vault
 >   restart fails with `unknown_browser` rather than reaching another profile.
 
-**Owner repo:** `/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-client`
+**Owner repo:** `keepkey-stack/projects/keepkey-client`
 **Paired vault PR:** https://github.com/keepkey/keepkey-vault/pull/372 (merged into `develop` → `bex-bridge.ts`)
 **Date:** 2026-07-19
 
@@ -249,6 +249,6 @@ id — do them together.
 Vault-side regression tests for the multi-client bridge (every instance
 accepted, per-instance call failure, stale pruning, ids unique across vault
 restarts) live in
-`/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-vault/src/bun/mcp.test.ts`
+`keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-vault/src/bun/mcp.test.ts`
 under `describe('BEX bridge call lifecycle')`; `browser` routing is covered
 under `describe('MCP dumb pipe (bridge UP)')`.

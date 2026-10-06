@@ -1,7 +1,7 @@
 # Handoff — Bitcoin-only onboarding + separate firmware (SPIKE)
 
 **Branch:** `spike/bitcoin-only-onboarding` (worktree off `origin/develop`)
-**Worktree:** `/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11-btconly-onboarding`
+**Worktree:** `keepkey-stack/projects/keepkey-vault-v11-btconly-onboarding`
 **Status:** SPIKE — vault-side plumbing wired behind `BITCOIN_ONLY_ONBOARDING` (default OFF, `src/shared/flags.ts`). Firmware release pipeline (blocker #1) still owes a signed btc-only asset; on-device hash entries and device dry-run still pending. Do NOT flip the flag on until a signed btc-only asset ships in a release, then enable in the release AFTER that.
 
 **Wired (flag off = byte-identical to today):**
@@ -50,9 +50,9 @@ Changes span vault + firmware-release:
 4. Device dry-run: fresh device → choose Bitcoin-only → btc-only firmware installs, boots, reports `KeepKeyBTC`, seed-lock holds.
 
 ## Key files (full paths, this worktree)
-- Onboarding: `/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11-btconly-onboarding/projects/keepkey-vault/src/mainview/components/OobSetupWizard.tsx`
-- Firmware install: `/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11-btconly-onboarding/projects/keepkey-vault/src/bun/engine-controller.ts` (~1539 bootloader, ~1593 firmware)
-- Hash/version map: `/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11-btconly-onboarding/projects/keepkey-vault/src/shared/firmware-versions.ts`
+- Onboarding: `keepkey-stack/projects/keepkey-vault-v11-btconly-onboarding/projects/keepkey-vault/src/mainview/components/OobSetupWizard.tsx`
+- Firmware install: `keepkey-stack/projects/keepkey-vault-v11-btconly-onboarding/projects/keepkey-vault/src/bun/engine-controller.ts` (~1539 bootloader, ~1593 firmware)
+- Hash/version map: `keepkey-stack/projects/keepkey-vault-v11-btconly-onboarding/projects/keepkey-vault/src/shared/firmware-versions.ts`
 - Firmware release workflow: `keepkey-firmware/.github/workflows/release.yml` (add btc-only asset)
 
 ## Related shipped work (this session, PR #342 → develop)

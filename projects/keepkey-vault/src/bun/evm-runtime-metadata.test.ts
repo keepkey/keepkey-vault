@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import { createHash } from 'node:crypto'
-import { resolveRuntimeEvmMetadata } from './evm-runtime-metadata'
+import { resolveRuntimeEvmMetadata, supportsRuntimeEvmMetadata } from './evm-runtime-metadata'
 
 const originalFetch = globalThis.fetch
 const originalUrl = process.env.CLEARSIGN_RUNTIME_URL
@@ -12,6 +12,12 @@ afterEach(() => {
 })
 
 describe('7.15 runtime EVM metadata', () => {
+  test('remains an explicit fallback on certified-capable alpha firmware', () => {
+    expect(supportsRuntimeEvmMetadata('7.14.1', true)).toBe(false)
+    expect(supportsRuntimeEvmMetadata('7.15.0', false)).toBe(false)
+    expect(supportsRuntimeEvmMetadata('7.15.0', true)).toBe(true)
+    expect(supportsRuntimeEvmMetadata('7.16.0', true)).toBe(true)
+  })
   test('is disabled unless a provider is explicitly configured', async () => {
     delete process.env.CLEARSIGN_RUNTIME_URL
     globalThis.fetch = (async () => { throw new Error('must not fetch') }) as unknown as typeof fetch
@@ -51,5 +57,15 @@ describe('7.15 runtime EVM metadata', () => {
       ? Response.json({ publicKeyHex: `03${'22'.repeat(32)}`, fingerprint: 'deadbeef', keyId: 1 })
       : Response.json({ keyId: 1, signedPayload: `0x${'cd'.repeat(80)}` })) as typeof fetch
     expect(resolveRuntimeEvmMetadata({ chainId: 1 })).rejects.toThrow('signer identity is malformed')
+  })
+
+  test('fails closed when a configured provider refuses an opaque transaction', async () => {
+    process.env.CLEARSIGN_RUNTIME_URL = 'http://provider.test'
+    globalThis.fetch = (async (input) => String(input).endsWith('/signer')
+      ? Response.json({ publicKeyHex: `03${'22'.repeat(32)}`, fingerprint: 'unused', keyId: 1 })
+      : Response.json({ classification: 'OPAQUE', error: 'unknown contract identity' }, { status: 422 })) as typeof fetch
+    expect(resolveRuntimeEvmMetadata({ chainId: 1 })).rejects.toThrow(
+      'ClearSign provider refused transaction: unknown contract identity',
+    )
   })
 })

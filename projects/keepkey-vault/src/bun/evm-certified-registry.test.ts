@@ -56,9 +56,18 @@ describe('findCertifiedEvmEnvelope', () => {
     expect(result?.keyId).toBe(0x80)
   })
 
-  test('treats a catalog miss as no enhancement', async () => {
+  test('treats an unreviewed catalog miss as no enhancement', async () => {
     globalThis.fetch = (async () => new Response(JSON.stringify({ classification: 'OPAQUE' }), { status: 422 })) as typeof fetch
-    expect(await findCertifiedEvmEnvelope(1, TO, DATA)).toBeUndefined()
+    expect(await findCertifiedEvmEnvelope(1, TO, '0x12345678')).toBeUndefined()
+  })
+
+  test('refuses to downgrade a reviewed USDT approval when the deployed catalog is stale', async () => {
+    globalThis.fetch = (async () => new Response(JSON.stringify({ classification: 'OPAQUE' }), { status: 422 })) as typeof fetch
+    const token = '0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9'
+    const approval = `0x095ea7b3${'000000000022d473030f116ddee9f6b43ac78ba3'.padStart(64, '0')}${'ff'.repeat(32)}`
+    await expect(findCertifiedEvmEnvelope(42161, token, approval)).rejects.toThrow(/certified description unavailable for approve/)
+    expect(await findCertifiedEvmEnvelope(1, token, approval)).toBeUndefined()
+    expect(await findCertifiedEvmEnvelope(42161, token, `${approval}00`)).toBeUndefined()
   })
 
   test('rejects wrong bindings or non-certified material before hdwallet', async () => {

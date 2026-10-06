@@ -16,7 +16,7 @@ Relay swaps now clear-sign on device in both directions, verified on real hardwa
 This handoff covers what landed, one design that was **rejected after review** (and why
 the reasoning matters), and the two pieces of remaining work.
 
-Repo root assumed: `/Users/highlander/WebstormProjects/keepkey-stack`
+Repo root assumed: `keepkey-stack`
 
 ---
 
@@ -142,7 +142,7 @@ will silently stay on green.
 key (slot 3), and loaded signers are **RAM-only** — every reboot or flash wipes them:
 
 ```bash
-cd /Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-sdk
+cd keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-sdk
 node tests/solana-clearsign/schema-sign.js     # loads signer + 4 on-device assertions
 node tests/solana-clearsign/offline-schema.js  # 14 offline checks, no device
 ```
