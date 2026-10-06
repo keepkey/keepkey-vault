@@ -452,6 +452,24 @@ export function FirmwareDropZone() {
 													)}
 												</Flex>
 											</Flex>
+											{/* The bootloader reports the installed firmware's hash; the
+											    release table names it when it's a known build. */}
+											{analysis.currentFirmwareVersion && (
+												<Flex justify="space-between" mb="2">
+													<Text fontSize="xs" color="kk.textSecondary">Installed firmware</Text>
+													<Flex align="center" gap="1.5">
+														<Text fontSize="sm" fontWeight="600" color="kk.textPrimary" fontFamily="mono">
+															v{analysis.currentFirmwareVersion}
+														</Text>
+														{analysis.currentFirmwareVerified === true && (
+															<Box as="span" color="var(--teal)" fontSize="xs">(official)</Box>
+														)}
+														{analysis.currentFirmwareVerified === false && (
+															<Box as="span" color="var(--gold)" fontSize="xs">(unofficial)</Box>
+														)}
+													</Flex>
+												</Flex>
+											)}
 										</>
 									) : (
 										<Flex justify="space-between" mb="2">
@@ -546,9 +564,17 @@ export function FirmwareDropZone() {
 										<line x1="12" y1="17" x2="12.01" y2="17" />
 									</svg>
 									<Text fontSize="sm" fontWeight="800" color="var(--rose)" textTransform="uppercase" letterSpacing="0.05em">
-										THIS WILL WIPE THE DEVICE
+										{analysis.wipeReason === "downgrade" ? "This downgrade will wipe the device" : "THIS WILL WIPE THE DEVICE"}
 									</Text>
 								</Flex>
+								{analysis.wipeReason === "downgrade" ? (
+								<Text fontSize="sm" color="var(--rose)" lineHeight="1.6" mb="3">
+									You are installing <Text as="span" fontWeight="700">v{analysis.detectedVersion}</Text> over{" "}
+									<Text as="span" fontWeight="700">v{analysis.currentFirmwareVersion}</Text>. Older firmware cannot read the
+									newer wallet storage, so when it starts, your KeepKey <Text as="span" fontWeight="700">erases all keys and
+									settings</Text>. To use this wallet again you will restore it from your recovery phrase.
+								</Text>
+								) : (
 								<Text fontSize="sm" color="var(--rose)" lineHeight="1.6" mb="3">
 									You are crossing the <Text as="span" fontWeight="700">signed/unsigned firmware boundary</Text>.
 									{analysis.isSigned
@@ -558,6 +584,7 @@ export function FirmwareDropZone() {
 									{' '}This transition requires a full device wipe — <Text as="span" fontWeight="700">all keys and
 									settings will be permanently erased</Text>.
 								</Text>
+								)}
 								<Text fontSize="sm" color="var(--rose)" lineHeight="1.6" mb="3">
 									Make sure you have your recovery seed backed up before proceeding.
 								</Text>
