@@ -23,7 +23,7 @@ include .env
 export ELECTROBUN_DEVELOPER_ID ELECTROBUN_TEAMID ELECTROBUN_APPLEID ELECTROBUN_APPLEIDPASS
 endif
 
-.PHONY: clearsign-worker-test clearsign-worker-deploy install dev dev-hmr build build-stable build-canary build-signed patch-arm64-release-tar prune-bundle dmg clean help vault sign-check verify verify-entitlements publish release upload-dmg upload-all-dmgs sign-release sign-release-intel verify-arch audit-macos-bundle submodules modules-install modules-build modules-clean audit build-zcash-cli build-zcash-cli-debug build-zcash-cli-intel test test-unit test-rest test-sign-gating test-zcash-cli test-emu build-intel build-signed-intel build-electrobun-x64-core build-electrobun-arm64-core prepare-electrobun-arm64-core publish-electrobun-x64-core build-electrobun-linux-x64-core preflight build-emulator build-emulator-windows build-emulator-macos-release build-emulator-release clean-emulator test-emu-python
+.PHONY: clearsign-worker-test clearsign-worker-deploy install dev dev-hmr build build-stable build-canary build-signed patch-arm64-release-tar prune-bundle dmg clean help vault sign-check notary-check verify verify-entitlements publish release upload-dmg upload-all-dmgs sign-release sign-release-intel verify-arch audit-macos-bundle submodules modules-install modules-build modules-clean audit build-zcash-cli build-zcash-cli-debug build-zcash-cli-intel test test-unit test-rest test-sign-gating test-zcash-cli test-emu build-intel build-signed-intel build-electrobun-x64-core build-electrobun-arm64-core prepare-electrobun-arm64-core publish-electrobun-x64-core build-electrobun-linux-x64-core preflight build-emulator build-emulator-windows build-emulator-macos-release build-emulator-release clean-emulator test-emu-python
 
 # --- Submodules (auto-init on fresh worktrees/clones) ---
 
@@ -318,7 +318,7 @@ prune-bundle:
 #    (This shipped the @cosmjs/stargate Freegrant/Feegrant fallback as a pre-fix build in v1.4.6/1.4.7,
 #    breaking every Cosmos tx with "createFeegrantAminoConverters is not a function".)
 #    Clearing the stamps forces modules-build from the pinned source before the vault install copies it.
-build-signed: sign-check
+build-signed: notary-check
 	@rm -f $(ZCASH_CLI_STAMP) $(PROTO_BUILD_STAMP) $(HDWALLET_BUILD_STAMP) $(DEVICE_PROTOCOL_BUILD_STAMP)
 	@node scripts/verify-certified-emulator.mjs
 	$(MAKE) prepare-electrobun-arm64-core
@@ -572,6 +572,20 @@ sign-check:
 	@security find-identity -v -p codesigning | grep "$$ELECTROBUN_DEVELOPER_ID" || \
 		(echo "ERROR: Developer ID signing identity not found in the active keychains" && exit 1)
 
+# Ask Apple's notary service whether these credentials can notarize, in a few
+# seconds, before a signed build spends ~15 minutes reaching notarization.
+# HTTP 403 "required agreement is missing or has expired" means the team's
+# Account Holder must accept the updated agreement at
+# https://developer.apple.com/account (team selected top right), then rerun.
+notary-check: sign-check
+	@echo "Checking Apple notary service..."
+	@out=$$(xcrun notarytool history --apple-id "$$ELECTROBUN_APPLEID" --password "$$ELECTROBUN_APPLEIDPASS" \
+		--team-id "$$ELECTROBUN_TEAMID" 2>&1) && echo "Notary service accepts these credentials." || \
+		{ echo "$$out" | grep -v '^\s*$$' | tail -3; \
+		  echo "ERROR: Apple notary refused. If it says an agreement is missing or expired, the Account Holder"; \
+		  echo "       must accept it at https://developer.apple.com/account (team $$ELECTROBUN_TEAMID), then rerun."; \
+		  exit 1; }
+
 verify:
 	@APP=$$(find $(PROJECT_DIR)/_build -name "*.app" -maxdepth 2 | head -1); \
 	if [ -z "$$APP" ]; then echo "No .app bundle found in _build/"; exit 1; fi; \
@@ -635,7 +649,7 @@ release: sign-check build-signed
 # NOTE: For arm64, prefer `make build-signed` (builds from source locally).
 # CI-built arm64 artifacts may fail notarization because the binaries were
 # built on a different machine. Use `make sign-release-intel` for x64 only.
-sign-release: sign-check
+sign-release: notary-check
 	@echo "=== Signing macOS release v$(VERSION) ==="
 	@# Verify draft release exists before doing any work
 	@gh release view v$(VERSION) --repo $(GITHUB_REPO) >/dev/null 2>&1 || \
@@ -710,7 +724,7 @@ sign-release: sign-check
 # Sign Intel (x86_64) macOS release artifact from CI.
 # For arm64, use `make build-signed` instead — local builds notarize reliably.
 # Usage: make sign-release-intel
-sign-release-intel: sign-check
+sign-release-intel: notary-check
 	@echo "=== Signing macOS Intel release v$(VERSION) ==="
 	@gh release view v$(VERSION) --repo $(GITHUB_REPO) >/dev/null 2>&1 || \
 		(echo "ERROR: No release v$(VERSION) found." && exit 1)
@@ -867,6 +881,7 @@ help:
 	@echo "  make test-zcash-cli       - Run Zcash CLI unit tests only"
 	@echo "  make audit          - Generate dependency manifest + SBOM"
 	@echo "  make sign-check     - Verify signing env vars are configured"
+	@echo "  make notary-check   - Verify Apple notary accepts the credentials (agreements in effect)"
 	@echo "  make verify         - Verify .app bundle signature + Gatekeeper"
 	@echo "  make publish        - Show distribution artifacts"
 	@echo "  make release        - Build, sign, and create a draft GitHub release"
