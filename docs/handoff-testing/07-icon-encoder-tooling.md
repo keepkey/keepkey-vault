@@ -7,7 +7,7 @@ every output by round-tripping through a decoder mirror; ImageMagick does the
 resize/center/threshold.
 
 **Where:** vault `#342` (OPEN) —
-`/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-vault/scripts/clearsign-icons/`
+`keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-vault/scripts/clearsign-icons/`
 (`encode-icon.mjs`, `build-catalog.mjs`, `README.md`, `sources/`, `generated/`).
 
 ## Test

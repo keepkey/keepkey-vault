@@ -1,0 +1,90 @@
+{
+  "version": 2,
+  "policyVersion": 5,
+  "inventoryHash": "f9528c0986f93e81684347eed06bdd0c514618cdbc019e7c36378d0e3a04f829",
+  "generatedAt": "2026-09-21T08:17:33.798Z",
+  "sources": [
+    {
+      "path": "../pioneer/modules/pioneer/pioneer-discovery/src/generatedAssetData.json",
+      "sha256": "8d4aacccb93c899c0ed90e46c40298768d4dbcdae54f3004b5959b88c6634a48"
+    },
+    {
+      "path": "../pioneer/modules/pioneer/pioneer-discovery/src/denylist.json",
+      "sha256": "a92dc1903a6c334a2f2868c74e4c8b589360f3aa0a6a60521c72ada6182a6b5a"
+    },
+    {
+      "path": ".worktrees/keepkey-vault-solana-certified/projects/keepkey-vault/clearsign-worker/src/evm-discovery-snapshot.json",
+      "sha256": "3bda7a166483137a3b3be120047c3ca5576da0e53953d00320e5ff3bca1ce120"
+    },
+    {
+      "path": "docs/clearsign-ecosystem/live-catalog.json",
+      "sha256": "657d45af30e7114f26c2e033451960a7480a236e11eac485fa58169437bf14f4"
+    }
+  ],
+  "signedProvenance": {
+    "publicKey": "0218621d9c14473458713bd3e672e53480aa7032ca9b67356395e88709bb45226a",
+    "total": 11689,
+    "results": [
+      {
+        "kind": "token-metadata",
+        "declared": 8728,
+        "discovered": 8728,
+        "valid": 8728,
+        "sha256": "9a17aaa2d699b55f257b399946d8c1cd71713b88ada1528332099cdedb4e3f10",
+        "invalid": []
+      },
+      {
+        "kind": "cosmos-msg-types",
+        "declared": 28,
+        "discovered": 28,
+        "valid": 28,
+        "sha256": "170e8d7818e1e7d02ced6e9d913726e4a2facc215d51b08e39f137af2ab613bf",
+        "invalid": []
+      },
+      {
+        "kind": "evm-selector-blobs",
+        "declared": 2933,
+        "discovered": 2933,
+        "valid": 2933,
+        "sha256": "2102fbbc00675a0f462ccc2f759d982a24434a2aeabb2ab3cf15ff8a3888c5dc",
+        "invalid": []
+      }
+    ]
+  },
+  "totalAssets": 24087,
+  "uniqueIdentities": 24087,
+  "byStatus": {
+    "denied": 3,
+    "needs-work": 16892,
+    "eligible-on-demand": 7192
+  },
+  "byNamespace": {
+    "binance": 1,
+    "bip122": 7,
+    "cosmos": 47,
+    "eip155": 19018,
+    "hive": 1,
+    "ripple": 1,
+    "solana": 5008,
+    "ton": 1,
+    "tron": 2,
+    "xrpl": 1
+  },
+  "byBlocker": {
+    "network-retired-no-new-blocks": 1,
+    "native-device-coverage-unverified": 304,
+    "chain-format-device-coverage-unverified": 42,
+    "invalid-slip44-identity": 1,
+    "firmware-symbol-format": 5343,
+    "not-in-reviewed-token-snapshot": 11542,
+    "missing-or-unsupported-decimals": 6270,
+    "verification-rpc-missing": 1,
+    "chain-certificate-missing": 1,
+    "invalid-network-identity": 1,
+    "network-mismatch": 1,
+    "mint-identity-audit-required": 5006,
+    "token-instruction-device-coverage-unverified": 5006
+  },
+  "deviceVerifiedAssets": 0,
+  "note": "Eligibility is not device verification or approval of contract behavior. Every source entry is accounted for; blockers may overlap."
+}

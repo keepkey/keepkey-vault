@@ -4,13 +4,17 @@ import { useTranslation } from "react-i18next"
 import { Z } from "../../lib/z-index"
 import { rpcRequest } from "../../lib/rpc"
 import type { SigningRequestInfo, EIP712DecodedInfo, CalldataDecodedInfo, SolanaTxDecodedInfo, EthMessageDecodedInfo, SolanaMessageDecodedInfo } from "../../../shared/types"
+import { evmContractIdentity } from "../../../shared/evm-contract-identity"
 import { versionCompare } from "../../../shared/firmware-versions"
 import { erc20Preview } from "../../../shared/erc20Preview"
 import { evmMaxFee, evmNativeValue } from "../../../shared/evmFeePreview"
+import { evmChainLabel } from "../../../shared/chains"
 import { isRelayBridgeDeposit } from "../../../shared/relayBridgePreview"
+import { decodeAcrossDepositV3 } from "../../../shared/acrossDeposit"
 import { utxoPreview } from "../../../shared/utxoPreview"
 import { cosmosDepositPreview } from "../../../shared/cosmosDepositPreview"
 import { assessSigningRisk, formatCertifiedArg, type RiskLevel } from "../../../shared/clearsign-risk"
+import { ClearSignReportCard } from "../ClearSignReportCard"
 
 interface SigningApprovalProps {
 	request: SigningRequestInfo
@@ -101,12 +105,13 @@ function Row({ label, value, mono = true }: { label: string; value?: string; mon
 
 // ── Trust badge (inline) ──────────────────────────────────────────────
 
-function TrustBadge({ level, hasSigned, schemaOnly, t }: { level: 'verified' | 'known' | 'unknown'; hasSigned?: boolean; schemaOnly?: boolean; t: (k: string, f?: string) => string }) {
+function TrustBadge({ level, hasSigned, schemaOnly, label, t }: { level: 'verified' | 'known' | 'unknown'; hasSigned?: boolean; schemaOnly?: boolean; label?: string; t: (k: string, f?: string) => string }) {
 	const cfg = level === 'verified'
 		? { bg: "rgba(34,197,94,0.12)", border: "rgba(34,197,94,0.3)", color: "var(--teal)", label: schemaOnly ? "Call schema verified" : hasSigned ? t("signing.signedVerified", "Signed & Verified") : t("signing.verified", "Verified Contract") }
 		: level === 'known'
 			? { bg: "rgba(233,196,106,0.12)", border: "rgba(233,196,106,0.3)", color: "var(--gold)", label: t("signing.knownPattern", "Known Pattern") }
 			: { bg: "rgba(239,68,68,0.12)", border: "rgba(239,68,68,0.3)", color: "var(--rose)", label: t("signing.unverifiedContract", "Unverified Contract") }
+	if (label) cfg.label = label
 
 	return (
 		<Flex
@@ -297,6 +302,44 @@ function SolanaBlindSigningConsent({
 	)
 }
 
+// ── Request a human clearsign review for an unknown contract call ─────
+
+function RequestClearSignReview({ request }: { request: SigningRequestInfo }) {
+	const { t } = useTranslation("device")
+	const [state, setState] = useState<"idle" | "sending" | "queued" | "failed">("idle")
+	const [error, setError] = useState<string>()
+	const data = String(request.data || "")
+	const chainId = Number(request.chainId)
+	if (request.method !== "/eth/sign-transaction" || !request.needsBlindSigning || request.clearSignReport?.definitionReview
+		|| !Number.isSafeInteger(chainId) || chainId < 1
+		|| !/^0x[0-9a-fA-F]{40}$/.test(String(request.to || "")) || !/^0x[0-9a-fA-F]{8}/.test(data)) return null
+	const submit = async () => {
+		setState("sending")
+		try {
+			await rpcRequest("requestClearSignReview", { chainId, to: String(request.to), data }, 15000)
+			setState("queued")
+		} catch (e: any) {
+			setError(e?.message || String(e))
+			setState("failed")
+		}
+	}
+	return (
+		<Flex direction="column" gap="1" w="100%" bg="rgba(0,0,0,0.2)" borderRadius="lg" px="3" py="2" data-clearsign-review-request={state}>
+			<Text fontSize="2xs" color="kk.textSecondary">
+				{state === "queued"
+					? t("signing.reviewQueued", "Requested. KeepKey reviewers will audit this contract; once published, future signings show a reviewed description and risk rating.")
+					: t("signing.reviewOffer", "KeepKey has not reviewed this contract. You can ask for a review. Only the contract address, function selector and call length are sent — not your address or amounts.")}
+			</Text>
+			{state === "failed" && <Text fontSize="2xs" color="var(--rose)">{error}</Text>}
+			{state !== "queued" && (
+				<Button size="xs" variant="outline" alignSelf="flex-start" onClick={submit} loading={state === "sending"}>
+					{t("signing.requestReview", "Request clearsign review")}
+				</Button>
+			)}
+		</Flex>
+	)
+}
+
 // ── Risk bar: level + the payload facts behind it ─────────────────────
 
 const RISK_STYLE: Record<RiskLevel, { color: string; filled: number }> = {
@@ -411,6 +454,12 @@ function CalldataSection({ decoded, request, t }: { decoded: CalldataDecodedInfo
 				</Text>
 			</Flex>
 			{erc20 && <Text fontSize="sm" fontWeight="700" color="kk.textPrimary" alignSelf="flex-start" wordBreak="break-word">{erc20.summary}</Text>}
+			{erc20 && <>
+				<Row label="Token" value={erc20.tokenIdentity || 'Unidentified token'} mono={false} />
+				<Row label="Token contract" value={erc20.tokenAddress} />
+				<Row label={erc20.counterpartyLabel} value={erc20.counterpartyIdentity || 'Unidentified address'} mono={false} />
+				<Row label={`${erc20.counterpartyLabel} address`} value={erc20.counterpartyAddress} />
+			</>}
 			{decoded.fields.map((field, i) => (
 				<Row key={i} label={field.name} value={field.name === 'Amount' && erc20 ? `${erc20.amount} (raw: ${erc20.rawAmount})` : field.value} />
 			))}
@@ -586,6 +635,15 @@ function CalldataInspector({ data, t }: { data: string; t: (k: string, f?: strin
  */
 // ponytail: English-only, like the risk-bar sentences next to it — i18n once
 // this wording has been read by real users.
+/** The device's own Limits wording for each v3 role (SRS-7.16 R-7.3). */
+const ROLE_TEXT: Record<number, string> = {
+	1: "You spend at most",
+	2: "You receive at least",
+	3: "You spend",
+	4: "You receive",
+	5: "Each use at most",
+}
+
 function CertifiedVouch({ certified, appName }: {
 	certified: NonNullable<SigningRequestInfo['solanaCertified']>
 	appName: string
@@ -605,8 +663,15 @@ function CertifiedVouch({ certified, appName }: {
 				</Text>
 			</Flex>
 			<Text fontSize="xs" fontWeight="600" color="white">
-				{certified.programName} — {certified.instructionName}
+				{certified.programName} — {certified.summary ?? certified.instructionName}
 			</Text>
+			{certified.args.some((a) => a.role) && (
+				<VStack gap="0.5" align="stretch" data-testid="certified-limits">
+					{certified.args.filter((a) => a.role).map((a, i) => (
+						<Row key={i} label={ROLE_TEXT[a.role!] ?? a.label} value={formatCertifiedArg(a, true)} />
+					))}
+				</VStack>
+			)}
 			<Row label="Program" value={certified.programId} />
 			{certified.args.map((a, i) => (
 				<Row key={i} label={a.label} value={formatCertifiedArg(a, true)} />
@@ -640,7 +705,12 @@ function formatArgValue(arg: { type: string; value: string }): string {
 	return arg.value
 }
 
-function SolanaDecodedSection({ decoded, t }: { decoded: SolanaTxDecodedInfo; t: (k: string, f?: string) => string }) {
+function SolanaDecodedSection({ decoded, t, certified }: {
+	decoded: SolanaTxDecodedInfo
+	t: (k: string, f?: string) => string
+	/** Present when the device clear-signs this call from a KeepKey-certified schema. */
+	certified?: SigningRequestInfo['solanaCertified']
+}) {
 	return (
 		<VStack gap="2" w="100%" bg="rgba(0,0,0,0.25)" borderRadius="xl" p="3" align="stretch">
 			<Flex gap="2" align="center" w="100%">
@@ -655,11 +725,15 @@ function SolanaDecodedSection({ decoded, t }: { decoded: SolanaTxDecodedInfo; t:
 				</Text>
 			</Flex>
 
-			{decoded.hasUnknownProgram && (
+			{decoded.hasUnknownProgram && (certified ? (
+				<Text fontSize="2xs" color="var(--teal)" bg="rgba(72,187,120,0.1)" px="2" py="1" borderRadius="md">
+					✓ {t("signing.solanaCertifiedProgram", "Decoded by your KeepKey from a KeepKey-certified schema:")} {certified.programName} — {certified.instructionName}
+				</Text>
+			) : (
 				<Text fontSize="2xs" color="orange.300" bg="rgba(255,140,0,0.1)" px="2" py="1" borderRadius="md">
 					⚠ {t("signing.solanaUnknownProgram", "Contains instructions from programs the Vault can't clear-sign.")}
 				</Text>
-			)}
+			))}
 			{decoded.altResolutionIncomplete && (
 				<Text fontSize="2xs" color="orange.300" bg="rgba(255,140,0,0.1)" px="2" py="1" borderRadius="md">
 					⚠ {t("signing.solanaAltIncomplete", "Some address lookup tables couldn't be resolved — account names may be missing.")}
@@ -847,16 +921,21 @@ function EthMessageSection({ decoded, t }: {
 // ── Typed data section ────────────────────────────────────────────────
 
 function TypedDataSection({ decoded, t }: { decoded: EIP712DecodedInfo; t: (k: string, f?: string) => string }) {
+	const chainId = Number(decoded.domain.chainId || 0)
+	const identified = (value: string) => {
+		const identity = /^0x[0-9a-fA-F]{40}$/.test(value) ? evmContractIdentity(chainId, value) : undefined
+		return identity ? `${identity} · ${value}` : value
+	}
 	return (
 		<VStack gap="1.5" w="100%" bg="rgba(0,0,0,0.25)" borderRadius="xl" p="3">
 			<Text fontSize="2xs" fontWeight="600" color={decoded.isKnownType ? "kk.gold" : "kk.textSecondary"}>
 				{decoded.operationName}
 			</Text>
 			{decoded.domain.name && <Row label="Domain" value={decoded.domain.name} />}
-			{decoded.domain.verifyingContract && <Row label="Contract" value={decoded.domain.verifyingContract} />}
+			{decoded.domain.verifyingContract && <Row label="Contract" value={identified(decoded.domain.verifyingContract)} />}
 			{decoded.domain.chainId !== undefined && <Row label="Chain ID" value={String(decoded.domain.chainId)} />}
 			{decoded.fields.map((field, i) => (
-				<Row key={i} label={field.label} value={field.value} />
+				<Row key={i} label={field.label} value={identified(field.raw || field.value)} />
 			))}
 		</VStack>
 	)
@@ -891,6 +970,11 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 	const hasSignedBlob = !!decoded?.signedInsightBlob
 	const relayBridgeDeposit = request.method === '/eth/sign-transaction'
 		&& isRelayBridgeDeposit(request.to, request.data, request.chainId)
+	// A pinned Across SpokePool on this chain: name the contract instead of
+	// "Unverified Contract". The device still blind-signs it, so the
+	// AdvancedMode gate below is untouched.
+	const acrossDeposit = request.method === '/eth/sign-transaction'
+		? decodeAcrossDepositV3(request.to, request.data, request.chainId) : null
 	const utxo = request.method === '/utxo/sign-transaction' ? utxoPreview(request.rawRequestBody) : undefined
 	const cosmosDeposit = request.method === '/thorchain/sign-amino-deposit'
 		? cosmosDepositPreview(request.rawRequestBody, 'THORChain')
@@ -910,11 +994,16 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 		else if (decoded?.source === 'pioneer' || decoded?.source === 'local') trustLevel = 'known'
 	}
 	if (request.typedDataDecoded) {
-		// Only x402 is streamed for on-device review; every other typed-data
-		// request is signed as a bare hash (EthereumSignTypedHash) — blind.
-		trustLevel = request.typedDataDecoded.operationName !== 'x402 EIP-3009 Payment' ? 'unknown'
-			: request.typedDataDecoded.isKnownType ? 'verified' : 'known'
+		// needsBlindSigning is the backend's prediction of what the device
+		// reviews natively (x402; canonical Permit2 PermitSingle on 7.16+).
+		// Everything else is signed as a bare hash under AdvancedMode — blind.
+		// Firmware 7.15+ drives the EIP-712 traversal; older firmware has no
+		// structured typed-data path. A failed protocol identity is not verified.
+		const structuredEip712 = !!request.firmwareVersion && versionCompare(request.firmwareVersion, '7.15.0') >= 0
+		trustLevel = request.needsBlindSigning || !structuredEip712 ? 'unknown'
+			: request.typedDataDecoded.isKnownType && request.typedDataDecoded.protocolIdentityVerified !== false ? 'verified' : 'known'
 	}
+	if (acrossDeposit && trustLevel === 'unknown') trustLevel = 'known'
 
 	// Solana is never a "simple transfer". Transactions need a clear-sign
 	// preview; raw message signing is AdvancedMode-gated because it lacks the
@@ -994,9 +1083,7 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 	const safeAppName = (request.appName || 'Unknown').replace(/[^\w\s\-.:()]/g, '').slice(0, 50)
 	const labelKey = METHOD_LABEL_KEYS[request.method]
 	const evmChainName = request.method === '/eth/sign-transaction'
-		? request.chainId === 43114 ? 'Avalanche C-Chain'
-			: request.chainId === 8453 ? 'Base'
-				: request.chainId === 1 ? 'Ethereum' : undefined
+		? evmChainLabel(request.chainId)?.name
 		: undefined
 	const methodLabel = request.method === '/utxo/sign-transaction' && utxo
 		? `${utxo.coin} Sign Transaction`
@@ -1154,7 +1241,8 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 						  EVM verified-contract trust signal, so hide it there too.
 						*/}
 						{!isSimpleTransfer && !request.ethMessageDecoded && !isSolanaRequest && (
-							<TrustBadge level={trustLevel} hasSigned={hasSignedBlob} schemaOnly={relayBridgeDeposit} t={t} />
+							<TrustBadge level={trustLevel} hasSigned={hasSignedBlob} schemaOnly={relayBridgeDeposit}
+								label={acrossDeposit ? t("signing.acrossKnownContract", "Across SpokePool · device shows raw data") : undefined} t={t} />
 						)}
 						<Text fontSize="2xs" color={remaining <= 30 ? "red.400" : "kk.textMuted"} fontWeight={remaining <= 30 ? "600" : "400"}>
 							{timeStr}
@@ -1223,8 +1311,10 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 					</Box>
 				)}
 
-				{/* Risk first, so it is read before any blind-signing consent. */}
+				{/* Report and risk first, so they are read before blind-sign consent. */}
+				<ClearSignReportCard report={request.clearSignReport} />
 				<RiskBar request={request} t={t} />
+				<RequestClearSignReview request={request} />
 
 				{/* What the certified description is, and what it is not. Below
 				    the risk bar on purpose: the verdict is read first, and this
@@ -1244,7 +1334,9 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 						title={isSolanaSignMessage ? t("signing.solanaAdvancedModeRequired", "Advanced Mode Required") : undefined}
 						description={isSolanaSignMessage
 							? t("signing.solanaAdvancedModeDescription", "Advanced Mode is off, so your KeepKey will reject this raw Solana message. Enable Advanced Mode here before approving.")
-							: undefined}
+							: acrossDeposit
+								? t("signing.acrossAdvancedModeDescription", "Your KeepKey cannot decode Across bridge deposits yet and will show this call only as raw data. Check the decoded details here, then enable Advanced Mode on the device to sign it.")
+								: undefined}
 						enableLabel={isSolanaSignMessage ? t("signing.enableAdvancedMode", "Enable Advanced Mode") : undefined}
 						error={advancedModeError}
 					/>
@@ -1277,7 +1369,7 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 					{(request.solanaDecoded || request.solanaMessageDecoded || request.typedDataDecoded || request.ethMessageDecoded || (decoded && decoded.source !== 'none')) && (
 						<Box flex="1" minW="0">
 							{request.solanaDecoded
-								? <SolanaDecodedSection decoded={request.solanaDecoded} t={t} />
+								? <SolanaDecodedSection decoded={request.solanaDecoded} t={t} certified={request.solanaCertified} />
 								: request.solanaMessageDecoded
 									? <SolanaMessageSection decoded={request.solanaMessageDecoded} t={t} />
 									: request.typedDataDecoded

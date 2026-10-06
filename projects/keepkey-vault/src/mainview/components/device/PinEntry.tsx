@@ -8,9 +8,13 @@ import { Z } from "../../lib/z-index"
 interface PinEntryProps {
 	type?: PinRequestType
 	failed?: boolean
+	/** Device's Failure for the last PIN sent; code 7 = Failure_PinInvalid. */
+	errorDetail?: { code?: number; message?: string } | null
+	/** Bumps on every device PinMatrixRequest (new scramble). */
+	requestSeq?: number
 	onSubmit: (pin: string) => void
 	onCancel: () => void
-	onWipe?: () => void
+	onWipe?: () => Promise<void>
 }
 
 const TITLE_KEYS: Record<PinRequestType, string> = {
@@ -59,18 +63,22 @@ const PIN_ANIMATIONS = `
  * The device screen shows scrambled numbers; the user taps
  * position-based buttons (1-9) on this grid.
  */
-export function PinEntry({ type = "current", failed, onSubmit, onCancel, onWipe }: PinEntryProps) {
+export function PinEntry({ type = "current", failed, errorDetail, requestSeq, onSubmit, onCancel, onWipe }: PinEntryProps) {
 	const { t } = useTranslation("device")
 	const [pin, setPin] = useState("")
 	const [showError, setShowError] = useState(false)
 	const [showWipeConfirm, setShowWipeConfirm] = useState(false)
 	const [wipeAcknowledged, setWipeAcknowledged] = useState(false)
 	const [wiping, setWiping] = useState(false)
+	const [wipeError, setWipeError] = useState<string | null>(null)
 
 	// Show error banner when failed prop becomes true
 	useEffect(() => {
 		if (failed) setShowError(true)
 	}, [failed])
+
+	// The device re-scrambles on every PinMatrixRequest, so a partial entry is stale.
+	useEffect(() => { setPin("") }, [requestSeq])
 
 	// Reset pin when type changes (e.g. new-first -> new-second)
 	useEffect(() => {
@@ -82,7 +90,15 @@ export function PinEntry({ type = "current", failed, onSubmit, onCancel, onWipe 
 	const handleWipe = useCallback(async () => {
 		if (!onWipe) return
 		setWiping(true)
-		onWipe()
+		setWipeError(null)
+		try {
+			await onWipe()
+		} catch (e: any) {
+			console.error("wipeDevice from PIN:", e)
+			setWipeError(e?.message || String(e))
+		} finally {
+			setWiping(false)
+		}
 	}, [onWipe])
 
 	const handleDigit = useCallback((digit: string) => {
@@ -182,7 +198,9 @@ export function PinEntry({ type = "current", failed, onSubmit, onCancel, onWipe 
 							{t("pin.incorrectPin")}
 						</Text>
 						<Text fontSize="xs" color="kk.textSecondary" mt="1">
-							{t("pin.tryAgainDescription")}
+							{errorDetail?.code !== undefined && errorDetail.code !== 7 && errorDetail.message
+								? `Device: ${errorDetail.message}`
+								: t("pin.tryAgainDescription")}
 						</Text>
 					</Box>
 				)}
@@ -379,6 +397,16 @@ export function PinEntry({ type = "current", failed, onSubmit, onCancel, onWipe 
 								{wiping ? t("pin.wiping") : t("pin.wipeDevice")}
 							</Button>
 						</Flex>
+						{wiping && (
+							<Text fontSize="xs" color="kk.gold" mt="3">
+								{t("pin.wipeConfirmOnDevice")}
+							</Text>
+						)}
+						{wipeError && (
+							<Text fontSize="xs" color="kk.error" mt="3">
+								{t("pin.wipeFailed", { error: wipeError })}
+							</Text>
+						)}
 					</Box>
 				)}
 

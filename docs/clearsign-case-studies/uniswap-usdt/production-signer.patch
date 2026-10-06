@@ -1,0 +1,65 @@
+--- a/projects/keepkey-vault/src/bun/evm-certified-schema.ts
++++ b/projects/keepkey-vault/src/bun/evm-certified-schema.ts
+@@ -44,6 +44,25 @@
+ }
+ 
+ export const CERTIFIED_EVM_CATALOG: Record<string, EvmSchemaSpec> = {
++  '42161:0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9:0x095ea7b3': {
++    chainId: 42161,
++    contract: '0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9',
++    selector: '0x095ea7b3',
++    method: 'Arbitrum USDT approval',
++    args: [
++      { name: 'Spender', format: EVM_ARG_ADDRESS },
++      { name: 'Allowance', format: EVM_ARG_TOKEN_AMOUNT, decimals: 6, symbol: 'USDT' },
++    ],
++    expectedCalldataLength: 68,
++    displayFields: ['Spender', 'Allowance'],
++    protocol: 'Uniswap Permit2',
++    maintainedBy: 'KeepKey',
++    action: 'Approve Arbitrum USDT for a token spender',
++    provenance: {
++      protocol: 'https://developers.uniswap.org/docs/liquidity/uniswapx/deployments',
++      token: 'https://arbiscan.io/token/0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9',
++    },
++  },
+   '1:0x4cd00e387622c35bddb9b4c962c136462338bc31:0x49290c1c': {
+     chainId: 1,
+     contract: '0x4cd00e387622c35bddb9b4c962c136462338bc31',
+--- a/projects/keepkey-vault/src/bun/evm-certified-schema.test.ts
++++ b/projects/keepkey-vault/src/bun/evm-certified-schema.test.ts
+@@ -17,6 +17,18 @@
+ const PORTALS = '0xbf5A7F3629fB325E2a8453D595AB103465F75E62'
+ 
+ describe('7.16 certified EVM schemas', () => {
++  it('binds Arbitrum USDT identity and unlimited allowance rendering metadata', () => {
++    const spec = CERTIFIED_EVM_CATALOG['42161:0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9:0x095ea7b3']
++    expect(findCertifiedEvmSchemaSpec(42161, spec.contract, `0x095ea7b3${'00'.repeat(64)}`)).toBe(spec)
++    const body = buildEvmSchemaBody(spec)
++    expect(body[0]).toBe(2)
++    expect(body.includes(Buffer.from('Arbitrum USDT approval'))).toBe(true)
++    expect(body.includes(Buffer.from('USDT'))).toBe(true)
++    expect(spec.args).toEqual([
++      { name: 'Spender', format: 1 },
++      { name: 'Allowance', format: 5, decimals: 6, symbol: 'USDT' },
++    ])
++  })
+   it('serializes the Relay schema with a delegate sentinel trailer', () => {
+     const spec = CERTIFIED_EVM_CATALOG[`1:${TO}:0x49290c1c`]
+     const body = buildEvmV2SchemaBody(spec)
+--- a/projects/keepkey-vault/clearsign-worker/src/index.test.ts
++++ b/projects/keepkey-vault/clearsign-worker/src/index.test.ts
+@@ -64,10 +64,10 @@
+     const response = await fetchWorker('/v1/catalog')
+     const body = await response.json() as any
+     expect(response.status).toBe(200)
+-    expect(body.entries).toHaveLength(6)
+-    expect(body.entries.map((entry: any) => entry.family)).toEqual(['evm', 'evm', 'solana', 'solana', 'solana', 'solana'])
++    expect(body.entries).toHaveLength(7)
++    expect(body.entries.map((entry: any) => entry.family)).toEqual(['evm', 'evm', 'evm', 'solana', 'solana', 'solana', 'solana'])
+     for (const entry of body.entries) {
+-      expect(['Relay', 'Portals', 'Pump', 'SoltoshiDICE']).toContain(entry.protocol)
++      expect(['Relay', 'Portals', 'Pump', 'SoltoshiDICE', 'Uniswap Permit2']).toContain(entry.protocol)
+       expect(entry.provenance.protocol).toMatch(/^https:\/\//)
+     }
+     const join = body.entries.find((entry: any) => entry.id === 'solana:soltoshidiceBlackjackJoin')

@@ -10,7 +10,7 @@ Server stamps `serverMs`/`traceId` on `POST /portfolio` and exposes
 **Where:**
 - pioneer `#164` (MERGED) — server stamp + ingest.
 - vault `#334` (MERGED, develop) —
-  `/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-vault/src/bun/perf-telemetry.ts`
+  `keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-vault/src/bun/perf-telemetry.ts`
   + `pioneer.ts` hook; tests `__tests__/perf-telemetry.test.ts`.
 
 ## Test

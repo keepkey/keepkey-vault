@@ -58,7 +58,7 @@ If changing `Broadcast` latency is undesirable, the swap monitor should detect t
 
 ## Scope / where
 
-- pioneer-server: `/Users/highlander/WebstormProjects/keepkey-stack/projects/pioneer/services/pioneer-server`
+- pioneer-server: `keepkey-stack/projects/pioneer/services/pioneer-server`
 - Applies to all Cosmos-family broadcasts; the acute case is THORChain/Maya `MsgDeposit`.
 - No vault changes required once Pioneer returns the committed result in the `results.raw.tx_response` shape the vault already checks.
 

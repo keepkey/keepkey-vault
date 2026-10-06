@@ -95,7 +95,7 @@ These were all chased down already and have memory + commit messages:
 
 ```bash
 # From repo root:
-cd /Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11
+cd keepkey-stack/projects/keepkey-vault-v11
 
 # Make sure submodule is on the right firmware
 git -C modules/keepkey-firmware log --oneline -1     # should be f8fee570 on alpha

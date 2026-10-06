@@ -1,7 +1,7 @@
 # Handoff — Finish the btc-only self-host epic (zero Pioneer calls)
 
 **Branch:** `btc-only` (draft PR #353 → develop). Stay on it.
-**Vault code:** `/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-vault/`
+**Vault code:** `keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-vault/`
 **Goal (definition of done):** when a self-host node is enabled on a bitcoin-only device, Vault makes **ZERO Pioneer calls** for that wallet. Balance ✅ done; **send + price + history still hit Pioneer** — that's the "cheating" the user called out. Finish those.
 
 ## Test node (on the tailnet, "beast" = 100.117.181.111)

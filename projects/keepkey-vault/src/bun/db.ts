@@ -8,14 +8,35 @@ import { Database } from 'bun:sqlite'
 import { Utils } from 'electrobun/bun'
 import { join, dirname } from 'node:path'
 import { mkdirSync, unlinkSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
-import { randomUUID } from 'crypto'
-import type { ChainBalance, CustomToken, CustomChain, PairedAppInfo, ApiLogEntry, ReportMeta, ReportData, SwapHistoryRecord, SwapHistoryFilter, SwapTrackingStatus, SwapHistoryStats, Bip85SeedMeta, PioneerServer, AddressBookEntry, AddressBookTx, AddressBookFilter, AddressBookKind, ClearSignEvent } from '../shared/types'
+import { createHash, randomUUID } from 'crypto'
+import type { ChainBalance, CustomToken, CustomChain, PairedAppInfo, ApiLogEntry, ReportMeta, ReportData, SwapHistoryRecord, SwapHistoryFilter, SwapTrackingStatus, SwapHistoryStats, Bip85SeedMeta, PioneerServer, AddressBookEntry, AddressBookTx, AddressBookFilter, AddressBookKind, ClearSignEvent, ClearSignObservation, ClearSignObservationDraft, ClearSignObservationOutcome, ClearSignEventSource, ClearSignCoverageSummary, ClearSignAuditJob, ClearSignPromotionBundle, ClearSignPromotionReview, ClearSignPromotionRecord } from '../shared/types'
+import { authenticatedClearSignLevel, clearSignExposurePriority, expandClearSignAuditDrafts } from './clearsign-observation'
+import { summarizeClearSignObservations } from './clearsign-observation'
+import { clearSignPromotionBundleHash, verifyClearSignPromotionReview } from './clearsign-promotion'
+import type { VerifiedClearSignArtifact } from './clearsign-artifact-import'
+import { configureClearSignArtifactSnapshots } from './clearsign-artifact-resolver'
 
 const SCHEMA_VERSION = '10'
 
 let db: Database | null = null
 
 export function getDb(): Database | null { return db }
+
+/** Bounded raw legacy rows for transient in-process ClearSign replay only. */
+export function getLegacyClearSignRows(from: number, to: number): Array<{
+  id: number; timestamp: number; route: string; status: number; requestBody?: string
+}> {
+  if (!Number.isSafeInteger(from) || !Number.isSafeInteger(to) || from < 0 || to <= from) throw new Error('invalid replay time range')
+  if (to - from > 31 * 24 * 60 * 60 * 1000) throw new Error('legacy replay range exceeds 31 days')
+  if (!db) throw new Error('Vault database is unavailable')
+  return db.query(
+    `SELECT id, timestamp, route, status, request_body AS requestBody
+       FROM api_log
+      WHERE timestamp >= ? AND timestamp < ?
+        AND route IN ('/eth/sign-transaction', '/solana/sign-transaction')
+      ORDER BY timestamp ASC LIMIT 10000`,
+  ).all(from, to) as Array<{ id: number; timestamp: number; route: string; status: number; requestBody?: string }>
+}
 
 // ── Lifecycle ──────────────────────────────────────────────────────────
 
@@ -426,6 +447,97 @@ export function initDb() {
     db.exec(`CREATE INDEX IF NOT EXISTS idx_clearsign_events_created ON clearsign_events(created_at DESC)`)
     db.exec(`CREATE INDEX IF NOT EXISTS idx_clearsign_events_device ON clearsign_events(device_id, created_at DESC)`)
     db.exec(`CREATE INDEX IF NOT EXISTS idx_clearsign_events_outcome ON clearsign_events(outcome, created_at DESC)`)
+
+    // Coverage denominator. Unlike clearsign_events this records EVERY
+    // supported signing attempt, including unknown and rejected requests. Its
+    // shape_json is produced by clearsign-observation.ts and contains no raw
+    // calldata arguments, user account addresses, transaction, or signature.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS clearsign_observations (
+        id                TEXT PRIMARY KEY,
+        created_at        INTEGER NOT NULL,
+        finalized_at      INTEGER,
+        device_id         TEXT,
+        source            TEXT NOT NULL,
+        chain             TEXT NOT NULL,
+        request_kind      TEXT NOT NULL,
+        shape_key         TEXT NOT NULL,
+        shape_json        TEXT NOT NULL,
+        protection_level  TEXT NOT NULL,
+        definition_source TEXT NOT NULL,
+        simulation_status TEXT NOT NULL DEFAULT 'not-requested',
+        definition_resolution TEXT NOT NULL DEFAULT 'not-checked',
+        exposure_class TEXT NOT NULL DEFAULT 'not-evaluated',
+        component_count INTEGER NOT NULL DEFAULT 1,
+        authenticated_component_count INTEGER NOT NULL DEFAULT 0,
+        outcome           TEXT NOT NULL,
+        error_class       TEXT
+      )
+    `)
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_clearsign_observations_created ON clearsign_observations(created_at DESC)`)
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_clearsign_observations_shape ON clearsign_observations(shape_key, created_at DESC)`)
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_clearsign_observations_level ON clearsign_observations(protection_level, created_at DESC)`)
+    try { db.exec(`ALTER TABLE clearsign_observations ADD COLUMN simulation_status TEXT NOT NULL DEFAULT 'not-requested'`) } catch { /* already exists */ }
+    try { db.exec(`ALTER TABLE clearsign_observations ADD COLUMN definition_resolution TEXT NOT NULL DEFAULT 'not-checked'`) } catch { /* already exists */ }
+    try { db.exec(`ALTER TABLE clearsign_observations ADD COLUMN exposure_class TEXT NOT NULL DEFAULT 'not-evaluated'`) } catch { /* already exists */ }
+    try { db.exec(`ALTER TABLE clearsign_observations ADD COLUMN component_count INTEGER NOT NULL DEFAULT 1`) } catch { /* already exists */ }
+    try { db.exec(`ALTER TABLE clearsign_observations ADD COLUMN authenticated_component_count INTEGER NOT NULL DEFAULT 0`) } catch { /* already exists */ }
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS clearsign_audit_jobs (
+        shape_key             TEXT PRIMARY KEY,
+        chain                 TEXT NOT NULL,
+        shape_json            TEXT NOT NULL,
+        first_seen_at         INTEGER NOT NULL,
+        last_seen_at          INTEGER NOT NULL,
+        request_count         INTEGER NOT NULL,
+        status                TEXT NOT NULL,
+        last_protection_level TEXT NOT NULL
+      )
+    `)
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_clearsign_audit_jobs_priority ON clearsign_audit_jobs(status, request_count DESC, last_seen_at DESC)`)
+    for (const column of [
+      `attempts INTEGER NOT NULL DEFAULT 0`,
+      `audit_started_at INTEGER`,
+      `audit_completed_at INTEGER`,
+      `evidence_json TEXT`,
+      `last_error_class TEXT`,
+      `max_exposure_class TEXT NOT NULL DEFAULT 'not-evaluated'`,
+      `max_exposure_rank INTEGER NOT NULL DEFAULT 5`,
+    ]) {
+      try { db.exec(`ALTER TABLE clearsign_audit_jobs ADD COLUMN ${column}`) } catch { /* already exists */ }
+    }
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS clearsign_identity_transitions (
+        id TEXT PRIMARY KEY, shape_key TEXT NOT NULL, changed_at INTEGER NOT NULL,
+        before_identity_hash TEXT NOT NULL, after_identity_hash TEXT NOT NULL,
+        UNIQUE(shape_key, before_identity_hash, after_identity_hash)
+      )
+    `)
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_clearsign_identity_transitions_changed ON clearsign_identity_transitions(changed_at DESC)`)
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS clearsign_promotion_bundles (
+        bundle_hash TEXT PRIMARY KEY, shape_key TEXT NOT NULL, bundle_json TEXT NOT NULL,
+        created_at INTEGER NOT NULL, revoked_at INTEGER, revocation_reason TEXT
+      )
+    `)
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_clearsign_promotion_shape ON clearsign_promotion_bundles(shape_key, created_at DESC)`)
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS clearsign_promotion_reviews (
+        bundle_hash TEXT NOT NULL, reviewer_public_key TEXT NOT NULL, role TEXT NOT NULL,
+        review_json TEXT NOT NULL, reviewed_at INTEGER NOT NULL,
+        PRIMARY KEY (bundle_hash, reviewer_public_key, role),
+        FOREIGN KEY (bundle_hash) REFERENCES clearsign_promotion_bundles(bundle_hash)
+      )
+    `)
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS clearsign_verified_artifacts (
+        bundle_hash TEXT PRIMARY KEY, shape_key TEXT NOT NULL, chain TEXT NOT NULL,
+        artifact_json TEXT NOT NULL, imported_at INTEGER NOT NULL,
+        revoked_at INTEGER, revocation_reason TEXT,
+        FOREIGN KEY (bundle_hash) REFERENCES clearsign_promotion_bundles(bundle_hash)
+      )
+    `)
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_clearsign_artifact_shape ON clearsign_verified_artifacts(shape_key, imported_at DESC)`)
 
     // ── Double-entry accounting ledger (additive — never dropped on version bump) ──
     db.exec(`
@@ -1109,6 +1221,415 @@ export function getClearSignEvents(filter: {
     return []
   }
 }
+
+function upsertClearSignAuditDemand(draft: ClearSignObservationDraft, seenAt: number): void {
+  if (!db || draft.protectionLevel === 'P4' || draft.protectionLevel === 'P5') return
+  db.run(
+    `INSERT INTO clearsign_audit_jobs (
+      shape_key, chain, shape_json, first_seen_at, last_seen_at,
+      request_count, status, last_protection_level, max_exposure_class, max_exposure_rank
+    ) VALUES (?, ?, ?, ?, ?, 1, 'pending', ?, ?, ?)
+    ON CONFLICT(shape_key) DO UPDATE SET
+      last_seen_at = excluded.last_seen_at,
+      request_count = clearsign_audit_jobs.request_count + 1,
+      status = CASE
+        WHEN clearsign_audit_jobs.status IN ('auditing', 'identity-changed') THEN clearsign_audit_jobs.status
+        WHEN clearsign_audit_jobs.status IN ('covered', 'evidence-ready')
+          AND clearsign_audit_jobs.audit_completed_at >= excluded.last_seen_at - 300000
+          THEN clearsign_audit_jobs.status
+        ELSE 'pending'
+      END,
+      max_exposure_class = CASE WHEN excluded.max_exposure_rank > clearsign_audit_jobs.max_exposure_rank
+        THEN excluded.max_exposure_class ELSE clearsign_audit_jobs.max_exposure_class END,
+      max_exposure_rank = MAX(excluded.max_exposure_rank, clearsign_audit_jobs.max_exposure_rank),
+      last_protection_level = excluded.last_protection_level`,
+    [draft.shapeKey, draft.chain, JSON.stringify(draft.shape), seenAt, seenAt, draft.protectionLevel,
+      draft.exposureClass, clearSignExposurePriority(draft.exposureClass)],
+  )
+}
+
+/** Queue a user-requested report for auditing without counting it as a signing attempt. */
+export function enqueueClearSignAuditDemand(draft: ClearSignObservationDraft): void {
+  try {
+    const seenAt = Date.now()
+    for (const auditDraft of expandClearSignAuditDrafts(draft)) upsertClearSignAuditDemand(auditDraft, seenAt)
+  }
+  catch (e: any) { console.warn('[db] enqueueClearSignAuditDemand failed:', e.message) }
+}
+
+/** Start one coverage observation before the user approval prompt. */
+export function insertClearSignObservation(
+  draft: ClearSignObservationDraft,
+  context: { deviceId?: string; source: ClearSignEventSource },
+): ClearSignObservation {
+  const entry: ClearSignObservation = {
+    ...draft,
+    ...context,
+    id: randomUUID(),
+    createdAt: Date.now(),
+    outcome: 'pending',
+    componentCount: draft.chain === 'Solana' && Array.isArray(draft.shape.components)
+      ? Math.max(1, draft.shape.components.length) : 1,
+    authenticatedComponentCount: 0,
+  }
+  try {
+    if (!db) return entry
+    db.run(
+      `INSERT INTO clearsign_observations (
+        id, created_at, device_id, source, chain, request_kind, shape_key,
+        shape_json, protection_level, definition_source, simulation_status, definition_resolution, exposure_class,
+        component_count, authenticated_component_count, outcome
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [entry.id, entry.createdAt, entry.deviceId || null, entry.source, entry.chain,
+        entry.requestKind, entry.shapeKey, JSON.stringify(entry.shape),
+        entry.protectionLevel, entry.definitionSource, entry.simulationStatus, entry.definitionResolution, entry.exposureClass,
+        entry.componentCount, entry.authenticatedComponentCount, entry.outcome],
+    )
+    for (const auditDraft of expandClearSignAuditDrafts(entry)) upsertClearSignAuditDemand(auditDraft, entry.createdAt)
+  } catch (e: any) {
+    console.warn('[db] insertClearSignObservation failed:', e.message)
+  }
+  return entry
+}
+
+/** Finalize an observation without retaining the device or HTTP error text. */
+export function finalizeClearSignObservation(
+  id: string,
+  outcome: Exclude<ClearSignObservationOutcome, 'pending'>,
+  errorClass?: string,
+): void {
+  try {
+    if (!db) return
+    db.run(
+      `UPDATE clearsign_observations
+          SET finalized_at = ?, outcome = ?, error_class = ?
+        WHERE id = ? AND outcome = 'pending'`,
+      [Date.now(), outcome, errorClass || null, id],
+    )
+  } catch (e: any) {
+    console.warn('[db] finalizeClearSignObservation failed:', e.message)
+  }
+}
+
+/** Record device acceptance. Runtime/self-service metadata remains P2 because
+ * device acceptance proves byte binding, not an authenticated publisher. */
+export function authenticateClearSignObservation(
+  id: string,
+  definitionSource: Exclude<ClearSignObservation['definitionSource'], 'none' | 'native'>,
+  authenticatedComponentCount = 1,
+  codeIdentityBound = false,
+  promotionBundleHash?: string,
+): void {
+  try {
+    if (!db) return
+    const authenticated = definitionSource === 'certified' || definitionSource === 'erc7730'
+    const protectionLevel = authenticatedClearSignLevel(definitionSource, codeIdentityBound)
+    db.run(
+      `UPDATE clearsign_observations
+          SET protection_level = ?, definition_source = ?,
+              authenticated_component_count = MIN(component_count, MAX(authenticated_component_count, ?))
+        WHERE id = ? AND outcome = 'pending'`,
+      [protectionLevel, definitionSource, authenticated ? Math.max(0, Math.floor(authenticatedComponentCount)) : 0, id],
+    )
+    if (authenticated) {
+      const bundleHash = promotionBundleHash?.replace(/^0x/i, '').toLowerCase()
+      if (bundleHash && /^[0-9a-f]{64}$/.test(bundleHash)) {
+        db.run(
+          `UPDATE clearsign_audit_jobs SET status = 'covered', last_protection_level = ?
+            WHERE shape_key = (SELECT shape_key FROM clearsign_promotion_bundles WHERE bundle_hash = ?)`,
+          [codeIdentityBound ? 'P5' : 'P4', bundleHash],
+        )
+      } else {
+        db.run(
+          `UPDATE clearsign_audit_jobs SET status = 'covered', last_protection_level = ?
+            WHERE shape_key = (SELECT shape_key FROM clearsign_observations WHERE id = ?)`,
+          [codeIdentityBound ? 'P5' : 'P4', id],
+        )
+      }
+    }
+  } catch (e: any) {
+    console.warn('[db] authenticateClearSignObservation failed:', e.message)
+  }
+}
+
+export function getClearSignCoverageSummary(limit = 10_000): ClearSignCoverageSummary {
+  const empty = summarizeClearSignObservations([])
+  try {
+    if (!db) return empty
+    const rows = db.query(
+      `SELECT id, created_at, finalized_at, device_id, source, chain,
+              request_kind, shape_key, shape_json, protection_level,
+              definition_source, simulation_status, definition_resolution, exposure_class,
+              component_count, authenticated_component_count, outcome, error_class
+         FROM clearsign_observations
+        ORDER BY created_at DESC LIMIT ?`,
+    ).all(Math.max(1, Math.min(50_000, Math.floor(limit)))) as Array<Record<string, any>>
+    const observations = rows.map((row) => ({
+      id: row.id,
+      createdAt: row.created_at,
+      finalizedAt: row.finalized_at || undefined,
+      deviceId: row.device_id || undefined,
+      source: row.source,
+      chain: row.chain,
+      requestKind: row.request_kind,
+      shapeKey: row.shape_key,
+      shape: JSON.parse(row.shape_json),
+      protectionLevel: row.protection_level,
+      definitionSource: row.definition_source,
+      simulationStatus: row.simulation_status || 'not-requested',
+      definitionResolution: row.definition_resolution || 'not-checked',
+      exposureClass: row.exposure_class || 'not-evaluated',
+      componentCount: Number(row.component_count) || 1,
+      authenticatedComponentCount: Number(row.authenticated_component_count) || 0,
+      outcome: row.outcome,
+      errorClass: row.error_class || undefined,
+    })) as ClearSignObservation[]
+    const summary = summarizeClearSignObservations(observations)
+    const auditRows = db.query(`SELECT status, COUNT(*) AS count FROM clearsign_audit_jobs GROUP BY status`).all() as Array<{ status: string; count: number }>
+    for (const row of auditRows) {
+      const count = Number(row.count) || 0
+      if (row.status === 'pending') summary.auditQueue.pending = count
+      else if (row.status === 'auditing') summary.auditQueue.auditing = count
+      else if (row.status === 'evidence-ready') summary.auditQueue.evidenceReady = count
+      else if (row.status === 'covered') summary.auditQueue.covered = count
+      else if (row.status === 'failed') summary.auditQueue.failed = count
+      else if (row.status === 'identity-changed') summary.auditQueue.identityChanged = count
+    }
+    const transitionCount = db.query(`SELECT COUNT(*) AS count FROM clearsign_identity_transitions`).get() as { count: number } | null
+    summary.auditQueue.historicalIdentityChanges = Number(transitionCount?.count) || 0
+    const componentStatuses = new Map((db.query(
+      `SELECT shape_key, status FROM clearsign_audit_jobs WHERE shape_key IN (${summary.topComponents.map(() => '?').join(',') || "''"})`,
+    ).all(...summary.topComponents.map(component => component.componentKey)) as Array<{ shape_key: string; status: ClearSignCoverageSummary['topComponents'][number]['auditStatus'] }>)
+      .map(row => [row.shape_key, row.status]))
+    for (const component of summary.topComponents) component.auditStatus = componentStatuses.get(component.componentKey)
+    return summary
+  } catch (e: any) {
+    console.warn('[db] getClearSignCoverageSummary failed:', e.message)
+    return empty
+  }
+}
+
+export function getClearSignAuditJobs(limit = 100): ClearSignAuditJob[] {
+  try {
+    if (!db) return []
+    const rows = db.query(
+      `SELECT shape_key, chain, shape_json, first_seen_at, last_seen_at,
+              request_count, status, last_protection_level, attempts,
+              audit_started_at, audit_completed_at, evidence_json, last_error_class, max_exposure_class
+         FROM clearsign_audit_jobs
+        ORDER BY CASE status
+          WHEN 'identity-changed' THEN 0 WHEN 'pending' THEN 1 WHEN 'auditing' THEN 2
+          WHEN 'failed' THEN 3 WHEN 'evidence-ready' THEN 4 ELSE 5 END,
+                 max_exposure_rank DESC, request_count DESC, last_seen_at DESC
+        LIMIT ?`,
+    ).all(Math.max(1, Math.min(1000, Math.floor(limit)))) as Array<Record<string, any>>
+    return rows.map((row) => ({
+      shapeKey: row.shape_key,
+      chain: row.chain,
+      shape: JSON.parse(row.shape_json),
+      firstSeenAt: row.first_seen_at,
+      lastSeenAt: row.last_seen_at,
+      requestCount: row.request_count,
+      status: row.status,
+      lastProtectionLevel: row.last_protection_level,
+      maxExposureClass: row.max_exposure_class || 'not-evaluated',
+      attempts: row.attempts || 0,
+      auditStartedAt: row.audit_started_at || undefined,
+      auditCompletedAt: row.audit_completed_at || undefined,
+      evidence: row.evidence_json ? JSON.parse(row.evidence_json) : undefined,
+      errorClass: row.last_error_class || undefined,
+    })) as ClearSignAuditJob[]
+  } catch (e: any) {
+    console.warn('[db] getClearSignAuditJobs failed:', e.message)
+    return []
+  }
+}
+
+export function getClearSignAuditJob(shapeKey: string): ClearSignAuditJob | undefined {
+  try {
+    if (!db) return undefined
+    const row = db.query(
+      `SELECT shape_key, chain, shape_json, first_seen_at, last_seen_at,
+              request_count, status, last_protection_level, attempts,
+              audit_started_at, audit_completed_at, evidence_json, last_error_class, max_exposure_class
+         FROM clearsign_audit_jobs WHERE shape_key = ?`,
+    ).get(shapeKey) as Record<string, any> | null
+    if (!row) return undefined
+    return {
+      shapeKey: row.shape_key, chain: row.chain, shape: JSON.parse(row.shape_json),
+      firstSeenAt: row.first_seen_at, lastSeenAt: row.last_seen_at,
+      requestCount: row.request_count, status: row.status,
+      lastProtectionLevel: row.last_protection_level, attempts: row.attempts || 0,
+      maxExposureClass: row.max_exposure_class || 'not-evaluated',
+      auditStartedAt: row.audit_started_at || undefined,
+      auditCompletedAt: row.audit_completed_at || undefined,
+      evidence: row.evidence_json ? JSON.parse(row.evidence_json) : undefined,
+      errorClass: row.last_error_class || undefined,
+    } as ClearSignAuditJob
+  } catch (e: any) {
+    console.warn('[db] getClearSignAuditJob failed:', e.message)
+    return undefined
+  }
+}
+
+/** Atomically-ish claim a local job. Vault has one Bun process; status prevents duplicate network work. */
+export function claimClearSignAuditJob(shapeKey: string): boolean {
+  try {
+    if (!db) return false
+    const row = db.query(`SELECT status FROM clearsign_audit_jobs WHERE shape_key = ?`).get(shapeKey) as { status: string } | null
+    if (!row || !['pending', 'failed'].includes(row.status)) return false
+    db.run(
+      `UPDATE clearsign_audit_jobs
+          SET status = 'auditing', audit_started_at = ?, audit_completed_at = NULL,
+              attempts = attempts + 1, last_error_class = NULL
+        WHERE shape_key = ? AND status IN ('pending', 'failed')`,
+      [Date.now(), shapeKey],
+    )
+    return true
+  } catch (e: any) {
+    console.warn('[db] claimClearSignAuditJob failed:', e.message)
+    return false
+  }
+}
+
+export function completeClearSignAuditJob(shapeKey: string, evidence: NonNullable<ClearSignAuditJob['evidence']>): void {
+  try {
+    if (!db) return
+    const previous = db.query(`SELECT evidence_json FROM clearsign_audit_jobs WHERE shape_key = ?`).get(shapeKey) as { evidence_json?: string } | null
+    let identityChanged = false
+    let beforeIdentityHash: string | undefined
+    const identity = (value: NonNullable<ClearSignAuditJob['evidence']>) => JSON.stringify(
+      value.identities.map(({ address, role, codeHash, owner, executable, deployedSlot, upgradeAuthority }) =>
+        ({ address, role, codeHash, owner, executable, deployedSlot, upgradeAuthority })),
+    )
+    const afterIdentityHash = createHash('sha256').update(identity(evidence)).digest('hex')
+    if (previous?.evidence_json) {
+      try {
+        const before = JSON.parse(previous.evidence_json) as NonNullable<ClearSignAuditJob['evidence']>
+        beforeIdentityHash = createHash('sha256').update(identity(before)).digest('hex')
+        identityChanged = beforeIdentityHash !== afterIdentityHash
+      } catch { identityChanged = true }
+    }
+    const completedAt = Date.now()
+    db.transaction(() => {
+      if (identityChanged) db!.run(
+        `INSERT OR IGNORE INTO clearsign_identity_transitions
+          (id, shape_key, changed_at, before_identity_hash, after_identity_hash) VALUES (?, ?, ?, ?, ?)`,
+        [randomUUID(), shapeKey, completedAt, beforeIdentityHash || 'unparseable', afterIdentityHash],
+      )
+      db!.run(
+        `UPDATE clearsign_audit_jobs SET status = ?, audit_completed_at = ?,
+                evidence_json = ?, last_error_class = NULL WHERE shape_key = ?`,
+        [identityChanged ? 'identity-changed' : 'evidence-ready', completedAt, JSON.stringify(evidence), shapeKey],
+      )
+    })()
+  } catch (e: any) { console.warn('[db] completeClearSignAuditJob failed:', e.message) }
+}
+
+export function failClearSignAuditJob(shapeKey: string, errorClass: string): void {
+  try {
+    if (!db) return
+    db.run(
+      `UPDATE clearsign_audit_jobs SET status = 'failed', audit_completed_at = ?,
+              last_error_class = ? WHERE shape_key = ?`,
+      [Date.now(), errorClass, shapeKey],
+    )
+  } catch (e: any) { console.warn('[db] failClearSignAuditJob failed:', e.message) }
+}
+
+export function saveClearSignPromotionBundle(bundle: ClearSignPromotionBundle): ClearSignPromotionRecord {
+  const bundleHash = clearSignPromotionBundleHash(bundle)
+  if (!db) return { bundleHash, shapeKey: bundle.shapeKey, bundle, reviews: [] }
+  db.run(
+    `INSERT INTO clearsign_promotion_bundles (bundle_hash, shape_key, bundle_json, created_at)
+     VALUES (?, ?, ?, ?)
+     ON CONFLICT(bundle_hash) DO UPDATE SET bundle_json = excluded.bundle_json`,
+    [bundleHash, bundle.shapeKey, JSON.stringify(bundle), Date.now()],
+  )
+  return getClearSignPromotion(bundleHash)!
+}
+
+export function addClearSignPromotionReview(review: ClearSignPromotionReview): ClearSignPromotionRecord {
+  const record = getClearSignPromotion(review.bundleHash)
+  if (!record) throw new Error('PROMOTION_BUNDLE_NOT_FOUND')
+  if (record.revokedAt) throw new Error('PROMOTION_BUNDLE_REVOKED')
+  if (!verifyClearSignPromotionReview(record.bundle, review)) throw new Error('INVALID_PROMOTION_REVIEW_SIGNATURE')
+  const publicKey = review.reviewerPublicKey.replace(/^0x/, '').toLowerCase()
+  db!.run(
+    `INSERT INTO clearsign_promotion_reviews (bundle_hash, reviewer_public_key, role, review_json, reviewed_at)
+     VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(bundle_hash, reviewer_public_key, role) DO UPDATE SET
+       review_json = excluded.review_json, reviewed_at = excluded.reviewed_at`,
+    [record.bundleHash, publicKey, review.role, JSON.stringify({ ...review, reviewerPublicKey: publicKey }), review.reviewedAt],
+  )
+  return getClearSignPromotion(record.bundleHash)!
+}
+
+export function revokeClearSignPromotion(bundleHash: string, reason: string): ClearSignPromotionRecord {
+  if (!db) throw new Error('DATABASE_UNAVAILABLE')
+  const cleanReason = reason.trim().slice(0, 240)
+  if (!cleanReason) throw new Error('REVOCATION_REASON_REQUIRED')
+  db.run(`UPDATE clearsign_promotion_bundles SET revoked_at = ?, revocation_reason = ? WHERE bundle_hash = ?`, [Date.now(), cleanReason, bundleHash.replace(/^0x/, '').toLowerCase()])
+  const record = getClearSignPromotion(bundleHash)
+  if (!record) throw new Error('PROMOTION_BUNDLE_NOT_FOUND')
+  return record
+}
+
+export function getClearSignPromotion(bundleHash: string): ClearSignPromotionRecord | undefined {
+  if (!db) return undefined
+  const hash = bundleHash.replace(/^0x/, '').toLowerCase()
+  const row = db.query(`SELECT bundle_hash, shape_key, bundle_json, revoked_at, revocation_reason FROM clearsign_promotion_bundles WHERE bundle_hash = ?`).get(hash) as Record<string, any> | null
+  if (!row) return undefined
+  const reviewRows = db.query(`SELECT review_json FROM clearsign_promotion_reviews WHERE bundle_hash = ? ORDER BY reviewed_at ASC`).all(hash) as Array<{ review_json: string }>
+  return {
+    bundleHash: row.bundle_hash, shapeKey: row.shape_key,
+    bundle: JSON.parse(row.bundle_json), reviews: reviewRows.map((entry) => JSON.parse(entry.review_json)),
+    revokedAt: row.revoked_at || undefined, revocationReason: row.revocation_reason || undefined,
+  }
+}
+
+export function getClearSignAuditEvidence(shapeKey: string): NonNullable<ClearSignAuditJob['evidence']> | undefined {
+  if (!db) return undefined
+  const row = db.query(`SELECT evidence_json FROM clearsign_audit_jobs WHERE shape_key = ?`).get(shapeKey) as { evidence_json?: string } | null
+  return row?.evidence_json ? JSON.parse(row.evidence_json) : undefined
+}
+
+export function saveVerifiedClearSignArtifact(artifact: VerifiedClearSignArtifact): VerifiedClearSignArtifact {
+  if (!db) throw new Error('DATABASE_UNAVAILABLE')
+  db.run(
+    `INSERT INTO clearsign_verified_artifacts (bundle_hash, shape_key, chain, artifact_json, imported_at)
+     VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(bundle_hash) DO UPDATE SET artifact_json = excluded.artifact_json,
+       imported_at = excluded.imported_at, revoked_at = NULL, revocation_reason = NULL`,
+    [artifact.bundleHash, artifact.shapeKey, artifact.chain, JSON.stringify(artifact), artifact.importedAt],
+  )
+  return artifact
+}
+
+export function getVerifiedClearSignArtifacts(options: { shapeKey?: string; includeInactive?: boolean } = {}): Array<VerifiedClearSignArtifact & { revokedAt?: number; revocationReason?: string }> {
+  if (!db) return []
+  const rows = options.shapeKey
+    ? db.query(`SELECT artifact_json, revoked_at, revocation_reason FROM clearsign_verified_artifacts WHERE shape_key = ? ORDER BY imported_at DESC`).all(options.shapeKey)
+    : db.query(`SELECT artifact_json, revoked_at, revocation_reason FROM clearsign_verified_artifacts ORDER BY imported_at DESC`).all()
+  return (rows as Array<Record<string, any>>).map(row => ({
+    ...JSON.parse(row.artifact_json), revokedAt: row.revoked_at || undefined, revocationReason: row.revocation_reason || undefined,
+  })).filter(artifact => options.includeInactive || (!artifact.revokedAt && artifact.expiresAt > Date.now()))
+}
+
+export function revokeVerifiedClearSignArtifact(bundleHash: string, reason: string): void {
+  if (!db) throw new Error('DATABASE_UNAVAILABLE')
+  const cleanReason = reason.trim().slice(0, 240)
+  if (!cleanReason) throw new Error('REVOCATION_REASON_REQUIRED')
+  const result = db.run(
+    `UPDATE clearsign_verified_artifacts SET revoked_at = ?, revocation_reason = ? WHERE bundle_hash = ?`,
+    [Date.now(), cleanReason, bundleHash.replace(/^0x/, '').toLowerCase()],
+  )
+  if (!result.changes) throw new Error('VERIFIED_ARTIFACT_NOT_FOUND')
+}
+
+configureClearSignArtifactSnapshots(() => getVerifiedClearSignArtifacts({ includeInactive: true }).map(artifact => ({
+  artifact, job: getClearSignAuditJob(artifact.shapeKey),
+})))
 
 // ── API Audit Log ──────────────────────────────────────────────────────
 

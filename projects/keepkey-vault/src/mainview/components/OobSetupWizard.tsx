@@ -139,6 +139,9 @@ const confettiPieces = Array.from({ length: 50 }, (_, i) => ({
 
 export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, onWordCountChange }: OobSetupWizardProps) {
   const [step, setStep] = useState<WizardStep>('authenticity')
+  useEffect(() => {
+    rpcRequest('logOnboarding', { event: `wizard step=${step}` }).catch(() => {})
+  }, [step])
   const [introCard, setIntroCard] = useState(0)
   const [tipCard, setTipCard] = useState(0)
   // Passphrase opt-in chosen on the (non-skippable) hidden-wallets tip card.
@@ -207,6 +210,8 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
   const [devLoadOpen, setDevLoadOpen] = useState(false)
   // Classified resetDevice failure (pin-mismatch / cancelled). Rendered as an
   // explain-and-retry card on init-progress instead of ejecting to init-choose.
+  // Dev seed load sets no PIN on its own; the device-driven PIN step after it can fail.
+  const [devPinError, setDevPinError] = useState<string | null>(null)
   const [createError, setCreateError] = useState<{ errorType: 'pin-mismatch' | 'cancelled' | 'unknown'; message: string } | null>(null)
   // The engine emits 'reset-error' just before the resetDevice RPC rejects, so
   // by the time the catch runs this ref already holds the classification.
@@ -891,14 +896,26 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
     setSetupError(null)
     try {
       await rpcRequest('loadDevice', { mnemonic: words }, DEVICE_INTERACTION_TIMEOUT)
-      setDevSeed('')
-      setDevAcknowledged(false)
-      setStep('init-label')
     } catch (err) {
       setSetupError(err instanceof Error ? err.message : 'Failed to load device')
       setStep('init-choose')
-    } finally {
+      return
+    }
+    setDevSeed('')
+    setDevAcknowledged(false)
+    await handleDevSetPin()
+  }
 
+  // LoadDevice carries no PIN (it would have to be typed on the computer), so the
+  // device sets one through its own scrambled matrix, exactly as Change PIN does.
+  // Setup never finishes on a PIN-less wallet: a cancel or mismatch stays here.
+  const handleDevSetPin = async () => {
+    setDevPinError(null)
+    try {
+      await rpcRequest('changePin', undefined, 0)
+      setStep('init-label')
+    } catch (err) {
+      setDevPinError(err instanceof Error ? err.message : 'PIN was not set')
     }
   }
 
@@ -1798,6 +1815,13 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
                     <Text fontSize="sm" fontWeight="bold" color="white">
                       {t('firmware.customFirmwareReady')}
                     </Text>
+                    {customFwAnalysis.imageKind !== 'firmware' && (
+                      <Text fontSize="xs" color="red.300" w="100%">
+                        {customFwAnalysis.imageKind === 'bootloader-updater'
+                          ? 'This is a bootloader updater, not firmware. Drop it on the Vault window to review and install it there.'
+                          : 'This is not a KeepKey firmware image, so it cannot be flashed.'}
+                      </Text>
+                    )}
 
                     <Box w="100%" p={3} bg="kk.cardBg" borderRadius="lg">
                       <VStack gap={2} align="stretch">
@@ -1959,6 +1983,7 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
                         transition="all 0.15s ease"
                         onClick={handleCustomFlash}
                         disabled={
+                          customFwAnalysis.imageKind !== 'firmware' ||
                           (customFwAnalysis.willWipeDevice && !customFwAcknowledged) ||
                           (!customFwAnalysis.isSigned && customFwAnalysis.isBootloaderMode && !customFwAcknowledged) ||
                           (!customFwWipeAck && backupBlocked)
@@ -2530,16 +2555,18 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
                   </Box>
                 </HStack>
 
-                <Text
-                  fontSize="2xs"
-                  color="kk.cardBgHover"
-                  cursor="pointer"
-                  textAlign="center"
-                  _hover={{ color: 'gray.500' }}
-                  onClick={() => setDevLoadOpen(true)}
-                >
-                  Developer: load seed
-                </Text>
+                {isEmulator && (
+                  <Text
+                    fontSize="2xs"
+                    color="kk.cardBgHover"
+                    cursor="pointer"
+                    textAlign="center"
+                    _hover={{ color: 'gray.500' }}
+                    onClick={() => setDevLoadOpen(true)}
+                  >
+                    Developer: load seed
+                  </Text>
+                )}
               </VStack>
             )}
 
@@ -2603,8 +2630,27 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
                   </VStack>
                 )}
 
+                {devPinError && (
+                  <VStack gap={4} w="100%" maxW="400px" mx="auto">
+                    <Box w="100%" bg="rgba(255,255,255,0.03)" border="1px solid" borderColor="rgba(233,196,106,0.33)" borderRadius="2xl" p={6}>
+                      <VStack gap={3}>
+                        <FaExclamationTriangle color="var(--gold)" size={26} />
+                        <Text fontSize="xl" fontWeight="800" color="white" textAlign="center">Set a PIN to finish setup</Text>
+                        <Text fontSize="sm" color="gray.400" textAlign="center" lineHeight="1.6">
+                          The seed is loaded, but the device has no PIN yet ({devPinError}). Anyone holding it
+                          could use the wallet, so setup does not finish until a PIN is set.
+                        </Text>
+                      </VStack>
+                    </Box>
+                    <Button w="100%" size="md" bg="var(--gold)" color="black" fontWeight="700" _hover={{ opacity: 0.9 }}
+                      onClick={() => void handleDevSetPin()}>
+                      Set PIN
+                    </Button>
+                  </VStack>
+                )}
+
                 {/* ── Spinner + "look at device" (or emulator window) ─────── */}
-                {!createError && (
+                {!createError && !devPinError && (
                 <>
                   <Spinner size="lg" color={HIGHLIGHT} borderWidth="3px" />
                     <VStack gap={1}>

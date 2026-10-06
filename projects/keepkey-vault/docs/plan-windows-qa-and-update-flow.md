@@ -33,7 +33,7 @@ The repeatable gate lives in the pioneer repo:
 `modules/pioneer/pioneer-discovery/scripts/audit-symbol-integrity.mjs` — 129
 high-risk-symbol entries checked against on-chain `symbol()`/`decimals()` on 9
 chains, exit 1 on any unexplained mismatch. Publish/rollout steps:
-`/Users/highlander/WebstormProjects/keepkey-stack/projects/pioneer/HANDOFF-DISCOVERY-STABLECOIN-INTEGRITY-PUBLISH.md`
+`keepkey-stack/projects/pioneer/HANDOFF-DISCOVERY-STABLECOIN-INTEGRITY-PUBLISH.md`
 
 ### Send-form gas
 

@@ -11,12 +11,12 @@
 | Layer | Change | Where |
 |---|---|---|
 | Firmware | `#315` — 11 more clear-sign ops (phase 3), merged to fork `develop` | `release/7.15.0-rc15`, SHA `23ef39c03e1c13f3e95cf2cd4e41d6d9517c1992` |
-| Vault | `#373` — `limit_order_create` / `limit_order_cancel` serializers | `/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-vault/src/bun/txbuilder/hive-ops.ts` |
-| Vault | un-staged `/hive/sign-operations` (live-device smoke passed) | `/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-vault/src/bun/rest-api.ts` |
-| SDK | `hive.hiveSignOperations` / `hiveSignTransfer` / `hiveSignMessage`, `address.hiveGetAddress` | `/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-sdk/src/index.ts` |
+| Vault | `#373` — `limit_order_create` / `limit_order_cancel` serializers | `keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-vault/src/bun/txbuilder/hive-ops.ts` |
+| Vault | un-staged `/hive/sign-operations` (live-device smoke passed) | `keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-vault/src/bun/rest-api.ts` |
+| SDK | `hive.hiveSignOperations` / `hiveSignTransfer` / `hiveSignMessage`, `address.hiveGetAddress` | `keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-sdk/src/index.ts` |
 
 Verified on-device (emulator, `EmulatorZcash` variant, fw revision `23ef39c0`):
-`/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-sdk/tests/hive/phase3-ops.js` → **7/7 pass**.
+`keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-sdk/tests/hive/phase3-ops.js` → **7/7 pass**.
 
 **Your job:** audit the extension against the op table in §3, then run §6.
 
@@ -136,15 +136,15 @@ All of these are enforced **host-side in the vault** with a readable message bef
 
 ## 6. Test procedure
 
-Prereqs: vault running (`make vault` from `/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11`), emulator on rc15, Hive enabled in Settings.
+Prereqs: vault running (`make vault` from `keepkey-stack/projects/keepkey-vault-v11`), emulator on rc15, Hive enabled in Settings.
 
 1. **Audit first** — for each op in §3, find where the extension builds it. Report ops the extension *cannot* currently construct; that's the real deliverable.
 2. **Baseline the plumbing** (already passing, confirms your environment):
    ```
-   cd /Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-sdk   # ← see note
+   cd keepkey-stack/projects/keepkey-sdk   # ← see note
    node tests/hive/phase3-ops.js
    ```
-   Actual path: `/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-sdk`
+   Actual path: `keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-sdk`
 3. **Drive it from the extension** — internal-market swap (`limit_order_create` → `limit_order_cancel`) is the highest-value path, since that's the flow that was failing with `Operation not in the KeepKey clear-sign table (got limit_order_create)`.
 4. **Confirm on the OLED that the rendered values match what the dApp asked for** — the whole point of the clear-sign table is that the screen is authoritative. Amount, symbol, and destination account, per screen.
 

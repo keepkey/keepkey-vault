@@ -16,6 +16,8 @@ import { parseSolanaTx, solanaMessageSlice } from '../src/bun/solana-tx'
 import { assessSigningRisk } from '../src/shared/clearsign-risk'
 import type { SigningRequestInfo } from '../src/shared/types'
 import joinFixture from './fixtures/solana/soltoshidice-blackjack-join.json'
+import swap from './fixtures/uniswap/base-ur-usdc-to-eth-swap.json'
+import { applyEvmTxPreview } from '../src/bun/evm-signing-preview'
 
 const LOGIN_MESSAGE_B64 = 'U29sdG9zaGlESUNFIHdhbGxldApOZXR3b3JrOiBtYWlubmV0LWJldGE6Q3VUTHA3cERtTkdrRmdpNGFvaDhFZjFZU2pjMkJ6RUNRUkx6WXFhb1ZXQlI6NG5DbXB3bmU3aENvV1RTcEFkNTR1RU5tQ2dISnJIVHluNERNUENFTXB1bXAKU2Vzc2lvbjogY2E1ZWQ3YTgtNWRmMS00MWJmLTkxY2EtYzNkZTRjMWM1NmY2Ck5vbmNlOiAzN2M0MDY2Ny01NzZkLTQwNTQtOTA2NC02MTg2MTRhYjg4YzE='
 const TX1_B64 = 'AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAYJ7Dl5pNxrQBvQRRcaGJ8mhW+rnqt1VgIU+XKy7cFkMA+LZzzaLik+AiCrPgHStY7QVcnBsnYt1RVhKxDKzW40NrgTPK+soJctzdQsxyxkxmokWe10HSLNM0pp7sZO3eosAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAg+JYP7kag/aX3JhxSBLr/9dbITv9zclr5W8RVNHvjowF02rdo/npIS0+fAcrrAThIR97VGw7P8fmeJwQ9+Dk5hH08KOLLv/nnxPfLbW1x5bwW1Qqm7U/+OurmoNbG6qQDBkZv5SEXMv/srbpyw5vnvIzlu8X3EmssQ5s6QAAAALDgivSk/PrRPvj8/Z3HCXXrb8LgSnx2YRVApRzV257QTQBKpt9xx9nI6TgJCP4k4JahDgt0ODAlVydCDyS4WCcCBwAFAjBXBQAIBwAGBAECBQMDE2tr'
@@ -189,7 +191,18 @@ describe('assessSigningRisk — EVM', () => {
   test('finite approve is still CRITICAL with the amount', () => {
     const r = tx('0x095ea7b3' + SPENDER + word(1_000_000_000n))
     expect(r.level).toBe('critical')
-    expect(r.reasons[0].text).toContain('up to 1,000 USDC of your USDC')
+    expect(r.reasons[0].text).toContain('up to 1,000 USDC')
+  })
+
+  test('real Arbitrum Uniswap setup approval says USDT, Permit2, and not all wallet tokens', () => {
+    const permit2 = '000000000000000000000000' + '000000000022d473030f116ddee9f6b43ac78ba3'
+    const r = tx('0x095ea7b3' + permit2 + word((1n << 256n) - 1n), {
+      chainId: 42161,
+      to: '0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9',
+    })
+    expect(r.level).toBe('medium')
+    expect(r.reasons[0].text).toBe('Standard Uniswap setup: gives canonical Permit2 persistent access to your Arbitrum USDT. You can revoke this allowance later.')
+    expect(r.reasons[0].text).not.toContain('ALL of your tokens')
   })
 
   test('revoke on a known token is LOW', () => {
@@ -217,7 +230,7 @@ describe('assessSigningRisk — EVM', () => {
     expect(r.reasons[0].text).toContain('0.5 ETH')
   })
 
-  test('Permit2 signature is CRITICAL plus blind-hash HIGH', () => {
+  test('Permit2 signature remains CRITICAL while 7.15+ reports structured device review', () => {
     const r = assessSigningRisk({
       method: '/eth/sign-typed-data',
       typedDataDecoded: {
@@ -228,15 +241,89 @@ describe('assessSigningRisk — EVM', () => {
           { label: 'Spender', value: '0xabc', format: 'address', raw: '0x3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad' },
         ],
       },
+      firmwareVersion: '7.16.0',
     } as SigningRequestInfo)!
     expect(r.level).toBe('critical')
     expect(r.reasons[0].text).toContain('spend ALL of your tokens')
-    expect(r.reasons.some((x) => x.level === 'high' && x.text.includes('hash'))).toBe(true)
+    expect(r.reasons.some((x) => x.level === 'high' && x.text.includes('hash'))).toBe(false)
+    expect(r.reasons.some((x) => x.text.includes('structured fields'))).toBe(true)
+  })
+
+  test('official Arbitrum Uniswap Permit2 names USDT, router, and expiration without generic wallet-wide alarm', () => {
+    const r = assessSigningRisk({ method: '/eth/sign-typed-data', firmwareVersion: '7.16.0', typedDataDecoded: {
+      operationName: 'Permit2 (Single)', primaryType: 'PermitSingle', isKnownType: true, protocolIdentityVerified: true,
+      domain: { chainId: 42161, verifyingContract: '0x000000000022d473030f116ddee9f6b43ac78ba3' },
+      fields: [
+        { label: 'Token', value: '0xfd08…fbb9', raw: '0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9', format: 'address' },
+        { label: 'Amount', value: 'max', raw: ((1n << 160n) - 1n).toString(), format: 'amount' },
+        { label: 'Expiration', value: '2026-10-21 16:33:16 UTC', raw: '1792600396', format: 'datetime' },
+        { label: 'Spender', value: '0x2d01…fe65', raw: '0x2d01411773c8c24805306e89a41f7855c3c4fe65', format: 'address' },
+      ],
+    } } as SigningRequestInfo)!
+    expect(r.level).toBe('medium')
+    expect(r.reasons[0].text).toContain('official Uniswap Universal Router')
+    expect(r.reasons[0].text).toContain('Arbitrum USDT')
+    expect(r.reasons[0].text).not.toContain('ALL of your tokens')
   })
 
   test('32-byte hash via personal_sign is HIGH', () => {
     const r = assessSigningRisk({ method: '/eth/sign', data: '0x' + 'ab'.repeat(32) } as SigningRequestInfo)!
     expect(r.level).toBe('high')
+  })
+
+  const reviewed = (riskLevel: string, raterPinned = false) => ({ clearSignReport: { rating: {
+    riskLevel, riskReasons: ['a single key controls upgrades, deposits, minting (delay 10d)'], findings: [], raterPinned,
+  } } } as unknown as Partial<SigningRequestInfo>)
+
+  test('a verified contract rating raises the level (MDM CapitalManager.deposit: high)', () => {
+    const deposit = '0x47e7ef24' + word(0n) + word(100n)
+    const r = tx(deposit, { to: '0x6b6c05ee7f49d00e63e74a9426d74ef9614f6a0f', chainId: 8453, deviceClearSigns: true, ...reviewed('high') })
+    expect(r.level).toBe('high')
+    expect(r.reasons[0].text).toBe('An auditor rates this contract high risk: a single key controls upgrades, deposits, minting (delay 10d). The rater is not yet pinned in this Vault.')
+  })
+
+  test('a low-risk rating never lowers a critical payload', () => {
+    const r = tx('0x095ea7b3' + SPENDER + word((1n << 256n) - 1n), reviewed('low', true))
+    expect(r.level).toBe('critical')
+  })
+})
+
+// Real Base Uniswap swap (fixtures/uniswap). The card said "Known Pattern"
+// beside a red "You would be signing blind" for the same request.
+describe('assessSigningRisk — reviewed Uniswap Universal Router swap', () => {
+
+  async function swapRequest(to = swap.to): Promise<SigningRequestInfo> {
+    const original = globalThis.fetch
+    globalThis.fetch = (async () => { throw new Error('offline') }) as unknown as typeof fetch
+    const s = { id: 'u', method: '/eth/sign-transaction', appName: 't', from: swap.from, to, value: swap.value, data: swap.data, chainId: swap.chainId } as SigningRequestInfo
+    try { await applyEvmTxPreview(s, to, swap.data, swap.chainId, '7.15.0') } finally { globalThis.fetch = original }
+    return s
+  }
+
+  test('device verifies a signed swap description: MEDIUM, names the swap, not "blind"', async () => {
+    const s = await swapRequest()
+    s.calldataDecoded!.signedInsightBlob = 'AQID' // what attachCertifiedUniswapSwap sets on 7.16
+    const r = assessSigningRisk(s)!
+    expect(r.level).toBe('medium')
+    const text = r.reasons.map((x) => x.text).join('\n')
+    expect(text).toContain('Swaps 300 USDC for at least 0.108123518386717195 ETH through the Uniswap Universal Router')
+    expect(text).toContain('Your KeepKey shows this swap on its screen')
+    expect(text).not.toContain('blind')
+  })
+
+  test('no signed description (device blind-signs): stays HIGH, adds what this computer read', async () => {
+    const r = assessSigningRisk(await swapRequest())!
+    expect(r.level).toBe('high')
+    expect(r.reasons[0].text).toContain('You would be signing blind')
+    expect(r.reasons.map((x) => x.text).join('\n')).toContain('This computer reads it as: Swaps 300 USDC')
+  })
+
+  test('a signed blob on an unreviewed contract is not treated as a reviewed swap', async () => {
+    const s = await swapRequest('0x1111111111111111111111111111111111111111')
+    s.calldataDecoded!.signedInsightBlob = 'AQID'
+    const r = assessSigningRisk(s)!
+    expect(r.level).toBe('high')
+    expect(r.reasons[0].text).toContain('You would be signing blind')
   })
 })
 

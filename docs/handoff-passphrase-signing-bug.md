@@ -79,7 +79,7 @@ These are not contradictory: both reviews agree the on-device **key derivation**
 
 ## 6. Most-likely firmware root-cause locus
 
-Canonical, maintained firmware repo on disk: **`/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-firmware`** (C, KeepKey fork of trezor-firmware; Trezor crypto vendored under `deps/crypto/trezor-firmware/crypto/`). ~6 sibling checkouts exist; this is the maintained one.
+Canonical, maintained firmware repo on disk: **`keepkey-stack/projects/keepkey-firmware`** (C, KeepKey fork of trezor-firmware; Trezor crypto vendored under `deps/crypto/trezor-firmware/crypto/`). ~6 sibling checkouts exist; this is the maintained one.
 
 **Both handlers derive the key identically** — `lib/firmware/fsm_msg_ethereum.h`: `fsm_msgEthereumSignTx` (**line 98**) and `fsm_msgEthereumGetAddress` (**line 123**) both call:
 ```c
@@ -135,7 +135,7 @@ The firmware **returns the exact digest it signed** in `EthereumTxRequest.hash`,
 
 The Bun backend mirrors every `console.*` to a log file at boot (`projects/keepkey-vault/src/bun/index.ts:30-58`):
 ```
-/Users/highlander/Library/Application Support/com.keepkey.vault/vault-backend.log
+~/Library/Application Support/com.keepkey.vault/vault-backend.log
 ```
 It already logs, per `/eth/sign-transaction` (`rest-api.ts:1508, 2082, 2088`):
 - `[REST] Signing request /eth/sign-transaction: …`
@@ -169,7 +169,7 @@ transport.onAny((_name: string | string[], ev: any) => {
 Rebuild + restart so the hook takes effect (the dev app loads a pre-bundled backend; per project convention use `make` from the repo root):
 ```bash
 # quit the running keepkey-vault-dev app first, then:
-cd /Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11
+cd keepkey-stack/projects/keepkey-vault-v11
 make dev        # bundle-backend → vite build → electrobun build → electrobun dev
 # or: make dev-hmr
 ```
@@ -220,7 +220,7 @@ Reconcile the host serialization with the device preimage (legacy RLP vs EIP-155
 - Proto field defs: `modules/device-protocol/messages-ethereum.proto:20-88`
 - Build targets: `Makefile:270-276` (`dev` / `dev-hmr`)
 
-**Firmware source (`keepkey-firmware`, on disk at `/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-firmware`):**
+**Firmware source (`keepkey-firmware`, on disk at `keepkey-stack/projects/keepkey-firmware`):**
 - `lib/firmware/fsm_msg_ethereum.h` — `fsm_msgEthereumSignTx:98`, `fsm_msgEthereumGetAddress:123`
 - `lib/firmware/fsm.c` — `fsm_getDerivedNode:180`
 - `lib/firmware/storage.c` — `storage_getSeed:1843`, `storage_getRootNode:1896` (seedCached gate `:1955`), `session_cachePassphrase:1996`, root-seed-cache `:1255/1279`

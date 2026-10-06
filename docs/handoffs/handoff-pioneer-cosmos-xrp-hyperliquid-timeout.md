@@ -1,6 +1,6 @@
 # Handoff: Pioneer — Cosmos / XRP / Hyperliquid GetPortfolioBalances timeout
 
-Repo: `/Users/highlander/WebstormProjects/keepkey-stack/projects/pioneer`
+Repo: `keepkey-stack/projects/pioneer`
 Related vault PR: https://github.com/keepkey/keepkey-vault/pull/178
 Priority: P1 — cosmos, thorchain, maya, osmosis, xrp, hyperliquid all show $0 on every load
 

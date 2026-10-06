@@ -27,8 +27,53 @@ env:
   EMU_SOURCE_ARTIFACT: 'certified-emulator-7.16.0-macos13-a7bf83d98d01d4b685967cd0aa4198aa9a53e4d9'
 
 jobs:
+  # Electrobun's Linux core (libNativeWrapper.so et al.), built from the pinned
+  # modules/electrobun on ubuntu-22.04 for a glibc 2.35 floor. Handed to the
+  # Linux build as a workflow artifact — never published as a release: a core
+  # release on this repo once became "Latest" and hijacked keepkey.com downloads.
+  linux-core:
+    name: Electrobun Linux core
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - run: git submodule update --init modules/electrobun
+      - id: pin
+        run: echo "sha=$(git rev-parse HEAD:modules/electrobun)" >> "$GITHUB_OUTPUT"
+      - id: cache
+        uses: actions/cache@v4
+        with:
+          path: artifacts/electrobun-core-linux-x64.tar.gz
+          key: electrobun-linux-core-${{ steps.pin.outputs.sha }}-${{ hashFiles('scripts/build-electrobun-linux-x64-core.sh') }}
+      - if: steps.cache.outputs.cache-hit != 'true'
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - if: steps.cache.outputs.cache-hit != 'true'
+        run: ./scripts/build-electrobun-linux-x64-core.sh
+      # Every function electrobun's runtime binds must be exported by the .so we
+      # ship. A v1.13.1 core under the 1.18.1 runtime lacked 33 of them, and
+      # Linux crashed at startup (bridge.requestHost).
+      - name: Core exports every symbol the runtime binds
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/core" && tar xzf artifacts/electrobun-core-linux-x64.tar.gz -C "$RUNNER_TEMP/core"
+          awk '/return dlopen\(nativeWrapperPath, \{/{f=1;next} f&&/^\t\t\}\);/{exit} f&&/^\t\t\t[A-Za-z_][A-Za-z0-9_]*: \{/{sub(/^\t+/,"");sub(/:.*/,"");print}' \
+            modules/electrobun/package/src/bun/proc/native.ts | sort -u > "$RUNNER_TEMP/need.txt"
+          [ "$(wc -l < "$RUNNER_TEMP/need.txt")" -gt 50 ] || { echo "::error::could not read the symbol list from native.ts"; exit 1; }
+          nm -D --defined-only "$RUNNER_TEMP/core/libNativeWrapper.so" | awk '{print $NF}' | sort -u > "$RUNNER_TEMP/have.txt"
+          missing=$(comm -23 "$RUNNER_TEMP/need.txt" "$RUNNER_TEMP/have.txt")
+          [ -z "$missing" ] || { echo "::error::libNativeWrapper.so is missing: $missing"; exit 1; }
+          echo "All $(wc -l < "$RUNNER_TEMP/need.txt") runtime symbols exported"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: electrobun-core-linux-x64
+          path: artifacts/electrobun-core-linux-x64.tar.gz
+          if-no-files-found: error
+
   build:
     name: Build (${{ matrix.name }})
+    needs: linux-core
     runs-on: ${{ matrix.runner }}
     permissions:
       actions: read
@@ -153,6 +198,16 @@ jobs:
             echo "Try clearing the hdwallet cache or rebuild locally"
             exit 1
           fi
+
+      - name: Make google-protobuf resolvable from device-protocol lib/
+        shell: bash
+        run: |
+          # lib/*_pb.js require('google-protobuf'), resolved from
+          # modules/device-protocol/ upward, which has no node_modules in CI.
+          # Tests that import the lib directly (pin-unlock-timeout) need it.
+          mkdir -p modules/device-protocol/node_modules
+          ln -sfn "$PWD/modules/hdwallet/node_modules/google-protobuf" modules/device-protocol/node_modules/google-protobuf
+          test -f modules/device-protocol/node_modules/google-protobuf/package.json
 
       - name: Install vault dependencies
         # --frozen-lockfile: install exactly what bun.lock pins. Without it, bun
@@ -421,36 +476,24 @@ jobs:
           echo "=== After cleanup ==="
           ls -la
 
+      - name: Download Electrobun Linux core
+        if: runner.os == 'Linux'
+        uses: actions/download-artifact@v4
+        with:
+          name: electrobun-core-linux-x64
+          path: ${{ runner.temp }}/electrobun-core
+
       - name: Substitute Electrobun Linux core (lower glibc floor)
         if: runner.os == 'Linux'
-        env:
-          # Tag of our self-built Electrobun core on this repo. Built on
-          # ubuntu-22.04 against glibc 2.35 so Vault works on Debian 12,
-          # Ubuntu 22.04, RHEL/Rocky 9, Mint 21, etc. — distros that the
-          # upstream-shipped libNativeWrapper.so (glibc 2.38) excludes.
-          # Republish via: make publish-electrobun-linux-x64-core
-          ELECTROBUN_LINUX_CORE_TAG: 'electrobun-linux-x64-core-v1'
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
           cd projects/keepkey-vault/artifacts
           TAR_ZST=$(ls stable-linux-x64-keepkey-vault.tar.zst 2>/dev/null | head -1)
-          if [ -z "$TAR_ZST" ]; then echo "No Linux tar.zst found, skipping core substitution"; exit 0; fi
+          [ -n "$TAR_ZST" ] || { echo "::error::No Linux tar.zst to patch"; exit 1; }
 
-          # Try to download our self-built core. If the release doesn't exist
-          # yet, don't fail — the audit step downstream will still catch the
-          # high-glibc upstream binary. This makes the first push to a fresh
-          # branch land cleanly even before the publish workflow has run.
-          CORE_URL="https://github.com/${{ github.repository }}/releases/download/${ELECTROBUN_LINUX_CORE_TAG}/electrobun-core-linux-x64.tar.gz"
-          CORE_TGZ=$(mktemp --suffix=.tar.gz)
-          if ! curl -fsSL -o "$CORE_TGZ" "$CORE_URL"; then
-            echo "::warning::Could not fetch $CORE_URL — using upstream-shipped libNativeWrapper.so (glibc 2.38)."
-            echo "::warning::Run 'make publish-electrobun-linux-x64-core' to build + publish a glibc 2.35 core."
-            rm -f "$CORE_TGZ"
-            exit 0
-          fi
-
+          # Built from the pinned modules/electrobun by the linux-core job.
+          CORE_TGZ="${{ runner.temp }}/electrobun-core/electrobun-core-linux-x64.tar.gz"
           echo "Fetched $(du -h "$CORE_TGZ" | cut -f1) of Electrobun Linux core"
 
           WORK=$(mktemp -d)
@@ -495,9 +538,9 @@ jobs:
         env:
           # Highest GLIBC_ symbol allowed in any ELF inside the bundle.
           # 2.35 = ubuntu-22.04 floor, reached via our self-built Electrobun
-          #        core (electrobun-linux-x64-core-v1) substituted in above.
+          #        core (linux-core job, from the pinned submodule) substituted in above.
           #        Covers Debian 12, Ubuntu 22.04 LTS, RHEL/Rocky 9, Mint 21,
-          #        Pop!_OS 22.04. Republish via `make publish-electrobun-linux-x64-core`.
+          #        Pop!_OS 22.04.
           LINUX_GLIBC_FLOOR: '2.35'
         shell: bash {0}  # disable -e + pipefail; we manage exit code ourselves
         run: |

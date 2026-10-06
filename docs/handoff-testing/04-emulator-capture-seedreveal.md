@@ -5,7 +5,7 @@ for automated test drivers) and reveal the active flash's saved seed / show
 version controls.
 
 **Where:** vault `#339` (MERGED, develop) —
-`/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-vault/src/bun/emulator-window.ts`
+`keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-vault/src/bun/emulator-window.ts`
 (`captureCurrentFrame` + `/_emu/capture` bridge), `index.ts`
 (`emulatorCaptureFrame`, `emulatorRevealSeed` RPCs), `rest-api.ts`
 (`POST /emulator/capture`, auth'd, `engine.isEmulator`-gated),

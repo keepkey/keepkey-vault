@@ -4,7 +4,7 @@
 files): shared blob builder + offline parity gate + on-device flows.
 
 **Where:** vault `#340` (MERGED, develop) —
-`/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-sdk/tests/`
+`keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-sdk/tests/`
 (`_clearsign.js`, `clearsign-offline-parity.js`,
 `evm-clearsign/{clearsign-signer-flows,loadsigner-sign-flows,relay-v2-schema-flow}.js`,
 `fixtures/clearsign-golden.json`).

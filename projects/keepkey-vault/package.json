@@ -14,6 +14,8 @@
     "clearsign:worker:test": "bun test clearsign-worker/src/index.test.ts",
     "clearsign:worker:dev": "wrangler dev --config clearsign-worker/wrangler.toml",
     "clearsign:worker:deploy": "wrangler deploy --config clearsign-worker/wrangler.toml",
+    "clearsign:uniswap-provider": "bun scripts/uniswap-runtime-provider.ts",
+    "clearsign:verify-pioneer-signatures": "bun scripts/clearsign-verify-pioneer-signatures.ts",
     "start": "bun run dev",
     "postinstall": "bash scripts/patch-electrobun.sh"
   },

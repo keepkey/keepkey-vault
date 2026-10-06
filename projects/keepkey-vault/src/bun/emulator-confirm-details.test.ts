@@ -9,7 +9,17 @@
  * no row is invented for an op that has no counterparty.
  */
 import { describe, it, expect } from 'bun:test'
-import { hiveConfirmDetails, hiveMessagePreview } from './emulator-confirm-details'
+import { hiveConfirmDetails, hiveMessagePreview, evmConfirmDetails } from './emulator-confirm-details'
+
+it('shows exact USDT and Permit2 identities and addresses in the emulator approval panel', () => {
+  const token = '0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9'
+  const spender = '0x000000000022d473030f116ddee9f6b43ac78ba3'
+  const data = `0x095ea7b3${spender.slice(2).padStart(64, '0')}${'ff'.repeat(32)}`
+  expect(evmConfirmDetails('ethSignTx', 'Ethereum', { chainId: 42161, to: token, data })).toMatchObject({
+    tokenAddress: token, tokenIdentity: 'USDT', to: spender, toIdentity: 'Uniswap Permit2',
+    toLabel: 'Spender', value: 'Unlimited USDT',
+  })
+})
 
 describe('hiveConfirmDetails', () => {
   it('names the operation instead of a bare chain header', () => {

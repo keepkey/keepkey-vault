@@ -3,8 +3,8 @@
 For a Pioneer-side dev/agent. Self-contained. Builds the account-creation backend that
 KeepKey Vault's Hive onboarding wizard will call.
 
-- **Pioneer repo:** `/Users/highlander/WebstormProjects/keepkey-stack/projects/pioneer`
-- **Vault plan + decisions:** `/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11-hive/docs/HIVE-ONBOARDING-PLAN.md`
+- **Pioneer repo:** `keepkey-stack/projects/pioneer`
+- **Vault plan + decisions:** `keepkey-stack/projects/keepkey-vault-v11-hive/docs/HIVE-ONBOARDING-PLAN.md`
 - **Message/serialization spec:** `…/keepkey-vault-v11-hive/docs/HIVE-FIRMWARE-PLAN.md` (Layer 3)
 - **Restart Pioneer with `make start`** (never paste manual pnpm/bun recipes).
 - **Never read or write `.env`.** Sponsor keys go through the existing secrets mechanism;

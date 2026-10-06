@@ -3,6 +3,7 @@ import { utils as ethersUtils } from 'ethers'
 import {
   ALPHA_DELEGATE_PUBLIC_KEY,
   CLEARSIGN_DOMAIN_SEPARATOR,
+  CLEARSIGN_EVM_SCOPES,
   buildAlphaCertificateBody,
   inspectAlphaCertificateBody,
 } from './clearsign-alpha-ceremony'
@@ -19,6 +20,12 @@ function bodyHex(overrides: { flags?: number; chain?: number; expiry?: number; d
 }
 
 describe('7.16 alpha certificate ceremony', () => {
+  it.each(CLEARSIGN_EVM_SCOPES)('binds the reviewed EVM certificate to chain %i', (chainId) => {
+    const request = buildAlphaCertificateBody('KeepKey Alpha 716', 1798675200, chainId)
+    const certificate = inspectAlphaCertificateBody(request.signedBodyHex, request.expectedMessageHashHex, 1787500000)
+    expect(certificate.chainId).toBe(chainId)
+    expect(certificate.delegatePublicKey).toBe(ALPHA_DELEGATE_PUBLIC_KEY)
+  })
   it('builds the canonical body for the reviewed alpha delegate', () => {
     const built = buildAlphaCertificateBody('KeepKey Vault', 1818806400)
     const inspected = inspectAlphaCertificateBody(
@@ -55,13 +62,19 @@ describe('7.16 alpha certificate ceremony', () => {
 
   it.each([
     ['wrong capability', { flags: 0 }],
-    ['wrong chain', { chain: 8453 }],
+    ['wrong chain', { chain: 999999 }],
     ['expired', { expiry: 1787270400 }],
     ['wrong delegate', { delegate: `02${'11'.repeat(32)}` }],
   ])('rejects %s', (_label, overrides) => {
     const body = bodyHex(overrides)
     const hash = ethersUtils.keccak256(`0x${body}`).slice(2)
     expect(() => inspectAlphaCertificateBody(body, hash, 1787500000)).toThrow()
+  })
+
+  it.each([8453, 42161])('accepts reviewed EVM chain %d', (chain) => {
+    const body = bodyHex({ chain })
+    const hash = ethersUtils.keccak256(`0x${body}`).slice(2)
+    expect(inspectAlphaCertificateBody(body, hash, 1787500000).chainId).toBe(chain)
   })
 
   it('rejects an independent hash mismatch', () => {

@@ -28,7 +28,7 @@ import {
 import type { ParsedSolanaMessage, SolanaInstruction } from './solana-tx'
 
 /** SOL_MAX_INSTRUCTIONS: a longer message parses with no instructions at all. */
-const SOL_MAX_INSTRUCTIONS = 8
+const SOL_MAX_INSTRUCTIONS = 12
 /** SOL_MAX_ACCOUNTS (static plus trusted LUT keys) and SOL_MAX_LUT_ACCOUNTS. */
 const SOL_MAX_ACCOUNTS = 32
 const SOL_MAX_LUT_ACCOUNTS = 8
@@ -37,6 +37,11 @@ const SYSTEM_PROGRAM = bs58.decode('11111111111111111111111111111111')
 const COMPUTE_BUDGET_PROGRAM = bs58.decode('ComputeBudget111111111111111111111111111111')
 const MEMO_PROGRAM = bs58.decode('MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr')
 const SYS_TRANSFER = 2
+const TOKEN_PROGRAM = bs58.decode('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA')
+const TOKEN_2022_PROGRAM = bs58.decode('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb')
+const ATA_PROGRAM = bs58.decode('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL')
+const TOKEN_CLOSE_ACCOUNT = 9
+const TOKEN_SYNC_NATIVE = 17
 
 /** Byte equality over anything indexable, so a Buffer and a Uint8Array compare. */
 function sameBytes(a: ArrayLike<number> | undefined, b: ArrayLike<number>): boolean {
@@ -64,6 +69,36 @@ export function solanaInstructionMatchesSchema(
     && (spec.args || []).every((arg) => arg.type !== ARG_TOKEN_AMOUNT || arg.mintAccount! < accounts)
 }
 
+/** Account slot `slot` of `instruction` is one of the message's signers. */
+function isSignerSlot(message: ParsedSolanaMessage, instruction: SolanaInstruction, slot: number): boolean {
+  const index = instruction.accountIndices[slot]
+  return index !== undefined && index < message.header.numRequiredSignatures
+}
+
+/**
+ * The signer's own SOL wrap/unwrap around a DEX trade (firmware
+ * schema_signerAccountCompanion): ATA Create/CreateIdempotent funded (slot 0)
+ * and owned (slot 2) by a signer, SyncNative, and CloseAccount whose
+ * destination (slot 1) and owner (slot 2) are signers.
+ */
+function isSignerAccountCompanion(message: ParsedSolanaMessage, instruction: SolanaInstruction): boolean {
+  const program = message.staticAccounts[instruction.programIdIndex]
+  const data = instruction.data
+  if (sameBytes(program, ATA_PROGRAM)) {
+    return (data.length === 0 || (data.length === 1 && (data[0] === 0 || data[0] === 1)))
+      && isSignerSlot(message, instruction, 0) && isSignerSlot(message, instruction, 2)
+  }
+  if (sameBytes(program, TOKEN_PROGRAM) || sameBytes(program, TOKEN_2022_PROGRAM)) {
+    if (data.length !== 1) return false
+    if (data[0] === TOKEN_SYNC_NATIVE) return instruction.accountIndices.length >= 1
+    if (data[0] === TOKEN_CLOSE_ACCOUNT) {
+      return instruction.accountIndices.length >= 3
+        && isSignerSlot(message, instruction, 1) && isSignerSlot(message, instruction, 2)
+    }
+  }
+  return false
+}
+
 /**
  * An instruction the certified review allows beside the described one:
  * ComputeBudget RequestHeapFrame (1), SetComputeUnitLimit (2), or
@@ -85,7 +120,7 @@ function isCertifiedCompanion(message: ParsedSolanaMessage, instruction: SolanaI
       && instruction.accountIndices.length === 2
       && instruction.accountIndices.every((index) => index < message.staticAccounts.length)
   }
-  return false
+  return isSignerAccountCompanion(message, instruction)
 }
 
 /** Writable plus readonly lookup-table indices the message serializes. */

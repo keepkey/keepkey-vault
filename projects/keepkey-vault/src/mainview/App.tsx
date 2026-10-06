@@ -272,6 +272,8 @@ function App() {
 	const [pinRequestType, setPinRequestType] = useState<PinRequestType | null>(null)
 	const [pinDismissed, setPinDismissed] = useState(false)
 	const [pinFailed, setPinFailed] = useState(false)
+	const [pinErrorDetail, setPinErrorDetail] = useState<{ code?: number; message?: string } | null>(null)
+	const [pinRequestSeq, setPinRequestSeq] = useState(0)
 	const pinDismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
 	useEffect(() => {
@@ -279,6 +281,7 @@ function App() {
 			if (pinDismissTimer.current) { clearTimeout(pinDismissTimer.current); pinDismissTimer.current = null }
 			setPinDismissed(false) // new request from device resets dismiss
 			setPinRequestType(payload.type as PinRequestType)
+			setPinRequestSeq((n) => n + 1) // device re-scrambled its matrix — clear partial entry
 		})
 	}, [])
 
@@ -286,7 +289,8 @@ function App() {
 	// Reset pinFailed first so the false→true transition fires the
 	// useEffect inside PinEntry even if it was already true.
 	useEffect(() => {
-		return onRpcMessage("pin-error", () => {
+		return onRpcMessage("pin-error", (detail) => {
+			setPinErrorDetail(detail ?? null)
 			setPinFailed(false)
 			// Batch in next tick so React sees the transition
 			queueMicrotask(() => setPinFailed(true))
@@ -314,9 +318,8 @@ function App() {
 	}, [])
 
 	const handlePinWipe = useCallback(async () => {
-		try {
-			await rpcRequest("wipeDevice", undefined, 0)
-		} catch (e) { console.error("wipeDevice from PIN:", e) }
+		// Errors propagate to PinEntry, which shows them and keeps the overlay open.
+		await rpcRequest("wipeDevice", undefined, 0)
 		setPinRequestType(null)
 		setPinDismissed(true)
 		setPinFailed(false)
@@ -843,6 +846,10 @@ function App() {
 		: ["needs_pin", "needs_passphrase"].includes(deviceState.state) ? "splash"
 		: "splash"
 
+	useEffect(() => {
+		rpcRequest("logOnboarding", { event: `phase=${phase} state=${deviceState.state} wizardComplete=${wizardComplete} setupInProgress=${setupInProgress} oobEntered=${oobEnteredRef.current} firmwareSkipped=${firmwareSkipped}` }).catch(() => {})
+	}, [phase, deviceState.state, wizardComplete, setupInProgress, firmwareSkipped])
+
 	// ── Overlays (render above everything) ──────────────────────────
 	// PIN is highest priority (z-index 2010) — must show above signing
 	// approval so users can unlock a PIN-locked device during API signing.
@@ -859,7 +866,7 @@ function App() {
 	) : null
 
 	const pinOverlay = pinRequestType && !passphraseRequested ? (
-		<PinEntry type={pinRequestType} failed={pinFailed} onSubmit={handlePinSubmit} onCancel={handlePinCancel} onWipe={handlePinWipe} />
+		<PinEntry type={pinRequestType} failed={pinFailed} errorDetail={pinErrorDetail} requestSeq={pinRequestSeq} onSubmit={handlePinSubmit} onCancel={handlePinCancel} onWipe={handlePinWipe} />
 	) : null
 
 	const charOverlay = (charRequest || recoveryError) ? (
@@ -1005,19 +1012,6 @@ function App() {
 							<DeviceGrid
 								onViewPortfolio={(id, label) => { setWatchOnlyDeviceId(id); setWatchOnlyLabel(label); setWatchOnlyMode(true) }}
 								onReady={() => setGridReady(true)}
-								onEnableEmulator={async () => {
-									const settings = await rpcRequest<AppSettings>('setEmulatorEnabled', { enabled: true }, 10000)
-									setEmulatorEnabled(settings.emulatorEnabled)
-									// Enabling the flag alone is a dead end on first run: with no flash
-									// images DeviceGrid has nothing to show and the Start card vanishes.
-									// Bootstrap and boot a default emulator wallet so "Start emulator"
-									// actually starts one (mirrors the DeviceSettingsDrawer install path).
-									const wallets = await rpcRequest<Array<{ name: string }>>('emulatorListWallets').catch(() => [])
-									if (wallets.length === 0) {
-										try { await rpcRequest('emulatorPair', undefined, 10000) } catch { /* may already be paired */ }
-										await rpcRequest('emulatorInit', { flashName: 'default' }, 30000)
-									}
-								}}
 								emulatorEnabled={emulatorEnabled}
 							/>
 							{/* Windows: a connected KeepKey can be invisible to the app if WinUSB
@@ -1034,7 +1028,8 @@ function App() {
 		return (
 			<>{splashNav}{resizeHandles}{updateBanner}{firmwareDropZone}{signingOverlay}{pairingOverlay}{passphraseOverlay}{charOverlay}{pinOverlay}
 				<OobSetupWizard onComplete={() => { setWizardComplete(true); setSetupInProgress(false) }} onSkipFirmware={() => { setFirmwareSkipped(true); setWizardComplete(true); setSetupInProgress(false) }} onSetupInProgress={setSetupInProgress} onWordCountChange={setRecoveryWordCount} />
-				<Box position="fixed" right="24px" bottom="24px" zIndex={1900} textAlign="right">
+				{/* Developer-only: shown once the emulator is enabled in Settings. */}
+				{emulatorEnabled && <Box position="fixed" right="24px" bottom="24px" zIndex={1900} textAlign="right">
 					{emulatorStartError && <Text mb="2" maxW="340px" fontSize="12px" color="kk.error">{emulatorStartError}</Text>}
 					<Button
 						onClick={startEmulatorFromSetup}
@@ -1048,7 +1043,7 @@ function App() {
 					>
 						{startingEmulator ? "Starting Emulator…" : "Use Emulator"}
 					</Button>
-				</Box>
+				</Box>}
 			</>
 		)
 	}

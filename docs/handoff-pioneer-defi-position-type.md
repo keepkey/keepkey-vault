@@ -1,6 +1,6 @@
 # Handoff: Pioneer DeFi position `type` so the vault can dedupe app-tokens
 
-**Repo:** `/Users/highlander/WebstormProjects/keepkey-stack/projects/pioneer`
+**Repo:** `keepkey-stack/projects/pioneer`
 **Consumer PR:** keepkey-vault #260 (`feat/tx-custom-fees`) — DeFi positions folded into `ChainBalance`
 **Related (closed):** keepkey-vault #253 (superseded by #260)
 **Server PR that shipped `includeDefi`:** `coinmastersguild/pioneer#121`

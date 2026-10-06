@@ -19,7 +19,7 @@ the swap output."
 
 ## Files changed
 
-### Pioneer — `/Users/highlander/WebstormProjects/keepkey-stack/projects/pioneer/modules/intergrations/mayachain/src/index.ts`
+### Pioneer — `keepkey-stack/projects/pioneer/modules/intergrations/mayachain/src/index.ts`
 
 Lines ~222–243: replaced the hardcoded `MAYA_BASE_UNIT = 1e8` with asset-aware logic.
 
@@ -56,13 +56,13 @@ That has been removed. The vault now passes amounts and parses outputs uniformly
 
 Start Pioneer locally:
 ```
-cd /Users/highlander/WebstormProjects/keepkey-stack/projects/pioneer
+cd keepkey-stack/projects/pioneer
 make start
 ```
 
 Start vault against local Pioneer (if needed — vault may already point to local):
 ```
-cd /Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-vault
+cd keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-vault
 make dev
 ```
 

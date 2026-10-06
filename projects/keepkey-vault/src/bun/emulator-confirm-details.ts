@@ -13,6 +13,8 @@
 import type { EmulatorConfirmDetails } from './emulator-window'
 import { decodeCalldataLocal } from './calldata-decoder'
 import { CHAINS } from '../shared/chains'
+import { erc20Preview } from '../shared/erc20Preview'
+import { evmContractIdentity } from '../shared/evm-contract-identity'
 
 const MAX_UINT256 = (1n << 256n) - 1n
 
@@ -99,6 +101,14 @@ export function evmConfirmDetails(operation: string, fallbackChain: string, para
   }
 
   const selector = data.slice(0, 10)
+  const tokenPreview = erc20Preview(params?.to, Number(params?.chainId), data)
+  if (tokenPreview) {
+    return { operation, opLabel: selector === '0x095ea7b3' ? 'Token Approval' : 'Token Transfer', chain,
+      to: tokenPreview.counterpartyAddress, toLabel: tokenPreview.counterpartyLabel,
+      toIdentity: tokenPreview.counterpartyIdentity,
+      tokenAddress: tokenPreview.tokenAddress, tokenIdentity: tokenPreview.tokenIdentity,
+      value: tokenPreview.amount, fee }
+  }
   const word = (i: number) => data.slice(10 + i * 64, 10 + (i + 1) * 64)
   const addrFromWord = (i: number) => '0x' + word(i).slice(24) // last 20 bytes
   const uintFromWord = (i: number) => {
@@ -150,6 +160,7 @@ export function evmConfirmDetails(operation: string, fallbackChain: string, para
     opLabel: decoded?.method ? `Contract call: ${decoded.method}` : 'Contract call',
     chain,
     to: params?.to, toLabel: 'Contract',
+    toIdentity: evmContractIdentity(Number(params?.chainId), String(params?.to || '')),
     value: nativeValue, // any native ETH sent alongside (e.g. ETH→token swap)
     fee,
     memo: `data ${selector}${decoded ? '' : ' (unrecognized)'}`,

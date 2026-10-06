@@ -9,13 +9,13 @@ clear-sign branch so the feature is emulator-testable. Those commits touch
 
 **Where:** firmware `feat/clearsign-persistent-identity-icons` /
 `release/7.15.0-rc7` (`BitHighlander/keepkey-firmware`). Submodule at
-`/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11/modules/keepkey-firmware`.
+`keepkey-stack/projects/keepkey-vault-v11/modules/keepkey-firmware`.
 
 ## Test / build
 ```
-cd /Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11/modules/keepkey-firmware
+cd keepkey-stack/projects/keepkey-vault-v11/modules/keepkey-firmware
 git checkout release/7.15.0-rc7    # (or feat/clearsign-persistent-identity-icons)
-cd /Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11
+cd keepkey-stack/projects/keepkey-vault-v11
 make build-emulator                # installs ~/.keepkey/emulator/libkkemu.dylib
 ```
 then **reload the emulator in Vault**.

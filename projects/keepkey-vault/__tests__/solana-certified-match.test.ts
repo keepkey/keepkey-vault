@@ -11,6 +11,7 @@ import joinFixture from './fixtures/solana/soltoshidice-blackjack-join.json'
 import ceeloFixture from './fixtures/solana/soltoshidice-ceelo-bet.json'
 import pokerRegistrationFixture from './fixtures/solana/soltoshidice-register-poker-tournament.json'
 import livePokerFixture from './fixtures/solana/soltoshidice-live-poker-session.json'
+import pumpTrades from './fixtures/solana/pumpswap-real-trades.json'
 
 const JOIN = CERTIFIED_SOLANA_CATALOG.soltoshidiceBlackjackJoin
 const PUMP = CERTIFIED_SOLANA_CATALOG.pumpAmmBuy
@@ -36,36 +37,40 @@ describe('certifiedSolanaSchemaApplies (firmware schema_applies, certified)', ()
     expect(applies(joinFixture.rawTxBase64)).toBe(JOIN_INDEX)
   })
 
-  test('a SoltoshiDICE join with an ATA-create companion does not apply', () => {
-    const rawTx = editJoin((m) => {
+  test('an ATA-create companion applies only when a signer funds and owns it', () => {
+    const withAta = (owner: number) => editJoin((m) => {
       const ata = addStaticAccount(m, 'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL')
-      m.instructions.splice(JOIN_INDEX, 0, { programIdIndex: ata, accountIndices: [0, 6, 0, 8, 7, 12], data: Buffer.from([1]) })
+      m.instructions.splice(JOIN_INDEX, 0, { programIdIndex: ata, accountIndices: [0, 6, owner, 8, 7, 12], data: Buffer.from([1]) })
     })
-    const message = parseSolanaWireMessage(rawTx)
+    expect(applies(withAta(0))).toBe(JOIN_INDEX + 1)
+    const message = parseSolanaWireMessage(withAta(6))
     // The join itself still has the reviewed shape; only the companion fails.
     expect(solanaInstructionMatchesSchema(message, message.instructions[JOIN_INDEX + 1], JOIN)).toBe(true)
     expect(certifiedSolanaSchemaApplies(message, JOIN)).toBeUndefined()
   })
 
-  test('syntheticPumpBuy does not apply: 9 instructions with ATA create, SyncNative and closeAccount', () => {
+  test('syntheticPumpBuy applies: 9 instructions with the signer\'s own WSOL create, sync and close', () => {
     const { rawTx } = syntheticPumpBuy()
     const message = parseSolanaWireMessage(rawTx)
     expect(message.instructions).toHaveLength(9)
-    expect(solanaInstructionMatchesSchema(message, message.instructions[7], PUMP)).toBe(true)
-    expect(certifiedSolanaSchemaApplies(message, PUMP)).toBeUndefined()
-    // Under the instruction cap, the companions still refuse it.
-    expect(applies(editSolanaTx(rawTx, (m) => { m.instructions.splice(1, 1) }), PUMP)).toBeUndefined()
+    expect(certifiedSolanaSchemaApplies(message, PUMP)).toBe(7)
+    // Closing the wrapped SOL to a non-signer is refused.
+    expect(applies(editSolanaTx(rawTx, (m) => { m.instructions[8].accountIndices = [5, 6, 0] }), PUMP)).toBeUndefined()
+    // So is closing an account a non-signer owns.
+    expect(applies(editSolanaTx(rawTx, (m) => { m.instructions[8].accountIndices = [5, 0, 6] }), PUMP)).toBeUndefined()
+    // And an ATA created for another owner.
+    expect(applies(editSolanaTx(rawTx, (m) => { m.instructions[3].accountIndices = [0, 5, 6, 21, 13, 16] }), PUMP)).toBeUndefined()
     // Control: the same buy beside ComputeBudget only applies.
     expect(applies(editSolanaTx(rawTx, (m) => { m.instructions = [m.instructions[0], m.instructions[7]] }), PUMP)).toBe(1)
   })
 
-  test('at most 8 instructions: a longer message parses with none', () => {
+  test('at most 12 instructions: a longer message parses with none', () => {
     const withMemos = (count: number) => editJoin((m) => {
       const memo = addStaticAccount(m, 'MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr')
       for (let i = 0; i < count; i++) m.instructions.push({ programIdIndex: memo, accountIndices: [], data: Buffer.from('gg') })
     })
-    expect(applies(withMemos(5))).toBe(JOIN_INDEX) // 8 instructions
-    expect(applies(withMemos(6))).toBeUndefined() // 9 instructions
+    expect(applies(withMemos(9))).toBe(JOIN_INDEX) // 12 instructions
+    expect(applies(withMemos(10))).toBeUndefined() // 13 instructions
   })
 
   test('ComputeBudget companions only in their exact firmware encodings', () => {
@@ -139,7 +144,10 @@ describe('findLocalCertifiedSolanaMatch (Vault pre-filter)', () => {
     const bareBuy = editSolanaTx(syntheticPumpBuy().rawTx, (m) => { m.instructions = [m.instructions[0], m.instructions[7]] })
     expect(findLocalCertifiedSolanaMatch(parseSolanaWireMessage(bareBuy)))
       .toMatchObject({ catalogKey: 'pumpAmmBuy', instructionIndex: 1 })
-    expect(findLocalCertifiedSolanaMatch(parseSolanaWireMessage(syntheticPumpBuy().rawTx))).toBeUndefined()
+    expect(findLocalCertifiedSolanaMatch(parseSolanaWireMessage(syntheticPumpBuy().rawTx)))
+      .toMatchObject({ catalogKey: 'pumpAmmBuy', instructionIndex: 7 })
+    const closedToStranger = editSolanaTx(syntheticPumpBuy().rawTx, (m) => { m.instructions[8].accountIndices = [5, 6, 0] })
+    expect(findLocalCertifiedSolanaMatch(parseSolanaWireMessage(closedToStranger))).toBeUndefined()
   })
 
   test('the real Cee-lo bet matches only the Cee-lo entry, though it shares a program with the join', () => {
@@ -185,6 +193,16 @@ describe(`certifiedSolanaSchemaApplies agrees with firmware ${firmwareCorpus.fir
       const spec = CERTIFIED_SOLANA_CATALOG[c.catalogKey as keyof typeof CERTIFIED_SOLANA_CATALOG]
       expect(certifiedSolanaSchemaApplies(parseSolanaMessage(Buffer.from(c.messageHex, 'hex')), spec, c.lutKeys))
         .toBe(accepted ? Number(accepted[1]) : undefined)
+    })
+  }
+})
+
+describe('real PumpSwap trades (owner wallet, the first 7.16 hardware test)', () => {
+  for (const name of ['sell', 'buy8', 'buy9'] as const) {
+    test(`${name} selects ${pumpTrades[name].expected.catalogKey} beside the signer's WSOL wrap/unwrap`, () => {
+      const message = parseSolanaWireMessage(pumpTrades[name].rawTxBase64)
+      expect(message.instructions).toHaveLength(pumpTrades[name].instructions)
+      expect(findLocalCertifiedSolanaMatch(message)).toMatchObject(pumpTrades[name].expected)
     })
   }
 })

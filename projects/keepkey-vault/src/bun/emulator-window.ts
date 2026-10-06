@@ -64,6 +64,9 @@ export interface EmulatorConfirmDetails {
   to?: string
   /** Label for the `to` row — "To" (default), "Spender", "Contract", "Validator". */
   toLabel?: string
+  toIdentity?: string
+  tokenAddress?: string
+  tokenIdentity?: string
   value?: string
   /** Network fee, pre-formatted by the sign handler (shown before approval). */
   fee?: string
@@ -85,6 +88,16 @@ let pendingConfirm: {
   id: string
   resolve: (approved: boolean) => void
 } | null = null
+
+/** Authenticated integration-test control; unavailable unless the caller's
+ * process explicitly enables its REST route. This advances the same pending
+ * decision as the visible Confirm/Reject buttons. */
+export function decidePendingEmulatorConfirm(approved: boolean): boolean {
+  if (!pendingConfirm) return false
+  pendingConfirm.resolve(approved)
+  pendingConfirm = null
+  return true
+}
 
 /**
  * Pending seed ack — resolved on explicit "I've recorded my words" click,
@@ -134,6 +147,13 @@ function startBridge(): number {
       if (url.pathname === '/_emu/confirm' && req.method === 'POST') {
         return req.json().then((body: any) => {
           console.log(`${TAG} Bridge: confirm id=${body.id}, approved=${body.approved}`)
+          // Integration captures must advance one firmware prompt at a time via
+          // the authenticated REST control. Ignore stale mouse/keyboard events
+          // from the visible emulator window while that control is enabled.
+          if (process.env.KEEPKEY_TEST_EMULATOR_CONTROL === '1') {
+            console.log(`${TAG} Bridge: ignored UI decision while test control is enabled`)
+            return new Response('ignored', { headers: { 'Access-Control-Allow-Origin': '*' } })
+          }
           if (pendingConfirm && pendingConfirm.id === body.id) {
             pendingConfirm.resolve(body.approved)
             pendingConfirm = null
@@ -907,8 +927,12 @@ function buildEmulatorHTML(bridgePort: number): string {
     if (details.chain) html += '<div class="detail">Chain: ' + esc(details.chain) + '</div>';
     if (details.to) {
       var addr = details.to;
-      if (addr.length > 24) addr = addr.slice(0, 12) + '...' + addr.slice(-10);
+      if (details.toIdentity) html += '<div class="detail">' + esc(details.toLabel || 'To') + ': ' + esc(details.toIdentity) + '</div>';
       html += '<div class="addr">' + esc(details.toLabel || 'To') + ': ' + esc(addr) + '</div>';
+    }
+    if (details.tokenAddress) {
+      html += '<div class="detail">Token: ' + esc(details.tokenIdentity || 'Unidentified token') + '</div>';
+      html += '<div class="addr">Token contract: ' + esc(details.tokenAddress) + '</div>';
     }
     if (details.value) html += '<div class="detail">Amount: ' + esc(details.value) + '</div>';
     if (details.fee) html += '<div class="detail">Fee: ' + esc(details.fee) + '</div>';

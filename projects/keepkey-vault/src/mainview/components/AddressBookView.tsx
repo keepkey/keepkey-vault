@@ -55,12 +55,14 @@ export function AddressBookView() {
   const [clearSignEnabled, setClearSignEnabled] = useState(false)
   const [certifying, setCertifying] = useState(false)
   const [certificationNotice, setCertificationNotice] = useState("")
+  // No capability flag exists: a failed probe on this firmware image disables certification.
+  const [certifyUnsupported, setCertifyUnsupported] = useState(false)
 
   const clearSignSupported = !!deviceState.firmwareVersion && versionCompare(deviceState.firmwareVersion, "7.16.0") >= 0
 
   useEffect(() => {
     rpcRequest<AppSettings>("getAppSettings", undefined, 5000)
-      .then(settings => setClearSignEnabled(settings.addressBookClearsignEnabled))
+      .then(settings => { setClearSignEnabled(settings.addressBookClearsignEnabled); setCertifyUnsupported(!!settings.addressBookCertifyUnsupported) })
       .catch(() => {})
   }, [])
 
@@ -80,6 +82,9 @@ export function AddressBookView() {
     } catch (error: any) {
       const message = error?.message || "Address Book certification failed"
       setCertificationNotice(message)
+      rpcRequest<AppSettings>("getAppSettings", undefined, 5000)
+        .then(settings => setCertifyUnsupported(!!settings.addressBookCertifyUnsupported))
+        .catch(() => {})
     } finally {
       setCertifying(false)
     }
@@ -170,13 +175,14 @@ export function AddressBookView() {
       <Flex align="center" justify="space-between" mb="3" mt="2" gap="2">
         <Text fontSize="lg" fontWeight="700" color="var(--text-0)">{t("title", { defaultValue: "Address Book" })}</Text>
         <Flex gap="2">
-        <Button size="sm" variant="outline" borderColor={clearSignEnabled ? "var(--teal)" : "var(--line)"} color={clearSignEnabled ? "var(--teal)" : "var(--text-2)"}
-                borderRadius="10px" px="3" h="34px" onClick={toggleClearSign} disabled={!clearSignSupported}
-                title={clearSignSupported ? undefined : "Address Book ClearSign requires connected firmware 7.16.0 or newer"}>
+        {/* Unreleased-firmware feature: absent, not teased, below 7.16. */}
+        {clearSignSupported && <Button size="sm" variant="outline" borderColor={clearSignEnabled ? "var(--teal)" : "var(--line)"} color={clearSignEnabled ? "var(--teal)" : "var(--text-2)"}
+                borderRadius="10px" px="3" h="34px" onClick={toggleClearSign}>
           {clearSignEnabled ? "ClearSign on" : "Enable ClearSign"}
-        </Button>
-        {clearSignEnabled && <Button size="sm" variant="outline" borderColor="var(--teal)" color="var(--teal)" borderRadius="10px" px="3" h="34px"
-                onClick={certify} disabled={certifying || !clearSignSupported}>{certifying ? "Review on device…" : "Certify contacts"}</Button>}
+        </Button>}
+        {clearSignEnabled && clearSignSupported && <Button size="sm" variant="outline" borderColor="var(--teal)" color="var(--teal)" borderRadius="10px" px="3" h="34px"
+                onClick={certify} disabled={certifying || !clearSignSupported || certifyUnsupported}
+                title={certifyUnsupported ? "This firmware build cannot certify contacts" : undefined}>{certifying ? "Review on device…" : "Certify contacts"}</Button>}
         <Button size="sm" variant="outline" borderColor="var(--gold)" color="var(--gold)" borderRadius="10px" px="3" h="34px"
                 _hover={{ bg: "rgba(233,196,106,0.10)" }} onClick={() => setAddOpen(true)} flexShrink={0} title={t("addAddressHint", { defaultValue: "Add an address to your Address Book" })}>
           <Flex align="center" gap="1.5">

@@ -282,14 +282,14 @@ Responsibilities:
 ### Integration points
 
 Ethereum:
-- [modules/keepkey-firmware/lib/firmware/fsm_msg_ethereum.h](/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11/modules/keepkey-firmware/lib/firmware/fsm_msg_ethereum.h)
-- [modules/keepkey-firmware/lib/firmware/ethereum.c](/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11/modules/keepkey-firmware/lib/firmware/ethereum.c)
+- [modules/keepkey-firmware/lib/firmware/fsm_msg_ethereum.h](keepkey-stack/projects/keepkey-vault-v11/modules/keepkey-firmware/lib/firmware/fsm_msg_ethereum.h)
+- [modules/keepkey-firmware/lib/firmware/ethereum.c](keepkey-stack/projects/keepkey-vault-v11/modules/keepkey-firmware/lib/firmware/ethereum.c)
 
 Solana:
 - the current Solana signing FSM and parser path in `solana.c` and corresponding FSM handlers
 
 Storage and policy:
-- [modules/keepkey-firmware/include/keepkey/firmware/policy.h](/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11/modules/keepkey-firmware/include/keepkey/firmware/policy.h)
+- [modules/keepkey-firmware/include/keepkey/firmware/policy.h](keepkey-stack/projects/keepkey-vault-v11/modules/keepkey-firmware/include/keepkey/firmware/policy.h)
 - storage policy plumbing if dedicated blind-signing toggles are introduced
 
 ## UI Model

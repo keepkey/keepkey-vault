@@ -161,6 +161,7 @@ function OrbitalView({
 	totalUsd,
 	totalDollars,
 	totalCents,
+	partial,
 	cleanTokenTotal,
 	onSelect,
 	privateModeEnabled,
@@ -171,6 +172,8 @@ function OrbitalView({
 	totalUsd: number
 	totalDollars: number
 	totalCents: string
+	/** A chain could not be reached, so the total is a floor, not a figure. */
+	partial: boolean
 	cleanTokenTotal: number
 	onSelect: (c: ChainDef) => void
 	privateModeEnabled: boolean
@@ -257,7 +260,7 @@ function OrbitalView({
 								letterSpacing="-0.04em"
 								lineHeight="1"
 							>
-								${totalDollars.toLocaleString()}
+								{partial ? '≥ ' : ''}${totalDollars.toLocaleString()}
 							</Text>
 							<Text
 								fontSize={{ base: "20px", md: "24px" }}
@@ -596,7 +599,7 @@ function ChainDetailOrbital({
 					letterSpacing="-0.02em"
 					lineHeight="1"
 				>
-					{formatBalance(String(combinedBal))} {chain.symbol}
+					{!balance || balance.syncState === 'degraded' ? '—' : formatBalance(String(combinedBal))} {chain.symbol}
 				</Text>
 				{(nativeBalanceUsd + shielded.usd) > 0 && (
 					<Text fontSize="13px" color="var(--text-2)" fontWeight="400">
@@ -2713,6 +2716,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 									totalUsd={totalUsd}
 									totalDollars={totalDollars}
 									totalCents={totalCents}
+									partial={anyChainUnknown}
 									cleanTokenTotal={cleanTokenTotal}
 									onSelect={(c) => setDrilledChainId(c.id)}
 									privateModeEnabled={privateModeEnabled}
@@ -2764,6 +2768,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 										totalUsd={totalUsd}
 										totalDollars={totalDollars}
 										totalCents={totalCents}
+										partial={anyChainUnknown}
 										cleanTokenTotal={cleanTokenTotal}
 										onSelect={(c) => setDrilledChainId(c.id)}
 										privateModeEnabled={privateModeEnabled}

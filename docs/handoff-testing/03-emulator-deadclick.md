@@ -6,7 +6,7 @@
 stranded in console). Now the handlers throw and the UI surfaces the error.
 
 **Where:** vault `#338` (MERGED, develop) —
-`/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-vault/src/bun/index.ts`
+`keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-vault/src/bun/index.ts`
 (`emulatorInit`/`emulatorSwitchWallet`/`emulatorImportWallet` throw),
 `src/mainview/components/DeviceGrid.tsx` (`handleStartEmu` surfaces any
 non-running result).
