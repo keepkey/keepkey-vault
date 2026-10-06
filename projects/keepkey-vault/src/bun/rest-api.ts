@@ -3298,6 +3298,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
                 return address
               },
               'rest:solanaSignTx',
+              () => engine.getDeviceState().firmwareVersion,
             )
             if (clearSignPayload) recordRestClearSignEvent({
               kind: 'transaction', outcome: 'signed', source: 'rest-api', chain: 'Solana',

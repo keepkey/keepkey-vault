@@ -16,6 +16,8 @@ import { parseSolanaTx, solanaMessageSlice } from '../src/bun/solana-tx'
 import { assessSigningRisk } from '../src/shared/clearsign-risk'
 import type { SigningRequestInfo } from '../src/shared/types'
 import joinFixture from './fixtures/solana/soltoshidice-blackjack-join.json'
+import swap from './fixtures/uniswap/base-ur-usdc-to-eth-swap.json'
+import { applyEvmTxPreview } from '../src/bun/evm-signing-preview'
 
 const LOGIN_MESSAGE_B64 = 'U29sdG9zaGlESUNFIHdhbGxldApOZXR3b3JrOiBtYWlubmV0LWJldGE6Q3VUTHA3cERtTkdrRmdpNGFvaDhFZjFZU2pjMkJ6RUNRUkx6WXFhb1ZXQlI6NG5DbXB3bmU3aENvV1RTcEFkNTR1RU5tQ2dISnJIVHluNERNUENFTXB1bXAKU2Vzc2lvbjogY2E1ZWQ3YTgtNWRmMS00MWJmLTkxY2EtYzNkZTRjMWM1NmY2Ck5vbmNlOiAzN2M0MDY2Ny01NzZkLTQwNTQtOTA2NC02MTg2MTRhYjg4YzE='
 const TX1_B64 = 'AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAYJ7Dl5pNxrQBvQRRcaGJ8mhW+rnqt1VgIU+XKy7cFkMA+LZzzaLik+AiCrPgHStY7QVcnBsnYt1RVhKxDKzW40NrgTPK+soJctzdQsxyxkxmokWe10HSLNM0pp7sZO3eosAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAg+JYP7kag/aX3JhxSBLr/9dbITv9zclr5W8RVNHvjowF02rdo/npIS0+fAcrrAThIR97VGw7P8fmeJwQ9+Dk5hH08KOLLv/nnxPfLbW1x5bwW1Qqm7U/+OurmoNbG6qQDBkZv5SEXMv/srbpyw5vnvIzlu8X3EmssQ5s6QAAAALDgivSk/PrRPvj8/Z3HCXXrb8LgSnx2YRVApRzV257QTQBKpt9xx9nI6TgJCP4k4JahDgt0ODAlVydCDyS4WCcCBwAFAjBXBQAIBwAGBAECBQMDE2tr'
@@ -289,8 +291,6 @@ describe('assessSigningRisk — EVM', () => {
 // Real Base Uniswap swap (fixtures/uniswap). The card said "Known Pattern"
 // beside a red "You would be signing blind" for the same request.
 describe('assessSigningRisk — reviewed Uniswap Universal Router swap', () => {
-  const swap = require('./fixtures/uniswap/base-ur-usdc-to-eth-swap.json')
-  const { applyEvmTxPreview } = require('../src/bun/evm-signing-preview')
 
   async function swapRequest(to = swap.to): Promise<SigningRequestInfo> {
     const original = globalThis.fetch

@@ -7,6 +7,7 @@ import {
 } from './solana-tx'
 import { prepareSolanaX402DeviceMetadata } from './solana-x402'
 import { findPromotedSolanaArtifact } from './clearsign-artifact-resolver'
+import { supportsCertifiedClearSign } from './solana-certified-policy'
 
 export type SolanaDeviceSigner = (params: any) => Promise<any>
 export type SolanaAddressDeriver = (addressNList: number[]) => Promise<string>
@@ -22,6 +23,7 @@ export async function signSolanaWireTransaction(
   signWithDevice: SolanaDeviceSigner,
   deriveSignerAddress: SolanaAddressDeriver,
   logPrefix = 'signTx:solana',
+  getFirmwareVersion?: () => string | undefined,
 ): Promise<any> {
   const fullTx = Buffer.from(
     typeof unsignedTx.rawTx === 'string'
@@ -40,7 +42,9 @@ export async function signSolanaWireTransaction(
 
   const messageBytes = solanaMessageSlice(fullTx, parsed)
   const message = parseSolanaMessage(messageBytes)
-  const promoted = unsignedTx.schema ? undefined : findPromotedSolanaArtifact(
+  // A promoted certified artifact is 7.16 authority material: older firmware
+  // skips the fields, and the record would still say "certified".
+  const promoted = unsignedTx.schema || !supportsCertifiedClearSign(getFirmwareVersion?.()) ? undefined : findPromotedSolanaArtifact(
     typeof unsignedTx.rawTx === 'string' ? unsignedTx.rawTx : Buffer.from(unsignedTx.rawTx).toString('base64'),
   )
   const effectiveUnsignedTx = promoted ? {
