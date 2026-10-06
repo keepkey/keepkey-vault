@@ -1,11 +1,13 @@
 {
 	"pin": {
 		"enterPin": "Enter PIN",
-		"createPin": "Create a PIN",
-		"confirmPin": "Confirm Your PIN",
+		"createPin": "Create a NEW PIN",
+		"confirmPin": "Enter the SAME PIN again",
 		"enterDescription": "Use the positions shown on your KeepKey to enter your PIN",
-		"createDescription": "Look at your KeepKey screen and tap the positions to set a new PIN",
-		"confirmDescription": "Enter the same PIN again to confirm",
+		"createDescription": "Make up a new PIN only you know. You will enter it twice. The numbers appear on your KeepKey screen, not here: tap the matching positions below.",
+		"confirmDescription": "Enter the PIN you just chose, one more time. The numbers on your KeepKey have moved, so look at its screen again.",
+		"setupStep": "Step {{step}} of 2",
+		"howPinWorks": "How PIN entry works",
 		"backspace": "Backspace",
 		"unlock": "Unlock",
 		"forgotPinWipe": "Forgot your PIN? Wipe device",
