@@ -118,6 +118,8 @@ const stepToVisibleId: Record<WizardStep, string | null> = {
 
 interface OobSetupWizardProps {
   onComplete: () => void
+  /** A new seed was just generated on the device: its balances are known to be zero. */
+  onWalletCreated?: () => void
   // Called when the user skips the firmware update on an already-initialized
   // device. App.tsx lets them into the app on the older firmware (session-only).
   onSkipFirmware?: () => void
@@ -137,7 +139,7 @@ const confettiPieces = Array.from({ length: 50 }, (_, i) => ({
 
 // ── Main Wizard ─────────────────────────────────────────────────────────────
 
-export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, onWordCountChange }: OobSetupWizardProps) {
+export function OobSetupWizard({ onComplete, onWalletCreated, onSkipFirmware, onSetupInProgress, onWordCountChange }: OobSetupWizardProps) {
   const [step, setStep] = useState<WizardStep>('authenticity')
   useEffect(() => {
     rpcRequest('logOnboarding', { event: `wizard step=${step}` }).catch(() => {})
@@ -154,6 +156,10 @@ export function OobSetupWizard({ onComplete, onSkipFirmware, onSetupInProgress, 
   // a btc-only seed is locked to btc-only firmware. Default multi = current behavior.
   const [coinMode, setCoinMode] = useState<'multi' | 'bitcoin-only'>('multi')
   const [setupType, setSetupType] = useState<'create' | 'recover' | null>(null)
+  // Every create path (device, replug-advanced, emulator) lands on init-label.
+  useEffect(() => {
+    if (step === 'init-label' && setupType === 'create') onWalletCreated?.()
+  }, [step, setupType, onWalletCreated])
   const [wordCount, setWordCount] = useState<12 | 18 | 24>(12)
   const [deviceLabel, setDeviceLabel] = useState('')
   const [applyingLabel, setApplyingLabel] = useState(false)
