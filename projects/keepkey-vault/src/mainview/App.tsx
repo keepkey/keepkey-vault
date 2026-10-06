@@ -685,7 +685,7 @@ function App() {
 		if (deviceState.state === "disconnected") setPortfolioLoaded(false)
 	}, [deviceState.state])
 
-	// Watch-only: check cache when disconnected, auto-exit when device connects
+	// Watch-only: note the cache when disconnected (tiles open it), auto-exit when a device connects
 	useEffect(() => {
 		if (deviceState.state === "disconnected") {
 			rpcRequest<{ available: boolean; deviceLabel?: string; lastSynced?: number }>("checkWatchOnlyCache")
@@ -694,10 +694,8 @@ function App() {
 						setWatchOnlyAvailable(true)
 						setWatchOnlyLabel(res.deviceLabel || "")
 						setWatchOnlyLastSynced(res.lastSynced || 0)
-						// Unplugging shouldn't dump the user back to the splash screen with
-						// their portfolio gone. Cached data exists → show it, read-only.
-						// The else-branch below auto-exits the moment a device reconnects.
-						setWatchOnlyMode(true)
+						// Unplugging returns to the home screen. Watch-only opens only when
+						// the user picks a wallet tile there (owner decision 2026-10-06).
 					}
 				})
 				.catch(() => {})
