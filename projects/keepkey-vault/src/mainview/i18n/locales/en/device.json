@@ -138,6 +138,7 @@
 		"wordOf": "Word {{current}} of {{total}}",
 		"percentComplete": "{{percent}}% complete",
 		"backspace": "Backspace",
+		"previousWord": "← Back to word {{n}}",
 		"completeRecovery": "Complete Recovery",
 		"nextWord": "Next Word",
 		"wordAccepted": "Word {{number}} accepted!",
