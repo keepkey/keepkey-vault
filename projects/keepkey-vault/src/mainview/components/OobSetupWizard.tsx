@@ -2565,18 +2565,18 @@ export function OobSetupWizard({ onComplete, onWalletCreated, onSkipFirmware, on
                   </Box>
                 </HStack>
 
-                {isEmulator && (
-                  <Text
-                    fontSize="2xs"
-                    color="kk.cardBgHover"
-                    cursor="pointer"
-                    textAlign="center"
-                    _hover={{ color: 'gray.500' }}
-                    onClick={() => setDevLoadOpen(true)}
-                  >
-                    Developer: load seed
-                  </Text>
-                )}
+                {/* Deliberately faint, but available on every device: some users
+                    load an existing seed this way (owner decision 2026-10-06). */}
+                <Text
+                  fontSize="2xs"
+                  color="kk.cardBgHover"
+                  cursor="pointer"
+                  textAlign="center"
+                  _hover={{ color: 'gray.500' }}
+                  onClick={() => setDevLoadOpen(true)}
+                >
+                  Developer: load seed
+                </Text>
               </VStack>
             )}
 
