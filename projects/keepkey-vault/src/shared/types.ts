@@ -619,6 +619,8 @@ export interface ChainBalance {
   syncState?: 'confirmed' | 'stale' | 'degraded'
   /** Assets verified directly against a chain RPC during this refresh. */
   confirmedAssetCaips?: string[]
+  /** Per-xpub split of `balance` for multi-xpub UTXO chains (LTC/DOGE/…). Absent when not live-fetched. */
+  breakdown?: Array<{ xpub: string; path: string; scriptType: string; balance: string; balanceUsd: number }>
 }
 
 // DeFi position. The server-side merged path (includeDefi=true) is the
