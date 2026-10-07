@@ -7,7 +7,7 @@ import * as core from '@keepkey/hdwallet-core'
 import { HIDKeepKeyAdapter } from '@keepkey/hdwallet-keepkey-nodehid'
 import { NodeWebUSBKeepKeyAdapter } from '@keepkey/hdwallet-keepkey-nodewebusb'
 import { usb } from 'usb'
-import { saveDeviceSnapshot, saveEmulatorWalletMeta, clearNonBitcoinBalances } from './db'
+import { saveDeviceSnapshot, saveEmulatorWalletMeta, clearNonBitcoinBalances, getSnapshotFeaturesByFirmwareHash } from './db'
 import { HttpError } from './auth'
 import { isBitcoinOnlyVariant, DEFAULT_AUTO_LOCK_MS } from '../shared/flags'
 import type { DeviceStateInfo, ActiveTransport, UpdatePhase, DeviceState, FirmwareManifest, PinRequestType, Bip85DeriveParams, Bip85DisplayResult } from '../shared/types'
@@ -1488,6 +1488,40 @@ export class EngineController extends EventEmitter {
     return 'ready'
   }
 
+  /**
+   * Version, signing status and variant of the firmware INSTALLED on the device.
+   * In bootloader mode the device reports only that firmware's hash: the release
+   * table names official multi-chain builds, and a firmware-mode snapshot with
+   * the same hash fills in anything else (notably bitcoin-only, which the table
+   * does not carry). Unknown fields stay undefined/null — never a guess.
+   */
+  private installedFirmware(): { version: string | null; verified?: boolean; bitcoinOnly?: boolean; present: boolean } {
+    const f = this.cachedFeatures
+    if (!f) return { version: null, present: false }
+    if (f.bootloaderMode !== true) {
+      const version = this.extractVersion(f)
+      return {
+        version: version === '0.0.0' ? null : version,
+        verified: this.verifyHashes(f).firmwareVerified,
+        bitcoinOnly: isBitcoinOnlyVariant(f.firmwareVariant),
+        present: true,
+      }
+    }
+    const hashHex = base64ToHex(f.firmwareHash)
+    const present = !!hashHex && !/^0+$/.test(hashHex)
+    const release = resolveOndeviceFirmwareVersion(hashHex)
+    const seen = present ? getSnapshotFeaturesByFirmwareHash(f.firmwareHash) : null
+    const seenVersion = seen ? this.extractVersion(seen) : null
+    return {
+      version: release?.match(/^v?(\d+\.\d+\.\d+)/)?.[1] ?? (seenVersion && seenVersion !== '0.0.0' ? seenVersion : null),
+      verified: release ? OFFICIAL_RELEASE_TAG.test(release) : undefined,
+      // ponytail: the release table holds multi-chain builds only; add a variant
+      // marker to it when signed bitcoin-only hashes are published.
+      bitcoinOnly: seen ? isBitcoinOnlyVariant(seen.firmwareVariant) : (release ? false : undefined),
+      present,
+    }
+  }
+
   private extractVersion(features: any): string {
     if (features.majorVersion) {
       return `${features.majorVersion}.${features.minorVersion}.${features.patchVersion}`
@@ -1719,6 +1753,10 @@ export class EngineController extends EventEmitter {
       // Pick the manifest entry for the chosen variant. Bitcoin-only lives in a
       // separate manifest field (firmwareBitcoinOnly) and REQUIRES a manifest
       // entry — there's no github fallback for it.
+      // A bitcoin-only wallet updates to bitcoin-only firmware: multi-chain
+      // firmware refuses its storage band and would lock the wallet. Switching
+      // variants is a deliberate custom-file flash, never the update button.
+      if (this.installedFirmware().bitcoinOnly) bitcoinOnly = true
       const channel = this.getChannelEntry()
       const fwEntry = bitcoinOnly ? channel?.firmwareBitcoinOnly : channel?.firmware
       if (bitcoinOnly && !fwEntry) {
@@ -2365,19 +2403,9 @@ export class EngineController extends EventEmitter {
     // the bootloader still reports the INSTALLED firmware's hash (usb_flash.c
     // handler_initialize, same meta+app hash as firmware mode), so the release
     // table names it. An unrecognized hash stays unknown — never a guess.
-    let currentFirmwareVersion: string | null = null
-    let currentFirmwareVerified: boolean | undefined
-    if (this.cachedFeatures && !isBootloaderMode) {
-      currentFirmwareVersion = this.extractVersion(this.cachedFeatures)
-      if (currentFirmwareVersion === '0.0.0') currentFirmwareVersion = null
-      currentFirmwareVerified = this.verifyHashes(this.cachedFeatures).firmwareVerified
-    } else if (this.cachedFeatures) {
-      const installed = resolveOndeviceFirmwareVersion(base64ToHex(this.cachedFeatures.firmwareHash))
-      if (installed) {
-        currentFirmwareVersion = installed.match(/^v?(\d+\.\d+\.\d+)/)?.[1] ?? null
-        currentFirmwareVerified = OFFICIAL_RELEASE_TAG.test(installed)
-      }
-    }
+    const installed = this.installedFirmware()
+    const currentFirmwareVersion = installed.version
+    const currentFirmwareVerified = installed.verified
 
     // Version comparison (only meaningful when we know both versions)
     let isDowngrade = false
@@ -2393,7 +2421,14 @@ export class EngineController extends EventEmitter {
     // finds a newer storage format at boot and resets it (owner policy: a
     // downgrade wiping is expected; say so plainly). Unknown installed
     // firmware claims neither.
-    const wipeReason = flashWipeReason({ isSigned, currentFirmwareVerified, isDowngrade })
+    const wipeReason = imageKind === 'firmware'
+      ? flashWipeReason({
+        isSigned, currentFirmwareVerified, isDowngrade,
+        currentBitcoinOnly: installed.bitcoinOnly,
+        targetBitcoinOnly: isBitcoinOnly,
+        installedUnknown: installed.present && !currentFirmwareVersion,
+      })
+      : flashWipeReason({ isSigned, currentFirmwareVerified, isDowngrade })
     const willWipeDevice = wipeReason !== undefined
 
     return {
