@@ -34,6 +34,9 @@ jobs:
   linux-core:
     name: Electrobun Linux core
     runs-on: ubuntu-22.04
+    # Least privilege: it only checks out, builds and uploads an artifact.
+    permissions:
+      contents: read
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
