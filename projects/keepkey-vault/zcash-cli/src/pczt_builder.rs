@@ -3338,6 +3338,50 @@ mod transparent_only_tests {
         assert_eq!(hex::encode(parsed.txid().as_ref()), txid);
     }
 
+    /// ZIP 320 TEX step 2 as librustzcash builds it (firmware fixture
+    /// zcash_tex_vectors.h: one-time output m/44'/133'/0'/2/0 → the ZIP 320
+    /// example TEX address, v6 NU6.3). Our transparent-only digests must give
+    /// the same input sighash, or the device signature would not verify.
+    #[test]
+    fn tex_step_two_sighash_matches_librustzcash() {
+        let mut txid =
+            hex::decode("981da2d23dcdd6c04e5d36aa00cca4eb6d21cd4aa1af6547bacc5ab8d9764e7d")
+                .unwrap();
+        txid.reverse(); // wire order → display order, as the host passes it
+        let inputs = vec![ShieldTransparentInput {
+            txid: hex::encode(txid),
+            vout: 0,
+            value: 1_010_000,
+            script_pubkey: "76a9142875b160968fae11ca7fdd0174825c812f24f05688ac".into(),
+        }];
+        let outputs = vec![DeshieldTransparentOutput {
+            script_pubkey: "76a9148286bf790866805397e3a947640b77a43f0b43a588ac".into(),
+            value: 1_000_000,
+        }];
+        let mut state = build_transparent_only(
+            &inputs,
+            &outputs,
+            ephemeral_path(),
+            crate::zip229::NU6_3_BRANCH_ID,
+        )
+        .unwrap();
+        assert_eq!(state.fee, 10_000);
+        // The fixture was built with expiry height 69121; ours carry 0.
+        state.digests.header_digest =
+            crate::zip229::digest_header(crate::zip229::NU6_3_BRANCH_ID, 0, 69121);
+        let sighash = crate::zip229::compute_transparent_sig_hash(
+            0,
+            &state.transparent_inputs,
+            &state.transparent_outputs,
+            &state.digests,
+            crate::zip229::NU6_3_BRANCH_ID,
+        );
+        assert_eq!(
+            hex::encode(sighash),
+            "03e328bb6a70c20bd803375f2da51bcd56d1e46fba7f6408752de160fc7234a5"
+        );
+    }
+
     #[test]
     fn rejects_a_signature_from_another_key() {
         let (_, pk, script) = key();

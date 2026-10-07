@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 import {
-	EPHEMERAL_GAP_LIMIT, decodeTexAddress, emptyTexState, encodeTransparentP2pkh, ephemeralPath,
+	EPHEMERAL_GAP_LIMIT, decodeTexAddress, emptyTexState, encodeTransparentP2pkh, ephemeralPath, hash160,
 	isTexAddress, p2pkhScript, parseTexState, pendingTexRecords, reserveEphemeral, texPayout,
 	texStateKey, texStep2Fee, updateTexRecord,
 } from './zcash-tex'
@@ -16,6 +16,13 @@ describe('TEX decoding (ZIP-320)', () => {
 		expect(encodeTransparentP2pkh(hash)).toBe(T1)
 		expect(p2pkhScript(hash)).toMatch(/^76a914[0-9a-f]{40}88ac$/)
 		expect(decodeTexAddress(TEX.toUpperCase())).toEqual(hash)
+	})
+
+	it('matches the firmware TEX fixture (librustzcash, all-x12 seed)', () => {
+		// zcash_tex_vectors.h: step-2 output script and the one-time key at m/44'/133'/0'/2/0.
+		expect(p2pkhScript(decodeTexAddress(TEX))).toBe('76a9148286bf790866805397e3a947640b77a43f0b43a588ac')
+		const ephemeralPubkey = Buffer.from('021dbfd8189e113def835a3f0eba3d41df5650f8391e37ab02b523ca567cdcadc1', 'hex')
+		expect(p2pkhScript(hash160(ephemeralPubkey))).toBe('76a9142875b160968fae11ca7fdd0174825c812f24f05688ac')
 	})
 
 	it('rejects a bad checksum, mixed case and testnet on mainnet', () => {
