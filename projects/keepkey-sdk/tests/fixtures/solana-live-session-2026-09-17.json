@@ -1,0 +1,92 @@
+{
+  "description": "Real Solana signing requests from a live dApp session (soltoshidice.wtf / Hash Holdem, 2026-09-17), with what each one actually did on mainnet. Expected risk levels are anchored to those on-chain outcomes, not to the risk code. See docs/clearsign-case-studies/2026-09-17-solana-signmessage-login.md.",
+  "signer": "Gu83nVMD8qh948D1vqe8UPoUHaFuSwcHrvNHetcM4Xux",
+  "addressN": [
+    2147483692,
+    2147484149,
+    2147483648,
+    2147483648
+  ],
+  "safety": "Every blockhash in these transactions expired within ~90 s of 2026-09-17 19:06 MDT, so re-signing them cannot produce a broadcastable transaction. Suites must use sign-transaction only, never sign-and-send.",
+  "cases": [
+    {
+      "name": "soltoshidice-login",
+      "apiLogId": 108386,
+      "kind": "message",
+      "payload": "U29sdG9zaGlESUNFIHdhbGxldApOZXR3b3JrOiBtYWlubmV0LWJldGE6Q3VUTHA3cERtTkdrRmdpNGFvaDhFZjFZU2pjMkJ6RUNRUkx6WXFhb1ZXQlI6NG5DbXB3bmU3aENvV1RTcEFkNTR1RU5tQ2dISnJIVHluNERNUENFTXB1bXAKU2Vzc2lvbjogY2E1ZWQ3YTgtNWRmMS00MWJmLTkxY2EtYzNkZTRjMWM1NmY2Ck5vbmNlOiAzN2M0MDY2Ny01NzZkLTQwNTQtOTA2NC02MTg2MTRhYjg4YzE=",
+      "expectLevel": "low",
+      "expectText": [
+        "You are signing a text message"
+      ],
+      "onChain": "n/a: login challenge. Note the Nonce is a constant across sessions (F12)."
+    },
+    {
+      "name": "hash-holdem-siws",
+      "apiLogId": 108754,
+      "kind": "message",
+      "payload": "c29sdG9zaGlkaWNlLnd0ZiB3YW50cyB5b3UgdG8gc2lnbiBpbiB3aXRoIHlvdXIgU29sYW5hIGFjY291bnQ6Ckd1ODNuVk1EOHFoOTQ4RDF2cWU4VVBvVUhhRnVTd2NIcnZOSGV0Y000WHV4CgpTaWduIGluIHRvIEhhc2ggSG9sZGVtLgoKVVJJOiBodHRwczovL3NvbHRvc2hpZGljZS53dGYKVmVyc2lvbjogMQpOb25jZTogOWQ5OTcyYTFmMmVkMGFhYTZhODZiZTY3MzQxMzllNjkKSXNzdWVkIEF0OiAyMDI2LTA5LTE4VDAxOjA0OjE4LjY4N1o=",
+      "expectLevel": "low",
+      "expectText": [
+        "You are signing a text message"
+      ],
+      "onChain": "n/a: SIWS sign-in with a fresh nonce."
+    },
+    {
+      "name": "soltoshidice-tx1",
+      "apiLogId": 108402,
+      "kind": "tx",
+      "payload": "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAYJ7Dl5pNxrQBvQRRcaGJ8mhW+rnqt1VgIU+XKy7cFkMA+LZzzaLik+AiCrPgHStY7QVcnBsnYt1RVhKxDKzW40NrgTPK+soJctzdQsxyxkxmokWe10HSLNM0pp7sZO3eosAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAg+JYP7kag/aX3JhxSBLr/9dbITv9zclr5W8RVNHvjowF02rdo/npIS0+fAcrrAThIR97VGw7P8fmeJwQ9+Dk5hH08KOLLv/nnxPfLbW1x5bwW1Qqm7U/+OurmoNbG6qQDBkZv5SEXMv/srbpyw5vnvIzlu8X3EmssQ5s6QAAAALDgivSk/PrRPvj8/Z3HCXXrb8LgSnx2YRVApRzV257QTQBKpt9xx9nI6TgJCP4k4JahDgt0ODAlVydCDyS4WCcCBwAFAjBXBQAIBwAGBAECBQMDE2tr",
+      "expectLevel": "high",
+      "expectText": [
+        "able to move your SOL or tokens"
+      ],
+      "onChain": "4CUN7Bii\u2026r7vn: user -0.00264152 SOL into a new account (rent)."
+    },
+    {
+      "name": "register-poker-tournament",
+      "apiLogId": 108426,
+      "kind": "tx",
+      "payload": "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAMF7Dl5pNxrQBvQRRcaGJ8mhW+rnqt1VgIU+XKy7cFkMA+SBSuyLMLvVQz9EGEI1MlPMqG9kd7zy9ZhLt6hHKwPl6Y7uSvSGri0hA8PAemDek6VnFE/45RVFzBlG83Ut0blAwZGb+UhFzL/7K26csOb57yM5bvF9xJrLEObOkAAAAD6i7mj/GndyNFb30gki6saw6J1Z/S55kobvO8xLhIbY4xiSIqbqZbckuOiNYzUip23axu1Rxj1/Xqq2y+NQrHuAgMABQLgkwQAAgMABAEIkVzQjkYeoSY=",
+      "expectLevel": "medium",
+      "expectText": [
+        "cannot move your SOL or tokens",
+        "You only pay the network fee"
+      ],
+      "onChain": "5ibnS5og\u2026CM57: fee only."
+    },
+    {
+      "name": "enter-poker-tournament",
+      "apiLogId": 108760,
+      "kind": "tx",
+      "payload": "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAYL7Dl5pNxrQBvQRRcaGJ8mhW+rnqt1VgIU+XKy7cFkMA8SheB/xXMu5ZIC8NnZz6PE5cL0+ZboF2OXndzp9GPOtJIFK7Iswu9VDP0QYQjUyU8yob2R3vPL1mEu3qEcrA+X6yS/JFhi7aS1IbKNRnwmCKpETc+wyjkUFJMCjqvQl2j8TaJY12piqmoMZB00zvwzyX8LlCTBZ44m7iW0xJt72jgngkHaA8cN0PyIX3rSEjutMrM6VAI0BzmviuXYTKzvRi7VYPgikW++mwY+JAw5bCiMBVvWRcLHmh4LrZ31YmSmO7kr0hq4tIQPDwHpg3pOlZxRP+OUVRcwZRvN1LdG5dYGiIfcl1ZePr3GpIuh3EgIlrbRUzOqy1dSV0dvC54T+ou5o/xp3cjRW99IJIurGsOidWf0ueZKG7zvMS4SG2MG3fbh7nWP3hhCXbzkbM3athr8TYO5DSf+vfko2KGL/GWIlmkQQYD34Y0ANKH4kE4xYcyCyUjyuaArBaJfEJHtAQcKAAkCCAEGAwQFCgmyTrrkDy0EBAA=",
+      "expectLevel": "high",
+      "expectText": [
+        "nobody can show you how much"
+      ],
+      "onChain": "4fdHkmL7\u2026: -10,000 4nCm\u2026pump via CPI Token-2022 TransferChecked."
+    },
+    {
+      "name": "authorize-session",
+      "apiLogId": 108799,
+      "kind": "tx",
+      "payload": "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAMG7Dl5pNxrQBvQRRcaGJ8mhW+rnqt1VgIU+XKy7cFkMA9RAS+mwyauUGfLcy++uAwgs1bYRKJcf0Ul/jg7aZzXI5+gozL5nAZjETjChwnAUfAQmnWnB1NncdEPZ4EYu/l3AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACmO7kr0hq4tIQPDwHpg3pOlZxRP+OUVRcwZRvN1LdG5dYGiIfcl1ZePr3GpIuh3EgIlrbRUzOqy1dSV0dvC54Tm/IE1cN/Wie7R6ETBuu5G3aXCkSSpSQSChjc6ttOfFECAwIAAQwCAAAAAC0xAQAAAAAEBAAFAgMwu9r7oWMoIiJRAS+mwyauUGfLcy++uAwgs1bYRKJcf0Ul/jg7aZzXI3KcrGoAAAAA",
+      "expectLevel": "high",
+      "expectText": [
+        "Sends 0.02 SOL to 6TD5\u2026T6kr.",
+        "Gives 6TD5\u2026T6kr permission to act for you"
+      ],
+      "onChain": "3XwHPEnT\u2026: 0.02 SOL -> 6TD5\u2026; 6TD5 then signed Act/Reveal* without KeepKey (F10)."
+    },
+    {
+      "name": "set-ready",
+      "apiLogId": 108805,
+      "kind": "tx",
+      "payload": "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAQG7Dl5pNxrQBvQRRcaGJ8mhW+rnqt1VgIU+XKy7cFkMA8SheB/xXMu5ZIC8NnZz6PE5cL0+ZboF2OXndzp9GPOtEYu1WD4IpFvvpsGPiQMOWwojAVb1kXCx5oeC62d9WJkpju5K9IauLSEDw8B6YN6TpWcUT/jlFUXMGUbzdS3RuXWBoiH3JdWXj69xqSLodxICJa20VMzqstXUldHbwueE/qLuaP8ad3I0VvfSCSLqxrDonVn9LnmShu87zEuEhtjKPzWlP+OgoVuVH+GwdxwvA5SdGHTJ55mQY2p9/07oeABAwUABAECBQlpTgeitae6KwE=",
+      "expectLevel": "medium",
+      "expectText": [
+        "You only pay the network fee"
+      ],
+      "onChain": "5q6Aexqe\u2026: fee only."
+    }
+  ]
+}

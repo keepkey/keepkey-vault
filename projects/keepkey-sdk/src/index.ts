@@ -20,6 +20,8 @@ import type {
   BnbSignTxParams,
   SolanaSignTxParams,
   SolanaSignOffchainMessageParams,
+  SolanaSignMessageParams,
+  SolanaMessageSignatureResult,
   SolanaOffchainMessageSignatureResult,
   TronSignTxParams,
   TronSignMessageParams,
@@ -557,6 +559,13 @@ export class KeepKeySdk {
       // Device confirmation can span several screens (schema-decoded args,
       // accounts, priority fee); the 30s default aborts mid-review.
       this.client.post('/solana/sign-transaction', params, this.client.signingTimeoutMs),
+
+    /**
+     * Sign raw Solana message bytes (dApp logins / `solana:signMessage`).
+     * Requires AdvancedMode on the device; see {@link SolanaSignMessageParams}.
+     */
+    solanaSignMessage: (params: SolanaSignMessageParams): Promise<SolanaMessageSignatureResult> =>
+      this.client.post('/solana/sign-message', params, this.client.signingTimeoutMs),
 
     /**
      * Sign a Solana off-chain message with domain separation. Firmware

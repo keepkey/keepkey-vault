@@ -2,8 +2,8 @@
 
 **Date**: 2026-05-16  
 **Branch**: `swapping-cleanup` (vault fixes already committed)  
-**Vault path**: `/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-vault/`  
-**Pioneer path**: `/Users/highlander/WebstormProjects/keepkey-stack/projects/pioneer/`
+**Vault path**: `keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-vault/`  
+**Pioneer path**: `keepkey-stack/projects/pioneer/`
 
 ---
 
@@ -146,7 +146,7 @@ If the vault sees `match === undefined` for an xpub, it could use `getCachedPubk
   - Legacy: `xpub6CXwXedtSY8ng1P8XULzYzFTJFujJamcKXaXDnBJzGYB7P56W1bkZLxeHmrAs9bmVgb9pbV9STMoiE6oyxs8DpvFuuYNKnxR4MrSM5aqgTp`
   - SegWit: `ypub6XKTae3tTEUCB6WaWVuHxJYYxoAw7uMthRrRrYSnnSvkFjksZfjG4igK1tvQRvejWVPjSrvU8DTPqkED6LRnxCwNkf77WPTD9xACU9REzDh`
   - NativeSegWit: `zpub6rXHd37fxCQN5Rn5cVtP64gg1xosZ5KA3jomifTN7dWKQCY64PSbDXT3ehyG5kWbQfVCmb5ZhjyvSDUYx1jvDrxtb2B7wvSjdgPsjWKYnwB`
-- Vault DB: `/Users/highlander/Library/Application Support/com.keepkey.vault/dev/vault.db`
+- Vault DB: `~/Library/Application Support/com.keepkey.vault/dev/vault.db`
 - Pioneer server: `https://api.keepkey.info` (reset from blue; use `make start` in pioneer dir)
 
 ---

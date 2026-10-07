@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 import { createHash, randomBytes } from 'crypto'
-import { analyzeEntropy, collectAndAnalyze, linearComplexity, LINEAR_COMPLEXITY_BITS, MAX_CHUNK_BYTES, toBits, verdictSummary } from './rng-audit'
+import { analyzeEntropy, collectAndAnalyze, collectAndAnalyzeWithGate, linearComplexity, LINEAR_COMPLEXITY_BITS, MAX_CHUNK_BYTES, toBits, verdictSummary } from './rng-audit'
 
 const sha = (b: Uint8Array) => createHash('sha256').update(b).digest('hex')
 const analyze = (b: Uint8Array) => analyzeEntropy(b, sha(b))
@@ -83,6 +83,32 @@ describe('RNG health testing', () => {
 })
 
 describe('entropy collection', () => {
+	it('keeps one emulator confirmation gate around the complete multi-chunk audit', async () => {
+		const events: string[] = []
+		const report = await collectAndAnalyzeWithGate(
+			async (size) => {
+				events.push(`entropy:${size}`)
+				return new Uint8Array(randomBytes(size))
+			},
+			2 * MAX_CHUNK_BYTES,
+			undefined,
+			async (run) => {
+				events.push('gate:start')
+				const result = await run()
+				events.push('gate:end')
+				return result
+			},
+		)
+
+		expect(events).toEqual([
+			'gate:start',
+			`entropy:${MAX_CHUNK_BYTES}`,
+			`entropy:${MAX_CHUNK_BYTES}`,
+			'gate:end',
+		])
+		expect(report.stats.bytes).toBe(2 * MAX_CHUNK_BYTES)
+	})
+
 	it('asks for the largest chunk and reports progress', async () => {
 		const asked: number[] = []
 		const progress: number[] = []

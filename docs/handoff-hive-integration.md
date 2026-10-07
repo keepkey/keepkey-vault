@@ -75,7 +75,7 @@ hiveSignTx: async (params) => {
 Also add to `src/shared/rpc-schema.ts` (request/response types).
 
 ### 3. Pioneer — Add Hive chain support
-**Repo**: `/Users/highlander/WebstormProjects/keepkey-stack/projects/pioneer`
+**Repo**: `keepkey-stack/projects/pioneer`
 **Reference**: `docs/coin-addition/coin-addition-guide.md` (UTXO-style but use Hive-specific values)
 
 Files to edit (in order):
@@ -209,7 +209,7 @@ The signed tx format is: `[ref_block_num(2)] [ref_block_prefix(4)] [expiration(4
 
 | Repo | Branch | Path |
 |---|---|---|
-| keepkey-vault-v11 | `feat/hive` | `/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11` (main tree) |
-| keepkey-vault-v11 | `feature/hive` | `/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11-hive` |
-| keepkey-firmware | `alpha` (Hive included) | `/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-firmware` |
-| pioneer | `release/v1.3.73` | `/Users/highlander/WebstormProjects/keepkey-stack/projects/pioneer` |
+| keepkey-vault-v11 | `feat/hive` | `keepkey-stack/projects/keepkey-vault-v11` (main tree) |
+| keepkey-vault-v11 | `feature/hive` | `keepkey-stack/projects/keepkey-vault-v11-hive` |
+| keepkey-firmware | `alpha` (Hive included) | `keepkey-stack/projects/keepkey-firmware` |
+| pioneer | `release/v1.3.73` | `keepkey-stack/projects/pioneer` |

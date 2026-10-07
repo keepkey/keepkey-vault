@@ -161,6 +161,7 @@ function OrbitalView({
 	totalUsd,
 	totalDollars,
 	totalCents,
+	partial,
 	cleanTokenTotal,
 	onSelect,
 	privateModeEnabled,
@@ -171,6 +172,8 @@ function OrbitalView({
 	totalUsd: number
 	totalDollars: number
 	totalCents: string
+	/** A chain could not be reached, so the total is a floor, not a figure. */
+	partial: boolean
 	cleanTokenTotal: number
 	onSelect: (c: ChainDef) => void
 	privateModeEnabled: boolean
@@ -257,7 +260,7 @@ function OrbitalView({
 								letterSpacing="-0.04em"
 								lineHeight="1"
 							>
-								${totalDollars.toLocaleString()}
+								{partial ? '≥ ' : ''}${totalDollars.toLocaleString()}
 							</Text>
 							<Text
 								fontSize={{ base: "20px", md: "24px" }}
@@ -596,7 +599,7 @@ function ChainDetailOrbital({
 					letterSpacing="-0.02em"
 					lineHeight="1"
 				>
-					{formatBalance(String(combinedBal))} {chain.symbol}
+					{!balance || balance.syncState === 'degraded' ? '—' : formatBalance(String(combinedBal))} {chain.symbol}
 				</Text>
 				{(nativeBalanceUsd + shielded.usd) > 0 && (
 					<Text fontSize="13px" color="var(--text-2)" fontWeight="400">
@@ -674,6 +677,9 @@ interface DashboardProps {
 	onForceRefreshConsumed?: () => void
 	/** True when using a hidden wallet — reports and some features are unavailable */
 	isHiddenWallet?: boolean
+	/** Seed generated during this session's setup: every balance is known to be 0.
+	 *  Rows still loading show 0 with a small spinner while the fetch confirms. */
+	knownEmpty?: boolean
 }
 
 const PIONEER_ERROR_GRACE_MS = 5 * 60 * 1000
@@ -690,7 +696,7 @@ function formatTimeAgo(ts: number, t: (key: string, opts?: Record<string, unknow
 	return t('timeDaysAgo', { count: days })
 }
 
-export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettings, firmwareVersion, firmwareVariant, forceRefresh, onForceRefreshConsumed, isHiddenWallet }: DashboardProps) {
+export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettings, firmwareVersion, firmwareVariant, forceRefresh, onForceRefreshConsumed, isHiddenWallet, knownEmpty }: DashboardProps) {
 	const { t } = useTranslation("dashboard")
 	const [selectedChain, setSelectedChain] = useState<ChainDef | null>(null)
 	const [selectedChainAction, setSelectedChainAction] = useState<"send" | "receive" | "swap" | "privacy" | undefined>(undefined)
@@ -1700,9 +1706,12 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 		return (
 			<>
 				<ActivityPage
+					key={`${watchOnly ? "watch" : "live"}:${watchOnlyDeviceId || "latest"}`}
 					defaultChainId={activityDefaultChain}
+					watchOnly={watchOnly}
+					watchOnlyDeviceId={watchOnlyDeviceId}
 					onBack={() => setShowActivityPage(false)}
-					onResumeSwap={(swap) => setActivityResumeSwap(swap)}
+					onResumeSwap={watchOnly ? undefined : (swap) => setActivityResumeSwap(swap)}
 				/>
 				<Suspense fallback={null}>
 					<LazySwapDialog
@@ -1725,7 +1734,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 		if (btc) {
 			return (
 				<AssetPageErrorBoundary onBack={() => {}} chainName={btc.coin}>
-					<AssetPage chain={btc} balance={balances.get('bitcoin')} onBack={() => {}} hideBack firmwareVersion={firmwareVersion} onViewActivity={handleViewActivity} watchOnly={watchOnly} isHiddenWallet={isHiddenWallet} />
+					<AssetPage chain={btc} balance={balances.get('bitcoin')} onBack={() => {}} hideBack firmwareVersion={firmwareVersion} onViewActivity={handleViewActivity} watchOnly={watchOnly} watchOnlyDeviceId={watchOnlyDeviceId} isHiddenWallet={isHiddenWallet} />
 				</AssetPageErrorBoundary>
 			)
 		}
@@ -1737,7 +1746,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 			<AssetPageErrorBoundary onBack={() => setSelectedChain(null)} chainName={selectedChain.coin}>
 				{/* key: remount on chain switch — AssetPage's mount-only effects (address
 				    derive, initial view) must not leak chain A state into chain B */}
-				<AssetPage key={selectedChain.id} chain={selectedChain} balance={bal} onBack={() => { setSelectedChain(null); setSelectedChainAction(undefined); setSelectedChainInitialToken(undefined) }} firmwareVersion={firmwareVersion} initialAction={selectedChainAction} initialToken={selectedChainInitialToken} onViewActivity={handleViewActivity} watchOnly={watchOnly} isHiddenWallet={isHiddenWallet} />
+				<AssetPage key={selectedChain.id} chain={selectedChain} balance={bal} onBack={() => { setSelectedChain(null); setSelectedChainAction(undefined); setSelectedChainInitialToken(undefined) }} firmwareVersion={firmwareVersion} initialAction={selectedChainAction} initialToken={selectedChainInitialToken} onViewActivity={handleViewActivity} watchOnly={watchOnly} watchOnlyDeviceId={watchOnlyDeviceId} isHiddenWallet={isHiddenWallet} />
 			</AssetPageErrorBoundary>
 		)
 	}
@@ -1817,7 +1826,12 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 							</Box>
 							<Box flex="1" minW="0">
 								<Text fontSize="14px" fontWeight="600" color="var(--text-0)" lineHeight="1.2">All Chains</Text>
-								{anyChainPending ? (
+								{anyChainPending && knownEmpty ? (
+									<Flex align="center" gap="1.5">
+										<Text fontSize="14px" color="var(--text-1)" fontWeight="500" lineHeight="1.3">{privateModeEnabled ? "••••••" : "$0"}</Text>
+										<Spinner size="xs" color="kk.gold" opacity={0.6} title="New wallet — confirming it is empty" />
+									</Flex>
+								) : anyChainPending ? (
 									<Spinner size="xs" color="kk.gold" mt="1" />
 								) : (
 									<Text
@@ -1942,8 +1956,8 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 										<Flex align="baseline" justify="space-between" gap="2" mt="0.5">
 											{pending ? (
 												<Flex align="center" gap="1.5">
-													<Spinner size="xs" color="kk.gold" />
-													<Text fontSize="12px" color="var(--text-2)" lineHeight="1.3">{chain.symbol}</Text>
+													<Text fontSize="12px" color="var(--text-2)" lineHeight="1.3">{knownEmpty ? `0 ${chain.symbol}` : chain.symbol}</Text>
+													<Spinner size="xs" color="kk.gold" opacity={knownEmpty ? 0.6 : 1} title={knownEmpty ? "New wallet — confirming it is empty" : undefined} />
 												</Flex>
 											) : unknown ? (
 												<Text
@@ -2710,6 +2724,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 									totalUsd={totalUsd}
 									totalDollars={totalDollars}
 									totalCents={totalCents}
+									partial={anyChainUnknown}
 									cleanTokenTotal={cleanTokenTotal}
 									onSelect={(c) => setDrilledChainId(c.id)}
 									privateModeEnabled={privateModeEnabled}
@@ -2761,6 +2776,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 										totalUsd={totalUsd}
 										totalDollars={totalDollars}
 										totalCents={totalCents}
+										partial={anyChainUnknown}
 										cleanTokenTotal={cleanTokenTotal}
 										onSelect={(c) => setDrilledChainId(c.id)}
 										privateModeEnabled={privateModeEnabled}

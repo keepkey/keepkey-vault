@@ -23,7 +23,7 @@ include .env
 export ELECTROBUN_DEVELOPER_ID ELECTROBUN_TEAMID ELECTROBUN_APPLEID ELECTROBUN_APPLEIDPASS
 endif
 
-.PHONY: install dev dev-hmr build build-stable build-canary build-signed prune-bundle dmg clean help vault sign-check verify verify-entitlements publish release upload-dmg upload-all-dmgs sign-release sign-release-intel verify-arch audit-macos-bundle submodules modules-install modules-build modules-clean audit build-zcash-cli build-zcash-cli-debug build-zcash-cli-intel test test-unit test-rest test-sign-gating test-zcash-cli test-emu build-intel build-signed-intel build-electrobun-x64-core build-electrobun-arm64-core prepare-electrobun-arm64-core publish-electrobun-x64-core build-electrobun-linux-x64-core publish-electrobun-linux-x64-core preflight build-emulator build-emulator-windows build-emulator-macos-release build-emulator-release clean-emulator test-emu-python
+.PHONY: clearsign-worker-test clearsign-worker-deploy install dev dev-hmr build build-stable build-canary build-signed patch-arm64-release-tar prune-bundle dmg clean help vault sign-check verify verify-entitlements publish release upload-dmg upload-all-dmgs sign-release sign-release-intel verify-arch audit-macos-bundle submodules modules-install modules-build modules-clean audit build-zcash-cli build-zcash-cli-debug build-zcash-cli-intel test test-unit test-rest test-sign-gating test-zcash-cli test-emu build-intel build-signed-intel build-electrobun-x64-core build-electrobun-arm64-core prepare-electrobun-arm64-core publish-electrobun-x64-core build-electrobun-linux-x64-core preflight build-emulator build-emulator-windows build-emulator-macos-release build-emulator-release clean-emulator test-emu-python
 
 # --- Submodules (auto-init on fresh worktrees/clones) ---
 
@@ -216,7 +216,7 @@ build-signed-intel:
 #   make publish-electrobun-x64-core
 # Then update X64_CORE_TAG in .github/workflows/build.yml to match.
 
-ELECTROBUN_X64_REPO ?= keepkey/keepkey-vault
+ELECTROBUN_X64_REPO ?= keepkey/electrobun
 # Tag format: electrobun-x64-core-vN — increment N when rebuilding
 ELECTROBUN_X64_TAG ?= electrobun-x64-core-v7
 
@@ -244,6 +244,7 @@ prepare-electrobun-arm64-core: install
 	ACTUAL_SHA=$$(shasum -a 256 "$$WORK/$$CORE_PATH" | awk '{print $$1}'); \
 	test "$$ACTUAL_SHA" = "$$CORE_SHA" || \
 		{ echo "ERROR: certified ARM64 Electrobun core hash mismatch"; exit 1; }; \
+	mkdir -p $(PROJECT_DIR)/node_modules/electrobun/dist-macos-arm64; \
 	tar xzf "$$WORK/$$CORE_PATH" \
 		-C $(PROJECT_DIR)/node_modules/electrobun/dist-macos-arm64
 
@@ -269,30 +270,12 @@ publish-electrobun-x64-core: build-electrobun-x64-core
 # resulting Linux Vault bundle works on Debian 12, Ubuntu 22.04, RHEL 9, etc.
 # Upstream's prebuilt core ships against glibc 2.38, which excludes those.
 #
-# Local invocation only works on an actual Ubuntu 22.04 host (or via
-# `make publish-electrobun-linux-x64-core` which runs the GH workflow).
-
-ELECTROBUN_LINUX_REPO ?= keepkey/keepkey-vault
-ELECTROBUN_LINUX_TAG ?= electrobun-linux-x64-core-v1
-# Pin to the upstream electrobun ref that matches the npm runtime version.
-ELECTROBUN_LINUX_REF ?= v1.13.1
+# Local invocation only works on an actual Ubuntu 22.04 host. CI builds it in
+# the linux-core job of build.yml; it is never published as a release.
 
 build-electrobun-linux-x64-core:
-	@echo "Building Electrobun Linux x64 core (must run on ubuntu-22.04)..."
-	ELECTROBUN_REF=$(ELECTROBUN_LINUX_REF) ./scripts/build-electrobun-linux-x64-core.sh
-
-# Triggers the GitHub workflow that builds + publishes on ubuntu-22.04.
-# Direct local publish isn't supported because the .so must be built on Linux.
-publish-electrobun-linux-x64-core:
-	@echo "Dispatching publish-electrobun-linux-x64-core.yml on $(ELECTROBUN_LINUX_REPO)..."
-	gh workflow run publish-electrobun-linux-x64-core.yml \
-		--repo $(ELECTROBUN_LINUX_REPO) \
-		--field electrobun_ref=$(ELECTROBUN_LINUX_REF) \
-		--field release_tag=$(ELECTROBUN_LINUX_TAG)
-	@echo "Watch progress: https://github.com/$(ELECTROBUN_LINUX_REPO)/actions/workflows/publish-electrobun-linux-x64-core.yml"
-	@echo ""
-	@echo "Once published, the main build workflow will pick it up automatically"
-	@echo "(see ELECTROBUN_LINUX_CORE_TAG in .github/workflows/build.yml)."
+	@echo "Building Electrobun Linux x64 core from the pinned submodule (must run on ubuntu-22.04)..."
+	./scripts/build-electrobun-linux-x64-core.sh
 
 # --- Vault ---
 
@@ -339,11 +322,21 @@ build-signed: sign-check
 	@rm -f $(ZCASH_CLI_STAMP) $(PROTO_BUILD_STAMP) $(HDWALLET_BUILD_STAMP) $(DEVICE_PROTOCOL_BUILD_STAMP)
 	@node scripts/verify-certified-emulator.mjs
 	$(MAKE) prepare-electrobun-arm64-core
-	$(MAKE) build-stable audit prune-bundle dmg
+	$(MAKE) build-stable audit prune-bundle
+	# Electrobun refreshes its downloaded core while packaging, so apply the
+	# certified macOS 13 helpers to the assembled app and re-sign it afterward.
+	$(MAKE) prepare-electrobun-arm64-core patch-arm64-release-tar dmg
 	@echo ""
 	@echo "=== Build complete ==="
 	@echo "DMG: $(PROJECT_DIR)/artifacts/$(DMG_NAME)"
 	@ls -lh $(PROJECT_DIR)/artifacts/$(DMG_NAME)
+
+patch-arm64-release-tar: sign-check
+	./scripts/patch-arm64-release-tar.sh \
+		"$(PROJECT_DIR)/artifacts/stable-macos-arm64-keepkey-vault.app.tar.zst" \
+		"$(PROJECT_DIR)/node_modules/electrobun/dist-macos-arm64" \
+		"$(PROJECT_DIR)/entitlements.plist" \
+		"$(MACOS_DEPLOYMENT_TARGET)"
 
 # Create a proper DMG from the fully-extracted app (workaround for Electrobun self-extractor bug)
 dmg: verify-arch
@@ -380,12 +373,25 @@ dmg: verify-arch
 	spctl --assess --type open --context context:primary-signature --verbose=4 "$$DMG_OUT"; \
 	echo "DMG ready: $$DMG_OUT"
 
+# --- ClearSign Worker ---
+
+clearsign-worker-test:
+	cd $(PROJECT_DIR) && bun test clearsign-worker/src
+
+# Production, outward-facing. The unit suite (which includes the Worker's)
+# gates the deploy. /health reports HEAD as the deployed source revision, so
+# a tree with uncommitted changes is refused.
+clearsign-worker-deploy: test-unit
+	@git diff --quiet && git diff --cached --quiet || { echo "clearsign-worker-deploy: uncommitted changes; commit or stash them so CLEARSIGN_SOURCE_REVISION matches the deployed code" >&2; exit 1; }
+	cd $(PROJECT_DIR) && wrangler deploy --config clearsign-worker/wrangler.toml --var CLEARSIGN_SOURCE_REVISION:$$(git rev-parse --short=9 HEAD)
+
 # --- Testing ---
 
 test: test-zcash-cli test-unit
 
 test-unit:
-	cd $(PROJECT_DIR) && bun test __tests__/evm-signer-verify.test.ts __tests__/evm-balance-fetch.test.ts __tests__/swap-parsing.test.ts __tests__/engine-state-machine.test.ts __tests__/device-switch.test.ts __tests__/wizard-messaging.test.ts __tests__/solana-tx.test.ts __tests__/solana-message-parser.test.ts __tests__/solana-instruction-decoder.test.ts __tests__/solana-alt.test.ts __tests__/solana-spl-decimals.test.ts __tests__/ton-build.test.ts __tests__/tron-memo-inject.test.ts __tests__/audit-coverage.test.ts __tests__/chain-scan.test.ts __tests__/pairing-pubkeys.test.ts __tests__/balance-display-state.test.ts __tests__/failed-fetch-not-zero.test.ts __tests__/advanced-mode-routing.test.ts __tests__/clearsign-provider-key.test.ts __tests__/firmware-clearsign-gate.test.ts __tests__/taproot-host.test.ts __tests__/solana-hdwallet-contract.test.ts __tests__/recovery-ownership.test.ts __tests__/evm-x402.test.ts __tests__/solana-x402.test.ts __tests__/patch-electrobun.test.ts __tests__/tx-watch.test.ts __tests__/signed-tx-registry.test.ts src/bun/emulator-library.test.ts src/bun/mcp.test.ts src/bun/rng-audit.test.ts src/shared/zcash-maturity.test.ts src/bun/zcash-capability.test.ts src/bun/zcash-sidecar-path.test.ts src/bun/txbuilder/utxo-zcash.test.ts src/bun/txbuilder/utxo-taproot.test.ts src/bun/txbuilder/hive-ops.test.ts src/bun/clearsign-studio.test.ts src/bun/solana-outflow.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/evm-signer-verify.test.ts __tests__/evm-balance-fetch.test.ts __tests__/swap-parsing.test.ts __tests__/engine-state-machine.test.ts __tests__/device-switch.test.ts __tests__/wizard-messaging.test.ts __tests__/update-safety.test.ts __tests__/solana-tx.test.ts __tests__/solana-message-parser.test.ts __tests__/solana-instruction-decoder.test.ts __tests__/solana-alt.test.ts __tests__/solana-spl-decimals.test.ts __tests__/ton-build.test.ts __tests__/tron-memo-inject.test.ts __tests__/audit-coverage.test.ts __tests__/chain-scan.test.ts __tests__/pairing-pubkeys.test.ts __tests__/balance-display-state.test.ts __tests__/failed-fetch-not-zero.test.ts __tests__/advanced-mode-routing.test.ts __tests__/solana-advanced-mode.test.ts __tests__/clearsign-provider-key.test.ts __tests__/firmware-clearsign-gate.test.ts __tests__/clearsign-risk.test.ts __tests__/taproot-host.test.ts __tests__/solana-hdwallet-contract.test.ts __tests__/recovery-ownership.test.ts __tests__/evm-x402.test.ts __tests__/solana-x402.test.ts __tests__/patch-electrobun.test.ts __tests__/tx-watch.test.ts __tests__/signed-tx-registry.test.ts src/bun/emulator-library.test.ts src/bun/mcp.test.ts src/bun/rng-audit.test.ts src/shared/zcash-maturity.test.ts src/bun/zcash-capability.test.ts src/bun/zcash-sidecar-path.test.ts src/bun/txbuilder/utxo-zcash.test.ts src/bun/txbuilder/utxo-taproot.test.ts src/bun/txbuilder/hive-ops.test.ts src/bun/clearsign-studio.test.ts src/bun/solana-outflow.test.ts src/bun/solana-certified-schema.test.ts __tests__/solana-certified-match.test.ts src/bun/solana-certified-registry.test.ts __tests__/solana-certified-routing.test.ts __tests__/solana-decode-risk.test.ts __tests__/solana-certified-copy.test.ts __tests__/solana-simulated-outflow.test.ts __tests__/evm-max-send.test.ts __tests__/tron-max-send.test.ts __tests__/tron-token-send-gates.test.ts src/bun/tron-preview.test.ts __tests__/arbitrum-broadcast.test.ts src/bun/wallet-session-cache.test.ts __tests__/pin-unlock-timeout.test.ts __tests__/firmware-authenticity-verdict.test.ts __tests__/app-phase.test.ts __tests__/flash-wipe.test.ts __tests__/webusb-recovery.test.ts src/bun/evm-certified-schema.test.ts src/bun/evm-certified-registry.test.ts src/bun/evm-runtime-metadata.test.ts src/bun/evm-schema-registry.test.ts __tests__/permit2-spender-name.test.ts src/bun/evm-signing-preview.test.ts src/bun/evm-presign-report.test.ts __tests__/transaction-effects.test.ts src/bun/uniswap-ur.test.ts __tests__/uniswap-ur-firmware-parity.test.ts src/bun/thor-swap-preview.test.ts src/shared/evmFeePreview.test.ts src/shared/acrossDeposit.test.ts src/bun/clearsign-review.test.ts src/shared/erc7730-support.test.ts src/bun/firmware-signature.test.ts __tests__/addressbook-clearsign.test.ts
+	$(MAKE) clearsign-worker-test
 	cd $(PROJECT_DIR) && bun src/bun/btc-backend/core.test.ts
 	# Script-style suites (own runner + process.exit — must NOT join the `bun test`
 	# list above, where the exit would cut the run short). cosmos.test.ts was green
@@ -449,6 +455,8 @@ EMU_INSTALL_DIR := $(HOME)/.keepkey/emulator
 # cannot exercise certified 7.16 flows and otherwise looks healthy until the
 # first certificate reaches the device.
 EMU_CLEARSIGN_ALPHA_ROOT ?= ON
+# Checked in the built library (7.16 compiles the root in with no CMake flag).
+CLEARSIGN_ALPHA_ROOT_PUBKEY := 02de9231b2094433235532fb1932e324a2c7304195e12e610c675cccbbd606dae7
 
 build-emulator:
 	@echo "=== Building emulator from current $(EMU_FW_DIR) checkout ==="
@@ -476,11 +484,13 @@ build-emulator:
 			-DNANOPB_PLUGIN="$$(command -v protoc-gen-nanopb)" \
 			-DCMAKE_C_FLAGS="-DPB_NO_PACKED_STRUCTS=1" \
 			-DCMAKE_CXX_FLAGS="-DPB_NO_PACKED_STRUCTS=1" && \
-		grep -qx 'KK_CLEARSIGN_ALPHA_ROOT:BOOL=$(EMU_CLEARSIGN_ALPHA_ROOT)' CMakeCache.txt || \
-			{ echo "ERROR: emulator ClearSign root configuration did not stick"; exit 1; }; \
 		make -j$$(sysctl -n hw.ncpu) kkemu kkemulator_dylib
 	mkdir -p $(EMU_INSTALL_DIR)
 	@if [ -f $(EMU_BUILD_DIR)/lib/libkkemu.dylib ]; then \
+		if [ "$(EMU_CLEARSIGN_ALPHA_ROOT)" = "ON" ]; then \
+			xxd -p $(EMU_BUILD_DIR)/lib/libkkemu.dylib | tr -d '\n' | grep -q $(CLEARSIGN_ALPHA_ROOT_PUBKEY) || \
+				{ echo "ERROR: emulator does not contain the ClearSign alpha root"; exit 1; }; \
+		fi; \
 		cp $(EMU_BUILD_DIR)/lib/libkkemu.dylib $(EMU_INSTALL_DIR)/libkkemu.dylib; \
 		codesign --force --sign - $(EMU_INSTALL_DIR)/libkkemu.dylib; \
 		echo "    Dylib:  $(EMU_INSTALL_DIR)/libkkemu.dylib (ad-hoc signed)"; \

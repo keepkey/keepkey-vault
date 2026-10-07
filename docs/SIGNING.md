@@ -158,9 +158,22 @@ SHA-256, and result. Signing and testing must refer to the same hash.
 3. Download every uploaded artifact again and compare SHA-256 with the tested
    local files.
 4. Confirm filenames and update manifests identify the correct architecture.
+   The Windows release artifact must be a directly runnable, Authenticode-signed
+   `KeepKey-Vault-<version>-win-x64-setup.exe`; multipart installers and ZIP-only
+   install flows fail the one-click release contract.
 5. Confirm release notes state the tested OS floor and architectures.
-6. Have a second operator review the evidence and approve publication.
-7. Publish the release, then test the public download once more.
+6. Have a second operator review the evidence and approve prerelease publication.
+7. Publish as a **prerelease**, never as Latest, for platform smoke testing. Verify
+   GitHub's `/releases/latest` endpoint still identifies the prior stable Vault
+   release and not this candidate or an auxiliary Electrobun-core release.
+8. Test the public prerelease downloads, including a version-pinned website
+   download for every platform. Windows must be one click from the downloaded
+   EXE; archive extraction is not an acceptable release flow.
+9. After the recorded platform gates pass, promote the immutable release with
+   `gh release edit v<VERSION> --repo keepkey/keepkey-vault --prerelease=false --latest`.
+   Do not rebuild or replace assets during promotion.
+10. Verify `/releases/latest` now resolves to the promoted `v<VERSION>`, then
+    download and hash-check the public assets once more.
 
 Release notes may claim only checks that were actually performed. Use distinct
 language for “signed/notarized,” “structurally audited,” and “runtime tested.”

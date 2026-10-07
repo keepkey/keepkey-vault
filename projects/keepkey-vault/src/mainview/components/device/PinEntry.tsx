@@ -4,13 +4,19 @@ import { useTranslation } from "react-i18next"
 import type { PinRequestType } from "../../../shared/types"
 import { KeepKeyUILogo } from "../logo/keepkey-ui"
 import { Z } from "../../lib/z-index"
+import { rpcRequest } from "../../lib/rpc"
+import { DOCS_LINKS } from "../../../shared/docs-links"
 
 interface PinEntryProps {
 	type?: PinRequestType
 	failed?: boolean
+	/** Device's Failure for the last PIN sent; code 7 = Failure_PinInvalid. */
+	errorDetail?: { code?: number; message?: string } | null
+	/** Bumps on every device PinMatrixRequest (new scramble). */
+	requestSeq?: number
 	onSubmit: (pin: string) => void
 	onCancel: () => void
-	onWipe?: () => void
+	onWipe?: () => Promise<void>
 }
 
 const TITLE_KEYS: Record<PinRequestType, string> = {
@@ -59,18 +65,22 @@ const PIN_ANIMATIONS = `
  * The device screen shows scrambled numbers; the user taps
  * position-based buttons (1-9) on this grid.
  */
-export function PinEntry({ type = "current", failed, onSubmit, onCancel, onWipe }: PinEntryProps) {
+export function PinEntry({ type = "current", failed, errorDetail, requestSeq, onSubmit, onCancel, onWipe }: PinEntryProps) {
 	const { t } = useTranslation("device")
 	const [pin, setPin] = useState("")
 	const [showError, setShowError] = useState(false)
 	const [showWipeConfirm, setShowWipeConfirm] = useState(false)
 	const [wipeAcknowledged, setWipeAcknowledged] = useState(false)
 	const [wiping, setWiping] = useState(false)
+	const [wipeError, setWipeError] = useState<string | null>(null)
 
 	// Show error banner when failed prop becomes true
 	useEffect(() => {
 		if (failed) setShowError(true)
 	}, [failed])
+
+	// The device re-scrambles on every PinMatrixRequest, so a partial entry is stale.
+	useEffect(() => { setPin("") }, [requestSeq])
 
 	// Reset pin when type changes (e.g. new-first -> new-second)
 	useEffect(() => {
@@ -82,7 +92,15 @@ export function PinEntry({ type = "current", failed, onSubmit, onCancel, onWipe 
 	const handleWipe = useCallback(async () => {
 		if (!onWipe) return
 		setWiping(true)
-		onWipe()
+		setWipeError(null)
+		try {
+			await onWipe()
+		} catch (e: any) {
+			console.error("wipeDevice from PIN:", e)
+			setWipeError(e?.message || String(e))
+		} finally {
+			setWiping(false)
+		}
 	}, [onWipe])
 
 	const handleDigit = useCallback((digit: string) => {
@@ -157,12 +175,28 @@ export function PinEntry({ type = "current", failed, onSubmit, onCancel, onWipe 
 						"0 0 0 1px rgba(233,196,106,0.22), 0 0 40px -6px rgba(233,196,106,0.18), 0 24px 60px -16px rgba(0,0,0,0.8), 0 4px 12px -4px rgba(0,0,0,0.5)",
 				}}
 			>
+				{/* Setting a PIN is two entries; users who skim miss that and get stuck. */}
+				{type !== "current" && (
+					<Flex justify="center" mb="3">
+						<Text fontSize="xs" fontWeight="700" letterSpacing="0.08em" textTransform="uppercase"
+							color="kk.gold" border="1px solid" borderColor="rgba(233,196,106,0.45)" borderRadius="full" px="3" py="1">
+							{t("pin.setupStep", { step: type === "new-first" ? 1 : 2 })}
+						</Text>
+					</Flex>
+				)}
 				<Text fontSize="xl" fontWeight="bold" mb="2" textAlign="center" color="kk.textPrimary">
 					{t(TITLE_KEYS[type])}
 				</Text>
-				<Text color="kk.textSecondary" fontSize="sm" mb="6" textAlign="center">
+				<Text color="kk.textSecondary" fontSize="sm" mb="2" textAlign="center">
 					{t(DESCRIPTION_KEYS[type])}
 				</Text>
+				{/* openUrl RPC: target="_blank" is a dead click in Electrobun. */}
+				<Flex justify="center" mb="5">
+					<Box as="button" type="button" fontSize="xs" color="kk.gold" textDecoration="underline"
+						onClick={() => rpcRequest("openUrl", { url: DOCS_LINKS.pinScrambled }).catch(() => {})}>
+						{t("pin.howPinWorks")}
+					</Box>
+				</Flex>
 
 				{!showWipeConfirm && (<>
 				{/* Incorrect PIN error banner */}
@@ -182,7 +216,9 @@ export function PinEntry({ type = "current", failed, onSubmit, onCancel, onWipe 
 							{t("pin.incorrectPin")}
 						</Text>
 						<Text fontSize="xs" color="kk.textSecondary" mt="1">
-							{t("pin.tryAgainDescription")}
+							{errorDetail?.code !== undefined && errorDetail.code !== 7 && errorDetail.message
+								? `Device: ${errorDetail.message}`
+								: t("pin.tryAgainDescription")}
 						</Text>
 					</Box>
 				)}
@@ -379,6 +415,16 @@ export function PinEntry({ type = "current", failed, onSubmit, onCancel, onWipe 
 								{wiping ? t("pin.wiping") : t("pin.wipeDevice")}
 							</Button>
 						</Flex>
+						{wiping && (
+							<Text fontSize="xs" color="kk.gold" mt="3">
+								{t("pin.wipeConfirmOnDevice")}
+							</Text>
+						)}
+						{wipeError && (
+							<Text fontSize="xs" color="kk.error" mt="3">
+								{t("pin.wipeFailed", { error: wipeError })}
+							</Text>
+						)}
 					</Box>
 				)}
 

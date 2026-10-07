@@ -290,6 +290,22 @@ export async function collectAndAnalyze(
 }
 
 /**
+ * Run a complete audit inside an optional transport gate. The emulator uses
+ * this to keep its reactive ButtonRequest handler installed across every
+ * entropy chunk. Gating individual chunks would repeatedly snapshot flash and
+ * leaves gaps where a firmware confirmation can strand the poll thread.
+ */
+export async function collectAndAnalyzeWithGate(
+  getEntropy: (size: number) => Promise<Uint8Array>,
+  totalBytes: number,
+  onProgress?: (collected: number, total: number) => void,
+  gate?: <T>(run: () => Promise<T>) => Promise<T>,
+): Promise<RngAuditReport> {
+  const run = () => collectAndAnalyze(getEntropy, totalBytes, onProgress)
+  return gate ? gate(run) : run()
+}
+
+/**
  * Berlekamp–Massey linear complexity over GF(2).
  *
  * Returns the length of the shortest LFSR that generates `bits`. This matters

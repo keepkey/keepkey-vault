@@ -892,24 +892,42 @@ New-Item -ItemType Directory -Path $ArtifactsDir | Out-Null
 # Build Installer EXE with Inno Setup
 # ============================================================================
 
-Write-Step "Downloading WebView2 bootstrapper (for Windows 10 support)"
+Write-Step "Downloading offline WebView2 runtime installer"
 
-$WebView2Bootstrapper = Join-Path $BuildDir "MicrosoftEdgeWebview2Setup.exe"
-if (-not (Test-Path $WebView2Bootstrapper)) {
-    $webview2Url = "https://go.microsoft.com/fwlink/p/?LinkId=2124703"
-    Write-Host "    Downloading from Microsoft..." -ForegroundColor Gray
+# Do not rely on the 1.8 MB Evergreen bootstrapper here. It can fail behind a
+# corporate proxy or when Edge Update is disabled, while returning control to
+# Inno Setup and leaving users with a successful-looking install that can only
+# display the splash screen. The x64 standalone installer is self-contained.
+$WebView2Installer = Join-Path $BuildDir "MicrosoftEdgeWebView2RuntimeInstallerX64.exe"
+if (-not (Test-Path $WebView2Installer)) {
+    $webview2Url = "https://go.microsoft.com/fwlink/?linkid=2124701"
+    Write-Host "    Downloading the Microsoft x64 standalone installer..." -ForegroundColor Gray
     try {
-        Invoke-WebRequest -Uri $webview2Url -OutFile $WebView2Bootstrapper -UseBasicParsing
-        $sizeKB = [math]::Round((Get-Item $WebView2Bootstrapper).Length / 1024)
-        Write-Success "Downloaded WebView2 bootstrapper: ${sizeKB} KB"
+        Invoke-WebRequest -Uri $webview2Url -OutFile $WebView2Installer -UseBasicParsing
     } catch {
         $errMsg = $_.Exception.Message
-        Write-Warning "Failed to download WebView2 bootstrapper: $errMsg"
-        Write-Warning "Windows 10 users may need to install WebView2 manually"
+        Remove-Item -LiteralPath $WebView2Installer -Force -ErrorAction SilentlyContinue
+        throw "Failed to download the required offline WebView2 runtime installer: $errMsg"
     }
 } else {
-    Write-Success "WebView2 bootstrapper already exists"
+    Write-Success "Offline WebView2 runtime installer already exists"
 }
+$webviewInfo = Get-Item $WebView2Installer
+if ($webviewInfo.Length -lt 50MB) {
+    throw "WebView2 offline installer is unexpectedly small ($($webviewInfo.Length) bytes): $WebView2Installer"
+}
+$webviewStream = [System.IO.File]::OpenRead($WebView2Installer)
+try {
+    $first = $webviewStream.ReadByte()
+    $second = $webviewStream.ReadByte()
+} finally {
+    $webviewStream.Dispose()
+}
+if ($first -ne 0x4D -or $second -ne 0x5A) {
+    throw "WebView2 offline installer is not a Windows executable: $WebView2Installer"
+}
+$sizeMB = [math]::Round($webviewInfo.Length / 1MB, 1)
+Write-Success "Verified offline WebView2 runtime installer: ${sizeMB} MB"
 
 # ============================================================================
 # Build Installer EXE with Inno Setup
@@ -978,6 +996,21 @@ $isccArgs = @(
     $IssFile
 )
 
+if (-not $SkipSign) {
+    $InnoSignScript = Join-Path $ScriptDir "sign-inno-file.ps1"
+    if (-not (Test-Path $InnoSignScript)) {
+        throw "Inno signing helper not found: $InnoSignScript"
+    }
+    # ISCC parses the /S value itself after PowerShell constructs argv. Literal
+    # quotes split the command into extra script arguments on Windows; Inno's
+    # $q placeholder preserves quotes until it invokes the signing command.
+    $innoSignCommand = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `$q$InnoSignScript`$q -SignToolPath `$q$SIGNTOOL`$q -Thumbprint `$q$Thumbprint`$q -FilePath `$f"
+    $isccArgs = @(
+        "/DEnableSigning=1",
+        "/Skeepkey=$innoSignCommand"
+    ) + $isccArgs
+}
+
 & $ISCC @isccArgs
 
 # Clean up staging
@@ -1003,29 +1036,14 @@ if (-not $SkipSign) {
     }
 }
 
-# ============================================================================
-# Package as .zip (Smart App Control-safe distribution)
-# ============================================================================
-# installer.iss sets UseSetupLdr=no, so Inno emits setup.exe + setup-*.bin
-# instead of a single self-extracting exe. That is deliberate: the normal
-# single-exe extracts an UNSIGNED setup.tmp engine to %TEMP% and runs it, which
-# Smart App Control blocks ("failed to initialize", Code Integrity 3077/3033).
-# With no loader there is no tmp -- SAC only sees the EV-signed setup.exe. Ship
-# the parts zipped; the user extracts and runs setup.exe. See
-# docs/WINDOWS-BUILD-AND-SIGN.md "Smart App Control".
-Write-Step "Packaging installer as .zip (Smart App Control-safe)"
-$installerParts = Get-ChildItem -Path $ArtifactsDir -File | Where-Object {
-    $_.Name -like "KeepKey-Vault-$Version-win-x64-setup*" -and ($_.Extension -eq '.exe' -or $_.Extension -eq '.bin')
+# A production build must be a single EXE. External .bin output would recreate
+# the ZIP UX failure and is therefore a hard release error.
+$installerBins = @(Get-ChildItem -Path $ArtifactsDir -Filter "KeepKey-Vault-$Version-win-x64-setup-*.bin" -File)
+if ($installerBins.Count -ne 0) {
+    throw "Installer is not single-file: ISCC emitted $($installerBins.Count) external .bin file(s)."
 }
-if (-not $installerParts) { throw "No installer parts (setup.exe/.bin) found to package" }
-$zipPath = Join-Path $ArtifactsDir "KeepKey-Vault-$Version-win-x64-setup.zip"
-Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
-Compress-Archive -Path $installerParts.FullName -DestinationPath $zipPath -CompressionLevel Optimal
-# Drop the loose parts so ONLY the .zip is uploaded — a bare setup.exe won't run
-# without its .bin siblings anyway, and leaving the SAC-blocked single exe around
-# invites shipping the broken artifact.
-$installerParts | Remove-Item -Force
-Write-Success "Created: $(Split-Path $zipPath -Leaf) ($([math]::Round((Get-Item $zipPath).Length / 1MB, 1)) MB)"
+if (-not (Test-Path $InstallerExe)) { throw "Single-file installer was not produced: $InstallerExe" }
+Write-Success "Single-file installer ready: $(Split-Path $InstallerExe -Leaf)"
 
 # ============================================================================
 # Generate Checksums
@@ -1076,8 +1094,8 @@ if (-not $SkipSign) {
     }
     Write-Host ""
     Write-Host "Next steps:" -ForegroundColor Yellow
-    Write-Host "  1. Test on a Smart App Control (Enforce) machine: extract the .zip, run setup.exe" -ForegroundColor Gray
-    Write-Host "  2. Upload the .zip (NOT a bare .exe) to the GitHub release" -ForegroundColor Gray
+    Write-Host "  1. Test the downloaded single EXE on a Smart App Control (Enforce) machine" -ForegroundColor Gray
+    Write-Host "  2. Upload the signed single EXE to the GitHub prerelease" -ForegroundColor Gray
     Write-Host "  3. Verify SmartScreen/Smart App Control does not block it" -ForegroundColor Gray
 } else {
     Write-Host "WARNING: Artifacts are NOT signed - test build only" -ForegroundColor Yellow

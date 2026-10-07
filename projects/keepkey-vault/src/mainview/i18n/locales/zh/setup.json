@@ -59,7 +59,7 @@
 		"listeningForBootloader": "正在监听引导程序模式下的设备...",
 		"readyDetectBootloader": "已准备好 — 检测引导程序",
 		"skipBootloaderUpdate": "跳过引导程序更新",
-		"verifyBackupHint": "KeepKey 设备上会要求您验证备份。我们将在更新后进行此操作——请按住按钮暂时跳过。",
+		"verifyBackupHint": "KeepKey 会询问您是否持有恢复短语，以防私钥被擦除。按住按钮即表示“是”并开始更新——只有在您已抄写好恢复短语时才确认。",
 		"followDirectionsOnDevice": "请按照设备上的指示操作",
 		"deviceWillGuide": "您的 KeepKey 将引导您完成更新过程。",
 		"bootloaderDetected": "已检测到引导加载程序模式",

@@ -4,6 +4,9 @@
  */
 import { pioneerEvmRpc, pioneerTokenMetadata } from './pioneer-evm'
 
+/** Arbitrum One sequencer RPC — used for gas estimates and broadcast (Pioneer's
+ * Arbitrum broadcaster reported success on rejected txs). */
+export const ARBITRUM_ONE_RPC = 'https://arb1.arbitrum.io/rpc'
 export const isPioneerEvmSource = (source: string): boolean => source.startsWith('eip155:')
 
 async function ethCall(rpcUrl: string, to: string, data: string): Promise<string> {

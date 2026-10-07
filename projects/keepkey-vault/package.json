@@ -1,6 +1,6 @@
 {
   "name": "keepkey-vault",
-  "version": "1.5.6",
+  "version": "1.6.1",
   "description": "KeepKey Vault - Desktop hardware wallet management powered by Electrobun",
   "scripts": {
     "dev": "bun scripts/bundle-backend.ts && vite build && bun scripts/collect-externals.ts && electrobun build && bun scripts/patch-bundle.ts && electrobun dev",
@@ -14,10 +14,13 @@
     "clearsign:worker:test": "bun test clearsign-worker/src/index.test.ts",
     "clearsign:worker:dev": "wrangler dev --config clearsign-worker/wrangler.toml",
     "clearsign:worker:deploy": "wrangler deploy --config clearsign-worker/wrangler.toml",
+    "clearsign:uniswap-provider": "bun scripts/uniswap-runtime-provider.ts",
+    "clearsign:verify-pioneer-signatures": "bun scripts/clearsign-verify-pioneer-signatures.ts",
     "start": "bun run dev",
     "postinstall": "bash scripts/patch-electrobun.sh"
   },
   "dependencies": {
+    "@ethersproject/signing-key": "5.8.0",
     "@chakra-ui/react": "^3.33.0",
     "@emotion/react": "^11.14.0",
     "@keepkey/device-protocol": "file:../../modules/device-protocol",

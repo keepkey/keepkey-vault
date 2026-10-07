@@ -59,7 +59,7 @@
 		"listeningForBootloader": "Aguardando dispositivo no modo bootloader...",
 		"readyDetectBootloader": "Estou pronto — Detectar Bootloader",
 		"skipBootloaderUpdate": "Pular atualização do bootloader",
-		"verifyBackupHint": "No KeepKey, será solicitado que você verifique o backup. Faremos isso após a atualização — segure o botão para pular por enquanto.",
+		"verifyBackupHint": "O KeepKey perguntará se você tem sua frase de recuperação caso as chaves privadas sejam apagadas. Segurar o botão responde sim e inicia a atualização — confirme apenas se você tiver sua frase de recuperação anotada.",
 		"followDirectionsOnDevice": "Siga as instruções no dispositivo",
 		"deviceWillGuide": "Seu KeepKey irá guiá-lo pelo processo de atualização.",
 		"bootloaderDetected": "Modo Bootloader detectado",

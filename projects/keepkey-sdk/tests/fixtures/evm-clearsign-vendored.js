@@ -63,6 +63,13 @@ function encodeFunction(signature, method, args) {
   return iface.functions[method].encode(normalized)
 }
 
+function encodeParameters(types, values) {
+  const coder = ethersPackage.AbiCoder
+    ? ethersPackage.AbiCoder.defaultAbiCoder()
+    : ethersPackage.utils.defaultAbiCoder
+  return coder.encode(types, values.map(normalizeAbiValue))
+}
+
 function uint256Word(value) {
   return Buffer.from(BigInt(value).toString(16).padStart(64, '0'), 'hex')
 }
@@ -87,6 +94,16 @@ function makeFlow({ key, protocol, category, method, signature, to, abiArgs, dis
   }
 }
 
+function makeRawFlow({ key, protocol, category, method, signature, to, calldata, displayArgs,
+  value = '0', chainId = 1, why, sources }) {
+  const normalized = calldata.toLowerCase().replace(/^0x/, '')
+  return {
+    key, protocol, category, chainId, to: to.toLowerCase().replace(/^0x/, ''), value,
+    selector: normalized.slice(0, 8), calldata: normalized, method, signature,
+    args: displayArgs, why, sources,
+  }
+}
+
 // Morpho Blue wstETH/WETH market 0xc54d…ec41, fetched from the official
 // Morpho API. Keeping the full tuple makes this a real, existing market shape.
 const MORPHO_MARKET = [
@@ -107,7 +124,66 @@ const packedSafeCall = `0x${Buffer.concat([
   usdcTransferBytes,
 ]).toString('hex')}`
 
+const LIVE_UNISWAP_ETH_USDC_INPUTS = [
+  encodeParameters(['address', 'uint256'], ['0x0000000000000000000000000000000000000002', 100000000000000n]),
+  encodeParameters(['address', 'uint256', 'uint256', 'address[]', 'bool', 'uint256[]'], [
+    '0x0000000000000000000000000000000000000001', 100000000000000n, 257170n, [WETH, USDC], false, [],
+  ]),
+  encodeParameters(['address', 'address', 'uint256'], [USDC, RECIPIENT, 257170n]),
+]
+
+const MAINNET_V4_POSITION_CALL = '0xdd46508f0000000000000000000000000000000000000000000000000000000000000040000000000000000000000000000000000000000000000000000000006a9f53b60000000000000000000000000000000000000000000000000000000000000380000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000000800000000000000000000000000000000000000000000000000000000000000003020d140000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000300000000000000000000000000000000000000000000000000000000000000600000000000000000000000000000000000000000000000000000000000000220000000000000000000000000000000000000000000000000000000000000028000000000000000000000000000000000000000000000000000000000000001a00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000faba6f8e4a5e8ab82f62fe7c39859fa577269be30000000000000000000000000000000000000000000000000000000000000bb8000000000000000000000000000000000000000000000000000000000000003c000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000152e80000000000000000000000000000000000000000000000000000000000015aa4000000000000000000000000000000000000000000000018bcf8f059e5e77df600000000000000000000000000000000000000000000000003a345cce75f7d2900000000000000000000000000000000000000000000006441dd1ae935f0bc7b000000000000000000000000e258d33f4a4c1af7000b6c498f9031462e1785190000000000000000000000000000000000000000000000000000000000000180000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000faba6f8e4a5e8ab82f62fe7c39859fa577269be3000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001'
+
 const flows = [
+  makeFlow({
+    key: 'uniswap-live-eth-usdc-universal-router',
+    protocol: 'Uniswap',
+    category: 'swaps',
+    method: 'execute',
+    signature: 'execute(bytes,bytes[],uint256)',
+    to: '0x23617e59a5925b2a4bf75d73ff6711cd0b29de85',
+    abiArgs: ['0x0b0804', LIVE_UNISWAP_ETH_USDC_INPUTS, 1800000000n],
+    value: '100000000000000',
+    displayArgs: [
+      stringArg('route', 'WRAP_ETH > V2_SWAP > SWEEP'),
+      tokenAmountArg('spend exactly', 100000000000000n, 18, 'ETH'),
+      tokenAmountArg('receive at least', 257170n, 6, 'USDC'),
+      stringArg('path', 'WETH > USDC'),
+      addressArg('recipient', RECIPIENT),
+      stringArg('payer', 'router balance after wrapping ETH'),
+      stringArg('deadline', '2027-01-15 08:00 UTC'),
+    ],
+    why: 'Live Uniswap web request captured through Vault: wraps the exact transaction value, executes an exact-input WETH/USDC v2 route, then sweeps no less than 0.257170 USDC to the recipient.',
+    sources: [
+      'https://github.com/Uniswap/universal-router/blob/main/contracts/libraries/Commands.sol',
+      'https://github.com/Uniswap/universal-router/releases/tag/v2.1.2',
+    ],
+  }),
+  makeRawFlow({
+    key: 'uniswap-mainnet-v4-eth-ondo-position-mint',
+    protocol: 'Uniswap',
+    category: 'liquidity',
+    method: 'modifyLiquidities',
+    signature: 'modifyLiquidities(bytes,uint256)',
+    to: '0xbd216513d74c8cf14cf4747e6aaa6420ff64ee9e',
+    calldata: MAINNET_V4_POSITION_CALL,
+    value: '262129949675060521',
+    displayArgs: [
+      stringArg('action', 'MINT_POSITION > SETTLE_PAIR > SWEEP'),
+      stringArg('pool', 'native ETH / ONDO; fee 3000; tick spacing 60'),
+      stringArg('tick range', '86760 to 88740'),
+      stringArg('liquidity', '456338755511283842550'),
+      tokenAmountArg('spend at most', 262129949675060521n, 18, 'ETH'),
+      tokenAmountArg('spend at most', 1849420386542208203899n, 18, 'ONDO'),
+      addressArg('position owner', '0xe258d33f4a4c1af7000b6c498f9031462e178519'),
+      stringArg('deadline', '1788826550 (expired replay)'),
+    ],
+    why: 'Byte-for-byte successful Ethereum mainnet v4 liquidity mint; the fixture displays both token maxima, pool/tick parameters, liquidity target, owner, action program and deadline.',
+    sources: [
+      'https://etherscan.io/tx/0xee15d43263bd1fb2be6f53eea2e32e660aaa024e4bc8a4510a9be868e9131819',
+      'https://github.com/Uniswap/v4-periphery/blob/main/src/PositionManager.sol',
+    ],
+  }),
   makeFlow({
     key: 'base-optimism-portal-deposit-eth',
     protocol: 'Base Bridge',

@@ -1,0 +1,79 @@
+[
+  {
+    "chainId": 10,
+    "name": "Optimism",
+    "requestPath": "../../docs/clearsign-case-studies/uniswap-usdt/evm-certificates/10-request.json",
+    "outputPath": "../../docs/clearsign-case-studies/uniswap-usdt/evm-certificates/10-certificate.json",
+    "messageHash": "926584297825db2ce61e67690a14bbf2e4ea829574379187afcc1a815df88ec2"
+  },
+  {
+    "chainId": 8453,
+    "name": "Base",
+    "requestPath": "../../docs/clearsign-case-studies/uniswap-usdt/evm-certificates/8453-request.json",
+    "outputPath": "../../docs/clearsign-case-studies/uniswap-usdt/evm-certificates/8453-certificate.json",
+    "messageHash": "47ae3eacb52f5395c8c326eacc69a9d6ea4aee1270deb0fdff56f1e490f92ffa"
+  },
+  {
+    "chainId": 137,
+    "name": "Polygon",
+    "requestPath": "../../docs/clearsign-case-studies/uniswap-usdt/evm-certificates/137-request.json",
+    "outputPath": "../../docs/clearsign-case-studies/uniswap-usdt/evm-certificates/137-certificate.json",
+    "messageHash": "b401e2f3d332e3237772cb14026d28d31e71a57ad4a60203878b289b79bc6563"
+  },
+  {
+    "chainId": 56,
+    "name": "BNB Smart Chain",
+    "requestPath": "../../docs/clearsign-case-studies/uniswap-usdt/evm-certificates/56-request.json",
+    "outputPath": "../../docs/clearsign-case-studies/uniswap-usdt/evm-certificates/56-certificate.json",
+    "messageHash": "fbb5f4d729fabe91e262bd8be66e47377bdcd09f3b1e44abb12b0be366de97c1"
+  },
+  {
+    "chainId": 43114,
+    "name": "Avalanche",
+    "requestPath": "../../docs/clearsign-case-studies/uniswap-usdt/evm-certificates/43114-request.json",
+    "outputPath": "../../docs/clearsign-case-studies/uniswap-usdt/evm-certificates/43114-certificate.json",
+    "messageHash": "2c2c96690860502673162db168cdc509eb55b6da3a735492c8f2f2792dd1fe92"
+  },
+  {
+    "chainId": 100,
+    "name": "Gnosis",
+    "requestPath": "../../docs/clearsign-case-studies/uniswap-usdt/evm-certificates/100-request.json",
+    "outputPath": "../../docs/clearsign-case-studies/uniswap-usdt/evm-certificates/100-certificate.json",
+    "messageHash": "3a2984b91619722ece99a05f0bb283ccd4a949e16ac8029686b5d0040c0a9309"
+  },
+  {
+    "chainId": 130,
+    "name": "Unichain",
+    "requestPath": "../../docs/clearsign-case-studies/uniswap-usdt/evm-certificates/130-request.json",
+    "outputPath": "../../docs/clearsign-case-studies/uniswap-usdt/evm-certificates/130-certificate.json",
+    "messageHash": "faf15a9919e499481bbbe9dc3a93bed49537261d55a6cd8ec3998e5c1a48f5c7"
+  },
+  {
+    "chainId": 5000,
+    "name": "Mantle",
+    "requestPath": "../../docs/clearsign-case-studies/uniswap-usdt/evm-certificates/5000-request.json",
+    "outputPath": "../../docs/clearsign-case-studies/uniswap-usdt/evm-certificates/5000-certificate.json",
+    "messageHash": "686864a63f3620920c01f8302d7d02a4824d753024f1c08019263e588fd64eb0"
+  },
+  {
+    "chainId": 42170,
+    "name": "Arbitrum Nova",
+    "requestPath": "../../docs/clearsign-case-studies/uniswap-usdt/evm-certificates/42170-request.json",
+    "outputPath": "../../docs/clearsign-case-studies/uniswap-usdt/evm-certificates/42170-certificate.json",
+    "messageHash": "ce0aced51d821a5cc2a565d65b508b2036e042dc9a397ead7f2285f2550cab32"
+  },
+  {
+    "chainId": 80094,
+    "name": "Berachain",
+    "requestPath": "../../docs/clearsign-case-studies/uniswap-usdt/evm-certificates/80094-request.json",
+    "outputPath": "../../docs/clearsign-case-studies/uniswap-usdt/evm-certificates/80094-certificate.json",
+    "messageHash": "39af43618259234304baf42de5e4806c05ca5ce4542b96132d0f3659f16d0f07"
+  },
+  {
+    "chainId": 81457,
+    "name": "Blast",
+    "requestPath": "../../docs/clearsign-case-studies/uniswap-usdt/evm-certificates/81457-request.json",
+    "outputPath": "../../docs/clearsign-case-studies/uniswap-usdt/evm-certificates/81457-certificate.json",
+    "messageHash": "834043c52d7c8863dae994260ef2d355f60568e0b3e7073539d3343c0fb9b8d1"
+  }
+]

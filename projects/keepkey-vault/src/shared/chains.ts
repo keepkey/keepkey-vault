@@ -380,6 +380,15 @@ export const CHAINS: ChainDef[] = CONFIGS.map(c => ({
   decimals: BaseDecimal[c.chain as keyof typeof BaseDecimal] ?? DECIMAL_FALLBACKS[c.chain] ?? 8,
 }))
 
+/** Display name + native symbol for an EVM chain id ("8453" or 8453), from
+ *  CHAINS — the one table the signing overlay, fee preview and REST audit
+ *  rows all read. Undefined for an id Vault has no built-in chain for. */
+export function evmChainLabel(chainId: number | string | undefined): { name: string; symbol: string } | undefined {
+  if (chainId === undefined || chainId === null || chainId === '') return undefined
+  const c = CHAINS.find(c => c.chainFamily === 'evm' && c.chainId === String(chainId))
+  return c ? { name: c.coin, symbol: c.symbol } : undefined
+}
+
 /** Resolve a chain from a real-time tx-push payload. Prefers `networkId`
  *  (CAIP-2, always present on SSE events); falls back to matching a CAIP-19
  *  string by its networkId prefix — token transfers carry a token caip like
@@ -470,4 +479,12 @@ export function customChainToChainDef(c: CustomChain): ChainDef {
     defaultPath: [0x8000002C, 0x8000003C, 0x80000000, 0, 0],
     chainId: String(c.chainId),
   }
+}
+
+/** Send intent, decided once from the asset the user picked: every native
+ *  asset CAIP is `…/slip44:…`, so any other CAIP is a TOKEN send. The UI and
+ *  every builder use this one rule — a token CAIP a builder can't resolve must
+ *  throw, never fall through to a native transfer (TRON ticket, 2026-09). */
+export function isTokenCaip(caip?: string): boolean {
+  return !!caip && !/\/slip44:/i.test(caip)
 }

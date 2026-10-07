@@ -1,5 +1,7 @@
 import { EventEmitter } from 'events'
 import { existsSync, readFileSync } from 'fs'
+import { classifyFirmwareImage, type EmbeddedBootloader, type FirmwareImageKind } from './firmware-image-kind'
+import { scanBundledImages, verifyFirmwareSignatures, type BundledImage } from './firmware-signature'
 import * as path from 'path'
 import * as core from '@keepkey/hdwallet-core'
 import { HIDKeepKeyAdapter } from '@keepkey/hdwallet-keepkey-nodehid'
@@ -10,7 +12,10 @@ import { HttpError } from './auth'
 import { isBitcoinOnlyVariant, DEFAULT_AUTO_LOCK_MS } from '../shared/flags'
 import type { DeviceStateInfo, ActiveTransport, UpdatePhase, DeviceState, FirmwareManifest, PinRequestType, Bip85DeriveParams, Bip85DisplayResult } from '../shared/types'
 import { resolveOndeviceFirmwareVersion } from '../shared/firmware-versions'
+import { flashWipeReason, type WipeReason } from '../shared/flash-wipe'
 import { EmulatorKeepKeyAdapter } from './emulator-transport'
+import { requestUnlock, isTransportTimeout, UNLOCK_TIMEOUT_MESSAGE } from './pin-unlock'
+import { forceReleaseWebUsb } from './webusb-recovery'
 import { getActiveFlashName, getEmulatorStatus } from './emulator'
 
 const KEEPKEY_VENDOR_ID = 0x2B24 // 11044
@@ -174,10 +179,14 @@ export class EngineController extends EventEmitter {
   private lastAcceptedCharSeq = -1
   private recoverySendInFlight = false
   private pinRequestCount = 0
+  /** True from sendPin until the device answers it — a Failure in that window is the PIN verdict. */
+  private pinAwaitingResult = false
   // Tracks whether promptPin() → getPublicKeys() is still awaiting resolution.
   // While active, sendPin/sendPassphrase must NOT call getFeatures — that would
   // race with the pending getPublicKeys and cause transport "Unexpected message".
   private promptPinActive = false
+  /** Set by the wipeDevice RPC; stops the PIN auto-prompt from racing the wipe. */
+  wipeInProgress = false
 
   get isSyncing(): boolean { return this.syncing }
   get isEmulator(): boolean { return this.activeTransport === 'emulator' }
@@ -231,6 +240,7 @@ export class EngineController extends EventEmitter {
     if (!this.wallet?.transport) return
     const transport = this.wallet.transport
     transport.removeAllListeners(String(core.Events.PIN_REQUEST))
+    transport.removeAllListeners(core.Events.FAILURE)
     transport.removeAllListeners(String(core.Events.BUTTON_REQUEST))
     transport.removeAllListeners(String(core.Events.PASSPHRASE_REQUEST))
     transport.removeAllListeners("80")
@@ -252,6 +262,18 @@ export class EngineController extends EventEmitter {
       }
       console.log(`[Engine] PIN_REQUEST → type=${type} (count=${this.pinRequestCount}, setup=${this.setupInProgress})`)
       this.emit('pin-request', { type })
+    })
+
+    // Any Failure the device sends right after we sent a PIN is the device's
+    // verdict on that PIN — surface it, whichever call owned the transport.
+    // Failure_PinInvalid = 7 (device-protocol types.proto).
+    transport.on(core.Events.FAILURE, (ev: any) => {
+      const code = ev?.message?.code
+      const message = ev?.message?.message
+      console.warn(`[Engine] Device FAILURE code=${code} message="${message}" (pinAwaitingResult=${this.pinAwaitingResult}, state=${this.lastState})`)
+      if (!this.pinAwaitingResult) return
+      this.pinAwaitingResult = false
+      this.emit('pin-error', { code, message })
     })
 
     transport.on(String(core.Events.BUTTON_REQUEST), () => {
@@ -387,6 +409,7 @@ export class EngineController extends EventEmitter {
 
   private updateState(state: DeviceState) {
     this.lastState = state
+    if (state !== 'needs_pin') this.pinAwaitingResult = false
     console.log(`[Engine] State → ${state}`)
 
     // Reconnect detection: if the device reaches ready with a cached passphrase
@@ -480,30 +503,31 @@ export class EngineController extends EventEmitter {
         this.updatePhase = 'idle'
         this.emit('state-change', this.getDeviceState())
       }
-      setTimeout(() => {
+      const autoPrompt = (): void => {
         this.promptPin().catch(err => {
           console.warn('[Engine] Auto prompt-pin failed (expected if PIN flow interrupts):', err?.message)
+          // A timeout leaves the transport unusable; retrying would just
+          // reshow the PIN grid with no pending request. Tell the user.
+          if (isTransportTimeout(err)) {
+            this.lastError = UNLOCK_TIMEOUT_MESSAGE
+            this.updateState('error')
+            return
+          }
           // If device is still locked (wrong PIN, transport error, etc.), retry so
           // the PIN overlay re-appears.  Without this, promptPinActive stays false,
           // lastState is already 'needs_pin', and updateState won't re-fire —
           // leaving the user with no PIN overlay while the device still needs PIN.
-          if (this.lastState === 'needs_pin' && !this.promptPinActive) {
-            // Notify UI that the PIN attempt failed (wrong PIN entered)
-            if (this.pinRequestCount > 0) {
-              console.log('[Engine] PIN attempt failed — notifying UI')
-              this.emit('pin-error', {})
+          // Keep retrying for as long as the device stays locked — every wrong
+          // PIN lands here. Never while a wipe owns the transport.
+          setTimeout(() => {
+            if (this.lastState === 'needs_pin' && !this.promptPinActive && !this.wipeInProgress) {
+              console.log('[Engine] Retrying prompt-pin (device still locked)')
+              autoPrompt()
             }
-            setTimeout(() => {
-              if (this.lastState === 'needs_pin' && !this.promptPinActive) {
-                console.log('[Engine] Retrying prompt-pin (device still locked)')
-                this.promptPin().catch(err2 => {
-                  console.warn('[Engine] Retry prompt-pin failed:', err2?.message)
-                })
-              }
-            }, 3000)
-          }
+          }, 3000)
         })
-      }, delay)
+      }
+      setTimeout(autoPrompt, delay)
     }
 
     // Same for needs_passphrase — device has passphrase protection but PIN is
@@ -630,6 +654,22 @@ export class EngineController extends EventEmitter {
   }
 
   /** Return the active channel entry (beta when alpha opt-in, else latest). */
+  private bundledImagesCache?: Map<string, BundledImage>
+  /** Bundled release images by full-file hash, signatures checked once. */
+  private bundledImages(): Map<string, BundledImage> {
+    return this.bundledImagesCache ??= scanBundledImages(getBundledFirmwareDir())
+  }
+
+  /** Signature status of a release Desktop would install. Undefined unless the
+   *  file ships in the bundle: a download is checked when it is fetched, not here. */
+  private installTarget(ref?: { version: string; url: string }): { version: string; signed: boolean } | undefined {
+    if (!ref) return undefined
+    for (const image of this.bundledImages().values()) {
+      if (image.relPath === ref.url) return { version: ref.version, signed: image.signed }
+    }
+    return undefined
+  }
+
   private getChannelEntry(): FirmwareManifest['latest'] | null {
     if (!this.manifest) return null
     if (this.alphaFirmware && this.manifest.beta) return this.manifest.beta
@@ -723,6 +763,8 @@ export class EngineController extends EventEmitter {
     firmwareVerified?: boolean
     bootloaderVerified?: boolean
     firmwareRelease?: string
+    bootloaderRelease?: string
+    firmwareSignaturesVerified?: boolean
   } {
     const fwHash = base64ToHex(features?.firmwareHash)
     const blHash = base64ToHex(features?.bootloaderHash)
@@ -739,11 +781,17 @@ export class EngineController extends EventEmitter {
       firmwareVerified = !!firmwareRelease && OFFICIAL_RELEASE_TAG.test(firmwareRelease)
     }
 
+    let bootloaderRelease: string | undefined
     if (blHash && this.manifest?.hashes) {
-      bootloaderVerified = blHash in (this.manifest.hashes.bootloader || {})
+      bootloaderRelease = this.manifest.hashes.bootloader?.[blHash]
+      bootloaderVerified = !!bootloaderRelease
     }
 
-    return { firmwareHash: fwHash, bootloaderHash: blHash, firmwareVerified, bootloaderVerified, firmwareRelease }
+    // The device hash is the full-file hash, so a bundled match names the exact
+    // file — and that file's signatures are checkable here.
+    const firmwareSignaturesVerified = fwHash && this.bundledImages().get(fwHash)?.signed === true ? true : undefined
+
+    return { firmwareHash: fwHash, bootloaderHash: blHash, firmwareVerified, bootloaderVerified, firmwareRelease, bootloaderRelease, firmwareSignaturesVerified }
   }
 
   // ── State Sync (called on USB attach + startup) ────────────────────────
@@ -1080,6 +1128,12 @@ export class EngineController extends EventEmitter {
         if (this.lastState === 'disconnected') {
           this.updateState('connected_unpaired')
         }
+        // A previous wallet dropped with a transfer still pending leaves this
+        // (cached) device half-open; release it or pairing loops forever.
+        if (webUsbDevice.opened) {
+          console.warn('[Engine] WebUSB device already open before pairing — releasing stale handle')
+          await forceReleaseWebUsb(webUsbDevice)
+        }
         console.log('[Engine] WebUSB device found, attempting pairRawDevice...')
         try {
           const wallet = await withTimeout(
@@ -1098,7 +1152,7 @@ export class EngineController extends EventEmitter {
           console.warn('[Engine] WebUSB pair failed:', lastError)
           // Close the raw USB device so its `opened` flag resets — without this,
           // the next retry sees opened=true and throws "already-connected".
-          try { await webUsbDevice.close() } catch (_) {}
+          await forceReleaseWebUsb(webUsbDevice)
           if (isPermissionError(lastError)) {
             permissionDenied = true
             console.warn('[Engine] WebUSB open denied (likely missing udev rules), trying HID...')
@@ -1559,6 +1613,10 @@ export class EngineController extends EventEmitter {
       firmwareVerified: hashes.firmwareVerified,
       firmwareRelease: hashes.firmwareRelease,
       bootloaderVerified: hashes.bootloaderVerified,
+      bootloaderRelease: hashes.bootloaderRelease,
+      firmwareSignaturesVerified: hashes.firmwareSignaturesVerified,
+      installFirmware: this.installTarget(this.getChannelEntry()?.firmware),
+      installBootloader: this.installTarget(this.getChannelEntry()?.bootloader),
       error: this.lastError,
       isEmulator: this.activeTransport === 'emulator',
       isHiddenWallet: this.hiddenWalletActive,
@@ -1942,13 +2000,15 @@ export class EngineController extends EventEmitter {
     // standard wallet derived earlier this session). Every subsequent
     // GetPublicKey/GetAddress — including "view address on device" — then shows the
     // wrong wallet until a physical reconnect power-cycles the device and clears the
-    // cache. ClearSession drops the cached seed + passphrase + PIN over USB, so the
-    // device re-prompts and re-derives from the correct seed with no reconnect needed.
-    // Skipped on the emulator: a ClearSession right after ApplySettings can leave a
+    // cache. Initialize drops the cached seed + passphrase (firmware
+    // session_clear(false)) but keeps the PIN, so the device re-derives from the
+    // correct seed and asks only for the passphrase. ClearSession would also drop
+    // the PIN, and the user entered the PIN once for ApplySettings and again here.
+    // Skipped on the emulator: a reset right after ApplySettings can leave a
     // stale ButtonAck in the ring buffer (emulators reconnect for clean state).
     if (opts.usePassphrase !== undefined && this.activeTransport !== 'emulator') {
-      await this.wallet.clearSession()
-      // Session is now empty — the device will re-prompt for PIN/passphrase. Drop our
+      await this.wallet.initialize()
+      // Seed + passphrase are gone — the device will re-prompt for the passphrase. Drop our
       // session classification so it's re-established on re-entry (sendPassphrase sets
       // hiddenWalletActive; deriveState routes through needs_pin → needs_passphrase).
       this.passphraseSetThisSession = false
@@ -1993,19 +2053,16 @@ export class EngineController extends EventEmitter {
    * The transport PIN_REQUEST event will fire, prompting the UI overlay.
    */
   async promptPin() {
-    if (!this.wallet) throw new Error('No device connected')
+    if (!this.wallet?.transport) throw new Error('No device connected')
     // getPublicKeys accesses the seed → triggers PinMatrixRequest on locked device.
     // It also triggers PASSPHRASE_REQUEST if passphrase protection is enabled.
     // Both are resolved via transport event handlers (sendPin/sendPassphrase).
     // While this promise is pending, sendPin/sendPassphrase must NOT call
     // getFeatures — that would race with getPublicKeys and cause FAILURE.
     this.promptPinActive = true
-    const promise = this.wallet.getPublicKeys([{
-      addressNList: [0x8000002C, 0x80000000, 0x80000000], // m/44'/0'/0'
-      curve: 'secp256k1',
-      showDisplay: false,
-      coin: 'Bitcoin',
-    }])
+    // Not wallet.getPublicKeys(): it uses a 5 s timeout, shorter than the
+    // firmware's post-failure PIN lockout wait (see pin-unlock.ts).
+    const promise = requestUnlock(this.wallet.transport)
     try {
       await promise
       // getPublicKeys completed — PIN (and passphrase if needed) were provided.
@@ -2025,8 +2082,15 @@ export class EngineController extends EventEmitter {
     }
   }
 
+  /** Re-issue the PIN prompt after something else (a failed wipe) cancelled it. */
+  repromptPin() {
+    if (this.lastState === 'needs_pin') this.updateState('needs_pin')
+  }
+
   async sendPin(pin: string) {
     if (!this.wallet) throw new Error('No device connected')
+    console.log(`[Engine] sendPin (pinRequests=${this.pinRequestCount}, promptPinActive=${this.promptPinActive})`)
+    this.pinAwaitingResult = true
     await this.wallet.sendPin(pin)
     // Don't call getFeatures if another operation owns the transport:
     // - setupInProgress: reset/recover is still running
@@ -2240,9 +2304,13 @@ export class EngineController extends EventEmitter {
     isDowngrade: boolean
     isSameVersion: boolean
     willWipeDevice: boolean
+    wipeReason?: WipeReason
     isBitcoinOnly: boolean
+    imageKind: FirmwareImageKind
+    embeddedBootloader?: EmbeddedBootloader
   } {
     const fileSize = data.length
+    const { kind: imageKind, embeddedBootloader } = classifyFirmwareImage(data, this.manifest?.hashes?.bootloader || {})
     const hasKpkyHeader = data.length >= 256
       && data[0] === 0x4B && data[1] === 0x50
       && data[2] === 0x4B && data[3] === 0x59 // "KPKY"
@@ -2251,40 +2319,27 @@ export class EngineController extends EventEmitter {
     const payload = hasKpkyHeader ? data.subarray(256) : data
     const payloadHash = sha256Hex(payload)
 
-    // Signed detection: KPKY header sigindex bytes at offsets 8-10.
-    // sigindex1 > 0 means at least one signature slot is filled → signed.
-    let headerSigned = false
-    if (hasKpkyHeader) {
-      headerSigned = data[8] !== 0 || data[9] !== 0 || data[10] !== 0
-    }
+    // Signed = the header's three signatures verify against KeepKey's release
+    // keys, as the bootloader checks them. Filled signature slots are not
+    // enough: a test-key build fills them too, and the official bootloader
+    // treats it as unsigned (and wipes the device crossing that boundary).
+    const headerSigned = hasKpkyHeader && verifyFirmwareSignatures(new Uint8Array(data))
 
-    // Manifest lookup — provides version AND confirms official release
-    let manifestSigned = false
+    // Manifest lookup — version label only. The manifest hash skips the
+    // header that holds the signatures, so it cannot vouch for them.
     let manifestVersion: string | null = null
 
     if (this.manifest?.hashes) {
       const fwVersion = this.manifest.hashes.firmware?.[payloadHash]
-      if (fwVersion) {
-        manifestSigned = true
-        manifestVersion = fwVersion.replace(/^v/, '')
-      } else {
-        // Also check full-file hash (bootloader format)
-        const fullHash = sha256Hex(data)
-        const blVersion = this.manifest.hashes.bootloader?.[fullHash]
-        if (blVersion) {
-          manifestSigned = true
-          manifestVersion = blVersion.replace(/^v/, '')
-        }
-      }
+      if (fwVersion) manifestVersion = fwVersion.replace(/^v/, '')
     }
 
-    // Combined: signed if header has signatures OR manifest recognizes the hash
-    const isSigned = headerSigned || manifestSigned
+    const isSigned = headerSigned
 
     // Version detection: manifest version is authoritative.
     // Fallback: scan binary for "VERSION" marker followed by semver pattern.
     // KeepKey firmware embeds "VERSION7.10.0" (no space) as a string constant.
-    let detectedVersion = manifestVersion
+    let detectedVersion = manifestVersion ?? embeddedBootloader?.version ?? null
     if (!detectedVersion) {
       const versionPattern = /VERSION(\d+\.\d+\.\d+)/
       // Search in the payload as a string (ASCII-safe scan)
@@ -2306,31 +2361,40 @@ export class EngineController extends EventEmitter {
     // Use resolved BL version (hash→version from manifest) when raw features lack it
     const deviceBootloaderVersion = this.getDeviceState().bootloaderVersion || this.cachedFeatures?.bootloaderVersion || null
 
-    // In bootloader mode, extractVersion() returns the BL version (not FW).
-    // The pre-existing firmware version is not available in bootloader mode.
+    // In bootloader mode, extractVersion() returns the BL version (not FW), but
+    // the bootloader still reports the INSTALLED firmware's hash (usb_flash.c
+    // handler_initialize, same meta+app hash as firmware mode), so the release
+    // table names it. An unrecognized hash stays unknown — never a guess.
     let currentFirmwareVersion: string | null = null
+    let currentFirmwareVerified: boolean | undefined
     if (this.cachedFeatures && !isBootloaderMode) {
       currentFirmwareVersion = this.extractVersion(this.cachedFeatures)
       if (currentFirmwareVersion === '0.0.0') currentFirmwareVersion = null
+      currentFirmwareVerified = this.verifyHashes(this.cachedFeatures).firmwareVerified
+    } else if (this.cachedFeatures) {
+      const installed = resolveOndeviceFirmwareVersion(base64ToHex(this.cachedFeatures.firmwareHash))
+      if (installed) {
+        currentFirmwareVersion = installed.match(/^v?(\d+\.\d+\.\d+)/)?.[1] ?? null
+        currentFirmwareVerified = OFFICIAL_RELEASE_TAG.test(installed)
+      }
     }
-
-    const currentFirmwareVerified = this.cachedFeatures && !isBootloaderMode
-      ? this.verifyHashes(this.cachedFeatures).firmwareVerified : undefined
 
     // Version comparison (only meaningful when we know both versions)
     let isDowngrade = false
     let isSameVersion = false
-    if (detectedVersion && currentFirmwareVersion) {
+    // Firmware images only: an updater's version is the BOOTLOADER's.
+    if (imageKind === 'firmware' && detectedVersion && currentFirmwareVersion) {
       isSameVersion = detectedVersion === currentFirmwareVersion
       isDowngrade = this.versionLessThan(detectedVersion, currentFirmwareVersion)
     }
 
-    // Crossing the signed/unsigned boundary in EITHER direction wipes the device.
-    // In bootloader mode we can't know the previous firmware state, so we can't determine this.
-    const willWipeDevice = !isBootloaderMode && (
-      (!isSigned && currentFirmwareVerified === true) ||   // signed → unsigned
-      (isSigned && currentFirmwareVerified === false)      // unsigned → signed
-    )
+    // Crossing the signed/unsigned boundary in EITHER direction wipes the device
+    // (bootloader should_restore). A downgrade wipes too: the older firmware
+    // finds a newer storage format at boot and resets it (owner policy: a
+    // downgrade wiping is expected; say so plainly). Unknown installed
+    // firmware claims neither.
+    const wipeReason = flashWipeReason({ isSigned, currentFirmwareVerified, isDowngrade })
+    const willWipeDevice = wipeReason !== undefined
 
     return {
       isSigned,
@@ -2345,7 +2409,12 @@ export class EngineController extends EventEmitter {
       isDowngrade,
       isSameVersion,
       willWipeDevice,
+      wipeReason,
       isBitcoinOnly,
+      imageKind,
+      // An official bootloader inside an updater that does not itself verify
+      // could be a decoy copy; only a signed updater vouches for it.
+      embeddedBootloader: embeddedBootloader && { ...embeddedBootloader, official: embeddedBootloader.official && headerSigned },
     }
   }
 

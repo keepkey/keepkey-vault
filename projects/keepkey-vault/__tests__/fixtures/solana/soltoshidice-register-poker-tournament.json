@@ -1,0 +1,13 @@
+{
+  "rawTxBase64": "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAMF7Dl5pNxrQBvQRRcaGJ8mhW+rnqt1VgIU+XKy7cFkMA817GNtAZonrOM7u5oSi9ecwNT1rzkG6Mxks0aIpfly5KY7uSvSGri0hA8PAemDek6VnFE/45RVFzBlG83Ut0blAwZGb+UhFzL/7K26csOb57yM5bvF9xJrLEObOkAAAAD6i7mj/GndyNFb30gki6saw6J1Z/S55kobvO8xLhIbY1ObYeLECYoW2AMom7hAgsuFCdFnLwzGc5cGqcMzWB/NAgMABQLgkwQAAgMABAEIkVzQjkYeoSY=",
+  "expected": {
+    "program": "CBuVrPT34qFWJ7vdTNK2cKzpnKkmnc9ZQwuS2oiFYpkt",
+    "instructionIndex": 1,
+    "discriminatorHex": "915cd08e461ea126",
+    "accounts": [
+      "Gu83nVMD8qh948D1vqe8UPoUHaFuSwcHrvNHetcM4Xux",
+      "Hs2VtY9dYU1RsXPn7aJt49pF2MiVh4KAzQq8Eu82BmWa",
+      "4dVfvTns1Sp7PNMoAsr63gEYzm4YLcbNC94ahzZ2r4iw"
+    ]
+  }
+}

@@ -6,6 +6,7 @@ import { IS_MAC, IS_WINDOWS } from "../lib/platform"
 import type { FirmwareAnalysis, FirmwareProgress } from "../../shared/types"
 import { FirmwareUpgradePreview } from "./FirmwareUpgradePreview"
 import { useDeviceState } from "../hooks/useDeviceState"
+import { requiresBackupConfirmation } from "../lib/update-safety"
 import holdAndConnectRaw from "../assets/svg/hold-and-connect.svg?raw"
 
 /**
@@ -35,6 +36,7 @@ export function FirmwareDropZone() {
 	const [error, setError] = useState<string | null>(null)
 	const [warningAcknowledged, setWarningAcknowledged] = useState(false)
 	const [wipeAcknowledged, setWipeAcknowledged] = useState(false)
+	const [backupConfirmed, setBackupConfirmed] = useState(false)
 	const dragCounter = useRef(0)
 	const phaseRef = useRef(phase)
 	phaseRef.current = phase
@@ -46,6 +48,10 @@ export function FirmwareDropZone() {
 	// moment the user finishes entering bootloader mode.
 	const deviceState = useDeviceState()
 	const inBootloader = deviceState.bootloaderMode === true
+	// An interrupted upload wipes the seed. Flashing happens in bootloader mode,
+	// which can't report whether a wallet exists, so this fails closed (only a
+	// device with no firmware on flash skips it).
+	const needsBackupConfirm = requiresBackupConfirmation(deviceState, null)
 
 	// Listen for firmware progress — only react when THIS component initiated the flash (C1 fix)
 	useEffect(() => {
@@ -199,6 +205,7 @@ export function FirmwareDropZone() {
 		// Never start a flash unless the device is actually in bootloader mode —
 		// otherwise firmwareErase hangs the HID read and looks like a freeze.
 		if (!inBootloader) return
+		if (needsBackupConfirm && !analysis?.willWipeDevice && !backupConfirmed) return
 		setPhase("flashing")
 		setProgress({ percent: 0, message: "Starting firmware flash..." })
 		try {
@@ -209,7 +216,7 @@ export function FirmwareDropZone() {
 			setError(err?.message || "Firmware flash failed")
 			setPhase("error")
 		}
-	}, [fileDataB64, inBootloader])
+	}, [fileDataB64, inBootloader, needsBackupConfirm, analysis, backupConfirmed])
 
 	const handleDismiss = useCallback(() => {
 		setPhase("idle")
@@ -220,6 +227,7 @@ export function FirmwareDropZone() {
 		setProgress(null)
 		setWarningAcknowledged(false)
 		setWipeAcknowledged(false)
+		setBackupConfirmed(false)
 	}, [])
 
 	// Don't render anything when idle and not dragging
@@ -363,7 +371,8 @@ export function FirmwareDropZone() {
 									<path d="M16 7V5a4 4 0 0 0-8 0v2" />
 								</svg>
 								<Text fontSize="md" fontWeight="700" color="kk.textPrimary">
-									Flash Firmware
+									{analysis.imageKind === "bootloader-updater" ? "Update Bootloader"
+										: analysis.imageKind === "firmware" ? "Flash Firmware" : "Not Flashable"}
 								</Text>
 							</Flex>
 							<Text fontSize="xs" color="kk.textSecondary" fontFamily="mono">
@@ -400,6 +409,20 @@ export function FirmwareDropZone() {
 											BITCOIN-ONLY
 										</Box>
 									)}
+									{analysis.imageKind !== "firmware" && (
+										<Box
+											px="2" py="0.5"
+											borderRadius="md"
+											fontSize="xs"
+											fontWeight="700"
+											letterSpacing="0.05em"
+											bg="rgba(168,239,210,0.12)"
+											color="var(--teal-2)"
+										>
+											{analysis.imageKind === "bootloader-updater" ? "BOOTLOADER UPDATER"
+												: analysis.imageKind === "raw-bootloader" ? "RAW BOOTLOADER" : "UNKNOWN IMAGE"}
+										</Box>
+									)}
 									{analysis.hasKpkyHeader && (
 										<Text fontSize="xs" color="kk.textSecondary">KPKY header detected</Text>
 									)}
@@ -429,6 +452,24 @@ export function FirmwareDropZone() {
 													)}
 												</Flex>
 											</Flex>
+											{/* The bootloader reports the installed firmware's hash; the
+											    release table names it when it's a known build. */}
+											{analysis.currentFirmwareVersion && (
+												<Flex justify="space-between" mb="2">
+													<Text fontSize="xs" color="kk.textSecondary">Installed firmware</Text>
+													<Flex align="center" gap="1.5">
+														<Text fontSize="sm" fontWeight="600" color="kk.textPrimary" fontFamily="mono">
+															v{analysis.currentFirmwareVersion}
+														</Text>
+														{analysis.currentFirmwareVerified === true && (
+															<Box as="span" color="var(--teal)" fontSize="xs">(official)</Box>
+														)}
+														{analysis.currentFirmwareVerified === false && (
+															<Box as="span" color="var(--gold)" fontSize="xs">(unofficial)</Box>
+														)}
+													</Flex>
+												</Flex>
+											)}
 										</>
 									) : (
 										<Flex justify="space-between" mb="2">
@@ -447,11 +488,27 @@ export function FirmwareDropZone() {
 										</Flex>
 									)}
 									<Flex justify="space-between" align="center">
-										<Text fontSize="xs" color="kk.textSecondary">Flashing to</Text>
+										<Text fontSize="xs" color="kk.textSecondary">
+											{analysis.imageKind === "firmware" ? "Flashing to" : "Bootloader in image"}
+										</Text>
 										<Text fontSize="sm" fontWeight="600" color="kk.gold" fontFamily="mono">
 											v{analysis.detectedVersion || "?.?.?"}
 										</Text>
 									</Flex>
+									{analysis.embeddedBootloader && (
+										<Flex justify="space-between" align="center" mt="2">
+											<Text fontSize="xs" color="kk.textSecondary">Bootloader hash</Text>
+											<Flex align="center" gap="1.5">
+												<Text fontSize="xs" color="kk.textSecondary" fontFamily="mono">
+													{analysis.embeddedBootloader.hash.slice(0, 16)}...
+												</Text>
+												<Box as="span" fontSize="xs" fontWeight="700"
+													color={analysis.embeddedBootloader.official ? "var(--teal)" : "var(--rose)"}>
+													{analysis.embeddedBootloader.official ? "official release" : "NOT an official release"}
+												</Box>
+											</Flex>
+										</Flex>
+									)}
 									{analysis.isSameVersion && (
 										<Text fontSize="xs" color="kk.textSecondary" mt="1">
 											Same version as currently installed
@@ -481,7 +538,7 @@ export function FirmwareDropZone() {
 						</Box>
 
 						{/* ── Release notes for this firmware version ── */}
-						{analysis.detectedVersion && (
+						{analysis.imageKind === "firmware" && analysis.detectedVersion && (
 							<Box mx="6" mb="3">
 								<FirmwareUpgradePreview
 									currentVersion={analysis.currentFirmwareVersion}
@@ -507,9 +564,17 @@ export function FirmwareDropZone() {
 										<line x1="12" y1="17" x2="12.01" y2="17" />
 									</svg>
 									<Text fontSize="sm" fontWeight="800" color="var(--rose)" textTransform="uppercase" letterSpacing="0.05em">
-										THIS WILL WIPE THE DEVICE
+										{analysis.wipeReason === "downgrade" ? "This downgrade will wipe the device" : "THIS WILL WIPE THE DEVICE"}
 									</Text>
 								</Flex>
+								{analysis.wipeReason === "downgrade" ? (
+								<Text fontSize="sm" color="var(--rose)" lineHeight="1.6" mb="3">
+									You are installing <Text as="span" fontWeight="700">v{analysis.detectedVersion}</Text> over{" "}
+									<Text as="span" fontWeight="700">v{analysis.currentFirmwareVersion}</Text>. Older firmware cannot read the
+									newer wallet storage, so when it starts, your KeepKey <Text as="span" fontWeight="700">erases all keys and
+									settings</Text>. To use this wallet again you will restore it from your recovery phrase.
+								</Text>
+								) : (
 								<Text fontSize="sm" color="var(--rose)" lineHeight="1.6" mb="3">
 									You are crossing the <Text as="span" fontWeight="700">signed/unsigned firmware boundary</Text>.
 									{analysis.isSigned
@@ -519,6 +584,7 @@ export function FirmwareDropZone() {
 									{' '}This transition requires a full device wipe — <Text as="span" fontWeight="700">all keys and
 									settings will be permanently erased</Text>.
 								</Text>
+								)}
 								<Text fontSize="sm" color="var(--rose)" lineHeight="1.6" mb="3">
 									Make sure you have your recovery seed backed up before proceeding.
 								</Text>
@@ -554,8 +620,62 @@ export function FirmwareDropZone() {
 							</Box>
 						)}
 
+						{/* ── Not flashable here: a raw bootloader would be written where firmware lives ── */}
+						{(analysis.imageKind === "raw-bootloader" || analysis.imageKind === "unknown") && (
+							<Box mx="6" mb="3" p="4" bg="rgba(229,62,62,0.1)" border="1px solid" borderColor="var(--rose)" borderRadius="lg">
+								<Text fontSize="sm" fontWeight="700" color="var(--rose)" mb="2">
+									{analysis.imageKind === "raw-bootloader" ? "Raw bootloader image" : "Unrecognized image"}
+								</Text>
+								<Text fontSize="sm" color="kk.textSecondary" lineHeight="1.6">
+									{analysis.imageKind === "raw-bootloader"
+										? "The firmware updater would write this into the firmware area, not the bootloader. Bootloaders are installed with their bootloader updater (blupdater.bin)."
+										: "This is not a KeepKey firmware image or bootloader updater, so it cannot be flashed."}
+								</Text>
+							</Box>
+						)}
+
+						{/* ── Bootloader updater: replaces the bootloader, permanently ── */}
+						{analysis.imageKind === "bootloader-updater" && (
+							<Box
+								mx="6" mb="3" p="4"
+								bg={analysis.embeddedBootloader?.official ? "rgba(237,137,54,0.1)" : "rgba(229,62,62,0.1)"}
+								border="1px solid"
+								borderColor={analysis.embeddedBootloader?.official ? "var(--gold)" : "var(--rose)"}
+								borderRadius="lg"
+							>
+								<Text fontSize="sm" fontWeight="700" mb="2"
+									color={analysis.embeddedBootloader?.official ? "var(--gold)" : "var(--rose)"}>
+									{analysis.embeddedBootloader?.official ? "Bootloader update" : "Unofficial bootloader"}
+								</Text>
+								<Text fontSize="sm" color="kk.textSecondary" lineHeight="1.6" mb="3">
+									This is not firmware. It runs once and replaces the device's bootloader
+									{analysis.embeddedBootloader?.version ? ` with v${analysis.embeddedBootloader.version}` : ""}, then
+									asks you to reconnect so you can install firmware.
+									{analysis.embeddedBootloader?.official
+										? " The bootloader is an official KeepKey release."
+										: " This bootloader is not an official KeepKey release: afterwards the device trusts only its signing keys, so official firmware will show as unofficial. Vault cannot restore the official bootloader. Use only on a test device."}
+								</Text>
+								<Flex as="label" align="center" gap="2" cursor="pointer" userSelect="none"
+									onClick={() => setWarningAcknowledged(!warningAcknowledged)}>
+									<Box w="18px" h="18px" borderRadius="sm" border="2px solid"
+										borderColor={warningAcknowledged ? "var(--rose)" : "kk.textSecondary"}
+										bg={warningAcknowledged ? "var(--rose)" : "transparent"}
+										display="flex" alignItems="center" justifyContent="center" flexShrink={0}>
+										{warningAcknowledged && (
+											<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+												<polyline points="20 6 9 17 4 12" />
+											</svg>
+										)}
+									</Box>
+									<Text fontSize="xs" fontWeight="600" color="kk.textSecondary">
+										I understand this permanently replaces the bootloader
+									</Text>
+								</Flex>
+							</Box>
+						)}
+
 						{/* ── SINGLE WARNING: Unsigned firmware (developer only) ── */}
-						{!analysis.isSigned && !analysis.willWipeDevice && (
+						{analysis.imageKind === "firmware" && !analysis.isSigned && !analysis.willWipeDevice && (
 							<Box
 								mx="6" mb="3" p="4"
 								bg="rgba(237,137,54,0.1)"
@@ -607,6 +727,40 @@ export function FirmwareDropZone() {
 									</Text>
 								</Flex>
 							</Box>
+						)}
+
+						{/* ── Recovery phrase confirmation (the wipe acknowledgement above already covers it) ── */}
+						{needsBackupConfirm && !analysis.willWipeDevice && (
+							<Flex
+								as="label"
+								mx="6" mb="3"
+								align="center"
+								gap="2"
+								cursor="pointer"
+								userSelect="none"
+								onClick={() => setBackupConfirmed(!backupConfirmed)}
+							>
+								<Box
+									w="18px" h="18px"
+									borderRadius="sm"
+									border="2px solid"
+									borderColor="kk.gold"
+									bg={backupConfirmed ? "kk.gold" : "transparent"}
+									display="flex"
+									alignItems="center"
+									justifyContent="center"
+									flexShrink={0}
+								>
+									{backupConfirmed && (
+										<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="black" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+											<polyline points="20 6 9 17 4 12" />
+										</svg>
+									)}
+								</Box>
+								<Text fontSize="xs" fontWeight="600" color="kk.textPrimary">
+									I have my recovery phrase written down. If the flash is interrupted, the wallet on this KeepKey is erased and can only be restored from it.
+								</Text>
+							</Flex>
 						)}
 
 						{/* ── GATE: device must be in bootloader mode to flash ── */}
@@ -671,15 +825,22 @@ export function FirmwareDropZone() {
 								onClick={handleFlash}
 								disabled={
 									!inBootloader
+									|| (analysis.imageKind !== "firmware" && analysis.imageKind !== "bootloader-updater")
+									|| (analysis.imageKind === "bootloader-updater" && !warningAcknowledged)
 									|| (analysis.willWipeDevice && !wipeAcknowledged)
 									|| (!analysis.isSigned && !analysis.willWipeDevice && !warningAcknowledged)
+									|| (needsBackupConfirm && !analysis.willWipeDevice && !backupConfirmed)
 								}
 							>
 								{!inBootloader
 									? "Enter bootloader mode first"
-									: analysis.willWipeDevice
-										? "Wipe & Flash"
-										: `Flash ${analysis.detectedVersion || "Firmware"}`}
+									: analysis.imageKind === "bootloader-updater"
+										? `Install Bootloader ${analysis.detectedVersion || ""}`.trim()
+										: analysis.imageKind !== "firmware"
+											? "Cannot flash"
+											: analysis.willWipeDevice
+												? "Wipe & Flash"
+												: `Flash ${analysis.detectedVersion || "Firmware"}`}
 							</Button>
 						</Flex>
 					</Box>

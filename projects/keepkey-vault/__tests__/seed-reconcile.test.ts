@@ -14,7 +14,7 @@
  *                             wallets never persist seed_eth_<id> (privacy), so
  *                             the stored identity is the standard wallet's and
  *                             MATCHES once the device returns to it.
- *  - passphrase toggle:       applySettings+clearSession changes the effective
+ *  - passphrase toggle:       applySettings+Initialize changes the effective
  *                             seed but reset only the engine's fingerprint and
  *                             identity, never the managers.
  *

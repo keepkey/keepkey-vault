@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { buildUtxoTx } from './utxo'
+import { buildUtxoTx, filterPositiveValueUtxos } from './utxo'
 
 const BITCOIN = {
 	id: 'bitcoin',
@@ -37,6 +37,12 @@ const taprootUtxo = () => ({
 })
 
 describe('Taproot transaction building', () => {
+	it('never selects zero-satoshi protocol outputs as ordinary UTXOs', () => {
+		const ddCarrier = { txid: 'dd', vout: 0, value: '0', scriptType: 'p2tr' }
+		const feeCoin = { txid: 'dgb', vout: 1, value: '10000000', scriptType: 'p2wpkh' }
+		expect(filterPositiveValueUtxos([ddCarrier, feeCoin])).toEqual([feeCoin])
+	})
+
 	it('spends P2TR inputs and returns change to the BIP86 account', async () => {
 		const tx = await buildUtxoTx(pioneerWith([taprootUtxo()]), BITCOIN, {
 			to: TO,

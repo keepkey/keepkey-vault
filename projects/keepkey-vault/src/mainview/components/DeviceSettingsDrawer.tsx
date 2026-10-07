@@ -14,6 +14,7 @@ import { isBitcoinOnlyVariant } from "../../shared/flags"
 import { SelfHostNodePanel } from "./SelfHostNodePanel"
 import { ClearSignStudio } from "./ClearSignStudio"
 import { RngAuditPanel } from "./RngAuditPanel"
+import { BROWSER_AGENT_PROMPT, BROWSER_EXTENSION_URL, BROWSER_AGENT_DOCS_URL } from "../../shared/browser-agent-prompt"
 
 interface DevicePolicy {
 	policyName?: string
@@ -169,7 +170,8 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 	const [removePinConfirm, setRemovePinConfirm] = useState(false)
 	const [togglingPassphrase, setTogglingPassphrase] = useState(false)
 	const [togglingPolicy, setTogglingPolicy] = useState("")
-	const [appSettings, setAppSettings] = useState<AppSettings>({ restApiEnabled: false, pioneerApiBase: '', pioneerServers: [], activePioneerServer: '', fiatCurrency: 'USD', numberLocale: 'en-US', walletConnectEnabled: false, bip85Enabled: false, zcashPrivacyEnabled: false, hiveEnabled: false, emulatorEnabled: false, offlineMode: false, btcNodeEnabled: false, btcNodeType: 'blockbook', btcNodeUrl: '', btcOnboardingShown: false, preReleaseUpdates: false, alphaFirmware: false, privateModeEnabled: false })
+	const [browserPromptStatus, setBrowserPromptStatus] = useState("")
+	const [appSettings, setAppSettings] = useState<AppSettings>({ restApiEnabled: false, pioneerApiBase: '', pioneerServers: [], activePioneerServer: '', fiatCurrency: 'USD', numberLocale: 'en-US', walletConnectEnabled: false, bip85Enabled: false, zcashPrivacyEnabled: false, hiveEnabled: false, emulatorEnabled: false, offlineMode: false, btcNodeEnabled: false, btcNodeType: 'blockbook', btcNodeUrl: '', btcOnboardingShown: false, preReleaseUpdates: false, alphaFirmware: false, addressBookClearsignEnabled: false, privateModeEnabled: false, passphraseIntroShown: false, evmSimulationRpcUrls: {} })
 	const [togglingRestApi, setTogglingRestApi] = useState(false)
 	const [windowFocusState, setWindowFocusState] = useState<{ refs: number; alwaysOnTop: boolean } | null>(null)
 	const [releasingWindowFocus, setReleasingWindowFocus] = useState(false)
@@ -190,6 +192,10 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 	const [resetting, setResetting] = useState(false)
 	const [clearSignStudioOpen, setClearSignStudioOpen] = useState(false)
 	const [rngAuditOpen, setRngAuditOpen] = useState(false)
+	const [simulationChainId, setSimulationChainId] = useState('1')
+	const [simulationRpcUrl, setSimulationRpcUrl] = useState('')
+	const [savingSimulationRpc, setSavingSimulationRpc] = useState(false)
+	const [simulationRpcMessage, setSimulationRpcMessage] = useState<{ ok: boolean; text: string } | null>(null)
 	const panelRef = useRef<HTMLDivElement>(null)
 
 	// Fetch device features + app settings when drawer opens
@@ -213,6 +219,9 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 	useEffect(() => onRpcMessage('window-focus-changed', (state) => setWindowFocusState(state)), [])
 
 	useEffect(() => { setLabel(deviceState.label || "") }, [deviceState.label])
+	useEffect(() => {
+		setSimulationRpcUrl(appSettings.evmSimulationRpcUrls?.[simulationChainId] || '')
+	}, [appSettings.evmSimulationRpcUrls, simulationChainId])
 	useEffect(() => { if (!open) { setWipeConfirm(false); setRemovePinConfirm(false); setResetConfirm(false) } }, [open])
 
 	// Escape key closes drawer
@@ -226,6 +235,18 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 	useEffect(() => { if (open) panelRef.current?.focus() }, [open])
 
 	// ── Handlers ────────────────────────────────────────────────────
+	const saveSimulationRpc = useCallback(async () => {
+		setSavingSimulationRpc(true); setSimulationRpcMessage(null)
+		try {
+			const result = await rpcRequest<AppSettings>('setEvmSimulationRpc', {
+				chainId: Number(simulationChainId), url: simulationRpcUrl.trim(),
+			}, 10000)
+			setAppSettings(result)
+			setSimulationRpcMessage({ ok: true, text: simulationRpcUrl.trim() ? 'Verified and saved.' : 'Custom endpoint removed.' })
+		} catch (error: any) {
+			setSimulationRpcMessage({ ok: false, text: error?.message || 'Endpoint validation failed.' })
+		} finally { setSavingSimulationRpc(false) }
+	}, [simulationChainId, simulationRpcUrl])
 
 	const saveLabel = useCallback(async () => {
 		if (!label.trim()) return
@@ -1642,10 +1663,47 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 						</VStack>
 					</Section>
 
+					{/* ── Browser use — needs the REST API, so only shown once it is on ── */}
+					{appSettings.restApiEnabled && <Section title="Browser use" defaultOpen={false}>
+						<Box>
+							<Text fontSize="sm" color="kk.textSecondary">
+								Use your existing Chrome profile with an agent. Install and pair the extension, enable its Agent Mode, then paste this prompt into your local agent. The prompt contains no credentials.
+							</Text>
+							<Flex gap="2" mt="3" flexWrap="wrap">
+								<Button size="sm" variant="outline" onClick={async () => {
+									try {
+										await navigator.clipboard.writeText(BROWSER_AGENT_PROMPT)
+										setBrowserPromptStatus("Copied. Paste into your local agent and describe your task.")
+									} catch {
+										setBrowserPromptStatus("Clipboard unavailable. Open the browser-use guide and copy the prompt there.")
+									}
+								}}>Copy browser-use prompt</Button>
+								<Button size="sm" variant="ghost" onClick={() => rpcRequest("openUrl", { url: BROWSER_EXTENSION_URL }).catch(() => setBrowserPromptStatus("Could not open Chrome Web Store. Use the install link in the guide."))}>Install Chrome extension</Button>
+								<Button size="sm" variant="ghost" onClick={() => rpcRequest("openUrl", { url: BROWSER_AGENT_DOCS_URL }).catch(() => setBrowserPromptStatus("Open docs.keepkey.com/docs/bex/mcp in your browser."))}>Browser-use guide</Button>
+							</Flex>
+							{browserPromptStatus && <Text role="status" fontSize="sm" color="kk.textSecondary" mt="2">{browserPromptStatus}</Text>}
+						</Box>
+					</Section>}
+
 					{/* ── Bitcoin node (self-host) — btc-only devices ─── */}
 					{isBitcoinOnlyVariant(deviceState.firmwareVariant) && (
 						<Section title="Bitcoin node" defaultOpen={true}>
 							<SelfHostNodePanel settings={appSettings} onChange={setAppSettings} onConnected={onNodeConnected} />
+						</Section>
+					)}
+
+					{!isBitcoinOnlyVariant(deviceState.firmwareVariant) && isPolicyEnabled("AdvancedMode") && (
+						<Section title="ClearSign simulation" defaultOpen={false}>
+							<VStack gap="3" align="stretch">
+								<Text fontSize="sm" color="kk.textSecondary">Use an explicit JSON-RPC provider for pre-sign execution, logs, and call traces. Vault verifies the chain ID before saving. Providers can observe transaction data.</Text>
+								<Flex gap="2">
+									<Input value={simulationChainId} onChange={(e) => setSimulationChainId(e.target.value.replace(/\D/g, ''))} placeholder="Chain ID" w="110px" />
+									<Input value={simulationRpcUrl} onChange={(e) => setSimulationRpcUrl(e.target.value)} placeholder="https://your-rpc.example" fontFamily="mono" />
+									<Button onClick={saveSimulationRpc} loading={savingSimulationRpc} disabled={!simulationChainId}>{simulationRpcUrl.trim() ? 'Verify & save' : 'Remove'}</Button>
+								</Flex>
+								{simulationRpcMessage && <Text fontSize="xs" color={simulationRpcMessage.ok ? 'green.300' : 'kk.error'}>{simulationRpcMessage.text}</Text>}
+								<Text fontSize="xs" color="kk.textMuted">Without a configured endpoint, Vault keeps the Pioneer fallback and explicitly marks unavailable or incomplete simulation evidence.</Text>
+							</VStack>
 						</Section>
 					)}
 

@@ -40,6 +40,20 @@ export interface FirmwareVersionInfo {
  */
 export const FIRMWARE_VERSION_MAP: FirmwareVersionInfo[] = [
   {
+    version: '7.17.0',
+    headline: 'DigiByte Taproot and DigiDollar foundation',
+    features: [
+      {
+        title: 'DigiDollar Support',
+        description: 'Adds the DigiByte Taproot signing foundation required for DigiDollar. DigiDollar accounts remain gated until transaction construction, indexing, and script-path redemption pass release acceptance.',
+        chains: ['digibyte'],
+        color: '#315BCA',
+        icon: 'chain',
+        comingSoon: true,
+      },
+    ],
+  },
+  {
     version: '7.15.0',
     headline: 'Zcash privacy and EVM transaction insight',
     features: [

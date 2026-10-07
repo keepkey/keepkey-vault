@@ -37,41 +37,75 @@ function human(raw: bigint, decimals: number): string {
   return `${raw / scale}${fraction ? `.${fraction}` : ''}`
 }
 
+/** Canonical base58check TRON address, or null. Lowercasing base58 breaks the
+ * checksum, so a case-damaged address can never pass. */
+export function canonicalTronAddress(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  try {
+    const decoded = Buffer.from(bs58.decode(value))
+    if (decoded.length !== 25) return null
+    const canonical = address(decoded.subarray(0, 21))
+    return canonical === value ? canonical : null
+  } catch { return null }
+}
+
+export interface TronTransfer {
+  kind: 'TRX transfer' | 'TRC-20 transfer'
+  owner: string
+  to: string
+  units: bigint
+  tokenContract?: string
+  memo?: Buffer
+  feeLimit?: bigint
+}
+
+/** Decode a single plain TRX or TRC-20 transfer from the exact raw_data bytes
+ * the device signs. Throws on anything else (fail closed like firmware
+ * tron_parseRawTx). */
+export function decodeTronTransfer(rawHex: string): TronTransfer {
+  if (!/^(?:0x)?(?:[0-9a-fA-F]{2})+$/.test(rawHex)) throw Error('TRON raw_data is not hex')
+  const raw = Buffer.from(rawHex.replace(/^0x/i, ''), 'hex')
+  const top = fields(raw, { 1: 2, 3: 0, 4: 2, 8: 0, 10: 2, 11: 2, 14: 0, 18: 0 })
+  const contract = fields(bytes(top, 11), { 1: 0, 2: 2 })
+  const kind = Number(number(contract, 1))
+  const any = fields(bytes(contract, 2), { 1: 2, 2: 2 })
+  const url = bytes(any, 1).toString('utf8')
+  const payload = bytes(any, 2)
+  const memo = top.has(10) ? bytes(top, 10) : undefined
+  const feeLimit = top.has(18) ? number(top, 18) : undefined
+  if (kind === 1 && url.endsWith('/protocol.TransferContract')) {
+    const transfer = fields(payload, { 1: 2, 2: 2, 3: 0 })
+    return { kind: 'TRX transfer', owner: address(bytes(transfer, 1)), to: address(bytes(transfer, 2)),
+      units: number(transfer, 3), memo, feeLimit }
+  }
+  if (kind === 31 && url.endsWith('/protocol.TriggerSmartContract')) {
+    const trigger = fields(payload, { 1: 2, 2: 2, 3: 0, 4: 2 })
+    if (trigger.has(3) && number(trigger, 3) !== 0n) throw Error('TRC-20 call carries TRX call_value')
+    const call = bytes(trigger, 4)
+    if (call.length !== 68 || call.subarray(0, 4).toString('hex') !== 'a9059cbb' ||
+        call.subarray(4, 15).some(v => v !== 0) || ![0, 0x41].includes(call[15])) throw Error('Not a TRC-20 transfer(address,uint256) call')
+    return { kind: 'TRC-20 transfer', owner: address(bytes(trigger, 1)), tokenContract: address(bytes(trigger, 2)),
+      to: address(Buffer.concat([Buffer.from([0x41]), call.subarray(16, 36)])),
+      units: BigInt(`0x${call.subarray(36).toString('hex')}`), memo, feeLimit }
+  }
+  throw Error(`Unsupported TRON contract type ${kind}`)
+}
+
 /** Fail closed like firmware tron_parseRawTx. Only a single plain TRX or
  * TRC-20 transfer earns a human summary; all displayed values come from the
  * exact protobuf raw_data bytes signed by the device. */
 export function tronPreview(rawHex: unknown): TronTxPreview | null {
-  if (typeof rawHex !== 'string' || !/^(?:0x)?(?:[0-9a-fA-F]{2})+$/.test(rawHex)) return null
+  if (typeof rawHex !== 'string') return null
   try {
-    const raw = Buffer.from(rawHex.replace(/^0x/i, ''), 'hex')
-    const top = fields(raw, { 1: 2, 3: 0, 4: 2, 8: 0, 10: 2, 11: 2, 14: 0, 18: 0 })
-    const contract = fields(bytes(top, 11), { 1: 0, 2: 2 })
-    const kind = Number(number(contract, 1))
-    const any = fields(bytes(contract, 2), { 1: 2, 2: 2 })
-    const url = bytes(any, 1).toString('utf8')
-    const payload = bytes(any, 2)
-    let owner: string, to: string, amount: string, tokenContract: string | undefined
-    if (kind === 1 && url.endsWith('/protocol.TransferContract')) {
-      const transfer = fields(payload, { 1: 2, 2: 2, 3: 0 })
-      owner = address(bytes(transfer, 1)); to = address(bytes(transfer, 2))
-      amount = `${human(number(transfer, 3), 6)} TRX`
-    } else if (kind === 31 && url.endsWith('/protocol.TriggerSmartContract')) {
-      const trigger = fields(payload, { 1: 2, 2: 2, 3: 0, 4: 2 })
-      if (trigger.has(3) && number(trigger, 3) !== 0n) return null
-      owner = address(bytes(trigger, 1)); tokenContract = address(bytes(trigger, 2))
-      const call = bytes(trigger, 4)
-      if (call.length !== 68 || call.subarray(0, 4).toString('hex') !== 'a9059cbb' ||
-          call.subarray(4, 15).some(v => v !== 0) || ![0, 0x41].includes(call[15])) return null
-      to = address(Buffer.concat([Buffer.from([0x41]), call.subarray(16, 36)]))
-      const units = BigInt(`0x${call.subarray(36).toString('hex')}`)
-      amount = tokenContract === 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t'
+    const { kind, owner, to, units, tokenContract, memo: memoBytes, feeLimit } = decodeTronTransfer(rawHex)
+    const amount = kind === 'TRX transfer' ? `${human(units, 6)} TRX`
+      : tokenContract === 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t'
         ? `${human(units, 6)} USDT` : `${units} base units (unverified token)`
-    } else return null
-    const memo = top.has(10) ? new TextDecoder('utf-8', { fatal: true }).decode(bytes(top, 10)) : undefined
+    const memo = memoBytes ? new TextDecoder('utf-8', { fatal: true }).decode(memoBytes) : undefined
     if (memo?.includes('\0')) return null
     const preview: TronTxPreview = {
-      kind: kind === 1 ? 'TRX transfer' : 'TRC-20 transfer', owner, to, amount, tokenContract, memo,
-      feeLimit: top.has(18) ? `${human(number(top, 18), 6)} TRX` : undefined,
+      kind, owner, to, amount, tokenContract, memo,
+      feeLimit: feeLimit !== undefined ? `${human(feeLimit, 6)} TRX` : undefined,
       warning: 'Swap terms come from the signed memo. The destination and settlement outcome are not independently verified here.',
     }
     const parts = memo?.split(':')

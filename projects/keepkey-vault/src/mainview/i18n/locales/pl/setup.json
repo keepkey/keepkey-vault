@@ -59,7 +59,7 @@
 		"listeningForBootloader": "Nasłuchiwanie urządzenia w trybie bootloadera...",
 		"readyDetectBootloader": "Jestem gotowy — Wykryj bootloader",
 		"skipBootloaderUpdate": "Pomiń aktualizację bootloadera",
-		"verifyBackupHint": "Na KeepKey pojawi się prośba o weryfikację kopii zapasowej. Zrobimy to po aktualizacji — przytrzymaj przycisk, aby to teraz pominąć.",
+		"verifyBackupHint": "KeepKey zapyta, czy masz frazę odzyskiwania na wypadek usunięcia kluczy prywatnych. Przytrzymanie przycisku oznacza odpowiedź „tak” i rozpoczyna aktualizację — potwierdź tylko wtedy, gdy masz zapisaną frazę odzyskiwania.",
 		"followDirectionsOnDevice": "Postępuj zgodnie z instrukcjami na urządzeniu",
 		"deviceWillGuide": "Twój KeepKey poprowadzi cię przez proces aktualizacji.",
 		"bootloaderDetected": "Wykryto tryb bootloadera",

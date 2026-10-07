@@ -105,6 +105,18 @@ export interface EthSignTxParams {
     signedPayload: string
     keyId?: number
   }
+  /** Signed, compiled ERC-7730 v2 catalog used by firmware to decode the exact transaction. */
+  erc7730?: {
+    primaryDefinitionId: string
+    definitions: Array<{
+      definitionId: string
+      envelope: string
+      kind: 1 | 2 | 3 | 4
+      chainId: number
+      contractAddress?: string
+      selectorOrTypeHash?: string
+    }>
+  }
 }
 
 /** Params for `eth.loadClearsignSigner` — POST /eth/clearsign/load-signer. */
@@ -333,6 +345,24 @@ export interface TonMessageSignatureResult {
   publicKey: string
   /** 64-byte Ed25519 signature, hex */
   signature: string
+}
+
+/** Raw Solana message signing (`/solana/sign-message`), the Wallet Standard
+ *  `solana:signMessage` path dApps use for logins. No domain separation: the
+ *  device requires AdvancedMode and shows every byte. Prefer
+ *  `solanaSignOffchainMessage` whenever the verifier can accept the envelope. */
+export interface SolanaSignMessageParams {
+  address_n?: number[]
+  addressNList?: number[]
+  /** Hex bytes are signed as hex; anything else is decoded as base64. */
+  message: string
+}
+
+export interface SolanaMessageSignatureResult {
+  /** Base64 Ed25519 signature over the raw message bytes. */
+  signature: string
+  /** Base64 32-byte public key. */
+  publicKey: string
 }
 
 export interface SolanaSignOffchainMessageParams {

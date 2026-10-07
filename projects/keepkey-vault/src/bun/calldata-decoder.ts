@@ -13,14 +13,41 @@
  */
 import type { CalldataDecodedInfo, CalldataDecodedField } from '../shared/types'
 import { thorDepositFields } from './thor-swap-preview'
+import { acrossDepositView, decodeAcrossDepositV3 } from '../shared/acrossDeposit'
+import { RELAY_DEPOSITORY, decodeRelayDeposit, isZeroAddress } from '../shared/relayDeposit'
+import { REVIEWED_EVM_TOKENS } from './evm-certified-schema'
+import firmwareTokenTable from './firmware-token-table.json'
 
 // ── Helpers ──────────────────────────────────────────────────────────────
+
+/** Base units → decimal string at full precision, trailing zeros removed. */
+function tokenUnits(raw: bigint, decimals: number): string {
+  const scale = 10n ** BigInt(decimals)
+  const frac = (raw % scale).toString().padStart(decimals, '0').replace(/0+$/, '')
+  return `${raw / scale}${frac ? `.${frac}` : ''}`
+}
 
 function formatAddress(raw: string): string {
   if (!raw || raw === '0x') return ''
   const hex = raw.replace(/^0x/, '')
   const addr = hex.length > 40 ? hex.slice(-40) : hex
   return '0x' + addr
+}
+
+/** A unix-seconds deadline as this computer's local time plus how far off it
+ *  is ("16:45, in 20 min"); a date is added when it is not within 12 h. Not a
+ *  plausible timestamp: returned as the bare number. */
+export function formatDeadline(epoch: string, nowMs = Date.now()): string {
+  const secs = Number(epoch)
+  if (!(secs > 1e9 && secs < 1e11)) return epoch
+  const when = new Date(secs * 1000)
+  const deltaMin = Math.round((secs * 1000 - nowMs) / 60_000)
+  const abs = Math.abs(deltaMin)
+  const span = abs < 60 ? `${abs} min` : abs < 1440 ? `${Math.floor(abs / 60)} h ${abs % 60} min` : `${Math.floor(abs / 1440)} d`
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const time = `${pad(when.getHours())}:${pad(when.getMinutes())}`
+  const day = abs > 720 ? `${when.getFullYear()}-${pad(when.getMonth() + 1)}-${pad(when.getDate())} ` : ''
+  return `${day}${time}, ${deltaMin >= 0 ? `in ${span}` : `EXPIRED ${span} ago`}`
 }
 
 function formatUint256(raw: string): string {
@@ -186,18 +213,22 @@ const LOCAL_DECODERS: LocalDecoder[] = [
     selector: '0x3593564c',
     method: 'Swap (Universal Router)',
     decode: (data) => {
-      // commands is a packed byte array — each byte is a command type
-      // inputs is an array of encoded params for each command
-      // deadline is the last 32 bytes before the dynamic data
-      const deadline = formatUint256('0x' + data.slice(74, 138))
-      const deadlineDate = Number(deadline) > 1e9 && Number(deadline) < 1e11
-        ? new Date(Number(deadline) * 1000).toISOString()
-        : deadline
+      // Head: word 0 = offset of commands, word 1 = offset of inputs, word 2 =
+      // deadline. (Reading word 1 showed the inputs offset, 0xa0 = "160".)
+      if (data.length < 202) return null
+      const deadline = formatUint256('0x' + data.slice(138, 202))
       return [
         { name: 'Protocol', type: 'string', value: 'Uniswap Universal Router', format: 'raw' },
-        { name: 'Deadline', type: 'uint256', value: deadlineDate, format: 'raw' },
+        { name: 'Deadline', type: 'uint256', value: formatDeadline(deadline), format: 'raw' },
       ]
     },
+  },
+  // execute(bytes commands, bytes[] inputs): no deadline. The device decodes
+  // both selectors; the swap rows need this card to attach to.
+  {
+    selector: '0x24856bc3',
+    method: 'Swap (Universal Router)',
+    decode: () => [{ name: 'Protocol', type: 'string', value: 'Uniswap Universal Router', format: 'raw' }],
   },
   // Uniswap V3 SwapRouter02 multicall(uint256 deadline, bytes[] data)
   {
@@ -205,12 +236,9 @@ const LOCAL_DECODERS: LocalDecoder[] = [
     method: 'Multicall (Uniswap V3)',
     decode: (data) => {
       const deadline = formatUint256('0x' + data.slice(10, 74))
-      const deadlineDate = Number(deadline) > 1e9 && Number(deadline) < 1e11
-        ? new Date(Number(deadline) * 1000).toISOString()
-        : deadline
       return [
         { name: 'Protocol', type: 'string', value: 'Uniswap V3 Router', format: 'raw' },
-        { name: 'Deadline', type: 'uint256', value: deadlineDate, format: 'raw' },
+        { name: 'Deadline', type: 'uint256', value: formatDeadline(deadline), format: 'raw' },
       ]
     },
   },
@@ -252,9 +280,7 @@ const LOCAL_DECODERS: LocalDecoder[] = [
       const deadline = formatUint256('0x' + data.slice(266, 330))
       const amountIn = formatUint256('0x' + data.slice(330, 394))
       const amountOutMin = formatUint256('0x' + data.slice(394, 458))
-      const deadlineDate = Number(deadline) > 1e9 && Number(deadline) < 1e11
-        ? new Date(Number(deadline) * 1000).toISOString()
-        : deadline
+      const deadlineDate = formatDeadline(deadline)
       return [
         { name: 'Token In', type: 'address', value: tokenIn, format: 'address' },
         { name: 'Token Out', type: 'address', value: tokenOut, format: 'address' },
@@ -379,8 +405,9 @@ export function decodeCalldataLocal(
 // ── Firmware clear-sign allowlist (mirrors device ethereum_contractHandled) ──
 //
 // rc3 firmware clear-signs a contract call WITHOUT AdvancedMode and WITHOUT any
-// signed-metadata blob ONLY for the pinned (selector, to) pairs below, plus a
-// standard 68-byte ERC-20 transfer/approve. Anything else the device blind-signs
+// signed-metadata blob ONLY for the pinned (chain, selector, to) entries below,
+// plus a standard 68-byte ERC-20 transfer/approve of a token in its built-in
+// table (firmware-token-table.json). Anything else the device blind-signs
 // (hard "Blocked" unless AdvancedMode is on). The signing overlay MUST gate off
 // THIS — not off "did our decoder recognize the calldata" — otherwise it either
 // under-warns (Uniswap/1inch/relay look verified but the device blind-signs) or
@@ -399,23 +426,31 @@ const ADDR = {
 
 // THORChain's Router lives at a DIFFERENT address on each EVM chain, so the
 // clear-sign pin is (address, chainId) together — mirrors thor_router_for_chain
-// in firmware ethereum_contracts/thortx.c. Keep this in lockstep with that
-// switch; a chain listed here but not there (or vice versa) makes the overlay
-// mispredict clear-signability. Missing chainId is not a trusted mainnet pin.
+// in firmware ethereum_contracts/thortx.c, which knows chains 1 and 43114 ONLY.
+// Keep this in lockstep with that switch; a chain listed here but not there (or
+// vice versa) makes the overlay mispredict clear-signability. Missing chainId is
+// not a trusted mainnet pin.
 const THOR_ROUTER_BY_CHAIN: Record<number, string> = {
   1:     ADDR.THOR_ROUTER,
   43114: ADDR.THOR_ROUTER_AVAX,
-  8453:  ADDR.THOR_ROUTER_AVAX, // Base currently uses the same address
+}
+// Display-only: THORChain's Base router (same address as Avalanche's) decodes
+// for the overlay, but the firmware does not pin it, so it is NOT native.
+const THOR_ROUTER_DECODE_BY_CHAIN: Record<number, string> = {
+  ...THOR_ROUTER_BY_CHAIN,
+  8453: ADDR.THOR_ROUTER_AVAX,
 }
 
-// selector → the ONE contract address the firmware pins that selector to.
-const FIRMWARE_PINNED: Record<string, string> = {
-  '0xd9627aa4': ADDR.ZX_EXCHANGE_PROXY, // sellToUniswap (0x)
-  '0xf305d719': ADDR.UNISWAP_V2_ROUTER, // addLiquidityETH
-  '0x02751cec': ADDR.UNISWAP_V2_ROUTER, // removeLiquidityETH
-  '0xfea7c53f': ADDR.SALARY_PROXY,      // withdrawFromSalary
-  '0x1fece7b4': ADDR.THOR_ROUTER,       // THORChain deposit
-  '0x44bc937b': ADDR.THOR_ROUTER,       // THORChain depositWithExpiry
+// 0x Exchange Proxy chains — mirrors zx_isExchangeProxyChain in firmware
+// ethereum_contracts.c (Optimism deliberately absent: different proxy there).
+const ZX_EXCHANGE_PROXY_CHAINS = new Set([1, 56, 137, 8453, 42161, 43114])
+
+// selector → the ONE (contract, chains) the firmware pins that selector to.
+const FIRMWARE_PINNED: Record<string, { to: string; chains: Set<number> }> = {
+  '0xd9627aa4': { to: ADDR.ZX_EXCHANGE_PROXY, chains: ZX_EXCHANGE_PROXY_CHAINS }, // sellToUniswap (0x)
+  '0xf305d719': { to: ADDR.UNISWAP_V2_ROUTER, chains: new Set([1]) },             // addLiquidityETH
+  '0x02751cec': { to: ADDR.UNISWAP_V2_ROUTER, chains: new Set([1]) },             // removeLiquidityETH
+  '0xfea7c53f': { to: ADDR.SALARY_PROXY, chains: new Set([1]) },                  // withdrawFromSalary
 }
 // THOR/Maya share both deposit selectors — accept either router for either.
 const THOR_MAYA_DEPOSIT = new Set(['0x1fece7b4', '0x44bc937b'])
@@ -423,23 +458,37 @@ const THOR_MAYA_DEPOSIT = new Set(['0x1fece7b4', '0x44bc937b'])
 /** ERC-20 transfer/approve the firmware renders natively (standard 68-byte). */
 const ERC20_NATIVE = new Set(['0xa9059cbb', '0x095ea7b3'])
 
+/** (chainId:address) of every token in the firmware's built-in table —
+ *  generated from the firmware build (scripts/gen-firmware-token-table.ts). */
+const FIRMWARE_TOKENS: ReadonlySet<string> = new Set((firmwareTokenTable as { tokens: string[] }).tokens)
+
+/** Firmware ethereum_contractHandled only claims calldata that fits the first
+ *  1024-byte chunk (data_total == data_initial_chunk.size). */
+const FIRMWARE_INITIAL_CHUNK_BYTES = 1024
+
+/** True iff (chainId, token) is in the firmware's built-in token table. */
+export function firmwareKnowsToken(chainId: number | undefined, token: string | undefined): boolean {
+  return chainId != null && !!token && FIRMWARE_TOKENS.has(`${chainId}:${token.toLowerCase()}`)
+}
+
 /**
- * True iff the rc3 device clear-signs this tx natively (no AdvancedMode, no
+ * True iff the device clear-signs this tx natively (no AdvancedMode, no
  * signed blob). Mirrors firmware `ethereum_contractHandled` + the standard
- * ERC-20 transfer/approve path in ethereum.c. Contract-address pinning matters:
- * the same selector to a DIFFERENT address is NOT clear-signed by the device.
+ * ERC-20 transfer/approve path in ethereum.c. Contract-address AND chain
+ * pinning matter: the same selector to a DIFFERENT address, or the same
+ * address on a chain the firmware does not list, is NOT clear-signed.
  */
 export function firmwareClearSigns(to?: string, data?: string, chainId?: number): boolean {
   if (!to || !data || data.length < 10) return false
   const selector = data.slice(0, 10).toLowerCase()
   const dest = to.toLowerCase()
 
-  // Standard ERC-20 transfer/approve: 4-byte selector + 2 32-byte words = 68B.
-  // ponytail: firmware also requires the token be in its built-in registry
-  // (unknown tokens hard-block); we can't cheaply mirror that list, so an exotic
-  // token defers to the device's own "enable AdvancedMode" prompt — benign UX,
-  // never an under-warn. Upgrade path: ship the token list into Vault.
-  if (ERC20_NATIVE.has(selector) && (data.length - 2) === 136) return true
+  // Standard ERC-20 transfer/approve: 4-byte selector + 2 32-byte words = 68B,
+  // and only for a token the firmware's table knows ON THIS CHAIN — anything
+  // else is UnknownToken, which the device gates on AdvancedMode.
+  if (ERC20_NATIVE.has(selector) && (data.length - 2) === 136) return firmwareKnowsToken(chainId, dest)
+
+  if ((data.length - 2) / 2 > FIRMWARE_INITIAL_CHUNK_BYTES) return false
 
   if (THOR_MAYA_DEPOSIT.has(selector)) {
     // The firmware binds both protocols' router pins to an explicit chainId.
@@ -450,9 +499,9 @@ export function firmwareClearSigns(to?: string, data?: string, chainId?: number)
       (chainId === 1 && dest === ADDR.MAYA_ROUTER)
   }
   const pinned = FIRMWARE_PINNED[selector]
-  return pinned != null && dest === pinned
-  // ponytail: MakerDAO (address+param gated, rare) intentionally omitted → those
-  // over-warn as blind. Add if a MakerDAO clear-sign flow actually shows up.
+  return pinned != null && dest === pinned.to && chainId != null && pinned.chains.has(chainId)
+  // ponytail: MakerDAO (address+param gated, rare) and the 0x approve-to-LP-pair
+  // path intentionally omitted → those over-warn as blind. Add if a flow shows up.
 }
 
 // ── Main decode function ─────────────────────────────────────────────────
@@ -471,7 +520,7 @@ export async function decodeCalldata(
   // comes from the destination router, never from the selector or memo text.
   if (THOR_MAYA_DEPOSIT.has(selector)) {
     const dest = contractAddress.toLowerCase()
-    const thor = _chainId != null && THOR_ROUTER_BY_CHAIN[_chainId] === dest
+    const thor = _chainId != null && THOR_ROUTER_DECODE_BY_CHAIN[_chainId] === dest
     const maya = _chainId === 1 && (dest === ADDR.MAYA_ROUTER || dest === ADDR.MAYA_ROUTER_V4)
     const protocol = thor ? 'THORChain' : maya ? 'Mayachain' : null
     const fields = protocol ? thorDepositFields(data, _chainId, protocol) : null
@@ -483,13 +532,64 @@ export async function decodeCalldata(
       method: `Unknown (${selector})`, selector, fields: [], source: 'none' }
   }
 
+  // Across SpokePool depositV3: only to a pinned pool on this chain, only a
+  // canonical encoding. Display only — the device still blind-signs it.
+  const across = decodeAcrossDepositV3(contractAddress, data, _chainId)
+  if (across) {
+    const v = acrossDepositView(across)
+    const fields: CalldataDecodedField[] = [
+      { name: 'Action', type: 'string', value: `Across bridge deposit: ${across.pool.chain} → ${v.destination}`, format: 'raw' },
+      { name: 'You send', type: 'uint256', value: `${v.sent} on ${across.pool.chain}`, format: 'amount' },
+      { name: 'Recipient gets', type: 'uint256', value: `${v.received} on ${v.destination}`, format: 'amount' },
+      { name: 'Recipient', type: 'address', value: across.recipient, format: 'address' },
+      { name: 'Refund to (depositor)', type: 'address', value: across.depositor, format: 'address' },
+      ...(v.fee ? [{ name: 'Bridge fee', type: 'uint256', value: v.fee, format: 'amount' as const }] : []),
+      { name: 'Fill deadline', type: 'uint32', value: v.fillDeadline, format: 'raw' },
+      { name: 'Exclusive relayer', type: 'address', value: v.exclusiveRelayer, format: 'raw' },
+      { name: 'Message to recipient', type: 'bytes', value: across.message === '0x' ? 'None' : `${(across.message.length - 2) / 2} bytes: ${across.message}`, format: 'hex' },
+      ...(v.integratorTag ? [{ name: 'Trailing bytes', type: 'bytes', value: v.integratorTag, format: 'hex' as const }] : []),
+      { name: 'SpokePool', type: 'address', value: `${across.pool.address} (Across, ${across.pool.chain})`, format: 'raw' },
+    ]
+    return {
+      dappName: 'Across', contractName: 'Across SpokePool', method: 'Bridge deposit (depositV3)',
+      selector, functionType: 'bridge', fields, source: 'local',
+    }
+  }
+
+  // Relay Depository deposit (in-app Relay swaps/bridges): only at the
+  // depository on a checked chain, only the exact ABI width. Display only:
+  // whether the device clear-signs it is decided by firmwareClearSigns and
+  // the certified catalog, never by this decode.
+  const relay = decodeRelayDeposit(contractAddress, data, _chainId)
+  if (relay) {
+    const token = relay.token ? REVIEWED_EVM_TOKENS[`${relay.chainId}:${relay.token}`] : undefined
+    const sent = relay.kind === 'native'
+      ? 'the native coin sent with this call (msg.value)'
+      : token ? `${tokenUnits(relay.amount!, token.decimals)} ${token.symbol}` : `${relay.amount} base units of token ${relay.token}`
+    const fields: CalldataDecodedField[] = [
+      { name: 'Action', type: 'string', value: `Relay deposit on ${relay.chain}: ${sent}`, format: 'raw' },
+      { name: 'You send', type: 'uint256', value: sent, format: 'amount' },
+      ...(relay.token ? [{ name: 'Token', type: 'address', value: `${relay.token}${token ? ` (${token.symbol})` : ''}`, format: 'address' as const }] : []),
+      { name: 'Credited to (depositor)', type: 'address', value: isZeroAddress(relay.depositor) ? 'the signing account (address(0))' : relay.depositor, format: 'address' },
+      { name: 'Relay order id', type: 'bytes32', value: relay.id, format: 'hex' },
+      { name: 'Destination', type: 'string', value: "Set by Relay's off-chain order (your quote); not in this call", format: 'raw' },
+      { name: 'Depository', type: 'address', value: `${RELAY_DEPOSITORY} (Relay Depository, ${relay.chain})`, format: 'raw' },
+      ...(relay.token && !token ? [{ name: 'Token warning', type: 'string', value: `Token ${relay.token} is not on KeepKey's reviewed list`, format: 'raw' as const }] : []),
+    ]
+    return {
+      dappName: 'Relay', contractName: 'Relay Depository',
+      method: relay.kind === 'native' ? 'Relay deposit (depositNative)' : 'Relay deposit (depositErc20)',
+      selector, functionType: 'bridge', fields, source: 'local',
+    }
+  }
+
   // Tier 1: Local decoders (offline, instant)
   for (const decoder of LOCAL_DECODERS) {
     if (selector === decoder.selector && data.length >= 10) {
       // Derive dApp name from method — DeFi protocols get their own name
       const method = decoder.method
       let dappName = 'ERC-20'
-      if (method.includes('Uniswap')) dappName = 'Uniswap'
+      if (method.includes('Uniswap') || method.includes('Universal Router')) dappName = 'Uniswap'
       else if (method.includes('1inch')) dappName = '1inch'
       else if (method.includes('THORChain')) dappName = 'THORChain'
       else if (method.includes('Wrap') || method.includes('Unwrap')) dappName = 'WETH'

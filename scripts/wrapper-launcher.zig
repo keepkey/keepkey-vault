@@ -96,6 +96,11 @@ const MSG = extern struct {
 // kernel32
 extern "kernel32" fn CreateProcessW(?[*:0]const u16, ?[*:0]u16, ?*anyopaque, ?*anyopaque, BOOL, DWORD, ?*anyopaque, ?[*:0]const u16, *STARTUPINFOW, *PROCESS_INFORMATION) callconv(.winapi) BOOL;
 extern "kernel32" fn CloseHandle(HANDLE) callconv(.winapi) BOOL;
+extern "kernel32" fn GetExitCodeProcess(HANDLE, *DWORD) callconv(.winapi) BOOL;
+extern "kernel32" fn GlobalAlloc(UINT, usize) callconv(.winapi) ?HANDLE;
+extern "kernel32" fn GlobalFree(HANDLE) callconv(.winapi) ?HANDLE;
+extern "kernel32" fn GlobalLock(HANDLE) callconv(.winapi) ?*anyopaque;
+extern "kernel32" fn GlobalUnlock(HANDLE) callconv(.winapi) BOOL;
 extern "kernel32" fn GetModuleHandleW(?[*:0]const u16) callconv(.winapi) HINSTANCE;
 extern "kernel32" fn Sleep(DWORD) callconv(.winapi) void;
 extern "kernel32" fn SetEnvironmentVariableW([*:0]const u16, ?[*:0]const u16) callconv(.winapi) BOOL;
@@ -122,6 +127,11 @@ extern "user32" fn InvalidateRect(HWND, ?*const RECT, BOOL) callconv(.winapi) BO
 extern "user32" fn IsWindowVisible(HWND) callconv(.winapi) BOOL;
 extern "user32" fn EnumWindows(*const fn (HWND, LPARAM) callconv(.winapi) BOOL, LPARAM) callconv(.winapi) BOOL;
 extern "user32" fn GetWindowTextW(HWND, [*]u16, INT) callconv(.winapi) INT;
+extern "user32" fn MessageBoxW(HWND, [*:0]const u16, [*:0]const u16, UINT) callconv(.winapi) INT;
+extern "user32" fn OpenClipboard(HWND) callconv(.winapi) BOOL;
+extern "user32" fn EmptyClipboard() callconv(.winapi) BOOL;
+extern "user32" fn SetClipboardData(UINT, HANDLE) callconv(.winapi) ?HANDLE;
+extern "user32" fn CloseClipboard() callconv(.winapi) BOOL;
 
 // gdi32
 extern "gdi32" fn CreateSolidBrush(COLORREF) callconv(.winapi) HBRUSH;
@@ -151,6 +161,12 @@ const FW_NORMAL: INT = 400;
 const FW_SEMIBOLD: INT = 600;
 const PM_REMOVE: UINT = 0x0001;
 const SW_SHOW: INT = 5;
+const STILL_ACTIVE: DWORD = 259;
+const GMEM_MOVEABLE: UINT = 0x0002;
+const CF_UNICODETEXT: UINT = 13;
+const MB_OK: UINT = 0x00000000;
+const MB_ICONERROR: UINT = 0x00000010;
+const MB_SETFOREGROUND: UINT = 0x00010000;
 
 // Splash dimensions
 const SPLASH_W: INT = 420;
@@ -233,6 +249,64 @@ fn loadVersion(exe_dir: []const u8, alloc: std.mem.Allocator) void {
     }
     g_version_buf[out] = 0; // null terminate
     g_version_len = out;
+}
+
+/// Put a deliberately small, non-sensitive startup diagnostic on the Windows
+/// clipboard. Ownership of `memory` transfers to the clipboard on success.
+fn copyDiagnosticToClipboard(text: []const u16) bool {
+    if (OpenClipboard(null) == 0) return false;
+    defer _ = CloseClipboard();
+    if (EmptyClipboard() == 0) return false;
+
+    const byte_len = (text.len + 1) * @sizeOf(u16);
+    const memory = GlobalAlloc(GMEM_MOVEABLE, byte_len) orelse return false;
+    const raw = GlobalLock(memory) orelse {
+        _ = GlobalFree(memory);
+        return false;
+    };
+    const dest: [*]u16 = @ptrCast(@alignCast(raw));
+    @memcpy(dest[0..text.len], text);
+    dest[text.len] = 0;
+    _ = GlobalUnlock(memory);
+
+    if (SetClipboardData(CF_UNICODETEXT, memory) == null) {
+        _ = GlobalFree(memory);
+        return false;
+    }
+    return true;
+}
+
+fn showStartupHelp(alloc: std.mem.Allocator, launcher_process: ?HANDLE) void {
+    var exit_code: DWORD = 0;
+    const launcher_state = if (launcher_process) |process| state: {
+        if (GetExitCodeProcess(process, &exit_code) == 0) break :state "unknown";
+        break :state if (exit_code == STILL_ACTIVE) "running" else "exited";
+    } else "not-started";
+
+    const version = if (g_version_len > 1)
+        std.unicode.utf16LeToUtf8Alloc(alloc, g_version_buf[1..g_version_len]) catch "unknown"
+    else
+        "unknown";
+    const report_utf8 = std.fmt.allocPrint(
+        alloc,
+        "KeepKey Vault startup report\r\nVersion: {s}\r\nPlatform: Windows x64\r\nFailure: no application window after 30 seconds\r\nLauncher: {s}\r\nExit code: {d}\r\n",
+        .{ version, launcher_state, exit_code },
+    ) catch return;
+    const report = std.unicode.utf8ToUtf16LeAlloc(alloc, report_utf8) catch return;
+    const copied = copyDiagnosticToClipboard(report);
+
+    const message = if (copied)
+        "KeepKey Vault did not open after 30 seconds.\n\nA non-sensitive startup report has been copied to your clipboard. Go to keepkey.com/support and paste it into your support request.\n\nThe report contains only the Vault version, platform, startup failure, and launcher status."
+    else
+        "KeepKey Vault did not open after 30 seconds.\n\nGo to keepkey.com/support and report that the Windows application showed no window. No diagnostic data was sent."
+    ;
+    const message_w = std.unicode.utf8ToUtf16LeAllocZ(alloc, message) catch return;
+    _ = MessageBoxW(
+        null,
+        message_w,
+        std.unicode.utf8ToUtf16LeStringLiteral("KeepKey Vault could not open"),
+        MB_OK | MB_ICONERROR | MB_SETFOREGROUND,
+    );
 }
 
 // ── Splash window procedure ─────────────────────────────────────────
@@ -420,9 +494,22 @@ pub fn main() !void {
     var pi = PROCESS_INFORMATION{};
 
     const ok = CreateProcessW(launcher_path_w, cmd_w, null, null, 0, CREATE_NO_WINDOW, null, cwd_w, &si, &pi);
+    var launcher_process: ?HANDLE = null;
     if (ok != 0) {
-        if (pi.hProcess) |h| _ = CloseHandle(h);
+        launcher_process = pi.hProcess;
         if (pi.hThread) |h| _ = CloseHandle(h);
+    } else {
+        // A missing/quarantined launcher should fail immediately instead of
+        // making the user stare at the splash screen for thirty seconds.
+        if (splash) |s| {
+            _ = KillTimer(s, TIMER_ID);
+            _ = DestroyWindow(s);
+        }
+        showStartupHelp(a, null);
+        return;
+    }
+    defer {
+        if (launcher_process) |h| _ = CloseHandle(h);
     }
 
     // ── Run message loop until splash is closed ─────────────────────
@@ -430,6 +517,8 @@ pub fn main() !void {
     // Safety: also close after 30 seconds regardless.
     var msg_loop = MSG{};
     const start = @as(u32, @truncate(@as(u64, @bitCast(std.time.milliTimestamp()))));
+    var startup_timed_out = false;
+    var launcher_exited = false;
     while (true) {
         while (PeekMessageW(&msg_loop, null, 0, 0, PM_REMOVE) != 0) {
             if (msg_loop.message == WM_QUIT) return;
@@ -437,7 +526,28 @@ pub fn main() !void {
             _ = DispatchMessageW(&msg_loop);
         }
         Sleep(16); // ~60fps
+        // If App Control or antivirus blocks a launcher dependency, Electrobun's
+        // launcher exits before a window exists. Surface that immediately and
+        // preserve its exit code in the clipboard report.
+        if (launcher_process) |process| {
+            var exit_code: DWORD = STILL_ACTIVE;
+            if (GetExitCodeProcess(process, &exit_code) != 0 and exit_code != STILL_ACTIVE) {
+                launcher_exited = true;
+                break;
+            }
+        }
         const now = @as(u32, @truncate(@as(u64, @bitCast(std.time.milliTimestamp()))));
-        if (now -% start > 30000) break; // 30s safety timeout
+        if (now -% start > 30000) {
+            startup_timed_out = true;
+            break;
+        }
+    }
+
+    if (startup_timed_out or launcher_exited) {
+        if (splash) |s| {
+            _ = KillTimer(s, TIMER_ID);
+            _ = DestroyWindow(s);
+        }
+        showStartupHelp(a, launcher_process);
     }
 }

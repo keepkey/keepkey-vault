@@ -1,0 +1,34 @@
+{
+  "_comment": "Real SoltoshiDICE 'Blackjack join' legacy transaction as received by Vault's REST /solana/sign-transaction from the SoltoshiDICE dapp (unsigned; the signature slot is zero). Instructions: ComputeBudget setComputeUnitLimit, System transfer of 2,000,000 lamports to the session key, then the 82-byte join (program CuTLp7pDmNGkFgi4aoh8Ef1YSjc2BzECQRLzYqaoVWBR, native Rust, no IDL). No address lookup tables. The blockhash is stale; tests inspect the unsigned message and never broadcast it.",
+  "rawTxBase64": "AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAYN7Dl5pNxrQBvQRRcaGJ8mhW+rnqt1VgIU+XKy7cFkMA8gmJLkBqXBv1MNdyH0Y0CQBAw/vjXfODSi6A2XvuBiDmNSMNDsbSaJ7Z8L8dpX4UesE7q8RDDFrxreLkDJzz7ld+S0UR81HpSnZL3odgGew1I1EASdO1CzqMcP04tgB/mEfTwo4su/+efE98ttbXHlvBbVCqbtT/466uag1sbqpKEbClE+xTEAdMneVhF6rRaasznsmlRLPEzzOnTQzDfG/E2iWNdqYqpqDGQdNM78M8l/C5QkwWeOJu4ltMSbe9oAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADgngkHaA8cN0PyIX3rSEjutMrM6VAI0BzmviuXYTKzvi2c82i4pPgIgqz4B0rWO0FXJwbJ2LdUVYSsQys1uNDYDBkZv5SEXMv/srbpyw5vnvIzlu8X3EmssQ5s6QAAAALDgivSk/PrRPvj8/Z3HCXXrb8LgSnx2YRVApRzV257QBt324e51j94YQl285GzN2rYa/E2DuQ0n/r35KNihi/z5rfsjy6c01cYw3JT/6bxpZONHvTr4w6+3lbhJyrXZJwMKAAUCQA0DAAcCAAUMAgAAAICEHgAAAAAACwkAAgQIAwEMBglSUVYAAAAAAAAA1AMAAAAAAAABAMqaOwAAAAChGwpRPsUxAHTJ3lYReq0WmrM57JpUSzxM8zp00Mw3xhAOAAAAAAAAAMqaOwAAAAAAypo7AAAAAA==",
+  "expected": {
+    "version": "legacy",
+    "altEntries": 0,
+    "programId": "CuTLp7pDmNGkFgi4aoh8Ef1YSjc2BzECQRLzYqaoVWBR",
+    "instructionIndex": 2,
+    "instructionDataLen": 82,
+    "instructionAccounts": [
+      "Gu83nVMD8qh948D1vqe8UPoUHaFuSwcHrvNHetcM4Xux",
+      "7gi41j1CFXTkTjks2m2X6gR6GBNJdm4g4ty7fLnzyWH2",
+      "9vBaKrxgtQEc6zavSVTvptAM2oRmX38SkyHXpfvUFoKR",
+      "4nCmpwne7hCoWTSpAd54uENmCgHJrHTyn4DMPCEMpump",
+      "951nS8NJoi7ajueDo7iztaWQiapUZuHAx5xt3vVApJXa",
+      "3CEz32zeuq2S2wNuQTpkX1dWD7QF4hhJDRmkk4p7Y6RK",
+      "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+      "HytQCDtEH44eeefFDgAEpYud1tRhSjoRgvYmLmfhJJY9",
+      "APAyVKwRubP7vV2RDX2YoL7TradcUP8noESSDgJcVVUy"
+    ],
+    "mint": "4nCmpwne7hCoWTSpAd54uENmCgHJrHTyn4DMPCEMpump",
+    "values": {
+      "round": "86",
+      "revision": "980",
+      "seat": 1,
+      "buyIn": "1000000000",
+      "sessionKey": "BqtZ8PRQywD9Z5xXeB5112wtPG3xtj7TqF56hroicGjX",
+      "seconds": "3600",
+      "allowance": "1000000000",
+      "maxWager": "1000000000"
+    },
+    "sessionFundingLamports": "2000000"
+  }
+}

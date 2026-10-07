@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { buildEvmTx } from '../src/bun/txbuilder/evm'
 import { CHAINS } from '../src/shared/chains'
 
@@ -13,6 +13,12 @@ const pioneerWithBalance = (balance: string) => ({
   GetNonceByNetwork: async () => ({ data: { nonce: 7 } }),
   GetBalanceAddressByNetwork: async () => ({ data: { balance } }),
 })
+
+let originalFetch: typeof fetch
+// Arbitrum estimates against its sequencer RPC; keep the suite offline — a
+// failed estimate falls back to the floor.
+beforeEach(() => { originalFetch = globalThis.fetch; globalThis.fetch = (async () => { throw new Error('offline') }) as typeof fetch })
+afterEach(() => { globalThis.fetch = originalFetch })
 
 describe('EVM max send', () => {
   test('rejects native max sends that cannot cover the rounded gas reserve', async () => {
@@ -62,5 +68,32 @@ describe('EVM max send', () => {
       fromAddress,
     })
     expect(BigInt(result.gasLimit)).toBeGreaterThanOrEqual(30_000n)
+  })
+
+  test('Arbitrum ERC-20 uses the sequencer estimate, not the fixed 100k', async () => {
+    let estimateReq: any
+    globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const req = JSON.parse(String(init?.body))
+      expect(req.method).toBe('eth_estimateGas')
+      estimateReq = req.params[0]
+      return new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result: '0x7a120' })) // 500k
+    }) as typeof fetch
+
+    const result = await buildEvmTx(pioneerWithBalance('1'), arbitrum, {
+      to: toAddress, amount: '5', fromAddress,
+      caip: `eip155:42161/erc20:${tokenAddress}`, tokenDecimals: 6,
+    })
+
+    expect(estimateReq.to).toBe(tokenAddress)
+    expect(estimateReq.data).toBe(result.data)
+    expect(BigInt(result.gasLimit)).toBe(600_000n) // 500k + 20% buffer
+  })
+
+  test('ERC-20 gas never drops below the 100k floor', async () => {
+    const result = await buildEvmTx(pioneerWithBalance('1'), arbitrum, {
+      to: toAddress, amount: '5', fromAddress,
+      caip: `eip155:42161/erc20:${tokenAddress}`, tokenDecimals: 6,
+    })
+    expect(BigInt(result.gasLimit)).toBe(100_000n)
   })
 })

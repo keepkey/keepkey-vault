@@ -20,6 +20,7 @@ const ARG_TYPE_TO_BYTE: Record<ClearSignSolanaArgType, number> = {
   u8: 2,
   pubkey: 3,
   opaque32: 4,
+  lamports: 5,
 }
 
 const ARG_BYTE_TO_TYPE = new Map<number, ClearSignSolanaArgType>(
@@ -31,6 +32,7 @@ const ARG_WIDTH: Record<ClearSignSolanaArgType, number> = {
   u8: 1,
   pubkey: 32,
   opaque32: 32,
+  lamports: 8,
 }
 
 function parseHex(value: string, field: string, minBytes?: number, maxBytes?: number): Buffer {
@@ -219,4 +221,3 @@ export function inspectSolanaSchema(payloadHex: string): ClearSignSolanaSchemaAr
     },
   }
 }
-

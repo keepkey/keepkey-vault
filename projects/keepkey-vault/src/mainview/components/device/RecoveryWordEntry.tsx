@@ -16,12 +16,12 @@ interface RecoveryWordEntryProps {
   errorType?: string | null
 }
 
+// Same grid as the KeepKey's own cipher screen: 2 rows of 13, a–m over n–z
+// (firmware app_layout.h CIPHER_ROWS / CIPHER_LETTER_BY_ROW), so the user
+// finds each letter where they just saw it on the device.
 const ALPHABET_ROWS = [
-  ["a", "b", "c", "d", "e", "f"],
-  ["g", "h", "i", "j", "k", "l"],
-  ["m", "n", "o", "p", "q", "r"],
-  ["s", "t", "u", "v", "w", "x"],
-  ["y", "z"],
+  "abcdefghijklm".split(""),
+  "nopqrstuvwxyz".split(""),
 ]
 
 const MAX_CHARS = 4
@@ -70,6 +70,12 @@ export function RecoveryWordEntry({
       prevWordPos.current = wordPos
       return () => clearTimeout(timer)
     }
+    if (wordPos < prevWordPos.current) {
+      // Back a word: the device dropped the word separator and is editing the
+      // previous word again, letters intact. Show as many as it reports.
+      setWordAccepted(false)
+      setCurrentChars(Array(characterPos).fill("\u2022"))
+    }
     prevWordPos.current = wordPos
   }, [wordPos])
 
@@ -92,11 +98,19 @@ export function RecoveryWordEntry({
     [currentChars.length, onCharacter],
   )
 
+  // On an empty word, Backspace goes back to the previous word: the device
+  // deletes the separating space (firmware recovery_delete_character, which
+  // also decrements its word count) and asks for the previous word again.
+  const canGoBackAWord = currentChars.length === 0 && wordPos > 0
   const handleBackspace = useCallback(() => {
-    if (currentChars.length === 0) return
+    if (wordAccepted) return
+    if (currentChars.length === 0) {
+      if (wordPos > 0) onDelete()
+      return
+    }
     setCurrentChars((prev) => prev.slice(0, -1))
     onDelete()
-  }, [currentChars.length, onDelete])
+  }, [currentChars.length, wordPos, wordAccepted, onDelete])
 
   const handleSubmitWord = useCallback(() => {
     if (isFinalWord) {
@@ -327,7 +341,7 @@ export function RecoveryWordEntry({
         border="1px solid"
         borderColor="kk.border"
         p="6"
-        maxW="480px"
+        maxW="760px"
         w="95%"
         boxShadow="0 8px 32px rgba(0,0,0,0.6)"
       >
@@ -441,13 +455,16 @@ export function RecoveryWordEntry({
         {/* Letter keyboard */}
         <VStack gap="2" mb="4">
           {ALPHABET_ROWS.map((row, i) => (
-            <Flex key={i} gap="2" justifyContent="center">
+            <Flex key={i} gap="1.5" justifyContent="center" w="100%">
               {row.map((letter) => (
                 <Button
                   key={letter}
                   onClick={() => handleChar(letter)}
-                  w="52px"
-                  h="44px"
+                  flex="1"
+                  minW="0"
+                  maxW="48px"
+                  h="48px"
+                  px="0"
                   bg="kk.cardBg"
                   border="1px solid"
                   borderColor="kk.border"
@@ -475,10 +492,10 @@ export function RecoveryWordEntry({
             borderColor="kk.border"
             color="kk.textSecondary"
             _hover={{ borderColor: "kk.gold", color: "kk.textPrimary" }}
-            disabled={currentChars.length === 0}
+            disabled={wordAccepted || (currentChars.length === 0 && wordPos === 0)}
             flex={1}
           >
-            {t('recovery.backspace')}
+            {canGoBackAWord ? t('recovery.previousWord', { n: wordPos }) : t('recovery.backspace')}
           </Button>
           <Button
             onClick={handleSubmitWord}

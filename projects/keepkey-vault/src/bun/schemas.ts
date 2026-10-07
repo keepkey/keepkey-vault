@@ -74,6 +74,18 @@ export const EthSignTransactionRequest = z.object({
     signedPayload: z.string(),
     keyId: z.number().int().optional(),
   }).optional(),
+  erc7730: z.object({
+    primaryDefinitionId: z.string().regex(/^(0x)?[0-9a-fA-F]{64}$/),
+    definitions: z.array(z.object({
+      definitionId: z.string().regex(/^(0x)?[0-9a-fA-F]{64}$/),
+      // Firmware accepts at most 16 KiB of program plus bounded proof/certificate framing.
+      envelope: z.string().regex(/^(0x)?(?:[0-9a-fA-F]{2})+$/).max(35_000),
+      kind: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]),
+      chainId: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+      contractAddress: z.string().regex(/^(0x)?[0-9a-fA-F]{40}$/).optional(),
+      selectorOrTypeHash: z.string().regex(/^(0x)?(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{64})$/).optional(),
+    }).strict()).min(1).max(32),
+  }).strict().optional(),
 }).strip().refine(
   d => d.from || d.addressNList || d.address_n_list,
   { message: 'Missing from address or addressNList' },
@@ -409,12 +421,164 @@ export const TonFinalizeTransferRequest = z.object({
   broadcast: z.boolean().optional(),
 }).strip()
 
+/** POST /solana/decode-transaction — decode only, no device, no signing */
+export const SolanaDecodeRequest = z.object({
+  raw_tx: z.string().min(1, 'raw_tx (base64 serialized transaction) is required'),
+}).strip()
+
+/** POST /clearsign/report — simulation-backed Vault report, never signs. */
+export const ClearSignReportRequest = z.discriminatedUnion('chain', [
+  z.object({
+    chain: z.literal('evm'),
+    chainId: z.number().int().positive().max(0xffffffff),
+    from: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
+    to: z.string().regex(/^0x[0-9a-fA-F]{40}$/).optional(),
+    data: z.string().regex(/^0x(?:[0-9a-fA-F]{2})*$/).optional(),
+    value: z.string().regex(/^0x[0-9a-fA-F]+$/).optional(),
+    gas: z.string().regex(/^0x[0-9a-fA-F]+$/).optional(),
+    gasPrice: z.string().regex(/^0x[0-9a-fA-F]+$/).optional(),
+    maxFeePerGas: z.string().regex(/^0x[0-9a-fA-F]+$/).optional(),
+    maxPriorityFeePerGas: z.string().regex(/^0x[0-9a-fA-F]+$/).optional(),
+    nonce: z.string().regex(/^0x[0-9a-fA-F]+$/).optional(),
+    hasErc7730: z.boolean().optional(),
+  }).strict(),
+  z.object({
+    chain: z.literal('solana'),
+    raw_tx: z.string().min(1),
+    owner: z.string().min(32).max(44),
+    hasCertifiedSchema: z.boolean().optional(),
+  }).strict(),
+])
+
+const Hash32 = z.string().regex(/^(0x)?[0-9a-fA-F]{64}$/)
+const PromotionCandidate = z.object({
+  source: z.enum(['sourcify', 'erc7730-registry', 'anchor-idl', 'program-registry']),
+  address: z.string().min(1).max(128), selectorOrDiscriminator: z.string().min(1).max(66),
+  name: z.string().min(1).max(128), signature: z.string().max(512).optional(),
+  inputs: z.array(z.object({ name: z.string().max(128), type: z.string().min(1).max(128) }).strict()).max(64),
+  accounts: z.array(z.object({ name: z.string().min(1).max(128), writable: z.boolean().optional(), signer: z.boolean().optional() }).strict()).max(64).optional(),
+  erc7730Display: z.object({
+    intent: z.string().min(1).max(128), interpolatedIntent: z.boolean().optional(),
+    hasIncludes: z.boolean(), requiredOrExcluded: z.boolean(), fieldsTruncated: z.boolean(),
+    fields: z.array(z.object({
+      path: z.string().max(256).optional(), label: z.string().max(128).optional(), format: z.string().max(64).optional(),
+      hasParams: z.boolean(), visible: z.string().max(128).optional(), encrypted: z.boolean(),
+    }).strict()).max(64),
+  }).strict().optional(),
+  matchQuality: z.string().max(64).optional(), verifiedAt: z.string().max(64).optional(), provenance: z.string().min(1).max(1024),
+}).strict()
+
+export const ClearSignPromotionBundleRequest = z.object({
+  version: z.literal(1), shapeKey: z.string().min(1).max(128), chain: z.enum(['Ethereum', 'Solana']),
+  candidate: PromotionCandidate, identityHash: Hash32.transform(value => value.replace(/^0x/, '').toLowerCase()),
+  createdAt: z.number().int().positive(), expiresAt: z.number().int().positive(),
+  fixtures: z.array(z.object({
+    transactionFingerprint: Hash32, payloadHash: Hash32, decodedFieldsHash: Hash32, effectsHash: Hash32,
+    provenance: z.enum(['user-opt-in', 'operator-reproduction', 'public-chain']),
+  }).strict()).min(1).max(100),
+  mutations: z.array(z.object({
+    id: z.string().min(1).max(128), kind: z.enum(['truncation', 'selector-or-discriminator', 'field-boundary', 'account-privilege', 'chain-or-contract']),
+    fixtureHash: Hash32, expected: z.enum(['reject', 'different-display', 'different-effect']),
+    observed: z.enum(['reject', 'different-display', 'different-effect', 'unexpected-pass']),
+  }).strict()).max(100),
+  deviceOracle: z.object({ firmwareVersion: z.string().min(1).max(64), artifactHash: Hash32, transcriptHash: Hash32, passed: z.boolean() }).strict(),
+}).strict()
+
+const ClearSignFixturePlanBase = {
+  payloadHex: z.string().regex(/^(0x)?(?:[0-9a-fA-F]{2})+$/).max(65_538),
+  transactionFingerprint: Hash32,
+  selectorOrDiscriminator: z.string().regex(/^(0x)?(?:[0-9a-fA-F]{2})+$/).max(66),
+  decodedFields: z.unknown(), effects: z.unknown(),
+  provenance: z.enum(['user-opt-in', 'operator-reproduction', 'public-chain']),
+}
+
+const ClearSignFinding = z.object({
+  code: z.string(), message: z.string(), severity: z.enum(['info', 'warning', 'danger']),
+})
+
+/** POST /clearsign/report response (shared/clearsign-report.ts ClearSignReport). */
+export const ClearSignReportResponse = z.object({
+  version: z.literal(1),
+  generatedAt: z.number(),
+  chain: z.enum(['Ethereum', 'Solana']),
+  transactionFingerprint: z.string(),
+  protectionLevel: z.enum(['P0', 'P1', 'P2', 'P3', 'P4', 'P5']),
+  headline: z.string(),
+  descriptor: z.object({
+    source: z.enum(['none', 'native', 'runtime', 'certified', 'erc7730']),
+    authenticated: z.boolean(),
+    format: z.enum(['ERC7730', 'EVM_METADATA', 'KKSOLSC1', 'FIRMWARE_NATIVE']).optional(),
+    label: z.string().optional(),
+    artifactHash: z.string().optional(),
+    codeIdentityBound: z.boolean().optional(),
+    expiresAt: z.number().optional(),
+    resolution: z.string().optional(),
+  }),
+  simulation: z.object({
+    version: z.literal(1),
+    chain: z.enum(['Ethereum', 'Solana']),
+    transactionFingerprint: z.string(),
+    status: z.enum(['success', 'revert', 'incomplete', 'unavailable']),
+    assetChanges: z.array(z.unknown()),
+    authorityChanges: z.array(z.unknown()),
+    invokedCode: z.array(z.unknown()),
+    warnings: z.array(ClearSignFinding),
+    unknowns: z.array(ClearSignFinding),
+  }).passthrough(),
+  findings: z.array(ClearSignFinding),
+  limitations: z.array(ClearSignFinding),
+  claims: z.array(z.object({
+    source: z.enum(['transaction-bytes', 'authenticated-definition', 'simulation']),
+    statement: z.string(),
+  })),
+  definitionReview: z.object({}).passthrough().optional(),
+  rating: z.object({}).passthrough().optional(),
+})
+
+/** Opt-in raw material is used only to create an ephemeral device-oracle plan. */
+export const ClearSignFixturePlanRequest = z.discriminatedUnion('chain', [
+  z.object({
+    ...ClearSignFixturePlanBase, chain: z.literal('Ethereum'),
+    context: z.object({ chainId: z.number().int().positive().max(Number.MAX_SAFE_INTEGER), contract: EthAddress }).strict(),
+  }).strict(),
+  z.object({
+    ...ClearSignFixturePlanBase, chain: z.literal('Solana'),
+    context: z.object({
+      accountPrivileges: z.array(z.object({
+        index: z.number().int().nonnegative().max(255), signer: z.boolean(), writable: z.boolean(),
+      }).strict()).min(1).max(255),
+    }).strict(),
+  }).strict(),
+])
+
+export const ClearSignPromotionReviewRequest = z.object({
+  bundleHash: Hash32.transform(value => value.replace(/^0x/, '').toLowerCase()),
+  reviewerPublicKey: z.string().regex(/^(0x)?(?:[0-9a-fA-F]{66}|[0-9a-fA-F]{130})$/),
+  role: z.enum(['semantics-review', 'security-review']), decision: z.enum(['approve', 'reject']),
+  reviewedAt: z.number().int().positive(), signature: z.string().regex(/^(0x)?[0-9a-fA-F]{130}$/),
+}).strict()
+
+export const ClearSignPromotionRevokeRequest = z.object({ bundleHash: Hash32, reason: z.string().min(1).max(240) }).strict()
+export const ClearSignPromotionEvaluateRequest = z.object({ bundleHash: Hash32 }).strict()
+export const ClearSignArtifactImportRequest = z.object({
+  bundleHash: Hash32.transform(value => value.replace(/^0x/, '').toLowerCase()),
+  payloadHex: z.string().regex(/^(0x)?[0-9a-fA-F]+$/).max(4096),
+  signatureHex: z.string().regex(/^(0x)?[0-9a-fA-F]{128}$/),
+  recovery: z.union([z.literal(27), z.literal(28)]).optional(),
+  certificateHex: z.string().regex(/^(0x)?[0-9a-fA-F]{278}$/),
+}).strict()
+export const ClearSignArtifactRevokeRequest = z.object({ bundleHash: Hash32, reason: z.string().min(1).max(240) }).strict()
+
 /** POST /solana/sign-message — sign an arbitrary message (firmware type 754) */
 export const SolanaSignMessageRequest = z.object({
   address_n: z.array(z.number().int()).optional(),
   addressNList: z.array(z.number().int()).optional(),
   message: z.string().min(1),
   show_display: z.boolean().optional(),
+  /** The account the dapp believes it is signing with (base58). When present
+   *  and different from the device's derived address → 409 (stale account). */
+  pubkey: z.string().optional(),
+  address: z.string().optional(),
 }).strip()
 
 
@@ -537,6 +701,8 @@ export const EthSignTransactionResponse = z.object({
   r: z.string(),
   s: z.string(),
   serialized: z.string(),
+  /** The ClearSign report shown at approval, when the signing gate built one. */
+  clearSignReport: ClearSignReportResponse.optional(),
 }).passthrough()
 
 /** UTXO sign-transaction response */

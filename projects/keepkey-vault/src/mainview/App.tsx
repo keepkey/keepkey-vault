@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react"
+import { resolveAppPhase, showWatchOnly } from "../shared/app-phase"
 import { Box, Flex, Text, Button } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
 import { PinEntry } from "./components/device/PinEntry"
@@ -48,7 +49,6 @@ import { SwapRpcMount } from "./components/SwapRpcMount"
 import { NAV_CONTENT_OFFSET, NAV_CONTENT_OFFSET_WITH_BANNER } from "./layout"
 import type { PinRequestType, PairingRequestInfo, SigningRequestInfo, ApiLogEntry, AppSettings, EmulatorStatus, CustomChain } from "../shared/types"
 
-type AppPhase = "splash" | "claimed" | "setup" | "ready"
 type SigningPhase = "approve" | "sending-payload" | "device-confirm"
 
 const SIGNING_PAYLOAD_MIN_MS = 15000
@@ -59,6 +59,10 @@ function App() {
 	const update = useUpdateState()
 	const [wizardComplete, setWizardComplete] = useState(false)
 	const [setupInProgress, setSetupInProgress] = useState(false)
+	// Wallet generated during this session's setup: balances are known to be 0,
+	// so the dashboard shows 0 while it confirms instead of a wall of spinners.
+	const [freshWallet, setFreshWallet] = useState(false)
+	const handleWalletCreated = useCallback(() => setFreshWallet(true), [])
 	// Session-only firmware-update skip. When the user chooses "skip" in the OOB
 	// wizard's firmware step we let them into the app on the older firmware, but
 	// we deliberately never persist this — it resets on disconnect so the update
@@ -272,6 +276,8 @@ function App() {
 	const [pinRequestType, setPinRequestType] = useState<PinRequestType | null>(null)
 	const [pinDismissed, setPinDismissed] = useState(false)
 	const [pinFailed, setPinFailed] = useState(false)
+	const [pinErrorDetail, setPinErrorDetail] = useState<{ code?: number; message?: string } | null>(null)
+	const [pinRequestSeq, setPinRequestSeq] = useState(0)
 	const pinDismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
 	useEffect(() => {
@@ -279,6 +285,7 @@ function App() {
 			if (pinDismissTimer.current) { clearTimeout(pinDismissTimer.current); pinDismissTimer.current = null }
 			setPinDismissed(false) // new request from device resets dismiss
 			setPinRequestType(payload.type as PinRequestType)
+			setPinRequestSeq((n) => n + 1) // device re-scrambled its matrix — clear partial entry
 		})
 	}, [])
 
@@ -286,7 +293,8 @@ function App() {
 	// Reset pinFailed first so the false→true transition fires the
 	// useEffect inside PinEntry even if it was already true.
 	useEffect(() => {
-		return onRpcMessage("pin-error", () => {
+		return onRpcMessage("pin-error", (detail) => {
+			setPinErrorDetail(detail ?? null)
 			setPinFailed(false)
 			// Batch in next tick so React sees the transition
 			queueMicrotask(() => setPinFailed(true))
@@ -314,9 +322,8 @@ function App() {
 	}, [])
 
 	const handlePinWipe = useCallback(async () => {
-		try {
-			await rpcRequest("wipeDevice", undefined, 0)
-		} catch (e) { console.error("wipeDevice from PIN:", e) }
+		// Errors propagate to PinEntry, which shows them and keeps the overlay open.
+		await rpcRequest("wipeDevice", undefined, 0)
 		setPinRequestType(null)
 		setPinDismissed(true)
 		setPinFailed(false)
@@ -679,10 +686,10 @@ function App() {
 
 	// Reset portfolioLoaded only on disconnect (not transient state changes)
 	useEffect(() => {
-		if (deviceState.state === "disconnected") setPortfolioLoaded(false)
+		if (deviceState.state === "disconnected") { setPortfolioLoaded(false); setFreshWallet(false) }
 	}, [deviceState.state])
 
-	// Watch-only: check cache when disconnected, auto-exit when device connects
+	// Watch-only: note the cache when disconnected (tiles open it), auto-exit when a device connects
 	useEffect(() => {
 		if (deviceState.state === "disconnected") {
 			rpcRequest<{ available: boolean; deviceLabel?: string; lastSynced?: number }>("checkWatchOnlyCache")
@@ -691,10 +698,8 @@ function App() {
 						setWatchOnlyAvailable(true)
 						setWatchOnlyLabel(res.deviceLabel || "")
 						setWatchOnlyLastSynced(res.lastSynced || 0)
-						// Unplugging shouldn't dump the user back to the splash screen with
-						// their portfolio gone. Cached data exists → show it, read-only.
-						// The else-branch below auto-exits the moment a device reconnects.
-						setWatchOnlyMode(true)
+						// Unplugging returns to the home screen. Watch-only opens only when
+						// the user picks a wallet tile there (owner decision 2026-10-06).
 					}
 				})
 				.catch(() => {})
@@ -829,19 +834,11 @@ function App() {
 
 	const oobLock = !wizardComplete && (setupInProgress || oobEnteredRef.current)
 
-	const phase: AppPhase =
-		// oobLock takes priority — during OOB, transient claim errors are expected
-		// (device reboots, brief LIBUSB_ERROR_ACCESS). Don't unmount the wizard.
-		oobLock ? "setup"
-		: isClaimed ? "claimed"
-		: ["disconnected", "connected_unpaired", "error"].includes(deviceState.state) ? "splash"
-		// Firmware update skipped this session — let the user into the app on the
-		// older firmware. TopNav keeps showing the "vX → vY" update reminder.
-		: firmwareSkipped && deviceState.state === "needs_firmware" ? "ready"
-		: !wizardComplete && ["bootloader", "needs_firmware", "needs_init"].includes(deviceState.state) ? "setup"
-		: deviceState.state === "ready" ? "ready"
-		: ["needs_pin", "needs_passphrase"].includes(deviceState.state) ? "splash"
-		: "splash"
+	const phase = resolveAppPhase({ state: deviceState.state, oobLock, isClaimed, firmwareSkipped, wizardComplete })
+
+	useEffect(() => {
+		rpcRequest("logOnboarding", { event: `phase=${phase} state=${deviceState.state} wizardComplete=${wizardComplete} setupInProgress=${setupInProgress} oobEntered=${oobEnteredRef.current} firmwareSkipped=${firmwareSkipped}` }).catch(() => {})
+	}, [phase, deviceState.state, wizardComplete, setupInProgress, firmwareSkipped])
 
 	// ── Overlays (render above everything) ──────────────────────────
 	// PIN is highest priority (z-index 2010) — must show above signing
@@ -859,7 +856,7 @@ function App() {
 	) : null
 
 	const pinOverlay = pinRequestType && !passphraseRequested ? (
-		<PinEntry type={pinRequestType} failed={pinFailed} onSubmit={handlePinSubmit} onCancel={handlePinCancel} onWipe={handlePinWipe} />
+		<PinEntry type={pinRequestType} failed={pinFailed} errorDetail={pinErrorDetail} requestSeq={pinRequestSeq} onSubmit={handlePinSubmit} onCancel={handlePinCancel} onWipe={handlePinWipe} />
 	) : null
 
 	const charOverlay = (charRequest || recoveryError) ? (
@@ -909,8 +906,8 @@ function App() {
 
 	const incomingTxToast = <IncomingTxToast tx={incomingTx} onDismiss={dismissIncomingTx} />
 
-	// Watch-only mode: render dashboard with cached data (read-only)
-	if (watchOnlyMode) {
+	// Watch-only mode: render dashboard with cached data (read-only) — never over setup
+	if (showWatchOnly(watchOnlyMode, phase)) {
 		return (
 			<>{resizeHandles}{updateBanner}{firmwareDropZone}
 				<Flex direction="column" h="100vh" bg="transparent" color="kk.textPrimary">
@@ -1005,19 +1002,6 @@ function App() {
 							<DeviceGrid
 								onViewPortfolio={(id, label) => { setWatchOnlyDeviceId(id); setWatchOnlyLabel(label); setWatchOnlyMode(true) }}
 								onReady={() => setGridReady(true)}
-								onEnableEmulator={async () => {
-									const settings = await rpcRequest<AppSettings>('setEmulatorEnabled', { enabled: true }, 10000)
-									setEmulatorEnabled(settings.emulatorEnabled)
-									// Enabling the flag alone is a dead end on first run: with no flash
-									// images DeviceGrid has nothing to show and the Start card vanishes.
-									// Bootstrap and boot a default emulator wallet so "Start emulator"
-									// actually starts one (mirrors the DeviceSettingsDrawer install path).
-									const wallets = await rpcRequest<Array<{ name: string }>>('emulatorListWallets').catch(() => [])
-									if (wallets.length === 0) {
-										try { await rpcRequest('emulatorPair', undefined, 10000) } catch { /* may already be paired */ }
-										await rpcRequest('emulatorInit', { flashName: 'default' }, 30000)
-									}
-								}}
 								emulatorEnabled={emulatorEnabled}
 							/>
 							{/* Windows: a connected KeepKey can be invisible to the app if WinUSB
@@ -1033,8 +1017,9 @@ function App() {
 	if (phase === "setup") {
 		return (
 			<>{splashNav}{resizeHandles}{updateBanner}{firmwareDropZone}{signingOverlay}{pairingOverlay}{passphraseOverlay}{charOverlay}{pinOverlay}
-				<OobSetupWizard onComplete={() => { setWizardComplete(true); setSetupInProgress(false) }} onSkipFirmware={() => { setFirmwareSkipped(true); setWizardComplete(true); setSetupInProgress(false) }} onSetupInProgress={setSetupInProgress} onWordCountChange={setRecoveryWordCount} />
-				<Box position="fixed" right="24px" bottom="24px" zIndex={1900} textAlign="right">
+				<OobSetupWizard onComplete={() => { setWizardComplete(true); setSetupInProgress(false) }} onSkipFirmware={() => { setFirmwareSkipped(true); setWizardComplete(true); setSetupInProgress(false) }} onSetupInProgress={setSetupInProgress} onWordCountChange={setRecoveryWordCount} onWalletCreated={handleWalletCreated} />
+				{/* Developer-only: shown once the emulator is enabled in Settings. */}
+				{emulatorEnabled && <Box position="fixed" right="24px" bottom="24px" zIndex={1900} textAlign="right">
 					{emulatorStartError && <Text mb="2" maxW="340px" fontSize="12px" color="kk.error">{emulatorStartError}</Text>}
 					<Button
 						onClick={startEmulatorFromSetup}
@@ -1048,7 +1033,7 @@ function App() {
 					>
 						{startingEmulator ? "Starting Emulator…" : "Use Emulator"}
 					</Button>
-				</Box>
+				</Box>}
 			</>
 		)
 	}
@@ -1109,7 +1094,13 @@ function App() {
 				/>
 				<Flex flex="1" direction="column" overflow="auto" pt={showBanner ? NAV_CONTENT_OFFSET_WITH_BANNER : NAV_CONTENT_OFFSET} pb={bottomBar ? "38px" : "4"} transition="padding-top 0.2s">
 				{/* TopNav offset plus banner height when visible. */}
-					{activeTab === "vault" && <Dashboard onLoaded={handlePortfolioLoaded} onOpenSettings={() => setSettingsOpen(true)} firmwareVersion={deviceState.firmwareVersion} firmwareVariant={deviceState.firmwareVariant} forceRefresh={wizardComplete} onForceRefreshConsumed={() => setWizardComplete(false)} isHiddenWallet={deviceState.isHiddenWallet} />}
+					{/* Kept mounted while another tab is open: a remount re-ran the mount
+					    fetch, so coming back from Address Book refreshed balances every
+					    time (always for passphrase wallets, which keep no cache). Only
+					    the refresh button fetches. */}
+					<Flex flex="1" direction="column" display={activeTab === "vault" ? "flex" : "none"}>
+						<Dashboard onLoaded={handlePortfolioLoaded} onOpenSettings={() => setSettingsOpen(true)} firmwareVersion={deviceState.firmwareVersion} firmwareVariant={deviceState.firmwareVariant} forceRefresh={wizardComplete} onForceRefreshConsumed={() => setWizardComplete(false)} isHiddenWallet={deviceState.isHiddenWallet} knownEmpty={freshWallet} />
+					</Flex>
 					{activeTab === "explore" && <AppStore onOpenApp={handleOpenApp} onOpenKeepKey={handleOpenKeepKey} />}
 					{activeTab === "addresses" && <AddressBookView />}
 				</Flex>

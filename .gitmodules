@@ -1,7 +1,7 @@
 [submodule "modules/hdwallet"]
 	path = modules/hdwallet
-	url = https://github.com/BitHighlander/hdwallet
-	branch = codex/certified-metadata-qa
+	url = https://github.com/keepkey/hdwallet
+	branch = master
 [submodule "modules/proto-tx-builder"]
 	path = modules/proto-tx-builder
 	url = https://github.com/BitHighlander/proto-tx-builder

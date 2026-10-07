@@ -2,24 +2,27 @@
   "version": "7.16.0",
   "source": {
     "repository": "keepkey/keepkey-vault",
-    "runId": 35066907070,
-    "headSha": "a7bf83d98d01d4b685967cd0aa4198aa9a53e4d9",
-    "artifactId": 10434508722,
-    "artifactName": "certified-emulator-7.16.0-macos13-a7bf83d98d01d4b685967cd0aa4198aa9a53e4d9",
-    "artifactDigest": "sha256:42fd9fe57a7eabbc91877921b580c8da1a511c8b728f9b2695ef754dcc156e45",
+    "runId": 37527545005,
+    "headSha": "c0a524fc52a7d330bd6303c5c351370b684bda8b",
+    "artifactId": 11443287393,
+    "artifactName": "certified-emulator-7.16.0-macos13-c0a524fc52a7d330bd6303c5c351370b684bda8b",
+    "artifactDigest": "sha256:4000c1c247eacc84e0d402a149cec4b788822f4d51e80f573ab409e5529ec8f4",
     "macArchive": "",
     "macLibraryPath": "projects/keepkey-vault/emulator-bundle/libkkemu.dylib",
     "windowsLibrary": "projects/keepkey-vault/emulator-bundle/libkkemu.dll",
     "armCorePath": "artifacts/electrobun-core-darwin-arm64.tar.gz",
-    "armCoreSha256": "06eb1f9fd23638da27f6a4f62fd5aff6996012e7ec9f9a5f2499d09c4b1f9f1b"
+    "armCoreSha256": "3d06c1816c3dda32253857bb3f1d58f006a4e89a642945075d4b439ebfe23673"
   },
   "files": {
     "libkkemu.dylib": {
-      "sha256": "328c5784648b56ba29eb80fee5e2784de33f792292902605d7d93e0e0e5e51b7",
-      "architectures": ["arm64", "x86_64"]
+      "sha256": "a626eeb3dc85021d79dfbdfba69aef062ada150680229a676d0be263ddcae1ee",
+      "architectures": [
+        "arm64",
+        "x86_64"
+      ]
     },
     "libkkemu.dll": {
-      "sha256": "f93495818a6d4349fffdccacdf00a8fa3684dee6a7567ff5a082032d8074b55d",
+      "sha256": "e723e2677a4c41edcccae80d3f26a23b5174b142f95f516666fc01f7af36031d",
       "architecture": "x86_64"
     }
   },

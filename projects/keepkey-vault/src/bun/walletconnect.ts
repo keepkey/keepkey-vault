@@ -11,12 +11,21 @@ import { buildApprovedNamespaces, getSdkError } from '@walletconnect/utils'
 import { formatJsonRpcResult, formatJsonRpcError } from '@walletconnect/jsonrpc-utils'
 import type { SessionTypes, SignClientTypes } from '@walletconnect/types'
 import bs58 from 'bs58'
-import type { SigningRequestInfo, WcSessionInfo } from '../shared/types'
+import type { ClearSignObservationDraft, ClearSignObservationOutcome, SigningRequestInfo, WcSessionInfo } from '../shared/types'
 import { evmAddressPath } from './evm-addresses'
 import { verifyEvmSigner } from './evm-rpc'
+import { applyEvmTxPreview, evmPriorityFee } from './evm-signing-preview'
 import { buildSolanaMessageDecodedInfo } from './solana-message-preview'
 import { buildSolanaDecodedInfo } from './solana-clearsign'
-import { requiresSolanaBlindSigningConsent } from './solana-consent'
+import { applySolanaSigningGates } from './solana-consent'
+import { simulateEvmEffects } from './evm-effects'
+import { simulateSolanaEffects } from './solana-effects'
+import { buildClearSignReport, solanaDecodedReportFindings } from '../shared/clearsign-report'
+import { uniswapReportFindingsWithState } from './uniswap-report'
+import { classifyEffectExposure, observeEvmCall, observeEvmTypedData, observeMalformedSolanaTransaction, observeSolanaTransaction } from './clearsign-observation'
+import { resolveEvmSchema, type SignedEvmSchema } from './evm-schema-registry'
+import { supportsCertifiedClearSign } from './solana-certified-policy'
+import { decodeEIP712 } from './eip712-decoder'
 
 function base64ToBase58(base64: string): string {
   return bs58.encode(Buffer.from(base64, 'base64'))
@@ -49,14 +58,17 @@ function assertChainIdMatches(txChainId: unknown, sessionChainId: number) {
   }
 }
 
-/** Attach the same clear-sign preview and conservative firmware-policy gate
- *  used by the REST route. x402's v0 transaction has no lookup tables, so its
- *  full preview is available without an RPC read. Transactions that do use an
- *  ALT remain explicitly opaque in WalletConnect until the accounts can be
- *  independently resolved. */
+/** Attach the same clear-sign preview and signing gates used by the REST
+ *  route. x402's v0 transaction has no lookup tables, so its full preview is
+ *  available without an RPC read. Transactions that do use an ALT remain
+ *  explicitly opaque in WalletConnect until the accounts can be independently
+ *  resolved. */
 async function attachSolanaTransactionPreview(
   signingInfo: SigningRequestInfo,
   transactionBase64: string,
+  firmwareVersion: string | undefined,
+  owner?: string,
+  endpoint?: string,
 ): Promise<void> {
   try {
     signingInfo.solanaDecoded = await buildSolanaDecodedInfo(
@@ -67,12 +79,17 @@ async function attachSolanaTransactionPreview(
     signingInfo.solanaDecodeError = `${e?.name || 'Error'}: ${e?.message || String(e)}`
   }
 
-  signingInfo.requiresBlindSigningConsent = requiresSolanaBlindSigningConsent(
-    signingInfo.solanaDecoded,
-    false,
-  )
-  if (signingInfo.requiresBlindSigningConsent) {
-    signingInfo.needsBlindSigning = true
+  applySolanaSigningGates(signingInfo, transactionBase64, firmwareVersion)
+  if (owner && endpoint) {
+    const simulation = await simulateSolanaEffects(transactionBase64, owner, endpoint)
+    const decodedFindings = solanaDecodedReportFindings(signingInfo.solanaDecoded)
+    signingInfo.clearSignReport = buildClearSignReport({
+      requestedLevel: simulation.status === 'success' ? 'P3' : 'P1',
+      descriptor: { source: 'none', authenticated: false },
+      simulation,
+      hostFindings: decodedFindings.findings,
+      hostLimitations: decodedFindings.limitations,
+    })
   }
 }
 
@@ -162,10 +179,20 @@ export interface WcCallbacks {
   getSolanaAccountInfo: (caipChain: string) => Promise<{ address: string; addressNList: number[] } | null>
   /** Sign a Solana message (raw bytes, base58 per WC spec). Returns 64-byte ed25519 signature. */
   solanaSignMessageRaw: (params: { addressNList: number[]; messageBase58: string }) => Promise<{ signatureBase64: string }>
+  /** Connected device's firmware version, e.g. "7.15.0". Undefined if unknown. */
+  getFirmwareVersion: () => string | undefined
   /** Sign a Solana transaction (full base64 tx including empty sig slots). Returns assembled signed tx + signature. */
-  solanaSignTransactionRaw: (params: { addressNList: number[]; signerAddress: string; transactionBase64: string }) => Promise<{ transactionBase64: string; signatureBase64: string }>
+  solanaSignTransactionRaw: (params: { addressNList: number[]; signerAddress: string; transactionBase64: string }) => Promise<{ transactionBase64: string; signatureBase64: string; clearSignPromotionBundleHash?: string }>
   /** Broadcast a fully-signed serialized transaction via Pioneer. Returns the on-chain txid. */
   broadcastViaPioneer: (params: { networkId: string; serialized: string }) => Promise<string>
+  /** Configured Solana endpoint used for pre-sign simulation. */
+  getSolanaRpcEndpoint: () => string
+  /** Explicit per-chain endpoint for EVM simulation; Pioneer fallback is returned when unset. */
+  getEvmSimulationEndpoint: (chainId: number) => string
+  /** Local privacy-safe ClearSign demand telemetry. Hidden wallets return undefined. */
+  recordClearSignObservation: (draft: ClearSignObservationDraft) => string | undefined
+  authenticateClearSignObservation: (id: string, source: 'runtime' | 'certified' | 'erc7730', authenticatedComponentCount?: number, codeIdentityBound?: boolean, promotionBundleHash?: string) => void
+  finalizeClearSignObservation: (id: string, outcome: Exclude<ClearSignObservationOutcome, 'pending'>, errorClass?: string) => void
   /** Show signing approval to user — returns true if approved. */
   requestSigningApproval: (info: SigningRequestInfo) => Promise<boolean>
   /** Dismiss the signing overlay. */
@@ -705,19 +732,37 @@ export class WalletConnectManager {
           chainId: 0,
           data: transaction,
         }
-        await attachSolanaTransactionPreview(signingInfo, transaction)
-        const approved = await this.callbacks.requestSigningApproval(signingInfo)
-        if (!approved) throw new Error('User rejected signing')
+        await attachSolanaTransactionPreview(signingInfo, transaction, this.callbacks.getFirmwareVersion(), account.address, this.callbacks.getSolanaRpcEndpoint())
+        const observationId = this.recordSolanaObservation(signingInfo, transaction)
+        const approvalStartedAt = Date.now()
+        let approved: boolean
+        try { approved = await this.callbacks.requestSigningApproval(signingInfo) }
+        catch (error) {
+          if (observationId) this.callbacks.finalizeClearSignObservation(observationId, 'failed', 'approval-ui')
+          this.callbacks.dismissSigning(signingId)
+          throw error
+        }
+        if (!approved) {
+          if (observationId) this.callbacks.finalizeClearSignObservation(observationId, Date.now() - approvalStartedAt >= 119_000 ? 'timed-out' : 'rejected')
+          this.callbacks.dismissSigning(signingId)
+          throw new Error('User rejected signing')
+        }
         try {
-          const { transactionBase64, signatureBase64 } = await this.callbacks.solanaSignTransactionRaw({
+          const { transactionBase64, signatureBase64, clearSignPromotionBundleHash } = await this.callbacks.solanaSignTransactionRaw({
             addressNList: account.addressNList,
             signerAddress: account.address,
             transactionBase64: transaction,
           })
-          return {
+          const result = {
             signature: base64ToBase58(signatureBase64),
             transaction: transactionBase64,
           }
+          if (observationId && clearSignPromotionBundleHash) this.callbacks.authenticateClearSignObservation(observationId, 'certified', 1, true, clearSignPromotionBundleHash)
+          if (observationId) this.callbacks.finalizeClearSignObservation(observationId, 'signed')
+          return result
+        } catch (error) {
+          if (observationId) this.callbacks.finalizeClearSignObservation(observationId, 'failed', 'device-or-transport')
+          throw error
         } finally {
           this.callbacks.dismissSigning(signingId)
         }
@@ -736,11 +781,23 @@ export class WalletConnectManager {
           chainId: 0,
           data: transaction,
         }
-        await attachSolanaTransactionPreview(signingInfo, transaction)
-        const approved = await this.callbacks.requestSigningApproval(signingInfo)
-        if (!approved) throw new Error('User rejected signing')
+        await attachSolanaTransactionPreview(signingInfo, transaction, this.callbacks.getFirmwareVersion(), account.address, this.callbacks.getSolanaRpcEndpoint())
+        const observationId = this.recordSolanaObservation(signingInfo, transaction)
+        const approvalStartedAt = Date.now()
+        let approved: boolean
+        try { approved = await this.callbacks.requestSigningApproval(signingInfo) }
+        catch (error) {
+          if (observationId) this.callbacks.finalizeClearSignObservation(observationId, 'failed', 'approval-ui')
+          this.callbacks.dismissSigning(signingId)
+          throw error
+        }
+        if (!approved) {
+          if (observationId) this.callbacks.finalizeClearSignObservation(observationId, Date.now() - approvalStartedAt >= 119_000 ? 'timed-out' : 'rejected')
+          this.callbacks.dismissSigning(signingId)
+          throw new Error('User rejected signing')
+        }
         try {
-          const { transactionBase64 } = await this.callbacks.solanaSignTransactionRaw({
+          const { transactionBase64, clearSignPromotionBundleHash } = await this.callbacks.solanaSignTransactionRaw({
             addressNList: account.addressNList,
             signerAddress: account.address,
             transactionBase64: transaction,
@@ -750,7 +807,12 @@ export class WalletConnectManager {
             networkId: chainId,
             serialized: transactionBase64,
           })
+          if (observationId && clearSignPromotionBundleHash) this.callbacks.authenticateClearSignObservation(observationId, 'certified', 1, true, clearSignPromotionBundleHash)
+          if (observationId) this.callbacks.finalizeClearSignObservation(observationId, 'signed')
           return { signature: txid }
+        } catch (error) {
+          if (observationId) this.callbacks.finalizeClearSignObservation(observationId, 'failed', 'device-network-or-transport')
+          throw error
         } finally {
           this.callbacks.dismissSigning(signingId)
         }
@@ -762,6 +824,26 @@ export class WalletConnectManager {
   }
 
   // ── JSON-RPC helper ─────────────────────────────────────────────
+
+  private recordSolanaObservation(signingInfo: SigningRequestInfo, transaction: string): string | undefined {
+    const report = signingInfo.clearSignReport
+    let draft: ClearSignObservationDraft
+    try {
+      draft = observeSolanaTransaction({
+        rawTxBase64: transaction,
+        source: report?.descriptor.source,
+        hostDecoded: Boolean(signingInfo.solanaDecoded),
+        simulated: report?.simulation.status === 'success',
+        simulationStatus: report?.simulation.status,
+        exposureClass: classifyEffectExposure(report?.simulation),
+        definitionResolution: report?.descriptor.resolution,
+      })
+    } catch {
+      draft = observeMalformedSolanaTransaction(transaction)
+    }
+    if (report) draft.protectionLevel = report.protectionLevel
+    return this.callbacks.recordClearSignObservation(draft)
+  }
 
   private async rpcCall(chainId: number, method: string, params: any[]): Promise<any> {
     const rpcUrl = CHAIN_RPC[chainId]
@@ -828,18 +910,34 @@ export class WalletConnectManager {
       chain: 'eth',
       from: this.callbacks.getEvmAddressInfo()?.address,
       chainId: typedData.domain?.chainId ? Number(typedData.domain.chainId) : chainId,
+      typedDataDecoded: decodeEIP712(typedData),
     }
 
-    const approved = await this.callbacks.requestSigningApproval(signingInfo)
-    if (!approved) throw new Error('User rejected signing')
+    const observationId = this.callbacks.recordClearSignObservation(observeEvmTypedData({
+      typedData, chainId: signingInfo.chainId, hostDecoded: true,
+    }))
+    const approvalStartedAt = Date.now()
+    let approved: boolean
+    try { approved = await this.callbacks.requestSigningApproval(signingInfo) }
+    catch (error) {
+      if (observationId) this.callbacks.finalizeClearSignObservation(observationId, 'failed', 'approval-ui')
+      throw error
+    }
+    if (!approved) {
+      if (observationId) this.callbacks.finalizeClearSignObservation(observationId, Date.now() - approvalStartedAt >= 119_000 ? 'timed-out' : 'rejected')
+      throw new Error('User rejected signing')
+    }
 
     try {
       const result = await this.callbacks.ethSignTypedData({
         addressNList,
         typedData,
       })
-
+      if (observationId) this.callbacks.finalizeClearSignObservation(observationId, 'signed')
       return result?.signature ?? result
+    } catch (error: any) {
+      if (observationId) this.callbacks.finalizeClearSignObservation(observationId, 'failed', 'device-or-transport')
+      throw error
     } finally {
       this.callbacks.dismissSigning(signingId)
     }
@@ -876,12 +974,72 @@ export class WalletConnectManager {
       data: tx.data,
       chainId: effectiveChainId,
     }
+    // Same calldata decode + verdict as REST: native firmware decode, else a
+    // 7.16 KeepKey-certified schema, else AdvancedMode (blind).
+    await applyEvmTxPreview(signingInfo, tx.to, tx.data, effectiveChainId, this.callbacks.getFirmwareVersion(), undefined, '[WC]')
 
-    const approved = await this.callbacks.requestSigningApproval(signingInfo)
-    if (!approved) throw new Error('User rejected signing')
+    const from = tx.from ?? this.callbacks.getEvmAddressInfo()?.address
+    let clearSignSchema: SignedEvmSchema | undefined
+    try {
+      clearSignSchema = await resolveEvmSchema(
+        effectiveChainId, tx.to, tx.data,
+        supportsCertifiedClearSign(this.callbacks.getFirmwareVersion()),
+      )
+    } catch (error: any) {
+      this.callbacks.log(`[WC] ClearSign schema lookup unavailable: ${error?.message || error}`)
+      throw error
+    }
+    if (from) {
+      const simulation = await simulateEvmEffects({
+        chainId: effectiveChainId, from, to: tx.to, data: tx.data || '0x',
+        value: tx.value || '0x0', gas: tx.gas || tx.gasLimit,
+        gasPrice: tx.gasPrice, maxFeePerGas: tx.maxFeePerGas,
+        maxPriorityFeePerGas: tx.maxPriorityFeePerGas, nonce: tx.nonce,
+      }, this.callbacks.getEvmSimulationEndpoint(effectiveChainId))
+      const universalRouterFindings = await uniswapReportFindingsWithState(
+        tx.data, effectiveChainId, tx.to, from, this.callbacks.getEvmSimulationEndpoint(effectiveChainId),
+      )
+      signingInfo.clearSignReport = buildClearSignReport({
+        requestedLevel: simulation.status === 'success' ? 'P3' : universalRouterFindings.complete ? 'P2' : 'P1',
+        descriptor: clearSignSchema ? {
+          source: clearSignSchema.keyId === 0x80 ? 'certified' : 'runtime',
+          authenticated: false,
+          format: 'EVM_METADATA',
+          label: clearSignSchema.method,
+        } : { source: 'none', authenticated: false },
+        simulation,
+        hostFindings: universalRouterFindings.findings,
+        hostLimitations: universalRouterFindings.limitations,
+      })
+    }
+    const report = signingInfo.clearSignReport
+    const observation = observeEvmCall({
+      chainId: effectiveChainId, to: tx.to, data: tx.data,
+      source: report?.descriptor.source,
+      simulated: report?.simulation.status === 'success',
+      simulationStatus: report?.simulation.status,
+      exposureClass: classifyEffectExposure(report?.simulation),
+      definitionResolution: report?.descriptor.resolution,
+    })
+    if (report) observation.protectionLevel = report.protectionLevel
+    const observationId = this.callbacks.recordClearSignObservation(observation)
+    const approvalStartedAt = Date.now()
+    let approved: boolean
+    try { approved = await this.callbacks.requestSigningApproval(signingInfo) }
+    catch (error) {
+      if (observationId) this.callbacks.finalizeClearSignObservation(observationId, 'failed', 'approval-ui')
+      this.callbacks.dismissSigning(signingId)
+      throw error
+    }
+    if (!approved) {
+      if (observationId) this.callbacks.finalizeClearSignObservation(
+        observationId, Date.now() - approvalStartedAt >= 119_000 ? 'timed-out' : 'rejected',
+      )
+      this.callbacks.dismissSigning(signingId)
+      throw new Error('User rejected signing')
+    }
 
     try {
-      const from = tx.from ?? this.callbacks.getEvmAddressInfo()?.address
       if (!from) throw new Error('Missing sender address')
 
       // Fetch nonce if not provided (most dApps omit it)
@@ -909,18 +1067,35 @@ export class WalletConnectManager {
         nonce,
         gasLimit,
       }
+      if (clearSignSchema) msg.txMetadata = {
+        signedPayload: clearSignSchema.signedPayload,
+        keyId: clearSignSchema.keyId,
+      }
 
       // EIP-1559 vs legacy gas — fetch from network if not provided
       if (tx.maxFeePerGas) {
         msg.maxFeePerGas = tx.maxFeePerGas
         // Fetch tip if omitted — 0x0 works but produces slow txs
-        msg.maxPriorityFeePerGas = tx.maxPriorityFeePerGas
+        const prio = tx.maxPriorityFeePerGas
           ?? await this.rpcCall(effectiveChainId, 'eth_maxPriorityFeePerGas', []).catch(() => '0x59682F00') // 1.5 gwei fallback
+        // Canonical RLP needs a zero priority fee as the EMPTY string, not a
+        // 0x00 byte (same as REST /eth/sign-transaction) or the tx recovers to
+        // the wrong signer.
+        msg.maxPriorityFeePerGas = evmPriorityFee(prio)
       } else if (tx.gasPrice) {
         msg.gasPrice = tx.gasPrice
       } else {
         // Neither provided — fetch from network
         msg.gasPrice = await this.rpcCall(effectiveChainId, 'eth_gasPrice', [])
+      }
+
+      // Certified schema attached at preview time → hand the device its bytes.
+      const decoded = signingInfo.calldataDecoded
+      if (decoded?.signedInsightBlob) {
+        msg.txMetadata = {
+          signedPayload: new Uint8Array(Buffer.from(decoded.signedInsightBlob, 'base64')),
+          keyId: decoded.insightKeyId,
+        }
       }
 
       const result = await this.callbacks.ethSignTx(msg)
@@ -933,13 +1108,22 @@ export class WalletConnectManager {
       // mangled pre-image is accepted by RPC nodes and then silently dropped
       // from the mempool; see verifyEvmSigner in evm-rpc.ts.
       await verifyEvmSigner(result.serialized, from)
+      if (observationId && clearSignSchema) this.callbacks.authenticateClearSignObservation(
+        observationId, clearSignSchema.keyId === 0x80 ? 'certified' : 'runtime', 1,
+        clearSignSchema.source === 'promoted-local', clearSignSchema.bundleHash,
+      )
 
       if (broadcast) {
         const txHash = await this.rpcCall(effectiveChainId, 'eth_sendRawTransaction', [result.serialized])
+        if (observationId) this.callbacks.finalizeClearSignObservation(observationId, 'signed')
         return txHash
       }
 
+      if (observationId) this.callbacks.finalizeClearSignObservation(observationId, 'signed')
       return result.serialized
+    } catch (error) {
+      if (observationId) this.callbacks.finalizeClearSignObservation(observationId, 'failed', 'device-network-or-transport')
+      throw error
     } finally {
       this.callbacks.dismissSigning(signingId)
     }

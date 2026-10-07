@@ -16,9 +16,9 @@ The build, signing, and installer steps are all driven by **one PowerShell scrip
 .\scripts\build-windows-production.ps1
 ```
 
-Output: `release-windows\KeepKey-Vault-<version>-win-x64-setup.zip` (contains the
-EV-signed `setup.exe` + `setup-*.bin`) and `SHA256SUMS-windows.txt`. **Ship the
-`.zip`, not a bare `.exe`** — see [Smart App Control](#smart-app-control-ship-a-zip-not-a-bare-exe).
+Output: `release-windows\KeepKey-Vault-<version>-win-x64-setup.exe` and
+`SHA256SUMS-windows.txt`. Inno invokes the signing tool during compilation so
+the temporary setup engine and uninstaller are signed before embedding.
 
 To rebuild the installer from an existing build tree without rebuilding sources:
 
@@ -164,7 +164,7 @@ After the file exists once, subsequent builds reuse it. Commit-or-don't is a sep
 
 ---
 
-## Smart App Control: ship a `.zip`, not a bare `.exe`
+## Smart App Control: sign Inno's internal engine
 
 **This shipped broken in 1.4.11.** A normal single-file Inno installer
 (`UseSetupLdr=yes`, the default) is a self-extractor: at runtime it unpacks an
@@ -174,14 +174,12 @@ SAC on (the default on many clean installs) the installer dies immediately with
 "Setup failed to initialize" (exit code 1) and logs **CodeIntegrity 3077/3033**
 in `Microsoft-Windows-CodeIntegrity/Operational`. The outer `setup.exe` being
 EV-signed does not help — SAC evaluates the extracted `setup.tmp` on its own, and
-that file is never signed (stock Inno cannot sign it).
+that file was not signed by the old post-build-only signing flow.
 
-**The fix (already in `installer.iss` + `build-windows-production.ps1`):**
-`UseSetupLdr=no`. With no loader there is no `setup.tmp`; the EV-signed `setup.exe`
-IS the engine and runs in-process, so SAC only sees the signed exe and allows it.
-Inno then emits `setup.exe` + `setup-*.bin`, which the build script zips into
-`KeepKey-Vault-<version>-win-x64-setup.zip`. Users extract the zip and run
-`setup.exe`. **Only the `.zip` is uploaded; never a bare `.exe`.**
+**The fix:** restore the normal single-file x64 loader and configure Inno's
+`SignTool` during compilation. Inno then signs Setup, its extracted temporary
+engine, and the generated uninstaller before embedding them. Signing only the
+finished EXE after ISCC returns is not sufficient and is a release failure.
 
 **The app itself is SAC-clean** — every shipped binary (`KeepKeyVault.exe`,
 `launcher.exe`, `bin\bun.exe`, DLLs) is EV-signed and runs under SAC without a
@@ -313,12 +311,15 @@ Before tagging and uploading:
 - [ ] Run `.\scripts\build-windows-production.ps1`
 - [ ] **Non-AVX:** `KeepKeyVault.exe` disassembles to **0** AVX/VEX instructions (`.text` VSize ≈ `0x5A46`; `c5 f9 7f` absent) — see step 9
 - [ ] **Non-AVX:** bundled `bun.exe` banner reads `Windows x64 (baseline)` and version ≥ 1.3.14 — see step 6
-- [ ] Verify installer signature via `signtool verify /pa /v` (on the extracted `setup.exe`)
-- [ ] **Smart App Control:** extract the `.zip` and run `setup.exe` on a machine with **SAC ON (Enforce)** — installs with **no** CodeIntegrity 3077/3033. This is mandatory and non-negotiable (see [Smart App Control](#smart-app-control-ship-a-zip-not-a-bare-exe)); SAC-off machines are NOT a valid test.
+- [ ] Verify the single-file installer signature via `signtool verify /pa /v`
+- [ ] **Smart App Control:** download and run the installer EXE on a machine with **SAC ON (Enforce)** — installs with **no** CodeIntegrity 3077/3033. This is mandatory and non-negotiable; SAC-off machines are NOT a valid test.
 - [ ] Smoke-test the installer on a clean Windows VM
+- [ ] **No-window recovery:** exercise a controlled startup failure where the native wrapper runs but no Vault window appears. After 30 seconds, confirm a native “KeepKey Vault could not open” message appears, the splash closes, and the clipboard contains only the version, platform, `no application window` failure, launcher state, and exit code. Paste it into a text editor and confirm the message directs the tester to `keepkey.com/support`. It must not contain a username, filesystem path, environment variable, wallet/device identifier, address, xpub, transaction data, credential, or log contents.
+- [ ] **No-window privacy:** repeat the recovery test with networking disabled. The same support message and clipboard report must work; confirm the wrapper makes no telemetry request and sends no report automatically.
 - [ ] **Non-AVX (if hardware available):** app launches past the splash on a no-AVX CPU (Gemini Lake N5030/N4020) instead of `0xC000001D`
-- [ ] Compare `SHA256SUMS-windows.txt` against the `.zip` hash
-- [ ] Upload the **`.zip`** (NOT a bare `.exe`) and `SHA256SUMS-windows.txt` to the GitHub release
+- [ ] Compare `SHA256SUMS-windows.txt` against the installer EXE hash
+- [ ] Upload the signed single installer EXE and `SHA256SUMS-windows.txt` to the GitHub release
 - [ ] Run the installed app, pair a real device, confirm `vault-backend.log` has the expected boot lines
 - [ ] Add an emulator without dropping a DLL; confirm it boots and reports firmware 7.16.0
+- [ ] With an **initialized Windows emulator**, run the 64 KB Randomness Audit; progress must reach 100%, the report must render, and the emulator poll thread must remain responsive. Run it twice and confirm the two sample SHA-256 values differ. A frozen audit or transport timeout blocks release.
 - [ ] On the emulator, run certified ETH→SOL ClearSign; labelled review appears and no Advanced Mode prompt is shown

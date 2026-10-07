@@ -14,10 +14,11 @@ import type { SwapAsset, SwapQuote, SwapQuoteParams, ExecuteSwapParams, SwapResu
 import { SOLANA_BLIND_SIGNING_REQUIRED, evmAdvancedModeRequiredMessage } from '../shared/types'
 import { toDeviceError, deviceErrorMessage } from '../shared/device-error'
 import { resolveEvmSchema } from './evm-schema-registry'
-import { resolveRuntimeEvmMetadata, type RuntimeEvmSigner } from './evm-runtime-metadata'
+import { resolveRuntimeEvmMetadata, supportsRuntimeEvmMetadata, type RuntimeEvmSigner } from './evm-runtime-metadata'
 import { evmCallRequiresAdvancedMode } from './evm-signing-policy'
+import { ERC7730_TRANSPORT_SUPPORTED } from '../shared/erc7730-support'
 import { findSolanaSchema } from './solana-schema-registry'
-import { findCertifiedSolanaProof } from './solana-certified-registry'
+import { certifiedSolanaProofApplies, findCertifiedSolanaProof } from './solana-certified-registry'
 import { hasCompleteCertifiedSolanaEnvelope, supportsCertifiedClearSign } from './solana-certified-policy'
 import { getPioneer } from './pioneer'
 import { encodeDepositWithExpiry, encodeApprove, parseUnits, toHex, readPioneerBalance } from './txbuilder/evm'
@@ -571,6 +572,14 @@ export interface SwapContext {
     request?: Record<string, unknown>
     error?: string
   }) => void
+  /** Common Vault protection boundary for every EVM/Solana swap signature. */
+  protectSign?: (input: {
+    chainFamily: ChainDef['chainFamily']
+    chainId?: string
+    from: string
+    tx: any
+    kind: 'approval' | 'swap'
+  }, sign: () => Promise<any>) => Promise<any>
 }
 
 /** Sentinel no-op for SwapContext.pushSubStage in REST/headless paths. */
@@ -606,6 +615,8 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
     fromAddress = typeof addrResult === 'string' ? addrResult : addrResult?.address
   }
   if (!fromAddress) throw new Error('Could not derive sender address')
+  const protectSign = (tx: any, kind: 'approval' | 'swap', sign: () => Promise<any>) =>
+    ctx.protectSign?.({ chainFamily: fromChain.chainFamily, chainId: fromChain.chainId, from: fromAddress!, tx, kind }, sign) ?? sign()
 
   // 1b. Derive destination address for validation
   const toChain = allChains.find(c => c.id === params.toChainId)
@@ -700,10 +711,18 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
       let certifiedProof: Awaited<ReturnType<typeof findCertifiedSolanaProof>>
       const firmwareVersion = ctx.getFirmwareVersion?.()
       if (supportsCertifiedClearSign(firmwareVersion)) {
+        const catalogKey = isTokenCaip(params.fromCaip) ? 'relayDepositToken' : 'relayDepositNative'
         try {
-          certifiedProof = await findCertifiedSolanaProof(params.relayTx.serializedTx, isTokenCaip(params.fromCaip) ? 'relayDepositToken' : 'relayDepositNative')
+          certifiedProof = await findCertifiedSolanaProof(params.relayTx.serializedTx, catalogKey)
         } catch (err: any) {
           console.warn(`${TAG} certified Solana ClearSign proof unavailable: ${err?.message || err}`)
+        }
+        // The service matches a catalogKey request without the firmware's
+        // companion rule. An envelope the device would not apply is a hard
+        // failure there, so it is dropped and the consent path below runs.
+        if (certifiedProof && !certifiedSolanaProofApplies(params.relayTx.serializedTx, catalogKey, certifiedProof)) {
+          console.info(`${TAG} certified Solana ClearSign proof dropped: the device would not apply ${catalogKey} to this transaction; using the existing consent flow`)
+          certifiedProof = undefined
         }
       } else {
         console.info(`${TAG} certified Solana ClearSign unsupported by firmware ${firmwareVersion || 'unknown'}; using the existing consent flow`)
@@ -760,7 +779,10 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
       unsignedTx = buildResult.unsignedTx
     } else {
       const certifiedSupported = supportsCertifiedClearSign(ctx.getFirmwareVersion?.())
-      const runtimeSupported = !certifiedSupported && ctx.isAdvancedModeEnabled?.() === true
+      // Certified and RAM-signer metadata are complementary. On 7.16+, try the
+      // certified catalog first, then use the explicitly configured runtime
+      // provider as a transaction-bound fallback under AdvancedMode.
+      const runtimeSupported = supportsRuntimeEvmMetadata(ctx.getFirmwareVersion?.(), ctx.isAdvancedModeEnabled?.() === true)
       const result = await buildRelaySwapTx(params, fromChain, fromAddress, getEvmRpcSource, isErc20Source, /* previewMode */ false, certifiedSupported, runtimeSupported)
       unsignedTx = result.unsignedTx
       fromAmountBaseUnits = result.fromAmountBaseUnits
@@ -784,7 +806,7 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
         swapLog(`${TAG} Relay ERC-20 approval required: prompting device for approveTx`)
         stage('approve-signing')
         const signedApprove = await wrapSign(
-          () => wallet.ethSignTx(result.approveTx),
+          () => protectSign(result.approveTx, 'approval', () => wallet.ethSignTx(result.approveTx)),
           { operation: 'erc20Approve', chain: fromChain.coin, to: result.approveTx.to, value: params.amount },
         )
         swapLog(`${TAG} Device signed approveTx`)
@@ -814,7 +836,7 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
 
   // ── EVM chains: MUST use router contract depositWithExpiry() ──
   } else if (fromChain.chainFamily === 'evm') {
-    const result = await buildEvmSwapTx(params, fromChain, fromAddress, pioneer, getEvmRpcSource, isErc20Source, wallet, /* previewMode */ false, stage, wrapSign)
+    const result = await buildEvmSwapTx(params, fromChain, fromAddress, pioneer, getEvmRpcSource, isErc20Source, wallet, /* previewMode */ false, stage, wrapSign, ctx.protectSign, supportsCertifiedClearSign(ctx.getFirmwareVersion?.()))
     unsignedTx = result.unsignedTx
     approvalTxid = result.approvalTxid
 
@@ -1061,7 +1083,7 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
       const srcMeta = (await getSwapAssets()).find(a => a.caip === params.fromCaip)
       const srcDecimals = srcMeta?.decimals ?? params.tokenDecimals
       outflow = JSON.stringify({
-        solAfter: r.solLamportsAfter.toString(),
+        solAfter: r.solLamportsAfter?.toString(),
         tokensAfter: r.tokensAfter.map(t => ({
           mint: t.mint,
           amount: t.amountAfter.toString(),
@@ -1070,7 +1092,11 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
         })),
         spending: params.amount,
         spendingSymbol: srcMeta?.symbol,
-        unavailable: r.unavailable,
+        // This panel has one SOL figure and no room for a footnote, so a
+        // post-state the simulation did not establish is reported as no answer
+        // rather than rendered — the alternative is "NaN SOL" and a drain
+        // warning that cannot fire.
+        unavailable: r.unavailable ?? (r.solLamportsAfter === undefined ? r.note : undefined),
         reason,
         decoded,
       })
@@ -1111,6 +1137,7 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
       Number(unsignedTx?.chainId),
       ctx.isAdvancedModeEnabled?.(),
       unsignedTx?.txMetadata,
+      unsignedTx?.erc7730,
     )
   ) {
     swapLog(`${TAG} EVM blind-sign gate: to=${unsignedTx.to} selector=${String(unsignedTx.data).slice(0, 10)} — AdvancedMode is off`)
@@ -1150,7 +1177,7 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
   const signOnDevice = (tx: any) => wrapSign(
     () => {
       clearSignSentToDevice = true
-      return txb.signTx(wallet, fromChain, tx)
+      return protectSign(tx, 'swap', () => txb.signTx(wallet, fromChain, tx))
     },
     { operation: 'swap', chain: fromChain.coin, to: params.inboundAddress, value: params.amount, memo: params.memo },
   )
@@ -1343,12 +1370,12 @@ export async function previewSwapBuild(
       return { unsignedTx: buildResult.unsignedTx }
     }
     const certifiedSupported = supportsCertifiedClearSign(ctx.getFirmwareVersion?.())
-    const runtimeSupported = !certifiedSupported && ctx.isAdvancedModeEnabled?.() === true
+    const runtimeSupported = supportsRuntimeEvmMetadata(ctx.getFirmwareVersion?.(), ctx.isAdvancedModeEnabled?.() === true)
     const result = await buildRelaySwapTx(params, fromChain, fromAddress, getEvmRpcSource, isErc20Source, /* previewMode */ true, certifiedSupported, runtimeSupported)
     return { unsignedTx: result.unsignedTx, approveTx: result.approveTx, allowance: result.allowance, balance: result.balance }
   }
   if (fromChain.chainFamily === 'evm') {
-    const result = await buildEvmSwapTx(params, fromChain, fromAddress, pioneer, getEvmRpcSource, isErc20Source, wallet, /* previewMode */ true)
+    const result = await buildEvmSwapTx(params, fromChain, fromAddress, pioneer, getEvmRpcSource, isErc20Source, wallet, /* previewMode */ true, undefined, undefined, undefined, supportsCertifiedClearSign(ctx.getFirmwareVersion?.()))
     return { unsignedTx: result.unsignedTx, approveTx: result.approveTx, allowance: result.allowance, balance: result.balance }
   }
   if (fromChain.chainFamily === 'utxo') {
@@ -1766,6 +1793,15 @@ async function buildRelaySwapTx(
     data: relay.data,
   }
 
+  if (relay.erc7730) {
+    if (ERC7730_TRANSPORT_SUPPORTED) {
+      unsignedTx.erc7730 = relay.erc7730
+      console.info(`${TAG} signed ERC-7730 catalog attached (${relay.erc7730.definitions.length} definitions)`)
+    } else {
+      console.warn(`${TAG} ERC-7730 catalog not attached (NOT_IMPLEMENTED: pinned hdwallet has no ERC-7730 transport)`)
+    }
+  }
+
   // Older firmware uses the ordinary signing/Advanced Mode path, without a
   // metadata preflight that its firmware may not implement.
   // Certified envelopes require supported firmware; a device rejection on
@@ -1784,6 +1820,21 @@ async function buildRelaySwapTx(
     console.info(`${TAG} clear-sign schema attached: ${evmSchema.method} (keyId=${evmSchema.keyId}, source=${evmSchema.source || 'local-test'})`)
   } else {
     console.info(`${TAG} ClearSign lookup complete: no metadata; device policy still applies`)
+  }
+  // The approve that precedes an ERC-20 deposit is signed with ethSignTx too:
+  // give it the same certified lookup (a reviewed token's approve entry), or
+  // the device treats it as an unknown token's approve and gates it on
+  // AdvancedMode. A failed lookup leaves the device's ordinary policy.
+  if (pendingApproveTx) {
+    try {
+      const approveSchema = await resolveEvmSchema(chainId, pendingApproveTx.to, pendingApproveTx.data, certifiedMetadataSupported)
+      if (approveSchema) {
+        pendingApproveTx.txMetadata = { signedPayload: approveSchema.signedPayload, keyId: approveSchema.keyId }
+        console.info(`${TAG} clear-sign schema attached to approve: ${approveSchema.method} (keyId=${approveSchema.keyId}, source=${approveSchema.source || 'local-test'})`)
+      }
+    } catch (e: any) {
+      console.warn(`${TAG} approve ClearSign lookup failed (${e?.message || e}); device policy still applies`)
+    }
   }
 
   // EIP-1559 fields — use signedFeePerGas (relay's quoted cap) so the signed tx
@@ -1877,6 +1928,8 @@ async function buildEvmSwapTx(
   previewMode = false,
   stage: (s: SwapSubStage) => void = () => {},
   wrapSign: SwapContext['wrapSign'] = (fn) => fn(),
+  protect?: SwapContext['protectSign'],
+  certifiedMetadataSupported = false,
 ): Promise<{ unsignedTx: any; approvalTxid?: string; approveTx?: any; allowance?: { current: string; required: string; sufficient: boolean; spender: string; tokenContract: string }; balance?: { current: string; required: string; sufficient: boolean; tokenContract?: string } }> {
   // Some protocols (e.g. Mayachain) only return `inboundAddress` and use it as the
   // router for EVM deposits. Accept either; throw only if both are missing.
@@ -2110,6 +2163,20 @@ async function buildEvmSwapTx(
       } else {
         approveTx.gasPrice = toHex(gasPrice)
       }
+      // Same certified lookup as the Relay-path approve: a reviewed token's
+      // approve has a certified entry for any spender (the generic "Token
+      // approval" one, which shows the router address in full). An unreviewed
+      // token has none and the device keeps its ordinary policy (blind review,
+      // AdvancedMode), which the in-app card reports from the same verdict.
+      try {
+        const approveSchema = await resolveEvmSchema(chainId, approveTx.to, approveTx.data, certifiedMetadataSupported)
+        if (approveSchema) {
+          approveTx.txMetadata = { signedPayload: approveSchema.signedPayload, keyId: approveSchema.keyId }
+          swapLog(`${TAG} clear-sign schema attached to approve: ${approveSchema.method} (keyId=${approveSchema.keyId}, source=${approveSchema.source || 'local-test'})`)
+        }
+      } catch (e: any) {
+        console.warn(`${TAG} approve ClearSign lookup failed (${e?.message || e}); device policy still applies`)
+      }
       pendingApproveTx = approveTx
 
       // Preview mode: caller wants the unsigned txs without signing — project
@@ -2120,7 +2187,12 @@ async function buildEvmSwapTx(
       swapLog(`${TAG} Signing ERC-20 approve tx: token=${tokenContract}, spender=${routerAddress}, amount=${amountBaseUnits}`)
       stage('approve-signing')
       const signedApprove = await wrapSign(
-        () => wallet.ethSignTx(approveTx),
+        () => {
+          const signApproval = () => wallet.ethSignTx(approveTx)
+          return protect
+            ? protect({ chainFamily: 'evm', chainId: fromChain.chainId, from: fromAddress, tx: approveTx, kind: 'approval' }, signApproval)
+            : signApproval()
+        },
         { operation: 'erc20Approve', chain: fromChain.coin, to: tokenContract, value: params.amount },
       )
 

@@ -1,7 +1,7 @@
 # Handoff — Bitcoin-only revisions: dedicated dashboard, header scoping, address book, self-host node
 
 **Branch:** `btc-only` (stay here — do NOT open new branches; this is the single consolidated line, draft PR #353 → develop).
-**Worktree:** `/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11`
+**Worktree:** `keepkey-stack/projects/keepkey-vault-v11`
 **Vault code:** `projects/keepkey-vault/`
 **Status:** scoping/handoff. Nothing below is built yet. The btc-only *detection* substrate it all builds on is already merged on this branch (see "What already exists").
 

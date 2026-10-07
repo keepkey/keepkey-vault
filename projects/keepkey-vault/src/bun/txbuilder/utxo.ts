@@ -267,6 +267,16 @@ function unwrapUtxoResponse(resp: any): any[] {
     : []
 }
 
+/** Never offer zero-satoshi outputs to ordinary UTXO coin selection.
+ *
+ * DigiDollar represents value in metadata attached to a zero-satoshi P2TR
+ * output. Spending one as a normal DGB input destroys the associated DD. The
+ * rule is safe for every UTXO chain: a zero-value input can only add fee weight.
+ */
+export function filterPositiveValueUtxos(utxos: any[]): any[] {
+  return utxos.filter((utxo) => Number(utxo?.value) > 0)
+}
+
 /** Resolve fee rates (sat/vByte). BTC self-host reads the node; everything else
  *  uses Pioneer's fee API (sat/kB → sat/vB conversion), falling back to defaults. */
 async function resolveFeeRates(
@@ -324,7 +334,7 @@ async function fetchUtxosForXpub(
   if (btcSelfHostActive(network)) {
     const backend = getBtcBackend()
     const raw = await backend.listUnspent({ network, xpub, scriptType: defaultScriptType })
-    const utxos = raw.map((u) => ({
+    const utxos = filterPositiveValueUtxos(raw).map((u) => ({
       txid: u.txid, vout: u.vout, value: Number(u.value),
       path: u.path, address: u.address, hex: u.hex,
       scriptType: u.scriptType || (u.path ? getScriptTypeFromPath(u.path) : undefined) || defaultScriptType,
@@ -336,7 +346,11 @@ async function fetchUtxosForXpub(
   const discoveryKey = utxoDiscoveryKey(xpub, defaultScriptType)
   const resp = await pioneer.ListUnspent({ network, xpub: discoveryKey })
   console.log(`${TAG} ListUnspent raw: ${JSON.stringify(resp)?.slice(0, 300)}`)
-  const utxos = unwrapUtxoResponse(resp)
+  const rawUtxos = unwrapUtxoResponse(resp)
+  const utxos = filterPositiveValueUtxos(rawUtxos)
+  if (utxos.length !== rawUtxos.length) {
+    console.warn(`${TAG} Ignoring ${rawUtxos.length - utxos.length} zero-value UTXO(s); they may carry protocol assets such as DigiDollar`)
+  }
   for (const u of utxos) {
     u.value = Number(u.value)
     u.scriptType = u.scriptType || (u.path ? getScriptTypeFromPath(u.path) : undefined) || defaultScriptType

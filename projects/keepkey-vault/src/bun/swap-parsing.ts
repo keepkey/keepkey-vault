@@ -5,6 +5,7 @@
  * (no Pioneer client, no DB, no server imports).
  */
 import { CHAINS } from '../shared/chains'
+import { thorMemoMinimum } from '../shared/swap-risk'
 import type { SwapAsset, SwapQuote, RelayTxParams } from '../shared/types'
 import { COIN_MAP_LONG } from '@pioneer-platform/pioneer-coins'
 
@@ -84,6 +85,47 @@ function parseSolanaSwapMetadata(...candidates: unknown[]): RelayTxParams['solan
     throw new Error('Invalid Solana ClearSign metadata: signerKeyId must be 0..3')
   }
   return { payload, signature, signerKeyId }
+}
+
+function parseErc7730Catalog(...candidates: unknown[]): RelayTxParams['erc7730'] {
+  const candidate = candidates.find(value => value != null)
+  if (candidate == null) return undefined
+  if (typeof candidate !== 'object') throw new Error('Invalid ERC-7730 catalog: expected an object')
+  const value = candidate as Record<string, any>
+  const hex = (input: unknown, bytes: number, field: string): string => {
+    if (typeof input !== 'string' || !new RegExp(`^(0x)?[0-9a-fA-F]{${bytes * 2}}$`).test(input)) {
+      throw new Error(`Invalid ERC-7730 catalog: ${field} must be ${bytes} bytes of hex`)
+    }
+    return input
+  }
+  if (!Array.isArray(value.definitions) || value.definitions.length < 1 || value.definitions.length > 32) {
+    throw new Error('Invalid ERC-7730 catalog: definitions must contain 1..32 entries')
+  }
+  const definitions = value.definitions.map((raw: any, index: number) => {
+    if (!raw || typeof raw !== 'object') throw new Error(`Invalid ERC-7730 catalog: definition ${index}`)
+    const kind = Number(raw.kind)
+    const chainId = Number(raw.chainId ?? raw.chain_id)
+    if (![1, 2, 3, 4].includes(kind) || !Number.isSafeInteger(chainId) || chainId < 0) {
+      throw new Error(`Invalid ERC-7730 catalog: definition ${index} identity`)
+    }
+    const envelope = raw.envelope
+    if (typeof envelope !== 'string' || !/^(0x)?(?:[0-9a-fA-F]{2})+$/.test(envelope) || envelope.length > 35_000) {
+      throw new Error(`Invalid ERC-7730 catalog: definition ${index} envelope`)
+    }
+    return {
+      definitionId: hex(raw.definitionId ?? raw.definition_id, 32, `definition ${index} id`),
+      envelope,
+      kind: kind as 1 | 2 | 3 | 4,
+      chainId,
+      contractAddress: raw.contractAddress || raw.contract_address
+        ? hex(raw.contractAddress ?? raw.contract_address, 20, `definition ${index} contract`) : undefined,
+      selectorOrTypeHash: raw.selectorOrTypeHash || raw.selector_or_type_hash
+        ? hex(raw.selectorOrTypeHash ?? raw.selector_or_type_hash,
+          String(raw.selectorOrTypeHash ?? raw.selector_or_type_hash).replace(/^0x/, '').length === 8 ? 4 : 32,
+          `definition ${index} selector`) : undefined,
+    }
+  })
+  return { primaryDefinitionId: hex(value.primaryDefinitionId ?? value.primary_definition_id, 32, 'primary id'), definitions }
 }
 
 // ── Asset mapping helpers ───────────────────────────────────────────
@@ -167,30 +209,35 @@ export function parseQuoteResponse(
   const qInner = qOuter?.data || qOuter
   if (!qInner) throw new Error('Pioneer Quote returned empty response')
 
-  // Pioneer returns array of quotes from different integrations, best first.
-  // Take the FIRST quote we can actually build. Previously this took quotes[0]
-  // unconditionally, so a single unbuildable head quote (e.g. a memoless NEAR
-  // Intents route on a non-EVM-calldata, non-UTXO source) killed the whole
-  // pair even when a buildable route sat at quotes[1]. Buildability is tested
-  // by parseSingleQuote's own throws — the validator IS the parser, so the
-  // two can never disagree. Skipping a higher-ranked quote may select a
-  // lower-output route: logged loudly below, never silent.
+  // Pioneer returns quotes from multiple integrations. Validate every route,
+  // then choose the largest quoted output for the same destination asset.
+  // Trusting array order can quietly choose a shallow THORChain pool while a
+  // better executable route is present later in the same response.
   const quotes: any[] = Array.isArray(qInner) ? qInner : [qInner]
   if (quotes.length === 0) throw new Error('No quotes available for this pair')
 
   let firstErr: Error | null = null
   const failures: string[] = []
+  let selected: SwapQuote | null = null
+  let selectedIndex = -1
   for (let i = 0; i < quotes.length; i++) {
     try {
       const parsed = parseSingleQuote(quotes[i], params)
-      if (i > 0) {
-        console.warn(`${TAG} selected quotes[${i}] (${parsed.swapper || parsed.integration}) — skipped ${i} higher-ranked unbuildable quote(s): ${failures.join(' | ')}. Output may be lower than the skipped route(s) advertised.`)
+      const output = Number(parsed.expectedOutput)
+      if (Number.isFinite(output) && output > 0 && (!selected || output > Number(selected.expectedOutput))) {
+        selected = parsed
+        selectedIndex = i
       }
-      return parsed
     } catch (e: any) {
       if (!firstErr) firstErr = e
       failures.push(`quotes[${i}]: ${e?.message}`)
     }
+  }
+  if (selected) {
+    if (selectedIndex > 0) {
+      console.warn(`${TAG} selected quotes[${selectedIndex}] (${selected.swapper || selected.integration}) with highest buildable output; ${failures.length} route(s) unbuildable`)
+    }
+    return selected
   }
   // None buildable — rethrow the head quote's error (most relevant; for a
   // NEAR-Intents-only response this preserves the exact "No supported routes"
@@ -321,6 +368,13 @@ function parseSingleQuote(
       maxPriorityFeePerGas: txParams.maxPriorityFeePerGas ? String(txParams.maxPriorityFeePerGas) : undefined,
       chainId: txParams.chainId,
       isDepositChannel: isDepositChannel || undefined,
+      erc7730: parseErc7730Catalog(
+        txParams.erc7730,
+        txParams.erc7730Catalog,
+        txParams.erc7730_catalog,
+        quote.erc7730,
+        quote.meta?.erc7730,
+      ),
     }
     console.log(`${TAG} ${integration} (${swapper}) — prebuilt tx extracted (to=${relayTx.to}, depositChannel=${isDepositChannel})`)
   }
@@ -401,13 +455,14 @@ function parseSingleQuote(
   let totalBps = fees.total_bps || fees.totalBps || 0
   let outboundFee = fees.outbound || fees.outboundFee || '0'
   let affiliateFee = fees.affiliate || fees.affiliateFee || '0'
-  const actualSlippageBps = fees.slippage_bps || fees.slippageBps || (params.slippageBps ?? 100)
+  const actualSlippageBps = fees.slippage_bps ?? fees.slippageBps ?? (params.slippageBps ?? 100)
 
   // Minimum output — Pioneer provides amountOutMin, fallback to slippage calc.
   const expectedNum = parseFloat(expectedOutputStr)
-  const minOut = quote.amountOutMin
+  const memoMinimum = /thor/i.test(`${integration} ${swapper ?? ''}`) ? thorMemoMinimum(memo) : undefined
+  const minOut = memoMinimum ?? (quote.amountOutMin != null
     ? parseFloat(quote.amountOutMin)
-    : expectedNum * (1 - actualSlippageBps / 10000)
+    : expectedNum * (1 - (params.slippageBps ?? 100) / 10000))
 
   // Estimated time — prefer total_swap_seconds (full swap duration) over
   // inbound_confirmation_seconds (just the inbound leg, much shorter)
@@ -451,6 +506,8 @@ function parseSingleQuote(
   return {
     expectedOutput: expectedOutputStr,
     minimumOutput: minOutStr,
+    minimumOutputSource: memoMinimum !== undefined ? 'memo' : quote.amountOutMin != null ? 'quote' : 'estimate',
+    requestedSlippageBps: params.slippageBps ?? 100,
     inboundAddress: inboundAddress || '',
     router,
     memo,

@@ -49,11 +49,11 @@ run('EIP-712 Permit2 — token spending approval', async (getSdk, assert) => {
       details: {
         token: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', // USDC
         amount: '1000000000', // 1000 USDC — bounded
-        expiration: '1735689600', // 2024-12-31
+        expiration: '1893456000', // 2030-01-01
         nonce: '0',
       },
       spender: '0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD', // Uniswap Universal Router
-      sigDeadline: '1735689600',
+      sigDeadline: '1893456000',
     },
   }
 
@@ -64,7 +64,7 @@ run('EIP-712 Permit2 — token spending approval', async (getSdk, assert) => {
   console.log('    Token: USDC (0xA0b8...)')
   console.log('    Amount: 1,000,000,000 (bounded)')
   console.log('    Spender: Uniswap Universal Router')
-  console.log('    Expiration: 2024-12-31')
+  console.log('    Expiration: 2030-01-01')
   console.log('\n  >>> APPROVE on device <<<\n')
 
   const result = await sdk.eth.ethSignTypedData({

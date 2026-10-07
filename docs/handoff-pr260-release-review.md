@@ -1,7 +1,7 @@
 # Handoff: PR #260 release review — custom fees + DeFi + wallet selector
 
 **Branch:** `feat/tx-custom-fees` → `develop` (PR #260)
-**Repo:** `/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-vault`
+**Repo:** `keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-vault`
 **Vault version:** `1.4.4` (NOT bumped — see Open Decisions)
 **Date:** 2026-06-19
 **Supersedes / folds in:** #253 (closed), #263 (closed)

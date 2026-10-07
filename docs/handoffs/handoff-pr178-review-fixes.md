@@ -251,6 +251,6 @@ Open questions that determine whether the simple unconditional upsert is safe:
    balance, or `balance="0"`?  The vault's `setCachedBalances` is the source of truth during
    Pioneer cold start — important to know what Pioneer sends.
 
-Pioneer repo: `/Users/highlander/WebstormProjects/keepkey-stack/projects/pioneer`  
+Pioneer repo: `keepkey-stack/projects/pioneer`  
 Relevant endpoint: `GetPortfolioBalances` in pioneer-server  
 Look for: `isStale` flag population logic, what happens when a chain's data source is unreachable

@@ -5,7 +5,7 @@
 (`fix/swap-execute-requires-review`) is in flight and already addresses the
 two swap-path items called out below — audit against develop, but check whether
 #266 has merged before re-deriving the swap findings.
-**Repo:** `/Users/highlander/WebstormProjects/keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-vault`
+**Repo:** `keepkey-stack/projects/keepkey-vault-v11/projects/keepkey-vault`
 
 ---
 

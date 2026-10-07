@@ -27,7 +27,7 @@
  * the tools actually returning data. Tools are Tier-1 READ-ONLY (no signing).
  */
 
-import { callBex, bridgeStatus, type BridgeError } from './bex-bridge'
+import { callBex, bridgeStatus, listBrowsers, type BridgeError } from './bex-bridge'
 
 // Default to 2025-06-18, which REMOVED JSON-RPC batching — so advertising it
 // while this (deliberately single-request) server rejects batches is honest.
@@ -90,6 +90,39 @@ const FALLBACK_TOOLS = [
     },
   },
 ]
+
+// Multi-client routing (see bex-bridge.ts). The vault owns `browser`: it is
+// added to every advertised tool, stripped before the call is forwarded, and
+// bex_browsers is answered here — the BEX never sees either.
+const BROWSER_ARG = {
+  type: 'string',
+  description: 'Which connected KeepKey browser (Chrome profile) to use, e.g. "b1-3f9a2c" — see bex_browsers. Required only when more than one is connected.',
+}
+
+const BROWSERS_TOOL = {
+  name: 'bex_browsers',
+  description:
+    'List the KeepKey browser instances connected to the vault — one per Chrome profile with Agent mode on — with each one\'s bex_status. Ids (e.g. b1-3f9a2c) are what you pass as `browser` to every other tool; they change when that extension reconnects or the vault restarts. To tell profiles apart, call bex_tabs with each browser.',
+  inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+}
+
+// tools/list and bex_browsers ask each browser for something it answers
+// instantly (catalog, status). One that stays silent this long is skipped, so a
+// hung client can't stall every agent for the full 30s call timeout.
+const PROBE_TIMEOUT_MS = 3_000
+
+/** Advertise `browser` on every tool, and add the vault-side bex_browsers. */
+function withBrowserArg(tools: any[]): any[] {
+  const out = tools.map(t => ({
+    ...t,
+    inputSchema: {
+      ...t.inputSchema,
+      type: 'object',
+      properties: { ...(t.inputSchema?.properties ?? {}), browser: BROWSER_ARG },
+    },
+  }))
+  return [BROWSERS_TOOL, ...out]
+}
 
 const json = (body: unknown, status = 200, cors: Record<string, string> = {}) =>
   new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json', ...cors } })
@@ -194,20 +227,25 @@ export async function handleMcpRequest(req: Request, cors: Record<string, string
     case 'tools/list': {
       // The BEX owns its catalog; we serve whatever it reports. This is what
       // keeps a new tool a one-repo change.
-      try {
-        const { tools } = (await callBex('bex_list_tools', {})) as { tools: unknown[] }
-        return rpcResult(id, { tools }, cors)
-      } catch {
-        // Bridge down (BEX closed, or Agent mode off) — serve the static
-        // fallback so tools/list still succeeds. Note: a connected-but-
-        // unresponsive BEX costs the full CALL_TIMEOUT_MS before landing here.
-        return rpcResult(id, { tools: FALLBACK_TOOLS }, cors)
+      // Any instance will do — they run the same extension — so ask the oldest,
+      // and the next if it doesn't answer. ponytail: if profiles ever run
+      // different BEX versions, the catalog is the first answerer's.
+      for (const { browser } of listBrowsers()) {
+        try {
+          const { tools } = (await callBex('bex_list_tools', {}, browser, PROBE_TIMEOUT_MS)) as { tools: unknown[] }
+          return rpcResult(id, { tools: withBrowserArg(tools) }, cors)
+        } catch {
+          // silent or broken — try the next browser
+        }
       }
+      // Bridge down (BEX closed, or Agent mode off) or no browser answered —
+      // serve the static fallback so tools/list still succeeds.
+      return rpcResult(id, { tools: withBrowserArg(FALLBACK_TOOLS) }, cors)
     }
 
     case 'tools/call': {
       const name = params?.name
-      const args = params?.arguments ?? {}
+      const { browser, ...args } = params?.arguments ?? {}
       // We validate the SHAPE of the request; the BEX owns which names are real.
       // A falsy/non-string name must be rejected here: the BEX drops frames with
       // a non-truthy `tool` without replying (mcpBridge.ts `if (!msg?.id ||
@@ -216,9 +254,19 @@ export async function handleMcpRequest(req: Request, cors: Record<string, string
       if (typeof name !== 'string' || name === '') {
         return rpcError(id, -32602, 'Invalid params: name must be a non-empty string', undefined, cors)
       }
+      if (name === 'bex_browsers') {
+        const browsers = await Promise.all(listBrowsers().map(async b => {
+          try {
+            return { ...b, status: await callBex('bex_status', {}, b.browser, PROBE_TIMEOUT_MS) }
+          } catch (e: any) {
+            return { ...b, error: e?.message || String(e) }
+          }
+        }))
+        return rpcResult(id, { content: [{ type: 'text', text: JSON.stringify({ browsers }, null, 2) }] }, cors)
+      }
       if (shouldPromote(name, args)) promoteBrowser()
       try {
-        const result = (await callBex(name, args)) as any
+        const result = (await callBex(name, args, typeof browser === 'string' ? browser : undefined)) as any
         // The BEX may answer with MCP content blocks already (bex_snapshot
         // returns pre-formatted text; bex_screenshot returns an image). Pass
         // those through untouched — JSON-stringifying them would double-encode

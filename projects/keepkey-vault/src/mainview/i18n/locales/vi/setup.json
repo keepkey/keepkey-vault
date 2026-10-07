@@ -59,7 +59,7 @@
 		"listeningForBootloader": "Đang lắng nghe thiết bị ở chế độ bootloader...",
 		"readyDetectBootloader": "Tôi đã sẵn sàng — Phát hiện bootloader",
 		"skipBootloaderUpdate": "Bỏ qua cập nhật bootloader",
-		"verifyBackupHint": "KeepKey sẽ yêu cầu bạn xác minh bản sao lưu. Chúng tôi sẽ làm điều đó sau khi cập nhật — giữ nút để bỏ qua bây giờ.",
+		"verifyBackupHint": "KeepKey sẽ hỏi bạn có cụm từ khôi phục phòng khi khóa riêng tư bị xóa hay không. Giữ nút nghĩa là trả lời có và bắt đầu cập nhật — chỉ xác nhận nếu bạn đã ghi lại cụm từ khôi phục.",
 		"followDirectionsOnDevice": "Thực hiện theo hướng dẫn trên thiết bị",
 		"deviceWillGuide": "KeepKey của bạn sẽ hướng dẫn bạn qua quá trình cập nhật.",
 		"bootloaderDetected": "Đã phát hiện chế độ bootloader",

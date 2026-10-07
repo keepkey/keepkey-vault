@@ -98,6 +98,18 @@ export interface EthSignTxParams {
         signedPayload: string;
         keyId?: number;
     };
+    /** Signed, compiled ERC-7730 v2 catalog used by firmware to decode the exact transaction. */
+    erc7730?: {
+        primaryDefinitionId: string;
+        definitions: Array<{
+            definitionId: string;
+            envelope: string;
+            kind: 1 | 2 | 3 | 4;
+            chainId: number;
+            contractAddress?: string;
+            selectorOrTypeHash?: string;
+        }>;
+    };
 }
 /** Params for `eth.loadClearsignSigner` — POST /eth/clearsign/load-signer. */
 export interface LoadClearsignSignerParams {
