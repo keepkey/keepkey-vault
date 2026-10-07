@@ -2115,7 +2115,27 @@ export function getDeviceSnapshotById(deviceId: string): { deviceId: string; lab
   }
 }
 
-export function getAllDeviceSnapshots(): Array<{ deviceId: string; label: string; firmwareVer: string; updatedAt: number; totalUsd: number }> {
+/** Firmware-mode features last seen for the firmware build with this hash
+ *  (base64, as the device reports it). The hash names the build, so any
+ *  device's snapshot of it says the same version and variant. */
+export function getSnapshotFeaturesByFirmwareHash(firmwareHash: string): any | null {
+  try {
+    if (!db || !firmwareHash) return null
+    const rows = db.query('SELECT features_json FROM device_snapshot ORDER BY updated_at DESC').all() as Array<{ features_json: string }>
+    for (const row of rows) {
+      try {
+        const features = JSON.parse(row.features_json)
+        if (features?.firmwareHash === firmwareHash && !features.bootloaderMode) return features
+      } catch { /* skip a corrupt row */ }
+    }
+    return null
+  } catch (e: any) {
+    console.warn('[db] getSnapshotFeaturesByFirmwareHash failed:', e.message)
+    return null
+  }
+}
+
+export function getAllDeviceSnapshots():Array<{ deviceId: string; label: string; firmwareVer: string; updatedAt: number; totalUsd: number }> {
   try {
     if (!db) return []
     const rows = db.query(`

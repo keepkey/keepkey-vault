@@ -29,7 +29,7 @@ import { DocsLink } from './DocsLink'
 import { DOCS_LINKS } from '../../shared/docs-links'
 import { TutorialPage } from './TutorialCards'
 import { LanguagePicker } from '../i18n/LanguageSelector'
-import { BITCOIN_ONLY_ONBOARDING } from '../../shared/flags'
+import { BITCOIN_ONLY_ONBOARDING, isBitcoinOnlyVariant } from '../../shared/flags'
 
 // ── Design tokens ───────────────────────────────────────────────────────────
 const HIGHLIGHT = 'green.500'
@@ -288,6 +288,11 @@ export function OobSetupWizard({ onComplete, onWalletCreated, onSkipFirmware, on
 
   // Device flags — derived from the unified device state
   const needsBootloader = deviceStatus.needsBootloaderUpdate
+  // A Bitcoin-only device updates to Bitcoin-only firmware (the engine enforces
+  // it): show that build and its hash, not the multi-coin one.
+  useEffect(() => {
+    if (isBitcoinOnlyVariant(deviceStatus.firmwareVariant)) setCoinMode('bitcoin-only')
+  }, [deviceStatus.firmwareVariant])
   const needsFirmware = deviceStatus.needsFirmwareUpdate
   const needsInit = deviceStatus.needsInit
   // Sticky for the session: once a device has told us it holds a wallet, a later

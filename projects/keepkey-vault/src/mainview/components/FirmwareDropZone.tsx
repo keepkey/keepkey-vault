@@ -548,7 +548,7 @@ export function FirmwareDropZone() {
 							</Box>
 						)}
 
-						{/* ── DOUBLE WARNING: Signed → Unsigned (WILL WIPE) ── */}
+						{/* ── DOUBLE WARNING: wipe, Bitcoin-only lock, or unknown installed firmware ── */}
 						{analysis.willWipeDevice && (
 							<Box
 								mx="6" mb="3" p="4"
@@ -564,10 +564,29 @@ export function FirmwareDropZone() {
 										<line x1="12" y1="17" x2="12.01" y2="17" />
 									</svg>
 									<Text fontSize="sm" fontWeight="800" color="var(--rose)" textTransform="uppercase" letterSpacing="0.05em">
-										{analysis.wipeReason === "downgrade" ? "This downgrade will wipe the device" : "THIS WILL WIPE THE DEVICE"}
+										{analysis.wipeReason === "downgrade" ? "This downgrade will wipe the device"
+											: analysis.wipeReason === "bitcoin-only-lock" ? "This will lock your Bitcoin-only wallet"
+											: analysis.wipeReason === "unknown-installed" ? "This may wipe the device"
+											: "THIS WILL WIPE THE DEVICE"}
 									</Text>
 								</Flex>
-								{analysis.wipeReason === "downgrade" ? (
+								{analysis.wipeReason === "bitcoin-only-lock" ? (
+								<Text fontSize="sm" color="var(--rose)" lineHeight="1.6" mb="3">
+									This KeepKey runs <Text as="span" fontWeight="700">Bitcoin-only</Text> firmware
+									{analysis.currentFirmwareVersion ? <> (v{analysis.currentFirmwareVersion})</> : null}. {analysis.isBitcoinOnly
+										? <>An older Bitcoin-only version</>
+										: <>Multi-coin firmware</>} will <Text as="span" fontWeight="700">refuse to open this wallet</Text>.
+									It stays on the device, but you cannot use it until you reinstall the Bitcoin-only firmware
+									{analysis.currentFirmwareVersion ? <> v{analysis.currentFirmwareVersion} or newer</> : null}, or wipe the device and restore it from your recovery phrase.
+								</Text>
+								) : analysis.wipeReason === "unknown-installed" ? (
+								<Text fontSize="sm" color="var(--rose)" lineHeight="1.6" mb="3">
+									KeepKey Desktop cannot tell which firmware is installed on this KeepKey, so it cannot rule out
+									that this image <Text as="span" fontWeight="700">erases all keys and settings</Text> or locks the wallet
+									(for example, an older version, or switching between Bitcoin-only and multi-coin firmware).
+									To let it check, start the KeepKey normally once (plug it in without holding the button) so KeepKey Desktop can read it, then return to bootloader mode and open this file again.
+								</Text>
+								) : analysis.wipeReason === "downgrade" ? (
 								<Text fontSize="sm" color="var(--rose)" lineHeight="1.6" mb="3">
 									You are installing <Text as="span" fontWeight="700">v{analysis.detectedVersion}</Text> over{" "}
 									<Text as="span" fontWeight="700">v{analysis.currentFirmwareVersion}</Text>. Older firmware cannot read the
@@ -614,7 +633,11 @@ export function FirmwareDropZone() {
 										)}
 									</Box>
 									<Text fontSize="xs" fontWeight="600" color="var(--rose)">
-										I understand this will wipe my device and I have my seed backed up
+										{analysis.wipeReason === "bitcoin-only-lock"
+											? "I understand my wallet will be locked and I have my seed backed up"
+											: analysis.wipeReason === "unknown-installed"
+												? "I understand this may wipe my device and I have my seed backed up"
+												: "I understand this will wipe my device and I have my seed backed up"}
 									</Text>
 								</Flex>
 							</Box>
@@ -839,7 +862,7 @@ export function FirmwareDropZone() {
 										: analysis.imageKind !== "firmware"
 											? "Cannot flash"
 											: analysis.willWipeDevice
-												? "Wipe & Flash"
+												? (analysis.wipeReason === "bitcoin-only-lock" || analysis.wipeReason === "unknown-installed" ? "Flash Anyway" : "Wipe & Flash")
 												: `Flash ${analysis.detectedVersion || "Firmware"}`}
 							</Button>
 						</Flex>

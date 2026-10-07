@@ -564,7 +564,7 @@ export interface FirmwareAnalysis {
   currentFirmwareVerified: boolean | undefined
   isDowngrade: boolean
   isSameVersion: boolean
-  willWipeDevice: boolean  // downgrade, or crossing the signed/unsigned boundary in either direction
+  willWipeDevice: boolean  // wipeReason is set: wipes, locks a Bitcoin-only wallet, or can't be ruled out — needs the strong confirmation
   /** Why the flash erases the wallet, when willWipeDevice. */
   wipeReason?: import('./flash-wipe').WipeReason
   isBitcoinOnly: boolean   // btc-only firmware variant, detected from the embedded KeepKeyBTC/EmulatorBTC string
