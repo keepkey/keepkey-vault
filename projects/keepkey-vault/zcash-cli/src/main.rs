@@ -690,6 +690,7 @@ async fn handle_build_pczt(state: &mut State, params: &Value) -> Result<Value> {
         &fvk,
         notes,
         recipient,
+        recipient_str,
         amount,
         account,
         branch_id,

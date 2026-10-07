@@ -88,6 +88,8 @@ export interface SigningRequest {
 		is_spend: boolean
 		recipient?: string
 		rseed?: string
+		/** ZIP 374: the Unified Address the user typed (payee output only) */
+		user_address?: string
 	}>
 	display: {
 		amount: string
@@ -396,11 +398,23 @@ async function deviceSign(wallet: any, sr: SigningRequest): Promise<string[]> {
 		throw new Error("Device did not return signatures")
 	}
 
-	if (signatures.length !== sr.n_actions) {
-		throw new Error(
-			`Signature count mismatch: got ${signatures.length} signatures for ${sr.n_actions} actions`
-		)
-	}
+	checkShieldedSignatureCount(signatures.length, sr)
 
 	return signatures
+}
+
+/**
+ * Firmware 7.15 returns one signature per real spend; earlier release
+ * candidates returned one per action. The sidecar applies either layout.
+ */
+export function checkShieldedSignatureCount(
+	count: number,
+	sr: Pick<SigningRequest, "n_actions" | "actions">,
+): void {
+	const spends = sr.actions.filter(a => a.is_spend).length
+	if (count !== sr.n_actions && count !== spends) {
+		throw new Error(
+			`Signature count mismatch: got ${count} signatures for ${sr.n_actions} actions (${spends} spends)`
+		)
+	}
 }

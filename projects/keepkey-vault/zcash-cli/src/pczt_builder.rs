@@ -99,6 +99,31 @@ pub struct ActionFields {
     pub recipient: Option<String>, // hex-encoded 43-byte Orchard receiver (d || pk_d)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rseed: Option<String>, // hex-encoded 32-byte note randomness seed
+    // ZIP 374: the Unified Address the user typed, set only on the payee output.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user_address: Option<String>,
+}
+
+/// Put the typed Unified Address on the first output that pays its Orchard
+/// receiver, so the device can show the address the user entered. Change and
+/// dummy outputs never get it.
+fn attach_user_address(
+    actions: &mut [ActionFields],
+    recipient: &Address,
+    amount: u64,
+    recipient_str: &str,
+) {
+    let ua = recipient_str.trim();
+    if !(ua.starts_with("u1") || ua.starts_with("zu1") || ua.starts_with("tu1")) {
+        return;
+    }
+    let receiver = hex::encode(recipient.to_raw_address_bytes());
+    if let Some(action) = actions
+        .iter_mut()
+        .find(|a| a.value == amount && a.recipient.as_deref() == Some(receiver.as_str()))
+    {
+        action.user_address = Some(ua.to_string());
+    }
 }
 
 /// Plaintext Zcash v5 transaction header fields needed by clear-signing firmware.
@@ -186,6 +211,7 @@ pub async fn build_pczt(
     fvk: &FullViewingKey,
     notes: Vec<SpendableNote>,
     recipient: Address,
+    recipient_str: &str,
     amount: u64,
     account: u32,
     branch_id: u32,
@@ -975,8 +1001,10 @@ pub async fn build_pczt(
             is_spend,
             recipient: orchard_recipient,
             rseed: orchard_rseed,
+            user_address: None,
         });
     }
+    attach_user_address(&mut action_fields, &recipient, amount, recipient_str);
 
     let ironwood_flags = effects_bundle.flag_byte() as u32;
     let ironwood_value_balance: i64 = *effects_bundle.value_balance();
@@ -1802,6 +1830,7 @@ pub async fn build_shield_pczt(
             is_spend,
             recipient: orchard_recipient,
             rseed: orchard_rseed,
+            user_address: None,
         });
     }
 
@@ -2887,6 +2916,7 @@ pub async fn build_deshield_pczt(
             is_spend,
             recipient: orchard_recipient,
             rseed: orchard_rseed,
+            user_address: None,
         });
     }
 
@@ -4742,5 +4772,71 @@ mod batch_validate_test {
             result,
             "Expected PASS: sigs in saved tx were created with T.1"
         );
+    }
+}
+
+#[cfg(test)]
+mod user_address_tests {
+    use super::{attach_user_address, ActionFields};
+    use orchard::keys::{FullViewingKey, Scope, SpendingKey};
+
+    fn action(index: u32, value: u64, recipient: Option<String>) -> ActionFields {
+        ActionFields {
+            index,
+            alpha: vec![0; 32],
+            cv_net: vec![0; 32],
+            nullifier: vec![0; 32],
+            cmx: vec![0; 32],
+            epk: vec![0; 32],
+            enc_compact: vec![0; 52],
+            enc_memo: vec![0; 512],
+            enc_noncompact: vec![0; 16],
+            rk: vec![0; 32],
+            out_ciphertext: vec![0; 80],
+            value,
+            is_spend: true,
+            recipient,
+            rseed: Some(hex::encode([0u8; 32])),
+            user_address: None,
+        }
+    }
+
+    fn addresses() -> (orchard::Address, orchard::Address) {
+        let sk = Option::<SpendingKey>::from(SpendingKey::from_bytes([7u8; 32])).unwrap();
+        let fvk = FullViewingKey::from(&sk);
+        (
+            fvk.address_at(0u32, Scope::External),
+            fvk.address_at(0u32, Scope::Internal),
+        )
+    }
+
+    /// Payee output gets the typed UA; change and dummy outputs stay None.
+    #[test]
+    fn user_address_only_on_payee_output() {
+        let (payee, change) = addresses();
+        let hex_of = |a: &orchard::Address| Some(hex::encode(a.to_raw_address_bytes()));
+        let mut actions = vec![
+            action(0, 40_000, hex_of(&change)),
+            action(1, 0, None),
+            action(2, 100_000, hex_of(&payee)),
+        ];
+        attach_user_address(&mut actions, &payee, 100_000, " u1example ");
+        assert_eq!(actions[0].user_address, None);
+        assert_eq!(actions[1].user_address, None);
+        assert_eq!(actions[2].user_address.as_deref(), Some("u1example"));
+
+        let json = serde_json::to_value(&actions).unwrap();
+        assert!(json[0].get("user_address").is_none());
+        assert_eq!(json[2]["user_address"], "u1example");
+    }
+
+    /// A raw-hex recipient is not a Unified Address, so nothing is forwarded.
+    #[test]
+    fn user_address_skipped_for_non_ua_recipient() {
+        let (payee, _) = addresses();
+        let raw = hex::encode(payee.to_raw_address_bytes());
+        let mut actions = vec![action(0, 100_000, Some(raw.clone()))];
+        attach_user_address(&mut actions, &payee, 100_000, &raw);
+        assert_eq!(actions[0].user_address, None);
     }
 }
