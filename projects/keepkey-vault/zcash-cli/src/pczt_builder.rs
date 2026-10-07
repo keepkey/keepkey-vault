@@ -40,30 +40,15 @@ const ZIP317_GRACE_ACTIONS: u64 = 2;
 const LEGACY_ORCHARD_BUNDLE_VERSION: BundleVersion = BundleVersion::orchard_v2();
 const IRONWOOD_BUNDLE_VERSION: BundleVersion = BundleVersion::ironwood_v3();
 
-/// Compute ZIP-317 fee for an Orchard-only transaction.
-/// fee = marginal_fee × max(grace_actions, logical_actions)
-/// where logical_actions = max(n_spends, n_outputs) for Orchard.
-fn zip317_fee(n_spends: usize, n_outputs: usize) -> u64 {
-    let logical_actions = std::cmp::max(n_spends, n_outputs) as u64;
-    ZIP317_MARGINAL_FEE * std::cmp::max(ZIP317_GRACE_ACTIONS, logical_actions)
+/// ZIP-317 fee for an Ironwood send (payee + change outputs).
+fn zip317_fee(n_spends: usize, _n_outputs: usize) -> u64 {
+    crate::batching::spend_fee(n_spends, crate::batching::SpendKind::Shielded)
 }
 
-/// ZIP-317 fee for a deshield tx (Orchard spends → 1 transparent output, 1 change note).
-///
-/// Per ZIP-317 §3, `logical_actions` uses the FINAL Orchard `action_count`
-/// (post-padding) — not the pre-padding `max(n_spends, n_outputs)`.
-/// `BundleType::DEFAULT` pads to a 2-action minimum for the anonymity set,
-/// so a 1-spend deshield has 2 orchard actions on chain.
-///
-/// Underpaying triggers the chain's "Unpaid actions is higher than the limit"
-/// mempool rejection even when the orchard proof verifies cleanly — because
-/// `unpaid_actions = ceil((expected_fee - actual_fee) / marginal_fee) > 0`.
+/// ZIP-317 fee for a deshield tx (Ironwood spends → 1 transparent output,
+/// 1 change note), counted on the padded action count.
 fn zip317_deshield_fee(n_spends: usize) -> u64 {
-    const N_TRANSPARENT_ACTIONS: u64 = 1; // one transparent output
-    const N_ORCHARD_OUTPUTS: usize = 1; // change note
-    let orchard_actions = std::cmp::max(2, std::cmp::max(n_spends, N_ORCHARD_OUTPUTS)) as u64;
-    let logical_actions = orchard_actions + N_TRANSPARENT_ACTIONS;
-    ZIP317_MARGINAL_FEE * std::cmp::max(ZIP317_GRACE_ACTIONS, logical_actions)
+    crate::batching::spend_fee(n_spends, crate::batching::SpendKind::Deshield)
 }
 
 /// Per-action fields needed by the device for signing + digest verification.
@@ -243,6 +228,13 @@ pub async fn build_pczt(
     // change until we compute it, and change depends on fee. Use a two-pass
     // approach: assume change exists (common case), compute fee, then verify.
     let n_spends = notes.len();
+    if crate::batching::ironwood_actions(n_spends, 2) > crate::batching::MAX_SHIELDED_ACTIONS {
+        return Err(anyhow::anyhow!(
+            "Send would spend {} notes; the device signs at most {} actions per transaction",
+            n_spends,
+            crate::batching::MAX_SHIELDED_ACTIONS
+        ));
+    }
     let n_outputs_with_change = 2usize; // recipient + change
     let fee = zip317_fee(n_spends, n_outputs_with_change);
     let needed = amount
@@ -1153,7 +1145,7 @@ pub fn finalize_pczt(
     )?;
 
     let tx_bytes =
-        serialize_v6_ironwood_hybrid_tx(&authorized_bundle, &[], &[], &[], branch_id, None)?;
+        serialize_v6_ironwood_hybrid_tx(Some(&authorized_bundle), &[], &[], &[], branch_id, None)?;
     let txid_hash = crate::zip229::compute_txid(ironwood_digest, &[], &[], branch_id, 0, 0);
     let txid = hex::encode(&txid_hash);
 
@@ -1430,6 +1422,7 @@ pub async fn build_shield_pczt(
     fee: u64,
     account: u32,
     branch_id: u32,
+    address_path: Vec<u32>,
     lwd_client: &mut crate::scanner::LightwalletClient,
     _db: &crate::wallet_db::WalletDb,
 ) -> Result<ShieldPcztState> {
@@ -1710,14 +1703,9 @@ pub async fn build_shield_pczt(
     info!("  ironwood:    {}", hex::encode(&digests.ironwood_digest));
     info!("  sighash:     {}", hex::encode(&sighash));
 
-    // Compute per-input transparent sighashes
-    let bip44_path: Vec<u32> = vec![
-        0x80000000 + 44,  // purpose
-        0x80000000 + 133, // coin (ZEC)
-        0x80000000,       // account 0
-        0,                // external chain
-        0,                // address index 0
-    ];
+    // Compute per-input transparent sighashes. Every input sits at
+    // `address_path` (m/44'/133'/0'/0/0, or a ZIP-320 ephemeral address).
+    let bip44_path = address_path;
 
     let mut transparent_signing: Vec<TransparentSigningInput> = Vec::new();
     for (i, input) in zip_inputs.iter().enumerate() {
@@ -1971,7 +1959,7 @@ pub fn finalize_shield_pczt(
     // Serialize as a hybrid v6 transaction with an empty Orchard slot and an
     // authorized Ironwood slot.
     let tx_bytes = serialize_v6_ironwood_hybrid_tx(
-        &authorized_bundle,
+        Some(&authorized_bundle),
         &state.transparent_inputs,
         &state.transparent_outputs,
         transparent_signatures,
@@ -2134,14 +2122,14 @@ fn validate_hybrid_ironwood_consensus(
 /// Serialize a transaction-v6 hybrid with transparent components and an
 /// Ironwood bundle. The Orchard bundle slot is encoded first and is empty.
 fn serialize_v6_ironwood_hybrid_tx(
-    bundle: &orchard::Bundle<orchard::bundle::Authorized, i64>,
+    bundle: Option<&orchard::Bundle<orchard::bundle::Authorized, i64>>,
     transparent_inputs: &[zip244::TransparentInput],
     transparent_outputs: &[zip244::TransparentOutput],
     transparent_signatures: &[Vec<u8>],
     branch_id: u32,
     compressed_pubkey: Option<&[u8]>,
 ) -> Result<Vec<u8>> {
-    if bundle.bundle_version() != IRONWOOD_BUNDLE_VERSION {
+    if bundle.is_some_and(|b| b.bundle_version() != IRONWOOD_BUNDLE_VERSION) {
         return Err(anyhow::anyhow!(
             "Refusing to serialize a non-Ironwood bundle in the v6 Ironwood slot"
         ));
@@ -2196,7 +2184,10 @@ fn serialize_v6_ironwood_hybrid_tx(
     tx.push(0); // Sapling outputs
     tx.push(0); // Orchard actions (empty v6 Orchard slot)
 
-    write_orchard_family_bundle(&mut tx, bundle);
+    match bundle {
+        Some(bundle) => write_orchard_family_bundle(&mut tx, bundle),
+        None => tx.push(0), // Ironwood actions (empty: transparent-only tx)
+    }
     Ok(tx)
 }
 
@@ -2402,18 +2393,13 @@ pub async fn build_deshield_pczt(
 
     let n_spends = notes.len();
 
-    // Firmware caps a signing session at ZCASH_MAX_ACTIONS (16) Orchard
-    // actions and rejects at ZcashSignPCZT — but only after we'd already
-    // spent minutes on tree building + Halo2 proving. Fail fast instead.
-    // ponytail: no note selection — consolidate via a z2z self-send first.
-    const FIRMWARE_MAX_ACTIONS: usize = 16;
-    if n_spends > FIRMWARE_MAX_ACTIONS {
+    // Callers pick notes with batching::plan_spend, which never exceeds the
+    // firmware's 16-action limit. Check anyway before minutes of proving.
+    if crate::batching::ironwood_actions(n_spends, 1) > crate::batching::MAX_SHIELDED_ACTIONS {
         return Err(anyhow::anyhow!(
-            "Deshield would spend {} notes but the device supports at most {} \
-             Orchard actions per transaction. Consolidate notes with a shielded \
-             send to your own address first.",
+            "Deshield would spend {} notes; the device signs at most {} actions per transaction",
             n_spends,
-            FIRMWARE_MAX_ACTIONS
+            crate::batching::MAX_SHIELDED_ACTIONS
         ));
     }
 
@@ -3049,7 +3035,7 @@ pub fn finalize_deshield_pczt(
     // Serialize as hybrid v6 tx: no transparent inputs, transparent outputs,
     // an empty Orchard slot, and the authorized Ironwood bundle.
     let tx_bytes = serialize_v6_ironwood_hybrid_tx(
-        &authorized_bundle,
+        Some(&authorized_bundle),
         &[], // no transparent inputs
         &state.transparent_outputs,
         &[], // no transparent signatures
@@ -3076,6 +3062,347 @@ pub fn finalize_deshield_pczt(
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────
+
+// ── Transparent-only (ZIP-320 TEX step 2) ────────────────────────────
+
+/// A transparent-only v6 transaction waiting for ECDSA signatures.
+/// ZIP-320: the second transaction of a TEX payment spends the wallet's
+/// ephemeral transparent output straight to the P2PKH hash in the TEX
+/// address, with no shielded bundle at all.
+pub struct TransparentOnlyState {
+    pub branch_id: u32,
+    pub digests: crate::zip229::Zip229Digests,
+    pub transparent_inputs: Vec<zip244::TransparentInput>,
+    pub transparent_outputs: Vec<zip244::TransparentOutput>,
+    pub transparent_signing_inputs: Vec<TransparentSigningInput>,
+    pub fee: u64,
+}
+
+/// Firmware 7.15 limits on transparent inputs and outputs per transaction.
+pub const MAX_TRANSPARENT_INPUTS: usize = 8;
+pub const MAX_TRANSPARENT_OUTPUTS: usize = 8;
+
+/// ZIP-317 fee for P2PKH inputs and outputs only.
+pub fn zip317_transparent_fee(n_inputs: usize, n_outputs: usize) -> u64 {
+    ZIP317_MARGINAL_FEE
+        * std::cmp::max(
+            ZIP317_GRACE_ACTIONS,
+            std::cmp::max(n_inputs, n_outputs) as u64,
+        )
+}
+
+/// Build a transparent-only v6 transaction. Every input is a P2PKH output at
+/// `address_path`; the fee is whatever the inputs leave over, and must meet
+/// ZIP-317.
+pub fn build_transparent_only(
+    inputs: &[ShieldTransparentInput],
+    outputs: &[DeshieldTransparentOutput],
+    address_path: Vec<u32>,
+    branch_id: u32,
+) -> Result<TransparentOnlyState> {
+    if branch_id != crate::zip229::NU6_3_BRANCH_ID {
+        return Err(anyhow::anyhow!(
+            "Transparent v6 transactions require NU6.3 branch 0x{:08x}; node reported 0x{:08x}",
+            crate::zip229::NU6_3_BRANCH_ID,
+            branch_id
+        ));
+    }
+    if inputs.is_empty() || inputs.len() > MAX_TRANSPARENT_INPUTS {
+        return Err(anyhow::anyhow!(
+            "Need 1 to {} transparent inputs, got {}",
+            MAX_TRANSPARENT_INPUTS,
+            inputs.len()
+        ));
+    }
+    if outputs.is_empty() || outputs.len() > MAX_TRANSPARENT_OUTPUTS {
+        return Err(anyhow::anyhow!(
+            "Need 1 to {} transparent outputs, got {}",
+            MAX_TRANSPARENT_OUTPUTS,
+            outputs.len()
+        ));
+    }
+
+    let mut zip_inputs = Vec::with_capacity(inputs.len());
+    for ti in inputs {
+        let txid_bytes = hex::decode(&ti.txid)?;
+        let mut prevout_hash: [u8; 32] = txid_bytes
+            .try_into()
+            .map_err(|_| anyhow::anyhow!("Invalid txid length"))?;
+        prevout_hash.reverse(); // display order → internal byte order
+        zip_inputs.push(zip244::TransparentInput {
+            prevout_hash,
+            prevout_index: ti.vout,
+            script_pubkey: hex::decode(&ti.script_pubkey)?,
+            value: ti.value,
+            sequence: 0xFFFFFFFF,
+        });
+    }
+    let mut zip_outputs = Vec::with_capacity(outputs.len());
+    for o in outputs {
+        if o.value == 0 {
+            return Err(anyhow::anyhow!("Transparent output value must be positive"));
+        }
+        zip_outputs.push(zip244::TransparentOutput {
+            value: o.value,
+            script_pubkey: hex::decode(&o.script_pubkey)?,
+        });
+    }
+
+    let total_in: u64 = zip_inputs.iter().map(|i| i.value).sum();
+    let total_out: u64 = zip_outputs.iter().map(|o| o.value).sum();
+    let fee = total_in.checked_sub(total_out).ok_or_else(|| {
+        anyhow::anyhow!(
+            "Outputs ({} ZAT) exceed inputs ({} ZAT)",
+            total_out,
+            total_in
+        )
+    })?;
+    let min_fee = zip317_transparent_fee(zip_inputs.len(), zip_outputs.len());
+    if fee < min_fee {
+        return Err(anyhow::anyhow!(
+            "Fee {} ZAT is below the ZIP-317 minimum {} ZAT",
+            fee,
+            min_fee
+        ));
+    }
+
+    let digests = crate::zip229::Zip229Digests {
+        header_digest: crate::zip229::digest_header(branch_id, 0, 0),
+        transparent_digest: zip244::digest_transparent_sig_for_orchard(&zip_inputs, &zip_outputs),
+        sapling_digest: zip244::EMPTY_SAPLING_DIGEST,
+        orchard_digest: crate::zip229::empty_orchard_digest(),
+        ironwood_digest: crate::zip229::empty_ironwood_digest(),
+    };
+
+    let transparent_signing_inputs = zip_inputs
+        .iter()
+        .enumerate()
+        .map(|(i, input)| TransparentSigningInput {
+            index: i as u32,
+            sighash: crate::zip229::compute_transparent_sig_hash(
+                i,
+                &zip_inputs,
+                &zip_outputs,
+                &digests,
+                branch_id,
+            )
+            .to_vec(),
+            address_path: address_path.clone(),
+            amount: input.value,
+            prevout_txid: hex::encode(input.prevout_hash),
+            prevout_index: input.prevout_index,
+            sequence: input.sequence,
+            script_pubkey: hex::encode(&input.script_pubkey),
+        })
+        .collect();
+
+    Ok(TransparentOnlyState {
+        branch_id,
+        digests,
+        transparent_inputs: zip_inputs,
+        transparent_outputs: zip_outputs,
+        transparent_signing_inputs,
+        fee,
+    })
+}
+
+/// Check each device signature against its input's sighash and the signing
+/// key, then serialize. A signature from the wrong key (wrong path) is
+/// caught here instead of as a node rejection.
+pub fn finalize_transparent_only(
+    state: &TransparentOnlyState,
+    transparent_signatures: &[Vec<u8>],
+    compressed_pubkey: &[u8],
+) -> Result<(Vec<u8>, String)> {
+    if transparent_signatures.len() != state.transparent_inputs.len() {
+        return Err(anyhow::anyhow!(
+            "Expected {} transparent signatures, got {}",
+            state.transparent_inputs.len(),
+            transparent_signatures.len()
+        ));
+    }
+    let secp = secp256k1::Secp256k1::verification_only();
+    let pubkey = secp256k1::PublicKey::from_slice(compressed_pubkey)
+        .map_err(|e| anyhow::anyhow!("Invalid compressed pubkey: {}", e))?;
+    let pubkey_hash = {
+        use ripemd::Ripemd160;
+        use sha2::{Digest, Sha256};
+        Ripemd160::digest(Sha256::digest(compressed_pubkey))
+    };
+    for (i, (sig, input)) in transparent_signatures
+        .iter()
+        .zip(&state.transparent_signing_inputs)
+        .enumerate()
+    {
+        let script = hex::decode(&input.script_pubkey)?;
+        if script.len() != 25 || script[3..23] != pubkey_hash[..] {
+            return Err(anyhow::anyhow!(
+                "Input {} is not a P2PKH output of the signing key",
+                i
+            ));
+        }
+        let signature = secp256k1::ecdsa::Signature::from_der(sig)
+            .map_err(|e| anyhow::anyhow!("Input {}: invalid DER signature: {}", i, e))?;
+        let digest: [u8; 32] = input.sighash.as_slice().try_into()?;
+        secp.verify_ecdsa(
+            &secp256k1::Message::from_digest(digest),
+            &signature,
+            &pubkey,
+        )
+        .map_err(|_| anyhow::anyhow!("Input {}: device signature does not verify", i))?;
+    }
+
+    let tx = serialize_v6_ironwood_hybrid_tx(
+        None,
+        &state.transparent_inputs,
+        &state.transparent_outputs,
+        transparent_signatures,
+        state.branch_id,
+        Some(compressed_pubkey),
+    )?;
+    let txid = crate::zip229::compute_txid(
+        crate::zip229::empty_ironwood_digest(),
+        &state.transparent_inputs,
+        &state.transparent_outputs,
+        state.branch_id,
+        0,
+        0,
+    );
+    Ok((tx, hex::encode(txid)))
+}
+
+#[cfg(test)]
+mod transparent_only_tests {
+    use super::*;
+    use zcash_primitives::transaction::Transaction;
+    use zcash_protocol::consensus::BranchId;
+
+    fn p2pkh(hash: &[u8]) -> String {
+        format!("76a914{}88ac", hex::encode(hash))
+    }
+
+    fn key() -> (secp256k1::SecretKey, Vec<u8>, String) {
+        use ripemd::Ripemd160;
+        use sha2::{Digest, Sha256};
+        let sk = secp256k1::SecretKey::from_slice(&[0x11; 32]).unwrap();
+        let pk = secp256k1::PublicKey::from_secret_key(&secp256k1::Secp256k1::new(), &sk)
+            .serialize()
+            .to_vec();
+        let script = p2pkh(&Ripemd160::digest(Sha256::digest(&pk)));
+        (sk, pk, script)
+    }
+
+    fn ephemeral_path() -> Vec<u32> {
+        vec![0x8000002C, 0x80000085, 0x80000000, 2, 0]
+    }
+
+    #[test]
+    fn tex_step_two_round_trips_through_the_canonical_parser() {
+        let (sk, pk, script) = key();
+        let inputs = vec![ShieldTransparentInput {
+            txid: "11".repeat(32),
+            vout: 0,
+            value: 110_000,
+            script_pubkey: script,
+        }];
+        let outputs = vec![DeshieldTransparentOutput {
+            script_pubkey: p2pkh(&[0xab; 20]),
+            value: 100_000,
+        }];
+        let state = build_transparent_only(
+            &inputs,
+            &outputs,
+            ephemeral_path(),
+            crate::zip229::NU6_3_BRANCH_ID,
+        )
+        .unwrap();
+        assert_eq!(state.fee, 10_000);
+        assert_eq!(state.transparent_signing_inputs[0].address_path[3], 2);
+
+        let secp = secp256k1::Secp256k1::new();
+        let msg = secp256k1::Message::from_digest(
+            state.transparent_signing_inputs[0]
+                .sighash
+                .as_slice()
+                .try_into()
+                .unwrap(),
+        );
+        let sig = secp.sign_ecdsa(&msg, &sk).serialize_der().to_vec();
+        let (raw, txid) = finalize_transparent_only(&state, &[sig], &pk).unwrap();
+
+        let parsed = Transaction::read(&raw[..], BranchId::Nu6_3)
+            .expect("canonical reader accepts a transparent-only v6 tx");
+        assert!(parsed.orchard_bundle().is_none());
+        assert!(parsed.ironwood_bundle().is_none());
+        assert_eq!(parsed.transparent_bundle().unwrap().vout.len(), 1);
+        assert_eq!(hex::encode(parsed.txid().as_ref()), txid);
+    }
+
+    #[test]
+    fn rejects_a_signature_from_another_key() {
+        let (_, pk, script) = key();
+        let inputs = vec![ShieldTransparentInput {
+            txid: "22".repeat(32),
+            vout: 1,
+            value: 50_000,
+            script_pubkey: script,
+        }];
+        let outputs = vec![DeshieldTransparentOutput {
+            script_pubkey: p2pkh(&[0xcd; 20]),
+            value: 40_000,
+        }];
+        let state = build_transparent_only(
+            &inputs,
+            &outputs,
+            ephemeral_path(),
+            crate::zip229::NU6_3_BRANCH_ID,
+        )
+        .unwrap();
+        let other = secp256k1::SecretKey::from_slice(&[0x22; 32]).unwrap();
+        let msg = secp256k1::Message::from_digest(
+            state.transparent_signing_inputs[0]
+                .sighash
+                .as_slice()
+                .try_into()
+                .unwrap(),
+        );
+        let sig = secp256k1::Secp256k1::new()
+            .sign_ecdsa(&msg, &other)
+            .serialize_der()
+            .to_vec();
+        assert!(finalize_transparent_only(&state, &[sig], &pk).is_err());
+    }
+
+    #[test]
+    fn enforces_limits_and_fee() {
+        let (_, _, script) = key();
+        let input = |n: u8| ShieldTransparentInput {
+            txid: format!("{:02x}", n).repeat(32),
+            vout: 0,
+            value: 20_000,
+            script_pubkey: script.clone(),
+        };
+        let out = |v| DeshieldTransparentOutput {
+            script_pubkey: p2pkh(&[1; 20]),
+            value: v,
+        };
+        let b = crate::zip229::NU6_3_BRANCH_ID;
+        // 8 inputs fit, 9 do not.
+        let eight: Vec<_> = (0..8).map(input).collect();
+        assert!(
+            build_transparent_only(&eight, &[out(160_000 - 40_000)], ephemeral_path(), b).is_ok()
+        );
+        let nine: Vec<_> = (0..9).map(input).collect();
+        assert!(build_transparent_only(&nine, &[out(100_000)], ephemeral_path(), b).is_err());
+        // Underpaying ZIP-317 is refused.
+        assert!(build_transparent_only(&[input(0)], &[out(15_000)], ephemeral_path(), b).is_err());
+        // Pre-NU6.3 branch is refused.
+        assert!(
+            build_transparent_only(&[input(0)], &[out(10_000)], ephemeral_path(), 0xc2d6_d0b4)
+                .is_err()
+        );
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -4666,7 +4993,7 @@ mod transaction_roundtrip_tests {
         let synth_sig = vec![0u8; 71];
         let synth_pubkey = [0x03u8; 33];
         let tx_bytes = serialize_v6_ironwood_hybrid_tx(
-            &bundle,
+            Some(&bundle),
             &inputs,
             &[],
             &[synth_sig],

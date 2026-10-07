@@ -5010,6 +5010,12 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           if (!callbacks?.zcashPreSendGate) throw new HttpError(503, 'Zcash pre-send gate unavailable')
           await callbacks.zcashPreSendGate(account)
           const result = await buildShieldedTx(body)
+          // The split path signs one transaction. A payment that needs more notes
+          // than one transaction can spend would come back paying only part of the
+          // amount, so refuse it rather than let a caller think it paid in full.
+          if (result.batch && result.batch.total_txs > 1) {
+            throw new HttpError(400, `This payment needs ${result.batch.total_txs} transactions (the device signs at most 16 actions each); use /api/zcash/shielded/send`)
+          }
           return json(result)
         }
 

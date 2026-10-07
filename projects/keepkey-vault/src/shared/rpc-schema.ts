@@ -1,7 +1,7 @@
 import type { ElectrobunRPCSchema } from 'electrobun/bun'
 import type { ClearSignReport } from './clearsign-report'
 import type { ClearSignCentralAssetAuditHistory, ClearSignCentralAssetReview, ClearSignCentralAssetReviewResult, ClearSignCentralContractAudit, ClearSignCentralContractReview, ClearSignCentralStatus, ClearSignProtectionCaseStudy } from './types'
-import type { DeviceStateInfo, FirmwareProgress, FirmwareAnalysis, FatalEvent, PinRequest, CharacterRequest, ChainBalance, BuildTxParams, BuildTxResult, BroadcastResult, BtcAccountSet, BtcScriptType, EvmAddressSet, CustomToken, CustomChain, AppSettings, PioneerServer, BtcGetAddressParams, EthGetAddressParams, EthSignTxParams, BtcSignTxParams, GetPublicKeysParams, UpdateInfo, UpdateStatus, TokenVisibilityStatus, PairingRequestInfo, PairedAppInfo, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, ReportMeta, ReportData, AuditReport, AuditPortfolioSnapshot, AuditMode, AuditDerivedAddress, AuditInspectResult, SwapAsset, SwapQuote, SwapQuoteParams, ExecuteSwapParams, SwapResult, SwapHealth, PendingSwap, SwapStatusUpdate, SwapHistoryRecord, SwapHistoryFilter, SwapHistoryStats, SwapUiState, SwapUiCommand, RecentActivity, BuildStakingTxParams, StakingPosition, DefiPosition, NameInfo, NameQuote, BuildNameRegTxParams, ZcashTransaction, EmulatorStatus, EmulatorWalletInfo, RegisteredDevice, WcSessionInfo, AddressBookEntry, AddressBookFilter, AddressBookTx, UsbDiagnosticReport, ClearSignEvent, ClearSignCoverageSummary, ClearSignAuditJob, ClearSignSolanaSchemaArtifact, ClearSignSolanaSchemaDraft, RngAuditReport } from './types'
+import type { DeviceStateInfo, FirmwareProgress, FirmwareAnalysis, FatalEvent, PinRequest, CharacterRequest, ChainBalance, BuildTxParams, BuildTxResult, BroadcastResult, BtcAccountSet, BtcScriptType, EvmAddressSet, CustomToken, CustomChain, AppSettings, PioneerServer, BtcGetAddressParams, EthGetAddressParams, EthSignTxParams, BtcSignTxParams, GetPublicKeysParams, UpdateInfo, UpdateStatus, TokenVisibilityStatus, PairingRequestInfo, PairedAppInfo, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, ReportMeta, ReportData, AuditReport, AuditPortfolioSnapshot, AuditMode, AuditDerivedAddress, AuditInspectResult, SwapAsset, SwapQuote, SwapQuoteParams, ExecuteSwapParams, SwapResult, SwapHealth, PendingSwap, SwapStatusUpdate, SwapHistoryRecord, SwapHistoryFilter, SwapHistoryStats, SwapUiState, SwapUiCommand, RecentActivity, BuildStakingTxParams, StakingPosition, DefiPosition, NameInfo, NameQuote, BuildNameRegTxParams, ZcashTransaction, ZcashTxBatch, ZcashTexPayment, EmulatorStatus, EmulatorWalletInfo, RegisteredDevice, WcSessionInfo, AddressBookEntry, AddressBookFilter, AddressBookTx, UsbDiagnosticReport, ClearSignEvent, ClearSignCoverageSummary, ClearSignAuditJob, ClearSignSolanaSchemaArtifact, ClearSignSolanaSchemaDraft, RngAuditReport } from './types'
 
 /**
  * RPC Schema for Bun ↔ WebView communication.
@@ -199,9 +199,14 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       zcashShieldedStatus: { params: void; response: { ready: boolean; fvk_loaded: boolean; address: string | null; fvk: { ak: string; nk: string; rivk: string } | null; synced_to: number | null; keepkey_release_block: number | null; verified: boolean; synced: boolean; verifying: boolean } }
       zcashShieldedInit: { params: { account?: number }; response: { fvk: { ak: string; nk: string; rivk: string }; address: string } }
       zcashShieldedScan: { params: { startHeight?: number; fullRescan?: boolean }; response: { balance: number; notes_found: number; synced_to: number } }
-      zcashShieldedBalance: { params: void; response: { confirmed: number; pending: number; synced_to?: number | null; notes_total?: number; notes_unspent?: number; keepkey_release_block?: number } }
-      zcashShieldedSend: { params: { recipient: string; amount: number; memo?: string }; response: { txid: string } }
-      zcashShieldZec: { params: { amount: number; account?: number }; response: { txid: string } }
+      // max_send / max_deshield: the most one payment can move, across as many
+      // transactions as the 16-action device limit requires.
+      zcashShieldedBalance: { params: void; response: { confirmed: number; pending: number; synced_to?: number | null; notes_total?: number; notes_unspent?: number; keepkey_release_block?: number; max_send?: number; max_deshield?: number } }
+      // A payment that needs more notes than one transaction can spend is sent
+      // as several; `txids` lists them all, `txid` is the last. A tex1
+      // recipient (ZIP-320) is paid via a one-time transparent address.
+      zcashShieldedSend: { params: { recipient: string; amount: number; memo?: string }; response: { txid: string; txids?: string[] } }
+      zcashShieldZec: { params: { amount: number; account?: number }; response: { txid: string; txids: string[] } }
       // Confirmed UTXO total at the user's first-receive t-addr — the only address
       // shieldZec sweeps. Use this (not chain-level getBalance, which sums the
       // whole xpub) to power the Shield page's Available / Max button.
@@ -210,9 +215,14 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       //   discrepancy between the chain-level balance and what's shieldable
       zcashTransparentBalance: {
         params: { account?: number } | void
-        response: { address: string; balanceZat: number; pendingZat: number; matureCount: number; pendingCount: number }
+        response: { address: string; balanceZat: number; pendingZat: number; matureCount: number; pendingCount: number; maxShieldZat: number }
       }
-      zcashDeshieldZec: { params: { recipient: string; amount: number; account?: number }; response: { txid: string } }
+      zcashDeshieldZec: { params: { recipient: string; amount: number; account?: number }; response: { txid: string; txids: string[] } }
+      // ZIP-320 TEX payments. `funded` ones hold funds at a one-time address
+      // after a failed step 2: complete them or shield the funds back.
+      zcashTexPayments: { params: void; response: { payments: ZcashTexPayment[] } }
+      zcashTexComplete: { params: { index: number }; response: { txid: string } }
+      zcashTexShieldBack: { params: { index: number }; response: { txid: string } }
       // Read-only diagnostic: does the cached shielded balance belong to the
       // connected device? `match: false` ⇒ stale/other-wallet, not spendable here.
       zcashVerifyDevice: { params: { account?: number } | void; response: { match: boolean; deviceAk: string; cachedAk: string | null; cachedAddress: string | null; message: string } }
@@ -582,9 +592,9 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       // recipient) — frontend re-fetches the list.
       'addressbook-changed': Record<string, never>
       'sweep-progress': { scanId: string; current: number; total: number; phase: string; foundCount: number; foundSats: number }
-      'shield-progress': { step: string; detail?: string }
-      'deshield-progress': { step: string; detail?: string }
-      'send-progress': { step: string; detail?: string }
+      'shield-progress': { step: string; detail?: string; batch?: ZcashTxBatch }
+      'deshield-progress': { step: string; detail?: string; batch?: ZcashTxBatch }
+      'send-progress': { step: string; detail?: string; batch?: ZcashTxBatch }
       // Fires whenever the device emits a ButtonRequest (any flow). UI flows
       // that are mid-signing use this to switch from "device computing" to
       // "press the button on your KeepKey".

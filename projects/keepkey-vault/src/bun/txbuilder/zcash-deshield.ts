@@ -41,6 +41,18 @@ interface DeshieldBuildResult {
 	}
 	transparent_outputs: Array<{ index: number; value: number; script_pubkey: string }>
 	display: { amount: string; fee: string; action: string }
+	batch?: import("./zcash-shielded").SpendBatchInfo
+}
+
+export interface DeshieldOptions {
+	signWrap?: import("./zcash-shielded").DeviceSignWrap
+	onProgress?: import("./zcash-shield").TxProgressFn
+	/** The recipient is this wallet's own key at this path (ZIP-320
+	 *  ephemeral address): the device can show it as the user's own. */
+	outputAddressN?: number[]
+	/** Called after each transaction broadcasts; its transparent output is
+	 *  vout 0 (change stays shielded). */
+	onBroadcast?: (tx: { txid: string; vout: number; value: number }) => void
 }
 
 let deshieldInProgress = false
@@ -55,11 +67,8 @@ let deshieldInProgress = false
 export async function deshieldZec(
 	wallet: any,
 	params: DeshieldParams,
-	opts?: {
-		signWrap?: import("./zcash-shielded").DeviceSignWrap;
-		onProgress?: import("./zcash-shield").TxProgressFn;
-	},
-): Promise<{ txid: string }> {
+	opts?: DeshieldOptions,
+): Promise<{ txid: string; txids: string[] }> {
 	if (deshieldInProgress) {
 		throw new Error("A deshield transaction is already in progress")
 	}
@@ -76,11 +85,8 @@ export async function deshieldZec(
 async function _deshieldZecInner(
 	wallet: any,
 	params: DeshieldParams,
-	opts?: {
-		signWrap?: import("./zcash-shielded").DeviceSignWrap;
-		onProgress?: import("./zcash-shield").TxProgressFn;
-	},
-): Promise<{ txid: string }> {
+	opts?: DeshieldOptions,
+): Promise<{ txid: string; txids: string[] }> {
 	const account = params.account ?? 0
 
 	// 0a. Validate inputs
@@ -100,25 +106,57 @@ async function _deshieldZecInner(
 		await initializeOrchardFromDevice(wallet, account)
 	}
 
-	// 1. Build deshield PCZT via sidecar
+	// One transaction per batch: the sidecar spends at most 16 notes per
+	// transaction and reports what is left to pay (see sendShielded).
+	const { txidToDisplayOrder } = await import("./zcash-shield")
+	const txids: string[] = []
+	let remaining = params.amount
+	while (remaining > 0) {
+		try {
+			const { txid, paid } = await deshieldOnce(wallet, { ...params, amount: remaining, account }, txids.length, opts)
+			const display = txidToDisplayOrder(txid)
+			txids.push(display)
+			opts?.onBroadcast?.({ txid: display, vout: 0, value: paid.pay })
+			console.log(`[zcash-deshield] Deshield transaction sent: ${display}`)
+			remaining = paid.remaining_after
+		} catch (e: any) {
+			if (txids.length === 0) throw e
+			throw new Error(
+				`Unshielded in ${txids.length} transaction(s) (${txids.join(", ")}); ${remaining} ZAT was not sent: ${e?.message ?? e}`
+			)
+		}
+	}
+	return { txid: txids[txids.length - 1], txids }
+}
+
+/** Build, sign, finalize and broadcast one deshield transaction paying up to
+ *  `params.amount`. Returns its internal-order txid and what it paid. */
+async function deshieldOnce(
+	wallet: any,
+	params: Required<DeshieldParams>,
+	done: number,
+	opts?: DeshieldOptions,
+): Promise<{ txid: string; paid: { pay: number; remaining_after: number } }> {
+	if (done > 0) opts?.onProgress?.("building", { index: done + 1, total: done + 1 })
 	console.log("[zcash-deshield] Building deshield PCZT...")
 	const buildResult: DeshieldBuildResult = await sendCommand("build_deshield_pczt", {
 		recipient: params.recipient,
 		amount: params.amount,
-		account,
+		account: params.account,
 	}, 600000) // Halo2 proof can take a while
 
 	const sr = buildResult.orchard_signing_request
-	console.log(`[zcash-deshield] PCZT built: ${sr.n_actions} ${sr.pool} actions`)
-	console.log(`[zcash-deshield] Display: ${buildResult.display.amount} → ${buildResult.display.action}`)
+	const batch = buildResult.batch
+	const paid = batch ?? { pay: params.amount, remaining_after: 0 }
+	const progress = { index: done + 1, total: done + (batch?.total_txs ?? 1), fee: batch?.fee }
+	console.log(`[zcash-deshield] PCZT built: ${sr.n_actions} ${sr.pool} actions (transaction ${progress.index} of ${progress.total})`)
 
-	// 2. Device signs Ironwood actions (no transparent signing needed).
+	// Device signs Ironwood actions (no transparent signing needed).
 	// The transparent output MUST be declared and streamed: the firmware recomputes the
 	// transparent digest from plaintext (reviewing the t-address + amount on-device) and
 	// derives the sighash from it. Omitting it makes the device sign against the EMPTY
 	// transparent digest — an invalid signature — and fail the fee gate (value_balance ≠ fee).
-	console.log("[zcash-deshield] Requesting device signatures...")
-	opts?.onProgress?.("signing")
+	opts?.onProgress?.("signing", progress)
 	if (typeof wallet.zcashSignPczt !== "function") {
 		throw new Error("hdwallet does not support zcashSignPczt — ensure Zcash-capable firmware")
 	}
@@ -126,32 +164,26 @@ async function _deshieldZecInner(
 		throw new Error("Sidecar returned no transparent_outputs for deshield — refusing to sign")
 	}
 
-	const signingRequest = { ...sr, transparent_outputs: buildResult.transparent_outputs }
+	const transparentOutputs = opts?.outputAddressN
+		? buildResult.transparent_outputs.map(o => ({ ...o, address_n: opts.outputAddressN }))
+		: buildResult.transparent_outputs
+	const signingRequest = { ...sr, transparent_outputs: transparentOutputs }
 	const signFn = () => wallet.zcashSignPczt(signingRequest, sr.sighash)
 	const signatures = opts?.signWrap ? await opts.signWrap(signFn) : await signFn()
 	if (!signatures || !Array.isArray(signatures)) {
 		throw new Error("Device did not return signatures")
 	}
-
 	console.log(`[zcash-deshield] Got ${signatures.length} Ironwood signatures`)
 
-	// 3. Finalize via sidecar — only Ironwood signatures, no transparent sigs
-	console.log("[zcash-deshield] Finalizing deshield transaction...")
+	// Finalize via sidecar — only Ironwood signatures, no transparent sigs
 	const { raw_tx, txid } = await sendCommand("finalize_deshield", {
 		orchard_signatures: signatures,
 	})
-
-	// 4. Broadcast
 	if (!raw_tx) {
 		throw new Error("Sidecar returned no raw_tx from finalize_deshield")
 	}
 	console.log(`[zcash-deshield] raw_tx length: ${raw_tx.length / 2} bytes`)
-	console.log("[zcash-deshield] Broadcasting...")
-	opts?.onProgress?.("broadcasting")
+	opts?.onProgress?.("broadcasting", progress)
 	await sendCommand("broadcast", { raw_tx })
-
-	const { txidToDisplayOrder } = await import("./zcash-shield")
-	const displayTxid = txidToDisplayOrder(txid)
-	console.log(`[zcash-deshield] Deshield transaction sent: ${displayTxid}`)
-	return { txid: displayTxid }
+	return { txid, paid }
 }
