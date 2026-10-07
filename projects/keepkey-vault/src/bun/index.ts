@@ -4179,7 +4179,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const evmPubkeyEntries = evmAddresses.getAllPubkeyEntries(evmChains)
 				const evmAddressSet = new Set(evmAddresses.toAddressSet().addresses.map(a => a.address.toLowerCase()))
 				for (const entry of evmPubkeyEntries) {
-					pubkeys.push({ caip: entry.caip, pubkey: entry.pubkey, chainId: entry.chainId, symbol: entry.symbol, networkId: entry.networkId })
+					pubkeys.push({ caip: entry.caip, pubkey: entry.pubkey, chainId: entry.chainId, symbol: entry.symbol, networkId: entry.networkId, path: pathToBip32(evmAddressPath(entry.addressIndex)) })
 				}
 
 				// Non-EVM, non-UTXO chains (cosmos, xrp, etc.) — skip hidden chains (e.g. zcash-shielded has dedicated RPC)
@@ -5271,7 +5271,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					}
 					const evmEntries = evmAddresses.getAllPubkeyEntries([chain])
 					if (evmEntries.length > 0) {
-						for (const entry of evmEntries) pubkeys.push({ caip: entry.caip, pubkey: entry.pubkey })
+						for (const entry of evmEntries) pubkeys.push({ caip: entry.caip, pubkey: entry.pubkey, path: pathToBip32(evmAddressPath(entry.addressIndex)) })
 						const selectedAddr = evmAddresses.getSelectedAddress()
 						displayAddress = selectedAddr?.address || evmEntries[0].pubkey
 					} else {
@@ -8345,6 +8345,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// Never pass partial positives to the guarded DB upsert: it accepts them.
 				const confirmedResults = results.filter(r => !failedChainIds.has(r.chainId))
 				setCachedBalances(deviceId, confirmedResults, new Set(confirmedResults.map(r => r.chainId)))
+				for (const row of confirmedResults) {
+					for (const part of row.breakdown || []) {
+						saveCachedPubkey(deviceId, row.chainId, part.path || part.xpub, part.xpub, '', part.scriptType, part.balance, part.balanceUsd, true)
+					}
+				}
 				const merged = new Map<string, ChainBalance>(cachedBalances.map(b => [b.chainId, { ...b, syncState: 'stale' as ChainBalance['syncState'] }]))
 				for (const row of confirmedResults) merged.set(row.chainId, row)
 				return [...merged.values()]
