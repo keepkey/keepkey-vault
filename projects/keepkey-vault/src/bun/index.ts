@@ -5797,14 +5797,14 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					// correct key for account > 0. Device-scoped, never written for
 					// passphrase wallets; dedup by xpub against the account-0 set above.
 					const utxoDevId = engine.getDeviceState().deviceId
-					if (utxoDevId && liveSeedIdentity && !engine.isPassphraseWallet) {
+					if (utxoDevId && !engine.isPassphraseWallet) {
 						const seen = new Set(derivedXpubs.map(x => x.xpub))
 						for (const pk of getCachedPubkeys(utxoDevId)) {
-							if (pk.chainId !== chain.id || !pk.xpub || seen.has(`${chain.caip}:${utxoDiscoveryKey(pk.xpub, pk.scriptType)}`)) continue
+							if (pk.chainId !== chain.id || !pk.xpub || seen.has(pk.xpub)) continue
 							const acctPath = parseBip32Path(pk.path)
 							if (!acctPath || acctPath.length !== 3) continue
 							derivedXpubs.push({ xpub: pk.xpub, scriptType: pk.scriptType || chain.scriptType || 'p2pkh', accountPath: acctPath })
-							seen.add(`${chain.caip}:${utxoDiscoveryKey(pk.xpub, pk.scriptType)}`)
+							seen.add(pk.xpub)
 						}
 					}
 					if (derivedXpubs.length > 0) {
