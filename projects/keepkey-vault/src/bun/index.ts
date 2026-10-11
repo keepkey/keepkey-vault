@@ -245,7 +245,7 @@ import { getRequiredConfs } from "../shared/confirmations"
 import { addSessionActivity, getSessionActivity, clearSessionActivity } from "./session-activity"
 import { buildTx, broadcastTx, canonicalizeTronTokenCaip } from "./txbuilder"
 import { buildCosmosStakingTx, buildCosmosNameRegTx } from "./txbuilder/cosmos"
-import { initializeOrchardFromDevice, scanOrchardNotes, getShieldedBalance, sendShielded, ensureFvkLoaded, displayOrchardAddressOnDevice } from "./txbuilder/zcash-shielded"
+import { initializeOrchardFromDevice, exportOrchardFvk, scanOrchardNotes, getShieldedBalance, sendShielded, ensureFvkLoaded, displayOrchardAddressOnDevice } from "./txbuilder/zcash-shielded"
 import { findZcashCliBinary, isSidecarReady, startSidecar, stopSidecar, wipeSidecarWalletDb, hasFvkLoaded, getCachedFvk, onScanProgress, getScanState, updateSyncedTo, beginZcashSend, endZcashSend, isZcashSendInFlight } from "./zcash-sidecar"
 import { CHAINS, customChainToChainDef, isChainSupported, hiveRolePath, btcTaprootSupported, findChainByNetwork } from "../shared/chains"
 import { versionCompare } from "../shared/firmware-versions"
@@ -2159,7 +2159,7 @@ async function ensureZcashDeviceMatch(account: number = 0, force: boolean = fals
 	// silent — no button press). The display path keeps the sticky short-circuit.
 	if (zcashDeviceVerified && !force) return true
 
-	const deviceFvk = await (engine.wallet as any).zcashGetOrchardFVK(account)
+	const deviceFvk = await exportOrchardFvk(engine.wallet, account)
 	if (!deviceFvk?.ak) throw new Error('Device returned no Orchard ak — cannot verify wallet identity')
 	const deviceAk = Buffer.from(deviceFvk.ak).toString('hex').toLowerCase()
 
@@ -6552,7 +6552,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					throw new Error('Device firmware does not support Orchard FVK export')
 				}
 				const cached = getCachedFvk()
-				const deviceFvk = await (engine.wallet as any).zcashGetOrchardFVK(params?.account ?? 0)
+				const deviceFvk = await exportOrchardFvk(engine.wallet, params?.account ?? 0)
 				const deviceAk = Buffer.from(deviceFvk.ak).toString('hex')
 				const cachedAk = cached?.fvk?.ak ?? null
 				const match = !!cachedAk && cachedAk.toLowerCase() === deviceAk.toLowerCase()
