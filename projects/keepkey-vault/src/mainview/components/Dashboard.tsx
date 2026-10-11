@@ -2463,25 +2463,26 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 				</Box>
 			)}
 
-			{/* Soft-fault banner — degraded/stale chains. Hidden while a hard
+			{/* Out-of-sync notice — degraded/stale chains. Informational (green): the
+			    server answered, these chains are just behind. Hidden while a hard
 			    pioneerError banner is showing (that one supersedes). */}
 			{!pioneerError && portfolioFault && (portfolioFault.degradedChains.length > 0 || portfolioFault.staleChains.length > 0) && (
 				<Box
 					mb="3"
 					px="4"
 					py="3"
-					bg="rgba(233,196,106,0.08)"
+					bg="rgba(34,197,94,0.08)"
 					border="1px solid"
-					borderColor="rgba(233,196,106,0.3)"
+					borderColor="rgba(34,197,94,0.3)"
 					borderRadius="lg"
 				>
 					<Flex direction="column" gap="2">
 						<Flex align="center" gap="2">
-							<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+							<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
 								<circle cx="12" cy="12" r="10" />
 								<polyline points="12 6 12 12 16 14" />
 							</svg>
-							<Text fontSize="sm" fontWeight="600" color="var(--gold)">
+							<Text fontSize="sm" fontWeight="600" color="#22c55e">
 								{portfolioFault.degradedChains.length > 0 ? t("degradedTitle") : t("staleTitle")}
 							</Text>
 						</Flex>
@@ -2511,7 +2512,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 							)}
 							{portfolioFault.staleChains.length > 0 && (
 								<Text fontSize="xs" color="kk.textSecondary" lineHeight="1.4">
-									{t("staleDesc", { count: portfolioFault.staleMinutes })}
+									{t("staleDesc", { ago: formatTimeAgo(Date.now() - portfolioFault.staleMinutes * 60_000, t) })}
 								</Text>
 							)}
 						</Flex>
@@ -2523,12 +2524,12 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 								fontSize="xs"
 								fontWeight="600"
 								color="white"
-								bg="rgba(233,196,106,0.2)"
+								bg="rgba(34,197,94,0.2)"
 								border="1px solid"
-								borderColor="kk.gold"
+								borderColor="#22c55e"
 								borderRadius="md"
 								cursor="pointer"
-								_hover={{ bg: "rgba(233,196,106,0.35)" }}
+								_hover={{ bg: "rgba(34,197,94,0.35)" }}
 								onClick={() => refreshBalances(true)}
 							>
 								{t("syncNow")}
