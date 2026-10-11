@@ -2,7 +2,6 @@ import { createHash } from 'node:crypto'
 import bs58 from 'bs58'
 
 import type { EffectAssetChange, EffectAuthorityChange, EffectCodeIdentity, EffectReport } from '../shared/transaction-effects'
-import { SIMULATION_UNAVAILABLE_MESSAGE } from '../shared/transaction-effects'
 import { DEFAULT_SOLANA_RPC_ENDPOINT } from './solana-alt'
 import { parseSolanaMessage, parseSolanaTx, solanaMessageSlice } from './solana-tx'
 
@@ -214,11 +213,10 @@ export async function simulateSolanaEffects(
     if (!result?.value) throw new Error('simulation returned no value')
     return normalizeSolanaSimulation(rawTxBase64, owner, endpoint, result.context?.slot, result.value)
   } catch (error: any) {
-    console.warn(`[clearsign] Solana simulation unavailable: ${error?.message || String(error)}`)
     return {
       version: 1, chain: 'Solana', transactionFingerprint: fingerprint,
       stateReference: { endpoint }, status: 'unavailable', assetChanges: [], authorityChanges: [], invokedCode: [], warnings: [],
-      unknowns: [{ code: 'SIMULATION_UNAVAILABLE', message: SIMULATION_UNAVAILABLE_MESSAGE, severity: 'danger' }],
+      unknowns: [{ code: 'SIMULATION_UNAVAILABLE', message: error?.message || String(error), severity: 'danger' }],
       completeness: { accountCoverage: 'unknown', innerExecution: 'unknown', tokenCoverage: 'unknown', authorityCoverage: 'unknown' },
     }
   }
