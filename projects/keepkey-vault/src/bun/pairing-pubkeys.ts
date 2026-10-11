@@ -104,8 +104,8 @@ export function utxoPairingEntries(
   const out: PairingEntry[] = []
   for (const x of xpubs) {
     const chain = byId.get(x.chainId)
-    if (!chain || !x.xpub || seen.has(x.xpub) || x.path.length < 3) continue
-    seen.add(x.xpub)
+    if (!chain || !x.xpub || seen.has(`${x.chainId}:${x.scriptType || chain.scriptType}:${x.xpub}`) || x.path.length < 3) continue
+    seen.add(`${x.chainId}:${x.scriptType || chain.scriptType}:${x.xpub}`)
     const addressNList = x.path.slice(0, 3)
     const addressNListMaster = masterOf(addressNList)
     // Account index is the hardened element [2] — 0x80000000 for account 0.

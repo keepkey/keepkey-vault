@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react"
 import { Box, Flex, Text } from "@chakra-ui/react"
 import { FaPlus, FaCheck, FaChevronDown } from "react-icons/fa"
 import { useTranslation } from "react-i18next"
+import { formatBalance } from "../lib/formatting"
 
 export interface UtxoScriptTypeInfo {
   scriptType: string
@@ -21,6 +22,14 @@ interface UtxoAccountSelectorProps {
   scripts?: UtxoScriptTypeInfo[]
   selectedScript?: string
   onSelectScript?: (scriptType: string) => void
+  /** Per-xpub balances (ChainBalance.breakdown) shown against each script type. */
+  breakdown?: Array<{ path: string; scriptType: string; balance: string }>
+}
+
+// "m/49'/2'/0'" → { purpose: 49, account: 0 }
+const parseAcctPath = (path: string) => {
+  const m = /^m\/(\d+)'\/\d+'\/(\d+)'/.exec(path)
+  return m ? { purpose: Number(m[1]), account: Number(m[2]) } : null
 }
 
 /**
@@ -28,7 +37,7 @@ interface UtxoAccountSelectorProps {
  * (LTC/DOGE/DASH/…). Glass pills in the AssetPage action row, modeled on
  * CompactBtcSelector.
  */
-export function UtxoAccountSelector({ accounts, selected, onSelect, onAddAccount, adding, symbol, scripts, selectedScript, onSelectScript }: UtxoAccountSelectorProps) {
+export function UtxoAccountSelector({ accounts, selected, onSelect, onAddAccount, adding, symbol, scripts, selectedScript, onSelectScript, breakdown }: UtxoAccountSelectorProps) {
   const { t } = useTranslation("receive")
   const [open, setOpen] = useState(false)
   const [scriptOpen, setScriptOpen] = useState(false)
@@ -51,6 +60,11 @@ export function UtxoAccountSelector({ accounts, selected, onSelect, onAddAccount
   }, [open, scriptOpen])
 
   const activeScript = scripts?.find(s => s.scriptType === selectedScript) || scripts?.[0]
+  // Breakdown rows for the selected account; each matched to a picker option by purpose + script type.
+  const acctRows = (breakdown || []).map(r => ({ ...r, p: parseAcctPath(r.path) })).filter(r => r.p?.account === selected)
+  const rowFor = (st: UtxoScriptTypeInfo) => acctRows.find(r => r.p?.purpose === st.purpose && r.scriptType === st.scriptType)
+  // Xpubs no option derives (e.g. LTC's historical p2wpkh-on-44' branch) — listed read-only so the rows sum to the total.
+  const extraRows = acctRows.filter(r => !scripts?.some(st => r.p?.purpose === st.purpose && r.scriptType === st.scriptType))
 
   return (
     <Flex gap="2" align="center">
@@ -197,7 +211,7 @@ export function UtxoAccountSelector({ accounts, selected, onSelect, onAddAccount
             position="absolute"
             top="calc(100% + 6px)"
             left="0"
-            minW="220px"
+            minW="280px"
             zIndex={9999}
             className="v3-glass-card-overlay electrobun-webkit-app-region-no-drag"
             py="1.5"
@@ -226,15 +240,41 @@ export function UtxoAccountSelector({ accounts, selected, onSelect, onAddAccount
                         {st.prefix}…
                       </Text>
                     </Box>
-                    {isSel && <Box as={FaCheck} color="var(--teal)" fontSize="10px" flexShrink={0} />}
+                    {rowFor(st) && <BalanceCell balance={rowFor(st)!.balance} symbol={symbol} />}
+                    <Box w="10px" flexShrink={0}>
+                      {isSel && <Box as={FaCheck} color="var(--teal)" fontSize="10px" />}
+                    </Box>
                   </Flex>
                 </Box>
               )
             })}
+            {extraRows.map(r => (
+              <Flex key={r.path + r.scriptType} align="center" gap="2.5" px="3" py="2" borderTop="1px solid rgba(255,255,255,0.06)" title="Tracked for balance; not selectable for receive">
+                <Box flex="1" minW="0">
+                  <Text fontSize="12px" fontWeight="600" color="var(--text-0)" lineHeight="1.1">
+                    {scripts.find(s => s.scriptType === r.scriptType)?.label || r.scriptType} (old path)
+                  </Text>
+                  <Text fontSize="10px" fontFamily="mono" color="var(--text-2)" lineHeight="1.2" mt="0.5">
+                    {r.path}
+                  </Text>
+                </Box>
+                <BalanceCell balance={r.balance} symbol={symbol} />
+                <Box w="10px" flexShrink={0} />
+              </Flex>
+            ))}
           </Box>
         )}
       </Box>
     )}
     </Flex>
+  )
+}
+
+function BalanceCell({ balance, symbol }: { balance: string; symbol: string }) {
+  const funded = parseFloat(balance) > 0
+  return (
+    <Text fontSize="12px" fontFamily="mono" fontWeight="600" color={funded ? "var(--teal)" : "var(--text-1)"} textAlign="right" whiteSpace="nowrap" flexShrink={0} ml="auto">
+      {formatBalance(balance)} {symbol}
+    </Text>
   )
 }

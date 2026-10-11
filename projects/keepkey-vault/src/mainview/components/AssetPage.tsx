@@ -1167,6 +1167,16 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 								</Flex>
 							)
 						)}
+						{watchOnly && isAltUtxo && activeBalance?.breakdown?.length ? (
+							<Box aria-label="Saved account balances">
+								{activeBalance.breakdown.map(row => (
+									<Flex key={`${row.path}:${row.scriptType}`} gap="3" justify="space-between" fontSize="12px">
+										<Text color="var(--text-2)">{row.scriptType} · {row.path}</Text>
+										<Text fontFamily="mono">{formatBalance(row.balance)} {chain.symbol}</Text>
+									</Flex>
+								))}
+							</Box>
+						) : null}
 						{!watchOnly && !isHiddenWallet && isAltUtxo && (
 							<UtxoAccountSelector
 								accounts={utxoAccounts}
@@ -1178,6 +1188,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 								scripts={utxoScripts || undefined}
 								selectedScript={utxoScriptType}
 								onSelectScript={selectUtxoScript}
+								breakdown={activeBalance?.breakdown}
 							/>
 						)}
 						{!watchOnly && isEvm && evmAddresses.addresses.length >= 1 && (

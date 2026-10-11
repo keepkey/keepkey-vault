@@ -237,6 +237,7 @@ import { loadSupportedChains } from "../shared/swap-support-matrix"
 import { PioneerSocket } from "./pioneer-socket"
 import { startEventStream, stopEventStream, type AddressEntry } from "./event-stream"
 import { rebuildActivityHistory, clearHistoryQueryCache } from "./activity-history"
+import { watchOnlyPortfolioKeys, watchOnlyNativeBalances, portfolioNativeMatch, trackedUtxoScriptPaths } from './watch-only-portfolio'
 import { cachedHistoryQueries, watchOnlyWalletScope, watchOnlyBitcoinScope } from './watch-only-history'
 import { createTxWatch, MAX_WATCH_MS, UNSEEN_GIVE_UP_MS } from "./tx-watch"
 import { getRequiredConfs } from "../shared/confirmations"
@@ -4091,6 +4092,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// blind spots (see src/shared/seed-reconcile.ts) and customers kept
 				// seeing the previous wallet's addresses/balances. `truth` is stamped
 				// onto the managers after init so the BTC-only path stays detectable.
+				const inventoryEpoch = activitySessionEpoch
+				const inventoryWallet = engine.wallet
 				const { truth: liveSeedIdentity } = await ensureManagersForSeed('getBalances')
 
 				// Initialize BTC multi-account on first balance fetch
@@ -4115,12 +4118,12 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const utxoChains = allChains.filter(c => c.chainFamily === 'utxo' && c.id !== 'bitcoin')
 				const nonUtxoChains = allChains.filter(c => c.chainFamily !== 'utxo')
 
-				// 1. Batch-fetch non-BTC UTXO xpubs in a single device call.
+				// 1. Re-derive account 0 and every tracked non-BTC UTXO account.
 				// LTC supports multiple script types (p2pkh, p2sh-p2wpkh, p2wpkh) — derive
 				// all so Pioneer reports balances from every address type.
 				const utxoPubKeyPaths: Array<{ chain: typeof utxoChains[0]; scriptType: string; path: number[] }> = []
 				for (const c of utxoChains) {
-					for (const sp of utxoAccountScriptPaths(c, 0, false, dgbTaprootEnabled)) {
+					for (const sp of trackedUtxoScriptPaths(c, !engine.isPassphraseWallet && liveSeedIdentity ? getCachedPubkeys(engine.getDeviceState().deviceId || '') : [], dgbTaprootEnabled)) {
 						utxoPubKeyPaths.push({ chain: c, scriptType: sp.scriptType, path: sp.path })
 					}
 				}
@@ -4138,8 +4141,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					console.warn('[getBalances] UTXO xpub batch failed:', e.message)
 				}
 
+				const incompleteUtxoDerivation = new Set(utxoPubKeyPaths.filter((_, i) => !xpubResults?.[i]?.xpub).map(p => p.chain.id))
+
 				// 2. Derive non-UTXO addresses (one device call per chain — unavoidable)
-				const pubkeys: Array<{ caip: string; pubkey: string; chainId: string; symbol: string; networkId: string; sourcePubkey?: string; scriptType?: string }> = []
+				const pubkeys: Array<{ caip: string; pubkey: string; chainId: string; symbol: string; networkId: string; sourcePubkey?: string; scriptType?: string; path?: string }> = []
 
 				for (let i = 0; i < utxoPubKeyPaths.length; i++) {
 					const xpub = xpubResults?.[i]?.xpub
@@ -4149,26 +4154,27 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						pubkey: utxoDiscoveryKey(xpub, utxoPubKeyPaths[i].scriptType),
 						sourcePubkey: xpub,
 						scriptType: utxoPubKeyPaths[i].scriptType,
+						path: pathToBip32(utxoPubKeyPaths[i].path),
 						chainId: c.id,
 						symbol: c.symbol,
 						networkId: c.networkId,
 					})
 				}
 
-				// Merge device-cached UTXO-altcoin xpubs beyond account 0 — persisted
+				// Merge cached UTXO keys, preserving nonstandard tracked paths — persisted
 				// by the audit "track" action (addUtxoAccount). Device-scoped and never
 				// written for passphrase wallets, so reading them here is hidden-safe.
-				// Dedups by xpub against the freshly-derived account-0 entries above.
+				// Dedup by network and discovery key against freshly derived entries.
 				{
 					const utxoDevId = engine.getDeviceState().deviceId
-					if (utxoDevId && !engine.isPassphraseWallet) {
+					if (utxoDevId && liveSeedIdentity && !engine.isPassphraseWallet) {
 						const utxoById = new Map(utxoChains.map(c => [c.id, c]))
-						const seen = new Set(pubkeys.map(p => p.pubkey))
+						const seen = new Set(pubkeys.map(p => `${p.caip}:${p.pubkey}`))
 						for (const pk of getCachedPubkeys(utxoDevId)) {
 							const c = utxoById.get(pk.chainId)
-							if (!c || !pk.xpub || seen.has(pk.xpub)) continue
-							pubkeys.push({ caip: c.caip, pubkey: pk.xpub, chainId: c.id, symbol: c.symbol, networkId: c.networkId })
-							seen.add(pk.xpub)
+							if (!c || !pk.xpub || seen.has(`${c.caip}:${utxoDiscoveryKey(pk.xpub, pk.scriptType)}`)) continue
+							pubkeys.push({ caip: c.caip, pubkey: utxoDiscoveryKey(pk.xpub, pk.scriptType), sourcePubkey: pk.xpub, chainId: c.id, symbol: c.symbol, networkId: c.networkId, path: pk.path, scriptType: pk.scriptType })
+							seen.add(`${c.caip}:${utxoDiscoveryKey(pk.xpub, pk.scriptType)}`)
 						}
 					}
 				}
@@ -4195,7 +4201,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const evmPubkeyEntries = evmAddresses.getAllPubkeyEntries(evmChains)
 				const evmAddressSet = new Set(evmAddresses.toAddressSet().addresses.map(a => a.address.toLowerCase()))
 				for (const entry of evmPubkeyEntries) {
-					pubkeys.push({ caip: entry.caip, pubkey: entry.pubkey, chainId: entry.chainId, symbol: entry.symbol, networkId: entry.networkId })
+					pubkeys.push({ caip: entry.caip, pubkey: entry.pubkey, chainId: entry.chainId, symbol: entry.symbol, networkId: entry.networkId, path: pathToBip32(evmAddressPath(entry.addressIndex)) })
 				}
 
 				// Non-EVM, non-UTXO chains (cosmos, xrp, etc.) — skip hidden chains (e.g. zcash-shielded has dedicated RPC)
@@ -4225,7 +4231,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// Fallback: if btcAccounts didn't initialize, try cached pubkeys from DB
 				if (btcPubkeyEntries.length === 0) {
 					const devId = engine.getDeviceState().deviceId
-					if (devId) {
+					if (devId && liveSeedIdentity && !engine.isPassphraseWallet) {
 						const cachedPks = getCachedPubkeys(devId)
 						const btcPks = cachedPks.filter(p => p.chainId === 'bitcoin' && p.xpub)
 						if (btcPks.length > 0) {
@@ -4244,6 +4250,15 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						scriptType: entry.scriptType,
 						chainId: 'bitcoin', symbol: 'BTC', networkId: btcChain.networkId,
 					})
+				}
+
+				// Persist the derived inventory even when Pioneer is unavailable.
+				const inventoryDeviceId = engine.getDeviceState().deviceId
+				if (inventoryDeviceId && liveSeedIdentity && inventoryEpoch === activitySessionEpoch && inventoryWallet === engine.wallet && !engine.isPassphraseWallet) {
+					for (const p of pubkeys) {
+						const xpub = p.sourcePubkey || ''
+						saveCachedPubkey(inventoryDeviceId, p.chainId, p.chainId === 'bitcoin' ? xpub : p.path || p.pubkey, xpub, xpub ? '' : p.pubkey, p.scriptType || '')
+					}
 				}
 
 				// ── Address Book: mirror own-wallet addresses (R2) ──────────────
@@ -4478,6 +4493,12 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							? pubkeys.filter(p => !effectivePubkeys.includes(p)).map(p => `${p.caip}:${p.pubkey}`)
 							: []
 					)
+					for (let i = 0; i < chunkResults.length; i++) {
+						const meta = chunkResults[i].meta
+						if (meta?.degraded || meta?.failures?.length || meta?.staleChains?.length) {
+							for (const p of pubkeyChunks[i].filter(p => utxoChains.some(c => c.id === p.chainId))) failedPubkeySetForDb.add(`${p.caip}:${p.pubkey}`)
+						}
+					}
 					console.log(`[getBalances] effectivePubkeys: ${effectivePubkeys.length}/${pubkeys.length} — chains: ${[...new Set(effectivePubkeys.map(p => p.chainId))].join(', ')}`)
 					const allEntries = chunkResults.flatMap(r => r.entries)
 					// A completed SPL swap can beat Pioneer's portfolio indexer by
@@ -4768,12 +4789,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					// sharing one caip. Pioneer returns one row PER pubkey, so a caip-level find()
 					// grabs the chain's first row (often an empty legacy xpub) and reports 0 while
 					// funds sit under another script type. Sum per-pubkey, mirroring BTC.
-					const utxoChainEntryCount = new Map<string, number>()
-					for (const p of pubkeys) {
-						if (p.chainId === 'bitcoin' || evmAddressSet.has(p.pubkey.toLowerCase())) continue
-						utxoChainEntryCount.set(p.chainId, (utxoChainEntryCount.get(p.chainId) || 0) + 1)
-					}
-					const utxoChainAgg = new Map<string, { balance: number; usd: number; address: string; symbol: string; matched: boolean; allOk: boolean }>()
+					const utxoChainAgg = new Map<string, { balance: number; usd: number; address: string; symbol: string; matched: boolean; allOk: boolean; breakdown: NonNullable<ChainBalance['breakdown']> }>()
 
 					const selectedXpubStr = btcAccounts.getSelectedXpub()?.xpub
 					for (const entry of pubkeys) {
@@ -4847,20 +4863,21 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 						// Multi-xpub UTXO chain (LTC/DOGE/…): match strictly by THIS entry's pubkey
 						// and sum across the chain's xpubs — caip matching cannot distinguish them.
-						if ((utxoChainEntryCount.get(entry.chainId) || 0) > 1) {
-							const match = pureNatives.find((d: any) => d.pubkey === entry.pubkey)
-								|| pureNatives.find((d: any) => d.address === entry.pubkey)
+						if (utxoChains.some(c => c.id === entry.chainId)) {
+							const match = portfolioNativeMatch(pureNatives, { ...entry, path: entry.path || '', scriptType: entry.scriptType || '' })
 							const bal = parseFloat(String(match?.balance ?? '0')) || 0
 							const usd = Number(match?.valueUsd ?? 0)
+							const part = { xpub: entry.sourcePubkey || entry.pubkey, path: entry.path || '', scriptType: entry.scriptType || '', balance: String(match?.balance ?? '0'), balanceUsd: usd }
 							const agg = utxoChainAgg.get(entry.chainId)
 							if (agg) {
+								agg.breakdown.push(part)
 								agg.balance += bal
 								agg.usd += usd
 								if (!agg.address && match?.address) agg.address = match.address
 								agg.matched = agg.matched || !!match
-								agg.allOk = agg.allOk && !isFailedEntry
+								agg.allOk = agg.allOk && !isFailedEntry && !!match
 							} else {
-								utxoChainAgg.set(entry.chainId, { balance: bal, usd, address: match?.address || '', symbol: entry.symbol, matched: !!match, allOk: !isFailedEntry })
+								utxoChainAgg.set(entry.chainId, { balance: bal, usd, address: match?.address || '', symbol: entry.symbol, matched: !!match, allOk: !isFailedEntry && !!match, breakdown: [part] })
 							}
 							continue
 						}
@@ -4897,6 +4914,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							nativeBalanceUsd: agg.usd,
 							address: agg.address || pubkeys.find(p => p.chainId === chainId)?.pubkey || '',
 							tokens: chainTokens && chainTokens.length > 0 ? chainTokens : undefined,
+							breakdown: agg.breakdown,
 						})
 					}
 
@@ -4970,10 +4988,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					else confirmedChainIds.delete('bitcoin')
 					// Never persist an aggregate we didn't fully validate: like BTC above, a
 					// multi-xpub chain is confirmed only if EVERY pubkey's chunk succeeded AND
-					// at least one row came back — else a partial/zero sum would force-write
-					// over a good cached balance. Unconfirmed → guarded upsert keeps non-zero.
+					// every row came back. Skip unconfirmed UTXO writes altogether: the
+					// legacy guarded upsert accepts partial positive amounts.
 					for (const [chainId, agg] of utxoChainAgg) {
-						if (!agg.matched || !agg.allOk) confirmedChainIds.delete(chainId)
+						if (!agg.matched || !agg.allOk || incompleteUtxoDerivation.has(chainId)) confirmedChainIds.delete(chainId)
 					}
 
 					// Mark that Pioneer has responded — prevents getBtcAccounts from re-loading stale DB rows
@@ -5016,7 +5034,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					try {
 						const deviceId = engine.getDeviceState().deviceId || 'unknown'
 						if (results.length > 0 && !engine.isPassphraseWallet) {
-							setCachedBalances(deviceId, results, confirmedChainIds)
+							setCachedBalances(deviceId, results.filter(r => !utxoChains.some(c => c.id === r.chainId) || confirmedChainIds.has(r.chainId)), confirmedChainIds)
 							rectifyWallet(deviceId, results)
 						}
 					} catch { /* never block on cache failure */ }
@@ -5182,10 +5200,12 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// Shared seed-staleness boundary — a single-chain refresh (AssetPage,
 				// tx-push, post-send) can run before a full getBalances, so it must
 				// also verify the managers against the device and purge if stale.
+				const inventoryEpoch = activitySessionEpoch
+				const inventoryWallet = engine.wallet
 				const { truth: liveSeedIdentity } = await ensureManagersForSeed('getBalance')
 
 				// Build pubkey list — EVM chains send ALL multi-address entries, others send one
-				const pubkeys: Array<{ caip: string; pubkey: string; sourcePubkey?: string; scriptType?: string }> = []
+				const pubkeys: Array<{ caip: string; pubkey: string; sourcePubkey?: string; scriptType?: string; path?: string }> = []
 				let displayAddress = '' // address shown in UI / used for swaps
 
 				if (chain.id === 'bitcoin') {
@@ -5199,7 +5219,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					// Fallback: if btcAccounts empty, try cached pubkeys from DB (mirrors getBalances line 1069-1080)
 					if (btcPubkeyEntries.length === 0) {
 						const devId = engine.getDeviceState().deviceId
-						if (devId) {
+						if (devId && !engine.isPassphraseWallet && liveSeedIdentity) {
 							const cachedPks = getCachedPubkeys(devId)
 							const btcPks = cachedPks.filter(p => p.chainId === 'bitcoin' && p.xpub)
 							if (btcPks.length > 0) {
@@ -5231,12 +5251,13 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					// utxoAccountScriptPaths for why the latter is load-bearing on LTC).
 					const includeDgbTaproot = chain.id === 'digibyte'
 						&& supportsDgbTaproot(process.env.FEATURE_TAPROOT_DGB === 'true', fwVersion)
-					const sps = utxoAccountScriptPaths(chain, 0, false, includeDgbTaproot)
+					const sps = trackedUtxoScriptPaths(chain, !engine.isPassphraseWallet && liveSeedIdentity ? getCachedPubkeys(engine.getDeviceState().deviceId || '') : [], includeDgbTaproot)
 					const paths = sps.map(sp => ({
 						addressNList: sp.path,
 						coin: chain.coin, scriptType: sp.scriptType, curve: 'secp256k1',
 					}))
 					const results = await wallet.getPublicKeys(paths)
+					if (sps.some((_, i) => !results?.[i]?.xpub)) throw new Error(`Incomplete public keys for ${chain.coin}; reconnect and retry`)
 					let anyXpub = false
 					for (let i = 0; i < sps.length; i++) {
 						const xpub = results?.[i]?.xpub
@@ -5246,6 +5267,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 								pubkey: utxoDiscoveryKey(xpub, sps[i].scriptType),
 								sourcePubkey: xpub,
 								scriptType: sps[i].scriptType,
+								path: pathToBip32(sps[i].path),
 							})
 							anyXpub = true
 						}
@@ -5254,11 +5276,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					// account 0 are spendable. Device-scoped, never written for passphrase
 					// wallets. Mirrors the portfolio merge in getBalances.
 					const utxoDevId = engine.getDeviceState().deviceId
-					if (utxoDevId && !engine.isPassphraseWallet) {
-						const seen = new Set(pubkeys.map(p => p.pubkey))
+					if (utxoDevId && liveSeedIdentity && !engine.isPassphraseWallet) {
+						const seen = new Set(pubkeys.map(p => `${p.caip}:${p.pubkey}`))
 						for (const pk of getCachedPubkeys(utxoDevId)) {
-							if (pk.chainId !== chain.id || !pk.xpub || seen.has(pk.xpub)) continue
-							pubkeys.push({ caip: chain.caip, pubkey: pk.xpub }); seen.add(pk.xpub); anyXpub = true
+							if (pk.chainId !== chain.id || !pk.xpub || seen.has(`${chain.caip}:${utxoDiscoveryKey(pk.xpub, pk.scriptType)}`)) continue
+							pubkeys.push({ caip: chain.caip, pubkey: utxoDiscoveryKey(pk.xpub, pk.scriptType), sourcePubkey: pk.xpub, path: pk.path, scriptType: pk.scriptType }); seen.add(`${chain.caip}:${utxoDiscoveryKey(pk.xpub, pk.scriptType)}`); anyXpub = true
 						}
 					}
 					if (!anyXpub) throw new Error(`Could not derive xpub for ${chain.coin}`)
@@ -5271,7 +5293,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					}
 					const evmEntries = evmAddresses.getAllPubkeyEntries([chain])
 					if (evmEntries.length > 0) {
-						for (const entry of evmEntries) pubkeys.push({ caip: entry.caip, pubkey: entry.pubkey })
+						for (const entry of evmEntries) pubkeys.push({ caip: entry.caip, pubkey: entry.pubkey, path: pathToBip32(evmAddressPath(entry.addressIndex)) })
 						const selectedAddr = evmAddresses.getSelectedAddress()
 						displayAddress = selectedAddr?.address || evmEntries[0].pubkey
 					} else {
@@ -5296,6 +5318,15 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// orphan stamp when no manager is initialized.
 				stampManagers(liveSeedIdentity)
 
+				// Persist the derived inventory even when Pioneer is unavailable.
+				const inventoryDeviceId = engine.getDeviceState().deviceId
+				if (inventoryDeviceId && liveSeedIdentity && inventoryEpoch === activitySessionEpoch && inventoryWallet === engine.wallet && !engine.isPassphraseWallet) {
+					for (const p of pubkeys) {
+						const xpub = p.sourcePubkey || ''
+						saveCachedPubkey(inventoryDeviceId, chain.id, chain.id === 'bitcoin' ? xpub : p.path || p.pubkey, xpub, xpub ? '' : p.pubkey, p.scriptType || '')
+					}
+				}
+
 				// Single portfolio call with all pubkeys for this chain
 				const isBtc = chain.id === 'bitcoin'
 				const isEvm = chain.chainFamily === 'evm'
@@ -5303,6 +5334,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				let balance = '0', balanceUsd = 0, address = displayAddress
 				let tokens: TokenBalance[] | undefined
 				let chainDefiPositions: DefiPosition[] | undefined
+				const utxoBreakdown: NonNullable<ChainBalance['breakdown']> = []
 				// True once Pioneer answered with NON-degraded data — gates the force
 				// cache overwrite below (degraded responses must not clobber the cache).
 				let pioneerConfirmed = false
@@ -5392,7 +5424,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					// cache. Surface it (same banner channel as getBalances) and treat
 					// the response as UNCONFIRMED — its values must not force-overwrite
 					// our cache (a degraded zero would clobber a good cached balance).
-					pioneerConfirmed = !portfolioMeta?.degraded
+					pioneerConfirmed = !portfolioMeta?.degraded && !portfolioMeta?.failures?.length && !portfolioMeta?.staleChains?.length
 					if (portfolioMeta?.degraded) {
 						console.warn(`[getBalance] ${chain.coin}: Pioneer served degraded data`)
 						try {
@@ -5452,11 +5484,13 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							|| pureNatives.find((d: any) => d.pubkey === sourcePubkey)
 							|| pureNatives.find((d: any) => d.caip === pk.caip && d.address === pk.pubkey)
 							|| pureNatives.find((d: any) => d.address?.toLowerCase() === pk.pubkey.toLowerCase())
+						if (isUtxo && !match) pioneerConfirmed = false
 						const bal = parseFloat(String(match?.balance ?? '0'))
 						const usd = Number(match?.valueUsd ?? 0)
 						nativeTotalBalance += bal
 						nativeTotalUsd += usd
 						if (isEvm) evmNativeByPubkey.set(pk.pubkey.toLowerCase(), { balance: bal, usd })
+						if (!isBtc && isUtxo) utxoBreakdown.push({ xpub: pk.sourcePubkey || pk.pubkey, path: pk.path || '', scriptType: pk.scriptType || '', balance: String(match?.balance ?? '0'), balanceUsd: usd })
 
 						// Capture Pioneer-returned address for this pubkey
 						if (match?.address) {
@@ -5615,13 +5649,14 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					address,
 					tokens,
 					defiPositions: chainDefiPositions,
+					breakdown: utxoBreakdown.length ? utxoBreakdown : undefined,
 				}
 
 				// Update single-chain cache + push to frontend so Dashboard stays in sync.
 				// PRIVACY: Skip DB write for passphrase wallets.
 				try {
 					const deviceId = engine.getDeviceState().deviceId || 'unknown'
-					if (!engine.isPassphraseWallet) {
+					if (!engine.isPassphraseWallet && (!isUtxo || pioneerConfirmed)) {
 						// force only when Pioneer confirmed (non-degraded) the value — then a
 						// genuine zero / unpriced balance must overwrite the stale cache row
 						// (same rule as getBalances' confirmedChainIds).
@@ -6817,8 +6852,6 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 				// Helper: convert hardened BIP44 path array to string
 				const pathToString = (p: number[]) => 'm/' + p.map((n: number) => n >= 0x80000000 ? `${n - 0x80000000}'` : String(n)).join('/')
-				// Helper: account-level path (first 3 elements)
-				const accountPath = (p: number[]) => p.slice(0, 3)
 
 				// Only use built-in CHAINS (not custom chains — those may lack rpc methods)
 				const fwVersion = engine.getDeviceState().firmwareVersion
@@ -6866,16 +6899,17 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const utxoChains = builtinChains.filter(c => c.chainFamily === 'utxo' && c.id !== 'bitcoin')
 				if (utxoChains.length > 0) {
 					const utxoXpubs: UtxoXpub[] = []
+					const paths = utxoChains.flatMap(chain => trackedUtxoScriptPaths(chain, !engine.isPassphraseWallet ? getCachedPubkeys(engine.getDeviceState().deviceId || '') : [],
+						supportsDgbTaproot(process.env.FEATURE_TAPROOT_DGB === 'true', fwVersion)).map(sp => ({ chain, ...sp })))
 					try {
-						const xpubResults = await wallet.getPublicKeys(utxoChains.map(c => ({
-							addressNList: accountPath(c.defaultPath), coin: c.coin,
-							scriptType: c.scriptType, curve: 'secp256k1',
+						const xpubResults = await wallet.getPublicKeys(paths.map(p => ({
+							addressNList: p.path, coin: p.chain.coin, scriptType: p.scriptType, curve: 'secp256k1',
 						}))) || []
-						for (let i = 0; i < utxoChains.length; i++) {
+						for (let i = 0; i < paths.length; i++) {
 							const xpub = xpubResults?.[i]?.xpub
 							if (xpub && typeof xpub === 'string') {
-								const chain = utxoChains[i]
-								utxoXpubs.push({ chainId: chain.id, xpub, scriptType: chain.scriptType, path: accountPath(chain.defaultPath) })
+								const p = paths[i]
+								utxoXpubs.push({ chainId: p.chain.id, xpub, scriptType: p.scriptType, path: p.path })
 							}
 						}
 					} catch (e: any) { console.warn('[mobilePairing] UTXO xpub batch failed:', e.message) }
@@ -6892,6 +6926,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							if (!path || path.length < 3) continue // bitcoin rows key the xpub in `path`
 							utxoXpubs.push({ chainId: pk.chainId, xpub: pk.xpub, scriptType: pk.scriptType, path })
 						}
+					}
+					if (paths.some(p => !utxoXpubs.some(x => x.chainId === p.chain.id && x.scriptType === p.scriptType && pathToBip32(x.path) === pathToBip32(p.path)))) {
+						throw new Error('Could not collect every UTXO account for pairing. Reconnect your KeepKey and try again.')
 					}
 					pubkeys.push(...utxoPairingEntries(utxoXpubs, utxoChains, context))
 				}
@@ -8244,31 +8281,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					snap.featuresJson,
 				)
 				const allChains = bitcoinOnlyChainList(getAllChains(), snapshotBitcoinOnly)
-				const chainById = new Map(allChains.map(c => [c.id, c]))
-				const pubkeys: Array<{ caip: string; pubkey: string; sourcePubkey?: string; chainId: string; symbol: string; networkId: string }> = []
-
 				const cached = getCachedBalances(deviceId)
-				for (const b of bitcoinOnlyBalanceList(cached?.balances ?? [], snapshotBitcoinOnly)) {
-					if (b.chainId === 'bitcoin') continue // cached BTC address isn't the xpub — handled below
-					if (!b.address) continue
-					const chain = chainById.get(b.chainId)
-					if (!chain || !chain.caip) continue
-					pubkeys.push({ caip: chain.caip, pubkey: b.address, chainId: chain.id, symbol: chain.symbol, networkId: chain.networkId })
-				}
-				// BTC: use the cached xpubs (one entry per script-type/account)
-				const btcChain = chainById.get('bitcoin')
-				if (btcChain) {
-					for (const p of getCachedPubkeys(deviceId).filter(p => p.chainId === 'bitcoin' && p.xpub)) {
-						pubkeys.push({
-							caip: btcChain.caip,
-							pubkey: utxoDiscoveryKey(p.xpub, p.scriptType || 'p2pkh'),
-							sourcePubkey: p.xpub,
-							chainId: 'bitcoin', symbol: 'BTC', networkId: btcChain.networkId,
-						})
-					}
-				}
-
-				if (pubkeys.length === 0) return cached?.balances ?? null
+				const cachedBalances = bitcoinOnlyBalanceList(cached?.balances ?? [], snapshotBitcoinOnly)
+				const { pubkeys, incomplete } = watchOnlyPortfolioKeys(allChains, cachedBalances, getCachedPubkeys(deviceId))
+				if (pubkeys.length === 0) return cachedBalances.map(b => ({ ...b, syncState: 'stale' as const }))
 
 				// 2. Pioneer client — let init failure throw so the UI surfaces it
 				const pioneer = await getPioneer()
@@ -8304,9 +8320,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 				// Chains whose chunk failed must NOT be confirmed below — otherwise a
 				// transient Pioneer error would write a 0 over good cached balances.
-				const failedChainIds = new Set<string>()
+				const failedChainIds = new Set<string>(incomplete)
 				for (let i = 0; i < chunkResults.length; i++) {
-					if (chunkResults[i].failed) for (const p of pubkeyChunks[i]) failedChainIds.add(p.chainId)
+					if (chunkResults[i].failed || chunkResults[i].meta?.degraded || chunkResults[i].meta?.failures?.length || chunkResults[i].meta?.staleChains?.length) for (const p of pubkeyChunks[i]) failedChainIds.add(p.chainId)
 				}
 
 				// 5. Classify natives vs tokens (shared isTokenEntry)
@@ -8336,7 +8352,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 					const token = parseTokenEntry(tok)
 					const existing = tokensByChainId.get(parentChainId) || []
-					existing.push(token)
+					const sameAsset = existing.find(t => (t.caip.startsWith('eip155:') ? t.caip.toLowerCase() : t.caip) === caipNorm)
+					if (sameAsset) {
+						sameAsset.balance = String(Number(sameAsset.balance) + Number(token.balance))
+						sameAsset.balanceUsd += token.balanceUsd
+					} else existing.push(token)
 					tokensByChainId.set(parentChainId, existing)
 				}
 
@@ -8356,59 +8376,26 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					defiByChain.set(chainId, list)
 				}
 
-				// 8. Build ChainBalance[] — sum BTC xpubs into one entry; others 1:1
-				const results: ChainBalance[] = []
-				let btcBalance = 0, btcUsd = 0, btcAddress = ''
-				for (const entry of pubkeys) {
-					if (entry.chainId === 'bitcoin') {
-						const match = pureNatives.find((d: any) => d.pubkey === entry.pubkey)
-							|| pureNatives.find((d: any) => d.pubkey === entry.sourcePubkey)
-							|| pureNatives.find((d: any) => d.caip === entry.caip && d.address === entry.pubkey)
-						btcBalance += parseFloat(String(match?.balance ?? '0'))
-						btcUsd += Number(match?.valueUsd ?? 0)
-						if (match?.address && !btcAddress) btcAddress = match.address
-						continue
+				// Sum every requested owner once, and attach chain-level tokens/DeFi once.
+				const results = watchOnlyNativeBalances(pubkeys, pureNatives, failedChainIds)
+				for (const row of results) {
+					row.tokens = tokensByChainId.get(row.chainId)
+					row.defiPositions = defiByChain.get(row.chainId)
+					row.balanceUsd += (row.tokens?.reduce((sum, t) => sum + t.balanceUsd, 0) || 0)
+						+ (row.defiPositions?.reduce((sum, p) => sum + (p.balanceUsd || 0), 0) || 0)
+					row.syncState = 'confirmed'
+				}
+				// Never pass partial positives to the guarded DB upsert: it accepts them.
+				const confirmedResults = results.filter(r => !failedChainIds.has(r.chainId))
+				setCachedBalances(deviceId, confirmedResults, new Set(confirmedResults.map(r => r.chainId)))
+				for (const row of confirmedResults) {
+					for (const part of row.breakdown || []) {
+						saveCachedPubkey(deviceId, row.chainId, part.path || part.xpub, part.xpub, '', part.scriptType, part.balance, part.balanceUsd, true)
 					}
-					const entryNetwork = entry.caip.split('/')[0]
-					const match = pureNatives.find((d: any) => d.caip === entry.caip)
-						|| pureNatives.find((d: any) => d.caip && d.caip.split('/')[0] === entryNetwork)
-						|| pureNatives.find((d: any) => d.pubkey === entry.pubkey)
-						|| pureNatives.find((d: any) => d.address === entry.pubkey)
-					const chainTokens = tokensByChainId.get(entry.chainId)
-					const tokenUsdTotal = chainTokens?.reduce((s, t) => s + t.balanceUsd, 0) || 0
-					const chainDefi = defiByChain.get(entry.chainId)
-					const defiUsdTotal = chainDefi?.reduce((s, p) => s + (p.balanceUsd || 0), 0) || 0
-					const nativeUsd = Number(match?.valueUsd ?? 0)
-					results.push({
-						chainId: entry.chainId,
-						symbol: entry.symbol,
-						balance: String(match?.balance ?? '0'),
-						balanceUsd: nativeUsd + tokenUsdTotal + defiUsdTotal,
-						nativeBalanceUsd: nativeUsd,
-						address: match?.address || entry.pubkey,
-						tokens: chainTokens && chainTokens.length > 0 ? chainTokens : undefined,
-						defiPositions: chainDefi && chainDefi.length > 0 ? chainDefi : undefined,
-					})
 				}
-				if (btcChain && pubkeys.some(p => p.chainId === 'bitcoin')) {
-					const chainTokens = tokensByChainId.get('bitcoin')
-					const tokenUsdTotal = chainTokens?.reduce((s, t) => s + t.balanceUsd, 0) || 0
-					results.push({
-						chainId: 'bitcoin',
-						symbol: 'BTC',
-						balance: String(btcBalance),
-						balanceUsd: btcUsd + tokenUsdTotal,
-						nativeBalanceUsd: btcUsd,
-						address: btcAddress,
-						tokens: chainTokens && chainTokens.length > 0 ? chainTokens : undefined,
-					})
-				}
-
-				// 9. Persist and return. Only chains whose chunk succeeded are "confirmed"
-				// (genuine zeros overwrite stale); failed chains keep their cached value.
-				const confirmed = new Set(results.map(r => r.chainId).filter(id => !failedChainIds.has(id)))
-				setCachedBalances(deviceId, results, confirmed)
-				return results
+				const merged = new Map<string, ChainBalance>(cachedBalances.map(b => [b.chainId, { ...b, syncState: 'stale' as ChainBalance['syncState'] }]))
+				for (const row of confirmedResults) merged.set(row.chainId, row)
+				return [...merged.values()]
 			},
 			getWatchOnlyPubkeys: async (params) => {
 				const { getDeviceSnapshotById } = await import('./db')
