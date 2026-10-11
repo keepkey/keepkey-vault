@@ -2055,6 +2055,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       toAddressOverride: toAddress,
       fromEvmAddressIndex: fromAsset.chainFamily === 'evm' ? evmAddresses.selectedIndex : undefined,
       integration: quote.integration,
+      swapper: quote.swapper,
       relayTx: quote.relayTx,
       // Token sources Pioneer's available-assets doesn't pre-list (e.g. SPL
       // USDT) have no decimals lookup backend-side — carry the picker's value.

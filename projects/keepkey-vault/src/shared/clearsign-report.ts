@@ -1,5 +1,5 @@
 import type { ClearSignDefinitionSource, ClearSignProtectionLevel, SolanaTxDecodedInfo } from './types'
-import type { EffectFinding, EffectReport } from './transaction-effects'
+import { PLAIN_TRANSFER_NOT_SIMULATED, type EffectFinding, type EffectReport } from './transaction-effects'
 
 export interface ClearSignDescriptorEvidence {
   source: ClearSignDefinitionSource
@@ -106,7 +106,8 @@ export function buildClearSignReport(input: {
     message: `Simulation observed ${approvals.length} new or changed spending authorit${approvals.length === 1 ? 'y' : 'ies'}.`,
     severity: approvals.some((change) => change.unlimited) ? 'danger' : 'warning',
   })
-  if (descriptor.authenticated && simulation.status !== 'success') limitations.push({
+  if (descriptor.authenticated && simulation.status !== 'success'
+    && !simulation.unknowns.some((unknown) => unknown.code === PLAIN_TRANSFER_NOT_SIMULATED)) limitations.push({
     code: 'DESCRIPTION_WITHOUT_COMPLETE_SIMULATION',
     message: 'The description is authenticated, but execution effects could not be completely simulated.',
     severity: 'warning',
