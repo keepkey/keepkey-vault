@@ -13,6 +13,7 @@ import { simulateEvmEffects } from './evm-effects'
 import { uniswapReportFindingsWithState } from './uniswap-report'
 import { resolvePromotedEvmArtifact } from './clearsign-artifact-resolver'
 import { ClearSignReportResponse } from './schemas'
+import { clearSignReportNeedsAttention } from '../shared/clearsign-report'
 
 const swap = require('../../__tests__/fixtures/uniswap/base-ur-usdc-to-eth-swap.json')
 const SIGNER = '0x909ef6b32dfdc12ca86aa710b54c991af3c5f82e'
@@ -171,6 +172,8 @@ describe('in-app swap card — the Desktop signing verdict for the same bytes', 
     expect(sent).toEqual([{ chainId: 8453, contract: RELAY, selector: '0xe8017952', calldataLength: 132, token: BASE_USDC }])
     expect(risk(r)[0]).toBe('Relay deposit on Base: sends 47.478285 USDC to the Relay Depository, credited to your account. Your KeepKey shows this deposit from a KeepKey-certified description and refuses it if that description is not genuine. Check the amount there.')
     expect(risk(r).join('\n')).toContain("set by Relay's off-chain order")
+    // Certified, but where it arrives is off-chain: the swap screen keeps the box.
+    expect(clearSignReportNeedsAttention(r)).toBe(true)
     expect(rows(r)).toContain('Action: Relay deposit on Base: 47.478285 USDC')
     expect(rows(r)).toContain(`Credited to (depositor): ${DEPOSIT.from}`)
     expect(rows(r).some((x) => x.startsWith('Relay order id: 0x001c161a'))).toBe(true)
@@ -283,11 +286,23 @@ describe('a plain transfer (a swap deposit to an address, no call data)', () => 
     expect(r.headline).toBe('KeepKey ClearSign ready')
     expect(risk(r)).toEqual([`Sends 0.01 ETH to ${DEPOSIT.to}.`])
     expect(r.limitations.map((l) => l.code)).toEqual(['PLAIN_TRANSFER_NOT_SIMULATED'])
+    // Clear on the device, nothing to warn about: the swap screen shows no report.
+    expect(clearSignReportNeedsAttention(r)).toBe(false)
+    // The owner caveat every deposit carries does not bring the box back…
+    const caveat = { code: 'DEPOSIT_ADDRESS_NOT_DEVICE_VERIFIED', message: 'x', severity: 'warning' as const }
+    expect(clearSignReportNeedsAttention({ ...r, limitations: [...r.limitations, caveat] })).toBe(false)
+    // …but a red line anywhere, an unrun check, or a badly rated contract does.
+    expect(clearSignReportNeedsAttention({ ...r, findings: [...r.findings, { code: 'NEAR_INTENTS_MISMATCH', message: 'x', severity: 'danger' }] })).toBe(true)
+    expect(clearSignReportNeedsAttention({ ...r, limitations: [{ code: 'CLEARSIGN_DEFINITION_REFUSED', message: 'x', severity: 'danger' }] })).toBe(true)
+    expect(clearSignReportNeedsAttention({ ...r, limitations: [{ code: 'NEAR_INTENTS_UNCONFIRMED', message: 'x', severity: 'warning' }] })).toBe(true)
+    expect(clearSignReportNeedsAttention({ ...r, rating: { riskLevel: 'high' } as any })).toBe(true)
+    expect(clearSignReportNeedsAttention({ ...r, rating: { riskLevel: 'low' } as any })).toBe(false)
   })
 
   test('a contract call with the same destination is still not promoted', async () => {
     const r = await report({ ...DEPOSIT, data: '0xdeadbeef' }, '7.16.0')
     expect(r.protectionLevel).toBe('P1')
+    expect(clearSignReportNeedsAttention(r)).toBe(true)
   })
 })
 
