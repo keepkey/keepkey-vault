@@ -12,6 +12,7 @@
  */
 
 import { sendCommand, isSidecarReady, startSidecar, setCachedFvk, hasFvkLoaded, beginZcashSend, endZcashSend } from "../zcash-sidecar"
+import { partialSend, type SplitSendResult } from "./zcash-batching"
 
 export interface ShieldedSendParams {
 	/** Hex-encoded Orchard recipient address (43 bytes) */
@@ -321,7 +322,7 @@ export async function sendShielded(
 	wallet: any,
 	params: ShieldedSendParams,
 	opts?: { signWrap?: DeviceSignWrap; onProgress?: import("./zcash-shield").TxProgressFn },
-): Promise<{ txid: string; txids: string[] }> {
+): Promise<SplitSendResult> {
 	if (sendInProgress) {
 		throw new Error("A shielded send is already in progress — wait for it to complete")
 	}
@@ -339,7 +340,7 @@ async function _sendShieldedInner(
 	wallet: any,
 	params: ShieldedSendParams,
 	opts?: { signWrap?: DeviceSignWrap; onProgress?: import("./zcash-shield").TxProgressFn },
-): Promise<{ txid: string; txids: string[] }> {
+): Promise<SplitSendResult> {
 	// 0. Ensure sidecar is running and FVK is set
 	if (!isSidecarReady()) {
 		await startSidecar()
@@ -389,9 +390,8 @@ async function _sendShieldedInner(
 			remaining = batch ? batch.remaining_after : 0
 		} catch (e: any) {
 			if (txids.length === 0) throw e
-			throw new Error(
-				`Sent ${txids.length} transaction(s) (${txids.join(", ")}); ${remaining} ZAT was not sent: ${e?.message ?? e}`
-			)
+			console.warn(`[zcash-shielded] Sent ${txids.length} transaction(s); ${remaining} ZAT was not sent: ${e?.message ?? e}`)
+			return partialSend(txids, remaining, e)
 		}
 	}
 	return { txid: txids[txids.length - 1], txids }

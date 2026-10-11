@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { MAX_TRANSPARENT_INPUTS, maxShieldable, planShieldBatches, shieldFee } from './zcash-batching'
+import { MAX_TRANSPARENT_INPUTS, maxShieldable, partialSend, planShieldBatches, shieldFee } from './zcash-batching'
 
 const ZEC = 100_000_000
 const utxos = (values: number[]) => values.map((value, i) => ({ txid: `${i}`, value }))
@@ -68,3 +68,17 @@ describe('planShieldBatches', () => {
 		expect(shieldFee(8)).toBe(50_000)
 	})
 })
+
+describe('partialSend', () => {
+	it('reports what went out and what is left, so a retry cannot pay the full amount again', () => {
+		expect(partialSend(['aa', 'bb'], 200_000_000, new Error('Cancelled on device'))).toEqual({
+			txid: 'bb', txids: ['aa', 'bb'], unsentZat: 200_000_000, unsentReason: 'Cancelled on device',
+		})
+	})
+
+	it('is never a result when nothing was sent or nothing is left', () => {
+		expect(() => partialSend([], 1, new Error('x'))).toThrow()
+		expect(() => partialSend(['aa'], 0, new Error('x'))).toThrow()
+	})
+})
+

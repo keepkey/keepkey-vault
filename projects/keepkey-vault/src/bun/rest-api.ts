@@ -4900,7 +4900,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             { signWrap: <T,>(fn: () => Promise<T>) => emuWrap(fn, details) },
           )
           callbacks?.zcashSchedulePostTxRescans?.()
-          return json(result, 200, zcashActivity('broadcast', result, body.amount, body.recipient))
+          // A partial send answers 200 with `unsentZat`: an error would invite retrying the full amount.
+          return json(result, 200, zcashActivity('broadcast', result, body.amount - (result.unsentZat ?? 0), body.recipient))
         }
 
         // Headless DESHIELD (z→t): spend a shielded note to a transparent addr.
@@ -4932,7 +4933,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const result = await deshieldZec(wallet, { recipient: body.recipient!, amount: body.amount!, account },
             { signWrap: <T,>(fn: () => Promise<T>) => emuWrap(fn, details) })
           callbacks?.zcashSchedulePostTxRescans?.()
-          return json(result, 200, zcashActivity('unshield', result, body.amount, body.recipient))
+          return json(result, 200, zcashActivity('unshield', result, body.amount! - (result.unsentZat ?? 0), body.recipient))
         }
 
         // Headless SHIELD (t→z): move transparent funds into a fresh shielded note.

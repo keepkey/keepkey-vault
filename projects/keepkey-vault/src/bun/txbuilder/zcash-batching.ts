@@ -76,3 +76,26 @@ export function planShieldBatches<U extends { value: number }>(utxos: U[], amoun
 	}
 	return batches
 }
+
+/** What a send split over several transactions reports. */
+export interface SplitSendResult {
+	txid: string
+	txids: string[]
+	/** Zatoshis that were NOT sent because a later transaction failed. */
+	unsentZat?: number
+	unsentReason?: string
+}
+
+/**
+ * A failure after the first broadcast is a partial send, not an error: money
+ * has moved. Reporting it as a result lets the caller record what was sent and
+ * offer only the remainder; an error would invite retrying the full amount.
+ */
+export function partialSend(txids: string[], unsentZat: number, error: unknown): SplitSendResult {
+	if (txids.length === 0 || !(unsentZat > 0)) throw new Error("partialSend: nothing sent, or nothing left to send")
+	return {
+		txid: txids[txids.length - 1], txids, unsentZat,
+		unsentReason: String((error as any)?.message ?? error),
+	}
+}
+

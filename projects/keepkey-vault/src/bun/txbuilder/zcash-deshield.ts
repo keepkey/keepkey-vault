@@ -10,6 +10,7 @@
 
 import { sendCommand, isSidecarReady, startSidecar, getCachedFvk, beginZcashSend, endZcashSend } from "../zcash-sidecar"
 import { initializeOrchardFromDevice } from "./zcash-shielded"
+import { partialSend, type SplitSendResult } from "./zcash-batching"
 
 export interface DeshieldParams {
 	/** Transparent recipient address (t1... or t3...) */
@@ -68,7 +69,7 @@ export async function deshieldZec(
 	wallet: any,
 	params: DeshieldParams,
 	opts?: DeshieldOptions,
-): Promise<{ txid: string; txids: string[] }> {
+): Promise<SplitSendResult> {
 	if (deshieldInProgress) {
 		throw new Error("A deshield transaction is already in progress")
 	}
@@ -86,7 +87,7 @@ async function _deshieldZecInner(
 	wallet: any,
 	params: DeshieldParams,
 	opts?: DeshieldOptions,
-): Promise<{ txid: string; txids: string[] }> {
+): Promise<SplitSendResult> {
 	const account = params.account ?? 0
 
 	// 0a. Validate inputs
@@ -121,9 +122,8 @@ async function _deshieldZecInner(
 			remaining = paid.remaining_after
 		} catch (e: any) {
 			if (txids.length === 0) throw e
-			throw new Error(
-				`Unshielded in ${txids.length} transaction(s) (${txids.join(", ")}); ${remaining} ZAT was not sent: ${e?.message ?? e}`
-			)
+			console.warn(`[zcash-deshield] Unshielded in ${txids.length} transaction(s); ${remaining} ZAT was not sent: ${e?.message ?? e}`)
+			return partialSend(txids, remaining, e)
 		}
 	}
 	return { txid: txids[txids.length - 1], txids }
