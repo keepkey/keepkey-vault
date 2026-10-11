@@ -13,6 +13,7 @@ import { isRelayBridgeDeposit } from "../../../shared/relayBridgePreview"
 import { decodeAcrossDepositV3 } from "../../../shared/acrossDeposit"
 import { utxoPreview } from "../../../shared/utxoPreview"
 import { cosmosDepositPreview } from "../../../shared/cosmosDepositPreview"
+import { cosmosTxPreview } from "../../../shared/cosmosTxPreview"
 import { assessSigningRisk, formatCertifiedArg, type RiskLevel } from "../../../shared/clearsign-risk"
 import { ClearSignReportCard } from "../ClearSignReportCard"
 
@@ -980,6 +981,7 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 		? cosmosDepositPreview(request.rawRequestBody, 'THORChain')
 		: request.method === '/mayachain/sign-amino-deposit'
 			? cosmosDepositPreview(request.rawRequestBody, 'Maya') : undefined
+	const cosmosTx = cosmosDeposit ? undefined : cosmosTxPreview(request.method, request.rawRequestBody)
 
 	let trustLevel: 'verified' | 'known' | 'unknown' = hasCalldata ? 'unknown' : 'verified'
 	if (hasCalldata) {
@@ -1088,7 +1090,7 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 	const methodLabel = request.method === '/utxo/sign-transaction' && utxo
 		? `${utxo.coin} Sign Transaction`
 		: evmChainName ? `${evmChainName} Sign Transaction`
-		: labelKey ? t(labelKey) : request.method
+		: labelKey ? t(labelKey) : cosmosTx?.title ?? request.method
 	const remaining = Math.max(0, 120 - elapsed)
 	const timeStr = `${Math.floor(remaining / 60)}:${(remaining % 60).toString().padStart(2, "0")}`
 
@@ -1270,6 +1272,18 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 						<Row label="Memo affiliate fee" value={cosmosDeposit.affiliateFee} />
 						<Row label="Exact memo" value={cosmosDeposit.memo} />
 						<Text fontSize="2xs" color="var(--rose)">{cosmosDeposit.warning}</Text>
+					</VStack>
+				)}
+				{cosmosTx && (
+					<VStack w="100%" align="stretch" gap="1.5" bg="rgba(0,0,0,0.25)" borderRadius="xl" p="3">
+						{cosmosTx.messages.map((message, i) => (
+							<VStack key={i} w="100%" align="stretch" gap="1.5">
+								<Text fontSize="xs" fontWeight="700" color="white">{message.type}</Text>
+								{message.rows.map((row, j) => <Row key={j} label={row.label} value={row.value} />)}
+							</VStack>
+						))}
+						<Row label="Fee" value={cosmosTx.fee} />
+						<Row label="Memo" value={cosmosTx.memo} />
 					</VStack>
 				)}
 				{request.method === '/tron/sign-transaction' && request.tronDecoded && (
