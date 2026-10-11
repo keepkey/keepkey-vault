@@ -12,7 +12,8 @@
 
 import { sendCommand, isSidecarReady, startSidecar, getCachedFvk, getScanState, beginZcashSend, endZcashSend } from "../zcash-sidecar"
 import { initializeOrchardFromDevice } from "./zcash-shielded"
-import { summarizeZcashMaturity, ZCASH_MIN_CONFIRMATIONS } from "../../shared/zcash-maturity"
+import { summarizeZcashMaturity, filterSpendableZcashUtxos, zcashUtxoValueZat, ZCASH_MIN_CONFIRMATIONS } from "../../shared/zcash-maturity"
+import { maxShieldable, planShieldBatches } from "./zcash-batching"
 
 /** Compute P2PKH scriptPubKey from compressed pubkey hex: OP_DUP OP_HASH160 <20> <HASH160> OP_EQUALVERIFY OP_CHECKSIG */
 async function p2pkhScriptPubKey(pubkeyHex: string): Promise<string> {
@@ -28,7 +29,7 @@ async function p2pkhScriptPubKey(pubkeyHex: string): Promise<string> {
 }
 
 /** Extract the 33-byte compressed pubkey from a Base58Check xpub string. */
-function pubkeyFromXpub(xpub: string): string {
+export function pubkeyFromXpub(xpub: string): string {
 	// Base58Check decode → 78 bytes: 4 version + 1 depth + 4 fingerprint + 4 index + 32 chaincode + 33 pubkey
 	const ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 	let num = 0n
@@ -94,7 +95,9 @@ interface ShieldBuildResult {
 let shieldInProgress = false
 
 export type TxProgressStep = "building" | "signing" | "broadcasting" | "complete"
-export type TxProgressFn = (step: TxProgressStep, detail?: any) => void
+/** `detail` carries the batch position when an operation takes several
+ *  transactions ("Shielding 3 of 5"). */
+export type TxProgressFn = (step: TxProgressStep, detail?: { index: number; total: number; fee?: number; phase?: string }) => void
 
 /** Re-exported alias — the shield gate is the same 10-conf rule the send/swap
  *  builder now enforces, so there is one definition of "spendable". */
@@ -116,7 +119,7 @@ export async function getShieldableTransparentBalance(
 	pioneer: any,
 	transparentAddress: string,
 	tipHeight?: number | null,
-): Promise<{ matureZat: number; pendingZat: number; matureCount: number; pendingCount: number; nextUnlockConfirmations: number | null }> {
+): Promise<{ matureZat: number; pendingZat: number; matureCount: number; pendingCount: number; nextUnlockConfirmations: number | null; maxShieldZat: number }> {
 	const result = await pioneer.ListUnspent({ network: "ZEC", xpub: transparentAddress })
 	const utxoArray = Array.isArray(result) ? result
 		: Array.isArray(result?.data) ? result.data
@@ -133,6 +136,10 @@ export async function getShieldableTransparentBalance(
 		matureCount: summary.spendableCount,
 		pendingCount: summary.lockedCount,
 		nextUnlockConfirmations: summary.nextUnlockConfirmations,
+		// Max button: every mature UTXO, after the fee of each 8-input batch.
+		maxShieldZat: maxShieldable(
+			filterSpendableZcashUtxos(utxoArray, tipHeight).map((u: any) => ({ value: zcashUtxoValueZat(u) })),
+		),
 	}
 }
 
@@ -160,7 +167,7 @@ export async function shieldZec(
 	pioneer: any,
 	params: ShieldParams,
 	opts?: { signWrap?: import("./zcash-shielded").DeviceSignWrap; onProgress?: TxProgressFn },
-): Promise<{ txid: string }> {
+): Promise<{ txid: string; txids: string[] }> {
 	if (shieldInProgress) {
 		throw new Error("A shield transaction is already in progress")
 	}
@@ -179,7 +186,7 @@ async function _shieldZecInner(
 	pioneer: any,
 	params: ShieldParams,
 	opts?: { signWrap?: import("./zcash-shielded").DeviceSignWrap; onProgress?: TxProgressFn },
-): Promise<{ txid: string }> {
+): Promise<{ txid: string; txids: string[] }> {
 	const account = params.account ?? 0
 
 	// 0. Ensure sidecar running + FVK set
@@ -337,122 +344,83 @@ async function _shieldZecInner(
 	const totalAvailable = utxos.reduce((sum, u) => sum + u.value, 0)
 	console.log(`[zcash-shield] Found ${utxos.length} UTXOs totaling ${totalAvailable} ZAT (after ${MIN_CONFIRMATIONS}-conf filter)`)
 
-	// 3. Coin selection — iteratively add UTXOs and recompute the ZIP-317 fee.
-	//
-	// The fee depends on how many inputs we end up selecting:
-	//   logical_actions = max(transparent_inputs, transparent_outputs=1)
-	//                   + max(orchard_spends, orchard_outputs)         // = 2 (BundleType::DEFAULT pad)
-	//   fee = 5000 * max(grace_actions=2, logical_actions)
-	//
-	// So adding inputs can raise the fee, which can require even more inputs
-	// to cover the new target. The previous greedy version selected against a
-	// fixed (1-input) target and then threw if the recomputed fee outran the
-	// selected total — even when more UTXOs were available. Now we recompute
-	// after each addition and keep going until the running total covers the
-	// running target, only erroring out if the entire set is short.
-	const nOrchardActions = 2 // BundleType::DEFAULT pads to a 2-action minimum
-	const computeFee = (nInputs: number): number => {
-		const transparentActions = Math.max(nInputs, 1) // max(inputs, change_outputs=1)
-		const logical = transparentActions + nOrchardActions
-		return 5000 * Math.max(2, logical)
-	}
-
-	// Cheap fast-path: even with 1 input (cheapest fee shape) we can't cover
-	// `amount + fee`, no point selecting.
-	const minFee = computeFee(1)
-	if (totalAvailable < params.amount + minFee) {
-		throw new Error(
-			`Insufficient transparent balance: have ${totalAvailable} ZAT, need ≥${params.amount + minFee} ZAT ` +
-			`(${params.amount} amount + ${minFee} fee minimum)`
-		)
-	}
-
-	const sorted = [...utxos].sort((a, b) => b.value - a.value)
-	const selected: TransparentUtxo[] = []
-	let selectedTotal = 0
-	let runningFee = computeFee(0)
-	for (const utxo of sorted) {
-		selected.push(utxo)
-		selectedTotal += utxo.value
-		runningFee = computeFee(selected.length)
-		if (selectedTotal >= params.amount + runningFee) break
-	}
-
-	const finalFee = computeFee(selected.length)
-	if (selectedTotal < params.amount + finalFee) {
-		throw new Error(
-			`Insufficient transparent balance after ZIP-317 fee for ${selected.length} input(s): ` +
-			`have ${selectedTotal} ZAT, need ${params.amount + finalFee} ZAT ` +
-			`(${params.amount} amount + ${finalFee} fee for ${selected.length + nOrchardActions} logical actions)`
-		)
-	}
-
-	console.log(`[zcash-shield] Selected ${selected.length} UTXOs totaling ${selectedTotal} ZAT, fee=${finalFee} ZAT`)
+	// 3. Split into transactions of at most 8 inputs each (firmware 7.15
+	// limit). They spend disjoint UTXOs, so each one is built, signed and
+	// broadcast in turn without waiting for the previous to confirm.
+	const batches = planShieldBatches(utxos, params.amount)
+	console.log(`[zcash-shield] Shielding ${params.amount} ZAT in ${batches.length} transaction(s): fees ${batches.map(b => b.fee).join(", ")} ZAT`)
 
 	// Derive scriptPubKey from pubkey if UTXOs don't have it (Pioneer often omits it)
 	const derivedScriptPubKey = await p2pkhScriptPubKey(compressedPubkey!)
-	console.log(`[zcash-shield] Derived P2PKH scriptPubKey: ${derivedScriptPubKey}`)
 
-	for (const u of selected) {
-		if (!u.scriptPubKey) {
-			u.scriptPubKey = derivedScriptPubKey
-			console.log(`[zcash-shield]   UTXO ${u.txid}:${u.vout} — using derived scriptPubKey`)
+	const txids: string[] = []
+	for (const [i, batch] of batches.entries()) {
+		const progress = { index: i + 1, total: batches.length, fee: batch.fee }
+		opts?.onProgress?.("building", progress)
+		try {
+			const { txid } = await signAndBroadcastShield(wallet, {
+				inputs: batch.inputs.map(u => ({ ...u, scriptPubKey: u.scriptPubKey || derivedScriptPubKey })),
+				amount: batch.amount,
+				fee: batch.fee,
+				account,
+				addressPath: zcashPath,
+				compressedPubkey: compressedPubkey!,
+			}, { ...opts, progress })
+			txids.push(txid)
+		} catch (e: any) {
+			if (txids.length === 0) throw e
+			throw new Error(
+				`Shielded ${txids.length} of ${batches.length} transactions (${txids.join(", ")}); ` +
+				`transaction ${i + 1} failed: ${e?.message ?? e}. Shield the rest again.`
+			)
 		}
-		console.log(`[zcash-shield]   UTXO: txid=${u.txid} vout=${u.vout} value=${u.value} script=${u.scriptPubKey?.slice(0, 30)}`)
 	}
+	return { txid: txids[txids.length - 1], txids }
+}
 
-	// 4. Build shield PCZT via sidecar
-	console.log("[zcash-shield] Building shield PCZT...")
+/** One shield transaction: build, sign on the device, finalize, broadcast.
+ *  Every input sits at `addressPath` and is signed with `compressedPubkey`. */
+export async function signAndBroadcastShield(
+	wallet: any,
+	tx: {
+		inputs: Array<{ txid: string; vout: number; value: number; scriptPubKey: string }>
+		amount: number
+		fee: number
+		account: number
+		addressPath: number[]
+		compressedPubkey: string
+	},
+	opts?: {
+		signWrap?: import("./zcash-shielded").DeviceSignWrap
+		onProgress?: TxProgressFn
+		progress?: { index: number; total: number; fee?: number }
+	},
+): Promise<{ txid: string }> {
+	console.log(`[zcash-shield] Building shield PCZT: ${tx.inputs.length} inputs, ${tx.amount} ZAT, fee ${tx.fee} ZAT...`)
 	const buildResult: ShieldBuildResult = await sendCommand("build_shield_pczt", {
-		transparent_inputs: selected.map(u => ({
+		transparent_inputs: tx.inputs.map(u => ({
 			txid: u.txid,
 			vout: u.vout,
 			value: u.value,
 			script_pubkey: u.scriptPubKey,
 		})),
-		amount: params.amount,
-		fee: finalFee,
-		account,
+		amount: tx.amount,
+		fee: tx.fee,
+		account: tx.account,
+		address_path: tx.addressPath,
 	}, 600000) // Halo2 proof can take a while
 
 	console.log(`[zcash-shield] Shield PCZT built: ${buildResult.transparent_inputs.length} transparent inputs, ${buildResult.orchard_signing_request.n_actions} Ironwood actions`)
 
-	// 5. Device signs — two-phase: Ironwood plus transparent authorization
-	//
-	// The hybrid signing protocol (ZcashTransparentInput/ZcashTransparentSig)
-	// requires firmware support that may not be present. Check first and
-	// fail with a clear error if transparent authorization is unavailable.
-	console.log("[zcash-shield] Requesting device signatures...")
-	opts?.onProgress?.("signing")
-
+	// Device signs — Ironwood plus transparent authorization.
+	opts?.onProgress?.("signing", opts.progress)
 	const hasTransparentInputs = buildResult.transparent_inputs.length > 0
-
-	// Check if firmware supports hybrid signing by checking if the method
-	// accepts transparent_inputs. If firmware returns "Unknown message",
-	// we need firmware >= 7.15.0 with ZcashTransparentInput support.
 	const signingRequest = {
 		...buildResult.orchard_signing_request,
 		header_fields: buildResult.orchard_signing_request.header_fields,
 		transparent_outputs: buildResult.transparent_outputs,
 		transparent_inputs: hasTransparentInputs
-			? buildResult.transparent_inputs.map((ti: any) => {
-				// hdwallet's TransparentInput is camelCase; the sidecar speaks
-				// snake_case. A silent mismatch here reaches the device as an
-				// input with no prevout/script and fails as "Invalid transparent
-				// input data" — validate before mapping, throw on missing.
-				if (!ti.prevout_txid || ti.prevout_index === undefined || !ti.script_pubkey) {
-					throw new Error(`Sidecar transparent input ${ti.index} missing prevout_txid/prevout_index/script_pubkey`)
-				}
-				return {
-					index: ti.index,
-					addressNList: ti.address_path,
-					amount: ti.amount,
-					prevoutTxid: ti.prevout_txid,
-					prevoutIndex: ti.prevout_index,
-					sequence: ti.sequence,
-					scriptPubkey: ti.script_pubkey,
-				}
-			})
+			? buildResult.transparent_inputs.map(toHdwalletTransparentInput)
 			: undefined,
 	}
 
@@ -472,32 +440,40 @@ async function _shieldZecInner(
 		throw e
 	}
 
-	// Extract transparent signatures (attached by hdwallet adapter)
+	// Transparent signatures are attached by the hdwallet adapter
 	const transparentSigs: string[] = (signatures as any)._transparentSignatures || []
 	const orchardSigs: string[] = signatures
-
 	console.log(`[zcash-shield] Got ${transparentSigs.length} transparent sigs, ${orchardSigs.length} Ironwood sigs`)
-	if (transparentSigs.length > 0) {
-		console.log(`[zcash-shield] Transparent sig[0]: ${transparentSigs[0]?.slice(0, 40)}...`)
-	}
-	console.log(`[zcash-shield] Pubkey for scriptSig: ${compressedPubkey}`)
 
-	// 6. Finalize via sidecar — pass pubkey for scriptSig construction
-	console.log("[zcash-shield] Finalizing shield transaction...")
 	const { raw_tx, txid } = await sendCommand("finalize_shield", {
 		transparent_signatures: transparentSigs,
 		orchard_signatures: orchardSigs,
-		compressed_pubkey: compressedPubkey,
+		compressed_pubkey: tx.compressedPubkey,
 	})
 
-	// 7. Broadcast
-	console.log(`[zcash-shield] raw_tx (first 200): ${raw_tx?.slice(0, 200)}`)
 	console.log(`[zcash-shield] raw_tx length: ${raw_tx?.length / 2} bytes`)
-	console.log("[zcash-shield] Broadcasting...")
-	opts?.onProgress?.("broadcasting")
+	opts?.onProgress?.("broadcasting", opts.progress)
 	await sendCommand("broadcast", { raw_tx })
 
 	const displayTxid = txidToDisplayOrder(txid)
 	console.log(`[zcash-shield] Shield transaction sent: ${displayTxid}`)
 	return { txid: displayTxid }
+}
+
+/** hdwallet's TransparentInput is camelCase; the sidecar speaks snake_case.
+ *  A silent mismatch reaches the device as an input with no prevout/script
+ *  and fails as "Invalid transparent input data", so validate first. */
+export function toHdwalletTransparentInput(ti: any) {
+	if (!ti.prevout_txid || ti.prevout_index === undefined || !ti.script_pubkey) {
+		throw new Error(`Sidecar transparent input ${ti.index} missing prevout_txid/prevout_index/script_pubkey`)
+	}
+	return {
+		index: ti.index,
+		addressNList: ti.address_path,
+		amount: ti.amount,
+		prevoutTxid: ti.prevout_txid,
+		prevoutIndex: ti.prevout_index,
+		sequence: ti.sequence,
+		scriptPubkey: ti.script_pubkey,
+	}
 }

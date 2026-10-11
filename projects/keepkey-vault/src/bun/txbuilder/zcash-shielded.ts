@@ -88,6 +88,8 @@ export interface SigningRequest {
 		is_spend: boolean
 		recipient?: string
 		rseed?: string
+		/** ZIP 374: the Unified Address the user typed (payee output only) */
+		user_address?: string
 	}>
 	display: {
 		amount: string
@@ -229,6 +231,16 @@ export async function getShieldedBalance(): Promise<{
 	return await sendCommand("balance")
 }
 
+/** How a payment splits when it needs more notes than one transaction can
+ *  spend (firmware 7.15 signs at most 16 actions). Absent on old sidecars. */
+export interface SpendBatchInfo {
+	total_txs: number
+	pay: number
+	fee: number
+	remaining_after: number
+	fees: number[]
+}
+
 /**
  * Build a shielded transaction and get the signing request for the device.
  *
@@ -237,6 +249,7 @@ export async function getShieldedBalance(): Promise<{
  */
 export async function buildShieldedTx(params: ShieldedSendParams): Promise<{
 	signing_request: SigningRequest
+	batch?: SpendBatchInfo
 }> {
 	if (!isSidecarReady()) {
 		throw new Error("Sidecar not initialized — call initializeOrchard() first")
@@ -308,7 +321,7 @@ export async function sendShielded(
 	wallet: any,
 	params: ShieldedSendParams,
 	opts?: { signWrap?: DeviceSignWrap; onProgress?: import("./zcash-shield").TxProgressFn },
-): Promise<{ txid: string }> {
+): Promise<{ txid: string; txids: string[] }> {
 	if (sendInProgress) {
 		throw new Error("A shielded send is already in progress — wait for it to complete")
 	}
@@ -326,7 +339,7 @@ async function _sendShieldedInner(
 	wallet: any,
 	params: ShieldedSendParams,
 	opts?: { signWrap?: DeviceSignWrap; onProgress?: import("./zcash-shield").TxProgressFn },
-): Promise<{ txid: string }> {
+): Promise<{ txid: string; txids: string[] }> {
 	// 0. Ensure sidecar is running and FVK is set
 	if (!isSidecarReady()) {
 		await startSidecar()
@@ -341,37 +354,47 @@ async function _sendShieldedInner(
 		console.log("[zcash-shielded] Using cached FVK, skipping device refresh")
 	}
 
-	// 1. Build PCZT via sidecar
-	console.log("[zcash-shielded] Building PCZT...")
-	const { signing_request } = await buildShieldedTx(params)
-
-	console.log(`[zcash-shielded] PCZT built: ${signing_request.n_actions} actions`)
-	console.log(`[zcash-shielded] Display: ${signing_request.display.amount} to ${signing_request.display.to}`)
-
-	// 2. Send to device for signing via hdwallet
-	// The device protobuf flow:
-	//   ZcashSignPCZT (digests + metadata) → ZcashPCZTActionAck
-	//   For each action: ZcashPCZTAction (fields) → ZcashPCZTActionAck | ZcashSignedPCZT
-	console.log("[zcash-shielded] Requesting device signatures...")
-	opts?.onProgress?.("signing")
-	const signatures = opts?.signWrap
-		? await opts.signWrap(() => deviceSign(wallet, signing_request))
-		: await deviceSign(wallet, signing_request)
-	console.log(`[zcash-shielded] Got ${signatures.length} signatures`)
-
-	// 3. Finalize via sidecar (apply sigs + binding sig + serialize)
-	console.log("[zcash-shielded] Finalizing transaction...")
-	const { raw_tx, txid } = await finalizeShieldedTx(signatures)
-
-	// 4. Broadcast
-	console.log("[zcash-shielded] Broadcasting...")
-	opts?.onProgress?.("broadcasting")
-	await broadcastShieldedTx(raw_tx)
-
+	// 1. One transaction per batch: the sidecar spends at most 16 notes per
+	// transaction and reports what is left to pay. Each batch spends disjoint
+	// notes, so the next one is built right after the previous broadcasts.
 	const { txidToDisplayOrder } = await import("./zcash-shield")
-	const displayTxid = txidToDisplayOrder(txid)
-	console.log(`[zcash-shielded] Transaction sent: ${displayTxid}`)
-	return { txid: displayTxid }
+	const txids: string[] = []
+	let remaining = params.amount
+	let total = 1
+	while (remaining > 0) {
+		const index = txids.length + 1
+		try {
+			if (index > 1) opts?.onProgress?.("building", { index, total })
+			console.log(`[zcash-shielded] Building PCZT for ${remaining} ZAT...`)
+			const { signing_request, batch } = await buildShieldedTx({ ...params, amount: remaining })
+			total = txids.length + (batch?.total_txs ?? 1)
+			const progress = { index, total, fee: batch?.fee }
+			console.log(`[zcash-shielded] PCZT built: ${signing_request.n_actions} actions (transaction ${progress.index} of ${progress.total})`)
+
+			// 2. Device signs: ZcashSignPCZT → ZcashPCZTAction(s) → ZcashSignedPCZT
+			opts?.onProgress?.("signing", progress)
+			const signatures = opts?.signWrap
+				? await opts.signWrap(() => deviceSign(wallet, signing_request))
+				: await deviceSign(wallet, signing_request)
+			console.log(`[zcash-shielded] Got ${signatures.length} signatures`)
+
+			// 3. Finalize via sidecar (apply sigs + binding sig + serialize)
+			const { raw_tx, txid } = await finalizeShieldedTx(signatures)
+
+			// 4. Broadcast
+			opts?.onProgress?.("broadcasting", progress)
+			await broadcastShieldedTx(raw_tx)
+			txids.push(txidToDisplayOrder(txid))
+			console.log(`[zcash-shielded] Transaction sent: ${txids[txids.length - 1]}`)
+			remaining = batch ? batch.remaining_after : 0
+		} catch (e: any) {
+			if (txids.length === 0) throw e
+			throw new Error(
+				`Sent ${txids.length} transaction(s) (${txids.join(", ")}); ${remaining} ZAT was not sent: ${e?.message ?? e}`
+			)
+		}
+	}
+	return { txid: txids[txids.length - 1], txids }
 }
 
 /**
@@ -396,11 +419,23 @@ async function deviceSign(wallet: any, sr: SigningRequest): Promise<string[]> {
 		throw new Error("Device did not return signatures")
 	}
 
-	if (signatures.length !== sr.n_actions) {
-		throw new Error(
-			`Signature count mismatch: got ${signatures.length} signatures for ${sr.n_actions} actions`
-		)
-	}
+	checkShieldedSignatureCount(signatures.length, sr)
 
 	return signatures
+}
+
+/**
+ * Firmware 7.15 returns one signature per real spend; earlier release
+ * candidates returned one per action. The sidecar applies either layout.
+ */
+export function checkShieldedSignatureCount(
+	count: number,
+	sr: Pick<SigningRequest, "n_actions" | "actions">,
+): void {
+	const spends = sr.actions.filter(a => a.is_spend).length
+	if (count !== sr.n_actions && count !== spends) {
+		throw new Error(
+			`Signature count mismatch: got ${count} signatures for ${sr.n_actions} actions (${spends} spends)`
+		)
+	}
 }
