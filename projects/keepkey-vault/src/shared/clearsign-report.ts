@@ -63,6 +63,16 @@ export interface ClearSignReport {
   rating?: ContractRating
 }
 
+/**
+ * Whether a report has anything the user must read. A transaction the KeepKey
+ * shows in full (P4/P5) with no danger line is simply clear: the app's own
+ * swap screen leaves the report out and lets the device speak.
+ */
+export function clearSignReportNeedsAttention(report: Pick<ClearSignReport, 'protectionLevel' | 'findings'>): boolean {
+  return !(report.protectionLevel === 'P4' || report.protectionLevel === 'P5')
+    || report.findings.some((finding) => finding.severity === 'danger')
+}
+
 const LEVEL_ORDER: ClearSignProtectionLevel[] = ['P0', 'P1', 'P2', 'P3', 'P4', 'P5']
 
 function minLevel(a: ClearSignProtectionLevel, b: ClearSignProtectionLevel): ClearSignProtectionLevel {

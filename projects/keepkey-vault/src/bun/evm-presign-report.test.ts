@@ -13,6 +13,7 @@ import { simulateEvmEffects } from './evm-effects'
 import { uniswapReportFindingsWithState } from './uniswap-report'
 import { resolvePromotedEvmArtifact } from './clearsign-artifact-resolver'
 import { ClearSignReportResponse } from './schemas'
+import { clearSignReportNeedsAttention } from '../shared/clearsign-report'
 
 const swap = require('../../__tests__/fixtures/uniswap/base-ur-usdc-to-eth-swap.json')
 const SIGNER = '0x909ef6b32dfdc12ca86aa710b54c991af3c5f82e'
@@ -283,11 +284,15 @@ describe('a plain transfer (a swap deposit to an address, no call data)', () => 
     expect(r.headline).toBe('KeepKey ClearSign ready')
     expect(risk(r)).toEqual([`Sends 0.01 ETH to ${DEPOSIT.to}.`])
     expect(r.limitations.map((l) => l.code)).toEqual(['PLAIN_TRANSFER_NOT_SIMULATED'])
+    // Clear on the device, nothing to warn about: the swap screen shows no report.
+    expect(clearSignReportNeedsAttention(r)).toBe(false)
+    expect(clearSignReportNeedsAttention({ ...r, findings: [...r.findings, { code: 'NEAR_INTENTS_MISMATCH', message: 'x', severity: 'danger' }] })).toBe(true)
   })
 
   test('a contract call with the same destination is still not promoted', async () => {
     const r = await report({ ...DEPOSIT, data: '0xdeadbeef' }, '7.16.0')
     expect(r.protectionLevel).toBe('P1')
+    expect(clearSignReportNeedsAttention(r)).toBe(true)
   })
 })
 
