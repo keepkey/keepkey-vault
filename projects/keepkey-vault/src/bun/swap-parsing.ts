@@ -6,6 +6,7 @@
  */
 import { CHAINS } from '../shared/chains'
 import { thorMemoMinimum } from '../shared/swap-risk'
+import { parseCaip } from '../shared/swap-discovery'
 import type { SwapAsset, SwapQuote, RelayTxParams } from '../shared/types'
 import { COIN_MAP_LONG } from '@pioneer-platform/pioneer-coins'
 
@@ -635,34 +636,60 @@ export function assetToCaip(thorAsset: string, knownAssets?: SwapAsset[]): strin
   return chainDef.caip
 }
 
-// ── NEAR Intents deposit address, in NEAR Intents' own words ────────────────
+// ── Swap deposit addresses on the report card ───────────────────────────────
 
 type SwapReportLine = { code: string; message: string; severity: 'info' | 'warning' | 'danger' }
+type SwapReportLines = { findings: SwapReportLine[]; limitations: SwapReportLine[] }
 
 /**
- * Report lines for a swap that pays a NEAR Intents deposit address.
- *
- * `status` is NEAR Intents' own record of that address (1Click
- * /v0/status?depositAddress=…), or undefined when it could not be read. The
- * address reaches Desktop through Pioneer; this is the second, independent
- * source. Neither is something the KeepKey can check, and the lines say so.
+ * The deposit address a swap's EVM transaction pays, read from the bytes to be
+ * signed and never from a quote field. A coin source pays `to`. A token source
+ * pays the transfer's recipient, and only when `to` is that token's own
+ * contract and no coin moves; anything else is not a simple deposit.
+ */
+export function swapDepositAddressFromTx(tx: { to?: string; data?: string; value?: string } | undefined, fromCaip: string): string | undefined {
+  if (!tx?.to) return undefined
+  const data = String(tx.data || '0x').toLowerCase()
+  const { isToken, contractAddress } = parseCaip(fromCaip)
+  if (!isToken) return data === '0x' ? tx.to : undefined
+  let movesCoin = true
+  try { movesCoin = BigInt(tx.value || 0) !== 0n } catch { /* unreadable value: not a simple deposit */ }
+  return !movesCoin && data.startsWith('0xa9059cbb') && data.length === 138 && contractAddress?.toLowerCase() === tx.to.toLowerCase()
+    ? `0x${data.slice(34, 74)}` : undefined
+}
+
+/** Said of every swap that pays a provider's deposit address, whoever the provider is. */
+export function swapDepositFindings(provider: string | undefined): SwapReportLines {
+  return {
+    findings: [{
+      code: 'SWAP_PROVIDER',
+      message: `Pioneer routes this swap through ${provider || 'a swap provider'}: the transfer pays a one-time deposit address.`,
+      severity: 'info',
+    }],
+    limitations: [{
+      code: 'DEPOSIT_ADDRESS_NOT_DEVICE_VERIFIED',
+      message: 'Your KeepKey shows the deposit address but cannot tell who owns it. Compare the address on the device with the one above.',
+      severity: 'warning',
+    }],
+  }
+}
+
+/**
+ * What NEAR Intents itself has on record for a deposit address (1Click
+ * /v0/status?depositAddress=…), as report lines; `status` is undefined when it
+ * could not be read. The address reaches Desktop through Pioneer; this is the
+ * second, independent source. Amounts and assets are not compared here.
  */
 export function nearIntentsDepositFindings(
   status: any,
   expected: { depositAddress: string; from?: string; recipient?: string; now?: number },
-): { findings: SwapReportLine[]; limitations: SwapReportLine[] } {
+): SwapReportLines {
+  const bare = (a: string) => a.startsWith('bitcoincash:') ? a.slice('bitcoincash:'.length) : a
   const same = (a?: string, b?: string) => !!a && !!b
-    && (a.startsWith('0x') && b.startsWith('0x') ? a.toLowerCase() === b.toLowerCase() : a === b)
-  const findings: SwapReportLine[] = [{
-    code: 'SWAP_PROVIDER',
-    message: `Pioneer routes this swap through NEAR Intents: the transfer pays a one-time NEAR Intents deposit address.`,
-    severity: 'info',
-  }]
-  const limitations: SwapReportLine[] = [{
-    code: 'DEPOSIT_ADDRESS_NOT_DEVICE_VERIFIED',
-    message: 'Your KeepKey shows the deposit address but cannot tell who owns it. Compare the address on the device with the one above.',
-    severity: 'warning',
-  }]
+    && (a.startsWith('0x') && b.startsWith('0x') ? a.toLowerCase() === b.toLowerCase() : bare(a) === bare(b))
+  const findings: SwapReportLine[] = []
+  const limitations: SwapReportLine[] = []
+  const danger = (code: string, message: string) => { findings.push({ code, message, severity: 'danger' }) }
   const request = status?.quoteResponse?.quoteRequest
   const quote = status?.quoteResponse?.quote
   if (!request || !quote?.depositAddress) {
@@ -674,24 +701,23 @@ export function nearIntentsDepositFindings(
     return { findings, limitations }
   }
   if (!same(quote.depositAddress, expected.depositAddress)) {
-    findings.push({
-      code: 'NEAR_INTENTS_ADDRESS_MISMATCH',
-      message: `NEAR Intents answered for a different deposit address (${quote.depositAddress}). Do not sign.`,
-      severity: 'danger',
-    })
+    danger('NEAR_INTENTS_ADDRESS_MISMATCH', `NEAR Intents answered for a different deposit address (${quote.depositAddress}). Do not sign.`)
     return { findings, limitations }
   }
-  const ours = (label: string, theirs: string | undefined, mine: string | undefined) =>
-    !theirs ? { code: 'NEAR_INTENTS_FIELD_MISSING', message: `NEAR Intents did not say where it ${label}.`, severity: 'danger' as const }
-      : mine && !same(theirs, mine) ? { code: 'NEAR_INTENTS_MISMATCH', message: `NEAR Intents ${label} ${theirs}, which is not your address ${mine}. Do not sign.`, severity: 'danger' as const }
-        : { code: 'NEAR_INTENTS_CONFIRMED', message: `NEAR Intents confirms this deposit address ${label} ${theirs}${mine ? ' (yours)' : ''}.`, severity: 'info' as const }
-  findings.push(ours('pays out to', request.recipient, expected.recipient))
-  findings.push(ours('refunds to', request.refundTo, expected.from))
+  if (status.status !== 'PENDING_DEPOSIT') danger('NEAR_INTENTS_NOT_WAITING',
+    `NEAR Intents reports this deposit address as ${String(status.status)}, not waiting for a deposit. Get a new quote.`)
+  const party = (label: string, theirs: string | undefined, onChain: boolean, mine: string | undefined) => {
+    if (!theirs) danger('NEAR_INTENTS_FIELD_MISSING', `NEAR Intents did not say where it ${label}.`)
+    else if (!onChain) danger('NEAR_INTENTS_NOT_ON_CHAIN', `NEAR Intents ${label} ${theirs} inside NEAR Intents, not to an address on the chain. Do not sign.`)
+    else if (!mine) findings.push({ code: 'NEAR_INTENTS_UNCOMPARED', message: `NEAR Intents has this deposit address down as: ${label} ${theirs}. Check that it is yours.`, severity: 'warning' })
+    else if (!same(theirs, mine)) danger('NEAR_INTENTS_MISMATCH', `NEAR Intents ${label} ${theirs}, which is not your address ${mine}. Do not sign.`)
+    else findings.push({ code: 'NEAR_INTENTS_CONFIRMED', message: `NEAR Intents confirms this deposit address ${label} ${theirs} (yours).`, severity: 'info' })
+  }
+  party('pays out to', request.recipient, request.recipientType === 'DESTINATION_CHAIN', expected.recipient)
+  party('refunds to', request.refundTo, request.refundType === 'ORIGIN_CHAIN', expected.from)
   const deadline = Date.parse(request.deadline)
-  if (deadline <= (expected.now ?? Date.now())) findings.push({
-    code: 'NEAR_INTENTS_QUOTE_EXPIRED',
-    message: `This quote's deposit deadline (${request.deadline}) has passed. Get a new quote.`,
-    severity: 'danger',
-  })
+  // An unreadable deadline is not a deadline in the future.
+  if (!(deadline > (expected.now ?? Date.now()))) danger('NEAR_INTENTS_QUOTE_EXPIRED',
+    `This quote's deposit deadline (${String(request.deadline)}) has passed or cannot be read. Get a new quote.`)
   return { findings, limitations }
 }

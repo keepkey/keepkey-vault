@@ -12,6 +12,8 @@ import {
   parseQuoteResponse,
   parseAssetsResponse,
   nearIntentsDepositFindings,
+  swapDepositAddressFromTx,
+  swapDepositFindings,
 } from '../src/bun/swap-parsing'
 
 // ── Fixtures: Real Pioneer SDK response shapes ──────────────────────
@@ -880,46 +882,82 @@ describe('parseAssetsResponse', () => {
 
 // Shape of a real 1Click /v0/status answer (Base ETH → ZEC, 2026-10-11),
 // reduced to the fields read. The recipient is a placeholder.
-describe('nearIntentsDepositFindings', () => {
+describe('swap deposit address on the report card', () => {
   const DEPOSIT = '0x44f8EfADc1d700EE7e22AF3813880378A50f1eCD'
   const FROM = '0x909Ef6B32DfDc12CA86aA710b54c991af3C5F82E'
   const RECIPIENT = 't1RecipientPlaceholder'
-  const status = (over: Record<string, unknown> = {}) => ({
+  const USDC = '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913'
+  const status = (over: Record<string, unknown> = {}, top: Record<string, unknown> = {}) => ({
     status: 'PENDING_DEPOSIT',
     quoteResponse: {
-      quoteRequest: { refundTo: FROM, recipient: RECIPIENT, deadline: '2026-10-11T06:20:44.388Z', ...over },
+      quoteRequest: {
+        refundTo: FROM, refundType: 'ORIGIN_CHAIN', recipient: RECIPIENT, recipientType: 'DESTINATION_CHAIN',
+        deadline: '2026-10-11T06:20:44.388Z', ...over,
+      },
       quote: { depositAddress: DEPOSIT },
     },
+    ...top,
   })
   const expected = { depositAddress: DEPOSIT.toLowerCase(), from: FROM.toLowerCase(), recipient: RECIPIENT, now: Date.parse('2026-10-11T06:00:00Z') }
   const codes = (lines: { code: string }[]) => lines.map((l) => l.code)
+  const transfer = (to: string) => `0xa9059cbb${to.slice(2).toLowerCase().padStart(64, '0')}${'5f5e100'.padStart(64, '0')}`
 
-  test('names the provider and repeats what NEAR Intents has on record', () => {
-    const r = nearIntentsDepositFindings(status(), expected)
-    expect(codes(r.findings)).toEqual(['SWAP_PROVIDER', 'NEAR_INTENTS_CONFIRMED', 'NEAR_INTENTS_CONFIRMED'])
-    expect(r.findings[1].message).toBe(`NEAR Intents confirms this deposit address pays out to ${RECIPIENT} (yours).`)
-    expect(r.findings[2].message).toBe(`NEAR Intents confirms this deposit address refunds to ${FROM} (yours).`)
+  test('the paid address comes from the bytes: the coin destination, or a transfer on the source token itself', () => {
+    expect(swapDepositAddressFromTx({ to: DEPOSIT, data: '0x', value: '0x2386f26fc10000' }, 'eip155:8453/slip44:60')).toBe(DEPOSIT)
+    expect(swapDepositAddressFromTx({ to: USDC, data: transfer(DEPOSIT), value: '0x0' }, `eip155:8453/erc20:${USDC}`)).toBe(DEPOSIT.toLowerCase())
+  })
+
+  test('a transfer on some other contract, a call, or a transfer that also moves coin is not a deposit', () => {
+    const other = '0x1111111111111111111111111111111111111111'
+    expect(swapDepositAddressFromTx({ to: other, data: transfer(DEPOSIT), value: '0x0' }, `eip155:8453/erc20:${USDC}`)).toBeUndefined()
+    expect(swapDepositAddressFromTx({ to: USDC, data: transfer(DEPOSIT), value: '0x1' }, `eip155:8453/erc20:${USDC}`)).toBeUndefined()
+    expect(swapDepositAddressFromTx({ to: DEPOSIT, data: '0xdeadbeef' }, 'eip155:8453/slip44:60')).toBeUndefined()
+    expect(swapDepositAddressFromTx({ to: USDC, data: transfer(DEPOSIT) }, 'eip155:8453/slip44:60')).toBeUndefined()
+  })
+
+  test('every deposit swap names its provider and says the device cannot verify the owner', () => {
+    const r = swapDepositFindings('Chainflip')
+    expect(r.findings[0].message).toContain('through Chainflip')
     expect(codes(r.limitations)).toEqual(['DEPOSIT_ADDRESS_NOT_DEVICE_VERIFIED'])
   })
 
-  test('a payout or refund to someone else is a danger line', () => {
-    const paid = nearIntentsDepositFindings(status({ recipient: 't1SomeoneElse' }), expected)
-    expect(paid.findings[1]).toMatchObject({ code: 'NEAR_INTENTS_MISMATCH', severity: 'danger' })
-    const refunded = nearIntentsDepositFindings(status({ refundTo: 'keepkey.near' }), expected)
-    expect(refunded.findings[2]).toMatchObject({ code: 'NEAR_INTENTS_MISMATCH', severity: 'danger' })
+  test('repeats what NEAR Intents has on record', () => {
+    const r = nearIntentsDepositFindings(status(), expected)
+    expect(r.findings.map((l) => l.message)).toEqual([
+      `NEAR Intents confirms this deposit address pays out to ${RECIPIENT} (yours).`,
+      `NEAR Intents confirms this deposit address refunds to ${FROM} (yours).`,
+    ])
+    expect(r.limitations).toEqual([])
   })
 
-  test('an answer about another address, or a passed deadline, is a danger line', () => {
-    const other = nearIntentsDepositFindings(status(), { ...expected, depositAddress: '0x1111111111111111111111111111111111111111' })
-    expect(other.findings.at(-1)).toMatchObject({ code: 'NEAR_INTENTS_ADDRESS_MISMATCH', severity: 'danger' })
-    const late = nearIntentsDepositFindings(status(), { ...expected, now: Date.parse('2026-10-11T07:00:00Z') })
-    expect(late.findings.at(-1)).toMatchObject({ code: 'NEAR_INTENTS_QUOTE_EXPIRED', severity: 'danger' })
+  test('a payout or refund to someone else, or kept inside NEAR Intents, is a danger line', () => {
+    for (const over of [{ recipient: 't1SomeoneElse' }, { refundTo: 'keepkey.near' }, { recipientType: 'INTENTS' }, { refundType: 'INTENTS' }, { recipient: undefined }]) {
+      const r = nearIntentsDepositFindings(status(over), expected)
+      expect(r.findings.filter((l) => l.severity === 'danger').length).toBe(1)
+    }
+  })
+
+  test('a used address, another address, or a deadline that passed or cannot be read is a danger line', () => {
+    const danger = (r: ReturnType<typeof nearIntentsDepositFindings>) => r.findings.filter((l) => l.severity === 'danger').map((l) => l.code)
+    expect(danger(nearIntentsDepositFindings(status({}, { status: 'SUCCESS' }), expected))).toEqual(['NEAR_INTENTS_NOT_WAITING'])
+    expect(danger(nearIntentsDepositFindings(status(), { ...expected, depositAddress: '0x1111111111111111111111111111111111111111' }))).toEqual(['NEAR_INTENTS_ADDRESS_MISMATCH'])
+    expect(danger(nearIntentsDepositFindings(status(), { ...expected, now: Date.parse('2026-10-11T07:00:00Z') }))).toEqual(['NEAR_INTENTS_QUOTE_EXPIRED'])
+    expect(danger(nearIntentsDepositFindings(status({ deadline: undefined }), expected))).toEqual(['NEAR_INTENTS_QUOTE_EXPIRED'])
+  })
+
+  test('with no address of ours to compare, it never says "yours"', () => {
+    const r = nearIntentsDepositFindings(status(), { ...expected, recipient: undefined })
+    expect(r.findings[0]).toMatchObject({ code: 'NEAR_INTENTS_UNCOMPARED', severity: 'warning' })
+  })
+
+  test('a Bitcoin Cash address matches with or without its prefix', () => {
+    const r = nearIntentsDepositFindings(status({ recipient: 'qpm2qsznhks23z7629mms6s4cwef74vcwvy22gdx6a' }), { ...expected, recipient: 'bitcoincash:qpm2qsznhks23z7629mms6s4cwef74vcwvy22gdx6a' })
+    expect(r.findings[0].code).toBe('NEAR_INTENTS_CONFIRMED')
   })
 
   test('no answer from NEAR Intents is said plainly, never read as a confirmation', () => {
     const r = nearIntentsDepositFindings(undefined, expected)
-    expect(codes(r.findings)).toEqual(['SWAP_PROVIDER'])
-    expect(codes(r.limitations)).toEqual(['DEPOSIT_ADDRESS_NOT_DEVICE_VERIFIED', 'NEAR_INTENTS_UNCONFIRMED'])
+    expect(r.findings).toEqual([])
+    expect(codes(r.limitations)).toEqual(['NEAR_INTENTS_UNCONFIRMED'])
   })
 })
-

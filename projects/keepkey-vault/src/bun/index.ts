@@ -7917,23 +7917,32 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						}
 						const [approval, transaction] = await Promise.all([reportFor(preview.approveTx), reportFor(preview.unsignedTx)])
 						preview.clearSignReports = { approval, transaction }
-						// A NEAR Intents swap pays a one-time deposit address. Name the
-						// provider and ask NEAR Intents itself what that address does.
-						// The address is read from the bytes to be signed, never from a
-						// quote field: the coin's destination, or a token transfer's recipient.
-						const txData = String(preview.unsignedTx?.data || '0x').toLowerCase()
-						const depositAddress: string | undefined = txData === '0x' ? preview.unsignedTx?.to
-							: txData.startsWith('0xa9059cbb') && txData.length === 138 ? `0x${txData.slice(34, 74)}` : undefined
-						if (transaction && depositAddress && (params.swapper === 'NEAR Intents' || params.integration === 'nearIntents')) {
-							const { nearIntentsDepositFindings } = await import('./swap-parsing')
-							let status: any
-							try {
-								const response = await fetch(`https://1click.chaindefuser.com/v0/status?depositAddress=${encodeURIComponent(depositAddress)}`, { signal: AbortSignal.timeout(8000) })
-								if (response.ok) status = await response.json()
-							} catch { /* reported as unconfirmed */ }
-							const lines = nearIntentsDepositFindings(status, { depositAddress, from, recipient: params.toAddressOverride })
+						// A swap that pays a provider's deposit address: name the provider,
+						// say the device cannot verify the address, and for NEAR Intents ask
+						// NEAR Intents itself what that address does.
+						const { swapDepositAddressFromTx, swapDepositFindings, nearIntentsDepositFindings } = await import('./swap-parsing')
+						const depositAddress = swapDepositAddressFromTx(preview.unsignedTx, params.fromCaip)
+						if (transaction && depositAddress) {
+							const nearIntents = params.swapper === 'NEAR Intents' || params.integration === 'nearIntents'
+							const lines = swapDepositFindings(params.swapper || params.integration)
+							if (nearIntents) {
+								let status: any
+								try {
+									const response = await fetch(`https://1click.chaindefuser.com/v0/status?depositAddress=${encodeURIComponent(depositAddress)}`, { signal: AbortSignal.timeout(8000) })
+									if (response.ok) status = await response.json()
+								} catch { /* reported as unconfirmed */ }
+								const near = nearIntentsDepositFindings(status, { depositAddress, from, recipient: params.toAddressOverride })
+								lines.findings.push(...near.findings)
+								lines.limitations.push(...near.limitations)
+							}
 							transaction.findings.push(...lines.findings)
 							transaction.limitations.push(...lines.limitations)
+							// The device shows the transfer either way, but a provider record
+							// that contradicts the swap must not sit under a "ready" headline.
+							if (lines.findings.some((line) => line.severity === 'danger')) {
+								transaction.protectionLevel = 'P1'
+								transaction.headline = 'The swap provider\'s record does not match this swap'
+							}
 						}
 					} else if (fromChain?.chainFamily === 'solana' && from && preview.unsignedTx?.rawTx) {
 						const [{ simulateSolanaEffects }, { buildClearSignReport, solanaDecodedReportFindings }, { buildSolanaDecodedInfo }] = await Promise.all([
