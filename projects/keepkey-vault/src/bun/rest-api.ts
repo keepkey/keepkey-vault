@@ -1,5 +1,5 @@
 import type { EngineController } from './engine-controller'
-import { deviceRefusalText } from './device-refusal'
+import { takeDeviceRefusal } from './device-refusal'
 import { withPermit2SpenderName } from './permit2-spender-name'
 import type { AuthStore } from './auth'
 import { HttpError } from './auth'
@@ -1219,6 +1219,9 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
       const path = url.pathname
       const method = req.method
       const requestStart = Date.now()
+      // When this request could first have reached the device (set once the
+      // approval card is answered); a device Failure before that is not ours.
+      let deviceWorkStart = requestStart
       const sessionEpoch = callbacks?.getSessionEpoch?.()
 
       // Human-gated device ops (signing + the clear-sign trust confirm) block
@@ -2157,6 +2160,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           }
           // Approved — retain decoded info so handlers can pass metadata to device.
           activeSigningInfo = signingInfo
+          deviceWorkStart = Date.now()
           activeAllowBlindSigning =
             signingInfo.requiresBlindSigningConsent === true
             && approval.allowBlindSigning === true
@@ -2932,7 +2936,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             // Distinguish user cancellation / device rejection from actual failures
             const errMsg = String(err?.message || err || '').toLowerCase()
             if (errMsg.includes('cancel') || errMsg.includes('rejected') || errMsg.includes('denied') || errMsg.includes('action cancelled')) {
-              const refusal = deviceRefusalText(engine.lastFailure, requestStart)
+              const refusal = takeDeviceRefusal(engine, deviceWorkStart)
               return json({ error: refusal ? `Device refused to sign: ${refusal}` : 'User cancelled signing on device' }, 403)
             }
             throw err
@@ -3026,7 +3030,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             // Distinguish user cancellation from actual failures
             const msg = String(err?.message || err || '').toLowerCase()
             if (msg.includes('cancel') || msg.includes('rejected') || msg.includes('denied') || msg.includes('action cancelled')) {
-              const refusal = deviceRefusalText(engine.lastFailure, requestStart)
+              const refusal = takeDeviceRefusal(engine, deviceWorkStart)
               if (activeClearSignObservationId) finalizeClearSignObservation(activeClearSignObservationId, refusal ? 'failed' : 'rejected', refusal ? 'device-or-transport' : 'user-rejected')
               return json({ error: refusal ? `Device refused to sign: ${refusal}` : 'User cancelled signing on device' }, 403)
             }

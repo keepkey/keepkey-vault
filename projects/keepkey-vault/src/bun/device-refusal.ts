@@ -9,5 +9,14 @@ export interface DeviceFailure { code?: number; message?: string; at: number }
  */
 export function deviceRefusalText(failure: DeviceFailure | null, since: number): string | null {
   if (!failure || failure.at < since || failure.code !== 4 || !failure.message) return null
-  return /cancel/i.test(failure.message) ? null : failure.message
+  // "Aborted" is the device answering a host Cancel, not a refusal of its own.
+  return /cancel|abort/i.test(failure.message) ? null : failure.message
+}
+
+/** Read the refusal for this request and consume it, so a second request that
+ * fails for the same device Failure does not report it as its own. */
+export function takeDeviceRefusal(engine: { lastFailure: DeviceFailure | null }, since: number): string | null {
+  const text = deviceRefusalText(engine.lastFailure, since)
+  if (text) engine.lastFailure = null
+  return text
 }
