@@ -19,7 +19,7 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
 
 async function apiGet(path) {
   const res = await fetch(`${BASE}${path}`, {
-    headers: { 'x-api-key': API_KEY },
+    headers: { Authorization: `Bearer ${API_KEY}` },
   })
   if (!res.ok) throw new Error(`GET ${path} → HTTP ${res.status}: ${await res.text()}`)
   return res.json()
@@ -28,7 +28,7 @@ async function apiGet(path) {
 async function apiPost(path, body) {
   const res = await fetch(`${BASE}${path}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-api-key': API_KEY },
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${API_KEY}` },
     body: JSON.stringify(body),
   })
   if (!res.ok) throw new Error(`POST ${path} → HTTP ${res.status}: ${await res.text()}`)
