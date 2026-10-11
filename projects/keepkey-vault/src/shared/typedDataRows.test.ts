@@ -56,13 +56,14 @@ test('the risk line names what the spender can take, in every entry', () => {
     .toContain('spend up to 250 USDC, now and later')
 })
 
-test('an unlimited later entry is not hidden by a small first one, in decimal or hex', () => {
-  for (const max of [MAX160, '0x' + 'f'.repeat(64)]) {
+test('an unlimited later entry is not hidden by a small first one, however it is written', () => {
+  // The signer trims and accepts 0X; an amount this code cannot read at all counts as unlimited.
+  for (const max of [MAX160, '0x' + 'f'.repeat(64), ' ' + MAX160, '0X' + 'F'.repeat(40), 'lots']) {
     expect(risk(typed([
       address('[1] Token', USDC), amount('[1] Amount', '250000000'),
       address('[2] Token', USDC), amount('[2] Amount', max),
       address('Spender', SPENDER),
-    ]))).toContain('spend ALL of your USDC')
+    ]))).toContain(max === 'lots' ? 'spend ALL of your tokens' : 'spend ALL of your USDC')
   }
 })
 
