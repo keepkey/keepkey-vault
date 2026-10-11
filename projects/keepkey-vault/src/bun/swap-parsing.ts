@@ -674,6 +674,12 @@ export function swapDepositFindings(provider: string | undefined): SwapReportLin
   }
 }
 
+/** 1Click's "no such deposit address" answer. Any other 404 (a moved or
+ *  retired endpoint) is not an answer about the address. */
+export function nearIntentsSaysUnknownAddress(httpStatus: number, body: any): boolean {
+  return httpStatus === 404 && /^Deposit address \S+ not found$/.test(String(body?.message))
+}
+
 /**
  * What NEAR Intents itself has on record for a deposit address (1Click
  * /v0/status?depositAddress=…), as report lines; `status` is undefined when it
