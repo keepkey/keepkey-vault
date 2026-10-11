@@ -137,7 +137,7 @@ export async function handleSweepRoute(
           to: destination,
           value: `${sweepResult.totalInputSats} sats (${sweepResult.inputCount} inputs, fee ${sweepResult.fee} sats)`,
         }
-        const approved = await callbacks.onSigningRequest(signingInfo)
+        const { approved } = await callbacks.onSigningRequest(signingInfo)
         if (!approved) {
           return json({ error: 'Signing rejected by user' }, 403)
         }
