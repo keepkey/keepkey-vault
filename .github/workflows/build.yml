@@ -670,14 +670,8 @@ jobs:
           # Remove leading whitespace from heredoc
           sed -i 's/^          //' "$APPDIR/keepkey-vault.desktop"
 
-          # AppRun launcher
-          cat > "$APPDIR/AppRun" <<'APPRUN'
-          #!/bin/bash
-          SELF=$(readlink -f "$0")
-          HERE=${SELF%/*}
-          exec "$HERE/usr/bin/bin/launcher" "$@"
-          APPRUN
-          sed -i 's/^          //' "$APPDIR/AppRun"
+          # AppRun launcher: checks for missing system libraries, then starts the app
+          cp ../scripts/linux-apprun.sh "$APPDIR/AppRun"
           chmod +x "$APPDIR/AppRun"
 
           # Download appimagetool
