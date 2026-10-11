@@ -1071,6 +1071,9 @@ export interface SigningRequestInfo {
    *  REST Solana: Vault found a certified ClearSign schema for these exact
    *  bytes, which the device verifies and decodes (no opaque consent asked). */
   deviceClearSigns?: boolean
+  /** Name of the spender when KeepKey has reviewed it (canonical Permit2 or a
+   *  certified name record). Set by the backend; absent = not recognised. */
+  recognizedSpender?: string
   /** Certified metadata resolved before user approval. The signing handler
    *  reuses this exact envelope so approval and device review cannot drift. */
   certifiedEvmSchema?: {

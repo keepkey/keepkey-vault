@@ -8,7 +8,7 @@ import { tronPreview } from './tron-preview'
 import type { ClearSignEvent } from '../shared/types'
 import { createHash } from 'crypto'
 import { decodeEIP712 } from './eip712-decoder'
-import { evmPriorityFee, normalizeEvmChainId, typedDataNativelyReviewed } from './evm-signing-preview'
+import { evmPriorityFee, normalizeEvmChainId, recognizedSpender, typedDataNativelyReviewed } from './evm-signing-preview'
 import { buildEvmReportForTx, evmSigningVerdict, prepareEvmTxSigningInfo } from './evm-presign-report'
 import { CHAINS, isChainSupported, hiveRolePath, evmChainLabel } from '../shared/chains'
 import { getEvmSimulationEndpoint } from './evm-simulation-config'
@@ -1731,6 +1731,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               signingInfo.chainId = normalizeEvmChainId(preview.typedData?.domain?.chainId)
               if (preview.typedData) {
                 signingInfo.typedDataDecoded = decodeEIP712(preview.typedData)
+                const permitSpender = signingInfo.typedDataDecoded?.fields.find((x) => x.label === 'Spender')?.raw
+                signingInfo.recognizedSpender = recognizedSpender(signingInfo.chainId, typeof permitSpender === 'string' ? permitSpender : undefined)
                 // hdwallet streams every document; the device reviews x402 and
                 // (7.16+) a canonical Permit2 PermitSingle natively. Anything
                 // else ends up hash-signed, which needs AdvancedMode.

@@ -423,3 +423,14 @@ describe('Uniswap V4 through UR 2.1.2 — preview rows and certified attach', ()
     expect(seen).toEqual([{ chainId: 8453, contract: UR212, selector: ethIn.data.slice(0, 10), tokens: [ethIn.pre.summary.tokenOut] }])
   })
 })
+
+test('recognizedSpender: canonical Permit2 and certified name records only', async () => {
+  const { recognizedSpender } = await import('./evm-signing-preview')
+  expect(recognizedSpender(1, '0x000000000022D473030F116dDEE9F6B43aC78BA3')).toBe('Uniswap Permit2')
+  expect(recognizedSpender(1, '0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD')).toBe('Uniswap Universal Router')
+  // A token is not a reviewed spender, and neither is a random or malformed address.
+  expect(recognizedSpender(1, '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48')).toBeUndefined()
+  expect(recognizedSpender(1, '0x1111111254eeb25477b68fb85ed929f73a960582')).toBeUndefined()
+  expect(recognizedSpender(1, 'not-an-address')).toBeUndefined()
+  expect(recognizedSpender(undefined, '0x000000000022D473030F116dDEE9F6B43aC78BA3')).toBeUndefined()
+})

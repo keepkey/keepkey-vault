@@ -152,6 +152,22 @@ const KNOWN_SELECTORS = new Set(['0x095ea7b3', '0x39509351', '0xa22cb465', '0xa9
 const PERMIT2 = '0x000000000022d473030f116ddee9f6b43ac78ba3'
 const ALL_THRESHOLD = (1n << 160n) - 1n // uint160 max: Permit2's "unlimited"
 
+/**
+ * How loud a spend permission is. Danger is kept for what a normal dapp flow
+ * does not ask for: an unlimited grant to a spender KeepKey has not reviewed.
+ * Every other case still says exactly what is granted, at a lower level, so
+ * the top warning keeps its meaning.
+ *   reviewed spender, bounded                  check before you sign
+ *   canonical Permit2, unlimited (Uniswap setup) check before you sign
+ *   reviewed spender, unlimited                high
+ *   unreviewed spender, bounded                high
+ *   unreviewed spender, unlimited              danger
+ */
+function spendPermissionLevel(recognizedSpender: string | undefined, unlimited: boolean): RiskLevel {
+  if (!recognizedSpender) return unlimited ? 'critical' : 'high'
+  return !unlimited || recognizedSpender === 'Uniswap Permit2' ? 'medium' : 'high'
+}
+
 function evmChainId(v: unknown): number {
   const n = typeof v === 'string' ? Number(v.startsWith('0x') ? parseInt(v, 16) : v) : Number(v)
   return n > 0 ? n : 1 // the /eth/sign-transaction handler signs a missing/0 chainId as 1
@@ -202,10 +218,14 @@ function evmTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void) 
     } else if (canonicalUniswapSetup && v >= ALL_THRESHOLD) {
       add('medium', 'Standard Uniswap setup: gives canonical Permit2 persistent access to your Arbitrum USDT. You can revoke this allowance later.')
     } else {
-      const scope = v >= ALL_THRESHOLD
-        ? `ALL of your ${token?.symbol ?? `token at ${to}`}`
-        : `up to ${amount(v)}`
-      add('critical', `Lets ${spender} spend ${scope}, now and later, without asking you again.`)
+      const all = v >= ALL_THRESHOLD
+      const scope = all ? `ALL of your ${token?.symbol ?? `token at ${to}`}` : `up to ${amount(v)}`
+      const known = req.recognizedSpender
+      const who = known ? `${known} (${spender})` : spender
+      const text = `Lets ${who} spend ${scope}, now and later, without asking you again.`
+      add(spendPermissionLevel(known, all), known && all && addrWord(0) === PERMIT2
+        ? `Standard Uniswap setup: gives canonical Permit2 persistent access to your ${token?.symbol ?? `token at ${to}`}. You can revoke this allowance later.`
+        : text)
     }
   } else if (sel === '0xa22cb465' && addrWord(0) && num(1) !== null) {
     add(num(1) === 0n ? 'low' : 'critical', num(1) === 0n
@@ -322,7 +342,9 @@ function evmTypedData(req: SigningRequestInfo, add: (l: RiskLevel, t: string) =>
       const howMuch = all ? `ALL of your ${named ? symbols.join(' and ') : 'tokens'}`
         : amounts.length ? `up to ${amounts.map((a) => a.text).join(' and ')}`
         : raw !== undefined ? `up to ${raw} of your tokens` : 'some of your tokens'
-      add('critical', `Lets ${f('Spender')?.raw ?? 'another account'} spend ${howMuch}, now and later. This signature alone is enough; no transaction from you is needed.`)
+      const known = d.isKnownType && d.protocolIdentityVerified !== false ? req.recognizedSpender : undefined
+      const who = f('Spender')?.raw ? (known ? `${known} (${f('Spender')!.raw})` : f('Spender')!.raw) : 'another account'
+      add(spendPermissionLevel(known, all), `Lets ${who} spend ${howMuch}, now and later. This signature alone is enough; no transaction from you is needed.`)
     }
   } else if (/^(OrderComponents|BulkOrder)$/.test(d.primaryType)) {
     add('critical', 'This is a marketplace order. Anyone holding this signature can take the listed items at the price in the order.')

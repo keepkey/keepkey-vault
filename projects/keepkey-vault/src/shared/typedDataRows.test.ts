@@ -83,3 +83,15 @@ test('what the signer receives is not listed as spendable', () => {
   expect(risk(d)).toContain('spend up to 1,100 USDC, now and later')
   expect(value(d, 'Output 1 Min Amount')).toBe('2,900 USDC (raw: 2900000000)')
 })
+
+test('a bounded Permit2 to a reviewed spender is not Danger; unlimited or unreviewed still warns louder', () => {
+  const level = (fields: any[], recognizedSpender?: string) => assessSigningRisk({
+    method: '/eth/sign-typed-data', typedDataDecoded: typed(fields), firmwareVersion: '7.16.0', recognizedSpender,
+  } as SigningRequestInfo)!.level
+  const bounded = [address('Token', USDC), amount('Amount', '1000000000'), address('Spender', SPENDER)]
+  const unlimited = [address('Token', USDC), amount('Amount', MAX160), address('Spender', SPENDER)]
+  expect(level(bounded, 'Uniswap Universal Router')).toBe('medium')
+  expect(level(unlimited, 'Uniswap Universal Router')).toBe('high')
+  expect(level(bounded)).toBe('high')
+  expect(level(unlimited)).toBe('critical')
+})
