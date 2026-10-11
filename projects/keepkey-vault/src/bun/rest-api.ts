@@ -3774,7 +3774,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const body = await parseRequest(req, S.GetPublicKeyRequest)
           const cacheKey = scopedKey(engine, 'pubkey', body, wallet)
           const cached = pubkeyCache.get(cacheKey)
-          if (cached) return json(cached)
+          // A request to show the key must reach the device, never the cache.
+          if (cached && !body.show_display) return json(cached)
           const sd = showDisplay(body.show_display)
           const result = await emuWrap(() => wallet.getPublicKeys([{
             addressNList: body.address_n,
