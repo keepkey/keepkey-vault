@@ -22,9 +22,9 @@ env:
   BUN_VERSION: '1.3.5'
   NODE_VERSION: '20'
   EMU_RELEASE_VERSION: '7.17.0'
-  EMU_SOURCE_RUN_ID: '37527545005'
-  EMU_SOURCE_SHA: 'c0a524fc52a7d330bd6303c5c351370b684bda8b'
-  EMU_SOURCE_ARTIFACT: 'certified-emulator-7.16.0-macos13-c0a524fc52a7d330bd6303c5c351370b684bda8b'
+  EMU_SOURCE_RUN_ID: '38171975676'
+  EMU_SOURCE_SHA: 'dc2cbb847cfff7ae6a8c88c154c4986bcbcad1c9'
+  EMU_SOURCE_ARTIFACT: 'certified-emulator-7.17.0-macos13-dc2cbb847cfff7ae6a8c88c154c4986bcbcad1c9'
 
 jobs:
   # Electrobun's Linux core (libNativeWrapper.so et al.), built from the pinned
