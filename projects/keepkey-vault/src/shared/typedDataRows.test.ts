@@ -85,14 +85,31 @@ test('what the signer receives is not listed as spendable', () => {
   expect(value(d, 'Output 1 Min Amount')).toBe('2,900 USDC (raw: 2900000000)')
 })
 
-test('a bounded Permit2 to a reviewed spender is not Danger; unlimited or unreviewed still warns louder', () => {
-  const level = (fields: any[], recognizedSpender?: string) => assessSigningRisk({
-    method: '/eth/sign-typed-data', typedDataDecoded: typed(fields), firmwareVersion: '7.16.0', recognizedSpender,
+test('permit levels: a Permit2 permit to a reviewed router is the normal Uniswap request; the rest scale with spender and bound', () => {
+  const level = (fields: any[], recognizedSpender?: string, domain: any = {}) => assessSigningRisk({
+    method: '/eth/sign-typed-data', typedDataDecoded: { ...typed(fields), domain: { ...typed(fields).domain, ...domain } },
+    firmwareVersion: '7.16.0', recognizedSpender,
   } as SigningRequestInfo)!.level
-  const bounded = [address('Token', USDC), amount('Amount', '1000000000'), address('Spender', SPENDER)]
-  const unlimited = [address('Token', USDC), amount('Amount', MAX160), address('Spender', SPENDER)]
-  expect(level(bounded, 'Uniswap Universal Router')).toBe('medium')
-  expect(level(unlimited, 'Uniswap Universal Router')).toBe('high')
-  expect(level(bounded)).toBe('high')
-  expect(level(unlimited)).toBe('critical')
+  const permit = (raw: string) => [address('Token', USDC), amount('Amount', raw), address('Spender', SPENDER)]
+  // Reviewed router through Permit2: bounded or the usual maximum-with-expiry.
+  expect(level(permit('1000000000'), 'Uniswap Universal Router')).toBe('medium')
+  expect(level(permit(MAX160), 'Uniswap Universal Router')).toBe('medium')
+  // Unreviewed spender: bounded is high, anything without a real bound is Danger.
+  expect(level(permit('1000000000'))).toBe('high')
+  expect(level(permit(MAX160))).toBe('critical')
+  expect(level(permit(((1n << 96n) - 1n).toString()))).toBe('critical')
+  expect(level(permit(' ' + MAX160))).toBe('critical')
+  // Not the standard flow: Permit2 itself named as the spender, or a permit on another contract.
+  expect(level(permit(MAX160), 'Uniswap Permit2')).toBe('high')
+  expect(level(permit(MAX160), 'Uniswap Universal Router', { verifyingContract: USDC })).toBe('high')
+})
+
+test('a DAI-style permit grants everything unless allowed is an explicit false', () => {
+  const level = (allowed: string) => assessSigningRisk({
+    method: '/eth/sign-typed-data', firmwareVersion: '7.16.0',
+    typedDataDecoded: { ...typed([address('Spender', SPENDER), { label: 'Allowed', value: allowed, format: 'raw', raw: allowed }]), primaryType: 'Permit', domain: { chainId: 1, verifyingContract: '0x6B175474E89094C44Da98b954EedeAC495271d0F' } },
+  } as SigningRequestInfo)!
+  expect(level('true').level).toBe('critical')
+  expect(level('1').level).toBe('critical')
+  expect(level('1').reasons[0].text).toContain('spend ALL of your tokens')
 })

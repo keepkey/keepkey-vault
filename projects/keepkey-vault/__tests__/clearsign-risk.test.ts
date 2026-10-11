@@ -204,11 +204,21 @@ describe('assessSigningRisk — EVM', () => {
     expect(tx('0x095ea7b3' + SPENDER + word(MAX), reviewed).level).toBe('high')
   })
 
+  test('"bounded" means a real bound: near-max amounts and unknown tokens are the worst case', () => {
+    const level = (amount: bigint, extra: Partial<SigningRequestInfo> = {}) => tx('0x095ea7b3' + SPENDER + word(amount), extra).level
+    expect(level((1n << 160n) - 2n)).toBe('critical')            // one below Permit2's max
+    expect(level((1n << 96n) - 1n)).toBe('critical')             // UNI/COMP "infinite"
+    expect(level(10n ** 30n)).toBe('critical')
+    expect(level((1n << 96n) - 1n, { recognizedSpender: 'Uniswap Universal Router' })).toBe('high')
+    // approve(to, tokenId) on an NFT has the same selector; an unknown contract is not assumed to be a token.
+    expect(level(1_000_000n, { to: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88' })).toBe('critical')
+  })
+
   test('an unlimited approve to canonical Permit2 is the standard setup on any chain and token', () => {
     const permit2 = '000000000000000000000000' + '000000000022d473030f116ddee9f6b43ac78ba3'
     const r = tx('0x095ea7b3' + permit2 + word((1n << 256n) - 1n), { recognizedSpender: 'Uniswap Permit2' })
     expect(r.level).toBe('medium')
-    expect(r.reasons[0].text).toBe('Standard Uniswap setup: gives canonical Permit2 persistent access to your USDC. You can revoke this allowance later.')
+    expect(r.reasons[0].text).toBe('Standard Permit2 setup: gives canonical Permit2 persistent access to your USDC. You can revoke this allowance later.')
   })
 
   test('real Arbitrum Uniswap setup approval says USDT, Permit2, and not all wallet tokens', () => {

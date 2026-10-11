@@ -185,6 +185,12 @@ export function recognizedSpender(chainId: number | undefined, address: string |
   return identity === 'Uniswap Permit2' ? identity : findEvmNameRecord(chainId, address)?.name
 }
 
+/** The reviewed spender of a decoded permit, for both REST and WalletConnect. */
+export function recognizedTypedDataSpender(decoded: SigningRequestInfo['typedDataDecoded'], chainId: number | undefined): string | undefined {
+  const spender = decoded?.fields.find((x) => x.label === 'Spender')?.raw
+  return recognizedSpender(chainId, typeof spender === 'string' ? spender : undefined)
+}
+
 export async function applyEvmTxPreview(
   signingInfo: SigningRequestInfo,
   to: string | undefined,
