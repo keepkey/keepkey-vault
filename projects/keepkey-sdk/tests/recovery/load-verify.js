@@ -19,9 +19,10 @@
  * NOT covered: recovery_cipher.c per-word/dry-run/wipe-on-failure (#272) — that's
  * the on-device CIPHER flow (recoverDevice), see the G1-G12 manual matrix.
  *
- * Run: node tests/run-all.js recovery   (vault must serve localhost:1646)
+ * Run: KEEPKEY_ALLOW_WIPE=1 node tests/run-all.js recovery   (vault must serve localhost:1646)
  */
-const { run } = require('../_helpers')
+const { run, requireWipeAllowed } = require('../_helpers')
+requireWipeAllowed()
 const { Mnemonic, HDNodeWallet, randomBytes } = require('ethers')
 
 const ETH_PATH = [0x80000000 + 44, 0x80000000 + 60, 0x80000000, 0, 0]

@@ -83,6 +83,14 @@ function summary() {
   return _failed
 }
 
+/** Suites that WIPE the device call this before anything else. A refusal
+ * exits non-zero so it can never be read as a pass. */
+function requireWipeAllowed() {
+  if (process.env.KEEPKEY_ALLOW_WIPE === '1') return
+  console.error('  REFUSED: this suite WIPES the connected device. Set KEEPKEY_ALLOW_WIPE=1 on a test device.')
+  process.exit(2)
+}
+
 // ── Runner ───────────────────────────────────────────────────────────
 
 function run(name, fn) {
@@ -117,7 +125,7 @@ function erc20Approve(spender, amount) {
 }
 
 module.exports = {
-  getSdk, assert, assertThrows, summary, run,
+  getSdk, assert, assertThrows, summary, run, requireWipeAllowed,
   ETH_PATH, SOLANA_PATH, CHAINS, SEL,
   toHex, padAddress, padUint256, erc20Transfer, erc20Approve,
 }

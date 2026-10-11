@@ -16,6 +16,7 @@ import { flashWipeReason, type WipeReason } from '../shared/flash-wipe'
 import { EmulatorKeepKeyAdapter } from './emulator-transport'
 import { requestUnlock, isTransportTimeout, UNLOCK_TIMEOUT_MESSAGE } from './pin-unlock'
 import { forceReleaseWebUsb } from './webusb-recovery'
+import type { DeviceFailure } from './device-refusal'
 import { getActiveFlashName, getEmulatorStatus } from './emulator'
 
 const KEEPKEY_VENDOR_ID = 0x2B24 // 11044
@@ -132,6 +133,8 @@ export class EngineController extends EventEmitter {
   // detach is seen during the reboot phase, gating acceptance of the reconnect.
   private sawDetachSinceFlash = false
   private lastState: DeviceState = 'disconnected'
+  /** Last Failure the device sent. hdwallet drops the text of a code-4 Failure. */
+  lastFailure: DeviceFailure | null = null
   private cachedFeatures: any = null
   private latestFirmware = FALLBACK_FIRMWARE
   private latestBootloader = FALLBACK_BOOTLOADER
@@ -271,6 +274,7 @@ export class EngineController extends EventEmitter {
       const code = ev?.message?.code
       const message = ev?.message?.message
       console.warn(`[Engine] Device FAILURE code=${code} message="${message}" (pinAwaitingResult=${this.pinAwaitingResult}, state=${this.lastState})`)
+      this.lastFailure = { code, message, at: Date.now() }
       if (!this.pinAwaitingResult) return
       this.pinAwaitingResult = false
       this.emit('pin-error', { code, message })
