@@ -729,6 +729,28 @@ export interface BuildNameRegTxParams {
 
 // ── Zcash shielded transaction history ──────────────────────────────────
 
+/** Position of one transaction in an operation that takes several. */
+export interface ZcashTxBatch {
+  index: number
+  total: number
+  fee?: number
+  /** TEX steps: "tex-fund" (to the one-time address), "tex-pay", "tex-return" */
+  phase?: string
+}
+
+/** A ZIP-320 TEX payment; mirrors TexRecord in src/bun/txbuilder/zcash-tex.ts */
+export interface ZcashTexPayment {
+  index: number
+  account: number
+  tex: string
+  amount: number
+  status: 'reserved' | 'funded' | 'paid' | 'returned'
+  funding: Array<{ txid: string; vout: number; value: number }>
+  finalTxid?: string
+  error?: string
+  createdAt: number
+}
+
 export interface ZcashTransaction {
   id: number
   value: number            // zatoshis

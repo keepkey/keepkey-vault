@@ -4,6 +4,7 @@
 //! Handles chain scanning, PCZT construction, Halo2 proving, and transaction finalization.
 //! NEVER opens the KeepKey device — Electrobun owns USB exclusively.
 
+mod batching;
 mod pczt_builder;
 mod scanner;
 mod wallet_db;
@@ -35,6 +36,8 @@ struct State {
     pending_shield_pczt: Option<pczt_builder::ShieldPcztState>,
     /// Pending deshield (Orchard → transparent) PCZT state waiting for signatures
     pending_deshield_pczt: Option<pczt_builder::DeshieldPcztState>,
+    /// Pending transparent-only (TEX step 2) transaction waiting for signatures
+    pending_transparent: Option<pczt_builder::TransparentOnlyState>,
     /// Spent-note nullifiers keyed by finalized raw-tx hex — marked spent in
     /// the wallet DB when THAT transaction broadcasts, so the shielded balance
     /// drops immediately instead of double-counting until the next chain scan.
@@ -51,6 +54,7 @@ impl State {
             pending_pczt: None,
             pending_shield_pczt: None,
             pending_deshield_pczt: None,
+            pending_transparent: None,
             pending_spent_notes: Vec::new(),
         }
     }
@@ -63,6 +67,7 @@ impl State {
             pending_pczt: None,
             pending_shield_pczt: None,
             pending_deshield_pczt: None,
+            pending_transparent: None,
             pending_spent_notes: Vec::new(),
         }
     }
@@ -582,6 +587,59 @@ fn record_pending_spent(state: &mut State, raw_tx_hex: String, nullifiers: Vec<[
     }
 }
 
+/// Pick the notes for the next transaction of a payment that may span
+/// several (firmware 7.15 signs at most 16 actions per transaction).
+/// Returns the notes to spend now, what this transaction pays, and the
+/// batch summary the host shows and loops on.
+fn select_next_batch(
+    notes: Vec<wallet_db::SpendableNote>,
+    amount: u64,
+    kind: batching::SpendKind,
+) -> Result<(Vec<wallet_db::SpendableNote>, u64, Value)> {
+    let values: Vec<u64> = notes.iter().map(|n| n.value).collect();
+    let plan = batching::plan_spend(&values, amount, kind).map_err(|e| anyhow::anyhow!(e))?;
+    let step = &plan[0];
+    let selected = step.notes.iter().map(|&i| notes[i].clone()).collect();
+    let batch = serde_json::json!({
+        "total_txs": plan.len(),
+        "pay": step.pay,
+        "fee": step.fee,
+        "remaining_after": amount - step.pay,
+        "fees": plan.iter().map(|s| s.fee).collect::<Vec<_>>(),
+    });
+    Ok((selected, step.pay, batch))
+}
+
+/// `plan_spend`: preview how a payment splits into transactions, without
+/// building anything.
+async fn handle_plan_spend(state: &mut State, params: &Value) -> Result<Value> {
+    let amount = params
+        .get("amount")
+        .and_then(|v| v.as_u64())
+        .ok_or_else(|| anyhow::anyhow!("Missing amount"))?;
+    let kind = match params.get("kind").and_then(|v| v.as_str()) {
+        Some("deshield") => batching::SpendKind::Deshield,
+        Some("shielded") | None => batching::SpendKind::Shielded,
+        Some(other) => return Err(anyhow::anyhow!("Unknown spend kind: {}", other)),
+    };
+    let db = state.ensure_db()?;
+    let max_h = db
+        .last_scanned_height()?
+        .unwrap_or(0)
+        .saturating_sub(MIN_CONFIRMATIONS);
+    let values: Vec<u64> = db
+        .get_spendable_notes_for_pool(Some(max_h), Some(wallet_db::ShieldedPool::Ironwood))?
+        .iter()
+        .map(|n| n.value)
+        .collect();
+    let plan = batching::plan_spend(&values, amount, kind).map_err(|e| anyhow::anyhow!(e))?;
+    Ok(serde_json::json!({
+        "steps": plan.iter().map(|s| serde_json::json!({
+            "n_notes": s.notes.len(), "pay": s.pay, "fee": s.fee, "change": s.change,
+        })).collect::<Vec<_>>(),
+    }))
+}
+
 async fn handle_balance(state: &mut State, _params: &Value) -> Result<Value> {
     let db = state.ensure_db()?;
     let balance = db.get_balance()?;
@@ -600,6 +658,7 @@ async fn handle_balance(state: &mut State, _params: &Value) -> Result<Value> {
         db.get_spendable_notes_for_pool(Some(max_h), Some(wallet_db::ShieldedPool::Ironwood))?;
     let spendable_confirmed: u64 = spendable_notes.iter().map(|n| n.value).sum();
     let spendable_count = spendable_notes.len() as u64;
+    let spendable_values: Vec<u64> = spendable_notes.iter().map(|n| n.value).collect();
 
     // Immature slice: unspent notes still inside the MIN_CONFIRMATIONS window
     // (e.g. change from a just-broadcast unshield). `confirmed` stays the total
@@ -616,6 +675,9 @@ async fn handle_balance(state: &mut State, _params: &Value) -> Result<Value> {
         "notes_unspent": unspent,
         "spendable_confirmed": spendable_confirmed,
         "spendable_notes_count": spendable_count,
+        // Largest send / unshield, across as many transactions as it takes.
+        "max_send": batching::max_spendable(&spendable_values, batching::SpendKind::Shielded),
+        "max_deshield": batching::max_spendable(&spendable_values, batching::SpendKind::Deshield),
         "min_confirmations": MIN_CONFIRMATIONS,
         "synced_to": synced_to,
         "keepkey_release_block": scanner::KEEPKEY_RELEASE_BLOCK,
@@ -685,11 +747,14 @@ async fn handle_build_pczt(state: &mut State, params: &Value) -> Result<Value> {
         return Err(anyhow::anyhow!("No spendable notes — scan first"));
     }
 
+    let (notes, amount, batch) = select_next_batch(notes, amount, batching::SpendKind::Shielded)?;
+
     // Build PCZT with real chain tree data
     let pczt_state = pczt_builder::build_pczt(
         &fvk,
         notes,
         recipient,
+        recipient_str,
         amount,
         account,
         branch_id,
@@ -706,6 +771,7 @@ async fn handle_build_pczt(state: &mut State, params: &Value) -> Result<Value> {
 
     Ok(serde_json::json!({
         "signing_request": signing_request,
+        "batch": batch,
     }))
 }
 
@@ -783,6 +849,7 @@ async fn handle_build_shield_pczt(state: &mut State, params: &Value) -> Result<V
         .ok_or_else(|| anyhow::anyhow!("Missing amount"))?;
     let fee = params.get("fee").and_then(|v| v.as_u64()).unwrap_or(10000);
     let account = params.get("account").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+    let address_path = parse_transparent_path(params.get("address_path"))?;
 
     let mut lwd_client = scanner::LightwalletClient::connect(None).await?;
     let branch_id = lwd_client.get_consensus_branch_id().await?;
@@ -797,6 +864,7 @@ async fn handle_build_shield_pczt(state: &mut State, params: &Value) -> Result<V
         fee,
         account,
         branch_id,
+        address_path,
         &mut lwd_client,
         db,
     )
@@ -906,6 +974,147 @@ async fn handle_finalize_shield(state: &mut State, params: &Value) -> Result<Val
     }))
 }
 
+/// Transparent signing path m/44'/133'/account'/change/index. `change` is 0
+/// (external), 1 (internal) or 2 (ZIP-320 ephemeral). Defaults to the
+/// first external address, the one the shield flow has always used.
+fn parse_transparent_path(v: Option<&Value>) -> Result<Vec<u32>> {
+    const H: u32 = 0x8000_0000;
+    let Some(v) = v else {
+        return Ok(vec![H + 44, H + 133, H, 0, 0]);
+    };
+    let path: Vec<u32> = v
+        .as_array()
+        .ok_or_else(|| anyhow::anyhow!("address_path must be an array"))?
+        .iter()
+        .map(|n| n.as_u64().and_then(|n| u32::try_from(n).ok()))
+        .collect::<Option<_>>()
+        .ok_or_else(|| anyhow::anyhow!("address_path entries must be u32"))?;
+    let valid = path.len() == 5
+        && path[0] == H + 44
+        && path[1] == H + 133
+        && path[2] >= H
+        && path[3] <= 2
+        && path[4] < H;
+    if !valid {
+        return Err(anyhow::anyhow!(
+            "address_path must be m/44'/133'/account'/{{0,1,2}}/index, got {:?}",
+            path
+        ));
+    }
+    Ok(path)
+}
+
+// ── Transparent-only (ZIP-320 TEX step 2) IPC handlers ───────────────────
+
+async fn handle_build_transparent_pczt(state: &mut State, params: &Value) -> Result<Value> {
+    let parse_inputs = || -> Option<Vec<pczt_builder::ShieldTransparentInput>> {
+        params
+            .get("transparent_inputs")?
+            .as_array()?
+            .iter()
+            .map(|i| {
+                Some(pczt_builder::ShieldTransparentInput {
+                    txid: i.get("txid")?.as_str()?.to_string(),
+                    vout: u32::try_from(i.get("vout")?.as_u64()?).ok()?,
+                    value: i.get("value")?.as_u64()?,
+                    script_pubkey: i.get("script_pubkey")?.as_str()?.to_string(),
+                })
+            })
+            .collect()
+    };
+    let parse_outputs = || -> Option<Vec<pczt_builder::DeshieldTransparentOutput>> {
+        params
+            .get("transparent_outputs")?
+            .as_array()?
+            .iter()
+            .map(|o| {
+                Some(pczt_builder::DeshieldTransparentOutput {
+                    value: o.get("value")?.as_u64()?,
+                    script_pubkey: o.get("script_pubkey")?.as_str()?.to_string(),
+                })
+            })
+            .collect()
+    };
+    let inputs = parse_inputs().ok_or_else(|| {
+        anyhow::anyhow!("transparent_inputs needs txid, vout, value, script_pubkey")
+    })?;
+    let outputs = parse_outputs()
+        .ok_or_else(|| anyhow::anyhow!("transparent_outputs needs value, script_pubkey"))?;
+    let address_path = parse_transparent_path(params.get("address_path"))?;
+    let account = params.get("account").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+
+    let mut lwd_client = scanner::LightwalletClient::connect(None).await?;
+    let branch_id = lwd_client.get_consensus_branch_id().await?;
+    let tx = pczt_builder::build_transparent_only(&inputs, &outputs, address_path, branch_id)?;
+
+    let paid: u64 = tx.transparent_outputs.iter().map(|o| o.value).sum();
+    let request = serde_json::json!({
+        "n_actions": 0,
+        "account": account,
+        "branch_id": branch_id,
+        "digests": {
+            "header": hex::encode(tx.digests.header_digest),
+            "transparent": hex::encode(tx.digests.transparent_digest),
+            "orchard": hex::encode(tx.digests.orchard_digest),
+            "ironwood": hex::encode(tx.digests.ironwood_digest),
+        },
+        "header_fields": {
+            "tx_version": 6,
+            "version_group_id": zip229::VERSION_GROUP_ID,
+            "lock_time": 0,
+            "expiry_height": 0,
+        },
+        "actions": [],
+        "transparent_inputs": tx.transparent_signing_inputs.iter().map(|ti| serde_json::json!({
+            "index": ti.index,
+            "address_path": ti.address_path,
+            "amount": ti.amount,
+            "prevout_txid": ti.prevout_txid,
+            "prevout_index": ti.prevout_index,
+            "sequence": ti.sequence,
+            "script_pubkey": ti.script_pubkey,
+        })).collect::<Vec<_>>(),
+        "transparent_outputs": tx.transparent_outputs.iter().enumerate().map(|(i, o)| serde_json::json!({
+            "index": i,
+            "value": o.value,
+            "script_pubkey": hex::encode(&o.script_pubkey),
+        })).collect::<Vec<_>>(),
+        "display": {
+            "amount": format!("{:.8} ZEC", paid as f64 / 1e8),
+            "fee": format!("{:.8} ZEC", tx.fee as f64 / 1e8),
+        },
+    });
+    state.pending_transparent = Some(tx);
+    Ok(request)
+}
+
+async fn handle_finalize_transparent(state: &mut State, params: &Value) -> Result<Value> {
+    let tx = state.pending_transparent.take().ok_or_else(|| {
+        anyhow::anyhow!("No pending transparent transaction — call build_transparent_pczt first")
+    })?;
+    let sigs = params
+        .get("transparent_signatures")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| anyhow::anyhow!("Missing transparent_signatures array"))?
+        .iter()
+        .map(|v| {
+            hex::decode(
+                v.as_str()
+                    .ok_or_else(|| anyhow::anyhow!("signature must be hex"))?,
+            )
+            .map_err(Into::into)
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let pubkey = hex::decode(
+        params
+            .get("compressed_pubkey")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| anyhow::anyhow!("Missing compressed_pubkey"))?,
+    )?;
+    let (raw_tx, txid) = pczt_builder::finalize_transparent_only(&tx, &sigs, &pubkey)?;
+    Ok(serde_json::json!({ "raw_tx": hex::encode(&raw_tx), "txid": txid }))
+}
+
 // ── Deshield (Orchard → transparent) IPC handlers ────────────────────────
 
 async fn handle_build_deshield_pczt(state: &mut State, params: &Value) -> Result<Value> {
@@ -965,6 +1174,8 @@ async fn handle_build_deshield_pczt(state: &mut State, params: &Value) -> Result
         return Err(anyhow::anyhow!("No spendable notes — scan first"));
     }
 
+    let (notes, amount, batch) = select_next_batch(notes, amount, batching::SpendKind::Deshield)?;
+
     // Build the transparent output(s)
     let transparent_output = pczt_builder::DeshieldTransparentOutput {
         script_pubkey: hex::encode(&script_pubkey),
@@ -1003,6 +1214,7 @@ async fn handle_build_deshield_pczt(state: &mut State, params: &Value) -> Result
     let signing_request = serde_json::json!({
         "orchard_signing_request": orchard_json,
         "transparent_outputs": transparent_outputs_json,
+        "batch": batch,
         "display": {
             "amount": format!("{:.8} ZEC", amount as f64 / 1e8),
             "fee": deshield_state.orchard_signing_request.display.fee,
@@ -1641,10 +1853,17 @@ async fn main() {
             "set_fvk" => handle_set_fvk(&mut state, &request.params).await,
             "scan" => handle_scan(&mut state, &request.params).await,
             "balance" => handle_balance(&mut state, &request.params).await,
+            "plan_spend" => handle_plan_spend(&mut state, &request.params).await,
             "build_pczt" => handle_build_pczt(&mut state, &request.params).await,
             "finalize" => handle_finalize(&mut state, &request.params).await,
             "build_shield_pczt" => handle_build_shield_pczt(&mut state, &request.params).await,
             "finalize_shield" => handle_finalize_shield(&mut state, &request.params).await,
+            "build_transparent_pczt" => {
+                handle_build_transparent_pczt(&mut state, &request.params).await
+            }
+            "finalize_transparent" => {
+                handle_finalize_transparent(&mut state, &request.params).await
+            }
             "build_deshield_pczt" => handle_build_deshield_pczt(&mut state, &request.params).await,
             "finalize_deshield" => handle_finalize_deshield(&mut state, &request.params).await,
             "broadcast" => handle_broadcast(&mut state, &request.params).await,
@@ -2235,5 +2454,22 @@ mod tests {
 
         db.reset().unwrap();
         assert!(db.load_fvk().unwrap().is_none());
+    }
+
+    #[test]
+    fn test_transparent_path_allows_ephemeral_change_index() {
+        const H: u32 = 0x8000_0000;
+        let default = parse_transparent_path(None).unwrap();
+        assert_eq!(default, vec![H + 44, H + 133, H, 0, 0]);
+        let eph = serde_json::json!([H + 44, H + 133, H, 2, 7]);
+        assert_eq!(parse_transparent_path(Some(&eph)).unwrap()[3], 2);
+        for bad in [
+            serde_json::json!([H + 44, H + 133, H, 3, 0]),
+            serde_json::json!([H + 44, H + 133, 0, 0, 0]),
+            serde_json::json!([H + 44, H + 133, H, 0]),
+            serde_json::json!([H + 44, H + 0, H, 0, 0]),
+        ] {
+            assert!(parse_transparent_path(Some(&bad)).is_err(), "{}", bad);
+        }
     }
 }

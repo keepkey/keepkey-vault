@@ -2232,6 +2232,28 @@ function maybeStartBackgroundWalletVerification(): void {
 	})()
 }
 
+/** Finish (pay the TEX address) or undo (shield back) a TEX payment
+ *  whose funds sit at a one-time address after a failed step 2. */
+async function texRecovery(action: 'complete' | 'shieldBack', index: number): Promise<{ txid: string }> {
+	if (!zcashPrivacyEnabled) throw new Error('Zcash privacy feature is disabled')
+	if (!engine.wallet) throw new Error('No device connected')
+	await ensureFvkLoaded(engine.wallet, 0)
+	await ensureZcashDeviceMatch(0, true)
+	const signWrap = engine.isEmulator
+		? <T,>(fn: () => Promise<T>) => emuSigningOp(fn, { operation: 'zcashShieldedSend', chain: 'Zcash' }) as Promise<T>
+		: undefined
+	const onProgress = (step: string, batch?: { index: number; total: number; fee?: number; phase?: string }) => {
+		try { rpc.send['send-progress']({ step, batch }) } catch { /* webview not ready */ }
+	}
+	const { payTex, shieldBackTex } = await import("./txbuilder/zcash-tex-send")
+	const result = action === 'complete'
+		? await payTex(engine.wallet as any, index, { signWrap, onProgress })
+		: await shieldBackTex(engine.wallet as any, index, { signWrap, onProgress })
+	try { rpc.send['send-progress']({ step: 'complete', detail: result.txid }) } catch { /* webview not ready */ }
+	schedulePostZcashTxRescans()
+	return { txid: result.txid }
+}
+
 /** After a private tx broadcasts (shield/deshield/z2z), the wallet DB only
  * learns the on-chain truth from scanning the mined block (~75s block time
  * plus propagation). The broadcast already marked spent notes optimistically;
@@ -6620,14 +6642,25 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					}) as Promise<T>
 					: undefined
 				try { rpc.send['send-progress']({ step: 'building' }) } catch { /* webview not ready */ }
-				const onProgress = (step: string) => {
-					try { rpc.send['send-progress']({ step }) } catch { /* webview not ready */ }
+				const onProgress = (step: string, batch?: { index: number; total: number; fee?: number; phase?: string }) => {
+					try { rpc.send['send-progress']({ step, batch }) } catch { /* webview not ready */ }
 				}
-				const result = await sendShielded(engine.wallet as any, {
-					recipient: params.recipient,
-					amount: params.amount,
-					memo: params.memo,
-				}, { signWrap, onProgress })
+				// ZIP-320: a tex1 recipient only accepts transparent funds, so it is
+				// paid in two transactions via a one-time transparent address.
+				const { isTexAddress } = await import("./txbuilder/zcash-tex")
+				const isTex = isTexAddress(params.recipient)
+				if (isTex && params.memo?.trim()) throw new Error('TEX addresses are transparent and cannot receive a memo')
+				const result = isTex
+					? await (await import("./txbuilder/zcash-tex-send")).sendTex(engine.wallet as any, {
+						recipient: params.recipient,
+						amount: params.amount,
+						account,
+					}, { signWrap, onProgress })
+					: await sendShielded(engine.wallet as any, {
+						recipient: params.recipient,
+						amount: params.amount,
+						memo: params.memo,
+					}, { signWrap, onProgress })
 				try { rpc.send['send-progress']({ step: 'complete', detail: result.txid }) } catch { /* webview not ready */ }
 				logZcashShieldedActivity('broadcast', result.txid, params.amount, params.recipient, sessionEpoch)
 				schedulePostZcashTxRescans()
@@ -6654,6 +6687,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					pendingZat: totals.pendingZat,
 					matureCount: totals.matureCount,
 					pendingCount: totals.pendingCount,
+					maxShieldZat: totals.maxShieldZat,
 				}
 			},
 			zcashShieldZec: async (params) => {
@@ -6680,8 +6714,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						operation: 'zcashShieldZec', chain: 'Zcash', value: zecAmount(params.amount),
 					}) as Promise<T>
 					: undefined
-				const onProgress = (step: string) => {
-					try { rpc.send['shield-progress']({ step }) } catch { /* webview not ready */ }
+				const onProgress = (step: string, batch?: { index: number; total: number; fee?: number; phase?: string }) => {
+					try { rpc.send['shield-progress']({ step, batch }) } catch { /* webview not ready */ }
 				}
 				const result = await shieldZec(engine.wallet as any, pioneer, {
 					amount: params.amount,
@@ -6710,8 +6744,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						to: params.recipient, value: zecAmount(params.amount),
 					}) as Promise<T>
 					: undefined
-				const onProgress = (step: string) => {
-					try { rpc.send['deshield-progress']({ step }) } catch { /* webview not ready */ }
+				const onProgress = (step: string, batch?: { index: number; total: number; fee?: number; phase?: string }) => {
+					try { rpc.send['deshield-progress']({ step, batch }) } catch { /* webview not ready */ }
 				}
 				const result = await deshieldZec(engine.wallet as any, {
 					recipient: params.recipient,
@@ -6723,6 +6757,15 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				schedulePostZcashTxRescans()
 				return result
 			},
+
+			// ZIP-320 TEX payments whose funds may sit at a one-time address.
+			zcashTexPayments: async () => {
+				if (!zcashPrivacyEnabled) throw new Error('Zcash privacy feature is disabled')
+				const { listTexPayments } = await import("./txbuilder/zcash-tex-send")
+				return { payments: listTexPayments() }
+			},
+			zcashTexComplete: async (params) => texRecovery('complete', params.index),
+			zcashTexShieldBack: async (params) => texRecovery('shieldBack', params.index),
 
 			zcashGetTransactions: async () => {
 				if (!zcashPrivacyEnabled) throw new Error('Zcash privacy feature is disabled')

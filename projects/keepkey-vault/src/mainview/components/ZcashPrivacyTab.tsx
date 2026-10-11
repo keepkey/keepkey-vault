@@ -12,7 +12,7 @@ import { SaveRecipientDialog } from "./SaveRecipientDialog"
 import { AddressIdenticon } from "./AddressIdenticon"
 import { ZCASH_V2_CSS } from "./zcash-v2-styles"
 import { CHAINS } from "../../shared/chains"
-import type { AddressBookEntry } from "../../shared/types"
+import type { AddressBookEntry, ZcashTexPayment, ZcashTxBatch } from "../../shared/types"
 
 /** CAIP-2 network + native asset CAIP shared by Zcash transparent + shielded
  *  entries. The address book keys recipients off the network; type (private vs
@@ -27,7 +27,7 @@ type ZcashAddrKind = "private" | "transparent"
 function zcashAddrKind(addr: string): ZcashAddrKind | null {
 	const s = addr.trim()
 	if (s.startsWith("u1")) return "private"
-	if (s.startsWith("t1") || s.startsWith("t3")) return "transparent"
+	if (s.startsWith("t1") || s.startsWith("t3") || s.startsWith("tex1")) return "transparent"
 	return null
 }
 
@@ -57,6 +57,8 @@ function validateZcashRecipient(addr: string): { valid: boolean; error?: string 
 	if (s.startsWith('zs1')) return { valid: false, error: 'saplingNotSupported' }
 	const BASE58 = /^[123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz]+$/
 	if ((s.startsWith('t1') || s.startsWith('t3')) && s.length === 35 && BASE58.test(s)) return { valid: true }
+	// ZIP-320 TEX: bech32m over a 20-byte hash. The checksum is verified when sending.
+	if (/^tex1[02-9ac-hj-np-z]{38}$/.test(s)) return { valid: true }
 	return { valid: false, error: 'invalidZcashRecipient' }
 }
 
@@ -160,6 +162,7 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 		confirmed: number; pending: number
 		notes_unspent?: number; spendable_confirmed?: number
 		spendable_notes_count?: number; min_confirmations?: number
+		max_send?: number; max_deshield?: number
 	} | null>(null)
 	const [syncedTo, setSyncedTo] = useState<number | null>(null)
 	const [scanState, setScanState] = useState<ScanState>("idle")
@@ -183,6 +186,14 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 	const [sendResult, setSendResult] = useState<string | null>(null)
 	const [sendError, setSendError] = useState<string | null>(null)
 	const [sendStep, setSendStep] = useState<string | null>(null)
+	// Which transaction of a multi-transaction operation is in flight.
+	const [sendBatch, setSendBatch] = useState<ZcashTxBatch | null>(null)
+	const [shieldBatch, setShieldBatch] = useState<ZcashTxBatch | null>(null)
+	const [deshieldBatch, setDeshieldBatch] = useState<ZcashTxBatch | null>(null)
+	// ZIP-320 payments whose funds wait at a one-time address.
+	const [texPending, setTexPending] = useState<ZcashTexPayment[]>([])
+	const [texBusy, setTexBusy] = useState<number | null>(null)
+	const [texError, setTexError] = useState<string | null>(null)
 	// Fires true whenever the device emits a ButtonRequest mid-signing —
 	// flips the TxFlowStatus headline from "Signing on device" to
 	// "Press the button on your KeepKey". Auto-clears 6s after the last
@@ -212,6 +223,8 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 	const [transparentBalanceZat, setTransparentBalanceZat] = useState<number | null>(null)
 	const [transparentPendingZat, setTransparentPendingZat] = useState<number>(0)
 	const [transparentBalanceLoading, setTransparentBalanceLoading] = useState(false)
+	// Most a shield can move in, after the fee of each 8-input transaction.
+	const [maxShieldZat, setMaxShieldZat] = useState<number | null>(null)
 	const [deshieldAmount, setDeshieldAmount] = useState("")
 	const [deshielding, setDeshielding] = useState(false)
 	const [deshieldResult, setDeshieldResult] = useState<string | null>(null)
@@ -275,22 +288,25 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 		setShowScanner(false)
 	}, [])
 
-	useEffect(() => onRpcMessage("shield-progress", (payload: { step: string; detail?: string }) => {
+	useEffect(() => onRpcMessage("shield-progress", (payload: { step: string; detail?: string; batch?: ZcashTxBatch }) => {
 		setShieldStep(payload.step)
+		if (payload.batch) setShieldBatch(payload.batch)
 		if (payload.step === "complete" && payload.detail) {
 			setShieldResult(payload.detail); setShielding(false); setShieldStep(null)
 		}
 	}), [])
 
-	useEffect(() => onRpcMessage("deshield-progress", (payload: { step: string; detail?: string }) => {
+	useEffect(() => onRpcMessage("deshield-progress", (payload: { step: string; detail?: string; batch?: ZcashTxBatch }) => {
 		setDeshieldStep(payload.step)
+		if (payload.batch) setDeshieldBatch(payload.batch)
 		if (payload.step === "complete" && payload.detail) {
 			setDeshieldResult(payload.detail); setDeshielding(false); setDeshieldStep(null)
 		}
 	}), [])
 
-	useEffect(() => onRpcMessage("send-progress", (payload: { step: string; detail?: string }) => {
+	useEffect(() => onRpcMessage("send-progress", (payload: { step: string; detail?: string; batch?: ZcashTxBatch }) => {
 		setSendStep(payload.step)
+		if (payload.batch) setSendBatch(payload.batch)
 		if (payload.step === "complete" && payload.detail) {
 			setSendResult(payload.detail); setSending(false); setSendStep(null)
 		}
@@ -433,8 +449,9 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 		try {
 			const r = await rpcRequest<{
 				address: string; balanceZat: number; pendingZat: number
-				matureCount: number; pendingCount: number
+				matureCount: number; pendingCount: number; maxShieldZat?: number
 			}>("zcashTransparentBalance", undefined, 20000)
+			setMaxShieldZat(Number.isFinite(r.maxShieldZat) ? r.maxShieldZat! : null)
 			setTransparentBalanceZat(Number.isFinite(r.balanceZat) && r.balanceZat >= 0 ? r.balanceZat : 0)
 			setTransparentPendingZat(Number.isFinite(r.pendingZat) && r.pendingZat >= 0 ? r.pendingZat : 0)
 			if (r.address && !myTransparentAddr) setMyTransparentAddr(r.address)
@@ -538,6 +555,28 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 		return Number(big)
 	}
 
+	const refreshTexPending = useCallback(async () => {
+		try {
+			const r = await rpcRequest<{ payments: ZcashTexPayment[] }>("zcashTexPayments", undefined, 10000)
+			setTexPending(r.payments.filter(p => p.status === "funded"))
+		} catch (e) { console.warn("[ZcashPrivacyTab] failed to load TEX payments:", e) }
+	}, [])
+
+	useEffect(() => {
+		if (status === "ready" && page === "send") refreshTexPending()
+	}, [status, page, refreshTexPending])
+
+	const handleTexRecovery = useCallback(async (index: number, action: "zcashTexComplete" | "zcashTexShieldBack") => {
+		setTexBusy(index); setTexError(null); setSendStep("building")
+		try {
+			const result = await rpcRequest<{ txid: string }>(action, { index }, 600000)
+			setSendResult(result.txid)
+			refreshBalance()
+		} catch (e: any) { setTexError(e.message || "TEX payment failed") }
+		setTexBusy(null); setSendStep(null); setSendBatch(null)
+		refreshTexPending()
+	}, [refreshBalance, refreshTexPending])
+
 	const handleSend = useCallback(async () => {
 		if (!recipient || !amount) return
 		if (recipientValidation && !recipientValidation.valid) {
@@ -555,8 +594,9 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 			setRecipient(""); setAmount(""); setMemo("")
 			refreshBalance()
 		} catch (e: any) { setSendError(e.message || "Send failed") }
-		setSending(false); setSendStep(null)
-	}, [recipient, amount, memo, recipientValidation, refreshBalance, t])
+		setSending(false); setSendStep(null); setSendBatch(null)
+		refreshTexPending()
+	}, [recipient, amount, memo, recipientValidation, refreshBalance, refreshTexPending, t])
 
 	const handleShield = useCallback(async () => {
 		if (!shieldAmount) return
@@ -568,7 +608,7 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 			setShieldResult(result.txid); setShieldAmount("")
 			refreshBalance(); refreshTransparentBalance()
 		} catch (e: any) { setShieldError(e.message || "Shield failed") }
-		setShielding(false); setShieldStep(null)
+		setShielding(false); setShieldStep(null); setShieldBatch(null)
 	}, [shieldAmount, refreshBalance, refreshTransparentBalance])
 
 	const handleDeshield = useCallback(async () => {
@@ -586,7 +626,7 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 			setDeshieldRecipient(""); setDeshieldAmount("")
 			refreshBalance(); refreshTransparentBalance()
 		} catch (e: any) { setDeshieldError(e.message || "Deshield failed") }
-		setDeshielding(false); setDeshieldStep(null)
+		setDeshielding(false); setDeshieldStep(null); setDeshieldBatch(null)
 	}, [deshieldRecipient, deshieldAmount, deshieldRecipientValidation, refreshBalance, refreshTransparentBalance, t])
 
 	const copyAddress = useCallback(() => {
@@ -611,6 +651,7 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 
 	const spendableMaxZatoshis = useMemo(() => {
 		if (!balance) return 0
+		if (balance.max_send != null) return balance.max_send
 		const spendable = balance.spendable_confirmed ?? 0
 		if (spendable <= 0) return 0
 		// ZIP-317: logical_actions = max(n_spends, n_outputs=2); fee = 5000 * max(2, logical_actions)
@@ -625,6 +666,7 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 	// Orchard actions, so fee = 5000 * (max(2, n_spends) + 1).
 	const deshieldMaxZatoshis = useMemo(() => {
 		if (!balance) return 0
+		if (balance.max_deshield != null) return balance.max_deshield
 		const spendable = balance.spendable_confirmed ?? 0
 		if (spendable <= 0) return 0
 		const nSpends = Math.max(1, balance.spendable_notes_count ?? 1)
@@ -639,8 +681,9 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 	const SHIELD_FEE_ZAT = 25_000
 	const shieldMaxZatoshis = useMemo(() => {
 		if (transparentBalanceZat == null) return 0
+		if (maxShieldZat != null) return maxShieldZat
 		return Math.max(0, transparentBalanceZat - SHIELD_FEE_ZAT)
-	}, [transparentBalanceZat])
+	}, [transparentBalanceZat, maxShieldZat])
 
 	const filteredTxs = useMemo(() => {
 		switch (historyFilter) {
@@ -914,7 +957,31 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 									</div>
 								</div>
 
-								<TxFlowStatus step={sendStep} awaitingButton={awaitingButton} kind="send" intent="shielded send" />
+								<TxFlowStatus step={sendStep} batch={sendBatch} awaitingButton={awaitingButton} kind="send" intent="shielded send" />
+								{texPending.length > 0 && (
+									<div className="tex-pending">
+										<div className="tex-pending-title">Unfinished TEX payments</div>
+										<p>These funds left your shielded balance for a one-time address but never reached the TEX recipient. Complete the payment, or shield the funds back.</p>
+										{texPending.map(p => {
+											const held = p.funding.reduce((sum, f) => sum + f.value, 0)
+											return (
+												<div key={p.index} className="tex-pending-row">
+													<div className="tex-pending-info">
+														<span>{formatZec(held)} ZEC → {p.tex.slice(0, 12)}…{p.tex.slice(-6)}</span>
+														{p.error && <span className="tex-pending-error">{p.error}</span>}
+													</div>
+													<button type="button" disabled={texBusy !== null} onClick={() => handleTexRecovery(p.index, "zcashTexComplete")}>
+														{texBusy === p.index ? "Working…" : "Complete payment"}
+													</button>
+													<button type="button" disabled={texBusy !== null} onClick={() => handleTexRecovery(p.index, "zcashTexShieldBack")}>
+														Shield back
+													</button>
+												</div>
+											)
+										})}
+										{texError && <ResultBox kind="err" title="TEX payment" message={texError} />}
+									</div>
+								)}
 
 								{!sending && (
 									<div className="submit-row">
@@ -1041,7 +1108,7 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 										>Max</button>
 									</div>
 								</div>
-								<TxFlowStatus step={shieldStep} awaitingButton={awaitingButton} kind="shield" intent="shield transaction" />
+								<TxFlowStatus step={shieldStep} batch={shieldBatch} awaitingButton={awaitingButton} kind="shield" intent="shield transaction" />
 
 								{!shielding && (
 									<div className="submit-row">
@@ -1127,7 +1194,7 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 										>Max</button>
 									</div>
 								</div>
-								<TxFlowStatus step={deshieldStep} awaitingButton={awaitingButton} kind="unshield" intent="unshield transaction" />
+								<TxFlowStatus step={deshieldStep} batch={deshieldBatch} awaitingButton={awaitingButton} kind="unshield" intent="unshield transaction" />
 
 								{!deshielding && (
 									<div className="submit-row">
@@ -1418,8 +1485,23 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
  *  state is the one users actually need to act on, so it gets the loudest
  *  treatment: full-card takeover with the device illustration and an explicit
  *  "Look at your KeepKey" call. */
-function TxFlowStatus({ step, awaitingButton, kind, intent }: {
+/** "Shielding 3 of 5" — shown when an operation takes several transactions. */
+function batchLabel(kind: "shield" | "unshield" | "send", batch: ZcashTxBatch | null): string | null {
+	if (!batch) return null
+	if (batch.phase === "tex-fund") {
+		return `TEX step 1 of 2: to your one-time address${batch.total > 1 ? ` (${batch.index} of ${batch.total})` : ""}`
+	}
+	if (batch.phase === "tex-pay") return "TEX step 2 of 2: one-time address → TEX recipient"
+	if (batch.phase === "tex-return") return "Shielding the one-time address back"
+	if (batch.total <= 1) return null
+	const verb = kind === "shield" ? "Shielding" : kind === "unshield" ? "Unshielding" : "Sending"
+	return `${verb} ${batch.index} of ${batch.total}`
+}
+
+function TxFlowStatus({ step, batch = null, awaitingButton, kind, intent }: {
 	step: string | null
+	/** Position in a multi-transaction operation, from the progress event */
+	batch?: ZcashTxBatch | null
 	/** True when the device just emitted a ButtonRequest — user must press it now.
 	 *  False when the device is computing silently (proof gen / Orchard sig). */
 	awaitingButton: boolean
@@ -1436,8 +1518,15 @@ function TxFlowStatus({ step, awaitingButton, kind, intent }: {
 		{ id: "broadcasting", label: "Broadcasting" },
 	]
 	const activeIdx = steps.findIndex(s => s.id === step)
+	const label = batchLabel(kind, batch)
 	return (
 		<div className={`tx-flow tx-flow-${accent}`}>
+			{label && (
+				<div className="tx-flow-batch">
+					{label}
+					{batch?.fee != null && <span> · fee {formatZec(batch.fee)} ZEC</span>}
+				</div>
+			)}
 			<div className="tx-flow-stepper">
 				{steps.map((s, i) => {
 					const state = i < activeIdx ? "done" : i === activeIdx ? "active" : "pending"
