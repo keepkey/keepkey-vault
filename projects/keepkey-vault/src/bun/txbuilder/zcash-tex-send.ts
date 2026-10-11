@@ -144,6 +144,7 @@ export async function sendTex(
 			outputAddressN: path,
 			onBroadcast: f => updateRecord(index, { status: "funded", funding: [...findRecord(index).funding, f] }),
 		})
+		if (funded.unsentZat) throw new Error(`Funding stopped ${funded.unsentZat} ZAT short: ${funded.unsentReason}`)
 		const paid = await payTex(wallet, index, opts)
 		return { txid: paid.txid, fundingTxids: funded.txids, ephemeralIndex: index }
 	} catch (e: any) {

@@ -94,6 +94,11 @@ function formatZec(zatoshis: number): string {
 	return (zatoshis / 1e8).toFixed(8).replace(/0+$/, "").replace(/\.$/, "") || "0"
 }
 
+function partialSendMessage(requestedZat: number, unsentZat: number, reason?: string): string {
+	return `Only ${formatZec(requestedZat - unsentZat)} of ${formatZec(requestedZat)} ZEC was sent. `
+		+ `${formatZec(unsentZat)} ZEC was not sent${reason ? `: ${reason}` : ""}. The amount field now holds what is left.`
+}
+
 // Each tab gets a small SVG glyph + accent color so the nav reads at a glance.
 // Colors are pulled from the design palette: gold = primary, green = inbound,
 // copper = outbound, blue/violet/teal for navigation actions.
@@ -588,10 +593,14 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 			const zatoshis = parseZatoshis(amount)
 			if (memo && new TextEncoder().encode(memo).length > 512) throw new Error(t("memoTooLong"))
 			// 10-min timeout — Halo 2 proof + on-device Orchard signing can run >60s
-			const result = await rpcRequest<{ txid: string }>("zcashShieldedSend",
+			const result = await rpcRequest<{ txid: string; unsentZat?: number; unsentReason?: string }>("zcashShieldedSend",
 				{ recipient, amount: zatoshis, memo: memo || undefined }, 600000)
 			setSendResult(result.txid)
-			setRecipient(""); setAmount(""); setMemo("")
+			if (result.unsentZat) {
+				// Part went out. Leave only the remainder, so sending again cannot pay twice.
+				setAmount(formatZec(result.unsentZat))
+				setSendError(partialSendMessage(zatoshis, result.unsentZat, result.unsentReason))
+			} else { setRecipient(""); setAmount(""); setMemo("") }
 			refreshBalance()
 		} catch (e: any) { setSendError(e.message || "Send failed") }
 		setSending(false); setSendStep(null); setSendBatch(null)
@@ -620,10 +629,13 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 		setDeshielding(true); setDeshieldError(null); setDeshieldResult(null); setDeshieldStep("building")
 		try {
 			const zatoshis = parseZatoshis(deshieldAmount)
-			const result = await rpcRequest<{ txid: string }>("zcashDeshieldZec",
+			const result = await rpcRequest<{ txid: string; unsentZat?: number; unsentReason?: string }>("zcashDeshieldZec",
 				{ recipient: deshieldRecipient, amount: zatoshis }, 600000)
 			setDeshieldResult(result.txid)
-			setDeshieldRecipient(""); setDeshieldAmount("")
+			if (result.unsentZat) {
+				setDeshieldAmount(formatZec(result.unsentZat))
+				setDeshieldError(partialSendMessage(zatoshis, result.unsentZat, result.unsentReason))
+			} else { setDeshieldRecipient(""); setDeshieldAmount("") }
 			refreshBalance(); refreshTransparentBalance()
 		} catch (e: any) { setDeshieldError(e.message || "Deshield failed") }
 		setDeshielding(false); setDeshieldStep(null); setDeshieldBatch(null)

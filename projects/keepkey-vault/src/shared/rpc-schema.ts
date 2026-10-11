@@ -205,7 +205,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       // A payment that needs more notes than one transaction can spend is sent
       // as several; `txids` lists them all, `txid` is the last. A tex1
       // recipient (ZIP-320) is paid via a one-time transparent address.
-      zcashShieldedSend: { params: { recipient: string; amount: number; memo?: string }; response: { txid: string; txids?: string[] } }
+      zcashShieldedSend: { params: { recipient: string; amount: number; memo?: string }; response: { txid: string; txids?: string[]; unsentZat?: number; unsentReason?: string } }
       zcashShieldZec: { params: { amount: number; account?: number }; response: { txid: string; txids: string[] } }
       // Confirmed UTXO total at the user's first-receive t-addr — the only address
       // shieldZec sweeps. Use this (not chain-level getBalance, which sums the
@@ -217,7 +217,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
         params: { account?: number } | void
         response: { address: string; balanceZat: number; pendingZat: number; matureCount: number; pendingCount: number; maxShieldZat: number }
       }
-      zcashDeshieldZec: { params: { recipient: string; amount: number; account?: number }; response: { txid: string; txids: string[] } }
+      zcashDeshieldZec: { params: { recipient: string; amount: number; account?: number }; response: { txid: string; txids: string[]; unsentZat?: number; unsentReason?: string } }
       // ZIP-320 TEX payments. `funded` ones hold funds at a one-time address
       // after a failed step 2: complete them or shield the funds back.
       zcashTexPayments: { params: void; response: { payments: ZcashTexPayment[] } }
