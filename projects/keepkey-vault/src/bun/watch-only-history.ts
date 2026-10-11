@@ -22,7 +22,7 @@ export function watchOnlyBitcoinScope(deviceId: string, pubkeys: Array<{ chainId
 export function cachedHistoryQueries(chain: ChainDef, balances: ChainBalance[], pubkeys: Array<{
   chainId: string; address: string; xpub: string; path: string; scriptType: string
 }>) {
-  const cached = pubkeys.filter(p => p.chainId === chain.id)
+  const cached = [...pubkeys.filter(p => p.chainId === chain.id), ...balances.filter(b => b.chainId === chain.id).flatMap(b => (b.breakdown || []).filter(p => p.xpub).map(p => ({ ...p, chainId: chain.id, address: '' })))]
   const queries = chain.chainFamily === 'utxo'
     ? cached.filter(p => p.xpub).map(p => ({ caip: chain.caip, pubkey: utxoDiscoveryKey(p.xpub, p.scriptType || chain.scriptType || 'p2pkh'), label: 'cached account', path: p.path, scriptType: p.scriptType }))
     : [...cached.map(p => p.address), ...balances.filter(b => b.chainId === chain.id).map(b => b.address)]
