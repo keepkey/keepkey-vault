@@ -121,6 +121,22 @@ export async function initializeOrchardFromSeed(seedHex: string, account: number
 export const initializeOrchard = initializeOrchardFromSeed
 
 /**
+ * Read the Orchard viewing key from the device.
+ *
+ * Firmware 7.15+ asks for a button press on every export ("Export Zcash View
+ * Key"). The emulator has no button, so its window must offer Confirm/Reject
+ * or the request waits forever. Every export goes through here.
+ */
+export async function exportOrchardFvk(wallet: any, account: number = 0): Promise<any> {
+	const read = () => wallet.zcashGetOrchardFVK(account)
+	// Only the emulator's transport lets the host answer a button request.
+	const delegate = wallet.transport?.delegate
+	if (!delegate || !("onButtonRequest" in delegate)) return read()
+	const { emuInteractiveConfirm } = await import("../emulator-window")
+	return emuInteractiveConfirm(read, { operation: "zcashExportViewingKey", opLabel: "Export Zcash View Key", chain: "Zcash" }, delegate)
+}
+
+/**
  * Initialize Orchard from device-exported FVK.
  *
  * This is the production path — the seed never leaves the device.
@@ -146,7 +162,7 @@ export async function initializeOrchardFromDevice(wallet: any, account: number =
 
 	// Request FVK from device — device derives internally, seed never leaves
 	console.log("[zcash-shielded] Requesting Orchard FVK from device...")
-	const deviceResult = await wallet.zcashGetOrchardFVK(account)
+	const deviceResult = await exportOrchardFvk(wallet, account)
 	const { ak, nk, rivk } = deviceResult
 
 	if (!ak || !nk || !rivk) {

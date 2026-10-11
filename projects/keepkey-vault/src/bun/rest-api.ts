@@ -15,7 +15,7 @@ import { getEvmSimulationEndpoint } from './evm-simulation-config'
 import { versionCompare } from '../shared/firmware-versions'
 import { isBitcoinOnlyVariant, DEFAULT_AUTO_LOCK_MS } from '../shared/flags'
 import {
-  initializeOrchardFromDevice, scanOrchardNotes, getShieldedBalance,
+  initializeOrchardFromDevice, exportOrchardFvk, scanOrchardNotes, getShieldedBalance,
   buildShieldedTx, finalizeShieldedTx, broadcastShieldedTx,
   ensureFvkLoaded, displayOrchardAddressOnDevice, sendShielded,
 } from './txbuilder/zcash-shielded'
@@ -4977,7 +4977,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             throw new HttpError(400, 'Device firmware does not support Orchard FVK export')
           }
           const cached = getCachedFvk()
-          const deviceFvk = await (wallet as any).zcashGetOrchardFVK(0)
+          const deviceFvk = await exportOrchardFvk(wallet, 0)
           const deviceAk = Buffer.from(deviceFvk.ak).toString('hex')
           const cachedAk = cached?.fvk?.ak ?? null
           const match = !!cachedAk && cachedAk.toLowerCase() === deviceAk.toLowerCase()

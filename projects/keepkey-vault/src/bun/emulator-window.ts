@@ -920,7 +920,7 @@ function buildEmulatorHTML(bridgePort: number): string {
     console.log('[emu-ui] Confirm request: op=' + details.operation + ' id=' + details.id);
     currentConfirmId = details.id;
     var opName = details.opLabel || details.operation
-      .replace(/([A-Z])/g, ' $$1').replace(/^ /, '')
+      .replace(/([A-Z])/g, ' $1').replace(/^ /, '')
       .replace('Sign Tx', 'Sign Transaction')
       .replace('Get Address', 'Verify Address');
     var html = '<div class="op-label">' + esc(opName) + '</div>';
