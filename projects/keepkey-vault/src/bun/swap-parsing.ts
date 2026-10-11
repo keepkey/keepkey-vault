@@ -677,7 +677,7 @@ export function swapDepositFindings(provider: string | undefined): SwapReportLin
 /**
  * What NEAR Intents itself has on record for a deposit address (1Click
  * /v0/status?depositAddress=…), as report lines; `status` is undefined when it
- * could not be read. The address reaches Desktop through Pioneer; this is the
+ * could not be read and null when NEAR Intents does not know the address. The address reaches Desktop through Pioneer; this is the
  * second, independent source. Amounts and assets are not compared here.
  */
 export function nearIntentsDepositFindings(
@@ -690,6 +690,10 @@ export function nearIntentsDepositFindings(
   const findings: SwapReportLine[] = []
   const limitations: SwapReportLine[] = []
   const danger = (code: string, message: string) => { findings.push({ code, message, severity: 'danger' }) }
+  if (status === null) {
+    danger('NEAR_INTENTS_UNKNOWN_ADDRESS', 'NEAR Intents does not know this deposit address. Do not sign.')
+    return { findings, limitations }
+  }
   const request = status?.quoteResponse?.quoteRequest
   const quote = status?.quoteResponse?.quote
   if (!request || !quote?.depositAddress) {

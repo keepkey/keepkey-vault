@@ -7930,6 +7930,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 								try {
 									const response = await fetch(`https://1click.chaindefuser.com/v0/status?depositAddress=${encodeURIComponent(depositAddress)}`, { signal: AbortSignal.timeout(8000) })
 									if (response.ok) status = await response.json()
+									// Asked and answered: NEAR Intents has no such deposit address.
+									else if (response.status === 404) status = null
 								} catch { /* reported as unconfirmed */ }
 								const near = nearIntentsDepositFindings(status, { depositAddress, from, recipient: params.toAddressOverride })
 								lines.findings.push(...near.findings)

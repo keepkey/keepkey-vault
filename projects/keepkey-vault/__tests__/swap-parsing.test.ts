@@ -955,6 +955,12 @@ describe('swap deposit address on the report card', () => {
     expect(r.findings[0].code).toBe('NEAR_INTENTS_CONFIRMED')
   })
 
+  test('an address NEAR Intents does not know is a danger line, not "could not be asked"', () => {
+    const r = nearIntentsDepositFindings(null, expected)
+    expect(r.findings).toEqual([{ code: 'NEAR_INTENTS_UNKNOWN_ADDRESS', message: 'NEAR Intents does not know this deposit address. Do not sign.', severity: 'danger' }])
+    expect(r.limitations).toEqual([])
+  })
+
   test('no answer from NEAR Intents is said plainly, never read as a confirmation', () => {
     const r = nearIntentsDepositFindings(undefined, expected)
     expect(r.findings).toEqual([])
