@@ -28,7 +28,7 @@ seed, and verifies the device derives the same ETH address an independent librar
 **Run:**
 ```
 cd projects/keepkey-sdk
-KEEPKEY_API_KEY=<key> node tests/run-all.js recovery
+KEEPKEY_ALLOW_WIPE=1 KEEPKEY_API_KEY=<key> node tests/run-all.js recovery
 # or a single file after `npm run build`:  node tests/recovery/load-verify.js
 ```
 (Vault must be serving the REST API on `localhost:1646`.)
