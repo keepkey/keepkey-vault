@@ -232,6 +232,7 @@ import { isBitcoinOnlyVariant } from "../shared/flags"
 import { bitcoinOnlyActivityList, bitcoinOnlyAddressBookHistoryList, bitcoinOnlyBalanceList, bitcoinOnlyChainList, bitcoinOnlyLedgerJournalList, bitcoinOnlyLedgerSummaryList, bitcoinOnlyPendingSigningRejection, bitcoinOnlyReportAllowed, bitcoinOnlyWatchOnlyScope, enforceBitcoinOnlyRpcBoundary } from "./bitcoin-only-boundary"
 import { assertOnline } from "./offline-policy"
 import { setPerfTelemetryOffline } from "./perf-telemetry"
+import { createUiWatchdog } from "./ui-watchdog"
 import { fetchDefiPositions } from "./zerion"
 import { loadSupportedChains } from "../shared/swap-support-matrix"
 import { PioneerSocket } from "./pioneer-socket"
@@ -2684,6 +2685,8 @@ async function deriveChainAddress(wallet: any, chain: ChainDef): Promise<string 
 
 // ── RPC Bridge (Electrobun UI ↔ Bun) ─────────────────────────────────
 
+const uiWatchdog = createUiWatchdog({ timeoutMs: 30_000, log: console.log, error: console.error })
+
 const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 	maxRequestTime: 1_800_000, // 30 minutes — generous for device-interactive ops, but not infinite
 	handlers: {
@@ -2692,7 +2695,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 		// scripts/patch-electrobun.sh, which normalizes them), so handlers here
 		// may throw device failures without hanging the renderer.
 		requests: enforceBitcoinOnlyRpcBoundary(
-			() => isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant),
+			// Runs ahead of every UI request, so it is also where the UI's first
+			// contact is recorded (see ui-watchdog.ts).
+			() => { uiWatchdog.seen(); return isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant) },
 			{
 			// ── Device lifecycle ──────────────────────────────────────
 			getDeviceState: async () => engine.getDeviceState(),
@@ -9989,6 +9994,7 @@ const mainWindow = new BrowserWindow({
 	},
 })
 _mainWindow = mainWindow
+uiWatchdog.start()
 
 // Set window icon on Windows via Win32 API (SendMessage WM_SETICON).
 // Electrobun's setWindowIcon is a no-op on Windows (stub in nativeWrapper.cpp).
