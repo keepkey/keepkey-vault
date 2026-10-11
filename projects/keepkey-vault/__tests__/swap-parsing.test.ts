@@ -12,6 +12,7 @@ import {
   parseQuoteResponse,
   parseAssetsResponse,
   nearIntentsDepositFindings,
+  nearIntentsSaysUnknownAddress,
   swapDepositAddressFromTx,
   swapDepositFindings,
 } from '../src/bun/swap-parsing'
@@ -953,6 +954,19 @@ describe('swap deposit address on the report card', () => {
   test('a Bitcoin Cash address matches with or without its prefix', () => {
     const r = nearIntentsDepositFindings(status({ recipient: 'qpm2qsznhks23z7629mms6s4cwef74vcwvy22gdx6a' }), { ...expected, recipient: 'bitcoincash:qpm2qsznhks23z7629mms6s4cwef74vcwvy22gdx6a' })
     expect(r.findings[0].code).toBe('NEAR_INTENTS_CONFIRMED')
+  })
+
+  test('an address NEAR Intents does not know is a danger line, not "could not be asked"', () => {
+    const r = nearIntentsDepositFindings(null, expected)
+    expect(r.findings).toEqual([{ code: 'NEAR_INTENTS_UNKNOWN_ADDRESS', message: 'NEAR Intents does not know this deposit address. Do not sign.', severity: 'danger' }])
+    expect(r.limitations).toEqual([])
+  })
+
+  test('only the "address not found" 404 counts as an answer (both bodies are real, 2026-10-11)', () => {
+    expect(nearIntentsSaysUnknownAddress(404, { message: 'Deposit address 0x1111111111111111111111111111111111111111 not found', error: 'Not Found', statusCode: 404 })).toBe(true)
+    expect(nearIntentsSaysUnknownAddress(404, { message: 'Cannot GET /v0/statusX?depositAddress=0x1111111111111111111111111111111111111111', error: 'Not Found', statusCode: 404 })).toBe(false)
+    expect(nearIntentsSaysUnknownAddress(404, undefined)).toBe(false)
+    expect(nearIntentsSaysUnknownAddress(500, { message: 'Deposit address 0x11 not found' })).toBe(false)
   })
 
   test('no answer from NEAR Intents is said plainly, never read as a confirmation', () => {
