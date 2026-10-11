@@ -65,12 +65,23 @@ export interface ClearSignReport {
 
 /**
  * Whether a report has anything the user must read. A transaction the KeepKey
- * shows in full (P4/P5) with no danger line is simply clear: the app's own
+ * shows in full (P4/P5) with nothing to add is simply clear: the app's own
  * swap screen leaves the report out and lets the device speak.
+ *
+ * Kept visible: any red line (finding or limitation), a risk line of medium or
+ * above (an off-chain order, a standing approval), a contract rated high or
+ * critical, and an independent check that could not run. Not kept: the notes
+ * every swap carries (assets leave the wallet, a deposit address has no owner
+ * the device can check).
  */
-export function clearSignReportNeedsAttention(report: Pick<ClearSignReport, 'protectionLevel' | 'findings'>): boolean {
-  return !(report.protectionLevel === 'P4' || report.protectionLevel === 'P5')
-    || report.findings.some((finding) => finding.severity === 'danger')
+export function clearSignReportNeedsAttention(
+  report: Pick<ClearSignReport, 'protectionLevel' | 'findings' | 'limitations' | 'rating'>,
+): boolean {
+  if (report.protectionLevel !== 'P4' && report.protectionLevel !== 'P5') return true
+  if ([...report.findings, ...report.limitations].some((line) => line.severity === 'danger')) return true
+  if (report.findings.some((line) => line.code === 'RISK_MEDIUM')) return true
+  if (report.limitations.some((line) => line.code === 'NEAR_INTENTS_UNCONFIRMED')) return true
+  return report.rating?.riskLevel === 'high' || report.rating?.riskLevel === 'critical'
 }
 
 const LEVEL_ORDER: ClearSignProtectionLevel[] = ['P0', 'P1', 'P2', 'P3', 'P4', 'P5']
