@@ -1670,7 +1670,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 								Use your existing Chrome profile with an agent. Install and pair the extension, enable its Agent Mode, then paste this prompt into your local agent. The prompt contains no credentials.
 							</Text>
 							<Flex gap="2" mt="3" flexWrap="wrap">
-								<Button size="sm" variant="outline" onClick={async () => {
+								<Button size="sm" variant="outline" borderColor="rgba(233,196,106,0.45)" color="kk.gold" onClick={async () => {
 									try {
 										await navigator.clipboard.writeText(BROWSER_AGENT_PROMPT)
 										setBrowserPromptStatus("Copied. Paste into your local agent and describe your task.")
@@ -1678,8 +1678,8 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 										setBrowserPromptStatus("Clipboard unavailable. Open the browser-use guide and copy the prompt there.")
 									}
 								}}>Copy browser-use prompt</Button>
-								<Button size="sm" variant="ghost" onClick={() => rpcRequest("openUrl", { url: BROWSER_EXTENSION_URL }).catch(() => setBrowserPromptStatus("Could not open Chrome Web Store. Use the install link in the guide."))}>Install Chrome extension</Button>
-								<Button size="sm" variant="ghost" onClick={() => rpcRequest("openUrl", { url: BROWSER_AGENT_DOCS_URL }).catch(() => setBrowserPromptStatus("Open docs.keepkey.com/docs/bex/mcp in your browser."))}>Browser-use guide</Button>
+								<Button size="sm" variant="ghost" color="kk.textSecondary" onClick={() => rpcRequest("openUrl", { url: BROWSER_EXTENSION_URL }).catch(() => setBrowserPromptStatus("Could not open Chrome Web Store. Use the install link in the guide."))}>Install Chrome extension</Button>
+								<Button size="sm" variant="ghost" color="kk.textSecondary" onClick={() => rpcRequest("openUrl", { url: BROWSER_AGENT_DOCS_URL }).catch(() => setBrowserPromptStatus("Open docs.keepkey.com/docs/bex/mcp in your browser."))}>Browser-use guide</Button>
 							</Flex>
 							{browserPromptStatus && <Text role="status" fontSize="sm" color="kk.textSecondary" mt="2">{browserPromptStatus}</Text>}
 						</Box>
