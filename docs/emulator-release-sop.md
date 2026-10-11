@@ -34,11 +34,11 @@ marking a release candidate ready.
 ## Release identity
 
 For the current Vault release train, the approved emulator release is
-`7.16.0`. The complete artifact set is:
+`7.17.0`. The complete artifact set is:
 
 - `libkkemu.dylib` — universal macOS `arm64` + `x86_64`
 - `libkkemu.dll` — Windows `x86_64`
-- CI handoff name: `emulator-build-input-libkkemu-7.16.0-win-x64.dll`
+- CI handoff name: `emulator-build-input-libkkemu-7.17.0-win-x64.dll`
 
 The expected emulator release must be declared by the Vault release branch and
 must agree with the CI artifact name and the runtime version reported by the
@@ -114,7 +114,7 @@ Smoke-test the packaged app with all user-installed emulator overrides removed
 or moved aside so the bundled library is necessarily selected:
 
 - Add an emulator without installing a library and confirm it reports emulator
-  release `7.16.0`.
+  release `7.17.0`.
 - Create or recover a wallet and confirm OLED preview updates.
 - Stop and reopen the emulator; encrypted flash must persist.
 - Run a certified ETH→SOL ClearSign swap with labelled review and no Advanced

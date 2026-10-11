@@ -24,7 +24,7 @@ BUILD_DIR="$FW_DIR/build-emu-win"
 TOOLCHAIN_FILE="cmake/toolchains/mingw-w64-x86_64.cmake"
 TC_CACHE="$HOME/.keepkey/emulator/.toolchain"
 PROTOC_VERSION=21.12
-EXPECTED_VERSION="${EMU_EXPECTED_VERSION:-7.16.0}"
+EXPECTED_VERSION="${EMU_EXPECTED_VERSION:-7.17.0}"
 STAGE_DIR="$REPO_ROOT/projects/keepkey-vault/emulator-bundle"
 PROTOC_WRAPPER="$REPO_ROOT/scripts/protoc-nanopb-compat.sh"
 

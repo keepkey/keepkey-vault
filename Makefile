@@ -892,7 +892,7 @@ help:
 	@echo "  make preflight      - Pre-release validation (pins, CI, builds, typecheck)"
 	@echo ""
 	@echo "Emulator:"
-	@echo "  make build-emulator-release - Build + audit bundled 7.16 macOS universal and Windows x64 libraries"
+	@echo "  make build-emulator-release - Build + audit bundled 7.17 macOS universal and Windows x64 libraries"
 	@echo "  make build-emulator        - Build kkemu+libkkemu from current firmware submodule checkout"
 	@echo "                               and install to ~/.keepkey/emulator/"
 	@echo "  make test-emu-python       - Run python-keepkey UDP tests against the installed kkemu"
@@ -914,7 +914,7 @@ preflight: submodules
 	done; \
 	echo ""; \
 	echo "2. CERTIFIED EMULATOR ARTIFACTS"; \
-	if node scripts/verify-certified-emulator.mjs >/dev/null 2>&1; then echo "   ✅ certified emulator 7.16.0 hashes and ABI"; \
+	if node scripts/verify-certified-emulator.mjs >/dev/null 2>&1; then echo "   ✅ certified emulator 7.17.0 hashes and ABI"; \
 	else echo "   ❌ certified emulator artifacts missing or invalid — run scripts/stage-certified-emulator.sh <artifact-dir>"; fail=1; fi; \
 	echo ""; \
 	echo "3. CANONICAL BRANCHES"; \
