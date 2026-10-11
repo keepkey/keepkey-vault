@@ -2205,7 +2205,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const body = await parseRequest(req, S.AddressRequest)
           const cacheKey = scopedKey(engine, 'cosmos', body, wallet)
           const cached = addressCache.get(cacheKey)
-          if (cached) return json({ address: cached })
+          // A request to show the address must reach the device, never the cache.
+          if (cached && !body.show_display) return json({ address: cached })
           const sd = showDisplay(body.show_display)
           const result = await emuWrap(() => wallet.cosmosGetAddress({
             addressNList: body.address_n,
@@ -2223,7 +2224,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const body = await parseRequest(req, S.AddressRequest)
           const cacheKey = scopedKey(engine, 'osmo', body, wallet)
           const cached = addressCache.get(cacheKey)
-          if (cached) return json({ address: cached })
+          // A request to show the address must reach the device, never the cache.
+          if (cached && !body.show_display) return json({ address: cached })
           const sd = showDisplay(body.show_display)
           const result = await emuWrap(() => wallet.osmosisGetAddress({
             addressNList: body.address_n,
@@ -2241,7 +2243,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const body = await parseRequest(req, S.AddressRequest)
           const cacheKey = scopedKey(engine, 'eth', body, wallet)
           const cached = addressCache.get(cacheKey)
-          if (cached) return json({ address: cached })
+          // A request to show the address must reach the device, never the cache.
+          if (cached && !body.show_display) return json({ address: cached })
           const sd = showDisplay(body.show_display)
           const result = await emuWrap(() => wallet.ethGetAddress({
             addressNList: body.address_n,
@@ -2259,7 +2262,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const body = await parseRequest(req, S.AddressRequest)
           const cacheKey = scopedKey(engine, 'tendermint', body, wallet)
           const cached = addressCache.get(cacheKey)
-          if (cached) return json({ address: cached })
+          // A request to show the address must reach the device, never the cache.
+          if (cached && !body.show_display) return json({ address: cached })
           const sd = showDisplay(body.show_display)
           const result = await emuWrap(() => wallet.cosmosGetAddress({
             addressNList: body.address_n,
@@ -2277,7 +2281,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const body = await parseRequest(req, S.AddressRequest)
           const cacheKey = scopedKey(engine, 'thor', body, wallet)
           const cached = addressCache.get(cacheKey)
-          if (cached) return json({ address: cached })
+          // A request to show the address must reach the device, never the cache.
+          if (cached && !body.show_display) return json({ address: cached })
           const sd = showDisplay(body.show_display)
           const result = await emuWrap(() => wallet.thorchainGetAddress({
             addressNList: body.address_n,
@@ -2295,7 +2300,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const body = await parseRequest(req, S.AddressRequest)
           const cacheKey = scopedKey(engine, 'maya', body, wallet)
           const cached = addressCache.get(cacheKey)
-          if (cached) return json({ address: cached })
+          // A request to show the address must reach the device, never the cache.
+          if (cached && !body.show_display) return json({ address: cached })
           const sd = showDisplay(body.show_display)
           const result = await emuWrap(() => wallet.mayachainGetAddress({
             addressNList: body.address_n,
@@ -2313,7 +2319,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const body = await parseRequest(req, S.AddressRequest)
           const cacheKey = scopedKey(engine, 'xrp', body, wallet)
           const cached = addressCache.get(cacheKey)
-          if (cached) return json({ address: cached })
+          // A request to show the address must reach the device, never the cache.
+          if (cached && !body.show_display) return json({ address: cached })
           const sd = showDisplay(body.show_display)
           const result = await emuWrap(() => wallet.rippleGetAddress({
             addressNList: body.address_n,
@@ -2333,7 +2340,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const body = await parseRequest(req, S.AddressRequest)
           const cacheKey = scopedKey(engine, 'sol', body, wallet)
           const cached = addressCache.get(cacheKey)
-          if (cached) return json({ address: cached })
+          // A request to show the address must reach the device, never the cache.
+          if (cached && !body.show_display) return json({ address: cached })
           const sd = showDisplay(body.show_display)
           const result = await emuWrap(() => wallet.solanaGetAddress({
             addressNList: body.address_n,
@@ -2353,7 +2361,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const body = await parseRequest(req, S.AddressRequest)
           const cacheKey = scopedKey(engine, 'trx', body, wallet)
           const cached = addressCache.get(cacheKey)
-          if (cached) return json({ address: cached })
+          // A request to show the address must reach the device, never the cache.
+          if (cached && !body.show_display) return json({ address: cached })
           const sd = showDisplay(body.show_display)
           const result = await emuWrap(() => wallet.tronGetAddress({
             addressNList: body.address_n,
@@ -2373,7 +2382,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const body = await parseRequest(req, S.AddressRequest)
           const cacheKey = scopedKey(engine, 'ton', body, wallet)
           const cached = addressCache.get(cacheKey)
-          if (cached) return json({ address: cached })
+          // A request to show the address must reach the device, never the cache.
+          if (cached && !body.show_display) return json({ address: cached })
           const sd = showDisplay(body.show_display)
           const result = await emuWrap(() => wallet.tonGetAddress({
             addressNList: body.address_n,
@@ -2396,7 +2406,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const body = await parseRequest(req, S.AddressRequest)
           const cacheKey = scopedKey(engine, 'hive', body, wallet)
           const cached = addressCache.get(cacheKey)
-          if (cached) return json({ address: cached })
+          // A request to show the address must reach the device, never the cache.
+          if (cached && !body.show_display) return json({ address: cached })
           const sd = showDisplay(body.show_display)
           const result = await emuWrap(() => (wallet as any).hiveGetPublicKey({
             addressNList: body.address_n,
@@ -3770,7 +3781,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const body = await parseRequest(req, S.GetPublicKeyRequest)
           const cacheKey = scopedKey(engine, 'pubkey', body, wallet)
           const cached = pubkeyCache.get(cacheKey)
-          if (cached) return json(cached)
+          // A request to show the key must reach the device, never the cache.
+          if (cached && !body.show_display) return json(cached)
           const sd = showDisplay(body.show_display)
           const result = await emuWrap(() => wallet.getPublicKeys([{
             addressNList: body.address_n,
