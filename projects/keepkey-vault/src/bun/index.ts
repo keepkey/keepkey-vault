@@ -6627,7 +6627,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						memo: params.memo,
 					}, { signWrap, onProgress })
 				try { rpc.send['send-progress']({ step: 'complete', detail: result.txid }) } catch { /* webview not ready */ }
-				logZcashShieldedActivity('broadcast', result.txid, params.amount, params.recipient, sessionEpoch)
+				// A split send that stopped part-way still moved money: record what was sent.
+				const unsentZat = (result as { unsentZat?: number }).unsentZat ?? 0
+				logZcashShieldedActivity('broadcast', result.txid, params.amount - unsentZat, params.recipient, sessionEpoch)
 				schedulePostZcashTxRescans()
 				return result
 			},
@@ -6718,7 +6720,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					account,
 				}, { signWrap, onProgress })
 				try { rpc.send['deshield-progress']({ step: 'complete', detail: result.txid }) } catch { /* webview not ready */ }
-				logZcashShieldedActivity('unshield', result.txid, params.amount, params.recipient, sessionEpoch)
+				logZcashShieldedActivity('unshield', result.txid, params.amount - (result.unsentZat ?? 0), params.recipient, sessionEpoch)
 				schedulePostZcashTxRescans()
 				return result
 			},
