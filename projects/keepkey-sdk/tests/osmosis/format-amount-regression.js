@@ -78,7 +78,7 @@ run('osmosis amount-format regression (post fw-315 float removal)', async (getSd
         type: 'cosmos-sdk/MsgDelegate',
         value: {
           delegator_address: address,
-          validator_address: 'osmovaloper1sjllsnramtg3ewxqwwrwjxfgc4n4ef9u2lcnj0', // well-known Osmosis validator, signing only
+          validator_address: 'osmovaloper1sjllsnramtg3ewxqwwrwjxfgc4n4ef9ua8h4lf', // valid bech32 (firmware checks the checksum), signing only
           amount: { denom: 'uosmo', amount: bigAmount },
         },
       }),
@@ -97,7 +97,7 @@ run('osmosis amount-format regression (post fw-315 float removal)', async (getSd
         type: 'cosmos-sdk/MsgUndelegate',
         value: {
           delegator_address: address,
-          validator_address: 'osmovaloper1sjllsnramtg3ewxqwwrwjxfgc4n4ef9u2lcnj0',
+          validator_address: 'osmovaloper1sjllsnramtg3ewxqwwrwjxfgc4n4ef9ua8h4lf',
           amount: { denom: 'uosmo', amount: '500' },
         },
       }),
