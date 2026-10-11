@@ -3,6 +3,7 @@
  * and never falls back to a public RPC when Pioneer reports an error.
  */
 import { utils } from 'ethers'
+import { PIONEER_UNSUPPORTED } from '../shared/transaction-effects'
 
 export function evmSourceForChain(
   chain: { id: string; chainFamily: string; networkId: string },
@@ -118,11 +119,11 @@ export async function pioneerEvmRpc(pioneer: any, networkId: string, method: str
         }), 'GetTokenAllowance')
         result = quantity(data.data?.allowance, 'token allowance')
       } else {
-        throw new Error(`Pioneer does not expose this eth_call selector: ${selector}`)
+        throw new Error(`${PIONEER_UNSUPPORTED} this eth_call selector: ${selector}`)
       }
       return `0x${result.slice(2).padStart(64, '0')}`
     }
     default:
-      throw new Error(`Pioneer does not expose ${method}; no direct-node fallback is allowed`)
+      throw new Error(`${PIONEER_UNSUPPORTED} ${method}; no direct-node fallback is allowed`)
   }
 }
