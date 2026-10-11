@@ -634,3 +634,64 @@ export function assetToCaip(thorAsset: string, knownAssets?: SwapAsset[]): strin
   // Native asset — use the chain's CAIP-19
   return chainDef.caip
 }
+
+// ── NEAR Intents deposit address, in NEAR Intents' own words ────────────────
+
+type SwapReportLine = { code: string; message: string; severity: 'info' | 'warning' | 'danger' }
+
+/**
+ * Report lines for a swap that pays a NEAR Intents deposit address.
+ *
+ * `status` is NEAR Intents' own record of that address (1Click
+ * /v0/status?depositAddress=…), or undefined when it could not be read. The
+ * address reaches Desktop through Pioneer; this is the second, independent
+ * source. Neither is something the KeepKey can check, and the lines say so.
+ */
+export function nearIntentsDepositFindings(
+  status: any,
+  expected: { depositAddress: string; from?: string; recipient?: string; now?: number },
+): { findings: SwapReportLine[]; limitations: SwapReportLine[] } {
+  const same = (a?: string, b?: string) => !!a && !!b
+    && (a.startsWith('0x') && b.startsWith('0x') ? a.toLowerCase() === b.toLowerCase() : a === b)
+  const findings: SwapReportLine[] = [{
+    code: 'SWAP_PROVIDER',
+    message: `Pioneer routes this swap through NEAR Intents: the transfer pays a one-time NEAR Intents deposit address.`,
+    severity: 'info',
+  }]
+  const limitations: SwapReportLine[] = [{
+    code: 'DEPOSIT_ADDRESS_NOT_DEVICE_VERIFIED',
+    message: 'Your KeepKey shows the deposit address but cannot tell who owns it. Compare the address on the device with the one above.',
+    severity: 'warning',
+  }]
+  const request = status?.quoteResponse?.quoteRequest
+  const quote = status?.quoteResponse?.quote
+  if (!request || !quote?.depositAddress) {
+    limitations.push({
+      code: 'NEAR_INTENTS_UNCONFIRMED',
+      message: 'NEAR Intents could not be asked about this deposit address, so only Pioneer vouches for it.',
+      severity: 'warning',
+    })
+    return { findings, limitations }
+  }
+  if (!same(quote.depositAddress, expected.depositAddress)) {
+    findings.push({
+      code: 'NEAR_INTENTS_ADDRESS_MISMATCH',
+      message: `NEAR Intents answered for a different deposit address (${quote.depositAddress}). Do not sign.`,
+      severity: 'danger',
+    })
+    return { findings, limitations }
+  }
+  const ours = (label: string, theirs: string | undefined, mine: string | undefined) =>
+    !theirs ? { code: 'NEAR_INTENTS_FIELD_MISSING', message: `NEAR Intents did not say where it ${label}.`, severity: 'danger' as const }
+      : mine && !same(theirs, mine) ? { code: 'NEAR_INTENTS_MISMATCH', message: `NEAR Intents ${label} ${theirs}, which is not your address ${mine}. Do not sign.`, severity: 'danger' as const }
+        : { code: 'NEAR_INTENTS_CONFIRMED', message: `NEAR Intents confirms this deposit address ${label} ${theirs}${mine ? ' (yours)' : ''}.`, severity: 'info' as const }
+  findings.push(ours('pays out to', request.recipient, expected.recipient))
+  findings.push(ours('refunds to', request.refundTo, expected.from))
+  const deadline = Date.parse(request.deadline)
+  if (deadline <= (expected.now ?? Date.now())) findings.push({
+    code: 'NEAR_INTENTS_QUOTE_EXPIRED',
+    message: `This quote's deposit deadline (${request.deadline}) has passed. Get a new quote.`,
+    severity: 'danger',
+  })
+  return { findings, limitations }
+}

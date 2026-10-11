@@ -25,6 +25,9 @@ export interface EffectCodeIdentity {
   invocation: 'top-level' | 'call' | 'delegatecall' | 'create' | 'program' | 'cpi'
 }
 
+/** Unknown code for a transfer with no call data: there is no call to simulate. */
+export const PLAIN_TRANSFER_NOT_SIMULATED = 'PLAIN_TRANSFER_NOT_SIMULATED'
+
 export interface EffectFinding {
   code: string
   message: string

@@ -7901,7 +7901,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 								},
 								firmwareVersion, endpoint, hasErc7730: Boolean(tx.erc7730), signerVerdict: true,
 							})
-							if (artifactResolution.status !== 'selected') {
+							if (artifactResolution.status !== 'selected' && tx.data && tx.data !== '0x') {
 								const draft = observeEvmCall({
 									chainId, to: tx.to, data: tx.data,
 									source: tx.erc7730 ? 'erc7730' : tx.txMetadata ? 'runtime' : 'none',
@@ -7917,6 +7917,24 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						}
 						const [approval, transaction] = await Promise.all([reportFor(preview.approveTx), reportFor(preview.unsignedTx)])
 						preview.clearSignReports = { approval, transaction }
+						// A NEAR Intents swap pays a one-time deposit address. Name the
+						// provider and ask NEAR Intents itself what that address does.
+						// The address is read from the bytes to be signed, never from a
+						// quote field: the coin's destination, or a token transfer's recipient.
+						const txData = String(preview.unsignedTx?.data || '0x').toLowerCase()
+						const depositAddress: string | undefined = txData === '0x' ? preview.unsignedTx?.to
+							: txData.startsWith('0xa9059cbb') && txData.length === 138 ? `0x${txData.slice(34, 74)}` : undefined
+						if (transaction && depositAddress && (params.swapper === 'NEAR Intents' || params.integration === 'nearIntents')) {
+							const { nearIntentsDepositFindings } = await import('./swap-parsing')
+							let status: any
+							try {
+								const response = await fetch(`https://1click.chaindefuser.com/v0/status?depositAddress=${encodeURIComponent(depositAddress)}`, { signal: AbortSignal.timeout(8000) })
+								if (response.ok) status = await response.json()
+							} catch { /* reported as unconfirmed */ }
+							const lines = nearIntentsDepositFindings(status, { depositAddress, from, recipient: params.toAddressOverride })
+							transaction.findings.push(...lines.findings)
+							transaction.limitations.push(...lines.limitations)
+						}
 					} else if (fromChain?.chainFamily === 'solana' && from && preview.unsignedTx?.rawTx) {
 						const [{ simulateSolanaEffects }, { buildClearSignReport, solanaDecodedReportFindings }, { buildSolanaDecodedInfo }] = await Promise.all([
 							import('./solana-effects'), import('../shared/clearsign-report'), import('./solana-clearsign'),

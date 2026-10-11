@@ -272,3 +272,22 @@ describe('Relay Depository decode — real calls', () => {
     }
   })
 })
+
+describe('a plain transfer (a swap deposit to an address, no call data)', () => {
+  const DEPOSIT: Tx = { chainId: 8453, from: SIGNER, to: '0x44f8efadc1d700ee7e22af3813880378a50f1ecd', value: '0x2386f26fc10000', data: '0x' }
+
+  test('reads as a send the device shows itself, with no contract-call errors', async () => {
+    const r = await report(DEPOSIT, '7.16.0')
+    expect(ClearSignReportResponse.safeParse(r).success).toBe(true)
+    expect(r.protectionLevel).toBe('P4')
+    expect(r.headline).toBe('KeepKey ClearSign ready')
+    expect(risk(r)).toEqual([`Sends 0.01 ETH to ${DEPOSIT.to}.`])
+    expect(r.limitations.map((l) => l.code)).toEqual(['PLAIN_TRANSFER_NOT_SIMULATED'])
+  })
+
+  test('a contract call with the same destination is still not promoted', async () => {
+    const r = await report({ ...DEPOSIT, data: '0xdeadbeef' }, '7.16.0')
+    expect(r.protectionLevel).toBe('P1')
+  })
+})
+
