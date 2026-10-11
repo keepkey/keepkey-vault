@@ -7,7 +7,7 @@ import type {
   EffectCodeIdentity,
   EffectReport,
 } from '../shared/transaction-effects'
-import { PLAIN_TRANSFER_NOT_SIMULATED } from '../shared/transaction-effects'
+import { PLAIN_TRANSFER_NOT_SIMULATED, SIMULATION_UNAVAILABLE_MESSAGE } from '../shared/transaction-effects'
 
 const TRANSFER_TOPIC = ethersUtils.id('Transfer(address,address,uint256)').toLowerCase()
 const APPROVAL_TOPIC = ethersUtils.id('Approval(address,address,uint256)').toLowerCase()
@@ -306,6 +306,8 @@ export async function simulateEvmEffects(tx: EvmSimulationTx, endpoint: string):
     if (/revert/i.test(message)) return normalizeEvmSimulation(tx, endpoint, blockReference, {
       status: '0x0', error: { message },
     })
+    // The provider's wording is for the log; the card gets a plain sentence.
+    console.warn(`[clearsign] EVM simulation unavailable: ${message}; eth_simulateV1: ${String((simulationError as any)?.message || simulationError || 'unavailable')}`)
     return {
       version: 1, chain: 'Ethereum', transactionFingerprint: fingerprint,
       stateReference: { endpoint }, status: 'unavailable', assetChanges: [], authorityChanges: [], invokedCode: [], warnings: [],
@@ -316,7 +318,7 @@ export async function simulateEvmEffects(tx: EvmSimulationTx, endpoint: string):
         severity: 'info',
       } : {
         code: 'SIMULATION_UNAVAILABLE',
-        message: `${message}; eth_simulateV1: ${String((simulationError as any)?.message || simulationError || 'unavailable')}`.slice(0, 300),
+        message: SIMULATION_UNAVAILABLE_MESSAGE,
         severity: 'danger',
       }],
       completeness: { accountCoverage: 'unknown', innerExecution: 'unknown', tokenCoverage: 'unknown' },

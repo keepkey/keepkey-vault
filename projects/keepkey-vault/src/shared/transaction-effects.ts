@@ -54,3 +54,6 @@ export interface EffectReport {
     authorityCoverage?: 'complete' | 'partial' | 'unknown'
   }
 }
+
+/** Shown on the approval card when no simulation ran. Provider and RPC error text stays in the log. */
+export const SIMULATION_UNAVAILABLE_MESSAGE = 'This computer could not simulate this transaction, so it cannot predict what it will move.'
