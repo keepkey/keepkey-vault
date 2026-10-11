@@ -24,6 +24,7 @@ import type {
   SolanaTxDecodedInstruction,
 } from './types'
 import { versionCompare } from './firmware-versions'
+import { typedDataAmounts } from './typedDataRows'
 import { ERC7730_TRANSPORT_SUPPORTED } from './erc7730-support'
 
 export type RiskLevel = 'low' | 'medium' | 'high' | 'critical'
@@ -299,7 +300,9 @@ function evmTypedData(req: SigningRequestInfo, add: (l: RiskLevel, t: string) =>
   const contract = d.domain.verifyingContract?.toLowerCase()
   if (/^Permit/.test(d.primaryType) || contract === PERMIT2) {
     const raw = f('Value')?.raw ?? f('Amount')?.raw ?? d.fields.find((x) => /Amount$/.test(x.label))?.raw
-    let all = f('Allowed')?.value === 'true'
+    // Every amount counts: a batch can hide an unlimited entry behind a small first one.
+    const amounts = typedDataAmounts(d)
+    let all = f('Allowed')?.value === 'true' || amounts.some((a) => a.unlimited)
     try { if (raw !== undefined) all ||= BigInt(raw) >= ALL_THRESHOLD } catch { /* odd amount: shown as "some of" */ }
     const chainId = Number(d.domain.chainId)
     const spender = String(f('Spender')?.raw || '').toLowerCase()
@@ -311,8 +314,11 @@ function evmTypedData(req: SigningRequestInfo, add: (l: RiskLevel, t: string) =>
     if (officialArbitrumUniswap) {
       add('medium', `Allows the official Uniswap Universal Router to spend ${all ? 'an unlimited amount of' : 'up to'} Arbitrum USDT through Permit2 until ${f('Expiration')?.value || 'the displayed expiration'}. Review the swap amount on the following transaction.`)
     } else {
-      const howMuch = all ? 'ALL of' : raw !== undefined ? `up to ${f('Value')?.value ?? f('Amount')?.value ?? raw} of` : 'some of'
-      add('critical', `Lets ${f('Spender')?.raw ?? 'another account'} spend ${howMuch} your tokens, now and later. This signature alone is enough; no transaction from you is needed.`)
+      const symbols = [...new Set(amounts.filter((a) => a.unlimited && a.symbol).map((a) => a.symbol))]
+      const howMuch = all ? `ALL of your ${symbols.length ? symbols.join(' and ') : 'tokens'}`
+        : amounts.length ? `up to ${amounts.map((a) => a.text).join(' and ')}`
+        : raw !== undefined ? `up to ${raw} of your tokens` : 'some of your tokens'
+      add('critical', `Lets ${f('Spender')?.raw ?? 'another account'} spend ${howMuch}, now and later. This signature alone is enough; no transaction from you is needed.`)
     }
   } else if (/^(OrderComponents|BulkOrder)$/.test(d.primaryType)) {
     add('critical', 'This is a marketplace order. Anyone holding this signature can take the listed items at the price in the order.')

@@ -13,6 +13,7 @@ import { isRelayBridgeDeposit } from "../../../shared/relayBridgePreview"
 import { decodeAcrossDepositV3 } from "../../../shared/acrossDeposit"
 import { utxoPreview } from "../../../shared/utxoPreview"
 import { cosmosDepositPreview } from "../../../shared/cosmosDepositPreview"
+import { typedDataRows } from "../../../shared/typedDataRows"
 import { assessSigningRisk, formatCertifiedArg, type RiskLevel } from "../../../shared/clearsign-risk"
 import { ClearSignReportCard } from "../ClearSignReportCard"
 
@@ -934,8 +935,8 @@ function TypedDataSection({ decoded, t }: { decoded: EIP712DecodedInfo; t: (k: s
 			{decoded.domain.name && <Row label="Domain" value={decoded.domain.name} />}
 			{decoded.domain.verifyingContract && <Row label="Contract" value={identified(decoded.domain.verifyingContract)} />}
 			{decoded.domain.chainId !== undefined && <Row label="Chain ID" value={String(decoded.domain.chainId)} />}
-			{decoded.fields.map((field, i) => (
-				<Row key={i} label={field.label} value={identified(field.raw || field.value)} />
+			{typedDataRows(decoded).map((row, i) => (
+				<Row key={i} label={row.label} value={identified(row.value)} />
 			))}
 		</VStack>
 	)
