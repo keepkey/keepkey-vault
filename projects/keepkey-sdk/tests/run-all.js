@@ -44,6 +44,10 @@ const tests = found.filter(t => !t.name.startsWith(DESTRUCTIVE)).concat(allowWip
 if (wipes.length && !allowWipe) {
   console.log(`\n  Skipping ${wipes.length} suite(s) that WIPE the device (${DESTRUCTIVE}*). Set KEEPKEY_ALLOW_WIPE=1 on a test device to run them.`)
 }
+if (tests.length === 0) {
+  console.error('\n  No suites ran.\n')
+  process.exit(1)
+}
 
 console.log(`\n  Running ${tests.length} test suite(s)${filter ? ` (filter: "${filter}")` : ''}:\n`)
 
