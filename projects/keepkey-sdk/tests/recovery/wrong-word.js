@@ -30,9 +30,10 @@
  *     prefer starting from an already-empty device, and replug if comms wedge.
  *
  * Requires the REST recovery endpoints (POST /system/recovery/character{,/delete,
- * /done}, GET /system/recovery/state). Run: node tests/run-all.js recovery
+ * /done}, GET /system/recovery/state). Run: KEEPKEY_ALLOW_WIPE=1 node tests/run-all.js recovery
  */
-const { run } = require('../_helpers')
+const { run, requireWipeAllowed } = require('../_helpers')
+requireWipeAllowed()
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 async function waitUninitialized(sdk, timeoutMs = 30000) {
