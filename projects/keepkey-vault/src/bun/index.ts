@@ -9080,6 +9080,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						deviceId: meta?.deviceId || undefined,
 						totalUsd: meta?.totalUsd ?? 0,
 						lastUsed: meta?.updatedAt || undefined,
+						ethAddress: meta?.ethAddress || undefined,
 					}
 				})
 			},

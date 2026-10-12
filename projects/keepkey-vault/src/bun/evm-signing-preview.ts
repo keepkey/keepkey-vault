@@ -202,7 +202,7 @@ export async function applyEvmTxPreview(
 ): Promise<void> {
   if (!data || data.length < 10 || !to) return
   try {
-    signingInfo.calldataDecoded = await decodeCalldata(to, data, chainId) ?? undefined
+    signingInfo.calldataDecoded = await decodeCalldata(to, data, chainId, signingInfo.value) ?? undefined
   } catch (e) { console.warn(`${tag} Calldata decode failed:`, e) }
   const swapRows = uniswapSwapFields(chainId, to, data, signingInfo.value, signingInfo.from)
   if (swapRows.length > 0 && signingInfo.calldataDecoded) {

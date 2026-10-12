@@ -191,6 +191,15 @@ describe('in-app swap card — the Desktop signing verdict for the same bytes', 
     expect(approve.limitations.map((l) => l.code)).toContain('DEVICE_SHOWS_RAW_DATA')
   })
 
+  test('native deposit states its amount once, not "msg.value"', async () => {
+    const tx = { chainId: 8453, from: DEPOSIT.from, to: RELAY, value: '0x8b0be503af0800',
+      data: `0x49290c1c${DEPOSIT.from.slice(2).toLowerCase().padStart(64, '0')}${'c3'.repeat(32)}` }
+    const r = await inApp(tx, '7.16.0')
+    expect(rows(r)).toContain('Action: Relay deposit on Base: 0.0391381 ETH')
+    expect(rows(r)).toContain('You send: 0.0391381 ETH')
+    expect(risk(r).filter((x) => x.includes('0.0391381 ETH'))).toHaveLength(1)
+  })
+
   test('7.15 firmware: no certified path, never P4', async () => {
     globalThis.fetch = catalogService([])
     const r = await inApp({ chainId: 8453, from: DEPOSIT.from, to: RELAY, value: '0x0', data: DEPOSIT.data }, '7.15.0')

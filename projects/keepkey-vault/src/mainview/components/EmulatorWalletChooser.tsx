@@ -63,6 +63,7 @@ export function EmulatorWalletChooser({ wallets, onPick, onDelete, onClose, busy
 							<Text fontSize="13px" fontWeight="600" fontFamily="mono" color="var(--text-0)">
 								{w.name}{w.isActive ? "  (running)" : ""}
 							</Text>
+							{w.ethAddress && <Text fontSize="10px" fontFamily="mono" color="var(--text-1)">ETH {w.ethAddress}</Text>}
 							<Text fontSize="10px" color="var(--text-3)">
 								{emulatorWalletDetail(w)}{w.hasMnemonic ? " · seed saved" : ""}{(w.totalUsd ?? 0) > 0 ? " · has cached balance" : ""}
 							</Text>
