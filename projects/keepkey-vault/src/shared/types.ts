@@ -1338,6 +1338,8 @@ export interface EmulatorWalletInfo {
   channel?: string
   /** When this wallet last connected (ms). */
   lastUsed?: number
+  /** First Ethereum account (m/44'/60'/0'/0/0), cached from the last connect. */
+  ethAddress?: string
 }
 
 /** Persisted device snapshot — one per device_id, stored in SQLite. */

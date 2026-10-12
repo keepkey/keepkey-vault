@@ -312,6 +312,9 @@ export function DeviceGrid({ onViewPortfolio, onReady, emulatorEnabled = false }
 										<Text fontSize="10px" color="var(--text-3)" lineHeight="1.35">
 											{running ? emulatorWalletDetail(running) : `${emuWallets.length} saved seed${emuWallets.length === 1 ? "" : "s"}`}
 										</Text>
+										{running?.ethAddress && (
+											<Text fontSize="9px" fontFamily="mono" color="var(--text-2)" wordBreak="break-all" lineHeight="1.3">ETH {running.ethAddress}</Text>
+										)}
 									</Box>
 								</Flex>
 								{running && (
