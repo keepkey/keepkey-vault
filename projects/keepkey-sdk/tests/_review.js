@@ -112,11 +112,13 @@ function readScreen(frame) {
 
 /** Fetch what Desktop recorded, empty its tape, and set whether it keeps recording. */
 async function takeTape(record) {
-  const res = await fetch(`${BASE}/emulator/test-tape`, {
+  const post = () => fetch(`${BASE}/emulator/test-tape`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${process.env.KEEPKEY_API_KEY}`, 'Content-Type': 'application/json' },
+    // No keep-alive: a suite can run for minutes, and Desktop has closed an idle socket by then.
+    headers: { Authorization: `Bearer ${process.env.KEEPKEY_API_KEY}`, 'Content-Type': 'application/json', Connection: 'close' },
     body: JSON.stringify({ record }),
   })
+  const res = await post().catch(post)
   if (!res.ok) throw new Error(`review tape unavailable (HTTP ${res.status}): start Desktop on the emulator with KEEPKEY_TEST_EMULATOR_CONTROL=1`)
   return (await res.json()).entries.map((e) => (e.kind === 'screen'
     ? { screen: e.operation, lines: readScreen(e.frame) }
@@ -146,7 +148,7 @@ function unhealthy(tape) {
  * their reviewed copy exactly. KEEPKEY_REVIEW=record rewrites the copy
  * instead (then read the diff before committing it).
  */
-function judge(suite, tape) {
+function judge(suite, tape, passed) {
   const cls = (SUITES[suite] || {}).class
   const file = reviewedPath(suite)
   if (process.env.KEEPKEY_REVIEW === 'record') {
@@ -157,6 +159,9 @@ function judge(suite, tape) {
   if (cls === 'edge-case' || cls === 'no-signing') return { verdict: cls, problems: [] }
   // A risky request must not look healthy; a normal one must.
   const problems = cls === 'must-warn' ? (unhealthy(tape).length ? [] : ['a risky request showed no warning']) : unhealthy(tape)
+  // A suite that skips itself, or signs without Desktop asking, proves nothing.
+  if (!passed) problems.push('the suite itself failed')
+  if (!tape.some((e) => e.card)) problems.push('no Desktop approval card was shown')
   if (!fs.existsSync(file)) problems.push('no reviewed copy; run with KEEPKEY_REVIEW=record and review it')
   else {
     const want = JSON.stringify(JSON.parse(fs.readFileSync(file, 'utf8')))

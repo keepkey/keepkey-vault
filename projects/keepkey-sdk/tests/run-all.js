@@ -78,7 +78,7 @@ async function main() {
     }
     if (taping) {
       const tape = await takeTape(false)
-      const { verdict, problems } = judge(test.name, tape)
+      const { verdict, problems } = judge(test.name, tape, ok)
       shown.push({ suite: test.name, ok, verdict, problems, cards: tape.filter((e) => e.card).length, screens: tape.filter((e) => e.screen).length })
       for (const p of problems) console.error(`  SHOWN: ${p}`)
     }
