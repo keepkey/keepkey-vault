@@ -172,8 +172,8 @@ describe('in-app swap card — the Desktop signing verdict for the same bytes', 
     expect(sent).toEqual([{ chainId: 8453, contract: RELAY, selector: '0xe8017952', calldataLength: 132, token: BASE_USDC }])
     expect(risk(r)[0]).toBe('Relay deposit on Base: sends 47.478285 USDC to the Relay Depository, credited to your account. Your KeepKey shows this deposit from a KeepKey-certified description and refuses it if that description is not genuine. Check the amount there.')
     expect(risk(r).join('\n')).toContain("set by Relay's off-chain order")
-    // Certified, but where it arrives is off-chain: the swap screen keeps the box.
-    expect(clearSignReportNeedsAttention(r)).toBe(true)
+    // Certified and nothing red: the swap screen shows no report.
+    expect(clearSignReportNeedsAttention(r)).toBe(false)
     expect(rows(r)).toContain('Action: Relay deposit on Base: 47.478285 USDC')
     expect(rows(r)).toContain(`Credited to (depositor): ${DEPOSIT.from}`)
     expect(rows(r).some((x) => x.startsWith('Relay order id: 0x001c161a'))).toBe(true)
