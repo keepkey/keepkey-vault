@@ -136,6 +136,13 @@ async function fetchCertifiedEvmSchema(
   // existing blind path, never block signing.
   const reviewLookup = !spec && !tokenCandidate
   const fail = (message: string): never => { throw reviewLookup ? new ReviewLookupError(message) : new Error(message) }
+  // No certificate never blocks signing: the call goes to the device without
+  // one and the device applies its own policy (AdvancedMode for a call it
+  // cannot describe). A certificate that arrives but does not match still fails.
+  const unavailable = (reason: string): undefined => {
+    if (!reviewLookup) console.warn(`[clearsign] no certified description for ${spec?.method || 'token call'} (${reason}); device policy applies`)
+    return undefined
+  }
   if (reviewLookup && (!/^[0-9a-f]+$/i.test(calldata) || length < 4 || !/^0x[0-9a-f]{40}$/i.test(String(to || '')))) return undefined
   const base = String(process.env.CLEARSIGN_SERVICE_URL || DEFAULT_CLEARSIGN_SERVICE_URL)
     .trim()
@@ -163,24 +170,15 @@ async function fetchCertifiedEvmSchema(
       signal: AbortSignal.timeout(reviewLookup ? 3_000 : 10_000),
     })
   } catch (error: any) {
-    if (reviewLookup) return undefined
-    throw new Error(`ClearSign verification service is unavailable: ${error?.message || 'connection failed'}`)
+    return unavailable(error?.message || 'connection failed')
   }
   let result: any
   try {
     result = await response.json()
   } catch {
-    if (reviewLookup) return undefined
-    throw new Error(`ClearSign verification service returned HTTP ${response.status} without valid JSON`)
+    return unavailable(`HTTP ${response.status} without valid JSON`)
   }
-  if (!response.ok && reviewLookup) return undefined
-  if (!response.ok) {
-    if (response.status === 422) {
-      if (!spec && result?.code !== 'TOKEN_IDENTITY_UNVERIFIED') return undefined
-      throw new Error(`ClearSign certified description unavailable for ${spec?.method || 'token call'}: ${result?.error || 'the service catalog must be updated and its signed artifact provisioned before signing'}`)
-    }
-    throw new Error(`ClearSign verification service returned HTTP ${response.status}: ${result?.error || 'request failed'}`)
-  }
+  if (!response.ok) return unavailable(result?.error || result?.code || `HTTP ${response.status}`)
 
   let review: ClearSignDefinitionReview | undefined
   if (reviewLookup) {
