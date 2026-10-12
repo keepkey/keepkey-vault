@@ -12,6 +12,8 @@ import { Box, Flex, Text, Image } from "@chakra-ui/react"
 import kkIcon from "../assets/icon.png"
 import { rpcRequest, onRpcMessage } from "../lib/rpc"
 import type { RegisteredDevice, EmulatorStatus, EmulatorWalletInfo } from "../../shared/types"
+import { emulatorWalletDetail } from "../../shared/emulatorWallets"
+import { NewEmulatorWalletForm } from "./EmulatorWalletChooser"
 
 interface DeviceGridProps {
 	onViewPortfolio: (deviceId: string, label: string) => void
@@ -240,7 +242,7 @@ export function DeviceGrid({ onViewPortfolio, onReady, emulatorEnabled = false }
 			)}
 
 			{/* Grid of cards */}
-			{hasContent && (
+			{(hasContent || emulatorEnabled) && (
 				<Flex wrap="wrap" gap="3" justify="center">
 					{/* Physical device cards (watch-only when not the active live session) */}
 					{devices.map((d) => (
@@ -296,7 +298,6 @@ export function DeviceGrid({ onViewPortfolio, onReady, emulatorEnabled = false }
 					{emuWallets.map((w) => {
 						const active = w.isActive && emuRunning
 						const isDeleting = confirmDeleteEmu === w.name
-						const displayName = w.label || w.name
 						return (
 							<DeviceCard key={`emu:${w.name}`} active={active}>
 								<Flex justify="space-between" align="center" mb="2">
@@ -309,12 +310,11 @@ export function DeviceGrid({ onViewPortfolio, onReady, emulatorEnabled = false }
 								<Flex align="center" gap="2.5" mb="2.5">
 									<EmulatorIcon active={active} />
 									<Box flex="1" minW="0">
-										<Text fontSize="14px" fontWeight="500" color={active ? "var(--teal)" : "var(--text-0)"} truncate lineHeight="1.2">
-											{displayName}
+										{/* The file name, not the device label: two wallets can both be labelled "KeepKey". */}
+										<Text fontSize="14px" fontWeight="500" fontFamily="mono" color={active ? "var(--teal)" : "var(--text-0)"} truncate lineHeight="1.2">
+											{w.name}
 										</Text>
-										{w.label && w.label !== w.name && (
-											<Text fontSize="10px" color="var(--text-3)" fontFamily="mono" truncate>{w.name}</Text>
-										)}
+										<Text fontSize="10px" color="var(--text-3)" lineHeight="1.35">{emulatorWalletDetail(w)}</Text>
 										{w.hasMnemonic && <Text fontSize="10px" color="var(--text-3)" mt="0.5">seed saved</Text>}
 									</Box>
 								</Flex>
@@ -352,6 +352,17 @@ export function DeviceGrid({ onViewPortfolio, onReady, emulatorEnabled = false }
 							</DeviceCard>
 						)
 					})}
+
+					{emulatorEnabled && (
+						<DeviceCard>
+							<Flex mb="2"><EmuBadge active={false} /></Flex>
+							<Text fontSize="14px" fontWeight="500" color="var(--text-0)" mb="1">New emulator wallet</Text>
+							<Text fontSize="10px" color="var(--text-3)" lineHeight="1.4" mb="2.5">
+								Name it so you can tell it apart later. You set its seed on the emulator next.
+							</Text>
+							<NewEmulatorWalletForm existing={emuWallets.map((w) => w.name)} onCreate={handleStartEmu} busy={!!loading} />
+						</DeviceCard>
+					)}
 				</Flex>
 			)}
 

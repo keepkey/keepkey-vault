@@ -14,6 +14,7 @@ import { BrowserView, BrowserWindow, type RPCSchema } from 'electrobun/bun'
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
+import { getActiveFlashName } from './emulator'
 
 const TAG = '[emu-window]'
 
@@ -247,7 +248,7 @@ export function openEmulatorWindow(): void {
   console.log(`${TAG} Opening emulator window at (${saved.x}, ${saved.y}) ${saved.width}x${saved.height}`)
 
   emuWindow = new BrowserWindow({
-    title: 'KeepKey Emulator',
+    title: `KeepKey Emulator: ${getActiveFlashName()}`,
     html: buildEmulatorHTML(port),
     rpc: emuRpc,
     frame: { width: saved.width, height: saved.height, x: saved.x, y: saved.y },

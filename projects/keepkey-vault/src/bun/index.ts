@@ -295,6 +295,7 @@ import type { ChainBalance, TokenBalance, CustomToken, SigningRequestInfo, ApiLo
 import type { VaultRPCSchema } from "../shared/rpc-schema"
 import { collectAndAnalyzeWithGate, MAX_CHUNK_BYTES } from "./rng-audit"
 import { withoutUnsupportedErc7730 } from '../shared/erc7730-support'
+import { newEmulatorWalletNameError } from '../shared/emulatorWallets'
 import { ADDRESS_BOOK_CERTIFY_UNSUPPORTED, buildCertificationRequest, buildContactProof, contactsFromEntries, CONTACT_DESTINATION, evmRecipient, isAddressBookCertifyUnsupported, signWithContactProofAck, type AddressBookCertification } from "./addressbook-clearsign"
 
 // L3 fix: withTimeout imported from engine-controller (was duplicated here)
@@ -9063,7 +9064,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const status = getEmulatorStatus()
 				const activeFlash = status.state === 'running' ? getActiveFlashName() : null
 				const metaByName = new Map(getAllEmulatorWalletMeta().map(m => [m.name, m]))
-				return listFlashImages().filter(name => !selectedBuild || name === emulatorBuildFlashName(selectedBuild)).map(name => {
+				// Sorted: directory order is arbitrary, and a list that reshuffles
+				// invites starting the wrong wallet. A selected build has exactly
+				// one wallet, listed even before its first start.
+				const names = selectedBuild ? [emulatorBuildFlashName(selectedBuild)] : listFlashImages().sort()
+				return names.map(name => {
 					const meta = metaByName.get(name)
 					return {
 						name,
@@ -9074,6 +9079,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						channel: meta?.channel || undefined,
 						deviceId: meta?.deviceId || undefined,
 						totalUsd: meta?.totalUsd ?? 0,
+						lastUsed: meta?.updatedAt || undefined,
 					}
 				})
 			},
@@ -9183,6 +9189,12 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const selectedBuild = selectedEmulatorBuild()
 				if (selectedBuild && params.name !== emulatorBuildFlashName(selectedBuild)) throw new Error('This build has its own flash; switch builds to use another wallet')
 				const { stopEmulator, initEmulator, getEmulatorStatus } = await import('./emulator')
+				const { listFlashImages } = await import('./emulator-keychain')
+				const saved = listFlashImages()
+				if (!selectedBuild && !saved.includes(params.name)) {
+					const problem = newEmulatorWalletNameError(params.name, saved)
+					if (problem) throw new Error(`Cannot create emulator wallet: ${problem}`)
+				}
 
 				// Stop current emulator if running
 				if (getEmulatorStatus().state === 'running') {

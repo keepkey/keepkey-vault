@@ -22,6 +22,7 @@ import { NodeStatusBar } from "./components/NodeStatusBar"
 import { NodeConnectedDialog } from "./components/NodeConnectedDialog"
 import { BitcoinOnlyOnboardingDialog } from "./components/BitcoinOnlyOnboardingDialog"
 import { DeviceGrid } from "./components/DeviceGrid"
+import { EmulatorWalletChooser } from "./components/EmulatorWalletChooser"
 import { DeviceClaimedDialog } from "./components/DeviceClaimedDialog"
 import { LinuxUdevWarning } from "./components/LinuxUdevWarning"
 import { WindowsUsbTroubleshooter } from "./components/WindowsUsbTroubleshooter"
@@ -47,7 +48,7 @@ import { Z } from "./lib/z-index"
 import { ActivityTracker } from "./components/ActivityTracker"
 import { SwapRpcMount } from "./components/SwapRpcMount"
 import { NAV_CONTENT_OFFSET, NAV_CONTENT_OFFSET_WITH_BANNER } from "./layout"
-import type { PinRequestType, PairingRequestInfo, SigningRequestInfo, ApiLogEntry, AppSettings, EmulatorStatus, CustomChain } from "../shared/types"
+import type { PinRequestType, PairingRequestInfo, SigningRequestInfo, ApiLogEntry, AppSettings, EmulatorStatus, EmulatorWalletInfo, CustomChain } from "../shared/types"
 
 type SigningPhase = "approve" | "sending-payload" | "device-confirm"
 
@@ -120,7 +121,9 @@ function App() {
 
 	// Escape hatch for hardware onboarding: development must never strand an
 	// operator in Welcome/Intro when they intend to use an emulator instead.
-	const startEmulatorFromSetup = useCallback(async () => {
+	// null = closed. The wallet is always chosen by name; nothing is picked for the user.
+	const [emulatorChoices, setEmulatorChoices] = useState<EmulatorWalletInfo[] | null>(null)
+	const startEmulatorFromSetup = useCallback(async (name: string) => {
 		if (startingEmulator) return
 		setStartingEmulator(true)
 		setEmulatorStartError(null)
@@ -130,15 +133,8 @@ function App() {
 				setEmulatorEnabled(settings.emulatorEnabled)
 			}
 			try { await rpcRequest('emulatorPair', undefined, 10000) } catch { /* already paired */ }
-			const wallets = await rpcRequest<Array<{ name: string; isActive?: boolean }>>('emulatorListWallets', undefined, 10000).catch(() => [])
-			if (wallets.length > 0) {
-				const wallet = wallets.find(w => w.isActive) || wallets[0]
-				await rpcRequest('emulatorSwitchWallet', { name: wallet.name }, 30000)
-			} else {
-				// Omit flashName so a selected content-addressed build receives its
-				// own isolated build-<hash> flash from the backend.
-				await rpcRequest('emulatorInit', undefined, 30000)
-			}
+			await rpcRequest('emulatorSwitchWallet', { name }, 30000)
+			setEmulatorChoices(null)
 			oobEnteredRef.current = false
 			setSetupInProgress(false)
 		} catch (error: any) {
@@ -1021,8 +1017,12 @@ function App() {
 				{/* Developer-only: shown once the emulator is enabled in Settings. */}
 				{emulatorEnabled && <Box position="fixed" right="24px" bottom="24px" zIndex={1900} textAlign="right">
 					{emulatorStartError && <Text mb="2" maxW="340px" fontSize="12px" color="kk.error">{emulatorStartError}</Text>}
+					{emulatorChoices && <Box mb="2"><EmulatorWalletChooser wallets={emulatorChoices} onPick={startEmulatorFromSetup} busy={startingEmulator} /></Box>}
 					<Button
-						onClick={startEmulatorFromSetup}
+						onClick={async () => {
+							if (emulatorChoices) return setEmulatorChoices(null)
+							setEmulatorChoices(await rpcRequest<EmulatorWalletInfo[]>('emulatorListWallets', undefined, 10000).catch(() => []))
+						}}
 						disabled={startingEmulator}
 						bg="rgba(168,85,247,0.16)"
 						border="1px solid rgba(168,85,247,0.55)"

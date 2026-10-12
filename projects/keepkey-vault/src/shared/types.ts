@@ -1336,6 +1336,8 @@ export interface EmulatorWalletInfo {
   firmwareVersion?: string
   /** Firmware release channel last reported for this wallet, if known. */
   channel?: string
+  /** When this wallet last connected (ms). */
+  lastUsed?: number
 }
 
 /** Persisted device snapshot — one per device_id, stored in SQLite. */
