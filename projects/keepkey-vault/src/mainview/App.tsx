@@ -1017,12 +1017,9 @@ function App() {
 				{/* Developer-only: shown once the emulator is enabled in Settings. */}
 				{emulatorEnabled && <Box position="fixed" right="24px" bottom="24px" zIndex={1900} textAlign="right">
 					{emulatorStartError && <Text mb="2" maxW="340px" fontSize="12px" color="kk.error">{emulatorStartError}</Text>}
-					{emulatorChoices && <Box mb="2"><EmulatorWalletChooser wallets={emulatorChoices} onPick={startEmulatorFromSetup} busy={startingEmulator} /></Box>}
+					{emulatorChoices && <EmulatorWalletChooser wallets={emulatorChoices} onPick={startEmulatorFromSetup} onClose={() => setEmulatorChoices(null)} busy={startingEmulator} error={emulatorStartError} />}
 					<Button
-						onClick={async () => {
-							if (emulatorChoices) return setEmulatorChoices(null)
-							setEmulatorChoices(await rpcRequest<EmulatorWalletInfo[]>('emulatorListWallets', undefined, 10000).catch(() => []))
-						}}
+						onClick={async () => setEmulatorChoices(await rpcRequest<EmulatorWalletInfo[]>('emulatorListWallets', undefined, 10000).catch(() => []))}
 						disabled={startingEmulator}
 						bg="rgba(168,85,247,0.16)"
 						border="1px solid rgba(168,85,247,0.55)"
