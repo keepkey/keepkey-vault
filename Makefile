@@ -415,12 +415,14 @@ test-sign-gating:
 # every suite except tests/chain/* works offline. Expect device confirmations.
 #   make test-sdk                 # everything except recovery/*
 #   make test-sdk filter=evm      # only suites whose path contains "evm"
+#   make test-sdk class=real-world,must-warn   # only suites of those classes (tests/review/suites.json)
 # recovery/* WIPES the device: it runs only with KEEPKEY_ALLOW_WIPE=1.
 filter =
+class =
 test-sdk:
 	@curl -sf -m 3 http://localhost:1646/api/health >/dev/null || \
 		(echo "ERROR: vault REST not answering on :1646. Start the vault first."; exit 1)
-	cd projects/keepkey-sdk && (test -d node_modules || npm ci --ignore-scripts --silent) && npm run build --silent && node tests/run-all.js $(filter)
+	cd projects/keepkey-sdk && (test -d node_modules || npm ci --ignore-scripts --silent) && npm run build --silent && KEEPKEY_SUITE_CLASS=$(class) node tests/run-all.js $(filter)
 
 test-emu:
 	@test -f $(HOME)/.keepkey/emulator/libkkemu.dylib || \

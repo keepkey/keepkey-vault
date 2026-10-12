@@ -296,7 +296,7 @@ import type { VaultRPCSchema } from "../shared/rpc-schema"
 import { collectAndAnalyzeWithGate, MAX_CHUNK_BYTES } from "./rng-audit"
 import { withoutUnsupportedErc7730 } from '../shared/erc7730-support'
 import { newEmulatorWalletNameError } from '../shared/emulatorWallets'
-import { recordReviewCard } from './test-review-tape'
+import { recordReviewCard, recordReviewCardText, reviewTapeRecording } from './test-review-tape'
 import { ADDRESS_BOOK_CERTIFY_UNSUPPORTED, buildCertificationRequest, buildContactProof, contactsFromEntries, CONTACT_DESTINATION, evmRecipient, isAddressBookCertifyUnsupported, signWithContactProofAck, type AddressBookCertification } from "./addressbook-clearsign"
 
 // L3 fix: withTimeout imported from engine-controller (was duplicated here)
@@ -1672,7 +1672,10 @@ const restCallbacks: RestApiCallbacks = {
 		// driver can inspect the real firmware screens one at a time. The device
 		// confirmation path remains interactive and unchanged.
 		// Emulator only: never skips the approval screen for a real device.
-		if (process.env.KEEPKEY_TEST_APPROVE_HOST_SIGNING === '1' && engine.isEmulator) {
+		// A recording tape shows the real card instead: it reports what it
+		// renders and then answers itself the way its buttons allow.
+		if (reviewTapeRecording() && engine.isEmulator) info.testReview = true
+		else if (process.env.KEEPKEY_TEST_APPROVE_HOST_SIGNING === '1' && engine.isEmulator) {
 			console.log(`[REST] Explicit test environment approved host signing gate for ${info.method}`)
 			return { approved: true }
 		}
@@ -6835,6 +6838,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					blindSigningApprovalIds.delete(params.id)
 					throw new Error('No pending signing request with that id')
 				}
+			},
+			reportSigningCard: async (params) => {
+				recordReviewCardText(params.id, String(params.text || ''))
 			},
 			rejectSigningRequest: async (params) => {
 				blindSigningApprovalIds.delete(params.id)

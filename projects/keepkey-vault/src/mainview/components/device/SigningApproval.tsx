@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react"
+import { useEffect, useRef, useState, useCallback } from "react"
 import { Box, Text, VStack, Flex, Button } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
 import { Z } from "../../lib/z-index"
@@ -1053,6 +1053,7 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 		setShowAdvancedConfirm(false)
 	}, [showAdvancedConfirm, t])
 
+	const cardRef = useRef<HTMLDivElement>(null)
 	const submitApproval = useCallback(() => {
 		if (approveDisabled) return
 		onApprove({
@@ -1064,6 +1065,18 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 		blindSigningConsentRequired,
 		onApprove,
 	])
+
+	// Emulator test tape (request.testReview): once the card has settled,
+	// report the text it renders, then answer it the way its own buttons allow.
+	useEffect(() => {
+		if (!request.testReview || phase !== 'approve') return
+		const timer = setTimeout(async () => {
+			await rpcRequest("reportSigningCard", { id: request.id, text: cardRef.current?.innerText ?? "" }).catch(() => {})
+			if (approveDisabled) onReject()
+			else submitApproval()
+		}, 1500)
+		return () => clearTimeout(timer)
+	}, [request.testReview, request.id, phase, approveDisabled, submitApproval, onReject])
 
 	useEffect(() => {
 		const handler = (e: KeyboardEvent) => {
@@ -1206,6 +1219,7 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 	// ── Approve phase ─────────────────────────────────────────────────
 	return (
 		<Box
+			ref={cardRef}
 			position="fixed" inset="0" zIndex={Z.overlay + 1}
 			bg="rgba(0,0,0,0.85)" backdropFilter="blur(8px)"
 			display="flex" alignItems="center" justifyContent="center"

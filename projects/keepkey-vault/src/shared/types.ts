@@ -1065,6 +1065,8 @@ export interface SigningRequestInfo {
   solanaDecodeError?: string
   /** true when tx has calldata that cannot be fully decoded — device will show blind-signing warning */
   needsBlindSigning?: boolean
+  /** Emulator test tape is recording: the approval card reports what it renders and answers itself. */
+  testReview?: boolean
   /** The device can independently decode this call, either from its native
    *  allowlist or from authenticated, firmware-verified metadata. A
    *  caller-supplied blob never sets this by itself.
