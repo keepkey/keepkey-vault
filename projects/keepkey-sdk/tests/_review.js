@@ -124,7 +124,8 @@ async function takeTape(record) {
     ? { screen: e.operation, lines: readScreen(e.frame) }
     : { card: e.method, level: e.risk ? e.risk.level : 'none', reasons: e.risk ? e.risk.reasons.map((r) => `${r.level}: ${r.text}`) : [], blind: e.needsBlindSigning,
         // What the Desktop window rendered; absent when the card was approved without being shown.
-        ...(e.text ? { window: e.text } : {}) }))
+        // The countdown in the card header changes every second; leave it out.
+        ...(e.text ? { window: e.text.filter((l) => !/^\d+:\d\d$/.test(l)) } : {}) }))
 }
 
 // ── Reviewed copies ──────────────────────────────────────────────────

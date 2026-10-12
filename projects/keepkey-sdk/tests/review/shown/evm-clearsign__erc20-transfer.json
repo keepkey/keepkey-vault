@@ -1,0 +1,68 @@
+[
+  {
+    "card": "/eth/sign-transaction",
+    "level": "low",
+    "reasons": [
+      "low: Sends 1 USDC to 0x742d35cc6634c0532950a20547b231011e30c8e7."
+    ],
+    "blind": false,
+    "window": [
+      "ACTION REQUIRED",
+      "Claude QA (Zcash)",
+      "Known Pattern",
+      "Ethereum Sign Transaction",
+      "Low risk",
+      "What signing this does:",
+      "• Sends 1 USDC to 0x742d35cc6634c0532950a20547b231011e30c8e7.",
+      "Checked on this computer. Your KeepKey screen is the final word.",
+      "ERC-20",
+      "transfer",
+      "Send 1 USDC to 0x742d35Cc6634C0532950a20547b231011e30c8e7",
+      "Token",
+      "USDC",
+      "Token contract",
+      "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+      "Recipient",
+      "Unidentified address",
+      "Recipient address",
+      "0x742d35Cc6634C0532950a20547b231011e30c8e7",
+      "Recipient",
+      "0x742d35Cc6634C0532950a20547b231011e30c8e7",
+      "Amount",
+      "1 USDC (raw: 1000000)",
+      "Transaction",
+      "Chain",
+      "Ethereum",
+      "To",
+      "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+      "Value",
+      "0 ETH",
+      "Max network fee",
+      "0.0013 ETH",
+      "ChainID",
+      "1",
+      "Full Request Payload",
+      "▼",
+      "Approve",
+      "Reject",
+      "Enter to approve · Esc to reject"
+    ]
+  },
+  {
+    "screen": "ethSignTx",
+    "lines": [
+      "SEND",
+      "Send 1 USDC to",
+      "0x742D35Cc6634C0532950A20547b231011e30C",
+      "8e7"
+    ]
+  },
+  {
+    "screen": "ethSignTx",
+    "lines": [
+      "TRANSACTION",
+      "Send the tokens from your wallet, paying",
+      "up to 0.0013 ETH for gas?"
+    ]
+  }
+]
