@@ -14,6 +14,7 @@ import { BrowserView, BrowserWindow, type RPCSchema } from 'electrobun/bun'
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
+import { recordReviewScreen, reviewTapeRecording } from './test-review-tape'
 
 const TAG = '[emu-window]'
 
@@ -488,6 +489,14 @@ async function requestUserConfirm(details: EmulatorConfirmDetails & { id: string
     console.log(`${TAG} Sending confirm-request: op=${details.operation}`)
     sendToWindow('confirm-request', details)
     sendToWindow('emu-state', { state: 'confirming' })
+    // Test tape: let the held frame land, record it, then press for the driver.
+    if (process.env.KEEPKEY_TEST_EMULATOR_CONTROL === '1' && reviewTapeRecording()) {
+      setTimeout(() => {
+        if (pendingConfirm?.id !== details.id) return
+        recordReviewScreen(details.operation, latestFrame)
+        decidePendingEmulatorConfirm(true)
+      }, 600)
+    }
   })
 }
 
@@ -513,6 +522,8 @@ function sendDismiss(): void {
 let displayPollTimer: ReturnType<typeof setInterval> | null = null
 let cachedPopFrames: (() => Uint8Array[]) | null = null
 const playbackQueue: Uint8Array[] = []
+/** Newest frame the firmware drew, whatever the window has played back so far. */
+let latestFrame: Uint8Array | null = null
 const PLAYBACK_QUEUE_CAP = 90 // ~6s at 15fps; older frames dropped
 const PLAYBACK_TICK_MS = 66 // ~15fps normal/idle cadence
 const PLAYBACK_TICK_SLOW_MS = 350 // post-approval: linger so confirm screens are readable
@@ -535,6 +546,7 @@ export function startDisplayPoll(): void {
       // (boot, wipe, recovery cipher prompts) were silently lost.
       const fresh = cachedPopFrames()
       if (fresh.length > 0) {
+        latestFrame = fresh[fresh.length - 1]
         playbackQueue.push(...fresh)
         while (playbackQueue.length > PLAYBACK_QUEUE_CAP) playbackQueue.shift()
       }

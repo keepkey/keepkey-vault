@@ -295,6 +295,7 @@ import type { ChainBalance, TokenBalance, CustomToken, SigningRequestInfo, ApiLo
 import type { VaultRPCSchema } from "../shared/rpc-schema"
 import { collectAndAnalyzeWithGate, MAX_CHUNK_BYTES } from "./rng-audit"
 import { withoutUnsupportedErc7730 } from '../shared/erc7730-support'
+import { recordReviewCard } from './test-review-tape'
 import { ADDRESS_BOOK_CERTIFY_UNSUPPORTED, buildCertificationRequest, buildContactProof, contactsFromEntries, CONTACT_DESTINATION, evmRecipient, isAddressBookCertifyUnsupported, signWithContactProofAck, type AddressBookCertification } from "./addressbook-clearsign"
 
 // L3 fix: withTimeout imported from engine-controller (was duplicated here)
@@ -1665,6 +1666,7 @@ const restCallbacks: RestApiCallbacks = {
 		resolveChain: (networkId: string) => findChainByNetwork(networkId, undefined, getAllChains()),
 	onSigningRequest: async (info: SigningRequestInfo) => {
 		attachSigningPolicySnapshot(info)
+		recordReviewCard(info)
 		// Local integration runs may bypass only the host preview gate so a test
 		// driver can inspect the real firmware screens one at a time. The device
 		// confirmation path remains interactive and unchanged.
