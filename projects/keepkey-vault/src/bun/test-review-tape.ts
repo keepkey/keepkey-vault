@@ -8,7 +8,7 @@ import type { SigningRequestInfo } from '../shared/types'
 import { assessSigningRisk, type RiskAssessment } from '../shared/clearsign-risk'
 
 export type ReviewTapeEntry =
-  | { kind: 'card'; method: string; risk: RiskAssessment | null; needsBlindSigning: boolean; deviceClearSigns: boolean; protectionLevel?: string }
+  | { kind: 'card'; id: string; method: string; text?: string[]; risk: RiskAssessment | null; needsBlindSigning: boolean; deviceClearSigns: boolean; protectionLevel?: string }
   /** frame: base64 of the 2048-byte SSD1306 buffer (8 pages x 256 columns). */
   | { kind: 'screen'; operation: string; frame: string }
 
@@ -20,7 +20,7 @@ export const reviewTapeRecording = (): boolean => recording
 export function recordReviewCard(info: SigningRequestInfo): void {
   if (!recording) return
   entries.push({
-    kind: 'card', method: info.method, risk: assessSigningRisk(info),
+    kind: 'card', id: info.id, method: info.method, risk: assessSigningRisk(info),
     needsBlindSigning: !!info.needsBlindSigning, deviceClearSigns: !!info.deviceClearSigns,
     protectionLevel: info.clearSignReport?.protectionLevel,
   })
@@ -28,6 +28,12 @@ export function recordReviewCard(info: SigningRequestInfo): void {
 
 export function recordReviewScreen(operation: string, frame: Uint8Array | null): void {
   if (recording && frame) entries.push({ kind: 'screen', operation, frame: Buffer.from(frame).toString('base64') })
+}
+
+/** The text the approval card for request `id` rendered in the Desktop window. */
+export function recordReviewCardText(id: string, text: string): void {
+  const card = entries.find((e) => e.kind === 'card' && e.id === id)
+  if (card && card.kind === 'card') card.text = text.split('\n').map((l) => l.trim()).filter(Boolean)
 }
 
 /** Hand over what was recorded, empty the tape, and set whether it keeps recording. */

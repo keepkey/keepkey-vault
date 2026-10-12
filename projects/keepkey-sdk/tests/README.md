@@ -7,6 +7,7 @@ root:
 ```
 make test-sdk                       # every suite except recovery/*
 make test-sdk filter=evm-native     # suites whose path contains "evm-native"
+make test-sdk class=real-world,must-warn   # only the suites that must show something
 ```
 
 `recovery/*` wipes the device and runs only with `KEEPKEY_ALLOW_WIPE=1`.
@@ -47,14 +48,15 @@ switches:
 ```
 KEEPKEY_AUTOSTART_EMULATOR_FLASH=<throwaway wallet name> \
 KEEPKEY_TEST_EMULATOR_CONTROL=1 \
-KEEPKEY_TEST_APPROVE_HOST_SIGNING=1 \
 make dev
 ```
 
 - `KEEPKEY_TEST_EMULATOR_CONTROL=1` turns on `POST /emulator/test-tape` and
   makes the emulator ignore clicks in its own window.
-- `KEEPKEY_TEST_APPROVE_HOST_SIGNING=1` approves Desktop's own card so the
-  request reaches the device. The card's content is still recorded.
+
+While the tape records, Desktop opens its real approval window for every
+request. The card reports the text it renders, then presses its own Approve
+button (or Reject, when Approve is disabled).
 
 Never point this at a wallet that holds funds: every device confirmation is
 pressed automatically while a suite is being recorded.
@@ -64,15 +66,17 @@ tape. An entry is one of:
 
 ```json
 { "card": "/eth/sign-transaction", "level": "low",
-  "reasons": ["low: Sends 0.0001 ETH to 0x0000…0001."], "blind": false }
+  "reasons": ["low: Sends 0.0001 ETH to 0x0000…0001."], "blind": false,
+  "window": ["Sign Transaction", "Low risk", "…every line the Desktop window rendered…"] }
 
 { "screen": "ethSignTx",
   "lines": ["SEND", "Send 0.0001 ETH to", "0x00000000000000000000000000000000000", "00001"] }
 ```
 
-- **card**: the risk bar of the Desktop approval card for that request. `level`
-  is `low` (teal), `medium` (gold), `high` or `critical` (red), or `none` when
-  the request type has no risk bar.
+- **card**: the Desktop approval card for that request. `level` is its risk
+  bar: `low` (teal), `medium` (gold), `high` or `critical` (red), or `none`
+  when the request type has no risk bar. `window` is every line of text the
+  window rendered.
 - **screen**: the text of one device confirmation, top to bottom, in the order
   the device showed them.
 

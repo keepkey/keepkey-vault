@@ -122,7 +122,9 @@ async function takeTape(record) {
   if (!res.ok) throw new Error(`review tape unavailable (HTTP ${res.status}): start Desktop on the emulator with KEEPKEY_TEST_EMULATOR_CONTROL=1`)
   return (await res.json()).entries.map((e) => (e.kind === 'screen'
     ? { screen: e.operation, lines: readScreen(e.frame) }
-    : { card: e.method, level: e.risk ? e.risk.level : 'none', reasons: e.risk ? e.risk.reasons.map((r) => `${r.level}: ${r.text}`) : [], blind: e.needsBlindSigning }))
+    : { card: e.method, level: e.risk ? e.risk.level : 'none', reasons: e.risk ? e.risk.reasons.map((r) => `${r.level}: ${r.text}`) : [], blind: e.needsBlindSigning,
+        // What the Desktop window rendered; absent when the card was approved without being shown.
+        ...(e.text ? { window: e.text } : {}) }))
 }
 
 // ── Reviewed copies ──────────────────────────────────────────────────
@@ -137,6 +139,9 @@ function unhealthy(tape) {
   for (const e of tape) {
     if (e.card && e.level !== 'low' && e.level !== 'none') problems.push(`approval card for ${e.card} reads "${e.level}": ${e.reasons.join(' | ')}`)
     if (e.card && e.blind) problems.push(`approval card for ${e.card} asks for blind signing`)
+    if (e.card && !e.window) problems.push(`approval card for ${e.card} was not shown in the Desktop window`)
+    const loud = (e.window || []).filter((l) => /Danger|High risk|Check before you sign|blind|Advanced Mode/i.test(l))
+    if (loud.length) problems.push(`Desktop window for ${e.card} says: ${loud.join(' | ')}`)
     if (e.screen && e.lines.some((l) => /BLOCKED|AdvancedMode|blind|Unknown/i.test(l))) problems.push(`device screen during ${e.screen}: ${e.lines.join(' / ')}`)
     if (e.screen && e.lines.length === 0) problems.push(`device screen during ${e.screen} had no readable text`)
   }

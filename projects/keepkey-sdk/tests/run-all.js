@@ -38,7 +38,12 @@ function findTests(dir, prefix = '') {
   return entries
 }
 
+// KEEPKEY_SUITE_CLASS=real-world,must-warn runs only suites of those classes
+// (tests/review/suites.json): the ones that must show something to the user.
+const classes = (process.env.KEEPKEY_SUITE_CLASS || '').split(',').filter(Boolean)
+const suiteClass = (name) => (require('./review/suites.json')[name] || {}).class
 const found = findTests(testsDir).filter(t => !filter || t.name.includes(filter))
+  .filter(t => classes.length === 0 || classes.includes(suiteClass(t.name)))
 const wipes = found.filter(t => t.name.startsWith(DESTRUCTIVE))
 const tests = found.filter(t => !t.name.startsWith(DESTRUCTIVE)).concat(allowWipe ? wipes : [])
 if (wipes.length && !allowWipe) {
