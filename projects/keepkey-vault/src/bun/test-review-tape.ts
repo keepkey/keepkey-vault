@@ -12,13 +12,17 @@ export type ReviewTapeEntry =
   /** frame: base64 of the 2048-byte SSD1306 buffer (8 pages x 256 columns). */
   | { kind: 'screen'; operation: string; frame: string }
 
-let recording = false
+// Recording presses device confirmations unattended, so it must not outlive
+// its driver: it lapses on its own, and the tape cannot grow without bound.
+const RECORDING_LAPSES_MS = 10 * 60_000
+const MAX_ENTRIES = 500
+let recordingUntil = 0
 let entries: ReviewTapeEntry[] = []
 
-export const reviewTapeRecording = (): boolean => recording
+export const reviewTapeRecording = (): boolean => Date.now() < recordingUntil
 
 export function recordReviewCard(info: SigningRequestInfo): void {
-  if (!recording) return
+  if (!reviewTapeRecording() || entries.length >= MAX_ENTRIES) return
   entries.push({
     kind: 'card', id: info.id, method: info.method, risk: assessSigningRisk(info),
     needsBlindSigning: !!info.needsBlindSigning, deviceClearSigns: !!info.deviceClearSigns,
@@ -27,7 +31,7 @@ export function recordReviewCard(info: SigningRequestInfo): void {
 }
 
 export function recordReviewScreen(operation: string, frame: Uint8Array | null): void {
-  if (recording && frame) entries.push({ kind: 'screen', operation, frame: Buffer.from(frame).toString('base64') })
+  if (reviewTapeRecording() && frame && entries.length < MAX_ENTRIES) entries.push({ kind: 'screen', operation, frame: Buffer.from(frame).toString('base64') })
 }
 
 /** The text the approval card for request `id` rendered in the Desktop window. */
@@ -40,6 +44,6 @@ export function recordReviewCardText(id: string, text: string): void {
 export function takeReviewTape(record: boolean): ReviewTapeEntry[] {
   const taken = entries
   entries = []
-  recording = record
+  recordingUntil = record ? Date.now() + RECORDING_LAPSES_MS : 0
   return taken
 }

@@ -1667,14 +1667,16 @@ const restCallbacks: RestApiCallbacks = {
 		resolveChain: (networkId: string) => findChainByNetwork(networkId, undefined, getAllChains()),
 	onSigningRequest: async (info: SigningRequestInfo) => {
 		attachSigningPolicySnapshot(info)
-		recordReviewCard(info)
+		// Emulator test tape only; a real device is never recorded or marked.
+		const taping = engine.isEmulator && process.env.KEEPKEY_TEST_EMULATOR_CONTROL === '1' && reviewTapeRecording()
+		if (taping) recordReviewCard(info)
 		// Local integration runs may bypass only the host preview gate so a test
 		// driver can inspect the real firmware screens one at a time. The device
 		// confirmation path remains interactive and unchanged.
 		// Emulator only: never skips the approval screen for a real device.
 		// A recording tape shows the real card instead: it reports what it
 		// renders and then answers itself the way its buttons allow.
-		if (reviewTapeRecording() && engine.isEmulator) info.testReview = true
+		if (taping) info.testReview = true
 		else if (process.env.KEEPKEY_TEST_APPROVE_HOST_SIGNING === '1' && engine.isEmulator) {
 			console.log(`[REST] Explicit test environment approved host signing gate for ${info.method}`)
 			return { approved: true }
@@ -6832,6 +6834,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						auth.rejectSigningRequest(params.id)
 						throw new Error(rejection)
 					}
+				}
+				// A card that answers itself for the test tape must still be on the emulator.
+				if (pendingSigningApprovalInfo.get(params.id)?.testReview && !engine.isEmulator) {
+					auth.rejectSigningRequest(params.id)
+					throw new Error('Test review approval is emulator-only')
 				}
 				if (params.allowBlindSigning === true) blindSigningApprovalIds.add(params.id)
 				if (!auth.approveSigningRequest(params.id)) {

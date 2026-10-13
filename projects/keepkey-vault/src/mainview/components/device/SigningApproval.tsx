@@ -1068,9 +1068,11 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 
 	// Emulator test tape (request.testReview): once the card has settled,
 	// report the text it renders, then answer it the way its own buttons allow.
+	const answeredForTape = useRef<string | null>(null)
 	useEffect(() => {
-		if (!request.testReview || phase !== 'approve') return
+		if (!request.testReview || phase !== 'approve' || answeredForTape.current === request.id) return
 		const timer = setTimeout(async () => {
+			answeredForTape.current = request.id // once per request, even if approval fails
 			await rpcRequest("reportSigningCard", { id: request.id, text: cardRef.current?.innerText ?? "" }).catch(() => {})
 			if (approveDisabled) onReject()
 			else submitApproval()

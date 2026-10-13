@@ -59,7 +59,9 @@ request. The card reports the text it renders, then presses its own Approve
 button (or Reject, when Approve is disabled).
 
 Never point this at a wallet that holds funds: every device confirmation is
-pressed automatically while a suite is being recorded.
+pressed automatically while a suite is being recorded. Recording lapses by
+itself ten minutes after it was last turned on, so a driver that dies cannot
+leave Desktop approving on its own.
 
 For each suite the runner turns the tape on, runs the suite, and takes the
 tape. An entry is one of:

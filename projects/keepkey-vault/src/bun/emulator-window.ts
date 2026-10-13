@@ -493,7 +493,7 @@ async function requestUserConfirm(details: EmulatorConfirmDetails & { id: string
     // Test tape: let the held frame land, record it, then press for the driver.
     if (process.env.KEEPKEY_TEST_EMULATOR_CONTROL === '1' && reviewTapeRecording()) {
       setTimeout(() => {
-        if (pendingConfirm?.id !== details.id) return
+        if (pendingConfirm?.id !== details.id || !reviewTapeRecording()) return
         recordReviewScreen(details.operation, latestFrame)
         decidePendingEmulatorConfirm(true)
       }, 600)
