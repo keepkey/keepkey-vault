@@ -28,7 +28,7 @@ export interface FakeTronGridOpts {
 export function fakeTronGrid(opts: FakeTronGridOpts = {}) {
   const requests: Record<string, any[]> = {}
   const handler = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    const path = new URL(String(input)).pathname.replace('/wallet/', '')
+    const path = new URL(String(input)).pathname.split('/').pop()! // TronGrid /wallet/X or Pioneer /api/v1/tron/wallet/X
     const req0 = init?.body ? JSON.parse(String(init.body)) : {}
     ;(requests[path] ??= []).push(req0)
     const req = opts.tamper ? opts.tamper({ ...req0 }, path) : req0
