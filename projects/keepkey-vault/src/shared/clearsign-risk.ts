@@ -196,7 +196,8 @@ function evmTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void) 
 
   const native = evmNativeValue(req.value ?? '0', chainId)
   const sendsCoin = native !== null && !/^0 /.test(native)
-  if (sendsCoin) add('low', `Sends ${native} to ${data === '0x' ? '' : 'the contract at '}${to}.`)
+  // A Relay deposit states its own amount and destination contract below.
+  if (sendsCoin && !decodeRelayDeposit(to, data, chainId)) add('low', `Sends ${native} to ${data === '0x' ? '' : 'the contract at '}${to}.`)
   if (data === '0x') {
     if (!sendsCoin) add('low', 'Calls no contract and sends nothing.')
     return

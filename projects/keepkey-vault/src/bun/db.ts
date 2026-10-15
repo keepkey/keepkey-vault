@@ -2179,6 +2179,8 @@ export interface EmulatorWalletMeta {
   channel: string
   updatedAt: number
   totalUsd: number
+  /** First Ethereum account, from the address cache; '' until the wallet has connected. */
+  ethAddress: string
 }
 
 export function saveEmulatorWalletMeta(name: string, label: string, deviceId: string, firmwareVersion: string, channel: string) {
@@ -2198,11 +2200,13 @@ export function getAllEmulatorWalletMeta(): EmulatorWalletMeta[] {
     if (!db) return []
     const rows = db.query(`
       SELECT w.name, w.label, w.device_id, w.firmware_version, w.channel, w.updated_at,
-             COALESCE(SUM(b.balance_usd), 0) AS total_usd
+             COALESCE(SUM(b.balance_usd), 0) AS total_usd,
+             COALESCE((SELECT p.address FROM cached_pubkeys p WHERE p.device_id = w.device_id
+                       AND p.chain_id = 'ethereum' AND p.path = 'm/44''/60''/0''/0/0' LIMIT 1), '') AS eth_address
       FROM emulator_wallet w
       LEFT JOIN balances b ON b.device_id = w.device_id
       GROUP BY w.name
-    `).all() as Array<{ name: string; label: string; device_id: string; firmware_version: string; channel: string; updated_at: number; total_usd: number }>
+    `).all() as Array<{ name: string; label: string; device_id: string; firmware_version: string; channel: string; updated_at: number; total_usd: number; eth_address: string }>
     return rows.map(r => ({
       name: r.name,
       label: r.label,
@@ -2211,6 +2215,7 @@ export function getAllEmulatorWalletMeta(): EmulatorWalletMeta[] {
       channel: r.channel,
       updatedAt: r.updated_at,
       totalUsd: r.total_usd,
+      ethAddress: r.eth_address,
     }))
   } catch (e: any) {
     console.warn('[db] getAllEmulatorWalletMeta failed:', e.message)

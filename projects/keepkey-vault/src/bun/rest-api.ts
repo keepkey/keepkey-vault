@@ -3087,6 +3087,18 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const dataUrl = await captureCurrentFrame()
           return json({ dataUrl })
         }
+        // Hands a test driver what the last requests showed (approval-card
+        // risk, raw device frames) and sets whether recording continues. While
+        // it records, each device confirmation is captured and then pressed.
+        if (path === '/emulator/test-tape' && method === 'POST') {
+          auth.requireAuth(req)
+          if (process.env.KEEPKEY_TEST_EMULATOR_CONTROL !== '1') throw new HttpError(404, 'Not found')
+          if (!engine.isEmulator) throw new HttpError(400, 'Emulator control is emulator-only')
+          const body = await req.json() as any
+          if (typeof body?.record !== 'boolean') throw new HttpError(400, 'record must be boolean')
+          const { takeReviewTape } = await import('./test-review-tape')
+          return json({ entries: takeReviewTape(body.record) })
+        }
         if (path === '/emulator/test-decision' && method === 'POST') {
           auth.requireAuth(req)
           if (process.env.KEEPKEY_TEST_EMULATOR_CONTROL !== '1') throw new HttpError(404, 'Not found')

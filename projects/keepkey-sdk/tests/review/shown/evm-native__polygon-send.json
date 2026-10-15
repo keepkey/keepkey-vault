@@ -1,0 +1,56 @@
+[
+  {
+    "card": "/eth/sign-transaction",
+    "level": "low",
+    "reasons": [
+      "low: Sends 0.001 MATIC to 0x0000000000000000000000000000000000000001."
+    ],
+    "blind": false,
+    "window": [
+      "ACTION REQUIRED",
+      "Claude QA (Zcash)",
+      "Polygon Sign Transaction",
+      "Low risk",
+      "What signing this does:",
+      "\u2022 Sends 0.001 MATIC to 0x0000000000000000000000000000000000000001.",
+      "Checked on this computer. Your KeepKey screen is the final word.",
+      "Transaction",
+      "Chain",
+      "Polygon",
+      "To",
+      "0x0000000000000000000000000000000000000001",
+      "Value",
+      "0.001 MATIC",
+      "Max network fee",
+      "0.00063 MATIC",
+      "ChainID",
+      "137",
+      "Data",
+      "Hex",
+      "Decoded",
+      "0x",
+      "Full Request Payload",
+      "\u25bc",
+      "Approve",
+      "Reject",
+      "Enter to approve \u00b7 Esc to reject"
+    ]
+  },
+  {
+    "screen": "ethSignTx",
+    "lines": [
+      "SEND",
+      "Send 0.001 MATIC to",
+      "0x00000000000000000000000000000000000",
+      "00001"
+    ]
+  },
+  {
+    "screen": "ethSignTx",
+    "lines": [
+      "TRANSACTION",
+      "Send 0.001 MATIC from your wallet, paying",
+      "up to 0.00063 MATIC for gas?"
+    ]
+  }
+]
