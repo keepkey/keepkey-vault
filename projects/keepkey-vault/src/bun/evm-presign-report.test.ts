@@ -13,7 +13,7 @@ import { simulateEvmEffects } from './evm-effects'
 import { uniswapReportFindingsWithState } from './uniswap-report'
 import { resolvePromotedEvmArtifact } from './clearsign-artifact-resolver'
 import { ClearSignReportResponse } from './schemas'
-import { clearSignReportNeedsAttention } from '../shared/clearsign-report'
+import { clearSignReportNeedsAttention, swapReportNeedsAttention } from '../shared/clearsign-report'
 
 const swap = require('../../__tests__/fixtures/uniswap/base-ur-usdc-to-eth-swap.json')
 const SIGNER = '0x909ef6b32dfdc12ca86aa710b54c991af3c5f82e'
@@ -270,6 +270,18 @@ describe('in-app swap card — the Desktop signing verdict for the same bytes', 
     const lines = risk(r).join('\n')
     expect(lines).toContain('Swap 0.04075 ETH on Base for at least 57.40830833 TRX on TRON via THORChain. Your KeepKey shows only raw data')
     expect(lines).not.toContain('signing blind')
+    // Blind on this firmware is not news in our own swap: no report box.
+    expect(swapReportNeedsAttention(r)).toBe(false)
+  })
+
+  test('the swap dialog shows the report only when the swap is not what was quoted', () => {
+    const base = { findings: [], limitations: [] }
+    const line = (code: string, severity: 'info' | 'warning' | 'danger') => ({ code, message: code, severity })
+    expect(swapReportNeedsAttention({ ...base, findings: [line('RISK_HIGH', 'danger')], limitations: [line('DEVICE_SHOWS_RAW_DATA', 'warning')] })).toBe(false)
+    expect(swapReportNeedsAttention({ ...base, findings: [line('NEAR_INTENTS_UNKNOWN_ADDRESS', 'danger')] })).toBe(true)
+    expect(swapReportNeedsAttention({ ...base, limitations: [line('NEAR_INTENTS_UNCONFIRMED', 'warning')] })).toBe(true)
+    expect(swapReportNeedsAttention({ ...base, findings: [line('NEAR_INTENTS_CONFIRMED', 'info')] })).toBe(false)
+    expect(swapReportNeedsAttention({ ...base, rating: { riskLevel: 'critical' } as any })).toBe(true)
   })
 
   test('the overlay and the card share one verdict function', async () => {

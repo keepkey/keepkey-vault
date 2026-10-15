@@ -424,6 +424,7 @@ const ADDR = {
   THOR_ROUTER_BSC:   '0xb30ec53f98ff5947ede720d32ac2da7e52a5f56b', // BNB Smart Chain
   MAYA_ROUTER:       '0xd89dce570de35a6f42d3bca7dba50a6d89bfc2a2',
   MAYA_ROUTER_V4:    '0xe3985e6b61b814f7cdb188766562ba71b446b46d', // current MAYANode ETH inbound router
+  MAYA_ROUTER_ARB:   '0x700e97ef07219440487840dc472e7120a7ff11f4', // Arbitrum One
 }
 
 // THORChain's Router lives at a DIFFERENT address on each EVM chain, so the
@@ -443,16 +444,49 @@ const THOR_ROUTER_BY_CHAIN: Record<number, string> = {
 // that firmware takes the 7.15 table.
 const THOR_ROUTER_PINS_MIN_FW = '7.15.0'
 const THOR_LINE_716 = '7.16'
-// 7.14.x pins no router: thor_isThorchainTx takes either deposit selector to
-// ANY address on any chain, and thor_confirmThorTx shows it if the ABI is
-// canonical, the memo is at most 256 bytes and the expiry fits a uint64
-// (release/7.14.2 4002ef183).
-const THOR_UNPINNED_LINE = '7.14'
-const THOR_UNPINNED_MAX_MEMO = 256
 const THOR_ROUTER_BY_CHAIN_715: Record<number, string> = {
   ...THOR_ROUTER_BY_CHAIN,
   56:   ADDR.THOR_ROUTER_BSC,
   8453: ADDR.THOR_ROUTER_AVAX, // Base: same address as Avalanche's
+}
+// Maya pins: 7.15 has Ethereum v4 + Arbitrum (maya_router_pins); the 7.16 line
+// Ethereum v4 only. Older or unknown firmware keeps the legacy mainnet pin.
+const MAYA_ROUTER_BY_CHAIN_715: Record<number, string> = { 1: ADDR.MAYA_ROUTER_V4, 42161: ADDR.MAYA_ROUTER_ARB }
+const MAYA_ROUTER_BY_CHAIN_716: Record<number, string> = { 1: ADDR.MAYA_ROUTER_V4 }
+const MAYA_ROUTER_BY_CHAIN_LEGACY: Record<number, string> = { 1: ADDR.MAYA_ROUTER }
+
+// 7.14.x pins no router: thor_isThorchainTx takes either deposit selector to
+// ANY address on any chain (release/7.14.2 4002ef183). The device would show
+// a deposit to an attacker's contract as a THORChain swap with a raw "Routing
+// through <hex>" line, so Desktop keeps the gate for anything that is not a
+// router it knows; for those it mirrors when thor_confirmThorTx refuses.
+const THOR_UNPINNED_LINE = '7.14'
+const knownDepositRouter = (dest: string, chainId: number | undefined) => chainId != null && [
+  THOR_ROUTER_BY_CHAIN_715[chainId], MAYA_ROUTER_BY_CHAIN_715[chainId], MAYA_ROUTER_BY_CHAIN_LEGACY[chainId],
+].includes(dest)
+
+/** thorchain_parseConfirmMemo (7.14.2) returns CONFIRMED, or the EVM path
+ *  cancels with no raw fallback. Mirrors its checks for the swap and add
+ *  operations; anything else (withdraw included) is predicted refused. */
+export function thor714MemoConfirms(memo: string): boolean {
+  if (memo.length === 0 || memo.length > 256 || !/^[\x21-\x7e]+$/.test(memo)) return false
+  if (/(^[:.])|([:.]$)|([:.][:.])/.test(memo)) return false // empty component
+  const fields = memo.split(':')
+  // Exactly one '.', inside the chain.asset field.
+  if ((memo.match(/\./g) || []).length !== 1 || fields.length < 2 || !fields[1].includes('.')) return false
+  return ['SWAP', 's', '=', 'ADD', 'a', '+'].includes(fields[0])
+}
+
+function thor714Confirms(data: string, chainId: number | undefined, selector: string): boolean {
+  const fields = thorDepositFields(data, chainId)
+  const memo = fields?.find((f) => f.name === 'Memo (exact)')?.value
+  if (memo == null || !thor714MemoConfirms(memo)) return false
+  // depositWithExpiry: the device reads the expiry as a uint64.
+  if (selector === '0x44bc937b' && !/^0{48}$/.test(data.slice(10 + 4 * 64, 10 + 4 * 64 + 48))) return false
+  // An unknown token's amount is printed raw into a 41-byte buffer with a
+  // " unformatted" suffix: wider than 28 digits and the device refuses.
+  const native = /^0{64}$/.test(data.slice(10 + 64, 10 + 128))
+  return native || BigInt(`0x${data.slice(10 + 128, 10 + 192)}`) < 10n ** 28n
 }
 // Display-only: THORChain's Base router decodes for the overlay on every
 // firmware; whether it is native is decided by the tables above.
@@ -512,23 +546,14 @@ export function firmwareClearSigns(to?: string, data?: string, chainId?: number,
 
   if (THOR_MAYA_DEPOSIT.has(selector)) {
     // The firmware binds both protocols' router pins to an explicit chainId.
-    // Its legacy Maya pin is ETH-mainnet only; the current v4 router remains
-    // behind the Advanced Mode gate until firmware supports it.
     // Unknown version = the older, smaller list: over-warning is recoverable,
     // predicting a clear-sign the device refuses is a dead "Blocked".
     const line = firmwareVersion?.split('.').slice(0, 2).join('.')
-    if (line === THOR_UNPINNED_LINE) {
-      const memo = thorDepositFields(data, chainId)?.find((f) => f.name === 'Memo (exact)')?.value
-      // depositWithExpiry: the device reads the expiry as a uint64.
-      const expiryFits = selector !== '0x44bc937b' || /^0{48}$/.test(data.slice(10 + 4 * 64, 10 + 4 * 64 + 48))
-      return memo != null && Buffer.byteLength(memo) <= THOR_UNPINNED_MAX_MEMO && expiryFits
-    }
-    const routers = firmwareVersion && line !== THOR_LINE_716 && versionCompare(firmwareVersion, THOR_ROUTER_PINS_MIN_FW) >= 0
-      ? THOR_ROUTER_BY_CHAIN_715
-      : THOR_ROUTER_BY_CHAIN
-    const thorRouter = chainId == null ? undefined : routers[chainId]
-    return (thorRouter != null && dest === thorRouter) ||
-      (chainId === 1 && dest === ADDR.MAYA_ROUTER)
+    if (line === THOR_UNPINNED_LINE) return knownDepositRouter(dest, chainId) && thor714Confirms(data, chainId, selector)
+    const pinTable = !!firmwareVersion && versionCompare(firmwareVersion, THOR_ROUTER_PINS_MIN_FW) >= 0
+    const thorRouters = pinTable && line !== THOR_LINE_716 ? THOR_ROUTER_BY_CHAIN_715 : THOR_ROUTER_BY_CHAIN
+    const mayaRouters = !pinTable ? MAYA_ROUTER_BY_CHAIN_LEGACY : line === THOR_LINE_716 ? MAYA_ROUTER_BY_CHAIN_716 : MAYA_ROUTER_BY_CHAIN_715
+    return chainId != null && (dest === thorRouters[chainId] || dest === mayaRouters[chainId])
   }
   const pinned = FIRMWARE_PINNED[selector]
   return pinned != null && dest === pinned.to && chainId != null && pinned.chains.has(chainId)

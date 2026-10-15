@@ -31,6 +31,8 @@ import { SwapRiskReview } from "./SwapRiskReview"
 import { computeDustWarning, shouldWarnHighSlippage, computeEffectiveSlippageBps, isSmallSwapQuoteWarning } from "../../shared/swap-warnings"
 import { useEvmAddresses } from "../hooks/useEvmAddresses"
 import { useDeviceState } from "../hooks/useDeviceState"
+import { ClearSignReportCard } from "./ClearSignReportCard"
+import { swapReportNeedsAttention } from "../../shared/clearsign-report"
 import { versionCompare } from "../../shared/firmware-versions"
 import { AssetPickerDialog } from "./AssetPickerDialog"
 import { networkDisplayName, ellipsizeCaip, parseCaip } from "../../shared/swap-discovery"
@@ -4006,6 +4008,11 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                   </Text>
                 )}
               </Box>
+
+              {/* Our own swap is assumed clear: the report shows only when it is
+                  not what was quoted (swapReportNeedsAttention). */}
+              {previewBuild?.clearSignReports?.approval && swapReportNeedsAttention(previewBuild.clearSignReports.approval) && <ClearSignReportCard report={previewBuild.clearSignReports.approval} title="Approval ClearSign Report" />}
+              {previewBuild?.clearSignReports?.transaction && swapReportNeedsAttention(previewBuild.clearSignReports.transaction) && <ClearSignReportCard report={previewBuild.clearSignReports.transaction} title="Swap ClearSign Report" />}
 
               {/* Animated route map — gold dot travels from-token →
                   integration → to-token. Shows the actual swap topology
