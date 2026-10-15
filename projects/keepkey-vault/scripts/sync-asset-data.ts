@@ -3,10 +3,12 @@
  * src/shared/assetData.json, in its slim form (see shared/assetLookup.ts).
  *
  * Additive only — entries already in the bundle keep their local overrides.
+ * A token whose symbol IS a chain ticker is never synced (see asset-sync-policy).
  * Run `make sync-asset-data` after bumping @pioneer-platform/pioneer-discovery;
  * __tests__/asset-catalog-sync.test.ts fails until you do.
  */
 import { join, resolve } from 'node:path'
+import { syncSkips } from '../src/shared/asset-sync-policy'
 
 const projectRoot = resolve(import.meta.dir, '..')
 const discoveryPath = join(projectRoot, 'node_modules/@pioneer-platform/pioneer-discovery/lib/generatedAssetData.json')
@@ -17,7 +19,7 @@ const bundle: Record<string, any> = await Bun.file(bundlePath).json()
 
 let added = 0
 for (const [caip, entry] of Object.entries(discovery)) {
-  if (caip in bundle) continue
+  if (caip in bundle || syncSkips(caip, entry.symbol)) continue
   const { assetId, chainId, icon, ...slim } = entry
   // Same derivation as caipToIcon(): only a non-derivable icon is stored.
   if (icon && icon !== `https://api.keepkey.info/coins/${btoa(caip).replace(/=+$/, '')}.png`) slim.icon = icon

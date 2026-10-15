@@ -110,3 +110,18 @@ describe('findEvmSchema', () => {
     expect(findEvmSchema(1, TO, '0x')).toBeUndefined()
   })
 })
+
+describe('resolveEvmSchema never stands in the CI test-key registry', () => {
+  it('chain 1 Relay bridgeDeposit with the service down: no schema, not the slot-3 entry', async () => {
+    const TO = '0x4cd00e387622c35bddb9b4c962c136462338bc31'
+    const DATA = '0x49290c1c' + '00'.repeat(64)
+    expect(findEvmSchema(1, TO, DATA)?.keyId).toBe(3)
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = (async () => { throw new Error('offline') }) as unknown as typeof fetch
+    try {
+      expect(await resolveEvmSchema(1, TO, DATA, true)).toBeUndefined()
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+})

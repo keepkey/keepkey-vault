@@ -324,8 +324,14 @@ export async function resolveEvmSchema(
   if (!certifiedMetadataSupported) return undefined
   const promoted = findPromotedEvmArtifact(chainId, to, data)
   if (promoted) return { ...promoted, keyId: CERTIFIED_METADATA_KEY_ID, source: 'promoted-local' }
-  return (await findCertifiedEvmSchema(chainId, to, data))
-    ?? findEvmSchema(chainId, to, data)
+  const certified = await findCertifiedEvmSchema(chainId, to, data)
+  if (certified) return certified
+  // The local registry is signed with the CI test key (slot 3), which a
+  // production device cannot verify. Since a service outage now returns
+  // undefined instead of throwing, taking it here would show "certified" and
+  // then fail on the device. Only a production-key entry may stand in.
+  const local = findEvmSchema(chainId, to, data)
+  return local?.keyId === CERTIFIED_METADATA_KEY_ID ? local : undefined
 }
 
 /** Resolve a reviewed description bound to this complete transaction. Used
