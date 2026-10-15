@@ -725,6 +725,9 @@ export async function signTx(
       // verified/opaque/malformed, verifies the derived signer even for
       // parseable opaque payloads, and rejects malformed transactions. Routing
       // v0 through SolanaSignMessage loses those transaction-specific checks.
+      // hdwallet's getFirmwareVersion is async and returns "v7.15.0";
+      // versionCompare needs a plain "7.15.0" string.
+      const firmwareVersion = (await wallet.getFirmwareVersion?.())?.replace(/^v/, '')
       return signSolanaWireTransaction(
         unsignedTx,
         (deviceParams) => wallet.solanaSignTx(deviceParams),
@@ -735,7 +738,7 @@ export async function signTx(
           return address
         },
         'signTx:solana',
-        () => wallet.getFirmwareVersion?.(),
+        () => firmwareVersion,
       )
     }
     case 'tron': {
