@@ -82,7 +82,7 @@ jobs:
       - name: Upload immutable certified artifact
         uses: actions/upload-artifact@v4
         with:
-          name: certified-emulator-7.16.0-macos13-${{ github.sha }}
+          name: certified-emulator-7.17.0-macos13-${{ github.sha }}
           if-no-files-found: error
           retention-days: 90
           path: |

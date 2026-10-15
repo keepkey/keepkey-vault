@@ -10,7 +10,7 @@
  *     ├─ emulator.ts (this)    — flash lifecycle, FFI bridge
  *     └─ libkkemu.dylib        — firmware as shared library (loaded via bun:ffi)
  *
- * Release builds carry a verified 7.16 library at Resources/app/emulator/.
+ * Release builds carry a verified 7.17 library at Resources/app/emulator/.
  * A library dropped into ~/.keepkey/emulator remains an explicit override.
  */
 import { dlopen, FFIType, ptr } from 'bun:ffi'
