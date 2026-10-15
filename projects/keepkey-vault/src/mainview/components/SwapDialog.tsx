@@ -32,6 +32,7 @@ import { computeDustWarning, shouldWarnHighSlippage, computeEffectiveSlippageBps
 import { useEvmAddresses } from "../hooks/useEvmAddresses"
 import { useDeviceState } from "../hooks/useDeviceState"
 import { ClearSignReportCard } from "./ClearSignReportCard"
+import { swapReportNeedsAttention } from "../../shared/clearsign-report"
 import { versionCompare } from "../../shared/firmware-versions"
 import { AssetPickerDialog } from "./AssetPickerDialog"
 import { networkDisplayName, ellipsizeCaip, parseCaip } from "../../shared/swap-discovery"
@@ -2055,6 +2056,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       toAddressOverride: toAddress,
       fromEvmAddressIndex: fromAsset.chainFamily === 'evm' ? evmAddresses.selectedIndex : undefined,
       integration: quote.integration,
+      swapper: quote.swapper,
       relayTx: quote.relayTx,
       // Token sources Pioneer's available-assets doesn't pre-list (e.g. SPL
       // USDT) have no decimals lookup backend-side — carry the picker's value.
@@ -4007,8 +4009,10 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                 )}
               </Box>
 
-              {previewBuild?.clearSignReports?.approval && <ClearSignReportCard report={previewBuild.clearSignReports.approval} title="Approval ClearSign Report" />}
-              {previewBuild?.clearSignReports?.transaction && <ClearSignReportCard report={previewBuild.clearSignReports.transaction} title="Swap ClearSign Report" />}
+              {/* Our own swap is assumed clear: the report shows only when it is
+                  not what was quoted (swapReportNeedsAttention). */}
+              {previewBuild?.clearSignReports?.approval && swapReportNeedsAttention(previewBuild.clearSignReports.approval) && <ClearSignReportCard report={previewBuild.clearSignReports.approval} title="Approval ClearSign Report" />}
+              {previewBuild?.clearSignReports?.transaction && swapReportNeedsAttention(previewBuild.clearSignReports.transaction) && <ClearSignReportCard report={previewBuild.clearSignReports.transaction} title="Swap ClearSign Report" />}
 
               {/* Animated route map — gold dot travels from-token →
                   integration → to-token. Shows the actual swap topology

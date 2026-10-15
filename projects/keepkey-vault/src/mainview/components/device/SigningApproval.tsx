@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react"
+import { useEffect, useRef, useState, useCallback } from "react"
 import { Box, Text, VStack, Flex, Button } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
 import { Z } from "../../lib/z-index"
@@ -13,6 +13,8 @@ import { isRelayBridgeDeposit } from "../../../shared/relayBridgePreview"
 import { decodeAcrossDepositV3 } from "../../../shared/acrossDeposit"
 import { utxoPreview } from "../../../shared/utxoPreview"
 import { cosmosDepositPreview } from "../../../shared/cosmosDepositPreview"
+import { cosmosTxPreview } from "../../../shared/cosmosTxPreview"
+import { typedDataRows } from "../../../shared/typedDataRows"
 import { assessSigningRisk, formatCertifiedArg, type RiskLevel } from "../../../shared/clearsign-risk"
 import { ClearSignReportCard } from "../ClearSignReportCard"
 
@@ -934,8 +936,8 @@ function TypedDataSection({ decoded, t }: { decoded: EIP712DecodedInfo; t: (k: s
 			{decoded.domain.name && <Row label="Domain" value={decoded.domain.name} />}
 			{decoded.domain.verifyingContract && <Row label="Contract" value={identified(decoded.domain.verifyingContract)} />}
 			{decoded.domain.chainId !== undefined && <Row label="Chain ID" value={String(decoded.domain.chainId)} />}
-			{decoded.fields.map((field, i) => (
-				<Row key={i} label={field.label} value={identified(field.raw || field.value)} />
+			{typedDataRows(decoded).map((row, i) => (
+				<Row key={i} label={row.label} value={identified(row.value)} />
 			))}
 		</VStack>
 	)
@@ -980,6 +982,7 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 		? cosmosDepositPreview(request.rawRequestBody, 'THORChain')
 		: request.method === '/mayachain/sign-amino-deposit'
 			? cosmosDepositPreview(request.rawRequestBody, 'Maya') : undefined
+	const cosmosTx = cosmosDeposit ? undefined : cosmosTxPreview(request.method, request.rawRequestBody)
 
 	let trustLevel: 'verified' | 'known' | 'unknown' = hasCalldata ? 'unknown' : 'verified'
 	if (hasCalldata) {
@@ -1050,6 +1053,7 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 		setShowAdvancedConfirm(false)
 	}, [showAdvancedConfirm, t])
 
+	const cardRef = useRef<HTMLDivElement>(null)
 	const submitApproval = useCallback(() => {
 		if (approveDisabled) return
 		onApprove({
@@ -1061,6 +1065,20 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 		blindSigningConsentRequired,
 		onApprove,
 	])
+
+	// Emulator test tape (request.testReview): once the card has settled,
+	// report the text it renders, then answer it the way its own buttons allow.
+	const answeredForTape = useRef<string | null>(null)
+	useEffect(() => {
+		if (!request.testReview || phase !== 'approve' || answeredForTape.current === request.id) return
+		const timer = setTimeout(async () => {
+			answeredForTape.current = request.id // once per request, even if approval fails
+			await rpcRequest("reportSigningCard", { id: request.id, text: cardRef.current?.innerText ?? "" }).catch(() => {})
+			if (approveDisabled) onReject()
+			else submitApproval()
+		}, 1500)
+		return () => clearTimeout(timer)
+	}, [request.testReview, request.id, phase, approveDisabled, submitApproval, onReject])
 
 	useEffect(() => {
 		const handler = (e: KeyboardEvent) => {
@@ -1088,7 +1106,7 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 	const methodLabel = request.method === '/utxo/sign-transaction' && utxo
 		? `${utxo.coin} Sign Transaction`
 		: evmChainName ? `${evmChainName} Sign Transaction`
-		: labelKey ? t(labelKey) : request.method
+		: labelKey ? t(labelKey) : cosmosTx?.title ?? request.method
 	const remaining = Math.max(0, 120 - elapsed)
 	const timeStr = `${Math.floor(remaining / 60)}:${(remaining % 60).toString().padStart(2, "0")}`
 
@@ -1203,6 +1221,7 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 	// ── Approve phase ─────────────────────────────────────────────────
 	return (
 		<Box
+			ref={cardRef}
 			position="fixed" inset="0" zIndex={Z.overlay + 1}
 			bg="rgba(0,0,0,0.85)" backdropFilter="blur(8px)"
 			display="flex" alignItems="center" justifyContent="center"
@@ -1270,6 +1289,18 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 						<Row label="Memo affiliate fee" value={cosmosDeposit.affiliateFee} />
 						<Row label="Exact memo" value={cosmosDeposit.memo} />
 						<Text fontSize="2xs" color="var(--rose)">{cosmosDeposit.warning}</Text>
+					</VStack>
+				)}
+				{cosmosTx && (
+					<VStack w="100%" align="stretch" gap="1.5" bg="rgba(0,0,0,0.25)" borderRadius="xl" p="3">
+						{cosmosTx.messages.map((message, i) => (
+							<VStack key={i} w="100%" align="stretch" gap="1.5">
+								<Text fontSize="xs" fontWeight="700" color="white">{message.type}</Text>
+								{message.rows.map((row, j) => <Row key={j} label={row.label} value={row.value} />)}
+							</VStack>
+						))}
+						<Row label="Fee" value={cosmosTx.fee} />
+						<Row label="Memo" value={cosmosTx.memo} />
 					</VStack>
 				)}
 				{request.method === '/tron/sign-transaction' && request.tronDecoded && (

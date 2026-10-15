@@ -14,7 +14,7 @@ import bs58 from 'bs58'
 import type { ClearSignObservationDraft, ClearSignObservationOutcome, SigningRequestInfo, WcSessionInfo } from '../shared/types'
 import { evmAddressPath } from './evm-addresses'
 import { verifyEvmSigner } from './evm-rpc'
-import { applyEvmTxPreview, evmPriorityFee } from './evm-signing-preview'
+import { applyEvmTxPreview, evmPriorityFee, recognizedTypedDataSpender } from './evm-signing-preview'
 import { buildSolanaMessageDecodedInfo } from './solana-message-preview'
 import { buildSolanaDecodedInfo } from './solana-clearsign'
 import { applySolanaSigningGates } from './solana-consent'
@@ -912,6 +912,7 @@ export class WalletConnectManager {
       chainId: typedData.domain?.chainId ? Number(typedData.domain.chainId) : chainId,
       typedDataDecoded: decodeEIP712(typedData),
     }
+    signingInfo.recognizedSpender = recognizedTypedDataSpender(signingInfo.typedDataDecoded, signingInfo.chainId)
 
     const observationId = this.callbacks.recordClearSignObservation(observeEvmTypedData({
       typedData, chainId: signingInfo.chainId, hostDecoded: true,

@@ -59,6 +59,12 @@ export async function prepareEvmTxSigningInfo(
   }
 }
 
+/** A transfer with no call data. Every firmware shows its amount and
+ *  destination itself, so it needs no description and no AdvancedMode. */
+export function isPlainEvmTransfer(info: Pick<SigningRequestInfo, 'to' | 'data'>): boolean {
+  return Boolean(info.to) && (!info.data || info.data === '0x')
+}
+
 /**
  * A name for the call when a reviewed, pinned local decoder read all of it:
  * a Universal Router swap at a reviewed router that decodes the way the device
@@ -72,6 +78,8 @@ export function reviewedEvmDecodeLabel(info: SigningRequestInfo): string | undef
   if (field('Protocol') === 'Uniswap Universal Router' && field('Action')?.startsWith('Swap ')) return 'Uniswap Universal Router swap'
   if (d.dappName === 'Across' && d.functionType === 'bridge') return 'Across bridge deposit'
   if (d.dappName === 'Relay' && d.functionType === 'bridge') return 'Relay deposit'
+  // calldata-decoder names THORChain/Maya only for a pinned router on this chain.
+  if ((d.dappName === 'THORChain' || d.dappName === 'Mayachain') && field('Action')) return `${d.dappName} deposit`
   return undefined
 }
 
@@ -93,7 +101,8 @@ export function evmSigningVerdict(
   // device-verified description.
   const certifiedBlob = !certified && !preview.txMetadata?.signedPayload
     && info.calldataDecoded?.insightKeyId === CERTIFIED_METADATA_KEY_ID
-  const deviceAuthenticated = info.deviceClearSigns === true || certifiedBlob
+  const plain = isPlainEvmTransfer(info)
+  const deviceAuthenticated = info.deviceClearSigns === true || certifiedBlob || plain
   const erc7730 = ERC7730_TRANSPORT_SUPPORTED && Boolean(preview.erc7730)
   return {
     requestedLevel: deviceAuthenticated ? 'P4' : hostEvidenceLevel(simulation, universalRouterComplete, info),
@@ -101,7 +110,7 @@ export function evmSigningVerdict(
       source: certified || certifiedBlob ? 'certified' : deviceAuthenticated ? 'native' : erc7730 ? 'erc7730' : preview.txMetadata ? 'runtime' : 'none',
       authenticated: deviceAuthenticated,
       format: certified || certifiedBlob ? 'EVM_METADATA' : deviceAuthenticated ? 'FIRMWARE_NATIVE' : erc7730 ? 'ERC7730' : preview.txMetadata ? 'EVM_METADATA' : undefined,
-      label: certified?.method || (certifiedBlob ? info.calldataDecoded?.method : undefined) || (deviceAuthenticated ? `${info.calldataDecoded?.dappName || 'EVM'} ${info.calldataDecoded?.method || 'call'}` : reviewedEvmDecodeLabel(info)),
+      label: certified?.method || (certifiedBlob ? info.calldataDecoded?.method : undefined) || (plain ? 'a plain transfer' : undefined) || (deviceAuthenticated ? `${info.calldataDecoded?.dappName || 'EVM'} ${info.calldataDecoded?.method || 'call'}` : reviewedEvmDecodeLabel(info)),
     },
   }
 }
@@ -143,7 +152,8 @@ export function buildEvmPresignReport(input: {
   const promoted = artifactResolution.status === 'selected' ? artifactResolution.artifact : undefined
   const reviewed = reviewedEvmDecodeLabel(info)
   const resolution = !promoted && reviewed && artifactResolution.status === 'no-artifact' ? 'reviewed-decoder' as const : artifactResolution.status
-  const verdict = input.signerVerdict ? evmSigningVerdict(info, {}, simulation, ur.complete) : undefined
+  // A plain transfer has no descriptor to wait for: the device shows it whoever asks.
+  const verdict = input.signerVerdict || isPlainEvmTransfer(info) ? evmSigningVerdict(info, {}, simulation, ur.complete) : undefined
   const report = buildClearSignReport({
     // A supplied descriptor becomes P4 only after the device verifies it
     // during signing. This pre-sign report never self-promotes.

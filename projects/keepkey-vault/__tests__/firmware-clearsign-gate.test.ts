@@ -11,7 +11,7 @@
  * Run: cd projects/keepkey-vault && bun test __tests__/firmware-clearsign-gate.test.ts
  */
 import { describe, test, expect } from 'bun:test'
-import { firmwareClearSigns, firmwareKnowsToken } from '../src/bun/calldata-decoder'
+import { thor714MemoConfirms, firmwareClearSigns, firmwareKnowsToken } from '../src/bun/calldata-decoder'
 import firmwareTokenTable from '../src/bun/firmware-token-table.json'
 
 const ZX = '0xdef1c0ded9bec7f1a1670819833240f027b25eff'
@@ -61,9 +61,83 @@ describe('firmwareClearSigns mirrors the rc3 native clear-sign allowlist', () =>
     expect(firmwareClearSigns(UNIV2, '0xf305d719' + word, 8453)).toBe(false)
     expect(firmwareClearSigns(SAPROXY, '0xfea7c53f' + word, 1)).toBe(true)
     expect(firmwareClearSigns(SAPROXY, '0xfea7c53f' + word, 137)).toBe(false)
-    // THORChain router: thortx.c knows chains 1 and 43114 only.
+    // THORChain router: before 7.15 thortx.c knows chains 1 and 43114 only.
     expect(firmwareClearSigns('0x00dc6100103bc402d490aee3f9a5560cbd91f1d4', '0x1fece7b4' + word, 43114)).toBe(true)
     expect(firmwareClearSigns('0x00dc6100103bc402d490aee3f9a5560cbd91f1d4', '0x1fece7b4' + word, 8453)).toBe(false)
+  })
+
+  test('THORChain router pins follow the firmware version (7.15 adds BSC and Base)', () => {
+    const BASE_ROUTER = '0x00dc6100103bc402d490aee3f9a5560cbd91f1d4'
+    const BSC_ROUTER = '0xb30ec53f98ff5947ede720d32ac2da7e52a5f56b'
+    const deposit = '0x44bc937b' + '00'.repeat(256) // depositWithExpiry, as in Base tx 0xd567902e…
+    for (const fw of ['7.15.0', '7.17.0']) {
+      expect(firmwareClearSigns(BASE_ROUTER, deposit, 8453, fw)).toBe(true)
+      expect(firmwareClearSigns(BSC_ROUTER, deposit, 56, fw)).toBe(true)
+    }
+    // The 7.16 line still has the two-chain switch (develop 27d72042c).
+    for (const fw of ['7.16.0', '7.16.1', undefined]) {
+      expect(firmwareClearSigns(BASE_ROUTER, deposit, 8453, fw)).toBe(false)
+      expect(firmwareClearSigns(BSC_ROUTER, deposit, 56, fw)).toBe(false)
+    }
+    // The pin is (chain, address): right address on the wrong chain is not native.
+    expect(firmwareClearSigns(BSC_ROUTER, deposit, 8453, '7.17.0')).toBe(false)
+    expect(firmwareClearSigns(BASE_ROUTER, deposit, 56, '7.17.0')).toBe(false)
+    expect(firmwareClearSigns('0x00000000000000000000000000000000000000aa', deposit, 8453, '7.17.0')).toBe(false)
+  })
+
+  test('7.14.x pins no router: any canonical deposit is shown, on any chain', () => {
+    const memoHex = (m: string) => Buffer.from(m).toString('hex')
+    const w = (h: string) => h.padStart(64, '0')
+    const withExpiry = (memo: string, expiry = 'ffffffff') => {
+      const m = memoHex(memo)
+      return `0x44bc937b${w('718f6c9df785bc4e323086de024ca822efbe8ab9')}${w('0')}${w('90c5e8ba98e000')}${w('a0')}${w(expiry)}${w((m.length / 2).toString(16))}${m.padEnd(Math.ceil(m.length / 64) * 64, '0')}`
+    }
+    const BASE_ROUTER = '0x00dc6100103bc402d490aee3f9a5560cbd91f1d4'
+    const real = withExpiry('=:TRON.TRX:TMoUJ2EqVESgcaD5eJdvphkkn8K3ucXdTp:5740830833:keep:30')
+    for (const fw of ['7.14.0', '7.14.2', '7.14.3']) {
+      expect(firmwareClearSigns(BASE_ROUTER, real, 8453, fw)).toBe(true)
+      expect(firmwareClearSigns('0xd37bbe5744d730a1d98d8dc97c42f0ca46ad7146', real, 1, fw)).toBe(true)
+      // The device would show a deposit to ANY contract; Desktop keeps the
+      // gate for one that is not a router it knows.
+      expect(firmwareClearSigns('0x00000000000000000000000000000000000000aa', real, 1, fw)).toBe(false)
+    }
+    // Same bytes on the pinned lines: Base only from 7.15, never on 7.16.
+    expect(firmwareClearSigns(BASE_ROUTER, real, 8453, '7.15.0')).toBe(true)
+    expect(firmwareClearSigns(BASE_ROUTER, real, 8453, '7.16.0')).toBe(false)
+    // thor_confirmThorTx refuses: non-canonical ABI, memo over 256 bytes, expiry over uint64.
+    expect(firmwareClearSigns(BASE_ROUTER, '0x44bc937b' + '00'.repeat(256), 8453, '7.14.2')).toBe(false)
+    expect(firmwareClearSigns(BASE_ROUTER, withExpiry('=:BTC.BTC:' + 'x'.repeat(250)), 8453, '7.14.2')).toBe(false)
+    expect(firmwareClearSigns(BASE_ROUTER, withExpiry('=:BTC.BTC:x', '1' + '0'.repeat(16)), 8453, '7.14.2')).toBe(false)
+  })
+
+  test('7.14.2 memo parser: what thorchain_parseConfirmMemo confirms', () => {
+    expect(thor714MemoConfirms('=:TRON.TRX:TMoUJ2EqVESgcaD5eJdvphkkn8K3ucXdTp:5740830833:keep:30')).toBe(true)
+    expect(thor714MemoConfirms('SWAP:ETH.USDT-0xdac17f958d2ee523a2206206994597c13d831ec7:0x41e5:420')).toBe(true)
+    expect(thor714MemoConfirms('+:ETH.ETH')).toBe(true)
+    for (const refused of [
+      '',                          // empty
+      '=:ETH.ETH::0',              // empty field
+      '=:ETH.ETH:dest :0',         // space
+      '=:ETH:ETH:dest',            // no dot in the asset field
+      '=:ETH.ETH:a.b',             // second dot (dotted destination)
+      'TRADE+:ETH.ETH:dest',       // operation the parser does not know
+      '-:ETH.ETH:5000',            // withdraw: predicted refused
+      'x'.repeat(257),
+    ]) expect(thor714MemoConfirms(refused)).toBe(false)
+  })
+
+  test('Maya router pins follow the firmware line', () => {
+    const LEGACY = '0xd89dce570de35a6f42d3bca7dba50a6d89bfc2a2'
+    const V4 = '0xe3985e6b61b814f7cdb188766562ba71b446b46d'
+    const ARB = '0x700e97ef07219440487840dc472e7120a7ff11f4'
+    const dep = '0x1fece7b4' + '00'.repeat(256)
+    expect(firmwareClearSigns(V4, dep, 1, '7.15.0')).toBe(true)
+    expect(firmwareClearSigns(ARB, dep, 42161, '7.15.0')).toBe(true)
+    expect(firmwareClearSigns(LEGACY, dep, 1, '7.15.0')).toBe(false)
+    expect(firmwareClearSigns(V4, dep, 1, '7.16.0')).toBe(true)
+    expect(firmwareClearSigns(ARB, dep, 42161, '7.16.0')).toBe(false)
+    expect(firmwareClearSigns(LEGACY, dep, 1, undefined)).toBe(true)
+    expect(firmwareClearSigns(V4, dep, 1, undefined)).toBe(false)
   })
 
   test('pinned calls only count when the calldata fits the first 1024-byte chunk', () => {

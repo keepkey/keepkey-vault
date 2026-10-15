@@ -9,7 +9,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const bundleDir = join(root, 'projects', 'keepkey-vault', 'emulator-bundle')
 const manifest = JSON.parse(readFileSync(join(bundleDir, 'manifest.json'), 'utf8'))
 
-if (manifest.version !== '7.16.0') throw new Error(`unexpected emulator release ${manifest.version}`)
+if (manifest.version !== '7.17.0') throw new Error(`unexpected emulator release ${manifest.version}`)
 
 for (const [name, record] of Object.entries(manifest.files)) {
   const path = join(bundleDir, name)

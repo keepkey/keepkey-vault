@@ -41,6 +41,8 @@ export function resolvePromotedEvmArtifact(chainId: number | undefined, to: stri
 }> {
   if (!chainId || !to || !data) return { status: 'invalid-request' }
   const calldata = data.replace(/^0x/i, '')
+  // A plain transfer calls nothing, so there is no definition to apply.
+  if (!calldata) return { status: 'no-artifact' }
   if (!/^[0-9a-f]+$/i.test(calldata) || calldata.length < 8 || calldata.length % 2) return { status: 'invalid-request' }
   for (const { artifact, job } of snapshotProvider()) {
     if (artifact.chain !== 'Ethereum' || !artifact.evmCertifiedEnvelopeHex) continue

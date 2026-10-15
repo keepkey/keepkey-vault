@@ -369,6 +369,26 @@ export const ZCASH_V2_CSS = `
 .zcash-v2 .tx-flow-copper   { border-color: rgba(217,119,87,0.3); background: linear-gradient(180deg, rgba(217,119,87,0.05), transparent); }
 .zcash-v2 .tx-flow-blue     { border-color: rgba(122,166,240,0.35); background: linear-gradient(180deg, rgba(122,166,240,0.05), transparent); }
 
+.zcash-v2 .tx-flow-batch {
+	padding: 10px 18px 0;
+	font-size: 12px; font-weight: 600;
+	opacity: 0.85;
+}
+.zcash-v2 .tex-pending {
+	margin-top: 14px;
+	padding: 12px 14px;
+	border-radius: 10px;
+	border: 1px solid rgba(217,119,87,0.35);
+	background: rgba(217,119,87,0.08);
+	font-size: 12px;
+}
+.zcash-v2 .tex-pending-title { font-weight: 700; margin-bottom: 4px; }
+.zcash-v2 .tex-pending-row {
+	display: flex; flex-wrap: wrap; align-items: center;
+	gap: 8px; margin-top: 8px;
+}
+.zcash-v2 .tex-pending-info { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.zcash-v2 .tex-pending-error { color: #d97757; overflow-wrap: anywhere; }
 .zcash-v2 .tx-flow-stepper {
 	display: grid; grid-template-columns: repeat(3, 1fr);
 	padding: 14px 18px;

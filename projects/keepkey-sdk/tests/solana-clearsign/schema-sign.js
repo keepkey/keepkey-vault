@@ -111,13 +111,15 @@ run('Solana ClearSign: KKSOLSC1 reusable schema on device', async (getSdk, asser
     ...CATALOG.relayDepositNative,
     args: [{ type: ARG_U64, label: 'Amount' }], // 8+8 = 16, not 48
   })
-  await assertThrows(
-    'a schema that does not account for all instruction bytes is refused',
-    () =>
-      sdk.solana.solanaSignTransaction({
-        addressNList: SOLANA_PATH,
-        raw_tx: wrapUnsigned(buildRelayMessage(signer, dataA)).toString('base64'),
-        schema: partial.schema,
-      }),
-  )
+  // assertThrows takes the caught error, not a function: passing the call
+  // itself was always truthy, so this refusal was never actually exercised.
+  let partialErr
+  try {
+    await sdk.solana.solanaSignTransaction({
+      addressNList: SOLANA_PATH,
+      raw_tx: wrapUnsigned(buildRelayMessage(signer, dataA)).toString('base64'),
+      schema: partial.schema,
+    })
+  } catch (e) { partialErr = e }
+  assertThrows('a schema that does not account for all instruction bytes is refused', partialErr)
 })

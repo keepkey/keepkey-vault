@@ -2,7 +2,7 @@
  * from a caller's label or a function selector alone. */
 import { evmTokenIdentity, evmContractIdentity } from './evm-contract-identity'
 
-function amountWithDecimals(raw: bigint, decimals: number): string {
+export function amountWithDecimals(raw: bigint, decimals: number): string {
   const divisor = 10n ** BigInt(decimals)
   const whole = (raw / divisor).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',')
   const fraction = (raw % divisor).toString().padStart(decimals, '0').replace(/0+$/, '')

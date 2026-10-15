@@ -15,8 +15,10 @@ import type { CalldataDecodedInfo, CalldataDecodedField } from '../shared/types'
 import { thorDepositFields } from './thor-swap-preview'
 import { acrossDepositView, decodeAcrossDepositV3 } from '../shared/acrossDeposit'
 import { RELAY_DEPOSITORY, decodeRelayDeposit, isZeroAddress } from '../shared/relayDeposit'
+import { evmNativeValue } from '../shared/evmFeePreview'
 import { REVIEWED_EVM_TOKENS } from './evm-certified-schema'
 import firmwareTokenTable from './firmware-token-table.json'
+import { versionCompare } from '../shared/firmware-versions'
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -420,8 +422,10 @@ const ADDR = {
   SALARY_PROXY:      '0xbd6a40bb904aea5a49c59050b5395f7484a4203d', // saproxy withdrawFromSalary
   THOR_ROUTER:       '0xd37bbe5744d730a1d98d8dc97c42f0ca46ad7146', // Ethereum
   THOR_ROUTER_AVAX:  '0x00dc6100103bc402d490aee3f9a5560cbd91f1d4', // Avalanche C-Chain
+  THOR_ROUTER_BSC:   '0xb30ec53f98ff5947ede720d32ac2da7e52a5f56b', // BNB Smart Chain
   MAYA_ROUTER:       '0xd89dce570de35a6f42d3bca7dba50a6d89bfc2a2',
   MAYA_ROUTER_V4:    '0xe3985e6b61b814f7cdb188766562ba71b446b46d', // current MAYANode ETH inbound router
+  MAYA_ROUTER_ARB:   '0x700e97ef07219440487840dc472e7120a7ff11f4', // Arbitrum One
 }
 
 // THORChain's Router lives at a DIFFERENT address on each EVM chain, so the
@@ -434,8 +438,59 @@ const THOR_ROUTER_BY_CHAIN: Record<number, string> = {
   1:     ADDR.THOR_ROUTER,
   43114: ADDR.THOR_ROUTER_AVAX,
 }
-// Display-only: THORChain's Base router (same address as Avalanche's) decodes
-// for the overlay, but the firmware does not pin it, so it is NOT native.
+// Firmware 7.15.0 replaced that switch with a (chainId, address) pin table
+// (thor_router_pins) and added BSC and Base. The 7.16 line (develop 27d72042c,
+// and the bundled 7.16 RC emulator c35aee50c) still has the two-chain switch:
+// docs/handoff-thorchain-base-router-pin-716.md. Drop the 7.16 exception when
+// that firmware takes the 7.15 table.
+const THOR_ROUTER_PINS_MIN_FW = '7.15.0'
+const THOR_LINE_716 = '7.16'
+const THOR_ROUTER_BY_CHAIN_715: Record<number, string> = {
+  ...THOR_ROUTER_BY_CHAIN,
+  56:   ADDR.THOR_ROUTER_BSC,
+  8453: ADDR.THOR_ROUTER_AVAX, // Base: same address as Avalanche's
+}
+// Maya pins: 7.15 has Ethereum v4 + Arbitrum (maya_router_pins); the 7.16 line
+// Ethereum v4 only. Older or unknown firmware keeps the legacy mainnet pin.
+const MAYA_ROUTER_BY_CHAIN_715: Record<number, string> = { 1: ADDR.MAYA_ROUTER_V4, 42161: ADDR.MAYA_ROUTER_ARB }
+const MAYA_ROUTER_BY_CHAIN_716: Record<number, string> = { 1: ADDR.MAYA_ROUTER_V4 }
+const MAYA_ROUTER_BY_CHAIN_LEGACY: Record<number, string> = { 1: ADDR.MAYA_ROUTER }
+
+// 7.14.x pins no router: thor_isThorchainTx takes either deposit selector to
+// ANY address on any chain (release/7.14.2 4002ef183). The device would show
+// a deposit to an attacker's contract as a THORChain swap with a raw "Routing
+// through <hex>" line, so Desktop keeps the gate for anything that is not a
+// router it knows; for those it mirrors when thor_confirmThorTx refuses.
+const THOR_UNPINNED_LINE = '7.14'
+const knownDepositRouter = (dest: string, chainId: number | undefined) => chainId != null && [
+  THOR_ROUTER_BY_CHAIN_715[chainId], MAYA_ROUTER_BY_CHAIN_715[chainId], MAYA_ROUTER_BY_CHAIN_LEGACY[chainId],
+].includes(dest)
+
+/** thorchain_parseConfirmMemo (7.14.2) returns CONFIRMED, or the EVM path
+ *  cancels with no raw fallback. Mirrors its checks for the swap and add
+ *  operations; anything else (withdraw included) is predicted refused. */
+export function thor714MemoConfirms(memo: string): boolean {
+  if (memo.length === 0 || memo.length > 256 || !/^[\x21-\x7e]+$/.test(memo)) return false
+  if (/(^[:.])|([:.]$)|([:.][:.])/.test(memo)) return false // empty component
+  const fields = memo.split(':')
+  // Exactly one '.', inside the chain.asset field.
+  if ((memo.match(/\./g) || []).length !== 1 || fields.length < 2 || !fields[1].includes('.')) return false
+  return ['SWAP', 's', '=', 'ADD', 'a', '+'].includes(fields[0])
+}
+
+function thor714Confirms(data: string, chainId: number | undefined, selector: string): boolean {
+  const fields = thorDepositFields(data, chainId)
+  const memo = fields?.find((f) => f.name === 'Memo (exact)')?.value
+  if (memo == null || !thor714MemoConfirms(memo)) return false
+  // depositWithExpiry: the device reads the expiry as a uint64.
+  if (selector === '0x44bc937b' && !/^0{48}$/.test(data.slice(10 + 4 * 64, 10 + 4 * 64 + 48))) return false
+  // An unknown token's amount is printed raw into a 41-byte buffer with a
+  // " unformatted" suffix: wider than 28 digits and the device refuses.
+  const native = /^0{64}$/.test(data.slice(10 + 64, 10 + 128))
+  return native || BigInt(`0x${data.slice(10 + 128, 10 + 192)}`) < 10n ** 28n
+}
+// Display-only: THORChain's Base router decodes for the overlay on every
+// firmware; whether it is native is decided by the tables above.
 const THOR_ROUTER_DECODE_BY_CHAIN: Record<number, string> = {
   ...THOR_ROUTER_BY_CHAIN,
   8453: ADDR.THOR_ROUTER_AVAX,
@@ -478,7 +533,7 @@ export function firmwareKnowsToken(chainId: number | undefined, token: string | 
  * pinning matter: the same selector to a DIFFERENT address, or the same
  * address on a chain the firmware does not list, is NOT clear-signed.
  */
-export function firmwareClearSigns(to?: string, data?: string, chainId?: number): boolean {
+export function firmwareClearSigns(to?: string, data?: string, chainId?: number, firmwareVersion?: string): boolean {
   if (!to || !data || data.length < 10) return false
   const selector = data.slice(0, 10).toLowerCase()
   const dest = to.toLowerCase()
@@ -492,11 +547,14 @@ export function firmwareClearSigns(to?: string, data?: string, chainId?: number)
 
   if (THOR_MAYA_DEPOSIT.has(selector)) {
     // The firmware binds both protocols' router pins to an explicit chainId.
-    // Its legacy Maya pin is ETH-mainnet only; the current v4 router remains
-    // behind the Advanced Mode gate until firmware supports it.
-    const thorRouter = chainId == null ? undefined : THOR_ROUTER_BY_CHAIN[chainId]
-    return (thorRouter != null && dest === thorRouter) ||
-      (chainId === 1 && dest === ADDR.MAYA_ROUTER)
+    // Unknown version = the older, smaller list: over-warning is recoverable,
+    // predicting a clear-sign the device refuses is a dead "Blocked".
+    const line = firmwareVersion?.split('.').slice(0, 2).join('.')
+    if (line === THOR_UNPINNED_LINE) return knownDepositRouter(dest, chainId) && thor714Confirms(data, chainId, selector)
+    const pinTable = !!firmwareVersion && versionCompare(firmwareVersion, THOR_ROUTER_PINS_MIN_FW) >= 0
+    const thorRouters = pinTable && line !== THOR_LINE_716 ? THOR_ROUTER_BY_CHAIN_715 : THOR_ROUTER_BY_CHAIN
+    const mayaRouters = !pinTable ? MAYA_ROUTER_BY_CHAIN_LEGACY : line === THOR_LINE_716 ? MAYA_ROUTER_BY_CHAIN_716 : MAYA_ROUTER_BY_CHAIN_715
+    return chainId != null && (dest === thorRouters[chainId] || dest === mayaRouters[chainId])
   }
   const pinned = FIRMWARE_PINNED[selector]
   return pinned != null && dest === pinned.to && chainId != null && pinned.chains.has(chainId)
@@ -510,6 +568,8 @@ export async function decodeCalldata(
   contractAddress: string,
   data: string,
   _chainId?: number,
+  /** The transaction's native value, so a payable call can state its amount. */
+  value?: unknown,
 ): Promise<CalldataDecodedInfo | null> {
   // Skip if no calldata or just a bare transfer (no data)
   if (!data || data === '0x' || data.length < 10) return null
@@ -564,7 +624,7 @@ export async function decodeCalldata(
   if (relay) {
     const token = relay.token ? REVIEWED_EVM_TOKENS[`${relay.chainId}:${relay.token}`] : undefined
     const sent = relay.kind === 'native'
-      ? 'the native coin sent with this call (msg.value)'
+      ? (value === undefined ? null : evmNativeValue(value, relay.chainId)) ?? 'the native coin sent with this call (msg.value)'
       : token ? `${tokenUnits(relay.amount!, token.decimals)} ${token.symbol}` : `${relay.amount} base units of token ${relay.token}`
     const fields: CalldataDecodedField[] = [
       { name: 'Action', type: 'string', value: `Relay deposit on ${relay.chain}: ${sent}`, format: 'raw' },

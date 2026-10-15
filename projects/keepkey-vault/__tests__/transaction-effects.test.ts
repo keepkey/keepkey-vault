@@ -296,3 +296,12 @@ describe('evmTxFingerprint', () => {
     ]) expect(evmTxFingerprint({ ...base, ...change } as any)).not.toBe(fp)
   })
 })
+
+test('a simulation Pioneer has no route for reads as a plain sentence; a real node error is kept', async () => {
+  const { simulationUnavailableMessage } = await import('../src/bun/evm-effects')
+  const noRoute = new Error('Pioneer does not expose eth_simulateV1; no direct-node fallback is allowed')
+  expect(simulationUnavailableMessage('Pioneer does not expose this eth_call selector: 0xd9627aa4', noRoute))
+    .toBe('This computer could not simulate this transaction, so it cannot predict what it will move.')
+  expect(simulationUnavailableMessage('insufficient funds for gas * price + value', noRoute))
+    .toContain('insufficient funds for gas * price + value')
+})

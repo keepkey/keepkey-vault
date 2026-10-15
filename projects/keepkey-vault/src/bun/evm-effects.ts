@@ -7,6 +7,7 @@ import type {
   EffectCodeIdentity,
   EffectReport,
 } from '../shared/transaction-effects'
+import { PIONEER_UNSUPPORTED, PLAIN_TRANSFER_NOT_SIMULATED, SIMULATION_UNAVAILABLE_MESSAGE } from '../shared/transaction-effects'
 
 const TRANSFER_TOPIC = ethersUtils.id('Transfer(address,address,uint256)').toLowerCase()
 const APPROVAL_TOPIC = ethersUtils.id('Approval(address,address,uint256)').toLowerCase()
@@ -256,6 +257,16 @@ async function bindRuntimeCode(report: EffectReport, endpoint: string, blockTag:
 }
 
 /** Simulate first; tracing is additive and may be unavailable on public RPCs. */
+export { PLAIN_TRANSFER_NOT_SIMULATED }
+
+/** The card line for a simulation that could not run. "Pioneer has no route
+ * for this" is not something a user can act on, so it becomes a plain
+ * sentence. Any other error (a node's own refusal, a network failure) is kept. */
+export function simulationUnavailableMessage(callMessage: string, simulationError: unknown): string {
+  if (callMessage.startsWith(PIONEER_UNSUPPORTED)) return SIMULATION_UNAVAILABLE_MESSAGE
+  return `${callMessage}; eth_simulateV1: ${String((simulationError as any)?.message || simulationError || 'unavailable')}`.slice(0, 300)
+}
+
 export async function simulateEvmEffects(tx: EvmSimulationTx, endpoint: string): Promise<EffectReport> {
   const fingerprint = evmTxFingerprint(tx)
   const call = { ...tx, input: tx.input || tx.data || '0x' } as Record<string, unknown>
@@ -306,9 +317,14 @@ export async function simulateEvmEffects(tx: EvmSimulationTx, endpoint: string):
     return {
       version: 1, chain: 'Ethereum', transactionFingerprint: fingerprint,
       stateReference: { endpoint }, status: 'unavailable', assetChanges: [], authorityChanges: [], invokedCode: [], warnings: [],
-      unknowns: [{
+      // No node could run it. For a plain transfer that costs little: there is no call to predict.
+      unknowns: [tx.to && call.input === '0x' ? {
+        code: PLAIN_TRANSFER_NOT_SIMULATED,
+        message: 'Not simulated: a plain transfer moves exactly the amount shown. If the destination is a contract, what it does next is not predicted.',
+        severity: 'info',
+      } : {
         code: 'SIMULATION_UNAVAILABLE',
-        message: `${message}; eth_simulateV1: ${String((simulationError as any)?.message || simulationError || 'unavailable')}`.slice(0, 300),
+        message: simulationUnavailableMessage(message, simulationError),
         severity: 'danger',
       }],
       completeness: { accountCoverage: 'unknown', innerExecution: 'unknown', tokenCoverage: 'unknown' },

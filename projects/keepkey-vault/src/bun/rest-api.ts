@@ -1,4 +1,5 @@
 import type { EngineController } from './engine-controller'
+import { takeDeviceRefusal } from './device-refusal'
 import { withPermit2SpenderName } from './permit2-spender-name'
 import type { AuthStore } from './auth'
 import { HttpError } from './auth'
@@ -8,14 +9,14 @@ import { tronPreview } from './tron-preview'
 import type { ClearSignEvent } from '../shared/types'
 import { createHash } from 'crypto'
 import { decodeEIP712 } from './eip712-decoder'
-import { evmPriorityFee, normalizeEvmChainId, typedDataNativelyReviewed } from './evm-signing-preview'
+import { evmPriorityFee, normalizeEvmChainId, recognizedTypedDataSpender, typedDataNativelyReviewed } from './evm-signing-preview'
 import { buildEvmReportForTx, evmSigningVerdict, prepareEvmTxSigningInfo } from './evm-presign-report'
 import { CHAINS, isChainSupported, hiveRolePath, evmChainLabel } from '../shared/chains'
 import { getEvmSimulationEndpoint } from './evm-simulation-config'
 import { versionCompare } from '../shared/firmware-versions'
 import { isBitcoinOnlyVariant, DEFAULT_AUTO_LOCK_MS } from '../shared/flags'
 import {
-  initializeOrchardFromDevice, scanOrchardNotes, getShieldedBalance,
+  initializeOrchardFromDevice, exportOrchardFvk, scanOrchardNotes, getShieldedBalance,
   buildShieldedTx, finalizeShieldedTx, broadcastShieldedTx,
   ensureFvkLoaded, displayOrchardAddressOnDevice, sendShielded,
 } from './txbuilder/zcash-shielded'
@@ -1218,6 +1219,9 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
       const path = url.pathname
       const method = req.method
       const requestStart = Date.now()
+      // When this request could first have reached the device (set once the
+      // approval card is answered); a device Failure before that is not ours.
+      let deviceWorkStart = requestStart
       const sessionEpoch = callbacks?.getSessionEpoch?.()
 
       // Human-gated device ops (signing + the clear-sign trust confirm) block
@@ -1731,6 +1735,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               signingInfo.chainId = normalizeEvmChainId(preview.typedData?.domain?.chainId)
               if (preview.typedData) {
                 signingInfo.typedDataDecoded = decodeEIP712(preview.typedData)
+                signingInfo.recognizedSpender = recognizedTypedDataSpender(signingInfo.typedDataDecoded, signingInfo.chainId)
                 // hdwallet streams every document; the device reviews x402 and
                 // (7.16+) a canonical Permit2 PermitSingle natively. Anything
                 // else ends up hash-signed, which needs AdvancedMode.
@@ -2156,6 +2161,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           }
           // Approved — retain decoded info so handlers can pass metadata to device.
           activeSigningInfo = signingInfo
+          deviceWorkStart = Date.now()
           activeAllowBlindSigning =
             signingInfo.requiresBlindSigningConsent === true
             && approval.allowBlindSigning === true
@@ -2200,7 +2206,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const body = await parseRequest(req, S.AddressRequest)
           const cacheKey = scopedKey(engine, 'cosmos', body, wallet)
           const cached = addressCache.get(cacheKey)
-          if (cached) return json({ address: cached })
+          // A request to show the address must reach the device, never the cache.
+          if (cached && !body.show_display) return json({ address: cached })
           const sd = showDisplay(body.show_display)
           const result = await emuWrap(() => wallet.cosmosGetAddress({
             addressNList: body.address_n,
@@ -2218,7 +2225,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const body = await parseRequest(req, S.AddressRequest)
           const cacheKey = scopedKey(engine, 'osmo', body, wallet)
           const cached = addressCache.get(cacheKey)
-          if (cached) return json({ address: cached })
+          // A request to show the address must reach the device, never the cache.
+          if (cached && !body.show_display) return json({ address: cached })
           const sd = showDisplay(body.show_display)
           const result = await emuWrap(() => wallet.osmosisGetAddress({
             addressNList: body.address_n,
@@ -2236,7 +2244,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const body = await parseRequest(req, S.AddressRequest)
           const cacheKey = scopedKey(engine, 'eth', body, wallet)
           const cached = addressCache.get(cacheKey)
-          if (cached) return json({ address: cached })
+          // A request to show the address must reach the device, never the cache.
+          if (cached && !body.show_display) return json({ address: cached })
           const sd = showDisplay(body.show_display)
           const result = await emuWrap(() => wallet.ethGetAddress({
             addressNList: body.address_n,
@@ -2254,7 +2263,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const body = await parseRequest(req, S.AddressRequest)
           const cacheKey = scopedKey(engine, 'tendermint', body, wallet)
           const cached = addressCache.get(cacheKey)
-          if (cached) return json({ address: cached })
+          // A request to show the address must reach the device, never the cache.
+          if (cached && !body.show_display) return json({ address: cached })
           const sd = showDisplay(body.show_display)
           const result = await emuWrap(() => wallet.cosmosGetAddress({
             addressNList: body.address_n,
@@ -2272,7 +2282,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const body = await parseRequest(req, S.AddressRequest)
           const cacheKey = scopedKey(engine, 'thor', body, wallet)
           const cached = addressCache.get(cacheKey)
-          if (cached) return json({ address: cached })
+          // A request to show the address must reach the device, never the cache.
+          if (cached && !body.show_display) return json({ address: cached })
           const sd = showDisplay(body.show_display)
           const result = await emuWrap(() => wallet.thorchainGetAddress({
             addressNList: body.address_n,
@@ -2290,7 +2301,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const body = await parseRequest(req, S.AddressRequest)
           const cacheKey = scopedKey(engine, 'maya', body, wallet)
           const cached = addressCache.get(cacheKey)
-          if (cached) return json({ address: cached })
+          // A request to show the address must reach the device, never the cache.
+          if (cached && !body.show_display) return json({ address: cached })
           const sd = showDisplay(body.show_display)
           const result = await emuWrap(() => wallet.mayachainGetAddress({
             addressNList: body.address_n,
@@ -2308,7 +2320,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const body = await parseRequest(req, S.AddressRequest)
           const cacheKey = scopedKey(engine, 'xrp', body, wallet)
           const cached = addressCache.get(cacheKey)
-          if (cached) return json({ address: cached })
+          // A request to show the address must reach the device, never the cache.
+          if (cached && !body.show_display) return json({ address: cached })
           const sd = showDisplay(body.show_display)
           const result = await emuWrap(() => wallet.rippleGetAddress({
             addressNList: body.address_n,
@@ -2328,7 +2341,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const body = await parseRequest(req, S.AddressRequest)
           const cacheKey = scopedKey(engine, 'sol', body, wallet)
           const cached = addressCache.get(cacheKey)
-          if (cached) return json({ address: cached })
+          // A request to show the address must reach the device, never the cache.
+          if (cached && !body.show_display) return json({ address: cached })
           const sd = showDisplay(body.show_display)
           const result = await emuWrap(() => wallet.solanaGetAddress({
             addressNList: body.address_n,
@@ -2348,7 +2362,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const body = await parseRequest(req, S.AddressRequest)
           const cacheKey = scopedKey(engine, 'trx', body, wallet)
           const cached = addressCache.get(cacheKey)
-          if (cached) return json({ address: cached })
+          // A request to show the address must reach the device, never the cache.
+          if (cached && !body.show_display) return json({ address: cached })
           const sd = showDisplay(body.show_display)
           const result = await emuWrap(() => wallet.tronGetAddress({
             addressNList: body.address_n,
@@ -2368,7 +2383,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const body = await parseRequest(req, S.AddressRequest)
           const cacheKey = scopedKey(engine, 'ton', body, wallet)
           const cached = addressCache.get(cacheKey)
-          if (cached) return json({ address: cached })
+          // A request to show the address must reach the device, never the cache.
+          if (cached && !body.show_display) return json({ address: cached })
           const sd = showDisplay(body.show_display)
           const result = await emuWrap(() => wallet.tonGetAddress({
             addressNList: body.address_n,
@@ -2391,7 +2407,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const body = await parseRequest(req, S.AddressRequest)
           const cacheKey = scopedKey(engine, 'hive', body, wallet)
           const cached = addressCache.get(cacheKey)
-          if (cached) return json({ address: cached })
+          // A request to show the address must reach the device, never the cache.
+          if (cached && !body.show_display) return json({ address: cached })
           const sd = showDisplay(body.show_display)
           const result = await emuWrap(() => (wallet as any).hiveGetPublicKey({
             addressNList: body.address_n,
@@ -2931,7 +2948,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             // Distinguish user cancellation / device rejection from actual failures
             const errMsg = String(err?.message || err || '').toLowerCase()
             if (errMsg.includes('cancel') || errMsg.includes('rejected') || errMsg.includes('denied') || errMsg.includes('action cancelled')) {
-              return json({ error: 'User cancelled signing on device' }, 403)
+              const refusal = takeDeviceRefusal(engine, deviceWorkStart)
+              return json({ error: refusal ? `Device refused to sign: ${refusal}` : 'User cancelled signing on device' }, 403)
             }
             throw err
           }
@@ -3024,8 +3042,9 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             // Distinguish user cancellation from actual failures
             const msg = String(err?.message || err || '').toLowerCase()
             if (msg.includes('cancel') || msg.includes('rejected') || msg.includes('denied') || msg.includes('action cancelled')) {
-              if (activeClearSignObservationId) finalizeClearSignObservation(activeClearSignObservationId, 'rejected', 'user-rejected')
-              return json({ error: 'User cancelled signing on device' }, 403)
+              const refusal = takeDeviceRefusal(engine, deviceWorkStart)
+              if (activeClearSignObservationId) finalizeClearSignObservation(activeClearSignObservationId, refusal ? 'failed' : 'rejected', refusal ? 'device-or-transport' : 'user-rejected')
+              return json({ error: refusal ? `Device refused to sign: ${refusal}` : 'User cancelled signing on device' }, 403)
             }
             if (activeClearSignObservationId) finalizeClearSignObservation(activeClearSignObservationId, 'failed', 'device-or-transport')
             throw err
@@ -3067,6 +3086,18 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const { captureCurrentFrame } = await import('./emulator-window')
           const dataUrl = await captureCurrentFrame()
           return json({ dataUrl })
+        }
+        // Hands a test driver what the last requests showed (approval-card
+        // risk, raw device frames) and sets whether recording continues. While
+        // it records, each device confirmation is captured and then pressed.
+        if (path === '/emulator/test-tape' && method === 'POST') {
+          auth.requireAuth(req)
+          if (process.env.KEEPKEY_TEST_EMULATOR_CONTROL !== '1') throw new HttpError(404, 'Not found')
+          if (!engine.isEmulator) throw new HttpError(400, 'Emulator control is emulator-only')
+          const body = await req.json() as any
+          if (typeof body?.record !== 'boolean') throw new HttpError(400, 'record must be boolean')
+          const { takeReviewTape } = await import('./test-review-tape')
+          return json({ entries: takeReviewTape(body.record) })
         }
         if (path === '/emulator/test-decision' && method === 'POST') {
           auth.requireAuth(req)
@@ -3763,7 +3794,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const body = await parseRequest(req, S.GetPublicKeyRequest)
           const cacheKey = scopedKey(engine, 'pubkey', body, wallet)
           const cached = pubkeyCache.get(cacheKey)
-          if (cached) return json(cached)
+          // A request to show the key must reach the device, never the cache.
+          if (cached && !body.show_display) return json(cached)
           const sd = showDisplay(body.show_display)
           const result = await emuWrap(() => wallet.getPublicKeys([{
             addressNList: body.address_n,
@@ -4900,7 +4932,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             { signWrap: <T,>(fn: () => Promise<T>) => emuWrap(fn, details) },
           )
           callbacks?.zcashSchedulePostTxRescans?.()
-          return json(result, 200, zcashActivity('broadcast', result, body.amount, body.recipient))
+          // A partial send answers 200 with `unsentZat`: an error would invite retrying the full amount.
+          return json(result, 200, zcashActivity('broadcast', result, body.amount - (result.unsentZat ?? 0), body.recipient))
         }
 
         // Headless DESHIELD (z→t): spend a shielded note to a transparent addr.
@@ -4932,7 +4965,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const result = await deshieldZec(wallet, { recipient: body.recipient!, amount: body.amount!, account },
             { signWrap: <T,>(fn: () => Promise<T>) => emuWrap(fn, details) })
           callbacks?.zcashSchedulePostTxRescans?.()
-          return json(result, 200, zcashActivity('unshield', result, body.amount, body.recipient))
+          return json(result, 200, zcashActivity('unshield', result, body.amount! - (result.unsentZat ?? 0), body.recipient))
         }
 
         // Headless SHIELD (t→z): move transparent funds into a fresh shielded note.
@@ -4976,7 +5009,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             throw new HttpError(400, 'Device firmware does not support Orchard FVK export')
           }
           const cached = getCachedFvk()
-          const deviceFvk = await (wallet as any).zcashGetOrchardFVK(0)
+          const deviceFvk = await exportOrchardFvk(wallet, 0)
           const deviceAk = Buffer.from(deviceFvk.ak).toString('hex')
           const cachedAk = cached?.fvk?.ak ?? null
           const match = !!cachedAk && cachedAk.toLowerCase() === deviceAk.toLowerCase()
@@ -5010,6 +5043,12 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           if (!callbacks?.zcashPreSendGate) throw new HttpError(503, 'Zcash pre-send gate unavailable')
           await callbacks.zcashPreSendGate(account)
           const result = await buildShieldedTx(body)
+          // The split path signs one transaction. A payment that needs more notes
+          // than one transaction can spend would come back paying only part of the
+          // amount, so refuse it rather than let a caller think it paid in full.
+          if (result.batch && result.batch.total_txs > 1) {
+            throw new HttpError(400, `This payment needs ${result.batch.total_txs} transactions (the device signs at most 16 actions each); use /api/zcash/shielded/send`)
+          }
           return json(result)
         }
 

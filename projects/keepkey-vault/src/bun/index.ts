@@ -232,6 +232,7 @@ import { isBitcoinOnlyVariant } from "../shared/flags"
 import { bitcoinOnlyActivityList, bitcoinOnlyAddressBookHistoryList, bitcoinOnlyBalanceList, bitcoinOnlyChainList, bitcoinOnlyLedgerJournalList, bitcoinOnlyLedgerSummaryList, bitcoinOnlyPendingSigningRejection, bitcoinOnlyReportAllowed, bitcoinOnlyWatchOnlyScope, enforceBitcoinOnlyRpcBoundary } from "./bitcoin-only-boundary"
 import { assertOnline } from "./offline-policy"
 import { setPerfTelemetryOffline } from "./perf-telemetry"
+import { createUiWatchdog } from "./ui-watchdog"
 import { fetchDefiPositions } from "./zerion"
 import { loadSupportedChains } from "../shared/swap-support-matrix"
 import { PioneerSocket } from "./pioneer-socket"
@@ -244,7 +245,7 @@ import { getRequiredConfs } from "../shared/confirmations"
 import { addSessionActivity, getSessionActivity, clearSessionActivity } from "./session-activity"
 import { buildTx, broadcastTx, canonicalizeTronTokenCaip } from "./txbuilder"
 import { buildCosmosStakingTx, buildCosmosNameRegTx } from "./txbuilder/cosmos"
-import { initializeOrchardFromDevice, scanOrchardNotes, getShieldedBalance, sendShielded, ensureFvkLoaded, displayOrchardAddressOnDevice } from "./txbuilder/zcash-shielded"
+import { initializeOrchardFromDevice, exportOrchardFvk, scanOrchardNotes, getShieldedBalance, sendShielded, ensureFvkLoaded, displayOrchardAddressOnDevice } from "./txbuilder/zcash-shielded"
 import { findZcashCliBinary, isSidecarReady, startSidecar, stopSidecar, wipeSidecarWalletDb, hasFvkLoaded, getCachedFvk, onScanProgress, getScanState, updateSyncedTo, beginZcashSend, endZcashSend, isZcashSendInFlight } from "./zcash-sidecar"
 import { CHAINS, customChainToChainDef, isChainSupported, hiveRolePath, btcTaprootSupported, findChainByNetwork } from "../shared/chains"
 import { versionCompare } from "../shared/firmware-versions"
@@ -294,6 +295,8 @@ import type { ChainBalance, TokenBalance, CustomToken, SigningRequestInfo, ApiLo
 import type { VaultRPCSchema } from "../shared/rpc-schema"
 import { collectAndAnalyzeWithGate, MAX_CHUNK_BYTES } from "./rng-audit"
 import { withoutUnsupportedErc7730 } from '../shared/erc7730-support'
+import { newEmulatorWalletNameError } from '../shared/emulatorWallets'
+import { recordReviewCard, recordReviewCardText, reviewTapeRecording } from './test-review-tape'
 import { ADDRESS_BOOK_CERTIFY_UNSUPPORTED, buildCertificationRequest, buildContactProof, contactsFromEntries, CONTACT_DESTINATION, evmRecipient, isAddressBookCertifyUnsupported, signWithContactProofAck, type AddressBookCertification } from "./addressbook-clearsign"
 
 // L3 fix: withTimeout imported from engine-controller (was duplicated here)
@@ -1664,11 +1667,17 @@ const restCallbacks: RestApiCallbacks = {
 		resolveChain: (networkId: string) => findChainByNetwork(networkId, undefined, getAllChains()),
 	onSigningRequest: async (info: SigningRequestInfo) => {
 		attachSigningPolicySnapshot(info)
+		// Emulator test tape only; a real device is never recorded or marked.
+		const taping = engine.isEmulator && process.env.KEEPKEY_TEST_EMULATOR_CONTROL === '1' && reviewTapeRecording()
+		if (taping) recordReviewCard(info)
 		// Local integration runs may bypass only the host preview gate so a test
 		// driver can inspect the real firmware screens one at a time. The device
 		// confirmation path remains interactive and unchanged.
 		// Emulator only: never skips the approval screen for a real device.
-		if (process.env.KEEPKEY_TEST_APPROVE_HOST_SIGNING === '1' && engine.isEmulator) {
+		// A recording tape shows the real card instead: it reports what it
+		// renders and then answers itself the way its buttons allow.
+		if (taping) info.testReview = true
+		else if (process.env.KEEPKEY_TEST_APPROVE_HOST_SIGNING === '1' && engine.isEmulator) {
 			console.log(`[REST] Explicit test environment approved host signing gate for ${info.method}`)
 			return { approved: true }
 		}
@@ -2158,7 +2167,7 @@ async function ensureZcashDeviceMatch(account: number = 0, force: boolean = fals
 	// silent — no button press). The display path keeps the sticky short-circuit.
 	if (zcashDeviceVerified && !force) return true
 
-	const deviceFvk = await (engine.wallet as any).zcashGetOrchardFVK(account)
+	const deviceFvk = await exportOrchardFvk(engine.wallet, account)
 	if (!deviceFvk?.ak) throw new Error('Device returned no Orchard ak — cannot verify wallet identity')
 	const deviceAk = Buffer.from(deviceFvk.ak).toString('hex').toLowerCase()
 
@@ -2230,6 +2239,28 @@ function maybeStartBackgroundWalletVerification(): void {
 			zcashBackgroundVerifyInFlight = false
 		}
 	})()
+}
+
+/** Finish (pay the TEX address) or undo (shield back) a TEX payment
+ *  whose funds sit at a one-time address after a failed step 2. */
+async function texRecovery(action: 'complete' | 'shieldBack', index: number): Promise<{ txid: string }> {
+	if (!zcashPrivacyEnabled) throw new Error('Zcash privacy feature is disabled')
+	if (!engine.wallet) throw new Error('No device connected')
+	await ensureFvkLoaded(engine.wallet, 0)
+	await ensureZcashDeviceMatch(0, true)
+	const signWrap = engine.isEmulator
+		? <T,>(fn: () => Promise<T>) => emuSigningOp(fn, { operation: 'zcashShieldedSend', chain: 'Zcash' }) as Promise<T>
+		: undefined
+	const onProgress = (step: string, batch?: { index: number; total: number; fee?: number; phase?: string }) => {
+		try { rpc.send['send-progress']({ step, batch }) } catch { /* webview not ready */ }
+	}
+	const { payTex, shieldBackTex } = await import("./txbuilder/zcash-tex-send")
+	const result = action === 'complete'
+		? await payTex(engine.wallet as any, index, { signWrap, onProgress })
+		: await shieldBackTex(engine.wallet as any, index, { signWrap, onProgress })
+	try { rpc.send['send-progress']({ step: 'complete', detail: result.txid }) } catch { /* webview not ready */ }
+	schedulePostZcashTxRescans()
+	return { txid: result.txid }
 }
 
 /** After a private tx broadcasts (shield/deshield/z2z), the wallet DB only
@@ -2663,6 +2694,8 @@ async function deriveChainAddress(wallet: any, chain: ChainDef): Promise<string 
 
 // ── RPC Bridge (Electrobun UI ↔ Bun) ─────────────────────────────────
 
+const uiWatchdog = createUiWatchdog({ timeoutMs: 30_000, log: console.log, error: console.error })
+
 const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 	maxRequestTime: 1_800_000, // 30 minutes — generous for device-interactive ops, but not infinite
 	handlers: {
@@ -2671,7 +2704,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 		// scripts/patch-electrobun.sh, which normalizes them), so handlers here
 		// may throw device failures without hanging the renderer.
 		requests: enforceBitcoinOnlyRpcBoundary(
-			() => isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant),
+			// Runs ahead of every UI request, so it is also where the UI's first
+			// contact is recorded (see ui-watchdog.ts).
+			() => { uiWatchdog.seen(); return isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant) },
 			{
 			// ── Device lifecycle ──────────────────────────────────────
 			getDeviceState: async () => engine.getDeviceState(),
@@ -6525,7 +6560,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					throw new Error('Device firmware does not support Orchard FVK export')
 				}
 				const cached = getCachedFvk()
-				const deviceFvk = await (engine.wallet as any).zcashGetOrchardFVK(params?.account ?? 0)
+				const deviceFvk = await exportOrchardFvk(engine.wallet, params?.account ?? 0)
 				const deviceAk = Buffer.from(deviceFvk.ak).toString('hex')
 				const cachedAk = cached?.fvk?.ak ?? null
 				const match = !!cachedAk && cachedAk.toLowerCase() === deviceAk.toLowerCase()
@@ -6620,16 +6655,29 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					}) as Promise<T>
 					: undefined
 				try { rpc.send['send-progress']({ step: 'building' }) } catch { /* webview not ready */ }
-				const onProgress = (step: string) => {
-					try { rpc.send['send-progress']({ step }) } catch { /* webview not ready */ }
+				const onProgress = (step: string, batch?: { index: number; total: number; fee?: number; phase?: string }) => {
+					try { rpc.send['send-progress']({ step, batch }) } catch { /* webview not ready */ }
 				}
-				const result = await sendShielded(engine.wallet as any, {
-					recipient: params.recipient,
-					amount: params.amount,
-					memo: params.memo,
-				}, { signWrap, onProgress })
+				// ZIP-320: a tex1 recipient only accepts transparent funds, so it is
+				// paid in two transactions via a one-time transparent address.
+				const { isTexAddress } = await import("./txbuilder/zcash-tex")
+				const isTex = isTexAddress(params.recipient)
+				if (isTex && params.memo?.trim()) throw new Error('TEX addresses are transparent and cannot receive a memo')
+				const result = isTex
+					? await (await import("./txbuilder/zcash-tex-send")).sendTex(engine.wallet as any, {
+						recipient: params.recipient,
+						amount: params.amount,
+						account,
+					}, { signWrap, onProgress })
+					: await sendShielded(engine.wallet as any, {
+						recipient: params.recipient,
+						amount: params.amount,
+						memo: params.memo,
+					}, { signWrap, onProgress })
 				try { rpc.send['send-progress']({ step: 'complete', detail: result.txid }) } catch { /* webview not ready */ }
-				logZcashShieldedActivity('broadcast', result.txid, params.amount, params.recipient, sessionEpoch)
+				// A split send that stopped part-way still moved money: record what was sent.
+				const unsentZat = (result as { unsentZat?: number }).unsentZat ?? 0
+				logZcashShieldedActivity('broadcast', result.txid, params.amount - unsentZat, params.recipient, sessionEpoch)
 				schedulePostZcashTxRescans()
 				return result
 			},
@@ -6654,6 +6702,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					pendingZat: totals.pendingZat,
 					matureCount: totals.matureCount,
 					pendingCount: totals.pendingCount,
+					maxShieldZat: totals.maxShieldZat,
 				}
 			},
 			zcashShieldZec: async (params) => {
@@ -6680,8 +6729,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						operation: 'zcashShieldZec', chain: 'Zcash', value: zecAmount(params.amount),
 					}) as Promise<T>
 					: undefined
-				const onProgress = (step: string) => {
-					try { rpc.send['shield-progress']({ step }) } catch { /* webview not ready */ }
+				const onProgress = (step: string, batch?: { index: number; total: number; fee?: number; phase?: string }) => {
+					try { rpc.send['shield-progress']({ step, batch }) } catch { /* webview not ready */ }
 				}
 				const result = await shieldZec(engine.wallet as any, pioneer, {
 					amount: params.amount,
@@ -6710,8 +6759,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						to: params.recipient, value: zecAmount(params.amount),
 					}) as Promise<T>
 					: undefined
-				const onProgress = (step: string) => {
-					try { rpc.send['deshield-progress']({ step }) } catch { /* webview not ready */ }
+				const onProgress = (step: string, batch?: { index: number; total: number; fee?: number; phase?: string }) => {
+					try { rpc.send['deshield-progress']({ step, batch }) } catch { /* webview not ready */ }
 				}
 				const result = await deshieldZec(engine.wallet as any, {
 					recipient: params.recipient,
@@ -6719,10 +6768,19 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					account,
 				}, { signWrap, onProgress })
 				try { rpc.send['deshield-progress']({ step: 'complete', detail: result.txid }) } catch { /* webview not ready */ }
-				logZcashShieldedActivity('unshield', result.txid, params.amount, params.recipient, sessionEpoch)
+				logZcashShieldedActivity('unshield', result.txid, params.amount - (result.unsentZat ?? 0), params.recipient, sessionEpoch)
 				schedulePostZcashTxRescans()
 				return result
 			},
+
+			// ZIP-320 TEX payments whose funds may sit at a one-time address.
+			zcashTexPayments: async () => {
+				if (!zcashPrivacyEnabled) throw new Error('Zcash privacy feature is disabled')
+				const { listTexPayments } = await import("./txbuilder/zcash-tex-send")
+				return { payments: listTexPayments() }
+			},
+			zcashTexComplete: async (params) => texRecovery('complete', params.index),
+			zcashTexShieldBack: async (params) => texRecovery('shieldBack', params.index),
 
 			zcashGetTransactions: async () => {
 				if (!zcashPrivacyEnabled) throw new Error('Zcash privacy feature is disabled')
@@ -6777,11 +6835,19 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						throw new Error(rejection)
 					}
 				}
+				// A card that answers itself for the test tape must still be on the emulator.
+				if (pendingSigningApprovalInfo.get(params.id)?.testReview && !engine.isEmulator) {
+					auth.rejectSigningRequest(params.id)
+					throw new Error('Test review approval is emulator-only')
+				}
 				if (params.allowBlindSigning === true) blindSigningApprovalIds.add(params.id)
 				if (!auth.approveSigningRequest(params.id)) {
 					blindSigningApprovalIds.delete(params.id)
 					throw new Error('No pending signing request with that id')
 				}
+			},
+			reportSigningCard: async (params) => {
+				recordReviewCardText(params.id, String(params.text || ''))
 			},
 			rejectSigningRequest: async (params) => {
 				blindSigningApprovalIds.delete(params.id)
@@ -7851,7 +7917,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 								},
 								firmwareVersion, endpoint, hasErc7730: Boolean(tx.erc7730), signerVerdict: true,
 							})
-							if (artifactResolution.status !== 'selected') {
+							if (artifactResolution.status !== 'selected' && tx.data && tx.data !== '0x') {
 								const draft = observeEvmCall({
 									chainId, to: tx.to, data: tx.data,
 									source: tx.erc7730 ? 'erc7730' : tx.txMetadata ? 'runtime' : 'none',
@@ -7867,6 +7933,35 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						}
 						const [approval, transaction] = await Promise.all([reportFor(preview.approveTx), reportFor(preview.unsignedTx)])
 						preview.clearSignReports = { approval, transaction }
+						// A swap that pays a provider's deposit address: name the provider,
+						// say the device cannot verify the address, and for NEAR Intents ask
+						// NEAR Intents itself what that address does.
+						const { swapDepositAddressFromTx, swapDepositFindings, nearIntentsDepositFindings, nearIntentsSaysUnknownAddress } = await import('./swap-parsing')
+						const depositAddress = swapDepositAddressFromTx(preview.unsignedTx, params.fromCaip)
+						if (transaction && depositAddress) {
+							const nearIntents = params.swapper === 'NEAR Intents' || params.integration === 'nearIntents'
+							const lines = swapDepositFindings(params.swapper || params.integration)
+							if (nearIntents) {
+								let status: any
+								try {
+									const response = await fetch(`https://1click.chaindefuser.com/v0/status?depositAddress=${encodeURIComponent(depositAddress)}`, { signal: AbortSignal.timeout(8000) })
+									if (response.ok) status = await response.json()
+									// Asked and answered: NEAR Intents has no such deposit address.
+									else if (nearIntentsSaysUnknownAddress(response.status, await response.json().catch(() => undefined))) status = null
+								} catch { /* reported as unconfirmed */ }
+								const near = nearIntentsDepositFindings(status, { depositAddress, from, recipient: params.toAddressOverride })
+								lines.findings.push(...near.findings)
+								lines.limitations.push(...near.limitations)
+							}
+							transaction.findings.push(...lines.findings)
+							transaction.limitations.push(...lines.limitations)
+							// The device shows the transfer either way, but a provider record
+							// that contradicts the swap must not sit under a "ready" headline.
+							if (lines.findings.some((line) => line.severity === 'danger')) {
+								transaction.protectionLevel = 'P1'
+								transaction.headline = 'The swap provider\'s record does not match this swap'
+							}
+						}
 					} else if (fromChain?.chainFamily === 'solana' && from && preview.unsignedTx?.rawTx) {
 						const [{ simulateSolanaEffects }, { buildClearSignReport, solanaDecodedReportFindings }, { buildSolanaDecodedInfo }] = await Promise.all([
 							import('./solana-effects'), import('../shared/clearsign-report'), import('./solana-clearsign'),
@@ -8984,7 +9079,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const status = getEmulatorStatus()
 				const activeFlash = status.state === 'running' ? getActiveFlashName() : null
 				const metaByName = new Map(getAllEmulatorWalletMeta().map(m => [m.name, m]))
-				return listFlashImages().filter(name => !selectedBuild || name === emulatorBuildFlashName(selectedBuild)).map(name => {
+				// Sorted: directory order is arbitrary, and a list that reshuffles
+				// invites starting the wrong wallet. A selected build has exactly
+				// one wallet, listed even before its first start.
+				const names = selectedBuild ? [emulatorBuildFlashName(selectedBuild)] : listFlashImages().sort()
+				return names.map(name => {
 					const meta = metaByName.get(name)
 					return {
 						name,
@@ -8995,6 +9094,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						channel: meta?.channel || undefined,
 						deviceId: meta?.deviceId || undefined,
 						totalUsd: meta?.totalUsd ?? 0,
+						lastUsed: meta?.updatedAt || undefined,
+						ethAddress: meta?.ethAddress || undefined,
 					}
 				})
 			},
@@ -9104,6 +9205,12 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const selectedBuild = selectedEmulatorBuild()
 				if (selectedBuild && params.name !== emulatorBuildFlashName(selectedBuild)) throw new Error('This build has its own flash; switch builds to use another wallet')
 				const { stopEmulator, initEmulator, getEmulatorStatus } = await import('./emulator')
+				const { listFlashImages } = await import('./emulator-keychain')
+				const saved = listFlashImages()
+				if (!selectedBuild && !saved.includes(params.name)) {
+					const problem = newEmulatorWalletNameError(params.name, saved)
+					if (problem) throw new Error(`Cannot create emulator wallet: ${problem}`)
+				}
 
 				// Stop current emulator if running
 				if (getEmulatorStatus().state === 'running') {
@@ -9933,6 +10040,7 @@ const mainWindow = new BrowserWindow({
 	},
 })
 _mainWindow = mainWindow
+uiWatchdog.start()
 
 // Set window icon on Windows via Win32 API (SendMessage WM_SETICON).
 // Electrobun's setWindowIcon is a no-op on Windows (stub in nativeWrapper.cpp).

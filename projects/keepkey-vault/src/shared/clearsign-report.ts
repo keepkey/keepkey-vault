@@ -1,5 +1,5 @@
 import type { ClearSignDefinitionSource, ClearSignProtectionLevel, SolanaTxDecodedInfo } from './types'
-import type { EffectFinding, EffectReport } from './transaction-effects'
+import { PLAIN_TRANSFER_NOT_SIMULATED, type EffectFinding, type EffectReport } from './transaction-effects'
 
 export interface ClearSignDescriptorEvidence {
   source: ClearSignDefinitionSource
@@ -63,6 +63,29 @@ export interface ClearSignReport {
   rating?: ContractRating
 }
 
+/**
+ * Whether a report has anything the user must read. A transaction the KeepKey
+ * shows in full (P4/P5) with nothing to add is simply clear: the app's own
+ * swap screen leaves the report out and lets the device speak.
+ *
+ * Kept visible: any red line (finding or limitation), a contract rated high or
+ * critical, and an independent check that could not run. Not kept: the notes
+ * every swap carries (assets leave the wallet, a deposit address has no owner
+ * the device can check, a bridge delivers through its own off-chain order, a
+ * bounded approval to the route's contract, a prediction this computer could
+ * not run: the device shows an authenticated transaction in full either way).
+ * A swap the user built here is expected to be clear; the box is for when it
+ * is not.
+ */
+export function clearSignReportNeedsAttention(
+  report: Pick<ClearSignReport, 'protectionLevel' | 'findings' | 'limitations' | 'rating'>,
+): boolean {
+  if (report.protectionLevel !== 'P4' && report.protectionLevel !== 'P5') return true
+  if ([...report.findings, ...report.limitations].some((line) => line.severity === 'danger' && line.code !== 'SIMULATION_UNAVAILABLE')) return true
+  if (report.limitations.some((line) => line.code === 'NEAR_INTENTS_UNCONFIRMED')) return true
+  return report.rating?.riskLevel === 'high' || report.rating?.riskLevel === 'critical'
+}
+
 const LEVEL_ORDER: ClearSignProtectionLevel[] = ['P0', 'P1', 'P2', 'P3', 'P4', 'P5']
 
 function minLevel(a: ClearSignProtectionLevel, b: ClearSignProtectionLevel): ClearSignProtectionLevel {
@@ -106,7 +129,8 @@ export function buildClearSignReport(input: {
     message: `Simulation observed ${approvals.length} new or changed spending authorit${approvals.length === 1 ? 'y' : 'ies'}.`,
     severity: approvals.some((change) => change.unlimited) ? 'danger' : 'warning',
   })
-  if (descriptor.authenticated && simulation.status !== 'success') limitations.push({
+  if (descriptor.authenticated && simulation.status !== 'success'
+    && !simulation.unknowns.some((unknown) => unknown.code === PLAIN_TRANSFER_NOT_SIMULATED)) limitations.push({
     code: 'DESCRIPTION_WITHOUT_COMPLETE_SIMULATION',
     message: 'The description is authenticated, but execution effects could not be completely simulated.',
     severity: 'warning',
@@ -192,4 +216,18 @@ export function solanaDecodedReportFindings(decoded: SolanaTxDecodedInfo | undef
     severity: 'warning',
   })
   return { findings, limitations }
+}
+
+/**
+ * The in-app swap dialog's own gate. A swap Desktop built from a Pioneer quote
+ * is a normal request: being blind on this firmware, or having no simulation,
+ * is not news (the Advanced Mode panel covers the device side). Only signals
+ * that this swap is not what was quoted put the report in front of the user:
+ * a NEAR Intents deposit-address red line or unanswered check, or a contract
+ * an auditor rated high or critical.
+ */
+export function swapReportNeedsAttention(report: Pick<ClearSignReport, 'findings' | 'limitations' | 'rating'>): boolean {
+  const near = [...report.findings, ...report.limitations].some((line) =>
+    line.code.startsWith('NEAR_INTENTS_') && (line.severity === 'danger' || line.code === 'NEAR_INTENTS_UNCONFIRMED'))
+  return near || report.rating?.riskLevel === 'high' || report.rating?.riskLevel === 'critical'
 }

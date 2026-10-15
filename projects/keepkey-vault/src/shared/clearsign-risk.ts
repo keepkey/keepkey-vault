@@ -24,6 +24,7 @@ import type {
   SolanaTxDecodedInstruction,
 } from './types'
 import { versionCompare } from './firmware-versions'
+import { typedDataSpendAmounts } from './typedDataRows'
 import { ERC7730_TRANSPORT_SUPPORTED } from './erc7730-support'
 
 export type RiskLevel = 'low' | 'medium' | 'high' | 'critical'
@@ -151,6 +152,28 @@ const KNOWN_SELECTORS = new Set(['0x095ea7b3', '0x39509351', '0xa22cb465', '0xa9
 const PERMIT2 = '0x000000000022d473030f116ddee9f6b43ac78ba3'
 const ALL_THRESHOLD = (1n << 160n) - 1n // uint160 max: Permit2's "unlimited"
 
+/** uint96 max: the largest "infinite" approval a real token uses (UNI, COMP).
+ * At or above it an amount is not a bound, whatever the request calls it. */
+const BOUND_LIMIT = (1n << 96n) - 1n
+
+/**
+ * How loud a spend permission is. Danger is kept for what a normal dapp flow
+ * does not ask for: a grant with no real bound to a spender KeepKey has not
+ * reviewed. Every other case still says exactly what is granted, at a lower
+ * level, so the top warning keeps its meaning.
+ *   reviewed spender, bounded        check before you sign
+ *   reviewed spender, standard flow  check before you sign   (see callers)
+ *   reviewed spender, unbounded      high
+ *   unreviewed spender, bounded      high
+ *   unreviewed spender, unbounded    danger
+ * "Unbounded" includes an amount this code could not read and a token it does
+ * not know: both are treated as the worst case.
+ */
+function spendPermissionLevel(recognizedSpender: string | undefined, unbounded: boolean, standardFlow = false): RiskLevel {
+  if (!recognizedSpender) return unbounded ? 'critical' : 'high'
+  return !unbounded || standardFlow ? 'medium' : 'high'
+}
+
 function evmChainId(v: unknown): number {
   const n = typeof v === 'string' ? Number(v.startsWith('0x') ? parseInt(v, 16) : v) : Number(v)
   return n > 0 ? n : 1 // the /eth/sign-transaction handler signs a missing/0 chainId as 1
@@ -173,7 +196,8 @@ function evmTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void) 
 
   const native = evmNativeValue(req.value ?? '0', chainId)
   const sendsCoin = native !== null && !/^0 /.test(native)
-  if (sendsCoin) add('low', `Sends ${native} to ${data === '0x' ? '' : 'the contract at '}${to}.`)
+  // A Relay deposit states its own amount and destination contract below.
+  if (sendsCoin && !decodeRelayDeposit(to, data, chainId)) add('low', `Sends ${native} to ${data === '0x' ? '' : 'the contract at '}${to}.`)
   if (data === '0x') {
     if (!sendsCoin) add('low', 'Calls no contract and sends nothing.')
     return
@@ -191,6 +215,8 @@ function evmTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void) 
   const urSwap = field('Protocol') === 'Uniswap Universal Router' && field('Action')?.startsWith('Swap ')
     ? field('Action')!.replace(/^Swap /, 'Swaps ') : undefined
   const relay = decodeRelayDeposit(to, data, chainId)
+  const thorProtocol = req.calldataDecoded?.source === 'local' ? req.calldataDecoded.dappName : undefined
+  const thorSwap = (thorProtocol === 'THORChain' || thorProtocol === 'Mayachain') ? field('Action') : undefined
   if ((sel === '0x095ea7b3' || sel === '0x39509351') && addrWord(0) && num(1) !== null) {
     const spender = addrWord(0)! + (addrWord(0) === RELAY_DEPOSITORY ? ' (the Relay Depository)' : ''), v = num(1)!
     const canonicalUniswapSetup = chainId === 42161
@@ -201,10 +227,18 @@ function evmTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void) 
     } else if (canonicalUniswapSetup && v >= ALL_THRESHOLD) {
       add('medium', 'Standard Uniswap setup: gives canonical Permit2 persistent access to your Arbitrum USDT. You can revoke this allowance later.')
     } else {
-      const scope = v >= ALL_THRESHOLD
-        ? `ALL of your ${token?.symbol ?? `token at ${to}`}`
-        : `up to ${amount(v)}`
-      add('critical', `Lets ${spender} spend ${scope}, now and later, without asking you again.`)
+      const all = v >= ALL_THRESHOLD
+      const scope = all ? `ALL of your ${token?.symbol ?? `token at ${to}`}` : `up to ${amount(v)}`
+      const known = req.recognizedSpender
+      const who = known ? `${known} (${spender})` : spender
+      const text = `Lets ${who} spend ${scope}, now and later, without asking you again.`
+      // An unknown token may be an NFT: approve(to, tokenId) has the same selector.
+      const unbounded = v >= BOUND_LIMIT || !token
+      // Approving canonical Permit2 once, for everything, is how Permit2 is set up.
+      const permit2Setup = known === 'Uniswap Permit2' && addrWord(0) === PERMIT2
+      add(spendPermissionLevel(known, unbounded, permit2Setup), permit2Setup && all
+        ? `Standard Permit2 setup: gives canonical Permit2 persistent access to your ${token?.symbol ?? `token at ${to}`}. You can revoke this allowance later.`
+        : text)
     }
   } else if (sel === '0xa22cb465' && addrWord(0) && num(1) !== null) {
     add(num(1) === 0n ? 'low' : 'critical', num(1) === 0n
@@ -225,6 +259,12 @@ function evmTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void) 
     acrossDeposit(across, req, add)
   } else if (relay) {
     relayDeposit(relay, req, field('You send'), add)
+  } else if (thorSwap) {
+    // A fully decoded deposit to the router pinned for this chain is a normal
+    // swap: say what it does, not "unknown contract".
+    add(req.deviceClearSigns ? 'low' : 'medium', req.deviceClearSigns
+      ? `${thorSwap}. Your KeepKey shows this deposit on its screen; check it there.`
+      : `${thorSwap}. Your KeepKey shows only raw data for this deposit, so check these details here.`)
   } else if (!req.deviceClearSigns || KNOWN_SELECTORS.has(sel)) {
     // A known selector reaching here did not parse (dirty address word,
     // trailing bytes): the device may accept it by length alone.
@@ -299,7 +339,11 @@ function evmTypedData(req: SigningRequestInfo, add: (l: RiskLevel, t: string) =>
   const contract = d.domain.verifyingContract?.toLowerCase()
   if (/^Permit/.test(d.primaryType) || contract === PERMIT2) {
     const raw = f('Value')?.raw ?? f('Amount')?.raw ?? d.fields.find((x) => /Amount$/.test(x.label))?.raw
-    let all = f('Allowed')?.value === 'true'
+    // Every amount counts: a batch can hide an unlimited entry behind a small first one.
+    const amounts = typedDataSpendAmounts(d)
+    // DAI's `allowed`: anything but an explicit false is a grant of everything.
+    const allowed = f('Allowed')?.value
+    let all = (allowed !== undefined && !/^(false|0)$/i.test(String(allowed).trim())) || amounts.some((a) => a.unlimited)
     try { if (raw !== undefined) all ||= BigInt(raw) >= ALL_THRESHOLD } catch { /* odd amount: shown as "some of" */ }
     const chainId = Number(d.domain.chainId)
     const spender = String(f('Spender')?.raw || '').toLowerCase()
@@ -311,8 +355,21 @@ function evmTypedData(req: SigningRequestInfo, add: (l: RiskLevel, t: string) =>
     if (officialArbitrumUniswap) {
       add('medium', `Allows the official Uniswap Universal Router to spend ${all ? 'an unlimited amount of' : 'up to'} Arbitrum USDT through Permit2 until ${f('Expiration')?.value || 'the displayed expiration'}. Review the swap amount on the following transaction.`)
     } else {
-      const howMuch = all ? 'ALL of' : raw !== undefined ? `up to ${f('Value')?.value ?? f('Amount')?.value ?? raw} of` : 'some of'
-      add('critical', `Lets ${f('Spender')?.raw ?? 'another account'} spend ${howMuch} your tokens, now and later. This signature alone is enough; no transaction from you is needed.`)
+      // Name the tokens only when every unlimited entry has a name; one unnamed
+      // unlimited token must not hide behind a named one.
+      const unlimited = amounts.filter((a) => a.unlimited)
+      const symbols = [...new Set(unlimited.map((a) => a.symbol))]
+      const named = unlimited.length > 0 && symbols.every(Boolean)
+      const howMuch = all ? `ALL of your ${named ? symbols.join(' and ') : 'tokens'}`
+        : amounts.length ? `up to ${amounts.map((a) => a.text).join(' and ')}`
+        : raw !== undefined ? `up to ${raw} of your tokens` : 'some of your tokens'
+      const known = d.isKnownType && d.protocolIdentityVerified !== false ? req.recognizedSpender : undefined
+      const who = f('Spender')?.raw ? (known ? `${known} (${f('Spender')!.raw})` : f('Spender')!.raw) : 'another account'
+      const unbounded = all || amounts.length === 0 || amounts.some((a) => a.raw === undefined || a.raw >= BOUND_LIMIT)
+      // A Permit2 permit to a reviewed router is what Uniswap asks for on every
+      // swap, usually for the maximum with an expiry.
+      const routerPermit = contract === PERMIT2 && !!known && known !== 'Uniswap Permit2'
+      add(spendPermissionLevel(known, unbounded, routerPermit), `Lets ${who} spend ${howMuch}, now and later. This signature alone is enough; no transaction from you is needed.`)
     }
   } else if (/^(OrderComponents|BulkOrder)$/.test(d.primaryType)) {
     add('critical', 'This is a marketplace order. Anyone holding this signature can take the listed items at the price in the order.')

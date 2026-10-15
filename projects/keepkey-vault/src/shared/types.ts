@@ -729,6 +729,28 @@ export interface BuildNameRegTxParams {
 
 // ── Zcash shielded transaction history ──────────────────────────────────
 
+/** Position of one transaction in an operation that takes several. */
+export interface ZcashTxBatch {
+  index: number
+  total: number
+  fee?: number
+  /** TEX steps: "tex-fund" (to the one-time address), "tex-pay", "tex-return" */
+  phase?: string
+}
+
+/** A ZIP-320 TEX payment; mirrors TexRecord in src/bun/txbuilder/zcash-tex.ts */
+export interface ZcashTexPayment {
+  index: number
+  account: number
+  tex: string
+  amount: number
+  status: 'reserved' | 'funded' | 'paid' | 'returned'
+  funding: Array<{ txid: string; vout: number; value: number }>
+  finalTxid?: string
+  error?: string
+  createdAt: number
+}
+
 export interface ZcashTransaction {
   id: number
   value: number            // zatoshis
@@ -1043,12 +1065,17 @@ export interface SigningRequestInfo {
   solanaDecodeError?: string
   /** true when tx has calldata that cannot be fully decoded — device will show blind-signing warning */
   needsBlindSigning?: boolean
+  /** Emulator test tape is recording: the approval card reports what it renders and answers itself. */
+  testReview?: boolean
   /** The device can independently decode this call, either from its native
    *  allowlist or from authenticated, firmware-verified metadata. A
    *  caller-supplied blob never sets this by itself.
    *  REST Solana: Vault found a certified ClearSign schema for these exact
    *  bytes, which the device verifies and decodes (no opaque consent asked). */
   deviceClearSigns?: boolean
+  /** Name of the spender when KeepKey has reviewed it (canonical Permit2 or a
+   *  certified name record). Set by the backend; absent = not recognised. */
+  recognizedSpender?: string
   /** Certified metadata resolved before user approval. The signing handler
    *  reuses this exact envelope so approval and device review cannot drift. */
   certifiedEvmSchema?: {
@@ -1311,6 +1338,10 @@ export interface EmulatorWalletInfo {
   firmwareVersion?: string
   /** Firmware release channel last reported for this wallet, if known. */
   channel?: string
+  /** When this wallet last connected (ms). */
+  lastUsed?: number
+  /** First Ethereum account (m/44'/60'/0'/0/0), cached from the last connect. */
+  ethAddress?: string
 }
 
 /** Persisted device snapshot — one per device_id, stored in SQLite. */
