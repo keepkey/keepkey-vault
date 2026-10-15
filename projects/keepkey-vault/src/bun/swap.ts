@@ -1138,6 +1138,7 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
       ctx.isAdvancedModeEnabled?.(),
       unsignedTx?.txMetadata,
       unsignedTx?.erc7730,
+      ctx.getFirmwareVersion?.(),
     )
   ) {
     swapLog(`${TAG} EVM blind-sign gate: to=${unsignedTx.to} selector=${String(unsignedTx.data).slice(0, 10)} — AdvancedMode is off`)

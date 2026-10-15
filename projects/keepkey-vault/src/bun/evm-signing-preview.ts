@@ -208,7 +208,7 @@ export async function applyEvmTxPreview(
   if (swapRows.length > 0 && signingInfo.calldataDecoded) {
     signingInfo.calldataDecoded.fields = [...swapRows, ...signingInfo.calldataDecoded.fields]
   }
-  signingInfo.deviceClearSigns = firmwareClearSigns(to, data, chainId)
+  signingInfo.deviceClearSigns = firmwareClearSigns(to, data, chainId, firmwareVersion)
   // approve / increaseAllowance: is the spender one KeepKey has reviewed?
   const selector = data.slice(0, 10).toLowerCase()
   if ((selector === '0x095ea7b3' || selector === '0x39509351') && /^0{24}[0-9a-fA-F]{40}$/.test(data.slice(10, 74))) {

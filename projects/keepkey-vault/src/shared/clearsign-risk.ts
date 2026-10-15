@@ -214,6 +214,8 @@ function evmTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void) 
   const urSwap = field('Protocol') === 'Uniswap Universal Router' && field('Action')?.startsWith('Swap ')
     ? field('Action')!.replace(/^Swap /, 'Swaps ') : undefined
   const relay = decodeRelayDeposit(to, data, chainId)
+  const thorProtocol = req.calldataDecoded?.source === 'local' ? req.calldataDecoded.dappName : undefined
+  const thorSwap = (thorProtocol === 'THORChain' || thorProtocol === 'Mayachain') ? field('Action') : undefined
   if ((sel === '0x095ea7b3' || sel === '0x39509351') && addrWord(0) && num(1) !== null) {
     const spender = addrWord(0)! + (addrWord(0) === RELAY_DEPOSITORY ? ' (the Relay Depository)' : ''), v = num(1)!
     const canonicalUniswapSetup = chainId === 42161
@@ -256,6 +258,12 @@ function evmTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void) 
     acrossDeposit(across, req, add)
   } else if (relay) {
     relayDeposit(relay, req, field('You send'), add)
+  } else if (thorSwap) {
+    // A fully decoded deposit to the router pinned for this chain is a normal
+    // swap: say what it does, not "unknown contract".
+    add(req.deviceClearSigns ? 'low' : 'medium', req.deviceClearSigns
+      ? `${thorSwap}. Your KeepKey shows this deposit on its screen; check it there.`
+      : `${thorSwap}. Your KeepKey shows only raw data for this deposit, so check these details here.`)
   } else if (!req.deviceClearSigns || KNOWN_SELECTORS.has(sel)) {
     // A known selector reaching here did not parse (dirty address word,
     // trailing bytes): the device may accept it by length alone.

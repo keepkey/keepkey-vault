@@ -17,6 +17,7 @@ import { acrossDepositView, decodeAcrossDepositV3 } from '../shared/acrossDeposi
 import { RELAY_DEPOSITORY, decodeRelayDeposit, isZeroAddress } from '../shared/relayDeposit'
 import { REVIEWED_EVM_TOKENS } from './evm-certified-schema'
 import firmwareTokenTable from './firmware-token-table.json'
+import { versionCompare } from '../shared/firmware-versions'
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -420,6 +421,7 @@ const ADDR = {
   SALARY_PROXY:      '0xbd6a40bb904aea5a49c59050b5395f7484a4203d', // saproxy withdrawFromSalary
   THOR_ROUTER:       '0xd37bbe5744d730a1d98d8dc97c42f0ca46ad7146', // Ethereum
   THOR_ROUTER_AVAX:  '0x00dc6100103bc402d490aee3f9a5560cbd91f1d4', // Avalanche C-Chain
+  THOR_ROUTER_BSC:   '0xb30ec53f98ff5947ede720d32ac2da7e52a5f56b', // BNB Smart Chain
   MAYA_ROUTER:       '0xd89dce570de35a6f42d3bca7dba50a6d89bfc2a2',
   MAYA_ROUTER_V4:    '0xe3985e6b61b814f7cdb188766562ba71b446b46d', // current MAYANode ETH inbound router
 }
@@ -434,8 +436,26 @@ const THOR_ROUTER_BY_CHAIN: Record<number, string> = {
   1:     ADDR.THOR_ROUTER,
   43114: ADDR.THOR_ROUTER_AVAX,
 }
-// Display-only: THORChain's Base router (same address as Avalanche's) decodes
-// for the overlay, but the firmware does not pin it, so it is NOT native.
+// Firmware 7.15.0 replaced that switch with a (chainId, address) pin table
+// (thor_router_pins) and added BSC and Base. The 7.16 line (develop 27d72042c,
+// and the bundled 7.16 RC emulator c35aee50c) still has the two-chain switch:
+// docs/handoff-thorchain-base-router-pin-716.md. Drop the 7.16 exception when
+// that firmware takes the 7.15 table.
+const THOR_ROUTER_PINS_MIN_FW = '7.15.0'
+const THOR_LINE_716 = '7.16'
+// 7.14.x pins no router: thor_isThorchainTx takes either deposit selector to
+// ANY address on any chain, and thor_confirmThorTx shows it if the ABI is
+// canonical, the memo is at most 256 bytes and the expiry fits a uint64
+// (release/7.14.2 4002ef183).
+const THOR_UNPINNED_LINE = '7.14'
+const THOR_UNPINNED_MAX_MEMO = 256
+const THOR_ROUTER_BY_CHAIN_715: Record<number, string> = {
+  ...THOR_ROUTER_BY_CHAIN,
+  56:   ADDR.THOR_ROUTER_BSC,
+  8453: ADDR.THOR_ROUTER_AVAX, // Base: same address as Avalanche's
+}
+// Display-only: THORChain's Base router decodes for the overlay on every
+// firmware; whether it is native is decided by the tables above.
 const THOR_ROUTER_DECODE_BY_CHAIN: Record<number, string> = {
   ...THOR_ROUTER_BY_CHAIN,
   8453: ADDR.THOR_ROUTER_AVAX,
@@ -478,7 +498,7 @@ export function firmwareKnowsToken(chainId: number | undefined, token: string | 
  * pinning matter: the same selector to a DIFFERENT address, or the same
  * address on a chain the firmware does not list, is NOT clear-signed.
  */
-export function firmwareClearSigns(to?: string, data?: string, chainId?: number): boolean {
+export function firmwareClearSigns(to?: string, data?: string, chainId?: number, firmwareVersion?: string): boolean {
   if (!to || !data || data.length < 10) return false
   const selector = data.slice(0, 10).toLowerCase()
   const dest = to.toLowerCase()
@@ -494,7 +514,19 @@ export function firmwareClearSigns(to?: string, data?: string, chainId?: number)
     // The firmware binds both protocols' router pins to an explicit chainId.
     // Its legacy Maya pin is ETH-mainnet only; the current v4 router remains
     // behind the Advanced Mode gate until firmware supports it.
-    const thorRouter = chainId == null ? undefined : THOR_ROUTER_BY_CHAIN[chainId]
+    // Unknown version = the older, smaller list: over-warning is recoverable,
+    // predicting a clear-sign the device refuses is a dead "Blocked".
+    const line = firmwareVersion?.split('.').slice(0, 2).join('.')
+    if (line === THOR_UNPINNED_LINE) {
+      const memo = thorDepositFields(data, chainId)?.find((f) => f.name === 'Memo (exact)')?.value
+      // depositWithExpiry: the device reads the expiry as a uint64.
+      const expiryFits = selector !== '0x44bc937b' || /^0{48}$/.test(data.slice(10 + 4 * 64, 10 + 4 * 64 + 48))
+      return memo != null && Buffer.byteLength(memo) <= THOR_UNPINNED_MAX_MEMO && expiryFits
+    }
+    const routers = firmwareVersion && line !== THOR_LINE_716 && versionCompare(firmwareVersion, THOR_ROUTER_PINS_MIN_FW) >= 0
+      ? THOR_ROUTER_BY_CHAIN_715
+      : THOR_ROUTER_BY_CHAIN
+    const thorRouter = chainId == null ? undefined : routers[chainId]
     return (thorRouter != null && dest === thorRouter) ||
       (chainId === 1 && dest === ADDR.MAYA_ROUTER)
   }

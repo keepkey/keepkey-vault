@@ -48,6 +48,12 @@ export async function pioneerTokenMetadata(pioneer: any, networkId: string, cont
   return { symbol: String(meta.symbol), name: String(meta.name || meta.symbol), decimals: meta.decimals as number }
 }
 
+/** Pioneer's read-only RPC passthrough (POST /evm/rpc), on Pioneer's nodes. */
+async function readRpc(pioneer: any, networkId: string, method: string, params: any[]): Promise<any> {
+  if (typeof pioneer.EvmReadRpc !== 'function') throw new Error(`${PIONEER_UNSUPPORTED} ${method} (server has no EvmReadRpc)`)
+  return dataOf(await pioneer.EvmReadRpc({ networkId, method, params }), 'EvmReadRpc').data
+}
+
 /** Only operations exposed by Pioneer's API are admitted. Unsupported methods
  * fail explicitly; quote/gas-limit fallback policy remains with the caller.
  */
@@ -119,10 +125,14 @@ export async function pioneerEvmRpc(pioneer: any, networkId: string, method: str
         }), 'GetTokenAllowance')
         result = quantity(data.data?.allowance, 'token allowance')
       } else {
-        throw new Error(`${PIONEER_UNSUPPORTED} this eth_call selector: ${selector}`)
+        return readRpc(pioneer, networkId, method, params)
       }
       return `0x${result.slice(2).padStart(64, '0')}`
     }
+    case 'eth_getCode':
+    case 'eth_blockNumber':
+    case 'eth_simulateV1':
+      return readRpc(pioneer, networkId, method, params)
     default:
       throw new Error(`${PIONEER_UNSUPPORTED} ${method}; no direct-node fallback is allowed`)
   }
