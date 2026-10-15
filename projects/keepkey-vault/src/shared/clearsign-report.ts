@@ -217,3 +217,17 @@ export function solanaDecodedReportFindings(decoded: SolanaTxDecodedInfo | undef
   })
   return { findings, limitations }
 }
+
+/**
+ * The in-app swap dialog's own gate. A swap Desktop built from a Pioneer quote
+ * is a normal request: being blind on this firmware, or having no simulation,
+ * is not news (the Advanced Mode panel covers the device side). Only signals
+ * that this swap is not what was quoted put the report in front of the user:
+ * a NEAR Intents deposit-address red line or unanswered check, or a contract
+ * an auditor rated high or critical.
+ */
+export function swapReportNeedsAttention(report: Pick<ClearSignReport, 'findings' | 'limitations' | 'rating'>): boolean {
+  const near = [...report.findings, ...report.limitations].some((line) =>
+    line.code.startsWith('NEAR_INTENTS_') && (line.severity === 'danger' || line.code === 'NEAR_INTENTS_UNCONFIRMED'))
+  return near || report.rating?.riskLevel === 'high' || report.rating?.riskLevel === 'critical'
+}

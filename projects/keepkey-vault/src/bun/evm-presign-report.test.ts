@@ -13,7 +13,7 @@ import { simulateEvmEffects } from './evm-effects'
 import { uniswapReportFindingsWithState } from './uniswap-report'
 import { resolvePromotedEvmArtifact } from './clearsign-artifact-resolver'
 import { ClearSignReportResponse } from './schemas'
-import { clearSignReportNeedsAttention } from '../shared/clearsign-report'
+import { clearSignReportNeedsAttention, swapReportNeedsAttention } from '../shared/clearsign-report'
 
 const swap = require('../../__tests__/fixtures/uniswap/base-ur-usdc-to-eth-swap.json')
 const SIGNER = '0x909ef6b32dfdc12ca86aa710b54c991af3c5f82e'
@@ -254,6 +254,43 @@ describe('in-app swap card — the Desktop signing verdict for the same bytes', 
     expect(r.protectionLevel).toBe('P1')
     expect(r.descriptor.authenticated).toBe(false)
     expect(r.limitations.map((l) => l.code)).toContain('DEVICE_SHOWS_RAW_DATA')
+  })
+
+  test('THORChain native deposit on Base: named and decoded (P2), not "unknown contract"', async () => {
+    globalThis.fetch = catalogService([])
+    // Shape of the 2026-10-12 Base→TRON.TRX swap (handoff-thorchain-base-router-pin-716.md).
+    const memo = Buffer.from('=:TRON.TRX:TMoUJ2EqVESgcaD5eJdvphkkn8K3ucXdTp:5740830833:keep:30').toString('hex')
+    const w = (hex: string) => hex.padStart(64, '0')
+    const tx = {
+      chainId: 8453, from: DEPOSIT.from, to: '0x00dc6100103bc402d490aee3f9a5560cbd91f1d4', value: '0x90c5e8ba98e000',
+      data: `0x44bc937b${w('718f6c9df785bc4e323086de024ca822efbe8ab9')}${w('0')}${w('90c5e8ba98e000')}${w('a0')}${w('ffffffff')}${w((memo.length / 2).toString(16))}${memo.padEnd(128, '0')}`,
+    }
+    // 7.14.2 pins no router: the device shows this deposit itself.
+    const native = await inApp(tx, '7.14.2')
+    expect(native.protectionLevel).toBe('P4')
+    expect(native.descriptor).toMatchObject({ source: 'native', authenticated: true })
+    expect(risk(native).join('\n')).toContain('via THORChain. Your KeepKey shows this deposit on its screen; check it there.')
+    expect(native.limitations.map((l) => l.code)).not.toContain('DEVICE_SHOWS_RAW_DATA')
+    // The 7.16 line has no Base pin: decoded here, raw on the device.
+    const r = await inApp(tx, '7.16.0')
+    expect(r.protectionLevel).toBe('P2')
+    expect(r.headline).not.toContain('Unknown')
+    expect(r.descriptor).toMatchObject({ authenticated: false, label: 'THORChain deposit' })
+    const lines = risk(r).join('\n')
+    expect(lines).toContain('Swap 0.04075 ETH on Base for at least 57.40830833 TRX on TRON via THORChain. Your KeepKey shows only raw data')
+    expect(lines).not.toContain('signing blind')
+    // Blind on this firmware is not news in our own swap: no report box.
+    expect(swapReportNeedsAttention(r)).toBe(false)
+  })
+
+  test('the swap dialog shows the report only when the swap is not what was quoted', () => {
+    const base = { findings: [], limitations: [] }
+    const line = (code: string, severity: 'info' | 'warning' | 'danger') => ({ code, message: code, severity })
+    expect(swapReportNeedsAttention({ ...base, findings: [line('RISK_HIGH', 'danger')], limitations: [line('DEVICE_SHOWS_RAW_DATA', 'warning')] })).toBe(false)
+    expect(swapReportNeedsAttention({ ...base, findings: [line('NEAR_INTENTS_UNKNOWN_ADDRESS', 'danger')] })).toBe(true)
+    expect(swapReportNeedsAttention({ ...base, limitations: [line('NEAR_INTENTS_UNCONFIRMED', 'warning')] })).toBe(true)
+    expect(swapReportNeedsAttention({ ...base, findings: [line('NEAR_INTENTS_CONFIRMED', 'info')] })).toBe(false)
+    expect(swapReportNeedsAttention({ ...base, rating: { riskLevel: 'critical' } as any })).toBe(true)
   })
 
   test('the overlay and the card share one verdict function', async () => {

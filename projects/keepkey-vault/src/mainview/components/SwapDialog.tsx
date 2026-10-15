@@ -32,7 +32,7 @@ import { computeDustWarning, shouldWarnHighSlippage, computeEffectiveSlippageBps
 import { useEvmAddresses } from "../hooks/useEvmAddresses"
 import { useDeviceState } from "../hooks/useDeviceState"
 import { ClearSignReportCard } from "./ClearSignReportCard"
-import { clearSignReportNeedsAttention } from "../../shared/clearsign-report"
+import { swapReportNeedsAttention } from "../../shared/clearsign-report"
 import { versionCompare } from "../../shared/firmware-versions"
 import { AssetPickerDialog } from "./AssetPickerDialog"
 import { networkDisplayName, ellipsizeCaip, parseCaip } from "../../shared/swap-discovery"
@@ -4009,10 +4009,10 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                 )}
               </Box>
 
-              {/* A swap the KeepKey shows in full needs no report: only one that
-                  is blind, or that a check contradicts, is put in front of the user. */}
-              {previewBuild?.clearSignReports?.approval && clearSignReportNeedsAttention(previewBuild.clearSignReports.approval) && <ClearSignReportCard report={previewBuild.clearSignReports.approval} title="Approval ClearSign Report" />}
-              {previewBuild?.clearSignReports?.transaction && clearSignReportNeedsAttention(previewBuild.clearSignReports.transaction) && <ClearSignReportCard report={previewBuild.clearSignReports.transaction} title="Swap ClearSign Report" />}
+              {/* Our own swap is assumed clear: the report shows only when it is
+                  not what was quoted (swapReportNeedsAttention). */}
+              {previewBuild?.clearSignReports?.approval && swapReportNeedsAttention(previewBuild.clearSignReports.approval) && <ClearSignReportCard report={previewBuild.clearSignReports.approval} title="Approval ClearSign Report" />}
+              {previewBuild?.clearSignReports?.transaction && swapReportNeedsAttention(previewBuild.clearSignReports.transaction) && <ClearSignReportCard report={previewBuild.clearSignReports.transaction} title="Swap ClearSign Report" />}
 
               {/* Animated route map — gold dot travels from-token →
                   integration → to-token. Shows the actual swap topology
