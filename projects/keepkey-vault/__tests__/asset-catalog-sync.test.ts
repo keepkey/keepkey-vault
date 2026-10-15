@@ -22,5 +22,6 @@ test('the sync never adds a token whose symbol is a chain ticker', () => {
   expect(syncSkips('eip155:1/slip44:60', 'ETH')).toBe(false)
   expect(syncSkips('solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/token:So11111111111111111111111111111111111111112', 'SOL')).toBe(false)
   expect(syncSkips('cosmos:thorchain-mainnet-v1/denom:btc-btc', 'BTC')).toBe(false)
+  expect(syncSkips('cosmos:thorchain-mainnet-v1/denom:x/fakebtc', 'BTC')).toBe(true)
   expect(syncSkips('tron:27Lqcw/trc20:TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t', 'USDT')).toBe(false)
 })

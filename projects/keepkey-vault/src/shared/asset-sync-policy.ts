@@ -17,6 +17,7 @@ const NATIVE_TICKER_ISSUERS = [
 
 export function syncSkips(caip: string, symbol: unknown): boolean {
   const isToken = !caip.includes('/slip44:')
-  return isToken && typeof symbol === 'string' && NATIVE_IDENTITIES.has(symbol.trim().toUpperCase())
-    && !NATIVE_TICKER_ISSUERS.some((issuer) => caip.startsWith(issuer))
+  // x/ denoms are made by contracts, not the protocol: never exempt.
+  const issued = NATIVE_TICKER_ISSUERS.some((issuer) => caip.startsWith(issuer) && !caip.startsWith(`${issuer}x/`))
+  return isToken && typeof symbol === 'string' && NATIVE_IDENTITIES.has(symbol.trim().toUpperCase()) && !issued
 }
