@@ -23,7 +23,7 @@ include .env
 export ELECTROBUN_DEVELOPER_ID ELECTROBUN_TEAMID ELECTROBUN_APPLEID ELECTROBUN_APPLEIDPASS
 endif
 
-.PHONY: clearsign-worker-test clearsign-worker-deploy install dev dev-hmr build build-stable build-canary build-signed patch-arm64-release-tar prune-bundle dmg clean help vault sign-check notary-check verify verify-entitlements publish release upload-dmg upload-all-dmgs sign-release sign-release-intel verify-arch audit-macos-bundle submodules modules-install modules-build modules-clean audit build-zcash-cli build-zcash-cli-debug build-zcash-cli-intel test test-unit test-rest test-sign-gating test-zcash-cli test-emu build-intel build-signed-intel build-electrobun-x64-core build-electrobun-arm64-core prepare-electrobun-arm64-core publish-electrobun-x64-core build-electrobun-linux-x64-core preflight build-emulator build-emulator-windows build-emulator-macos-release build-emulator-release clean-emulator test-emu-python
+.PHONY: clearsign-worker-test sync-asset-data clearsign-worker-deploy install dev dev-hmr build build-stable build-canary build-signed patch-arm64-release-tar prune-bundle dmg clean help vault sign-check notary-check verify verify-entitlements publish release upload-dmg upload-all-dmgs sign-release sign-release-intel verify-arch audit-macos-bundle submodules modules-install modules-build modules-clean audit build-zcash-cli build-zcash-cli-debug build-zcash-cli-intel test test-unit test-rest test-sign-gating test-zcash-cli test-emu build-intel build-signed-intel build-electrobun-x64-core build-electrobun-arm64-core prepare-electrobun-arm64-core publish-electrobun-x64-core build-electrobun-linux-x64-core preflight build-emulator build-emulator-windows build-emulator-macos-release build-emulator-release clean-emulator test-emu-python
 
 # --- Submodules (auto-init on fresh worktrees/clones) ---
 
@@ -390,7 +390,7 @@ clearsign-worker-deploy: test-unit
 test: test-zcash-cli test-unit
 
 test-unit:
-	cd $(PROJECT_DIR) && bun test __tests__/evm-signer-verify.test.ts __tests__/evm-balance-fetch.test.ts __tests__/swap-parsing.test.ts __tests__/engine-state-machine.test.ts __tests__/device-switch.test.ts __tests__/wizard-messaging.test.ts __tests__/update-safety.test.ts __tests__/solana-tx.test.ts __tests__/solana-message-parser.test.ts __tests__/solana-instruction-decoder.test.ts __tests__/solana-alt.test.ts __tests__/solana-spl-decimals.test.ts __tests__/ton-build.test.ts __tests__/tron-memo-inject.test.ts __tests__/audit-coverage.test.ts __tests__/chain-scan.test.ts __tests__/pairing-pubkeys.test.ts __tests__/watch-only-portfolio.test.ts __tests__/watch-only-history.test.ts __tests__/balance-display-state.test.ts __tests__/failed-fetch-not-zero.test.ts __tests__/advanced-mode-routing.test.ts __tests__/solana-advanced-mode.test.ts __tests__/clearsign-provider-key.test.ts __tests__/firmware-clearsign-gate.test.ts __tests__/clearsign-risk.test.ts __tests__/taproot-host.test.ts __tests__/solana-hdwallet-contract.test.ts __tests__/recovery-ownership.test.ts __tests__/evm-x402.test.ts __tests__/solana-x402.test.ts __tests__/patch-electrobun.test.ts __tests__/tx-watch.test.ts __tests__/signed-tx-registry.test.ts src/bun/emulator-library.test.ts src/bun/mcp.test.ts src/bun/rng-audit.test.ts src/shared/zcash-maturity.test.ts src/bun/zcash-capability.test.ts src/bun/zcash-sidecar-path.test.ts src/bun/txbuilder/utxo-zcash.test.ts src/bun/txbuilder/zcash-shielded.test.ts src/bun/txbuilder/zcash-batching.test.ts src/bun/txbuilder/zcash-tex.test.ts src/bun/txbuilder/utxo-taproot.test.ts src/bun/txbuilder/hive-ops.test.ts src/bun/clearsign-studio.test.ts src/bun/solana-outflow.test.ts src/bun/solana-certified-schema.test.ts __tests__/solana-certified-match.test.ts src/bun/solana-certified-registry.test.ts __tests__/solana-certified-routing.test.ts __tests__/solana-decode-risk.test.ts __tests__/solana-certified-copy.test.ts __tests__/solana-simulated-outflow.test.ts __tests__/evm-max-send.test.ts __tests__/tron-max-send.test.ts __tests__/tron-token-send-gates.test.ts src/bun/tron-preview.test.ts __tests__/arbitrum-broadcast.test.ts src/bun/wallet-session-cache.test.ts __tests__/pin-unlock-timeout.test.ts __tests__/firmware-authenticity-verdict.test.ts __tests__/app-phase.test.ts __tests__/flash-wipe.test.ts __tests__/webusb-recovery.test.ts src/bun/evm-certified-schema.test.ts src/bun/evm-certified-registry.test.ts src/bun/evm-runtime-metadata.test.ts src/bun/evm-schema-registry.test.ts __tests__/permit2-spender-name.test.ts src/bun/evm-signing-preview.test.ts src/bun/evm-presign-report.test.ts __tests__/transaction-effects.test.ts src/bun/uniswap-ur.test.ts __tests__/uniswap-ur-firmware-parity.test.ts src/bun/thor-swap-preview.test.ts src/shared/evmFeePreview.test.ts src/shared/acrossDeposit.test.ts src/bun/clearsign-review.test.ts src/shared/erc7730-support.test.ts src/bun/firmware-signature.test.ts __tests__/addressbook-clearsign.test.ts src/bun/ui-watchdog.test.ts __tests__/linux-apprun.test.ts src/bun/device-refusal.test.ts src/shared/cosmosTxPreview.test.ts src/shared/typedDataRows.test.ts
+	cd $(PROJECT_DIR) && bun test __tests__/evm-signer-verify.test.ts __tests__/evm-balance-fetch.test.ts __tests__/swap-parsing.test.ts __tests__/engine-state-machine.test.ts __tests__/device-switch.test.ts __tests__/wizard-messaging.test.ts __tests__/update-safety.test.ts __tests__/solana-tx.test.ts __tests__/solana-message-parser.test.ts __tests__/solana-instruction-decoder.test.ts __tests__/solana-alt.test.ts __tests__/solana-spl-decimals.test.ts __tests__/ton-build.test.ts __tests__/tron-memo-inject.test.ts __tests__/audit-coverage.test.ts __tests__/chain-scan.test.ts __tests__/pairing-pubkeys.test.ts __tests__/watch-only-portfolio.test.ts __tests__/watch-only-history.test.ts __tests__/balance-display-state.test.ts __tests__/failed-fetch-not-zero.test.ts __tests__/advanced-mode-routing.test.ts __tests__/solana-advanced-mode.test.ts __tests__/clearsign-provider-key.test.ts __tests__/firmware-clearsign-gate.test.ts __tests__/clearsign-risk.test.ts __tests__/taproot-host.test.ts __tests__/solana-hdwallet-contract.test.ts __tests__/recovery-ownership.test.ts __tests__/evm-x402.test.ts __tests__/solana-x402.test.ts __tests__/patch-electrobun.test.ts __tests__/tx-watch.test.ts __tests__/signed-tx-registry.test.ts src/bun/emulator-library.test.ts src/bun/mcp.test.ts src/bun/rng-audit.test.ts src/shared/zcash-maturity.test.ts src/bun/zcash-capability.test.ts src/bun/zcash-sidecar-path.test.ts src/bun/txbuilder/utxo-zcash.test.ts src/bun/txbuilder/zcash-shielded.test.ts src/bun/txbuilder/zcash-batching.test.ts src/bun/txbuilder/zcash-tex.test.ts src/bun/txbuilder/utxo-taproot.test.ts src/bun/txbuilder/hive-ops.test.ts src/bun/clearsign-studio.test.ts src/bun/solana-outflow.test.ts src/bun/solana-certified-schema.test.ts __tests__/solana-certified-match.test.ts src/bun/solana-certified-registry.test.ts __tests__/solana-certified-routing.test.ts __tests__/solana-decode-risk.test.ts __tests__/solana-certified-copy.test.ts __tests__/solana-simulated-outflow.test.ts __tests__/evm-max-send.test.ts __tests__/tron-max-send.test.ts __tests__/tron-token-send-gates.test.ts src/bun/tron-preview.test.ts __tests__/arbitrum-broadcast.test.ts src/bun/wallet-session-cache.test.ts __tests__/pin-unlock-timeout.test.ts __tests__/firmware-authenticity-verdict.test.ts __tests__/app-phase.test.ts __tests__/flash-wipe.test.ts __tests__/webusb-recovery.test.ts src/bun/evm-certified-schema.test.ts src/bun/evm-certified-registry.test.ts src/bun/evm-runtime-metadata.test.ts src/bun/evm-schema-registry.test.ts __tests__/permit2-spender-name.test.ts src/bun/evm-signing-preview.test.ts src/bun/evm-presign-report.test.ts __tests__/transaction-effects.test.ts src/bun/uniswap-ur.test.ts __tests__/uniswap-ur-firmware-parity.test.ts src/bun/thor-swap-preview.test.ts src/shared/evmFeePreview.test.ts src/shared/acrossDeposit.test.ts src/bun/clearsign-review.test.ts src/shared/erc7730-support.test.ts src/bun/firmware-signature.test.ts __tests__/addressbook-clearsign.test.ts src/bun/ui-watchdog.test.ts __tests__/linux-apprun.test.ts src/bun/device-refusal.test.ts src/shared/cosmosTxPreview.test.ts src/shared/typedDataRows.test.ts src/shared/emulatorWallets.test.ts __tests__/asset-catalog-sync.test.ts
 	$(MAKE) clearsign-worker-test
 	cd $(PROJECT_DIR) && bun src/bun/btc-backend/core.test.ts
 	# Script-style suites (own runner + process.exit — must NOT join the `bun test`
@@ -415,12 +415,14 @@ test-sign-gating:
 # every suite except tests/chain/* works offline. Expect device confirmations.
 #   make test-sdk                 # everything except recovery/*
 #   make test-sdk filter=evm      # only suites whose path contains "evm"
+#   make test-sdk class=real-world,must-warn   # only suites of those classes (tests/review/suites.json)
 # recovery/* WIPES the device: it runs only with KEEPKEY_ALLOW_WIPE=1.
 filter =
+class =
 test-sdk:
 	@curl -sf -m 3 http://localhost:1646/api/health >/dev/null || \
 		(echo "ERROR: vault REST not answering on :1646. Start the vault first."; exit 1)
-	cd projects/keepkey-sdk && (test -d node_modules || npm ci --ignore-scripts --silent) && npm run build --silent && node tests/run-all.js $(filter)
+	cd projects/keepkey-sdk && (test -d node_modules || npm ci --ignore-scripts --silent) && npm run build --silent && KEEPKEY_SUITE_CLASS=$(class) node tests/run-all.js $(filter)
 
 test-emu:
 	@test -f $(HOME)/.keepkey/emulator/libkkemu.dylib || \
@@ -557,6 +559,10 @@ clean: modules-clean
 
 audit:
 	cd $(PROJECT_DIR) && bun scripts/audit-deps.ts
+
+# Pull newly-catalogued pioneer-discovery assets into the bundled catalog.
+sync-asset-data:
+	cd $(PROJECT_DIR) && bun scripts/sync-asset-data.ts
 
 # --- Code Signing ---
 
@@ -893,7 +899,7 @@ help:
 	@echo "  make preflight      - Pre-release validation (pins, CI, builds, typecheck)"
 	@echo ""
 	@echo "Emulator:"
-	@echo "  make build-emulator-release - Build + audit bundled 7.16 macOS universal and Windows x64 libraries"
+	@echo "  make build-emulator-release - Build + audit bundled 7.17 macOS universal and Windows x64 libraries"
 	@echo "  make build-emulator        - Build kkemu+libkkemu from current firmware submodule checkout"
 	@echo "                               and install to ~/.keepkey/emulator/"
 	@echo "  make test-emu-python       - Run python-keepkey UDP tests against the installed kkemu"
@@ -915,7 +921,7 @@ preflight: submodules
 	done; \
 	echo ""; \
 	echo "2. CERTIFIED EMULATOR ARTIFACTS"; \
-	if node scripts/verify-certified-emulator.mjs >/dev/null 2>&1; then echo "   ✅ certified emulator 7.16.0 hashes and ABI"; \
+	if node scripts/verify-certified-emulator.mjs >/dev/null 2>&1; then echo "   ✅ certified emulator 7.17.0 hashes and ABI"; \
 	else echo "   ❌ certified emulator artifacts missing or invalid — run scripts/stage-certified-emulator.sh <artifact-dir>"; fail=1; fi; \
 	echo ""; \
 	echo "3. CANONICAL BRANCHES"; \

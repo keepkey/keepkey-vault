@@ -68,18 +68,20 @@ export interface ClearSignReport {
  * shows in full (P4/P5) with nothing to add is simply clear: the app's own
  * swap screen leaves the report out and lets the device speak.
  *
- * Kept visible: any red line (finding or limitation), a risk line of medium or
- * above (an off-chain order, a standing approval), a contract rated high or
+ * Kept visible: any red line (finding or limitation), a contract rated high or
  * critical, and an independent check that could not run. Not kept: the notes
  * every swap carries (assets leave the wallet, a deposit address has no owner
- * the device can check).
+ * the device can check, a bridge delivers through its own off-chain order, a
+ * bounded approval to the route's contract, a prediction this computer could
+ * not run: the device shows an authenticated transaction in full either way).
+ * A swap the user built here is expected to be clear; the box is for when it
+ * is not.
  */
 export function clearSignReportNeedsAttention(
   report: Pick<ClearSignReport, 'protectionLevel' | 'findings' | 'limitations' | 'rating'>,
 ): boolean {
   if (report.protectionLevel !== 'P4' && report.protectionLevel !== 'P5') return true
-  if ([...report.findings, ...report.limitations].some((line) => line.severity === 'danger')) return true
-  if (report.findings.some((line) => line.code === 'RISK_MEDIUM')) return true
+  if ([...report.findings, ...report.limitations].some((line) => line.severity === 'danger' && line.code !== 'SIMULATION_UNAVAILABLE')) return true
   if (report.limitations.some((line) => line.code === 'NEAR_INTENTS_UNCONFIRMED')) return true
   return report.rating?.riskLevel === 'high' || report.rating?.riskLevel === 'critical'
 }

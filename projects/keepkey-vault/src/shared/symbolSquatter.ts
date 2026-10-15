@@ -19,7 +19,7 @@ import { isAssetMapReady, isKnownAsset } from './assetLookup'
 // case-insensitive comparison. ponytail: curated list of the commonly-abused
 // majors; extend it — or derive it from the catalog's native (slip44) symbols —
 // if scammers start impersonating other chains.
-const NATIVE_IDENTITIES = new Set([
+export const NATIVE_IDENTITIES = new Set([
   'BTC', 'BITCOIN',
   'ETH', 'ETHEREUM',
   'SOL', 'SOLANA',

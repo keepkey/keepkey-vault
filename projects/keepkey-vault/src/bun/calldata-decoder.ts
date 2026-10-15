@@ -15,6 +15,7 @@ import type { CalldataDecodedInfo, CalldataDecodedField } from '../shared/types'
 import { thorDepositFields } from './thor-swap-preview'
 import { acrossDepositView, decodeAcrossDepositV3 } from '../shared/acrossDeposit'
 import { RELAY_DEPOSITORY, decodeRelayDeposit, isZeroAddress } from '../shared/relayDeposit'
+import { evmNativeValue } from '../shared/evmFeePreview'
 import { REVIEWED_EVM_TOKENS } from './evm-certified-schema'
 import firmwareTokenTable from './firmware-token-table.json'
 import { versionCompare } from '../shared/firmware-versions'
@@ -567,6 +568,8 @@ export async function decodeCalldata(
   contractAddress: string,
   data: string,
   _chainId?: number,
+  /** The transaction's native value, so a payable call can state its amount. */
+  value?: unknown,
 ): Promise<CalldataDecodedInfo | null> {
   // Skip if no calldata or just a bare transfer (no data)
   if (!data || data === '0x' || data.length < 10) return null
@@ -621,7 +624,7 @@ export async function decodeCalldata(
   if (relay) {
     const token = relay.token ? REVIEWED_EVM_TOKENS[`${relay.chainId}:${relay.token}`] : undefined
     const sent = relay.kind === 'native'
-      ? 'the native coin sent with this call (msg.value)'
+      ? (value === undefined ? null : evmNativeValue(value, relay.chainId)) ?? 'the native coin sent with this call (msg.value)'
       : token ? `${tokenUnits(relay.amount!, token.decimals)} ${token.symbol}` : `${relay.amount} base units of token ${relay.token}`
     const fields: CalldataDecodedField[] = [
       { name: 'Action', type: 'string', value: `Relay deposit on ${relay.chain}: ${sent}`, format: 'raw' },

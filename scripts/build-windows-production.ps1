@@ -363,13 +363,13 @@ Write-Success "Build tools available (git, bun, yarn)"
 
 if (-not $SkipBuild) {
     if (-not (Test-Path $EmulatorDllSource)) {
-        throw "Pinned 7.16 emulator DLL missing at $EmulatorDllSource.`nDownload emulator-build-input-libkkemu-7.16.0-win-x64.dll from the matching macOS CI artifact, rename it to libkkemu.dll, and place it in emulator-bundle before building."
+        throw "Pinned 7.17 emulator DLL missing at $EmulatorDllSource.`nDownload emulator-build-input-libkkemu-7.17.0-win-x64.dll from the matching macOS CI artifact, rename it to libkkemu.dll, and place it in emulator-bundle before building."
     }
     $emuHeader = [System.IO.File]::ReadAllBytes($EmulatorDllSource)
     if ($emuHeader.Length -lt 2 -or $emuHeader[0] -ne 0x4D -or $emuHeader[1] -ne 0x5A) {
         throw "Emulator build input is not a Windows PE DLL (MZ header missing): $EmulatorDllSource"
     }
-    Write-Success "Pinned 7.16 emulator DLL staged: $EmulatorDllSource"
+    Write-Success "Pinned 7.17 emulator DLL staged: $EmulatorDllSource"
 }
 
 # Check certificate (if signing)
@@ -613,7 +613,7 @@ if (-not (Test-Path $ExtModulesDir)) {
     throw "External modules staging directory not found: $ExtModulesDir`nRun without -SkipBuild to regenerate collect-externals output."
 }
 if (-not (Test-Path $BundledEmulatorDll)) {
-    throw "Release gate failed: Electrobun did not bundle the 7.16 emulator at $BundledEmulatorDll"
+    throw "Release gate failed: Electrobun did not bundle the 7.17 emulator at $BundledEmulatorDll"
 }
 if (-not $SkipBuild) {
     $sourceHash = (Get-FileHash $EmulatorDllSource -Algorithm SHA256).Hash

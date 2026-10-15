@@ -172,8 +172,8 @@ describe('in-app swap card — the Desktop signing verdict for the same bytes', 
     expect(sent).toEqual([{ chainId: 8453, contract: RELAY, selector: '0xe8017952', calldataLength: 132, token: BASE_USDC }])
     expect(risk(r)[0]).toBe('Relay deposit on Base: sends 47.478285 USDC to the Relay Depository, credited to your account. Your KeepKey shows this deposit from a KeepKey-certified description and refuses it if that description is not genuine. Check the amount there.')
     expect(risk(r).join('\n')).toContain("set by Relay's off-chain order")
-    // Certified, but where it arrives is off-chain: the swap screen keeps the box.
-    expect(clearSignReportNeedsAttention(r)).toBe(true)
+    // Certified and nothing red: the swap screen shows no report.
+    expect(clearSignReportNeedsAttention(r)).toBe(false)
     expect(rows(r)).toContain('Action: Relay deposit on Base: 47.478285 USDC')
     expect(rows(r)).toContain(`Credited to (depositor): ${DEPOSIT.from}`)
     expect(rows(r).some((x) => x.startsWith('Relay order id: 0x001c161a'))).toBe(true)
@@ -189,6 +189,15 @@ describe('in-app swap card — the Desktop signing verdict for the same bytes', 
     const approve = await inApp(APPROVE, '7.16.0')
     expect(approve.protectionLevel).toBe('P1')
     expect(approve.limitations.map((l) => l.code)).toContain('DEVICE_SHOWS_RAW_DATA')
+  })
+
+  test('native deposit states its amount once, not "msg.value"', async () => {
+    const tx = { chainId: 8453, from: DEPOSIT.from, to: RELAY, value: '0x8b0be503af0800',
+      data: `0x49290c1c${DEPOSIT.from.slice(2).toLowerCase().padStart(64, '0')}${'c3'.repeat(32)}` }
+    const r = await inApp(tx, '7.16.0')
+    expect(rows(r)).toContain('Action: Relay deposit on Base: 0.0391381 ETH')
+    expect(rows(r)).toContain('You send: 0.0391381 ETH')
+    expect(risk(r).filter((x) => x.includes('0.0391381 ETH'))).toHaveLength(1)
   })
 
   test('7.15 firmware: no certified path, never P4', async () => {

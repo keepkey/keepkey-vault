@@ -906,11 +906,12 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 									size="sm" variant="outline" borderColor="kk.border" color="kk.textSecondary" px="4" py="2"
 									_hover={{ borderColor: "kk.error", color: "kk.error" }}
 									onClick={async () => {
-										if (!confirm("Delete flash and stop? This erases the emulator seed.")) return
+										// Only ever the wallet that is running, and say which one.
+										const name = emuWallets.find((w) => w.isActive)?.name
+										if (!name || !confirm(`Delete emulator wallet "${name}" and stop? This erases its seed from this computer.`)) return
 										setRevealedSeed(null)
 										try {
-											await rpcRequest("emulatorStop", undefined, 10000)
-											await rpcRequest("emulatorDeleteFlash", { name: "default" }, 5000)
+											await rpcRequest("emulatorDeleteFlash", { name }, 5000)
 										} catch (e: any) {
 											console.error("Flash delete failed:", e?.message)
 										}
@@ -939,7 +940,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 							</Flex>
 
 							{/* ── Wallet (seed) switcher — pick a different saved seed ── */}
-							{emuWallets.length > 1 && (
+							{emuWallets.length > 0 && (
 								<Flex align="center" gap="2" mt="3" wrap="wrap">
 									<Text fontSize="xs" color="kk.textMuted">Wallet:</Text>
 									<Box
@@ -951,7 +952,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 										borderRadius="md" fontSize="xs" px="2" py="1"
 									>
 										{emuWallets.map((w) => (
-											<option key={w.name} value={w.name}>{w.label || w.name}{w.firmwareVersion ? ` (fw ${w.firmwareVersion})` : ""}</option>
+											<option key={w.name} value={w.name}>{w.name}{w.label ? ` · "${w.label}"` : ""}{w.firmwareVersion ? ` (fw ${w.firmwareVersion})` : ""}</option>
 										))}
 									</Box>
 								</Flex>

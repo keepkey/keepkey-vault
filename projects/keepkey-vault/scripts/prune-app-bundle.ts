@@ -455,7 +455,7 @@ if (existsSync(infoPlistPath)) {
 // an Intel app that installs successfully but fails at dlopen time.
 const bundledEmulator = join(resourcesDir, 'app', 'emulator', 'libkkemu.dylib')
 if (!existsSync(bundledEmulator)) {
-  console.error(`[prune-bundle] ERROR: bundled 7.16 emulator missing: ${bundledEmulator}`)
+  console.error(`[prune-bundle] ERROR: bundled 7.17 emulator missing: ${bundledEmulator}`)
   process.exit(1)
 }
 const emuArchs = Bun.spawnSync(['lipo', '-archs', bundledEmulator])

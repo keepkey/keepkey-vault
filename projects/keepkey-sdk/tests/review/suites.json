@@ -1,0 +1,298 @@
+{
+  "chain/assets.js": {
+    "class": "no-signing",
+    "why": "reads data or runs offline; nothing is shown for approval"
+  },
+  "chain/balances.js": {
+    "class": "no-signing",
+    "why": "reads data or runs offline; nothing is shown for approval"
+  },
+  "chain/market.js": {
+    "class": "no-signing",
+    "why": "reads data or runs offline; nothing is shown for approval"
+  },
+  "chain/network.js": {
+    "class": "no-signing",
+    "why": "reads data or runs offline; nothing is shown for approval"
+  },
+  "chain/swap.js": {
+    "class": "no-signing",
+    "why": "reads data or runs offline; nothing is shown for approval"
+  },
+  "chain/tx-history.js": {
+    "class": "no-signing",
+    "why": "reads data or runs offline; nothing is shown for approval"
+  },
+  "chain/utxo.js": {
+    "class": "no-signing",
+    "why": "reads data or runs offline; nothing is shown for approval"
+  },
+  "clearsign-offline-parity.js": {
+    "class": "no-signing",
+    "why": "reads data or runs offline; nothing is shown for approval"
+  },
+  "clearsign-vendored-offline.js": {
+    "class": "no-signing",
+    "why": "reads data or runs offline; nothing is shown for approval"
+  },
+  "evm-adversarial/address-mismatch.js": {
+    "class": "edge-case",
+    "why": "hostile input"
+  },
+  "evm-adversarial/value-in-token-call.js": {
+    "class": "edge-case",
+    "why": "hostile input"
+  },
+  "evm-clearsign/certified-relay-bridge-deposit.js": {
+    "class": "real-world",
+    "why": "Relay bridge deposit with the certified description"
+  },
+  "evm-clearsign/clearsign-signer-flows.js": {
+    "class": "edge-case",
+    "why": "runtime signer mechanism (test key, not KeepKey-certified by design)"
+  },
+  "evm-clearsign/erc20-approve-unlimited.js": {
+    "class": "must-warn",
+    "why": "unlimited approval: signs, and must say so"
+  },
+  "evm-clearsign/erc20-approve.js": {
+    "class": "real-world",
+    "why": "bounded token approval"
+  },
+  "evm-clearsign/erc20-transfer.js": {
+    "class": "real-world",
+    "why": "token transfer"
+  },
+  "evm-clearsign/loadsigner-sign-flows.js": {
+    "class": "edge-case",
+    "why": "runtime signer mechanism"
+  },
+  "evm-clearsign/provider-key-schema-flow.js": {
+    "class": "edge-case",
+    "why": "provider signer mechanism"
+  },
+  "evm-clearsign/provider-live-sign-flow.js": {
+    "class": "edge-case",
+    "why": "provider signer mechanism"
+  },
+  "evm-clearsign/relay-v2-schema-flow.js": {
+    "class": "edge-case",
+    "why": "runtime signer mechanism"
+  },
+  "evm-clearsign/uniswap-v2-eth-to-token.js": {
+    "class": "real-world",
+    "why": "Uniswap V2 swap"
+  },
+  "evm-clearsign/uniswap-v2-token-to-eth.js": {
+    "class": "real-world",
+    "why": "Uniswap V2 swap"
+  },
+  "evm-clearsign/uniswap-v3-exact-input.js": {
+    "class": "real-world",
+    "why": "Uniswap V3 swap"
+  },
+  "evm-clearsign/uniswap-v3-multicall.js": {
+    "class": "real-world",
+    "why": "Uniswap V3 multicall swap"
+  },
+  "evm-clearsign/unknown-contract.js": {
+    "class": "must-warn",
+    "why": "call KeepKey cannot read: must say it is blind"
+  },
+  "evm-eip712/matrix.js": {
+    "class": "real-world",
+    "why": "structured typed-data requests dapps send"
+  },
+  "evm-eip712/permit2.js": {
+    "class": "real-world",
+    "why": "Permit2 signature for a swap"
+  },
+  "evm-firmware/eip1559-chainid-required.js": {
+    "class": "edge-case",
+    "why": "firmware regression"
+  },
+  "evm-firmware/eip1559-recover.js": {
+    "class": "edge-case",
+    "why": "firmware regression"
+  },
+  "evm-firmware/selltouniswap-offset.js": {
+    "class": "edge-case",
+    "why": "firmware regression"
+  },
+  "evm-firmware/thorchain-router-pin.js": {
+    "class": "edge-case",
+    "why": "firmware regression"
+  },
+  "evm-firmware/transformerc20-clearsign.js": {
+    "class": "edge-case",
+    "why": "firmware regression"
+  },
+  "evm-firmware/uniswap-liquidity-recipient.js": {
+    "class": "edge-case",
+    "why": "firmware regression"
+  },
+  "evm-invalid/bad-chainid.js": {
+    "class": "edge-case",
+    "why": "invalid input"
+  },
+  "evm-invalid/malformed-calldata.js": {
+    "class": "edge-case",
+    "why": "invalid input"
+  },
+  "evm-invalid/missing-to.js": {
+    "class": "edge-case",
+    "why": "invalid input"
+  },
+  "evm-native/eth-send.js": {
+    "class": "real-world",
+    "why": "plain ETH send"
+  },
+  "evm-native/polygon-send.js": {
+    "class": "real-world",
+    "why": "plain MATIC send"
+  },
+  "evm-personal-sign/eth-sign-message.js": {
+    "class": "real-world",
+    "why": "sign-in message"
+  },
+  "evm-tx-1559/find-preimage.js": {
+    "class": "no-signing",
+    "why": "reads data or runs offline; nothing is shown for approval"
+  },
+  "evm-tx-1559/firmware-hash-replica.js": {
+    "class": "no-signing",
+    "why": "reads data or runs offline; nothing is shown for approval"
+  },
+  "evm-tx-1559/recover-fixture.js": {
+    "class": "no-signing",
+    "why": "reads data or runs offline; nothing is shown for approval"
+  },
+  "evm-tx-1559/sign-and-recover.js": {
+    "class": "edge-case",
+    "why": "firmware regression"
+  },
+  "fw-715/00-capabilities.js": {
+    "class": "no-signing",
+    "why": "reads data or runs offline; nothing is shown for approval"
+  },
+  "fw-715/10-evm-large-chainid.js": {
+    "class": "edge-case",
+    "why": "firmware regression"
+  },
+  "fw-715/11-evm-1559-chunked-data.js": {
+    "class": "edge-case",
+    "why": "firmware regression"
+  },
+  "hive/all-operations.js": {
+    "class": "real-world",
+    "why": "every Hive operation"
+  },
+  "hive/phase3-ops.js": {
+    "class": "real-world",
+    "why": "Hive limit orders"
+  },
+  "osmosis/format-amount-regression.js": {
+    "class": "real-world",
+    "why": "Osmosis delegate and undelegate"
+  },
+  "rc23/hardware.js": {
+    "class": "real-world",
+    "why": "release acceptance through the production path"
+  },
+  "rc24/hardware.js": {
+    "class": "real-world",
+    "why": "release acceptance through the production path"
+  },
+  "redteam/erc20-approval-disguised-as-swap.js": {
+    "class": "must-warn",
+    "why": "the app lies about what the request is"
+  },
+  "redteam/historical-addressbook-evm.js": {
+    "class": "real-world",
+    "why": "completed real transfer, replayed"
+  },
+  "redteam/historical-maya-eth-cacao.js": {
+    "class": "real-world",
+    "why": "completed real Maya swap, replayed"
+  },
+  "redteam/historical-maya-native.js": {
+    "class": "real-world",
+    "why": "completed real Maya swap, replayed"
+  },
+  "redteam/historical-near-intents-deposit.js": {
+    "class": "real-world",
+    "why": "completed real NEAR Intents swap, replayed"
+  },
+  "redteam/historical-relay-bridge-deposit.js": {
+    "class": "real-world",
+    "why": "completed real Relay swap, replayed"
+  },
+  "redteam/historical-thor-alt-evm.js": {
+    "class": "real-world",
+    "why": "completed real THORChain swap, replayed"
+  },
+  "redteam/historical-thor-btc.js": {
+    "class": "real-world",
+    "why": "completed real THORChain swap, replayed"
+  },
+  "redteam/historical-thor-erc20.js": {
+    "class": "real-world",
+    "why": "completed real THORChain swap, replayed"
+  },
+  "redteam/historical-thor-eth-usdt.js": {
+    "class": "real-world",
+    "why": "completed real THORChain swap, replayed"
+  },
+  "redteam/historical-thor-ltc.js": {
+    "class": "real-world",
+    "why": "completed real THORChain swap, replayed"
+  },
+  "redteam/historical-thor-native.js": {
+    "class": "real-world",
+    "why": "completed real THORChain swap, replayed"
+  },
+  "redteam/historical-thor-tron.js": {
+    "class": "real-world",
+    "why": "completed real THORChain swap, replayed"
+  },
+  "solana-clearsign/descriptor-sign.js": {
+    "class": "edge-case",
+    "why": "runtime signer mechanism"
+  },
+  "solana-clearsign/live-risk-replay.js": {
+    "class": "real-world",
+    "why": "replay of real Solana dapp requests"
+  },
+  "solana-clearsign/offline-descriptor.js": {
+    "class": "no-signing",
+    "why": "reads data or runs offline; nothing is shown for approval"
+  },
+  "solana-clearsign/offline-schema.js": {
+    "class": "no-signing",
+    "why": "reads data or runs offline; nothing is shown for approval"
+  },
+  "solana-clearsign/schema-sign.js": {
+    "class": "edge-case",
+    "why": "runtime signer mechanism"
+  },
+  "sweep/scan.js": {
+    "class": "no-signing",
+    "why": "reads data or runs offline; nothing is shown for approval"
+  },
+  "thorchain/ruji.js": {
+    "class": "real-world",
+    "why": "THORChain sends of RUJI and secured assets"
+  },
+  "ton/get-address.js": {
+    "class": "real-world",
+    "why": "show a TON address"
+  },
+  "zcash/build-response-shape.js": {
+    "class": "no-signing",
+    "why": "reads data or runs offline; nothing is shown for approval"
+  },
+  "zcash/shield.js": {
+    "class": "real-world",
+    "why": "Zcash shield"
+  }
+}

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test'
-import { findEvmSchema, findCertifiedEvmSchema } from './evm-schema-registry'
+import { findEvmSchema, findCertifiedEvmSchema, resolveEvmSchema } from './evm-schema-registry'
 import { buildTokenSchema } from './evm-token-schema'
 import { buildEvmSchemaBody } from './evm-certified-schema'
 
@@ -12,17 +12,15 @@ const DATA =
   '8a2c121197efc95c42f53142ab409735ee353287f877ed4d351f63094d5bfcb1'
 
 describe('findEvmSchema', () => {
-  it('blocks the live USDT approval when its reviewed artifact is unavailable', async () => {
+  it('leaves the live USDT approval to the device when its reviewed artifact is unavailable', async () => {
     const originalFetch = globalThis.fetch
     const token = '0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9'
     const approval = `0x095ea7b3${'000000000022d473030f116ddee9f6b43ac78ba3'.padStart(64, '0')}${'ff'.repeat(32)}`
     try {
       for (const status of [422, 503]) {
         globalThis.fetch = (async () => new Response(JSON.stringify({ classification: 'OPAQUE' }), { status })) as typeof fetch
-        await expect(findCertifiedEvmSchema(42161, token, approval)).rejects.toThrow(/ClearSign/)
+        expect(await findCertifiedEvmSchema(42161, token, approval)).toBeUndefined()
       }
-      globalThis.fetch = (async () => new Response(JSON.stringify({ classification: 'OPAQUE' }), { status: 422 })) as typeof fetch
-      expect(await findCertifiedEvmSchema(1, token, approval)).toBeUndefined()
     } finally {
       globalThis.fetch = originalFetch
     }
@@ -57,7 +55,21 @@ describe('findEvmSchema', () => {
         await expect(findCertifiedEvmSchema(42161, contract, calldata)).rejects.toThrow(/token identity/)
       }
       globalThis.fetch = (async () => Response.json({ classification: 'OPAQUE', code: 'TOKEN_IDENTITY_UNVERIFIED' }, { status: 422 })) as typeof fetch
-      await expect(findCertifiedEvmSchema(42161, contract, calldata)).rejects.toThrow(/certified description unavailable/)
+      expect(await findCertifiedEvmSchema(42161, contract, calldata)).toBeUndefined()
+    } finally { globalThis.fetch = originalFetch }
+  })
+
+  it('a reviewed call the service cannot certify goes to the device without a certificate', async () => {
+    const originalFetch = globalThis.fetch
+    // Relay depositNative on Base: reviewed here, absent from the deployed service.
+    const relay = ['0x4cd00e387622c35bddb9b4c962c136462338bc31', `0x49290c1c${'00'.repeat(64)}`] as const
+    try {
+      globalThis.fetch = (async () => Response.json({ classification: 'OPAQUE', error: 'not in the reviewed catalog' }, { status: 422 })) as typeof fetch
+      expect(await resolveEvmSchema(8453, ...relay)).toBeUndefined()
+      globalThis.fetch = (async () => { throw new Error('offline') }) as typeof fetch
+      expect(await resolveEvmSchema(8453, ...relay)).toBeUndefined()
+      globalThis.fetch = (async () => new Response('bad gateway', { status: 502 })) as typeof fetch
+      expect(await resolveEvmSchema(8453, ...relay)).toBeUndefined()
     } finally { globalThis.fetch = originalFetch }
   })
 
@@ -96,5 +108,20 @@ describe('findEvmSchema', () => {
     expect(findEvmSchema(1, undefined, DATA)).toBeUndefined()
     expect(findEvmSchema(1, TO, undefined)).toBeUndefined()
     expect(findEvmSchema(1, TO, '0x')).toBeUndefined()
+  })
+})
+
+describe('resolveEvmSchema never stands in the CI test-key registry', () => {
+  it('chain 1 Relay bridgeDeposit with the service down: no schema, not the slot-3 entry', async () => {
+    const TO = '0x4cd00e387622c35bddb9b4c962c136462338bc31'
+    const DATA = '0x49290c1c' + '00'.repeat(64)
+    expect(findEvmSchema(1, TO, DATA)?.keyId).toBe(3)
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = (async () => { throw new Error('offline') }) as unknown as typeof fetch
+    try {
+      expect(await resolveEvmSchema(1, TO, DATA, true)).toBeUndefined()
+    } finally {
+      globalThis.fetch = originalFetch
+    }
   })
 })

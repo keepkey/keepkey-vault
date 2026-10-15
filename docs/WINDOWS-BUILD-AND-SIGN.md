@@ -55,7 +55,7 @@ A fully provisioned build machine. If this is a fresh box, follow [`WINDOWS-DEV-
 - Clean checkout on the release branch (e.g. `release/X.Y.Z`) with all expected submodules initialized — the script handles submodule init itself, but a dirty tree will produce a dirty build
 - `modules/device-protocol/lib/messages_pb.js` **must exist** (see [The device-protocol pitfall](#the-device-protocol-pitfall) below)
 - `projects/keepkey-vault/emulator-bundle/libkkemu.dll` must be the
-  `emulator-build-input-libkkemu-7.16.0-win-x64.dll` from the matching commit's
+  `emulator-build-input-libkkemu-7.17.0-win-x64.dll` from the matching commit's
   macOS CI artifact. The build rejects a missing/non-PE DLL and verifies that
   Electrobun copied the exact SHA-256 into the app.
 
@@ -320,6 +320,6 @@ Before tagging and uploading:
 - [ ] Compare `SHA256SUMS-windows.txt` against the installer EXE hash
 - [ ] Upload the signed single installer EXE and `SHA256SUMS-windows.txt` to the GitHub release
 - [ ] Run the installed app, pair a real device, confirm `vault-backend.log` has the expected boot lines
-- [ ] Add an emulator without dropping a DLL; confirm it boots and reports firmware 7.16.0
+- [ ] Add an emulator without dropping a DLL; confirm it boots and reports firmware 7.17.0
 - [ ] With an **initialized Windows emulator**, run the 64 KB Randomness Audit; progress must reach 100%, the report must render, and the emulator poll thread must remain responsive. Run it twice and confirm the two sample SHA-256 values differ. A frozen audit or transport timeout blocks release.
 - [ ] On the emulator, run certified ETH→SOL ClearSign; labelled review appears and no Advanced Mode prompt is shown
