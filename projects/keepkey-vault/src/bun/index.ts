@@ -262,7 +262,7 @@ import { auditUnknownClearSignShape, setClearSignAuditGate } from "./clearsign-l
 import { classifyEffectExposure, observeEvmCall, observeEvmTypedData, observeMalformedSolanaTransaction, observeSolanaTransaction } from "./clearsign-observation"
 import { getClearSignProtectionCaseStudies } from "./clearsign-case-studies"
 import { getEvmSimulationEndpoint, getEvmSimulationRpcUrls } from "./evm-simulation-config"
-import { initDb, factoryResetDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, setCustomTokenIcon as dbSetCustomTokenIcon, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility, insertApiLog, getApiLogs, clearApiLogs, setCachedBalances, getCachedBalances, updateCachedBalance, clearBalances, deleteCachedChainBalance, saveCachedPubkey, getLatestDeviceSnapshot, getCachedPubkeys, saveReport, getReportsList, getReportById, deleteReport, reportExists, getSwapHistory, getSwapHistoryStats, getSwapHistoryByTxid, getBip85Seeds, saveBip85Seed, deleteBip85Seed, clearCachedPubkeys, getRecentActivityFromLog, getPioneerServers, addPioneerServerDb, removePioneerServerDb, syncOwnAddressBook, recordOutbound, getAddressBookList, updateAddressBookEntry, deleteAddressBookEntry, getAddressBookHistory, getDeviceLabelMap, getBalancesForOwnSeed, addExternalEntry, matchAddressBook, insertClearSignEvent, getClearSignEvents, insertClearSignObservation, finalizeClearSignObservation, authenticateClearSignObservation, getClearSignCoverageSummary, getClearSignAuditJobs, enqueueClearSignAuditDemand } from "./db"
+import { initDb, getDb, factoryResetDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, setCustomTokenIcon as dbSetCustomTokenIcon, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility, insertApiLog, getApiLogs, clearApiLogs, setCachedBalances, getCachedBalances, updateCachedBalance, clearBalances, deleteCachedChainBalance, saveCachedPubkey, getLatestDeviceSnapshot, getCachedPubkeys, saveReport, getReportsList, getReportById, deleteReport, reportExists, getSwapHistory, getSwapHistoryStats, getSwapHistoryByTxid, getBip85Seeds, saveBip85Seed, deleteBip85Seed, clearCachedPubkeys, getRecentActivityFromLog, getPioneerServers, addPioneerServerDb, removePioneerServerDb, syncOwnAddressBook, recordOutbound, getAddressBookList, updateAddressBookEntry, deleteAddressBookEntry, getAddressBookHistory, getDeviceLabelMap, getBalancesForOwnSeed, addExternalEntry, matchAddressBook, insertClearSignEvent, getClearSignEvents, insertClearSignObservation, finalizeClearSignObservation, authenticateClearSignObservation, getClearSignCoverageSummary, getClearSignAuditJobs, enqueueClearSignAuditDemand } from "./db"
 import { getCentralAssetAuditHistory, getCentralClearSignStatus, getCentralContractAudit, submitCentralAssetReview, submitCentralContractReview } from './clearsign-central-client'
 import { buildCentralAssetReview, buildCentralContractReview } from './clearsign-central-review'
 import { getConfiguredReviewerIdentity, signCentralReview } from './clearsign-review-signer-client'
@@ -279,7 +279,8 @@ import { buildSolanaSchema, inspectSolanaSchema } from "./clearsign-studio"
 import { resolvePromotedEvmArtifact, resolvePromotedSolanaArtifact } from "./clearsign-artifact-resolver"
 import { resolveEvmSchema } from "./evm-schema-registry"
 import { requestClearSignReview } from "./clearsign-review"
-import { resolveRuntimeEvmMetadata, supportsRuntimeEvmMetadata, type RuntimeEvmSigner } from "./evm-runtime-metadata"
+import type { RuntimeEvmSigner } from "./evm-runtime-metadata"
+import { addClearSignProvider, listClearSignProviders, removeClearSignProvider, resolveProviderTxMetadata, seedClearSignProviderFromEnv } from "./clearsign-providers"
 import { supportsCertifiedClearSign } from "./solana-certified-policy"
 import { createRpcAltFetcher } from "./solana-alt"
 import {
@@ -956,6 +957,10 @@ function deferredInit() {
 	perf('deferredInit start')
 	initDb()
 	dbReady = true
+	{
+		const db = getDb()
+		if (db) seedClearSignProviderFromEnv(db).catch((e: any) => console.warn(`[clearsign] CLEARSIGN_RUNTIME_URL seed skipped: ${e?.message || e}`))
+	}
 	try {
 		const stored = getCustomChains()
 		customChainDefs = stored.map(customChainToChainDef)
@@ -1233,6 +1238,8 @@ function getOrCreateWcManager(): WalletConnectManager {
 			return sel ? { address: sel.address, addressIndex: sel.addressIndex } : null
 		},
 		ethSignTx: (params) => { if (isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant)) throw new Error('WalletConnect is not available on bitcoin-only firmware'); if (!engine.wallet) throw new Error('Device disconnected'); return engine.wallet.ethSignTx(params) },
+		getAdvancedModeEnabled: () => getAdvancedModeEnabled() === true,
+		loadClearsignSigner: async (signer) => { if (!engine.wallet) throw new Error('Device disconnected'); await loadProviderSigner(signer) },
 		ethSignMessage: (params) => { if (isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant)) throw new Error('WalletConnect is not available on bitcoin-only firmware'); if (!engine.wallet) throw new Error('Device disconnected'); return engine.wallet.ethSignMessage(params) },
 		ethSignTypedData: async (params) => { if (isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant)) throw new Error('WalletConnect is not available on bitcoin-only firmware'); if (!engine.wallet) throw new Error('Device disconnected'); return engine.wallet.ethSignTypedData(await withPermit2SpenderName(params, engine.getDeviceState().firmwareVersion)) },
 		getCosmosAccountInfo: async (caipChain) => {
@@ -1803,6 +1810,20 @@ async function emuSigningOp(
 ): Promise<any> {
 	const { emuInteractiveConfirm } = await import('./emulator-window')
 	return emuInteractiveConfirm(fn, details, engine.emuDelegate, (engine.wallet as any)?.transport)
+}
+
+/** Ask the device to trust a provider's key for this session. The device
+ * shows its name, fingerprint and "NOT verified by KeepKey". */
+async function loadProviderSigner(signer: RuntimeEvmSigner): Promise<void> {
+	const load = () => (engine.wallet as any).loadClearsignSigner({
+		keyId: signer.keyId,
+		pubkey: Uint8Array.from(Buffer.from(signer.publicKeyHex, 'hex')),
+		alias: signer.alias,
+	})
+	if (engine.isEmulator) await emuSigningOp(load, {
+		operation: 'loadClearsignSigner', opLabel: `Trust ${signer.alias} (${signer.fingerprint})`, chain: 'Ethereum',
+	})
+	else await load()
 }
 
 // F5: best-effort confirm fields for the Cosmos-family tx shape (Cosmos/THOR/
@@ -3062,6 +3083,23 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					throw cause
 				}
 			},
+			clearsignListProviders: async () => {
+				const db = getDb()
+				return db ? listClearSignProviders(db) : []
+			},
+			clearsignAddProvider: async (params) => {
+				if (getAdvancedModeEnabled() !== true) throw new Error('ClearSign providers need AdvancedMode on the connected device')
+				const db = getDb()
+				if (!db) throw new Error('Vault database is unavailable')
+				addClearSignProvider(db, params)
+				return listClearSignProviders(db)
+			},
+			clearsignRemoveProvider: async (params) => {
+				const db = getDb()
+				if (!db) throw new Error('Vault database is unavailable')
+				removeClearSignProvider(db, params.id)
+				return listClearSignProviders(db)
+			},
 			clearsignDeriveProviderKey: async (params) => {
 				const alias = String(params.alias || '').trim()
 				if (!alias || alias.length > 31 || !/^[A-Za-z0-9 _-]+$/.test(alias)) {
@@ -3517,29 +3555,19 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						}
 					}
 				}
-				// The browser-extension and WalletConnect paths converge here. On
-				// 7.15, an explicitly configured provider can bind a reviewed report
-				// to this exact final transaction. Loading its RAM signer is always a
-				// separate mandatory device trust screen; runtime metadata never
-				// silently acquires KeepKey-certified status or bypasses AdvancedMode.
-				if (!resolvedSchema && !effectiveParams?.txMetadata && !effectiveParams?.erc7730
-					&& supportsRuntimeEvmMetadata(engine.getDeviceState().firmwareVersion, getAdvancedModeEnabled() === true)) {
-					const runtime = await resolveRuntimeEvmMetadata(effectiveParams)
+				// Browser-extension path. WalletConnect signs through its own
+				// callback (getOrCreateWcManager) and REST through rest-api.ts; all
+				// of them call the same provider step, resolveProviderTxMetadata.
+				// Loading the provider's RAM signer is always a separate device
+				// trust screen; its description never becomes KeepKey-certified.
+				if (!resolvedSchema) {
+					const runtime = await resolveProviderTxMetadata(effectiveParams, {
+						firmwareVersion: engine.getDeviceState().firmwareVersion, advancedMode: getAdvancedModeEnabled() === true,
+					})
 					if (runtime) {
 						runtimeSigner = runtime.signer
-						effectiveParams = {
-							...effectiveParams,
-							txMetadata: { signedPayload: runtime.signedPayload, keyId: runtime.keyId },
-						}
-						const load = () => (engine.wallet as any).loadClearsignSigner({
-							keyId: runtime.signer.keyId,
-							pubkey: Uint8Array.from(Buffer.from(runtime.signer.publicKeyHex, 'hex')),
-							alias: runtime.signer.alias,
-						})
-						if (engine.isEmulator) await emuSigningOp(load, {
-							operation: 'loadClearsignSigner', opLabel: `Trust ${runtime.signer.alias} (${runtime.signer.fingerprint})`, chain: 'Ethereum',
-						})
-						else await load()
+						effectiveParams = { ...effectiveParams, txMetadata: runtime.txMetadata }
+						await loadProviderSigner(runtime.signer)
 					}
 				}
 				const signedPayload = effectiveParams?.txMetadata?.signedPayload

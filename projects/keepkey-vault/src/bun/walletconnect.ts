@@ -25,6 +25,8 @@ import { buildClearSignReport, solanaDecodedReportFindings } from '../shared/cle
 import { uniswapReportFindingsWithState } from './uniswap-report'
 import { classifyEffectExposure, observeEvmCall, observeEvmTypedData, observeMalformedSolanaTransaction, observeSolanaTransaction } from './clearsign-observation'
 import { resolveEvmSchema, type SignedEvmSchema } from './evm-schema-registry'
+import { resolveProviderTxMetadata } from './clearsign-providers'
+import type { RuntimeEvmSigner } from './evm-runtime-metadata'
 import { supportsCertifiedClearSign } from './solana-certified-policy'
 import { decodeEIP712 } from './eip712-decoder'
 
@@ -167,6 +169,10 @@ export interface WcCallbacks {
   ensureEvmAddressInfo: () => Promise<{ address: string; addressIndex: number } | null>
   /** Sign an EVM transaction via the KeepKey device. */
   ethSignTx: (params: any) => Promise<any>
+  /** AdvancedMode policy on the connected device (gates ClearSign providers). */
+  getAdvancedModeEnabled: () => boolean
+  /** Ask the device to trust a ClearSign provider's key for this session. */
+  loadClearsignSigner: (signer: RuntimeEvmSigner) => Promise<void>
   /** Sign a message via the KeepKey device. */
   ethSignMessage: (params: any) => Promise<any>
   /** Sign typed data (EIP-712) via the KeepKey device. */
@@ -1100,6 +1106,17 @@ export class WalletConnectManager {
           signedPayload: new Uint8Array(Buffer.from(decoded.signedInsightBlob, 'base64')),
           keyId: decoded.insightKeyId,
         }
+      }
+
+      // Nothing described the call: ask the matching ClearSign provider the
+      // user added, now that nonce, gas and fees are final.
+      const runtime = await resolveProviderTxMetadata(msg, {
+        firmwareVersion: this.callbacks.getFirmwareVersion(), advancedMode: this.callbacks.getAdvancedModeEnabled(),
+      })
+      if (runtime) {
+        this.callbacks.log(`[WC] ClearSign provider ${runtime.provider.name} (${runtime.provider.fingerprint}) described the call`)
+        await this.callbacks.loadClearsignSigner(runtime.signer)
+        msg.txMetadata = runtime.txMetadata
       }
 
       const result = await this.callbacks.ethSignTx(msg)

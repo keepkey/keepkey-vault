@@ -1276,6 +1276,31 @@ export interface PioneerServer {
   isDefault: boolean
 }
 
+// A third-party ClearSign description provider the user added (persisted in
+// SQLite). Its key is trusted by the device only per session, after the user
+// approves "NOT verified by KeepKey"; nothing here is KeepKey-certified.
+export interface ClearSignProviderContract {
+  chainId: number
+  address: string                // lowercase 0x-prefixed
+}
+
+export interface ClearSignProvider {
+  id: string
+  name: string                   // alias shown on the device trust screen
+  url: string
+  publicKeyHex: string           // 33-byte compressed secp256k1, lowercase hex
+  fingerprint: string            // 16 uppercase hex, as the device shows it
+  contracts: ClearSignProviderContract[] // empty = any contract
+  createdAt: number
+}
+
+export interface ClearSignProviderInput {
+  name: string
+  url: string
+  publicKeyHex: string
+  contracts?: ClearSignProviderContract[]
+}
+
 // Application-level settings (persisted in SQLite)
 export interface AppSettings {
   restApiEnabled: boolean        // controls entire REST API server on/off

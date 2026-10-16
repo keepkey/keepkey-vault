@@ -83,7 +83,8 @@ import { createClearSignFixturePlan } from './clearsign-fixture-plan'
 import { replayLegacyClearSignRows } from './clearsign-legacy-replay'
 import { importPromotedClearSignArtifact } from './clearsign-artifact-import'
 import { findPromotedEvmArtifact, findPromotedSolanaArtifact, resolvePromotedSolanaArtifact } from './clearsign-artifact-resolver'
-import { resolveRuntimeEvmMetadata, supportsRuntimeEvmMetadata, type RuntimeEvmSigner } from './evm-runtime-metadata'
+import type { RuntimeEvmSigner } from './evm-runtime-metadata'
+import { resolveProviderTxMetadata } from './clearsign-providers'
 import { supportsCertifiedClearSign } from './solana-certified-policy'
 import { measureLiveDeployment, resolveEvmSchema } from './evm-schema-registry'
 import { findContractRating } from './clearsign-review'
@@ -2826,25 +2827,21 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
                 keyId: decoded.insightKeyId,
               }
               console.log(`[REST] EVM clear-sign: using Pioneer blob (keyId=${decoded.insightKeyId}, ${msg.txMetadata.signedPayload.length} bytes)`)
-            } else if (
-              supportsRuntimeEvmMetadata(activeSigningInfo?.firmwareVersion, activeSigningInfo?.advancedModeEnabled === true)
-            ) {
-              // The REST, browser-extension and WalletConnect routes must use
-              // the same exact-transaction runtime metadata path. A configured
-              // provider is authoritative: transport, identity, signing and
-              // device trust failures abort signing rather than silently
-              // degrading to raw blind signing.
-              const runtime = await resolveRuntimeEvmMetadata(msg)
+            } else {
+              // Same provider step as the RPC, swap and WalletConnect routes:
+              // the ClearSign provider the user added for this contract, asked
+              // about this exact final transaction (AdvancedMode, 7.15+ only).
+              const runtime = await resolveProviderTxMetadata(msg, {
+                firmwareVersion: activeSigningInfo?.firmwareVersion,
+                advancedMode: activeSigningInfo?.advancedModeEnabled === true,
+              })
               if (runtime) {
                 runtimeSigner = runtime.signer
-                msg.txMetadata = {
-                  signedPayload: runtime.signedPayload,
-                  keyId: runtime.keyId,
-                }
-                console.log(`[REST] EVM clear-sign: runtime provider signer ${runtime.signer.fingerprint} (keyId=${runtime.keyId})`)
+                msg.txMetadata = runtime.txMetadata
+                console.log(`[REST] EVM clear-sign: ClearSign provider ${runtime.provider.name} (${runtime.provider.fingerprint}, keyId=${runtime.txMetadata.keyId})`)
+              } else {
+                console.log('[REST] EVM clear-sign: no metadata blob — device will show raw hex')
               }
-            } else {
-              console.log('[REST] EVM clear-sign: no metadata blob — device will show raw hex')
             }
           }
 

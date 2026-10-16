@@ -16,6 +16,7 @@ import { summarizeClearSignObservations } from './clearsign-observation'
 import { clearSignPromotionBundleHash, verifyClearSignPromotionReview } from './clearsign-promotion'
 import type { VerifiedClearSignArtifact } from './clearsign-artifact-import'
 import { configureClearSignArtifactSnapshots } from './clearsign-artifact-resolver'
+import { configureClearSignProviders, ensureClearSignProviderTable, listClearSignProviders } from './clearsign-providers'
 
 const SCHEMA_VERSION = '10'
 
@@ -296,6 +297,9 @@ export function initDb() {
         ['https://api.keepkey.info', 'KeepKey Official', Date.now()]
       )
     }
+
+    // User-added ClearSign description providers (third-party, per-session trust).
+    ensureClearSignProviderTable(db)
 
     // Per-emulator-wallet metadata (keyed by flash name, stable across re-imports).
     // Kept separate from device_snapshot so ephemeral emu identities never
@@ -993,6 +997,17 @@ export function removePioneerServerDb(url: string) {
     throw e
   }
 }
+
+// ── ClearSign Providers ──────────────────────────────────────────────
+
+configureClearSignProviders(() => {
+  try {
+    return db ? listClearSignProviders(db) : []
+  } catch (e: any) {
+    console.warn('[db] listClearSignProviders failed:', e.message)
+    return []
+  }
+})
 
 // ── Token Visibility (spam filter user overrides) ─────────────────────
 

@@ -21,11 +21,11 @@ export function supportsRuntimeEvmMetadata(firmwareVersion: string | undefined, 
   return advancedMode && !!firmwareVersion && versionCompare(firmwareVersion, '7.15.0') >= 0
 }
 
-/** Resolve transaction-bound metadata for the 7.15 RAM signer path. This is
- * deliberately opt-in: production builds do not contact localhost or load a
- * trust key unless CLEARSIGN_RUNTIME_URL names the provider service. */
-export async function resolveRuntimeEvmMetadata(tx: any): Promise<RuntimeEvmMetadata | undefined> {
-  const configured = String(process.env.CLEARSIGN_RUNTIME_URL || '').trim().replace(/\/+$/, '')
+/** Resolve transaction-bound metadata for the 7.15 RAM signer path from one
+ * provider the user added (clearsign-providers.ts picks which). Nothing is
+ * contacted without a provider URL. */
+export async function resolveRuntimeEvmMetadata(tx: any, providerUrl: string): Promise<RuntimeEvmMetadata | undefined> {
+  const configured = String(providerUrl || '').trim().replace(/\/+$/, '')
   if (!configured) return undefined
 
   const [signerResponse, signResponse] = await Promise.all([
