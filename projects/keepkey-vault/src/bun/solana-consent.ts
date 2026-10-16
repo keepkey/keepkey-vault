@@ -45,15 +45,15 @@ function firmwareClearSigns(instruction: SolanaTxDecodedInstruction): boolean {
       if (instruction.instructionName === 'transferChecked') {
         return instruction.accounts.length >= 4
       }
-      return instruction.instructionName === 'mintTo'
-        || instruction.instructionName === 'burn'
-        || instruction.instructionName === 'closeAccount'
+      // MintTo and Burn are opaque on 7.14.2 and on the released 7.15 and 7.16.
+      return instruction.instructionName === 'closeAccount'
     case TOKEN_2022_PROGRAM:
-      // Firmware forces all Token-2022 transfer variants opaque because
-      // extensions can add undisclosed hooks or fees.
-      return instruction.instructionName === 'mintTo'
-        || instruction.instructionName === 'burn'
-        || instruction.instructionName === 'closeAccount'
+      // Released firmware since 7.14.2 forces every Token-2022 instruction
+      // opaque because extensions can add undisclosed hooks or fees.
+      return false
+    case STAKE_PROGRAM:
+      return instruction.instructionName === 'delegateStake'
+        || instruction.instructionName === 'deactivate'
     case ATA_PROGRAM:
       return instruction.instructionName === 'create'
     case COMPUTE_BUDGET_PROGRAM:
@@ -146,18 +146,25 @@ export function solanaFirmwareRequiresAdvancedMode(
 
 /**
  * The opcodes each program's firmware classifier decodes (lib/firmware/solana.c
- * parse_instruction_section, the same in every build since 7.14.1). Any other
- * opcode, or any program not listed, makes the whole review OPAQUE.
- * System, Stake and Vote opcodes are a u32 LE; the others one byte.
+ * parse_instruction_section; the opcode set is the same in every build since
+ * 7.14.1), each with the exact data length and the fewest accounts it decodes
+ * on 7.14.2 and 7.16.0. Any other opcode, length or account count, or any
+ * program not listed, is UNKNOWN and makes the whole review OPAQUE: padding a
+ * recognised instruction loses clear-signing. System, Stake and Vote opcodes are a u32 LE;
+ * the others one byte. SetAuthority (6) is listed by its None form; it is
+ * opaque whatever its length.
  */
-const TOKEN_OPCODES = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 15, 17]
-const FIRMWARE_OPCODES: Record<string, number[]> = {
-  [SYSTEM_PROGRAM]: [0, 1, 2, 4, 5, 6, 7, 8],
-  [TOKEN_PROGRAM]: TOKEN_OPCODES,
-  [TOKEN_2022_PROGRAM]: TOKEN_OPCODES,
-  [STAKE_PROGRAM]: [1, 2, 3, 4, 5, 7],
-  [VOTE_PROGRAM]: [1, 3, 4, 5],
-  [COMPUTE_BUDGET_PROGRAM]: [1, 2, 3, 4],
+const TOKEN_LAYOUTS: Record<number, [dataLength: number, minAccounts: number]> = {
+  3: [9, 3], 4: [9, 3], 5: [1, 2], 6: [3, 2], 7: [9, 3], 8: [9, 3], 9: [1, 3],
+  10: [1, 3], 11: [1, 3], 12: [10, 4], 14: [10, 3], 15: [10, 3], 17: [1, 1],
+}
+const FIRMWARE_LAYOUTS: Record<string, Record<number, [dataLength: number, minAccounts: number]>> = {
+  [SYSTEM_PROGRAM]: { 0: [52, 2], 1: [36, 1], 2: [12, 2], 4: [4, 3], 5: [12, 5], 6: [36, 3], 7: [36, 2], 8: [12, 1] },
+  [TOKEN_PROGRAM]: TOKEN_LAYOUTS,
+  [TOKEN_2022_PROGRAM]: TOKEN_LAYOUTS,
+  [STAKE_PROGRAM]: { 1: [40, 3], 2: [4, 6], 3: [12, 3], 4: [12, 5], 5: [4, 3], 7: [4, 5] },
+  [VOTE_PROGRAM]: { 1: [40, 3], 3: [12, 3], 4: [4, 3], 5: [5, 2] },
+  [COMPUTE_BUDGET_PROGRAM]: { 1: [5, 0], 2: [5, 0], 3: [9, 0], 4: [5, 0] },
 }
 
 /** The non-certified review every firmware build at a version agrees on, if any. */
@@ -182,7 +189,9 @@ function predictFirmwareReview(
     // Lookup-table accounts are chain state the device cannot resolve.
     return 'opaque'
   }
-  if (message.instructions.length === 0 || message.instructions.length > 8) return 'opaque'
+  // The released 7.16.0 reviews up to twelve instructions, older builds eight.
+  const maxInstructions = at('7.16.0') ? 12 : 8
+  if (message.instructions.length === 0 || message.instructions.length > maxInstructions) return 'opaque'
   return message.instructions.some((ix) => firmwareForcesOpaque(keys, ix, at)) ? 'opaque' : undefined
 }
 
@@ -193,33 +202,42 @@ function firmwareForcesOpaque(
 ): boolean {
   const program = keys[ix.programIdIndex]
   const data = Buffer.from(ix.data)
-  const only7142 = at('7.14.2') && !at('7.15.0')
+  // 7.14.2 and the released 7.16.0 decode only exact layouts, and refuse
+  // every Token-2022 instruction, MintTo/Burn and a non-canonical ATA create.
+  // The 7.15.0 builds disagree.
+  const strict = (at('7.14.2') && !at('7.15.0')) || at('7.16.0')
   if (program === MEMO_V2_PROGRAM) return false
   if (program === ATA_PROGRAM) {
     // Create is empty data or [0]; CreateIdempotent ([1]) is reviewed from 7.15.
     const op = data.length === 0 ? 0 : data.length === 1 ? data[0] : -1
     if (op !== 0 && !(op === 1 && at('7.15.0'))) return true
-    // 7.14.2 reviews only a Create naming the System and SPL Token programs.
-    return only7142 && (
+    // Only a Create naming the System and SPL Token programs is reviewed.
+    return strict && (
       ix.accountIndices.length < 6
       || keys[ix.accountIndices[4]] !== SYSTEM_PROGRAM
       || keys[ix.accountIndices[5]] !== TOKEN_PROGRAM
     )
   }
-  const opcodes = FIRMWARE_OPCODES[program]
-  if (!opcodes) return true
+  const layouts = FIRMWARE_LAYOUTS[program]
+  if (!layouts) return true
   const wide = program === SYSTEM_PROGRAM || program === STAKE_PROGRAM || program === VOTE_PROGRAM
   if (data.length < (wide ? 4 : 1)) return true
   const op = wide ? data.readUInt32LE(0) : data[0]
-  if (!opcodes.includes(op)) return true
+  const layout = layouts[op]
+  if (!layout) return true
+  if (strict) {
+    const [length, minAccounts] = layout
+    if (data.length !== length || ix.accountIndices.length < minAccounts) return true
+    // Stake and Vote Authorize decode only the staker (0) or withdrawer (1) role.
+    if ((program === STAKE_PROGRAM || program === VOTE_PROGRAM) && op === 1 && data.readUInt32LE(36) > 1) return true
+  }
   if (program !== TOKEN_PROGRAM && program !== TOKEN_2022_PROGRAM) return false
   // From 7.14.2 every build refuses to clear-sign unchecked Transfer and
   // Approve (no mint), SetAuthority, and Token-2022 TransferChecked (hooks).
   if (at('7.14.2') && ([3, 4, 6].includes(op) || (program === TOKEN_2022_PROGRAM && op === 12))) {
     return true
   }
-  // 7.14.2 alone also refuses every Token-2022 instruction and MintTo/Burn.
-  return only7142 && (program === TOKEN_2022_PROGRAM || [7, 8, 14, 15].includes(op))
+  return strict && (program === TOKEN_2022_PROGRAM || [7, 8, 14, 15].includes(op))
 }
 
 /**

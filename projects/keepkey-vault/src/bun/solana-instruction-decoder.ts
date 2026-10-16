@@ -258,6 +258,11 @@ function decodeArgs(data: Uint8Array, start: number, schema: SolanaArgSchema[]):
     args.push(res.arg)
     offset = res.nextOffset
   }
+  // Signed bytes past the last field are never shown, so this is not a full
+  // decode (firmware treats such an instruction as unknown).
+  if (offset < data.length) {
+    return { args, note: `${data.length - offset} trailing bytes not decoded` }
+  }
   return { args }
 }
 

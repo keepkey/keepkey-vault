@@ -70,7 +70,7 @@ const acct = (ix: SolanaTxDecodedInstruction, label: string) => ix.accounts.find
 const SOL_DECIMALS = 9
 
 /** Programs the firmware decodes itself (lib/firmware/solana.c; mirrored in
- *  bun/solana-consent.ts FIRMWARE_OPCODES). Token-2022 is left out: 7.16.0
+ *  bun/solana-consent.ts FIRMWARE_LAYOUTS). Token-2022 is left out: 7.16.0
  *  shows every Token-2022 instruction as raw data. */
 const SOLANA_FIRMWARE_PROGRAMS = new Set([
   '11111111111111111111111111111111',            // System
@@ -83,6 +83,23 @@ const SOLANA_MEMO_PROGRAMS = new Set([
   'MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr',
   'Memo1UhkJRfHyvLMcVucJwxXeuD728EqVDDwQDxFMNo',
 ])
+const SOLANA_MEMO_V2 = 'MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr'
+const SOLANA_ATA_PROGRAM = 'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL'
+
+/** Does the device itself show this instruction? Memo v2 text, a canonical
+ *  ATA create (System and SPL Token in slots 4 and 5), and the programs
+ *  firmware decodes, each decoded in full here. MintTo and Burn are left out:
+ *  released firmware since 7.14.2 shows them only as raw data. */
+function solanaFirmwareShows(ix: SolanaTxDecodedInstruction): boolean {
+  if (ix.programId === SOLANA_MEMO_V2) return true
+  if (ix.status !== 'known' || ix.note) return false
+  if (ix.programId === SOLANA_ATA_PROGRAM) {
+    return ix.accounts[4]?.pubkey === '11111111111111111111111111111111'
+      && ix.accounts[5]?.pubkey === 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA'
+  }
+  if (ix.instructionName === 'mintTo' || ix.instructionName === 'burn') return false
+  return SOLANA_FIRMWARE_PROGRAMS.has(ix.programId)
+}
 
 /** Exact d / h / min / s, the way the device screen spells a duration. */
 function duration(seconds: bigint): string {
@@ -144,11 +161,20 @@ function describeKnown(ix: SolanaTxDecodedInstruction): RiskReason | null {
   const name = ix.instructionName
   if (ix.programName === 'System Program' && name === 'transfer') {
     const to = acct(ix, 'destination')
-    return { level: 'low', text: `Sends ${units(arg(ix, 'lamports') ?? '0', 9)} SOL${to ? ` to ${shortAddr(to)}` : ''}.` }
+    const lamports = arg(ix, 'lamports')
+    return { level: 'low', text: `Sends ${lamports ? `${units(lamports, 9)} SOL` : 'SOL'}${to ? ` to ${shortAddr(to)}` : ''}.` }
+  }
+  if (ix.programName === 'Stake Program' && name === 'delegateStake') {
+    const stake = acct(ix, 'stakeAccount'), vote = acct(ix, 'voteAccount')
+    return { level: 'low', text: `Delegates ${stake ? `stake account ${shortAddr(stake)}` : 'a stake account'} to ${vote ? `validator vote account ${shortAddr(vote)}` : 'a validator'}.` }
+  }
+  if (ix.programName === 'Stake Program' && name === 'deactivate') {
+    const stake = acct(ix, 'stakeAccount')
+    return { level: 'low', text: `Deactivates ${stake ? `stake account ${shortAddr(stake)}` : 'a stake account'}.` }
   }
   if (name === 'transfer' || name === 'transferChecked') {
-    const dec = arg(ix, 'decimals')
-    const amount = dec ? units(arg(ix, 'amount') ?? '0', Number(dec)) : 'tokens'
+    const dec = arg(ix, 'decimals'), raw = arg(ix, 'amount')
+    const amount = dec && raw ? units(raw, Number(dec)) : 'tokens'
     const mint = acct(ix, 'mint')
     return { level: 'low', text: `Sends ${amount}${dec && mint ? ` of token ${shortAddr(mint)}` : ''}.` }
   }
@@ -552,14 +578,22 @@ export function assessSigningRisk(req: SigningRequestInfo): RiskAssessment | nul
   let recognition: Recognition = 'unknown'
 
   if (req.solanaMessageDecoded) {
-    const c = req.solanaMessageDecoded.classification
+    const m = req.solanaMessageDecoded
+    const c = m.classification
+    // Text with control characters other than tab and line breaks is not
+    // decoded in full, whatever share of it reads as text.
+    const readable = m.messageText !== undefined && !/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(m.messageText)
     if (c === 'solana-transaction' || c === 'solana-transaction-message') {
       add('critical', 'This "message" is really a transaction. Signing it could move your money.')
-    } else if (c === 'binary-message') {
+    } else if (c === 'binary-message' || !readable) {
       add('medium', 'You are signing data that is not readable text. Only the site knows what it means.')
-    } else {
+    } else if (m.plainText === true) {
+      // The firmware shows plain ASCII text and checks it holds no signer key.
       add('low', 'You are signing a text message. It cannot move your money by itself.')
       recognition = 'shows'
+    } else {
+      add('low', 'You are signing a text message. Your KeepKey blocks it unless Advanced Mode is on, then shows it only as raw bytes, so read the text here.')
+      recognition = 'known'
     }
   } else if (req.solanaDecoded) {
     const d = req.solanaDecoded
@@ -570,6 +604,7 @@ export function assessSigningRisk(req: SigningRequestInfo): RiskAssessment | nul
       if (ix.status === 'known') {
         const r = describeKnown(ix)
         if (r) reasons.push(r)
+        if (ix.note) add('medium', `This ${ix.programName} step has bytes this computer cannot account for, so it is not decoded in full.`)
       } else if (ix.status === 'known-program-unknown-ix' && assets.includes(ix.programName)) {
         add('high', `Uses a ${ix.programName} action KeepKey does not recognize. It could move your funds or hand over control of them.`)
       } else if (ix.status === 'known-program-unknown-ix' && !SOLANA_MEMO_PROGRAMS.has(ix.programId)) {
@@ -602,11 +637,14 @@ export function assessSigningRisk(req: SigningRequestInfo): RiskAssessment | nul
     if (d.altResolutionIncomplete) {
       add('high', 'Part of this transaction is hidden and could not be looked up.')
     }
-    // A memo moves nothing; the decoder has no layout for it yet.
+    // A memo moves nothing; the decoder has no layout for it yet. A note means
+    // bytes were cut short or left over, so that step is not decoded in full.
     const decoded = !d.altResolutionIncomplete
-      && d.instructions.every((i) => i.status === 'known' || SOLANA_MEMO_PROGRAMS.has(i.programId))
-    const firmwareShows = d.instructions.every((i) => i.status === 'known' && SOLANA_FIRMWARE_PROGRAMS.has(i.programId))
-    recognition = req.deviceClearSigns || (decoded && firmwareShows && req.requiresAdvancedMode !== true) ? 'shows'
+      && d.instructions.every((i) => (i.status === 'known' && !i.note) || SOLANA_MEMO_PROGRAMS.has(i.programId))
+    // Only a firmware check that ran says the device shows it: a caller that
+    // never asked (no firmware version) leaves requiresAdvancedMode unset.
+    const firmwareShows = d.instructions.every(solanaFirmwareShows) && req.requiresAdvancedMode === false
+    recognition = req.deviceClearSigns || (decoded && firmwareShows) ? 'shows'
       : decoded ? 'known' : 'unknown'
     if (reasons.length === 0) {
       add('low', recognition === 'shows'
