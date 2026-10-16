@@ -312,4 +312,19 @@ describe('swap.ts: a Relay certified proof is attached only when the device will
     expect(swap.slice(guard, guard + 400)).toContain('certifiedProof = undefined')
     expect(attached).toBeGreaterThan(guard)
   })
+
+  test('Desktop ships no runtime-slot Solana schema: Relay is certified or goes to consent', () => {
+    // Pre-signed KKSOLSC1 payloads in the source tree (base64 "KKSOLSC1") were
+    // CI-test-key schemas for runtime slot 3. Test keys never ship.
+    const shipped = new Bun.Glob('src/**/*.{ts,tsx,json}')
+    for (const file of shipped.scanSync({ cwd: new URL('..', import.meta.url).pathname })) {
+      if (/\.test\.tsx?$/.test(file)) continue
+      const text = readFileSync(new URL(`../${file}`, import.meta.url), 'utf8')
+      expect({ file, kksolsc1: text.includes('S0tTT0xTQzE') }).toEqual({ file, kksolsc1: false })
+    }
+    const swap = readFileSync(new URL('../src/bun/swap.ts', import.meta.url), 'utf8')
+    expect(swap).not.toContain('findSolanaSchema')
+    // The only Solana schema the swap attaches is the certified proof's.
+    expect(swap.match(/\bschema: /g)).toEqual(['schema: '])
+  })
 })
