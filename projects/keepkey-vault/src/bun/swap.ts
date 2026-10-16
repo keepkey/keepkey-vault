@@ -1141,7 +1141,8 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
       ctx.getFirmwareVersion?.(),
     )
   ) {
-    swapLog(`${TAG} EVM blind-sign gate: to=${unsignedTx.to} selector=${String(unsignedTx.data).slice(0, 10)} — AdvancedMode is off`)
+    // Always logged: this host prediction is the only trace of why a swap stopped.
+    console.warn(`${TAG} EVM blind-sign gate: chainId=${unsignedTx.chainId} to=${unsignedTx.to} selector=${String(unsignedTx.data).slice(0, 10)} bytes=${(String(unsignedTx.data).length - 2) / 2} fw=${ctx.getFirmwareVersion?.() ?? '?'} — AdvancedMode is off`)
     // Message content is load-bearing: SwapDialog routes on /AdvancedMode/i to
     // the opt-in panel instead of a dead error. See evmAdvancedModeRequiredMessage.
     throw new Error(evmAdvancedModeRequiredMessage(fromChain.coin))
