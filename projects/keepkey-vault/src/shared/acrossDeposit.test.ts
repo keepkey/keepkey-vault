@@ -62,12 +62,14 @@ describe('decodeAcrossDepositV3 — real Base → Ethereum deposit', () => {
     expect(f['Trailing bytes']).toContain('Across integrator tag')
   })
 
-  test('risk replaces the generic blind line but stays honest and high', () => {
+  test('a known protocol: yellow, says the firmware cannot show it yet', () => {
     const r = assessSigningRisk(req())!
-    expect(r.level).toBe('high')
+    expect(r.level).toBe('medium')
     const all = r.reasons.map((x) => x.text).join('\n')
-    expect(all).toContain('Across bridge deposit to the Across SpokePool on Base')
-    expect(all).toContain('signing blind')
+    expect(all).toContain('Across bridge deposit to the Across SpokePool on Base, a contract KeepKey knows')
+    expect(all).toContain('cannot show Across deposits on the device yet')
+    expect(all).not.toContain('signing blind')
+    expect(r.tier).toBe('yellow')
     expect(all).not.toContain('can use any token permission you already gave')
     expect(all).not.toContain('NOT the account signing')
     expect(all).toContain('Bridge fee: 0.000042124539766514 WETH (0.03%)')

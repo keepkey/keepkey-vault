@@ -29,16 +29,27 @@ import { ERC7730_TRANSPORT_SUPPORTED } from './erc7730-support'
 
 export type RiskLevel = 'low' | 'medium' | 'high' | 'critical'
 export interface RiskReason { level: RiskLevel; text: string }
-export interface RiskAssessment { level: RiskLevel; headline: string; reasons: RiskReason[] }
+/** The one verdict the user sees (owner rule 2026-10-16): green = the KeepKey
+ *  shows it (natively or from a certified description), yellow = this computer
+ *  knows it but this KeepKey firmware cannot show it yet, red = unknown, or
+ *  anything a normal app does not do. `level` stays the per-reason scale. */
+export type SigningTier = 'green' | 'yellow' | 'red'
+export interface RiskAssessment { level: RiskLevel; tier: SigningTier; headline: string; reasons: RiskReason[] }
 
 const ORDER: RiskLevel[] = ['low', 'medium', 'high', 'critical']
-const HEADLINE: Record<RiskLevel, string> = {
-  low: 'Low risk',
-  medium: 'Check before you sign',
-  high: 'High risk: only sign if you trust this site',
-  critical: 'Danger: reject unless you are certain',
+const TIER_HEADLINE: Record<SigningTier, string> = {
+  green: 'Shown on your KeepKey',
+  yellow: 'Known, but your KeepKey cannot show it yet',
+  red: 'Unknown or unusual: only sign if you trust this site',
 }
 const U64_MAX = (1n << 64n) - 1n
+
+/** A protocol Desktop knows and decodes in full, on firmware that cannot show
+ *  it yet. Owner rule: known is normal, so say "not on this firmware yet",
+ *  not "signing blind". The device still needs AdvancedMode for raw data. */
+function notOnThisFirmware(what: string, fw?: string): string {
+  return `${fw ? `KeepKey firmware ${fw}` : 'This KeepKey firmware'} cannot show ${what} on the device yet, so the device shows raw data and needs Advanced Mode to sign. Later firmware may add it. Check the details here.`
+}
 
 export const shortAddr = (a: string) => (a.length > 12 ? `${a.slice(0, 4)}…${a.slice(-4)}` : a)
 
@@ -264,12 +275,13 @@ function evmTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void) 
     // swap: say what it does, not "unknown contract".
     add(req.deviceClearSigns ? 'low' : 'medium', req.deviceClearSigns
       ? `${thorSwap}. Your KeepKey shows this deposit on its screen; check it there.`
-      : `${thorSwap}. Your KeepKey shows only raw data for this deposit, so check these details here.`)
+      : `${thorSwap}. ${notOnThisFirmware('this deposit', req.firmwareVersion)}`)
+  } else if (urSwap && !req.deviceClearSigns) {
+    add('medium', `${urSwap} through the Uniswap Universal Router, a contract KeepKey has reviewed. ${notOnThisFirmware('this swap', req.firmwareVersion)}`)
   } else if (!req.deviceClearSigns || KNOWN_SELECTORS.has(sel)) {
     // A known selector reaching here did not parse (dirty address word,
     // trailing bytes): the device may accept it by length alone.
     add('high', `Your KeepKey cannot show what this call to ${to} does. It can use any token permission you already gave that contract. You would be signing blind.`)
-    if (urSwap) add('low', `This computer reads it as: ${urSwap} through the Uniswap Universal Router. Your KeepKey will not confirm that.`)
   }
 
   if (field('Action')?.startsWith('Swap ')) {
@@ -294,20 +306,21 @@ function relayDeposit(d: RelayDeposit, req: SigningRequestInfo, decodedSent: str
   if (certified) {
     add('medium', `${what} Your KeepKey shows this deposit from a KeepKey-certified description and refuses it if that description is not genuine. Check the amount there.`)
   } else {
-    add('high', `${what} Your KeepKey cannot decode this deposit: its screen shows only raw data, so you are signing blind. Check these details here before approving.`)
+    add('medium', `${what} ${notOnThisFirmware('Relay deposits', req.firmwareVersion)}`)
   }
   if (credited !== 'your account' && from) add('high', `The deposit is credited to ${d.depositor}, not to the signing account.`)
   add('medium', "Where it arrives (destination chain, recipient and amount) is set by Relay's off-chain order, not by this transaction. Neither this computer nor your KeepKey can check it.")
 }
 
 /** A depositV3 to a pinned Across SpokePool. Decoded here only: the device
- *  shows it as raw data, so the blind line stays and AdvancedMode still gates. */
+ *  shows it as raw data and AdvancedMode still gates, but a known protocol is
+ *  normal, so the line says so instead of "signing blind". */
 function acrossDeposit(d: AcrossDepositV3, req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void) {
   const v = acrossDepositView(d)
   const from = (req.from ?? '').toLowerCase()
   let value: bigint | null = null
   try { value = BigInt(req.value === undefined || req.value === '' || req.value === '0x' ? 0 : req.value) } catch { /* unreadable: no claim about it */ }
-  add('high', `Across bridge deposit to the Across SpokePool on ${d.pool.chain}. Your KeepKey cannot decode bridge deposits yet: its screen shows only raw data, so you are signing blind. Check these details here before approving.`)
+  add('medium', `Across bridge deposit to the Across SpokePool on ${d.pool.chain}, a contract KeepKey knows. ${notOnThisFirmware('Across deposits', req.firmwareVersion)}`)
   if (value !== null && value > 0n) {
     if (d.inputToken !== d.pool.wrappedNative.address || value !== d.inputAmount) {
       add('high', `The coin sent with this call does not match the deposit (${v.sent}). The SpokePool will reject it and you would still pay the network fee.`)
@@ -437,7 +450,7 @@ export function assessSigningRisk(req: SigningRequestInfo): RiskAssessment | nul
         const what = req.solanaCertified
           ? `this call as "${req.solanaCertified.programName} — ${req.solanaCertified.instructionName}"`
           : `this call's details`
-        add(canMoveFunds ? 'high' : 'medium', canMoveFunds
+        add('medium', canMoveFunds
           ? `Runs app code (${apps}) that is able to move your SOL or tokens. Your KeepKey shows ${what} from a KeepKey-certified description, so check the amounts on its screen.`
           : `Runs app code (${apps}) that cannot move your SOL or tokens. Your KeepKey shows ${what} from a KeepKey-certified description. You only pay the network fee.`)
       } else if (canMoveFunds) {
@@ -506,5 +519,10 @@ export function assessSigningRisk(req: SigningRequestInfo): RiskAssessment | nul
     (max, r) => (ORDER.indexOf(r.level) > ORDER.indexOf(max) ? r.level : max), 'low')
   // Riskiest sentence first — it is the one the user must not skim past.
   reasons.sort((a, b) => ORDER.indexOf(b.level) - ORDER.indexOf(a.level))
-  return { level, headline: HEADLINE[level], reasons }
+  const sol = req.solanaDecoded
+  const deviceShows = !!req.deviceClearSigns
+    || (!!req.calldataDecoded?.signedInsightBlob && req.calldataDecoded.insightKeyId === 0x80)
+    || (!!sol && !sol.altResolutionIncomplete && sol.instructions.every((i) => i.status === 'known'))
+  const tier: SigningTier = ORDER.indexOf(level) >= ORDER.indexOf('high') ? 'red' : deviceShows ? 'green' : 'yellow'
+  return { level, tier, headline: TIER_HEADLINE[tier], reasons }
 }

@@ -100,6 +100,10 @@ describe('assessSigningRisk — certified Solana route', () => {
     expect(text).not.toContain('cannot read')
     expect(text).not.toContain('nobody can show you how much')
     expect(text).toContain('KeepKey-certified description')
+    // Certified, but it hands a session key power to send without the KeepKey:
+    // not what a normal app does, so the three-level verdict stays red.
+    expect(certified.tier).toBe('red')
+    expect(opaque.tier).toBe('red')
     // The session-key warning and the level are unchanged.
     expect(text).toContain('permission to act for you')
     expect(certified.level).toBe(opaque.level)
@@ -309,6 +313,13 @@ describe('assessSigningRisk — EVM', () => {
     expect(r.reasons[0].text).toBe('An auditor rates this contract high risk: a single key controls upgrades, deposits, minting (delay 10d). The rater is not yet pinned in this Vault.')
   })
 
+  test('three-level verdict: what the KeepKey shows is green, an unknown call is red', () => {
+    const transfer = '0xa9059cbb' + word(0x1234n) + word(1_000_000n)
+    const usdc = '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48'
+    expect(tx(transfer, { to: usdc, chainId: 1, deviceClearSigns: true }).tier).toBe('green')
+    expect(tx('0xdeadbeef' + word(1n), { to: '0x1111111111111111111111111111111111111111', chainId: 1 }).tier).toBe('red')
+  })
+
   test('a low-risk rating never lowers a critical payload', () => {
     const r = tx('0x095ea7b3' + SPENDER + word((1n << 256n) - 1n), reviewed('low', true))
     expect(r.level).toBe('critical')
@@ -338,11 +349,13 @@ describe('assessSigningRisk — reviewed Uniswap Universal Router swap', () => {
     expect(text).not.toContain('blind')
   })
 
-  test('no signed description (device blind-signs): stays HIGH, adds what this computer read', async () => {
+  test('no signed description: known protocol, yellow, not shown on this firmware yet', async () => {
     const r = assessSigningRisk(await swapRequest())!
-    expect(r.level).toBe('high')
-    expect(r.reasons[0].text).toContain('You would be signing blind')
-    expect(r.reasons.map((x) => x.text).join('\n')).toContain('This computer reads it as: Swaps 300 USDC')
+    expect(r.level).toBe('medium')
+    expect(r.reasons[0].text).toContain('Swaps 300 USDC')
+    expect(r.reasons[0].text).toContain('cannot show this swap on the device yet')
+    expect(r.reasons.map((x) => x.text).join('\n')).not.toContain('signing blind')
+    expect(r.tier).toBe('yellow')
   })
 
   test('a signed blob on an unreviewed contract is not treated as a reviewed swap', async () => {
