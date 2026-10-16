@@ -263,6 +263,7 @@ export const ONDEVICE_FIRMWARE_HASHES: Record<string, string> = {
   '518ad41643ee8a0aa6a6422f8534ac94f56cd65bc637aea4db7f3fdbb53255c3': 'v7.10.0',
   '446fd7ac54e0ba2d54ed1d98ef9455b01f6b9be50de7db817a50e9a3cf0c6e3d': 'v7.14.0',
   'f40fe1b74949a9e091269536b27cd53bbb8a5c1c428a6c36ff7d5c6bf6845f46': 'v7.14.1',
+  'caa53bd48e7a6c1f01dcf20ac434cefad0d72ea93a7b0ca688072f36a19d68df': 'v7.14.2',
   // v7.14.0 unsigned builds (custom firmware)
   '75dc509a90f70a1f0025a9c5451532f407c4f78df5ef7d1d7b9b2ef9b9740e19': 'v7.14.0-solana',
   '02def01217709269ff39c2c4745179e45c9c6892b19299de6cdd2f2becfddc87': 'v7.14.0-bip85',
