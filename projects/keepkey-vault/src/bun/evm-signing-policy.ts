@@ -1,14 +1,14 @@
 import { firmwareClearSigns } from './calldata-decoder'
-import { isCertifiedEvmMetadata } from './evm-schema-registry'
 import { ERC7730_TRANSPORT_SUPPORTED } from '../shared/erc7730-support'
+import { certifiedEnvelopeShown, metadataPayloadBytes } from '../shared/certified-evm-envelope'
 
 /**
  * Host-side mirror of the device's default EVM policy.
  *
- * A native firmware decode or a 7.16 root-certified envelope can proceed with
- * AdvancedMode off. Runtime/self-service metadata is never treated as a
- * substitute for AdvancedMode here; the device independently enforces the
- * same distinction before it signs.
+ * A native firmware decode, or a 7.16 root-certified envelope the device shows
+ * for this exact call, can proceed with AdvancedMode off. Runtime/self-service
+ * metadata is never treated as a substitute for AdvancedMode here; the device
+ * independently enforces the same distinction before it signs.
  */
 export function evmCallRequiresAdvancedMode(
   to: string | undefined,
@@ -20,9 +20,10 @@ export function evmCallRequiresAdvancedMode(
   firmwareVersion?: string,
   value?: unknown,
 ): boolean {
+  const m = metadata as { signedPayload?: unknown; keyId?: unknown } | null | undefined
   return typeof data === 'string' && data.length > 2 &&
     !firmwareClearSigns(to, data, chainId, firmwareVersion, value) &&
-    !isCertifiedEvmMetadata(metadata) &&
+    !certifiedEnvelopeShown(metadataPayloadBytes(m?.signedPayload), m?.keyId, firmwareVersion, { chainId, to, data }) &&
     // The device verifies every signed catalog envelope and refuses signing on
     // any authentication/identity failure, so a catalog can enter that strict
     // path without host AdvancedMode. It cannot silently become blind signing.

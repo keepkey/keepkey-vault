@@ -1002,10 +1002,11 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 		// clear-signs. A contract our decoder recognizes (source 'local') but the
 		// firmware blind-signs (e.g. Uniswap) must still read 'unknown' — the badge
 		// can't claim "known" for a tx the device shows as raw hex.
-		// A caller-supplied blob is unverified on this computer; only the device
-		// checks it, so it earns "known" at most, never a green "verified".
-		if (hasSignedBlob) trustLevel = 'known'
-		else if (request.needsBlindSigning) trustLevel = 'unknown'
+		// A signed blob never outranks it: a runtime-signer blob only annotates
+		// a call the device still blind-signs. Otherwise a blob is unverified on
+		// this computer, so it earns "known" at most, never a green "verified".
+		if (request.needsBlindSigning) trustLevel = 'unknown'
+		else if (hasSignedBlob) trustLevel = 'known'
 		else if (decoded?.source === 'pioneer' || decoded?.source === 'local') trustLevel = 'known'
 	}
 	if (request.typedDataDecoded) {

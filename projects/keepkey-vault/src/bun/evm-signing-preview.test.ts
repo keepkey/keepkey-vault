@@ -118,12 +118,58 @@ describe('applyEvmTxPreview = needsAdvancedMode = !(native || (fw >= 7.16 && cer
     expect(s.calldataDecoded?.signedInsightBlob).toBeUndefined()
   })
 
-  test('caller-provided runtime-signer blob keeps its REST priority', async () => {
+  test('caller-provided runtime-signer blob keeps its REST priority, not a relaxed gate', async () => {
     const s = info()
     await applyEvmTxPreview(s, USDC_BASE, transfer, 8453, '7.15.0', { signedPayload: 'AAEC', keyId: 3 })
-    expect(s.needsBlindSigning).toBe(false)
+    expect(s.needsBlindSigning).toBe(true)
     expect(s.calldataDecoded?.signedInsightBlob).toBe('AAEC')
     expect(s.calldataDecoded?.insightKeyId).toBe(3)
+  })
+})
+
+describe('a caller blob never relaxes the gate unless it is a certified envelope the device shows', () => {
+  const TO = `0x${'42'.repeat(20)}`
+  const CALL = '0xdeadbeef' + word('1')
+  /** 0x03 + a 139-byte certificate + body (version, chain id, contract, selector). */
+  const envelope = (version = 0x02, chainId = 1, to = TO, selector = 'deadbeef') =>
+    `03${'cc'.repeat(139)}${version.toString(16).padStart(2, '0')}${chainId.toString(16).padStart(8, '0')}${to.slice(2)}${selector}`
+  const preview = async (fw: string, meta: { signedPayload: string; keyId?: number }) => {
+    globalThis.fetch = (async () => { throw new Error('offline') }) as unknown as typeof fetch
+    const s = info()
+    await applyEvmTxPreview(s, TO, CALL, 1, fw, meta)
+    return s
+  }
+
+  test('a runtime-signer blob (keyId 1) on 7.16.0 annotates only: still blind, still AdvancedMode', async () => {
+    const meta = { signedPayload: '00112233', keyId: 1 }
+    const s = await preview('7.16.0', meta)
+    expect(s.needsBlindSigning).toBe(true)
+    expect(s.calldataDecoded?.insightSource).toBe('caller')
+    expect(s.calldataDecoded?.insightKeyId).toBe(1)
+    expect(assessSigningRisk({ ...s, to: TO, data: CALL, chainId: 1, firmwareVersion: '7.16.0' })!.tier).not.toBe('green')
+    expect(evmCallRequiresAdvancedMode(TO, CALL, 1, false, meta, undefined, '7.16.0')).toBe(true)
+  })
+
+  test('a certified 0x03 envelope for this exact call on 7.16.0 is shown, so no AdvancedMode', async () => {
+    const meta = { signedPayload: `0x${envelope()}`, keyId: 0x80 }
+    expect((await preview('7.16.0', meta)).needsBlindSigning).toBe(false)
+    expect(evmCallRequiresAdvancedMode(TO, CALL, 1, false, meta, undefined, '7.16.0')).toBe(false)
+  })
+
+  test('the certified shape is not enough: old firmware, wrong key, body, chain, contract or selector', async () => {
+    for (const [fw, meta] of [
+      ['7.15.0', { signedPayload: envelope(), keyId: 0x80 }],
+      ['7.16.0', { signedPayload: envelope(), keyId: 1 }],
+      ['7.16.0', { signedPayload: envelope(0x04), keyId: 0x80 }],
+      ['7.16.0', { signedPayload: envelope(0x06), keyId: 0x80 }],
+      ['7.16.0', { signedPayload: envelope(0x02, 8453), keyId: 0x80 }],
+      ['7.16.0', { signedPayload: envelope(0x02, 1, `0x${'43'.repeat(20)}`), keyId: 0x80 }],
+      ['7.16.0', { signedPayload: envelope(0x02, 1, TO, 'a9059cbb'), keyId: 0x80 }],
+      ['7.16.0', { signedPayload: envelope().slice(0, 300), keyId: 0x80 }],
+    ] as const) {
+      expect((await preview(fw, meta)).needsBlindSigning).toBe(true)
+      expect(evmCallRequiresAdvancedMode(TO, CALL, 1, false, meta, undefined, fw)).toBe(true)
+    }
   })
 })
 

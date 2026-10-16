@@ -12,6 +12,7 @@ import { REVIEWED_EVM_TOKENS, findEvmNameRecord, findReviewedUniversalRouter } f
 import { evmContractIdentity } from '../shared/evm-contract-identity'
 import { urPrecheck } from './uniswap-ur'
 import { supportsCertifiedClearSign } from './solana-certified-policy'
+import { certifiedEnvelopeShown, metadataPayloadBytes } from '../shared/certified-evm-envelope'
 
 /** A chain id as dapps send it (number, "8453", "0x2105") → positive integer, else undefined. */
 export function normalizeEvmChainId(raw: unknown): number | undefined {
@@ -220,8 +221,11 @@ export async function applyEvmTxPreview(
   }
 
   if (callerMetadata?.signedPayload) {
-    // Runtime-signer blob from the caller: the REST sign handler honours it at
-    // priority 1 and the device verifies it against the loaded signer.
+    // A blob from the caller: the REST sign handler sends it at priority 1.
+    // It relaxes the gate only as a KeepKey-certified envelope this firmware
+    // shows for this exact call (the device refuses a forged one outright).
+    // A runtime-signer blob is annotation only: the device still shows the
+    // raw data and needs AdvancedMode, so the gate stays as without it.
     signingInfo.calldataDecoded = {
       dappName: 'Unknown', contractName: 'Unknown', method: '(runtime signer)',
       selector: data.slice(0, 10), fields: [], source: 'none',
@@ -230,8 +234,11 @@ export async function applyEvmTxPreview(
       insightKeyId: callerMetadata.keyId,
       insightSource: 'caller',
     }
-    signingInfo.needsBlindSigning = false
-    console.log(`${tag} needsBlindSigning=false (caller-provided runtime-signer blob, keyId=${callerMetadata.keyId})`)
+    const certified = certifiedEnvelopeShown(
+      metadataPayloadBytes(callerMetadata.signedPayload), callerMetadata.keyId, firmwareVersion, { chainId, to, data },
+    )
+    signingInfo.needsBlindSigning = !certified && !signingInfo.deviceClearSigns
+    console.log(`${tag} needsBlindSigning=${signingInfo.needsBlindSigning} (caller-provided blob, keyId=${callerMetadata.keyId}, certified envelope shown=${certified})`)
   } else if (signingInfo.deviceClearSigns) {
     // Firmware decodes it natively — no metadata, no AdvancedMode.
     signingInfo.needsBlindSigning = false

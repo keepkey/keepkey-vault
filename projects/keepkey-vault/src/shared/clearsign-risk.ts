@@ -24,6 +24,7 @@ import type {
   SolanaTxDecodedInstruction,
 } from './types'
 import { versionCompare } from './firmware-versions'
+import { base64PayloadBytes, certifiedEnvelopeShown, evmSignedChainId as evmChainId } from './certified-evm-envelope'
 import { typedDataSpendAmounts } from './typedDataRows'
 import { ERC7730_TRANSPORT_SUPPORTED } from './erc7730-support'
 
@@ -226,31 +227,13 @@ function spendPermissionLevel(recognizedSpender: string | undefined, unbounded: 
   return !unbounded || standardFlow ? 'medium' : 'high'
 }
 
-function evmChainId(v: unknown): number {
-  const n = typeof v === 'string' ? Number(v.startsWith('0x') ? parseInt(v, 16) : v) : Number(v)
-  return n > 0 ? n : 1 // the /eth/sign-transaction handler signs a missing/0 chainId as 1
-}
-
-/** Body versions stock 7.16.0 shows a transaction from (signed_metadata.h):
- *  0x02 schema, 0x05 schema with intent, 0x07 decoder. It refuses 0x04, and
- *  0x06 is a name record that describes no call. */
-const SHOWN_BODY_VERSIONS = new Set([0x02, 0x05, 0x07])
-
 /** A KeepKey-certified description (keyId 0x80) Desktop attached itself, in a
  *  form this firmware shows, for this exact call. A caller's blob is not one:
  *  Desktop never checked it, and the device refuses a forged one. */
 function certifiedBlobShown(req: SigningRequestInfo): boolean {
   const d = req.calldataDecoded
-  if (!d?.signedInsightBlob || d.insightKeyId !== 0x80 || d.insightSource === 'caller') return false
-  if (!req.firmwareVersion || versionCompare(req.firmwareVersion, '7.16.0') < 0) return false
-  let b: Uint8Array
-  try { b = Uint8Array.from(atob(d.signedInsightBlob), (c) => c.charCodeAt(0)) } catch { return false }
-  // 0x03, a 139-byte certificate, then the body: version, chain id, contract, selector.
-  if (b.length < 169 || b[0] !== 0x03 || !SHOWN_BODY_VERSIONS.has(b[140])) return false
-  const hex = (from: number, end: number) => Array.from(b.slice(from, end), (x) => x.toString(16).padStart(2, '0')).join('')
-  const data = typeof req.data === 'string' ? req.data.toLowerCase() : ''
-  return parseInt(hex(141, 145), 16) === evmChainId(req.chainId)
-    && `0x${hex(145, 165)}` === (req.to ?? '').toLowerCase() && `0x${hex(165, 169)}` === data.slice(0, 10)
+  if (!d?.signedInsightBlob || d.insightSource === 'caller') return false
+  return certifiedEnvelopeShown(base64PayloadBytes(d.signedInsightBlob), d.insightKeyId, req.firmwareVersion, req)
 }
 
 /** What the verdict tier rests on: the device shows it, this computer knows the

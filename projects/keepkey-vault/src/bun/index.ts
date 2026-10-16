@@ -279,7 +279,7 @@ import { buildSolanaSchema, inspectSolanaSchema } from "./clearsign-studio"
 import { resolvePromotedEvmArtifact, resolvePromotedSolanaArtifact } from "./clearsign-artifact-resolver"
 import { resolveEvmSchema } from "./evm-schema-registry"
 import { requestClearSignReview } from "./clearsign-review"
-import { resolveRuntimeEvmMetadata, supportsRuntimeEvmMetadata, type RuntimeEvmSigner } from "./evm-runtime-metadata"
+import { resolveRuntimeEvmMetadata, supportsRuntimeEvmMetadata, trustRuntimeSigner, type RuntimeEvmSigner } from "./evm-runtime-metadata"
 import { supportsCertifiedClearSign } from "./solana-certified-policy"
 import { createRpcAltFetcher } from "./solana-alt"
 import {
@@ -3524,22 +3524,27 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// silently acquires KeepKey-certified status or bypasses AdvancedMode.
 				if (!resolvedSchema && !effectiveParams?.txMetadata && !effectiveParams?.erc7730
 					&& supportsRuntimeEvmMetadata(engine.getDeviceState().firmwareVersion, getAdvancedModeEnabled() === true)) {
+					// A provider decline or outage, or a refused trust screen, means
+					// no description: the call signs as it would with no provider.
 					const runtime = await resolveRuntimeEvmMetadata(effectiveParams)
 					if (runtime) {
-						runtimeSigner = runtime.signer
-						effectiveParams = {
-							...effectiveParams,
-							txMetadata: { signedPayload: runtime.signedPayload, keyId: runtime.keyId },
-						}
 						const load = () => (engine.wallet as any).loadClearsignSigner({
 							keyId: runtime.signer.keyId,
 							pubkey: Uint8Array.from(Buffer.from(runtime.signer.publicKeyHex, 'hex')),
 							alias: runtime.signer.alias,
 						})
-						if (engine.isEmulator) await emuSigningOp(load, {
-							operation: 'loadClearsignSigner', opLabel: `Trust ${runtime.signer.alias} (${runtime.signer.fingerprint})`, chain: 'Ethereum',
-						})
-						else await load()
+						const trusted = await trustRuntimeSigner(runtime.signer, () => engine.isEmulator
+							? emuSigningOp(load, {
+								operation: 'loadClearsignSigner', opLabel: `Trust ${runtime.signer.alias} (${runtime.signer.deviceFingerprint})`, chain: 'Ethereum',
+							})
+							: load(), '[ethSignTx]')
+						if (trusted) {
+							runtimeSigner = runtime.signer
+							effectiveParams = {
+								...effectiveParams,
+								txMetadata: { signedPayload: runtime.signedPayload, keyId: runtime.keyId },
+							}
+						}
 					}
 				}
 				const signedPayload = effectiveParams?.txMetadata?.signedPayload
@@ -7920,6 +7925,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							return report
 						}
 						const [approval, transaction] = await Promise.all([reportFor(preview.approveTx), reportFor(preview.unsignedTx)])
+						// The runtime provider the swap will ask: named on the card, never as KeepKey.
+						if (transaction && preview.runtimeSigner) transaction.descriptor = {
+							...transaction.descriptor,
+							provider: { alias: preview.runtimeSigner.alias, fingerprint: preview.runtimeSigner.deviceFingerprint, status: 'requested' },
+						}
 						preview.clearSignReports = { approval, transaction }
 						// A swap that pays a provider's deposit address: name the provider,
 						// say the device cannot verify the address, and for NEAR Intents ask

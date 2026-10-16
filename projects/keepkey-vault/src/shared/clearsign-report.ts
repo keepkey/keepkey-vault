@@ -13,6 +13,32 @@ export interface ClearSignDescriptorEvidence {
     | 'identity-unavailable' | 'identity-stale' | 'identity-changed' | 'identity-mismatch' | 'unsupported-alt'
     /** No artifact; a reviewed, pinned local decoder read the call (display only). */
     | 'reviewed-decoder'
+  /** A third-party (runtime) signer that will be asked for, or supplied, a
+   *  description. Never KeepKey: the device says "NOT verified by KeepKey". */
+  provider?: ClearSignRuntimeProvider
+}
+
+export interface ClearSignRuntimeProvider {
+  /** Provider name and its fingerprint as the device shows it (16 hex). */
+  alias?: string
+  fingerprint?: string
+  /** A caller's blob names only the device slot (1-3) its signer sits in. */
+  keyId?: number
+  /** 'requested': asked after approval, may decline. 'supplied': the app sent it. */
+  status: 'requested' | 'supplied'
+}
+
+/** The card line naming who describes a call when it is not KeepKey.
+ *  Matches the device's own words: "NOT verified by KeepKey". */
+export function runtimeProviderLine(provider: ClearSignRuntimeProvider | undefined): string | undefined {
+  if (!provider) return undefined
+  const who = provider.alias
+    ? `'${provider.alias}'${provider.fingerprint ? ` (${provider.fingerprint})` : ''}`
+    : provider.keyId && provider.keyId >= 1 && provider.keyId <= 3 ? `the signer in slot ${provider.keyId} of your KeepKey` : undefined
+  if (!who) return undefined
+  return provider.status === 'requested'
+    ? `Description requested from ${who}. NOT verified by KeepKey. If it answers, your KeepKey asks you to trust it for this session.`
+    : `Description from ${who}. NOT verified by KeepKey.`
 }
 
 /** Two EIP-712 approvals of the clearsign definition (device schema) for

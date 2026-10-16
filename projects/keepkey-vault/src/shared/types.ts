@@ -1068,6 +1068,10 @@ export interface SigningRequestInfo {
   solanaDecodeError?: string
   /** true when tx has calldata that cannot be fully decoded — device will show blind-signing warning */
   needsBlindSigning?: boolean
+  /** The runtime ClearSign provider the sign handler will ask for a
+   *  description, as the approval card named it (fingerprint as the device
+   *  shows it). The handler attaches a description only from this key. */
+  runtimeProvider?: { alias: string; fingerprint: string; publicKeyHex: string }
   /** Emulator test tape is recording: the approval card reports what it renders and answers itself. */
   testReview?: boolean
   /** The device can independently decode this call, either from its native

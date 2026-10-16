@@ -14,7 +14,7 @@ import type { SwapAsset, SwapQuote, SwapQuoteParams, ExecuteSwapParams, SwapResu
 import { SOLANA_BLIND_SIGNING_REQUIRED, evmAdvancedModeRequiredMessage } from '../shared/types'
 import { toDeviceError, deviceErrorMessage } from '../shared/device-error'
 import { resolveEvmSchema } from './evm-schema-registry'
-import { resolveRuntimeEvmMetadata, supportsRuntimeEvmMetadata, type RuntimeEvmSigner } from './evm-runtime-metadata'
+import { resolveRuntimeEvmMetadata, supportsRuntimeEvmMetadata, trustRuntimeSigner, type RuntimeEvmSigner } from './evm-runtime-metadata'
 import { evmCallRequiresAdvancedMode } from './evm-signing-policy'
 import { ERC7730_TRANSPORT_SUPPORTED } from '../shared/erc7730-support'
 import { findSolanaSchema } from './solana-schema-registry'
@@ -806,14 +806,16 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
 
       // Firmware 7.15 recognizes only keys explicitly trusted into a RAM slot.
       // This is never silent: LoadClearsignSigner displays alias + fingerprint
-      // and "NOT verified by KeepKey" for mandatory device approval.
+      // and "NOT verified by KeepKey" for mandatory device approval. A refused
+      // trust screen means no description, not a failed swap.
       if (result.runtimeSigner) {
         const signer = result.runtimeSigner
-        swapLog(`${TAG} requesting 7.15 runtime signer trust: ${signer.alias} (${signer.fingerprint})`)
-        await wrapSign(
+        swapLog(`${TAG} requesting 7.15 runtime signer trust: ${signer.alias} (${signer.deviceFingerprint})`)
+        const trusted = await trustRuntimeSigner(signer, () => wrapSign(
           () => wallet.loadClearsignSigner({ keyId: signer.keyId, pubkey: Uint8Array.from(Buffer.from(signer.publicKeyHex, 'hex')), alias: signer.alias }),
           { operation: 'loadClearsignSigner', chain: fromChain.coin },
-        )
+        ), TAG)
+        if (!trusted) delete unsignedTx.txMetadata
       }
 
       // ERC-20 relay txs may need an approval to the router (THORChain Router,
@@ -1307,7 +1309,7 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
 export async function previewSwapBuild(
   params: ExecuteSwapParams,
   ctx: SwapContext,
-): Promise<{ approveTx?: any; unsignedTx: any; allowance?: { current: string; required: string; sufficient: boolean; spender: string; tokenContract: string }; balance?: { current: string; required: string; sufficient: boolean; tokenContract?: string } }> {
+): Promise<{ approveTx?: any; unsignedTx: any; runtimeSigner?: RuntimeEvmSigner; allowance?: { current: string; required: string; sufficient: boolean; spender: string; tokenContract: string }; balance?: { current: string; required: string; sufficient: boolean; tokenContract?: string } }> {
   const { wallet, getAllChains, getEvmRpcSource, getBtcXpub, getAllBtcXpubs } = ctx
 
   const allChains = getAllChains()
@@ -1366,7 +1368,7 @@ export async function previewSwapBuild(
     const certifiedSupported = supportsCertifiedClearSign(ctx.getFirmwareVersion?.())
     const runtimeSupported = supportsRuntimeEvmMetadata(ctx.getFirmwareVersion?.(), ctx.isAdvancedModeEnabled?.() === true)
     const result = await buildRelaySwapTx(params, fromChain, fromAddress, getEvmRpcSource, isErc20Source, /* previewMode */ true, certifiedSupported, runtimeSupported)
-    return { unsignedTx: result.unsignedTx, approveTx: result.approveTx, allowance: result.allowance, balance: result.balance }
+    return { unsignedTx: result.unsignedTx, approveTx: result.approveTx, allowance: result.allowance, balance: result.balance, runtimeSigner: result.runtimeSigner }
   }
   if (fromChain.chainFamily === 'evm') {
     const result = await buildEvmSwapTx(params, fromChain, fromAddress, pioneer, getEvmRpcSource, isErc20Source, wallet, /* previewMode */ true, undefined, undefined, undefined, supportsCertifiedClearSign(ctx.getFirmwareVersion?.()))

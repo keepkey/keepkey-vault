@@ -8,12 +8,12 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import type { SigningRequestInfo } from '../shared/types'
 import { assessSigningRisk } from '../shared/clearsign-risk'
-import { buildEvmPresignReport, prepareEvmTxSigningInfo } from './evm-presign-report'
+import { buildEvmPresignReport, evmSigningVerdict, prepareEvmTxSigningInfo } from './evm-presign-report'
 import { simulateEvmEffects } from './evm-effects'
 import { uniswapReportFindingsWithState } from './uniswap-report'
 import { resolvePromotedEvmArtifact } from './clearsign-artifact-resolver'
 import { ClearSignReportResponse } from './schemas'
-import { clearSignReportNeedsAttention, swapReportNeedsAttention } from '../shared/clearsign-report'
+import { buildClearSignReport, clearSignReportNeedsAttention, runtimeProviderLine, swapReportNeedsAttention } from '../shared/clearsign-report'
 
 const swap = require('../../__tests__/fixtures/uniswap/base-ur-usdc-to-eth-swap.json')
 const SIGNER = '0x909ef6b32dfdc12ca86aa710b54c991af3c5f82e'
@@ -108,6 +108,45 @@ describe('POST /clearsign/report — Desktop parity', () => {
     expect(r.descriptor).toMatchObject({ source: 'native', authenticated: true, format: 'FIRMWARE_NATIVE' })
     expect((await desktopRisk(USDC, '7.16.0')).tier).toBe('green')
     expect(r.limitations.map((l) => l.code)).not.toContain('DEVICE_SHOWS_RAW_DATA')
+  })
+
+  test('a caller runtime-signer blob on an unknown call: the report still says the device shows raw data', async () => {
+    const tx = { chainId: 1, from: SIGNER, to: `0x${'42'.repeat(20)}`, value: '0x0', data: `0xdeadbeef${'1'.padStart(64, '0')}` }
+    const signingInfo: SigningRequestInfo = { id: 'r', method: '/eth/sign-transaction', appName: 'app', ...tx, firmwareVersion: '7.16.0' }
+    await prepareEvmTxSigningInfo(signingInfo, { ...tx, txMetadata: { signedPayload: '00112233', keyId: 1 } }, '7.16.0')
+    expect(signingInfo.needsBlindSigning).toBe(true)
+    const r = buildEvmPresignReport({
+      signingInfo, deviceConnected: true,
+      simulation: await simulateEvmEffects(tx, 'http://127.0.0.1:9/'),
+      universalRouterFindings: { complete: false, findings: [], limitations: [] },
+      artifactResolution: resolvePromotedEvmArtifact(tx.chainId, tx.to, tx.data),
+    })
+    expect(r.limitations.map((l) => l.code)).toContain('DEVICE_SHOWS_RAW_DATA')
+  })
+
+  test('the card names a third-party describer, as the device does, and never as KeepKey', async () => {
+    const requested = runtimeProviderLine({ alias: 'Acme Labs', fingerprint: '656B0D303F6BBDBD', status: 'requested' })!
+    expect(requested).toContain("'Acme Labs' (656B0D303F6BBDBD)")
+    expect(requested).toContain('NOT verified by KeepKey')
+    expect(runtimeProviderLine({ keyId: 2, status: 'supplied' })).toBe('Description from the signer in slot 2 of your KeepKey. NOT verified by KeepKey.')
+    expect(runtimeProviderLine(undefined)).toBeUndefined()
+    expect(runtimeProviderLine({ keyId: 0x80, status: 'supplied' })).toBeUndefined()
+    for (const line of [requested, runtimeProviderLine({ keyId: 1, status: 'supplied' })!]) {
+      expect(line.replace('NOT verified by KeepKey', '')).not.toMatch(/certified|verified/i)
+    }
+
+    // A caller's runtime blob names its device slot on the card; a certified
+    // envelope (keyId 0x80) names no third party.
+    const tx = { chainId: 1, from: SIGNER, to: `0x${'42'.repeat(20)}`, value: '0x0', data: `0xdeadbeef${'1'.padStart(64, '0')}` }
+    const s: SigningRequestInfo = { id: 'r', method: '/eth/sign-transaction', appName: 'app', ...tx, firmwareVersion: '7.16.0' }
+    const sim = await simulateEvmEffects(tx, 'http://127.0.0.1:9/')
+    expect(evmSigningVerdict(s, { txMetadata: { signedPayload: '00', keyId: 1 } }, sim, false).descriptor.provider).toEqual({ keyId: 1, status: 'supplied' })
+    expect(evmSigningVerdict(s, { txMetadata: { signedPayload: '00', keyId: 0x80 } }, sim, false).descriptor.provider).toBeUndefined()
+    expect(evmSigningVerdict(s, {}, sim, false).descriptor.provider).toBeUndefined()
+    const report = buildClearSignReport({
+      ...evmSigningVerdict(s, { txMetadata: { signedPayload: '00', keyId: 1 } }, sim, false), simulation: sim,
+    })
+    expect(ClearSignReportResponse.safeParse(report).success).toBe(true)
   })
 
   test('the same swap calldata to an unknown contract stays P1, unnamed, no rows', async () => {

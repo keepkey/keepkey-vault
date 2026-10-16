@@ -83,7 +83,7 @@ import { createClearSignFixturePlan } from './clearsign-fixture-plan'
 import { replayLegacyClearSignRows } from './clearsign-legacy-replay'
 import { importPromotedClearSignArtifact } from './clearsign-artifact-import'
 import { findPromotedEvmArtifact, findPromotedSolanaArtifact, resolvePromotedSolanaArtifact } from './clearsign-artifact-resolver'
-import { resolveRuntimeEvmMetadata, supportsRuntimeEvmMetadata, type RuntimeEvmSigner } from './evm-runtime-metadata'
+import { resolveNamedRuntimeEvmMetadata, resolveRuntimeEvmSigner, runtimeProviderWillBeAsked, supportsRuntimeEvmMetadata, trustRuntimeSigner, type RuntimeEvmSigner } from './evm-runtime-metadata'
 import { supportsCertifiedClearSign } from './solana-certified-policy'
 import { measureLiveDeployment, resolveEvmSchema } from './evm-schema-registry'
 import { findContractRating } from './clearsign-review'
@@ -2080,6 +2080,20 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             signingInfo.needsBlindSigning = false
             signingInfo.requiresAdvancedMode = false
           }
+          // Name the runtime provider the sign handler will ask, on the card,
+          // before approval: its description is fetched only after approval,
+          // and the handler attaches one only from the key named here.
+          if (path === '/eth/sign-transaction' && signingInfo.clearSignReport
+            && runtimeProviderWillBeAsked(signingInfo, probeCheckBody?.txMetadata)) {
+            const signer = await resolveRuntimeEvmSigner()
+            if (signer) {
+              signingInfo.runtimeProvider = { alias: signer.alias, fingerprint: signer.deviceFingerprint, publicKeyHex: signer.publicKeyHex }
+              signingInfo.clearSignReport.descriptor = {
+                ...signingInfo.clearSignReport.descriptor,
+                provider: { alias: signer.alias, fingerprint: signer.deviceFingerprint, status: 'requested' },
+              }
+            }
+          }
 
           // Track before waiting so rejection, timeout, or a malformed approval
           // decision still dismisses the Vault overlay in the request finally.
@@ -2829,12 +2843,14 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             } else if (
               supportsRuntimeEvmMetadata(activeSigningInfo?.firmwareVersion, activeSigningInfo?.advancedModeEnabled === true)
             ) {
-              // The REST, browser-extension and WalletConnect routes must use
-              // the same exact-transaction runtime metadata path. A configured
-              // provider is authoritative: transport, identity, signing and
-              // device trust failures abort signing rather than silently
-              // degrading to raw blind signing.
-              const runtime = await resolveRuntimeEvmMetadata(msg)
+              // The same exact-transaction runtime metadata path as the
+              // browser-extension route. Runtime metadata only annotates: a
+              // provider decline, outage or malformed answer, or a refused
+              // device trust screen, means no description. The device then
+              // shows the call as it would with no provider (raw data under
+              // AdvancedMode, which this path already requires).
+              // Only from the key the approval card named.
+              const runtime = await resolveNamedRuntimeEvmMetadata(msg, activeSigningInfo?.runtimeProvider)
               if (runtime) {
                 runtimeSigner = runtime.signer
                 msg.txMetadata = {
@@ -2853,32 +2869,37 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               throw new HttpError(501, 'Connected device does not support LoadClearsignSigner (requires firmware 7.15.0+)')
             }
             let signerSentToDevice = false
-            try {
-              await emuWrap(
-                () => {
-                  signerSentToDevice = true
-                  return (wallet as any).loadClearsignSigner({
-                    keyId: runtimeSigner!.keyId,
-                    pubkey: Uint8Array.from(Buffer.from(runtimeSigner!.publicKeyHex, 'hex')),
-                    alias: runtimeSigner!.alias,
-                  })
-                },
-                { operation: 'loadClearsignSigner', opLabel: `Trust ${runtimeSigner.alias} (${runtimeSigner.fingerprint})`, chain: 'Ethereum' },
-              )
-              recordRestClearSignEvent({
-                kind: 'signer-load', outcome: 'loaded', source: 'rest-api', chain: 'Ethereum',
-                label: runtimeSigner.alias, publicKey: runtimeSigner.publicKeyHex, fingerprint: runtimeSigner.fingerprint,
-                keyId: runtimeSigner.keyId, sentToDevice: signerSentToDevice,
-                request: { persist: false, automatic: true },
-              })
-            } catch (err: any) {
-              recordRestClearSignEvent({
-                kind: 'signer-load', outcome: 'blocked', source: 'rest-api', chain: 'Ethereum',
-                label: runtimeSigner.alias, publicKey: runtimeSigner.publicKeyHex, fingerprint: runtimeSigner.fingerprint,
-                keyId: runtimeSigner.keyId, sentToDevice: signerSentToDevice,
-                request: { persist: false, automatic: true }, error: err?.message || String(err),
-              })
-              throw err
+            let loadError: unknown
+            const signer = runtimeSigner
+            const trusted = await trustRuntimeSigner(signer, async () => {
+              try {
+                await emuWrap(
+                  () => {
+                    signerSentToDevice = true
+                    return (wallet as any).loadClearsignSigner({
+                      keyId: signer.keyId,
+                      pubkey: Uint8Array.from(Buffer.from(signer.publicKeyHex, 'hex')),
+                      alias: signer.alias,
+                    })
+                  },
+                  { operation: 'loadClearsignSigner', opLabel: `Trust ${signer.alias} (${signer.deviceFingerprint})`, chain: 'Ethereum' },
+                )
+              } catch (err) {
+                loadError = err
+                throw err
+              }
+            }, '[REST]')
+            recordRestClearSignEvent({
+              kind: 'signer-load', outcome: trusted ? 'loaded' : 'blocked', source: 'rest-api', chain: 'Ethereum',
+              label: signer.alias, publicKey: signer.publicKeyHex, fingerprint: signer.fingerprint,
+              keyId: signer.keyId, sentToDevice: signerSentToDevice,
+              request: { automatic: true },
+              ...(trusted ? {} : { error: (loadError as any)?.message || String(loadError) }),
+            })
+            if (!trusted) {
+              // No description: never send metadata for a key the user did not trust.
+              delete msg.txMetadata
+              runtimeSigner = undefined
             }
           }
 
@@ -2960,7 +2981,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const icon = body.icon ? parseHex(body.icon, 'icon') : undefined
           if (icon && icon.length > 384) throw new HttpError(400, `icon must be <= 384 bytes, got ${icon.length}`)
           console.log(`[REST] clearsign load-signer: slot=${body.keyId} alias="${body.alias}" pubkey=${body.pubkey}`
-            + `${icon ? ` icon=${icon.length}B ${body.iconWidth}x${body.iconHeight}` : ''}${body.persist ? ' persist' : ''}`)
+            + `${icon ? ` icon=${icon.length}B ${body.iconWidth}x${body.iconHeight}` : ''}`)
           let clearSignSentToDevice = false
           const signerFingerprint = createHash('sha256').update(Buffer.from(pubkey)).digest('hex').slice(0, 8)
           try {
@@ -2975,7 +2996,6 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
                 return (wallet as any).loadClearsignSigner({
                   keyId: body.keyId, pubkey, alias: body.alias,
                   icon, iconWidth: body.iconWidth, iconHeight: body.iconHeight,
-                  persist: body.persist === true,
                 })
               },
               { operation: 'loadClearsignSigner', opLabel: 'Trust Signer', chain: 'Ethereum' },
@@ -2984,7 +3004,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               kind: 'signer-load', outcome: 'loaded', source: 'rest-api', chain: 'Ethereum',
               label: body.alias, publicKey: Buffer.from(pubkey).toString('hex'), fingerprint: signerFingerprint,
               keyId: body.keyId, sentToDevice: clearSignSentToDevice,
-              request: { persist: body.persist === true, iconBytes: icon?.length || 0 },
+              request: { iconBytes: icon?.length || 0 },
             })
             return json({ ok: true, keyId: body.keyId, alias: body.alias })
           } catch (err: any) {
@@ -2992,7 +3012,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               kind: 'signer-load', outcome: 'blocked', source: 'rest-api', chain: 'Ethereum',
               label: body.alias, publicKey: Buffer.from(pubkey).toString('hex'), fingerprint: signerFingerprint,
               keyId: body.keyId, sentToDevice: clearSignSentToDevice,
-              request: { persist: body.persist === true, iconBytes: icon?.length || 0 },
+              request: { iconBytes: icon?.length || 0 },
               error: err?.message || String(err),
             })
             const errMsg = String(err?.message || err || '').toLowerCase()
