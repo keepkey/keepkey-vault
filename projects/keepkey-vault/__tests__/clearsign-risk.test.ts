@@ -385,3 +385,46 @@ describe('Solana plain-text rule (mirrors firmware solana_rawMessageIsPlainText)
     expect(isPlainTextForSigner(Buffer.from('head ' + 'K'.repeat(31) + ' tail'), printableSigner)).toBe(true)
   })
 })
+
+describe('three-level verdict on Solana: device shows it, computer decodes it, or neither', () => {
+  const SYSTEM = '11111111111111111111111111111111'
+  const ix = (programId: string, status: 'known' | 'known-program-unknown-ix' | 'unknown-program', programName: string, instructionName?: string) =>
+    ({ status, programId, programName, instructionName, args: [], accounts: [] })
+  const sol = (...instructions: ReturnType<typeof ix>[]) => ({
+    method: '/solana/sign-transaction', firmwareVersion: '7.16.0',
+    solanaDecoded: { version: 'legacy', staticAccountCount: 4, instructions },
+  } as unknown as SigningRequestInfo)
+
+  test('a plain SOL transfer is green: the firmware decodes System', () => {
+    const r = assessSigningRisk(sol(ix(SYSTEM, 'known', 'System Program', 'transfer')))!
+    expect(r.tier).toBe('green')
+  })
+
+  test('a fully decoded app call with no certified description is yellow, never green', () => {
+    // Relay depositNative on firmware without the certified schema: this
+    // computer decodes it, the device shows raw data.
+    const r = assessSigningRisk(sol(ix('99vQwtBwYtrqqD9YSXbdum3KBdxPAVxYTaQ3cfnJSrN2', 'known', 'Relay', 'depositNative')))!
+    expect(r.tier).toBe('yellow')
+    expect(r.reasons.map((x) => x.text).join('\n')).toContain('Your KeepKey shows it as raw data')
+    expect(r.reasons.map((x) => x.text).join('\n')).not.toContain('KeepKey can read every step')
+  })
+
+  test('a program known only by name is red and says it cannot decode the action', () => {
+    const r = assessSigningRisk(sol(ix('JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4', 'known-program-unknown-ix', 'Jupiter Aggregator v6')))!
+    expect(r.tier).toBe('red')
+    expect(r.reasons.map((x) => x.text).join('\n')).toContain('cannot decode this action')
+  })
+
+  test('a memo does not make a decoded transfer unknown', () => {
+    const r = assessSigningRisk(sol(
+      ix(SYSTEM, 'known', 'System Program', 'transfer'),
+      ix('MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr', 'known-program-unknown-ix', 'Memo Program'),
+    ))!
+    expect(r.tier).toBe('yellow')
+  })
+
+  test('a certified description the device verifies is green', () => {
+    const r = assessSigningRisk({ ...sol(ix('99vQwtBwYtrqqD9YSXbdum3KBdxPAVxYTaQ3cfnJSrN2', 'known', 'Relay', 'depositNative')), deviceClearSigns: true })!
+    expect(r.tier).toBe('green')
+  })
+})

@@ -69,6 +69,21 @@ const acct = (ix: SolanaTxDecodedInstruction, label: string) => ix.accounts.find
 
 const SOL_DECIMALS = 9
 
+/** Programs the firmware decodes itself (lib/firmware/solana.c; mirrored in
+ *  bun/solana-consent.ts FIRMWARE_OPCODES). Token-2022 is left out: 7.16.0
+ *  shows every Token-2022 instruction as raw data. */
+const SOLANA_FIRMWARE_PROGRAMS = new Set([
+  '11111111111111111111111111111111',            // System
+  'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', // SPL Token
+  'Stake11111111111111111111111111111111111111',
+  'Vote111111111111111111111111111111111111111',
+  'ComputeBudget111111111111111111111111111111',
+])
+const SOLANA_MEMO_PROGRAMS = new Set([
+  'MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr',
+  'Memo1UhkJRfHyvLMcVucJwxXeuD728EqVDDwQDxFMNo',
+])
+
 /** Exact d / h / min / s, the way the device screen spells a duration. */
 function duration(seconds: bigint): string {
   const parts: string[] = []
@@ -190,13 +205,17 @@ function evmChainId(v: unknown): number {
   return n > 0 ? n : 1 // the /eth/sign-transaction handler signs a missing/0 chainId as 1
 }
 
-function evmTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void) {
+/** What the verdict tier rests on: the device shows it, this computer knows the
+ *  protocol and decodes it in full, or neither. */
+type Recognition = 'shows' | 'known' | 'unknown'
+
+function evmTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void): Recognition {
   const to = (req.to ?? '').toLowerCase()
   const chainId = evmChainId(req.chainId)
   const rawData = typeof req.data === 'string' && req.data !== '' ? req.data : '0x'
   if (!/^0x([0-9a-fA-F]{2})*$/.test(rawData)) {
     add('high', 'This computer cannot read the call data. You would be signing blind.')
-    return
+    return 'unknown'
   }
   const data = rawData.toLowerCase()
   const word = (i: number) => data.slice(10 + 64 * i, 74 + 64 * i)
@@ -211,8 +230,9 @@ function evmTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void) 
   if (sendsCoin && !decodeRelayDeposit(to, data, chainId)) add('low', `Sends ${native} to ${data === '0x' ? '' : 'the contract at '}${to}.`)
   if (data === '0x') {
     if (!sendsCoin) add('low', 'Calls no contract and sends nothing.')
-    return
+    return 'shows'
   }
+  let recognition: Recognition = 'unknown'
 
   const sel = data.slice(0, 10)
   const across = decodeAcrossDepositV3(to, data, chainId)
@@ -229,6 +249,7 @@ function evmTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void) 
   const thorProtocol = req.calldataDecoded?.source === 'local' ? req.calldataDecoded.dappName : undefined
   const thorSwap = (thorProtocol === 'THORChain' || thorProtocol === 'Mayachain') ? field('Action') : undefined
   if ((sel === '0x095ea7b3' || sel === '0x39509351') && addrWord(0) && num(1) !== null) {
+    if (token) recognition = 'known'
     const spender = addrWord(0)! + (addrWord(0) === RELAY_DEPOSITORY ? ' (the Relay Depository)' : ''), v = num(1)!
     const canonicalUniswapSetup = chainId === 42161
       && to === '0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9'
@@ -256,27 +277,33 @@ function evmTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void) 
       ? `Removes ${addrWord(0)}'s access to your NFTs in collection ${to}.`
       : `Lets ${addrWord(0)} take ALL of your NFTs in collection ${to}, now and later, without asking you again.`)
   } else if (sel === '0xa9059cbb' && data.length === 138 && addrWord(0) && num(1) !== null) {
+    if (token) recognition = 'known'
     add(token ? 'low' : 'medium', token
       ? `Sends ${amount(num(1)!)} to ${addrWord(0)}.`
       : `Sends ${num(1)} units of token ${to} to ${addrWord(0)}. This computer does not recognize this token.`)
   } else if (hasCatalog) {
     add('high', `The site attached a signed description of this call. This computer cannot check it; your KeepKey checks it and refuses if it is not genuine. The call can still use any token permission you already gave ${to}.`)
   } else if (urSwap && req.calldataDecoded?.signedInsightBlob) {
+    recognition = 'known'
     // Every command decoded, and a signed description attached that the device
     // verifies before it shows the swap: the amounts are on its screen, so
     // this is a check, not a blind signature.
     add('medium', `${urSwap} through the Uniswap Universal Router, a contract KeepKey has reviewed. Your KeepKey shows this swap on its screen from a signed description, and refuses it if that description is not genuine. Check the amounts there.`)
   } else if (across) {
+    recognition = 'known'
     acrossDeposit(across, req, add)
   } else if (relay) {
+    recognition = 'known'
     relayDeposit(relay, req, field('You send'), add)
   } else if (thorSwap) {
+    recognition = 'known'
     // A fully decoded deposit to the router pinned for this chain is a normal
     // swap: say what it does, not "unknown contract".
     add(req.deviceClearSigns ? 'low' : 'medium', req.deviceClearSigns
       ? `${thorSwap}. Your KeepKey shows this deposit on its screen; check it there.`
       : `${thorSwap}. ${notOnThisFirmware('this deposit', req.firmwareVersion)}`)
   } else if (urSwap && !req.deviceClearSigns) {
+    recognition = 'known'
     add('medium', `${urSwap} through the Uniswap Universal Router, a contract KeepKey has reviewed. ${notOnThisFirmware('this swap', req.firmwareVersion)}`)
   } else if (!req.deviceClearSigns || KNOWN_SELECTORS.has(sel)) {
     // A known selector reaching here did not parse (dirty address word,
@@ -289,6 +316,7 @@ function evmTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void) 
     if (!min || min === 'No minimum specified' || /^0(?:\.0+)?\s/.test(min)) add('high', 'Sets no minimum, so this swap can pay you back almost nothing.')
   }
   if (field('Token warning') || field('Input token warning')) add('high', 'Swaps a token KeepKey does not recognize. It may be a fake.')
+  return recognition
 }
 
 /** A deposit to the Relay Depository. The calldata names what is sent and
@@ -338,16 +366,16 @@ function acrossDeposit(d: AcrossDepositV3, req: SigningRequestInfo, add: (l: Ris
   if (d.message !== '0x') add('high', `Also passes ${(d.message.length - 2) / 2} bytes of instructions that run at the recipient on ${v.destination}. This computer cannot read them.`)
 }
 
-function evmTypedData(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void) {
+function evmTypedData(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void): Recognition {
   const d = req.typedDataDecoded
   if (!d) {
     add('high', 'This computer could not read this signature request, and your KeepKey shows only a code (hash) for it. You would be signing blind.')
-    return
+    return 'unknown'
   }
   const f = (label: string) => d.fields.find((x) => x.label === label)
   if (d.operationName === 'x402 EIP-3009 Payment') {
     add('medium', `Authorizes a payment of ${f('Value')?.value ?? 'an amount'} to ${f('Pay To')?.raw ?? 'another account'}. Anyone holding this signature can collect it until ${f('Valid Before')?.value ?? 'it expires'}.`)
-    return
+    return !!req.firmwareVersion && versionCompare(req.firmwareVersion, '7.15.0') >= 0 ? 'shows' : 'unknown'
   }
   const contract = d.domain.verifyingContract?.toLowerCase()
   if (/^Permit/.test(d.primaryType) || contract === PERMIT2) {
@@ -393,26 +421,30 @@ function evmTypedData(req: SigningRequestInfo, add: (l: RiskLevel, t: string) =>
   } else {
     add('high', 'Your KeepKey can only show a code (hash) for this signature, not what it says. You would be signing blind.')
   }
+  return structured ? 'shows' : 'unknown'
 }
 
-function evmMessage(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void) {
+function evmMessage(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void): Recognition {
   const m = req.ethMessageDecoded
   const raw = String(m?.messageRaw ?? req.data ?? '')
   if (/^0x[0-9a-fA-F]{64}$/.test(raw)) {
     add('high', 'You are signing a 32-byte code, not text. Some apps accept this as approval of a payment or order you cannot see.')
   } else if (m?.isUtf8Text && m.messageText !== undefined && !/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(m.messageText)) {
     add('low', 'You are signing a text message. Some apps treat signed text as a login or an approval, so read it on your KeepKey screen.')
+    return 'shows'
   } else if (m) {
     add('medium', 'You are signing data that is not readable text. Only the site knows what it means.')
   } else {
     add('medium', 'This message was not decoded on this computer. Read it on your KeepKey screen.')
   }
+  return 'unknown'
 }
 
 /** null = no assessment for this request type yet (bar hidden). */
 export function assessSigningRisk(req: SigningRequestInfo): RiskAssessment | null {
   const reasons: RiskReason[] = []
   const add = (level: RiskLevel, text: string) => reasons.push({ level, text })
+  let recognition: Recognition = 'unknown'
 
   if (req.solanaMessageDecoded) {
     const c = req.solanaMessageDecoded.classification
@@ -422,6 +454,7 @@ export function assessSigningRisk(req: SigningRequestInfo): RiskAssessment | nul
       add('medium', 'You are signing data that is not readable text. Only the site knows what it means.')
     } else {
       add('low', 'You are signing a text message. It cannot move your money by itself.')
+      recognition = 'shows'
     }
   } else if (req.solanaDecoded) {
     const d = req.solanaDecoded
@@ -434,6 +467,8 @@ export function assessSigningRisk(req: SigningRequestInfo): RiskAssessment | nul
         if (r) reasons.push(r)
       } else if (ix.status === 'known-program-unknown-ix' && assets.includes(ix.programName)) {
         add('high', `Uses a ${ix.programName} action KeepKey does not recognize. It could move your funds or hand over control of them.`)
+      } else if (ix.status === 'known-program-unknown-ix' && !SOLANA_MEMO_PROGRAMS.has(ix.programId)) {
+        add('medium', `Uses ${ix.programName}, a program KeepKey knows by name, but this computer cannot decode this action.`)
       }
     }
     for (const key of d.fundedKeysGivenToUnknownProgram ?? []) {
@@ -462,7 +497,17 @@ export function assessSigningRisk(req: SigningRequestInfo): RiskAssessment | nul
     if (d.altResolutionIncomplete) {
       add('high', 'Part of this transaction is hidden and could not be looked up.')
     }
-    if (reasons.length === 0) add('low', 'KeepKey can read every step of this transaction.')
+    // A memo moves nothing; the decoder has no layout for it yet.
+    const decoded = !d.altResolutionIncomplete
+      && d.instructions.every((i) => i.status === 'known' || SOLANA_MEMO_PROGRAMS.has(i.programId))
+    const firmwareShows = d.instructions.every((i) => i.status === 'known' && SOLANA_FIRMWARE_PROGRAMS.has(i.programId))
+    recognition = req.deviceClearSigns || (decoded && firmwareShows && req.requiresAdvancedMode !== true) ? 'shows'
+      : decoded ? 'known' : 'unknown'
+    if (reasons.length === 0) {
+      add('low', recognition === 'shows'
+        ? 'Your KeepKey shows every step of this transaction.'
+        : 'This computer decodes every step of this transaction. Your KeepKey shows it as raw data.')
+    }
     // The amounts the signed description names, in its own labels, and what
     // they add up to in SOL. Arithmetic over signed values — never a cap on
     // what the program's own code can move.
@@ -492,7 +537,10 @@ export function assessSigningRisk(req: SigningRequestInfo): RiskAssessment | nul
       add('low', `Network fee: up to ${units(fee, SOL_DECIMALS)} SOL.`)
     }
   } else if (req.method === '/eth/sign-transaction') {
-    evmTx(req, add)
+    recognition = evmTx(req, add)
+    // The device verifies a KeepKey-certified description and shows it.
+    if (req.deviceClearSigns || req.certifiedEvmSchema
+      || (!!req.calldataDecoded?.signedInsightBlob && req.calldataDecoded.insightKeyId === 0x80)) recognition = 'shows'
     if (reasons.length === 0) add('low', 'Your KeepKey decodes this call on its screen. Check the recipient and amount there.')
     // A verified human rating can only add a reason, so it can only raise the level.
     const rating = req.clearSignReport?.rating
@@ -501,9 +549,9 @@ export function assessSigningRisk(req: SigningRequestInfo): RiskAssessment | nul
         + (rating.raterPinned ? '' : ' The rater is not yet pinned in this Vault.'))
     }
   } else if (req.method === '/eth/sign-typed-data') {
-    evmTypedData(req, add)
+    recognition = evmTypedData(req, add)
   } else if (req.method === '/eth/sign') {
-    evmMessage(req, add)
+    recognition = evmMessage(req, add)
   } else if (req.solanaDecodeError || /^\/solana\/sign-(transaction|and-send)/.test(req.method)) {
     add('high', 'KeepKey cannot read this transaction at all. You would be signing blind.')
   } else {
@@ -519,10 +567,7 @@ export function assessSigningRisk(req: SigningRequestInfo): RiskAssessment | nul
     (max, r) => (ORDER.indexOf(r.level) > ORDER.indexOf(max) ? r.level : max), 'low')
   // Riskiest sentence first — it is the one the user must not skim past.
   reasons.sort((a, b) => ORDER.indexOf(b.level) - ORDER.indexOf(a.level))
-  const sol = req.solanaDecoded
-  const deviceShows = !!req.deviceClearSigns
-    || (!!req.calldataDecoded?.signedInsightBlob && req.calldataDecoded.insightKeyId === 0x80)
-    || (!!sol && !sol.altResolutionIncomplete && sol.instructions.every((i) => i.status === 'known'))
-  const tier: SigningTier = ORDER.indexOf(level) >= ORDER.indexOf('high') ? 'red' : deviceShows ? 'green' : 'yellow'
+  const tier: SigningTier = ORDER.indexOf(level) >= ORDER.indexOf('high') || recognition === 'unknown' ? 'red'
+    : recognition === 'shows' ? 'green' : 'yellow'
   return { level, tier, headline: TIER_HEADLINE[tier], reasons }
 }
