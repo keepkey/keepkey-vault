@@ -12,7 +12,7 @@ import {
   findCertifiedEvmSchemaSpec,
   buildCertifiedEvmEnvelope,
 } from './evm-certified-schema'
-import capturedEnvelope from '../../../../docs/clearsign-case-studies/uniswap-usdt/certified-response.json'
+import production from '../../__tests__/fixtures/clearsign-production-catalog-batch1.json'
 
 const TO = '0x4cd00e387622c35bddb9b4c962c136462338bc31'
 const DATA =
@@ -31,10 +31,14 @@ describe('7.16 certified EVM schemas', () => {
   // ceremony, for any spender (Permit2 or not).
   const ARB_USDT = '0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9'
   const permit2Approve = `0x095ea7b3${'000000000022d473030f116ddee9f6b43ac78ba3'.padStart(64, '0')}${'ff'.repeat(32)}`
-  it('refuses the captured mainnet certificate for the Arbitrum schema before using the delegate key', () => {
+  it('refuses the production mainnet certificate for the Arbitrum schema before using the delegate key', () => {
     const spec = findCertifiedEvmSchemaSpec(42161, ARB_USDT, permit2Approve)!
-    const certificate = Buffer.from(capturedEnvelope.signedPayload.slice(2), 'hex').subarray(1, 140).toString('hex')
-    expect(() => buildCertifiedEvmEnvelope(spec, certificate, '00'.repeat(32))).toThrow(/scoped to 1, not chain 42161/)
+    expect(() => buildCertifiedEvmEnvelope(spec, production.certificates['1'], '00'.repeat(32))).toThrow(/scoped to 1, not chain 42161/)
+  })
+  it('signs only with the delegate the production certificate names', () => {
+    const spec = findCertifiedEvmSchemaSpec(42161, ARB_USDT, permit2Approve)!
+    expect(() => buildCertifiedEvmEnvelope(spec, production.certificates['42161'], '11'.repeat(32)))
+      .toThrow(/does not match the certificate's delegate/)
   })
   it('binds Arbitrum USDT identity and allowance rendering metadata', () => {
     const spec = findCertifiedEvmSchemaSpec(42161, ARB_USDT, `0x095ea7b3${'00'.repeat(64)}`)!

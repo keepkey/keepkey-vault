@@ -4,11 +4,14 @@ import { utils as ethersUtils } from 'ethers'
 import type { ClearSignAuditEvidence, ClearSignPromotionBundle, ClearSignPromotionReview } from '../src/shared/types'
 import { clearSignIdentityHash, clearSignPromotionBundleHash, clearSignPromotionReviewDigest } from '../src/bun/clearsign-promotion'
 import { importPromotedClearSignArtifact } from '../src/bun/clearsign-artifact-import'
-import arbitrumCertificate from '../../../docs/clearsign-case-studies/uniswap-usdt/arbitrum-certificate.json'
+import production from './fixtures/clearsign-production-catalog-batch1.json'
 
-// Public production Relay envelope returned by /v1/evm/schema. It contains a
-// root certificate and signatures only; no private key or transaction data.
-const ENVELOPE = '030101000000016b359b004b6565704b657920416c706861203731360000000000000000000000000000000342f5f9704494b3f9bd72295eecaf29d783d23ea02b2dc9f48abcd2e46d4850cffc4364672f0172aa70ed21eacc2ea8bd0d333119ddf048b096686e1a8e56bda438f9e70b9cfc229a1e93e2d91846c31c4083d8b176e225d76341069dd22826cf02000000014cd00e387622c35bddb9b4c962c136462338bc3149290c1c000d6272696467654465706f73697402096465706f7369746f7201076f72646572496403010000000080500eca0f7b0521c5d0ee5f6ff406eca34e97bf9fa72c450a65a2248004c6c5107f9cc0a3c7816cedd06c3206a0c6e6242b228190a5b1da773561065c6f0e86cc1b'
+// The production Relay bridgeDeposit envelope (2026-10-16 ceremony, scope 1).
+// It contains a root certificate and signatures only; no private key or
+// transaction data.
+const ENVELOPE = production.entries.find((entry) => entry.scope === 1)!.certified_payload_hex!
+// The same Relay body under the alpha root, as the alpha Worker served it.
+const ALPHA_ENVELOPE = '030101000000016b359b004b6565704b657920416c706861203731360000000000000000000000000000000342f5f9704494b3f9bd72295eecaf29d783d23ea02b2dc9f48abcd2e46d4850cffc4364672f0172aa70ed21eacc2ea8bd0d333119ddf048b096686e1a8e56bda438f9e70b9cfc229a1e93e2d91846c31c4083d8b176e225d76341069dd22826cf02000000014cd00e387622c35bddb9b4c962c136462338bc3149290c1c000d6272696467654465706f73697402096465706f7369746f7201076f72646572496403010000000080500eca0f7b0521c5d0ee5f6ff406eca34e97bf9fa72c450a65a2248004c6c5107f9cc0a3c7816cedd06c3206a0c6e6242b228190a5b1da773561065c6f0e86cc1b'
 const NOW = 1_789_000_000_000
 const evidence: ClearSignAuditEvidence = {
   version: 1, auditedAt: NOW, chain: 'Ethereum', endpoint: 'public-chain', stateReference: '0x1',
@@ -55,7 +58,7 @@ describe('offline ClearSign artifact ceremony import', () => {
       now: NOW,
     })
     expect(artifact.evmCertifiedEnvelopeHex).toBe(ENVELOPE)
-    expect(artifact.delegateAlias).toBe('KeepKey Alpha 716')
+    expect(artifact.delegateAlias).toBe('KeepKey ClearSign')
     expect(artifact.reviewerFingerprints).toHaveLength(2)
   })
 
@@ -77,6 +80,20 @@ describe('offline ClearSign artifact ceremony import', () => {
     // The real Arbitrum certificate passes scope verification, but the old
     // mainnet artifact signature must still fail for the modified payload.
     expect(() => importPromotedClearSignArtifact({ ...common,
-      ceremony: { ...ceremony, certificateHex: arbitrumCertificate.certificateHex } })).toThrow('certified delegate')
+      ceremony: { ...ceremony, certificateHex: production.certificates['42161'] } })).toThrow('certified delegate')
+  })
+
+  test('refuses an alpha-root ceremony: Desktop trusts only the production root', () => {
+    const alpha = Buffer.from(ALPHA_ENVELOPE, 'hex')
+    const alphaInner = alpha.subarray(140)
+    expect(alphaInner.subarray(0, -65).toString('hex')).toBe(payload.toString('hex'))
+    expect(() => importPromotedClearSignArtifact({
+      bundle, reviews, currentEvidence: evidence,
+      observedShape: { chainId: 1, contract: bundle.candidate.address, selector: '0x49290c1c', calldataLength: 68 },
+      ceremony: { bundleHash: clearSignPromotionBundleHash(bundle), payloadHex: payload.toString('hex'),
+        signatureHex: alphaInner.subarray(-65, -1).toString('hex'), recovery: alphaInner[alphaInner.length - 1],
+        certificateHex: alpha.subarray(1, 140).toString('hex') },
+      now: NOW,
+    })).toThrow('not signed by the KeepKey ClearSign root')
   })
 })

@@ -2,10 +2,10 @@ import { createHash } from 'node:crypto'
 import { utils as ethersUtils } from 'ethers'
 
 import {
-  ALPHA_DELEGATE_PUBLIC_KEY,
-  ALPHA_DELEGATE_FINGERPRINT,
   CLEARSIGN_SCOPE_ETHEREUM,
+  delegateFingerprint,
   inspectAlphaCertificate,
+  type AlphaCertificateBody,
 } from './clearsign-alpha-ceremony'
 import { UR_V4_ROUTERS } from './uniswap-ur'
 import { REVIEWED_EVM_TOKENS } from '../shared/reviewed-evm-tokens'
@@ -613,7 +613,7 @@ const ROLE_TEXT: Record<number, string> = {
  * EXAMPLE_ADDRESS unless pinned, token amounts are 25 whole units, {v} is
  * the firmware doc's 0.007988 ETH. Undefined for schemas without an intent.
  */
-export function expectedEvmScreens(spec: EvmSchemaSpec, alias = 'KeepKey Alpha 716'): ExpectedScreen[] | undefined {
+export function expectedEvmScreens(spec: EvmSchemaSpec, alias: string, fingerprint: string): ExpectedScreen[] | undefined {
   const intent = spec.intent
   if (!intent) return undefined
   const checksum = (a: string) => ethersUtils.getAddress(a)
@@ -661,8 +661,8 @@ export function expectedEvmScreens(spec: EvmSchemaSpec, alias = 'KeepKey Alpha 7
   })
   screens.push({
     title: 'KeepKey ClearSign',
-    body: `Described by ${alias} ${ALPHA_DELEGATE_FINGERPRINT}\ncertified by KeepKey`,
-    approximate: "the alias comes from the chain's certificate; this is the alpha certificate's alias",
+    body: `Described by ${alias} ${fingerprint}\ncertified by KeepKey`,
+    approximate: "the alias and fingerprint come from the chain's certificate",
   })
   return screens
 }
@@ -670,26 +670,23 @@ export function expectedEvmScreens(spec: EvmSchemaSpec, alias = 'KeepKey Alpha 7
 /** Backwards-compatible name retained for existing v2 callers/tests. */
 export const buildEvmV2SchemaBody = buildEvmSchemaBody
 
+/** Rehearsals pass `rootPublicKey`; Desktop leaves it to the production root. */
 export function buildCertifiedEvmEnvelope(
   spec: EvmSchemaSpec,
   certificateHex: string,
   delegatePrivateKeyHex: string,
+  rootPublicKey?: string,
 ): { signedPayload: string; keyId: number; fingerprint: string; alias: string } {
-  const certificate = hexBytes(certificateHex, 139, 'alpha certificate')
-  const certificateInfo = inspectAlphaCertificate(certificate.toString('hex'))
+  const certificate = hexBytes(certificateHex, 139, 'certificate')
+  const certificateInfo = inspectAlphaCertificate(certificate.toString('hex'), undefined, rootPublicKey)
   // The device accepts a description only on its certificate's chain.
   if (certificateInfo.chainId !== spec.chainId) {
     throw new Error(`certificate is scoped to ${certificateInfo.chainId}, not chain ${spec.chainId}`)
   }
-  const privateKey = hexBytes(delegatePrivateKeyHex, 32, 'delegate private key')
-  const signingKey = new ethersUtils.SigningKey(`0x${privateKey.toString('hex')}`)
-  const publicKey = ethersUtils.computePublicKey(signingKey.publicKey, true).slice(2).toLowerCase()
-  if (publicKey !== ALPHA_DELEGATE_PUBLIC_KEY) {
-    throw new Error(`delegate private key does not match reviewed signer ${ALPHA_DELEGATE_FINGERPRINT}`)
-  }
+  const signingKey = delegateSigningKey(delegatePrivateKeyHex, certificateInfo)
 
   const body = buildEvmSchemaBody(spec)
-  return signCertifiedEvmBody(body, certificate, certificateInfo.alias, signingKey)
+  return signCertifiedEvmBody(body, certificate, certificateInfo, signingKey)
 }
 
 /** A certified name record; the certificate must be scoped to its chain. */
@@ -697,19 +694,15 @@ export function buildCertifiedEvmNameEnvelope(
   record: EvmNameRecord,
   certificateHex: string,
   delegatePrivateKeyHex: string,
+  rootPublicKey?: string,
 ): { signedPayload: string; keyId: number; fingerprint: string; alias: string } {
-  const certificate = hexBytes(certificateHex, 139, 'alpha certificate')
-  const certificateInfo = inspectAlphaCertificate(certificate.toString('hex'))
+  const certificate = hexBytes(certificateHex, 139, 'certificate')
+  const certificateInfo = inspectAlphaCertificate(certificate.toString('hex'), undefined, rootPublicKey)
   if (certificateInfo.chainId !== record.chainId) {
     throw new Error(`certificate is scoped to ${certificateInfo.chainId}, not chain ${record.chainId}`)
   }
-  const privateKey = hexBytes(delegatePrivateKeyHex, 32, 'delegate private key')
-  const signingKey = new ethersUtils.SigningKey(`0x${privateKey.toString('hex')}`)
-  const publicKey = ethersUtils.computePublicKey(signingKey.publicKey, true).slice(2).toLowerCase()
-  if (publicKey !== ALPHA_DELEGATE_PUBLIC_KEY) {
-    throw new Error(`delegate private key does not match reviewed signer ${ALPHA_DELEGATE_FINGERPRINT}`)
-  }
-  return signCertifiedEvmBody(buildEvmNameBody(record), certificate, certificateInfo.alias, signingKey)
+  const signingKey = delegateSigningKey(delegatePrivateKeyHex, certificateInfo)
+  return signCertifiedEvmBody(buildEvmNameBody(record), certificate, certificateInfo, signingKey)
 }
 
 // ── v0x07: certified Uniswap Universal Router decoder ────────────────────────
@@ -809,20 +802,16 @@ export function buildCertifiedEvmDecoderEnvelope(
   tokens: EvmDecoderToken[],
   certificateHex: string,
   delegatePrivateKeyHex: string,
+  rootPublicKey?: string,
 ): { signedPayload: string; keyId: number; fingerprint: string; alias: string } {
   const body = buildEvmDecoderBody(chainId, router, selector, tokens)
-  const certificate = hexBytes(certificateHex, 139, 'alpha certificate')
-  const certificateInfo = inspectAlphaCertificate(certificate.toString('hex'))
+  const certificate = hexBytes(certificateHex, 139, 'certificate')
+  const certificateInfo = inspectAlphaCertificate(certificate.toString('hex'), undefined, rootPublicKey)
   if (certificateInfo.chainId !== chainId) {
     throw new Error(`certificate is scoped to ${certificateInfo.chainId}, not chain ${chainId}`)
   }
-  const privateKey = hexBytes(delegatePrivateKeyHex, 32, 'delegate private key')
-  const signingKey = new ethersUtils.SigningKey(`0x${privateKey.toString('hex')}`)
-  const publicKey = ethersUtils.computePublicKey(signingKey.publicKey, true).slice(2).toLowerCase()
-  if (publicKey !== ALPHA_DELEGATE_PUBLIC_KEY) {
-    throw new Error(`delegate private key does not match reviewed signer ${ALPHA_DELEGATE_FINGERPRINT}`)
-  }
-  return signCertifiedEvmBody(body, certificate, certificateInfo.alias, signingKey)
+  const signingKey = delegateSigningKey(delegatePrivateKeyHex, certificateInfo)
+  return signCertifiedEvmBody(body, certificate, certificateInfo, signingKey)
 }
 
 /**
@@ -830,7 +819,7 @@ export function buildCertifiedEvmDecoderEnvelope(
  * placeholders: {in}/{out} are "<amount> <SYM>" ("ETH" when wrapped from
  * msg.value / unwrapped), read by the device from the calldata.
  */
-export function expectedUniswapScreens(chainId: number, router: string, alias = 'KeepKey Alpha 716'): Array<ExpectedScreen & { exactOut?: string; numbered?: string; when?: string }> {
+export function expectedUniswapScreens(chainId: number, router: string, alias: string, fingerprint: string): Array<ExpectedScreen & { exactOut?: string; numbered?: string; when?: string }> {
   const v4 = urV4Router(chainId, router)
   return [
     { title: UR_TITLE, body: 'Swap {in} for at least {out}', exactOut: 'Swap at most {in} for {out}' },
@@ -858,16 +847,30 @@ export function expectedUniswapScreens(chainId: number, router: string, alias = 
     { title: 'Contract', body: `${UR_METHOD}\n${ethersUtils.getAddress(router)}` },
     {
       title: 'KeepKey ClearSign',
-      body: `Described by ${alias} ${ALPHA_DELEGATE_FINGERPRINT}\ncertified by KeepKey`,
-      approximate: `the alias comes from the chain's certificate (chain ${chainId})`,
+      body: `Described by ${alias} ${fingerprint}\ncertified by KeepKey`,
+      approximate: `the alias and fingerprint come from the chain's certificate (chain ${chainId})`,
     },
   ]
+}
+
+/** The delegate key for this certificate: it must be the key the certificate names. */
+function delegateSigningKey(
+  delegatePrivateKeyHex: string,
+  certificateInfo: AlphaCertificateBody,
+): InstanceType<typeof ethersUtils.SigningKey> {
+  const privateKey = hexBytes(delegatePrivateKeyHex, 32, 'delegate private key')
+  const signingKey = new ethersUtils.SigningKey(`0x${privateKey.toString('hex')}`)
+  const publicKey = ethersUtils.computePublicKey(signingKey.publicKey, true).slice(2).toLowerCase()
+  if (publicKey !== certificateInfo.delegatePublicKey) {
+    throw new Error(`delegate private key does not match the certificate's delegate ${delegateFingerprint(certificateInfo.delegatePublicKey)}`)
+  }
+  return signingKey
 }
 
 function signCertifiedEvmBody(
   body: Buffer,
   certificate: Buffer,
-  alias: string,
+  certificateInfo: AlphaCertificateBody,
   signingKey: InstanceType<typeof ethersUtils.SigningKey>,
 ): { signedPayload: string; keyId: number; fingerprint: string; alias: string } {
   const digest = createHash('sha256').update(body).digest('hex')
@@ -882,8 +885,8 @@ function signCertifiedEvmBody(
   return {
     signedPayload: `0x${envelope.toString('hex')}`,
     keyId: CERTIFIED_METADATA_KEY_ID,
-    fingerprint: ALPHA_DELEGATE_FINGERPRINT,
-    alias,
+    fingerprint: delegateFingerprint(certificateInfo.delegatePublicKey),
+    alias: certificateInfo.alias,
   }
 }
 

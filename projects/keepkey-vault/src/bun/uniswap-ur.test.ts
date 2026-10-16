@@ -9,6 +9,8 @@ import {
   UNIVERSAL_ROUTER_PROVENANCE,
 } from './evm-certified-schema'
 import { urDecode, urPrecheck, urSummarize, type UrPlan, type UrStep } from './uniswap-ur'
+import production from '../../__tests__/fixtures/clearsign-production-catalog-batch1.json'
+import { ALPHA_ROOT_PUBLIC_KEY } from '../../scripts/clearsign-alpha-rehearsal'
 
 /**
  * Real Base Universal Router calls, copied verbatim from the firmware unit test
@@ -201,13 +203,15 @@ describe('v0x07 decoder entry body', () => {
   })
 
   it('envelope: a certificate for another chain cannot certify the swap', () => {
-    // Real 2026-10-03 Arbitrum certificate (public; firmware ClearsignRootCeremony20261003).
-    const arbitrumCert = '01010000a4b16b359b004b6565704b657920416c706861203731360000000000000000000000000000000342f5f9704494b3f9bd72295eecaf29d783d23ea02b2dc9f48abcd2e46d4850cf2fe56b2ec1cd8540b8c5eff6ad5c30b5aea85edd7499c3340074e0df12cba0d31a973fb36ab9cc9e3ca759fba08dd96908e3f5541b891f00fc6ff941e9365a6c'
-    expect(() => buildCertifiedEvmDecoderEnvelope(8453, BASE_UR12, '0x3593564c', tokens, arbitrumCert, '11'.repeat(32)))
+    // The production Arbitrum certificate (2026-10-16 ceremony).
+    expect(() => buildCertifiedEvmDecoderEnvelope(8453, BASE_UR12, '0x3593564c', tokens, production.certificates['42161'], '11'.repeat(32)))
       .toThrow(/scoped to 42161, not chain 8453/)
+    // Real 2026-10-03 alpha Base certificate: refused unless a rehearsal names the alpha root.
     const baseCert = '0101000021056b359b004b6565704b657920416c706861203731360000000000000000000000000000000342f5f9704494b3f9bd72295eecaf29d783d23ea02b2dc9f48abcd2e46d4850cfd3f4638bcd78bd822b88d56dc66bb34c167e3509597a8d3e86a37f14c5b89a504b04f2868e5fcb3ff93f317e2cae7b1cfca149559a272a3ea713125d37757a98'
     expect(() => buildCertifiedEvmDecoderEnvelope(8453, BASE_UR12, '0x3593564c', tokens, baseCert, '11'.repeat(32)))
-      .toThrow(/does not match reviewed signer/)
+      .toThrow(/not signed by the KeepKey ClearSign root/)
+    expect(() => buildCertifiedEvmDecoderEnvelope(8453, BASE_UR12, '0x3593564c', tokens, baseCert, '11'.repeat(32), ALPHA_ROOT_PUBLIC_KEY))
+      .toThrow(/does not match the certificate's delegate/)
   })
 
   it('reviews only UR 1.2, 2.0 and 2.1.2 deployments, all from the pinned Uniswap list', () => {

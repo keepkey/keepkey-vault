@@ -4,8 +4,9 @@ import { Keyring } from '@keepkey/hdwallet-core'
 import { NodeWebUSBKeepKeyAdapter } from '@keepkey/hdwallet-keepkey-nodewebusb'
 import { HIDKeepKeyAdapter } from '@keepkey/hdwallet-keepkey-nodehid'
 import { getDeviceList } from 'usb'
-import { ALPHA_ROOT_PUBLIC_KEY, CLEARSIGN_DOMAIN_SEPARATOR, inspectAlphaCertificateBody,
+import { CLEARSIGN_DOMAIN_SEPARATOR, inspectAlphaCertificateBody,
   verifyAlphaRootSignature, CLEARSIGN_EVM_SCOPES } from '../src/bun/clearsign-alpha-ceremony'
+import { ALPHA_ROOT_PUBLIC_KEY } from './clearsign-alpha-rehearsal'
 
 const sign = process.argv.includes('--sign')
 const requestPath = process.argv.find(x => x.startsWith('--request='))?.slice('--request='.length)
@@ -48,7 +49,7 @@ try {
     await wallet.applyPolicy({ policyName: 'AdvancedMode', enabled: true })
     const signed = await wallet.ethSignTypedHash({ addressNList: path,
       domainSeparatorHash: CLEARSIGN_DOMAIN_SEPARATOR, messageHash: inspection.messageHash })
-    const verified = verifyAlphaRootSignature(inspection, signed.signature)
+    const verified = verifyAlphaRootSignature(inspection, signed.signature, ALPHA_ROOT_PUBLIC_KEY)
     await Bun.write(outputPath!, JSON.stringify({ format: 'keepkey-clearsign-delegate-cert-v1', ...verified,
       chainId: inspection.chainId, alias: inspection.alias, notAfter: inspection.notAfter }, null, 2) + '\n')
     console.log(`Verified public certificate written to ${outputPath}`)
