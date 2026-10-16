@@ -1309,7 +1309,7 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
 export async function previewSwapBuild(
   params: ExecuteSwapParams,
   ctx: SwapContext,
-): Promise<{ approveTx?: any; unsignedTx: any; allowance?: { current: string; required: string; sufficient: boolean; spender: string; tokenContract: string }; balance?: { current: string; required: string; sufficient: boolean; tokenContract?: string } }> {
+): Promise<{ approveTx?: any; unsignedTx: any; runtimeSigner?: RuntimeEvmSigner; allowance?: { current: string; required: string; sufficient: boolean; spender: string; tokenContract: string }; balance?: { current: string; required: string; sufficient: boolean; tokenContract?: string } }> {
   const { wallet, getAllChains, getEvmRpcSource, getBtcXpub, getAllBtcXpubs } = ctx
 
   const allChains = getAllChains()
@@ -1368,7 +1368,7 @@ export async function previewSwapBuild(
     const certifiedSupported = supportsCertifiedClearSign(ctx.getFirmwareVersion?.())
     const runtimeSupported = supportsRuntimeEvmMetadata(ctx.getFirmwareVersion?.(), ctx.isAdvancedModeEnabled?.() === true)
     const result = await buildRelaySwapTx(params, fromChain, fromAddress, getEvmRpcSource, isErc20Source, /* previewMode */ true, certifiedSupported, runtimeSupported)
-    return { unsignedTx: result.unsignedTx, approveTx: result.approveTx, allowance: result.allowance, balance: result.balance }
+    return { unsignedTx: result.unsignedTx, approveTx: result.approveTx, allowance: result.allowance, balance: result.balance, runtimeSigner: result.runtimeSigner }
   }
   if (fromChain.chainFamily === 'evm') {
     const result = await buildEvmSwapTx(params, fromChain, fromAddress, pioneer, getEvmRpcSource, isErc20Source, wallet, /* previewMode */ true, undefined, undefined, undefined, supportsCertifiedClearSign(ctx.getFirmwareVersion?.()))

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { createHash } from 'node:crypto'
-import { deviceFingerprint, resolveRuntimeEvmMetadata, supportsRuntimeEvmMetadata, trustRuntimeSigner } from './evm-runtime-metadata'
+import { deviceFingerprint, resolveNamedRuntimeEvmMetadata, resolveRuntimeEvmMetadata, resolveRuntimeEvmSigner, runtimeProviderWillBeAsked, supportsRuntimeEvmMetadata, trustRuntimeSigner } from './evm-runtime-metadata'
 
 const originalFetch = globalThis.fetch
 const originalUrl = process.env.CLEARSIGN_RUNTIME_URL
@@ -57,11 +57,16 @@ describe('7.15 runtime EVM metadata', () => {
   })
 })
 
-/** A real provider on localhost (no fetch mock). */
+/** A real provider on localhost (no fetch mock). Connections are not kept
+ * alive, so a pooled socket to a stopped server never leaks into a later test. */
 function provider(signer: () => Response | Promise<Response>, sign: () => Response | Promise<Response>) {
   const server = Bun.serve({
     port: 0,
-    fetch: (req) => new URL(req.url).pathname === '/signer' ? signer() : sign(),
+    fetch: async (req) => {
+      const res = await (new URL(req.url).pathname === '/signer' ? signer() : sign())
+      res.headers.set('connection', 'close')
+      return res
+    },
   })
   process.env.CLEARSIGN_RUNTIME_URL = `http://127.0.0.1:${server.port}`
   return server
@@ -129,6 +134,36 @@ describe('a provider decline or outage means no description, never a failed sign
     const result = await resolveRuntimeEvmMetadata({ chainId: 1 })
     expect(result?.signer).toMatchObject({ alias: 'Acme Labs', deviceFingerprint: deviceFingerprint(KEY) })
     expect(warnings).toHaveLength(0)
+  })
+
+  test('the approval card names the signer before approval: /signer only, 16-hex as the device shows it', async () => {
+    let signed = false
+    server = provider(goodSigner, () => { signed = true; return new Response('no', { status: 500 }) })
+    expect(await resolveRuntimeEvmSigner()).toMatchObject({ alias: 'Acme Labs', publicKeyHex: KEY, deviceFingerprint: deviceFingerprint(KEY) })
+    expect(signed).toBe(false)
+    server.stop(true)
+    server = provider(() => new Response('down', { status: 503 }), goodSigner)
+    expect(await resolveRuntimeEvmSigner()).toBeUndefined()
+  })
+
+  test('the sign handler attaches only from the key the card named', async () => {
+    server = provider(goodSigner, () => Response.json({ keyId: 2, signedPayload: `0x${'ab'.repeat(80)}` }))
+    const named = { publicKeyHex: KEY, fingerprint: deviceFingerprint(KEY) }
+    expect((await resolveNamedRuntimeEvmMetadata({ chainId: 1 }, named))?.signer.publicKeyHex).toBe(KEY)
+    expect(await resolveNamedRuntimeEvmMetadata({ chainId: 1 }, undefined)).toBeUndefined()
+    const other = `03${'22'.repeat(32)}`
+    expect(await resolveNamedRuntimeEvmMetadata({ chainId: 1 }, { publicKeyHex: other, fingerprint: deviceFingerprint(other) })).toBeUndefined()
+    expect(warnings).toEqual([expect.stringContaining('signer changed since approval')])
+  })
+
+  test('the provider is asked only with no other description, on 7.15+ with AdvancedMode', () => {
+    const base = { id: 'x', method: '/eth/sign-transaction', appName: 'a', firmwareVersion: '7.16.0', advancedModeEnabled: true }
+    expect(runtimeProviderWillBeAsked(base, undefined)).toBe(true)
+    expect(runtimeProviderWillBeAsked({ ...base, advancedModeEnabled: false }, undefined)).toBe(false)
+    expect(runtimeProviderWillBeAsked({ ...base, firmwareVersion: '7.14.1' }, undefined)).toBe(false)
+    expect(runtimeProviderWillBeAsked(base, { signedPayload: '00' })).toBe(false)
+    expect(runtimeProviderWillBeAsked({ ...base, calldataDecoded: { dappName: 'x', contractName: 'x', method: 'x', selector: '0x', fields: [], source: 'none', signedInsightBlob: 'AA==' } }, undefined)).toBe(false)
+    expect(runtimeProviderWillBeAsked({ ...base, certifiedEvmSchema: { method: 'm' } as any }, undefined)).toBe(false)
   })
 
   test('a refused device trust screen → not trusted, so the caller drops the metadata', async () => {

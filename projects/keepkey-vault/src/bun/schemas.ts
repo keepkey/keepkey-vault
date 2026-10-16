@@ -519,6 +519,12 @@ export const ClearSignReportResponse = z.object({
     codeIdentityBound: z.boolean().optional(),
     expiresAt: z.number().optional(),
     resolution: z.string().optional(),
+    provider: z.object({
+      alias: z.string().optional(),
+      fingerprint: z.string().optional(),
+      keyId: z.number().int().optional(),
+      status: z.enum(['requested', 'supplied']),
+    }).optional(),
   }),
   simulation: z.object({
     version: z.literal(1),

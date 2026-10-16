@@ -83,7 +83,7 @@ import { createClearSignFixturePlan } from './clearsign-fixture-plan'
 import { replayLegacyClearSignRows } from './clearsign-legacy-replay'
 import { importPromotedClearSignArtifact } from './clearsign-artifact-import'
 import { findPromotedEvmArtifact, findPromotedSolanaArtifact, resolvePromotedSolanaArtifact } from './clearsign-artifact-resolver'
-import { resolveRuntimeEvmMetadata, supportsRuntimeEvmMetadata, trustRuntimeSigner, type RuntimeEvmSigner } from './evm-runtime-metadata'
+import { resolveNamedRuntimeEvmMetadata, resolveRuntimeEvmSigner, runtimeProviderWillBeAsked, supportsRuntimeEvmMetadata, trustRuntimeSigner, type RuntimeEvmSigner } from './evm-runtime-metadata'
 import { supportsCertifiedClearSign } from './solana-certified-policy'
 import { measureLiveDeployment, resolveEvmSchema } from './evm-schema-registry'
 import { findContractRating } from './clearsign-review'
@@ -2080,6 +2080,20 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             signingInfo.needsBlindSigning = false
             signingInfo.requiresAdvancedMode = false
           }
+          // Name the runtime provider the sign handler will ask, on the card,
+          // before approval: its description is fetched only after approval,
+          // and the handler attaches one only from the key named here.
+          if (path === '/eth/sign-transaction' && signingInfo.clearSignReport
+            && runtimeProviderWillBeAsked(signingInfo, probeCheckBody?.txMetadata)) {
+            const signer = await resolveRuntimeEvmSigner()
+            if (signer) {
+              signingInfo.runtimeProvider = { alias: signer.alias, fingerprint: signer.deviceFingerprint, publicKeyHex: signer.publicKeyHex }
+              signingInfo.clearSignReport.descriptor = {
+                ...signingInfo.clearSignReport.descriptor,
+                provider: { alias: signer.alias, fingerprint: signer.deviceFingerprint, status: 'requested' },
+              }
+            }
+          }
 
           // Track before waiting so rejection, timeout, or a malformed approval
           // decision still dismisses the Vault overlay in the request finally.
@@ -2835,7 +2849,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               // device trust screen, means no description. The device then
               // shows the call as it would with no provider (raw data under
               // AdvancedMode, which this path already requires).
-              const runtime = await resolveRuntimeEvmMetadata(msg)
+              // Only from the key the approval card named.
+              const runtime = await resolveNamedRuntimeEvmMetadata(msg, activeSigningInfo?.runtimeProvider)
               if (runtime) {
                 runtimeSigner = runtime.signer
                 msg.txMetadata = {

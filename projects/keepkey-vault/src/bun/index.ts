@@ -7925,6 +7925,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							return report
 						}
 						const [approval, transaction] = await Promise.all([reportFor(preview.approveTx), reportFor(preview.unsignedTx)])
+						// The runtime provider the swap will ask: named on the card, never as KeepKey.
+						if (transaction && preview.runtimeSigner) transaction.descriptor = {
+							...transaction.descriptor,
+							provider: { alias: preview.runtimeSigner.alias, fingerprint: preview.runtimeSigner.deviceFingerprint, status: 'requested' },
+						}
 						preview.clearSignReports = { approval, transaction }
 						// A swap that pays a provider's deposit address: name the provider,
 						// say the device cannot verify the address, and for NEAR Intents ask

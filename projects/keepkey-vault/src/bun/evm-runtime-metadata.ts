@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import { versionCompare } from '../shared/firmware-versions'
+import type { SigningRequestInfo } from '../shared/types'
 
 export interface RuntimeEvmSigner {
   keyId: number
@@ -88,28 +89,71 @@ export async function resolveRuntimeEvmMetadata(tx: any, timeoutMs = RUNTIME_PRO
   if (!signerResponse.ok || !signResponse.ok) {
     return noDescription(configured, `unavailable (${signerResponse.status}/${signResponse.status})`)
   }
-  const publicKeyHex = String(signer?.publicKeyHex || '').replace(/^0x/i, '').toLowerCase()
-  if (!/^0[23][0-9a-f]{64}$/.test(publicKeyHex)) return noDescription(configured, 'signer identity is malformed')
-  const shown = deviceFingerprint(publicKeyHex)
-  const fingerprint = shown.slice(0, 8).toLowerCase()
-  // The provider may advertise the 4-byte wire form or the 8-byte device form.
-  const advertised = String(signer?.fingerprint || '').toUpperCase()
-  if ((advertised.length !== 8 && advertised.length !== 16) || !shown.startsWith(advertised)) {
-    return noDescription(configured, 'signer identity is malformed (fingerprint does not match its key)')
-  }
-  const keyId = Number(signed?.keyId)
-  if (!Number.isInteger(keyId) || keyId < 1 || keyId > 3 || keyId !== Number(signer?.keyId)) {
+  const identity = signerIdentity(signer)
+  if (typeof identity === 'string') return noDescription(configured, identity)
+  if (Number(signed?.keyId) !== identity.keyId) {
     return noDescription(configured, 'returned a non-loadable or mismatched signer slot')
   }
   const payload = String(signed?.signedPayload || '').replace(/^0x/i, '')
   if (!/^[0-9a-f]+$/i.test(payload) || payload.length < 130) return noDescription(configured, 'returned malformed metadata')
-  return {
-    signedPayload: `0x${payload}`,
-    keyId,
-    signer: {
-      keyId, alias: String(signer.alias || 'ClearSign Provider').slice(0, 31), publicKeyHex, fingerprint, deviceFingerprint: shown,
-    },
+  return { signedPayload: `0x${payload}`, keyId: identity.keyId, signer: identity }
+}
+
+/** Transaction-bound metadata only from the signer an approval card named:
+ * never attach a description under a name the user was not shown. Nothing
+ * named, or a different key answering, means no description. */
+export async function resolveNamedRuntimeEvmMetadata(
+  tx: any, named: { publicKeyHex: string; fingerprint: string } | undefined, timeoutMs = RUNTIME_PROVIDER_TIMEOUT_MS,
+): Promise<RuntimeEvmMetadata | undefined> {
+  if (!named) return undefined
+  const answer = await resolveRuntimeEvmMetadata(tx, timeoutMs)
+  if (!answer || answer.signer.publicKeyHex === named.publicKeyHex) return answer
+  console.warn(`[clearsign] runtime provider signer changed since approval (${named.fingerprint} → ${answer.signer.deviceFingerprint}); signing with no description`)
+  return undefined
+}
+
+/** The provider's advertised signer, checked against its own key, or why not. */
+function signerIdentity(signer: any): RuntimeEvmSigner | string {
+  const publicKeyHex = String(signer?.publicKeyHex || '').replace(/^0x/i, '').toLowerCase()
+  if (!/^0[23][0-9a-f]{64}$/.test(publicKeyHex)) return 'signer identity is malformed'
+  const shown = deviceFingerprint(publicKeyHex)
+  // The provider may advertise the 4-byte wire form or the 8-byte device form.
+  const advertised = String(signer?.fingerprint || '').toUpperCase()
+  if ((advertised.length !== 8 && advertised.length !== 16) || !shown.startsWith(advertised)) {
+    return 'signer identity is malformed (fingerprint does not match its key)'
   }
+  const keyId = Number(signer?.keyId)
+  if (!Number.isInteger(keyId) || keyId < 1 || keyId > 3) return 'returned a non-loadable or mismatched signer slot'
+  return {
+    keyId, alias: String(signer.alias || 'ClearSign Provider').slice(0, 31), publicKeyHex,
+    fingerprint: shown.slice(0, 8).toLowerCase(), deviceFingerprint: shown,
+  }
+}
+
+/** The configured provider's signer, for the approval card to name before the
+ * user approves (the transaction-bound description is fetched only after). No
+ * provider, or one that is down or malformed, gives undefined. */
+export async function resolveRuntimeEvmSigner(timeoutMs = RUNTIME_PROVIDER_TIMEOUT_MS): Promise<RuntimeEvmSigner | undefined> {
+  const configured = String(process.env.CLEARSIGN_RUNTIME_URL || '').trim().replace(/\/+$/, '')
+  if (!configured) return undefined
+  let response: Response
+  try {
+    response = await fetch(`${configured}/signer`, { signal: AbortSignal.timeout(timeoutMs) })
+  } catch (e: any) {
+    return noDescription(configured, e?.name === 'TimeoutError' ? `no answer in ${timeoutMs} ms` : `unreachable (${e?.message || e})`)
+  }
+  if (!response.ok) return noDescription(configured, `unavailable (${response.status})`)
+  const identity = signerIdentity(await response.json().catch(() => null))
+  return typeof identity === 'string' ? noDescription(configured, identity) : identity
+}
+
+/** Whether the REST sign handler will ask the runtime provider for this call:
+ * no caller blob, no certified or Pioneer description, and 7.15+ with
+ * AdvancedMode on (the same order the handler resolves metadata in). */
+export function runtimeProviderWillBeAsked(info: SigningRequestInfo, callerMetadata: unknown): boolean {
+  return !(callerMetadata as { signedPayload?: unknown } | undefined)?.signedPayload
+    && !info.certifiedEvmSchema && !info.calldataDecoded?.signedInsightBlob
+    && supportsRuntimeEvmMetadata(info.firmwareVersion, info.advancedModeEnabled === true)
 }
 
 /** Ask the device to trust the provider's signer for this session. A refusal
