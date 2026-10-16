@@ -47,6 +47,39 @@
           "args": []
         }
       }
+    },
+    "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL": {
+      "name": "Associated Token Account",
+      "category": "token",
+      "website": "https://spl.solana.com/associated-token-account",
+      "description": "Derives and creates the canonical token account for (wallet, mint) pairs. Same as pioneer-discovery plus the \"\" entry: Create was first sent with empty data, which has no u8 discriminator, and firmware shows it as Create.",
+      "discriminator": {
+        "encoding": "u8",
+        "offset": 0,
+        "length": 1
+      },
+      "instructions": {
+        "": {
+          "name": "create",
+          "accounts": ["funder", "associated_account", "owner", "mint", "system_program", "token_program"],
+          "args": []
+        },
+        "00": {
+          "name": "create",
+          "accounts": ["funder", "associated_account", "owner", "mint", "system_program", "token_program"],
+          "args": []
+        },
+        "01": {
+          "name": "createIdempotent",
+          "accounts": ["funder", "associated_account", "owner", "mint", "system_program", "token_program"],
+          "args": []
+        },
+        "02": {
+          "name": "recoverNested",
+          "accounts": ["nested_account", "nested_mint", "destination", "owner_associated_account", "owner_mint", "owner", "token_program"],
+          "args": []
+        }
+      }
     }
   }
 }
