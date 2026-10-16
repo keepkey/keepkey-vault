@@ -98,6 +98,18 @@ describe('POST /clearsign/report — Desktop parity', () => {
     expect(r.findings[0].message).toContain('cannot show this swap on the device yet')
   })
 
+  test('an ERC-20 transfer the firmware decodes itself: P4, as on the Desktop', async () => {
+    const USDC = { chainId: 1, from: SIGNER, to: '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48', value: '0x0',
+      data: `0xa9059cbb${'11'.repeat(20).padStart(64, '0')}${(25_000_000).toString(16).padStart(64, '0')}` }
+    const r = await report(USDC, '7.16.0')
+    expect(ClearSignReportResponse.safeParse(r).success).toBe(true)
+    expect(r.protectionLevel).toBe('P4')
+    expect(r.headline).toBe('KeepKey ClearSign ready')
+    expect(r.descriptor).toMatchObject({ source: 'native', authenticated: true, format: 'FIRMWARE_NATIVE' })
+    expect((await desktopRisk(USDC, '7.16.0')).tier).toBe('green')
+    expect(r.limitations.map((l) => l.code)).not.toContain('DEVICE_SHOWS_RAW_DATA')
+  })
+
   test('the same swap calldata to an unknown contract stays P1, unnamed, no rows', async () => {
     const r = await report({ ...UR, to: '0x1111111111111111111111111111111111111111' }, '7.15.0')
     expect(r.protectionLevel).toBe('P1')
