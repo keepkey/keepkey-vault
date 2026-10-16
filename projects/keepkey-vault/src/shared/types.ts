@@ -127,6 +127,44 @@ export interface ClearSignSolanaSchemaArtifact {
   draft: ClearSignSolanaSchemaDraft
 }
 
+/** One 32-byte calldata word, as the firmware v0x02 parser formats it. */
+export type ClearSignEvmArgFormat = 'address' | 'amount' | 'bytes' | 'token-amount'
+
+/** A runtime-tier EVM v0x02 description of one (chainId, contract, selector). */
+export interface ClearSignEvmSchemaDraft {
+  chainId: number
+  contract: string
+  selector: string
+  method: string
+  args: Array<{ name: string; format: ClearSignEvmArgFormat; decimals?: number; symbol?: string }>
+}
+
+export interface ClearSignEvmSchemaArtifact {
+  format: 'evm-v2'
+  /** Unsigned body hex; its trailer names the signer slot `keyId`. */
+  body: string
+  byteLength: number
+  /** The exact calldata length the device requires (4 + 32 per arg). */
+  calldataLength: number
+  keyId: number
+  draft: ClearSignEvmSchemaDraft
+}
+
+/** A provider-signed description: body || r || s || recovery, as hex. */
+export interface ClearSignEvmSignedEntry {
+  keyId: number
+  signedPayload: string
+  draft: ClearSignEvmSchemaDraft
+}
+
+/** Public bundle file. Never carries private key material. */
+export interface ClearSignProviderBundle {
+  format: 'keepkey-clearsign-provider-bundle-v1'
+  provider: { alias: string; publicKeyHex: string; fingerprint: string; keyId: number }
+  entries: Array<{ chainId: number; contract: string; selector: string; method: string; signedPayload: string }>
+  notice: string
+}
+
 export type ClearSignEventKind = 'schema-attestation' | 'signer-load' | 'transaction'
 export type ClearSignEventOutcome = 'signed' | 'loaded' | 'blocked'
 export type ClearSignEventSource = 'studio' | 'vault-rpc' | 'rest-api' | 'walletconnect' | 'vault-swap'

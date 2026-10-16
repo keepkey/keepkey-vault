@@ -286,6 +286,7 @@ import { resolveRuntimeEvmMetadata, supportsRuntimeEvmMetadata, type RuntimeEvmS
 import { supportsCertifiedClearSign } from "./solana-certified-policy"
 import { createRpcAltFetcher } from "./solana-alt"
 import { createProviderKeySession } from "./clearsign-provider-session"
+import { buildProviderBundle, buildStudioEvmSchema, parseProviderBundle } from "./clearsign-studio-evm"
 import { getTokenMetadata, broadcastEvmTx, verifyEvmSigner } from "./evm-rpc"
 import { evmSourceForChain } from "./pioneer-evm"
 import { deviceErrorMessage } from "../shared/device-error"
@@ -3063,6 +3064,41 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			// The provider private key never touches disk: memory only, this Studio session.
 			clearsignDeriveProviderKey: async (params) => providerKeySession.derive(params),
 			clearsignClearProviderKey: async () => ({ cleared: providerKeySession.clear() }),
+			clearsignBuildEvmSchema: async (params) => {
+				requireClearsignAdvancedMode()
+				return buildStudioEvmSchema(params.draft, params.keyId)
+			},
+			clearsignSignEvmSchema: async (params) => {
+				let label = 'Rejected EVM description'
+				try {
+					const signed = providerKeySession.signEvmSchema(params.draft, params.keyId)
+					label = `${signed.draft.method} · chain ${signed.draft.chainId}`
+					recordClearSignEvent({
+						kind: 'schema-attestation', outcome: 'signed', source: 'studio', chain: 'Ethereum', format: 'evm-v2',
+						label, payload: signed.signedPayload, publicKey: signed.publicKeyHex, fingerprint: signed.fingerprint,
+						keyId: signed.keyId, sentToDevice: false, request: { schema: signed.draft, provider: signed.alias },
+					})
+					return signed
+				} catch (cause: any) {
+					recordClearSignEvent({
+						kind: 'schema-attestation', outcome: 'blocked', source: 'studio', chain: 'Ethereum', format: 'evm-v2',
+						label, sentToDevice: false, request: { schema: params.draft }, error: cause?.message || String(cause),
+					})
+					throw cause
+				}
+			},
+			clearsignExportProviderBundle: async (params) => {
+				requireClearsignAdvancedMode()
+				const bundle = buildProviderBundle(params)
+				const slug = bundle.provider.alias.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+				const filePath = path.join(os.homedir(), 'Downloads', `keepkey-clearsign-bundle-${slug}-${bundle.provider.fingerprint}.json`)
+				await Bun.write(filePath, JSON.stringify(bundle, null, 2))
+				return { filePath, bundle }
+			},
+			clearsignImportProviderBundle: async (params) => {
+				requireClearsignAdvancedMode()
+				return parseProviderBundle(params.json)
+			},
 			clearsignListEvents: async (params) => {
 				requireClearsignAdvancedMode()
 				if (engine.isPassphraseWallet) return []

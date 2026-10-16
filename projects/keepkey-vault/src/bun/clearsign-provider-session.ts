@@ -11,6 +11,8 @@
  * every buffer we own, which is the best this runtime allows.
  */
 import { deriveProviderKey, validateProviderCeremony, type ProviderKey } from '../shared/clearsign-provider-key'
+import { buildStudioEvmSchema, signEvmBody } from './clearsign-studio-evm'
+import type { ClearSignEvmSchemaDraft, ClearSignEvmSignedEntry } from '../shared/types'
 
 export interface ProviderKeyIdentity {
   alias: string
@@ -55,6 +57,16 @@ export function createProviderKeySession(
       const key = derive(mnemonic)
       current = { alias, publicKeyHex: key.publicKeyHex, fingerprint: key.fingerprint, privateKey: key.privateKey }
       return { alias, publicKeyHex: key.publicKeyHex, fingerprint: key.fingerprint }
+    },
+
+    /** Sign a v0x02 description built host-side from the draft, never raw renderer bytes. */
+    signEvmSchema(draft: ClearSignEvmSchemaDraft, keyId: number): ClearSignEvmSignedEntry & ProviderKeyIdentity {
+      gate()
+      if (!current) throw new Error('Derive the provider key from the device words first; it is kept only for this Studio session')
+      const artifact = buildStudioEvmSchema(draft, keyId)
+      const signedPayload = signEvmBody(Uint8Array.from(Buffer.from(artifact.body, 'hex')), current.privateKey)
+      const { alias, publicKeyHex, fingerprint } = current
+      return { keyId, signedPayload, draft: artifact.draft, alias, publicKeyHex, fingerprint }
     },
   }
 }

@@ -120,7 +120,7 @@ describe('provider key never written to disk', () => {
 
   test('the Desktop handler keeps the key in the session, not in ~/Downloads', () => {
     const index = readFileSync(join(SRC, 'bun/index.ts'), 'utf8')
-    const handler = index.slice(index.indexOf('clearsignDeriveProviderKey:'), index.indexOf('clearsignListEvents:'))
+    const handler = index.slice(index.indexOf('clearsignDeriveProviderKey:'), index.indexOf('clearsignClearProviderKey:'))
     expect(handler).toContain('providerKeySession.derive(params)')
     expect(handler).not.toContain('Downloads')
     expect(index).not.toContain('keepkey-provider-')
