@@ -436,7 +436,26 @@ function evmTypedData(req: SigningRequestInfo, add: (l: RiskLevel, t: string) =>
     return !!req.firmwareVersion && versionCompare(req.firmwareVersion, '7.15.0') >= 0 ? 'shows' : 'unknown'
   }
   const contract = d.domain.verifyingContract?.toLowerCase()
-  if (/^Permit/.test(d.primaryType) || contract === PERMIT2) {
+  // A known document whose spend line stays at "check before you sign":
+  // firmware that cannot show it still leaves it known, not unknown.
+  let knownCalm = false
+  // The meaning sits in bytes the device shows only as raw hex.
+  let opaque = false
+  const delegate = f('Agent Address')?.raw ?? f('Delegate')?.raw ?? f('Session Key')?.raw
+  if (/ApproveAgent$/.test(d.primaryType) || delegate) {
+    // Owner rule: handing over signing power is never a normal request.
+    const unlimited = d.primaryType === 'Delegation' && f('Caveats')?.value === '[]'
+      && /^0x(ff){32}$/i.test(String(f('Authority')?.raw ?? ''))
+    add(unlimited ? 'critical' : 'high', `Gives ${delegate || 'another account'} the power to act for your account. It can then sign without your KeepKey.${unlimited ? ' There are no limits on what it can do.' : ''}`)
+  } else if (d.primaryType === 'SafeTx' && !/^(0x)?$/.test(String(f('Data')?.raw ?? ''))) {
+    // The device decodes only an embedded approve and warns on delegatecall;
+    // any other call inside a Safe transaction shows as hex, and so it is here.
+    opaque = true
+    const to = f('To')?.raw || 'another contract'
+    add('high', f('Operation')?.raw === '1'
+      ? `Runs code from ${to} inside your Safe (delegatecall). That code can do anything with what the Safe holds.`
+      : `Makes your Safe call ${to} with data this computer cannot read. Your KeepKey shows that data only as raw hex.`)
+  } else if (/^Permit/.test(d.primaryType) || contract === PERMIT2) {
     const raw = f('Value')?.raw ?? f('Amount')?.raw ?? d.fields.find((x) => /Amount$/.test(x.label))?.raw
     // Every amount counts: a batch can hide an unlimited entry behind a small first one.
     const amounts = typedDataSpendAmounts(d)
@@ -451,8 +470,10 @@ function evmTypedData(req: SigningRequestInfo, add: (l: RiskLevel, t: string) =>
       && d.protocolIdentityVerified !== false && chainId === 42161 && contract === PERMIT2
       && spender === '0x2d01411773c8c24805306e89a41f7855c3c4fe65'
       && token === '0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9'
+    const identified = d.isKnownType && d.protocolIdentityVerified !== false
     if (officialArbitrumUniswap) {
       add('medium', `Allows the official Uniswap Universal Router to spend ${all ? 'an unlimited amount of' : 'up to'} Arbitrum USDT through Permit2 until ${f('Expiration')?.value || 'the displayed expiration'}. Review the swap amount on the following transaction.`)
+      knownCalm = true
     } else {
       // Name the tokens only when every unlimited entry has a name; one unnamed
       // unlimited token must not hide behind a named one.
@@ -462,13 +483,26 @@ function evmTypedData(req: SigningRequestInfo, add: (l: RiskLevel, t: string) =>
       const howMuch = all ? `ALL of your ${named ? symbols.join(' and ') : 'tokens'}`
         : amounts.length ? `up to ${amounts.map((a) => a.text).join(' and ')}`
         : raw !== undefined ? `up to ${raw} of your tokens` : 'some of your tokens'
-      const known = d.isKnownType && d.protocolIdentityVerified !== false ? req.recognizedSpender : undefined
+      // A UniswapX order to the reactor the decoder verified, paying out only
+      // to this account, is a normal swap even though the reactor has no name record.
+      const from = req.from?.toLowerCase()
+      const recipients = d.fields.filter((x) => /^Output \d+ Recipient$/.test(x.label))
+      const ownSwap = /^UniswapX /.test(d.operationName) && d.protocolIdentityVerified === true && !!from
+        && String(f('Swapper')?.raw ?? '').toLowerCase() === from
+        && recipients.length > 0 && recipients.every((x) => String(x.raw ?? '').toLowerCase() === from)
+      const known = identified ? req.recognizedSpender ?? (ownSwap ? 'UniswapX' : undefined) : undefined
       const who = f('Spender')?.raw ? (known ? `${known} (${f('Spender')!.raw})` : f('Spender')!.raw) : 'another account'
       const unbounded = all || amounts.length === 0 || amounts.some((a) => a.raw === undefined || a.raw >= BOUND_LIMIT)
       // A Permit2 permit to a reviewed router is what Uniswap asks for on every
       // swap, usually for the maximum with an expiry.
-      const routerPermit = contract === PERMIT2 && !!known && known !== 'Uniswap Permit2'
-      add(spendPermissionLevel(known, unbounded, routerPermit), `Lets ${who} spend ${howMuch}, now and later. This signature alone is enough; no transaction from you is needed.`)
+      const routerPermit = contract === PERMIT2 && !!known && known === req.recognizedSpender && known !== 'Uniswap Permit2'
+      const level = spendPermissionLevel(known, unbounded, routerPermit)
+      // A signature transfer (Permit*TransferFrom) is spent once, not an allowance.
+      const once = /TransferFrom$/.test(d.primaryType)
+      add(level, once
+        ? `Lets ${who} take ${howMuch}, once. This signature alone is enough; no transaction from you is needed.`
+        : `Lets ${who} spend ${howMuch}, now and later. This signature alone is enough; no transaction from you is needed.`)
+      knownCalm = identified && ORDER.indexOf(level) <= ORDER.indexOf('medium')
     }
   } else if (/^(OrderComponents|BulkOrder)$/.test(d.primaryType)) {
     add('critical', 'This is a marketplace order. Anyone holding this signature can take the listed items at the price in the order.')
@@ -476,10 +510,12 @@ function evmTypedData(req: SigningRequestInfo, add: (l: RiskLevel, t: string) =>
   const structured = !!req.firmwareVersion && versionCompare(req.firmwareVersion, '7.15.0') >= 0
   if (structured) {
     add('low', 'Your KeepKey will request and display the structured fields that it hashes for this signature.')
+  } else if (knownCalm) {
+    add('medium', notOnThisFirmware(`this ${d.operationName}`, req.firmwareVersion))
   } else {
     add('high', 'Your KeepKey can only show a code (hash) for this signature, not what it says. You would be signing blind.')
   }
-  return structured ? 'shows' : 'unknown'
+  return opaque ? 'unknown' : structured ? 'shows' : knownCalm ? 'known' : 'unknown'
 }
 
 function evmMessage(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void): Recognition {
@@ -488,8 +524,19 @@ function evmMessage(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => v
   if (/^0x[0-9a-fA-F]{64}$/.test(raw)) {
     add('high', 'You are signing a 32-byte code, not text. Some apps accept this as approval of a payment or order you cannot see.')
   } else if (m?.isUtf8Text && m.messageText !== undefined && !/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(m.messageText)) {
-    add('low', 'You are signing a text message. Some apps treat signed text as a login or an approval, so read it on your KeepKey screen.')
-    return 'shows'
+    // The device draws only printable ASCII as characters; every other byte,
+    // each byte of a non-English letter or emoji included, appears as \xNN.
+    if (/^[\x20-\x7e\t\n\r]*$/.test(m.messageText)) {
+      add('low', 'You are signing a text message. Some apps treat signed text as a login or an approval, so read it on your KeepKey screen.')
+      return 'shows'
+    }
+    // Text-direction and invisible characters make the text read differently
+    // from what is signed. Not U+200C/U+200D: emoji and some scripts need them.
+    if (/[\u200b\u200e\u200f\u202a-\u202e\u2066-\u2069\ufeff]/.test(m.messageText)) {
+      add('high', 'This text contains hidden characters that can change how it reads, such as reversed text. Normal apps do not use them.')
+    }
+    add('medium', 'You are signing a text message. Your KeepKey shows its non-English letters and symbols as \\xNN codes, so read the text here.')
+    return 'known'
   } else if (m) {
     add('medium', 'You are signing data that is not readable text. Only the site knows what it means.')
   } else {

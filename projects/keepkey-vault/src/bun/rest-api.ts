@@ -49,6 +49,7 @@ import { parseSolanaTx, SolanaTxParseError } from './solana-tx'
 import { signSolanaWireTransaction } from './solana-signing'
 import { buildSolanaDecodedInfo } from './solana-clearsign'
 import { buildSolanaMessageDecodedInfo, solanaSignerChangedError } from './solana-message-preview'
+import { ethMessagePreview } from './eth-message-preview'
 import bs58 from 'bs58'
 import { assessSigningRisk } from '../shared/clearsign-risk'
 import { applyRestSolanaSigningGates, buildRestSolanaSignRequest, type CertifiedSolanaProof } from './solana-certified-registry'
@@ -1753,37 +1754,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               }
             } else if (path === '/eth/sign') {
               // EIP-191 personal_sign: body is { address, addressNList, message }.
-              // Message arrives as a hex string per JSON-RPC spec; in practice it
-              // nearly always encodes UTF-8 text (SIWE, dApp login challenges).
-              // Decode to plaintext so the user sees what they're actually
-              // signing — raw hex alone is useless for consent.
               signingInfo.from = preview.address
-              const raw = typeof preview.message === 'string' ? preview.message : ''
-              let text: string | undefined
-              let isUtf8Text = false
-              if (raw) {
-                const hexMatch = /^0x([0-9a-fA-F]*)$/.exec(raw)
-                if (hexMatch) {
-                  try {
-                    const buf = Buffer.from(hexMatch[1], 'hex')
-                    const decoded = new TextDecoder('utf-8', { fatal: true }).decode(buf)
-                    text = decoded
-                    isUtf8Text = true
-                  } catch {
-                    // Not valid UTF-8 — leave `text` undefined; UI will show hex.
-                  }
-                } else {
-                  // Already a plaintext string (non-spec clients).
-                  text = raw
-                  isUtf8Text = true
-                }
-              }
-              signingInfo.ethMessageDecoded = {
-                address: preview.address,
-                messageRaw: raw,
-                messageText: text,
-                isUtf8Text,
-              }
+              signingInfo.ethMessageDecoded = ethMessagePreview(preview.address, preview.message)
             } else if (path === '/ton/sign-transaction') {
               // TON: field names differ from EVM (to_address, amount, raw_tx)
               signingInfo.to = preview.to_address

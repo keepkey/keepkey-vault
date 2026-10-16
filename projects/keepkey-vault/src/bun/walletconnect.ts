@@ -16,6 +16,7 @@ import { evmAddressPath } from './evm-addresses'
 import { verifyEvmSigner } from './evm-rpc'
 import { applyEvmTxPreview, evmPriorityFee, recognizedTypedDataSpender } from './evm-signing-preview'
 import { buildSolanaMessageDecodedInfo } from './solana-message-preview'
+import { ethMessagePreview } from './eth-message-preview'
 import { buildSolanaDecodedInfo } from './solana-clearsign'
 import { applySolanaSigningGates } from './solana-consent'
 import { simulateEvmEffects } from './evm-effects'
@@ -867,15 +868,18 @@ export class WalletConnectManager {
     chainId: number,
   ): Promise<string> {
     const signingId = crypto.randomUUID()
+    const from = this.callbacks.getEvmAddressInfo()?.address
 
     const signingInfo: SigningRequestInfo = {
       id: signingId,
       method: '/eth/sign',
       appName,
       chain: 'eth',
-      from: this.callbacks.getEvmAddressInfo()?.address,
+      from,
       data: message,
       chainId,
+      // Same decode as REST /eth/sign, so a WalletConnect login gets the same verdict.
+      ethMessageDecoded: ethMessagePreview(from ?? '', message),
     }
 
     const approved = await this.callbacks.requestSigningApproval(signingInfo)
