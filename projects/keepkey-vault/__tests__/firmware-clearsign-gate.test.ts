@@ -13,6 +13,7 @@
 import { describe, test, expect } from 'bun:test'
 import { thor714MemoConfirms, firmwareClearSigns, firmwareKnowsToken } from '../src/bun/calldata-decoder'
 import firmwareTokenTable from '../src/bun/firmware-token-table.json'
+import firmwareTokenTable716 from '../src/bun/firmware-token-table-716.json'
 
 const ZX = '0xdef1c0ded9bec7f1a1670819833240f027b25eff'
 const UNIV2 = '0x7a250d5630b4cf539739df2c5dacb4c659f2488d'
@@ -22,6 +23,7 @@ const RANDOM = '0x1111111111111111111111111111111111111111'
 const SAPROXY = '0xbd6a40bb904aea5a49c59050b5395f7484a4203d'
 const USDC_ETH = '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48'
 const USDC_BASE = '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913'
+const USDT_ETH = '0xdac17f958d2ee523a2206206994597c13d831ec7'
 const word = '00'.repeat(32)
 const erc20Transfer = '0xa9059cbb' + word + word   // 68-byte standard transfer
 const erc20Approve = '0x095ea7b3' + word + word
@@ -165,6 +167,41 @@ describe('firmwareClearSigns mirrors the rc3 native clear-sign allowlist', () =>
     for (const entry of firmwareTokenTable.tokens) expect(entry).toMatch(/^\d+:0x[0-9a-f]{40}$/)
     expect(firmwareKnowsToken(1, USDC_ETH)).toBe(true)
     expect(firmwareKnowsToken(8453, USDC_BASE)).toBe(false)
+  })
+
+  test('7.16.0 token table is pinned: priority-only, 153 mainnet entries, inside the 7.15 table', () => {
+    // 49 ethereum-lists (--profile priority-only) + 150 uniswap (fill), deduped.
+    expect(firmwareTokenTable716.tokens.length).toBe(153)
+    expect(new Set(firmwareTokenTable716.tokens).size).toBe(153)
+    const t715 = new Set(firmwareTokenTable.tokens)
+    for (const entry of firmwareTokenTable716.tokens) {
+      expect(entry).toMatch(/^1:0x[0-9a-f]{40}$/)
+      expect(t715.has(entry)).toBe(true)
+    }
+  })
+
+  test('ERC-20 prediction follows the firmware line: 7.16.0 ships the smaller table', () => {
+    const LEO = '0x2af5d2ad76741191d15dfe7bf6ac92d4bd912ca3'  // in 7.15, not 7.16
+    const OP = '0x4200000000000000000000000000000000000042'   // Optimism, in 7.15, not 7.16
+    for (const fw of ['7.14.2', '7.15.0', '7.15.2']) {
+      expect(firmwareClearSigns(LEO, erc20Transfer, 1, fw)).toBe(true)
+      expect(firmwareClearSigns(LEO, erc20Approve, 1, fw)).toBe(true)
+      expect(firmwareClearSigns(OP, erc20Transfer, 10, fw)).toBe(true)
+    }
+    for (const fw of ['7.16.0', '7.16.1', '7.17.0']) {
+      expect(firmwareClearSigns(LEO, erc20Transfer, 1, fw)).toBe(false)
+      expect(firmwareClearSigns(LEO, erc20Approve, 1, fw)).toBe(false)
+      expect(firmwareClearSigns(OP, erc20Transfer, 10, fw)).toBe(false)
+    }
+    // Stablecoins are in both.
+    for (const fw of ['7.15.0', '7.16.0', undefined]) {
+      expect(firmwareClearSigns(USDT_ETH, erc20Transfer, 1, fw)).toBe(true)
+      expect(firmwareClearSigns(USDC_ETH, erc20Approve, 1, fw)).toBe(true)
+    }
+    // Unknown version: the smaller (7.16) table.
+    expect(firmwareKnowsToken(1, LEO)).toBe(false)
+    expect(firmwareClearSigns(LEO, erc20Transfer, 1, undefined)).toBe(false)
+    expect(firmwareClearSigns(OP, erc20Transfer, 10, '')).toBe(false)
   })
 
   test('non-standard-length transfer selector → blind (not the 68-byte path)', () => {

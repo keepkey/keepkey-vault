@@ -59,6 +59,22 @@ describe('applyEvmTxPreview = needsAdvancedMode = !(native || (fw >= 7.16 && cer
     expect(called).toBe(false)
   })
 
+  test('a token in the 7.15 table but not 7.16.0: native on 7.15, certified lookup on 7.16', async () => {
+    const LEO = '0x2af5d2ad76741191d15dfe7bf6ac92d4bd912ca3'
+    let called = false
+    globalThis.fetch = (async () => { called = true; throw new Error('no') }) as unknown as typeof fetch
+    const s715 = info()
+    await applyEvmTxPreview(s715, LEO, transfer, 1, '7.15.0')
+    expect(s715.deviceClearSigns).toBe(true)
+    expect(s715.needsBlindSigning).toBe(false)
+    expect(called).toBe(false)
+    const s716 = info()
+    await applyEvmTxPreview(s716, LEO, transfer, 1, '7.16.0')
+    expect(s716.deviceClearSigns).toBe(false)
+    expect(called).toBe(true) // the certified schema path ran
+    expect(s716.needsBlindSigning).toBe(true) // service down here → AdvancedMode
+  })
+
   test('7.16 + certified schema attaches the blob; the sign handler round-trips it to txMetadata', async () => {
     const seen = service('transfer', `eip155:8453:${USDC_BASE}:0xa9059cbb`)
     const s = info()

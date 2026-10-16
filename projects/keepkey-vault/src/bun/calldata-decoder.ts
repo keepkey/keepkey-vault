@@ -18,6 +18,7 @@ import { RELAY_DEPOSITORY, decodeRelayDeposit, isZeroAddress } from '../shared/r
 import { evmNativeValue } from '../shared/evmFeePreview'
 import { REVIEWED_EVM_TOKENS } from './evm-certified-schema'
 import firmwareTokenTable from './firmware-token-table.json'
+import firmwareTokenTable716 from './firmware-token-table-716.json'
 import { versionCompare } from '../shared/firmware-versions'
 
 // ── Helpers ──────────────────────────────────────────────────────────────
@@ -409,7 +410,7 @@ export function decodeCalldataLocal(
 // rc3 firmware clear-signs a contract call WITHOUT AdvancedMode and WITHOUT any
 // signed-metadata blob ONLY for the pinned (chain, selector, to) entries below,
 // plus a standard 68-byte ERC-20 transfer/approve of a token in its built-in
-// table (firmware-token-table.json). Anything else the device blind-signs
+// table (firmware-token-table*.json). Anything else the device blind-signs
 // (hard "Blocked" unless AdvancedMode is on). The signing overlay MUST gate off
 // THIS — not off "did our decoder recognize the calldata" — otherwise it either
 // under-warns (Uniswap/1inch/relay look verified but the device blind-signs) or
@@ -510,16 +511,26 @@ const THOR_MAYA_DEPOSIT = new Set(['0x1fece7b4', '0x44bc937b'])
 const ERC20_NATIVE = new Set(['0xa9059cbb', '0x095ea7b3'])
 
 /** (chainId:address) of every token in the firmware's built-in table —
- *  generated from the firmware build (scripts/gen-firmware-token-table.ts). */
+ *  generated from the firmware build (scripts/gen-firmware-token-table.ts).
+ *  7.15.x: the `fill` profile, 418 entries on several chains. Older known
+ *  versions keep using it, as before. */
 const FIRMWARE_TOKENS: ReadonlySet<string> = new Set((firmwareTokenTable as { tokens: string[] }).tokens)
+/** 7.16.0 builds with `--profile priority-only` (D-014): 153 mainnet entries,
+ *  a subset of the above. Everything else is AdvancedMode or a certified schema. */
+const FIRMWARE_TOKENS_716: ReadonlySet<string> = new Set((firmwareTokenTable716 as { tokens: string[] }).tokens)
+const PRIORITY_ONLY_TOKENS_MIN_FW = '7.16.0'
 
 /** Firmware ethereum_contractHandled only claims calldata that fits the first
  *  1024-byte chunk (data_total == data_initial_chunk.size). */
 const FIRMWARE_INITIAL_CHUNK_BYTES = 1024
 
-/** True iff (chainId, token) is in the firmware's built-in token table. */
-export function firmwareKnowsToken(chainId: number | undefined, token: string | undefined): boolean {
-  return chainId != null && !!token && FIRMWARE_TOKENS.has(`${chainId}:${token.toLowerCase()}`)
+/** True iff (chainId, token) is in this firmware's built-in token table.
+ *  Unknown version = the smaller 7.16 table: over-warning is recoverable,
+ *  predicting a clear-sign the device refuses is a dead "Blocked". */
+export function firmwareKnowsToken(chainId: number | undefined, token: string | undefined, firmwareVersion?: string): boolean {
+  const table = firmwareVersion && versionCompare(firmwareVersion, PRIORITY_ONLY_TOKENS_MIN_FW) < 0
+    ? FIRMWARE_TOKENS : FIRMWARE_TOKENS_716
+  return chainId != null && !!token && table.has(`${chainId}:${token.toLowerCase()}`)
 }
 
 /**
@@ -537,7 +548,7 @@ export function firmwareClearSigns(to?: string, data?: string, chainId?: number,
   // Standard ERC-20 transfer/approve: 4-byte selector + 2 32-byte words = 68B,
   // and only for a token the firmware's table knows ON THIS CHAIN — anything
   // else is UnknownToken, which the device gates on AdvancedMode.
-  if (ERC20_NATIVE.has(selector) && (data.length - 2) === 136) return firmwareKnowsToken(chainId, dest)
+  if (ERC20_NATIVE.has(selector) && (data.length - 2) === 136) return firmwareKnowsToken(chainId, dest, firmwareVersion)
 
   if ((data.length - 2) / 2 > FIRMWARE_INITIAL_CHUNK_BYTES) return false
 
