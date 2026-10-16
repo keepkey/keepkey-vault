@@ -4257,11 +4257,11 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                 </Flex>
               )}
 
-              {quote.warning && (
-                <Flex align="center" gap="2" bg="rgba(251,146,60,0.08)" border="1px solid" borderColor="rgba(251,146,60,0.3)" px="3" py="2" borderRadius="lg" w="full">
-                  <Text fontSize="10px" color="var(--gold)">{quote.warning}</Text>
-                </Flex>
-              )}
+              {/* quote.warning is not shown: it is THORNode's note to API
+                  integrators ("Do not cache this response. Do not send funds
+                  after the expiry…"). The dialog enforces it: a quote older
+                  than swapRisk.quoteMaxAgeMs (30–60 s, far inside the expiry)
+                  is re-fetched and re-reviewed before signing. */}
 
               {riskPanel}
 
