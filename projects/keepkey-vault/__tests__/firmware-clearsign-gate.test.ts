@@ -70,15 +70,13 @@ describe('firmwareClearSigns mirrors the rc3 native clear-sign allowlist', () =>
     const BASE_ROUTER = '0x00dc6100103bc402d490aee3f9a5560cbd91f1d4'
     const BSC_ROUTER = '0xb30ec53f98ff5947ede720d32ac2da7e52a5f56b'
     const deposit = '0x44bc937b' + '00'.repeat(256) // depositWithExpiry, as in Base tx 0xd567902e…
-    for (const fw of ['7.15.0', '7.17.0']) {
+    for (const fw of ['7.15.0', '7.16.0', '7.16.1', '7.17.0']) {
       expect(firmwareClearSigns(BASE_ROUTER, deposit, 8453, fw)).toBe(true)
       expect(firmwareClearSigns(BSC_ROUTER, deposit, 56, fw)).toBe(true)
     }
-    // The 7.16 line still has the two-chain switch (develop 27d72042c).
-    for (const fw of ['7.16.0', '7.16.1', undefined]) {
-      expect(firmwareClearSigns(BASE_ROUTER, deposit, 8453, fw)).toBe(false)
-      expect(firmwareClearSigns(BSC_ROUTER, deposit, 56, fw)).toBe(false)
-    }
+    // Unknown firmware: the older two-chain switch.
+    expect(firmwareClearSigns(BASE_ROUTER, deposit, 8453, undefined)).toBe(false)
+    expect(firmwareClearSigns(BSC_ROUTER, deposit, 56, undefined)).toBe(false)
     // The pin is (chain, address): right address on the wrong chain is not native.
     expect(firmwareClearSigns(BSC_ROUTER, deposit, 8453, '7.17.0')).toBe(false)
     expect(firmwareClearSigns(BASE_ROUTER, deposit, 56, '7.17.0')).toBe(false)
@@ -101,9 +99,9 @@ describe('firmwareClearSigns mirrors the rc3 native clear-sign allowlist', () =>
       // gate for one that is not a router it knows.
       expect(firmwareClearSigns('0x00000000000000000000000000000000000000aa', real, 1, fw)).toBe(false)
     }
-    // Same bytes on the pinned lines: Base only from 7.15, never on 7.16.
+    // Same bytes on the pinned lines: Base from 7.15.
     expect(firmwareClearSigns(BASE_ROUTER, real, 8453, '7.15.0')).toBe(true)
-    expect(firmwareClearSigns(BASE_ROUTER, real, 8453, '7.16.0')).toBe(false)
+    expect(firmwareClearSigns(BASE_ROUTER, real, 8453, '7.16.0')).toBe(true)
     // thor_confirmThorTx refuses: non-canonical ABI, memo over 256 bytes, expiry over uint64.
     expect(firmwareClearSigns(BASE_ROUTER, '0x44bc937b' + '00'.repeat(256), 8453, '7.14.2')).toBe(false)
     expect(firmwareClearSigns(BASE_ROUTER, withExpiry('=:BTC.BTC:' + 'x'.repeat(250)), 8453, '7.14.2')).toBe(false)
@@ -135,7 +133,7 @@ describe('firmwareClearSigns mirrors the rc3 native clear-sign allowlist', () =>
     expect(firmwareClearSigns(ARB, dep, 42161, '7.15.0')).toBe(true)
     expect(firmwareClearSigns(LEGACY, dep, 1, '7.15.0')).toBe(false)
     expect(firmwareClearSigns(V4, dep, 1, '7.16.0')).toBe(true)
-    expect(firmwareClearSigns(ARB, dep, 42161, '7.16.0')).toBe(false)
+    expect(firmwareClearSigns(ARB, dep, 42161, '7.16.0')).toBe(true)
     expect(firmwareClearSigns(LEGACY, dep, 1, undefined)).toBe(true)
     expect(firmwareClearSigns(V4, dep, 1, undefined)).toBe(false)
   })

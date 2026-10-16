@@ -265,14 +265,16 @@ describe('in-app swap card — the Desktop signing verdict for the same bytes', 
       chainId: 8453, from: DEPOSIT.from, to: '0x00dc6100103bc402d490aee3f9a5560cbd91f1d4', value: '0x90c5e8ba98e000',
       data: `0x44bc937b${w('718f6c9df785bc4e323086de024ca822efbe8ab9')}${w('0')}${w('90c5e8ba98e000')}${w('a0')}${w('ffffffff')}${w((memo.length / 2).toString(16))}${memo.padEnd(128, '0')}`,
     }
-    // 7.14.2 pins no router: the device shows this deposit itself.
-    const native = await inApp(tx, '7.14.2')
-    expect(native.protectionLevel).toBe('P4')
-    expect(native.descriptor).toMatchObject({ source: 'native', authenticated: true })
-    expect(risk(native).join('\n')).toContain('via THORChain. Your KeepKey shows this deposit on its screen; check it there.')
-    expect(native.limitations.map((l) => l.code)).not.toContain('DEVICE_SHOWS_RAW_DATA')
-    // The 7.16 line has no Base pin: decoded here, raw on the device.
-    const r = await inApp(tx, '7.16.0')
+    // 7.14.2 pins no router and 7.15+ pins Base: the device shows this deposit itself.
+    for (const fw of ['7.14.2', '7.16.0']) {
+      const native = await inApp(tx, fw)
+      expect(native.protectionLevel).toBe('P4')
+      expect(native.descriptor).toMatchObject({ source: 'native', authenticated: true })
+      expect(risk(native).join('\n')).toContain('via THORChain. Your KeepKey shows this deposit on its screen; check it there.')
+      expect(native.limitations.map((l) => l.code)).not.toContain('DEVICE_SHOWS_RAW_DATA')
+    }
+    // 7.13 has no Base pin: decoded here, raw on the device.
+    const r = await inApp(tx, '7.13.0')
     expect(r.protectionLevel).toBe('P2')
     expect(r.headline).not.toContain('Unknown')
     expect(r.descriptor).toMatchObject({ authenticated: false, label: 'THORChain deposit' })

@@ -439,21 +439,17 @@ const THOR_ROUTER_BY_CHAIN: Record<number, string> = {
   43114: ADDR.THOR_ROUTER_AVAX,
 }
 // Firmware 7.15.0 replaced that switch with a (chainId, address) pin table
-// (thor_router_pins) and added BSC and Base. The 7.16 line (develop 27d72042c,
-// and the bundled 7.16 RC emulator c35aee50c) still has the two-chain switch:
-// docs/handoff-thorchain-base-router-pin-716.md. Drop the 7.16 exception when
-// that firmware takes the 7.15 table.
+// (thor_router_pins) and added BSC and Base. Released 7.16.0 (4f94a63b6) has
+// the same table.
 const THOR_ROUTER_PINS_MIN_FW = '7.15.0'
-const THOR_LINE_716 = '7.16'
 const THOR_ROUTER_BY_CHAIN_715: Record<number, string> = {
   ...THOR_ROUTER_BY_CHAIN,
   56:   ADDR.THOR_ROUTER_BSC,
   8453: ADDR.THOR_ROUTER_AVAX, // Base: same address as Avalanche's
 }
-// Maya pins: 7.15 has Ethereum v4 + Arbitrum (maya_router_pins); the 7.16 line
-// Ethereum v4 only. Older or unknown firmware keeps the legacy mainnet pin.
+// Maya pins from 7.15: Ethereum v4 + Arbitrum (maya_router_pins). Older or
+// unknown firmware keeps the legacy mainnet pin.
 const MAYA_ROUTER_BY_CHAIN_715: Record<number, string> = { 1: ADDR.MAYA_ROUTER_V4, 42161: ADDR.MAYA_ROUTER_ARB }
-const MAYA_ROUTER_BY_CHAIN_716: Record<number, string> = { 1: ADDR.MAYA_ROUTER_V4 }
 const MAYA_ROUTER_BY_CHAIN_LEGACY: Record<number, string> = { 1: ADDR.MAYA_ROUTER }
 
 // 7.14.x pins no router: thor_isThorchainTx takes either deposit selector to
@@ -552,8 +548,8 @@ export function firmwareClearSigns(to?: string, data?: string, chainId?: number,
     const line = firmwareVersion?.split('.').slice(0, 2).join('.')
     if (line === THOR_UNPINNED_LINE) return knownDepositRouter(dest, chainId) && thor714Confirms(data, chainId, selector)
     const pinTable = !!firmwareVersion && versionCompare(firmwareVersion, THOR_ROUTER_PINS_MIN_FW) >= 0
-    const thorRouters = pinTable && line !== THOR_LINE_716 ? THOR_ROUTER_BY_CHAIN_715 : THOR_ROUTER_BY_CHAIN
-    const mayaRouters = !pinTable ? MAYA_ROUTER_BY_CHAIN_LEGACY : line === THOR_LINE_716 ? MAYA_ROUTER_BY_CHAIN_716 : MAYA_ROUTER_BY_CHAIN_715
+    const thorRouters = pinTable ? THOR_ROUTER_BY_CHAIN_715 : THOR_ROUTER_BY_CHAIN
+    const mayaRouters = pinTable ? MAYA_ROUTER_BY_CHAIN_715 : MAYA_ROUTER_BY_CHAIN_LEGACY
     return chainId != null && (dest === thorRouters[chainId] || dest === mayaRouters[chainId])
   }
   const pinned = FIRMWARE_PINNED[selector]
