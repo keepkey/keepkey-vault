@@ -14,7 +14,7 @@
  * the device screen stays the authority.
  */
 import { evmNativeValue } from './evmFeePreview'
-import { acrossDepositView, decodeAcrossDepositV3, type AcrossDepositV3 } from './acrossDeposit'
+import { acrossDepositView, decodeAcrossDepositV3, findReviewedAcrossSpokePool, type AcrossDepositV3 } from './acrossDeposit'
 import { RELAY_DEPOSITORY, decodeRelayDeposit, isZeroAddress, type RelayDeposit } from './relayDeposit'
 import { REVIEWED_EVM_TOKENS } from './reviewed-evm-tokens'
 import type {
@@ -205,6 +205,28 @@ function evmChainId(v: unknown): number {
   return n > 0 ? n : 1 // the /eth/sign-transaction handler signs a missing/0 chainId as 1
 }
 
+/** Body versions stock 7.16.0 shows a transaction from (signed_metadata.h):
+ *  0x02 schema, 0x05 schema with intent, 0x07 decoder. It refuses 0x04, and
+ *  0x06 is a name record that describes no call. */
+const SHOWN_BODY_VERSIONS = new Set([0x02, 0x05, 0x07])
+
+/** A KeepKey-certified description (keyId 0x80) Desktop attached itself, in a
+ *  form this firmware shows, for this exact call. A caller's blob is not one:
+ *  Desktop never checked it, and the device refuses a forged one. */
+function certifiedBlobShown(req: SigningRequestInfo): boolean {
+  const d = req.calldataDecoded
+  if (!d?.signedInsightBlob || d.insightKeyId !== 0x80 || d.insightSource === 'caller') return false
+  if (!req.firmwareVersion || versionCompare(req.firmwareVersion, '7.16.0') < 0) return false
+  let b: Uint8Array
+  try { b = Uint8Array.from(atob(d.signedInsightBlob), (c) => c.charCodeAt(0)) } catch { return false }
+  // 0x03, a 139-byte certificate, then the body: version, chain id, contract, selector.
+  if (b.length < 169 || b[0] !== 0x03 || !SHOWN_BODY_VERSIONS.has(b[140])) return false
+  const hex = (from: number, end: number) => Array.from(b.slice(from, end), (x) => x.toString(16).padStart(2, '0')).join('')
+  const data = typeof req.data === 'string' ? req.data.toLowerCase() : ''
+  return parseInt(hex(141, 145), 16) === evmChainId(req.chainId)
+    && `0x${hex(145, 165)}` === (req.to ?? '').toLowerCase() && `0x${hex(165, 169)}` === data.slice(0, 10)
+}
+
 /** What the verdict tier rests on: the device shows it, this computer knows the
  *  protocol and decodes it in full, or neither. */
 type Recognition = 'shows' | 'known' | 'unknown'
@@ -224,6 +246,7 @@ function evmTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void):
   const token = EVM_TOKENS[`${chainId}:${to}`]
   const amount = (raw: bigint) => (token ? `${units(raw.toString(), token.decimals)} ${token.symbol}` : `${raw} units of token ${to}`)
 
+  const from = (req.from ?? '').toLowerCase()
   const native = evmNativeValue(req.value ?? '0', chainId)
   const sendsCoin = native !== null && !/^0 /.test(native)
   // A Relay deposit states its own amount and destination contract below.
@@ -264,8 +287,9 @@ function evmTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void):
       const known = req.recognizedSpender
       const who = known ? `${known} (${spender})` : spender
       const text = `Lets ${who} spend ${scope}, now and later, without asking you again.`
-      // An unknown token may be an NFT: approve(to, tokenId) has the same selector.
-      const unbounded = v >= BOUND_LIMIT || !token
+      // An unknown token may be an NFT: approve(to, tokenId) has the same
+      // selector. One the device shows natively is a token it names.
+      const unbounded = v >= BOUND_LIMIT || (!token && !req.deviceClearSigns)
       // Approving canonical Permit2 once, for everything, is how Permit2 is set up.
       const permit2Setup = known === 'Uniswap Permit2' && addrWord(0) === PERMIT2
       add(spendPermissionLevel(known, unbounded, permit2Setup), permit2Setup && all
@@ -281,6 +305,14 @@ function evmTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void):
     add(token ? 'low' : 'medium', token
       ? `Sends ${amount(num(1)!)} to ${addrWord(0)}.`
       : `Sends ${num(1)} units of token ${to} to ${addrWord(0)}. This computer does not recognize this token.`)
+    // Contracts that do not credit a plain transfer: tokens sent there are stuck.
+    const rcpt = addrWord(0)!
+    const sink = rcpt === to ? 'the token contract itself'
+      : rcpt === PERMIT2 ? 'Uniswap Permit2'
+        : rcpt === RELAY_DEPOSITORY ? 'the Relay Depository'
+          : findReviewedAcrossSpokePool(chainId, rcpt) ? 'an Across SpokePool'
+            : req.recognizedRecipient
+    if (sink) add('high', `Sends the tokens straight to ${sink} (${rcpt}), which does not credit a plain transfer. A normal app never does this, and the tokens may be lost.`)
   } else if (hasCatalog) {
     add('high', `The site attached a signed description of this call. This computer cannot check it; your KeepKey checks it and refuses if it is not genuine. The call can still use any token permission you already gave ${to}.`)
   } else if (urSwap && req.calldataDecoded?.signedInsightBlob) {
@@ -305,6 +337,10 @@ function evmTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void):
   } else if (urSwap && !req.deviceClearSigns) {
     recognition = 'known'
     add('medium', `${urSwap} through the Uniswap Universal Router, a contract KeepKey has reviewed. ${notOnThisFirmware('this swap', req.firmwareVersion)}`)
+  } else if (!req.deviceClearSigns && certifiedBlobShown(req)) {
+    // No decoder here, but the device verifies the certified description and
+    // shows the call from it, so this is not a blind signature.
+    add('medium', `Your KeepKey shows this call to ${to} from a KeepKey-certified description, and refuses it if that description is not genuine. Check the details there. The call can still use any token permission you already gave ${to}.`)
   } else if (!req.deviceClearSigns || KNOWN_SELECTORS.has(sel)) {
     // A known selector reaching here did not parse (dirty address word,
     // trailing bytes): the device may accept it by length alone.
@@ -316,6 +352,23 @@ function evmTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void):
     if (!min || min === 'No minimum specified' || /^0(?:\.0+)?\s/.test(min)) add('high', 'Sets no minimum, so this swap can pay you back almost nothing.')
   }
   if (field('Token warning') || field('Input token warning')) add('high', 'Swaps a token KeepKey does not recognize. It may be a fake.')
+  if (urSwap) {
+    // uniswapSwapFields marks the signing account; a bare address is someone else.
+    const recipient = field('Recipient')
+    if (from && recipient && /^0x[0-9a-f]{40}$/.test(recipient) && recipient !== from) {
+      add('high', `The swap output goes to ${recipient}, which is NOT the account signing this (${from}).`)
+    }
+    const fee = /^(\d+)\.(\d{2})% of the output to (0x[0-9a-f]{40})$/.exec(field('Fee') ?? '')
+    // Uniswap's own interface fee is 0.15-0.25%; above 1% it is not a fee.
+    if (fee && Number(fee[1]) * 100 + Number(fee[2]) > 100) add('high', `${fee[1]}.${fee[2]}% of the swap output goes to ${fee[3]}, not to you.`)
+    else if (fee) add('low', `Fee: ${fee[1]}.${fee[2]}% of the swap output goes to ${fee[3]}.`)
+  }
+  if (thorSwap) {
+    const dest = field('Output destination')
+    if (from && dest && /^0x[0-9a-fA-F]{40}$/.test(dest) && dest.toLowerCase() !== from) {
+      add('high', `The swap pays out to ${dest}, which is NOT the account signing this (${from}).`)
+    }
+  }
   return recognition
 }
 
@@ -330,7 +383,7 @@ function relayDeposit(d: RelayDeposit, req: SigningRequestInfo, decodedSent: str
   const what = `Relay deposit on ${d.chain}: sends ${sent} to the Relay Depository, credited to ${credited}.`
   // A KeepKey-certified envelope (keyId 0x80) the device verifies, attached
   // by the preview; a caller's runtime blob is not one.
-  const certified = req.deviceClearSigns || (!!req.calldataDecoded?.signedInsightBlob && req.calldataDecoded.insightKeyId === 0x80)
+  const certified = req.deviceClearSigns || certifiedBlobShown(req)
   if (certified) {
     add('medium', `${what} Your KeepKey shows this deposit from a KeepKey-certified description and refuses it if that description is not genuine. Check the amount there.`)
   } else {
@@ -344,7 +397,7 @@ function relayDeposit(d: RelayDeposit, req: SigningRequestInfo, decodedSent: str
  *  shows it as raw data and AdvancedMode still gates, but a known protocol is
  *  normal, so the line says so instead of "signing blind". */
 function acrossDeposit(d: AcrossDepositV3, req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void) {
-  const v = acrossDepositView(d)
+  const v = acrossDepositView(d, EVM_TOKENS)
   const from = (req.from ?? '').toLowerCase()
   let value: bigint | null = null
   try { value = BigInt(req.value === undefined || req.value === '' || req.value === '0x' ? 0 : req.value) } catch { /* unreadable: no claim about it */ }
@@ -360,9 +413,14 @@ function acrossDeposit(d: AcrossDepositV3, req: SigningRequestInfo, add: (l: Ris
   if (from && d.recipient !== from) add('high', `The bridged funds go to ${d.recipient}, which is NOT the account signing this (${from}).`)
   if (from && d.depositor !== from) add('high', `Refunds go to ${d.depositor}, which is NOT the account signing this (${from}).`)
   if (d.outputAmount === 0n) add('high', 'The recipient is set to receive nothing.')
-  if (!v.destinationKnown) add('medium', `This computer does not recognize destination ${v.destination}.`)
-  if (!v.inputTokenKnown || !v.outputTokenKnown) add('medium', 'This computer cannot name every token in this deposit; amounts are shown in base units.')
-  if (v.fee) add(v.feeBps !== null && v.feeBps > 300n ? 'medium' : 'low', `Bridge fee: ${v.fee}.`)
+  if (!v.destinationKnown) add('high', `This computer does not recognize destination ${v.destination}. Funds bridged there may never arrive.`)
+  if (!v.outputTokenKnown) add('high', `This computer cannot name the token the recipient gets (${d.outputToken}). It may be worth nothing.`)
+  else if (!v.inputTokenKnown) add('medium', 'This computer cannot name every token in this deposit; amounts are shown in base units.')
+  // Real Across fees are well under 1%. Far above that, the relayer that
+  // fills the deposit keeps the difference.
+  const relayer = isZeroAddress(d.exclusiveRelayer) ? 'the relayer' : `the exclusive relayer ${d.exclusiveRelayer}`
+  if (v.fee && v.feeBps !== null && v.feeBps > 1000n) add('high', `Bridge fee: ${v.fee}. That is not a normal Across fee: ${relayer} keeps it.`)
+  else if (v.fee) add(v.feeBps !== null && v.feeBps > 300n ? 'medium' : 'low', `Bridge fee: ${v.fee}.`)
   if (d.message !== '0x') add('high', `Also passes ${(d.message.length - 2) / 2} bytes of instructions that run at the recipient on ${v.destination}. This computer cannot read them.`)
 }
 
@@ -539,8 +597,7 @@ export function assessSigningRisk(req: SigningRequestInfo): RiskAssessment | nul
   } else if (req.method === '/eth/sign-transaction') {
     recognition = evmTx(req, add)
     // The device verifies a KeepKey-certified description and shows it.
-    if (req.deviceClearSigns || req.certifiedEvmSchema
-      || (!!req.calldataDecoded?.signedInsightBlob && req.calldataDecoded.insightKeyId === 0x80)) recognition = 'shows'
+    if (req.deviceClearSigns || req.certifiedEvmSchema || certifiedBlobShown(req)) recognition = 'shows'
     if (reasons.length === 0) add('low', 'Your KeepKey decodes this call on its screen. Check the recipient and amount there.')
     // A verified human rating can only add a reason, so it can only raise the level.
     const rating = req.clearSignReport?.rating

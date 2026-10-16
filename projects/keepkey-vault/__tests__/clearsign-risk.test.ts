@@ -428,3 +428,122 @@ describe('three-level verdict on Solana: device shows it, computer decodes it, o
     expect(r.tier).toBe('green')
   })
 })
+
+// EVM requests through the real REST preview (prepareEvmTxSigningInfo), offline.
+describe('EVM verdict regressions', () => {
+  const { utils } = require('ethers')
+  const abi = utils.defaultAbiCoder
+  const SIGNER = '0x909ef6b32dfdc12ca86aa710b54c991af3c5f82e'
+  const STRANGER = '0x1111111111111111111111111111111111111111'
+  const BASE_UR = '0x6ff5693b99212da76ad316178a184ab56d299b43'
+  const BASE_USDC = '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913'
+  const BASE_WETH = '0x4200000000000000000000000000000000000006'
+  const ETH_USDC = '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48'
+  const PERMIT2 = '0x000000000022d473030f116ddee9f6b43ac78ba3'
+  const RELAY = '0x4cd00e387622c35bddb9b4c962c136462338bc31'
+
+  async function preview(chainId: number, to: string, data: string, fw: string, value = '0x0') {
+    const { prepareEvmTxSigningInfo } = await import('../src/bun/evm-presign-report')
+    const original = globalThis.fetch
+    globalThis.fetch = (async () => { throw new Error('offline') }) as unknown as typeof fetch
+    try {
+      const s = { id: 'v', method: '/eth/sign-transaction', appName: 'app', from: SIGNER, to, value, chainId, data, firmwareVersion: fw } as SigningRequestInfo
+      await prepareEvmTxSigningInfo(s, { chainId, from: SIGNER, to, value, data }, fw)
+      return s
+    } finally { globalThis.fetch = original }
+  }
+  const texts = (s: SigningRequestInfo) => assessSigningRisk(s)!.reasons.map((x) => x.text).join('\n')
+
+  // wiring:2
+  test('a certified description Desktop attached for a call with no host decoder is green, not "signing blind"', () => {
+    const contract = '0x1234567890123456789012345678901234567890'
+    const data = '0xb6b55f25' + (10n ** 18n).toString(16).padStart(64, '0')
+    const body = Buffer.concat([Buffer.from([0x02, 0, 0, 0, 1]), Buffer.from(contract.slice(2), 'hex'), Buffer.from('b6b55f25', 'hex'), Buffer.alloc(40, 0x33)])
+    const blob = Buffer.concat([Buffer.from([0x03]), Buffer.alloc(139, 0x11), body, Buffer.alloc(65, 0x22)]).toString('base64')
+    const req = (over: Partial<SigningRequestInfo> = {}) => ({
+      id: 'c', method: '/eth/sign-transaction', appName: 'app', from: SIGNER, to: contract, value: '0x0', chainId: 1, data,
+      firmwareVersion: '7.16.0', deviceClearSigns: false, needsBlindSigning: false,
+      calldataDecoded: { dappName: 'Unknown', contractName: contract, method: 'deposit', selector: '0xb6b55f25', fields: [], source: 'none', signedInsightBlob: blob, insightKeyId: 0x80 },
+      ...over,
+    } as SigningRequestInfo)
+    const r = assessSigningRisk(req())!
+    expect(r.tier).toBe('green')
+    expect(r.reasons[0].text).toContain('from a KeepKey-certified description')
+    expect(r.reasons.map((x) => x.text).join('\n')).not.toContain('signing blind')
+    // The device cannot show it on older firmware, or for another contract.
+    expect(assessSigningRisk(req({ firmwareVersion: '7.15.0' }))!.tier).toBe('red')
+    expect(assessSigningRisk(req({ to: STRANGER }))!.tier).toBe('red')
+  })
+
+  const path = utils.solidityPack(['address', 'uint24', 'address'], [BASE_USDC, 500, BASE_WETH])
+  const v3In = (recipient: string, minOut: bigint) => abi.encode(['address', 'uint256', 'uint256', 'bytes', 'bool'], [recipient, 1000_000000n, minOut, path, true])
+  const execute = (commands: string, inputs: string[]) => '0x3593564c' + abi.encode(['bytes', 'bytes[]', 'uint256'], [commands, inputs, 4102444800n]).slice(2)
+
+  // evm-yellow:1
+  test('a Universal Router swap that pays its output to someone else is red', async () => {
+    for (const fw of ['7.15.0', '7.16.0']) {
+      const s = await preview(8453, BASE_UR, execute('0x00', [v3In(STRANGER, 3n * 10n ** 17n)]), fw)
+      expect(assessSigningRisk(s)!.tier).toBe('red')
+      expect(texts(s)).toContain(`The swap output goes to ${STRANGER}, which is NOT the account signing this (${SIGNER}).`)
+      // To the signer itself (MSG_SENDER) it stays a known swap.
+      const own = await preview(8453, BASE_UR, execute('0x00', [v3In('0x0000000000000000000000000000000000000001', 3n * 10n ** 17n)]), fw)
+      expect(assessSigningRisk(own)!.tier).toBe('yellow')
+    }
+  })
+
+  // evm-yellow:2
+  test('a Universal Router fee that takes 99% of the output is red; a normal fee is named, not red', async () => {
+    const swap = (bips: bigint, sweepMin: bigint) => execute('0x000604', [
+      v3In('0x0000000000000000000000000000000000000002', 3n * 10n ** 17n),
+      abi.encode(['address', 'address', 'uint256'], [BASE_WETH, STRANGER, bips]),
+      abi.encode(['address', 'address', 'uint256'], [BASE_WETH, '0x0000000000000000000000000000000000000001', sweepMin]),
+    ])
+    const greedy = await preview(8453, BASE_UR, swap(9900n, 3n * 10n ** 15n), '7.15.0')
+    expect(assessSigningRisk(greedy)!.tier).toBe('red')
+    expect(texts(greedy)).toContain(`99.00% of the swap output goes to ${STRANGER}, not to you.`)
+    const normal = await preview(8453, BASE_UR, swap(25n, 299n * 10n ** 15n), '7.15.0')
+    expect(assessSigningRisk(normal)!.tier).toBe('yellow')
+    expect(texts(normal)).toContain(`Fee: 0.25% of the swap output goes to ${STRANGER}.`)
+  })
+
+  // evm-yellow:5
+  test('a THORChain swap that pays out to another EVM address is red', async () => {
+    const ROUTER = '0xd37bbe5744d730a1d98d8dc97c42f0ca46ad7146'
+    const expiry = BigInt(Math.floor(Date.now() / 1000) + 3600)
+    const deposit = (memo: string) => '0x44bc937b' + abi.encode(['address', 'address', 'uint256', 'string', 'uint256'],
+      ['0x4444444444444444444444444444444444444444', ETH_USDC, 1000_000000n, memo, expiry]).slice(2)
+    for (const fw of ['7.14.2', '7.16.0']) {
+      const other = await preview(1, ROUTER, deposit(`=:ETH.ETH:${STRANGER}:30000000`), fw)
+      expect(assessSigningRisk(other)!.tier).toBe('red')
+      expect(texts(other)).toContain(`The swap pays out to ${STRANGER}, which is NOT the account signing this (${SIGNER}).`)
+      expect(assessSigningRisk(await preview(1, ROUTER, deposit(`=:ETH.ETH:${SIGNER}:30000000`), fw))!.tier).toBe('green')
+    }
+  })
+
+  // evm-yellow:6
+  test('a token transfer straight into a contract that does not credit it is red', async () => {
+    const transfer = (to: string) => '0xa9059cbb' + abi.encode(['address', 'uint256'], [to, 100_000000n]).slice(2)
+    for (const [chainId, token, sink] of [[1, ETH_USDC, ETH_USDC], [1, ETH_USDC, PERMIT2], [8453, BASE_USDC, RELAY], [8453, BASE_USDC, BASE_UR]] as const) {
+      const s = await preview(chainId, token, transfer(sink), '7.16.0')
+      expect(assessSigningRisk(s)!.tier).toBe('red')
+      expect(texts(s)).toContain(`(${sink}), which does not credit a plain transfer`)
+    }
+    // A transfer to a person is unchanged.
+    expect(assessSigningRisk(await preview(1, ETH_USDC, transfer(STRANGER), '7.16.0'))!.tier).toBe('green')
+  })
+
+  // evm-yellow:7
+  test('a bounded approve the device shows natively (mainnet DAI) to a reviewed spender is green', async () => {
+    const DAI = '0x6b175474e89094c44da98b954eedeac495271d0f'
+    const UR = '0x66a9893cc07d91d95644aedd05d03f95e1dba8af'
+    const approve = (spender: string, v: bigint) => '0x095ea7b3' + abi.encode(['address', 'uint256'], [spender, v]).slice(2)
+    const s = await preview(1, DAI, approve(UR, 100n * 10n ** 18n), '7.16.0')
+    expect(s.deviceClearSigns).toBe(true)
+    const r = assessSigningRisk(s)!
+    expect(r.tier).toBe('green')
+    expect(r.level).toBe('medium')
+    // An unlimited grant or an unreviewed spender still is not.
+    expect(assessSigningRisk(await preview(1, DAI, approve(UR, (1n << 256n) - 1n), '7.16.0'))!.tier).toBe('red')
+    expect(assessSigningRisk(await preview(1, DAI, approve(STRANGER, 100n * 10n ** 18n), '7.16.0'))!.tier).toBe('red')
+  })
+})

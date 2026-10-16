@@ -1022,6 +1022,9 @@ export interface CalldataDecodedInfo {
   signedInsightBlob?: string
   /** Signing key slot used for the insight blob */
   insightKeyId?: number
+  /** 'caller': the REST caller supplied the blob (txMetadata). Desktop never
+   *  checked it, so it never makes the verdict "shown on your KeepKey". */
+  insightSource?: 'caller'
   /** Pioneer's verdict on the blob: VERIFIED = curated descriptor + exact
    *  calldata round-trip; UNKNOWN = opaque. Blob is only attached when
    *  VERIFIED — rc3 fail-closes on opaque blobs, so on UNKNOWN the existing
@@ -1076,6 +1079,9 @@ export interface SigningRequestInfo {
   /** Name of the spender when KeepKey has reviewed it (canonical Permit2 or a
    *  certified name record). Set by the backend; absent = not recognised. */
   recognizedSpender?: string
+  /** The same, for the recipient of a plain ERC-20 transfer: a reviewed
+   *  contract (such as a Universal Router) that does not credit a transfer. */
+  recognizedRecipient?: string
   /** Certified metadata resolved before user approval. The signing handler
    *  reuses this exact envelope so approval and device review cannot drift. */
   certifiedEvmSchema?: {
