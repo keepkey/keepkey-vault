@@ -25,6 +25,14 @@ export const EVM_INSIGHT = false
 export const BITCOIN_ONLY_ONBOARDING = false
 
 /**
+ * Passkeys (firmware >= 7.16.0): a Settings section explaining how to use the
+ * KeepKey as a passkey. The device speaks CTAP2 over its own FIDO interface,
+ * so browsers use it directly; Desktop only explains it. Default OFF while
+ * passkeys are tested on 7.16 hardware.
+ */
+export const PASSKEYS_UI = false
+
+/**
  * True when the connected device runs bitcoin-only firmware, per its Features
  * `firmware_variant` string (set in firmware fsm_msg_common.h). Drives the
  * BTC-only UI restriction. NOT gated by BITCOIN_ONLY_ONBOARDING — the UI must
