@@ -27,4 +27,24 @@ describe('exportOrchardFvk', () => {
 		const wallet = { transport: { delegate: {} }, zcashGetOrchardFVK: async (account: number) => ({ ...fvk, account }) }
 		expect(await exportOrchardFvk(wallet, 2)).toEqual({ ...fvk, account: 2 })
 	})
+
+	it('asks the device once per wallet', async () => {
+		let reads = 0
+		let address = '0xAAA'
+		const wallet = {
+			transport: { delegate: {} },
+			ethGetAddress: async () => address,
+			zcashGetOrchardFVK: async () => {
+				reads++
+				return { ak: new Uint8Array([reads]), nk: new Uint8Array([2]), rivk: new Uint8Array([3]) }
+			},
+		}
+		const first = await exportOrchardFvk(wallet, 0)
+		expect(await exportOrchardFvk(wallet, 0)).toBe(first)
+		expect(reads).toBe(1)
+
+		address = '0xBBB' // another seed or passphrase
+		expect((await exportOrchardFvk(wallet, 0)).ak).toEqual(new Uint8Array([2]))
+		expect(reads).toBe(2)
+	})
 })

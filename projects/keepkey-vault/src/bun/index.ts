@@ -245,7 +245,7 @@ import { getRequiredConfs } from "../shared/confirmations"
 import { addSessionActivity, getSessionActivity, clearSessionActivity } from "./session-activity"
 import { buildTx, broadcastTx, canonicalizeTronTokenCaip } from "./txbuilder"
 import { buildCosmosStakingTx, buildCosmosNameRegTx } from "./txbuilder/cosmos"
-import { initializeOrchardFromDevice, exportOrchardFvk, scanOrchardNotes, getShieldedBalance, sendShielded, ensureFvkLoaded, displayOrchardAddressOnDevice } from "./txbuilder/zcash-shielded"
+import { initializeOrchardFromDevice, exportOrchardFvk, scanOrchardNotes, getShieldedBalance, sendShielded, ensureFvkLoaded, displayOrchardAddressOnDevice, setFvkDiskAllowed } from "./txbuilder/zcash-shielded"
 import { findZcashCliBinary, isSidecarReady, startSidecar, stopSidecar, wipeSidecarWalletDb, hasFvkLoaded, getCachedFvk, onScanProgress, getScanState, updateSyncedTo, beginZcashSend, endZcashSend, isZcashSendInFlight } from "./zcash-sidecar"
 import { CHAINS, customChainToChainDef, isChainSupported, hiveRolePath, btcTaprootSupported, findChainByNetwork } from "../shared/chains"
 import { versionCompare } from "../shared/firmware-versions"
@@ -866,6 +866,8 @@ const perf = (label: string) => console.log(`[PERF] +${Date.now() - BOOT_START}m
 // ── Engine Controller (constructors are lightweight — no I/O) ────────
 const engine = new EngineController()
 setClearSignAuditGate(() => engine.isEmulator && !offlineMode && !engine.isPassphraseWallet)
+// A hidden wallet's Zcash view key is never written to disk.
+setFvkDiskAllowed(() => !engine.isPassphraseWallet)
 
 /**
  * ClearSign evidence is device-scoped and local-only. Hidden/passphrase
@@ -2143,8 +2145,9 @@ async function ensureZcashScanFresh(): Promise<void> {
  * Prove the cached Orchard FVK actually belongs to the CONNECTED device before
  * we trust its balance or let it spend. The on-disk FVK store has no device
  * identity, and the only existing invalidation — the `seed-changed` event —
- * does not fire reliably on device-to-device swaps. So derive the FVK fresh
- * from the device (silent; no button, seed never leaves) and compare `ak`.
+ * does not fire reliably on device-to-device swaps. So take the connected
+ * wallet's FVK (exportOrchardFvk: the device asks once per wallet, then it is
+ * remembered under the wallet's silent identity) and compare `ak`.
  *
  *  - match            → mark verified, keep the cache + scanned notes.
  *  - no cache / mismatch → the cache belongs to a DIFFERENT wallet (bleed):
