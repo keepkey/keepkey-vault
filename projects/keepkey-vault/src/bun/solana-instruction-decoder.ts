@@ -301,7 +301,10 @@ export function decodeInstruction(input: DecodeInstructionInput): DecodedInstruc
 
   const encoding: DiscriminatorEncoding = program.discriminator?.encoding ?? 'none'
   const discHex = extractDiscriminator(input.data, encoding)
-  const schema = discHex ? program.instructions?.[discHex] : undefined
+  // Empty data has no discriminator; a program may name the instruction it
+  // means under the "" key (the legacy ATA Create).
+  const key = discHex ?? (input.data.length === 0 ? '' : undefined)
+  const schema = key !== undefined ? program.instructions?.[key] : undefined
 
   if (!schema) {
     return {
@@ -323,7 +326,7 @@ export function decodeInstruction(input: DecodeInstructionInput): DecodedInstruc
     }
   }
 
-  const argStart = discriminatorLength(encoding)
+  const argStart = discHex ? discriminatorLength(encoding) : 0
   const { args, note } = decodeArgs(input.data, argStart, schema.args ?? [])
 
   return {

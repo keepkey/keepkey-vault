@@ -828,4 +828,24 @@ describe('Solana verdicts follow what firmware 7.16.0 shows (lib/firmware/solana
     expect(t22.info.requiresAdvancedMode).toBe(true)
     expect(t22.risk.tier).not.toBe('green')
   })
+
+  test('solana:7 an ATA create with empty data (the legacy form) is green when canonical', async () => {
+    const ataCreate = (accounts = [payer, dstAta, dest, mint, SYSTEM, TOKEN]) => ({ program: ATA, accounts, data: [] as number[] })
+    for (const send of [transferChecked(), solTransfer()]) {
+      const { info, risk } = await signVerdict([ataCreate(), send])
+      expect(info.solanaDecoded!.instructions[0].instructionName).toBe('create')
+      expect(info.requiresAdvancedMode).toBe(false)
+      expect(info.requiresBlindSigningConsent).toBe(false)
+      expect(risk.tier).toBe('green')
+    }
+    // Token-2022 in slot 5, or no token program at all, is not canonical.
+    for (const accounts of [
+      [payer, dstAta, dest, mint, SYSTEM, 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb'],
+      [payer, dstAta, dest, mint, SYSTEM],
+    ]) {
+      const { info, risk } = await signVerdict([ataCreate(accounts), transferChecked()])
+      expect(info.requiresAdvancedMode).toBe(true)
+      expect(risk.tier).not.toBe('green')
+    }
+  })
 })
