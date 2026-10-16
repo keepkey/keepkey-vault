@@ -14,7 +14,7 @@ import type { SwapAsset, SwapQuote, SwapQuoteParams, ExecuteSwapParams, SwapResu
 import { SOLANA_BLIND_SIGNING_REQUIRED, evmAdvancedModeRequiredMessage } from '../shared/types'
 import { toDeviceError, deviceErrorMessage } from '../shared/device-error'
 import { resolveEvmSchema } from './evm-schema-registry'
-import { resolveRuntimeEvmMetadata, supportsRuntimeEvmMetadata, type RuntimeEvmSigner } from './evm-runtime-metadata'
+import { resolveRuntimeEvmMetadata, supportsRuntimeEvmMetadata, trustRuntimeSigner, type RuntimeEvmSigner } from './evm-runtime-metadata'
 import { evmCallRequiresAdvancedMode } from './evm-signing-policy'
 import { ERC7730_TRANSPORT_SUPPORTED } from '../shared/erc7730-support'
 import { findSolanaSchema } from './solana-schema-registry'
@@ -806,14 +806,16 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
 
       // Firmware 7.15 recognizes only keys explicitly trusted into a RAM slot.
       // This is never silent: LoadClearsignSigner displays alias + fingerprint
-      // and "NOT verified by KeepKey" for mandatory device approval.
+      // and "NOT verified by KeepKey" for mandatory device approval. A refused
+      // trust screen means no description, not a failed swap.
       if (result.runtimeSigner) {
         const signer = result.runtimeSigner
-        swapLog(`${TAG} requesting 7.15 runtime signer trust: ${signer.alias} (${signer.fingerprint})`)
-        await wrapSign(
+        swapLog(`${TAG} requesting 7.15 runtime signer trust: ${signer.alias} (${signer.deviceFingerprint})`)
+        const trusted = await trustRuntimeSigner(signer, () => wrapSign(
           () => wallet.loadClearsignSigner({ keyId: signer.keyId, pubkey: Uint8Array.from(Buffer.from(signer.publicKeyHex, 'hex')), alias: signer.alias }),
           { operation: 'loadClearsignSigner', chain: fromChain.coin },
-        )
+        ), TAG)
+        if (!trusted) delete unsignedTx.txMetadata
       }
 
       // ERC-20 relay txs may need an approval to the router (THORChain Router,
