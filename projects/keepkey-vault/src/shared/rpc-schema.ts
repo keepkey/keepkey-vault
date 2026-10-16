@@ -70,9 +70,10 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       clearsignSubmitCentralContractReview: { params: ClearSignCentralContractReview; response: Record<string, unknown> }
       clearsignGetProtectionCaseStudies: { params: void; response: ClearSignProtectionCaseStudy[] }
       // Provider-key ceremony. The mnemonic is read off the device screen and
-      // typed back in; the derived PRIVATE key is written to a file and never
-      // returned to the renderer.
-      clearsignDeriveProviderKey: { params: { childMnemonic: string; alias: string; wordCount: number; index: number }; response: { publicKeyHex: string; fingerprint: string; filePath: string } }
+      // typed back in; the derived PRIVATE key stays in host memory for this
+      // Studio session only (never on disk, never returned to the renderer).
+      clearsignDeriveProviderKey: { params: { childMnemonic: string; alias: string; wordCount: number; index: number }; response: { alias: string; publicKeyHex: string; fingerprint: string } }
+      clearsignClearProviderKey: { params: void; response: { cleared: boolean } }
       // Open a URL in the user's default browser (escapes the WebView).
       // The system WebView blocks target=_blank, so explorer/docs links
       // route through here instead. Bun shells out to the OS-native opener.

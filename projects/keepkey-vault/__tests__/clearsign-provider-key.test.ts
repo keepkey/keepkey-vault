@@ -15,18 +15,14 @@
  */
 import { describe, test, expect } from 'bun:test'
 import { createHash } from 'crypto'
-import { mkdtempSync, readFileSync, rmSync, statSync } from 'fs'
-import { tmpdir } from 'os'
+import { readFileSync } from 'fs'
 import { join } from 'path'
-import {
-  deriveProviderKey,
-  providerFingerprint,
-  buildProviderKeyFile,
-  validateProviderCeremony,
-  writeProviderKeyFile,
-  PROVIDER_KEY_PATH,
-  PROVIDER_KEY_WARNING,
-} from '../src/shared/clearsign-provider-key'
+import { mnemonicToSeedSync } from 'bip39'
+import { utils as ethersUtils } from 'ethers'
+import * as providerKeyModule from '../src/shared/clearsign-provider-key'
+import { createProviderKeySession } from '../src/bun/clearsign-provider-session'
+
+const { deriveProviderKey, providerFingerprint, validateProviderCeremony } = providerKeyModule
 
 // BIP-39 test vector mnemonic. NEVER a real provider key.
 const ABANDON = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'
@@ -65,8 +61,12 @@ describe('deriveProviderKey', () => {
     expect(['02', '03']).toContain(publicKeyHex.slice(0, 2))
   })
 
-  test('private key is 32 bytes', () => {
-    expect(deriveProviderKey(ABANDON).privateKeyHex).toHaveLength(64)
+  test('private key is 32 zeroable bytes, the BIP-32 master key of the child mnemonic', () => {
+    const { privateKey } = deriveProviderKey(ABANDON)
+    expect(privateKey).toBeInstanceOf(Uint8Array)
+    expect(privateKey).toHaveLength(32)
+    const master = ethersUtils.HDNode.fromSeed(mnemonicToSeedSync(ABANDON)).privateKey.slice(2)
+    expect(Buffer.from(privateKey).toString('hex')).toBe(master)
   })
 
   test('normalises whitespace and case rather than deriving a different key', () => {
@@ -106,74 +106,71 @@ describe('providerFingerprint matches the firmware algorithm', () => {
   })
 })
 
-describe('buildProviderKeyFile', () => {
-  const file = buildProviderKeyFile({
-    key: deriveProviderKey(ABANDON),
-    alias: 'Pioneer',
-    bip85WordCount: 12,
-    bip85Index: 0,
-    deviceFingerprint: 'deadbeef',
-    createdAt: '2026-08-15T00:00:00.000Z',
+// Owner rule 2026-10-16: the provider private key NEVER touches disk.
+describe('provider key never written to disk', () => {
+  const SRC = join(import.meta.dir, '..', 'src')
+
+  test('the key module exports no file writer and imports no fs', () => {
+    expect(Object.keys(providerKeyModule)).not.toContain('writeProviderKeyFile')
+    expect(Object.keys(providerKeyModule)).not.toContain('buildProviderKeyFile')
+    for (const file of ['shared/clearsign-provider-key.ts', 'bun/clearsign-provider-session.ts']) {
+      expect(readFileSync(join(SRC, file), 'utf8')).not.toMatch(/from ['"](node:)?fs['"]/)
+    }
   })
 
-  test('records the ceremony so the key can be re-derived and audited', () => {
-    expect(file.ceremony).toEqual({
-      bip85WordCount: 12,
-      bip85Index: 0,
-      derivationPath: PROVIDER_KEY_PATH,
-      deviceFingerprint: 'deadbeef',
-      createdAt: '2026-08-15T00:00:00.000Z',
-    })
-  })
-
-  test('carries the fingerprint the operator will compare against the device', () => {
-    expect(file.fingerprint).toBe('b690735f')
-    expect(file.publicKeyHex).toBe(deriveProviderKey(ABANDON).publicKeyHex)
-  })
-
-  test('states plainly that it holds a live key, and what it can and cannot do', () => {
-    // The honesty is the feature: this key can MISLABEL a transaction but can
-    // never conceal one, because a runtime signer is annotation-only.
-    expect(file.warning).toBe(PROVIDER_KEY_WARNING)
-    expect(file.warning).toContain('plaintext')
-    expect(file.warning).toContain('mislabel')
-    expect(file.warning).toContain('cannot remove the raw review')
-  })
-
-  test('is versioned, so a later format change is detectable', () => {
-    expect(file.format).toBe('keepkey-clearsign-provider-key-v1')
+  test('the Desktop handler keeps the key in the session, not in ~/Downloads', () => {
+    const index = readFileSync(join(SRC, 'bun/index.ts'), 'utf8')
+    const handler = index.slice(index.indexOf('clearsignDeriveProviderKey:'), index.indexOf('clearsignListEvents:'))
+    expect(handler).toContain('providerKeySession.derive(params)')
+    expect(handler).not.toContain('Downloads')
+    expect(index).not.toContain('keepkey-provider-')
   })
 })
 
-describe('writeProviderKeyFile', () => {
-  const file = buildProviderKeyFile({
-    key: deriveProviderKey(ABANDON),
-    alias: 'Pioneer',
-    bip85WordCount: 12,
-    bip85Index: 0,
-    createdAt: '2026-08-15T00:00:00.000Z',
+describe('provider key session', () => {
+  const ceremony = { childMnemonic: ABANDON, alias: 'Acme Labs', wordCount: 12, index: 0 }
+
+  function session(advanced = { on: true }) {
+    const keys: Uint8Array[] = []
+    const s = createProviderKeySession(
+      () => { if (!advanced.on) throw new Error('ClearSign Studio requires AdvancedMode on the connected device') },
+      (m) => { const k = deriveProviderKey(m); keys.push(k.privateKey); return k },
+    )
+    return { s, keys, advanced }
+  }
+
+  test('derive requires AdvancedMode', () => {
+    const { s, keys } = session({ on: false })
+    expect(() => s.derive(ceremony)).toThrow('AdvancedMode')
+    expect(keys).toHaveLength(0)
   })
 
-  test('creates the secret owner-only from its first byte', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'keepkey-provider-key-'))
-    const filePath = join(dir, 'provider.json')
-    try {
-      writeProviderKeyFile(filePath, file)
-      expect(JSON.parse(readFileSync(filePath, 'utf8'))).toEqual(file)
-      if (process.platform !== 'win32') expect(statSync(filePath).mode & 0o777).toBe(0o600)
-    } finally {
-      rmSync(dir, { recursive: true, force: true })
-    }
+  test('derive returns only the public half', () => {
+    const { s } = session()
+    const identity = s.derive(ceremony)
+    expect(identity).toEqual({ alias: 'Acme Labs', publicKeyHex: deriveProviderKey(ABANDON).publicKeyHex, fingerprint: 'b690735f' })
+    expect(JSON.stringify(identity)).not.toContain(Buffer.from(deriveProviderKey(ABANDON).privateKey).toString('hex'))
   })
 
-  test('refuses to overwrite an existing path', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'keepkey-provider-key-'))
-    const filePath = join(dir, 'provider.json')
-    try {
-      writeProviderKeyFile(filePath, file)
-      expect(() => writeProviderKeyFile(filePath, file)).toThrow()
-    } finally {
-      rmSync(dir, { recursive: true, force: true })
-    }
+  test('clear zeroes the key; AdvancedMode off or a new derive clears it too', () => {
+    const { s, keys, advanced } = session()
+    s.derive(ceremony)
+    s.derive({ ...ceremony, alias: 'Acme Two' })
+    expect(keys[0].every(b => b === 0)).toBe(true)
+    expect(s.clear()).toBe(true)
+    expect(keys[1].every(b => b === 0)).toBe(true)
+    expect(s.clear()).toBe(false)
+
+    s.derive(ceremony)
+    advanced.on = false
+    expect(() => s.derive(ceremony)).toThrow('AdvancedMode')
+    expect(keys[2].every(b => b === 0)).toBe(true)
+  })
+
+  test('rejects a bad alias or a ceremony mismatch before deriving', () => {
+    const { s, keys } = session()
+    expect(() => s.derive({ ...ceremony, alias: 'Acme%' })).toThrow('Alias')
+    expect(() => s.derive({ ...ceremony, wordCount: 24 })).toThrow('expected 24')
+    expect(keys).toHaveLength(0)
   })
 })
