@@ -214,6 +214,10 @@ export async function applyEvmTxPreview(
   if ((selector === '0x095ea7b3' || selector === '0x39509351') && /^0{24}[0-9a-fA-F]{40}$/.test(data.slice(10, 74))) {
     signingInfo.recognizedSpender = recognizedSpender(chainId, `0x${data.slice(34, 74)}`)
   }
+  // transfer straight to a reviewed contract: the risk bar flags it.
+  if (selector === '0xa9059cbb' && /^0{24}[0-9a-fA-F]{40}$/.test(data.slice(10, 74))) {
+    signingInfo.recognizedRecipient = recognizedSpender(chainId, `0x${data.slice(34, 74)}`)
+  }
 
   if (callerMetadata?.signedPayload) {
     // Runtime-signer blob from the caller: the REST sign handler honours it at
@@ -224,6 +228,7 @@ export async function applyEvmTxPreview(
       ...signingInfo.calldataDecoded,
       signedInsightBlob: callerMetadata.signedPayload,
       insightKeyId: callerMetadata.keyId,
+      insightSource: 'caller',
     }
     signingInfo.needsBlindSigning = false
     console.log(`${tag} needsBlindSigning=false (caller-provided runtime-signer blob, keyId=${callerMetadata.keyId})`)
