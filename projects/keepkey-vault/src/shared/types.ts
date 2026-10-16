@@ -1803,6 +1803,7 @@ export interface PendingSwap {
   toCaip?: string
   fromAmount: string      // human-readable
   expectedOutput: string  // quote-time estimate; never replace with received output
+  minimumOutput?: string  // quote-time floor; a payout at or above it is the whole swap
   payouts?: Array<{ txid: string; amount: string; asset: string; address?: string }>
   receivedOutput?: string // actual received amount (filled by Pioneer poll once outbound confirms)
   memo: string

@@ -26,7 +26,7 @@ import { providerTrackerUrl } from "../lib/trackers"
 import { ProviderBadge, ProverChip, resolveProvider } from "./ProviderBadge"
 import { getSwapperAnimation } from "../lib/swapper-animations"
 import { assessSwapRisk } from "../../shared/swap-risk"
-import { isSwapFullySettled } from "../../shared/swap-settlement"
+import { isSwapFullySettled, payoutReachesMinimum } from "../../shared/swap-settlement"
 import { SwapRiskReview } from "./SwapRiskReview"
 import { computeDustWarning, shouldWarnHighSlippage, computeEffectiveSlippageBps, isSmallSwapQuoteWarning } from "../../shared/swap-warnings"
 import { useEvmAddresses } from "../hooks/useEvmAddresses"
@@ -965,6 +965,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     swapper: liveSwapper, payouts: livePayouts, receivedOutput: liveReceivedOutput,
     minimumOutput: quote?.minimumOutput || resumeSwap?.minimumOutput })
   const isSwapFailed = liveStatus === 'failed' || liveStatus === 'refunded'
+  const payoutMeetsMinimum = payoutReachesMinimum(liveReceivedOutput, quote?.minimumOutput || resumeSwap?.minimumOutput)
 
   // Seed the inbound/timing/error fields from a full refreshSwap snapshot.
   // The swap-update message carries these too, but the snapshot is the backstop
@@ -2785,9 +2786,9 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
 
           {phase === 'submitted' && toAsset && livePayouts.length > 0 && (
             <Box p="4" m="3" border="1px solid var(--teal)" borderRadius="lg">
-              <Text fontSize="13px" fontWeight="700">{isSwapComplete ? 'Settlement payouts' : 'Partial payout — settlement still in progress'}</Text>
+              <Text fontSize="13px" fontWeight="700">{isSwapComplete ? 'Settlement payouts' : payoutMeetsMinimum ? 'Payout received — confirming settlement' : 'Partial payout — settlement still in progress'}</Text>
               <Text fontSize="12px" color="var(--teal)" mt="1">Total reported received: {liveReceivedOutput || '0'} {toAsset.symbol}</Text>
-              {!isSwapComplete && quote && <Text fontSize="11px" color="kk.textMuted" mt="1">Still expected: approximately {formatBalance(String(Math.max(0, Number(quote.expectedOutput) - Number(liveReceivedOutput || 0))))} {toAsset.symbol}. A partial payment is not the final swap output.</Text>}
+              {!isSwapComplete && !payoutMeetsMinimum && quote && <Text fontSize="11px" color="kk.textMuted" mt="1">Still expected: approximately {formatBalance(String(Math.max(0, Number(quote.expectedOutput) - Number(liveReceivedOutput || 0))))} {toAsset.symbol}. A partial payment is not the final swap output.</Text>}
               {livePayouts.map((payout, index) => <Flex key={`${payout.txid}-${index}`} justify="space-between" mt="2" gap="3">
                 <Text fontSize="11px">Payment {index + 1}: {payout.amount} {toAsset.symbol}</Text>
                 <Box as="button" fontSize="11px" color="var(--teal)" textDecoration="underline" onClick={() => {

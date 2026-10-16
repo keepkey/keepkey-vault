@@ -1,6 +1,14 @@
 /** A protocol status alone cannot prove a streaming swap has paid every leg. */
 import { decimalToBaseUnitsStrict } from './max-send'
 
+/** The quote's expected output is an estimate; the real output always differs
+ *  a little (outbound fee, price move). A payout at or above the minimum is the
+ *  whole swap, not a partial one with more to come. */
+export function payoutReachesMinimum(receivedHuman?: string, minimumHuman?: string): boolean {
+  const minimum = Number(minimumHuman || 0)
+  return minimum > 0 && Number(receivedHuman || 0) + 1e-8 >= minimum
+}
+
 export function payoutBelowMinimum(receivedBaseUnits: string, minimumHuman: string): boolean {
   if (!minimumHuman || Number(minimumHuman) <= 0) return false
   try { return BigInt(receivedBaseUnits) < decimalToBaseUnitsStrict(minimumHuman, 8) }
