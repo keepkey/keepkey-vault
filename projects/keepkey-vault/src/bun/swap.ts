@@ -627,7 +627,7 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
   // Applies to the swap and to the ERC-20 approve before it.
   const assertEvmSignable = (tx: any) => {
     if (!evmCallRequiresAdvancedMode(tx?.to, tx?.data, Number(tx?.chainId), ctx.isAdvancedModeEnabled?.(),
-      tx?.txMetadata, tx?.erc7730, ctx.getFirmwareVersion?.())) return
+      tx?.txMetadata, tx?.erc7730, ctx.getFirmwareVersion?.(), tx?.value)) return
     // Always logged: this host prediction is the only trace of why a swap stopped.
     console.warn(`${TAG} EVM blind-sign gate: chainId=${tx.chainId} to=${tx.to} selector=${String(tx.data).slice(0, 10)} bytes=${(String(tx.data).length - 2) / 2} fw=${ctx.getFirmwareVersion?.() ?? '?'} — AdvancedMode is off`)
     // Message content is load-bearing: SwapDialog routes on /AdvancedMode/i to

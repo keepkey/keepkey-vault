@@ -18,9 +18,10 @@ export function evmCallRequiresAdvancedMode(
   metadata?: unknown,
   erc7730?: unknown,
   firmwareVersion?: string,
+  value?: unknown,
 ): boolean {
   return typeof data === 'string' && data.length > 2 &&
-    !firmwareClearSigns(to, data, chainId, firmwareVersion) &&
+    !firmwareClearSigns(to, data, chainId, firmwareVersion, value) &&
     !isCertifiedEvmMetadata(metadata) &&
     // The device verifies every signed catalog envelope and refuses signing on
     // any authentication/identity failure, so a catalog can enter that strict

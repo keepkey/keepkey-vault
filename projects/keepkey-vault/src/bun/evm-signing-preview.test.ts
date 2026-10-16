@@ -6,6 +6,8 @@ import { findCertifiedEvmEnvelope } from './evm-certified-registry'
 import { findEvmSchema } from './evm-schema-registry'
 import { SolanaSignMessageRequest } from './schemas'
 import { solanaSignerChangedError } from './solana-message-preview'
+import { evmCallRequiresAdvancedMode } from './evm-signing-policy'
+import { assessSigningRisk } from '../shared/clearsign-risk'
 
 const originalFetch = globalThis.fetch
 afterEach(() => { globalThis.fetch = originalFetch })
@@ -122,6 +124,77 @@ describe('applyEvmTxPreview = needsAdvancedMode = !(native || (fw >= 7.16 && cer
     expect(s.needsBlindSigning).toBe(false)
     expect(s.calldataDecoded?.signedInsightBlob).toBe('AAEC')
     expect(s.calldataDecoded?.insightKeyId).toBe(3)
+  })
+})
+
+describe('the device does not show it → never green (firmware mirror)', () => {
+  const ZX = '0xdef1c0ded9bec7f1a1670819833240f027b25eff'
+  const UNIV2 = '0x7a250d5630b4cf539739df2c5dacb4c659f2488d'
+  const USDT_ETH = '0xdac17f958d2ee523a2206206994597c13d831ec7'
+  const UNKNOWN_A = '4444444444444444444444444444444444444444'
+  const UNKNOWN_B = '5555555555555555555555555555555555555555'
+  const TENTH_ETH = '0x16345785d8a0000'
+  const w = (hex: string) => word(hex.replace(/^0x/, ''))
+  const sell = (a: string, b: string, offset = '80') =>
+    '0xd9627aa4' + w(offset) + w('de0b6b3a7640000') + w('1') + w('0') + w('2') + w(a) + w(b)
+  const liquidity = (selector: string, tokenWord: string) =>
+    selector + tokenWord + w('1') + w('1') + w('1') + w(RECIPIENT) + w('ffffffff')
+
+  async function verdict(to: string, data: string, chainId: number, fw: string, value = '0x0') {
+    globalThis.fetch = (async () => { throw new Error('offline') }) as unknown as typeof fetch
+    const s: SigningRequestInfo = { ...info(), chain: 'eth', from: `0x${RECIPIENT}`, to, value, data, chainId, firmwareVersion: fw }
+    await applyEvmTxPreview(s, to, data, chainId, fw)
+    return { s, tier: assessSigningRisk(s)!.tier }
+  }
+
+  test('evm-yellow:0 — a token transfer or approve that also sends ETH is not shown on 7.15 or 7.16', async () => {
+    for (const fw of ['7.15.0', '7.16.0']) {
+      for (const data of [transfer, approve(PERMIT2)]) {
+        const withValue = await verdict(USDC_ETH, data, 1, fw, TENTH_ETH)
+        expect(withValue.s.deviceClearSigns).toBe(false)
+        expect(withValue.s.needsBlindSigning).toBe(true)
+        expect(withValue.tier).not.toBe('green')
+        expect((await verdict(USDC_ETH, data, 1, fw)).tier).toBe('green')
+      }
+    }
+  })
+
+  test('evm-green:4 — the host gates ETH on a token call before the device says "Blocked"', async () => {
+    for (const data of [transfer, approve(PERMIT2)]) {
+      expect(evmCallRequiresAdvancedMode(USDC_ETH, data, 1, false, undefined, undefined, '7.16.0', TENTH_ETH)).toBe(true)
+      expect(evmCallRequiresAdvancedMode(USDC_ETH, data, 1, false, undefined, undefined, '7.16.0', '0x0')).toBe(false)
+      expect(evmCallRequiresAdvancedMode(USDC_ETH, data, 1, false, undefined, undefined, '7.16.0')).toBe(false)
+      expect((await verdict(USDC_ETH, data, 1, '7.16.0', TENTH_ETH)).tier).not.toBe('green')
+    }
+  })
+
+  test('evm-green:2 — 0x sellToUniswap is red unless the device can name every token', async () => {
+    for (const [data, chainId] of [
+      [sell(UNKNOWN_A, UNKNOWN_B), 1],               // tokens outside the 7.16 table
+      [sell(USDC_ETH, USDT_ETH, 'a0'), 1],           // non-canonical array offset
+      [sell(USDC_ETH, USDC_BASE), 8453],             // Base has no table entries
+    ] as const) {
+      const r = await verdict(ZX, data, chainId, '7.16.0')
+      expect(r.s.deviceClearSigns).toBe(false)
+      expect(r.s.needsBlindSigning).toBe(true)
+      expect(r.tier).toBe('red')
+    }
+    expect((await verdict(ZX, sell(USDC_ETH, USDT_ETH), 1, '7.16.0')).tier).toBe('green')
+  })
+
+  test('evm-green:3 — Uniswap V2 liquidity is red when the firmware would refuse it', async () => {
+    const add = '0xf305d719', remove = '0x02751cec'
+    for (const [data, value] of [
+      [liquidity(add, w(UNKNOWN_A)), '0xde0b6b3a7640000'],                          // token outside the table
+      [liquidity(remove, w(USDC_ETH)), '0x1'],                                      // ETH on removeLiquidityETH
+      [liquidity(add, 'ff'.repeat(12) + USDC_ETH.slice(2)), '0xde0b6b3a7640000'],   // dirty address word
+    ] as const) {
+      const r = await verdict(UNIV2, data, 1, '7.16.0', value)
+      expect(r.s.deviceClearSigns).toBe(false)
+      expect(r.s.needsBlindSigning).toBe(true)
+      expect(r.tier).toBe('red')
+    }
+    expect((await verdict(UNIV2, liquidity(add, w(USDC_ETH)), 1, '7.16.0', '0xde0b6b3a7640000')).tier).toBe('green')
   })
 })
 

@@ -533,22 +533,64 @@ export function firmwareKnowsToken(chainId: number | undefined, token: string | 
   return chainId != null && !!token && table.has(`${chainId}:${token.toLowerCase()}`)
 }
 
+/** ethereum_valueIsZero: no value is zero; a value Desktop cannot read is not. */
+function valueIsZero(value: unknown): boolean {
+  return value == null || /^(0x)?0*$/i.test(String(value).trim())
+}
+
+/** ABI head word `i` after the selector, 64 hex chars. */
+const abiWord = (data: string, i: number) => data.slice(10 + i * 64, 10 + (i + 1) * 64)
+const cleanAddressWord = (w: string) => /^0{24}[0-9a-f]{40}$/.test(w)
+/** tokenByChainAddress also resolves 0xeeee…ee, but only on Ethereum mainnet. */
+const ETH_SENTINEL = `0x${'e'.repeat(40)}`
+const firmwareResolvesToken = (chainId: number, token: string, firmwareVersion?: string) =>
+  (chainId === 1 && token === ETH_SENTINEL) || firmwareKnowsToken(chainId, token, firmwareVersion)
+
+/** zx_isZxSwap claims sellToUniswap only when zxswap_resolveBothTokens can
+ *  name every token: canonical 0x80 offset, 2 or 3 tokens, clean words, and
+ *  each token in this chain's table. Base, Arbitrum and Avalanche have none. */
+function zxSellToUniswapShown(data: string, chainId: number, firmwareVersion?: string): boolean {
+  if (abiWord(data, 0) !== '80'.padStart(64, '0') || !/^0{63}[01]$/.test(abiWord(data, 3))) return false
+  const count = /^0{63}[23]$/.test(abiWord(data, 4)) ? Number(abiWord(data, 4).slice(-1)) : 0
+  if (count === 0 || (data.length - 2) / 2 < 4 + (5 + count) * 32) return false
+  for (let i = 0; i < count; i++) {
+    const w = abiWord(data, 5 + i)
+    if (!cleanAddressWord(w) || !firmwareResolvesToken(chainId, `0x${w.slice(24)}`, firmwareVersion)) return false
+  }
+  return true
+}
+
+/** liquidity_shape_is_clear_signable: exactly 196 bytes, clean token and
+ *  recipient words, a u64 deadline, a token in the table, and no value on
+ *  removeLiquidityETH. */
+function uniV2LiquidityShown(selector: string, data: string, value: unknown, firmwareVersion?: string): boolean {
+  if ((data.length - 2) / 2 !== 4 + 6 * 32) return false
+  const token = abiWord(data, 0)
+  if (!cleanAddressWord(token) || !cleanAddressWord(abiWord(data, 4)) || !/^0{48}/.test(abiWord(data, 5))) return false
+  if (!firmwareResolvesToken(1, `0x${token.slice(24)}`, firmwareVersion)) return false
+  return selector !== '0x02751cec' || valueIsZero(value)
+}
+
 /**
  * True iff the device clear-signs this tx natively (no AdvancedMode, no
  * signed blob). Mirrors firmware `ethereum_contractHandled` + the standard
  * ERC-20 transfer/approve path in ethereum.c. Contract-address AND chain
  * pinning matter: the same selector to a DIFFERENT address, or the same
  * address on a chain the firmware does not list, is NOT clear-signed.
+ * `value` is the tx's native value: the ERC-20 screens need it to be zero.
  */
-export function firmwareClearSigns(to?: string, data?: string, chainId?: number, firmwareVersion?: string): boolean {
+export function firmwareClearSigns(to?: string, data?: string, chainId?: number, firmwareVersion?: string, value?: unknown): boolean {
   if (!to || !data || data.length < 10) return false
   const selector = data.slice(0, 10).toLowerCase()
   const dest = to.toLowerCase()
 
   // Standard ERC-20 transfer/approve: 4-byte selector + 2 32-byte words = 68B,
   // and only for a token the firmware's table knows ON THIS CHAIN — anything
-  // else is UnknownToken, which the device gates on AdvancedMode.
-  if (ERC20_NATIVE.has(selector) && (data.length - 2) === 136) return firmwareKnowsToken(chainId, dest, firmwareVersion)
+  // else is UnknownToken, which the device gates on AdvancedMode. With value
+  // attached the firmware does not treat it as a token call at all.
+  if (ERC20_NATIVE.has(selector) && (data.length - 2) === 136) {
+    return valueIsZero(value) && firmwareKnowsToken(chainId, dest, firmwareVersion)
+  }
 
   if ((data.length - 2) / 2 > FIRMWARE_INITIAL_CHUNK_BYTES) return false
 
@@ -564,7 +606,14 @@ export function firmwareClearSigns(to?: string, data?: string, chainId?: number,
     return chainId != null && (dest === thorRouters[chainId] || dest === mayaRouters[chainId])
   }
   const pinned = FIRMWARE_PINNED[selector]
-  return pinned != null && dest === pinned.to && chainId != null && pinned.chains.has(chainId)
+  if (pinned == null || dest !== pinned.to || chainId == null || !pinned.chains.has(chainId)) return false
+  // The 0x and liquidity decoders refuse what they cannot name. The 7.15
+  // checks apply to every version: stricter only over-warns.
+  if (selector === '0xd9627aa4') return zxSellToUniswapShown(data.toLowerCase(), chainId, firmwareVersion)
+  if (selector === '0xf305d719' || selector === '0x02751cec') {
+    return uniV2LiquidityShown(selector, data.toLowerCase(), value, firmwareVersion)
+  }
+  return true
   // ponytail: MakerDAO (address+param gated, rare) and the 0x approve-to-LP-pair
   // path intentionally omitted → those over-warn as blind. Add if a flow shows up.
 }
