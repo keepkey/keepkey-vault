@@ -191,6 +191,29 @@ describe('Across verdict regressions', () => {
     expect(usdc.reasons.map((x) => x.text).join('\n')).toContain('Bridge fee: 0.5 USDC (0.05%)')
   })
 
+  // Follow-up to evm-yellow:3: real stablecoin routes stay yellow and named.
+  test('Base USDC to the USDC or USDT Across pays out on each pinned chain is yellow, with both sides named', async () => {
+    const routes: [bigint, string, string][] = [
+      [10n, '0x0b2c639c533813f4aa9d7837caf62653d097ff85', '999.5 USDC'],     // Optimism native USDC
+      [137n, '0x3c499c542cef5e3811e1192ce70d8cc03d5c3359', '999.5 USDC'],    // Polygon native USDC
+      [137n, '0x2791bca1f2de4661ed88a30c99a7a9449aa84174', '999.5 USDC.e'],  // Polygon bridged USDC
+      [43114n, '0xb97ef9ef8734c71904d8002f8b6bc66dd9c48a6e', '999.5 USDC'],
+      [59144n, '0xa219439258ca9da29e9cc4ce5596924745e12b93', '999.5 USDT'],
+      [324n, '0x3355df6d4c9c3035724fd0e3914de96a5a83aaf4', '999.5 USDC.e'],
+    ]
+    for (const [dest, outputToken, received] of routes) {
+      const data = deposit({ inputToken: BASE_USDC, outputToken, inputAmount: 1000_000000n, outputAmount: 999_500000n, dest })
+      const r = assessSigningRisk(req({ value: '0x0', data }))!
+      expect(r.tier).toBe('yellow')
+      expect(r.reasons.map((x) => x.text).join('\n')).toContain(`A relayer pays ${received} to`)
+      expect((await decodeCalldata(POOL, data, 8453))?.fields.find((f) => f.name === 'Recipient gets')?.value).toStartWith(received)
+    }
+    // BNB Smart Chain USDC has 18 decimals.
+    const bsc = deposit({ inputToken: BASE_USDC, outputToken: '0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d', inputAmount: 1000_000000n, outputAmount: 999_5n * 10n ** 17n, dest: 56n })
+    expect(assessSigningRisk(req({ value: '0x0', data: bsc }))!.tier).toBe('yellow')
+    expect(texts(req({ value: '0x0', data: bsc })).join('\n')).toContain('A relayer pays 999.5 USDC to')
+  })
+
   // evm-yellow:4
   test('a "bridge fee" that keeps 99% of the deposit is red and names the relayer that collects it', () => {
     const data = deposit({ inputToken: BASE_WETH, outputToken: ETH_WETH, inputAmount: 10n ** 18n, outputAmount: 10n ** 16n, dest: 1n, relayer: ATTACKER, exclusivity: 3600 })
