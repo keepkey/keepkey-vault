@@ -13,6 +13,7 @@ import type { DeviceStateInfo, AppSettings, EmulatorWalletInfo } from "../../sha
 import { isBitcoinOnlyVariant } from "../../shared/flags"
 import { SelfHostNodePanel } from "./SelfHostNodePanel"
 import { ClearSignStudio } from "./ClearSignStudio"
+import { ClearSignProvidersPanel } from "./ClearSignProvidersPanel"
 import { RngAuditPanel } from "./RngAuditPanel"
 import { BROWSER_AGENT_PROMPT, BROWSER_EXTENSION_URL, BROWSER_AGENT_DOCS_URL } from "../../shared/browser-agent-prompt"
 
@@ -1349,6 +1350,8 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 									</Flex>
 								</Box>
 							)}
+
+							{isPolicyEnabled("AdvancedMode") && <ClearSignProvidersPanel />}
 
 							{isPolicyEnabled("AdvancedMode") && (
 								<Box px="3" py="3" borderRadius="12px" bg="rgba(233,196,106,0.06)" border="1px solid rgba(233,196,106,0.18)">
