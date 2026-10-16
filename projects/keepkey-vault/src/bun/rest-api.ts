@@ -2878,7 +2878,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               kind: 'signer-load', outcome: trusted ? 'loaded' : 'blocked', source: 'rest-api', chain: 'Ethereum',
               label: signer.alias, publicKey: signer.publicKeyHex, fingerprint: signer.fingerprint,
               keyId: signer.keyId, sentToDevice: signerSentToDevice,
-              request: { persist: false, automatic: true },
+              request: { automatic: true },
               ...(trusted ? {} : { error: (loadError as any)?.message || String(loadError) }),
             })
             if (!trusted) {
@@ -2966,7 +2966,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           const icon = body.icon ? parseHex(body.icon, 'icon') : undefined
           if (icon && icon.length > 384) throw new HttpError(400, `icon must be <= 384 bytes, got ${icon.length}`)
           console.log(`[REST] clearsign load-signer: slot=${body.keyId} alias="${body.alias}" pubkey=${body.pubkey}`
-            + `${icon ? ` icon=${icon.length}B ${body.iconWidth}x${body.iconHeight}` : ''}${body.persist ? ' persist' : ''}`)
+            + `${icon ? ` icon=${icon.length}B ${body.iconWidth}x${body.iconHeight}` : ''}`)
           let clearSignSentToDevice = false
           const signerFingerprint = createHash('sha256').update(Buffer.from(pubkey)).digest('hex').slice(0, 8)
           try {
@@ -2981,7 +2981,6 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
                 return (wallet as any).loadClearsignSigner({
                   keyId: body.keyId, pubkey, alias: body.alias,
                   icon, iconWidth: body.iconWidth, iconHeight: body.iconHeight,
-                  persist: body.persist === true,
                 })
               },
               { operation: 'loadClearsignSigner', opLabel: 'Trust Signer', chain: 'Ethereum' },
@@ -2990,7 +2989,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               kind: 'signer-load', outcome: 'loaded', source: 'rest-api', chain: 'Ethereum',
               label: body.alias, publicKey: Buffer.from(pubkey).toString('hex'), fingerprint: signerFingerprint,
               keyId: body.keyId, sentToDevice: clearSignSentToDevice,
-              request: { persist: body.persist === true, iconBytes: icon?.length || 0 },
+              request: { iconBytes: icon?.length || 0 },
             })
             return json({ ok: true, keyId: body.keyId, alias: body.alias })
           } catch (err: any) {
@@ -2998,7 +2997,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               kind: 'signer-load', outcome: 'blocked', source: 'rest-api', chain: 'Ethereum',
               label: body.alias, publicKey: Buffer.from(pubkey).toString('hex'), fingerprint: signerFingerprint,
               keyId: body.keyId, sentToDevice: clearSignSentToDevice,
-              request: { persist: body.persist === true, iconBytes: icon?.length || 0 },
+              request: { iconBytes: icon?.length || 0 },
               error: err?.message || String(err),
             })
             const errMsg = String(err?.message || err || '').toLowerCase()
