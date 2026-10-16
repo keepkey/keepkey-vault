@@ -110,6 +110,20 @@ describe('POST /clearsign/report — Desktop parity', () => {
     expect(r.limitations.map((l) => l.code)).not.toContain('DEVICE_SHOWS_RAW_DATA')
   })
 
+  test('a caller runtime-signer blob on an unknown call: the report still says the device shows raw data', async () => {
+    const tx = { chainId: 1, from: SIGNER, to: `0x${'42'.repeat(20)}`, value: '0x0', data: `0xdeadbeef${'1'.padStart(64, '0')}` }
+    const signingInfo: SigningRequestInfo = { id: 'r', method: '/eth/sign-transaction', appName: 'app', ...tx, firmwareVersion: '7.16.0' }
+    await prepareEvmTxSigningInfo(signingInfo, { ...tx, txMetadata: { signedPayload: '00112233', keyId: 1 } }, '7.16.0')
+    expect(signingInfo.needsBlindSigning).toBe(true)
+    const r = buildEvmPresignReport({
+      signingInfo, deviceConnected: true,
+      simulation: await simulateEvmEffects(tx, 'http://127.0.0.1:9/'),
+      universalRouterFindings: { complete: false, findings: [], limitations: [] },
+      artifactResolution: resolvePromotedEvmArtifact(tx.chainId, tx.to, tx.data),
+    })
+    expect(r.limitations.map((l) => l.code)).toContain('DEVICE_SHOWS_RAW_DATA')
+  })
+
   test('the same swap calldata to an unknown contract stays P1, unnamed, no rows', async () => {
     const r = await report({ ...UR, to: '0x1111111111111111111111111111111111111111' }, '7.15.0')
     expect(r.protectionLevel).toBe('P1')
