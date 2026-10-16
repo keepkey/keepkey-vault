@@ -9,7 +9,7 @@
  * chain and the calldata is a canonical ABI encoding. Anything else returns
  * null and takes the existing generic (blind) path.
  */
-import { REVIEWED_EVM_TOKENS } from './reviewed-evm-tokens'
+import { ACROSS_NAMED_TOKENS, REVIEWED_EVM_TOKENS } from './reviewed-evm-tokens'
 
 /** Across deployments, verbatim from the pinned commit. */
 export const ACROSS_DEPLOYMENTS_PROVENANCE =
@@ -161,7 +161,7 @@ export interface AcrossDepositView {
   integratorTag: string | null
 }
 
-export function acrossDepositView(d: AcrossDepositV3, tokens: TokenNames = REVIEWED_EVM_TOKENS): AcrossDepositView {
+export function acrossDepositView(d: AcrossDepositV3, tokens: TokenNames = { ...ACROSS_NAMED_TOKENS, ...REVIEWED_EVM_TOKENS }): AcrossDepositView {
   const src = BigInt(d.pool.chainId)
   const inTok = knownToken(src, d.inputToken, tokens)
   const outTok = knownToken(d.destinationChainId, d.outputToken, tokens)

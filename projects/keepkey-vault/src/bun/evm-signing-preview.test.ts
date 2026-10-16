@@ -159,6 +159,19 @@ describe('the device does not show it → never green (firmware mirror)', () => 
     }
   })
 
+  test('a token transfer, approve or increaseAllowance that also sends ETH is red; without ETH it is unchanged', async () => {
+    const increase = '0x39509351' + word(PERMIT2.slice(2)) + word('f4240')
+    for (const data of [transfer, approve(PERMIT2), increase]) {
+      const withValue = await verdict(USDC_ETH, data, 1, '7.16.0', TENTH_ETH)
+      expect(withValue.tier).toBe('red')
+      expect(assessSigningRisk(withValue.s)!.reasons.map((r) => r.text))
+        .toContain('Also sends 0.1 ETH to the token contract, which a token transfer or approval does not do.')
+    }
+    const plain = await verdict(USDC_ETH, transfer, 1, '7.16.0')
+    expect(plain.tier).toBe('green')
+    expect(assessSigningRisk(plain.s)!.reasons.some((r) => r.text.startsWith('Also sends'))).toBe(false)
+  })
+
   test('evm-green:4 — the host gates ETH on a token call before the device says "Blocked"', async () => {
     for (const data of [transfer, approve(PERMIT2)]) {
       expect(evmCallRequiresAdvancedMode(USDC_ETH, data, 1, false, undefined, undefined, '7.16.0', TENTH_ETH)).toBe(true)

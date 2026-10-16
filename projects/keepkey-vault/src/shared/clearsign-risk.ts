@@ -16,7 +16,7 @@
 import { evmNativeValue } from './evmFeePreview'
 import { acrossDepositView, decodeAcrossDepositV3, findReviewedAcrossSpokePool, type AcrossDepositV3 } from './acrossDeposit'
 import { RELAY_DEPOSITORY, decodeRelayDeposit, isZeroAddress, type RelayDeposit } from './relayDeposit'
-import { REVIEWED_EVM_TOKENS } from './reviewed-evm-tokens'
+import { ACROSS_NAMED_TOKENS, REVIEWED_EVM_TOKENS } from './reviewed-evm-tokens'
 import type {
   SigningRequestInfo,
   SimulatedHoldings,
@@ -297,8 +297,11 @@ function evmTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void):
   const relay = decodeRelayDeposit(to, data, chainId)
   const thorProtocol = req.calldataDecoded?.source === 'local' ? req.calldataDecoded.dappName : undefined
   const thorSwap = (thorProtocol === 'THORChain' || thorProtocol === 'Mayachain') ? field('Action') : undefined
+  // A standard token reverts a transfer/approve that carries native coin.
+  const coinOnTokenCall = () => { if (sendsCoin) add('high', `Also sends ${native} to the token contract, which a token transfer or approval does not do.`) }
   if ((sel === '0x095ea7b3' || sel === '0x39509351') && addrWord(0) && num(1) !== null) {
     if (token) recognition = 'known'
+    coinOnTokenCall()
     const spender = addrWord(0)! + (addrWord(0) === RELAY_DEPOSITORY ? ' (the Relay Depository)' : ''), v = num(1)!
     const canonicalUniswapSetup = chainId === 42161
       && to === '0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9'
@@ -328,6 +331,7 @@ function evmTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void):
       : `Lets ${addrWord(0)} take ALL of your NFTs in collection ${to}, now and later, without asking you again.`)
   } else if (sel === '0xa9059cbb' && data.length === 138 && addrWord(0) && num(1) !== null) {
     if (token) recognition = 'known'
+    coinOnTokenCall()
     add(token ? 'low' : 'medium', token
       ? `Sends ${amount(num(1)!)} to ${addrWord(0)}.`
       : `Sends ${num(1)} units of token ${to} to ${addrWord(0)}. This computer does not recognize this token.`)
@@ -423,7 +427,7 @@ function relayDeposit(d: RelayDeposit, req: SigningRequestInfo, decodedSent: str
  *  shows it as raw data and AdvancedMode still gates, but a known protocol is
  *  normal, so the line says so instead of "signing blind". */
 function acrossDeposit(d: AcrossDepositV3, req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void) {
-  const v = acrossDepositView(d, EVM_TOKENS)
+  const v = acrossDepositView(d, { ...ACROSS_NAMED_TOKENS, ...EVM_TOKENS })
   const from = (req.from ?? '').toLowerCase()
   let value: bigint | null = null
   try { value = BigInt(req.value === undefined || req.value === '' || req.value === '0x' ? 0 : req.value) } catch { /* unreadable: no claim about it */ }
