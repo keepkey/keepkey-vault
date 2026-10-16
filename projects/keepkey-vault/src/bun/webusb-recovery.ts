@@ -31,6 +31,17 @@ function bounded<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
   ]).finally(() => clearTimeout(timer!))
 }
 
+// Devices whose release failed. A reset that timed out can still be running
+// in libusb, and calling close() on that handle again segfaulted Bun (null
+// pointer) on the next pairing retry. Such a device is never touched again;
+// node-usb hands out a new object after a replug.
+const unreleasable = new WeakSet<object>()
+
+/** True when an earlier release of this device failed: only a replug recovers it. */
+export function isUnreleasable(dev: object): boolean {
+  return unreleasable.has(dev)
+}
+
 /**
  * Close the device; if it stays open, reset it (aborting pending transfers)
  * and keep retrying close until `timeoutMs`. Never throws.
@@ -41,6 +52,7 @@ export async function forceReleaseWebUsb(
   timeoutMs = 3000,
   retryDelayMs = 100,
 ): Promise<boolean> {
+  if (unreleasable.has(dev)) return false
   if (!dev.opened) return true
   const deadline = Date.now() + timeoutMs
   const remaining = () => Math.max(1, deadline - Date.now())
@@ -72,6 +84,7 @@ export async function forceReleaseWebUsb(
 
   if (dev.opened) {
     console.warn('[Engine] WebUSB device could not be released:', lastErr ? errMsg(lastErr) : 'still open')
+    unreleasable.add(dev)
     return false
   }
   console.log('[Engine] WebUSB device released after reset')
