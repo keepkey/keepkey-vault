@@ -143,8 +143,9 @@ export function buildEvmPresignReport(input: {
   /**
    * In-app only: this Desktop is the signer and sends exactly the prepared
    * request, so the report takes the signing overlay's verdict
-   * (evmSigningVerdict). An external caller (POST /clearsign/report) never
-   * gets P4 here: its descriptor is verified only by the device at signing.
+   * (evmSigningVerdict). An external caller (POST /clearsign/report) gets P4
+   * only for a call the firmware shows natively: a descriptor is verified only
+   * by the device at signing.
    */
   signerVerdict?: boolean
 }): ClearSignReport {
@@ -152,8 +153,12 @@ export function buildEvmPresignReport(input: {
   const promoted = artifactResolution.status === 'selected' ? artifactResolution.artifact : undefined
   const reviewed = reviewedEvmDecodeLabel(info)
   const resolution = !promoted && reviewed && artifactResolution.status === 'no-artifact' ? 'reviewed-decoder' as const : artifactResolution.status
-  // A plain transfer has no descriptor to wait for: the device shows it whoever asks.
-  const verdict = input.signerVerdict || isPlainEvmTransfer(info) ? evmSigningVerdict(info, {}, simulation, ur.complete) : undefined
+  // A plain transfer, or a call the firmware decodes itself (an ERC-20 transfer
+  // of a token in its table), has no descriptor to wait for: the device shows
+  // it whoever asks.
+  const firmwareNative = info.deviceClearSigns === true && !info.certifiedEvmSchema
+    && info.calldataDecoded?.insightKeyId !== CERTIFIED_METADATA_KEY_ID
+  const verdict = input.signerVerdict || isPlainEvmTransfer(info) || firmwareNative ? evmSigningVerdict(info, {}, simulation, ur.complete) : undefined
   const report = buildClearSignReport({
     // A supplied descriptor becomes P4 only after the device verifies it
     // during signing. This pre-sign report never self-promotes.

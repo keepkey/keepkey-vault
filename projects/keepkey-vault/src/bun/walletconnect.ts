@@ -17,7 +17,7 @@ import { verifyEvmSigner } from './evm-rpc'
 import { applyEvmTxPreview, evmPriorityFee, recognizedTypedDataSpender } from './evm-signing-preview'
 import { buildSolanaMessageDecodedInfo } from './solana-message-preview'
 import { buildSolanaDecodedInfo } from './solana-clearsign'
-import { applySolanaSigningGates } from './solana-consent'
+import { applySolanaSigningGates, solanaSigningVerdict } from './solana-consent'
 import { simulateEvmEffects } from './evm-effects'
 import { simulateSolanaEffects } from './solana-effects'
 import { buildClearSignReport, solanaDecodedReportFindings } from '../shared/clearsign-report'
@@ -84,8 +84,7 @@ async function attachSolanaTransactionPreview(
     const simulation = await simulateSolanaEffects(transactionBase64, owner, endpoint)
     const decodedFindings = solanaDecodedReportFindings(signingInfo.solanaDecoded)
     signingInfo.clearSignReport = buildClearSignReport({
-      requestedLevel: simulation.status === 'success' ? 'P3' : 'P1',
-      descriptor: { source: 'none', authenticated: false },
+      ...solanaSigningVerdict(signingInfo, simulation, false, { source: 'none', authenticated: false }),
       simulation,
       hostFindings: decodedFindings.findings,
       hostLimitations: decodedFindings.limitations,

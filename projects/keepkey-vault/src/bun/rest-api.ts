@@ -54,6 +54,7 @@ import { assessSigningRisk } from '../shared/clearsign-risk'
 import { applyRestSolanaSigningGates, buildRestSolanaSignRequest, type CertifiedSolanaProof } from './solana-certified-registry'
 import { certifiedTokenIdentities, describeCertifiedSolanaTransaction } from './solana-certified-describe'
 import { simulateSolanaHoldings } from './solana-outflow'
+import { solanaSigningVerdict } from './solana-consent'
 import { createRpcAltFetcher, DEFAULT_SOLANA_RPC_ENDPOINT } from './solana-alt'
 import { utxoDiscoveryKey } from './btc-backend/types'
 import {
@@ -1843,6 +1844,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               // registry. Best-effort — a parse/ALT-RPC failure surfaces an
               // explicit warning in the UI rather than silently falling
               // back to an unflagged simple-transfer dialog.
+              let solanaSimulation: Awaited<ReturnType<typeof simulateSolanaEffects>> | undefined
               if (typeof preview.raw_tx === 'string') {
                 const endpoint = getSetting('solana_rpc_endpoint') || DEFAULT_SOLANA_RPC_ENDPOINT
                 try {
@@ -1867,19 +1869,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
                   const owner = typeof derived === 'string' ? derived : derived?.address
                   if (owner) {
                     signingInfo.from = owner
-                    const simulation = await simulateSolanaEffects(preview.raw_tx, owner, endpoint)
-                    const decodedFindings = solanaDecodedReportFindings(signingInfo.solanaDecoded)
-                    signingInfo.clearSignReport = buildClearSignReport({
-                      requestedLevel: simulation.status === 'success' ? 'P3' : 'P1',
-                      descriptor: {
-                        source: preview.schema ? (preview.certificate ? 'certified' : 'runtime') : 'none',
-                        authenticated: false,
-                        format: preview.schema ? 'KKSOLSC1' : undefined,
-                      },
-                      simulation,
-                      hostFindings: decodedFindings.findings,
-                      hostLimitations: decodedFindings.limitations,
-                    })
+                    solanaSimulation = await simulateSolanaEffects(preview.raw_tx, owner, endpoint)
                   }
                 } catch (e: any) {
                   console.warn('[REST] Solana effect report failed:', e?.message || e)
@@ -1912,6 +1902,25 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
                 // from the reviewed entry the envelope was checked against, so
                 // the overlay shows the same values the device will.
                 signingInfo.solanaCertified = describeCertifiedSolanaTransaction(preview.raw_tx, certifiedProof)
+              }
+              // The report card takes its level from what the device will show,
+              // so it is built once the gates and the certified lookup are in.
+              if (solanaSimulation) {
+                try {
+                  const decodedFindings = solanaDecodedReportFindings(signingInfo.solanaDecoded)
+                  signingInfo.clearSignReport = buildClearSignReport({
+                    ...solanaSigningVerdict(signingInfo, solanaSimulation, Boolean(certifiedProof), {
+                      source: preview.schema ? (preview.certificate ? 'certified' : 'runtime') : 'none',
+                      authenticated: false,
+                      format: preview.schema ? 'KKSOLSC1' : undefined,
+                    }),
+                    simulation: solanaSimulation,
+                    hostFindings: decodedFindings.findings,
+                    hostLimitations: decodedFindings.limitations,
+                  })
+                } catch (e: any) {
+                  console.warn('[REST] Solana effect report failed:', e?.message || e)
+                }
               }
               // Every gate above is now decided. The simulation runs last, on
               // purpose: it is an estimate from an RPC this computer chose, so

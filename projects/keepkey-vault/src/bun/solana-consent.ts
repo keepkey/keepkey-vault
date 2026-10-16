@@ -1,6 +1,8 @@
 import bs58 from 'bs58'
 import { versionCompare } from '../shared/firmware-versions'
-import type { SigningRequestInfo, SolanaTxDecodedInfo, SolanaTxDecodedInstruction } from '../shared/types'
+import type { ClearSignProtectionLevel, SigningRequestInfo, SolanaTxDecodedInfo, SolanaTxDecodedInstruction } from '../shared/types'
+import type { ClearSignDescriptorEvidence } from '../shared/clearsign-report'
+import type { EffectReport } from '../shared/transaction-effects'
 import { supportsCertifiedClearSign } from './solana-certified-policy'
 import {
   parseSolanaMessage,
@@ -239,4 +241,25 @@ export function applySolanaSigningGates(
   )
   info.requiresAdvancedMode = solanaFirmwareRequiresAdvancedMode(rawTxBase64, firmwareVersion, metadata)
   if (info.requiresBlindSigningConsent || info.requiresAdvancedMode) info.needsBlindSigning = true
+}
+
+/**
+ * The report level for a Solana signing overlay, from what the device will
+ * show. Call it after the gates. P4 when a certified envelope the device
+ * verifies is attached, or when the firmware decodes every instruction itself;
+ * otherwise host evidence only (P3 with a simulation, else P1) and `fallback`.
+ */
+export function solanaSigningVerdict(
+  info: SigningRequestInfo, simulation: EffectReport, certified: boolean, fallback: ClearSignDescriptorEvidence,
+): { requestedLevel: ClearSignProtectionLevel; descriptor: ClearSignDescriptorEvidence } {
+  const c = info.solanaCertified
+  if (certified) return {
+    requestedLevel: 'P4',
+    descriptor: { source: 'certified', authenticated: true, format: 'KKSOLSC1', label: c ? `${c.programName} — ${c.instructionName}` : undefined },
+  }
+  if (!info.requiresAdvancedMode && !requiresSolanaBlindSigningConsent(info.solanaDecoded, false)) return {
+    requestedLevel: 'P4',
+    descriptor: { source: 'native', authenticated: true, format: 'FIRMWARE_NATIVE' },
+  }
+  return { requestedLevel: simulation.status === 'success' ? 'P3' : 'P1', descriptor: fallback }
 }
