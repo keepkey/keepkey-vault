@@ -15,7 +15,7 @@ import { utxoPreview } from "../../../shared/utxoPreview"
 import { cosmosDepositPreview } from "../../../shared/cosmosDepositPreview"
 import { cosmosTxPreview } from "../../../shared/cosmosTxPreview"
 import { typedDataRows } from "../../../shared/typedDataRows"
-import { assessSigningRisk, formatCertifiedArg, type RiskLevel } from "../../../shared/clearsign-risk"
+import { assessSigningRisk, formatCertifiedArg, type RiskLevel, type SigningTier } from "../../../shared/clearsign-risk"
 import { ClearSignReportCard } from "../ClearSignReportCard"
 
 interface SigningApprovalProps {
@@ -344,25 +344,30 @@ function RequestClearSignReview({ request }: { request: SigningRequestInfo }) {
 
 // ── Risk bar: level + the payload facts behind it ─────────────────────
 
-const RISK_STYLE: Record<RiskLevel, { color: string; filled: number }> = {
-	low: { color: "var(--teal)", filled: 1 },
-	medium: { color: "var(--gold)", filled: 2 },
-	high: { color: "var(--rose)", filled: 3 },
-	critical: { color: "var(--rose)", filled: 4 },
+const RISK_STYLE: Record<RiskLevel, { color: string }> = {
+	low: { color: "var(--teal)" },
+	medium: { color: "var(--gold)" },
+	high: { color: "var(--rose)" },
+	critical: { color: "var(--rose)" },
+}
+const TIER_STYLE: Record<SigningTier, { color: string; filled: number }> = {
+	green: { color: "var(--teal)", filled: 1 },
+	yellow: { color: "var(--gold)", filled: 2 },
+	red: { color: "var(--rose)", filled: 3 },
 }
 
 function RiskBar({ request, t }: { request: SigningRequestInfo; t: (k: string, f?: string) => string }) {
 	const risk = assessSigningRisk(request)
 	if (!risk) return null
-	const style = RISK_STYLE[risk.level]
+	const style = TIER_STYLE[risk.tier]
 	return (
-		<Flex direction="column" gap="1.5" w="100%" bg="rgba(0,0,0,0.2)" borderRadius="lg" px="3" py="2" data-risk-level={risk.level}>
+		<Flex direction="column" gap="1.5" w="100%" bg="rgba(0,0,0,0.2)" borderRadius="lg" px="3" py="2" data-risk-level={risk.level} data-risk-tier={risk.tier}>
 			<Flex align="center" gap="2">
 				<Text fontSize="xs" fontWeight="700" color={style.color}>
-					{t(`signing.risk_${risk.level}`, risk.headline)}
+					{t(`signing.tier_${risk.tier}`, risk.headline)}
 				</Text>
 				<Flex gap="1" flex="1" minW="60px">
-					{[1, 2, 3, 4].map((i) => (
+					{[1, 2, 3].map((i) => (
 						<Box key={i} flex="1" h="6px" borderRadius="full" bg={i <= style.filled ? style.color : "rgba(255,255,255,0.1)"} />
 					))}
 				</Flex>
@@ -977,6 +982,13 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 	// AdvancedMode gate below is untouched.
 	const acrossDeposit = request.method === '/eth/sign-transaction'
 		? decodeAcrossDepositV3(request.to, request.data, request.chainId) : null
+	// A protocol this computer knows and decodes in full. The device may still
+	// need AdvancedMode for it on this firmware, but it is not "unknown".
+	const knownProtocol = acrossDeposit ? 'Across'
+		: relayBridgeDeposit ? 'Relay'
+		: swapDecision ? decoded!.fields.find(field => field.name === 'Protocol')!.value.replace(/ Router$/, '')
+		: decoded?.fields.some(field => field.name === 'Protocol' && field.value === 'Uniswap Universal Router') ? 'Uniswap'
+		: null
 	const utxo = request.method === '/utxo/sign-transaction' ? utxoPreview(request.rawRequestBody) : undefined
 	const cosmosDeposit = request.method === '/thorchain/sign-amino-deposit'
 		? cosmosDepositPreview(request.rawRequestBody, 'THORChain')
@@ -1261,7 +1273,7 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 						*/}
 						{!isSimpleTransfer && !request.ethMessageDecoded && !isSolanaRequest && (
 							<TrustBadge level={trustLevel} hasSigned={hasSignedBlob} schemaOnly={relayBridgeDeposit}
-								label={acrossDeposit ? t("signing.acrossKnownContract", "Across SpokePool · device shows raw data") : undefined} t={t} />
+								label={acrossDeposit ? t("signing.acrossKnownContract", "Across SpokePool · known contract") : undefined} t={t} />
 						)}
 						<Text fontSize="2xs" color={remaining <= 30 ? "red.400" : "kk.textMuted"} fontWeight={remaining <= 30 ? "600" : "400"}>
 							{timeStr}
@@ -1362,11 +1374,13 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 						onEnable={handleEnableAdvancedMode}
 						onCancel={() => setShowAdvancedConfirm(false)}
 						t={t}
-						title={isSolanaSignMessage ? t("signing.solanaAdvancedModeRequired", "Advanced Mode Required") : undefined}
+						title={isSolanaSignMessage ? t("signing.solanaAdvancedModeRequired", "Advanced Mode Required")
+							: knownProtocol ? t("signing.knownNotOnFirmwareTitle", "Known, not shown on this KeepKey yet") : undefined}
 						description={isSolanaSignMessage
 							? t("signing.solanaAdvancedModeDescription", "Advanced Mode is off, so your KeepKey will reject this raw Solana message. Enable Advanced Mode here before approving.")
-							: acrossDeposit
-								? t("signing.acrossAdvancedModeDescription", "Your KeepKey cannot decode Across bridge deposits yet and will show this call only as raw data. Check the decoded details here, then enable Advanced Mode on the device to sign it.")
+							: knownProtocol
+								// ponytail: English-only, like the risk reasons; t() here has no interpolation.
+								? `KeepKey knows this contract (${knownProtocol}). ${request.firmwareVersion ? `Firmware ${request.firmwareVersion}` : 'This firmware'} cannot show it on the device yet, so signing it needs Advanced Mode. Later firmware may add it.`
 								: undefined}
 						enableLabel={isSolanaSignMessage ? t("signing.enableAdvancedMode", "Enable Advanced Mode") : undefined}
 						error={advancedModeError}

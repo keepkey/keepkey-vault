@@ -1205,6 +1205,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
     return requested ?? false
   }
 
+  const ZCASH_SEND_ROUTES = new Set(['/api/zcash/shielded/send', '/api/zcash/shielded/shield', '/api/zcash/shielded/deshield'])
   const server = Bun.serve({
     port,
     maxRequestBodySize: 1024 * 1024, // 1 MB max (addresses/signing payloads are small)
@@ -1226,8 +1227,10 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
       // Human-gated device ops (signing + the clear-sign trust confirm) block
       // the socket while the user presses the physical button. Disable the idle
-      // timeout for just these requests, not the whole server.
-      if (method === 'POST' && (SIGNING_ROUTES.has(path) || path === '/eth/clearsign/load-signer')) {
+      // timeout for just these requests, not the whole server. Zcash shielded
+      // sends also prove for ~15 s per batch before the device prompt.
+      if (method === 'POST' && (SIGNING_ROUTES.has(path) || path === '/eth/clearsign/load-signer'
+        || ZCASH_SEND_ROUTES.has(path))) {
         server.timeout(req, 0)
       }
 

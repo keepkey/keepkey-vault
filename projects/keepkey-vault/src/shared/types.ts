@@ -1279,7 +1279,6 @@ export interface AppSettings {
   fiatCurrency: FiatCurrency     // display currency (default 'USD')
   numberLocale: string           // number formatting locale (default 'en-US')
   walletConnectEnabled: boolean   // feature flag: WalletConnect dApp support (default OFF)
-  bip85Enabled: boolean          // feature flag: BIP-85 derived seeds (default OFF)
   zcashPrivacyEnabled: boolean   // read-only capability: auto-ON when firmware >= 7.15.0 and this build includes zcash-cli
   hiveEnabled: boolean           // read-only capability: Hive blockchain — auto-ON when firmware >= 7.15.0
   emulatorEnabled: boolean       // feature flag: macOS emulator surface (default OFF — dev-only)
@@ -1804,6 +1803,7 @@ export interface PendingSwap {
   toCaip?: string
   fromAmount: string      // human-readable
   expectedOutput: string  // quote-time estimate; never replace with received output
+  minimumOutput?: string  // quote-time floor; a payout at or above it is the whole swap
   payouts?: Array<{ txid: string; amount: string; asset: string; address?: string }>
   receivedOutput?: string // actual received amount (filled by Pioneer poll once outbound confirms)
   memo: string

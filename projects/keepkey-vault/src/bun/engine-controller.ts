@@ -15,7 +15,7 @@ import { resolveOndeviceFirmwareVersion } from '../shared/firmware-versions'
 import { flashWipeReason, type WipeReason } from '../shared/flash-wipe'
 import { EmulatorKeepKeyAdapter } from './emulator-transport'
 import { requestUnlock, isTransportTimeout, UNLOCK_TIMEOUT_MESSAGE } from './pin-unlock'
-import { forceReleaseWebUsb } from './webusb-recovery'
+import { forceReleaseWebUsb, isUnreleasable } from './webusb-recovery'
 import type { DeviceFailure } from './device-refusal'
 import { getActiveFlashName, getEmulatorStatus } from './emulator'
 
@@ -1134,32 +1134,39 @@ export class EngineController extends EventEmitter {
         }
         // A previous wallet dropped with a transfer still pending leaves this
         // (cached) device half-open; release it or pairing loops forever.
-        if (webUsbDevice.opened) {
+        if (!isUnreleasable(webUsbDevice) && webUsbDevice.opened) {
           console.warn('[Engine] WebUSB device already open before pairing — releasing stale handle')
           await forceReleaseWebUsb(webUsbDevice)
         }
-        console.log('[Engine] WebUSB device found, attempting pairRawDevice...')
-        try {
-          const wallet = await withTimeout(
-            this.webUsbAdapter.pairRawDevice(webUsbDevice),
-            PAIR_TIMEOUT_MS,
-            'WebUSB pairRawDevice'
-          )
-          if (wallet) {
-            this.activeTransport = 'webusb'
-            console.log('[Engine] Paired via WebUSB')
-            return { wallet, usbDetected: true, keepKeyOnBus, permissionDenied: false, error: null }
-          }
-          console.warn('[Engine] WebUSB pairRawDevice returned falsy')
-        } catch (err: any) {
-          lastError = err?.message || String(err)
-          console.warn('[Engine] WebUSB pair failed:', lastError)
-          // Close the raw USB device so its `opened` flag resets — without this,
-          // the next retry sees opened=true and throws "already-connected".
-          await forceReleaseWebUsb(webUsbDevice)
-          if (isPermissionError(lastError)) {
-            permissionDenied = true
-            console.warn('[Engine] WebUSB open denied (likely missing udev rules), trying HID...')
+        if (isUnreleasable(webUsbDevice)) {
+          // Release failed (now or on an earlier retry). Touching this handle
+          // again crashed the app, so wait for the user to replug instead.
+          lastError = 'Your KeepKey is not responding. Unplug it and plug it back in.'
+          console.warn('[Engine] WebUSB device stuck — waiting for a replug')
+        } else {
+          console.log('[Engine] WebUSB device found, attempting pairRawDevice...')
+          try {
+            const wallet = await withTimeout(
+              this.webUsbAdapter.pairRawDevice(webUsbDevice),
+              PAIR_TIMEOUT_MS,
+              'WebUSB pairRawDevice'
+            )
+            if (wallet) {
+              this.activeTransport = 'webusb'
+              console.log('[Engine] Paired via WebUSB')
+              return { wallet, usbDetected: true, keepKeyOnBus, permissionDenied: false, error: null }
+            }
+            console.warn('[Engine] WebUSB pairRawDevice returned falsy')
+          } catch (err: any) {
+            lastError = err?.message || String(err)
+            console.warn('[Engine] WebUSB pair failed:', lastError)
+            // Close the raw USB device so its `opened` flag resets — without this,
+            // the next retry sees opened=true and throws "already-connected".
+            await forceReleaseWebUsb(webUsbDevice)
+            if (isPermissionError(lastError)) {
+              permissionDenied = true
+              console.warn('[Engine] WebUSB open denied (likely missing udev rules), trying HID...')
+            }
           }
         }
       }

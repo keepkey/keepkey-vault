@@ -14,6 +14,12 @@ import { ZCASH_V2_CSS } from "./zcash-v2-styles"
 import { CHAINS } from "../../shared/chains"
 import type { AddressBookEntry, ZcashTexPayment, ZcashTxBatch } from "../../shared/types"
 
+// No client timeout for Zcash sends. Each batch is a Halo 2 proof plus device
+// signing, so a split send can run well past 10 minutes; a timeout here showed
+// "failed" while the backend went on to broadcast, inviting a second send.
+// Progress arrives through the *-progress messages.
+const ZCASH_TX_TIMEOUT = 0
+
 /** CAIP-2 network + native asset CAIP shared by Zcash transparent + shielded
  *  entries. The address book keys recipients off the network; type (private vs
  *  transparent) is read from the address prefix, not the network. */
@@ -578,7 +584,7 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 	const handleTexRecovery = useCallback(async (index: number, action: "zcashTexComplete" | "zcashTexShieldBack") => {
 		setTexBusy(index); setTexError(null); setSendStep("building")
 		try {
-			const result = await rpcRequest<{ txid: string }>(action, { index }, 600000)
+			const result = await rpcRequest<{ txid: string }>(action, { index }, ZCASH_TX_TIMEOUT)
 			setSendResult(result.txid)
 			refreshBalance()
 		} catch (e: any) { setTexError(e.message || "TEX payment failed") }
@@ -596,9 +602,8 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 		try {
 			const zatoshis = parseZatoshis(amount)
 			if (memo && new TextEncoder().encode(memo).length > 512) throw new Error(t("memoTooLong"))
-			// 10-min timeout — Halo 2 proof + on-device Orchard signing can run >60s
 			const result = await rpcRequest<{ txid: string; txids?: string[]; unsentZat?: number; unsentReason?: string }>("zcashShieldedSend",
-				{ recipient, amount: zatoshis, memo: memo || undefined }, 600000)
+				{ recipient, amount: zatoshis, memo: memo || undefined }, ZCASH_TX_TIMEOUT)
 			setSendResult(result.txid)
 			if (result.unsentZat) {
 				// Part went out. Leave only the remainder, so sending again cannot pay twice.
@@ -617,7 +622,7 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 		try {
 			const zatoshis = parseZatoshis(shieldAmount)
 			const result = await rpcRequest<{ txid: string }>("zcashShieldZec",
-				{ amount: zatoshis }, 600000)
+				{ amount: zatoshis }, ZCASH_TX_TIMEOUT)
 			setShieldResult(result.txid); setShieldAmount("")
 			refreshBalance(); refreshTransparentBalance()
 		} catch (e: any) { setShieldError(e.message || "Shield failed") }
@@ -634,7 +639,7 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 		try {
 			const zatoshis = parseZatoshis(deshieldAmount)
 			const result = await rpcRequest<{ txid: string; txids?: string[]; unsentZat?: number; unsentReason?: string }>("zcashDeshieldZec",
-				{ recipient: deshieldRecipient, amount: zatoshis }, 600000)
+				{ recipient: deshieldRecipient, amount: zatoshis }, ZCASH_TX_TIMEOUT)
 			setDeshieldResult(result.txid)
 			if (result.unsentZat) {
 				setDeshieldAmount(formatZec(result.unsentZat))

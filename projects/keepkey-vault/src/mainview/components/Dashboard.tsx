@@ -762,7 +762,6 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 	const [showReports, setShowReports] = useState(false)
 	const [showAudit, setShowAudit] = useState(false)
 	const [showBip85, setShowBip85] = useState(false)
-	const [bip85Enabled, setBip85Enabled] = useState(false)
 	const [zcashEnabled, setZcashEnabled] = useState(false)
 	const [hiveEnabled, setHiveEnabled] = useState(false)
 	// One-time passphrase/hidden-wallet intro. `passphraseIntroSeen` starts true so
@@ -943,7 +942,6 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 	const refreshFeatureFlags = useCallback(() => {
 		rpcRequest<AppSettings>('getAppSettings', undefined, 5000)
 			.then(s => {
-				setBip85Enabled(s.bip85Enabled)
 				setZcashEnabled(s.zcashPrivacyEnabled)
 				setHiveEnabled(s.hiveEnabled)
 				setPassphraseIntroSeen(s.passphraseIntroShown)
@@ -3219,36 +3217,38 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 				/>
 			)}
 
-			{/* BIP-85 lock icon — bottom right (only when feature enabled AND firmware >= 7.16.0) */}
-			{bip85Enabled && !watchOnly && firmwareVersion && versionCompare(firmwareVersion, '7.16.0') >= 0 && (
+			{/* BIP-85 Seed Vault — firmware >= 7.16.0. Stacked above the Activity
+			    pill (ActivityTracker, fixed bottom-right) so the two never overlap. */}
+			{!watchOnly && firmwareVersion && versionCompare(firmwareVersion, '7.16.0') >= 0 && (
 				<Box
 					as="button"
 					position="fixed"
-					bottom="24px"
-					right="24px"
+					bottom="76px"
+					right="28px"
 					w="52px"
 					h="52px"
 					borderRadius="full"
-					bg="rgba(233,196,106,0.15)"
-					border="1px solid"
-					borderColor="rgba(233,196,106,0.3)"
+					bg="rgba(233,196,106,0.22)"
+					border="1.5px solid"
+					borderColor="rgba(233,196,106,0.7)"
+					boxShadow="0 0 16px rgba(233,196,106,0.25)"
 					display="flex"
 					alignItems="center"
 					justifyContent="center"
 					cursor="pointer"
 					transition="all 0.2s"
 					_hover={{
-						bg: "rgba(233,196,106,0.25)",
+						bg: "rgba(233,196,106,0.32)",
 						borderColor: "kk.gold",
 						transform: "scale(1.08)",
-						boxShadow: "0 0 20px rgba(233,196,106,0.3)",
+						boxShadow: "0 0 24px rgba(233,196,106,0.4)",
 					}}
 					_active={{ transform: "scale(0.95)" }}
 					onClick={() => setShowBip85(true)}
 					zIndex={10}
 					title="BIP-85 Seed Vault"
 				>
-					<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+					<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
 						<rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
 						<path d="M7 11V7a5 5 0 0 1 10 0v4" />
 					</svg>

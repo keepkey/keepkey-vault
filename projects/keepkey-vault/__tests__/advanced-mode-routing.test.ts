@@ -100,3 +100,24 @@ describe('Solana schema fallback preserves the outflow check', () => {
     expect(helper.indexOf('checkSolanaOutflow')).toBeLessThan(helper.indexOf('SOLANA_BLIND_SIGNING_REQUIRED'))
   })
 })
+
+describe('ERC-20 approvals are checked before the device sees them', () => {
+  // An approve for a token the firmware does not know, with no certified
+  // entry, is refused on the device as a bare "Action cancelled". Each approve
+  // must pass the same AdvancedMode prediction as the swap, so it reaches the
+  // opt-in panel instead.
+  const swapSource = readFileSync(new URL('../src/bun/swap.ts', import.meta.url), 'utf8')
+
+  test('every approve signing site runs the gate first', () => {
+    const parts = swapSource.split("stage('approve-signing')")
+    expect(parts.length - 1).toBe(2)
+    for (const before of parts.slice(0, -1)) {
+      expect(before.slice(-300)).toMatch(/assert(EvmSignable|Signable)\((result\.)?approveTx\)/)
+    }
+  })
+
+  test('the gate throws the message the panel routes on', () => {
+    const gate = swapSource.slice(swapSource.indexOf('const assertEvmSignable'))
+    expect(gate.slice(0, 1200)).toContain('throw new Error(evmAdvancedModeRequiredMessage(')
+  })
+})

@@ -6,10 +6,10 @@ import { LanguageSelector } from "../i18n/LanguageSelector"
 import { CurrencySelector } from "./CurrencySelector"
 import { rpcRequest, onRpcMessage } from "../lib/rpc"
 import { IS_MAC, IS_WINDOWS } from "../lib/platform"
-import { AUTO_LOCK_CHOICES, DEFAULT_AUTO_LOCK_MS } from "../../shared/flags"
+import { AUTO_LOCK_CHOICES, DEFAULT_AUTO_LOCK_MS, PASSKEYS_UI } from "../../shared/flags"
+import { versionCompare } from "../../shared/firmware-versions"
 import { Z } from "../lib/z-index"
 import type { DeviceStateInfo, AppSettings, EmulatorWalletInfo } from "../../shared/types"
-import { versionCompare } from "../../shared/firmware-versions"
 import { isBitcoinOnlyVariant } from "../../shared/flags"
 import { SelfHostNodePanel } from "./SelfHostNodePanel"
 import { ClearSignStudio } from "./ClearSignStudio"
@@ -171,12 +171,11 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 	const [togglingPassphrase, setTogglingPassphrase] = useState(false)
 	const [togglingPolicy, setTogglingPolicy] = useState("")
 	const [browserPromptStatus, setBrowserPromptStatus] = useState("")
-	const [appSettings, setAppSettings] = useState<AppSettings>({ restApiEnabled: false, pioneerApiBase: '', pioneerServers: [], activePioneerServer: '', fiatCurrency: 'USD', numberLocale: 'en-US', walletConnectEnabled: false, bip85Enabled: false, zcashPrivacyEnabled: false, hiveEnabled: false, emulatorEnabled: false, offlineMode: false, btcNodeEnabled: false, btcNodeType: 'blockbook', btcNodeUrl: '', btcOnboardingShown: false, preReleaseUpdates: false, alphaFirmware: false, addressBookClearsignEnabled: false, privateModeEnabled: false, passphraseIntroShown: false, evmSimulationRpcUrls: {} })
+	const [appSettings, setAppSettings] = useState<AppSettings>({ restApiEnabled: false, pioneerApiBase: '', pioneerServers: [], activePioneerServer: '', fiatCurrency: 'USD', numberLocale: 'en-US', walletConnectEnabled: false, zcashPrivacyEnabled: false, hiveEnabled: false, emulatorEnabled: false, offlineMode: false, btcNodeEnabled: false, btcNodeType: 'blockbook', btcNodeUrl: '', btcOnboardingShown: false, preReleaseUpdates: false, alphaFirmware: false, addressBookClearsignEnabled: false, privateModeEnabled: false, passphraseIntroShown: false, evmSimulationRpcUrls: {} })
 	const [togglingRestApi, setTogglingRestApi] = useState(false)
 	const [windowFocusState, setWindowFocusState] = useState<{ refs: number; alwaysOnTop: boolean } | null>(null)
 	const [releasingWindowFocus, setReleasingWindowFocus] = useState(false)
 	const [togglingWalletConnect, setTogglingWalletConnect] = useState(false)
-	const [togglingBip85, setTogglingBip85] = useState(false)
 	const [togglingEmulator, setTogglingEmulator] = useState(false)
 	const [togglingPreRelease, setTogglingPreRelease] = useState(false)
 	const [togglingAlphaFirmware, setTogglingAlphaFirmware] = useState(false)
@@ -341,15 +340,6 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 			setAppSettings(result)
 		} catch (e: any) { console.error("setWalletConnectEnabled:", e) }
 		setTogglingWalletConnect(false)
-	}, [])
-
-	const toggleBip85 = useCallback(async (enabled: boolean) => {
-		setTogglingBip85(true)
-		try {
-			const result = await rpcRequest<AppSettings>("setBip85Enabled", { enabled }, 10000)
-			setAppSettings(result)
-		} catch (e: any) { console.error("setBip85Enabled:", e) }
-		setTogglingBip85(false)
 	}, [])
 
 	const toggleEmulator = useCallback(async (enabled: boolean) => {
@@ -1374,6 +1364,34 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 						</VStack>
 					</Section>
 
+					{/* ── Passkeys (7.16+, behind PASSKEYS_UI) ─────────── */}
+					{/* ponytail: explanation + a test site only. The firmware has no way to
+					    list or delete passkeys, so there is nothing to manage here yet. */}
+					{PASSKEYS_UI && !!deviceState.firmwareVersion && versionCompare(deviceState.firmwareVersion, '7.16.0') >= 0 && (
+						<Section title="Passkeys" defaultOpen={false}>
+							<VStack gap="3" align="stretch">
+								<Text fontSize="sm" color="kk.textSecondary" lineHeight="1.5">
+									Your KeepKey can be the passkey for websites: you sign in by pressing its button, with no password. It works while the KeepKey is plugged in, even before you enter your PIN.
+								</Text>
+								<Box px="3" py="3" borderRadius="12px" bg="rgba(255,255,255,0.03)" border="1px solid rgba(255,255,255,0.08)">
+									<Text fontSize="sm" color="kk.textPrimary" fontWeight="600">How to use it</Text>
+									<Text fontSize="xs" color="kk.textSecondary" mt="1" lineHeight="1.5">
+										When a site offers a passkey, choose "Use a security key" (or "another device", then USB security key). Confirm on your KeepKey.
+									</Text>
+								</Box>
+								<Box px="3" py="3" borderRadius="12px" bg="rgba(245,163,59,0.06)" border="1px solid rgba(245,163,59,0.2)">
+									<Text fontSize="sm" color="kk.textPrimary" fontWeight="600">Good to know</Text>
+									<Text fontSize="xs" color="kk.textSecondary" mt="1" lineHeight="1.5">
+										It remembers the account for up to 4 sites; sites where you type your username first have no limit. Wiping or recovering this KeepKey removes its passkeys, and your recovery sentence does not bring them back. Keep another way to sign in to each site.
+									</Text>
+								</Box>
+								<Flex justify="flex-end">
+									<Button size="sm" variant="outline" borderColor="rgba(233,196,106,0.45)" color="kk.gold" onClick={() => rpcRequest("openUrl", { url: "https://webauthn.io" }).catch(() => {})}>Try it on webauthn.io</Button>
+								</Flex>
+							</VStack>
+						</Section>
+					)}
+
 					{/* ── Application Settings ────────────────────────── */}
 					<Section title={t("application")} defaultOpen={false}>
 						<VStack gap="4" align="stretch">
@@ -1763,36 +1781,9 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 								/>
 							</Flex>}
 
-							{/* BIP-85 Derived Seeds toggle — requires firmware >= 7.16.0 */}
-							{(() => {
-								const bip85FwOk = !!deviceState.firmwareVersion && versionCompare(deviceState.firmwareVersion, '7.16.0') >= 0
-								return (
-									<Flex justify="space-between" align="center" opacity={bip85FwOk ? 1 : 0.45}>
-										<Flex align="center" gap="3">
-											<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(233,196,106,0.1)">
-												<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-													<rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-													<path d="M7 11V7a5 5 0 0 1 10 0v4" />
-												</svg>
-											</Flex>
-											<Box>
-												<Text fontSize="md" color="kk.textPrimary" fontWeight="500">{t("bip85Feature")}</Text>
-												<Text fontSize="sm" color={bip85FwOk ? "kk.textSecondary" : "kk.textTertiary"} mt="0.5">
-													{bip85FwOk ? t("bip85FeatureDescription") : "Requires firmware 7.16.0 or later"}
-												</Text>
-											</Box>
-										</Flex>
-										<Toggle
-											checked={bip85FwOk && appSettings.bip85Enabled}
-											onChange={toggleBip85}
-											disabled={!bip85FwOk || togglingBip85}
-										/>
-									</Flex>
-								)
-							})()}
-
 							{/* Zcash + Hive have no toggles — both turn on automatically on
-							    firmware >= 7.15.0 (derived in bun/index.ts on device ready). */}
+							    firmware >= 7.15.0 (derived in bun/index.ts on device ready).
+							    BIP-85 likewise: the Dashboard shows it on firmware >= 7.16.0. */}
 
 							{/* Emulator toggle — dev tool, default off. Supported on macOS
 							    (Keychain) and Windows (DPAPI); Linux has no key store wired up. */}

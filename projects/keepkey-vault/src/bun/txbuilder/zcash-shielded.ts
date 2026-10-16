@@ -13,6 +13,7 @@
 
 import { sendCommand, isSidecarReady, startSidecar, setCachedFvk, hasFvkLoaded, beginZcashSend, endZcashSend } from "../zcash-sidecar"
 import { partialSend, type SplitSendResult } from "./zcash-batching"
+import { getSetting, setSetting } from "../db"
 
 export interface ShieldedSendParams {
 	/** Hex-encoded Orchard recipient address (43 bytes) */
@@ -120,14 +121,67 @@ export async function initializeOrchardFromSeed(seedHex: string, account: number
 /** @deprecated Use initializeOrchardFromDevice for production */
 export const initializeOrchard = initializeOrchardFromSeed
 
+// Firmware 7.15+ asks for a button press on every export, and the device-match
+// check runs before every scan and send. So each wallet's key is remembered
+// under its identity, the ETH m/44'/60'/0'/0/0 address, which the device gives
+// without a button. Another seed or passphrase has another address and is asked
+// once. Hidden wallets stay in memory only.
+const rememberedFvks = new Map<string, any>()
+let fvkDiskAllowed = () => false
+
+/** Whether a remembered key may also be saved to the settings DB. */
+export function setFvkDiskAllowed(allowed: () => boolean): void {
+	fvkDiskAllowed = allowed
+}
+
+async function walletIdentity(wallet: any): Promise<string | null> {
+	try {
+		const r = await wallet.ethGetAddress({ addressNList: [0x80000000 + 44, 0x80000000 + 60, 0x80000000, 0, 0], showDisplay: false })
+		return (typeof r === "string" ? r : r?.address)?.toLowerCase() || null
+	} catch {
+		return null
+	}
+}
+
+function savedFvk(key: string): any | null {
+	const raw = getSetting(key)
+	if (!raw) return null
+	try {
+		const { ak, nk, rivk } = JSON.parse(raw)
+		return { ak: Buffer.from(ak, "hex"), nk: Buffer.from(nk, "hex"), rivk: Buffer.from(rivk, "hex") }
+	} catch {
+		return null
+	}
+}
+
 /**
- * Read the Orchard viewing key from the device.
- *
- * Firmware 7.15+ asks for a button press on every export ("Export Zcash View
- * Key"). The emulator has no button, so its window must offer Confirm/Reject
- * or the request waits forever. Every export goes through here.
+ * The Orchard viewing key of the connected wallet: remembered, or read from
+ * the device. Every export goes through here.
  */
 export async function exportOrchardFvk(wallet: any, account: number = 0): Promise<any> {
+	const id = await walletIdentity(wallet)
+	const key = id ? `zcash_fvk_${id}_${account}` : null
+	if (key) {
+		const known = rememberedFvks.get(key) ?? (fvkDiskAllowed() ? savedFvk(key) : null)
+		if (known) {
+			rememberedFvks.set(key, known)
+			return known
+		}
+	}
+	const fvk = await readOrchardFvk(wallet, account)
+	if (key && fvk?.ak && fvk?.nk && fvk?.rivk) {
+		rememberedFvks.set(key, fvk)
+		const hex = (b: Uint8Array) => Buffer.from(b).toString("hex")
+		if (fvkDiskAllowed()) setSetting(key, JSON.stringify({ ak: hex(fvk.ak), nk: hex(fvk.nk), rivk: hex(fvk.rivk) }))
+	}
+	return fvk
+}
+
+/**
+ * Read the key from the device ("Export Zcash View Key"). The emulator has no
+ * button, so its window must offer Confirm/Reject or the request waits forever.
+ */
+async function readOrchardFvk(wallet: any, account: number): Promise<any> {
 	const read = () => wallet.zcashGetOrchardFVK(account)
 	// Only the emulator's transport lets the host answer a button request.
 	const delegate = wallet.transport?.delegate

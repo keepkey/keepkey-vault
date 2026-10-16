@@ -378,17 +378,21 @@ const RIVERPROOF_INSTRUCTIONS: Record<string, Omit<SolanaSchemaSpec, 'programId'
     intent: 'Leave poker table {a0}; your seat balance comes back from vault {a2}',
   },
 }
-/** CBuVrP keeps its original keys (above) for the instructions they cover. */
-const RIVERPROOF_DEPLOYMENTS: Array<[suffix: string, programId: string, skip: string[]]> = [
-  ['', 'CBuVrPT34qFWJ7vdTNK2cKzpnKkmnc9ZQwuS2oiFYpkt', []],
-  ['V2', 'psDvYRCi8C1JuinSmVjNicZmqzE5XAi41x6U8CnBB6a', []],
-  ['V3', '3EB6JJ2k1yPdg9qokViBdSWq4jaEVG4wiKbS8Pw3FmWQ', []],
+/** CBuVrP keeps its original keys (above) for the instructions they cover.
+ * `signedV1` were signed in the 2026-10-16 ceremony without an intent: those
+ * keys serialize as v1 so they match the signed bytes. */
+const RIVERPROOF_DEPLOYMENTS: Array<[suffix: string, programId: string, skip: string[], signedV1: string[]]> = [
+  ['', 'CBuVrPT34qFWJ7vdTNK2cKzpnKkmnc9ZQwuS2oiFYpkt', [],
+    ['RegisterPokerTournament', 'EnterPokerTournament', 'AuthorizePokerSession', 'SetPokerReady']],
+  ['V2', 'psDvYRCi8C1JuinSmVjNicZmqzE5XAi41x6U8CnBB6a', [], []],
+  ['V3', '3EB6JJ2k1yPdg9qokViBdSWq4jaEVG4wiKbS8Pw3FmWQ', [], []],
 ]
 const RIVERPROOF_CATALOG: Record<string, SolanaSchemaSpec> = Object.fromEntries(
-  RIVERPROOF_DEPLOYMENTS.flatMap(([suffix, programId, skip]) =>
+  RIVERPROOF_DEPLOYMENTS.flatMap(([suffix, programId, skip, signedV1]) =>
     Object.entries(RIVERPROOF_INSTRUCTIONS)
       .filter(([name]) => !skip.includes(name))
-      .map(([name, spec]) => [`soltoshidice${name}${suffix}`, { ...spec, programId }])))
+      .map(([name, { intent, ...spec }]) => [`soltoshidice${name}${suffix}`,
+        { ...spec, programId, ...(signedV1.includes(name) ? {} : { intent }) }])))
 
 export const CERTIFIED_SOLANA_CATALOG: Record<string, SolanaSchemaSpec> = {
   pumpAmmBuy: {
@@ -397,18 +401,24 @@ export const CERTIFIED_SOLANA_CATALOG: Record<string, SolanaSchemaSpec> = {
     provenance: { protocol: 'https://github.com/pump-fun/pump-public-docs/blob/main/idl/pump_amm.json' },
     programId: 'pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA',
     discriminator: Buffer.from('66063d1201daebea', 'hex'),
-    programName: 'Pump.fun',
-    instructionName: 'Buy tokens',
+    // Wording as signed in the 2026-10-16 ceremony (v1, no intent): the
+    // device gets exactly those bytes, so this must serialize to them.
+    programName: 'Pump AMM',
+    instructionName: 'Buy',
     // Exact official IDL: u64 base_amount_out, u64 max_quote_amount_in,
     // OptionBool (a one-byte bool). Amounts are raw token units; the two
     // signed mint accounts identify their units without trusting a ticker.
     args: [
-      { type: ARG_TOKEN_AMOUNT, label: 'You get', mintAccount: 3, role: ROLE_RECEIVE_EXACT },
-      { type: ARG_TOKEN_AMOUNT, label: 'Pay at most', mintAccount: 4, role: ROLE_SPEND_MAX },
+      { type: ARG_U64, label: 'Base units out' },
+      { type: ARG_U64, label: 'Max quote units' },
       { type: ARG_U8, label: 'Track volume' },
     ],
-    // base_amount_out is exact; max_quote_amount_in caps the spend. Mints: accounts 3 and 4 (a native quote mint shows as SOL by firmware rule).
-    intent: 'Buy {0} for at most {1}',
+    accounts: [
+      { index: 3, label: 'Buy token mint' },
+      { index: 4, label: 'Pay token mint' },
+      { index: 5, label: 'Receive account' },
+      { index: 6, label: 'Pay account' },
+    ],
   },
   pumpAmmSell: {
     protocol: 'Pump',
@@ -478,14 +488,13 @@ export const CERTIFIED_SOLANA_CATALOG: Record<string, SolanaSchemaSpec> = {
       { type: ARG_U64, label: 'Round' },
       { type: ARG_U64, label: 'Revision' },
       { type: ARG_U8, label: 'Seat' },
-      { type: ARG_TOKEN_AMOUNT, label: 'Buy-in', mintAccount: 3, role: ROLE_SPEND_EXACT },
+      { type: ARG_TOKEN_AMOUNT, label: 'Buy-in', mintAccount: 3 },
       { type: ARG_PUBKEY, label: 'Session key' },
       { type: ARG_DURATION, label: 'Expires in' },
-      { type: ARG_TOKEN_AMOUNT, label: 'Allowance', mintAccount: 3, role: ROLE_SPEND_MAX },
-      { type: ARG_TOKEN_AMOUNT, label: 'Max wager', mintAccount: 3, role: ROLE_CAP },
+      { type: ARG_TOKEN_AMOUNT, label: 'Allowance', mintAccount: 3 },
+      { type: ARG_TOKEN_AMOUNT, label: 'Max wager', mintAccount: 3 },
     ],
-    // The session key bets for you: allowance is its total budget, max wager each bet's cap (encoder evidence above).
-    intent: 'Join blackjack seat {2} for {3}; key {4} may bet {7} each, {6} total, for {5}',
+    // As signed in the 2026-10-16 ceremony: v2, no roles or intent.
   },
   soltoshidiceCeeloBet: {
     protocol: 'SoltoshiDICE',
@@ -557,25 +566,23 @@ export const CERTIFIED_SOLANA_CATALOG: Record<string, SolanaSchemaSpec> = {
     instructionName: 'Cee-lo place bet',
     args: [
       { type: ARG_U64, label: 'Round' },
-      { type: ARG_TOKEN_AMOUNT, label: 'Wager', mintAccount: 5, role: ROLE_SPEND_EXACT },
+      { type: ARG_TOKEN_AMOUNT, label: 'Wager', mintAccount: 5 },
       { type: ARG_U8, label: 'Protocol' },
-      { type: ARG_LAMPORTS, label: 'SOL deposit', role: ROLE_SPEND_EXACT },
+      { type: ARG_LAMPORTS, label: 'SOL deposit' },
     ],
-    // 'refundable' is the dapp's own word for the deposit (evidence above).
-    intent: 'Bet {1} on Cee-lo round {0}, plus a refundable {3} deposit',
+    // As signed in the 2026-10-16 ceremony: v2, no roles or intent.
   },
   relayDepositNative: {
     programId: '99vQwtBwYtrqqD9YSXbdum3KBdxPAVxYTaQ3cfnJSrN2',
     discriminator: Buffer.from('0d9e0ddf5fd51c06', 'hex'),
-    programName: 'Relay',
-    instructionName: 'Bridge deposit',
+    // As signed in the 2026-10-16 ceremony: v1, no role or intent.
+    programName: 'Relay Bridge',
+    instructionName: 'depositNative',
     args: [
-      { type: ARG_LAMPORTS, label: 'Amount', role: ROLE_SPEND_EXACT },
+      { type: ARG_LAMPORTS, label: 'Amount' },
       { type: ARG_OPAQUE32, label: 'Order' },
     ],
     accounts: [{ index: 3, label: 'Vault' }],
-    // What arrives on the other chain is Relay's obligation, not in these bytes.
-    intent: 'Deposit {0} into Relay vault {a0} to bridge; delivery is by Relay',
   },
   relayDepositToken: {
     programId: '99vQwtBwYtrqqD9YSXbdum3KBdxPAVxYTaQ3cfnJSrN2',

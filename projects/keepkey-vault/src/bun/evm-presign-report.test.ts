@@ -66,8 +66,8 @@ describe('POST /clearsign/report — Desktop parity', () => {
     expect(r.descriptor).toMatchObject({ source: 'none', authenticated: false, label: 'Uniswap Universal Router swap', resolution: 'reviewed-decoder' })
     const desktop = await desktopRisk(UR, '7.15.0')
     expect(risk(r)).toEqual(desktop.reasons.map((x) => x.text))
-    expect(r.findings[0].message).toContain('You would be signing blind')
-    expect(risk(r).join('\n')).toContain('This computer reads it as: Swaps 300 USDC for at least 0.108123518386717195 ETH through the Uniswap Universal Router')
+    expect(r.findings[0].message).toContain('Swaps 300 USDC for at least 0.108123518386717195 ETH through the Uniswap Universal Router')
+    expect(r.findings[0].message).toContain('cannot show this swap on the device yet')
     expect(rows(r)).toContain('Action: Swap 300 USDC for at least 0.108123518386717195 ETH')
     expect(rows(r)).toContain('Minimum output: 0.108123518386717195 ETH')
     expect(rows(r).some((x) => x.startsWith('Deadline: '))).toBe(true)
@@ -81,8 +81,8 @@ describe('POST /clearsign/report — Desktop parity', () => {
     expect(r.descriptor).toMatchObject({ label: 'Across bridge deposit', resolution: 'reviewed-decoder' })
     const desktop = await desktopRisk(ACROSS, '7.15.0')
     expect(risk(r)).toEqual(desktop.reasons.map((x) => x.text))
-    expect(r.findings[0].message).toContain('Across bridge deposit to the Across SpokePool on Base. Your KeepKey cannot decode bridge deposits yet')
-    expect(r.findings[0].severity).toBe('danger')
+    expect(r.findings[0].message).toContain('Across bridge deposit to the Across SpokePool on Base, a contract KeepKey knows')
+    expect(r.findings[0].severity).not.toBe('danger')
     expect(rows(r)).toContain('Action: Across bridge deposit: Base → Ethereum (chain id 1)')
     expect(rows(r).some((x) => x.startsWith('Recipient gets: '))).toBe(true)
     expect(r.limitations.map((l) => l.code)).toContain('DEVICE_SHOWS_RAW_DATA')
@@ -95,7 +95,7 @@ describe('POST /clearsign/report — Desktop parity', () => {
     const codes = r.limitations.map((l) => l.code)
     expect(codes).toContain('DEVICE_NOT_CONNECTED')
     expect(codes).not.toContain('DEVICE_SHOWS_RAW_DATA')
-    expect(r.findings[0].message).toContain('You would be signing blind')
+    expect(r.findings[0].message).toContain('cannot show this swap on the device yet')
   })
 
   test('the same swap calldata to an unknown contract stays P1, unnamed, no rows', async () => {
@@ -184,7 +184,7 @@ describe('in-app swap card — the Desktop signing verdict for the same bytes', 
     const r = await inApp(tx, '7.16.0')
     expect(r.protectionLevel).toBe('P2')
     expect(r.descriptor).toMatchObject({ authenticated: false, label: 'Relay deposit', resolution: 'reviewed-decoder' })
-    expect(risk(r)[0]).toContain('Your KeepKey cannot decode this deposit')
+    expect(risk(r)[0]).toContain('cannot show Relay deposits on the device yet')
     expect(r.limitations.map((l) => l.code)).toContain('DEVICE_SHOWS_RAW_DATA')
     const approve = await inApp(APPROVE, '7.16.0')
     expect(approve.protectionLevel).toBe('P1')
@@ -265,19 +265,21 @@ describe('in-app swap card — the Desktop signing verdict for the same bytes', 
       chainId: 8453, from: DEPOSIT.from, to: '0x00dc6100103bc402d490aee3f9a5560cbd91f1d4', value: '0x90c5e8ba98e000',
       data: `0x44bc937b${w('718f6c9df785bc4e323086de024ca822efbe8ab9')}${w('0')}${w('90c5e8ba98e000')}${w('a0')}${w('ffffffff')}${w((memo.length / 2).toString(16))}${memo.padEnd(128, '0')}`,
     }
-    // 7.14.2 pins no router: the device shows this deposit itself.
-    const native = await inApp(tx, '7.14.2')
-    expect(native.protectionLevel).toBe('P4')
-    expect(native.descriptor).toMatchObject({ source: 'native', authenticated: true })
-    expect(risk(native).join('\n')).toContain('via THORChain. Your KeepKey shows this deposit on its screen; check it there.')
-    expect(native.limitations.map((l) => l.code)).not.toContain('DEVICE_SHOWS_RAW_DATA')
-    // The 7.16 line has no Base pin: decoded here, raw on the device.
-    const r = await inApp(tx, '7.16.0')
+    // 7.14.2 pins no router and 7.15+ pins Base: the device shows this deposit itself.
+    for (const fw of ['7.14.2', '7.16.0']) {
+      const native = await inApp(tx, fw)
+      expect(native.protectionLevel).toBe('P4')
+      expect(native.descriptor).toMatchObject({ source: 'native', authenticated: true })
+      expect(risk(native).join('\n')).toContain('via THORChain. Your KeepKey shows this deposit on its screen; check it there.')
+      expect(native.limitations.map((l) => l.code)).not.toContain('DEVICE_SHOWS_RAW_DATA')
+    }
+    // 7.13 has no Base pin: decoded here, raw on the device.
+    const r = await inApp(tx, '7.13.0')
     expect(r.protectionLevel).toBe('P2')
     expect(r.headline).not.toContain('Unknown')
     expect(r.descriptor).toMatchObject({ authenticated: false, label: 'THORChain deposit' })
     const lines = risk(r).join('\n')
-    expect(lines).toContain('Swap 0.04075 ETH on Base for at least 57.40830833 TRX on TRON via THORChain. Your KeepKey shows only raw data')
+    expect(lines).toContain('Swap 0.04075 ETH on Base for at least 57.40830833 TRX on TRON via THORChain. KeepKey firmware 7.13.0 cannot show this deposit on the device yet')
     expect(lines).not.toContain('signing blind')
     // Blind on this firmware is not news in our own swap: no report box.
     expect(swapReportNeedsAttention(r)).toBe(false)

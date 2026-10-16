@@ -618,6 +618,23 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
   const protectSign = (tx: any, kind: 'approval' | 'swap', sign: () => Promise<any>) =>
     ctx.protectSign?.({ chainFamily: fromChain.chainFamily, chainId: fromChain.chainId, from: fromAddress!, tx, kind }, sign) ?? sign()
 
+  // An EVM call the firmware cannot decode, with no certified entry, needs
+  // AdvancedMode. Check it BEFORE the device sees it: otherwise the device
+  // renders "Blocked", replies ActionCancelled, and hdwallet's transport
+  // (transport.ts) builds a bare `new core.ActionCancelled()` that DISCARDS the
+  // firmware's reason ("Blind signing disabled by policy"). The user would see
+  // a generic "Action cancelled", indistinguishable from pressing Cancel.
+  // Applies to the swap and to the ERC-20 approve before it.
+  const assertEvmSignable = (tx: any) => {
+    if (!evmCallRequiresAdvancedMode(tx?.to, tx?.data, Number(tx?.chainId), ctx.isAdvancedModeEnabled?.(),
+      tx?.txMetadata, tx?.erc7730, ctx.getFirmwareVersion?.())) return
+    // Always logged: this host prediction is the only trace of why a swap stopped.
+    console.warn(`${TAG} EVM blind-sign gate: chainId=${tx.chainId} to=${tx.to} selector=${String(tx.data).slice(0, 10)} bytes=${(String(tx.data).length - 2) / 2} fw=${ctx.getFirmwareVersion?.() ?? '?'} — AdvancedMode is off`)
+    // Message content is load-bearing: SwapDialog routes on /AdvancedMode/i to
+    // the opt-in panel instead of a dead error. See evmAdvancedModeRequiredMessage.
+    throw new Error(evmAdvancedModeRequiredMessage(fromChain.coin))
+  }
+
   // 1b. Derive destination address for validation
   const toChain = allChains.find(c => c.id === params.toChainId)
   if (!toChain) throw new Error(`Unknown destination chain: ${params.toChainId}`)
@@ -804,6 +821,7 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
       // reverts on-chain. Same pattern as buildEvmSwapTx but driven from here.
       if (result.approveTx) {
         swapLog(`${TAG} Relay ERC-20 approval required: prompting device for approveTx`)
+        assertEvmSignable(result.approveTx)
         stage('approve-signing')
         const signedApprove = await wrapSign(
           () => protectSign(result.approveTx, 'approval', () => wallet.ethSignTx(result.approveTx)),
@@ -836,7 +854,7 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
 
   // ── EVM chains: MUST use router contract depositWithExpiry() ──
   } else if (fromChain.chainFamily === 'evm') {
-    const result = await buildEvmSwapTx(params, fromChain, fromAddress, pioneer, getEvmRpcSource, isErc20Source, wallet, /* previewMode */ false, stage, wrapSign, ctx.protectSign, supportsCertifiedClearSign(ctx.getFirmwareVersion?.()))
+    const result = await buildEvmSwapTx(params, fromChain, fromAddress, pioneer, getEvmRpcSource, isErc20Source, wallet, /* previewMode */ false, stage, wrapSign, ctx.protectSign, supportsCertifiedClearSign(ctx.getFirmwareVersion?.()), assertEvmSignable)
     unsignedTx = result.unsignedTx
     approvalTxid = result.approvalTxid
 
@@ -1117,35 +1135,10 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
 
   // Same shape as the Solana gate above, for EVM contract calls the firmware
   // cannot decode (relay/aggregator routes are the common case — they are not
-  // in the device's pinned allowlist).
-  //
-  // A 7.16 root-certified envelope is the one alternative to AdvancedMode.
-  // Runtime/self-service metadata is annotation-only and remains gated.
-  //
-  // Without this check the device renders "Blocked", replies ActionCancelled,
-  // and hdwallet's transport (transport.ts) constructs a bare
-  // `new core.ActionCancelled()` that DISCARDS the firmware's reason string
-  // ("Blind signing disabled by policy"). The user is then shown a generic
-  // "Action cancelled" — indistinguishable from having pressed Cancel — for a
-  // policy refusal they were never told about. Check before we prompt, so the
-  // message names the actual blocker.
-  if (
-    fromChain.chainFamily === 'evm' &&
-    evmCallRequiresAdvancedMode(
-      unsignedTx?.to,
-      unsignedTx?.data,
-      Number(unsignedTx?.chainId),
-      ctx.isAdvancedModeEnabled?.(),
-      unsignedTx?.txMetadata,
-      unsignedTx?.erc7730,
-      ctx.getFirmwareVersion?.(),
-    )
-  ) {
-    swapLog(`${TAG} EVM blind-sign gate: to=${unsignedTx.to} selector=${String(unsignedTx.data).slice(0, 10)} — AdvancedMode is off`)
-    // Message content is load-bearing: SwapDialog routes on /AdvancedMode/i to
-    // the opt-in panel instead of a dead error. See evmAdvancedModeRequiredMessage.
-    throw new Error(evmAdvancedModeRequiredMessage(fromChain.coin))
-  }
+  // in the device's pinned allowlist). A 7.16 root-certified envelope is the
+  // one alternative to AdvancedMode; runtime/self-service metadata is
+  // annotation-only and remains gated.
+  if (fromChain.chainFamily === 'evm') assertEvmSignable(unsignedTx)
 
   // 4. Sign on device (user confirms tx details on hardware wallet)
   console.info(`${TAG} policy passed; signing ${fromChain.chainFamily} via ${fromChain.signMethod} (advancedMode=${ctx.isAdvancedModeEnabled?.() ?? 'unknown'}, metadataKey=${unsignedTx?.txMetadata?.keyId ?? 'none'})`)
@@ -1931,6 +1924,7 @@ async function buildEvmSwapTx(
   wrapSign: SwapContext['wrapSign'] = (fn) => fn(),
   protect?: SwapContext['protectSign'],
   certifiedMetadataSupported = false,
+  assertSignable: (tx: any) => void = () => {},
 ): Promise<{ unsignedTx: any; approvalTxid?: string; approveTx?: any; allowance?: { current: string; required: string; sufficient: boolean; spender: string; tokenContract: string }; balance?: { current: string; required: string; sufficient: boolean; tokenContract?: string } }> {
   // Some protocols (e.g. Mayachain) only return `inboundAddress` and use it as the
   // router for EVM deposits. Accept either; throw only if both are missing.
@@ -2186,6 +2180,7 @@ async function buildEvmSwapTx(
         nonce += 1
       } else {
       swapLog(`${TAG} Signing ERC-20 approve tx: token=${tokenContract}, spender=${routerAddress}, amount=${amountBaseUnits}`)
+      assertSignable(approveTx)
       stage('approve-signing')
       const signedApprove = await wrapSign(
         () => {

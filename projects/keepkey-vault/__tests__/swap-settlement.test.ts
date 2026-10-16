@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { isSwapFullySettled, payoutBelowMinimum } from '../src/shared/swap-settlement'
+import { isSwapFullySettled, payoutBelowMinimum, payoutReachesMinimum } from '../src/shared/swap-settlement'
 
 const payout = { txid: '0xabc', amount: '1.55' }
 
@@ -28,4 +28,13 @@ test('protocol completed with reported payout can show Done', () => {
 
 test('unrelated integration keeps its completion semantics', () => {
   expect(isSwapFullySettled({ status: 'completed', integration: 'relay' })).toBe(true)
+})
+
+test('a payout at or above the minimum is the whole swap, not a partial one', () => {
+  // Base ETH -> ETH via THORChain, 2026-10-16: quoted 0.04113342, minimum
+  // 0.03989941, one payout of 0.0410687. The 0.000065 gap is the estimate.
+  expect(payoutReachesMinimum('0.0410687', '0.03989941')).toBe(true)
+  expect(payoutReachesMinimum('0.03989941', '0.03989941')).toBe(true)
+  expect(payoutReachesMinimum('0.02', '0.03989941')).toBe(false) // a real partial leg
+  expect(payoutReachesMinimum('0.0410687', undefined)).toBe(false) // no minimum: no claim
 })

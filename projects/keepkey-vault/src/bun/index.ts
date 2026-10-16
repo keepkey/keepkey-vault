@@ -245,7 +245,7 @@ import { getRequiredConfs } from "../shared/confirmations"
 import { addSessionActivity, getSessionActivity, clearSessionActivity } from "./session-activity"
 import { buildTx, broadcastTx, canonicalizeTronTokenCaip } from "./txbuilder"
 import { buildCosmosStakingTx, buildCosmosNameRegTx } from "./txbuilder/cosmos"
-import { initializeOrchardFromDevice, exportOrchardFvk, scanOrchardNotes, getShieldedBalance, sendShielded, ensureFvkLoaded, displayOrchardAddressOnDevice } from "./txbuilder/zcash-shielded"
+import { initializeOrchardFromDevice, exportOrchardFvk, scanOrchardNotes, getShieldedBalance, sendShielded, ensureFvkLoaded, displayOrchardAddressOnDevice, setFvkDiskAllowed } from "./txbuilder/zcash-shielded"
 import { findZcashCliBinary, isSidecarReady, startSidecar, stopSidecar, wipeSidecarWalletDb, hasFvkLoaded, getCachedFvk, onScanProgress, getScanState, updateSyncedTo, beginZcashSend, endZcashSend, isZcashSendInFlight } from "./zcash-sidecar"
 import { CHAINS, customChainToChainDef, isChainSupported, hiveRolePath, btcTaprootSupported, findChainByNetwork } from "../shared/chains"
 import { versionCompare } from "../shared/firmware-versions"
@@ -866,6 +866,8 @@ const perf = (label: string) => console.log(`[PERF] +${Date.now() - BOOT_START}m
 // ── Engine Controller (constructors are lightweight — no I/O) ────────
 const engine = new EngineController()
 setClearSignAuditGate(() => engine.isEmulator && !offlineMode && !engine.isPassphraseWallet)
+// A hidden wallet's Zcash view key is never written to disk.
+setFvkDiskAllowed(() => !engine.isPassphraseWallet)
 
 /**
  * ClearSign evidence is device-scoped and local-only. Hidden/passphrase
@@ -1003,7 +1005,6 @@ async function requestSigningApprovalDecision(id: string) {
 // Settings loaded lazily after DB init — defaults used until then
 let restApiEnabled = false
 let walletConnectEnabled = false
-let bip85Enabled = false
 let zcashPrivacyEnabled = false
 let hiveEnabled = false
 let offlineMode = false
@@ -1057,7 +1058,6 @@ function requireOnline(operation: string): void {
 function loadSettings() {
 	restApiEnabled = getSetting('rest_api_enabled') === '1'
 	walletConnectEnabled = getSetting('walletconnect_enabled') === '1'
-	bip85Enabled = getSetting('bip85_enabled') === '1'
 	const storedZcashPrivacyEnabled = getSetting('zcash_privacy_enabled') === '1'
 	const zcashSidecarAvailable = !!findZcashCliBinary()
 	zcashPrivacyEnabled = storedZcashPrivacyEnabled && zcashSidecarAvailable
@@ -1416,7 +1416,6 @@ function getAppSettings() {
 		fiatCurrency: getSetting('fiat_currency') || 'USD',
 		numberLocale: getSetting('number_locale') || 'en-US',
 		walletConnectEnabled,
-		bip85Enabled,
 		zcashPrivacyEnabled,
 		hiveEnabled,
 		emulatorEnabled,
@@ -2146,8 +2145,9 @@ async function ensureZcashScanFresh(): Promise<void> {
  * Prove the cached Orchard FVK actually belongs to the CONNECTED device before
  * we trust its balance or let it spend. The on-disk FVK store has no device
  * identity, and the only existing invalidation — the `seed-changed` event —
- * does not fire reliably on device-to-device swaps. So derive the FVK fresh
- * from the device (silent; no button, seed never leaves) and compare `ak`.
+ * does not fire reliably on device-to-device swaps. So take the connected
+ * wallet's FVK (exportOrchardFvk: the device asks once per wallet, then it is
+ * remembered under the wallet's silent identity) and compare `ak`.
  *
  *  - match            → mark verified, keep the cache + scanned notes.
  *  - no cache / mismatch → the cache belongs to a DIFFERENT wallet (bleed):
@@ -7229,18 +7229,6 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				console.log('[settings] WalletConnect enabled:', params.enabled)
 				return getAppSettings()
 			},
-			setBip85Enabled: async (params) => {
-				// BIP-85 requires firmware >= 7.16.0
-				const fwVer = engine.getDeviceState().firmwareVersion
-				if (params.enabled && (!fwVer || versionCompare(fwVer, '7.16.0') < 0)) {
-					console.warn(`[settings] BIP-85 blocked — firmware ${fwVer || 'unknown'} < 7.16.0`)
-					return getAppSettings()
-				}
-				bip85Enabled = params.enabled
-				setSetting('bip85_enabled', params.enabled ? '1' : '0')
-				console.log('[settings] BIP-85 enabled:', params.enabled)
-				return getAppSettings()
-			},
 			setEmulatorEnabled: async (params) => {
 				// Refuse to enable on platforms with no emulator support. The
 				// emulator runs on macOS (Keychain) and Windows (DPAPI); Linux
@@ -9740,11 +9728,6 @@ engine.on('state-change', (state) => {
 	// Auto-disable advanced features if firmware doesn't support them
 	if (state.state === 'ready') {
 		const fw = state.firmwareVersion
-		if (bip85Enabled && (!fw || versionCompare(fw, '7.16.0') < 0)) {
-			bip85Enabled = false
-			setSetting('bip85_enabled', '0')
-			console.log(`[settings] BIP-85 auto-disabled — firmware ${fw || 'unknown'} < 7.16.0`)
-		}
 		// Zcash + Hive are capabilities, not user toggles. Both require firmware
 		// >= 7.15.0; Zcash privacy additionally requires the native sidecar to be
 		// present in this app build. The setting row mirrors the derived value so

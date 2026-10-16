@@ -160,6 +160,28 @@ export function evmEntryId(spec: Pick<EvmSchemaSpec, 'chainId' | 'contract' | 's
 }
 
 export const CERTIFIED_EVM_CATALOG: Record<string, EvmSchemaSpec> = {
+  // Signed in the 2026-10-16 ceremony as a 0x02 body (no intent, no roles)
+  // for any spender; the device gets exactly those bytes, so this entry
+  // serializes to them and answers before the reviewed-token approve.
+  '42161:0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9:0x095ea7b3': {
+    chainId: 42161,
+    contract: '0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9',
+    selector: '0x095ea7b3',
+    method: 'Arbitrum USDT approval',
+    args: [
+      { name: 'Spender', format: EVM_ARG_ADDRESS },
+      { name: 'Allowance', format: EVM_ARG_TOKEN_AMOUNT, decimals: 6, symbol: 'USDT' },
+    ],
+    expectedCalldataLength: 68,
+    protocol: 'ERC-20',
+    maintainedBy: 'KeepKey',
+    action: 'Approve Arbitrum USDT for a token spender',
+    provenance: {
+      protocol: 'https://eips.ethereum.org/EIPS/eip-20',
+      token: 'https://arbiscan.io/token/0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9',
+    },
+  },
+  // Signed in the 2026-10-16 ceremony as a 0x02 body (no intent).
   '1:0x4cd00e387622c35bddb9b4c962c136462338bc31:0x49290c1c': {
     chainId: 1,
     contract: '0x4cd00e387622c35bddb9b4c962c136462338bc31',
@@ -170,15 +192,10 @@ export const CERTIFIED_EVM_CATALOG: Record<string, EvmSchemaSpec> = {
       { name: 'orderId', format: EVM_ARG_BYTES },
     ],
     expectedCalldataLength: 68,
-    intent: {
-      title: 'Relay',
-      template: 'Bridge {v} through Relay for {0}; delivery is by Relay',
-      valueRole: ROLE_SPEND_EXACT,
-    },
   },
   // Relay Depository depositNative on Base and Arbitrum: the same contract
-  // and description as the Ethereum entry above (whose method name,
-  // bridgeDeposit, predates the ABI name and stays as signed).
+  // as the Ethereum entry above (whose method name, bridgeDeposit, predates
+  // the ABI name and stays as signed), with an intent.
   ...relayNativeEntries([8453, 42161]),
   '1:0xbf5a7f3629fb325e2a8453d595ab103465f75e62:0xa2e42c65': {
     chainId: 1,

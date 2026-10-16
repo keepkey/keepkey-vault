@@ -51,15 +51,15 @@ describe('signCertifiedSolanaSchema', () => {
 // loading it (its @noble deps are not installed in Vault CI).
 const V1_CATALOG_BYTES: Record<string, string> = {
   relayDepositToken: '4b4b534f4c53433101792689378ecd51d80406eb0caa3b62795beb10b6c5dc96bc2e0df03cbfee1abf080b9c60da27a3b4130c52656c6179204272696467650c6465706f736974546f6b656e020106416d6f756e7404054f726465720103055661756c74',
+  relayDepositNative: '4b4b534f4c53433101792689378ecd51d80406eb0caa3b62795beb10b6c5dc96bc2e0df03cbfee1abf080d9e0ddf5fd51c060c52656c6179204272696467650d6465706f7369744e6174697665020506416d6f756e7404054f726465720103055661756c74',
 }
 
 // v3 (SRS-7.16 §3.7) payloads, pinned on purpose: roles and the intent are
-// signed with the schema, so any drift changes what the device shows.
+// signed with the schema, so any drift changes what the device shows. Keys
+// signed in the 2026-10-16 ceremony are pinned to those signed bytes in
+// __tests__/clearsign-production-catalog.test.ts instead.
 const V3_CATALOG_BYTES: Record<string, string> = {
-  pumpAmmBuy: '4b4b534f4c534331030c14defc825ec67694250818bb654065f4298d3156d571b4d4f8090c18e9a8630866063d1201daebea0850756d702e66756e0a42757920746f6b656e73030607596f75206765740304060b506179206174206d6f73740401020c547261636b20766f6c756d65000017427579207b307d20666f72206174206d6f7374207b317d',
   pumpAmmSell: '4b4b534f4c534331030c14defc825ec67694250818bb654065f4298d3156d571b4d4f8090c18e9a8630833e685a4017f83ad0850756d702e66756e0b53656c6c20746f6b656e73020608596f752073656c6c0303061052656365697665206174206c656173740402001953656c6c207b307d20666f72206174206c65617374207b317d',
-  relayDepositNative: '4b4b534f4c53433103792689378ecd51d80406eb0caa3b62795beb10b6c5dc96bc2e0df03cbfee1abf080d9e0ddf5fd51c060552656c61790e427269646765206465706f736974020506416d6f756e740304054f72646572000103055661756c74414465706f736974207b307d20696e746f2052656c6179207661756c74207b61307d20746f206272696467653b2064656c69766572792069732062792052656c6179',
-  soltoshidiceCeeloBet: '4b4b534f4c53433103b0e08af4a4fcfad13ef8fcfd9dc70975eb6fc2e04a7c76611540a51cd5db9ed001360c536f6c746f73686944494345104365652d6c6f20706c61636520626574040105526f756e6400060557616765720503020850726f746f636f6c00050b534f4c206465706f73697403003a426574207b317d206f6e204365652d6c6f20726f756e64207b307d2c20706c7573206120726566756e6461626c65207b337d206465706f736974',
 }
 
 const byte = (value: number) => value.toString(16).padStart(2, '0')
@@ -181,10 +181,10 @@ describe('SoltoshiDICE Blackjack join catalog entry', () => {
   const message = parseSolanaMessage(solanaMessageSlice(fullTx, parseSolanaTx(fullTx)))
   const join = message.instructions[joinFixture.expected.instructionIndex]
 
-  test('is a v3 payload within the 256-byte proto cap', () => {
+  test('is the ceremony-signed v2 payload within the 256-byte proto cap', () => {
     const payload = serializeSolanaSchema(spec)
-    expect(payload[8]).toBe(3)
-    expect(payload.length).toBe(240)
+    expect(payload[8]).toBe(2)
+    expect(payload.length).toBe(154)
     expect(payload.length).toBeLessThanOrEqual(256)
   })
 
@@ -243,9 +243,9 @@ describe('SoltoshiDICE poker tournament registration catalog entry', () => {
       .toEqual(pokerRegistrationFixture.expected.accounts)
   })
 
-  test('serializes as a v3 schema within the firmware payload cap', () => {
+  test('serializes as the ceremony-signed v1 schema within the firmware payload cap', () => {
     const payload = serializeSolanaSchema(spec)
-    expect(payload[8]).toBe(3)
+    expect(payload[8]).toBe(1)
     expect(payload.length).toBeLessThanOrEqual(256)
   })
 })
@@ -283,10 +283,10 @@ describe('SoltoshiDICE Cee-lo bet catalog entry', () => {
   // The single non-ComputeBudget instruction of the captured bet.
   const bet = message.instructions[1]
 
-  test('is a v3 payload within the 256-byte proto cap', () => {
+  test('is the ceremony-signed v2 payload within the 256-byte proto cap', () => {
     const payload = serializeSolanaSchema(spec)
-    expect(payload[8]).toBe(3)
-    expect(payload.length).toBe(176)
+    expect(payload[8]).toBe(2)
+    expect(payload.length).toBe(113)
     expect(payload.length).toBeLessThanOrEqual(256)
   })
 

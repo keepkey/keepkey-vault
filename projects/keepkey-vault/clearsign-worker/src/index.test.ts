@@ -71,11 +71,13 @@ describe('ClearSign Worker public surface', () => {
     const response = await fetchWorker('/v1/catalog')
     const body = await response.json() as any
     expect(response.status).toBe(200)
-    expect(body.entries).toHaveLength(85) // 72 + Relay depositNative on Base/Arbitrum + 11 Relay depositErc20 (one per reviewed token)
-    expect(body.entries.filter((entry: any) => entry.family === 'evm')).toHaveLength(58)
+    // 72 + Relay depositNative on Base/Arbitrum + 11 Relay depositErc20 (one per reviewed token), less
+    // the Arbitrum USDT approve pair the ceremony-signed catalog entry now answers.
+    expect(body.entries).toHaveLength(84)
+    expect(body.entries.filter((entry: any) => entry.family === 'evm')).toHaveLength(57)
     expect(body.entries.filter((entry: any) => entry.family === 'evm' && entry.protocol === 'Relay')).toHaveLength(14)
     expect(body.entries.filter((entry: any) => entry.protocol === 'Uniswap')).toHaveLength(9)
-    expect(body.entries.filter((entry: any) => entry.protocol === 'ERC-20')).toHaveLength(33)
+    expect(body.entries.filter((entry: any) => entry.protocol === 'ERC-20')).toHaveLength(32)
     expect(body.entries.filter((entry: any) => entry.family === 'solana')).toHaveLength(27)
     for (const entry of body.entries) {
       expect(['Relay', 'Portals', 'Across', 'Pump', 'SoltoshiDICE', 'ERC-20', 'Uniswap']).toContain(entry.protocol)
@@ -120,10 +122,11 @@ describe('ClearSign Worker public surface', () => {
       ['Recipient', '0x909Ef6B32DfDc12CA86aA710b54c991af3C5F82E'],
       ['KeepKey ClearSign', 'Described by KeepKey Alpha 716 a9531b9d\ncertified by KeepKey'],
     ])
-    // Arbitrum USDT0's symbol() is "USD₮0": the review must not claim it agrees.
+    // Arbitrum USDT0's symbol() is "USD₮0": the review must not claim it agrees. Its approve is
+    // the ceremony-signed catalog entry (symbol USDT, any spender); transfer stays reviewed-token.
     const usdt0 = evm.filter((entry: any) => entry.id.startsWith('eip155:42161:0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9:'))
-    expect(usdt0).toHaveLength(3)
-    for (const entry of usdt0) {
+    expect(usdt0.map((entry: any) => entry.method).sort()).toEqual(['Arbitrum USDT approval', 'transfer'])
+    for (const entry of usdt0.filter((entry: any) => entry.method === 'transfer')) {
       expect(entry.provenance.review).toContain('transliteration of the contract symbol() "USD₮0"')
       expect(entry.provenance.review).not.toContain('agrees with the contract symbol()')
     }
@@ -135,7 +138,12 @@ describe('ClearSign Worker public surface', () => {
     const across = evm.find((entry: any) => entry.protocol === 'Across')
     expect(across.screens).toEqual([])
     expect(across.screensNote).toContain('cannot verify on 7.16')
-    for (const entry of evm.filter((e: any) => e.protocol !== 'Portals' && e.protocol !== 'Across')) expect(entry.screens.length).toBeGreaterThan(3)
+    // The ceremony-signed 0x02 bodies (Ethereum Relay bridgeDeposit, Arbitrum USDT approve) carry no
+    // intent: no intent review to list, and no 0x04 decoder note.
+    const signed02 = evm.filter((e: any) => e.protocol !== 'Portals' && e.protocol !== 'Across' && !e.title)
+    expect(signed02.map((e: any) => e.method).sort()).toEqual(['Arbitrum USDT approval', 'bridgeDeposit'])
+    for (const entry of signed02) expect([entry.screens, entry.screensNote]).toEqual([[], undefined])
+    for (const entry of evm.filter((e: any) => e.protocol !== 'Portals' && e.protocol !== 'Across' && e.title)) expect(entry.screens.length).toBeGreaterThan(3)
   })
 
   it('EXPECTED-SCREENS.md states every Base USDC screen the catalog publishes', async () => {

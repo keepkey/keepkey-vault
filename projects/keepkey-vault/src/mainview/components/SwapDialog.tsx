@@ -26,7 +26,7 @@ import { providerTrackerUrl } from "../lib/trackers"
 import { ProviderBadge, ProverChip, resolveProvider } from "./ProviderBadge"
 import { getSwapperAnimation } from "../lib/swapper-animations"
 import { assessSwapRisk } from "../../shared/swap-risk"
-import { isSwapFullySettled } from "../../shared/swap-settlement"
+import { isSwapFullySettled, payoutReachesMinimum } from "../../shared/swap-settlement"
 import { SwapRiskReview } from "./SwapRiskReview"
 import { computeDustWarning, shouldWarnHighSlippage, computeEffectiveSlippageBps, isSmallSwapQuoteWarning } from "../../shared/swap-warnings"
 import { useEvmAddresses } from "../hooks/useEvmAddresses"
@@ -820,7 +820,6 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       decoded?: string[]
     } | null
   >(null)
-  const [allowSolanaBlindSigning, setAllowSolanaBlindSigning] = useState(false)
   const [txid, setTxid] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   // Bump to force the quote useEffect to re-run with the same inputs (used by
@@ -966,6 +965,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     swapper: liveSwapper, payouts: livePayouts, receivedOutput: liveReceivedOutput,
     minimumOutput: quote?.minimumOutput || resumeSwap?.minimumOutput })
   const isSwapFailed = liveStatus === 'failed' || liveStatus === 'refunded'
+  const payoutMeetsMinimum = payoutReachesMinimum(liveReceivedOutput, quote?.minimumOutput || resumeSwap?.minimumOutput)
 
   // Seed the inbound/timing/error fields from a full refreshSwap snapshot.
   // The swap-update message carries these too, but the snapshot is the backstop
@@ -1947,24 +1947,6 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
   // resolver to populate a real receive address.
   const toAddressIsXpub = !!toAddress && !useCustomAddress && XPUB_RE.test(toAddress)
 
-  // One-time opaque consent is tied to the exact quoted route and user inputs.
-  // Any amount/address/slippage/serialized-transaction change invalidates it.
-  const solanaOpaqueConsentKey = [
-    fromAsset?.caip,
-    toAsset?.caip,
-    amount,
-    slippageBps,
-    fromAddress,
-    toAddress,
-    quote?.relayTx?.serializedTx,
-  ].join('|')
-  const previousSolanaOpaqueConsentKey = useRef(solanaOpaqueConsentKey)
-  useEffect(() => {
-    if (previousSolanaOpaqueConsentKey.current !== solanaOpaqueConsentKey) {
-      previousSolanaOpaqueConsentKey.current = solanaOpaqueConsentKey
-      setAllowSolanaBlindSigning(false)
-    }
-  }, [solanaOpaqueConsentKey])
   const canQuote = !!(fromAsset && toAsset && !sameAsset && validAmount && fromAddress && toAddress && !toAddressIsXpub && !exceedsBalance && !exceedsSafeMax && !customAddressError)
 
   // Human reason a quote can't fire right now, but ONLY for the cases that
@@ -2319,7 +2301,6 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
         integration: liveQuote.integration,
         swapper: liveQuote.swapper,
         relayTx: liveQuote.relayTx,
-        allowSolanaBlindSigning,
         // Same as the preview build: synthesized token sources need the
         // picker's decimals — Pioneer's available-assets won't have them.
         tokenDecimals: isTokenCaip(fromAsset.caip!) ? normalizeDecimals(fromAsset.decimals) ?? undefined : undefined,
@@ -2400,7 +2381,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
       setError(friendly)
       setPhase('review')
     }
-  }, [quote, quoteFetchedAt, fromAsset, toAsset, sendAmount, sendIsMax, fromBalance, fromAddress, toAddress, slippageBps, balances, phase, previewLoading, previewError, previewBuild, allowSolanaBlindSigning, useCustomAddress, riskLocked, swapRisk.blocked, swapRisk.quoteMaxAgeMs])
+  }, [quote, quoteFetchedAt, fromAsset, toAsset, sendAmount, sendIsMax, fromBalance, fromAddress, toAddress, slippageBps, balances, phase, previewLoading, previewError, previewBuild, useCustomAddress, riskLocked, swapRisk.blocked, swapRisk.quoteMaxAgeMs])
 
   // ── Reset ─────────────────────────────────────────────────────────
   const reset = useCallback(() => {
@@ -2416,7 +2397,6 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     setError(null)
     setBlindSignError(null)
     setEnablingBlindSign(false)
-    setAllowSolanaBlindSigning(false)
     setTxid(null)
     setBeforeFromBal(null)
     setBeforeToBal(null)
@@ -2454,39 +2434,31 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
     setError(t('swapCancelled', 'Swap cancelled — confirm again or change inputs'))
   }, [phase, t])
 
-  // Turn on the device's AdvancedMode (Blind Signing) policy. There is no
-  // per-transaction exception on shipped firmware, so the opaque Solana route
-  // only signs once the global policy is on. It is session state on 7.15+:
-  // the device disarms it when it locks or is unplugged, so the user may be
-  // asked again. Raises an enable-policy confirm on the device.
+  // Turn on the device's AdvancedMode (Blind Signing) policy. Shipped firmware
+  // has no per-transaction exception, so EVM and Solana alike sign only once
+  // the policy is on. It is session state on 7.15+: the device disarms it when
+  // it locks or is unplugged, so the user may be asked again.
   const handleEnableBlindSigning = useCallback(async () => {
     setEnablingBlindSign(true)
     setBlindSignError(null)
-    if (blindSignCause === 'device') {
-      // Persistent device policy. The device demands a button confirm AND a
-      // full PIN re-entry (it ignores the session PIN cache), so this is not
-      // instant — hence the 60s budget and the "on device" copy.
-      try {
-        // 0 = no timeout: this blocks on an on-device confirm AND a full
-        // scrambled-matrix PIN re-entry (the device ignores the session cache).
-        // A 60s budget could reject while the device still completes the write,
-        // leaving the policy ON while the UI claims it failed.
-        await rpcRequest('applyPolicy', { policyName: 'AdvancedMode', enabled: true }, 0)
-      } catch (e: any) {
-        const msg = e?.message || ''
-        setBlindSignError(/cancel|denied|rejected/i.test(msg)
-          ? t('blindSignDeclined', 'Declined on device — blind signing was not enabled.')
-          : (msg || t('blindSignEnableFailed', 'Failed to enable blind signing on the device.')))
-        setEnablingBlindSign(false)
-        return
-      }
-    } else {
-      setAllowSolanaBlindSigning(true)
+    try {
+      // 0 = no timeout: this blocks on an on-device confirm AND a full
+      // scrambled-matrix PIN re-entry (the device ignores the session cache).
+      // A timeout could reject while the device still completes the write,
+      // leaving the policy ON while the UI claims it failed.
+      await rpcRequest('applyPolicy', { policyName: 'AdvancedMode', enabled: true }, 0)
+    } catch (e: any) {
+      const msg = e?.message || ''
+      setBlindSignError(/cancel|denied|rejected/i.test(msg)
+        ? t('blindSignDeclined', 'Declined on device — blind signing was not enabled.')
+        : (msg || t('blindSignEnableFailed', 'Failed to enable blind signing on the device.')))
+      setEnablingBlindSign(false)
+      return
     }
     setError(null)
     setPhase('review')
     setEnablingBlindSign(false)
-  }, [blindSignCause, t])
+  }, [t])
 
   const copyTxid = useCallback(() => {
     if (!txid) return
@@ -2814,9 +2786,9 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
 
           {phase === 'submitted' && toAsset && livePayouts.length > 0 && (
             <Box p="4" m="3" border="1px solid var(--teal)" borderRadius="lg">
-              <Text fontSize="13px" fontWeight="700">{isSwapComplete ? 'Settlement payouts' : 'Partial payout — settlement still in progress'}</Text>
+              <Text fontSize="13px" fontWeight="700">{isSwapComplete ? 'Settlement payouts' : payoutMeetsMinimum ? 'Payout received — confirming settlement' : 'Partial payout — settlement still in progress'}</Text>
               <Text fontSize="12px" color="var(--teal)" mt="1">Total reported received: {liveReceivedOutput || '0'} {toAsset.symbol}</Text>
-              {!isSwapComplete && quote && <Text fontSize="11px" color="kk.textMuted" mt="1">Still expected: approximately {formatBalance(String(Math.max(0, Number(quote.expectedOutput) - Number(liveReceivedOutput || 0))))} {toAsset.symbol}. A partial payment is not the final swap output.</Text>}
+              {!isSwapComplete && !payoutMeetsMinimum && quote && <Text fontSize="11px" color="kk.textMuted" mt="1">Still expected: approximately {formatBalance(String(Math.max(0, Number(quote.expectedOutput) - Number(liveReceivedOutput || 0))))} {toAsset.symbol}. A partial payment is not the final swap output.</Text>}
               {livePayouts.map((payout, index) => <Flex key={`${payout.txid}-${index}`} justify="space-between" mt="2" gap="3">
                 <Text fontSize="11px">Payment {index + 1}: {payout.amount} {toAsset.symbol}</Text>
                 <Box as="button" fontSize="11px" color="var(--teal)" textDecoration="underline" onClick={() => {
@@ -3859,13 +3831,13 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
               <VStack gap="2" align="center" maxW="420px">
                 <Text fontSize="lg" fontWeight="700" color="kk.textPrimary" textAlign="center">
                   {blindSignCause === 'device'
-                    ? t('deviceBlindSignTitle', 'Your KeepKey needs blind signing enabled')
-                    : t('solanaOpaqueTitle', 'One-time Blind Signing for Solana')}
+                    ? t('deviceBlindSignTitle', "Your KeepKey can't show this transaction")
+                    : t('solanaOpaqueTitle', "Your KeepKey can't show this Solana transaction")}
                 </Text>
                 <Text fontSize="sm" color="kk.textSecondary" textAlign="center" lineHeight="1.5">
                   {blindSignCause === 'device'
-                    ? t('deviceBlindSignBody', 'The device could not read this transaction well enough to show you what it does, and it refuses to sign anything it cannot display unless you turn on Advanced Mode. Newer firmware can read more transaction types, so this may not be needed after an update.')
-                    : t('solanaOpaqueBody', 'This Relay transaction uses a custom Solana program and lookup-table accounts that your KeepKey cannot fully verify. No signed ClearSign descriptor was supplied for the route, so this transaction requires the opaque fallback.')}
+                    ? t('deviceBlindSignBody', 'Your KeepKey has no review it can show for this transaction, so it signs it only with blind signing on. With blind signing on, the device asks you to approve without showing what the transaction does.')
+                    : t('solanaOpaqueBody', 'Your KeepKey has no review it can show for this transaction, so it signs it only with blind signing on. The summary below was worked out on this computer; your KeepKey cannot confirm it.')}
                 </Text>
               </VStack>
 
@@ -3939,9 +3911,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                   </svg>
                 </Box>
                 <Text fontSize="11px" color="kk.textMuted" lineHeight="1.4">
-                  {blindSignCause === 'device'
-                    ? t('deviceBlindSignCaveat', 'This stays on until the device locks or is unplugged, and it applies to every app that uses this KeepKey — not just this swap. It also turns off the safety check this app runs on transactions your device cannot read: future swaps like this one will go straight to the device without showing you what leaves your wallet. The device will ask you to confirm and to re-enter your PIN.')
-                    : t('solanaOpaqueCaveat', 'Blind signing means the device shows a generic prompt instead of authenticated swap details. This approval applies only to this transaction and does not enable global Advanced Mode. Confirm only the swap you reviewed here.')}
+                  {t('deviceBlindSignCaveat', 'Blind signing stays on until the KeepKey locks or is unplugged, for every app that uses it, not just this swap. While it is on, this app also stops showing this screen before such transactions. The device asks you to confirm and to re-enter your PIN.')}
                 </Text>
               </Flex>
 
@@ -3952,20 +3922,18 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
               )}
 
               <Flex gap="3" w="full" maxW="420px" pt="1">
-                <Button size="sm" flex="1" variant="outline" borderColor="kk.border" color="kk.textSecondary"
+                <Button size="sm" flex="1" bg="kk.gold" color="black" fontWeight="600"
                   disabled={enablingBlindSign}
-                  _hover={{ bg: 'rgba(255,255,255,0.04)' }}
+                  _hover={{ opacity: 0.9 }}
                   onClick={() => { setBlindSignError(null); setPhase('review') }}>
                   {t('back', 'Back')}
                 </Button>
-                <Button size="sm" flex="1" bg="kk.gold" color="black" fontWeight="600"
+                <Button size="sm" flex="1" variant="outline" borderColor="kk.border" color="kk.textSecondary"
                   loading={enablingBlindSign}
                   loadingText={t('blindSignConfirmOnDevice', 'Confirm on device…')}
-                  _hover={{ opacity: 0.9 }}
+                  _hover={{ bg: 'rgba(255,255,255,0.04)' }}
                   onClick={handleEnableBlindSigning}>
-                  {blindSignCause === 'device'
-                    ? t('deviceBlindSignEnable', 'Enable on device')
-                    : t('solanaOpaqueAllowOnce', 'Allow Once')}
+                  {t('deviceBlindSignEnable', 'Turn on blind signing')}
                 </Button>
               </Flex>
             </VStack>
@@ -4290,11 +4258,11 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                 </Flex>
               )}
 
-              {quote.warning && (
-                <Flex align="center" gap="2" bg="rgba(251,146,60,0.08)" border="1px solid" borderColor="rgba(251,146,60,0.3)" px="3" py="2" borderRadius="lg" w="full">
-                  <Text fontSize="10px" color="var(--gold)">{quote.warning}</Text>
-                </Flex>
-              )}
+              {/* quote.warning is not shown: it is THORNode's note to API
+                  integrators ("Do not cache this response. Do not send funds
+                  after the expiry…"). The dialog enforces it: a quote older
+                  than swapRisk.quoteMaxAgeMs (30–60 s, far inside the expiry)
+                  is re-fetched and re-reviewed before signing. */}
 
               {riskPanel}
 

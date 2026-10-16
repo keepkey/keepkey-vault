@@ -65,7 +65,7 @@ describe('findCertifiedEvmEnvelope', () => {
     globalThis.fetch = (async () => new Response(JSON.stringify({ classification: 'OPAQUE' }), { status: 422 })) as typeof fetch
     const token = '0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9'
     const approval = `0x095ea7b3${'000000000022d473030f116ddee9f6b43ac78ba3'.padStart(64, '0')}${'ff'.repeat(32)}`
-    await expect(findCertifiedEvmEnvelope(42161, token, approval)).rejects.toThrow(/certified description unavailable for approve/)
+    await expect(findCertifiedEvmEnvelope(42161, token, approval)).rejects.toThrow(/certified description unavailable for Arbitrum USDT approval/)
     expect(await findCertifiedEvmEnvelope(1, token, approval)).toBeUndefined()
     expect(await findCertifiedEvmEnvelope(42161, token, `${approval}00`)).toBeUndefined()
   })

@@ -111,6 +111,8 @@ function reviewedTokenEntries(): EvmSchemaSpec[] {
   return Object.entries(REVIEWED_EVM_TOKENS).flatMap(([key]) => {
     const [chainId, contract] = key.split(':')
     return ([[ERC20_APPROVE, PERMIT2_ADDRESS], [ERC20_APPROVE, undefined], [ERC20_TRANSFER, undefined]] as const)
+      // A catalog entry (ceremony-signed) answers its shape for every spender.
+      .filter(([selector]) => !CERTIFIED_EVM_CATALOG[`${chainId}:${contract}:${selector}`])
       .map(([selector, spender]) => findReviewedTokenSchema(Number(chainId), contract, selector, 68, spender)!)
       .map((spec) => ({
         ...spec,
@@ -151,7 +153,7 @@ function reviewedCatalog() {
     ...(spec.intent ? { title: spec.intent.title, template: spec.intent.template } : {}),
     // What the device shows, in order (signed_metadata_build_intent_review).
     screens: expectedEvmScreens(spec) || [],
-    ...(spec.intent ? {} : {
+    ...(spec.intent || spec.decoder === undefined ? {} : {
       screensNote: 'No intent. Firmware 7.16 parses inner versions 0x01, 0x02, 0x05, 0x06 and 0x07 only; this 0x04 decoder schema cannot verify on 7.16, and a certified envelope carrying it is refused, not downgraded.',
     }),
     provenance: spec.provenance || { protocol: PROVENANCE.protocol, security: PROVENANCE.protocolSecurity },
