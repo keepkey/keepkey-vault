@@ -17,7 +17,10 @@ import { assessSigningRisk } from '../src/shared/clearsign-risk'
 import type { SigningRequestInfo } from '../src/shared/types'
 import joinFixture from './fixtures/solana/soltoshidice-blackjack-join.json'
 import swap from './fixtures/uniswap/base-ur-usdc-to-eth-swap.json'
-import { applyEvmTxPreview } from '../src/bun/evm-signing-preview'
+import { applyEvmTxPreview, recognizedTypedDataSpender } from '../src/bun/evm-signing-preview'
+import { decodeEIP712 } from '../src/bun/eip712-decoder'
+import { ethMessagePreview } from '../src/bun/eth-message-preview'
+import { WalletConnectManager } from '../src/bun/walletconnect'
 
 const LOGIN_MESSAGE_B64 = 'U29sdG9zaGlESUNFIHdhbGxldApOZXR3b3JrOiBtYWlubmV0LWJldGE6Q3VUTHA3cERtTkdrRmdpNGFvaDhFZjFZU2pjMkJ6RUNRUkx6WXFhb1ZXQlI6NG5DbXB3bmU3aENvV1RTcEFkNTR1RU5tQ2dISnJIVHluNERNUENFTXB1bXAKU2Vzc2lvbjogY2E1ZWQ3YTgtNWRmMS00MWJmLTkxY2EtYzNkZTRjMWM1NmY2Ck5vbmNlOiAzN2M0MDY2Ny01NzZkLTQwNTQtOTA2NC02MTg2MTRhYjg4YzE='
 const TX1_B64 = 'AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAYJ7Dl5pNxrQBvQRRcaGJ8mhW+rnqt1VgIU+XKy7cFkMA+LZzzaLik+AiCrPgHStY7QVcnBsnYt1RVhKxDKzW40NrgTPK+soJctzdQsxyxkxmokWe10HSLNM0pp7sZO3eosAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAg+JYP7kag/aX3JhxSBLr/9dbITv9zclr5W8RVNHvjowF02rdo/npIS0+fAcrrAThIR97VGw7P8fmeJwQ9+Dk5hH08KOLLv/nnxPfLbW1x5bwW1Qqm7U/+OurmoNbG6qQDBkZv5SEXMv/srbpyw5vnvIzlu8X3EmssQ5s6QAAAALDgivSk/PrRPvj8/Z3HCXXrb8LgSnx2YRVApRzV257QTQBKpt9xx9nI6TgJCP4k4JahDgt0ODAlVydCDyS4WCcCBwAFAjBXBQAIBwAGBAECBQMDE2tr'
@@ -426,5 +429,170 @@ describe('three-level verdict on Solana: device shows it, computer decodes it, o
   test('a certified description the device verifies is green', () => {
     const r = assessSigningRisk({ ...sol(ix('99vQwtBwYtrqqD9YSXbdum3KBdxPAVxYTaQ3cfnJSrN2', 'known', 'Relay', 'depositNative')), deviceClearSigns: true })!
     expect(r.tier).toBe('green')
+  })
+})
+
+// Verdicts on messages (personal_sign and EIP-712), each request built the
+// way rest-api.ts and walletconnect.ts build it.
+describe('message verdicts', () => {
+  const USER = '0x1111111111111111111111111111111111111111'
+  const EVIL = '0x9999999999999999999999999999999999999999'
+  const PERMIT2_ADDR = '0x000000000022D473030F116dDEE9F6B43aC78BA3'
+  const USDC = '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48'
+  const hex = (s: string) => '0x' + Buffer.from(s, 'utf8').toString('hex')
+  const text = (r: { reasons: { text: string }[] }) => r.reasons.map((x) => x.text).join('\n')
+  const typed = (typedData: any, firmwareVersion = '7.16.0') => {
+    const chainId = Number(typedData.domain?.chainId) || undefined
+    const typedDataDecoded = decodeEIP712(typedData)
+    return assessSigningRisk({
+      id: 't', method: '/eth/sign-typed-data', appName: 'dapp', chain: 'eth', from: USER, chainId, firmwareVersion,
+      typedDataDecoded, recognizedSpender: recognizedTypedDataSpender(typedDataDecoded, chainId),
+    })!
+  }
+  const personal = (message: string) => assessSigningRisk({
+    id: 't', method: '/eth/sign', appName: 'dapp', chain: 'eth', from: USER, firmwareVersion: '7.16.0',
+    ethMessageDecoded: ethMessagePreview(USER, message),
+  })!
+
+  // messages:0
+  test('a SafeTx carrying a call is red: the device shows the call only as hex', () => {
+    const safeTx = (msg: any) => ({
+      primaryType: 'SafeTx',
+      domain: { chainId: 1, verifyingContract: '0x1234567890123456789012345678901234567890' },
+      types: {
+        EIP712Domain: [{ name: 'chainId', type: 'uint256' }, { name: 'verifyingContract', type: 'address' }],
+        SafeTx: [
+          { name: 'to', type: 'address' }, { name: 'value', type: 'uint256' }, { name: 'data', type: 'bytes' },
+          { name: 'operation', type: 'uint8' }, { name: 'safeTxGas', type: 'uint256' }, { name: 'baseGas', type: 'uint256' },
+          { name: 'gasPrice', type: 'uint256' }, { name: 'gasToken', type: 'address' }, { name: 'refundReceiver', type: 'address' },
+          { name: 'nonce', type: 'uint256' },
+        ],
+      },
+      message: { value: '0', safeTxGas: 0, baseGas: 0, gasPrice: 0, gasToken: '0x' + '0'.repeat(40), refundReceiver: '0x' + '0'.repeat(40), nonce: 3, ...msg },
+    })
+    const transfer = '0xa9059cbb' + EVIL.slice(2).padStart(64, '0') + (10n ** 12n).toString(16).padStart(64, '0')
+    const call = typed(safeTx({ to: USDC, data: transfer, operation: 0 }))
+    expect(call.tier).toBe('red')
+    expect(text(call)).toContain('Your KeepKey shows that data only as raw hex')
+    const delegatecall = typed(safeTx({ to: EVIL, data: '0x12345678', operation: 1 }))
+    expect(delegatecall.tier).toBe('red')
+    expect(text(delegatecall)).toContain('(delegatecall)')
+    // A plain ETH send from the Safe carries no data: the device shows every field.
+    expect(typed(safeTx({ to: EVIL, value: '1000000000000000000', data: '0x', operation: 0 })).tier).toBe('green')
+  })
+
+  // messages:1
+  test('typed data that hands over signing power is red', () => {
+    const DT = [{ name: 'name', type: 'string' }, { name: 'version', type: 'string' }, { name: 'chainId', type: 'uint256' }, { name: 'verifyingContract', type: 'address' }]
+    const agent = typed({
+      primaryType: 'HyperliquidTransaction:ApproveAgent',
+      domain: { name: 'HyperliquidSignTransaction', version: '1', chainId: 42161, verifyingContract: '0x0000000000000000000000000000000000000000' },
+      types: { EIP712Domain: DT, 'HyperliquidTransaction:ApproveAgent': [
+        { name: 'hyperliquidChain', type: 'string' }, { name: 'agentAddress', type: 'address' }, { name: 'agentName', type: 'string' }, { name: 'nonce', type: 'uint64' }] },
+      message: { hyperliquidChain: 'Mainnet', agentAddress: EVIL, agentName: '', nonce: 1760000000001 },
+    })
+    expect(agent.tier).toBe('red')
+    expect(agent.level).toBe('high')
+    expect(agent.reasons[0].text).toBe(`Gives ${EVIL} the power to act for your account. It can then sign without your KeepKey.`)
+    const delegation = typed({
+      primaryType: 'Delegation',
+      domain: { name: 'DelegationManager', version: '1', chainId: 1, verifyingContract: '0xdb9B1e94B5b69Df7e401DDbedE43491141047dB3' },
+      types: { EIP712Domain: DT, Delegation: [
+        { name: 'delegate', type: 'address' }, { name: 'delegator', type: 'address' }, { name: 'authority', type: 'bytes32' },
+        { name: 'caveats', type: 'Caveat[]' }, { name: 'salt', type: 'uint256' }], Caveat: [{ name: 'enforcer', type: 'address' }, { name: 'terms', type: 'bytes' }] },
+      message: { delegate: EVIL, delegator: USER, authority: '0x' + 'ff'.repeat(32), caveats: [], salt: '7' },
+    })
+    expect(delegation.tier).toBe('red')
+    expect(delegation.level).toBe('critical')
+    // Vote delegation (delegateBySig) names a delegatee for votes, not a signer: unchanged.
+    const votes = typed({
+      primaryType: 'Delegation',
+      domain: { name: 'Uniswap', chainId: 1, verifyingContract: '0x1f9840a85d5af5bf1d1762f925bdaddc4201f984' },
+      types: { EIP712Domain: [{ name: 'name', type: 'string' }, { name: 'chainId', type: 'uint256' }, { name: 'verifyingContract', type: 'address' }],
+        Delegation: [{ name: 'delegatee', type: 'address' }, { name: 'nonce', type: 'uint256' }, { name: 'expiry', type: 'uint256' }] },
+      message: { delegatee: EVIL, nonce: 0, expiry: 1792000000 },
+    })
+    expect(votes.tier).toBe('green')
+  })
+
+  // messages:5
+  test('non-ASCII text is yellow: the device shows those bytes as codes, not letters', () => {
+    for (const msg of ['请签名以登录 OpenSea 🦊', 'Sign in to OpenSea 🦊']) {
+      for (const raw of [hex(msg), msg]) {
+        const r = personal(raw)
+        expect(r.tier).toBe('yellow')
+        expect(text(r)).not.toContain('read it on your KeepKey screen')
+      }
+    }
+    // A text-direction override is a spoof, not a localized login.
+    const rlo = personal(hex(`Approve transfer to ${String.fromCharCode(0x202e)}elif.exe`))
+    expect(rlo.tier).toBe('red')
+    expect(text(rlo)).toContain('hidden characters')
+    // Plain ASCII, newlines included, stays green.
+    expect(personal(hex('Welcome to OpenSea!\n\nClick to sign in.')).tier).toBe('green')
+  })
+
+  // messages:6
+  test('a WalletConnect personal_sign SIWE login gets the same green verdict as REST', async () => {
+    const siwe = `app.uniswap.org wants you to sign in with your Ethereum account:\n${USER}\n\nSign in to Uniswap\n\nURI: https://app.uniswap.org\nVersion: 1\nChain ID: 1\nNonce: abcdef12345\nIssued At: 2026-10-16T00:00:00.000Z`
+    let seen: SigningRequestInfo | undefined
+    const wc = new WalletConnectManager({
+      getEvmAddressInfo: () => ({ address: USER }),
+      requestSigningApproval: async (info: SigningRequestInfo) => { seen = info; return false },
+    } as any)
+    await expect((wc as any).signMessage(hex(siwe), [], 'Uniswap', 1)).rejects.toThrow('User rejected signing')
+    // index.ts attachSigningPolicySnapshot adds the firmware version before the overlay assesses it.
+    const r = assessSigningRisk({ ...seen!, firmwareVersion: '7.16.0' })!
+    expect(r.tier).toBe('green')
+    expect(personal(hex(siwe)).tier).toBe('green')
+  })
+
+  // messages:7
+  test('fully decoded Permit2 swaps are not forced red', () => {
+    const permitSingle = {
+      primaryType: 'PermitSingle',
+      domain: { name: 'Permit2', chainId: 1, verifyingContract: PERMIT2_ADDR },
+      types: {
+        EIP712Domain: [{ name: 'name', type: 'string' }, { name: 'chainId', type: 'uint256' }, { name: 'verifyingContract', type: 'address' }],
+        PermitSingle: [{ name: 'details', type: 'PermitDetails' }, { name: 'spender', type: 'address' }, { name: 'sigDeadline', type: 'uint256' }],
+        PermitDetails: [{ name: 'token', type: 'address' }, { name: 'amount', type: 'uint160' }, { name: 'expiration', type: 'uint48' }, { name: 'nonce', type: 'uint48' }],
+      },
+      message: { details: { token: USDC, amount: '100000000', expiration: '1792000000', nonce: '3' }, spender: '0x66a9893cc07d91d95644aedd05d03f95e1dba8af', sigDeadline: '1792000000' },
+    }
+    // Case A: 7.14.2 cannot show it, but this computer decodes it and knows the router.
+    const a = typed(permitSingle, '7.14.2')
+    expect(a.tier).toBe('yellow')
+    expect(text(a)).toContain('KeepKey firmware 7.14.2 cannot show')
+    expect(typed({ ...permitSingle, message: { ...permitSingle.message, spender: EVIL } }, '7.14.2').tier).toBe('red')
+
+    const REACTOR = '0x00000011f84b9aa48e5f8aa8b9897600006289be'
+    const dutch = (recipient: string, reactor = REACTOR) => ({
+      primaryType: 'PermitWitnessTransferFrom',
+      domain: { name: 'Permit2', chainId: 1, verifyingContract: PERMIT2_ADDR },
+      types: {
+        EIP712Domain: [{ name: 'name', type: 'string' }, { name: 'chainId', type: 'uint256' }, { name: 'verifyingContract', type: 'address' }],
+        PermitWitnessTransferFrom: [{ name: 'permitted', type: 'TokenPermissions' }, { name: 'spender', type: 'address' }, { name: 'nonce', type: 'uint256' }, { name: 'deadline', type: 'uint256' }, { name: 'witness', type: 'V2DutchOrder' }],
+        TokenPermissions: [{ name: 'token', type: 'address' }, { name: 'amount', type: 'uint256' }],
+        OrderInfo: [{ name: 'reactor', type: 'address' }, { name: 'swapper', type: 'address' }, { name: 'nonce', type: 'uint256' }, { name: 'deadline', type: 'uint256' }, { name: 'additionalValidationContract', type: 'address' }, { name: 'additionalValidationData', type: 'bytes' }],
+        V2DutchOrder: [{ name: 'info', type: 'OrderInfo' }, { name: 'cosigner', type: 'address' }, { name: 'baseInputToken', type: 'address' }, { name: 'baseInputStartAmount', type: 'uint256' }, { name: 'baseInputEndAmount', type: 'uint256' }, { name: 'baseOutputs', type: 'DutchOutput[]' }],
+        DutchOutput: [{ name: 'token', type: 'address' }, { name: 'startAmount', type: 'uint256' }, { name: 'endAmount', type: 'uint256' }, { name: 'recipient', type: 'address' }],
+      },
+      message: {
+        permitted: { token: USDC, amount: '100000000' }, spender: reactor, nonce: '7', deadline: '1792000000',
+        witness: {
+          info: { reactor, swapper: USER, nonce: '7', deadline: '1792000000', additionalValidationContract: '0x0000000000000000000000000000000000000000', additionalValidationData: '0x' },
+          cosigner: '0x4449cd34d1eb1fedcf02a1be3834ffde8e6a6180', baseInputToken: USDC, baseInputStartAmount: '100000000', baseInputEndAmount: '100000000',
+          baseOutputs: [{ token: '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2', startAmount: '40000000000000000', endAmount: '39000000000000000', recipient }],
+        },
+      },
+    })
+    // Case B: a UniswapX order to the verified reactor, paying this account, on 7.16.
+    const b = typed(dutch(USER))
+    expect(b.tier).toBe('green')
+    expect(text(b)).toContain(', once.')
+    expect(text(b)).not.toContain('now and later')
+    // The same order paying someone else, or to a reactor that is not the real one, stays red.
+    expect(typed(dutch(EVIL)).tier).toBe('red')
+    expect(typed(dutch(USER, EVIL)).tier).toBe('red')
   })
 })
