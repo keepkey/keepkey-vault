@@ -22,6 +22,31 @@
           ]
         }
       }
+    },
+    "Stake11111111111111111111111111111111111111": {
+      "name": "Stake Program",
+      "category": "staking",
+      "website": "https://docs.solana.com/developing/runtime-facilities/programs#stake-program",
+      "description": "Native staking: delegate, deactivate, split, merge, withdraw. Only DelegateStake and Deactivate are decoded here: they keep the stake account's authorities, and firmware shows both. Authorize, Split and Withdraw can hand control or funds to another account and stay undecoded.",
+      "discriminator": {
+        "encoding": "u32-le",
+        "offset": 0,
+        "length": 4
+      },
+      "instructions": {
+        "02000000": {
+          "name": "delegateStake",
+          "description": "Delegate a stake account to a validator's vote account.",
+          "accounts": ["stakeAccount", "voteAccount", "clockSysvar", "stakeHistorySysvar", "stakeConfig", "stakeAuthority"],
+          "args": []
+        },
+        "05000000": {
+          "name": "deactivate",
+          "description": "Deactivate a stake account so it can be withdrawn after cooldown.",
+          "accounts": ["stakeAccount", "clockSysvar", "stakeAuthority"],
+          "args": []
+        }
+      }
     }
   }
 }

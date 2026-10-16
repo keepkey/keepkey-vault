@@ -52,6 +52,7 @@ import { buildSolanaMessageDecodedInfo, solanaSignerChangedError } from './solan
 import bs58 from 'bs58'
 import { assessSigningRisk } from '../shared/clearsign-risk'
 import { applyRestSolanaSigningGates, buildRestSolanaSignRequest, type CertifiedSolanaProof } from './solana-certified-registry'
+import { requiresSolanaBlindSigningConsent, solanaFirmwareRequiresAdvancedMode } from './solana-consent'
 import { certifiedTokenIdentities, describeCertifiedSolanaTransaction } from './solana-certified-describe'
 import { simulateSolanaHoldings } from './solana-outflow'
 import { createRpcAltFetcher, DEFAULT_SOLANA_RPC_ENDPOINT } from './solana-alt'
@@ -3403,9 +3404,16 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             // clear-sign depends on the certified lookup in the signing gate
             // (a network round-trip, firmware-version-dependent), so a decode
             // must not promise it.
+            // Whether the device shows these bytes natively depends on the
+            // connected firmware. With no firmware version known, nothing is
+            // claimed (requiresAdvancedMode stays unset, so never green).
+            const firmwareVersion = engine.getDeviceState().firmwareVersion
+            const requiresAdvancedMode = firmwareVersion
+              ? solanaFirmwareRequiresAdvancedMode(body.raw_tx, firmwareVersion)
+              : undefined
             const risk = assessSigningRisk({
               id: 'decode', method: 'solana_decodeTransaction', appName: 'decode', chain: 'solana',
-              solanaDecoded, requiresBlindSigningConsent, simulatedOutflow,
+              solanaDecoded, requiresBlindSigningConsent, requiresAdvancedMode, firmwareVersion, simulatedOutflow,
             } as any)
             return json({ solanaDecoded, requiresBlindSigningConsent, risk, simulatedOutflow })
           } catch (e: any) {

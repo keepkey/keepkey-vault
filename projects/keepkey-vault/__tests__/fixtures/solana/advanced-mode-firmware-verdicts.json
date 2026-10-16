@@ -1,6 +1,6 @@
 {
   "_comment": "Solana transactions with each firmware build's review verdict. Generated, do not edit: every verdict is the output of scripts/solana-fw-review-oracle/harness.c, which links that build's own lib/firmware/solana.c and calls solana_inspectTx on the exact message bytes Vault sends. fsm_msgSolanaSignTx refuses OPAQUE without AdvancedMode, signs VERIFIED without it, and refuses MALFORMED either way. solanaFirmwareRequiresAdvancedMode must agree with them (__tests__/solana-advanced-mode.test.ts).",
-  "command": "scripts/solana-fw-review-oracle/gen-verdicts.sh <keepkey-firmware> 5482e7366a36e81336074f53a9defb6cff45ed72 e519dc13ced6adbd77cc5ceb6207f3cc04e57492 dd38324e3ffa1178d632e4da58f27cab7c0494a4 2676ec43089223daae7f588494975108e6201a75 e507d0c6f6ea3e5fcbaceec08fd26bb8f6e46192 b452f011c93eb98d7d1e859c1927842729d20e13",
+  "command": "scripts/solana-fw-review-oracle/gen-verdicts.sh <keepkey-firmware> 5482e7366a36e81336074f53a9defb6cff45ed72 e519dc13ced6adbd77cc5ceb6207f3cc04e57492 dd38324e3ffa1178d632e4da58f27cab7c0494a4 2676ec43089223daae7f588494975108e6201a75 4f94a63b6632be48379c95465b3a9f4ae6e561bb b452f011c93eb98d7d1e859c1927842729d20e13",
   "builds": [
     {
       "rev": "v7.14.1",
@@ -27,10 +27,10 @@
       "subject": "Fix confirmation observer static analysis"
     },
     {
-      "rev": "e507d0c6f6ea3e5fcbaceec08fd26bb8f6e46192",
-      "sha": "e507d0c6f6ea3e5fcbaceec08fd26bb8f6e46192",
+      "rev": "4f94a63b6632be48379c95465b3a9f4ae6e561bb",
+      "sha": "4f94a63b6632be48379c95465b3a9f4ae6e561bb",
       "version": "7.16.0",
-      "subject": "Show human swap limits and TRON transaction terms on device"
+      "subject": "Merge pull request #495 from keepkey/release/7.16.0"
     },
     {
       "rev": "bithighlander/alpha",
@@ -48,7 +48,7 @@
         "e519dc13ced6adbd77cc5ceb6207f3cc04e57492": "VERIFIED",
         "dd38324e3ffa1178d632e4da58f27cab7c0494a4": "VERIFIED",
         "2676ec43089223daae7f588494975108e6201a75": "VERIFIED",
-        "e507d0c6f6ea3e5fcbaceec08fd26bb8f6e46192": "VERIFIED",
+        "4f94a63b6632be48379c95465b3a9f4ae6e561bb": "VERIFIED",
         "b452f011c93eb98d7d1e859c1927842729d20e13": "VERIFIED"
       }
     },
@@ -60,7 +60,7 @@
         "e519dc13ced6adbd77cc5ceb6207f3cc04e57492": "OPAQUE",
         "dd38324e3ffa1178d632e4da58f27cab7c0494a4": "VERIFIED",
         "2676ec43089223daae7f588494975108e6201a75": "VERIFIED",
-        "e507d0c6f6ea3e5fcbaceec08fd26bb8f6e46192": "VERIFIED",
+        "4f94a63b6632be48379c95465b3a9f4ae6e561bb": "VERIFIED",
         "b452f011c93eb98d7d1e859c1927842729d20e13": "VERIFIED"
       }
     },
@@ -72,7 +72,7 @@
         "e519dc13ced6adbd77cc5ceb6207f3cc04e57492": "VERIFIED",
         "dd38324e3ffa1178d632e4da58f27cab7c0494a4": "VERIFIED",
         "2676ec43089223daae7f588494975108e6201a75": "VERIFIED",
-        "e507d0c6f6ea3e5fcbaceec08fd26bb8f6e46192": "VERIFIED",
+        "4f94a63b6632be48379c95465b3a9f4ae6e561bb": "VERIFIED",
         "b452f011c93eb98d7d1e859c1927842729d20e13": "VERIFIED"
       }
     },
@@ -84,7 +84,7 @@
         "e519dc13ced6adbd77cc5ceb6207f3cc04e57492": "OPAQUE",
         "dd38324e3ffa1178d632e4da58f27cab7c0494a4": "VERIFIED",
         "2676ec43089223daae7f588494975108e6201a75": "VERIFIED",
-        "e507d0c6f6ea3e5fcbaceec08fd26bb8f6e46192": "VERIFIED",
+        "4f94a63b6632be48379c95465b3a9f4ae6e561bb": "VERIFIED",
         "b452f011c93eb98d7d1e859c1927842729d20e13": "VERIFIED"
       }
     },
@@ -96,7 +96,7 @@
         "e519dc13ced6adbd77cc5ceb6207f3cc04e57492": "VERIFIED",
         "dd38324e3ffa1178d632e4da58f27cab7c0494a4": "VERIFIED",
         "2676ec43089223daae7f588494975108e6201a75": "VERIFIED",
-        "e507d0c6f6ea3e5fcbaceec08fd26bb8f6e46192": "VERIFIED",
+        "4f94a63b6632be48379c95465b3a9f4ae6e561bb": "VERIFIED",
         "b452f011c93eb98d7d1e859c1927842729d20e13": "VERIFIED"
       }
     },
@@ -108,7 +108,7 @@
         "e519dc13ced6adbd77cc5ceb6207f3cc04e57492": "VERIFIED",
         "dd38324e3ffa1178d632e4da58f27cab7c0494a4": "VERIFIED",
         "2676ec43089223daae7f588494975108e6201a75": "VERIFIED",
-        "e507d0c6f6ea3e5fcbaceec08fd26bb8f6e46192": "VERIFIED",
+        "4f94a63b6632be48379c95465b3a9f4ae6e561bb": "VERIFIED",
         "b452f011c93eb98d7d1e859c1927842729d20e13": "VERIFIED"
       }
     },
@@ -120,7 +120,7 @@
         "e519dc13ced6adbd77cc5ceb6207f3cc04e57492": "VERIFIED",
         "dd38324e3ffa1178d632e4da58f27cab7c0494a4": "VERIFIED",
         "2676ec43089223daae7f588494975108e6201a75": "VERIFIED",
-        "e507d0c6f6ea3e5fcbaceec08fd26bb8f6e46192": "VERIFIED",
+        "4f94a63b6632be48379c95465b3a9f4ae6e561bb": "VERIFIED",
         "b452f011c93eb98d7d1e859c1927842729d20e13": "VERIFIED"
       }
     },
@@ -132,7 +132,7 @@
         "e519dc13ced6adbd77cc5ceb6207f3cc04e57492": "OPAQUE",
         "dd38324e3ffa1178d632e4da58f27cab7c0494a4": "OPAQUE",
         "2676ec43089223daae7f588494975108e6201a75": "OPAQUE",
-        "e507d0c6f6ea3e5fcbaceec08fd26bb8f6e46192": "OPAQUE",
+        "4f94a63b6632be48379c95465b3a9f4ae6e561bb": "OPAQUE",
         "b452f011c93eb98d7d1e859c1927842729d20e13": "OPAQUE"
       }
     },
@@ -144,7 +144,7 @@
         "e519dc13ced6adbd77cc5ceb6207f3cc04e57492": "OPAQUE",
         "dd38324e3ffa1178d632e4da58f27cab7c0494a4": "OPAQUE",
         "2676ec43089223daae7f588494975108e6201a75": "OPAQUE",
-        "e507d0c6f6ea3e5fcbaceec08fd26bb8f6e46192": "OPAQUE",
+        "4f94a63b6632be48379c95465b3a9f4ae6e561bb": "OPAQUE",
         "b452f011c93eb98d7d1e859c1927842729d20e13": "OPAQUE"
       }
     },
@@ -156,7 +156,7 @@
         "e519dc13ced6adbd77cc5ceb6207f3cc04e57492": "OPAQUE",
         "dd38324e3ffa1178d632e4da58f27cab7c0494a4": "VERIFIED",
         "2676ec43089223daae7f588494975108e6201a75": "OPAQUE",
-        "e507d0c6f6ea3e5fcbaceec08fd26bb8f6e46192": "VERIFIED",
+        "4f94a63b6632be48379c95465b3a9f4ae6e561bb": "OPAQUE",
         "b452f011c93eb98d7d1e859c1927842729d20e13": "OPAQUE"
       }
     },
@@ -168,7 +168,7 @@
         "e519dc13ced6adbd77cc5ceb6207f3cc04e57492": "OPAQUE",
         "dd38324e3ffa1178d632e4da58f27cab7c0494a4": "OPAQUE",
         "2676ec43089223daae7f588494975108e6201a75": "OPAQUE",
-        "e507d0c6f6ea3e5fcbaceec08fd26bb8f6e46192": "OPAQUE",
+        "4f94a63b6632be48379c95465b3a9f4ae6e561bb": "OPAQUE",
         "b452f011c93eb98d7d1e859c1927842729d20e13": "OPAQUE"
       }
     },
@@ -180,7 +180,7 @@
         "e519dc13ced6adbd77cc5ceb6207f3cc04e57492": "OPAQUE",
         "dd38324e3ffa1178d632e4da58f27cab7c0494a4": "VERIFIED",
         "2676ec43089223daae7f588494975108e6201a75": "OPAQUE",
-        "e507d0c6f6ea3e5fcbaceec08fd26bb8f6e46192": "VERIFIED",
+        "4f94a63b6632be48379c95465b3a9f4ae6e561bb": "OPAQUE",
         "b452f011c93eb98d7d1e859c1927842729d20e13": "OPAQUE"
       }
     },
@@ -192,7 +192,7 @@
         "e519dc13ced6adbd77cc5ceb6207f3cc04e57492": "OPAQUE",
         "dd38324e3ffa1178d632e4da58f27cab7c0494a4": "VERIFIED",
         "2676ec43089223daae7f588494975108e6201a75": "OPAQUE",
-        "e507d0c6f6ea3e5fcbaceec08fd26bb8f6e46192": "VERIFIED",
+        "4f94a63b6632be48379c95465b3a9f4ae6e561bb": "OPAQUE",
         "b452f011c93eb98d7d1e859c1927842729d20e13": "OPAQUE"
       }
     },
@@ -204,7 +204,7 @@
         "e519dc13ced6adbd77cc5ceb6207f3cc04e57492": "VERIFIED",
         "dd38324e3ffa1178d632e4da58f27cab7c0494a4": "OPAQUE",
         "2676ec43089223daae7f588494975108e6201a75": "VERIFIED",
-        "e507d0c6f6ea3e5fcbaceec08fd26bb8f6e46192": "OPAQUE",
+        "4f94a63b6632be48379c95465b3a9f4ae6e561bb": "VERIFIED",
         "b452f011c93eb98d7d1e859c1927842729d20e13": "VERIFIED"
       }
     },
@@ -216,7 +216,7 @@
         "e519dc13ced6adbd77cc5ceb6207f3cc04e57492": "OPAQUE",
         "dd38324e3ffa1178d632e4da58f27cab7c0494a4": "OPAQUE",
         "2676ec43089223daae7f588494975108e6201a75": "OPAQUE",
-        "e507d0c6f6ea3e5fcbaceec08fd26bb8f6e46192": "OPAQUE",
+        "4f94a63b6632be48379c95465b3a9f4ae6e561bb": "OPAQUE",
         "b452f011c93eb98d7d1e859c1927842729d20e13": "OPAQUE"
       }
     },
@@ -228,7 +228,7 @@
         "e519dc13ced6adbd77cc5ceb6207f3cc04e57492": "OPAQUE",
         "dd38324e3ffa1178d632e4da58f27cab7c0494a4": "OPAQUE",
         "2676ec43089223daae7f588494975108e6201a75": "OPAQUE",
-        "e507d0c6f6ea3e5fcbaceec08fd26bb8f6e46192": "OPAQUE",
+        "4f94a63b6632be48379c95465b3a9f4ae6e561bb": "VERIFIED",
         "b452f011c93eb98d7d1e859c1927842729d20e13": "OPAQUE"
       }
     },
@@ -240,7 +240,7 @@
         "e519dc13ced6adbd77cc5ceb6207f3cc04e57492": "OPAQUE",
         "dd38324e3ffa1178d632e4da58f27cab7c0494a4": "OPAQUE",
         "2676ec43089223daae7f588494975108e6201a75": "OPAQUE",
-        "e507d0c6f6ea3e5fcbaceec08fd26bb8f6e46192": "MALFORMED",
+        "4f94a63b6632be48379c95465b3a9f4ae6e561bb": "OPAQUE",
         "b452f011c93eb98d7d1e859c1927842729d20e13": "MALFORMED"
       }
     },
@@ -252,7 +252,7 @@
         "e519dc13ced6adbd77cc5ceb6207f3cc04e57492": "OPAQUE",
         "dd38324e3ffa1178d632e4da58f27cab7c0494a4": "VERIFIED",
         "2676ec43089223daae7f588494975108e6201a75": "VERIFIED",
-        "e507d0c6f6ea3e5fcbaceec08fd26bb8f6e46192": "VERIFIED",
+        "4f94a63b6632be48379c95465b3a9f4ae6e561bb": "VERIFIED",
         "b452f011c93eb98d7d1e859c1927842729d20e13": "VERIFIED"
       }
     },
@@ -264,7 +264,7 @@
         "e519dc13ced6adbd77cc5ceb6207f3cc04e57492": "MALFORMED",
         "dd38324e3ffa1178d632e4da58f27cab7c0494a4": "OPAQUE",
         "2676ec43089223daae7f588494975108e6201a75": "OPAQUE",
-        "e507d0c6f6ea3e5fcbaceec08fd26bb8f6e46192": "OPAQUE",
+        "4f94a63b6632be48379c95465b3a9f4ae6e561bb": "VERIFIED",
         "b452f011c93eb98d7d1e859c1927842729d20e13": "OPAQUE"
       }
     },
@@ -276,7 +276,7 @@
         "e519dc13ced6adbd77cc5ceb6207f3cc04e57492": "MALFORMED",
         "dd38324e3ffa1178d632e4da58f27cab7c0494a4": "OPAQUE",
         "2676ec43089223daae7f588494975108e6201a75": "OPAQUE",
-        "e507d0c6f6ea3e5fcbaceec08fd26bb8f6e46192": "OPAQUE",
+        "4f94a63b6632be48379c95465b3a9f4ae6e561bb": "OPAQUE",
         "b452f011c93eb98d7d1e859c1927842729d20e13": "OPAQUE"
       }
     },
@@ -288,7 +288,7 @@
         "e519dc13ced6adbd77cc5ceb6207f3cc04e57492": "OPAQUE",
         "dd38324e3ffa1178d632e4da58f27cab7c0494a4": "OPAQUE",
         "2676ec43089223daae7f588494975108e6201a75": "OPAQUE",
-        "e507d0c6f6ea3e5fcbaceec08fd26bb8f6e46192": "OPAQUE",
+        "4f94a63b6632be48379c95465b3a9f4ae6e561bb": "OPAQUE",
         "b452f011c93eb98d7d1e859c1927842729d20e13": "OPAQUE"
       }
     },
@@ -300,7 +300,7 @@
         "e519dc13ced6adbd77cc5ceb6207f3cc04e57492": "OPAQUE",
         "dd38324e3ffa1178d632e4da58f27cab7c0494a4": "OPAQUE",
         "2676ec43089223daae7f588494975108e6201a75": "OPAQUE",
-        "e507d0c6f6ea3e5fcbaceec08fd26bb8f6e46192": "OPAQUE",
+        "4f94a63b6632be48379c95465b3a9f4ae6e561bb": "OPAQUE",
         "b452f011c93eb98d7d1e859c1927842729d20e13": "OPAQUE"
       }
     },
@@ -312,7 +312,7 @@
         "e519dc13ced6adbd77cc5ceb6207f3cc04e57492": "MALFORMED",
         "dd38324e3ffa1178d632e4da58f27cab7c0494a4": "OPAQUE",
         "2676ec43089223daae7f588494975108e6201a75": "OPAQUE",
-        "e507d0c6f6ea3e5fcbaceec08fd26bb8f6e46192": "OPAQUE",
+        "4f94a63b6632be48379c95465b3a9f4ae6e561bb": "OPAQUE",
         "b452f011c93eb98d7d1e859c1927842729d20e13": "OPAQUE"
       }
     }

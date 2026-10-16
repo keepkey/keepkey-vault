@@ -19,7 +19,7 @@ import { buildSolanaDecodedInfo } from '../src/bun/solana-clearsign'
 import { applySolanaSigningGates, solanaFirmwareRequiresAdvancedMode } from '../src/bun/solana-consent'
 import type { SigningRequestInfo } from '../src/shared/types'
 
-const PINNED_FIRMWARE = 'e507d0c6f6ea3e5fcbaceec08fd26bb8f6e46192' // modules/keepkey-firmware
+const V7160 = '4f94a63b6632be48379c95465b3a9f4ae6e561bb' // released 7.16.0 (release/7.16.0, #495)
 const V7141 = '5482e7366a36e81336074f53a9defb6cff45ed72'
 const versions = [...new Set(corpus.builds.map((b) => b.version))]
 const rawTx = (name: string) => {
@@ -29,9 +29,9 @@ const rawTx = (name: string) => {
 }
 
 describe('AdvancedMode is required exactly where every firmware build of the version refuses', () => {
-  test('the corpus covers the released 7.14.1, the pinned alpha, and 7.14.2 through 7.16', () => {
+  test('the corpus covers 7.14.1 through 7.16, with the released 7.14.1 and 7.16.0', () => {
     expect(corpus.builds.map((b) => b.sha)).toContain(V7141)
-    expect(corpus.builds.map((b) => b.sha)).toContain(PINNED_FIRMWARE)
+    expect(corpus.builds.map((b) => b.sha)).toContain(V7160)
     expect(versions).toEqual(['7.14.1', '7.14.2', '7.15.0', '7.16.0'])
   })
 
@@ -54,7 +54,7 @@ describe('what the firmware verdicts mean for common transactions', () => {
 
   test('an SPL send with createIdempotent clear-signs from 7.15 and is opaque on 7.14', () => {
     const name = 'SPL send: ATA createIdempotent + transferChecked (@solana/spl-token default)'
-    expect(verdict(name, PINNED_FIRMWARE)).toBe('VERIFIED')
+    expect(verdict(name, V7160)).toBe('VERIFIED')
     expect(verdict(name, V7141)).toBe('OPAQUE')
     expect(solanaFirmwareRequiresAdvancedMode(rawTx(name).rawTx, '7.16.0')).toBe(false)
     expect(solanaFirmwareRequiresAdvancedMode(rawTx(name).rawTx, '7.15.0')).toBe(false)

@@ -18,6 +18,8 @@ import type { SigningRequestInfo } from '../src/shared/types'
 import joinFixture from './fixtures/solana/soltoshidice-blackjack-join.json'
 import swap from './fixtures/uniswap/base-ur-usdc-to-eth-swap.json'
 import { applyEvmTxPreview } from '../src/bun/evm-signing-preview'
+import { applySolanaSigningGates, requiresSolanaBlindSigningConsent } from '../src/bun/solana-consent'
+import bs58 from 'bs58'
 
 const LOGIN_MESSAGE_B64 = 'U29sdG9zaGlESUNFIHdhbGxldApOZXR3b3JrOiBtYWlubmV0LWJldGE6Q3VUTHA3cERtTkdrRmdpNGFvaDhFZjFZU2pjMkJ6RUNRUkx6WXFhb1ZXQlI6NG5DbXB3bmU3aENvV1RTcEFkNTR1RU5tQ2dISnJIVHluNERNUENFTXB1bXAKU2Vzc2lvbjogY2E1ZWQ3YTgtNWRmMS00MWJmLTkxY2EtYzNkZTRjMWM1NmY2Ck5vbmNlOiAzN2M0MDY2Ny01NzZkLTQwNTQtOTA2NC02MTg2MTRhYjg4YzE='
 const TX1_B64 = 'AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAYJ7Dl5pNxrQBvQRRcaGJ8mhW+rnqt1VgIU+XKy7cFkMA+LZzzaLik+AiCrPgHStY7QVcnBsnYt1RVhKxDKzW40NrgTPK+soJctzdQsxyxkxmokWe10HSLNM0pp7sZO3eosAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAg+JYP7kag/aX3JhxSBLr/9dbITv9zclr5W8RVNHvjowF02rdo/npIS0+fAcrrAThIR97VGw7P8fmeJwQ9+Dk5hH08KOLLv/nnxPfLbW1x5bwW1Qqm7U/+OurmoNbG6qQDBkZv5SEXMv/srbpyw5vnvIzlu8X3EmssQ5s6QAAAALDgivSk/PrRPvj8/Z3HCXXrb8LgSnx2YRVApRzV257QTQBKpt9xx9nI6TgJCP4k4JahDgt0ODAlVydCDyS4WCcCBwAFAjBXBQAIBwAGBAECBQMDE2tr'
@@ -391,7 +393,7 @@ describe('three-level verdict on Solana: device shows it, computer decodes it, o
   const ix = (programId: string, status: 'known' | 'known-program-unknown-ix' | 'unknown-program', programName: string, instructionName?: string) =>
     ({ status, programId, programName, instructionName, args: [], accounts: [] })
   const sol = (...instructions: ReturnType<typeof ix>[]) => ({
-    method: '/solana/sign-transaction', firmwareVersion: '7.16.0',
+    method: '/solana/sign-transaction', firmwareVersion: '7.16.0', requiresAdvancedMode: false,
     solanaDecoded: { version: 'legacy', staticAccountCount: 4, instructions },
   } as unknown as SigningRequestInfo)
 
@@ -420,11 +422,123 @@ describe('three-level verdict on Solana: device shows it, computer decodes it, o
       ix(SYSTEM, 'known', 'System Program', 'transfer'),
       ix('MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr', 'known-program-unknown-ix', 'Memo Program'),
     ))!
-    expect(r.tier).toBe('yellow')
+    // The firmware shows Memo v2 text itself.
+    expect(r.tier).toBe('green')
   })
 
   test('a certified description the device verifies is green', () => {
     const r = assessSigningRisk({ ...sol(ix('99vQwtBwYtrqqD9YSXbdum3KBdxPAVxYTaQ3cfnJSrN2', 'known', 'Relay', 'depositNative')), deviceClearSigns: true })!
     expect(r.tier).toBe('green')
+  })
+})
+
+describe('Solana verdicts follow what firmware 7.16.0 shows (lib/firmware/solana.c)', () => {
+  const SYSTEM = '11111111111111111111111111111111'
+  const TOKEN = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA'
+  const ATA = 'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL'
+  const MEMO = 'MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr'
+  const STAKE = 'Stake11111111111111111111111111111111111111'
+  const CLOCK = 'SysvarC1ock11111111111111111111111111111111'
+  const key = (n: number) => bs58.encode(Buffer.alloc(32, n))
+  const payer = key(1), dest = key(2), mint = key(3), srcAta = key(4), dstAta = key(5), stake = key(6), vote = key(7)
+  const u32 = (n: number) => { const b = Buffer.alloc(4); b.writeUInt32LE(n); return [...b] }
+  const u64 = (n: bigint) => { const b = Buffer.alloc(8); b.writeBigUInt64LE(n); return [...b] }
+  type Ix = { program: string; accounts: string[]; data: number[] }
+  /** Unsigned legacy wire tx: payer signs, program ids last. */
+  const legacyTx = (ixs: Ix[]) => {
+    const programs = [...new Set(ixs.map((i) => i.program))]
+    const others = [...new Set(ixs.flatMap((i) => i.accounts))].filter((a) => a !== payer && !programs.includes(a))
+    const keys = [payer, ...others, ...programs]
+    const msg = [1, 0, programs.length, keys.length, ...keys.flatMap((k) => [...bs58.decode(k)]), ...Buffer.alloc(32, 9), ixs.length]
+    for (const ix of ixs) msg.push(keys.indexOf(ix.program), ix.accounts.length, ...ix.accounts.map((a) => keys.indexOf(a)), ix.data.length, ...ix.data)
+    return Buffer.from([1, ...Buffer.alloc(64), ...msg]).toString('base64')
+  }
+  /** The REST and WalletConnect sign path: decode, gates for the firmware, verdict. */
+  const signVerdict = async (ixs: Ix[], firmwareVersion = '7.16.0') => {
+    const raw = legacyTx(ixs)
+    const info = { id: 'x', method: '/solana/sign-transaction', firmwareVersion } as SigningRequestInfo
+    info.solanaDecoded = await buildSolanaDecodedInfo(raw, noAlts)
+    applySolanaSigningGates(info, raw, firmwareVersion)
+    return { info, risk: assessSigningRisk(info)! }
+  }
+  const transferChecked = (data = [12, ...u64(5_000_000n), 6]): Ix => ({ program: TOKEN, accounts: [srcAta, mint, dstAta, payer], data })
+  const solTransfer = (data = [...u32(2), ...u64(1_000_000n)]): Ix => ({ program: SYSTEM, accounts: [payer, dest], data })
+
+  test('solana:0 a firmware-native instruction with extra data bytes is red and needs Advanced Mode', async () => {
+    // Firmware decodes TransferChecked only at exactly 10 bytes and a System
+    // transfer at exactly 12; anything longer is unknown, so the tx is opaque.
+    for (const ix of [transferChecked([12, ...u64(5_000_000n), 6, 0xaa]), solTransfer([...u32(2), ...u64(1_000_000_000n), 0xde, 0xad, 0xbe, 0xef])]) {
+      const { info, risk } = await signVerdict([ix])
+      expect(info.requiresAdvancedMode).toBe(true)
+      expect(risk.tier).toBe('red')
+      expect(risk.reasons.map((r) => r.text).join('\n')).toContain('not decoded in full')
+    }
+    expect((await signVerdict([transferChecked()])).risk.tier).toBe('green')
+  })
+
+  test('solana:1 SPL Burn and MintTo are yellow on 7.16.0: the device shows them as raw data', async () => {
+    const burn = { program: TOKEN, accounts: [srcAta, mint, payer], data: [8, ...u64(1000n)] }
+    const mintTo = { program: TOKEN, accounts: [mint, dstAta, payer], data: [7, ...u64(1000n)] }
+    for (const ix of [burn, mintTo]) {
+      const { info, risk } = await signVerdict([ix])
+      expect(info.requiresAdvancedMode).toBe(true)
+      expect(info.requiresBlindSigningConsent).toBe(true)
+      expect(risk.tier).toBe('yellow')
+    }
+  })
+
+  test('solana:2 the decode route never says green without a firmware check', async () => {
+    // POST /solana/decode-transaction with no device: no requiresAdvancedMode.
+    const unchecked = { program: TOKEN, accounts: [srcAta, dstAta, payer], data: [3, ...u64(1000n)] }
+    const solanaDecoded = await buildSolanaDecodedInfo(legacyTx([unchecked]), noAlts)
+    const risk = assessSigningRisk({
+      id: 'decode', method: 'solana_decodeTransaction', solanaDecoded,
+      requiresBlindSigningConsent: requiresSolanaBlindSigningConsent(solanaDecoded, false),
+    } as SigningRequestInfo)!
+    expect(risk.tier).toBe('yellow')
+  })
+
+  test('solana:3 non-ASCII or CRLF sign-in text is yellow; text with control bytes is red', () => {
+    const SIGNER = 'Gu83nVMD8qh948D1vqe8UPoUHaFuSwcHrvNHetcM4Xux'
+    const tier = (text: string) => {
+      const d = buildSolanaMessageDecodedInfo(Buffer.from(text).toString('base64'), { encoding: 'base64', signer: SIGNER })
+      return assessSigningRisk({ method: '/solana/sign-message', solanaMessageDecoded: d, requiresAdvancedMode: d.plainText !== true } as SigningRequestInfo)!.tier
+    }
+    expect(tier('Bienvenue sur café.fr — connectez-vous')).toBe('yellow')
+    expect(tier('Sign in to example.com\r\nNonce: 12345\r\n')).toBe('yellow')
+    expect(tier('Login to dapp 🚀')).toBe('yellow')
+    expect(tier('Approve order id \x01\x02\x03\x04\x05 for settlement of the batch number 7781 today')).toBe('red')
+    expect(tier('Sign in to example.com\nNonce: 12345')).toBe('green')
+  })
+
+  test('solana:4 a truncated System transfer is red and does not claim it sends 0 SOL', async () => {
+    const { info, risk } = await signVerdict([solTransfer([...u32(2), 1, 2, 3, 4])])
+    expect(info.requiresAdvancedMode).toBe(true)
+    expect(risk.tier).toBe('red')
+    expect(risk.reasons.map((r) => r.text).join('\n')).not.toContain('Sends 0 SOL')
+  })
+
+  test('solana:5 native stake Delegate and Deactivate are green: the device shows both', async () => {
+    const delegate = { program: STAKE, accounts: [stake, vote, CLOCK, key(8), key(9), payer], data: u32(2) }
+    const deactivate = { program: STAKE, accounts: [stake, CLOCK, payer], data: u32(5) }
+    for (const ix of [delegate, deactivate]) {
+      const { info, risk } = await signVerdict([ix])
+      expect(info.requiresAdvancedMode).toBe(false)
+      expect(info.requiresBlindSigningConsent).toBe(false)
+      expect(risk.tier).toBe('green')
+    }
+    const text = (await signVerdict([delegate])).risk.reasons.map((r) => r.text).join('\n')
+    expect(text).toContain(`Delegates stake account ${stake.slice(0, 4)}`)
+  })
+
+  test('solana:6 an SPL send with a canonical ATA create, or a SOL send with a memo, is green', async () => {
+    const ataIdem = (tokenProgram = TOKEN) => ({ program: ATA, accounts: [payer, dstAta, dest, mint, SYSTEM, tokenProgram], data: [1] })
+    const memo = { program: MEMO, accounts: [], data: [...Buffer.from('invoice 42')] }
+    expect((await signVerdict([ataIdem(), transferChecked()])).risk.tier).toBe('green')
+    expect((await signVerdict([solTransfer(), memo])).risk.tier).toBe('green')
+    // An ATA create naming Token-2022 is not the canonical form: opaque on 7.16.0.
+    const t22 = await signVerdict([ataIdem('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb')])
+    expect(t22.info.requiresAdvancedMode).toBe(true)
+    expect(t22.risk.tier).not.toBe('green')
   })
 })
