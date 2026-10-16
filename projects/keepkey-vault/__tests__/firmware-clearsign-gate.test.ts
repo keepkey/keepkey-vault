@@ -27,6 +27,11 @@ const USDT_ETH = '0xdac17f958d2ee523a2206206994597c13d831ec7'
 const word = '00'.repeat(32)
 const erc20Transfer = '0xa9059cbb' + word + word   // 68-byte standard transfer
 const erc20Approve = '0x095ea7b3' + word + word
+const w = (hex: string) => hex.replace(/^0x/, '').padStart(64, '0')
+// sellToUniswap(USDC → USDT), canonical: offset 0x80, two tokens the table knows.
+const zxSell = '0xd9627aa4' + w('80') + w('de0b6b3a7640000') + w('1') + w('0') + w('2') + w(USDC_ETH) + w(USDT_ETH)
+// addLiquidityETH(USDC, …): 196 bytes, clean words, u64 deadline.
+const univ2Add = '0xf305d719' + w(USDC_ETH) + w('1') + w('1') + w('1') + w(RANDOM) + w('ffffffff')
 
 describe('firmwareClearSigns mirrors the rc3 native clear-sign allowlist', () => {
   test('THORChain/Maya deposit to the pinned router → clear-signs', () => {
@@ -46,21 +51,20 @@ describe('firmwareClearSigns mirrors the rc3 native clear-sign allowlist', () =>
 
   test('0x proxy methods only at the pinned ExchangeProxy/router', () => {
     expect(firmwareClearSigns(ZX, '0x415565b0' + word, 1)).toBe(false)  // transformERC20
-    expect(firmwareClearSigns(ZX, '0xd9627aa4' + word, 1)).toBe(true)   // sellToUniswap
-    expect(firmwareClearSigns(UNIV2, '0xf305d719' + word, 1)).toBe(true) // addLiquidityETH
+    expect(firmwareClearSigns(ZX, zxSell, 1)).toBe(true)        // sellToUniswap
+    expect(firmwareClearSigns(UNIV2, univ2Add, 1)).toBe(true)   // addLiquidityETH
     expect(firmwareClearSigns(RANDOM, '0x415565b0' + word, 1)).toBe(false)
     expect(firmwareClearSigns(UNIV2, '0x415565b0' + word, 1)).toBe(false) // right selector, wrong pin
   })
 
   test('pinned contracts are chain-scoped like firmware ethereum_contracts.c', () => {
-    // 0x Exchange Proxy: zx_isExchangeProxyChain = 1, 56, 137, 8453, 42161, 43114.
-    for (const chain of [1, 56, 137, 8453, 42161, 43114]) {
-      expect(firmwareClearSigns(ZX, '0xd9627aa4' + word, chain)).toBe(true)
-    }
-    expect(firmwareClearSigns(ZX, '0xd9627aa4' + word, 10)).toBe(false)   // different proxy on Optimism
-    expect(firmwareClearSigns(ZX, '0xd9627aa4' + word)).toBe(false)       // no chain id
+    // 0x Exchange Proxy: zx_isExchangeProxyChain = 1, 56, 137, 8453, 42161, 43114,
+    // and then only for tokens that chain's table names (see the 0x test below).
+    expect(firmwareClearSigns(ZX, zxSell, 1)).toBe(true)
+    expect(firmwareClearSigns(ZX, zxSell, 10)).toBe(false)   // different proxy on Optimism
+    expect(firmwareClearSigns(ZX, zxSell)).toBe(false)       // no chain id
     // Uniswap V2 liquidity + saproxy: Ethereum mainnet only.
-    expect(firmwareClearSigns(UNIV2, '0xf305d719' + word, 8453)).toBe(false)
+    expect(firmwareClearSigns(UNIV2, univ2Add, 8453)).toBe(false)
     expect(firmwareClearSigns(SAPROXY, '0xfea7c53f' + word, 1)).toBe(true)
     expect(firmwareClearSigns(SAPROXY, '0xfea7c53f' + word, 137)).toBe(false)
     // THORChain router: before 7.15 thortx.c knows chains 1 and 43114 only.
@@ -141,8 +145,9 @@ describe('firmwareClearSigns mirrors the rc3 native clear-sign allowlist', () =>
   })
 
   test('pinned calls only count when the calldata fits the first 1024-byte chunk', () => {
-    const fits = '0xd9627aa4' + '00'.repeat(1020)
-    const spills = '0xd9627aa4' + '00'.repeat(1021)
+    // A real 0x quote carries a tail past the ABI extent; the firmware allows it.
+    const fits = zxSell + '00'.repeat(1024 - (zxSell.length - 2) / 2)
+    const spills = fits + '00'
     expect(firmwareClearSigns(ZX, fits, 1)).toBe(true)
     expect(firmwareClearSigns(ZX, spills, 1)).toBe(false)
     expect(firmwareClearSigns(THOR, '0x1fece7b4' + '00'.repeat(1021), 1)).toBe(false)
@@ -158,6 +163,44 @@ describe('firmwareClearSigns mirrors the rc3 native clear-sign allowlist', () =>
     expect(firmwareClearSigns(RANDOM, erc20Transfer, 1)).toBe(false)
     expect(firmwareClearSigns(RANDOM, erc20Approve, 1)).toBe(false)
     expect(firmwareClearSigns(USDC_ETH, erc20Transfer)).toBe(false) // no chain id
+  })
+
+  test('ERC-20 transfer/approve with native value attached → not native (ethereum_valueIsZero)', () => {
+    for (const data of [erc20Transfer, erc20Approve]) {
+      for (const zero of [undefined, null, '', '0x', '0x0', '0x00', '0', 0]) {
+        expect(firmwareClearSigns(USDC_ETH, data, 1, '7.16.0', zero)).toBe(true)
+      }
+      for (const value of ['0x16345785d8a0000', '1', 1, 'junk']) {
+        expect(firmwareClearSigns(USDC_ETH, data, 1, '7.16.0', value)).toBe(false)
+        expect(firmwareClearSigns(USDC_ETH, data, 1, '7.15.0', value)).toBe(false)
+      }
+    }
+  })
+
+  test('0x sellToUniswap mirrors zxswap_resolveBothTokens', () => {
+    const head = (offset: string, sushi: string, count: string) =>
+      '0xd9627aa4' + w(offset) + w('de0b6b3a7640000') + w('1') + w(sushi) + w(count)
+    const ETH = '0x' + 'e'.repeat(40)
+    const DAI = '0x6b175474e89094c44da98b954eedeac495271d0f'
+    expect(firmwareClearSigns(ZX, head('80', '1', '2') + w(USDC_ETH) + w(USDT_ETH), 1, '7.16.0')).toBe(true)   // Sushiswap
+    expect(firmwareClearSigns(ZX, head('80', '0', '3') + w(ETH) + w(DAI) + w(USDC_ETH), 1, '7.16.0')).toBe(true) // ETH sentinel, 3 hops
+    expect(firmwareClearSigns(ZX, head('80', '0', '2') + w(ETH) + w(USDC_ETH), 8453, '7.16.0')).toBe(false)    // sentinel is mainnet-only
+    expect(firmwareClearSigns(ZX, head('80', '0', '3') + w(USDC_ETH) + w(RANDOM) + w(USDT_ETH), 1, '7.16.0')).toBe(false) // unknown middle hop
+    expect(firmwareClearSigns(ZX, head('80', '2', '2') + w(USDC_ETH) + w(USDT_ETH), 1, '7.16.0')).toBe(false)  // isSushi not 0/1
+    expect(firmwareClearSigns(ZX, head('80', '0', '4') + w(USDC_ETH) + w(USDT_ETH) + w(DAI) + w(ETH), 1, '7.16.0')).toBe(false)
+    expect(firmwareClearSigns(ZX, head('80', '0', '2') + w(USDC_ETH) + 'ff' + w(USDT_ETH).slice(2), 1, '7.16.0')).toBe(false) // dirty word
+    expect(firmwareClearSigns(ZX, head('80', '0', '2') + w(USDC_ETH), 1, '7.16.0')).toBe(false)                // short
+  })
+
+  test('Uniswap V2 add/removeLiquidityETH mirror liquidity_shape_is_clear_signable', () => {
+    const remove = '0x02751cec' + univ2Add.slice(10)
+    expect(firmwareClearSigns(UNIV2, univ2Add, 1, '7.16.0', '0xde0b6b3a7640000')).toBe(true)
+    expect(firmwareClearSigns(UNIV2, remove, 1, '7.16.0', '0x0')).toBe(true)
+    expect(firmwareClearSigns(UNIV2, remove, 1, '7.16.0', '0x1')).toBe(false)
+    expect(firmwareClearSigns(UNIV2, univ2Add + word, 1, '7.16.0')).toBe(false)                             // not 196 bytes
+    expect(firmwareClearSigns(UNIV2, univ2Add.slice(0, -64) + w('1' + '0'.repeat(16)), 1, '7.16.0')).toBe(false) // deadline over u64
+    expect(firmwareClearSigns(UNIV2, univ2Add.replace(w(RANDOM), 'ff' + w(RANDOM).slice(2)), 1, '7.16.0')).toBe(false) // dirty recipient
+    expect(firmwareClearSigns(UNIV2, univ2Add.replace(w(USDC_ETH), w(RANDOM)), 1, '7.16.0')).toBe(false)    // token not in the table
   })
 
   test('firmware token table is pinned (regenerate: bun scripts/gen-firmware-token-table.ts)', () => {
