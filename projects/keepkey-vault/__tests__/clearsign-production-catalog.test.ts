@@ -7,15 +7,18 @@
  * evm-schema-registry). So every signed entry must equal Desktop's local
  * serialization of its catalog key.
  *
- * The fixture is a verbatim copy of keepkey-clearsign-server-static
- * worker/shared/production-catalog.json (the ceremony's
- * signed-catalog-batch1.json).
+ * The fixtures are verbatim copies of keepkey-clearsign-server-static
+ * worker/shared/production-catalog-batch1.json and -batch2.json (the
+ * ceremony's signed-catalog-batch1.json and -batch2.json). Batch 2 replaced
+ * batch 1's Arbitrum USDT approval with a Permit2-pinned and a generic entry;
+ * the Worker no longer serves the batch-1 one.
  */
 import { createHash } from 'node:crypto'
 import { afterEach, describe, expect, test } from 'bun:test'
 import bs58 from 'bs58'
 
 import signed from './fixtures/clearsign-production-catalog-batch1.json'
+import batch2 from './fixtures/clearsign-production-catalog-batch2.json'
 import { CERTIFIED_SOLANA_CATALOG, serializeSolanaSchema } from '../src/bun/solana-certified-schema'
 import { buildEvmSchemaBody, findCertifiedEvmSchemaSpec } from '../src/bun/evm-certified-schema'
 import { certifiedSolanaProofApplies, prepareExternalSolanaProof, type CertifiedSolanaProof } from '../src/bun/solana-certified-registry'
@@ -44,17 +47,26 @@ const SOLANA_KEYS: Record<string, string> = {
 // EVM entries are looked up from calldata (findCertifiedEvmSchemaSpec), so
 // each one lists the calls that must resolve to the signed body.
 const EVM_CALLS: Record<string, { key: string; chainId: number; to: string; calldata: string[] }> = {
-  '2f17530521daab81a1bd0b2feaa770fca5a5f785a12605caf965df0d5b4f2563': {
-    key: `42161:${ARB_USDT}:0x095ea7b3`, chainId: 42161, to: ARB_USDT,
-    // Any spender, Permit2 included: the signed Spender is a plain address.
-    calldata: [approve('0x909ef6b32dfdc12ca86aa710b54c991af3c5f82e'), approve('0x000000000022d473030f116ddee9f6b43ac78ba3')],
-  },
   'e2769638c2f849d6dc44bf62713a808057ead3a48e8a24ea1628adb2a6e22767': {
     key: `1:${RELAY_DEPOSITORY}:0x49290c1c`, chainId: 1, to: RELAY_DEPOSITORY, calldata: [bridgeDeposit],
   },
+  // Batch 2: the Arbitrum USDT0 approve, one entry with Permit2 pinned as the
+  // spender and one for any other spender.
+  'ad0c184ae8765a08cbb2c92cf69d6d1b46ed4c3b4da565e5d1c5dbb1864b0fd5': {
+    key: `42161:${ARB_USDT}:0x095ea7b3:permit2`, chainId: 42161, to: ARB_USDT,
+    calldata: [approve('0x000000000022d473030f116ddee9f6b43ac78ba3')],
+  },
+  '49fdb51938cdec05cbb416a070da59b12fd7468fe29bc4fa52c88714b37c7e94': {
+    key: `42161:${ARB_USDT}:0x095ea7b3`, chainId: 42161, to: ARB_USDT,
+    calldata: [approve('0x909ef6b32dfdc12ca86aa710b54c991af3c5f82e')],
+  },
 }
+// Batch 1's Arbitrum USDT approval ("Arbitrum USDT approval", any spender),
+// superseded by the two batch-2 entries above.
+const SUPERSEDED = new Set(['2f17530521daab81a1bd0b2feaa770fca5a5f785a12605caf965df0d5b4f2563'])
 
-const entryByDigest = (digest: string): Entry => signed.entries.find((entry) => entry.digest_hex === digest)!
+const entryByDigest = (digest: string): Entry =>
+  (signed.entries.find((entry) => entry.digest_hex === digest) ?? batch2.entries.find((entry) => entry.digest_hex === digest)) as Entry
 /** The method name inside a signed 0x02 body (after version, chain, contract, selector). */
 const signedMethod = (entryHex: string) => {
   const body = Buffer.from(entryHex, 'hex')
@@ -63,8 +75,9 @@ const signedMethod = (entryHex: string) => {
 
 describe('production catalog batch 1: Desktop serializes every signed entry byte-for-byte', () => {
   test('every signed entry is mapped to exactly one Desktop key, and its digest is sha256 of its body', () => {
-    const mapped = [...Object.keys(SOLANA_KEYS), ...Object.keys(EVM_CALLS)]
-    expect(mapped.sort()).toEqual(signed.entries.map((entry) => entry.digest_hex).sort())
+    const batch1Mapped = [...Object.keys(SOLANA_KEYS), ...Object.keys(EVM_CALLS)]
+      .filter((digest) => signed.entries.some((entry) => entry.digest_hex === digest))
+    expect([...batch1Mapped, ...SUPERSEDED].sort()).toEqual(signed.entries.map((entry) => entry.digest_hex).sort())
     for (const entry of signed.entries) {
       expect(createHash('sha256').update(Buffer.from(entry.entry_hex, 'hex')).digest('hex')).toBe(entry.digest_hex)
     }
@@ -92,6 +105,13 @@ describe('production catalog batch 1: Desktop serializes every signed entry byte
         expect(spec.method).toBe(signedMethod(entry.entry_hex))
       }
     })
+  }
+})
+
+test('the superseded batch-1 USDT approval is no longer what Desktop builds', () => {
+  const old = signed.entries.find((entry) => SUPERSEDED.has(entry.digest_hex))!
+  for (const spender of ['0x000000000022d473030f116ddee9f6b43ac78ba3', '0x909ef6b32dfdc12ca86aa710b54c991af3c5f82e']) {
+    expect(buildEvmSchemaBody(findCertifiedEvmSchemaSpec(42161, ARB_USDT, approve(spender))!).toString('hex')).not.toBe(old.entry_hex)
   }
 })
 

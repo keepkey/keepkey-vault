@@ -36,12 +36,14 @@ describe('7.16 certified EVM schemas', () => {
     const certificate = Buffer.from(capturedEnvelope.signedPayload.slice(2), 'hex').subarray(1, 140).toString('hex')
     expect(() => buildCertifiedEvmEnvelope(spec, certificate, '00'.repeat(32))).toThrow(/scoped to 1, not chain 42161/)
   })
-  it('binds Arbitrum USDT identity and allowance rendering metadata', () => {
-    const spec = findCertifiedEvmSchemaSpec(42161, ARB_USDT, `0x095ea7b3${'00'.repeat(64)}`)!
-    expect(spec.method).toBe('Arbitrum USDT approval')
-    expect(spec.args[1]).toMatchObject({ name: 'Allowance', format: 5, decimals: 6, symbol: 'USDT' })
-    expect(spec.intent).toBeUndefined()
-    expect(findCertifiedEvmSchemaSpec(42161, ARB_USDT, permit2Approve)).toBe(spec)
+  it('binds Arbitrum USDT0 identity and allowance rendering metadata (batch 2: Permit2-pinned and generic)', () => {
+    const generic = findCertifiedEvmSchemaSpec(42161, ARB_USDT, `0x095ea7b3${'00'.repeat(64)}`)!
+    const pinned = findCertifiedEvmSchemaSpec(42161, ARB_USDT, permit2Approve)!
+    expect(generic.method).toBe('approve')
+    expect(pinned.method).toBe('approve')
+    expect(generic.args.find((a) => a.format === 5)).toMatchObject({ decimals: 6, symbol: 'USDT0' })
+    expect(pinned.args[0]).toMatchObject({ pinned: '0x000000000022d473030f116ddee9f6b43ac78ba3' })
+    expect(pinned).not.toBe(generic)
   })
   it('serializes the Relay schema with a delegate sentinel trailer', () => {
     const spec = CERTIFIED_EVM_CATALOG[`1:${TO}:0x49290c1c`]
