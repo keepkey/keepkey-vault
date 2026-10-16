@@ -1003,7 +1003,6 @@ async function requestSigningApprovalDecision(id: string) {
 // Settings loaded lazily after DB init — defaults used until then
 let restApiEnabled = false
 let walletConnectEnabled = false
-let bip85Enabled = false
 let zcashPrivacyEnabled = false
 let hiveEnabled = false
 let offlineMode = false
@@ -1057,7 +1056,6 @@ function requireOnline(operation: string): void {
 function loadSettings() {
 	restApiEnabled = getSetting('rest_api_enabled') === '1'
 	walletConnectEnabled = getSetting('walletconnect_enabled') === '1'
-	bip85Enabled = getSetting('bip85_enabled') === '1'
 	const storedZcashPrivacyEnabled = getSetting('zcash_privacy_enabled') === '1'
 	const zcashSidecarAvailable = !!findZcashCliBinary()
 	zcashPrivacyEnabled = storedZcashPrivacyEnabled && zcashSidecarAvailable
@@ -1416,7 +1414,6 @@ function getAppSettings() {
 		fiatCurrency: getSetting('fiat_currency') || 'USD',
 		numberLocale: getSetting('number_locale') || 'en-US',
 		walletConnectEnabled,
-		bip85Enabled,
 		zcashPrivacyEnabled,
 		hiveEnabled,
 		emulatorEnabled,
@@ -7229,18 +7226,6 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				console.log('[settings] WalletConnect enabled:', params.enabled)
 				return getAppSettings()
 			},
-			setBip85Enabled: async (params) => {
-				// BIP-85 requires firmware >= 7.16.0
-				const fwVer = engine.getDeviceState().firmwareVersion
-				if (params.enabled && (!fwVer || versionCompare(fwVer, '7.16.0') < 0)) {
-					console.warn(`[settings] BIP-85 blocked — firmware ${fwVer || 'unknown'} < 7.16.0`)
-					return getAppSettings()
-				}
-				bip85Enabled = params.enabled
-				setSetting('bip85_enabled', params.enabled ? '1' : '0')
-				console.log('[settings] BIP-85 enabled:', params.enabled)
-				return getAppSettings()
-			},
 			setEmulatorEnabled: async (params) => {
 				// Refuse to enable on platforms with no emulator support. The
 				// emulator runs on macOS (Keychain) and Windows (DPAPI); Linux
@@ -9740,11 +9725,6 @@ engine.on('state-change', (state) => {
 	// Auto-disable advanced features if firmware doesn't support them
 	if (state.state === 'ready') {
 		const fw = state.firmwareVersion
-		if (bip85Enabled && (!fw || versionCompare(fw, '7.16.0') < 0)) {
-			bip85Enabled = false
-			setSetting('bip85_enabled', '0')
-			console.log(`[settings] BIP-85 auto-disabled — firmware ${fw || 'unknown'} < 7.16.0`)
-		}
 		// Zcash + Hive are capabilities, not user toggles. Both require firmware
 		// >= 7.15.0; Zcash privacy additionally requires the native sidecar to be
 		// present in this app build. The setting row mirrors the derived value so

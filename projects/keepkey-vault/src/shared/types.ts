@@ -1279,7 +1279,6 @@ export interface AppSettings {
   fiatCurrency: FiatCurrency     // display currency (default 'USD')
   numberLocale: string           // number formatting locale (default 'en-US')
   walletConnectEnabled: boolean   // feature flag: WalletConnect dApp support (default OFF)
-  bip85Enabled: boolean          // feature flag: BIP-85 derived seeds (default OFF)
   zcashPrivacyEnabled: boolean   // read-only capability: auto-ON when firmware >= 7.15.0 and this build includes zcash-cli
   hiveEnabled: boolean           // read-only capability: Hive blockchain — auto-ON when firmware >= 7.15.0
   emulatorEnabled: boolean       // feature flag: macOS emulator surface (default OFF — dev-only)
