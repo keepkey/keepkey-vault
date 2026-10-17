@@ -1648,6 +1648,8 @@ export class EngineController extends EventEmitter {
       // refusing a btc-only seed (wipe required); else multi-chain. Drives the
       // BTC-only UI restriction (see isBitcoinOnlyVariant).
       firmwareVariant: features?.firmwareVariant || undefined,
+      // Features.capabilities (7.15+), e.g. CAPABILITY_ERC7730_RUNTIME_REVIEW.
+      capabilities: Array.isArray(features?.capabilitiesList) ? [...features.capabilitiesList] : undefined,
       // In bootloader mode the device can't report `initialized` — use firmware
       // hash presence instead. If firmware bytes exist on flash, the device has
       // been set up before and entered bootloader for an update (not OOB).

@@ -72,6 +72,8 @@ export interface DeviceStateInfo {
    *  firmware; "bitcoin-only-locked" = multi-chain firmware refusing a btc-only seed.
    *  See isBitcoinOnlyVariant() in shared/flags. */
   firmwareVariant?: string
+  /** Features.capabilities as the device reports them (7.15+); absent before. */
+  capabilities?: number[]
   resolvedFwVersion?: string  // firmware version resolved from on-device hash (bootloader mode only)
   firmwareHash?: string
   bootloaderHash?: string
@@ -1133,6 +1135,10 @@ export interface SigningRequestInfo {
     source?: 'local-test' | 'certified-service' | 'promoted-local'
     definitionReview?: import('./clearsign-report').ClearSignDefinitionReview
   }
+  /** A KeepKey ClearSign service ERC-7730 definition for this exact call,
+   *  fetched and checked before approval. The signing handler sends exactly
+   *  this one, so approval and device review cannot drift. */
+  erc7730?: Erc7730Catalog
   /** true when the UI must enable AdvancedMode before allowing approval */
   requiresAdvancedMode?: boolean
   /** true when this request needs a separate, explicit one-shot opaque-signing
@@ -1729,17 +1735,20 @@ export interface RelayTxParams {
     signerKeyId: number         // trusted ClearSign key slot (0..3)
   }
   /** Reusable signed ERC-7730 v2 definitions supplied by the quote/catalog service. */
-  erc7730?: {
-    primaryDefinitionId: string
-    definitions: Array<{
-      definitionId: string
-      envelope: string
-      kind: 1 | 2 | 3 | 4
-      chainId: number
-      contractAddress?: string
-      selectorOrTypeHash?: string
-    }>
-  }
+  erc7730?: Erc7730Catalog
+}
+
+/** Signed ERC-7730 v2 definitions in the shape hdwallet's transport sends. */
+export interface Erc7730Catalog {
+  primaryDefinitionId: string
+  definitions: Array<{
+    definitionId: string
+    envelope: string
+    kind: 1 | 2 | 3 | 4
+    chainId: number
+    contractAddress?: string
+    selectorOrTypeHash?: string
+  }>
 }
 
 /** Quote response from Pioneer (aggregated across DEXes) */

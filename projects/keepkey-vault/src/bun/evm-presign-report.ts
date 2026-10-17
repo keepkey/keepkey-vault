@@ -7,7 +7,6 @@
 import type { ClearSignProtectionLevel, SigningRequestInfo } from '../shared/types'
 import type { EffectFinding, EffectReport } from '../shared/transaction-effects'
 import { buildClearSignReport, type ClearSignDescriptorEvidence, type ClearSignReport, type ContractRating } from '../shared/clearsign-report'
-import { ERC7730_TRANSPORT_SUPPORTED } from '../shared/erc7730-support'
 import { CERTIFIED_METADATA_KEY_ID } from './evm-certified-schema'
 import { certifiedBodyRefused, certifiedEnvelopeShown, metadataPayloadBytes } from '../shared/certified-evm-envelope'
 import { assessSigningRisk, type RiskLevel } from '../shared/clearsign-risk'
@@ -101,7 +100,7 @@ export function reviewedEvmDecodeLabel(info: SigningRequestInfo): string | undef
  * request as the signer will send it (its txMetadata is a caller blob).
  */
 export function evmSigningVerdict(
-  info: SigningRequestInfo, preview: { txMetadata?: { signedPayload?: unknown; keyId?: unknown }; erc7730?: unknown },
+  info: SigningRequestInfo, preview: { txMetadata?: { signedPayload?: unknown; keyId?: unknown } },
   simulation: EffectReport, universalRouterComplete: boolean,
 ): { requestedLevel: ClearSignProtectionLevel; descriptor: ClearSignDescriptorEvidence } {
   const certified = info.certifiedEvmSchema
@@ -111,8 +110,11 @@ export function evmSigningVerdict(
   const certifiedBlob = !certified && !preview.txMetadata?.signedPayload
     && info.calldataDecoded?.insightKeyId === CERTIFIED_METADATA_KEY_ID
   const plain = isPlainEvmTransfer(info)
-  const deviceAuthenticated = info.deviceClearSigns === true || certifiedBlob || plain
-  const erc7730 = ERC7730_TRANSPORT_SUPPORTED && Boolean(preview.erc7730)
+  // A ClearSign service ERC-7730 definition the preview fetched and checked for
+  // this exact call: the device verifies it and shows the call from it. Never
+  // beside kind-1 metadata, which wins.
+  const erc7730 = !certified && !certifiedBlob && !preview.txMetadata?.signedPayload && Boolean(info.erc7730)
+  const deviceAuthenticated = info.deviceClearSigns === true || certifiedBlob || plain || erc7730
   // A caller's runtime-signer blob: name the device slot its signer sits in.
   const callerKeyId = Number(preview.txMetadata?.keyId)
   const provider = preview.txMetadata?.signedPayload && Number.isInteger(callerKeyId) && callerKeyId >= 1 && callerKeyId <= 3
@@ -120,9 +122,9 @@ export function evmSigningVerdict(
   return {
     requestedLevel: deviceAuthenticated ? 'P4' : hostEvidenceLevel(simulation, universalRouterComplete, info),
     descriptor: {
-      source: certified || certifiedBlob ? 'certified' : deviceAuthenticated ? 'native' : erc7730 ? 'erc7730' : preview.txMetadata ? 'runtime' : 'none',
+      source: certified || certifiedBlob ? 'certified' : erc7730 ? 'erc7730' : deviceAuthenticated ? 'native' : preview.txMetadata ? 'runtime' : 'none',
       authenticated: deviceAuthenticated,
-      format: certified || certifiedBlob ? 'EVM_METADATA' : deviceAuthenticated ? 'FIRMWARE_NATIVE' : erc7730 ? 'ERC7730' : preview.txMetadata ? 'EVM_METADATA' : undefined,
+      format: certified || certifiedBlob ? 'EVM_METADATA' : erc7730 ? 'ERC7730' : deviceAuthenticated ? 'FIRMWARE_NATIVE' : preview.txMetadata ? 'EVM_METADATA' : undefined,
       label: certified?.method || (certifiedBlob ? info.calldataDecoded?.method : undefined) || (plain ? 'a plain transfer' : undefined) || (deviceAuthenticated ? `${info.calldataDecoded?.dappName || 'EVM'} ${info.calldataDecoded?.method || 'call'}` : reviewedEvmDecodeLabel(info)),
       ...(provider ? { provider } : {}),
     },

@@ -26,7 +26,6 @@ import type {
 import { versionCompare } from './firmware-versions'
 import { base64PayloadBytes, certifiedEnvelopeShown, evmSignedChainId as evmChainId } from './certified-evm-envelope'
 import { typedDataSpendAmounts } from './typedDataRows'
-import { ERC7730_TRANSPORT_SUPPORTED } from './erc7730-support'
 
 export type RiskLevel = 'low' | 'medium' | 'high' | 'critical'
 export interface RiskReason { level: RiskLevel; text: string }
@@ -268,9 +267,9 @@ function evmTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void):
 
   const sel = data.slice(0, 10)
   const across = decodeAcrossDepositV3(to, data, chainId)
-  const catalog = req.rawRequestBody?.erc7730
-  // Without a transport the catalog never reaches the device: treat as absent.
-  const hasCatalog = ERC7730_TRANSPORT_SUPPORTED && typeof catalog === 'object' && catalog !== null
+  // A KeepKey ClearSign service definition Desktop fetched and checked for this
+  // call (evm-signing-preview). A caller's catalog is never sent, so it is not one.
+  const erc7730 = Boolean(req.erc7730)
   const fields = req.calldataDecoded?.fields ?? []
   const field = (n: string) => fields.find((f) => f.name === n)?.value
   // Set only for a reviewed Universal Router whose calldata decodes the way
@@ -326,8 +325,9 @@ function evmTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void):
           : findReviewedAcrossSpokePool(chainId, rcpt) ? 'an Across SpokePool'
             : req.recognizedRecipient
     if (sink) add('high', `Sends the tokens straight to ${sink} (${rcpt}), which does not credit a plain transfer. A normal app never does this, and the tokens may be lost.`)
-  } else if (hasCatalog) {
-    add('high', `The site attached a signed description of this call. This computer cannot check it; your KeepKey checks it and refuses if it is not genuine. The call can still use any token permission you already gave ${to}.`)
+  } else if (erc7730) {
+    // The device verifies the definition and shows the call from it.
+    add('medium', `Your KeepKey shows this call to ${to} from a KeepKey ClearSign description, and refuses it if that description is not genuine. Check the details there. The call can still use any token permission you already gave ${to}.`)
   } else if (urSwap && req.calldataDecoded?.signedInsightBlob) {
     recognition = 'known'
     // Every command decoded, and a signed description attached that the device
@@ -669,7 +669,7 @@ export function assessSigningRisk(req: SigningRequestInfo): RiskAssessment | nul
   } else if (req.method === '/eth/sign-transaction') {
     recognition = evmTx(req, add)
     // The device verifies a KeepKey-certified description and shows it.
-    if (req.deviceClearSigns || req.certifiedEvmSchema || certifiedBlobShown(req)) recognition = 'shows'
+    if (req.deviceClearSigns || req.certifiedEvmSchema || certifiedBlobShown(req) || req.erc7730) recognition = 'shows'
     if (reasons.length === 0) add('low', 'Your KeepKey decodes this call on its screen. Check the recipient and amount there.')
     // A verified human rating can only add a reason, so it can only raise the level.
     const rating = req.clearSignReport?.rating

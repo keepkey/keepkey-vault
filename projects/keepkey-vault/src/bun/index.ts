@@ -295,7 +295,7 @@ import { deviceErrorMessage } from "../shared/device-error"
 import type { ChainBalance, TokenBalance, CustomToken, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, EvmAddressSet, Bip85SeedMeta, StakingPosition, SwapAsset, AuditToken, DefiPosition, RecentActivity, ClearSignEvent, ClearSignSolanaSchemaArtifact } from "../shared/types"
 import type { VaultRPCSchema } from "../shared/rpc-schema"
 import { collectAndAnalyzeWithGate, MAX_CHUNK_BYTES } from "./rng-audit"
-import { withoutUnsupportedErc7730 } from '../shared/erc7730-support'
+import { withoutCallerErc7730 } from '../shared/erc7730-support'
 import { newEmulatorWalletNameError } from '../shared/emulatorWallets'
 import { recordReviewCard, recordReviewCardText, reviewTapeRecording } from './test-review-tape'
 import { ADDRESS_BOOK_CERTIFY_UNSUPPORTED, buildCertificationRequest, buildContactProof, contactsFromEntries, CONTACT_DESTINATION, evmRecipient, isAddressBookCertifyUnsupported, signWithContactProofAck, type AddressBookCertification } from "./addressbook-clearsign"
@@ -3540,7 +3540,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			ethSignTx: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
-				params = withoutUnsupportedErc7730(params, 'ethSignTx')
+				params = withoutCallerErc7730(params, 'ethSignTx')
 				const promotedResolution = resolvePromotedEvmArtifact(
 					Number((params as any)?.chainId), (params as any)?.to, (params as any)?.data,
 				)

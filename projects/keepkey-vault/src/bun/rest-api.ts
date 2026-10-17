@@ -88,7 +88,6 @@ import { nameProviderOnCard, resolveProviderTxMetadata } from './clearsign-provi
 import { supportsCertifiedClearSign } from './solana-certified-policy'
 import { measureLiveDeployment, resolveEvmSchema } from './evm-schema-registry'
 import { findContractRating } from './clearsign-review'
-import { ERC7730_TRANSPORT_SUPPORTED } from '../shared/erc7730-support'
 
 export interface EmuSigningDetails {
   operation: string
@@ -2661,8 +2660,9 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         if (path === '/clearsign/report' && method === 'POST') {
           auth.requireAuth(req)
           const body = await parseRequest(req, S.ClearSignReportRequest)
-          // A catalog the pinned transport cannot deliver is not a descriptor.
-          if (body.chain === 'evm' && !ERC7730_TRANSPORT_SUPPORTED) body.hasErc7730 = undefined
+          // A caller's catalog never reaches the device: Desktop sends only
+          // definitions it fetches from the ClearSign service itself.
+          if (body.chain === 'evm') body.hasErc7730 = undefined
           if (body.chain === 'evm') {
             // The same preview the Desktop builds before its signing overlay,
             // against the connected device's firmware (none: the preview
@@ -2784,15 +2784,10 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             msg.gasPrice = body.gasPrice || body.gas_price || '0x0'
           }
 
-          // ERC-7730 definitions are reusable signed catalog entries. The
-          // device preloads the primary envelope, then requests bounded chunks
-          // from this catalog while decoding this exact transaction.
-          if (body.erc7730 && ERC7730_TRANSPORT_SUPPORTED) {
-            msg.erc7730 = body.erc7730
-            console.log(`[REST] ERC-7730 catalog attached (${body.erc7730.definitions.length} definitions)`)
-          } else if (body.erc7730) {
-            console.warn('[REST] ERC-7730 catalog ignored (NOT_IMPLEMENTED: pinned hdwallet has no ERC-7730 transport)')
-          }
+          // A caller's ERC-7730 catalog is never sent: it may be runtime tier,
+          // which the device gates on AdvancedMode. Desktop sends only the
+          // ClearSign service definition it checked before approval.
+          if (body.erc7730) console.warn('[REST] caller-supplied ERC-7730 catalog ignored; only ClearSign service definitions are sent')
 
           // ── EVM Clear-Signing: attach signed metadata blob for device OLED ──
           // Priority: 1) caller provides txMetadata in request body (test fixtures)

@@ -17,7 +17,6 @@ import { resolveEvmSchema } from './evm-schema-registry'
 import { trustRuntimeSigner, type RuntimeEvmSigner } from './evm-runtime-metadata'
 import { nameRuntimeProvider, resolveProviderTxMetadata } from './clearsign-providers'
 import { evmCallRequiresAdvancedMode } from './evm-signing-policy'
-import { ERC7730_TRANSPORT_SUPPORTED } from '../shared/erc7730-support'
 import { certifiedSolanaProofApplies, findCertifiedSolanaProof } from './solana-certified-registry'
 import { hasCompleteCertifiedSolanaEnvelope, supportsCertifiedClearSign } from './solana-certified-policy'
 import { getPioneer } from './pioneer'
@@ -1760,14 +1759,9 @@ async function buildRelaySwapTx(
     data: relay.data,
   }
 
-  if (relay.erc7730) {
-    if (ERC7730_TRANSPORT_SUPPORTED) {
-      unsignedTx.erc7730 = relay.erc7730
-      console.info(`${TAG} signed ERC-7730 catalog attached (${relay.erc7730.definitions.length} definitions)`)
-    } else {
-      console.warn(`${TAG} ERC-7730 catalog not attached (NOT_IMPLEMENTED: pinned hdwallet has no ERC-7730 transport)`)
-    }
-  }
+  // A quote's ERC-7730 catalog is never sent: Desktop sends only the
+  // ClearSign service definition it fetches and checks itself.
+  if (relay.erc7730) console.warn(`${TAG} quote ERC-7730 catalog ignored; only ClearSign service definitions are sent`)
 
   // Older firmware uses the ordinary signing/Advanced Mode path, without a
   // metadata preflight that its firmware may not implement.
