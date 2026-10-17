@@ -28,20 +28,19 @@ import { FirmwareAuthenticity } from './FirmwareAuthenticity'
 import { DocsLink } from './DocsLink'
 import { DOCS_LINKS } from '../../shared/docs-links'
 import { TutorialPage } from './TutorialCards'
+import { CoinChoice } from './CoinChoice'
 import { LanguagePicker } from '../i18n/LanguageSelector'
 import { BITCOIN_ONLY_ONBOARDING } from '../../shared/flags'
-import { wizardCoinMode, type CoinVariant as CoinMode } from '../../shared/firmware-install'
+import { stepAfterAuthenticity, wizardCoinMode, type CoinVariant as CoinMode } from '../../shared/firmware-install'
 
 // The Bitcoin-only / Multi-chain choice outlives the wizard component: the OOB
 // replugs can unmount and remount it (oob-bootloader-flow), and the variant
-// picked on the bootloader page must still drive the firmware step. Cleared
+// picked on the coin-choice page must still drive the firmware step. Cleared
 // when setup ends (firmware installed, custom firmware flashed, firmware
 // skipped, wizard complete) so the next KeepKey starts from Multi-chain.
 let rememberedCoinMode: CoinMode | null = null
-let rememberedCoinConfirmed = false
 function forgetCoinChoice() {
   rememberedCoinMode = null
-  rememberedCoinConfirmed = false
 }
 
 // ── Design tokens ───────────────────────────────────────────────────────────
@@ -73,6 +72,7 @@ const ANIMATIONS_CSS = `
 
 type WizardStep =
   | 'authenticity'
+  | 'coin-choice'
   | 'intro'
   | 'welcome'
   | 'bootloader'
@@ -90,6 +90,7 @@ type WizardStep =
 
 const STEP_SEQUENCE: WizardStep[] = [
   'authenticity',
+  'coin-choice',
   'intro',
   'welcome',
   'bootloader',
@@ -111,6 +112,7 @@ const STEP_SEQUENCE: WizardStep[] = [
 // Map wizard steps → their visible step group
 const stepToVisibleId: Record<WizardStep, string | null> = {
   'authenticity': null,
+  'coin-choice': null,
   'intro': null,
   'welcome': null,
   'bootloader': 'bootloader',
@@ -152,7 +154,7 @@ const confettiPieces = Array.from({ length: 50 }, (_, i) => ({
 
 // ── Main Wizard ─────────────────────────────────────────────────────────────
 
-export function OobSetupWizard({ onComplete, onWalletCreated, onSkipFirmware, onSetupInProgress, onWordCountChange }: OobSetupWizardProps) {
+export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, onSkipFirmware, onSetupInProgress, onWordCountChange }: OobSetupWizardProps) {
   const [step, setStep] = useState<WizardStep>('authenticity')
   useEffect(() => {
     rpcRequest('logOnboarding', { event: `wizard step=${step}` }).catch(() => {})
@@ -167,17 +169,16 @@ export function OobSetupWizard({ onComplete, onWalletCreated, onSkipFirmware, on
   const applyingTipPassphraseRef = useRef(false)
   // Bitcoin-only vs Multi-chain firmware choice for a new (or unrecognised)
   // device. One-way: a btc-only seed is locked to btc-only firmware.
-  // `coinConfirmed`: the user already settled it (picked one, or continued past
-  // the picker on the bootloader page), so the firmware step does not ask again.
   const [coinChoice, setCoinChoice] = useState<CoinMode | null>(rememberedCoinMode)
-  const [coinConfirmed, setCoinConfirmed] = useState(rememberedCoinConfirmed)
+  // Every way out of setup drops the choice, so the next KeepKey starts fresh.
+  const onComplete = useCallback(() => { forgetCoinChoice(); onCompleteProp() }, [onCompleteProp])
   const chooseCoin = (mode: CoinMode) => {
     rememberedCoinMode = mode
-    rememberedCoinConfirmed = true
     setCoinChoice(mode)
-    setCoinConfirmed(true)
   }
-  const [showCoinChange, setShowCoinChange] = useState(false)
+  // Where "Change" on the bootloader/firmware page came from; the coin-choice
+  // page returns there instead of going on to the tutorial.
+  const [coinReturnStep, setCoinReturnStep] = useState<WizardStep | null>(null)
   // Wipe/lock acknowledgement for the official install (see installWipeReason).
   const [installWipeAcknowledged, setInstallWipeAcknowledged] = useState(false)
   const [setupType, setSetupType] = useState<'create' | 'recover' | null>(null)
@@ -203,6 +204,7 @@ export function OobSetupWizard({ onComplete, onWalletCreated, onSkipFirmware, on
   const { t } = useTranslation('setup')
   const STEP_DESCRIPTIONS: Record<WizardStep, string> = {
     'authenticity': '',
+    'coin-choice': '',
     'intro': '',
     'welcome': t('stepDescriptions.welcome'),
     'bootloader': t('stepDescriptions.bootloader'),
@@ -329,8 +331,8 @@ export function OobSetupWizard({ onComplete, onWalletCreated, onSkipFirmware, on
   })
   // Keep the preselected default through the replug into bootloader mode,
   // where the bootloader may not identify the firmware (5.2.4 on 2.1.4).
-  // Not confirmed: only a click confirms. The engine still warns if it cannot
-  // identify the firmware it installs over.
+  // Never overwrites a choice (coinChoice is set). The engine still warns if
+  // it cannot identify the firmware it installs over.
   useEffect(() => {
     if (showCoinPicker && !variantUnknown && coinChoice === null && coinMode) {
       rememberedCoinMode = coinMode
@@ -396,57 +398,26 @@ export function OobSetupWizard({ onComplete, onWalletCreated, onSkipFirmware, on
     </Flex>
   ) : null
 
-  // Bitcoin-only vs Multi-chain picker. Shown on the bootloader page of a new
-  // KeepKey (before anything is flashed) and, when not settled there, on the
-  // firmware step.
-  const coinPicker = (
-    <VStack w="100%" gap={2}>
-      <Text w="100%" fontSize="xs" color="kk.textSecondary" textTransform="uppercase" fontWeight="600">
-        {t('coinMode.title', { defaultValue: 'Firmware for this KeepKey' })}
-      </Text>
-      {variantUnknown && !coinMode && (
-        <Text w="100%" fontSize="xs" color="yellow.300">
-          {t('coinMode.unknownInstalled', { defaultValue: 'KeepKey Desktop cannot tell which firmware is on this KeepKey. Choose the one you want installed.' })}
+  // The chosen firmware on the bootloader and firmware pages; the choice
+  // itself is the coin-choice page.
+  const coinSummary = (
+    <HStack w="100%" p={3} bg="kk.cardBg" borderRadius="lg" justify="space-between">
+      <HStack gap={2}>
+        {coinMode === 'bitcoin-only' ? <FaBitcoin color="#F7931A" size={16} />
+          : coinMode === 'multi' ? <FaWallet color="var(--teal)" size={16} />
+          : <FaExclamationTriangle color="var(--gold)" size={16} />}
+        <Text fontSize="sm" color="white" fontWeight="600">
+          {coinMode === 'bitcoin-only'
+            ? t('coinMode.installingBtc', { defaultValue: 'Bitcoin-only firmware' })
+            : coinMode === 'multi'
+              ? t('coinMode.installingMulti', { defaultValue: 'Multi-chain firmware' })
+              : t('coinMode.chooseFirst', { defaultValue: 'Choose Bitcoin-only or Multi-chain' })}
         </Text>
-      )}
-      {([
-        { id: 'multi', icon: FaWallet, title: t('coinMode.multiTitle', { defaultValue: 'Multi-chain' }), desc: t('coinMode.multiDesc', { defaultValue: 'Bitcoin, Ethereum, and all supported assets.' }) },
-        { id: 'bitcoin-only', icon: FaBitcoin, title: t('coinMode.btcTitle', { defaultValue: 'Bitcoin-only' }), desc: t('coinMode.btcDesc', { defaultValue: 'Bitcoin only. Smaller attack surface.' }) },
-      ] as const).map((opt) => {
-        const selected = coinMode === opt.id
-        const Icon = opt.icon
-        const version = opt.id === 'bitcoin-only' ? deviceStatus.latestFirmwareBitcoinOnly : deviceStatus.latestFirmware
-        return (
-          <Box
-            key={opt.id}
-            as="button"
-            w="100%" p={3} borderRadius="lg" cursor="pointer" textAlign="left"
-            borderWidth="2px"
-            borderColor={selected ? 'var(--teal)' : 'kk.border'}
-            bg={selected ? 'rgba(72,187,120,0.08)' : 'kk.cardBg'}
-            aria-pressed={selected}
-            onClick={() => { chooseCoin(opt.id); setShowCoinChange(false) }}
-          >
-            <HStack gap={3}>
-              <Icon color={selected ? 'var(--teal)' : 'var(--chakra-colors-kk-textSecondary)'} size={20} />
-              <VStack gap={0.5} align="start">
-                <Text fontSize="sm" fontWeight="700" color="white">{opt.title}{version ? ` · v${version}` : ''}</Text>
-                <Text fontSize="xs" color="kk.textSecondary">{opt.desc}</Text>
-              </VStack>
-            </HStack>
-          </Box>
-        )
-      })}
-      {coinMode === 'bitcoin-only' && (
-        <HStack w="100%" p={2} gap={2} borderRadius="md" bg="rgba(237,137,54,0.12)" align="start">
-          <FaExclamationTriangle color="var(--chakra-colors-yellow-400)" size={14} style={{ flexShrink: 0, marginTop: 2 }} />
-          <Text fontSize="xs" color="yellow.300">
-            {t('coinMode.warning', { defaultValue: 'This is one-way. A Bitcoin-only wallet cannot later hold ETH or other assets without wiping the device and reinstalling multi-chain firmware.' })}
-            {!factoryDevice && ' ' + t('coinMode.existingWallet', { defaultValue: 'If this KeepKey already holds a wallet, it keeps working for Bitcoin. Its other coins stay on your recovery phrase, but this KeepKey cannot use them, and going back to Multi-chain firmware later can mean wiping it and restoring from the recovery phrase.' })}
-          </Text>
-        </HStack>
-      )}
-    </VStack>
+      </HStack>
+      <Box as="button" fontSize="xs" color="kk.textSecondary" textDecoration="underline" onClick={() => { setCoinReturnStep(step); setStep('coin-choice') }}>
+        {coinMode ? t('coinMode.change', { defaultValue: 'Change' }) : t('coinMode.choose', { defaultValue: 'Choose' })}
+      </Box>
+    </HStack>
   )
 
   // Wipe/lock warning for the official install, same reasons and wording as a
@@ -554,7 +525,7 @@ export function OobSetupWizard({ onComplete, onWalletCreated, onSkipFirmware, on
   let progressPercent = 0
   if (visibleIndex >= 0) {
     progressPercent = ((visibleIndex + 1) / VISIBLE_STEPS.length) * 100
-  } else if (step !== 'welcome' && step !== 'intro') {
+  } else if (step !== 'welcome' && step !== 'intro' && step !== 'coin-choice') {
     progressPercent = 100
   }
 
@@ -1183,13 +1154,13 @@ export function OobSetupWizard({ onComplete, onWalletCreated, onSkipFirmware, on
   // L7 fix: prevent navigating back to already-completed steps
   // init-label excluded: its Previous target is init-progress, which the
   // create-recovery effect immediately pushes forward again — a no-op bounce.
-  const showPrevious = !['authenticity', 'intro', 'welcome', 'complete', 'init-progress', 'init-label', 'verify-seed', 'security-tips'].includes(step)
+  const showPrevious = !['authenticity', 'coin-choice', 'intro', 'welcome', 'complete', 'init-progress', 'init-label', 'verify-seed', 'security-tips'].includes(step)
   // L4 fix: hide Next on firmware step for OOB devices (firmware is required)
   // Security steps carry their own Accept/Skip actions; a footer Next would
   // bypass them (and from sec-dice would land on init-progress with no RPC in
   // flight — a spinner that never resolves).
   const showNext =
-    !['authenticity', 'intro', 'bootloader', 'init-choose', 'create-briefing', 'sec-randomness', 'sec-dice', 'init-progress', 'init-label', 'verify-seed', 'security-tips', 'complete'].includes(step) &&
+    !['authenticity', 'coin-choice', 'intro', 'bootloader', 'init-choose', 'create-briefing', 'sec-randomness', 'sec-dice', 'init-progress', 'init-label', 'verify-seed', 'security-tips', 'complete'].includes(step) &&
     !(step === 'firmware' && (updateState === 'updating' || updateState === 'complete')) &&
     !(step === 'firmware' && isOobDevice)
 
@@ -1334,7 +1305,25 @@ export function OobSetupWizard({ onComplete, onWalletCreated, onSkipFirmware, on
                 firmwareSignaturesVerified={deviceStatus?.firmwareSignaturesVerified}
                 installFirmware={deviceStatus?.installFirmware}
                 installBootloader={deviceStatus?.installBootloader}
-                onContinue={() => setStep('intro')}
+                continueDisabled={!hasFeatures}
+                onContinue={() => setStep(stepAfterAuthenticity({ showPicker: showCoinPicker, hasFeatures }))}
+              />
+            )}
+
+            {step === 'coin-choice' && (
+              <CoinChoice
+                coinMode={coinMode}
+                multiVersion={deviceStatus.latestFirmware}
+                btcVersion={deviceStatus.latestFirmwareBitcoinOnly}
+                variantUnknown={variantUnknown}
+                factoryDevice={factoryDevice}
+                onChoose={chooseCoin}
+                onContinue={() => {
+                  if (!coinMode) return
+                  chooseCoin(coinMode)
+                  setStep(coinReturnStep ?? 'intro')
+                  setCoinReturnStep(null)
+                }}
               />
             )}
 
@@ -1487,7 +1476,7 @@ export function OobSetupWizard({ onComplete, onWalletCreated, onSkipFirmware, on
                       </Box>
                     )}
 
-                    {showCoinPicker && coinPicker}
+                    {showCoinPicker && coinSummary}
                     {needsBootloader && backupConfirmBox}
                     {needsBootloader && (
                       <Button
@@ -1499,12 +1488,7 @@ export function OobSetupWizard({ onComplete, onWalletCreated, onSkipFirmware, on
                         _hover={{ bg: '#D4BC6A', transform: 'translateY(-1px)', boxShadow: '0 4px 12px rgba(233,196,106, 0.3)' }}
                         _active={{ transform: 'scale(0.98)' }}
                         transition="all 0.15s ease"
-                        onClick={() => {
-                          // Continuing past the picker settles the choice: the
-                          // firmware step installs it without asking again.
-                          if (showCoinPicker && coinMode) chooseCoin(coinMode)
-                          startBootloaderUpdate()
-                        }}
+                        onClick={() => startBootloaderUpdate()}
                         disabled={backupBlocked}
                       >
                         {t('bootloader.updateBootloaderTo', { version: deviceStatus.latestBootloader || '?' })}
@@ -1573,7 +1557,7 @@ export function OobSetupWizard({ onComplete, onWalletCreated, onSkipFirmware, on
                       </Box>
                     )}
 
-                    {showCoinPicker && coinPicker}
+                    {showCoinPicker && coinSummary}
 
                     <Box w="100%" p={4} bg="kk.cardBg" borderRadius="lg" borderWidth="1px" borderColor="kk.cardBgHover">
                       <VStack align="start" gap={3}>
@@ -1857,24 +1841,7 @@ export function OobSetupWizard({ onComplete, onWalletCreated, onSkipFirmware, on
                       )
                     })()}
 
-                    {/* Bitcoin-only vs Multi-chain. Usually settled on the bootloader
-                        page; shown in full here only if it was not (bootloader already
-                        current, or firmware Desktop cannot identify). */}
-                    {showCoinPicker && (coinConfirmed && coinMode && !showCoinChange ? (
-                      <HStack w="100%" p={3} bg="kk.cardBg" borderRadius="lg" justify="space-between">
-                        <HStack gap={2}>
-                          {coinMode === 'bitcoin-only' ? <FaBitcoin color="var(--teal)" size={16} /> : <FaWallet color="var(--teal)" size={16} />}
-                          <Text fontSize="sm" color="white" fontWeight="600">
-                            {coinMode === 'bitcoin-only'
-                              ? t('coinMode.installingBtc', { defaultValue: 'Bitcoin-only firmware' })
-                              : t('coinMode.installingMulti', { defaultValue: 'Multi-chain firmware' })}
-                          </Text>
-                        </HStack>
-                        <Box as="button" fontSize="xs" color="kk.textSecondary" textDecoration="underline" onClick={() => setShowCoinChange(true)}>
-                          {t('coinMode.change', { defaultValue: 'Change' })}
-                        </Box>
-                      </HStack>
-                    ) : coinPicker)}
+                    {showCoinPicker && coinSummary}
 
                     {installWipeCard ?? backupConfirmBox}
                     <Button
@@ -2235,7 +2202,7 @@ export function OobSetupWizard({ onComplete, onWalletCreated, onSkipFirmware, on
                 {/* Not in bootloader, not post-flash — show instructions to enter bootloader */}
                 {updateState === 'idle' && !inBootloader && !isRebooting && customFwPhase === 'idle' && !firmwareJustFlashed && (
                   <>
-                    {showCoinPicker && !coinConfirmed && coinPicker}
+                    {showCoinPicker && coinSummary}
                     <Box maxW="100px" mx="auto" opacity={0.85} dangerouslySetInnerHTML={{ __html: holdAndConnectRaw }} sx={{ '& svg': { width: '100%', height: '100%' } }} />
                     <Box w="100%" p={3} bg="kk.cardBg" borderRadius="lg" borderWidth="1px" borderColor="kk.cardBgHover">
                       <VStack align="start" gap={1}>
@@ -3358,7 +3325,7 @@ export function OobSetupWizard({ onComplete, onWalletCreated, onSkipFirmware, on
         </Box>
 
         {/* ── Footer ─────────────────────────────────────────────────── */}
-        <Box display={step === 'authenticity' ? 'none' : undefined} px={5} py={3} borderTopWidth="1px" borderColor="rgba(233,196,106, 0.2)">
+        <Box display={step === 'authenticity' || step === 'coin-choice' ? 'none' : undefined} px={5} py={3} borderTopWidth="1px" borderColor="rgba(233,196,106, 0.2)">
           <HStack justify="space-between">
             <Text fontSize="sm" color="kk.textSecondary" fontWeight="500">
               {visibleIndex >= 0

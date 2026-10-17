@@ -10,7 +10,7 @@ import { readFileSync } from 'fs'
 import { join } from 'path'
 import {
   assertInstallAllowed, installedFromBootloader, installedInFirmwareMode, isBitcoinOnlyImage, latestFor,
-  mergeManifests, needsFirmware, planInstall, wizardCoinMode,
+  mergeManifests, needsFirmware, planInstall, stepAfterAuthenticity, wizardCoinMode,
   type ChannelFirmware, type InstalledFirmware,
 } from '../src/shared/firmware-install'
 import type { WipeReason } from '../src/shared/flash-wipe'
@@ -326,5 +326,28 @@ describe('setup wizard: Bitcoin-only / Multi-chain choice', () => {
   test('no bitcoin-only build, or the flag off: no picker, multi-chain', () => {
     expect(wizardCoinMode({ ...base, newDevice: true, bitcoinOnlyAvailable: false, remembered: 'bitcoin-only' })).toMatchObject({ coinMode: 'multi', showPicker: false })
     expect(wizardCoinMode({ ...base, newDevice: true, enabled: false, remembered: 'bitcoin-only' })).toMatchObject({ coinMode: 'multi', showPicker: false })
+  })
+})
+
+describe('setup wizard: the choice page comes before the tutorial', () => {
+  const base = { enabled: true, bitcoinOnlyAvailable: true, newDevice: false, needsBootloaderUpdate: false, remembered: null }
+  const next = (p: Partial<Parameters<typeof wizardCoinMode>[0]>, hasFeatures = true) =>
+    stepAfterAuthenticity({ showPicker: wizardCoinMode({ ...base, ...p }).showPicker, hasFeatures })
+
+  test('devices that get the choice see it first', () => {
+    expect(next({ installedBitcoinOnly: false, needsBootloaderUpdate: true })).toBe('coin-choice') // 5.2.4 on bootloader 1.0.2
+    expect(next({ installedBitcoinOnly: false, newDevice: true })).toBe('coin-choice') // factory 4.0.0
+    expect(next({})).toBe('coin-choice') // unidentified firmware
+  })
+
+  test('every other device goes straight to the tutorial', () => {
+    expect(next({ installedBitcoinOnly: true, needsBootloaderUpdate: true })).toBe('intro') // Bitcoin-only 7.14.3
+    expect(next({ installedBitcoinOnly: false })).toBe('intro') // 7.14.1 -> 7.14.2, or 7.16.0
+    expect(next({ installedBitcoinOnly: false, newDevice: true, bitcoinOnlyAvailable: false })).toBe('intro')
+    expect(next({ installedBitcoinOnly: false, newDevice: true, enabled: false })).toBe('intro')
+  })
+
+  test('no features yet: every device looks unidentified, so no choice page', () => {
+    expect(next({}, false)).toBe('intro')
   })
 })
