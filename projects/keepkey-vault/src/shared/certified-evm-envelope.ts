@@ -5,6 +5,20 @@
  */
 import { versionCompare } from './firmware-versions'
 
+let productionRootTrusted: () => boolean = () => true
+
+/** The connected device trusts the production ClearSign root. The emulator
+ *  library compiles in only the alpha root and refuses every certificate
+ *  Desktop attaches, so it counts as having no certified support (the device
+ *  shows its normal review). index.ts registers this once. */
+export function configureProductionRootTrust(trusted: () => boolean): void {
+  productionRootTrusted = trusted
+}
+
+export function deviceTrustsProductionRoot(): boolean {
+  return productionRootTrusted()
+}
+
 /** The delegate key id of a KeepKey-certified envelope (METADATA_KEYID_DELEGATE). */
 export const CERTIFIED_ENVELOPE_KEY_ID = 0x80
 
@@ -67,7 +81,7 @@ export function certifiedEnvelopeShown(
   firmwareVersion: string | undefined,
   tx: { chainId?: unknown; to?: string; data?: unknown },
 ): boolean {
-  if (!payload || keyId !== CERTIFIED_ENVELOPE_KEY_ID) return false
+  if (!payload || keyId !== CERTIFIED_ENVELOPE_KEY_ID || !productionRootTrusted()) return false
   if (!firmwareVersion || versionCompare(firmwareVersion, '7.16.0') < 0) return false
   // 0x03, a 139-byte certificate, then the body: version, chain id, contract, selector.
   if (payload.length < 169 || payload[0] !== 0x03 || !bodyShown(payload[140], firmwareVersion)) return false

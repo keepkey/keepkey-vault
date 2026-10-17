@@ -285,6 +285,7 @@ import { requestClearSignReview } from "./clearsign-review"
 import { trustRuntimeSigner, type RuntimeEvmSigner } from "./evm-runtime-metadata"
 import { addClearSignProvider, listClearSignProviders, removeClearSignProvider, resolveProviderTxMetadata, seedClearSignProviderFromEnv } from "./clearsign-providers"
 import { supportsCertifiedClearSign } from "./solana-certified-policy"
+import { configureProductionRootTrust } from "../shared/certified-evm-envelope"
 import { createRpcAltFetcher } from "./solana-alt"
 import { createProviderKeySession } from "./clearsign-provider-session"
 import { buildProviderBundle, buildStudioEvmSchema, parseProviderBundle, providerBundleFileName } from "./clearsign-studio-evm"
@@ -866,6 +867,8 @@ const perf = (label: string) => console.log(`[PERF] +${Date.now() - BOOT_START}m
 // ── Engine Controller (constructors are lightweight — no I/O) ────────
 const engine = new EngineController()
 setClearSignAuditGate(() => engine.isEmulator && !offlineMode && !engine.isPassphraseWallet)
+// The emulator library trusts only the alpha root: no certified descriptions.
+configureProductionRootTrust(() => !engine.isEmulator)
 // A hidden wallet's Zcash view key is never written to disk.
 setFvkDiskAllowed(() => !engine.isPassphraseWallet)
 

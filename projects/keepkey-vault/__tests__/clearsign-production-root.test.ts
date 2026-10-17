@@ -14,6 +14,9 @@ import { CERTIFIED_EVM_CATALOG, expectedEvmScreens, expectedUniswapScreens } fro
 import { configureClearSignArtifactSnapshots, resolvePromotedEvmArtifact, resolvePromotedSolanaArtifact } from '../src/bun/clearsign-artifact-resolver'
 import { clearSignIdentityHash } from '../src/bun/clearsign-promotion'
 import { resolveEvmSchema } from '../src/bun/evm-schema-registry'
+import { certifiedEnvelopeShown, configureProductionRootTrust } from '../src/shared/certified-evm-envelope'
+import { supportsCertifiedClearSign } from '../src/bun/solana-certified-policy'
+import { evmCallRequiresAdvancedMode } from '../src/bun/evm-signing-policy'
 import noAltFixture from './fixtures/solana/relay-deposit-native-no-alt.json'
 
 const NOW = 1_790_000_000
@@ -93,5 +96,26 @@ describe('artifacts saved before the production root (v1.6.1 checked imports aga
       globalThis.fetch = realFetch
       console.warn = warn
     }
+  })
+})
+
+describe('the bundled emulator compiles in only the alpha root', () => {
+  test('it gets no certified description and the AdvancedMode gate stays, so it never refuses a claim', () => {
+    const UR = '0x2d01411773c8c24805306e89a41f7855c3c4fe65'
+    const envelope = Uint8Array.from(Buffer.concat([Buffer.from([3]), Buffer.alloc(139, 7), Buffer.from([2]),
+      Buffer.from('0000a4b1', 'hex'), Buffer.from(UR.slice(2), 'hex'), Buffer.from('3593564c', 'hex'), Buffer.alloc(65)]))
+    const tx = { chainId: 42161, to: UR, data: '0x3593564c' + '00'.repeat(64) }
+    const meta = { signedPayload: Buffer.from(envelope).toString('hex'), keyId: 0x80 }
+    expect(supportsCertifiedClearSign('7.17.0')).toBe(true)
+    expect(certifiedEnvelopeShown(envelope, 0x80, '7.17.0', tx)).toBe(true)
+    try {
+      configureProductionRootTrust(() => false)
+      expect(supportsCertifiedClearSign('7.17.0')).toBe(false)
+      expect(certifiedEnvelopeShown(envelope, 0x80, '7.17.0', tx)).toBe(false)
+      expect(evmCallRequiresAdvancedMode(UR, tx.data, 42161, false, meta, undefined, '7.17.0')).toBe(true)
+    } finally { configureProductionRootTrust(() => true) }
+    // Desktop registers the emulator as not trusting the production root.
+    const index = readFileSync(new URL('../src/bun/index.ts', import.meta.url), 'utf8')
+    expect(index).toContain('configureProductionRootTrust(() => !engine.isEmulator)')
   })
 })

@@ -1,4 +1,5 @@
 import { versionCompare } from '../shared/firmware-versions'
+import { deviceTrustsProductionRoot } from '../shared/certified-evm-envelope'
 
 export const CERTIFIED_CLEARSIGN_MIN_FW = '7.16.0'
 
@@ -7,6 +8,8 @@ export const CERTIFIED_CLEARSIGN_MIN_FW = '7.16.0'
  * material and then mistakes its refusal for user cancellation. */
 export function supportsCertifiedClearSign(firmwareVersion?: string): boolean {
   return !!firmwareVersion && versionCompare(firmwareVersion, CERTIFIED_CLEARSIGN_MIN_FW) >= 0
+    // The emulator trusts only the alpha root: it would refuse every certificate.
+    && deviceTrustsProductionRoot()
 }
 
 /**
