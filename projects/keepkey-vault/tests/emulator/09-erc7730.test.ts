@@ -20,10 +20,23 @@
  * Optional: KK_ERC7730_LIMIT=n (first n of each kind), KK_ERC7730_FILTER=text
  * (fixture id substring), KK_ERC7730_SHARD=i/n (every n-th case from i, so n
  * processes can share the run), KK_ERC7730_REPORT=path (JSON results).
+ *
+ * KK_ERC7730_MODE=desktop runs the calldata fixtures through Desktop's own
+ * path instead of handing hdwallet the definition: the REST approval preview
+ * (prepareEvmTxSigningInfo -> attachErc7730Definition -> resolveErc7730ForCall,
+ * which GETs /v1/erc7730/definition) and the REST/RPC sign step
+ * (signWithErc7730Fallback). A local HTTP server stands in for the ClearSign
+ * worker and serves the fixture's definitions; CLEARSIGN_SERVICE_URL points at
+ * it for this process only (the product default stays production). Each case
+ * is also signed blind with AdvancedMode on, and the two signatures must match.
+ * Typed data is not run: Desktop never attaches a typed-data definition on 7.16
+ * (ERC7730_TYPED_DATA_SUPPORTED).
  */
 import { dlopen, FFIType, ptr } from 'bun:ffi'
-import { existsSync, readFileSync, writeFileSync } from 'fs'
-import { describe, test, expect, afterAll } from 'bun:test'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
+import { tmpdir } from 'os'
+import { join } from 'path'
+import { describe, test, expect, afterAll, mock } from 'bun:test'
 import { createHash } from 'crypto'
 import * as core from '@keepkey/hdwallet-core'
 import { Transport, type TransportDelegate } from '@keepkey/hdwallet-keepkey'
@@ -35,10 +48,12 @@ const REPORT = process.env.KK_ERC7730_REPORT
 const LIMIT = Number(process.env.KK_ERC7730_LIMIT || 0)
 const FILTER = process.env.KK_ERC7730_FILTER || ''
 const [SHARD, SHARDS] = (process.env.KK_ERC7730_SHARD || '0/1').split('/').map(Number)
+const MODE = process.env.KK_ERC7730_MODE === 'desktop' ? 'desktop' : 'hdwallet'
 const SIGN_TIMEOUT_MS = 120_000
 const PATH = [0x8000002c, 0x8000003c, 0x80000000, 0, 0]
 
 const MSG_FAILURE = 3
+const MSG_FEATURES = 17
 const MSG_BUTTON_REQUEST = 26
 const MSG_DEBUG_GET_STATE = 101
 const MSG_DEBUG_STATE = 102
@@ -160,6 +175,9 @@ type Screen = { code: number; title: string; body: string }
 type DefinitionRequest = { kind: number; chainId: number; contract: string; selector: string; definitionId: string; offset: number; length: number; depth: number }
 
 /** What one signing showed and asked for. */
+/** Features.capabilities (field 30, packed) as the device last sent it. */
+let deviceCapabilities: number[] | undefined
+
 class Recorder {
   buttons = 0
   screens: Screen[] = []
@@ -236,6 +254,15 @@ class ReplayDelegate implements TransportDelegate {
         kind: n(1), chainId: n(2), contract: hex(fields.get(3)?.[0]), selector: hex(fields.get(4)?.[0]),
         definitionId: hex(fields.get(5)?.[0]), offset: n(6), length: n(7), depth: n(8),
       })
+    } else if (this.type === MSG_FEATURES) {
+      const packed = fields.get(30)?.[0]
+      deviceCapabilities = []
+      if (packed instanceof Uint8Array) {
+        for (let i = 0, x = 0, mul = 1; i < packed.length; i++) {
+          x += (packed[i] & 0x7f) * mul; mul *= 128
+          if (!(packed[i] & 0x80)) { deviceCapabilities.push(x); x = 0; mul = 1 }
+        }
+      }
     } else if (this.type === MSG_FAILURE) {
       this.rec.failure = text(fields.get(2)?.[0])
     }
@@ -352,13 +379,22 @@ async function attempt(fn: () => Promise<{ signature: string; signer?: string }>
 }
 
 function signCalldata(fx: FxCalldata, erc7730?: core.ETHSignTx['erc7730']) {
+  return signCalldataVia(fx, (msg) => wallet.ethSignTx({ ...msg, erc7730 }))
+}
+
+function calldataMsg(fx: FxCalldata) {
+  const t = fx.tx
+  return {
+    addressNList: PATH, chainId: t.chainId, nonce: t.nonce, gasLimit: t.gasLimit,
+    maxFeePerGas: t.maxFeePerGas, maxPriorityFeePerGas: t.maxPriorityFeePerGas,
+    to: t.to, value: t.value, data: t.data,
+  }
+}
+
+function signCalldataVia(fx: FxCalldata, send: (msg: ReturnType<typeof calldataMsg>) => Promise<any>) {
   const t = fx.tx
   return async () => {
-    const out = await wallet.ethSignTx({
-      addressNList: PATH, chainId: t.chainId, nonce: t.nonce, gasLimit: t.gasLimit,
-      maxFeePerGas: t.maxFeePerGas, maxPriorityFeePerGas: t.maxPriorityFeePerGas,
-      to: t.to, value: t.value, data: t.data, erc7730,
-    })
+    const out = await send(calldataMsg(fx))
     const digest = utils.keccak256(utils.serializeTransaction({
       type: 2, chainId: t.chainId, nonce: Number(t.nonce), gasLimit: t.gasLimit,
       maxFeePerGas: t.maxFeePerGas, maxPriorityFeePerGas: t.maxPriorityFeePerGas,
@@ -394,9 +430,183 @@ function signTyped(fx: FxEip712, erc7730?: core.ETHSignTypedData['erc7730']) {
   }
 }
 
+// ── Desktop path ───────────────────────────────────────────────────────
+
+// db.ts reads electrobun's userData at import; give it a throwaway directory
+// (no promoted artifacts, like a fresh install). Desktop mode only.
+const desktopDataDir = MODE === 'desktop' && fixture ? mkdtempSync(join(tmpdir(), 'vault-erc7730-desktop-')) : ''
+if (desktopDataDir) mock.module('electrobun/bun', () => ({ Utils: { paths: { userData: desktopDataDir } } }))
+
+/** Every GET /v1/erc7730/definition the stand-in worker answered. */
+const servedLookups: string[] = []
+let desktopServer: ReturnType<typeof Bun.serve> | null = null
+
+/**
+ * Test-only stand-in for the ClearSign worker: the fixture's calldata
+ * definitions, verbatim, by (chainId, contract, selector). Anything else is
+ * the worker's own "not in the signed catalog" (422), so Desktop's other
+ * lookups (certified schemas) find nothing, as for an unlisted call.
+ */
+function startDefinitionServer(): string {
+  const notListed = () => Response.json({ classification: 'OPAQUE', code: 'NOT_IN_SIGNED_CATALOG' }, { status: 422 })
+  desktopServer = Bun.serve({
+    hostname: '127.0.0.1', port: 0,
+    fetch(req) {
+      const url = new URL(req.url)
+      if (req.method !== 'GET' || url.pathname !== '/v1/erc7730/definition' || url.searchParams.get('kind') !== 'calldata') return notListed()
+      const chainId = Number(url.searchParams.get('chainId'))
+      const contract = String(url.searchParams.get('contract')).toLowerCase()
+      const selector = String(url.searchParams.get('selector')).toLowerCase().replace(/^0x/, '')
+      servedLookups.push(`${chainId}:${contract}:0x${selector}`)
+      const hit = fixture!.definitions.find((d) => Number(d.kind) === 1 && Number(d.chainId) === chainId
+        && (d.contractAddress ?? '').toLowerCase() === contract
+        && (d.selectorOrTypeHash ?? '').toLowerCase().replace(/^0x/, '').slice(0, 8) === selector)
+      return hit ? Response.json(hit) : notListed()
+    },
+  })
+  return `http://127.0.0.1:${desktopServer.port}`
+}
+
+function stopDesktop() {
+  try { desktopServer?.stop(true) } catch {}
+  desktopServer = null
+  if (desktopDataDir) rmSync(desktopDataDir, { recursive: true, force: true })
+}
+
+type DesktopModules = {
+  prepare: typeof import('../../src/bun/evm-presign-report').prepareEvmTxSigningInfo
+  resolver: typeof import('../../src/bun/erc7730-resolver')
+  skipReason: typeof import('../../src/shared/erc7730-support').erc7730CalldataSkipReason
+  typedDataSupported: boolean
+}
+let desktopMods: DesktopModules | null = null
+let firmwareVersion = ''
+let capabilities: number[] = []
+let hdwalletCapabilities: number[] | undefined
+
+/** Why Desktop attached no definition to this call, from its own checks. */
+function notAttachedReason(fx: FxCalldata, info: any): string {
+  const { resolver, skipReason } = desktopMods!
+  const t = fx.tx
+  if (info.deviceClearSigns) return 'firmware decodes the call natively'
+  if (info.certifiedEvmSchema || info.calldataDecoded?.signedInsightBlob) return 'another description won'
+  const skip = skipReason(t.data)
+  if (skip) return `skipped: ${skip}`
+  const served = definitionsById.get(fx.definitionId)
+  if (!served) return 'no definition served'
+  const checked = resolver.checkErc7730CalldataDefinition(served, { chainId: t.chainId, to: t.to.toLowerCase(), data: t.data })
+  if ('reason' in checked) return `checked out: ${checked.reason}`
+  return 'refused by the device earlier this session'
+}
+
+/**
+ * One call the way the REST handler signs it: the approval preview decides
+ * the definition and whether the call is blind, the approval card turns
+ * AdvancedMode on for a blind call, and the handler sends exactly the
+ * previewed definition. After a refusal of the definition the user approves
+ * the blind card again, with AdvancedMode on.
+ */
+async function desktopSign(fx: FxCalldata) {
+  const { prepare, resolver } = desktopMods!
+  const t = fx.tx
+  const info: any = {
+    id: fx.id, method: 'eth_signTransaction', appName: 'erc7730-replay',
+    from: address, to: t.to, value: t.value, data: t.data, chainId: t.chainId, firmwareVersion,
+  }
+  const preview = {
+    from: address, to: t.to, data: t.data, value: t.value, nonce: t.nonce, gas: t.gasLimit,
+    maxFeePerGas: t.maxFeePerGas, maxPriorityFeePerGas: t.maxPriorityFeePerGas,
+  }
+  await prepare(info, preview, firmwareVersion, capabilities)
+  const blind = info.needsBlindSigning === true
+  await setAdvancedMode(blind)
+  const advancedModeAtSign = advancedMode
+  let fellBack: string | undefined
+  const attempted = await attempt(signCalldataVia(fx, (msg) => resolver.signWithErc7730Fallback(
+    info.erc7730 ? { ...msg, erc7730: info.erc7730 } : msg,
+    (m: any) => wallet.ethSignTx(m),
+    async (_plain, reason) => { fellBack = reason; await setAdvancedMode(true) },
+    '[erc7730-replay]',
+  )))
+  const outcome: DesktopOutcome = !info.erc7730 ? 'not-attached' : fellBack ? 'fell-back' : 'clear-signed'
+  return {
+    attempted, outcome, needsBlindSigning: blind, advancedMode: advancedModeAtSign,
+    definitionId: info.erc7730?.primaryDefinitionId as string | undefined,
+    reason: outcome === 'not-attached' ? notAttachedReason(fx, info) : fellBack,
+    otherDescription: !!(info.certifiedEvmSchema || info.calldataDecoded?.signedInsightBlob),
+  }
+}
+
+describe.skipIf(!fixture || MODE !== 'desktop')('ERC-7730 replay through Desktop on the stock 7.16 emulator', () => {
+  test('boot a blank flash, start the stand-in worker, firmware is 7.16.0', async () => {
+    const base = startDefinitionServer()
+    process.env.CLEARSIGN_SERVICE_URL = base
+    const envelope = await import('../../src/shared/certified-evm-envelope')
+    // index.ts: an emulator started with a test root trusts that root.
+    envelope.configureProductionRootTrust(() => !!process.env.KK_CLEARSIGN_TEST_ROOT)
+    const support = await import('../../src/shared/erc7730-support')
+    desktopMods = {
+      prepare: (await import('../../src/bun/evm-presign-report')).prepareEvmTxSigningInfo,
+      resolver: await import('../../src/bun/erc7730-resolver'),
+      skipReason: support.erc7730CalldataSkipReason,
+      typedDataSupported: support.ERC7730_TYPED_DATA_SUPPORTED,
+    }
+    desktopMods.resolver.forgetRefusedErc7730Definitions()
+    await boot()
+    const features = await wallet.getFeatures()
+    expect(features.initialized).toBe(true)
+    firmwareVersion = `${features.majorVersion}.${features.minorVersion}.${features.patchVersion}`
+    // engine-controller reads hdwallet's Features.capabilitiesList. When the
+    // installed hdwallet cannot decode the field, the replay uses what the
+    // device sent, and the next test fails to say Desktop would not.
+    hdwalletCapabilities = Array.isArray(features.capabilitiesList) ? [...features.capabilitiesList] : undefined
+    capabilities = hdwalletCapabilities ?? deviceCapabilities ?? []
+    address = (await wallet.ethGetAddress({ addressNList: PATH, showDisplay: false })).toLowerCase()
+    console.log(`  firmware ${firmwareVersion}, device capabilities [${deviceCapabilities}], hdwallet capabilities ${hdwalletCapabilities ? `[${hdwalletCapabilities}]` : 'undefined'}, signer ${address}, worker ${base}, ${calldataCases.length} calldata cases`)
+    expect(firmwareVersion).toBe('7.16.0')
+    expect(support.supportsErc7730Transport(firmwareVersion, capabilities)).toBe(true)
+  }, 60_000)
+
+  test('hdwallet decodes Features.capabilities as the device sent them', () => {
+    expect(deviceCapabilities ?? []).toContain(4)
+    expect(hdwalletCapabilities).toEqual(deviceCapabilities)
+  })
+
+  test('typed data: Desktop attaches no definition on 7.16', () => {
+    expect(desktopMods?.typedDataSupported).toBe(false)
+    if (eip712Cases.length) console.log(`  ${eip712Cases.length} EIP-712 cases not run: ERC7730_TYPED_DATA_SUPPORTED is off`)
+  })
+
+  for (const fx of calldataCases) {
+    test(`desktop calldata ${fx.id}`, async () => {
+      await setAdvancedMode(true)
+      const base = await attempt(signCalldata(fx))
+      const d = await desktopSign(fx)
+      const def = d.attempted
+      const pass = base.ok && def.ok && def.signature === base.signature && def.signer?.toLowerCase() === address
+        && !d.otherDescription
+        && (d.outcome !== 'clear-signed' || def.definitionRequests.length > 0)
+      rows.push({
+        kind: 'desktop', id: fx.id, description: fx.description, base, def, pass,
+        desktop: { outcome: d.outcome, reason: d.reason, definitionId: d.definitionId, needsBlindSigning: d.needsBlindSigning, advancedMode: d.advancedMode },
+      })
+      expect(base.error).toBeUndefined()
+      expect(def.error).toBeUndefined()
+      expect(def.signature).toBe(base.signature!)
+      expect(def.signer?.toLowerCase()).toBe(address)
+      expect(d.otherDescription).toBe(false)
+      if (d.outcome === 'clear-signed') expect(def.definitionRequests.length).toBeGreaterThan(0)
+    }, 3 * SIGN_TIMEOUT_MS + 30_000)
+  }
+})
+
 // ── Results ────────────────────────────────────────────────────────────
 
-type Row = { kind: 'calldata' | 'eip712' | 'negative'; id: string; description: string; base?: Attempt; def?: Attempt; note?: string; pass: boolean }
+type DesktopOutcome = 'clear-signed' | 'not-attached' | 'fell-back'
+type Row = {
+  kind: 'calldata' | 'eip712' | 'negative' | 'desktop'; id: string; description: string; base?: Attempt; def?: Attempt; note?: string; pass: boolean
+  desktop?: { outcome: DesktopOutcome; reason?: string; definitionId?: string; needsBlindSigning?: boolean; advancedMode?: boolean }
+}
 const rows: Row[] = []
 const screenKey = (s: Screen) => `${s.title}\u0000${s.body}`
 
@@ -413,16 +623,30 @@ function reshow(base: Attempt, def: Attempt) {
 
 afterAll(() => {
   halt()
+  stopDesktop()
   if (!fixture) return
   const sum = (kind: Row['kind']) => {
     const r = rows.filter((x) => x.kind === kind)
     return { total: r.length, pass: r.filter((x) => x.pass).length, signed: r.filter((x) => x.def?.ok).length, baseSigned: r.filter((x) => x.base?.ok).length }
   }
-  const summary = { dylib: DYLIB_PATH, firmware: fixture.firmware, restarts, calldata: sum('calldata'), eip712: sum('eip712'), negative: sum('negative') }
+  const desktopRows = rows.filter((x) => x.kind === 'desktop')
+  const byOutcome = (o: DesktopOutcome) => desktopRows.filter((x) => x.desktop?.outcome === o)
+  const reasons = (list: Row[]) => list.reduce<Record<string, number>>((m, r) => { const k = r.desktop?.reason ?? '-'; m[k] = (m[k] ?? 0) + 1; return m }, {})
+  const desktop = MODE !== 'desktop' ? undefined : {
+    ...sum('desktop'), definitionLookups: servedLookups.length,
+    clearSigned: byOutcome('clear-signed').length,
+    notAttached: byOutcome('not-attached').length, notAttachedReasons: reasons(byOutcome('not-attached')),
+    fellBack: byOutcome('fell-back').length, fellBackReasons: reasons(byOutcome('fell-back')),
+    eip712SkippedByRule: MODE === 'desktop' ? eip712Cases.length : 0,
+  }
+  const summary = { mode: MODE, deviceCapabilities, hdwalletCapabilities: hdwalletCapabilities ?? null, dylib: DYLIB_PATH, firmware: fixture.firmware, restarts, calldata: sum('calldata'), eip712: sum('eip712'), negative: sum('negative'), desktop }
   console.log('\n=== ERC-7730 replay summary ===')
   console.log(JSON.stringify(summary, null, 1))
   for (const r of rows.filter((x) => !x.pass)) {
     console.log(`FAIL ${r.kind} ${r.id} | base: ${r.base?.ok ? 'ok' : r.base?.error} | def: ${r.def?.ok ? 'ok' : r.def?.error}${r.note ? ` | ${r.note}` : ''}`)
+  }
+  for (const r of desktopRows.filter((x) => x.desktop?.outcome !== 'clear-signed')) {
+    console.log(`DESKTOP ${r.desktop!.outcome} ${r.id} | ${r.desktop!.reason ?? ''} | signed: ${r.def?.ok ? 'ok' : r.def?.error} | AdvancedMode at sign: ${r.desktop!.advancedMode}`)
   }
   console.log('\n--- EIP-712 screens: without vs with definition ---')
   for (const r of rows.filter((x) => x.kind === 'eip712' && x.base?.ok && x.def?.ok)) {
@@ -436,7 +660,7 @@ afterAll(() => {
 
 // ── Tests ──────────────────────────────────────────────────────────────
 
-describe.skipIf(!fixture)('ERC-7730 replay on the stock 7.16 emulator', () => {
+describe.skipIf(!fixture || MODE !== 'hdwallet')('ERC-7730 replay on the stock 7.16 emulator', () => {
   test('boot a blank flash, load the test seed, firmware is 7.16.0', async () => {
     await boot()
     const features = await wallet.getFeatures()

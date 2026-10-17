@@ -444,6 +444,8 @@ test-emu:
 # KK_CLEARSIGN_TEST_ROOT with C getenv() in kkemu_init, and bun's process.env
 # never reaches getenv, so the root is exported here before bun starts.
 #   make test-emu-erc7730 ERC7730_LIMIT=5 ERC7730_FILTER=uniswap ERC7730_SHARD=0/4 ERC7730_REPORT=/path/report.json
+# ERC7730_MODE=desktop runs the calldata fixtures through Desktop's resolver and
+# sign step against a local stand-in for the ClearSign worker.
 ERC7730_EMU_DYLIB ?= $(HOME)/keepkey-toolchain/emu-v7.16.0-prodroot-arm64/lib/libkkemu.dylib
 ERC7730_FIXTURE ?= $(HOME)/keepkey-audit-rigs/issuer/batch2/erc7730/test-signed/erc7730-replay-fixture.json
 test-emu-erc7730:
@@ -454,6 +456,7 @@ test-emu-erc7730:
 	echo "$$root" | grep -Eq '^0[23][0-9a-f]{64}$$' && \
 	KK_EMU_DYLIB="$(ERC7730_EMU_DYLIB)" KK_CLEARSIGN_TEST_ROOT="$$root" KK_ERC7730_FIXTURE="$(ERC7730_FIXTURE)" \
 	KK_ERC7730_LIMIT="$(ERC7730_LIMIT)" KK_ERC7730_FILTER="$(ERC7730_FILTER)" KK_ERC7730_SHARD="$(or $(ERC7730_SHARD),0/1)" KK_ERC7730_REPORT="$(ERC7730_REPORT)" \
+	KK_ERC7730_MODE="$(ERC7730_MODE)" \
 	bun test --timeout 300000 tests/emulator/09-erc7730.test.ts
 
 # --- Emulator (developer feature) ---
