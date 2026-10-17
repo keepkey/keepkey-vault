@@ -14,7 +14,6 @@
  * shows the native amount screen. A wrong or unsigned schema is refused, not
  * silently trusted.
  */
-import registry from './evm-schemas-local.json'
 import { DEFAULT_CLEARSIGN_SERVICE_URL } from './solana-certified-registry'
 import { deploymentMismatch, verifyPublishedReview } from './clearsign-review'
 import { snapshotEvmIdentities } from './clearsign-live-auditor'
@@ -53,30 +52,6 @@ export interface SignedEvmSchema {
   bundleHash?: string
   /** Verified definition approvals, when the service published this definition. */
   definitionReview?: ClearSignDefinitionReview
-}
-
-const SCHEMAS: Record<string, SignedEvmSchema> = (registry as any).schemas ?? {}
-
-/**
- * Find a schema for this call, or undefined. Returns undefined rather than
- * throwing on any doubt — a missing schema means the existing (blind-sign)
- * behaviour, never a blocked transaction.
- */
-export function findEvmSchema(
-  chainId: number | undefined,
-  to: string | undefined,
-  data: string | undefined,
-): SignedEvmSchema | undefined {
-  if (!chainId || !to || !data) return undefined
-  const calldata = data.startsWith('0x') ? data.slice(2) : data
-  if (calldata.length < 8) return undefined
-  const selector = '0x' + calldata.slice(0, 8).toLowerCase()
-  const schema = SCHEMAS[`${chainId}:${to.toLowerCase()}:${selector}`]
-  if (!schema) return undefined
-  // The device enforces this too, but checking here keeps a stale registry
-  // entry from producing a confusing on-device refusal mid-signing.
-  if (calldata.length / 2 !== schema.expectedCalldataLength) return undefined
-  return schema
 }
 
 /**
@@ -322,22 +297,14 @@ export async function resolveEvmSchema(
    *  before 7.17.0; unknown firmware counts as refusing) is never returned. */
   firmwareVersion?: string,
 ): Promise<SignedEvmSchema | undefined> {
-  // Older firmware may not handle EthereumTxMetadata at all. In particular,
-  // never substitute the local CI-key schema when the certified path is off.
-  // The caller's ordinary Advanced Mode policy gate still applies.
+  // Older firmware may not handle EthereumTxMetadata at all. The caller's
+  // ordinary Advanced Mode policy gate still applies.
   if (!certifiedMetadataSupported) return undefined
   const shown = (entry: SignedEvmSchema | undefined) =>
     entry && !certifiedBodyRefused(entry.signedPayload, firmwareVersion) ? entry : undefined
   const promoted = findPromotedEvmArtifact(chainId, to, data)
   if (promoted) return shown({ ...promoted, keyId: CERTIFIED_METADATA_KEY_ID, source: 'promoted-local' })
-  const certified = await findCertifiedEvmSchema(chainId, to, data)
-  if (certified) return shown(certified)
-  // The local registry is signed with the CI test key (slot 3), which a
-  // production device cannot verify. Since a service outage now returns
-  // undefined instead of throwing, taking it here would show "certified" and
-  // then fail on the device. Only a production-key entry may stand in.
-  const local = findEvmSchema(chainId, to, data)
-  return local?.keyId === CERTIFIED_METADATA_KEY_ID ? local : undefined
+  return shown(await findCertifiedEvmSchema(chainId, to, data))
 }
 
 /** Resolve a reviewed description bound to this complete transaction. Used

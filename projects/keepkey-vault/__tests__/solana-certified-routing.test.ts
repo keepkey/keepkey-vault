@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import bs58 from 'bs58'
 
 import {
@@ -326,5 +326,31 @@ describe('swap.ts: a Relay certified proof is attached only when the device will
     expect(swap).not.toContain('findSolanaSchema')
     // The only Solana schema the swap attaches is the certified proof's.
     expect(swap.match(/\bschema: /g)).toEqual(['schema: '])
+  })
+
+  test('no shipped signed entry names any key but the certified delegate (0x80)', () => {
+    // Test keys sign runtime slots 1-3 (the CI key used slot 3). Any signed
+    // entry in shipped src must be under the KeepKey-certified delegate.
+    const certified = (v: unknown) => v === 0x80 || v === '0x80' || v === '128'
+    const offenders: string[] = []
+    const walk = (node: unknown, file: string, at: string) => {
+      if (Array.isArray(node)) return node.forEach((x, i) => walk(x, file, `${at}[${i}]`))
+      if (!node || typeof node !== 'object') return
+      const o = node as Record<string, unknown>
+      const signed = 'signedPayload' in o || 'signature' in o || 'payload' in o
+      for (const k of ['keyId', 'signerKeyId']) {
+        // Values only: an API schema that merely documents the field is not an entry.
+        if (signed && k in o && (typeof o[k] !== 'object' || o[k] === null) && !certified(o[k])) offenders.push(`${file}${at}.${k}=${String(o[k])}`)
+      }
+      for (const [k, v] of Object.entries(o)) walk(v, file, `${at}.${k}`)
+    }
+    const root = new URL('..', import.meta.url).pathname
+    for (const file of new Bun.Glob('src/**/*.json').scanSync({ cwd: root })) {
+      walk(JSON.parse(readFileSync(`${root}${file}`, 'utf8')), file, '')
+    }
+    expect(offenders).toEqual([])
+    // The CI-key EVM registry and its lookup are gone.
+    expect(existsSync(`${root}src/bun/evm-schemas-local.json`)).toBe(false)
+    expect(readFileSync(`${root}src/bun/evm-schema-registry.ts`, 'utf8')).not.toContain('findEvmSchema(')
   })
 })

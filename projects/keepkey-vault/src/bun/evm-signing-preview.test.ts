@@ -4,7 +4,6 @@ import { applyEvmTxPreview, evmPriorityFee, normalizeEvmChainId, typedDataNative
 import { approveSpender, findCertifiedEvmSchema, resolveEvmSchema } from './evm-schema-registry'
 import { certifiedBodyRefused } from '../shared/certified-evm-envelope'
 import { findCertifiedEvmEnvelope } from './evm-certified-registry'
-import { findEvmSchema } from './evm-schema-registry'
 import { SolanaSignMessageRequest } from './schemas'
 import { solanaSignerChangedError } from './solana-message-preview'
 import { evmCallRequiresAdvancedMode } from './evm-signing-policy'
@@ -108,10 +107,9 @@ describe('applyEvmTxPreview = needsAdvancedMode = !(native || (fw >= 7.16 && cer
     expect(s.calldataDecoded?.signedInsightBlob).toBeUndefined()
   })
 
-  test('never substitutes the local CI-key schema', async () => {
+  test('a declined certified lookup leaves the Relay deposit blind (no local stand-in)', async () => {
     const TO = '0x4cd00e387622c35bddb9b4c962c136462338bc31'
     const DATA = '0x49290c1c' + word('909ef6b32dfdc12ca86aa710b54c991af3c5f82e') + '8a2c121197efc95c42f53142ab409735ee353287f877ed4d351f63094d5bfcb1'
-    expect(findEvmSchema(1, TO, DATA)).toBeDefined()
     globalThis.fetch = (async () => new Response(JSON.stringify({ classification: 'OPAQUE' }), { status: 422 })) as typeof fetch
     const s = info()
     await applyEvmTxPreview(s, TO, DATA, 1, '7.16.0')
