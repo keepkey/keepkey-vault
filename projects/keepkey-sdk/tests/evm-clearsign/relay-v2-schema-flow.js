@@ -15,8 +15,13 @@
  * Blob + calldata from projects/keepkey-clearsign/docs/relay-v2-schema-payload/.
  *
  * Run: KEEPKEY_API_KEY=… node tests/evm-clearsign/relay-v2-schema-flow.js
+ *
+ * 7.16: runtime signers need a session AdvancedMode, and the runtime tier still
+ * shows the raw review on the device, not clear-sign pages. The suite SKIPs
+ * while AdvancedMode is off; run opt-in, it ends with clearSession, which
+ * clears AdvancedMode and drops the public CI test signer.
  */
-const { run, ETH_PATH } = require('../_helpers')
+const { run, requireAdvancedModeSession, ETH_PATH } = require('../_helpers')
 
 // v2 static-schema blob for (chainId 1, relay solver, selector 0x02d5f05f),
 // signed by the slot-3 test key. First byte 0x02 = METADATA_VERSION_SCHEMA.
@@ -37,6 +42,7 @@ const ALIAS = 'CI Test'
 
 run('clear-sign v2: relay static-schema on device', async (getSdk, assert) => {
   const sdk = await getSdk()
+  await requireAdvancedModeSession(sdk)
 
   const { address } = await sdk.address.ethGetAddress({ address_n: ETH_PATH })
   console.log(`  Device ETH address: ${address}`)
@@ -52,7 +58,7 @@ run('clear-sign v2: relay static-schema on device', async (getSdk, assert) => {
   assert('signer loaded (device confirmed)', !!load && load.ok === true)
 
   console.log('\n  Signing relay swap — the device decodes token/amount/requestId from the calldata')
-  console.log('  >>> APPROVE the clear-sign pages on device <<<')
+  console.log('  >>> APPROVE on device (7.16 runtime tier: the raw review, not clear-sign pages) <<<')
   console.log('      expect: token 0xA0b8…eb48 (USDC),  amount 2987.5 USDC,  requestId 52604')
   const result = await sdk.eth.ethSignTransaction({
     to: RELAY_TO,

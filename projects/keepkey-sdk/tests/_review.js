@@ -115,7 +115,7 @@ async function takeTape(record) {
   const post = () => fetch(`${BASE}/emulator/test-tape`, {
     method: 'POST',
     // No keep-alive: a suite can run for minutes, and Desktop has closed an idle socket by then.
-    headers: { Authorization: `Bearer ${process.env.KEEPKEY_API_KEY}`, 'Content-Type': 'application/json', Connection: 'close' },
+    headers: { Authorization: `Bearer ${require('./_helpers').savedApiKey()}`, 'Content-Type': 'application/json', Connection: 'close' },
     body: JSON.stringify({ record }),
   })
   const res = await post().catch(post)

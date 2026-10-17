@@ -47,6 +47,9 @@ export interface DeviceFeatures {
   no_backup: boolean
   wipe_code_protection: boolean
   auto_lock_delay_ms: number
+  /** Features.capabilities (firmware 7.15+), e.g. 4 = ERC-7730 runtime review.
+   *  Absent when the firmware reports none or the Desktop predates it. */
+  capabilities?: number[]
 }
 
 export interface DeviceInfo {
@@ -65,6 +68,18 @@ export interface SignedTx {
   v?: number
   signature?: string
   serialized?: string
+}
+
+/** POST /eth/sign-transaction result. */
+export interface EthSignedTx extends SignedTx {
+  /** The ClearSign report Desktop showed at approval, when its signing gate built one. */
+  clearSignReport?: ClearSignReport
+}
+
+/** POST /solana/sign-transaction result. */
+export interface SolanaSignedTx extends SignedTx {
+  /** The ClearSign report Desktop showed at approval, when its signing gate built one. */
+  clearSignReport?: ClearSignReport
 }
 
 export interface AddressResult {
@@ -87,6 +102,7 @@ export interface EthSignTxParams {
   to: string
   value: string
   data?: string
+  /** Hex nonce. When omitted Desktop signs with nonce 0x0. */
   nonce?: string
   gas?: string
   gasLimit?: string
@@ -95,17 +111,20 @@ export interface EthSignTxParams {
   maxPriorityFeePerGas?: string
   chainId?: number
   /**
-   * EVM clear-signing metadata (firmware 7.15.0+). A signed blob, bound to this
-   * tx's exact sighash, sent as EthereumTxMetadata before signing so the device
-   * shows decoded contract-call info instead of raw hex. `keyId` names the
-   * device key slot the blob is signed against (0 = built-in production key;
-   * 3 = a runtime signer loaded via `loadClearsignSigner`).
+   * EVM clear-signing metadata (firmware 7.15.0+), sent as EthereumTxMetadata
+   * before signing. `keyId` names the key the blob is signed against: 0x80 for
+   * the KeepKey-certified delegate, 1-3 for a runtime signer loaded via
+   * `loadClearsignSigner`. Firmware 7.16 has no built-in key 0. Omit it to let
+   * Desktop attach a certified description itself.
    */
   txMetadata?: {
     signedPayload: string
     keyId?: number
   }
-  /** Signed, compiled ERC-7730 v2 catalog used by firmware to decode the exact transaction. */
+  /**
+   * Ignored. Desktop only logs a caller-supplied catalog and sends the device
+   * definitions it fetched from the ClearSign service itself.
+   */
   erc7730?: {
     primaryDefinitionId: string
     definitions: Array<{
@@ -213,11 +232,6 @@ export interface HiveSignMessageParams {
 
 // ── XRP Types ───────────────────────────────────────────────────────
 export interface XrpSignTxParams {
-  [key: string]: any
-}
-
-// ── BNB Types ───────────────────────────────────────────────────────
-export interface BnbSignTxParams {
   [key: string]: any
 }
 
@@ -468,6 +482,13 @@ export interface BatchPubkeysPath {
   note?: string
 }
 
+// ── Device policies ─────────────────────────────────────────────────
+export interface ApplyPoliciesParams {
+  /** Firmware policy name, e.g. 'AdvancedMode'. */
+  policyName: 'AdvancedMode' | string
+  enabled: boolean
+}
+
 // ── Apply Settings ──────────────────────────────────────────────────
 export interface ApplySettingsParams {
   label?: string
@@ -489,15 +510,6 @@ export interface HealthResponse {
 
 export interface PairResponse {
   apiKey: string
-}
-
-export interface SupportedAsset {
-  chain: string
-  symbol: string
-  coin: string
-  networkId: string
-  caip: string
-  chainFamily: string
 }
 
 // ── Chain Data Types (v2 API) ──────────────────────────────────────
@@ -558,13 +570,18 @@ export interface StakingParams {
   address: string
 }
 
+/** POST /api/v2/swap/quote. */
 export interface SwapQuoteParams {
-  sellAsset: string
-  buyAsset: string
-  sellAmount: string
-  senderAddress: string
-  recipientAddress: string
-  slippage?: number
+  /** CAIP-19 asset id sold, e.g. 'eip155:8453/slip44:60'. */
+  fromCaip: string
+  /** CAIP-19 asset id bought. */
+  toCaip: string
+  /** Decimal amount of the sold asset, e.g. '0.0001'. */
+  amount: string
+  fromAddress: string
+  toAddress: string
+  /** 10-5000 basis points. */
+  slippageBps?: number
 }
 
 // ── Sweep Types ────────────────────────────────────────────────────
@@ -612,4 +629,114 @@ export interface SweepExecuteResult {
   outputSats: number
   dryRun?: boolean
   unsignedTx?: any
+}
+
+// ── ClearSign report (POST /clearsign/report) ──────────────────────
+
+export interface ClearSignFinding {
+  code: string
+  message: string
+  /** 'danger' is the red line Desktop shows. */
+  severity: 'info' | 'warning' | 'danger'
+}
+
+export type ClearSignProtectionLevel = 'P0' | 'P1' | 'P2' | 'P3' | 'P4' | 'P5'
+
+export interface ClearSignDescriptor {
+  /** Who described the call: firmware itself, a KeepKey-certified envelope,
+   *  an ERC-7730 definition, a runtime signer, or nobody. */
+  source: 'none' | 'native' | 'runtime' | 'certified' | 'erc7730'
+  authenticated: boolean
+  format?: 'ERC7730' | 'EVM_METADATA' | 'KKSOLSC1' | 'FIRMWARE_NATIVE'
+  label?: string
+  artifactHash?: string
+  codeIdentityBound?: boolean
+  expiresAt?: number
+  resolution?: string
+  provider?: {
+    alias?: string
+    fingerprint?: string
+    keyId?: number
+    status: 'requested' | 'supplied'
+  }
+}
+
+export interface ClearSignSimulation {
+  version: 1
+  chain: 'Ethereum' | 'Solana'
+  transactionFingerprint: string
+  status: 'success' | 'revert' | 'incomplete' | 'unavailable'
+  assetChanges: unknown[]
+  authorityChanges: unknown[]
+  invokedCode: unknown[]
+  warnings: ClearSignFinding[]
+  unknowns: ClearSignFinding[]
+  [key: string]: unknown
+}
+
+/** Desktop's verdict on one transaction. Built without any device I/O. */
+export interface ClearSignReport {
+  version: 1
+  generatedAt: number
+  chain: 'Ethereum' | 'Solana'
+  transactionFingerprint: string
+  protectionLevel: ClearSignProtectionLevel
+  headline: string
+  descriptor: ClearSignDescriptor
+  simulation: ClearSignSimulation
+  findings: ClearSignFinding[]
+  /** e.g. DEVICE_SHOWS_RAW_DATA, DEVICE_NOT_CONNECTED. */
+  limitations: ClearSignFinding[]
+  claims: Array<{
+    source: 'transaction-bytes' | 'authenticated-definition' | 'simulation'
+    statement: string
+  }>
+  definitionReview?: Record<string, unknown>
+  rating?: Record<string, unknown>
+}
+
+/** Hex fields are 0x-prefixed. */
+export interface ClearSignReportEvmRequest {
+  chain: 'evm'
+  chainId: number
+  from: string
+  to?: string
+  data?: string
+  value?: string
+  gas?: string
+  gasPrice?: string
+  maxFeePerGas?: string
+  maxPriorityFeePerGas?: string
+  nonce?: string
+  hasErc7730?: boolean
+}
+
+export interface ClearSignReportSolanaRequest {
+  chain: 'solana'
+  /** Base64 serialized transaction. */
+  raw_tx: string
+  /** Base58 fee payer / owner address. */
+  owner: string
+  hasCertifiedSchema?: boolean
+}
+
+export type ClearSignReportRequest = ClearSignReportEvmRequest | ClearSignReportSolanaRequest
+
+// ── Solana decode (POST /solana/decode-transaction) ────────────────
+
+export interface SolanaDecodeParams {
+  /** Base64 serialized transaction. */
+  raw_tx: string
+}
+
+export interface SolanaDecodeResult {
+  /** Present when Desktop could decode the bytes. */
+  solanaDecoded?: any
+  /** Present instead of `solanaDecoded` when it could not. */
+  solanaDecodeError?: string
+  requiresBlindSigningConsent: boolean
+  /** Desktop's risk verdict. Whether the firmware needs AdvancedMode feeds it
+   *  but is not returned as its own field. */
+  risk: any
+  simulatedOutflow?: any
 }

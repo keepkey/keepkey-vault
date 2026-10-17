@@ -14,8 +14,13 @@ const { join } = require('path')
 const filter = process.argv[2] || ''
 const testsDir = __dirname
 
-// Discover all .js test files (skip helpers, run-all, fixtures)
-const SKIP = new Set(['_helpers.js', '_clearsign.js', '_review.js', 'run-all.js'])
+// Discover all .js test files. Files starting with '_' are shared helpers.
+const SKIP = new Set(['run-all.js'])
+// A suite that exits with this code was SKIPPED (tests/_helpers.js skip()).
+const { SKIP_EXIT } = require('./_helpers')
+// Per-suite timeout. A suite that waits on the features cache or on a person
+// at the device can need more, e.g. KEEPKEY_SUITE_TIMEOUT_MS=600000.
+const SUITE_TIMEOUT_MS = Number(process.env.KEEPKEY_SUITE_TIMEOUT_MS) || 180000
 
 // recovery/* WIPES the connected device. Never part of a normal run: it needs
 // KEEPKEY_ALLOW_WIPE=1 and runs last, because it leaves the device empty.
@@ -25,7 +30,7 @@ const allowWipe = process.env.KEEPKEY_ALLOW_WIPE === '1'
 function findTests(dir, prefix = '') {
   const entries = []
   for (const name of readdirSync(dir)) {
-    if (SKIP.has(name)) continue
+    if (SKIP.has(name) || name.startsWith('_')) continue
     const full = join(dir, name)
     const rel = prefix ? `${prefix}/${name}` : name
     if (statSync(full).isDirectory()) {
@@ -56,7 +61,7 @@ if (tests.length === 0) {
 
 console.log(`\n  Running ${tests.length} test suite(s)${filter ? ` (filter: "${filter}")` : ''}:\n`)
 
-let passed = 0, failed = 0
+let passed = 0, failed = 0, skipped = 0
 
 // What each suite made Desktop and the device show (see _review.js). Without
 // the emulator's test tape, suites still run but nothing shown is checked.
@@ -73,15 +78,25 @@ async function main() {
     console.log(`  ── ${test.name} ──`)
     if (taping) await takeTape(true)
     let ok = true
+    let wasSkipped = false
     try {
-      execSync(`node "${test.path}"`, { stdio: 'inherit', timeout: 180000 })
+      execSync(`node "${test.path}"`, { stdio: 'inherit', timeout: SUITE_TIMEOUT_MS })
       passed++
     } catch (e) {
-      ok = false
-      failed++
-      console.error(`  FAILED: ${test.name}\n`)
+      if (e.status === SKIP_EXIT) {
+        wasSkipped = true
+        skipped++
+        console.log(`  SKIPPED: ${test.name}\n`)
+      } else {
+        ok = false
+        failed++
+        console.error(`  FAILED: ${test.name}${e.signal ? ` (${e.signal}; timeout ${SUITE_TIMEOUT_MS} ms)` : ''}\n`)
+      }
     }
-    if (taping) {
+    if (taping && wasSkipped) {
+      await takeTape(false)
+      shown.push({ suite: test.name, ok, verdict: 'skipped', problems: [], cards: 0, screens: 0 })
+    } else if (taping) {
       const tape = await takeTape(false)
       const { verdict, problems } = judge(test.name, tape, ok)
       shown.push({ suite: test.name, ok, verdict, problems, cards: tape.filter((e) => e.card).length, screens: tape.filter((e) => e.screen).length })
@@ -90,7 +105,7 @@ async function main() {
   }
 
   console.log(`\n  ════════════════════════════════════════`)
-  console.log(`  Total: ${passed + failed} suites, ${passed} passed, ${failed} failed`)
+  console.log(`  Total: ${passed + failed + skipped} suites, ${passed} passed, ${failed} failed, ${skipped} skipped`)
   if (taping) {
     console.log(`\n  What was shown (cards = Desktop approval cards, screens = device confirmations):`)
     for (const r of shown) console.log(`  ${r.verdict.padEnd(12)} ${r.ok ? 'pass' : 'FAIL'}  cards ${String(r.cards).padStart(2)}  screens ${String(r.screens).padStart(3)}  ${r.suite}`)

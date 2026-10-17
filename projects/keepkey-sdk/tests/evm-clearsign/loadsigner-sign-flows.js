@@ -21,8 +21,13 @@
  *   node tests/evm-clearsign/loadsigner-sign-flows.js
  * Named: KEEPKEY_API_KEY=… CLEARSIGN_FLOW=aave-v3-supply,erc20-transfer \
  *   node tests/evm-clearsign/loadsigner-sign-flows.js
+ *
+ * 7.16: runtime signers need a session AdvancedMode, and the runtime tier still
+ * shows the raw review on the device, not clear-sign pages. The suite SKIPs
+ * while AdvancedMode is off; run opt-in, it ends with clearSession, which
+ * clears AdvancedMode and drops the public CI test signer.
  */
-const { run, ETH_PATH } = require('../_helpers')
+const { run, requireAdvancedModeSession, ETH_PATH } = require('../_helpers')
 const { ALL_FLOWS, buildFlowBlob, CI_TEST_PUBKEY, CI_SIGNER_ALIAS, TEST_KEY_ID } = require('../_clearsign')
 
 const FLOW_KEYS = Object.keys(ALL_FLOWS).sort()
@@ -58,6 +63,7 @@ if (!FLOWS.length) throw new Error('Selected ClearSign batch is empty')
 
 run(`clear-sign: load CI signer + sign ${FLOWS.length}/${FLOW_KEYS.length} flows`, async (getSdk, assert) => {
   const sdk = await getSdk()
+  await requireAdvancedModeSession(sdk)
 
   const { address } = await sdk.address.ethGetAddress({ address_n: ETH_PATH })
   console.log(`  Device ETH address: ${address}`)
@@ -75,7 +81,7 @@ run(`clear-sign: load CI signer + sign ${FLOWS.length}/${FLOW_KEYS.length} flows
     console.log(`\n  [${key}] ${flow.method}  to=${tx.to}`)
     console.log(`    args: ${flow.args.map(a => a.name).join(', ')}`)
     if (flow.sources?.length) console.log(`    source: ${flow.sources[0]}`)
-    console.log('    >>> APPROVE the clear-sign pages on device <<<')
+    console.log('    >>> APPROVE on device (7.16 runtime tier: the raw review, not clear-sign pages) <<<')
     const result = await sdk.eth.ethSignTransaction({
       ...tx,
       addressNList: ETH_PATH,

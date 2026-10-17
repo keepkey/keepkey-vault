@@ -12,6 +12,7 @@
  */
 const { run, ETH_PATH } = require('../_helpers')
 const { fixtures } = require('../fixtures/eip712-matrix')
+const { verifyTypedData } = require('ethers')
 
 const ALL_FLOWS = Object.keys(fixtures)
 
@@ -60,5 +61,9 @@ run(`structured EIP-712: sign ${flows.length}/${ALL_FLOWS.length} flows`, async 
     const result = await sdk.eth.ethSignTypedData({ address, typedData: fixture.typedData })
     const signature = typeof result === 'string' ? result : result?.signature
     assert(`[${key}] got a 65-byte signature`, typeof signature === 'string' && /^0x[0-9a-fA-F]{130}$/.test(signature))
+    if (typeof signature !== 'string') continue
+    const { EIP712Domain, ...types } = fixture.typedData.types
+    const recovered = verifyTypedData(fixture.typedData.domain, types, fixture.typedData.message, signature)
+    assert(`[${key}] signature recovers to the device`, recovered.toLowerCase() === address.toLowerCase())
   }
 })

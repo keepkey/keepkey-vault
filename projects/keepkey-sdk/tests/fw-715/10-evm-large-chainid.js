@@ -16,7 +16,7 @@
  * The check is objective: a wrong pre-image cannot recover to the device's own
  * address by accident.
  */
-const { run, ETH_PATH, toHex } = require('../_helpers')
+const { run, ETH_PATH, toHex, SENTINEL_NONCE } = require('../_helpers')
 const { Transaction } = require('ethers')
 
 // chainId, name, and the byte 7.14.1 would have hashed instead.
@@ -40,7 +40,7 @@ run('fw-715 EVM large chainId — type-2 recovers to the device on chainId >= 25
       to: address, // send to self: no funds move, nothing to fund
       value: '0x0',
       data: '0x',
-      nonce: '0x0',
+      nonce: SENTINEL_NONCE, // can never be mined
       gasLimit: '0x5208',
       maxFeePerGas: toHex(30e9),
       maxPriorityFeePerGas: toHex(1.5e9),

@@ -22,7 +22,7 @@
  *
  * Run: KEEPKEY_API_KEY=… node tests/evm-clearsign/provider-live-sign-flow.js
  */
-const { run, ETH_PATH, erc20Transfer } = require('../_helpers')
+const { run, ETH_PATH, erc20Transfer, skip, requireAdvancedModeSession } = require('../_helpers')
 
 const PROVIDER = process.env.CLEARSIGN_PROVIDER || 'http://localhost:1647'
 
@@ -60,9 +60,8 @@ run('clear-sign: live provider attestation on device', async (getSdk, assert) =>
     if (!response.ok) throw new Error(`${response.status}`)
     signer = await response.json()
   } catch (cause) {
-    console.log(`  SKIPPED — no provider server at ${PROVIDER} (${cause.message}).`)
-    console.log('  Start it: cd projects/keepkey-clearsign-server && make serve\n')
-    return
+    console.log('  Start it: cd projects/keepkey-clearsign-server && make serve')
+    skip(`no provider server at ${PROVIDER} (${cause.message})`)
   }
 
   console.log(`  Provider: ${signer.alias} · ${signer.fingerprint} · slot ${signer.keyId}`)
@@ -91,6 +90,7 @@ run('clear-sign: live provider attestation on device', async (getSdk, assert) =>
   assert('blob carries the derived tx hash', signedPayload.includes(txHash))
 
   const sdk = await getSdk()
+  await requireAdvancedModeSession(sdk)
   const { address } = await sdk.address.ethGetAddress({ address_n: ETH_PATH })
   console.log(`  Device ETH address: ${address}`)
 

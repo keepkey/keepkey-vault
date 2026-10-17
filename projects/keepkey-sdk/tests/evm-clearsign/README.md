@@ -21,9 +21,10 @@ screen before judging a test.
 
 ## 7.16: KeepKey-certified path
 
-Run `node tests/evm-clearsign/certified-relay-bridge-deposit.js` against the
-7.16 emulator. It requests a v3 envelope from the ClearSign service, with
-reserved `keyId=0x80`; **do not call `LoadClearsignSigner`**. The device checks
+Run `make test-sdk filter=fw-716/30-` (moved to
+`tests/fw-716/30-certified-relay-bridge.js`). Desktop requests the v3 envelope
+from the ClearSign service itself, with reserved `keyId=0x80`; the suite sends no
+`txMetadata` and **does not call `LoadClearsignSigner`**. The device checks
 the root-signed delegate certificate, delegate signature, scope, and schema
 against the transaction. A valid certified path starts with the positive
 **“Verified by KeepKey”** identity screen (the exact firmware wording; do not

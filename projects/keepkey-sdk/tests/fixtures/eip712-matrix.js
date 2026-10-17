@@ -39,9 +39,11 @@ const fixtures = {
       primaryType: 'PermitSingle',
       domain: { name: 'Permit2', chainId: 1, verifyingContract: ADDRESS.permit2 },
       message: {
-        details: { token: ADDRESS.usdc, amount: '1000000000', expiration: '1893456000', nonce: '0' },
+        // Signed by the device itself: amount 1 and a past sigDeadline
+        // (2023-11-14), so Permit2 reverts SignatureExpired if it ever leaks.
+        details: { token: ADDRESS.usdc, amount: '1', expiration: '1893456000', nonce: '0' },
         spender: ADDRESS.spender,
-        sigDeadline: '1893456000',
+        sigDeadline: '1700000000',
       },
     },
   },
@@ -61,11 +63,12 @@ const fixtures = {
       domain: { name: 'Permit2', chainId: 1, verifyingContract: ADDRESS.permit2 },
       message: {
         details: [
-          { token: ADDRESS.usdc, amount: '250000000', expiration: '1893456000', nonce: '1' },
-          { token: ADDRESS.dai, amount: '500000000000000000000', expiration: '1893456000', nonce: '2' },
+          // Same as permit2-single: amount 1, past sigDeadline, never usable.
+          { token: ADDRESS.usdc, amount: '1', expiration: '1893456000', nonce: '1' },
+          { token: ADDRESS.dai, amount: '1', expiration: '1893456000', nonce: '2' },
         ],
         spender: ADDRESS.spender,
-        sigDeadline: '1893456000',
+        sigDeadline: '1700000000',
       },
     },
   },

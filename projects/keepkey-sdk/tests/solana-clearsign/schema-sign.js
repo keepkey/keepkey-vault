@@ -12,8 +12,13 @@
  *   4. Prove a schema that under-covers the instruction data is refused.
  *
  * Requires firmware with KKSOLSC1 support plus human confirmations.
+ *
+ * 7.16: runtime signers need a session AdvancedMode, and the runtime tier still
+ * shows the raw review on the device, not clear-sign pages. The suite SKIPs
+ * while AdvancedMode is off; run opt-in, it ends with clearSession, which
+ * clears AdvancedMode and drops the public CI test signer.
  */
-const { run, SOLANA_PATH } = require('../_helpers')
+const { run, requireAdvancedModeSession, SOLANA_PATH } = require('../_helpers')
 const {
   TEST_KEY_ID,
   CI_TEST_PUBKEY,
@@ -71,6 +76,7 @@ function decodeSolanaAddress(address) {
 
 run('Solana ClearSign: KKSOLSC1 reusable schema on device', async (getSdk, assert, assertThrows) => {
   const sdk = await getSdk()
+  await requireAdvancedModeSession(sdk)
   const { address } = await sdk.address.solanaGetAddress({ address_n: SOLANA_PATH })
   const signer = decodeSolanaAddress(address)
   console.log(`  Device Solana address: ${address}`)

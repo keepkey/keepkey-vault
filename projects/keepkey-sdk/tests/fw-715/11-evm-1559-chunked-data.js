@@ -41,7 +41,7 @@
  * Skipping is not a coverage hole: python-keepkey drives the same chunked path
  * against the emulator with no gate in the way.
  */
-const { run, ETH_PATH, toHex, SEL } = require('../_helpers')
+const { run, ETH_PATH, toHex, SEL, SENTINEL_NONCE, skip } = require('../_helpers')
 const { Transaction } = require('ethers')
 
 const CHUNK = 1024
@@ -52,8 +52,8 @@ if (!process.env.KK_ALLOW_BLIND) {
   console.log('  hits the blind-sign gate. Do not disable that gate casually.')
   console.log('  To run: enable AdvancedMode, re-run with KK_ALLOW_BLIND=1.')
   console.log('  Session-scoped firmware disarms it on lock/unplug by itself.')
-  console.log('  No device interaction performed.\n')
-  process.exit(0)
+  console.log('  No device interaction performed.')
+  skip('needs KK_ALLOW_BLIND=1 and a session AdvancedMode')
 }
 
 /** ERC-20 transfer selector + `words` 32-byte words. Shape is irrelevant to the
@@ -81,7 +81,7 @@ run('fw-715 EVM 1559 chunked data — access list stays last across chunk bounda
     to: address, // self: nothing moves, no funds needed
     value: '0x0',
     data,
-    nonce: '0x0',
+    nonce: SENTINEL_NONCE, // can never be mined
     gasLimit: '0x30D40',
     maxFeePerGas: toHex(30e9),
     maxPriorityFeePerGas: toHex(1.5e9),

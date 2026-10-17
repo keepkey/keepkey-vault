@@ -4,6 +4,8 @@ import type {
   DeviceFeatures,
   DeviceInfo,
   SignedTx,
+  EthSignedTx,
+  SolanaSignedTx,
   AddressRequest,
   EthSignTxParams,
   LoadClearsignSignerParams,
@@ -17,7 +19,6 @@ import type {
   HiveSignTransferParams,
   HiveSignMessageParams,
   XrpSignTxParams,
-  BnbSignTxParams,
   SolanaSignTxParams,
   SolanaSignOffchainMessageParams,
   SolanaSignMessageParams,
@@ -39,8 +40,8 @@ import type {
   GetPublicKeyRequest,
   BatchPubkeysPath,
   ApplySettingsParams,
+  ApplyPoliciesParams,
   HealthResponse,
-  SupportedAsset,
   PortfolioBalancesParams,
   MarketInfoParams,
   SearchAssetsParams,
@@ -57,6 +58,10 @@ import type {
   SweepScanStatus,
   SweepExecuteParams,
   SweepExecuteResult,
+  ClearSignReport,
+  ClearSignReportRequest,
+  SolanaDecodeParams,
+  SolanaDecodeResult,
 } from './types'
 
 export { SdkError } from './client'
@@ -177,10 +182,6 @@ export class KeepKeySdk {
       getDevices: (): Promise<{ devices: DeviceInfo[]; total: number }> =>
         this.client.get('/api/v2/devices'),
 
-      /** List assets supported by the connected device. */
-      getSupportedAssets: (): Promise<{ assets: SupportedAsset[] }> =>
-        this.client.get('/api/v2/devices/supported-assets'),
-
       /** Check REST API health and device connection state. Does not require auth. */
       getHealth: (): Promise<HealthResponse> =>
         this.client.get('/api/health'),
@@ -208,8 +209,9 @@ export class KeepKeySdk {
       applySettings: (params: ApplySettingsParams): Promise<{ success: boolean }> =>
         this.client.post('/system/apply-settings', params),
 
-      /** Apply device policy changes. */
-      applyPolicies: (params: any): Promise<{ success: boolean }> =>
+      /** Apply a device policy change, e.g. `{ policyName: 'AdvancedMode', enabled: false }`.
+       *  Confirmed on the device (and asks for the PIN); each call writes device flash. */
+      applyPolicies: (params: ApplyPoliciesParams): Promise<{ success: boolean }> =>
         this.client.post('/system/apply-policies', params),
 
       /** Start a PIN change flow. Pass `remove: true` to remove the PIN. */
@@ -325,10 +327,6 @@ export class KeepKeySdk {
     xrpGetAddress: (params: AddressRequest): Promise<{ address: string }> =>
       this.client.post('/addresses/xrp', params),
 
-    /** Derive a BNB Beacon Chain address. */
-    bnbGetAddress: (params: AddressRequest): Promise<{ address: string }> =>
-      this.client.post('/addresses/bnb', params),
-
     /** Derive a Solana (SOL) address. */
     solanaGetAddress: (params: AddressRequest): Promise<{ address: string }> =>
       this.client.post('/addresses/solana', params),
@@ -353,7 +351,7 @@ export class KeepKeySdk {
   /** Ethereum and EVM-compatible signing (sign-tx, sign-message, EIP-712). */
   eth = {
     /** Sign an Ethereum or EVM transaction. Supports legacy and EIP-1559. */
-    ethSignTransaction: (params: EthSignTxParams): Promise<SignedTx> =>
+    ethSignTransaction: (params: EthSignTxParams): Promise<EthSignedTx> =>
       this.client.post('/eth/sign-transaction', params, this.client.signingTimeoutMs),
 
     /**
@@ -533,17 +531,6 @@ export class KeepKeySdk {
   }
 
   // ═══════════════════════════════════════════════════════════════════
-  // binance — BNB Beacon Chain signing
-  // ═══════════════════════════════════════════════════════════════════
-
-  /** BNB Beacon Chain signing. */
-  binance = {
-    /** Sign a BNB Beacon Chain transaction. */
-    binanceSignTransaction: (params: BnbSignTxParams): Promise<SignedTx> =>
-      this.client.post('/bnb/sign-transaction', params, this.client.signingTimeoutMs),
-  }
-
-  // ═══════════════════════════════════════════════════════════════════
   // solana — Solana signing
   // ═══════════════════════════════════════════════════════════════════
 
@@ -555,10 +542,17 @@ export class KeepKeySdk {
      * provider-signed KKSOLSW1 `swapMetadata` descriptor; firmware verifies its
      * binding before displaying ClearSign swap details.
      */
-    solanaSignTransaction: (params: SolanaSignTxParams): Promise<SignedTx> =>
+    solanaSignTransaction: (params: SolanaSignTxParams): Promise<SolanaSignedTx> =>
       // Device confirmation can span several screens (schema-decoded args,
       // accounts, priority fee); the 30s default aborts mid-review.
       this.client.post('/solana/sign-transaction', params, this.client.signingTimeoutMs),
+
+    /**
+     * Decode a Solana transaction and return Desktop's risk verdict for it.
+     * No device I/O and no signing.
+     */
+    decodeTransaction: (params: SolanaDecodeParams): Promise<SolanaDecodeResult> =>
+      this.client.post('/solana/decode-transaction', params),
 
     /**
      * Sign raw Solana message bytes (dApp logins / `solana:signMessage`).
@@ -678,6 +672,21 @@ export class KeepKeySdk {
   }
 
   // ═══════════════════════════════════════════════════════════════════
+  // clearsign — Desktop's verdict on a transaction, before signing
+  // ═══════════════════════════════════════════════════════════════════
+
+  /** ClearSign reports: what Desktop and the device would show for a transaction. */
+  clearsign = {
+    /**
+     * Build the report Desktop's approval card shows for this transaction,
+     * against the connected device's firmware. No device I/O and no signing;
+     * Desktop records the request as a local audit-demand row.
+     */
+    report: (params: ClearSignReportRequest): Promise<ClearSignReport> =>
+      this.client.post('/clearsign/report', params),
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
   // xpub — public key operations
   // ═══════════════════════════════════════════════════════════════════
 
@@ -778,13 +787,9 @@ export class KeepKeySdk {
     getStakingPositions: (params: StakingParams): Promise<any> =>
       this.client.post('/api/v2/staking/positions', params),
 
-    /** Get a swap quote from the integrated aggregator. */
+    /** Get a swap quote from the integrated aggregator. Returns `{ data: quote }`. */
     getSwapQuote: (params: SwapQuoteParams): Promise<any> =>
       this.client.post('/api/v2/swap/quote', params),
-
-    /** Get THORChain/Mayachain inbound addresses (for swap deposits). */
-    getInboundAddresses: (): Promise<any> =>
-      this.client.get('/api/v2/swap/inbound-addresses'),
   }
 
   // ═══════════════════════════════════════════════════════════════════

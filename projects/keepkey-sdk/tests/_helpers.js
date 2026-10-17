@@ -26,6 +26,11 @@ const CHAINS = {
   BASE: 8453,
 }
 
+/** Nonce for every signing suite that may run on a real-funds device. No
+ * account reaches 2^32-1 transactions, so a signature over it can never be
+ * mined even if its bytes leak through a log or a shared report. */
+const SENTINEL_NONCE = process.env.KK716_NONCE || '0xffffffff'
+
 /** Well-known ERC-20 selectors */
 const SEL = {
   transfer: '0xa9059cbb',
@@ -37,14 +42,30 @@ const SEL = {
 
 let _sdk = null
 
+// Each suite is its own process, so the API key from the first pairing is kept
+// here (outside the repo) and reused; the SDK pairs again if Desktop rejects it.
+const KEY_FILE = require('path').join(require('os').homedir(), '.keepkey', 'sdk-test-api-key')
+
+/** The key the suites use: KEEPKEY_API_KEY, else the one saved by the last pairing. */
+function savedApiKey() {
+  if (process.env.KEEPKEY_API_KEY) return process.env.KEEPKEY_API_KEY
+  try { return require('fs').readFileSync(KEY_FILE, 'utf8').trim() || undefined } catch { return undefined }
+}
+
 async function getSdk() {
   if (_sdk) return _sdk
+  const fs = require('fs')
+  const saved = savedApiKey()
   _sdk = await KeepKeySdk.create({
-    apiKey: process.env.KEEPKEY_API_KEY,
+    apiKey: saved,
     baseUrl: process.env.KEEPKEY_URL || 'http://localhost:1646',
     serviceName: 'KeepKey SDK Tests',
     serviceImageUrl: '',
   })
+  if (!process.env.KEEPKEY_API_KEY && _sdk.apiKey && _sdk.apiKey !== saved) {
+    fs.mkdirSync(require('path').dirname(KEY_FILE), { recursive: true })
+    fs.writeFileSync(KEY_FILE, _sdk.apiKey, { mode: 0o600 })
+  }
   return _sdk
 }
 
@@ -83,6 +104,20 @@ function summary() {
   return _failed
 }
 
+/** Exit code run-all.js counts as SKIPPED: neither passed nor failed. */
+const SKIP_EXIT = 3
+
+/** Stop the suite and report it SKIPPED. A skip never hides a failure: if an
+ * assertion already failed, the suite exits as failed instead. */
+function skip(reason) {
+  if (_failed > 0) {
+    console.error(`\n  SKIP requested (${reason}) after ${_failed} failed assertion(s): reporting FAILED`)
+    process.exit(1)
+  }
+  console.log(`\n  SKIPPED: ${reason}\n`)
+  process.exit(SKIP_EXIT)
+}
+
 /** Suites that WIPE the device call this before anything else. A refusal
  * exits non-zero so it can never be read as a pass. */
 function requireWipeAllowed() {
@@ -93,15 +128,77 @@ function requireWipeAllowed() {
 
 // ── Runner ───────────────────────────────────────────────────────────
 
+const _atEnd = []
+
+/** Run `fn` when the suite ends, passed or crashed (not on skip()). */
+function atEnd(fn) { _atEnd.push(fn) }
+
+async function runAtEnd() {
+  for (const fn of _atEnd.splice(0).reverse()) {
+    try { await fn() } catch (e) {
+      console.error(`  cleanup failed: ${e.message || e}`)
+      _failed++
+    }
+  }
+}
+
 function run(name, fn) {
   console.log(`\n=== ${name} ===\n`)
-  fn(getSdk, assert, assertThrows).then(() => {
+  fn(getSdk, assert, assertThrows).then(async () => {
+    await runAtEnd()
     const fails = summary()
     process.exit(fails > 0 ? 1 : 0)
-  }).catch(e => {
+  }).catch(async e => {
     console.error('\nTest crashed:', e)
+    await runAtEnd()
     process.exit(1)
   })
+}
+
+/**
+ * Runtime-signer suites (LoadClearsignSigner, KKSOLSC1/KKSOLSW1 blobs) need a
+ * session AdvancedMode on 7.16: SKIP when it is off. When it is on, the suite
+ * ends with clearSession, which clears AdvancedMode and drops the public CI
+ * test signer it loaded (no press, no flash write). On 7.16 the runtime tier
+ * still shows the raw review: these suites never prove clear-sign pages.
+ */
+async function requireAdvancedModeSession(sdk) {
+  const features = await sdk.system.info.getFeatures()
+  const p = (features.policies || []).find((x) => x.policy_name === 'AdvancedMode')
+  if (!p || p.enabled !== true) skip('runtime tier needs a session AdvancedMode (opt-in)')
+  atEnd(async () => {
+    await sdk.system.device.clearSession()
+    console.log('  clearSession: AdvancedMode and runtime signers cleared')
+  })
+}
+
+// ── Signature checks ─────────────────────────────────────────────────
+
+/** Parse a signed EVM envelope: { from, nonce, chainId } as ethers recovers them.
+ *  Pass criteria compare `from` with the device address, never `!!result`. */
+function recoverEvm(serialized) {
+  const tx = require('ethers').Transaction.from(serialized)
+  return { from: (tx.from || '').toLowerCase(), nonce: BigInt(tx.nonce), chainId: Number(tx.chainId) }
+}
+
+/** The pass check for an EVM sign: the envelope recovers to the device, on
+ *  this chain, with the sentinel nonce. Returns the parsed tx or null. */
+function assertSignedByDevice(assert, result, address, chainId) {
+  const serialized = result && (result.serialized || result.serializedTx)
+  assert('returns a serialized envelope', !!serialized)
+  if (!serialized) return null
+  const tx = recoverEvm(serialized)
+  console.log(`  signed: ${short(serialized)} recovered ${tx.from}`)
+  assert('signature recovers to the device', tx.from === address.toLowerCase())
+  assert(`chainId ${chainId}`, tx.chainId === chainId)
+  assert(`nonce is the sentinel ${SENTINEL_NONCE}`, tx.nonce === BigInt(SENTINEL_NONCE))
+  return tx
+}
+
+/** Print only a prefix of a signature or serialized tx. */
+function short(hex) {
+  const s = String(hex || '')
+  return s.length > 18 ? `${s.slice(0, 18)}…(${s.length} chars)` : s
 }
 
 // ── Hex helpers ──────────────────────────────────────────────────────
@@ -125,7 +222,7 @@ function erc20Approve(spender, amount) {
 }
 
 module.exports = {
-  getSdk, assert, assertThrows, summary, run, requireWipeAllowed,
-  ETH_PATH, SOLANA_PATH, CHAINS, SEL,
+  getSdk, savedApiKey, assert, assertThrows, summary, run, atEnd, requireWipeAllowed, requireAdvancedModeSession, skip, SKIP_EXIT,
+  ETH_PATH, SOLANA_PATH, CHAINS, SEL, SENTINEL_NONCE, recoverEvm, assertSignedByDevice, short,
   toHex, padAddress, padUint256, erc20Transfer, erc20Approve,
 }

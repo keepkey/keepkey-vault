@@ -26,7 +26,7 @@
  */
 const { sha256 } = require('@noble/hashes/sha256')
 const { secp256k1 } = require('@noble/curves/secp256k1')
-const { run, ETH_PATH, erc20Transfer } = require('../_helpers')
+const { run, ETH_PATH, erc20Transfer, skip, requireAdvancedModeSession } = require('../_helpers')
 
 const CATALOG = process.env.CLEARSIGN_CATALOG || 'http://localhost:1647'
 
@@ -47,11 +47,9 @@ run('clear-sign: catalog schema signs on device', async (getSdk, assert) => {
     signer = await getJson('/signer')
     chain = await getJson('/catalog/eip155-1.json')
   } catch (cause) {
-    // Not a failure: run-all.js has no catalog server. Say why it did nothing
-    // rather than passing silently.
-    console.log(`  SKIPPED — no catalog at ${CATALOG} (${cause.message}).`)
-    console.log('  Start it: cd projects/keepkey-clearsign-server && make serve\n')
-    return
+    // Not a failure and not a pass: run-all.js has no catalog server.
+    console.log('  Start it: cd projects/keepkey-clearsign-server && make serve')
+    skip(`no catalog at ${CATALOG} (${cause.message})`)
   }
 
   console.log(`  Catalog: ${CATALOG} · signer ${signer.alias} · slot ${signer.keyId}`)
@@ -77,6 +75,7 @@ run('clear-sign: catalog schema signs on device', async (getSdk, assert) => {
   assert('catalog signature verifies under the served public key', verified)
 
   const sdk = await getSdk()
+  await requireAdvancedModeSession(sdk)
   const { address } = await sdk.address.ethGetAddress({ address_n: ETH_PATH })
   console.log(`  Device ETH address: ${address}`)
 

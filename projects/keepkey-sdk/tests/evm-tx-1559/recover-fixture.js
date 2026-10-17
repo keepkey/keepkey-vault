@@ -1,9 +1,12 @@
 /**
  * evm-tx-1559/recover-fixture.js — offline regression suite
  *
- * Walks every entry in fixtures/evm-tx-1559-regression.json and asserts the
- * recovered signer (from the captured serialized bytes) equals the
- * expectedSigner. NO device required — pure offline check.
+ * Walks every entry in fixtures/evm-tx-1559-regression.json. Each entry is a
+ * documented regression artifact: bytes captured from the BROKEN signing chain.
+ * A stored signature is not changed by fixing the signer, so the suite asserts
+ * the captured envelope still recovers to the WRONG signer (not expectedSigner).
+ * NO device required — pure offline check. The live check that the fix holds
+ * is fw-715/11-evm-1559-chunked-data.js (and sign-and-recover.js, opt-in).
  *
  * Why this exists: in 2026-04-28 we discovered that production
  * `sdk.eth.ethSignTransaction` was returning serialized type-2 envelopes
@@ -59,11 +62,11 @@ for (const name of fixtureNames) {
   console.log(`     recovered: ${recovered}`)
   console.log(`     txHash:    ${txHash}`)
 
-  if (norm(recovered) === norm(expected)) {
-    ok(`${name}: serialized envelope recovers to expected signer`)
+  if (norm(recovered) !== norm(expected)) {
+    ok(`${name}: captured envelope recovers to the wrong signer (the documented regression artifact)`)
   } else {
-    fail(`${name}: serialized envelope recovers to WRONG signer`,
-         `(known regression — keep this fixture failing until the SDK/firmware bug is fixed)`)
+    fail(`${name}: captured envelope recovers to expectedSigner`,
+         `the fixture no longer holds the broken-chain bytes it documents; re-check it`)
   }
 
   // 2) Sanity: r/s in the captured fixture matches what ethers parses.
@@ -75,7 +78,7 @@ for (const name of fixtureNames) {
          `parsed r=${sig.r}\n     parsed s=${sig.s}\n     fixture r=${fix.output.r}\n     fixture s=${fix.output.s}`)
   }
 
-  // 3) Try the OTHER v parity to confirm the bug is *not* a simple parity flip.
+  // 3) The OTHER v parity must not recover either: the bug was not a parity flip.
   const flippedSig = Signature.from({ r: sig.r, s: sig.s, yParity: sig.yParity === 0 ? 1 : 0 })
   const flippedTx = Transaction.from(serialized)
   flippedTx.signature = flippedSig
@@ -125,7 +128,7 @@ for (const name of fixtureNames) {
 
 console.log(`\n  Result: ${passed} passed, ${failed} failed`)
 console.log(`\n  Notes for triage:`)
-console.log(`  - Failures here are expected today (the regression is open).`)
+console.log(`  - These bytes come from the broken chain; they recover to the wrong signer by design.`)
 console.log(`  - The ">>> diagnostic match" line, if it appears, names which non-canonical pre-image the firmware/SDK is hashing — that's the bug.`)
 console.log(`  - If no diagnostic match prints, the bug is in a field encoding not yet hypothesized; instrument the SDK directly to log the exact bytes sent to firmware.\n`)
 

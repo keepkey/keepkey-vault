@@ -43,10 +43,6 @@
     "class": "edge-case",
     "why": "hostile input"
   },
-  "evm-clearsign/certified-relay-bridge-deposit.js": {
-    "class": "real-world",
-    "why": "Relay bridge deposit with the certified description"
-  },
   "evm-clearsign/clearsign-signer-flows.js": {
     "class": "edge-case",
     "why": "runtime signer mechanism (test key, not KeepKey-certified by design)"
@@ -80,20 +76,20 @@
     "why": "runtime signer mechanism"
   },
   "evm-clearsign/uniswap-v2-eth-to-token.js": {
-    "class": "real-world",
-    "why": "Uniswap V2 swap"
+    "class": "must-warn",
+    "why": "swap KeepKey cannot read with AdvancedMode off: Desktop must report the raw review"
   },
   "evm-clearsign/uniswap-v2-token-to-eth.js": {
-    "class": "real-world",
-    "why": "Uniswap V2 swap"
+    "class": "must-warn",
+    "why": "swap KeepKey cannot read with AdvancedMode off: Desktop must report the raw review"
   },
   "evm-clearsign/uniswap-v3-exact-input.js": {
-    "class": "real-world",
-    "why": "Uniswap V3 swap"
+    "class": "must-warn",
+    "why": "swap KeepKey cannot read with AdvancedMode off: Desktop must report the raw review"
   },
   "evm-clearsign/uniswap-v3-multicall.js": {
-    "class": "real-world",
-    "why": "Uniswap V3 multicall swap"
+    "class": "must-warn",
+    "why": "swap KeepKey cannot read with AdvancedMode off: Desktop must report the raw review"
   },
   "evm-clearsign/unknown-contract.js": {
     "class": "must-warn",
@@ -183,6 +179,106 @@
     "class": "edge-case",
     "why": "firmware regression"
   },
+  "fw-716/00-device-identity.js": {
+    "class": "no-signing",
+    "why": "device is released 7.16.0 hardware, AdvancedMode off"
+  },
+  "fw-716/01-clearsign-service.js": {
+    "class": "no-signing",
+    "why": "production ClearSign worker state; network only"
+  },
+  "fw-716/02-erc7730-availability.js": {
+    "class": "no-signing",
+    "why": "is any ERC-7730 definition served and attached; zero press"
+  },
+  "fw-716/03-verdict-matrix.js": {
+    "class": "no-signing",
+    "why": "Desktop verdict per shape; zero press"
+  },
+  "fw-716/04-solana-decode.js": {
+    "class": "no-signing",
+    "why": "Desktop Solana risk preview; zero press"
+  },
+  "fw-716/05-sdk-drift.js": {
+    "class": "no-signing",
+    "why": "retired routes and SDK surface drift"
+  },
+  "fw-716/06-load-signer-gate.js": {
+    "class": "edge-case",
+    "why": "runtime signers need AdvancedMode; persist refused"
+  },
+  "fw-716/10-evm-blind-gate-reject.js": {
+    "class": "must-warn",
+    "why": "unknown contract stays red and the card blocks it"
+  },
+  "fw-716/11-eip712-chunked-gap.js": {
+    "class": "edge-case",
+    "why": "host guard on EIP-712 leaves over 1024 bytes"
+  },
+  "fw-716/12-solana-not-signer.js": {
+    "class": "edge-case",
+    "why": "device key not a signer: zero-press refusal"
+  },
+  "fw-716/13-tron-untrusted.js": {
+    "class": "must-warn",
+    "why": "untrusted TRC-20 and TIP-712 hash refused with AdvancedMode off"
+  },
+  "fw-716/14-zcash-readonly.js": {
+    "class": "no-signing",
+    "why": "Zcash status and view-key check; never sends"
+  },
+  "fw-716/20-advancedmode-session.js": {
+    "class": "edge-case",
+    "why": "AdvancedMode is session state; certified claims never downgrade"
+  },
+  "fw-716/30-certified-relay-bridge.js": {
+    "class": "real-world",
+    "why": "Relay bridge deposit with the certified description"
+  },
+  "fw-716/31-certified-intent-transfer.js": {
+    "class": "real-world",
+    "why": "certified Base USDC transfer"
+  },
+  "fw-716/32-certified-intent-approvals.js": {
+    "class": "real-world",
+    "why": "certified bounded and unlimited approvals"
+  },
+  "fw-716/33-certified-relay-deposits.js": {
+    "class": "real-world",
+    "why": "certified Relay deposits on Base"
+  },
+  "fw-716/34-unlimited-threshold.js": {
+    "class": "must-warn",
+    "why": "unlimited approve warns and still signs"
+  },
+  "fw-716/35-thor-maya-routers.js": {
+    "class": "real-world",
+    "why": "THOR Base and Maya Arbitrum router deposits"
+  },
+  "fw-716/36-tron-usdt.js": {
+    "class": "real-world",
+    "why": "TRC-20 USDT transfer clear-signs"
+  },
+  "fw-716/37-permit2-typed-data.js": {
+    "class": "real-world",
+    "why": "Permit2 typed data in words"
+  },
+  "fw-716/38-uniswap-ur-base.js": {
+    "class": "real-world",
+    "why": "certified Uniswap Universal Router swap"
+  },
+  "fw-716/39-solana-certified.js": {
+    "class": "real-world",
+    "why": "certified Solana review"
+  },
+  "fw-716/40-erc7730-sign.js": {
+    "class": "real-world",
+    "why": "ERC-7730 runtime review; skips while nothing is served"
+  },
+  "fw-716/50-advancedmode-one-click.js": {
+    "class": "must-warn",
+    "why": "card turns AdvancedMode on, then signs; opt-in"
+  },
   "hive/all-operations.js": {
     "class": "real-world",
     "why": "every Hive operation"
@@ -195,13 +291,9 @@
     "class": "real-world",
     "why": "Osmosis delegate and undelegate"
   },
-  "rc23/hardware.js": {
-    "class": "real-world",
-    "why": "release acceptance through the production path"
-  },
   "rc24/hardware.js": {
-    "class": "real-world",
-    "why": "release acceptance through the production path"
+    "class": "edge-case",
+    "why": "release acceptance; opt-in (RC24_HARDWARE_TEST=1), expected version from env"
   },
   "redteam/erc20-approval-disguised-as-swap.js": {
     "class": "must-warn",
@@ -292,7 +384,7 @@
     "why": "reads data or runs offline; nothing is shown for approval"
   },
   "zcash/shield.js": {
-    "class": "real-world",
-    "why": "Zcash shield"
+    "class": "no-signing",
+    "why": "reads the shield build only; never shields, sends or broadcasts"
   }
 }

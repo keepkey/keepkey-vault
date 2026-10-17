@@ -61,7 +61,6 @@ run('Uniswap V3: exactInputSingle (ETH → USDC, 0.3% pool)', async (getSdk, ass
     to: UNISWAP_V3_ROUTER,
     value: toHex(amountIn), // ETH sent with call (wraps to WETH internally)
     data,
-    nonce: '0x2',
     gasLimit: toHex(250000),
     maxFeePerGas: toHex(30000000000),
     maxPriorityFeePerGas: toHex(1500000000),
@@ -96,10 +95,14 @@ run('Uniswap V3: exactInputSingle (ETH → USDC, 0.3% pool)', async (getSdk, ass
   console.log('  │   Raw hex dump of calldata                       │')
   console.log('  └──────────────────────────────────────────────────┘')
 
-  console.log('\n  >>> APPROVE on device <<<\n')
 
-  const result = await sdk.eth.ethSignTransaction(tx)
-
-  assert('Got signed tx', !!result)
-  assert('Has signature data', !!(result.serializedTx || result.v !== undefined))
+  // Zero presses. With AdvancedMode off, 7.16 cannot show this call, so
+  // Desktop's report must say the device shows raw data (the signing card then
+  // blocks it). Signing it would need AdvancedMode: see fw-716/50 (opt-in).
+  const report = await sdk.clearsign.report({
+    chain: 'evm', chainId: tx.chainId, from: address, to: tx.to, data: tx.data, value: tx.value,
+  })
+  console.log(`  report: ${report.protectionLevel} source=${report.descriptor.source} [${report.limitations.map((l) => l.code).join(', ')}]`)
+  assert('Desktop saw the device', !report.limitations.some((l) => l.code === 'DEVICE_NOT_CONNECTED'))
+  assert('report says the device shows raw data', report.limitations.some((l) => l.code === 'DEVICE_SHOWS_RAW_DATA'))
 })

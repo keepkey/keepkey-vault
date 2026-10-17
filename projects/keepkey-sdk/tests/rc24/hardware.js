@@ -2,15 +2,23 @@
  * RC24 physical-device acceptance tests through the production path:
  * keepkey-sdk -> Vault REST -> hdwallet -> KeepKey.
  *
- * This file is discovered by `test:all`, so it deliberately exits without
- * touching hardware unless RC24_HARDWARE_TEST=1 and an explicit phase are set.
+ * This file is discovered by `test:all`, so it SKIPS (exit 3) without touching
+ * hardware unless RC24_HARDWARE_TEST=1 and an explicit phase are set.
+ *
+ * The expected release comes from env: RC24_EXPECT_VERSION (default 7.16.0)
+ * and RC24_EXPECT_FIRMWARE_HASH (default the 7.16.0 hash Desktop maps,
+ * 99ebac75...). Pairing reuses the suite key (tests/_helpers.js getSdk).
  * It never wipes, resets, loads, recovers, or broadcasts from the device.
  */
 
 const { createHash } = require('node:crypto')
 const { createInterface } = require('node:readline/promises')
 const { stdin, stdout } = require('node:process')
-const { KeepKeySdk } = require('../../lib/index')
+const { getSdk, skip } = require('../_helpers')
+
+const EXPECT_VERSION = process.env.RC24_EXPECT_VERSION || '7.16.0'
+const EXPECT_FIRMWARE_HASH = process.env.RC24_EXPECT_FIRMWARE_HASH
+  || '99ebac75902b285678c235ec3cb0a9de2d2bc1181c0d47db6a9ae14cf035879c'
 
 const TAPROOT_PATH = [0x80000000 + 86, 0x80000000, 0x80000000, 0, 0]
 const SYNTHETIC_PREVOUT = '11'.repeat(32)
@@ -21,8 +29,7 @@ const ENTROPY_BLOCKS = 8
 const phase = process.argv[2]
 
 if (process.env.RC24_HARDWARE_TEST !== '1') {
-  console.log('  SKIP rc24/hardware.js (set RC24_HARDWARE_TEST=1 and choose an explicit phase)')
-  process.exit(0)
+  skip('rc24/hardware.js is opt-in: set RC24_HARDWARE_TEST=1 and choose an explicit phase')
 }
 
 const validPhases = new Set(['taproot', 'p2wpkh-control', 'locked-entropy', 'entropy-budget'])
@@ -38,7 +45,7 @@ if (!stdin.isTTY || !stdout.isTTY) {
 
 const rl = createInterface({ input: stdin, output: stdout })
 const evidence = {
-  candidate: 'v7.15.0-rc24',
+  candidate: `v${EXPECT_VERSION}`,
   transport: 'keepkey-sdk -> Vault REST -> hdwallet -> KeepKey',
   phase,
   started_at: new Date().toISOString(),
@@ -83,29 +90,20 @@ function entropyHealth(bytes, label) {
 }
 
 async function connect() {
-  const sdk = await KeepKeySdk.create({
-    apiKey: process.env.KEEPKEY_API_KEY,
-    baseUrl: process.env.KEEPKEY_URL || 'http://localhost:1646',
-    serviceName: 'KeepKey RC24 Hardware Acceptance',
-    serviceImageUrl: '',
-  })
+  const sdk = await getSdk()
   const [health, features] = await Promise.all([
     sdk.system.info.getHealth(),
     sdk.system.info.getFeatures(),
   ])
 
   check('Vault reports a connected device', health.device_connected === true)
-  check(
-    'firmware version is 7.15.0',
-    features.major_version === 7 && features.minor_version === 15 && features.patch_version === 0,
-    `${features.major_version}.${features.minor_version}.${features.patch_version}`,
-  )
-  const expectedFirmwareHash = process.env.RC24_EXPECT_FIRMWARE_HASH
+  const version = `${features.major_version}.${features.minor_version}.${features.patch_version}`
+  check(`firmware version is ${EXPECT_VERSION}`, version === EXPECT_VERSION, version)
   check(
     'RC24_EXPECT_FIRMWARE_HASH identifies the exact candidate',
-    typeof expectedFirmwareHash === 'string' && /^[0-9a-f]{64}$/i.test(expectedFirmwareHash),
+    /^[0-9a-f]{64}$/i.test(EXPECT_FIRMWARE_HASH),
   )
-  check('firmware binary hash matches the RC24 artifact', features.firmware_hash === expectedFirmwareHash)
+  check('firmware binary hash matches the expected release', features.firmware_hash === EXPECT_FIRMWARE_HASH.toLowerCase())
   evidence.firmware = {
     version: `${features.major_version}.${features.minor_version}.${features.patch_version}`,
     variant: features.firmware_variant,
