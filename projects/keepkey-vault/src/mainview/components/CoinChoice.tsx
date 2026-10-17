@@ -61,9 +61,8 @@ export function CoinChoice({ coinMode, multiVersion, btcVersion, variantUnknown,
         </Flex>
       ),
       lines: [
-        t('coinMode.multiLine1', { defaultValue: 'Bitcoin, Ethereum, Solana and more' }),
-        t('coinMode.multiLine2', { defaultValue: 'Every chain KeepKey Desktop supports' }),
-        t('coinMode.multiLine3', { defaultValue: 'Swaps and dapps' }),
+        t('coinMode.multiLine1', { defaultValue: 'Bitcoin, Ethereum, Solana and many more' }),
+        t('coinMode.multiLine2', { defaultValue: 'Swaps and dapps' }),
       ],
     },
   ]
@@ -138,8 +137,8 @@ export function CoinChoice({ coinMode, multiVersion, btcVersion, variantUnknown,
         <HStack w="100%" p={3} gap={2} borderRadius="lg" bg="rgba(237,137,54,0.12)" align="start">
           <FaExclamationTriangle color="var(--chakra-colors-yellow-400)" size={14} style={{ flexShrink: 0, marginTop: 3 }} />
           <Text fontSize="xs" color="yellow.300" lineHeight="1.5">
-            {t('coinMode.warning', { defaultValue: 'This is one-way. A Bitcoin-only wallet cannot later hold ETH or other assets without wiping the device and reinstalling multi-chain firmware.' })}
-            {!factoryDevice && ' ' + t('coinMode.existingWallet', { defaultValue: 'If this KeepKey already holds a wallet, it keeps working for Bitcoin. Its other coins stay on your recovery phrase, but this KeepKey cannot use them, and going back to Multi-chain firmware later can mean wiping it and restoring from the recovery phrase.' })}
+            {t('coinMode.pageWarning', { defaultValue: 'One-way: this KeepKey will only hold Bitcoin. Going back to Multi-chain means wiping it and restoring from your recovery phrase.' })}
+            {!factoryDevice && ' ' + t('coinMode.pageExistingWallet', { defaultValue: 'Your other coins stay safe on your recovery phrase.' })}
           </Text>
         </HStack>
       )}

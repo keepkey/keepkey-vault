@@ -154,7 +154,7 @@ const confettiPieces = Array.from({ length: 50 }, (_, i) => ({
 
 // ── Main Wizard ─────────────────────────────────────────────────────────────
 
-export function OobSetupWizard({ onComplete, onWalletCreated, onSkipFirmware, onSetupInProgress, onWordCountChange }: OobSetupWizardProps) {
+export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, onSkipFirmware, onSetupInProgress, onWordCountChange }: OobSetupWizardProps) {
   const [step, setStep] = useState<WizardStep>('authenticity')
   useEffect(() => {
     rpcRequest('logOnboarding', { event: `wizard step=${step}` }).catch(() => {})
@@ -170,6 +170,8 @@ export function OobSetupWizard({ onComplete, onWalletCreated, onSkipFirmware, on
   // Bitcoin-only vs Multi-chain firmware choice for a new (or unrecognised)
   // device. One-way: a btc-only seed is locked to btc-only firmware.
   const [coinChoice, setCoinChoice] = useState<CoinMode | null>(rememberedCoinMode)
+  // Every way out of setup drops the choice, so the next KeepKey starts fresh.
+  const onComplete = useCallback(() => { forgetCoinChoice(); onCompleteProp() }, [onCompleteProp])
   const chooseCoin = (mode: CoinMode) => {
     rememberedCoinMode = mode
     setCoinChoice(mode)
@@ -401,7 +403,9 @@ export function OobSetupWizard({ onComplete, onWalletCreated, onSkipFirmware, on
   const coinSummary = (
     <HStack w="100%" p={3} bg="kk.cardBg" borderRadius="lg" justify="space-between">
       <HStack gap={2}>
-        {coinMode === 'bitcoin-only' ? <FaBitcoin color="#F7931A" size={16} /> : <FaWallet color="var(--teal)" size={16} />}
+        {coinMode === 'bitcoin-only' ? <FaBitcoin color="#F7931A" size={16} />
+          : coinMode === 'multi' ? <FaWallet color="var(--teal)" size={16} />
+          : <FaExclamationTriangle color="var(--gold)" size={16} />}
         <Text fontSize="sm" color="white" fontWeight="600">
           {coinMode === 'bitcoin-only'
             ? t('coinMode.installingBtc', { defaultValue: 'Bitcoin-only firmware' })
@@ -1301,6 +1305,7 @@ export function OobSetupWizard({ onComplete, onWalletCreated, onSkipFirmware, on
                 firmwareSignaturesVerified={deviceStatus?.firmwareSignaturesVerified}
                 installFirmware={deviceStatus?.installFirmware}
                 installBootloader={deviceStatus?.installBootloader}
+                continueDisabled={!hasFeatures}
                 onContinue={() => setStep(stepAfterAuthenticity({ showPicker: showCoinPicker, hasFeatures }))}
               />
             )}
