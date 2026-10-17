@@ -7,7 +7,7 @@
  * 2) The SDK no longer exposes address.bnbGetAddress,
  *    binance.binanceSignTransaction, system.info.getSupportedAssets or
  *    chain.getInboundAddresses (no Desktop routes behind them).
- * 3) chain.getSwapQuote in the CAIP shape (Base ETH -> Base USDC, quote only,
+ * 3) chain.getSwapQuote in the CAIP shape (Base ETH -> Ethereum ETH, quote only,
  *    nothing is signed or broadcast) answers 2xx with a quote and no error.
  *
  * Only step 3 can SKIP: when Desktop is in offline mode or the Pioneer server
@@ -69,8 +69,10 @@ run('fw-716/05 Binance retired, SDK surface drift', async (getSdk, assert) => {
   console.log(`  device: ${device}`)
 
   const params = {
+    // Both ends must be in Desktop's swap asset list (GET /api/v2/swap/assets);
+    // on Base it offers only ETH.
     fromCaip: 'eip155:8453/slip44:60',
-    toCaip: `eip155:8453/erc20:${F.USDC_BASE}`,
+    toCaip: 'eip155:1/slip44:60',
     amount: '0.0001',
     fromAddress: device,
     toAddress: device,
