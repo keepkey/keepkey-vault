@@ -26,15 +26,20 @@ a real user journey).
   the device decodes the values. Desktop shows a richer host-side preview
   as advice.
 - Trust chain (D-004): offline root on a KeepKey → per-chain delegate
-  certificate (Ethereum, Solana, Base 8453, Arbitrum 42161; expiry
-  2026-12-31) → delegate `a9531b9d` on the ClearSign worker.
+  certificate → delegate on the ClearSign service. Production root
+  `027c1fde…e321` (production certificates for scopes 1, 501 and 42161,
+  each with its own delegate). The alpha root `02de9231…` and its delegate
+  `a9531b9d` are for rehearsals and tests only.
 - Formats on the device (7.16): v2 and 0x05 schemas (device-decoded),
   0x06 names, KKSOLSC1 Solana schemas. 0x07 Uniswap decoder: being restored
   with clean-up and split routes (D-018). Per-transaction v1 stays out of
   the certified tier.
-- Live service: `https://keepkey-clearsign.bithighlander.workers.dev`
-  (`projects/keepkey-vault/clearsign-worker`). Deploy only from a pushed
-  commit (`make clearsign-worker-deploy`).
+- Live service: `https://keepkey-clearsign.bithighlander.workers.dev`,
+  deployed from `keepkey-clearsign-server`. Since 2026-10-16 it serves only
+  production certificates (root `027c1fde…e321`, alias "KeepKey ClearSign"),
+  and Desktop trusts only that root. `projects/keepkey-vault/clearsign-worker`
+  is the alpha rehearsal copy: it is not deployable to production
+  (`make clearsign-worker-rehearsal-deploy` refuses while it pins the alpha root).
 - Next: offline ceremony signing of the catalog; delegate key off
   Cloudflare (D-018).
 - Generic engine: the on-device ERC-7730 interpreter already on 7.16

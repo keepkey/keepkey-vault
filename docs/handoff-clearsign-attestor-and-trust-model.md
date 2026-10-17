@@ -99,6 +99,10 @@ and every other instruction must be one firmware already decodes.
 - `src/bun/evm-schema-registry.ts`, `src/bun/solana-schema-registry.ts` + their
   `*-local.json` registries; `swap.ts` attaches a matching schema. **No match = today's
   behaviour**, so it can never block a swap.
+  - **Removed 2026-10-16:** both `*-local.json` registries and `solana-schema-registry.ts`.
+    They were signed with the CI test key (runtime slot 3), and test-key signed material
+    never ships. Desktop now attaches only entries certified under the production root
+    (key id `0x80`); a test guards shipped `src/` against any other signed entry.
 - `fix(assets)`: Pioneer lowercases the network part of token CAIPs, but Solana/Tron network
   ids are base58 and **case-sensitive**. The icon URL is `base64(caip)`, so USDT-on-Solana
   404'd. Fixed where the CAIP enters, not at the URL.

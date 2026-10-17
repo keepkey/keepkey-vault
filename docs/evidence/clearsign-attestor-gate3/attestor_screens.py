@@ -13,8 +13,14 @@ exchange is written/read at the wire layer (##, >HL header) instead of through
 mapping. Everything else -- wipe/load, DebugLink press, OLED decode -- is the
 existing zoo harness.
 
-Payload = the real production Relay Bridge depositNative schema from
-projects/keepkey-vault/src/bun/solana-schemas-local.json.
+Payload = the Relay Bridge depositNative schema from the former
+projects/keepkey-vault/src/bun/solana-schemas-local.json. That file was
+signed with the CI test key (not production) and was deleted on 2026-10-16
+because test-key signed material never ships. To rerun this capture, extract
+it from history and point KK_SCHEMA_REGISTRY at the copy:
+
+  git show c6c48d67c^:projects/keepkey-vault/src/bun/solana-schemas-local.json > /some/dir/solana-schemas-local.json
+  KK_SCHEMA_REGISTRY=/some/dir/solana-schemas-local.json python3 attestor_screens.py ./out
 """
 import base64
 import json
@@ -41,9 +47,8 @@ MSG_BUTTON_ACK = proto.MessageType_ButtonAck
 MSG_FAILURE = proto.MessageType_Failure
 
 OUT = sys.argv[1] if len(sys.argv) > 1 else "."
-REGISTRY = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..",
-                        "..", "projects", "keepkey-vault", "src", "bun",
-                        "solana-schemas-local.json")
+# The registry is no longer in src/ (see the module docstring).
+REGISTRY = os.environ.get("KK_SCHEMA_REGISTRY", "")
 SCHEMA_KEY = "99vqwtbwytrqqd9ysxbdum3kbdxpavxytaq3cfnjsrn2:0d9e0ddf5fd51c06"
 
 
@@ -99,6 +104,8 @@ def run_flow(client, payload, prefix, expect_shots):
 
 
 def main():
+    if not REGISTRY:
+        sys.exit("set KK_SCHEMA_REGISTRY to the extracted solana-schemas-local.json (see the docstring)")
     schema = json.load(open(REGISTRY))["schemas"][SCHEMA_KEY]
     payload = base64.b64decode(schema["payload"])
     print(f"payload: {schema['program']} / {schema['instruction']}, {len(payload)} bytes")

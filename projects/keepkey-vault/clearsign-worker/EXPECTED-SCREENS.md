@@ -2,6 +2,13 @@
 
 Status: DRAFT for owner review, 2026-10-03. Not deployed.
 
+> **2026-10-16:** the examples below name the **alpha** rehearsal signer ("KeepKey Alpha 716",
+> `a9531b9d`). Production certificates, the only ones KeepKey Desktop trusts, are signed by the
+> production root `027c1fde…e321` and read "KeepKey ClearSign" with that certificate's own delegate
+> fingerprint. `expectedEvmScreens()` no longer has an alpha default; it takes the alias and
+> fingerprint from the certificate in use. This Worker copy is alpha-only and is not deployable to
+> production.
+
 This file lists what a KeepKey on firmware 7.16 shows for each certified EVM
 entry kind. The order and fixed strings come from
 `signed_metadata_build_intent_review` and its helpers in

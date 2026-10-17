@@ -1,8 +1,23 @@
-# KeepKey ClearSign service
+# KeepKey ClearSign service: alpha rehearsal copy
 
-**Live at:** `https://keepkey-clearsign.bithighlander.workers.dev` (Cloudflare Worker `keepkey-clearsign`).
-There is no custom domain yet; KeepKey Desktop has this URL built in
-(`DEFAULT_CLEARSIGN_SERVICE_URL`, `src/bun/solana-certified-registry.ts`).
+> **Status (2026-10-16): this folder is the alpha rehearsal Worker, not the live service.**
+>
+> - It pins the **alpha** root `02de9231…dae7` and delegate `a9531b9d` ("KeepKey Alpha 716"),
+>   from `scripts/clearsign-alpha-rehearsal.ts`.
+> - The live service at `https://keepkey-clearsign.bithighlander.workers.dev` (Cloudflare Worker
+>   `keepkey-clearsign`) is built and deployed from the `keepkey-clearsign-server` repo. It serves
+>   only **production** certificates, signed by the production root `027c1fde…e321` (alias
+>   "KeepKey ClearSign"). KeepKey Desktop has that URL built in (`DEFAULT_CLEARSIGN_SERVICE_URL`,
+>   `src/bun/solana-certified-registry.ts`).
+> - KeepKey Desktop trusts only the production root. The alpha root appears in tests and rehearsal
+>   scripts only.
+> - This copy is **not deployable to production**. `wrangler.toml` names the separate Worker
+>   `keepkey-clearsign-alpha-rehearsal`. `make clearsign-worker-rehearsal-deploy` refuses when the
+>   target is the production Worker, and also while this code pins the alpha root, which it does
+>   today.
+>
+> The sections below describe the alpha rehearsal. The production trust chain has the same shape,
+> with the production root and its delegates.
 
 ## What this is
 
@@ -230,9 +245,12 @@ screens. `EXPECTED-SCREENS.md` has the same screens for owner review.
 ## Operating it
 
 ```sh
-bun test clearsign-worker/src/index.test.ts
-npx wrangler deploy --config clearsign-worker/wrangler.toml
+make clearsign-worker-test
 ```
+
+Do not run `wrangler deploy` by hand. The only deploy target is `make clearsign-worker-rehearsal-deploy`,
+and it refuses while this copy pins the alpha root (see the status note at the top). The production
+Worker is deployed from `keepkey-clearsign-server`.
 
 Secrets (set through stdin, never in this repo or `wrangler.toml`): `CLEARSIGN_DELEGATE_PRIVATE_KEY`,
 `CLEARSIGN_CERTIFICATE_HEX` (Ethereum mainnet), `CLEARSIGN_SOLANA_CERTIFICATE_HEX`, and
