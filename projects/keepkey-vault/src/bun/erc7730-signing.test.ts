@@ -113,7 +113,7 @@ describe('WalletConnect eth_sendTransaction', () => {
 
   async function wcSign(opts: { advancedMode: boolean; caps?: number[]; refuse?: string; declineSecondCard?: boolean }) {
     const { WalletConnectManager } = await import('./walletconnect')
-    const cap = { sent: [] as any[], cards: [] as any[], dismissed: [] as string[] }
+    const cap = { sent: [] as any[], cards: [] as any[], dismissed: [] as string[], refused: [] as string[], finalized: [] as string[] }
     const manager: any = new WalletConnectManager({
       getEvmAddressInfo: () => ({ address: FROM, addressIndex: 0 }),
       ensureEvmAddressInfo: async () => null,
@@ -128,9 +128,10 @@ describe('WalletConnect eth_sendTransaction', () => {
       getDeviceCapabilities: () => opts.caps ?? CAPS,
       getEvmSimulationEndpoint: () => 'http://127.0.0.1:9/',
       getSolanaRpcEndpoint: () => 'http://127.0.0.1:9/',
-      recordClearSignObservation: () => undefined,
+      recordClearSignObservation: () => 'obs',
       authenticateClearSignObservation: () => {},
-      finalizeClearSignObservation: () => {},
+      finalizeClearSignObservation: (_id: string, outcome: string) => { cap.finalized.push(outcome) },
+      refuseClearSignObservationDefinition: (id: string) => { cap.refused.push(id) },
       requestSigningApproval: async (card: any) => {
         cap.cards.push(structuredClone(card))
         return !(opts.declineSecondCard && cap.cards.length === 2)
@@ -178,16 +179,65 @@ describe('WalletConnect eth_sendTransaction', () => {
     })
   }
 
-  test('with AdvancedMode on, it signs without the definition at once', async () => {
+  test('with AdvancedMode on too: the blind card again before the call without the definition', async () => {
     const { cap, run } = await wcSign({ advancedMode: true, refuse: 'Inner call cannot be clear-signed' })
     await expect(run).rejects.toThrow('test-stop')
     expect(cap.sent.map((m) => Boolean(m.erc7730))).toEqual([true, false])
-    expect(cap.cards.length).toBe(1)
+    expect(cap.cards.length).toBe(2)
+    expect(cap.cards[1].needsBlindSigning).toBe(true)
+    expect(cap.cards[1].erc7730).toBeUndefined()
+    expect(cap.cards[1].clearSignReport?.descriptor.source).not.toBe('erc7730')
+    // The coverage record no longer names the refused definition.
+    expect(cap.refused).toEqual(['obs'])
   })
 
-  test('declining the blind-sign card signs nothing more', async () => {
-    const { cap, run } = await wcSign({ advancedMode: false, refuse: 'Value too long to clear-sign', declineSecondCard: true })
+  test('declining the blind-sign card signs nothing more and is recorded as rejected', async () => {
+    const { cap, run } = await wcSign({ advancedMode: true, refuse: 'Value too long to clear-sign', declineSecondCard: true })
     await expect(run).rejects.toThrow('User rejected signing')
     expect(cap.sent.length).toBe(1)
+    expect(cap.finalized[0]).toBe('rejected')
+  })
+})
+
+describe('in-app swap', () => {
+  test('a refused definition is never signed blind under the swap card', async () => {
+    const { signWithErc7730Fallback } = await import('./erc7730-resolver')
+    const { ERC7730_SWAP_REREVIEW, stopSwapAfterErc7730Refusal } = await import('./swap')
+    const msg = { to: tx.to, data: tx.data, chainId: tx.chainId, value: tx.value, erc7730: (await prepared(CAPS)).erc7730 }
+    for (const advancedMode of [true, false]) {
+      forgetRefusedErc7730Definitions()
+      const sent: boolean[] = []
+      const sign = async (m: any) => { sent.push(Boolean(m.erc7730)); if (m.erc7730) throw new Error('Value too long to clear-sign'); return 'signed' }
+      const assertEvmSignable = (plain: any) => {
+        if (evmCallRequiresAdvancedMode(plain.to, plain.data, plain.chainId, advancedMode, plain.txMetadata, plain.erc7730, FW, plain.value, CAPS)) {
+          throw new Error('This ETH swap has to be blind-signed. Turn on AdvancedMode to continue.')
+        }
+      }
+      const run = signWithErc7730Fallback(msg, sign, stopSwapAfterErc7730Refusal(assertEvmSignable))
+      // Off: the AdvancedMode opt-in panel. On: back to review, rebuilt without the definition.
+      await expect(run).rejects.toThrow(advancedMode ? ERC7730_SWAP_REREVIEW : /AdvancedMode/)
+      expect(sent).toEqual([true])
+    }
+    // SwapDialog routes /AdvancedMode/i to the opt-in panel; the re-review message must not match.
+    expect(/AdvancedMode/i.test(ERC7730_SWAP_REREVIEW)).toBe(false)
+    // The rebuilt preview does not attach the refused definition again.
+    expect((await prepared(CAPS)).erc7730).toBeUndefined()
+  })
+
+  test('the swap card looks up a definition only where the signer attaches one', async () => {
+    const { buildEvmReportForTx } = await import('./evm-presign-report')
+    const report = async (capabilities?: number[]) => (await buildEvmReportForTx({
+      tx: { chainId: tx.chainId, from: FROM, to: tx.to, data: tx.data, value: tx.value },
+      firmwareVersion: FW, capabilities, endpoint: 'http://127.0.0.1:9/', signerVerdict: true,
+      measure: async () => { throw new Error('offline') },
+    })).report
+    // A router call the swap signs without a definition: no lookup, the blind verdict.
+    const without = await report(undefined)
+    expect(lookups).toEqual([])
+    expect(without.protectionLevel).not.toBe('P4')
+    expect(without.descriptor.source).not.toBe('erc7730')
+    // The swap card passes the device capabilities only for a transaction that carries one.
+    const index = await Bun.file(new URL('./index.ts', import.meta.url)).text()
+    expect(index).toContain('capabilities: tx.erc7730 ? engine.getDeviceState().capabilities : undefined,')
   })
 })

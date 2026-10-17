@@ -265,7 +265,7 @@ import { auditUnknownClearSignShape, setClearSignAuditGate } from "./clearsign-l
 import { classifyEffectExposure, observeEvmCall, observeEvmTypedData, observeMalformedSolanaTransaction, observeSolanaTransaction } from "./clearsign-observation"
 import { getClearSignProtectionCaseStudies } from "./clearsign-case-studies"
 import { getEvmSimulationEndpoint, getEvmSimulationRpcUrls } from "./evm-simulation-config"
-import { initDb, getDb, factoryResetDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, setCustomTokenIcon as dbSetCustomTokenIcon, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility, insertApiLog, getApiLogs, clearApiLogs, setCachedBalances, getCachedBalances, updateCachedBalance, clearBalances, deleteCachedChainBalance, saveCachedPubkey, getLatestDeviceSnapshot, getCachedPubkeys, saveReport, getReportsList, getReportById, deleteReport, reportExists, getSwapHistory, getSwapHistoryStats, getSwapHistoryByTxid, getBip85Seeds, saveBip85Seed, deleteBip85Seed, clearCachedPubkeys, getRecentActivityFromLog, getPioneerServers, addPioneerServerDb, removePioneerServerDb, syncOwnAddressBook, recordOutbound, getAddressBookList, updateAddressBookEntry, deleteAddressBookEntry, getAddressBookHistory, getDeviceLabelMap, getBalancesForOwnSeed, addExternalEntry, matchAddressBook, insertClearSignEvent, getClearSignEvents, insertClearSignObservation, finalizeClearSignObservation, authenticateClearSignObservation, getClearSignCoverageSummary, getClearSignAuditJobs, enqueueClearSignAuditDemand } from "./db"
+import { initDb, getDb, factoryResetDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, setCustomTokenIcon as dbSetCustomTokenIcon, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility, insertApiLog, getApiLogs, clearApiLogs, setCachedBalances, getCachedBalances, updateCachedBalance, clearBalances, deleteCachedChainBalance, saveCachedPubkey, getLatestDeviceSnapshot, getCachedPubkeys, saveReport, getReportsList, getReportById, deleteReport, reportExists, getSwapHistory, getSwapHistoryStats, getSwapHistoryByTxid, getBip85Seeds, saveBip85Seed, deleteBip85Seed, clearCachedPubkeys, getRecentActivityFromLog, getPioneerServers, addPioneerServerDb, removePioneerServerDb, syncOwnAddressBook, recordOutbound, getAddressBookList, updateAddressBookEntry, deleteAddressBookEntry, getAddressBookHistory, getDeviceLabelMap, getBalancesForOwnSeed, addExternalEntry, matchAddressBook, insertClearSignEvent, getClearSignEvents, insertClearSignObservation, finalizeClearSignObservation, authenticateClearSignObservation, refuseClearSignObservationDefinition, getClearSignCoverageSummary, getClearSignAuditJobs, enqueueClearSignAuditDemand } from "./db"
 import { getCentralAssetAuditHistory, getCentralClearSignStatus, getCentralContractAudit, submitCentralAssetReview, submitCentralContractReview } from './clearsign-central-client'
 import { buildCentralAssetReview, buildCentralContractReview } from './clearsign-central-review'
 import { getConfiguredReviewerIdentity, signCentralReview } from './clearsign-review-signer-client'
@@ -288,6 +288,8 @@ import { addClearSignProvider, listClearSignProviders, removeClearSignProvider, 
 import { supportsCertifiedClearSign } from "./solana-certified-policy"
 import { configureProductionRootTrust } from "../shared/certified-evm-envelope"
 import { emulatorClearSignTestRoot } from "./emulator-library"
+import { emulatorReadsClearSignTestRoot } from "./emulator"
+import { DEFAULT_CLEARSIGN_SERVICE_URL } from "./solana-certified-registry"
 import { createRpcAltFetcher } from "./solana-alt"
 import { createProviderKeySession } from "./clearsign-provider-session"
 import { buildProviderBundle, buildStudioEvmSchema, parseProviderBundle, providerBundleFileName, uniqueFilePath } from "./clearsign-studio-evm"
@@ -873,9 +875,9 @@ setClearSignAuditGate(() => engine.isEmulator && !offlineMode && !engine.isPassp
 // unless it was started with a ClearSign TEST root (QA against the stock 7.16
 // emulator, with CLEARSIGN_SERVICE_URL serving test-root definitions). A real
 // device always trusts the production root.
-const emulatorTestRoot = emulatorClearSignTestRoot()
-if (emulatorTestRoot) console.warn(`[clearsign] KK_CLEARSIGN_TEST_ROOT=${emulatorTestRoot}: the emulator gets certified descriptions (TEST root)`)
-configureProductionRootTrust(() => !engine.isEmulator || !!emulatorTestRoot)
+const emulatorTestRoot = emulatorClearSignTestRoot(process.env, DEFAULT_CLEARSIGN_SERVICE_URL)
+if (emulatorTestRoot) console.warn(`[clearsign] KK_CLEARSIGN_TEST_ROOT=${emulatorTestRoot}: an emulator library that reads it gets certified descriptions (TEST root)`)
+configureProductionRootTrust(() => !engine.isEmulator || (!!emulatorTestRoot && emulatorReadsClearSignTestRoot()))
 // A hidden wallet's Zcash view key is never written to disk.
 setFvkDiskAllowed(() => !engine.isPassphraseWallet)
 
@@ -1361,6 +1363,7 @@ function getOrCreateWcManager(): WalletConnectManager {
 		authenticateClearSignObservation: (id, source, authenticatedComponentCount, codeIdentityBound, promotionBundleHash) => {
 			authenticateClearSignObservation(id, source, authenticatedComponentCount, codeIdentityBound, promotionBundleHash)
 		},
+		refuseClearSignObservationDefinition: (id) => refuseClearSignObservationDefinition(id),
 		solanaSignTransactionRaw: async ({ addressNList, signerAddress, transactionBase64 }) => {
 			if (isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant)) throw new Error('WalletConnect is not available on bitcoin-only firmware')
 			if (!engine.wallet) throw new Error('Device disconnected')
@@ -3652,7 +3655,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						if (!contactProofAttached) return signWithErc7730Fallback(effectiveParams, (p: any) => {
 							signedParams = p
 							return engine.wallet!.ethSignTx(p)
-						}, undefined, '[ethSignTx]')
+						}, () => { if (observationId) refuseClearSignObservationDefinition(observationId) }, '[ethSignTx]')
 						// Only the device's "Contact verified" ack means it showed the label.
 						const signed = await signWithContactProofAck((engine.wallet as any)?.transport, () => engine.wallet!.ethSignTx(effectiveParams))
 						contactVerified = signed.contactVerified
@@ -7988,7 +7991,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 									gas: tx.gas, gasLimit: tx.gasLimit, gasPrice: tx.gasPrice,
 									maxFeePerGas: tx.maxFeePerGas, maxPriorityFeePerGas: tx.maxPriorityFeePerGas, nonce: tx.nonce,
 								},
-								firmwareVersion, capabilities: engine.getDeviceState().capabilities, endpoint, signerVerdict: true,
+								firmwareVersion, endpoint, signerVerdict: true,
+								// An ERC-7730 definition only where the swap build attached
+								// one (Relay), as the signer sends it: never a lookup of its
+								// own for a THOR/Maya router call the signer sends without.
+								capabilities: tx.erc7730 ? engine.getDeviceState().capabilities : undefined,
 							})
 							if (artifactResolution.status !== 'selected' && tx.data && tx.data !== '0x') {
 								const draft = observeEvmCall({

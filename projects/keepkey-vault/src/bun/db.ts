@@ -10,7 +10,7 @@ import { Utils } from 'electrobun/bun'
 import { join, dirname } from 'node:path'
 import { mkdirSync, unlinkSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { createHash, randomUUID } from 'crypto'
-import type { ChainBalance, CustomToken, CustomChain, PairedAppInfo, ApiLogEntry, ReportMeta, ReportData, SwapHistoryRecord, SwapHistoryFilter, SwapTrackingStatus, SwapHistoryStats, Bip85SeedMeta, PioneerServer, AddressBookEntry, AddressBookTx, AddressBookFilter, AddressBookKind, ClearSignEvent, ClearSignObservation, ClearSignObservationDraft, ClearSignObservationOutcome, ClearSignEventSource, ClearSignCoverageSummary, ClearSignAuditJob, ClearSignPromotionBundle, ClearSignPromotionReview, ClearSignPromotionRecord } from '../shared/types'
+import type { ChainBalance, CustomToken, CustomChain, PairedAppInfo, ApiLogEntry, ReportMeta, ReportData, SwapHistoryRecord, SwapHistoryFilter, SwapTrackingStatus, SwapHistoryStats, Bip85SeedMeta, PioneerServer, AddressBookEntry, AddressBookTx, AddressBookFilter, AddressBookKind, ClearSignEvent, ClearSignObservation, ClearSignObservationDraft, ClearSignObservationOutcome, ClearSignProtectionLevel, ClearSignEventSource, ClearSignCoverageSummary, ClearSignAuditJob, ClearSignPromotionBundle, ClearSignPromotionReview, ClearSignPromotionRecord } from '../shared/types'
 import { authenticatedClearSignLevel, clearSignExposurePriority, expandClearSignAuditDrafts } from './clearsign-observation'
 import { summarizeClearSignObservations } from './clearsign-observation'
 import { clearSignPromotionBundleHash, verifyClearSignPromotionReview } from './clearsign-promotion'
@@ -1334,6 +1334,22 @@ export function finalizeClearSignObservation(
     )
   } catch (e: any) {
     console.warn('[db] finalizeClearSignObservation failed:', e.message)
+  }
+}
+
+/** The device refused the observation's ERC-7730 definition and the call is
+ *  signed without it: no description any more, at the host level given. */
+export function refuseClearSignObservationDefinition(id: string, protectionLevel?: ClearSignProtectionLevel): void {
+  try {
+    if (!db) return
+    db.run(
+      `UPDATE clearsign_observations
+          SET definition_source = 'none', protection_level = COALESCE(?, protection_level)
+        WHERE id = ? AND outcome = 'pending' AND definition_source = 'erc7730'`,
+      [protectionLevel ?? null, id],
+    )
+  } catch (e: any) {
+    console.warn('[db] refuseClearSignObservationDefinition failed:', e.message)
   }
 }
 

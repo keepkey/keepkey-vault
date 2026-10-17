@@ -3,7 +3,7 @@
  * alpha root signs nothing a shipped build accepts: rehearsals and tests pass
  * it explicitly, from scripts/clearsign-alpha-rehearsal.ts.
  */
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { describe, expect, test } from 'bun:test'
 
 import signed from './fixtures/clearsign-production-catalog-batch1.json'
@@ -18,7 +18,9 @@ import { certifiedEnvelopeShown, configureProductionRootTrust } from '../src/sha
 import { supportsCertifiedClearSign } from '../src/bun/solana-certified-policy'
 import { evmCallRequiresAdvancedMode } from '../src/bun/evm-signing-policy'
 import noAltFixture from './fixtures/solana/relay-deposit-native-no-alt.json'
-import { emulatorClearSignTestRoot } from '../src/bun/emulator-library'
+import { emulatorClearSignTestRoot, libraryReadsClearSignTestRoot } from '../src/bun/emulator-library'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 
 const NOW = 1_790_000_000
 
@@ -116,19 +118,49 @@ describe('the bundled emulator compiles in only the alpha root', () => {
       expect(evmCallRequiresAdvancedMode(UR, tx.data, 42161, false, meta, undefined, '7.17.0')).toBe(true)
     } finally { configureProductionRootTrust(() => true) }
     // Desktop registers the emulator as not trusting the production root,
-    // unless it was launched with a ClearSign TEST root.
+    // unless it was launched with a ClearSign TEST root its library reads.
     const index = readFileSync(new URL('../src/bun/index.ts', import.meta.url), 'utf8')
-    expect(index).toContain('configureProductionRootTrust(() => !engine.isEmulator || !!emulatorTestRoot)')
-    expect(index).toContain('const emulatorTestRoot = emulatorClearSignTestRoot()')
+    expect(index).toContain('configureProductionRootTrust(() => !engine.isEmulator || (!!emulatorTestRoot && emulatorReadsClearSignTestRoot()))')
+    expect(index).toContain('const emulatorTestRoot = emulatorClearSignTestRoot(process.env, DEFAULT_CLEARSIGN_SERVICE_URL)')
+    const emulator = readFileSync(new URL('../src/bun/emulator.ts', import.meta.url), 'utf8')
+    expect(emulator).toContain('readsTestRoot = libraryReadsClearSignTestRoot(dylibPath)')
   })
 
-  test('only a launch-time KK_CLEARSIGN_TEST_ROOT compressed key counts as a test root', () => {
-    const key = '02ec4954d2a274a8e8f05823471464dde86b675fbc675ddbb672a28c6953d9ef76'
-    expect(emulatorClearSignTestRoot({ KK_CLEARSIGN_TEST_ROOT: key })).toBe(key)
-    expect(emulatorClearSignTestRoot({ KK_CLEARSIGN_TEST_ROOT: ` ${key.toUpperCase()} ` })).toBe(key)
-    for (const bad of [undefined, '', '1', key.slice(2), `04${key.slice(2)}`, `${key}00`]) {
-      expect(emulatorClearSignTestRoot({ KK_CLEARSIGN_TEST_ROOT: bad })).toBeUndefined()
+  const KEY = '02ec4954d2a274a8e8f05823471464dde86b675fbc675ddbb672a28c6953d9ef76'
+  const TEST_SERVICE = 'http://127.0.0.1:8787'
+  const PRODUCTION = 'https://keepkey-clearsign.bithighlander.workers.dev'
+  const root = (value: string | undefined, service: string | undefined = TEST_SERVICE) =>
+    emulatorClearSignTestRoot({ KK_CLEARSIGN_TEST_ROOT: value, CLEARSIGN_SERVICE_URL: service }, PRODUCTION)
+
+  test('only a KK_CLEARSIGN_TEST_ROOT the firmware itself takes counts as a test root', () => {
+    expect(root(KEY)).toBe(KEY)
+    // The firmware's hex reader takes either case.
+    expect(root(KEY.toUpperCase())).toBe(KEY)
+    // It does not trim, wants exactly 66 hex characters, 02/03, and a point on the curve.
+    for (const bad of [undefined, '', '1', ` ${KEY}`, `${KEY}\n`, KEY.slice(2), `04${KEY.slice(2)}`, `${KEY}00`,
+      `02${'0'.repeat(64)}`, `03${'f'.repeat(64)}`]) {
+      expect(root(bad)).toBeUndefined()
     }
-    expect(emulatorClearSignTestRoot({})).toBeUndefined()
+  })
+
+  test('the test root replaces the compiled-in root: only with a ClearSign service other than production', () => {
+    expect(emulatorClearSignTestRoot({ KK_CLEARSIGN_TEST_ROOT: KEY }, PRODUCTION)).toBeUndefined()
+    for (const service of ['', ' ', PRODUCTION, `${PRODUCTION}/`]) expect(root(KEY, service)).toBeUndefined()
+  })
+
+  test('a library that does not read KK_CLEARSIGN_TEST_ROOT is not a test-root emulator', () => {
+    const system = process.platform === 'darwin' ? '/usr/lib/libSystem.B.dylib' : process.platform === 'win32' ? 'kernel32.dll' : 'libc.so.6'
+    expect(libraryReadsClearSignTestRoot(system)).toBe(false)
+    expect(libraryReadsClearSignTestRoot('/nonexistent/libkkemu.dylib')).toBe(false)
+  })
+
+  // The installed release library (no loader) and the stock 7.16 debug build (loader), when on this machine.
+  const installed = join(homedir(), '.keepkey', 'emulator', 'libkkemu.dylib')
+  const stock716 = join(homedir(), 'keepkey-toolchain', 'emu-v7.16.0-prodroot-arm64', 'lib', 'libkkemu.dylib')
+  test.skipIf(!existsSync(installed) || readFileSync(installed).includes('KK_CLEARSIGN_TEST_ROOT'))('the installed release emulator library does not read it', () => {
+    expect(libraryReadsClearSignTestRoot(installed)).toBe(false)
+  })
+  test.skipIf(!existsSync(stock716))('the stock 7.16 debug emulator library reads it', () => {
+    expect(libraryReadsClearSignTestRoot(stock716)).toBe(true)
   })
 })

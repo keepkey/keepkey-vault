@@ -38,6 +38,25 @@ import {
 } from './swap-parsing'
 
 const TAG = '[swap]'
+/** The device refused the swap's ERC-7730 definition with AdvancedMode on.
+ *  SwapDialog shows it on the review step, whose preview is rebuilt. Must not
+ *  contain "AdvancedMode" (that routes to the opt-in panel). */
+export const ERC7730_SWAP_REREVIEW = 'Your KeepKey could not show this swap from its ClearSign description, so nothing was signed. '
+  + 'Review the swap again: it now has to be blind-signed.'
+
+/**
+ * After the device refused a swap's ERC-7730 definition. The swap card said the
+ * device shows the call, and without the definition it signs blind, so it is
+ * never signed under that card: AdvancedMode off goes to the opt-in panel
+ * (assertEvmSignable); on, back to review, where the rebuilt preview has no
+ * definition (refused this session) and reads as the blind call.
+ */
+export function stopSwapAfterErc7730Refusal(assertEvmSignable: (tx: any) => void): (plain: any) => never {
+  return (plain) => {
+    assertEvmSignable(plain)
+    throw new Error(ERC7730_SWAP_REREVIEW)
+  }
+}
 
 // CAIP-2 of Bitcoin mainnet (genesis-hash-keyed, canonical, immutable).
 // Used to gate BTC-only behavior — the cached btc-account-manager and the
@@ -1099,9 +1118,7 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
   )
   try {
     try {
-      // A refused ERC-7730 definition: the plain call goes through the normal
-      // gate (assertEvmSignable routes a missing AdvancedMode to the opt-in panel).
-      signedTx = await signWithErc7730Fallback(unsignedTx, signOnDevice, (plain) => assertEvmSignable(plain), TAG)
+      signedTx = await signWithErc7730Fallback(unsignedTx, signOnDevice, stopSwapAfterErc7730Refusal(assertEvmSignable), TAG)
     } catch (e: any) {
       // The device refused the SCHEMA, not the transaction. Firmware validates
       // schema material BEFORE it draws any confirm screen (fsm_msg_solana.h),

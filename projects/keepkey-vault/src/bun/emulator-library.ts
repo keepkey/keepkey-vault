@@ -1,6 +1,8 @@
 import { existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync, unlinkSync } from 'fs'
 import { homedir } from 'os'
 import { join, resolve } from 'path'
+import { dlopen, FFIType } from 'bun:ffi'
+import { secp256k1 } from '@noble/curves/secp256k1'
 
 type SupportedPlatform = 'darwin' | 'win32' | 'linux'
 
@@ -113,12 +115,45 @@ export function resolveEmulatorLibPath(options: {
 
 /**
  * The ClearSign TEST root the emulator was started with, or undefined. A debug
- * libkkemu reads KK_CLEARSIGN_TEST_ROOT (a 33-byte compressed key, 66 hex) with
- * getenv in kkemu_init, so only the launch environment counts: Bun's
- * process.env assignments never reach getenv. Read it once, at startup. A QA
- * setting for the stock 7.16 emulator; it never applies to a real device.
+ * libkkemu reads KK_CLEARSIGN_TEST_ROOT with getenv in kkemu_init, so only the
+ * launch environment counts: Bun's process.env assignments never reach getenv.
+ * Read it once, at startup. A QA setting for the stock 7.16 emulator; it never
+ * applies to a real device.
+ *
+ * Only a value the firmware takes (clearsign_root.c): exactly 66 hex
+ * characters with no whitespace, 02/03, a point on secp256k1. It ignores
+ * anything else and keeps its compiled-in root. The test root REPLACES that
+ * root, so the production service's certificates are refused: certified
+ * descriptions must come from a CLEARSIGN_SERVICE_URL that signs under it.
  */
-export function emulatorClearSignTestRoot(env: Record<string, string | undefined> = process.env): string | undefined {
-  const key = env.KK_CLEARSIGN_TEST_ROOT?.trim()
-  return key && /^0[23][0-9a-fA-F]{64}$/.test(key) ? key.toLowerCase() : undefined
+export function emulatorClearSignTestRoot(env: Record<string, string | undefined>, productionServiceUrl: string): string | undefined {
+  const key = env.KK_CLEARSIGN_TEST_ROOT
+  if (!key) return undefined
+  let onCurve = /^0[23][0-9a-fA-F]{64}$/.test(key)
+  if (onCurve) try { secp256k1.ProjectivePoint.fromHex(key) } catch { onCurve = false }
+  if (!onCurve) {
+    console.warn('[clearsign] KK_CLEARSIGN_TEST_ROOT is not a key the emulator reads (66 hex, compressed, on secp256k1); ignored')
+    return undefined
+  }
+  const service = String(env.CLEARSIGN_SERVICE_URL || '').trim().replace(/\/+$/, '')
+  if (!service || service === productionServiceUrl.replace(/\/+$/, '')) {
+    console.warn('[clearsign] KK_CLEARSIGN_TEST_ROOT needs a CLEARSIGN_SERVICE_URL that signs under it (not the production service); ignored')
+    return undefined
+  }
+  return key.toLowerCase()
+}
+
+/**
+ * Whether this emulator library reads KK_CLEARSIGN_TEST_ROOT at all: only a
+ * DEBUG_LINK multi-coin build exports the loader kkemu_init calls
+ * (clearsign_root_load_test_root_from_env). The bundled and installed
+ * libraries do not, and keep trusting only their compiled-in root.
+ */
+export function libraryReadsClearSignTestRoot(path: string): boolean {
+  try {
+    dlopen(path, { clearsign_root_load_test_root_from_env: { args: [], returns: FFIType.bool } }).close()
+    return true
+  } catch {
+    return false
+  }
 }

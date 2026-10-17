@@ -53,6 +53,66 @@ describe('ERC-7730 envelope header', () => {
     expect(readErc7730Envelope(bytesOf(broken.envelope))!.embeddedCall).toBeUndefined()
   })
 
+  describe('a program 7.16 would not read is never attachable', () => {
+    // The embedded fixture's program, split into sections and rebuilt.
+    const be32 = (b: Uint8Array, at: number) => ((b[at] << 24) >>> 0) + (b[at + 1] << 16) + (b[at + 2] << 8) + b[at + 3]
+    const env = bytesOf(embedded.definition.envelope)
+    const program = env.subarray(10, 10 + be32(env, 6))
+    const sections: { t: number; v: Uint8Array }[] = []
+    for (let i = 0, at = 179; i < program[178]; i++) {
+      const length = be32(program, at + 1)
+      sections.push({ t: program[at], v: program.slice(at + 5, at + 5 + length) })
+      at += 5 + length
+    }
+    const build = (secs: typeof sections) => {
+      const out = [...program.subarray(0, 179)]
+      out[178] = secs.length
+      for (const { t, v } of secs) out.push(t, (v.length >>> 24) & 255, (v.length >>> 16) & 255, (v.length >>> 8) & 255, v.length & 255, ...v)
+      return Uint8Array.from(out)
+    }
+    // Resource flag cleared: only the formatter bytes still say "embedded".
+    const quiet = () => sections.map(({ t, v }) => {
+      const copy = v.slice(); if (t === 9) copy[19] = 0; return { t, v: copy }
+    })
+    const clean = { t: 6, v: Uint8Array.from([0, 1, 2, 0, 1, 1, 1, 0, 0]) }
+
+    it('control: rebuilt unchanged, it still reads as an embedded call', () => {
+      expect(programHasEmbeddedCall(build(quiet()))).toBe(true)
+    })
+
+    it('a later clean section of the same type does not hide the embedded call', () => {
+      expect(programHasEmbeddedCall(build([...quiet(), clean]))).toBeUndefined()
+      const s = quiet()
+      expect(programHasEmbeddedCall(build([...s.filter((x) => x.t !== 6), s.find((x) => x.t === 6)!, clean]))).toBeUndefined()
+    })
+
+    it('sections out of order or past type 9', () => {
+      expect(programHasEmbeddedCall(build([...quiet()].reverse()))).toBeUndefined()
+      expect(programHasEmbeddedCall(build([...quiet(), { t: 10, v: new Uint8Array(0) }]))).toBeUndefined()
+    })
+
+    it('trailing bytes after the last section', () => {
+      expect(programHasEmbeddedCall(new Uint8Array([...build(quiet()), 0]))).toBeUndefined()
+    })
+
+    it('a formatter that swallows the next as argument bytes, leaving bytes over', () => {
+      const s = quiet()
+      const f = s.find((x) => x.t === 6)!
+      f.v[0] = 0; f.v[1] = 1
+      f.v[4] = Math.floor((f.v.length - 5) / 4)
+      expect((f.v.length - 5) % 4).not.toBe(0)
+      expect(programHasEmbeddedCall(build(s))).toBeUndefined()
+    })
+
+    it('a formatter with no arguments, or more than 23', () => {
+      for (const args of [0, 24]) {
+        const s = quiet()
+        s.find((x) => x.t === 6)!.v[4] = args
+        expect(programHasEmbeddedCall(build(s))).toBeUndefined()
+      }
+    })
+  })
+
   it('is not an envelope without the K773 and C773 magic', () => {
     const bytes = bytesOf(plain.definition.envelope)
     bytes[0] = 0

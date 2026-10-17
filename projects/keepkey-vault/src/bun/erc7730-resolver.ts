@@ -28,6 +28,10 @@ const KIND_CALLDATA = 1
 /** C773 program sections (python-keepkey keepkeylib/erc7730_compiler.py). */
 const SECTION_FORMATTERS = 6
 const SECTION_RESOURCES = 9
+/** 7.16 erc7730_program limits (ERC7730_PROGRAM_MAX_SECTIONS, ERC7730_FORMATTER_MAX_ARGUMENTS). */
+const MAX_SECTIONS = 9
+const MAX_FORMATTERS = 64
+const MAX_FORMATTER_ARGUMENTS = 23
 /** Formatter kind "calldata": the embedded-call formatter. */
 const FORMATTER_EMBEDDED_CALL = 13
 
@@ -57,31 +61,44 @@ export interface Erc7730EnvelopeHeader {
 const be32 = (b: Uint8Array, at: number) => ((b[at] << 24) >>> 0) + (b[at + 1] << 16) + (b[at + 2] << 8) + b[at + 3]
 const hex = (b: Uint8Array) => Buffer.from(b).toString('hex')
 
-/** Whether a C773 program uses the embedded-call formatter; undefined when its sections cannot be read. */
+/**
+ * Whether a C773 program uses the embedded-call formatter; undefined when its
+ * sections cannot be read the way 7.16 reads them (erc7730_program.c): section
+ * types 1..9 strictly increasing, exactly the declared count, ending exactly at
+ * the program length; at most 64 formatters, each with 1..23 arguments, ending
+ * exactly at the formatter section's end.
+ */
 export function programHasEmbeddedCall(program: Uint8Array): boolean | undefined {
   if (program.length < PROGRAM_HEADER_SIZE) return undefined
   let formatters: Uint8Array | undefined
   let resources: Uint8Array | undefined
   let at = PROGRAM_HEADER_SIZE
+  let last = 0
   for (let i = 0; i < program[PROGRAM_HEADER_SIZE - 1]; i++) {
     if (at + 5 > program.length) return undefined
     const kind = program[at]
     const length = be32(program, at + 1)
-    if (at + 5 + length > program.length) return undefined
+    if (kind === 0 || kind > MAX_SECTIONS || kind <= last || at + 5 + length > program.length) return undefined
     const value = program.subarray(at + 5, at + 5 + length)
     if (kind === SECTION_FORMATTERS) formatters = value
     if (kind === SECTION_RESOURCES) resources = value
+    last = kind
     at += 5 + length
   }
+  if (at !== program.length) return undefined
   if (!formatters || formatters.length < 2) return undefined
+  const count = (formatters[0] << 8) | formatters[1]
+  if (count > MAX_FORMATTERS) return undefined
   let embedded = false
   let p = 2
-  for (let i = 0; i < ((formatters[0] << 8) | formatters[1]); i++) {
+  for (let i = 0; i < count; i++) {
     if (p + 3 > formatters.length) return undefined
+    const args = formatters[p + 2]
+    if (args === 0 || args > MAX_FORMATTER_ARGUMENTS) return undefined
     if (formatters[p] === FORMATTER_EMBEDDED_CALL) embedded = true
-    p += 3 + 4 * formatters[p + 2]
+    p += 3 + 4 * args
   }
-  if (p > formatters.length) return undefined
+  if (p !== formatters.length) return undefined
   // The resource summary's own flag for the same thing.
   if (resources && resources.length >= 20 && resources[19] !== 0) embedded = true
   return embedded

@@ -24,7 +24,7 @@ import {
 } from './emulator-keychain'
 import { startEmulatorWatchdog, stopEmulatorWatchdog } from './emulator-watchdog'
 import type { EmulatorStatus, EmulatorProcessState } from '../shared/types'
-import { emulatorLibFilename, resolveEmulatorLibPath } from './emulator-library'
+import { emulatorLibFilename, libraryReadsClearSignTestRoot, resolveEmulatorLibPath } from './emulator-library'
 
 const TAG = '[emulator]'
 const FLASH_SIZE = 1048576  // 1 MB
@@ -61,6 +61,13 @@ export function getRuntimeDylibPath(): string | null {
 // ── FFI Handle ──────────────────────────────────────────────────────────
 
 let ffi: ReturnType<typeof dlopen> | null = null
+/** The loaded library reads KK_CLEARSIGN_TEST_ROOT (see libraryReadsClearSignTestRoot). */
+let readsTestRoot = false
+
+/** Whether the running emulator library reads a ClearSign test root. */
+export function emulatorReadsClearSignTestRoot(): boolean {
+  return ffi !== null && readsTestRoot
+}
 
 function loadDylib(path: string) {
   return dlopen(path, {
@@ -162,6 +169,7 @@ export function initEmulator(flashName = 'default'): EmulatorStatus {
 
     console.log(`${TAG} Loading dylib: ${dylibPath}`)
     ffi = loadDylib(dylibPath)
+    readsTestRoot = libraryReadsClearSignTestRoot(dylibPath)
 
     // 3. Pass flash buffer to firmware
     const rc = ffi.symbols.kkemu_init(ptr(activeFlash.buffer), FLASH_SIZE)

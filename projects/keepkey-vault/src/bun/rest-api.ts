@@ -11,7 +11,6 @@ import { createHash } from 'crypto'
 import { decodeEIP712 } from './eip712-decoder'
 import { evmPriorityFee, normalizeEvmChainId, recognizedTypedDataSpender, typedDataNativelyReviewed } from './evm-signing-preview'
 import { buildEvmReportForTx, evmSigningVerdict, prepareEvmTxSigningInfo, withoutErc7730Description } from './evm-presign-report'
-import { evmCallRequiresAdvancedMode } from './evm-signing-policy'
 import { signWithErc7730Fallback } from './erc7730-resolver'
 import { CHAINS, isChainSupported, hiveRolePath, evmChainLabel } from '../shared/chains'
 import { getEvmSimulationEndpoint } from './evm-simulation-config'
@@ -43,7 +42,7 @@ import { handleSwapRoute } from './rest-swap'
 import { handleSweepRoute } from './rest-sweep'
 import { isOfflineNetworkRoute } from './offline-policy'
 import { handleLedgerRoute } from './rest-ledger'
-import { getSetting, findApiLogs, getApiLogById, getRecentActivityFromLog, getSwapHistory, getSwapHistoryByTxid, getSwapHistoryStats, getCachedBalances, getCachedPubkeys, getAllTokenVisibility, getTokensByVisibility, setTokenVisibility, removeTokenVisibility, insertClearSignEvent, insertClearSignObservation, finalizeClearSignObservation, authenticateClearSignObservation, getClearSignCoverageSummary, getLegacyClearSignRows, getClearSignAuditJobs, getClearSignAuditJob, getClearSignAuditEvidence, enqueueClearSignAuditDemand, saveClearSignPromotionBundle, addClearSignPromotionReview, getClearSignPromotion, revokeClearSignPromotion, saveVerifiedClearSignArtifact, getVerifiedClearSignArtifacts, revokeVerifiedClearSignArtifact } from './db'
+import { getSetting, findApiLogs, getApiLogById, getRecentActivityFromLog, getSwapHistory, getSwapHistoryByTxid, getSwapHistoryStats, getCachedBalances, getCachedPubkeys, getAllTokenVisibility, getTokensByVisibility, setTokenVisibility, removeTokenVisibility, insertClearSignEvent, insertClearSignObservation, finalizeClearSignObservation, authenticateClearSignObservation, refuseClearSignObservationDefinition, getClearSignCoverageSummary, getLegacyClearSignRows, getClearSignAuditJobs, getClearSignAuditJob, getClearSignAuditEvidence, enqueueClearSignAuditDemand, saveClearSignPromotionBundle, addClearSignPromotionReview, getClearSignPromotion, revokeClearSignPromotion, saveVerifiedClearSignArtifact, getVerifiedClearSignArtifacts, revokeVerifiedClearSignArtifact } from './db'
 import { detectSpamToken, categorizeTokens } from '../shared/spamFilter'
 import { rebuildActivityHistory, type ActivityHistoryRebuildOptions } from './activity-history'
 import type { SwapTrackingStatus } from '../shared/types'
@@ -2128,7 +2127,9 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
                   })()
                 : undefined
             if (draft) {
-              if (report) draft.protectionLevel = report.protectionLevel
+              // An ERC-7730 definition reaches P4 only when the device accepts
+              // it (authenticateClearSignObservation); until then the host level.
+              if (report && report.descriptor.source !== 'erc7730') draft.protectionLevel = report.protectionLevel
               activeClearSignObservationId = insertClearSignObservation(draft, {
                 deviceId: engine.getDeviceState().deviceId,
                 source: 'rest-api',
@@ -2918,19 +2919,22 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               clearSignSentToDevice = true
               signedMsg = m
               return wallet.ethSignTx(m)
-            }, evmConfirmDetails('ethSignTx', evmChainName, m)), async (plain: any) => {
-              // The device refused the definition: the plain call goes through
-              // the normal gate. Without AdvancedMode the card asks again, as
-              // the blind call it now is.
-              const approved = activeSigningInfo
-              if (!approved || !evmCallRequiresAdvancedMode(plain.to, plain.data, plain.chainId, approved.advancedModeEnabled,
-                plain.txMetadata, undefined, approved.firmwareVersion, plain.value)) return
-              const again = withoutErc7730Description(approved)
+            }, evmConfirmDetails('ethSignTx', evmChainName, m)), async () => {
+              // The device refused the definition. The user approved a card
+              // that said the device shows the call; it now signs blind. Always
+              // ask again with the card for the blind call it now is, whatever
+              // AdvancedMode (the card offers to turn it on when it is off or
+              // unknown), and report and record that one.
+              const again = withoutErc7730Description(activeSigningInfo!)
               if (activeSigningId) callbacks?.onSigningDismissed?.(activeSigningId)
               activeSigningId = again.id
               activeSigningInfo = again
+              if (activeClearSignObservationId) refuseClearSignObservationDefinition(activeClearSignObservationId, again.clearSignReport?.protectionLevel)
               const decision = await callbacks!.onSigningRequest(again)
-              if (!decision.approved) throw new HttpError(403, 'Signing rejected by user')
+              if (!decision.approved) {
+                if (activeClearSignObservationId) finalizeClearSignObservation(activeClearSignObservationId, 'rejected')
+                throw new HttpError(403, 'Signing rejected by user')
+              }
             }, '[REST]')
             console.log('[REST] ethSignTx result:', JSON.stringify(result))
             if (clearSignPayload) recordRestClearSignEvent({

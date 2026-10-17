@@ -16,7 +16,6 @@ import { evmAddressPath } from './evm-addresses'
 import { verifyEvmSigner } from './evm-rpc'
 import { applyEvmTxPreview, attachErc7730Definition, evmPriorityFee, recognizedTypedDataSpender } from './evm-signing-preview'
 import { signWithErc7730Fallback } from './erc7730-resolver'
-import { evmCallRequiresAdvancedMode } from './evm-signing-policy'
 import { withoutErc7730Description } from './evm-presign-report'
 import { buildSolanaMessageDecodedInfo } from './solana-message-preview'
 import { ethMessagePreview } from './eth-message-preview'
@@ -204,6 +203,8 @@ export interface WcCallbacks {
   recordClearSignObservation: (draft: ClearSignObservationDraft) => string | undefined
   authenticateClearSignObservation: (id: string, source: 'runtime' | 'certified' | 'erc7730', authenticatedComponentCount?: number, codeIdentityBound?: boolean, promotionBundleHash?: string) => void
   finalizeClearSignObservation: (id: string, outcome: Exclude<ClearSignObservationOutcome, 'pending'>, errorClass?: string) => void
+  /** The device refused the observation's ERC-7730 definition; the call signs without it. */
+  refuseClearSignObservationDefinition?: (id: string) => void
   /** Show signing approval to user — returns true if approved. */
   requestSigningApproval: (info: SigningRequestInfo) => Promise<boolean>
   /** Dismiss the signing overlay. */
@@ -1153,16 +1154,19 @@ export class WalletConnectManager {
       }
 
       let signedMsg: any = msg
-      const result = await signWithErc7730Fallback(msg, (m: any) => { signedMsg = m; return this.callbacks.ethSignTx(m) }, async (plain: any) => {
-        // The device refused the definition: the plain call goes through the
-        // normal gate. Without AdvancedMode the card asks again, as the blind
-        // call it now is.
-        if (!evmCallRequiresAdvancedMode(plain.to, plain.data, effectiveChainId, this.callbacks.getAdvancedModeEnabled(),
-          plain.txMetadata, undefined, this.callbacks.getFirmwareVersion(), plain.value)) return
+      const result = await signWithErc7730Fallback(msg, (m: any) => { signedMsg = m; return this.callbacks.ethSignTx(m) }, async () => {
+        // The device refused the definition. The user approved a card that
+        // said the device shows the call; it now signs blind. Always ask again
+        // with the card for the blind call it now is, whatever AdvancedMode
+        // (the card offers to turn it on when it is off).
         const again = withoutErc7730Description(signingInfo)
+        if (observationId) this.callbacks.refuseClearSignObservationDefinition?.(observationId)
         this.callbacks.dismissSigning(cardId)
         cardId = again.id
-        if (!await this.callbacks.requestSigningApproval(again)) throw new Error('User rejected signing')
+        if (!await this.callbacks.requestSigningApproval(again)) {
+          if (observationId) this.callbacks.finalizeClearSignObservation(observationId, 'rejected')
+          throw new Error('User rejected signing')
+        }
       }, '[WC]')
       if (!result?.serialized) {
         throw new Error('Device did not return serialized transaction')
