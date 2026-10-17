@@ -56,7 +56,7 @@ export interface EffectReport {
 }
 
 /** Shown on the approval card when no simulation ran. Provider and RPC error text stays in the log. */
-export const SIMULATION_UNAVAILABLE_MESSAGE = 'This computer could not simulate this transaction, so it cannot predict what it will move.'
+export const SIMULATION_UNAVAILABLE_MESSAGE = "Couldn't simulate this transaction."
 
 /** Start of the error for a call Pioneer has no route for. Not a failed run:
  * the provider simply cannot simulate it. */

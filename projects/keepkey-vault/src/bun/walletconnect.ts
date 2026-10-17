@@ -205,6 +205,8 @@ export interface WcCallbacks {
   finalizeClearSignObservation: (id: string, outcome: Exclude<ClearSignObservationOutcome, 'pending'>, errorClass?: string) => void
   /** The device refused the observation's ERC-7730 definition; the call signs without it. */
   refuseClearSignObservationDefinition?: (id: string) => void
+  /** Add this computer's records of the called contract to the card (contract-facts). */
+  addContractFacts?: (info: SigningRequestInfo) => Promise<void>
   /** Show signing approval to user — returns true if approved. */
   requestSigningApproval: (info: SigningRequestInfo) => Promise<boolean>
   /** Dismiss the signing overlay. */
@@ -993,6 +995,7 @@ export class WalletConnectManager {
     // Same calldata decode + verdict as REST: native firmware decode, else a
     // 7.16 KeepKey-certified schema, else AdvancedMode (blind).
     await applyEvmTxPreview(signingInfo, tx.to, tx.data, effectiveChainId, this.callbacks.getFirmwareVersion(), undefined, '[WC]')
+    const contractFacts = this.callbacks.addContractFacts?.(signingInfo)
 
     const from = tx.from ?? this.callbacks.getEvmAddressInfo()?.address
     let clearSignSchema: SignedEvmSchema | undefined
@@ -1035,6 +1038,7 @@ export class WalletConnectManager {
         hostLimitations: universalRouterFindings.limitations,
       })
     }
+    await contractFacts
     // Name on the card the provider the sign step will ask (its /signer
     // only). The sign step attaches a description only from that provider.
     if (!clearSignSchema && !signingInfo.calldataDecoded?.signedInsightBlob && !signingInfo.erc7730) {

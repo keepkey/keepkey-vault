@@ -14,6 +14,7 @@ import { buildEvmReportForTx, evmSigningVerdict, prepareEvmTxSigningInfo, withou
 import { signWithErc7730Fallback } from './erc7730-resolver'
 import { CHAINS, isChainSupported, hiveRolePath, evmChainLabel } from '../shared/chains'
 import { getEvmSimulationEndpoint } from './evm-simulation-config'
+import { addContractFacts } from './contract-facts'
 import { versionCompare } from '../shared/firmware-versions'
 import { isBitcoinOnlyVariant, DEFAULT_AUTO_LOCK_MS } from '../shared/flags'
 import {
@@ -1970,6 +1971,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               // natively or a 7.16 KeepKey-certified schema covers. Shared with
               // POST /clearsign/report so both surfaces judge the same bytes alike.
               await prepareEvmTxSigningInfo(signingInfo, preview, engine.getDeviceState().firmwareVersion, engine.getDeviceState().capabilities)
+              // Card only: never part of the /clearsign/report a caller reads.
+              const contractFacts = addContractFacts(signingInfo, engine.isPassphraseWallet ? undefined : engine.getDeviceState().deviceId)
               if (path === '/eth/sign-transaction' && /^0x[0-9a-fA-F]{40}$/.test(String(preview.from || ''))) {
                 const chainIdNum = typeof signingInfo.chainId === 'string'
                   ? (signingInfo.chainId.startsWith('0x') ? parseInt(signingInfo.chainId, 16) : parseInt(signingInfo.chainId, 10))
@@ -2000,6 +2003,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
                   rating: await findContractRating(chainIdNum, String(preview.to || ''), measureLiveDeployment),
                 })
               }
+              await contractFacts
             }
           } catch (e: any) {
             if (e instanceof HttpError) throw e
