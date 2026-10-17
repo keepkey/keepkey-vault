@@ -3,6 +3,7 @@
  * fw-716/35 — THORChain Base and Maya Arbitrum deposits clear-sign natively
  * with AdvancedMode off. 2 Desktop clicks; about 9 device presses for (a) and 8
  * for (b) (router, vault, amount, [expiry], 3 swap screens, raw memo, final).
+ * Run with KEEPKEY_SUITE_TIMEOUT_MS=360000 (it SKIPs below that).
  *
  * Released 7.16.0 pins THOR/Maya routers by (chainId, address), the same table
  * as 7.15 b6 (stock-716 lib/firmware/ethereum_contracts/thortx.c):
@@ -19,10 +20,11 @@
  * vault = this device, asset = 0x0 (native), value 1e12 wei. Signs only, with
  * SENTINEL_NONCE: neither transaction can ever be mined. Nothing is broadcast.
  */
-const { run, atEnd, assertSignedByDevice } = require('../_helpers')
+const { run, atEnd, skip, assertSignedByDevice } = require('../_helpers')
 const F = require('./_fw716')
 
 const THOR_ROUTER_BASE = '0x00dc6100103bc402d490aee3f9a5560cbd91f1d4'
+const MIN_BUDGET_MS = 360_000
 const MAYA_ROUTER_ARB = '0x700e97ef07219440487840dc472e7120a7ff11f4'
 const SEL_DEPOSIT = '0x1fece7b4' // deposit(address,address,uint256,string)
 const SEL_DEPOSIT_EXPIRY = '0x44bc937b' // depositWithExpiry(address,address,uint256,string,uint256)
@@ -58,6 +60,12 @@ function assertNative(assert, r, label) {
 
 function main() {
   run('fw-716/35 THOR Base + Maya Arbitrum router deposits (AdvancedMode off, native)', async (getSdk, assert) => {
+    // Two signs of ~9 and ~8 screens: a kill mid-sign leaves the device
+    // waiting on screens with no host.
+    const budget = Number(process.env.KEEPKEY_SUITE_TIMEOUT_MS) || 180_000
+    if (budget < MIN_BUDGET_MS) {
+      skip(`needs KEEPKEY_SUITE_TIMEOUT_MS=${MIN_BUDGET_MS}: run-all.js would kill it at ${budget} ms mid-sign`)
+    }
     const sdk = await getSdk()
     const f = await sdk.system.info.getFeatures()
     const version = `${f.major_version}.${f.minor_version}.${f.patch_version}`

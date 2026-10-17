@@ -34,14 +34,14 @@
  *
  *     KK_ALLOW_BLIND=1 node tests/fw-715/11-evm-1559-chunked-data.js
  *
- * On firmware that scopes AdvancedMode to the session it disarms itself when the
- * device locks or is unplugged, so there is nothing to turn back off. On older
- * firmware the policy persists — turn it off by hand there.
+ * The suite SKIPs if AdvancedMode is not on, and ends with clearSession, which
+ * turns a session AdvancedMode off (7.16) with no press. On older firmware the
+ * policy persists — turn it off by hand there.
  *
  * Skipping is not a coverage hole: python-keepkey drives the same chunked path
  * against the emulator with no gate in the way.
  */
-const { run, ETH_PATH, toHex, SEL, SENTINEL_NONCE, skip } = require('../_helpers')
+const { run, ETH_PATH, toHex, SEL, SENTINEL_NONCE, skip, requireAdvancedModeSession } = require('../_helpers')
 const { Transaction } = require('ethers')
 
 const CHUNK = 1024
@@ -67,6 +67,8 @@ const byteLen = (hex) => (hex.replace(/^0x/, '').length) / 2
 
 run('fw-715 EVM 1559 chunked data — access list stays last across chunk boundary', async (getSdk, assert) => {
   const sdk = await getSdk()
+  // SKIPs unless AdvancedMode is on; ends with clearSession (no press, no flash write).
+  await requireAdvancedModeSession(sdk)
   const { address } = await sdk.address.ethGetAddress({ address_n: ETH_PATH })
   console.log(`\n  device address: ${address}`)
 

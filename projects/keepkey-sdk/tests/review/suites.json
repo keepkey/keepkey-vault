@@ -221,7 +221,7 @@
   },
   "fw-716/13-tron-untrusted.js": {
     "class": "must-warn",
-    "why": "untrusted TRC-20 and TIP-712 hash refused with AdvancedMode off"
+    "why": "untrusted TRC-20 refused by the firmware with AdvancedMode off"
   },
   "fw-716/14-zcash-readonly.js": {
     "class": "no-signing",
@@ -249,7 +249,7 @@
   },
   "fw-716/34-unlimited-threshold.js": {
     "class": "must-warn",
-    "why": "unlimited approve warns and still signs"
+    "why": "native approve of 2^255 signs; Desktop warns red"
   },
   "fw-716/35-thor-maya-routers.js": {
     "class": "real-world",
@@ -261,7 +261,7 @@
   },
   "fw-716/37-permit2-typed-data.js": {
     "class": "real-world",
-    "why": "Permit2 typed data in words"
+    "why": "Permit2 typed data signs (review and name owner-observed)"
   },
   "fw-716/38-uniswap-ur-base.js": {
     "class": "real-world",

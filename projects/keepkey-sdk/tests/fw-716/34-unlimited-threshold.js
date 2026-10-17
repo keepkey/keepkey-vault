@@ -1,10 +1,14 @@
 #!/usr/bin/env node
 /**
- * fw-716/34 — on 7.16 "unlimited" means an allowance >= 2^255 (ERC-7730's
- * threshold; ethereum.c ethereum_allowanceIsUnlimited tests the top bit), not
- * only all-ff. A native unlimited approve to an unknown spender warns and
- * still signs (owner rule 2026-10-07: never refuse max). 1 Desktop click +
- * about 3-4 device presses.
+ * fw-716/34 — a native approve of 2^255 to an unknown spender signs with
+ * AdvancedMode off (owner rule 2026-10-07: never refuse max). 1 Desktop click
+ * + about 3-4 device presses.
+ *
+ * What the API proves: the signature, and that Desktop's report is red. That
+ * red line is Desktop's own rule (any approve >= uint96-max to an unknown
+ * spender, clearsign-risk.ts BOUND_LIMIT), not the 2^255 rule. Whether the
+ * DEVICE shows "UNLIMITED" at 2^255 (ethereum.c ethereum_allowanceIsUnlimited
+ * tests the top bit) is the owner's observation: NOT PROVEN by this suite.
  *
  * Chain-1 USDC (in the 7.16.0 token table, so native) approve(random unknown
  * spender, 2^255 = 0x80 followed by 31 zero bytes), value 0, SENTINEL_NONCE.
@@ -16,7 +20,7 @@ const F = require('./_fw716')
 
 const THRESHOLD = 1n << 255n
 
-run('fw-716/34 unlimited threshold 2^255: native USDC approve to an unknown spender warns and signs', async (getSdk, assert) => {
+run('fw-716/34 native USDC approve of 2^255 signs with AdvancedMode off (device threshold owner-observed)', async (getSdk, assert) => {
   const sdk = await getSdk()
   await F.requireAdvancedModeOff(sdk, assert)
   const { eth: device } = await F.deviceAddresses(sdk)
@@ -40,7 +44,7 @@ run('fw-716/34 unlimited threshold 2^255: native USDC approve to an unknown spen
   console.log(`  pre-report: ${F.describeReport(pre)}`)
   const red = pre.findings.filter((l) => l.code === 'RISK_HIGH' || l.code === 'RISK_CRITICAL')
   for (const l of red) console.log(`    ${l.code}: ${String(l.message).slice(0, 140)}`)
-  assert('pre-report has a red/critical finding', red.length > 0)
+  assert("pre-report has a red/critical finding (Desktop's uint96 rule)", red.length > 0)
 
   console.log('  OWNER: approve the Desktop card (do NOT enable Advanced Mode), then confirm on the device:')
   console.log(`    - "UNLIMITED approval": Allow ${spender} to spend ALL your USDC`)
@@ -60,4 +64,5 @@ run('fw-716/34 unlimited threshold 2^255: native USDC approve to an unknown spen
   if (!r) return
   console.log(`  signed report: ${F.describeReport(r)}`)
   assert("descriptor.source === 'native'", r.descriptor.source === 'native')
+  console.log('  NOT PROVEN by API: the device treating 2^255 as UNLIMITED. Owner: did the device show UNLIMITED?')
 })

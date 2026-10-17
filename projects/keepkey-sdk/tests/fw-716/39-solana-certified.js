@@ -33,6 +33,9 @@ run('fw-716/39 certified Solana Relay depositNative (AdvancedMode off, Desktop a
 
   const sdk = await getSdk()
   await F.requireAdvancedModeOff(sdk, assert)
+  // Desktop's own ClearSign lookup may miss even when the worker certifies the
+  // tx: then its card asks for AdvancedMode up front. Never leave it on.
+  F.guardAdvancedModeOff(sdk, assert)
   const { address: sol } = await sdk.address.solanaGetAddress({ address_n: SOLANA_PATH, show_display: false })
   console.log(`  device SOL: ${sol}`)
 
@@ -54,7 +57,15 @@ run('fw-716/39 certified Solana Relay depositNative (AdvancedMode off, Desktop a
   console.log('         On the device: the certified Relay Bridge depositNative review, signed by KeepKey ClearSign:')
   console.log(`           Amount 0.001 SOL, Order ${orderId.toString('hex').slice(0, 16)}…, Vault ${S.RELAY.vault}, then the fee and Sign.`)
   console.log('         Confirm each screen. A blind-sign or "Enable AdvancedMode" screen means FAIL: press Cancel.')
-  const out = await sdk.solana.solanaSignTransaction({ raw_tx: raw, addressNList: SOLANA_PATH })
+  console.log('         If the card offers Enable Advanced Mode instead, Desktop did not attach the certified review: click Reject (FAIL).')
+  let out
+  try {
+    out = await sdk.solana.solanaSignTransaction({ raw_tx: raw, addressNList: SOLANA_PATH })
+  } catch (e) {
+    console.error(`  sign refused: ${e?.status ?? '-'} ${String(e?.message || e).slice(0, 300)}`)
+    assert('device signed the certified Solana review', false)
+    return
+  }
 
   const sig = Buffer.from(String(out?.signature || ''), 'base64')
   console.log(`  signature: ${short(sig.toString('hex'))}`)

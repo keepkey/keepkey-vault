@@ -6,7 +6,7 @@
  * Target: a production-root 7.16.0 KeepKey holding REAL FUNDS. Every signing
  * suite signs only (never broadcasts) and uses SENTINEL_NONCE.
  */
-const { ETH_PATH, SOLANA_PATH, SENTINEL_NONCE, skip } = require('../_helpers')
+const { ETH_PATH, SOLANA_PATH, SENTINEL_NONCE, skip, atEnd } = require('../_helpers')
 
 /** m/44'/195'/0'/0/0 */
 const TRON_PATH = [0x80000000 + 44, 0x80000000 + 195, 0x80000000, 0, 0]
@@ -76,6 +76,19 @@ async function restoreAdvancedMode(sdk) {
     on = advancedMode(await waitFeatures(sdk))
   }
   return on
+}
+
+/** For suites that never turn AdvancedMode on but show a card whose main
+ *  button can: at the end (also after a crash or a kill) it must still read
+ *  off; if not, turn it off and FAIL. */
+function guardAdvancedModeOff(sdk, assert) {
+  atEnd(async () => {
+    console.log(`\n  waiting ${FEATURES_WAIT_MS / 1000} s for Desktop's features cache...`)
+    const on = advancedMode(await waitFeatures(sdk))
+    if (on === false) return assert('AdvancedMode is still off at the end', true)
+    const after = await restoreAdvancedMode(sdk)
+    throw new Error(`AdvancedMode read ${on} at the end (now ${after}); this suite never turns it on`)
+  })
 }
 
 // ── ClearSign report ─────────────────────────────────────────────────
@@ -213,7 +226,7 @@ function reportBody(tx) {
 module.exports = {
   TRON_PATH, WORKER, EXPECT_FINGERPRINT, CERTIFIED_KEY_ID, FEATURES_WAIT_MS,
   USDC_BASE, USDC_ETH, PERMIT2,
-  sleep, deviceAddresses, advancedMode, waitFeatures, requireAdvancedModeOff, restoreAdvancedMode,
+  sleep, deviceAddresses, advancedMode, waitFeatures, requireAdvancedModeOff, restoreAdvancedMode, guardAdvancedModeOff,
   isRed, hasRed, hasLimitation, describeReport, assertDeviceConnected,
   worker, catalogEntries, findEvmEntry, requireEvmEntry, certifiedName, evmSchema, isProductionEnvelope,
   ERC7730_CANDIDATES, probeErc7730, servedErc7730Candidates,

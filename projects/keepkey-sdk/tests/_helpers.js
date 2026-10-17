@@ -28,8 +28,9 @@ const CHAINS = {
 
 /** Nonce for every signing suite that may run on a real-funds device. No
  * account reaches 2^32-1 transactions, so a signature over it can never be
- * mined even if its bytes leak through a log or a shared report. */
-const SENTINEL_NONCE = process.env.KK716_NONCE || '0xffffffff'
+ * mined even if its bytes leak through a log or a shared report. Fixed on
+ * purpose: no override, so a stray env var can never make a signature minable. */
+const SENTINEL_NONCE = '0xffffffff'
 
 /** Well-known ERC-20 selectors */
 const SEL = {
@@ -46,28 +47,58 @@ let _sdk = null
 // here (outside the repo) and reused; the SDK pairs again if Desktop rejects it.
 const KEY_FILE = require('path').join(require('os').homedir(), '.keepkey', 'sdk-test-api-key')
 
+function readKeyFile() {
+  try { return require('fs').readFileSync(KEY_FILE, 'utf8').trim() || undefined } catch { return undefined }
+}
+
 /** The key the suites use: KEEPKEY_API_KEY, else the one saved by the last pairing. */
 function savedApiKey() {
-  if (process.env.KEEPKEY_API_KEY) return process.env.KEEPKEY_API_KEY
-  try { return require('fs').readFileSync(KEY_FILE, 'utf8').trim() || undefined } catch { return undefined }
+  return process.env.KEEPKEY_API_KEY || readKeyFile()
+}
+
+/** Does Desktop accept this key? The same check the SDK makes (GET /auth/pair). */
+async function keyAccepted(baseUrl, key) {
+  try {
+    const resp = await fetch(`${baseUrl}/auth/pair`, { headers: { Authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(30_000) })
+    return resp.ok && (await resp.json()).paired === true
+  } catch { return false }
+}
+
+/** Save the key this process ends with. The SDK can pair again mid-suite (a
+ *  401 re-pair), so this also runs at exit: the next suite then reuses it. */
+function saveApiKey() {
+  const key = _sdk && _sdk.apiKey
+  if (!key || key === readKeyFile()) return
+  try {
+    const fs = require('fs')
+    fs.mkdirSync(require('path').dirname(KEY_FILE), { recursive: true })
+    fs.writeFileSync(KEY_FILE, key, { mode: 0o600 })
+    fs.chmodSync(KEY_FILE, 0o600) // mode applies only when the file is created
+  } catch (e) {
+    console.warn(`  WARNING: could not save the API key to ${KEY_FILE}: ${e.message}`)
+  }
 }
 
 async function getSdk() {
   if (_sdk) return _sdk
-  const fs = require('fs')
-  const saved = savedApiKey()
+  const baseUrl = process.env.KEEPKEY_URL || 'http://localhost:1646'
+  const envKey = process.env.KEEPKEY_API_KEY
+  const fileKey = readKeyFile()
+  let apiKey = envKey || fileKey
+  // A stale KEEPKEY_API_KEY must not make every suite pair: fall back to the saved key.
+  if (envKey && fileKey && envKey !== fileKey && !(await keyAccepted(baseUrl, envKey))) {
+    console.warn('  WARNING: Desktop rejected KEEPKEY_API_KEY; using the saved key instead. Unset KEEPKEY_API_KEY.')
+    apiKey = fileKey
+  }
   _sdk = await KeepKeySdk.create({
-    apiKey: saved,
-    baseUrl: process.env.KEEPKEY_URL || 'http://localhost:1646',
+    apiKey,
+    baseUrl,
     serviceName: 'KeepKey SDK Tests',
     serviceImageUrl: '',
   })
-  if (process.env.KEEPKEY_API_KEY && _sdk.apiKey !== saved) {
-    console.warn('  WARNING: Desktop rejected KEEPKEY_API_KEY, so this suite paired again. Unset it (the saved key is then used) or every suite will ask to pair.')
-  } else if (_sdk.apiKey && _sdk.apiKey !== saved) {
-    fs.mkdirSync(require('path').dirname(KEY_FILE), { recursive: true })
-    fs.writeFileSync(KEY_FILE, _sdk.apiKey, { mode: 0o600 })
-  }
+  if (apiKey && _sdk.apiKey !== apiKey) console.warn('  NOTE: Desktop did not accept the saved key, so this suite paired again (saved for the next suites).')
+  saveApiKey()
+  process.on('exit', saveApiKey)
   return _sdk
 }
 
@@ -131,9 +162,18 @@ function requireWipeAllowed() {
 // ── Runner ───────────────────────────────────────────────────────────
 
 const _atEnd = []
+const _notCovered = []
 
-/** Run `fn` when the suite ends, passed or crashed (not on skip()). */
+/** Run `fn` when the suite ends: passed, crashed, or killed by SIGTERM/SIGINT
+ *  (not on skip()). */
 function atEnd(fn) { _atEnd.push(fn) }
+
+/** Record a part of the suite that did not run. A suite with any such part and
+ *  no failure ends SKIPPED (partial), never passed. */
+function notCovered(reason) {
+  console.log(`  NOT COVERED: ${reason}`)
+  _notCovered.push(reason)
+}
 
 async function runAtEnd() {
   for (const fn of _atEnd.splice(0).reverse()) {
@@ -146,9 +186,25 @@ async function runAtEnd() {
 
 function run(name, fn) {
   console.log(`\n=== ${name} ===\n`)
+  // run-all.js kills a suite past its timeout with SIGTERM (and waits for it to
+  // exit); Ctrl-C sends SIGINT. Either way the cleanup still runs, e.g. turning
+  // AdvancedMode back off. A second signal kills outright.
+  for (const sig of ['SIGTERM', 'SIGINT']) {
+    process.once(sig, async () => {
+      console.error(`\n  ${sig}: suite killed, running cleanup`)
+      _failed++
+      await runAtEnd()
+      summary()
+      process.exit(1)
+    })
+  }
   fn(getSdk, assert, assertThrows).then(async () => {
     await runAtEnd()
     const fails = summary()
+    if (fails === 0 && _notCovered.length > 0) {
+      console.log(`  PARTIAL, reported as SKIPPED. Not covered: ${_notCovered.join('; ')}\n`)
+      process.exit(SKIP_EXIT)
+    }
     process.exit(fails > 0 ? 1 : 0)
   }).catch(async e => {
     console.error('\nTest crashed:', e)
@@ -224,7 +280,7 @@ function erc20Approve(spender, amount) {
 }
 
 module.exports = {
-  getSdk, savedApiKey, assert, assertThrows, summary, run, atEnd, requireWipeAllowed, requireAdvancedModeSession, skip, SKIP_EXIT,
+  getSdk, savedApiKey, assert, assertThrows, summary, run, atEnd, notCovered, requireWipeAllowed, requireAdvancedModeSession, skip, SKIP_EXIT,
   ETH_PATH, SOLANA_PATH, CHAINS, SEL, SENTINEL_NONCE, recoverEvm, assertSignedByDevice, short,
   toHex, padAddress, padUint256, erc20Transfer, erc20Approve,
 }

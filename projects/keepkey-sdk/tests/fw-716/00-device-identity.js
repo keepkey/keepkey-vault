@@ -7,7 +7,7 @@
  * FAIL, never a skip: every later refusal would pass for the wrong reason.
  * Also prints the device addresses and the sentinel nonce the signing suites use.
  */
-const { run, SENTINEL_NONCE } = require('../_helpers')
+const { run, notCovered, SENTINEL_NONCE } = require('../_helpers')
 const F = require('./_fw716')
 
 /** Desktop maps this hash to v7.16.0 (src/shared/firmware-versions.ts). It is
@@ -44,7 +44,7 @@ run('fw-716/00 device identity (released 7.16.0, AdvancedMode off)', async (getS
 
   const caps = Array.isArray(f.capabilities) ? f.capabilities : null
   if (caps) console.log(`  capabilities:     [${caps.join(', ')}]`)
-  else console.log('  NOTE: capabilities not exposed over REST; 4/5/13/17/18/25/26/27 are proven only by later suites\' behaviour')
+  else notCovered('capabilities 4/5/13/17/18/25/26/27 NOT CHECKED: this Desktop does not expose Features.capabilities (it lacks faa3c6da4; rebuild Desktop from a branch that has it)')
   console.log('')
 
   assert('firmware is exactly 7.16.0', Number(f.major_version) === 7 && Number(f.minor_version) === 16 && Number(f.patch_version) === 0)

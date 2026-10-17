@@ -18,7 +18,7 @@
  * natively; a certified attach shows as "no DEVICE_SHOWS_RAW_DATA" with
  * source 'none' (the device verifies the description at signing).
  */
-const { run, erc20Transfer, erc20Approve } = require('../_helpers')
+const { run, notCovered, erc20Transfer, erc20Approve } = require('../_helpers')
 const F = require('./_fw716')
 const { depositCalldata, THOR_ROUTER_BASE, MAYA_ROUTER_ARB } = require('./35-thor-maya-routers')
 const { baseSwapCalldata, WETH_BASE } = require('./38-uniswap-ur-base')
@@ -33,6 +33,8 @@ const U256_MAX = (1n << 256n) - 1n
 
 const hex = (n) => '0x' + BigInt(n).toString(16)
 const riskRed = (r) => r.findings.filter((l) => l.code === 'RISK_HIGH' || l.code === 'RISK_CRITICAL')
+/** Desktop's yellow line: risk level medium, report severity 'warning'. */
+const riskYellow = (r) => r.findings.filter((l) => l.code === 'RISK_MEDIUM')
 const raw = (r) => F.hasLimitation(r, 'DEVICE_SHOWS_RAW_DATA')
 const native = (r) => r.descriptor.source === 'native'
 
@@ -62,18 +64,18 @@ function shapes(device, relayEntry, now) {
 
   return [
     ['A', 'native ETH send to self, chain 1', { chainId: 1, to: device, data: '0x', value: hex(10n ** 12n) },
-      (r) => [["source 'native'", native(r)], ['P4', r.protectionLevel === 'P4'], ['no DEVICE_SHOWS_RAW_DATA', !raw(r)]]],
+      (r) => [["source 'native'", native(r)], ['P4', r.protectionLevel === 'P4'], ['no DEVICE_SHOWS_RAW_DATA', !raw(r)], ['no red finding (normal)', riskRed(r).length === 0]]],
     ['B', 'Relay bridgeDeposit, chain 1, catalog contract',
       { chainId: 1, to: relayEntry?.contract || RELAY, data: '0x49290c1c' + F.word(device) + F.word(F.randomHex(32)), value: hex(10n ** 12n) },
       (r) => [['no DEVICE_SHOWS_RAW_DATA (certified attach)', !raw(r)]],
       relayEntry ? undefined : "no catalog entry 'Relay bridgeDeposit chain 1'"],
     ['C', 'THOR depositWithExpiry on the Base V6 router', { chainId: 8453, to: THOR_ROUTER_BASE, data: thorData, value: hex(10n ** 12n) },
-      (r) => [["source 'native'", native(r)], ['P4', r.protectionLevel === 'P4'], ['no DEVICE_SHOWS_RAW_DATA', !raw(r)]]],
+      (r) => [["source 'native'", native(r)], ['P4', r.protectionLevel === 'P4'], ['no DEVICE_SHOWS_RAW_DATA', !raw(r)], ['no red finding (normal)', riskRed(r).length === 0]]],
     ['D', 'the same THOR calldata on 8453 to a non-pinned contract', { chainId: 8453, to: F.randomAddress(), data: thorData, value: hex(10n ** 12n) },
       (r) => [['DEVICE_SHOWS_RAW_DATA present', raw(r)], ["source 'none'", r.descriptor.source === 'none']]],
     ['E', 'Maya deposit on the Arbitrum router',
       { chainId: 42161, to: MAYA_ROUTER_ARB, data: depositCalldata({ vault: F.randomAddress(), amount: 10n ** 12n, memo: `=:ETH.ETH:${device}:1` }), value: hex(10n ** 12n) },
-      (r) => [["source 'native'", native(r)], ['P4', r.protectionLevel === 'P4'], ['no DEVICE_SHOWS_RAW_DATA', !raw(r)]]],
+      (r) => [["source 'native'", native(r)], ['P4', r.protectionLevel === 'P4'], ['no DEVICE_SHOWS_RAW_DATA', !raw(r)], ['no red finding (normal)', riskRed(r).length === 0]]],
     ['F1', 'chain-1 USDC transfer, value 0', { chainId: 1, to: F.USDC_ETH, data: erc20Transfer(device, 1), value: '0x0' },
       (r) => [["source 'native'", native(r)], ['no DEVICE_SHOWS_RAW_DATA', !raw(r)]]],
     ['F2', 'chain-1 USDC transfer, value 1 wei', { chainId: 1, to: F.USDC_ETH, data: erc20Transfer(device, 1), value: '0x1' },
@@ -88,7 +90,8 @@ function shapes(device, relayEntry, now) {
       { chainId: 8453, to: ACROSS_SPOKE_BASE, value: hex(10n ** 12n),
         data: acrossDepositV3({ depositor: device, recipient: device, inputToken: WETH_BASE, outputToken: WETH_ETH,
           inputAmount: 10n ** 12n, outputAmount: 999n * 10n ** 9n, destinationChainId: 1, now }) },
-      (r) => [['DEVICE_SHOWS_RAW_DATA present', raw(r)], ['no red/critical finding (known protocol)', riskRed(r).length === 0]]],
+      (r) => [['DEVICE_SHOWS_RAW_DATA present', raw(r)], ['no red/critical finding (known protocol)', riskRed(r).length === 0],
+        ['a yellow line (RISK_MEDIUM): raw data on the device, known protocol', riskYellow(r).length > 0]]],
     ['J', 'chain-1 USDC approve 1 USDC to Permit2', { chainId: 1, to: F.USDC_ETH, data: erc20Approve(F.PERMIT2, 1_000_000), value: '0x0' },
       (r) => [['no red/critical finding (normal setup)', riskRed(r).length === 0]]],
     ['K', 'chain-1 USDC approve 2^256-1 to a fresh random address', { chainId: 1, to: F.USDC_ETH, data: erc20Approve(F.randomAddress(), U256_MAX), value: '0x0' },
@@ -119,7 +122,8 @@ function main() {
     for (const [id, title, req, checks, skipReason] of shapes(device, relayEntry, Math.floor(Date.now() / 1000))) {
       console.log(`  ── ${id}: ${title} ──`)
       if (skipReason) {
-        console.log(`  SKIPPED (shape ${id} only): ${skipReason}\n`)
+        notCovered(`shape ${id}: ${skipReason}`)
+        console.log('')
         continue
       }
       const r = await sdk.clearsign.report({ chain: 'evm', from: device, ...req })

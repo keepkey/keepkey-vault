@@ -16,7 +16,7 @@
  * no txMetadata (Desktop attaches each envelope). Signs only: nothing is
  * broadcast and neither tx can ever be mined.
  */
-const { run, atEnd, skip, assertSignedByDevice } = require('../_helpers')
+const { run, atEnd, skip, notCovered, assertSignedByDevice } = require('../_helpers')
 const F = require('./_fw716')
 
 const MIN_BUDGET_MS = 360_000
@@ -69,7 +69,7 @@ run(`fw-716/33 certified Relay depositNative + depositErc20 on chain ${CHAIN} (A
   for (const c of cases) {
     console.log(`\n  ── ${c.id} ${c.name} ──`)
     if (c.skip) {
-      console.log(`  SKIPPED (${c.id} only): ${c.skip}`)
+      notCovered(`${c.id}: ${c.skip}`)
       continue
     }
     const id = F.word(F.randomHex(32))

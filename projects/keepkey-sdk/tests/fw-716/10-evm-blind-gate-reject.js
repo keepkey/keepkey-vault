@@ -1,8 +1,12 @@
 #!/usr/bin/env node
 /**
  * fw-716/10 — blind-sign gate with AdvancedMode off: an unknown contract call
- * stays red and the Desktop card blocks it. 1 Desktop click (Reject), 0
- * device presses.
+ * is red in Desktop's report. 1 Desktop click (Reject), 0 device presses.
+ *
+ * What the API proves: the pre-report (red, source 'none',
+ * DEVICE_SHOWS_RAW_DATA) and that nothing was signed. That the card disabled
+ * Approve is owner-observed: a 403 only shows that Reject was clicked, and the
+ * device gate (ethereum.c) is never reached.
  *
  * 0xdeadbeef + 32 random bytes to a random contract on chain 1, value 0,
  * SENTINEL_NONCE. The owner clicks Reject on the card; the pass is Desktop's
@@ -56,7 +60,7 @@ run('fw-716/10 blind-sign gate: unknown contract, AdvancedMode off, card Reject'
   assert('no signature', !(out && (out.signature || out.v || out.r)))
   assert('no serialized tx', !(out && (out.serialized || out.serializedTx)))
   if (out) console.error(`  SIGNED: ${short(out.serialized || out.serializedTx)} (the gate let a blind call through)`)
-  assert(`HTTP 403 '${REJECTED}'`, err?.status === 403 && String(err.message).includes(REJECTED))
+  assert(`owner clicked Reject: HTTP 403 '${REJECTED}' (the card's block is owner-observed)`, err?.status === 403 && String(err.message).includes(REJECTED))
   if (elapsed >= CARD_TIMEOUT_MS) {
     console.error(`  INCONCLUSIVE: ${(elapsed / 1000).toFixed(0)} s is the card timeout, not a Reject click`)
   }

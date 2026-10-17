@@ -6,7 +6,8 @@
  * Cost: 1 Desktop click (the card's main button, 'Enable Advanced Mode') +
  * 'Enable Policy' on the device with the PIN, then about 2-3 blind-sign
  * presses. The restore is clearSession (0 presses, no flash write); the next
- * device operation asks for the PIN. Run with KEEPKEY_SUITE_TIMEOUT_MS=600000.
+ * device operation asks for the PIN. Run with KEEPKEY_SUITE_TIMEOUT_MS=900000
+ * (worst case: PIN, the card, blind-sign screens, policy re-reads, cleanup).
  *
  * Signs only, never broadcasts: chain 1, a random contract, value 0,
  * SENTINEL_NONCE, so the tx can never be mined.
@@ -17,7 +18,7 @@
 const { run, atEnd, skip, assertSignedByDevice, ETH_PATH } = require('../_helpers')
 const F = require('./_fw716')
 
-const MIN_BUDGET_MS = 600_000
+const MIN_BUDGET_MS = 900_000
 const DROP_POLL_MS = 120_000
 
 run('fw-716/50 one-click AdvancedMode from the approval card', async (getSdk, assert) => {

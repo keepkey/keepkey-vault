@@ -90,7 +90,9 @@ async function main() {
       } else {
         ok = false
         failed++
-        console.error(`  FAILED: ${test.name}${e.signal ? ` (${e.signal}; timeout ${SUITE_TIMEOUT_MS} ms)` : ''}\n`)
+        // A suite past its timeout gets SIGTERM, runs its cleanup and exits 1.
+        const killed = e.signal || e.code === 'ETIMEDOUT'
+        console.error(`  FAILED: ${test.name}${killed ? ` (killed at the ${SUITE_TIMEOUT_MS} ms timeout)` : ''}\n`)
       }
     }
     if (taping && wasSkipped) {

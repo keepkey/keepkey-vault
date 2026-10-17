@@ -16,7 +16,7 @@
  * txMetadata: Desktop attaches each envelope itself. Signs only: nothing is
  * broadcast and neither tx can ever be mined.
  */
-const { run, atEnd, skip, assertSignedByDevice, erc20Approve } = require('../_helpers')
+const { run, atEnd, skip, notCovered, assertSignedByDevice, erc20Approve } = require('../_helpers')
 const F = require('./_fw716')
 
 const MIN_BUDGET_MS = 360_000
@@ -72,7 +72,7 @@ run('fw-716/32 certified intents: Base USDC Token approval + unlimited Shared ap
   for (const c of cases) {
     console.log(`\n  ── ${c.id} ${c.name} ──`)
     if (c.skip) {
-      console.log(`  SKIPPED (${c.id} only): ${c.skip}`)
+      notCovered(`${c.id}: ${c.skip}`)
       continue
     }
     const env = await F.worker('/v1/evm/schema', { chainId: CHAIN, contract: F.USDC_BASE, selector: '0x095ea7b3', calldataLength: 68, spender: c.spender })

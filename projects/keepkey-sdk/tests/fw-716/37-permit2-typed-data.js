@@ -1,8 +1,14 @@
 #!/usr/bin/env node
 /**
- * fw-716/37 — Permit2 PermitSingle in words (capability 13), with the spender's
- * certified name that Desktop attaches itself (withPermit2SpenderName).
- * 2 Desktop clicks, several presses each.
+ * fw-716/37 — Permit2 PermitSingle typed data signs (review and name are
+ * owner-observed). 2 Desktop clicks, about 9 presses each. Run with
+ * KEEPKEY_SUITE_TIMEOUT_MS=360000 (it SKIPs below that).
+ *
+ * NOT PROVEN by the API: the Permit2 review in words (capability 13) and the
+ * certified spender name Desktop attaches (withPermit2SpenderName). Released
+ * 7.16 streams EIP-712 without consulting AdvancedMode, so a signature proves
+ * only that some typed-data review was confirmed. The suite asserts that a
+ * certified name record exists for (a), so the name path is available.
  *
  * Every permit is unusable on-chain: amount 1 (0.000001 USDC) and sigDeadline
  * 1700000000 (2023-11-14, already past, so Permit2 reverts SignatureExpired).
@@ -19,12 +25,13 @@
  * printed, never asserted. AdvancedMode must be off: Permit2 is reviewed
  * natively, so no blind-sign gate applies.
  */
-const { run, ETH_PATH, short } = require('../_helpers')
+const { run, skip, ETH_PATH, short } = require('../_helpers')
 const { verifyTypedData } = require('ethers')
 const F = require('./_fw716')
 
 const UR_CHAIN1 = '0x66a9893cc07d91d95644aedd05d03f95e1dba8af'
 const SIG_DEADLINE = 1700000000
+const MIN_BUDGET_MS = 360_000
 
 /** The firmware's date format: "YYYY-MM-DD HH:MM UTC". */
 const utc = (t) => new Date(t * 1000).toISOString().slice(0, 16).replace('T', ' ') + ' UTC'
@@ -108,9 +115,16 @@ async function signCase(sdk, assert, device, label, typedData) {
   assert(`${label}: signature recovers to the device`, recovered.toLowerCase() === device.toLowerCase())
 }
 
-run('fw-716/37 Permit2 PermitSingle in words (certified spender name)', async (getSdk, assert) => {
+run('fw-716/37 Permit2 typed data signs (review and name owner-observed)', async (getSdk, assert) => {
+  // Two typed-data signs with a person reading ~9 screens each: a kill
+  // mid-sign leaves the device waiting on screens with no host.
+  const budget = Number(process.env.KEEPKEY_SUITE_TIMEOUT_MS) || 180_000
+  if (budget < MIN_BUDGET_MS) {
+    skip(`needs KEEPKEY_SUITE_TIMEOUT_MS=${MIN_BUDGET_MS}: run-all.js would kill it at ${budget} ms mid-sign`)
+  }
   const sdk = await getSdk()
   await F.requireAdvancedModeOff(sdk, assert)
+  F.guardAdvancedModeOff(sdk, assert)
   const { address: device } = await sdk.address.ethGetAddress({ address_n: ETH_PATH, show_display: false })
   console.log(`  device: ${device}`)
 
@@ -118,6 +132,7 @@ run('fw-716/37 Permit2 PermitSingle in words (certified spender name)', async (g
   console.log('\n  (a) spender = Uniswap Universal Router, expiration now + 30 days')
   const expiration = Math.floor(Date.now() / 1000) + 30 * 86400
   const name = await expectedName(UR_CHAIN1)
+  assert('(a) a certified name record exists for the Universal Router (the name path is available)', !!name)
   printExpected({ spenderText: name || shortAddr(UR_CHAIN1), until: utc(expiration), named: !!name })
   console.log(`  OWNER: note whether "${name || 'Uniswap Universal Router'}" appeared on the device.`)
   await signCase(sdk, assert, device, '(a) Universal Router', permit({ spender: UR_CHAIN1, expiration }))
@@ -128,4 +143,5 @@ run('fw-716/37 Permit2 PermitSingle in words (certified spender name)', async (g
   printExpected({ spenderText: `${shortAddr(spender)} (checksummed)`, until: 'the end of the block that uses this permit', named: false })
   console.log('  OWNER: the Spender screen should read "Not identified"; no ClearSign naming screen.')
   await signCase(sdk, assert, device, '(b) unnamed spender, expiration 0', permit({ spender, expiration: 0 }))
+  console.log('\n  NOT PROVEN by API: the Permit2 review in words (cap 13) and the certified name on the device. Owner-observed.')
 })

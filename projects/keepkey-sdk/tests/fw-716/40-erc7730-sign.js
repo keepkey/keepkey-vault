@@ -71,6 +71,8 @@ run('fw-716/40 ERC-7730 runtime review (AdvancedMode off)', async (getSdk, asser
 
   const sdk = await getSdk()
   await F.requireAdvancedModeOff(sdk, assert)
+  // The fallback card (device refused the definition) offers Advanced Mode.
+  F.guardAdvancedModeOff(sdk, assert)
   const { eth: device } = await F.deviceAddresses(sdk)
   console.log(`  device: ${device}`)
 
@@ -99,10 +101,6 @@ run('fw-716/40 ERC-7730 runtime review (AdvancedMode off)', async (getSdk, asser
     if (/rejected by user/i.test(msg)) {
       console.error('  A card was rejected. If it was the second card, the device refused the ERC-7730 definition (see the Desktop log line "[REST] the device refused the ERC-7730 definition (<reason>)").')
     }
-    // The fallback card can offer Advanced Mode: make sure it is off again.
-    if (F.advancedMode(await F.waitFeatures(sdk)) !== false) {
-      assert('AdvancedMode restored off', (await F.restoreAdvancedMode(sdk)) === false)
-    }
     return
   }
 
@@ -115,8 +113,5 @@ run('fw-716/40 ERC-7730 runtime review (AdvancedMode off)', async (getSdk, asser
   const refused = r.limitations.find((l) => l.code === 'ERC7730_DEFINITION_REFUSED')
   assert(`no ERC7730_DEFINITION_REFUSED${refused ? ` (${refused.message})` : ''}`, !refused)
   assert("signed report: descriptor.source === 'erc7730'", r.descriptor.source === 'erc7730')
-  if (refused && F.advancedMode(await F.waitFeatures(sdk)) !== false) {
-    assert('AdvancedMode restored off', (await F.restoreAdvancedMode(sdk)) === false)
-  }
   console.log(`  signed report: protectionLevel ${r.protectionLevel}, authenticated ${r.descriptor.authenticated} (printed, not asserted)`)
 })
