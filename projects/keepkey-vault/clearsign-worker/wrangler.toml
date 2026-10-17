@@ -1,4 +1,5 @@
-name = "keepkey-clearsign"
+# Alpha rehearsal copy: never the production Worker (keepkey-clearsign).
+name = "keepkey-clearsign-alpha-rehearsal"
 main = "src/index.ts"
 account_id = "53185d258559a5dae7d6fa6225cc46ba"
 compatibility_date = "2026-08-23"
@@ -6,7 +7,7 @@ compatibility_flags = ["nodejs_compat"]
 workers_dev = true
 
 [vars]
-CLEARSIGN_ENVIRONMENT = "production"
+CLEARSIGN_ENVIRONMENT = "alpha-rehearsal"
 # Server-managed failover. Vault only talks to this ClearSign service.
 # Pioneer first: it reads through our keyed node (public RPCs throttle
 # Cloudflare egress). Pioneer v1.4.0 serves only getMultipleAccounts here.
