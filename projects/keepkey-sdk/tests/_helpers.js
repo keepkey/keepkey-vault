@@ -62,7 +62,9 @@ async function getSdk() {
     serviceName: 'KeepKey SDK Tests',
     serviceImageUrl: '',
   })
-  if (!process.env.KEEPKEY_API_KEY && _sdk.apiKey && _sdk.apiKey !== saved) {
+  if (process.env.KEEPKEY_API_KEY && _sdk.apiKey !== saved) {
+    console.warn('  WARNING: Desktop rejected KEEPKEY_API_KEY, so this suite paired again. Unset it (the saved key is then used) or every suite will ask to pair.')
+  } else if (_sdk.apiKey && _sdk.apiKey !== saved) {
     fs.mkdirSync(require('path').dirname(KEY_FILE), { recursive: true })
     fs.writeFileSync(KEY_FILE, _sdk.apiKey, { mode: 0o600 })
   }

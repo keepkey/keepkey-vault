@@ -10,7 +10,7 @@
  * Expected device screens: "Verified by KeepKey" / bridgeDeposit / depositor
  * (this device) / orderId, then the amount and fee.
  */
-const { run, SENTINEL_NONCE, recoverEvm, short, skip } = require('../_helpers')
+const { run, atEnd, SENTINEL_NONCE, recoverEvm, short, skip } = require('../_helpers')
 const F = require('./_fw716')
 
 const SELECTOR = '0x49290c1c'
@@ -29,6 +29,13 @@ run('fw-716/30 certified Relay bridgeDeposit (AdvancedMode off, Desktop attaches
   await F.requireAdvancedModeOff(sdk, assert)
   const { eth: device } = await F.deviceAddresses(sdk)
   console.log(`  device: ${device}`)
+  atEnd(async () => {
+    console.log(`\n  waiting ${F.FEATURES_WAIT_MS / 1000} s for Desktop's features cache...`)
+    const on = F.advancedMode(await F.waitFeatures(sdk))
+    if (on === false) return assert('AdvancedMode is still off at the end', true)
+    const after = await F.restoreAdvancedMode(sdk)
+    throw new Error(`AdvancedMode read ${on} at the end (now ${after}); this suite never turns it on`)
+  })
 
   const data = SELECTOR + F.word(device) + F.word(F.randomHex(32))
   const tx = F.evmTx({ from: device, to: entry.contract, data, value: '0x' + (1e12).toString(16), chainId: 1 })
@@ -37,8 +44,17 @@ run('fw-716/30 certified Relay bridgeDeposit (AdvancedMode off, Desktop attaches
   F.assertDeviceConnected(assert, pre, 'pre-report')
   console.log(`  pre-report: ${F.describeReport(pre)}`)
 
-  console.log('  OWNER: approve the Desktop card, then confirm on the device.')
-  const out = await sdk.eth.ethSignTransaction(tx)
+  console.log('  OWNER: approve the Desktop card (do NOT enable Advanced Mode), then confirm on the device:')
+  console.log(`    - "Verified by KeepKey" bridgeDeposit: depositor ${device} (this device), orderId`)
+  console.log('    - the amount (0.000001 ETH) and fee confirm')
+  let out
+  try {
+    out = await sdk.eth.ethSignTransaction(tx)
+  } catch (e) {
+    console.error(`  sign refused: ${String(e?.message || e).slice(0, 300)}`)
+    assert('device signed bridgeDeposit', false)
+    return
+  }
   const serialized = out.serialized || out.serializedTx
   assert('returns a serialized envelope', !!serialized)
   if (!serialized) return
