@@ -6,7 +6,9 @@ import {
   buildAlphaCertificateBody,
   inspectAlphaCertificateBody,
 } from './clearsign-alpha-ceremony'
-import { ALPHA_DELEGATE_PUBLIC_KEY } from '../../scripts/clearsign-alpha-rehearsal'
+import { ALPHA_DELEGATE_PUBLIC_KEY, inspectAlphaCeremonyRequest } from '../../scripts/clearsign-alpha-rehearsal'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 
 function bodyHex(overrides: { flags?: number; chain?: number; expiry?: number; delegate?: string } = {}): string {
   const body = Buffer.alloc(75)
@@ -87,5 +89,18 @@ describe('7.16 alpha certificate ceremony', () => {
   it('rejects an independent hash mismatch', () => {
     expect(() => inspectAlphaCertificateBody(bodyHex(), '11'.repeat(32), 1787500000))
       .toThrow('independent message hash does not match')
+  })
+})
+
+describe('scripts/clearsign-root-ceremony.ts', () => {
+  it('signs a request only for the reviewed alpha delegate', () => {
+    const other = `02${'01'.repeat(32)}`
+    const forged = buildAlphaCertificateBody('KeepKey Vault', 1818806400, 1, other)
+    expect(() => inspectAlphaCeremonyRequest(forged, 1787500000)).toThrow('is not the reviewed alpha delegate')
+    const reviewed = buildAlphaCertificateBody('KeepKey Vault', 1818806400, 1, ALPHA_DELEGATE_PUBLIC_KEY)
+    expect(inspectAlphaCeremonyRequest(reviewed, 1787500000).delegatePublicKey).toBe(ALPHA_DELEGATE_PUBLIC_KEY)
+    const script = readFileSync(join(import.meta.dir, '../../scripts/clearsign-root-ceremony.ts'), 'utf8')
+    expect(script).toContain('const inspection = request ? inspectAlphaCeremonyRequest(request) : undefined')
+    expect(script).not.toContain('inspectAlphaCertificateBody(')
   })
 })

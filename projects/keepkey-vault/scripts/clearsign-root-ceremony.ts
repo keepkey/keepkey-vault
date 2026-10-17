@@ -4,16 +4,16 @@ import { Keyring } from '@keepkey/hdwallet-core'
 import { NodeWebUSBKeepKeyAdapter } from '@keepkey/hdwallet-keepkey-nodewebusb'
 import { HIDKeepKeyAdapter } from '@keepkey/hdwallet-keepkey-nodehid'
 import { getDeviceList } from 'usb'
-import { CLEARSIGN_DOMAIN_SEPARATOR, inspectAlphaCertificateBody,
-  verifyAlphaRootSignature, CLEARSIGN_EVM_SCOPES } from '../src/bun/clearsign-alpha-ceremony'
-import { ALPHA_ROOT_PUBLIC_KEY } from './clearsign-alpha-rehearsal'
+import { CLEARSIGN_DOMAIN_SEPARATOR, verifyAlphaRootSignature, CLEARSIGN_EVM_SCOPES } from '../src/bun/clearsign-alpha-ceremony'
+import { ALPHA_ROOT_PUBLIC_KEY, inspectAlphaCeremonyRequest } from './clearsign-alpha-rehearsal'
 
 const sign = process.argv.includes('--sign')
 const requestPath = process.argv.find(x => x.startsWith('--request='))?.slice('--request='.length)
 const outputPath = process.argv.find(x => x.startsWith('--output='))?.slice('--output='.length)
 if (sign && (!requestPath || !outputPath)) throw new Error('--sign requires --request=PUBLIC_REQUEST.json and --output=PUBLIC_CERTIFICATE.json')
 const request = requestPath ? await Bun.file(requestPath).json() : undefined
-const inspection = request ? inspectAlphaCertificateBody(request.signedBodyHex, request.expectedMessageHashHex) : undefined
+// Pins the reviewed alpha delegate before any device is touched.
+const inspection = request ? inspectAlphaCeremonyRequest(request) : undefined
 if (sign && !CLEARSIGN_EVM_SCOPES.some(scope => scope === inspection?.chainId)) throw new Error('This ceremony is restricted to the reviewed EVM chains')
 
 const path = [0x8000002c, 0x8000003c, 0x80000000, 0, 0]
