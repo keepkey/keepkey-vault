@@ -23,7 +23,7 @@ include .env
 export ELECTROBUN_DEVELOPER_ID ELECTROBUN_TEAMID ELECTROBUN_APPLEID ELECTROBUN_APPLEIDPASS
 endif
 
-.PHONY: clearsign-worker-test sync-asset-data clearsign-worker-rehearsal-guard clearsign-worker-rehearsal-deploy install dev dev-hmr build build-stable build-canary build-signed patch-arm64-release-tar prune-bundle dmg clean help vault sign-check notary-check verify verify-entitlements publish release upload-dmg upload-all-dmgs sign-release sign-release-intel verify-arch audit-macos-bundle submodules modules-install modules-build modules-clean audit build-zcash-cli build-zcash-cli-debug build-zcash-cli-intel test test-unit test-rest test-sign-gating test-zcash-cli test-emu build-intel build-signed-intel build-electrobun-x64-core build-electrobun-arm64-core prepare-electrobun-arm64-core publish-electrobun-x64-core build-electrobun-linux-x64-core preflight build-emulator build-emulator-windows build-emulator-macos-release build-emulator-release clean-emulator test-emu-python
+.PHONY: clearsign-worker-test sync-asset-data clearsign-worker-rehearsal-guard clearsign-worker-rehearsal-deploy install dev dev-hmr build build-stable build-canary build-signed patch-arm64-release-tar prune-bundle dmg clean help vault sign-check notary-check verify verify-entitlements publish release upload-dmg upload-all-dmgs sign-release sign-release-intel verify-arch audit-macos-bundle submodules modules-install modules-build modules-clean audit build-zcash-cli build-zcash-cli-debug build-zcash-cli-intel test test-unit test-rest test-sign-gating test-zcash-cli test-emu test-emu-erc7730 build-intel build-signed-intel build-electrobun-x64-core build-electrobun-arm64-core prepare-electrobun-arm64-core publish-electrobun-x64-core build-electrobun-linux-x64-core preflight build-emulator build-emulator-windows build-emulator-macos-release build-emulator-release clean-emulator test-emu-python
 
 # --- Submodules (auto-init on fresh worktrees/clones) ---
 
@@ -437,6 +437,24 @@ test-emu:
 	@test -f $(HOME)/.keepkey/emulator/libkkemu.dylib || \
 		(echo "ERROR: emulator not installed. Run: make build-emulator"; exit 1)
 	cd $(PROJECT_DIR) && bun test tests/emulator/
+
+# ERC-7730 replay (tests/emulator/09-erc7730.test.ts): hdwallet against a STOCK
+# 7.16.0 debug dylib, signing every fixture of the test-signed rig catalog with
+# and without its definition. Blank in-memory flash only. libkkemu reads
+# KK_CLEARSIGN_TEST_ROOT with C getenv() in kkemu_init, and bun's process.env
+# never reaches getenv, so the root is exported here before bun starts.
+#   make test-emu-erc7730 ERC7730_LIMIT=5 ERC7730_FILTER=uniswap ERC7730_SHARD=0/4 ERC7730_REPORT=/path/report.json
+ERC7730_EMU_DYLIB ?= $(HOME)/keepkey-toolchain/emu-v7.16.0-prodroot-arm64/lib/libkkemu.dylib
+ERC7730_FIXTURE ?= $(HOME)/keepkey-audit-rigs/issuer/batch2/erc7730/test-signed/erc7730-replay-fixture.json
+test-emu-erc7730:
+	@test -f "$(ERC7730_EMU_DYLIB)" || (echo "ERROR: stock 7.16 dylib not found: $(ERC7730_EMU_DYLIB)"; exit 1)
+	@test -f "$(ERC7730_FIXTURE)" || (echo "ERROR: ERC-7730 fixture not found: $(ERC7730_FIXTURE)"; exit 1)
+	cd $(PROJECT_DIR) && \
+	root=$$(F="$(ERC7730_FIXTURE)" bun -e 'console.log(require(process.env.F).testRootPubkey)') && \
+	echo "$$root" | grep -Eq '^0[23][0-9a-f]{64}$$' && \
+	KK_EMU_DYLIB="$(ERC7730_EMU_DYLIB)" KK_CLEARSIGN_TEST_ROOT="$$root" KK_ERC7730_FIXTURE="$(ERC7730_FIXTURE)" \
+	KK_ERC7730_LIMIT="$(ERC7730_LIMIT)" KK_ERC7730_FILTER="$(ERC7730_FILTER)" KK_ERC7730_SHARD="$(or $(ERC7730_SHARD),0/1)" KK_ERC7730_REPORT="$(ERC7730_REPORT)" \
+	bun test --timeout 300000 tests/emulator/09-erc7730.test.ts
 
 # --- Emulator (developer feature) ---
 # Build the native emulator from the firmware submodule on the current
@@ -912,6 +930,7 @@ help:
 	@echo "  make build-emulator        - Build kkemu+libkkemu from current firmware submodule checkout"
 	@echo "                               and install to ~/.keepkey/emulator/"
 	@echo "  make test-emu-python       - Run python-keepkey UDP tests against the installed kkemu"
+	@echo "  make test-emu-erc7730      - Replay the ERC-7730 test-signed fixture on a stock 7.16 dylib"
 	@echo "  make clean-emulator        - Remove the installed dylib + binary"
 
 # --- Pre-release Validation ---
