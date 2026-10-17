@@ -29,30 +29,33 @@ const job: ClearSignAuditJob = {
   status: 'evidence-ready', lastProtectionLevel: 'P3', maxExposureClass: 'not-evaluated', attempts: 1, evidence,
 }
 
+// These fixtures carry placeholder certificates; the production-root check is
+// covered in clearsign-production-root.test.ts.
+const FAKE_CERTIFICATES_TRUSTED = () => true
 afterEach(() => configureClearSignArtifactSnapshots(() => []))
 
 describe('promoted artifact resolution', () => {
   test('selects exact calldata only while identity is current', () => {
-    configureClearSignArtifactSnapshots(() => [{ artifact, job }])
+    configureClearSignArtifactSnapshots(() => [{ artifact, job }], FAKE_CERTIFICATES_TRUSTED)
     const hit = findPromotedEvmArtifact(1, candidate.address, `0x12345678${'00'.repeat(32)}`)
     expect(hit?.method).toBe('deposit')
     expect(findPromotedEvmArtifact(1, candidate.address, `0x12345678${'00'.repeat(64)}`)).toBeUndefined()
-    configureClearSignArtifactSnapshots(() => [{ artifact, job: { ...job, status: 'identity-changed' } }])
+    configureClearSignArtifactSnapshots(() => [{ artifact, job: { ...job, status: 'identity-changed' } }], FAKE_CERTIFICATES_TRUSTED)
     expect(findPromotedEvmArtifact(1, candidate.address, `0x12345678${'00'.repeat(32)}`)).toBeUndefined()
   })
 
   test('does not select revoked or expired artifacts', () => {
-    configureClearSignArtifactSnapshots(() => [{ artifact: { ...artifact, revokedAt: Date.now() }, job }])
+    configureClearSignArtifactSnapshots(() => [{ artifact: { ...artifact, revokedAt: Date.now() }, job }], FAKE_CERTIFICATES_TRUSTED)
     expect(findPromotedEvmArtifact(1, candidate.address, `0x12345678${'00'.repeat(32)}`)).toBeUndefined()
     expect(resolvePromotedEvmArtifact(1, candidate.address, `0x12345678${'00'.repeat(32)}`).status).toBe('revoked')
-    configureClearSignArtifactSnapshots(() => [{ artifact: { ...artifact, expiresAt: Date.now() - 1 }, job }])
+    configureClearSignArtifactSnapshots(() => [{ artifact: { ...artifact, expiresAt: Date.now() - 1 }, job }], FAKE_CERTIFICATES_TRUSTED)
     expect(findPromotedEvmArtifact(1, candidate.address, `0x12345678${'00'.repeat(32)}`)).toBeUndefined()
     expect(resolvePromotedEvmArtifact(1, candidate.address, `0x12345678${'00'.repeat(32)}`).status).toBe('expired')
   })
 
   test('fails closed when deployed-code identity evidence is stale', () => {
     const staleEvidence = { ...evidence, auditedAt: Date.now() - 5 * 60 * 1000 - 1 }
-    configureClearSignArtifactSnapshots(() => [{ artifact, job: { ...job, evidence: staleEvidence } }])
+    configureClearSignArtifactSnapshots(() => [{ artifact, job: { ...job, evidence: staleEvidence } }], FAKE_CERTIFICATES_TRUSTED)
     expect(findPromotedEvmArtifact(1, candidate.address, `0x12345678${'00'.repeat(32)}`)).toBeUndefined()
     expect(resolvePromotedEvmArtifact(1, candidate.address, `0x12345678${'00'.repeat(32)}`).status).toBe('identity-stale')
   })
@@ -72,7 +75,7 @@ describe('promoted artifact resolution', () => {
       solana: { schemaPayloadHex: solPayload.toString('hex'), schemaSignatureHex: '77'.repeat(64), signerKeyId: 128, certificateHex: '88'.repeat(139) },
     }
     const solJob: ClearSignAuditJob = { ...job, shapeKey: solShapeKey, chain: 'Solana', evidence: solEvidence }
-    configureClearSignArtifactSnapshots(() => [{ artifact: solArtifact, job: solJob }])
+    configureClearSignArtifactSnapshots(() => [{ artifact: solArtifact, job: solJob }], FAKE_CERTIFICATES_TRUSTED)
     expect(findPromotedSolanaArtifact(noAltFixture.rawTxBase64)?.bundleHash).toBe(solArtifact.bundleHash)
     const privilegeMutation = Buffer.from(noAltFixture.rawTxBase64, 'base64')
     privilegeMutation[67] = 1 // v0 message header: make the only signer readonly

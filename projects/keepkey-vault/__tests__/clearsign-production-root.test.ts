@@ -11,6 +11,10 @@ import alphaArbitrum from '../../../docs/clearsign-case-studies/uniswap-usdt/arb
 import { ALPHA_ROOT_PUBLIC_KEY } from '../scripts/clearsign-alpha-rehearsal'
 import { delegateFingerprint, inspectAlphaCertificate } from '../src/bun/clearsign-alpha-ceremony'
 import { CERTIFIED_EVM_CATALOG, expectedEvmScreens, expectedUniswapScreens } from '../src/bun/evm-certified-schema'
+import { configureClearSignArtifactSnapshots, resolvePromotedEvmArtifact, resolvePromotedSolanaArtifact } from '../src/bun/clearsign-artifact-resolver'
+import { clearSignIdentityHash } from '../src/bun/clearsign-promotion'
+import { resolveEvmSchema } from '../src/bun/evm-schema-registry'
+import noAltFixture from './fixtures/solana/relay-deposit-native-no-alt.json'
 
 const NOW = 1_790_000_000
 
@@ -48,5 +52,46 @@ describe('the production ClearSign root', () => {
     expect(expectedEvmScreens(spec, inspected.alias, fingerprint)!.at(-1)!.body).toBe(described)
     const router = '0x2d01411773c8c24805306e89a41f7855c3c4fe65'
     expect(expectedUniswapScreens(42161, router, inspected.alias, fingerprint).at(-1)!.body).toBe(described)
+  })
+})
+
+describe('artifacts saved before the production root (v1.6.1 checked imports against the alpha root)', () => {
+  const to = '0x1111111111111111111111111111111111111111'
+  const method = Buffer.from('doThing', 'ascii')
+  const body = Buffer.concat([Buffer.from([2]), Buffer.from([0, 0, 0xa4, 0xb1]), Buffer.from(to.slice(2), 'hex'), Buffer.from('abcdef01', 'hex'),
+    Buffer.from([0, method.length]), method, Buffer.from([1]), Buffer.alloc(71)])
+  const data = '0xabcdef01' + '00'.repeat(32)
+  const evidence = { identities: [{ x: 1 }], auditedAt: Date.now() } as any
+  const snapshot = (certificateHex: string, solana = false) => ({
+    artifact: {
+      chain: solana ? 'Solana' : 'Ethereum', shapeKey: 'saved', payloadHex: body.toString('hex'), bundleHash: 'ab',
+      identityHash: clearSignIdentityHash(evidence), expiresAt: Date.now() + 86_400_000, certificateHex,
+      ...(solana
+        ? { solana: { schemaPayloadHex: '00', schemaSignatureHex: '00', signerKeyId: 128, certificateHex } }
+        : { evmCertifiedEnvelopeHex: Buffer.concat([Buffer.from([3]), Buffer.from(certificateHex, 'hex'), body, Buffer.alloc(65)]).toString('hex') }),
+    },
+    job: { status: 'covered', evidence },
+  }) as any
+
+  test('an alpha-root artifact is never sent as KeepKey-certified; a production-root one is', async () => {
+    const realFetch = globalThis.fetch
+    const warn = console.warn
+    const warnings: string[] = []
+    console.warn = (...m: unknown[]) => { warnings.push(m.join(' ')) }
+    globalThis.fetch = (async () => new Response('{}', { status: 422 })) as unknown as typeof fetch
+    try {
+      configureClearSignArtifactSnapshots(() => [snapshot(alphaArbitrum.certificateHex), snapshot(alphaArbitrum.certificateHex, true)])
+      expect(resolvePromotedEvmArtifact(42161, to, data).status).toBe('no-artifact')
+      expect(await resolveEvmSchema(42161, to, data, true, '7.16.0')).toBeUndefined()
+      expect(resolvePromotedSolanaArtifact(noAltFixture.rawTxBase64).status).toBe('no-artifact')
+      expect(warnings.filter((w) => w.includes('not under the KeepKey ClearSign root'))).toHaveLength(1)
+
+      configureClearSignArtifactSnapshots(() => [snapshot(signed.certificates['42161'])])
+      expect(resolvePromotedEvmArtifact(42161, to, data).status).toBe('selected')
+    } finally {
+      configureClearSignArtifactSnapshots(() => [])
+      globalThis.fetch = realFetch
+      console.warn = warn
+    }
   })
 })
