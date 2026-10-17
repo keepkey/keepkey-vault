@@ -219,6 +219,7 @@ type SwapPreviewBuild = {
   allowance?: { current: string; required: string; sufficient: boolean; spender: string; tokenContract: string }
   balance?: { current: string; required: string; sufficient: boolean; tokenContract?: string }
   clearSignReports?: { approval?: import('../../shared/clearsign-report').ClearSignReport; transaction?: import('../../shared/clearsign-report').ClearSignReport }
+  runtimeProvider?: import('../../shared/types').RuntimeProviderNamed
 }
 
 const EVM_METHOD_LABELS: Record<string, string> = {
@@ -2304,6 +2305,8 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
         // Same as the preview build: synthesized token sources need the
         // picker's decimals — Pioneer's available-assets won't have them.
         tokenDecimals: isTokenCaip(fromAsset.caip!) ? normalizeDecimals(fromAsset.decimals) ?? undefined : undefined,
+        // A provider description only from the one this preview card named.
+        runtimeProvider: previewBuild?.runtimeProvider ?? null,
       }, 600000)
 
       setTxid(result.txid)

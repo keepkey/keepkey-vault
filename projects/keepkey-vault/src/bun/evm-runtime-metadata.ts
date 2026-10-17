@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import { versionCompare } from '../shared/firmware-versions'
+import { firmwareClearSigns } from './calldata-decoder'
 import type { SigningRequestInfo } from '../shared/types'
 
 export interface RuntimeEvmSigner {
@@ -43,42 +44,69 @@ function noDescription(provider: string, reason: string): undefined {
   return undefined
 }
 
-/** Resolve transaction-bound metadata for the 7.15 RAM signer path. This is
- * deliberately opt-in: production builds do not contact localhost or load a
- * trust key unless CLEARSIGN_RUNTIME_URL names the provider service.
+export interface RuntimeProviderOptions {
+  timeoutMs?: number
+  /** The key the user added for this provider: an answer from any other key
+   * means no description, and the transaction is never POSTed to it. */
+  expectedPublicKeyHex?: string
+}
+
+const providerBase = (providerUrl: string) => String(providerUrl || '').trim().replace(/\/+$/, '')
+
+/** GET /signer and check it, or why not. Nothing else is sent. */
+async function fetchSigner(configured: string, opts: RuntimeProviderOptions): Promise<RuntimeEvmSigner | string> {
+  const timeoutMs = opts.timeoutMs ?? RUNTIME_PROVIDER_TIMEOUT_MS
+  let response: Response
+  try {
+    response = await fetch(`${configured}/signer`, { signal: AbortSignal.timeout(timeoutMs) })
+  } catch (e: any) {
+    return e?.name === 'TimeoutError' ? `no answer in ${timeoutMs} ms` : `unreachable (${e?.message || e})`
+  }
+  if (!response.ok) return `unavailable (${response.status})`
+  const identity = signerIdentity(await response.json().catch(() => null))
+  if (typeof identity === 'string') return identity
+  const expected = opts.expectedPublicKeyHex?.replace(/^0x/i, '').toLowerCase()
+  if (expected && identity.publicKeyHex !== expected) {
+    return `answered with a key (${identity.deviceFingerprint}) that is not the one you added (${deviceFingerprint(expected)})`
+  }
+  return identity
+}
+
+/** Resolve transaction-bound metadata for the 7.15 RAM signer path from one
+ * provider the user added (clearsign-providers.ts picks which). Nothing is
+ * contacted without a provider URL. The signer is fetched and checked first;
+ * the transaction is POSTed only to a provider whose key is the expected one.
  *
  * Every failure returns undefined (the device then shows the call as it would
  * with no provider): a decline (422), any other non-ok status, a network
- * error or timeout, and an answer whose signer identity, slot or payload is
- * malformed. None of these can make the device sign under a misleading name:
- * the device names only a key the user trusted on its own screen, and a
- * malformed answer is never sent to it. */
-export async function resolveRuntimeEvmMetadata(tx: any, timeoutMs = RUNTIME_PROVIDER_TIMEOUT_MS): Promise<RuntimeEvmMetadata | undefined> {
-  const configured = String(process.env.CLEARSIGN_RUNTIME_URL || '').trim().replace(/\/+$/, '')
+ * error or timeout, a key other than the one the user added, and an answer
+ * whose signer identity, slot or payload is malformed. None of these can make
+ * the device sign under a misleading name: the device names only a key the
+ * user trusted on its own screen, and a malformed answer is never sent to it. */
+export async function resolveRuntimeEvmMetadata(tx: any, providerUrl: string, opts: RuntimeProviderOptions = {}): Promise<RuntimeEvmMetadata | undefined> {
+  const configured = providerBase(providerUrl)
   if (!configured) return undefined
+  const identity = await fetchSigner(configured, opts)
+  if (typeof identity === 'string') return noDescription(configured, identity)
 
-  let signerResponse: Response
+  const timeoutMs = opts.timeoutMs ?? RUNTIME_PROVIDER_TIMEOUT_MS
   let signResponse: Response
   try {
-    [signerResponse, signResponse] = await Promise.all([
-      fetch(`${configured}/signer`, { signal: AbortSignal.timeout(timeoutMs) }),
-      fetch(`${configured}/sign`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          chainId: tx.chainId, nonce: tx.nonce, gasLimit: tx.gasLimit,
-          to: tx.to, value: tx.value, data: tx.data,
-          ...(tx.gasPrice !== undefined ? { gasPrice: tx.gasPrice } : {}),
-          ...(tx.maxFeePerGas !== undefined ? { maxFeePerGas: tx.maxFeePerGas } : {}),
-          ...(tx.maxPriorityFeePerGas !== undefined ? { maxPriorityFeePerGas: tx.maxPriorityFeePerGas } : {}),
-        }),
-        signal: AbortSignal.timeout(timeoutMs),
+    signResponse = await fetch(`${configured}/sign`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        chainId: tx.chainId, nonce: tx.nonce, gasLimit: tx.gasLimit,
+        to: tx.to, value: tx.value, data: tx.data,
+        ...(tx.gasPrice !== undefined ? { gasPrice: tx.gasPrice } : {}),
+        ...(tx.maxFeePerGas !== undefined ? { maxFeePerGas: tx.maxFeePerGas } : {}),
+        ...(tx.maxPriorityFeePerGas !== undefined ? { maxPriorityFeePerGas: tx.maxPriorityFeePerGas } : {}),
       }),
-    ])
+      signal: AbortSignal.timeout(timeoutMs),
+    })
   } catch (e: any) {
     return noDescription(configured, e?.name === 'TimeoutError' ? `no answer in ${timeoutMs} ms` : `unreachable (${e?.message || e})`)
   }
-  const signer: any = await signerResponse.json().catch(() => null)
   const signed: any = await signResponse.json().catch(() => null)
   if (signResponse.status === 422) {
     const reason = typeof signed?.error === 'string' && signed.error.length <= 240
@@ -86,30 +114,13 @@ export async function resolveRuntimeEvmMetadata(tx: any, timeoutMs = RUNTIME_PRO
       : 'transaction is outside the provider coverage policy'
     return noDescription(configured, `declined (${reason})`)
   }
-  if (!signerResponse.ok || !signResponse.ok) {
-    return noDescription(configured, `unavailable (${signerResponse.status}/${signResponse.status})`)
-  }
-  const identity = signerIdentity(signer)
-  if (typeof identity === 'string') return noDescription(configured, identity)
+  if (!signResponse.ok) return noDescription(configured, `unavailable (${signResponse.status})`)
   if (Number(signed?.keyId) !== identity.keyId) {
     return noDescription(configured, 'returned a non-loadable or mismatched signer slot')
   }
   const payload = String(signed?.signedPayload || '').replace(/^0x/i, '')
   if (!/^[0-9a-f]+$/i.test(payload) || payload.length < 130) return noDescription(configured, 'returned malformed metadata')
   return { signedPayload: `0x${payload}`, keyId: identity.keyId, signer: identity }
-}
-
-/** Transaction-bound metadata only from the signer an approval card named:
- * never attach a description under a name the user was not shown. Nothing
- * named, or a different key answering, means no description. */
-export async function resolveNamedRuntimeEvmMetadata(
-  tx: any, named: { publicKeyHex: string; fingerprint: string } | undefined, timeoutMs = RUNTIME_PROVIDER_TIMEOUT_MS,
-): Promise<RuntimeEvmMetadata | undefined> {
-  if (!named) return undefined
-  const answer = await resolveRuntimeEvmMetadata(tx, timeoutMs)
-  if (!answer || answer.signer.publicKeyHex === named.publicKeyHex) return answer
-  console.warn(`[clearsign] runtime provider signer changed since approval (${named.fingerprint} → ${answer.signer.deviceFingerprint}); signing with no description`)
-  return undefined
 }
 
 /** The provider's advertised signer, checked against its own key, or why not. */
@@ -130,29 +141,36 @@ function signerIdentity(signer: any): RuntimeEvmSigner | string {
   }
 }
 
-/** The configured provider's signer, for the approval card to name before the
- * user approves (the transaction-bound description is fetched only after). No
- * provider, or one that is down or malformed, gives undefined. */
-export async function resolveRuntimeEvmSigner(timeoutMs = RUNTIME_PROVIDER_TIMEOUT_MS): Promise<RuntimeEvmSigner | undefined> {
-  const configured = String(process.env.CLEARSIGN_RUNTIME_URL || '').trim().replace(/\/+$/, '')
+/** A provider's signer, for the approval card to name before the user
+ * approves (the transaction-bound description is fetched only after). One
+ * that is down, malformed or not the expected key gives undefined. */
+export async function resolveRuntimeEvmSigner(providerUrl: string, opts: RuntimeProviderOptions = {}): Promise<RuntimeEvmSigner | undefined> {
+  const configured = providerBase(providerUrl)
   if (!configured) return undefined
-  let response: Response
-  try {
-    response = await fetch(`${configured}/signer`, { signal: AbortSignal.timeout(timeoutMs) })
-  } catch (e: any) {
-    return noDescription(configured, e?.name === 'TimeoutError' ? `no answer in ${timeoutMs} ms` : `unreachable (${e?.message || e})`)
-  }
-  if (!response.ok) return noDescription(configured, `unavailable (${response.status})`)
-  const identity = signerIdentity(await response.json().catch(() => null))
+  const identity = await fetchSigner(configured, opts)
   return typeof identity === 'string' ? noDescription(configured, identity) : identity
 }
 
+/** Whether a provider description could add anything: a call with calldata
+ * the firmware does not show on its own. A plain send, or an ERC-20
+ * transfer/approve of a token the firmware knows, never contacts a provider
+ * (no third-party trust screen on a normal flow, no leak of every send). */
+export function providerCanDescribe(tx: { to?: string; data?: string; chainId?: unknown; value?: unknown }, firmwareVersion: string | undefined): boolean {
+  const data = String(tx?.data || '')
+  if (!/^0x[0-9a-f]{8}/i.test(data)) return false
+  const raw = tx?.chainId
+  const chainId = typeof raw === 'string' && /^0x/i.test(raw) ? parseInt(raw, 16) : Number(raw)
+  return !firmwareClearSigns(tx.to, data, Number.isFinite(chainId) ? chainId : undefined, firmwareVersion, tx.value)
+}
+
 /** Whether the REST sign handler will ask the runtime provider for this call:
- * no caller blob, no certified or Pioneer description, and 7.15+ with
- * AdvancedMode on (the same order the handler resolves metadata in). */
+ * no caller blob, no certified or Pioneer description, a call the firmware
+ * does not show natively, and 7.15+ with AdvancedMode on (the same order the
+ * handler resolves metadata in). */
 export function runtimeProviderWillBeAsked(info: SigningRequestInfo, callerMetadata: unknown): boolean {
   return !(callerMetadata as { signedPayload?: unknown } | undefined)?.signedPayload
     && !info.certifiedEvmSchema && !info.calldataDecoded?.signedInsightBlob
+    && !info.deviceClearSigns && providerCanDescribe(info, info.firmwareVersion)
     && supportsRuntimeEvmMetadata(info.firmwareVersion, info.advancedModeEnabled === true)
 }
 

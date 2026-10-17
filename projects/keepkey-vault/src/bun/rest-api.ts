@@ -83,7 +83,8 @@ import { createClearSignFixturePlan } from './clearsign-fixture-plan'
 import { replayLegacyClearSignRows } from './clearsign-legacy-replay'
 import { importPromotedClearSignArtifact } from './clearsign-artifact-import'
 import { findPromotedEvmArtifact, findPromotedSolanaArtifact, resolvePromotedSolanaArtifact } from './clearsign-artifact-resolver'
-import { resolveNamedRuntimeEvmMetadata, resolveRuntimeEvmSigner, runtimeProviderWillBeAsked, supportsRuntimeEvmMetadata, trustRuntimeSigner, type RuntimeEvmSigner } from './evm-runtime-metadata'
+import { runtimeProviderWillBeAsked, trustRuntimeSigner, type RuntimeEvmSigner } from './evm-runtime-metadata'
+import { nameRuntimeProvider, resolveProviderTxMetadata } from './clearsign-providers'
 import { supportsCertifiedClearSign } from './solana-certified-policy'
 import { measureLiveDeployment, resolveEvmSchema } from './evm-schema-registry'
 import { findContractRating } from './clearsign-review'
@@ -2085,12 +2086,14 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           // and the handler attaches one only from the key named here.
           if (path === '/eth/sign-transaction' && signingInfo.clearSignReport
             && runtimeProviderWillBeAsked(signingInfo, probeCheckBody?.txMetadata)) {
-            const signer = await resolveRuntimeEvmSigner()
-            if (signer) {
-              signingInfo.runtimeProvider = { alias: signer.alias, fingerprint: signer.deviceFingerprint, publicKeyHex: signer.publicKeyHex }
+            const named = await nameRuntimeProvider(signingInfo, {
+              firmwareVersion: signingInfo.firmwareVersion, advancedMode: signingInfo.advancedModeEnabled === true,
+            })
+            if (named) {
+              signingInfo.runtimeProvider = named
               signingInfo.clearSignReport.descriptor = {
                 ...signingInfo.clearSignReport.descriptor,
-                provider: { alias: signer.alias, fingerprint: signer.deviceFingerprint, status: 'requested' },
+                provider: { alias: named.alias, fingerprint: named.fingerprint, status: 'requested' },
               }
             }
           }
@@ -2840,27 +2843,24 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
                 keyId: decoded.insightKeyId,
               }
               console.log(`[REST] EVM clear-sign: using Pioneer blob (keyId=${decoded.insightKeyId}, ${msg.txMetadata.signedPayload.length} bytes)`)
-            } else if (
-              supportsRuntimeEvmMetadata(activeSigningInfo?.firmwareVersion, activeSigningInfo?.advancedModeEnabled === true)
-            ) {
-              // The same exact-transaction runtime metadata path as the
-              // browser-extension route. Runtime metadata only annotates: a
-              // provider decline, outage or malformed answer, or a refused
-              // device trust screen, means no description. The device then
-              // shows the call as it would with no provider (raw data under
-              // AdvancedMode, which this path already requires).
-              // Only from the key the approval card named.
-              const runtime = await resolveNamedRuntimeEvmMetadata(msg, activeSigningInfo?.runtimeProvider)
+            } else {
+              // Same provider step as the RPC, swap and WalletConnect routes:
+              // the ClearSign provider the user added for this contract, asked
+              // about this exact final transaction (AdvancedMode, 7.15+ only).
+              // Runtime metadata only annotates: a decline, outage, other key
+              // or a refused device trust screen means no description. Only
+              // from the provider, key and slot the approval card named.
+              const runtime = await resolveProviderTxMetadata(msg, {
+                firmwareVersion: activeSigningInfo?.firmwareVersion,
+                advancedMode: activeSigningInfo?.advancedModeEnabled === true,
+              }, undefined, { named: activeSigningInfo?.runtimeProvider ?? null })
               if (runtime) {
                 runtimeSigner = runtime.signer
-                msg.txMetadata = {
-                  signedPayload: runtime.signedPayload,
-                  keyId: runtime.keyId,
-                }
-                console.log(`[REST] EVM clear-sign: runtime provider signer ${runtime.signer.fingerprint} (keyId=${runtime.keyId})`)
+                msg.txMetadata = runtime.txMetadata
+                console.log(`[REST] EVM clear-sign: ClearSign provider ${runtime.provider.name} (${runtime.signer.deviceFingerprint}, keyId=${runtime.txMetadata.keyId})`)
+              } else {
+                console.log('[REST] EVM clear-sign: no metadata blob — device will show raw hex')
               }
-            } else {
-              console.log('[REST] EVM clear-sign: no metadata blob — device will show raw hex')
             }
           }
 
@@ -2891,7 +2891,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             }, '[REST]')
             recordRestClearSignEvent({
               kind: 'signer-load', outcome: trusted ? 'loaded' : 'blocked', source: 'rest-api', chain: 'Ethereum',
-              label: signer.alias, publicKey: signer.publicKeyHex, fingerprint: signer.fingerprint,
+              label: signer.alias, publicKey: signer.publicKeyHex, fingerprint: signer.deviceFingerprint,
               keyId: signer.keyId, sentToDevice: signerSentToDevice,
               request: { automatic: true },
               ...(trusted ? {} : { error: (loadError as any)?.message || String(loadError) }),

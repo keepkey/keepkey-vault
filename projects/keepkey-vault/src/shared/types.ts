@@ -1071,7 +1071,7 @@ export interface SigningRequestInfo {
   /** The runtime ClearSign provider the sign handler will ask for a
    *  description, as the approval card named it (fingerprint as the device
    *  shows it). The handler attaches a description only from this key. */
-  runtimeProvider?: { alias: string; fingerprint: string; publicKeyHex: string }
+  runtimeProvider?: RuntimeProviderNamed
   /** Emulator test tape is recording: the approval card reports what it renders and answers itself. */
   testReview?: boolean
   /** The device can independently decode this call, either from its native
@@ -1278,6 +1278,31 @@ export interface PioneerServer {
   url: string
   label: string
   isDefault: boolean
+}
+
+// A third-party ClearSign description provider the user added (persisted in
+// SQLite). Its key is trusted by the device only per session, after the user
+// approves "NOT verified by KeepKey"; nothing here is KeepKey-certified.
+export interface ClearSignProviderContract {
+  chainId: number
+  address: string                // lowercase 0x-prefixed
+}
+
+export interface ClearSignProvider {
+  id: string
+  name: string                   // alias shown on the device trust screen
+  url: string
+  publicKeyHex: string           // 33-byte compressed secp256k1, lowercase hex
+  fingerprint: string            // 16 uppercase hex, as the device shows it
+  contracts: ClearSignProviderContract[] // empty = any contract
+  createdAt: number
+}
+
+export interface ClearSignProviderInput {
+  name: string
+  url: string
+  publicKeyHex: string
+  contracts?: ClearSignProviderContract[]
 }
 
 // Application-level settings (persisted in SQLite)
@@ -1765,6 +1790,19 @@ export interface ExecuteSwapParams {
    *  fallback. It does not change the device's AdvancedMode policy, which is
    *  session state on 7.15+ (disarmed on lock or unplug). */
   allowSolanaBlindSigning?: boolean
+  /** The ClearSign provider the swap preview card named (null: it named
+   *  none). A description is attached only from that provider, key and slot.
+   *  Absent for callers with no card. */
+  runtimeProvider?: RuntimeProviderNamed | null
+}
+
+/** A third-party ClearSign provider as an approval card named it. */
+export interface RuntimeProviderNamed {
+  alias: string
+  /** 16-hex uppercase, as the device shows it. */
+  fingerprint: string
+  publicKeyHex: string
+  keyId: number
 }
 
 export type SwapProviderStatus = 'ok' | 'degraded' | 'offline' | 'unknown'

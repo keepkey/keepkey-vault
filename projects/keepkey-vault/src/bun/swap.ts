@@ -10,11 +10,12 @@
  */
 import { CHAINS, supportedBtcScriptTypes, btcAccountPath, evmAddressPath } from '../shared/chains'
 import type { ChainDef } from '../shared/chains'
-import type { SwapAsset, SwapQuote, SwapQuoteParams, ExecuteSwapParams, SwapResult } from '../shared/types'
+import type { SwapAsset, SwapQuote, SwapQuoteParams, ExecuteSwapParams, SwapResult, RuntimeProviderNamed } from '../shared/types'
 import { SOLANA_BLIND_SIGNING_REQUIRED, evmAdvancedModeRequiredMessage } from '../shared/types'
 import { toDeviceError, deviceErrorMessage } from '../shared/device-error'
 import { resolveEvmSchema } from './evm-schema-registry'
-import { resolveRuntimeEvmMetadata, supportsRuntimeEvmMetadata, trustRuntimeSigner, type RuntimeEvmSigner } from './evm-runtime-metadata'
+import { trustRuntimeSigner, type RuntimeEvmSigner } from './evm-runtime-metadata'
+import { resolveProviderTxMetadata } from './clearsign-providers'
 import { evmCallRequiresAdvancedMode } from './evm-signing-policy'
 import { ERC7730_TRANSPORT_SUPPORTED } from '../shared/erc7730-support'
 import { findSolanaSchema } from './solana-schema-registry'
@@ -797,10 +798,11 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
     } else {
       const certifiedSupported = supportsCertifiedClearSign(ctx.getFirmwareVersion?.())
       // Certified and RAM-signer metadata are complementary. On 7.16+, try the
-      // certified catalog first, then use the explicitly configured runtime
-      // provider as a transaction-bound fallback under AdvancedMode.
-      const runtimeSupported = supportsRuntimeEvmMetadata(ctx.getFirmwareVersion?.(), ctx.isAdvancedModeEnabled?.() === true)
-      const result = await buildRelaySwapTx(params, fromChain, fromAddress, getEvmRpcSource, isErc20Source, /* previewMode */ false, certifiedSupported, runtimeSupported)
+      // certified catalog first, then the ClearSign provider the user added
+      // as a transaction-bound fallback under AdvancedMode.
+      // Only from the provider the swap preview card named, when there was one.
+      const runtimeGate = { firmwareVersion: ctx.getFirmwareVersion?.(), advancedMode: ctx.isAdvancedModeEnabled?.() === true, named: params.runtimeProvider }
+      const result = await buildRelaySwapTx(params, fromChain, fromAddress, getEvmRpcSource, isErc20Source, /* previewMode */ false, certifiedSupported, runtimeGate)
       unsignedTx = result.unsignedTx
       fromAmountBaseUnits = result.fromAmountBaseUnits
 
@@ -1309,7 +1311,7 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
 export async function previewSwapBuild(
   params: ExecuteSwapParams,
   ctx: SwapContext,
-): Promise<{ approveTx?: any; unsignedTx: any; runtimeSigner?: RuntimeEvmSigner; allowance?: { current: string; required: string; sufficient: boolean; spender: string; tokenContract: string }; balance?: { current: string; required: string; sufficient: boolean; tokenContract?: string } }> {
+): Promise<{ approveTx?: any; unsignedTx: any; runtimeSigner?: RuntimeEvmSigner; runtimeProvider?: RuntimeProviderNamed; allowance?: { current: string; required: string; sufficient: boolean; spender: string; tokenContract: string }; balance?: { current: string; required: string; sufficient: boolean; tokenContract?: string } }> {
   const { wallet, getAllChains, getEvmRpcSource, getBtcXpub, getAllBtcXpubs } = ctx
 
   const allChains = getAllChains()
@@ -1366,9 +1368,13 @@ export async function previewSwapBuild(
       return { unsignedTx: buildResult.unsignedTx }
     }
     const certifiedSupported = supportsCertifiedClearSign(ctx.getFirmwareVersion?.())
-    const runtimeSupported = supportsRuntimeEvmMetadata(ctx.getFirmwareVersion?.(), ctx.isAdvancedModeEnabled?.() === true)
-    const result = await buildRelaySwapTx(params, fromChain, fromAddress, getEvmRpcSource, isErc20Source, /* previewMode */ true, certifiedSupported, runtimeSupported)
-    return { unsignedTx: result.unsignedTx, approveTx: result.approveTx, allowance: result.allowance, balance: result.balance, runtimeSigner: result.runtimeSigner }
+    const runtimeGate = { firmwareVersion: ctx.getFirmwareVersion?.(), advancedMode: ctx.isAdvancedModeEnabled?.() === true }
+    const result = await buildRelaySwapTx(params, fromChain, fromAddress, getEvmRpcSource, isErc20Source, /* previewMode */ true, certifiedSupported, runtimeGate)
+    const signer = result.runtimeSigner
+    return {
+      unsignedTx: result.unsignedTx, approveTx: result.approveTx, allowance: result.allowance, balance: result.balance, runtimeSigner: signer,
+      runtimeProvider: signer ? { alias: signer.alias, fingerprint: signer.deviceFingerprint, publicKeyHex: signer.publicKeyHex, keyId: signer.keyId } : undefined,
+    }
   }
   if (fromChain.chainFamily === 'evm') {
     const result = await buildEvmSwapTx(params, fromChain, fromAddress, pioneer, getEvmRpcSource, isErc20Source, wallet, /* previewMode */ true, undefined, undefined, undefined, supportsCertifiedClearSign(ctx.getFirmwareVersion?.()))
@@ -1467,7 +1473,7 @@ async function buildRelaySwapTx(
   isErc20Source = false,
   previewMode = false,
   certifiedMetadataSupported = false,
-  runtimeMetadataSupported = false,
+  runtimeGate: { firmwareVersion?: string; advancedMode: boolean; named?: RuntimeProviderNamed | null } = { advancedMode: false },
 ): Promise<{ unsignedTx: any; runtimeSigner?: RuntimeEvmSigner; approveTx?: any; fromAmountBaseUnits?: string; allowance?: { current: string; required: string; sufficient: boolean; spender: string; tokenContract: string }; balance?: { current: string; required: string; sufficient: boolean; tokenContract?: string } }> {
   const relay = params.relayTx!
   const evmSigningPath = params.fromEvmAddressIndex != null
@@ -1852,13 +1858,11 @@ async function buildRelaySwapTx(
   // signed field (including the final fee model and any adjusted nonce/value)
   // has been placed on the transaction.
   let runtimeSigner: RuntimeEvmSigner | undefined
-  if (!unsignedTx.txMetadata && runtimeMetadataSupported) {
-    const runtime = await resolveRuntimeEvmMetadata(unsignedTx)
-    if (runtime) {
-      unsignedTx.txMetadata = { signedPayload: runtime.signedPayload, keyId: runtime.keyId }
-      runtimeSigner = runtime.signer
-      console.info(`${TAG} 7.15 runtime ClearSign metadata attached (slot=${runtime.keyId}, signer=${runtime.signer.fingerprint})`)
-    }
+  const runtime = await resolveProviderTxMetadata(unsignedTx, runtimeGate, undefined, { named: runtimeGate.named })
+  if (runtime) {
+    unsignedTx.txMetadata = runtime.txMetadata
+    runtimeSigner = runtime.signer
+    console.info(`${TAG} ClearSign provider ${runtime.provider.name} described the swap (slot=${runtime.txMetadata.keyId}, ${runtime.signer.deviceFingerprint})`)
   }
 
   // Sanity guard — ERC-20 sources ALWAYS need calldata (transferFrom or
