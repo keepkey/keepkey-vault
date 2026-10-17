@@ -130,9 +130,11 @@ function TrustBadge({ level, hasSigned, schemaOnly, label, t }: { level: 'verifi
 
 // ── Blind signing warning ─────────────────────────────────────────────
 
-function BlindSigningBanner({ enabled, confirming, onEnable, onCancel, t, title, description, confirmDescription, enableLabel, error }: {
+function BlindSigningBanner({ enabled, confirming, onEnable, onCancel, t, title, description, confirmDescription, enableLabel, error, explainOnly = false }: {
 	enabled: boolean; confirming: boolean; onEnable: () => void; onCancel: () => void; t: (k: string, f?: string) => string
 	title?: string; description?: string; confirmDescription?: string; enableLabel?: string; error?: string | null
+	/** The card's bottom button turns Advanced Mode on; the banner only explains why. */
+	explainOnly?: boolean
 }) {
 	if (enabled) return null
 	return (
@@ -152,7 +154,7 @@ function BlindSigningBanner({ enabled, confirming, onEnable, onCancel, t, title,
 							: (description ?? t("signing.blindSigningDescription", "Enable Advanced Mode on device to sign unverified contract data."))}
 					</Text>
 				</Box>
-				{!confirming && (
+				{!confirming && !explainOnly && (
 					<Box
 						as="button" px="3" py="1" borderRadius="full"
 						bg="rgba(245,163,59,0.2)" color="#F5A33B" fontSize="2xs" fontWeight="600"
@@ -1049,23 +1051,26 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 
 	const [showAdvancedConfirm, setShowAdvancedConfirm] = useState(false)
 
+	// One click from the card's main button: the device's own ENABLE POLICY
+	// screen is the confirmation. No timeout: the device also asks for a full
+	// PIN re-entry, and a timeout could fire while the device still turns it on.
 	const handleEnableAdvancedMode = useCallback(async () => {
-		if (!showAdvancedConfirm) {
-			setShowAdvancedConfirm(true)
-			return
-		}
+		if (enablingPolicy) return
 		setEnablingPolicy(true)
 		setAdvancedModeError(null)
 		try {
-			await rpcRequest("applyPolicy", { policyName: "AdvancedMode", enabled: true }, 60000)
+			await rpcRequest("applyPolicy", { policyName: "AdvancedMode", enabled: true }, 0)
 			setAdvancedModeEnabled(true)
 		} catch (e: any) {
 			console.error("Failed to enable AdvancedMode:", e)
-			setAdvancedModeError(e?.message || t("signing.advancedModeEnableFailed", "Failed to enable Advanced Mode."))
+			const msg = e?.message || ''
+			setAdvancedModeError(/cancel|denied|rejected/i.test(msg)
+				? t("signing.advancedModeDeclined", "Declined on your KeepKey. Advanced Mode is still off.")
+				: (msg || t("signing.advancedModeEnableFailed", "Failed to enable Advanced Mode.")))
 		}
 		setEnablingPolicy(false)
 		setShowAdvancedConfirm(false)
-	}, [showAdvancedConfirm, t])
+	}, [enablingPolicy, t])
 
 	const cardRef = useRef<HTMLDivElement>(null)
 	const submitApproval = useCallback(() => {
@@ -1391,6 +1396,7 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 								: undefined}
 						enableLabel={isSolanaSignMessage ? t("signing.enableAdvancedMode", "Enable Advanced Mode") : undefined}
 						error={advancedModeError}
+						explainOnly
 					/>
 				)}
 
@@ -1466,11 +1472,14 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 						flex="1" bg="kk.gold"
 						color="black" fontWeight="600" size="md"
 						_hover={{ bg: "kk.goldHover" }}
-						onClick={submitApproval} disabled={approveDisabled}
-						cursor={approveDisabled ? "not-allowed" : "pointer"}
+						onClick={advancedModeBlocked ? handleEnableAdvancedMode : submitApproval}
+						disabled={enablingPolicy || (!advancedModeBlocked && approveDisabled)}
+						cursor={enablingPolicy || (!advancedModeBlocked && approveDisabled) ? "not-allowed" : "pointer"}
 					>
-						{advancedModeBlocked
-							? t("signing.enableAdvancedModeFirst", "Enable Advanced Mode to approve")
+						{enablingPolicy
+							? t("signing.advancedModeConfirmOnDevice", "Confirm on your KeepKey, then re-enter your PIN")
+							: advancedModeBlocked
+							? t("signing.turnOnAdvancedMode", "Turn on Advanced Mode")
 							: blindSigningConsentBlocked
 								? t("signing.allowBlindSigningOnceFirst", "Choose Allow once to approve")
 								: t("signing.approve")}
@@ -1486,7 +1495,7 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 				</Flex>
 
 				<Text fontSize="2xs" color="kk.textMuted">
-					{advancedModeBlocked ? t("signing.enableAdvancedModeHint", "Enable Advanced Mode above to unlock signing") : t("signing.keyboardHint")}
+					{advancedModeBlocked ? t("signing.advancedModeScopeHint", "Advanced Mode stays on until your KeepKey locks or is unplugged, for every app that uses it.") : t("signing.keyboardHint")}
 				</Text>
 			</VStack>
 		</Box>

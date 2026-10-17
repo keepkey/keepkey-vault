@@ -3227,14 +3227,22 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const apply = () => engine.wallet!.applyPolicy({ policyName: params.policyName, enabled: params.enabled })
 				// The device drops session signers when AdvancedMode goes off; drop the Studio key with them.
 				providerKeySession.onPolicy(params)
-				if (engine.isEmulator) {
-					await emuSigningOp(apply, {
-						operation: 'applyPolicy',
-						opLabel: `${params.enabled ? 'Enable' : 'Disable'} ${params.policyName} policy`,
-					})
-				} else {
-					await apply()
+				const what = `${params.policyName} ${params.enabled ? 'on' : 'off'}`
+				console.log(`[policy] ${what}: waiting for the device`)
+				try {
+					if (engine.isEmulator) {
+						await emuSigningOp(apply, {
+							operation: 'applyPolicy',
+							opLabel: `${params.enabled ? 'Enable' : 'Disable'} ${params.policyName} policy`,
+						})
+					} else {
+						await apply()
+					}
+				} catch (e: any) {
+					console.warn(`[policy] ${what} failed:`, e?.message || e)
+					throw e
 				}
+				console.log(`[policy] ${what}: done`)
 				clearFeaturesCache()
 				try {
 					await engine.refreshFeaturesSnapshot()
