@@ -1886,7 +1886,7 @@ export class EngineController extends EventEmitter {
     }
   }
 
-  async recoverDevice(opts: { wordCount: 12 | 18 | 24; pin: boolean; passphrase: boolean }, _retryCount = 0) {
+  async recoverDevice(opts: { wordCount: 12 | 18 | 24; pin: boolean; passphrase: boolean }, _retryCount = 0, sendAutoLock = true) {
     const MAX_WORD_RETRIES = 5
 
     if (_retryCount === 0) {
@@ -1901,7 +1901,7 @@ export class EngineController extends EventEmitter {
         label: 'KeepKey',
         pin: opts.pin,
         passphrase: opts.passphrase,
-        autoLockDelayMs: DEFAULT_AUTO_LOCK_MS,
+        autoLockDelayMs: sendAutoLock ? DEFAULT_AUTO_LOCK_MS : undefined,
       })
       this.cachedFeatures = await this.wallet!.getFeatures()
       this.updateState(this.deriveState(this.cachedFeatures))
@@ -1910,6 +1910,13 @@ export class EngineController extends EventEmitter {
     } catch (err: any) {
       const rawMessage = extractErrorMessage(err)
       console.error('[Engine] Recovery failed:', rawMessage)
+
+      // A device that caps the auto-lock (the private ClearSign issuer firmware)
+      // refuses our default before any word is entered: recover with its own.
+      if (sendAutoLock && rawMessage.includes('Auto-lock delay must be')) {
+        console.log('[Engine] Device refused the auto-lock default, recovering with the device default')
+        return this.recoverDevice(opts, _retryCount, false)
+      }
 
       // Word not found — firmware aborts session, but we auto-restart so user can retry
       if (rawMessage.includes('Word not found') && _retryCount < MAX_WORD_RETRIES) {
@@ -1920,7 +1927,7 @@ export class EngineController extends EventEmitter {
           autoRetrying: true,
         })
         await new Promise(r => setTimeout(r, 2000))
-        return this.recoverDevice(opts, _retryCount + 1)
+        return this.recoverDevice(opts, _retryCount + 1, sendAutoLock)
       }
 
       // Terminal error — clean up. Capture the PIN prompt count BEFORE zeroing
