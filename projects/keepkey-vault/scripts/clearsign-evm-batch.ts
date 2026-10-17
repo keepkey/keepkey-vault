@@ -1,4 +1,5 @@
 import { buildAlphaCertificateBody, inspectAlphaCertificate, inspectAlphaCertificateBody } from '../src/bun/clearsign-alpha-ceremony'
+import { ALPHA_ALIAS, ALPHA_DELEGATE_PUBLIC_KEY, ALPHA_ROOT_PUBLIC_KEY } from './clearsign-alpha-rehearsal'
 
 const chains = [[10, 'Optimism'], [8453, 'Base'], [137, 'Polygon'], [56, 'BNB Smart Chain'],
   [43114, 'Avalanche'], [100, 'Gnosis'], [130, 'Unichain'], [5000, 'Mantle'],
@@ -7,7 +8,7 @@ const directory = '../../docs/clearsign-case-studies/uniswap-usdt/evm-certificat
 const sign = process.argv.includes('--sign')
 const requests = []
 for (const [chainId, name] of chains) {
-  const request = buildAlphaCertificateBody('KeepKey Alpha 716', 1798675200, chainId)
+  const request = buildAlphaCertificateBody(ALPHA_ALIAS, 1798675200, chainId, ALPHA_DELEGATE_PUBLIC_KEY)
   const inspection = inspectAlphaCertificateBody(request.signedBodyHex, request.expectedMessageHashHex)
   const requestPath = `${directory}/${chainId}-request.json`
   const outputPath = `${directory}/${chainId}-certificate.json`
@@ -20,7 +21,7 @@ for (const request of requests) {
   if (!sign) continue
   if (await Bun.file(request.outputPath).exists()) {
     const saved = await Bun.file(request.outputPath).json()
-    const certificate = inspectAlphaCertificate(saved.certificateHex)
+    const certificate = inspectAlphaCertificate(saved.certificateHex, undefined, ALPHA_ROOT_PUBLIC_KEY)
     if (certificate.chainId !== request.chainId || certificate.messageHash !== request.messageHash) {
       throw new Error('Saved certificate does not match this reviewed request')
     }

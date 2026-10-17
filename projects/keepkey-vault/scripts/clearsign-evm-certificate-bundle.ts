@@ -1,4 +1,5 @@
 import { CLEARSIGN_EVM_SCOPES, inspectAlphaCertificate } from '../src/bun/clearsign-alpha-ceremony'
+import { ALPHA_ROOT_PUBLIC_KEY } from './clearsign-alpha-rehearsal'
 
 const root = '../../docs/clearsign-case-studies/uniswap-usdt'
 const certificates: Record<string, string> = {}
@@ -8,7 +9,7 @@ for (const chainId of CLEARSIGN_EVM_SCOPES) {
   const path = chainId === 42161 ? `${root}/arbitrum-certificate.json`
     : `${root}/evm-certificates/${chainId}-certificate.json`
   const saved = await Bun.file(path).json()
-  const certificate = inspectAlphaCertificate(saved.certificateHex)
+  const certificate = inspectAlphaCertificate(saved.certificateHex, undefined, ALPHA_ROOT_PUBLIC_KEY)
   if (certificate.chainId !== chainId) throw new Error(`Wrong certificate scope in ${path}`)
   certificates[String(chainId)] = saved.certificateHex
 }

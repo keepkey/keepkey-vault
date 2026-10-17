@@ -2,12 +2,11 @@
 import { createHash } from 'node:crypto'
 import bs58 from 'bs58'
 import {
-  ALPHA_DELEGATE_FINGERPRINT,
-  ALPHA_DELEGATE_PUBLIC_KEY,
   CLEARSIGN_SCOPE_ETHEREUM,
   CLEARSIGN_SCOPE_SOLANA,
   inspectAlphaCertificate,
 } from '../src/bun/clearsign-alpha-ceremony'
+import { ALPHA_DELEGATE_FINGERPRINT, ALPHA_DELEGATE_PUBLIC_KEY, ALPHA_ROOT_PUBLIC_KEY } from './clearsign-alpha-rehearsal'
 import { signCertifiedSolanaLutAttestation } from '../src/bun/solana-certified-lut'
 import { signCertifiedSolanaSchema, CERTIFIED_SOLANA_CATALOG } from '../src/bun/solana-certified-schema'
 import { resolveCanonicalLutAccounts } from '../src/bun/solana-lut-resolver'
@@ -46,12 +45,12 @@ async function loadCertificateHex(hexEnv: string, fileEnv: string): Promise<stri
 }
 
 const solanaCertificateHex = await loadCertificateHex('CLEARSIGN_SOLANA_CERTIFICATE_HEX', 'CLEARSIGN_SOLANA_CERTIFICATE_FILE')
-const solanaCertificate = solanaCertificateHex ? inspectAlphaCertificate(solanaCertificateHex) : undefined
+const solanaCertificate = solanaCertificateHex ? inspectAlphaCertificate(solanaCertificateHex, undefined, ALPHA_ROOT_PUBLIC_KEY) : undefined
 if (solanaCertificate && solanaCertificate.chainId !== CLEARSIGN_SCOPE_SOLANA) {
   throw new Error(`CLEARSIGN_SOLANA_CERTIFICATE_HEX is scoped to ${solanaCertificate.chainId}, expected Solana (${CLEARSIGN_SCOPE_SOLANA})`)
 }
 const ethereumCertificateHex = await loadCertificateHex('CLEARSIGN_ETHEREUM_CERTIFICATE_HEX', 'CLEARSIGN_ETHEREUM_CERTIFICATE_FILE')
-const ethereumCertificate = ethereumCertificateHex ? inspectAlphaCertificate(ethereumCertificateHex) : undefined
+const ethereumCertificate = ethereumCertificateHex ? inspectAlphaCertificate(ethereumCertificateHex, undefined, ALPHA_ROOT_PUBLIC_KEY) : undefined
 if (ethereumCertificate && ethereumCertificate.chainId !== CLEARSIGN_SCOPE_ETHEREUM) {
   throw new Error(`CLEARSIGN_ETHEREUM_CERTIFICATE_HEX is scoped to ${ethereumCertificate.chainId}, expected Ethereum (${CLEARSIGN_SCOPE_ETHEREUM})`)
 }
@@ -107,7 +106,7 @@ const server = Bun.serve({
       const spec = findCertifiedEvmSchemaByShape(chainId, contract, selector, calldataLength)
       if (!spec) return json({ error: 'transaction shape is not in the reviewed EVM catalog' }, 422)
       try {
-        const envelope = buildCertifiedEvmEnvelope(spec, ethereumCertificateHex, signer.privateKeyHex)
+        const envelope = buildCertifiedEvmEnvelope(spec, ethereumCertificateHex, signer.privateKeyHex, ALPHA_ROOT_PUBLIC_KEY)
         return json({
           success: true,
           classification: 'VERIFIED',
@@ -162,7 +161,7 @@ const server = Bun.serve({
           return json({ error: `catalog entry ${catalogKey} does not match any instruction in this transaction` }, 422)
         }
 
-        const schema = signCertifiedSolanaSchema(solanaCertificateHex, signer.privateKeyHex, spec)
+        const schema = signCertifiedSolanaSchema(solanaCertificateHex, signer.privateKeyHex, spec, ALPHA_ROOT_PUBLIC_KEY)
 
         // A self-contained legacy/v0 message commits every instruction account
         // directly in the signed bytes. It needs the certified instruction
@@ -194,6 +193,7 @@ const server = Bun.serve({
           signer.privateKeyHex,
           messageHash,
           lutResolution.accounts,
+          ALPHA_ROOT_PUBLIC_KEY,
         )
         return json({
           success: true,

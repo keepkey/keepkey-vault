@@ -3,9 +3,8 @@ import { utils as ethersUtils } from 'ethers'
 import bs58 from 'bs58'
 
 import {
-  ALPHA_DELEGATE_PUBLIC_KEY,
-  ALPHA_DELEGATE_FINGERPRINT,
   CLEARSIGN_SCOPE_SOLANA,
+  delegateFingerprint,
   inspectAlphaCertificate,
 } from './clearsign-alpha-ceremony'
 
@@ -240,22 +239,24 @@ export interface CertifiedSolanaSchema {
 
 /** Sign a KKSOLSC1 schema for the certified path, using the Solana-scoped
  * (501) delegate certificate and its private key. The private key never
- * leaves this process. */
+ * leaves this process. Rehearsals pass `rootPublicKey`; Desktop leaves it to
+ * the production root. */
 export function signCertifiedSolanaSchema(
   certificateHex: string,
   delegatePrivateKeyHex: string,
   spec: SolanaSchemaSpec,
+  rootPublicKey?: string,
 ): CertifiedSolanaSchema {
   const certificate = hexBytes(certificateHex, 139, 'solana certificate')
-  const certInfo = inspectAlphaCertificate(certificate.toString('hex'))
+  const certInfo = inspectAlphaCertificate(certificate.toString('hex'), undefined, rootPublicKey)
   if (certInfo.chainId !== CLEARSIGN_SCOPE_SOLANA) {
     throw new Error(`certificate is scoped to ${certInfo.chainId}, not Solana (${CLEARSIGN_SCOPE_SOLANA})`)
   }
   const privateKey = hexBytes(delegatePrivateKeyHex, 32, 'delegate private key')
   const signingKey = new ethersUtils.SigningKey(`0x${privateKey.toString('hex')}`)
   const publicKey = ethersUtils.computePublicKey(signingKey.publicKey, true).slice(2).toLowerCase()
-  if (publicKey !== ALPHA_DELEGATE_PUBLIC_KEY) {
-    throw new Error(`delegate private key does not match reviewed signer ${ALPHA_DELEGATE_FINGERPRINT}`)
+  if (publicKey !== certInfo.delegatePublicKey) {
+    throw new Error(`delegate private key does not match the certificate's delegate ${delegateFingerprint(certInfo.delegatePublicKey)}`)
   }
 
   const payload = serializeSolanaSchema(spec)
@@ -269,7 +270,7 @@ export function signCertifiedSolanaSchema(
     schemaPayload: `0x${payload.toString('hex')}`,
     schemaSignature: `0x${compact.toString('hex')}`,
     keyId: 0x80,
-    fingerprint: ALPHA_DELEGATE_FINGERPRINT,
+    fingerprint: delegateFingerprint(certInfo.delegatePublicKey),
     alias: certInfo.alias,
     certificateHex: certificate.toString('hex'),
   }

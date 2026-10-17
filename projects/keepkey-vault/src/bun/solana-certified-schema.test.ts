@@ -23,10 +23,10 @@ import joinFixture from '../../__tests__/fixtures/solana/soltoshidice-blackjack-
 import ceeloFixture from '../../__tests__/fixtures/solana/soltoshidice-ceelo-bet.json'
 import pokerRegistrationFixture from '../../__tests__/fixtures/solana/soltoshidice-register-poker-tournament.json'
 import livePokerFixture from '../../__tests__/fixtures/solana/soltoshidice-live-poker-session.json'
+import production from '../../__tests__/fixtures/clearsign-production-catalog-batch1.json'
 
-// Real Solana scope-501 certificate issued 2026-08-24 by the master root
-// signer (docs/certs/solana-scope-501-certificate.json). Public data only.
-const SOLANA_CERT_HEX = '0101000001f56c68c8804b6565704b6579205661756c74000000000000000000000000000000000000000342f5f9704494b3f9bd72295eecaf29d783d23ea02b2dc9f48abcd2e46d4850cfa2753fac6068a45747a32a4a39f249af72b55370f3491913b7fb9a80207d619b3b4fca6750fc1fdc790da5562b42a351e12cde3c0f084056a24ca8d1bf2c36b5'
+// The production Solana scope-501 certificate (2026-10-16 ceremony). Public data only.
+const SOLANA_CERT_HEX = production.certificates['501']
 
 describe('serializeSolanaSchema', () => {
   test('coverage exactly matches the real 48-byte Relay instruction data', () => {
@@ -39,7 +39,7 @@ describe('signCertifiedSolanaSchema', () => {
   test('accepts the real Solana-scoped certificate but rejects a mismatched private key', () => {
     const wrongKey = randomBytes(32).toString('hex')
     expect(() => signCertifiedSolanaSchema(SOLANA_CERT_HEX, wrongKey, CERTIFIED_SOLANA_CATALOG.relayDepositNative))
-      .toThrow(/does not match reviewed signer/)
+      .toThrow(/does not match the certificate's delegate/)
   })
 })
 

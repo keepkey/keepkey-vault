@@ -18,7 +18,6 @@ import { trustRuntimeSigner, type RuntimeEvmSigner } from './evm-runtime-metadat
 import { resolveProviderTxMetadata } from './clearsign-providers'
 import { evmCallRequiresAdvancedMode } from './evm-signing-policy'
 import { ERC7730_TRANSPORT_SUPPORTED } from '../shared/erc7730-support'
-import { findSolanaSchema } from './solana-schema-registry'
 import { certifiedSolanaProofApplies, findCertifiedSolanaProof } from './solana-certified-registry'
 import { hasCompleteCertifiedSolanaEnvelope, supportsCertifiedClearSign } from './solana-certified-policy'
 import { getPioneer } from './pioneer'
@@ -703,29 +702,13 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
     // Skip the EVM-only buildRelaySwapTx and feed it straight to the Solana signer.
     if (fromChain.chainFamily === 'solana' && params.relayTx?.serializedTx) {
       swapLog(`${TAG} Relay Solana prebuilt tx — bypassing EVM relay builder`)
-      // A signed KKSOLSC1 schema lets the device decode this instruction —
+      // A KeepKey-certified schema lets the device decode this instruction —
       // program, amount, destination — instead of showing a blind-sign prompt.
-      // findSolanaSchema declines when the message still carries lookup
-      // tables, since firmware will not apply a schema to accounts that are
-      // absent from the signed bytes.
-      // A schema the device CANNOT verify is worse than no schema at all.
-      // Firmware fails the whole request ("Invalid Solana instruction schema",
-      // fsm_msg_solana.h:803) and deliberately never degrades to blind signing:
-      // "Present-but-invalid schema material fails the request". Verification
-      // needs a signer loaded in RAM, and loaded signers are only honoured with
-      // AdvancedMode on -- so with AdvancedMode known-off it is a GUARANTEED
-      // hard reject, worded as if the transaction were malformed.
-      //
-      // Dropping it here routes into the opaque-consent path below, which asks
-      // the user to opt in. Perverse otherwise: a route WITHOUT a schema works
-      // (consent -> blind sign) while a route WITH one dies.
-      //
-      // Certified path first: a KeepKey root certificate authorizes firmware
-      // to trust the resolved LUT accounts directly, so — unlike the
-      // runtime-signer schema below — it needs no AdvancedMode and works even
-      // when the message still carries lookup tables. Never blocks the
-      // fallback: a service outage or a route outside the reviewed catalog
-      // just drops through to the existing behavior unchanged.
+      // The root certificate authorizes firmware to trust the resolved LUT
+      // accounts directly, so it needs no AdvancedMode and works even when the
+      // message still carries lookup tables. Never blocks the fallback: a
+      // service outage or a route outside the reviewed catalog just drops
+      // through to the opaque-consent path below.
       let certifiedProof: Awaited<ReturnType<typeof findCertifiedSolanaProof>>
       const firmwareVersion = ctx.getFirmwareVersion?.()
       if (supportsCertifiedClearSign(firmwareVersion)) {
@@ -749,20 +732,6 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
         console.info(`${TAG} certified Solana ClearSign proof attached (${certifiedProof.lutProof?.accounts.length || 0} LUT accounts)`)
       }
 
-      const solSchemaAvailable = findSolanaSchema(params.relayTx.serializedTx)
-      // Withheld in two cases: AdvancedMode off (verification cannot succeed --
-      // loaded signers are only honoured with it on), and after the user has
-      // explicitly consented to blind signing (re-attaching would refuse again
-      // and loop).
-      const solSchema = certifiedProof || ctx.isAdvancedModeEnabled?.() === false || params.allowSolanaBlindSigning === true
-        ? undefined
-        : solSchemaAvailable
-      if (solSchemaAvailable && !solSchema && !certifiedProof) {
-        swapLog(`${TAG} clear-sign schema withheld: AdvancedMode is off, the device could not verify it`)
-      }
-      if (solSchema) {
-        swapLog(`${TAG} clear-sign schema attached: ${solSchema.program}/${solSchema.instruction} (keyId=${solSchema.signerKeyId})`)
-      }
       if (params.relayTx.solanaSwapMetadata && !certifiedProof) {
         // The old host model called protobuf fields 5-7 "swap metadata".
         // Firmware 7.16 defines those fields as a repeated LUT account list,
@@ -777,9 +746,6 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
         allowBlindSigning: params.allowSolanaBlindSigning === true,
         ...(certifiedProof
           ? { ...(certifiedProof.lutProof ? { lutProof: certifiedProof.lutProof } : {}), schema: certifiedProof.schema, certificate: certifiedProof.certificate }
-          : {}),
-        ...(solSchema
-          ? { schema: { payload: solSchema.payload, signature: solSchema.signature, signerKeyId: solSchema.signerKeyId } }
           : {}),
       }
     } else if (fromChain.chainFamily === 'tron') {
@@ -1026,12 +992,7 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
     !!params.relayTx?.serializedTx &&
     // Both self-contained and LUT-backed certified messages bypass the host
     // opaque gate; firmware still authenticates every certificate/signature.
-    !hasCompleteCertifiedSolanaEnvelope(unsignedTx) &&
-    // A reusable schema lets the device read this instruction, so no
-    // blind-sign consent is needed.
-    // Must mirror the attach decision above: a schema we withheld is not a
-    // schema the device will use, so the opaque path still applies.
-    !(ctx.isAdvancedModeEnabled?.() !== false && findSolanaSchema(params.relayTx.serializedTx))
+    !hasCompleteCertifiedSolanaEnvelope(unsignedTx)
   const buildSolanaBlindSignRequirement = async (): Promise<Error> => {
     // The device can't verify this transaction, so check it here instead:
     // simulate against an independent RPC and report what actually leaves the
@@ -1183,19 +1144,11 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
     try {
       signedTx = await signOnDevice(unsignedTx)
     } catch (e: any) {
-      // The device refused the SCHEMA, not the transaction.
-      //
-      // Predicting whether it can verify our schema is unwinnable: it needs a
-      // signer loaded in RAM, Vault does not track which are loaded, and both
-      // that and AdvancedMode die on power cycle. Worse, gating on AdvancedMode
-      // alone inverts — turning AdvancedMode ON re-enables attachment, so the
-      // user fixes one refusal and immediately earns another.
-      //
-      // So stop predicting and react. Firmware validates schema material BEFORE
-      // it draws any confirm screen (fsm_msg_solana.h), so this failure cost the
-      // user nothing and they saw nothing. Drop the schema and sign the very
-      // same bytes the ordinary way. The schema was only ever an enhancement —
-      // better screens — and must never be the reason a swap cannot proceed.
+      // The device refused the SCHEMA, not the transaction. Firmware validates
+      // schema material BEFORE it draws any confirm screen (fsm_msg_solana.h),
+      // so this failure cost the user nothing and they saw nothing. The schema
+      // was only ever an enhancement — better screens — and must never be the
+      // reason a swap cannot proceed.
       if (unsignedTx?.schema && /Invalid Solana instruction schema/i.test(deviceErrorMessage(e))) {
         // Do NOT silently re-sign without the schema. Dropping it means this
         // transaction gets blind-signed, and the opaque-consent panel exists to
@@ -1203,9 +1156,7 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
         // before that happens. Skipping straight past it would trade a gate for
         // a silent downgrade, which is worse.
         //
-        // Ask instead. On the retry params.allowSolanaBlindSigning is true,
-        // which suppresses schema attachment above -- otherwise the schema would
-        // be re-attached, refused again, and the flow would loop.
+        // Ask instead.
         swapLog(`${TAG} device refused the clear-sign schema — checking outflow before requesting blind-sign consent`)
         throw await buildSolanaBlindSignRequirement()
       } else {
