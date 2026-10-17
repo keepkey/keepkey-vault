@@ -123,7 +123,7 @@ export async function seedClearSignProviderFromEnv(db: Database, rawUrl = proces
   const existing = listClearSignProviders(db).find(p => p.url === url)
   let provider = existing
   if (!existing) {
-    const response = await fetch(`${url}/signer`, { signal: AbortSignal.timeout(3_000) })
+    const response = await fetch(`${url}/signer`, { redirect: 'error', signal: AbortSignal.timeout(3_000) })
     if (!response.ok) throw new Error(`provider /signer answered ${response.status}`)
     const signer: any = await response.json()
     const name = String(signer?.alias || '').replace(/[^A-Za-z0-9 _-]/g, '').trim().slice(0, 31) || 'ClearSign Provider'

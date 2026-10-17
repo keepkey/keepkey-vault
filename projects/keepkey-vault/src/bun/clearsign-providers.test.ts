@@ -155,6 +155,31 @@ describe('resolveProviderTxMetadata (shared by REST, RPC, swaps and WalletConnec
     expect(warnings).toEqual([expect.stringContaining('not the one you added (656B0D303F6BBDBD)')])
   })
 
+  test('a provider redirect is no description: nothing reaches another host', async () => {
+    const other = startProvider(ACME); servers.push(other.server)
+    const redirecting = (paths: string[]) => {
+      const server = Bun.serve({ port: 0, fetch(req) {
+        const path = new URL(req.url).pathname
+        if (paths.includes(path)) return new Response(null, { status: 307, headers: { location: `${other.url}${path}` } })
+        if (path === '/signer') return Response.json({ keyId: 2, alias: 'Acme Labs', publicKeyHex: ACME, fingerprint: fp8(ACME) })
+        return Response.json({ error: 'not covered' }, { status: 404 })
+      } })
+      servers.push(server)
+      return `http://127.0.0.1:${server.port}`
+    }
+    const warn = console.warn
+    console.warn = () => {}
+    try {
+      for (const paths of [['/sign'], ['/signer']]) {
+        const providers = [addClearSignProvider(memoryDb(), { name: 'Acme Labs', url: redirecting(paths), publicKeyHex: ACME })]
+        expect(await resolveProviderTxMetadata(tx(CONTRACT_A), GATE_ON, providers)).toBeUndefined()
+        expect(await nameRuntimeProvider(tx(CONTRACT_A), GATE_ON, providers)).toEqual(paths[0] === '/sign' ? expect.objectContaining({ keyId: 2 }) : undefined)
+      }
+      await expect(seedClearSignProviderFromEnv(memoryDb(), redirecting(['/signer']))).rejects.toThrow()
+    } finally { console.warn = warn }
+    expect(other.hits).toEqual([])
+  })
+
   test('a plain send or a firmware-known ERC-20 transfer contacts no provider', async () => {
     const a = startProvider(ACME); servers.push(a.server)
     const providers = [addClearSignProvider(memoryDb(), { name: 'Acme Labs', url: a.url, publicKeyHex: ACME })]

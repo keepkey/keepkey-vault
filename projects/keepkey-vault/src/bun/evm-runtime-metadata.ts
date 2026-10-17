@@ -58,7 +58,8 @@ async function fetchSigner(configured: string, opts: RuntimeProviderOptions): Pr
   const timeoutMs = opts.timeoutMs ?? RUNTIME_PROVIDER_TIMEOUT_MS
   let response: Response
   try {
-    response = await fetch(`${configured}/signer`, { signal: AbortSignal.timeout(timeoutMs) })
+    // No redirects: only the URL the user added is ever contacted.
+    response = await fetch(`${configured}/signer`, { redirect: 'error', signal: AbortSignal.timeout(timeoutMs) })
   } catch (e: any) {
     return e?.name === 'TimeoutError' ? `no answer in ${timeoutMs} ms` : `unreachable (${e?.message || e})`
   }
@@ -94,6 +95,7 @@ export async function resolveRuntimeEvmMetadata(tx: any, providerUrl: string, op
   try {
     signResponse = await fetch(`${configured}/sign`, {
       method: 'POST',
+      redirect: 'error',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         chainId: tx.chainId, nonce: tx.nonce, gasLimit: tx.gasLimit,
