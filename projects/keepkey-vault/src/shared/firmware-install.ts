@@ -208,6 +208,16 @@ export function wizardCoinMode(p: {
 }
 
 /**
+ * Setup's page after the authenticity check: the firmware choice, before the
+ * tutorial, for a device that gets one. Without features every device looks
+ * unidentified, so then it goes on to the tutorial (the bootloader and
+ * firmware pages still link to the choice).
+ */
+export function stepAfterAuthenticity(p: { showPicker: boolean; hasFeatures: boolean }): 'coin-choice' | 'intro' {
+  return p.showPicker && p.hasFeatures ? 'coin-choice' : 'intro'
+}
+
+/**
  * Merge the bundled and remote manifests. Per channel the newer multi-chain
  * entry wins (bundled on ties: it ships inside the signed app), and the
  * bitcoin-only build is picked separately on its own version, so it is never
