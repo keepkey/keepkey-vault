@@ -1280,7 +1280,8 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 						  requests. Solana has program/message semantics, not an
 						  EVM verified-contract trust signal, so hide it there too.
 						*/}
-						{!isSimpleTransfer && !request.ethMessageDecoded && !isSolanaRequest && (
+						{/* An unknown contract is said once, by the risk bar's verdict. */}
+						{!isSimpleTransfer && !request.ethMessageDecoded && !isSolanaRequest && !(trustLevel === 'unknown' && assessSigningRisk(request)) && (
 							<TrustBadge level={trustLevel} hasSigned={hasSignedBlob} schemaOnly={relayBridgeDeposit}
 								label={acrossDeposit ? t("signing.acrossKnownContract", "Across SpokePool · known contract") : undefined} t={t} />
 						)}
@@ -1364,7 +1365,7 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 				)}
 
 				{/* Report and risk first, so they are read before blind-sign consent. */}
-				<ClearSignReportCard report={request.clearSignReport} />
+				<ClearSignReportCard report={request.clearSignReport} verdictBelow={Boolean(assessSigningRisk(request))} />
 				{/* No report (an addressNList caller): the provider the sign step pins is still named. */}
 				{(() => {
 					const line = namedProviderLine(request.runtimeProvider, request.clearSignReport)

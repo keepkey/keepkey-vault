@@ -205,6 +205,8 @@ export interface WcCallbacks {
   finalizeClearSignObservation: (id: string, outcome: Exclude<ClearSignObservationOutcome, 'pending'>, errorClass?: string) => void
   /** The device refused the observation's ERC-7730 definition; the call signs without it. */
   refuseClearSignObservationDefinition?: (id: string) => void
+  /** Add this computer's records of the called contract to the card (contract-facts). */
+  addContractFacts?: (info: SigningRequestInfo) => Promise<void>
   /** Show signing approval to user — returns true if approved. */
   requestSigningApproval: (info: SigningRequestInfo) => Promise<boolean>
   /** Dismiss the signing overlay. */
@@ -1011,6 +1013,8 @@ export class WalletConnectManager {
       await attachErc7730Definition(signingInfo, tx.to, tx.data, this.callbacks.getFirmwareVersion(),
         this.callbacks.getDeviceCapabilities?.(), '[WC]')
     }
+    // After the ERC-7730 attach, so a call the KeepKey shows gets nothing added.
+    const contractFacts = this.callbacks.addContractFacts?.(signingInfo)
     if (from) {
       const simulation = await simulateEvmEffects({
         chainId: effectiveChainId, from, to: tx.to, data: tx.data || '0x',
@@ -1035,6 +1039,7 @@ export class WalletConnectManager {
         hostLimitations: universalRouterFindings.limitations,
       })
     }
+    await contractFacts
     // Name on the card the provider the sign step will ask (its /signer
     // only). The sign step attaches a description only from that provider.
     if (!clearSignSchema && !signingInfo.calldataDecoded?.signedInsightBlob && !signingInfo.erc7730) {

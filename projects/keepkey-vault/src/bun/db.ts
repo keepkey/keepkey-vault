@@ -1930,6 +1930,35 @@ export function updateApiLogTxMeta(
   }
 }
 
+/** Earlier on-chain transactions from `from` to contract `to` on `chainId`,
+ *  as Pioneer's history found them (SCAN rows). A signature alone is not
+ *  counted: a site can ask for one and never broadcast it. Pioneer's history
+ *  can miss transactions, so `count` is a lower bound. */
+export function getPriorEvmCalls(from: string, to: string, chainId: number): { count: number; since: number } | null {
+  try {
+    if (!db) return null
+    const f = from.toLowerCase(), t = to.toLowerCase()
+    const rows = db.query(
+      `SELECT timestamp, txid, response_body FROM api_log
+       WHERE method = 'SCAN' AND activity_type = 'send' AND lower(response_body) LIKE ?`
+    ).all(`%${t}%`) as Array<{ timestamp: number; txid: string | null; response_body: string | null }>
+    const sent = new Set<string>()
+    let since = Infinity
+    for (const r of rows) {
+      try {
+        const b = JSON.parse(r.response_body || '{}')
+        if (String(b.to).toLowerCase() !== t || String(b.from).toLowerCase() !== f || b.networkId !== `eip155:${chainId}`) continue
+        sent.add(r.txid || String(r.timestamp))
+        since = Math.min(since, r.timestamp)
+      } catch { /* not JSON: not a match */ }
+    }
+    return sent.size > 0 ? { count: sent.size, since } : null
+  } catch (e: any) {
+    console.warn('[db] getPriorEvmCalls failed:', e.message)
+    return null
+  }
+}
+
 const VALID_ACTIVITY_TYPES = new Set(['send', 'receive', 'swap', 'sign', 'message', 'approve', 'broadcast', 'shield', 'unshield'])
 
 /** Query api_log entries that have activity_type set + swap_history, merged by timestamp */

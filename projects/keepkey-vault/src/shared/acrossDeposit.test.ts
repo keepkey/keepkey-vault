@@ -110,7 +110,7 @@ describe('decodeAcrossDepositV3 — flags and refusals', () => {
     for (const data of bad) {
       expect(decodeAcrossDepositV3(POOL, data, 8453)).toBeNull()
       expect((await decodeCalldata(POOL, data, 8453))?.dappName).not.toBe('Across')
-      expect(texts(req({ data })).some((x) => x.includes('It can use any token permission you already gave that contract'))).toBe(true)
+      expect(texts(req({ data })).some((x) => x.includes('You would be signing blind'))).toBe(true)
     }
   })
 

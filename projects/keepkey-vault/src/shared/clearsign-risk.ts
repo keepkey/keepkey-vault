@@ -42,6 +42,7 @@ const TIER_HEADLINE: Record<SigningTier, string> = {
   yellow: 'Known, but your KeepKey cannot show it yet',
   red: 'Unknown or unusual: only sign if you trust this site',
 }
+const USED_BEFORE_HEADLINE = 'Used before, but your KeepKey cannot show this call'
 const U64_MAX = (1n << 64n) - 1n
 
 /** A protocol Desktop knows and decodes in full, on firmware that cannot show
@@ -236,8 +237,9 @@ function certifiedBlobShown(req: SigningRequestInfo): boolean {
 }
 
 /** What the verdict tier rests on: the device shows it, this computer knows the
- *  protocol and decodes it in full, or neither. */
-type Recognition = 'shows' | 'known' | 'unknown'
+ *  protocol and decodes it in full, this account has used the contract before,
+ *  or none of these. */
+type Recognition = 'shows' | 'known' | 'used' | 'unknown'
 
 function evmTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void): Recognition {
   const to = (req.to ?? '').toLowerCase()
@@ -357,7 +359,19 @@ function evmTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void):
   } else if (!req.deviceClearSigns || KNOWN_SELECTORS.has(sel)) {
     // A known selector reaching here did not parse (dirty address word,
     // trailing bytes): the device may accept it by length alone.
-    add('high', `Your KeepKey cannot show what this call to ${to} does. It can use any token permission you already gave that contract. You would be signing blind.`)
+    // This computer's own record that this account used this exact contract on
+    // this chain is a known pattern; a name the contract gives itself is not.
+    const usedBefore = Boolean(req.priorUse) && native !== null && !sendsCoin && !KNOWN_SELECTORS.has(sel)
+    if (usedBefore) recognition = 'used'
+    add(usedBefore ? 'medium' : 'high', `Your KeepKey cannot show what this call to ${to} does. You would be signing blind.`)
+    if (req.contractName) {
+      const { name, symbol } = req.contractName
+      add('low', `This contract's token is named "${name}"${symbol !== name ? ` (${symbol})` : ''}. Not verified: any contract can use any name.`)
+    }
+    if (req.priorUse) {
+      const { count, since } = req.priorUse
+      add('low', `You have used this contract from this account at least ${count === 1 ? 'once' : `${count} times`} before, since ${new Date(since).toLocaleString('en-US', { month: 'short', year: 'numeric' })}.`)
+    }
   }
 
   if (field('Action')?.startsWith('Swap ')) {
@@ -698,5 +712,5 @@ export function assessSigningRisk(req: SigningRequestInfo): RiskAssessment | nul
   reasons.sort((a, b) => ORDER.indexOf(b.level) - ORDER.indexOf(a.level))
   const tier: SigningTier = ORDER.indexOf(level) >= ORDER.indexOf('high') || recognition === 'unknown' ? 'red'
     : recognition === 'shows' ? 'green' : 'yellow'
-  return { level, tier, headline: TIER_HEADLINE[tier], reasons }
+  return { level, tier, headline: tier === 'yellow' && recognition === 'used' ? USED_BEFORE_HEADLINE : TIER_HEADLINE[tier], reasons }
 }

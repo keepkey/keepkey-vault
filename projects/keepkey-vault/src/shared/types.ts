@@ -1144,6 +1144,13 @@ export interface SigningRequestInfo {
   /** The same, for the recipient of a plain ERC-20 transfer: a reviewed
    *  contract (such as a Universal Router) that does not credit a transfer. */
   recognizedRecipient?: string
+  /** Approval card only, from this computer's own records: earlier
+   *  transactions this account sent or signed to this contract on this
+   *  chain (a lower bound; `since` in ms). */
+  priorUse?: { count: number; since: number }
+  /** Approval card only: the name and symbol the contract reports for
+   *  itself. Any contract can claim any name, so it is never trust. */
+  contractName?: { name: string; symbol: string }
   /** Certified metadata resolved before user approval. The signing handler
    *  reuses this exact envelope so approval and device review cannot drift. */
   certifiedEvmSchema?: {

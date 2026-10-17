@@ -849,3 +849,60 @@ describe('Solana verdicts follow what firmware 7.16.0 shows (lib/firmware/solana
     }
   })
 })
+
+// The Venice card the owner pasted (2026-10-17): KeepKey Browser Extension on
+// Base, claimAndStake() (0xcb1a4fc0, no args) to the sVVV proxy, value 0.
+// This account sent to the contract on 2025-01-28 and 2026-04-23 (api_log SCAN).
+describe('blind call to a contract this account has used before', () => {
+  const venice = (extra: Partial<SigningRequestInfo> = {}) => ({
+    id: 'venice', method: '/eth/sign-transaction', appName: 'KeepKey Browser Extension', chainId: 8453,
+    from: '0x27de622cc44c55b53caF299eCedccdAB29aC98A8', to: '0x321b7ff75154472B18EDb199033fF4D116F340Ff',
+    data: '0xcb1a4fc0', value: '0x0', needsBlindSigning: true, ...extra,
+  } as SigningRequestInfo)
+  const priorUse = { count: 2, since: Date.UTC(2025, 0, 28, 12) }
+  const contractName = { name: 'Staked Venice Token', symbol: 'sVVV' }
+  const texts = (r: ReturnType<typeof assessSigningRisk>) => r!.reasons.map((x) => x.text)
+
+  test('no prior use: red, signing blind, no unchecked permission claim', () => {
+    const r = assessSigningRisk(venice())!
+    expect(r.tier).toBe('red')
+    expect(r.level).toBe('high')
+    expect(texts(r)).toEqual(['Your KeepKey cannot show what this call to 0x321b7ff75154472b18edb199033ff4d116f340ff does. You would be signing blind.'])
+  })
+
+  test('the contract\'s own name is shown, labelled, and never calms the card', () => {
+    const r = assessSigningRisk(venice({ contractName }))!
+    expect(r.tier).toBe('red')
+    expect(r.level).toBe('high')
+    expect(texts(r)).toContain('This contract\'s token is named "Staked Venice Token" (sVVV). Not verified: any contract can use any name.')
+  })
+
+  test('prior use and no coin sent: yellow, still blind', () => {
+    const r = assessSigningRisk(venice({ priorUse, contractName }))!
+    expect(r.tier).toBe('yellow')
+    expect(r.level).toBe('medium')
+    expect(r.headline).toBe('Used before, but your KeepKey cannot show this call')
+    expect(texts(r)).toEqual([
+      'Your KeepKey cannot show what this call to 0x321b7ff75154472b18edb199033ff4d116f340ff does. You would be signing blind.',
+      'This contract\'s token is named "Staked Venice Token" (sVVV). Not verified: any contract can use any name.',
+      'You have used this contract from this account at least 2 times before, since Jan 2025.',
+    ])
+  })
+
+  test('prior use but coin sent, or a malformed token call: stays red', () => {
+    expect(assessSigningRisk(venice({ priorUse, value: '0x2386f26fc10000' }))!.tier).toBe('red')
+    expect(assessSigningRisk(venice({ priorUse, data: '0xa9059cbb00' }))!.tier).toBe('red')
+    expect(assessSigningRisk(venice({ priorUse, value: 'zz' }))!.tier).toBe('red')
+  })
+
+  test('a name equal to its symbol is not repeated; one use reads "once"', () => {
+    const r = assessSigningRisk(venice({ priorUse: { count: 1, since: priorUse.since }, contractName: { name: 'sVVV', symbol: 'sVVV' } }))!
+    expect(texts(r)).toContain('This contract\'s token is named "sVVV". Not verified: any contract can use any name.')
+    expect(texts(r)).toContain('You have used this contract from this account at least once before, since Jan 2025.')
+  })
+
+  test('a call the KeepKey shows gets no name or prior-use line', () => {
+    const r = assessSigningRisk(venice({ priorUse, contractName, needsBlindSigning: false, deviceClearSigns: true }))!
+    expect(texts(r).some((x) => x.includes('token is named') || x.includes('used this contract'))).toBe(false)
+  })
+})
