@@ -26,7 +26,7 @@ const SECP256K1_HALF_ORDER = BigInt('0x7fffffffffffffffffffffffffffffff5d576e735
 /** First 4 bytes of sha256(compressed key), as the signer services and the
  *  event log name a delegate. */
 export function delegateFingerprint(publicKeyHex: string): string {
-  return createHash('sha256').update(exactHex(publicKeyHex, 33, 'delegate public key')).digest('hex').slice(0, 8)
+  return createHash('sha256').update(Uint8Array.from(exactHex(publicKeyHex, 33, 'delegate public key'))).digest('hex').slice(0, 8)
 }
 
 function exactHex(input: string, bytes: number, label: string): Buffer {

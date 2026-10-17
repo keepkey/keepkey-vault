@@ -3,14 +3,6 @@ import { findCertifiedEvmSchema, resolveEvmSchema } from './evm-schema-registry'
 import { buildTokenSchema } from './evm-token-schema'
 import { buildEvmSchemaBody } from './evm-certified-schema'
 
-/* The exact Relay ETH->Solana bridge deposit captured from api.relay.link on
- * 2026-07-27 — the transaction that used to blind-sign. */
-const TO = '0x4cd00e387622c35bddb9b4c962c136462338bc31'
-const DATA =
-  '0x49290c1c' +
-  '000000000000000000000000909ef6b32dfdc12ca86aa710b54c991af3c5f82e' +
-  '8a2c121197efc95c42f53142ab409735ee353287f877ed4d351f63094d5bfcb1'
-
 describe('findCertifiedEvmSchema', () => {
   it('leaves the live USDT approval to the device when its reviewed artifact is unavailable', async () => {
     const originalFetch = globalThis.fetch
