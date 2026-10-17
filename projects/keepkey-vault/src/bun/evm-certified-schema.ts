@@ -458,8 +458,9 @@ export function findCertifiedEvmSchemaByShape(
   return spec
 }
 
-/** Serialize a device-decoded v2 or v4 schema. */
-export function buildEvmSchemaBody(spec: EvmSchemaSpec): Buffer {
+/** Serialize a device-decoded v2 or v4 schema. `keyId` is the trailer's
+ * signer: the certified delegate by default, a runtime slot (0-3) for Studio. */
+export function buildEvmSchemaBody(spec: EvmSchemaSpec, keyId: number = CERTIFIED_METADATA_KEY_ID): Buffer {
   if (!Number.isInteger(spec.chainId) || spec.chainId <= 0 || spec.chainId > 0xffffffff) {
     throw new Error('schema chainId must be a nonzero uint32')
   }
@@ -480,7 +481,7 @@ export function buildEvmSchemaBody(spec: EvmSchemaSpec): Buffer {
       be16(method.length),
       method,
       u8(spec.decoder),
-      u8(1), be32(0), u8(CERTIFIED_METADATA_KEY_ID),
+      u8(1), be32(0), u8(keyId),
     ])
   }
   const intent = spec.intent
@@ -524,7 +525,7 @@ export function buildEvmSchemaBody(spec: EvmSchemaSpec): Buffer {
     const template = ascii(intent.template, 96, 'intent template')
     parts.push(u8(intent.valueRole), u8(title.length), title, u8(template.length), template)
   }
-  parts.push(u8(1), be32(0), u8(CERTIFIED_METADATA_KEY_ID))
+  parts.push(u8(1), be32(0), u8(keyId))
   return Buffer.concat(parts)
 }
 

@@ -1,16 +1,32 @@
 # ClearSign Studio
 
-ClearSign Studio is an Advanced-mode developer tool in Vault. It is the local
-authoring, attestation, signer-loading, and evidence environment for proving
-the self-service workflow before KeepKey publishes a firmware-pinned
-production ClearSign identity.
+ClearSign Studio is an Advanced Mode developer tool in KeepKey Desktop. It is
+the local environment for authoring descriptions, attesting them, loading
+signers, and keeping evidence. Third-party providers use it to describe their
+own contracts.
 
 Open it from **Device Settings → Signing Policy → ClearSign Studio** after
-enabling Advanced Mode.
+enabling Advanced Mode. Every Studio action needs Advanced Mode, on the host
+and on the device.
 
 ## Release boundary
 
-This release intentionally has no baked KeepKey ClearSign public key.
+Firmware 7.16 embeds KeepKey's production ClearSign root. Only descriptions
+under a certificate signed by that root appear as "certified by KeepKey".
+KeepKey signs its own descriptions on a separate ClearSign issuer device;
+Desktop never holds those keys. Everything Studio makes is the runtime tier.
+
+What the device does with runtime-tier descriptions on 7.16:
+
+- **Advanced Mode off:** the device refuses signer loads and runtime metadata.
+  The transaction is reviewed with no description.
+- **Advanced Mode on:** loading a signer asks the user, for this session only,
+  to trust the provider by alias and fingerprint, marked **NOT verified by
+  KeepKey**. The description then annotates the review. The raw review (EVM)
+  or Blind Sign screen (Solana) still follows.
+- Turning Advanced Mode off clears every loaded signer. Nothing is persisted.
+
+Other rules:
 
 - The regular firmware contains the constrained attestor; there is no separate
   attestor build variant.
@@ -24,9 +40,8 @@ This release intentionally has no baked KeepKey ClearSign public key.
   only descriptors that pass the firmware's `KKSOLSC1` parser and displays
   every program, discriminator, argument label, and account label on-device.
 
-The intended later release reads the public key from a signed device, reviews
-the evidence, and pins that key in signed firmware. That promotion is a
-separate release decision; the Studio does not perform it.
+A provider that wants its descriptions shown without Advanced Mode needs a
+KeepKey-certified key. That is a review process, not a Studio feature.
 
 ## Studio workflow
 
@@ -43,7 +58,24 @@ separate release decision; the Studio does not perform it.
 4. **Load identity** can either read the connected device's dedicated attestor
    public key or accept a pasted 33-byte compressed secp256k1 key. The verifying
    device must approve its alias and fingerprint in a selected RAM slot.
-5. **Evidence** lists durable local results for the current device: descriptor
+5. **Create provider key** derives a third-party provider key from a BIP-85
+   child seed. The device shows the child words; the operator types them back.
+   Desktop exports only the public key and fingerprint. **The provider private
+   key never touches disk:** it is held in memory for the Studio session and
+   zeroed when Studio closes, when another key is derived, or when Advanced
+   Mode is found off. To sign again later, show the same index on the device
+   and enter the words again.
+6. **EVM descriptions** authors a v0x02 description for one chain, contract
+   and selector: a method label and one labelled 32-byte argument per calldata
+   word (address, amount, token amount, or bytes32). Desktop serializes it with
+   the same encoder as the certified catalog, with the trailer naming the
+   chosen signer slot, and signs `SHA256(body)` with the session provider key.
+   v0x05 intents are not authored in Studio yet.
+   **Export bundle** writes a JSON file to Downloads holding the provider
+   alias, public key, slot, and signed descriptions. It never holds a private
+   key. **Import bundle** checks that every signature verifies against the
+   bundle's public key before showing it, and can load that identity.
+7. **Evidence** lists durable local results for the current device: descriptor
    attestations, signer loads, and EVM/Solana transactions carrying ClearSign
    metadata. Signed and blocked views are filterable, and every record exposes
    the exact descriptor plus whether it reached the device transport.
@@ -79,7 +111,11 @@ write ClearSign evidence.
 
 | Test | Expected result |
 |---|---|
-| Studio action with Advanced Mode off | Host and firmware both reject it |
+| Studio action with Advanced Mode off | Host and firmware both reject it; the session provider key is zeroed |
+| Derive provider key | Only public key and fingerprint returned; no file written |
+| Sign an EVM description, close Studio, sign again | Second signature refused until the words are entered again |
+| Studio EVM description on 7.16, Advanced Mode on | Trust screen says NOT verified by KeepKey; decoded call, then raw review |
+| Import a bundle with a tampered description | Rejected: signature does not verify |
 | Read key with Advanced Mode on | 33-byte compressed key and stable fingerprint |
 | Malformed or non-`KKSOLSC1` payload | Rejected without a signature |
 | Build the bundled Relay form | Bytes exactly match the SDK/firmware fixture |

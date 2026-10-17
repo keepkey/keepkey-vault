@@ -2,9 +2,12 @@
  * Derive a clear-sign PROVIDER signing key from a BIP-85 child mnemonic.
  *
  * The ceremony: a KeepKey derives a BIP-85 child mnemonic (device-side), and
- * that mnemonic's master key becomes the provider's signing key. The private
- * key is then loaded into a live service, where it is FULLY EXPOSED — exactly
- * like any hot key.
+ * that mnemonic's master key becomes the provider's signing key.
+ *
+ * Desktop NEVER writes this private key to disk. Studio exports only the public
+ * key and fingerprint; when it must sign, the operator re-enters the words the
+ * device shows and the key lives in memory for that Studio session only
+ * (clearsign-provider-session.ts), zeroed when the session ends.
  *
  * BIP-85 buys no custody here and this module must not imply otherwise. What it
  * buys is a ceremony that is deterministic, repeatable and documented: the key
@@ -18,9 +21,8 @@
  * decoded screens, never remove the raw review.
  */
 import { mnemonicToSeedSync, validateMnemonic } from 'bip39'
-import { utils as ethersUtils } from 'ethers'
-import { createHash } from 'crypto'
-import { closeSync, fsyncSync, openSync, writeFileSync } from 'fs'
+import { secp256k1 } from '@noble/curves/secp256k1'
+import { createHash, createHmac } from 'crypto'
 
 /**
  * The BIP-85 child mnemonic IS the key material, so the provider key is that
@@ -33,8 +35,8 @@ import { closeSync, fsyncSync, openSync, writeFileSync } from 'fs'
 export const PROVIDER_KEY_PATH = 'm' as const
 
 export interface ProviderKey {
-  /** 32-byte private key, hex, no 0x. Hot the moment it leaves this process. */
-  privateKeyHex: string
+  /** 32-byte private key. Caller owns it and must zero it (fill(0)) when done. */
+  privateKey: Uint8Array
   /** 33-byte COMPRESSED secp256k1 public key, hex, no 0x — what the device loads. */
   publicKeyHex: string
   /** 8 hex chars. Must equal what the device shows on the trust prompt. */
@@ -90,6 +92,9 @@ export function providerFingerprint(compressedPubkeyHex: string): string {
  * Throws on an invalid mnemonic rather than deriving from garbage — a key
  * derived from a typo would produce a fingerprint that silently never matches
  * any device, and the operator would have no way to tell that from a bug.
+ *
+ * BIP-32 master key (HMAC-SHA512 "Bitcoin seed"), kept in buffers this function
+ * zeroes itself, so the only copy of the secret left is the returned privateKey.
  */
 export function deriveProviderKey(childMnemonic: string): ProviderKey {
   const mnemonic = String(childMnemonic || '').trim().replace(/\s+/g, ' ').toLowerCase()
@@ -99,73 +104,14 @@ export function deriveProviderKey(childMnemonic: string): ProviderKey {
   }
 
   const seed = mnemonicToSeedSync(mnemonic)
-  const node = ethersUtils.HDNode.fromSeed(seed)
-
-  const privateKeyHex = node.privateKey.replace(/^0x/i, '').toLowerCase()
-  const publicKeyHex = ethersUtils
-    .computePublicKey(node.privateKey, /* compressed */ true)
-    .replace(/^0x/i, '')
-    .toLowerCase()
-
-  return { privateKeyHex, publicKeyHex, fingerprint: providerFingerprint(publicKeyHex) }
-}
-
-/** What gets written to disk for the live service to load. */
-export interface ProviderKeyFile {
-  format: 'keepkey-clearsign-provider-key-v1'
-  alias: string
-  /** BIP-85 parameters, so the ceremony can be repeated and audited. */
-  ceremony: { bip85WordCount: number; bip85Index: number; derivationPath: string; deviceFingerprint?: string; createdAt: string }
-  publicKeyHex: string
-  fingerprint: string
-  privateKeyHex: string
-  /** Read by humans, not code. */
-  warning: string
-}
-
-export const PROVIDER_KEY_WARNING =
-  'This file contains a live signing key in plaintext. Anyone holding it can sign '
-  + 'clear-sign context that KeepKey devices will DISPLAY under this provider identity. '
-  + 'It cannot forge transactions and cannot remove the raw review, but it can mislabel '
-  + 'what a transaction appears to do. Treat it as a production secret.'
-
-export function buildProviderKeyFile(opts: {
-  key: ProviderKey
-  alias: string
-  bip85WordCount: number
-  bip85Index: number
-  deviceFingerprint?: string
-  createdAt: string
-}): ProviderKeyFile {
-  return {
-    format: 'keepkey-clearsign-provider-key-v1',
-    alias: opts.alias,
-    ceremony: {
-      bip85WordCount: opts.bip85WordCount,
-      bip85Index: opts.bip85Index,
-      derivationPath: PROVIDER_KEY_PATH,
-      deviceFingerprint: opts.deviceFingerprint,
-      createdAt: opts.createdAt,
-    },
-    publicKeyHex: opts.key.publicKeyHex,
-    fingerprint: opts.key.fingerprint,
-    privateKeyHex: opts.key.privateKeyHex,
-    warning: PROVIDER_KEY_WARNING,
+  const master = createHmac('sha512', 'Bitcoin seed').update(seed as Uint8Array).digest()
+  seed.fill(0)
+  const privateKey = new Uint8Array(master.subarray(0, 32))
+  master.fill(0)
+  if (!secp256k1.utils.isValidPrivateKey(privateKey)) {
+    privateKey.fill(0)
+    throw new Error('BIP-85 child mnemonic yields an invalid master key; use another index')
   }
-}
-
-/**
- * Create a plaintext provider-key file without a world-readable interval.
- * `wx` also refuses to follow/overwrite an existing path, which prevents a
- * repeated ceremony or symlink from replacing another file unexpectedly.
- */
-export function writeProviderKeyFile(filePath: string, file: ProviderKeyFile): void {
-  let fd: number | undefined
-  try {
-    fd = openSync(filePath, 'wx', 0o600)
-    writeFileSync(fd, JSON.stringify(file, null, 2), { encoding: 'utf8' })
-    fsyncSync(fd)
-  } finally {
-    if (fd !== undefined) closeSync(fd)
-  }
+  const publicKeyHex = Buffer.from(secp256k1.getPublicKey(privateKey, true)).toString('hex')
+  return { privateKey, publicKeyHex, fingerprint: providerFingerprint(publicKeyHex) }
 }

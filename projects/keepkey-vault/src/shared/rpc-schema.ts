@@ -1,7 +1,7 @@
 import type { ElectrobunRPCSchema } from 'electrobun/bun'
 import type { ClearSignReport } from './clearsign-report'
 import type { ClearSignCentralAssetAuditHistory, ClearSignCentralAssetReview, ClearSignCentralAssetReviewResult, ClearSignCentralContractAudit, ClearSignCentralContractReview, ClearSignCentralStatus, ClearSignProtectionCaseStudy, RuntimeProviderNamed } from './types'
-import type { DeviceStateInfo, FirmwareProgress, FirmwareAnalysis, FatalEvent, PinRequest, CharacterRequest, ChainBalance, BuildTxParams, BuildTxResult, BroadcastResult, BtcAccountSet, BtcScriptType, EvmAddressSet, CustomToken, CustomChain, AppSettings, PioneerServer, BtcGetAddressParams, EthGetAddressParams, EthSignTxParams, BtcSignTxParams, GetPublicKeysParams, UpdateInfo, UpdateStatus, TokenVisibilityStatus, PairingRequestInfo, PairedAppInfo, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, ReportMeta, ReportData, AuditReport, AuditPortfolioSnapshot, AuditMode, AuditDerivedAddress, AuditInspectResult, SwapAsset, SwapQuote, SwapQuoteParams, ExecuteSwapParams, SwapResult, SwapHealth, PendingSwap, SwapStatusUpdate, SwapHistoryRecord, SwapHistoryFilter, SwapHistoryStats, SwapUiState, SwapUiCommand, RecentActivity, BuildStakingTxParams, StakingPosition, DefiPosition, NameInfo, NameQuote, BuildNameRegTxParams, ZcashTransaction, ZcashTxBatch, ZcashTexPayment, EmulatorStatus, EmulatorWalletInfo, RegisteredDevice, WcSessionInfo, AddressBookEntry, AddressBookFilter, AddressBookTx, UsbDiagnosticReport, ClearSignEvent, ClearSignCoverageSummary, ClearSignAuditJob, ClearSignSolanaSchemaArtifact, ClearSignSolanaSchemaDraft, RngAuditReport, ClearSignProvider, ClearSignProviderInput } from './types'
+import type { DeviceStateInfo, FirmwareProgress, FirmwareAnalysis, FatalEvent, PinRequest, CharacterRequest, ChainBalance, BuildTxParams, BuildTxResult, BroadcastResult, BtcAccountSet, BtcScriptType, EvmAddressSet, CustomToken, CustomChain, AppSettings, PioneerServer, BtcGetAddressParams, EthGetAddressParams, EthSignTxParams, BtcSignTxParams, GetPublicKeysParams, UpdateInfo, UpdateStatus, TokenVisibilityStatus, PairingRequestInfo, PairedAppInfo, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, ReportMeta, ReportData, AuditReport, AuditPortfolioSnapshot, AuditMode, AuditDerivedAddress, AuditInspectResult, SwapAsset, SwapQuote, SwapQuoteParams, ExecuteSwapParams, SwapResult, SwapHealth, PendingSwap, SwapStatusUpdate, SwapHistoryRecord, SwapHistoryFilter, SwapHistoryStats, SwapUiState, SwapUiCommand, RecentActivity, BuildStakingTxParams, StakingPosition, DefiPosition, NameInfo, NameQuote, BuildNameRegTxParams, ZcashTransaction, ZcashTxBatch, ZcashTexPayment, EmulatorStatus, EmulatorWalletInfo, RegisteredDevice, WcSessionInfo, AddressBookEntry, AddressBookFilter, AddressBookTx, UsbDiagnosticReport, ClearSignEvent, ClearSignCoverageSummary, ClearSignAuditJob, ClearSignSolanaSchemaArtifact, ClearSignSolanaSchemaDraft, ClearSignEvmSchemaDraft, ClearSignEvmSchemaArtifact, ClearSignEvmSignedEntry, ClearSignProviderBundle, RngAuditReport, ClearSignProvider, ClearSignProviderInput } from './types'
 
 /**
  * RPC Schema for Bun ↔ WebView communication.
@@ -70,9 +70,15 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       clearsignSubmitCentralContractReview: { params: ClearSignCentralContractReview; response: Record<string, unknown> }
       clearsignGetProtectionCaseStudies: { params: void; response: ClearSignProtectionCaseStudy[] }
       // Provider-key ceremony. The mnemonic is read off the device screen and
-      // typed back in; the derived PRIVATE key is written to a file and never
-      // returned to the renderer.
-      clearsignDeriveProviderKey: { params: { childMnemonic: string; alias: string; wordCount: number; index: number }; response: { publicKeyHex: string; fingerprint: string; filePath: string } }
+      // typed back in; the derived PRIVATE key stays in host memory for this
+      // Studio session only (never on disk, never returned to the renderer).
+      clearsignDeriveProviderKey: { params: { childMnemonic: string; alias: string; wordCount: number; index: number }; response: { alias: string; publicKeyHex: string; fingerprint: string } }
+      clearsignClearProviderKey: { params: void; response: { cleared: boolean } }
+      // Runtime-tier EVM v0x02 descriptions signed by the session provider key. Bundles are public only.
+      clearsignBuildEvmSchema: { params: { draft: ClearSignEvmSchemaDraft; keyId: number }; response: ClearSignEvmSchemaArtifact }
+      clearsignSignEvmSchema: { params: { draft: ClearSignEvmSchemaDraft; keyId: number }; response: ClearSignEvmSignedEntry & { alias: string; publicKeyHex: string; fingerprint: string } }
+      clearsignExportProviderBundle: { params: { alias: string; publicKeyHex: string; keyId: number; signedPayloads: string[] }; response: { filePath: string; bundle: ClearSignProviderBundle } }
+      clearsignImportProviderBundle: { params: { json: string }; response: { bundle: ClearSignProviderBundle; entries: ClearSignEvmSignedEntry[] } }
       // Third-party ClearSign providers the user added. The device asks to
       // trust each one per session ("NOT verified by KeepKey"); adding needs
       // AdvancedMode, since the runtime tier does nothing without it.

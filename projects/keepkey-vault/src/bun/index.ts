@@ -51,6 +51,9 @@ function requireClearsignAdvancedMode(): void {
 	}
 }
 
+// Studio's third-party provider key: RAM-only, AdvancedMode-gated, zeroed on clear.
+const providerKeySession = createProviderKeySession(requireClearsignAdvancedMode)
+
 function supportsAddressBookClearsignFirmware(): boolean {
 	const version = engine.getDeviceState().firmwareVersion
 	return Boolean(version && versionCompare(version, '7.16.0') >= 0)
@@ -283,12 +286,8 @@ import { trustRuntimeSigner, type RuntimeEvmSigner } from "./evm-runtime-metadat
 import { addClearSignProvider, listClearSignProviders, removeClearSignProvider, resolveProviderTxMetadata, seedClearSignProviderFromEnv } from "./clearsign-providers"
 import { supportsCertifiedClearSign } from "./solana-certified-policy"
 import { createRpcAltFetcher } from "./solana-alt"
-import {
-	buildProviderKeyFile,
-	deriveProviderKey,
-	validateProviderCeremony,
-	writeProviderKeyFile,
-} from "../shared/clearsign-provider-key"
+import { createProviderKeySession } from "./clearsign-provider-session"
+import { buildProviderBundle, buildStudioEvmSchema, parseProviderBundle } from "./clearsign-studio-evm"
 import { getTokenMetadata, broadcastEvmTx, verifyEvmSigner } from "./evm-rpc"
 import { evmSourceForChain } from "./pioneer-evm"
 import { deviceErrorMessage } from "../shared/device-error"
@@ -3100,35 +3099,43 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				removeClearSignProvider(db, params.id)
 				return listClearSignProviders(db)
 			},
-			clearsignDeriveProviderKey: async (params) => {
-				const alias = String(params.alias || '').trim()
-				if (!alias || alias.length > 31 || !/^[A-Za-z0-9 _-]+$/.test(alias)) {
-					throw new Error('Alias must be 1-31 letters, digits, spaces, hyphens, or underscores')
+			// The provider private key never touches disk: memory only, this Studio session.
+			clearsignDeriveProviderKey: async (params) => providerKeySession.derive(params),
+			clearsignClearProviderKey: async () => ({ cleared: providerKeySession.clear() }),
+			clearsignBuildEvmSchema: async (params) => {
+				requireClearsignAdvancedMode()
+				return buildStudioEvmSchema(params.draft, params.keyId)
+			},
+			clearsignSignEvmSchema: async (params) => {
+				let label = 'Rejected EVM description'
+				try {
+					const signed = providerKeySession.signEvmSchema(params.draft, params.keyId)
+					label = `${signed.draft.method} · chain ${signed.draft.chainId}`
+					recordClearSignEvent({
+						kind: 'schema-attestation', outcome: 'signed', source: 'studio', chain: 'Ethereum', format: 'evm-v2',
+						label, payload: signed.signedPayload, publicKey: signed.publicKeyHex, fingerprint: signed.fingerprint,
+						keyId: signed.keyId, sentToDevice: false, request: { schema: signed.draft, provider: signed.alias },
+					})
+					return signed
+				} catch (cause: any) {
+					recordClearSignEvent({
+						kind: 'schema-attestation', outcome: 'blocked', source: 'studio', chain: 'Ethereum', format: 'evm-v2',
+						label, sentToDevice: false, request: { schema: params.draft }, error: cause?.message || String(cause),
+					})
+					throw cause
 				}
-				const childMnemonic = validateProviderCeremony({
-					childMnemonic: params.childMnemonic,
-					wordCount: params.wordCount,
-					index: params.index,
-				})
-				const key = deriveProviderKey(childMnemonic)
-				// PRIVACY: don't stamp a hidden wallet's fingerprint into a file on disk.
-				let deviceFingerprint: string | undefined
-				if (!engine.isPassphraseWallet) {
-					try { deviceFingerprint = await engine.getWalletFingerprint() } catch { /* no device */ }
-				}
-				const file = buildProviderKeyFile({
-					key,
-					alias,
-					bip85WordCount: params.wordCount,
-					bip85Index: params.index,
-					deviceFingerprint,
-					createdAt: new Date().toISOString(),
-				})
-				const slug = alias.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
-				const filePath = path.join(os.homedir(), 'Downloads', `keepkey-provider-${slug}-${key.fingerprint}.json`)
-				writeProviderKeyFile(filePath, file)
-				// Private key stays on disk — the renderer only ever sees the public half.
-				return { publicKeyHex: key.publicKeyHex, fingerprint: key.fingerprint, filePath }
+			},
+			clearsignExportProviderBundle: async (params) => {
+				requireClearsignAdvancedMode()
+				const bundle = buildProviderBundle(params)
+				const slug = bundle.provider.alias.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+				const filePath = path.join(os.homedir(), 'Downloads', `keepkey-clearsign-bundle-${slug}-${bundle.provider.fingerprint}.json`)
+				await Bun.write(filePath, JSON.stringify(bundle, null, 2))
+				return { filePath, bundle }
+			},
+			clearsignImportProviderBundle: async (params) => {
+				requireClearsignAdvancedMode()
+				return parseProviderBundle(params.json)
 			},
 			clearsignListEvents: async (params) => {
 				requireClearsignAdvancedMode()
@@ -3213,6 +3220,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// and blocks on a button press. On the emulator that needs the
 				// interactive Accept/Reject affordance or it hangs until timeout.
 				const apply = () => engine.wallet!.applyPolicy({ policyName: params.policyName, enabled: params.enabled })
+				// The device drops session signers when AdvancedMode goes off; drop the Studio key with them.
+				if (params.policyName === 'AdvancedMode' && !params.enabled) providerKeySession.clear()
 				if (engine.isEmulator) {
 					await emuSigningOp(apply, {
 						operation: 'applyPolicy',
