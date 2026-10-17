@@ -161,56 +161,9 @@ jobs:
           npx tsc -p .
           test -f dist/index.js
 
-      - name: Populate device-protocol lib/
+      - name: Build device-protocol lib/ from the pinned submodule
         shell: bash
-        run: |
-          # device-protocol/lib/ is gitignored — protobuf build output.
-          # Copy pre-built lib/ from hdwallet's resolved npm copy.
-          # hdwallet's yarn.lock pins the exact device-protocol version it was
-          # built/tested against, so its lib/ is the correct wire format.
-          if [ -f modules/device-protocol/lib/messages_pb.js ]; then
-            echo "device-protocol lib/ already present"
-            exit 0
-          fi
-
-          HDWALLET_DP="modules/hdwallet/node_modules/@keepkey/device-protocol"
-
-          if [ ! -d "$HDWALLET_DP" ] || [ ! -f "$HDWALLET_DP/lib/messages_pb.js" ]; then
-            echo "FATAL: device-protocol lib/ missing and no hdwallet copy available"
-            echo "Build on macOS first: cd modules/device-protocol && npm install && npm run build"
-            exit 1
-          fi
-
-          SUBMOD_VER=$(node -p "require('./modules/device-protocol/package.json').version" 2>/dev/null || echo "unknown")
-          HDWALLET_VER=$(node -p "require('./$HDWALLET_DP/package.json').version" 2>/dev/null || echo "unknown")
-          echo "Submodule package.json: $SUBMOD_VER"
-          echo "hdwallet resolved npm:  $HDWALLET_VER"
-          if [ "$SUBMOD_VER" != "$HDWALLET_VER" ]; then
-            echo "WARNING: version strings differ (git vs npm) — this is expected when"
-            echo "the npm publish was from a version-bump commit not on the submodule branch."
-            echo "Using hdwallet's resolved copy (it matches what hdwallet was built against)."
-          fi
-
-          echo "Copying lib/ from hdwallet's resolved device-protocol..."
-          rm -rf modules/device-protocol/lib
-          cp -r "$HDWALLET_DP/lib" modules/device-protocol/lib
-          JS_COUNT=$(ls modules/device-protocol/lib/*.js 2>/dev/null | wc -l)
-          echo "Done — $JS_COUNT JS files"
-          if [ "$JS_COUNT" -lt 1 ]; then
-            echo "FATAL: cp succeeded but 0 JS files in lib/ — cache may be stale"
-            echo "Try clearing the hdwallet cache or rebuild locally"
-            exit 1
-          fi
-
-      - name: Make google-protobuf resolvable from device-protocol lib/
-        shell: bash
-        run: |
-          # lib/*_pb.js require('google-protobuf'), resolved from
-          # modules/device-protocol/ upward, which has no node_modules in CI.
-          # Tests that import the lib directly (pin-unlock-timeout) need it.
-          mkdir -p modules/device-protocol/node_modules
-          ln -sfn "$PWD/modules/hdwallet/node_modules/google-protobuf" modules/device-protocol/node_modules/google-protobuf
-          test -f modules/device-protocol/node_modules/google-protobuf/package.json
+        run: make device-protocol-build
 
       - name: Install vault dependencies
         # --frozen-lockfile: install exactly what bun.lock pins. Without it, bun
