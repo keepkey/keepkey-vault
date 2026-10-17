@@ -20,6 +20,7 @@ import { deploymentMismatch, verifyPublishedReview } from './clearsign-review'
 import { snapshotEvmIdentities } from './clearsign-live-auditor'
 import { getEvmSimulationEndpoint } from './evm-simulation-config'
 import type { ClearSignDefinitionReview } from '../shared/clearsign-report'
+import { certifiedBodyRefused } from '../shared/certified-evm-envelope'
 import {
   buildEvmDecoderBody,
   CERTIFIED_METADATA_KEY_ID,
@@ -317,15 +318,20 @@ export async function resolveEvmSchema(
   to: string | undefined,
   data: string | undefined,
   certifiedMetadataSupported = true,
+  /** The device's firmware: an entry whose certified body it refuses (0x04
+   *  before 7.17.0; unknown firmware counts as refusing) is never returned. */
+  firmwareVersion?: string,
 ): Promise<SignedEvmSchema | undefined> {
   // Older firmware may not handle EthereumTxMetadata at all. In particular,
   // never substitute the local CI-key schema when the certified path is off.
   // The caller's ordinary Advanced Mode policy gate still applies.
   if (!certifiedMetadataSupported) return undefined
+  const shown = (entry: SignedEvmSchema | undefined) =>
+    entry && !certifiedBodyRefused(entry.signedPayload, firmwareVersion) ? entry : undefined
   const promoted = findPromotedEvmArtifact(chainId, to, data)
-  if (promoted) return { ...promoted, keyId: CERTIFIED_METADATA_KEY_ID, source: 'promoted-local' }
+  if (promoted) return shown({ ...promoted, keyId: CERTIFIED_METADATA_KEY_ID, source: 'promoted-local' })
   const certified = await findCertifiedEvmSchema(chainId, to, data)
-  if (certified) return certified
+  if (certified) return shown(certified)
   // The local registry is signed with the CI test key (slot 3), which a
   // production device cannot verify. Since a service outage now returns
   // undefined instead of throwing, taking it here would show "certified" and

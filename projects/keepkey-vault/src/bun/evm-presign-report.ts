@@ -45,7 +45,7 @@ export async function prepareEvmTxSigningInfo(
           maxPriorityFeePerGas: preview.maxPriorityFeePerGas || preview.max_priority_fee_per_gas || '0x0',
         }),
       }
-      const certified = await resolveEvmSchema(chainIdNum, preview.to, preview.data, true)
+      const certified = await resolveEvmSchema(chainIdNum, preview.to, preview.data, true, signingInfo.firmwareVersion)
         ?? await resolveCertifiedEvmTransaction(txForCertification)
       if (certified) {
         signingInfo.certifiedEvmSchema = certified

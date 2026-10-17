@@ -13,6 +13,26 @@ export const CERTIFIED_ENVELOPE_KEY_ID = 0x80
  *  0x06 is a name record that describes no call. */
 const SHOWN_BODY_VERSIONS = new Set([0x02, 0x05, 0x07])
 
+/** The first firmware that shows a certified 0x04 dynamic schema
+ *  (METADATA_VERSION_DYNAMIC_SCHEMA in signed_metadata.c). Stock 7.16.0
+ *  refuses 0x04 inside the certified envelope. */
+export const CERTIFIED_DYNAMIC_SCHEMA_MIN_FW = '7.17.0'
+
+function bodyShown(version: number, firmwareVersion: string): boolean {
+  return SHOWN_BODY_VERSIONS.has(version)
+    || (version === 0x04 && versionCompare(firmwareVersion, CERTIFIED_DYNAMIC_SCHEMA_MIN_FW) >= 0)
+}
+
+/** A certified envelope whose body this firmware refuses: a 0x04 dynamic
+ *  schema before 7.17.0 (unknown firmware counts as refusing). Desktop never
+ *  resolves or attaches one, so neither the REST nor the swap gate relies on
+ *  it, and the device never refuses a certified claim it was sent. */
+export function certifiedBodyRefused(payload: unknown, firmwareVersion: string | undefined): boolean {
+  const bytes = metadataPayloadBytes(payload)
+  if (!bytes || bytes.length < 141 || bytes[0] !== 0x03 || bytes[140] !== 0x04) return false
+  return !firmwareVersion || !bodyShown(0x04, firmwareVersion)
+}
+
 /** The chain id the REST sign handler signs: a missing or 0 id is signed as 1. */
 export function evmSignedChainId(v: unknown): number {
   const n = typeof v === 'string' ? Number(v.startsWith('0x') ? parseInt(v, 16) : v) : Number(v)
@@ -35,7 +55,8 @@ export function base64PayloadBytes(blob: string): Uint8Array | undefined {
 
 /**
  * True only for a 0x03 envelope under key id 0x80, on firmware 7.16.0 or
- * later, whose inner body is one the device shows (0x02/0x05/0x07) and names
+ * later, whose inner body is one the device shows (0x02/0x05/0x07, and 0x04
+ * from 7.17.0) and names
  * this exact chain, contract and selector. Shape only: the device checks the
  * certificate and signature, and refuses a failed certified claim outright
  * rather than signing blind (ethereum.c, SRS R-1.4).
@@ -49,7 +70,7 @@ export function certifiedEnvelopeShown(
   if (!payload || keyId !== CERTIFIED_ENVELOPE_KEY_ID) return false
   if (!firmwareVersion || versionCompare(firmwareVersion, '7.16.0') < 0) return false
   // 0x03, a 139-byte certificate, then the body: version, chain id, contract, selector.
-  if (payload.length < 169 || payload[0] !== 0x03 || !SHOWN_BODY_VERSIONS.has(payload[140])) return false
+  if (payload.length < 169 || payload[0] !== 0x03 || !bodyShown(payload[140], firmwareVersion)) return false
   const hex = (from: number, end: number) => Array.from(payload.slice(from, end), (x) => x.toString(16).padStart(2, '0')).join('')
   const data = typeof tx.data === 'string' ? tx.data.toLowerCase() : ''
   return parseInt(hex(141, 145), 16) === evmSignedChainId(tx.chainId)

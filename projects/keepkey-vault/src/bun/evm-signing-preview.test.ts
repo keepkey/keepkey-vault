@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import type { SigningRequestInfo } from '../shared/types'
 import { applyEvmTxPreview, evmPriorityFee, normalizeEvmChainId, typedDataNativelyReviewed } from './evm-signing-preview'
-import { approveSpender, findCertifiedEvmSchema } from './evm-schema-registry'
+import { approveSpender, findCertifiedEvmSchema, resolveEvmSchema } from './evm-schema-registry'
+import { certifiedBodyRefused } from '../shared/certified-evm-envelope'
 import { findCertifiedEvmEnvelope } from './evm-certified-registry'
 import { findEvmSchema } from './evm-schema-registry'
 import { SolanaSignMessageRequest } from './schemas'
@@ -170,6 +171,43 @@ describe('a caller blob never relaxes the gate unless it is a certified envelope
       expect((await preview(fw, meta)).needsBlindSigning).toBe(true)
       expect(evmCallRequiresAdvancedMode(TO, CALL, 1, false, meta, undefined, fw)).toBe(true)
     }
+  })
+})
+
+describe('one rule for certified 0x04 dynamic schemas (REST gate = swap gate)', () => {
+  const PORTALS = '0xbf5a7f3629fb325e2a8453d595ab103465f75e62'
+  const DATA = '0xa2e42c65' + '00'.repeat(448)
+  /** 0x03 | certificate (chain id at bytes 3..6) | 0x04 body | signature. */
+  const dynamicEnvelope = () => `0x03${'cc'.repeat(2)}00000001${'cc'.repeat(133)}04${'00000001'}${PORTALS.slice(2)}a2e42c65${'00'.repeat(8)}${'ab'.repeat(65)}`
+  const service = () => {
+    globalThis.fetch = (async () => Response.json({
+      classification: 'VERIFIED', chainId: 1, contract: PORTALS, selector: '0xa2e42c65', method: 'Portals swap',
+      keyId: 0x80, signedPayload: dynamicEnvelope(),
+    })) as unknown as typeof fetch
+  }
+
+  test('7.16.0 refuses 0x04 inside the certified envelope: never resolved, attached or relied on', async () => {
+    expect(certifiedBodyRefused(dynamicEnvelope(), '7.16.0')).toBe(true)
+    expect(certifiedBodyRefused(dynamicEnvelope(), undefined)).toBe(true)
+    expect(certifiedBodyRefused(dynamicEnvelope(), '7.17.0')).toBe(false)
+    service()
+    expect(await resolveEvmSchema(1, PORTALS, DATA, true, '7.16.0')).toBeUndefined()
+    const s = info()
+    await applyEvmTxPreview(s, PORTALS, DATA, 1, '7.16.0')
+    expect(s.needsBlindSigning).toBe(true)
+    expect(s.calldataDecoded?.signedInsightBlob).toBeUndefined()
+    // The swap gate agrees: a 0x04 envelope does not lift AdvancedMode on 7.16.0.
+    expect(evmCallRequiresAdvancedMode(PORTALS, DATA, 1, false, { signedPayload: dynamicEnvelope(), keyId: 0x80 }, undefined, '7.16.0')).toBe(true)
+  })
+
+  test('firmware that shows 0x04 gets it on both gates', async () => {
+    service()
+    expect((await resolveEvmSchema(1, PORTALS, DATA, true, '7.17.0'))?.method).toBe('Portals swap')
+    service()
+    const s = info()
+    await applyEvmTxPreview(s, PORTALS, DATA, 1, '7.17.0')
+    expect(s.needsBlindSigning).toBe(false)
+    expect(evmCallRequiresAdvancedMode(PORTALS, DATA, 1, false, { signedPayload: dynamicEnvelope(), keyId: 0x80 }, undefined, '7.17.0')).toBe(false)
   })
 })
 

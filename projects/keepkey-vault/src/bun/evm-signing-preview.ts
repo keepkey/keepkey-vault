@@ -12,7 +12,7 @@ import { REVIEWED_EVM_TOKENS, findEvmNameRecord, findReviewedUniversalRouter } f
 import { evmContractIdentity } from '../shared/evm-contract-identity'
 import { urPrecheck } from './uniswap-ur'
 import { supportsCertifiedClearSign } from './solana-certified-policy'
-import { certifiedEnvelopeShown, metadataPayloadBytes } from '../shared/certified-evm-envelope'
+import { certifiedBodyRefused, certifiedEnvelopeShown, metadataPayloadBytes } from '../shared/certified-evm-envelope'
 
 /** A chain id as dapps send it (number, "8453", "0x2105") → positive integer, else undefined. */
 export function normalizeEvmChainId(raw: unknown): number | undefined {
@@ -54,6 +54,11 @@ export async function attachCertifiedEvmSchema(
     return false
   }
   if (!schema) return false
+  // The same rule as the swap gate: a body this firmware refuses is never attached.
+  if (certifiedBodyRefused(schema.signedPayload, firmwareVersion)) {
+    console.log(`${tag} EVM clear-sign: certified "${schema.method}" is a dynamic schema this firmware (${firmwareVersion}) refuses — not attached`)
+    return false
+  }
   signingInfo.calldataDecoded = {
     ...(signingInfo.calldataDecoded ?? {
       dappName: 'Unknown', contractName: to, method: schema.method,
