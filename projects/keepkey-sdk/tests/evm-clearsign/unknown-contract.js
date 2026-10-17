@@ -14,7 +14,7 @@
  */
 const { run, ETH_PATH, CHAINS, toHex } = require('../_helpers')
 
-run('Unknown contract call — blind signing required', async (getSdk, assert) => {
+run('Unknown contract call — red, device shows raw data', async (getSdk, assert) => {
   const sdk = await getSdk()
 
   const { address } = await sdk.address.ethGetAddress({ address_n: ETH_PATH })
@@ -28,7 +28,6 @@ run('Unknown contract call — blind signing required', async (getSdk, assert) =
     data: '0xdeadbeef' +
       '0000000000000000000000000000000000000000000000000000000000000042' +
       '00000000000000000000000000000000000000000000000000000000000000ff',
-    nonce: '0x5',
     gasLimit: toHex(100000),
     gasPrice: toHex(20000000000),
     chainId: CHAINS.ETH,
@@ -41,8 +40,16 @@ run('Unknown contract call — blind signing required', async (getSdk, assert) =
   console.log('    Value: 0.05 ETH (sent with call)')
   console.log('    needsBlindSigning: TRUE')
   console.log('    Raw calldata shown as hex dump')
-  console.log('\n  >>> APPROVE on device — blind signing scenario <<<\n')
 
-  const result = await sdk.eth.ethSignTransaction(tx)
-  assert('Got signed tx (blind signing allowed)', !!result)
+  // Zero presses. With AdvancedMode off, 7.16 cannot show this call, so
+  // Desktop's report must say the device shows raw data (the signing card then
+  // blocks it). Signing it would need AdvancedMode: see fw-716/50 (opt-in).
+  const report = await sdk.clearsign.report({
+    chain: 'evm', chainId: tx.chainId, from: address, to: tx.to, data: tx.data, value: tx.value,
+  })
+  console.log(`  report: ${report.protectionLevel} source=${report.descriptor.source} [${report.limitations.map((l) => l.code).join(', ')}]`)
+  assert('Desktop saw the device', !report.limitations.some((l) => l.code === 'DEVICE_NOT_CONNECTED'))
+  assert('report says the device shows raw data', report.limitations.some((l) => l.code === 'DEVICE_SHOWS_RAW_DATA'))
+  assert("no description: source 'none'", report.descriptor.source === 'none')
+  assert('report is below P4', report.protectionLevel !== 'P4' && report.protectionLevel !== 'P5')
 })

@@ -22,6 +22,64 @@
           ]
         }
       }
+    },
+    "Stake11111111111111111111111111111111111111": {
+      "name": "Stake Program",
+      "category": "staking",
+      "website": "https://docs.solana.com/developing/runtime-facilities/programs#stake-program",
+      "description": "Native staking: delegate, deactivate, split, merge, withdraw. Only DelegateStake and Deactivate are decoded here: they keep the stake account's authorities, and firmware shows both. Authorize, Split and Withdraw can hand control or funds to another account and stay undecoded.",
+      "discriminator": {
+        "encoding": "u32-le",
+        "offset": 0,
+        "length": 4
+      },
+      "instructions": {
+        "02000000": {
+          "name": "delegateStake",
+          "description": "Delegate a stake account to a validator's vote account.",
+          "accounts": ["stakeAccount", "voteAccount", "clockSysvar", "stakeHistorySysvar", "stakeConfig", "stakeAuthority"],
+          "args": []
+        },
+        "05000000": {
+          "name": "deactivate",
+          "description": "Deactivate a stake account so it can be withdrawn after cooldown.",
+          "accounts": ["stakeAccount", "clockSysvar", "stakeAuthority"],
+          "args": []
+        }
+      }
+    },
+    "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL": {
+      "name": "Associated Token Account",
+      "category": "token",
+      "website": "https://spl.solana.com/associated-token-account",
+      "description": "Derives and creates the canonical token account for (wallet, mint) pairs. Same as pioneer-discovery plus the \"\" entry: Create was first sent with empty data, which has no u8 discriminator, and firmware shows it as Create.",
+      "discriminator": {
+        "encoding": "u8",
+        "offset": 0,
+        "length": 1
+      },
+      "instructions": {
+        "": {
+          "name": "create",
+          "accounts": ["funder", "associated_account", "owner", "mint", "system_program", "token_program"],
+          "args": []
+        },
+        "00": {
+          "name": "create",
+          "accounts": ["funder", "associated_account", "owner", "mint", "system_program", "token_program"],
+          "args": []
+        },
+        "01": {
+          "name": "createIdempotent",
+          "accounts": ["funder", "associated_account", "owner", "mint", "system_program", "token_program"],
+          "args": []
+        },
+        "02": {
+          "name": "recoverNested",
+          "accounts": ["nested_account", "nested_mint", "destination", "owner_associated_account", "owner_mint", "owner", "token_program"],
+          "args": []
+        }
+      }
     }
   }
 }

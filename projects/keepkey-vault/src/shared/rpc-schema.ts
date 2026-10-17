@@ -1,7 +1,7 @@
 import type { ElectrobunRPCSchema } from 'electrobun/bun'
 import type { ClearSignReport } from './clearsign-report'
-import type { ClearSignCentralAssetAuditHistory, ClearSignCentralAssetReview, ClearSignCentralAssetReviewResult, ClearSignCentralContractAudit, ClearSignCentralContractReview, ClearSignCentralStatus, ClearSignProtectionCaseStudy } from './types'
-import type { DeviceStateInfo, FirmwareProgress, FirmwareAnalysis, FatalEvent, PinRequest, CharacterRequest, ChainBalance, BuildTxParams, BuildTxResult, BroadcastResult, BtcAccountSet, BtcScriptType, EvmAddressSet, CustomToken, CustomChain, AppSettings, PioneerServer, BtcGetAddressParams, EthGetAddressParams, EthSignTxParams, BtcSignTxParams, GetPublicKeysParams, UpdateInfo, UpdateStatus, TokenVisibilityStatus, PairingRequestInfo, PairedAppInfo, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, ReportMeta, ReportData, AuditReport, AuditPortfolioSnapshot, AuditMode, AuditDerivedAddress, AuditInspectResult, SwapAsset, SwapQuote, SwapQuoteParams, ExecuteSwapParams, SwapResult, SwapHealth, PendingSwap, SwapStatusUpdate, SwapHistoryRecord, SwapHistoryFilter, SwapHistoryStats, SwapUiState, SwapUiCommand, RecentActivity, BuildStakingTxParams, StakingPosition, DefiPosition, NameInfo, NameQuote, BuildNameRegTxParams, ZcashTransaction, EmulatorStatus, EmulatorWalletInfo, RegisteredDevice, WcSessionInfo, AddressBookEntry, AddressBookFilter, AddressBookTx, UsbDiagnosticReport, ClearSignEvent, ClearSignCoverageSummary, ClearSignAuditJob, ClearSignSolanaSchemaArtifact, ClearSignSolanaSchemaDraft, RngAuditReport } from './types'
+import type { ClearSignCentralAssetAuditHistory, ClearSignCentralAssetReview, ClearSignCentralAssetReviewResult, ClearSignCentralContractAudit, ClearSignCentralContractReview, ClearSignCentralStatus, ClearSignProtectionCaseStudy, RuntimeProviderNamed } from './types'
+import type { DeviceStateInfo, FirmwareProgress, FirmwareAnalysis, FatalEvent, PinRequest, CharacterRequest, ChainBalance, BuildTxParams, BuildTxResult, BroadcastResult, BtcAccountSet, BtcScriptType, EvmAddressSet, CustomToken, CustomChain, AppSettings, PioneerServer, BtcGetAddressParams, EthGetAddressParams, EthSignTxParams, BtcSignTxParams, GetPublicKeysParams, UpdateInfo, UpdateStatus, TokenVisibilityStatus, PairingRequestInfo, PairedAppInfo, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, ReportMeta, ReportData, AuditReport, AuditPortfolioSnapshot, AuditMode, AuditDerivedAddress, AuditInspectResult, SwapAsset, SwapQuote, SwapQuoteParams, ExecuteSwapParams, SwapResult, SwapHealth, PendingSwap, SwapStatusUpdate, SwapHistoryRecord, SwapHistoryFilter, SwapHistoryStats, SwapUiState, SwapUiCommand, RecentActivity, BuildStakingTxParams, StakingPosition, DefiPosition, NameInfo, NameQuote, BuildNameRegTxParams, ZcashTransaction, ZcashTxBatch, ZcashTexPayment, EmulatorStatus, EmulatorWalletInfo, RegisteredDevice, WcSessionInfo, AddressBookEntry, AddressBookFilter, AddressBookTx, UsbDiagnosticReport, ClearSignEvent, ClearSignCoverageSummary, ClearSignAuditJob, ClearSignSolanaSchemaArtifact, ClearSignSolanaSchemaDraft, ClearSignEvmSchemaDraft, ClearSignEvmSchemaArtifact, ClearSignEvmSignedEntry, ClearSignProviderBundle, RngAuditReport, ClearSignProvider, ClearSignProviderInput } from './types'
 
 /**
  * RPC Schema for Bun ↔ WebView communication.
@@ -18,7 +18,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       getDeviceState: { params: void; response: DeviceStateInfo }
       retryConnect: { params: void; response: void }
       startBootloaderUpdate: { params: void; response: void }
-      startFirmwareUpdate: { params: { bitcoinOnly?: boolean }; response: void }
+      startFirmwareUpdate: { params: { variant?: 'multi' | 'bitcoin-only'; acknowledgeWipe?: import('./flash-wipe').WipeReason }; response: void }
       flashFirmware: { params: void; response: void }
       analyzeFirmware: { params: { data: string }; response: FirmwareAnalysis }
       flashCustomFirmware: { params: { data: string }; response: void }
@@ -70,9 +70,21 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       clearsignSubmitCentralContractReview: { params: ClearSignCentralContractReview; response: Record<string, unknown> }
       clearsignGetProtectionCaseStudies: { params: void; response: ClearSignProtectionCaseStudy[] }
       // Provider-key ceremony. The mnemonic is read off the device screen and
-      // typed back in; the derived PRIVATE key is written to a file and never
-      // returned to the renderer.
-      clearsignDeriveProviderKey: { params: { childMnemonic: string; alias: string; wordCount: number; index: number }; response: { publicKeyHex: string; fingerprint: string; filePath: string } }
+      // typed back in; the derived PRIVATE key stays in host memory for this
+      // Studio session only (never on disk, never returned to the renderer).
+      clearsignDeriveProviderKey: { params: { childMnemonic: string; alias: string; wordCount: number; index: number }; response: { alias: string; publicKeyHex: string; fingerprint: string } }
+      clearsignClearProviderKey: { params: void; response: { cleared: boolean } }
+      // Runtime-tier EVM v0x02 descriptions signed by the session provider key. Bundles are public only.
+      clearsignBuildEvmSchema: { params: { draft: ClearSignEvmSchemaDraft; keyId: number }; response: ClearSignEvmSchemaArtifact }
+      clearsignSignEvmSchema: { params: { draft: ClearSignEvmSchemaDraft; keyId: number }; response: ClearSignEvmSignedEntry & { alias: string; publicKeyHex: string; fingerprint: string } }
+      clearsignExportProviderBundle: { params: { alias: string; publicKeyHex: string; keyId?: number; signedPayloads: string[] }; response: { filePath: string; bundle: ClearSignProviderBundle } }
+      clearsignImportProviderBundle: { params: { json: string }; response: { bundle: ClearSignProviderBundle; entries: ClearSignEvmSignedEntry[] } }
+      // Third-party ClearSign providers the user added. The device asks to
+      // trust each one per session ("NOT verified by KeepKey"); adding needs
+      // AdvancedMode, since the runtime tier does nothing without it.
+      clearsignListProviders: { params: void; response: ClearSignProvider[] }
+      clearsignAddProvider: { params: ClearSignProviderInput; response: ClearSignProvider[] }
+      clearsignRemoveProvider: { params: { id: string }; response: ClearSignProvider[] }
       // Open a URL in the user's default browser (escapes the WebView).
       // The system WebView blocks target=_blank, so explorer/docs links
       // route through here instead. Bun shells out to the OS-native opener.
@@ -199,9 +211,14 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       zcashShieldedStatus: { params: void; response: { ready: boolean; fvk_loaded: boolean; address: string | null; fvk: { ak: string; nk: string; rivk: string } | null; synced_to: number | null; keepkey_release_block: number | null; verified: boolean; synced: boolean; verifying: boolean } }
       zcashShieldedInit: { params: { account?: number }; response: { fvk: { ak: string; nk: string; rivk: string }; address: string } }
       zcashShieldedScan: { params: { startHeight?: number; fullRescan?: boolean }; response: { balance: number; notes_found: number; synced_to: number } }
-      zcashShieldedBalance: { params: void; response: { confirmed: number; pending: number; synced_to?: number | null; notes_total?: number; notes_unspent?: number; keepkey_release_block?: number } }
-      zcashShieldedSend: { params: { recipient: string; amount: number; memo?: string }; response: { txid: string } }
-      zcashShieldZec: { params: { amount: number; account?: number }; response: { txid: string } }
+      // max_send / max_deshield: the most one payment can move, across as many
+      // transactions as the 16-action device limit requires.
+      zcashShieldedBalance: { params: void; response: { confirmed: number; pending: number; synced_to?: number | null; notes_total?: number; notes_unspent?: number; keepkey_release_block?: number; max_send?: number; max_deshield?: number } }
+      // A payment that needs more notes than one transaction can spend is sent
+      // as several; `txids` lists them all, `txid` is the last. A tex1
+      // recipient (ZIP-320) is paid via a one-time transparent address.
+      zcashShieldedSend: { params: { recipient: string; amount: number; memo?: string }; response: { txid: string; txids?: string[]; unsentZat?: number; unsentReason?: string } }
+      zcashShieldZec: { params: { amount: number; account?: number }; response: { txid: string; txids: string[] } }
       // Confirmed UTXO total at the user's first-receive t-addr — the only address
       // shieldZec sweeps. Use this (not chain-level getBalance, which sums the
       // whole xpub) to power the Shield page's Available / Max button.
@@ -210,9 +227,14 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       //   discrepancy between the chain-level balance and what's shieldable
       zcashTransparentBalance: {
         params: { account?: number } | void
-        response: { address: string; balanceZat: number; pendingZat: number; matureCount: number; pendingCount: number }
+        response: { address: string; balanceZat: number; pendingZat: number; matureCount: number; pendingCount: number; maxShieldZat: number }
       }
-      zcashDeshieldZec: { params: { recipient: string; amount: number; account?: number }; response: { txid: string } }
+      zcashDeshieldZec: { params: { recipient: string; amount: number; account?: number }; response: { txid: string; txids: string[]; unsentZat?: number; unsentReason?: string } }
+      // ZIP-320 TEX payments. `funded` ones hold funds at a one-time address
+      // after a failed step 2: complete them or shield the funds back.
+      zcashTexPayments: { params: void; response: { payments: ZcashTexPayment[] } }
+      zcashTexComplete: { params: { index: number }; response: { txid: string } }
+      zcashTexShieldBack: { params: { index: number }; response: { txid: string } }
       // Read-only diagnostic: does the cached shielded balance belong to the
       // connected device? `match: false` ⇒ stale/other-wallet, not spendable here.
       zcashVerifyDevice: { params: { account?: number } | void; response: { match: boolean; deviceAk: string; cachedAk: string | null; cachedAddress: string | null; message: string } }
@@ -227,6 +249,8 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       rejectPairing: { params: void; response: void }
       approveSigningRequest: { params: { id: string; allowBlindSigning?: boolean }; response: void }
       rejectSigningRequest: { params: { id: string }; response: void }
+      /** Emulator test tape only: the text the approval card rendered. */
+      reportSigningCard: { params: { id: string; text: string }; response: void }
       listPairedApps: { params: void; response: PairedAppInfo[] }
       revokePairing: { params: { apiKey: string }; response: void }
 
@@ -255,7 +279,6 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       setBtcNode: { params: { enabled: boolean; type: 'blockbook' | 'core'; url: string; rpcUser?: string; rpcPass?: string }; response: AppSettings }
       testBtcNode: { params: { type: 'blockbook' | 'core'; url: string; rpcUser?: string; rpcPass?: string }; response: { ok: boolean; error?: string; chain?: string; blocks?: number; pruned?: boolean; txindex?: boolean; inSync?: boolean; detectedType?: 'blockbook' | 'core' } }
       getBtcNodeStatus: { params: void; response: { active: boolean; kind?: 'blockbook' | 'core'; ok?: boolean; error?: string; height?: number; headers?: number; syncing?: boolean; progress?: number } }
-      setBip85Enabled: { params: { enabled: boolean }; response: AppSettings }
       // Zcash + Hive have no setters — both are derived from the connected
       // device's firmware (>= 7.15.0) in the device-ready handler in bun/index.ts.
       setEmulatorEnabled: { params: { enabled: boolean }; response: AppSettings }
@@ -308,6 +331,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
         allowance?: { current: string; required: string; sufficient: boolean; spender: string; tokenContract: string }
         balance?: { current: string; required: string; sufficient: boolean; tokenContract?: string }
         clearSignReports?: { approval?: ClearSignReport; transaction?: ClearSignReport }
+        runtimeProvider?: RuntimeProviderNamed
       } }
       getPendingSwaps: { params: void; response: PendingSwap[] }
       dismissSwap: { params: { txid: string }; response: void }
@@ -582,9 +606,9 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       // recipient) — frontend re-fetches the list.
       'addressbook-changed': Record<string, never>
       'sweep-progress': { scanId: string; current: number; total: number; phase: string; foundCount: number; foundSats: number }
-      'shield-progress': { step: string; detail?: string }
-      'deshield-progress': { step: string; detail?: string }
-      'send-progress': { step: string; detail?: string }
+      'shield-progress': { step: string; detail?: string; batch?: ZcashTxBatch }
+      'deshield-progress': { step: string; detail?: string; batch?: ZcashTxBatch }
+      'send-progress': { step: string; detail?: string; batch?: ZcashTxBatch }
       // Fires whenever the device emits a ButtonRequest (any flow). UI flows
       // that are mid-signing use this to switch from "device computing" to
       // "press the button on your KeepKey".

@@ -1,0 +1,173 @@
+[
+  {
+    "card": "/osmosis/sign-amino",
+    "level": "none",
+    "reasons": [],
+    "blind": false,
+    "window": [
+      "ACTION REQUIRED",
+      "Claude QA (Zcash)",
+      "Osmosis Sign",
+      "cosmos-sdk/MsgSend",
+      "From address",
+      "osmo15cenya0tr7nm3tz2wn3h3zwkht2rxrq7g9ypmq",
+      "To address",
+      "osmo15cenya0tr7nm3tz2wn3h3zwkht2rxrq7g9ypmq",
+      "Amount",
+      "123456789.123456 OSMO (123456789123456 uosmo)",
+      "Fee",
+      "0.0008 OSMO (800 uosmo)",
+      "Transaction",
+      "Chain",
+      "OSMOSIS",
+      "From",
+      "osmo15cenya0tr7nm3tz2wn3h3zwkht2rxrq7g9ypmq",
+      "Full Request Payload",
+      "\u25bc",
+      "Approve",
+      "Reject",
+      "Enter to approve \u00b7 Esc to reject"
+    ]
+  },
+  {
+    "screen": "osmosisSignTx",
+    "lines": [
+      "Send 123456789.123456 OSMO to",
+      "osmo15cenya0tr7nm3tz2wn3h3zwkht2rxrq7",
+      "g9ypmq"
+    ]
+  },
+  {
+    "screen": "osmosisSignTx",
+    "lines": [
+      "OSMOSIS ACCOUNT #0",
+      "Sign this Osmosis transaction on osmosis-1?",
+      "It includes a fee of 800 uOSMO and 290000",
+      "gas."
+    ]
+  },
+  {
+    "card": "/osmosis/sign-amino-delegate",
+    "level": "none",
+    "reasons": [],
+    "blind": false,
+    "window": [
+      "ACTION REQUIRED",
+      "Claude QA (Zcash)",
+      "Osmosis Delegate",
+      "cosmos-sdk/MsgDelegate",
+      "Delegator address",
+      "osmo15cenya0tr7nm3tz2wn3h3zwkht2rxrq7g9ypmq",
+      "Validator address",
+      "osmovaloper1sjllsnramtg3ewxqwwrwjxfgc4n4ef9ua8h4lf",
+      "Amount",
+      "123456789.123456 OSMO (123456789123456 uosmo)",
+      "Fee",
+      "0.0008 OSMO (800 uosmo)",
+      "Transaction",
+      "Chain",
+      "OSMOSIS",
+      "From",
+      "osmo15cenya0tr7nm3tz2wn3h3zwkht2rxrq7g9ypmq",
+      "Full Request Payload",
+      "\u25bc",
+      "Approve",
+      "Reject",
+      "Enter to approve \u00b7 Esc to reject"
+    ]
+  },
+  {
+    "screen": "osmosisSignTx",
+    "lines": [
+      "Confirm Delegator Address",
+      "osmo15cenya0tr7nm3tz2wn3h3",
+      "zwkht2rxrq7g9ypmq"
+    ]
+  },
+  {
+    "screen": "osmosisSignTx",
+    "lines": [
+      "Confirm Validator Address",
+      "osmovaloper1sjllsnramtg3ewxq",
+      "wwrwjxfgc4n4ef9ua8h4lf"
+    ]
+  },
+  {
+    "screen": "osmosisSignTx",
+    "lines": [
+      "CONFIRM AMOUNT",
+      "123456789.123456 OSMO"
+    ]
+  },
+  {
+    "screen": "osmosisSignTx",
+    "lines": [
+      "OSMOSIS ACCOUNT #0",
+      "Sign this Osmosis transaction on osmosis-1?",
+      "It includes a fee of 800 uOSMO and 290000",
+      "gas."
+    ]
+  },
+  {
+    "card": "/osmosis/sign-amino-undelegate",
+    "level": "none",
+    "reasons": [],
+    "blind": false,
+    "window": [
+      "ACTION REQUIRED",
+      "Claude QA (Zcash)",
+      "Osmosis Undelegate",
+      "cosmos-sdk/MsgUndelegate",
+      "Delegator address",
+      "osmo15cenya0tr7nm3tz2wn3h3zwkht2rxrq7g9ypmq",
+      "Validator address",
+      "osmovaloper1sjllsnramtg3ewxqwwrwjxfgc4n4ef9ua8h4lf",
+      "Amount",
+      "0.0005 OSMO (500 uosmo)",
+      "Fee",
+      "0.0008 OSMO (800 uosmo)",
+      "Transaction",
+      "Chain",
+      "OSMOSIS",
+      "From",
+      "osmo15cenya0tr7nm3tz2wn3h3zwkht2rxrq7g9ypmq",
+      "Full Request Payload",
+      "\u25bc",
+      "Approve",
+      "Reject",
+      "Enter to approve \u00b7 Esc to reject"
+    ]
+  },
+  {
+    "screen": "osmosisSignTx",
+    "lines": [
+      "Confirm Delegator Address",
+      "osmo15cenya0tr7nm3tz2wn3h3",
+      "zwkht2rxrq7g9ypmq"
+    ]
+  },
+  {
+    "screen": "osmosisSignTx",
+    "lines": [
+      "Confirm Validator Address",
+      "osmovaloper1sjllsnramtg3ewxq",
+      "wwrwjxfgc4n4ef9ua8h4lf"
+    ]
+  },
+  {
+    "screen": "osmosisSignTx",
+    "lines": [
+      "CONFIRM AMOUNT",
+      "0.000500 OSMO"
+    ]
+  },
+  {
+    "screen": "osmosisSignTx",
+    "lines": [
+      "OSMOSIS ACCOUNT #0",
+      "Sign this Osmosis transaction on osmosis-1?",
+      "It includes a fee of 800 uOSMO and 290000",
+      "gas."
+    ]
+  }
+]

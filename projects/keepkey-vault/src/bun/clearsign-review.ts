@@ -193,6 +193,9 @@ export async function requestClearSignReview(chainId: number, to: string, data: 
   })
   const result: any = await response.json().catch(() => null)
   const request = result?.discoveryRequest
-  if (!request?.queued) throw new Error(result?.error || `ClearSign service did not queue the request (HTTP ${response.status})`)
+  // No discoveryRequest at all means the service predates review requests; its
+  // "not in the reviewed catalog" error would read as if the request was bad.
+  if (!request) throw new Error(`The ClearSign service cannot take review requests yet (HTTP ${response.status}). Nothing was sent to reviewers.`)
+  if (!request.queued) throw new Error(result?.error || `ClearSign service did not queue the request (HTTP ${response.status})`)
   return { queued: true, requestId: String(request.requestId) }
 }

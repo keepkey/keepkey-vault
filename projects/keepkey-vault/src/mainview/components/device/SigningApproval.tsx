@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react"
+import { useEffect, useRef, useState, useCallback } from "react"
 import { Box, Text, VStack, Flex, Button } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
 import { Z } from "../../lib/z-index"
@@ -13,8 +13,11 @@ import { isRelayBridgeDeposit } from "../../../shared/relayBridgePreview"
 import { decodeAcrossDepositV3 } from "../../../shared/acrossDeposit"
 import { utxoPreview } from "../../../shared/utxoPreview"
 import { cosmosDepositPreview } from "../../../shared/cosmosDepositPreview"
-import { assessSigningRisk, formatCertifiedArg, type RiskLevel } from "../../../shared/clearsign-risk"
+import { cosmosTxPreview } from "../../../shared/cosmosTxPreview"
+import { typedDataRows } from "../../../shared/typedDataRows"
+import { assessSigningRisk, formatCertifiedArg, type RiskLevel, type SigningTier } from "../../../shared/clearsign-risk"
 import { ClearSignReportCard } from "../ClearSignReportCard"
+import { namedProviderLine } from "../../../shared/clearsign-report"
 
 interface SigningApprovalProps {
 	request: SigningRequestInfo
@@ -127,9 +130,11 @@ function TrustBadge({ level, hasSigned, schemaOnly, label, t }: { level: 'verifi
 
 // ── Blind signing warning ─────────────────────────────────────────────
 
-function BlindSigningBanner({ enabled, confirming, onEnable, onCancel, t, title, description, confirmDescription, enableLabel, error }: {
+function BlindSigningBanner({ enabled, confirming, onEnable, onCancel, t, title, description, confirmDescription, enableLabel, error, explainOnly = false }: {
 	enabled: boolean; confirming: boolean; onEnable: () => void; onCancel: () => void; t: (k: string, f?: string) => string
 	title?: string; description?: string; confirmDescription?: string; enableLabel?: string; error?: string | null
+	/** The card's bottom button turns Advanced Mode on; the banner only explains why. */
+	explainOnly?: boolean
 }) {
 	if (enabled) return null
 	return (
@@ -149,7 +154,7 @@ function BlindSigningBanner({ enabled, confirming, onEnable, onCancel, t, title,
 							: (description ?? t("signing.blindSigningDescription", "Enable Advanced Mode on device to sign unverified contract data."))}
 					</Text>
 				</Box>
-				{!confirming && (
+				{!confirming && !explainOnly && (
 					<Box
 						as="button" px="3" py="1" borderRadius="full"
 						bg="rgba(245,163,59,0.2)" color="#F5A33B" fontSize="2xs" fontWeight="600"
@@ -342,25 +347,30 @@ function RequestClearSignReview({ request }: { request: SigningRequestInfo }) {
 
 // ── Risk bar: level + the payload facts behind it ─────────────────────
 
-const RISK_STYLE: Record<RiskLevel, { color: string; filled: number }> = {
-	low: { color: "var(--teal)", filled: 1 },
-	medium: { color: "var(--gold)", filled: 2 },
-	high: { color: "var(--rose)", filled: 3 },
-	critical: { color: "var(--rose)", filled: 4 },
+const RISK_STYLE: Record<RiskLevel, { color: string }> = {
+	low: { color: "var(--teal)" },
+	medium: { color: "var(--gold)" },
+	high: { color: "var(--rose)" },
+	critical: { color: "var(--rose)" },
+}
+const TIER_STYLE: Record<SigningTier, { color: string; filled: number }> = {
+	green: { color: "var(--teal)", filled: 1 },
+	yellow: { color: "var(--gold)", filled: 2 },
+	red: { color: "var(--rose)", filled: 3 },
 }
 
 function RiskBar({ request, t }: { request: SigningRequestInfo; t: (k: string, f?: string) => string }) {
 	const risk = assessSigningRisk(request)
 	if (!risk) return null
-	const style = RISK_STYLE[risk.level]
+	const style = TIER_STYLE[risk.tier]
 	return (
-		<Flex direction="column" gap="1.5" w="100%" bg="rgba(0,0,0,0.2)" borderRadius="lg" px="3" py="2" data-risk-level={risk.level}>
+		<Flex direction="column" gap="1.5" w="100%" bg="rgba(0,0,0,0.2)" borderRadius="lg" px="3" py="2" data-risk-level={risk.level} data-risk-tier={risk.tier}>
 			<Flex align="center" gap="2">
 				<Text fontSize="xs" fontWeight="700" color={style.color}>
-					{t(`signing.risk_${risk.level}`, risk.headline)}
+					{t(`signing.tier_${risk.tier}`, risk.headline)}
 				</Text>
 				<Flex gap="1" flex="1" minW="60px">
-					{[1, 2, 3, 4].map((i) => (
+					{[1, 2, 3].map((i) => (
 						<Box key={i} flex="1" h="6px" borderRadius="full" bg={i <= style.filled ? style.color : "rgba(255,255,255,0.1)"} />
 					))}
 				</Flex>
@@ -934,8 +944,8 @@ function TypedDataSection({ decoded, t }: { decoded: EIP712DecodedInfo; t: (k: s
 			{decoded.domain.name && <Row label="Domain" value={decoded.domain.name} />}
 			{decoded.domain.verifyingContract && <Row label="Contract" value={identified(decoded.domain.verifyingContract)} />}
 			{decoded.domain.chainId !== undefined && <Row label="Chain ID" value={String(decoded.domain.chainId)} />}
-			{decoded.fields.map((field, i) => (
-				<Row key={i} label={field.label} value={identified(field.raw || field.value)} />
+			{typedDataRows(decoded).map((row, i) => (
+				<Row key={i} label={row.label} value={identified(row.value)} />
 			))}
 		</VStack>
 	)
@@ -975,11 +985,19 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 	// AdvancedMode gate below is untouched.
 	const acrossDeposit = request.method === '/eth/sign-transaction'
 		? decodeAcrossDepositV3(request.to, request.data, request.chainId) : null
+	// A protocol this computer knows and decodes in full. The device may still
+	// need AdvancedMode for it on this firmware, but it is not "unknown".
+	const knownProtocol = acrossDeposit ? 'Across'
+		: relayBridgeDeposit ? 'Relay'
+		: swapDecision ? decoded!.fields.find(field => field.name === 'Protocol')!.value.replace(/ Router$/, '')
+		: decoded?.fields.some(field => field.name === 'Protocol' && field.value === 'Uniswap Universal Router') ? 'Uniswap'
+		: null
 	const utxo = request.method === '/utxo/sign-transaction' ? utxoPreview(request.rawRequestBody) : undefined
 	const cosmosDeposit = request.method === '/thorchain/sign-amino-deposit'
 		? cosmosDepositPreview(request.rawRequestBody, 'THORChain')
 		: request.method === '/mayachain/sign-amino-deposit'
 			? cosmosDepositPreview(request.rawRequestBody, 'Maya') : undefined
+	const cosmosTx = cosmosDeposit ? undefined : cosmosTxPreview(request.method, request.rawRequestBody)
 
 	let trustLevel: 'verified' | 'known' | 'unknown' = hasCalldata ? 'unknown' : 'verified'
 	if (hasCalldata) {
@@ -987,10 +1005,13 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 		// clear-signs. A contract our decoder recognizes (source 'local') but the
 		// firmware blind-signs (e.g. Uniswap) must still read 'unknown' — the badge
 		// can't claim "known" for a tx the device shows as raw hex.
-		// A caller-supplied blob is unverified on this computer; only the device
-		// checks it, so it earns "known" at most, never a green "verified".
-		if (hasSignedBlob) trustLevel = 'known'
-		else if (request.needsBlindSigning) trustLevel = 'unknown'
+		// A signed blob never outranks it: a runtime-signer blob only annotates
+		// a call the device still blind-signs. Otherwise a blob is unverified on
+		// this computer, so it earns "known" at most, never a green "verified".
+		if (request.needsBlindSigning) trustLevel = 'unknown'
+		// An ERC-7730 definition is signed bytes this computer cannot verify
+		// either; the device verifies it and shows the call from it.
+		else if (hasSignedBlob || request.erc7730) trustLevel = 'known'
 		else if (decoded?.source === 'pioneer' || decoded?.source === 'local') trustLevel = 'known'
 	}
 	if (request.typedDataDecoded) {
@@ -1032,24 +1053,28 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 
 	const [showAdvancedConfirm, setShowAdvancedConfirm] = useState(false)
 
+	// One click from the card's main button: the device's own ENABLE POLICY
+	// screen is the confirmation. No timeout: the device also asks for a full
+	// PIN re-entry, and a timeout could fire while the device still turns it on.
 	const handleEnableAdvancedMode = useCallback(async () => {
-		if (!showAdvancedConfirm) {
-			setShowAdvancedConfirm(true)
-			return
-		}
+		if (enablingPolicy) return
 		setEnablingPolicy(true)
 		setAdvancedModeError(null)
 		try {
-			await rpcRequest("applyPolicy", { policyName: "AdvancedMode", enabled: true }, 60000)
+			await rpcRequest("applyPolicy", { policyName: "AdvancedMode", enabled: true }, 0)
 			setAdvancedModeEnabled(true)
 		} catch (e: any) {
 			console.error("Failed to enable AdvancedMode:", e)
-			setAdvancedModeError(e?.message || t("signing.advancedModeEnableFailed", "Failed to enable Advanced Mode."))
+			const msg = e?.message || ''
+			setAdvancedModeError(/cancel|denied|rejected/i.test(msg)
+				? t("signing.advancedModeDeclined", "Declined on your KeepKey. Advanced Mode is still off.")
+				: (msg || t("signing.advancedModeEnableFailed", "Failed to enable Advanced Mode.")))
 		}
 		setEnablingPolicy(false)
 		setShowAdvancedConfirm(false)
-	}, [showAdvancedConfirm, t])
+	}, [enablingPolicy, t])
 
+	const cardRef = useRef<HTMLDivElement>(null)
 	const submitApproval = useCallback(() => {
 		if (approveDisabled) return
 		onApprove({
@@ -1061,6 +1086,20 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 		blindSigningConsentRequired,
 		onApprove,
 	])
+
+	// Emulator test tape (request.testReview): once the card has settled,
+	// report the text it renders, then answer it the way its own buttons allow.
+	const answeredForTape = useRef<string | null>(null)
+	useEffect(() => {
+		if (!request.testReview || phase !== 'approve' || answeredForTape.current === request.id) return
+		const timer = setTimeout(async () => {
+			answeredForTape.current = request.id // once per request, even if approval fails
+			await rpcRequest("reportSigningCard", { id: request.id, text: cardRef.current?.innerText ?? "" }).catch(() => {})
+			if (approveDisabled) onReject()
+			else submitApproval()
+		}, 1500)
+		return () => clearTimeout(timer)
+	}, [request.testReview, request.id, phase, approveDisabled, submitApproval, onReject])
 
 	useEffect(() => {
 		const handler = (e: KeyboardEvent) => {
@@ -1088,7 +1127,7 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 	const methodLabel = request.method === '/utxo/sign-transaction' && utxo
 		? `${utxo.coin} Sign Transaction`
 		: evmChainName ? `${evmChainName} Sign Transaction`
-		: labelKey ? t(labelKey) : request.method
+		: labelKey ? t(labelKey) : cosmosTx?.title ?? request.method
 	const remaining = Math.max(0, 120 - elapsed)
 	const timeStr = `${Math.floor(remaining / 60)}:${(remaining % 60).toString().padStart(2, "0")}`
 
@@ -1203,6 +1242,7 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 	// ── Approve phase ─────────────────────────────────────────────────
 	return (
 		<Box
+			ref={cardRef}
 			position="fixed" inset="0" zIndex={Z.overlay + 1}
 			bg="rgba(0,0,0,0.85)" backdropFilter="blur(8px)"
 			display="flex" alignItems="center" justifyContent="center"
@@ -1242,7 +1282,7 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 						*/}
 						{!isSimpleTransfer && !request.ethMessageDecoded && !isSolanaRequest && (
 							<TrustBadge level={trustLevel} hasSigned={hasSignedBlob} schemaOnly={relayBridgeDeposit}
-								label={acrossDeposit ? t("signing.acrossKnownContract", "Across SpokePool · device shows raw data") : undefined} t={t} />
+								label={acrossDeposit ? t("signing.acrossKnownContract", "Across SpokePool · known contract") : undefined} t={t} />
 						)}
 						<Text fontSize="2xs" color={remaining <= 30 ? "red.400" : "kk.textMuted"} fontWeight={remaining <= 30 ? "600" : "400"}>
 							{timeStr}
@@ -1270,6 +1310,18 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 						<Row label="Memo affiliate fee" value={cosmosDeposit.affiliateFee} />
 						<Row label="Exact memo" value={cosmosDeposit.memo} />
 						<Text fontSize="2xs" color="var(--rose)">{cosmosDeposit.warning}</Text>
+					</VStack>
+				)}
+				{cosmosTx && (
+					<VStack w="100%" align="stretch" gap="1.5" bg="rgba(0,0,0,0.25)" borderRadius="xl" p="3">
+						{cosmosTx.messages.map((message, i) => (
+							<VStack key={i} w="100%" align="stretch" gap="1.5">
+								<Text fontSize="xs" fontWeight="700" color="white">{message.type}</Text>
+								{message.rows.map((row, j) => <Row key={j} label={row.label} value={row.value} />)}
+							</VStack>
+						))}
+						<Row label="Fee" value={cosmosTx.fee} />
+						<Row label="Memo" value={cosmosTx.memo} />
 					</VStack>
 				)}
 				{request.method === '/tron/sign-transaction' && request.tronDecoded && (
@@ -1313,6 +1365,11 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 
 				{/* Report and risk first, so they are read before blind-sign consent. */}
 				<ClearSignReportCard report={request.clearSignReport} />
+				{/* No report (an addressNList caller): the provider the sign step pins is still named. */}
+				{(() => {
+					const line = namedProviderLine(request.runtimeProvider, request.clearSignReport)
+					return line ? <Text fontSize="2xs" color="kk.textSecondary" data-clearsign-provider>{line}</Text> : null
+				})()}
 				<RiskBar request={request} t={t} />
 				<RequestClearSignReview request={request} />
 
@@ -1331,14 +1388,17 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 						onEnable={handleEnableAdvancedMode}
 						onCancel={() => setShowAdvancedConfirm(false)}
 						t={t}
-						title={isSolanaSignMessage ? t("signing.solanaAdvancedModeRequired", "Advanced Mode Required") : undefined}
+						title={isSolanaSignMessage ? t("signing.solanaAdvancedModeRequired", "Advanced Mode Required")
+							: knownProtocol ? t("signing.knownNotOnFirmwareTitle", "Known, not shown on this KeepKey yet") : undefined}
 						description={isSolanaSignMessage
 							? t("signing.solanaAdvancedModeDescription", "Advanced Mode is off, so your KeepKey will reject this raw Solana message. Enable Advanced Mode here before approving.")
-							: acrossDeposit
-								? t("signing.acrossAdvancedModeDescription", "Your KeepKey cannot decode Across bridge deposits yet and will show this call only as raw data. Check the decoded details here, then enable Advanced Mode on the device to sign it.")
+							: knownProtocol
+								// ponytail: English-only, like the risk reasons; t() here has no interpolation.
+								? `KeepKey knows this contract (${knownProtocol}). ${request.firmwareVersion ? `Firmware ${request.firmwareVersion}` : 'This firmware'} cannot show it on the device yet, so signing it needs Advanced Mode. Later firmware may add it.`
 								: undefined}
 						enableLabel={isSolanaSignMessage ? t("signing.enableAdvancedMode", "Enable Advanced Mode") : undefined}
 						error={advancedModeError}
+						explainOnly
 					/>
 				)}
 
@@ -1414,11 +1474,14 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 						flex="1" bg="kk.gold"
 						color="black" fontWeight="600" size="md"
 						_hover={{ bg: "kk.goldHover" }}
-						onClick={submitApproval} disabled={approveDisabled}
-						cursor={approveDisabled ? "not-allowed" : "pointer"}
+						onClick={advancedModeBlocked ? handleEnableAdvancedMode : submitApproval}
+						disabled={enablingPolicy || (!advancedModeBlocked && approveDisabled)}
+						cursor={enablingPolicy || (!advancedModeBlocked && approveDisabled) ? "not-allowed" : "pointer"}
 					>
-						{advancedModeBlocked
-							? t("signing.enableAdvancedModeFirst", "Enable Advanced Mode to approve")
+						{enablingPolicy
+							? t("signing.advancedModeConfirmOnDevice", "Confirm on your KeepKey, then re-enter your PIN")
+							: advancedModeBlocked
+							? t("signing.turnOnAdvancedMode", "Turn on Advanced Mode")
 							: blindSigningConsentBlocked
 								? t("signing.allowBlindSigningOnceFirst", "Choose Allow once to approve")
 								: t("signing.approve")}
@@ -1434,7 +1497,7 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 				</Flex>
 
 				<Text fontSize="2xs" color="kk.textMuted">
-					{advancedModeBlocked ? t("signing.enableAdvancedModeHint", "Enable Advanced Mode above to unlock signing") : t("signing.keyboardHint")}
+					{advancedModeBlocked ? t("signing.advancedModeScopeHint", "Advanced Mode stays on until your KeepKey locks or is unplugged, for every app that uses it.") : t("signing.keyboardHint")}
 				</Text>
 			</VStack>
 		</Box>

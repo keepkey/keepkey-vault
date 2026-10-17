@@ -8,8 +8,13 @@
  *
  * Requires firmware with KKSOLSW1 support and human confirmation of the signer
  * trust screen plus the ClearSign swap pages.
+ *
+ * 7.16: runtime signers need a session AdvancedMode, and the runtime tier still
+ * shows the raw review on the device, not clear-sign pages. The suite SKIPs
+ * while AdvancedMode is off; run opt-in, it ends with clearSession, which
+ * clears AdvancedMode and drops the public CI test signer.
  */
-const { run, SOLANA_PATH } = require('../_helpers')
+const { run, requireAdvancedModeSession, SOLANA_PATH } = require('../_helpers')
 const {
   TEST_KEY_ID,
   CI_TEST_PUBKEY,
@@ -21,6 +26,7 @@ const {
 
 run('Solana ClearSign: KKSOLSW1 descriptor on device', async (getSdk, assert, assertThrows) => {
   const sdk = await getSdk()
+  await requireAdvancedModeSession(sdk)
   const { address } = await sdk.address.solanaGetAddress({ address_n: SOLANA_PATH })
   const signerPublicKey = decodeSolanaAddress(address)
   const fixture = buildSolanaSwapFixture(signerPublicKey)

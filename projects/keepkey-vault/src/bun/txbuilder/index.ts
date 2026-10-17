@@ -15,6 +15,7 @@ import { SOLANA_LAMPORTS_PER_SIGNATURE, solanaTransferLamportsForAmount } from '
 import { signSolanaWireTransaction } from '../solana-signing'
 import { getBtcBackend } from '../btc-backend'
 import { canonicalTronAddress, decodeTronTransfer } from '../tron-preview'
+import { getPioneerApiBase } from '../pioneer'
 import { ARBITRUM_ONE_RPC } from '../evm-rpc'
 
 /** BTC mainnet — the only UTXO chain that broadcasts via a self-host node. */
@@ -103,12 +104,21 @@ export function assertTronPayload(rawHex: string, expected: {
   }
 }
 
+// TRON full-node calls go through Pioneer's keyed node: keyless TronGrid caps
+// each user IP at 3 rps, which a single TRC-20 build preview exceeds. TronGrid
+// direct stays as the fallback for a Pioneer that is down or predates the route.
+// The response is verified before signing either way (assertTronPayload).
+async function tronWalletFetch(method: string, body: unknown = {}): Promise<Response> {
+  const init = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
+  try {
+    const resp = await fetch(`${getPioneerApiBase()}/api/v1/tron/wallet/${method}`, { ...init, signal: AbortSignal.timeout(15_000) })
+    if (resp.ok) return resp
+  } catch { /* fall through to TronGrid */ }
+  return fetch(`https://api.trongrid.io/wallet/${method}`, init)
+}
+
 async function fetchTronTokenDecimals(owner: string, contract: string): Promise<number> {
-  const resp = await fetch('https://api.trongrid.io/wallet/triggerconstantcontract', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ owner_address: owner, contract_address: contract, function_selector: 'decimals()', parameter: '', visible: true }),
-  })
+  const resp = await tronWalletFetch('triggerconstantcontract', { owner_address: owner, contract_address: contract, function_selector: 'decimals()', parameter: '', visible: true })
   const data = await resp.json() as any
   if (data?.Error) throw new Error(data.Error)
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
@@ -119,11 +129,7 @@ async function fetchTronTokenDecimals(owner: string, contract: string): Promise<
 }
 
 async function fetchTronNativeBalanceSun(address: string): Promise<bigint> {
-  const resp = await fetch('https://api.trongrid.io/wallet/getaccount', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ address, visible: true }),
-  })
+  const resp = await tronWalletFetch('getaccount', { address, visible: true })
   const data = await resp.json() as any
   if (data?.Error) throw new Error(data.Error)
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
@@ -428,16 +434,12 @@ export async function buildTx(
             const ownerHashHex = tronAddressHashHex(params.fromAddress)
             const ownerParameter = ownerHashHex.padStart(64, '0')
             try {
-              const resp = await fetch('https://api.trongrid.io/wallet/triggerconstantcontract', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  owner_address: params.fromAddress,
-                  contract_address: tokenContractFromCaip,
-                  function_selector: 'balanceOf(address)',
-                  parameter: ownerParameter,
-                  visible: true,
-                }),
+              const resp = await tronWalletFetch('triggerconstantcontract', {
+                owner_address: params.fromAddress,
+                contract_address: tokenContractFromCaip,
+                function_selector: 'balanceOf(address)',
+                parameter: ownerParameter,
+                visible: true,
               })
               const respJson = await resp.json() as any
               if (respJson?.Error) throw new Error(respJson.Error)
@@ -474,18 +476,14 @@ export async function buildTx(
         let tronGridTx: any
         try {
           console.debug(`[buildTx] TRON triggersmartcontract: USDT.transfer(${params.to}, ${tokenAmountBase.toString()}) at ${tokenContractFromCaip}`)
-          const resp = await fetch('https://api.trongrid.io/wallet/triggersmartcontract', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              owner_address: params.fromAddress,
-              contract_address: tokenContractFromCaip,
-              function_selector: 'transfer(address,uint256)',
-              parameter,
-              fee_limit: FEE_LIMIT_SUN,
-              call_value: 0,
-              visible: true,
-            }),
+          const resp = await tronWalletFetch('triggersmartcontract', {
+            owner_address: params.fromAddress,
+            contract_address: tokenContractFromCaip,
+            function_selector: 'transfer(address,uint256)',
+            parameter,
+            fee_limit: FEE_LIMIT_SUN,
+            call_value: 0,
+            visible: true,
           })
           const respJson = await resp.json() as any
           if (respJson?.Error) throw new Error(respJson.Error)
@@ -516,18 +514,14 @@ export async function buildTx(
         let displayFeeTrx = String(FEE_LIMIT_SUN / 1_000_000) // ponytail: fallback = ceiling (upper bound, honest as "max fee")
         try {
           const [simResp, chainParamsResp] = await Promise.all([
-            fetch('https://api.trongrid.io/wallet/triggerconstantcontract', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                owner_address: params.fromAddress,
-                contract_address: tokenContractFromCaip,
-                function_selector: 'transfer(address,uint256)',
-                parameter,
-                visible: true,
-              }),
+            tronWalletFetch('triggerconstantcontract', {
+              owner_address: params.fromAddress,
+              contract_address: tokenContractFromCaip,
+              function_selector: 'transfer(address,uint256)',
+              parameter,
+              visible: true,
             }),
-            fetch('https://api.trongrid.io/wallet/getchainparameters'),
+            tronWalletFetch('getchainparameters'),
           ])
           const sim = await simResp.json() as any
           const chainParams = await chainParamsResp.json() as any
@@ -591,11 +585,7 @@ export async function buildTx(
           visible: true,
         }
         if (params.memo) body.extra_data = params.memo
-        const resp = await fetch('https://api.trongrid.io/wallet/createtransaction', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-        })
+        const resp = await tronWalletFetch('createtransaction', body)
         tronGridTx = await resp.json() as any
         if (tronGridTx?.Error) {
           if (tronGridTx.Error.includes('no OwnerAccount')) {
@@ -735,6 +725,9 @@ export async function signTx(
       // verified/opaque/malformed, verifies the derived signer even for
       // parseable opaque payloads, and rejects malformed transactions. Routing
       // v0 through SolanaSignMessage loses those transaction-specific checks.
+      // hdwallet's getFirmwareVersion is async and returns "v7.15.0";
+      // versionCompare needs a plain "7.15.0" string.
+      const firmwareVersion = (await wallet.getFirmwareVersion?.())?.replace(/^v/, '')
       return signSolanaWireTransaction(
         unsignedTx,
         (deviceParams) => wallet.solanaSignTx(deviceParams),
@@ -745,7 +738,7 @@ export async function signTx(
           return address
         },
         'signTx:solana',
-        () => wallet.getFirmwareVersion?.(),
+        () => firmwareVersion,
       )
     }
     case 'tron': {
@@ -835,13 +828,13 @@ export async function broadcastTx(
     }
 
     const broadcastBody = { ...tronGridTx, signature: [sigHex] }
-    const resp = await fetch('https://api.trongrid.io/wallet/broadcasttransaction', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(broadcastBody),
-    })
+    const resp = await tronWalletFetch('broadcasttransaction', broadcastBody)
     const data = await resp.json() as any
     if (data?.result === true && data?.txid) return { txid: data.txid }
+    // A node that already holds this exact signed tx answers DUP_TRANSACTION_ERROR.
+    // With node failover a retry can land after the first node accepted it, and
+    // reporting that as a failure invites a second, real send.
+    if (data?.code === 'DUP_TRANSACTION_ERROR' && tronGridTx.txID) return { txid: tronGridTx.txID }
 
     // Diagnostic: TronGrid uses several error shapes:
     //   { result: false, code: "CONTRACT_VALIDATE_ERROR", message: "<hex>" }

@@ -11,7 +11,7 @@
  *
  * Zoo: 18-token-contract.png
  */
-const { run, ETH_PATH, CHAINS, toHex, erc20Transfer } = require('../_helpers')
+const { run, ETH_PATH, CHAINS, toHex, erc20Transfer, SENTINEL_NONCE, assertSignedByDevice } = require('../_helpers')
 
 run('ERC-20 transfer() — clearsign decoded', async (getSdk, assert) => {
   const sdk = await getSdk()
@@ -33,7 +33,7 @@ run('ERC-20 transfer() — clearsign decoded', async (getSdk, assert) => {
     to: USDC,
     value: '0x0', // No ETH value — token transfer
     data,
-    nonce: '0x0',
+    nonce: SENTINEL_NONCE, // can never be mined
     gasLimit: toHex(65000),
     gasPrice: toHex(20000000000), // 20 Gwei
     chainId: CHAINS.ETH,
@@ -49,6 +49,5 @@ run('ERC-20 transfer() — clearsign decoded', async (getSdk, assert) => {
 
   const result = await sdk.eth.ethSignTransaction(tx)
 
-  assert('Got signed tx', !!result)
-  assert('Has signature', !!(result.serializedTx || result.r))
+  assertSignedByDevice(assert, result, address, CHAINS.ETH)
 })

@@ -6,8 +6,7 @@
 //
 // Case (a) needs on-device approval; case (b) rejects before any confirmation.
 //   KEEPKEY_API_KEY=<key> node tests/evm-firmware/thorchain-router-pin.js
-const { run, ETH_PATH, CHAINS, toHex } = require('../_helpers')
-const { Transaction } = require('ethers')
+const { run, ETH_PATH, CHAINS, toHex, SENTINEL_NONCE, assertSignedByDevice } = require('../_helpers')
 
 const THOR_ROUTER_V4 = '0xd37bbe5744d730a1d98d8dc97c42f0ca46ad7146'
 const word = (h) => h.replace(/^0x/, '').padStart(64, '0')
@@ -24,7 +23,7 @@ const depositCalldata = '0x1fece7b4'
 
 const baseTx = {
   addressNList: ETH_PATH, value: toHex('0x65945acd2b867ef000'),
-  data: depositCalldata, nonce: '0x0', gasLimit: '0x186a0',
+  data: depositCalldata, nonce: SENTINEL_NONCE, gasLimit: '0x186a0',
   gasPrice: toHex(0x5fb9aca00), chainId: CHAINS.ETH,
 }
 
@@ -37,9 +36,7 @@ run('THORChain router pin — real router clear-signs, attacker contract blocked
 
   // (a) deposit to the pinned router → clear-signs (needs on-device approval)
   const out = await sdk.eth.ethSignTransaction({ ...baseTx, from: address, to: THOR_ROUTER_V4 })
-  assert('deposit to v4 router signs', !!(out.serialized || out.serializedTx))
-  const parsed = Transaction.from(out.serialized || out.serializedTx)
-  assert('recovers to device addr', parsed.from && parsed.from.toLowerCase() === address.toLowerCase())
+  assertSignedByDevice(assert, out, address, CHAINS.ETH)
 
   // (b) same calldata to an arbitrary (attacker) contract → must NOT clear-sign;
   // with AdvancedMode off it is blind-sign-blocked and rejected.

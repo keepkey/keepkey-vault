@@ -15,8 +15,11 @@ import type { CalldataDecodedInfo, CalldataDecodedField } from '../shared/types'
 import { thorDepositFields } from './thor-swap-preview'
 import { acrossDepositView, decodeAcrossDepositV3 } from '../shared/acrossDeposit'
 import { RELAY_DEPOSITORY, decodeRelayDeposit, isZeroAddress } from '../shared/relayDeposit'
+import { evmNativeValue } from '../shared/evmFeePreview'
 import { REVIEWED_EVM_TOKENS } from './evm-certified-schema'
 import firmwareTokenTable from './firmware-token-table.json'
+import firmwareTokenTable716 from './firmware-token-table-716.json'
+import { versionCompare } from '../shared/firmware-versions'
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -407,7 +410,7 @@ export function decodeCalldataLocal(
 // rc3 firmware clear-signs a contract call WITHOUT AdvancedMode and WITHOUT any
 // signed-metadata blob ONLY for the pinned (chain, selector, to) entries below,
 // plus a standard 68-byte ERC-20 transfer/approve of a token in its built-in
-// table (firmware-token-table.json). Anything else the device blind-signs
+// table (firmware-token-table*.json). Anything else the device blind-signs
 // (hard "Blocked" unless AdvancedMode is on). The signing overlay MUST gate off
 // THIS — not off "did our decoder recognize the calldata" — otherwise it either
 // under-warns (Uniswap/1inch/relay look verified but the device blind-signs) or
@@ -420,8 +423,10 @@ const ADDR = {
   SALARY_PROXY:      '0xbd6a40bb904aea5a49c59050b5395f7484a4203d', // saproxy withdrawFromSalary
   THOR_ROUTER:       '0xd37bbe5744d730a1d98d8dc97c42f0ca46ad7146', // Ethereum
   THOR_ROUTER_AVAX:  '0x00dc6100103bc402d490aee3f9a5560cbd91f1d4', // Avalanche C-Chain
+  THOR_ROUTER_BSC:   '0xb30ec53f98ff5947ede720d32ac2da7e52a5f56b', // BNB Smart Chain
   MAYA_ROUTER:       '0xd89dce570de35a6f42d3bca7dba50a6d89bfc2a2',
   MAYA_ROUTER_V4:    '0xe3985e6b61b814f7cdb188766562ba71b446b46d', // current MAYANode ETH inbound router
+  MAYA_ROUTER_ARB:   '0x700e97ef07219440487840dc472e7120a7ff11f4', // Arbitrum One
 }
 
 // THORChain's Router lives at a DIFFERENT address on each EVM chain, so the
@@ -434,8 +439,55 @@ const THOR_ROUTER_BY_CHAIN: Record<number, string> = {
   1:     ADDR.THOR_ROUTER,
   43114: ADDR.THOR_ROUTER_AVAX,
 }
-// Display-only: THORChain's Base router (same address as Avalanche's) decodes
-// for the overlay, but the firmware does not pin it, so it is NOT native.
+// Firmware 7.15.0 replaced that switch with a (chainId, address) pin table
+// (thor_router_pins) and added BSC and Base. Released 7.16.0 (4f94a63b6) has
+// the same table.
+const THOR_ROUTER_PINS_MIN_FW = '7.15.0'
+const THOR_ROUTER_BY_CHAIN_715: Record<number, string> = {
+  ...THOR_ROUTER_BY_CHAIN,
+  56:   ADDR.THOR_ROUTER_BSC,
+  8453: ADDR.THOR_ROUTER_AVAX, // Base: same address as Avalanche's
+}
+// Maya pins from 7.15: Ethereum v4 + Arbitrum (maya_router_pins). Older or
+// unknown firmware keeps the legacy mainnet pin.
+const MAYA_ROUTER_BY_CHAIN_715: Record<number, string> = { 1: ADDR.MAYA_ROUTER_V4, 42161: ADDR.MAYA_ROUTER_ARB }
+const MAYA_ROUTER_BY_CHAIN_LEGACY: Record<number, string> = { 1: ADDR.MAYA_ROUTER }
+
+// 7.14.x pins no router: thor_isThorchainTx takes either deposit selector to
+// ANY address on any chain (release/7.14.2 4002ef183). The device would show
+// a deposit to an attacker's contract as a THORChain swap with a raw "Routing
+// through <hex>" line, so Desktop keeps the gate for anything that is not a
+// router it knows; for those it mirrors when thor_confirmThorTx refuses.
+const THOR_UNPINNED_LINE = '7.14'
+const knownDepositRouter = (dest: string, chainId: number | undefined) => chainId != null && [
+  THOR_ROUTER_BY_CHAIN_715[chainId], MAYA_ROUTER_BY_CHAIN_715[chainId], MAYA_ROUTER_BY_CHAIN_LEGACY[chainId],
+].includes(dest)
+
+/** thorchain_parseConfirmMemo (7.14.2) returns CONFIRMED, or the EVM path
+ *  cancels with no raw fallback. Mirrors its checks for the swap and add
+ *  operations; anything else (withdraw included) is predicted refused. */
+export function thor714MemoConfirms(memo: string): boolean {
+  if (memo.length === 0 || memo.length > 256 || !/^[\x21-\x7e]+$/.test(memo)) return false
+  if (/(^[:.])|([:.]$)|([:.][:.])/.test(memo)) return false // empty component
+  const fields = memo.split(':')
+  // Exactly one '.', inside the chain.asset field.
+  if ((memo.match(/\./g) || []).length !== 1 || fields.length < 2 || !fields[1].includes('.')) return false
+  return ['SWAP', 's', '=', 'ADD', 'a', '+'].includes(fields[0])
+}
+
+function thor714Confirms(data: string, chainId: number | undefined, selector: string): boolean {
+  const fields = thorDepositFields(data, chainId)
+  const memo = fields?.find((f) => f.name === 'Memo (exact)')?.value
+  if (memo == null || !thor714MemoConfirms(memo)) return false
+  // depositWithExpiry: the device reads the expiry as a uint64.
+  if (selector === '0x44bc937b' && !/^0{48}$/.test(data.slice(10 + 4 * 64, 10 + 4 * 64 + 48))) return false
+  // An unknown token's amount is printed raw into a 41-byte buffer with a
+  // " unformatted" suffix: wider than 28 digits and the device refuses.
+  const native = /^0{64}$/.test(data.slice(10 + 64, 10 + 128))
+  return native || BigInt(`0x${data.slice(10 + 128, 10 + 192)}`) < 10n ** 28n
+}
+// Display-only: THORChain's Base router decodes for the overlay on every
+// firmware; whether it is native is decided by the tables above.
 const THOR_ROUTER_DECODE_BY_CHAIN: Record<number, string> = {
   ...THOR_ROUTER_BY_CHAIN,
   8453: ADDR.THOR_ROUTER_AVAX,
@@ -459,16 +511,64 @@ const THOR_MAYA_DEPOSIT = new Set(['0x1fece7b4', '0x44bc937b'])
 const ERC20_NATIVE = new Set(['0xa9059cbb', '0x095ea7b3'])
 
 /** (chainId:address) of every token in the firmware's built-in table —
- *  generated from the firmware build (scripts/gen-firmware-token-table.ts). */
+ *  generated from the firmware build (scripts/gen-firmware-token-table.ts).
+ *  7.15.x: the `fill` profile, 418 entries on several chains. Older known
+ *  versions keep using it, as before. */
 const FIRMWARE_TOKENS: ReadonlySet<string> = new Set((firmwareTokenTable as { tokens: string[] }).tokens)
+/** 7.16.0 builds with `--profile priority-only` (D-014): 153 mainnet entries,
+ *  a subset of the above. Everything else is AdvancedMode or a certified schema. */
+const FIRMWARE_TOKENS_716: ReadonlySet<string> = new Set((firmwareTokenTable716 as { tokens: string[] }).tokens)
+const PRIORITY_ONLY_TOKENS_MIN_FW = '7.16.0'
 
 /** Firmware ethereum_contractHandled only claims calldata that fits the first
  *  1024-byte chunk (data_total == data_initial_chunk.size). */
 const FIRMWARE_INITIAL_CHUNK_BYTES = 1024
 
-/** True iff (chainId, token) is in the firmware's built-in token table. */
-export function firmwareKnowsToken(chainId: number | undefined, token: string | undefined): boolean {
-  return chainId != null && !!token && FIRMWARE_TOKENS.has(`${chainId}:${token.toLowerCase()}`)
+/** True iff (chainId, token) is in this firmware's built-in token table.
+ *  Unknown version = the smaller 7.16 table: over-warning is recoverable,
+ *  predicting a clear-sign the device refuses is a dead "Blocked". */
+export function firmwareKnowsToken(chainId: number | undefined, token: string | undefined, firmwareVersion?: string): boolean {
+  const table = firmwareVersion && versionCompare(firmwareVersion, PRIORITY_ONLY_TOKENS_MIN_FW) < 0
+    ? FIRMWARE_TOKENS : FIRMWARE_TOKENS_716
+  return chainId != null && !!token && table.has(`${chainId}:${token.toLowerCase()}`)
+}
+
+/** ethereum_valueIsZero: no value is zero; a value Desktop cannot read is not. */
+function valueIsZero(value: unknown): boolean {
+  return value == null || /^(0x)?0*$/i.test(String(value).trim())
+}
+
+/** ABI head word `i` after the selector, 64 hex chars. */
+const abiWord = (data: string, i: number) => data.slice(10 + i * 64, 10 + (i + 1) * 64)
+const cleanAddressWord = (w: string) => /^0{24}[0-9a-f]{40}$/.test(w)
+/** tokenByChainAddress also resolves 0xeeee…ee, but only on Ethereum mainnet. */
+const ETH_SENTINEL = `0x${'e'.repeat(40)}`
+const firmwareResolvesToken = (chainId: number, token: string, firmwareVersion?: string) =>
+  (chainId === 1 && token === ETH_SENTINEL) || firmwareKnowsToken(chainId, token, firmwareVersion)
+
+/** zx_isZxSwap claims sellToUniswap only when zxswap_resolveBothTokens can
+ *  name every token: canonical 0x80 offset, 2 or 3 tokens, clean words, and
+ *  each token in this chain's table. Base, Arbitrum and Avalanche have none. */
+function zxSellToUniswapShown(data: string, chainId: number, firmwareVersion?: string): boolean {
+  if (abiWord(data, 0) !== '80'.padStart(64, '0') || !/^0{63}[01]$/.test(abiWord(data, 3))) return false
+  const count = /^0{63}[23]$/.test(abiWord(data, 4)) ? Number(abiWord(data, 4).slice(-1)) : 0
+  if (count === 0 || (data.length - 2) / 2 < 4 + (5 + count) * 32) return false
+  for (let i = 0; i < count; i++) {
+    const w = abiWord(data, 5 + i)
+    if (!cleanAddressWord(w) || !firmwareResolvesToken(chainId, `0x${w.slice(24)}`, firmwareVersion)) return false
+  }
+  return true
+}
+
+/** liquidity_shape_is_clear_signable: exactly 196 bytes, clean token and
+ *  recipient words, a u64 deadline, a token in the table, and no value on
+ *  removeLiquidityETH. */
+function uniV2LiquidityShown(selector: string, data: string, value: unknown, firmwareVersion?: string): boolean {
+  if ((data.length - 2) / 2 !== 4 + 6 * 32) return false
+  const token = abiWord(data, 0)
+  if (!cleanAddressWord(token) || !cleanAddressWord(abiWord(data, 4)) || !/^0{48}/.test(abiWord(data, 5))) return false
+  if (!firmwareResolvesToken(1, `0x${token.slice(24)}`, firmwareVersion)) return false
+  return selector !== '0x02751cec' || valueIsZero(value)
 }
 
 /**
@@ -477,29 +577,43 @@ export function firmwareKnowsToken(chainId: number | undefined, token: string | 
  * ERC-20 transfer/approve path in ethereum.c. Contract-address AND chain
  * pinning matter: the same selector to a DIFFERENT address, or the same
  * address on a chain the firmware does not list, is NOT clear-signed.
+ * `value` is the tx's native value: the ERC-20 screens need it to be zero.
  */
-export function firmwareClearSigns(to?: string, data?: string, chainId?: number): boolean {
+export function firmwareClearSigns(to?: string, data?: string, chainId?: number, firmwareVersion?: string, value?: unknown): boolean {
   if (!to || !data || data.length < 10) return false
   const selector = data.slice(0, 10).toLowerCase()
   const dest = to.toLowerCase()
 
   // Standard ERC-20 transfer/approve: 4-byte selector + 2 32-byte words = 68B,
   // and only for a token the firmware's table knows ON THIS CHAIN — anything
-  // else is UnknownToken, which the device gates on AdvancedMode.
-  if (ERC20_NATIVE.has(selector) && (data.length - 2) === 136) return firmwareKnowsToken(chainId, dest)
+  // else is UnknownToken, which the device gates on AdvancedMode. With value
+  // attached the firmware does not treat it as a token call at all.
+  if (ERC20_NATIVE.has(selector) && (data.length - 2) === 136) {
+    return valueIsZero(value) && firmwareKnowsToken(chainId, dest, firmwareVersion)
+  }
 
   if ((data.length - 2) / 2 > FIRMWARE_INITIAL_CHUNK_BYTES) return false
 
   if (THOR_MAYA_DEPOSIT.has(selector)) {
     // The firmware binds both protocols' router pins to an explicit chainId.
-    // Its legacy Maya pin is ETH-mainnet only; the current v4 router remains
-    // behind the Advanced Mode gate until firmware supports it.
-    const thorRouter = chainId == null ? undefined : THOR_ROUTER_BY_CHAIN[chainId]
-    return (thorRouter != null && dest === thorRouter) ||
-      (chainId === 1 && dest === ADDR.MAYA_ROUTER)
+    // Unknown version = the older, smaller list: over-warning is recoverable,
+    // predicting a clear-sign the device refuses is a dead "Blocked".
+    const line = firmwareVersion?.split('.').slice(0, 2).join('.')
+    if (line === THOR_UNPINNED_LINE) return knownDepositRouter(dest, chainId) && thor714Confirms(data, chainId, selector)
+    const pinTable = !!firmwareVersion && versionCompare(firmwareVersion, THOR_ROUTER_PINS_MIN_FW) >= 0
+    const thorRouters = pinTable ? THOR_ROUTER_BY_CHAIN_715 : THOR_ROUTER_BY_CHAIN
+    const mayaRouters = pinTable ? MAYA_ROUTER_BY_CHAIN_715 : MAYA_ROUTER_BY_CHAIN_LEGACY
+    return chainId != null && (dest === thorRouters[chainId] || dest === mayaRouters[chainId])
   }
   const pinned = FIRMWARE_PINNED[selector]
-  return pinned != null && dest === pinned.to && chainId != null && pinned.chains.has(chainId)
+  if (pinned == null || dest !== pinned.to || chainId == null || !pinned.chains.has(chainId)) return false
+  // The 0x and liquidity decoders refuse what they cannot name. The 7.15
+  // checks apply to every version: stricter only over-warns.
+  if (selector === '0xd9627aa4') return zxSellToUniswapShown(data.toLowerCase(), chainId, firmwareVersion)
+  if (selector === '0xf305d719' || selector === '0x02751cec') {
+    return uniV2LiquidityShown(selector, data.toLowerCase(), value, firmwareVersion)
+  }
+  return true
   // ponytail: MakerDAO (address+param gated, rare) and the 0x approve-to-LP-pair
   // path intentionally omitted → those over-warn as blind. Add if a flow shows up.
 }
@@ -510,6 +624,8 @@ export async function decodeCalldata(
   contractAddress: string,
   data: string,
   _chainId?: number,
+  /** The transaction's native value, so a payable call can state its amount. */
+  value?: unknown,
 ): Promise<CalldataDecodedInfo | null> {
   // Skip if no calldata or just a bare transfer (no data)
   if (!data || data === '0x' || data.length < 10) return null
@@ -564,7 +680,7 @@ export async function decodeCalldata(
   if (relay) {
     const token = relay.token ? REVIEWED_EVM_TOKENS[`${relay.chainId}:${relay.token}`] : undefined
     const sent = relay.kind === 'native'
-      ? 'the native coin sent with this call (msg.value)'
+      ? (value === undefined ? null : evmNativeValue(value, relay.chainId)) ?? 'the native coin sent with this call (msg.value)'
       : token ? `${tokenUnits(relay.amount!, token.decimals)} ${token.symbol}` : `${relay.amount} base units of token ${relay.token}`
     const fields: CalldataDecodedField[] = [
       { name: 'Action', type: 'string', value: `Relay deposit on ${relay.chain}: ${sent}`, format: 'raw' },

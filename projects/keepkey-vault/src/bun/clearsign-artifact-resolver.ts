@@ -5,6 +5,7 @@ import { clearSignIdentityHash } from './clearsign-promotion'
 import { inspectSolanaSchema } from './clearsign-studio'
 import { parseSolanaMessage, parseSolanaTx, solanaMessageSlice } from './solana-tx'
 import { expandClearSignAuditDrafts, observeSolanaTransaction } from './clearsign-observation'
+import { inspectAlphaCertificate } from './clearsign-alpha-ceremony'
 
 type ActiveArtifact = VerifiedClearSignArtifact & { revokedAt?: number }
 type Snapshot = { artifact: ActiveArtifact; job?: ClearSignAuditJob }
@@ -12,6 +13,26 @@ export type ClearSignArtifactRefusal = 'invalid-request' | 'no-artifact' | 'shap
   | 'identity-unavailable' | 'identity-stale' | 'identity-changed' | 'identity-mismatch' | 'unsupported-alt'
 export type ClearSignArtifactResolution<T> = { status: 'selected'; artifact: T } | { status: ClearSignArtifactRefusal }
 let snapshotProvider: () => Snapshot[] = () => []
+let certificateTrusted: (certificateHex: string) => boolean = underProductionRoot
+const warnedCertificates = new Set<string>()
+
+/** Whether a saved artifact's certificate chains to the production ClearSign
+ *  root, the only root Desktop trusts. v1.6.1 imported artifacts under the
+ *  alpha root; those are never sent as KeepKey-certified (one warning each),
+ *  so the device shows its normal review instead of refusing the claim. */
+export function underProductionRoot(certificateHex: string): boolean {
+  try {
+    inspectAlphaCertificate(certificateHex)
+    return true
+  } catch (e: any) {
+    const key = String(certificateHex).toLowerCase()
+    if (!warnedCertificates.has(key)) {
+      warnedCertificates.add(key)
+      console.warn(`[clearsign] a saved ClearSign artifact is not under the KeepKey ClearSign root (${e?.message || e}); not used`)
+    }
+    return false
+  }
+}
 export const CLEARSIGN_IDENTITY_MAX_AGE_MS = 5 * 60 * 1000
 
 function identityRefusal(job: ClearSignAuditJob | undefined, identityHash: string): ClearSignArtifactRefusal | undefined {
@@ -24,9 +45,13 @@ function identityRefusal(job: ClearSignAuditJob | undefined, identityHash: strin
 }
 
 /** The DB layer registers this once. Keeping storage behind this seam prevents
- * pure schema matching from booting ElectroBun or owning database lifecycle. */
-export function configureClearSignArtifactSnapshots(provider: () => Snapshot[]): void {
+ * pure schema matching from booting ElectroBun or owning database lifecycle.
+ * `trusted` is the production-root check; only tests pass another. */
+export function configureClearSignArtifactSnapshots(
+  provider: () => Snapshot[], trusted: (certificateHex: string) => boolean = underProductionRoot,
+): void {
   snapshotProvider = provider
+  certificateTrusted = trusted
 }
 
 export function findPromotedEvmArtifact(chainId: number | undefined, to: string | undefined, data: string | undefined): {
@@ -41,6 +66,8 @@ export function resolvePromotedEvmArtifact(chainId: number | undefined, to: stri
 }> {
   if (!chainId || !to || !data) return { status: 'invalid-request' }
   const calldata = data.replace(/^0x/i, '')
+  // A plain transfer calls nothing, so there is no definition to apply.
+  if (!calldata) return { status: 'no-artifact' }
   if (!/^[0-9a-f]+$/i.test(calldata) || calldata.length < 8 || calldata.length % 2) return { status: 'invalid-request' }
   for (const { artifact, job } of snapshotProvider()) {
     if (artifact.chain !== 'Ethereum' || !artifact.evmCertifiedEnvelopeHex) continue
@@ -56,6 +83,8 @@ export function resolvePromotedEvmArtifact(chainId: number | undefined, to: stri
       const expectedCalldataLength = 4 + payload[numArgsOffset] * 32
       if (schemaChain !== chainId || contract.toLowerCase() !== to.toLowerCase()
         || selector !== `0x${calldata.slice(0, 8).toLowerCase()}`) continue
+      // The certificate the device gets: envelope bytes 1..140.
+      if (!certificateTrusted(artifact.evmCertifiedEnvelopeHex.slice(2, 2 + 139 * 2))) continue
       if (calldata.length / 2 !== expectedCalldataLength) return { status: 'shape-mismatch' }
       if (artifact.revokedAt) return { status: 'revoked' }
       if (artifact.expiresAt <= Date.now()) return { status: 'expired' }
@@ -106,6 +135,7 @@ export function resolvePromotedSolanaArtifact(rawTxBase64: string | undefined): 
   let sawSolanaArtifact = false
   for (const { artifact, job } of snapshotProvider()) {
     if (artifact.chain !== 'Solana' || !artifact.solana) continue
+    if (!certificateTrusted(artifact.solana.certificateHex)) continue
     sawSolanaArtifact = true
     if (!currentShapeKeys.has(artifact.shapeKey)) continue
     if (artifact.revokedAt) return { status: 'revoked' }

@@ -10,7 +10,7 @@
  * Run: bun test __tests__/webusb-recovery.test.ts
  */
 import { describe, test, expect } from 'bun:test'
-import { forceReleaseWebUsb } from '../src/bun/webusb-recovery'
+import { forceReleaseWebUsb, isUnreleasable } from '../src/bun/webusb-recovery'
 
 /** Fake node-usb WebUSBDevice: close() fails while a transfer is pending; reset() aborts it. */
 class FakeDevice {
@@ -80,6 +80,21 @@ describe('forceReleaseWebUsb', () => {
     const t0 = Date.now()
     expect(await forceReleaseWebUsb(dev, 100, 10)).toBe(false)
     expect(Date.now() - t0).toBeLessThan(1000)
+  })
+
+  test('a device that could not be released is never touched again', async () => {
+    // Second close() on such a handle segfaulted Bun on the next pairing retry.
+    const dev = new FakeDevice(true)
+    dev.reset = async () => { throw new Error('WebUSB reset timed out after 2999ms') }
+    expect(await forceReleaseWebUsb(dev, 100, 10)).toBe(false)
+    expect(isUnreleasable(dev)).toBe(true)
+
+    const closes = dev.closeCalls
+    expect(await forceReleaseWebUsb(dev, 100, 10)).toBe(false)
+    expect(dev.closeCalls).toBe(closes)
+
+    // A replug yields a new device object, which pairs normally.
+    expect(isUnreleasable(new FakeDevice(true))).toBe(false)
   })
 
   test('hanging close/reset are bounded by the timeout', async () => {

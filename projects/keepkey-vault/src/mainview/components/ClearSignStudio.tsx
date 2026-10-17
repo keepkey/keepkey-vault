@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Box, Button, Flex, Input, Text, Textarea, VStack } from "@chakra-ui/react"
 
 import type {
@@ -11,6 +11,10 @@ import type {
 	ClearSignCentralContractAudit,
 	ClearSignCentralContractReview,
 	ClearSignCentralStatus,
+	ClearSignEvmArgFormat,
+	ClearSignEvmSchemaArtifact,
+	ClearSignEvmSchemaDraft,
+	ClearSignEvmSignedEntry,
 	ClearSignProtectionCaseStudy,
 	ClearSignSolanaArgType,
 	ClearSignSolanaSchemaArtifact,
@@ -37,6 +41,24 @@ const RELAY_SCHEMA_FIXTURE = [
 	"6f756e7404054f726465720103055661756c74",
 ].join("")
 
+const EVM_EXAMPLE_DRAFT: ClearSignEvmSchemaDraft = {
+	chainId: 1,
+	contract: "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+	selector: "0xa9059cbb",
+	method: "transfer",
+	args: [
+		{ name: "To", format: "address" },
+		{ name: "Amount", format: "token-amount", decimals: 6, symbol: "USDC" },
+	],
+}
+
+const EVM_ARG_FORMATS: Array<{ value: ClearSignEvmArgFormat; label: string }> = [
+	{ value: "address", label: "Address" },
+	{ value: "amount", label: "Amount (wei)" },
+	{ value: "token-amount", label: "Token amount" },
+	{ value: "bytes", label: "Bytes32" },
+]
+
 const ARG_TYPES: Array<{ value: ClearSignSolanaArgType; label: string; width: string }> = [
 	{ value: "u64", label: "u64 LE", width: "8B" },
 	{ value: "u8", label: "u8", width: "1B" },
@@ -45,8 +67,8 @@ const ARG_TYPES: Array<{ value: ClearSignSolanaArgType; label: string; width: st
 	{ value: "lamports", label: "Lamports", width: "8B" },
 ]
 
-type StudioTab = "author" | "provider" | "signer" | "evidence"
-type BusyAction = "identity" | "build" | "inspect" | "attest" | "load" | "history" | "asset-history" | "reviewer-identity" | "asset-review-build" | "asset-review-sign" | "asset-review" | "contract-audit" | "contract-review-build" | "contract-review-sign" | "contract-review" | "bip85" | "derive" | ""
+type StudioTab = "author" | "provider" | "evm" | "signer" | "evidence"
+type BusyAction = "identity" | "build" | "inspect" | "attest" | "load" | "history" | "asset-history" | "reviewer-identity" | "asset-review-build" | "asset-review-sign" | "asset-review" | "contract-audit" | "contract-review-build" | "contract-review-sign" | "contract-review" | "bip85" | "derive" | "evm-build" | "evm-sign" | "bundle-export" | "bundle-import" | ""
 
 type Attestation = {
 	payload: string
@@ -151,7 +173,14 @@ export function ClearSignStudio({ open, onClose, advancedMode, firmwareVersion }
 	const [wordCount, setWordCount] = useState<12 | 18 | 24>(12)
 	const [bip85Index, setBip85Index] = useState(0)
 	const [childMnemonic, setChildMnemonic] = useState("")
-	const [providerKey, setProviderKey] = useState<{ publicKeyHex: string; fingerprint: string; filePath: string } | null>(null)
+	const [providerKey, setProviderKey] = useState<{ alias: string; publicKeyHex: string; fingerprint: string } | null>(null)
+	const [evmDraft, setEvmDraft] = useState<ClearSignEvmSchemaDraft>(EVM_EXAMPLE_DRAFT)
+	const [evmArtifact, setEvmArtifact] = useState<ClearSignEvmSchemaArtifact | null>(null)
+	const [evmEntries, setEvmEntries] = useState<ClearSignEvmSignedEntry[]>([])
+	const [confirmDrop, setConfirmDrop] = useState("")
+	// Public identity of the descriptions in evmEntries: the session key, or an imported bundle's.
+	const [bundleProvider, setBundleProvider] = useState<{ alias: string; publicKeyHex: string; fingerprint: string } | null>(null)
+	const bundleFileRef = useRef<HTMLInputElement>(null)
 
 	const loadConfiguredReviewer = useCallback(async () => {
 		setBusy("reviewer-identity")
@@ -348,6 +377,27 @@ export function ClearSignStudio({ open, onClose, advancedMode, firmwareVersion }
 		void refreshHistory()
 	}, [open, refreshHistory])
 
+	// AdvancedMode off ends the host session (onPolicy): the card must not say "In memory".
+	useEffect(() => {
+		if (!advancedMode) setProviderKey(null)
+	}, [advancedMode])
+
+	// Editing the ceremony inputs ends the derived key on the host too, not only on the card.
+	const dropProviderKey = useCallback(() => {
+		setProviderKey(null)
+		void rpcRequest("clearsignClearProviderKey").catch(() => {})
+	}, [])
+
+	// The provider key lives in host memory for this Studio session only: zero it on close.
+	useEffect(() => {
+		if (!open) return
+		return () => {
+			setProviderKey(null)
+			setChildMnemonic("")
+			void rpcRequest("clearsignClearProviderKey").catch(() => {})
+		}
+	}, [open])
+
 	useEffect(() => {
 		if (!open) return
 		const onKey = (event: KeyboardEvent) => { if (event.key === "Escape" && !busy) onClose() }
@@ -467,13 +517,13 @@ export function ClearSignStudio({ open, onClose, advancedMode, firmwareVersion }
 		setError("")
 		setNotice("")
 		try {
-			const result = await rpcRequest<{ publicKeyHex: string; fingerprint: string; filePath: string }>(
+			const result = await rpcRequest<{ alias: string; publicKeyHex: string; fingerprint: string }>(
 				"clearsignDeriveProviderKey",
 				{ childMnemonic, alias, wordCount, index: bip85Index },
 			)
 			setProviderKey(result)
 			setChildMnemonic("")
-			setNotice(`Provider key ${result.fingerprint} written to ${result.filePath}. The words are cleared from this screen.`)
+			setNotice(`Provider key ${result.fingerprint} derived. It is held in memory until Studio closes and is never written to disk. The words are cleared from this screen.`)
 		} catch (cause: any) {
 			setProviderKey(null)
 			setError(cause?.message || String(cause))
@@ -481,6 +531,73 @@ export function ClearSignStudio({ open, onClose, advancedMode, firmwareVersion }
 			setBusy("")
 		}
 	}, [alias, bip85Index, childMnemonic, wordCount])
+
+	const setEvmField = useCallback(<K extends keyof ClearSignEvmSchemaDraft>(field: K, value: ClearSignEvmSchemaDraft[K]) => {
+		setEvmDraft(current => ({ ...current, [field]: value }))
+		setEvmArtifact(null)
+	}, [])
+
+	const runEvm = useCallback(async (action: BusyAction, run: () => Promise<void>) => {
+		setBusy(action)
+		setError("")
+		setNotice("")
+		try {
+			await run()
+		} catch (cause: any) {
+			setError(cause?.message || String(cause))
+		} finally {
+			setBusy("")
+		}
+	}, [])
+
+	const buildEvm = useCallback(() => runEvm("evm-build", async () => {
+		setEvmArtifact(await rpcRequest<ClearSignEvmSchemaArtifact>("clearsignBuildEvmSchema", { draft: evmDraft, keyId: slot }))
+	}), [evmDraft, runEvm, slot])
+
+	const signEvm = useCallback(() => runEvm("evm-sign", async () => {
+		// A bundle holds one key and one slot: signing for another starts a new
+		// one. Say so first and sign only on the second press, so nothing is lost
+		// without the operator knowing (export the current bundle in between).
+		const replaces = !!providerKey && evmEntries.length > 0
+			&& (evmEntries.some(e => e.keyId !== slot) || (!!bundleProvider && bundleProvider.publicKeyHex !== providerKey?.publicKeyHex))
+		const dropKey = `${slot}:${providerKey?.publicKeyHex}:${evmEntries.length}`
+		if (replaces && confirmDrop !== dropKey) {
+			setConfirmDrop(dropKey)
+			throw new Error(`Signing for slot ${slot}${bundleProvider && bundleProvider.publicKeyHex !== providerKey?.publicKeyHex ? ` with ${providerKey?.alias}` : ""} starts a new bundle and drops the ${evmEntries.length} description${evmEntries.length === 1 ? "" : "s"} for slot ${evmEntries[0].keyId}. Export the bundle first to keep them, then press Sign again.`)
+		}
+		setConfirmDrop("")
+		const signed = await rpcRequest<ClearSignEvmSignedEntry & { alias: string; publicKeyHex: string; fingerprint: string }>(
+			"clearsignSignEvmSchema", { draft: evmDraft, keyId: slot },
+		)
+		const same = (e: ClearSignEvmSignedEntry) => e.draft.chainId === signed.draft.chainId && e.draft.contract === signed.draft.contract && e.draft.selector === signed.draft.selector
+		const fromOtherKey = bundleProvider && bundleProvider.publicKeyHex !== signed.publicKeyHex
+		// A bundle holds one slot: signing for another slot starts a new bundle.
+		setEvmEntries(current => [...(fromOtherKey || current.some(e => e.keyId !== signed.keyId) ? [] : current.filter(e => !same(e))), signed])
+		setBundleProvider({ alias: signed.alias, publicKeyHex: signed.publicKeyHex, fingerprint: signed.fingerprint })
+		setNotice(`${signed.draft.method} signed by ${signed.alias} ${signed.fingerprint} for slot ${signed.keyId}.${replaces ? ` A new bundle was started; the ${evmEntries.length} earlier description${evmEntries.length === 1 ? " was" : "s were"} dropped.` : ""}`)
+	}), [bundleProvider, confirmDrop, evmDraft, evmEntries, providerKey, runEvm, slot])
+
+	const exportBundle = useCallback(() => runEvm("bundle-export", async () => {
+		if (!bundleProvider) return
+		const result = await rpcRequest<{ filePath: string }>("clearsignExportProviderBundle", {
+			alias: bundleProvider.alias,
+			publicKeyHex: bundleProvider.publicKeyHex,
+			// The slot the descriptions were signed for, not the picker's current one.
+			signedPayloads: evmEntries.map(e => e.signedPayload),
+		})
+		setNotice(`Bundle written to ${result.filePath}. It holds the public key and signed descriptions only.`)
+	}), [bundleProvider, evmEntries, runEvm])
+
+	const importBundle = useCallback((file: File) => runEvm("bundle-import", async () => {
+		const { bundle, entries } = await rpcRequest<{ bundle: { provider: { alias: string; publicKeyHex: string; fingerprint: string; keyId: number } }; entries: ClearSignEvmSignedEntry[] }>(
+			"clearsignImportProviderBundle", { json: await file.text() },
+		)
+		const { alias: bundleAlias, publicKeyHex, fingerprint, keyId } = bundle.provider
+		setEvmEntries(entries)
+		setBundleProvider({ alias: bundleAlias, publicKeyHex, fingerprint })
+		setSlot(keyId)
+		setNotice(`Imported ${entries.length} description${entries.length === 1 ? "" : "s"} from ${bundleAlias} ${fingerprint} (slot ${keyId}). Each signature verified against the bundle's public key.`)
+	}), [runEvm])
 
 	const copy = useCallback(async (name: string, value: string) => {
 		if (await copyText(value)) {
@@ -526,9 +643,9 @@ export function ClearSignStudio({ open, onClose, advancedMode, firmwareVersion }
 				</Flex>
 
 				<Flex px={{ base: "4", md: "6" }} py="2.5" gap="2" borderBottom="1px solid var(--line)" bg="rgba(0,0,0,0.10)" overflowX="auto">
-					{(["author", "provider", "signer", "evidence"] as StudioTab[]).map(value => (
+					{(["author", "provider", "evm", "signer", "evidence"] as StudioTab[]).map(value => (
 						<Button key={value} size="sm" variant={tab === value ? "solid" : "ghost"} bg={tab === value ? "var(--gold)" : undefined} color={tab === value ? "#15110a" : "var(--text-1)"} onClick={() => setTab(value)}>
-							{value === "author" ? "Author & attest" : value === "provider" ? "Create provider key" : value === "signer" ? "Load identity" : `Evidence (${history.length})`}
+							{value === "author" ? "Author & attest" : value === "provider" ? "Create provider key" : value === "evm" ? "EVM descriptions" : value === "signer" ? "Load identity" : `Evidence (${history.length})`}
 						</Button>
 					))}
 				</Flex>
@@ -626,25 +743,93 @@ export function ClearSignStudio({ open, onClose, advancedMode, firmwareVersion }
 							<Flex gap="4" direction={{ base: "column", lg: "row" }}>
 								<Box flex="1" p="4" borderRadius="14px" bg="var(--ink-0)" border="1px solid var(--line)">
 									<Text fontSize="12px" fontWeight="700" color="var(--text-0)">1 · Derive a child seed on the device</Text>
-									<Text fontSize="11px" color="var(--text-2)" mt="1">BIP-85 gives no custody: the key ends up hot inside a live service. What it gives is a ceremony you can repeat and audit from device + index instead of a key file of unexplained origin.</Text>
-									<Box mt="3"><FieldLabel hint="shown on device when the signer is loaded">Provider alias</FieldLabel><Input value={alias} onChange={event => { setAlias(event.target.value); setProviderKey(null) }} maxLength={31} size="sm" bg="rgba(0,0,0,0.18)" /></Box>
-									<Flex gap="1" align="center" mt="3"><Text fontSize="10px" color="var(--text-2)" mr="2">Words</Text>{([12, 18, 24] as const).map(value => <Button key={value} size="xs" minW="38px" variant={wordCount === value ? "solid" : "outline"} bg={wordCount === value ? "var(--gold)" : undefined} color={wordCount === value ? "#15110a" : "var(--text-1)"} onClick={() => { setWordCount(value); setProviderKey(null) }}>{value}</Button>)}</Flex>
-									<Box mt="3"><FieldLabel hint="same index always re-derives the same key">Index</FieldLabel><Input type="number" min={0} value={bip85Index} onChange={event => { setBip85Index(Math.max(0, Number(event.target.value) || 0)); setProviderKey(null) }} size="sm" w="140px" bg="rgba(0,0,0,0.18)" /></Box>
-									<Button mt="4" w="full" size="sm" variant="outline" borderColor="var(--line)" onClick={showChildSeed} loading={busy === "bip85"} disabled={!!busy}>Show child seed on device</Button>
+									<Text fontSize="11px" color="var(--text-2)" mt="1">BIP-85 gives a ceremony you can repeat and audit from device + index. Desktop never writes the provider private key to disk: it is re-derived from the device words when Studio needs to sign, and only the public key is exported.</Text>
+									<Box mt="3"><FieldLabel hint="shown on device when the signer is loaded">Provider alias</FieldLabel><Input value={alias} onChange={event => { setAlias(event.target.value); dropProviderKey() }} maxLength={31} size="sm" bg="rgba(0,0,0,0.18)" /></Box>
+									<Flex gap="1" align="center" mt="3"><Text fontSize="10px" color="var(--text-2)" mr="2">Words</Text>{([12, 18, 24] as const).map(value => <Button key={value} size="xs" minW="38px" variant={wordCount === value ? "solid" : "outline"} bg={wordCount === value ? "var(--gold)" : undefined} color={wordCount === value ? "#15110a" : "var(--text-1)"} onClick={() => { setWordCount(value); dropProviderKey() }}>{value}</Button>)}</Flex>
+									<Box mt="3"><FieldLabel hint="same index always re-derives the same key">Index</FieldLabel><Input type="number" min={0} value={bip85Index} onChange={event => { setBip85Index(Math.max(0, Number(event.target.value) || 0)); dropProviderKey() }} size="sm" w="140px" bg="rgba(0,0,0,0.18)" /></Box>
+									<Button mt="4" w="full" size="sm" variant="outline" borderColor="var(--line)" onClick={showChildSeed} loading={busy === "bip85"} disabled={!!busy || !advancedMode}>Show child seed on device</Button>
 									<Text fontSize="10px" color="var(--text-2)" mt="3">The words are displayed on the KeepKey screen only — they never cross USB. Read them off the device and type them below.</Text>
 								</Box>
 
 								<Box flex="1" p="4" borderRadius="14px" bg="var(--ink-0)" border="1px solid var(--line)">
 									<Text fontSize="12px" fontWeight="700" color="var(--text-0)">2 · Type the words back</Text>
 									<Text fontSize="11px" color="var(--text-2)" mt="1">A typo fails the BIP-39 checksum rather than deriving a plausible key whose fingerprint never matches any device.</Text>
-									<Box mt="3"><FieldLabel hint="12, 18 or 24 words">BIP-85 child mnemonic</FieldLabel><Textarea value={childMnemonic} onChange={event => { setChildMnemonic(event.target.value); setProviderKey(null) }} rows={4} fontSize="11px" bg="rgba(0,0,0,0.18)" spellCheck={false} autoComplete="off" /></Box>
-									<Button mt="3" w="full" size="sm" bg="var(--gold)" color="#15110a" onClick={deriveProvider} loading={busy === "derive"} disabled={!!busy || !childMnemonic.trim() || !alias.trim()}>Derive provider key</Button>
-									<Box mt="3" p="3" bg="rgba(255,255,255,0.025)" borderRadius="10px"><VStack align="stretch" gap="2"><ResultRow label="Fingerprint" value={providerKey?.fingerprint} /><ResultRow label="Public key" value={providerKey ? shortHex(providerKey.publicKeyHex) : undefined} /><ResultRow label="Key file" value={providerKey?.filePath} /></VStack></Box>
+									<Box mt="3"><FieldLabel hint="12, 18 or 24 words">BIP-85 child mnemonic</FieldLabel><Textarea value={childMnemonic} onChange={event => { setChildMnemonic(event.target.value); dropProviderKey() }} rows={4} fontSize="11px" bg="rgba(0,0,0,0.18)" spellCheck={false} autoComplete="off" /></Box>
+									<Button mt="3" w="full" size="sm" bg="var(--gold)" color="#15110a" onClick={deriveProvider} loading={busy === "derive"} disabled={!!busy || !advancedMode || !childMnemonic.trim() || !alias.trim()}>Derive provider key</Button>
+									<Box mt="3" p="3" bg="rgba(255,255,255,0.025)" borderRadius="10px"><VStack align="stretch" gap="2"><ResultRow label="Fingerprint" value={providerKey?.fingerprint} /><ResultRow label="Public key" value={providerKey ? shortHex(providerKey.publicKeyHex) : undefined} /><ResultRow label="Private key" value={providerKey ? "In memory for this Studio session" : undefined} /></VStack></Box>
 									{providerKey && <>
-										<Text fontSize="10px" color="var(--gold)" mt="3">The key file holds a live signing key in plaintext. It can mislabel what a transaction appears to do under this alias; it can never conceal one, and never removes the raw review.</Text>
+										<Text fontSize="10px" color="var(--text-2)" mt="3">Only the public key leaves Studio. Anyone holding this provider's words can describe transactions under this alias on devices that trust it; a description never removes the raw review.</Text>
 										<Flex gap="2" mt="3"><Button flex="1" size="xs" variant="outline" borderColor="var(--line)" onClick={() => copy("providerKey", providerKey.publicKeyHex)}>{copied === "providerKey" ? "Copied" : "Copy public key"}</Button><Button flex="1" size="xs" variant="ghost" color="var(--gold)" onClick={() => { setPublicKeyInput(providerKey.publicKeyHex); setIdentity({ publicKey: providerKey.publicKeyHex, fingerprint: providerKey.fingerprint }); setLoaded(false); setTab("signer") }}>Load this identity →</Button></Flex>
 									</>}
 								</Box>
+							</Flex>
+						)}
+
+						{tab === "evm" && (
+							<Flex gap="4" direction={{ base: "column", lg: "row" }} align="stretch">
+								<Box flex="1.2" p="4" borderRadius="14px" bg="var(--ink-0)" border="1px solid var(--line)">
+									<Flex justify="space-between" align="start" gap="3" mb="3">
+										<Box>
+											<Text fontSize="12px" fontWeight="700" color="var(--text-0)">1 · Describe one contract call (v0x02)</Text>
+											<Text fontSize="11px" color="var(--text-2)" mt="1">One description covers one chain, contract and selector. Every argument is one 32-byte word; the device requires the calldata to match exactly.</Text>
+										</Box>
+										<Button size="xs" variant="ghost" color="var(--gold)" onClick={() => { setEvmDraft(EVM_EXAMPLE_DRAFT); setEvmArtifact(null) }}>Example</Button>
+									</Flex>
+									<VStack align="stretch" gap="3">
+										<Flex gap="3" direction={{ base: "column", md: "row" }}>
+											<Box w={{ base: "full", md: "120px" }}><FieldLabel>Chain ID</FieldLabel><Input type="number" min={1} value={evmDraft.chainId} onChange={event => setEvmField("chainId", Number(event.target.value) || 0)} size="sm" bg="rgba(0,0,0,0.18)" /></Box>
+											<Box flex="1"><FieldLabel hint="20-byte hex">Contract</FieldLabel><Input value={evmDraft.contract} onChange={event => setEvmField("contract", event.target.value)} size="sm" fontFamily="mono" bg="rgba(0,0,0,0.18)" /></Box>
+										</Flex>
+										<Flex gap="3" direction={{ base: "column", md: "row" }}>
+											<Box w={{ base: "full", md: "160px" }}><FieldLabel hint="4 bytes">Selector</FieldLabel><Input value={evmDraft.selector} onChange={event => setEvmField("selector", event.target.value)} size="sm" fontFamily="mono" bg="rgba(0,0,0,0.18)" /></Box>
+											<Box flex="1"><FieldLabel hint="max 64 ASCII">Method label</FieldLabel><Input value={evmDraft.method} onChange={event => setEvmField("method", event.target.value)} maxLength={64} size="sm" bg="rgba(0,0,0,0.18)" /></Box>
+										</Flex>
+										<Box>
+											<Flex justify="space-between" align="center" mb="1"><FieldLabel hint="max 8, in calldata order">Arguments</FieldLabel><Button size="xs" variant="ghost" color="var(--gold)" disabled={evmDraft.args.length >= 8} onClick={() => setEvmField("args", [...evmDraft.args, { name: "Value", format: "amount" }])}>+ Add</Button></Flex>
+											<VStack align="stretch" gap="2">
+												{evmDraft.args.length === 0 && <Text fontSize="10px" color="var(--text-2)">No arguments: the calldata must be the selector alone.</Text>}
+												{evmDraft.args.map((arg, index) => (
+													<Flex key={index} gap="2" wrap="wrap">
+														<select value={arg.format} onChange={event => setEvmField("args", evmDraft.args.map((item, i) => i === index ? { name: item.name, format: event.target.value as ClearSignEvmArgFormat, ...(event.target.value === "token-amount" ? { decimals: 18, symbol: "" } : {}) } : item))} style={{ height: 32, minWidth: 130, padding: "0 8px", fontSize: 11, color: "var(--text-0)", background: "var(--ink-1)", border: "1px solid var(--line)", borderRadius: 6 }}>
+															{EVM_ARG_FORMATS.map(format => <option key={format.value} value={format.value}>{format.label}</option>)}
+														</select>
+														<Input flex="1" minW="120px" value={arg.name} onChange={event => setEvmField("args", evmDraft.args.map((item, i) => i === index ? { ...item, name: event.target.value } : item))} maxLength={32} size="sm" placeholder="Display label" bg="rgba(0,0,0,0.18)" />
+														{arg.format === "token-amount" && <>
+															<Input w="80px" value={arg.symbol ?? ""} onChange={event => setEvmField("args", evmDraft.args.map((item, i) => i === index ? { ...item, symbol: event.target.value } : item))} maxLength={10} size="sm" placeholder="Symbol" bg="rgba(0,0,0,0.18)" />
+															<Input w="70px" type="number" min={0} max={36} value={arg.decimals ?? 0} onChange={event => setEvmField("args", evmDraft.args.map((item, i) => i === index ? { ...item, decimals: Number(event.target.value) } : item))} size="sm" bg="rgba(0,0,0,0.18)" />
+														</>}
+														<Button size="xs" mt="0.5" variant="ghost" color="var(--rose)" onClick={() => setEvmField("args", evmDraft.args.filter((_, i) => i !== index))}>Remove</Button>
+													</Flex>
+												))}
+											</VStack>
+										</Box>
+										<Flex gap="1" align="center"><Text fontSize="10px" color="var(--text-2)" mr="2">Signer slot</Text>{[0, 1, 2, 3].map(value => <Button key={value} size="xs" minW="34px" variant={slot === value ? "solid" : "outline"} bg={slot === value ? "var(--gold)" : undefined} color={slot === value ? "#15110a" : "var(--text-1)"} onClick={() => { setSlot(value); setEvmArtifact(null) }}>{value}</Button>)}</Flex>
+										<Flex justify="flex-end"><Button size="sm" variant="outline" borderColor="var(--line)" onClick={buildEvm} loading={busy === "evm-build"} disabled={!!busy || !advancedMode}>Build canonical bytes</Button></Flex>
+										{evmArtifact && <Box p="3" bg="rgba(255,255,255,0.025)" borderRadius="10px"><VStack align="stretch" gap="2"><ResultRow label="Body" value={shortHex(evmArtifact.body, 24)} /><ResultRow label="Size" value={`${evmArtifact.byteLength} bytes`} /><ResultRow label="Calldata length" value={`${evmArtifact.calldataLength} bytes exactly`} /><ResultRow label="Signer slot" value={String(evmArtifact.keyId)} /></VStack></Box>}
+									</VStack>
+								</Box>
+
+								<VStack flex="0.85" align="stretch" gap="4">
+									<Box p="4" borderRadius="14px" bg="var(--ink-0)" border="1px solid var(--line)">
+										<Text fontSize="12px" fontWeight="700" color="var(--text-0)">2 · Sign with the provider key</Text>
+										<Text fontSize="11px" color="var(--text-2)" mt="1">Uses the key derived from the device words in "Create provider key". It stays in memory until Studio closes. The device shows these descriptions only after the user trusts this provider for the session, marked NOT verified by KeepKey, and the raw review still follows.</Text>
+										<Box mt="3" p="3" bg="rgba(255,255,255,0.025)" borderRadius="10px"><ResultRow label="Provider key" value={providerKey ? `${providerKey.alias} · ${providerKey.fingerprint}` : "Not derived this session"} /></Box>
+										<Button mt="3" w="full" size="sm" bg="var(--gold)" color="#15110a" onClick={signEvm} loading={busy === "evm-sign"} disabled={!!busy || !advancedMode || !providerKey}>Sign description</Button>
+										{!providerKey && <Button mt="2" w="full" size="xs" variant="ghost" color="var(--gold)" onClick={() => setTab("provider")}>Derive the provider key →</Button>}
+									</Box>
+
+									<Box p="4" borderRadius="14px" bg="var(--ink-0)" border="1px solid var(--line)">
+										<Text fontSize="12px" fontWeight="700" color="var(--text-0)">3 · Bundle ({evmEntries.length})</Text>
+										<Text fontSize="11px" color="var(--text-2)" mt="1">A bundle file holds the provider's public key, alias and signed descriptions. It never holds a private key.</Text>
+										{bundleProvider && <Box mt="3" p="3" bg="rgba(255,255,255,0.025)" borderRadius="10px"><VStack align="stretch" gap="2"><ResultRow label="Provider" value={`${bundleProvider.alias} · ${bundleProvider.fingerprint}`} />{evmEntries.map(entry => <ResultRow key={entry.signedPayload} label={`${entry.draft.method} · chain ${entry.draft.chainId}`} value={`${shortHex(entry.draft.contract, 6)} ${entry.draft.selector}`} />)}</VStack></Box>}
+										<Flex gap="2" mt="3">
+											<Button flex="1" size="xs" variant="outline" borderColor="var(--line)" onClick={exportBundle} loading={busy === "bundle-export"} disabled={!!busy || !advancedMode || !bundleProvider || evmEntries.length === 0}>Export bundle</Button>
+											<Button flex="1" size="xs" variant="outline" borderColor="var(--line)" onClick={() => bundleFileRef.current?.click()} loading={busy === "bundle-import"} disabled={!!busy || !advancedMode}>Import bundle</Button>
+											<input ref={bundleFileRef} type="file" accept="application/json,.json" style={{ display: "none" }} onChange={event => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ""; if (file) void importBundle(file) }} />
+										</Flex>
+										{bundleProvider && <Button mt="2" w="full" size="xs" variant="ghost" color="var(--gold)" onClick={() => { setAlias(bundleProvider.alias); setPublicKeyInput(bundleProvider.publicKeyHex); setIdentity({ publicKey: bundleProvider.publicKeyHex, fingerprint: bundleProvider.fingerprint }); setLoaded(false); setTab("signer") }}>Load this identity →</Button>}
+									</Box>
+								</VStack>
 							</Flex>
 						)}
 

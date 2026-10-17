@@ -22,7 +22,7 @@ import { describe, test, expect, afterAll } from 'bun:test'
 import * as core from '@keepkey/hdwallet-core'
 import { Adapter, Transport, type TransportDelegate } from '@keepkey/hdwallet-keepkey'
 
-const DYLIB = join(homedir(), '.keepkey', 'emulator', 'libkkemu.dylib')
+const DYLIB = process.env.KK_EMU_DYLIB || join(homedir(), '.keepkey', 'emulator', 'libkkemu.dylib')
 const TEST_MNEMONIC = 'alcohol woman abuse must during monitor noble actual mixed trade anger aisle'
 
 function loadDylib() {

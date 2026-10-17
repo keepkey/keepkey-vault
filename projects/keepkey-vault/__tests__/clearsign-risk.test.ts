@@ -17,7 +17,12 @@ import { assessSigningRisk } from '../src/shared/clearsign-risk'
 import type { SigningRequestInfo } from '../src/shared/types'
 import joinFixture from './fixtures/solana/soltoshidice-blackjack-join.json'
 import swap from './fixtures/uniswap/base-ur-usdc-to-eth-swap.json'
-import { applyEvmTxPreview } from '../src/bun/evm-signing-preview'
+import { applyEvmTxPreview, recognizedTypedDataSpender } from '../src/bun/evm-signing-preview'
+import { decodeEIP712 } from '../src/bun/eip712-decoder'
+import { ethMessagePreview } from '../src/bun/eth-message-preview'
+import { WalletConnectManager } from '../src/bun/walletconnect'
+import { applySolanaSigningGates, requiresSolanaBlindSigningConsent } from '../src/bun/solana-consent'
+import bs58 from 'bs58'
 
 const LOGIN_MESSAGE_B64 = 'U29sdG9zaGlESUNFIHdhbGxldApOZXR3b3JrOiBtYWlubmV0LWJldGE6Q3VUTHA3cERtTkdrRmdpNGFvaDhFZjFZU2pjMkJ6RUNRUkx6WXFhb1ZXQlI6NG5DbXB3bmU3aENvV1RTcEFkNTR1RU5tQ2dISnJIVHluNERNUENFTXB1bXAKU2Vzc2lvbjogY2E1ZWQ3YTgtNWRmMS00MWJmLTkxY2EtYzNkZTRjMWM1NmY2Ck5vbmNlOiAzN2M0MDY2Ny01NzZkLTQwNTQtOTA2NC02MTg2MTRhYjg4YzE='
 const TX1_B64 = 'AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAYJ7Dl5pNxrQBvQRRcaGJ8mhW+rnqt1VgIU+XKy7cFkMA+LZzzaLik+AiCrPgHStY7QVcnBsnYt1RVhKxDKzW40NrgTPK+soJctzdQsxyxkxmokWe10HSLNM0pp7sZO3eosAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAg+JYP7kag/aX3JhxSBLr/9dbITv9zclr5W8RVNHvjowF02rdo/npIS0+fAcrrAThIR97VGw7P8fmeJwQ9+Dk5hH08KOLLv/nnxPfLbW1x5bwW1Qqm7U/+OurmoNbG6qQDBkZv5SEXMv/srbpyw5vnvIzlu8X3EmssQ5s6QAAAALDgivSk/PrRPvj8/Z3HCXXrb8LgSnx2YRVApRzV257QTQBKpt9xx9nI6TgJCP4k4JahDgt0ODAlVydCDyS4WCcCBwAFAjBXBQAIBwAGBAECBQMDE2tr'
@@ -100,6 +105,10 @@ describe('assessSigningRisk — certified Solana route', () => {
     expect(text).not.toContain('cannot read')
     expect(text).not.toContain('nobody can show you how much')
     expect(text).toContain('KeepKey-certified description')
+    // Certified, but it hands a session key power to send without the KeepKey:
+    // not what a normal app does, so the three-level verdict stays red.
+    expect(certified.tier).toBe('red')
+    expect(opaque.tier).toBe('red')
     // The session-key warning and the level are unchanged.
     expect(text).toContain('permission to act for you')
     expect(certified.level).toBe(opaque.level)
@@ -188,10 +197,37 @@ describe('assessSigningRisk — EVM', () => {
     expect(r.reasons[0].text).toBe('Lets 0x1111111254eeb25477b68fb85ed929f73a960582 spend ALL of your USDC, now and later, without asking you again.')
   })
 
-  test('finite approve is still CRITICAL with the amount', () => {
-    const r = tx('0x095ea7b3' + SPENDER + word(1_000_000_000n))
-    expect(r.level).toBe('critical')
-    expect(r.reasons[0].text).toContain('up to 1,000 USDC')
+  // Owner rule 2026-10-11: Danger only for what a normal dapp does not ask for.
+  test('spend permission level: Danger only for an unlimited grant to an unreviewed spender', () => {
+    const MAX = (1n << 256n) - 1n
+    const bounded = tx('0x095ea7b3' + SPENDER + word(1_000_000_000n))
+    expect(bounded.level).toBe('high')
+    expect(bounded.reasons[0].text).toContain('up to 1,000 USDC')
+    expect(tx('0x095ea7b3' + SPENDER + word(MAX)).level).toBe('critical')
+
+    const reviewed = { recognizedSpender: 'Uniswap Universal Router' }
+    const normal = tx('0x095ea7b3' + SPENDER + word(1_000_000_000n), reviewed)
+    expect(normal.level).toBe('medium')
+    expect(normal.reasons[0].text).toContain('Lets Uniswap Universal Router (0x')
+    expect(normal.reasons[0].text).toContain('up to 1,000 USDC')
+    expect(tx('0x095ea7b3' + SPENDER + word(MAX), reviewed).level).toBe('high')
+  })
+
+  test('"bounded" means a real bound: near-max amounts and unknown tokens are the worst case', () => {
+    const level = (amount: bigint, extra: Partial<SigningRequestInfo> = {}) => tx('0x095ea7b3' + SPENDER + word(amount), extra).level
+    expect(level((1n << 160n) - 2n)).toBe('critical')            // one below Permit2's max
+    expect(level((1n << 96n) - 1n)).toBe('critical')             // UNI/COMP "infinite"
+    expect(level(10n ** 30n)).toBe('critical')
+    expect(level((1n << 96n) - 1n, { recognizedSpender: 'Uniswap Universal Router' })).toBe('high')
+    // approve(to, tokenId) on an NFT has the same selector; an unknown contract is not assumed to be a token.
+    expect(level(1_000_000n, { to: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88' })).toBe('critical')
+  })
+
+  test('an unlimited approve to canonical Permit2 is the standard setup on any chain and token', () => {
+    const permit2 = '000000000000000000000000' + '000000000022d473030f116ddee9f6b43ac78ba3'
+    const r = tx('0x095ea7b3' + permit2 + word((1n << 256n) - 1n), { recognizedSpender: 'Uniswap Permit2' })
+    expect(r.level).toBe('medium')
+    expect(r.reasons[0].text).toBe('Standard Permit2 setup: gives canonical Permit2 persistent access to your USDC. You can revoke this allowance later.')
   })
 
   test('real Arbitrum Uniswap setup approval says USDT, Permit2, and not all wallet tokens', () => {
@@ -282,6 +318,13 @@ describe('assessSigningRisk — EVM', () => {
     expect(r.reasons[0].text).toBe('An auditor rates this contract high risk: a single key controls upgrades, deposits, minting (delay 10d). The rater is not yet pinned in this Vault.')
   })
 
+  test('three-level verdict: what the KeepKey shows is green, an unknown call is red', () => {
+    const transfer = '0xa9059cbb' + word(0x1234n) + word(1_000_000n)
+    const usdc = '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48'
+    expect(tx(transfer, { to: usdc, chainId: 1, deviceClearSigns: true }).tier).toBe('green')
+    expect(tx('0xdeadbeef' + word(1n), { to: '0x1111111111111111111111111111111111111111', chainId: 1 }).tier).toBe('red')
+  })
+
   test('a low-risk rating never lowers a critical payload', () => {
     const r = tx('0x095ea7b3' + SPENDER + word((1n << 256n) - 1n), reviewed('low', true))
     expect(r.level).toBe('critical')
@@ -311,11 +354,13 @@ describe('assessSigningRisk — reviewed Uniswap Universal Router swap', () => {
     expect(text).not.toContain('blind')
   })
 
-  test('no signed description (device blind-signs): stays HIGH, adds what this computer read', async () => {
+  test('no signed description: known protocol, yellow, not shown on this firmware yet', async () => {
     const r = assessSigningRisk(await swapRequest())!
-    expect(r.level).toBe('high')
-    expect(r.reasons[0].text).toContain('You would be signing blind')
-    expect(r.reasons.map((x) => x.text).join('\n')).toContain('This computer reads it as: Swaps 300 USDC')
+    expect(r.level).toBe('medium')
+    expect(r.reasons[0].text).toContain('Swaps 300 USDC')
+    expect(r.reasons[0].text).toContain('cannot show this swap on the device yet')
+    expect(r.reasons.map((x) => x.text).join('\n')).not.toContain('signing blind')
+    expect(r.tier).toBe('yellow')
   })
 
   test('a signed blob on an unreviewed contract is not treated as a reviewed swap', async () => {
@@ -343,5 +388,464 @@ describe('Solana plain-text rule (mirrors firmware solana_rawMessageIsPlainText)
     const printableSigner = require('bs58').default.encode(Buffer.alloc(32, 'K'))
     expect(isPlainTextForSigner(Buffer.from('head ' + 'K'.repeat(32) + ' tail'), printableSigner)).toBe(false)
     expect(isPlainTextForSigner(Buffer.from('head ' + 'K'.repeat(31) + ' tail'), printableSigner)).toBe(true)
+  })
+})
+
+describe('three-level verdict on Solana: device shows it, computer decodes it, or neither', () => {
+  const SYSTEM = '11111111111111111111111111111111'
+  const ix = (programId: string, status: 'known' | 'known-program-unknown-ix' | 'unknown-program', programName: string, instructionName?: string) =>
+    ({ status, programId, programName, instructionName, args: [], accounts: [] })
+  const sol = (...instructions: ReturnType<typeof ix>[]) => ({
+    method: '/solana/sign-transaction', firmwareVersion: '7.16.0', requiresAdvancedMode: false,
+    solanaDecoded: { version: 'legacy', staticAccountCount: 4, instructions },
+  } as unknown as SigningRequestInfo)
+
+  test('a plain SOL transfer is green: the firmware decodes System', () => {
+    const r = assessSigningRisk(sol(ix(SYSTEM, 'known', 'System Program', 'transfer')))!
+    expect(r.tier).toBe('green')
+  })
+
+  test('a fully decoded app call with no certified description is yellow, never green', () => {
+    // Relay depositNative on firmware without the certified schema: this
+    // computer decodes it, the device shows raw data.
+    const r = assessSigningRisk(sol(ix('99vQwtBwYtrqqD9YSXbdum3KBdxPAVxYTaQ3cfnJSrN2', 'known', 'Relay', 'depositNative')))!
+    expect(r.tier).toBe('yellow')
+    expect(r.reasons.map((x) => x.text).join('\n')).toContain('Your KeepKey shows it as raw data')
+    expect(r.reasons.map((x) => x.text).join('\n')).not.toContain('KeepKey can read every step')
+  })
+
+  test('a program known only by name is red and says it cannot decode the action', () => {
+    const r = assessSigningRisk(sol(ix('JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4', 'known-program-unknown-ix', 'Jupiter Aggregator v6')))!
+    expect(r.tier).toBe('red')
+    expect(r.reasons.map((x) => x.text).join('\n')).toContain('cannot decode this action')
+  })
+
+  test('a memo does not make a decoded transfer unknown', () => {
+    const r = assessSigningRisk(sol(
+      ix(SYSTEM, 'known', 'System Program', 'transfer'),
+      ix('MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr', 'known-program-unknown-ix', 'Memo Program'),
+    ))!
+    // The firmware shows Memo v2 text itself.
+    expect(r.tier).toBe('green')
+  })
+
+  test('a certified description the device verifies is green', () => {
+    const r = assessSigningRisk({ ...sol(ix('99vQwtBwYtrqqD9YSXbdum3KBdxPAVxYTaQ3cfnJSrN2', 'known', 'Relay', 'depositNative')), deviceClearSigns: true })!
+    expect(r.tier).toBe('green')
+  })
+})
+
+// EVM requests through the real REST preview (prepareEvmTxSigningInfo), offline.
+describe('EVM verdict regressions', () => {
+  const { utils } = require('ethers')
+  const abi = utils.defaultAbiCoder
+  const SIGNER = '0x909ef6b32dfdc12ca86aa710b54c991af3c5f82e'
+  const STRANGER = '0x1111111111111111111111111111111111111111'
+  const BASE_UR = '0x6ff5693b99212da76ad316178a184ab56d299b43'
+  const BASE_USDC = '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913'
+  const BASE_WETH = '0x4200000000000000000000000000000000000006'
+  const ETH_USDC = '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48'
+  const PERMIT2 = '0x000000000022d473030f116ddee9f6b43ac78ba3'
+  const RELAY = '0x4cd00e387622c35bddb9b4c962c136462338bc31'
+
+  async function preview(chainId: number, to: string, data: string, fw: string, value = '0x0') {
+    const { prepareEvmTxSigningInfo } = await import('../src/bun/evm-presign-report')
+    const original = globalThis.fetch
+    globalThis.fetch = (async () => { throw new Error('offline') }) as unknown as typeof fetch
+    try {
+      const s = { id: 'v', method: '/eth/sign-transaction', appName: 'app', from: SIGNER, to, value, chainId, data, firmwareVersion: fw } as SigningRequestInfo
+      await prepareEvmTxSigningInfo(s, { chainId, from: SIGNER, to, value, data }, fw)
+      return s
+    } finally { globalThis.fetch = original }
+  }
+  const texts = (s: SigningRequestInfo) => assessSigningRisk(s)!.reasons.map((x) => x.text).join('\n')
+
+  // wiring:2
+  test('a certified description Desktop attached for a call with no host decoder is green, not "signing blind"', () => {
+    const contract = '0x1234567890123456789012345678901234567890'
+    const data = '0xb6b55f25' + (10n ** 18n).toString(16).padStart(64, '0')
+    const body = Buffer.concat([Buffer.from([0x02, 0, 0, 0, 1]), Buffer.from(contract.slice(2), 'hex'), Buffer.from('b6b55f25', 'hex'), Buffer.alloc(40, 0x33)])
+    const blob = Buffer.concat([Buffer.from([0x03]), Buffer.alloc(139, 0x11), body, Buffer.alloc(65, 0x22)]).toString('base64')
+    const req = (over: Partial<SigningRequestInfo> = {}) => ({
+      id: 'c', method: '/eth/sign-transaction', appName: 'app', from: SIGNER, to: contract, value: '0x0', chainId: 1, data,
+      firmwareVersion: '7.16.0', deviceClearSigns: false, needsBlindSigning: false,
+      calldataDecoded: { dappName: 'Unknown', contractName: contract, method: 'deposit', selector: '0xb6b55f25', fields: [], source: 'none', signedInsightBlob: blob, insightKeyId: 0x80 },
+      ...over,
+    } as SigningRequestInfo)
+    const r = assessSigningRisk(req())!
+    expect(r.tier).toBe('green')
+    expect(r.reasons[0].text).toContain('from a KeepKey-certified description')
+    expect(r.reasons.map((x) => x.text).join('\n')).not.toContain('signing blind')
+    // The device cannot show it on older firmware, or for another contract.
+    expect(assessSigningRisk(req({ firmwareVersion: '7.15.0' }))!.tier).toBe('red')
+    expect(assessSigningRisk(req({ to: STRANGER }))!.tier).toBe('red')
+  })
+
+  const path = utils.solidityPack(['address', 'uint24', 'address'], [BASE_USDC, 500, BASE_WETH])
+  const v3In = (recipient: string, minOut: bigint) => abi.encode(['address', 'uint256', 'uint256', 'bytes', 'bool'], [recipient, 1000_000000n, minOut, path, true])
+  const execute = (commands: string, inputs: string[]) => '0x3593564c' + abi.encode(['bytes', 'bytes[]', 'uint256'], [commands, inputs, 4102444800n]).slice(2)
+
+  // evm-yellow:1
+  test('a Universal Router swap that pays its output to someone else is red', async () => {
+    for (const fw of ['7.15.0', '7.16.0']) {
+      const s = await preview(8453, BASE_UR, execute('0x00', [v3In(STRANGER, 3n * 10n ** 17n)]), fw)
+      expect(assessSigningRisk(s)!.tier).toBe('red')
+      expect(texts(s)).toContain(`The swap output goes to ${STRANGER}, which is NOT the account signing this (${SIGNER}).`)
+      // To the signer itself (MSG_SENDER) it stays a known swap.
+      const own = await preview(8453, BASE_UR, execute('0x00', [v3In('0x0000000000000000000000000000000000000001', 3n * 10n ** 17n)]), fw)
+      expect(assessSigningRisk(own)!.tier).toBe('yellow')
+    }
+  })
+
+  // evm-yellow:2
+  test('a Universal Router fee that takes 99% of the output is red; a normal fee is named, not red', async () => {
+    const swap = (bips: bigint, sweepMin: bigint) => execute('0x000604', [
+      v3In('0x0000000000000000000000000000000000000002', 3n * 10n ** 17n),
+      abi.encode(['address', 'address', 'uint256'], [BASE_WETH, STRANGER, bips]),
+      abi.encode(['address', 'address', 'uint256'], [BASE_WETH, '0x0000000000000000000000000000000000000001', sweepMin]),
+    ])
+    const greedy = await preview(8453, BASE_UR, swap(9900n, 3n * 10n ** 15n), '7.15.0')
+    expect(assessSigningRisk(greedy)!.tier).toBe('red')
+    expect(texts(greedy)).toContain(`99.00% of the swap output goes to ${STRANGER}, not to you.`)
+    const normal = await preview(8453, BASE_UR, swap(25n, 299n * 10n ** 15n), '7.15.0')
+    expect(assessSigningRisk(normal)!.tier).toBe('yellow')
+    expect(texts(normal)).toContain(`Fee: 0.25% of the swap output goes to ${STRANGER}.`)
+  })
+
+  // evm-yellow:5
+  test('a THORChain swap that pays out to another EVM address is red', async () => {
+    const ROUTER = '0xd37bbe5744d730a1d98d8dc97c42f0ca46ad7146'
+    const expiry = BigInt(Math.floor(Date.now() / 1000) + 3600)
+    const deposit = (memo: string) => '0x44bc937b' + abi.encode(['address', 'address', 'uint256', 'string', 'uint256'],
+      ['0x4444444444444444444444444444444444444444', ETH_USDC, 1000_000000n, memo, expiry]).slice(2)
+    for (const fw of ['7.14.2', '7.16.0']) {
+      const other = await preview(1, ROUTER, deposit(`=:ETH.ETH:${STRANGER}:30000000`), fw)
+      expect(assessSigningRisk(other)!.tier).toBe('red')
+      expect(texts(other)).toContain(`The swap pays out to ${STRANGER}, which is NOT the account signing this (${SIGNER}).`)
+      expect(assessSigningRisk(await preview(1, ROUTER, deposit(`=:ETH.ETH:${SIGNER}:30000000`), fw))!.tier).toBe('green')
+    }
+  })
+
+  // evm-yellow:6
+  test('a token transfer straight into a contract that does not credit it is red', async () => {
+    const transfer = (to: string) => '0xa9059cbb' + abi.encode(['address', 'uint256'], [to, 100_000000n]).slice(2)
+    for (const [chainId, token, sink] of [[1, ETH_USDC, ETH_USDC], [1, ETH_USDC, PERMIT2], [8453, BASE_USDC, RELAY], [8453, BASE_USDC, BASE_UR]] as const) {
+      const s = await preview(chainId, token, transfer(sink), '7.16.0')
+      expect(assessSigningRisk(s)!.tier).toBe('red')
+      expect(texts(s)).toContain(`(${sink}), which does not credit a plain transfer`)
+    }
+    // A transfer to a person is unchanged.
+    expect(assessSigningRisk(await preview(1, ETH_USDC, transfer(STRANGER), '7.16.0'))!.tier).toBe('green')
+  })
+
+  // evm-yellow:7
+  test('a bounded approve the device shows natively (mainnet DAI) to a reviewed spender is green', async () => {
+    const DAI = '0x6b175474e89094c44da98b954eedeac495271d0f'
+    const UR = '0x66a9893cc07d91d95644aedd05d03f95e1dba8af'
+    const approve = (spender: string, v: bigint) => '0x095ea7b3' + abi.encode(['address', 'uint256'], [spender, v]).slice(2)
+    const s = await preview(1, DAI, approve(UR, 100n * 10n ** 18n), '7.16.0')
+    expect(s.deviceClearSigns).toBe(true)
+    const r = assessSigningRisk(s)!
+    expect(r.tier).toBe('green')
+    expect(r.level).toBe('medium')
+    // An unlimited grant or an unreviewed spender still is not.
+    expect(assessSigningRisk(await preview(1, DAI, approve(UR, (1n << 256n) - 1n), '7.16.0'))!.tier).toBe('red')
+    expect(assessSigningRisk(await preview(1, DAI, approve(STRANGER, 100n * 10n ** 18n), '7.16.0'))!.tier).toBe('red')
+  })
+})
+
+// Verdicts on messages (personal_sign and EIP-712), each request built the
+// way rest-api.ts and walletconnect.ts build it.
+describe('message verdicts', () => {
+  const USER = '0x1111111111111111111111111111111111111111'
+  const EVIL = '0x9999999999999999999999999999999999999999'
+  const PERMIT2_ADDR = '0x000000000022D473030F116dDEE9F6B43aC78BA3'
+  const USDC = '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48'
+  const hex = (s: string) => '0x' + Buffer.from(s, 'utf8').toString('hex')
+  const text = (r: { reasons: { text: string }[] }) => r.reasons.map((x) => x.text).join('\n')
+  const typed = (typedData: any, firmwareVersion = '7.16.0') => {
+    const chainId = Number(typedData.domain?.chainId) || undefined
+    const typedDataDecoded = decodeEIP712(typedData)
+    return assessSigningRisk({
+      id: 't', method: '/eth/sign-typed-data', appName: 'dapp', chain: 'eth', from: USER, chainId, firmwareVersion,
+      typedDataDecoded, recognizedSpender: recognizedTypedDataSpender(typedDataDecoded, chainId),
+    })!
+  }
+  const personal = (message: string) => assessSigningRisk({
+    id: 't', method: '/eth/sign', appName: 'dapp', chain: 'eth', from: USER, firmwareVersion: '7.16.0',
+    ethMessageDecoded: ethMessagePreview(USER, message),
+  })!
+
+  // messages:0
+  test('a SafeTx carrying a call is red: the device shows the call only as hex', () => {
+    const safeTx = (msg: any) => ({
+      primaryType: 'SafeTx',
+      domain: { chainId: 1, verifyingContract: '0x1234567890123456789012345678901234567890' },
+      types: {
+        EIP712Domain: [{ name: 'chainId', type: 'uint256' }, { name: 'verifyingContract', type: 'address' }],
+        SafeTx: [
+          { name: 'to', type: 'address' }, { name: 'value', type: 'uint256' }, { name: 'data', type: 'bytes' },
+          { name: 'operation', type: 'uint8' }, { name: 'safeTxGas', type: 'uint256' }, { name: 'baseGas', type: 'uint256' },
+          { name: 'gasPrice', type: 'uint256' }, { name: 'gasToken', type: 'address' }, { name: 'refundReceiver', type: 'address' },
+          { name: 'nonce', type: 'uint256' },
+        ],
+      },
+      message: { value: '0', safeTxGas: 0, baseGas: 0, gasPrice: 0, gasToken: '0x' + '0'.repeat(40), refundReceiver: '0x' + '0'.repeat(40), nonce: 3, ...msg },
+    })
+    const transfer = '0xa9059cbb' + EVIL.slice(2).padStart(64, '0') + (10n ** 12n).toString(16).padStart(64, '0')
+    const call = typed(safeTx({ to: USDC, data: transfer, operation: 0 }))
+    expect(call.tier).toBe('red')
+    expect(text(call)).toContain('Your KeepKey shows that data only as raw hex')
+    const delegatecall = typed(safeTx({ to: EVIL, data: '0x12345678', operation: 1 }))
+    expect(delegatecall.tier).toBe('red')
+    expect(text(delegatecall)).toContain('(delegatecall)')
+    // A plain ETH send from the Safe carries no data: the device shows every field.
+    expect(typed(safeTx({ to: EVIL, value: '1000000000000000000', data: '0x', operation: 0 })).tier).toBe('green')
+  })
+
+  // messages:1
+  test('typed data that hands over signing power is red', () => {
+    const DT = [{ name: 'name', type: 'string' }, { name: 'version', type: 'string' }, { name: 'chainId', type: 'uint256' }, { name: 'verifyingContract', type: 'address' }]
+    const agent = typed({
+      primaryType: 'HyperliquidTransaction:ApproveAgent',
+      domain: { name: 'HyperliquidSignTransaction', version: '1', chainId: 42161, verifyingContract: '0x0000000000000000000000000000000000000000' },
+      types: { EIP712Domain: DT, 'HyperliquidTransaction:ApproveAgent': [
+        { name: 'hyperliquidChain', type: 'string' }, { name: 'agentAddress', type: 'address' }, { name: 'agentName', type: 'string' }, { name: 'nonce', type: 'uint64' }] },
+      message: { hyperliquidChain: 'Mainnet', agentAddress: EVIL, agentName: '', nonce: 1760000000001 },
+    })
+    expect(agent.tier).toBe('red')
+    expect(agent.level).toBe('high')
+    expect(agent.reasons[0].text).toBe(`Gives ${EVIL} the power to act for your account. It can then sign without your KeepKey.`)
+    const delegation = typed({
+      primaryType: 'Delegation',
+      domain: { name: 'DelegationManager', version: '1', chainId: 1, verifyingContract: '0xdb9B1e94B5b69Df7e401DDbedE43491141047dB3' },
+      types: { EIP712Domain: DT, Delegation: [
+        { name: 'delegate', type: 'address' }, { name: 'delegator', type: 'address' }, { name: 'authority', type: 'bytes32' },
+        { name: 'caveats', type: 'Caveat[]' }, { name: 'salt', type: 'uint256' }], Caveat: [{ name: 'enforcer', type: 'address' }, { name: 'terms', type: 'bytes' }] },
+      message: { delegate: EVIL, delegator: USER, authority: '0x' + 'ff'.repeat(32), caveats: [], salt: '7' },
+    })
+    expect(delegation.tier).toBe('red')
+    expect(delegation.level).toBe('critical')
+    // Vote delegation (delegateBySig) names a delegatee for votes, not a signer: unchanged.
+    const votes = typed({
+      primaryType: 'Delegation',
+      domain: { name: 'Uniswap', chainId: 1, verifyingContract: '0x1f9840a85d5af5bf1d1762f925bdaddc4201f984' },
+      types: { EIP712Domain: [{ name: 'name', type: 'string' }, { name: 'chainId', type: 'uint256' }, { name: 'verifyingContract', type: 'address' }],
+        Delegation: [{ name: 'delegatee', type: 'address' }, { name: 'nonce', type: 'uint256' }, { name: 'expiry', type: 'uint256' }] },
+      message: { delegatee: EVIL, nonce: 0, expiry: 1792000000 },
+    })
+    expect(votes.tier).toBe('green')
+  })
+
+  // messages:5
+  test('non-ASCII text is yellow: the device shows those bytes as codes, not letters', () => {
+    for (const msg of ['请签名以登录 OpenSea 🦊', 'Sign in to OpenSea 🦊']) {
+      for (const raw of [hex(msg), msg]) {
+        const r = personal(raw)
+        expect(r.tier).toBe('yellow')
+        expect(text(r)).not.toContain('read it on your KeepKey screen')
+      }
+    }
+    // A text-direction override is a spoof, not a localized login.
+    const rlo = personal(hex(`Approve transfer to ${String.fromCharCode(0x202e)}elif.exe`))
+    expect(rlo.tier).toBe('red')
+    expect(text(rlo)).toContain('hidden characters')
+    // Plain ASCII, newlines included, stays green.
+    expect(personal(hex('Welcome to OpenSea!\n\nClick to sign in.')).tier).toBe('green')
+  })
+
+  // messages:6
+  test('a WalletConnect personal_sign SIWE login gets the same green verdict as REST', async () => {
+    const siwe = `app.uniswap.org wants you to sign in with your Ethereum account:\n${USER}\n\nSign in to Uniswap\n\nURI: https://app.uniswap.org\nVersion: 1\nChain ID: 1\nNonce: abcdef12345\nIssued At: 2026-10-16T00:00:00.000Z`
+    let seen: SigningRequestInfo | undefined
+    const wc = new WalletConnectManager({
+      getEvmAddressInfo: () => ({ address: USER }),
+      requestSigningApproval: async (info: SigningRequestInfo) => { seen = info; return false },
+    } as any)
+    await expect((wc as any).signMessage(hex(siwe), [], 'Uniswap', 1)).rejects.toThrow('User rejected signing')
+    // index.ts attachSigningPolicySnapshot adds the firmware version before the overlay assesses it.
+    const r = assessSigningRisk({ ...seen!, firmwareVersion: '7.16.0' })!
+    expect(r.tier).toBe('green')
+    expect(personal(hex(siwe)).tier).toBe('green')
+  })
+
+  // messages:7
+  test('fully decoded Permit2 swaps are not forced red', () => {
+    const permitSingle = {
+      primaryType: 'PermitSingle',
+      domain: { name: 'Permit2', chainId: 1, verifyingContract: PERMIT2_ADDR },
+      types: {
+        EIP712Domain: [{ name: 'name', type: 'string' }, { name: 'chainId', type: 'uint256' }, { name: 'verifyingContract', type: 'address' }],
+        PermitSingle: [{ name: 'details', type: 'PermitDetails' }, { name: 'spender', type: 'address' }, { name: 'sigDeadline', type: 'uint256' }],
+        PermitDetails: [{ name: 'token', type: 'address' }, { name: 'amount', type: 'uint160' }, { name: 'expiration', type: 'uint48' }, { name: 'nonce', type: 'uint48' }],
+      },
+      message: { details: { token: USDC, amount: '100000000', expiration: '1792000000', nonce: '3' }, spender: '0x66a9893cc07d91d95644aedd05d03f95e1dba8af', sigDeadline: '1792000000' },
+    }
+    // Case A: 7.14.2 cannot show it, but this computer decodes it and knows the router.
+    const a = typed(permitSingle, '7.14.2')
+    expect(a.tier).toBe('yellow')
+    expect(text(a)).toContain('KeepKey firmware 7.14.2 cannot show')
+    expect(typed({ ...permitSingle, message: { ...permitSingle.message, spender: EVIL } }, '7.14.2').tier).toBe('red')
+
+    const REACTOR = '0x00000011f84b9aa48e5f8aa8b9897600006289be'
+    const dutch = (recipient: string, reactor = REACTOR) => ({
+      primaryType: 'PermitWitnessTransferFrom',
+      domain: { name: 'Permit2', chainId: 1, verifyingContract: PERMIT2_ADDR },
+      types: {
+        EIP712Domain: [{ name: 'name', type: 'string' }, { name: 'chainId', type: 'uint256' }, { name: 'verifyingContract', type: 'address' }],
+        PermitWitnessTransferFrom: [{ name: 'permitted', type: 'TokenPermissions' }, { name: 'spender', type: 'address' }, { name: 'nonce', type: 'uint256' }, { name: 'deadline', type: 'uint256' }, { name: 'witness', type: 'V2DutchOrder' }],
+        TokenPermissions: [{ name: 'token', type: 'address' }, { name: 'amount', type: 'uint256' }],
+        OrderInfo: [{ name: 'reactor', type: 'address' }, { name: 'swapper', type: 'address' }, { name: 'nonce', type: 'uint256' }, { name: 'deadline', type: 'uint256' }, { name: 'additionalValidationContract', type: 'address' }, { name: 'additionalValidationData', type: 'bytes' }],
+        V2DutchOrder: [{ name: 'info', type: 'OrderInfo' }, { name: 'cosigner', type: 'address' }, { name: 'baseInputToken', type: 'address' }, { name: 'baseInputStartAmount', type: 'uint256' }, { name: 'baseInputEndAmount', type: 'uint256' }, { name: 'baseOutputs', type: 'DutchOutput[]' }],
+        DutchOutput: [{ name: 'token', type: 'address' }, { name: 'startAmount', type: 'uint256' }, { name: 'endAmount', type: 'uint256' }, { name: 'recipient', type: 'address' }],
+      },
+      message: {
+        permitted: { token: USDC, amount: '100000000' }, spender: reactor, nonce: '7', deadline: '1792000000',
+        witness: {
+          info: { reactor, swapper: USER, nonce: '7', deadline: '1792000000', additionalValidationContract: '0x0000000000000000000000000000000000000000', additionalValidationData: '0x' },
+          cosigner: '0x4449cd34d1eb1fedcf02a1be3834ffde8e6a6180', baseInputToken: USDC, baseInputStartAmount: '100000000', baseInputEndAmount: '100000000',
+          baseOutputs: [{ token: '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2', startAmount: '40000000000000000', endAmount: '39000000000000000', recipient }],
+        },
+      },
+    })
+    // Case B: a UniswapX order to the verified reactor, paying this account, on 7.16.
+    const b = typed(dutch(USER))
+    expect(b.tier).toBe('green')
+    expect(text(b)).toContain(', once.')
+    expect(text(b)).not.toContain('now and later')
+    // The same order paying someone else, or to a reactor that is not the real one, stays red.
+    expect(typed(dutch(EVIL)).tier).toBe('red')
+    expect(typed(dutch(USER, EVIL)).tier).toBe('red')
+  })
+})
+
+describe('Solana verdicts follow what firmware 7.16.0 shows (lib/firmware/solana.c)', () => {
+  const SYSTEM = '11111111111111111111111111111111'
+  const TOKEN = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA'
+  const ATA = 'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL'
+  const MEMO = 'MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr'
+  const STAKE = 'Stake11111111111111111111111111111111111111'
+  const CLOCK = 'SysvarC1ock11111111111111111111111111111111'
+  const key = (n: number) => bs58.encode(Buffer.alloc(32, n))
+  const payer = key(1), dest = key(2), mint = key(3), srcAta = key(4), dstAta = key(5), stake = key(6), vote = key(7)
+  const u32 = (n: number) => { const b = Buffer.alloc(4); b.writeUInt32LE(n); return [...b] }
+  const u64 = (n: bigint) => { const b = Buffer.alloc(8); b.writeBigUInt64LE(n); return [...b] }
+  type Ix = { program: string; accounts: string[]; data: number[] }
+  /** Unsigned legacy wire tx: payer signs, program ids last. */
+  const legacyTx = (ixs: Ix[]) => {
+    const programs = [...new Set(ixs.map((i) => i.program))]
+    const others = [...new Set(ixs.flatMap((i) => i.accounts))].filter((a) => a !== payer && !programs.includes(a))
+    const keys = [payer, ...others, ...programs]
+    const msg = [1, 0, programs.length, keys.length, ...keys.flatMap((k) => [...bs58.decode(k)]), ...Buffer.alloc(32, 9), ixs.length]
+    for (const ix of ixs) msg.push(keys.indexOf(ix.program), ix.accounts.length, ...ix.accounts.map((a) => keys.indexOf(a)), ix.data.length, ...ix.data)
+    return Buffer.from([1, ...Buffer.alloc(64), ...msg]).toString('base64')
+  }
+  /** The REST and WalletConnect sign path: decode, gates for the firmware, verdict. */
+  const signVerdict = async (ixs: Ix[], firmwareVersion = '7.16.0') => {
+    const raw = legacyTx(ixs)
+    const info = { id: 'x', method: '/solana/sign-transaction', firmwareVersion } as SigningRequestInfo
+    info.solanaDecoded = await buildSolanaDecodedInfo(raw, noAlts)
+    applySolanaSigningGates(info, raw, firmwareVersion)
+    return { info, risk: assessSigningRisk(info)! }
+  }
+  const transferChecked = (data = [12, ...u64(5_000_000n), 6]): Ix => ({ program: TOKEN, accounts: [srcAta, mint, dstAta, payer], data })
+  const solTransfer = (data = [...u32(2), ...u64(1_000_000n)]): Ix => ({ program: SYSTEM, accounts: [payer, dest], data })
+
+  test('solana:0 a firmware-native instruction with extra data bytes is red and needs Advanced Mode', async () => {
+    // Firmware decodes TransferChecked only at exactly 10 bytes and a System
+    // transfer at exactly 12; anything longer is unknown, so the tx is opaque.
+    for (const ix of [transferChecked([12, ...u64(5_000_000n), 6, 0xaa]), solTransfer([...u32(2), ...u64(1_000_000_000n), 0xde, 0xad, 0xbe, 0xef])]) {
+      const { info, risk } = await signVerdict([ix])
+      expect(info.requiresAdvancedMode).toBe(true)
+      expect(risk.tier).toBe('red')
+      expect(risk.reasons.map((r) => r.text).join('\n')).toContain('not decoded in full')
+    }
+    expect((await signVerdict([transferChecked()])).risk.tier).toBe('green')
+  })
+
+  test('solana:1 SPL Burn and MintTo are yellow on 7.16.0: the device shows them as raw data', async () => {
+    const burn = { program: TOKEN, accounts: [srcAta, mint, payer], data: [8, ...u64(1000n)] }
+    const mintTo = { program: TOKEN, accounts: [mint, dstAta, payer], data: [7, ...u64(1000n)] }
+    for (const ix of [burn, mintTo]) {
+      const { info, risk } = await signVerdict([ix])
+      expect(info.requiresAdvancedMode).toBe(true)
+      expect(info.requiresBlindSigningConsent).toBe(true)
+      expect(risk.tier).toBe('yellow')
+    }
+  })
+
+  test('solana:2 the decode route never says green without a firmware check', async () => {
+    // POST /solana/decode-transaction with no device: no requiresAdvancedMode.
+    const unchecked = { program: TOKEN, accounts: [srcAta, dstAta, payer], data: [3, ...u64(1000n)] }
+    const solanaDecoded = await buildSolanaDecodedInfo(legacyTx([unchecked]), noAlts)
+    const risk = assessSigningRisk({
+      id: 'decode', method: 'solana_decodeTransaction', solanaDecoded,
+      requiresBlindSigningConsent: requiresSolanaBlindSigningConsent(solanaDecoded, false),
+    } as SigningRequestInfo)!
+    expect(risk.tier).toBe('yellow')
+  })
+
+  test('solana:3 non-ASCII or CRLF sign-in text is yellow; text with control bytes is red', () => {
+    const SIGNER = 'Gu83nVMD8qh948D1vqe8UPoUHaFuSwcHrvNHetcM4Xux'
+    const tier = (text: string) => {
+      const d = buildSolanaMessageDecodedInfo(Buffer.from(text).toString('base64'), { encoding: 'base64', signer: SIGNER })
+      return assessSigningRisk({ method: '/solana/sign-message', solanaMessageDecoded: d, requiresAdvancedMode: d.plainText !== true } as SigningRequestInfo)!.tier
+    }
+    expect(tier('Bienvenue sur café.fr — connectez-vous')).toBe('yellow')
+    expect(tier('Sign in to example.com\r\nNonce: 12345\r\n')).toBe('yellow')
+    expect(tier('Login to dapp 🚀')).toBe('yellow')
+    expect(tier('Approve order id \x01\x02\x03\x04\x05 for settlement of the batch number 7781 today')).toBe('red')
+    expect(tier('Sign in to example.com\nNonce: 12345')).toBe('green')
+  })
+
+  test('solana:4 a truncated System transfer is red and does not claim it sends 0 SOL', async () => {
+    const { info, risk } = await signVerdict([solTransfer([...u32(2), 1, 2, 3, 4])])
+    expect(info.requiresAdvancedMode).toBe(true)
+    expect(risk.tier).toBe('red')
+    expect(risk.reasons.map((r) => r.text).join('\n')).not.toContain('Sends 0 SOL')
+  })
+
+  test('solana:5 native stake Delegate and Deactivate are green: the device shows both', async () => {
+    const delegate = { program: STAKE, accounts: [stake, vote, CLOCK, key(8), key(9), payer], data: u32(2) }
+    const deactivate = { program: STAKE, accounts: [stake, CLOCK, payer], data: u32(5) }
+    for (const ix of [delegate, deactivate]) {
+      const { info, risk } = await signVerdict([ix])
+      expect(info.requiresAdvancedMode).toBe(false)
+      expect(info.requiresBlindSigningConsent).toBe(false)
+      expect(risk.tier).toBe('green')
+    }
+    const text = (await signVerdict([delegate])).risk.reasons.map((r) => r.text).join('\n')
+    expect(text).toContain(`Delegates stake account ${stake.slice(0, 4)}`)
+  })
+
+  test('solana:6 an SPL send with a canonical ATA create, or a SOL send with a memo, is green', async () => {
+    const ataIdem = (tokenProgram = TOKEN) => ({ program: ATA, accounts: [payer, dstAta, dest, mint, SYSTEM, tokenProgram], data: [1] })
+    const memo = { program: MEMO, accounts: [], data: [...Buffer.from('invoice 42')] }
+    expect((await signVerdict([ataIdem(), transferChecked()])).risk.tier).toBe('green')
+    expect((await signVerdict([solTransfer(), memo])).risk.tier).toBe('green')
+    // An ATA create naming Token-2022 is not the canonical form: opaque on 7.16.0.
+    const t22 = await signVerdict([ataIdem('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb')])
+    expect(t22.info.requiresAdvancedMode).toBe(true)
+    expect(t22.risk.tier).not.toBe('green')
+  })
+
+  test('solana:7 an ATA create with empty data (the legacy form) is green when canonical', async () => {
+    const ataCreate = (accounts = [payer, dstAta, dest, mint, SYSTEM, TOKEN]) => ({ program: ATA, accounts, data: [] as number[] })
+    for (const send of [transferChecked(), solTransfer()]) {
+      const { info, risk } = await signVerdict([ataCreate(), send])
+      expect(info.solanaDecoded!.instructions[0].instructionName).toBe('create')
+      expect(info.requiresAdvancedMode).toBe(false)
+      expect(info.requiresBlindSigningConsent).toBe(false)
+      expect(risk.tier).toBe('green')
+    }
+    // Token-2022 in slot 5, or no token program at all, is not canonical.
+    for (const accounts of [
+      [payer, dstAta, dest, mint, SYSTEM, 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb'],
+      [payer, dstAta, dest, mint, SYSTEM],
+    ]) {
+      const { info, risk } = await signVerdict([ataCreate(accounts), transferChecked()])
+      expect(info.requiresAdvancedMode).toBe(true)
+      expect(risk.tier).not.toBe('green')
+    }
   })
 })

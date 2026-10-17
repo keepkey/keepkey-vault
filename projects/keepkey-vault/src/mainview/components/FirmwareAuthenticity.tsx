@@ -99,6 +99,7 @@ export function FirmwareAuthenticity({
 	installFirmware,
 	installBootloader,
 	onContinue,
+	continueDisabled,
 }: {
 	firmwareHash?: string
 	firmwareRelease?: string
@@ -110,6 +111,7 @@ export function FirmwareAuthenticity({
 	installFirmware?: { version: string; signed: boolean }
 	installBootloader?: { version: string; signed: boolean }
 	onContinue: () => void
+	continueDisabled?: boolean
 }) {
 	const verdict = authenticityVerdict(firmwareHash, firmwareVerified, bootloaderVerified)
 	const passed = verdict === "verified" || verdict === "genuine"
@@ -234,7 +236,7 @@ export function FirmwareAuthenticity({
 							<HStack gap={4} flexWrap="wrap">
 								{verdict === "verified" && firmwareRelease && (
 									<Box as="button" type="button" fontSize="2xs" color={GOLD} textDecoration="underline"
-										onClick={() => openUrl(`https://github.com/keepkey/keepkey-firmware/releases/tag/${firmwareRelease}`)}>
+										onClick={() => openUrl(`https://github.com/keepkey/keepkey-firmware/releases/tag/${firmwareRelease.replace(/-bitcoin-only$/, "")}`)}>
 										Open the {firmwareRelease} release
 									</Box>
 								)}
@@ -263,7 +265,7 @@ export function FirmwareAuthenticity({
 			</Box>
 
 			<Button w="100%" maxW="360px" size="md" bg={GOLD} color="black" fontWeight="700"
-				_hover={{ opacity: 0.9 }} _active={{ transform: "scale(0.98)" }} onClick={onContinue}>
+				_hover={{ opacity: 0.9 }} _active={{ transform: "scale(0.98)" }} disabled={continueDisabled} onClick={onContinue}>
 				<Flex gap={2} align="center" justify="center">
 					<Text>{verdict === "unrecognized" ? "Continue with this build" : passed ? "Set up my KeepKey" : "Continue"}</Text>
 					<FaChevronRight size={10} />

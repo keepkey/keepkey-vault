@@ -10,6 +10,9 @@
  * Run: bun test __tests__/engine-state-machine.test.ts
  */
 import { describe, test, expect, beforeEach } from 'bun:test'
+// The firmware-update decision is the shared module the engine calls, not a copy.
+import { installedFromBootloader, needsFirmware } from '../src/shared/firmware-install'
+import { isBitcoinOnlyVariant } from '../src/shared/flags'
 
 // ── Mirror of engine-controller pure functions ────────────────────────
 // These are exact copies of the private methods. If they drift, tests
@@ -35,11 +38,18 @@ function versionLessThan(current: string, target: string): boolean {
   return false
 }
 
-function deriveState(features: any, latestFirmware: string): DeviceState {
+function deriveState(features: any, latestFirmware: string, latestBitcoinOnly?: string): DeviceState {
   if (!features) return 'disconnected'
   if (features.bootloaderMode) return 'bootloader'
   const fwVersion = extractVersion(features)
-  if (versionLessThan(fwVersion, latestFirmware) || fwVersion === '4.0.0') return 'needs_firmware'
+  const bitcoinOnly = isBitcoinOnlyVariant(features.firmwareVariant)
+  if (needsFirmware({
+    bootloaderMode: false,
+    fwVersion,
+    installed: { version: fwVersion, bitcoinOnly, present: true },
+    latestMulti: latestFirmware,
+    latestBitcoinOnly,
+  })) return 'needs_firmware'
   if (!features.initialized) return 'needs_init'
   if (features.pinProtection && !features.pinCached) return 'needs_pin'
   if (features.passphraseProtection && !features.passphraseCached) return 'needs_passphrase'
@@ -62,9 +72,15 @@ function getDeviceState(snap: EngineSnapshot) {
   const bootloaderMode = features?.bootloaderMode ?? false
   // Fix #1: default initialized=true when features are unavailable
   const initialized = features ? (features.initialized ?? false) : true
-  const needsFw = bootloaderMode
-    ? true
-    : fwVersion ? (versionLessThan(fwVersion, snap.latestFirmware) || fwVersion === '4.0.0') : false
+  const hashHex = features?.firmwareHash
+    ? (typeof features.firmwareHash === 'string' && /^[0-9a-fA-F]+$/.test(features.firmwareHash)
+        ? features.firmwareHash
+        : Buffer.from(features.firmwareHash, 'base64').toString('hex'))
+    : undefined
+  const installed = bootloaderMode
+    ? installedFromBootloader({ hashHex, release: null, snapshot: null })
+    : { version: fwVersion ?? null, bitcoinOnly: isBitcoinOnlyVariant(features?.firmwareVariant), present: true }
+  const needsFw = needsFirmware({ bootloaderMode, fwVersion, installed, latestMulti: snap.latestFirmware })
 
   let effectiveBlVersion = blVersion
   if (!effectiveBlVersion && bootloaderMode && fwVersion) effectiveBlVersion = fwVersion
@@ -216,6 +232,13 @@ describe('deriveState()', () => {
 
   test('all good → ready', () => {
     expect(deriveState({ majorVersion: 7, minorVersion: 10, patchVersion: 0, initialized: true }, FW)).toBe('ready')
+  })
+
+  test('Bitcoin-only 7.14.3 is compared to the Bitcoin-only build, never the multi-chain latest', () => {
+    const btc = { majorVersion: 7, minorVersion: 14, patchVersion: 3, initialized: true, firmwareVariant: 'KeepKeyBTC' }
+    expect(deriveState(btc, '7.16.0', '7.14.3')).toBe('ready')
+    expect(deriveState(btc, '7.16.0', undefined)).toBe('ready')
+    expect(deriveState(btc, '7.14.2', '7.14.4')).toBe('needs_firmware')
   })
 
   test('priority: bootloader > firmware > init > pin > passphrase', () => {

@@ -3,13 +3,18 @@ import { SigningKey, computePublicKey } from '@ethersproject/signing-key'
 import bs58 from 'bs58'
 
 import {
-  ALPHA_DELEGATE_FINGERPRINT,
-  ALPHA_DELEGATE_PUBLIC_KEY,
-  ALPHA_ROOT_PUBLIC_KEY,
   CLEARSIGN_SCOPE_ETHEREUM,
   CLEARSIGN_SCOPE_SOLANA,
   inspectAlphaCertificate,
 } from '../../src/bun/clearsign-alpha-ceremony'
+// This Worker copy signs live with the one alpha delegate, under the alpha
+// root: a rehearsal service. Desktop trusts only the production root.
+import {
+  ALPHA_ALIAS,
+  ALPHA_DELEGATE_FINGERPRINT,
+  ALPHA_DELEGATE_PUBLIC_KEY,
+  ALPHA_ROOT_PUBLIC_KEY,
+} from '../../scripts/clearsign-alpha-rehearsal'
 import {
   buildCertifiedEvmEnvelope,
   buildCertifiedEvmNameEnvelope,
@@ -111,6 +116,8 @@ function reviewedTokenEntries(): EvmSchemaSpec[] {
   return Object.entries(REVIEWED_EVM_TOKENS).flatMap(([key]) => {
     const [chainId, contract] = key.split(':')
     return ([[ERC20_APPROVE, PERMIT2_ADDRESS], [ERC20_APPROVE, undefined], [ERC20_TRANSFER, undefined]] as const)
+      // A catalog entry (ceremony-signed) answers its shape for every spender.
+      .filter(([selector]) => !CERTIFIED_EVM_CATALOG[`${chainId}:${contract}:${selector}`])
       .map(([selector, spender]) => findReviewedTokenSchema(Number(chainId), contract, selector, 68, spender)!)
       .map((spec) => ({
         ...spec,
@@ -150,8 +157,8 @@ function reviewedCatalog() {
     ...(isPinnedSpender(spec) ? { spender: PERMIT2_ADDRESS } : {}),
     ...(spec.intent ? { title: spec.intent.title, template: spec.intent.template } : {}),
     // What the device shows, in order (signed_metadata_build_intent_review).
-    screens: expectedEvmScreens(spec) || [],
-    ...(spec.intent ? {} : {
+    screens: expectedEvmScreens(spec, ALPHA_ALIAS, ALPHA_DELEGATE_FINGERPRINT) || [],
+    ...(spec.intent || spec.decoder === undefined ? {} : {
       screensNote: 'No intent. Firmware 7.16 parses inner versions 0x01, 0x02, 0x05, 0x06 and 0x07 only; this 0x04 decoder schema cannot verify on 7.16, and a certified envelope carrying it is refused, not downgraded.',
     }),
     provenance: spec.provenance || { protocol: PROVENANCE.protocol, security: PROVENANCE.protocolSecurity },
@@ -173,7 +180,7 @@ function reviewedCatalog() {
     supportedShape: `up to 6 steps, read as token flow through the router: [PERMIT2_PERMIT naming this router] then V2/V3${urV4Router(router.chainId, router.address) ? '/V4 (V4_SWAP: SWAP_EXACT_IN/OUT with SETTLE, TAKE, optional TAKE_PORTION; empty hookData; at most 3 distinct hooks, each shown)' : ''} swaps, WRAP_ETH, UNWRAP_WETH, SWEEP and one PAY_PORTION; the user pays one asset (msg.value or one Permit2 token), one asset reaches one recipient (leftover ETH may go back to it), router-paid swaps (splits, multi-hop) are free to the user; all swaps exact-in or all exact-out; no allow-revert flags${urV4Router(router.chainId, router.address) ? '' : '; V4_SWAP refused (decoded only for UR 2.1.2 on Base)'}`,
     tokens: 'every token the review names, and only those: the paid token (unless ETH, from msg.value), the delivered token (unless ETH), and the Permit2 token; never native ETH or a route\'s intermediate tokens; each a reviewed token on this chain; 1-4 per entry',
     fieldsShownByKeepKey: ['Input amount', 'Output limit', 'Recipient', 'Permit2 allowance', 'Fee', ...(urV4Router(router.chainId, router.address) ? ['Pool hooks'] : [])],
-    screens: expectedUniswapScreens(router.chainId, router.address),
+    screens: expectedUniswapScreens(router.chainId, router.address, ALPHA_ALIAS, ALPHA_DELEGATE_FINGERPRINT),
     provenance: {
       protocol: 'https://github.com/Uniswap/universal-router',
       deployment: `${UNIVERSAL_ROUTER_PROVENANCE} (${router.source})`,
@@ -211,7 +218,7 @@ function provisioning(env: Env) {
       return undefined
     }
     try {
-      const certificate = inspectAlphaCertificate(value)
+      const certificate = inspectAlphaCertificate(value, undefined, ALPHA_ROOT_PUBLIC_KEY)
       if (certificate.chainId !== scope) throw new Error('wrong scope')
       return certificate
     } catch {
@@ -413,7 +420,7 @@ export default {
         return json({ classification: 'UNAVAILABLE', entry: evmEntryId(spec), error: `certified signing is not provisioned for chain ${spec.chainId}` }, 503)
       }
       try {
-        const signed = buildCertifiedEvmEnvelope(spec, certificate, env.CLEARSIGN_DELEGATE_PRIVATE_KEY)
+        const signed = buildCertifiedEvmEnvelope(spec, certificate, env.CLEARSIGN_DELEGATE_PRIVATE_KEY, ALPHA_ROOT_PUBLIC_KEY)
         return json({ success: true, classification: 'VERIFIED', version: 3, entry: evmEntryId(spec), ...signed, method: spec.method, ...(isPinnedSpender(spec) ? { spender: PERMIT2_ADDRESS } : {}), chainId: spec.chainId, contract: spec.contract, selector: spec.selector, expectedCalldataLength: spec.expectedCalldataLength, decoder: spec.decoder, provenance: spec.provenance || PROVENANCE })
       } catch {
         return json({ error: 'certified Ethereum schema could not be produced' }, 500)
@@ -446,7 +453,7 @@ export default {
         return json({ classification: 'UNAVAILABLE', entry, error: `certified signing is not provisioned for chain ${chainId}` }, 503)
       }
       try {
-        const signed = buildCertifiedEvmDecoderEnvelope(chainId, router.address, selector, identities, certificate, env.CLEARSIGN_DELEGATE_PRIVATE_KEY)
+        const signed = buildCertifiedEvmDecoderEnvelope(chainId, router.address, selector, identities, certificate, env.CLEARSIGN_DELEGATE_PRIVATE_KEY, ALPHA_ROOT_PUBLIC_KEY)
         return json({ success: true, classification: 'VERIFIED', version: 7, entry, ...signed, chainId, contract: router.address, selector, method: UR_METHOD, decoder: EVM_DECODER_UNISWAP_UR, title: UR_TITLE, tokens: identities, provenance: { source: UNIVERSAL_ROUTER_PROVENANCE, entry: router.source } })
       } catch {
         return json({ error: 'certified swap entry could not be produced' }, 500)
@@ -466,7 +473,7 @@ export default {
         return json({ classification: 'UNAVAILABLE', error: `certified signing is not provisioned for chain ${record.chainId}` }, 503)
       }
       try {
-        const signed = buildCertifiedEvmNameEnvelope(record, certificate, env.CLEARSIGN_DELEGATE_PRIVATE_KEY)
+        const signed = buildCertifiedEvmNameEnvelope(record, certificate, env.CLEARSIGN_DELEGATE_PRIVATE_KEY, ALPHA_ROOT_PUBLIC_KEY)
         return json({ success: true, classification: 'VERIFIED', version: 6, ...signed, chainId: record.chainId, address: record.address, name: record.name, provenance: { source: UNIVERSAL_ROUTER_PROVENANCE, entry: record.source } })
       } catch (error: any) {
         // The only certificate held is scoped to one chain; other chains need their own.
@@ -541,7 +548,7 @@ export default {
 
       let proofStage = 'schema'
       try {
-        const schema = signCertifiedSolanaSchema(env.CLEARSIGN_SOLANA_CERTIFICATE_HEX, env.CLEARSIGN_DELEGATE_PRIVATE_KEY, spec)
+        const schema = signCertifiedSolanaSchema(env.CLEARSIGN_SOLANA_CERTIFICATE_HEX, env.CLEARSIGN_DELEGATE_PRIVATE_KEY, spec, ALPHA_ROOT_PUBLIC_KEY)
         const response: any = {
           catalogKey,
           success: true,
@@ -564,7 +571,7 @@ export default {
           )
           proofStage = 'lookup-signature'
           const messageHash = createHash('sha256').update(messageBytes).digest()
-          const proof = signCertifiedSolanaLutAttestation(env.CLEARSIGN_SOLANA_CERTIFICATE_HEX, env.CLEARSIGN_DELEGATE_PRIVATE_KEY, messageHash, resolution.accounts)
+          const proof = signCertifiedSolanaLutAttestation(env.CLEARSIGN_SOLANA_CERTIFICATE_HEX, env.CLEARSIGN_DELEGATE_PRIVATE_KEY, messageHash, resolution.accounts, ALPHA_ROOT_PUBLIC_KEY)
           response.lutProof = {
             accounts: resolution.accounts.map((account) => account.toString('base64')),
             signature: proof.lutSignature,

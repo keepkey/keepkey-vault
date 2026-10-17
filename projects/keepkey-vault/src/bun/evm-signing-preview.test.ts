@@ -1,11 +1,15 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import type { SigningRequestInfo } from '../shared/types'
 import { applyEvmTxPreview, evmPriorityFee, normalizeEvmChainId, typedDataNativelyReviewed } from './evm-signing-preview'
-import { approveSpender, findCertifiedEvmSchema } from './evm-schema-registry'
+import { approveSpender, findCertifiedEvmSchema, resolveEvmSchema } from './evm-schema-registry'
+import { certifiedBodyRefused } from '../shared/certified-evm-envelope'
 import { findCertifiedEvmEnvelope } from './evm-certified-registry'
-import { findEvmSchema } from './evm-schema-registry'
 import { SolanaSignMessageRequest } from './schemas'
 import { solanaSignerChangedError } from './solana-message-preview'
+import { evmCallRequiresAdvancedMode } from './evm-signing-policy'
+import { assessSigningRisk } from '../shared/clearsign-risk'
+import { prepareEvmTxSigningInfo } from './evm-presign-report'
+import { runtimeEvmSighash } from './uniswap-runtime-envelope'
 
 const originalFetch = globalThis.fetch
 afterEach(() => { globalThis.fetch = originalFetch })
@@ -59,6 +63,22 @@ describe('applyEvmTxPreview = needsAdvancedMode = !(native || (fw >= 7.16 && cer
     expect(called).toBe(false)
   })
 
+  test('a token in the 7.15 table but not 7.16.0: native on 7.15, certified lookup on 7.16', async () => {
+    const LEO = '0x2af5d2ad76741191d15dfe7bf6ac92d4bd912ca3'
+    let called = false
+    globalThis.fetch = (async () => { called = true; throw new Error('no') }) as unknown as typeof fetch
+    const s715 = info()
+    await applyEvmTxPreview(s715, LEO, transfer, 1, '7.15.0')
+    expect(s715.deviceClearSigns).toBe(true)
+    expect(s715.needsBlindSigning).toBe(false)
+    expect(called).toBe(false)
+    const s716 = info()
+    await applyEvmTxPreview(s716, LEO, transfer, 1, '7.16.0')
+    expect(s716.deviceClearSigns).toBe(false)
+    expect(called).toBe(true) // the certified schema path ran
+    expect(s716.needsBlindSigning).toBe(true) // service down here → AdvancedMode
+  })
+
   test('7.16 + certified schema attaches the blob; the sign handler round-trips it to txMetadata', async () => {
     const seen = service('transfer', `eip155:8453:${USDC_BASE}:0xa9059cbb`)
     const s = info()
@@ -89,10 +109,9 @@ describe('applyEvmTxPreview = needsAdvancedMode = !(native || (fw >= 7.16 && cer
     expect(s.calldataDecoded?.signedInsightBlob).toBeUndefined()
   })
 
-  test('never substitutes the local CI-key schema', async () => {
+  test('a declined certified lookup leaves the Relay deposit blind (no local stand-in)', async () => {
     const TO = '0x4cd00e387622c35bddb9b4c962c136462338bc31'
     const DATA = '0x49290c1c' + word('909ef6b32dfdc12ca86aa710b54c991af3c5f82e') + '8a2c121197efc95c42f53142ab409735ee353287f877ed4d351f63094d5bfcb1'
-    expect(findEvmSchema(1, TO, DATA)).toBeDefined()
     globalThis.fetch = (async () => new Response(JSON.stringify({ classification: 'OPAQUE' }), { status: 422 })) as typeof fetch
     const s = info()
     await applyEvmTxPreview(s, TO, DATA, 1, '7.16.0')
@@ -100,12 +119,242 @@ describe('applyEvmTxPreview = needsAdvancedMode = !(native || (fw >= 7.16 && cer
     expect(s.calldataDecoded?.signedInsightBlob).toBeUndefined()
   })
 
-  test('caller-provided runtime-signer blob keeps its REST priority', async () => {
+  test('caller-provided runtime-signer blob keeps its REST priority, not a relaxed gate', async () => {
     const s = info()
     await applyEvmTxPreview(s, USDC_BASE, transfer, 8453, '7.15.0', { signedPayload: 'AAEC', keyId: 3 })
-    expect(s.needsBlindSigning).toBe(false)
+    expect(s.needsBlindSigning).toBe(true)
     expect(s.calldataDecoded?.signedInsightBlob).toBe('AAEC')
     expect(s.calldataDecoded?.insightKeyId).toBe(3)
+  })
+})
+
+describe('a caller blob never relaxes the gate unless it is a certified envelope the device shows', () => {
+  const TO = `0x${'42'.repeat(20)}`
+  const CALL = '0xdeadbeef' + word('1')
+  /** 0x03 + a 139-byte certificate + body (version, chain id, contract, selector). */
+  const envelope = (version = 0x02, chainId = 1, to = TO, selector = 'deadbeef') =>
+    `03${'cc'.repeat(139)}${version.toString(16).padStart(2, '0')}${chainId.toString(16).padStart(8, '0')}${to.slice(2)}${selector}`
+  const preview = async (fw: string, meta: { signedPayload: string; keyId?: number }) => {
+    globalThis.fetch = (async () => { throw new Error('offline') }) as unknown as typeof fetch
+    const s = info()
+    await applyEvmTxPreview(s, TO, CALL, 1, fw, meta)
+    return s
+  }
+
+  test('a runtime-signer blob (keyId 1) on 7.16.0 annotates only: still blind, still AdvancedMode', async () => {
+    const meta = { signedPayload: '00112233', keyId: 1 }
+    const s = await preview('7.16.0', meta)
+    expect(s.needsBlindSigning).toBe(true)
+    expect(s.calldataDecoded?.insightSource).toBe('caller')
+    expect(s.calldataDecoded?.insightKeyId).toBe(1)
+    expect(assessSigningRisk({ ...s, to: TO, data: CALL, chainId: 1, firmwareVersion: '7.16.0' })!.tier).not.toBe('green')
+    expect(evmCallRequiresAdvancedMode(TO, CALL, 1, false, meta, undefined, '7.16.0')).toBe(true)
+  })
+
+  test('a certified 0x03 envelope for this exact call on 7.16.0 is shown, so no AdvancedMode', async () => {
+    const meta = { signedPayload: `0x${envelope()}`, keyId: 0x80 }
+    expect((await preview('7.16.0', meta)).needsBlindSigning).toBe(false)
+    expect(evmCallRequiresAdvancedMode(TO, CALL, 1, false, meta, undefined, '7.16.0')).toBe(false)
+  })
+
+  test('the certified shape is not enough: old firmware, wrong key, body, chain, contract or selector', async () => {
+    for (const [fw, meta] of [
+      ['7.15.0', { signedPayload: envelope(), keyId: 0x80 }],
+      ['7.16.0', { signedPayload: envelope(), keyId: 1 }],
+      ['7.16.0', { signedPayload: envelope(0x04), keyId: 0x80 }],
+      ['7.16.0', { signedPayload: envelope(0x06), keyId: 0x80 }],
+      ['7.16.0', { signedPayload: envelope(0x02, 8453), keyId: 0x80 }],
+      ['7.16.0', { signedPayload: envelope(0x02, 1, `0x${'43'.repeat(20)}`), keyId: 0x80 }],
+      ['7.16.0', { signedPayload: envelope(0x02, 1, TO, 'a9059cbb'), keyId: 0x80 }],
+      ['7.16.0', { signedPayload: envelope().slice(0, 300), keyId: 0x80 }],
+    ] as const) {
+      expect((await preview(fw, meta)).needsBlindSigning).toBe(true)
+      expect(evmCallRequiresAdvancedMode(TO, CALL, 1, false, meta, undefined, fw)).toBe(true)
+    }
+  })
+})
+
+describe('one rule for certified 0x04 dynamic schemas (REST gate = swap gate)', () => {
+  const PORTALS = '0xbf5a7f3629fb325e2a8453d595ab103465f75e62'
+  const DATA = '0xa2e42c65' + '00'.repeat(448)
+  /** 0x03 | certificate (chain id at bytes 3..6) | 0x04 body | signature. */
+  const dynamicEnvelope = () => `0x03${'cc'.repeat(2)}00000001${'cc'.repeat(133)}04${'00000001'}${PORTALS.slice(2)}a2e42c65${'00'.repeat(8)}${'ab'.repeat(65)}`
+  const service = () => {
+    globalThis.fetch = (async () => Response.json({
+      classification: 'VERIFIED', chainId: 1, contract: PORTALS, selector: '0xa2e42c65', method: 'Portals swap',
+      keyId: 0x80, signedPayload: dynamicEnvelope(),
+    })) as unknown as typeof fetch
+  }
+
+  test('7.16.0 refuses 0x04 inside the certified envelope: never resolved, attached or relied on', async () => {
+    expect(certifiedBodyRefused(dynamicEnvelope(), '7.16.0')).toBe(true)
+    expect(certifiedBodyRefused(dynamicEnvelope(), undefined)).toBe(true)
+    expect(certifiedBodyRefused(dynamicEnvelope(), '7.17.0')).toBe(false)
+    service()
+    expect(await resolveEvmSchema(1, PORTALS, DATA, true, '7.16.0')).toBeUndefined()
+    const s = info()
+    await applyEvmTxPreview(s, PORTALS, DATA, 1, '7.16.0')
+    expect(s.needsBlindSigning).toBe(true)
+    expect(s.calldataDecoded?.signedInsightBlob).toBeUndefined()
+    // The swap gate agrees: a 0x04 envelope does not lift AdvancedMode on 7.16.0.
+    expect(evmCallRequiresAdvancedMode(PORTALS, DATA, 1, false, { signedPayload: dynamicEnvelope(), keyId: 0x80 }, undefined, '7.16.0')).toBe(true)
+  })
+
+  test('firmware that shows 0x04 gets it on both gates', async () => {
+    service()
+    expect((await resolveEvmSchema(1, PORTALS, DATA, true, '7.17.0'))?.method).toBe('Portals swap')
+    service()
+    const s = info()
+    await applyEvmTxPreview(s, PORTALS, DATA, 1, '7.17.0')
+    expect(s.needsBlindSigning).toBe(false)
+    expect(evmCallRequiresAdvancedMode(PORTALS, DATA, 1, false, { signedPayload: dynamicEnvelope(), keyId: 0x80 }, undefined, '7.17.0')).toBe(false)
+  })
+})
+
+test('every resolveEvmSchema call passes the firmware version (unknown firmware drops 0x04)', () => {
+  const { readdirSync, readFileSync } = require('node:fs') as typeof import('node:fs')
+  const { join } = require('node:path') as typeof import('node:path')
+  const dir = join(import.meta.dir)
+  const calls: string[] = []
+  for (const f of readdirSync(dir).filter((n) => n.endsWith('.ts') && !n.endsWith('.test.ts'))) {
+    const src = readFileSync(join(dir, f), 'utf8')
+    for (let i = src.indexOf('resolveEvmSchema('); i >= 0; i = src.indexOf('resolveEvmSchema(', i + 1)) {
+      if (/function\s+$/.test(src.slice(Math.max(0, i - 20), i))) continue
+      let depth = 0, args = 1, j = i + 'resolveEvmSchema'.length
+      for (; j < src.length; j++) {
+        const c = src[j]
+        if (c === '(' || c === '[' || c === '{') depth++
+        else if (c === ')' || c === ']' || c === '}') { if (--depth === 0) break }
+        else if (c === ',' && depth === 1 && src.slice(j + 1).trimStart()[0] !== ')') args++
+      }
+      calls.push(`${f}: ${args} args`)
+    }
+  }
+  expect(calls.length).toBeGreaterThanOrEqual(6)
+  expect(calls.filter((c) => !c.endsWith(' 5 args'))).toEqual([])
+})
+
+describe('a transaction-bound certified answer follows the same rule (REST gate = swap gate)', () => {
+  const UR = '0x2d01411773c8c24805306e89a41f7855c3c4fe65'
+  const DATA = '0x3593564c' + '00'.repeat(4000)
+  const FROM = '0x' + '11'.repeat(20)
+  const preview = { from: FROM, to: UR, data: DATA, value: '0x0', nonce: '0x5', gas: '0x40000', maxFeePerGas: '0x10', maxPriorityFeePerGas: '0x1' }
+  const certTx = { chainId: 42161, from: FROM, to: UR, data: DATA, value: '0x0', nonce: '0x5', gasLimit: '0x40000', maxFeePerGas: '0x10', maxPriorityFeePerGas: '0x1' }
+  /** 0x03 | certificate(139) | body: version, chain 42161, router, execute | signature(65). */
+  const envelope = (bodyVersion: number) =>
+    `0x03${'07'.repeat(139)}${bodyVersion.toString(16).padStart(2, '0')}0000a4b1${UR.slice(2)}3593564c${'00'.repeat(40)}${'09'.repeat(65)}`
+  const service = (payload: string) => {
+    const txHash = '0x' + runtimeEvmSighash(certTx).toString('hex')
+    globalThis.fetch = (async (url: any) => String(url).endsWith('/v1/evm/transaction')
+      ? Response.json({ signedPayload: payload, keyId: 0x80, classification: 'VERIFIED', chainId: 42161, contract: UR, selector: '0x3593564c', txHash, method: 'execute' })
+      : new Response('{}', { status: 422 })) as unknown as typeof fetch
+  }
+  const rest = async (fw: string) => {
+    const s: any = { ...info(), chainId: 42161, to: UR, data: DATA, value: '0x0', from: FROM, firmwareVersion: fw }
+    await prepareEvmTxSigningInfo(s, preview, fw)
+    return s
+  }
+
+  for (const body of [0x01, 0x04]) {
+    test(`body 0x0${body} on 7.16.0: REST stays blind and attaches nothing, as the swap gate does`, async () => {
+      service(envelope(body))
+      const s = await rest('7.16.0')
+      expect(s.certifiedEvmSchema).toBeUndefined()
+      expect(s.needsBlindSigning).toBe(true)
+      expect(evmCallRequiresAdvancedMode(UR, DATA, 42161, false, { signedPayload: envelope(body), keyId: 0x80 }, undefined, '7.16.0', '0x0')).toBe(true)
+    })
+  }
+
+  test('a body the firmware shows relaxes both gates', async () => {
+    service(envelope(0x04))
+    const s = await rest('7.17.0')
+    expect(s.certifiedEvmSchema?.method).toBe('execute')
+    expect(s.needsBlindSigning).toBe(false)
+    expect(evmCallRequiresAdvancedMode(UR, DATA, 42161, false, { signedPayload: envelope(0x04), keyId: 0x80 }, undefined, '7.17.0', '0x0')).toBe(false)
+  })
+})
+
+describe('the device does not show it → never green (firmware mirror)', () => {
+  const ZX = '0xdef1c0ded9bec7f1a1670819833240f027b25eff'
+  const UNIV2 = '0x7a250d5630b4cf539739df2c5dacb4c659f2488d'
+  const USDT_ETH = '0xdac17f958d2ee523a2206206994597c13d831ec7'
+  const UNKNOWN_A = '4444444444444444444444444444444444444444'
+  const UNKNOWN_B = '5555555555555555555555555555555555555555'
+  const TENTH_ETH = '0x16345785d8a0000'
+  const w = (hex: string) => word(hex.replace(/^0x/, ''))
+  const sell = (a: string, b: string, offset = '80') =>
+    '0xd9627aa4' + w(offset) + w('de0b6b3a7640000') + w('1') + w('0') + w('2') + w(a) + w(b)
+  const liquidity = (selector: string, tokenWord: string) =>
+    selector + tokenWord + w('1') + w('1') + w('1') + w(RECIPIENT) + w('ffffffff')
+
+  async function verdict(to: string, data: string, chainId: number, fw: string, value = '0x0') {
+    globalThis.fetch = (async () => { throw new Error('offline') }) as unknown as typeof fetch
+    const s: SigningRequestInfo = { ...info(), chain: 'eth', from: `0x${RECIPIENT}`, to, value, data, chainId, firmwareVersion: fw }
+    await applyEvmTxPreview(s, to, data, chainId, fw)
+    return { s, tier: assessSigningRisk(s)!.tier }
+  }
+
+  test('evm-yellow:0 — a token transfer or approve that also sends ETH is not shown on 7.15 or 7.16', async () => {
+    for (const fw of ['7.15.0', '7.16.0']) {
+      for (const data of [transfer, approve(PERMIT2)]) {
+        const withValue = await verdict(USDC_ETH, data, 1, fw, TENTH_ETH)
+        expect(withValue.s.deviceClearSigns).toBe(false)
+        expect(withValue.s.needsBlindSigning).toBe(true)
+        expect(withValue.tier).not.toBe('green')
+        expect((await verdict(USDC_ETH, data, 1, fw)).tier).toBe('green')
+      }
+    }
+  })
+
+  test('a token transfer, approve or increaseAllowance that also sends ETH is red; without ETH it is unchanged', async () => {
+    const increase = '0x39509351' + word(PERMIT2.slice(2)) + word('f4240')
+    for (const data of [transfer, approve(PERMIT2), increase]) {
+      const withValue = await verdict(USDC_ETH, data, 1, '7.16.0', TENTH_ETH)
+      expect(withValue.tier).toBe('red')
+      expect(assessSigningRisk(withValue.s)!.reasons.map((r) => r.text))
+        .toContain('Also sends 0.1 ETH to the token contract, which a token transfer or approval does not do.')
+    }
+    const plain = await verdict(USDC_ETH, transfer, 1, '7.16.0')
+    expect(plain.tier).toBe('green')
+    expect(assessSigningRisk(plain.s)!.reasons.some((r) => r.text.startsWith('Also sends'))).toBe(false)
+  })
+
+  test('evm-green:4 — the host gates ETH on a token call before the device says "Blocked"', async () => {
+    for (const data of [transfer, approve(PERMIT2)]) {
+      expect(evmCallRequiresAdvancedMode(USDC_ETH, data, 1, false, undefined, undefined, '7.16.0', TENTH_ETH)).toBe(true)
+      expect(evmCallRequiresAdvancedMode(USDC_ETH, data, 1, false, undefined, undefined, '7.16.0', '0x0')).toBe(false)
+      expect(evmCallRequiresAdvancedMode(USDC_ETH, data, 1, false, undefined, undefined, '7.16.0')).toBe(false)
+      expect((await verdict(USDC_ETH, data, 1, '7.16.0', TENTH_ETH)).tier).not.toBe('green')
+    }
+  })
+
+  test('evm-green:2 — 0x sellToUniswap is red unless the device can name every token', async () => {
+    for (const [data, chainId] of [
+      [sell(UNKNOWN_A, UNKNOWN_B), 1],               // tokens outside the 7.16 table
+      [sell(USDC_ETH, USDT_ETH, 'a0'), 1],           // non-canonical array offset
+      [sell(USDC_ETH, USDC_BASE), 8453],             // Base has no table entries
+    ] as const) {
+      const r = await verdict(ZX, data, chainId, '7.16.0')
+      expect(r.s.deviceClearSigns).toBe(false)
+      expect(r.s.needsBlindSigning).toBe(true)
+      expect(r.tier).toBe('red')
+    }
+    expect((await verdict(ZX, sell(USDC_ETH, USDT_ETH), 1, '7.16.0')).tier).toBe('green')
+  })
+
+  test('evm-green:3 — Uniswap V2 liquidity is red when the firmware would refuse it', async () => {
+    const add = '0xf305d719', remove = '0x02751cec'
+    for (const [data, value] of [
+      [liquidity(add, w(UNKNOWN_A)), '0xde0b6b3a7640000'],                          // token outside the table
+      [liquidity(remove, w(USDC_ETH)), '0x1'],                                      // ETH on removeLiquidityETH
+      [liquidity(add, 'ff'.repeat(12) + USDC_ETH.slice(2)), '0xde0b6b3a7640000'],   // dirty address word
+    ] as const) {
+      const r = await verdict(UNIV2, data, 1, '7.16.0', value)
+      expect(r.s.deviceClearSigns).toBe(false)
+      expect(r.s.needsBlindSigning).toBe(true)
+      expect(r.tier).toBe('red')
+    }
+    expect((await verdict(UNIV2, liquidity(add, w(USDC_ETH)), 1, '7.16.0', '0xde0b6b3a7640000')).tier).toBe('green')
   })
 })
 
@@ -422,4 +671,15 @@ describe('Uniswap V4 through UR 2.1.2 — preview rows and certified attach', ()
     expect(s.needsBlindSigning).toBe(false)
     expect(seen).toEqual([{ chainId: 8453, contract: UR212, selector: ethIn.data.slice(0, 10), tokens: [ethIn.pre.summary.tokenOut] }])
   })
+})
+
+test('recognizedSpender: canonical Permit2 and certified name records only', async () => {
+  const { recognizedSpender } = await import('./evm-signing-preview')
+  expect(recognizedSpender(1, '0x000000000022D473030F116dDEE9F6B43aC78BA3')).toBe('Uniswap Permit2')
+  expect(recognizedSpender(1, '0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD')).toBe('Uniswap Universal Router')
+  // A token is not a reviewed spender, and neither is a random or malformed address.
+  expect(recognizedSpender(1, '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48')).toBeUndefined()
+  expect(recognizedSpender(1, '0x1111111254eeb25477b68fb85ed929f73a960582')).toBeUndefined()
+  expect(recognizedSpender(1, 'not-an-address')).toBeUndefined()
+  expect(recognizedSpender(undefined, '0x000000000022D473030F116dDEE9F6B43aC78BA3')).toBeUndefined()
 })

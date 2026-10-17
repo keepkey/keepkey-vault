@@ -23,8 +23,9 @@ const PACKET_SIZE = 64
 const POLL_MS = 5
 const READ_TIMEOUT_MS = 10_000 // 10s for tests (not 120s)
 // Tests load whichever dylib the developer has installed at the same path
-// the production app uses. Run `make build-emulator` first.
-const DYLIB_PATH = join(homedir(), '.keepkey', 'emulator', 'libkkemu.dylib')
+// the production app uses. Run `make build-emulator` first. KK_EMU_DYLIB
+// points them at another build (e.g. a stock release) instead.
+export const DYLIB_PATH = process.env.KK_EMU_DYLIB || join(homedir(), '.keepkey', 'emulator', 'libkkemu.dylib')
 
 // Standard python-keepkey test mnemonic (same as tests/common.py mnemonic12)
 export const TEST_MNEMONIC = 'alcohol woman abuse must during monitor noble actual mixed trade anger aisle'

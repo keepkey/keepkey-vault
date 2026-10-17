@@ -9,10 +9,10 @@ import { IS_MAC, IS_WINDOWS } from "../lib/platform"
 import { AUTO_LOCK_CHOICES, DEFAULT_AUTO_LOCK_MS } from "../../shared/flags"
 import { Z } from "../lib/z-index"
 import type { DeviceStateInfo, AppSettings, EmulatorWalletInfo } from "../../shared/types"
-import { versionCompare } from "../../shared/firmware-versions"
 import { isBitcoinOnlyVariant } from "../../shared/flags"
 import { SelfHostNodePanel } from "./SelfHostNodePanel"
 import { ClearSignStudio } from "./ClearSignStudio"
+import { ClearSignProvidersPanel } from "./ClearSignProvidersPanel"
 import { RngAuditPanel } from "./RngAuditPanel"
 import { BROWSER_AGENT_PROMPT, BROWSER_EXTENSION_URL, BROWSER_AGENT_DOCS_URL } from "../../shared/browser-agent-prompt"
 
@@ -171,12 +171,11 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 	const [togglingPassphrase, setTogglingPassphrase] = useState(false)
 	const [togglingPolicy, setTogglingPolicy] = useState("")
 	const [browserPromptStatus, setBrowserPromptStatus] = useState("")
-	const [appSettings, setAppSettings] = useState<AppSettings>({ restApiEnabled: false, pioneerApiBase: '', pioneerServers: [], activePioneerServer: '', fiatCurrency: 'USD', numberLocale: 'en-US', walletConnectEnabled: false, bip85Enabled: false, zcashPrivacyEnabled: false, hiveEnabled: false, emulatorEnabled: false, offlineMode: false, btcNodeEnabled: false, btcNodeType: 'blockbook', btcNodeUrl: '', btcOnboardingShown: false, preReleaseUpdates: false, alphaFirmware: false, addressBookClearsignEnabled: false, privateModeEnabled: false, passphraseIntroShown: false, evmSimulationRpcUrls: {} })
+	const [appSettings, setAppSettings] = useState<AppSettings>({ restApiEnabled: false, pioneerApiBase: '', pioneerServers: [], activePioneerServer: '', fiatCurrency: 'USD', numberLocale: 'en-US', walletConnectEnabled: false, zcashPrivacyEnabled: false, hiveEnabled: false, emulatorEnabled: false, offlineMode: false, btcNodeEnabled: false, btcNodeType: 'blockbook', btcNodeUrl: '', btcOnboardingShown: false, preReleaseUpdates: false, alphaFirmware: false, addressBookClearsignEnabled: false, privateModeEnabled: false, passphraseIntroShown: false, evmSimulationRpcUrls: {} })
 	const [togglingRestApi, setTogglingRestApi] = useState(false)
 	const [windowFocusState, setWindowFocusState] = useState<{ refs: number; alwaysOnTop: boolean } | null>(null)
 	const [releasingWindowFocus, setReleasingWindowFocus] = useState(false)
 	const [togglingWalletConnect, setTogglingWalletConnect] = useState(false)
-	const [togglingBip85, setTogglingBip85] = useState(false)
 	const [togglingEmulator, setTogglingEmulator] = useState(false)
 	const [togglingPreRelease, setTogglingPreRelease] = useState(false)
 	const [togglingAlphaFirmware, setTogglingAlphaFirmware] = useState(false)
@@ -341,15 +340,6 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 			setAppSettings(result)
 		} catch (e: any) { console.error("setWalletConnectEnabled:", e) }
 		setTogglingWalletConnect(false)
-	}, [])
-
-	const toggleBip85 = useCallback(async (enabled: boolean) => {
-		setTogglingBip85(true)
-		try {
-			const result = await rpcRequest<AppSettings>("setBip85Enabled", { enabled }, 10000)
-			setAppSettings(result)
-		} catch (e: any) { console.error("setBip85Enabled:", e) }
-		setTogglingBip85(false)
 	}, [])
 
 	const toggleEmulator = useCallback(async (enabled: boolean) => {
@@ -906,11 +896,12 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 									size="sm" variant="outline" borderColor="kk.border" color="kk.textSecondary" px="4" py="2"
 									_hover={{ borderColor: "kk.error", color: "kk.error" }}
 									onClick={async () => {
-										if (!confirm("Delete flash and stop? This erases the emulator seed.")) return
+										// Only ever the wallet that is running, and say which one.
+										const name = emuWallets.find((w) => w.isActive)?.name
+										if (!name || !confirm(`Delete emulator wallet "${name}" and stop? This erases its seed from this computer.`)) return
 										setRevealedSeed(null)
 										try {
-											await rpcRequest("emulatorStop", undefined, 10000)
-											await rpcRequest("emulatorDeleteFlash", { name: "default" }, 5000)
+											await rpcRequest("emulatorDeleteFlash", { name }, 5000)
 										} catch (e: any) {
 											console.error("Flash delete failed:", e?.message)
 										}
@@ -939,7 +930,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 							</Flex>
 
 							{/* ── Wallet (seed) switcher — pick a different saved seed ── */}
-							{emuWallets.length > 1 && (
+							{emuWallets.length > 0 && (
 								<Flex align="center" gap="2" mt="3" wrap="wrap">
 									<Text fontSize="xs" color="kk.textMuted">Wallet:</Text>
 									<Box
@@ -951,7 +942,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 										borderRadius="md" fontSize="xs" px="2" py="1"
 									>
 										{emuWallets.map((w) => (
-											<option key={w.name} value={w.name}>{w.label || w.name}{w.firmwareVersion ? ` (fw ${w.firmwareVersion})` : ""}</option>
+											<option key={w.name} value={w.name}>{w.name}{w.label ? ` · "${w.label}"` : ""}{w.firmwareVersion ? ` (fw ${w.firmwareVersion})` : ""}</option>
 										))}
 									</Box>
 								</Flex>
@@ -1359,6 +1350,8 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 								</Box>
 							)}
 
+							{isPolicyEnabled("AdvancedMode") && <ClearSignProvidersPanel />}
+
 							{isPolicyEnabled("AdvancedMode") && (
 								<Box px="3" py="3" borderRadius="12px" bg="rgba(233,196,106,0.06)" border="1px solid rgba(233,196,106,0.18)">
 									<Flex align="center" justify="space-between" gap="3">
@@ -1670,7 +1663,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 								Use your existing Chrome profile with an agent. Install and pair the extension, enable its Agent Mode, then paste this prompt into your local agent. The prompt contains no credentials.
 							</Text>
 							<Flex gap="2" mt="3" flexWrap="wrap">
-								<Button size="sm" variant="outline" onClick={async () => {
+								<Button size="sm" variant="outline" borderColor="rgba(233,196,106,0.45)" color="kk.gold" onClick={async () => {
 									try {
 										await navigator.clipboard.writeText(BROWSER_AGENT_PROMPT)
 										setBrowserPromptStatus("Copied. Paste into your local agent and describe your task.")
@@ -1678,8 +1671,8 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 										setBrowserPromptStatus("Clipboard unavailable. Open the browser-use guide and copy the prompt there.")
 									}
 								}}>Copy browser-use prompt</Button>
-								<Button size="sm" variant="ghost" onClick={() => rpcRequest("openUrl", { url: BROWSER_EXTENSION_URL }).catch(() => setBrowserPromptStatus("Could not open Chrome Web Store. Use the install link in the guide."))}>Install Chrome extension</Button>
-								<Button size="sm" variant="ghost" onClick={() => rpcRequest("openUrl", { url: BROWSER_AGENT_DOCS_URL }).catch(() => setBrowserPromptStatus("Open docs.keepkey.com/docs/bex/mcp in your browser."))}>Browser-use guide</Button>
+								<Button size="sm" variant="ghost" color="kk.textSecondary" onClick={() => rpcRequest("openUrl", { url: BROWSER_EXTENSION_URL }).catch(() => setBrowserPromptStatus("Could not open Chrome Web Store. Use the install link in the guide."))}>Install Chrome extension</Button>
+								<Button size="sm" variant="ghost" color="kk.textSecondary" onClick={() => rpcRequest("openUrl", { url: BROWSER_AGENT_DOCS_URL }).catch(() => setBrowserPromptStatus("Open docs.keepkey.com/docs/bex/mcp in your browser."))}>Browser-use guide</Button>
 							</Flex>
 							{browserPromptStatus && <Text role="status" fontSize="sm" color="kk.textSecondary" mt="2">{browserPromptStatus}</Text>}
 						</Box>
@@ -1762,36 +1755,9 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 								/>
 							</Flex>}
 
-							{/* BIP-85 Derived Seeds toggle — requires firmware >= 7.16.0 */}
-							{(() => {
-								const bip85FwOk = !!deviceState.firmwareVersion && versionCompare(deviceState.firmwareVersion, '7.16.0') >= 0
-								return (
-									<Flex justify="space-between" align="center" opacity={bip85FwOk ? 1 : 0.45}>
-										<Flex align="center" gap="3">
-											<Flex align="center" justify="center" w="32px" h="32px" borderRadius="lg" bg="rgba(233,196,106,0.1)">
-												<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-													<rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-													<path d="M7 11V7a5 5 0 0 1 10 0v4" />
-												</svg>
-											</Flex>
-											<Box>
-												<Text fontSize="md" color="kk.textPrimary" fontWeight="500">{t("bip85Feature")}</Text>
-												<Text fontSize="sm" color={bip85FwOk ? "kk.textSecondary" : "kk.textTertiary"} mt="0.5">
-													{bip85FwOk ? t("bip85FeatureDescription") : "Requires firmware 7.16.0 or later"}
-												</Text>
-											</Box>
-										</Flex>
-										<Toggle
-											checked={bip85FwOk && appSettings.bip85Enabled}
-											onChange={toggleBip85}
-											disabled={!bip85FwOk || togglingBip85}
-										/>
-									</Flex>
-								)
-							})()}
-
 							{/* Zcash + Hive have no toggles — both turn on automatically on
-							    firmware >= 7.15.0 (derived in bun/index.ts on device ready). */}
+							    firmware >= 7.15.0 (derived in bun/index.ts on device ready).
+							    BIP-85 likewise: the Dashboard shows it on firmware >= 7.16.0. */}
 
 							{/* Emulator toggle — dev tool, default off. Supported on macOS
 							    (Keychain) and Windows (DPAPI); Linux has no key store wired up. */}

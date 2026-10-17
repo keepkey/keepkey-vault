@@ -14,12 +14,12 @@
  * shows the native amount screen. A wrong or unsigned schema is refused, not
  * silently trusted.
  */
-import registry from './evm-schemas-local.json'
 import { DEFAULT_CLEARSIGN_SERVICE_URL } from './solana-certified-registry'
 import { deploymentMismatch, verifyPublishedReview } from './clearsign-review'
 import { snapshotEvmIdentities } from './clearsign-live-auditor'
 import { getEvmSimulationEndpoint } from './evm-simulation-config'
 import type { ClearSignDefinitionReview } from '../shared/clearsign-report'
+import { certifiedBodyRefused } from '../shared/certified-evm-envelope'
 import {
   buildEvmDecoderBody,
   CERTIFIED_METADATA_KEY_ID,
@@ -52,30 +52,6 @@ export interface SignedEvmSchema {
   bundleHash?: string
   /** Verified definition approvals, when the service published this definition. */
   definitionReview?: ClearSignDefinitionReview
-}
-
-const SCHEMAS: Record<string, SignedEvmSchema> = (registry as any).schemas ?? {}
-
-/**
- * Find a schema for this call, or undefined. Returns undefined rather than
- * throwing on any doubt — a missing schema means the existing (blind-sign)
- * behaviour, never a blocked transaction.
- */
-export function findEvmSchema(
-  chainId: number | undefined,
-  to: string | undefined,
-  data: string | undefined,
-): SignedEvmSchema | undefined {
-  if (!chainId || !to || !data) return undefined
-  const calldata = data.startsWith('0x') ? data.slice(2) : data
-  if (calldata.length < 8) return undefined
-  const selector = '0x' + calldata.slice(0, 8).toLowerCase()
-  const schema = SCHEMAS[`${chainId}:${to.toLowerCase()}:${selector}`]
-  if (!schema) return undefined
-  // The device enforces this too, but checking here keeps a stale registry
-  // entry from producing a confusing on-device refusal mid-signing.
-  if (calldata.length / 2 !== schema.expectedCalldataLength) return undefined
-  return schema
 }
 
 /**
@@ -136,6 +112,13 @@ async function fetchCertifiedEvmSchema(
   // existing blind path, never block signing.
   const reviewLookup = !spec && !tokenCandidate
   const fail = (message: string): never => { throw reviewLookup ? new ReviewLookupError(message) : new Error(message) }
+  // No certificate never blocks signing: the call goes to the device without
+  // one and the device applies its own policy (AdvancedMode for a call it
+  // cannot describe). A certificate that arrives but does not match still fails.
+  const unavailable = (reason: string): undefined => {
+    if (!reviewLookup) console.warn(`[clearsign] no certified description for ${spec?.method || 'token call'} (${reason}); device policy applies`)
+    return undefined
+  }
   if (reviewLookup && (!/^[0-9a-f]+$/i.test(calldata) || length < 4 || !/^0x[0-9a-f]{40}$/i.test(String(to || '')))) return undefined
   const base = String(process.env.CLEARSIGN_SERVICE_URL || DEFAULT_CLEARSIGN_SERVICE_URL)
     .trim()
@@ -163,24 +146,15 @@ async function fetchCertifiedEvmSchema(
       signal: AbortSignal.timeout(reviewLookup ? 3_000 : 10_000),
     })
   } catch (error: any) {
-    if (reviewLookup) return undefined
-    throw new Error(`ClearSign verification service is unavailable: ${error?.message || 'connection failed'}`)
+    return unavailable(error?.message || 'connection failed')
   }
   let result: any
   try {
     result = await response.json()
   } catch {
-    if (reviewLookup) return undefined
-    throw new Error(`ClearSign verification service returned HTTP ${response.status} without valid JSON`)
+    return unavailable(`HTTP ${response.status} without valid JSON`)
   }
-  if (!response.ok && reviewLookup) return undefined
-  if (!response.ok) {
-    if (response.status === 422) {
-      if (!spec && result?.code !== 'TOKEN_IDENTITY_UNVERIFIED') return undefined
-      throw new Error(`ClearSign certified description unavailable for ${spec?.method || 'token call'}: ${result?.error || 'the service catalog must be updated and its signed artifact provisioned before signing'}`)
-    }
-    throw new Error(`ClearSign verification service returned HTTP ${response.status}: ${result?.error || 'request failed'}`)
-  }
+  if (!response.ok) return unavailable(result?.error || result?.code || `HTTP ${response.status}`)
 
   let review: ClearSignDefinitionReview | undefined
   if (reviewLookup) {
@@ -319,15 +293,18 @@ export async function resolveEvmSchema(
   to: string | undefined,
   data: string | undefined,
   certifiedMetadataSupported = true,
+  /** The device's firmware: an entry whose certified body it refuses (0x04
+   *  before 7.17.0; unknown firmware counts as refusing) is never returned. */
+  firmwareVersion?: string,
 ): Promise<SignedEvmSchema | undefined> {
-  // Older firmware may not handle EthereumTxMetadata at all. In particular,
-  // never substitute the local CI-key schema when the certified path is off.
-  // The caller's ordinary Advanced Mode policy gate still applies.
+  // Older firmware may not handle EthereumTxMetadata at all. The caller's
+  // ordinary Advanced Mode policy gate still applies.
   if (!certifiedMetadataSupported) return undefined
+  const shown = (entry: SignedEvmSchema | undefined) =>
+    entry && !certifiedBodyRefused(entry.signedPayload, firmwareVersion) ? entry : undefined
   const promoted = findPromotedEvmArtifact(chainId, to, data)
-  if (promoted) return { ...promoted, keyId: CERTIFIED_METADATA_KEY_ID, source: 'promoted-local' }
-  return (await findCertifiedEvmSchema(chainId, to, data))
-    ?? findEvmSchema(chainId, to, data)
+  if (promoted) return shown({ ...promoted, keyId: CERTIFIED_METADATA_KEY_ID, source: 'promoted-local' })
+  return shown(await findCertifiedEvmSchema(chainId, to, data))
 }
 
 /** Resolve a reviewed description bound to this complete transaction. Used

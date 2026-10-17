@@ -3,6 +3,7 @@
  * and never falls back to a public RPC when Pioneer reports an error.
  */
 import { utils } from 'ethers'
+import { PIONEER_UNSUPPORTED } from '../shared/transaction-effects'
 
 export function evmSourceForChain(
   chain: { id: string; chainFamily: string; networkId: string },
@@ -45,6 +46,12 @@ export async function pioneerTokenMetadata(pioneer: any, networkId: string, cont
     throw new Error('Pioneer returned invalid token metadata')
   }
   return { symbol: String(meta.symbol), name: String(meta.name || meta.symbol), decimals: meta.decimals as number }
+}
+
+/** Pioneer's read-only RPC passthrough (POST /evm/rpc), on Pioneer's nodes. */
+async function readRpc(pioneer: any, networkId: string, method: string, params: any[]): Promise<any> {
+  if (typeof pioneer.EvmReadRpc !== 'function') throw new Error(`${PIONEER_UNSUPPORTED} ${method} (server has no EvmReadRpc)`)
+  return dataOf(await pioneer.EvmReadRpc({ networkId, method, params }), 'EvmReadRpc').data
 }
 
 /** Only operations exposed by Pioneer's API are admitted. Unsupported methods
@@ -118,11 +125,15 @@ export async function pioneerEvmRpc(pioneer: any, networkId: string, method: str
         }), 'GetTokenAllowance')
         result = quantity(data.data?.allowance, 'token allowance')
       } else {
-        throw new Error(`Pioneer does not expose this eth_call selector: ${selector}`)
+        return readRpc(pioneer, networkId, method, params)
       }
       return `0x${result.slice(2).padStart(64, '0')}`
     }
+    case 'eth_getCode':
+    case 'eth_blockNumber':
+    case 'eth_simulateV1':
+      return readRpc(pioneer, networkId, method, params)
     default:
-      throw new Error(`Pioneer does not expose ${method}; no direct-node fallback is allowed`)
+      throw new Error(`${PIONEER_UNSUPPORTED} ${method}; no direct-node fallback is allowed`)
   }
 }

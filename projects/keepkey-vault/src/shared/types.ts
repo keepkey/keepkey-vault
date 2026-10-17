@@ -49,6 +49,8 @@ export interface DeviceStateInfo {
   label?: string
   firmwareVersion?: string
   bootloaderVersion?: string
+  /** Latest firmware of the device's own lineage: a Bitcoin-only device gets
+   *  the Bitcoin-only build (absent if there is none), never multi-chain. */
   latestFirmware?: string
   latestBootloader?: string
   /** Pinned payload sha256 for the latest firmware (from the manifest) — the
@@ -58,6 +60,22 @@ export interface DeviceStateInfo {
    *  latestFirmwareHash (multi-coin) — the OOB "Bitcoin-only" choice installs a
    *  different binary and must verify against this hash. */
   latestFirmwareBitcoinOnlyHash?: string
+  /** Version (no 'v') of the Bitcoin-only build this Desktop can install;
+   *  absent when the manifest has none. */
+  latestFirmwareBitcoinOnly?: string
+  /** Installed firmware is Bitcoin-only (true), multi-chain (false) or unknown
+   *  (undefined: bootloader mode, unrecognised hash, no snapshot). Works in
+   *  bootloader mode, unlike firmwareVariant. */
+  installedBitcoinOnly?: boolean
+  /** Treat as a new KeepKey in the setup UI: factory firmware (4.0.0, no
+   *  wallet), also across the bootloader-mode replugs of setup, or no firmware
+   *  at all. UI only: a device with no firmware can still hold a wallet in
+   *  storage, so installWipeReason still carries any wipe ('no-firmware'). */
+  factoryFirmware?: boolean
+  /** Why installing each official build may wipe or lock this device's wallet
+   *  (see flashWipeReason); undefined = it does not. The install must carry an
+   *  explicit acknowledgement when set. */
+  installWipeReason?: { multi?: import('./flash-wipe').WipeReason; bitcoinOnly?: import('./flash-wipe').WipeReason }
   /** Which manifest channel latestFirmware/latestFirmwareHash resolved from.
    *  'beta' builds are pre-release and not covered by the reproducible-build
    *  claim (no published git tag / release assets to verify against). */
@@ -72,6 +90,8 @@ export interface DeviceStateInfo {
    *  firmware; "bitcoin-only-locked" = multi-chain firmware refusing a btc-only seed.
    *  See isBitcoinOnlyVariant() in shared/flags. */
   firmwareVariant?: string
+  /** Features.capabilities as the device reports them (7.15+); absent before. */
+  capabilities?: number[]
   resolvedFwVersion?: string  // firmware version resolved from on-device hash (bootloader mode only)
   firmwareHash?: string
   bootloaderHash?: string
@@ -125,6 +145,44 @@ export interface ClearSignSolanaSchemaArtifact {
   byteLength: number
   coverageBytes: number
   draft: ClearSignSolanaSchemaDraft
+}
+
+/** One 32-byte calldata word, as the firmware v0x02 parser formats it. */
+export type ClearSignEvmArgFormat = 'address' | 'amount' | 'bytes' | 'token-amount'
+
+/** A runtime-tier EVM v0x02 description of one (chainId, contract, selector). */
+export interface ClearSignEvmSchemaDraft {
+  chainId: number
+  contract: string
+  selector: string
+  method: string
+  args: Array<{ name: string; format: ClearSignEvmArgFormat; decimals?: number; symbol?: string }>
+}
+
+export interface ClearSignEvmSchemaArtifact {
+  format: 'evm-v2'
+  /** Unsigned body hex; its trailer names the signer slot `keyId`. */
+  body: string
+  byteLength: number
+  /** The exact calldata length the device requires (4 + 32 per arg). */
+  calldataLength: number
+  keyId: number
+  draft: ClearSignEvmSchemaDraft
+}
+
+/** A provider-signed description: body || r || s || recovery, as hex. */
+export interface ClearSignEvmSignedEntry {
+  keyId: number
+  signedPayload: string
+  draft: ClearSignEvmSchemaDraft
+}
+
+/** Public bundle file. Never carries private key material. */
+export interface ClearSignProviderBundle {
+  format: 'keepkey-clearsign-provider-bundle-v1'
+  provider: { alias: string; publicKeyHex: string; fingerprint: string; keyId: number }
+  entries: Array<{ chainId: number; contract: string; selector: string; method: string; signedPayload: string }>
+  notice: string
 }
 
 export type ClearSignEventKind = 'schema-attestation' | 'signer-load' | 'transaction'
@@ -564,7 +622,7 @@ export interface FirmwareAnalysis {
   currentFirmwareVerified: boolean | undefined
   isDowngrade: boolean
   isSameVersion: boolean
-  willWipeDevice: boolean  // downgrade, or crossing the signed/unsigned boundary in either direction
+  willWipeDevice: boolean  // wipeReason is set: wipes, locks a Bitcoin-only wallet, or can't be ruled out — needs the strong confirmation
   /** Why the flash erases the wallet, when willWipeDevice. */
   wipeReason?: import('./flash-wipe').WipeReason
   isBitcoinOnly: boolean   // btc-only firmware variant, detected from the embedded KeepKeyBTC/EmulatorBTC string
@@ -619,6 +677,8 @@ export interface ChainBalance {
   syncState?: 'confirmed' | 'stale' | 'degraded'
   /** Assets verified directly against a chain RPC during this refresh. */
   confirmedAssetCaips?: string[]
+  /** Per-xpub split of `balance` for multi-xpub UTXO chains (LTC/DOGE/…). Absent when not live-fetched. */
+  breakdown?: Array<{ xpub: string; path: string; scriptType: string; balance: string; balanceUsd: number }>
 }
 
 // DeFi position. The server-side merged path (includeDefi=true) is the
@@ -726,6 +786,28 @@ export interface BuildNameRegTxParams {
 }
 
 // ── Zcash shielded transaction history ──────────────────────────────────
+
+/** Position of one transaction in an operation that takes several. */
+export interface ZcashTxBatch {
+  index: number
+  total: number
+  fee?: number
+  /** TEX steps: "tex-fund" (to the one-time address), "tex-pay", "tex-return" */
+  phase?: string
+}
+
+/** A ZIP-320 TEX payment; mirrors TexRecord in src/bun/txbuilder/zcash-tex.ts */
+export interface ZcashTexPayment {
+  index: number
+  account: number
+  tex: string
+  amount: number
+  status: 'reserved' | 'funded' | 'paid' | 'returned'
+  funding: Array<{ txid: string; vout: number; value: number }>
+  finalTxid?: string
+  error?: string
+  createdAt: number
+}
 
 export interface ZcashTransaction {
   id: number
@@ -998,6 +1080,9 @@ export interface CalldataDecodedInfo {
   signedInsightBlob?: string
   /** Signing key slot used for the insight blob */
   insightKeyId?: number
+  /** 'caller': the REST caller supplied the blob (txMetadata). Desktop never
+   *  checked it, so it never makes the verdict "shown on your KeepKey". */
+  insightSource?: 'caller'
   /** Pioneer's verdict on the blob: VERIFIED = curated descriptor + exact
    *  calldata round-trip; UNKNOWN = opaque. Blob is only attached when
    *  VERIFIED — rc3 fail-closes on opaque blobs, so on UNKNOWN the existing
@@ -1041,12 +1126,24 @@ export interface SigningRequestInfo {
   solanaDecodeError?: string
   /** true when tx has calldata that cannot be fully decoded — device will show blind-signing warning */
   needsBlindSigning?: boolean
+  /** The runtime ClearSign provider the sign handler will ask for a
+   *  description, as the approval card named it (fingerprint as the device
+   *  shows it). The handler attaches a description only from this key. */
+  runtimeProvider?: RuntimeProviderNamed
+  /** Emulator test tape is recording: the approval card reports what it renders and answers itself. */
+  testReview?: boolean
   /** The device can independently decode this call, either from its native
    *  allowlist or from authenticated, firmware-verified metadata. A
    *  caller-supplied blob never sets this by itself.
    *  REST Solana: Vault found a certified ClearSign schema for these exact
    *  bytes, which the device verifies and decodes (no opaque consent asked). */
   deviceClearSigns?: boolean
+  /** Name of the spender when KeepKey has reviewed it (canonical Permit2 or a
+   *  certified name record). Set by the backend; absent = not recognised. */
+  recognizedSpender?: string
+  /** The same, for the recipient of a plain ERC-20 transfer: a reviewed
+   *  contract (such as a Universal Router) that does not credit a transfer. */
+  recognizedRecipient?: string
   /** Certified metadata resolved before user approval. The signing handler
    *  reuses this exact envelope so approval and device review cannot drift. */
   certifiedEvmSchema?: {
@@ -1056,6 +1153,10 @@ export interface SigningRequestInfo {
     source?: 'local-test' | 'certified-service' | 'promoted-local'
     definitionReview?: import('./clearsign-report').ClearSignDefinitionReview
   }
+  /** A KeepKey ClearSign service ERC-7730 definition for this exact call,
+   *  fetched and checked before approval. The signing handler sends exactly
+   *  this one, so approval and device review cannot drift. */
+  erc7730?: Erc7730Catalog
   /** true when the UI must enable AdvancedMode before allowing approval */
   requiresAdvancedMode?: boolean
   /** true when this request needs a separate, explicit one-shot opaque-signing
@@ -1241,6 +1342,31 @@ export interface PioneerServer {
   isDefault: boolean
 }
 
+// A third-party ClearSign description provider the user added (persisted in
+// SQLite). Its key is trusted by the device only per session, after the user
+// approves "NOT verified by KeepKey"; nothing here is KeepKey-certified.
+export interface ClearSignProviderContract {
+  chainId: number
+  address: string                // lowercase 0x-prefixed
+}
+
+export interface ClearSignProvider {
+  id: string
+  name: string                   // alias shown on the device trust screen
+  url: string
+  publicKeyHex: string           // 33-byte compressed secp256k1, lowercase hex
+  fingerprint: string            // 16 uppercase hex, as the device shows it
+  contracts: ClearSignProviderContract[] // empty = any contract
+  createdAt: number
+}
+
+export interface ClearSignProviderInput {
+  name: string
+  url: string
+  publicKeyHex: string
+  contracts?: ClearSignProviderContract[]
+}
+
 // Application-level settings (persisted in SQLite)
 export interface AppSettings {
   restApiEnabled: boolean        // controls entire REST API server on/off
@@ -1250,7 +1376,6 @@ export interface AppSettings {
   fiatCurrency: FiatCurrency     // display currency (default 'USD')
   numberLocale: string           // number formatting locale (default 'en-US')
   walletConnectEnabled: boolean   // feature flag: WalletConnect dApp support (default OFF)
-  bip85Enabled: boolean          // feature flag: BIP-85 derived seeds (default OFF)
   zcashPrivacyEnabled: boolean   // read-only capability: auto-ON when firmware >= 7.15.0 and this build includes zcash-cli
   hiveEnabled: boolean           // read-only capability: Hive blockchain — auto-ON when firmware >= 7.15.0
   emulatorEnabled: boolean       // feature flag: macOS emulator surface (default OFF — dev-only)
@@ -1309,6 +1434,10 @@ export interface EmulatorWalletInfo {
   firmwareVersion?: string
   /** Firmware release channel last reported for this wallet, if known. */
   channel?: string
+  /** When this wallet last connected (ms). */
+  lastUsed?: number
+  /** First Ethereum account (m/44'/60'/0'/0/0), cached from the last connect. */
+  ethAddress?: string
 }
 
 /** Persisted device snapshot — one per device_id, stored in SQLite. */
@@ -1624,17 +1753,20 @@ export interface RelayTxParams {
     signerKeyId: number         // trusted ClearSign key slot (0..3)
   }
   /** Reusable signed ERC-7730 v2 definitions supplied by the quote/catalog service. */
-  erc7730?: {
-    primaryDefinitionId: string
-    definitions: Array<{
-      definitionId: string
-      envelope: string
-      kind: 1 | 2 | 3 | 4
-      chainId: number
-      contractAddress?: string
-      selectorOrTypeHash?: string
-    }>
-  }
+  erc7730?: Erc7730Catalog
+}
+
+/** Signed ERC-7730 v2 definitions in the shape hdwallet's transport sends. */
+export interface Erc7730Catalog {
+  primaryDefinitionId: string
+  definitions: Array<{
+    definitionId: string
+    envelope: string
+    kind: 1 | 2 | 3 | 4
+    chainId: number
+    contractAddress?: string
+    selectorOrTypeHash?: string
+  }>
 }
 
 /** Quote response from Pioneer (aggregated across DEXes) */
@@ -1723,6 +1855,19 @@ export interface ExecuteSwapParams {
    *  fallback. It does not change the device's AdvancedMode policy, which is
    *  session state on 7.15+ (disarmed on lock or unplug). */
   allowSolanaBlindSigning?: boolean
+  /** The ClearSign provider the swap preview card named (null: it named
+   *  none). A description is attached only from that provider, key and slot.
+   *  Absent for callers with no card. */
+  runtimeProvider?: RuntimeProviderNamed | null
+}
+
+/** A third-party ClearSign provider as an approval card named it. */
+export interface RuntimeProviderNamed {
+  alias: string
+  /** 16-hex uppercase, as the device shows it. */
+  fingerprint: string
+  publicKeyHex: string
+  keyId: number
 }
 
 export type SwapProviderStatus = 'ok' | 'degraded' | 'offline' | 'unknown'
@@ -1771,6 +1916,7 @@ export interface PendingSwap {
   toCaip?: string
   fromAmount: string      // human-readable
   expectedOutput: string  // quote-time estimate; never replace with received output
+  minimumOutput?: string  // quote-time floor; a payout at or above it is the whole swap
   payouts?: Array<{ txid: string; amount: string; asset: string; address?: string }>
   receivedOutput?: string // actual received amount (filled by Pioneer poll once outbound confirms)
   memo: string

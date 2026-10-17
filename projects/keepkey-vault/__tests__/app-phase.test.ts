@@ -40,4 +40,13 @@ describe('resolveAppPhase', () => {
     expect(resolveAppPhase({ ...base, state: 'needs_firmware', firmwareSkipped: true })).toBe('ready')
     expect(resolveAppPhase({ ...base, state: 'needs_init', wizardComplete: true })).toBe('splash')
   })
+
+  test('bootloader mode with nothing to install asks for a replug instead of looping setup', () => {
+    expect(resolveAppPhase({ ...base, state: 'bootloader', bootloaderIdle: true })).toBe('leave-bootloader')
+    expect(resolveAppPhase({ ...base, state: 'bootloader', bootloaderIdle: true, wizardComplete: true })).toBe('leave-bootloader')
+    // A running setup (e.g. "Firmware Update Complete, replug") keeps the wizard.
+    expect(resolveAppPhase({ ...base, state: 'bootloader', bootloaderIdle: true, oobLock: true })).toBe('setup')
+    // Something to install: setup as before.
+    expect(resolveAppPhase({ ...base, state: 'bootloader', bootloaderIdle: false })).toBe('setup')
+  })
 })

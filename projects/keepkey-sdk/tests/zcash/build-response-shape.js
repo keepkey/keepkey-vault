@@ -1,104 +1,53 @@
 /**
- * Tests the /api/zcash/shielded/build response shape — no device signing needed.
+ * Tests the /api/zcash/shielded/build response shape. Builds only: nothing is
+ * signed, finalized or broadcast, and it never calls send, shield or deshield.
  *
- * These are the exact fields zcash.ts reads when constructing protobuf messages
- * for the device. A wrong key name here (e.g. prevout_txid vs prevoutTxid) causes
- * a silent undefined that becomes a malformed protobuf message on the device.
+ * These are the exact fields zcash.ts reads from build.signing_request when it
+ * builds the device messages. A wrong key name causes a silent undefined that
+ * becomes a malformed protobuf message on the device.
  *
- * Requires: vault running, sidecar ready, transparent ZEC balance > 10000 zat.
- * Run: node tests/zcash/build-response-shape.js
+ * Device: the build first proves the cached view key belongs to the connected
+ * device, which can ask to export the Zcash view key (1 press).
+ * Requires Zcash privacy enabled and a ready sidecar; 403/503: SKIPPED.
+ * Run: make test-sdk filter=zcash/build-response-shape
  */
 
-const { run } = require('../_helpers')
-
-const BASE = process.env.KEEPKEY_URL || 'http://localhost:1646'
-const API_KEY = process.env.KEEPKEY_API_KEY || ''
-
-function authHeader() {
-  if (!API_KEY) return {}
-  const val = API_KEY.startsWith('Bearer ') ? API_KEY : `Bearer ${API_KEY}`
-  return { 'Authorization': val }
-}
-
-async function apiGet(path) {
-  const res = await fetch(`${BASE}${path}`, { headers: { ...authHeader() } })
-  if (!res.ok) throw new Error(`GET ${path} → ${res.status}: ${await res.text()}`)
-  return res.json()
-}
-
-async function apiPost(path, body) {
-  const res = await fetch(`${BASE}${path}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...authHeader() },
-    body: JSON.stringify(body),
-  })
-  // Return body regardless — caller decides if error is acceptable
-  const data = await res.json().catch(async () => ({ error: await res.text() }))
-  return { ok: res.ok, status: res.status, data }
-}
+const { run, skip } = require('../_helpers')
 
 run('Zcash build response — field names match what zcash.ts reads', async (getSdk, assert) => {
+  const sdk = await getSdk()
+  const client = sdk.getClient()
 
-  const status = await apiGet('/api/zcash/shielded/status')
-  if (!status.ready) {
-    console.log(`  SKIP: sidecar not ready`)
-    return
+  let status
+  try {
+    status = await client.get('/api/zcash/shielded/status')
+  } catch (e) {
+    if (e.status === 403) skip(`Zcash privacy disabled (${e.message})`)
+    throw e
   }
+  if (!status.ready) skip(`sidecar not ready (${status.error ?? 'no error given'})`)
 
-  const balance = await apiGet('/api/zcash/shielded/balance')
-  const transparentSats = Number(balance.transparent_sats ?? 0)
-  if (transparentSats < 10000) {
-    console.log(`  SKIP: transparent balance too low (${transparentSats} zat)`)
-    return
-  }
-
-  const { ok, status: httpStatus, data } = await apiPost('/api/zcash/shielded/build', {
-    recipient: 'u1' + 'a'.repeat(87), // intentionally invalid — we only inspect structure
-    amount: 10000,
-    account: 0,
-  })
-
-  // If it passed address validation, inspect full structure.
-  // If rejected, we can't validate the build response — warn and skip.
-  if (!ok) {
-    const msg = String(data.error ?? '')
-    const isAddressErr = msg.toLowerCase().includes('address') || msg.toLowerCase().includes('recipient')
-    if (isAddressErr) {
-      console.log(`  NOTE: address validation rejected dummy recipient (${httpStatus}) — can't inspect build output`)
-      console.log(`        Use a real UA from "POST /api/zcash/shielded/display-address" to run the full check`)
-      assert('Build endpoint reachable (address validation works)', true)
-    } else {
-      assert(`Build succeeded or gave address error (got: ${msg.slice(0, 80)})`, false)
+  console.log('  OWNER: the device may ask to export the Zcash view key - confirm.')
+  let build
+  try {
+    build = await client.post('/api/zcash/shielded/build', {
+      recipient: 'u1' + 'a'.repeat(87), // intentionally invalid: only the structure is inspected
+      amount: 10000,
+      account: 0,
+    }, 600000)
+  } catch (e) {
+    if (e.status === 503) skip(`/api/zcash/shielded/build answered 503: ${e.message}`)
+    const msg = String(e.message || e).toLowerCase()
+    if (msg.includes('address') || msg.includes('recipient')) {
+      skip(`build refused the placeholder recipient (${e.status}); use a real UA from display-address to inspect the shape`)
     }
+    assert(`build succeeded or gave an address error (got ${e.status}: ${String(e.message).slice(0, 80)})`, false)
     return
   }
 
-  // ── transparent_inputs: field names zcash-shield.ts reads ───────────
-  assert('Response has transparent_inputs array', Array.isArray(data.transparent_inputs))
-  if (Array.isArray(data.transparent_inputs) && data.transparent_inputs.length > 0) {
-    const ti = data.transparent_inputs[0]
-    // zcash-shield.ts maps these via: prevoutTxid: ti.prevout_txid
-    assert('transparent_input[0].index is a number', typeof ti.index === 'number')
-    assert('transparent_input[0].amount is a number', typeof ti.amount === 'number')
-    assert('transparent_input[0].prevout_txid is a 64-char hex string', typeof ti.prevout_txid === 'string' && ti.prevout_txid.length === 64)
-    assert('transparent_input[0].prevout_index is a number', typeof ti.prevout_index === 'number')
-    assert('transparent_input[0].sequence is a number', typeof ti.sequence === 'number')
-    assert('transparent_input[0].script_pubkey is a hex string', typeof ti.script_pubkey === 'string' && ti.script_pubkey.length > 0)
-    assert('transparent_input[0].address_path is an array', Array.isArray(ti.address_path))
-    // Regression: these camelCase aliases must NOT appear (they caused silent undefineds)
-    assert('NO camelCase prevoutTxid alias', ti.prevoutTxid === undefined)
-    assert('NO camelCase scriptPubkey alias', ti.scriptPubkey === undefined)
-  }
-
-  // ── transparent_outputs: field names zcash.ts reads ─────────────────
-  assert('Response has transparent_outputs array', Array.isArray(data.transparent_outputs))
-  if (Array.isArray(data.transparent_outputs) && data.transparent_outputs.length > 0) {
-    const to = data.transparent_outputs[0]
-    // zcash.ts reads: output.index, output.value, output.script_pubkey
-    assert('transparent_output[0].index is a number (regression: was missing)', typeof to.index === 'number')
-    assert('transparent_output[0].value is a number', typeof to.value === 'number')
-    assert('transparent_output[0].script_pubkey is a hex string', typeof to.script_pubkey === 'string' && to.script_pubkey.length > 0)
-  }
+  const data = build.signing_request
+  assert('build returns signing_request', !!data && typeof data === 'object')
+  if (!data) return
 
   // ── header_fields: firmware requires all four for tx reconstruction ──
   assert('Response has header_fields', typeof data.header_fields === 'object' && data.header_fields !== null)

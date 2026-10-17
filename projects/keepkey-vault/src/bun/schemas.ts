@@ -92,7 +92,7 @@ export const EthSignTransactionRequest = z.object({
 )
 
 /** POST /eth/clearsign/load-signer — load a runtime clear-sign signer (RAM-only, user-confirmed) */
-export const LoadClearsignSignerRequest = z.object({
+const LoadClearsignSignerBody = z.object({
   keyId: z.number().int().min(1).max(3),          // slot 0 = built-in production key, not loadable
   pubkey: z.string().regex(/^(0x)?[0-9a-fA-F]{66}$/), // 33-byte compressed secp256k1 hex
   alias: z.string().min(1).max(31).regex(/^[A-Za-z0-9 _-]+$/), // shown on the device trust screen
@@ -101,14 +101,21 @@ export const LoadClearsignSignerRequest = z.object({
   icon: z.string().regex(/^(0x)?[0-9a-fA-F]{2,768}$/).optional(),
   iconWidth: z.number().int().min(1).max(64).optional(),
   iconHeight: z.number().int().min(1).max(64).optional(),
-  // Persist the identity in device flash across reboots (until WipeDevice).
-  persist: z.boolean().optional(),
 }).strip().refine(
   // icon + its dimensions travel together: firmware rejects an icon without
   // dimensions, and dimensions without an icon are silently dropped.
   (v) => [v.icon, v.iconWidth, v.iconHeight].filter((x) => x !== undefined).length % 3 === 0,
   { message: 'icon, iconWidth, and iconHeight must all be present or all absent' },
 )
+// Signers are never persisted (the firmware refuses it): an old caller that
+// still asks gets a clear 400 rather than a silently dropped flag.
+export const LoadClearsignSignerRequest = z.unknown().superRefine((raw, ctx) => {
+  const persist = (raw as { persist?: unknown } | null)?.persist
+  if (persist !== undefined && persist !== false) ctx.addIssue({
+    code: 'custom', path: ['persist'],
+    message: 'persistent ClearSign signers are not supported; signers are RAM-only for this session',
+  })
+}).pipe(LoadClearsignSignerBody)
 
 /** POST /eth/sign-typed-data */
 export const EthSignTypedDataRequest = z.object({
@@ -513,6 +520,12 @@ export const ClearSignReportResponse = z.object({
     codeIdentityBound: z.boolean().optional(),
     expiresAt: z.number().optional(),
     resolution: z.string().optional(),
+    provider: z.object({
+      alias: z.string().optional(),
+      fingerprint: z.string().optional(),
+      keyId: z.number().int().optional(),
+      status: z.enum(['requested', 'supplied']),
+    }).optional(),
   }),
   simulation: z.object({
     version: z.literal(1),

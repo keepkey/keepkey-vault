@@ -2,7 +2,7 @@
  * Which top-level screen App renders. Kept out of App.tsx so the precedence
  * rules — the setup lock above all — have a test.
  */
-export type AppPhase = "splash" | "claimed" | "setup" | "ready"
+export type AppPhase = "splash" | "claimed" | "setup" | "ready" | "leave-bootloader"
 
 export function resolveAppPhase(p: {
   state: string
@@ -11,6 +11,8 @@ export function resolveAppPhase(p: {
   isClaimed: boolean
   firmwareSkipped: boolean
   wizardComplete: boolean
+  /** In bootloader mode with nothing to install: the user only has to replug. */
+  bootloaderIdle?: boolean
 }): AppPhase {
   // oobLock takes priority — during OOB, transient claim errors are expected
   // (device reboots, brief LIBUSB_ERROR_ACCESS). Don't unmount the wizard.
@@ -20,6 +22,8 @@ export function resolveAppPhase(p: {
   // Firmware update skipped this session — let the user into the app on the
   // older firmware. TopNav keeps showing the "vX → vY" update reminder.
   if (p.firmwareSkipped && p.state === "needs_firmware") return "ready"
+  // Nothing to install: setup would only loop back to itself. Ask for a replug.
+  if (p.state === "bootloader" && p.bootloaderIdle) return "leave-bootloader"
   if (!p.wizardComplete && ["bootloader", "needs_firmware", "needs_init"].includes(p.state)) return "setup"
   if (p.state === "ready") return "ready"
   return "splash"

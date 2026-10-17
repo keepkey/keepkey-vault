@@ -12,7 +12,7 @@
  * SECURITY NOTE: Approvals are high-risk. Unlimited approvals (MAX_UINT256)
  * give the spender permanent access to drain all tokens of that type.
  */
-const { run, ETH_PATH, CHAINS, toHex, erc20Approve } = require('../_helpers')
+const { run, ETH_PATH, CHAINS, toHex, erc20Approve, SENTINEL_NONCE, assertSignedByDevice } = require('../_helpers')
 
 run('ERC-20 approve() — clearsign decoded', async (getSdk, assert) => {
   const sdk = await getSdk()
@@ -32,7 +32,7 @@ run('ERC-20 approve() — clearsign decoded', async (getSdk, assert) => {
     to: USDC,
     value: '0x0',
     data,
-    nonce: '0x1',
+    nonce: SENTINEL_NONCE, // can never be mined
     gasLimit: toHex(50000),
     gasPrice: toHex(20000000000),
     chainId: CHAINS.ETH,
@@ -46,5 +46,5 @@ run('ERC-20 approve() — clearsign decoded', async (getSdk, assert) => {
   console.log('\n  >>> APPROVE on device <<<\n')
 
   const result = await sdk.eth.ethSignTransaction(tx)
-  assert('Got signed tx', !!result)
+  assertSignedByDevice(assert, result, address, CHAINS.ETH)
 })

@@ -9,6 +9,7 @@
  * chain and the calldata is a canonical ABI encoding. Anything else returns
  * null and takes the existing generic (blind) path.
  */
+import { ACROSS_NAMED_TOKENS, REVIEWED_EVM_TOKENS } from './reviewed-evm-tokens'
 
 /** Across deployments, verbatim from the pinned commit. */
 export const ACROSS_DEPLOYMENTS_PROVENANCE =
@@ -130,10 +131,13 @@ function units(raw: bigint, decimals: number): string {
 const poolForChain = (chainId: bigint) =>
   chainId <= BigInt(Number.MAX_SAFE_INTEGER) ? REVIEWED_ACROSS_SPOKE_POOLS.find((p) => BigInt(p.chainId) === chainId) : undefined
 
-/** The token's identity, only for a pool's verified wrapped-native token. */
-function knownToken(chainId: bigint, token: string) {
+type TokenNames = Record<string, { symbol: string; decimals: number }>
+
+/** The token's identity: a pool's verified wrapped-native token, or a
+ *  reviewed token listed by exact chain:address. */
+function knownToken(chainId: bigint, token: string, tokens: TokenNames) {
   const w = poolForChain(chainId)?.wrappedNative
-  return w && w.address === token ? w : undefined
+  return w && w.address === token ? w : tokens[`${chainId}:${token}`]
 }
 
 export function acrossChainName(chainId: bigint): string | undefined {
@@ -157,10 +161,10 @@ export interface AcrossDepositView {
   integratorTag: string | null
 }
 
-export function acrossDepositView(d: AcrossDepositV3): AcrossDepositView {
+export function acrossDepositView(d: AcrossDepositV3, tokens: TokenNames = { ...ACROSS_NAMED_TOKENS, ...REVIEWED_EVM_TOKENS }): AcrossDepositView {
   const src = BigInt(d.pool.chainId)
-  const inTok = knownToken(src, d.inputToken)
-  const outTok = knownToken(d.destinationChainId, d.outputToken)
+  const inTok = knownToken(src, d.inputToken, tokens)
+  const outTok = knownToken(d.destinationChainId, d.outputToken, tokens)
   const amount = (raw: bigint, tok: ReturnType<typeof knownToken>, token: string) =>
     tok ? `${units(raw, tok.decimals)} ${tok.symbol}` : `${raw.toLocaleString('en-US')} base units of token ${token}`
   const destName = acrossChainName(d.destinationChainId)

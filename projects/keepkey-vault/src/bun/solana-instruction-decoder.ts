@@ -16,8 +16,8 @@
  *      declared encoding (`u8`, `u32-le`, `anchor` 8-byte sighash, or
  *      `none`) and look up the instruction schema.
  *   4. Walk the declared args over the remaining data bytes and render
- *      typed values (u64 as decimal, pubkey as base58, string as UTF-8,
- *      bytes as hex tail).
+ *      typed values (u64 as decimal, pubkey as base58, string as UTF-8
+ *      after its u64 length, bytes as hex tail).
  *   5. Map each schema account label to the resolved base58 key from the
  *      instruction's `accountIndices`.
  *
@@ -208,13 +208,26 @@ function readPubkey(data: Uint8Array, offset: number, name: string): ReadResult 
   }
 }
 
-function readBytesRemaining(data: Uint8Array, offset: number, name: string, type: SolanaArgType): ReadResult {
-  const bytes = data.subarray(offset)
-  const value = type === 'string'
-    ? new TextDecoder('utf-8', { fatal: false }).decode(bytes)
-    : bufToHex(bytes)
+/** A bincode String, as native programs encode one (System
+ *  createAccountWithSeed's seed): a u64 LE byte length, then UTF-8. The
+ *  caller has checked that the length fits the data. */
+function readString(data: Uint8Array, offset: number, name: string): ReadResult {
+  const end = offset + 8 + Number(readLe(data, offset, 8))
   return {
-    arg: { name, type, value, rawHex: bufToHex(bytes) },
+    arg: {
+      name,
+      type: 'string',
+      value: new TextDecoder('utf-8', { fatal: false }).decode(data.subarray(offset + 8, end)),
+      rawHex: bufToHex(data.subarray(offset, end)),
+    },
+    nextOffset: end,
+  }
+}
+
+function readBytesRemaining(data: Uint8Array, offset: number, name: string): ReadResult {
+  const bytes = data.subarray(offset)
+  return {
+    arg: { name, type: 'bytes', value: bufToHex(bytes), rawHex: bufToHex(bytes) },
     nextOffset: data.length,
   }
 }
@@ -230,9 +243,9 @@ function requiredBytes(type: SolanaArgType): number {
     case 'u8': case 'bool': return 1
     case 'u16': return 2
     case 'u32': return 4
-    case 'u64': return 8
+    case 'u64': case 'string': return 8 // a string's u64 length prefix
     case 'pubkey': return 32
-    case 'string': case 'bytes': return 0 // consume remaining
+    case 'bytes': return 0 // consume remaining
   }
 }
 
@@ -244,6 +257,13 @@ function decodeArgs(data: Uint8Array, start: number, schema: SolanaArgSchema[]):
     if (need > 0 && offset + need > data.length) {
       return { args, note: `truncated at arg "${arg.name}" (need ${need}B, have ${data.length - offset}B)` }
     }
+    if (arg.type === 'string') {
+      const length = readLe(data, offset, 8)
+      const have = data.length - offset - 8
+      if (length > BigInt(have)) {
+        return { args, note: `truncated at arg "${arg.name}" (need ${length}B, have ${have}B)` }
+      }
+    }
     let res: ReadResult
     switch (arg.type) {
       case 'u8':     res = readU8(data, offset, arg.name); break
@@ -252,11 +272,16 @@ function decodeArgs(data: Uint8Array, start: number, schema: SolanaArgSchema[]):
       case 'u64':    res = readU64(data, offset, arg.name); break
       case 'bool':   res = readBool(data, offset, arg.name); break
       case 'pubkey': res = readPubkey(data, offset, arg.name); break
-      case 'string': res = readBytesRemaining(data, offset, arg.name, 'string'); break
-      case 'bytes':  res = readBytesRemaining(data, offset, arg.name, 'bytes'); break
+      case 'string': res = readString(data, offset, arg.name); break
+      case 'bytes':  res = readBytesRemaining(data, offset, arg.name); break
     }
     args.push(res.arg)
     offset = res.nextOffset
+  }
+  // Signed bytes past the last field are never shown, so this is not a full
+  // decode (firmware treats such an instruction as unknown).
+  if (offset < data.length) {
+    return { args, note: `${data.length - offset} trailing bytes not decoded` }
   }
   return { args }
 }
@@ -296,7 +321,10 @@ export function decodeInstruction(input: DecodeInstructionInput): DecodedInstruc
 
   const encoding: DiscriminatorEncoding = program.discriminator?.encoding ?? 'none'
   const discHex = extractDiscriminator(input.data, encoding)
-  const schema = discHex ? program.instructions?.[discHex] : undefined
+  // Empty data has no discriminator; a program may name the instruction it
+  // means under the "" key (the legacy ATA Create).
+  const key = discHex ?? (input.data.length === 0 ? '' : undefined)
+  const schema = key !== undefined ? program.instructions?.[key] : undefined
 
   if (!schema) {
     return {
@@ -318,7 +346,7 @@ export function decodeInstruction(input: DecodeInstructionInput): DecodedInstruc
     }
   }
 
-  const argStart = discriminatorLength(encoding)
+  const argStart = discHex ? discriminatorLength(encoding) : 0
   const { args, note } = decodeArgs(input.data, argStart, schema.args ?? [])
 
   return {

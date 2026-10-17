@@ -12,6 +12,8 @@
  */
 
 import { sendCommand, isSidecarReady, startSidecar, setCachedFvk, hasFvkLoaded, beginZcashSend, endZcashSend } from "../zcash-sidecar"
+import { partialSend, type SplitSendResult } from "./zcash-batching"
+import { getSetting, setSetting } from "../db"
 
 export interface ShieldedSendParams {
 	/** Hex-encoded Orchard recipient address (43 bytes) */
@@ -88,6 +90,8 @@ export interface SigningRequest {
 		is_spend: boolean
 		recipient?: string
 		rseed?: string
+		/** ZIP 374: the Unified Address the user typed (payee output only) */
+		user_address?: string
 	}>
 	display: {
 		amount: string
@@ -117,6 +121,75 @@ export async function initializeOrchardFromSeed(seedHex: string, account: number
 /** @deprecated Use initializeOrchardFromDevice for production */
 export const initializeOrchard = initializeOrchardFromSeed
 
+// Firmware 7.15+ asks for a button press on every export, and the device-match
+// check runs before every scan and send. So each wallet's key is remembered
+// under its identity, the ETH m/44'/60'/0'/0/0 address, which the device gives
+// without a button. Another seed or passphrase has another address and is asked
+// once. Hidden wallets stay in memory only.
+const rememberedFvks = new Map<string, any>()
+let fvkDiskAllowed = () => false
+
+/** Whether a remembered key may also be saved to the settings DB. */
+export function setFvkDiskAllowed(allowed: () => boolean): void {
+	fvkDiskAllowed = allowed
+}
+
+async function walletIdentity(wallet: any): Promise<string | null> {
+	try {
+		const r = await wallet.ethGetAddress({ addressNList: [0x80000000 + 44, 0x80000000 + 60, 0x80000000, 0, 0], showDisplay: false })
+		return (typeof r === "string" ? r : r?.address)?.toLowerCase() || null
+	} catch {
+		return null
+	}
+}
+
+function savedFvk(key: string): any | null {
+	const raw = getSetting(key)
+	if (!raw) return null
+	try {
+		const { ak, nk, rivk } = JSON.parse(raw)
+		return { ak: Buffer.from(ak, "hex"), nk: Buffer.from(nk, "hex"), rivk: Buffer.from(rivk, "hex") }
+	} catch {
+		return null
+	}
+}
+
+/**
+ * The Orchard viewing key of the connected wallet: remembered, or read from
+ * the device. Every export goes through here.
+ */
+export async function exportOrchardFvk(wallet: any, account: number = 0): Promise<any> {
+	const id = await walletIdentity(wallet)
+	const key = id ? `zcash_fvk_${id}_${account}` : null
+	if (key) {
+		const known = rememberedFvks.get(key) ?? (fvkDiskAllowed() ? savedFvk(key) : null)
+		if (known) {
+			rememberedFvks.set(key, known)
+			return known
+		}
+	}
+	const fvk = await readOrchardFvk(wallet, account)
+	if (key && fvk?.ak && fvk?.nk && fvk?.rivk) {
+		rememberedFvks.set(key, fvk)
+		const hex = (b: Uint8Array) => Buffer.from(b).toString("hex")
+		if (fvkDiskAllowed()) setSetting(key, JSON.stringify({ ak: hex(fvk.ak), nk: hex(fvk.nk), rivk: hex(fvk.rivk) }))
+	}
+	return fvk
+}
+
+/**
+ * Read the key from the device ("Export Zcash View Key"). The emulator has no
+ * button, so its window must offer Confirm/Reject or the request waits forever.
+ */
+async function readOrchardFvk(wallet: any, account: number): Promise<any> {
+	const read = () => wallet.zcashGetOrchardFVK(account)
+	// Only the emulator's transport lets the host answer a button request.
+	const delegate = wallet.transport?.delegate
+	if (!delegate || !("onButtonRequest" in delegate)) return read()
+	const { emuInteractiveConfirm } = await import("../emulator-window")
+	return emuInteractiveConfirm(read, { operation: "zcashExportViewingKey", opLabel: "Export Zcash View Key", chain: "Zcash" }, delegate)
+}
+
 /**
  * Initialize Orchard from device-exported FVK.
  *
@@ -143,7 +216,7 @@ export async function initializeOrchardFromDevice(wallet: any, account: number =
 
 	// Request FVK from device — device derives internally, seed never leaves
 	console.log("[zcash-shielded] Requesting Orchard FVK from device...")
-	const deviceResult = await wallet.zcashGetOrchardFVK(account)
+	const deviceResult = await exportOrchardFvk(wallet, account)
 	const { ak, nk, rivk } = deviceResult
 
 	if (!ak || !nk || !rivk) {
@@ -229,6 +302,16 @@ export async function getShieldedBalance(): Promise<{
 	return await sendCommand("balance")
 }
 
+/** How a payment splits when it needs more notes than one transaction can
+ *  spend (firmware 7.15 signs at most 16 actions). Absent on old sidecars. */
+export interface SpendBatchInfo {
+	total_txs: number
+	pay: number
+	fee: number
+	remaining_after: number
+	fees: number[]
+}
+
 /**
  * Build a shielded transaction and get the signing request for the device.
  *
@@ -237,6 +320,7 @@ export async function getShieldedBalance(): Promise<{
  */
 export async function buildShieldedTx(params: ShieldedSendParams): Promise<{
 	signing_request: SigningRequest
+	batch?: SpendBatchInfo
 }> {
 	if (!isSidecarReady()) {
 		throw new Error("Sidecar not initialized — call initializeOrchard() first")
@@ -308,7 +392,7 @@ export async function sendShielded(
 	wallet: any,
 	params: ShieldedSendParams,
 	opts?: { signWrap?: DeviceSignWrap; onProgress?: import("./zcash-shield").TxProgressFn },
-): Promise<{ txid: string }> {
+): Promise<SplitSendResult> {
 	if (sendInProgress) {
 		throw new Error("A shielded send is already in progress — wait for it to complete")
 	}
@@ -326,7 +410,7 @@ async function _sendShieldedInner(
 	wallet: any,
 	params: ShieldedSendParams,
 	opts?: { signWrap?: DeviceSignWrap; onProgress?: import("./zcash-shield").TxProgressFn },
-): Promise<{ txid: string }> {
+): Promise<SplitSendResult> {
 	// 0. Ensure sidecar is running and FVK is set
 	if (!isSidecarReady()) {
 		await startSidecar()
@@ -341,37 +425,46 @@ async function _sendShieldedInner(
 		console.log("[zcash-shielded] Using cached FVK, skipping device refresh")
 	}
 
-	// 1. Build PCZT via sidecar
-	console.log("[zcash-shielded] Building PCZT...")
-	const { signing_request } = await buildShieldedTx(params)
-
-	console.log(`[zcash-shielded] PCZT built: ${signing_request.n_actions} actions`)
-	console.log(`[zcash-shielded] Display: ${signing_request.display.amount} to ${signing_request.display.to}`)
-
-	// 2. Send to device for signing via hdwallet
-	// The device protobuf flow:
-	//   ZcashSignPCZT (digests + metadata) → ZcashPCZTActionAck
-	//   For each action: ZcashPCZTAction (fields) → ZcashPCZTActionAck | ZcashSignedPCZT
-	console.log("[zcash-shielded] Requesting device signatures...")
-	opts?.onProgress?.("signing")
-	const signatures = opts?.signWrap
-		? await opts.signWrap(() => deviceSign(wallet, signing_request))
-		: await deviceSign(wallet, signing_request)
-	console.log(`[zcash-shielded] Got ${signatures.length} signatures`)
-
-	// 3. Finalize via sidecar (apply sigs + binding sig + serialize)
-	console.log("[zcash-shielded] Finalizing transaction...")
-	const { raw_tx, txid } = await finalizeShieldedTx(signatures)
-
-	// 4. Broadcast
-	console.log("[zcash-shielded] Broadcasting...")
-	opts?.onProgress?.("broadcasting")
-	await broadcastShieldedTx(raw_tx)
-
+	// 1. One transaction per batch: the sidecar spends at most 16 notes per
+	// transaction and reports what is left to pay. Each batch spends disjoint
+	// notes, so the next one is built right after the previous broadcasts.
 	const { txidToDisplayOrder } = await import("./zcash-shield")
-	const displayTxid = txidToDisplayOrder(txid)
-	console.log(`[zcash-shielded] Transaction sent: ${displayTxid}`)
-	return { txid: displayTxid }
+	const txids: string[] = []
+	let remaining = params.amount
+	let total = 1
+	while (remaining > 0) {
+		const index = txids.length + 1
+		try {
+			if (index > 1) opts?.onProgress?.("building", { index, total })
+			console.log(`[zcash-shielded] Building PCZT for ${remaining} ZAT...`)
+			const { signing_request, batch } = await buildShieldedTx({ ...params, amount: remaining })
+			total = txids.length + (batch?.total_txs ?? 1)
+			const progress = { index, total, fee: batch?.fee }
+			console.log(`[zcash-shielded] PCZT built: ${signing_request.n_actions} actions (transaction ${progress.index} of ${progress.total})`)
+
+			// 2. Device signs: ZcashSignPCZT → ZcashPCZTAction(s) → ZcashSignedPCZT
+			opts?.onProgress?.("signing", progress)
+			const signatures = opts?.signWrap
+				? await opts.signWrap(() => deviceSign(wallet, signing_request))
+				: await deviceSign(wallet, signing_request)
+			console.log(`[zcash-shielded] Got ${signatures.length} signatures`)
+
+			// 3. Finalize via sidecar (apply sigs + binding sig + serialize)
+			const { raw_tx, txid } = await finalizeShieldedTx(signatures)
+
+			// 4. Broadcast
+			opts?.onProgress?.("broadcasting", progress)
+			await broadcastShieldedTx(raw_tx)
+			txids.push(txidToDisplayOrder(txid))
+			console.log(`[zcash-shielded] Transaction sent: ${txids[txids.length - 1]}`)
+			remaining = batch ? batch.remaining_after : 0
+		} catch (e: any) {
+			if (txids.length === 0) throw e
+			console.warn(`[zcash-shielded] Sent ${txids.length} transaction(s); ${remaining} ZAT was not sent: ${e?.message ?? e}`)
+			return partialSend(txids, remaining, e)
+		}
+	}
+	return { txid: txids[txids.length - 1], txids }
 }
 
 /**
@@ -396,11 +489,23 @@ async function deviceSign(wallet: any, sr: SigningRequest): Promise<string[]> {
 		throw new Error("Device did not return signatures")
 	}
 
-	if (signatures.length !== sr.n_actions) {
-		throw new Error(
-			`Signature count mismatch: got ${signatures.length} signatures for ${sr.n_actions} actions`
-		)
-	}
+	checkShieldedSignatureCount(signatures.length, sr)
 
 	return signatures
+}
+
+/**
+ * Firmware 7.15 returns one signature per real spend; earlier release
+ * candidates returned one per action. The sidecar applies either layout.
+ */
+export function checkShieldedSignatureCount(
+	count: number,
+	sr: Pick<SigningRequest, "n_actions" | "actions">,
+): void {
+	const spends = sr.actions.filter(a => a.is_spend).length
+	if (count !== sr.n_actions && count !== spends) {
+		throw new Error(
+			`Signature count mismatch: got ${count} signatures for ${sr.n_actions} actions (${spends} spends)`
+		)
+	}
 }

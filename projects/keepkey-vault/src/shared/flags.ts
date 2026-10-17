@@ -13,16 +13,15 @@
 export const EVM_INSIGHT = false
 
 /**
- * Bitcoin-only onboarding: during OOB setup on a fresh device, let the user pick
- * Bitcoin-only vs Multi-coin firmware. Bitcoin-only flashes the BITCOIN_ONLY
- * firmware variant (smaller attack surface) and is effectively ONE-WAY — a
- * bitcoin-only seed is locked to bitcoin-only firmware (storage band 10017).
- *
- * Default OFF. Do NOT flip on until a signed btc-only asset is actually
- * published in a firmware release (see BTC_ONLY_FIRMWARE_ASSET) and shipped,
- * then enable in the release AFTER that.
+ * Bitcoin-only onboarding: during setup of a new KeepKey, let the user pick
+ * Bitcoin-only vs Multi-chain firmware on the first (bootloader) page; the
+ * firmware step installs the choice. Bitcoin-only flashes the signed bitcoin-only
+ * build bundled in firmware-bundle/ (manifest firmwareBitcoinOnly) and is
+ * effectively ONE-WAY: a bitcoin-only seed is locked to bitcoin-only firmware
+ * (storage band 10017). The picker hides itself when the manifest has no
+ * bitcoin-only entry.
  */
-export const BITCOIN_ONLY_ONBOARDING = false
+export const BITCOIN_ONLY_ONBOARDING = true
 
 /**
  * True when the connected device runs bitcoin-only firmware, per its Features

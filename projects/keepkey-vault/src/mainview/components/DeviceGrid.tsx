@@ -12,6 +12,8 @@ import { Box, Flex, Text, Image } from "@chakra-ui/react"
 import kkIcon from "../assets/icon.png"
 import { rpcRequest, onRpcMessage } from "../lib/rpc"
 import type { RegisteredDevice, EmulatorStatus, EmulatorWalletInfo } from "../../shared/types"
+import { emulatorWalletDetail } from "../../shared/emulatorWallets"
+import { EmulatorWalletChooser } from "./EmulatorWalletChooser"
 
 interface DeviceGridProps {
 	onViewPortfolio: (deviceId: string, label: string) => void
@@ -31,7 +33,7 @@ export function DeviceGrid({ onViewPortfolio, onReady, emulatorEnabled = false }
 	const [emuStatus, setEmuStatus] = useState<EmulatorStatus | null>(null)
 	const [loading, setLoading] = useState<string | null>(null)
 	const [confirmForget, setConfirmForget] = useState<string | null>(null)
-	const [confirmDeleteEmu, setConfirmDeleteEmu] = useState<string | null>(null)
+	const [pickingSeed, setPickingSeed] = useState(false)
 	const [error, setError] = useState<string | null>(null)
 	const [showValues, setShowValues] = useState(false)
 	const [revealed, setRevealed] = useState(hasRevealedOnce)
@@ -77,7 +79,7 @@ export function DeviceGrid({ onViewPortfolio, onReady, emulatorEnabled = false }
 		if (!emulatorEnabled) {
 			setEmuStatus(null)
 			setEmuWallets([])
-			setConfirmDeleteEmu(null)
+			setPickingSeed(false)
 		}
 	}, [emulatorEnabled])
 
@@ -105,8 +107,11 @@ export function DeviceGrid({ onViewPortfolio, onReady, emulatorEnabled = false }
 				throw new Error(status?.error || "Emulator did not start (no error reported)")
 			}
 			await refresh()
+			setLoading(null)
+			return true
 		} catch (e: any) { setError(e?.message || String(e) || "Emulator failed to start") }
 		setLoading(null)
+		return false
 	}, [refresh])
 
 	const handleStopEmu = useCallback(async () => {
@@ -125,7 +130,6 @@ export function DeviceGrid({ onViewPortfolio, onReady, emulatorEnabled = false }
 			await refresh()
 		} catch (e: any) { setError(e?.message || String(e)) }
 		setLoading(null)
-		setConfirmDeleteEmu(null)
 	}, [refresh])
 
 	// ── Helpers ──────────────────────────────────────────────────────
@@ -240,7 +244,7 @@ export function DeviceGrid({ onViewPortfolio, onReady, emulatorEnabled = false }
 			)}
 
 			{/* Grid of cards */}
-			{hasContent && (
+			{(hasContent || emulatorEnabled) && (
 				<Flex wrap="wrap" gap="3" justify="center">
 					{/* Physical device cards (watch-only when not the active live session) */}
 					{devices.map((d) => (
@@ -292,67 +296,50 @@ export function DeviceGrid({ onViewPortfolio, onReady, emulatorEnabled = false }
 						</DeviceCard>
 					))}
 
-					{/* Emulator wallet cards */}
-					{emuWallets.map((w) => {
-						const active = w.isActive && emuRunning
-						const isDeleting = confirmDeleteEmu === w.name
-						const displayName = w.label || w.name
+					{/* One emulator card. It never starts a seed by itself: every start
+					    goes through the picker, where the seed is chosen by name. */}
+					{emulatorEnabled && (() => {
+						const running = emuRunning ? emuWallets.find((w) => w.isActive) : undefined
 						return (
-							<DeviceCard key={`emu:${w.name}`} active={active}>
-								<Flex justify="space-between" align="center" mb="2">
-									<EmuBadge active={active} />
-									{!active && !isDeleting && (
-										<SmallCircleBtn color="var(--text-3)" label="&times;" onClick={() => setConfirmDeleteEmu(w.name)} />
-									)}
-								</Flex>
-
+							<DeviceCard active={!!running}>
+								<Flex mb="2"><EmuBadge active={!!running} /></Flex>
 								<Flex align="center" gap="2.5" mb="2.5">
-									<EmulatorIcon active={active} />
+									<EmulatorIcon active={!!running} />
 									<Box flex="1" minW="0">
-										<Text fontSize="14px" fontWeight="500" color={active ? "var(--teal)" : "var(--text-0)"} truncate lineHeight="1.2">
-											{displayName}
+										<Text fontSize="14px" fontWeight="500" fontFamily={running ? "mono" : undefined} color={running ? "var(--teal)" : "var(--text-0)"} truncate lineHeight="1.2">
+											{running ? running.name : "KeepKey Emulator"}
 										</Text>
-										{w.label && w.label !== w.name && (
-											<Text fontSize="10px" color="var(--text-3)" fontFamily="mono" truncate>{w.name}</Text>
+										<Text fontSize="10px" color="var(--text-3)" lineHeight="1.35">
+											{running ? emulatorWalletDetail(running) : `${emuWallets.length} saved seed${emuWallets.length === 1 ? "" : "s"}`}
+										</Text>
+										{running?.ethAddress && (
+											<Text fontSize="9px" fontFamily="mono" color="var(--text-2)" wordBreak="break-all" lineHeight="1.3">ETH {running.ethAddress}</Text>
 										)}
-										{w.hasMnemonic && <Text fontSize="10px" color="var(--text-3)" mt="0.5">seed saved</Text>}
 									</Box>
 								</Flex>
-
-								{(w.totalUsd ?? 0) > 0 && (
-									<Box mb="2.5">
-										<Text fontSize="10px" color="var(--text-3)" letterSpacing="0.06em" textTransform="uppercase" fontFamily="mono">
-											Cached balance
-										</Text>
-										<Text fontSize="17px" fontWeight="500" color={showValues ? (active ? "var(--teal)" : "var(--text-0)") : "var(--text-3)"} lineHeight="1.1">
-											{showValues ? `$${formatUsd(w.totalUsd ?? 0)}` : '$ ••••'}
-										</Text>
+								{running && (
+									<Box mb="1.5">
+										<CardCta tone="rose" onClick={handleStopEmu} loading={loading === "emu:__stop"}>Stop emulator</CardCta>
 									</Box>
 								)}
-
-								{isDeleting ? (
-									<Box>
-										<Text fontSize="10px" color="var(--rose)" mb="1.5" lineHeight="1.4">
-											Delete from disk? Recovery phrase needed to re-load.
-										</Text>
-										<Flex gap="1.5">
-											<SmallCircleBtn color="var(--rose)" label="Y" onClick={() => handleDeleteEmu(w.name)} loading={loading === `emu:${w.name}`} />
-											<SmallCircleBtn color="var(--text-3)" label="N" onClick={() => setConfirmDeleteEmu(null)} />
-										</Flex>
-									</Box>
-								) : active ? (
-									<CardCta tone="rose" onClick={handleStopEmu} loading={loading === "emu:__stop"}>
-										Stop emulator
-									</CardCta>
-								) : (
-									<CardCta tone="teal" onClick={() => handleStartEmu(w.name)} loading={loading === `emu:${w.name}`}>
-										Start
-									</CardCta>
-								)}
+								<CardCta tone="teal" onClick={() => { setError(null); setPickingSeed(true) }}>
+									{running ? "Switch seed…" : "Start emulator…"}
+								</CardCta>
 							</DeviceCard>
 						)
-					})}
+					})()}
 				</Flex>
+			)}
+
+			{pickingSeed && (
+				<EmulatorWalletChooser
+					wallets={emuWallets}
+					busy={!!loading}
+					error={error}
+					onClose={() => setPickingSeed(false)}
+					onPick={async (name) => { if (await handleStartEmu(name)) setPickingSeed(false) }}
+					onDelete={handleDeleteEmu}
+				/>
 			)}
 
 			{/* Grand total + eyeball toggle */}

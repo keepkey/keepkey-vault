@@ -9,7 +9,7 @@
  *
  * Zoo: 19-eip712-permit.png (similar risk profile)
  */
-const { run, ETH_PATH, CHAINS, toHex, erc20Approve } = require('../_helpers')
+const { run, ETH_PATH, CHAINS, toHex, erc20Approve, SENTINEL_NONCE, assertSignedByDevice } = require('../_helpers')
 
 const MAX_UINT256 = (2n ** 256n) - 1n
 
@@ -29,7 +29,7 @@ run('ERC-20 approve() — UNLIMITED (MAX_UINT256)', async (getSdk, assert) => {
     to: USDC,
     value: '0x0',
     data,
-    nonce: '0x2',
+    nonce: SENTINEL_NONCE, // can never be mined
     gasLimit: toHex(50000),
     gasPrice: toHex(20000000000),
     chainId: CHAINS.ETH,
@@ -44,5 +44,5 @@ run('ERC-20 approve() — UNLIMITED (MAX_UINT256)', async (getSdk, assert) => {
   console.log('\n  >>> APPROVE on device — note the risk <<<\n')
 
   const result = await sdk.eth.ethSignTransaction(tx)
-  assert('Got signed tx', !!result)
+  assertSignedByDevice(assert, result, address, CHAINS.ETH)
 })

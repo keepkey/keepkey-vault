@@ -7,7 +7,7 @@
  *
  * Zoo: evm-chains/polygon-chain137 (chain ID verification)
  */
-const { run, ETH_PATH, CHAINS, toHex } = require('../_helpers')
+const { run, ETH_PATH, CHAINS, toHex, SENTINEL_NONCE, assertSignedByDevice } = require('../_helpers')
 
 run('Polygon Native Send (chain ID 137)', async (getSdk, assert) => {
   const sdk = await getSdk()
@@ -20,7 +20,7 @@ run('Polygon Native Send (chain ID 137)', async (getSdk, assert) => {
     to: '0x0000000000000000000000000000000000000001',
     value: toHex(1000000000000000), // 0.001 MATIC
     data: '0x',
-    nonce: '0x0',
+    nonce: SENTINEL_NONCE, // can never be mined
     gasLimit: '0x5208',
     gasPrice: '0x6FC23AC00', // 30 Gwei
     chainId: CHAINS.POLYGON,
@@ -31,7 +31,5 @@ run('Polygon Native Send (chain ID 137)', async (getSdk, assert) => {
 
   const result = await sdk.eth.ethSignTransaction(tx)
 
-  assert('Got signed tx', !!result)
-  assert('Has signature components', !!(result.serializedTx || result.v !== undefined))
-  console.log(`  v=${result.v}`)
+  assertSignedByDevice(assert, result, address, CHAINS.POLYGON)
 })

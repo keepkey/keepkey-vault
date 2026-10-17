@@ -13,14 +13,16 @@ function exactHex(value: string, bytes: number | undefined, label: string): Buff
   return Buffer.from(clean, 'hex')
 }
 
+/** Returns the recovery byte as given: the production issuer writes 0/1, the
+ *  alpha ceremony 27/28, and firmware does not read it. */
 function signatureMatches(digest: string, signature: Buffer, expectedPublicKey: string, recovery?: number): number {
   const candidates = recovery === undefined ? [27, 28] : [recovery]
-  if (!candidates.every(value => value === 27 || value === 28)) throw new Error('recovery must be 27 or 28')
+  if (!candidates.every(value => [0, 1, 27, 28].includes(value))) throw new Error('recovery must be 0, 1, 27 or 28')
   const r = `0x${signature.subarray(0, 32).toString('hex')}`
   const s = `0x${signature.subarray(32).toString('hex')}`
   for (const v of candidates) {
     try {
-      const recovered = ethersUtils.computePublicKey(ethersUtils.recoverPublicKey(`0x${digest}`, { r, s, v }), true).slice(2).toLowerCase()
+      const recovered = ethersUtils.computePublicKey(ethersUtils.recoverPublicKey(`0x${digest}`, { r, s, v: v < 27 ? v + 27 : v }), true).slice(2).toLowerCase()
       if (recovered === expectedPublicKey.toLowerCase()) return v
     } catch { /* try the other recovery bit */ }
   }

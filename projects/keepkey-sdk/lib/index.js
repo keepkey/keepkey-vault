@@ -57,8 +57,6 @@ class KeepKeySdk {
                 getEntropy: (size) => this.client.postBytes('/system/info/get-entropy', { size }, this.client.signingTimeoutMs),
                 /** List all connected KeepKey devices. */
                 getDevices: () => this.client.get('/api/v2/devices'),
-                /** List assets supported by the connected device. */
-                getSupportedAssets: () => this.client.get('/api/v2/devices/supported-assets'),
                 /** Check REST API health and device connection state. Does not require auth. */
                 getHealth: () => this.client.get('/api/health'),
                 /** List all coins the firmware knows about. */
@@ -74,7 +72,8 @@ class KeepKeySdk {
                 wipe: () => this.client.post('/system/wipe-device', undefined, this.client.signingTimeoutMs),
                 /** Change device label, passphrase protection, or auto-lock delay. */
                 applySettings: (params) => this.client.post('/system/apply-settings', params),
-                /** Apply device policy changes. */
+                /** Apply a device policy change, e.g. `{ policyName: 'AdvancedMode', enabled: false }`.
+                 *  Confirmed on the device (and asks for the PIN); each call writes device flash. */
                 applyPolicies: (params) => this.client.post('/system/apply-policies', params),
                 /** Start a PIN change flow. Pass `remove: true` to remove the PIN. */
                 changePin: (remove) => this.client.post('/system/change-pin', remove ? { remove: true } : {}),
@@ -142,8 +141,6 @@ class KeepKeySdk {
             tendermintGetAddress: (params) => this.client.post('/addresses/tendermint', params),
             /** Derive an XRP (Ripple) address. */
             xrpGetAddress: (params) => this.client.post('/addresses/xrp', params),
-            /** Derive a BNB Beacon Chain address. */
-            bnbGetAddress: (params) => this.client.post('/addresses/bnb', params),
             /** Derive a Solana (SOL) address. */
             solanaGetAddress: (params) => this.client.post('/addresses/solana', params),
             /** Derive a TRON (TRX) address. */
@@ -275,14 +272,6 @@ class KeepKeySdk {
             xrpSignTransaction: (params) => this.client.post('/xrp/sign-transaction', params, this.client.signingTimeoutMs),
         };
         // ═══════════════════════════════════════════════════════════════════
-        // binance — BNB Beacon Chain signing
-        // ═══════════════════════════════════════════════════════════════════
-        /** BNB Beacon Chain signing. */
-        this.binance = {
-            /** Sign a BNB Beacon Chain transaction. */
-            binanceSignTransaction: (params) => this.client.post('/bnb/sign-transaction', params, this.client.signingTimeoutMs),
-        };
-        // ═══════════════════════════════════════════════════════════════════
         // solana — Solana signing
         // ═══════════════════════════════════════════════════════════════════
         /** Solana signing (supports SPL tokens and transaction-bound ClearSign metadata). */
@@ -297,6 +286,16 @@ class KeepKeySdk {
             // Device confirmation can span several screens (schema-decoded args,
             // accounts, priority fee); the 30s default aborts mid-review.
             this.client.post('/solana/sign-transaction', params, this.client.signingTimeoutMs),
+            /**
+             * Decode a Solana transaction and return Desktop's risk verdict for it.
+             * No device I/O and no signing.
+             */
+            decodeTransaction: (params) => this.client.post('/solana/decode-transaction', params),
+            /**
+             * Sign raw Solana message bytes (dApp logins / `solana:signMessage`).
+             * Requires AdvancedMode on the device; see {@link SolanaSignMessageParams}.
+             */
+            solanaSignMessage: (params) => this.client.post('/solana/sign-message', params, this.client.signingTimeoutMs),
             /**
              * Sign a Solana off-chain message with domain separation. Firmware
              * builds the spec envelope (`\xff` || "solana offchain" || version ||
@@ -378,6 +377,18 @@ class KeepKeySdk {
             tonFinalizeTransfer: (params) => this.client.post('/ton/finalize-transfer', params),
         };
         // ═══════════════════════════════════════════════════════════════════
+        // clearsign — Desktop's verdict on a transaction, before signing
+        // ═══════════════════════════════════════════════════════════════════
+        /** ClearSign reports: what Desktop and the device would show for a transaction. */
+        this.clearsign = {
+            /**
+             * Build the report Desktop's approval card shows for this transaction,
+             * against the connected device's firmware. No device I/O and no signing;
+             * Desktop records the request as a local audit-demand row.
+             */
+            report: (params) => this.client.post('/clearsign/report', params),
+        };
+        // ═══════════════════════════════════════════════════════════════════
         // xpub — public key operations
         // ═══════════════════════════════════════════════════════════════════
         /** Extended public key (xpub) derivation — single and batch. */
@@ -443,10 +454,8 @@ class KeepKeySdk {
             getTokenDecimals: (params) => this.client.post('/api/v2/network/token-decimals', params),
             /** Get staking positions for an address. */
             getStakingPositions: (params) => this.client.post('/api/v2/staking/positions', params),
-            /** Get a swap quote from the integrated aggregator. */
+            /** Get a swap quote from the integrated aggregator. Returns `{ data: quote }`. */
             getSwapQuote: (params) => this.client.post('/api/v2/swap/quote', params),
-            /** Get THORChain/Mayachain inbound addresses (for swap deposits). */
-            getInboundAddresses: () => this.client.get('/api/v2/swap/inbound-addresses'),
         };
         // ═══════════════════════════════════════════════════════════════════
         // sweep — BTC non-standard path recovery

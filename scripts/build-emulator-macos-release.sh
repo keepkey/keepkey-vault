@@ -9,7 +9,7 @@ CLEARSIGN_ALPHA_ROOT_PUBKEY=02de9231b2094433235532fb1932e324a2c7304195e12e610c67
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FW_DIR="$REPO_ROOT/modules/keepkey-firmware"
 STAGE_DIR="$REPO_ROOT/projects/keepkey-vault/emulator-bundle"
-EXPECTED_VERSION="${EMU_EXPECTED_VERSION:-7.16.0}"
+EXPECTED_VERSION="${EMU_EXPECTED_VERSION:-7.17.0}"
 PROTOC_WRAPPER="$REPO_ROOT/scripts/protoc-nanopb-compat.sh"
 PROTOC_VERSION=21.12
 TC_CACHE="$HOME/.keepkey/emulator/.toolchain"
@@ -94,6 +94,7 @@ build_arch() {
     -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
     -DPROTOC_BINARY="$PROTOC_WRAPPER" \
     -DNANOPB_DIR="$NANOPB_DIR" \
+    -DPROTOC_GEN_NANOPB_EXECUTABLE="$PYBIN/protoc-gen-nanopb" \
     -DCMAKE_C_FLAGS="-DPB_NO_PACKED_STRUCTS=1" \
     -DCMAKE_CXX_FLAGS="-DPB_NO_PACKED_STRUCTS=1"
   PATH="$PYBIN:$PATH:$NANOPB_DIR/generator" cmake --build "$build_dir" \

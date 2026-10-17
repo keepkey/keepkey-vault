@@ -5,16 +5,18 @@
  * null / no-op and log a warning. The app never crashes from cache failure.
  */
 import { Database } from 'bun:sqlite'
+import { migratePublicKeyCache } from './public-key-cache-migration'
 import { Utils } from 'electrobun/bun'
 import { join, dirname } from 'node:path'
 import { mkdirSync, unlinkSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { createHash, randomUUID } from 'crypto'
-import type { ChainBalance, CustomToken, CustomChain, PairedAppInfo, ApiLogEntry, ReportMeta, ReportData, SwapHistoryRecord, SwapHistoryFilter, SwapTrackingStatus, SwapHistoryStats, Bip85SeedMeta, PioneerServer, AddressBookEntry, AddressBookTx, AddressBookFilter, AddressBookKind, ClearSignEvent, ClearSignObservation, ClearSignObservationDraft, ClearSignObservationOutcome, ClearSignEventSource, ClearSignCoverageSummary, ClearSignAuditJob, ClearSignPromotionBundle, ClearSignPromotionReview, ClearSignPromotionRecord } from '../shared/types'
+import type { ChainBalance, CustomToken, CustomChain, PairedAppInfo, ApiLogEntry, ReportMeta, ReportData, SwapHistoryRecord, SwapHistoryFilter, SwapTrackingStatus, SwapHistoryStats, Bip85SeedMeta, PioneerServer, AddressBookEntry, AddressBookTx, AddressBookFilter, AddressBookKind, ClearSignEvent, ClearSignObservation, ClearSignObservationDraft, ClearSignObservationOutcome, ClearSignProtectionLevel, ClearSignEventSource, ClearSignCoverageSummary, ClearSignAuditJob, ClearSignPromotionBundle, ClearSignPromotionReview, ClearSignPromotionRecord } from '../shared/types'
 import { authenticatedClearSignLevel, clearSignExposurePriority, expandClearSignAuditDrafts } from './clearsign-observation'
 import { summarizeClearSignObservations } from './clearsign-observation'
 import { clearSignPromotionBundleHash, verifyClearSignPromotionReview } from './clearsign-promotion'
 import type { VerifiedClearSignArtifact } from './clearsign-artifact-import'
 import { configureClearSignArtifactSnapshots } from './clearsign-artifact-resolver'
+import { configureClearSignProviders, ensureClearSignProviderTable, listClearSignProviders } from './clearsign-providers'
 
 const SCHEMA_VERSION = '10'
 
@@ -85,6 +87,8 @@ export function initDb() {
         PRIMARY KEY (device_id, chain_id)
       )
     `)
+    migratePublicKeyCache(db, 'balances')
+
     // Migration: add defi_positions_json for existing installs that
     // predate the GetPortfolioBalances includeDefi merge.
     try {
@@ -206,6 +210,7 @@ export function initDb() {
       db.exec(`ALTER TABLE cached_pubkeys ADD COLUMN balance_usd REAL NOT NULL DEFAULT 0`)
     } catch { /* column already exists */ }
 
+    migratePublicKeyCache(db, 'pubkeys')
 
     db.exec(`
       CREATE TABLE IF NOT EXISTS reports (
@@ -292,6 +297,9 @@ export function initDb() {
         ['https://api.keepkey.info', 'KeepKey Official', Date.now()]
       )
     }
+
+    // User-added ClearSign description providers (third-party, per-session trust).
+    ensureClearSignProviderTable(db)
 
     // Per-emulator-wallet metadata (keyed by flash name, stable across re-imports).
     // Kept separate from device_snapshot so ephemeral emu identities never
@@ -661,8 +669,8 @@ export function getCachedBalances(deviceId: string): { balances: ChainBalance[];
   try {
     if (!db) return null
     const rows = db.query(
-      'SELECT chain_id, symbol, balance, balance_usd, address, tokens_json, defi_positions_json, updated_at FROM balances WHERE device_id = ?'
-    ).all(deviceId) as Array<{ chain_id: string; symbol: string; balance: string; balance_usd: number; address: string; tokens_json: string | null; defi_positions_json: string | null; updated_at: number }>
+      'SELECT chain_id, symbol, balance, balance_usd, address, tokens_json, defi_positions_json, breakdown_json, updated_at FROM balances WHERE device_id = ?'
+    ).all(deviceId) as Array<{ chain_id: string; symbol: string; balance: string; balance_usd: number; address: string; tokens_json: string | null; defi_positions_json: string | null; breakdown_json: string | null; updated_at: number }>
     if (!rows || rows.length === 0) return null
     let maxUpdatedAt = 0
     const balances = rows.map(r => {
@@ -680,6 +688,9 @@ export function getCachedBalances(deviceId: string): { balances: ChainBalance[];
       }
       if (r.defi_positions_json) {
         try { entry.defiPositions = JSON.parse(r.defi_positions_json) } catch { /* corrupt JSON, skip defi */ }
+      }
+      if (r.breakdown_json) {
+        try { const rows = JSON.parse(r.breakdown_json); if (Array.isArray(rows)) entry.breakdown = rows } catch { /* corrupt JSON */ }
       }
       // Native = balanceUsd − tokens − defi. We can't reconstruct it perfectly
       // because the live path doesn't separately persist nativeBalanceUsd, but
@@ -705,8 +716,8 @@ export function setCachedBalances(deviceId: string, balances: ChainBalance[], co
     const now = Date.now()
     // Guarded upsert: keep existing non-zero if Pioneer didn't respond for this chain.
     const stmtGuarded = db.prepare(
-      `INSERT INTO balances (device_id, chain_id, symbol, balance, balance_usd, address, tokens_json, defi_positions_json, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO balances (device_id, chain_id, symbol, balance, balance_usd, address, tokens_json, defi_positions_json, breakdown_json, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(device_id, chain_id) DO UPDATE SET
          symbol     = excluded.symbol,
          address    = CASE WHEN excluded.address != '' THEN excluded.address ELSE address END,
@@ -714,12 +725,13 @@ export function setCachedBalances(deviceId: string, balances: ChainBalance[], co
          balance_usd= CASE WHEN CAST(excluded.balance_usd AS REAL) > 0 THEN excluded.balance_usd ELSE balance_usd END,
          tokens_json= CASE WHEN CAST(excluded.balance_usd AS REAL) > 0 THEN excluded.tokens_json ELSE tokens_json END,
          defi_positions_json = CASE WHEN CAST(excluded.balance_usd AS REAL) > 0 THEN excluded.defi_positions_json ELSE defi_positions_json END,
+         breakdown_json = CASE WHEN CAST(excluded.balance_usd AS REAL) > 0 THEN COALESCE(excluded.breakdown_json, breakdown_json) ELSE breakdown_json END,
          updated_at = CASE WHEN CAST(excluded.balance_usd AS REAL) > 0 THEN excluded.updated_at  ELSE updated_at  END`
     )
     // Forced upsert: Pioneer confirmed this chain — always write, even if balance=0.
     const stmtForced = db.prepare(
-      `INSERT INTO balances (device_id, chain_id, symbol, balance, balance_usd, address, tokens_json, defi_positions_json, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO balances (device_id, chain_id, symbol, balance, balance_usd, address, tokens_json, defi_positions_json, breakdown_json, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(device_id, chain_id) DO UPDATE SET
          symbol      = excluded.symbol,
          address     = CASE WHEN excluded.address != '' THEN excluded.address ELSE address END,
@@ -727,13 +739,14 @@ export function setCachedBalances(deviceId: string, balances: ChainBalance[], co
          balance_usd = excluded.balance_usd,
          tokens_json = excluded.tokens_json,
          defi_positions_json = excluded.defi_positions_json,
+         breakdown_json = COALESCE(excluded.breakdown_json, breakdown_json),
          updated_at  = excluded.updated_at`
     )
     const tx = db.transaction(() => {
       for (const b of balances) {
         const tokensJson = b.tokens && b.tokens.length > 0 ? JSON.stringify(b.tokens) : null
         const defiJson = b.defiPositions && b.defiPositions.length > 0 ? JSON.stringify(b.defiPositions) : null
-        const args = [deviceId, b.chainId, b.symbol, b.balance, b.balanceUsd, b.address, tokensJson, defiJson, now] as const
+        const args = [deviceId, b.chainId, b.symbol, b.balance, b.balanceUsd, b.address, tokensJson, defiJson, b.breakdown ? JSON.stringify(b.breakdown) : null, now] as const
         if (confirmedChainIds?.has(b.chainId)) {
           stmtForced.run(...args)
         } else {
@@ -756,8 +769,8 @@ export function updateCachedBalance(deviceId: string, balance: ChainBalance, for
     const defiJson = balance.defiPositions && balance.defiPositions.length > 0 ? JSON.stringify(balance.defiPositions) : null
     if (force) {
       db.run(
-        `INSERT INTO balances (device_id, chain_id, symbol, balance, balance_usd, address, tokens_json, defi_positions_json, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO balances (device_id, chain_id, symbol, balance, balance_usd, address, tokens_json, defi_positions_json, breakdown_json, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(device_id, chain_id) DO UPDATE SET
            symbol      = excluded.symbol,
            address     = CASE WHEN excluded.address != '' THEN excluded.address ELSE address END,
@@ -765,13 +778,14 @@ export function updateCachedBalance(deviceId: string, balance: ChainBalance, for
            balance_usd = excluded.balance_usd,
            tokens_json = excluded.tokens_json,
            defi_positions_json = excluded.defi_positions_json,
+           breakdown_json = COALESCE(excluded.breakdown_json, breakdown_json),
            updated_at  = excluded.updated_at`,
-        [deviceId, balance.chainId, balance.symbol, balance.balance, balance.balanceUsd, balance.address, tokensJson, defiJson, Date.now()]
+        [deviceId, balance.chainId, balance.symbol, balance.balance, balance.balanceUsd, balance.address, tokensJson, defiJson, balance.breakdown ? JSON.stringify(balance.breakdown) : null, Date.now()]
       )
     } else {
       db.run(
-        `INSERT INTO balances (device_id, chain_id, symbol, balance, balance_usd, address, tokens_json, defi_positions_json, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO balances (device_id, chain_id, symbol, balance, balance_usd, address, tokens_json, defi_positions_json, breakdown_json, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(device_id, chain_id) DO UPDATE SET
            symbol     = excluded.symbol,
            address    = CASE WHEN excluded.address != '' THEN excluded.address ELSE address END,
@@ -779,8 +793,9 @@ export function updateCachedBalance(deviceId: string, balance: ChainBalance, for
            balance_usd= CASE WHEN CAST(excluded.balance_usd AS REAL) > 0 THEN excluded.balance_usd ELSE balance_usd END,
            tokens_json= CASE WHEN CAST(excluded.balance_usd AS REAL) > 0 THEN excluded.tokens_json ELSE tokens_json END,
            defi_positions_json = CASE WHEN CAST(excluded.balance_usd AS REAL) > 0 THEN excluded.defi_positions_json ELSE defi_positions_json END,
+           breakdown_json = CASE WHEN CAST(excluded.balance_usd AS REAL) > 0 THEN COALESCE(excluded.breakdown_json, breakdown_json) ELSE breakdown_json END,
            updated_at = CASE WHEN CAST(excluded.balance_usd AS REAL) > 0 THEN excluded.updated_at  ELSE updated_at  END`,
-        [deviceId, balance.chainId, balance.symbol, balance.balance, balance.balanceUsd, balance.address, tokensJson, defiJson, Date.now()]
+        [deviceId, balance.chainId, balance.symbol, balance.balance, balance.balanceUsd, balance.address, tokensJson, defiJson, balance.breakdown ? JSON.stringify(balance.breakdown) : null, Date.now()]
       )
     }
   } catch (e: any) {
@@ -982,6 +997,17 @@ export function removePioneerServerDb(url: string) {
     throw e
   }
 }
+
+// ── ClearSign Providers ──────────────────────────────────────────────
+
+configureClearSignProviders(() => {
+  try {
+    return db ? listClearSignProviders(db) : []
+  } catch (e: any) {
+    console.warn('[db] listClearSignProviders failed:', e.message)
+    return []
+  }
+})
 
 // ── Token Visibility (spam filter user overrides) ─────────────────────
 
@@ -1308,6 +1334,22 @@ export function finalizeClearSignObservation(
     )
   } catch (e: any) {
     console.warn('[db] finalizeClearSignObservation failed:', e.message)
+  }
+}
+
+/** The device refused the observation's ERC-7730 definition and the call is
+ *  signed without it: no description any more, at the host level given. */
+export function refuseClearSignObservationDefinition(id: string, protectionLevel?: ClearSignProtectionLevel): void {
+  try {
+    if (!db) return
+    db.run(
+      `UPDATE clearsign_observations
+          SET definition_source = 'none', protection_level = COALESCE(?, protection_level)
+        WHERE id = ? AND outcome = 'pending' AND definition_source = 'erc7730'`,
+      [protectionLevel ?? null, id],
+    )
+  } catch (e: any) {
+    console.warn('[db] refuseClearSignObservationDefinition failed:', e.message)
   }
 }
 
@@ -2104,7 +2146,27 @@ export function getDeviceSnapshotById(deviceId: string): { deviceId: string; lab
   }
 }
 
-export function getAllDeviceSnapshots(): Array<{ deviceId: string; label: string; firmwareVer: string; updatedAt: number; totalUsd: number }> {
+/** Firmware-mode features last seen for the firmware build with this hash
+ *  (base64, as the device reports it). The hash names the build, so any
+ *  device's snapshot of it says the same version and variant. */
+export function getSnapshotFeaturesByFirmwareHash(firmwareHash: string): any | null {
+  try {
+    if (!db || !firmwareHash) return null
+    const rows = db.query('SELECT features_json FROM device_snapshot ORDER BY updated_at DESC').all() as Array<{ features_json: string }>
+    for (const row of rows) {
+      try {
+        const features = JSON.parse(row.features_json)
+        if (features?.firmwareHash === firmwareHash && !features.bootloaderMode) return features
+      } catch { /* skip a corrupt row */ }
+    }
+    return null
+  } catch (e: any) {
+    console.warn('[db] getSnapshotFeaturesByFirmwareHash failed:', e.message)
+    return null
+  }
+}
+
+export function getAllDeviceSnapshots():Array<{ deviceId: string; label: string; firmwareVer: string; updatedAt: number; totalUsd: number }> {
   try {
     if (!db) return []
     const rows = db.query(`
@@ -2148,6 +2210,8 @@ export interface EmulatorWalletMeta {
   channel: string
   updatedAt: number
   totalUsd: number
+  /** First Ethereum account, from the address cache; '' until the wallet has connected. */
+  ethAddress: string
 }
 
 export function saveEmulatorWalletMeta(name: string, label: string, deviceId: string, firmwareVersion: string, channel: string) {
@@ -2167,11 +2231,13 @@ export function getAllEmulatorWalletMeta(): EmulatorWalletMeta[] {
     if (!db) return []
     const rows = db.query(`
       SELECT w.name, w.label, w.device_id, w.firmware_version, w.channel, w.updated_at,
-             COALESCE(SUM(b.balance_usd), 0) AS total_usd
+             COALESCE(SUM(b.balance_usd), 0) AS total_usd,
+             COALESCE((SELECT p.address FROM cached_pubkeys p WHERE p.device_id = w.device_id
+                       AND p.chain_id = 'ethereum' AND p.path = 'm/44''/60''/0''/0/0' LIMIT 1), '') AS eth_address
       FROM emulator_wallet w
       LEFT JOIN balances b ON b.device_id = w.device_id
       GROUP BY w.name
-    `).all() as Array<{ name: string; label: string; device_id: string; firmware_version: string; channel: string; updated_at: number; total_usd: number }>
+    `).all() as Array<{ name: string; label: string; device_id: string; firmware_version: string; channel: string; updated_at: number; total_usd: number; eth_address: string }>
     return rows.map(r => ({
       name: r.name,
       label: r.label,
@@ -2180,6 +2246,7 @@ export function getAllEmulatorWalletMeta(): EmulatorWalletMeta[] {
       channel: r.channel,
       updatedAt: r.updated_at,
       totalUsd: r.total_usd,
+      ethAddress: r.eth_address,
     }))
   } catch (e: any) {
     console.warn('[db] getAllEmulatorWalletMeta failed:', e.message)
@@ -2205,7 +2272,7 @@ export function saveCachedPubkey(deviceId: string, chainId: string, path: string
       db.run(
         `INSERT INTO cached_pubkeys (device_id, chain_id, path, xpub, address, script_type, balance, balance_usd, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(device_id, chain_id, path) DO UPDATE SET
+         ON CONFLICT(device_id, chain_id, path, script_type) DO UPDATE SET
            xpub        = excluded.xpub,
            address     = CASE WHEN excluded.address != '' THEN excluded.address ELSE address END,
            script_type = excluded.script_type,
@@ -2218,7 +2285,7 @@ export function saveCachedPubkey(deviceId: string, chainId: string, path: string
       db.run(
         `INSERT INTO cached_pubkeys (device_id, chain_id, path, xpub, address, script_type, balance, balance_usd, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(device_id, chain_id, path) DO UPDATE SET
+         ON CONFLICT(device_id, chain_id, path, script_type) DO UPDATE SET
            xpub        = excluded.xpub,
            address     = CASE WHEN excluded.address != '' THEN excluded.address ELSE address END,
            script_type = excluded.script_type,

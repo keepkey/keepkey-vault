@@ -122,6 +122,49 @@ describe('decodeInstruction — fallback paths', () => {
     expect(result.note).toContain('no schema for discriminator')
   })
 
+  // A stake-account creation as wallets send it, encoded by the Solana
+  // reference SDK (@solana/web3.js SystemProgram.createAccountWithSeed):
+  // u32 3 | base | bincode String "stake:0" (u64 length 7, then the bytes) |
+  // lamports | space | owner (the Stake program).
+  const CREATE_WITH_SEED = Buffer.from(
+    '03000000'
+    + '7e8c088760bfde1dddcf32c17f209b8242ee52aaf131facd88d0ea2c6d0b06f2'
+    + '0700000000000000' + '7374616b653a30'
+    + '80d5220000000000' + 'c800000000000000'
+    + '06a1d8179137542a983437bdfe2a7ab2557f535c8a78722b68a49dc000000000',
+    'hex',
+  )
+  const WALLET = '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM'
+  const STAKE_ACCOUNT = '8BseXT9EtoEhBTKFFYkwTnjKSUZwhtmdKY2Jrj8j45Rt'
+
+  test('System createAccountWithSeed reads the length-prefixed seed and every field after it', () => {
+    const result = decodeInstruction({
+      programIdIndex: 2,
+      accountIndices: [0, 1],
+      data: CREATE_WITH_SEED,
+      expandedAccounts: [WALLET, STAKE_ACCOUNT, SYSTEM_PROGRAM],
+    })
+    expect(result.status).toBe('known')
+    expect(result.instructionName).toBe('createAccountWithSeed')
+    expect(result.note).toBeUndefined()
+    expect(result.args.map((a) => [a.name, a.value])).toEqual([
+      ['base', WALLET],
+      ['seed', 'stake:0'],
+      ['lamports', '2282880'],
+      ['space', '200'],
+      ['owner', 'Stake11111111111111111111111111111111111111'],
+    ])
+    expect(result.args[1].rawHex).toBe('07000000000000007374616b653a30')
+  })
+
+  test('a seed whose length runs past the data is truncated, not read', () => {
+    for (const data of [CREATE_WITH_SEED.subarray(0, 40), CREATE_WITH_SEED.subarray(0, 50)]) {
+      const result = decodeInstruction({ programIdIndex: 0, accountIndices: [], data, expandedAccounts: [SYSTEM_PROGRAM] })
+      expect(result.args.map((a) => a.name)).toEqual(['base'])
+      expect(result.note).toContain('truncated at arg "seed"')
+    }
+  })
+
   test('truncated args surface a note instead of throwing', () => {
     // SPL Token transfer needs 1 disc + 8 bytes. Give 1 + 3.
     const data = Buffer.concat([Buffer.from([0x03]), Buffer.from([0x01, 0x02, 0x03])])

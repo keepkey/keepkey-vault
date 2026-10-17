@@ -25,6 +25,9 @@ export interface EffectCodeIdentity {
   invocation: 'top-level' | 'call' | 'delegatecall' | 'create' | 'program' | 'cpi'
 }
 
+/** Unknown code for a transfer with no call data: there is no call to simulate. */
+export const PLAIN_TRANSFER_NOT_SIMULATED = 'PLAIN_TRANSFER_NOT_SIMULATED'
+
 export interface EffectFinding {
   code: string
   message: string
@@ -51,3 +54,10 @@ export interface EffectReport {
     authorityCoverage?: 'complete' | 'partial' | 'unknown'
   }
 }
+
+/** Shown on the approval card when no simulation ran. Provider and RPC error text stays in the log. */
+export const SIMULATION_UNAVAILABLE_MESSAGE = 'This computer could not simulate this transaction, so it cannot predict what it will move.'
+
+/** Start of the error for a call Pioneer has no route for. Not a failed run:
+ * the provider simply cannot simulate it. */
+export const PIONEER_UNSUPPORTED = 'Pioneer does not expose'

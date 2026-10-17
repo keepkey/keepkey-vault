@@ -511,6 +511,16 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 	const tokenTotalUsd = useMemo(() => cleanTokens.reduce((sum, t) => sum + (t.balanceUsd || 0), 0), [cleanTokens])
 	const spamTotalUsd = useMemo(() => spamTokens.reduce((sum, t) => sum + (t.balanceUsd || 0), 0), [spamTokens])
 	const cleanBalanceUsd = (activeBalance?.balanceUsd || 0) - spamTotalUsd
+	// zZEC is the chain's own coin in the shielded pool, and the USD above
+	// already counts it. Fold it into the header amount too, as the Dashboard
+	// does, so "0 ZEC" never sits next to a nonzero USD total.
+	const shieldedAmount = tokens.reduce((sum, t) => t.type === 'shielded' ? sum + parseFloat(t.balance || '0') : sum, 0)
+	const headerBalance = activeBalance && shieldedAmount > 0
+		? String(parseFloat(activeBalance.balance || '0') + shieldedAmount)
+		: activeBalance?.balance ?? '0'
+	const headerBalanceTitle = shieldedAmount > 0
+		? `${shieldedAmount} shielded + ${activeBalance?.balance ?? '0'} transparent ${chain.symbol}`
+		: `${headerBalance} ${chain.symbol}`
 
 	const [showAddToken, setShowAddToken] = useState(false)
 	// Watch-only mode never opens signing dialogs, regardless of how they're
@@ -1012,10 +1022,10 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 												color="var(--text-0)"
 												letterSpacing="-0.01em"
 												lineHeight="1.05"
-												title={`${activeBalance.balance} ${chain.symbol}`}
+												title={headerBalanceTitle}
 												cursor="help"
 											>
-												{formatBalance(activeBalance.balance)}
+												{formatBalance(headerBalance)}
 											</Text>
 											<Text
 												fontFamily="mono"
@@ -1096,8 +1106,8 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 				) : activeBalance && (
 					<>
 						<Flex display={{ base: "flex", sm: "none" }} align="baseline" justify="space-between" mb="1" gap="3">
-							<Text fontFamily="mono" fontSize="18px" fontWeight="500" color="var(--text-0)" letterSpacing="0.01em" title={`${activeBalance.balance} ${chain.symbol}`}>
-								{formatBalance(activeBalance.balance)}
+							<Text fontFamily="mono" fontSize="18px" fontWeight="500" color="var(--text-0)" letterSpacing="0.01em" title={headerBalanceTitle}>
+								{formatBalance(headerBalance)}
 								<Box as="span" color="var(--text-3)" ml="1.5" fontSize="13px">{chain.symbol}</Box>
 							</Text>
 							{cleanBalanceUsd > 0 && (
@@ -1167,6 +1177,16 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 								</Flex>
 							)
 						)}
+						{watchOnly && isAltUtxo && activeBalance?.breakdown?.length ? (
+							<Box aria-label="Saved account balances">
+								{activeBalance.breakdown.map(row => (
+									<Flex key={`${row.path}:${row.scriptType}`} gap="3" justify="space-between" fontSize="12px">
+										<Text color="var(--text-2)">{row.scriptType} · {row.path}</Text>
+										<Text fontFamily="mono">{formatBalance(row.balance)} {chain.symbol}</Text>
+									</Flex>
+								))}
+							</Box>
+						) : null}
 						{!watchOnly && !isHiddenWallet && isAltUtxo && (
 							<UtxoAccountSelector
 								accounts={utxoAccounts}
@@ -1178,6 +1198,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 								scripts={utxoScripts || undefined}
 								selectedScript={utxoScriptType}
 								onSelectScript={selectUtxoScript}
+								breakdown={activeBalance?.breakdown}
 							/>
 						)}
 						{!watchOnly && isEvm && evmAddresses.addresses.length >= 1 && (

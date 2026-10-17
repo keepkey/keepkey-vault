@@ -14,9 +14,12 @@
  *
  * Needs a device with AdvancedMode enabled (raw message + opaque programs).
  *   make test-sdk filter=live-risk-replay
+ *
+ * 7.16: AdvancedMode is session state. The suite SKIPs while it is off; run
+ * opt-in, it ends with clearSession, which clears AdvancedMode again.
  */
 const crypto = require('crypto')
-const { run } = require('../_helpers')
+const { run, requireAdvancedModeSession } = require('../_helpers')
 const fixture = require('../fixtures/solana-live-session-2026-09-17.json')
 
 const B58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
@@ -49,6 +52,7 @@ function banner(c, level, lines) {
 
 run('Solana live-session risk replay (human-verified)', async (getSdk, assert, assertThrows) => {
   const sdk = await getSdk()
+  await requireAdvancedModeSession(sdk)
   const signer = base58Decode(fixture.signer)
   const address_n = fixture.addressN
 

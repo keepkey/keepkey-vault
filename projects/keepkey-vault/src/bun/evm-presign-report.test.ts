@@ -8,11 +8,12 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import type { SigningRequestInfo } from '../shared/types'
 import { assessSigningRisk } from '../shared/clearsign-risk'
-import { buildEvmPresignReport, prepareEvmTxSigningInfo } from './evm-presign-report'
+import { buildEvmPresignReport, evmSigningVerdict, prepareEvmTxSigningInfo } from './evm-presign-report'
 import { simulateEvmEffects } from './evm-effects'
 import { uniswapReportFindingsWithState } from './uniswap-report'
 import { resolvePromotedEvmArtifact } from './clearsign-artifact-resolver'
 import { ClearSignReportResponse } from './schemas'
+import { buildClearSignReport, clearSignReportNeedsAttention, namedProviderLine, runtimeProviderLine, swapReportNeedsAttention } from '../shared/clearsign-report'
 
 const swap = require('../../__tests__/fixtures/uniswap/base-ur-usdc-to-eth-swap.json')
 const SIGNER = '0x909ef6b32dfdc12ca86aa710b54c991af3c5f82e'
@@ -65,8 +66,8 @@ describe('POST /clearsign/report — Desktop parity', () => {
     expect(r.descriptor).toMatchObject({ source: 'none', authenticated: false, label: 'Uniswap Universal Router swap', resolution: 'reviewed-decoder' })
     const desktop = await desktopRisk(UR, '7.15.0')
     expect(risk(r)).toEqual(desktop.reasons.map((x) => x.text))
-    expect(r.findings[0].message).toContain('You would be signing blind')
-    expect(risk(r).join('\n')).toContain('This computer reads it as: Swaps 300 USDC for at least 0.108123518386717195 ETH through the Uniswap Universal Router')
+    expect(r.findings[0].message).toContain('Swaps 300 USDC for at least 0.108123518386717195 ETH through the Uniswap Universal Router')
+    expect(r.findings[0].message).toContain('cannot show this swap on the device yet')
     expect(rows(r)).toContain('Action: Swap 300 USDC for at least 0.108123518386717195 ETH')
     expect(rows(r)).toContain('Minimum output: 0.108123518386717195 ETH')
     expect(rows(r).some((x) => x.startsWith('Deadline: '))).toBe(true)
@@ -80,8 +81,8 @@ describe('POST /clearsign/report — Desktop parity', () => {
     expect(r.descriptor).toMatchObject({ label: 'Across bridge deposit', resolution: 'reviewed-decoder' })
     const desktop = await desktopRisk(ACROSS, '7.15.0')
     expect(risk(r)).toEqual(desktop.reasons.map((x) => x.text))
-    expect(r.findings[0].message).toContain('Across bridge deposit to the Across SpokePool on Base. Your KeepKey cannot decode bridge deposits yet')
-    expect(r.findings[0].severity).toBe('danger')
+    expect(r.findings[0].message).toContain('Across bridge deposit to the Across SpokePool on Base, a contract KeepKey knows')
+    expect(r.findings[0].severity).not.toBe('danger')
     expect(rows(r)).toContain('Action: Across bridge deposit: Base → Ethereum (chain id 1)')
     expect(rows(r).some((x) => x.startsWith('Recipient gets: '))).toBe(true)
     expect(r.limitations.map((l) => l.code)).toContain('DEVICE_SHOWS_RAW_DATA')
@@ -94,7 +95,74 @@ describe('POST /clearsign/report — Desktop parity', () => {
     const codes = r.limitations.map((l) => l.code)
     expect(codes).toContain('DEVICE_NOT_CONNECTED')
     expect(codes).not.toContain('DEVICE_SHOWS_RAW_DATA')
-    expect(r.findings[0].message).toContain('You would be signing blind')
+    expect(r.findings[0].message).toContain('cannot show this swap on the device yet')
+  })
+
+  test('an ERC-20 transfer the firmware decodes itself: P4, as on the Desktop', async () => {
+    const USDC = { chainId: 1, from: SIGNER, to: '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48', value: '0x0',
+      data: `0xa9059cbb${'11'.repeat(20).padStart(64, '0')}${(25_000_000).toString(16).padStart(64, '0')}` }
+    const r = await report(USDC, '7.16.0')
+    expect(ClearSignReportResponse.safeParse(r).success).toBe(true)
+    expect(r.protectionLevel).toBe('P4')
+    expect(r.headline).toBe('KeepKey ClearSign ready')
+    expect(r.descriptor).toMatchObject({ source: 'native', authenticated: true, format: 'FIRMWARE_NATIVE' })
+    expect((await desktopRisk(USDC, '7.16.0')).tier).toBe('green')
+    expect(r.limitations.map((l) => l.code)).not.toContain('DEVICE_SHOWS_RAW_DATA')
+  })
+
+  test('a caller runtime-signer blob on an unknown call: the report still says the device shows raw data', async () => {
+    const tx = { chainId: 1, from: SIGNER, to: `0x${'42'.repeat(20)}`, value: '0x0', data: `0xdeadbeef${'1'.padStart(64, '0')}` }
+    const signingInfo: SigningRequestInfo = { id: 'r', method: '/eth/sign-transaction', appName: 'app', ...tx, firmwareVersion: '7.16.0' }
+    await prepareEvmTxSigningInfo(signingInfo, { ...tx, txMetadata: { signedPayload: '00112233', keyId: 1 } }, '7.16.0')
+    expect(signingInfo.needsBlindSigning).toBe(true)
+    const r = buildEvmPresignReport({
+      signingInfo, deviceConnected: true,
+      simulation: await simulateEvmEffects(tx, 'http://127.0.0.1:9/'),
+      universalRouterFindings: { complete: false, findings: [], limitations: [] },
+      artifactResolution: resolvePromotedEvmArtifact(tx.chainId, tx.to, tx.data),
+    })
+    expect(r.limitations.map((l) => l.code)).toContain('DEVICE_SHOWS_RAW_DATA')
+  })
+
+  test('a review names the provider the sign step pins even with no report card up', () => {
+    const named = { alias: 'Acme Labs', fingerprint: '656B0D303F6BBDBD', publicKeyHex: '02', keyId: 2 }
+    const line = runtimeProviderLine({ alias: 'Acme Labs', fingerprint: '656B0D303F6BBDBD', status: 'requested' })
+    // No card (addressNList REST caller, or an ordinary swap behind the attention gate).
+    expect(namedProviderLine(named, undefined)).toBe(line)
+    expect(namedProviderLine(named, { descriptor: { source: 'none', authenticated: false } } as any)).toBe(line)
+    // A shown card that already names it: not twice. No provider: nothing.
+    expect(namedProviderLine(named, { descriptor: { source: 'none', authenticated: false, provider: { alias: 'Acme Labs', status: 'requested' } } } as any)).toBeUndefined()
+    expect(namedProviderLine(null)).toBeUndefined()
+    // Both Desktop reviews that pin a provider render the line.
+    const { readFileSync } = require('node:fs') as typeof import('node:fs')
+    const ui = (f: string) => readFileSync(`${import.meta.dir}/../mainview/components/${f}`, 'utf8')
+    expect(ui('SwapDialog.tsx')).toContain('namedProviderLine(previewBuild?.runtimeProvider, report && swapReportNeedsAttention(report) ? report : undefined)')
+    expect(ui('device/SigningApproval.tsx')).toContain('namedProviderLine(request.runtimeProvider, request.clearSignReport)')
+  })
+
+  test('the card names a third-party describer, as the device does, and never as KeepKey', async () => {
+    const requested = runtimeProviderLine({ alias: 'Acme Labs', fingerprint: '656B0D303F6BBDBD', status: 'requested' })!
+    expect(requested).toContain("'Acme Labs' (656B0D303F6BBDBD)")
+    expect(requested).toContain('NOT verified by KeepKey')
+    expect(runtimeProviderLine({ keyId: 2, status: 'supplied' })).toBe('Description from the signer in slot 2 of your KeepKey. NOT verified by KeepKey.')
+    expect(runtimeProviderLine(undefined)).toBeUndefined()
+    expect(runtimeProviderLine({ keyId: 0x80, status: 'supplied' })).toBeUndefined()
+    for (const line of [requested, runtimeProviderLine({ keyId: 1, status: 'supplied' })!]) {
+      expect(line.replace('NOT verified by KeepKey', '')).not.toMatch(/certified|verified/i)
+    }
+
+    // A caller's runtime blob names its device slot on the card; a certified
+    // envelope (keyId 0x80) names no third party.
+    const tx = { chainId: 1, from: SIGNER, to: `0x${'42'.repeat(20)}`, value: '0x0', data: `0xdeadbeef${'1'.padStart(64, '0')}` }
+    const s: SigningRequestInfo = { id: 'r', method: '/eth/sign-transaction', appName: 'app', ...tx, firmwareVersion: '7.16.0' }
+    const sim = await simulateEvmEffects(tx, 'http://127.0.0.1:9/')
+    expect(evmSigningVerdict(s, { txMetadata: { signedPayload: '00', keyId: 1 } }, sim, false).descriptor.provider).toEqual({ keyId: 1, status: 'supplied' })
+    expect(evmSigningVerdict(s, { txMetadata: { signedPayload: '00', keyId: 0x80 } }, sim, false).descriptor.provider).toBeUndefined()
+    expect(evmSigningVerdict(s, {}, sim, false).descriptor.provider).toBeUndefined()
+    const report = buildClearSignReport({
+      ...evmSigningVerdict(s, { txMetadata: { signedPayload: '00', keyId: 1 } }, sim, false), simulation: sim,
+    })
+    expect(ClearSignReportResponse.safeParse(report).success).toBe(true)
   })
 
   test('the same swap calldata to an unknown contract stays P1, unnamed, no rows', async () => {
@@ -171,6 +239,8 @@ describe('in-app swap card — the Desktop signing verdict for the same bytes', 
     expect(sent).toEqual([{ chainId: 8453, contract: RELAY, selector: '0xe8017952', calldataLength: 132, token: BASE_USDC }])
     expect(risk(r)[0]).toBe('Relay deposit on Base: sends 47.478285 USDC to the Relay Depository, credited to your account. Your KeepKey shows this deposit from a KeepKey-certified description and refuses it if that description is not genuine. Check the amount there.')
     expect(risk(r).join('\n')).toContain("set by Relay's off-chain order")
+    // Certified and nothing red: the swap screen shows no report.
+    expect(clearSignReportNeedsAttention(r)).toBe(false)
     expect(rows(r)).toContain('Action: Relay deposit on Base: 47.478285 USDC')
     expect(rows(r)).toContain(`Credited to (depositor): ${DEPOSIT.from}`)
     expect(rows(r).some((x) => x.startsWith('Relay order id: 0x001c161a'))).toBe(true)
@@ -181,11 +251,20 @@ describe('in-app swap card — the Desktop signing verdict for the same bytes', 
     const r = await inApp(tx, '7.16.0')
     expect(r.protectionLevel).toBe('P2')
     expect(r.descriptor).toMatchObject({ authenticated: false, label: 'Relay deposit', resolution: 'reviewed-decoder' })
-    expect(risk(r)[0]).toContain('Your KeepKey cannot decode this deposit')
+    expect(risk(r)[0]).toContain('cannot show Relay deposits on the device yet')
     expect(r.limitations.map((l) => l.code)).toContain('DEVICE_SHOWS_RAW_DATA')
     const approve = await inApp(APPROVE, '7.16.0')
     expect(approve.protectionLevel).toBe('P1')
     expect(approve.limitations.map((l) => l.code)).toContain('DEVICE_SHOWS_RAW_DATA')
+  })
+
+  test('native deposit states its amount once, not "msg.value"', async () => {
+    const tx = { chainId: 8453, from: DEPOSIT.from, to: RELAY, value: '0x8b0be503af0800',
+      data: `0x49290c1c${DEPOSIT.from.slice(2).toLowerCase().padStart(64, '0')}${'c3'.repeat(32)}` }
+    const r = await inApp(tx, '7.16.0')
+    expect(rows(r)).toContain('Action: Relay deposit on Base: 0.0391381 ETH')
+    expect(rows(r)).toContain('You send: 0.0391381 ETH')
+    expect(risk(r).filter((x) => x.includes('0.0391381 ETH'))).toHaveLength(1)
   })
 
   test('7.15 firmware: no certified path, never P4', async () => {
@@ -244,6 +323,45 @@ describe('in-app swap card — the Desktop signing verdict for the same bytes', 
     expect(r.limitations.map((l) => l.code)).toContain('DEVICE_SHOWS_RAW_DATA')
   })
 
+  test('THORChain native deposit on Base: named and decoded (P2), not "unknown contract"', async () => {
+    globalThis.fetch = catalogService([])
+    // Shape of the 2026-10-12 Base→TRON.TRX swap (handoff-thorchain-base-router-pin-716.md).
+    const memo = Buffer.from('=:TRON.TRX:TMoUJ2EqVESgcaD5eJdvphkkn8K3ucXdTp:5740830833:keep:30').toString('hex')
+    const w = (hex: string) => hex.padStart(64, '0')
+    const tx = {
+      chainId: 8453, from: DEPOSIT.from, to: '0x00dc6100103bc402d490aee3f9a5560cbd91f1d4', value: '0x90c5e8ba98e000',
+      data: `0x44bc937b${w('718f6c9df785bc4e323086de024ca822efbe8ab9')}${w('0')}${w('90c5e8ba98e000')}${w('a0')}${w('ffffffff')}${w((memo.length / 2).toString(16))}${memo.padEnd(128, '0')}`,
+    }
+    // 7.14.2 pins no router and 7.15+ pins Base: the device shows this deposit itself.
+    for (const fw of ['7.14.2', '7.16.0']) {
+      const native = await inApp(tx, fw)
+      expect(native.protectionLevel).toBe('P4')
+      expect(native.descriptor).toMatchObject({ source: 'native', authenticated: true })
+      expect(risk(native).join('\n')).toContain('via THORChain. Your KeepKey shows this deposit on its screen; check it there.')
+      expect(native.limitations.map((l) => l.code)).not.toContain('DEVICE_SHOWS_RAW_DATA')
+    }
+    // 7.13 has no Base pin: decoded here, raw on the device.
+    const r = await inApp(tx, '7.13.0')
+    expect(r.protectionLevel).toBe('P2')
+    expect(r.headline).not.toContain('Unknown')
+    expect(r.descriptor).toMatchObject({ authenticated: false, label: 'THORChain deposit' })
+    const lines = risk(r).join('\n')
+    expect(lines).toContain('Swap 0.04075 ETH on Base for at least 57.40830833 TRX on TRON via THORChain. KeepKey firmware 7.13.0 cannot show this deposit on the device yet')
+    expect(lines).not.toContain('signing blind')
+    // Blind on this firmware is not news in our own swap: no report box.
+    expect(swapReportNeedsAttention(r)).toBe(false)
+  })
+
+  test('the swap dialog shows the report only when the swap is not what was quoted', () => {
+    const base = { findings: [], limitations: [] }
+    const line = (code: string, severity: 'info' | 'warning' | 'danger') => ({ code, message: code, severity })
+    expect(swapReportNeedsAttention({ ...base, findings: [line('RISK_HIGH', 'danger')], limitations: [line('DEVICE_SHOWS_RAW_DATA', 'warning')] })).toBe(false)
+    expect(swapReportNeedsAttention({ ...base, findings: [line('NEAR_INTENTS_UNKNOWN_ADDRESS', 'danger')] })).toBe(true)
+    expect(swapReportNeedsAttention({ ...base, limitations: [line('NEAR_INTENTS_UNCONFIRMED', 'warning')] })).toBe(true)
+    expect(swapReportNeedsAttention({ ...base, findings: [line('NEAR_INTENTS_CONFIRMED', 'info')] })).toBe(false)
+    expect(swapReportNeedsAttention({ ...base, rating: { riskLevel: 'critical' } as any })).toBe(true)
+  })
+
   test('the overlay and the card share one verdict function', async () => {
     const { evmSigningVerdict } = await import('./evm-presign-report')
     globalThis.fetch = catalogService([])
@@ -272,3 +390,34 @@ describe('Relay Depository decode — real calls', () => {
     }
   })
 })
+
+describe('a plain transfer (a swap deposit to an address, no call data)', () => {
+  const DEPOSIT: Tx = { chainId: 8453, from: SIGNER, to: '0x44f8efadc1d700ee7e22af3813880378a50f1ecd', value: '0x2386f26fc10000', data: '0x' }
+
+  test('reads as a send the device shows itself, with no contract-call errors', async () => {
+    const r = await report(DEPOSIT, '7.16.0')
+    expect(ClearSignReportResponse.safeParse(r).success).toBe(true)
+    expect(r.protectionLevel).toBe('P4')
+    expect(r.headline).toBe('KeepKey ClearSign ready')
+    expect(risk(r)).toEqual([`Sends 0.01 ETH to ${DEPOSIT.to}.`])
+    expect(r.limitations.map((l) => l.code)).toEqual(['PLAIN_TRANSFER_NOT_SIMULATED'])
+    // Clear on the device, nothing to warn about: the swap screen shows no report.
+    expect(clearSignReportNeedsAttention(r)).toBe(false)
+    // The owner caveat every deposit carries does not bring the box back…
+    const caveat = { code: 'DEPOSIT_ADDRESS_NOT_DEVICE_VERIFIED', message: 'x', severity: 'warning' as const }
+    expect(clearSignReportNeedsAttention({ ...r, limitations: [...r.limitations, caveat] })).toBe(false)
+    // …but a red line anywhere, an unrun check, or a badly rated contract does.
+    expect(clearSignReportNeedsAttention({ ...r, findings: [...r.findings, { code: 'NEAR_INTENTS_MISMATCH', message: 'x', severity: 'danger' }] })).toBe(true)
+    expect(clearSignReportNeedsAttention({ ...r, limitations: [{ code: 'CLEARSIGN_DEFINITION_REFUSED', message: 'x', severity: 'danger' }] })).toBe(true)
+    expect(clearSignReportNeedsAttention({ ...r, limitations: [{ code: 'NEAR_INTENTS_UNCONFIRMED', message: 'x', severity: 'warning' }] })).toBe(true)
+    expect(clearSignReportNeedsAttention({ ...r, rating: { riskLevel: 'high' } as any })).toBe(true)
+    expect(clearSignReportNeedsAttention({ ...r, rating: { riskLevel: 'low' } as any })).toBe(false)
+  })
+
+  test('a contract call with the same destination is still not promoted', async () => {
+    const r = await report({ ...DEPOSIT, data: '0xdeadbeef' }, '7.16.0')
+    expect(r.protectionLevel).toBe('P1')
+    expect(clearSignReportNeedsAttention(r)).toBe(true)
+  })
+})
+

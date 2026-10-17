@@ -1,9 +1,11 @@
+import { createHash } from 'node:crypto'
 import { utils as ethersUtils } from 'ethers'
 
 export const ALPHA_ROOT_PATH = [0x8000002c, 0x8000003c, 0x80000000, 0, 0]
-export const ALPHA_ROOT_PUBLIC_KEY = '02de9231b2094433235532fb1932e324a2c7304195e12e610c675cccbbd606dae7'
-export const ALPHA_DELEGATE_PUBLIC_KEY = '0342f5f9704494b3f9bd72295eecaf29d783d23ea02b2dc9f48abcd2e46d4850cf'
-export const ALPHA_DELEGATE_FINGERPRINT = 'a9531b9d'
+/** The one ClearSign root Desktop trusts: the production root compiled into
+ *  released 7.16 firmware. The alpha root lives in
+ *  scripts/clearsign-alpha-rehearsal.ts and is never shipped. */
+export const PRODUCTION_ROOT_PUBLIC_KEY = '027c1fde75db6c36393e095e0dc5ab9a5bcf1ae9eb92b5d36e212a2bf7f8a6e321'
 export const CLEARSIGN_DOMAIN_SEPARATOR = '8839401f8d0112b4348770ddace152e96fc5e5081aefeed6b5d8bef0d6ecdf66'
 export const CLEARSIGN_MIN_EXPIRY = 1787270400
 
@@ -20,6 +22,12 @@ const ALLOWED_SCOPES = new Set<number>([CLEARSIGN_SCOPE_SOLANA, ...CLEARSIGN_EVM
 const CERT_BODY_BYTES = 75
 const CERT_SIGNATURE_BYTES = 64
 const SECP256K1_HALF_ORDER = BigInt('0x7fffffffffffffffffffffffffffffff5d576e7357a4501ddfe92f46681b20a0')
+
+/** First 4 bytes of sha256(compressed key), as the signer services and the
+ *  event log name a delegate. */
+export function delegateFingerprint(publicKeyHex: string): string {
+  return createHash('sha256').update(Uint8Array.from(exactHex(publicKeyHex, 33, 'delegate public key'))).digest('hex').slice(0, 8)
+}
 
 function exactHex(input: string, bytes: number, label: string): Buffer {
   const value = String(input || '').replace(/^0x/i, '')
@@ -69,7 +77,8 @@ export interface AlphaCertificateBody {
 export function buildAlphaCertificateBody(
   alias: string,
   notAfter: number,
-  scope: number = CLEARSIGN_SCOPE_ETHEREUM,
+  scope: number,
+  delegatePublicKey: string,
 ): { signedBodyHex: string; expectedMessageHashHex: string } {
   if (!Number.isSafeInteger(notAfter) || notAfter < 0 || notAfter > 0xffffffff) {
     throw new Error('certificate expiry must be a uint32 Unix timestamp')
@@ -81,14 +90,16 @@ export function buildAlphaCertificateBody(
   body.writeUInt32BE(scope, 2)
   body.writeUInt32BE(notAfter, 6)
   encodeAlias(alias).copy(body, 10)
-  exactHex(ALPHA_DELEGATE_PUBLIC_KEY, 33, 'alpha delegate public key').copy(body, 42)
+  exactHex(delegatePublicKey, 33, 'delegate public key').copy(body, 42)
   return {
     signedBodyHex: body.toString('hex'),
     expectedMessageHashHex: ethersUtils.keccak256(body).slice(2),
   }
 }
 
-/** Validate the one alpha certificate this Vault build is allowed to request. */
+/** Validate a certificate body: version, capability, a reviewed scope, expiry
+ *  and the independently computed hash. Any delegate key may be named; the
+ *  root signature (inspectAlphaCertificate) is what vouches for it. */
 export function inspectAlphaCertificateBody(
   signedBodyHex: string,
   expectedMessageHashHex: string,
@@ -96,19 +107,16 @@ export function inspectAlphaCertificateBody(
 ): AlphaCertificateBody {
   const body = exactHex(signedBodyHex, CERT_BODY_BYTES, 'signed certificate body')
   if (body[0] !== 1) throw new Error('certificate version must be 1')
-  if (body[1] !== 1) throw new Error('alpha certificate must grant exactly MAY_SUPPRESS_RAW')
+  if (body[1] !== 1) throw new Error('certificate must grant exactly MAY_SUPPRESS_RAW')
 
   const chainId = body.readUInt32BE(2)
-  if (!ALLOWED_SCOPES.has(chainId)) throw new Error(`certificate scope ${chainId} is not a reviewed alpha scope`)
+  if (!ALLOWED_SCOPES.has(chainId)) throw new Error(`certificate scope ${chainId} is not a reviewed scope`)
   const notAfter = body.readUInt32BE(6)
   if (notAfter <= CLEARSIGN_MIN_EXPIRY) throw new Error('certificate expiry does not clear the 7.16 revocation floor')
   if (notAfter <= nowSeconds) throw new Error('certificate is already expired')
 
   const alias = decodeAlias(body.subarray(10, 42))
   const delegatePublicKey = body.subarray(42, 75).toString('hex')
-  if (delegatePublicKey !== ALPHA_DELEGATE_PUBLIC_KEY) {
-    throw new Error(`certificate delegate must be the reviewed alpha signer ${ALPHA_DELEGATE_FINGERPRINT}`)
-  }
 
   const messageHash = ethersUtils.keccak256(body).slice(2)
   const expectedMessageHash = exactHex(expectedMessageHashHex, 32, 'independent message hash').toString('hex')
@@ -125,6 +133,7 @@ export function inspectAlphaCertificateBody(
 export function verifyAlphaRootSignature(
   inspection: AlphaCertificateBody,
   signatureHex: string,
+  rootPublicKey: string = PRODUCTION_ROOT_PUBLIC_KEY,
 ): { certificateHex: string; address: string } {
   const raw = exactHex(signatureHex, 65, 'device signature')
   const recovery = raw[64]
@@ -134,20 +143,22 @@ export function verifyAlphaRootSignature(
 
   const recovered = ethersUtils.recoverPublicKey(`0x${inspection.signingDigest}`, `0x${raw.toString('hex')}`)
   const compressed = ethersUtils.computePublicKey(recovered, true).slice(2).toLowerCase()
-  if (compressed !== ALPHA_ROOT_PUBLIC_KEY) throw new Error('signature was not produced by the reviewed alpha root')
+  if (compressed !== rootPublicKey) throw new Error('signature was not produced by the expected ClearSign root')
 
   return {
     certificateHex: Buffer.concat([inspection.body, raw.subarray(0, CERT_SIGNATURE_BYTES)]).toString('hex'),
-    address: ethersUtils.computeAddress(`0x${ALPHA_ROOT_PUBLIC_KEY}`),
+    address: ethersUtils.computeAddress(`0x${rootPublicKey}`),
   }
 }
 
-/** Validate a complete 139-byte certificate before it is given to a signer. */
+/** Validate a complete 139-byte certificate against the production root.
+ *  Only rehearsals and tests pass another root. */
 export function inspectAlphaCertificate(
   certificateHex: string,
   nowSeconds = Math.floor(Date.now() / 1000),
+  rootPublicKey: string = PRODUCTION_ROOT_PUBLIC_KEY,
 ): AlphaCertificateBody {
-  const certificate = exactHex(certificateHex, CERT_BODY_BYTES + CERT_SIGNATURE_BYTES, 'alpha certificate')
+  const certificate = exactHex(certificateHex, CERT_BODY_BYTES + CERT_SIGNATURE_BYTES, 'certificate')
   const body = certificate.subarray(0, CERT_BODY_BYTES)
   const inspection = inspectAlphaCertificateBody(
     body.toString('hex'),
@@ -162,11 +173,11 @@ export function inspectAlphaCertificate(
       return ethersUtils.computePublicKey(
         ethersUtils.recoverPublicKey(`0x${inspection.signingDigest}`, { r, s, v }),
         true,
-      ).slice(2).toLowerCase() === ALPHA_ROOT_PUBLIC_KEY
+      ).slice(2).toLowerCase() === rootPublicKey
     } catch {
       return false
     }
   })
-  if (!matchesRoot) throw new Error('certificate was not signed by the reviewed alpha root')
+  if (!matchesRoot) throw new Error('certificate was not signed by the KeepKey ClearSign root')
   return inspection
 }

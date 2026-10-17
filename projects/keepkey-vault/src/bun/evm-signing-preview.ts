@@ -8,9 +8,12 @@
 import type { CalldataDecodedField, SigningRequestInfo } from '../shared/types'
 import { decodeCalldata, firmwareClearSigns, formatDeadline } from './calldata-decoder'
 import { findCertifiedEvmSchema, findCertifiedUniswapSwap } from './evm-schema-registry'
-import { REVIEWED_EVM_TOKENS, findReviewedUniversalRouter } from './evm-certified-schema'
+import { REVIEWED_EVM_TOKENS, findEvmNameRecord, findReviewedUniversalRouter } from './evm-certified-schema'
+import { evmContractIdentity } from '../shared/evm-contract-identity'
 import { urPrecheck } from './uniswap-ur'
 import { supportsCertifiedClearSign } from './solana-certified-policy'
+import { certifiedBodyRefused, certifiedEnvelopeShown, metadataPayloadBytes } from '../shared/certified-evm-envelope'
+import { resolveErc7730ForCall } from './erc7730-resolver'
 
 /** A chain id as dapps send it (number, "8453", "0x2105") → positive integer, else undefined. */
 export function normalizeEvmChainId(raw: unknown): number | undefined {
@@ -52,6 +55,11 @@ export async function attachCertifiedEvmSchema(
     return false
   }
   if (!schema) return false
+  // The same rule as the swap gate: a body this firmware refuses is never attached.
+  if (certifiedBodyRefused(schema.signedPayload, firmwareVersion)) {
+    console.log(`${tag} EVM clear-sign: certified "${schema.method}" is a dynamic schema this firmware (${firmwareVersion}) refuses — not attached`)
+    return false
+  }
   signingInfo.calldataDecoded = {
     ...(signingInfo.calldataDecoded ?? {
       dappName: 'Unknown', contractName: to, method: schema.method,
@@ -62,6 +70,32 @@ export async function attachCertifiedEvmSchema(
     insightKeyId: schema.keyId,
   }
   console.log(`${tag} EVM clear-sign: certified schema "${schema.method}" attached (keyId=0x${schema.keyId.toString(16)}, chain ${chainId}, to ${to})`)
+  return true
+}
+
+/**
+ * Attach a KeepKey ClearSign service ERC-7730 definition for this exact call,
+ * when the call is still blind (nothing else describes it) and the device takes
+ * one. The sign handler sends exactly signingInfo.erc7730, so the card, the
+ * gate (evmCallRequiresAdvancedMode) and the device agree. Returns true when
+ * one was attached.
+ */
+export async function attachErc7730Definition(
+  signingInfo: SigningRequestInfo,
+  to: string | undefined,
+  data: string | undefined,
+  firmwareVersion: string | undefined,
+  capabilities: readonly number[] | undefined,
+  tag = '[REST]',
+): Promise<boolean> {
+  if (!signingInfo.needsBlindSigning || signingInfo.deviceClearSigns || signingInfo.calldataDecoded?.signedInsightBlob) return false
+  const catalog = await resolveErc7730ForCall({
+    chainId: signingInfo.chainId, to, data, value: signingInfo.value, firmwareVersion, capabilities,
+  })
+  if (!catalog) return false
+  signingInfo.erc7730 = catalog
+  signingInfo.needsBlindSigning = false
+  console.log(`${tag} EVM clear-sign: ERC-7730 definition ${catalog.primaryDefinitionId.slice(0, 18)}… attached (chain ${signingInfo.chainId}, to ${to})`)
   return true
 }
 
@@ -176,6 +210,20 @@ export async function attachCertifiedUniswapSwap(
  * Decode calldata for the overlay and set deviceClearSigns / needsBlindSigning.
  * `callerMetadata` is a runtime-signer blob a REST caller supplied directly.
  */
+/** A spender KeepKey has reviewed: canonical Permit2, or an address with a
+ * certified name record (the same list the device names spenders from). */
+export function recognizedSpender(chainId: number | undefined, address: string | undefined): string | undefined {
+  if (!chainId || !address || !/^0x[0-9a-fA-F]{40}$/.test(address)) return undefined
+  const identity = evmContractIdentity(chainId, address)
+  return identity === 'Uniswap Permit2' ? identity : findEvmNameRecord(chainId, address)?.name
+}
+
+/** The reviewed spender of a decoded permit, for both REST and WalletConnect. */
+export function recognizedTypedDataSpender(decoded: SigningRequestInfo['typedDataDecoded'], chainId: number | undefined): string | undefined {
+  const spender = decoded?.fields.find((x) => x.label === 'Spender')?.raw
+  return recognizedSpender(chainId, typeof spender === 'string' ? spender : undefined)
+}
+
 export async function applyEvmTxPreview(
   signingInfo: SigningRequestInfo,
   to: string | undefined,
@@ -187,26 +235,42 @@ export async function applyEvmTxPreview(
 ): Promise<void> {
   if (!data || data.length < 10 || !to) return
   try {
-    signingInfo.calldataDecoded = await decodeCalldata(to, data, chainId) ?? undefined
+    signingInfo.calldataDecoded = await decodeCalldata(to, data, chainId, signingInfo.value) ?? undefined
   } catch (e) { console.warn(`${tag} Calldata decode failed:`, e) }
   const swapRows = uniswapSwapFields(chainId, to, data, signingInfo.value, signingInfo.from)
   if (swapRows.length > 0 && signingInfo.calldataDecoded) {
     signingInfo.calldataDecoded.fields = [...swapRows, ...signingInfo.calldataDecoded.fields]
   }
-  signingInfo.deviceClearSigns = firmwareClearSigns(to, data, chainId)
+  signingInfo.deviceClearSigns = firmwareClearSigns(to, data, chainId, firmwareVersion, signingInfo.value)
+  // approve / increaseAllowance: is the spender one KeepKey has reviewed?
+  const selector = data.slice(0, 10).toLowerCase()
+  if ((selector === '0x095ea7b3' || selector === '0x39509351') && /^0{24}[0-9a-fA-F]{40}$/.test(data.slice(10, 74))) {
+    signingInfo.recognizedSpender = recognizedSpender(chainId, `0x${data.slice(34, 74)}`)
+  }
+  // transfer straight to a reviewed contract: the risk bar flags it.
+  if (selector === '0xa9059cbb' && /^0{24}[0-9a-fA-F]{40}$/.test(data.slice(10, 74))) {
+    signingInfo.recognizedRecipient = recognizedSpender(chainId, `0x${data.slice(34, 74)}`)
+  }
 
   if (callerMetadata?.signedPayload) {
-    // Runtime-signer blob from the caller: the REST sign handler honours it at
-    // priority 1 and the device verifies it against the loaded signer.
+    // A blob from the caller: the REST sign handler sends it at priority 1.
+    // It relaxes the gate only as a KeepKey-certified envelope this firmware
+    // shows for this exact call (the device refuses a forged one outright).
+    // A runtime-signer blob is annotation only: the device still shows the
+    // raw data and needs AdvancedMode, so the gate stays as without it.
     signingInfo.calldataDecoded = {
       dappName: 'Unknown', contractName: 'Unknown', method: '(runtime signer)',
       selector: data.slice(0, 10), fields: [], source: 'none',
       ...signingInfo.calldataDecoded,
       signedInsightBlob: callerMetadata.signedPayload,
       insightKeyId: callerMetadata.keyId,
+      insightSource: 'caller',
     }
-    signingInfo.needsBlindSigning = false
-    console.log(`${tag} needsBlindSigning=false (caller-provided runtime-signer blob, keyId=${callerMetadata.keyId})`)
+    const certified = certifiedEnvelopeShown(
+      metadataPayloadBytes(callerMetadata.signedPayload), callerMetadata.keyId, firmwareVersion, { chainId, to, data },
+    )
+    signingInfo.needsBlindSigning = !certified && !signingInfo.deviceClearSigns
+    console.log(`${tag} needsBlindSigning=${signingInfo.needsBlindSigning} (caller-provided blob, keyId=${callerMetadata.keyId}, certified envelope shown=${certified})`)
   } else if (signingInfo.deviceClearSigns) {
     // Firmware decodes it natively — no metadata, no AdvancedMode.
     signingInfo.needsBlindSigning = false

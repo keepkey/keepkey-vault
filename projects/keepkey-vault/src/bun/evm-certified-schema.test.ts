@@ -12,7 +12,7 @@ import {
   findCertifiedEvmSchemaSpec,
   buildCertifiedEvmEnvelope,
 } from './evm-certified-schema'
-import capturedEnvelope from '../../../../docs/clearsign-case-studies/uniswap-usdt/certified-response.json'
+import production from '../../__tests__/fixtures/clearsign-production-catalog-batch1.json'
 
 const TO = '0x4cd00e387622c35bddb9b4c962c136462338bc31'
 const DATA =
@@ -20,35 +20,46 @@ const DATA =
   '000000000000000000000000909ef6b32dfdc12ca86aa710b54c991af3c5f82e' +
   '8a2c121197efc95c42f53142ab409735ee353287f877ed4d351f63094d5bfcb1'
 const PORTALS = '0xbf5A7F3629fB325E2a8453D595AB103465F75E62'
+// The Relay intent the firmware unit tests pin (kRelayIntentBodyFromServer).
+// The Ethereum catalog entry no longer carries it (signed without one in the
+// 2026-10-16 ceremony); Base and Arbitrum depositNative still do.
+const RELAY_INTENT = { title: 'Relay', template: 'Bridge {v} through Relay for {0}; delivery is by Relay', valueRole: 3 }
 const ACROSS = '0xe35e9842fceaCA96570B734083f4a58e8F7C5f2A'
 
 describe('7.16 certified EVM schemas', () => {
-  // Arbitrum USDT approve is described by the reviewed-token table (USDT0,
-  // Permit2-pinned or generic spender), not a static catalog entry.
+  // Arbitrum USDT approve is the catalog entry signed in the 2026-10-16
+  // ceremony, for any spender (Permit2 or not).
   const ARB_USDT = '0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9'
   const permit2Approve = `0x095ea7b3${'000000000022d473030f116ddee9f6b43ac78ba3'.padStart(64, '0')}${'ff'.repeat(32)}`
-  it('refuses the captured mainnet certificate for the Arbitrum schema before using the delegate key', () => {
+  it('refuses the production mainnet certificate for the Arbitrum schema before using the delegate key', () => {
     const spec = findCertifiedEvmSchemaSpec(42161, ARB_USDT, permit2Approve)!
-    const certificate = Buffer.from(capturedEnvelope.signedPayload.slice(2), 'hex').subarray(1, 140).toString('hex')
-    expect(() => buildCertifiedEvmEnvelope(spec, certificate, '00'.repeat(32))).toThrow(/scoped to 1, not chain 42161/)
+    expect(() => buildCertifiedEvmEnvelope(spec, production.certificates['1'], '00'.repeat(32))).toThrow(/scoped to 1, not chain 42161/)
   })
-  it('binds Arbitrum USDT identity and allowance rendering metadata', () => {
-    const spec = findCertifiedEvmSchemaSpec(42161, ARB_USDT, `0x095ea7b3${'00'.repeat(64)}`)!
-    expect(spec.method).toBe('approve')
-    expect(spec.args[1]).toMatchObject({ name: 'Allowance', format: 5, decimals: 6, symbol: 'USDT0' })
-    expect(buildEvmSchemaBody(spec).includes(Buffer.from('USDT0'))).toBe(true)
+  it('signs only with the delegate the production certificate names', () => {
+    const spec = findCertifiedEvmSchemaSpec(42161, ARB_USDT, permit2Approve)!
+    expect(() => buildCertifiedEvmEnvelope(spec, production.certificates['42161'], '11'.repeat(32)))
+      .toThrow(/does not match the certificate's delegate/)
+  })
+  it('binds Arbitrum USDT0 identity and allowance rendering metadata (batch 2: Permit2-pinned and generic)', () => {
+    const generic = findCertifiedEvmSchemaSpec(42161, ARB_USDT, `0x095ea7b3${'00'.repeat(64)}`)!
+    const pinned = findCertifiedEvmSchemaSpec(42161, ARB_USDT, permit2Approve)!
+    expect(generic.method).toBe('approve')
+    expect(pinned.method).toBe('approve')
+    expect(generic.args.find((a) => a.format === 5)).toMatchObject({ decimals: 6, symbol: 'USDT0' })
+    expect(pinned.args[0]).toMatchObject({ pinned: '0x000000000022d473030f116ddee9f6b43ac78ba3' })
+    expect(pinned).not.toBe(generic)
   })
   it('serializes the Relay schema with a delegate sentinel trailer', () => {
     const spec = CERTIFIED_EVM_CATALOG[`1:${TO}:0x49290c1c`]
     const body = buildEvmV2SchemaBody(spec)
-    expect(body[0]).toBe(0x05)
+    expect(body[0]).toBe(0x02)
     expect(body[body.length - 1]).toBe(CERTIFIED_METADATA_KEY_ID)
     expect(body.subarray(1, 5).readUInt32BE()).toBe(1)
     expect(body.includes(Buffer.from('bridgeDeposit', 'ascii'))).toBe(true)
   })
 
   it('serializes the Relay intent (v0x05) byte-for-byte as the firmware unit test pins it', () => {
-    const spec = CERTIFIED_EVM_CATALOG[`1:${TO}:0x49290c1c`]
+    const spec = { ...CERTIFIED_EVM_CATALOG[`1:${TO}:0x49290c1c`], intent: RELAY_INTENT }
     // Same bytes as fw unittests signed_metadata.cpp kRelayIntentBodyFromServer.
     expect(buildEvmSchemaBody(spec).toString('hex')).toBe(
       '05000000014cd00e387622c35bddb9b4c962c136462338bc3149290c1c000d6272696467654465706f73697402096465706f7369746f720100076f7264657249640300030552656c617936427269646765207b767d207468726f7567682052656c617920666f72207b307d3b2064656c69766572792069732062792052656c6179010000000080',
@@ -56,7 +67,7 @@ describe('7.16 certified EVM schemas', () => {
   })
 
   it('refuses intents the firmware would reject', () => {
-    const base = CERTIFIED_EVM_CATALOG[`1:${TO}:0x49290c1c`]
+    const base = { ...CERTIFIED_EVM_CATALOG[`1:${TO}:0x49290c1c`], intent: RELAY_INTENT }
     const bad = (intent: Partial<NonNullable<typeof base.intent>>) => () =>
       buildEvmSchemaBody({ ...base, intent: { ...base.intent!, ...intent } })
     expect(bad({ template: 'Bridge through Relay for {0}' })).toThrow(/\{v\}/)
@@ -210,6 +221,8 @@ describe('reviewed ERC-20 token schemas', () => {
     for (const key of Object.keys(REVIEWED_EVM_TOKENS)) {
       const [chainId, contract] = key.split(':')
       for (const [selector, spender] of [['0x095ea7b3', PERMIT2], ['0x095ea7b3', undefined], ['0xa9059cbb', undefined]] as const) {
+        // The ceremony-signed catalog entry (Arbitrum USDT approve) has no intent.
+        if (CERTIFIED_EVM_CATALOG[`${chainId}:${contract}:${selector}`]) continue
         const spec = byShape(Number(chainId), contract, selector, 68, spender)!
         const { title, template } = spec.intent!
         expect(title.length).toBeGreaterThanOrEqual(1)
@@ -290,11 +303,11 @@ describe('Relay depositErc20 (one entry per reviewed token)', () => {
     }
   })
 
-  it('depositNative on Base and Arbitrum uses the Ethereum description under the ABI name', () => {
+  it('depositNative on Base and Arbitrum keeps the Relay intent under the ABI name', () => {
     for (const chainId of [8453, 42161]) {
       const spec = findCertifiedEvmSchemaSpec(chainId, TO, DATA)!
       expect(spec.method).toBe('depositNative')
-      expect(spec.intent).toEqual({ ...CERTIFIED_EVM_CATALOG[`1:${TO}:0x49290c1c`].intent!, valueRole: 3 })
+      expect(spec.intent).toEqual(RELAY_INTENT)
       expect(buildEvmSchemaBody(spec)[0]).toBe(0x05)
     }
   })

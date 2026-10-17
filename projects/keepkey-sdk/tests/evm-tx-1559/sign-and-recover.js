@@ -21,8 +21,12 @@
  */
 const fs = require('fs')
 const path = require('path')
-const { run, ETH_PATH } = require('../_helpers')
+const { run, ETH_PATH, skip } = require('../_helpers')
 const { Transaction } = require('ethers')
+
+// The captured input is a real transaction shape the device blind-signs. Never
+// part of a normal run on a real-funds device.
+if (process.env.KK_ALLOW_BLIND !== '1') skip('needs KK_ALLOW_BLIND=1 (blind-signs a captured real transaction)')
 
 const FIXTURE = path.join(__dirname, '..', 'fixtures', 'evm-tx-1559-regression.json')
 

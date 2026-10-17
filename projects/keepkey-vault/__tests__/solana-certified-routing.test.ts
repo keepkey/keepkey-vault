@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import bs58 from 'bs58'
 
 import {
@@ -304,12 +304,72 @@ describe('swap.ts: a Relay certified proof is attached only when the device will
 
   test('swap.ts drops a fetched proof the device would not apply before attaching it', () => {
     const swap = readFileSync(new URL('../src/bun/swap.ts', import.meta.url), 'utf8')
-    const fetched = swap.indexOf('certifiedProof = await findCertifiedSolanaProof(params.relayTx.serializedTx, catalogKey)')
-    const guard = swap.indexOf('if (certifiedProof && !certifiedSolanaProofApplies(params.relayTx.serializedTx, catalogKey, certifiedProof)) {')
+    const fetched = swap.indexOf('certifiedProof = await findCertifiedSolanaProof(rawTx, catalogKey)')
+    const guard = swap.indexOf('if (certifiedProof && !certifiedSolanaProofApplies(rawTx, catalogKey, certifiedProof)) {')
     const attached = swap.indexOf('schema: certifiedProof.schema, certificate: certifiedProof.certificate')
     expect(fetched).toBeGreaterThan(-1)
     expect(guard).toBeGreaterThan(fetched)
     expect(swap.slice(guard, guard + 400)).toContain('certifiedProof = undefined')
     expect(attached).toBeGreaterThan(guard)
+  })
+
+  test('a consented retry carries no schema or certificate, so a refused proof cannot loop', async () => {
+    const { buildRelaySolanaUnsignedTx } = await import('../src/bun/swap')
+    let asked = 0
+    globalThis.fetch = (async () => { asked++; throw new Error('offline') }) as unknown as typeof fetch
+    const params: any = {
+      fromCaip: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/slip44:501', relayTx: { serializedTx: relayFixture.rawTxBase64 },
+    }
+    const retry = await buildRelaySolanaUnsignedTx({ ...params, allowSolanaBlindSigning: true }, [0x8000002c, 0x800001f5, 0x80000000, 0x80000000], '7.16.0')
+    expect(retry.allowBlindSigning).toBe(true)
+    expect(retry).not.toHaveProperty('schema')
+    expect(retry).not.toHaveProperty('certificate')
+    expect(retry).not.toHaveProperty('lutProof')
+    expect(asked).toBe(0)
+    // Without consent the certified service is still asked first.
+    const first = await buildRelaySolanaUnsignedTx(params, [0x8000002c, 0x800001f5, 0x80000000, 0x80000000], '7.16.0')
+    expect(first.allowBlindSigning).toBe(false)
+    expect(asked).toBeGreaterThan(0)
+  })
+
+  test('Desktop ships no runtime-slot Solana schema: Relay is certified or goes to consent', () => {
+    // Pre-signed KKSOLSC1 payloads in the source tree (base64 "KKSOLSC1") were
+    // CI-test-key schemas for runtime slot 3. Test keys never ship.
+    const shipped = new Bun.Glob('src/**/*.{ts,tsx,json}')
+    for (const file of shipped.scanSync({ cwd: new URL('..', import.meta.url).pathname })) {
+      if (/\.test\.tsx?$/.test(file)) continue
+      const text = readFileSync(new URL(`../${file}`, import.meta.url), 'utf8')
+      expect({ file, kksolsc1: text.includes('S0tTT0xTQzE') }).toEqual({ file, kksolsc1: false })
+    }
+    const swap = readFileSync(new URL('../src/bun/swap.ts', import.meta.url), 'utf8')
+    expect(swap).not.toContain('findSolanaSchema')
+    // The only Solana schema the swap attaches is the certified proof's.
+    expect(swap.match(/\bschema: /g)).toEqual(['schema: '])
+  })
+
+  test('no shipped signed entry names any key but the certified delegate (0x80)', () => {
+    // Test keys sign runtime slots 1-3 (the CI key used slot 3). Any signed
+    // entry in shipped src must be under the KeepKey-certified delegate.
+    const certified = (v: unknown) => v === 0x80 || v === '0x80' || v === '128'
+    const offenders: string[] = []
+    const walk = (node: unknown, file: string, at: string) => {
+      if (Array.isArray(node)) return node.forEach((x, i) => walk(x, file, `${at}[${i}]`))
+      if (!node || typeof node !== 'object') return
+      const o = node as Record<string, unknown>
+      const signed = 'signedPayload' in o || 'signature' in o || 'payload' in o
+      for (const k of ['keyId', 'signerKeyId']) {
+        // Values only: an API schema that merely documents the field is not an entry.
+        if (signed && k in o && (typeof o[k] !== 'object' || o[k] === null) && !certified(o[k])) offenders.push(`${file}${at}.${k}=${String(o[k])}`)
+      }
+      for (const [k, v] of Object.entries(o)) walk(v, file, `${at}.${k}`)
+    }
+    const root = new URL('..', import.meta.url).pathname
+    for (const file of new Bun.Glob('src/**/*.json').scanSync({ cwd: root })) {
+      walk(JSON.parse(readFileSync(`${root}${file}`, 'utf8')), file, '')
+    }
+    expect(offenders).toEqual([])
+    // The CI-key EVM registry and its lookup are gone.
+    expect(existsSync(`${root}src/bun/evm-schemas-local.json`)).toBe(false)
+    expect(readFileSync(`${root}src/bun/evm-schema-registry.ts`, 'utf8')).not.toContain('findEvmSchema(')
   })
 })

@@ -1,0 +1,447 @@
+[
+  {
+    "card": "/thorchain/sign-amino-transfer",
+    "level": "none",
+    "reasons": [],
+    "blind": false,
+    "window": [
+      "ACTION REQUIRED",
+      "Claude QA (Zcash)",
+      "THORChain Transfer",
+      "thorchain/MsgSend",
+      "From address",
+      "thor1ls33ayg26kmltw7jjy55p32ghjna09zp74t4az",
+      "To address",
+      "thor1ls33ayg26kmltw7jjy55p32ghjna09zp74t4az",
+      "Amount",
+      "0.01 RUNE (1000000 rune)",
+      "Fee",
+      "0 RUNE (0 rune)",
+      "Transaction",
+      "Chain",
+      "THORCHAIN",
+      "From",
+      "thor1ls33ayg26kmltw7jjy55p32ghjna09zp74t4az",
+      "Full Request Payload",
+      "▼",
+      "Approve",
+      "Reject",
+      "Enter to approve · Esc to reject"
+    ]
+  },
+  {
+    "screen": "thorchainSignTx",
+    "lines": [
+      "THORChain Account #0",
+      "thor1ls33ayg26kmltw7jjy55p",
+      "32ghjna09zp74t4az"
+    ]
+  },
+  {
+    "screen": "thorchainSignTx",
+    "lines": [
+      "Send 0.01 to",
+      "thor1ls33ayg26kmltw7jjy55p32ghjna09zp74t4",
+      "az"
+    ]
+  },
+  {
+    "screen": "thorchainSignTx",
+    "lines": [
+      "ASSET",
+      "rune"
+    ]
+  },
+  {
+    "screen": "thorchainSignTx",
+    "lines": [
+      "MEMO",
+      "(empty)"
+    ]
+  },
+  {
+    "screen": "thorchainSignTx",
+    "lines": [
+      "THORCHAIN ACCOUNT #0",
+      "Sign RUNE on thorchain-1? Fee: 0 rune. Gas:",
+      "500000000."
+    ]
+  },
+  {
+    "card": "/thorchain/sign-amino-transfer",
+    "level": "none",
+    "reasons": [],
+    "blind": false,
+    "window": [
+      "ACTION REQUIRED",
+      "Claude QA (Zcash)",
+      "THORChain Transfer",
+      "thorchain/MsgSend",
+      "From address",
+      "thor1ls33ayg26kmltw7jjy55p32ghjna09zp74t4az",
+      "To address",
+      "thor1ls33ayg26kmltw7jjy55p32ghjna09zp74t4az",
+      "Amount",
+      "1000000 tcy",
+      "Fee",
+      "0 RUNE (0 rune)",
+      "Transaction",
+      "Chain",
+      "THORCHAIN",
+      "From",
+      "thor1ls33ayg26kmltw7jjy55p32ghjna09zp74t4az",
+      "Full Request Payload",
+      "▼",
+      "Approve",
+      "Reject",
+      "Enter to approve · Esc to reject"
+    ]
+  },
+  {
+    "screen": "thorchainSignTx",
+    "lines": [
+      "THORChain Account #0",
+      "thor1ls33ayg26kmltw7jjy55p",
+      "32ghjna09zp74t4az"
+    ]
+  },
+  {
+    "screen": "thorchainSignTx",
+    "lines": [
+      "Send 0.01 to",
+      "thor1ls33ayg26kmltw7jjy55p32ghjna09zp74t4",
+      "az"
+    ]
+  },
+  {
+    "screen": "thorchainSignTx",
+    "lines": [
+      "ASSET",
+      "tcy"
+    ]
+  },
+  {
+    "screen": "thorchainSignTx",
+    "lines": [
+      "MEMO",
+      "(empty)"
+    ]
+  },
+  {
+    "screen": "thorchainSignTx",
+    "lines": [
+      "THORCHAIN ACCOUNT #0",
+      "Sign RUNE on thorchain-1? Fee: 0 rune. Gas:",
+      "500000000."
+    ]
+  },
+  {
+    "card": "/thorchain/sign-amino-transfer",
+    "level": "none",
+    "reasons": [],
+    "blind": false,
+    "window": [
+      "ACTION REQUIRED",
+      "Claude QA (Zcash)",
+      "THORChain Transfer",
+      "thorchain/MsgSend",
+      "From address",
+      "thor1ls33ayg26kmltw7jjy55p32ghjna09zp74t4az",
+      "To address",
+      "thor1ls33ayg26kmltw7jjy55p32ghjna09zp74t4az",
+      "Amount",
+      "1000000 rujira",
+      "Fee",
+      "0 RUNE (0 rune)",
+      "Transaction",
+      "Chain",
+      "THORCHAIN",
+      "From",
+      "thor1ls33ayg26kmltw7jjy55p32ghjna09zp74t4az",
+      "Full Request Payload",
+      "▼",
+      "Approve",
+      "Reject",
+      "Enter to approve · Esc to reject"
+    ]
+  },
+  {
+    "screen": "thorchainSignTx",
+    "lines": [
+      "THORChain Account #0",
+      "thor1ls33ayg26kmltw7jjy55p",
+      "32ghjna09zp74t4az"
+    ]
+  },
+  {
+    "screen": "thorchainSignTx",
+    "lines": [
+      "Send 0.01 to",
+      "thor1ls33ayg26kmltw7jjy55p32ghjna09zp74t4",
+      "az"
+    ]
+  },
+  {
+    "screen": "thorchainSignTx",
+    "lines": [
+      "ASSET",
+      "rujira"
+    ]
+  },
+  {
+    "screen": "thorchainSignTx",
+    "lines": [
+      "MEMO",
+      "(empty)"
+    ]
+  },
+  {
+    "screen": "thorchainSignTx",
+    "lines": [
+      "THORCHAIN ACCOUNT #0",
+      "Sign RUNE on thorchain-1? Fee: 0 rune. Gas:",
+      "500000000."
+    ]
+  },
+  {
+    "card": "/thorchain/sign-amino-transfer",
+    "level": "none",
+    "reasons": [],
+    "blind": false,
+    "window": [
+      "ACTION REQUIRED",
+      "Claude QA (Zcash)",
+      "THORChain Transfer",
+      "thorchain/MsgSend",
+      "From address",
+      "thor1ls33ayg26kmltw7jjy55p32ghjna09zp74t4az",
+      "To address",
+      "thor1ls33ayg26kmltw7jjy55p32ghjna09zp74t4az",
+      "Amount",
+      "1000000 btc-btc",
+      "Fee",
+      "0 RUNE (0 rune)",
+      "Transaction",
+      "Chain",
+      "THORCHAIN",
+      "From",
+      "thor1ls33ayg26kmltw7jjy55p32ghjna09zp74t4az",
+      "Full Request Payload",
+      "▼",
+      "Approve",
+      "Reject",
+      "Enter to approve · Esc to reject"
+    ]
+  },
+  {
+    "screen": "thorchainSignTx",
+    "lines": [
+      "THORChain Account #0",
+      "thor1ls33ayg26kmltw7jjy55p",
+      "32ghjna09zp74t4az"
+    ]
+  },
+  {
+    "screen": "thorchainSignTx",
+    "lines": [
+      "Send 0.01 to",
+      "thor1ls33ayg26kmltw7jjy55p32ghjna09zp74t4",
+      "az"
+    ]
+  },
+  {
+    "screen": "thorchainSignTx",
+    "lines": [
+      "ASSET",
+      "btc-btc"
+    ]
+  },
+  {
+    "screen": "thorchainSignTx",
+    "lines": [
+      "MEMO",
+      "(empty)"
+    ]
+  },
+  {
+    "screen": "thorchainSignTx",
+    "lines": [
+      "THORCHAIN ACCOUNT #0",
+      "Sign RUNE on thorchain-1? Fee: 0 rune. Gas:",
+      "500000000."
+    ]
+  },
+  {
+    "card": "/thorchain/sign-amino-transfer",
+    "level": "none",
+    "reasons": [],
+    "blind": false,
+    "window": [
+      "ACTION REQUIRED",
+      "Claude QA (Zcash)",
+      "THORChain Transfer",
+      "thorchain/MsgSend",
+      "From address",
+      "thor1ls33ayg26kmltw7jjy55p32ghjna09zp74t4az",
+      "To address",
+      "thor1ls33ayg26kmltw7jjy55p32ghjna09zp74t4az",
+      "Amount",
+      "1000000 eth-usdc",
+      "Fee",
+      "0 RUNE (0 rune)",
+      "Transaction",
+      "Chain",
+      "THORCHAIN",
+      "From",
+      "thor1ls33ayg26kmltw7jjy55p32ghjna09zp74t4az",
+      "Full Request Payload",
+      "▼",
+      "Approve",
+      "Reject",
+      "Enter to approve · Esc to reject"
+    ]
+  },
+  {
+    "screen": "thorchainSignTx",
+    "lines": [
+      "THORChain Account #0",
+      "thor1ls33ayg26kmltw7jjy55p",
+      "32ghjna09zp74t4az"
+    ]
+  },
+  {
+    "screen": "thorchainSignTx",
+    "lines": [
+      "Send 0.01 to",
+      "thor1ls33ayg26kmltw7jjy55p32ghjna09zp74t4",
+      "az"
+    ]
+  },
+  {
+    "screen": "thorchainSignTx",
+    "lines": [
+      "ASSET",
+      "eth-usdc"
+    ]
+  },
+  {
+    "screen": "thorchainSignTx",
+    "lines": [
+      "MEMO",
+      "(empty)"
+    ]
+  },
+  {
+    "screen": "thorchainSignTx",
+    "lines": [
+      "THORCHAIN ACCOUNT #0",
+      "Sign RUNE on thorchain-1? Fee: 0 rune. Gas:",
+      "500000000."
+    ]
+  },
+  {
+    "card": "/thorchain/sign-amino-deposit",
+    "level": "none",
+    "reasons": [],
+    "blind": false,
+    "window": [
+      "ACTION REQUIRED",
+      "Claude QA (Zcash)",
+      "THORChain Deposit",
+      "THORChain deposit",
+      "Input",
+      "0.01000000 THOR.RUNE",
+      "Signer",
+      "thor1ls33ayg26kmltw7jjy55p32ghjna09zp74t4az",
+      "Exact memo",
+      "SECURE+:BTC.BTC",
+      "Swap terms come from the signed memo. The destination and settlement outcome are not independently verified here.",
+      "Transaction",
+      "Chain",
+      "THORCHAIN",
+      "From",
+      "thor1ls33ayg26kmltw7jjy55p32ghjna09zp74t4az",
+      "Full Request Payload",
+      "▼",
+      "Approve",
+      "Reject",
+      "Enter to approve · Esc to reject"
+    ]
+  },
+  {
+    "screen": "thorchainSignTx",
+    "lines": [
+      "THORChain Account #0",
+      "thor1ls33ayg26kmltw7jjy55p",
+      "32ghjna09zp74t4az"
+    ]
+  },
+  {
+    "screen": "thorchainSignTx",
+    "lines": [
+      "Send 0.01 THOR.RUNE to",
+      "thor1ls33ayg26kmltw7jjy55p32ghjna09zp74t4",
+      "az"
+    ]
+  },
+  {
+    "screen": "thorchainSignTx",
+    "lines": [
+      "MEMO",
+      "SECURE+:BTC.BTC"
+    ]
+  },
+  {
+    "screen": "thorchainSignTx",
+    "lines": [
+      "MEMO",
+      "SECURE+:BTC.BTC"
+    ]
+  },
+  {
+    "screen": "thorchainSignTx",
+    "lines": [
+      "THORCHAIN ACCOUNT #0",
+      "Sign RUNE on thorchain-1? Fee: 0 rune. Gas:",
+      "500000000."
+    ]
+  },
+  {
+    "card": "/thorchain/sign-amino-transfer",
+    "level": "none",
+    "reasons": [],
+    "blind": false,
+    "window": [
+      "ACTION REQUIRED",
+      "Claude QA (Zcash)",
+      "THORChain Transfer",
+      "thorchain/MsgSend",
+      "From address",
+      "thor1ls33ayg26kmltw7jjy55p32ghjna09zp74t4az",
+      "To address",
+      "thor1ls33ayg26kmltw7jjy55p32ghjna09zp74t4az",
+      "Amount",
+      "1000000 rune\"},{\"x",
+      "Fee",
+      "0 RUNE (0 rune)",
+      "Transaction",
+      "Chain",
+      "THORCHAIN",
+      "From",
+      "thor1ls33ayg26kmltw7jjy55p32ghjna09zp74t4az",
+      "Full Request Payload",
+      "▼",
+      "Approve",
+      "Reject",
+      "Enter to approve · Esc to reject"
+    ]
+  },
+  {
+    "screen": "thorchainSignTx",
+    "lines": [
+      "THORChain Account #0",
+      "thor1ls33ayg26kmltw7jjy55p",
+      "32ghjna09zp74t4az"
+    ]
+  }
+]

@@ -16,10 +16,13 @@
 import { describe, expect, test } from 'bun:test'
 import corpus from './fixtures/solana/advanced-mode-firmware-verdicts.json'
 import { buildSolanaDecodedInfo } from '../src/bun/solana-clearsign'
-import { applySolanaSigningGates, solanaFirmwareRequiresAdvancedMode } from '../src/bun/solana-consent'
+import { applySolanaSigningGates, solanaFirmwareRequiresAdvancedMode, solanaSigningVerdict } from '../src/bun/solana-consent'
+import { assessSigningRisk } from '../src/shared/clearsign-risk'
+import { buildClearSignReport, clearSignReportNeedsAttention, solanaDecodedReportFindings } from '../src/shared/clearsign-report'
+import type { EffectReport } from '../src/shared/transaction-effects'
 import type { SigningRequestInfo } from '../src/shared/types'
 
-const PINNED_FIRMWARE = 'e507d0c6f6ea3e5fcbaceec08fd26bb8f6e46192' // modules/keepkey-firmware
+const V7160 = '4f94a63b6632be48379c95465b3a9f4ae6e561bb' // released 7.16.0 (release/7.16.0, #495)
 const V7141 = '5482e7366a36e81336074f53a9defb6cff45ed72'
 const versions = [...new Set(corpus.builds.map((b) => b.version))]
 const rawTx = (name: string) => {
@@ -29,9 +32,9 @@ const rawTx = (name: string) => {
 }
 
 describe('AdvancedMode is required exactly where every firmware build of the version refuses', () => {
-  test('the corpus covers the released 7.14.1, the pinned alpha, and 7.14.2 through 7.16', () => {
+  test('the corpus covers 7.14.1 through 7.16, with the released 7.14.1 and 7.16.0', () => {
     expect(corpus.builds.map((b) => b.sha)).toContain(V7141)
-    expect(corpus.builds.map((b) => b.sha)).toContain(PINNED_FIRMWARE)
+    expect(corpus.builds.map((b) => b.sha)).toContain(V7160)
     expect(versions).toEqual(['7.14.1', '7.14.2', '7.15.0', '7.16.0'])
   })
 
@@ -54,7 +57,7 @@ describe('what the firmware verdicts mean for common transactions', () => {
 
   test('an SPL send with createIdempotent clear-signs from 7.15 and is opaque on 7.14', () => {
     const name = 'SPL send: ATA createIdempotent + transferChecked (@solana/spl-token default)'
-    expect(verdict(name, PINNED_FIRMWARE)).toBe('VERIFIED')
+    expect(verdict(name, V7160)).toBe('VERIFIED')
     expect(verdict(name, V7141)).toBe('OPAQUE')
     expect(solanaFirmwareRequiresAdvancedMode(rawTx(name).rawTx, '7.16.0')).toBe(false)
     expect(solanaFirmwareRequiresAdvancedMode(rawTx(name).rawTx, '7.15.0')).toBe(false)
@@ -156,5 +159,55 @@ describe('the approval gates REST and WalletConnect attach', () => {
     expect(await gates('unknown program', '7.16.0', { schema: { signerKeyId: 0x80 }, certificate: 'cert' }))
       .toEqual({ consent: false, advancedMode: false, blind: undefined })
     expect(await gates('plain SOL transfer', '7.16.0')).toEqual({ consent: false, advancedMode: false, blind: undefined })
+  })
+})
+
+describe('the overlay report card agrees with what the device shows', () => {
+  const sim = (status: 'success' | 'unavailable') => ({
+    version: 1, chain: 'Solana', transactionFingerprint: 'f', stateReference: { endpoint: 'x' }, status,
+    assetChanges: [], authorityChanges: [], invokedCode: [], warnings: [], unknowns: [],
+    completeness: { accountCoverage: 'unknown', innerExecution: 'unknown', tokenCoverage: 'unknown' },
+  }) as unknown as EffectReport
+  // What REST and WalletConnect build, after the gates and the certified lookup.
+  const card = async (name: string, status: 'success' | 'unavailable', opts: { certified?: boolean; metadata?: object } = {}) => {
+    const info = { id: 'x', method: '/solana/sign-transaction', appName: 'app', chain: 'solana', firmwareVersion: '7.16.0' } as SigningRequestInfo
+    const raw = rawTx(name).rawTx
+    info.solanaDecoded = await buildSolanaDecodedInfo(raw, async (keys) => keys.map(() => null))
+    applySolanaSigningGates(info, raw, '7.16.0', opts.metadata)
+    if (opts.certified) info.deviceClearSigns = true
+    const f = solanaDecodedReportFindings(info.solanaDecoded)
+    info.clearSignReport = buildClearSignReport({
+      ...solanaSigningVerdict(info, sim(status), opts.certified === true, { source: 'none', authenticated: false }),
+      simulation: sim(status), hostFindings: f.findings, hostLimitations: f.limitations,
+    })
+    return { info, report: info.clearSignReport }
+  }
+
+  test('a plain SOL send the firmware decodes reads ClearSign ready, not blind review', async () => {
+    for (const status of ['unavailable', 'success'] as const) {
+      const { info, report } = await card('plain SOL transfer', status)
+      expect(assessSigningRisk(info)?.tier).toBe('green')
+      expect(report.protectionLevel).toBe('P4')
+      expect(report.headline).toBe('KeepKey ClearSign ready')
+      expect(report.descriptor).toMatchObject({ source: 'native', authenticated: true, format: 'FIRMWARE_NATIVE' })
+      expect(clearSignReportNeedsAttention(report)).toBe(false)
+    }
+  })
+
+  test('a certified envelope reads as an authenticated description', async () => {
+    const { report } = await card('unknown program', 'unavailable', { certified: true })
+    expect(report.protectionLevel).toBe('P4')
+    expect(report.descriptor).toMatchObject({ source: 'certified', authenticated: true, format: 'KKSOLSC1' })
+  })
+
+  test('what the device cannot show keeps host evidence only', async () => {
+    expect((await card('unknown program', 'unavailable')).report.protectionLevel).toBe('P1')
+    expect((await card('unknown program', 'success')).report.protectionLevel).toBe('P3')
+    // A runtime schema needs AdvancedMode on 7.16, so the device does not decode it alone.
+    const runtime = await card('plain SOL transfer', 'unavailable', { metadata: { schema: { signerKeyId: 1 } } })
+    expect(runtime.report.protectionLevel).toBe('P1')
+    expect(runtime.report.descriptor.authenticated).toBe(false)
+    // The firmware clear-signs this from 7.15, but the conservative consent step still asks.
+    expect((await card('SPL send: ATA createIdempotent + transferChecked (@solana/spl-token default)', 'unavailable')).report.protectionLevel).toBe('P1')
   })
 })

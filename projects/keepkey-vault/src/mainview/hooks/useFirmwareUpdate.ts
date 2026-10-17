@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { onRpcMessage, rpcRequest } from '../lib/rpc'
 import type { FirmwareProgress } from '../../shared/types'
+import type { WipeReason } from '../../shared/flash-wipe'
 
 type UpdateState = 'idle' | 'updating' | 'complete' | 'error'
 
@@ -43,13 +44,13 @@ export function useFirmwareUpdate() {
     }
   }, [])
 
-  const startFirmwareUpdate = useCallback(async (bitcoinOnly = false) => {
+  const startFirmwareUpdate = useCallback(async (opts: { variant?: 'multi' | 'bitcoin-only'; acknowledgeWipe?: WipeReason } = {}) => {
     activeRef.current = true
     setState('updating')
     setError(null)
     setProgress({ percent: 0, message: 'Starting firmware update...' })
     try {
-      await rpcRequest('startFirmwareUpdate', { bitcoinOnly }, 0)
+      await rpcRequest('startFirmwareUpdate', opts, 0)
       activeRef.current = false
       setState('complete')
     } catch (err: any) {

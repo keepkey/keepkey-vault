@@ -1,5 +1,5 @@
 import { VaultClient } from './client';
-import type { SdkConfig, DeviceFeatures, DeviceInfo, SignedTx, AddressRequest, EthSignTxParams, LoadClearsignSignerParams, LoadClearsignSignerResult, EthSignTypedDataParams, EthSignMessageParams, EthVerifyMessageParams, BtcSignTxParams, CosmosAminoSignParams, HiveSignOperationsParams, HiveSignTransferParams, HiveSignMessageParams, XrpSignTxParams, BnbSignTxParams, SolanaSignTxParams, SolanaSignOffchainMessageParams, SolanaOffchainMessageSignatureResult, TronSignTxParams, TronSignMessageParams, TronMessageSignatureResult, TronVerifyMessageParams, TronSignTypedHashParams, TronTypedDataSignatureResult, TonSignTxParams, TonSignMessageParams, TonMessageSignatureResult, TonBuildTransferParams, TonBuildTransferResult, TonFinalizeTransferParams, TonFinalizeTransferResult, GetPublicKeyRequest, BatchPubkeysPath, ApplySettingsParams, HealthResponse, SupportedAsset, PortfolioBalancesParams, MarketInfoParams, SearchAssetsParams, ListUnspentParams, PubkeyInfoParams, TxHistoryParams, BroadcastParams, NetworkIdParams, NetworkAddressParams, TokenDecimalsParams, StakingParams, SwapQuoteParams, SweepScanParams, SweepScanStatus, SweepExecuteParams, SweepExecuteResult } from './types';
+import type { SdkConfig, DeviceFeatures, DeviceInfo, SignedTx, EthSignedTx, SolanaSignedTx, AddressRequest, EthSignTxParams, LoadClearsignSignerParams, LoadClearsignSignerResult, EthSignTypedDataParams, EthSignMessageParams, EthVerifyMessageParams, BtcSignTxParams, CosmosAminoSignParams, HiveSignOperationsParams, HiveSignTransferParams, HiveSignMessageParams, XrpSignTxParams, SolanaSignTxParams, SolanaSignOffchainMessageParams, SolanaSignMessageParams, SolanaMessageSignatureResult, SolanaOffchainMessageSignatureResult, TronSignTxParams, TronSignMessageParams, TronMessageSignatureResult, TronVerifyMessageParams, TronSignTypedHashParams, TronTypedDataSignatureResult, TonSignTxParams, TonSignMessageParams, TonMessageSignatureResult, TonBuildTransferParams, TonBuildTransferResult, TonFinalizeTransferParams, TonFinalizeTransferResult, GetPublicKeyRequest, BatchPubkeysPath, ApplySettingsParams, ApplyPoliciesParams, HealthResponse, PortfolioBalancesParams, MarketInfoParams, SearchAssetsParams, ListUnspentParams, PubkeyInfoParams, TxHistoryParams, BroadcastParams, NetworkIdParams, NetworkAddressParams, TokenDecimalsParams, StakingParams, SwapQuoteParams, SweepScanParams, SweepScanStatus, SweepExecuteParams, SweepExecuteResult, ClearSignReport, ClearSignReportRequest, SolanaDecodeParams, SolanaDecodeResult } from './types';
 export { SdkError } from './client';
 export * from './types';
 /**
@@ -61,10 +61,6 @@ export declare class KeepKeySdk {
                 devices: DeviceInfo[];
                 total: number;
             }>;
-            /** List assets supported by the connected device. */
-            getSupportedAssets: () => Promise<{
-                assets: SupportedAsset[];
-            }>;
             /** Check REST API health and device connection state. Does not require auth. */
             getHealth: () => Promise<HealthResponse>;
             /** List all coins the firmware knows about. */
@@ -88,8 +84,9 @@ export declare class KeepKeySdk {
             applySettings: (params: ApplySettingsParams) => Promise<{
                 success: boolean;
             }>;
-            /** Apply device policy changes. */
-            applyPolicies: (params: any) => Promise<{
+            /** Apply a device policy change, e.g. `{ policyName: 'AdvancedMode', enabled: false }`.
+             *  Confirmed on the device (and asks for the PIN); each call writes device flash. */
+            applyPolicies: (params: ApplyPoliciesParams) => Promise<{
                 success: boolean;
             }>;
             /** Start a PIN change flow. Pass `remove: true` to remove the PIN. */
@@ -204,10 +201,6 @@ export declare class KeepKeySdk {
         xrpGetAddress: (params: AddressRequest) => Promise<{
             address: string;
         }>;
-        /** Derive a BNB Beacon Chain address. */
-        bnbGetAddress: (params: AddressRequest) => Promise<{
-            address: string;
-        }>;
         /** Derive a Solana (SOL) address. */
         solanaGetAddress: (params: AddressRequest) => Promise<{
             address: string;
@@ -228,7 +221,7 @@ export declare class KeepKeySdk {
     /** Ethereum and EVM-compatible signing (sign-tx, sign-message, EIP-712). */
     eth: {
         /** Sign an Ethereum or EVM transaction. Supports legacy and EIP-1559. */
-        ethSignTransaction: (params: EthSignTxParams) => Promise<SignedTx>;
+        ethSignTransaction: (params: EthSignTxParams) => Promise<EthSignedTx>;
         /**
          * Load an EVM clear-sign signer into a device key slot (user-confirmed on
          * device). The device shows a trust screen naming the alias + pubkey
@@ -322,11 +315,6 @@ export declare class KeepKeySdk {
         /** Sign an XRP payment transaction. */
         xrpSignTransaction: (params: XrpSignTxParams) => Promise<SignedTx>;
     };
-    /** BNB Beacon Chain signing. */
-    binance: {
-        /** Sign a BNB Beacon Chain transaction. */
-        binanceSignTransaction: (params: BnbSignTxParams) => Promise<SignedTx>;
-    };
     /** Solana signing (supports SPL tokens and transaction-bound ClearSign metadata). */
     solana: {
         /**
@@ -335,7 +323,17 @@ export declare class KeepKeySdk {
          * provider-signed KKSOLSW1 `swapMetadata` descriptor; firmware verifies its
          * binding before displaying ClearSign swap details.
          */
-        solanaSignTransaction: (params: SolanaSignTxParams) => Promise<SignedTx>;
+        solanaSignTransaction: (params: SolanaSignTxParams) => Promise<SolanaSignedTx>;
+        /**
+         * Decode a Solana transaction and return Desktop's risk verdict for it.
+         * No device I/O and no signing.
+         */
+        decodeTransaction: (params: SolanaDecodeParams) => Promise<SolanaDecodeResult>;
+        /**
+         * Sign raw Solana message bytes (dApp logins / `solana:signMessage`).
+         * Requires AdvancedMode on the device; see {@link SolanaSignMessageParams}.
+         */
+        solanaSignMessage: (params: SolanaSignMessageParams) => Promise<SolanaMessageSignatureResult>;
         /**
          * Sign a Solana off-chain message with domain separation. Firmware
          * builds the spec envelope (`\xff` || "solana offchain" || version ||
@@ -412,6 +410,15 @@ export declare class KeepKeySdk {
          */
         tonFinalizeTransfer: (params: TonFinalizeTransferParams) => Promise<TonFinalizeTransferResult>;
     };
+    /** ClearSign reports: what Desktop and the device would show for a transaction. */
+    clearsign: {
+        /**
+         * Build the report Desktop's approval card shows for this transaction,
+         * against the connected device's firmware. No device I/O and no signing;
+         * Desktop records the request as a local audit-demand row.
+         */
+        report: (params: ClearSignReportRequest) => Promise<ClearSignReport>;
+    };
     /** Extended public key (xpub) derivation — single and batch. */
     xpub: {
         /** Derive a single xpub at the given BIP32 path. */
@@ -467,10 +474,8 @@ export declare class KeepKeySdk {
         getTokenDecimals: (params: TokenDecimalsParams) => Promise<any>;
         /** Get staking positions for an address. */
         getStakingPositions: (params: StakingParams) => Promise<any>;
-        /** Get a swap quote from the integrated aggregator. */
+        /** Get a swap quote from the integrated aggregator. Returns `{ data: quote }`. */
         getSwapQuote: (params: SwapQuoteParams) => Promise<any>;
-        /** Get THORChain/Mayachain inbound addresses (for swap deposits). */
-        getInboundAddresses: () => Promise<any>;
     };
     /**
      * Async sweep tool for recovering BTC from non-standard derivation paths

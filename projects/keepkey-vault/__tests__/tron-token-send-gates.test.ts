@@ -108,6 +108,30 @@ describe('G2 — decoded payload must match the reviewed send', () => {
   })
 })
 
+describe('TRON node routing', () => {
+  const hostsFor = async (pioneerStatus: number) => {
+    const grid = fakeTronGrid()
+    const hosts: string[] = []
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input))
+      hosts.push(url.host)
+      if (url.host !== 'api.trongrid.io' && pioneerStatus !== 200) return new Response('{}', { status: pioneerStatus })
+      return grid.handler(input, init)
+    }) as typeof fetch
+    await send({ caip: `tron:27Lqcw/trc20:${USDT}` })
+    return new Set(hosts)
+  }
+
+  test('a build goes through Pioneer, never keyless TronGrid from the user IP', async () => {
+    expect([...await hostsFor(200)]).toEqual(['api.keepkey.info'])
+  })
+
+  test('a Pioneer without the route (404) or with no node (502) falls back to TronGrid', async () => {
+    expect(await hostsFor(404)).toContain('api.trongrid.io')
+    expect(await hostsFor(502)).toContain('api.trongrid.io')
+  })
+})
+
 describe('G3/G4', () => {
   test('ingestion repairs a lowercased contract from the entry contract field, then the pinned map', () => {
     expect(canonicalizeTronTokenCaip(`tron:27Lqcw/trc20:${USDC.toLowerCase()}`, USDC)).toBe(`tron:27Lqcw/trc20:${USDC}`)
