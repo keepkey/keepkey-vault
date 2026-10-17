@@ -1009,7 +1009,9 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 		// a call the device still blind-signs. Otherwise a blob is unverified on
 		// this computer, so it earns "known" at most, never a green "verified".
 		if (request.needsBlindSigning) trustLevel = 'unknown'
-		else if (hasSignedBlob) trustLevel = 'known'
+		// An ERC-7730 definition is signed bytes this computer cannot verify
+		// either; the device verifies it and shows the call from it.
+		else if (hasSignedBlob || request.erc7730) trustLevel = 'known'
 		else if (decoded?.source === 'pioneer' || decoded?.source === 'local') trustLevel = 'known'
 	}
 	if (request.typedDataDecoded) {

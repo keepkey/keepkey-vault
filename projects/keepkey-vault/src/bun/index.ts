@@ -281,6 +281,7 @@ import { prioritizeExtraContracts, type PortfolioExtraContract } from "./portfol
 import { buildSolanaSchema, inspectSolanaSchema } from "./clearsign-studio"
 import { resolvePromotedEvmArtifact, resolvePromotedSolanaArtifact } from "./clearsign-artifact-resolver"
 import { resolveEvmSchema } from "./evm-schema-registry"
+import { resolveErc7730ForCall, signWithErc7730Fallback } from "./erc7730-resolver"
 import { requestClearSignReview } from "./clearsign-review"
 import { trustRuntimeSigner, type RuntimeEvmSigner } from "./evm-runtime-metadata"
 import { addClearSignProvider, listClearSignProviders, removeClearSignProvider, resolveProviderTxMetadata, seedClearSignProviderFromEnv } from "./clearsign-providers"
@@ -1243,7 +1244,7 @@ function getOrCreateWcManager(): WalletConnectManager {
 		getAdvancedModeEnabled: () => getAdvancedModeEnabled() === true,
 		loadClearsignSigner: async (signer) => { if (!engine.wallet) throw new Error('Device disconnected'); await loadProviderSigner(signer) },
 		ethSignMessage: (params) => { if (isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant)) throw new Error('WalletConnect is not available on bitcoin-only firmware'); if (!engine.wallet) throw new Error('Device disconnected'); return engine.wallet.ethSignMessage(params) },
-		ethSignTypedData: async (params) => { if (isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant)) throw new Error('WalletConnect is not available on bitcoin-only firmware'); if (!engine.wallet) throw new Error('Device disconnected'); return engine.wallet.ethSignTypedData(await withPermit2SpenderName(params, engine.getDeviceState().firmwareVersion)) },
+		ethSignTypedData: async (params) => { if (isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant)) throw new Error('WalletConnect is not available on bitcoin-only firmware'); if (!engine.wallet) throw new Error('Device disconnected'); return engine.wallet.ethSignTypedData(await withPermit2SpenderName(withoutCallerErc7730(params, '[WC] ethSignTypedData'), engine.getDeviceState().firmwareVersion)) },
 		getCosmosAccountInfo: async (caipChain) => {
 			if (isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant)) return null
 			if (!engine.wallet) return null
@@ -1335,6 +1336,7 @@ function getOrCreateWcManager(): WalletConnectManager {
 		getSolanaRpcEndpoint: () => getSetting('solana_rpc_endpoint') || 'https://api.mainnet-beta.solana.com',
 		getEvmSimulationEndpoint,
 		getFirmwareVersion: () => engine.getDeviceState().firmwareVersion,
+		getDeviceCapabilities: () => engine.getDeviceState().capabilities,
 		recordClearSignObservation: (draft) => {
 			if (engine.isPassphraseWallet) return undefined
 			const observation = insertClearSignObservation(draft, {
@@ -2561,6 +2563,7 @@ async function headlessExecuteSwap(params: ExecuteSwapParams, pushSubStage: (sta
 		pushSubStage,
 		isAdvancedModeEnabled: getAdvancedModeEnabled,
 		getFirmwareVersion: () => engine.getDeviceState().firmwareVersion,
+		getDeviceCapabilities: () => engine.getDeviceState().capabilities,
 		getSolanaRpcEndpoint: () => getSetting('solana_rpc_endpoint') || undefined,
 		protectSign: async (input, sign) => {
 			if (engine.isPassphraseWallet || (input.chainFamily !== 'evm' && input.chainFamily !== 'solana')) return sign()
@@ -3577,6 +3580,17 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						}
 					}
 				}
+				// Nothing above described the call: a ClearSign service ERC-7730
+				// definition, when this device takes one. One description per
+				// transaction, so the provider step below yields to it.
+				if (!resolvedSchema && !effectiveParams?.txMetadata) {
+					const erc7730 = await resolveErc7730ForCall({
+						chainId: Number(effectiveParams?.chainId), to: effectiveParams?.to, data: effectiveParams?.data,
+						value: effectiveParams?.value, firmwareVersion: engine.getDeviceState().firmwareVersion,
+						capabilities: engine.getDeviceState().capabilities,
+					})
+					if (erc7730) effectiveParams = { ...effectiveParams, erc7730 }
+				}
 				// Browser-extension path. WalletConnect signs through its own
 				// callback (getOrCreateWcManager) and REST through rest-api.ts; all
 				// of them call the same provider step, resolveProviderTxMetadata.
@@ -3621,11 +3635,18 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					observationId = insertClearSignObservation(draft, { deviceId: engine.getDeviceState().deviceId, source: 'vault-rpc' }).id
 					void auditUnknownClearSignShape(draft, { evm: getEvmSimulationEndpoint(Number(draft.shape.chainId || 1)) })
 				}
+				// What the device signed: without the ERC-7730 definition if it refused it.
+				let signedParams: any = effectiveParams
 				try {
 					let contactVerified = false
 					const sign = async () => {
 						sentToDevice = true
-						if (!contactProofAttached) return engine.wallet!.ethSignTx(effectiveParams)
+						// No Desktop card on this path: a refused definition is signed
+						// without it, and the device applies its own AdvancedMode gate.
+						if (!contactProofAttached) return signWithErc7730Fallback(effectiveParams, (p: any) => {
+							signedParams = p
+							return engine.wallet!.ethSignTx(p)
+						}, undefined, '[ethSignTx]')
 						// Only the device's "Contact verified" ack means it showed the label.
 						const signed = await signWithContactProofAck((engine.wallet as any)?.transport, () => engine.wallet!.ethSignTx(effectiveParams))
 						contactVerified = signed.contactVerified
@@ -3651,8 +3672,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						keyId: Number.isInteger(request.keyId) ? request.keyId : undefined,
 						sentToDevice, request,
 					})
-					if (observationId && (effectiveParams?.erc7730 || (effectiveParams?.txMetadata && !contactProofAttached))) authenticateClearSignObservation(
-						observationId, effectiveParams.erc7730 ? 'erc7730' : effectiveParams.txMetadata?.keyId === 0x80 ? 'certified' : 'runtime',
+					if (observationId && (signedParams?.erc7730 || (signedParams?.txMetadata && !contactProofAttached))) authenticateClearSignObservation(
+						observationId, signedParams.erc7730 ? 'erc7730' : signedParams.txMetadata?.keyId === 0x80 ? 'certified' : 'runtime',
 						1, resolvedSchema?.source === 'promoted-local', resolvedSchema?.bundleHash,
 					)
 					if (observationId) finalizeClearSignObservation(observationId, 'signed')
@@ -3698,7 +3719,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			ethSignTypedData: async (rawParams) => {
 				if (!engine.wallet) throw new Error('No device connected')
-				const params = await withPermit2SpenderName(rawParams, engine.getDeviceState().firmwareVersion)
+				// Typed-data ERC-7730 stays off on 7.16 (ERC7730_TYPED_DATA_SUPPORTED):
+				// no definition is ever sent with a document.
+				const params = await withPermit2SpenderName(withoutCallerErc7730(rawParams, 'ethSignTypedData'), engine.getDeviceState().firmwareVersion)
 				let observationId: string | undefined
 				if (!engine.isPassphraseWallet) {
 					const draft = observeEvmTypedData({ typedData: (params as any)?.typedData, hostDecoded: true })
@@ -7932,6 +7955,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					// The card names the ClearSign provider only when it will be asked.
 					isAdvancedModeEnabled: getAdvancedModeEnabled,
 					getFirmwareVersion: () => engine.getDeviceState().firmwareVersion,
+					getDeviceCapabilities: () => engine.getDeviceState().capabilities,
 				}).catch((error: any) => {
 					console.error(`[swap] preview failed (${params.fromChainId}): ${deviceErrorMessage(error)}`)
 					throw error
@@ -7958,7 +7982,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 									gas: tx.gas, gasLimit: tx.gasLimit, gasPrice: tx.gasPrice,
 									maxFeePerGas: tx.maxFeePerGas, maxPriorityFeePerGas: tx.maxPriorityFeePerGas, nonce: tx.nonce,
 								},
-								firmwareVersion, endpoint, hasErc7730: Boolean(tx.erc7730), signerVerdict: true,
+								firmwareVersion, capabilities: engine.getDeviceState().capabilities, endpoint, signerVerdict: true,
 							})
 							if (artifactResolution.status !== 'selected' && tx.data && tx.data !== '0x') {
 								const draft = observeEvmCall({

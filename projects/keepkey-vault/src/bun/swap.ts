@@ -14,6 +14,7 @@ import type { SwapAsset, SwapQuote, SwapQuoteParams, ExecuteSwapParams, SwapResu
 import { SOLANA_BLIND_SIGNING_REQUIRED, evmAdvancedModeRequiredMessage } from '../shared/types'
 import { toDeviceError, deviceErrorMessage } from '../shared/device-error'
 import { resolveEvmSchema } from './evm-schema-registry'
+import { resolveErc7730ForCall, signWithErc7730Fallback } from './erc7730-resolver'
 import { trustRuntimeSigner, type RuntimeEvmSigner } from './evm-runtime-metadata'
 import { nameRuntimeProvider, resolveProviderTxMetadata } from './clearsign-providers'
 import { evmCallRequiresAdvancedMode } from './evm-signing-policy'
@@ -557,6 +558,8 @@ export interface SwapContext {
    *  Used to gate Solana swaps, which can only blind-sign. */
   isAdvancedModeEnabled?: () => boolean | undefined
   getFirmwareVersion?: () => string | undefined
+  /** Features.capabilities of the connected device (the ERC-7730 gate). */
+  getDeviceCapabilities?: () => number[] | undefined
   /** User's configured Solana RPC, for the host-side outflow check. */
   getSolanaRpcEndpoint?: () => string | undefined
   /** Durable ClearSign evidence sink owned by Vault (no-op for callers that do not persist). */
@@ -626,7 +629,7 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
   // Applies to the swap and to the ERC-20 approve before it.
   const assertEvmSignable = (tx: any) => {
     if (!evmCallRequiresAdvancedMode(tx?.to, tx?.data, Number(tx?.chainId), ctx.isAdvancedModeEnabled?.(),
-      tx?.txMetadata, tx?.erc7730, ctx.getFirmwareVersion?.(), tx?.value)) return
+      tx?.txMetadata, tx?.erc7730, ctx.getFirmwareVersion?.(), tx?.value, ctx.getDeviceCapabilities?.())) return
     // Always logged: this host prediction is the only trace of why a swap stopped.
     console.warn(`${TAG} EVM blind-sign gate: chainId=${tx.chainId} to=${tx.to} selector=${String(tx.data).slice(0, 10)} bytes=${(String(tx.data).length - 2) / 2} fw=${ctx.getFirmwareVersion?.() ?? '?'} — AdvancedMode is off`)
     // Message content is load-bearing: SwapDialog routes on /AdvancedMode/i to
@@ -721,7 +724,7 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
       // certified catalog first, then the ClearSign provider the user added
       // as a transaction-bound fallback under AdvancedMode.
       // Only from the provider the swap preview card named, when there was one.
-      const runtimeGate = { firmwareVersion: ctx.getFirmwareVersion?.(), advancedMode: ctx.isAdvancedModeEnabled?.() === true, named: params.runtimeProvider }
+      const runtimeGate = { firmwareVersion: ctx.getFirmwareVersion?.(), advancedMode: ctx.isAdvancedModeEnabled?.() === true, capabilities: ctx.getDeviceCapabilities?.(), named: params.runtimeProvider }
       const result = await buildRelaySwapTx(params, fromChain, fromAddress, getEvmRpcSource, isErc20Source, /* previewMode */ false, certifiedSupported, runtimeGate)
       unsignedTx = result.unsignedTx
       fromAmountBaseUnits = result.fromAmountBaseUnits
@@ -1096,7 +1099,9 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
   )
   try {
     try {
-      signedTx = await signOnDevice(unsignedTx)
+      // A refused ERC-7730 definition: the plain call goes through the normal
+      // gate (assertEvmSignable routes a missing AdvancedMode to the opt-in panel).
+      signedTx = await signWithErc7730Fallback(unsignedTx, signOnDevice, (plain) => assertEvmSignable(plain), TAG)
     } catch (e: any) {
       // The device refused the SCHEMA, not the transaction. Firmware validates
       // schema material BEFORE it draws any confirm screen (fsm_msg_solana.h),
@@ -1333,7 +1338,7 @@ export async function previewSwapBuild(
       return { unsignedTx: buildResult.unsignedTx }
     }
     const certifiedSupported = supportsCertifiedClearSign(ctx.getFirmwareVersion?.())
-    const runtimeGate = { firmwareVersion: ctx.getFirmwareVersion?.(), advancedMode: ctx.isAdvancedModeEnabled?.() === true }
+    const runtimeGate = { firmwareVersion: ctx.getFirmwareVersion?.(), advancedMode: ctx.isAdvancedModeEnabled?.() === true, capabilities: ctx.getDeviceCapabilities?.() }
     const result = await buildRelaySwapTx(params, fromChain, fromAddress, getEvmRpcSource, isErc20Source, /* previewMode */ true, certifiedSupported, runtimeGate)
     return {
       unsignedTx: result.unsignedTx, approveTx: result.approveTx, allowance: result.allowance, balance: result.balance,
@@ -1437,7 +1442,7 @@ async function buildRelaySwapTx(
   isErc20Source = false,
   previewMode = false,
   certifiedMetadataSupported = false,
-  runtimeGate: { firmwareVersion?: string; advancedMode: boolean; named?: RuntimeProviderNamed | null } = { advancedMode: false },
+  runtimeGate: { firmwareVersion?: string; advancedMode: boolean; named?: RuntimeProviderNamed | null; capabilities?: readonly number[] } = { advancedMode: false },
 ): Promise<{ unsignedTx: any; runtimeSigner?: RuntimeEvmSigner; runtimeProvider?: RuntimeProviderNamed; approveTx?: any; fromAmountBaseUnits?: string; allowance?: { current: string; required: string; sufficient: boolean; spender: string; tokenContract: string }; balance?: { current: string; required: string; sufficient: boolean; tokenContract?: string } }> {
   const relay = params.relayTx!
   const evmSigningPath = params.fromEvmAddressIndex != null
@@ -1781,6 +1786,19 @@ async function buildRelaySwapTx(
     console.info(`${TAG} clear-sign schema attached: ${evmSchema.method} (keyId=${evmSchema.keyId}, source=${evmSchema.source || 'local-test'})`)
   } else {
     console.info(`${TAG} ClearSign lookup complete: no metadata; device policy still applies`)
+  }
+  // No kind-1 description: a ClearSign service ERC-7730 definition, resolved
+  // the same way for the preview card and the signature. Never on the approve
+  // below (7.16 refuses approvals with a definition).
+  if (!unsignedTx.txMetadata) {
+    const erc7730 = await resolveErc7730ForCall({
+      chainId, to: relay.to, data: relay.data, value: unsignedTx.value,
+      firmwareVersion: runtimeGate.firmwareVersion, capabilities: runtimeGate.capabilities,
+    })
+    if (erc7730) {
+      unsignedTx.erc7730 = erc7730
+      console.info(`${TAG} ERC-7730 definition attached: ${erc7730.primaryDefinitionId.slice(0, 18)}…`)
+    }
   }
   // The approve that precedes an ERC-20 deposit is signed with ethSignTx too:
   // give it the same certified lookup (a reviewed token's approve entry), or

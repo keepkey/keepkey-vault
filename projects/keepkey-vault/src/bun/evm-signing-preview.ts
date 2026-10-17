@@ -13,6 +13,7 @@ import { evmContractIdentity } from '../shared/evm-contract-identity'
 import { urPrecheck } from './uniswap-ur'
 import { supportsCertifiedClearSign } from './solana-certified-policy'
 import { certifiedBodyRefused, certifiedEnvelopeShown, metadataPayloadBytes } from '../shared/certified-evm-envelope'
+import { resolveErc7730ForCall } from './erc7730-resolver'
 
 /** A chain id as dapps send it (number, "8453", "0x2105") → positive integer, else undefined. */
 export function normalizeEvmChainId(raw: unknown): number | undefined {
@@ -69,6 +70,32 @@ export async function attachCertifiedEvmSchema(
     insightKeyId: schema.keyId,
   }
   console.log(`${tag} EVM clear-sign: certified schema "${schema.method}" attached (keyId=0x${schema.keyId.toString(16)}, chain ${chainId}, to ${to})`)
+  return true
+}
+
+/**
+ * Attach a KeepKey ClearSign service ERC-7730 definition for this exact call,
+ * when the call is still blind (nothing else describes it) and the device takes
+ * one. The sign handler sends exactly signingInfo.erc7730, so the card, the
+ * gate (evmCallRequiresAdvancedMode) and the device agree. Returns true when
+ * one was attached.
+ */
+export async function attachErc7730Definition(
+  signingInfo: SigningRequestInfo,
+  to: string | undefined,
+  data: string | undefined,
+  firmwareVersion: string | undefined,
+  capabilities: readonly number[] | undefined,
+  tag = '[REST]',
+): Promise<boolean> {
+  if (!signingInfo.needsBlindSigning || signingInfo.deviceClearSigns || signingInfo.calldataDecoded?.signedInsightBlob) return false
+  const catalog = await resolveErc7730ForCall({
+    chainId: signingInfo.chainId, to, data, value: signingInfo.value, firmwareVersion, capabilities,
+  })
+  if (!catalog) return false
+  signingInfo.erc7730 = catalog
+  signingInfo.needsBlindSigning = false
+  console.log(`${tag} EVM clear-sign: ERC-7730 definition ${catalog.primaryDefinitionId.slice(0, 18)}… attached (chain ${signingInfo.chainId}, to ${to})`)
   return true
 }
 

@@ -10,7 +10,9 @@ import type { ClearSignEvent } from '../shared/types'
 import { createHash } from 'crypto'
 import { decodeEIP712 } from './eip712-decoder'
 import { evmPriorityFee, normalizeEvmChainId, recognizedTypedDataSpender, typedDataNativelyReviewed } from './evm-signing-preview'
-import { buildEvmReportForTx, evmSigningVerdict, prepareEvmTxSigningInfo } from './evm-presign-report'
+import { buildEvmReportForTx, evmSigningVerdict, prepareEvmTxSigningInfo, withoutErc7730Description } from './evm-presign-report'
+import { evmCallRequiresAdvancedMode } from './evm-signing-policy'
+import { signWithErc7730Fallback } from './erc7730-resolver'
 import { CHAINS, isChainSupported, hiveRolePath, evmChainLabel } from '../shared/chains'
 import { getEvmSimulationEndpoint } from './evm-simulation-config'
 import { versionCompare } from '../shared/firmware-versions'
@@ -2013,7 +2015,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               // the UI, and gate blind-signing off what the FIRMWARE clear-signs
               // natively or a 7.16 KeepKey-certified schema covers. Shared with
               // POST /clearsign/report so both surfaces judge the same bytes alike.
-              await prepareEvmTxSigningInfo(signingInfo, preview, engine.getDeviceState().firmwareVersion)
+              await prepareEvmTxSigningInfo(signingInfo, preview, engine.getDeviceState().firmwareVersion, engine.getDeviceState().capabilities)
               if (path === '/eth/sign-transaction' && /^0x[0-9a-fA-F]{40}$/.test(String(preview.from || ''))) {
                 const chainIdNum = typeof signingInfo.chainId === 'string'
                   ? (signingInfo.chainId.startsWith('0x') ? parseInt(signingInfo.chainId, 16) : parseInt(signingInfo.chainId, 10))
@@ -2660,22 +2662,20 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         if (path === '/clearsign/report' && method === 'POST') {
           auth.requireAuth(req)
           const body = await parseRequest(req, S.ClearSignReportRequest)
-          // A caller's catalog never reaches the device: Desktop sends only
-          // definitions it fetches from the ClearSign service itself.
-          if (body.chain === 'evm') body.hasErc7730 = undefined
           if (body.chain === 'evm') {
             // The same preview the Desktop builds before its signing overlay,
             // against the connected device's firmware (none: the preview
             // degrades to the no-certification path and the report says so).
             const { report, simulation, artifactResolution } = await buildEvmReportForTx({
               tx: body, firmwareVersion: engine.getDeviceState().firmwareVersion,
-              endpoint: getEvmSimulationEndpoint(body.chainId), hasErc7730: body.hasErc7730,
+              capabilities: engine.getDeviceState().capabilities,
+              endpoint: getEvmSimulationEndpoint(body.chainId),
             })
             const promoted = artifactResolution.status === 'selected' ? artifactResolution.artifact : undefined
             if (!promoted) {
               const draft = observeEvmCall({
                 chainId: body.chainId, to: body.to, data: body.data,
-                source: body.hasErc7730 ? 'erc7730' : 'none',
+                source: report.descriptor.source === 'erc7730' ? 'erc7730' : 'none',
                 simulated: simulation.status === 'success', simulationStatus: simulation.status,
                 definitionResolution: artifactResolution.status,
                 exposureClass: classifyEffectExposure(simulation),
@@ -2803,7 +2803,10 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           } else {
             const firmwareVersion = activeSigningInfo?.firmwareVersion
             let certified: Awaited<ReturnType<typeof resolveEvmSchema>> = activeSigningInfo?.certifiedEvmSchema
-            if (!certified && supportsCertifiedClearSign(firmwareVersion)) {
+            // The ERC-7730 definition the approval card was built on: sent as
+            // approved, so the card and the device cannot drift.
+            const erc7730 = activeSigningInfo?.erc7730
+            if (!certified && !erc7730 && supportsCertifiedClearSign(firmwareVersion)) {
               try {
                 certified = await resolveEvmSchema(msg.chainId, msg.to, msg.data, true, firmwareVersion)
               } catch (error: any) {
@@ -2828,6 +2831,10 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
                 keyId: decoded.insightKeyId,
               }
               console.log(`[REST] EVM clear-sign: using Pioneer blob (keyId=${decoded.insightKeyId}, ${msg.txMetadata.signedPayload.length} bytes)`)
+            } else if (erc7730) {
+              // No kind-1 description: the one the card named.
+              msg.erc7730 = erc7730
+              console.log(`[REST] EVM clear-sign: ERC-7730 definition ${erc7730.primaryDefinitionId.slice(0, 18)}…`)
             } else {
               // Same provider step as the RPC, swap and WalletConnect routes:
               // the ClearSign provider the user added for this contract, asked
@@ -2900,14 +2907,31 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           }
           let clearSignSentToDevice = false
           const evmChainName = evmChainLabel(chainId)?.name ?? `EVM chain ${chainId}`
+          // What the device actually signed: without the ERC-7730 definition
+          // after a refusal of it.
+          let signedMsg: any = msg
           try {
             // Honest confirm dialog: decode msg.data so token/contract calls
             // don't show the contract as recipient or 0x0/hex-wei as amount.
             const { evmConfirmDetails } = await import('./emulator-confirm-details')
-            const result = await emuWrap(() => {
+            const result = await signWithErc7730Fallback(msg, (m: any) => emuWrap(() => {
               clearSignSentToDevice = true
-              return wallet.ethSignTx(msg)
-            }, evmConfirmDetails('ethSignTx', evmChainName, msg))
+              signedMsg = m
+              return wallet.ethSignTx(m)
+            }, evmConfirmDetails('ethSignTx', evmChainName, m)), async (plain: any) => {
+              // The device refused the definition: the plain call goes through
+              // the normal gate. Without AdvancedMode the card asks again, as
+              // the blind call it now is.
+              const approved = activeSigningInfo
+              if (!approved || !evmCallRequiresAdvancedMode(plain.to, plain.data, plain.chainId, approved.advancedModeEnabled,
+                plain.txMetadata, undefined, approved.firmwareVersion, plain.value)) return
+              const again = withoutErc7730Description(approved)
+              if (activeSigningId) callbacks?.onSigningDismissed?.(activeSigningId)
+              activeSigningId = again.id
+              activeSigningInfo = again
+              const decision = await callbacks!.onSigningRequest(again)
+              if (!decision.approved) throw new HttpError(403, 'Signing rejected by user')
+            }, '[REST]')
             console.log('[REST] ethSignTx result:', JSON.stringify(result))
             if (clearSignPayload) recordRestClearSignEvent({
               kind: 'transaction', outcome: 'signed', source: 'rest-api', chain: evmChainName,
@@ -2915,10 +2939,10 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               keyId: Number.isInteger(clearSignRequest.keyId) ? clearSignRequest.keyId : undefined,
               sentToDevice: clearSignSentToDevice, request: clearSignRequest,
             })
-            if (activeClearSignObservationId && (msg.erc7730 || msg.txMetadata)) {
+            if (activeClearSignObservationId && (signedMsg.erc7730 || signedMsg.txMetadata)) {
               authenticateClearSignObservation(
                 activeClearSignObservationId,
-                msg.erc7730 ? 'erc7730' : msg.txMetadata?.keyId === 0x80 ? 'certified' : 'runtime',
+                signedMsg.erc7730 ? 'erc7730' : signedMsg.txMetadata?.keyId === 0x80 ? 'certified' : 'runtime',
               )
             }
             if (activeClearSignObservationId) finalizeClearSignObservation(activeClearSignObservationId, 'signed')
@@ -2936,6 +2960,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               error: err?.message || String(err),
             })
             if (activeClearSignObservationId) finalizeClearSignObservation(activeClearSignObservationId, 'failed', 'device-or-transport')
+            // The user declined the card for the call without its definition.
+            if (err instanceof HttpError) throw err
             // Distinguish user cancellation / device rejection from actual failures
             const errMsg = String(err?.message || err || '').toLowerCase()
             if (errMsg.includes('cancel') || errMsg.includes('rejected') || errMsg.includes('denied') || errMsg.includes('action cancelled')) {

@@ -10,7 +10,7 @@ import { buildClearSignReport, type ClearSignDescriptorEvidence, type ClearSignR
 import { CERTIFIED_METADATA_KEY_ID } from './evm-certified-schema'
 import { certifiedBodyRefused, certifiedEnvelopeShown, metadataPayloadBytes } from '../shared/certified-evm-envelope'
 import { assessSigningRisk, type RiskLevel } from '../shared/clearsign-risk'
-import { applyEvmTxPreview } from './evm-signing-preview'
+import { applyEvmTxPreview, attachErc7730Definition } from './evm-signing-preview'
 import { measureLiveDeployment, resolveCertifiedEvmTransaction, resolveEvmSchema } from './evm-schema-registry'
 import { supportsCertifiedClearSign } from './solana-certified-policy'
 import { resolvePromotedEvmArtifact, type ClearSignArtifactResolution } from './clearsign-artifact-resolver'
@@ -27,6 +27,7 @@ import { findContractRating } from './clearsign-review'
  */
 export async function prepareEvmTxSigningInfo(
   signingInfo: SigningRequestInfo, preview: any, firmwareVersion: string | undefined,
+  capabilities?: readonly number[],
 ): Promise<void> {
   await applyEvmTxPreview(
     signingInfo, preview.to, preview.data, signingInfo.chainId as number | undefined,
@@ -65,6 +66,9 @@ export async function prepareEvmTxSigningInfo(
       console.warn(`[REST] Certified approval preview unavailable, staying blind: ${error?.message || error}`)
     }
   }
+  // Last: a ClearSign service ERC-7730 definition, only when nothing above
+  // describes the call (kind-1 wins; one description per transaction).
+  if (!preview.txMetadata?.signedPayload) await attachErc7730Definition(signingInfo, preview.to, preview.data, firmwareVersion, capabilities)
 }
 
 /** A transfer with no call data. Every firmware shows its amount and
@@ -131,6 +135,39 @@ export function evmSigningVerdict(
   }
 }
 
+/** Report entries buildClearSignReport derives itself (from the simulation
+ *  and the descriptor); a rebuilt report must not carry them twice. */
+const DERIVED_REPORT_CODES = new Set(['ASSETS_LEAVE_WALLET', 'AUTHORITY_GRANTED', 'DESCRIPTION_WITHOUT_COMPLETE_SIMULATION', 'CLEARSIGN_DEFINITION_REFUSED'])
+
+/**
+ * The overlay info once the device has refused its ERC-7730 definition. The
+ * call is signed without it, so the card reads as the blind call it now is and
+ * asks for the normal blind-sign / AdvancedMode handling (a new card id).
+ */
+export function withoutErc7730Description(info: SigningRequestInfo): SigningRequestInfo {
+  const { erc7730: _refused, ...rest } = info
+  const next: SigningRequestInfo = { ...rest, id: `${info.id}:without-erc7730`, needsBlindSigning: true }
+  const report = info.clearSignReport
+  if (report) {
+    const sim = report.simulation
+    const fromSimulation = new Set<unknown>([...sim.warnings, ...sim.unknowns])
+    const keep = (f: EffectFinding) => !fromSimulation.has(f) && !DERIVED_REPORT_CODES.has(f.code)
+    next.clearSignReport = buildClearSignReport({
+      requestedLevel: hostEvidenceLevel(sim, false, next),
+      descriptor: { source: 'none', authenticated: false, label: reviewedEvmDecodeLabel(next), resolution: report.descriptor.resolution },
+      simulation: sim,
+      hostFindings: report.findings.filter(keep),
+      hostLimitations: [...report.limitations.filter(keep), {
+        code: 'ERC7730_DEFINITION_REFUSED',
+        message: 'Your KeepKey could not show this call from its ClearSign description. It shows raw data instead.',
+        severity: 'danger',
+      }],
+      rating: report.rating,
+    })
+  }
+  return next
+}
+
 /** Pre-sign level from host evidence only; P4 is never reachable here. */
 export function hostEvidenceLevel(
   simulation: EffectReport, universalRouterComplete: boolean, info: SigningRequestInfo,
@@ -154,7 +191,6 @@ export function buildEvmPresignReport(input: {
   simulation: EffectReport
   universalRouterFindings: { complete: boolean; findings: EffectFinding[]; limitations: EffectFinding[] }
   artifactResolution: ClearSignArtifactResolution<{ bundleHash: string; method: string; expiresAt: number }>
-  hasErc7730?: boolean
   rating?: ContractRating
   /**
    * In-app only: this Desktop is the signer and sends exactly the prepared
@@ -180,9 +216,9 @@ export function buildEvmPresignReport(input: {
     // during signing. This pre-sign report never self-promotes.
     requestedLevel: verdict?.requestedLevel ?? hostEvidenceLevel(simulation, ur.complete, info),
     descriptor: verdict ? { ...verdict.descriptor, resolution: verdict.descriptor.authenticated ? artifactResolution.status : resolution } : {
-      source: promoted ? 'certified' : input.hasErc7730 ? 'erc7730' : 'none',
+      source: promoted ? 'certified' : info.erc7730 ? 'erc7730' : 'none',
       authenticated: false,
-      format: promoted ? 'EVM_METADATA' : input.hasErc7730 ? 'ERC7730' : undefined,
+      format: promoted ? 'EVM_METADATA' : info.erc7730 ? 'ERC7730' : undefined,
       label: promoted?.method ?? reviewed,
       artifactHash: promoted?.bundleHash,
       codeIdentityBound: Boolean(promoted),
@@ -241,8 +277,9 @@ export interface EvmReportTx {
 export async function buildEvmReportForTx(input: {
   tx: EvmReportTx
   firmwareVersion: string | undefined
+  /** Features.capabilities of the connected device (the ERC-7730 gate). */
+  capabilities?: readonly number[]
   endpoint: string
-  hasErc7730?: boolean
   signerVerdict?: boolean
   measure?: typeof measureLiveDeployment
 }): Promise<{ report: ClearSignReport; signingInfo: SigningRequestInfo; simulation: EffectReport; artifactResolution: ReturnType<typeof resolvePromotedEvmArtifact> }> {
@@ -261,14 +298,13 @@ export async function buildEvmReportForTx(input: {
   }
   // The request as a dapp would send it: no caller metadata, so the shared
   // preview resolves certified envelopes itself, as the signing path does.
-  await prepareEvmTxSigningInfo(signingInfo, { ...tx, data }, firmwareVersion)
+  await prepareEvmTxSigningInfo(signingInfo, { ...tx, data }, firmwareVersion, input.capabilities)
   const report = buildEvmPresignReport({
     signingInfo,
     deviceConnected: Boolean(firmwareVersion),
     simulation,
     universalRouterFindings,
     artifactResolution,
-    hasErc7730: input.hasErc7730,
     signerVerdict: input.signerVerdict,
     rating: tx.to ? await findContractRating(tx.chainId, tx.to, input.measure ?? measureLiveDeployment) : undefined,
   })

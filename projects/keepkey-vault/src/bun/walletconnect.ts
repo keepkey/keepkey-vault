@@ -14,7 +14,10 @@ import bs58 from 'bs58'
 import type { ClearSignObservationDraft, ClearSignObservationOutcome, SigningRequestInfo, WcSessionInfo } from '../shared/types'
 import { evmAddressPath } from './evm-addresses'
 import { verifyEvmSigner } from './evm-rpc'
-import { applyEvmTxPreview, evmPriorityFee, recognizedTypedDataSpender } from './evm-signing-preview'
+import { applyEvmTxPreview, attachErc7730Definition, evmPriorityFee, recognizedTypedDataSpender } from './evm-signing-preview'
+import { signWithErc7730Fallback } from './erc7730-resolver'
+import { evmCallRequiresAdvancedMode } from './evm-signing-policy'
+import { withoutErc7730Description } from './evm-presign-report'
 import { buildSolanaMessageDecodedInfo } from './solana-message-preview'
 import { ethMessagePreview } from './eth-message-preview'
 import { buildSolanaDecodedInfo } from './solana-clearsign'
@@ -187,6 +190,8 @@ export interface WcCallbacks {
   solanaSignMessageRaw: (params: { addressNList: number[]; messageBase58: string }) => Promise<{ signatureBase64: string }>
   /** Connected device's firmware version, e.g. "7.15.0". Undefined if unknown. */
   getFirmwareVersion: () => string | undefined
+  /** Connected device's Features.capabilities (7.15+). Undefined if unknown. */
+  getDeviceCapabilities?: () => number[] | undefined
   /** Sign a Solana transaction (full base64 tx including empty sig slots). Returns assembled signed tx + signature. */
   solanaSignTransactionRaw: (params: { addressNList: number[]; signerAddress: string; transactionBase64: string }) => Promise<{ transactionBase64: string; signatureBase64: string; clearSignPromotionBundleHash?: string }>
   /** Broadcast a fully-signed serialized transaction via Pioneer. Returns the on-chain txid. */
@@ -999,6 +1004,12 @@ export class WalletConnectManager {
       this.callbacks.log(`[WC] ClearSign schema lookup unavailable: ${error?.message || error}`)
       throw error
     }
+    // Nothing else describes the call: a ClearSign service ERC-7730 definition,
+    // sent exactly as the card shows it (one description per transaction).
+    if (!clearSignSchema) {
+      await attachErc7730Definition(signingInfo, tx.to, tx.data, this.callbacks.getFirmwareVersion(),
+        this.callbacks.getDeviceCapabilities?.(), '[WC]')
+    }
     if (from) {
       const simulation = await simulateEvmEffects({
         chainId: effectiveChainId, from, to: tx.to, data: tx.data || '0x',
@@ -1016,7 +1027,8 @@ export class WalletConnectManager {
           authenticated: false,
           format: 'EVM_METADATA',
           label: clearSignSchema.method,
-        } : { source: 'none', authenticated: false },
+        } : signingInfo.erc7730 ? { source: 'erc7730', authenticated: false, format: 'ERC7730' }
+          : { source: 'none', authenticated: false },
         simulation,
         hostFindings: universalRouterFindings.findings,
         hostLimitations: universalRouterFindings.limitations,
@@ -1024,7 +1036,7 @@ export class WalletConnectManager {
     }
     // Name on the card the provider the sign step will ask (its /signer
     // only). The sign step attaches a description only from that provider.
-    if (!clearSignSchema && !signingInfo.calldataDecoded?.signedInsightBlob) {
+    if (!clearSignSchema && !signingInfo.calldataDecoded?.signedInsightBlob && !signingInfo.erc7730) {
       const named = await nameRuntimeProvider(
         { chainId: effectiveChainId, to: tx.to, data: tx.data, value: tx.value },
         { firmwareVersion: this.callbacks.getFirmwareVersion(), advancedMode: this.callbacks.getAdvancedModeEnabled() },
@@ -1064,6 +1076,8 @@ export class WalletConnectManager {
       throw new Error('User rejected signing')
     }
 
+    // The card on screen: a second one if the device refuses the definition.
+    let cardId: string = signingId
     try {
       if (!from) throw new Error('Missing sender address')
 
@@ -1123,6 +1137,10 @@ export class WalletConnectManager {
         }
       }
 
+      // The ERC-7730 definition the card was built on, when nothing above
+      // attached kind-1 metadata (which wins).
+      if (!msg.txMetadata && signingInfo.erc7730) msg.erc7730 = signingInfo.erc7730
+
       // Nothing described the call: ask the matching ClearSign provider the
       // user added, now that nonce, gas and fees are final.
       const runtime = await resolveProviderTxMetadata(msg, {
@@ -1134,7 +1152,18 @@ export class WalletConnectManager {
         msg.txMetadata = runtime.txMetadata
       }
 
-      const result = await this.callbacks.ethSignTx(msg)
+      let signedMsg: any = msg
+      const result = await signWithErc7730Fallback(msg, (m: any) => { signedMsg = m; return this.callbacks.ethSignTx(m) }, async (plain: any) => {
+        // The device refused the definition: the plain call goes through the
+        // normal gate. Without AdvancedMode the card asks again, as the blind
+        // call it now is.
+        if (!evmCallRequiresAdvancedMode(plain.to, plain.data, effectiveChainId, this.callbacks.getAdvancedModeEnabled(),
+          plain.txMetadata, undefined, this.callbacks.getFirmwareVersion(), plain.value)) return
+        const again = withoutErc7730Description(signingInfo)
+        this.callbacks.dismissSigning(cardId)
+        cardId = again.id
+        if (!await this.callbacks.requestSigningApproval(again)) throw new Error('User rejected signing')
+      }, '[WC]')
       if (!result?.serialized) {
         throw new Error('Device did not return serialized transaction')
       }
@@ -1148,6 +1177,7 @@ export class WalletConnectManager {
         observationId, clearSignSchema.keyId === 0x80 ? 'certified' : 'runtime', 1,
         clearSignSchema.source === 'promoted-local', clearSignSchema.bundleHash,
       )
+      else if (observationId && signedMsg.erc7730) this.callbacks.authenticateClearSignObservation(observationId, 'erc7730')
 
       if (broadcast) {
         const txHash = await this.rpcCall(effectiveChainId, 'eth_sendRawTransaction', [result.serialized])
@@ -1161,7 +1191,7 @@ export class WalletConnectManager {
       if (observationId) this.callbacks.finalizeClearSignObservation(observationId, 'failed', 'device-network-or-transport')
       throw error
     } finally {
-      this.callbacks.dismissSigning(signingId)
+      this.callbacks.dismissSigning(cardId)
     }
   }
 }
