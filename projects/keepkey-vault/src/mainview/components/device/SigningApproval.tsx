@@ -1365,7 +1365,7 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 				)}
 
 				{/* Report and risk first, so they are read before blind-sign consent. */}
-				<ClearSignReportCard report={request.clearSignReport} />
+				<ClearSignReportCard report={request.clearSignReport} verdictBelow={Boolean(assessSigningRisk(request))} />
 				{/* No report (an addressNList caller): the provider the sign step pins is still named. */}
 				{(() => {
 					const line = namedProviderLine(request.runtimeProvider, request.clearSignReport)

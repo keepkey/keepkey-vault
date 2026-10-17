@@ -995,7 +995,6 @@ export class WalletConnectManager {
     // Same calldata decode + verdict as REST: native firmware decode, else a
     // 7.16 KeepKey-certified schema, else AdvancedMode (blind).
     await applyEvmTxPreview(signingInfo, tx.to, tx.data, effectiveChainId, this.callbacks.getFirmwareVersion(), undefined, '[WC]')
-    const contractFacts = this.callbacks.addContractFacts?.(signingInfo)
 
     const from = tx.from ?? this.callbacks.getEvmAddressInfo()?.address
     let clearSignSchema: SignedEvmSchema | undefined
@@ -1014,6 +1013,8 @@ export class WalletConnectManager {
       await attachErc7730Definition(signingInfo, tx.to, tx.data, this.callbacks.getFirmwareVersion(),
         this.callbacks.getDeviceCapabilities?.(), '[WC]')
     }
+    // After the ERC-7730 attach, so a call the KeepKey shows gets nothing added.
+    const contractFacts = this.callbacks.addContractFacts?.(signingInfo)
     if (from) {
       const simulation = await simulateEvmEffects({
         chainId: effectiveChainId, from, to: tx.to, data: tx.data || '0x',

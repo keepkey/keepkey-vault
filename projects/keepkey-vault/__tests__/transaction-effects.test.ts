@@ -303,5 +303,5 @@ test('a simulation Pioneer has no route for reads as a plain sentence; a real no
   expect(simulationUnavailableMessage('Pioneer does not expose this eth_call selector: 0xd9627aa4', noRoute))
     .toBe("Couldn't simulate this transaction.")
   expect(simulationUnavailableMessage('insufficient funds for gas * price + value', noRoute))
-    .toContain('insufficient funds for gas * price + value')
+    .toBe("Couldn't simulate this transaction. insufficient funds for gas * price + value")
 })

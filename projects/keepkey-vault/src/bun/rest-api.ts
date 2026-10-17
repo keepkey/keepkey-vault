@@ -1972,7 +1972,12 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               // POST /clearsign/report so both surfaces judge the same bytes alike.
               await prepareEvmTxSigningInfo(signingInfo, preview, engine.getDeviceState().firmwareVersion, engine.getDeviceState().capabilities)
               // Card only: never part of the /clearsign/report a caller reads.
-              const contractFacts = addContractFacts(signingInfo, engine.isPassphraseWallet ? undefined : engine.getDeviceState().deviceId)
+              // `from` is the signing key unless the caller also sent a path
+              // that this computer has not matched to it.
+              const nList = preview.addressNList || preview.address_n_list
+              let account: string | undefined = String(preview.from || '')
+              if (nList) try { if (JSON.stringify(auth.getAccount(account).addressNList) !== JSON.stringify(nList)) account = undefined } catch { account = undefined }
+              const contractFacts = addContractFacts(signingInfo, engine.isPassphraseWallet ? undefined : engine.getDeviceState().deviceId, account)
               if (path === '/eth/sign-transaction' && /^0x[0-9a-fA-F]{40}$/.test(String(preview.from || ''))) {
                 const chainIdNum = typeof signingInfo.chainId === 'string'
                   ? (signingInfo.chainId.startsWith('0x') ? parseInt(signingInfo.chainId, 16) : parseInt(signingInfo.chainId, 10))

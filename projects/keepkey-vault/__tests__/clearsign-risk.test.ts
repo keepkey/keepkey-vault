@@ -874,7 +874,7 @@ describe('blind call to a contract this account has used before', () => {
     const r = assessSigningRisk(venice({ contractName }))!
     expect(r.tier).toBe('red')
     expect(r.level).toBe('high')
-    expect(texts(r)).toContain('The contract calls itself "Staked Venice Token" (sVVV). Not verified: any contract can use any name.')
+    expect(texts(r)).toContain('This contract\'s token is named "Staked Venice Token" (sVVV). Not verified: any contract can use any name.')
   })
 
   test('prior use and no coin sent: yellow, still blind', () => {
@@ -884,13 +884,25 @@ describe('blind call to a contract this account has used before', () => {
     expect(r.headline).toBe('Used before, but your KeepKey cannot show this call')
     expect(texts(r)).toEqual([
       'Your KeepKey cannot show what this call to 0x321b7ff75154472b18edb199033ff4d116f340ff does. You would be signing blind.',
-      'The contract calls itself "Staked Venice Token" (sVVV). Not verified: any contract can use any name.',
-      'You have used this contract from this account 2 times before, since Jan 2025.',
+      'This contract\'s token is named "Staked Venice Token" (sVVV). Not verified: any contract can use any name.',
+      'You have used this contract from this account at least 2 times before, since Jan 2025.',
     ])
   })
 
   test('prior use but coin sent, or a malformed token call: stays red', () => {
     expect(assessSigningRisk(venice({ priorUse, value: '0x2386f26fc10000' }))!.tier).toBe('red')
     expect(assessSigningRisk(venice({ priorUse, data: '0xa9059cbb00' }))!.tier).toBe('red')
+    expect(assessSigningRisk(venice({ priorUse, value: 'zz' }))!.tier).toBe('red')
+  })
+
+  test('a name equal to its symbol is not repeated; one use reads "once"', () => {
+    const r = assessSigningRisk(venice({ priorUse: { count: 1, since: priorUse.since }, contractName: { name: 'sVVV', symbol: 'sVVV' } }))!
+    expect(texts(r)).toContain('This contract\'s token is named "sVVV". Not verified: any contract can use any name.')
+    expect(texts(r)).toContain('You have used this contract from this account at least once before, since Jan 2025.')
+  })
+
+  test('a call the KeepKey shows gets no name or prior-use line', () => {
+    const r = assessSigningRisk(venice({ priorUse, contractName, needsBlindSigning: false, deviceClearSigns: true }))!
+    expect(texts(r).some((x) => x.includes('token is named') || x.includes('used this contract'))).toBe(false)
   })
 })

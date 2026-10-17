@@ -1930,33 +1930,29 @@ export function updateApiLogTxMeta(
   }
 }
 
-/** Earlier transactions from `from` to contract `to` on `chainId`, from this
- *  computer's own log: sends Pioneer's history found (SCAN) and REST signs.
- *  A sign row has no txid to join to its SCAN row, so the count is the larger
- *  of the two (a lower bound), and `since` the earliest of either. */
+/** Earlier on-chain transactions from `from` to contract `to` on `chainId`,
+ *  as Pioneer's history found them (SCAN rows). A signature alone is not
+ *  counted: a site can ask for one and never broadcast it. Pioneer's history
+ *  can miss transactions, so `count` is a lower bound. */
 export function getPriorEvmCalls(from: string, to: string, chainId: number): { count: number; since: number } | null {
   try {
     if (!db) return null
     const f = from.toLowerCase(), t = to.toLowerCase()
     const rows = db.query(
-      `SELECT method, timestamp, txid, request_body, response_body FROM api_log
-       WHERE ((method = 'SCAN' AND activity_type = 'send') OR (activity_type = 'sign' AND route = '/eth/sign-transaction'))
-         AND (lower(request_body) LIKE ? OR lower(response_body) LIKE ?)`
-    ).all(`%${t}%`, `%${t}%`) as Array<{ method: string; timestamp: number; txid: string | null; request_body: string | null; response_body: string | null }>
+      `SELECT timestamp, txid, response_body FROM api_log
+       WHERE method = 'SCAN' AND activity_type = 'send' AND lower(response_body) LIKE ?`
+    ).all(`%${t}%`) as Array<{ timestamp: number; txid: string | null; response_body: string | null }>
     const sent = new Set<string>()
-    let signed = 0, since = Infinity
+    let since = Infinity
     for (const r of rows) {
       try {
-        const scan = r.method === 'SCAN'
-        const b = JSON.parse((scan ? r.response_body : r.request_body) || '{}')
-        if (String(b.to).toLowerCase() !== t || String(b.from).toLowerCase() !== f) continue
-        if (scan ? b.networkId !== `eip155:${chainId}` : Number(b.chainId) !== chainId) continue
-        if (scan) sent.add(r.txid || String(r.timestamp)); else signed++
+        const b = JSON.parse(r.response_body || '{}')
+        if (String(b.to).toLowerCase() !== t || String(b.from).toLowerCase() !== f || b.networkId !== `eip155:${chainId}`) continue
+        sent.add(r.txid || String(r.timestamp))
         since = Math.min(since, r.timestamp)
       } catch { /* not JSON: not a match */ }
     }
-    const count = Math.max(sent.size, signed)
-    return count > 0 ? { count, since } : null
+    return sent.size > 0 ? { count: sent.size, since } : null
   } catch (e: any) {
     console.warn('[db] getPriorEvmCalls failed:', e.message)
     return null

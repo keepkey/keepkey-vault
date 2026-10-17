@@ -364,11 +364,14 @@ function evmTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void):
     const usedBefore = Boolean(req.priorUse) && native !== null && !sendsCoin && !KNOWN_SELECTORS.has(sel)
     if (usedBefore) recognition = 'used'
     add(usedBefore ? 'medium' : 'high', `Your KeepKey cannot show what this call to ${to} does. You would be signing blind.`)
-  }
-  if (req.contractName) add('low', `The contract calls itself "${req.contractName.name}" (${req.contractName.symbol}). Not verified: any contract can use any name.`)
-  if (req.priorUse) {
-    const { count, since } = req.priorUse
-    add('low', `You have used this contract from this account ${count} time${count === 1 ? '' : 's'} before, since ${new Date(since).toLocaleString('en-US', { month: 'short', year: 'numeric' })}.`)
+    if (req.contractName) {
+      const { name, symbol } = req.contractName
+      add('low', `This contract's token is named "${name}"${symbol !== name ? ` (${symbol})` : ''}. Not verified: any contract can use any name.`)
+    }
+    if (req.priorUse) {
+      const { count, since } = req.priorUse
+      add('low', `You have used this contract from this account at least ${count === 1 ? 'once' : `${count} times`} before, since ${new Date(since).toLocaleString('en-US', { month: 'short', year: 'numeric' })}.`)
+    }
   }
 
   if (field('Action')?.startsWith('Swap ')) {

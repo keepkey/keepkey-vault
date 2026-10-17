@@ -1396,7 +1396,8 @@ function getOrCreateWcManager(): WalletConnectManager {
 				clearSignPromotionBundleHash: result.clearSignPromotionBundleHash,
 			}
 		},
-		addContractFacts: (info) => addContractFacts(info, engine.isPassphraseWallet ? undefined : engine.getDeviceState().deviceId),
+		// WalletConnect has already matched tx.from to the signing account.
+		addContractFacts: (info) => addContractFacts(info, engine.isPassphraseWallet ? undefined : engine.getDeviceState().deviceId, info.from),
 		requestSigningApproval: async (info) => {
 			attachSigningPolicySnapshot(info)
 			try { rpc.send['signing-request'](info) } catch { /* webview not ready */ }

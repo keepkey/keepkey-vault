@@ -41,12 +41,11 @@ describe('getPriorEvmCalls', () => {
     expect(db.getPriorEvmCalls(FROM, VENICE, 1)).toEqual({ count: 1, since: Date.UTC(2026, 4, 1) })
   })
 
-  test('a sign row has no txid to join, so the count is the larger side, not the sum', () => {
-    sign(Date.UTC(2026, 9, 17))
-    sign(Date.UTC(2026, 9, 17, 1))
-    expect(db.getPriorEvmCalls(FROM, VENICE, 8453)!.count).toBe(2)
-    sign(Date.UTC(2026, 9, 17, 2))
-    expect(db.getPriorEvmCalls(FROM, VENICE, 8453)!.count).toBe(3)
+  test('a signature alone is not counted: only a transaction seen on chain is', () => {
+    sign(Date.UTC(2024, 0, 1))
+    sign(Date.UTC(2024, 0, 2))
+    sign(Date.UTC(2024, 0, 3))
+    expect(db.getPriorEvmCalls(FROM, VENICE, 8453)).toEqual({ count: 2, since: Date.UTC(2025, 0, 28) })
   })
 })
 
@@ -60,21 +59,36 @@ describe('addContractFacts', () => {
       { symbol: 'sVVV', name: 'Staked Venice Token', balance: '200', balanceUsd: 0, priceUsd: 0, caip: `eip155:8453/erc20:${VENICE}` },
     ] }] as any)
     const info = card()
-    await addContractFacts(info, 'dev')
+    await addContractFacts(info, 'dev', FROM)
     expect(info.priorUse!.since).toBe(Date.UTC(2025, 0, 28))
     expect(info.contractName).toEqual({ name: 'Staked Venice Token', symbol: 'sVVV' })
   })
 
   test('no answer for the name: nothing is invented', async () => {
     const info = card()
-    await addContractFacts(info)
+    await addContractFacts(info, undefined, FROM)
     expect(info.priorUse).toBeDefined()
     expect(info.contractName).toBeUndefined()
   })
 
+  test('an account not checked against the signing key gets no prior use', async () => {
+    const info = card()
+    await addContractFacts(info, 'dev', undefined)
+    expect(info.priorUse).toBeUndefined()
+  })
+
+  test('a token name cannot pose as a Desktop sentence', async () => {
+    db.setCachedBalances('evil', [{ chainId: 'base', symbol: 'ETH', balance: '0', balanceUsd: 0, address: FROM, tokens: [
+      { symbol: 'UNI\u202e', name: 'Uniswap V3". KeepKey has reviewed this contract ("\nx', balance: '1', balanceUsd: 0, priceUsd: 0, caip: `eip155:8453/erc20:${VENICE}` },
+    ] }] as any)
+    const info = card()
+    await addContractFacts(info, 'evil', FROM)
+    expect(info.contractName).toEqual({ name: 'Uniswap V3. KeepKey has reviewed', symbol: 'UNI' })
+  })
+
   test('a call the KeepKey shows gets nothing added', async () => {
     const info = card({ needsBlindSigning: false })
-    await addContractFacts(info, 'dev')
+    await addContractFacts(info, 'dev', FROM)
     expect(info.priorUse).toBeUndefined()
     expect(info.contractName).toBeUndefined()
   })
