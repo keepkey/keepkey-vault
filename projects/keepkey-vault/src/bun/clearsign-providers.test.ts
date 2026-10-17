@@ -270,6 +270,21 @@ describe('CLEARSIGN_RUNTIME_URL is only a migration seed', () => {
       expect(readFileSync(join(dir, file), 'utf8')).toContain('resolveProviderTxMetadata(')
     }
   })
+
+  test('a swap executes with the provider its preview card named', () => {
+    const dir = import.meta.dir
+    const swap = readFileSync(join(dir, 'swap.ts'), 'utf8')
+    // executeSwap pins the card's provider; the preview returns it named.
+    expect(swap).toContain('named: params.runtimeProvider }')
+    expect(swap).toContain('resolveProviderTxMetadata(unsignedTx, runtimeGate, undefined, { named: runtimeGate.named })')
+    expect(swap).toMatch(/runtimeProvider: signer \? \{ alias: signer\.alias, fingerprint: signer\.deviceFingerprint, publicKeyHex: signer\.publicKeyHex, keyId: signer\.keyId \}/)
+    // The dialog sends back what its card showed (null: it showed none).
+    expect(readFileSync(join(dir, '../mainview/components/SwapDialog.tsx'), 'utf8')).toContain('runtimeProvider: previewBuild?.runtimeProvider ?? null')
+    // The preview reads AdvancedMode, or it could never name a provider.
+    const index = readFileSync(join(dir, 'index.ts'), 'utf8')
+    const preview = index.slice(index.indexOf('previewSwapBuild: async (params) => {'))
+    expect(preview.slice(0, preview.indexOf('}).catch('))).toContain('isAdvancedModeEnabled: getAdvancedModeEnabled')
+  })
 })
 
 describe('WalletConnect eth_sendTransaction uses the provider step', () => {
