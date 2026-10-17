@@ -287,6 +287,7 @@ import { trustRuntimeSigner, type RuntimeEvmSigner } from "./evm-runtime-metadat
 import { addClearSignProvider, listClearSignProviders, removeClearSignProvider, resolveProviderTxMetadata, seedClearSignProviderFromEnv } from "./clearsign-providers"
 import { supportsCertifiedClearSign } from "./solana-certified-policy"
 import { configureProductionRootTrust } from "../shared/certified-evm-envelope"
+import { emulatorClearSignTestRoot } from "./emulator-library"
 import { createRpcAltFetcher } from "./solana-alt"
 import { createProviderKeySession } from "./clearsign-provider-session"
 import { buildProviderBundle, buildStudioEvmSchema, parseProviderBundle, providerBundleFileName, uniqueFilePath } from "./clearsign-studio-evm"
@@ -868,8 +869,13 @@ const perf = (label: string) => console.log(`[PERF] +${Date.now() - BOOT_START}m
 // ── Engine Controller (constructors are lightweight — no I/O) ────────
 const engine = new EngineController()
 setClearSignAuditGate(() => engine.isEmulator && !offlineMode && !engine.isPassphraseWallet)
-// The emulator library trusts only the alpha root: no certified descriptions.
-configureProductionRootTrust(() => !engine.isEmulator)
+// The emulator library trusts only the alpha root: no certified descriptions,
+// unless it was started with a ClearSign TEST root (QA against the stock 7.16
+// emulator, with CLEARSIGN_SERVICE_URL serving test-root definitions). A real
+// device always trusts the production root.
+const emulatorTestRoot = emulatorClearSignTestRoot()
+if (emulatorTestRoot) console.warn(`[clearsign] KK_CLEARSIGN_TEST_ROOT=${emulatorTestRoot}: the emulator gets certified descriptions (TEST root)`)
+configureProductionRootTrust(() => !engine.isEmulator || !!emulatorTestRoot)
 // A hidden wallet's Zcash view key is never written to disk.
 setFvkDiskAllowed(() => !engine.isPassphraseWallet)
 

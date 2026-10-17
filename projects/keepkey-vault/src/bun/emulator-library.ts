@@ -110,3 +110,15 @@ export function resolveEmulatorLibPath(options: {
   return bundledEmulatorCandidates(options.importDir, options.cwd ?? process.cwd(), platform)
     .find(exists) ?? null
 }
+
+/**
+ * The ClearSign TEST root the emulator was started with, or undefined. A debug
+ * libkkemu reads KK_CLEARSIGN_TEST_ROOT (a 33-byte compressed key, 66 hex) with
+ * getenv in kkemu_init, so only the launch environment counts: Bun's
+ * process.env assignments never reach getenv. Read it once, at startup. A QA
+ * setting for the stock 7.16 emulator; it never applies to a real device.
+ */
+export function emulatorClearSignTestRoot(env: Record<string, string | undefined> = process.env): string | undefined {
+  const key = env.KK_CLEARSIGN_TEST_ROOT?.trim()
+  return key && /^0[23][0-9a-fA-F]{64}$/.test(key) ? key.toLowerCase() : undefined
+}

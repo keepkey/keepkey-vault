@@ -18,6 +18,7 @@ import { certifiedEnvelopeShown, configureProductionRootTrust } from '../src/sha
 import { supportsCertifiedClearSign } from '../src/bun/solana-certified-policy'
 import { evmCallRequiresAdvancedMode } from '../src/bun/evm-signing-policy'
 import noAltFixture from './fixtures/solana/relay-deposit-native-no-alt.json'
+import { emulatorClearSignTestRoot } from '../src/bun/emulator-library'
 
 const NOW = 1_790_000_000
 
@@ -114,8 +115,20 @@ describe('the bundled emulator compiles in only the alpha root', () => {
       expect(certifiedEnvelopeShown(envelope, 0x80, '7.17.0', tx)).toBe(false)
       expect(evmCallRequiresAdvancedMode(UR, tx.data, 42161, false, meta, undefined, '7.17.0')).toBe(true)
     } finally { configureProductionRootTrust(() => true) }
-    // Desktop registers the emulator as not trusting the production root.
+    // Desktop registers the emulator as not trusting the production root,
+    // unless it was launched with a ClearSign TEST root.
     const index = readFileSync(new URL('../src/bun/index.ts', import.meta.url), 'utf8')
-    expect(index).toContain('configureProductionRootTrust(() => !engine.isEmulator)')
+    expect(index).toContain('configureProductionRootTrust(() => !engine.isEmulator || !!emulatorTestRoot)')
+    expect(index).toContain('const emulatorTestRoot = emulatorClearSignTestRoot()')
+  })
+
+  test('only a launch-time KK_CLEARSIGN_TEST_ROOT compressed key counts as a test root', () => {
+    const key = '02ec4954d2a274a8e8f05823471464dde86b675fbc675ddbb672a28c6953d9ef76'
+    expect(emulatorClearSignTestRoot({ KK_CLEARSIGN_TEST_ROOT: key })).toBe(key)
+    expect(emulatorClearSignTestRoot({ KK_CLEARSIGN_TEST_ROOT: ` ${key.toUpperCase()} ` })).toBe(key)
+    for (const bad of [undefined, '', '1', key.slice(2), `04${key.slice(2)}`, `${key}00`]) {
+      expect(emulatorClearSignTestRoot({ KK_CLEARSIGN_TEST_ROOT: bad })).toBeUndefined()
+    }
+    expect(emulatorClearSignTestRoot({})).toBeUndefined()
   })
 })
