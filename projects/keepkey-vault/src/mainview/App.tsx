@@ -812,7 +812,9 @@ function App() {
 	// Track OOB entry — once the wizard is shown, lock it through disconnects.
 	// A skipped firmware update is the one exception: don't re-arm the OOB lock,
 	// otherwise the user would be yanked back into the wizard after skipping.
-	if (!wizardComplete && !firmwareSkipped && ["bootloader", "needs_firmware", "needs_init"].includes(deviceState.state)) {
+	// Bootloader mode with current firmware and bootloader: nothing for setup to do.
+	const bootloaderIdle = deviceState.state === "bootloader" && !deviceState.needsFirmwareUpdate && !deviceState.needsBootloaderUpdate
+	if (!wizardComplete && !firmwareSkipped && !bootloaderIdle && ["bootloader", "needs_firmware", "needs_init"].includes(deviceState.state)) {
 		oobEnteredRef.current = true
 	}
 	if (wizardComplete) {
@@ -830,7 +832,7 @@ function App() {
 
 	const oobLock = !wizardComplete && (setupInProgress || oobEnteredRef.current)
 
-	const phase = resolveAppPhase({ state: deviceState.state, oobLock, isClaimed, firmwareSkipped, wizardComplete })
+	const phase = resolveAppPhase({ state: deviceState.state, oobLock, isClaimed, firmwareSkipped, wizardComplete, bootloaderIdle })
 
 	useEffect(() => {
 		rpcRequest("logOnboarding", { event: `phase=${phase} state=${deviceState.state} wizardComplete=${wizardComplete} setupInProgress=${setupInProgress} oobEntered=${oobEnteredRef.current} firmwareSkipped=${firmwareSkipped}` }).catch(() => {})
@@ -963,6 +965,24 @@ function App() {
 				<SplashScreen statusText={t("keepkeyDetected", { ns: "nav" })} variant="claimed" isBitcoinOnly={splashBitcoinOnly}>
 					<DeviceClaimedDialog error={deviceState.error || t("claimed.defaultError", { ns: "device" })} />
 				</SplashScreen>
+			</>
+		)
+	}
+
+	if (phase === "leave-bootloader") {
+		const installed = deviceState.resolvedFwVersion?.replace(/^v/, "").replace(/-.*$/, "")
+		const variant = deviceState.installedBitcoinOnly ? " Bitcoin-only" : ""
+		return (
+			<>{splashNav}{resizeHandles}{updateBanner}{firmwareDropZone}{signingOverlay}{pairingOverlay}{passphraseOverlay}{charOverlay}{pinOverlay}
+				<SplashScreen
+					statusText={t("leaveBootloader.title", { ns: "nav", defaultValue: "Your KeepKey is in bootloader mode" })}
+					hintText={installed
+						? t("leaveBootloader.hintVersion", { ns: "nav", defaultValue: "Firmware v{{version}}{{variant}} is installed and up to date. Unplug your KeepKey and plug it back in without holding the button.", version: installed, variant })
+						: t("leaveBootloader.hint", { ns: "nav", defaultValue: "Its firmware is up to date. Unplug your KeepKey and plug it back in without holding the button." })}
+					variant="connecting"
+					childrenReady
+					isBitcoinOnly={!!deviceState.installedBitcoinOnly}
+				/>
 			</>
 		)
 	}
