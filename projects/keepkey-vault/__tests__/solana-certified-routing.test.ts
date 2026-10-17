@@ -304,13 +304,32 @@ describe('swap.ts: a Relay certified proof is attached only when the device will
 
   test('swap.ts drops a fetched proof the device would not apply before attaching it', () => {
     const swap = readFileSync(new URL('../src/bun/swap.ts', import.meta.url), 'utf8')
-    const fetched = swap.indexOf('certifiedProof = await findCertifiedSolanaProof(params.relayTx.serializedTx, catalogKey)')
-    const guard = swap.indexOf('if (certifiedProof && !certifiedSolanaProofApplies(params.relayTx.serializedTx, catalogKey, certifiedProof)) {')
+    const fetched = swap.indexOf('certifiedProof = await findCertifiedSolanaProof(rawTx, catalogKey)')
+    const guard = swap.indexOf('if (certifiedProof && !certifiedSolanaProofApplies(rawTx, catalogKey, certifiedProof)) {')
     const attached = swap.indexOf('schema: certifiedProof.schema, certificate: certifiedProof.certificate')
     expect(fetched).toBeGreaterThan(-1)
     expect(guard).toBeGreaterThan(fetched)
     expect(swap.slice(guard, guard + 400)).toContain('certifiedProof = undefined')
     expect(attached).toBeGreaterThan(guard)
+  })
+
+  test('a consented retry carries no schema or certificate, so a refused proof cannot loop', async () => {
+    const { buildRelaySolanaUnsignedTx } = await import('../src/bun/swap')
+    let asked = 0
+    globalThis.fetch = (async () => { asked++; throw new Error('offline') }) as unknown as typeof fetch
+    const params: any = {
+      fromCaip: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/slip44:501', relayTx: { serializedTx: relayFixture.rawTxBase64 },
+    }
+    const retry = await buildRelaySolanaUnsignedTx({ ...params, allowSolanaBlindSigning: true }, [0x8000002c, 0x800001f5, 0x80000000, 0x80000000], '7.16.0')
+    expect(retry.allowBlindSigning).toBe(true)
+    expect(retry).not.toHaveProperty('schema')
+    expect(retry).not.toHaveProperty('certificate')
+    expect(retry).not.toHaveProperty('lutProof')
+    expect(asked).toBe(0)
+    // Without consent the certified service is still asked first.
+    const first = await buildRelaySolanaUnsignedTx(params, [0x8000002c, 0x800001f5, 0x80000000, 0x80000000], '7.16.0')
+    expect(first.allowBlindSigning).toBe(false)
+    expect(asked).toBeGreaterThan(0)
   })
 
   test('Desktop ships no runtime-slot Solana schema: Relay is certified or goes to consent', () => {

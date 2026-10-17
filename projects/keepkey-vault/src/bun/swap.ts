@@ -702,52 +702,7 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
     // Skip the EVM-only buildRelaySwapTx and feed it straight to the Solana signer.
     if (fromChain.chainFamily === 'solana' && params.relayTx?.serializedTx) {
       swapLog(`${TAG} Relay Solana prebuilt tx — bypassing EVM relay builder`)
-      // A KeepKey-certified schema lets the device decode this instruction —
-      // program, amount, destination — instead of showing a blind-sign prompt.
-      // The root certificate authorizes firmware to trust the resolved LUT
-      // accounts directly, so it needs no AdvancedMode and works even when the
-      // message still carries lookup tables. Never blocks the fallback: a
-      // service outage or a route outside the reviewed catalog just drops
-      // through to the opaque-consent path below.
-      let certifiedProof: Awaited<ReturnType<typeof findCertifiedSolanaProof>>
-      const firmwareVersion = ctx.getFirmwareVersion?.()
-      if (supportsCertifiedClearSign(firmwareVersion)) {
-        const catalogKey = isTokenCaip(params.fromCaip) ? 'relayDepositToken' : 'relayDepositNative'
-        try {
-          certifiedProof = await findCertifiedSolanaProof(params.relayTx.serializedTx, catalogKey)
-        } catch (err: any) {
-          console.warn(`${TAG} certified Solana ClearSign proof unavailable: ${err?.message || err}`)
-        }
-        // The service matches a catalogKey request without the firmware's
-        // companion rule. An envelope the device would not apply is a hard
-        // failure there, so it is dropped and the consent path below runs.
-        if (certifiedProof && !certifiedSolanaProofApplies(params.relayTx.serializedTx, catalogKey, certifiedProof)) {
-          console.info(`${TAG} certified Solana ClearSign proof dropped: the device would not apply ${catalogKey} to this transaction; using the existing consent flow`)
-          certifiedProof = undefined
-        }
-      } else {
-        console.info(`${TAG} certified Solana ClearSign unsupported by firmware ${firmwareVersion || 'unknown'}; using the existing consent flow`)
-      }
-      if (certifiedProof) {
-        console.info(`${TAG} certified Solana ClearSign proof attached (${certifiedProof.lutProof?.accounts.length || 0} LUT accounts)`)
-      }
-
-      if (params.relayTx.solanaSwapMetadata && !certifiedProof) {
-        // The old host model called protobuf fields 5-7 "swap metadata".
-        // Firmware 7.16 defines those fields as a repeated LUT account list,
-        // its signature, and signer id. Sending the obsolete envelope would
-        // be ignored as a malformed LUT list and must never count as verified
-        // ClearSign coverage or suppress the explicit blind-sign consent.
-        swapLog(`${TAG} obsolete Solana swap metadata withheld: 7.16 requires a LUT account attestation`)
-      }
-      unsignedTx = {
-        addressNList: fromChain.defaultPath,
-        rawTx: params.relayTx.serializedTx,
-        allowBlindSigning: params.allowSolanaBlindSigning === true,
-        ...(certifiedProof
-          ? { ...(certifiedProof.lutProof ? { lutProof: certifiedProof.lutProof } : {}), schema: certifiedProof.schema, certificate: certifiedProof.certificate }
-          : {}),
-      }
+      unsignedTx = await buildRelaySolanaUnsignedTx(params, fromChain.defaultPath, ctx.getFirmwareVersion?.())
     } else if (fromChain.chainFamily === 'tron') {
       // Tron has no nonces — buildRelaySwapTx is EVM-only. Route through TronGrid txbuilder.
       swapLog(`${TAG} Relay Tron prebuilt tx — bypassing EVM relay builder`)
@@ -1253,6 +1208,66 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
 }
 
 // ── Relay swap tx building (pre-built calldata from bridge protocol) ──
+
+
+/** The Relay Solana prebuilt transaction as the device signs it. Exported for tests. */
+export async function buildRelaySolanaUnsignedTx(
+  params: ExecuteSwapParams,
+  addressNList: number[],
+  firmwareVersion: string | undefined,
+): Promise<any> {
+  const rawTx = String(params.relayTx?.serializedTx || '')
+  // A KeepKey-certified schema lets the device decode this instruction —
+  // program, amount, destination — instead of showing a blind-sign prompt.
+  // The root certificate authorizes firmware to trust the resolved LUT
+  // accounts directly, so it needs no AdvancedMode and works even when the
+  // message still carries lookup tables. Never blocks the fallback: a
+  // service outage or a route outside the reviewed catalog just drops
+  // through to the opaque-consent path below.
+  let certifiedProof: Awaited<ReturnType<typeof findCertifiedSolanaProof>>
+  if (params.allowSolanaBlindSigning === true) {
+    // The user consented to signing this one blind, usually because the
+    // device refused the certified proof. Sending the proof again would be
+    // refused again and ask for consent again, in a loop.
+    console.info(`${TAG} Solana blind signing consented; no certified proof attached`)
+  } else if (supportsCertifiedClearSign(firmwareVersion)) {
+    const catalogKey = isTokenCaip(params.fromCaip) ? 'relayDepositToken' : 'relayDepositNative'
+    try {
+      certifiedProof = await findCertifiedSolanaProof(rawTx, catalogKey)
+    } catch (err: any) {
+      console.warn(`${TAG} certified Solana ClearSign proof unavailable: ${err?.message || err}`)
+    }
+    // The service matches a catalogKey request without the firmware's
+    // companion rule. An envelope the device would not apply is a hard
+    // failure there, so it is dropped and the consent path below runs.
+    if (certifiedProof && !certifiedSolanaProofApplies(rawTx, catalogKey, certifiedProof)) {
+      console.info(`${TAG} certified Solana ClearSign proof dropped: the device would not apply ${catalogKey} to this transaction; using the existing consent flow`)
+      certifiedProof = undefined
+    }
+  } else {
+    console.info(`${TAG} certified Solana ClearSign unsupported by firmware ${firmwareVersion || 'unknown'}; using the existing consent flow`)
+  }
+  if (certifiedProof) {
+    console.info(`${TAG} certified Solana ClearSign proof attached (${certifiedProof.lutProof?.accounts.length || 0} LUT accounts)`)
+  }
+
+  if (params.relayTx?.solanaSwapMetadata && !certifiedProof) {
+    // The old host model called protobuf fields 5-7 "swap metadata".
+    // Firmware 7.16 defines those fields as a repeated LUT account list,
+    // its signature, and signer id. Sending the obsolete envelope would
+    // be ignored as a malformed LUT list and must never count as verified
+    // ClearSign coverage or suppress the explicit blind-sign consent.
+    swapLog(`${TAG} obsolete Solana swap metadata withheld: 7.16 requires a LUT account attestation`)
+  }
+  return {
+    addressNList,
+    rawTx,
+    allowBlindSigning: params.allowSolanaBlindSigning === true,
+    ...(certifiedProof
+      ? { ...(certifiedProof.lutProof ? { lutProof: certifiedProof.lutProof } : {}), schema: certifiedProof.schema, certificate: certifiedProof.certificate }
+      : {}),
+  }
+}
 
 /** Build the unsigned swap tx(s) without signing or broadcasting. Used by
  *  the UI to surface the exact hdwallet payload on the Confirm Quote screen
