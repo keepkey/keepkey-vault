@@ -4204,6 +4204,13 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         if (path === '/api/pubkeys/batch' && method === 'POST') {
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
+          // During setup the device runs the bootloader, factory firmware or no
+          // wallet: it answers every derivation with a Failure ("Unknown
+          // message"). Do not ask it until it runs firmware with a wallet.
+          const setupState = engine.getDeviceState()
+          if (setupState.bootloaderMode || setupState.factoryFirmware || setupState.needsInit) {
+            throw new HttpError(503, 'Device is being set up: no wallet to derive addresses from yet')
+          }
           const body = await parseRequest(req, S.BatchPubkeysRequest)
           const batchSessionKey = scopedKey(engine, 'batch-request', null, wallet)
           const paths = body.paths || []
