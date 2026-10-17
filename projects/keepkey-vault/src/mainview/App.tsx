@@ -970,17 +970,20 @@ function App() {
 	}
 
 	if (phase === "leave-bootloader") {
-		const installed = deviceState.resolvedFwVersion?.replace(/^v/, "").replace(/-.*$/, "")
-		const variant = deviceState.installedBitcoinOnly ? " Bitcoin-only" : ""
+		// Claim "up to date" only from a live bootloader read with no flash in
+		// progress or failed; features are cleared while a flash reboots.
+		const installed = deviceState.bootloaderMode && deviceState.updatePhase === "idle"
+			? deviceState.resolvedFwVersion?.replace(/^v/, "").replace(/-.*$/, "")
+			: undefined
+		const variant = deviceState.installedBitcoinOnly ? "Bitcoin-only firmware" : "Firmware"
 		return (
 			<>{splashNav}{resizeHandles}{updateBanner}{firmwareDropZone}{signingOverlay}{pairingOverlay}{passphraseOverlay}{charOverlay}{pinOverlay}
 				<SplashScreen
 					statusText={t("leaveBootloader.title", { ns: "nav", defaultValue: "Your KeepKey is in bootloader mode" })}
 					hintText={installed
-						? t("leaveBootloader.hintVersion", { ns: "nav", defaultValue: "Firmware v{{version}}{{variant}} is installed and up to date. Unplug your KeepKey and plug it back in without holding the button.", version: installed, variant })
-						: t("leaveBootloader.hint", { ns: "nav", defaultValue: "Its firmware is up to date. Unplug your KeepKey and plug it back in without holding the button." })}
+						? t("leaveBootloader.hintVersion", { ns: "nav", defaultValue: "{{variant}} v{{version}} is installed and up to date. Unplug your KeepKey and plug it back in without holding the button.", version: installed, variant })
+						: t("leaveBootloader.hint", { ns: "nav", defaultValue: "Unplug your KeepKey and plug it back in without holding the button." })}
 					variant="connecting"
-					childrenReady
 					isBitcoinOnly={!!deviceState.installedBitcoinOnly}
 				/>
 			</>
