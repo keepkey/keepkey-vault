@@ -43,13 +43,13 @@ export function useFirmwareUpdate() {
     }
   }, [])
 
-  const startFirmwareUpdate = useCallback(async (bitcoinOnly = false) => {
+  const startFirmwareUpdate = useCallback(async (opts: { variant?: 'multi' | 'bitcoin-only'; acknowledgeWipe?: boolean } = {}) => {
     activeRef.current = true
     setState('updating')
     setError(null)
     setProgress({ percent: 0, message: 'Starting firmware update...' })
     try {
-      await rpcRequest('startFirmwareUpdate', { bitcoinOnly }, 0)
+      await rpcRequest('startFirmwareUpdate', opts, 0)
       activeRef.current = false
       setState('complete')
     } catch (err: any) {

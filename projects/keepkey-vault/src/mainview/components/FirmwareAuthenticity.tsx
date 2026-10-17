@@ -234,7 +234,7 @@ export function FirmwareAuthenticity({
 							<HStack gap={4} flexWrap="wrap">
 								{verdict === "verified" && firmwareRelease && (
 									<Box as="button" type="button" fontSize="2xs" color={GOLD} textDecoration="underline"
-										onClick={() => openUrl(`https://github.com/keepkey/keepkey-firmware/releases/tag/${firmwareRelease}`)}>
+										onClick={() => openUrl(`https://github.com/keepkey/keepkey-firmware/releases/tag/${firmwareRelease.replace(/-bitcoin-only$/, "")}`)}>
 										Open the {firmwareRelease} release
 									</Box>
 								)}

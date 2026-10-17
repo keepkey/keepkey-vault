@@ -49,6 +49,8 @@ export interface DeviceStateInfo {
   label?: string
   firmwareVersion?: string
   bootloaderVersion?: string
+  /** Latest firmware of the device's own lineage: a Bitcoin-only device gets
+   *  the Bitcoin-only build (absent if there is none), never multi-chain. */
   latestFirmware?: string
   latestBootloader?: string
   /** Pinned payload sha256 for the latest firmware (from the manifest) — the
@@ -58,6 +60,20 @@ export interface DeviceStateInfo {
    *  latestFirmwareHash (multi-coin) — the OOB "Bitcoin-only" choice installs a
    *  different binary and must verify against this hash. */
   latestFirmwareBitcoinOnlyHash?: string
+  /** Version (no 'v') of the Bitcoin-only build this Desktop can install;
+   *  absent when the manifest has none. */
+  latestFirmwareBitcoinOnly?: string
+  /** Installed firmware is Bitcoin-only (true), multi-chain (false) or unknown
+   *  (undefined: bootloader mode, unrecognised hash, no snapshot). Works in
+   *  bootloader mode, unlike firmwareVariant. */
+  installedBitcoinOnly?: boolean
+  /** A new KeepKey: factory firmware (4.0.0), also across the bootloader-mode
+   *  replugs of setup, or no firmware at all. Nothing on it can be wiped. */
+  factoryFirmware?: boolean
+  /** Why installing each official build may wipe or lock this device's wallet
+   *  (see flashWipeReason); undefined = it does not. The install must carry an
+   *  explicit acknowledgement when set. */
+  installWipeReason?: { multi?: import('./flash-wipe').WipeReason; bitcoinOnly?: import('./flash-wipe').WipeReason }
   /** Which manifest channel latestFirmware/latestFirmwareHash resolved from.
    *  'beta' builds are pre-release and not covered by the reproducible-build
    *  claim (no published git tag / release assets to verify against). */
