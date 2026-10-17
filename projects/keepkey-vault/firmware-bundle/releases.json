@@ -10,6 +10,11 @@
       "version": "v2.1.4",
       "url": "bl_v2.1.4/blupdater.bin",
       "hash": "6bb7cfd28262fcd61c450fdc3f6932650bdf16a134ab6c1bc6f90b0d1578e620"
+    },
+    "firmwareBitcoinOnly": {
+      "version": "v7.14.3",
+      "url": "v7.14.3/firmware.keepkey.bitcoin-only.bin",
+      "hash": "4cf84bfe977d00ca18d871791f3308206649c88b681ed9ad09c5081787488f64"
     }
   },
   "beta": {
@@ -22,6 +27,11 @@
       "version": "v2.1.4",
       "url": "bl_v2.1.4/blupdater.bin",
       "hash": "6bb7cfd28262fcd61c450fdc3f6932650bdf16a134ab6c1bc6f90b0d1578e620"
+    },
+    "firmwareBitcoinOnly": {
+      "version": "v7.14.3",
+      "url": "v7.14.3/firmware.keepkey.bitcoin-only.bin",
+      "hash": "4cf84bfe977d00ca18d871791f3308206649c88b681ed9ad09c5081787488f64"
     }
   },
   "hashes": {
@@ -53,6 +63,7 @@
       "8c1082eca6c6f79b14e84de6d0d21e15eff3c545982d97c9fc6e4b30365513c7": "v7.14.0",
       "73a880682d00c725cf9b38347ed0f08f4c2214c2c0f54559739f9d939f6275ae": "v7.14.1",
       "45fe90c1dd72df59815475b37404635c5b890b298d74324632383965f533e9fa": "v7.14.2",
+      "4cf84bfe977d00ca18d871791f3308206649c88b681ed9ad09c5081787488f64": "v7.14.3",
       "95f5c15218b28dbbcf748127685d52f625e06bb79cd8caf6d553b55f38470dc1": "v7.16.0"
     }
   }

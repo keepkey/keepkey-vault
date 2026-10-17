@@ -27,10 +27,10 @@
  * that is not what it claims -- that is how a phantom v7.9.0 entry survived
  * for a year.
  *
- * NOT COVERED YET: the bitcoin-only variant. release.yml builds it as a
- * separate matrix entry with its own suffixed assets, so it is a parallel
- * lineage with its own hashes and ONDEVICE_FIRMWARE_HASHES has none of them.
- * Until they are pinned, every btc-only device reads as unrecognised.
+ * The bitcoin-only variant is a parallel lineage with its own hashes, pinned
+ * as `vX.Y.Z-bitcoin-only` (release tag vX.Y.Z). v7.14.3 publishes it as
+ * `firmware.keepkey.bitcoin-only.bin`; release.yml's planned name
+ * `firmware.keepkey.vX.Y.Z-bitcoin-only.bin` is tried too.
  *
  * Usage: bun scripts/verify-firmware-hashes.ts
  * Exit 1 on any mismatch so CI can gate on it.
@@ -40,10 +40,10 @@ import { ONDEVICE_FIRMWARE_HASHES, versionCompare } from '../src/shared/firmware
 
 const RELEASE = 'https://github.com/keepkey/keepkey-firmware/releases/download'
 // Two lineages ship per release: the default build and the bitcoin-only
-// variant, published by release.yml with a `-bitcoin-only` suffix. They are
-// different binaries with different hashes, so both need pinning. The suffix
-// allowlist stays explicit so unsigned in-house builds (-zcash, -solana) are
-// not mistaken for a release lineage.
+// variant (asset name contains `bitcoin-only`; pinned with a `-bitcoin-only`
+// tag suffix). They are different binaries with different hashes, so both
+// need pinning. The suffix allowlist stays explicit so unsigned in-house
+// builds (-zcash, -solana) are not mistaken for a release lineage.
 const OFFICIAL = /^v\d+\.\d+\.\d+(-bitcoin-only)?$/
 const BTC_SUFFIX = '-bitcoin-only'
 
@@ -53,8 +53,7 @@ function splitTag(tag: string): { semver: string; suffix: string } {
   return { semver: tag.slice(1, tag.length - suffix.length), suffix }
 }
 
-// No btc-only row exists until 7.15 signs one, so the suffix path above is
-// otherwise dead code until the day it matters. Pin its behaviour now.
+// Pin splitTag's behaviour: a wrong split means wrong btc-only asset URLs.
 {
   const btc = splitTag('v7.15.0-bitcoin-only')
   const plain = splitTag('v7.14.1')
@@ -85,7 +84,10 @@ for (const [version, pinned] of expected) {
   // both rather than calling the releases API, which rate-limits
   // unauthenticated callers at 60/hour -- fewer than the rows in this table.
   const candidates = suffix
-    ? [`${RELEASE}/v${semver}/firmware.keepkey.v${semver}${suffix}.bin`]
+    ? [
+        `${RELEASE}/v${semver}/firmware.keepkey.bitcoin-only.bin`,
+        `${RELEASE}/v${semver}/firmware.keepkey.v${semver}${suffix}.bin`,
+      ]
     : [
         `${RELEASE}/v${semver}/firmware.keepkey.bin`,
         `${RELEASE}/v${semver}/firmware.keepkey.v${semver}.bin`,
@@ -158,15 +160,17 @@ if (token) {
       if (!/^v\d+\.\d+\.\d+$/.test(r.tag_name)) continue
       if (versionCompare(r.tag_name.slice(1), floor) < 0) continue
 
-      // Each published .bin lineage needs its own row. 7.15 is the first
-      // release to carry a bitcoin-only asset, so this is what will flag the
-      // missing btc-only hash on release day rather than a user reporting it.
+      // Each published .bin lineage needs its own row, so this flags a missing
+      // btc-only hash on release day rather than a user reporting it. Match
+      // 'bitcoin-only' without the dash: v7.14.3 names its asset
+      // firmware.keepkey.bitcoin-only.bin.
       const bins = r.assets.map((a) => a.name).filter((n) => n.endsWith('.bin'))
       if (!bins.length) continue
-      if (bins.some((n) => !n.includes(BTC_SUFFIX)) && !expected.has(r.tag_name)) {
+      const isBtc = (n: string) => n.includes('bitcoin-only')
+      if (bins.some((n) => !isBtc(n)) && !expected.has(r.tag_name)) {
         unpinned.push(r.tag_name)
       }
-      if (bins.some((n) => n.includes(BTC_SUFFIX)) && !expected.has(r.tag_name + BTC_SUFFIX)) {
+      if (bins.some(isBtc) && !expected.has(r.tag_name + BTC_SUFFIX)) {
         unpinned.push(r.tag_name + BTC_SUFFIX)
       }
     }

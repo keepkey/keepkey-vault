@@ -4204,6 +4204,16 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         if (path === '/api/pubkeys/batch' && method === 'POST') {
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
+          // During setup the device runs the bootloader, factory firmware, no
+          // wallet, or firmware so old that setup updates the bootloader first
+          // (e.g. 5.2.4 on bootloader 1.0.2): it answers derivations with a
+          // Failure ("Unknown message"). Do not ask it until setup is done. A
+          // device whose user skipped a firmware update keeps working.
+          const setupState = engine.getDeviceState()
+          if (setupState.bootloaderMode || setupState.factoryFirmware || setupState.needsInit
+            || (setupState.state === 'needs_firmware' && setupState.needsBootloaderUpdate)) {
+            throw new HttpError(503, 'Device is being set up: no wallet to derive addresses from yet')
+          }
           const body = await parseRequest(req, S.BatchPubkeysRequest)
           const batchSessionKey = scopedKey(engine, 'batch-request', null, wallet)
           const paths = body.paths || []

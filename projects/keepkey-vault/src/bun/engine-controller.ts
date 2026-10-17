@@ -12,6 +12,7 @@ import { HttpError } from './auth'
 import { isBitcoinOnlyVariant, DEFAULT_AUTO_LOCK_MS } from '../shared/flags'
 import type { DeviceStateInfo, ActiveTransport, UpdatePhase, DeviceState, FirmwareManifest, PinRequestType, Bip85DeriveParams, Bip85DisplayResult } from '../shared/types'
 import { resolveOndeviceFirmwareVersion } from '../shared/firmware-versions'
+import { OFFICIAL_RELEASE_TAG, assertInstallAllowed, installedFromBootloader, installedInFirmwareMode, isBitcoinOnlyImage, latestFor, mergeManifests, needsFirmware, planInstall, type CoinVariant, type InstalledFirmware } from '../shared/firmware-install'
 import { flashWipeReason, type WipeReason } from '../shared/flash-wipe'
 import { EmulatorKeepKeyAdapter } from './emulator-transport'
 import { requestUnlock, isTransportTimeout, UNLOCK_TIMEOUT_MESSAGE } from './pin-unlock'
@@ -22,17 +23,6 @@ import { getActiveFlashName, getEmulatorStatus } from './emulator'
 const KEEPKEY_VENDOR_ID = 0x2B24 // 11044
 // Firmware manifest lives in keepkey-vault (migrated from keepkey-desktop, which is now stale).
 const MANIFEST_URL = 'https://raw.githubusercontent.com/keepkey/keepkey-vault/master/firmware/releases.json'
-
-/**
- * Official release tags. Two lineages ship from the same release: the default
- * build (vX.Y.Z) and the bitcoin-only variant, which release.yml publishes with
- * a `-bitcoin-only` suffix and which is a DIFFERENT binary with its own hash.
- *
- * The suffix allowlist is deliberate rather than a general `-.*`: the hash table
- * also carries unsigned in-house builds (v7.14.0-zcash, -solana, -bip85) that
- * must never read as official.
- */
-const OFFICIAL_RELEASE_TAG = /^v\d+\.\d+\.\d+(-bitcoin-only)?$/
 
 /**
  * Locate firmware-bundle/ — copied into app by electrobun.config.ts (see firmware-bundle/README.md).
@@ -592,14 +582,12 @@ export class EngineController extends EventEmitter {
    * false otherwise. Prevents garbage input from causing downstream crashes.
    */
   private isValidManifest(m: any): m is FirmwareManifest {
+    const isRef = (r: any) => typeof r?.version === 'string' && typeof r?.url === 'string' && typeof r?.hash === 'string'
     const isEntry = (e: any) => e
-      && typeof e.firmware?.version === 'string'
-      && typeof e.firmware?.url === 'string'
-      && typeof e.firmware?.hash === 'string'
-      && typeof e.bootloader?.version === 'string'
-      && typeof e.bootloader?.url === 'string'
-      && typeof e.bootloader?.hash === 'string'
-    return !!(m && isEntry(m.latest))
+      && isRef(e.firmware)
+      && isRef(e.bootloader)
+      && (e.firmwareBitcoinOnly === undefined || isRef(e.firmwareBitcoinOnly))
+    return !!(m && isEntry(m.latest) && (m.beta === undefined || isEntry(m.beta)))
   }
 
   /** Read the bundled manifest from disk. Returns null if missing or malformed. */
@@ -634,26 +622,8 @@ export class EngineController extends EventEmitter {
    * trust bundled (it's inside the Apple-signed DMG).
    */
   private mergeManifests(bundled: FirmwareManifest | null, remote: FirmwareManifest | null): FirmwareManifest | null {
-    if (!bundled && !remote) return null
-    if (!bundled) return remote
-    if (!remote) return bundled
-
-    const pickNewer = (b: FirmwareManifest['latest'], r: FirmwareManifest['latest']): FirmwareManifest['latest'] => {
-      const bFw = b.firmware.version.replace(/^v/, '')
-      const rFw = r.firmware.version.replace(/^v/, '')
-      return this.versionLessThan(bFw, rFw) ? r : b
-    }
-
-    const merged: FirmwareManifest = {
-      latest: pickNewer(bundled.latest, remote.latest),
-      beta: pickNewer(bundled.beta ?? bundled.latest, remote.beta ?? remote.latest),
-      hashes: {
-        bootloader: { ...(bundled.hashes?.bootloader ?? {}), ...(remote.hashes?.bootloader ?? {}) },
-        firmware: { ...(bundled.hashes?.firmware ?? {}), ...(remote.hashes?.firmware ?? {}) },
-      },
-    }
-
-    console.log(`[Engine] Merged manifest: latest=${merged.latest.firmware.version} beta=${merged.beta.firmware.version}`)
+    const merged = mergeManifests(bundled, remote)
+    if (merged && bundled && remote) console.log(`[Engine] Merged manifest: latest=${merged.latest.firmware.version} beta=${merged.beta.firmware.version} btc=${merged.latest.firmwareBitcoinOnly?.version ?? '(none)'}`)
     return merged
   }
 
@@ -1488,7 +1458,14 @@ export class EngineController extends EventEmitter {
     if (features.bootloaderMode) return 'bootloader'
 
     const fwVersion = this.extractVersion(features)
-    if (this.versionLessThan(fwVersion, this.latestFirmware) || fwVersion === '4.0.0') {
+    const bitcoinOnly = isBitcoinOnlyVariant(features.firmwareVariant)
+    if (needsFirmware({
+      bootloaderMode: false,
+      fwVersion,
+      installed: { version: fwVersion, bitcoinOnly, present: true },
+      latestMulti: this.latestFirmware,
+      latestBitcoinOnly: latestFor(this.getChannelEntry(), true),
+    })) {
       return 'needs_firmware'
     }
 
@@ -1500,37 +1477,45 @@ export class EngineController extends EventEmitter {
   }
 
   /**
+   * Set while the device last seen in firmware mode ran factory firmware
+   * (4.0.0, no wallet). In bootloader mode that firmware's hash is not in the
+   * release table, so this is how a new KeepKey stays "new" across the OOB
+   * replugs. Any other firmware-mode read, or a recognised bootloader-mode
+   * hash, clears it. It is not tied to a device, so it only shapes the setup
+   * UI: planInstall still warns that an unidentified firmware may be wiped.
+   */
+  private factorySeen = false
+
+  /**
    * Version, signing status and variant of the firmware INSTALLED on the device.
    * In bootloader mode the device reports only that firmware's hash: the release
-   * table names official multi-chain builds, and a firmware-mode snapshot with
-   * the same hash fills in anything else (notably bitcoin-only, which the table
-   * does not carry). Unknown fields stay undefined/null — never a guess.
+   * table names official builds of both lineages, and a firmware-mode snapshot
+   * with the same hash fills in anything else. Unknown fields stay
+   * undefined/null — never a guess.
    */
-  private installedFirmware(): { version: string | null; verified?: boolean; bitcoinOnly?: boolean; present: boolean } {
+  private installedFirmware(): InstalledFirmware {
     const f = this.cachedFeatures
     if (!f) return { version: null, present: false }
     if (f.bootloaderMode !== true) {
-      const version = this.extractVersion(f)
-      return {
-        version: version === '0.0.0' ? null : version,
+      const installed = installedInFirmwareMode({
+        version: this.extractVersion(f),
         verified: this.verifyHashes(f).firmwareVerified,
         bitcoinOnly: isBitcoinOnlyVariant(f.firmwareVariant),
-        present: true,
-      }
+        initialized: f.initialized,
+      })
+      this.factorySeen = installed.factory === true
+      return installed
     }
     const hashHex = base64ToHex(f.firmwareHash)
-    const present = !!hashHex && !/^0+$/.test(hashHex)
     const release = resolveOndeviceFirmwareVersion(hashHex)
-    const seen = present ? getSnapshotFeaturesByFirmwareHash(f.firmwareHash) : null
-    const seenVersion = seen ? this.extractVersion(seen) : null
-    return {
-      version: release?.match(/^v?(\d+\.\d+\.\d+)/)?.[1] ?? (seenVersion && seenVersion !== '0.0.0' ? seenVersion : null),
-      verified: release ? OFFICIAL_RELEASE_TAG.test(release) : undefined,
-      // ponytail: the release table holds multi-chain builds only; add a variant
-      // marker to it when signed bitcoin-only hashes are published.
-      bitcoinOnly: seen ? isBitcoinOnlyVariant(seen.firmwareVariant) : (release ? false : undefined),
-      present,
-    }
+    if (release) this.factorySeen = false
+    const seen = hashHex && !release ? getSnapshotFeaturesByFirmwareHash(f.firmwareHash) : null
+    return installedFromBootloader({
+      hashHex,
+      release,
+      snapshot: seen ? { version: this.extractVersion(seen), bitcoinOnly: isBitcoinOnlyVariant(seen.firmwareVariant) } : null,
+      factorySeen: this.factorySeen,
+    })
   }
 
   private extractVersion(features: any): string {
@@ -1584,18 +1569,32 @@ export class EngineController extends EventEmitter {
     const firmwarePresent = !!hashes.firmwareHash && !/^0+$/.test(hashes.firmwareHash)
 
     // In bootloader mode, fwVersion (from extractVersion) is actually the BL version.
-    // Use the hash-resolved firmware version to decide if an update is needed:
-    //   - known hash + version >= latest → already current, no update
-    //   - known hash + version <  latest → update available
-    //   - unknown hash (custom firmware)  → offer update (safe default)
-    //   - no firmware present              → offer update
-    const needsFw = bootloaderMode
-      ? (resolvedFwVersion && firmwarePresent
-          ? this.versionLessThan(resolvedFwVersion.replace(/^v/, ''), this.latestFirmware)
-          : true)
-      : fwVersion
-        ? (this.versionLessThan(fwVersion, this.latestFirmware) || fwVersion === '4.0.0')
-        : false
+    // The installed firmware (hash table, else snapshot) decides instead:
+    //   - known + older than the latest of ITS lineage → update available
+    //   - known + current or newer                     → no update
+    //   - unknown hash (custom firmware) or none        → offer update
+    // A bitcoin-only device is compared to the bitcoin-only build only.
+    const channel = this.getChannelEntry()
+    const installed = this.installedFirmware()
+    const latestBitcoinOnly = latestFor(channel, true)
+    const needsFw = needsFirmware({
+      bootloaderMode,
+      fwVersion,
+      installed,
+      latestMulti: this.latestFirmware,
+      latestBitcoinOnly,
+    })
+    // What the official install would do to this device, per lineage. The
+    // device's own lineage is what Desktop offers; the other is only reachable
+    // through the setup choice, and both carry their wipe reason.
+    const planFor = (choice: CoinVariant) => {
+      const plan = planInstall({ installed, choice, channel, fallbackMulti: this.latestFirmware })
+      return plan.ok ? plan.wipeReason : undefined
+    }
+    const installWipeReason = features
+      ? { multi: planFor('multi'), bitcoinOnly: latestBitcoinOnly ? planFor('bitcoin-only') : undefined }
+      : undefined
+    const ownEntry = installed.bitcoinOnly === true ? channel?.firmwareBitcoinOnly : channel?.firmware
 
     // Bootloader version check with hash-to-version fallback.
     // Some firmware versions don't report blVersion in features, but DO report
@@ -1632,10 +1631,17 @@ export class EngineController extends EventEmitter {
       label: features?.label || undefined,
       firmwareVersion: fwVersion,
       bootloaderVersion: effectiveBlVersion || blVersion,
-      latestFirmware: this.latestFirmware,
+      // The latest of this device's own lineage: a bitcoin-only device is
+      // shown (and offered) the bitcoin-only build, never the multi-chain one.
+      latestFirmware: installed.bitcoinOnly === true ? latestBitcoinOnly : this.latestFirmware,
       latestBootloader: this.latestBootloader,
-      latestFirmwareHash: this.getChannelEntry()?.firmware?.hash,
-      latestFirmwareBitcoinOnlyHash: this.getChannelEntry()?.firmwareBitcoinOnly?.hash,
+      latestFirmwareHash: ownEntry?.hash,
+      latestFirmwareBitcoinOnly: latestBitcoinOnly,
+      latestFirmwareBitcoinOnlyHash: channel?.firmwareBitcoinOnly?.hash,
+      installedBitcoinOnly: installed.bitcoinOnly,
+      // Held through the setup replugs (no features while unplugged).
+      factoryFirmware: features ? installed.factory === true || !installed.present : this.factorySeen,
+      installWipeReason,
       firmwareChannel: this.alphaFirmware && this.manifest?.beta ? 'beta' : 'latest',
       bootloaderMode,
       needsBootloaderUpdate: needsBl,
@@ -1662,7 +1668,7 @@ export class EngineController extends EventEmitter {
       bootloaderVerified: hashes.bootloaderVerified,
       bootloaderRelease: hashes.bootloaderRelease,
       firmwareSignaturesVerified: hashes.firmwareSignaturesVerified,
-      installFirmware: this.installTarget(this.getChannelEntry()?.firmware),
+      installFirmware: this.installTarget(ownEntry),
       installBootloader: this.installTarget(this.getChannelEntry()?.bootloader),
       error: this.lastError,
       isEmulator: this.activeTransport === 'emulator',
@@ -1756,25 +1762,30 @@ export class EngineController extends EventEmitter {
     }
   }
 
-  async startFirmwareUpdate(bitcoinOnly = false) {
+  /**
+   * Install the official firmware. `variant` is the user's explicit choice;
+   * without one the device keeps its own lineage. Refuses (before anything is
+   * erased) a flash that may wipe or lock the wallet unless `acknowledgeWipe`
+   * names that exact outcome: `WIPE_ACK_REQUIRED:<reason>`.
+   */
+  async startFirmwareUpdate(opts: { variant?: CoinVariant; acknowledgeWipe?: WipeReason } = {}) {
     if (!this.wallet) throw new Error('No device connected')
+    const plan = planInstall({
+      installed: this.installedFirmware(),
+      choice: opts.variant,
+      channel: this.getChannelEntry(),
+      fallbackMulti: this.latestFirmware,
+    })
+    assertInstallAllowed(plan, opts.acknowledgeWipe)
     this.updatePhase = 'flashing'
     this.emit('state-change', this.getDeviceState())
     this.emit('firmware-progress', { percent: 0, message: 'Starting firmware update...' })
 
     try {
-      // Pick the manifest entry for the chosen variant. Bitcoin-only lives in a
-      // separate manifest field (firmwareBitcoinOnly) and REQUIRES a manifest
-      // entry — there's no github fallback for it.
-      // A bitcoin-only wallet updates to bitcoin-only firmware: multi-chain
-      // firmware refuses its storage band and would lock the wallet. Switching
-      // variants is a deliberate custom-file flash, never the update button.
-      if (this.installedFirmware().bitcoinOnly) bitcoinOnly = true
-      const channel = this.getChannelEntry()
-      const fwEntry = bitcoinOnly ? channel?.firmwareBitcoinOnly : channel?.firmware
-      if (bitcoinOnly && !fwEntry) {
-        throw new Error('Bitcoin-only firmware is not available in this build (no manifest entry)')
-      }
+      // Bitcoin-only lives in its own manifest field (firmwareBitcoinOnly) and
+      // REQUIRES a manifest entry — there's no github fallback for it (planInstall).
+      const fwEntry = plan.entry
+      console.log(`[Engine] Installing ${plan.bitcoinOnly ? 'bitcoin-only' : 'multi-chain'} firmware v${plan.version}${plan.wipeReason ? ` (wipe acknowledged: ${plan.wipeReason})` : ''}`)
       this.emit('firmware-progress', { percent: 10, message: 'Loading firmware...' })
       const firmware = fwEntry
         ? await this.loadBinary(fwEntry.url)
@@ -1794,6 +1805,13 @@ export class EngineController extends EventEmitter {
         }
         console.log(`[Engine] Firmware binary integrity verified${hasKpkyHeader ? ' (KPKY header stripped)' : ''}`)
         this.emit('firmware-progress', { percent: 20, message: `Binary verified — sha256 matches the pinned release hash (${downloadedHash.slice(0, 16)}…)` })
+      }
+
+      // The hash pins the manifest entry; this pins the lineage, so a manifest
+      // listing the wrong build under a variant can never get it flashed. Only
+      // the bitcoin-only build compiles in this string (see analyzeFirmware).
+      if (isBitcoinOnlyImage(firmware) !== plan.bitcoinOnly) {
+        throw new Error(`Firmware image is not the ${plan.bitcoinOnly ? 'Bitcoin-only' : 'multi-chain'} build`)
       }
 
       // See note in startBootloaderUpdate: no JS timeout can cover a readSync
@@ -2405,7 +2423,7 @@ export class EngineController extends EventEmitter {
     // the literal "KeepKeyBTC"/"EmulatorBTC" (fsm_msg_common.h, under #if BITCOIN_ONLY);
     // a full build never contains it. This is the only reliable signal at flash
     // time — the device can't report firmware_variant until it boots the new fw.
-    const isBitcoinOnly = /KeepKeyBTC|EmulatorBTC/.test(payload.toString('latin1'))
+    const isBitcoinOnly = isBitcoinOnlyImage(payload)
 
     // Device state — distinguish bootloader mode from firmware mode
     const isBootloaderMode = this.cachedFeatures?.bootloaderMode === true
@@ -2440,6 +2458,7 @@ export class EngineController extends EventEmitter {
         currentBitcoinOnly: installed.bitcoinOnly,
         targetBitcoinOnly: isBitcoinOnly,
         installedUnknown: installed.present && !currentFirmwareVersion,
+        noFirmware: !installed.present,
       })
       : flashWipeReason({ isSigned, currentFirmwareVerified, isDowngrade })
     const willWipeDevice = wipeReason !== undefined

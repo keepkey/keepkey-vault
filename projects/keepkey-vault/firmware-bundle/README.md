@@ -9,6 +9,9 @@ firmware-bundle/
 ├── releases.json              # Bundled manifest (parallel to keepkey-desktop's releases.json)
 ├── v7.10.0/firmware.keepkey.bin
 ├── v7.14.0/firmware.keepkey.bin
+├── v7.14.1/firmware.keepkey.bin
+├── v7.14.2/firmware.keepkey.bin
+├── v7.14.3/firmware.keepkey.bitcoin-only.bin   # Bitcoin-only build (releases.json firmwareBitcoinOnly)
 └── bl_v2.1.4/blupdater.bin
 ```
 
@@ -44,6 +47,7 @@ tail -c +257 firmware-bundle/vX.Y.Z/firmware.keepkey.bin | shasum -a 256
 
 - **Firmware (`firmware.keepkey.bin`)**: SHA-256 of the payload (first 256 bytes stripped — that's the KPKY header). Same format keepkey-desktop uses.
 - **Bootloader (`blupdater.bin`)**: SHA-256 of the full binary (no header).
+- **Bitcoin-only firmware**: same payload format, in each channel's `firmwareBitcoinOnly` entry. The device reports the FULL-file hash, which goes in `ONDEVICE_FIRMWARE_HASHES` (src/shared/firmware-versions.ts) as `vX.Y.Z-bitcoin-only`.
 
 ## Git tracking
 

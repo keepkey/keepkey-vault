@@ -218,9 +218,10 @@ export function getUpgradeVersions(from: string | null, to: string): FirmwareVer
  * Used to resolve firmware version in bootloader mode where the device can't
  * report version numbers. Unknown hashes indicate custom/unsigned firmware.
  *
- * ponytail: the bitcoin-only firmware variant is a parallel lineage with its
- * OWN full-file hashes. Add its per-version entries here once a signed btc-only
- * asset is published, else btc-only reads as custom/unsigned in bootloader mode.
+ * The bitcoin-only firmware is a parallel lineage with its OWN full-file
+ * hashes, tagged `vX.Y.Z-bitcoin-only` here (the GitHub release tag is plain
+ * vX.Y.Z). In bootloader mode this suffix is the only way Desktop can tell a
+ * bitcoin-only device from a multi-chain one; read it with releaseInfo().
  */
 export const ONDEVICE_FIRMWARE_HASHES: Record<string, string> = {
   'd380357b7403064d7b1ea963dc56032239541a21ef0b7e08082fb36ed470de82': 'v6.0.0',
@@ -264,6 +265,8 @@ export const ONDEVICE_FIRMWARE_HASHES: Record<string, string> = {
   '446fd7ac54e0ba2d54ed1d98ef9455b01f6b9be50de7db817a50e9a3cf0c6e3d': 'v7.14.0',
   'f40fe1b74949a9e091269536b27cd53bbb8a5c1c428a6c36ff7d5c6bf6845f46': 'v7.14.1',
   'caa53bd48e7a6c1f01dcf20ac434cefad0d72ea93a7b0ca688072f36a19d68df': 'v7.14.2',
+  // Bitcoin-only build, release v7.14.3 asset firmware.keepkey.bitcoin-only.bin.
+  '74b6b2d03e38aa8fe646fb8c8016cb4e7be1793d1ce9493c2bbe5759a85ecbec': 'v7.14.3-bitcoin-only',
   // Pre-release, recognised only: Desktop does not bundle or offer it.
   '99ebac75902b285678c235ec3cb0a9de2d2bc1181c0d47db6a9ae14cf035879c': 'v7.16.0',
   // v7.14.0 unsigned builds (custom firmware)
@@ -280,6 +283,16 @@ export const ONDEVICE_FIRMWARE_HASHES: Record<string, string> = {
 export function resolveOndeviceFirmwareVersion(hash: string | undefined): string | null {
   if (!hash) return null
   return ONDEVICE_FIRMWARE_HASHES[hash] ?? null
+}
+
+/**
+ * Version and variant named by a hash-table tag:
+ * 'v7.14.3-bitcoin-only' -> { version: '7.14.3', bitcoinOnly: true }.
+ * Unsigned in-house tags (v7.14.0-zcash) are multi-chain builds.
+ */
+export function releaseInfo(tag: string): { version: string; bitcoinOnly: boolean } | null {
+  const m = tag.match(/^v?(\d+\.\d+\.\d+)(-bitcoin-only)?/)
+  return m ? { version: m[1], bitcoinOnly: !!m[2] } : null
 }
 
 /** Compare semver strings: returns -1 (a<b), 0 (a==b), 1 (a>b) */
