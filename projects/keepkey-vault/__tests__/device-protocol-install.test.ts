@@ -2,12 +2,11 @@ import { describe, expect, test } from 'bun:test'
 import { realpathSync } from 'node:fs'
 import { createRequire } from 'node:module'
 
-// Vault and hdwallet-keepkey must load the device-protocol built from
-// modules/device-protocol. hdwallet-keepkey resolves it from its real path
-// (modules/hdwallet), so a stale copy there decodes Features without
-// capabilities and drops the Zcash TEX hint while Vault's own copy has both.
+// Vault and hdwallet-keepkey must both load the 7.16 firmware protocol.
+// hdwallet-keepkey resolves it from its real path (modules/hdwallet), so a
+// stale copy there decodes Features without capabilities and drops the Zcash
+// TEX hint while Vault's own copy has both.
 const require = createRequire(import.meta.url)
-const submodule = require('../../../modules/device-protocol/package.json')
 
 const consumers = {
   vault: require,
@@ -18,12 +17,6 @@ const consumers = {
 const FEATURES_WITH_CAPABILITIES = new Uint8Array([0xf2, 0x01, 0x03, 1, 26, 27])
 
 describe.each(Object.entries(consumers))('device-protocol seen by %s', (_name, req) => {
-  test('is the submodule build', () => {
-    const pkg = req('@keepkey/device-protocol/package.json')
-    expect(pkg.name).toBe('@keepkey/device-protocol')
-    expect(pkg.version).toBe(submodule.version)
-  })
-
   test('decodes Features.capabilities', () => {
     const { Features } = req('@keepkey/device-protocol/lib/messages_pb')
     const features = Features.deserializeBinary(FEATURES_WITH_CAPABILITIES)

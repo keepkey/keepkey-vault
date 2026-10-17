@@ -23,7 +23,7 @@ never authorizes changing the firmware gitlink. See
 |--------|------|-----------------|---------|
 | **hdwallet** | `BitHighlander/hdwallet` | `codex/certified-metadata-qa` | HD wallet core + KeepKey adapter with certified signing metadata |
 | **proto-tx-builder** | `BitHighlander/proto-tx-builder` | `main` | Cosmos/Thorchain/Maya TX builder (`@keepkey/proto-tx-builder`) |
-| **device-protocol** | `keepkey/device-protocol` | `master` | Canonical protocol, published as `@keepkey/device-protocol` |
+| **device-protocol** | `keepkey/device-protocol` | `master` | Canonical protocol; hdwallet gets it from npm as `@bithighlander/device-protocol` |
 | **electrobun** | `BitHighlander/electrobun` | `keepkey/launcher-env-lifetime` | Desktop framework runtime with the Intel launcher lifetime fix |
 
 Ignored for Vault releases:
@@ -116,19 +116,17 @@ done
 ### device-protocol (`master`)
 
 - **Must come from `keepkey/device-protocol` `master`**
-- No `@bithighlander/device-protocol` pins anywhere: Vault and every module it
-  builds depend on `@keepkey/device-protocol`
+- hdwallet depends on `npm:@bithighlander/device-protocol@<version>`, published
+  from the pinned master commit with only the package name and version changed
 - The generated protocol library must satisfy the Vault runtime contract
 - Required protocol changes must be merged to `master` first
-- The package must be published as `@keepkey/device-protocol` from the exact pinned commit
+- The npm package must be built from the exact pinned commit (name and version changes only)
 - The `lib/` directory is gitignored — it is built from the submodule (`make modules-build`) before vault builds
 - Verify the remote first: `git submodule sync -- modules/device-protocol && git -C modules/device-protocol remote get-url origin`
 - The remote must be `https://github.com/keepkey/device-protocol`
 - Verify the branch: `cd modules/device-protocol && git fetch origin master && git log --oneline origin/master..HEAD` (should be empty)
-- Verify publication: tag `v<version>` must resolve to the pinned commit, the
-  registry repository must be `keepkey/device-protocol`, and a local dry-run
-  pack from the pinned commit must match the registry `dist.integrity`. If npm
-  records `gitHead`, it must also equal the pinned commit.
+- Verify publication: the npm package's `lib/` and protos must equal a build of
+  the pinned commit; only `name` and `version` in `package.json` may differ.
 
 ### keepkey-firmware (ignored for Vault releases)
 
@@ -221,7 +219,7 @@ Before `git checkout -b release/X.Y.Z develop`:
 
 1. Run the pinning checklist (all OK, all clean)
 2. **Run the canonical-branch-behind check** — review and pull any bug fixes
-3. Verify `device-protocol` is on `keepkey/device-protocol` master and that the exact commit is published as `@keepkey/device-protocol`
+3. Verify `device-protocol` is on `keepkey/device-protocol` master and that hdwallet's `@bithighlander/device-protocol` version was built from it
 4. Verify `electrobun` is on the configured BitHighlander release branch HEAD
 5. Verify `hdwallet` is on the configured BitHighlander release branch HEAD
 6. Do not inspect or modify `modules/keepkey-firmware`.
