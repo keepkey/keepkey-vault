@@ -6,8 +6,7 @@ import { LanguageSelector } from "../i18n/LanguageSelector"
 import { CurrencySelector } from "./CurrencySelector"
 import { rpcRequest, onRpcMessage } from "../lib/rpc"
 import { IS_MAC, IS_WINDOWS } from "../lib/platform"
-import { AUTO_LOCK_CHOICES, DEFAULT_AUTO_LOCK_MS, PASSKEYS_UI } from "../../shared/flags"
-import { versionCompare } from "../../shared/firmware-versions"
+import { AUTO_LOCK_CHOICES, DEFAULT_AUTO_LOCK_MS } from "../../shared/flags"
 import { Z } from "../lib/z-index"
 import type { DeviceStateInfo, AppSettings, EmulatorWalletInfo } from "../../shared/types"
 import { isBitcoinOnlyVariant } from "../../shared/flags"
@@ -1366,34 +1365,6 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 							)}
 						</VStack>
 					</Section>
-
-					{/* ── Passkeys (7.16+, behind PASSKEYS_UI) ─────────── */}
-					{/* ponytail: explanation + a test site only. The firmware has no way to
-					    list or delete passkeys, so there is nothing to manage here yet. */}
-					{PASSKEYS_UI && !!deviceState.firmwareVersion && versionCompare(deviceState.firmwareVersion, '7.16.0') >= 0 && (
-						<Section title="Passkeys" defaultOpen={false}>
-							<VStack gap="3" align="stretch">
-								<Text fontSize="sm" color="kk.textSecondary" lineHeight="1.5">
-									Your KeepKey can be the passkey for websites: you sign in by pressing its button, with no password. It works while the KeepKey is plugged in, even before you enter your PIN.
-								</Text>
-								<Box px="3" py="3" borderRadius="12px" bg="rgba(255,255,255,0.03)" border="1px solid rgba(255,255,255,0.08)">
-									<Text fontSize="sm" color="kk.textPrimary" fontWeight="600">How to use it</Text>
-									<Text fontSize="xs" color="kk.textSecondary" mt="1" lineHeight="1.5">
-										When a site offers a passkey, choose "Use a security key" (or "another device", then USB security key). Confirm on your KeepKey.
-									</Text>
-								</Box>
-								<Box px="3" py="3" borderRadius="12px" bg="rgba(245,163,59,0.06)" border="1px solid rgba(245,163,59,0.2)">
-									<Text fontSize="sm" color="kk.textPrimary" fontWeight="600">Good to know</Text>
-									<Text fontSize="xs" color="kk.textSecondary" mt="1" lineHeight="1.5">
-										It remembers the account for up to 4 sites; sites where you type your username first have no limit. Wiping or recovering this KeepKey removes its passkeys, and your recovery sentence does not bring them back. Keep another way to sign in to each site.
-									</Text>
-								</Box>
-								<Flex justify="flex-end">
-									<Button size="sm" variant="outline" borderColor="rgba(233,196,106,0.45)" color="kk.gold" onClick={() => rpcRequest("openUrl", { url: "https://webauthn.io" }).catch(() => {})}>Try it on webauthn.io</Button>
-								</Flex>
-							</VStack>
-						</Section>
-					)}
 
 					{/* ── Application Settings ────────────────────────── */}
 					<Section title={t("application")} defaultOpen={false}>
