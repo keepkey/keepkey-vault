@@ -240,11 +240,9 @@ describe('a transaction-bound certified answer follows the same rule (REST gate 
   const FROM = '0x' + '11'.repeat(20)
   const preview = { from: FROM, to: UR, data: DATA, value: '0x0', nonce: '0x5', gas: '0x40000', maxFeePerGas: '0x10', maxPriorityFeePerGas: '0x1' }
   const certTx = { chainId: 42161, from: FROM, to: UR, data: DATA, value: '0x0', nonce: '0x5', gasLimit: '0x40000', maxFeePerGas: '0x10', maxPriorityFeePerGas: '0x1' }
-  const envelope = (bodyVersion: number) => '0x' + Buffer.concat([
-    Buffer.from([0x03]), Buffer.alloc(139, 7),
-    Buffer.from([bodyVersion]), Buffer.from('0000a4b1', 'hex'), Buffer.from(UR.slice(2), 'hex'), Buffer.from('3593564c', 'hex'), Buffer.alloc(40),
-    Buffer.alloc(65, 9),
-  ]).toString('hex')
+  /** 0x03 | certificate(139) | body: version, chain 42161, router, execute | signature(65). */
+  const envelope = (bodyVersion: number) =>
+    `0x03${'07'.repeat(139)}${bodyVersion.toString(16).padStart(2, '0')}0000a4b1${UR.slice(2)}3593564c${'00'.repeat(40)}${'09'.repeat(65)}`
   const service = (payload: string) => {
     const txHash = '0x' + runtimeEvmSighash(certTx).toString('hex')
     globalThis.fetch = (async (url: any) => String(url).endsWith('/v1/evm/transaction')
