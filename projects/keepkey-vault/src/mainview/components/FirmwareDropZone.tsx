@@ -567,6 +567,7 @@ export function FirmwareDropZone() {
 										{analysis.wipeReason === "downgrade" ? "This downgrade will wipe the device"
 											: analysis.wipeReason === "bitcoin-only-lock" ? "This will lock your Bitcoin-only wallet"
 											: analysis.wipeReason === "unknown-installed" ? "This may wipe the device"
+											: analysis.wipeReason === "no-firmware" ? "Any wallet on this KeepKey will be erased"
 											: "THIS WILL WIPE THE DEVICE"}
 									</Text>
 								</Flex>
@@ -585,6 +586,12 @@ export function FirmwareDropZone() {
 									that this image <Text as="span" fontWeight="700">erases all keys and settings</Text> or locks the wallet
 									(for example, an older version, or switching between Bitcoin-only and multi-coin firmware).
 									To let it check, start the KeepKey normally once (plug it in without holding the button) so KeepKey Desktop can read it, then return to bootloader mode and open this file again.
+								</Text>
+								) : analysis.wipeReason === "no-firmware" ? (
+								<Text fontSize="sm" color="var(--rose)" lineHeight="1.6" mb="3">
+									This KeepKey has no firmware installed (for example, after an interrupted update). If it held a
+									wallet, flashing firmware <Text as="span" fontWeight="700">erases all keys and settings</Text>, and you will
+									restore it from your recovery phrase.
 								</Text>
 								) : analysis.wipeReason === "downgrade" ? (
 								<Text fontSize="sm" color="var(--rose)" lineHeight="1.6" mb="3">
@@ -635,7 +642,7 @@ export function FirmwareDropZone() {
 									<Text fontSize="xs" fontWeight="600" color="var(--rose)">
 										{analysis.wipeReason === "bitcoin-only-lock"
 											? "I understand my wallet will be locked and I have my seed backed up"
-											: analysis.wipeReason === "unknown-installed"
+											: analysis.wipeReason === "unknown-installed" || analysis.wipeReason === "no-firmware"
 												? "I understand this may wipe my device and I have my seed backed up"
 												: "I understand this will wipe my device and I have my seed backed up"}
 									</Text>

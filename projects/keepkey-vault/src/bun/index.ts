@@ -298,6 +298,7 @@ import { evmSourceForChain } from "./pioneer-evm"
 import { deviceErrorMessage } from "../shared/device-error"
 import type { ChainBalance, TokenBalance, CustomToken, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, EvmAddressSet, Bip85SeedMeta, StakingPosition, SwapAsset, AuditToken, DefiPosition, RecentActivity, ClearSignEvent, ClearSignSolanaSchemaArtifact } from "../shared/types"
 import type { VaultRPCSchema } from "../shared/rpc-schema"
+import type { WipeReason } from "../shared/flash-wipe"
 import { collectAndAnalyzeWithGate, MAX_CHUNK_BYTES } from "./rng-audit"
 import { withoutCallerErc7730 } from '../shared/erc7730-support'
 import { newEmulatorWalletNameError } from '../shared/emulatorWallets'
@@ -2749,7 +2750,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			getDeviceState: async () => engine.getDeviceState(),
 			retryConnect: async () => { await engine.retryConnect() },
 			startBootloaderUpdate: async () => { requireOnline('bootloader update'); await engine.startBootloaderUpdate() },
-			startFirmwareUpdate: async (params: { variant?: 'multi' | 'bitcoin-only'; acknowledgeWipe?: boolean }) => { requireOnline('firmware update'); await engine.startFirmwareUpdate({ variant: params?.variant, acknowledgeWipe: params?.acknowledgeWipe === true }) },
+			startFirmwareUpdate: async (params: { variant?: 'multi' | 'bitcoin-only'; acknowledgeWipe?: WipeReason }) => { requireOnline('firmware update'); await engine.startFirmwareUpdate({ variant: params?.variant, acknowledgeWipe: params?.acknowledgeWipe }) },
 			flashFirmware: async () => { await engine.flashFirmware() },
 			analyzeFirmware: async (params) => {
 				if (params.data.length > 10_000_000) throw new Error('Firmware data too large (max ~7.5MB)')

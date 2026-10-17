@@ -22,6 +22,10 @@ describe('flashWipeReason', () => {
   test('installed firmware of unknown version is never silent', () => {
     expect(flashWipeReason({ isSigned: true, isDowngrade: false, installedUnknown: true })).toBe('unknown-installed')
   })
+  test('no firmware on flash is never silent: a wallet may still be in storage', () => {
+    expect(flashWipeReason({ isSigned: true, isDowngrade: false, noFirmware: true })).toBe('no-firmware')
+    expect(flashWipeReason({ isSigned: false, isDowngrade: false, noFirmware: true })).toBe('no-firmware')
+  })
 })
 
 describe('flashWipeReason: Bitcoin-only storage band', () => {

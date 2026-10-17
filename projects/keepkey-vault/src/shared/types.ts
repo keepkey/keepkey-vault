@@ -67,8 +67,10 @@ export interface DeviceStateInfo {
    *  (undefined: bootloader mode, unrecognised hash, no snapshot). Works in
    *  bootloader mode, unlike firmwareVariant. */
   installedBitcoinOnly?: boolean
-  /** A new KeepKey: factory firmware (4.0.0), also across the bootloader-mode
-   *  replugs of setup, or no firmware at all. Nothing on it can be wiped. */
+  /** Treat as a new KeepKey in the setup UI: factory firmware (4.0.0, no
+   *  wallet), also across the bootloader-mode replugs of setup, or no firmware
+   *  at all. UI only: a device with no firmware can still hold a wallet in
+   *  storage, so installWipeReason still carries any wipe ('no-firmware'). */
   factoryFirmware?: boolean
   /** Why installing each official build may wipe or lock this device's wallet
    *  (see flashWipeReason); undefined = it does not. The install must carry an

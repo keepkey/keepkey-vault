@@ -1,4 +1,4 @@
-export type WipeReason = 'downgrade' | 'signed-to-unsigned' | 'unsigned-to-signed' | 'bitcoin-only-lock' | 'unknown-installed'
+export type WipeReason = 'downgrade' | 'signed-to-unsigned' | 'unsigned-to-signed' | 'bitcoin-only-lock' | 'unknown-installed' | 'no-firmware'
 
 /**
  * Why flashing this image endangers the wallet, or undefined if it does not.
@@ -13,6 +13,10 @@ export type WipeReason = 'downgrade' | 'signed-to-unsigned' | 'unsigned-to-signe
  * - 'unknown-installed': firmware is installed but neither its version nor its
  *   variant can be told (bootloader mode, unrecognized hash), so no outcome can
  *   be ruled out — including a wipe.
+ * - 'no-firmware': the bootloader reports no firmware. A wallet can still be in
+ *   storage (e.g. an interrupted update), and the bootloader never restores
+ *   storage when the old firmware's signatures fail (usb_flash.c
+ *   should_restore), so any wallet on it is erased.
  * Unknown signing status (undefined) claims neither boundary.
  */
 export function flashWipeReason(p: {
@@ -24,6 +28,8 @@ export function flashWipeReason(p: {
   targetBitcoinOnly?: boolean
   /** Firmware is installed but its version is unknown. */
   installedUnknown?: boolean
+  /** The bootloader reports no firmware on flash. */
+  noFirmware?: boolean
 }): WipeReason | undefined {
   if (!p.isSigned && p.currentFirmwareVerified === true) return 'signed-to-unsigned'
   if (p.isSigned && p.currentFirmwareVerified === false) return 'unsigned-to-signed'
@@ -34,5 +40,6 @@ export function flashWipeReason(p: {
   }
   if (p.isDowngrade) return 'downgrade'
   if (p.installedUnknown) return 'unknown-installed'
+  if (p.noFirmware) return 'no-firmware'
   return undefined
 }

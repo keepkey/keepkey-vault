@@ -9,9 +9,11 @@ import { describe, test, expect } from 'bun:test'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 import {
-  installedFromBootloader, latestFor, mergeManifests, needsFirmware, planInstall,
+  assertInstallAllowed, installedFromBootloader, installedInFirmwareMode, isBitcoinOnlyImage, latestFor,
+  mergeManifests, needsFirmware, planInstall, wizardCoinMode,
   type ChannelFirmware, type InstalledFirmware,
 } from '../src/shared/firmware-install'
+import type { WipeReason } from '../src/shared/flash-wipe'
 import { resolveOndeviceFirmwareVersion } from '../src/shared/firmware-versions'
 import type { FirmwareManifest } from '../src/shared/types'
 
@@ -32,9 +34,9 @@ const LATEST_BTC = latestFor(channel, true)!
 function inBootloader(hash: string, opts: { snapshot?: { version: string | null; bitcoinOnly: boolean }; factorySeen?: boolean } = {}): InstalledFirmware {
   return installedFromBootloader({ hashHex: hash, release: resolveOndeviceFirmwareVersion(hash), snapshot: opts.snapshot ?? null, factorySeen: opts.factorySeen })
 }
-/** Firmware mode, as the engine builds it from Features. */
-function inFirmware(version: string, bitcoinOnly: boolean, verified = true): InstalledFirmware {
-  return { version, bitcoinOnly, verified, present: true, factory: version === '4.0.0' || undefined }
+/** Firmware mode: the same helper the engine builds it with from Features. */
+function inFirmware(version: string, bitcoinOnly: boolean, verified: boolean | 'unknown' = true, initialized = version !== '4.0.0'): InstalledFirmware {
+  return installedInFirmwareMode({ version, bitcoinOnly, verified: verified === 'unknown' ? undefined : verified, initialized })
 }
 function needs(installed: InstalledFirmware, bootloaderMode: boolean, ch: ChannelFirmware | null = channel, latestMulti = LATEST_MULTI) {
   return needsFirmware({ bootloaderMode, fwVersion: bootloaderMode ? '2.1.4' : installed.version ?? undefined, installed, latestMulti, latestBitcoinOnly: latestFor(ch, true) })
@@ -52,8 +54,24 @@ describe('bundled manifest', () => {
 })
 
 describe('(a)/(b) new KeepKey: choose Bitcoin-only or multi-chain, nothing to wipe', () => {
-  test('factory firmware 4.0.0 in firmware mode needs firmware', () => {
+  test('factory firmware 4.0.0 in firmware mode needs firmware, even with no latest to compare to', () => {
     expect(needs(inFirmware('4.0.0', false), false)).toBe(true)
+    const installed = inFirmware('4.0.0', false)
+    expect(needsFirmware({ bootloaderMode: false, fwVersion: '4.0.0', installed, latestMulti: undefined, latestBitcoinOnly: undefined })).toBe(true)
+  })
+
+  test('only an uninitialized 4.0.0 is factory: one holding a wallet is not "new"', () => {
+    expect(inFirmware('4.0.0', false).factory).toBe(true)
+    expect(inFirmware('4.0.0', false, 'unknown', true).factory).toBeUndefined()
+    expect(inFirmware('5.2.4', false, 'unknown', true)).toEqual({ version: '5.2.4', verified: undefined, bitcoinOnly: false, present: true, factory: undefined })
+  })
+
+  test('an old official firmware that holds a wallet (5.2.4, no hash reported) updates to either lineage with no wipe', () => {
+    const installed = inFirmware('5.2.4', false, 'unknown', true)
+    expect(needs(installed, false)).toBe(true)
+    expect(plan(installed, 'multi')).toMatchObject({ ok: true, bitcoinOnly: false, version: '7.14.2', wipeReason: undefined })
+    // bitcoin-only firmware keeps a migrated multi-chain wallet portable (storage.c storage_stampBitcoinOnlySeed)
+    expect(plan(installed, 'bitcoin-only')).toMatchObject({ ok: true, bitcoinOnly: true, version: '7.14.3', wipeReason: undefined })
   })
 
   test('Bitcoin-only installs the bundled bitcoin-only build with no wipe warning', () => {
@@ -67,24 +85,25 @@ describe('(a)/(b) new KeepKey: choose Bitcoin-only or multi-chain, nothing to wi
     expect(p).toEqual({ ok: true, bitcoinOnly: false, version: '7.14.2', entry: channel.firmware, wipeReason: undefined })
   })
 
-  test('in bootloader mode the factory hash is unknown, but the device stays "new" (seen on 4.0.0 first)', () => {
+  test('in bootloader mode the factory hash is unknown: the device stays "new" for the UI, but the install still warns', () => {
+    // factorySeen is session memory, not tied to the device: another KeepKey
+    // plugged in now would read the same, so it never removes the warning.
     const installed = inBootloader(UNKNOWN, { factorySeen: true })
     expect(installed).toEqual({ version: null, present: true, factory: true })
     expect(needs(installed, true)).toBe(true)
+    expect(plan(installed)).toMatchObject({ ok: true, bitcoinOnly: false, wipeReason: 'unknown-installed' })
     for (const choice of ['multi', 'bitcoin-only'] as const) {
-      const p = plan(installed, choice)
-      expect(p.ok && p.wipeReason).toBeUndefined()
-      expect(p.ok && p.bitcoinOnly).toBe(choice === 'bitcoin-only')
+      expect(plan(installed, choice)).toMatchObject({ ok: true, bitcoinOnly: choice === 'bitcoin-only', wipeReason: 'unknown-installed' })
     }
   })
 
-  test('no firmware on flash: nothing to wipe, multi-chain by default', () => {
+  test('no firmware on flash: multi-chain by default, and any wallet still in storage is warned about', () => {
     for (const hash of ['', '0'.repeat(64)]) {
       const installed = inBootloader(hash)
       expect(installed.present).toBe(false)
       expect(needs(installed, true)).toBe(true)
-      expect(plan(installed)).toMatchObject({ ok: true, bitcoinOnly: false, wipeReason: undefined })
-      expect(plan(installed, 'bitcoin-only')).toMatchObject({ ok: true, bitcoinOnly: true, wipeReason: undefined })
+      expect(plan(installed)).toMatchObject({ ok: true, bitcoinOnly: false, wipeReason: 'no-firmware' })
+      expect(plan(installed, 'bitcoin-only')).toMatchObject({ ok: true, bitcoinOnly: true, wipeReason: 'no-firmware' })
     }
   })
 
@@ -131,12 +150,20 @@ describe('(d) Bitcoin-only 7.14.3 in bootloader mode, no snapshot', () => {
   })
 })
 
-describe("(d') Bitcoin-only in bootloader mode with a remembered snapshot", () => {
-  test('a snapshot names firmware the table does not know', () => {
+describe("(d') bootloader mode with a remembered snapshot of firmware the table does not know", () => {
+  test('the snapshot names version and variant, but the build is not official', () => {
     const installed = inBootloader(UNKNOWN, { snapshot: { version: '7.14.3', bitcoinOnly: true } })
-    expect(installed).toEqual({ version: '7.14.3', bitcoinOnly: true, present: true })
+    expect(installed).toEqual({ version: '7.14.3', verified: false, bitcoinOnly: true, present: true })
     expect(needs(installed, true)).toBe(false)
-    expect(plan(installed)).toMatchObject({ ok: true, bitcoinOnly: true, wipeReason: undefined })
+    // Official firmware over an unofficial build: the bootloader does not restore storage.
+    expect(plan(installed)).toMatchObject({ ok: true, bitcoinOnly: true, wipeReason: 'unsigned-to-signed' })
+  })
+
+  test('a snapshot never makes Desktop less careful than no snapshot, and matches firmware mode', () => {
+    const withSnapshot = inBootloader(UNKNOWN, { snapshot: { version: '7.14.1', bitcoinOnly: false } })
+    expect(plan(withSnapshot, 'multi')).toMatchObject({ ok: true, wipeReason: 'unsigned-to-signed' })
+    expect(plan(inFirmware('7.14.1', false, false), 'multi')).toMatchObject({ ok: true, wipeReason: 'unsigned-to-signed' })
+    expect(plan(inBootloader(UNKNOWN), 'multi')).toMatchObject({ ok: true, wipeReason: 'unknown-installed' })
   })
 
   test('the release table wins over a snapshot', () => {
@@ -220,5 +247,84 @@ describe('mergeManifests keeps the bitcoin-only build', () => {
     const remote = m(entry('v7.10.0'))
     expect(mergeManifests(manifest, remote)!.latest.firmwareBitcoinOnly).toEqual(channel.firmwareBitcoinOnly)
     expect(mergeManifests(manifest, null)).toBe(manifest)
+  })
+})
+
+describe('engine gate before anything is erased', () => {
+  const REASONS: WipeReason[] = ['downgrade', 'signed-to-unsigned', 'unsigned-to-signed', 'bitcoin-only-lock', 'unknown-installed', 'no-firmware']
+
+  test('a plan with no wipe reason needs no acknowledgement', () => {
+    expect(() => assertInstallAllowed(plan(inFirmware('7.14.1', false)))).not.toThrow()
+  })
+
+  test('each wipe reason needs an acknowledgement of exactly that reason', () => {
+    for (const reason of REASONS) {
+      const p = { ok: true as const, bitcoinOnly: false, version: '7.14.2', wipeReason: reason }
+      expect(() => assertInstallAllowed(p)).toThrow(`WIPE_ACK_REQUIRED:${reason}`)
+      expect(() => assertInstallAllowed(p, reason)).not.toThrow()
+      for (const other of REASONS.filter((r) => r !== reason)) {
+        expect(() => assertInstallAllowed(p, other)).toThrow(`WIPE_ACK_REQUIRED:${reason}`)
+      }
+    }
+  })
+
+  test('a refused plan throws its own error', () => {
+    expect(() => assertInstallAllowed(plan(inBootloader(UNKNOWN)))).toThrow('cannot tell which firmware')
+  })
+})
+
+describe('image variant marker on the bundled binaries', () => {
+  const bin = (dir: string, name = 'firmware.keepkey.bin') => new Uint8Array(readFileSync(join(import.meta.dir, '../firmware-bundle', dir, name)))
+
+  test('the bitcoin-only build is bitcoin-only', () => {
+    expect(isBitcoinOnlyImage(bin('v7.14.3', 'firmware.keepkey.bitcoin-only.bin'))).toBe(true)
+  })
+
+  test('every multi-chain build is not', () => {
+    for (const dir of ['v7.10.0', 'v7.14.0', 'v7.14.1', 'v7.14.2']) expect(isBitcoinOnlyImage(bin(dir))).toBe(false)
+  })
+
+  test('the manifest lists each build under its own variant', () => {
+    expect(isBitcoinOnlyImage(bin(channel.firmwareBitcoinOnly!.url.split('/')[0], channel.firmwareBitcoinOnly!.url.split('/')[1]))).toBe(true)
+    expect(isBitcoinOnlyImage(bin(channel.firmware.url.split('/')[0], channel.firmware.url.split('/')[1]))).toBe(false)
+  })
+})
+
+describe('setup wizard: Bitcoin-only / Multi-chain choice', () => {
+  const base = { enabled: true, bitcoinOnlyAvailable: true, newDevice: false, needsBootloaderUpdate: false, remembered: null }
+
+  test('a new KeepKey gets the picker with Multi-chain preselected', () => {
+    expect(wizardCoinMode({ ...base, newDevice: true, installedBitcoinOnly: false })).toEqual({ coinMode: 'multi', showPicker: true, variantUnknown: false })
+    expect(wizardCoinMode({ ...base, newDevice: true })).toEqual({ coinMode: 'multi', showPicker: true, variantUnknown: false })
+  })
+
+  test('the choice made on the bootloader page carries through the replugs', () => {
+    // after the bootloader update the device is replugged: the wizard may remount, firmware unknown in bootloader mode
+    expect(wizardCoinMode({ ...base, newDevice: true, remembered: 'bitcoin-only' }).coinMode).toBe('bitcoin-only')
+    expect(wizardCoinMode({ ...base, remembered: 'bitcoin-only' })).toEqual({ coinMode: 'bitcoin-only', showPicker: true, variantUnknown: true })
+    expect(wizardCoinMode({ ...base, installedBitcoinOnly: false, remembered: 'bitcoin-only' })).toEqual({ coinMode: 'bitcoin-only', showPicker: true, variantUnknown: false })
+  })
+
+  test('an old multi-chain KeepKey going through the bootloader update (5.2.4 on 1.0.2) gets the picker on the first page', () => {
+    expect(wizardCoinMode({ ...base, installedBitcoinOnly: false, needsBootloaderUpdate: true })).toEqual({ coinMode: 'multi', showPicker: true, variantUnknown: false })
+  })
+
+  test('other multi-chain devices update as before: no picker, multi-chain', () => {
+    expect(wizardCoinMode({ ...base, installedBitcoinOnly: false })).toEqual({ coinMode: 'multi', showPicker: false, variantUnknown: false })
+  })
+
+  test('a Bitcoin-only device stays Bitcoin-only, whatever was remembered', () => {
+    for (const remembered of [null, 'multi', 'bitcoin-only'] as const) {
+      expect(wizardCoinMode({ ...base, installedBitcoinOnly: true, needsBootloaderUpdate: true, remembered })).toMatchObject({ coinMode: 'bitcoin-only', showPicker: false })
+    }
+  })
+
+  test('unidentified firmware: picker with nothing preselected', () => {
+    expect(wizardCoinMode(base)).toEqual({ coinMode: null, showPicker: true, variantUnknown: true })
+  })
+
+  test('no bitcoin-only build, or the flag off: no picker, multi-chain', () => {
+    expect(wizardCoinMode({ ...base, newDevice: true, bitcoinOnlyAvailable: false, remembered: 'bitcoin-only' })).toMatchObject({ coinMode: 'multi', showPicker: false })
+    expect(wizardCoinMode({ ...base, newDevice: true, enabled: false, remembered: 'bitcoin-only' })).toMatchObject({ coinMode: 'multi', showPicker: false })
   })
 })

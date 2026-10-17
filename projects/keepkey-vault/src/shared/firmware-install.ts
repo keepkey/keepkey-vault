@@ -27,13 +27,31 @@ export interface InstalledFirmware {
   bitcoinOnly?: boolean
   /** Firmware bytes are on flash. */
   present: boolean
-  /** Stock factory firmware (4.0.0): there is no wallet on the device to lose. */
+  /** A new KeepKey: stock factory firmware (4.0.0, no wallet). In bootloader
+   *  mode this is session memory, not tied to the device, so it only shapes the
+   *  setup UI (picker, Multi-chain default). It never removes a wipe reason. */
   factory?: boolean
 }
 
 export interface ChannelFirmware {
   firmware?: FirmwareBinaryRef
   firmwareBitcoinOnly?: FirmwareBinaryRef
+}
+
+/** Stock factory firmware: 4.0.0 with no wallet on it. */
+export function isFactoryFirmware(version: string, initialized: boolean | undefined): boolean {
+  return version === '4.0.0' && initialized === false
+}
+
+/** Installed firmware of a device in firmware mode, from its Features. */
+export function installedInFirmwareMode(p: { version: string; verified?: boolean; bitcoinOnly: boolean; initialized?: boolean }): InstalledFirmware {
+  return {
+    version: p.version === '0.0.0' ? null : p.version,
+    verified: p.verified,
+    bitcoinOnly: p.bitcoinOnly,
+    present: true,
+    factory: isFactoryFirmware(p.version, p.initialized) || undefined,
+  }
 }
 
 /**
@@ -56,8 +74,11 @@ export function installedFromBootloader(p: {
     return { version: info.version, verified: OFFICIAL_RELEASE_TAG.test(p.release!), bitcoinOnly: info.bitcoinOnly, present }
   }
   if (p.snapshot) {
+    // The snapshot names version and variant, but only the release table says
+    // a build is official (as verifyHashes does in firmware mode), so this one
+    // is not: an official install over it crosses the signed/unsigned line.
     const v = p.snapshot.version
-    return { version: v && v !== '0.0.0' ? v : null, bitcoinOnly: p.snapshot.bitcoinOnly, present }
+    return { version: v && v !== '0.0.0' ? v : null, verified: false, bitcoinOnly: p.snapshot.bitcoinOnly, present }
   }
   return { version: null, present, factory: p.factorySeen || undefined }
 }
@@ -114,9 +135,9 @@ export function planInstall(p: {
   /** Multi-chain version to install when there is no manifest entry. */
   fallbackMulti?: string
 }): InstallPlan {
-  const blank = p.installed.factory === true || !p.installed.present
   let bitcoinOnly: boolean | undefined = p.choice ? p.choice === 'bitcoin-only' : p.installed.bitcoinOnly
-  if (bitcoinOnly === undefined && blank) bitcoinOnly = false
+  // Nothing on flash, or a new KeepKey: multi-chain unless the user chose.
+  if (bitcoinOnly === undefined && (!p.installed.present || p.installed.factory === true)) bitcoinOnly = false
   if (bitcoinOnly === undefined) {
     return { ok: false, error: 'KeepKey Desktop cannot tell which firmware is on this KeepKey. Choose Bitcoin-only or Multi-chain firmware first.' }
   }
@@ -126,15 +147,64 @@ export function planInstall(p: {
   }
   const version = entry ? entry.version.replace(/^v/, '') : p.fallbackMulti
   if (!version) return { ok: false, error: 'No firmware release is available to install.' }
-  const wipeReason = blank ? undefined : flashWipeReason({
+  // Every device gets the same check, new ones included: "new" can be session
+  // memory (factory), and a device with no firmware may still hold a wallet.
+  const wipeReason = flashWipeReason({
     isSigned: true,
     currentFirmwareVerified: p.installed.verified,
     isDowngrade: !!p.installed.version && versionCompare(version, p.installed.version) < 0,
     currentBitcoinOnly: p.installed.bitcoinOnly,
     targetBitcoinOnly: bitcoinOnly,
-    installedUnknown: !p.installed.version,
+    installedUnknown: p.installed.present && !p.installed.version,
+    noFirmware: !p.installed.present,
   })
   return { ok: true, bitcoinOnly, version, entry, wipeReason }
+}
+
+/**
+ * The engine's gate before anything is erased: the plan must be valid, and a
+ * plan that may wipe or lock the wallet needs the user's acknowledgement of
+ * that exact reason (not a reason shown earlier for another plan).
+ */
+export function assertInstallAllowed(plan: InstallPlan, acknowledgeWipe?: WipeReason): asserts plan is Extract<InstallPlan, { ok: true }> {
+  if (!plan.ok) throw new Error(plan.error)
+  if (plan.wipeReason && acknowledgeWipe !== plan.wipeReason) throw new Error(`WIPE_ACK_REQUIRED:${plan.wipeReason}`)
+}
+
+/** Only the bitcoin-only build compiles in "KeepKeyBTC"/"EmulatorBTC"
+ *  (fsm_msg_common.h, under #if BITCOIN_ONLY); a multi-chain build never does. */
+export function isBitcoinOnlyImage(bytes: ArrayBufferView): boolean {
+  const text = new TextDecoder('latin1').decode(bytes)
+  return text.includes('KeepKeyBTC') || text.includes('EmulatorBTC')
+}
+
+/**
+ * The setup wizard's Bitcoin-only / Multi-chain choice.
+ * - A Bitcoin-only device stays Bitcoin-only: no picker.
+ * - A new KeepKey, or one going through setup's bootloader update, gets the
+ *   picker with Multi-chain preselected, or the choice the user already made
+ *   (it outlives the bootloader-update replugs). Other multi-chain devices
+ *   update as before, with no picker.
+ * - A device whose firmware Desktop cannot identify gets the picker with
+ *   nothing preselected: the user must choose.
+ * - No picker when the flag is off or there is no bitcoin-only build.
+ */
+export function wizardCoinMode(p: {
+  enabled: boolean
+  bitcoinOnlyAvailable: boolean
+  installedBitcoinOnly?: boolean
+  /** deviceStatus.factoryFirmware: factory firmware, or no firmware. */
+  newDevice: boolean
+  /** The device needs the bootloader update (setup's first page). */
+  needsBootloaderUpdate: boolean
+  remembered: CoinVariant | null
+}): { coinMode: CoinVariant | null; showPicker: boolean; variantUnknown: boolean } {
+  const variantUnknown = !p.newDevice && p.installedBitcoinOnly === undefined
+  if (p.installedBitcoinOnly === true) return { coinMode: 'bitcoin-only', showPicker: false, variantUnknown }
+  if (!p.enabled || !p.bitcoinOnlyAvailable) return { coinMode: 'multi', showPicker: false, variantUnknown }
+  if (variantUnknown) return { coinMode: p.remembered, showPicker: true, variantUnknown }
+  const showPicker = p.newDevice || p.needsBootloaderUpdate || p.remembered !== null
+  return { coinMode: showPicker ? p.remembered ?? 'multi' : 'multi', showPicker, variantUnknown }
 }
 
 /**
