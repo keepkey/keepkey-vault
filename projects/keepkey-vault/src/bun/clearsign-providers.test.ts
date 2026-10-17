@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import type { ClearSignProvider } from '../shared/types'
 import {
   addClearSignProvider, configureClearSignProviders, ensureClearSignProviderTable, listClearSignProviders,
-  nameRuntimeProvider, providerFingerprint, providerFor, removeClearSignProvider, resolveProviderTxMetadata, seedClearSignProviderFromEnv,
+  nameProviderOnCard, nameRuntimeProvider, providerFingerprint, providerFor, removeClearSignProvider, resolveProviderTxMetadata, seedClearSignProviderFromEnv,
 } from './clearsign-providers'
 
 // The 'Acme Labs' key from the 7.16.0 emulator run: the device showed
@@ -201,6 +201,36 @@ describe('resolveProviderTxMetadata (shared by REST, RPC, swaps and WalletConnec
     addClearSignProvider(db, { name: 'Acme Labs', url: a.url, publicKeyHex: ACME })
     configureClearSignProviders(() => listClearSignProviders(db))
     expect((await resolveProviderTxMetadata(tx(CONTRACT_A), GATE_ON))?.signer.alias).toBe('Acme Labs')
+  })
+})
+
+describe('REST approval card names the provider', () => {
+  const info = (extra: object = {}): any => ({
+    id: 'x', method: '/eth/sign-transaction', appName: 'a', firmwareVersion: '7.16.0', advancedModeEnabled: true,
+    chainId: 1, to: CONTRACT_A, data: '0xdeadbeef', ...extra,
+  })
+
+  test('also for an addressNList caller with no report', async () => {
+    const a = startProvider(ACME); servers.push(a.server)
+    const providers = [addClearSignProvider(memoryDb(), { name: 'Acme Labs', url: a.url, publicKeyHex: ACME })]
+    const noReport = info()
+    await nameProviderOnCard(noReport, undefined, providers)
+    expect(noReport.runtimeProvider).toEqual({ alias: 'Acme Labs', fingerprint: '656B0D303F6BBDBD', publicKeyHex: ACME, keyId: 2 })
+    expect(noReport.clearSignReport).toBeUndefined()
+
+    const withReport = info({ clearSignReport: { descriptor: { source: 'none' } } })
+    await nameProviderOnCard(withReport, undefined, providers)
+    expect(withReport.clearSignReport.descriptor.provider).toEqual({ alias: 'Acme Labs', fingerprint: '656B0D303F6BBDBD', status: 'requested' })
+
+    // A caller blob or a native call: nothing named, nobody asked.
+    a.hits.length = 0
+    const blob = info()
+    await nameProviderOnCard(blob, { signedPayload: '00' }, providers)
+    const send = info({ data: '0x' })
+    await nameProviderOnCard(send, undefined, providers)
+    expect(blob.runtimeProvider).toBeUndefined()
+    expect(send.runtimeProvider).toBeUndefined()
+    expect(a.hits).toEqual([])
   })
 })
 

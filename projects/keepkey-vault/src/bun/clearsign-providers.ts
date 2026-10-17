@@ -10,10 +10,10 @@
  */
 import type { Database } from 'bun:sqlite'
 import { createHash, randomUUID } from 'node:crypto'
-import type { ClearSignProvider, ClearSignProviderContract, ClearSignProviderInput, RuntimeProviderNamed } from '../shared/types'
+import type { ClearSignProvider, ClearSignProviderContract, ClearSignProviderInput, RuntimeProviderNamed, SigningRequestInfo } from '../shared/types'
 import { secp256k1 } from '@noble/curves/secp256k1'
 import {
-  providerCanDescribe, resolveRuntimeEvmMetadata, resolveRuntimeEvmSigner, supportsRuntimeEvmMetadata,
+  providerCanDescribe, resolveRuntimeEvmMetadata, resolveRuntimeEvmSigner, runtimeProviderWillBeAsked, supportsRuntimeEvmMetadata,
   type RuntimeEvmSigner, type RuntimeProviderOptions,
 } from './evm-runtime-metadata'
 
@@ -186,6 +186,22 @@ export async function nameRuntimeProvider(
   const signer = await resolveRuntimeEvmSigner(provider.url, { ...opts, expectedPublicKeyHex: provider.publicKeyHex })
   if (!signer) return undefined
   return { alias: provider.name, fingerprint: provider.fingerprint, publicKeyHex: provider.publicKeyHex, keyId: signer.keyId }
+}
+
+/** REST approval card: name the provider the sign handler will ask whenever
+ * it will be asked, also for callers that send addressNList without `from`
+ * (they get no report, so only signingInfo.runtimeProvider carries it). */
+export async function nameProviderOnCard(
+  info: SigningRequestInfo, callerMetadata: unknown, providers: ClearSignProvider[] = providerSource(),
+): Promise<void> {
+  if (!runtimeProviderWillBeAsked(info, callerMetadata)) return
+  const named = await nameRuntimeProvider(info, { firmwareVersion: info.firmwareVersion, advancedMode: info.advancedModeEnabled === true }, providers)
+  if (!named) return
+  info.runtimeProvider = named
+  if (info.clearSignReport) info.clearSignReport.descriptor = {
+    ...info.clearSignReport.descriptor,
+    provider: { alias: named.alias, fingerprint: named.fingerprint, status: 'requested' },
+  }
 }
 
 /** The single runtime-provider step shared by REST, RPC, swaps and

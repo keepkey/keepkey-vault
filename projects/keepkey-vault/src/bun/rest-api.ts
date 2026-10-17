@@ -83,8 +83,8 @@ import { createClearSignFixturePlan } from './clearsign-fixture-plan'
 import { replayLegacyClearSignRows } from './clearsign-legacy-replay'
 import { importPromotedClearSignArtifact } from './clearsign-artifact-import'
 import { findPromotedEvmArtifact, findPromotedSolanaArtifact, resolvePromotedSolanaArtifact } from './clearsign-artifact-resolver'
-import { runtimeProviderWillBeAsked, trustRuntimeSigner, type RuntimeEvmSigner } from './evm-runtime-metadata'
-import { nameRuntimeProvider, resolveProviderTxMetadata } from './clearsign-providers'
+import { trustRuntimeSigner, type RuntimeEvmSigner } from './evm-runtime-metadata'
+import { nameProviderOnCard, resolveProviderTxMetadata } from './clearsign-providers'
 import { supportsCertifiedClearSign } from './solana-certified-policy'
 import { measureLiveDeployment, resolveEvmSchema } from './evm-schema-registry'
 import { findContractRating } from './clearsign-review'
@@ -2084,19 +2084,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           // Name the runtime provider the sign handler will ask, on the card,
           // before approval: its description is fetched only after approval,
           // and the handler attaches one only from the key named here.
-          if (path === '/eth/sign-transaction' && signingInfo.clearSignReport
-            && runtimeProviderWillBeAsked(signingInfo, probeCheckBody?.txMetadata)) {
-            const named = await nameRuntimeProvider(signingInfo, {
-              firmwareVersion: signingInfo.firmwareVersion, advancedMode: signingInfo.advancedModeEnabled === true,
-            })
-            if (named) {
-              signingInfo.runtimeProvider = named
-              signingInfo.clearSignReport.descriptor = {
-                ...signingInfo.clearSignReport.descriptor,
-                provider: { alias: named.alias, fingerprint: named.fingerprint, status: 'requested' },
-              }
-            }
-          }
+          if (path === '/eth/sign-transaction') await nameProviderOnCard(signingInfo, probeCheckBody?.txMetadata)
 
           // Track before waiting so rejection, timeout, or a malformed approval
           // decision still dismisses the Vault overlay in the request finally.
