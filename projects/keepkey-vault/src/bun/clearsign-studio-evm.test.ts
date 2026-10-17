@@ -10,6 +10,7 @@ import {
   parseProviderBundle,
   PROVIDER_BUNDLE_FORMAT,
   providerBundleFileName,
+  uniqueFilePath,
 } from './clearsign-studio-evm'
 import { createProviderKeySession } from './clearsign-provider-session'
 import { deriveProviderKey } from '../shared/clearsign-provider-key'
@@ -139,7 +140,27 @@ describe('provider bundle export/import', () => {
   })
 
   it('names the export file even when the alias has no letters or digits', () => {
-    expect(providerBundleFileName(bundle)).toBe('keepkey-clearsign-bundle-acme-labs-b690735f.json')
-    expect(providerBundleFileName({ ...bundle, provider: { ...bundle.provider, alias: '___' } })).toBe('keepkey-clearsign-bundle-provider-b690735f.json')
+    expect(providerBundleFileName(bundle)).toBe('keepkey-clearsign-bundle-acme-labs-b690735f-slot1.json')
+    expect(providerBundleFileName({ ...bundle, provider: { ...bundle.provider, alias: '___' } })).toBe('keepkey-clearsign-bundle-provider-b690735f-slot1.json')
+  })
+
+  it('signing for another slot or key warns before it drops the current bundle', () => {
+    const studio = readFileSync(join(import.meta.dir, '../mainview/components/ClearSignStudio.tsx'), 'utf8')
+    const sign = studio.slice(studio.indexOf('const signEvm = useCallback('), studio.indexOf('const exportBundle = useCallback('))
+    // The warning (and its early return) comes before the host is asked to sign.
+    expect(sign.indexOf('if (replaces && confirmDrop !== dropKey)')).toBeGreaterThan(-1)
+    expect(sign.indexOf('if (replaces && confirmDrop !== dropKey)')).toBeLessThan(sign.indexOf('"clearsignSignEvmSchema"'))
+    expect(sign).toContain('Export the bundle first to keep them, then press Sign again.')
+    expect(sign).toContain('earlier description')
+  })
+
+  it('one key exported for two slots gives two files, and an export never overwrites one', () => {
+    const slot2 = { ...bundle, provider: { ...bundle.provider, keyId: 2 } }
+    expect(providerBundleFileName(slot2)).not.toBe(providerBundleFileName(bundle))
+    const taken = new Set(['/d/b.json', '/d/b-2.json'])
+    expect(uniqueFilePath('/d/a.json', (p) => taken.has(p))).toBe('/d/a.json')
+    expect(uniqueFilePath('/d/b.json', (p) => taken.has(p))).toBe('/d/b-3.json')
+    const index = readFileSync(join(import.meta.dir, 'index.ts'), 'utf8')
+    expect(index).toContain("uniqueFilePath(path.join(os.homedir(), 'Downloads', providerBundleFileName(bundle)), fs.existsSync)")
   })
 })

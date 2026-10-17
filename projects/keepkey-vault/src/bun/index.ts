@@ -52,7 +52,7 @@ function requireClearsignAdvancedMode(): void {
 }
 
 // Studio's third-party provider key: RAM-only, AdvancedMode-gated, zeroed on clear.
-const providerKeySession = createProviderKeySession(requireClearsignAdvancedMode)
+const providerKeySession = createProviderKeySession(requireClearsignAdvancedMode, undefined, () => engine.getDeviceState().deviceId)
 
 function supportsAddressBookClearsignFirmware(): boolean {
 	const version = engine.getDeviceState().firmwareVersion
@@ -288,7 +288,7 @@ import { supportsCertifiedClearSign } from "./solana-certified-policy"
 import { configureProductionRootTrust } from "../shared/certified-evm-envelope"
 import { createRpcAltFetcher } from "./solana-alt"
 import { createProviderKeySession } from "./clearsign-provider-session"
-import { buildProviderBundle, buildStudioEvmSchema, parseProviderBundle, providerBundleFileName } from "./clearsign-studio-evm"
+import { buildProviderBundle, buildStudioEvmSchema, parseProviderBundle, providerBundleFileName, uniqueFilePath } from "./clearsign-studio-evm"
 import { getTokenMetadata, broadcastEvmTx, verifyEvmSigner } from "./evm-rpc"
 import { evmSourceForChain } from "./pioneer-evm"
 import { deviceErrorMessage } from "../shared/device-error"
@@ -3108,7 +3108,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			clearsignDeriveProviderKey: async (params) => providerKeySession.derive(params),
 			clearsignClearProviderKey: async () => ({ cleared: providerKeySession.clear() }),
 			clearsignBuildEvmSchema: async (params) => {
-				requireClearsignAdvancedMode()
+				providerKeySession.requireAdvancedMode()
 				return buildStudioEvmSchema(params.draft, params.keyId)
 			},
 			clearsignSignEvmSchema: async (params) => {
@@ -3131,14 +3131,15 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				}
 			},
 			clearsignExportProviderBundle: async (params) => {
-				requireClearsignAdvancedMode()
+				providerKeySession.requireAdvancedMode()
 				const bundle = buildProviderBundle(params)
-				const filePath = path.join(os.homedir(), 'Downloads', providerBundleFileName(bundle))
+				// Never overwrite an earlier export (another slot, or the same one twice).
+				const filePath = uniqueFilePath(path.join(os.homedir(), 'Downloads', providerBundleFileName(bundle)), fs.existsSync)
 				await Bun.write(filePath, JSON.stringify(bundle, null, 2))
 				return { filePath, bundle }
 			},
 			clearsignImportProviderBundle: async (params) => {
-				requireClearsignAdvancedMode()
+				providerKeySession.requireAdvancedMode()
 				return parseProviderBundle(params.json)
 			},
 			clearsignListEvents: async (params) => {
@@ -9704,6 +9705,8 @@ function startPioneerSocketIfAllowed(): void {
 // Push engine events to WebView
 engine.on('state-change', (state) => {
 	try { rpc.send['device-state'](state) } catch { /* webview not ready yet */ }
+	// The Studio provider key belongs to the device it was derived with.
+	providerKeySession.onDeviceState(state)
 	const bitcoinOnly = isBitcoinOnlyVariant(state.firmwareVariant)
 	// Scope the self-host node to the connected device: only a btc-only device may
 	// use the (global) persisted node. A multichain device — which can't even see
@@ -10343,6 +10346,8 @@ let quitting = false
 function cleanupAndQuit() {
 	if (quitting) return
 	quitting = true
+	// Zero the Studio provider key: the window (and its close effect) is going away.
+	try { providerKeySession.clear() } catch { /* nothing to zero */ }
 
 	// Force-exit safety net — if cleanup blocks (e.g. FFI busy-wait), exit anyway.
 	// stopEmulator() below disarms the emulator-owned watchdog.

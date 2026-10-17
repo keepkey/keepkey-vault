@@ -217,7 +217,16 @@ export function buildProviderBundle(opts: {
  * has no letters or digits) and the provider fingerprint. */
 export function providerBundleFileName(bundle: ClearSignProviderBundle): string {
   const slug = bundle.provider.alias.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'provider'
-  return `keepkey-clearsign-bundle-${slug}-${bundle.provider.fingerprint}.json`
+  return `keepkey-clearsign-bundle-${slug}-${bundle.provider.fingerprint}-slot${bundle.provider.keyId}.json`
+}
+
+/** `filePath`, or the first free `name-2.json`, `name-3.json`, ... so an export never overwrites a file. */
+export function uniqueFilePath(filePath: string, exists: (path: string) => boolean): string {
+  const dot = filePath.lastIndexOf('.')
+  const [stem, ext] = dot > filePath.lastIndexOf('/') ? [filePath.slice(0, dot), filePath.slice(dot)] : [filePath, '']
+  let candidate = filePath
+  for (let n = 2; exists(candidate); n++) candidate = `${stem}-${n}${ext}`
+  return candidate
 }
 
 /** Validate an imported bundle file: every entry must verify and match its row. */

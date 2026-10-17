@@ -205,6 +205,66 @@ describe('provider key session', () => {
     expect(onClose.slice(0, onClose.indexOf('}, [open])'))).toContain('rpcRequest("clearsignClearProviderKey")')
   })
 
+  test('the key belongs to the device it was derived with: unplugged or swapped ends it', () => {
+    const device = { id: 'A' as string | undefined }
+    const keys: Uint8Array[] = []
+    const advanced = { on: true }
+    const mk = () => createProviderKeySession(
+      () => { if (!advanced.on) throw new Error('ClearSign Studio requires AdvancedMode on the connected device') },
+      (m) => { const k = deriveProviderKey(m); keys.push(k.privateKey); return k },
+      () => device.id,
+    )
+    const draft = { chainId: 1, contract: `0x${'aa'.repeat(20)}`, selector: '0xa9059cbb', method: 'transfer', args: [] }
+
+    let s = mk()
+    s.derive(ceremony)
+    expect(s.onDeviceState({ state: 'ready', deviceId: 'A' })).toBe(false)
+    expect(s.onDeviceState({ state: 'disconnected' })).toBe(true)
+    expect(keys[0].every(b => b === 0)).toBe(true)
+
+    s.derive(ceremony)
+    expect(s.onDeviceState({ state: 'ready', deviceId: 'B' })).toBe(true)
+    expect(keys[1].every(b => b === 0)).toBe(true)
+
+    // Device B plugged in with AdvancedMode on, no state event seen: signing still refuses A's key.
+    s = mk()
+    s.derive(ceremony)
+    device.id = 'B'
+    expect(() => s.signEvmSchema(draft as any, 1)).toThrow('Derive the provider key')
+    expect(keys[2].every(b => b === 0)).toBe(true)
+
+    // The other Studio handlers' gate also ends the session when AdvancedMode is off.
+    s.derive(ceremony)
+    advanced.on = false
+    expect(() => s.requireAdvancedMode()).toThrow('AdvancedMode')
+    expect(keys[3].every(b => b === 0)).toBe(true)
+  })
+
+  test('quit, device changes and every Studio EVM handler reach the session', () => {
+    const SRC = join(import.meta.dir, '..', 'src')
+    const index = readFileSync(join(SRC, 'bun/index.ts'), 'utf8')
+    const quit = index.slice(index.indexOf('function cleanupAndQuit() {'))
+    expect(quit.slice(0, quit.indexOf('stopEmulator'))).toContain('providerKeySession.clear()')
+    const stateChange = index.slice(index.indexOf("engine.on('state-change', (state) => {"))
+    expect(stateChange.slice(0, 400)).toContain('providerKeySession.onDeviceState(state)')
+    expect(index).toContain('createProviderKeySession(requireClearsignAdvancedMode, undefined, () => engine.getDeviceState().deviceId)')
+    for (const handler of ['clearsignBuildEvmSchema', 'clearsignExportProviderBundle', 'clearsignImportProviderBundle']) {
+      const body = index.slice(index.indexOf(`${handler}: async`))
+      expect(body.slice(0, body.indexOf('\n\t\t\t}'))).toContain('providerKeySession.requireAdvancedMode()')
+    }
+  })
+
+  test('the Studio card never says "In memory" for a key the host no longer holds', () => {
+    const studio = readFileSync(join(import.meta.dir, '..', 'src', 'mainview/components/ClearSignStudio.tsx'), 'utf8')
+    // AdvancedMode off (host cleared it via onPolicy) resets the card.
+    expect(studio).toContain('if (!advancedMode) setProviderKey(null)')
+    // Editing alias, word count, index or words ends the host key too.
+    const drop = studio.slice(studio.indexOf('const dropProviderKey = useCallback(() => {'))
+    expect(drop.slice(0, drop.indexOf('}, [])'))).toContain('rpcRequest("clearsignClearProviderKey")')
+    expect(studio.match(/dropProviderKey\(\) \}/g)).toHaveLength(4)
+    expect(studio).not.toMatch(/\); setProviderKey\(null\) \}/)
+  })
+
   test('rejects a bad alias or a ceremony mismatch before deriving', () => {
     const { s, keys } = session()
     expect(() => s.derive({ ...ceremony, alias: 'Acme%' })).toThrow('Alias')

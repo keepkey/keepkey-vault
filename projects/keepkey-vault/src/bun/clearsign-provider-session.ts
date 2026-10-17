@@ -4,7 +4,8 @@
  * Owner rule (2026-10-16): the third-party provider private key is NEVER
  * written to disk. The operator re-enters the BIP-85 words the device shows,
  * the key is derived here, used to sign, and zeroed when the session ends
- * (Studio closes, a new key is derived, or AdvancedMode is found off).
+ * (Studio closes, a new key is derived, AdvancedMode is found off, the device
+ * it was derived with is unplugged or swapped, or the app quits).
  * Every entry point requires AdvancedMode, like the rest of Studio.
  *
  * JS cannot zero strings or bigints the libraries make internally; we zero
@@ -23,8 +24,10 @@ export interface ProviderKeyIdentity {
 export function createProviderKeySession(
   requireAdvancedMode: () => void,
   derive: (mnemonic: string) => ProviderKey = deriveProviderKey,
+  /** The connected device's id: the key belongs to the device it was derived with. */
+  deviceId: () => string | undefined = () => undefined,
 ) {
-  let current: (ProviderKeyIdentity & { privateKey: Uint8Array }) | null = null
+  let current: (ProviderKeyIdentity & { privateKey: Uint8Array; deviceId?: string }) | null = null
 
   const clear = (): boolean => {
     if (!current) return false
@@ -40,10 +43,21 @@ export function createProviderKeySession(
       clear()
       throw cause
     }
+    if (current && current.deviceId !== deviceId()) clear()
   }
 
   return {
     clear,
+
+    /** AdvancedMode check for every Studio handler: a failure (or another
+     * device) also ends the session. */
+    requireAdvancedMode: gate,
+
+    /** The engine's device state: an unplugged or different device ends the session. */
+    onDeviceState(state: { state?: unknown; deviceId?: unknown }): boolean {
+      if (!current) return false
+      return state?.state === 'disconnected' || (!!state?.deviceId && state.deviceId !== current.deviceId) ? clear() : false
+    },
 
     /** A policy change on the device: AdvancedMode off ends the Studio session
      * (the device drops its session signers at the same time). Every path that
@@ -64,7 +78,7 @@ export function createProviderKeySession(
       }
       const mnemonic = validateProviderCeremony(params)
       const key = derive(mnemonic)
-      current = { alias, publicKeyHex: key.publicKeyHex, fingerprint: key.fingerprint, privateKey: key.privateKey }
+      current = { alias, publicKeyHex: key.publicKeyHex, fingerprint: key.fingerprint, privateKey: key.privateKey, deviceId: deviceId() }
       return { alias, publicKeyHex: key.publicKeyHex, fingerprint: key.fingerprint }
     },
 

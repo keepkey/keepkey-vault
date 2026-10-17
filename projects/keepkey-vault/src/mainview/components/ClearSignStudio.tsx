@@ -177,6 +177,7 @@ export function ClearSignStudio({ open, onClose, advancedMode, firmwareVersion }
 	const [evmDraft, setEvmDraft] = useState<ClearSignEvmSchemaDraft>(EVM_EXAMPLE_DRAFT)
 	const [evmArtifact, setEvmArtifact] = useState<ClearSignEvmSchemaArtifact | null>(null)
 	const [evmEntries, setEvmEntries] = useState<ClearSignEvmSignedEntry[]>([])
+	const [confirmDrop, setConfirmDrop] = useState("")
 	// Public identity of the descriptions in evmEntries: the session key, or an imported bundle's.
 	const [bundleProvider, setBundleProvider] = useState<{ alias: string; publicKeyHex: string; fingerprint: string } | null>(null)
 	const bundleFileRef = useRef<HTMLInputElement>(null)
@@ -376,6 +377,17 @@ export function ClearSignStudio({ open, onClose, advancedMode, firmwareVersion }
 		void refreshHistory()
 	}, [open, refreshHistory])
 
+	// AdvancedMode off ends the host session (onPolicy): the card must not say "In memory".
+	useEffect(() => {
+		if (!advancedMode) setProviderKey(null)
+	}, [advancedMode])
+
+	// Editing the ceremony inputs ends the derived key on the host too, not only on the card.
+	const dropProviderKey = useCallback(() => {
+		setProviderKey(null)
+		void rpcRequest("clearsignClearProviderKey").catch(() => {})
+	}, [])
+
 	// The provider key lives in host memory for this Studio session only: zero it on close.
 	useEffect(() => {
 		if (!open) return
@@ -543,6 +555,17 @@ export function ClearSignStudio({ open, onClose, advancedMode, firmwareVersion }
 	}), [evmDraft, runEvm, slot])
 
 	const signEvm = useCallback(() => runEvm("evm-sign", async () => {
+		// A bundle holds one key and one slot: signing for another starts a new
+		// one. Say so first and sign only on the second press, so nothing is lost
+		// without the operator knowing (export the current bundle in between).
+		const replaces = !!providerKey && evmEntries.length > 0
+			&& (evmEntries.some(e => e.keyId !== slot) || (!!bundleProvider && bundleProvider.publicKeyHex !== providerKey?.publicKeyHex))
+		const dropKey = `${slot}:${providerKey?.publicKeyHex}:${evmEntries.length}`
+		if (replaces && confirmDrop !== dropKey) {
+			setConfirmDrop(dropKey)
+			throw new Error(`Signing for slot ${slot}${bundleProvider && bundleProvider.publicKeyHex !== providerKey?.publicKeyHex ? ` with ${providerKey?.alias}` : ""} starts a new bundle and drops the ${evmEntries.length} description${evmEntries.length === 1 ? "" : "s"} for slot ${evmEntries[0].keyId}. Export the bundle first to keep them, then press Sign again.`)
+		}
+		setConfirmDrop("")
 		const signed = await rpcRequest<ClearSignEvmSignedEntry & { alias: string; publicKeyHex: string; fingerprint: string }>(
 			"clearsignSignEvmSchema", { draft: evmDraft, keyId: slot },
 		)
@@ -551,8 +574,8 @@ export function ClearSignStudio({ open, onClose, advancedMode, firmwareVersion }
 		// A bundle holds one slot: signing for another slot starts a new bundle.
 		setEvmEntries(current => [...(fromOtherKey || current.some(e => e.keyId !== signed.keyId) ? [] : current.filter(e => !same(e))), signed])
 		setBundleProvider({ alias: signed.alias, publicKeyHex: signed.publicKeyHex, fingerprint: signed.fingerprint })
-		setNotice(`${signed.draft.method} signed by ${signed.alias} ${signed.fingerprint} for slot ${signed.keyId}.`)
-	}), [bundleProvider, evmDraft, runEvm, slot])
+		setNotice(`${signed.draft.method} signed by ${signed.alias} ${signed.fingerprint} for slot ${signed.keyId}.${replaces ? ` A new bundle was started; the ${evmEntries.length} earlier description${evmEntries.length === 1 ? " was" : "s were"} dropped.` : ""}`)
+	}), [bundleProvider, confirmDrop, evmDraft, evmEntries, providerKey, runEvm, slot])
 
 	const exportBundle = useCallback(() => runEvm("bundle-export", async () => {
 		if (!bundleProvider) return
@@ -721,9 +744,9 @@ export function ClearSignStudio({ open, onClose, advancedMode, firmwareVersion }
 								<Box flex="1" p="4" borderRadius="14px" bg="var(--ink-0)" border="1px solid var(--line)">
 									<Text fontSize="12px" fontWeight="700" color="var(--text-0)">1 · Derive a child seed on the device</Text>
 									<Text fontSize="11px" color="var(--text-2)" mt="1">BIP-85 gives a ceremony you can repeat and audit from device + index. Desktop never writes the provider private key to disk: it is re-derived from the device words when Studio needs to sign, and only the public key is exported.</Text>
-									<Box mt="3"><FieldLabel hint="shown on device when the signer is loaded">Provider alias</FieldLabel><Input value={alias} onChange={event => { setAlias(event.target.value); setProviderKey(null) }} maxLength={31} size="sm" bg="rgba(0,0,0,0.18)" /></Box>
-									<Flex gap="1" align="center" mt="3"><Text fontSize="10px" color="var(--text-2)" mr="2">Words</Text>{([12, 18, 24] as const).map(value => <Button key={value} size="xs" minW="38px" variant={wordCount === value ? "solid" : "outline"} bg={wordCount === value ? "var(--gold)" : undefined} color={wordCount === value ? "#15110a" : "var(--text-1)"} onClick={() => { setWordCount(value); setProviderKey(null) }}>{value}</Button>)}</Flex>
-									<Box mt="3"><FieldLabel hint="same index always re-derives the same key">Index</FieldLabel><Input type="number" min={0} value={bip85Index} onChange={event => { setBip85Index(Math.max(0, Number(event.target.value) || 0)); setProviderKey(null) }} size="sm" w="140px" bg="rgba(0,0,0,0.18)" /></Box>
+									<Box mt="3"><FieldLabel hint="shown on device when the signer is loaded">Provider alias</FieldLabel><Input value={alias} onChange={event => { setAlias(event.target.value); dropProviderKey() }} maxLength={31} size="sm" bg="rgba(0,0,0,0.18)" /></Box>
+									<Flex gap="1" align="center" mt="3"><Text fontSize="10px" color="var(--text-2)" mr="2">Words</Text>{([12, 18, 24] as const).map(value => <Button key={value} size="xs" minW="38px" variant={wordCount === value ? "solid" : "outline"} bg={wordCount === value ? "var(--gold)" : undefined} color={wordCount === value ? "#15110a" : "var(--text-1)"} onClick={() => { setWordCount(value); dropProviderKey() }}>{value}</Button>)}</Flex>
+									<Box mt="3"><FieldLabel hint="same index always re-derives the same key">Index</FieldLabel><Input type="number" min={0} value={bip85Index} onChange={event => { setBip85Index(Math.max(0, Number(event.target.value) || 0)); dropProviderKey() }} size="sm" w="140px" bg="rgba(0,0,0,0.18)" /></Box>
 									<Button mt="4" w="full" size="sm" variant="outline" borderColor="var(--line)" onClick={showChildSeed} loading={busy === "bip85"} disabled={!!busy || !advancedMode}>Show child seed on device</Button>
 									<Text fontSize="10px" color="var(--text-2)" mt="3">The words are displayed on the KeepKey screen only — they never cross USB. Read them off the device and type them below.</Text>
 								</Box>
@@ -731,7 +754,7 @@ export function ClearSignStudio({ open, onClose, advancedMode, firmwareVersion }
 								<Box flex="1" p="4" borderRadius="14px" bg="var(--ink-0)" border="1px solid var(--line)">
 									<Text fontSize="12px" fontWeight="700" color="var(--text-0)">2 · Type the words back</Text>
 									<Text fontSize="11px" color="var(--text-2)" mt="1">A typo fails the BIP-39 checksum rather than deriving a plausible key whose fingerprint never matches any device.</Text>
-									<Box mt="3"><FieldLabel hint="12, 18 or 24 words">BIP-85 child mnemonic</FieldLabel><Textarea value={childMnemonic} onChange={event => { setChildMnemonic(event.target.value); setProviderKey(null) }} rows={4} fontSize="11px" bg="rgba(0,0,0,0.18)" spellCheck={false} autoComplete="off" /></Box>
+									<Box mt="3"><FieldLabel hint="12, 18 or 24 words">BIP-85 child mnemonic</FieldLabel><Textarea value={childMnemonic} onChange={event => { setChildMnemonic(event.target.value); dropProviderKey() }} rows={4} fontSize="11px" bg="rgba(0,0,0,0.18)" spellCheck={false} autoComplete="off" /></Box>
 									<Button mt="3" w="full" size="sm" bg="var(--gold)" color="#15110a" onClick={deriveProvider} loading={busy === "derive"} disabled={!!busy || !advancedMode || !childMnemonic.trim() || !alias.trim()}>Derive provider key</Button>
 									<Box mt="3" p="3" bg="rgba(255,255,255,0.025)" borderRadius="10px"><VStack align="stretch" gap="2"><ResultRow label="Fingerprint" value={providerKey?.fingerprint} /><ResultRow label="Public key" value={providerKey ? shortHex(providerKey.publicKeyHex) : undefined} /><ResultRow label="Private key" value={providerKey ? "In memory for this Studio session" : undefined} /></VStack></Box>
 									{providerKey && <>
