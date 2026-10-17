@@ -32,7 +32,7 @@ import { computeDustWarning, shouldWarnHighSlippage, computeEffectiveSlippageBps
 import { useEvmAddresses } from "../hooks/useEvmAddresses"
 import { useDeviceState } from "../hooks/useDeviceState"
 import { ClearSignReportCard } from "./ClearSignReportCard"
-import { swapReportNeedsAttention } from "../../shared/clearsign-report"
+import { namedProviderLine, swapReportNeedsAttention } from "../../shared/clearsign-report"
 import { versionCompare } from "../../shared/firmware-versions"
 import { AssetPickerDialog } from "./AssetPickerDialog"
 import { networkDisplayName, ellipsizeCaip, parseCaip } from "../../shared/swap-discovery"
@@ -3984,6 +3984,12 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
                   not what was quoted (swapReportNeedsAttention). */}
               {previewBuild?.clearSignReports?.approval && swapReportNeedsAttention(previewBuild.clearSignReports.approval) && <ClearSignReportCard report={previewBuild.clearSignReports.approval} title="Approval ClearSign Report" />}
               {previewBuild?.clearSignReports?.transaction && swapReportNeedsAttention(previewBuild.clearSignReports.transaction) && <ClearSignReportCard report={previewBuild.clearSignReports.transaction} title="Swap ClearSign Report" />}
+              {/* The provider the swap will ask is always named: execute pins it. */}
+              {(() => {
+                const report = previewBuild?.clearSignReports?.transaction
+                const line = namedProviderLine(previewBuild?.runtimeProvider, report && swapReportNeedsAttention(report) ? report : undefined)
+                return line ? <Text fontSize="2xs" color="kk.textSecondary" data-clearsign-provider>{line}</Text> : null
+              })()}
 
               {/* Animated route map — gold dot travels from-token →
                   integration → to-token. Shows the actual swap topology

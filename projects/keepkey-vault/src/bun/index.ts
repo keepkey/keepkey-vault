@@ -3571,6 +3571,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// Loading the provider's RAM signer is always a separate device
 				// trust screen; its description never becomes KeepKey-certified.
 				// A decline, outage or refused trust screen means no description.
+				// No `named` pin here: this path has no Desktop approval card. The
+				// caller's own card names the provider, and the device's trust
+				// screen names it again before it is used.
 				if (!resolvedSchema) {
 					const runtime = await resolveProviderTxMetadata(effectiveParams, {
 						firmwareVersion: engine.getDeviceState().firmwareVersion, advancedMode: getAdvancedModeEnabled() === true,
@@ -7948,7 +7951,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							if (artifactResolution.status !== 'selected' && tx.data && tx.data !== '0x') {
 								const draft = observeEvmCall({
 									chainId, to: tx.to, data: tx.data,
-									source: tx.erc7730 ? 'erc7730' : tx.txMetadata ? 'runtime' : 'none',
+									source: tx.erc7730 ? 'erc7730' : tx.txMetadata || (tx === preview.unsignedTx && preview.runtimeProvider) ? 'runtime' : 'none',
 									simulated: simulation.status === 'success', simulationStatus: simulation.status,
 									definitionResolution: artifactResolution.status,
 									exposureClass: classifyEffectExposure(simulation),
@@ -7961,9 +7964,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						}
 						const [approval, transaction] = await Promise.all([reportFor(preview.approveTx), reportFor(preview.unsignedTx)])
 						// The runtime provider the swap will ask: named on the card, never as KeepKey.
-						if (transaction && preview.runtimeSigner) transaction.descriptor = {
+						if (transaction && preview.runtimeProvider) transaction.descriptor = {
 							...transaction.descriptor,
-							provider: { alias: preview.runtimeSigner.alias, fingerprint: preview.runtimeSigner.deviceFingerprint, status: 'requested' },
+							provider: { alias: preview.runtimeProvider.alias, fingerprint: preview.runtimeProvider.fingerprint, status: 'requested' },
 						}
 						preview.clearSignReports = { approval, transaction }
 						// A swap that pays a provider's deposit address: name the provider,

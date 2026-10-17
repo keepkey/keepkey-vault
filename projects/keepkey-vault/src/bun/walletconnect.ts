@@ -25,7 +25,7 @@ import { buildClearSignReport, solanaDecodedReportFindings } from '../shared/cle
 import { uniswapReportFindingsWithState } from './uniswap-report'
 import { classifyEffectExposure, observeEvmCall, observeEvmTypedData, observeMalformedSolanaTransaction, observeSolanaTransaction } from './clearsign-observation'
 import { resolveEvmSchema, type SignedEvmSchema } from './evm-schema-registry'
-import { resolveProviderTxMetadata } from './clearsign-providers'
+import { nameRuntimeProvider, resolveProviderTxMetadata } from './clearsign-providers'
 import { trustRuntimeSigner, type RuntimeEvmSigner } from './evm-runtime-metadata'
 import { supportsCertifiedClearSign } from './solana-certified-policy'
 import { decodeEIP712 } from './eip712-decoder'
@@ -1022,6 +1022,21 @@ export class WalletConnectManager {
         hostLimitations: universalRouterFindings.limitations,
       })
     }
+    // Name on the card the provider the sign step will ask (its /signer
+    // only). The sign step attaches a description only from that provider.
+    if (!clearSignSchema && !signingInfo.calldataDecoded?.signedInsightBlob) {
+      const named = await nameRuntimeProvider(
+        { chainId: effectiveChainId, to: tx.to, data: tx.data, value: tx.value },
+        { firmwareVersion: this.callbacks.getFirmwareVersion(), advancedMode: this.callbacks.getAdvancedModeEnabled() },
+      )
+      if (named) {
+        signingInfo.runtimeProvider = named
+        if (signingInfo.clearSignReport) signingInfo.clearSignReport.descriptor = {
+          ...signingInfo.clearSignReport.descriptor,
+          provider: { alias: named.alias, fingerprint: named.fingerprint, status: 'requested' },
+        }
+      }
+    }
     const report = signingInfo.clearSignReport
     const observation = observeEvmCall({
       chainId: effectiveChainId, to: tx.to, data: tx.data,
@@ -1112,7 +1127,7 @@ export class WalletConnectManager {
       // user added, now that nonce, gas and fees are final.
       const runtime = await resolveProviderTxMetadata(msg, {
         firmwareVersion: this.callbacks.getFirmwareVersion(), advancedMode: this.callbacks.getAdvancedModeEnabled(),
-      })
+      }, undefined, { named: signingInfo.runtimeProvider ?? null })
       // A refused device trust screen means no description, not a failed signature.
       if (runtime && await trustRuntimeSigner(runtime.signer, () => this.callbacks.loadClearsignSigner(runtime.signer), '[WC]')) {
         this.callbacks.log(`[WC] ClearSign provider ${runtime.provider.name} (${runtime.signer.deviceFingerprint}) described the call`)

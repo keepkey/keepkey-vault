@@ -301,8 +301,12 @@ describe('CLEARSIGN_RUNTIME_URL is only a migration seed', () => {
     const swap = readFileSync(join(dir, 'swap.ts'), 'utf8')
     // executeSwap pins the card's provider; the preview returns it named.
     expect(swap).toContain('named: params.runtimeProvider }')
-    expect(swap).toContain('resolveProviderTxMetadata(unsignedTx, runtimeGate, undefined, { named: runtimeGate.named })')
-    expect(swap).toMatch(/runtimeProvider: signer \? \{ alias: signer\.alias, fingerprint: signer\.deviceFingerprint, publicKeyHex: signer\.publicKeyHex, keyId: signer\.keyId \}/)
+    // The preview names the provider from /signer only; the transaction is
+    // POSTed to it only by the execute build, after the user confirms.
+    expect(swap).toContain('const runtimeProvider = previewMode ? await nameRuntimeProvider(unsignedTx, runtimeGate) : undefined')
+    expect(swap).toContain('const runtime = previewMode ? undefined : await resolveProviderTxMetadata(unsignedTx, runtimeGate, undefined, { named: runtimeGate.named })')
+    expect(swap.match(/resolveProviderTxMetadata\(/g)).toHaveLength(1)
+    expect(swap).toContain('runtimeProvider: result.runtimeProvider,')
     // The dialog sends back what its card showed (null: it showed none).
     expect(readFileSync(join(dir, '../mainview/components/SwapDialog.tsx'), 'utf8')).toContain('runtimeProvider: previewBuild?.runtimeProvider ?? null')
     // The preview reads AdvancedMode, or it could never name a provider.
@@ -315,9 +319,9 @@ describe('CLEARSIGN_RUNTIME_URL is only a migration seed', () => {
 describe('WalletConnect eth_sendTransaction uses the provider step', () => {
   const FROM = '0x1111111111111111111111111111111111111111'
 
-  async function wcSign(advancedMode: boolean, rpcUrl: string, refuseTrust = false) {
+  async function wcSign(advancedMode: boolean, rpcUrl: string, refuseTrust = false, onApproval: (info: any) => void = () => {}) {
     const { WalletConnectManager } = await import('./walletconnect')
-    const cap: { msg?: any; loaded: any[] } = { loaded: [] }
+    const cap: { msg?: any; loaded: any[]; card?: any } = { loaded: [] }
     const manager: any = new WalletConnectManager({
       getEvmAddressInfo: () => ({ address: FROM, addressIndex: 0 }),
       ensureEvmAddressInfo: async () => null,
@@ -330,7 +334,7 @@ describe('WalletConnect eth_sendTransaction uses the provider step', () => {
       recordClearSignObservation: () => undefined,
       authenticateClearSignObservation: () => {},
       finalizeClearSignObservation: () => {},
-      requestSigningApproval: async () => true,
+      requestSigningApproval: async (info: any) => { cap.card = structuredClone(info); onApproval(info); return true },
       dismissSigning: () => {},
       log: () => {},
     } as any)
@@ -354,6 +358,9 @@ describe('WalletConnect eth_sendTransaction uses the provider step', () => {
       configureClearSignProviders(() => listClearSignProviders(db))
 
       const on = await wcSign(true, `${p.url}/rpc`)
+      // The WalletConnect card names the provider the sign step pins.
+      expect(on.card.runtimeProvider).toEqual({ alias: 'Acme Labs', fingerprint: '656B0D303F6BBDBD', publicKeyHex: ACME, keyId: 2 })
+      expect(on.card.clearSignReport.descriptor.provider).toEqual({ alias: 'Acme Labs', fingerprint: '656B0D303F6BBDBD', status: 'requested' })
       expect(p.hits).toContain('GET /signer')
       expect(p.hits).toContain('POST /sign')
       expect(on.loaded.map(s => s.alias)).toEqual(['Acme Labs'])
@@ -370,6 +377,17 @@ describe('WalletConnect eth_sendTransaction uses the provider step', () => {
       const refused = await wcSign(true, `${p.url}/rpc`, true)
       expect(refused.loaded.map(s => s.alias)).toEqual(['Acme Labs'])
       expect(refused.msg.txMetadata).toBeUndefined()
+
+      // A provider other than the one the card named (the list changed while
+      // the card was up): no description, and the transaction is not sent.
+      const other = startProvider(OTHER, 'Other'); servers.push(other.server)
+      const swapped = memoryDb()
+      addClearSignProvider(swapped, { name: 'Other', url: other.url, publicKeyHex: OTHER, contracts: [{ chainId: 1, address: CONTRACT_A }] })
+      const changed = await wcSign(true, `${p.url}/rpc`, false, () => configureClearSignProviders(() => listClearSignProviders(swapped)))
+      expect(changed.card.runtimeProvider?.alias).toBe('Acme Labs')
+      expect(changed.loaded).toEqual([])
+      expect(changed.msg.txMetadata).toBeUndefined()
+      expect(other.hits).not.toContain('POST /sign')
     } finally {
       if (previous === undefined) delete process.env.CLEARSIGN_SERVICE_URL
       else process.env.CLEARSIGN_SERVICE_URL = previous

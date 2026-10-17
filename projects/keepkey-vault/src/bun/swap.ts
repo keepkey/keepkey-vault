@@ -15,7 +15,7 @@ import { SOLANA_BLIND_SIGNING_REQUIRED, evmAdvancedModeRequiredMessage } from '.
 import { toDeviceError, deviceErrorMessage } from '../shared/device-error'
 import { resolveEvmSchema } from './evm-schema-registry'
 import { trustRuntimeSigner, type RuntimeEvmSigner } from './evm-runtime-metadata'
-import { resolveProviderTxMetadata } from './clearsign-providers'
+import { nameRuntimeProvider, resolveProviderTxMetadata } from './clearsign-providers'
 import { evmCallRequiresAdvancedMode } from './evm-signing-policy'
 import { ERC7730_TRANSPORT_SUPPORTED } from '../shared/erc7730-support'
 import { certifiedSolanaProofApplies, findCertifiedSolanaProof } from './solana-certified-registry'
@@ -1277,7 +1277,7 @@ export async function buildRelaySolanaUnsignedTx(
 export async function previewSwapBuild(
   params: ExecuteSwapParams,
   ctx: SwapContext,
-): Promise<{ approveTx?: any; unsignedTx: any; runtimeSigner?: RuntimeEvmSigner; runtimeProvider?: RuntimeProviderNamed; allowance?: { current: string; required: string; sufficient: boolean; spender: string; tokenContract: string }; balance?: { current: string; required: string; sufficient: boolean; tokenContract?: string } }> {
+): Promise<{ approveTx?: any; unsignedTx: any; runtimeProvider?: RuntimeProviderNamed; allowance?: { current: string; required: string; sufficient: boolean; spender: string; tokenContract: string }; balance?: { current: string; required: string; sufficient: boolean; tokenContract?: string } }> {
   const { wallet, getAllChains, getEvmRpcSource, getBtcXpub, getAllBtcXpubs } = ctx
 
   const allChains = getAllChains()
@@ -1336,10 +1336,9 @@ export async function previewSwapBuild(
     const certifiedSupported = supportsCertifiedClearSign(ctx.getFirmwareVersion?.())
     const runtimeGate = { firmwareVersion: ctx.getFirmwareVersion?.(), advancedMode: ctx.isAdvancedModeEnabled?.() === true }
     const result = await buildRelaySwapTx(params, fromChain, fromAddress, getEvmRpcSource, isErc20Source, /* previewMode */ true, certifiedSupported, runtimeGate)
-    const signer = result.runtimeSigner
     return {
-      unsignedTx: result.unsignedTx, approveTx: result.approveTx, allowance: result.allowance, balance: result.balance, runtimeSigner: signer,
-      runtimeProvider: signer ? { alias: signer.alias, fingerprint: signer.deviceFingerprint, publicKeyHex: signer.publicKeyHex, keyId: signer.keyId } : undefined,
+      unsignedTx: result.unsignedTx, approveTx: result.approveTx, allowance: result.allowance, balance: result.balance,
+      runtimeProvider: result.runtimeProvider,
     }
   }
   if (fromChain.chainFamily === 'evm') {
@@ -1440,7 +1439,7 @@ async function buildRelaySwapTx(
   previewMode = false,
   certifiedMetadataSupported = false,
   runtimeGate: { firmwareVersion?: string; advancedMode: boolean; named?: RuntimeProviderNamed | null } = { advancedMode: false },
-): Promise<{ unsignedTx: any; runtimeSigner?: RuntimeEvmSigner; approveTx?: any; fromAmountBaseUnits?: string; allowance?: { current: string; required: string; sufficient: boolean; spender: string; tokenContract: string }; balance?: { current: string; required: string; sufficient: boolean; tokenContract?: string } }> {
+): Promise<{ unsignedTx: any; runtimeSigner?: RuntimeEvmSigner; runtimeProvider?: RuntimeProviderNamed; approveTx?: any; fromAmountBaseUnits?: string; allowance?: { current: string; required: string; sufficient: boolean; spender: string; tokenContract: string }; balance?: { current: string; required: string; sufficient: boolean; tokenContract?: string } }> {
   const relay = params.relayTx!
   const evmSigningPath = params.fromEvmAddressIndex != null
     ? evmAddressPath(params.fromEvmAddressIndex)
@@ -1822,9 +1821,11 @@ async function buildRelaySwapTx(
 
   // Runtime metadata is transaction-bound, so resolve it only after every
   // signed field (including the final fee model and any adjusted nonce/value)
-  // has been placed on the transaction.
+  // has been placed on the transaction. The preview only names the provider
+  // (its /signer); the transaction is sent to it after the user confirms.
   let runtimeSigner: RuntimeEvmSigner | undefined
-  const runtime = await resolveProviderTxMetadata(unsignedTx, runtimeGate, undefined, { named: runtimeGate.named })
+  const runtimeProvider = previewMode ? await nameRuntimeProvider(unsignedTx, runtimeGate) : undefined
+  const runtime = previewMode ? undefined : await resolveProviderTxMetadata(unsignedTx, runtimeGate, undefined, { named: runtimeGate.named })
   if (runtime) {
     unsignedTx.txMetadata = runtime.txMetadata
     runtimeSigner = runtime.signer
@@ -1878,7 +1879,7 @@ async function buildRelaySwapTx(
     }
   }
 
-  return { unsignedTx, runtimeSigner, approveTx: pendingApproveTx, allowance: allowanceInfo, balance: balanceInfo, fromAmountBaseUnits }
+  return { unsignedTx, runtimeSigner, runtimeProvider, approveTx: pendingApproveTx, allowance: allowanceInfo, balance: balanceInfo, fromAmountBaseUnits }
 }
 
 // ── EVM swap tx building (extracted for readability) ────────────────

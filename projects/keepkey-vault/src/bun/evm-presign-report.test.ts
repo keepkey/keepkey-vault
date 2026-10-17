@@ -13,7 +13,7 @@ import { simulateEvmEffects } from './evm-effects'
 import { uniswapReportFindingsWithState } from './uniswap-report'
 import { resolvePromotedEvmArtifact } from './clearsign-artifact-resolver'
 import { ClearSignReportResponse } from './schemas'
-import { buildClearSignReport, clearSignReportNeedsAttention, runtimeProviderLine, swapReportNeedsAttention } from '../shared/clearsign-report'
+import { buildClearSignReport, clearSignReportNeedsAttention, namedProviderLine, runtimeProviderLine, swapReportNeedsAttention } from '../shared/clearsign-report'
 
 const swap = require('../../__tests__/fixtures/uniswap/base-ur-usdc-to-eth-swap.json')
 const SIGNER = '0x909ef6b32dfdc12ca86aa710b54c991af3c5f82e'
@@ -122,6 +122,22 @@ describe('POST /clearsign/report — Desktop parity', () => {
       artifactResolution: resolvePromotedEvmArtifact(tx.chainId, tx.to, tx.data),
     })
     expect(r.limitations.map((l) => l.code)).toContain('DEVICE_SHOWS_RAW_DATA')
+  })
+
+  test('a review names the provider the sign step pins even with no report card up', () => {
+    const named = { alias: 'Acme Labs', fingerprint: '656B0D303F6BBDBD', publicKeyHex: '02', keyId: 2 }
+    const line = runtimeProviderLine({ alias: 'Acme Labs', fingerprint: '656B0D303F6BBDBD', status: 'requested' })
+    // No card (addressNList REST caller, or an ordinary swap behind the attention gate).
+    expect(namedProviderLine(named, undefined)).toBe(line)
+    expect(namedProviderLine(named, { descriptor: { source: 'none', authenticated: false } } as any)).toBe(line)
+    // A shown card that already names it: not twice. No provider: nothing.
+    expect(namedProviderLine(named, { descriptor: { source: 'none', authenticated: false, provider: { alias: 'Acme Labs', status: 'requested' } } } as any)).toBeUndefined()
+    expect(namedProviderLine(null)).toBeUndefined()
+    // Both Desktop reviews that pin a provider render the line.
+    const { readFileSync } = require('node:fs') as typeof import('node:fs')
+    const ui = (f: string) => readFileSync(`${import.meta.dir}/../mainview/components/${f}`, 'utf8')
+    expect(ui('SwapDialog.tsx')).toContain('namedProviderLine(previewBuild?.runtimeProvider, report && swapReportNeedsAttention(report) ? report : undefined)')
+    expect(ui('device/SigningApproval.tsx')).toContain('namedProviderLine(request.runtimeProvider, request.clearSignReport)')
   })
 
   test('the card names a third-party describer, as the device does, and never as KeepKey', async () => {

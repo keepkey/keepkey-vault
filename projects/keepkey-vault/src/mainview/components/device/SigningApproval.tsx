@@ -17,6 +17,7 @@ import { cosmosTxPreview } from "../../../shared/cosmosTxPreview"
 import { typedDataRows } from "../../../shared/typedDataRows"
 import { assessSigningRisk, formatCertifiedArg, type RiskLevel, type SigningTier } from "../../../shared/clearsign-risk"
 import { ClearSignReportCard } from "../ClearSignReportCard"
+import { namedProviderLine } from "../../../shared/clearsign-report"
 
 interface SigningApprovalProps {
 	request: SigningRequestInfo
@@ -1357,6 +1358,11 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 
 				{/* Report and risk first, so they are read before blind-sign consent. */}
 				<ClearSignReportCard report={request.clearSignReport} />
+				{/* No report (an addressNList caller): the provider the sign step pins is still named. */}
+				{(() => {
+					const line = namedProviderLine(request.runtimeProvider, request.clearSignReport)
+					return line ? <Text fontSize="2xs" color="kk.textSecondary" data-clearsign-provider>{line}</Text> : null
+				})()}
 				<RiskBar request={request} t={t} />
 				<RequestClearSignReview request={request} />
 

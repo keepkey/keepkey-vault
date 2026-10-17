@@ -257,3 +257,15 @@ export function swapReportNeedsAttention(report: Pick<ClearSignReport, 'findings
     line.code.startsWith('NEAR_INTENTS_') && (line.severity === 'danger' || line.code === 'NEAR_INTENTS_UNCONFIRMED'))
   return near || report.rating?.riskLevel === 'high' || report.rating?.riskLevel === 'critical'
 }
+
+/** The provider line for a review whose shown report card does not name the
+ *  provider (no card, or one hidden behind the swap attention gate). The sign
+ *  step attaches a description only from the provider the review named, so a
+ *  review never pins a name it did not show. */
+export function namedProviderLine(
+  provider: { alias: string; fingerprint: string } | null | undefined,
+  shownCard?: Pick<ClearSignReport, 'descriptor'>,
+): string | undefined {
+  if (!provider || shownCard?.descriptor.provider) return undefined
+  return runtimeProviderLine({ alias: provider.alias, fingerprint: provider.fingerprint, status: 'requested' })
+}
