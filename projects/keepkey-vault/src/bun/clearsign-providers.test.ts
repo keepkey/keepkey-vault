@@ -85,6 +85,17 @@ describe('ClearSign provider list', () => {
     expect(() => addClearSignProvider(db, { ...ok, url: 'not a url' })).toThrow('valid URL')
     expect(() => addClearSignProvider(db, { ...ok, contracts: [{ chainId: 0, address: CONTRACT_A }] })).toThrow('chain ID')
     expect(() => addClearSignProvider(db, { ...ok, contracts: [{ chainId: 1, address: '0x1234' }] })).toThrow('20-byte')
+    // /signer and /sign are appended to the path: no query, fragment or credentials.
+    expect(() => addClearSignProvider(db, { ...ok, url: 'https://acme.example/api?token=x' })).toThrow('query, fragment')
+    expect(() => addClearSignProvider(db, { ...ok, url: 'https://acme.example/api#frag' })).toThrow('query, fragment')
+    expect(() => addClearSignProvider(db, { ...ok, url: 'https://u:p@acme.example' })).toThrow('query, fragment')
+    expect(() => addClearSignProvider(db, { ...ok, url: 'https://u@acme.example' })).toThrow('query, fragment')
+    // The device shows this name: a third party never reads as KeepKey.
+    expect(() => addClearSignProvider(db, { ...ok, name: 'KeepKey Official' })).toThrow('KeepKey')
+    expect(() => addClearSignProvider(db, { ...ok, name: 'keepkey' })).toThrow('KeepKey')
+    expect(() => addClearSignProvider(db, { ...ok, name: 'My KEEPKEY signer' })).toThrow('KeepKey')
+    // Right shape, but no point on the curve has this x.
+    expect(() => addClearSignProvider(db, { ...ok, publicKeyHex: `02${'05'.repeat(32)}` })).toThrow('not a point')
     expect(listClearSignProviders(db)).toEqual([])
     // Local development providers may use plain http.
     expect(addClearSignProvider(db, { ...ok, url: 'http://127.0.0.1:1647' }).url).toBe('http://127.0.0.1:1647')
@@ -205,6 +216,17 @@ describe('CLEARSIGN_RUNTIME_URL is only a migration seed', () => {
     expect(listClearSignProviders(db)).toEqual([])
     expect(a.hits).toEqual(['GET /signer'])
     expect(await seedClearSignProviderFromEnv(db, '')).toBeUndefined()
+  })
+
+  test('a removal sticks even after the variable names another URL and then this one again', async () => {
+    const a = startProvider(ACME); servers.push(a.server)
+    const b = startProvider(OTHER, 'Other'); servers.push(b.server)
+    const db = memoryDb()
+    const seededA = await seedClearSignProviderFromEnv(db, a.url)
+    removeClearSignProvider(db, seededA!.id)
+    expect(await seedClearSignProviderFromEnv(db, b.url)).toMatchObject({ url: b.url })
+    expect(await seedClearSignProviderFromEnv(db, a.url)).toBeUndefined()
+    expect(listClearSignProviders(db).map(p => p.url)).toEqual([b.url])
   })
 
   test('no signing path reads the env var or calls the provider resolver directly', () => {

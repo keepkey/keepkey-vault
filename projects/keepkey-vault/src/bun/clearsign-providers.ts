@@ -11,12 +11,15 @@
 import type { Database } from 'bun:sqlite'
 import { createHash, randomUUID } from 'node:crypto'
 import type { ClearSignProvider, ClearSignProviderContract, ClearSignProviderInput, RuntimeProviderNamed } from '../shared/types'
+import { secp256k1 } from '@noble/curves/secp256k1'
 import {
   providerCanDescribe, resolveRuntimeEvmMetadata, resolveRuntimeEvmSigner, supportsRuntimeEvmMetadata,
   type RuntimeEvmSigner, type RuntimeProviderOptions,
 } from './evm-runtime-metadata'
 
-const ENV_SEED_KEY = 'clearsign_provider_env_seed'
+/** Before every seeded URL was recorded, only the last one was, under this key. */
+const LEGACY_ENV_SEED_KEY = 'clearsign_provider_env_seed'
+const envSeedKey = (url: string) => `${LEGACY_ENV_SEED_KEY}:${url}`
 
 /** First 8 bytes of sha256(pubkey) as 16 uppercase hex: what the device shows. */
 export function providerFingerprint(publicKeyHex: string): string {
@@ -29,6 +32,11 @@ function normalizeUrl(raw: string): string {
   const local = url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname === '[::1]'
   if (url.protocol !== 'https:' && !(url.protocol === 'http:' && local)) {
     throw new Error('Provider URL must use https (http only for localhost)')
+  }
+  // /signer and /sign are appended to the path: a query, fragment or
+  // credentials would break that path or leak in every request.
+  if (url.search || url.hash || url.username || url.password) {
+    throw new Error('Provider URL must not carry a query, fragment, user name or password')
   }
   return url.toString().replace(/\/+$/, '')
 }
@@ -50,8 +58,11 @@ export function validateProviderInput(input: ClearSignProviderInput): Omit<Clear
   if (!name || name.length > 31 || !/^[A-Za-z0-9 _-]+$/.test(name)) {
     throw new Error('Name must be 1-31 letters, digits, spaces, hyphens, or underscores')
   }
+  // The device shows this name on its trust screen: a third party never reads as KeepKey.
+  if (/keepkey/i.test(name)) throw new Error('Name must not contain "KeepKey"')
   const publicKeyHex = String(input?.publicKeyHex || '').trim().replace(/^0x/i, '').toLowerCase()
   if (!/^0[23][0-9a-f]{64}$/.test(publicKeyHex)) throw new Error('Public key must be a 33-byte compressed secp256k1 key')
+  try { secp256k1.ProjectivePoint.fromHex(publicKeyHex) } catch { throw new Error('Public key is not a point on secp256k1') }
   return {
     name, url: normalizeUrl(input?.url), publicKeyHex,
     fingerprint: providerFingerprint(publicKeyHex),
@@ -101,13 +112,14 @@ export function removeClearSignProvider(db: Database, id: string): void {
 }
 
 /** Migration seed: CLEARSIGN_RUNTIME_URL used to name the one provider. If it
- * is set, add it to the list once (keyed by URL, so removing it sticks). */
+ * is set, add it to the list once. Every seeded URL is recorded, so removing
+ * one sticks even after the variable names another URL and then this one again. */
 export async function seedClearSignProviderFromEnv(db: Database, rawUrl = process.env.CLEARSIGN_RUNTIME_URL): Promise<ClearSignProvider | undefined> {
   const configured = String(rawUrl || '').trim()
   if (!configured) return undefined
   const url = normalizeUrl(configured)
-  const seeded = db.query('SELECT value FROM meta WHERE key = ?').get(ENV_SEED_KEY) as { value: string } | null
-  if (seeded?.value === url) return undefined
+  const legacy = db.query('SELECT value FROM meta WHERE key = ?').get(LEGACY_ENV_SEED_KEY) as { value: string } | null
+  if (legacy?.value === url || db.query('SELECT 1 FROM meta WHERE key = ?').get(envSeedKey(url))) return undefined
   const existing = listClearSignProviders(db).find(p => p.url === url)
   let provider = existing
   if (!existing) {
@@ -117,7 +129,7 @@ export async function seedClearSignProviderFromEnv(db: Database, rawUrl = proces
     const name = String(signer?.alias || '').replace(/[^A-Za-z0-9 _-]/g, '').trim().slice(0, 31) || 'ClearSign Provider'
     provider = addClearSignProvider(db, { name, url, publicKeyHex: String(signer?.publicKeyHex || '') })
   }
-  db.run('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)', [ENV_SEED_KEY, url])
+  db.run('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)', [envSeedKey(url), url])
   return existing ? undefined : provider
 }
 
