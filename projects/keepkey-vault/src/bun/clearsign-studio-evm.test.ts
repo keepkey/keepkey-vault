@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'bun:test'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 
 import { buildEvmSchemaBody, EVM_ARG_ADDRESS, EVM_ARG_TOKEN_AMOUNT } from './evm-certified-schema'
 import {
@@ -7,6 +9,7 @@ import {
   inspectSignedEvmEntry,
   parseProviderBundle,
   PROVIDER_BUNDLE_FORMAT,
+  providerBundleFileName,
 } from './clearsign-studio-evm'
 import { createProviderKeySession } from './clearsign-provider-session'
 import { deriveProviderKey } from '../shared/clearsign-provider-key'
@@ -117,5 +120,26 @@ describe('provider bundle export/import', () => {
     expect(() => parseProviderBundle(JSON.stringify({ ...bundle, provider: { ...bundle.provider, fingerprint: 'deadbeef' } }))).toThrow('fingerprint')
     expect(() => parseProviderBundle(JSON.stringify({ ...bundle, format: 'other' }))).toThrow('format')
     expect(() => buildProviderBundle({ alias: 'Acme Labs', publicKeyHex, keyId: 1, signedPayloads: [SERVER_SIGNED, SERVER_SIGNED] })).toThrow('twice')
+    // An imported file states its slot.
+    expect(() => parseProviderBundle(JSON.stringify({ ...bundle, provider: { ...bundle.provider, keyId: undefined } }))).toThrow()
+  })
+
+  it('exports with the slot the descriptions were signed for, whatever the picker shows now', () => {
+    const { session } = signedSession()
+    session.derive({ childMnemonic: ABANDON, alias: 'Acme Labs', wordCount: 12, index: 0 })
+    const slot2 = session.signEvmSchema({ ...USDC_TRANSFER, selector: '0x095ea7b3', method: 'approve' }, 2)
+    // The renderer sends no slot: the bundle takes the entries' own.
+    expect(buildProviderBundle({ alias: 'Acme Labs', publicKeyHex, signedPayloads: [slot2.signedPayload] }).provider.keyId).toBe(2)
+    expect(buildProviderBundle({ alias: 'Acme Labs', publicKeyHex, signedPayloads: [SERVER_SIGNED] }).provider.keyId).toBe(1)
+    // Entries from two slots never make one bundle.
+    expect(() => buildProviderBundle({ alias: 'Acme Labs', publicKeyHex, signedPayloads: [SERVER_SIGNED, slot2.signedPayload] })).toThrow('one slot')
+    const studio = readFileSync(join(import.meta.dir, '../mainview/components/ClearSignStudio.tsx'), 'utf8')
+    const exportCall = studio.slice(studio.indexOf('"clearsignExportProviderBundle"'), studio.indexOf('setNotice(`Bundle written'))
+    expect(exportCall).not.toContain('keyId: slot')
+  })
+
+  it('names the export file even when the alias has no letters or digits', () => {
+    expect(providerBundleFileName(bundle)).toBe('keepkey-clearsign-bundle-acme-labs-b690735f.json')
+    expect(providerBundleFileName({ ...bundle, provider: { ...bundle.provider, alias: '___' } })).toBe('keepkey-clearsign-bundle-provider-b690735f.json')
   })
 })

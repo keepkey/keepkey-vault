@@ -548,7 +548,8 @@ export function ClearSignStudio({ open, onClose, advancedMode, firmwareVersion }
 		)
 		const same = (e: ClearSignEvmSignedEntry) => e.draft.chainId === signed.draft.chainId && e.draft.contract === signed.draft.contract && e.draft.selector === signed.draft.selector
 		const fromOtherKey = bundleProvider && bundleProvider.publicKeyHex !== signed.publicKeyHex
-		setEvmEntries(current => [...(fromOtherKey ? [] : current.filter(e => !same(e))), signed])
+		// A bundle holds one slot: signing for another slot starts a new bundle.
+		setEvmEntries(current => [...(fromOtherKey || current.some(e => e.keyId !== signed.keyId) ? [] : current.filter(e => !same(e))), signed])
 		setBundleProvider({ alias: signed.alias, publicKeyHex: signed.publicKeyHex, fingerprint: signed.fingerprint })
 		setNotice(`${signed.draft.method} signed by ${signed.alias} ${signed.fingerprint} for slot ${signed.keyId}.`)
 	}), [bundleProvider, evmDraft, runEvm, slot])
@@ -558,11 +559,11 @@ export function ClearSignStudio({ open, onClose, advancedMode, firmwareVersion }
 		const result = await rpcRequest<{ filePath: string }>("clearsignExportProviderBundle", {
 			alias: bundleProvider.alias,
 			publicKeyHex: bundleProvider.publicKeyHex,
-			keyId: slot,
+			// The slot the descriptions were signed for, not the picker's current one.
 			signedPayloads: evmEntries.map(e => e.signedPayload),
 		})
 		setNotice(`Bundle written to ${result.filePath}. It holds the public key and signed descriptions only.`)
-	}), [bundleProvider, evmEntries, runEvm, slot])
+	}), [bundleProvider, evmEntries, runEvm])
 
 	const importBundle = useCallback((file: File) => runEvm("bundle-import", async () => {
 		const { bundle, entries } = await rpcRequest<{ bundle: { provider: { alias: string; publicKeyHex: string; fingerprint: string; keyId: number } }; entries: ClearSignEvmSignedEntry[] }>(

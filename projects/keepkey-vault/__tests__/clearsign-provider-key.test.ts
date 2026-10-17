@@ -167,6 +167,44 @@ describe('provider key session', () => {
     expect(keys[2].every(b => b === 0)).toBe(true)
   })
 
+  test('a failed re-derive still zeroes the previous key', () => {
+    const { s, keys } = session()
+    s.derive(ceremony)
+    expect(() => s.derive({ ...ceremony, wordCount: 24 })).toThrow('expected 24')
+    expect(keys[0].every(b => b === 0)).toBe(true)
+    expect(() => s.signEvmSchema({ chainId: 1, contract: `0x${'aa'.repeat(20)}`, selector: '0xa9059cbb', method: 'transfer', args: [] }, 1)).toThrow('Derive the provider key')
+    s.derive(ceremony)
+    expect(() => s.derive({ ...ceremony, alias: 'Acme%' })).toThrow('Alias')
+    expect(keys[1].every(b => b === 0)).toBe(true)
+  })
+
+  test('AdvancedMode turned off ends the session; other policy changes do not', () => {
+    const { s, keys } = session()
+    s.derive(ceremony)
+    expect(s.onPolicy({ policyName: 'ShapeShift', enabled: false })).toBe(false)
+    expect(s.onPolicy({ policyName: 'AdvancedMode', enabled: true })).toBe(false)
+    expect(keys[0].some(b => b !== 0)).toBe(true)
+    expect(s.onPolicy({ policyName: 'AdvancedMode', enabled: false })).toBe(true)
+    expect(keys[0].every(b => b === 0)).toBe(true)
+  })
+
+  test('every path that ends the session reaches it: RPC applyPolicy, REST apply-policies, Studio close', () => {
+    const SRC = join(import.meta.dir, '..', 'src')
+    const index = readFileSync(join(SRC, 'bun/index.ts'), 'utf8')
+    const applyPolicy = index.slice(index.indexOf('applyPolicy: async (params) => {'))
+    expect(applyPolicy.slice(0, applyPolicy.indexOf('engine.isEmulator'))).toContain('providerKeySession.onPolicy(params)')
+    expect(index).toContain('onPolicyApplied: (policy) => { providerKeySession.onPolicy(policy) }')
+    expect(index).toContain('clearsignClearProviderKey: async () => ({ cleared: providerKeySession.clear() })')
+    const rest = readFileSync(join(SRC, 'bun/rest-api.ts'), 'utf8')
+    const route = rest.slice(rest.indexOf("path === '/system/apply-policies'"))
+    expect(route.indexOf('callbacks?.onPolicyApplied?.(')).toBeGreaterThan(-1)
+    expect(route.indexOf('callbacks?.onPolicyApplied?.(')).toBeLessThan(route.indexOf('await wallet.applyPolicy(body)'))
+    // Studio closing (or unmounting) zeroes the host key.
+    const studio = readFileSync(join(SRC, 'mainview/components/ClearSignStudio.tsx'), 'utf8')
+    const onClose = studio.slice(studio.indexOf('zero it on close'))
+    expect(onClose.slice(0, onClose.indexOf('}, [open])'))).toContain('rpcRequest("clearsignClearProviderKey")')
+  })
+
   test('rejects a bad alias or a ceremony mismatch before deriving', () => {
     const { s, keys } = session()
     expect(() => s.derive({ ...ceremony, alias: 'Acme%' })).toThrow('Alias')

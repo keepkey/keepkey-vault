@@ -287,7 +287,7 @@ import { addClearSignProvider, listClearSignProviders, removeClearSignProvider, 
 import { supportsCertifiedClearSign } from "./solana-certified-policy"
 import { createRpcAltFetcher } from "./solana-alt"
 import { createProviderKeySession } from "./clearsign-provider-session"
-import { buildProviderBundle, buildStudioEvmSchema, parseProviderBundle } from "./clearsign-studio-evm"
+import { buildProviderBundle, buildStudioEvmSchema, parseProviderBundle, providerBundleFileName } from "./clearsign-studio-evm"
 import { getTokenMetadata, broadcastEvmTx, verifyEvmSigner } from "./evm-rpc"
 import { evmSourceForChain } from "./pioneer-evm"
 import { deviceErrorMessage } from "../shared/device-error"
@@ -1699,6 +1699,8 @@ const restCallbacks: RestApiCallbacks = {
 	onSigningDismissed: (id: string) => {
 		try { rpc.send['signing-dismissed']({ id }) } catch { /* webview not ready */ }
 	},
+	// AdvancedMode off over REST ends the Studio provider-key session too.
+	onPolicyApplied: (policy) => { providerKeySession.onPolicy(policy) },
 	onPairRequest: (info) => {
 		try { rpc.send['pair-request'](info) } catch { /* webview not ready */ }
 		acquireWindowFocus()
@@ -3128,8 +3130,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			clearsignExportProviderBundle: async (params) => {
 				requireClearsignAdvancedMode()
 				const bundle = buildProviderBundle(params)
-				const slug = bundle.provider.alias.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
-				const filePath = path.join(os.homedir(), 'Downloads', `keepkey-clearsign-bundle-${slug}-${bundle.provider.fingerprint}.json`)
+				const filePath = path.join(os.homedir(), 'Downloads', providerBundleFileName(bundle))
 				await Bun.write(filePath, JSON.stringify(bundle, null, 2))
 				return { filePath, bundle }
 			},
@@ -3221,7 +3222,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// interactive Accept/Reject affordance or it hangs until timeout.
 				const apply = () => engine.wallet!.applyPolicy({ policyName: params.policyName, enabled: params.enabled })
 				// The device drops session signers when AdvancedMode goes off; drop the Studio key with them.
-				if (params.policyName === 'AdvancedMode' && !params.enabled) providerKeySession.clear()
+				providerKeySession.onPolicy(params)
 				if (engine.isEmulator) {
 					await emuSigningOp(apply, {
 						operation: 'applyPolicy',

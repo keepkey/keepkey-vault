@@ -45,15 +45,24 @@ export function createProviderKeySession(
   return {
     clear,
 
+    /** A policy change on the device: AdvancedMode off ends the Studio session
+     * (the device drops its session signers at the same time). Every path that
+     * applies a policy (RPC applyPolicy, REST /system/apply-policies) calls it. */
+    onPolicy(policy: { policyName?: unknown; enabled?: unknown }): boolean {
+      return policy?.policyName === 'AdvancedMode' && policy.enabled !== true ? clear() : false
+    },
+
     /** Derive from the device's BIP-85 words; returns only the public half. */
     derive(params: { childMnemonic: string; alias: string; wordCount: number; index: number }): ProviderKeyIdentity {
       gate()
+      // Every attempt ends the previous key, even one that fails validation:
+      // the Studio card already shows "not derived" once any input changes.
+      clear()
       const alias = String(params.alias || '').trim()
       if (!alias || alias.length > 31 || !/^[A-Za-z0-9 _-]+$/.test(alias)) {
         throw new Error('Alias must be 1-31 letters, digits, spaces, hyphens, or underscores')
       }
       const mnemonic = validateProviderCeremony(params)
-      clear()
       const key = derive(mnemonic)
       current = { alias, publicKeyHex: key.publicKeyHex, fingerprint: key.fingerprint, privateKey: key.privateKey }
       return { alias, publicKeyHex: key.publicKeyHex, fingerprint: key.fingerprint }

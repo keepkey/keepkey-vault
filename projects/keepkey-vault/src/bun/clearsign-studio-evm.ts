@@ -181,15 +181,21 @@ function requireAlias(value: unknown): string {
 export function buildProviderBundle(opts: {
   alias: string
   publicKeyHex: string
-  keyId: number
+  /** The bundle's device slot. Export omits it: the slot the entries were signed for. */
+  keyId?: number
   signedPayloads: string[]
 }): ClearSignProviderBundle {
-  requireRuntimeSlot(opts.keyId)
   const publicKeyHex = cleanHex(opts.publicKeyHex, 33, 'provider public key').slice(2)
   if (!Array.isArray(opts.signedPayloads) || opts.signedPayloads.length === 0) throw new Error('bundle has no descriptions')
-  const entries = opts.signedPayloads.map(payload => {
-    const entry = inspectSignedEvmEntry(payload, publicKeyHex)
-    if (entry.keyId !== opts.keyId) throw new Error(`${entry.draft.method} is signed for slot ${entry.keyId}, not ${opts.keyId}`)
+  const inspected = opts.signedPayloads.map(payload => inspectSignedEvmEntry(payload, publicKeyHex))
+  const slots = [...new Set(inspected.map(entry => entry.keyId))]
+  if (opts.keyId === undefined && slots.length > 1) {
+    throw new Error(`descriptions are signed for slots ${slots.join(', ')}; a bundle holds one slot`)
+  }
+  const keyId = opts.keyId ?? slots[0]
+  requireRuntimeSlot(keyId)
+  const entries = inspected.map(entry => {
+    if (entry.keyId !== keyId) throw new Error(`${entry.draft.method} is signed for slot ${entry.keyId}, not ${keyId}`)
     const { chainId, contract, selector, method } = entry.draft
     return { chainId, contract, selector, method, signedPayload: entry.signedPayload }
   })
@@ -201,10 +207,17 @@ export function buildProviderBundle(opts: {
   }
   return {
     format: PROVIDER_BUNDLE_FORMAT,
-    provider: { alias: requireAlias(opts.alias), publicKeyHex, fingerprint: providerFingerprint(publicKeyHex), keyId: opts.keyId },
+    provider: { alias: requireAlias(opts.alias), publicKeyHex, fingerprint: providerFingerprint(publicKeyHex), keyId },
     entries,
     notice: PROVIDER_BUNDLE_NOTICE,
   }
+}
+
+/** The export file name: the alias as a slug (a fixed word when the alias
+ * has no letters or digits) and the provider fingerprint. */
+export function providerBundleFileName(bundle: ClearSignProviderBundle): string {
+  const slug = bundle.provider.alias.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'provider'
+  return `keepkey-clearsign-bundle-${slug}-${bundle.provider.fingerprint}.json`
 }
 
 /** Validate an imported bundle file: every entry must verify and match its row. */
@@ -214,6 +227,8 @@ export function parseProviderBundle(json: string): { bundle: ClearSignProviderBu
   if (parsed?.format !== PROVIDER_BUNDLE_FORMAT) throw new Error(`bundle format must be ${PROVIDER_BUNDLE_FORMAT}`)
   // Rebuilt from the verified fields only: anything else in the file is dropped.
   const rows: any[] = Array.isArray(parsed.entries) ? parsed.entries : []
+  // An imported file must state its slot; it is checked against every entry.
+  requireRuntimeSlot(parsed.provider?.keyId)
   const bundle = buildProviderBundle({
     alias: parsed.provider?.alias,
     publicKeyHex: parsed.provider?.publicKeyHex,

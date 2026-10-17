@@ -127,6 +127,8 @@ export interface RestApiCallbacks {
   onSigningRequest: (info: SigningRequestInfo) => Promise<SigningApprovalDecision>
   onSigningDismissed?: (id: string) => void
   onPairRequest: (info: { name: string; url: string; imageUrl: string }) => void
+  /** A device policy is being applied (POST /system/apply-policies). */
+  onPolicyApplied?: (policy: { policyName?: unknown; enabled?: unknown }) => void
   onPairDismissed?: () => void
   getVersion: () => string
   /** Wrap a signing/display op for the emulator (pre-writes confirmations, interactive approve) */
@@ -4686,6 +4688,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.ApplyPoliciesRequest)
+          // AdvancedMode off ends the Studio provider-key session, as the RPC path does.
+          callbacks?.onPolicyApplied?.(body as { policyName?: unknown; enabled?: unknown })
           await wallet.applyPolicy(body)
           featuresCache = null
           try {

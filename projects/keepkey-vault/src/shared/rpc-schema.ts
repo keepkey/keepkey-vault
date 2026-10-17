@@ -77,7 +77,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       // Runtime-tier EVM v0x02 descriptions signed by the session provider key. Bundles are public only.
       clearsignBuildEvmSchema: { params: { draft: ClearSignEvmSchemaDraft; keyId: number }; response: ClearSignEvmSchemaArtifact }
       clearsignSignEvmSchema: { params: { draft: ClearSignEvmSchemaDraft; keyId: number }; response: ClearSignEvmSignedEntry & { alias: string; publicKeyHex: string; fingerprint: string } }
-      clearsignExportProviderBundle: { params: { alias: string; publicKeyHex: string; keyId: number; signedPayloads: string[] }; response: { filePath: string; bundle: ClearSignProviderBundle } }
+      clearsignExportProviderBundle: { params: { alias: string; publicKeyHex: string; keyId?: number; signedPayloads: string[] }; response: { filePath: string; bundle: ClearSignProviderBundle } }
       clearsignImportProviderBundle: { params: { json: string }; response: { bundle: ClearSignProviderBundle; entries: ClearSignEvmSignedEntry[] } }
       // Third-party ClearSign providers the user added. The device asks to
       // trust each one per session ("NOT verified by KeepKey"); adding needs
