@@ -110,7 +110,8 @@ const LoadClearsignSignerBody = z.object({
 // Signers are never persisted (the firmware refuses it): an old caller that
 // still asks gets a clear 400 rather than a silently dropped flag.
 export const LoadClearsignSignerRequest = z.unknown().superRefine((raw, ctx) => {
-  if ((raw as { persist?: unknown } | null)?.persist === true) ctx.addIssue({
+  const persist = (raw as { persist?: unknown } | null)?.persist
+  if (persist !== undefined && persist !== false) ctx.addIssue({
     code: 'custom', path: ['persist'],
     message: 'persistent ClearSign signers are not supported; signers are RAM-only for this session',
   })
