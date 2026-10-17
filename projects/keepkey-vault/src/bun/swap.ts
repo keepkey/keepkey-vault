@@ -779,7 +779,7 @@ export async function executeSwap(params: ExecuteSwapParams, ctx: SwapContext): 
 
   // ── EVM chains: MUST use router contract depositWithExpiry() ──
   } else if (fromChain.chainFamily === 'evm') {
-    const result = await buildEvmSwapTx(params, fromChain, fromAddress, pioneer, getEvmRpcSource, isErc20Source, wallet, /* previewMode */ false, stage, wrapSign, ctx.protectSign, supportsCertifiedClearSign(ctx.getFirmwareVersion?.()), assertEvmSignable)
+    const result = await buildEvmSwapTx(params, fromChain, fromAddress, pioneer, getEvmRpcSource, isErc20Source, wallet, /* previewMode */ false, stage, wrapSign, ctx.protectSign, supportsCertifiedClearSign(ctx.getFirmwareVersion?.()), assertEvmSignable, ctx.getFirmwareVersion?.())
     unsignedTx = result.unsignedTx
     approvalTxid = result.approvalTxid
 
@@ -1343,7 +1343,7 @@ export async function previewSwapBuild(
     }
   }
   if (fromChain.chainFamily === 'evm') {
-    const result = await buildEvmSwapTx(params, fromChain, fromAddress, pioneer, getEvmRpcSource, isErc20Source, wallet, /* previewMode */ true, undefined, undefined, undefined, supportsCertifiedClearSign(ctx.getFirmwareVersion?.()))
+    const result = await buildEvmSwapTx(params, fromChain, fromAddress, pioneer, getEvmRpcSource, isErc20Source, wallet, /* previewMode */ true, undefined, undefined, undefined, supportsCertifiedClearSign(ctx.getFirmwareVersion?.()), undefined, ctx.getFirmwareVersion?.())
     return { unsignedTx: result.unsignedTx, approveTx: result.approveTx, allowance: result.allowance, balance: result.balance }
   }
   if (fromChain.chainFamily === 'utxo') {
@@ -1897,6 +1897,7 @@ async function buildEvmSwapTx(
   protect?: SwapContext['protectSign'],
   certifiedMetadataSupported = false,
   assertSignable: (tx: any) => void = () => {},
+  firmwareVersion?: string,
 ): Promise<{ unsignedTx: any; approvalTxid?: string; approveTx?: any; allowance?: { current: string; required: string; sufficient: boolean; spender: string; tokenContract: string }; balance?: { current: string; required: string; sufficient: boolean; tokenContract?: string } }> {
   // Some protocols (e.g. Mayachain) only return `inboundAddress` and use it as the
   // router for EVM deposits. Accept either; throw only if both are missing.
@@ -2136,7 +2137,7 @@ async function buildEvmSwapTx(
       // token has none and the device keeps its ordinary policy (blind review,
       // AdvancedMode), which the in-app card reports from the same verdict.
       try {
-        const approveSchema = await resolveEvmSchema(chainId, approveTx.to, approveTx.data, certifiedMetadataSupported)
+        const approveSchema = await resolveEvmSchema(chainId, approveTx.to, approveTx.data, certifiedMetadataSupported, firmwareVersion)
         if (approveSchema) {
           approveTx.txMetadata = { signedPayload: approveSchema.signedPayload, keyId: approveSchema.keyId }
           swapLog(`${TAG} clear-sign schema attached to approve: ${approveSchema.method} (keyId=${approveSchema.keyId}, source=${approveSchema.source || 'local-test'})`)

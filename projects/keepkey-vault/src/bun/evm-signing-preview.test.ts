@@ -211,6 +211,29 @@ describe('one rule for certified 0x04 dynamic schemas (REST gate = swap gate)', 
   })
 })
 
+test('every resolveEvmSchema call passes the firmware version (unknown firmware drops 0x04)', () => {
+  const { readdirSync, readFileSync } = require('node:fs') as typeof import('node:fs')
+  const { join } = require('node:path') as typeof import('node:path')
+  const dir = join(import.meta.dir)
+  const calls: string[] = []
+  for (const f of readdirSync(dir).filter((n) => n.endsWith('.ts') && !n.endsWith('.test.ts'))) {
+    const src = readFileSync(join(dir, f), 'utf8')
+    for (let i = src.indexOf('resolveEvmSchema('); i >= 0; i = src.indexOf('resolveEvmSchema(', i + 1)) {
+      if (/function\s+$/.test(src.slice(Math.max(0, i - 20), i))) continue
+      let depth = 0, args = 1, j = i + 'resolveEvmSchema'.length
+      for (; j < src.length; j++) {
+        const c = src[j]
+        if (c === '(' || c === '[' || c === '{') depth++
+        else if (c === ')' || c === ']' || c === '}') { if (--depth === 0) break }
+        else if (c === ',' && depth === 1 && src.slice(j + 1).trimStart()[0] !== ')') args++
+      }
+      calls.push(`${f}: ${args} args`)
+    }
+  }
+  expect(calls.length).toBeGreaterThanOrEqual(6)
+  expect(calls.filter((c) => !c.endsWith(' 5 args'))).toEqual([])
+})
+
 describe('a transaction-bound certified answer follows the same rule (REST gate = swap gate)', () => {
   const UR = '0x2d01411773c8c24805306e89a41f7855c3c4fe65'
   const DATA = '0x3593564c' + '00'.repeat(4000)
