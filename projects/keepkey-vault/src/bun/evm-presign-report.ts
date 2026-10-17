@@ -9,6 +9,7 @@ import type { EffectFinding, EffectReport } from '../shared/transaction-effects'
 import { buildClearSignReport, type ClearSignDescriptorEvidence, type ClearSignReport, type ContractRating } from '../shared/clearsign-report'
 import { ERC7730_TRANSPORT_SUPPORTED } from '../shared/erc7730-support'
 import { CERTIFIED_METADATA_KEY_ID } from './evm-certified-schema'
+import { certifiedBodyRefused, certifiedEnvelopeShown, metadataPayloadBytes } from '../shared/certified-evm-envelope'
 import { assessSigningRisk, type RiskLevel } from '../shared/clearsign-risk'
 import { applyEvmTxPreview } from './evm-signing-preview'
 import { measureLiveDeployment, resolveCertifiedEvmTransaction, resolveEvmSchema } from './evm-schema-registry'
@@ -45,8 +46,16 @@ export async function prepareEvmTxSigningInfo(
           maxPriorityFeePerGas: preview.maxPriorityFeePerGas || preview.max_priority_fee_per_gas || '0x0',
         }),
       }
-      const certified = await resolveEvmSchema(chainIdNum, preview.to, preview.data, true, signingInfo.firmwareVersion)
+      const found = await resolveEvmSchema(chainIdNum, preview.to, preview.data, true, signingInfo.firmwareVersion)
         ?? await resolveCertifiedEvmTransaction(txForCertification)
+      // The swap gate's rule (evmCallRequiresAdvancedMode): relax only for an
+      // envelope this firmware shows for this exact call. A body it refuses
+      // (0x04 on 7.16.0) is dropped, so the device shows its normal review.
+      const certified = found && !certifiedBodyRefused(found.signedPayload, signingInfo.firmwareVersion)
+        && certifiedEnvelopeShown(metadataPayloadBytes(found.signedPayload), found.keyId, signingInfo.firmwareVersion,
+          { chainId: chainIdNum, to: preview.to, data: preview.data })
+        ? found : undefined
+      if (found && !certified) console.warn(`[REST] Certified "${found.method}" is not shown by firmware ${signingInfo.firmwareVersion} for this call — not attached`)
       if (certified) {
         signingInfo.certifiedEvmSchema = certified
         signingInfo.deviceClearSigns = true

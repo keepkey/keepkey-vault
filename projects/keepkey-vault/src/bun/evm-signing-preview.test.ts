@@ -8,6 +8,8 @@ import { SolanaSignMessageRequest } from './schemas'
 import { solanaSignerChangedError } from './solana-message-preview'
 import { evmCallRequiresAdvancedMode } from './evm-signing-policy'
 import { assessSigningRisk } from '../shared/clearsign-risk'
+import { prepareEvmTxSigningInfo } from './evm-presign-report'
+import { runtimeEvmSighash } from './uniswap-runtime-envelope'
 
 const originalFetch = globalThis.fetch
 afterEach(() => { globalThis.fetch = originalFetch })
@@ -206,6 +208,48 @@ describe('one rule for certified 0x04 dynamic schemas (REST gate = swap gate)', 
     await applyEvmTxPreview(s, PORTALS, DATA, 1, '7.17.0')
     expect(s.needsBlindSigning).toBe(false)
     expect(evmCallRequiresAdvancedMode(PORTALS, DATA, 1, false, { signedPayload: dynamicEnvelope(), keyId: 0x80 }, undefined, '7.17.0')).toBe(false)
+  })
+})
+
+describe('a transaction-bound certified answer follows the same rule (REST gate = swap gate)', () => {
+  const UR = '0x2d01411773c8c24805306e89a41f7855c3c4fe65'
+  const DATA = '0x3593564c' + '00'.repeat(4000)
+  const FROM = '0x' + '11'.repeat(20)
+  const preview = { from: FROM, to: UR, data: DATA, value: '0x0', nonce: '0x5', gas: '0x40000', maxFeePerGas: '0x10', maxPriorityFeePerGas: '0x1' }
+  const certTx = { chainId: 42161, from: FROM, to: UR, data: DATA, value: '0x0', nonce: '0x5', gasLimit: '0x40000', maxFeePerGas: '0x10', maxPriorityFeePerGas: '0x1' }
+  const envelope = (bodyVersion: number) => '0x' + Buffer.concat([
+    Buffer.from([0x03]), Buffer.alloc(139, 7),
+    Buffer.from([bodyVersion]), Buffer.from('0000a4b1', 'hex'), Buffer.from(UR.slice(2), 'hex'), Buffer.from('3593564c', 'hex'), Buffer.alloc(40),
+    Buffer.alloc(65, 9),
+  ]).toString('hex')
+  const service = (payload: string) => {
+    const txHash = '0x' + runtimeEvmSighash(certTx).toString('hex')
+    globalThis.fetch = (async (url: any) => String(url).endsWith('/v1/evm/transaction')
+      ? Response.json({ signedPayload: payload, keyId: 0x80, classification: 'VERIFIED', chainId: 42161, contract: UR, selector: '0x3593564c', txHash, method: 'execute' })
+      : new Response('{}', { status: 422 })) as unknown as typeof fetch
+  }
+  const rest = async (fw: string) => {
+    const s: any = { ...info(), chainId: 42161, to: UR, data: DATA, value: '0x0', from: FROM, firmwareVersion: fw }
+    await prepareEvmTxSigningInfo(s, preview, fw)
+    return s
+  }
+
+  for (const body of [0x01, 0x04]) {
+    test(`body 0x0${body} on 7.16.0: REST stays blind and attaches nothing, as the swap gate does`, async () => {
+      service(envelope(body))
+      const s = await rest('7.16.0')
+      expect(s.certifiedEvmSchema).toBeUndefined()
+      expect(s.needsBlindSigning).toBe(true)
+      expect(evmCallRequiresAdvancedMode(UR, DATA, 42161, false, { signedPayload: envelope(body), keyId: 0x80 }, undefined, '7.16.0', '0x0')).toBe(true)
+    })
+  }
+
+  test('a body the firmware shows relaxes both gates', async () => {
+    service(envelope(0x04))
+    const s = await rest('7.17.0')
+    expect(s.certifiedEvmSchema?.method).toBe('execute')
+    expect(s.needsBlindSigning).toBe(false)
+    expect(evmCallRequiresAdvancedMode(UR, DATA, 42161, false, { signedPayload: envelope(0x04), keyId: 0x80 }, undefined, '7.17.0', '0x0')).toBe(false)
   })
 })
 
