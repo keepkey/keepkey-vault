@@ -83,7 +83,7 @@ import { createClearSignFixturePlan } from './clearsign-fixture-plan'
 import { replayLegacyClearSignRows } from './clearsign-legacy-replay'
 import { importPromotedClearSignArtifact } from './clearsign-artifact-import'
 import { findPromotedEvmArtifact, findPromotedSolanaArtifact, resolvePromotedSolanaArtifact } from './clearsign-artifact-resolver'
-import { trustRuntimeSigner, type RuntimeEvmSigner } from './evm-runtime-metadata'
+import { deviceFingerprint, trustRuntimeSigner, type RuntimeEvmSigner } from './evm-runtime-metadata'
 import { nameProviderOnCard, resolveProviderTxMetadata } from './clearsign-providers'
 import { supportsCertifiedClearSign } from './solana-certified-policy'
 import { measureLiveDeployment, resolveEvmSchema } from './evm-schema-registry'
@@ -2971,7 +2971,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           console.log(`[REST] clearsign load-signer: slot=${body.keyId} alias="${body.alias}" pubkey=${body.pubkey}`
             + `${icon ? ` icon=${icon.length}B ${body.iconWidth}x${body.iconHeight}` : ''}`)
           let clearSignSentToDevice = false
-          const signerFingerprint = createHash('sha256').update(Buffer.from(pubkey)).digest('hex').slice(0, 8)
+          // As the device shows it on the trust screen (16 hex).
+          const signerFingerprint = deviceFingerprint(Buffer.from(pubkey).toString('hex'))
           try {
             // Loading a signer raises a mandatory on-device "Trust signer" confirm.
             // On the emulator that button press must be armed via emuWrap (interactive
@@ -2986,7 +2987,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
                   icon, iconWidth: body.iconWidth, iconHeight: body.iconHeight,
                 })
               },
-              { operation: 'loadClearsignSigner', opLabel: 'Trust Signer', chain: 'Ethereum' },
+              { operation: 'loadClearsignSigner', opLabel: `Trust ${body.alias} (${signerFingerprint})`, chain: 'Ethereum' },
             )
             recordRestClearSignEvent({
               kind: 'signer-load', outcome: 'loaded', source: 'rest-api', chain: 'Ethereum',

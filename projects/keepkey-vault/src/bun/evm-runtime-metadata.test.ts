@@ -47,6 +47,17 @@ describe('7.15 runtime EVM metadata', () => {
     })
   })
 
+  test('logs, emulator labels and results name a runtime signer by the 16-hex device fingerprint', () => {
+    const { readFileSync } = require('node:fs') as typeof import('node:fs')
+    for (const file of ['rest-api.ts', 'index.ts', 'swap.ts', 'walletconnect.ts', 'clearsign-providers.ts']) {
+      const source = readFileSync(`${import.meta.dir}/${file}`, 'utf8')
+      // The 8-hex wire form never names a runtime signer.
+      expect(source).not.toMatch(/(signer|runtimeSigner|runtime\.signer)\.fingerprint\b/)
+    }
+    // The REST load-signer route names the signer it loads the same way.
+    expect(readFileSync(`${import.meta.dir}/rest-api.ts`, 'utf8')).not.toMatch(/digest\('hex'\)\.slice\(0, 8\)/)
+  })
+
   test('the device fingerprint is the 16-hex form 7.16 shows (emulator transcript)', () => {
     // studio-audit/proof/run1: "Trust 'Acme Labs' (656B0D303F6BBDBD) for this session…"
     expect(deviceFingerprint('0246bda74e01a6587ece226943fbff7a10a55cc6971ea2113b0fc6fc90550ba139')).toBe('656B0D303F6BBDBD')
