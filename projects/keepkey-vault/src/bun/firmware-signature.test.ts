@@ -59,7 +59,7 @@ describe('bundled release images', () => {
     const relPath = 'v7.14.3/firmware.keepkey.bitcoin-only.bin'
     expect(resolveOndeviceFirmwareVersion(byPath.get(relPath))).toBe('v7.14.3-bitcoin-only')
     const manifest = JSON.parse(readFileSync(join(import.meta.dir, '../../firmware-bundle/releases.json'), 'utf8'))
-    const payload = createHash('sha256').update(readFileSync(join(import.meta.dir, '../../firmware-bundle', relPath)).subarray(256)).digest('hex')
+    const payload = createHash('sha256').update(new Uint8Array(readFileSync(join(import.meta.dir, '../../firmware-bundle', relPath))).subarray(256)).digest('hex')
     for (const channel of ['latest', 'beta']) {
       expect(manifest[channel].firmwareBitcoinOnly).toEqual({ version: 'v7.14.3', url: relPath, hash: payload })
     }
