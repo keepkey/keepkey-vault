@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import { createHash } from 'crypto'
 import { existsSync, readFileSync } from 'fs'
 import { join } from 'path'
 
@@ -52,5 +53,17 @@ describe('bundled release images', () => {
       expect(resolveOndeviceFirmwareVersion(byPath.get(`${version}/firmware.keepkey.bin`))).toBe(version)
     }
     expect(byPath.has('bl_v2.1.4/blupdater.bin')).toBe(true)
+  })
+  test('the bitcoin-only image is pinned under its own tag and matches the manifest', () => {
+    const byPath = new Map([...images].map(([hash, image]) => [image.relPath, hash]))
+    const relPath = 'v7.14.3/firmware.keepkey.bitcoin-only.bin'
+    expect(resolveOndeviceFirmwareVersion(byPath.get(relPath))).toBe('v7.14.3-bitcoin-only')
+    const manifest = JSON.parse(readFileSync(join(import.meta.dir, '../../firmware-bundle/releases.json'), 'utf8'))
+    const payload = createHash('sha256').update(readFileSync(join(import.meta.dir, '../../firmware-bundle', relPath)).subarray(256)).digest('hex')
+    for (const channel of ['latest', 'beta']) {
+      expect(manifest[channel].firmwareBitcoinOnly).toEqual({ version: 'v7.14.3', url: relPath, hash: payload })
+    }
+    // analyzeFirmware strips the 'v' and compares versions: no variant suffix here.
+    expect(manifest.hashes.firmware[payload]).toBe('v7.14.3')
   })
 })
