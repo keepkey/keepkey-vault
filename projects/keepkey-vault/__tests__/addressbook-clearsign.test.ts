@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { EventEmitter2 } from 'eventemitter2'
-import { buildCertificationRequest, buildContactProof, CONTACT_DESTINATION, evmRecipient, isAddressBookCertifyUnsupported, signWithContactProofAck, type AddressBookCertification } from '../src/bun/addressbook-clearsign'
+import { buildCertificationRequest, contactProofAllowed, buildContactProof, CONTACT_DESTINATION, evmRecipient, isAddressBookCertifyUnsupported, signWithContactProofAck, type AddressBookCertification } from '../src/bun/addressbook-clearsign'
 
 const contacts = [
   { network: 'eip155:1', destinationType: CONTACT_DESTINATION.EVM_ADDRESS, destination: '11'.repeat(20), label: 'Alice' },
@@ -90,5 +90,27 @@ describe('address-book ClearSign device answers (firmware #951)', () => {
     // #951's own answers, and the user's decision, are not "unsupported".
     expect(isAddressBookCertifyUnsupported('Invalid address book')).toBe(false)
     expect(isAddressBookCertifyUnsupported('Action cancelled by user')).toBe(false)
+  })
+})
+
+describe('contactProofAllowed: one metadata message per transaction', () => {
+  const USDT = '0xdac17f958d2ee523a2206206994597c13d831ec7'
+  const UNKNOWN_TOKEN = '0x1111111111111111111111111111111111111111'
+  const transfer = '0xa9059cbb' + '0'.repeat(24) + '2'.repeat(40) + (1_000_000).toString(16).padStart(64, '0')
+  const base = { chainId: 1, firmwareVersion: '7.16.0', callerMetadata: false, schemaAttached: false, erc7730: false }
+
+  test('nothing else describes the call: the contact proof goes', () => {
+    expect(contactProofAllowed({ ...base, to: USDT, data: transfer })).toBe(true)
+  })
+  test('the device shows the token natively: the contact replaces Desktop\'s schema', () => {
+    expect(contactProofAllowed({ ...base, to: USDT, data: transfer, schemaAttached: true })).toBe(true)
+    expect(contactProofAllowed({ ...base, to: '0x2222222222222222222222222222222222222222', data: '0x', schemaAttached: true })).toBe(true)
+  })
+  test('a token the device does not know keeps its certified description', () => {
+    expect(contactProofAllowed({ ...base, to: UNKNOWN_TOKEN, data: transfer, schemaAttached: true })).toBe(false)
+  })
+  test('caller metadata and ERC-7730 always win', () => {
+    expect(contactProofAllowed({ ...base, to: USDT, data: transfer, callerMetadata: true })).toBe(false)
+    expect(contactProofAllowed({ ...base, to: USDT, data: transfer, erc7730: true })).toBe(false)
   })
 })

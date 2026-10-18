@@ -305,7 +305,7 @@ import { collectAndAnalyzeWithGate, MAX_CHUNK_BYTES } from "./rng-audit"
 import { withoutCallerErc7730 } from '../shared/erc7730-support'
 import { newEmulatorWalletNameError } from '../shared/emulatorWallets'
 import { recordReviewCard, recordReviewCardText, reviewTapeRecording } from './test-review-tape'
-import { ADDRESS_BOOK_CERTIFY_UNSUPPORTED, buildCertificationRequest, buildContactProof, contactsFromEntries, CONTACT_DESTINATION, evmRecipient, isAddressBookCertifyUnsupported, signWithContactProofAck, type AddressBookCertification } from "./addressbook-clearsign"
+import { ADDRESS_BOOK_CERTIFY_UNSUPPORTED, buildCertificationRequest, contactProofAllowed, buildContactProof, contactsFromEntries, CONTACT_DESTINATION, evmRecipient, isAddressBookCertifyUnsupported, signWithContactProofAck, type AddressBookCertification } from "./addressbook-clearsign"
 
 // L3 fix: withTimeout imported from engine-controller (was duplicated here)
 const PIONEER_TIMEOUT_MS = 60_000
@@ -3584,16 +3584,24 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					txMetadata: { signedPayload: resolvedSchema.signedPayload, keyId: resolvedSchema.keyId },
 				} : params
 				// Develop's address-book ClearSign: a device-certified contact label
-				// for a plain recipient. Only when no contract definition resolved.
+				// for a plain recipient. Only when no contract definition resolved, or
+				// when the device shows the send natively (native coin, or a token in
+				// its own table): there the certified token description adds nothing
+				// and would push the contact name off the screen (one metadata per tx).
 				let contactProofAttached = false
 				if (addressBookClearsignEnabled && supportsAddressBookClearsignFirmware() && !engine.isPassphraseWallet
-					&& !effectiveParams?.txMetadata && !effectiveParams?.erc7730) {
+					&& contactProofAllowed({
+						to: effectiveParams?.to, data: effectiveParams?.data, chainId: Number(effectiveParams?.chainId), value: effectiveParams?.value,
+						firmwareVersion: engine.getDeviceState().firmwareVersion,
+						callerMetadata: !!(params as any)?.txMetadata, schemaAttached: !!resolvedSchema, erc7730: !!effectiveParams?.erc7730,
+					})) {
 					const certification = storedAddressBookCertification()
 					const recipient = evmRecipient(effectiveParams)
 					if (certification && recipient) {
 						const proof = buildContactProof(certification, `eip155:${recipient.chainId}`, CONTACT_DESTINATION.EVM_ADDRESS, recipient.address)
 						if (proof) {
 							effectiveParams = { ...effectiveParams, txMetadata: { signedPayload: proof } }
+							resolvedSchema = undefined
 							contactProofAttached = true
 							console.log(`[addressbook-clearsign] attached revision ${certification.revision} proof for ${recipient.address}`)
 						}
@@ -3619,7 +3627,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// No `named` pin here: this path has no Desktop approval card. The
 				// caller's own card names the provider, and the device's trust
 				// screen names it again before it is used.
-				if (!resolvedSchema) {
+				if (!resolvedSchema && !contactProofAttached) {
 					const runtime = await resolveProviderTxMetadata(effectiveParams, {
 						firmwareVersion: engine.getDeviceState().firmwareVersion, advancedMode: getAdvancedModeEnabled() === true,
 					})
