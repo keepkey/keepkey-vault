@@ -1488,7 +1488,7 @@ function getWalletDbScope(): { deviceId: string; walletId: string } | null {
 	return { deviceId, walletId: `${deviceId}:${seedId}` }
 }
 
-/** A saved wallet's Bitcoin accounts the PSBT core can build for (no Taproot), from the watch-only cache only. */
+/** A saved wallet's single-signature Bitcoin accounts, from the watch-only cache only. */
 function getWatchOnlyBtcAccounts(deviceId?: string) {
 	const snapshot = getDeviceSnapshotById(deviceId || getLatestDeviceSnapshot()?.deviceId || '')
 	if (!snapshot) throw new Error('No saved wallet to build a PSBT for')
@@ -1496,7 +1496,7 @@ function getWatchOnlyBtcAccounts(deviceId?: string) {
 	const seen = new Set<string>()
 	const accounts = getCachedPubkeys(snapshot.deviceId).flatMap(row => {
 		if (row.chainId !== 'bitcoin' || !row.xpub || seen.has(row.xpub)) return []
-		if (row.scriptType !== 'p2wpkh' && row.scriptType !== 'p2sh-p2wpkh' && row.scriptType !== 'p2pkh') return []
+		if (row.scriptType !== 'p2wpkh' && row.scriptType !== 'p2sh-p2wpkh' && row.scriptType !== 'p2pkh' && row.scriptType !== 'p2tr') return []
 		seen.add(row.xpub)
 		const scriptType = row.scriptType as BtcPsbtScriptType
 		try {
@@ -3685,11 +3685,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const { truth } = await ensureManagersForSeed('btcPsbtAnalyze')
 				if (!btcAccounts.isInitialized) await btcAccounts.initialize(wallet as any)
 				stampManagers(truth)
-				// Every loaded account the PSBT core can sign for (no taproot yet). Ownership is proven from these xpubs only;
-				// the master fingerprint only orders the search.
+				// Ownership is proven from the loaded account xpubs; fingerprints are only metadata.
 				const masterFingerprint = btcAccounts.masterFingerprint ? new Uint8Array(Buffer.from(btcAccounts.masterFingerprint, 'hex')) : undefined
 				const accounts = btcAccounts.getAllXpubMeta()
-					.filter(x => x.scriptType !== 'p2tr')
 					.map(x => ({ scriptType: x.scriptType as BtcPsbtScriptType, path: x.path, xpub: toStandardXpub(x.xpub).xpub, masterFingerprint }))
 				const analysis = analyzePsbt(bytes, accounts)
 				if (engine.wallet !== wallet || engine.isPassphraseWallet !== hidden || activitySessionEpoch !== epoch) {
@@ -3755,8 +3753,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			btcWatchOnlyExport: async (params) => {
 				if (!engine.wallet || engine.getDeviceState().state !== 'ready') throw new Error('Connect and unlock your KeepKey to export')
 				const scriptType = params?.scriptType
-				if (scriptType !== 'p2wpkh' && scriptType !== 'p2sh-p2wpkh' && scriptType !== 'p2pkh') {
-					throw new Error('Electrum supports native segwit, nested segwit and legacy accounts only (no Taproot)')
+				if (scriptType !== 'p2wpkh' && scriptType !== 'p2sh-p2wpkh' && scriptType !== 'p2pkh' && scriptType !== 'p2tr') {
+					throw new Error('Choose a supported Bitcoin account type')
 				}
 				const { truth } = await ensureManagersForSeed('btcWatchOnlyExport')
 				if (!btcAccounts.isInitialized) await btcAccounts.initialize(engine.wallet as any)
@@ -3764,7 +3762,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const meta = btcAccounts.getAllXpubMeta().find(x => x.accountIndex === params.accountIndex && x.scriptType === scriptType)
 				if (!meta) throw new Error(`Bitcoin account ${params.accountIndex} is not loaded`)
 				const std = toStandardXpub(meta.xpub)
-				if (std.scriptType !== scriptType) throw new Error(`The ${scriptType} key has the wrong prefix`)
+				if (std.scriptType !== (scriptType === 'p2tr' ? 'p2pkh' : scriptType)) throw new Error(`The ${scriptType} key has the wrong prefix`)
 				const fingerprint = btcAccounts.masterFingerprint
 				const result = { key: toSlip132(std.xpub, scriptType), fingerprint, derivation: formatPath(meta.path) }
 				if (!params.save) return result

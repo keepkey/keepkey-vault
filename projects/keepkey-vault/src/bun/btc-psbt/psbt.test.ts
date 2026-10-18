@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 import * as btc from '@scure/btc-signer'
+import { _DebugPSBT, RawPSBTV0 } from '@scure/btc-signer/psbt'
 import { HDKey } from '@scure/bip32'
 import { base64, hex } from '@scure/base'
 import { sha256 } from '@noble/hashes/sha2'
@@ -15,7 +16,7 @@ import {
 const MASTER = HDKey.fromMasterSeed(new Uint8Array(mnemonicToSeedSync('abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about')))
 const MASTER_FP = hex.decode('73c5da0a')
 const H = 0x80000000
-const PURPOSE: Record<BtcPsbtScriptType, number> = { p2pkh: 44, 'p2sh-p2wpkh': 49, p2wpkh: 84 }
+const PURPOSE: Record<BtcPsbtScriptType, number> = { p2pkh: 44, 'p2sh-p2wpkh': 49, p2wpkh: 84, p2tr: 86 }
 const RECIPIENT = 'bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4'
 const UNKNOWN = { allowUnknownOutputs: true }
 
@@ -32,6 +33,7 @@ function scriptAt(scriptType: BtcPsbtScriptType, path: number[]): Uint8Array {
   const pub = keyAt(path).publicKey!
   if (scriptType === 'p2pkh') return btc.p2pkh(pub).script
   if (scriptType === 'p2wpkh') return btc.p2wpkh(pub).script
+  if (scriptType === 'p2tr') return btc.p2tr(pub.subarray(1)).script
   return btc.p2sh(btc.p2wpkh(pub)).script
 }
 
@@ -132,6 +134,64 @@ describe('decode', () => {
 })
 
 describe('round trip with the test mnemonic', () => {
+  it('BIP86 Taproot: x-only origins, derived change and verified Schnorr signatures', () => {
+    for (const withFp of [true, false]) {
+      const { acct, psbtBytes, analysis } = build('p2tr', TWO_COINS, { withFp, change: { index: 0, value: 29_000n } })
+      expect(analysis.inputs[0].address).toBe('bc1p5cyxnuxmeuwuvkwfem96lqzszd02n6xdcjrs20cac6yqjjwudpxqkedrcr')
+      expect(analysis.outputs[1].deviceWillShow).toBe('hidden-change')
+      const input = btc.Transaction.fromPSBT(psbtBytes).getInput(0)
+      expect(input.tapInternalKey).toHaveLength(32)
+      expect(input.tapBip32Derivation![0][0]).toEqual(input.tapInternalKey!)
+      expect(input.tapBip32Derivation![0][1].hashes).toEqual([])
+      expect(input.tapBip32Derivation![0][1].der.path).toEqual(withFp ? [86 + H, H, H, 0, 0] : [0, 0])
+      expect(toSignTx(analysis).inputs[0].scriptType).toBe('p2tr')
+      expect(toSignTx(analysis).outputs[1]).toMatchObject({ scriptType: 'p2tr', addressNList: [86 + H, H, H, 1, 0] })
+      const signed = signLikeDevice(analysis)
+      const fin = finalizeSigned(analysis, signed)
+      expect(btc.RawTx.decode(hex.decode(signed)).witnesses![0][0]).toHaveLength(64)
+      expect(parseForBroadcast(fin.psbtBytes).fee).toBe(1000n)
+      expect(alreadySigned(fin.psbtBytes)?.txid).toBe(fin.txid)
+      // BIP371 permits witness UTXOs alone for Taproot: all values and scripts
+      // are bound by every SIGHASH_DEFAULT signature.
+      const witnessOnly = mutate(psbtBytes, tx => { for (let i = 0; i < 2; i++) tx.updateInput(i, { nonWitnessUtxo: undefined }, true) })
+      const a = analyze(witnessOnly, [acct])
+      expect(a.flags.unverifiedAmounts).toBe(true)
+      expect(finalizeSigned(a, signLikeDevice(a)).txHex).toHaveLength(signed.length)
+      const wrongAmount = { ...analysis, inputs: analysis.inputs.map((x, i) => ({ ...x, amount: x.amount + (i === 1 ? 1n : 0n) })) }
+      expect(() => finalizeSigned(wrongAmount, signed)).toThrow(/Taproot signature does not verify/)
+    }
+  })
+
+  it('Taproot rejects unsupported sighashes, script trees, wrong internal keys and altered signatures', () => {
+    const { acct, psbtBytes, analysis } = build('p2tr', TWO_COINS, { change: { index: 0, value: 29_000n } })
+    for (const sighashType of [btc.SigHash.ALL, btc.SigHash.NONE, btc.SigHash.SINGLE, btc.SigHash.ALL_ANYONECANPAY]) {
+      expect(() => analyze(mutate(psbtBytes, t => t.updateInput(0, { sighashType }, true)), [acct])).toThrow(/SIGHASH_DEFAULT/)
+    }
+    expect(() => analyze(mutate(psbtBytes, t => t.updateInput(0, { tapMerkleRoot: new Uint8Array(32) }, true)), [acct])).toThrow(/no script trees/)
+    expect(() => analyze(mutate(psbtBytes, t => {
+      const [[key, v]] = t.getInput(0).tapBip32Derivation!
+      t.updateInput(0, { tapBip32Derivation: undefined }, true)
+      t.updateInput(0, { tapBip32Derivation: [[key, { ...v, hashes: [new Uint8Array(32)] }]] }, true)
+    }), [acct])).toThrow(/no script trees/)
+    expect(() => analyze(mutate(psbtBytes, t => t.updateInput(0, { tapInternalKey: keyAt([86 + H, H, H, 0, 1]).publicKey!.subarray(1) }, true)), [acct])).toThrow(/internal key/)
+    const signed = btc.RawTx.decode(hex.decode(signLikeDevice(analysis)))
+    signed.witnesses![0][0][0] ^= 1
+    expect(() => finalizeSigned(analysis, hex.encode(btc.RawTx.encode(signed)))).toThrow(/Taproot signature does not verify/)
+    signed.witnesses![0].push(new Uint8Array([0x50]))
+    expect(() => finalizeSigned(analysis, hex.encode(btc.RawTx.encode(signed)))).toThrow(/Taproot witness/)
+  })
+
+  it('signs mixed Taproot and native SegWit inputs with full previous transactions', () => {
+    const segwit = build('p2wpkh', TWO_COINS, { change: { index: 0, value: 29_000n } })
+    const taproot = build('p2tr', [{ chain: 0, index: 0, value: 10000n, seed: 'mixed-taproot' }], { pay: 9000n })
+    const tx = btc.Transaction.fromPSBT(segwit.psbtBytes)
+    tx.addInput(btc.Transaction.fromPSBT(taproot.psbtBytes).getInput(0))
+    const a = analyze(tx.toPSBT(0), [segwit.acct, taproot.acct])
+    expect(a.flags.multiAccount).toBe(true)
+    expect(a.outputs[1].deviceWillShow).toBe('address')
+    expect(parseForBroadcast(finalizeSigned(a, signLikeDevice(a)).psbtBytes).fee).toBe(11000n)
+  })
+
   it('p2wpkh, full paths: build -> analyze -> toSignTx -> sign -> finalize -> broadcast', () => {
     const { psbtBytes, psbtBase64, analysis } = build('p2wpkh', TWO_COINS, { change: { index: 0, value: 29_000n } })
     expect(base64.decode(psbtBase64)).toEqual(psbtBytes)
@@ -172,6 +232,8 @@ describe('round trip with the test mnemonic', () => {
 
     const serializedTx = signLikeDevice(analysis)
     const fin = finalizeSigned(analysis, serializedTx)
+    // Electrum requires an explicit empty scriptSig on native SegWit inputs.
+    expect(RawPSBTV0.decode(fin.psbtBytes).inputs[0].finalScriptSig).toEqual(new Uint8Array())
     expect(fin.txHex).toBe(serializedTx)
     const done = btc.Transaction.fromPSBT(fin.psbtBytes)
     expect(done.isFinal).toBe(true)
@@ -226,6 +288,29 @@ describe('round trip with the test mnemonic', () => {
     expect(toSignTx(analysis).inputs.every((i) => i.hex && i.hex.length > 0)).toBe(true)
     const signed = signLikeDevice(analysis)
     expect(finalizeSigned(analysis, signed).txHex).toBe(signed)
+  })
+
+  it('accepts Electrum legacy finalization with empty witnesses, preserving the transaction and fee', () => {
+    const { analysis } = build('p2pkh', TWO_COINS, { change: { index: 0, value: 29_000n } })
+    const fin = finalizeSigned(analysis, signLikeDevice(analysis))
+    const raw = _DebugPSBT.decode(fin.psbtBytes)
+    raw.items[1]['08'] = new Uint8Array([0])
+    raw.items[2]['08'] = new Uint8Array([0])
+    const electrum = _DebugPSBT.encode(raw)
+    expect(parseForBroadcast(electrum)).toEqual(parseForBroadcast(fin.psbtBytes))
+    expect(alreadySigned(electrum)?.txid).toBe(fin.txid)
+    expect(() => analyze(electrum, [account('p2pkh')])).toThrow(/already signed/)
+  })
+
+  it('does not discard an empty witness on a SegWit input or a missing legacy signature', () => {
+    for (const scriptType of ['p2wpkh', 'p2pkh'] as const) {
+      const { analysis } = build(scriptType, TWO_COINS, { change: { index: 0, value: 29_000n } })
+      const fin = finalizeSigned(analysis, signLikeDevice(analysis))
+      const raw = _DebugPSBT.decode(fin.psbtBytes)
+      raw.items[1]['08'] = new Uint8Array([0])
+      if (scriptType === 'p2pkh') delete raw.items[1]['07']
+      expect(() => parseForBroadcast(_DebugPSBT.encode(raw))).toThrow()
+    }
   })
 
   it('accepts zero fingerprints (full path) and PSBTs with no derivation at all', () => {

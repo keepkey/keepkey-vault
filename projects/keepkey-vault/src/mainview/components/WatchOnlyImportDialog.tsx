@@ -13,7 +13,7 @@ type Phase = "idle" | "input" | "checking" | "preview" | "saving" | "error"
 type Source = { data: string } | { fileBytes: string }
 
 const card = { bg: "rgba(255,255,255,0.03)", borderRadius: "lg", border: "1px solid", borderColor: "kk.border", p: "3" } as const
-const SCRIPT_LABEL: Record<string, string> = { p2wpkh: "Native SegWit (bc1q)", "p2sh-p2wpkh": "Nested SegWit (3...)", p2pkh: "Legacy (1...)" }
+const SCRIPT_LABEL: Record<string, string> = { p2wpkh: "Native SegWit (bc1q)", "p2sh-p2wpkh": "Nested SegWit (3...)", p2pkh: "Legacy (1...)", p2tr: "Taproot (bc1p)" }
 
 /**
  * WatchOnlyImportDialog — add a Bitcoin watch-only wallet from an Electrum wallet
@@ -112,6 +112,8 @@ export function WatchOnlyImportDialog({ onImported }: { onImported: (deviceId: s
 	const goldButton = { size: "sm", bg: "kk.gold", color: "black", fontWeight: "600", px: "4", py: "2", _hover: { bg: "kk.goldHover" } } as const
 	const plainButton = { size: "sm", variant: "outline", color: "kk.textSecondary", borderColor: "kk.border", px: "4", py: "2" } as const
 	const canImport = !!preview && (!preview.pathAssumed || pathOk || taproot)
+	const selectedPath = taproot ? preview?.path.replace(/^m\/44'/, "m/86'") : preview?.path
+	const selectedType = taproot ? "p2tr" : preview?.scriptType
 
 	return (
 		<>
@@ -158,9 +160,9 @@ export function WatchOnlyImportDialog({ onImported }: { onImported: (deviceId: s
 								</Text>
 							</Box>
 							<Box {...card}>
-								<Text fontSize="xs" color="kk.textSecondary">{SCRIPT_LABEL[preview.scriptType]} · {preview.source === "electrum" ? "Electrum wallet file" : "extended public key"}</Text>
+								<Text fontSize="xs" color="kk.textSecondary">{SCRIPT_LABEL[selectedType!]} · {preview.source === "electrum" ? "Electrum wallet file" : "extended public key"}</Text>
 								<Text fontSize="xs" fontFamily="mono" color="kk.textPrimary" wordBreak="break-all" mt="1">{preview.key}</Text>
-								<Text fontSize="xs" color="kk.textSecondary" mt="2">Derivation path: <Text as="span" fontFamily="mono" color="kk.textPrimary">{preview.path}</Text>{preview.pathAssumed ? " (assumed)" : ""}</Text>
+								<Text fontSize="xs" color="kk.textSecondary" mt="2">Derivation path: <Text as="span" fontFamily="mono" color="kk.textPrimary">{selectedPath}</Text>{preview.pathAssumed ? " (confirm below)" : ""}</Text>
 								<Text fontSize="xs" color="kk.textSecondary">Master fingerprint: <Text as="span" fontFamily="mono" color="kk.textPrimary">{preview.fingerprint ?? "unknown"}</Text></Text>
 							</Box>
 

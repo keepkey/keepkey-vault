@@ -12,7 +12,7 @@ import { b58check, formatPath, parsePath, readElectrumWallet, toSlip132, toStand
 import type { BtcPsbtScriptType } from './psbt'
 
 const H = 0x80000000
-const PURPOSE: Record<BtcPsbtScriptType, number> = { p2pkh: 44, 'p2sh-p2wpkh': 49, p2wpkh: 84 }
+const PURPOSE: Record<BtcPsbtScriptType, number> = { p2pkh: 44, 'p2sh-p2wpkh': 49, p2wpkh: 84, p2tr: 86 }
 
 export interface WatchOnlyImport {
   /** 'wo:' + sha256 of the standard xpubs; the synthetic device_snapshot id */
@@ -46,21 +46,24 @@ function readBareKey(text: string): { xpub: string; scriptType: BtcPsbtScriptTyp
 /**
  * text: Electrum wallet JSON or a bare key. fingerprint: optional user-entered
  * master fingerprint. path: the path the user confirmed; required (and must be
- * the standard one) when the import does not state it. Taproot is refused.
+ * the standard one) when the import does not state it. A bare xpub needs an
+ * explicit BIP86 path to select Taproot; its version bytes alone mean legacy.
  */
 export function parseWatchOnlyImport(text: string, opts: { fingerprint?: string; path?: string } = {}): WatchOnlyImport {
   const t = text.trim()
   const isFile = /^(\{|BIE[12]|QklFM[Qg])/.test(t)
   const electrum = isFile ? readElectrumWallet(t) : null
-  const { xpub, scriptType } = electrum ?? readBareKey(t)
+  const decoded = electrum ?? readBareKey(t)
+  const { xpub } = decoded
+  let { scriptType } = decoded
   const hd = HDKey.fromExtendedKey(xpub)
   if (hd.index < H) throw new Error('The account level of this key is not hardened; not a BIP44/49/84 account key')
+  if (!electrum && scriptType === 'p2pkh' && opts.path && parsePath(opts.path.trim())[0] === 86 + H) scriptType = 'p2tr'
   const standard = [PURPOSE[scriptType] + H, H, hd.index]
   let path = electrum?.path ?? standard
 
   if (opts.path) {
     const confirmed = parsePath(opts.path.trim())
-    if (confirmed[0] === 86 + H) throw new Error('Taproot (BIP86) keys are not supported for watch-only import')
     if (formatPath(confirmed) !== formatPath(path)) {
       throw new Error(`A ${scriptType} key at this account can only be ${formatPath(path)}, not ${formatPath(confirmed)}`)
     }

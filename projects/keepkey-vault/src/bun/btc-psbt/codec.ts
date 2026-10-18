@@ -10,8 +10,8 @@ export const b58check = createBase58check(sha256)
 
 const H = 0x80000000
 // SLIP-132 public versions: xpub / ypub / zpub. Script type comes from the prefix, as Electrum does.
-const PUB: Record<BtcPsbtScriptType, number> = { p2pkh: 0x0488b21e, 'p2sh-p2wpkh': 0x049d7cb2, p2wpkh: 0x04b24746 }
-const PURPOSE: Record<BtcPsbtScriptType, number> = { p2pkh: 44, 'p2sh-p2wpkh': 49, p2wpkh: 84 }
+const PUB = { p2pkh: 0x0488b21e, 'p2sh-p2wpkh': 0x049d7cb2, p2wpkh: 0x04b24746 }
+const PURPOSE: Record<BtcPsbtScriptType, number> = { p2pkh: 44, 'p2sh-p2wpkh': 49, p2wpkh: 84, p2tr: 86 }
 const REFUSED: Record<number, string> = {
   0x0488ade4: 'This is a private key (xprv). Never import a private key',
   0x049d7878: 'This is a private key (yprv). Never import a private key',
@@ -36,7 +36,7 @@ function decodePublicKey(key: string): { bytes: Uint8Array; scriptType: BtcPsbtS
   if (bytes.length !== 78) throw new Error('Not an extended public key')
   const version = u32be(bytes)
   if (REFUSED[version]) throw new Error(REFUSED[version])
-  const scriptType = (Object.keys(PUB) as BtcPsbtScriptType[]).find((t) => PUB[t] === version)
+  const scriptType = (Object.keys(PUB) as Array<keyof typeof PUB>).find((t) => PUB[t] === version)
   if (!scriptType || (bytes[45] !== 0x02 && bytes[45] !== 0x03)) throw new Error('Not a mainnet xpub, ypub or zpub')
   return { bytes, scriptType }
 }
@@ -57,7 +57,7 @@ export function toStandardXpub(key: string): { xpub: string; scriptType: BtcPsbt
 export function toSlip132(xpub: string, scriptType: BtcPsbtScriptType): string {
   const { bytes, scriptType: t } = decodePublicKey(xpub)
   if (t !== 'p2pkh') throw new Error('Expected a standard xpub')
-  return withVersion(bytes, PUB[scriptType])
+  return withVersion(bytes, scriptType === 'p2tr' ? PUB.p2pkh : PUB[scriptType])
 }
 
 /** Parent fingerprint of a depth-1 key (e.g. m/84'), which is the master fingerprint. */
@@ -70,7 +70,7 @@ export function masterFingerprintFromDepth1Xpub(xpub: string): Uint8Array {
 /** Account path of a stored depth-3 account key. Coin type 0' is assumed: Desktop stores mainnet Bitcoin accounts only. */
 export function accountPathFromXpub(key: string, scriptType: BtcPsbtScriptType): number[] {
   const { bytes, scriptType: prefixType } = decodePublicKey(key)
-  if (prefixType !== scriptType) throw new Error(`The stored ${scriptType} key has the wrong prefix`)
+  if (prefixType !== (scriptType === 'p2tr' ? 'p2pkh' : scriptType)) throw new Error(`The stored ${scriptType} key has the wrong prefix`)
   const child = u32be(bytes, 9)
   if (bytes[4] !== 3 || child < H) throw new Error('Not a BIP44/49/84 account key')
   return [PURPOSE[scriptType] + H, H, child]
@@ -141,12 +141,16 @@ export function readElectrumWallet(text: string): ElectrumImport {
   return out
 }
 
-/** Unencrypted Electrum watch-only file. No seed_version: Electrum assumes an old one and upgrades. */
+/** Unencrypted Electrum watch-only file. Format 20 introduced explicit key origins.
+ * Older formats run _convert_version_20, which overwrites root_fingerprint with
+ * null for depth-3 keys, even when we supplied the real master fingerprint. */
 export function writeElectrumWallet(account: BtcPsbtAccount & { masterFingerprint: Uint8Array }, label: string): string {
+  if (account.scriptType === 'p2tr') throw new Error('Electrum does not support Taproot wallets; use a BIP86 xpub and path in Sparrow')
   const xpub = typeof account.xpub === 'string' ? account.xpub : b58check.encode(account.xpub)
   checkAccountPath(account.path, account.scriptType)
   if (account.masterFingerprint.length !== 4) throw new Error('Master fingerprint must be 4 bytes')
   return JSON.stringify({
+    seed_version: 20,
     wallet_type: 'standard',
     use_encryption: false,
     keystore: {

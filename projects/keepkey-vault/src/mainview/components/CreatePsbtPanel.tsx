@@ -1,9 +1,9 @@
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { Box, Flex, Text, Button, Input, Spinner } from "@chakra-ui/react"
 import { rpcRequest } from "../lib/rpc"
 import type { BtcWatchOnlyAccounts, BtcWatchOnlyPsbt } from "../../shared/types"
 
-const SCRIPT_LABEL: Record<string, string> = { p2wpkh: "Native SegWit", "p2sh-p2wpkh": "SegWit", p2pkh: "Legacy" }
+const SCRIPT_LABEL: Record<string, string> = { p2wpkh: "Native SegWit", "p2sh-p2wpkh": "SegWit", p2pkh: "Legacy", p2tr: "Taproot" }
 const FEE_LEVELS = [{ level: 1, label: "Slow" }, { level: 3, label: "Average" }, { level: 5, label: "Fast" }] as const
 
 /** Exact: "12,345 sats (0.00012345 BTC)". Amounts arrive as decimal strings. */
@@ -30,21 +30,26 @@ export function CreatePsbtPanel({ deviceId }: { deviceId?: string }) {
 	const [result, setResult] = useState<BtcWatchOnlyPsbt | null>(null)
 	const [copied, setCopied] = useState(false)
 	const [error, setError] = useState<string | null>(null)
+	const walletEpoch = useRef(0)
 
 	useEffect(() => {
+		const epoch = ++walletEpoch.current
 		// Another saved wallet: drop the previous wallet's accounts, choice and PSBT before loading.
 		setInfo(null)
 		setAccount(0)
 		setResult(null)
 		setError(null)
+		setBusy(false)
 		rpcRequest<BtcWatchOnlyAccounts>("btcWatchOnlyAccounts", deviceId ? { deviceId } : undefined)
-			.then(setInfo)
-			.catch((e: any) => setError(e?.message || "Could not read the saved Bitcoin accounts"))
+			.then((r) => { if (walletEpoch.current === epoch) setInfo(r) })
+			.catch((e: any) => { if (walletEpoch.current === epoch) setError(e?.message || "Could not read the saved Bitcoin accounts") })
+		return () => { walletEpoch.current++ }
 	}, [deviceId])
 
 	const handleCreate = useCallback(async () => {
 		const a = info?.accounts[account]
 		if (!a) return
+		const epoch = walletEpoch.current
 		setBusy(true)
 		setError(null)
 		setResult(null)
@@ -52,12 +57,13 @@ export function CreatePsbtPanel({ deviceId }: { deviceId?: string }) {
 			const r = await rpcRequest<BtcWatchOnlyPsbt>("btcWatchOnlyBuildPsbt", {
 				...(deviceId ? { deviceId } : {}), scriptType: a.scriptType, accountIndex: a.accountIndex, to, amount, isMax, feeLevel,
 			}, 300000)
+			if (walletEpoch.current !== epoch) return
 			setResult(r)
 			try { await navigator.clipboard.writeText(r.psbtBase64); setCopied(true) } catch { setCopied(false) }
 		} catch (e: any) {
-			setError(e?.message || "Could not create the PSBT")
+			if (walletEpoch.current === epoch) setError(e?.message || "Could not create the PSBT")
 		} finally {
-			setBusy(false)
+			if (walletEpoch.current === epoch) setBusy(false)
 		}
 	}, [info, account, deviceId, to, amount, isMax, feeLevel])
 

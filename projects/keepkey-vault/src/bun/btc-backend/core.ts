@@ -119,7 +119,7 @@ export function coreUtxoPath(desc: string | undefined, script: ScriptKind): stri
 /** estimatesmartfee returns BTC/kB → sat/vByte (×1e8 ÷1000 = ×1e5), floor 1.
  *  No feerate (fresh/pruned node returns only `errors`) → throw, never a guessed rate. */
 export function feerateToSatVb(feerate?: number, errors?: string[]): number {
-  if (!(typeof feerate === 'number' && feerate > 0)) {
+  if (!(typeof feerate === 'number' && Number.isFinite(feerate) && feerate > 0)) {
     throw new Error(`Bitcoin node could not estimate a fee rate${errors?.length ? `: ${errors.join('; ')}` : ''}`)
   }
   return Math.max(1, Math.ceil(feerate * 1e5))

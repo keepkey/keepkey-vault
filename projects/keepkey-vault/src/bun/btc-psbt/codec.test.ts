@@ -45,9 +45,10 @@ describe('SLIP-132', () => {
 describe('Electrum wallet file', () => {
   const account = { scriptType: 'p2wpkh' as const, path: [84 + H, H, H], xpub: ACCOUNT_XPUB, masterFingerprint: hex.decode('73c5da0a') }
 
-  it('writes an unencrypted bip32 watch-only file without seed_version and reads it back', () => {
+  it('writes format 20 so Electrum preserves the explicit key origin during upgrades', () => {
     const text = writeElectrumWallet(account, 'KeepKey')
     expect(JSON.parse(text)).toEqual({
+      seed_version: 20,
       wallet_type: 'standard',
       use_encryption: false,
       keystore: { type: 'bip32', xpub: ZPUB, xprv: null, derivation: "m/84'/0'/0'", root_fingerprint: '73c5da0a', label: 'KeepKey' },

@@ -96,8 +96,8 @@ async function bbFetch(cfg: BlockbookConfig, path: string, init?: RequestInit): 
 
 /** estimatefee returns { result: "<BTC/kB>" } → sat/vB (×1e5), floor 1. No estimate ("-1") → throw, never a guessed rate. */
 export function estimatefeeToSatVb(r: any): number {
-  const btcPerKb = parseFloat(r?.result)
-  if (!(btcPerKb > 0)) throw new Error(`Blockbook could not estimate a fee rate (estimatefee returned ${JSON.stringify(r?.result ?? null)})`)
+  const btcPerKb = typeof r?.result === 'string' || typeof r?.result === 'number' ? Number(r.result) : NaN
+  if (!(Number.isFinite(btcPerKb) && btcPerKb > 0)) throw new Error(`Blockbook could not estimate a fee rate (estimatefee returned ${JSON.stringify(r?.result ?? null)})`)
   return Math.max(1, Math.ceil(btcPerKb * 1e5))
 }
 

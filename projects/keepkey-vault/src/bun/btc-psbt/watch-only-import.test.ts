@@ -25,11 +25,14 @@ describe('bare key import', () => {
     expect(parseWatchOnlyImport(ZPUB, { path: "m/84h/0h/0h" }).path).toEqual([84 + H, H, H])
   })
 
-  it('takes account and script type from the key; a bare xpub is legacy, Taproot is refused', () => {
+  it('takes account and script type from the key; Taproot requires an explicitly confirmed BIP86 path', () => {
     const acct2 = toSlip132(MASTER.derive("m/49'/0'/2'").publicExtendedKey, 'p2sh-p2wpkh')
     expect(parseWatchOnlyImport(acct2)).toMatchObject({ scriptType: 'p2sh-p2wpkh', path: [49 + H, H, 2 + H], pathAssumed: true })
     expect(parseWatchOnlyImport(XPUB44)).toMatchObject({ scriptType: 'p2pkh', path: [44 + H, H, H], key: XPUB44 })
-    expect(() => parseWatchOnlyImport(XPUB44, { path: "m/86'/0'/0'" })).toThrow(/Taproot/)
+    const xpub86 = MASTER.derive("m/86'/0'/0'").publicExtendedKey
+    const taproot = parseWatchOnlyImport(xpub86, { path: "m/86'/0'/0'" })
+    expect(taproot).toMatchObject({ scriptType: 'p2tr', path: [86 + H, H, H], key: xpub86 })
+    expect(deriveAddress(taproot, 0, 0)).toBe('bc1p5cyxnuxmeuwuvkwfem96lqzszd02n6xdcjrs20cac6yqjjwudpxqkedrcr')
     expect(() => parseWatchOnlyImport(ZPUB, { path: "m/49'/0'/0'" })).toThrow(/can only be m\/84'\/0'\/0'/)
     expect(() => parseWatchOnlyImport(ZPUB, { path: "m/84'/0'/1'" })).toThrow(/can only be/)
   })

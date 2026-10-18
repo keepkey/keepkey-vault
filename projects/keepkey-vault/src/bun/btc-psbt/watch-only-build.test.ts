@@ -67,6 +67,33 @@ const COINS = [{ chain: 0, index: 0, value: 50_000, seed: 'a' }, { chain: 0, ind
 const PAY = { to: RECIPIENT, amount: '0.0006', isMax: false, feeLevel: 5 }
 
 describe('watch-only Create PSBT', () => {
+  it('builds a BIP86 Taproot PSBT from the saved xpub through the selected backend', async () => {
+    const path = [86 + H, H, H]
+    const key = MASTER.derive(formatPath(path))
+    const script = btc.p2tr(key.deriveChild(0).deriveChild(0).publicKey!.subarray(1)).script
+    const prev = btc.RawTx.encode({ version: 2, segwitFlag: false, lockTime: 0, witnesses: undefined,
+      inputs: [{ txid: new Uint8Array(32).fill(7), index: 0, finalScriptSig: new Uint8Array(), sequence: 0xffffffff }],
+      outputs: [{ amount: 100_000n, script }] })
+    const txid = hex.encode(sha256(sha256(prev)).reverse())
+    const f = fixture([], {
+      async listUnspent(q) {
+        expect(q.scriptType).toBe('p2tr')
+        return [{ txid, vout: 0, value: 100_000, path: "m/86'/0'/0'/0/0", scriptType: 'p2tr' }]
+      },
+      async rawTxHex() { return hex.encode(prev) },
+    })
+    const built = await buildWatchOnlyPsbt(f.backend, BITCOIN, { scriptType: 'p2tr', path, xpub: key.publicExtendedKey }, PAY)
+    expect(built.analysis.inputs[0].scriptType).toBe('p2tr')
+    expect(built.analysis.outputs[1].kind).toBe('change')
+    expect(built.analysis.outputs[1].address!.startsWith('bc1p')).toBe(true)
+    expect(toSignTx(built.analysis).inputs[0].addressNList).toEqual([...path, 0, 0])
+    const tx = btc.Transaction.fromPSBT(built.psbtBytes)
+    expect(tx.getInput(0).tapBip32Derivation![0][1].der.path).toEqual([0, 0])
+    tx.signIdx(key.deriveChild(0).deriveChild(0).privateKey!, 0)
+    tx.finalize()
+    expect(parseForBroadcast(tx.toPSBT(0)).fee).toBe(built.analysis.fee)
+  })
+
   it('derives the public BIP84 test vectors from the account key', () => {
     expect(btc.Address(btc.NETWORK).encode(btc.OutScript.decode(scriptAt([...PATH, 0, 0])))).toBe(RECEIVE_0)
     expect(btc.Address(btc.NETWORK).encode(btc.OutScript.decode(scriptAt([...PATH, 1, 0])))).toBe(CHANGE_0)
@@ -124,6 +151,8 @@ describe('watch-only Create PSBT', () => {
     await expect(buildWatchOnlyPsbt(bb.backend, BITCOIN, account(true), PAY)).rejects.toThrow('refusing to guess a fee rate')
     const core = fixture(COINS, { async feeRate() { return { slow: feerateToSatVb(undefined, ['Insufficient data or no feerate found']), average: 1, fast: 1 } } })
     await expect(buildWatchOnlyPsbt(core.backend, BITCOIN, account(true), PAY)).rejects.toThrow('Insufficient data')
+    for (const result of ['Infinity', '0.0001junk', '', null, true]) expect(() => estimatefeeToSatVb({ result })).toThrow('could not estimate')
+    for (const rate of [Infinity, NaN, -1, 0]) expect(() => feerateToSatVb(rate)).toThrow('could not estimate')
   })
 
   it('refuses when the change index cannot be proven', async () => {

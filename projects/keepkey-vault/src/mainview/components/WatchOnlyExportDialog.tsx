@@ -4,13 +4,14 @@ import { rpcRequest } from "../lib/rpc"
 import { Z } from "../lib/z-index"
 import type { BtcAccount } from "../../shared/types"
 
-type ExportScriptType = "p2wpkh" | "p2sh-p2wpkh" | "p2pkh"
+type ExportScriptType = "p2wpkh" | "p2sh-p2wpkh" | "p2pkh" | "p2tr"
 type ExportData = { key: string; fingerprint: string | null; derivation: string; filePath?: string }
 
 const SCRIPT_TYPES: Array<{ scriptType: ExportScriptType; label: string }> = [
 	{ scriptType: "p2wpkh", label: "Native SegWit (bc1q)" },
 	{ scriptType: "p2sh-p2wpkh", label: "Nested SegWit (3...)" },
 	{ scriptType: "p2pkh", label: "Legacy (1...)" },
+	{ scriptType: "p2tr", label: "Taproot (bc1p)" },
 ]
 
 const card = { bg: "rgba(255,255,255,0.03)", borderRadius: "lg", border: "1px solid", borderColor: "kk.border", p: "3" } as const
@@ -105,7 +106,7 @@ export function WatchOnlyExportDialog({ accounts, isHiddenWallet, onClose }: { a
 								</Box>
 							))}
 						</Flex>
-						<Text fontSize="xs" color="kk.textSecondary">Taproot (bc1p) accounts can't be exported: Electrum has no Taproot wallets.</Text>
+						{scriptType === "p2tr" && <Text fontSize="xs" color="kk.textSecondary">Copy this BIP86 key, fingerprint and path into a Taproot watch-only wallet in Sparrow. Electrum wallet files support the other account types.</Text>}
 
 						{!data && !error && (
 							<Flex align="center" gap="2" py="3" justify="center">
@@ -116,7 +117,7 @@ export function WatchOnlyExportDialog({ accounts, isHiddenWallet, onClose }: { a
 
 						{data && (
 							<Box {...card}>
-								<Text fontSize="xs" color="kk.textSecondary">Public key (Electrum: "Use a master key")</Text>
+								<Text fontSize="xs" color="kk.textSecondary">{scriptType === "p2tr" ? "BIP86 public key (Sparrow: Taproot)" : 'Public key (Electrum: "Use a master key")'}</Text>
 								<Text fontSize="xs" fontFamily="mono" color="kk.textPrimary" wordBreak="break-all" mb="2">{data.key}</Text>
 								<Flex justify="space-between"><Text fontSize="xs" color="kk.textSecondary">Master fingerprint</Text><Text fontSize="xs" fontFamily="mono" color="kk.textPrimary">{data.fingerprint ?? "unknown"}</Text></Flex>
 								<Flex justify="space-between"><Text fontSize="xs" color="kk.textSecondary">Derivation path</Text><Text fontSize="xs" fontFamily="mono" color="kk.textPrimary">{data.derivation}</Text></Flex>
@@ -134,7 +135,7 @@ export function WatchOnlyExportDialog({ accounts, isHiddenWallet, onClose }: { a
 						<Flex gap="2" justify="flex-end">
 							<Button {...plainButton} onClick={onClose} disabled={busy}>Close</Button>
 							<Button {...plainButton} onClick={handleCopy} disabled={!data}>{copied ? "Copied" : "Copy key"}</Button>
-							<Button {...goldButton} onClick={handleSave} disabled={!data || !data.fingerprint || busy}>
+							<Button {...goldButton} onClick={handleSave} disabled={!data || !data.fingerprint || busy || scriptType === "p2tr"}>
 								{busy ? "Saving..." : "Save Electrum wallet file"}
 							</Button>
 						</Flex>

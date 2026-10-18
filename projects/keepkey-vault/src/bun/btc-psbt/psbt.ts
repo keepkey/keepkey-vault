@@ -13,10 +13,10 @@ import { RawPSBTV0 } from '@scure/btc-signer/psbt'
 import { HDKey } from '@scure/bip32'
 import { base64, hex } from '@scure/base'
 import { sha256 } from '@noble/hashes/sha2'
-import { secp256k1 } from '@noble/curves/secp256k1'
+import { secp256k1, schnorr } from '@noble/curves/secp256k1'
 import { b58check } from './codec'
 
-export type BtcPsbtScriptType = 'p2pkh' | 'p2sh-p2wpkh' | 'p2wpkh'
+export type BtcPsbtScriptType = 'p2pkh' | 'p2sh-p2wpkh' | 'p2wpkh' | 'p2tr'
 
 export interface BtcPsbtAccount {
   scriptType: BtcPsbtScriptType
@@ -37,7 +37,7 @@ const CHANGE_GAP = 1000
 const MAX_CHANGE_INDEX = 1_000_000 // firmware signing.c BIP32_MAX_LAST_ELEMENT
 const SCAN_LIMIT = 200 // per chain, only for inputs that carry no derivation at all (~0.4 ms per key)
 const H = 0x80000000
-const PURPOSE: Record<BtcPsbtScriptType, number> = { p2pkh: 44, 'p2sh-p2wpkh': 49, p2wpkh: 84 }
+const PURPOSE: Record<BtcPsbtScriptType, number> = { p2pkh: 44, 'p2sh-p2wpkh': 49, p2wpkh: 84, p2tr: 86 }
 const MAGIC = [0x70, 0x73, 0x62, 0x74, 0xff]
 const EMPTY = new Uint8Array(0)
 
@@ -227,6 +227,7 @@ function loadAccount(a: BtcPsbtAccount): Acct {
 }
 
 function scriptsFor(scriptType: BtcPsbtScriptType, pubkey: Uint8Array): Derived {
+  if (scriptType === 'p2tr') return { pubkey, script: btc.p2tr(pubkey.subarray(1)).script }
   if (scriptType === 'p2pkh') return { pubkey, script: btc.p2pkh(pubkey).script }
   if (scriptType === 'p2wpkh') return { pubkey, script: btc.p2wpkh(pubkey).script }
   const p = btc.p2sh(btc.p2wpkh(pubkey))
@@ -265,11 +266,16 @@ function matchDerivation(entries: Derivation, script: Uint8Array, accts: Acct[])
   for (const [pubkey, { fingerprint, path }] of entries) {
     for (const c of candidates(fingerprint, path, accts)) {
       const d = derive(c.acct, c.chain, c.index)
-      if (!eq(d.pubkey, pubkey)) continue
+      if (!eq(c.acct.scriptType === 'p2tr' ? d.pubkey.subarray(1) : d.pubkey, pubkey)) continue
       return eq(d.script, script) ? { ...c, ...d } : 'mismatch'
     }
   }
   return undefined
+}
+
+/** BIP371 key-path origins use x-only keys and zero leaf hashes. */
+function derivations(meta: { bip32Derivation?: Derivation; tapBip32Derivation?: Array<[Uint8Array, { hashes: Uint8Array[]; der: { fingerprint: number; path: number[] } }]> }): Derivation {
+  return [...(meta.bip32Derivation ?? []), ...(meta.tapBip32Derivation ?? []).filter(([, v]) => !v.hashes.length).map(([key, v]): Derivation[number] => [key, v.der])]
 }
 
 /** Bounded gap scan for PSBTs stripped of derivations (Electrum "strip sensitive metadata", some exports). */
@@ -298,6 +304,66 @@ function decodeRawTx(bytes: Uint8Array): RawTx {
   return tx
 }
 
+/** Electrum finalizes legacy inputs with an empty witness stack (00), which
+ * btc-signer 1.8 rejects. Remove only that redundant field on proven P2PKH
+ * inputs. Preserve all other bytes; reject duplicate keys before removing any. */
+function normalizeLegacyEmptyWitness(bytes: Uint8Array): Uint8Array {
+  let pos = MAGIC.length
+  const size = () => {
+    if (pos >= bytes.length) throw new Error('Truncated PSBT')
+    const tag = bytes[pos++]
+    if (tag < 0xfd) return tag
+    const width = tag === 0xfd ? 2 : tag === 0xfe ? 4 : 8
+    if (pos + width > bytes.length) throw new Error('Truncated PSBT')
+    let n = 0n
+    for (let j = 0; j < width; j++) n |= BigInt(bytes[pos++]) << BigInt(8 * j)
+    if (n < (width === 2 ? 0xfdn : width === 4 ? 0x10000n : 0x100000000n) || n > BigInt(bytes.length)) throw new Error('Invalid PSBT length')
+    return Number(n)
+  }
+  const map = () => {
+    const entries: Array<{ start: number; end: number; key: string; value: Uint8Array }> = []
+    const seen = new Set<string>()
+    while (true) {
+      const start = pos
+      const keyLen = size()
+      if (!keyLen) return entries
+      if (pos + keyLen > bytes.length) throw new Error('Truncated PSBT key')
+      const key = hex.encode(bytes.subarray(pos, pos += keyLen))
+      if (seen.has(key)) throw new Error('Duplicate PSBT key')
+      seen.add(key)
+      const valueLen = size()
+      if (pos + valueLen > bytes.length) throw new Error('Truncated PSBT value')
+      const value = bytes.subarray(pos, pos += valueLen)
+      entries.push({ start, end: pos, key, value })
+    }
+  }
+  const global = map()
+  const unsignedBytes = global.find(e => e.key === '00')?.value
+  if (!unsignedBytes) throw new Error('Missing unsigned transaction')
+  const unsigned = decodeRawTx(unsignedBytes)
+  const removed: Array<{ start: number; end: number }> = []
+  for (let i = 0; i < unsigned.inputs.length; i++) {
+    const entries = map()
+    const witness = entries.find(e => e.key === '08')
+    if (!witness || witness.value.length !== 1 || witness.value[0] !== 0) continue
+    if (!entries.find(e => e.key === '07')?.value.length) continue
+    const prevBytes = entries.find(e => e.key === '00')?.value
+    if (!prevBytes) continue
+    const prev = btc.RawTx.decode(prevBytes)
+    const input = unsigned.inputs[i]
+    if (txidOf(prev) !== hex.encode(input.txid)) continue
+    const script = prev.outputs[input.index]?.script
+    if (!script || script.length !== 25 || script[0] !== 0x76 || script[1] !== 0xa9 || script[2] !== 20 || script[23] !== 0x88 || script[24] !== 0xac) continue
+    removed.push(witness)
+  }
+  if (!removed.length) throw new Error('No legacy empty witnesses')
+  const parts: Uint8Array[] = []
+  let start = 0
+  for (const r of removed) { parts.push(bytes.subarray(start, r.start)); start = r.end }
+  parts.push(bytes.subarray(start))
+  return btc.utils.concatBytes(...parts)
+}
+
 /** Binary (psbt\xff), base64 (cHNidP8), hex (70736274ff) PSBT, or raw tx hex. Caps and structural refusals only. */
 export function decode(input: Uint8Array | string): Decoded {
   if (input.length > MAX_ENCODED_BYTES) throw new Error('Input is larger than 1 MB, refusing')
@@ -317,7 +383,13 @@ export function decode(input: Uint8Array | string): Decoded {
   if (!startsWithMagic(bytes)) return { kind: 'rawtx', tx: decodeRawTx(bytes), bytes }
 
   let tx: btc.Transaction
-  try { tx = btc.Transaction.fromPSBT(bytes) } catch (e) { throw new Error(`Invalid PSBT: ${msg(e)}`) }
+  try { tx = btc.Transaction.fromPSBT(bytes) } catch (e) {
+    if (!msg(e).includes('empty finalScriptWitness')) throw new Error(`Invalid PSBT: ${msg(e)}`)
+    try {
+      bytes = normalizeLegacyEmptyWitness(bytes)
+      tx = btc.Transaction.fromPSBT(bytes)
+    } catch (normalizedError) { throw new Error(`Invalid PSBT: ${msg(normalizedError)}`) }
+  }
   if (tx.opts.PSBTVersion !== 0) throw new Error('Only PSBT version 0 is supported')
   if (tx.inputsLength > MAX_IO || tx.outputsLength > MAX_IO) throw new Error(`More than ${MAX_IO} inputs or outputs, refusing`)
   const seen = new Set<string>()
@@ -364,7 +436,7 @@ function prevOut(tx: btc.Transaction, i: number): { amount: bigint; script: Uint
 function estimateVsize(inputs: BtcPsbtScriptType[], outputScripts: Uint8Array[]): number {
   // Weight units; signatures counted at 72 bytes (DER + sighash byte).
   const varint = (n: number) => (n < 0xfd ? 1 : 3)
-  const IN: Record<BtcPsbtScriptType, number> = { p2pkh: 4 * 148, 'p2sh-p2wpkh': 4 * 64 + 108, p2wpkh: 4 * 41 + 108 }
+  const IN: Record<BtcPsbtScriptType, number> = { p2pkh: 4 * 148, 'p2sh-p2wpkh': 4 * 64 + 108, p2wpkh: 4 * 41 + 108, p2tr: 4 * 41 + 66 }
   let w = 4 * (4 + varint(inputs.length) + varint(outputScripts.length) + 4)
   if (inputs.some((t) => t !== 'p2pkh')) w += 2
   for (const t of inputs) w += IN[t]
@@ -389,25 +461,28 @@ export function analyze(input: Uint8Array | string, accounts: BtcPsbtAccount[]):
     }
     const prev = prevOut(tx, i)
     const sh = inp.sighashType
-    const okSighash = sh === undefined || sh === btc.SigHash.ALL || (isTaproot(prev.script) && sh === btc.SigHash.DEFAULT)
-    if (!okSighash) throw new Error(`Input #${i} asks for sighash ${sh}; KeepKey only signs SIGHASH_ALL`)
+    const taproot = isTaproot(prev.script)
+    const okSighash = sh === undefined || sh === (taproot ? btc.SigHash.DEFAULT : btc.SigHash.ALL)
+    if (!okSighash) throw new Error(`Input #${i} asks for sighash ${sh}; KeepKey only signs ${taproot ? 'SIGHASH_DEFAULT for Taproot' : 'SIGHASH_ALL'}`)
+    if (taproot && (inp.tapMerkleRoot !== undefined || inp.tapLeafScript?.length || inp.tapBip32Derivation?.some(([, v]) => v.hashes.length))) {
+      throw new Error(`Input #${i}: only BIP86 Taproot key-path spending is supported (no script trees)`)
+    }
     prevs.push(prev)
   }
   const owned: Array<Owned | undefined> = prevs.map((prev, i) => {
-    const entries = tx.getInput(i).bip32Derivation
+    const entries = derivations(tx.getInput(i))
     if (!entries?.length) return undefined
     const m = matchDerivation(entries, prev.script, accts)
     if (m === 'mismatch') throw new Error(`Input #${i}: our key path does not produce this coin's script, refusing`)
     return m
   })
-  const unpathed = prevs.flatMap((p, i) => (tx.getInput(i).bip32Derivation?.length ? [] : [hex.encode(p.script)]))
+  const unpathed = prevs.flatMap((p, i) => (derivations(tx.getInput(i)).length ? [] : [hex.encode(p.script)]))
   if (unpathed.length) {
     const found = scanScripts(new Set(unpathed), accts)
-    prevs.forEach((p, i) => { if (!tx.getInput(i).bip32Derivation?.length) owned[i] = found.get(hex.encode(p.script)) })
+    prevs.forEach((p, i) => { if (!derivations(tx.getInput(i)).length) owned[i] = found.get(hex.encode(p.script)) })
   }
-  // Desktop loads no taproot accounts for PSBTs yet, so a bc1p coin is never "ours": say that, not "wrong wallet".
   const tap = owned.findIndex((o, i) => !o && isTaproot(prevs[i].script))
-  if (tap >= 0) throw new Error(`Input #${tap} is a Taproot (bc1p) coin; signing Taproot PSBTs is not supported yet`)
+  if (tap >= 0) throw new Error(`Input #${tap} is a Taproot (bc1p) coin not found in this wallet's loaded BIP86 accounts`)
   const mine = owned.filter((o): o is Owned => !!o)
   if (!mine.length) throw new Error('Not this wallet. Wrong passphrase or account not added?')
   if (mine.length !== owned.length) {
@@ -417,12 +492,16 @@ export function analyze(input: Uint8Array | string, accounts: BtcPsbtAccount[]):
 
   // Amounts (CVE-2020-14199 class): the firmware trusts host-supplied segwit v0 amounts.
   prevs.forEach((p, i) => {
+    const internal = tx.getInput(i).tapInternalKey
+    if (owned[i]!.acct.scriptType === 'p2tr' && internal && !eq(internal, owned[i]!.pubkey.subarray(1))) {
+      throw new Error(`Input #${i}: Taproot internal key does not match this wallet`)
+    }
     if (owned[i]!.acct.scriptType === 'p2pkh' && !p.verified) {
       throw new Error(`Input #${i} spends a legacy (1...) coin. KeepKey needs that coin's full previous transaction and this file doesn't include it. Re-export with full previous transactions.`)
     }
   })
   const unverified = prevs.some((p) => !p.verified)
-  if (unverified && prevs.length > 1 && !prevs.some((p) => isTaproot(p.script))) {
+  if (unverified && prevs.length > 1 && !owned.every(o => o!.acct.scriptType === 'p2tr')) {
     throw new Error('Several inputs without their previous transactions: the fee cannot be verified. Re-export with full previous transactions.')
   }
 
@@ -455,7 +534,8 @@ export function analyze(input: Uint8Array | string, accounts: BtcPsbtAccount[]):
     }
     let address: string
     try { address = scriptToAddress(script) } catch (e) { throw new Error(`Output #${i}: ${msg(e)}, refusing`) }
-    const m = out.bip32Derivation?.length ? matchDerivation(out.bip32Derivation, script, accts) : undefined
+    const entries = derivations(out)
+    const m = entries.length ? matchDerivation(entries, script, accts) : undefined
     if (m === 'mismatch') throw new Error(`Output #${i}: change mismatch (our key path, different script), refusing`)
     if (!m) { outputs.push({ ...base, address, kind: 'payment', deviceWillShow: 'address' }); continue }
     const owner = { accountPath: m.acct.path, scriptType: m.acct.scriptType, addressNList: [...m.acct.path, m.chain, m.index] }
@@ -568,7 +648,18 @@ export function finalizeSigned(a: PsbtAnalysis, serializedTxHex: string): { psbt
     const pub = ai.pubkey
     let sig: Uint8Array
     let digest: Uint8Array
-    if (ai.scriptType === 'p2pkh') {
+    if (ai.scriptType === 'p2tr') {
+      // Firmware implements BIP86 key-path SIGHASH_DEFAULT: one 64-byte Schnorr
+      // signature, no annex, no script-path witness and no sighash suffix.
+      if (s.finalScriptSig.length || witness.length !== 1 || witness[0].length !== 64) fail(`input #${i} Taproot witness`)
+      digest = tx.preimageWitnessV1(i, a.inputs.map(x => scriptsFor(x.scriptType, x.pubkey).script), btc.SigHash.DEFAULT, a.inputs.map(x => x.amount))
+      const outputKey = scriptsFor('p2tr', pub).script.subarray(2)
+      if (!schnorr.verify(witness[0], digest, outputKey)) throw new Error(`Input #${i}: Taproot signature does not verify. Refusing.`)
+      const clear: Record<string, undefined> = {}
+      for (const k of Object.keys(p)) if (!FINAL_KEYS.has(k)) clear[k] = undefined
+      tx.updateInput(i, { ...clear, finalScriptSig: EMPTY, finalScriptWitness: witness } as InputUpdate, true)
+      return
+    } else if (ai.scriptType === 'p2pkh') {
       const parts = btc.Script.decode(s.finalScriptSig)
       const [sg, pk] = parts
       if (witness.length || parts.length !== 2 || !(sg instanceof Uint8Array) || !(pk instanceof Uint8Array) || !eq(pk, pub)) {
@@ -597,7 +688,11 @@ export function finalizeSigned(a: PsbtAnalysis, serializedTxHex: string): { psbt
 
   const txHex = hex.encode(tx.extract())
   if (txHex !== signedHex) throw new Error('Re-assembled transaction differs from the device output, refusing')
-  const psbtBytes = tx.toPSBT(0)
+  // btc-signer omits empty final_scriptSig. Electrum 4.8 requires that field
+  // together with final_scriptWitness to recognize native SegWit as complete.
+  const raw = RawPSBTV0.decode(tx.toPSBT(0))
+  raw.inputs.forEach((inp, i) => { inp.finalScriptSig = signed.inputs[i].finalScriptSig })
+  const psbtBytes = RawPSBTV0.encode(raw)
   return { psbtBytes, psbtBase64: base64.encode(psbtBytes), txHex, txid: tx.id }
 }
 
@@ -655,7 +750,9 @@ export function buildPsbt(p: BuildPsbtParams): { psbtBytes: Uint8Array; psbtBase
       nonWitnessUtxo: prevBytes,
       ...(acct.scriptType !== 'p2pkh' ? { witnessUtxo: { script: out.script, amount: out.amount } } : {}),
       ...(d.redeemScript ? { redeemScript: d.redeemScript } : {}),
-      bip32Derivation: [[d.pubkey, origin(acct, chain, index)]],
+      ...(acct.scriptType === 'p2tr'
+        ? { tapInternalKey: d.pubkey.subarray(1), tapBip32Derivation: [[d.pubkey.subarray(1), { hashes: [], der: origin(acct, chain, index) }]] as NonNullable<InputUpdate['tapBip32Derivation']> }
+        : { bip32Derivation: [[d.pubkey, origin(acct, chain, index)]] as Derivation }),
     })
   })
   p.outputs.forEach((o, i) => tx.addOutputAddress(o.address, sats(o.value, `Output #${i}`), btc.NETWORK))
@@ -666,7 +763,9 @@ export function buildPsbt(p: BuildPsbtParams): { psbtBytes: Uint8Array; psbtBase
       script: d.script,
       amount: sats(p.change.value, 'Change'),
       ...(d.redeemScript ? { redeemScript: d.redeemScript } : {}),
-      bip32Derivation: [[d.pubkey, origin(acct, chain, index)]],
+      ...(acct.scriptType === 'p2tr'
+        ? { tapInternalKey: d.pubkey.subarray(1), tapBip32Derivation: [[d.pubkey.subarray(1), { hashes: [], der: origin(acct, chain, index) }]] as NonNullable<InputUpdate['tapBip32Derivation']> }
+        : { bip32Derivation: [[d.pubkey, origin(acct, chain, index)]] as Derivation }),
     })
   }
   // PSBT_GLOBAL_XPUB only for a bare xpub, as Electrum's get_xpub_to_be_used_in_partial_tx writes it:

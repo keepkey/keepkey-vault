@@ -1564,7 +1564,7 @@ export interface BtcWatchOnlyAccounts {
   fingerprintKnown: boolean
   /** Who answers chain data: 'pioneer', or the user's own node ('blockbook' / 'core') */
   backend: string
-  accounts: Array<{ scriptType: 'p2wpkh' | 'p2sh-p2wpkh' | 'p2pkh'; accountIndex: number; path: string }>
+  accounts: Array<{ scriptType: BtcScriptType; accountIndex: number; path: string }>
 }
 
 /** btcWatchOnlyImport result (preview, or saved). fingerprint null = unknown (Electrum-style origins in PSBTs). */
@@ -1572,7 +1572,7 @@ export interface BtcWatchOnlyImport {
   id: string
   label: string
   source: 'electrum' | 'key'
-  scriptType: 'p2wpkh' | 'p2sh-p2wpkh' | 'p2pkh'
+  scriptType: BtcScriptType
   key: string
   path: string
   /** Inferred from the key, not stated by the import: the user must confirm it */
