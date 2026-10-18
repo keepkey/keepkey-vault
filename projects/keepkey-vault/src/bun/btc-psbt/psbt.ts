@@ -255,9 +255,7 @@ function candidates(fingerprint: number, path: number[], accts: Acct[]): Array<{
 
 /** First derivation entry that re-derives to its pubkey. 'mismatch' = our key on a script it doesn't produce. */
 function matchDerivation(entries: Derivation, script: Uint8Array, accts: Acct[]): Owned | 'mismatch' | undefined {
-  // Entries naming our master fingerprint are tried first; only the re-derived pubkey and script prove ownership.
-  const ours = (fp: number) => accts.some((a) => a.master === fp)
-  for (const [pubkey, { fingerprint, path }] of [...entries].sort((x, y) => +ours(y[1].fingerprint) - +ours(x[1].fingerprint))) {
+  for (const [pubkey, { fingerprint, path }] of entries) {
     for (const c of candidates(fingerprint, path, accts)) {
       const d = derive(c.acct, c.chain, c.index)
       if (!eq(d.pubkey, pubkey)) continue

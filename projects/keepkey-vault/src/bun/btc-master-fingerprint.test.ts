@@ -76,4 +76,11 @@ describe('device_snapshot master_fp', () => {
     db.saveDeviceSnapshot('dev1', 'Renamed', '7.15.0', '{"x":1}')
     expect(db.getDeviceSnapshotById('dev1')).toMatchObject({ label: 'Renamed', firmwareVer: '7.15.0', featuresJson: '{"x":1}', masterFp: '73c5da0a' })
   })
+
+  test('a seed-change purge clears it with the cached pubkeys', () => {
+    db.saveDeviceSnapshot('dev2', 'KeepKey', '7.14.2', '{}')
+    db.setDeviceMasterFingerprint('dev2', '73c5da0a')
+    db.clearCachedPubkeys('dev2')
+    expect(db.getDeviceSnapshotById('dev2')).toMatchObject({ label: 'KeepKey', masterFp: null })
+  })
 })

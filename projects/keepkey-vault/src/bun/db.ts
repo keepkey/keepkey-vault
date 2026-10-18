@@ -2397,6 +2397,8 @@ export function clearCachedPubkeys(deviceId: string) {
   try {
     if (!db) return
     db.run('DELETE FROM cached_pubkeys WHERE device_id = ?', [deviceId])
+    // The master fingerprint belongs to the same seed; a wiped and re-seeded KeepKey keeps its device_id.
+    db.run('UPDATE device_snapshot SET master_fp = NULL WHERE device_id = ?', [deviceId])
     console.log(`[db] Cleared cached pubkeys for device ${deviceId}`)
   } catch (e: any) {
     console.warn('[db] clearCachedPubkeys failed:', e.message)

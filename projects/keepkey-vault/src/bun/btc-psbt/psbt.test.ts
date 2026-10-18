@@ -253,7 +253,7 @@ describe('round trip with the test mnemonic', () => {
     expect(finalizeSigned(a, signLikeDevice(a)).txHex).toHaveLength(signLikeDevice(a).length)
   })
 
-  it('master fingerprint orders the search only; the re-derived key proves ownership', () => {
+  it('foreign-fingerprint decoy entries are skipped; our fingerprint on a key we did not derive is refused', () => {
     const { psbtBytes } = build('p2wpkh', TWO_COINS, { change: { index: 0, value: 29_000n } })
     const other = keyAt([84 + H, H, 9 + H, 0, 0]).publicKey!
     const withEntries = (f: (pub: Uint8Array, path: number[]) => Array<[Uint8Array, { fingerprint: number; path: number[] }]>) => mutate(psbtBytes, (tx) => {
