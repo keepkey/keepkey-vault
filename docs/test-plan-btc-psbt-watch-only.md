@@ -76,3 +76,24 @@ an own node fails. Missing fee estimates or previous transactions fail closed.
 
 The two-PC transfer and live own-node scenarios require those environments;
 unit tests and synthetic transactions do not substitute for those checks.
+
+## Final review evidence — 2026-10-18
+
+- Full regression: 1,557 tests, 53 worker tests, 35 Core backend assertions,
+  and the standalone Cosmos/flags suites passed. The development app built.
+- Electrum 4.8.0: all six offline round trips passed.
+- Installed Sparrow 2.1.2 library: both Taproot round trips passed.
+- Physical KeepKey 7.14.3 Bitcoin-only: all five BIP86 receive addresses matched;
+  the synthetic transaction signed after two confirmation requests.
+- Actual Desktop, offline mode: dropped/reviewed/signed the Taproot PSBT,
+  saved its finalized file, and reopened it in broadcast review with the
+  correct fee and txid. The broadcast button was absent while offline.
+- Sparrow independently verified that physical-device Schnorr signature,
+  its master fingerprint, five addresses, fee and finalized PSBT.
+- Actual Desktop: imported a different BIP86 account, confirmed the explicit
+  path choice, retained watch-only mode with the connected nonmatching key,
+  and showed the unverified-address warning. The Bitcoin-only dashboard,
+  navigation and command palette were checked after correcting their scope.
+
+No real UTXOs were spent or broadcast by these checks. A live-node broadcast
+and transfer between two physical PCs remain release-environment checks.

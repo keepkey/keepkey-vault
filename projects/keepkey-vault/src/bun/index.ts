@@ -8727,10 +8727,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			// ── Watch-only mode ─────────────────────────────────────
 			// The UI opened (active) or left watch-only. A Bitcoin-only saved wallet may use the
 			// user's own node, exactly like a connected Bitcoin-only device.
-			watchOnlySetView: async (params): Promise<void> => {
+			watchOnlySetView: async (params): Promise<{ bitcoinOnly: boolean }> => {
 				const snap = params?.active ? (params.deviceId ? getDeviceSnapshotById(params.deviceId) : getLatestDeviceSnapshot()) : null
 				watchOnlyViewBtcOnly = !!snap && bitcoinOnlyWatchOnlyScope(false, snap.featuresJson)
 				setBtcNodeWatchOnlyEligible(watchOnlyViewBtcOnly)
+				return { bitcoinOnly: watchOnlyViewBtcOnly }
 			},
 			checkWatchOnlyCache: async () => {
 				const snap = getLatestDeviceSnapshot()

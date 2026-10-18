@@ -105,7 +105,7 @@ export function CreatePsbtPanel({ deviceId }: { deviceId?: string }) {
 						</Flex>
 					)}
 					<Text fontSize="xs" color="kk.textSecondary">
-						From {SCRIPT_LABEL[info.accounts[account].scriptType]} {info.accounts[account].path} · chain data from {info.backend === "pioneer" ? "Pioneer" : `your own ${info.backend} node`}
+						From {SCRIPT_LABEL[info.accounts[account].scriptType]} {info.accounts[account].path} · {info.backend === "device-only" ? "Go online to fetch coins and fee estimates." : `chain data from ${info.backend === "pioneer" ? "Pioneer" : `your own ${info.backend} node`}`}
 					</Text>
 					<Input value={to} onChange={(e) => setTo(e.target.value)} placeholder="Recipient Bitcoin address (bc1..., 1..., 3...)" fontFamily="mono" fontSize="xs" disabled={busy} />
 					<Flex gap="2" align="center">
@@ -125,7 +125,7 @@ export function CreatePsbtPanel({ deviceId }: { deviceId?: string }) {
 						</Text>
 					)}
 					<Flex justify="flex-end">
-						<Button {...goldButton} onClick={handleCreate} disabled={busy || !to.trim() || (!isMax && !amount.trim())}>
+						<Button {...goldButton} onClick={handleCreate} disabled={busy || info.backend === "device-only" || !to.trim() || (!isMax && !amount.trim())}>
 							{busy ? "Building..." : "Create PSBT"}
 						</Button>
 					</Flex>

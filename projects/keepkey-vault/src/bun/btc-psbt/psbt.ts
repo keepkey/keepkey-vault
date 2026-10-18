@@ -1,6 +1,6 @@
 /**
  * BIP-174 PSBT v0 for Bitcoin mainnet single-sig accounts (p2pkh, p2sh-p2wpkh,
- * p2wpkh). Pure: no device, no network, no RPC.
+ * p2wpkh, BIP86 p2tr key-path). Pure: no device, no network, no RPC.
  *
  * Trust model: the PSBT is hostile. Ownership is proven only by re-deriving
  * each pubkey AND scriptPubKey from Desktop's own account xpub; fingerprints

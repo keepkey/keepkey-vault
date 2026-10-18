@@ -160,6 +160,7 @@ function App() {
 	const [watchOnlyLastSynced, setWatchOnlyLastSynced] = useState(0)
 	// A KeepKey connected while watching that does not hold the watched wallet ("other"), or could not be asked ("unchecked").
 	const [watchOnlyOtherDevice, setWatchOnlyOtherDevice] = useState<"other" | "unchecked" | null>(null)
+	const [watchOnlyScope, setWatchOnlyScope] = useState<{ deviceId?: string; bitcoinOnly: boolean }>({ bitcoinOnly: true })
 
 
 	// Fetch app version + REST API state on mount
@@ -860,10 +861,17 @@ function App() {
 
 	// Bun lets a Bitcoin-only saved wallet use the user's own node only while it is on screen.
 	const watchOnlyShown = showWatchOnly(watchOnlyMode, phase)
+	// Until the selected snapshot answers, keep the UI within Bitcoin. A scope
+	// from the previous wallet must never expose multichain actions on a new one.
+	const watchOnlyBitcoinOnly = isBitcoinOnlyVariant(deviceState.firmwareVariant)
+		|| watchOnlyScope.deviceId !== watchOnlyDeviceId || watchOnlyScope.bitcoinOnly
 	useEffect(() => {
 		if (!watchOnlyShown) return
-		rpcRequest("watchOnlySetView", { active: true, deviceId: watchOnlyDeviceId }).catch(() => {})
-		return () => { rpcRequest("watchOnlySetView", { active: false }).catch(() => {}) }
+		let cancelled = false
+		rpcRequest<{ bitcoinOnly: boolean }>("watchOnlySetView", { active: true, deviceId: watchOnlyDeviceId })
+			.then(({ bitcoinOnly }) => { if (!cancelled) setWatchOnlyScope({ deviceId: watchOnlyDeviceId, bitcoinOnly }) })
+			.catch(() => {})
+		return () => { cancelled = true; rpcRequest("watchOnlySetView", { active: false }).catch(() => {}) }
 	}, [watchOnlyShown, watchOnlyDeviceId])
 
 	useEffect(() => {
@@ -956,6 +964,7 @@ function App() {
 						activeTab="vault"
 						onTabChange={() => {}}
 						watchOnly
+						isBitcoinOnly={watchOnlyBitcoinOnly}
 						onExitToDeviceSelect={() => { setWatchOnlyMode(false); setWatchOnlyDeviceId(undefined) }}
 						connectedDeviceId={deviceState.deviceId || null}
 						watchingDeviceId={watchOnlyDeviceId || null}
@@ -970,7 +979,7 @@ function App() {
 									: t("watchOnlyDeviceUnchecked", { ns: "nav", defaultValue: "Could not check whether the connected KeepKey holds {{label}}. Still showing it as watch-only.", label: watchOnlyLabel || "this wallet" })}
 							</Text>
 						)}
-						<Dashboard watchOnly watchOnlyDeviceId={watchOnlyDeviceId} onLoaded={() => {}} />
+						<Dashboard watchOnly watchOnlyDeviceId={watchOnlyDeviceId} firmwareVariant={watchOnlyBitcoinOnly ? 'KeepKeyBTC' : undefined} onLoaded={() => {}} />
 					</Flex>
 				</Flex>
 				<DeviceSettingsDrawer
@@ -990,6 +999,7 @@ function App() {
 					onJumpToVault={() => setActiveTab("vault")}
 					balances={paletteBalances}
 					firmwareVersion={undefined}
+					bitcoinOnly={watchOnlyBitcoinOnly}
 					hiveEnabled={hiveEnabled}
 				/>
 			</>
