@@ -256,7 +256,7 @@ import { supportsZcashPrivacyBuild } from "./zcash-capability"
 import type { ChainDef } from "../shared/chains"
 import { BtcAccountManager } from "./btc-accounts"
 import { alreadySigned, analyze as analyzePsbt, finalizeSigned, toSignTx, type BtcPsbtScriptType, type PsbtAnalysis } from "./btc-psbt/psbt"
-import { formatPath, toStandardXpub } from "./btc-psbt/codec"
+import { formatPath, toSlip132, toStandardXpub, writeElectrumWallet } from "./btc-psbt/codec"
 import { unwrapUtxoDiscoveryKey, utxoDiscoveryKey } from "./btc-backend/types"
 import { marketPriceUsd } from "../shared/market-price"
 import { EvmAddressManager, evmAddressPath } from "./evm-addresses"
@@ -268,7 +268,7 @@ import { classifyEffectExposure, observeEvmCall, observeEvmTypedData, observeMal
 import { getClearSignProtectionCaseStudies } from "./clearsign-case-studies"
 import { getEvmSimulationEndpoint, getEvmSimulationRpcUrls } from "./evm-simulation-config"
 import { addContractFacts } from "./contract-facts"
-import { initDb, getDb, factoryResetDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, setCustomTokenIcon as dbSetCustomTokenIcon, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility, insertApiLog, getApiLogs, clearApiLogs, setCachedBalances, getCachedBalances, updateCachedBalance, clearBalances, deleteCachedChainBalance, saveCachedPubkey, getLatestDeviceSnapshot, getCachedPubkeys, saveReport, getReportsList, getReportById, deleteReport, reportExists, getSwapHistory, getSwapHistoryStats, getSwapHistoryByTxid, getBip85Seeds, saveBip85Seed, deleteBip85Seed, clearCachedPubkeys, getRecentActivityFromLog, getPioneerServers, addPioneerServerDb, removePioneerServerDb, syncOwnAddressBook, recordOutbound, getAddressBookList, updateAddressBookEntry, deleteAddressBookEntry, getAddressBookHistory, getDeviceLabelMap, getBalancesForOwnSeed, addExternalEntry, matchAddressBook, insertClearSignEvent, getClearSignEvents, insertClearSignObservation, finalizeClearSignObservation, authenticateClearSignObservation, refuseClearSignObservationDefinition, getClearSignCoverageSummary, getClearSignAuditJobs, enqueueClearSignAuditDemand, getSignedTxReview } from "./db"
+import { initDb, getDb, factoryResetDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, setCustomTokenIcon as dbSetCustomTokenIcon, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility, insertApiLog, getApiLogs, clearApiLogs, setCachedBalances, getCachedBalances, updateCachedBalance, clearBalances, deleteCachedChainBalance, saveCachedPubkey, getLatestDeviceSnapshot, getCachedPubkeys, saveReport, getReportsList, getReportById, deleteReport, reportExists, getSwapHistory, getSwapHistoryStats, getSwapHistoryByTxid, getBip85Seeds, saveBip85Seed, deleteBip85Seed, clearCachedPubkeys, getRecentActivityFromLog, getPioneerServers, addPioneerServerDb, removePioneerServerDb, syncOwnAddressBook, recordOutbound, getAddressBookList, updateAddressBookEntry, deleteAddressBookEntry, getAddressBookHistory, getDeviceLabelMap, getBalancesForOwnSeed, addExternalEntry, matchAddressBook, insertClearSignEvent, getClearSignEvents, insertClearSignObservation, finalizeClearSignObservation, authenticateClearSignObservation, refuseClearSignObservationDefinition, getClearSignCoverageSummary, getClearSignAuditJobs, enqueueClearSignAuditDemand, getSignedTxReview, setDeviceMasterFingerprint } from "./db"
 import { lookupEvmTx, recordSignedEvmTx, txDetails, walletBook } from "./signed-tx-review"
 import { getCentralAssetAuditHistory, getCentralClearSignStatus, getCentralContractAudit, submitCentralAssetReview, submitCentralContractReview } from './clearsign-central-client'
 import { buildCentralAssetReview, buildCentralContractReview } from './clearsign-central-review'
@@ -3580,10 +3580,12 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const { truth } = await ensureManagersForSeed('btcPsbtAnalyze')
 				if (!btcAccounts.isInitialized) await btcAccounts.initialize(wallet as any)
 				stampManagers(truth)
-				// Every loaded account the PSBT core can sign for (no taproot yet). Ownership is proven from these xpubs only.
+				// Every loaded account the PSBT core can sign for (no taproot yet). Ownership is proven from these xpubs only;
+				// the master fingerprint only orders the search.
+				const masterFingerprint = btcAccounts.masterFingerprint ? new Uint8Array(Buffer.from(btcAccounts.masterFingerprint, 'hex')) : undefined
 				const accounts = btcAccounts.getAllXpubMeta()
 					.filter(x => x.scriptType !== 'p2tr')
-					.map(x => ({ scriptType: x.scriptType as BtcPsbtScriptType, path: x.path, xpub: toStandardXpub(x.xpub).xpub }))
+					.map(x => ({ scriptType: x.scriptType as BtcPsbtScriptType, path: x.path, xpub: toStandardXpub(x.xpub).xpub, masterFingerprint }))
 				const analysis = analyzePsbt(bytes, accounts)
 				if (engine.wallet !== wallet || engine.isPassphraseWallet !== hidden || activitySessionEpoch !== epoch) {
 					throw new Error('The wallet changed while checking this PSBT. Drop it again.')
@@ -3644,6 +3646,28 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				} finally {
 					p.signing = false
 				}
+			},
+			btcWatchOnlyExport: async (params) => {
+				if (!engine.wallet || engine.getDeviceState().state !== 'ready') throw new Error('Connect and unlock your KeepKey to export')
+				const scriptType = params?.scriptType
+				if (scriptType !== 'p2wpkh' && scriptType !== 'p2sh-p2wpkh' && scriptType !== 'p2pkh') {
+					throw new Error('Electrum supports native segwit, nested segwit and legacy accounts only (no Taproot)')
+				}
+				const { truth } = await ensureManagersForSeed('btcWatchOnlyExport')
+				if (!btcAccounts.isInitialized) await btcAccounts.initialize(engine.wallet as any)
+				stampManagers(truth)
+				const meta = btcAccounts.getAllXpubMeta().find(x => x.accountIndex === params.accountIndex && x.scriptType === scriptType)
+				if (!meta) throw new Error(`Bitcoin account ${params.accountIndex} is not loaded`)
+				const std = toStandardXpub(meta.xpub)
+				if (std.scriptType !== scriptType) throw new Error(`The ${scriptType} key has the wrong prefix`)
+				const fingerprint = btcAccounts.masterFingerprint
+				const result = { key: toSlip132(std.xpub, scriptType), fingerprint, derivation: formatPath(meta.path) }
+				if (!params.save) return result
+				if (!fingerprint) throw new Error('Master fingerprint unknown. Reconnect the KeepKey and try again.')
+				const json = writeElectrumWallet({ scriptType, path: meta.path, xpub: std.xpub, masterFingerprint: new Uint8Array(Buffer.from(fingerprint, 'hex')) }, 'KeepKey')
+				const filePath = uniqueFilePath(path.join(os.homedir(), 'Downloads', `keepkey-btc-${scriptType}-account${meta.accountIndex}.json`), fs.existsSync)
+				await Bun.write(filePath, json)
+				return { ...result, filePath }
 			},
 			btcPsbtShowFile: async () => {
 				if (!lastSignedPsbtPath) return
@@ -10140,6 +10164,11 @@ engine.on('reset-error', (err) => {
 // BtcAccountManager change events → push to WebView
 btcAccounts.on('change', (set) => {
 	try { rpc.send['btc-accounts-update'](set) } catch { /* webview not ready yet */ }
+	// PRIVACY: hidden-wallet sessions persist nothing (engine-controller snapshot rule).
+	const deviceId = engine.getDeviceState().deviceId
+	if (btcAccounts.masterFingerprint && deviceId && !engine.isPassphraseWallet && !engine.isEmulator) {
+		setDeviceMasterFingerprint(deviceId, btcAccounts.masterFingerprint)
+	}
 })
 
 // EvmAddressManager change events → push to WebView

@@ -117,6 +117,8 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       /** Signs only the PSBT bun holds for this review id, in the wallet session it was checked in. */
       btcPsbtSign: { params: { id: string }; response: { filePath: string; txHex: string; txid: string } }
       btcPsbtShowFile: { params: void; response: void }
+      /** Electrum watch-only export of one loaded account. save=true writes the wallet file to ~/Downloads. fingerprint null = unknown. */
+      btcWatchOnlyExport: { params: { accountIndex: number; scriptType: 'p2wpkh' | 'p2sh-p2wpkh' | 'p2pkh'; save?: boolean }; response: { key: string; fingerprint: string | null; derivation: string; filePath?: string } }
       ethSignTx: { params: any; response: any }
       ethSignMessage: { params: any; response: any } // TODO: type
       ethSignTypedData: { params: any; response: any } // TODO: type

@@ -36,6 +36,8 @@ describe('SLIP-132', () => {
 
   it('reads the master fingerprint from a depth-1 key only', () => {
     expect(hex.encode(masterFingerprintFromDepth1Xpub(MASTER.derive("m/84'").publicExtendedKey))).toBe('73c5da0a')
+    // The device answers m/84' with SPENDWITNESS as a zpub.
+    expect(hex.encode(masterFingerprintFromDepth1Xpub(toSlip132(MASTER.derive("m/84'").publicExtendedKey, 'p2wpkh')))).toBe('73c5da0a')
     expect(() => masterFingerprintFromDepth1Xpub(ACCOUNT_XPUB)).toThrow(/depth-1/)
   })
 })

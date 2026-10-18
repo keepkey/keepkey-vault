@@ -35,6 +35,7 @@ import { useBtcAccounts } from "../hooks/useBtcAccounts"
 import { useEvmAddresses } from "../hooks/useEvmAddresses"
 import { AddTokenDialog } from "./AddTokenDialog"
 import { PSBT_PASTE_EVENT } from "./PsbtSignDialog"
+import { WatchOnlyExportDialog } from "./WatchOnlyExportDialog"
 import { detectSpamToken, categorizeTokens, type SpamResult } from "../../shared/spamFilter"
 
 type AssetView = "receive" | "send" | "privacy"
@@ -524,6 +525,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 		: `${headerBalance} ${chain.symbol}`
 
 	const [showAddToken, setShowAddToken] = useState(false)
+	const [showWatchOnlyExport, setShowWatchOnlyExport] = useState(false)
 	// Watch-only mode never opens signing dialogs, regardless of how they're
 	// triggered (initialAction prop, action-row button, hotkey, dApp request).
 	const [showSwapDialog, setShowSwapDialogRaw] = useState(initialAction === "swap" && !watchOnly)
@@ -1464,6 +1466,9 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 						onClose={() => setShowAddToken(false)}
 					/>
 				)}
+				{showWatchOnlyExport && (
+					<WatchOnlyExportDialog accounts={btcAccounts.accounts} isHiddenWallet={isHiddenWallet} onClose={() => setShowWatchOnlyExport(false)} />
+				)}
 
 				{/* Activity preview */}
 				<Box mt="6">
@@ -1490,6 +1495,16 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 								className="electrobun-webkit-app-region-no-drag"
 							>
 								Sign PSBT
+							</Box>
+						)}
+						{isBtc && !watchOnly && btcAccounts.accounts.length > 0 && (
+							<Box
+								as="button" fontSize="11px" color="var(--gold)" fontWeight="500"
+								cursor="pointer" _hover={{ opacity: 0.75 }} transition="opacity 0.15s"
+								onClick={() => setShowWatchOnlyExport(true)}
+								className="electrobun-webkit-app-region-no-drag"
+							>
+								Watch-only export
 							</Box>
 						)}
 						{onViewActivity && (

@@ -7,6 +7,7 @@
  */
 import { EventEmitter } from 'events'
 import { supportedBtcScriptTypes, btcAccountPath } from '../shared/chains'
+import { masterFingerprintFromDepth1Xpub } from './btc-psbt/codec'
 import type { BtcScriptType, BtcXpub, BtcAccount, BtcAccountSet } from '../shared/types'
 
 export class BtcAccountManager extends EventEmitter {
@@ -15,6 +16,8 @@ export class BtcAccountManager extends EventEmitter {
   private initPromise: Promise<BtcAccountSet> | null = null
   /** Set after getBalances calls updateXpubBalance — prevents getBtcAccounts from stomping live data with stale DB rows. */
   pioneerFetched = false
+  /** BIP32 master fingerprint (8 hex) read with account 0; null = unknown. */
+  masterFingerprint: string | null = null
 
   /** Initialize account 0 with the device-supported BTC account types. */
   async initialize(wallet: any): Promise<BtcAccountSet> {
@@ -30,6 +33,7 @@ export class BtcAccountManager extends EventEmitter {
   private async _doInitialize(wallet: any): Promise<BtcAccountSet> {
     this.accounts = []
     this.selectedXpub = { accountIndex: 0, scriptType: 'p2wpkh' }
+    this.masterFingerprint = null
     await this.fetchAccount(wallet, 0)
     const set = this.toAccountSet()
     this.emit('change', set)
@@ -68,7 +72,13 @@ export class BtcAccountManager extends EventEmitter {
       curve: 'secp256k1',
     }))
 
-    const requiredResults = await wallet.getPublicKeys(requiredPaths)
+    // Account 0 also asks for m/84': a depth-1 key's parent fingerprint is the master
+    // fingerprint (PSBT key origins, Electrum root_fingerprint). No prompt, and the
+    // firmware has no path policy, so it succeeds wherever the p2wpkh account does.
+    const fingerprintPath = accountIndex === 0
+      ? [{ addressNList: [84 + 0x80000000], coin: 'Bitcoin', scriptType: 'p2wpkh', curve: 'secp256k1', showDisplay: false }]
+      : []
+    const requiredResults = await wallet.getPublicKeys([...requiredPaths, ...fingerprintPath])
     const missingRequired = requiredScriptTypes
       .filter((_, i) => !requiredResults?.[i]?.xpub)
       .map(st => st.scriptType)
@@ -118,6 +128,15 @@ export class BtcAccountManager extends EventEmitter {
       xpubs,
       totalBalanceUsd: 0,
     })
+
+    if (fingerprintPath.length) {
+      const depth1 = requiredResults?.[requiredPaths.length]?.xpub
+      try {
+        this.masterFingerprint = depth1 ? Buffer.from(masterFingerprintFromDepth1Xpub(depth1)).toString('hex') : null
+      } catch (e: any) {
+        console.warn(`[btc-accounts] Master fingerprint unreadable: ${e?.message || String(e)}`)
+      }
+    }
   }
 
   /** Return all pubkey entries for Pioneer balance lookup (all xpubs across all accounts). */
@@ -211,6 +230,7 @@ export class BtcAccountManager extends EventEmitter {
     this.selectedXpub = { accountIndex: 0, scriptType: 'p2wpkh' }
     this.initPromise = null
     this.pioneerFetched = false
+    this.masterFingerprint = null
   }
 
   /** Whether accounts have been initialized. */

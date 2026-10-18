@@ -252,6 +252,22 @@ describe('round trip with the test mnemonic', () => {
     expect(a.outputs[1].deviceWillShow).toBe('address')
     expect(finalizeSigned(a, signLikeDevice(a)).txHex).toHaveLength(signLikeDevice(a).length)
   })
+
+  it('master fingerprint orders the search only; the re-derived key proves ownership', () => {
+    const { psbtBytes } = build('p2wpkh', TWO_COINS, { change: { index: 0, value: 29_000n } })
+    const other = keyAt([84 + H, H, 9 + H, 0, 0]).publicKey!
+    const withEntries = (f: (pub: Uint8Array, path: number[]) => Array<[Uint8Array, { fingerprint: number; path: number[] }]>) => mutate(psbtBytes, (tx) => {
+      for (let i = 0; i < 2; i++) {
+        const [[pub, der]] = tx.getInput(i).bip32Derivation!
+        tx.updateInput(i, { bip32Derivation: undefined }, true)
+        tx.updateInput(i, { bip32Derivation: f(pub, der.path) }, true)
+      }
+    })
+    const decoy = withEntries((pub, path) => [[other, { fingerprint: 0xdeadbeef, path }], [pub, { fingerprint: 0x73c5da0a, path }]])
+    expect(analyze(decoy, [account('p2wpkh')]).inputs.map((i) => i.addressNList[4])).toEqual([0, 1])
+    const forged = withEntries((_pub, path) => [[other, { fingerprint: 0x73c5da0a, path }]])
+    expect(() => analyze(forged, [account('p2wpkh')])).toThrow(/Not this wallet/)
+  })
 })
 
 describe('refusals and device parity', () => {

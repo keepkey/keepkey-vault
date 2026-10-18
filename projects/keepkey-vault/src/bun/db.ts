@@ -188,6 +188,8 @@ export function initDb() {
         updated_at    INTEGER NOT NULL
       )
     `)
+    // BIP32 master fingerprint (8 hex), standard (non-hidden) wallets only
+    try { db.exec(`ALTER TABLE device_snapshot ADD COLUMN master_fp TEXT`) } catch { /* already exists */ }
 
     db.exec(`
       CREATE TABLE IF NOT EXISTS cached_pubkeys (
@@ -2174,11 +2176,23 @@ export function saveDeviceSnapshot(deviceId: string, label: string, firmwareVer:
   try {
     if (!db) return
     db.run(
-      `INSERT OR REPLACE INTO device_snapshot (device_id, label, firmware_ver, features_json, updated_at) VALUES (?, ?, ?, ?, ?)`,
+      // Upsert, not REPLACE: keeps master_fp, which is written separately.
+      `INSERT INTO device_snapshot (device_id, label, firmware_ver, features_json, updated_at) VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(device_id) DO UPDATE SET label = excluded.label, firmware_ver = excluded.firmware_ver, features_json = excluded.features_json, updated_at = excluded.updated_at`,
       [deviceId, label, firmwareVer, featuresJson, Date.now()]
     )
   } catch (e: any) {
     console.warn('[db] saveDeviceSnapshot failed:', e.message)
+  }
+}
+
+/** Only updates an existing snapshot row, so it never registers a device by itself. */
+export function setDeviceMasterFingerprint(deviceId: string, masterFp: string) {
+  try {
+    if (!db) return
+    db.run('UPDATE device_snapshot SET master_fp = ? WHERE device_id = ?', [masterFp, deviceId])
+  } catch (e: any) {
+    console.warn('[db] setDeviceMasterFingerprint failed:', e.message)
   }
 }
 
@@ -2196,14 +2210,14 @@ export function getLatestDeviceSnapshot(): { deviceId: string; label: string; fi
   }
 }
 
-export function getDeviceSnapshotById(deviceId: string): { deviceId: string; label: string; firmwareVer: string; featuresJson: string; updatedAt: number } | null {
+export function getDeviceSnapshotById(deviceId: string): { deviceId: string; label: string; firmwareVer: string; featuresJson: string; updatedAt: number; masterFp: string | null } | null {
   try {
     if (!db) return null
     const row = db.query(
-      'SELECT device_id, label, firmware_ver, features_json, updated_at FROM device_snapshot WHERE device_id = ?'
-    ).get(deviceId) as { device_id: string; label: string; firmware_ver: string; features_json: string; updated_at: number } | null
+      'SELECT device_id, label, firmware_ver, features_json, updated_at, master_fp FROM device_snapshot WHERE device_id = ?'
+    ).get(deviceId) as { device_id: string; label: string; firmware_ver: string; features_json: string; updated_at: number; master_fp: string | null } | null
     if (!row) return null
-    return { deviceId: row.device_id, label: row.label, firmwareVer: row.firmware_ver, featuresJson: row.features_json, updatedAt: row.updated_at }
+    return { deviceId: row.device_id, label: row.label, firmwareVer: row.firmware_ver, featuresJson: row.features_json, updatedAt: row.updated_at, masterFp: row.master_fp }
   } catch (e: any) {
     console.warn('[db] getDeviceSnapshotById failed:', e.message)
     return null
