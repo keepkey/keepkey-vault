@@ -145,20 +145,20 @@ export function AddressBookView() {
     return Array.from(byDevice.values())
   }, [display])
 
-  const externalRows = useMemo(() => display.filter(e => e.kind === "external"), [display])
+  // Most recently sent-to first (Send page), then most recently saved.
+  const externalRows = useMemo(() => display.filter(e => e.kind === "external")
+    .sort((a, b) => (b.lastUsedAt || 0) - (a.lastUsedAt || 0) || (b.savedAt || 0) - (a.savedAt || 0) || b.updatedAt - a.updatedAt), [display])
 
   const tabs = useMemo(() => {
+    // Saved recipients first: always shown, and the tab the Address Book opens on.
     const list: Array<{ id: string; label: string; connected?: boolean; external?: boolean }> =
-      deviceTabs.map(g => ({ id: g.deviceId, label: g.label, connected: g.deviceId === connectedDeviceId }))
-    // External tab is always shown so it's discoverable + a target for "Add address".
-    list.push({ id: EXTERNAL_TAB, label: t("contacts", { defaultValue: "Saved recipients" }), external: true })
+      [{ id: EXTERNAL_TAB, label: t("contacts", { defaultValue: "Saved recipients" }), external: true }]
+    list.push(...deviceTabs.map(g => ({ id: g.deviceId, label: g.label, connected: g.deviceId === connectedDeviceId })))
     return list
   }, [deviceTabs, connectedDeviceId, t])
 
-  // Resolve the active tab: explicit selection if still valid, else connected device, else first.
-  const effectiveTab = (activeTab && tabs.some(tb => tb.id === activeTab))
-    ? activeTab
-    : (tabs.find(tb => tb.connected)?.id || tabs[0]?.id || null)
+  // Resolve the active tab: explicit selection if still valid, else Saved recipients.
+  const effectiveTab = (activeTab && tabs.some(tb => tb.id === activeTab)) ? activeTab : EXTERNAL_TAB
 
   const tabRows = useMemo<DisplayEntry[]>(() => {
     if (effectiveTab === EXTERNAL_TAB) return externalRows

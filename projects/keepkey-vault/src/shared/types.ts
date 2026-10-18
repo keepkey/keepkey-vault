@@ -905,6 +905,7 @@ export interface AddressBookEntry {
   firstSeenTxid?: string     // external rows — txid that introduced the recipient
   note?: string
   savedAt?: number           // external rows — when the user explicitly saved it (R4); null = history-only
+  lastUsedAt?: number        // latest send to this entry from the Send page (list reads only)
   createdAt: number
   updatedAt: number
 }

@@ -2796,6 +2796,7 @@ function mapAddressBookRow(r: any): AddressBookEntry {
     firstSeenTxid: r.first_seen_txid || undefined,
     note: r.note || undefined,
     savedAt: r.saved_at ?? undefined,
+    lastUsedAt: r.last_used_at ?? undefined,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   }
@@ -2922,7 +2923,8 @@ export function getAddressBookList(filter: AddressBookFilter): AddressBookEntry[
     if (!db) return []
     // The Address Book is wallet-agnostic: own + external are readable without a
     // wallet scope (omit walletId for a global, cross-wallet listing).
-    let sql = 'SELECT * FROM addressbook WHERE 1=1'
+    // last_used_at: the latest send to this entry from KeepKey Desktop's Send page.
+    let sql = 'SELECT a.*, (SELECT MAX(t.broadcast_at) FROM addressbook_tx t WHERE t.entry_id = a.id) AS last_used_at FROM addressbook a WHERE 1=1'
     const params: any[] = []
     if (filter.walletId) { sql += ' AND wallet_id = ?'; params.push(filter.walletId) }
     if (filter.networkId) { sql += ' AND network_id = ?'; params.push(filter.networkId) }
