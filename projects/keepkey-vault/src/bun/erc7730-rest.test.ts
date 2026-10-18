@@ -11,6 +11,7 @@ import { EventEmitter } from 'node:events'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { utils } from 'ethers'
 import fixtures from './erc7730-resolver.fixtures.json'
 
 // engine-controller's USB adapter is not loadable outside the app bundle; the
@@ -52,12 +53,16 @@ const latestObservation = () => db.getDb()!.query(
   `SELECT protection_level, definition_source, outcome, shape_key FROM clearsign_observations ORDER BY created_at DESC LIMIT 1`,
 ).get() as { protection_level: string; definition_source: string; outcome: string; shape_key: string }
 
-async function restSign(opts: { advancedMode?: boolean; declineSecondCard?: boolean; accept?: boolean }) {
+// What the history dialog will show for this txid (signed-tx-review.ts); '0xf8' is the fake device's serialized tx.
+const latestReview = () => (db.getDb()!.query(`SELECT review_json FROM signed_tx_review ORDER BY rowid DESC LIMIT 1`).get() as { review_json: string } | null)
+const reviewOfLastSign = () => db.getSignedTxReview(`eip155:${tx.chainId}`, utils.keccak256('0xf8'), 'erc7730-rest-test', `erc7730-rest-test:${FROM}`)
+
+async function restSign(opts: { advancedMode?: boolean; declineSecondCard?: boolean; accept?: boolean; passphrase?: boolean }) {
   const sent: any[] = []
   const cards: any[] = []
   let atDevice: ReturnType<typeof latestObservation> | undefined
   const engine: any = Object.assign(new EventEmitter(), {
-    isEmulator: false, isPassphraseWallet: false,
+    isEmulator: false, isPassphraseWallet: opts.passphrase === true, currentSeedEthAddress: FROM,
     getDeviceState: () => ({ state: 'ready', firmwareVersion: '7.16.0', capabilities: [1, 4], deviceId: 'erc7730-rest-test' }),
     getCachedFeaturesSnapshot: () => undefined,
     wallet: {
@@ -113,6 +118,8 @@ describe('REST: the device refuses the ERC-7730 definition', () => {
       // And so does the coverage record.
       expect(r.observation).toMatchObject({ definition_source: 'none', outcome: 'signed' })
       expect(r.observation.protection_level).not.toBe('P4')
+      // History keeps the card for the blind call it became.
+      expect(reviewOfLastSign()?.signedHow).toBe('blind')
     }, 30_000)
   }
 
@@ -133,5 +140,13 @@ describe('REST: the device refuses the ERC-7730 definition', () => {
     expect(job.status).toBe('covered')
     expect(job.last_protection_level).toBe('P4')
     expect(accepted.observation).toMatchObject({ protection_level: 'P4', definition_source: 'erc7730', outcome: 'signed' })
+    expect(reviewOfLastSign()?.signedHow).toBe('erc7730')
+  }, 30_000)
+
+  test('a passphrase wallet keeps no history record', async () => {
+    db.getDb()!.run('DELETE FROM signed_tx_review')
+    const r = await restSign({ advancedMode: false, accept: true, passphrase: true })
+    expect(r.status).toBe(200)
+    expect(latestReview()).toBeNull()
   }, 30_000)
 })

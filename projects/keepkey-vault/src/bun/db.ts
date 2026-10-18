@@ -14,6 +14,7 @@ import type { ChainBalance, CustomToken, CustomChain, PairedAppInfo, ApiLogEntry
 import { authenticatedClearSignLevel, clearSignExposurePriority, expandClearSignAuditDrafts } from './clearsign-observation'
 import { summarizeClearSignObservations } from './clearsign-observation'
 import { clearSignPromotionBundleHash, verifyClearSignPromotionReview } from './clearsign-promotion'
+import type { SignedTxReview } from '../shared/tx-clearsign'
 import type { VerifiedClearSignArtifact } from './clearsign-artifact-import'
 import { configureClearSignArtifactSnapshots } from './clearsign-artifact-resolver'
 import { configureClearSignProviders, ensureClearSignProviderTable, listClearSignProviders } from './clearsign-providers'
@@ -490,6 +491,18 @@ export function initDb() {
     try { db.exec(`ALTER TABLE clearsign_observations ADD COLUMN exposure_class TEXT NOT NULL DEFAULT 'not-evaluated'`) } catch { /* already exists */ }
     try { db.exec(`ALTER TABLE clearsign_observations ADD COLUMN component_count INTEGER NOT NULL DEFAULT 1`) } catch { /* already exists */ }
     try { db.exec(`ALTER TABLE clearsign_observations ADD COLUMN authenticated_component_count INTEGER NOT NULL DEFAULT 0`) } catch { /* already exists */ }
+    // What the approval card showed for each signed EVM transaction (signed-tx-review.ts).
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS signed_tx_review (
+        network_id  TEXT NOT NULL,
+        txid        TEXT NOT NULL,
+        device_id   TEXT NOT NULL,
+        wallet_id   TEXT NOT NULL,
+        created_at  INTEGER NOT NULL,
+        review_json TEXT NOT NULL,
+        PRIMARY KEY (network_id, txid)
+      )
+    `)
     db.exec(`
       CREATE TABLE IF NOT EXISTS clearsign_audit_jobs (
         shape_key             TEXT PRIMARY KEY,
@@ -1283,6 +1296,25 @@ export function enqueueClearSignAuditDemand(draft: ClearSignObservationDraft): v
   catch (e: any) { console.warn('[db] enqueueClearSignAuditDemand failed:', e.message) }
 }
 
+export function saveSignedTxReview(networkId: string, txid: string, deviceId: string, walletId: string, review: SignedTxReview) {
+  try {
+    if (!db) return
+    db.run(
+      `INSERT OR REPLACE INTO signed_tx_review (network_id, txid, device_id, wallet_id, created_at, review_json) VALUES (?, ?, ?, ?, ?, ?)`,
+      [networkId, txid.toLowerCase(), deviceId, walletId, review.signedAt, JSON.stringify(review)],
+    )
+  } catch (e: any) { console.warn('[db] saveSignedTxReview failed:', e.message) }
+}
+
+export function getSignedTxReview(networkId: string, txid: string, deviceId: string, walletId: string): SignedTxReview | null {
+  try {
+    const row = db?.query(
+      `SELECT review_json FROM signed_tx_review WHERE network_id = ? AND txid = ? AND device_id = ? AND wallet_id = ?`,
+    ).get(networkId, txid.toLowerCase(), deviceId, walletId) as { review_json: string } | null
+    return row ? JSON.parse(row.review_json) : null
+  } catch (e: any) { console.warn('[db] getSignedTxReview failed:', e.message); return null }
+}
+
 /** Start one coverage observation before the user approval prompt. */
 export function insertClearSignObservation(
   draft: ClearSignObservationDraft,
@@ -1788,6 +1820,9 @@ export function clearApiLogs(deviceId?: string, walletId?: string) {
     if (walletId) db.run('DELETE FROM api_log WHERE wallet_id = ?', [walletId])
     else if (deviceId) db.run('DELETE FROM api_log WHERE device_id = ?', [deviceId])
     else db.run('DELETE FROM api_log')
+    if (walletId) db.run('DELETE FROM signed_tx_review WHERE wallet_id = ?', [walletId])
+    else if (deviceId) db.run('DELETE FROM signed_tx_review WHERE device_id = ?', [deviceId])
+    else db.run('DELETE FROM signed_tx_review')
   } catch (e: any) {
     console.warn('[db] clearApiLogs failed:', e.message)
   }
@@ -2224,6 +2259,7 @@ export function deleteDeviceSnapshot(deviceId: string) {
     db.run('DELETE FROM swap_history WHERE device_id = ?', [deviceId])
     db.run('DELETE FROM addressbook WHERE device_id = ?', [deviceId])
     db.run('DELETE FROM addressbook_tx WHERE device_id = ?', [deviceId])
+    db.run('DELETE FROM signed_tx_review WHERE device_id = ?', [deviceId])
   } catch (e: any) {
     console.warn('[db] deleteDeviceSnapshot failed:', e.message)
   }

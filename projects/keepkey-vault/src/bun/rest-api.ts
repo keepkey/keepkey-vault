@@ -91,6 +91,7 @@ import { supportsCertifiedClearSign } from './solana-certified-policy'
 import { measureLiveDeployment, resolveEvmSchema } from './evm-schema-registry'
 import { findContractRating } from './clearsign-review'
 import { formatFeatures } from './features-format'
+import { recordSignedEvmTx } from './signed-tx-review'
 
 export interface EmuSigningDetails {
   operation: string
@@ -2901,6 +2902,11 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               }
             }, '[REST]')
             console.log('[REST] ethSignTx result:', JSON.stringify(result))
+            // Keep what the card showed, by txid, for the history dialog.
+            const reviewScope = engine.isPassphraseWallet ? null : getWalletDbScope()
+            if (reviewScope && activeSigningInfo && (result as any)?.serialized) {
+              recordSignedEvmTx(reviewScope, chainId, (result as any).serialized, activeSigningInfo, signedMsg)
+            }
             if (clearSignPayload) recordRestClearSignEvent({
               kind: 'transaction', outcome: 'signed', source: 'rest-api', chain: evmChainName,
               format: 'EVM_TX_METADATA', label: 'EVM ClearSign transaction', payload: clearSignPayload,

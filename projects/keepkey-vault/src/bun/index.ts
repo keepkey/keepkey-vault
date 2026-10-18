@@ -266,7 +266,9 @@ import { classifyEffectExposure, observeEvmCall, observeEvmTypedData, observeMal
 import { getClearSignProtectionCaseStudies } from "./clearsign-case-studies"
 import { getEvmSimulationEndpoint, getEvmSimulationRpcUrls } from "./evm-simulation-config"
 import { addContractFacts } from "./contract-facts"
-import { initDb, getDb, factoryResetDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, setCustomTokenIcon as dbSetCustomTokenIcon, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility, insertApiLog, getApiLogs, clearApiLogs, setCachedBalances, getCachedBalances, updateCachedBalance, clearBalances, deleteCachedChainBalance, saveCachedPubkey, getLatestDeviceSnapshot, getCachedPubkeys, saveReport, getReportsList, getReportById, deleteReport, reportExists, getSwapHistory, getSwapHistoryStats, getSwapHistoryByTxid, getBip85Seeds, saveBip85Seed, deleteBip85Seed, clearCachedPubkeys, getRecentActivityFromLog, getPioneerServers, addPioneerServerDb, removePioneerServerDb, syncOwnAddressBook, recordOutbound, getAddressBookList, updateAddressBookEntry, deleteAddressBookEntry, getAddressBookHistory, getDeviceLabelMap, getBalancesForOwnSeed, addExternalEntry, matchAddressBook, insertClearSignEvent, getClearSignEvents, insertClearSignObservation, finalizeClearSignObservation, authenticateClearSignObservation, refuseClearSignObservationDefinition, getClearSignCoverageSummary, getClearSignAuditJobs, enqueueClearSignAuditDemand } from "./db"
+import { initDb, getDb, factoryResetDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, setCustomTokenIcon as dbSetCustomTokenIcon, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility, insertApiLog, getApiLogs, clearApiLogs, setCachedBalances, getCachedBalances, updateCachedBalance, clearBalances, deleteCachedChainBalance, saveCachedPubkey, getLatestDeviceSnapshot, getCachedPubkeys, saveReport, getReportsList, getReportById, deleteReport, reportExists, getSwapHistory, getSwapHistoryStats, getSwapHistoryByTxid, getBip85Seeds, saveBip85Seed, deleteBip85Seed, clearCachedPubkeys, getRecentActivityFromLog, getPioneerServers, addPioneerServerDb, removePioneerServerDb, syncOwnAddressBook, recordOutbound, getAddressBookList, updateAddressBookEntry, deleteAddressBookEntry, getAddressBookHistory, getDeviceLabelMap, getBalancesForOwnSeed, addExternalEntry, matchAddressBook, insertClearSignEvent, getClearSignEvents, insertClearSignObservation, finalizeClearSignObservation, authenticateClearSignObservation, refuseClearSignObservationDefinition, getClearSignCoverageSummary, getClearSignAuditJobs, enqueueClearSignAuditDemand, getSignedTxReview } from "./db"
+import { lookupEvmTx, recordSignedEvmTx, txClearSign } from "./signed-tx-review"
+import type { TxClearSign } from "../shared/tx-clearsign"
 import { getCentralAssetAuditHistory, getCentralClearSignStatus, getCentralContractAudit, submitCentralAssetReview, submitCentralContractReview } from './clearsign-central-client'
 import { buildCentralAssetReview, buildCentralContractReview } from './clearsign-central-review'
 import { getConfiguredReviewerIdentity, signCentralReview } from './clearsign-review-signer-client'
@@ -1026,6 +1028,7 @@ let walletConnectEnabled = false
 let zcashPrivacyEnabled = false
 let hiveEnabled = false
 let offlineMode = false
+const txClearSignCache = new Map<string, TxClearSign>()
 // Hive sponsor ETH anti-drain gate. ON for release — the vault signs the EIP-191
 // gate and sends ethAddress/ethSignature. HARD DEPENDENCY: Pioneer must have the
 // server-side gate deployed (accept + verify the fields) or /hive/create-account
@@ -1347,6 +1350,10 @@ function getOrCreateWcManager(): WalletConnectManager {
 		getEvmSimulationEndpoint,
 		getFirmwareVersion: () => engine.getDeviceState().firmwareVersion,
 		getDeviceCapabilities: () => engine.getDeviceState().capabilities,
+		recordSignedTx: (chainId, serialized, shown, signedMsg) => {
+			const scope = engine.isPassphraseWallet ? null : getWalletDbScope()
+			if (scope) recordSignedEvmTx(scope, chainId, serialized, shown, signedMsg)
+		},
 		recordClearSignObservation: (draft) => {
 			if (engine.isPassphraseWallet) return undefined
 			const observation = insertClearSignObservation(draft, {
@@ -8269,6 +8276,19 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return bitcoinOnlyActivityList(rows, isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant))
 			},
 			getActivityScanState: async () => ({ running: activityScanRunning }),
+			// What the card showed when this EVM tx was signed; else Desktop's
+			// decode of its call data now (Pioneer LookupTx), cached per txid.
+			getTxClearSign: async ({ networkId, txid, received }: { networkId: string; txid: string; received?: boolean }): Promise<TxClearSign> => {
+				if (!/^eip155:[1-9]\d*$/.test(networkId) || !/^0x[0-9a-f]{64}$/i.test(txid)) return { kind: 'none' }
+				const scope = engine.isPassphraseWallet ? null : getWalletDbScope()
+				const record = scope ? getSignedTxReview(networkId, txid, scope.deviceId, scope.walletId) : null
+				const key = `${networkId}:${txid.toLowerCase()}:${received ? 'in' : 'out'}`
+				if (!record && txClearSignCache.has(key)) return txClearSignCache.get(key)!
+				const tx = (record || offlineMode) ? undefined : await lookupEvmTx(await getPioneer(), networkId, txid).catch(() => undefined)
+				const result = await txClearSign(record, tx, Number(networkId.slice(7)), received === true)
+				if (result.kind === 'decoded' || result.kind === 'plain') txClearSignCache.set(key, result)
+				return result
+			},
 			getWatchOnlyHistoryChains: async (params) => {
 				const { snapshot, scope } = await getWatchOnlyHistoryContext(params?.deviceId)
 				const chains = bitcoinOnlyChainList(getAllChains(), bitcoinOnlyWatchOnlyScope(false, snapshot.featuresJson))

@@ -205,6 +205,8 @@ export interface WcCallbacks {
   finalizeClearSignObservation: (id: string, outcome: Exclude<ClearSignObservationOutcome, 'pending'>, errorClass?: string) => void
   /** The device refused the observation's ERC-7730 definition; the call signs without it. */
   refuseClearSignObservationDefinition?: (id: string) => void
+  /** Keep what the card showed for this signed transaction (signed-tx-review). */
+  recordSignedTx?: (chainId: number, serialized: string, shown: SigningRequestInfo, signedMsg: any) => void
   /** Add this computer's records of the called contract to the card (contract-facts). */
   addContractFacts?: (info: SigningRequestInfo) => Promise<void>
   /** Show signing approval to user — returns true if approved. */
@@ -1159,12 +1161,14 @@ export class WalletConnectManager {
       }
 
       let signedMsg: any = msg
+      let shown = signingInfo
       const result = await signWithErc7730Fallback(msg, (m: any) => { signedMsg = m; return this.callbacks.ethSignTx(m) }, async () => {
         // The device refused the definition. The user approved a card that
         // said the device shows the call; it now signs blind. Always ask again
         // with the card for the blind call it now is, whatever AdvancedMode
         // (the card offers to turn it on when it is off).
         const again = withoutErc7730Description(signingInfo)
+        shown = again
         if (observationId) this.callbacks.refuseClearSignObservationDefinition?.(observationId)
         this.callbacks.dismissSigning(cardId)
         cardId = again.id
@@ -1182,6 +1186,7 @@ export class WalletConnectManager {
       // mangled pre-image is accepted by RPC nodes and then silently dropped
       // from the mempool; see verifyEvmSigner in evm-rpc.ts.
       await verifyEvmSigner(result.serialized, from)
+      this.callbacks.recordSignedTx?.(effectiveChainId, result.serialized, shown, signedMsg)
       if (observationId && clearSignSchema) this.callbacks.authenticateClearSignObservation(
         observationId, clearSignSchema.keyId === 0x80 ? 'certified' : 'runtime', 1,
         clearSignSchema.source === 'promoted-local', clearSignSchema.bundleHash,
