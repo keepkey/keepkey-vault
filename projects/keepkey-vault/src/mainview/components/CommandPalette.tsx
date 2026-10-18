@@ -17,6 +17,7 @@ interface CommandPaletteProps {
 	balances: Map<string, ChainBalance>
 	/** Device firmware version — used to filter chains that require newer firmware. */
 	firmwareVersion?: string
+	bitcoinOnly?: boolean
 	/** Hive feature flag — Hive is hidden from results unless explicitly enabled in settings. */
 	hiveEnabled?: boolean
 }
@@ -49,7 +50,7 @@ function scoreMatch(query: string, fields: { symbol?: string; coin?: string; nam
 	return 0
 }
 
-export function CommandPalette({ open, onClose, onJumpToVault, balances, firmwareVersion, hiveEnabled }: CommandPaletteProps) {
+export function CommandPalette({ open, onClose, onJumpToVault, balances, firmwareVersion, bitcoinOnly, hiveEnabled }: CommandPaletteProps) {
 	const { privateModeEnabled } = useFiat()
 	const [query, setQuery] = useState("")
 	const [activeIdx, setActiveIdx] = useState(0)
@@ -68,7 +69,7 @@ export function CommandPalette({ open, onClose, onJumpToVault, balances, firmwar
 	}, [open])
 
 	const results = useMemo<Result[]>(() => {
-		const chains = CHAINS.filter(c => !c.hidden && isChainSupported(c, firmwareVersion) && (c.id !== 'hive' || hiveEnabled))
+		const chains = CHAINS.filter(c => !c.hidden && (!bitcoinOnly || c.id === 'bitcoin') && isChainSupported(c, firmwareVersion) && (c.id !== 'hive' || hiveEnabled))
 		const trimmed = query.trim()
 
 		if (!trimmed) {
@@ -98,7 +99,7 @@ export function CommandPalette({ open, onClose, onJumpToVault, balances, firmwar
 		}
 		scored.sort((a, b) => b.score - a.score)
 		return scored.slice(0, MAX_RESULTS).map(s => s.r)
-	}, [query, balances, hiveEnabled, firmwareVersion])
+	}, [query, balances, hiveEnabled, firmwareVersion, bitcoinOnly])
 
 	// Clamp active index when results change
 	useEffect(() => {

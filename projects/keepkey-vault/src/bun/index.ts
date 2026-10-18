@@ -230,7 +230,7 @@ import { startRestApi, clearFeaturesCache, setUiActive, uiHeartbeat, type RestAp
 import { signSolanaWireTransaction } from "./solana-signing"
 import { AuthStore } from "./auth"
 import { ensurePioneerQueryKeyRegistered, getPioneer, getPioneerApiBase, resetPioneer, setPioneerOffline, DEFAULT_API_BASE, getQueryKey as getPioneerQueryKey } from "./pioneer"
-import { setBtcBackendOffline, setBtcNodeConfig, setBtcNodeDeviceEligible, isBtcNodeActive, getBtcBackend, broadcastBtcTx } from "./btc-backend"
+import { setBtcBackendOffline, setBtcNodeConfig, setBtcNodeDeviceEligible, setBtcNodeWatchOnlyEligible, isBtcNodeActive, getBtcBackend, broadcastBtcTx } from "./btc-backend"
 import { isBitcoinOnlyVariant } from "../shared/flags"
 import { bitcoinOnlyActivityList, bitcoinOnlyAddressBookHistoryList, bitcoinOnlyBalanceList, bitcoinOnlyChainList, bitcoinOnlyLedgerJournalList, bitcoinOnlyLedgerSummaryList, bitcoinOnlyPendingSigningRejection, bitcoinOnlyReportAllowed, bitcoinOnlyWatchOnlyScope, enforceBitcoinOnlyRpcBoundary } from "./bitcoin-only-boundary"
 import { assertOnline } from "./offline-policy"
@@ -255,6 +255,10 @@ import { versionCompare } from "../shared/firmware-versions"
 import { supportsZcashPrivacyBuild } from "./zcash-capability"
 import type { ChainDef } from "../shared/chains"
 import { BtcAccountManager } from "./btc-accounts"
+import { alreadySigned, analyze as analyzePsbt, deriveAddress as deriveBtcAddress, feeFromPrevTxs, finalizeSigned, parseForBroadcast, toSignTx, type BtcPsbtScriptType, type PsbtAnalysis } from "./btc-psbt/psbt"
+import { accountPathFromXpub, formatPath, masterFingerprintFromDepth1Xpub, toSlip132, toStandardXpub, writeElectrumWallet } from "./btc-psbt/codec"
+import { parseWatchOnlyImport } from "./btc-psbt/watch-only-import"
+import { buildWatchOnlyPsbt } from "./btc-psbt/watch-only-build"
 import { unwrapUtxoDiscoveryKey, utxoDiscoveryKey } from "./btc-backend/types"
 import { marketPriceUsd } from "../shared/market-price"
 import { EvmAddressManager, evmAddressPath } from "./evm-addresses"
@@ -266,7 +270,7 @@ import { classifyEffectExposure, observeEvmCall, observeEvmTypedData, observeMal
 import { getClearSignProtectionCaseStudies } from "./clearsign-case-studies"
 import { getEvmSimulationEndpoint, getEvmSimulationRpcUrls } from "./evm-simulation-config"
 import { addContractFacts } from "./contract-facts"
-import { initDb, getDb, factoryResetDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, setCustomTokenIcon as dbSetCustomTokenIcon, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility, insertApiLog, getApiLogs, clearApiLogs, setCachedBalances, getCachedBalances, updateCachedBalance, clearBalances, deleteCachedChainBalance, saveCachedPubkey, getLatestDeviceSnapshot, getCachedPubkeys, saveReport, getReportsList, getReportById, deleteReport, reportExists, getSwapHistory, getSwapHistoryStats, getSwapHistoryByTxid, getBip85Seeds, saveBip85Seed, deleteBip85Seed, clearCachedPubkeys, getRecentActivityFromLog, getPioneerServers, addPioneerServerDb, removePioneerServerDb, syncOwnAddressBook, recordOutbound, getAddressBookList, updateAddressBookEntry, deleteAddressBookEntry, getAddressBookHistory, getDeviceLabelMap, getBalancesForOwnSeed, addExternalEntry, matchAddressBook, insertClearSignEvent, getClearSignEvents, insertClearSignObservation, finalizeClearSignObservation, authenticateClearSignObservation, refuseClearSignObservationDefinition, getClearSignCoverageSummary, getClearSignAuditJobs, enqueueClearSignAuditDemand, getSignedTxReview } from "./db"
+import { initDb, getDb, factoryResetDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, setCustomTokenIcon as dbSetCustomTokenIcon, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility, insertApiLog, getApiLogs, clearApiLogs, setCachedBalances, getCachedBalances, updateCachedBalance, clearBalances, deleteCachedChainBalance, saveCachedPubkey, getLatestDeviceSnapshot, getCachedPubkeys, saveReport, getReportsList, getReportById, deleteReport, reportExists, getSwapHistory, getSwapHistoryStats, getSwapHistoryByTxid, getBip85Seeds, saveBip85Seed, deleteBip85Seed, clearCachedPubkeys, getRecentActivityFromLog, getPioneerServers, addPioneerServerDb, removePioneerServerDb, syncOwnAddressBook, recordOutbound, getAddressBookList, updateAddressBookEntry, deleteAddressBookEntry, getAddressBookHistory, getDeviceLabelMap, getBalancesForOwnSeed, addExternalEntry, matchAddressBook, insertClearSignEvent, getClearSignEvents, insertClearSignObservation, finalizeClearSignObservation, authenticateClearSignObservation, refuseClearSignObservationDefinition, getClearSignCoverageSummary, getClearSignAuditJobs, enqueueClearSignAuditDemand, getSignedTxReview, setDeviceMasterFingerprint, getDeviceSnapshotById, getAllDeviceSnapshots, saveImportedWatchOnlyWallet, setImportedWalletVerified } from "./db"
 import { lookupEvmTx, recordSignedEvmTx, txDetails, walletBook } from "./signed-tx-review"
 import { getCentralAssetAuditHistory, getCentralClearSignStatus, getCentralContractAudit, submitCentralAssetReview, submitCentralContractReview } from './clearsign-central-client'
 import { buildCentralAssetReview, buildCentralContractReview } from './clearsign-central-review'
@@ -298,7 +302,7 @@ import { buildProviderBundle, buildStudioEvmSchema, parseProviderBundle, provide
 import { getTokenMetadata, broadcastEvmTx, verifyEvmSigner } from "./evm-rpc"
 import { evmSourceForChain } from "./pioneer-evm"
 import { deviceErrorMessage } from "../shared/device-error"
-import type { ChainBalance, TokenBalance, CustomToken, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, EvmAddressSet, Bip85SeedMeta, StakingPosition, SwapAsset, AuditToken, DefiPosition, RecentActivity, ClearSignEvent, ClearSignSolanaSchemaArtifact } from "../shared/types"
+import type { BtcBroadcastReview, BtcPsbtReview, BtcWatchOnlyAccounts, BtcWatchOnlyImport, BtcWatchOnlyPsbt, BtcWatchOnlyReceive, ChainBalance, TokenBalance, CustomToken, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, EvmAddressSet, Bip85SeedMeta, StakingPosition, SwapAsset, AuditToken, DefiPosition, RecentActivity, ClearSignEvent, ClearSignSolanaSchemaArtifact } from "../shared/types"
 import type { VaultRPCSchema } from "../shared/rpc-schema"
 import type { WipeReason } from "../shared/flash-wipe"
 import { collectAndAnalyzeWithGate, MAX_CHUNK_BYTES } from "./rng-audit"
@@ -904,6 +908,11 @@ function recordClearSignEvent(
 	return insertClearSignEvent(complete)
 }
 const btcAccounts = new BtcAccountManager()
+/** A Bitcoin-only saved wallet is on screen in watch-only (watchOnlySetView): the Bitcoin-only RPC boundary applies. */
+let watchOnlyViewBtcOnly = false
+/** The one PSBT under review. btcPsbtSign signs only this, by id, in the wallet session it was checked in. */
+let pendingPsbt: { id: string; stem: string; analysis: PsbtAnalysis; deviceId: string; hidden: boolean; epoch: number; wallet: unknown; signing: boolean } | null = null
+let lastSignedPsbtPath: string | null = null
 const evmAddresses = new EvmAddressManager()
 // Last deviceId we saw reach 'ready'. The managers above are kept across
 // disconnect for the watch-only UI, so a device-to-device swap (deviceId
@@ -1477,6 +1486,104 @@ function getWalletDbScope(): { deviceId: string; walletId: string } | null {
 	const seedId = engine.currentSeedEthAddress?.toLowerCase()
 	if (!seedId) return null
 	return { deviceId, walletId: `${deviceId}:${seedId}` }
+}
+
+/** A saved wallet's single-signature Bitcoin accounts, from the watch-only cache only. */
+function getWatchOnlyBtcAccounts(deviceId?: string) {
+	const snapshot = getDeviceSnapshotById(deviceId || getLatestDeviceSnapshot()?.deviceId || '')
+	if (!snapshot) throw new Error('No saved wallet to build a PSBT for')
+	const masterFingerprint = snapshot.masterFp ? new Uint8Array(Buffer.from(snapshot.masterFp, 'hex')) : undefined
+	const seen = new Set<string>()
+	const accounts = getCachedPubkeys(snapshot.deviceId).flatMap(row => {
+		if (row.chainId !== 'bitcoin' || !row.xpub || seen.has(row.xpub)) return []
+		if (row.scriptType !== 'p2wpkh' && row.scriptType !== 'p2sh-p2wpkh' && row.scriptType !== 'p2pkh' && row.scriptType !== 'p2tr') return []
+		seen.add(row.xpub)
+		const scriptType = row.scriptType as BtcPsbtScriptType
+		try {
+			return [{ scriptType, path: accountPathFromXpub(row.xpub, scriptType), xpub: toStandardXpub(row.xpub).xpub, masterFingerprint }]
+		} catch (e: any) {
+			console.warn(`[watch-only] skipping an unreadable Bitcoin key: ${e?.message || e}`)
+			return []
+		}
+	})
+	return { snapshot, accounts }
+}
+
+/** Imported watch-only wallets (btcWatchOnlyImport) carry these flags in their synthetic snapshot. */
+function watchOnlyImportFlags(featuresJson: string): { imported: boolean; verified: boolean } {
+	try {
+		const f = JSON.parse(featuresJson)
+		return { imported: f?.watchOnlyImport === true, verified: f?.deviceVerified === true }
+	} catch { return { imported: false, verified: false } }
+}
+
+/** The account watch-only receive uses: native segwit account 0 when saved, else the only one. */
+function watchOnlyReceiveAccount(deviceId?: string) {
+	const { snapshot, accounts } = getWatchOnlyBtcAccounts(deviceId)
+	const account = accounts.find(a => a.scriptType === 'p2wpkh' && a.path[2] === 0x80000000) || accounts[0]
+	if (!account) throw new Error('No Bitcoin account is saved for this wallet')
+	return { snapshot, account }
+}
+
+/** Wallets whose KeepKey showed a different receive address this session: their host-derived addresses stay hidden. */
+const watchOnlyAddressMismatch = new Set<string>()
+
+/** Does the connected, unlocked KeepKey hold this saved wallet? A device's own snapshot matches by
+ *  device id. An imported key matches only if the device returns the same account xpub at its path,
+ *  which also marks the import verified (and stores the real master fingerprint, standard wallets only). */
+async function watchOnlyDeviceMatch(deviceId: string): Promise<boolean> {
+	const snapshot = getDeviceSnapshotById(deviceId)
+	const state = engine.getDeviceState()
+	if (!snapshot) return false
+	// Not "a different KeepKey": Desktop could not ask it.
+	if (!engine.wallet || state.state !== 'ready') throw new Error('The connected KeepKey is not ready')
+	if (!watchOnlyImportFlags(snapshot.featuresJson).imported) return state.deviceId === deviceId
+	const { account } = watchOnlyReceiveAccount(deviceId)
+	const res = await engine.wallet.getPublicKeys([
+		{ addressNList: account.path, coin: 'Bitcoin', scriptType: account.scriptType, curve: 'secp256k1', showDisplay: false },
+		{ addressNList: [84 + 0x80000000], coin: 'Bitcoin', scriptType: 'p2wpkh', curve: 'secp256k1', showDisplay: false },
+	] as any)
+	const got = res?.[0]?.xpub
+	if (!got || toStandardXpub(got).xpub !== account.xpub) return false
+	let masterFp: string | null = null
+	try {
+		if (!engine.isPassphraseWallet && res?.[1]?.xpub) masterFp = Buffer.from(masterFingerprintFromDepth1Xpub(res[1].xpub)).toString('hex')
+	} catch { /* fingerprint stays as imported */ }
+	// The emulator is not a KeepKey: it never marks an import verified or supplies its fingerprint.
+	if (!engine.isEmulator) setImportedWalletVerified(deviceId, masterFp)
+	return true
+}
+
+/** Next unused receive/change index from the active BTC backend; unavailable says so, never a silent guess. */
+async function btcAddressIndicesFor(xpub: string, scriptType?: string) {
+	const backend = getBtcBackend()
+	if (!backend.addressIndices) {
+		const mode = backend.kind === 'core' ? 'Bitcoin Core scantxoutset' : 'offline mode'
+		return {
+			receiveIndex: 0,
+			changeIndex: 0,
+			discoveryAvailable: false,
+			source: backend.kind,
+			warning: `${mode} cannot prove which addresses were previously used. Index 0 is shown as a manual starting point; verify or select the intended index before receiving.`,
+		}
+	}
+	try {
+		const btcNetworkId = CHAINS.find(c => c.id === 'bitcoin')!.networkId
+		return await withTimeout(
+			backend.addressIndices({ network: btcNetworkId, xpub, scriptType }),
+			PIONEER_TIMEOUT_MS,
+			`${backend.kind} address discovery`,
+		)
+	} catch (e: any) {
+		console.warn(`[getBtcAddressIndices] ${backend.kind} discovery failed:`, e.message)
+		return {
+			receiveIndex: 0,
+			changeIndex: 0,
+			discoveryAvailable: false,
+			source: backend.kind,
+			warning: `Address history lookup failed. Index 0 is not proven unused; verify or select the intended index before receiving.`,
+		}
+	}
 }
 
 async function getWatchOnlyHistoryContext(deviceId?: string) {
@@ -2753,7 +2860,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 		requests: enforceBitcoinOnlyRpcBoundary(
 			// Runs ahead of every UI request, so it is also where the UI's first
 			// contact is recorded (see ui-watchdog.ts).
-			() => { uiWatchdog.seen(); return isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant) },
+			// A Bitcoin-only watch-only wallet on screen is held to the same boundary as a Bitcoin-only device.
+			() => { uiWatchdog.seen(); return isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant) || watchOnlyViewBtcOnly },
 			{
 			// ── Device lifecycle ──────────────────────────────────────
 			getDeviceState: async () => engine.getDeviceState(),
@@ -3559,6 +3667,234 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					)
 				}
 				return await engine.wallet.btcSignTx(params)
+			},
+			btcPsbtAnalyze: async (params): Promise<BtcPsbtReview> => {
+				pendingPsbt = null
+				// base64 of at most 1 MB, checked before decoding (decode() re-checks the bytes).
+				if (typeof params?.data !== 'string' || params.data.length > 1_398_104) throw new Error('PSBT is larger than 1 MB, refusing')
+				const bytes = new Uint8Array(Buffer.from(params.data, 'base64'))
+				const signed = alreadySigned(bytes)
+				if (signed) return { kind: 'signed', txid: signed.txid, txHex: signed.txHex, fee: signed.fee === null ? null : signed.fee.toString() }
+				if (!engine.wallet || engine.getDeviceState().state !== 'ready') {
+					throw new Error('This PSBT is not signed yet, and only a KeepKey can sign it. Connect and unlock your KeepKey and drop it again (offline mode works too), or sign it in Electrum with your KeepKey.')
+				}
+				const wallet = engine.wallet
+				const deviceId = engine.getDeviceState().deviceId || ''
+				const hidden = engine.isPassphraseWallet
+				const epoch = activitySessionEpoch
+				const { truth } = await ensureManagersForSeed('btcPsbtAnalyze')
+				if (!btcAccounts.isInitialized) await btcAccounts.initialize(wallet as any)
+				stampManagers(truth)
+				// Ownership is proven from the loaded account xpubs; fingerprints are only metadata.
+				const masterFingerprint = btcAccounts.masterFingerprint ? new Uint8Array(Buffer.from(btcAccounts.masterFingerprint, 'hex')) : undefined
+				const accounts = btcAccounts.getAllXpubMeta()
+					.map(x => ({ scriptType: x.scriptType as BtcPsbtScriptType, path: x.path, xpub: toStandardXpub(x.xpub).xpub, masterFingerprint }))
+				const analysis = analyzePsbt(bytes, accounts)
+				if (engine.wallet !== wallet || engine.isPassphraseWallet !== hidden || activitySessionEpoch !== epoch) {
+					throw new Error('The wallet changed while checking this PSBT. Drop it again.')
+				}
+				const stem = String(params.name || '').replace(/\.[^.]*$/, '').replace(/[^A-Za-z0-9_-]+/g, '_').slice(0, 64) || 'transaction'
+				const id = randomUUID()
+				pendingPsbt = { id, stem, analysis, deviceId, hidden, epoch, wallet, signing: false }
+				const a = analysis
+				return {
+					kind: 'review', id, version: a.version, locktime: a.locktime,
+					inputs: a.inputs.map(x => ({
+						txid: x.txid, vout: x.vout, sequence: x.sequence, amount: x.amount.toString(), amountVerified: x.amountVerified,
+						scriptType: x.scriptType, path: formatPath(x.addressNList), address: x.address,
+					})),
+					outputs: a.outputs.map(o => ({
+						index: o.index, amount: o.amount.toString(), address: o.address, opReturn: o.opReturn,
+						kind: o.kind, deviceWillShow: o.deviceWillShow, path: o.owner ? formatPath(o.owner.addressNList) : undefined,
+					})),
+					totalIn: a.totalIn.toString(), fee: a.fee.toString(), change: a.change.toString(), sent: a.sent.toString(),
+					deviceTotal: a.deviceTotal.toString(), estVsize: a.estVsize, satPerVbyte: a.satPerVbyte, feePercent: a.feePercent,
+					flags: a.flags,
+				}
+			},
+			btcPsbtSign: async (params) => {
+				const p = pendingPsbt
+				if (!p || p.id !== params?.id) throw new Error('This PSBT review has expired. Drop the file again.')
+				if (p.signing) throw new Error('Already signing this PSBT')
+				if (!engine.wallet || engine.wallet !== p.wallet || engine.getDeviceState().state !== 'ready'
+					|| (engine.getDeviceState().deviceId || '') !== p.deviceId || engine.isPassphraseWallet !== p.hidden || activitySessionEpoch !== p.epoch) {
+					pendingPsbt = null
+					throw new Error('The wallet changed since this PSBT was checked (device, passphrase or session). Drop the file again.')
+				}
+				p.signing = true
+				try {
+					const req = toSignTx(p.analysis)
+					const sign = () => engine.wallet!.btcSignTx(req as any)
+					let res: any
+					try {
+						res = engine.isEmulator
+							? await emuSigningOp(sign, {
+								operation: 'btcSignTx', chain: 'Bitcoin',
+								to: p.analysis.outputs.find(o => o.deviceWillShow === 'address')?.address,
+								value: `${p.analysis.sent} sats`, fee: `${p.analysis.fee} sats`,
+							})
+							: await sign()
+					} catch (e) {
+						const m = deviceErrorMessage(e)
+						// hdwallet replaces every device Failure (cancel included) with this one string.
+						throw new Error(m === 'Failed to sign BTC transaction' ? 'The KeepKey did not sign: cancelled on the device or rejected by the firmware.' : m)
+					}
+					// Field-by-field check against the PSBT plus signature verification, then BIP174 finalize.
+					const fin = finalizeSigned(p.analysis, res?.serializedTx ?? '')
+					const filePath = uniqueFilePath(path.join(os.homedir(), 'Downloads', `${p.stem}-signed.psbt`), fs.existsSync)
+					await Bun.write(filePath, fin.psbtBytes)
+					if (pendingPsbt === p) pendingPsbt = null
+					lastSignedPsbtPath = filePath
+					return { filePath, txHex: fin.txHex, txid: fin.txid }
+				} finally {
+					p.signing = false
+				}
+			},
+			btcWatchOnlyExport: async (params) => {
+				if (!engine.wallet || engine.getDeviceState().state !== 'ready') throw new Error('Connect and unlock your KeepKey to export')
+				const scriptType = params?.scriptType
+				if (scriptType !== 'p2wpkh' && scriptType !== 'p2sh-p2wpkh' && scriptType !== 'p2pkh' && scriptType !== 'p2tr') {
+					throw new Error('Choose a supported Bitcoin account type')
+				}
+				const { truth } = await ensureManagersForSeed('btcWatchOnlyExport')
+				if (!btcAccounts.isInitialized) await btcAccounts.initialize(engine.wallet as any)
+				stampManagers(truth)
+				const meta = btcAccounts.getAllXpubMeta().find(x => x.accountIndex === params.accountIndex && x.scriptType === scriptType)
+				if (!meta) throw new Error(`Bitcoin account ${params.accountIndex} is not loaded`)
+				const std = toStandardXpub(meta.xpub)
+				if (std.scriptType !== (scriptType === 'p2tr' ? 'p2pkh' : scriptType)) throw new Error(`The ${scriptType} key has the wrong prefix`)
+				const fingerprint = btcAccounts.masterFingerprint
+				const result = { key: toSlip132(std.xpub, scriptType), fingerprint, derivation: formatPath(meta.path) }
+				if (!params.save) return result
+				if (!fingerprint) throw new Error('Master fingerprint unknown. Reconnect the KeepKey and try again.')
+				const json = writeElectrumWallet({ scriptType, path: meta.path, xpub: std.xpub, masterFingerprint: new Uint8Array(Buffer.from(fingerprint, 'hex')) }, 'KeepKey')
+				const filePath = uniqueFilePath(path.join(os.homedir(), 'Downloads', `keepkey-btc-${scriptType}-account${meta.accountIndex}.json`), fs.existsSync)
+				await Bun.write(filePath, json)
+				return { ...result, filePath }
+			},
+			/** Watch-only "Create PSBT": no device; chain data through getBtcBackend() (the user's own node when active). */
+			btcWatchOnlyAccounts: async (params): Promise<BtcWatchOnlyAccounts> => {
+				const { snapshot, accounts } = getWatchOnlyBtcAccounts(params?.deviceId)
+				return {
+					fingerprintKnown: !!snapshot.masterFp,
+					backend: getBtcBackend().kind,
+					accounts: accounts.map(a => ({ scriptType: a.scriptType, accountIndex: a.path[2] - 0x80000000, path: formatPath(a.path) })),
+				}
+			},
+			/** Import an Electrum wallet file or a bare x/y/zpub as a Bitcoin-only watch-only wallet (no device).
+			 *  Without save: a preview. save: requires the path confirmed when the import doesn't state it. */
+			btcWatchOnlyImport: async (params): Promise<BtcWatchOnlyImport> => {
+				// 10 MB: Electrum files carry address history. Base64 length checked before decoding.
+				if ((params?.data?.length ?? 0) > 10_485_760 || (params?.fileBytes?.length ?? 0) > 13_981_016) throw new Error('File is larger than 10 MB, refusing')
+				const text = typeof params?.data === 'string' ? params.data
+					: typeof params?.fileBytes === 'string' ? Buffer.from(params.fileBytes, 'base64').toString('utf8') : ''
+				const w = parseWatchOnlyImport(text, { fingerprint: params?.fingerprint, path: params?.path })
+				// Never a device's name: an Electrum file's own label (often "KeepKey") is ignored.
+				const name = String(params?.label ?? '').replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 40)
+				const label = `Imported · ${name || `Bitcoin ${formatPath(w.path)}`}`
+				const preview: BtcWatchOnlyImport = {
+					id: w.id, label, source: w.source, scriptType: w.scriptType, key: w.key, path: formatPath(w.path),
+					pathAssumed: w.pathAssumed, fingerprint: w.fingerprint, saved: false,
+				}
+				if (!params?.save) return preview
+				if (w.pathAssumed && !params.path) throw new Error('Confirm the derivation path first')
+				saveImportedWatchOnlyWallet({
+					id: w.id, label, masterFp: w.fingerprint, path: formatPath(w.path), key: w.key, scriptType: w.scriptType,
+					// KeepKeyBTC: the Bitcoin-only filter, node routing and RPC boundary apply as for a Bitcoin-only device.
+					featuresJson: JSON.stringify({ firmwareVariant: 'KeepKeyBTC', watchOnlyImport: true, deviceVerified: false, source: w.source }),
+				})
+				return { ...preview, saved: true }
+			},
+			/** Does the connected KeepKey hold this saved wallet? (Imported keys: asks the device, marks verified.) */
+			btcWatchOnlyDeviceMatch: async (params) => {
+				if (!params?.deviceId) return { match: false }
+				return { match: await watchOnlyDeviceMatch(params.deviceId) }
+			},
+			/** Next unused receive address, derived on the host from the saved xpub (index from getBtcBackend()). */
+			btcWatchOnlyReceive: async (params): Promise<BtcWatchOnlyReceive> => {
+				const { snapshot, account } = watchOnlyReceiveAccount(params?.deviceId)
+				if (watchOnlyAddressMismatch.has(snapshot.deviceId)) throw new Error('The KeepKey showed a different address for this wallet. Do not use addresses Desktop derived for it.')
+				const key = toSlip132(account.xpub, account.scriptType)
+				const indices = await btcAddressIndicesFor(key, account.scriptType)
+				const flags = watchOnlyImportFlags(snapshot.featuresJson)
+				return {
+					address: deriveBtcAddress(account, 0, indices.receiveIndex),
+					path: [...account.path, 0, indices.receiveIndex],
+					scriptType: account.scriptType,
+					xpub: key,
+					warning: indices.discoveryAvailable ? undefined : indices.warning,
+					verified: !flags.imported || flags.verified,
+				}
+			},
+			/** Show a watch-only receive address on the KeepKey, only if the connected device holds this wallet. */
+			btcWatchOnlyShowAddress: async (params) => {
+				const deviceId = String(params?.deviceId || '')
+				const index = Number(params?.index)
+				if (!(await watchOnlyDeviceMatch(deviceId))) throw new Error('The connected KeepKey does not hold this wallet')
+				const { account } = watchOnlyReceiveAccount(deviceId)
+				const address = deriveBtcAddress(account, 0, index)
+				const res = await engine.wallet!.btcGetAddress({ addressNList: [...account.path, 0, index], coin: 'Bitcoin', scriptType: account.scriptType, showDisplay: true } as any)
+				const shown = typeof res === 'string' ? res : (res as any)?.address
+				if (shown !== address) {
+					watchOnlyAddressMismatch.add(deviceId)
+					throw new Error(`The KeepKey showed ${shown}, not ${address}. Do not use this address.`)
+				}
+				return { address }
+			},
+			btcWatchOnlyBuildPsbt: async (params): Promise<BtcWatchOnlyPsbt> => {
+				requireOnline('Create PSBT')
+				const feeLevel = Number(params?.feeLevel)
+				if (![1, 3, 5].includes(feeLevel)) throw new Error('Choose a fee level')
+				const { accounts } = getWatchOnlyBtcAccounts(params?.deviceId)
+				const account = accounts.find(a => a.scriptType === params?.scriptType && a.path[2] === 0x80000000 + Number(params?.accountIndex))
+				if (!account) throw new Error('That Bitcoin account is not saved for this wallet')
+				const backend = getBtcBackend()
+				const { psbtBytes, psbtBase64, analysis } = await buildWatchOnlyPsbt(backend, CHAINS.find(c => c.id === 'bitcoin')!, account, {
+					to: String(params.to ?? ''), amount: String(params.amount ?? ''), isMax: !!params.isMax, feeLevel,
+				})
+				const filePath = uniqueFilePath(path.join(os.homedir(), 'Downloads', `keepkey-btc-${account.scriptType}-account${account.path[2] - 0x80000000}-unsigned.psbt`), fs.existsSync)
+				await Bun.write(filePath, psbtBytes)
+				return {
+					filePath, psbtBase64, backend: backend.kind, fingerprintKnown: !!account.masterFingerprint,
+					outputs: analysis.outputs.map(o => ({ address: o.address, amount: o.amount.toString(), change: o.kind === 'change' })),
+					fee: analysis.fee.toString(), satPerVbyte: analysis.satPerVbyte, estVsize: analysis.estVsize,
+				}
+			},
+			/** Signed PSBT or raw tx hex (base64 of the dropped bytes). Without send: review only (no network
+			 *  when the PSBT proves its amounts). send: broadcast through the backend, then check the txid. */
+			btcBroadcastSigned: async (params): Promise<BtcBroadcastReview> => {
+				if (typeof params?.data !== 'string' || params.data.length > 1_398_104) throw new Error('Transaction is larger than 1 MB, refusing')
+				const parsed = parseForBroadcast(new Uint8Array(Buffer.from(params.data, 'base64')))
+				const network = 'bip122:000000000019d6689c085ae165831e93'
+				const outputs = parsed.outputs.map(o => ({ amount: o.amount.toString(), address: o.address, opReturnHex: o.opReturnHex, scriptHex: o.scriptHex }))
+				const backendKind = getBtcBackend().kind
+				if (params.send) {
+					requireOnline('Bitcoin broadcast')
+					if (params.backend !== backendKind) {
+						throw new Error(`The broadcast backend changed since the review (${params.backend} -> ${backendKind}). Drop the transaction again to review it.`)
+					}
+					const pioneer = backendKind === 'pioneer' ? await getPioneer() : null
+					const txid = await broadcastBtcTx(pioneer, network, parsed.txHex)
+					if (txid !== parsed.txid) {
+						throw new Error(`The broadcast returned txid ${txid}, not ${parsed.txid}. Check both on a block explorer before doing anything else.`)
+					}
+					return { txid, txHex: parsed.txHex, outputs, fee: parsed.fee?.toString() ?? null, feeSource: null, backend: backendKind, broadcast: true }
+				}
+				// Fee: proven by the PSBT's previous txs, else fetched and hash-checked through the backend, else unknown.
+				let fee = parsed.fee
+				let feeSource: string | null = fee === null ? null : 'psbt'
+				if (fee === null && !offlineMode) {
+					const backend = getBtcBackend()
+					fee = await feeFromPrevTxs(parsed.txHex, txid => backend.rawTxHex({ network, txid }))
+					if (fee !== null) feeSource = backend.kind
+				}
+				return { txid: parsed.txid, txHex: parsed.txHex, outputs, fee: fee?.toString() ?? null, feeSource, backend: backendKind, broadcast: false }
+			},
+			btcPsbtShowFile: async () => {
+				if (!lastSignedPsbtPath) return
+				const cmd = process.platform === 'win32' ? 'explorer' : process.platform === 'linux' ? 'xdg-open' : 'open'
+				const args = process.platform === 'darwin' ? ['-R', lastSignedPsbtPath] : process.platform === 'linux' ? [path.dirname(lastSignedPsbtPath)] : [`/select,${lastSignedPsbtPath}`]
+				Bun.spawn([cmd, ...args])
 			},
 			ethSignTx: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
@@ -6392,34 +6728,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			getBtcAddressIndices: async (params) => {
 				const { xpub, scriptType } = params
 				if (!xpub) throw new Error('xpub required')
-				const backend = getBtcBackend()
-				if (!backend.addressIndices) {
-					const mode = backend.kind === 'core' ? 'Bitcoin Core scantxoutset' : 'offline mode'
-					return {
-						receiveIndex: 0,
-						changeIndex: 0,
-						discoveryAvailable: false,
-						source: backend.kind,
-						warning: `${mode} cannot prove which addresses were previously used. Index 0 is shown as a manual starting point; verify or select the intended index before receiving.`,
-					}
-				}
-				try {
-					const btcNetworkId = CHAINS.find(c => c.id === 'bitcoin')!.networkId
-					return await withTimeout(
-						backend.addressIndices({ network: btcNetworkId, xpub, scriptType }),
-						PIONEER_TIMEOUT_MS,
-						`${backend.kind} address discovery`,
-					)
-				} catch (e: any) {
-					console.warn(`[getBtcAddressIndices] ${backend.kind} discovery failed:`, e.message)
-					return {
-						receiveIndex: 0,
-						changeIndex: 0,
-						discoveryAvailable: false,
-						source: backend.kind,
-						warning: `Address history lookup failed. Index 0 is not proven unused; verify or select the intended index before receiving.`,
-					}
-				}
+				return await btcAddressIndicesFor(xpub, scriptType)
 			},
 
 			// ── EVM multi-address ────────────────────────────────────
@@ -8416,6 +8725,14 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 
 			// ── Watch-only mode ─────────────────────────────────────
+			// The UI opened (active) or left watch-only. A Bitcoin-only saved wallet may use the
+			// user's own node, exactly like a connected Bitcoin-only device.
+			watchOnlySetView: async (params): Promise<{ bitcoinOnly: boolean }> => {
+				const snap = params?.active ? (params.deviceId ? getDeviceSnapshotById(params.deviceId) : getLatestDeviceSnapshot()) : null
+				watchOnlyViewBtcOnly = !!snap && bitcoinOnlyWatchOnlyScope(false, snap.featuresJson)
+				setBtcNodeWatchOnlyEligible(watchOnlyViewBtcOnly)
+				return { bitcoinOnly: watchOnlyViewBtcOnly }
+			},
 			checkWatchOnlyCache: async () => {
 				const snap = getLatestDeviceSnapshot()
 				if (!snap) return { available: false }
@@ -8432,7 +8749,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant),
 					snap.featuresJson,
 				)
-				return result ? bitcoinOnlyBalanceList(result.balances, bitcoinOnly) : null
+				// Cached rows, never live: the UI shows them as cached with their age.
+				return result ? bitcoinOnlyBalanceList(result.balances, bitcoinOnly).map(b => ({ ...b, syncState: 'stale' as const })) : null
 			},
 			// Re-fetch watch-only balances from Pioneer using addresses reconstructed
 			// from cache — NO device required. Self-contained: deliberately does NOT
@@ -8471,8 +8789,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					networkToChain.set(chain.networkId.toLowerCase(), chain.id)
 				}
 
-				// 4. Chunked GetPortfolioBalances
-				const pubkeyChunks = chunkArray(pubkeys, PIONEER_PORTFOLIO_CHUNK_SIZE)
+				// 4. Chunked GetPortfolioBalances. With the user's own node active, BTC comes from the
+				// node (below) and its xpubs never reach Pioneer (the guard would refuse them anyway).
+				const btcBackend = getBtcBackend()
+				const nodeBtc = btcBackend.kind !== 'pioneer' ? pubkeys.filter(p => p.chainId === 'bitcoin') : []
+				const pubkeyChunks = chunkArray(nodeBtc.length ? pubkeys.filter(p => p.chainId !== 'bitcoin') : pubkeys, PIONEER_PORTFOLIO_CHUNK_SIZE)
 				const chunkResults = await withTimeout(
 					mapWithConcurrency(pubkeyChunks, PIONEER_PORTFOLIO_MAX_CONCURRENCY, async (chunk, i) => {
 						try {
@@ -8497,6 +8818,22 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const failedChainIds = new Set<string>(incomplete)
 				for (let i = 0; i < chunkResults.length; i++) {
 					if (chunkResults[i].failed || chunkResults[i].meta?.degraded || chunkResults[i].meta?.failures?.length || chunkResults[i].meta?.staleChains?.length) for (const p of pubkeyChunks[i]) failedChainIds.add(p.chainId)
+				}
+				if (nodeBtc.length) {
+					try {
+						// The price is not chain data (not guarded). Without it the row stays cached rather than showing $0.
+						const btcChain = allChains.find(c => c.id === 'bitcoin')!
+						const priceUsd = marketPriceUsd(await withTimeout(pioneer.GetMarketInfo([btcChain.caip]), PIONEER_TIMEOUT_MS, 'GetMarketInfo(BTC)'))
+						if (!(priceUsd > 0)) throw new Error('no BTC price')
+						for (const p of nodeBtc) {
+							const utxos = await btcBackend.listUnspent({ network: p.networkId, xpub: p.sourcePubkey || p.pubkey, scriptType: p.scriptType })
+							const btc = utxos.reduce((sum, u) => sum + u.value, 0) / 1e8
+							allEntries.push({ caip: p.caip, pubkey: p.pubkey, networkId: p.networkId, balance: btc.toFixed(8), valueUsd: btc * priceUsd })
+						}
+					} catch (err: any) {
+						console.warn(`[refreshWatchOnlyBalances] BTC via ${btcBackend.kind} failed:`, err?.message || err)
+						failedChainIds.add('bitcoin')
+					}
 				}
 
 				// 5. Classify natives vs tokens (shared isTokenEntry)
@@ -8558,6 +8895,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					row.balanceUsd += (row.tokens?.reduce((sum, t) => sum + t.balanceUsd, 0) || 0)
 						+ (row.defiPositions?.reduce((sum, p) => sum + (p.balanceUsd || 0), 0) || 0)
 					row.syncState = 'confirmed'
+					row.updatedAt = Date.now()
 				}
 				// Never pass partial positives to the guarded DB upsert: it accepts them.
 				const confirmedResults = results.filter(r => !failedChainIds.has(r.chainId))
@@ -10049,6 +10387,25 @@ engine.on('reset-error', (err) => {
 // BtcAccountManager change events → push to WebView
 btcAccounts.on('change', (set) => {
 	try { rpc.send['btc-accounts-update'](set) } catch { /* webview not ready yet */ }
+	// PRIVACY: hidden-wallet sessions persist nothing (engine-controller snapshot rule).
+	const deviceId = engine.getDeviceState().deviceId
+	if (btcAccounts.masterFingerprint && deviceId && !engine.isPassphraseWallet && !engine.isEmulator) {
+		setDeviceMasterFingerprint(deviceId, btcAccounts.masterFingerprint)
+	}
+	// An imported watch-only key that this KeepKey (never the emulator) returns at the same path is verified.
+	// Never throws: this listener runs inside the account fetch.
+	if (!engine.isEmulator) for (const snap of getAllDeviceSnapshots()) {
+		if (!snap.imported || snap.verified) continue
+		try {
+			const { account } = watchOnlyReceiveAccount(snap.deviceId)
+			const meta = btcAccounts.getAllXpubMeta().find(x => x.scriptType === account.scriptType && formatPath(x.path) === formatPath(account.path))
+			if (meta && toStandardXpub(meta.xpub).xpub === account.xpub) {
+				setImportedWalletVerified(snap.deviceId, engine.isPassphraseWallet ? null : btcAccounts.masterFingerprint)
+			}
+		} catch (e: any) {
+			console.warn(`[watch-only] verification skipped for ${snap.deviceId}:`, e?.message || e)
+		}
+	}
 })
 
 // EvmAddressManager change events → push to WebView

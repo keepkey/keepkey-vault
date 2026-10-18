@@ -8,6 +8,10 @@ import { FirmwareUpgradePreview } from "./FirmwareUpgradePreview"
 import { useDeviceState } from "../hooks/useDeviceState"
 import { requiresBackupConfirmation } from "../lib/update-safety"
 import holdAndConnectRaw from "../assets/svg/hold-and-connect.svg?raw"
+import { looksLikePsbt, looksLikeRawTxHex, looksLikeWatchOnlyImport, PSBT_SNIFF_BYTES } from "../../shared/psbt-sniff"
+import { PSBT_DROP_EVENT } from "./PsbtSignDialog"
+import { WATCH_ONLY_IMPORT_EVENT } from "./WatchOnlyImportDialog"
+import { BTC_BROADCAST_EVENT } from "./BroadcastSignedDialog"
 
 /**
  * FirmwareDropZone — Global drag-and-drop dispatcher.
@@ -16,6 +20,11 @@ import holdAndConnectRaw from "../assets/svg/hold-and-connect.svg?raw"
  *   - .bin  → firmware analysis + flash flow (signed/unsigned, version compare).
  *   - .dylib → emulator dylib install (macOS only). Replaces any previously
  *             installed emulator and flips the emulator dev flag on.
+ *   - anything else whose CONTENT is a PSBT (binary, base64 or hex; wallets use
+ *             .psbt, .txn, .txt or no extension) → PsbtSignDialog via PSBT_DROP_EVENT
+ *             (it hands a fully signed one on to BroadcastSignedDialog).
+ *   - a signed raw transaction as hex text (Electrum's complete .txn) → BroadcastSignedDialog.
+ *   - an Electrum wallet file or an extended public key → WatchOnlyImportDialog.
  *
  * Warning levels for firmware:
  * - Signed firmware: green badge, standard confirmation
@@ -122,9 +131,22 @@ export function FirmwareDropZone() {
 				await processDylib(file)
 				return
 			}
+			const head = new Uint8Array(await file.slice(0, PSBT_SNIFF_BYTES).arrayBuffer())
+			if (looksLikePsbt(head)) {
+				window.dispatchEvent(new CustomEvent(PSBT_DROP_EVENT, { detail: file }))
+				return
+			}
+			if (looksLikeRawTxHex(head)) {
+				window.dispatchEvent(new CustomEvent(BTC_BROADCAST_EVENT, { detail: file }))
+				return
+			}
+			if (looksLikeWatchOnlyImport(head)) {
+				window.dispatchEvent(new CustomEvent(WATCH_ONLY_IMPORT_EVENT, { detail: file }))
+				return
+			}
 			setError(IS_EMU_PLATFORM
-				? `Only .bin firmware or ${IS_WINDOWS ? ".dll" : ".dylib"} emulator files are supported`
-				: "Only .bin firmware files are supported")
+				? `Only .bin firmware, ${IS_WINDOWS ? ".dll" : ".dylib"} emulator or Bitcoin PSBT files are supported`
+				: "Only .bin firmware or Bitcoin PSBT files are supported")
 			setPhase("error")
 		}
 
@@ -266,9 +288,9 @@ export function FirmwareDropZone() {
 					</Text>
 					<Text fontSize="sm" color="kk.textSecondary" textAlign="center">
 						{IS_EMU_PLATFORM
-							? <>Drop a <Text as="span" fontFamily="mono">.bin</Text> firmware to flash your KeepKey,
+							? <>Drop a Bitcoin PSBT to review and sign it, a <Text as="span" fontFamily="mono">.bin</Text> firmware to flash your KeepKey,
 							   or a <Text as="span" fontFamily="mono">{IS_WINDOWS ? '.dll' : '.dylib'}</Text> to install an emulator.</>
-							: <>Drop a <Text as="span" fontFamily="mono">.bin</Text> firmware file to flash your KeepKey.
+							: <>Drop a Bitcoin PSBT to review and sign it, or a <Text as="span" fontFamily="mono">.bin</Text> firmware file to flash your KeepKey.
 							   Signed and unsigned firmware supported.</>}
 					</Text>
 				</Flex>

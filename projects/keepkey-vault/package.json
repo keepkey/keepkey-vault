@@ -32,6 +32,8 @@
     "@pioneer-platform/pioneer-coins": "^11.0.0",
     "@pioneer-platform/pioneer-discovery": "10.3.2",
     "@scure/base": "1.2.6",
+    "@scure/bip32": "1.7.0",
+    "@scure/btc-signer": "1.8.1",
     "@ton/core": "^0.63.1",
     "@walletconnect/core": "^2.23.9",
     "@walletconnect/jsonrpc-utils": "^1.0.8",

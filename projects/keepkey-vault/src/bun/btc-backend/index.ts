@@ -31,9 +31,12 @@ let nodeBackend: BtcBackend | null = null
 // self-host node — its BTC stays on Pioneer. Set from index.ts on every device
 // state-change; false until a btc-only device reaches ready.
 let deviceBtcOnly = false
+// A Bitcoin-only watch-only wallet is open (no device needed). Kept apart from
+// deviceBtcOnly because every device state-change rewrites that one.
+let watchOnlyBtc = false
 
-/** The persisted node is live only when a btc-only device is connected. */
-function nodeActive(): boolean { return nodeBackend !== null && deviceBtcOnly }
+/** The persisted node is live only for a btc-only device or a btc-only watch-only wallet. */
+function nodeActive(): boolean { return nodeBackend !== null && (deviceBtcOnly || watchOnlyBtc) }
 
 /** True when the persisted node is actually in use (configured AND the connected
  *  device is btc-only). Callers use this instead of the raw btc_node_enabled
@@ -68,11 +71,17 @@ export function setBtcNodeDeviceEligible(isBtcOnly: boolean): void {
   syncPioneerGuard()
 }
 
+/** Set from index.ts when the UI opens (true for a btc-only snapshot) or leaves watch-only. */
+export function setBtcNodeWatchOnlyEligible(isBtcOnly: boolean): void {
+  watchOnlyBtc = isBtcOnly
+  syncPioneerGuard()
+}
+
 export function getBtcBackend(): BtcBackend {
   if (offlineMode) return DeviceOnlyBackend
   // Self-host: route to the node with NO fallback to Pioneer — a failing node
   // throws a verbose error the user must fix (sovereignty stance). Node only
-  // applies to a btc-only device (nodeActive); else BTC stays on Pioneer.
+  // applies to a btc-only device or watch-only wallet (nodeActive); else BTC stays on Pioneer.
   if (nodeActive()) return nodeBackend!
   return PioneerBackend
 }

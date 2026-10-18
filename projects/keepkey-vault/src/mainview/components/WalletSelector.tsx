@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next"
 import { rpcRequest } from "../lib/rpc"
 import kkIcon from "../assets/icon.png"
 import type { RegisteredDevice } from "../../shared/types"
+import { WATCH_ONLY_IMPORT_EVENT } from "./WatchOnlyImportDialog"
 
 interface WalletSelectorProps {
 	/** True when popover is open. Parent owns the toggle. */
@@ -248,15 +249,33 @@ export function WalletSelector({
 											· {relTime(d.updatedAt)}
 										</Text>
 									)}
+									{d.imported && (
+										<Text fontSize="10px" color={d.verified ? "var(--teal)" : "var(--gold)"}>
+											· {d.verified ? t("watchOnlyVerified", { defaultValue: "verified on a KeepKey" }) : t("watchOnlyNotVerified", { defaultValue: "not verified" })}
+										</Text>
+									)}
 								</Flex>
 							</Box>
 							<Text fontSize="11px" color="var(--text-2)" fontFamily="mono" fontWeight="500" flexShrink={0}>
-								{dollars(d.totalUsd || 0)}
+								{d.totalUsd == null ? "—" : dollars(d.totalUsd)}
 							</Text>
 						</Flex>
 					</Box>
 				)
 			})}
+
+			<Box
+				as="button" w="100%" px="3" py="2" mt="1" textAlign="left" cursor="pointer"
+				borderTop="1px solid rgba(255,255,255,0.07)" _hover={{ bg: "rgba(255,255,255,0.04)" }}
+				onClick={() => { close(); window.dispatchEvent(new Event(WATCH_ONLY_IMPORT_EVENT)) }}
+			>
+				<Text fontSize="12px" fontWeight="600" color="var(--gold)">
+					{t("importWatchOnly", { defaultValue: "Import watch-only…" })}
+				</Text>
+				<Text fontSize="10px" color="var(--text-3)">
+					{t("importWatchOnlyHint", { defaultValue: "Electrum wallet file or xpub / ypub / zpub" })}
+				</Text>
+			</Box>
 		</Box>
 	)
 }
