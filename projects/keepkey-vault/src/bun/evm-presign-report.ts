@@ -131,13 +131,14 @@ export function evmSigningVerdict(
       format: certified || certifiedBlob ? 'EVM_METADATA' : erc7730 ? 'ERC7730' : deviceAuthenticated ? 'FIRMWARE_NATIVE' : preview.txMetadata ? 'EVM_METADATA' : undefined,
       label: certified?.method || (certifiedBlob ? info.calldataDecoded?.method : undefined) || (plain ? 'a plain transfer' : undefined) || (deviceAuthenticated ? `${info.calldataDecoded?.dappName || 'EVM'} ${info.calldataDecoded?.method || 'call'}` : reviewedEvmDecodeLabel(info)),
       ...(provider ? { provider } : {}),
+      ...(erc7730 && info.erc7730Description?.signedBy ? { signer: info.erc7730Description.signedBy } : {}),
     },
   }
 }
 
 /** Report entries buildClearSignReport derives itself (from the simulation
  *  and the descriptor); a rebuilt report must not carry them twice. */
-const DERIVED_REPORT_CODES = new Set(['ASSETS_LEAVE_WALLET', 'AUTHORITY_GRANTED', 'DESCRIPTION_WITHOUT_COMPLETE_SIMULATION', 'CLEARSIGN_DEFINITION_REFUSED'])
+const DERIVED_REPORT_CODES = new Set(['ASSETS_LEAVE_WALLET', 'AUTHORITY_GRANTED', 'CLEARSIGN_DEFINITION_REFUSED'])
 
 /**
  * The overlay info once the device has refused its ERC-7730 definition. The
@@ -145,7 +146,7 @@ const DERIVED_REPORT_CODES = new Set(['ASSETS_LEAVE_WALLET', 'AUTHORITY_GRANTED'
  * asks for the normal blind-sign / AdvancedMode handling (a new card id).
  */
 export function withoutErc7730Description(info: SigningRequestInfo): SigningRequestInfo {
-  const { erc7730: _refused, ...rest } = info
+  const { erc7730: _refused, erc7730Description: _shown, ...rest } = info
   const next: SigningRequestInfo = { ...rest, id: `${info.id}:without-erc7730`, needsBlindSigning: true }
   const report = info.clearSignReport
   if (report) {

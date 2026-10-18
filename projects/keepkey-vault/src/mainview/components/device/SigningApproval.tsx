@@ -3,7 +3,7 @@ import { Box, Text, VStack, Flex, Button } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
 import { Z } from "../../lib/z-index"
 import { rpcRequest } from "../../lib/rpc"
-import type { SigningRequestInfo, EIP712DecodedInfo, CalldataDecodedInfo, SolanaTxDecodedInfo, EthMessageDecodedInfo, SolanaMessageDecodedInfo } from "../../../shared/types"
+import type { SigningRequestInfo, EIP712DecodedInfo, CalldataDecodedInfo, SolanaTxDecodedInfo, EthMessageDecodedInfo, SolanaMessageDecodedInfo, Erc7730Description } from "../../../shared/types"
 import { evmContractIdentity } from "../../../shared/evm-contract-identity"
 import { versionCompare } from "../../../shared/firmware-versions"
 import { erc20Preview } from "../../../shared/erc20Preview"
@@ -457,6 +457,34 @@ function RawPayload({ data, label }: { data: unknown; label: string }) {
 						{jsonStr}
 					</Text>
 				</Box>
+			)}
+		</VStack>
+	)
+}
+
+// ── ERC-7730 description: what the KeepKey will show ─────────────────
+
+/** The intent and fields the attached definition makes the KeepKey show, read
+ *  here from the same bytes, under Desktop's own name for the protocol. Links
+ *  open through the openUrl RPC (an anchor is a dead click in Electrobun). */
+function Erc7730Section({ d }: { d: Erc7730Description }) {
+	const links = [d.protocol?.url, d.explorerUrl].filter((url): url is string => !!url && url.startsWith("https://"))
+	return (
+		<VStack gap="1.5" w="100%" bg="rgba(0,0,0,0.25)" borderRadius="xl" p="3" align="stretch" data-erc7730-description>
+			<Text fontSize="sm" fontWeight="800" color="white">{d.protocol ? `${d.protocol.name} · ${d.intent}` : d.intent}</Text>
+			{d.summary && d.summary !== d.intent && <Text fontSize="xs" color="kk.textPrimary">{d.summary}</Text>}
+			{d.protocol?.about && <Text fontSize="xs" color="kk.textSecondary">{d.protocol.about}</Text>}
+			{d.fields.map((f, i) => <Row key={i} label={f.label} value={f.value} />)}
+			{links.length > 0 && (
+				<Flex gap="3" wrap="wrap">
+					{links.map((url) => (
+						<Text key={url} as="a" fontSize="2xs" color="kk.textSecondary" textDecoration="underline" cursor="pointer"
+							// @ts-expect-error -- Chakra's polymorphic props don't model anchor attrs
+							href={url}
+							onClick={(e: React.MouseEvent) => { e.preventDefault(); rpcRequest("openUrl", { url }).catch(() => {}) }}
+						>{new URL(url).hostname}</Text>
+					))}
+				</Flex>
 			)}
 		</VStack>
 	)
@@ -1377,6 +1405,8 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 					</Box>
 				)}
 
+				{/* What the call does, as the KeepKey will show it. */}
+				{request.erc7730 && request.erc7730Description && <Erc7730Section d={request.erc7730Description} />}
 				{/* Report and risk first, so they are read before blind-sign consent. */}
 				<ClearSignReportCard report={request.clearSignReport} verdictBelow={Boolean(assessSigningRisk(request))} />
 				{/* No report (an addressNList caller): the provider the sign step pins is still named. */}

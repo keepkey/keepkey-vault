@@ -1,5 +1,5 @@
 import type { ClearSignDefinitionSource, ClearSignProtectionLevel, SolanaTxDecodedInfo } from './types'
-import { PLAIN_TRANSFER_NOT_SIMULATED, type EffectFinding, type EffectReport } from './transaction-effects'
+import type { EffectFinding, EffectReport } from './transaction-effects'
 
 export interface ClearSignDescriptorEvidence {
   source: ClearSignDefinitionSource
@@ -13,6 +13,9 @@ export interface ClearSignDescriptorEvidence {
     | 'identity-unavailable' | 'identity-stale' | 'identity-changed' | 'identity-mismatch' | 'unsupported-alt'
     /** No artifact; a reviewed, pinned local decoder read the call (display only). */
     | 'reviewed-decoder'
+  /** Who signed the description, set only when this computer checked that
+   *  signature up to KeepKey's production root (an ERC-7730 envelope). */
+  signer?: string
   /** A third-party (runtime) signer that will be asked for, or supplied, a
    *  description. Never KeepKey: the device says "NOT verified by KeepKey". */
   provider?: ClearSignRuntimeProvider
@@ -155,12 +158,6 @@ export function buildClearSignReport(input: {
     message: `Simulation observed ${approvals.length} new or changed spending authorit${approvals.length === 1 ? 'y' : 'ies'}.`,
     severity: approvals.some((change) => change.unlimited) ? 'danger' : 'warning',
   })
-  if (descriptor.authenticated && simulation.status !== 'success'
-    && !simulation.unknowns.some((unknown) => unknown.code === PLAIN_TRANSFER_NOT_SIMULATED)) limitations.push({
-    code: 'DESCRIPTION_WITHOUT_COMPLETE_SIMULATION',
-    message: 'The description is authenticated, but execution effects could not be completely simulated.',
-    severity: 'warning',
-  })
   if (descriptor.resolution && descriptor.resolution !== 'selected' && descriptor.resolution !== 'no-artifact'
     && descriptor.resolution !== 'reviewed-decoder') limitations.push({
     code: 'CLEARSIGN_DEFINITION_REFUSED',
@@ -170,7 +167,10 @@ export function buildClearSignReport(input: {
   })
 
   const headline = protectionLevel === 'P5' ? 'Authenticated description bound to deployed code'
-    : protectionLevel === 'P4' ? (descriptor.source === 'native' ? 'KeepKey ClearSign ready' : 'Authenticated ClearSign description')
+    // P4 rests on the device's own check; name a signer only when this
+    // computer checked the signature too.
+    : protectionLevel === 'P4' ? (descriptor.source === 'native' ? 'KeepKey ClearSign ready'
+      : descriptor.signer ? `Signed by ${descriptor.signer}` : 'Your KeepKey checks the signed description')
       : protectionLevel === 'P3' ? 'Simulated on this computer; not authenticated by KeepKey'
         : protectionLevel === 'P2' ? 'Decoded on this computer; not authenticated by KeepKey'
           : protectionLevel === 'P0' ? 'Transaction blocked'

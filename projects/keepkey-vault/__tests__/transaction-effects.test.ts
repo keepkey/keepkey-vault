@@ -118,7 +118,7 @@ describe('Vault ClearSign effect reports', () => {
     expect(report.headline).toContain('not authenticated')
   })
 
-  test('ClearSign Report separates authenticated description from incomplete effects', () => {
+  test('ClearSign Report adds no filler line when an authenticated description has incomplete effects', () => {
     const simulation = normalizeEvmSimulation(
       { chainId: 1, from: wallet, to: other, input: '0x12345678' },
       'http://rpc', '0x10', { status: '0x1' }, undefined,
@@ -130,7 +130,8 @@ describe('Vault ClearSign effect reports', () => {
       now: 100,
     })
     expect(report.protectionLevel).toBe('P5')
-    expect(report.limitations.map((finding) => finding.code)).toContain('DESCRIPTION_WITHOUT_COMPLETE_SIMULATION')
+    expect(report.simulation.status).not.toBe('success')
+    expect(report.limitations.map((finding) => finding.code)).not.toContain('DESCRIPTION_WITHOUT_COMPLETE_SIMULATION')
     expect(report.claims.map((claim) => claim.source)).toContain('authenticated-definition')
   })
 

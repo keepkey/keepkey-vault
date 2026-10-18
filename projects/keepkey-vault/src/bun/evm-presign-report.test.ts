@@ -220,7 +220,7 @@ describe('in-app swap card — the Desktop signing verdict for the same bytes', 
     const r = await inApp(APPROVE, '7.16.0')
     expect(ClearSignReportResponse.safeParse(r).success).toBe(true)
     expect(r.protectionLevel).toBe('P4')
-    expect(r.headline).toBe('Authenticated ClearSign description')
+    expect(r.headline).toBe('Your KeepKey checks the signed description')
     expect(r.descriptor).toMatchObject({ source: 'certified', authenticated: true, format: 'EVM_METADATA', label: 'approve' })
     expect(sent).toEqual([{ chainId: 8453, contract: BASE_USDC, selector: '0x095ea7b3', calldataLength: 68, spender: RELAY }])
     // The risk bar names reviewed Base tokens (was "47478285 units of token …").
