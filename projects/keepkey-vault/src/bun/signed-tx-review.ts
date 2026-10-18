@@ -19,11 +19,15 @@ const callSummary = (d?: CalldataDecodedInfo | null) =>
 /** The card's verdict, recomputed from the very object the card was built from. */
 export function signedTxReview(info: SigningRequestInfo, signedMsg: any): SignedTxReview {
   const risk = assessSigningRisk(info)
+  // From the card's verdict, not from what was sent: a caller's 0x80 blob this
+  // firmware cannot show still signs blind. Unmarked calls with data are blind.
+  const blind = info.needsBlindSigning ?? (!info.deviceClearSigns && !!info.data && info.data !== '0x')
   return {
     signedHow: signedMsg?.erc7730 ? 'erc7730'
-      : signedMsg?.txMetadata?.keyId === 0x80 ? 'certified'
-        : signedMsg?.txMetadata ? 'provider'
-          : info.needsBlindSigning ? 'blind' : 'native',
+      : blind ? (signedMsg?.txMetadata ? 'provider' : 'blind')
+        : info.deviceClearSigns ? 'native'
+          : signedMsg?.txMetadata?.keyId === 0x80 ? 'certified'
+            : 'native',
     tier: risk?.tier, headline: risk?.headline, reasons: risk?.reasons ?? [],
     call: callSummary(info.calldataDecoded), provider: info.runtimeProvider?.alias, appName: info.appName,
     signedAt: Date.now(),
@@ -45,7 +49,8 @@ const DEVICE_CLAIM = /your KeepKey|KeepKey firmware|Advanced Mode|signing blind/
 /** The on-chain transaction, as a node returns it. undefined = not available. */
 export interface EvmTxFacts { to?: string | null; from?: string; value?: string; data?: string }
 
-export async function txClearSign(record: SignedTxReview | null, tx: EvmTxFacts | null | undefined, chainId: number): Promise<TxClearSign> {
+/** `received`: someone else's call. Show what it is, not risk lines about "your" funds. */
+export async function txClearSign(record: SignedTxReview | null, tx: EvmTxFacts | null | undefined, chainId: number, received = false): Promise<TxClearSign> {
   if (record) return { kind: 'record', ...record }
   if (!tx || typeof tx.data !== 'string' || !tx.to) return { kind: 'none' }
   if (tx.data === '0x' || tx.data === '') return { kind: 'plain' }
@@ -54,7 +59,7 @@ export async function txClearSign(record: SignedTxReview | null, tx: EvmTxFacts 
     to: tx.to, from: tx.from, value: tx.value, data: tx.data,
     calldataDecoded: (await decodeCalldata(tx.to, tx.data, chainId, tx.value)) ?? undefined,
   }
-  const reasons = (assessSigningRisk(info)?.reasons ?? []).filter((r) => !DEVICE_CLAIM.test(r.text))
+  const reasons = received ? [] : (assessSigningRisk(info)?.reasons ?? []).filter((r) => !DEVICE_CLAIM.test(r.text))
   return { kind: 'decoded', call: callSummary(info.calldataDecoded), reasons }
 }
 

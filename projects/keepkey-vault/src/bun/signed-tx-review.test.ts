@@ -7,6 +7,7 @@ import { Wallet, utils } from 'ethers'
 import type { SigningRequestInfo } from '../shared/types'
 import { assessSigningRisk } from '../shared/clearsign-risk'
 import { signedHowText } from '../shared/tx-clearsign'
+import { decodeCalldata } from './calldata-decoder'
 
 const dir = mkdtempSync(join(tmpdir(), 'vault-signed-tx-review-'))
 mock.module('electrobun/bun', () => ({ Utils: { paths: { userData: dir } } }))
@@ -56,12 +57,34 @@ describe('signedTxReview', () => {
     expect(signedHowText(review)).toBe('blind (Advanced Mode)')
   })
 
-  test('what was sent to the device decides how it signed', () => {
-    expect(signedTxReview(venice(), { erc7730: {} }).signedHow).toBe('erc7730')
-    expect(signedTxReview(venice({ needsBlindSigning: false }), { txMetadata: { keyId: 0x80 } }).signedHow).toBe('certified')
+  test('the card verdict and what was sent decide how it signed', () => {
+    const erc7730 = signedTxReview(venice({ needsBlindSigning: false }), { erc7730: {} })
+    expect([erc7730.signedHow, signedHowText(erc7730)]).toEqual(['erc7730', 'clear-signed, from a KeepKey ClearSign description'])
+    const certified = signedTxReview(venice({ needsBlindSigning: false }), { txMetadata: { keyId: 0x80 } })
+    expect([certified.signedHow, signedHowText(certified)]).toEqual(['certified', 'clear-signed, from a KeepKey-certified description'])
     const provider = signedTxReview(venice({ runtimeProvider: { alias: 'Venice', fingerprint: 'ab12' } as any }), { txMetadata: { keyId: 1 } })
-    expect(signedHowText(provider)).toBe("blind (Advanced Mode), described by 'Venice', not verified by KeepKey")
-    expect(signedTxReview(venice({ needsBlindSigning: false, data: '0x' }), {}).signedHow).toBe('native')
+    expect(signedHowText(provider)).toBe("blind (Advanced Mode). Described by 'Venice', not checked by KeepKey")
+    const native = signedTxReview(venice({ needsBlindSigning: false, deviceClearSigns: true }), {})
+    expect([native.signedHow, signedHowText(native)]).toEqual(['native', 'clear-signed'])
+    expect(signedTxReview(venice({ needsBlindSigning: undefined, data: '0x' }), {}).signedHow).toBe('native')
+  })
+
+  test('a caller 0x80 blob the firmware cannot show (7.15) is not recorded as certified', () => {
+    const r = signedTxReview(venice({ firmwareVersion: '7.15.0' }), { txMetadata: { keyId: 0x80, signedPayload: 'AA==' } })
+    expect(r.signedHow).toBe('provider')
+    expect(signedHowText(r)).toStartWith('blind (Advanced Mode)')
+  })
+
+  test('a call with data the preview never marked is blind, not clear-signed', () => {
+    expect(signedTxReview(venice({ needsBlindSigning: undefined, data: '0x12' }), {}).signedHow).toBe('blind')
+  })
+
+  test('a known call the firmware cannot show reads "not on this firmware", not "blind"', async () => {
+    const data = `0xa9059cbb000000000000000000000000${OTHER}${(5_000_000n).toString(16).padStart(64, '0')}`
+    const calldataDecoded = (await decodeCalldata(USDC, data, 1, '0x0'))!
+    const r = signedTxReview(venice({ chainId: 1, to: USDC, data, calldataDecoded }), {})
+    expect(r.call).toBe('ERC-20: transfer')
+    expect(signedHowText(r)).toBe('raw data, this firmware cannot show it yet (Advanced Mode)')
   })
 })
 
@@ -109,5 +132,19 @@ describe('txClearSign without a record', () => {
     const data = `0x095ea7b3000000000000000000000000${OTHER}${'f'.repeat(64)}`
     const approve = await txClearSign(null, { to: USDC, value: '0x0', data }, 1)
     expect(approve.kind === 'decoded' && approve.reasons.map((r) => r.text)).toEqual([`Lets 0x${OTHER} spend ALL of your USDC, now and later, without asking you again.`])
+    // A THORChain deposit: its only line names the firmware and Advanced Mode.
+    const memo = Buffer.from('=:TRON.TRX:TMoUJ2EqVESgcaD5eJdvphkkn8K3ucXdTp:5740830833:keep:30').toString('hex')
+    const w = (hex: string) => hex.padStart(64, '0')
+    const thor = await txClearSign(null, {
+      to: '0x00dc6100103bc402d490aee3f9a5560cbd91f1d4', value: '0x90c5e8ba98e000',
+      data: `0x44bc937b${w('718f6c9df785bc4e323086de024ca822efbe8ab9')}${w('0')}${w('90c5e8ba98e000')}${w('a0')}${w('ffffffff')}${w((memo.length / 2).toString(16))}${memo.padEnd(128, '0')}`,
+    }, 8453)
+    expect(thor.kind === 'decoded' && thor.call).toBeTruthy()
+    expect(thor.kind === 'decoded' && thor.reasons.map((r) => r.text)).toEqual(['Sends 0.04075 ETH to the contract at 0x00dc6100103bc402d490aee3f9a5560cbd91f1d4.'])
+  })
+
+  test('a received call shows what it is, with no lines about "your" funds', async () => {
+    const data = `0x095ea7b3000000000000000000000000${OTHER}${'f'.repeat(64)}`
+    expect(await txClearSign(null, { to: USDC, value: '0x0', data }, 1, true)).toEqual({ kind: 'decoded', call: 'ERC-20: approve', reasons: [] })
   })
 })

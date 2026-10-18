@@ -8278,14 +8278,14 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			getActivityScanState: async () => ({ running: activityScanRunning }),
 			// What the card showed when this EVM tx was signed; else Desktop's
 			// decode of its call data now (Pioneer LookupTx), cached per txid.
-			getTxClearSign: async ({ networkId, txid }: { networkId: string; txid: string }): Promise<TxClearSign> => {
+			getTxClearSign: async ({ networkId, txid, received }: { networkId: string; txid: string; received?: boolean }): Promise<TxClearSign> => {
 				if (!/^eip155:[1-9]\d*$/.test(networkId) || !/^0x[0-9a-f]{64}$/i.test(txid)) return { kind: 'none' }
 				const scope = engine.isPassphraseWallet ? null : getWalletDbScope()
 				const record = scope ? getSignedTxReview(networkId, txid, scope.deviceId, scope.walletId) : null
-				const key = `${networkId}:${txid.toLowerCase()}`
+				const key = `${networkId}:${txid.toLowerCase()}:${received ? 'in' : 'out'}`
 				if (!record && txClearSignCache.has(key)) return txClearSignCache.get(key)!
 				const tx = (record || offlineMode) ? undefined : await lookupEvmTx(await getPioneer(), networkId, txid).catch(() => undefined)
-				const result = await txClearSign(record, tx, Number(networkId.slice(7)))
+				const result = await txClearSign(record, tx, Number(networkId.slice(7)), received === true)
 				if (result.kind === 'decoded' || result.kind === 'plain') txClearSignCache.set(key, result)
 				return result
 			},

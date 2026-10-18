@@ -24,12 +24,15 @@ export type TxClearSign =
   | { kind: 'plain' }
   | { kind: 'none' }
 
-export function signedHowText(r: Pick<SignedTxReview, 'signedHow' | 'provider'>): string {
+/** A call KeepKey Desktop decoded (`call`) is known: "not on this firmware
+ *  yet", not "blind" (owner rule, as on the approval card). */
+export function signedHowText(r: Pick<SignedTxReview, 'signedHow' | 'provider' | 'call'>): string {
+  const raw = r.call ? 'raw data, this firmware cannot show it yet (Advanced Mode)' : 'blind (Advanced Mode)'
   switch (r.signedHow) {
     case 'native': return 'clear-signed'
     case 'certified': return 'clear-signed, from a KeepKey-certified description'
     case 'erc7730': return 'clear-signed, from a KeepKey ClearSign description'
-    case 'provider': return `blind (Advanced Mode), described by ${r.provider ? `'${r.provider}'` : 'a ClearSign provider'}, not verified by KeepKey`
-    case 'blind': return 'blind (Advanced Mode)'
+    case 'provider': return `${raw}. Described by ${r.provider ? `'${r.provider}'` : 'a ClearSign provider'}, not checked by KeepKey`
+    case 'blind': return raw
   }
 }
