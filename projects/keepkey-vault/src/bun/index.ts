@@ -7552,12 +7552,16 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			previewAddressBookCertification: async () =>
 				contactsFromEntries(getAddressBookList({ kind: 'external', savedOnly: true }))
 					.map(c => ({ label: c.label, network: c.network, address: `0x${c.destination}` })),
-			certifyAddressBook: async () => {
+			certifyAddressBook: async (params) => {
 				if (!addressBookClearsignEnabled) throw new Error('Address Book ClearSign is not enabled')
 				if (!engine.wallet) throw new Error('No device connected')
 				requireAddressBookClearsignFirmware()
 				if (engine.isPassphraseWallet) throw new Error('Address Book certification is unavailable in a passphrase session')
+				// The review dialog can drop contacts; it can never add one.
+				const only = (params as any)?.only as { network: string; address: string }[] | undefined
+				const keep = only && new Set(only.map(o => `${o.network}|${String(o.address).toLowerCase().replace(/^0x/, '')}`))
 				const contacts = contactsFromEntries(getAddressBookList({ kind: 'external', savedOnly: true }))
+					.filter(c => !keep || keep.has(`${c.network}|${c.destination}`))
 				if (!contacts.length) throw new Error('Add at least one labeled EVM contact before certifying')
 				const revision = Math.max(0, Number(getSetting('addressbook_clearsign_revision') || '0')) + 1
 				if (addressBookCertifyUnsupported()) throw new Error(ADDRESS_BOOK_CERTIFY_UNSUPPORTED)

@@ -377,7 +377,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       updateAddressBook: { params: { id: string; label?: string; note?: string }; response: boolean }
       deleteAddressBook: { params: { id: string }; response: void }
       getAddressBookHistory: { params: { entryId: string }; response: AddressBookTx[] }
-      certifyAddressBook: { params: void; response: { revision: number; count: number; root: string; fingerprint: string } }
+      certifyAddressBook: { params: { only?: { network: string; address: string }[] } | void; response: { revision: number; count: number; root: string; fingerprint: string } }
       previewAddressBookCertification: { params: void; response: { label: string; network: string; address: string }[] }
 
       // ── Recent Activity ──────────────────────────────────────────────────

@@ -88,12 +88,12 @@ export function AddressBookView() {
     }
   }, [])
 
-  const certify = useCallback(async () => {
+  const certify = useCallback(async (picked: { label: string; network: string; address: string }[]) => {
     setCertifyPreview(null)
     setCertifying(true)
     setCertificationNotice("")
     try {
-      const result = await rpcRequest<{ revision: number; count: number; fingerprint: string }>("certifyAddressBook", undefined, 0)
+      const result = await rpcRequest<{ revision: number; count: number; fingerprint: string }>("certifyAddressBook", { only: picked.map(c => ({ network: c.network, address: c.address })) }, 0)
       setCertificationNotice(`Certified ${result.count} contacts · revision ${result.revision} · ${result.fingerprint}`)
     } catch (error: any) {
       const message = error?.message || "Address Book certification failed"
@@ -211,26 +211,54 @@ export function AddressBookView() {
       {certifyPreview && (
         <Box position="fixed" inset="0" zIndex={Z.dialog} display="flex" alignItems="center" justifyContent="center" bg="rgba(0,0,0,0.6)"
              onClick={() => setCertifyPreview(null)}>
-          <Box bg="kk.cardBg" border="1px solid" borderColor="kk.border" borderRadius="14px" p="5" w="92%" maxW="520px" maxH="80vh" overflowY="auto"
-               onClick={(e) => e.stopPropagation()}>
-            <Text fontSize="md" fontWeight="700" color="var(--text-0)">Certify {certifyPreview.length} contact{certifyPreview.length === 1 ? "" : "s"}?</Text>
-            <Text fontSize="xs" color="var(--text-2)" mt="1" mb="3">
-              Your KeepKey will sign this list. Sends to these addresses on these networks then show the name on your KeepKey.
+          <Box bg="kk.cardBg" border="1px solid" borderColor="rgba(72,187,170,0.45)" borderRadius="16px" p="5" w="92%" maxW="540px" maxH="80vh" overflowY="auto"
+               boxShadow="0 0 0 1px rgba(72,187,170,0.15), 0 8px 32px rgba(0,0,0,0.6)" onClick={(e) => e.stopPropagation()}>
+            <Flex align="center" gap="2.5" mb="1">
+              <Flex w="32px" h="32px" borderRadius="full" bg="rgba(72,187,170,0.15)" align="center" justify="center" flexShrink={0}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--teal)" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+              </Flex>
+              <Text fontSize="md" fontWeight="700" color="var(--text-0)">
+                Certify <Text as="span" color="var(--teal)">{certifyPreview.length}</Text> contact{certifyPreview.length === 1 ? "" : "s"}?
+              </Text>
+            </Flex>
+            <Text fontSize="xs" color="var(--text-2)" mb="3" pl="42px">
+              Your KeepKey signs this list. Sends to these addresses on these networks then show the name on your KeepKey.
             </Text>
             <Flex direction="column" gap="2">
-              {certifyPreview.map((c) => (
-                <Box key={`${c.network}:${c.address}`} px="3" py="2" borderRadius="10px" bg="rgba(255,255,255,0.03)" border="1px solid" borderColor="var(--line)">
-                  <Flex justify="space-between" gap="2">
-                    <Text fontSize="sm" fontWeight="700" color="var(--text-0)">{c.label}</Text>
-                    <Text fontSize="xs" color="var(--text-2)">{evmChainLabel(c.network.split(":")[1])?.name || c.network}</Text>
+              {certifyPreview.map((c) => {
+                const chain = CHAINS.find(ch => caipToNetworkId(ch.caip) === c.network)
+                const key = `${c.network}:${c.address}`
+                return (
+                  <Flex key={key} align="center" gap="3" px="3" py="2.5" borderRadius="12px" bg="var(--ink-0)" border="1px solid" borderColor="var(--line)"
+                        borderLeft="3px solid var(--gold)">
+                    <AddressIdenticon seed={c.address.toLowerCase()} size={32} />
+                    <Box flex="1" minW="0">
+                      <Flex align="center" gap="2">
+                        <Text fontSize="sm" fontWeight="700" color="var(--gold)" truncate>{c.label}</Text>
+                        <Flex align="center" gap="1" px="1.5" py="0.5" borderRadius="6px" bg="rgba(255,255,255,0.05)" flexShrink={0}>
+                          {chain && <AssetIcon caip={chain.caip} size={12} alt={chain.symbol} />}
+                          <Text fontSize="10px" color="var(--text-1)">{chain?.coin || evmChainLabel(c.network.split(":")[1])?.name || c.network}</Text>
+                        </Flex>
+                      </Flex>
+                      <Text fontSize="xs" color="var(--text-1)" fontFamily="mono" wordBreak="break-all">{c.address}</Text>
+                    </Box>
+                    <Box as="button" aria-label={`Leave ${c.label} out`} title="Leave out of this certification" flexShrink={0}
+                         w="26px" h="26px" borderRadius="full" color="var(--text-2)" _hover={{ color: "var(--rose)", bg: "rgba(224,140,123,0.12)" }}
+                         onClick={() => setCertifyPreview(prev => {
+                           const next = (prev || []).filter(p => `${p.network}:${p.address}` !== key)
+                           return next.length ? next : null
+                         })}>
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" style={{ margin: "0 auto" }}><line x1="6" y1="6" x2="18" y2="18" /><line x1="18" y1="6" x2="6" y2="18" /></svg>
+                    </Box>
                   </Flex>
-                  <Text fontSize="xs" color="var(--text-1)" fontFamily="mono" wordBreak="break-all">{c.address}</Text>
-                </Box>
-              ))}
+                )
+              })}
             </Flex>
             <Flex justify="flex-end" gap="2" mt="4">
               <Button size="sm" variant="outline" borderColor="var(--line)" color="var(--text-1)" onClick={() => setCertifyPreview(null)}>Cancel</Button>
-              <Button size="sm" variant="outline" borderColor="var(--teal)" color="var(--teal)" onClick={certify}>Certify on KeepKey</Button>
+              <Button size="sm" bg="var(--teal)" color="black" fontWeight="700" _hover={{ opacity: 0.9 }} onClick={() => certify(certifyPreview)}>
+                Certify {certifyPreview.length} on KeepKey
+              </Button>
             </Flex>
           </Box>
         </Box>
