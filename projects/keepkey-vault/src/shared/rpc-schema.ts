@@ -387,7 +387,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       // True while the engine's startup/background bulk history scan is in flight,
       // so the activity UI can show "Syncing…" instead of a false "no activity".
       getActivityScanState: { params: void; response: { running: boolean } }
-      getTxDetails: { params: { networkId: string; txid: string; received?: boolean }; response: TxDetailLine[] | null }
+      getTxDetails: { params: { networkId: string; txid: string }; response: TxDetailLine[] | null }
       dismissActivity: { params: { id: string }; response: void }
       clearRecentActivity: { params: void; response: void }
 

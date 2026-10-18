@@ -4,10 +4,12 @@
  * of this wallet, the result, and how it was signed. Names only, no addresses.
  */
 import { utils } from 'ethers'
+import { assetData } from '@pioneer-platform/pioneer-discovery'
 import { assessSigningRisk } from '../shared/clearsign-risk'
 import { evmChainLabel } from '../shared/chains'
 import { evmContractIdentity, evmTokenIdentity } from '../shared/evm-contract-identity'
 import { REVIEWED_EVM_TOKENS } from '../shared/reviewed-evm-tokens'
+import { detectSpamToken } from '../shared/spamFilter'
 import type { CalldataDecodedInfo, SigningRequestInfo, TokenBalance } from '../shared/types'
 import type { SignedTxReview, TxDetailLine } from '../shared/tx-clearsign'
 import { decodeCalldata } from './calldata-decoder'
@@ -54,11 +56,12 @@ export interface EvmLog { address: string; topics: string[]; data: string }
 export interface EvmReceiptFacts { status: 0 | 1; logs: EvmLog[] }
 export interface EvmToken { symbol: string; decimals: number }
 
-/** Pioneer's LookupTx, given a few seconds: a hung call must not leave the dialog waiting. */
+/** Pioneer's LookupTx, given a few seconds (Pioneer's own start included):
+ *  a hung call must not leave the dialog waiting. */
 export async function lookupEvmTx(pioneer: any, networkId: string, txid: string, timeoutMs = 5000): Promise<{ tx: EvmTxFacts; receipt?: EvmReceiptFacts } | undefined> {
   let timer: ReturnType<typeof setTimeout> | undefined
   const res = await Promise.race([
-    pioneer.LookupTx({ networkId, txid }),
+    Promise.resolve(pioneer).then((p) => p.LookupTx({ networkId, txid })),
     new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('LookupTx timed out')), timeoutMs) }),
   ]).finally(() => clearTimeout(timer))
   const { tx, receipt } = res?.data?.data ?? {}
@@ -85,15 +88,24 @@ const tokenText = (s: unknown, max: number) => {
   return t.length <= max && /^[A-Za-z0-9$][A-Za-z0-9 .+_$-]*$/.test(t) && !/\.[a-z]{2,}\b|^unknown$/i.test(t) && !ADDRESS.test(t) ? t : undefined
 }
 
+let catalogSymbols: Set<string> | undefined
+/** A symbol some catalog token already uses: an unlisted token taking it is an impersonation. */
+const catalogSymbol = (s?: string) => (catalogSymbols ??= new Set((Array.isArray(assetData) ? assetData : Object.values(assetData as object))
+  .map((a: any) => String(a.symbol).toLowerCase()))).has(String(s).toLowerCase())
+
 /** This wallet's EVM addresses and the token names Desktop has: reviewed
- *  tokens, the token catalog, and the portfolio (minus tokens the user hid). */
+ *  tokens, the token catalog, and the portfolio. A portfolio token the
+ *  portfolio itself hides as spam counts only when no catalog token uses its
+ *  symbol (a fake "USDT" never does), and never when the user hid it. */
 export function walletBook(chainId: number, deviceId?: string) {
   const balances = deviceId ? getCachedBalances(deviceId)?.balances ?? [] : []
   const own = balances.map((b) => b.address?.toLowerCase()).filter((a) => /^0x[0-9a-f]{40}$/.test(a ?? ''))
   const held = new Map<string, TokenBalance>()
   for (const t of balances.flatMap((b) => b.tokens ?? [])) {
     const caip = t.caip?.toLowerCase() ?? ''
-    if (caip.startsWith(`eip155:${chainId}/erc20:`) && Number.isInteger(t.decimals) && !held.has(caip.slice(-42)) && getTokenVisibility(caip) !== 'hidden') held.set(caip.slice(-42), t)
+    const user = getTokenVisibility(caip)
+    if (caip.startsWith(`eip155:${chainId}/erc20:`) && Number.isInteger(t.decimals) && !held.has(caip.slice(-42))
+      && user !== 'hidden' && (!detectSpamToken(t, user).isSpam || !catalogSymbol(t.symbol))) held.set(caip.slice(-42), t)
   }
   const tokenOf = (address: string): EvmToken | undefined => {
     const a = address.toLowerCase()
@@ -117,7 +129,6 @@ function amount(raw: bigint, decimals: number): string {
 }
 
 const TRANSFER = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef'
-const TRANSFER_SINGLE = '0xc3d58168c5ae7397731d063d5bbf3d657854427343f4c083240f7aacaa2d0f62'
 const topicAddress = (t?: string) => (t && /^0x0{24}[0-9a-fA-F]{40}$/.test(t) ? `0x${t.slice(26)}`.toLowerCase() : '')
 
 /** What the receipt's Transfer logs moved in and out of `own`, net per token.
@@ -125,14 +136,12 @@ const topicAddress = (t?: string) => (t && /^0x0{24}[0-9a-fA-F]{40}$/.test(t) ? 
 export function tokenMoves(logs: EvmLog[], own: Set<string>, tokenOf: (address: string) => EvmToken | undefined): TxDetailLine[] {
   const net = new Map<string, bigint>()
   for (const log of logs) {
-    const [sig, a, b, c] = log.topics.map((t) => t.toLowerCase())
+    const [sig, a, b] = log.topics.map((t) => t.toLowerCase())
     let from: string, to: string, n: bigint, key: string
     if (sig === TRANSFER && log.topics.length === 3 && /^0x[0-9a-fA-F]{64}$/.test(log.data)) {
       [from, to, n, key] = [topicAddress(a), topicAddress(b), BigInt(log.data), log.address.toLowerCase()]
     } else if (sig === TRANSFER && log.topics.length === 4) {
-      [from, to, n, key] = [topicAddress(a), topicAddress(b), 1n, 'nft']
-    } else if (sig === TRANSFER_SINGLE && log.topics.length === 4 && /^0x[0-9a-fA-F]{128}$/.test(log.data)) {
-      [from, to, n, key] = [topicAddress(b), topicAddress(c), BigInt(`0x${log.data.slice(66)}`), 'nft']
+      [from, to, n, key] = [topicAddress(a), topicAddress(b), 1n, `nft:${log.address.toLowerCase()}`]
     } else continue
     const sign = (own.has(to) ? 1n : 0n) - (own.has(from) ? 1n : 0n)
     if (sign) net.set(key, (net.get(key) ?? 0n) + sign * n)
@@ -141,26 +150,29 @@ export function tokenMoves(logs: EvmLog[], own: Set<string>, tokenOf: (address: 
   for (const [key, n] of net) {
     if (n === 0n) continue
     const abs = n < 0n ? -n : n
-    const token = key === 'nft' ? undefined : tokenOf(key)
-    const value = key === 'nft' ? `${abs} NFT${abs > 1n ? 's' : ''}` : token && `${amount(abs, token.decimals)} ${token.symbol}`
+    const nft = key.startsWith('nft:')
+    const token = nft ? undefined : tokenOf(key)
+    const value = nft ? `${abs} NFT${abs > 1n ? 's' : ''}` : token && `${amount(abs, token.decimals)} ${token.symbol}`
     if (value) lines.push({ label: n > 0n ? 'Received' : 'Sent', value })
   }
   return lines
 }
 
 const ACTIONS: Record<string, string> = {
-  transferFrom: 'Transfer', 'deposit (Wrap ETH)': 'Wrap', 'withdraw (Unwrap WETH)': 'Unwrap',
-  'safeTransferFrom (NFT)': 'Transfer', 'setApprovalForAll (NFT)': 'Approve all',
+  transferFrom: 'Transfer', 'safeTransferFrom (NFT)': 'Transfer', 'setApprovalForAll (NFT)': 'Approve all',
+  'Exact Input Single (Uniswap V3)': 'Swap', 'Exact Input (Uniswap V3)': 'Swap',
 }
 /** A method name in plain words: "claimAndStake" -> "Claim and stake". */
 function actionText(method: string, name?: string): string {
   if (ACTIONS[method]) return ACTIONS[method]
-  if (/swap|sell/i.test(method)) return 'Swap'
-  let m = method.replace(/\s*\(.*\)$/, '').replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+  let m = method.replace(/\s*\(.*\)$/, '')
+  if (/swap|sell/i.test(m)) return 'Swap'
+  m = m.replace(/([a-z0-9])([A-Z])/g, '$1 $2')
   if (name && m.toLowerCase().startsWith(`${name.toLowerCase()} `)) m = m.slice(name.length + 1)
   return m.charAt(0).toUpperCase() + m.slice(1).toLowerCase()
 }
 
+const PINNED = new Set(['THORChain', 'Mayachain', 'Across', 'Relay'])
 const SHOWN = { native: 'Shown on your KeepKey', certified: 'Shown on your KeepKey', erc7730: 'Shown on your KeepKey', provider: 'Signed as raw data on your KeepKey', blind: 'Signed as raw data on your KeepKey' } as const
 
 export interface TxDetailsInput {
@@ -180,17 +192,22 @@ export async function txDetails({ record, tx, receipt, chainId, own, tokenOf, na
   const to = tx?.to?.toLowerCase()
   if (to && tx?.data && tx.data !== '0x') {
     const decoded = await decodeCalldata(to, tx.data, chainId, tx.value)
+    // The decoder names a protocol from the selector alone, except for these,
+    // which it decodes only at their pinned contracts.
     const dapp = decoded && decoded.source !== 'none' ? decoded.dappName : 'Unknown'
-    const name = dapp === 'ERC-20' || dapp === 'NFT' ? tokenOf(to)?.symbol ?? (dapp === 'NFT' ? 'NFT' : undefined)
-      : dapp !== 'Unknown' ? dapp : nameOf(to) ?? tokenText(record?.contract, 32)
+    const toSymbol = tokenOf(to)?.symbol
+    const name = PINNED.has(dapp) ? dapp
+      : (/^(ERC-20|NFT|WETH)$/.test(dapp) && toSymbol) || nameOf(to) || tokenText(record?.contract, 32) || (dapp === 'NFT' ? 'NFT' : undefined)
     const method = knownMethod(decoded) ?? record?.call
-    const action = method ? actionText(method, name) : name && 'Contract call'
+    const wrapped = toSymbol === `W${evmChainLabel(chainId)?.symbol}`
+    const action = method === 'deposit (Wrap ETH)' && wrapped ? 'Wrap' : method === 'withdraw (Unwrap WETH)' && wrapped ? 'Unwrap'
+      : method ? actionText(method, name) : name && 'Contract call'
     if (action) lines.push({ label: 'Action', value: name ? `${name} · ${action}` : action })
   }
   const wei = /^(0x[0-9a-fA-F]+|\d+)$/.test(tx?.value ?? '') ? BigInt(tx!.value!) : 0n
   const symbol = evmChainLabel(chainId)?.symbol
   const from = tx?.from?.toLowerCase() ?? ''
-  if (wei > 0n && symbol && own.has(from) !== own.has(to ?? '')) {
+  if (wei > 0n && receipt?.status === 1 && symbol && own.has(from) !== own.has(to ?? '')) {
     lines.push({ label: own.has(from) ? 'Sent' : 'Received', value: `${amount(wei, 18)} ${symbol}` })
   }
   if (receipt) {

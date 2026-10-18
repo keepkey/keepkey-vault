@@ -146,12 +146,15 @@ describe('tokenMoves', () => {
     ], own, tokenOf)).toEqual([])
   })
 
-  test('counts ERC-721 and ERC-1155 items', () => {
+  test('counts ERC-721 items per collection; ERC-1155 amounts are left out', () => {
     const single = '0xc3d58168c5ae7397731d063d5bbf3d657854427343f4c083240f7aacaa2d0f62'
+    const nft = (collection: string, from: string, to: string, id: bigint) => ({ address: collection, topics: [TRANSFER, topic(from), topic(to), word(id)], data: '0x' })
     expect(tokenMoves([
-      { address: RANDOM, topics: [TRANSFER, topic(ZERO), topic(FROM), word(7n)], data: '0x' },
-      { address: RANDOM, topics: [single, topic(RANDOM), topic(RANDOM), topic(FROM)], data: `${word(1n)}${word(2n).slice(2)}` },
-    ], own, tokenOf)).toEqual([{ label: 'Received', value: '3 NFTs' }])
+      nft(RANDOM, ZERO, FROM, 7n), nft(RANDOM, ZERO, FROM, 8n),
+      // One NFT swapped for one from another collection: both show.
+      nft(VENICE, FROM, RANDOM, 1n), nft(BASE_WETH, RANDOM, FROM, 2n),
+      { address: RANDOM, topics: [single, topic(RANDOM), topic(RANDOM), topic(FROM)], data: `${word(1n)}${word(100_000_000n).slice(2)}` },
+    ], own, tokenOf)).toEqual([{ label: 'Received', value: '2 NFTs' }, { label: 'Sent', value: '1 NFT' }, { label: 'Received', value: '1 NFT' }])
   })
 
   test('large and tiny amounts stay short', () => {
@@ -202,11 +205,31 @@ describe('txDetails', () => {
       tx: { to: UR_BASE, from: FROM, value: '0x0', data: '0x24856bc3' + '00'.repeat(64) },
       receipt: { status: 1, logs: [transfer(BASE_USDC, FROM, RANDOM, 100_000_000n), transfer(BASE_WETH, RANDOM, FROM, 41_250_000_000_000_000n)] },
     })).toEqual([
-      { label: 'Action', value: 'Uniswap · Swap' },
+      { label: 'Action', value: 'Uniswap Universal Router · Swap' },
       { label: 'Sent', value: '100 USDC' },
       { label: 'Received', value: '0.04125 WETH' },
       { label: 'Result', value: 'Succeeded' },
     ])
+  })
+
+  test('native value: received, someone else\'s, and a failed or pending send', async () => {
+    const eth = (from: string, to: string, receipt?: { status: 0 | 1; logs: [] }) =>
+      details({ chainId: 1, tx: { to, from, value: '0x16345785d8a0000', data: '0x' }, receipt })
+    expect(await eth(RANDOM, FROM, { status: 1, logs: [] })).toEqual([{ label: 'Received', value: '0.1 ETH' }, { label: 'Result', value: 'Succeeded' }])
+    expect(await eth(RANDOM, VENICE, { status: 1, logs: [] })).toEqual([{ label: 'Result', value: 'Succeeded' }])
+    expect(await eth(FROM, RANDOM, { status: 0, logs: [] })).toEqual([{ label: 'Result', value: 'Failed' }])
+    expect(await eth(FROM, RANDOM)).toBeNull()
+  })
+
+  test('a protocol is named by the contract called, never by the selector alone', async () => {
+    const call = (to: string, data: string, chainId = 8453) => details({ chainId, tx: { to, from: FROM, value: '0x0', data } })
+    const action = async (...a: Parameters<typeof call>) => (await call(...a))?.[0].value
+    expect(await action(RANDOM, '0xd0e30db0')).toBe('Deposit')
+    expect(await action(BASE_WETH, '0xd0e30db0')).toBe('WETH · Wrap')
+    expect(await action(VENICE, `0x2e1a7d4d${word(1n).slice(2)}`)).toBe('sVVV · Withdraw')
+    expect(await action(RANDOM, '0xac9650d8')).toBe('Multicall')
+    expect(await action(RANDOM, `0x3593564c${'00'.repeat(96)}`, 56)).toBe('Swap')
+    expect(await action(RANDOM, `0xf305d719${'00'.repeat(192)}`)).toBe('Add liquidity')
   })
 
   test('a failed approve says so; an unlimited approval adds no warning', async () => {
@@ -243,14 +266,15 @@ describe('txDetails', () => {
 })
 
 describe('walletBook', () => {
-  test('names tokens from the catalog and the portfolio, never a hidden or spam-named one', () => {
+  test('names tokens from the catalog and the portfolio, never a hidden, spam-named or impersonating one', () => {
     const t = (contract: string, symbol: string, name: string, decimals?: number) =>
       ({ symbol, name, decimals, caip: `eip155:8453/erc20:${contract}`, balance: '1', balanceUsd: 0, priceUsd: 0 })
     const HIDDEN = '0x2222222222222222222222222222222222222222'
     const SPAM = '0x3333333333333333333333333333333333333333'
+    const FAKE = '0x1686edd62d367265f033eede344706b41c3a475b'
     db.setCachedBalances('book', [{ chainId: 'base', symbol: 'ETH', balance: '0', balanceUsd: 0, address: FROM, tokens: [
       t(VENICE.toLowerCase(), 'sVVV', 'Staked Venice Token'), t(VENICE.toLowerCase(), 'sVVV', 'Staked Venice Token', 18),
-      t(HIDDEN, 'HID', 'Hidden', 18), t(SPAM, 'Visit claim.xyz', 'Telegram @Bot', 18),
+      t(HIDDEN, 'HID', 'Hidden', 18), t(SPAM, 'Visit claim.xyz', 'Telegram @Bot', 18), t(FAKE, 'USDT', 'USDT GIVEAWAYS', 18),
     ] }] as any)
     db.setTokenVisibility(`eip155:8453/erc20:${HIDDEN}`, 'hidden')
     const book = walletBook(8453, 'book')
@@ -259,7 +283,7 @@ describe('walletBook', () => {
     expect(book.tokenOf(VENICE)).toEqual({ symbol: 'sVVV', decimals: 18 })
     expect(book.nameOf(VENICE)).toBe('Staked Venice Token')
     expect(book.nameOf(UR_BASE)).toBe('Uniswap Universal Router')
-    expect([book.tokenOf(HIDDEN), book.tokenOf(SPAM), book.nameOf(SPAM)]).toEqual([undefined, undefined, undefined])
+    expect([book.tokenOf(HIDDEN), book.tokenOf(SPAM), book.nameOf(SPAM), book.tokenOf(FAKE), book.nameOf(FAKE)]).toEqual([undefined, undefined, undefined, undefined, undefined])
     expect(walletBook(8453).own).toEqual([])
   })
 })
@@ -282,8 +306,14 @@ describe('lookupEvmTx', () => {
     expect((await lookupEvmTx(pioneer, 'eip155:1', txid))?.receipt).toBeUndefined()
   })
 
-  test('a hung Pioneer call gives up', async () => {
-    const pioneer = { LookupTx: () => new Promise(() => {}) }
-    await expect(lookupEvmTx(pioneer, 'eip155:1', txid, 20)).rejects.toThrow('timed out')
+  test('a receipt for another transaction is not used', async () => {
+    const pioneer = { LookupTx: async () => ({ data: { data: { tx: { hash: txid, data: '0x' }, receipt: { transactionHash: `0x${'cd'.repeat(32)}`, status: 1, logs: [] } } } }) }
+    expect((await lookupEvmTx(pioneer, 'eip155:1', txid))?.receipt).toBeUndefined()
+  })
+
+  test('a hung Pioneer call or a Pioneer that never starts gives up', async () => {
+    await expect(lookupEvmTx({ LookupTx: () => new Promise(() => {}) }, 'eip155:1', txid, 20)).rejects.toThrow('timed out')
+    await expect(lookupEvmTx(new Promise(() => {}), 'eip155:1', txid, 20)).rejects.toThrow('timed out')
+    await expect(lookupEvmTx(Promise.reject(new Error('no pioneer')), 'eip155:1', txid, 20)).rejects.toThrow('no pioneer')
   })
 })

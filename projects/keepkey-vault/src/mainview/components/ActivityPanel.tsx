@@ -253,16 +253,16 @@ function CopyableRow({ label, value, explorerUrl }: { label: string; value: stri
 
 /** What the transaction did, in plain words. Loads after the dialog opens, so
  *  it never holds the dialog up; nothing to say renders nothing. */
-function TxDetailsSection({ networkId, txid, received }: { networkId: string; txid: string; received: boolean }) {
+function TxDetailsSection({ networkId, txid }: { networkId: string; txid: string }) {
   const [lines, setLines] = useState<TxDetailLine[] | null>(null)
   useEffect(() => {
     let live = true
     setLines(null)
-    rpcRequest('getTxDetails', { networkId, txid, received })
+    rpcRequest('getTxDetails', { networkId, txid })
       .then(r => { if (live) setLines(r) })
       .catch(() => { if (live) setLines(null) })
     return () => { live = false }
-  }, [networkId, txid, received])
+  }, [networkId, txid])
   if (!lines?.length) return null
   return (
     <Box mt="2" pt="2" borderTop="1px solid" borderColor="kk.border">
@@ -401,7 +401,7 @@ export function TxDetailDialog({ detail, onClose, nativePrices }: { detail: TxDe
             )}
 
             {/* Below the button, so it does not move when this loads. */}
-            {a.txid && chainDef?.chainFamily === 'evm' && <TxDetailsSection networkId={chainDef.networkId} txid={a.txid} received={a.type === 'receive'} />}
+            {a.txid && chainDef?.chainFamily === 'evm' && <TxDetailsSection networkId={chainDef.networkId} txid={a.txid} />}
           </VStack>
         </Box>
       </Box>

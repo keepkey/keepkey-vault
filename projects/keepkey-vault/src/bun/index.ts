@@ -8278,19 +8278,21 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			// What a finished EVM tx did, in plain words: Desktop's decode of the
 			// call, what moved in and out of this wallet (Pioneer LookupTx, mined
 			// results cached per txid), and how it was signed when Desktop kept the card.
-			getTxDetails: async ({ networkId, txid, received }: { networkId: string; txid: string; received?: boolean }) => {
+			getTxDetails: async ({ networkId, txid }: { networkId: string; txid: string }) => {
 				if (!/^eip155:[1-9]\d*$/.test(networkId) || !/^0x[0-9a-f]{64}$/i.test(txid)) return null
 				const scope = engine.isPassphraseWallet ? null : getWalletDbScope()
 				const record = scope ? getSignedTxReview(networkId, txid, scope.deviceId, scope.walletId) : null
 				const key = `${networkId}:${txid.toLowerCase()}`
 				let found = minedEvmTxCache.get(key)
 				if (!found && !offlineMode) {
-					found = await lookupEvmTx(await getPioneer(), networkId, txid).catch(() => undefined)
+					found = await lookupEvmTx(getPioneer(), networkId, txid).catch(() => undefined)
 					if (found?.receipt) minedEvmTxCache.set(key, found)
 				}
 				const chainId = Number(networkId.slice(7))
 				const book = walletBook(chainId, scope?.deviceId)
-				const own = new Set([...book.own, scope?.walletId.slice(scope.deviceId.length + 1), received ? '' : found?.tx.from?.toLowerCase()].filter((a): a is string => !!a))
+				// The sender is this wallet only when Desktop kept the card it signed:
+				// Pioneer's "send" also covers others moving this wallet's tokens.
+				const own = new Set([...book.own, scope?.walletId.slice(scope.deviceId.length + 1), record ? found?.tx.from?.toLowerCase() : ''].filter((a): a is string => !!a))
 				return txDetails({ record, ...found, chainId, own, tokenOf: book.tokenOf, nameOf: book.nameOf }).catch(() => null)
 			},
 			getWatchOnlyHistoryChains: async (params) => {
