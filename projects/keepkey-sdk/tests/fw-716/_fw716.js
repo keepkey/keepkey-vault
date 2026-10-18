@@ -255,7 +255,7 @@ async function probeErc7730Case({ chainId, to, selector }) {
  * lists. Signs only: nothing is broadcast.
  *
  * case: { id, name, chainId, to, data(device), value?, gasLimit?, probe(),
- *         expect: ['certified'] | ['native', 'certified'] | ['erc7730'], screens(device) }
+ *         expect: ['certified'] | ['native'] | ['erc7730'], screens(device) }
  */
 async function signCases(getSdk, assert, cases, { cap, minBudgetMs } = {}) {
   const budget = Number(process.env.KEEPKEY_SUITE_TIMEOUT_MS) || 180_000
