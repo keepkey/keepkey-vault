@@ -1769,13 +1769,15 @@ export interface RelayTxParams {
  *  call (bun/erc7730-describe). `protocol` is Desktop's own name for the
  *  contract, not part of the signed definition. */
 export interface Erc7730Description {
-  /** The certificate alias, only when this computer checked the envelope's
-   *  signature up to KeepKey's production root. */
-  signedBy?: string
+  /** The certificate alias: this computer checked the envelope's signature up
+   *  to KeepKey's production root (no description otherwise). */
+  signedBy: string
   intent: string
   /** The interpolated intent ("Stake 0.01 ETH"), when the definition has one. */
   summary?: string
-  fields: Array<{ label: string; value: string }>
+  /** Values as the device shows them, one device line per "\n"; `note` is
+   *  this computer's own reading of a token the device does not know. */
+  fields: Array<{ label: string; value: string; note?: string }>
   protocol?: { name: string; url: string; about?: string }
   explorerUrl?: string
 }

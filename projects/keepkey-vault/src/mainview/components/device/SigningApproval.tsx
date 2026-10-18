@@ -472,9 +472,18 @@ function Erc7730Section({ d }: { d: Erc7730Description }) {
 	return (
 		<VStack gap="1.5" w="100%" bg="rgba(0,0,0,0.25)" borderRadius="xl" p="3" align="stretch" data-erc7730-description>
 			<Text fontSize="sm" fontWeight="800" color="white">{d.protocol ? `${d.protocol.name} · ${d.intent}` : d.intent}</Text>
-			{d.summary && d.summary !== d.intent && <Text fontSize="xs" color="kk.textPrimary">{d.summary}</Text>}
+			{d.summary && d.summary !== d.intent && <Text fontSize="xs" color="kk.textPrimary" whiteSpace="pre-line">{d.summary}</Text>}
 			{d.protocol?.about && <Text fontSize="xs" color="kk.textSecondary">{d.protocol.about}</Text>}
-			{d.fields.map((f, i) => <Row key={i} label={f.label} value={f.value} />)}
+			{d.fields.map((f, i) => (
+				<Flex key={i} gap="3" w="100%" align="flex-start">
+					<Text fontSize="2xs" color="kk.textMuted" flexShrink={0} minW="60px" pt="0.5">{f.label}</Text>
+					<Box flex="1">
+						{/* One device line per line, as the KeepKey shows it. */}
+						<Text fontSize="2xs" color="kk.textPrimary" fontFamily="mono" wordBreak="break-all" whiteSpace="pre-line">{f.value}</Text>
+						{f.note && <Text fontSize="2xs" color="kk.textSecondary">{f.note}</Text>}
+					</Box>
+				</Flex>
+			))}
 			{links.length > 0 && (
 				<Flex gap="3" wrap="wrap">
 					{links.map((url) => (

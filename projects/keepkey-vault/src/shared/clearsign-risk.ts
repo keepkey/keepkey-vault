@@ -331,7 +331,8 @@ function evmTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void):
     // The device verifies the definition and shows the call from it.
     const d = req.erc7730Description
     const what = d ? `${d.summary ?? d.intent}${d.protocol ? ` on ${d.protocol.name}` : ''}` : `This call to ${to}`
-    add('medium', `${what}: your KeepKey shows it from a KeepKey ClearSign description.`)
+    // Calm when this computer read the same description; gold only when it could not.
+    add(d ? 'low' : 'medium', `${what}: your KeepKey shows it from a KeepKey ClearSign description.`)
   } else if (urSwap && req.calldataDecoded?.signedInsightBlob) {
     recognition = 'known'
     // Every command decoded, and a signed description attached that the device

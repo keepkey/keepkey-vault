@@ -2,8 +2,9 @@
  * What a KeepKey ClearSign ERC-7730 definition makes the KeepKey show, read on
  * this computer from the exact envelope Desktop sends: the intent and every
  * field's label and value, formatted the way 7.16 formats them
- * (erc7730_field.c), plus who signed the envelope when this computer checked
- * that signature up to KeepKey's production root.
+ * (erc7730_field.c, erc7730_format.c; lines split as on the device), only
+ * when this computer checked the envelope's signature up to KeepKey's
+ * production root.
  *
  * Display only. Whether a definition is attached, and how the call is gated,
  * never depends on anything here; an envelope this cannot read gets no
@@ -17,6 +18,7 @@ import { utils as ethersUtils } from 'ethers'
 import { secp256k1 } from '@noble/curves/secp256k1'
 import { inspectAlphaCertificate } from './clearsign-alpha-ceremony'
 import { REVIEWED_EVM_TOKENS } from '../shared/reviewed-evm-tokens'
+import firmwareTokens from './firmware-token-table-716.json'
 import { evmTokenIdentity } from '../shared/evm-contract-identity'
 import { evmNativeValue } from '../shared/evmFeePreview'
 import { CHAINS } from '../shared/chains'
@@ -64,6 +66,19 @@ const sha256 = (...parts: Uint8Array[]) => {
 const u16 = (b: Uint8Array, at: number) => (b[at] << 8) | b[at + 1]
 const u32 = (b: Uint8Array, at: number) => ((b[at] << 24) >>> 0) + (b[at + 1] << 16) + (b[at + 2] << 8) + b[at + 3]
 const hex = (b: Uint8Array) => `0x${Buffer.from(b).toString('hex')}`
+/** format_escaped: a byte outside 0x21..0x7e as \xNN, a backslash doubled; a
+ *  label (`spaces`) keeps a lone space between two other characters. */
+const escaped = (text: string, spaces = true) => {
+  const bytes = new TextEncoder().encode(text)
+  return Array.from(bytes, (b, i) => b === 0x5c ? '\\\\'
+    : (b <= 0x20 && !(spaces && b === 0x20 && i > 0 && i < bytes.length - 1 && bytes[i - 1] !== 0x20 && bytes[i + 1] !== 0x20)) || b >= 0x7f
+      ? `\\x${b.toString(16).padStart(2, '0')}` : String.fromCharCode(b)).join('')
+}
+/** The 7.16 token table (tokenByChainAddress): what the device names a token. */
+const DEVICE_TOKENS: Record<string, Array<string | number>> = {
+  ...firmwareTokens.symbols, // [ticker, decimals]
+  [`1:0x${'e'.repeat(40)}`]: ['ETH', 18], // the Ethereum-mainnet sentinel
+}
 
 /** The certificate alias, when the envelope's catalog signature verifies the
  *  way 7.16 verifies it (clearsign_root_verify_erc7730_catalog): a production
@@ -87,9 +102,11 @@ function catalogSigner(program: Uint8Array, proof: Uint8Array[], cert: Uint8Arra
 interface Leaf { kind: number; value: bigint | string | boolean }
 
 /**
- * The description of `call` from a checked K773 envelope (hex), or undefined
- * when the envelope or the calldata cannot be read the way the device reads
- * them. `from` is the signing account: an address equal to it reads "your account".
+ * The description of `call` from a K773 envelope (hex), or undefined when its
+ * signature does not check out to the production root, or the envelope or the
+ * calldata cannot be read the way the device reads them. `from` is the signing
+ * address only when this computer has matched it to the signing key; without
+ * it, @.from cannot be shown and no address reads "(this wallet)".
  */
 export function describeErc7730Call(
   envelopeHex: string,
@@ -104,6 +121,8 @@ export function describeErc7730Call(
     const cert = envelope.subarray(at + 2, at + 2 + u16(envelope, at))
     const sig = envelope.subarray(at + 2 + cert.length, at + 66 + cert.length)
     const chainId = BigInt(hex(program.subarray(10, 18)))
+    const signedBy = catalogSigner(program, proof, cert, sig, chainId)
+    if (!signedBy || chainId !== BigInt(call.chainId)) return undefined
 
     // Sections: u8 type | be32 length | body.
     const section: Record<number, Uint8Array> = {}
@@ -113,7 +132,7 @@ export function describeErc7730Call(
     }
     const s = section[1]
     const strings: string[] = []
-    for (let i = 0, p = 2; i < u16(s, 0); i++) { strings.push(new TextDecoder().decode(s.subarray(p + 2, p + 2 + u16(s, p)))); p += 2 + u16(s, p) }
+    for (let i = 0, p = 2; i < u16(s, 0); i++) { strings.push(escaped(new TextDecoder().decode(s.subarray(p + 2, p + 2 + u16(s, p))))); p += 2 + u16(s, p) }
     const n = section[2]
     const nodes = Array.from({ length: u16(n, 0) }, (_, i) => ({ kind: n[2 + 9 * i], size: u16(n, 3 + 9 * i), first: u16(n, 5 + 9 * i), count: u16(n, 7 + 9 * i), length: u16(n, 9 + 9 * i) }))
     const pt = section[3]
@@ -171,6 +190,7 @@ export function describeErc7730Call(
       if (path.source === 2) {
         const value = String(call.value ?? '')
         if (path.index === 3) return [{ kind: 1, value: BigInt(value === '' || value === '0x' ? 0 : value) }]
+        if (path.index === 1 && !call.from) throw new Error('signer not matched')
         return [{ kind: 3, value: String(path.index === 1 ? call.from : call.to).toLowerCase() }]
       }
       let at: Array<{ node: number; value: any }> = [{ node: 0, value: args }]
@@ -189,54 +209,69 @@ export function describeErc7730Call(
     }
 
     const from = call.from?.toLowerCase()
-    const address = (a: string) => `${ethersUtils.getAddress(a)}${a === from ? ' (your account)' : ''}`
-    const raw = ({ kind, value }: Leaf) => kind === 3 ? address(value as string) : String(value)
+    const raw = ({ kind, value }: Leaf) => kind === 3 ? ethersUtils.getAddress(value as string)
+      : kind === 7 ? escaped(value as string, false) : String(value)
     const scaled = (v: bigint, decimals: number) => {
       const base = 10n ** BigInt(decimals)
       const fraction = (v % base).toString().padStart(decimals, '0').replace(/0+$/, '')
       return `${v / base}${fraction ? `.${fraction}` : ''}`
     }
-    const format = (index: number): string => {
+    const format = (index: number): { value: string; note?: string } => {
       const f = formatters[index]
       const values = resolve(f.args.get(1)!.index)
-      return values.map((v, i) => {
+      let note: string | undefined
+      const value = values.map((v, i) => {
         const pick = (role: number) => { const list = argument(f, role); return list?.[list.length === 1 ? 0 : i] }
         const n = v.value as bigint
+        const native = () => evmNativeValue(n.toString(), call.chainId) ?? n.toString()
         switch (f.kind) {
-          case 2: return evmNativeValue(n.toString(), call.chainId) ?? n.toString()
+          case 2: return native()
           case 3: {
             const token = String(pick(2)!.value)
-            // Role 22: addresses the definition says stand for the native coin.
+            // Roles 7/8: the signer's message ("Max") once the amount reaches the threshold.
+            const threshold = pick(7)
+            const message = threshold && n >= (threshold.value as bigint) ? pick(8)?.value : undefined
+            const known = /^0x0{40}$/.test(token) ? undefined : DEVICE_TOKENS[`${call.chainId}:${token}`]
+            // Role 22: addresses the signer says stand for the native coin, never over the device's table.
             const aliases = f.args.get(22)
             const set = aliases && literals[aliases.index].bytes
-            if (set && Array.from({ length: u16(set, 0) }, (_, k) => literal(u16(set, 2 + 2 * k)).value).includes(token)) {
-              return evmNativeValue(n.toString(), call.chainId) ?? n.toString()
-            }
-            const t = REVIEWED_EVM_TOKENS[`${call.chainId}:${token}`] ?? evmTokenIdentity(call.chainId, token)
-            return t && t.symbol !== 'UNKNOWN' ? `${scaled(n, t.decimals)} ${t.symbol}` : `${n} base units of token ${ethersUtils.getAddress(token)}`
+            const alias = !known && set && Array.from({ length: u16(set, 0) }, (_, k) => literal(u16(set, 2 + 2 * k)).value).includes(token)
+            const ours = REVIEWED_EVM_TOKENS[`${call.chainId}:${token}`] ?? evmTokenIdentity(call.chainId, token)
+            if (!known && !alias && ours && ours.symbol !== 'UNKNOWN') note = `This computer reads it as ${scaled(n, ours.decimals)} ${ours.symbol}.`
+            const shown = known ? `${scaled(n, Number(known[1]))} ${known[0]}`
+              : alias ? `Signer native alias:\n${ethersUtils.getAddress(token)}\n${native()}`
+                : `${n}\nunknown token\n${ethersUtils.getAddress(token)}`
+            return message ? `Signer: ${message}\n${shown}` : shown
           }
-          case 4: return `Token ID ${n}, collection ${ethersUtils.getAddress(String(pick(3)!.value))}`
+          case 4: return `Token ID ${n}\nCollection\n${ethersUtils.getAddress(String(pick(3)!.value))}`
           case 5: {
             if (pick(9)?.value === 'blockheight') return `Block ${n}`
-            return n <= 253402300799n ? new Date(Number(n) * 1000).toISOString().replace('T', ' ').replace(/\.\d+Z$/, ' UTC') : `${n} (not a date)`
+            return n <= 253402300799n ? `${new Date(Number(n) * 1000).toISOString().replace('T', ' ').replace(/\.\d+Z$/, ' UTC')}\n(${n})` : `${n}\n(not a date)`
           }
           case 6: {
+            if (n >= 2n ** 64n) return `${n} s`
             const parts = ([[86400n, 'd'], [3600n, 'h'], [60n, 'm'], [1n, 's']] as const)
               .map(([unit, name], k, all) => [k === 0 ? n / unit : (n % all[k - 1][0]) / unit, name] as const)
               .filter(([count]) => count > 0n).map(([count, name]) => `${count}${name}`)
-            return parts.join(' ') || '0s'
+            return `${parts.join(' ') || '0s'}\n(${n} s)`
           }
-          case 7: return `${scaled(n, Number(pick(4)?.value ?? 0))} ${pick(5)?.value ?? ''}`.trim()
+          case 7: {
+            const base = pick(5)!.value as string
+            return `unit set by signer\n${scaled(n, Number(pick(4)?.value ?? 0))}${base ? ` ${base}` : ''}\nraw ${n}`
+          }
           case 8: {
             const map = literals[f.args.get(10)!.index].bytes
             for (let k = 0; k < u16(map, 0); k++) {
-              if (literal(u16(map, 2 + 4 * k)).value === v.value) return strings[u16(map, 4 + 4 * k)]
+              if (literal(u16(map, 2 + 4 * k)).value === v.value) return `label set by signer\n${strings[u16(map, 4 + 4 * k)]} (${raw(v)})`
             }
-            return raw(v)
+            return `${raw(v)} (unmapped)`
           }
-          default: return raw(v) // raw (1) and addressName (10)
+          // addressName: the device derives the signer and marks it.
+          case 10: return v.kind === 3 && v.value === from ? `${raw(v)}\n(this wallet)` : raw(v)
+          default: return raw(v)
         }
-      }).join(', ')
+      }).join('\n')
+      return { value, ...(note ? { note } : {}) }
     }
 
     let intent = ''
@@ -245,8 +280,8 @@ export function describeErc7730Call(
     for (const d of display) {
       if (d.op === 1) intent = strings[d.a]
       else if (d.op === 2) parts.push(strings[d.a])
-      else if (d.op === 3) parts.push(format(d.a))
-      else if (d.op === 4) fields.push({ label: strings[d.a], value: format(d.b) })
+      else if (d.op === 3) parts.push(format(d.a).value)
+      else if (d.op === 4) fields.push({ label: strings[d.a], ...format(d.b) })
       else if (d.op === 10) break
       // 5/6 groups and 7/8 array runs only frame fields; a field's own path
       // names every element it shows.
@@ -257,9 +292,8 @@ export function describeErc7730Call(
     const protocol = PROTOCOLS[`${call.chainId}:${to}`]
     const about = protocol?.about[call.data.slice(0, 10).toLowerCase()]
     const explorer = CHAINS.find((c) => c.chainFamily === 'evm' && c.chainId === String(call.chainId))?.explorerAddressUrl
-    const signedBy = catalogSigner(program, proof, cert, sig, chainId)
     return {
-      ...(signedBy ? { signedBy } : {}),
+      signedBy,
       intent,
       ...(parts.length ? { summary: parts.join(' ') } : {}),
       fields,

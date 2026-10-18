@@ -16,7 +16,7 @@ import { evmAddressPath } from './evm-addresses'
 import { verifyEvmSigner } from './evm-rpc'
 import { applyEvmTxPreview, attachErc7730Definition, evmPriorityFee, recognizedTypedDataSpender } from './evm-signing-preview'
 import { signWithErc7730Fallback } from './erc7730-resolver'
-import { withoutErc7730Description } from './evm-presign-report'
+import { evmSigningVerdict, withoutErc7730Description } from './evm-presign-report'
 import { buildSolanaMessageDecodedInfo } from './solana-message-preview'
 import { ethMessagePreview } from './eth-message-preview'
 import { buildSolanaDecodedInfo } from './solana-clearsign'
@@ -1028,14 +1028,16 @@ export class WalletConnectManager {
         tx.data, effectiveChainId, tx.to, from, this.callbacks.getEvmSimulationEndpoint(effectiveChainId),
       )
       signingInfo.clearSignReport = buildClearSignReport({
-        requestedLevel: simulation.status === 'success' ? 'P3' : universalRouterFindings.complete ? 'P2' : 'P1',
-        descriptor: clearSignSchema ? {
-          source: clearSignSchema.keyId === 0x80 ? 'certified' : 'runtime',
-          authenticated: false,
-          format: 'EVM_METADATA',
-          label: clearSignSchema.method,
-        } : signingInfo.erc7730 ? { source: 'erc7730', authenticated: false, format: 'ERC7730' }
-          : { source: 'none', authenticated: false },
+        // An attached ERC-7730 definition: the in-app overlay's verdict, so the card agrees with itself.
+        ...(!clearSignSchema && signingInfo.erc7730 ? evmSigningVerdict(signingInfo, {}, simulation, universalRouterFindings.complete) : {
+          requestedLevel: simulation.status === 'success' ? 'P3' : universalRouterFindings.complete ? 'P2' : 'P1',
+          descriptor: clearSignSchema ? {
+            source: clearSignSchema.keyId === 0x80 ? 'certified' : 'runtime',
+            authenticated: false,
+            format: 'EVM_METADATA',
+            label: clearSignSchema.method,
+          } : { source: 'none', authenticated: false },
+        }),
         simulation,
         hostFindings: universalRouterFindings.findings,
         hostLimitations: universalRouterFindings.limitations,

@@ -1,5 +1,6 @@
 import { Flex, Text } from '@chakra-ui/react'
 import { runtimeProviderLine, type ClearSignReport, type ContractRating } from '../../shared/clearsign-report'
+import { SIMULATION_UNAVAILABLE_MESSAGE } from '../../shared/transaction-effects'
 
 export function ClearSignReportCard({ report, title = 'ClearSign Report', verdictBelow = false }: { report?: ClearSignReport; title?: string; verdictBelow?: boolean }) {
   if (!report) return null
@@ -18,8 +19,8 @@ export function ClearSignReportCard({ report, title = 'ClearSign Report', verdic
     {report.simulation.assetChanges.map((change, index) => <Text key={`${change.asset.id}:${change.account}:${index}`} fontSize="xs" color={BigInt(change.delta) < 0n ? 'var(--rose)' : 'var(--teal)'}>{BigInt(change.delta) < 0n ? '−' : '+'}{BigInt(change.delta) < 0n ? change.delta.slice(1) : change.delta} raw units · {change.asset.symbol || short(change.asset.id)}</Text>)}
     {report.simulation.authorityChanges.map((change, index) => <Text key={`${change.kind}:${index}`} fontSize="xs" color={change.revoked ? 'kk.textSecondary' : 'var(--rose)'}>{change.revoked ? 'Revokes' : 'Grants'} {change.unlimited ? 'unlimited ' : ''}{change.kind} authority to {short(change.authority)}</Text>)}
     {report.findings.map((finding, index) => <Text key={`${finding.code}:${index}`} fontSize="2xs" color={finding.severity === 'danger' ? 'var(--rose)' : 'kk.textSecondary'}>• {finding.message}</Text>)}
-    {/* A call the KeepKey shows in full needs no "could not simulate" line. */}
-    {report.limitations.filter((finding) => !(shown && finding.code === 'SIMULATION_UNAVAILABLE')).map((finding, index) => <Text key={`${finding.code}:${index}`} fontSize="2xs" color="var(--gold)">{finding.message}</Text>)}
+    {/* A call the KeepKey shows in full needs no bare "could not simulate" line; a node's reason stays. */}
+    {report.limitations.filter((finding) => !(shown && finding.code === 'SIMULATION_UNAVAILABLE' && finding.message === SIMULATION_UNAVAILABLE_MESSAGE)).map((finding, index) => <Text key={`${finding.code}:${index}`} fontSize="2xs" color="var(--gold)">{finding.message}</Text>)}
     {report.definitionReview && <Text fontSize="2xs" color="kk.textMuted">
       Definition approved by separate semantics and security reviewers for the audited code ({report.definitionReview.auditedIdentities.map((item) => item.role).join(' + ')}).
       {!report.definitionReview.approversPinned && ' Approvers are not yet pinned in this Vault.'}
