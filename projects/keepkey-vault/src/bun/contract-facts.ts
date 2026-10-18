@@ -5,7 +5,7 @@ import { getEvmSimulationEndpoint } from './evm-simulation-config'
 
 /** A self-reported name as plain text: no quotes, control, bidi or zero-width
  *  characters, so it cannot pose as a Desktop sentence. */
-const plain = (s: unknown) => String(s ?? '').replace(/["'`\u2018\u2019\u201C\u201D\p{Cc}\p{Cf}]/gu, '').trim().slice(0, 32)
+export const plain = (s: unknown) => String(s ?? '').replace(/["'`\u2018\u2019\u201C\u201D\p{Cc}\p{Cf}]/gu, '').trim().slice(0, 32)
 
 /** What this computer knows about the contract a blind EVM call goes to, for
  *  the approval card only (never for the caller): `account`'s earlier on-chain

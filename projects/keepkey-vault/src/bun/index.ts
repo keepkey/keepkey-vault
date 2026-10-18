@@ -267,8 +267,7 @@ import { getClearSignProtectionCaseStudies } from "./clearsign-case-studies"
 import { getEvmSimulationEndpoint, getEvmSimulationRpcUrls } from "./evm-simulation-config"
 import { addContractFacts } from "./contract-facts"
 import { initDb, getDb, factoryResetDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, setCustomTokenIcon as dbSetCustomTokenIcon, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility, insertApiLog, getApiLogs, clearApiLogs, setCachedBalances, getCachedBalances, updateCachedBalance, clearBalances, deleteCachedChainBalance, saveCachedPubkey, getLatestDeviceSnapshot, getCachedPubkeys, saveReport, getReportsList, getReportById, deleteReport, reportExists, getSwapHistory, getSwapHistoryStats, getSwapHistoryByTxid, getBip85Seeds, saveBip85Seed, deleteBip85Seed, clearCachedPubkeys, getRecentActivityFromLog, getPioneerServers, addPioneerServerDb, removePioneerServerDb, syncOwnAddressBook, recordOutbound, getAddressBookList, updateAddressBookEntry, deleteAddressBookEntry, getAddressBookHistory, getDeviceLabelMap, getBalancesForOwnSeed, addExternalEntry, matchAddressBook, insertClearSignEvent, getClearSignEvents, insertClearSignObservation, finalizeClearSignObservation, authenticateClearSignObservation, refuseClearSignObservationDefinition, getClearSignCoverageSummary, getClearSignAuditJobs, enqueueClearSignAuditDemand, getSignedTxReview } from "./db"
-import { lookupEvmTx, recordSignedEvmTx, txClearSign } from "./signed-tx-review"
-import type { TxClearSign } from "../shared/tx-clearsign"
+import { lookupEvmTx, recordSignedEvmTx, txDetails, walletBook } from "./signed-tx-review"
 import { getCentralAssetAuditHistory, getCentralClearSignStatus, getCentralContractAudit, submitCentralAssetReview, submitCentralContractReview } from './clearsign-central-client'
 import { buildCentralAssetReview, buildCentralContractReview } from './clearsign-central-review'
 import { getConfiguredReviewerIdentity, signCentralReview } from './clearsign-review-signer-client'
@@ -1028,7 +1027,7 @@ let walletConnectEnabled = false
 let zcashPrivacyEnabled = false
 let hiveEnabled = false
 let offlineMode = false
-const txClearSignCache = new Map<string, TxClearSign>()
+const minedEvmTxCache = new Map<string, NonNullable<Awaited<ReturnType<typeof lookupEvmTx>>>>()
 // Hive sponsor ETH anti-drain gate. ON for release — the vault signs the EIP-191
 // gate and sends ethAddress/ethSignature. HARD DEPENDENCY: Pioneer must have the
 // server-side gate deployed (accept + verify the fields) or /hive/create-account
@@ -8276,18 +8275,25 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return bitcoinOnlyActivityList(rows, isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant))
 			},
 			getActivityScanState: async () => ({ running: activityScanRunning }),
-			// What the card showed when this EVM tx was signed; else Desktop's
-			// decode of its call data now (Pioneer LookupTx), cached per txid.
-			getTxClearSign: async ({ networkId, txid, received }: { networkId: string; txid: string; received?: boolean }): Promise<TxClearSign> => {
-				if (!/^eip155:[1-9]\d*$/.test(networkId) || !/^0x[0-9a-f]{64}$/i.test(txid)) return { kind: 'none' }
+			// What a finished EVM tx did, in plain words: Desktop's decode of the
+			// call, what moved in and out of this wallet (Pioneer LookupTx, mined
+			// results cached per txid), and how it was signed when Desktop kept the card.
+			getTxDetails: async ({ networkId, txid }: { networkId: string; txid: string }) => {
+				if (!/^eip155:[1-9]\d*$/.test(networkId) || !/^0x[0-9a-f]{64}$/i.test(txid)) return null
 				const scope = engine.isPassphraseWallet ? null : getWalletDbScope()
 				const record = scope ? getSignedTxReview(networkId, txid, scope.deviceId, scope.walletId) : null
-				const key = `${networkId}:${txid.toLowerCase()}:${received ? 'in' : 'out'}`
-				if (!record && txClearSignCache.has(key)) return txClearSignCache.get(key)!
-				const tx = (record || offlineMode) ? undefined : await lookupEvmTx(await getPioneer(), networkId, txid).catch(() => undefined)
-				const result = await txClearSign(record, tx, Number(networkId.slice(7)), received === true)
-				if (result.kind === 'decoded' || result.kind === 'plain') txClearSignCache.set(key, result)
-				return result
+				const key = `${networkId}:${txid.toLowerCase()}`
+				let found = minedEvmTxCache.get(key)
+				if (!found && !offlineMode) {
+					found = await lookupEvmTx(getPioneer(), networkId, txid).catch(() => undefined)
+					if (found?.receipt) minedEvmTxCache.set(key, found)
+				}
+				const chainId = Number(networkId.slice(7))
+				const book = walletBook(chainId, scope?.deviceId)
+				// The sender is this wallet only when Desktop kept the card it signed:
+				// Pioneer's "send" also covers others moving this wallet's tokens.
+				const own = new Set([...book.own, scope?.walletId.slice(scope.deviceId.length + 1), record ? found?.tx.from?.toLowerCase() : ''].filter((a): a is string => !!a))
+				return txDetails({ record, ...found, chainId, own, tokenOf: book.tokenOf, nameOf: book.nameOf }).catch(() => null)
 			},
 			getWatchOnlyHistoryChains: async (params) => {
 				const { snapshot, scope } = await getWatchOnlyHistoryContext(params?.deviceId)
