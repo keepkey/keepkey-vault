@@ -13,6 +13,7 @@ import { caipToIcon } from "../../shared/assetLookup"
 import { getRequiredConfs } from "../../shared/confirmations"
 import type { RecentActivity, PendingSwap, ChainBalance, SwapTrackingStatus } from "../../shared/types"
 import { isSwapFullySettled } from "../../shared/swap-settlement"
+import { signedHowText, type TxClearSign } from "../../shared/tx-clearsign"
 
 interface ActivityPanelProps {
   open: boolean
@@ -250,6 +251,46 @@ function CopyableRow({ label, value, explorerUrl }: { label: string; value: stri
   )
 }
 
+const TIER_COLOR = { green: 'var(--teal)', yellow: 'var(--gold)', red: 'var(--rose)' } as const
+const LEVEL_COLOR = { low: 'kk.textSecondary', medium: 'var(--gold)', high: 'var(--rose)', critical: 'var(--rose)' } as const
+
+/** Loads after the dialog opens, so it never holds the dialog up. */
+function TxClearSignSection({ networkId, txid }: { networkId: string; txid: string }) {
+  const [cs, setCs] = useState<TxClearSign | null>(null)
+  useEffect(() => {
+    let live = true
+    setCs(null)
+    rpcRequest('getTxClearSign', { networkId, txid })
+      .then(r => { if (live) setCs(r) })
+      .catch(() => { if (live) setCs({ kind: 'none' }) })
+    return () => { live = false }
+  }, [networkId, txid])
+  if (!cs) return null
+  const lines = cs.kind === 'record' || cs.kind === 'decoded' ? cs.reasons.map((r, i) => (
+    <Text key={i} fontSize="11px" color={LEVEL_COLOR[r.level]}>• {r.text}</Text>
+  )) : null
+  return (
+    <Box mt="2" pt="2" borderTop="1px solid" borderColor="kk.border" data-tx-clearsign={cs.kind}>
+      <Text fontSize="11px" fontWeight="700" color="kk.textPrimary">ClearSign</Text>
+      {cs.kind === 'record' ? <>
+        <Text fontSize="10px" color="kk.textMuted" mb="1">What KeepKey Desktop showed when you signed</Text>
+        <TxDetailRow label="Signed on your KeepKey" value={signedHowText(cs)} />
+        {cs.call && <TxDetailRow label="Call" value={cs.call} />}
+        {cs.appName && <TxDetailRow label="Requested by" value={cs.appName} />}
+        {cs.tier && cs.headline && <Text fontSize="xs" fontWeight="700" color={TIER_COLOR[cs.tier]} mt="1">{cs.headline}</Text>}
+        {lines}
+      </> : cs.kind === 'decoded' ? <>
+        <Text fontSize="10px" color="kk.textMuted" mb="1">Decoded now by KeepKey Desktop — not a record of what was shown when it was signed</Text>
+        {cs.call && <TxDetailRow label="Call" value={cs.call} />}
+        {!cs.call && cs.reasons.length === 0 && <Text fontSize="11px" color="kk.textSecondary">A contract call KeepKey Desktop cannot decode.</Text>}
+        {lines}
+      </> : (
+        <Text fontSize="11px" color="kk.textSecondary">{cs.kind === 'plain' ? 'Plain transfer, no contract call' : 'No ClearSign record for this transaction'}</Text>
+      )}
+    </Box>
+  )
+}
+
 export function TxDetailDialog({ detail, onClose, nativePrices }: { detail: TxDetail; onClose: () => void; nativePrices: Record<string, number> }) {
   if (detail.kind === 'activity') {
     const a = detail.activity
@@ -353,6 +394,8 @@ export function TxDetailDialog({ detail, onClose, nativePrices }: { detail: TxDe
 
             {/* Timestamp */}
             <TxDetailRow label="Time" value={formatFullDate(a.createdAt)} />
+
+            {a.txid && chainDef?.chainFamily === 'evm' && <TxClearSignSection networkId={chainDef.networkId} txid={a.txid} />}
 
             {/* Explorer button */}
             {verificationLinks.length > 0 && (
