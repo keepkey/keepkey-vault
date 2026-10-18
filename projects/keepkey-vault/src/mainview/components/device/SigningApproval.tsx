@@ -341,8 +341,9 @@ function RequestClearSignReview({ request }: { request: SigningRequestInfo }) {
 				// ponytail: CSS hover tip, no tooltip library in the app
 				<Box position="relative" alignSelf="flex-start" css={{ "&:hover > [data-tip], &:focus-within > [data-tip]": { opacity: 1 } }}>
 					<Button size="xs" variant="outline" gap="1.5" onClick={submit} loading={state === "sending"}
+						color="kk.gold" borderColor="rgba(233,196,106,0.45)" _hover={{ bg: "rgba(233,196,106,0.12)" }}
 						aria-describedby="clearsign-review-tip">
-						<Box w="14px" h="14px" borderRadius="3px" overflow="hidden" flexShrink={0}><KeepKeyUILogo /></Box>
+						<Box w="16px" h="16px" borderRadius="3px" overflow="hidden" flexShrink={0} border="1px solid rgba(233,196,106,0.6)"><KeepKeyUILogo /></Box>
 						{t("signing.requestReview", "Submit to KeepKey for review")}
 					</Button>
 					<Box data-tip id="clearsign-review-tip" role="tooltip" position="absolute" bottom="calc(100% + 6px)" left="0" w="260px"
