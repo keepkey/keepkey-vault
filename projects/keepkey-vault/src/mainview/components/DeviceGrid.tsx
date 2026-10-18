@@ -279,7 +279,7 @@ export function DeviceGrid({ onViewPortfolio, onReady, emulatorEnabled = false }
 							</Flex>
 
 							{/* Balance */}
-							{d.totalUsd > 0 && (
+							{d.totalUsd != null && d.totalUsd > 0 && (
 								<Box mb="2.5">
 									<Text fontSize="10px" color="var(--text-3)" letterSpacing="0.06em" textTransform="uppercase" fontFamily="mono">
 										Cached balance

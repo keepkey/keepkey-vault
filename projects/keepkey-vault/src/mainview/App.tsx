@@ -158,8 +158,8 @@ function App() {
 	const [watchOnlyDeviceId, setWatchOnlyDeviceId] = useState<string | undefined>(undefined)
 	const [watchOnlyLabel, setWatchOnlyLabel] = useState("")
 	const [watchOnlyLastSynced, setWatchOnlyLastSynced] = useState(0)
-	// A KeepKey connected while watching that does not hold the watched wallet.
-	const [watchOnlyOtherDevice, setWatchOnlyOtherDevice] = useState(false)
+	// A KeepKey connected while watching that does not hold the watched wallet ("other"), or could not be asked ("unchecked").
+	const [watchOnlyOtherDevice, setWatchOnlyOtherDevice] = useState<"other" | "unchecked" | null>(null)
 
 
 	// Fetch app version + REST API state on mount
@@ -692,7 +692,7 @@ function App() {
 
 	// Watch-only: note the cache when disconnected (tiles open it). A connected KeepKey ends watch-only
 	// only when it holds the watched wallet; otherwise the view stays and says a different KeepKey is connected.
-	useEffect(() => { setWatchOnlyOtherDevice(false) }, [watchOnlyMode, watchOnlyDeviceId])
+	useEffect(() => { setWatchOnlyOtherDevice(null) }, [watchOnlyMode, watchOnlyDeviceId])
 	useEffect(() => {
 		if (deviceState.state === "disconnected") {
 			rpcRequest<{ available: boolean; deviceLabel?: string; lastSynced?: number }>("checkWatchOnlyCache")
@@ -709,22 +709,26 @@ function App() {
 			return
 		}
 		setWatchOnlyAvailable(false)
+	}, [deviceState.state])
+	// Re-checked when the watched wallet changes too (picked or imported while a KeepKey is connected).
+	useEffect(() => {
+		if (deviceState.state === "disconnected") return
 		const exit = () => { setWatchOnlyMode(false); setWatchOnlyDeviceId(undefined) }
 		if (!watchOnlyMode || !watchOnlyDeviceId) { setWatchOnlyMode(false); return }
 		// A device's own snapshot matches by id, known before unlock.
 		if (!watchOnlyDeviceId.startsWith("wo:")) {
 			if (deviceState.deviceId === watchOnlyDeviceId) exit()
-			else if (deviceState.deviceId) setWatchOnlyOtherDevice(true)
+			else if (deviceState.deviceId) setWatchOnlyOtherDevice("other")
 			return
 		}
 		// An imported key: bun asks the unlocked device for the account xpub (PIN/passphrase prompts show over watch-only).
 		if (deviceState.state !== "ready") return
 		let cancelled = false
 		rpcRequest<{ match: boolean }>("btcWatchOnlyDeviceMatch", { deviceId: watchOnlyDeviceId }, 60000)
-			.then(({ match }) => { if (cancelled) return; if (match) exit(); else setWatchOnlyOtherDevice(true) })
-			.catch(() => { if (!cancelled) setWatchOnlyOtherDevice(true) })
+			.then(({ match }) => { if (cancelled) return; if (match) exit(); else setWatchOnlyOtherDevice("other") })
+			.catch((e) => { if (!cancelled) { console.warn("[watch-only] device match failed:", e?.message); setWatchOnlyOtherDevice("unchecked") } })
 		return () => { cancelled = true }
-	}, [deviceState.state, deviceState.deviceId]) // eslint-disable-line react-hooks/exhaustive-deps
+	}, [deviceState.state, deviceState.deviceId, watchOnlyMode, watchOnlyDeviceId])
 
 
 	// ── Launch an external app (gate on REST API) ──────────────────
@@ -908,7 +912,11 @@ function App() {
 
 	// ── Firmware drop zone (always active) + the PSBT/broadcast dialogs it dispatches to ──
 	const firmwareDropZone = <><FirmwareDropZone /><PsbtSignDialog /><BroadcastSignedDialog />
-		<WatchOnlyImportDialog onImported={(id, lbl) => { setWatchOnlyDeviceId(id); setWatchOnlyLabel(lbl); setWatchOnlyMode(true) }} /></>
+		<WatchOnlyImportDialog onImported={(id, lbl) => {
+			// The dialog hands the view back after its first refresh; re-importing the wallet on screen changes no state, so re-send it.
+			if (id === watchOnlyDeviceId && watchOnlyShown) rpcRequest("watchOnlySetView", { active: true, deviceId: id }).catch(() => {})
+			setWatchOnlyDeviceId(id); setWatchOnlyLabel(lbl); setWatchOnlyMode(true)
+		}} /></>
 
 	// ── Render phases ───────────────────────────────────────────────
 
@@ -957,7 +965,9 @@ function App() {
 					<Flex flex="1" direction="column" overflow="auto" pt={NAV_CONTENT_OFFSET} pb="4">
 						{watchOnlyOtherDevice && deviceState.state !== "disconnected" && (
 							<Text fontSize="xs" color="kk.gold" textAlign="center" py="1.5">
-								{t("watchOnlyOtherDevice", { ns: "nav", defaultValue: "Different KeepKey connected. Still showing {{label}}; switch wallets from the wallet menu.", label: watchOnlyLabel || "this wallet" })}
+								{watchOnlyOtherDevice === "other"
+									? t("watchOnlyOtherDevice", { ns: "nav", defaultValue: "Different KeepKey connected. Still showing {{label}}; switch wallets from the wallet menu.", label: watchOnlyLabel || "this wallet" })
+									: t("watchOnlyDeviceUnchecked", { ns: "nav", defaultValue: "Could not check whether the connected KeepKey holds {{label}}. Still showing it as watch-only.", label: watchOnlyLabel || "this wallet" })}
 							</Text>
 						)}
 						<Dashboard watchOnly watchOnlyDeviceId={watchOnlyDeviceId} onLoaded={() => {}} />

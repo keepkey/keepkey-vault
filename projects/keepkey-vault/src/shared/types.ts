@@ -1456,7 +1456,7 @@ export interface RegisteredDevice {
   label: string
   firmwareVer: string
   updatedAt: number
-  totalUsd: number       // sum of cached balance_usd across all chains
+  totalUsd: number | null // sum of cached balance_usd across all chains; null = never synced
   /** Watch-only import (no device); verified once a KeepKey returned the same account xpub */
   imported?: boolean
   verified?: boolean

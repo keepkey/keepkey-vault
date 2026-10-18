@@ -2245,19 +2245,19 @@ export function getSnapshotFeaturesByFirmwareHash(firmwareHash: string): any | n
   }
 }
 
-export function getAllDeviceSnapshots():Array<{ deviceId: string; label: string; firmwareVer: string; updatedAt: number; totalUsd: number; imported?: boolean; verified?: boolean }> {
+export function getAllDeviceSnapshots():Array<{ deviceId: string; label: string; firmwareVer: string; updatedAt: number; totalUsd: number | null; imported?: boolean; verified?: boolean }> {
   try {
     if (!db) return []
     const rows = db.query(`
       SELECT s.device_id, s.label, s.firmware_ver, s.updated_at,
-             COALESCE(SUM(b.balance_usd), 0) AS total_usd,
+             CASE WHEN COUNT(b.chain_id) = 0 THEN NULL ELSE SUM(b.balance_usd) END AS total_usd,
              json_extract(s.features_json, '$.watchOnlyImport') AS imported,
              json_extract(s.features_json, '$.deviceVerified') AS verified
       FROM device_snapshot s
       LEFT JOIN balances b ON b.device_id = s.device_id
       GROUP BY s.device_id
       ORDER BY s.updated_at DESC
-    `).all() as Array<{ device_id: string; label: string; firmware_ver: string; updated_at: number; total_usd: number; imported: number | null; verified: number | null }>
+    `).all() as Array<{ device_id: string; label: string; firmware_ver: string; updated_at: number; total_usd: number | null; imported: number | null; verified: number | null }>
     return rows.map(r => ({
       deviceId: r.device_id, label: r.label, firmwareVer: r.firmware_ver, updatedAt: r.updated_at, totalUsd: r.total_usd,
       ...(r.imported ? { imported: true, verified: !!r.verified } : {}),

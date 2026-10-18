@@ -1525,13 +1525,18 @@ function watchOnlyReceiveAccount(deviceId?: string) {
 	return { snapshot, account }
 }
 
+/** Wallets whose KeepKey showed a different receive address this session: their host-derived addresses stay hidden. */
+const watchOnlyAddressMismatch = new Set<string>()
+
 /** Does the connected, unlocked KeepKey hold this saved wallet? A device's own snapshot matches by
  *  device id. An imported key matches only if the device returns the same account xpub at its path,
  *  which also marks the import verified (and stores the real master fingerprint, standard wallets only). */
 async function watchOnlyDeviceMatch(deviceId: string): Promise<boolean> {
 	const snapshot = getDeviceSnapshotById(deviceId)
 	const state = engine.getDeviceState()
-	if (!snapshot || !engine.wallet || state.state !== 'ready') return false
+	if (!snapshot) return false
+	// Not "a different KeepKey": Desktop could not ask it.
+	if (!engine.wallet || state.state !== 'ready') throw new Error('The connected KeepKey is not ready')
 	if (!watchOnlyImportFlags(snapshot.featuresJson).imported) return state.deviceId === deviceId
 	const { account } = watchOnlyReceiveAccount(deviceId)
 	const res = await engine.wallet.getPublicKeys([
@@ -1544,7 +1549,8 @@ async function watchOnlyDeviceMatch(deviceId: string): Promise<boolean> {
 	try {
 		if (!engine.isPassphraseWallet && res?.[1]?.xpub) masterFp = Buffer.from(masterFingerprintFromDepth1Xpub(res[1].xpub)).toString('hex')
 	} catch { /* fingerprint stays as imported */ }
-	setImportedWalletVerified(deviceId, masterFp)
+	// The emulator is not a KeepKey: it never marks an import verified or supplies its fingerprint.
+	if (!engine.isEmulator) setImportedWalletVerified(deviceId, masterFp)
 	return true
 }
 
@@ -3809,6 +3815,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			/** Next unused receive address, derived on the host from the saved xpub (index from getBtcBackend()). */
 			btcWatchOnlyReceive: async (params): Promise<BtcWatchOnlyReceive> => {
 				const { snapshot, account } = watchOnlyReceiveAccount(params?.deviceId)
+				if (watchOnlyAddressMismatch.has(snapshot.deviceId)) throw new Error('The KeepKey showed a different address for this wallet. Do not use addresses Desktop derived for it.')
 				const key = toSlip132(account.xpub, account.scriptType)
 				const indices = await btcAddressIndicesFor(key, account.scriptType)
 				const flags = watchOnlyImportFlags(snapshot.featuresJson)
@@ -3830,7 +3837,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const address = deriveBtcAddress(account, 0, index)
 				const res = await engine.wallet!.btcGetAddress({ addressNList: [...account.path, 0, index], coin: 'Bitcoin', scriptType: account.scriptType, showDisplay: true } as any)
 				const shown = typeof res === 'string' ? res : (res as any)?.address
-				if (shown !== address) throw new Error(`The KeepKey showed ${shown}, not ${address}. Do not use this address.`)
+				if (shown !== address) {
+					watchOnlyAddressMismatch.add(deviceId)
+					throw new Error(`The KeepKey showed ${shown}, not ${address}. Do not use this address.`)
+				}
 				return { address }
 			},
 			btcWatchOnlyBuildPsbt: async (params): Promise<BtcWatchOnlyPsbt> => {
@@ -10383,9 +10393,9 @@ btcAccounts.on('change', (set) => {
 	if (btcAccounts.masterFingerprint && deviceId && !engine.isPassphraseWallet && !engine.isEmulator) {
 		setDeviceMasterFingerprint(deviceId, btcAccounts.masterFingerprint)
 	}
-	// An imported watch-only key that this KeepKey returns at the same path is verified.
+	// An imported watch-only key that this KeepKey (never the emulator) returns at the same path is verified.
 	// Never throws: this listener runs inside the account fetch.
-	for (const snap of getAllDeviceSnapshots()) {
+	if (!engine.isEmulator) for (const snap of getAllDeviceSnapshots()) {
 		if (!snap.imported || snap.verified) continue
 		try {
 			const { account } = watchOnlyReceiveAccount(snap.deviceId)

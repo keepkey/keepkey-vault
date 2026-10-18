@@ -257,7 +257,7 @@ export function WalletSelector({
 								</Flex>
 							</Box>
 							<Text fontSize="11px" color="var(--text-2)" fontFamily="mono" fontWeight="500" flexShrink={0}>
-								{dollars(d.totalUsd || 0)}
+								{d.totalUsd == null ? "—" : dollars(d.totalUsd)}
 							</Text>
 						</Flex>
 					</Box>

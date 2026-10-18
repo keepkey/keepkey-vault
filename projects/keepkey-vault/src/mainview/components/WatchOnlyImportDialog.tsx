@@ -95,6 +95,8 @@ export function WatchOnlyImportDialog({ onImported }: { onImported: (deviceId: s
 			await rpcRequest("watchOnlySetView", { active: true, deviceId: saved.id }).catch(() => {})
 			await rpcRequest("refreshWatchOnlyBalances", { deviceId: saved.id }, 200000)
 				.catch((e: any) => console.warn("[WatchOnlyImport] first refresh failed:", e?.message))
+			// App owns the view: it sets it again only if the import is actually shown (not during setup).
+			await rpcRequest("watchOnlySetView", { active: false }).catch(() => {})
 			setPhase("idle")
 			onImported(saved.id, saved.label)
 		} catch (e: any) {
