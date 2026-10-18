@@ -8,3 +8,9 @@ export function looksLikePsbt(head: Uint8Array): boolean {
 	const text = new TextDecoder().decode(head).trimStart()
 	return text.startsWith('cHNidP8') || text.slice(0, 10).toLowerCase() === '70736274ff'
 }
+
+/** Signed raw transaction as hex text (Electrum's complete .txn): version 1 or 2, hex only. */
+export function looksLikeRawTxHex(head: Uint8Array): boolean {
+	const text = new TextDecoder().decode(head).trimStart()
+	return /^0[12]000000[0-9a-fA-F]{8}/.test(text) && /^[0-9a-fA-F]*\s*$/.test(text)
+}

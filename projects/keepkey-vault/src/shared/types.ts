@@ -1557,6 +1557,35 @@ export type BtcPsbtReview =
       flags: { nonZeroLocktime: boolean; rbf: boolean; unusualVersion: boolean; noChange: boolean; multiAccount: boolean; unverifiedAmounts: boolean; ownOutputShown: boolean }
     }
 
+export interface BtcWatchOnlyAccounts {
+  fingerprintKnown: boolean
+  /** Who answers chain data: 'pioneer', or the user's own node ('blockbook' / 'core') */
+  backend: string
+  accounts: Array<{ scriptType: 'p2wpkh' | 'p2sh-p2wpkh' | 'p2pkh'; accountIndex: number; path: string }>
+}
+
+/** btcWatchOnlyBuildPsbt result. Amounts are satoshis as decimal strings. */
+export interface BtcWatchOnlyPsbt {
+  filePath: string
+  psbtBase64: string
+  backend: string
+  fingerprintKnown: boolean
+  outputs: Array<{ address?: string; amount: string; change: boolean }>
+  fee: string
+  satPerVbyte: number
+  estVsize: number
+}
+
+/** btcBroadcastSigned result. fee null = unknown (never estimated). feeSource: 'psbt' or the backend that supplied the previous txs. */
+export interface BtcBroadcastReview {
+  txid: string
+  txHex: string
+  outputs: Array<{ amount: string; address?: string; opReturnHex?: string; scriptHex: string }>
+  fee: string | null
+  feeSource: string | null
+  broadcast: boolean
+}
+
 export interface GetPublicKeysParams {
   paths: Array<{
     addressNList: number[]

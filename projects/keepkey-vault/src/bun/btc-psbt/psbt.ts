@@ -185,6 +185,13 @@ function scriptToAddress(script: Uint8Array): string {
   return btc.Address(btc.NETWORK).encode(out)
 }
 
+/** A Bitcoin mainnet address the KeepKey can pay (same script rules as the review). */
+export function assertMainnetAddress(address: string): void {
+  let script: Uint8Array
+  try { script = btc.OutScript.encode(btc.Address(btc.NETWORK).decode(address.trim())) } catch { throw new Error('Not a Bitcoin mainnet address') }
+  scriptToAddress(script)
+}
+
 // ── accounts and derivation ────────────────────────────────────────────
 
 interface Derived { pubkey: Uint8Array; script: Uint8Array; redeemScript?: Uint8Array }
@@ -711,6 +718,29 @@ export function parseForBroadcast(input: Uint8Array | string): { txHex: string; 
   const fee = totalIn === null ? null : totalIn - totalOut
   if (fee !== null && fee < 0n) throw new Error('Outputs spend more than the inputs, refusing')
   return { txHex: hex.encode(tx.toBytes(true, true)), txid: tx.id, outputs: outputs.map(describeOutput), fee }
+}
+
+/**
+ * Fee of a signed transaction from its inputs' previous transactions, each hash-checked
+ * against the txid it is spent by. null when any of them is unavailable: fee unknown, never a guess.
+ */
+export async function feeFromPrevTxs(txHex: string, fetchPrevTx: (txid: string) => Promise<string | undefined>): Promise<bigint | null> {
+  const tx = decodeRawTx(hex.decode(txHex))
+  let totalIn = 0n
+  for (const [i, inp] of tx.inputs.entries()) {
+    const txid = hex.encode(inp.txid)
+    let prevHex: string | undefined
+    try { prevHex = await fetchPrevTx(txid) } catch { return null }
+    if (!prevHex) return null
+    const prev = btc.RawTx.decode(hex.decode(prevHex))
+    if (txidOf(prev) !== txid) throw new Error(`Input #${i}: the backend's previous transaction does not hash to ${txid}, refusing`)
+    const out = prev.outputs[inp.index]
+    if (!out) throw new Error(`Input #${i}: previous transaction has no output ${inp.index}`)
+    totalIn = checkAmount(totalIn + out.amount, 'Total input')
+  }
+  const fee = totalIn - tx.outputs.reduce((s, o) => s + o.amount, 0n)
+  if (fee < 0n) throw new Error('Outputs spend more than the inputs, refusing')
+  return fee
 }
 
 /** A dropped PSBT whose every input already carries signatures: the transaction it holds. null while any input is unsigned. */

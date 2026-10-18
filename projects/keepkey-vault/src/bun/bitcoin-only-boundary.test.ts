@@ -189,6 +189,10 @@ describe('Bitcoin-only REST boundary', () => {
     expect(bitcoinOnlyRpcRejection('btcPsbtSign', { id: 'x' })).toBeNull()
     expect(bitcoinOnlyRpcRejection('btcPsbtShowFile', undefined)).toBeNull()
     expect(bitcoinOnlyRpcRejection('btcWatchOnlyExport', { accountIndex: 0, scriptType: 'p2wpkh' })).toBeNull()
+    expect(bitcoinOnlyRpcRejection('btcWatchOnlyAccounts', undefined)).toBeNull()
+    expect(bitcoinOnlyRpcRejection('btcWatchOnlyBuildPsbt', { scriptType: 'p2wpkh', accountIndex: 0, to: 'bc1q', amount: '0.1', isMax: false, feeLevel: 3 })).toBeNull()
+    expect(bitcoinOnlyRpcRejection('btcBroadcastSigned', { data: '' })).toBeNull()
+    expect(bitcoinOnlyRpcRejection('watchOnlySetView', { active: true })).toBeNull()
     expect(bitcoinOnlyRpcRejection('getPublicKeys', {
       paths: [{ coin: 'Bitcoin' }, { coin: 'Zcash' }],
     })).not.toBeNull()

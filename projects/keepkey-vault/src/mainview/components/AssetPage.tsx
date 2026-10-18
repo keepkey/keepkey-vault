@@ -36,9 +36,10 @@ import { useEvmAddresses } from "../hooks/useEvmAddresses"
 import { AddTokenDialog } from "./AddTokenDialog"
 import { PSBT_PASTE_EVENT } from "./PsbtSignDialog"
 import { WatchOnlyExportDialog } from "./WatchOnlyExportDialog"
+import { CreatePsbtPanel } from "./CreatePsbtPanel"
 import { detectSpamToken, categorizeTokens, type SpamResult } from "../../shared/spamFilter"
 
-type AssetView = "receive" | "send" | "privacy"
+type AssetView = "receive" | "send" | "privacy" | "psbt"
 
 type BtcAddressIndexResult = {
 	receiveIndex: number
@@ -647,6 +648,10 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 		...(!watchOnly && !isShieldedToken ? [{ id: "send" as const, label: t("send"), icon: (
 			<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="19" x2="12" y2="5" /><polyline points="5 12 12 5 19 12" /></svg>
 		) }] : []),
+		// Watch-only Bitcoin: Send becomes Create PSBT (unsigned; a KeepKey signs it later).
+		...(watchOnly && isBtc && !selectedToken ? [{ id: "psbt" as const, label: t("createPsbt", { defaultValue: "Create PSBT" }), icon: (
+			<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="19" x2="12" y2="5" /><polyline points="5 12 12 5 19 12" /></svg>
+		) }] : []),
 		...(!watchOnly && swappableChainIds.has(chain.id) && !isShieldedToken ? [{ id: "swap" as const, label: t("swap"), icon: (
 			<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="17 1 21 5 17 9" /><path d="M3 11V9a4 4 0 0 1 4-4h14" /><polyline points="7 23 3 19 7 15" /><path d="M21 13v2a4 4 0 0 1-4 4H3" /></svg>
 		) }] : []),
@@ -943,6 +948,15 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 											<Flex align="center" gap="1" color="var(--rose)" className="v3-glass-chip" px="2" py="0.5" title={refreshError} cursor="help">
 												<Box w="6px" h="6px" borderRadius="full" bg="var(--rose)" />
 												<Text fontSize="10px" fontFamily="mono" fontWeight="500" letterSpacing="0.02em">{t("refreshFailed")}</Text>
+											</Flex>
+										) : watchOnly && activeBalance?.syncState === "stale" ? (
+											// Watch-only cache: never "Synced". Say it is cached and how old it is.
+											<Flex align="center" gap="1" color="var(--gold)" className="v3-glass-chip" px="2" py="0.5"
+												title={activeBalance.updatedAt ? `Cached ${new Date(activeBalance.updatedAt).toLocaleString()}` : undefined}>
+												<Box w="6px" h="6px" borderRadius="full" bg="var(--gold)" />
+												<Text fontSize="10px" fontFamily="mono" fontWeight="500" letterSpacing="0.02em">
+													{t("cached", { defaultValue: "Cached" })}{activeBalance.updatedAt ? ` · ${new Date(activeBalance.updatedAt).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}` : ""}
+												</Text>
 											</Flex>
 										) : activeBalance ? (
 											<Flex align="center" gap="1" color="var(--teal)" className="v3-glass-chip" px="2" py="0.5"
@@ -1267,6 +1281,8 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 						<Suspense fallback={<Spinner size="sm" color="kk.gold" />}>
 							<ZcashPrivacyTab initialPage={safeInitial === "send" ? "send" : "receive"} />
 						</Suspense>
+					) : view === "psbt" ? (
+						<CreatePsbtPanel deviceId={watchOnlyDeviceId} />
 					) : view === "send" ? (
 						isBtc && !btcSelected?.xpubData ? (
 							<Flex align="center" justify="center" minH="200px">

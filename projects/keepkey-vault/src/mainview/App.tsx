@@ -14,6 +14,7 @@ import { MobilePanel } from "./components/MobilePanel"
 import { WalletConnectPanel } from "./components/WalletConnectPanel"
 import { FirmwareDropZone } from "./components/FirmwareDropZone"
 import { PsbtSignDialog } from "./components/PsbtSignDialog"
+import { BroadcastSignedDialog } from "./components/BroadcastSignedDialog"
 import { SplashScreen } from "./components/SplashScreen"
 import { isBitcoinOnlyVariant } from "../shared/flags"
 import { useOnline } from "./hooks/useOnline"
@@ -835,6 +836,14 @@ function App() {
 
 	const phase = resolveAppPhase({ state: deviceState.state, oobLock, isClaimed, firmwareSkipped, wizardComplete, bootloaderIdle })
 
+	// Bun lets a Bitcoin-only saved wallet use the user's own node only while it is on screen.
+	const watchOnlyShown = showWatchOnly(watchOnlyMode, phase)
+	useEffect(() => {
+		if (!watchOnlyShown) return
+		rpcRequest("watchOnlySetView", { active: true, deviceId: watchOnlyDeviceId }).catch(() => {})
+		return () => { rpcRequest("watchOnlySetView", { active: false }).catch(() => {}) }
+	}, [watchOnlyShown, watchOnlyDeviceId])
+
 	useEffect(() => {
 		rpcRequest("logOnboarding", { event: `phase=${phase} state=${deviceState.state} wizardComplete=${wizardComplete} setupInProgress=${setupInProgress} oobEntered=${oobEnteredRef.current} firmwareSkipped=${firmwareSkipped}` }).catch(() => {})
 	}, [phase, deviceState.state, wizardComplete, setupInProgress, firmwareSkipped])
@@ -879,8 +888,8 @@ function App() {
 		setWatchOnlyMode(false)
 	}, [])
 
-	// ── Firmware drop zone (always active) + the PSBT dialog it dispatches to ──
-	const firmwareDropZone = <><FirmwareDropZone /><PsbtSignDialog /></>
+	// ── Firmware drop zone (always active) + the PSBT/broadcast dialogs it dispatches to ──
+	const firmwareDropZone = <><FirmwareDropZone /><PsbtSignDialog /><BroadcastSignedDialog /></>
 
 	// ── Render phases ───────────────────────────────────────────────
 

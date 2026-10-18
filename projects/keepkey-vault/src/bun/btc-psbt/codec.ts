@@ -67,6 +67,15 @@ export function masterFingerprintFromDepth1Xpub(xpub: string): Uint8Array {
   return bytes.slice(5, 9)
 }
 
+/** Account path of a stored depth-3 account key. Coin type 0' is assumed: Desktop stores mainnet Bitcoin accounts only. */
+export function accountPathFromXpub(key: string, scriptType: BtcPsbtScriptType): number[] {
+  const { bytes, scriptType: prefixType } = decodePublicKey(key)
+  if (prefixType !== scriptType) throw new Error(`The stored ${scriptType} key has the wrong prefix`)
+  const child = u32be(bytes, 9)
+  if (bytes[4] !== 3 || child < H) throw new Error('Not a BIP44/49/84 account key')
+  return [PURPOSE[scriptType] + H, H, child]
+}
+
 export function formatPath(path: number[]): string {
   return 'm/' + path.map((p) => (p >= H ? `${p - H}'` : `${p}`)).join('/')
 }

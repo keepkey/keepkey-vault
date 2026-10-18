@@ -3,6 +3,7 @@ import { Box, Flex, Text, Button, Spinner, Textarea } from "@chakra-ui/react"
 import { rpcRequest } from "../lib/rpc"
 import { Z } from "../lib/z-index"
 import type { BtcPsbtReview } from "../../shared/types"
+import { BTC_BROADCAST_EVENT } from "./BroadcastSignedDialog"
 
 /** FirmwareDropZone fires this with the dropped File once its content sniffs as a PSBT. */
 export const PSBT_DROP_EVENT = "keepkey-psbt-drop"
@@ -11,7 +12,7 @@ export const PSBT_PASTE_EVENT = "keepkey-psbt-paste"
 const MAX_PSBT_BYTES = 1024 * 1024
 
 type Review = Extract<BtcPsbtReview, { kind: "review" }>
-type Phase = "idle" | "paste" | "analyzing" | "review" | "signing" | "done" | "signed" | "error"
+type Phase = "idle" | "paste" | "analyzing" | "review" | "signing" | "done" | "error"
 
 function toBase64(bytes: Uint8Array): string {
 	const CHUNK = 8192
@@ -52,7 +53,7 @@ export function PsbtSignDialog() {
 	const [phase, setPhase] = useState<Phase>("idle")
 	const [name, setName] = useState("")
 	const [review, setReview] = useState<Review | null>(null)
-	const [signed, setSigned] = useState<{ txid: string; txHex: string; fee?: string | null; filePath?: string } | null>(null)
+	const [signed, setSigned] = useState<{ txid: string; txHex: string; filePath: string } | null>(null)
 	const [error, setError] = useState<string | null>(null)
 	const [pasted, setPasted] = useState("")
 	const [copied, setCopied] = useState(false)
@@ -69,8 +70,9 @@ export function PsbtSignDialog() {
 			if (bytes.length > MAX_PSBT_BYTES) throw new Error("PSBT is larger than 1 MB, refusing")
 			const result = await rpcRequest<BtcPsbtReview>("btcPsbtAnalyze", { data: toBase64(bytes), name: fileName }, 60000)
 			if (result.kind === "signed") {
-				setSigned(result)
-				setPhase("signed")
+				// Already signed: nothing to sign, so review it for broadcast instead.
+				window.dispatchEvent(new CustomEvent(BTC_BROADCAST_EVENT, { detail: new File([new Uint8Array(bytes)], fileName) }))
+				setPhase("idle")
 			} else {
 				setReview(result)
 				setPhase("review")
@@ -269,28 +271,21 @@ export function PsbtSignDialog() {
 						</Flex>
 					)}
 
-					{(phase === "done" || phase === "signed") && signed && (
+					{phase === "done" && signed && (
 						<Flex direction="column" gap="3">
 							<Text fontSize="sm" fontWeight="600" color="var(--teal-2)">
-								{phase === "done" ? "Signed. Load the file back into your wallet, or broadcast the raw transaction." : "This PSBT already contains signatures (not checked by Desktop)."}
+								Signed. Load the file back into your wallet, or broadcast the raw transaction.
 							</Text>
 							<Box {...card}>
-								{signed.filePath && (
-									<Box mb="2">
-										<Text fontSize="xs" color="kk.textSecondary">Saved to</Text>
-										<Mono>{signed.filePath}</Mono>
-									</Box>
-								)}
+								<Box mb="2">
+									<Text fontSize="xs" color="kk.textSecondary">Saved to</Text>
+									<Mono>{signed.filePath}</Mono>
+								</Box>
 								<Text fontSize="xs" color="kk.textSecondary">Transaction ID</Text>
 								<Mono>{signed.txid}</Mono>
-								{phase === "signed" && (
-									<Text fontSize="xs" color="kk.textSecondary" mt="2">
-										Fee: {signed.fee != null ? sats(signed.fee) : "unknown (the file does not prove its input amounts)"}
-									</Text>
-								)}
 							</Box>
 							<Flex gap="2" justify="flex-end">
-								{signed.filePath && <Button {...plainButton} onClick={() => void rpcRequest("btcPsbtShowFile")}>Show in Finder</Button>}
+								<Button {...plainButton} onClick={() => void rpcRequest("btcPsbtShowFile")}>Show in Finder</Button>
 								<Button {...plainButton} onClick={handleCopy}>{copied ? "Copied" : "Copy raw hex"}</Button>
 								<Button {...goldButton} onClick={handleDismiss}>Done</Button>
 							</Flex>

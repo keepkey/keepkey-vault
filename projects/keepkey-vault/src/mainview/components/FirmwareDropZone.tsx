@@ -8,8 +8,9 @@ import { FirmwareUpgradePreview } from "./FirmwareUpgradePreview"
 import { useDeviceState } from "../hooks/useDeviceState"
 import { requiresBackupConfirmation } from "../lib/update-safety"
 import holdAndConnectRaw from "../assets/svg/hold-and-connect.svg?raw"
-import { looksLikePsbt, PSBT_SNIFF_BYTES } from "../../shared/psbt-sniff"
+import { looksLikePsbt, looksLikeRawTxHex, PSBT_SNIFF_BYTES } from "../../shared/psbt-sniff"
 import { PSBT_DROP_EVENT } from "./PsbtSignDialog"
+import { BTC_BROADCAST_EVENT } from "./BroadcastSignedDialog"
 
 /**
  * FirmwareDropZone — Global drag-and-drop dispatcher.
@@ -19,7 +20,9 @@ import { PSBT_DROP_EVENT } from "./PsbtSignDialog"
  *   - .dylib → emulator dylib install (macOS only). Replaces any previously
  *             installed emulator and flips the emulator dev flag on.
  *   - anything else whose CONTENT is a PSBT (binary, base64 or hex; wallets use
- *             .psbt, .txn, .txt or no extension) → PsbtSignDialog via PSBT_DROP_EVENT.
+ *             .psbt, .txn, .txt or no extension) → PsbtSignDialog via PSBT_DROP_EVENT
+ *             (it hands a fully signed one on to BroadcastSignedDialog).
+ *   - a signed raw transaction as hex text (Electrum's complete .txn) → BroadcastSignedDialog.
  *
  * Warning levels for firmware:
  * - Signed firmware: green badge, standard confirmation
@@ -126,8 +129,13 @@ export function FirmwareDropZone() {
 				await processDylib(file)
 				return
 			}
-			if (looksLikePsbt(new Uint8Array(await file.slice(0, PSBT_SNIFF_BYTES).arrayBuffer()))) {
+			const head = new Uint8Array(await file.slice(0, PSBT_SNIFF_BYTES).arrayBuffer())
+			if (looksLikePsbt(head)) {
 				window.dispatchEvent(new CustomEvent(PSBT_DROP_EVENT, { detail: file }))
+				return
+			}
+			if (looksLikeRawTxHex(head)) {
+				window.dispatchEvent(new CustomEvent(BTC_BROADCAST_EVENT, { detail: file }))
 				return
 			}
 			setError(IS_EMU_PLATFORM

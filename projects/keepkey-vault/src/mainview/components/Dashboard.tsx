@@ -1023,6 +1023,9 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 						const map = new Map<string, ChainBalance>()
 						for (const b of result) map.set(b.chainId, b)
 						setBalances(map)
+						// Cached rows: show their age, never present them as current.
+						const newest = Math.max(0, ...result.map(b => b.updatedAt || 0))
+						setCacheUpdatedAt(newest || null)
 					}
 				} catch { /* watch-only cache unavailable */ }
 				if (!cancelled) { setInitialLoaded(true); onLoaded?.() }
@@ -2236,7 +2239,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 						<circle cx="12" cy="12" r="3" />
 					</svg>
 					<Text fontSize="xs" color="kk.gold" fontWeight="500">
-						{t("watchOnlyBanner")}
+						{t("watchOnlyBanner")}{cacheUpdatedAt ? ` · ${t("lastUpdated", { time: new Date(cacheUpdatedAt).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }) })}` : ""}
 					</Text>
 				</Flex>
 			)}

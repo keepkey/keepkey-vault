@@ -2,7 +2,7 @@ import type { ElectrobunRPCSchema } from 'electrobun/bun'
 import type { ClearSignReport } from './clearsign-report'
 import type { TxDetailLine } from './tx-clearsign'
 import type { ClearSignCentralAssetAuditHistory, ClearSignCentralAssetReview, ClearSignCentralAssetReviewResult, ClearSignCentralContractAudit, ClearSignCentralContractReview, ClearSignCentralStatus, ClearSignProtectionCaseStudy, RuntimeProviderNamed } from './types'
-import type { DeviceStateInfo, FirmwareProgress, FirmwareAnalysis, FatalEvent, PinRequest, CharacterRequest, ChainBalance, BuildTxParams, BuildTxResult, BroadcastResult, BtcAccountSet, BtcScriptType, EvmAddressSet, CustomToken, CustomChain, AppSettings, PioneerServer, BtcGetAddressParams, EthGetAddressParams, EthSignTxParams, BtcSignTxParams, GetPublicKeysParams, UpdateInfo, UpdateStatus, TokenVisibilityStatus, PairingRequestInfo, PairedAppInfo, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, ReportMeta, ReportData, AuditReport, AuditPortfolioSnapshot, AuditMode, AuditDerivedAddress, AuditInspectResult, SwapAsset, SwapQuote, SwapQuoteParams, ExecuteSwapParams, SwapResult, SwapHealth, PendingSwap, SwapStatusUpdate, SwapHistoryRecord, SwapHistoryFilter, SwapHistoryStats, SwapUiState, SwapUiCommand, RecentActivity, BuildStakingTxParams, StakingPosition, DefiPosition, NameInfo, NameQuote, BuildNameRegTxParams, ZcashTransaction, ZcashTxBatch, ZcashTexPayment, EmulatorStatus, EmulatorWalletInfo, RegisteredDevice, WcSessionInfo, AddressBookEntry, AddressBookFilter, AddressBookTx, UsbDiagnosticReport, ClearSignEvent, ClearSignCoverageSummary, ClearSignAuditJob, ClearSignSolanaSchemaArtifact, ClearSignSolanaSchemaDraft, ClearSignEvmSchemaDraft, ClearSignEvmSchemaArtifact, ClearSignEvmSignedEntry, ClearSignProviderBundle, RngAuditReport, ClearSignProvider, ClearSignProviderInput, BtcPsbtReview } from './types'
+import type { DeviceStateInfo, FirmwareProgress, FirmwareAnalysis, FatalEvent, PinRequest, CharacterRequest, ChainBalance, BuildTxParams, BuildTxResult, BroadcastResult, BtcAccountSet, BtcScriptType, EvmAddressSet, CustomToken, CustomChain, AppSettings, PioneerServer, BtcGetAddressParams, EthGetAddressParams, EthSignTxParams, BtcSignTxParams, GetPublicKeysParams, UpdateInfo, UpdateStatus, TokenVisibilityStatus, PairingRequestInfo, PairedAppInfo, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, ReportMeta, ReportData, AuditReport, AuditPortfolioSnapshot, AuditMode, AuditDerivedAddress, AuditInspectResult, SwapAsset, SwapQuote, SwapQuoteParams, ExecuteSwapParams, SwapResult, SwapHealth, PendingSwap, SwapStatusUpdate, SwapHistoryRecord, SwapHistoryFilter, SwapHistoryStats, SwapUiState, SwapUiCommand, RecentActivity, BuildStakingTxParams, StakingPosition, DefiPosition, NameInfo, NameQuote, BuildNameRegTxParams, ZcashTransaction, ZcashTxBatch, ZcashTexPayment, EmulatorStatus, EmulatorWalletInfo, RegisteredDevice, WcSessionInfo, AddressBookEntry, AddressBookFilter, AddressBookTx, UsbDiagnosticReport, ClearSignEvent, ClearSignCoverageSummary, ClearSignAuditJob, ClearSignSolanaSchemaArtifact, ClearSignSolanaSchemaDraft, ClearSignEvmSchemaDraft, ClearSignEvmSchemaArtifact, ClearSignEvmSignedEntry, ClearSignProviderBundle, RngAuditReport, ClearSignProvider, ClearSignProviderInput, BtcPsbtReview, BtcWatchOnlyAccounts, BtcWatchOnlyPsbt, BtcBroadcastReview } from './types'
 
 /**
  * RPC Schema for Bun ↔ WebView communication.
@@ -117,6 +117,11 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       /** Signs only the PSBT bun holds for this review id, in the wallet session it was checked in. */
       btcPsbtSign: { params: { id: string }; response: { filePath: string; txHex: string; txid: string } }
       btcPsbtShowFile: { params: void; response: void }
+      /** Watch-only Create PSBT (no device). Accounts come from the saved wallet; chain data from getBtcBackend(). */
+      btcWatchOnlyAccounts: { params: { deviceId?: string } | void; response: BtcWatchOnlyAccounts }
+      btcWatchOnlyBuildPsbt: { params: { deviceId?: string; scriptType: 'p2wpkh' | 'p2sh-p2wpkh' | 'p2pkh'; accountIndex: number; to: string; amount: string; isMax: boolean; feeLevel: 1 | 3 | 5 }; response: BtcWatchOnlyPsbt }
+      /** Signed PSBT or raw tx hex, base64 of the dropped bytes. send=false reviews, send=true broadcasts. */
+      btcBroadcastSigned: { params: { data: string; send?: boolean }; response: BtcBroadcastReview }
       /** Electrum watch-only export of one loaded account. save=true writes the wallet file to ~/Downloads. fingerprint null = unknown. */
       btcWatchOnlyExport: { params: { accountIndex: number; scriptType: 'p2wpkh' | 'p2sh-p2wpkh' | 'p2pkh'; save?: boolean }; response: { key: string; fingerprint: string | null; derivation: string; filePath?: string } }
       ethSignTx: { params: any; response: any }
@@ -404,6 +409,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
 
       // ── Watch-only mode ──────────────────────────────────────────────
       checkWatchOnlyCache: { params: void; response: { available: boolean; deviceLabel?: string; lastSynced?: number } }
+      watchOnlySetView: { params: { active: boolean; deviceId?: string }; response: void }
       getWatchOnlyBalances: { params: { deviceId?: string } | void; response: ChainBalance[] | null }
       refreshWatchOnlyBalances: { params: { deviceId?: string } | void; response: ChainBalance[] | null }
       getWatchOnlyPubkeys: { params: { deviceId?: string } | void; response: Array<{ chainId: string; path: string; xpub: string; address: string }> }
