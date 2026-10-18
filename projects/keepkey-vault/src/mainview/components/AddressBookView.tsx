@@ -11,6 +11,8 @@ import { useDeviceState } from "../hooks/useDeviceState"
 import { AddressIdenticon } from "./AddressIdenticon"
 import { AssetIcon } from "./AssetIcon"
 import { AddAddressDialog } from "./AddAddressDialog"
+import { Z } from "../lib/z-index"
+import { evmChainLabel } from "../../shared/chains"
 import type { AddressBookEntry, AddressBookTx, AppSettings } from "../../shared/types"
 
 const chainById = new Map(CHAINS.map(c => [c.id, c]))
@@ -73,7 +75,21 @@ export function AddressBookView() {
     setCertificationNotice(enabled ? "ClearSign enabled — certify after contact changes." : "")
   }, [clearSignEnabled])
 
+  // One review of every contact before the device is asked to certify them all.
+  const [certifyPreview, setCertifyPreview] = useState<{ label: string; network: string; address: string }[] | null>(null)
+  const reviewCertify = useCallback(async () => {
+    setCertificationNotice("")
+    try {
+      const contacts = await rpcRequest<{ label: string; network: string; address: string }[]>("previewAddressBookCertification", undefined, 5000)
+      if (!contacts.length) setCertificationNotice("Add at least one labeled EVM contact before certifying")
+      else setCertifyPreview(contacts)
+    } catch (error: any) {
+      setCertificationNotice(error?.message || "Could not list the contacts to certify")
+    }
+  }, [])
+
   const certify = useCallback(async () => {
+    setCertifyPreview(null)
     setCertifying(true)
     setCertificationNotice("")
     try {
@@ -181,7 +197,7 @@ export function AddressBookView() {
           {clearSignEnabled ? "ClearSign on" : "Enable ClearSign"}
         </Button>}
         {clearSignEnabled && clearSignSupported && <Button size="sm" variant="outline" borderColor="var(--teal)" color="var(--teal)" borderRadius="10px" px="3" h="34px"
-                onClick={certify} disabled={certifying || !clearSignSupported || certifyUnsupported}
+                onClick={reviewCertify} disabled={certifying || !clearSignSupported || certifyUnsupported}
                 title={certifyUnsupported ? "This firmware build cannot certify contacts" : undefined}>{certifying ? "Review on device…" : "Certify contacts"}</Button>}
         <Button size="sm" variant="outline" borderColor="var(--gold)" color="var(--gold)" borderRadius="10px" px="3" h="34px"
                 _hover={{ bg: "rgba(233,196,106,0.10)" }} onClick={() => setAddOpen(true)} flexShrink={0} title={t("addAddressHint", { defaultValue: "Add an address to your Address Book" })}>
@@ -192,6 +208,33 @@ export function AddressBookView() {
         </Button>
         </Flex>
       </Flex>
+      {certifyPreview && (
+        <Box position="fixed" inset="0" zIndex={Z.dialog} display="flex" alignItems="center" justifyContent="center" bg="rgba(0,0,0,0.6)"
+             onClick={() => setCertifyPreview(null)}>
+          <Box bg="kk.cardBg" border="1px solid" borderColor="kk.border" borderRadius="14px" p="5" w="92%" maxW="520px" maxH="80vh" overflowY="auto"
+               onClick={(e) => e.stopPropagation()}>
+            <Text fontSize="md" fontWeight="700" color="var(--text-0)">Certify {certifyPreview.length} contact{certifyPreview.length === 1 ? "" : "s"}?</Text>
+            <Text fontSize="xs" color="var(--text-2)" mt="1" mb="3">
+              Your KeepKey will sign this list. Sends to these addresses on these networks then show the name on your KeepKey.
+            </Text>
+            <Flex direction="column" gap="2">
+              {certifyPreview.map((c) => (
+                <Box key={`${c.network}:${c.address}`} px="3" py="2" borderRadius="10px" bg="rgba(255,255,255,0.03)" border="1px solid" borderColor="var(--line)">
+                  <Flex justify="space-between" gap="2">
+                    <Text fontSize="sm" fontWeight="700" color="var(--text-0)">{c.label}</Text>
+                    <Text fontSize="xs" color="var(--text-2)">{evmChainLabel(c.network.split(":")[1])?.name || c.network}</Text>
+                  </Flex>
+                  <Text fontSize="xs" color="var(--text-1)" fontFamily="mono" wordBreak="break-all">{c.address}</Text>
+                </Box>
+              ))}
+            </Flex>
+            <Flex justify="flex-end" gap="2" mt="4">
+              <Button size="sm" variant="outline" borderColor="var(--line)" color="var(--text-1)" onClick={() => setCertifyPreview(null)}>Cancel</Button>
+              <Button size="sm" variant="outline" borderColor="var(--teal)" color="var(--teal)" onClick={certify}>Certify on KeepKey</Button>
+            </Flex>
+          </Box>
+        </Box>
+      )}
 
       {certificationNotice && <Text fontSize="11px" color="var(--text-2)" mb="3">{certificationNotice}</Text>}
 

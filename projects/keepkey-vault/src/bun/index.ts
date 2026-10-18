@@ -7549,6 +7549,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant),
 				)
 			},
+			previewAddressBookCertification: async () =>
+				contactsFromEntries(getAddressBookList({ kind: 'external', savedOnly: true }))
+					.map(c => ({ label: c.label, network: c.network, address: `0x${c.destination}` })),
 			certifyAddressBook: async () => {
 				if (!addressBookClearsignEnabled) throw new Error('Address Book ClearSign is not enabled')
 				if (!engine.wallet) throw new Error('No device connected')

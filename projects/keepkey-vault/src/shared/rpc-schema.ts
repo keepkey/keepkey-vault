@@ -378,6 +378,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       deleteAddressBook: { params: { id: string }; response: void }
       getAddressBookHistory: { params: { entryId: string }; response: AddressBookTx[] }
       certifyAddressBook: { params: void; response: { revision: number; count: number; root: string; fingerprint: string } }
+      previewAddressBookCertification: { params: void; response: { label: string; network: string; address: string }[] }
 
       // ── Recent Activity ──────────────────────────────────────────────────
       // limit omitted = every row for the wallet (the activity list shows full history)
