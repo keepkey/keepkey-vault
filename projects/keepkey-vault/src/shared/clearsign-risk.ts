@@ -329,7 +329,10 @@ function evmTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void):
     if (sink) add('high', `Sends the tokens straight to ${sink} (${rcpt}), which does not credit a plain transfer. A normal app never does this, and the tokens may be lost.`)
   } else if (erc7730) {
     // The device verifies the definition and shows the call from it.
-    add('medium', `Your KeepKey shows this call to ${to} from a KeepKey ClearSign description, and refuses it if that description is not genuine. Check the details there. The call can still use any token permission you already gave ${to}.`)
+    const d = req.erc7730Description
+    const what = d ? `${d.summary ?? d.intent}${d.protocol ? ` on ${d.protocol.name}` : ''}` : `This call to ${to}`
+    // Calm when this computer read the same description; gold only when it could not.
+    add(d ? 'low' : 'medium', `${what}: your KeepKey shows it from a KeepKey ClearSign description.`)
   } else if (urSwap && req.calldataDecoded?.signedInsightBlob) {
     recognition = 'known'
     // Every command decoded, and a signed description attached that the device
@@ -355,7 +358,7 @@ function evmTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void):
   } else if (!req.deviceClearSigns && certifiedBlobShown(req)) {
     // No decoder here, but the device verifies the certified description and
     // shows the call from it, so this is not a blind signature.
-    add('medium', `Your KeepKey shows this call to ${to} from a KeepKey-certified description, and refuses it if that description is not genuine. Check the details there. The call can still use any token permission you already gave ${to}.`)
+    add('medium', `Your KeepKey shows this call to ${to} from a KeepKey-certified description.`)
   } else if (!req.deviceClearSigns || KNOWN_SELECTORS.has(sel)) {
     // A known selector reaching here did not parse (dirty address word,
     // trailing bytes): the device may accept it by length alone.

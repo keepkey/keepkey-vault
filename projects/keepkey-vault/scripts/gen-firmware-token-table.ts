@@ -35,19 +35,23 @@ const dir = process.argv[2]
 const outName = process.argv[3] ?? 'firmware-token-table.json'
 if (!dir) throw new Error('usage: bun scripts/gen-firmware-token-table.ts <firmware include/keepkey/firmware dir> [out.json]')
 
-const X = /^X\((\d+),\s*"((?:\\x[0-9a-fA-F]{2}){20})",/
-const tokens = new Set<string>()
+const X = /^X\((\d+),\s*"((?:\\x[0-9a-fA-F]{2}){20})",\s*" ?([^"]*)",\s*(\d+)\)/
+// The firmware's table order (uniswap first): tokenByChainAddress takes the first match.
+const symbols: Record<string, [string, number]> = {}
 for (const file of ['uniswap_tokens.def', 'ethereum_tokens.def']) {
   for (const line of readFileSync(join(dir, file), 'utf8').split('\n')) {
     const m = X.exec(line)
     if (!m) continue
-    tokens.add(`${m[1]}:0x${m[2].replace(/\\x/g, '').toLowerCase()}`)
+    symbols[`${m[1]}:0x${m[2].replace(/\\x/g, '').toLowerCase()}`] ??= [m[3], Number(m[4])]
   }
 }
+const tokens = Object.keys(symbols)
 const out = {
   _source: 'firmware tokenByChainAddress table (uniswap_tokens.def + ethereum_tokens.def)',
   _regenerate: `bun scripts/gen-firmware-token-table.ts <fw build>/include/keepkey/firmware${process.argv[3] ? ` ${outName}` : ''}`,
   tokens: [...tokens].sort(),
+  /** What the device names each token: ticker and decimals. */
+  symbols,
 }
 writeFileSync(join(import.meta.dir, '../src/bun', outName), JSON.stringify(out, null, 1) + '\n')
 console.log(`wrote ${out.tokens.length} (chain:address) entries to src/bun/${outName}`)

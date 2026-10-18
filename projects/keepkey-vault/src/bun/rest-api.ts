@@ -11,6 +11,7 @@ import { createHash } from 'crypto'
 import { decodeEIP712 } from './eip712-decoder'
 import { evmPriorityFee, normalizeEvmChainId, recognizedTypedDataSpender, typedDataNativelyReviewed } from './evm-signing-preview'
 import { buildEvmReportForTx, evmSigningVerdict, prepareEvmTxSigningInfo, withoutErc7730Description } from './evm-presign-report'
+import { describeErc7730Call } from './erc7730-describe'
 import { signWithErc7730Fallback } from './erc7730-resolver'
 import { CHAINS, isChainSupported, hiveRolePath, evmChainLabel } from '../shared/chains'
 import { getEvmSimulationEndpoint } from './evm-simulation-config'
@@ -1978,6 +1979,14 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               const nList = preview.addressNList || preview.address_n_list
               let account: string | undefined = String(preview.from || '')
               if (nList) try { if (JSON.stringify(auth.getAccount(account).addressNList) !== JSON.stringify(nList)) account = undefined } catch { account = undefined }
+              // The ERC-7730 description reads @.from and "(this wallet)" off the matched key only.
+              if (signingInfo.erc7730Description && account !== signingInfo.from) {
+                const described = describeErc7730Call(signingInfo.erc7730!.definitions[0].envelope, {
+                  chainId: signingInfo.chainId as number, to: preview.to, data: preview.data, value: preview.value,
+                })
+                if (described) signingInfo.erc7730Description = described
+                else delete signingInfo.erc7730Description
+              }
               const contractFacts = addContractFacts(signingInfo, engine.isPassphraseWallet ? undefined : engine.getDeviceState().deviceId, account)
               if (path === '/eth/sign-transaction' && /^0x[0-9a-fA-F]{40}$/.test(String(preview.from || ''))) {
                 const chainIdNum = typeof signingInfo.chainId === 'string'

@@ -1165,6 +1165,8 @@ export interface SigningRequestInfo {
    *  fetched and checked before approval. The signing handler sends exactly
    *  this one, so approval and device review cannot drift. */
   erc7730?: Erc7730Catalog
+  /** What that definition makes the KeepKey show, read here from its bytes. */
+  erc7730Description?: Erc7730Description
   /** true when the UI must enable AdvancedMode before allowing approval */
   requiresAdvancedMode?: boolean
   /** true when this request needs a separate, explicit one-shot opaque-signing
@@ -1762,6 +1764,23 @@ export interface RelayTxParams {
   }
   /** Reusable signed ERC-7730 v2 definitions supplied by the quote/catalog service. */
   erc7730?: Erc7730Catalog
+}
+
+/** What a KeepKey ClearSign ERC-7730 definition makes the KeepKey show for one
+ *  call (bun/erc7730-describe). `protocol` is Desktop's own name for the
+ *  contract, not part of the signed definition. */
+export interface Erc7730Description {
+  /** The certificate alias: this computer checked the envelope's signature up
+   *  to KeepKey's production root (no description otherwise). */
+  signedBy: string
+  intent: string
+  /** The interpolated intent ("Stake 0.01 ETH"), when the definition has one. */
+  summary?: string
+  /** Values as the device shows them, one device line per "\n"; `note` is
+   *  this computer's own reading of a token the device does not know. */
+  fields: Array<{ label: string; value: string; note?: string }>
+  protocol?: { name: string; url: string; about?: string }
+  explorerUrl?: string
 }
 
 /** Signed ERC-7730 v2 definitions in the shape hdwallet's transport sends. */
