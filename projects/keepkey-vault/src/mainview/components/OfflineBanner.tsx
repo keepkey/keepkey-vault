@@ -34,8 +34,8 @@ export function OfflineBanner({ airplane }: { airplane?: boolean }) {
       </svg>
       <Text fontSize="11px" fontWeight="600" letterSpacing="0.01em" textAlign="center">
         {airplane
-          ? t("offlineBannerAirplane", { defaultValue: "Offline mode on — no network. Device, addresses & receiving work; balances, history & sending are paused." })
-          : t("offlineBannerNoNet", { defaultValue: "No network — Vault is offline. Device, addresses & receiving still work; balances, history & sending are paused." })}
+          ? t("offlineBannerAirplane", { defaultValue: "Offline mode on — no network. Device, addresses, receiving & PSBT signing (drop a PSBT here) work; balances, history & sending are paused." })
+          : t("offlineBannerNoNet", { defaultValue: "No network — Vault is offline. Device, addresses, receiving & PSBT signing (drop a PSBT here) still work; balances, history & sending are paused." })}
       </Text>
     </Flex>
   )

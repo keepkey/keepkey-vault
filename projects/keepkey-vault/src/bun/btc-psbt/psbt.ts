@@ -709,3 +709,14 @@ export function parseForBroadcast(input: Uint8Array | string): { txHex: string; 
   if (fee !== null && fee < 0n) throw new Error('Outputs spend more than the inputs, refusing')
   return { txHex: hex.encode(tx.toBytes(true, true)), txid: tx.id, outputs: outputs.map(describeOutput), fee }
 }
+
+/** A dropped PSBT whose every input already carries signatures: the transaction it holds. null while any input is unsigned. */
+export function alreadySigned(input: Uint8Array | string): ReturnType<typeof parseForBroadcast> | null {
+  const d = decode(input)
+  if (d.kind !== 'psbt') return null
+  for (let i = 0; i < d.tx.inputsLength; i++) {
+    const inp = d.tx.getInput(i)
+    if (!inp.finalScriptSig?.length && !inp.finalScriptWitness?.length && !inp.partialSig?.length && !inp.tapKeySig) return null
+  }
+  return parseForBroadcast(d.bytes)
+}

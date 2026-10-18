@@ -184,6 +184,10 @@ describe('Bitcoin-only REST boundary', () => {
     expect(bitcoinOnlyRpcRejection('btcGetAddress', { coin: 'Litecoin' })).not.toBeNull()
     expect(bitcoinOnlyRpcRejection('btcSignTx', { coin: 'Dogecoin' })).not.toBeNull()
     expect(bitcoinOnlyRpcRejection('btcSignTx', { coin: 'Bitcoin' })).toBeNull()
+    // PSBT drop-to-sign is Bitcoin mainnet only and must stay open on Bitcoin-only firmware.
+    expect(bitcoinOnlyRpcRejection('btcPsbtAnalyze', { data: '', name: 'tx.psbt' })).toBeNull()
+    expect(bitcoinOnlyRpcRejection('btcPsbtSign', { id: 'x' })).toBeNull()
+    expect(bitcoinOnlyRpcRejection('btcPsbtShowFile', undefined)).toBeNull()
     expect(bitcoinOnlyRpcRejection('getPublicKeys', {
       paths: [{ coin: 'Bitcoin' }, { coin: 'Zcash' }],
     })).not.toBeNull()

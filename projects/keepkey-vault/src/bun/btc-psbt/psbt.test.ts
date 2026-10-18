@@ -7,7 +7,7 @@ import { mnemonicToSeedSync } from 'bip39'
 import vectors from './bip174-vectors.json'
 import { b58check, formatPath } from './codec'
 import {
-  MAX_MONEY, analyze, buildPsbt, decode, finalizeSigned, parseForBroadcast, toSignTx,
+  MAX_MONEY, alreadySigned, analyze, buildPsbt, decode, finalizeSigned, parseForBroadcast, toSignTx,
   type BtcPsbtAccount, type BtcPsbtScriptType, type PsbtAnalysis,
 } from './psbt'
 
@@ -375,5 +375,18 @@ describe('refusals and device parity', () => {
     const badSig = btc.RawTx.encode({ ...signed, witnesses: [[sig, signed.witnesses![0][1]], signed.witnesses![1]] })
     expect(() => finalizeSigned(analysis, hex.encode(badSig))).toThrow(/does not verify/)
 
+  })
+})
+
+describe('alreadySigned', () => {
+  it('returns the transaction of a fully signed PSBT, null while any input is unsigned', () => {
+    const { psbtBytes, analysis } = build('p2wpkh', TWO_COINS, { change: { index: 0, value: 29_000n } })
+    expect(alreadySigned(psbtBytes)).toBeNull()
+    const halfSigned = mutate(psbtBytes, (tx) => tx.signIdx(keyAt(analysis.inputs[0].addressNList).privateKey!, 0))
+    expect(alreadySigned(halfSigned)).toBeNull()
+
+    const fin = finalizeSigned(analysis, signLikeDevice(analysis))
+    expect(alreadySigned(fin.psbtBytes)).toMatchObject({ txHex: fin.txHex, txid: fin.txid })
+    expect(alreadySigned(fin.psbtBase64)?.txid).toBe(fin.txid)
   })
 })

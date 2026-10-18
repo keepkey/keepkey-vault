@@ -255,6 +255,8 @@ import { versionCompare } from "../shared/firmware-versions"
 import { supportsZcashPrivacyBuild } from "./zcash-capability"
 import type { ChainDef } from "../shared/chains"
 import { BtcAccountManager } from "./btc-accounts"
+import { alreadySigned, analyze as analyzePsbt, finalizeSigned, toSignTx, type BtcPsbtScriptType, type PsbtAnalysis } from "./btc-psbt/psbt"
+import { formatPath, toStandardXpub } from "./btc-psbt/codec"
 import { unwrapUtxoDiscoveryKey, utxoDiscoveryKey } from "./btc-backend/types"
 import { marketPriceUsd } from "../shared/market-price"
 import { EvmAddressManager, evmAddressPath } from "./evm-addresses"
@@ -298,7 +300,7 @@ import { buildProviderBundle, buildStudioEvmSchema, parseProviderBundle, provide
 import { getTokenMetadata, broadcastEvmTx, verifyEvmSigner } from "./evm-rpc"
 import { evmSourceForChain } from "./pioneer-evm"
 import { deviceErrorMessage } from "../shared/device-error"
-import type { ChainBalance, TokenBalance, CustomToken, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, EvmAddressSet, Bip85SeedMeta, StakingPosition, SwapAsset, AuditToken, DefiPosition, RecentActivity, ClearSignEvent, ClearSignSolanaSchemaArtifact } from "../shared/types"
+import type { BtcPsbtReview, ChainBalance, TokenBalance, CustomToken, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, EvmAddressSet, Bip85SeedMeta, StakingPosition, SwapAsset, AuditToken, DefiPosition, RecentActivity, ClearSignEvent, ClearSignSolanaSchemaArtifact } from "../shared/types"
 import type { VaultRPCSchema } from "../shared/rpc-schema"
 import type { WipeReason } from "../shared/flash-wipe"
 import { collectAndAnalyzeWithGate, MAX_CHUNK_BYTES } from "./rng-audit"
@@ -904,6 +906,9 @@ function recordClearSignEvent(
 	return insertClearSignEvent(complete)
 }
 const btcAccounts = new BtcAccountManager()
+/** The one PSBT under review. btcPsbtSign signs only this, by id, in the wallet session it was checked in. */
+let pendingPsbt: { id: string; stem: string; analysis: PsbtAnalysis; deviceId: string; hidden: boolean; epoch: number; wallet: unknown; signing: boolean } | null = null
+let lastSignedPsbtPath: string | null = null
 const evmAddresses = new EvmAddressManager()
 // Last deviceId we saw reach 'ready'. The managers above are kept across
 // disconnect for the watch-only UI, so a device-to-device swap (deviceId
@@ -3559,6 +3564,92 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					)
 				}
 				return await engine.wallet.btcSignTx(params)
+			},
+			btcPsbtAnalyze: async (params): Promise<BtcPsbtReview> => {
+				pendingPsbt = null
+				// base64 of at most 1 MB, checked before decoding (decode() re-checks the bytes).
+				if (typeof params?.data !== 'string' || params.data.length > 1_398_104) throw new Error('PSBT is larger than 1 MB, refusing')
+				const bytes = new Uint8Array(Buffer.from(params.data, 'base64'))
+				const signed = alreadySigned(bytes)
+				if (signed) return { kind: 'signed', txid: signed.txid, txHex: signed.txHex, fee: signed.fee === null ? null : signed.fee.toString() }
+				if (!engine.wallet || engine.getDeviceState().state !== 'ready') throw new Error('Connect and unlock your KeepKey to check this PSBT')
+				const wallet = engine.wallet
+				const deviceId = engine.getDeviceState().deviceId || ''
+				const hidden = engine.isPassphraseWallet
+				const epoch = activitySessionEpoch
+				const { truth } = await ensureManagersForSeed('btcPsbtAnalyze')
+				if (!btcAccounts.isInitialized) await btcAccounts.initialize(wallet as any)
+				stampManagers(truth)
+				// Every loaded account the PSBT core can sign for (no taproot yet). Ownership is proven from these xpubs only.
+				const accounts = btcAccounts.getAllXpubMeta()
+					.filter(x => x.scriptType !== 'p2tr')
+					.map(x => ({ scriptType: x.scriptType as BtcPsbtScriptType, path: x.path, xpub: toStandardXpub(x.xpub).xpub }))
+				const analysis = analyzePsbt(bytes, accounts)
+				if (engine.wallet !== wallet || engine.isPassphraseWallet !== hidden || activitySessionEpoch !== epoch) {
+					throw new Error('The wallet changed while checking this PSBT. Drop it again.')
+				}
+				const stem = String(params.name || '').replace(/\.[^.]*$/, '').replace(/[^A-Za-z0-9_-]+/g, '_').slice(0, 64) || 'transaction'
+				const id = randomUUID()
+				pendingPsbt = { id, stem, analysis, deviceId, hidden, epoch, wallet, signing: false }
+				const a = analysis
+				return {
+					kind: 'review', id, version: a.version, locktime: a.locktime,
+					inputs: a.inputs.map(x => ({
+						txid: x.txid, vout: x.vout, sequence: x.sequence, amount: x.amount.toString(), amountVerified: x.amountVerified,
+						scriptType: x.scriptType, path: formatPath(x.addressNList), address: x.address,
+					})),
+					outputs: a.outputs.map(o => ({
+						index: o.index, amount: o.amount.toString(), address: o.address, opReturn: o.opReturn,
+						kind: o.kind, deviceWillShow: o.deviceWillShow, path: o.owner ? formatPath(o.owner.addressNList) : undefined,
+					})),
+					totalIn: a.totalIn.toString(), fee: a.fee.toString(), change: a.change.toString(), sent: a.sent.toString(),
+					deviceTotal: a.deviceTotal.toString(), estVsize: a.estVsize, satPerVbyte: a.satPerVbyte, feePercent: a.feePercent,
+					flags: a.flags,
+				}
+			},
+			btcPsbtSign: async (params) => {
+				const p = pendingPsbt
+				if (!p || p.id !== params?.id) throw new Error('This PSBT review has expired. Drop the file again.')
+				if (p.signing) throw new Error('Already signing this PSBT')
+				if (!engine.wallet || engine.wallet !== p.wallet || engine.getDeviceState().state !== 'ready'
+					|| (engine.getDeviceState().deviceId || '') !== p.deviceId || engine.isPassphraseWallet !== p.hidden || activitySessionEpoch !== p.epoch) {
+					pendingPsbt = null
+					throw new Error('The wallet changed since this PSBT was checked (device, passphrase or session). Drop the file again.')
+				}
+				p.signing = true
+				try {
+					const req = toSignTx(p.analysis)
+					const sign = () => engine.wallet!.btcSignTx(req as any)
+					let res: any
+					try {
+						res = engine.isEmulator
+							? await emuSigningOp(sign, {
+								operation: 'btcSignTx', chain: 'Bitcoin',
+								to: p.analysis.outputs.find(o => o.deviceWillShow === 'address')?.address,
+								value: `${p.analysis.sent} sats`, fee: `${p.analysis.fee} sats`,
+							})
+							: await sign()
+					} catch (e) {
+						const m = deviceErrorMessage(e)
+						// hdwallet replaces every device Failure (cancel included) with this one string.
+						throw new Error(m === 'Failed to sign BTC transaction' ? 'The KeepKey did not sign: cancelled on the device or rejected by the firmware.' : m)
+					}
+					// Field-by-field check against the PSBT plus signature verification, then BIP174 finalize.
+					const fin = finalizeSigned(p.analysis, res?.serializedTx ?? '')
+					const filePath = uniqueFilePath(path.join(os.homedir(), 'Downloads', `${p.stem}-signed.psbt`), fs.existsSync)
+					await Bun.write(filePath, fin.psbtBytes)
+					if (pendingPsbt === p) pendingPsbt = null
+					lastSignedPsbtPath = filePath
+					return { filePath, txHex: fin.txHex, txid: fin.txid }
+				} finally {
+					p.signing = false
+				}
+			},
+			btcPsbtShowFile: async () => {
+				if (!lastSignedPsbtPath) return
+				const cmd = process.platform === 'win32' ? 'explorer' : process.platform === 'linux' ? 'xdg-open' : 'open'
+				const args = process.platform === 'darwin' ? ['-R', lastSignedPsbtPath] : process.platform === 'linux' ? [path.dirname(lastSignedPsbtPath)] : [`/select,${lastSignedPsbtPath}`]
+				Bun.spawn([cmd, ...args])
 			},
 			ethSignTx: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')

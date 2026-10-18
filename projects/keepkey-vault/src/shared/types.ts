@@ -1528,6 +1528,35 @@ export interface BtcSignTxParams {
   locktime?: number
 }
 
+/** btcPsbtAnalyze result. Amounts are satoshis as decimal strings (bigint on the bun side). */
+export type BtcPsbtReview =
+  | { kind: 'signed'; txid: string; txHex: string; /** null = inputs not hash-verified, unknown */ fee: string | null }
+  | {
+      kind: 'review'
+      id: string
+      version: number
+      locktime: number
+      inputs: Array<{ txid: string; vout: number; sequence: number; amount: string; amountVerified: boolean; scriptType: string; path: string; address: string }>
+      outputs: Array<{
+        index: number
+        amount: string
+        address?: string
+        opReturn?: { hex: string; text: string }
+        kind: 'payment' | 'change' | 'own' | 'op-return'
+        deviceWillShow: 'hidden-change' | 'address' | 'op-return'
+        path?: string
+      }>
+      totalIn: string
+      fee: string
+      change: string
+      sent: string
+      deviceTotal: string
+      estVsize: number
+      satPerVbyte: number
+      feePercent: number | null
+      flags: { nonZeroLocktime: boolean; rbf: boolean; unusualVersion: boolean; noChange: boolean; multiAccount: boolean; unverifiedAmounts: boolean; ownOutputShown: boolean }
+    }
+
 export interface GetPublicKeysParams {
   paths: Array<{
     addressNList: number[]

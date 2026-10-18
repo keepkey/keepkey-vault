@@ -13,6 +13,7 @@ import { MobilePairingDialog } from "./components/MobilePairingDialog"
 import { MobilePanel } from "./components/MobilePanel"
 import { WalletConnectPanel } from "./components/WalletConnectPanel"
 import { FirmwareDropZone } from "./components/FirmwareDropZone"
+import { PsbtSignDialog } from "./components/PsbtSignDialog"
 import { SplashScreen } from "./components/SplashScreen"
 import { isBitcoinOnlyVariant } from "../shared/flags"
 import { useOnline } from "./hooks/useOnline"
@@ -878,8 +879,8 @@ function App() {
 		setWatchOnlyMode(false)
 	}, [])
 
-	// ── Firmware drop zone (always active) ──────────────────────────
-	const firmwareDropZone = <FirmwareDropZone />
+	// ── Firmware drop zone (always active) + the PSBT dialog it dispatches to ──
+	const firmwareDropZone = <><FirmwareDropZone /><PsbtSignDialog /></>
 
 	// ── Render phases ───────────────────────────────────────────────
 
