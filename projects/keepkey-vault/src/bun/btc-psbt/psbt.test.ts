@@ -5,7 +5,7 @@ import { base64, hex } from '@scure/base'
 import { sha256 } from '@noble/hashes/sha2'
 import { mnemonicToSeedSync } from 'bip39'
 import vectors from './bip174-vectors.json'
-import { formatPath } from './codec'
+import { b58check, formatPath } from './codec'
 import {
   MAX_MONEY, analyze, buildPsbt, decode, finalizeSigned, parseForBroadcast, toSignTx,
   type BtcPsbtAccount, type BtcPsbtScriptType, type PsbtAnalysis,
@@ -136,14 +136,13 @@ describe('round trip with the test mnemonic', () => {
     const { psbtBytes, psbtBase64, analysis } = build('p2wpkh', TWO_COINS, { change: { index: 0, value: 29_000n } })
     expect(base64.decode(psbtBase64)).toEqual(psbtBytes)
 
-    // Real master fingerprint + full path on inputs and change; global xpub carries the account origin.
+    // Real master fingerprint + full path on inputs and change; no global xpub (it would only leak the account).
     const tx = btc.Transaction.fromPSBT(psbtBytes)
     expect(tx.getInput(0).bip32Derivation![0][1]).toEqual({ fingerprint: 0x73c5da0a, path: [84 + H, H, H, 0, 0] })
     expect(tx.getOutput(1).bip32Derivation![0][1]).toEqual({ fingerprint: 0x73c5da0a, path: [84 + H, H, H, 1, 0] })
     expect(tx.getInput(0).nonWitnessUtxo).toBeDefined()
     expect(tx.getInput(0).witnessUtxo!.amount).toBe(50_000n)
-    const globalXpub = (tx as any).global.xpub
-    expect(globalXpub[0][1]).toEqual({ fingerprint: 0x73c5da0a, path: [84 + H, H, H] })
+    expect((tx as any).global.xpub).toBeUndefined()
 
     // BIP84 test vector addresses.
     expect(analysis.inputs[0].address).toBe('bc1qcr8te4kr609gcawutmrza0j4xv80jy8z306fyu')
@@ -189,6 +188,9 @@ describe('round trip with the test mnemonic', () => {
     const raw = parseForBroadcast(serializedTx)
     expect(raw.txid).toBe(fin.txid)
     expect(raw.fee).toBeNull()
+    // witness_utxo alone is editable after signing: fee unknown.
+    const noPrev = mutate(fin.psbtBytes, (t) => { for (let i = 0; i < 2; i++) t.updateInput(i, { nonWitnessUtxo: undefined }, true) })
+    expect(parseForBroadcast(noPrev).fee).toBeNull()
   })
 
   it('p2wpkh, Electrum relative paths when only the account xpub is known', () => {
@@ -197,7 +199,14 @@ describe('round trip with the test mnemonic', () => {
     const tx = btc.Transaction.fromPSBT(psbtBytes)
     expect(tx.getInput(1).bip32Derivation![0][1]).toEqual({ fingerprint: accountFp, path: [0, 1] })
     expect(tx.getOutput(1).bip32Derivation![0][1]).toEqual({ fingerprint: accountFp, path: [1, 0] })
-    expect((tx as any).global.xpub[0][1]).toEqual({ fingerprint: accountFp, path: [] })
+    // Electrum's form: depth, parent fingerprint and child number zeroed so depth == path length (BIP-174).
+    const [[xpubBytes, xpubOrigin]] = (tx as any).global.xpub
+    expect(xpubOrigin).toEqual({ fingerprint: accountFp, path: [] })
+    const real = HDKey.fromExtendedKey(acct.xpub as string)
+    const g = HDKey.fromExtendedKey(b58check.encode(xpubBytes))
+    expect([g.depth, g.parentFingerprint, g.index]).toEqual([xpubOrigin.path.length, 0, 0])
+    expect(g.publicKey).toEqual(real.publicKey)
+    expect(g.chainCode).toEqual(real.chainCode)
     expect(analysis.inputs[1].addressNList).toEqual([84 + H, H, H, 0, 1])
     expect(analysis.outputs[1].kind).toBe('change')
     expect(finalizeSigned(analysis, signLikeDevice(analysis)).txid).toHaveLength(64)
@@ -264,6 +273,24 @@ describe('refusals and device parity', () => {
     const other = fundingTx(scriptAt('p2wpkh', [84 + H, H, H, 0, 0]), 50_000n, 'not-a')
     const bad = mutate(psbtBytes, (tx) => tx.updateInput(0, { nonWitnessUtxo: other.hex }, true))
     expect(() => analyze(bad, [account('p2wpkh')])).toThrow(/does not hash/)
+
+    // btc-signer refuses these at decode; prevOut repeats the check as a backstop.
+    const w = btc.Transaction.fromPSBT(psbtBytes).getInput(0).witnessUtxo!
+    const lowAmount = mutate(psbtBytes, (tx) => tx.updateInput(0, { witnessUtxo: { ...w, amount: w.amount - 1n } }, true))
+    expect(() => analyze(lowAmount, [account('p2wpkh')])).toThrow(/witness UTXO disagrees|witnessUtxo different from nonWitnessUtxo/)
+    const otherScript = mutate(psbtBytes, (tx) => tx.updateInput(0, { witnessUtxo: { ...w, script: scriptAt('p2wpkh', [84 + H, H, H, 0, 1]) } }, true))
+    expect(() => analyze(otherScript, [account('p2wpkh')])).toThrow(/witness UTXO disagrees|witnessUtxo different from nonWitnessUtxo/)
+  })
+
+  it('refuses non-minimal pushes that btc-signer reads as a standard address', () => {
+    const { psbtBytes } = build('p2wpkh', TWO_COINS)
+    const h20 = '11'.repeat(20)
+    for (const s of [`004c14${h20}`, `76a94c14${h20}88ac`]) {
+      const bad = mutate(psbtBytes, (tx) => tx.addOutput({ script: hex.decode(s), amount: 1000n }))
+      expect(() => analyze(bad, [account('p2wpkh')])).toThrow(/non-canonical/)
+      // A raw tx paying it shows the script, never a look-alike address.
+      expect(parseForBroadcast(fundingTx(hex.decode(s), 1000n, s).hex).outputs[1]).toEqual({ amount: 1000n, scriptHex: s })
+    }
   })
 
   it('refuses a swapped change script', () => {

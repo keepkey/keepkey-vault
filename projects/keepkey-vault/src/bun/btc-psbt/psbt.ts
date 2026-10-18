@@ -180,6 +180,8 @@ function scriptToAddress(script: Uint8Array): string {
   if (out.type !== 'pkh' && out.type !== 'sh' && out.type !== 'wpkh' && out.type !== 'wsh' && out.type !== 'tr') {
     throw new Error(`unsupported output script (${out.type})`)
   }
+  // btc-signer accepts non-minimal pushes (00 4c 14 ..); the address would name a different script.
+  if (!eq(btc.OutScript.encode(out), script)) throw new Error('non-canonical output script')
   return btc.Address(btc.NETWORK).encode(out)
 }
 
@@ -651,11 +653,16 @@ export function buildPsbt(p: BuildPsbtParams): { psbtBytes: Uint8Array; psbtBase
       bip32Derivation: [[d.pubkey, origin(acct, chain, index)]],
     })
   }
-  // PSBT_GLOBAL_XPUB: standard xpub bytes; Electrum writes (account fp, empty path) when the root is unknown.
-  const raw = RawPSBTV0.decode(tx.toPSBT(0))
-  const xpubBytes = b58check.decode(acct.hd.publicExtendedKey)
-  raw.global.xpub = [[xpubBytes, acct.master !== undefined ? { fingerprint: acct.master, path: acct.path } : { fingerprint: acct.fp, path: [] }]]
-  const psbtBytes = RawPSBTV0.encode(raw)
+  // PSBT_GLOBAL_XPUB only for a bare xpub, as Electrum's get_xpub_to_be_used_in_partial_tx writes it:
+  // (account fp, empty path) with depth, parent fingerprint and child number zeroed so depth == path length.
+  let psbtBytes = tx.toPSBT(0)
+  if (acct.master === undefined) {
+    const raw = RawPSBTV0.decode(psbtBytes)
+    const xpubBytes = b58check.decode(acct.hd.publicExtendedKey).slice()
+    xpubBytes.fill(0, 4, 13)
+    raw.global.xpub = [[xpubBytes, { fingerprint: acct.fp, path: [] }]]
+    psbtBytes = RawPSBTV0.encode(raw)
+  }
 
   const analysis = analyze(psbtBytes, [p.account])
   if (p.change && !analysis.outputs.some((o) => o.kind === 'change')) {
@@ -687,11 +694,11 @@ export function parseForBroadcast(input: Uint8Array | string): { txHex: string; 
   if (!tx.isFinal) {
     try { tx.finalize() } catch (e) { throw new Error(`PSBT is not fully signed: ${msg(e)}`) }
   }
+  // Only hash-checked NON_WITNESS_UTXO amounts count: witness_utxo can be edited after signing.
   let totalIn: bigint | null = 0n
   for (let i = 0; i < tx.inputsLength && totalIn !== null; i++) {
-    const inp = tx.getInput(i)
-    if (inp.nonWitnessUtxo || inp.witnessUtxo) totalIn += prevOut(tx, i).amount
-    else totalIn = null
+    const prev = tx.getInput(i).nonWitnessUtxo ? prevOut(tx, i) : undefined
+    totalIn = prev?.verified ? totalIn + prev.amount : null
   }
   const outputs = Array.from({ length: tx.outputsLength }, (_, i) => {
     const o = tx.getOutput(i)
