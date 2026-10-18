@@ -5,7 +5,7 @@ import { FaPlus, FaEye, FaEyeSlash, FaShieldAlt, FaCheck, FaCopy, FaTag, FaChevr
 import { rpcRequest, onRpcMessage } from "../lib/rpc"
 import type { ChainDef } from "../../shared/chains"
 import { CHAINS, btcScriptTypeConfig, btcAccountPath, evmAddressPath, isChainSupported } from "../../shared/chains"
-import type { ChainBalance, TokenBalance, TokenVisibilityStatus, AppSettings, SwapAsset } from "../../shared/types"
+import type { ChainBalance, TokenBalance, TokenVisibilityStatus, AppSettings, SwapAsset, BtcWatchOnlyReceive } from "../../shared/types"
 import { VAULT_CHAIN_TO_THOR } from "../../shared/swap-discovery"
 import { getAssetIcon } from "../../shared/assetLookup"
 import { AnimatedUsd } from "./AnimatedUsd"
@@ -296,13 +296,8 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 	// Cancellation guard prevents stale responses from overwriting current address (Finding 5)
 	useEffect(() => {
 		if (!isBtc || !btcSelected) return
-		// Watch-only: no device — show the cached BTC address; can't derive per-index offline.
-		if (watchOnly) {
-			setAddress(balance?.address || null)
-			setDeriveError(balance?.address ? null : 'Address unavailable offline')
-			setLoading(false)
-			return
-		}
+		// Watch-only: the host derives the address from the saved xpub (effect below), never the connected device.
+		if (watchOnly) return
 		let cancelled = false
 		const path = btcSelected.fullPath
 		;(async () => {
@@ -341,7 +336,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 		?.xpubs.find(x => x.scriptType === (selectedBtcScriptType ?? 'p2wpkh'))
 		?.xpub
 	useEffect(() => {
-		if (!isBtc) return
+		if (!isBtc || watchOnly) return
 		setBtcChangeIndex(0)
 		setBtcAddressIndices(null)
 		if (!selectedBtcXpub) return
@@ -363,7 +358,41 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 		return () => { cancelled = true }
 	// Re-run after every successful balance sync. A receive address that was
 	// unused when the page opened may have become used since the prior scan.
-	}, [isBtc, selectedBtcScriptType, selectedBtcAccountIndex, selectedBtcXpub, lastSyncedAt])
+	}, [isBtc, selectedBtcScriptType, selectedBtcAccountIndex, selectedBtcXpub, lastSyncedAt, watchOnly])
+
+	// Watch-only Bitcoin: next unused receive address derived on the host from the saved xpub
+	// (index from the active backend). An imported key stays "not verified" until a KeepKey that
+	// holds it is connected; only then is "Show on KeepKey" offered.
+	const [woReceive, setWoReceive] = useState<BtcWatchOnlyReceive | null>(null)
+	const [woDeviceMatch, setWoDeviceMatch] = useState(false)
+	const [woAck, setWoAck] = useState(false)
+	useEffect(() => { setWoAck(false) }, [watchOnlyDeviceId])
+	useEffect(() => {
+		if (!watchOnly || !isBtc) return
+		let cancelled = false
+		setLoading(true)
+		setDeriveError(null)
+		setAddress(null)
+		;(async () => {
+			try {
+				// Asked first: a match also marks an imported key verified.
+				const match = watchOnlyDeviceId
+					? (await rpcRequest<{ match: boolean }>('btcWatchOnlyDeviceMatch', { deviceId: watchOnlyDeviceId }, 60000).catch(() => ({ match: false }))).match
+					: false
+				const r = await rpcRequest<BtcWatchOnlyReceive>('btcWatchOnlyReceive', watchOnlyDeviceId ? { deviceId: watchOnlyDeviceId } : undefined, 60000)
+				if (cancelled) return
+				setWoDeviceMatch(match)
+				setWoReceive(r)
+				setAddress(r.address)
+				setCurrentPath(r.path)
+			} catch (e: any) {
+				if (!cancelled) setDeriveError(e?.message || 'Receive address unavailable')
+			}
+			if (!cancelled) setLoading(false)
+		})()
+		return () => { cancelled = true }
+	}, [watchOnly, isBtc, watchOnlyDeviceId, lastSyncedAt])
+	const woUnverified = watchOnly && isBtc && !!woReceive && !woReceive.verified
 
 	// When toggling Receive/Change, set index to the active backend's cached value.
 	const handleBtcChangeIndex = useCallback((v: 0 | 1) => {
@@ -1313,15 +1342,32 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 					) : isHive ? (
 						<HiveAccountPanel activeKey={address} color={chain.color} loading={loading} deriveError={deriveError} onRetryDerive={deriveAddress} refreshNonce={refreshNonce} />
 					) : (
-						<ReceiveView
+						<>
+						{woUnverified && (
+							<Box w="100%" mb="4" p="3" borderRadius="10px" border="1px solid rgba(245,101,101,0.45)" bg="rgba(245,101,101,0.08)">
+								<Text fontSize="13px" fontWeight="700" color="red.300">{t("watchOnlyNotVerifiedTitle", { defaultValue: "Addresses NOT verified on a KeepKey" })}</Text>
+								<Text fontSize="12px" color="var(--text-2)" mt="1">
+									{t("watchOnlyNotVerifiedBody", { defaultValue: "This wallet was imported from a key, not read from your KeepKey. If that key was swapped or mistyped, coins sent here are not yours. Connect the KeepKey that holds it to verify." })}
+								</Text>
+								{!woAck && (
+									<Button size="xs" mt="2" variant="outline" color="red.200" borderColor="rgba(245,101,101,0.45)" onClick={() => setWoAck(true)}>
+										{t("watchOnlyShowUnverified", { defaultValue: "I understand, show the address" })}
+									</Button>
+								)}
+							</Box>
+						)}
+						{watchOnly && isBtc && woReceive?.warning && (
+							<Text fontSize="11px" color="orange.300" lineHeight="1.45" mb="3">{woReceive.warning}</Text>
+						)}
+						{!(woUnverified && !woAck) && <ReceiveView
 							chain={chain}
 							address={address}
 							loading={loading || btcAddressDiscoveryLoading}
 							error={deriveError}
-							currentPath={isBtc && btcSelected ? btcSelected.fullPath : currentPath}
+							currentPath={isBtc && btcSelected && !watchOnly ? btcSelected.fullPath : currentPath}
 							onDerive={deriveAddress}
-							scriptType={effectiveScriptType}
-							xpub={isBtc ? btcSelected?.xpubData?.xpub : utxoXpub ?? undefined}
+							scriptType={watchOnly && isBtc ? woReceive?.scriptType : effectiveScriptType}
+							xpub={isBtc ? (watchOnly ? woReceive?.xpub : btcSelected?.xpubData?.xpub) : utxoXpub ?? undefined}
 							isBtc={isBtc}
 							btcChangeIndex={btcChangeIndex}
 							btcAddressIndex={btcAddressIndex}
@@ -1332,7 +1378,19 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 							tonBounceable={tonBounceable}
 							onTonBounceableChange={(v) => { setTonBounceable(v); deriveAddress(undefined, v) }}
 							watchOnly={watchOnly}
-						/>
+							onShowOnDevice={watchOnly && isBtc && woDeviceMatch && woReceive && watchOnlyDeviceId
+								? async () => {
+									try {
+										await rpcRequest('btcWatchOnlyShowAddress', { deviceId: watchOnlyDeviceId, index: woReceive.path[4] }, 120000)
+									} catch (e: any) {
+										// A device that shows another address makes the host one suspect: hide it and say why.
+										setAddress(null)
+										setDeriveError(e?.message || 'Could not show the address on the KeepKey')
+									}
+								}
+								: undefined}
+						/>}
+						</>
 					)}
 				</Box>
 

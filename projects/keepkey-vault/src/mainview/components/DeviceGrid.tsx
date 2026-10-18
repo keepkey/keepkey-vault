@@ -14,6 +14,7 @@ import { rpcRequest, onRpcMessage } from "../lib/rpc"
 import type { RegisteredDevice, EmulatorStatus, EmulatorWalletInfo } from "../../shared/types"
 import { emulatorWalletDetail } from "../../shared/emulatorWallets"
 import { EmulatorWalletChooser } from "./EmulatorWalletChooser"
+import { WATCH_ONLY_IMPORT_EVENT } from "./WatchOnlyImportDialog"
 
 interface DeviceGridProps {
 	onViewPortfolio: (deviceId: string, label: string) => void
@@ -272,7 +273,7 @@ export function DeviceGrid({ onViewPortfolio, onReady, emulatorEnabled = false }
 										{d.label || "KeepKey"}
 									</Text>
 									<Text fontSize="10px" color="var(--text-3)" fontFamily="mono" letterSpacing="0.02em">
-										fw {d.firmwareVer} · {timeAgo(d.updatedAt)}
+										{d.imported ? (d.verified ? "verified on a KeepKey" : "not verified on a KeepKey") : `fw ${d.firmwareVer}`} · {timeAgo(d.updatedAt)}
 									</Text>
 								</Box>
 							</Flex>
@@ -341,6 +342,19 @@ export function DeviceGrid({ onViewPortfolio, onReady, emulatorEnabled = false }
 					onDelete={handleDeleteEmu}
 				/>
 			)}
+
+			{/* Watch-only import for a machine that never saw the KeepKey */}
+			<Flex justify="center" mt="4">
+				<Box
+					as="button"
+					onClick={() => window.dispatchEvent(new Event(WATCH_ONLY_IMPORT_EVENT))}
+					px="3" py="1.5" borderRadius="10px" fontSize="11px" fontWeight="600" letterSpacing="0.04em"
+					color="var(--gold)" bg="rgba(233,196,106,0.10)" border="1px solid rgba(233,196,106,0.30)"
+					cursor="pointer" _hover={{ bg: "rgba(233,196,106,0.20)" }}
+				>
+					Import watch-only (Electrum file or xpub)
+				</Box>
+			</Flex>
 
 			{/* Grand total + eyeball toggle */}
 			{grandTotal > 0 && (

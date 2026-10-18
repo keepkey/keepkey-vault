@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { looksLikePsbt, looksLikeRawTxHex } from './psbt-sniff'
+import { looksLikePsbt, looksLikeRawTxHex, looksLikeWatchOnlyImport } from './psbt-sniff'
 
 const enc = (s: string) => new TextEncoder().encode(s)
 
@@ -32,5 +32,22 @@ describe('looksLikeRawTxHex', () => {
 		expect(looksLikeRawTxHex(new Uint8Array([0x02, 0x00, 0x00, 0x00, 0x01]))).toBe(false)
 		expect(looksLikeRawTxHex(enc('02000000 is not a tx'))).toBe(false)
 		expect(looksLikeRawTxHex(enc('03000000aabbccdd'))).toBe(false)
+	})
+})
+
+describe('looksLikeWatchOnlyImport', () => {
+	it('recognises Electrum wallet files and extended keys', () => {
+		expect(looksLikeWatchOnlyImport(enc('{\n    "addr_history": {'))).toBe(true)
+		expect(looksLikeWatchOnlyImport(enc('{"wallet_type": "standard"}'))).toBe(true)
+		expect(looksLikeWatchOnlyImport(enc('QklFMQPe3n'))).toBe(true)
+		expect(looksLikeWatchOnlyImport(enc('zpub6rFR7y4Q2AijBEqTUquhVz398htDFrtymD9x'))).toBe(true)
+		expect(looksLikeWatchOnlyImport(enc('\n xprv9s21ZrQH143K3QTDL4LXw2F7HEK3wJUD2nW2'))).toBe(true)
+	})
+
+	it('leaves PSBTs, raw transactions and old Electrum .txn JSON alone', () => {
+		expect(looksLikeWatchOnlyImport(enc('cHNidP8BAHUCAAAAASaBcTce3/KF6Tet'))).toBe(false)
+		expect(looksLikeWatchOnlyImport(enc('0200000001268171371edff285e937'))).toBe(false)
+		expect(looksLikeWatchOnlyImport(enc('{"complete": true, "final": false, "hex": "0200'))).toBe(false)
+		expect(looksLikeWatchOnlyImport(enc('xpub'))).toBe(false)
 	})
 })

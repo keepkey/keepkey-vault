@@ -255,8 +255,9 @@ import { versionCompare } from "../shared/firmware-versions"
 import { supportsZcashPrivacyBuild } from "./zcash-capability"
 import type { ChainDef } from "../shared/chains"
 import { BtcAccountManager } from "./btc-accounts"
-import { alreadySigned, analyze as analyzePsbt, feeFromPrevTxs, finalizeSigned, parseForBroadcast, toSignTx, type BtcPsbtScriptType, type PsbtAnalysis } from "./btc-psbt/psbt"
-import { accountPathFromXpub, formatPath, toSlip132, toStandardXpub, writeElectrumWallet } from "./btc-psbt/codec"
+import { alreadySigned, analyze as analyzePsbt, deriveAddress as deriveBtcAddress, feeFromPrevTxs, finalizeSigned, parseForBroadcast, toSignTx, type BtcPsbtScriptType, type PsbtAnalysis } from "./btc-psbt/psbt"
+import { accountPathFromXpub, formatPath, masterFingerprintFromDepth1Xpub, toSlip132, toStandardXpub, writeElectrumWallet } from "./btc-psbt/codec"
+import { parseWatchOnlyImport } from "./btc-psbt/watch-only-import"
 import { buildWatchOnlyPsbt } from "./btc-psbt/watch-only-build"
 import { unwrapUtxoDiscoveryKey, utxoDiscoveryKey } from "./btc-backend/types"
 import { marketPriceUsd } from "../shared/market-price"
@@ -269,7 +270,7 @@ import { classifyEffectExposure, observeEvmCall, observeEvmTypedData, observeMal
 import { getClearSignProtectionCaseStudies } from "./clearsign-case-studies"
 import { getEvmSimulationEndpoint, getEvmSimulationRpcUrls } from "./evm-simulation-config"
 import { addContractFacts } from "./contract-facts"
-import { initDb, getDb, factoryResetDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, setCustomTokenIcon as dbSetCustomTokenIcon, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility, insertApiLog, getApiLogs, clearApiLogs, setCachedBalances, getCachedBalances, updateCachedBalance, clearBalances, deleteCachedChainBalance, saveCachedPubkey, getLatestDeviceSnapshot, getCachedPubkeys, saveReport, getReportsList, getReportById, deleteReport, reportExists, getSwapHistory, getSwapHistoryStats, getSwapHistoryByTxid, getBip85Seeds, saveBip85Seed, deleteBip85Seed, clearCachedPubkeys, getRecentActivityFromLog, getPioneerServers, addPioneerServerDb, removePioneerServerDb, syncOwnAddressBook, recordOutbound, getAddressBookList, updateAddressBookEntry, deleteAddressBookEntry, getAddressBookHistory, getDeviceLabelMap, getBalancesForOwnSeed, addExternalEntry, matchAddressBook, insertClearSignEvent, getClearSignEvents, insertClearSignObservation, finalizeClearSignObservation, authenticateClearSignObservation, refuseClearSignObservationDefinition, getClearSignCoverageSummary, getClearSignAuditJobs, enqueueClearSignAuditDemand, getSignedTxReview, setDeviceMasterFingerprint, getDeviceSnapshotById } from "./db"
+import { initDb, getDb, factoryResetDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, setCustomTokenIcon as dbSetCustomTokenIcon, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility, insertApiLog, getApiLogs, clearApiLogs, setCachedBalances, getCachedBalances, updateCachedBalance, clearBalances, deleteCachedChainBalance, saveCachedPubkey, getLatestDeviceSnapshot, getCachedPubkeys, saveReport, getReportsList, getReportById, deleteReport, reportExists, getSwapHistory, getSwapHistoryStats, getSwapHistoryByTxid, getBip85Seeds, saveBip85Seed, deleteBip85Seed, clearCachedPubkeys, getRecentActivityFromLog, getPioneerServers, addPioneerServerDb, removePioneerServerDb, syncOwnAddressBook, recordOutbound, getAddressBookList, updateAddressBookEntry, deleteAddressBookEntry, getAddressBookHistory, getDeviceLabelMap, getBalancesForOwnSeed, addExternalEntry, matchAddressBook, insertClearSignEvent, getClearSignEvents, insertClearSignObservation, finalizeClearSignObservation, authenticateClearSignObservation, refuseClearSignObservationDefinition, getClearSignCoverageSummary, getClearSignAuditJobs, enqueueClearSignAuditDemand, getSignedTxReview, setDeviceMasterFingerprint, getDeviceSnapshotById, getAllDeviceSnapshots, saveImportedWatchOnlyWallet, setImportedWalletVerified } from "./db"
 import { lookupEvmTx, recordSignedEvmTx, txDetails, walletBook } from "./signed-tx-review"
 import { getCentralAssetAuditHistory, getCentralClearSignStatus, getCentralContractAudit, submitCentralAssetReview, submitCentralContractReview } from './clearsign-central-client'
 import { buildCentralAssetReview, buildCentralContractReview } from './clearsign-central-review'
@@ -301,7 +302,7 @@ import { buildProviderBundle, buildStudioEvmSchema, parseProviderBundle, provide
 import { getTokenMetadata, broadcastEvmTx, verifyEvmSigner } from "./evm-rpc"
 import { evmSourceForChain } from "./pioneer-evm"
 import { deviceErrorMessage } from "../shared/device-error"
-import type { BtcBroadcastReview, BtcPsbtReview, BtcWatchOnlyAccounts, BtcWatchOnlyPsbt, ChainBalance, TokenBalance, CustomToken, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, EvmAddressSet, Bip85SeedMeta, StakingPosition, SwapAsset, AuditToken, DefiPosition, RecentActivity, ClearSignEvent, ClearSignSolanaSchemaArtifact } from "../shared/types"
+import type { BtcBroadcastReview, BtcPsbtReview, BtcWatchOnlyAccounts, BtcWatchOnlyImport, BtcWatchOnlyPsbt, BtcWatchOnlyReceive, ChainBalance, TokenBalance, CustomToken, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, EvmAddressSet, Bip85SeedMeta, StakingPosition, SwapAsset, AuditToken, DefiPosition, RecentActivity, ClearSignEvent, ClearSignSolanaSchemaArtifact } from "../shared/types"
 import type { VaultRPCSchema } from "../shared/rpc-schema"
 import type { WipeReason } from "../shared/flash-wipe"
 import { collectAndAnalyzeWithGate, MAX_CHUNK_BYTES } from "./rng-audit"
@@ -907,6 +908,8 @@ function recordClearSignEvent(
 	return insertClearSignEvent(complete)
 }
 const btcAccounts = new BtcAccountManager()
+/** A Bitcoin-only saved wallet is on screen in watch-only (watchOnlySetView): the Bitcoin-only RPC boundary applies. */
+let watchOnlyViewBtcOnly = false
 /** The one PSBT under review. btcPsbtSign signs only this, by id, in the wallet session it was checked in. */
 let pendingPsbt: { id: string; stem: string; analysis: PsbtAnalysis; deviceId: string; hidden: boolean; epoch: number; wallet: unknown; signing: boolean } | null = null
 let lastSignedPsbtPath: string | null = null
@@ -1504,6 +1507,77 @@ function getWatchOnlyBtcAccounts(deviceId?: string) {
 		}
 	})
 	return { snapshot, accounts }
+}
+
+/** Imported watch-only wallets (btcWatchOnlyImport) carry these flags in their synthetic snapshot. */
+function watchOnlyImportFlags(featuresJson: string): { imported: boolean; verified: boolean } {
+	try {
+		const f = JSON.parse(featuresJson)
+		return { imported: f?.watchOnlyImport === true, verified: f?.deviceVerified === true }
+	} catch { return { imported: false, verified: false } }
+}
+
+/** The account watch-only receive uses: native segwit account 0 when saved, else the only one. */
+function watchOnlyReceiveAccount(deviceId?: string) {
+	const { snapshot, accounts } = getWatchOnlyBtcAccounts(deviceId)
+	const account = accounts.find(a => a.scriptType === 'p2wpkh' && a.path[2] === 0x80000000) || accounts[0]
+	if (!account) throw new Error('No Bitcoin account is saved for this wallet')
+	return { snapshot, account }
+}
+
+/** Does the connected, unlocked KeepKey hold this saved wallet? A device's own snapshot matches by
+ *  device id. An imported key matches only if the device returns the same account xpub at its path,
+ *  which also marks the import verified (and stores the real master fingerprint, standard wallets only). */
+async function watchOnlyDeviceMatch(deviceId: string): Promise<boolean> {
+	const snapshot = getDeviceSnapshotById(deviceId)
+	const state = engine.getDeviceState()
+	if (!snapshot || !engine.wallet || state.state !== 'ready') return false
+	if (!watchOnlyImportFlags(snapshot.featuresJson).imported) return state.deviceId === deviceId
+	const { account } = watchOnlyReceiveAccount(deviceId)
+	const res = await engine.wallet.getPublicKeys([
+		{ addressNList: account.path, coin: 'Bitcoin', scriptType: account.scriptType, curve: 'secp256k1', showDisplay: false },
+		{ addressNList: [84 + 0x80000000], coin: 'Bitcoin', scriptType: 'p2wpkh', curve: 'secp256k1', showDisplay: false },
+	] as any)
+	const got = res?.[0]?.xpub
+	if (!got || toStandardXpub(got).xpub !== account.xpub) return false
+	let masterFp: string | null = null
+	try {
+		if (!engine.isPassphraseWallet && res?.[1]?.xpub) masterFp = Buffer.from(masterFingerprintFromDepth1Xpub(res[1].xpub)).toString('hex')
+	} catch { /* fingerprint stays as imported */ }
+	setImportedWalletVerified(deviceId, masterFp)
+	return true
+}
+
+/** Next unused receive/change index from the active BTC backend; unavailable says so, never a silent guess. */
+async function btcAddressIndicesFor(xpub: string, scriptType?: string) {
+	const backend = getBtcBackend()
+	if (!backend.addressIndices) {
+		const mode = backend.kind === 'core' ? 'Bitcoin Core scantxoutset' : 'offline mode'
+		return {
+			receiveIndex: 0,
+			changeIndex: 0,
+			discoveryAvailable: false,
+			source: backend.kind,
+			warning: `${mode} cannot prove which addresses were previously used. Index 0 is shown as a manual starting point; verify or select the intended index before receiving.`,
+		}
+	}
+	try {
+		const btcNetworkId = CHAINS.find(c => c.id === 'bitcoin')!.networkId
+		return await withTimeout(
+			backend.addressIndices({ network: btcNetworkId, xpub, scriptType }),
+			PIONEER_TIMEOUT_MS,
+			`${backend.kind} address discovery`,
+		)
+	} catch (e: any) {
+		console.warn(`[getBtcAddressIndices] ${backend.kind} discovery failed:`, e.message)
+		return {
+			receiveIndex: 0,
+			changeIndex: 0,
+			discoveryAvailable: false,
+			source: backend.kind,
+			warning: `Address history lookup failed. Index 0 is not proven unused; verify or select the intended index before receiving.`,
+		}
+	}
 }
 
 async function getWatchOnlyHistoryContext(deviceId?: string) {
@@ -2780,7 +2854,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 		requests: enforceBitcoinOnlyRpcBoundary(
 			// Runs ahead of every UI request, so it is also where the UI's first
 			// contact is recorded (see ui-watchdog.ts).
-			() => { uiWatchdog.seen(); return isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant) },
+			// A Bitcoin-only watch-only wallet on screen is held to the same boundary as a Bitcoin-only device.
+			() => { uiWatchdog.seen(); return isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant) || watchOnlyViewBtcOnly },
 			{
 			// ── Device lifecycle ──────────────────────────────────────
 			getDeviceState: async () => engine.getDeviceState(),
@@ -3701,6 +3776,62 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					backend: getBtcBackend().kind,
 					accounts: accounts.map(a => ({ scriptType: a.scriptType, accountIndex: a.path[2] - 0x80000000, path: formatPath(a.path) })),
 				}
+			},
+			/** Import an Electrum wallet file or a bare x/y/zpub as a Bitcoin-only watch-only wallet (no device).
+			 *  Without save: a preview. save: requires the path confirmed when the import doesn't state it. */
+			btcWatchOnlyImport: async (params): Promise<BtcWatchOnlyImport> => {
+				// 10 MB: Electrum files carry address history. Base64 length checked before decoding.
+				if ((params?.data?.length ?? 0) > 10_485_760 || (params?.fileBytes?.length ?? 0) > 13_981_016) throw new Error('File is larger than 10 MB, refusing')
+				const text = typeof params?.data === 'string' ? params.data
+					: typeof params?.fileBytes === 'string' ? Buffer.from(params.fileBytes, 'base64').toString('utf8') : ''
+				const w = parseWatchOnlyImport(text, { fingerprint: params?.fingerprint, path: params?.path })
+				// Never a device's name: an Electrum file's own label (often "KeepKey") is ignored.
+				const name = String(params?.label ?? '').replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 40)
+				const label = `Imported · ${name || `Bitcoin ${formatPath(w.path)}`}`
+				const preview: BtcWatchOnlyImport = {
+					id: w.id, label, source: w.source, scriptType: w.scriptType, key: w.key, path: formatPath(w.path),
+					pathAssumed: w.pathAssumed, fingerprint: w.fingerprint, saved: false,
+				}
+				if (!params?.save) return preview
+				if (w.pathAssumed && !params.path) throw new Error('Confirm the derivation path first')
+				saveImportedWatchOnlyWallet({
+					id: w.id, label, masterFp: w.fingerprint, path: formatPath(w.path), key: w.key, scriptType: w.scriptType,
+					// KeepKeyBTC: the Bitcoin-only filter, node routing and RPC boundary apply as for a Bitcoin-only device.
+					featuresJson: JSON.stringify({ firmwareVariant: 'KeepKeyBTC', watchOnlyImport: true, deviceVerified: false, source: w.source }),
+				})
+				return { ...preview, saved: true }
+			},
+			/** Does the connected KeepKey hold this saved wallet? (Imported keys: asks the device, marks verified.) */
+			btcWatchOnlyDeviceMatch: async (params) => {
+				if (!params?.deviceId) return { match: false }
+				return { match: await watchOnlyDeviceMatch(params.deviceId) }
+			},
+			/** Next unused receive address, derived on the host from the saved xpub (index from getBtcBackend()). */
+			btcWatchOnlyReceive: async (params): Promise<BtcWatchOnlyReceive> => {
+				const { snapshot, account } = watchOnlyReceiveAccount(params?.deviceId)
+				const key = toSlip132(account.xpub, account.scriptType)
+				const indices = await btcAddressIndicesFor(key, account.scriptType)
+				const flags = watchOnlyImportFlags(snapshot.featuresJson)
+				return {
+					address: deriveBtcAddress(account, 0, indices.receiveIndex),
+					path: [...account.path, 0, indices.receiveIndex],
+					scriptType: account.scriptType,
+					xpub: key,
+					warning: indices.discoveryAvailable ? undefined : indices.warning,
+					verified: !flags.imported || flags.verified,
+				}
+			},
+			/** Show a watch-only receive address on the KeepKey, only if the connected device holds this wallet. */
+			btcWatchOnlyShowAddress: async (params) => {
+				const deviceId = String(params?.deviceId || '')
+				const index = Number(params?.index)
+				if (!(await watchOnlyDeviceMatch(deviceId))) throw new Error('The connected KeepKey does not hold this wallet')
+				const { account } = watchOnlyReceiveAccount(deviceId)
+				const address = deriveBtcAddress(account, 0, index)
+				const res = await engine.wallet!.btcGetAddress({ addressNList: [...account.path, 0, index], coin: 'Bitcoin', scriptType: account.scriptType, showDisplay: true } as any)
+				const shown = typeof res === 'string' ? res : (res as any)?.address
+				if (shown !== address) throw new Error(`The KeepKey showed ${shown}, not ${address}. Do not use this address.`)
+				return { address }
 			},
 			btcWatchOnlyBuildPsbt: async (params): Promise<BtcWatchOnlyPsbt> => {
 				requireOnline('Create PSBT')
@@ -6589,34 +6720,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			getBtcAddressIndices: async (params) => {
 				const { xpub, scriptType } = params
 				if (!xpub) throw new Error('xpub required')
-				const backend = getBtcBackend()
-				if (!backend.addressIndices) {
-					const mode = backend.kind === 'core' ? 'Bitcoin Core scantxoutset' : 'offline mode'
-					return {
-						receiveIndex: 0,
-						changeIndex: 0,
-						discoveryAvailable: false,
-						source: backend.kind,
-						warning: `${mode} cannot prove which addresses were previously used. Index 0 is shown as a manual starting point; verify or select the intended index before receiving.`,
-					}
-				}
-				try {
-					const btcNetworkId = CHAINS.find(c => c.id === 'bitcoin')!.networkId
-					return await withTimeout(
-						backend.addressIndices({ network: btcNetworkId, xpub, scriptType }),
-						PIONEER_TIMEOUT_MS,
-						`${backend.kind} address discovery`,
-					)
-				} catch (e: any) {
-					console.warn(`[getBtcAddressIndices] ${backend.kind} discovery failed:`, e.message)
-					return {
-						receiveIndex: 0,
-						changeIndex: 0,
-						discoveryAvailable: false,
-						source: backend.kind,
-						warning: `Address history lookup failed. Index 0 is not proven unused; verify or select the intended index before receiving.`,
-					}
-				}
+				return await btcAddressIndicesFor(xpub, scriptType)
 			},
 
 			// ── EVM multi-address ────────────────────────────────────
@@ -8617,7 +8721,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			// user's own node, exactly like a connected Bitcoin-only device.
 			watchOnlySetView: async (params): Promise<void> => {
 				const snap = params?.active ? (params.deviceId ? getDeviceSnapshotById(params.deviceId) : getLatestDeviceSnapshot()) : null
-				setBtcNodeWatchOnlyEligible(!!snap && bitcoinOnlyWatchOnlyScope(false, snap.featuresJson))
+				watchOnlyViewBtcOnly = !!snap && bitcoinOnlyWatchOnlyScope(false, snap.featuresJson)
+				setBtcNodeWatchOnlyEligible(watchOnlyViewBtcOnly)
 			},
 			checkWatchOnlyCache: async () => {
 				const snap = getLatestDeviceSnapshot()
@@ -10277,6 +10382,20 @@ btcAccounts.on('change', (set) => {
 	const deviceId = engine.getDeviceState().deviceId
 	if (btcAccounts.masterFingerprint && deviceId && !engine.isPassphraseWallet && !engine.isEmulator) {
 		setDeviceMasterFingerprint(deviceId, btcAccounts.masterFingerprint)
+	}
+	// An imported watch-only key that this KeepKey returns at the same path is verified.
+	// Never throws: this listener runs inside the account fetch.
+	for (const snap of getAllDeviceSnapshots()) {
+		if (!snap.imported || snap.verified) continue
+		try {
+			const { account } = watchOnlyReceiveAccount(snap.deviceId)
+			const meta = btcAccounts.getAllXpubMeta().find(x => x.scriptType === account.scriptType && formatPath(x.path) === formatPath(account.path))
+			if (meta && toStandardXpub(meta.xpub).xpub === account.xpub) {
+				setImportedWalletVerified(snap.deviceId, engine.isPassphraseWallet ? null : btcAccounts.masterFingerprint)
+			}
+		} catch (e: any) {
+			console.warn(`[watch-only] verification skipped for ${snap.deviceId}:`, e?.message || e)
+		}
 	}
 })
 

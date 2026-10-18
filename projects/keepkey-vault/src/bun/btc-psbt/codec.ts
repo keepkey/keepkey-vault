@@ -80,7 +80,7 @@ export function formatPath(path: number[]): string {
   return 'm/' + path.map((p) => (p >= H ? `${p - H}'` : `${p}`)).join('/')
 }
 
-function parsePath(s: string): number[] {
+export function parsePath(s: string): number[] {
   if (!/^m(\/\d+['hH]?)+$/.test(s)) throw new Error(`Unreadable derivation path: ${s}`)
   return s.slice(2).split('/').map((p) => {
     const n = parseInt(p, 10)

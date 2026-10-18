@@ -2200,7 +2200,8 @@ export function getLatestDeviceSnapshot(): { deviceId: string; label: string; fi
   try {
     if (!db) return null
     const row = db.query(
-      'SELECT device_id, label, firmware_ver, features_json, updated_at FROM device_snapshot ORDER BY updated_at DESC LIMIT 1'
+      // Imported watch-only wallets ('wo:') are not devices: "latest" stays the last KeepKey seen.
+      "SELECT device_id, label, firmware_ver, features_json, updated_at FROM device_snapshot WHERE device_id NOT LIKE 'wo:%' ORDER BY updated_at DESC LIMIT 1"
     ).get() as { device_id: string; label: string; firmware_ver: string; features_json: string; updated_at: number } | null
     if (!row) return null
     return { deviceId: row.device_id, label: row.label, firmwareVer: row.firmware_ver, featuresJson: row.features_json, updatedAt: row.updated_at }
@@ -2244,18 +2245,23 @@ export function getSnapshotFeaturesByFirmwareHash(firmwareHash: string): any | n
   }
 }
 
-export function getAllDeviceSnapshots():Array<{ deviceId: string; label: string; firmwareVer: string; updatedAt: number; totalUsd: number }> {
+export function getAllDeviceSnapshots():Array<{ deviceId: string; label: string; firmwareVer: string; updatedAt: number; totalUsd: number; imported?: boolean; verified?: boolean }> {
   try {
     if (!db) return []
     const rows = db.query(`
       SELECT s.device_id, s.label, s.firmware_ver, s.updated_at,
-             COALESCE(SUM(b.balance_usd), 0) AS total_usd
+             COALESCE(SUM(b.balance_usd), 0) AS total_usd,
+             json_extract(s.features_json, '$.watchOnlyImport') AS imported,
+             json_extract(s.features_json, '$.deviceVerified') AS verified
       FROM device_snapshot s
       LEFT JOIN balances b ON b.device_id = s.device_id
       GROUP BY s.device_id
       ORDER BY s.updated_at DESC
-    `).all() as Array<{ device_id: string; label: string; firmware_ver: string; updated_at: number; total_usd: number }>
-    return rows.map(r => ({ deviceId: r.device_id, label: r.label, firmwareVer: r.firmware_ver, updatedAt: r.updated_at, totalUsd: r.total_usd }))
+    `).all() as Array<{ device_id: string; label: string; firmware_ver: string; updated_at: number; total_usd: number; imported: number | null; verified: number | null }>
+    return rows.map(r => ({
+      deviceId: r.device_id, label: r.label, firmwareVer: r.firmware_ver, updatedAt: r.updated_at, totalUsd: r.total_usd,
+      ...(r.imported ? { imported: true, verified: !!r.verified } : {}),
+    }))
   } catch (e: any) {
     console.warn('[db] getAllDeviceSnapshots failed:', e.message)
     return []
@@ -2274,8 +2280,39 @@ export function deleteDeviceSnapshot(deviceId: string) {
     db.run('DELETE FROM addressbook WHERE device_id = ?', [deviceId])
     db.run('DELETE FROM addressbook_tx WHERE device_id = ?', [deviceId])
     db.run('DELETE FROM signed_tx_review WHERE device_id = ?', [deviceId])
+    // Ledger rows are keyed by device id or by a wallet id that starts with it ("<id>:...").
+    const owned = `(device_id = ?1 OR substr(device_id, 1, length(?1) + 1) = ?1 || ':')`
+    db.run(`DELETE FROM postings WHERE journal_entry_id IN (SELECT id FROM journal_entries WHERE ${owned})`, [deviceId])
+    db.run(`DELETE FROM journal_entries WHERE ${owned}`, [deviceId])
+    db.run(`DELETE FROM ledger_accounts WHERE ${owned}`, [deviceId])
+    db.run(`DELETE FROM ledger_checkpoints WHERE ${owned}`, [deviceId])
   } catch (e: any) {
     console.warn('[db] deleteDeviceSnapshot failed:', e.message)
+  }
+}
+
+/** Imported watch-only wallet (no device): synthetic snapshot + its Bitcoin key row, in one transaction. */
+export function saveImportedWatchOnlyWallet(w: { id: string; label: string; featuresJson: string; masterFp: string | null; path: string; key: string; scriptType: string }) {
+  if (!db) throw new Error('Database unavailable')
+  const d = db
+  d.transaction(() => {
+    const existing = d.query('SELECT label FROM device_snapshot WHERE device_id = ?').get(w.id) as { label: string } | null
+    if (existing) throw new Error(`This key is already imported as "${existing.label}"`)
+    d.run('INSERT INTO device_snapshot (device_id, label, firmware_ver, features_json, updated_at, master_fp) VALUES (?, ?, ?, ?, ?, ?)',
+      [w.id, w.label, '', w.featuresJson, Date.now(), w.masterFp])
+    d.run(`INSERT INTO cached_pubkeys (device_id, chain_id, path, xpub, address, script_type, balance, balance_usd, updated_at) VALUES (?, 'bitcoin', ?, ?, '', ?, '0', 0, ?)`,
+      [w.id, w.path, w.key, w.scriptType, Date.now()])
+  })()
+}
+
+/** A connected KeepKey returned the imported account xpub at its path. masterFp null keeps the stored one. */
+export function setImportedWalletVerified(deviceId: string, masterFp: string | null) {
+  try {
+    if (!db) return
+    db.run(`UPDATE device_snapshot SET features_json = json_set(features_json, '$.deviceVerified', json('true')), master_fp = COALESCE(?, master_fp)
+            WHERE device_id = ? AND json_extract(features_json, '$.watchOnlyImport')`, [masterFp, deviceId])
+  } catch (e: any) {
+    console.warn('[db] setImportedWalletVerified failed:', e.message)
   }
 }
 
@@ -3093,7 +3130,8 @@ export function getBalancesForOwnSeed(): Array<{ deviceId: string; chainId: stri
   try {
     if (!db) return []
     const rows = db.query(
-      "SELECT device_id, chain_id, address FROM balances WHERE address != '' AND device_id != '' AND device_id != 'unknown'",
+      // Imported watch-only wallets ('wo:') are never "own": no KeepKey proved those keys.
+      "SELECT device_id, chain_id, address FROM balances WHERE address != '' AND device_id != '' AND device_id != 'unknown' AND device_id NOT LIKE 'wo:%'",
     ).all() as any[]
     return rows.map(r => ({ deviceId: r.device_id, chainId: r.chain_id, address: r.address }))
   } catch (e: any) {

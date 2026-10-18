@@ -1457,6 +1457,9 @@ export interface RegisteredDevice {
   firmwareVer: string
   updatedAt: number
   totalUsd: number       // sum of cached balance_usd across all chains
+  /** Watch-only import (no device); verified once a KeepKey returned the same account xpub */
+  imported?: boolean
+  verified?: boolean
 }
 
 // ── BIP-85 types ────────────────────────────────────────────────────────
@@ -1562,6 +1565,31 @@ export interface BtcWatchOnlyAccounts {
   /** Who answers chain data: 'pioneer', or the user's own node ('blockbook' / 'core') */
   backend: string
   accounts: Array<{ scriptType: 'p2wpkh' | 'p2sh-p2wpkh' | 'p2pkh'; accountIndex: number; path: string }>
+}
+
+/** btcWatchOnlyImport result (preview, or saved). fingerprint null = unknown (Electrum-style origins in PSBTs). */
+export interface BtcWatchOnlyImport {
+  id: string
+  label: string
+  source: 'electrum' | 'key'
+  scriptType: 'p2wpkh' | 'p2sh-p2wpkh' | 'p2pkh'
+  key: string
+  path: string
+  /** Inferred from the key, not stated by the import: the user must confirm it */
+  pathAssumed: boolean
+  fingerprint: string | null
+  saved: boolean
+}
+
+/** btcWatchOnlyReceive result. verified false = an imported key no KeepKey has confirmed yet. */
+export interface BtcWatchOnlyReceive {
+  address: string
+  path: number[]
+  scriptType: string
+  xpub: string
+  /** Set when the backend could not prove the index unused */
+  warning?: string
+  verified: boolean
 }
 
 /** btcWatchOnlyBuildPsbt result. Amounts are satoshis as decimal strings. */

@@ -14,7 +14,7 @@ const MAX_PSBT_BYTES = 1024 * 1024
 type Review = Extract<BtcPsbtReview, { kind: "review" }>
 type Phase = "idle" | "paste" | "analyzing" | "review" | "signing" | "done" | "error"
 
-function toBase64(bytes: Uint8Array): string {
+export function toBase64(bytes: Uint8Array): string {
 	const CHUNK = 8192
 	let binary = ""
 	for (let i = 0; i < bytes.length; i += CHUNK) binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK))

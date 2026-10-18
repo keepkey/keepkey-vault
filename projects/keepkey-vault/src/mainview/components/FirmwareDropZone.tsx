@@ -8,8 +8,9 @@ import { FirmwareUpgradePreview } from "./FirmwareUpgradePreview"
 import { useDeviceState } from "../hooks/useDeviceState"
 import { requiresBackupConfirmation } from "../lib/update-safety"
 import holdAndConnectRaw from "../assets/svg/hold-and-connect.svg?raw"
-import { looksLikePsbt, looksLikeRawTxHex, PSBT_SNIFF_BYTES } from "../../shared/psbt-sniff"
+import { looksLikePsbt, looksLikeRawTxHex, looksLikeWatchOnlyImport, PSBT_SNIFF_BYTES } from "../../shared/psbt-sniff"
 import { PSBT_DROP_EVENT } from "./PsbtSignDialog"
+import { WATCH_ONLY_IMPORT_EVENT } from "./WatchOnlyImportDialog"
 import { BTC_BROADCAST_EVENT } from "./BroadcastSignedDialog"
 
 /**
@@ -23,6 +24,7 @@ import { BTC_BROADCAST_EVENT } from "./BroadcastSignedDialog"
  *             .psbt, .txn, .txt or no extension) → PsbtSignDialog via PSBT_DROP_EVENT
  *             (it hands a fully signed one on to BroadcastSignedDialog).
  *   - a signed raw transaction as hex text (Electrum's complete .txn) → BroadcastSignedDialog.
+ *   - an Electrum wallet file or an extended public key → WatchOnlyImportDialog.
  *
  * Warning levels for firmware:
  * - Signed firmware: green badge, standard confirmation
@@ -136,6 +138,10 @@ export function FirmwareDropZone() {
 			}
 			if (looksLikeRawTxHex(head)) {
 				window.dispatchEvent(new CustomEvent(BTC_BROADCAST_EVENT, { detail: file }))
+				return
+			}
+			if (looksLikeWatchOnlyImport(head)) {
+				window.dispatchEvent(new CustomEvent(WATCH_ONLY_IMPORT_EVENT, { detail: file }))
 				return
 			}
 			setError(IS_EMU_PLATFORM

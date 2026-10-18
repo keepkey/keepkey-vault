@@ -14,3 +14,11 @@ export function looksLikeRawTxHex(head: Uint8Array): boolean {
 	const text = new TextDecoder().decode(head).trimStart()
 	return /^0[12]000000[0-9a-fA-F]{8}/.test(text) && /^[0-9a-fA-F]*\s*$/.test(text)
 }
+
+/** Electrum wallet file (JSON, or encrypted BIE1/BIE2) or an extended key, for the watch-only import.
+ *  Private and testnet keys too, so the import can say why it refuses them. Old Electrum .txn JSON is not one. */
+export function looksLikeWatchOnlyImport(head: Uint8Array): boolean {
+	const text = new TextDecoder().decode(head).trimStart()
+	if (text.startsWith('{')) return !/"(hex|complete)"/.test(text)
+	return /^(BIE[12]|QklFM[Qg])/.test(text) || /^[xyzXYZtuv](pub|prv)[1-9A-HJ-NP-Za-km-z]{8}/.test(text)
+}

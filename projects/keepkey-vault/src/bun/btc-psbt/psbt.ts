@@ -601,6 +601,12 @@ export function finalizeSigned(a: PsbtAnalysis, serializedTxHex: string): { psbt
   return { psbtBytes, psbtBase64: base64.encode(psbtBytes), txHex, txid: tx.id }
 }
 
+/** Address at account/chain/index, derived on the host from the account xpub (watch-only receive). */
+export function deriveAddress(account: BtcPsbtAccount, chain: 0 | 1, index: number): string {
+  if (!Number.isInteger(index) || index < 0 || index >= H) throw new Error('Address index out of range')
+  return scriptToAddress(derive(loadAccount(account), chain, index).script)
+}
+
 // ── watch-only build ───────────────────────────────────────────────────
 
 export interface BuildPsbtParams {
