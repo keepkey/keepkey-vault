@@ -32,6 +32,11 @@ export function CreatePsbtPanel({ deviceId }: { deviceId?: string }) {
 	const [error, setError] = useState<string | null>(null)
 
 	useEffect(() => {
+		// Another saved wallet: drop the previous wallet's accounts, choice and PSBT before loading.
+		setInfo(null)
+		setAccount(0)
+		setResult(null)
+		setError(null)
 		rpcRequest<BtcWatchOnlyAccounts>("btcWatchOnlyAccounts", deviceId ? { deviceId } : undefined)
 			.then(setInfo)
 			.catch((e: any) => setError(e?.message || "Could not read the saved Bitcoin accounts"))

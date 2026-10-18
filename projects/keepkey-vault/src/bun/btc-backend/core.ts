@@ -116,9 +116,13 @@ export function coreUtxoPath(desc: string | undefined, script: ScriptKind): stri
   return `m/${SCRIPT_PURPOSE[script]}'/0'/0'/${branch}/${index}`
 }
 
-/** estimatesmartfee returns BTC/kB → sat/vByte (×1e8 ÷1000 = ×1e5), floor 1. */
-export function feerateToSatVb(feerate?: number): number {
-  return Math.max(1, Math.ceil((typeof feerate === 'number' ? feerate : 0) * 1e5))
+/** estimatesmartfee returns BTC/kB → sat/vByte (×1e8 ÷1000 = ×1e5), floor 1.
+ *  No feerate (fresh/pruned node returns only `errors`) → throw, never a guessed rate. */
+export function feerateToSatVb(feerate?: number, errors?: string[]): number {
+  if (!(typeof feerate === 'number' && feerate > 0)) {
+    throw new Error(`Bitcoin node could not estimate a fee rate${errors?.length ? `: ${errors.join('; ')}` : ''}`)
+  }
+  return Math.max(1, Math.ceil(feerate * 1e5))
 }
 
 // ── JSON-RPC ──────────────────────────────────────────────────────────────────
@@ -246,12 +250,8 @@ export function makeCoreBackend(cfg: CoreConfig): BtcBackend {
     },
 
     async feeRate(): Promise<BtcFeeRates> {
-      const [s, a, f] = await Promise.all([
-        coreRpc(cfg, 'estimatesmartfee', [6]).catch(() => null),
-        coreRpc(cfg, 'estimatesmartfee', [3]).catch(() => null),
-        coreRpc(cfg, 'estimatesmartfee', [1]).catch(() => null),
-      ])
-      return { slow: feerateToSatVb(s?.feerate), average: feerateToSatVb(a?.feerate), fast: feerateToSatVb(f?.feerate) }
+      const [s, a, f] = await Promise.all([6, 3, 1].map((n) => coreRpc(cfg, 'estimatesmartfee', [n])))
+      return { slow: feerateToSatVb(s?.feerate, s?.errors), average: feerateToSatVb(a?.feerate, a?.errors), fast: feerateToSatVb(f?.feerate, f?.errors) }
     },
 
     async broadcast({ rawTxHex }) {

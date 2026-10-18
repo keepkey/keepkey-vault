@@ -724,13 +724,26 @@ export function parseForBroadcast(input: Uint8Array | string): { txHex: string; 
  * Fee of a signed transaction from its inputs' previous transactions, each hash-checked
  * against the txid it is spent by. null when any of them is unavailable: fee unknown, never a guess.
  */
-export async function feeFromPrevTxs(txHex: string, fetchPrevTx: (txid: string) => Promise<string | undefined>): Promise<bigint | null> {
+export async function feeFromPrevTxs(
+  txHex: string, fetchPrevTx: (txid: string) => Promise<string | undefined>, timeoutMs = 30_000,
+): Promise<bigint | null> {
   const tx = decodeRawTx(hex.decode(txHex))
+  // Unique previous txs in parallel; a failure or a slow backend means fee unknown, never a stuck review.
+  const txids = [...new Set(tx.inputs.map((inp) => hex.encode(inp.txid)))]
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let fetched: Array<string | undefined> | null
+  try {
+    fetched = await Promise.race([
+      Promise.all(txids.map((txid) => fetchPrevTx(txid))),
+      new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), timeoutMs) }),
+    ])
+  } catch { return null } finally { clearTimeout(timer) }
+  if (!fetched) return null
+  const prevById = new Map(txids.map((txid, k) => [txid, fetched![k]]))
   let totalIn = 0n
   for (const [i, inp] of tx.inputs.entries()) {
     const txid = hex.encode(inp.txid)
-    let prevHex: string | undefined
-    try { prevHex = await fetchPrevTx(txid) } catch { return null }
+    const prevHex = prevById.get(txid)
     if (!prevHex) return null
     const prev = btc.RawTx.decode(hex.decode(prevHex))
     if (txidOf(prev) !== txid) throw new Error(`Input #${i}: the backend's previous transaction does not hash to ${txid}, refusing`)

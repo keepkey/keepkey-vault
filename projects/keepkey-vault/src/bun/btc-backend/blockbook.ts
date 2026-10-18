@@ -94,6 +94,13 @@ async function bbFetch(cfg: BlockbookConfig, path: string, init?: RequestInit): 
   return json
 }
 
+/** estimatefee returns { result: "<BTC/kB>" } → sat/vB (×1e5), floor 1. No estimate ("-1") → throw, never a guessed rate. */
+export function estimatefeeToSatVb(r: any): number {
+  const btcPerKb = parseFloat(r?.result)
+  if (!(btcPerKb > 0)) throw new Error(`Blockbook could not estimate a fee rate (estimatefee returned ${JSON.stringify(r?.result ?? null)})`)
+  return Math.max(1, Math.ceil(btcPerKb * 1e5))
+}
+
 export function makeBlockbookBackend(cfg: BlockbookConfig): BtcBackend {
   return {
     kind: 'blockbook',
@@ -120,10 +127,8 @@ export function makeBlockbookBackend(cfg: BlockbookConfig): BtcBackend {
     },
 
     async feeRate(): Promise<BtcFeeRates> {
-      // estimatefee returns { result: "<BTC/kB>" } → sat/vB (×1e5), floor 1.
-      const conv = (r: any) => Math.max(1, Math.ceil(parseFloat(r?.result ?? '0') * 1e5))
-      const [s, a, f] = await Promise.all([6, 3, 1].map((n) => bbFetch(cfg, `/api/v2/estimatefee/${n}`).catch(() => null)))
-      return { slow: conv(s), average: conv(a), fast: conv(f) }
+      const [s, a, f] = await Promise.all([6, 3, 1].map((n) => bbFetch(cfg, `/api/v2/estimatefee/${n}`)))
+      return { slow: estimatefeeToSatVb(s), average: estimatefeeToSatVb(a), fast: estimatefeeToSatVb(f) }
     },
 
     async broadcast({ rawTxHex }) {

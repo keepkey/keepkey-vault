@@ -1576,13 +1576,15 @@ export interface BtcWatchOnlyPsbt {
   estVsize: number
 }
 
-/** btcBroadcastSigned result. fee null = unknown (never estimated). feeSource: 'psbt' or the backend that supplied the previous txs. */
+/** btcBroadcastSigned result. fee null = unknown (never estimated). feeSource: 'psbt' or the backend that supplied the previous txs.
+ *  backend: the BTC backend kind that will broadcast ('device-only' = offline); a send is refused if it changed since the review. */
 export interface BtcBroadcastReview {
   txid: string
   txHex: string
   outputs: Array<{ amount: string; address?: string; opReturnHex?: string; scriptHex: string }>
   fee: string | null
   feeSource: string | null
+  backend: string
   broadcast: boolean
 }
 

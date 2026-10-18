@@ -75,13 +75,15 @@ export function BroadcastSignedDialog() {
 		setPhase("sending")
 		setError(null)
 		try {
-			setReview(await rpcRequest<BtcBroadcastReview>("btcBroadcastSigned", { data, send: true }, 120000))
+			const res = await rpcRequest<BtcBroadcastReview>("btcBroadcastSigned", { data, send: true, backend: review?.backend }, 120000)
+			// Keep the fee the review proved from hash-checked previous txs (a raw tx alone cannot prove it).
+			setReview(r => ({ ...res, fee: r?.fee ?? res.fee, feeSource: r?.feeSource ?? res.feeSource }))
 			setPhase("done")
 		} catch (err: any) {
 			setError(err?.message || "Broadcast failed")
 			setPhase("error")
 		}
-	}, [data])
+	}, [data, review])
 
 	const handleCopy = useCallback((text: string) => {
 		navigator.clipboard.writeText(text)
@@ -101,6 +103,7 @@ export function BroadcastSignedDialog() {
 	const goldButton = { size: "sm", bg: "kk.gold", color: "black", fontWeight: "600", px: "4", py: "2", _hover: { bg: "kk.goldHover" } } as const
 	const plainButton = { size: "sm", variant: "outline", color: "kk.textSecondary", borderColor: "kk.border", px: "4", py: "2" } as const
 	const busy = phase === "checking" || phase === "sending"
+	const offline = review?.backend === "device-only"
 
 	return (
 		<>
@@ -149,6 +152,11 @@ export function BroadcastSignedDialog() {
 									Outputs come from the transaction itself. Your change is listed as an output too: check every address.
 								</Text>
 							</Box>
+							<Text fontSize="xs" color="kk.textSecondary" textAlign="right">
+								{offline ? "Offline mode: copy the raw hex, or go online to broadcast."
+									: review.backend === "pioneer" ? "Broadcast via Pioneer"
+									: `Broadcast via your own ${review.backend === "core" ? "Bitcoin Core" : review.backend} node`}
+							</Text>
 							{phase === "sending" ? (
 								<Flex align="center" gap="2" justify="center" py="2">
 									<Spinner size="sm" color="kk.gold" />
@@ -164,7 +172,7 @@ export function BroadcastSignedDialog() {
 									) : (
 										<>
 											<Button {...plainButton} onClick={handleDismiss}>Cancel</Button>
-											<Button {...goldButton} onClick={handleBroadcast}>Broadcast</Button>
+											{!offline && <Button {...goldButton} onClick={handleBroadcast}>Broadcast</Button>}
 										</>
 									)}
 								</Flex>

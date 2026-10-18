@@ -6,6 +6,8 @@ import { hex } from '@scure/base'
 import { sha256 } from '@noble/hashes/sha2'
 import { mnemonicToSeedSync } from 'bip39'
 import type { BtcBackend, BtcUtxo } from '../btc-backend/types'
+import { estimatefeeToSatVb } from '../btc-backend/blockbook'
+import { feerateToSatVb } from '../btc-backend/core'
 import { formatPath } from './codec'
 import { feeFromPrevTxs, parseForBroadcast, toSignTx, type BtcPsbtAccount } from './psbt'
 import { buildWatchOnlyPsbt } from './watch-only-build'
@@ -116,6 +118,14 @@ describe('watch-only Create PSBT', () => {
     await expect(buildWatchOnlyPsbt(f.backend, BITCOIN, account(true), PAY)).rejects.toThrow('refusing to guess a fee rate')
   })
 
+  it('a node with no fee estimate is refused, not floored to a made-up rate', async () => {
+    // The real node conversions: Blockbook estimatefee "-1", Core estimatesmartfee with only errors.
+    const bb = fixture(COINS, { async feeRate() { return { slow: estimatefeeToSatVb({ result: '-1' }), average: 1, fast: 1 } } })
+    await expect(buildWatchOnlyPsbt(bb.backend, BITCOIN, account(true), PAY)).rejects.toThrow('refusing to guess a fee rate')
+    const core = fixture(COINS, { async feeRate() { return { slow: feerateToSatVb(undefined, ['Insufficient data or no feerate found']), average: 1, fast: 1 } } })
+    await expect(buildWatchOnlyPsbt(core.backend, BITCOIN, account(true), PAY)).rejects.toThrow('Insufficient data')
+  })
+
   it('refuses when the change index cannot be proven', async () => {
     const noIndex = fixture(COINS, { addressIndices: undefined })
     await expect(buildWatchOnlyPsbt(noIndex.backend, BITCOIN, account(true), PAY)).rejects.toThrow('cannot prove an unused change address')
@@ -193,6 +203,7 @@ describe('broadcast parsing', () => {
     expect(await feeFromPrevTxs(p.txHex, async (txid) => s.f.prevTxs[txid])).toBe(s.analysis.fee)
     expect(await feeFromPrevTxs(p.txHex, async () => undefined)).toBeNull()
     expect(await feeFromPrevTxs(p.txHex, async () => { throw new Error('OFFLINE') })).toBeNull()
+    expect(await feeFromPrevTxs(p.txHex, () => new Promise<undefined>(() => {}), 20)).toBeNull() // a slow backend: unknown, not a stuck review
     const other = funding(0, 0, 50_000n, 'other').hex
     await expect(feeFromPrevTxs(p.txHex, async () => other)).rejects.toThrow('does not hash')
   })

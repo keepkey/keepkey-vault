@@ -3728,14 +3728,18 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const parsed = parseForBroadcast(new Uint8Array(Buffer.from(params.data, 'base64')))
 				const network = 'bip122:000000000019d6689c085ae165831e93'
 				const outputs = parsed.outputs.map(o => ({ amount: o.amount.toString(), address: o.address, opReturnHex: o.opReturnHex, scriptHex: o.scriptHex }))
+				const backendKind = getBtcBackend().kind
 				if (params.send) {
 					requireOnline('Bitcoin broadcast')
-					const pioneer = getBtcBackend().kind === 'pioneer' ? await getPioneer() : null
+					if (params.backend !== backendKind) {
+						throw new Error(`The broadcast backend changed since the review (${params.backend} -> ${backendKind}). Drop the transaction again to review it.`)
+					}
+					const pioneer = backendKind === 'pioneer' ? await getPioneer() : null
 					const txid = await broadcastBtcTx(pioneer, network, parsed.txHex)
 					if (txid !== parsed.txid) {
 						throw new Error(`The broadcast returned txid ${txid}, not ${parsed.txid}. Check both on a block explorer before doing anything else.`)
 					}
-					return { txid, txHex: parsed.txHex, outputs, fee: parsed.fee?.toString() ?? null, feeSource: null, broadcast: true }
+					return { txid, txHex: parsed.txHex, outputs, fee: parsed.fee?.toString() ?? null, feeSource: null, backend: backendKind, broadcast: true }
 				}
 				// Fee: proven by the PSBT's previous txs, else fetched and hash-checked through the backend, else unknown.
 				let fee = parsed.fee
@@ -3745,7 +3749,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					fee = await feeFromPrevTxs(parsed.txHex, txid => backend.rawTxHex({ network, txid }))
 					if (fee !== null) feeSource = backend.kind
 				}
-				return { txid: parsed.txid, txHex: parsed.txHex, outputs, fee: fee?.toString() ?? null, feeSource, broadcast: false }
+				return { txid: parsed.txid, txHex: parsed.txHex, outputs, fee: fee?.toString() ?? null, feeSource, backend: backendKind, broadcast: false }
 			},
 			btcPsbtShowFile: async () => {
 				if (!lastSignedPsbtPath) return
