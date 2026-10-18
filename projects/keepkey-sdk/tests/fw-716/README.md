@@ -62,7 +62,8 @@ all of 30-39 back to back. Env vars pass through make:
 
 `KEEPKEY_SUITE_TIMEOUT_MS` defaults to 180000 (3 min). Suites that need more
 SKIP with 0 presses when it is too low, instead of being killed mid-sign: 32,
-33, 35 and 37 need 360000; 20 and 50 (which turn AdvancedMode on) need 900000.
+33, 35 and 37 need 360000; 41 and 43 need 540000; 20 and 50 (which turn
+AdvancedMode on) need 900000.
 
 ## Run list, in order
 
@@ -95,6 +96,9 @@ operation may first ask for the PIN if the device is locked.
 | 38 | `make test-sdk filter=fw-716/38-` | 1 click + ~4-6 presses | Certified Uniswap UR swap on a Base catalog router. |
 | 39 | `make test-sdk filter=fw-716/39-` | 1 click + several presses | Certified Solana review signs with AdvancedMode off; source `certified`, `KKSOLSC1`. |
 | 40 | `make test-sdk filter=fw-716/40-` | 0 (**SKIP today**) | Once production serves ERC-7730: a certified-tier ERC-7730 review signs with AdvancedMode off. |
+| 41 | `KEEPKEY_SUITE_TIMEOUT_MS=540000 make test-sdk filter=fw-716/41-` | 3 clicks + ~3-4 presses each | Batch 3a tokens sign with AdvancedMode off: USDT transfer and LINK approve on chain 1 (native or certified), USDC transfer on Polygon (certified). SKIPs if AdvancedMode is on. |
+| 42 | `make test-sdk filter=fw-716/42-` | 1 click + ~3-4 presses | Batch 2: certified Shared approval of USDT0 to Permit2 on Arbitrum signs with AdvancedMode off. SKIPs if AdvancedMode is on. |
+| 43 | `KEEPKEY_SUITE_TIMEOUT_MS=540000 make test-sdk filter=fw-716/43-` | 3 clicks + several presses each | Batch 4 ERC-7730: Aave supply on Base and Arbitrum, Lido submit on chain 1 sign with AdvancedMode off (source `erc7730`). SKIPs if AdvancedMode is on. |
 | 50 | `KK716_ONE_CLICK=1 KEEPKEY_SUITE_TIMEOUT_MS=900000 make test-sdk filter=fw-716/50-` | 1 click + Enable Policy + PIN + ~2-3 presses | Opt-in. The card's main button turns AdvancedMode on and signs; a lock turns it off. |
 | 715/10 | `make test-sdk filter=fw-715/10-` | 3 clicks + ~3-6 presses | 7.15 fix carried into 7.16: type-2 signatures on Base, Arbitrum and Avalanche (chainId >= 256) recover to the device. Self-send, sentinel nonce. |
 | 715/11 | `KK_ALLOW_BLIND=1 make test-sdk filter=fw-715/11-` | Opt-in: turn AdvancedMode on in Desktop first (Enable Policy + PIN), then 1 click + ~2-3 blind-sign presses | 7.15 fix carried into 7.16: >1024-byte calldata keeps the access list last. SKIPs unless AdvancedMode is on; ends with clearSession (AdvancedMode off, no press). |
@@ -124,6 +128,9 @@ tagged); both use the sentinel nonce.
 | 37 | 2 cards | Permit2 summary, Limits, Token, Spender, Details; "Uniswap Universal Router" named on (a); expiration 0 on (b) reads "until the end of the block that uses this permit"; a past "Signature valid until" |
 | 38 | card | certified Uniswap UR swap; "Output goes to" this device |
 | 39 | card (a card offering Enable Advanced Mode means Desktop did not attach the review: Reject) | certified Solana review |
+| 41 | 3 cards (a second card offering Enable Advanced Mode: Reject) | send 1 USDT; approve Permit2 for 1 LINK; certified "USDC transfer" 1 USDC on Polygon |
+| 42 | card | certified "Shared approval": Permit2 may spend up to 1 USDT0 |
+| 43 | 3 cards (a second card offering Enable Advanced Mode: Reject) | ERC-7730 review: Aave "Supply" 1 USDC (Base, Arbitrum); Lido "Stake ETH" 0.000001 ETH |
 | 50 | card main button: Enable Advanced Mode | Enable Policy + PIN, then the blind-sign screens |
 | 715/10 | 3 cards: Approve | 3 self-sends (Base, Arbitrum, Avalanche): amount and fee |
 | 715/11 | card: Approve | blind-sign data screens, then amount and fee |
@@ -135,14 +142,14 @@ tagged); both use the sentinel nonce.
 | `KEEPKEY_API_KEY` | unset (saved key used) | every suite |
 | `KK716_LABEL` | `New7142signed` | 00 |
 | `KK716_BOOTLOADER_HASH` | unset (printed only) | 00 |
-| `KK716_CLEARSIGN_URL` | `https://keepkey-clearsign.bithighlander.workers.dev` | 01-03, 20, 30-40 |
+| `KK716_CLEARSIGN_URL` | `https://keepkey-clearsign.bithighlander.workers.dev` | 01-03, 20, 30-43 |
 | `KK716_EXPECT_FINGERPRINT` | `fdd258ec` | 01, 20, 30, 37 |
 | `KK716_ALPHA_ENVELOPE` | unset (20(b) then uses a tampered production envelope) | 20(b) |
 | `KK716_RELAY_CHAIN` | `8453` | 33 |
 | `KK716_ZCASH_DISPLAY` | unset | 14 |
 | `KK716_ERC7730_CALL` | unset | 40 |
 | `KK716_ONE_CLICK` | unset | 50 |
-| `KEEPKEY_SUITE_TIMEOUT_MS` | `180000` | run-all.js; 32, 33, 35, 37 SKIP below 360000, 20 and 50 below 900000 |
+| `KEEPKEY_SUITE_TIMEOUT_MS` | `180000` | run-all.js; 32, 33, 35, 37 SKIP below 360000, 41 and 43 below 540000, 20 and 50 below 900000 |
 
 Desktop's own `CLEARSIGN_SERVICE_URL` is not visible over REST; the suites query
 the worker above directly.
@@ -160,13 +167,16 @@ Arbitrum intents, the UR swap) is `fc91f86a`; the Solana delegate is
 `tests/fw-716/_fw716.js` (not a suite: files starting with `_` are skipped):
 
 - device: `deviceAddresses(sdk)`, `advancedMode(features)`, `waitFeatures(sdk)`,
-  `requireAdvancedModeOff(sdk, assert)`, `restoreAdvancedMode(sdk)`,
+  `requireAdvancedModeOff(sdk, assert)`, `requireClearSignOnly(sdk, cap)` (SKIP
+  before 7.16.0, without `cap`, or with AdvancedMode on), `restoreAdvancedMode(sdk)`,
   `guardAdvancedModeOff(sdk, assert)` (end check: still off, else restore and FAIL)
 - report: `hasRed`, `hasLimitation`, `describeReport`, `assertDeviceConnected`
 - worker: `worker(path, body)`, `catalogEntries()`, `findEvmEntry(query)`,
   `requireEvmEntry(name, query)`, `certifiedName(chainId, address)`,
   `evmSchema(...)`, `isProductionEnvelope(body)` (batch-1 fingerprint)
 - ERC-7730: `ERC7730_CANDIDATES`, `probeErc7730(c)`, `servedErc7730Candidates()`
+- sign cases (41-43): `signCases(getSdk, assert, cases, { cap, minBudgetMs })`,
+  `probeEvmSchema(...)`, `probeErc7730Case(...)` (a worker non-200 is NOT COVERED, named)
 - builders: `evmTx({ from, to, data, value, chainId })` (sentinel nonce, 1559
   fees), `reportBody(tx)`, `word`, `randomHex`, `randomAddress`
 

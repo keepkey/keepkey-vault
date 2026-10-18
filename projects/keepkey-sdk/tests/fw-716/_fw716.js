@@ -6,7 +6,7 @@
  * Target: a production-root 7.16.0 KeepKey holding REAL FUNDS. Every signing
  * suite signs only (never broadcasts) and uses SENTINEL_NONCE.
  */
-const { ETH_PATH, SOLANA_PATH, SENTINEL_NONCE, skip, atEnd } = require('../_helpers')
+const { ETH_PATH, SOLANA_PATH, SENTINEL_NONCE, skip, atEnd, notCovered, assertSignedByDevice } = require('../_helpers')
 
 /** m/44'/195'/0'/0/0 */
 const TRON_PATH = [0x80000000 + 44, 0x80000000 + 195, 0x80000000, 0, 0]
@@ -76,6 +76,29 @@ async function restoreAdvancedMode(sdk) {
     on = advancedMode(await waitFeatures(sdk))
   }
   return on
+}
+
+/**
+ * Gate for suites whose pass is "signed with AdvancedMode off" (41-43): SKIP on
+ * firmware before 7.16.0, on a missing capability `cap` (when Desktop reports
+ * capabilities), and on AdvancedMode on or missing: then a blind call signs
+ * too, so a signature proves nothing. The suite never changes AdvancedMode.
+ */
+async function requireClearSignOnly(sdk, cap) {
+  const f = await sdk.system.info.getFeatures()
+  const version = `${f.major_version}.${f.minor_version}.${f.patch_version}`
+  if (Number(f.major_version) < 7 || (Number(f.major_version) === 7 && Number(f.minor_version) < 16)) {
+    skip(`firmware ${version} predates 7.16.0`)
+  }
+  const caps = Array.isArray(f.capabilities) ? f.capabilities : undefined
+  if (cap != null && caps && !caps.includes(cap)) skip(`device does not report capability ${cap}: [${caps.join(', ')}]`)
+  const on = advancedMode(f)
+  if (on !== false) {
+    skip(`AdvancedMode reads ${on === undefined ? 'missing' : 'ON'}: a blind call would sign too, so a signature proves nothing. `
+      + 'This suite never changes it: lock the device (it is session state on 7.16) and rerun')
+  }
+  console.log(`  firmware ${version}, AdvancedMode off, capabilities ${caps ? `[${caps.join(', ')}]` : '(not reported by this Desktop)'}`)
+  return f
 }
 
 /** For suites that never turn AdvancedMode on but show a card whose main
@@ -200,6 +223,96 @@ async function servedErc7730Candidates() {
   return results
 }
 
+// ── Sign cases with AdvancedMode off (41-43) ─────────────────────────
+
+/** POST /v1/evm/schema with the body Desktop sends (evm-schema-registry.ts):
+ *  the call shape, plus the spender for an approve. */
+async function probeEvmSchema({ chainId, to, selector, spender }) {
+  const { status, body } = await worker('/v1/evm/schema', { chainId, contract: to, selector, calldataLength: 68, ...(spender ? { spender } : {}) })
+  const t = body?.tokenIdentity
+  return {
+    route: 'POST /v1/evm/schema', status, ok: status === 200 && body?.classification === 'VERIFIED',
+    note: `${body?.classification || body?.code || ''} '${body?.method || ''}' entry=${body?.entry || '-'} fingerprint=${body?.fingerprint || '-'}${t ? ` tokenIdentity=${t.symbol}/${t.decimals} ${t.source}` : ''}`,
+  }
+}
+
+/** GET /v1/erc7730/definition, as Desktop asks for a calldata definition. */
+async function probeErc7730Case({ chainId, to, selector }) {
+  const p = await probeErc7730({ chainId, to, selector })
+  const embedded = p.body?.embeddedCalls === true
+  return {
+    route: 'GET /v1/erc7730/definition', status: p.status, ok: p.status === 200 && !embedded,
+    note: `${p.code || ''}${p.body?.definitionId ? ` definition ${String(p.body.definitionId).slice(0, 18)}...` : ''}${embedded ? ' embeddedCalls (Desktop never sends these on 7.16)' : ''}`,
+  }
+}
+
+/**
+ * Sign each case on the device with AdvancedMode off; the suite sends no
+ * txMetadata, Desktop attaches any description itself. A case whose worker
+ * route has no answer is NOT COVERED with the gap named (a 'native' case signs
+ * anyway). Pass per case: the signature recovers to the device on its chain
+ * with the sentinel nonce, and the signed report's source is one `expect`
+ * lists. Signs only: nothing is broadcast.
+ *
+ * case: { id, name, chainId, to, data(device), value?, gasLimit?, probe(),
+ *         expect: ['certified'] | ['native', 'certified'] | ['erc7730'], screens(device) }
+ */
+async function signCases(getSdk, assert, cases, { cap, minBudgetMs } = {}) {
+  const budget = Number(process.env.KEEPKEY_SUITE_TIMEOUT_MS) || 180_000
+  if (minBudgetMs && budget < minBudgetMs) {
+    skip(`needs KEEPKEY_SUITE_TIMEOUT_MS=${minBudgetMs}: run-all.js would kill it at ${budget} ms mid-sign`)
+  }
+  // The worker first: no Desktop contact when nothing can attach.
+  for (const c of cases) {
+    const w = await c.probe()
+    console.log(`  ${c.id} ${c.name}: worker ${w.route} ${w.status} ${w.note}`)
+    if (!w.ok && !c.expect.includes('native')) c.gap = `${c.id} ${c.name}: worker ${w.route} answers ${w.status} ${w.note}`.trim()
+  }
+  if (cases.every((c) => c.gap)) skip(cases.map((c) => c.gap).join('; '))
+
+  const sdk = await getSdk()
+  await requireClearSignOnly(sdk, cap)
+  // The fallback card (no description, or the device refused one) offers Advanced Mode.
+  guardAdvancedModeOff(sdk, assert)
+  const { eth: device } = await deviceAddresses(sdk)
+  console.log(`  device: ${device}`)
+
+  for (const c of cases) {
+    console.log(`\n  ── ${c.id} ${c.name} ──`)
+    if (c.gap) { notCovered(c.gap); continue }
+    const tx = evmTx({ from: device, to: c.to, data: c.data(device), value: c.value, chainId: c.chainId, gasLimit: c.gasLimit })
+    const pre = await sdk.clearsign.report(reportBody(tx))
+    assertDeviceConnected(assert, pre, `${c.id} pre-report`)
+    console.log(`  pre-report: ${describeReport(pre)}`)
+    const want7730 = c.expect.includes('erc7730')
+    const found = want7730 ? pre.descriptor.source === 'erc7730' : !hasLimitation(pre, 'DEVICE_SHOWS_RAW_DATA')
+    assert(`${c.id} pre-report: Desktop found the description (${want7730 ? "source 'erc7730'" : 'no DEVICE_SHOWS_RAW_DATA'})`, found)
+    if (!found) {
+      console.error('  not signing: the card would offer Advanced Mode. Check the Desktop log ([clearsign] / [erc7730] lines).')
+      continue
+    }
+
+    console.log('  OWNER: approve the Desktop card (never Enable Advanced Mode), then confirm on the device:')
+    for (const s of c.screens(device)) console.log(`    - ${s}`)
+    console.log('  A SECOND card for the same call (offering Advanced Mode) means the device refused the description: Reject it.')
+    let out
+    try {
+      out = await sdk.eth.ethSignTransaction(tx)
+    } catch (e) {
+      console.error(`  sign refused: ${String(e?.message || e).slice(0, 300)}`)
+      assert(`${c.id} device signed`, false)
+      continue
+    }
+    assertSignedByDevice(assert, out, device, c.chainId)
+    const r = out.clearSignReport
+    assert(`${c.id} response carries clearSignReport`, !!r)
+    if (!r) continue
+    console.log(`  signed report: ${describeReport(r)}`)
+    assert(`${c.id} signed report source is ${c.expect.join(' or ')} (read '${r.descriptor.source}')`, c.expect.includes(r.descriptor.source))
+    if (want7730) assert(`${c.id} no ERC7730_DEFINITION_REFUSED`, !hasLimitation(r, 'ERC7730_DEFINITION_REFUSED'))
+  }
+}
+
 // ── Builders ─────────────────────────────────────────────────────────
 
 const word = (hex) => String(hex).replace(/^0x/, '').toLowerCase().padStart(64, '0')
@@ -226,9 +339,10 @@ function reportBody(tx) {
 module.exports = {
   TRON_PATH, WORKER, EXPECT_FINGERPRINT, CERTIFIED_KEY_ID, FEATURES_WAIT_MS,
   USDC_BASE, USDC_ETH, PERMIT2,
-  sleep, deviceAddresses, advancedMode, waitFeatures, requireAdvancedModeOff, restoreAdvancedMode, guardAdvancedModeOff,
+  sleep, deviceAddresses, advancedMode, waitFeatures, requireAdvancedModeOff, requireClearSignOnly, restoreAdvancedMode, guardAdvancedModeOff,
   isRed, hasRed, hasLimitation, describeReport, assertDeviceConnected,
   worker, catalogEntries, findEvmEntry, requireEvmEntry, certifiedName, evmSchema, isProductionEnvelope,
   ERC7730_CANDIDATES, probeErc7730, servedErc7730Candidates,
+  probeEvmSchema, probeErc7730Case, signCases,
   word, randomHex, randomAddress, evmTx, reportBody,
 }
