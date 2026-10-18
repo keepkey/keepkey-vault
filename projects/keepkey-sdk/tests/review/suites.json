@@ -275,6 +275,18 @@
     "class": "real-world",
     "why": "ERC-7730 runtime review; skips while nothing is served"
   },
+  "fw-716/41-certified-tokens-3a.js": {
+    "class": "real-world",
+    "why": "native USDT/LINK on chain 1, batch 3a USDC on Polygon"
+  },
+  "fw-716/42-usdt0-permit2-arbitrum.js": {
+    "class": "real-world",
+    "why": "certified USDT0 Shared approval to Permit2 on Arbitrum"
+  },
+  "fw-716/43-erc7730-aave-lido.js": {
+    "class": "real-world",
+    "why": "ERC-7730 Aave supply (Base, Arbitrum) and Lido submit"
+  },
   "fw-716/50-advancedmode-one-click.js": {
     "class": "must-warn",
     "why": "card turns AdvancedMode on, then signs; opt-in"
