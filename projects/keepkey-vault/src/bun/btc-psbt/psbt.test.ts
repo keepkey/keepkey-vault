@@ -333,6 +333,13 @@ describe('refusals and device parity', () => {
     expect(() => analyze(psbtBytes, [account('p2wpkh', true, 1)])).toThrow(/Not this wallet/)
   })
 
+  it('names a Taproot input instead of calling it foreign', () => {
+    const { psbtBytes } = build('p2wpkh', TWO_COINS)
+    const f = fundingTx(btc.p2tr(keyAt([86 + H, H, H, 0, 0]).publicKey!.subarray(1)).script, 70_000n, 'taproot')
+    const bad = mutate(psbtBytes, (tx) => tx.addInput({ txid: f.txid, index: 1, nonWitnessUtxo: f.hex }))
+    expect(() => analyze(bad, [account('p2wpkh')])).toThrow(/Input #2 is a Taproot \(bc1p\) coin/)
+  })
+
   it('refuses sighash NONE, already-signed inputs, duplicate outpoints and amounts above MAX_MONEY', () => {
     const { psbtBytes, analysis } = build('p2wpkh', TWO_COINS)
     const acct = [account('p2wpkh')]

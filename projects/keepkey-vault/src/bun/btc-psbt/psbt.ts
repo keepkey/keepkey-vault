@@ -398,6 +398,9 @@ export function analyze(input: Uint8Array | string, accounts: BtcPsbtAccount[]):
     const found = scanScripts(new Set(unpathed), accts)
     prevs.forEach((p, i) => { if (!tx.getInput(i).bip32Derivation?.length) owned[i] = found.get(hex.encode(p.script)) })
   }
+  // Desktop loads no taproot accounts for PSBTs yet, so a bc1p coin is never "ours": say that, not "wrong wallet".
+  const tap = owned.findIndex((o, i) => !o && isTaproot(prevs[i].script))
+  if (tap >= 0) throw new Error(`Input #${tap} is a Taproot (bc1p) coin; signing Taproot PSBTs is not supported yet`)
   const mine = owned.filter((o): o is Owned => !!o)
   if (!mine.length) throw new Error('Not this wallet. Wrong passphrase or account not added?')
   if (mine.length !== owned.length) {

@@ -2,11 +2,12 @@ import { useState, useEffect, useCallback, useRef } from "react"
 import { Box, Flex, Text, Button, Spinner, Textarea } from "@chakra-ui/react"
 import { rpcRequest } from "../lib/rpc"
 import { Z } from "../lib/z-index"
-import { looksLikePsbt } from "../../shared/psbt-sniff"
 import type { BtcPsbtReview } from "../../shared/types"
 
 /** FirmwareDropZone fires this with the dropped File once its content sniffs as a PSBT. */
 export const PSBT_DROP_EVENT = "keepkey-psbt-drop"
+/** The BTC asset page fires this to open the paste box. */
+export const PSBT_PASTE_EVENT = "keepkey-psbt-paste"
 const MAX_PSBT_BYTES = 1024 * 1024
 
 type Review = Extract<BtcPsbtReview, { kind: "review" }>
@@ -80,8 +81,8 @@ export function PsbtSignDialog() {
 		}
 	}, [])
 
-	// Drops (from FirmwareDropZone) and a PSBT pasted anywhere outside a text field.
-	// Neither signs: both only open the review. New input is ignored while busy.
+	// Drops (from FirmwareDropZone) open the review; the asset page opens the paste box.
+	// Neither signs. New input is ignored while busy.
 	useEffect(() => {
 		const busy = () => phaseRef.current === "analyzing" || phaseRef.current === "signing"
 		const onDrop = async (e: Event) => {
@@ -95,20 +96,19 @@ export function PsbtSignDialog() {
 			}
 			await analyze(new Uint8Array(await file.arrayBuffer()), file.name)
 		}
-		const onPaste = (e: ClipboardEvent) => {
-			const target = e.target as HTMLElement | null
-			if (busy() || target?.closest("input, textarea, [contenteditable='true']")) return
-			const text = e.clipboardData?.getData("text") || ""
-			const bytes = new TextEncoder().encode(text)
-			if (!looksLikePsbt(bytes)) return
-			e.preventDefault()
-			void analyze(bytes, "pasted")
+		const onPaste = () => {
+			if (busy()) return
+			setReview(null)
+			setSigned(null)
+			setError(null)
+			setName("")
+			setPhase("paste")
 		}
 		window.addEventListener(PSBT_DROP_EVENT, onDrop)
-		document.addEventListener("paste", onPaste)
+		window.addEventListener(PSBT_PASTE_EVENT, onPaste)
 		return () => {
 			window.removeEventListener(PSBT_DROP_EVENT, onDrop)
-			document.removeEventListener("paste", onPaste)
+			window.removeEventListener(PSBT_PASTE_EVENT, onPaste)
 		}
 	}, [analyze])
 
@@ -155,7 +155,8 @@ export function PsbtSignDialog() {
 		if (f.ownOutputShown) warnings.push("An output pays back to this wallet but is not standard change. The KeepKey shows its address.")
 		if (f.noChange) warnings.push("No change output: everything except the outputs below goes to the fee.")
 		if (review.feePercent !== null && review.feePercent > 5) warnings.push(`High fee: ${review.feePercent}% of the amount sent.`)
-		if (f.nonZeroLocktime) warnings.push(`Locktime ${review.locktime}: the KeepKey does not show this.`)
+		// Wallets set a block-height locktime by default (anti-fee-sniping, shown in the info line); a timestamp one is unusual.
+		if (f.nonZeroLocktime && review.locktime >= 500000000) warnings.push(`Locktime ${review.locktime} is a timestamp: the KeepKey does not show this.`)
 		if (f.unusualVersion) warnings.push(`Unusual transaction version ${review.version}.`)
 	}
 
@@ -182,7 +183,7 @@ export function PsbtSignDialog() {
 
 					{phase === "paste" && (
 						<>
-							<Text fontSize="sm" color="kk.textSecondary" mb="2">Paste a PSBT (base64 or hex):</Text>
+							<Text fontSize="sm" color="kk.textSecondary" mb="2">Paste a PSBT (base64 or hex), or drop the file on this window:</Text>
 							<Textarea value={pasted} onChange={(e) => setPasted(e.target.value)} rows={6} fontFamily="mono" fontSize="xs" mb="3" placeholder="cHNidP8..." />
 							<Flex gap="2" justify="flex-end">
 								<Button {...plainButton} onClick={handleDismiss}>Cancel</Button>
@@ -271,7 +272,7 @@ export function PsbtSignDialog() {
 					{(phase === "done" || phase === "signed") && signed && (
 						<Flex direction="column" gap="3">
 							<Text fontSize="sm" fontWeight="600" color="var(--teal-2)">
-								{phase === "done" ? "Signed. Load the file back into your wallet, or broadcast the raw transaction." : "This PSBT is already signed."}
+								{phase === "done" ? "Signed. Load the file back into your wallet, or broadcast the raw transaction." : "This PSBT already contains signatures (not checked by Desktop)."}
 							</Text>
 							<Box {...card}>
 								{signed.filePath && (

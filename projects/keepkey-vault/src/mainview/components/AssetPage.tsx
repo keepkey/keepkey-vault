@@ -34,6 +34,7 @@ import { EvmAddressSelector } from "./EvmAddressSelector"
 import { useBtcAccounts } from "../hooks/useBtcAccounts"
 import { useEvmAddresses } from "../hooks/useEvmAddresses"
 import { AddTokenDialog } from "./AddTokenDialog"
+import { PSBT_PASTE_EVENT } from "./PsbtSignDialog"
 import { detectSpamToken, categorizeTokens, type SpamResult } from "../../shared/spamFilter"
 
 type AssetView = "receive" | "send" | "privacy"
@@ -1479,6 +1480,16 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 								className="electrobun-webkit-app-region-no-drag"
 							>
 								Reports
+							</Box>
+						)}
+						{isBtc && !watchOnly && (
+							<Box
+								as="button" fontSize="11px" color="var(--gold)" fontWeight="500"
+								cursor="pointer" _hover={{ opacity: 0.75 }} transition="opacity 0.15s"
+								onClick={() => window.dispatchEvent(new Event(PSBT_PASTE_EVENT))}
+								className="electrobun-webkit-app-region-no-drag"
+							>
+								Sign PSBT
 							</Box>
 						)}
 						{onViewActivity && (
