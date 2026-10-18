@@ -13,7 +13,7 @@ import { caipToIcon } from "../../shared/assetLookup"
 import { getRequiredConfs } from "../../shared/confirmations"
 import type { RecentActivity, PendingSwap, ChainBalance, SwapTrackingStatus } from "../../shared/types"
 import { isSwapFullySettled } from "../../shared/swap-settlement"
-import { signedHowText, type TxClearSign } from "../../shared/tx-clearsign"
+import type { TxDetailLine } from "../../shared/tx-clearsign"
 
 interface ActivityPanelProps {
   open: boolean
@@ -251,42 +251,23 @@ function CopyableRow({ label, value, explorerUrl }: { label: string; value: stri
   )
 }
 
-const TIER_COLOR = { green: 'var(--teal)', yellow: 'var(--gold)', red: 'var(--rose)' } as const
-const LEVEL_COLOR = { low: 'kk.textSecondary', medium: 'var(--gold)', high: 'var(--rose)', critical: 'var(--rose)' } as const
-
-/** Loads after the dialog opens, so it never holds the dialog up. */
-function TxClearSignSection({ networkId, txid, received }: { networkId: string; txid: string; received: boolean }) {
-  const [cs, setCs] = useState<TxClearSign | null>(null)
+/** What the transaction did, in plain words. Loads after the dialog opens, so
+ *  it never holds the dialog up; nothing to say renders nothing. */
+function TxDetailsSection({ networkId, txid, received }: { networkId: string; txid: string; received: boolean }) {
+  const [lines, setLines] = useState<TxDetailLine[] | null>(null)
   useEffect(() => {
     let live = true
-    setCs(null)
-    rpcRequest('getTxClearSign', { networkId, txid, received })
-      .then(r => { if (live) setCs(r) })
-      .catch(() => { if (live) setCs({ kind: 'none' }) })
+    setLines(null)
+    rpcRequest('getTxDetails', { networkId, txid, received })
+      .then(r => { if (live) setLines(r) })
+      .catch(() => { if (live) setLines(null) })
     return () => { live = false }
   }, [networkId, txid, received])
-  if (!cs) return null
-  const lines = cs.kind === 'record' || cs.kind === 'decoded' ? cs.reasons.map((r, i) => (
-    <Text key={i} fontSize="11px" color={LEVEL_COLOR[r.level]}>• {r.text}</Text>
-  )) : null
+  if (!lines?.length) return null
   return (
-    <Box mt="2" pt="2" borderTop="1px solid" borderColor="kk.border" data-tx-clearsign={cs.kind}>
-      <Text fontSize="11px" fontWeight="700" color="kk.textPrimary">ClearSign</Text>
-      {cs.kind === 'record' ? <>
-        <Text fontSize="10px" color="kk.textMuted" mb="1">What KeepKey Desktop showed when you signed</Text>
-        <TxDetailRow label="Signed on your KeepKey" value={signedHowText(cs)} prose />
-        {cs.call && <TxDetailRow label="Call" value={cs.call} prose />}
-        {cs.appName && <TxDetailRow label="Requested by" value={cs.appName} prose />}
-        {cs.tier && cs.headline && <Text fontSize="xs" fontWeight="700" color={TIER_COLOR[cs.tier]} mt="1">{cs.headline}</Text>}
-        {lines}
-      </> : cs.kind === 'decoded' ? <>
-        <Text fontSize="10px" color="kk.textMuted" mb="1">Decoded now by KeepKey Desktop — not a record of what was shown when it was signed</Text>
-        {cs.call && <TxDetailRow label="Call" value={cs.call} prose />}
-        {!cs.call && cs.reasons.length === 0 && <Text fontSize="11px" color="kk.textSecondary">A contract call KeepKey Desktop cannot decode.</Text>}
-        {lines}
-      </> : (
-        <Text fontSize="11px" color="kk.textSecondary">{cs.kind === 'plain' ? 'Plain transfer, no contract call' : 'No ClearSign record for this transaction'}</Text>
-      )}
+    <Box mt="2" pt="2" borderTop="1px solid" borderColor="kk.border">
+      <Text fontSize="11px" fontWeight="700" color="kk.textPrimary">Details</Text>
+      {lines.map((l, i) => <TxDetailRow key={i} label={l.label} value={l.value} prose />)}
     </Box>
   )
 }
@@ -420,7 +401,7 @@ export function TxDetailDialog({ detail, onClose, nativePrices }: { detail: TxDe
             )}
 
             {/* Below the button, so it does not move when this loads. */}
-            {a.txid && chainDef?.chainFamily === 'evm' && <TxClearSignSection networkId={chainDef.networkId} txid={a.txid} received={a.type === 'receive'} />}
+            {a.txid && chainDef?.chainFamily === 'evm' && <TxDetailsSection networkId={chainDef.networkId} txid={a.txid} received={a.type === 'receive'} />}
           </VStack>
         </Box>
       </Box>
