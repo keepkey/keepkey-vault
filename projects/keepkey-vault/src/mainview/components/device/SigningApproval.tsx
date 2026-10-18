@@ -17,6 +17,7 @@ import { cosmosTxPreview } from "../../../shared/cosmosTxPreview"
 import { typedDataRows } from "../../../shared/typedDataRows"
 import { assessSigningRisk, formatCertifiedArg, type RiskLevel, type SigningTier } from "../../../shared/clearsign-risk"
 import { ClearSignReportCard } from "../ClearSignReportCard"
+import { KeepKeyUILogo } from "../logo/keepkey-ui"
 import { namedProviderLine } from "../../../shared/clearsign-report"
 
 interface SigningApprovalProps {
@@ -337,9 +338,20 @@ function RequestClearSignReview({ request }: { request: SigningRequestInfo }) {
 			</Text>
 			{state === "failed" && <Text fontSize="2xs" color="var(--rose)">{error}</Text>}
 			{state !== "queued" && (
-				<Button size="xs" variant="outline" alignSelf="flex-start" onClick={submit} loading={state === "sending"}>
-					{t("signing.requestReview", "Request clearsign review")}
-				</Button>
+				// ponytail: CSS hover tip, no tooltip library in the app
+				<Box position="relative" alignSelf="flex-start" css={{ "&:hover > [data-tip], &:focus-within > [data-tip]": { opacity: 1 } }}>
+					<Button size="xs" variant="outline" gap="1.5" onClick={submit} loading={state === "sending"}
+						aria-describedby="clearsign-review-tip">
+						<Box w="14px" h="14px" borderRadius="3px" overflow="hidden" flexShrink={0}><KeepKeyUILogo /></Box>
+						{t("signing.requestReview", "Submit to KeepKey for review")}
+					</Button>
+					<Box data-tip id="clearsign-review-tip" role="tooltip" position="absolute" bottom="calc(100% + 6px)" left="0" w="260px"
+						bg="kk.cardBg" border="1px solid" borderColor="kk.border" borderRadius="md" px="2.5" py="2"
+						fontSize="2xs" color="kk.textPrimary" lineHeight="1.4" boxShadow="0 4px 16px rgba(0,0,0,0.5)"
+						opacity={0} pointerEvents="none" transition="opacity 0.15s" zIndex={1}>
+						{t("signing.requestReviewTip", "KeepKey reviews ClearSign submissions for third-party contracts. Once a contract is reviewed, your KeepKey shows what each call does instead of signing blind.")}
+					</Box>
+				</Box>
 			)}
 		</Flex>
 	)
