@@ -5,7 +5,7 @@
  */
 import { Box, Text, VStack, HStack } from '@chakra-ui/react'
 
-const REPRO_DOC_URL = 'https://github.com/keepkey/keepkey-firmware/blob/master/docs/ReproducibleBuilds.md'
+const REPRO_DOC_URL = 'https://github.com/keepkey/keepkey-firmware#verifying-published-binaries'
 
 interface Props {
   /** Target firmware version being installed (no leading "v") */
