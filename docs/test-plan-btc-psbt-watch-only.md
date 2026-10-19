@@ -121,8 +121,8 @@ even before a view notification or after a different device connects. The node
 configuration remains a persisted Desktop setting, not a portable credential in
 the public-wallet file. Optional hosted fiat quotes must not prevent refreshing
 the node's UTXO balances; unavailable/cached fiat valuation is disclosed separately.
-If a node is configured but no eligible saved wallet is selected, generic
-signed-file review/broadcast must refuse rather than offer Pioneer. Changing
+Generic signed-file review/broadcast uses the configured Bitcoin node without
+requiring a connected device or selected wallet. Changing
 node settings, including a different node of the same type, requires a new review.
 
 ## Cross-application acceptance matrix
@@ -239,3 +239,104 @@ with `PYTHONPATH=/path/to/electrum python scripts/test-btc-electrum.py
 Follow-up regression: 1,572 unit tests, 53 worker tests and 35 Core assertions
 passed, as did the standalone Cosmos/flags runners and the development app build.
 Typecheck retained the same 1,034 baseline diagnostics, with no new diagnostics.
+
+
+## Local Sparrow round trip and broadcast (operator confirmed)
+
+The operator created a native SegWit transaction in Sparrow using a USB-paired
+KeepKey, saved the unsigned PSBT, signed it in Desktop on the device, then
+unplugged KeepKey and successfully broadcast the signed file in Desktop.
+Desktop's independent signature/field check and the Electrum 4.8 library agreed
+on the finalized transaction. This proves the connected signing and disconnected
+relay roles on this computer; it does not prove a physically offline, two-computer
+transfer, confirmation, or every hardware/host combination. Private artifacts and
+transaction details remain outside the repository.
+
+The disconnected broadcast check found and fixed an incorrect requirement to
+select a saved Bitcoin-only wallet. Signed Bitcoin relay now uses the saved node
+without any device or selected wallet. Offline mode still prevents broadcast;
+a configured node failure does not silently fall back to a hosted provider.
+
+## QR transport
+
+Desktop exposes **Scan Bitcoin QR** on the wallet screen, wallet selector and
+Bitcoin page, plus Scan QR in the PSBT and watch-only import dialogs. Camera or
+local image files can collect animated fragments with progress and reset.
+Unsigned PSBT, signed PSBT, raw transaction and Desktop public-wallet exports
+have a QR display. Scanning routes through the existing review and strict backend
+parsers; it never signs, saves a wallet or broadcasts automatically.
+
+- UR: legacy `crypto-psbt`, modern `psbt`, and `bytes`; fountain decoding,
+  out-of-order fragments, duplicate handling, message identity and size limits.
+- BBQr: H (hex), 2 (base32), Z (raw DEFLATE/base32) decoding; base32 export.
+  Accept transaction and public wallet types only, bound decompressed size, and
+  reject conflicting duplicates/headers. BBQr itself has no message checksum.
+- Electrum: static Base43 PSBT or raw-transaction QR. Large data must use animated
+  UR/BBQr or files. Static QR capacity is checked before rendering.
+- All QR generation and image decoding are local. The QR renderer supports
+  standard versions 1–40. Camera streams stop on success, cancel and unmount.
+
+Evidence: independent Sparrow 2.1.2 runtime accepted Desktop's UR and BBQr for the
+operator's actual unsigned PSBT; Desktop accepted Sparrow UR and all three BBQr
+encodings. Electrum 4.8 Base43 output matched byte-for-byte and its transaction QR
+export was accepted. Generated QR pixels were decoded with jsQR. An isolated
+browser test passed all formats and assembled an animated camera sequence,
+verifying that its camera track stopped. The camera source was simulated; a
+physical camera/display transfer between two computers still needs rehearsal.
+Image import supports still PNG/JPEG/WebP/BMP frames; select the full frame set.
+Animated GIF/video file import is not supported. Public-wallet UR/BBQr is Desktop's
+public JSON format, not a claim of generic descriptor or UR crypto-account import.
+
+## Multisig scope review
+
+Sparrow/Electrum own wallet policy creation, coin selection, coordination,
+combining signatures, recovery metadata and all other hardware integrations.
+Desktop supports KeepKey hardware only. It can review/finalize a completed PSBT
+and relay a raw transaction through the saved node without owning that wallet.
+This does not require adding other hardware vendors to Desktop.
+
+Synthetic regression fixtures prove relay preparation for 2-of-3 P2SH,
+P2WSH and P2SH-P2WSH: a PSBT with quorum signatures and a finalized PSBT produce
+the same txid as the extracted raw transaction. An incomplete PSBT is rejected;
+a raw transaction's fee remains unknown until previous input amounts are proven.
+These are local parser/finalization checks, not real multisig device signing or
+on-chain broadcasts. PSBT v0, 1 MB, I/O and derivation metadata caps still apply
+(currently four derivations per input/output); raw final transactions do not
+carry cosigner derivation metadata. Node acceptance enforces Bitcoin consensus.
+
+Desktop cannot currently add KeepKey's signature to multisig. Its account
+exports/imports and ownership checks are single-signature BIP44/49/84/86. It
+rejects already partial-signed input while signing, assumes every input belongs
+to one of those accounts, and expects a fully signed serialized transaction.
+The hdwallet KeepKey adapter maps multisig script-type enums but does not populate
+`TxInputType.multisig`, `TxOutputType.multisig`, or multisig GetAddress data.
+Firmware/protobuf multisig structures alone therefore do not establish support.
+Electrum 4.8's KeepKey plugin does populate those structures, including P2WSH and
+wrapped P2WSH. Sparrow's KeepKey implementation inherits TrezorClient's multisig
+input/output and address-display handling. These are host-code capabilities;
+exact hardware combinations still need tests. See [Sparrow's implementation](https://github.com/sparrowwallet/lark/blob/master/src/main/java/com/sparrowwallet/lark/TrezorClient.java),
+[Electrum's KeepKey plugin](https://github.com/spesmilo/electrum/blob/master/electrum/plugins/keepkey/keepkey.py),
+and [Electrum's multisig file/QR workflow](https://electrum.readthedocs.io/en/latest/multisig.html).
+
+If KeepKey co-signing through Desktop is pursued, the bounded next slice is:
+1. Export the KeepKey BIP48 public cosigner key with fingerprint/path/script type.
+2. Import an explicit multisig policy/descriptor from Sparrow or Electrum: quorum,
+   all cosigner origins/xpubs, key ordering, network and receive/change branches.
+   Verify the receive address on KeepKey and bind subsequent change to that policy.
+3. Extend the USB adapter and PSBT bridge to sign only KeepKey's share, preserve
+   existing signatures and unknown fields, and return a partial PSBT without
+   requiring quorum or finalizing prematurely. Verify the new signature locally.
+4. Demonstrate Sparrow/Electrum -> Desktop/KeepKey -> external cosigner in the
+   coordinator -> finalized file/QR -> Desktop broadcast, including wrong policy,
+   wrong device/passphrase, altered change, and insufficient signatures.
+
+Start with 2-of-3 native SegWit/BIP48 (`m/48'/0'/account'/2'`). Legacy and wrapped
+SegWit are separate acceptance cases. Taproot multisig/MuSig2 and native Desktop
+support for any other hardware vendor are outside this scope.
+
+
+Latest local validation: 843 Bun tests across 91 files passed (run outside the
+sandbox so temporary localhost REST servers can bind); the two standalone test
+scripts that exit their process are excluded from that shared test runner.
+The focused Bitcoin/QR suite passed 122 tests. No physical multisig signing is
+claimed by these parser and transport tests.

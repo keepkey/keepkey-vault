@@ -3745,7 +3745,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					await Bun.write(filePath, fin.psbtBytes)
 					if (pendingPsbt === p) pendingPsbt = null
 					lastSignedPsbtPath = filePath
-					return { filePath, txHex: fin.txHex, txid: fin.txid }
+					return { filePath, txHex: fin.txHex, txid: fin.txid, psbtBase64: Buffer.from(fin.psbtBytes).toString('base64') }
 				} finally {
 					p.signing = false
 				}
@@ -3764,12 +3764,12 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const std = toStandardXpub(meta.xpub)
 				if (std.scriptType !== (scriptType === 'p2tr' ? 'p2pkh' : scriptType)) throw new Error(`The ${scriptType} key has the wrong prefix`)
 				const fingerprint = btcAccounts.masterFingerprint
-				const result = { key: toSlip132(std.xpub, scriptType), fingerprint, derivation: formatPath(meta.path) }
+				const account = fingerprint ? { scriptType, path: meta.path, xpub: std.xpub, masterFingerprint: new Uint8Array(Buffer.from(fingerprint, 'hex')) } : null
+				const result = { key: toSlip132(std.xpub, scriptType), fingerprint, derivation: formatPath(meta.path), publicWallet: account ? writePublicWallet(account) : null }
 				if (!params.save) return result
 				if (!fingerprint) throw new Error('Master fingerprint unknown. Reconnect the KeepKey and try again.')
 				if (params.format && params.format !== 'desktop' && params.format !== 'electrum') throw new Error('Unknown public wallet export format')
-				const account = { scriptType, path: meta.path, xpub: std.xpub, masterFingerprint: new Uint8Array(Buffer.from(fingerprint, 'hex')) }
-				const json = params.format === 'desktop' ? writePublicWallet(account) : writeElectrumWallet(account, 'KeepKey')
+				const json = params.format === 'desktop' ? result.publicWallet! : writeElectrumWallet(account!, 'KeepKey')
 				const filePath = uniqueFilePath(path.join(os.homedir(), 'Downloads', `keepkey-btc-${scriptType}-account${meta.accountIndex}${params.format === 'desktop' ? '-public' : ''}.json`), fs.existsSync)
 				await Bun.write(filePath, json)
 				return { ...result, filePath }

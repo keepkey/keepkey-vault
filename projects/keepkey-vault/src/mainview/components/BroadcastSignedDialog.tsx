@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react"
 import { Box, Flex, Text, Button, Spinner } from "@chakra-ui/react"
+import { hex } from "@scure/base"
+import { BitcoinQrDialog } from "./BitcoinQrDialog"
 import { rpcRequest } from "../lib/rpc"
 import { Z } from "../lib/z-index"
 import type { BtcBroadcastReview } from "../../shared/types"
@@ -40,6 +42,7 @@ export function BroadcastSignedDialog() {
 	const [data, setData] = useState("")
 	const [review, setReview] = useState<BtcBroadcastReview | null>(null)
 	const [error, setError] = useState<string | null>(null)
+	const [showQr, setShowQr] = useState(false)
 	const [copied, setCopied] = useState(false)
 	const phaseRef = useRef(phase)
 	phaseRef.current = phase
@@ -49,6 +52,7 @@ export function BroadcastSignedDialog() {
 			const file = (e as CustomEvent<File>).detail
 			if (!file || phaseRef.current === "checking" || phaseRef.current === "sending") return
 			setName(file.name)
+			setShowQr(false)
 			setReview(null)
 			setError(null)
 			if (file.size > MAX_BYTES) {
@@ -107,6 +111,7 @@ export function BroadcastSignedDialog() {
 
 	return (
 		<>
+			{showQr && review && <BitcoinQrDialog bytes={hex.decode(review.txHex)} title="Signed transaction QR" onClose={() => setShowQr(false)} />}
 			<Box position="fixed" inset="0" bg="rgba(0,0,0,0.85)" zIndex={Z.dialog} onClick={busy ? undefined : handleDismiss} />
 			<Box
 				position="fixed" top="50%" left="50%" transform="translate(-50%, -50%)"
@@ -130,6 +135,7 @@ export function BroadcastSignedDialog() {
 							{phase === "done" && (
 								<Text fontSize="sm" fontWeight="600" color="var(--teal-2)">Broadcast endpoint returned the expected transaction ID. This does not establish network propagation or confirmation.</Text>
 							)}
+							<Button size="sm" variant="outline" onClick={() => setShowQr(true)}>Show transaction QR</Button>
 							<Box {...card}>
 								<Text fontSize="xs" fontWeight="700" color="kk.textSecondary" mb="2">TO ({review.outputs.length})</Text>
 								{review.outputs.map((o, i) => (

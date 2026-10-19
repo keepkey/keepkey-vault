@@ -12,15 +12,23 @@ afterEach(() => {
 })
 
 describe('own-node eligibility: btc-only device OR btc-only watch-only wallet', () => {
-  it('requires a selected wallet for generic signed-file broadcast when a node is configured', () => {
+  it('reviews and broadcasts signed files through the saved node with no device or selected wallet', () => {
     setBtcNodeConfig(NODE)
-    expect(() => getPsbtBroadcastRoute()).toThrow(/Open its saved Bitcoin-only wallet/)
+    expect(getPsbtBroadcastRoute().backend.kind).toBe('blockbook')
     setBtcNodeWatchOnlyEligible(true)
     expect(getPsbtBroadcastRoute().backend.kind).toBe('blockbook')
     setBtcNodeDeviceEligible(false)
     expect(getPsbtBroadcastRoute().backend.kind).toBe('blockbook')
     setBtcBackendOffline(true)
     expect(getPsbtBroadcastRoute().backend.kind).toBe('device-only')
+  })
+
+  it('a disconnected Core relay keeps the configured backend after restoring settings', () => {
+    setBtcNodeConfig({ type: 'core', url: NODE.url })
+    expect(getPsbtBroadcastRoute().backend.kind).toBe('core')
+    setBtcNodeConfig(null)
+    setBtcNodeConfig({ type: 'core', url: NODE.url })
+    expect(getPsbtBroadcastRoute().backend.kind).toBe('core')
   })
 
   it('invalidates a broadcast review when a node changes to another node of the same type', () => {

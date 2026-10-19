@@ -1,3 +1,4 @@
+import { BITCOIN_QR_SCAN_EVENT } from "./BitcoinQrImport"
 /**
  * DeviceGrid — wallet selector shown on the splash screen.
  *
@@ -8,7 +9,7 @@
  * can tell at a glance which wallets have signing live and which are cached.
  */
 import { useState, useEffect, useCallback } from "react"
-import { Box, Flex, Text, Image } from "@chakra-ui/react"
+import { Box, Flex, Text, Image, Button } from "@chakra-ui/react"
 import kkIcon from "../assets/icon.png"
 import { rpcRequest, onRpcMessage } from "../lib/rpc"
 import type { RegisteredDevice, EmulatorStatus, EmulatorWalletInfo } from "../../shared/types"
@@ -344,7 +345,7 @@ export function DeviceGrid({ onViewPortfolio, onReady, emulatorEnabled = false }
 			)}
 
 			{/* Watch-only import for a machine that never saw the KeepKey */}
-			<Flex justify="center" mt="4">
+			<Flex justify="center" mt="4" gap="2" wrap="wrap">
 				<Box
 					as="button"
 					onClick={() => window.dispatchEvent(new Event(WATCH_ONLY_IMPORT_EVENT))}
@@ -354,6 +355,7 @@ export function DeviceGrid({ onViewPortfolio, onReady, emulatorEnabled = false }
 				>
 					Import watch-only (Electrum file or xpub)
 				</Box>
+				<Button size="sm" variant="outline" color="var(--gold)" onClick={() => window.dispatchEvent(new Event(BITCOIN_QR_SCAN_EVENT))}>Scan Bitcoin QR</Button>
 			</Flex>
 
 			{/* Grand total + eyeball toggle */}

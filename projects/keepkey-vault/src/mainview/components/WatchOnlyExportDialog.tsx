@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback } from "react"
 import { Box, Flex, Text, Button, Spinner } from "@chakra-ui/react"
+import { BitcoinQrDialog } from "./BitcoinQrDialog"
 import { rpcRequest } from "../lib/rpc"
 import { Z } from "../lib/z-index"
 import type { BtcAccount } from "../../shared/types"
 
 type ExportScriptType = "p2wpkh" | "p2sh-p2wpkh" | "p2pkh" | "p2tr"
-type ExportData = { key: string; fingerprint: string | null; derivation: string; filePath?: string }
+type ExportData = { key: string; fingerprint: string | null; derivation: string; publicWallet: string | null; filePath?: string }
 
 const SCRIPT_TYPES: Array<{ scriptType: ExportScriptType; label: string }> = [
 	{ scriptType: "p2wpkh", label: "Native SegWit (bc1q)" },
@@ -28,12 +29,14 @@ export function WatchOnlyExportDialog({ accounts, isHiddenWallet, onClose }: { a
 	const [data, setData] = useState<ExportData | null>(null)
 	const [error, setError] = useState<string | null>(null)
 	const [busy, setBusy] = useState(false)
+	const [showQr, setShowQr] = useState(false)
 	const [copied, setCopied] = useState(false)
 	const [savedFormat, setSavedFormat] = useState<'desktop' | 'electrum'>('desktop')
 
 	useEffect(() => {
 		let cancelled = false
 		setData(null)
+		setShowQr(false)
 		setError(null)
 		rpcRequest<ExportData>("btcWatchOnlyExport", { accountIndex, scriptType }, 60000)
 			.then((d) => { if (!cancelled) setData(d) })
@@ -69,6 +72,7 @@ export function WatchOnlyExportDialog({ accounts, isHiddenWallet, onClose }: { a
 
 	return (
 		<>
+			{showQr && data?.publicWallet && <BitcoinQrDialog bytes={new TextEncoder().encode(data.publicWallet)} title="Desktop public wallet QR" onClose={() => setShowQr(false)} />}
 			<Box position="fixed" inset="0" bg="rgba(0,0,0,0.85)" zIndex={Z.dialog} onClick={busy ? undefined : onClose} />
 			<Box
 				position="fixed" top="50%" left="50%" transform="translate(-50%, -50%)"
@@ -137,6 +141,7 @@ export function WatchOnlyExportDialog({ accounts, isHiddenWallet, onClose }: { a
 
 						<Flex gap="2" justify="flex-end" wrap="wrap">
 							<Button {...plainButton} onClick={onClose} disabled={busy}>Close</Button>
+							<Button {...plainButton} disabled={!data?.publicWallet} onClick={() => setShowQr(true)}>Public wallet QR</Button>
 							<Button {...plainButton} onClick={handleCopy} disabled={!data}>{copied ? "Copied" : "Copy key"}</Button>
 							<Button {...plainButton} onClick={() => void handleSave('electrum')} disabled={!data || !data.fingerprint || busy || scriptType === "p2tr"}>
 								Save Electrum file

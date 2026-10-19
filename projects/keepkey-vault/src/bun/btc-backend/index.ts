@@ -93,13 +93,11 @@ export function getWatchOnlyBtcBackend(bitcoinOnlyWallet: boolean): BtcBackend {
   return bitcoinOnlyWallet && nodeBackend ? nodeBackend : PioneerBackend
 }
 
-/** A generic signed file does not identify the selected saved wallet. If a node
- * is configured, require the user to select its wallet rather than silently
- * offering Pioneer after a restart/disconnect. Bind review to the configuration,
- * including same-type URL/auth changes, without exposing node credentials. */
+/** Relaying a signed Bitcoin file requires neither a device nor a wallet. Honor
+ * the saved Bitcoin node independently of USB/view eligibility. Bind review to
+ * configuration changes without exposing node credentials. */
 export function getPsbtBroadcastRoute() {
-  const backend = getBtcBackend()
-  if (nodeBackend && backend.kind === 'pioneer') throw new Error('Your Bitcoin node is configured. Open its saved Bitcoin-only wallet before reviewing or broadcasting this file.')
+  const backend = offlineMode ? DeviceOnlyBackend : nodeBackend ?? PioneerBackend
   return { backend, id: `${backend.kind}:${nodeConfigRevision}` }
 }
 

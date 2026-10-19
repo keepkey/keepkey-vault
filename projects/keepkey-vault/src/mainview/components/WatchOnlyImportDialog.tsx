@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react"
 import { Box, Flex, Text, Button, Spinner, Textarea, Input } from "@chakra-ui/react"
 import { rpcRequest } from "../lib/rpc"
+import { BITCOIN_QR_SCAN_EVENT } from "./BitcoinQrImport"
 import { Z } from "../lib/z-index"
 import type { BtcWatchOnlyImport } from "../../shared/types"
 import { toBase64 } from "./PsbtSignDialog"
@@ -138,6 +139,7 @@ export function WatchOnlyImportDialog({ onImported }: { onImported: (deviceId: s
 								onChange={(e) => { const f = e.currentTarget.files?.[0]; e.currentTarget.value = ""; if (f) void readFile(f) }} />
 							<Flex gap="2" justify="flex-end">
 								<Button {...plainButton} onClick={close}>Cancel</Button>
+								<Button {...plainButton} onClick={() => { close(); window.dispatchEvent(new Event(BITCOIN_QR_SCAN_EVENT)) }}>Scan QR</Button>
 								<Button {...plainButton} onClick={() => fileRef.current?.click()}>Choose file</Button>
 								<Button {...goldButton} disabled={!pasted.trim()} onClick={() => void check({ data: pasted }, "")}>Check</Button>
 							</Flex>
