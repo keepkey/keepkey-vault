@@ -1387,6 +1387,7 @@ export interface AppSettings {
   activePioneerServer: string    // URL of the active server
   fiatCurrency: FiatCurrency     // display currency (default 'USD')
   numberLocale: string           // number formatting locale (default 'en-US')
+  btcMultisigEnabled: boolean    // runtime feature flag: Bitcoin multisig co-signing (default OFF)
   walletConnectEnabled: boolean   // feature flag: WalletConnect dApp support (default OFF)
   zcashPrivacyEnabled: boolean   // read-only capability: auto-ON when firmware >= 7.15.0 and this build includes zcash-cli
   hiveEnabled: boolean           // read-only capability: Hive blockchain — auto-ON when firmware >= 7.15.0
@@ -1535,9 +1536,11 @@ export interface BtcSignTxParams {
 
 /** btcPsbtAnalyze result. Amounts are satoshis as decimal strings (bigint on the bun side). */
 export type BtcPsbtReview =
+  | {kind:'policy-required';message:string}
   | { kind: 'signed'; txid: string; txHex: string; /** null = inputs not hash-verified, unknown */ fee: string | null }
   | {
       kind: 'review'
+      multisig?:{policyId:string;threshold:number;cosigners:number;fingerprint:string;signedCounts:number[]}
       id: string
       version: number
       locktime: number

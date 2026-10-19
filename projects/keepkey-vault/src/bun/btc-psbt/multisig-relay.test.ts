@@ -21,7 +21,7 @@ for (const type of ['p2sh', 'p2wsh', 'p2sh-p2wsh'] as const) {
     tx.addOutput({ script: destination.script, amount: 99_000n })
     const unsigned = tx.toPSBT()
     tx.sign(keys[0].privateKey!)
-    expect(() => alreadySigned(tx.toPSBT())).toThrow(/not fully signed/)
+    expect(alreadySigned(tx.toPSBT())).toBeNull()
     tx.sign(keys[1].privateKey!)
     const quorum = parseForBroadcast(tx.toPSBT())
     expect(quorum.fee).toBe(1000n)

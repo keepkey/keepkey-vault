@@ -1,3 +1,4 @@
+import {hasMultisigSigningData,btcMultisigEnabled,BTC_MULTISIG_DISABLED} from './btc-psbt/multisig-feature'
 import type { EngineController } from './engine-controller'
 import { takeDeviceRefusal } from './device-refusal'
 import { withPermit2SpenderName } from './permit2-spender-name'
@@ -2114,6 +2115,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               })
             }
           }
+          if(path === '/utxo/sign-transaction' && hasMultisigSigningData(probeCheckBody) && !btcMultisigEnabled(getSetting)) throw new HttpError(403,BTC_MULTISIG_DISABLED)
           const approvalStartedAt = Date.now()
           const approval = await callbacks.onSigningRequest(signingInfo)
           if (!approval.approved) {
@@ -3115,6 +3117,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.UtxoSignTransactionRequest)
+          if(hasMultisigSigningData(body) && !btcMultisigEnabled(getSetting))throw new HttpError(403,BTC_MULTISIG_DISABLED)
           const coin = body.coin || 'Bitcoin'
 
           // BCH: prepend bitcoincash: prefix to output addresses

@@ -19,7 +19,7 @@ function classify(bytes: Uint8Array): BitcoinQrPayload {
   if (!bytes.length || bytes.length > MAX_QR_BYTES) throw new Error('QR payload must be between 1 byte and 1 MB')
   if (magic(bytes)) return { bytes, kind: 'psbt' }
   const text = new TextDecoder().decode(bytes).trim()
-  if (text.startsWith('{') || /^[xyz]pub/.test(text)) return { bytes, kind: 'wallet' }
+  if (text.startsWith('{') || /^[xyz]pub/.test(text) || /^(?:wsh|sh)\(/.test(text)) return { bytes, kind: 'wallet' }
   if (bytes.length >= 10 && (bytes[0] === 1 || bytes[0] === 2) && bytes[1] === 0 && bytes[2] === 0 && bytes[3] === 0) return { bytes, kind: 'transaction' }
   throw new Error('QR does not contain a supported Bitcoin PSBT, transaction or public wallet')
 }
@@ -179,7 +179,7 @@ export class BitcoinQrDecoder {
       return this.finish(bytes, match[2] === 'P' ? 'psbt' : match[2] === 'T' ? 'transaction' : 'wallet')
     }
     if (this.identity) throw new Error('Reset before importing another QR')
-    if (/^(\{|[xyz]pub)/.test(text)) return this.finish(new TextEncoder().encode(text), 'wallet')
+    if (/^(\{|[xyz]pub|(?:wsh|sh)\()/.test(text)) return this.finish(new TextEncoder().encode(text), 'wallet')
     if (/^cHNidP/.test(text)) return this.finish(base64.decode(text), 'psbt')
     if (/^(70736274ff|0[12]000000)/i.test(text) && /^(?:[0-9a-f]{2})+$/i.test(text)) return this.finish(hex.decode(text.toLowerCase()))
     return this.finish(decodeBase43(text))

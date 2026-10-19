@@ -1,3 +1,4 @@
+import { looksLikeMultisigPolicy, MULTISIG_POLICY_EVENT } from "../../shared/multisig-policy"
 import { useState, useEffect, useCallback, useRef } from "react"
 import { Box, Flex, Text, Button, Spinner } from "@chakra-ui/react"
 import { rpcRequest, onRpcMessage } from "../lib/rpc"
@@ -144,6 +145,9 @@ export function FirmwareDropZone() {
 			if (looksLikeRawTxHex(head)) {
 				window.dispatchEvent(new CustomEvent(BTC_BROADCAST_EVENT, { detail: file }))
 				return
+			}
+			if(file.size<=1024*1024 && looksLikeMultisigPolicy(await file.text())) {
+				window.dispatchEvent(new CustomEvent(MULTISIG_POLICY_EVENT,{detail:file}));return
 			}
 			if (looksLikeWatchOnlyImport(head)) {
 				window.dispatchEvent(new CustomEvent(WATCH_ONLY_IMPORT_EVENT, { detail: file }))
