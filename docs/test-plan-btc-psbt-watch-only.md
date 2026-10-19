@@ -355,6 +355,14 @@ computers remain distinct operator acceptance checks.
   `*-cosigned.psbt`. Electrum independently verified this partial signature,
   added the public test cosigner and completed it. Desktop's finalization/parser
   accepted the returned file with the original txid and 1,000-sat fee.
+- Final operator check: with KeepKey disconnected, actual Desktop loaded the
+  Electrum-completed multisig PSBT into broadcast review. The operator explicitly
+  clicked Broadcast; Blockbook rejected the synthetic funding with
+  `bad-txns-inputs-missingorspent`. The displayed/copied raw transaction matched
+  the independently verified completed PSBT byte for byte: 60,000 sats payment,
+  39,000 sats change and a proven 1,000-sat fee. This proves the relay path and
+  expected node refusal, not a successful funded multisig broadcast. The synthetic
+  policy enrollment was removed; evidence files were retained locally.
 - Browser tests with simulated RPC exercised policy import/preview, cancellation
   without enrollment, enrollment, review resumption, partial signing without raw
   transaction actions, saved policy removal, and policy/partial-PSBT UR/BBQr UI.
