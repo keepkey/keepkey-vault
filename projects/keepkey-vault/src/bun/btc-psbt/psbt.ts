@@ -144,7 +144,7 @@ function txidOf(tx: RawTx): string {
   return hex.encode(sha256d(bytes).reverse())
 }
 
-function checkAmount(v: bigint, what: string): bigint {
+export function checkAmount(v: bigint, what: string): bigint {
   if (v < 0n || v > MAX_MONEY) throw new Error(`${what}: amount ${v} sats is outside 0..21M BTC, refusing`)
   return v
 }
@@ -156,7 +156,7 @@ function sats(v: bigint | number | string, what: string): bigint {
 }
 
 /** Firmware re-encodes OP_RETURN as 6a + op_push(len) + data (transaction.c); anything else can't be reproduced. */
-function opReturnData(script: Uint8Array): Uint8Array | undefined {
+export function opReturnData(script: Uint8Array): Uint8Array | undefined {
   if (script[0] !== 0x6a || script.length < 3) return undefined
   const pushdata1 = script[1] === 0x4c
   const len = pushdata1 ? script[2] : script[1]
@@ -166,13 +166,13 @@ function opReturnData(script: Uint8Array): Uint8Array | undefined {
   return data
 }
 
-function printable(data: Uint8Array): string {
+export function printable(data: Uint8Array): string {
   // Printable ASCII only: drops control, bidi and every other non-ASCII byte.
   return String.fromCharCode(...data.filter((c) => c >= 0x20 && c <= 0x7e))
 }
 
 /** Address from the script (never from PSBT strings). Refuses scripts the device can't pay or that burn funds. */
-function scriptToAddress(script: Uint8Array): string {
+export function scriptToAddress(script: Uint8Array): string {
   let out: ReturnType<typeof btc.OutScript.decode>
   try { out = btc.OutScript.decode(script) } catch { throw new Error('non-standard output script') }
   // pkh/sh, witness v0 with a 20/32-byte program, witness v1 with a 32-byte program.
@@ -365,7 +365,8 @@ function normalizeLegacyEmptyWitness(bytes: Uint8Array): Uint8Array {
 }
 
 /** Binary (psbt\xff), base64 (cHNidP8), hex (70736274ff) PSBT, or raw tx hex. Caps and structural refusals only. */
-export function decode(input: Uint8Array | string): Decoded {
+export function decode(input: Uint8Array | string, maxDerivations = MAX_DERIVATIONS): Decoded {
+  if (!Number.isInteger(maxDerivations) || maxDerivations < 1 || maxDerivations > 15) throw new Error('Invalid derivation limit')
   if (input.length > MAX_ENCODED_BYTES) throw new Error('Input is larger than 1 MB, refusing')
   let bytes: Uint8Array
   if (typeof input !== 'string' && startsWithMagic(input)) {
@@ -398,8 +399,8 @@ export function decode(input: Uint8Array | string): Decoded {
     const outpoint = `${hex.encode(inp.txid!)}:${inp.index}`
     if (seen.has(outpoint)) throw new Error(`Input #${i} spends the same coin as an earlier input, refusing`)
     seen.add(outpoint)
-    if ((inp.bip32Derivation?.length ?? 0) > MAX_DERIVATIONS || (inp.tapBip32Derivation?.length ?? 0) > MAX_DERIVATIONS) {
-      throw new Error(`Input #${i} has more than ${MAX_DERIVATIONS} key paths (multisig is not supported)`)
+    if ((inp.bip32Derivation?.length ?? 0) > maxDerivations || (inp.tapBip32Derivation?.length ?? 0) > maxDerivations) {
+      throw new Error(`Input #${i} has more than ${maxDerivations} key paths (multisig is not supported)`)
     }
     if (inp.witnessUtxo) checkAmount(inp.witnessUtxo.amount, `Input #${i}`)
     if (inp.nonWitnessUtxo) checkAmount(inp.nonWitnessUtxo.outputs[inp.index!].amount, `Input #${i}`)
@@ -407,8 +408,8 @@ export function decode(input: Uint8Array | string): Decoded {
   for (let i = 0; i < tx.outputsLength; i++) {
     const out = tx.getOutput(i)
     checkAmount(out.amount!, `Output #${i}`)
-    if ((out.bip32Derivation?.length ?? 0) > MAX_DERIVATIONS || (out.tapBip32Derivation?.length ?? 0) > MAX_DERIVATIONS) {
-      throw new Error(`Output #${i} has more than ${MAX_DERIVATIONS} key paths`)
+    if ((out.bip32Derivation?.length ?? 0) > maxDerivations || (out.tapBip32Derivation?.length ?? 0) > maxDerivations) {
+      throw new Error(`Output #${i} has more than ${maxDerivations} key paths`)
     }
   }
   return { kind: 'psbt', tx, bytes }
@@ -417,7 +418,7 @@ export function decode(input: Uint8Array | string): Decoded {
 // ── analyze ────────────────────────────────────────────────────────────
 
 /** Previous output of input #i. Amount comes from NON_WITNESS_UTXO when present, after hash and witness_utxo checks. */
-function prevOut(tx: btc.Transaction, i: number): { amount: bigint; script: Uint8Array; verified: boolean; prevTxHex?: string } {
+export function prevOut(tx: btc.Transaction, i: number): { amount: bigint; script: Uint8Array; verified: boolean; prevTxHex?: string } {
   const inp = tx.getInput(i)
   const txid = hex.encode(inp.txid!)
   if (inp.nonWitnessUtxo) {
@@ -605,7 +606,7 @@ export function toSignTx(a: PsbtAnalysis): PsbtSignTx {
 // ── finalize ───────────────────────────────────────────────────────────
 
 /** Legacy SIGHASH_ALL digest (public btc-signer API has no legacy preimage). */
-function legacySighash(tx: btc.Transaction, idx: number, script: Uint8Array): Uint8Array {
+export function legacySighash(tx: btc.Transaction, idx: number, script: Uint8Array): Uint8Array {
   const inputs = Array.from({ length: tx.inputsLength }, (_, j) => {
     const x = tx.getInput(j)
     return { txid: x.txid!, index: x.index!, sequence: x.sequence!, finalScriptSig: j === idx ? script : EMPTY }
@@ -800,7 +801,7 @@ function describeOutput(o: { amount: bigint; script: Uint8Array }): BroadcastOut
 
 /** Signed/finalized PSBT (finalized here if every input has its signatures) or raw tx hex, ready for broadcastBtcTx. */
 export function parseForBroadcast(input: Uint8Array | string): { txHex: string; txid: string; outputs: BroadcastOutput[]; fee: bigint | null } {
-  const d = decode(input)
+  const d = decode(input, 15)
   if (d.kind === 'rawtx') {
     // A raw tx carries no input amounts: fee unknown, never a guess.
     return { txHex: hex.encode(d.bytes), txid: txidOf(d.tx), outputs: d.tx.outputs.map(describeOutput), fee: null }
@@ -863,11 +864,13 @@ export async function feeFromPrevTxs(
 
 /** A dropped PSBT whose every input already carries signatures: the transaction it holds. null while any input is unsigned. */
 export function alreadySigned(input: Uint8Array | string): ReturnType<typeof parseForBroadcast> | null {
-  const d = decode(input)
+  const d = decode(input, 15)
   if (d.kind !== 'psbt') return null
   for (let i = 0; i < d.tx.inputsLength; i++) {
     const inp = d.tx.getInput(i)
     if (!inp.finalScriptSig?.length && !inp.finalScriptWitness?.length && !inp.partialSig?.length && !inp.tapKeySig) return null
   }
+  // A partial multisig signature is not a completed transaction.
+  if (!d.tx.isFinal) { try { d.tx.finalize() } catch { return null } }
   return parseForBroadcast(d.bytes)
 }

@@ -295,48 +295,103 @@ Desktop supports KeepKey hardware only. It can review/finalize a completed PSBT
 and relay a raw transaction through the saved node without owning that wallet.
 This does not require adding other hardware vendors to Desktop.
 
-Synthetic regression fixtures prove relay preparation for 2-of-3 P2SH,
-P2WSH and P2SH-P2WSH: a PSBT with quorum signatures and a finalized PSBT produce
-the same txid as the extracted raw transaction. An incomplete PSBT is rejected;
-a raw transaction's fee remains unknown until previous input amounts are proven.
-These are local parser/finalization checks, not real multisig device signing or
-on-chain broadcasts. PSBT v0, 1 MB, I/O and derivation metadata caps still apply
-(currently four derivations per input/output); raw final transactions do not
-carry cosigner derivation metadata. Node acceptance enforces Bitcoin consensus.
+Desktop now supports KeepKey co-signing of Bitcoin mainnet PSBT v0 for classic
+P2WSH, P2SH-P2WSH and P2SH multisig. The policy parser accepts explicit `multi`
+and `sortedmulti` descriptors, public Electrum multisig wallets, and Desktop
+public-policy JSON. Each cosigner must supply a master fingerprint, complete
+account origin and public account key. BIP48 origins are supported (legacy also
+accepts BIP45); normal account indices are limited to 0–100. Policies require
+2–15 distinct cosigners; repeated master fingerprints are conservatively refused.
+Taproot multisig/MuSig2 and other hardware integrations remain outside scope.
 
-Desktop cannot currently add KeepKey's signature to multisig. Its account
-exports/imports and ownership checks are single-signature BIP44/49/84/86. It
-rejects already partial-signed input while signing, assumes every input belongs
-to one of those accounts, and expects a fully signed serialized transaction.
-The hdwallet KeepKey adapter maps multisig script-type enums but does not populate
-`TxInputType.multisig`, `TxOutputType.multisig`, or multisig GetAddress data.
-Firmware/protobuf multisig structures alone therefore do not establish support.
-Electrum 4.8's KeepKey plugin does populate those structures, including P2WSH and
-wrapped P2WSH. Sparrow's KeepKey implementation inherits TrezorClient's multisig
-input/output and address-display handling. These are host-code capabilities;
-exact hardware combinations still need tests. See [Sparrow's implementation](https://github.com/sparrowwallet/lark/blob/master/src/main/java/com/sparrowwallet/lark/TrezorClient.java),
-[Electrum's KeepKey plugin](https://github.com/spesmilo/electrum/blob/master/electrum/plugins/keepkey/keepkey.py),
-and [Electrum's multisig file/QR workflow](https://electrum.readthedocs.io/en/latest/multisig.html).
+### Using co-signing
 
-If KeepKey co-signing through Desktop is pursued, the bounded next slice is:
-1. Export the KeepKey BIP48 public cosigner key with fingerprint/path/script type.
-2. Import an explicit multisig policy/descriptor from Sparrow or Electrum: quorum,
-   all cosigner origins/xpubs, key ordering, network and receive/change branches.
-   Verify the receive address on KeepKey and bind subsequent change to that policy.
-3. Extend the USB adapter and PSBT bridge to sign only KeepKey's share, preserve
-   existing signatures and unknown fields, and return a partial PSBT without
-   requiring quorum or finalizing prematurely. Verify the new signature locally.
-4. Demonstrate Sparrow/Electrum -> Desktop/KeepKey -> external cosigner in the
-   coordinator -> finalized file/QR -> Desktop broadcast, including wrong policy,
-   wrong device/passphrase, altered change, and insufficient signatures.
+1. Open **Multisig co-signing** on the Bitcoin page or under **Sign PSBT**.
+   Select script type/account and read the KeepKey public cosigner key. Copy the
+   key with its fingerprint and origin into the coordinator; never export a seed.
+2. Import the coordinator's public descriptor or unencrypted public Electrum
+   multisig wallet. Desktop checks the actual KeepKey account xpub, not just its
+   fingerprint. Compare the quorum, all cosigner keys and first receive address.
+3. Choose **Verify address on KeepKey and save**, and compare/confirm that first
+   receive address on the device and coordinator. Normal-wallet public policies
+   persist across restarts; passphrase-wallet policies exist only for the current
+   unlocked session. These must be imported/verified again after restart.
+4. Drop the unsigned/partially signed PSBT (or scan its QR). Desktop requires
+   every input to belong to one verified policy, every cosigner origin, complete
+   hash-checked previous transactions, coherent change scripts and SIGHASH_ALL.
+   It verifies earlier signatures before sending bare DER slots over USB.
+5. Review recipients/fee and confirm on KeepKey. Desktop verifies each returned
+   signature against the held transaction, preserves older signatures and unknown
+   PSBT fields, and saves `*-cosigned.psbt` even below quorum. The result offers
+   PSBT QR export. Raw transaction export is available only after quorum.
+6. Return partial files to Sparrow/Electrum for other signatures and combination.
+   A completed PSBT or final transaction can be reviewed and broadcast in Desktop
+   with KeepKey disconnected, through the saved backend. Offline state cannot
+   establish whether inputs remain unspent.
 
-Start with 2-of-3 native SegWit/BIP48 (`m/48'/0'/account'/2'`). Legacy and wrapped
-SegWit are separate acceptance cases. Taproot multisig/MuSig2 and native Desktop
-support for any other hardware vendor are outside this scope.
+Public policy descriptors support static text, animated UR and BBQr import/export;
+PSBT transport also supports Electrum Base43. Camera transport and two physical
+computers remain distinct operator acceptance checks.
 
+### Local evidence — 2026-10-18
 
-Latest local validation: 843 Bun tests across 91 files passed (run outside the
-sandbox so temporary localhost REST servers can bind); the two standalone test
-scripts that exit their process are excluded from that shared test runner.
-The focused Bitcoin/QR suite passed 122 tests. No physical multisig signing is
-claimed by these parser and transport tests.
+- Physical KeepKey **7.16.0**: native SegWit, wrapped SegWit and legacy BIP48
+  2-of-3 tests each matched four receive/change addresses and signed a synthetic
+  transaction after two device confirmation requests. These tests retained an
+  earlier public test cosigner's signature and independently verified KeepKey's
+  new DER signature. Each reached quorum with a 1,000-sat fee.
+- Installed Sparrow 2.1.2 Bitcoin library verified both signatures for all three
+  device-produced PSBTs, unchanged unsigned transaction bytes and the fee.
+  Electrum 4.8 independently verified both signatures and finalized each PSBT
+  to the same transaction ID as Desktop. These are actual library checks,
+  not claims of driving either coordinator's GUI or USB plugin.
+- Failure case: repeated recipient/amount with different synthetic inputs triggered
+  KeepKey's duplicate-transaction protection and exported no signed result.
+  Reconnecting cleared the protection; subsequent fixtures use distinct recipients.
+  Never automatically retry a rejected transaction or suppress the warning.
+- Actual Desktop: imported the public policy and displayed/confirmed its first
+  receive address on KeepKey. After restarting Desktop, the persisted policy
+  accepted an unsigned file, signed it on KeepKey and exported a below-quorum
+  `*-cosigned.psbt`. Electrum independently verified this partial signature,
+  added the public test cosigner and completed it. Desktop's finalization/parser
+  accepted the returned file with the original txid and 1,000-sat fee.
+- Browser tests with simulated RPC exercised policy import/preview, cancellation
+  without enrollment, enrollment, review resumption, partial signing without raw
+  transaction actions, saved policy removal, and policy/partial-PSBT UR/BBQr UI.
+- Automated checks cover altered change/origins, wrong device key despite matching
+  fingerprint, invalid old/new signatures, wrong previous transactions, partial
+  quorum, unknown-field retention, session-only storage and failed persistence.
+  The adapter contract covers DER slots and legacy public-key wire restrictions.
+
+The standalone device runner never broadcasts and uses nonexistent funding:
+
+```sh
+BTC_MULTISIG_EVIDENCE_DIR=/private/tmp/keepkey-multisig-check \
+  bun scripts/btc-multisig-hardware-check.ts --only=p2wsh --sign
+```
+
+Run from `projects/keepkey-vault` using Bun 1.3.14 (the packaged Desktop runtime).
+Close applications claiming the device first. Other script choices are
+`--only=p2sh-p2wsh` and `--only=p2sh`. Omit `--sign` for address checks only.
+Independent verifier commands (same working directory):
+
+```sh
+PYTHONPATH=/path/to/electrum /path/to/electrum-venv/bin/python \
+  scripts/test-btc-multisig-electrum.py EVIDENCE_DIR p2wsh
+SPARROW_CLASSES=/path/to/extracted-classes SPARROW_JDK=/path/to/jdk \
+  bun scripts/test-btc-multisig-sparrow.ts EVIDENCE_DIR p2wsh
+```
+
+The Electrum verifier optionally takes a third argument: the Desktop partial
+PSBT. It verifies KeepKey's share, completes it with the publicly known test
+cosigner from this fixture and saves the returned PSBT under EVIDENCE_DIR.
+Never use/fund this synthetic test policy as a real wallet.
+
+Final regression: 1,615 app tests, 8 adapter tests, 53 worker tests, 35 Core
+assertions and the standalone Cosmos (10) and flags (7) checks passed. The local
+macOS arm64 development app built. Typecheck retained 1,034 baseline diagnostics;
+the existing handler-map diagnostic now counts the additional RPC handlers.
+Evidence contains actual public wallet metadata; keep it outside the repository.
+No funded multisig transaction was broadcast by these tests. Coordinator GUI
+round trips, passphrase/account variants and an actual physically disconnected
+transfer still need their own evidence before being claimed in a video.

@@ -1535,9 +1535,11 @@ export interface BtcSignTxParams {
 
 /** btcPsbtAnalyze result. Amounts are satoshis as decimal strings (bigint on the bun side). */
 export type BtcPsbtReview =
+  | {kind:'policy-required';message:string}
   | { kind: 'signed'; txid: string; txHex: string; /** null = inputs not hash-verified, unknown */ fee: string | null }
   | {
       kind: 'review'
+      multisig?:{policyId:string;threshold:number;cosigners:number;fingerprint:string;signedCounts:number[]}
       id: string
       version: number
       locktime: number

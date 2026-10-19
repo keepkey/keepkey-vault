@@ -14,6 +14,7 @@ import { MobilePanel } from "./components/MobilePanel"
 import { WalletConnectPanel } from "./components/WalletConnectPanel"
 import { FirmwareDropZone } from "./components/FirmwareDropZone"
 import { BitcoinQrImport } from "./components/BitcoinQrImport"
+import { MultisigPolicyDialog } from "./components/MultisigPolicyDialog"
 import { PsbtSignDialog } from "./components/PsbtSignDialog"
 import { BroadcastSignedDialog } from "./components/BroadcastSignedDialog"
 import { WatchOnlyImportDialog } from "./components/WatchOnlyImportDialog"
@@ -920,7 +921,7 @@ function App() {
 	}, [])
 
 	// ── Firmware drop zone (always active) + the PSBT/broadcast dialogs it dispatches to ──
-	const firmwareDropZone = <><FirmwareDropZone /><PsbtSignDialog /><BroadcastSignedDialog /><BitcoinQrImport />
+	const firmwareDropZone = <><FirmwareDropZone /><PsbtSignDialog /><MultisigPolicyDialog /><BroadcastSignedDialog /><BitcoinQrImport />
 		<WatchOnlyImportDialog onImported={(id, lbl) => {
 			// The dialog hands the view back after its first refresh; re-importing the wallet on screen changes no state, so re-send it.
 			if (id === watchOnlyDeviceId && watchOnlyShown) rpcRequest("watchOnlySetView", { active: true, deviceId: id }).catch(() => {})

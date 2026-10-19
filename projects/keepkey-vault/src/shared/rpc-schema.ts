@@ -1,3 +1,4 @@
+import type { MultisigPolicyPreview,MultisigCosignerExport,BtcPsbtSigned } from "./multisig-policy"
 import type { ElectrobunRPCSchema } from 'electrobun/bun'
 import type { ClearSignReport } from './clearsign-report'
 import type { TxDetailLine } from './tx-clearsign'
@@ -115,8 +116,12 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       /** PSBT to sign: base64 of the dropped file or pasted text. No network; works offline. */
       btcPsbtAnalyze: { params: { data: string; name?: string }; response: BtcPsbtReview }
       /** Signs only the PSBT bun holds for this review id, in the wallet session it was checked in. */
-      btcPsbtSign: { params: { id: string }; response: { filePath: string; txHex: string; txid: string; psbtBase64: string } }
+      btcPsbtSign: { params: { id: string }; response: BtcPsbtSigned }
       btcPsbtShowFile: { params: void; response: void }
+      btcMultisigCosigner: {params:{scriptType:'p2wsh'|'p2sh-p2wsh'|'p2sh';accountIndex:number};response:MultisigCosignerExport}
+      btcMultisigPolicy: {params:{data:string;name?:string;save?:boolean};response:MultisigPolicyPreview}
+      btcMultisigPolicies: {params:void;response:MultisigPolicyPreview[]}
+      btcMultisigPolicyDelete: {params:{id:string};response:void}
       /** Watch-only Create PSBT (no device). Accounts come from the saved wallet; chain data from getBtcBackend(). */
       btcWatchOnlyAccounts: { params: { deviceId?: string } | void; response: BtcWatchOnlyAccounts }
       /** Electrum wallet file or bare x/y/zpub (data = text, fileBytes = base64). save=false previews. */

@@ -257,6 +257,11 @@ import type { ChainDef } from "../shared/chains"
 import { BtcAccountManager } from "./btc-accounts"
 import { alreadySigned, analyze as analyzePsbt, deriveAddress as deriveBtcAddress, feeFromPrevTxs, finalizeSigned, parseForBroadcast, toSignTx, type BtcPsbtScriptType, type PsbtAnalysis } from "./btc-psbt/psbt"
 import { accountPathFromXpub, formatPath, masterFingerprintFromDepth1Xpub, toSlip132, toStandardXpub, writeElectrumWallet } from "./btc-psbt/codec"
+import {parseMultisigPolicy,deriveMultisig,type MultisigPolicy} from './btc-psbt/multisig-policy'
+import {analyzeMultisig,matchesMultisigPolicy,isMultisigPsbt,multisigToSignTx,applyMultisigSignatures,type MultisigAnalysis} from './btc-psbt/multisig-cosign'
+import {readMultisigCosigner,readMultisigFingerprint,matchMultisigDevice,verifyMultisigPolicy} from './btc-psbt/multisig-device'
+import {MultisigRegistry,type SavedMultisigPolicy} from './btc-psbt/multisig-registry'
+import type {MultisigPolicyPreview} from '../shared/multisig-policy'
 import { writePublicWallet } from "./btc-psbt/public-wallet"
 import { parseWatchOnlyImport } from "./btc-psbt/watch-only-import"
 import { buildWatchOnlyPsbt } from "./btc-psbt/watch-only-build"
@@ -912,8 +917,53 @@ const btcAccounts = new BtcAccountManager()
 /** A Bitcoin-only saved wallet is on screen in watch-only (watchOnlySetView): the Bitcoin-only RPC boundary applies. */
 let watchOnlyViewBtcOnly = false
 /** The one PSBT under review. btcPsbtSign signs only this, by id, in the wallet session it was checked in. */
-let pendingPsbt: { id: string; stem: string; analysis: PsbtAnalysis; deviceId: string; hidden: boolean; epoch: number; wallet: unknown; signing: boolean } | null = null
+let pendingPsbt: { id: string; stem: string; analysis: PsbtAnalysis | MultisigAnalysis; deviceId: string; hidden: boolean; epoch: number; wallet: unknown; signing: boolean } | null = null
 let lastSignedPsbtPath: string | null = null
+const multisigRegistry = new MultisigRegistry(getSetting, setSetting, () => ({
+	hidden: engine.isPassphraseWallet,
+	epoch: activitySessionEpoch,
+}))
+const savedMultisigPolicies = () => multisigRegistry.read()
+const saveMultisigPolicies = (records: SavedMultisigPolicy[]) => multisigRegistry.write(records)
+function multisigPreview(policy: MultisigPolicy, record: SavedMultisigPolicy): MultisigPolicyPreview {
+	return {
+		id: policy.id,
+		name: record.name,
+		descriptor: policy.descriptor,
+		scriptType: policy.scriptType,
+		threshold: policy.threshold,
+		cosigners: policy.cosigners.map((c) => ({
+			fingerprint: c.fingerprint,
+			path: formatPath(c.path),
+			xpub: c.xpub,
+			ours: c.xpub === record.xpub,
+		})),
+		address: deriveMultisig(policy, 0, 0).address,
+		saved: record.verifiedAt > 0,
+		sessionOnly: engine.isPassphraseWallet,
+	}
+}
+function multisigSession() {
+	const wallet = engine.wallet,
+		hidden = engine.isPassphraseWallet,
+		epoch = activitySessionEpoch,
+		deviceId = engine.getDeviceState().deviceId
+	if (!wallet || engine.getDeviceState().state !== "ready")
+		throw new Error("Connect and unlock KeepKey for multisig co-signing")
+	if (pendingPsbt?.signing) throw new Error("Finish the current PSBT signing request first")
+	const assertCurrent = () => {
+		if (
+			engine.wallet !== wallet ||
+			engine.isPassphraseWallet !== hidden ||
+			activitySessionEpoch !== epoch ||
+			engine.getDeviceState().deviceId !== deviceId ||
+			engine.getDeviceState().state !== "ready"
+		)
+			throw new Error("The KeepKey wallet or passphrase changed. Start again.")
+	}
+	return { wallet, assertCurrent }
+}
+
 const evmAddresses = new EvmAddressManager()
 // Last deviceId we saw reach 'ready'. The managers above are kept across
 // disconnect for the watch-only UI, so a device-to-device swap (deviceId
@@ -3668,7 +3718,52 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				}
 				return await engine.wallet.btcSignTx(params)
 			},
+			btcMultisigCosigner: async (params) => {
+				const { wallet, assertCurrent } = multisigSession()
+				if (!["p2wsh", "p2sh-p2wsh", "p2sh"].includes(params?.scriptType))
+					throw new Error("Choose a supported multisig script type")
+				const key = await readMultisigCosigner(wallet as any, params.scriptType, params.accountIndex)
+				assertCurrent()
+				return key
+			},
+			btcMultisigPolicy: async (params) => {
+				const { wallet, assertCurrent } = multisigSession(),
+					policy = parseMultisigPolicy(params?.data)
+				const signerIndex = await matchMultisigDevice(wallet as any, policy)
+				assertCurrent()
+				const own = policy.cosigners[signerIndex]
+				const record: SavedMultisigPolicy = {
+					name:
+						String(params.name ?? "Multisig")
+							.replace(/[\u0000-\u001f\u007f]/g, "")
+							.trim()
+							.slice(0, 40) || "Multisig",
+					descriptor: policy.descriptor,
+					fingerprint: own.fingerprint,
+					xpub: own.xpub,
+					verifiedAt: 0,
+				}
+				if (params.save) {
+					await verifyMultisigPolicy(wallet as any, policy, signerIndex)
+					assertCurrent()
+					record.verifiedAt = Date.now()
+					saveMultisigPolicies([
+						...savedMultisigPolicies().filter((r) => parseMultisigPolicy(r.descriptor).id !== policy.id),
+						record,
+					])
+					pendingPsbt = null
+				}
+				return multisigPreview(policy, record)
+			},
+			btcMultisigPolicies: async () =>
+				savedMultisigPolicies().map((r) => multisigPreview(parseMultisigPolicy(r.descriptor), r)),
+			btcMultisigPolicyDelete: async ({ id }) => {
+				if (pendingPsbt?.signing) throw new Error("Finish signing before removing a multisig policy")
+				saveMultisigPolicies(savedMultisigPolicies().filter((r) => parseMultisigPolicy(r.descriptor).id !== id))
+				pendingPsbt = null
+			},
 			btcPsbtAnalyze: async (params): Promise<BtcPsbtReview> => {
+				if(pendingPsbt?.signing)throw new Error('Finish the current PSBT signing request first')
 				pendingPsbt = null
 				// base64 of at most 1 MB, checked before decoding (decode() re-checks the bytes).
 				if (typeof params?.data !== 'string' || params.data.length > 1_398_104) throw new Error('PSBT is larger than 1 MB, refusing')
@@ -3682,14 +3777,24 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const deviceId = engine.getDeviceState().deviceId || ''
 				const hidden = engine.isPassphraseWallet
 				const epoch = activitySessionEpoch
-				const { truth } = await ensureManagersForSeed('btcPsbtAnalyze')
-				if (!btcAccounts.isInitialized) await btcAccounts.initialize(wallet as any)
-				stampManagers(truth)
-				// Ownership is proven from the loaded account xpubs; fingerprints are only metadata.
-				const masterFingerprint = btcAccounts.masterFingerprint ? new Uint8Array(Buffer.from(btcAccounts.masterFingerprint, 'hex')) : undefined
-				const accounts = btcAccounts.getAllXpubMeta()
-					.map(x => ({ scriptType: x.scriptType as BtcPsbtScriptType, path: x.path, xpub: toStandardXpub(x.xpub).xpub, masterFingerprint }))
-				const analysis = analyzePsbt(bytes, accounts)
+				let analysis:PsbtAnalysis|MultisigAnalysis
+				if(isMultisigPsbt(bytes)){
+					const candidates=savedMultisigPolicies().map(record=>({record,policy:parseMultisigPolicy(record.descriptor)})).filter(({policy})=>matchesMultisigPolicy(bytes,policy))
+					if(!candidates.length)return {kind:'policy-required',message:'Import and verify this multisig wallet policy on KeepKey before co-signing. Use the coordinator’s descriptor or public Electrum multisig wallet file.'}
+					const fingerprint=await readMultisigFingerprint(wallet as any)
+					const found=candidates.find(({record})=>record.fingerprint===fingerprint)
+					if(!found)throw new Error('This KeepKey is not an enrolled cosigner. Check the device and passphrase.')
+					const signerIndex=await matchMultisigDevice(wallet as any,found.policy,fingerprint)
+					if(found.record.xpub!==found.policy.cosigners[signerIndex].xpub||!found.record.verifiedAt)throw new Error('Re-verify this multisig policy on KeepKey')
+					analysis=analyzeMultisig(bytes,found.policy,signerIndex)
+				}else{
+					const {truth}=await ensureManagersForSeed('btcPsbtAnalyze')
+					if(!btcAccounts.isInitialized)await btcAccounts.initialize(wallet as any)
+					stampManagers(truth)
+					const masterFingerprint=btcAccounts.masterFingerprint?new Uint8Array(Buffer.from(btcAccounts.masterFingerprint,'hex')):undefined
+					const accounts=btcAccounts.getAllXpubMeta().map(x=>({scriptType:x.scriptType as BtcPsbtScriptType,path:x.path,xpub:toStandardXpub(x.xpub).xpub,masterFingerprint}))
+					analysis=analyzePsbt(bytes,accounts)
+				}
 				if (engine.wallet !== wallet || engine.isPassphraseWallet !== hidden || activitySessionEpoch !== epoch) {
 					throw new Error('The wallet changed while checking this PSBT. Drop it again.')
 				}
@@ -3699,6 +3804,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const a = analysis
 				return {
 					kind: 'review', id, version: a.version, locktime: a.locktime,
+					...('multisig' in a?{multisig:{policyId:a.multisig.policy.id,threshold:a.multisig.policy.threshold,cosigners:a.multisig.policy.cosigners.length,fingerprint:a.multisig.fingerprint,signedCounts:a.inputs.map(x=>x.signatures)}}:{}),
 					inputs: a.inputs.map(x => ({
 						txid: x.txid, vout: x.vout, sequence: x.sequence, amount: x.amount.toString(), amountVerified: x.amountVerified,
 						scriptType: x.scriptType, path: formatPath(x.addressNList), address: x.address,
@@ -3723,7 +3829,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				}
 				p.signing = true
 				try {
-					const req = toSignTx(p.analysis)
+					const req = 'multisig' in p.analysis ? multisigToSignTx(p.analysis) : toSignTx(p.analysis)
 					const sign = () => engine.wallet!.btcSignTx(req as any)
 					let res: any
 					try {
@@ -3740,12 +3846,13 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						throw new Error(m === 'Failed to sign BTC transaction' ? 'The KeepKey did not sign: cancelled on the device or rejected by the firmware.' : m)
 					}
 					// Field-by-field check against the PSBT plus signature verification, then BIP174 finalize.
-					const fin = finalizeSigned(p.analysis, res?.serializedTx ?? '')
-					const filePath = uniqueFilePath(path.join(os.homedir(), 'Downloads', `${p.stem}-signed.psbt`), fs.existsSync)
+					if(engine.wallet!==p.wallet||engine.isPassphraseWallet!==p.hidden||activitySessionEpoch!==p.epoch||engine.getDeviceState().state!=='ready')throw new Error('The wallet changed during signing. No PSBT was exported.')
+					const fin = 'multisig' in p.analysis ? applyMultisigSignatures(p.analysis,res?.signatures??[]) : {...finalizeSigned(p.analysis,res?.serializedTx??''),complete:true}
+					const filePath = uniqueFilePath(path.join(os.homedir(), 'Downloads', `${p.stem}-${'multisig' in p.analysis?'cosigned':'signed'}.psbt`), fs.existsSync)
 					await Bun.write(filePath, fin.psbtBytes)
 					if (pendingPsbt === p) pendingPsbt = null
 					lastSignedPsbtPath = filePath
-					return { filePath, txHex: fin.txHex, txid: fin.txid, psbtBase64: Buffer.from(fin.psbtBytes).toString('base64') }
+					return {filePath,txHex:fin.txHex,txid:fin.txid,psbtBase64:Buffer.from(fin.psbtBytes).toString('base64'),complete:fin.complete,...('signaturesAdded' in fin?{signaturesAdded:fin.signaturesAdded,threshold:fin.threshold,cosigners:fin.cosigners,signedCounts:fin.signedCounts}:{})}
 				} finally {
 					p.signing = false
 				}

@@ -1,3 +1,4 @@
+import { looksLikeMultisigPolicy, MULTISIG_POLICY_EVENT } from '../../shared/multisig-policy'
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { hex } from '@scure/base'
 import { BitcoinQrDecoder } from '../../shared/bitcoin-qr'
@@ -33,7 +34,7 @@ export function BitcoinQrImport() {
     const { bytes, kind } = progress.result
     const file = new File([kind === 'transaction' ? hex.encode(bytes) : new Uint8Array(bytes)], kind === 'psbt' ? 'scanned.psbt' : kind === 'wallet' ? 'scanned-public-wallet.json' : 'scanned-transaction.txn')
     // Event strings avoid circular imports between the global dialogs.
-    window.dispatchEvent(new CustomEvent(kind === 'psbt' ? 'keepkey-psbt-drop' : kind === 'wallet' ? 'keepkey-watch-only-import' : 'keepkey-btc-broadcast', { detail: file }))
+    window.dispatchEvent(new CustomEvent(kind === 'psbt' ? 'keepkey-psbt-drop' : kind === 'wallet' ? (looksLikeMultisigPolicy(new TextDecoder().decode(bytes)) ? MULTISIG_POLICY_EVENT : 'keepkey-watch-only-import') : 'keepkey-btc-broadcast', { detail: file }))
     setOpen(false)
     return true
   }, [])

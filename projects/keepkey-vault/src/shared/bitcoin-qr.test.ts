@@ -110,3 +110,12 @@ describe('Bitcoin QR transport', () => {
     }
   })
 })
+
+
+test('multisig public descriptors transfer through static text, UR and BBQr', () => {
+  // The transport identifies public policy data; the backend validates its keys and origins.
+  const descriptor='wsh(sortedmulti(2,[12345678/48h/0h/0h/2h]xpubExample/<0;1>/*,[abcdef01/48h/0h/0h/2h]xpubOther/<0;1>/*))'
+  const bytes=new TextEncoder().encode(descriptor)
+  expect(new BitcoinQrDecoder().receive(descriptor).result).toEqual({kind:'wallet',bytes})
+  for(const format of ['ur','bbqr'] as const)expect(finish(bitcoinQrFrames(bytes,format,60).reverse())).toEqual({kind:'wallet',bytes})
+})
