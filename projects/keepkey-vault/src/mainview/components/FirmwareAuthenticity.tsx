@@ -241,7 +241,7 @@ export function FirmwareAuthenticity({
 									</Box>
 								)}
 								<Box as="button" type="button" fontSize="2xs" color={GOLD} textDecoration="underline"
-									onClick={() => openUrl("https://github.com/keepkey/keepkey-firmware/blob/master/docs/ReproducibleBuilds.md")}>
+								onClick={() => openUrl("https://github.com/keepkey/keepkey-firmware#verifying-published-binaries")}>
 									How to reproduce the build
 								</Box>
 							</HStack>

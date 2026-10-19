@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react"
 import { Box, Flex, Text, Button, Input, Spinner } from "@chakra-ui/react"
+import { base64 } from "@scure/base"
+import { BitcoinQrDialog } from "./BitcoinQrDialog"
 import { rpcRequest } from "../lib/rpc"
 import type { BtcWatchOnlyAccounts, BtcWatchOnlyPsbt } from "../../shared/types"
 
@@ -28,6 +30,7 @@ export function CreatePsbtPanel({ deviceId }: { deviceId?: string }) {
 	const [feeLevel, setFeeLevel] = useState<1 | 3 | 5>(3)
 	const [busy, setBusy] = useState(false)
 	const [result, setResult] = useState<BtcWatchOnlyPsbt | null>(null)
+	const [showQr, setShowQr] = useState(false)
 	const [copied, setCopied] = useState(false)
 	const [error, setError] = useState<string | null>(null)
 	const walletEpoch = useRef(0)
@@ -38,6 +41,7 @@ export function CreatePsbtPanel({ deviceId }: { deviceId?: string }) {
 		setInfo(null)
 		setAccount(0)
 		setResult(null)
+		setShowQr(false)
 		setError(null)
 		setBusy(false)
 		rpcRequest<BtcWatchOnlyAccounts>("btcWatchOnlyAccounts", deviceId ? { deviceId } : undefined)
@@ -75,6 +79,7 @@ export function CreatePsbtPanel({ deviceId }: { deviceId?: string }) {
 
 	return (
 		<Flex direction="column" gap="3">
+			{showQr && result && <BitcoinQrDialog bytes={base64.decode(result.psbtBase64)} title="Unsigned PSBT QR" onClose={() => setShowQr(false)} />}
 			<Text fontSize="md" fontWeight="700" color="kk.textPrimary">Create PSBT</Text>
 			<Box {...card} borderColor="rgba(233,196,106,0.4)" bg="rgba(233,196,106,0.06)">
 				<Text fontSize="xs" color="var(--gold)">
@@ -138,6 +143,7 @@ export function CreatePsbtPanel({ deviceId }: { deviceId?: string }) {
 						Saved{copied ? " and copied to the clipboard" : ""}. Not signed: sign it on a KeepKey, then drop the signed file here to broadcast it.
 					</Text>
 					<Text fontSize="xs" fontFamily="mono" color="kk.textPrimary" wordBreak="break-all" mb="2">{result.filePath}</Text>
+					<Button size="sm" variant="outline" mb="2" onClick={() => setShowQr(true)}>Show unsigned QR</Button>
 					{result.outputs.map((o, i) => (
 						<Flex key={i} justify="space-between" gap="2">
 							<Text fontSize="xs" fontFamily="mono" color="kk.textPrimary" wordBreak="break-all">{o.change ? `${o.address} (change)` : o.address}</Text>

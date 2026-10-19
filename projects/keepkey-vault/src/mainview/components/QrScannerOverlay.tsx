@@ -4,279 +4,154 @@ import { Box, Flex, Text, Button } from "@chakra-ui/react"
 import jsQR from "jsqr"
 
 interface QrScannerOverlayProps {
-	onScan: (data: string) => void
-	onClose: () => void
+  onScan: (data: string) => void
+  onClose: () => void
+  /** Return false while collecting an animated sequence. Throw to show an error. */
+  onFrame?: (data: string) => boolean
+  onReset?: () => void
+  status?: string
+  title?: string
+  initialImages?: File[]
 }
 
-type ScanMode = "starting" | "streaming" | "fallback"
-
-function decodeQrFromImageSrc(src: string): Promise<string | null> {
-	return new Promise((resolve) => {
-		const img = new Image()
-		img.onload = () => {
-			const canvas = document.createElement("canvas")
-			canvas.width = img.width
-			canvas.height = img.height
-			const ctx = canvas.getContext("2d")
-			if (!ctx) { resolve(null); return }
-			ctx.drawImage(img, 0, 0)
-			const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
-			const code = jsQR(imageData.data, imageData.width, imageData.height)
-			resolve(code?.data || null)
-		}
-		img.onerror = () => resolve(null)
-		img.src = src
-	})
+async function decodeImage(file: Blob): Promise<string | null> {
+  if (file.size > 20 * 1024 * 1024) throw new Error("QR image exceeds 20 MB")
+  const url = URL.createObjectURL(file)
+  try {
+    const img = new Image()
+    await new Promise<void>((resolve, reject) => {
+      img.onload = () => resolve()
+      img.onerror = () => reject(new Error("Could not read this QR image"))
+      img.src = url
+    })
+    if (!img.width || !img.height || img.width * img.height > 16_000_000) throw new Error("QR image exceeds 16 megapixels")
+    const canvas = document.createElement("canvas")
+    canvas.width = img.width
+    canvas.height = img.height
+    const ctx = canvas.getContext("2d", { willReadFrequently: true })
+    if (!ctx) throw new Error("Image scanning is unavailable")
+    ctx.drawImage(img, 0, 0)
+    const data = ctx.getImageData(0, 0, canvas.width, canvas.height)
+    return jsQR(data.data, data.width, data.height)?.data ?? null
+  } finally { URL.revokeObjectURL(url) }
 }
 
-function decodeQrFromBlob(blob: File | Blob): Promise<string | null> {
-	const url = URL.createObjectURL(blob)
-	return decodeQrFromImageSrc(url).finally(() => URL.revokeObjectURL(url))
-}
+/** One frame for addresses/WalletConnect; continuing frames for Bitcoin UR/BBQr.
+ * Images and camera frames are decoded locally. Camera tracks always stop on exit. */
+export function QrScannerOverlay({ onScan, onClose, onFrame, onReset, status, title = "Scan QR Code", initialImages }: QrScannerOverlayProps) {
+  const [mode, setMode] = useState<"starting" | "streaming" | "images">(initialImages?.length ? "images" : "starting")
+  const [error, setError] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [cameraAttempt, setCameraAttempt] = useState(0)
+  const video = useRef<HTMLVideoElement>(null)
+  const input = useRef<HTMLInputElement>(null)
+  const stream = useRef<MediaStream | null>(null)
+  const timer = useRef<ReturnType<typeof setInterval> | null>(null)
+  const done = useRef(false)
+  const mounted = useRef(true)
+  const imagesBusy = useRef(false)
+  const callbacks = useRef({ onScan, onClose, onFrame })
+  callbacks.current = { onScan, onClose, onFrame }
+  const stop = useCallback(() => {
+    if (timer.current) clearInterval(timer.current)
+    timer.current = null
+    stream.current?.getTracks().forEach(t => t.stop())
+    stream.current = null
+  }, [])
+  const accept = useCallback((data: string) => {
+    if (done.current || !mounted.current) return false
+    try {
+      const complete = callbacks.current.onFrame ? callbacks.current.onFrame(data) : true
+      setError(null)
+      if (complete) {
+        done.current = true
+        stop()
+        if (!callbacks.current.onFrame) callbacks.current.onScan(data)
+      }
+      return complete
+    } catch (e: any) { setError(e?.message || "Could not decode QR"); return false }
+  }, [stop])
+  const processImages = useCallback(async (files: File[]) => {
+    if (imagesBusy.current || done.current) return
+    imagesBusy.current = true
+    setLoading(true)
+    setError(null)
+    try {
+      if (files.length > 4096) throw new Error("Select at most 4096 QR frame images")
+      for (const file of files) {
+        if (!mounted.current || done.current) break
+        const data = await decodeImage(file)
+        if (!mounted.current) break
+        if (!data) throw new Error("No QR found. Use a clearer image, or select all frames of the animation.")
+        if (accept(data)) break
+      }
+    } catch (e: any) { if (mounted.current) setError(e?.message || "Image scan failed") }
+    finally { imagesBusy.current = false; if (mounted.current) setLoading(false) }
+  }, [accept])
+  useEffect(() => {
+    mounted.current = true
+    done.current = false
+    if (initialImages?.length) void processImages(initialImages)
+    return () => { mounted.current = false; done.current = true; stop() }
+    // Initial images belong to this scanner session only.
+  }, [stop, processImages, initialImages])
+  useEffect(() => {
+    if (mode === "images") return
+    let cancelled = false
+    async function start() {
+      try {
+        if (!navigator.mediaDevices?.getUserMedia) throw new Error("Camera unavailable")
+        const camera = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false })
+        if (cancelled || done.current) { camera.getTracks().forEach(t => t.stop()); return }
+        stream.current = camera
+        if (video.current) { video.current.srcObject = camera; await video.current.play() }
+        if (cancelled || done.current) { stop(); return }
+        setMode("streaming")
+        const canvas = document.createElement("canvas")
+        const ctx = canvas.getContext("2d", { willReadFrequently: true })
+        if (!ctx) throw new Error("Camera image scanning is unavailable")
+        timer.current = setInterval(() => {
+          const v = video.current
+          if (done.current || imagesBusy.current || !v || v.readyState < 2 || !v.videoWidth) return
+          const scale = Math.min(1, 1600 / Math.max(v.videoWidth, v.videoHeight))
+          canvas.width = Math.round(v.videoWidth * scale)
+          canvas.height = Math.round(v.videoHeight * scale)
+          ctx.drawImage(v, 0, 0, canvas.width, canvas.height)
+          const frame = ctx.getImageData(0, 0, canvas.width, canvas.height)
+          const code = jsQR(frame.data, frame.width, frame.height)
+          if (code?.data) accept(code.data)
+        }, 120)
+      } catch {
+        if (!cancelled) { stop(); setError("Camera unavailable. Choose QR image files instead, or retry the camera."); setMode("images") }
+      }
+    }
+    void start()
+    return () => { cancelled = true; stop() }
+    // Changing starting -> streaming must not restart the camera.
+  }, [cameraAttempt, mode === "images", accept, stop])
 
-export function QrScannerOverlay({ onScan, onClose }: QrScannerOverlayProps) {
-	const [mode, setMode] = useState<ScanMode>("starting")
-	const [error, setError] = useState<string | null>(null)
-	const [loading, setLoading] = useState(false)
-	const [dragOver, setDragOver] = useState(false)
-	const videoRef = useRef<HTMLVideoElement>(null)
-	const canvasRef = useRef<HTMLCanvasElement>(null)
-	const fileInputRef = useRef<HTMLInputElement>(null)
-	const foundRef = useRef(false)
-	const streamRef = useRef<MediaStream | null>(null)
-	const scanIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
-
-	// Start browser camera on mount
-	useEffect(() => {
-		foundRef.current = false
-		let cancelled = false
-
-		async function startCamera() {
-			try {
-				const stream = await navigator.mediaDevices.getUserMedia({
-					video: { facingMode: "environment", width: { ideal: 640 }, height: { ideal: 480 } },
-					audio: false,
-				})
-				if (cancelled) { stream.getTracks().forEach(t => t.stop()); return }
-				streamRef.current = stream
-				if (videoRef.current) {
-					videoRef.current.srcObject = stream
-					videoRef.current.play().catch(() => {})
-				}
-				setMode("streaming")
-
-				// Scan frames for QR codes at ~10fps
-				scanIntervalRef.current = setInterval(() => {
-					if (foundRef.current || !videoRef.current || !canvasRef.current) return
-					const video = videoRef.current
-					if (video.readyState < video.HAVE_ENOUGH_DATA) return
-
-					const canvas = canvasRef.current
-					canvas.width = video.videoWidth
-					canvas.height = video.videoHeight
-					const ctx = canvas.getContext("2d", { willReadFrequently: true })
-					if (!ctx) return
-					ctx.drawImage(video, 0, 0)
-					const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
-					const code = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: "dontInvert" })
-					if (code?.data) {
-						foundRef.current = true
-						if (scanIntervalRef.current) clearInterval(scanIntervalRef.current)
-						if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop())
-						onScan(code.data)
-					}
-				}, 100)
-			} catch (err: any) {
-				if (cancelled) return
-				console.warn("[QrScanner] getUserMedia failed:", err.message)
-				setError("Camera not available. Upload a QR code image instead.")
-				setMode("fallback")
-			}
-		}
-
-		startCamera()
-
-		return () => {
-			cancelled = true
-			if (scanIntervalRef.current) clearInterval(scanIntervalRef.current)
-			if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop())
-		}
-	}, [onScan])
-
-	const handleClose = useCallback(() => {
-		if (scanIntervalRef.current) clearInterval(scanIntervalRef.current)
-		if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop())
-		onClose()
-	}, [onClose])
-
-	// File upload fallback
-	const processFile = useCallback(async (file: File | Blob) => {
-		setLoading(true)
-		setError(null)
-		const result = await decodeQrFromBlob(file)
-		setLoading(false)
-		if (result) {
-			onScan(result)
-		} else {
-			setError("No QR code found in image. Try a clearer photo.")
-		}
-	}, [onScan])
-
-	const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-		const file = e.target.files?.[0]
-		if (file) processFile(file)
-		e.target.value = ""
-	}, [processFile])
-
-	const handleDrop = useCallback((e: React.DragEvent) => {
-		e.preventDefault()
-		setDragOver(false)
-		const file = e.dataTransfer.files?.[0]
-		if (file && file.type.startsWith("image/")) {
-			processFile(file)
-		}
-	}, [processFile])
-
-	// Portal to <body>: `position: fixed` resolves against the nearest
-	// transformed/filtered ancestor, not the viewport, so rendering in place
-	// left the overlay offset by that ancestor's origin (SendForm, WalletConnect
-	// and ZcashPrivacyTab all mount under animated containers).
-	return createPortal(
-		<Flex
-			position="fixed"
-			inset={0}
-			bg="blackAlpha.900"
-			align="center" justify="center"
-			zIndex={2000}
-			direction="column"
-			overflowY="auto"
-			py="6"
-		>
-			<Text fontSize="lg" fontWeight="bold" color="white" mb="4">
-				Scan QR Code
-			</Text>
-
-			{/* Live camera feed */}
-			{(mode === "starting" || mode === "streaming") && (
-				<>
-					<Box
-						position="relative"
-						borderRadius="lg"
-						overflow="hidden"
-						border="2px solid"
-						borderColor="kk.gold"
-						maxW="400px"
-						w="90%"
-						bg="black"
-					>
-						{mode === "starting" && (
-							<Flex align="center" justify="center" h="300px">
-								<Text fontSize="sm" color="gray.500">Starting camera...</Text>
-							</Flex>
-						)}
-						<video
-							ref={videoRef}
-							playsInline
-							muted
-							style={{
-								width: "100%",
-								display: mode === "streaming" ? "block" : "none",
-								background: "#000",
-							}}
-						/>
-						{/* Scan target overlay */}
-						{mode === "streaming" && (
-							<Box
-								position="absolute" top="50%" left="50%"
-								transform="translate(-50%, -50%)"
-								w="60%" h="60%"
-								border="2px solid rgba(233,196,106,0.5)"
-								borderRadius="md"
-								pointerEvents="none"
-							/>
-						)}
-					</Box>
-					<canvas ref={canvasRef} style={{ display: "none" }} />
-
-					<Text fontSize="xs" color="gray.500" mt="3" textAlign="center">
-						Point your camera at a wallet QR code
-					</Text>
-
-					{/* Switch to file upload */}
-					<Button
-						size="xs" variant="ghost" color="gray.600" mt="2"
-						_hover={{ color: "gray.400" }}
-						onClick={() => {
-							if (scanIntervalRef.current) clearInterval(scanIntervalRef.current)
-							if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop())
-							setMode("fallback")
-						}}
-					>
-						Use image file instead
-					</Button>
-				</>
-			)}
-
-			{/* File upload fallback */}
-			{mode === "fallback" && (
-				<>
-					{error && (
-						<Box mb="3" bg="rgba(255,23,68,0.1)" border="1px solid" borderColor="red.500" borderRadius="lg" p="3" maxW="360px" w="90%">
-							<Text color="red.400" fontSize="xs" textAlign="center">{error}</Text>
-						</Box>
-					)}
-
-					<Box
-						w="90%" maxW="360px" h="180px"
-						border="2px dashed"
-						borderColor={dragOver ? "kk.gold" : "gray.600"}
-						borderRadius="lg"
-						bg={dragOver ? "rgba(233,196,106,0.06)" : "rgba(255,255,255,0.03)"}
-						cursor="pointer"
-						transition="all 0.15s"
-						_hover={{ borderColor: "kk.gold", bg: "rgba(233,196,106,0.06)" }}
-						onClick={() => fileInputRef.current?.click()}
-						onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
-						onDragLeave={() => setDragOver(false)}
-						onDrop={handleDrop}
-					>
-						<Flex direction="column" align="center" justify="center" h="100%" gap="2" px="4">
-							<svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke={dragOver ? "var(--gold)" : "#888"} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-								<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-								<polyline points="17 8 12 3 7 8" />
-								<line x1="12" y1="3" x2="12" y2="15" />
-							</svg>
-							<Text fontSize="sm" color={dragOver ? "kk.gold" : "gray.400"} textAlign="center">
-								{loading ? "Scanning..." : "Drop a QR code image here"}
-							</Text>
-							<Text fontSize="xs" color="gray.600" textAlign="center">
-								or click to browse
-							</Text>
-						</Flex>
-					</Box>
-
-					<input
-						ref={fileInputRef}
-						type="file"
-						accept="image/*"
-						style={{ display: "none" }}
-						onChange={handleFileChange}
-					/>
-				</>
-			)}
-
-			{/* Cancel */}
-			<Button
-				mt="4" size="sm"
-				variant="outline"
-				borderColor="gray.600"
-				color="gray.300"
-				_hover={{ borderColor: "red.400", color: "red.400" }}
-				onClick={handleClose}
-			>
-				Cancel
-			</Button>
-		</Flex>,
-		document.body
-	)
+  const close = () => { done.current = true; stop(); callbacks.current.onClose() }
+  return createPortal(
+    <Flex position="fixed" inset={0} bg="blackAlpha.900" zIndex={2000} align="center" justify="center" direction="column" overflowY="auto" py="5" gap="3" role="dialog" aria-modal="true" aria-label={title}>
+      <Text color="white" fontSize="lg" fontWeight="bold">{title}</Text>
+      {mode !== "images" && <Box w="90%" maxW="560px" bg="black" border="1px solid" borderColor="kk.gold" borderRadius="lg" overflow="hidden">
+        {mode === "starting" && <Text p="5" color="gray.400">Starting camera…</Text>}
+        <video ref={video} playsInline muted style={{ width: "100%", display: mode === "streaming" ? "block" : "none" }} />
+      </Box>}
+      <Text color="gray.300" fontSize="sm" textAlign="center" maxW="90%" role="status">{loading ? "Reading QR images…" : status || "Point the camera at a QR code. Keep animated codes playing until all frames arrive."}</Text>
+      {error && <Text color="red.300" fontSize="sm" maxW="90%" textAlign="center" role="alert">{error}</Text>}
+      <Box border="1px dashed" borderColor="gray.500" p="4" borderRadius="lg" color="gray.300" cursor="pointer" maxW="90%"
+        onClick={() => input.current?.click()}
+        onDragOver={e => { e.preventDefault(); e.stopPropagation() }}
+        onDrop={e => { e.preventDefault(); e.stopPropagation(); void processImages(Array.from(e.dataTransfer.files)) }}>
+        Choose or drop QR images (select all frames for animated codes)
+      </Box>
+      <input ref={input} type="file" accept="image/png,image/jpeg,image/webp,image/bmp" multiple style={{ display: "none" }} onChange={e => { const files = Array.from(e.target.files ?? []); e.target.value = ""; void processImages(files) }} />
+      <Flex gap="2" wrap="wrap" justify="center">
+        {mode === "images" ? <Button size="sm" bg="gray.800" color="gray.200" onClick={() => { setError(null); setMode("starting"); setCameraAttempt(n => n + 1) }}>Retry camera</Button>
+          : <Button size="sm" bg="gray.800" color="gray.200" onClick={() => { stop(); setMode("images") }}>Stop camera</Button>}
+        {onReset && <Button size="sm" bg="gray.800" color="gray.200" disabled={loading} onClick={() => { done.current = false; onReset(); setError(null) }}>Reset scan</Button>}
+        <Button size="sm" bg="gray.800" color="gray.200" onClick={close}>Cancel</Button>
+      </Flex>
+    </Flex>, document.body)
 }

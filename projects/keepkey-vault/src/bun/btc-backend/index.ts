@@ -4,11 +4,10 @@
  * - offline (airplane) mode → DeviceOnlyBackend (every net op throws OFFLINE)
  * - default                 → PioneerBackend
  *
- * Self-host (core/electrum/blockbook) backends slot in here later, selected from
- * the btc_nodes config — WITHOUT touching consumers. No auto-fallback: a failed
- * self-host backend throws (verbose), it does NOT silently reroute to Pioneer —
- * that's the sovereignty stance (see design doc). The offline flag is pushed in
- * by index.ts (setBtcBackendOffline) so this module stays db/pioneer-free.
+ * Core/Blockbook use the persisted node configuration for an eligible device or
+ * saved wallet. A failed self-host backend throws; it never reroutes to Pioneer.
+ * Settings and wallet scope are pushed in by index.ts so this module stays
+ * independent of the database and Pioneer client initialization.
  */
 import type { BtcBackend } from './types'
 import { PioneerBackend } from './pioneer'
@@ -26,10 +25,9 @@ export type NodeConfig =
 
 let offlineMode = false
 let nodeBackend: BtcBackend | null = null
-// The persisted node config is GLOBAL, but only a btc-only device may use it. A
-// multichain device (or no device yet) must never inherit another device's
-// self-host node — its BTC stays on Pioneer. Set from index.ts on every device
-// state-change; false until a btc-only device reaches ready.
+let nodeConfigRevision = 0
+// Node configuration is persisted globally; eligibility follows the selected
+// Bitcoin-only device or saved wallet, rather than USB connection state alone.
 let deviceBtcOnly = false
 // A Bitcoin-only watch-only wallet is open (no device needed). Kept apart from
 // deviceBtcOnly because every device state-change rewrites that one.
@@ -38,8 +36,8 @@ let watchOnlyBtc = false
 /** The persisted node is live only for a btc-only device or a btc-only watch-only wallet. */
 function nodeActive(): boolean { return nodeBackend !== null && (deviceBtcOnly || watchOnlyBtc) }
 
-/** True when the persisted node is actually in use (configured AND the connected
- *  device is btc-only). Callers use this instead of the raw btc_node_enabled
+/** True when the persisted node is actually in use for the selected device or
+ *  watch-only wallet. Callers use this instead of the raw btc_node_enabled
  *  setting so a suppressed node isn't shown as active on a multichain device. */
 export function isBtcNodeActive(): boolean { return nodeActive() }
 
@@ -57,6 +55,7 @@ export function setBtcBackendOffline(v: boolean): void {
 
 /** Set by index.ts from the persisted self-host node config. null → Pioneer. */
 export function setBtcNodeConfig(cfg: NodeConfig | null): void {
+  nodeConfigRevision++
   nodeBackend = !cfg ? null
     : cfg.type === 'blockbook' ? makeBlockbookBackend(cfg)
     : makeCoreBackend(cfg)
@@ -84,6 +83,22 @@ export function getBtcBackend(): BtcBackend {
   // applies to a btc-only device or watch-only wallet (nodeActive); else BTC stays on Pioneer.
   if (nodeActive()) return nodeBackend!
   return PioneerBackend
+}
+
+/** A watch-only request names its saved wallet explicitly. It may arrive before
+ * the UI's view notification, or while a different device is connected. Capture
+ * its backend from that wallet's scope, without changing global device state. */
+export function getWatchOnlyBtcBackend(bitcoinOnlyWallet: boolean): BtcBackend {
+  if (offlineMode) return DeviceOnlyBackend
+  return bitcoinOnlyWallet && nodeBackend ? nodeBackend : PioneerBackend
+}
+
+/** Relaying a signed Bitcoin file requires neither a device nor a wallet. Honor
+ * the saved Bitcoin node independently of USB/view eligibility. Bind review to
+ * configuration changes without exposing node credentials. */
+export function getPsbtBroadcastRoute() {
+  const backend = offlineMode ? DeviceOnlyBackend : nodeBackend ?? PioneerBackend
+  return { backend, id: `${backend.kind}:${nodeConfigRevision}` }
 }
 
 const BTC_NETWORK_ID = 'bip122:000000000019d6689c085ae165831e93'

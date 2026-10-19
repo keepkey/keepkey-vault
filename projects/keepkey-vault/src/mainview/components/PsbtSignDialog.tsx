@@ -1,6 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from "react"
 import { Box, Flex, Text, Button, Spinner, Textarea } from "@chakra-ui/react"
+import { base64, hex } from "@scure/base"
+import { BitcoinQrDialog } from "./BitcoinQrDialog"
 import { rpcRequest } from "../lib/rpc"
+import { BITCOIN_QR_SCAN_EVENT } from "./BitcoinQrImport"
 import { Z } from "../lib/z-index"
 import type { BtcPsbtReview } from "../../shared/types"
 import { BTC_BROADCAST_EVENT } from "./BroadcastSignedDialog"
@@ -53,9 +56,10 @@ export function PsbtSignDialog() {
 	const [phase, setPhase] = useState<Phase>("idle")
 	const [name, setName] = useState("")
 	const [review, setReview] = useState<Review | null>(null)
-	const [signed, setSigned] = useState<{ txid: string; txHex: string; filePath: string } | null>(null)
+	const [signed, setSigned] = useState<{ txid: string; txHex: string; filePath: string; psbtBase64: string } | null>(null)
 	const [error, setError] = useState<string | null>(null)
 	const [pasted, setPasted] = useState("")
+	const [showQr, setShowQr] = useState<"psbt" | "transaction" | null>(null)
 	const [copied, setCopied] = useState(false)
 	const phaseRef = useRef(phase)
 	phaseRef.current = phase
@@ -120,7 +124,7 @@ export function PsbtSignDialog() {
 		setError(null)
 		try {
 			// No timeout: the user confirms every output, then the total and fee, on the device.
-			const result = await rpcRequest<{ filePath: string; txHex: string; txid: string }>("btcPsbtSign", { id: review.id }, 0)
+			const result = await rpcRequest<{ filePath: string; txHex: string; txid: string; psbtBase64: string }>("btcPsbtSign", { id: review.id }, 0)
 			setSigned(result)
 			setPhase("done")
 		} catch (err: any) {
@@ -140,6 +144,7 @@ export function PsbtSignDialog() {
 		setPhase("idle")
 		setReview(null)
 		setSigned(null)
+		setShowQr(null)
 		setError(null)
 		setPasted("")
 		setName("")
@@ -164,6 +169,7 @@ export function PsbtSignDialog() {
 
 	return (
 		<>
+			{signed && showQr && <BitcoinQrDialog bytes={showQr === "psbt" ? base64.decode(signed.psbtBase64) : hex.decode(signed.txHex)} title={showQr === "psbt" ? "Signed PSBT QR" : "Signed transaction QR"} onClose={() => setShowQr(null)} />}
 			<Box position="fixed" inset="0" bg="rgba(0,0,0,0.85)" zIndex={Z.dialog}
 				onClick={phase === "signing" || phase === "analyzing" ? undefined : handleDismiss} />
 			<Box
@@ -189,6 +195,7 @@ export function PsbtSignDialog() {
 							<Textarea value={pasted} onChange={(e) => setPasted(e.target.value)} rows={6} fontFamily="mono" fontSize="xs" mb="3" placeholder="cHNidP8..." />
 							<Flex gap="2" justify="flex-end">
 								<Button {...plainButton} onClick={handleDismiss}>Cancel</Button>
+								<Button {...plainButton} onClick={() => { handleDismiss(); window.dispatchEvent(new Event(BITCOIN_QR_SCAN_EVENT)) }}>Scan QR</Button>
 								<Button {...goldButton} disabled={!pasted.trim()} onClick={() => void analyze(new TextEncoder().encode(pasted), "pasted")}>Check</Button>
 							</Flex>
 						</>
@@ -196,6 +203,10 @@ export function PsbtSignDialog() {
 
 					{(phase === "review" || phase === "signing") && review && (
 						<Flex direction="column" gap="3">
+							<Text fontSize="xs" color="kk.textSecondary">
+								KeepKey communicates with this computer over USB. For offline signing, disconnect the computer from the network.
+								Removable media and transaction parsers remain attack surfaces. This review does not establish whether the inputs are still unspent.
+							</Text>
 							{warnings.length > 0 && (
 								<Box {...card} borderColor="rgba(233,196,106,0.4)" bg="rgba(233,196,106,0.06)">
 									{warnings.map((w) => <Text key={w} fontSize="xs" color="var(--gold)">{w}</Text>)}
@@ -284,7 +295,9 @@ export function PsbtSignDialog() {
 								<Text fontSize="xs" color="kk.textSecondary">Transaction ID</Text>
 								<Mono>{signed.txid}</Mono>
 							</Box>
-							<Flex gap="2" justify="flex-end">
+							<Flex gap="2" justify="flex-end" wrap="wrap">
+								<Button {...plainButton} onClick={() => setShowQr("psbt")}>Signed PSBT QR</Button>
+								<Button {...plainButton} onClick={() => setShowQr("transaction")}>Raw transaction QR</Button>
 								<Button {...plainButton} onClick={() => void rpcRequest("btcPsbtShowFile")}>Show in Finder</Button>
 								<Button {...plainButton} onClick={handleCopy}>{copied ? "Copied" : "Copy raw hex"}</Button>
 								<Button {...goldButton} onClick={handleDismiss}>Done</Button>

@@ -230,7 +230,7 @@ import { startRestApi, clearFeaturesCache, setUiActive, uiHeartbeat, type RestAp
 import { signSolanaWireTransaction } from "./solana-signing"
 import { AuthStore } from "./auth"
 import { ensurePioneerQueryKeyRegistered, getPioneer, getPioneerApiBase, resetPioneer, setPioneerOffline, DEFAULT_API_BASE, getQueryKey as getPioneerQueryKey } from "./pioneer"
-import { setBtcBackendOffline, setBtcNodeConfig, setBtcNodeDeviceEligible, setBtcNodeWatchOnlyEligible, isBtcNodeActive, getBtcBackend, broadcastBtcTx } from "./btc-backend"
+import { setBtcBackendOffline, setBtcNodeConfig, setBtcNodeDeviceEligible, setBtcNodeWatchOnlyEligible, isBtcNodeActive, getBtcBackend, getWatchOnlyBtcBackend, getPsbtBroadcastRoute, broadcastBtcTx } from "./btc-backend"
 import { isBitcoinOnlyVariant } from "../shared/flags"
 import { bitcoinOnlyActivityList, bitcoinOnlyAddressBookHistoryList, bitcoinOnlyBalanceList, bitcoinOnlyChainList, bitcoinOnlyLedgerJournalList, bitcoinOnlyLedgerSummaryList, bitcoinOnlyPendingSigningRejection, bitcoinOnlyReportAllowed, bitcoinOnlyWatchOnlyScope, enforceBitcoinOnlyRpcBoundary } from "./bitcoin-only-boundary"
 import { assertOnline } from "./offline-policy"
@@ -241,7 +241,7 @@ import { loadSupportedChains } from "../shared/swap-support-matrix"
 import { PioneerSocket } from "./pioneer-socket"
 import { startEventStream, stopEventStream, type AddressEntry } from "./event-stream"
 import { rebuildActivityHistory, clearHistoryQueryCache } from "./activity-history"
-import { watchOnlyPortfolioKeys, watchOnlyNativeBalances, portfolioNativeMatch, trackedUtxoScriptPaths } from './watch-only-portfolio'
+import { watchOnlyPortfolioKeys, watchOnlyNativeBalances, watchOnlyNodeBalances, portfolioNativeMatch, trackedUtxoScriptPaths } from './watch-only-portfolio'
 import { cachedHistoryQueries, watchOnlyWalletScope, watchOnlyBitcoinScope } from './watch-only-history'
 import { createTxWatch, MAX_WATCH_MS, UNSEEN_GIVE_UP_MS } from "./tx-watch"
 import { getRequiredConfs } from "../shared/confirmations"
@@ -257,6 +257,7 @@ import type { ChainDef } from "../shared/chains"
 import { BtcAccountManager } from "./btc-accounts"
 import { alreadySigned, analyze as analyzePsbt, deriveAddress as deriveBtcAddress, feeFromPrevTxs, finalizeSigned, parseForBroadcast, toSignTx, type BtcPsbtScriptType, type PsbtAnalysis } from "./btc-psbt/psbt"
 import { accountPathFromXpub, formatPath, masterFingerprintFromDepth1Xpub, toSlip132, toStandardXpub, writeElectrumWallet } from "./btc-psbt/codec"
+import { writePublicWallet } from "./btc-psbt/public-wallet"
 import { parseWatchOnlyImport } from "./btc-psbt/watch-only-import"
 import { buildWatchOnlyPsbt } from "./btc-psbt/watch-only-build"
 import { unwrapUtxoDiscoveryKey, utxoDiscoveryKey } from "./btc-backend/types"
@@ -1555,8 +1556,7 @@ async function watchOnlyDeviceMatch(deviceId: string): Promise<boolean> {
 }
 
 /** Next unused receive/change index from the active BTC backend; unavailable says so, never a silent guess. */
-async function btcAddressIndicesFor(xpub: string, scriptType?: string) {
-	const backend = getBtcBackend()
+async function btcAddressIndicesFor(xpub: string, scriptType?: string, backend = getBtcBackend()) {
 	if (!backend.addressIndices) {
 		const mode = backend.kind === 'core' ? 'Bitcoin Core scantxoutset' : 'offline mode'
 		return {
@@ -3745,7 +3745,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					await Bun.write(filePath, fin.psbtBytes)
 					if (pendingPsbt === p) pendingPsbt = null
 					lastSignedPsbtPath = filePath
-					return { filePath, txHex: fin.txHex, txid: fin.txid }
+					return { filePath, txHex: fin.txHex, txid: fin.txid, psbtBase64: Buffer.from(fin.psbtBytes).toString('base64') }
 				} finally {
 					p.signing = false
 				}
@@ -3764,11 +3764,13 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const std = toStandardXpub(meta.xpub)
 				if (std.scriptType !== (scriptType === 'p2tr' ? 'p2pkh' : scriptType)) throw new Error(`The ${scriptType} key has the wrong prefix`)
 				const fingerprint = btcAccounts.masterFingerprint
-				const result = { key: toSlip132(std.xpub, scriptType), fingerprint, derivation: formatPath(meta.path) }
+				const account = fingerprint ? { scriptType, path: meta.path, xpub: std.xpub, masterFingerprint: new Uint8Array(Buffer.from(fingerprint, 'hex')) } : null
+				const result = { key: toSlip132(std.xpub, scriptType), fingerprint, derivation: formatPath(meta.path), publicWallet: account ? writePublicWallet(account) : null }
 				if (!params.save) return result
 				if (!fingerprint) throw new Error('Master fingerprint unknown. Reconnect the KeepKey and try again.')
-				const json = writeElectrumWallet({ scriptType, path: meta.path, xpub: std.xpub, masterFingerprint: new Uint8Array(Buffer.from(fingerprint, 'hex')) }, 'KeepKey')
-				const filePath = uniqueFilePath(path.join(os.homedir(), 'Downloads', `keepkey-btc-${scriptType}-account${meta.accountIndex}.json`), fs.existsSync)
+				if (params.format && params.format !== 'desktop' && params.format !== 'electrum') throw new Error('Unknown public wallet export format')
+				const json = params.format === 'desktop' ? result.publicWallet! : writeElectrumWallet(account!, 'KeepKey')
+				const filePath = uniqueFilePath(path.join(os.homedir(), 'Downloads', `keepkey-btc-${scriptType}-account${meta.accountIndex}${params.format === 'desktop' ? '-public' : ''}.json`), fs.existsSync)
 				await Bun.write(filePath, json)
 				return { ...result, filePath }
 			},
@@ -3777,7 +3779,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const { snapshot, accounts } = getWatchOnlyBtcAccounts(params?.deviceId)
 				return {
 					fingerprintKnown: !!snapshot.masterFp,
-					backend: getBtcBackend().kind,
+					backend: getWatchOnlyBtcBackend(bitcoinOnlyWatchOnlyScope(false, snapshot.featuresJson)).kind,
 					accounts: accounts.map(a => ({ scriptType: a.scriptType, accountIndex: a.path[2] - 0x80000000, path: formatPath(a.path) })),
 				}
 			},
@@ -3815,7 +3817,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const { snapshot, account } = watchOnlyReceiveAccount(params?.deviceId)
 				if (watchOnlyAddressMismatch.has(snapshot.deviceId)) throw new Error('The KeepKey showed a different address for this wallet. Do not use addresses Desktop derived for it.')
 				const key = toSlip132(account.xpub, account.scriptType)
-				const indices = await btcAddressIndicesFor(key, account.scriptType)
+				const indices = await btcAddressIndicesFor(key, account.scriptType, getWatchOnlyBtcBackend(bitcoinOnlyWatchOnlyScope(false, snapshot.featuresJson)))
 				const flags = watchOnlyImportFlags(snapshot.featuresJson)
 				return {
 					address: deriveBtcAddress(account, 0, indices.receiveIndex),
@@ -3845,10 +3847,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				requireOnline('Create PSBT')
 				const feeLevel = Number(params?.feeLevel)
 				if (![1, 3, 5].includes(feeLevel)) throw new Error('Choose a fee level')
-				const { accounts } = getWatchOnlyBtcAccounts(params?.deviceId)
+				const { snapshot, accounts } = getWatchOnlyBtcAccounts(params?.deviceId)
 				const account = accounts.find(a => a.scriptType === params?.scriptType && a.path[2] === 0x80000000 + Number(params?.accountIndex))
 				if (!account) throw new Error('That Bitcoin account is not saved for this wallet')
-				const backend = getBtcBackend()
+				const backend = getWatchOnlyBtcBackend(bitcoinOnlyWatchOnlyScope(false, snapshot.featuresJson))
 				const { psbtBytes, psbtBase64, analysis } = await buildWatchOnlyPsbt(backend, CHAINS.find(c => c.id === 'bitcoin')!, account, {
 					to: String(params.to ?? ''), amount: String(params.amount ?? ''), isMax: !!params.isMax, feeLevel,
 				})
@@ -3867,28 +3869,28 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const parsed = parseForBroadcast(new Uint8Array(Buffer.from(params.data, 'base64')))
 				const network = 'bip122:000000000019d6689c085ae165831e93'
 				const outputs = parsed.outputs.map(o => ({ amount: o.amount.toString(), address: o.address, opReturnHex: o.opReturnHex, scriptHex: o.scriptHex }))
-				const backendKind = getBtcBackend().kind
+				const { backend, id: routeId } = getPsbtBroadcastRoute()
+				const backendKind = backend.kind
+				const backendId = backendKind === 'pioneer' ? `${routeId}:${getPioneerApiBase()}` : routeId
 				if (params.send) {
 					requireOnline('Bitcoin broadcast')
-					if (params.backend !== backendKind) {
-						throw new Error(`The broadcast backend changed since the review (${params.backend} -> ${backendKind}). Drop the transaction again to review it.`)
+					if (params.backend !== backendKind || params.backendId !== backendId) {
+						throw new Error('The broadcast backend or its settings changed since the review. Drop the transaction again to review it.')
 					}
-					const pioneer = backendKind === 'pioneer' ? await getPioneer() : null
-					const txid = await broadcastBtcTx(pioneer, network, parsed.txHex)
+					const { txid } = await backend.broadcast({ network, rawTxHex: parsed.txHex })
 					if (txid !== parsed.txid) {
 						throw new Error(`The broadcast returned txid ${txid}, not ${parsed.txid}. Check both on a block explorer before doing anything else.`)
 					}
-					return { txid, txHex: parsed.txHex, outputs, fee: parsed.fee?.toString() ?? null, feeSource: null, backend: backendKind, broadcast: true }
+					return { txid, txHex: parsed.txHex, outputs, fee: parsed.fee?.toString() ?? null, feeSource: null, backend: backendKind, backendId, broadcast: true }
 				}
 				// Fee: proven by the PSBT's previous txs, else fetched and hash-checked through the backend, else unknown.
 				let fee = parsed.fee
 				let feeSource: string | null = fee === null ? null : 'psbt'
 				if (fee === null && !offlineMode) {
-					const backend = getBtcBackend()
 					fee = await feeFromPrevTxs(parsed.txHex, txid => backend.rawTxHex({ network, txid }))
 					if (fee !== null) feeSource = backend.kind
 				}
-				return { txid: parsed.txid, txHex: parsed.txHex, outputs, fee: fee?.toString() ?? null, feeSource, backend: backendKind, broadcast: false }
+				return { txid: parsed.txid, txHex: parsed.txHex, outputs, fee: fee?.toString() ?? null, feeSource, backend: backendKind, backendId, broadcast: false }
 			},
 			btcPsbtShowFile: async () => {
 				if (!lastSignedPsbtPath) return
@@ -7511,8 +7513,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return getAppSettings()
 			},
 			setOfflineMode: async (params) => {
-				offlineMode = params.enabled
+				if (typeof params.enabled !== 'boolean') throw new Error('Offline mode requires an enabled boolean')
 				setSetting('offline_mode', params.enabled ? '1' : '0')
+				if (getSetting('offline_mode') !== (params.enabled ? '1' : '0')) throw new Error('Could not save offline mode. Try again.')
+				offlineMode = params.enabled
 				setBtcBackendOffline(offlineMode)
 				setPioneerOffline(offlineMode)
 				setPerfTelemetryOffline(offlineMode)
@@ -8752,7 +8756,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// Cached rows, never live: the UI shows them as cached with their age.
 				return result ? bitcoinOnlyBalanceList(result.balances, bitcoinOnly).map(b => ({ ...b, syncState: 'stale' as const })) : null
 			},
-			// Re-fetch watch-only balances from Pioneer using addresses reconstructed
+			// Re-fetch watch-only balances from the selected backend using public keys reconstructed
 			// from cache — NO device required. Self-contained: deliberately does NOT
 			// touch the device getBalances managers.
 			// ponytail: display-only simplified parse — no per-owner EVM token map and
@@ -8768,18 +8772,15 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const deviceId = snap.deviceId
 
 				// 1. Reconstruct the pubkey list from cache (no device available)
+				const walletBitcoinOnly = bitcoinOnlyWatchOnlyScope(false, snap.featuresJson)
 				const snapshotBitcoinOnly = bitcoinOnlyWatchOnlyScope(
-					isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant),
-					snap.featuresJson,
+					isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant), snap.featuresJson,
 				)
 				const allChains = bitcoinOnlyChainList(getAllChains(), snapshotBitcoinOnly)
 				const cached = getCachedBalances(deviceId)
 				const cachedBalances = bitcoinOnlyBalanceList(cached?.balances ?? [], snapshotBitcoinOnly)
 				const { pubkeys, incomplete } = watchOnlyPortfolioKeys(allChains, cachedBalances, getCachedPubkeys(deviceId))
 				if (pubkeys.length === 0) return cachedBalances.map(b => ({ ...b, syncState: 'stale' as const }))
-
-				// 2. Pioneer client — let init failure throw so the UI surfaces it
-				const pioneer = await getPioneer()
 
 				// 3. networkId → chainId lookup (non-hidden takes priority)
 				const networkToChain = new Map<string, string>()
@@ -8791,14 +8792,16 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 
 				// 4. Chunked GetPortfolioBalances. With the user's own node active, BTC comes from the
 				// node (below) and its xpubs never reach Pioneer (the guard would refuse them anyway).
-				const btcBackend = getBtcBackend()
+				const btcBackend = getWatchOnlyBtcBackend(walletBitcoinOnly)
 				const nodeBtc = btcBackend.kind !== 'pioneer' ? pubkeys.filter(p => p.chainId === 'bitcoin') : []
 				const pubkeyChunks = chunkArray(nodeBtc.length ? pubkeys.filter(p => p.chainId !== 'bitcoin') : pubkeys, PIONEER_PORTFOLIO_CHUNK_SIZE)
+				// A Bitcoin-only node refresh must work even when Pioneer cannot initialize.
+				const pioneer = pubkeyChunks.length ? await getPioneer() : null
 				const chunkResults = await withTimeout(
 					mapWithConcurrency(pubkeyChunks, PIONEER_PORTFOLIO_MAX_CONCURRENCY, async (chunk, i) => {
 						try {
 							const resp = await withTimeout(
-								pioneer.GetPortfolioBalances({ pubkeys: chunk.map(p => ({ caip: p.caip, pubkey: p.pubkey })), includeDefi: true }, { forceRefresh: true }),
+								pioneer!.GetPortfolioBalances({ pubkeys: chunk.map(p => ({ caip: p.caip, pubkey: p.pubkey })), includeDefi: true }, { forceRefresh: true }),
 								PIONEER_PORTFOLIO_CHUNK_TIMEOUT_MS,
 								`watch-only chunk ${i + 1}/${pubkeyChunks.length}`
 							)
@@ -8819,17 +8822,18 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				for (let i = 0; i < chunkResults.length; i++) {
 					if (chunkResults[i].failed || chunkResults[i].meta?.degraded || chunkResults[i].meta?.failures?.length || chunkResults[i].meta?.staleChains?.length) for (const p of pubkeyChunks[i]) failedChainIds.add(p.chainId)
 				}
+				let nodeFiatState: ChainBalance['fiatValueState']
 				if (nodeBtc.length) {
 					try {
-						// The price is not chain data (not guarded). Without it the row stays cached rather than showing $0.
 						const btcChain = allChains.find(c => c.id === 'bitcoin')!
-						const priceUsd = marketPriceUsd(await withTimeout(pioneer.GetMarketInfo([btcChain.caip]), PIONEER_TIMEOUT_MS, 'GetMarketInfo(BTC)'))
-						if (!(priceUsd > 0)) throw new Error('no BTC price')
-						for (const p of nodeBtc) {
-							const utxos = await btcBackend.listUnspent({ network: p.networkId, xpub: p.sourcePubkey || p.pubkey, scriptType: p.scriptType })
-							const btc = utxos.reduce((sum, u) => sum + u.value, 0) / 1e8
-							allEntries.push({ caip: p.caip, pubkey: p.pubkey, networkId: p.networkId, balance: btc.toFixed(8), valueUsd: btc * priceUsd })
-						}
+						const oldBtc = cachedBalances.find(b => b.chainId === 'bitcoin')
+						const cachedPrice = oldBtc && Number(oldBtc.balance) > 0 ? (oldBtc.nativeBalanceUsd ?? oldBtc.balanceUsd) / Number(oldBtc.balance) : 0
+						const own = await watchOnlyNodeBalances(btcBackend, nodeBtc, () => withTimeout(
+							getPioneer().then(client => client.GetMarketInfo([btcChain.caip])).then(marketPriceUsd),
+							PIONEER_TIMEOUT_MS, 'optional BTC fiat quote',
+						), cachedPrice)
+						allEntries.push(...own.entries)
+						nodeFiatState = own.fiatValueState
 					} catch (err: any) {
 						console.warn(`[refreshWatchOnlyBalances] BTC via ${btcBackend.kind} failed:`, err?.message || err)
 						failedChainIds.add('bitcoin')
@@ -8890,6 +8894,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// Sum every requested owner once, and attach chain-level tokens/DeFi once.
 				const results = watchOnlyNativeBalances(pubkeys, pureNatives, failedChainIds)
 				for (const row of results) {
+					if (row.chainId === 'bitcoin' && nodeBtc.length) row.fiatValueState = nodeFiatState
 					row.tokens = tokensByChainId.get(row.chainId)
 					row.defiPositions = defiByChain.get(row.chainId)
 					row.balanceUsd += (row.tokens?.reduce((sum, t) => sum + t.balanceUsd, 0) || 0)

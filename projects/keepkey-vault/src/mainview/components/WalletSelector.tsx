@@ -1,3 +1,4 @@
+import { BITCOIN_QR_SCAN_EVENT } from "./BitcoinQrImport"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { Box, Flex, Text, Image } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
@@ -276,6 +277,7 @@ export function WalletSelector({
 					{t("importWatchOnlyHint", { defaultValue: "Electrum wallet file or xpub / ypub / zpub" })}
 				</Text>
 			</Box>
+			<Box as="button" w="100%" px="3" py="2" textAlign="left" color="var(--gold)" fontSize="12px" onClick={() => { close(); window.dispatchEvent(new Event(BITCOIN_QR_SCAN_EVENT)) }}>Scan Bitcoin QR</Box>
 		</Box>
 	)
 }

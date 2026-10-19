@@ -10,6 +10,7 @@ import { hex } from '@scure/base'
 import { HDKey } from '@scure/bip32'
 import { b58check, formatPath, parsePath, readElectrumWallet, toSlip132, toStandardXpub } from './codec'
 import type { BtcPsbtScriptType } from './psbt'
+import { readPublicWallet } from './public-wallet'
 
 const H = 0x80000000
 const PURPOSE: Record<BtcPsbtScriptType, number> = { p2pkh: 44, 'p2sh-p2wpkh': 49, p2wpkh: 84, p2tr: 86 }
@@ -17,7 +18,7 @@ const PURPOSE: Record<BtcPsbtScriptType, number> = { p2pkh: 44, 'p2sh-p2wpkh': 4
 export interface WatchOnlyImport {
   /** 'wo:' + sha256 of the standard xpubs; the synthetic device_snapshot id */
   id: string
-  source: 'electrum' | 'key'
+  source: 'electrum' | 'key' | 'desktop'
   scriptType: BtcPsbtScriptType
   /** Standard xpub */
   xpub: string
@@ -52,15 +53,18 @@ function readBareKey(text: string): { xpub: string; scriptType: BtcPsbtScriptTyp
 export function parseWatchOnlyImport(text: string, opts: { fingerprint?: string; path?: string } = {}): WatchOnlyImport {
   const t = text.trim()
   const isFile = /^(\{|BIE[12]|QklFM[Qg])/.test(t)
-  const electrum = isFile ? readElectrumWallet(t) : null
-  const decoded = electrum ?? readBareKey(t)
+  const json = t.startsWith('{') ? JSON.parse(t) : null
+  const desktop = json?.format === 'keepkey-public-wallet' ? readPublicWallet(json) : null
+  const electrum = isFile && !desktop ? readElectrumWallet(t) : null
+  const file = desktop ?? electrum
+  const decoded = file ?? readBareKey(t)
   const { xpub } = decoded
   let { scriptType } = decoded
   const hd = HDKey.fromExtendedKey(xpub)
   if (hd.index < H) throw new Error('The account level of this key is not hardened; not a BIP44/49/84 account key')
-  if (!electrum && scriptType === 'p2pkh' && opts.path && parsePath(opts.path.trim())[0] === 86 + H) scriptType = 'p2tr'
+  if (!file && scriptType === 'p2pkh' && opts.path && parsePath(opts.path.trim())[0] === 86 + H) scriptType = 'p2tr'
   const standard = [PURPOSE[scriptType] + H, H, hd.index]
-  let path = electrum?.path ?? standard
+  let path = file?.path ?? standard
 
   if (opts.path) {
     const confirmed = parsePath(opts.path.trim())
@@ -70,9 +74,9 @@ export function parseWatchOnlyImport(text: string, opts: { fingerprint?: string;
     path = confirmed
   }
 
-  let fingerprint = electrum?.masterFingerprint ? hex.encode(electrum.masterFingerprint) : null
+  let fingerprint = file?.masterFingerprint ? hex.encode(file.masterFingerprint) : null
   // Electrum records the account key's own fingerprint when it knows no origin: not the master.
-  if (fingerprint !== null && parseInt(fingerprint, 16) === hd.fingerprint) fingerprint = null
+  if (electrum && fingerprint !== null && parseInt(fingerprint, 16) === hd.fingerprint) fingerprint = null
   if (opts.fingerprint) {
     const fp = opts.fingerprint.trim().toLowerCase()
     if (!/^[0-9a-f]{8}$/.test(fp)) throw new Error('Master fingerprint must be 8 hex characters')
@@ -82,12 +86,12 @@ export function parseWatchOnlyImport(text: string, opts: { fingerprint?: string;
 
   return {
     id: watchOnlyImportId([xpub]),
-    source: electrum ? 'electrum' : 'key',
+    source: desktop ? 'desktop' : electrum ? 'electrum' : 'key',
     scriptType,
     xpub,
     key: toSlip132(xpub, scriptType),
     path,
-    pathAssumed: !electrum?.path,
+    pathAssumed: !file?.path,
     fingerprint,
   }
 }

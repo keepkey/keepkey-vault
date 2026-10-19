@@ -654,6 +654,8 @@ export interface ChainBalance {
   balance: string       // human-readable (e.g. "0.001")
   balanceUsd: number    // total USD (native + tokens)
   nativeBalanceUsd?: number  // native-only USD (excludes tokens)
+  /** Own-node balances remain usable when the optional fiat quote fails. */
+  fiatValueState?: 'stale' | 'unavailable'
   address: string
   tokens?: TokenBalance[]
   /**
@@ -1571,7 +1573,7 @@ export interface BtcWatchOnlyAccounts {
 export interface BtcWatchOnlyImport {
   id: string
   label: string
-  source: 'electrum' | 'key'
+  source: 'electrum' | 'key' | 'desktop'
   scriptType: BtcScriptType
   key: string
   path: string
@@ -1613,6 +1615,7 @@ export interface BtcBroadcastReview {
   fee: string | null
   feeSource: string | null
   backend: string
+  backendId: string
   broadcast: boolean
 }
 

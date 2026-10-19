@@ -11,6 +11,7 @@ import holdAndConnectRaw from "../assets/svg/hold-and-connect.svg?raw"
 import { looksLikePsbt, looksLikeRawTxHex, looksLikeWatchOnlyImport, PSBT_SNIFF_BYTES } from "../../shared/psbt-sniff"
 import { PSBT_DROP_EVENT } from "./PsbtSignDialog"
 import { WATCH_ONLY_IMPORT_EVENT } from "./WatchOnlyImportDialog"
+import { BITCOIN_QR_SCAN_EVENT } from "./BitcoinQrImport"
 import { BTC_BROADCAST_EVENT } from "./BroadcastSignedDialog"
 
 /**
@@ -107,6 +108,10 @@ export function FirmwareDropZone() {
 
 			const file = files[0]
 			const lower = file.name.toLowerCase()
+			if (/\.(png|jpe?g|webp|bmp)$/.test(lower)) {
+				window.dispatchEvent(new CustomEvent(BITCOIN_QR_SCAN_EVENT, { detail: Array.from(files) }))
+				return
+			}
 			if (lower.endsWith(".bin")) {
 				await processFile(file)
 				return

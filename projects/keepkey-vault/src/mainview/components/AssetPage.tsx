@@ -1,3 +1,4 @@
+import { BITCOIN_QR_SCAN_EVENT } from "./BitcoinQrImport"
 import React, { lazy, Suspense, useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { useTranslation } from "react-i18next"
 import { Box, Flex, Text, Button, Image, VStack, HStack, IconButton, Spinner } from "@chakra-ui/react"
@@ -1561,6 +1562,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 								Reports
 							</Box>
 						)}
+						{isBtc && <Button size="xs" variant="ghost" color="var(--gold)" onClick={() => window.dispatchEvent(new Event(BITCOIN_QR_SCAN_EVENT))}>Scan Bitcoin QR</Button>}
 						{isBtc && !watchOnly && (
 							<Box
 								as="button" fontSize="11px" color="var(--gold)" fontWeight="500"
