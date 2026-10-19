@@ -1,3 +1,4 @@
+import {useBtcMultisigEnabled} from "../hooks/useBtcMultisigEnabled"
 import { useState, useEffect, useCallback, useRef } from "react"
 import { Box, Flex, Text, Button, Spinner, Textarea } from "@chakra-ui/react"
 import { base64, hex } from "@scure/base"
@@ -54,6 +55,7 @@ const card = { bg: "rgba(255,255,255,0.03)", borderRadius: "lg", border: "1px so
  * an explicit Sign click. No network: works online and offline.
  */
 export function PsbtSignDialog() {
+	const multisigEnabled=useBtcMultisigEnabled()
 	const [phase, setPhase] = useState<Phase>("idle")
 	const [name, setName] = useState("")
 	const [review, setReview] = useState<Review | null>(null)
@@ -206,7 +208,7 @@ export function PsbtSignDialog() {
 							<Textarea value={pasted} onChange={(e) => setPasted(e.target.value)} rows={6} fontFamily="mono" fontSize="xs" mb="3" placeholder="cHNidP8..." />
 							<Flex gap="2" justify="flex-end">
 								<Button {...plainButton} onClick={handleDismiss}>Cancel</Button>
-								<Button {...plainButton} onClick={()=>window.dispatchEvent(new Event(MULTISIG_POLICY_EVENT))}>Multisig setup</Button>
+								{multisigEnabled && <Button {...plainButton} onClick={()=>window.dispatchEvent(new Event(MULTISIG_POLICY_EVENT))}>Multisig setup</Button>}
 								<Button {...plainButton} onClick={() => { handleDismiss(); window.dispatchEvent(new Event(BITCOIN_QR_SCAN_EVENT)) }}>Scan QR</Button>
 								<Button {...goldButton} disabled={!pasted.trim()} onClick={() => void analyze(new TextEncoder().encode(pasted), "pasted")}>Check</Button>
 							</Flex>

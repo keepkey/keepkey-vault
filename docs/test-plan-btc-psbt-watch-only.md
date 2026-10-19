@@ -304,6 +304,19 @@ accepts BIP45); normal account indices are limited to 0–100. Policies require
 2–15 distinct cosigners; repeated master fingerprints are conservatively refused.
 Taproot multisig/MuSig2 and other hardware integrations remain outside scope.
 
+### Runtime opt-in (v1.6.4 prerelease)
+
+Multisig co-signing is **off by default**, including upgrades with existing saved
+policies. Enable **Settings → Feature Flags → Bitcoin multisig co-signing** at
+runtime; no build option or environment variable enables it. The Bitcoin-page
+entry and setup controls follow this setting immediately. Disabled policy
+file/QR imports explain where to enable it and do not read device keys.
+Backend policy and signing RPCs and the low-level REST signing route also check
+the flag. Turning it off invalidates pending multisig reviews and policy/key
+operations; an active PSBT signing request must finish before changing the flag.
+Normal single-signature signing and final PSBT/raw-transaction review/broadcast
+remain available with multisig off. Saved policies do not implicitly opt users in.
+
 ### Using co-signing
 
 1. Open **Multisig co-signing** on the Bitcoin page or under **Sign PSBT**.

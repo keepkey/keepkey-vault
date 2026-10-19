@@ -1,3 +1,4 @@
+import { useBtcMultisigEnabled } from "../hooks/useBtcMultisigEnabled";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Box, Button, Flex, Text, Textarea } from "@chakra-ui/react";
 import {
@@ -26,6 +27,7 @@ const mono = {
 /** Only public policies are imported. Every policy is matched to the actual
  * KeepKey account key, then its first receive address is displayed on device. */
 export function MultisigPolicyDialog() {
+  const enabled = useBtcMultisigEnabled();
   const [open, setOpen] = useState(false);
   const [data, setData] = useState("");
   const [name, setName] = useState("Multisig");
@@ -64,6 +66,7 @@ export function MultisigPolicyDialog() {
       setKey(null);
       setData("");
       setQr(null);
+      if (!enabled) return;
       try {
         const file = (event as CustomEvent<File>).detail;
         if (file instanceof File) await readFile(file);
@@ -77,7 +80,17 @@ export function MultisigPolicyDialog() {
     };
     window.addEventListener(MULTISIG_POLICY_EVENT, onOpen);
     return () => window.removeEventListener(MULTISIG_POLICY_EVENT, onOpen);
-  }, []);
+  }, [enabled]);
+  useEffect(() => {
+    if (!enabled) {
+      ++generation.current;
+      setPreview(null);
+      setKey(null);
+      setSaved([]);
+      setQr(null);
+      setData("");
+    }
+  }, [enabled]);
   const run = async (operation: () => Promise<void>) => {
     if (locked.current) return;
     locked.current = true;
@@ -124,6 +137,40 @@ export function MultisigPolicyDialog() {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
   if (!open) return null;
+  if (!enabled)
+    return (
+      <>
+        <Box
+          position="fixed"
+          inset="0"
+          bg="rgba(0,0,0,0.85)"
+          zIndex={Z.dialog + 2}
+          onClick={close}
+        />
+        <Box
+          role="dialog"
+          aria-label="Multisig co-signing disabled"
+          position="fixed"
+          top="50%"
+          left="50%"
+          transform="translate(-50%,-50%)"
+          zIndex={Z.dialog + 3}
+          bg="kk.bg"
+          borderRadius="xl"
+          p="6"
+          maxW="90vw"
+        >
+          <Text>
+            Bitcoin multisig co-signing is off. Enable it in Settings → Feature
+            Flags.
+          </Text>
+          <Button {...outline} mt="4" onClick={close}>
+            Close
+          </Button>
+        </Box>
+      </>
+    );
+
   return (
     <>
       {qr && (

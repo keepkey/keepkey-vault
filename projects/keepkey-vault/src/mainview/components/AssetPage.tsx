@@ -166,12 +166,14 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 	// Feature flags: zcash privacy
 	const [swappableChainIds, setSwappableChainIds] = useState<Set<string>>(new Set())
 	const [zcashPrivacyEnabled, setZcashPrivacyEnabled] = useState(false)
+	const [btcMultisigEnabled,setBtcMultisigEnabled]=useState(false)
 	const settingsLoaded = useRef(false)
 	const refreshFeatureFlags = useCallback(() => {
 		rpcRequest<AppSettings>("getAppSettings")
 			.then(s => {
 				settingsLoaded.current = true
 				setZcashPrivacyEnabled(s.zcashPrivacyEnabled)
+				setBtcMultisigEnabled(s.btcMultisigEnabled===true)
 			})
 			.catch(() => {})
 		rpcRequest<string[]>("getSwappableChainIds", undefined, 20000)
@@ -1564,7 +1566,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 							</Box>
 						)}
 						{isBtc && <Button size="xs" variant="ghost" color="var(--gold)" onClick={() => window.dispatchEvent(new Event(BITCOIN_QR_SCAN_EVENT))}>Scan Bitcoin QR</Button>}
-						{isBtc && <Button size="xs" variant="ghost" color="var(--gold)" onClick={()=>window.dispatchEvent(new Event(MULTISIG_POLICY_EVENT))}>Multisig co-signing</Button>}
+						{isBtc && btcMultisigEnabled && <Button size="xs" variant="ghost" color="var(--gold)" onClick={()=>window.dispatchEvent(new Event(MULTISIG_POLICY_EVENT))}>Multisig co-signing</Button>}
 						{isBtc && !watchOnly && (
 							<Box
 								as="button" fontSize="11px" color="var(--gold)" fontWeight="500"
