@@ -1110,7 +1110,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 						if (amount <= 0) continue
 						const newNativeUsd = amount * freshPrice
 						const tokenUsd = bal.tokens?.reduce((s, t) => s + (t.balanceUsd || 0), 0) || 0
-						const updated = { ...bal, nativeBalanceUsd: newNativeUsd, balanceUsd: newNativeUsd + tokenUsd }
+						const updated = { ...bal, nativeBalanceUsd: newNativeUsd, balanceUsd: newNativeUsd + tokenUsd, fiatValueState: undefined }
 						next.set(chain.id, updated)
 						changed = true
 					}
@@ -2226,6 +2226,12 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 				</Flex>
 
 			{/* Watch-only banner */}
+			{watchOnly && balances.get('bitcoin')?.fiatValueState && (
+				<Text fontSize="xs" color="var(--gold)" mb="3" role="status">
+					Bitcoin balance refreshed from your node. {balances.get('bitcoin')?.fiatValueState === 'stale'
+						? 'Fiat values use a cached price.' : 'Fiat prices are unavailable; displayed USD totals exclude this Bitcoin balance.'}
+				</Text>
+			)}
 			{watchOnly && (
 				<Flex
 					align="center"

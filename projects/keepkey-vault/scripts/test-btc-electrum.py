@@ -18,6 +18,34 @@ util.AS_LIB_USER_I_WANT_TO_MANAGE_MY_OWN_ASYNCIO_LOOP = True
 async def main():
     root = Path(sys.argv[1])
     config = SimpleConfig({'electrum_path': str(root / 'config'), 'offline': True})
+    if '--hardware' in sys.argv:
+        # Independently verify Desktop's physical-device native SegWit result.
+        # This exercises Electrum's codecs/signature verifier, not its USB plugin.
+        reports = json.loads((root / 'hardware-report.json').read_text())
+        checked = 0
+        for report in reports:
+            if report['scriptType'] != 'p2wpkh' or not report['signed']:
+                continue
+            db = WalletDB((root / 'p2wpkh-electrum.json').read_text(), upgrade=True)
+            wallet = Wallet(db, config=config)
+            wallet.synchronize()
+            assert wallet.is_watching_only()
+            assert wallet.get_receiving_addresses()[:5] == report['addresses']
+            assert wallet.get_keystore().get_root_fingerprint() == report['fingerprint']
+            unsigned = tx_from_any((root / 'p2wpkh-unsigned.psbt').read_bytes())
+            unsigned.add_info_from_wallet(wallet, include_xpubs=True)
+            signed = tx_from_any((root / 'p2wpkh-signed.psbt').read_bytes())
+            assert signed.is_complete()
+            assert signed.txid() == report['txid']
+            assert signed.get_fee() == 1000
+            for i, txin in enumerate(signed.inputs()):
+                sig, pub = txin.witness_elements()
+                assert pub in unsigned.inputs()[i].pubkeys
+                assert unsigned.verify_sig_for_txin(txin_index=i, pubkey_bytes=pub, sig=sig)
+            checked += 1
+        assert checked, 'No signed native SegWit hardware report found'
+        print(f'Electrum {ELECTRUM_VERSION}: physical KeepKey native SegWit signature, wallet origin, five addresses, fee and signed PSBT verified (USB plugin not exercised)')
+        return
     for fixture in json.loads((root / 'fixtures.json').read_text()):
         name = fixture['name']
         db = WalletDB((root / f'{name}-wallet.json').read_text(), upgrade=True)

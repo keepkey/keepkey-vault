@@ -196,6 +196,10 @@ export function PsbtSignDialog() {
 
 					{(phase === "review" || phase === "signing") && review && (
 						<Flex direction="column" gap="3">
+							<Text fontSize="xs" color="kk.textSecondary">
+								KeepKey communicates with this computer over USB. For offline signing, disconnect the computer from the network.
+								Removable media and transaction parsers remain attack surfaces. This review does not establish whether the inputs are still unspent.
+							</Text>
 							{warnings.length > 0 && (
 								<Box {...card} borderColor="rgba(233,196,106,0.4)" bg="rgba(233,196,106,0.06)">
 									{warnings.map((w) => <Text key={w} fontSize="xs" color="var(--gold)">{w}</Text>)}

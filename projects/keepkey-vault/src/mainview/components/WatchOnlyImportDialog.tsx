@@ -86,7 +86,7 @@ export function WatchOnlyImportDialog({ onImported }: { onImported: (deviceId: s
 		setPhase("saving")
 		setError(null)
 		try {
-			// The account number is the key's own; only the purpose is a choice (Taproot is refused by bun).
+			// A bare xpub needs an explicit BIP86 choice; public-wallet files state the script type.
 			const path = taproot ? preview.path.replace(/^m\/44'/, "m/86'") : preview.path
 			const saved = await rpcRequest<BtcWatchOnlyImport>("btcWatchOnlyImport", {
 				...source, label, fingerprint: fingerprint.trim() || undefined, path: preview.pathAssumed ? path : undefined, save: true,
@@ -131,7 +131,7 @@ export function WatchOnlyImportDialog({ onImported }: { onImported: (deviceId: s
 					{phase === "input" && (
 						<>
 							<Text fontSize="sm" color="kk.textSecondary" mb="2">
-								Paste an xpub, ypub or zpub, or choose an Electrum wallet file (you can also drop it on this window). Never a private key or seed.
+								Paste an xpub, ypub or zpub, or choose a Desktop public wallet or Electrum wallet file (you can also drop it on this window). Never a private key or seed.
 							</Text>
 							<Textarea value={pasted} onChange={(e) => setPasted(e.target.value)} rows={4} fontFamily="mono" fontSize="xs" mb="3" placeholder="zpub6r..." />
 							<input ref={fileRef} type="file" accept=".json,application/json,text/plain,*" style={{ display: "none" }}
@@ -160,7 +160,7 @@ export function WatchOnlyImportDialog({ onImported }: { onImported: (deviceId: s
 								</Text>
 							</Box>
 							<Box {...card}>
-								<Text fontSize="xs" color="kk.textSecondary">{SCRIPT_LABEL[selectedType!]} · {preview.source === "electrum" ? "Electrum wallet file" : "extended public key"}</Text>
+								<Text fontSize="xs" color="kk.textSecondary">{SCRIPT_LABEL[selectedType!]} · {preview.source === "desktop" ? "Desktop public wallet file" : preview.source === "electrum" ? "Electrum wallet file" : "extended public key"}</Text>
 								<Text fontSize="xs" fontFamily="mono" color="kk.textPrimary" wordBreak="break-all" mt="1">{preview.key}</Text>
 								<Text fontSize="xs" color="kk.textSecondary" mt="2">Derivation path: <Text as="span" fontFamily="mono" color="kk.textPrimary">{selectedPath}</Text>{preview.pathAssumed ? " (confirm below)" : ""}</Text>
 								<Text fontSize="xs" color="kk.textSecondary">Master fingerprint: <Text as="span" fontFamily="mono" color="kk.textPrimary">{preview.fingerprint ?? "unknown"}</Text></Text>

@@ -82,7 +82,7 @@ export function SelfHostNodePanel({ settings, onChange, onConnected }: { setting
       <Text fontSize="10px" color="kk.textSecondary" mb="2.5">
         {type === "blockbook"
           ? "Trezor indexer — xpub-native, full history. What Pioneer uses."
-          : "Bitcoin Core RPC — scantxoutset (no history unless txindex + archival)."}
+          : "Bitcoin Core RPC — UTXO scan, fees and broadcast. Desktop does not discover transaction history, even with archival storage and txindex."}
       </Text>
 
       <Text fontSize="11px" color="kk.textSecondary" mb="1">{type === "blockbook" ? "Blockbook URL" : "Node RPC URL"}</Text>
@@ -111,8 +111,8 @@ export function SelfHostNodePanel({ settings, onChange, onConnected }: { setting
                 Connected as {result.detectedType === "core" ? "Bitcoin Core" : "Blockbook"} — {result.chain} · height {result.blocks?.toLocaleString()}
               </Text>
               {type === "blockbook" && result.inSync === false && <Text fontSize="11px" color="var(--gold)" mt="1">⚠ Indexer still syncing — balances may be incomplete until caught up.</Text>}
-              {type === "core" && result.pruned && <Text fontSize="11px" color="var(--gold)" mt="1">⚠ Pruned node — balances & sending work, but no transaction history.</Text>}
-              {type === "core" && result.txindex === false && <Text fontSize="11px" color="var(--gold)" mt="1">⚠ txindex off — can't spend legacy (1…) inputs. Set txindex=1 to enable.</Text>}
+              {type === "core" && result.pruned && <Text fontSize="11px" color="var(--gold)" mt="1">⚠ Pruned node — older previous transactions may be unavailable. Desktop does not discover Core wallet history.</Text>}
+              {type === "core" && result.txindex === false && <Text fontSize="11px" color="var(--gold)" mt="1">⚠ txindex off — full previous transactions for legacy inputs may be unavailable. Enabling txindex requires the relevant block data.</Text>}
               {type === "core" && result.txindex === undefined && <Text fontSize="11px" color="kk.textSecondary" mt="1">txindex status unknown (old Core) — legacy-input spends may fail.</Text>}
             </>
           ) : (

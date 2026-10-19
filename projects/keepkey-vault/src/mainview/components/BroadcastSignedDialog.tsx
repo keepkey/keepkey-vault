@@ -75,7 +75,7 @@ export function BroadcastSignedDialog() {
 		setPhase("sending")
 		setError(null)
 		try {
-			const res = await rpcRequest<BtcBroadcastReview>("btcBroadcastSigned", { data, send: true, backend: review?.backend }, 120000)
+			const res = await rpcRequest<BtcBroadcastReview>("btcBroadcastSigned", { data, send: true, backend: review?.backend, backendId: review?.backendId }, 120000)
 			// Keep the fee the review proved from hash-checked previous txs (a raw tx alone cannot prove it).
 			setReview(r => ({ ...res, fee: r?.fee ?? res.fee, feeSource: r?.feeSource ?? res.feeSource }))
 			setPhase("done")
@@ -128,7 +128,7 @@ export function BroadcastSignedDialog() {
 					{(phase === "review" || phase === "sending" || phase === "done") && review && (
 						<Flex direction="column" gap="3">
 							{phase === "done" && (
-								<Text fontSize="sm" fontWeight="600" color="var(--teal-2)">Broadcast. The network accepted this transaction ID.</Text>
+								<Text fontSize="sm" fontWeight="600" color="var(--teal-2)">Broadcast endpoint returned the expected transaction ID. This does not establish network propagation or confirmation.</Text>
 							)}
 							<Box {...card}>
 								<Text fontSize="xs" fontWeight="700" color="kk.textSecondary" mb="2">TO ({review.outputs.length})</Text>

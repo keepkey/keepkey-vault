@@ -126,9 +126,9 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       btcWatchOnlyShowAddress: { params: { deviceId: string; index: number }; response: { address: string } }
       btcWatchOnlyBuildPsbt: { params: { deviceId?: string; scriptType: 'p2wpkh' | 'p2sh-p2wpkh' | 'p2pkh' | 'p2tr'; accountIndex: number; to: string; amount: string; isMax: boolean; feeLevel: 1 | 3 | 5 }; response: BtcWatchOnlyPsbt }
       /** Signed PSBT or raw tx hex, base64 of the dropped bytes. send=false reviews, send=true broadcasts. */
-      btcBroadcastSigned: { params: { data: string; send?: boolean; backend?: string }; response: BtcBroadcastReview }
+      btcBroadcastSigned: { params: { data: string; send?: boolean; backend?: string; backendId?: string }; response: BtcBroadcastReview }
       /** Electrum watch-only export of one loaded account. save=true writes the wallet file to ~/Downloads. fingerprint null = unknown. */
-      btcWatchOnlyExport: { params: { accountIndex: number; scriptType: 'p2wpkh' | 'p2sh-p2wpkh' | 'p2pkh' | 'p2tr'; save?: boolean }; response: { key: string; fingerprint: string | null; derivation: string; filePath?: string } }
+      btcWatchOnlyExport: { params: { accountIndex: number; scriptType: 'p2wpkh' | 'p2sh-p2wpkh' | 'p2pkh' | 'p2tr'; save?: boolean; format?: 'electrum' | 'desktop' }; response: { key: string; fingerprint: string | null; derivation: string; filePath?: string } }
       ethSignTx: { params: any; response: any }
       ethSignMessage: { params: any; response: any } // TODO: type
       ethSignTypedData: { params: any; response: any } // TODO: type

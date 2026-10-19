@@ -29,6 +29,7 @@ export function WatchOnlyExportDialog({ accounts, isHiddenWallet, onClose }: { a
 	const [error, setError] = useState<string | null>(null)
 	const [busy, setBusy] = useState(false)
 	const [copied, setCopied] = useState(false)
+	const [savedFormat, setSavedFormat] = useState<'desktop' | 'electrum'>('desktop')
 
 	useEffect(() => {
 		let cancelled = false
@@ -40,11 +41,12 @@ export function WatchOnlyExportDialog({ accounts, isHiddenWallet, onClose }: { a
 		return () => { cancelled = true }
 	}, [accountIndex, scriptType])
 
-	const handleSave = useCallback(async () => {
+	const handleSave = useCallback(async (format: 'desktop' | 'electrum') => {
 		setBusy(true)
 		setError(null)
 		try {
-			setData(await rpcRequest<ExportData>("btcWatchOnlyExport", { accountIndex, scriptType, save: true }, 60000))
+			setData(await rpcRequest<ExportData>("btcWatchOnlyExport", { accountIndex, scriptType, save: true, format }, 60000))
+			setSavedFormat(format)
 		} catch (e: any) {
 			setError(e?.message || "Could not save the wallet file")
 		}
@@ -76,7 +78,7 @@ export function WatchOnlyExportDialog({ accounts, isHiddenWallet, onClose }: { a
 			>
 				<Box p="6">
 					<Text fontSize="lg" fontWeight="700" color="kk.textPrimary">Export watch-only wallet</Text>
-					<Text fontSize="xs" color="kk.textSecondary" mb="4">For Electrum or Sparrow · Bitcoin mainnet</Text>
+					<Text fontSize="xs" color="kk.textSecondary" mb="4">For Desktop, Electrum or Sparrow · Bitcoin mainnet</Text>
 
 					<Flex direction="column" gap="3">
 						<Box {...card} borderColor="rgba(233,196,106,0.4)" bg="rgba(233,196,106,0.06)">
@@ -106,7 +108,8 @@ export function WatchOnlyExportDialog({ accounts, isHiddenWallet, onClose }: { a
 								</Box>
 							))}
 						</Flex>
-						{scriptType === "p2tr" && <Text fontSize="xs" color="kk.textSecondary">Copy this BIP86 key, fingerprint and path into a Taproot watch-only wallet in Sparrow. Electrum wallet files support the other account types.</Text>}
+						<Text fontSize="xs" color="kk.textSecondary">Save a Desktop public wallet file to prepare transactions on an online computer without connecting your KeepKey. It includes the fingerprint, path, script type, network and receive/change branches.</Text>
+						{scriptType === "p2tr" && <Text fontSize="xs" color="kk.textSecondary">Taproot signing uses Desktop. Sparrow's KeepKey USB integration and Electrum's KeepKey plugin do not support Taproot signing. File exchange is a separate compatibility check.</Text>}
 
 						{!data && !error && (
 							<Flex align="center" gap="2" py="3" justify="center">
@@ -123,7 +126,7 @@ export function WatchOnlyExportDialog({ accounts, isHiddenWallet, onClose }: { a
 								<Flex justify="space-between"><Text fontSize="xs" color="kk.textSecondary">Derivation path</Text><Text fontSize="xs" fontFamily="mono" color="kk.textPrimary">{data.derivation}</Text></Flex>
 								{data.filePath && (
 									<Box mt="2">
-										<Text fontSize="xs" color="var(--teal-2)">Saved. Open it in Electrum with File &gt; Open.</Text>
+										<Text fontSize="xs" color="var(--teal-2)">{savedFormat === 'desktop' ? 'Saved. Drop this public wallet file on Desktop on the online computer.' : 'Saved. Open it in Electrum with File > Open.'}</Text>
 										<Text fontSize="xs" fontFamily="mono" color="kk.textPrimary" wordBreak="break-all">{data.filePath}</Text>
 									</Box>
 								)}
@@ -132,11 +135,14 @@ export function WatchOnlyExportDialog({ accounts, isHiddenWallet, onClose }: { a
 
 						{error && <Text fontSize="sm" color="var(--rose)">{error}</Text>}
 
-						<Flex gap="2" justify="flex-end">
+						<Flex gap="2" justify="flex-end" wrap="wrap">
 							<Button {...plainButton} onClick={onClose} disabled={busy}>Close</Button>
 							<Button {...plainButton} onClick={handleCopy} disabled={!data}>{copied ? "Copied" : "Copy key"}</Button>
-							<Button {...goldButton} onClick={handleSave} disabled={!data || !data.fingerprint || busy || scriptType === "p2tr"}>
-								{busy ? "Saving..." : "Save Electrum wallet file"}
+							<Button {...plainButton} onClick={() => void handleSave('electrum')} disabled={!data || !data.fingerprint || busy || scriptType === "p2tr"}>
+								Save Electrum file
+							</Button>
+							<Button {...goldButton} onClick={() => void handleSave('desktop')} disabled={!data || !data.fingerprint || busy}>
+								{busy ? "Saving..." : "Save Desktop public wallet"}
 							</Button>
 						</Flex>
 					</Flex>

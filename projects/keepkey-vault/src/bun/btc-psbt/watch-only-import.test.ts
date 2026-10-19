@@ -6,6 +6,10 @@ import { mnemonicToSeedSync } from 'bip39'
 import { parseWatchOnlyImport, watchOnlyImportId } from './watch-only-import'
 import { toSlip132, writeElectrumWallet } from './codec'
 import { deriveAddress } from './psbt'
+import { readPublicWallet, writePublicWallet } from './public-wallet'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 
 // Public BIP-39 test mnemonic; its BIP84 zpub and first address are the BIP84 test vectors.
 const MASTER = HDKey.fromMasterSeed(new Uint8Array(mnemonicToSeedSync('abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about')))
@@ -14,6 +18,46 @@ const XPUB84 = MASTER.derive("m/84'/0'/0'").publicExtendedKey
 const XPUB44 = MASTER.derive("m/44'/0'/0'").publicExtendedKey
 const H = 0x80000000
 const sha = (s: string) => createHash('sha256').update(s).digest('hex')
+
+describe('portable Desktop public wallet', () => {
+  it('recovers the public wallet, node settings and transaction files across four fresh processes', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'btc-offline-restart-'))
+    try {
+      for (const phase of ['export', 'build', 'sign', 'review']) {
+        const result = Bun.spawnSync([process.execPath, join(import.meta.dir, '../../../__tests__/fixtures/btc-offline-restart.ts'), dir, phase])
+        expect(result.exitCode, result.stdout.toString() + result.stderr.toString()).toBe(0)
+        if (phase === 'review') expect(result.stdout.toString()).toContain('Restart recovery passed')
+      }
+    } finally { rmSync(dir, { recursive: true, force: true }) }
+  })
+  for (const [scriptType, purpose] of [['p2pkh', 44], ['p2sh-p2wpkh', 49], ['p2wpkh', 84], ['p2tr', 86]] as const) {
+    it(`preserves ${scriptType} account 2, origin and both address branches`, () => {
+      const path = [purpose + H, H, 2 + H]
+      const account = { scriptType, path, xpub: MASTER.derive(`m/${purpose}'/0'/2'`).publicExtendedKey, masterFingerprint: hex.decode('73c5da0a') }
+      const file = writePublicWallet(account)
+      const imported = parseWatchOnlyImport(file)
+      expect(imported).toMatchObject({ source: 'desktop', scriptType, path, pathAssumed: false, fingerprint: '73c5da0a', xpub: account.xpub })
+      for (const branch of [0, 1] as const) for (let index = 0; index < 5; index++) expect(deriveAddress(imported, branch, index)).toBe(deriveAddress(account, branch, index))
+      expect(JSON.parse(file)).toMatchObject({ network: 'bitcoin-mainnet', account: { receiveBranch: 0, changeBranch: 1 } })
+      expect(() => parseWatchOnlyImport(file, { fingerprint: 'ffffffff' })).toThrow(/differs from the file/)
+      expect(() => parseWatchOnlyImport(file, { path: `m/${purpose}'/0'/0'` })).toThrow(/can only be/)
+    })
+  }
+
+  const account = { ...account84(), masterFingerprint: hex.decode('73c5da0a') }
+  const file = JSON.parse(writePublicWallet(account))
+  it('refuses different networks, branches, formats and private metadata', () => {
+    for (const patch of [{ network: 'bitcoin-testnet' }, { version: 2 }, { masterFingerprint: 'bad' }, { seed: 'never import secrets' }, { account: { ...file.account, changeBranch: 0 } }, { account: { ...file.account, receiveBranch: 1 } }, { account: { ...file.account, xprv: 'private' } }, { account: { ...file.account, xpub: MASTER.derive("m/84'/0'/0'").privateExtendedKey } }, { account: { ...file.account, path: "m/86'/0'/0'" } }, { account: { ...file.account, scriptType: '__proto__' } }]) {
+      expect(() => parseWatchOnlyImport(JSON.stringify({ ...file, ...patch }))).toThrow()
+    }
+  })
+
+  it('rejects a branch key masquerading as an account and preserves an explicit fingerprint collision', () => {
+    expect(() => readPublicWallet({ ...file, account: { ...file.account, xpub: MASTER.derive("m/84'/0'/0'/0").publicExtendedKey } })).toThrow(/do not agree/)
+    const fingerprint = HDKey.fromExtendedKey(XPUB84).fingerprint.toString(16).padStart(8, '0')
+    expect(parseWatchOnlyImport(JSON.stringify({ ...file, masterFingerprint: fingerprint })).fingerprint).toBe(fingerprint)
+  })
+})
 
 describe('bare key import', () => {
   it('reads a zpub with the assumed BIP84 path and no fingerprint', () => {
