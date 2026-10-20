@@ -15,6 +15,17 @@ import { normalizeAssetCaip } from './balance-reconciliation'
 
 export type BalanceDisplayState = 'pending' | 'unknown' | 'known'
 
+/** Confidence for a single-chain portfolio response, including partial HTTP 200s. */
+export function portfolioBalanceSyncState(meta?: {
+  degraded?: boolean
+  failures?: readonly unknown[]
+  staleChains?: readonly unknown[]
+} | null): 'confirmed' | 'stale' | 'degraded' {
+  if (meta?.degraded || meta?.failures?.length) return 'degraded'
+  if (meta?.staleChains?.length) return 'stale'
+  return 'confirmed'
+}
+
 export interface BalanceDisplayInput {
   /** Is there an entry for this chain in the balances map at all? */
   hasEntry: boolean

@@ -222,3 +222,92 @@ describe('Permit2 EIP-712 ClearSign decoding', () => {
     expect(decoded.fields).toContainEqual(expect.objectContaining({ label: 'Output 1 End Amount', value: '863944497040461607478' }))
   })
 })
+
+
+describe('device comparison digests (#385)', () => {
+  const typedData = {
+    domain: { name: 'HyperliquidSignTransaction', version: '1', chainId: 42161, verifyingContract: '0x0000000000000000000000000000000000000000' },
+    primaryType: 'HyperliquidTransaction:ApproveAgent',
+    types: { 'HyperliquidTransaction:ApproveAgent': [
+      { name: 'hyperliquidChain', type: 'string' }, { name: 'agentAddress', type: 'address' },
+      { name: 'agentName', type: 'string' }, { name: 'nonce', type: 'uint64' },
+    ] },
+    message: { hyperliquidChain: 'Mainnet', agentAddress: '0x1111111111111111111111111111111111111111', agentName: 'QA agent', nonce: 1700000000000 },
+  }
+
+  test('matches the two hashes sent by the legacy hdwallet signing path', () => {
+    expect(decodeEIP712(typedData).hashes).toEqual({
+      domainHash: '0x2f54e643b38c9c2b65cb731aaf11c54f01705ee0cdf45aea16e2ac0a5ce7531a',
+      messageHash: '0xc5b56400c8cd0456343cf6b965eafd00b7cf3be1359e57586ba528da1c9a31de',
+    })
+    expect(decodeEIP712({ ...typedData, message: { ...typedData.message, nonce: 1700000000001 } }).hashes?.messageHash)
+      .not.toBe(decodeEIP712(typedData).hashes?.messageHash)
+  })
+
+  test('respects an explicit domain field order instead of assuming canonical order', () => {
+    const EIP712Domain = [{ name: 'chainId', type: 'uint256' }, { name: 'name', type: 'string' }]
+    const input = { ...typedData, domain: { name: 'test', chainId: 1 }, types: { ...typedData.types, EIP712Domain } }
+    expect(decodeEIP712(input).hashes?.domainHash).toBe(ethersUtils._TypedDataEncoder.hashStruct('EIP712Domain', { EIP712Domain }, input.domain))
+    expect(decodeEIP712(input).hashes?.domainHash).not.toBe(ethersUtils._TypedDataEncoder.hashDomain(input.domain))
+  })
+
+  test('domain-only signing has no invented message hash', () => {
+    const decoded = decodeEIP712({ ...typedData, primaryType: 'EIP712Domain' })
+    expect(decoded.hashes?.domainHash).toBeDefined()
+    expect(decoded.hashes?.messageHash).toBeUndefined()
+  })
+
+  test('a missing type or malformed value cannot produce a misleading comparison hash', () => {
+    expect(decodeEIP712({ ...typedData, types: {} }).hashes).toBeUndefined()
+    expect(decodeEIP712({ ...typedData, message: { ...typedData.message, agentAddress: 'invalid' } }).hashes).toBeUndefined()
+  })
+})
+
+
+test('signing approval retains full fields, account and digests through both device phases', () => {
+  // Isolated process: the browser RPC module gets an empty window, so rendering
+  // cannot open a device connection or change other suites' module globals.
+  const script = `
+    import { createElement } from 'react'
+    import { renderToStaticMarkup } from 'react-dom/server'
+    import { ChakraProvider, defaultSystem } from '@chakra-ui/react'
+    import i18next from 'i18next'
+    import { I18nextProvider } from 'react-i18next'
+    globalThis.window = {}
+    const { SigningApproval } = await import('./src/mainview/components/device/SigningApproval')
+    const i18n = i18next.createInstance()
+    await i18n.init({ lng: 'en', resources: { en: { device: {} } }, initImmediate: false })
+    const request = JSON.parse(process.env.TEST_SIGNING_REQUEST)
+    const results = ['approve', 'sending-payload', 'device-confirm'].map(phase => {
+      const html = renderToStaticMarkup(createElement(ChakraProvider, { value: defaultSystem },
+        createElement(I18nextProvider, { i18n }, createElement(SigningApproval, {
+          request, phase, onApprove() {}, onReject() {}, onCancel() {},
+        }))))
+      return {
+        phase, account: html.includes(request.from), field: html.includes('1700000000000'),
+        domain: html.includes(request.typedDataDecoded.hashes.domainHash),
+        message: html.includes(request.typedDataDecoded.hashes.messageHash),
+        labels: html.includes('TYPED DATA DOMAIN') && html.includes('TYPED DATA MESSAGE'),
+      }
+    })
+    console.log(JSON.stringify(results))
+  `
+  const request = {
+    id: 'qa-comparison', method: '/eth/sign-typed-data', appName: 'QA',
+    from: '0x1111111111111111111111111111111111111111',
+    typedDataDecoded: {
+      operationName: 'QA', domain: { name: 'QA' }, primaryType: 'Message', isKnownType: false,
+      fields: [{ label: 'Nonce', value: '1700000000000', raw: '1700000000000', format: 'raw' }],
+      hashes: { domainHash: '0x' + 'ab'.repeat(32), messageHash: '0x' + 'cd'.repeat(32) },
+    },
+  }
+  const run = Bun.spawnSync([process.execPath, '--eval', script], {
+    cwd: new URL('../', import.meta.url).pathname,
+    env: { ...process.env, TEST_SIGNING_REQUEST: JSON.stringify(request) },
+  })
+  expect(run.exitCode).toBe(0)
+  const results = JSON.parse(run.stdout.toString().trim().split('\n').at(-1)!)
+  expect(results).toEqual(['approve', 'sending-payload', 'device-confirm'].map(phase => ({
+    phase, account: true, field: true, domain: true, message: true, labels: true,
+  })))
+})

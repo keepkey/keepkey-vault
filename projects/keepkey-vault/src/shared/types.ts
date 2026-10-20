@@ -1013,6 +1013,8 @@ export interface EIP712DecodedInfo {
   isKnownType: boolean
   /** True only when the signed protocol contract identity is in the reviewed deployment registry. */
   protocolIdentityVerified?: boolean
+  /** Full host-computed digests for comparison with legacy device screens. */
+  hashes?: { domainHash: string; messageHash?: string }
 }
 
 /**

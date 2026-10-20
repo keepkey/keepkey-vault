@@ -1,4 +1,4 @@
-# KeepKey Vault v1.6.4 — prerelease
+# KeepKey Desktop v1.6.4
 
 ## Bitcoin transaction exchange
 
