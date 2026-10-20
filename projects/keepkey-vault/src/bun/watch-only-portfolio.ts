@@ -2,6 +2,7 @@ import type { ChainDef } from '../shared/chains'
 import type { ChainBalance } from '../shared/types'
 import { utxoDiscoveryKey } from './btc-backend/types'
 import { pathToBip32, utxoAccountScriptPaths } from './chain-scan'
+import type { BtcBackend } from './btc-backend/types'
 
 export interface SavedPublicKey {
   chainId: string; xpub: string; address: string; path: string; scriptType: string
@@ -9,6 +10,41 @@ export interface SavedPublicKey {
 export interface PortfolioKey {
   caip: string; pubkey: string; sourcePubkey?: string; chainId: string; symbol: string
   networkId: string; path: string; scriptType: string
+}
+
+/** Optional fiat pricing must never decide whether an own-node UTXO refresh
+ * succeeds. Fetch all accounts atomically: a failed account cannot zero another. */
+export async function watchOnlyNodeBalances(backend: BtcBackend, keys: PortfolioKey[], quote: () => Promise<number>, cachedPrice = 0) {
+  const validPrice = (value: number) => Number.isFinite(value * 21_000_000) && value > 0
+  const [price, accounts] = await Promise.all([
+    Promise.resolve().then(quote).then(value => {
+      if (!validPrice(value)) throw new Error('No valid fiat quote')
+      return { value, state: undefined as ChainBalance['fiatValueState'] }
+    }).catch(() => ({ value: validPrice(cachedPrice) ? cachedPrice : 0, state: validPrice(cachedPrice) ? 'stale' as const : 'unavailable' as const })),
+    (async () => {
+      const accounts: Array<{ p: PortfolioKey; sats: bigint }> = []
+      // Core permits one scantxoutset scan at a time.
+      for (const p of keys) {
+        const utxos = await backend.listUnspent({ network: p.networkId, xpub: p.sourcePubkey || p.pubkey, scriptType: p.scriptType })
+        let sats = 0n
+        for (const u of utxos) {
+          if (!Number.isSafeInteger(u.value) || u.value < 0) throw new Error('Node returned an invalid UTXO amount')
+          sats += BigInt(u.value)
+        }
+        if (sats > 2_100_000_000_000_000n) throw new Error('Node returned an invalid total balance')
+        accounts.push({ p, sats })
+      }
+      return accounts
+    })(),
+  ])
+  return {
+    fiatValueState: price.state,
+    entries: accounts.map(({ p, sats }) => ({
+      caip: p.caip, pubkey: p.pubkey, networkId: p.networkId,
+      balance: `${sats / 100_000_000n}.${(sats % 100_000_000n).toString().padStart(8, '0')}`,
+      valueUsd: Number(sats) / 1e8 * price.value,
+    })),
+  }
 }
 
 /** Public-key inventory, never a receive address in place of an account xpub. */

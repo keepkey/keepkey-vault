@@ -14,6 +14,7 @@ import { urPrecheck } from './uniswap-ur'
 import { supportsCertifiedClearSign } from './solana-certified-policy'
 import { certifiedBodyRefused, certifiedEnvelopeShown, metadataPayloadBytes } from '../shared/certified-evm-envelope'
 import { resolveErc7730ForCall } from './erc7730-resolver'
+import { describeErc7730Call } from './erc7730-describe'
 
 /** A chain id as dapps send it (number, "8453", "0x2105") → positive integer, else undefined. */
 export function normalizeEvmChainId(raw: unknown): number | undefined {
@@ -95,6 +96,10 @@ export async function attachErc7730Definition(
   if (!catalog) return false
   signingInfo.erc7730 = catalog
   signingInfo.needsBlindSigning = false
+  const description = describeErc7730Call(catalog.definitions[0].envelope, {
+    chainId: signingInfo.chainId as number, to: to!, data: data!, value: signingInfo.value, from: signingInfo.from,
+  })
+  if (description) signingInfo.erc7730Description = description
   console.log(`${tag} EVM clear-sign: ERC-7730 definition ${catalog.primaryDefinitionId.slice(0, 18)}… attached (chain ${signingInfo.chainId}, to ${to})`)
   return true
 }

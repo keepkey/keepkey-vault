@@ -14,6 +14,7 @@ import type { ChainBalance, CustomToken, CustomChain, PairedAppInfo, ApiLogEntry
 import { authenticatedClearSignLevel, clearSignExposurePriority, expandClearSignAuditDrafts } from './clearsign-observation'
 import { summarizeClearSignObservations } from './clearsign-observation'
 import { clearSignPromotionBundleHash, verifyClearSignPromotionReview } from './clearsign-promotion'
+import type { SignedTxReview } from '../shared/tx-clearsign'
 import type { VerifiedClearSignArtifact } from './clearsign-artifact-import'
 import { configureClearSignArtifactSnapshots } from './clearsign-artifact-resolver'
 import { configureClearSignProviders, ensureClearSignProviderTable, listClearSignProviders } from './clearsign-providers'
@@ -187,6 +188,8 @@ export function initDb() {
         updated_at    INTEGER NOT NULL
       )
     `)
+    // BIP32 master fingerprint (8 hex), standard (non-hidden) wallets only
+    try { db.exec(`ALTER TABLE device_snapshot ADD COLUMN master_fp TEXT`) } catch { /* already exists */ }
 
     db.exec(`
       CREATE TABLE IF NOT EXISTS cached_pubkeys (
@@ -490,6 +493,18 @@ export function initDb() {
     try { db.exec(`ALTER TABLE clearsign_observations ADD COLUMN exposure_class TEXT NOT NULL DEFAULT 'not-evaluated'`) } catch { /* already exists */ }
     try { db.exec(`ALTER TABLE clearsign_observations ADD COLUMN component_count INTEGER NOT NULL DEFAULT 1`) } catch { /* already exists */ }
     try { db.exec(`ALTER TABLE clearsign_observations ADD COLUMN authenticated_component_count INTEGER NOT NULL DEFAULT 0`) } catch { /* already exists */ }
+    // What the approval card showed for each signed EVM transaction (signed-tx-review.ts).
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS signed_tx_review (
+        network_id  TEXT NOT NULL,
+        txid        TEXT NOT NULL,
+        device_id   TEXT NOT NULL,
+        wallet_id   TEXT NOT NULL,
+        created_at  INTEGER NOT NULL,
+        review_json TEXT NOT NULL,
+        PRIMARY KEY (network_id, txid)
+      )
+    `)
     db.exec(`
       CREATE TABLE IF NOT EXISTS clearsign_audit_jobs (
         shape_key             TEXT PRIMARY KEY,
@@ -1283,6 +1298,25 @@ export function enqueueClearSignAuditDemand(draft: ClearSignObservationDraft): v
   catch (e: any) { console.warn('[db] enqueueClearSignAuditDemand failed:', e.message) }
 }
 
+export function saveSignedTxReview(networkId: string, txid: string, deviceId: string, walletId: string, review: SignedTxReview) {
+  try {
+    if (!db) return
+    db.run(
+      `INSERT OR REPLACE INTO signed_tx_review (network_id, txid, device_id, wallet_id, created_at, review_json) VALUES (?, ?, ?, ?, ?, ?)`,
+      [networkId, txid.toLowerCase(), deviceId, walletId, review.signedAt, JSON.stringify(review)],
+    )
+  } catch (e: any) { console.warn('[db] saveSignedTxReview failed:', e.message) }
+}
+
+export function getSignedTxReview(networkId: string, txid: string, deviceId: string, walletId: string): SignedTxReview | null {
+  try {
+    const row = db?.query(
+      `SELECT review_json FROM signed_tx_review WHERE network_id = ? AND txid = ? AND device_id = ? AND wallet_id = ?`,
+    ).get(networkId, txid.toLowerCase(), deviceId, walletId) as { review_json: string } | null
+    return row ? JSON.parse(row.review_json) : null
+  } catch (e: any) { console.warn('[db] getSignedTxReview failed:', e.message); return null }
+}
+
 /** Start one coverage observation before the user approval prompt. */
 export function insertClearSignObservation(
   draft: ClearSignObservationDraft,
@@ -1788,6 +1822,9 @@ export function clearApiLogs(deviceId?: string, walletId?: string) {
     if (walletId) db.run('DELETE FROM api_log WHERE wallet_id = ?', [walletId])
     else if (deviceId) db.run('DELETE FROM api_log WHERE device_id = ?', [deviceId])
     else db.run('DELETE FROM api_log')
+    if (walletId) db.run('DELETE FROM signed_tx_review WHERE wallet_id = ?', [walletId])
+    else if (deviceId) db.run('DELETE FROM signed_tx_review WHERE device_id = ?', [deviceId])
+    else db.run('DELETE FROM signed_tx_review')
   } catch (e: any) {
     console.warn('[db] clearApiLogs failed:', e.message)
   }
@@ -1927,6 +1964,35 @@ export function updateApiLogTxMeta(
     else db.run(`UPDATE api_log SET ${setSql.join(', ')} WHERE txid = ? AND method = 'SCAN'`, [...args, txid])
   } catch (e: any) {
     console.warn('[db] updateApiLogTxMeta failed:', e.message)
+  }
+}
+
+/** Earlier on-chain transactions from `from` to contract `to` on `chainId`,
+ *  as Pioneer's history found them (SCAN rows). A signature alone is not
+ *  counted: a site can ask for one and never broadcast it. Pioneer's history
+ *  can miss transactions, so `count` is a lower bound. */
+export function getPriorEvmCalls(from: string, to: string, chainId: number): { count: number; since: number } | null {
+  try {
+    if (!db) return null
+    const f = from.toLowerCase(), t = to.toLowerCase()
+    const rows = db.query(
+      `SELECT timestamp, txid, response_body FROM api_log
+       WHERE method = 'SCAN' AND activity_type = 'send' AND lower(response_body) LIKE ?`
+    ).all(`%${t}%`) as Array<{ timestamp: number; txid: string | null; response_body: string | null }>
+    const sent = new Set<string>()
+    let since = Infinity
+    for (const r of rows) {
+      try {
+        const b = JSON.parse(r.response_body || '{}')
+        if (String(b.to).toLowerCase() !== t || String(b.from).toLowerCase() !== f || b.networkId !== `eip155:${chainId}`) continue
+        sent.add(r.txid || String(r.timestamp))
+        since = Math.min(since, r.timestamp)
+      } catch { /* not JSON: not a match */ }
+    }
+    return sent.size > 0 ? { count: sent.size, since } : null
+  } catch (e: any) {
+    console.warn('[db] getPriorEvmCalls failed:', e.message)
+    return null
   }
 }
 
@@ -2110,7 +2176,9 @@ export function saveDeviceSnapshot(deviceId: string, label: string, firmwareVer:
   try {
     if (!db) return
     db.run(
-      `INSERT OR REPLACE INTO device_snapshot (device_id, label, firmware_ver, features_json, updated_at) VALUES (?, ?, ?, ?, ?)`,
+      // Upsert, not REPLACE: keeps master_fp, which is written separately.
+      `INSERT INTO device_snapshot (device_id, label, firmware_ver, features_json, updated_at) VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(device_id) DO UPDATE SET label = excluded.label, firmware_ver = excluded.firmware_ver, features_json = excluded.features_json, updated_at = excluded.updated_at`,
       [deviceId, label, firmwareVer, featuresJson, Date.now()]
     )
   } catch (e: any) {
@@ -2118,11 +2186,22 @@ export function saveDeviceSnapshot(deviceId: string, label: string, firmwareVer:
   }
 }
 
+/** Only updates an existing snapshot row, so it never registers a device by itself. */
+export function setDeviceMasterFingerprint(deviceId: string, masterFp: string) {
+  try {
+    if (!db) return
+    db.run('UPDATE device_snapshot SET master_fp = ? WHERE device_id = ?', [masterFp, deviceId])
+  } catch (e: any) {
+    console.warn('[db] setDeviceMasterFingerprint failed:', e.message)
+  }
+}
+
 export function getLatestDeviceSnapshot(): { deviceId: string; label: string; firmwareVer: string; featuresJson: string; updatedAt: number } | null {
   try {
     if (!db) return null
     const row = db.query(
-      'SELECT device_id, label, firmware_ver, features_json, updated_at FROM device_snapshot ORDER BY updated_at DESC LIMIT 1'
+      // Imported watch-only wallets ('wo:') are not devices: "latest" stays the last KeepKey seen.
+      "SELECT device_id, label, firmware_ver, features_json, updated_at FROM device_snapshot WHERE device_id NOT LIKE 'wo:%' ORDER BY updated_at DESC LIMIT 1"
     ).get() as { device_id: string; label: string; firmware_ver: string; features_json: string; updated_at: number } | null
     if (!row) return null
     return { deviceId: row.device_id, label: row.label, firmwareVer: row.firmware_ver, featuresJson: row.features_json, updatedAt: row.updated_at }
@@ -2132,14 +2211,14 @@ export function getLatestDeviceSnapshot(): { deviceId: string; label: string; fi
   }
 }
 
-export function getDeviceSnapshotById(deviceId: string): { deviceId: string; label: string; firmwareVer: string; featuresJson: string; updatedAt: number } | null {
+export function getDeviceSnapshotById(deviceId: string): { deviceId: string; label: string; firmwareVer: string; featuresJson: string; updatedAt: number; masterFp: string | null } | null {
   try {
     if (!db) return null
     const row = db.query(
-      'SELECT device_id, label, firmware_ver, features_json, updated_at FROM device_snapshot WHERE device_id = ?'
-    ).get(deviceId) as { device_id: string; label: string; firmware_ver: string; features_json: string; updated_at: number } | null
+      'SELECT device_id, label, firmware_ver, features_json, updated_at, master_fp FROM device_snapshot WHERE device_id = ?'
+    ).get(deviceId) as { device_id: string; label: string; firmware_ver: string; features_json: string; updated_at: number; master_fp: string | null } | null
     if (!row) return null
-    return { deviceId: row.device_id, label: row.label, firmwareVer: row.firmware_ver, featuresJson: row.features_json, updatedAt: row.updated_at }
+    return { deviceId: row.device_id, label: row.label, firmwareVer: row.firmware_ver, featuresJson: row.features_json, updatedAt: row.updated_at, masterFp: row.master_fp }
   } catch (e: any) {
     console.warn('[db] getDeviceSnapshotById failed:', e.message)
     return null
@@ -2166,18 +2245,23 @@ export function getSnapshotFeaturesByFirmwareHash(firmwareHash: string): any | n
   }
 }
 
-export function getAllDeviceSnapshots():Array<{ deviceId: string; label: string; firmwareVer: string; updatedAt: number; totalUsd: number }> {
+export function getAllDeviceSnapshots():Array<{ deviceId: string; label: string; firmwareVer: string; updatedAt: number; totalUsd: number | null; imported?: boolean; verified?: boolean }> {
   try {
     if (!db) return []
     const rows = db.query(`
       SELECT s.device_id, s.label, s.firmware_ver, s.updated_at,
-             COALESCE(SUM(b.balance_usd), 0) AS total_usd
+             CASE WHEN COUNT(b.chain_id) = 0 THEN NULL ELSE SUM(b.balance_usd) END AS total_usd,
+             json_extract(s.features_json, '$.watchOnlyImport') AS imported,
+             json_extract(s.features_json, '$.deviceVerified') AS verified
       FROM device_snapshot s
       LEFT JOIN balances b ON b.device_id = s.device_id
       GROUP BY s.device_id
       ORDER BY s.updated_at DESC
-    `).all() as Array<{ device_id: string; label: string; firmware_ver: string; updated_at: number; total_usd: number }>
-    return rows.map(r => ({ deviceId: r.device_id, label: r.label, firmwareVer: r.firmware_ver, updatedAt: r.updated_at, totalUsd: r.total_usd }))
+    `).all() as Array<{ device_id: string; label: string; firmware_ver: string; updated_at: number; total_usd: number | null; imported: number | null; verified: number | null }>
+    return rows.map(r => ({
+      deviceId: r.device_id, label: r.label, firmwareVer: r.firmware_ver, updatedAt: r.updated_at, totalUsd: r.total_usd,
+      ...(r.imported ? { imported: true, verified: !!r.verified } : {}),
+    }))
   } catch (e: any) {
     console.warn('[db] getAllDeviceSnapshots failed:', e.message)
     return []
@@ -2195,8 +2279,40 @@ export function deleteDeviceSnapshot(deviceId: string) {
     db.run('DELETE FROM swap_history WHERE device_id = ?', [deviceId])
     db.run('DELETE FROM addressbook WHERE device_id = ?', [deviceId])
     db.run('DELETE FROM addressbook_tx WHERE device_id = ?', [deviceId])
+    db.run('DELETE FROM signed_tx_review WHERE device_id = ?', [deviceId])
+    // Ledger rows are keyed by device id or by a wallet id that starts with it ("<id>:...").
+    const owned = `(device_id = ?1 OR substr(device_id, 1, length(?1) + 1) = ?1 || ':')`
+    db.run(`DELETE FROM postings WHERE journal_entry_id IN (SELECT id FROM journal_entries WHERE ${owned})`, [deviceId])
+    db.run(`DELETE FROM journal_entries WHERE ${owned}`, [deviceId])
+    db.run(`DELETE FROM ledger_accounts WHERE ${owned}`, [deviceId])
+    db.run(`DELETE FROM ledger_checkpoints WHERE ${owned}`, [deviceId])
   } catch (e: any) {
     console.warn('[db] deleteDeviceSnapshot failed:', e.message)
+  }
+}
+
+/** Imported watch-only wallet (no device): synthetic snapshot + its Bitcoin key row, in one transaction. */
+export function saveImportedWatchOnlyWallet(w: { id: string; label: string; featuresJson: string; masterFp: string | null; path: string; key: string; scriptType: string }) {
+  if (!db) throw new Error('Database unavailable')
+  const d = db
+  d.transaction(() => {
+    const existing = d.query('SELECT label FROM device_snapshot WHERE device_id = ?').get(w.id) as { label: string } | null
+    if (existing) throw new Error(`This key is already imported as "${existing.label}"`)
+    d.run('INSERT INTO device_snapshot (device_id, label, firmware_ver, features_json, updated_at, master_fp) VALUES (?, ?, ?, ?, ?, ?)',
+      [w.id, w.label, '', w.featuresJson, Date.now(), w.masterFp])
+    d.run(`INSERT INTO cached_pubkeys (device_id, chain_id, path, xpub, address, script_type, balance, balance_usd, updated_at) VALUES (?, 'bitcoin', ?, ?, '', ?, '0', 0, ?)`,
+      [w.id, w.path, w.key, w.scriptType, Date.now()])
+  })()
+}
+
+/** A connected KeepKey returned the imported account xpub at its path. masterFp null keeps the stored one. */
+export function setImportedWalletVerified(deviceId: string, masterFp: string | null) {
+  try {
+    if (!db) return
+    db.run(`UPDATE device_snapshot SET features_json = json_set(features_json, '$.deviceVerified', json('true')), master_fp = COALESCE(?, master_fp)
+            WHERE device_id = ? AND json_extract(features_json, '$.watchOnlyImport')`, [masterFp, deviceId])
+  } catch (e: any) {
+    console.warn('[db] setImportedWalletVerified failed:', e.message)
   }
 }
 
@@ -2318,6 +2434,8 @@ export function clearCachedPubkeys(deviceId: string) {
   try {
     if (!db) return
     db.run('DELETE FROM cached_pubkeys WHERE device_id = ?', [deviceId])
+    // The master fingerprint belongs to the same seed; a wiped and re-seeded KeepKey keeps its device_id.
+    db.run('UPDATE device_snapshot SET master_fp = NULL WHERE device_id = ?', [deviceId])
     console.log(`[db] Cleared cached pubkeys for device ${deviceId}`)
   } catch (e: any) {
     console.warn('[db] clearCachedPubkeys failed:', e.message)
@@ -2731,6 +2849,7 @@ function mapAddressBookRow(r: any): AddressBookEntry {
     firstSeenTxid: r.first_seen_txid || undefined,
     note: r.note || undefined,
     savedAt: r.saved_at ?? undefined,
+    lastUsedAt: r.last_used_at ?? undefined,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   }
@@ -2857,7 +2976,8 @@ export function getAddressBookList(filter: AddressBookFilter): AddressBookEntry[
     if (!db) return []
     // The Address Book is wallet-agnostic: own + external are readable without a
     // wallet scope (omit walletId for a global, cross-wallet listing).
-    let sql = 'SELECT * FROM addressbook WHERE 1=1'
+    // last_used_at: the latest send to this entry from KeepKey Desktop's Send page.
+    let sql = 'SELECT a.*, (SELECT MAX(t.broadcast_at) FROM addressbook_tx t WHERE t.entry_id = a.id) AS last_used_at FROM addressbook a WHERE 1=1'
     const params: any[] = []
     if (filter.walletId) { sql += ' AND wallet_id = ?'; params.push(filter.walletId) }
     if (filter.networkId) { sql += ' AND network_id = ?'; params.push(filter.networkId) }
@@ -3010,7 +3130,8 @@ export function getBalancesForOwnSeed(): Array<{ deviceId: string; chainId: stri
   try {
     if (!db) return []
     const rows = db.query(
-      "SELECT device_id, chain_id, address FROM balances WHERE address != '' AND device_id != '' AND device_id != 'unknown'",
+      // Imported watch-only wallets ('wo:') are never "own": no KeepKey proved those keys.
+      "SELECT device_id, chain_id, address FROM balances WHERE address != '' AND device_id != '' AND device_id != 'unknown' AND device_id NOT LIKE 'wo:%'",
     ).all() as any[]
     return rows.map(r => ({ deviceId: r.device_id, chainId: r.chain_id, address: r.address }))
   } catch (e: any) {

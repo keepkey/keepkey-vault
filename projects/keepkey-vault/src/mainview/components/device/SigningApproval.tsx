@@ -3,7 +3,7 @@ import { Box, Text, VStack, Flex, Button } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
 import { Z } from "../../lib/z-index"
 import { rpcRequest } from "../../lib/rpc"
-import type { SigningRequestInfo, EIP712DecodedInfo, CalldataDecodedInfo, SolanaTxDecodedInfo, EthMessageDecodedInfo, SolanaMessageDecodedInfo } from "../../../shared/types"
+import type { SigningRequestInfo, EIP712DecodedInfo, CalldataDecodedInfo, SolanaTxDecodedInfo, EthMessageDecodedInfo, SolanaMessageDecodedInfo, Erc7730Description } from "../../../shared/types"
 import { evmContractIdentity } from "../../../shared/evm-contract-identity"
 import { versionCompare } from "../../../shared/firmware-versions"
 import { erc20Preview } from "../../../shared/erc20Preview"
@@ -17,6 +17,7 @@ import { cosmosTxPreview } from "../../../shared/cosmosTxPreview"
 import { typedDataRows } from "../../../shared/typedDataRows"
 import { assessSigningRisk, formatCertifiedArg, type RiskLevel, type SigningTier } from "../../../shared/clearsign-risk"
 import { ClearSignReportCard } from "../ClearSignReportCard"
+import { KeepKeyUILogo } from "../logo/keepkey-ui"
 import { namedProviderLine } from "../../../shared/clearsign-report"
 
 interface SigningApprovalProps {
@@ -337,9 +338,21 @@ function RequestClearSignReview({ request }: { request: SigningRequestInfo }) {
 			</Text>
 			{state === "failed" && <Text fontSize="2xs" color="var(--rose)">{error}</Text>}
 			{state !== "queued" && (
-				<Button size="xs" variant="outline" alignSelf="flex-start" onClick={submit} loading={state === "sending"}>
-					{t("signing.requestReview", "Request clearsign review")}
-				</Button>
+				// ponytail: CSS hover tip, no tooltip library in the app
+				<Box position="relative" alignSelf="flex-start" css={{ "&:hover > [data-tip], &:focus-within > [data-tip]": { opacity: 1 } }}>
+					<Button size="xs" variant="outline" gap="1.5" onClick={submit} loading={state === "sending"}
+						color="kk.gold" borderColor="rgba(233,196,106,0.45)" _hover={{ bg: "rgba(233,196,106,0.12)" }}
+						aria-describedby="clearsign-review-tip">
+						<Box w="16px" h="16px" borderRadius="3px" overflow="hidden" flexShrink={0} border="1px solid rgba(233,196,106,0.6)"><KeepKeyUILogo /></Box>
+						{t("signing.requestReview", "Submit to KeepKey for review")}
+					</Button>
+					<Box data-tip id="clearsign-review-tip" role="tooltip" position="absolute" bottom="calc(100% + 6px)" left="0" w="260px"
+						bg="kk.cardBg" border="1px solid" borderColor="kk.border" borderRadius="md" px="2.5" py="2"
+						fontSize="2xs" color="kk.textPrimary" lineHeight="1.4" boxShadow="0 4px 16px rgba(0,0,0,0.5)"
+						opacity={0} pointerEvents="none" transition="opacity 0.15s" zIndex={1}>
+						{t("signing.requestReviewTip", "KeepKey reviews ClearSign submissions for third-party contracts. Once a contract is reviewed, your KeepKey shows what each call does instead of signing blind.")}
+					</Box>
+				</Box>
 			)}
 		</Flex>
 	)
@@ -444,6 +457,43 @@ function RawPayload({ data, label }: { data: unknown; label: string }) {
 						{jsonStr}
 					</Text>
 				</Box>
+			)}
+		</VStack>
+	)
+}
+
+// ── ERC-7730 description: what the KeepKey will show ─────────────────
+
+/** The intent and fields the attached definition makes the KeepKey show, read
+ *  here from the same bytes, under Desktop's own name for the protocol. Links
+ *  open through the openUrl RPC (an anchor is a dead click in Electrobun). */
+function Erc7730Section({ d }: { d: Erc7730Description }) {
+	const links = [d.protocol?.url, d.explorerUrl].filter((url): url is string => !!url && url.startsWith("https://"))
+	return (
+		<VStack gap="1.5" w="100%" bg="rgba(0,0,0,0.25)" borderRadius="xl" p="3" align="stretch" data-erc7730-description>
+			<Text fontSize="sm" fontWeight="800" color="white">{d.protocol ? `${d.protocol.name} · ${d.intent}` : d.intent}</Text>
+			{d.summary && d.summary !== d.intent && <Text fontSize="xs" color="kk.textPrimary" whiteSpace="pre-line">{d.summary}</Text>}
+			{d.protocol?.about && <Text fontSize="xs" color="kk.textSecondary">{d.protocol.about}</Text>}
+			{d.fields.map((f, i) => (
+				<Flex key={i} gap="3" w="100%" align="flex-start">
+					<Text fontSize="2xs" color="kk.textMuted" flexShrink={0} minW="60px" pt="0.5">{f.label}</Text>
+					<Box flex="1">
+						{/* One device line per line, as the KeepKey shows it. */}
+						<Text fontSize="2xs" color="kk.textPrimary" fontFamily="mono" wordBreak="break-all" whiteSpace="pre-line">{f.value}</Text>
+						{f.note && <Text fontSize="2xs" color="kk.textSecondary">{f.note}</Text>}
+					</Box>
+				</Flex>
+			))}
+			{links.length > 0 && (
+				<Flex gap="3" wrap="wrap">
+					{links.map((url) => (
+						<Text key={url} as="a" fontSize="2xs" color="kk.textSecondary" textDecoration="underline" cursor="pointer"
+							// @ts-expect-error -- Chakra's polymorphic props don't model anchor attrs
+							href={url}
+							onClick={(e: React.MouseEvent) => { e.preventDefault(); rpcRequest("openUrl", { url }).catch(() => {}) }}
+						>{new URL(url).hostname}</Text>
+					))}
+				</Flex>
 			)}
 		</VStack>
 	)
@@ -1280,7 +1330,8 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 						  requests. Solana has program/message semantics, not an
 						  EVM verified-contract trust signal, so hide it there too.
 						*/}
-						{!isSimpleTransfer && !request.ethMessageDecoded && !isSolanaRequest && (
+						{/* An unknown contract is said once, by the risk bar's verdict. */}
+						{!isSimpleTransfer && !request.ethMessageDecoded && !isSolanaRequest && !(trustLevel === 'unknown' && assessSigningRisk(request)) && (
 							<TrustBadge level={trustLevel} hasSigned={hasSignedBlob} schemaOnly={relayBridgeDeposit}
 								label={acrossDeposit ? t("signing.acrossKnownContract", "Across SpokePool · known contract") : undefined} t={t} />
 						)}
@@ -1363,8 +1414,10 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 					</Box>
 				)}
 
+				{/* What the call does, as the KeepKey will show it. */}
+				{request.erc7730 && request.erc7730Description && <Erc7730Section d={request.erc7730Description} />}
 				{/* Report and risk first, so they are read before blind-sign consent. */}
-				<ClearSignReportCard report={request.clearSignReport} />
+				<ClearSignReportCard report={request.clearSignReport} verdictBelow={Boolean(assessSigningRisk(request))} />
 				{/* No report (an addressNList caller): the provider the sign step pins is still named. */}
 				{(() => {
 					const line = namedProviderLine(request.runtimeProvider, request.clearSignReport)

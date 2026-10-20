@@ -261,10 +261,12 @@ export { PLAIN_TRANSFER_NOT_SIMULATED }
 
 /** The card line for a simulation that could not run. "Pioneer has no route
  * for this" is not something a user can act on, so it becomes a plain
- * sentence. Any other error (a node's own refusal, a network failure) is kept. */
+ * sentence. Any other error keeps the node's own reason (such as
+ * "insufficient funds") after that sentence; the rest goes to the log. */
 export function simulationUnavailableMessage(callMessage: string, simulationError: unknown): string {
   if (callMessage.startsWith(PIONEER_UNSUPPORTED)) return SIMULATION_UNAVAILABLE_MESSAGE
-  return `${callMessage}; eth_simulateV1: ${String((simulationError as any)?.message || simulationError || 'unavailable')}`.slice(0, 300)
+  console.warn(`[evm-effects] simulation unavailable: ${callMessage}; eth_simulateV1: ${String((simulationError as any)?.message || simulationError || 'unavailable')}`)
+  return `${SIMULATION_UNAVAILABLE_MESSAGE} ${callMessage}`.slice(0, 300)
 }
 
 export async function simulateEvmEffects(tx: EvmSimulationTx, endpoint: string): Promise<EffectReport> {

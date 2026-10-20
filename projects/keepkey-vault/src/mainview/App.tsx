@@ -13,6 +13,11 @@ import { MobilePairingDialog } from "./components/MobilePairingDialog"
 import { MobilePanel } from "./components/MobilePanel"
 import { WalletConnectPanel } from "./components/WalletConnectPanel"
 import { FirmwareDropZone } from "./components/FirmwareDropZone"
+import { BitcoinQrImport } from "./components/BitcoinQrImport"
+import { MultisigPolicyDialog } from "./components/MultisigPolicyDialog"
+import { PsbtSignDialog } from "./components/PsbtSignDialog"
+import { BroadcastSignedDialog } from "./components/BroadcastSignedDialog"
+import { WatchOnlyImportDialog } from "./components/WatchOnlyImportDialog"
 import { SplashScreen } from "./components/SplashScreen"
 import { isBitcoinOnlyVariant } from "../shared/flags"
 import { useOnline } from "./hooks/useOnline"
@@ -155,6 +160,9 @@ function App() {
 	const [watchOnlyDeviceId, setWatchOnlyDeviceId] = useState<string | undefined>(undefined)
 	const [watchOnlyLabel, setWatchOnlyLabel] = useState("")
 	const [watchOnlyLastSynced, setWatchOnlyLastSynced] = useState(0)
+	// A KeepKey connected while watching that does not hold the watched wallet ("other"), or could not be asked ("unchecked").
+	const [watchOnlyOtherDevice, setWatchOnlyOtherDevice] = useState<"other" | "unchecked" | null>(null)
+	const [watchOnlyScope, setWatchOnlyScope] = useState<{ deviceId?: string; bitcoinOnly: boolean }>({ bitcoinOnly: true })
 
 
 	// Fetch app version + REST API state on mount
@@ -685,7 +693,9 @@ function App() {
 		if (deviceState.state === "disconnected") { setPortfolioLoaded(false); setFreshWallet(false) }
 	}, [deviceState.state])
 
-	// Watch-only: note the cache when disconnected (tiles open it), auto-exit when a device connects
+	// Watch-only: note the cache when disconnected (tiles open it). A connected KeepKey ends watch-only
+	// only when it holds the watched wallet; otherwise the view stays and says a different KeepKey is connected.
+	useEffect(() => { setWatchOnlyOtherDevice(null) }, [watchOnlyMode, watchOnlyDeviceId])
 	useEffect(() => {
 		if (deviceState.state === "disconnected") {
 			rpcRequest<{ available: boolean; deviceLabel?: string; lastSynced?: number }>("checkWatchOnlyCache")
@@ -699,12 +709,29 @@ function App() {
 					}
 				})
 				.catch(() => {})
-		} else {
-			// Device found — exit watch-only seamlessly
-			setWatchOnlyAvailable(false)
-			setWatchOnlyMode(false)
+			return
 		}
+		setWatchOnlyAvailable(false)
 	}, [deviceState.state])
+	// Re-checked when the watched wallet changes too (picked or imported while a KeepKey is connected).
+	useEffect(() => {
+		if (deviceState.state === "disconnected") return
+		const exit = () => { setWatchOnlyMode(false); setWatchOnlyDeviceId(undefined) }
+		if (!watchOnlyMode || !watchOnlyDeviceId) { setWatchOnlyMode(false); return }
+		// A device's own snapshot matches by id, known before unlock.
+		if (!watchOnlyDeviceId.startsWith("wo:")) {
+			if (deviceState.deviceId === watchOnlyDeviceId) exit()
+			else if (deviceState.deviceId) setWatchOnlyOtherDevice("other")
+			return
+		}
+		// An imported key: bun asks the unlocked device for the account xpub (PIN/passphrase prompts show over watch-only).
+		if (deviceState.state !== "ready") return
+		let cancelled = false
+		rpcRequest<{ match: boolean }>("btcWatchOnlyDeviceMatch", { deviceId: watchOnlyDeviceId }, 60000)
+			.then(({ match }) => { if (cancelled) return; if (match) exit(); else setWatchOnlyOtherDevice("other") })
+			.catch((e) => { if (!cancelled) { console.warn("[watch-only] device match failed:", e?.message); setWatchOnlyOtherDevice("unchecked") } })
+		return () => { cancelled = true }
+	}, [deviceState.state, deviceState.deviceId, watchOnlyMode, watchOnlyDeviceId])
 
 
 	// ── Launch an external app (gate on REST API) ──────────────────
@@ -834,6 +861,21 @@ function App() {
 
 	const phase = resolveAppPhase({ state: deviceState.state, oobLock, isClaimed, firmwareSkipped, wizardComplete, bootloaderIdle })
 
+	// Bun lets a Bitcoin-only saved wallet use the user's own node only while it is on screen.
+	const watchOnlyShown = showWatchOnly(watchOnlyMode, phase)
+	// Until the selected snapshot answers, keep the UI within Bitcoin. A scope
+	// from the previous wallet must never expose multichain actions on a new one.
+	const watchOnlyBitcoinOnly = isBitcoinOnlyVariant(deviceState.firmwareVariant)
+		|| watchOnlyScope.deviceId !== watchOnlyDeviceId || watchOnlyScope.bitcoinOnly
+	useEffect(() => {
+		if (!watchOnlyShown) return
+		let cancelled = false
+		rpcRequest<{ bitcoinOnly: boolean }>("watchOnlySetView", { active: true, deviceId: watchOnlyDeviceId })
+			.then(({ bitcoinOnly }) => { if (!cancelled) setWatchOnlyScope({ deviceId: watchOnlyDeviceId, bitcoinOnly }) })
+			.catch(() => {})
+		return () => { cancelled = true; rpcRequest("watchOnlySetView", { active: false }).catch(() => {}) }
+	}, [watchOnlyShown, watchOnlyDeviceId])
+
 	useEffect(() => {
 		rpcRequest("logOnboarding", { event: `phase=${phase} state=${deviceState.state} wizardComplete=${wizardComplete} setupInProgress=${setupInProgress} oobEntered=${oobEnteredRef.current} firmwareSkipped=${firmwareSkipped}` }).catch(() => {})
 	}, [phase, deviceState.state, wizardComplete, setupInProgress, firmwareSkipped])
@@ -878,8 +920,13 @@ function App() {
 		setWatchOnlyMode(false)
 	}, [])
 
-	// ── Firmware drop zone (always active) ──────────────────────────
-	const firmwareDropZone = <FirmwareDropZone />
+	// ── Firmware drop zone (always active) + the PSBT/broadcast dialogs it dispatches to ──
+	const firmwareDropZone = <><FirmwareDropZone /><PsbtSignDialog /><MultisigPolicyDialog /><BroadcastSignedDialog /><BitcoinQrImport />
+		<WatchOnlyImportDialog onImported={(id, lbl) => {
+			// The dialog hands the view back after its first refresh; re-importing the wallet on screen changes no state, so re-send it.
+			if (id === watchOnlyDeviceId && watchOnlyShown) rpcRequest("watchOnlySetView", { active: true, deviceId: id }).catch(() => {})
+			setWatchOnlyDeviceId(id); setWatchOnlyLabel(lbl); setWatchOnlyMode(true)
+		}} /></>
 
 	// ── Render phases ───────────────────────────────────────────────
 
@@ -907,7 +954,7 @@ function App() {
 	// Watch-only mode: render dashboard with cached data (read-only) — never over setup
 	if (showWatchOnly(watchOnlyMode, phase)) {
 		return (
-			<>{resizeHandles}{updateBanner}{firmwareDropZone}
+			<>{resizeHandles}{updateBanner}{firmwareDropZone}{passphraseOverlay}{pinOverlay}
 				<Flex direction="column" h="100vh" bg="transparent" color="kk.textPrimary">
 					<TopNav
 						label={watchOnlyLabel || "KeepKey"}
@@ -919,6 +966,7 @@ function App() {
 						activeTab="vault"
 						onTabChange={() => {}}
 						watchOnly
+						isBitcoinOnly={watchOnlyBitcoinOnly}
 						onExitToDeviceSelect={() => { setWatchOnlyMode(false); setWatchOnlyDeviceId(undefined) }}
 						connectedDeviceId={deviceState.deviceId || null}
 						watchingDeviceId={watchOnlyDeviceId || null}
@@ -926,7 +974,14 @@ function App() {
 						onReturnToConnected={() => { setWatchOnlyMode(false); setWatchOnlyDeviceId(undefined) }}
 					/>
 					<Flex flex="1" direction="column" overflow="auto" pt={NAV_CONTENT_OFFSET} pb="4">
-						<Dashboard watchOnly watchOnlyDeviceId={watchOnlyDeviceId} onLoaded={() => {}} />
+						{watchOnlyOtherDevice && deviceState.state !== "disconnected" && (
+							<Text fontSize="xs" color="kk.gold" textAlign="center" py="1.5">
+								{watchOnlyOtherDevice === "other"
+									? t("watchOnlyOtherDevice", { ns: "nav", defaultValue: "Different KeepKey connected. Still showing {{label}}; switch wallets from the wallet menu.", label: watchOnlyLabel || "this wallet" })
+									: t("watchOnlyDeviceUnchecked", { ns: "nav", defaultValue: "Could not check whether the connected KeepKey holds {{label}}. Still showing it as watch-only.", label: watchOnlyLabel || "this wallet" })}
+							</Text>
+						)}
+						<Dashboard watchOnly watchOnlyDeviceId={watchOnlyDeviceId} firmwareVariant={watchOnlyBitcoinOnly ? 'KeepKeyBTC' : undefined} onLoaded={() => {}} />
 					</Flex>
 				</Flex>
 				<DeviceSettingsDrawer
@@ -946,6 +1001,7 @@ function App() {
 					onJumpToVault={() => setActiveTab("vault")}
 					balances={paletteBalances}
 					firmwareVersion={undefined}
+					bitcoinOnly={watchOnlyBitcoinOnly}
 					hiveEnabled={hiveEnabled}
 				/>
 			</>

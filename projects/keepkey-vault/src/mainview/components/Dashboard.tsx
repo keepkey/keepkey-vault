@@ -1023,6 +1023,9 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 						const map = new Map<string, ChainBalance>()
 						for (const b of result) map.set(b.chainId, b)
 						setBalances(map)
+						// Cached rows: show the oldest row's age, never present them as current.
+						const ages = result.map(b => b.updatedAt || 0).filter(Boolean)
+						setCacheUpdatedAt(ages.length ? Math.min(...ages) : null)
 					}
 				} catch { /* watch-only cache unavailable */ }
 				if (!cancelled) { setInitialLoaded(true); onLoaded?.() }
@@ -1107,7 +1110,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 						if (amount <= 0) continue
 						const newNativeUsd = amount * freshPrice
 						const tokenUsd = bal.tokens?.reduce((s, t) => s + (t.balanceUsd || 0), 0) || 0
-						const updated = { ...bal, nativeBalanceUsd: newNativeUsd, balanceUsd: newNativeUsd + tokenUsd }
+						const updated = { ...bal, nativeBalanceUsd: newNativeUsd, balanceUsd: newNativeUsd + tokenUsd, fiatValueState: undefined }
 						next.set(chain.id, updated)
 						changed = true
 					}
@@ -1141,9 +1144,14 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 						balancesRef.current = map
 						return map
 					})
-					setCacheUpdatedAt(Date.now())
+					// A chain that failed comes back as its cached row (syncState 'stale'): keep its age,
+					// and when nothing refreshed say so instead of "just now".
+					const staleAges = result.filter(b => b.syncState === 'stale').map(b => b.updatedAt || 0).filter(Boolean)
+					setCacheUpdatedAt(staleAges.length ? Math.min(...staleAges) : Date.now())
 					setHasEverRefreshed(true)
-					clearPioneerError()
+					if (result.length && result.every(b => b.syncState === 'stale')) {
+						stagePioneerError({ message: 'Unable to refresh balances; showing cached balances', url: 'the configured balance server' })
+					} else clearPioneerError()
 				}
 			} catch (e: any) {
 				const message = e?.message || 'Unable to refresh balances'
@@ -2218,6 +2226,12 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 				</Flex>
 
 			{/* Watch-only banner */}
+			{watchOnly && balances.get('bitcoin')?.fiatValueState && (
+				<Text fontSize="xs" color="var(--gold)" mb="3" role="status">
+					Bitcoin balance refreshed from your node. {balances.get('bitcoin')?.fiatValueState === 'stale'
+						? 'Fiat values use a cached price.' : 'Fiat prices are unavailable; displayed USD totals exclude this Bitcoin balance.'}
+				</Text>
+			)}
 			{watchOnly && (
 				<Flex
 					align="center"
@@ -2236,7 +2250,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 						<circle cx="12" cy="12" r="3" />
 					</svg>
 					<Text fontSize="xs" color="kk.gold" fontWeight="500">
-						{t("watchOnlyBanner")}
+						{t("watchOnlyBanner")}{cacheUpdatedAt ? ` · ${t("lastUpdated", { time: new Date(cacheUpdatedAt).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }) })}` : ""}
 					</Text>
 				</Flex>
 			)}

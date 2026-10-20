@@ -256,6 +256,10 @@ export interface BuildUtxoParams {
   accountPath?: number[] // BTC multi-account: account-level path [purpose+H, coinType+H, account+H]
   satPerVByte?: number   // custom (free-form) fee rate — overrides feeLevel preset
   isSwapDeposit?: boolean
+  /** Strict mode, for the watch-only PSBT build (BTC only): every chain read goes through
+   *  this backend (index.ts passes getBtcBackend()), and anything the builder would
+   *  otherwise guess (fee rate, change index, input path, previous tx) throws instead. */
+  strictBackend?: BtcBackend
 }
 
 /** Unwrap Pioneer ListUnspent response (handles Swagger/Axios double-wrapping) */
@@ -280,13 +284,14 @@ export function filterPositiveValueUtxos(utxos: any[]): any[] {
 /** Resolve fee rates (sat/vByte). BTC self-host reads the node; everything else
  *  uses Pioneer's fee API (sat/kB → sat/vB conversion), falling back to defaults. */
 async function resolveFeeRates(
-  pioneer: any, chain: ChainDef,
+  pioneer: any, chain: ChainDef, strictBackend?: BtcBackend,
 ): Promise<{ slow: number; average: number; fast: number }> {
   if (HARDCODED_FEES[chain.networkId]) return HARDCODED_FEES[chain.networkId]
-  if (btcSelfHostActive(chain.networkId)) {
-    try { return await getBtcBackend().feeRate(chain.networkId) }
+  if (strictBackend || btcSelfHostActive(chain.networkId)) {
+    const backend = strictBackend || getBtcBackend()
+    try { return await backend.feeRate(chain.networkId) }
     catch (error: any) {
-      throw new Error(`Self-host fee lookup failed; refusing to guess a fee rate: ${error?.message || error}`)
+      throw new Error(`${backend.kind} fee lookup failed; refusing to guess a fee rate: ${error?.message || error}`)
     }
   }
   try {
@@ -328,11 +333,11 @@ export async function selfHostChangeIndex(
 /** Fetch UTXOs for a single xpub, tag each with its scriptType and source accountPath */
 async function fetchUtxosForXpub(
   pioneer: any, network: string, xpub: string, defaultScriptType: string,
-  sourceAccountPath?: number[],
+  sourceAccountPath?: number[], strictBackend?: BtcBackend,
 ): Promise<any[]> {
   console.log(`${TAG} Fetching UTXOs: network=${network}, xpub=${xpub.slice(0, 20)}...`)
-  if (btcSelfHostActive(network)) {
-    const backend = getBtcBackend()
+  if (strictBackend || btcSelfHostActive(network)) {
+    const backend = strictBackend || getBtcBackend()
     const raw = await backend.listUnspent({ network, xpub, scriptType: defaultScriptType })
     const utxos = filterPositiveValueUtxos(raw).map((u) => ({
       txid: u.txid, vout: u.vout, value: Number(u.value),
@@ -340,7 +345,7 @@ async function fetchUtxosForXpub(
       scriptType: u.scriptType || (u.path ? getScriptTypeFromPath(u.path) : undefined) || defaultScriptType,
       ...(sourceAccountPath ? { _sourceAccountPath: sourceAccountPath } : {}),
     }))
-    console.log(`${TAG} ${xpub.slice(0, 8)}...: ${utxos.length} UTXOs via self-host ${backend.kind}, ${utxos.reduce((s, u) => s + u.value, 0) / 1e8}`)
+    console.log(`${TAG} ${xpub.slice(0, 8)}...: ${utxos.length} UTXOs via ${backend.kind} backend, ${utxos.reduce((s, u) => s + u.value, 0) / 1e8}`)
     return utxos
   }
   const discoveryKey = utxoDiscoveryKey(xpub, defaultScriptType)
@@ -431,7 +436,9 @@ export async function buildUtxoTx(
   chain: ChainDef,
   params: BuildUtxoParams,
 ) {
-  const { memo, feeLevel = 5, isMax = false, xpub, allXpubs, scriptTypeOverride, accountPath, satPerVByte, isSwapDeposit = false } = params
+  const { memo, feeLevel = 5, isMax = false, xpub, allXpubs, scriptTypeOverride, accountPath, satPerVByte, isSwapDeposit = false, strictBackend } = params
+  const strict = !!strictBackend
+  if (strict && chain.networkId !== BTC_NETWORK_ID) throw new Error(`${TAG} strict build is Bitcoin mainnet only`)
   // Chain tip for ZEC maturity + consensus branch selection; null when the
   // sidecar isn't running, which transparent sends don't require.
   let zcashTip: number | null = null
@@ -490,7 +497,7 @@ export async function buildUtxoTx(
       )
     }
   } else {
-    utxos = await fetchUtxosForXpub(pioneer, chain.networkId, primaryXpub, scriptType, accountPath || undefined)
+    utxos = await fetchUtxosForXpub(pioneer, chain.networkId, primaryXpub, scriptType, accountPath || undefined, strictBackend)
   }
   if (chain.id === 'zcash') {
     zcashTip = await zcashTipHeight()
@@ -536,7 +543,7 @@ export async function buildUtxoTx(
   }
 
   // 2. Get fee rate
-  const feeRates = await resolveFeeRates(pioneer, chain)
+  const feeRates = await resolveFeeRates(pioneer, chain, strictBackend)
 
   const effectiveFeeRate = satPerVByte && satPerVByte > 0
     ? Math.max(1, Math.ceil(satPerVByte)) // custom rate — user's explicit choice (consensus floors still apply below)
@@ -652,7 +659,7 @@ export async function buildUtxoTx(
   // must still use full address history: deriving from current UTXOs can reuse an
   // address that was previously spent. Blockbook supports it; Core scantxoutset does
   // not, so a Core transaction requiring change fails closed.
-  const btcSelfHost = btcSelfHostActive(chain.networkId)
+  const btcSelfHost = strict || btcSelfHostActive(chain.networkId)
   // Always query primaryXpub for change-address discovery, plus all funded xpubs for path enrichment
   const queryCandidates = allXpubs?.length
     ? [{ xpub: primaryXpub, scriptType }, ...allXpubs.map(x => ({ xpub: x.xpub, scriptType: x.scriptType }))]
@@ -661,14 +668,15 @@ export async function buildUtxoTx(
     queryCandidates.map(q => [utxoDiscoveryKey(q.xpub, q.scriptType), q]),
   ).values()]
   if (btcSelfHost) {
-    const backend = getBtcBackend()
+    const backend = strictBackend || getBtcBackend()
     changeAddressIndex = await selfHostChangeIndex(
       backend,
       { network: chain.networkId, xpub: primaryXpub, scriptType },
       outputs.some((output: any) => !output.address),
     )
-    console.log(`${TAG} Self-host change index via ${backend.kind}: ${changeAddressIndex}`)
+    console.log(`${TAG} Backend change index via ${backend.kind}: ${changeAddressIndex}`)
   }
+  const discoveredChangeIndex = changeAddressIndex
   for (const query of xpubsToQuery) {
     const qXpub = query.xpub
     const discoveryKey = utxoDiscoveryKey(qXpub, query.scriptType)
@@ -756,6 +764,11 @@ export async function buildUtxoTx(
   if (collisionAttempts >= MAX_GAP_LIMIT) {
     throw new Error(`Failed to find unused change address after ${MAX_GAP_LIMIT} attempts — gap limit exceeded`)
   }
+  // Electrum's change gap limit is 10: change further out than that is invisible to a watch-only
+  // wallet. Only an input collision (backend history disagreeing with its own UTXOs) moves it.
+  if (strict && outputs.some((o: any) => !o.address) && changeAddressIndex > discoveredChangeIndex - 1 + 10) {
+    throw new Error(`Change index ${changeAddressIndex} is more than 10 past the highest used change address (${discoveredChangeIndex - 1}); refusing`)
+  }
 
   // Change address path — use correct account index (from accountPath or default 0)
   const changeAddressNList = accountPath
@@ -777,6 +790,8 @@ export async function buildUtxoTx(
       } else {
         addressNList = rawNList
       }
+    } else if (strict) {
+      throw new Error(`${chain.coin} backend returned UTXO ${input.txid}:${input.vout} without its derivation path; refusing to guess one`)
     } else {
       // No path from API — derive from this input's scriptType + account path
       const inputPurpose = PURPOSE[inputScriptType] ?? purpose
@@ -793,6 +808,19 @@ export async function buildUtxoTx(
       hex: input.txHex || input.hex || '',
     }
   })
+  // Strict: every input's full previous transaction comes from the backend, never ''.
+  if (strictBackend) {
+    const backend = strictBackend
+    const prevTxs = new Map<string, string>()
+    for (const inp of preparedInputs) {
+      if (!prevTxs.has(inp.txid)) {
+        const hex = await backend.rawTxHex({ network: chain.networkId, txid: inp.txid })
+        if (!hex) throw new Error(`${backend.kind} returned no previous transaction for ${inp.txid}; refusing to build without it`)
+        prevTxs.set(inp.txid, hex)
+      }
+      inp.hex = prevTxs.get(inp.txid)!
+    }
+  }
 
   const preparedOutputs: any[] = outputs
     .map((output: any) => {

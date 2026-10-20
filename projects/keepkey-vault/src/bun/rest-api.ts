@@ -1,3 +1,4 @@
+import {hasMultisigSigningData,btcMultisigEnabled,BTC_MULTISIG_DISABLED} from './btc-psbt/multisig-feature'
 import type { EngineController } from './engine-controller'
 import { takeDeviceRefusal } from './device-refusal'
 import { withPermit2SpenderName } from './permit2-spender-name'
@@ -11,9 +12,11 @@ import { createHash } from 'crypto'
 import { decodeEIP712 } from './eip712-decoder'
 import { evmPriorityFee, normalizeEvmChainId, recognizedTypedDataSpender, typedDataNativelyReviewed } from './evm-signing-preview'
 import { buildEvmReportForTx, evmSigningVerdict, prepareEvmTxSigningInfo, withoutErc7730Description } from './evm-presign-report'
+import { describeErc7730Call } from './erc7730-describe'
 import { signWithErc7730Fallback } from './erc7730-resolver'
 import { CHAINS, isChainSupported, hiveRolePath, evmChainLabel } from '../shared/chains'
 import { getEvmSimulationEndpoint } from './evm-simulation-config'
+import { addContractFacts } from './contract-facts'
 import { versionCompare } from '../shared/firmware-versions'
 import { isBitcoinOnlyVariant, DEFAULT_AUTO_LOCK_MS } from '../shared/flags'
 import {
@@ -90,6 +93,7 @@ import { supportsCertifiedClearSign } from './solana-certified-policy'
 import { measureLiveDeployment, resolveEvmSchema } from './evm-schema-registry'
 import { findContractRating } from './clearsign-review'
 import { formatFeatures } from './features-format'
+import { recordSignedEvmTx } from './signed-tx-review'
 
 export interface EmuSigningDetails {
   operation: string
@@ -1970,6 +1974,21 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               // natively or a 7.16 KeepKey-certified schema covers. Shared with
               // POST /clearsign/report so both surfaces judge the same bytes alike.
               await prepareEvmTxSigningInfo(signingInfo, preview, engine.getDeviceState().firmwareVersion, engine.getDeviceState().capabilities)
+              // Card only: never part of the /clearsign/report a caller reads.
+              // `from` is the signing key unless the caller also sent a path
+              // that this computer has not matched to it.
+              const nList = preview.addressNList || preview.address_n_list
+              let account: string | undefined = String(preview.from || '')
+              if (nList) try { if (JSON.stringify(auth.getAccount(account).addressNList) !== JSON.stringify(nList)) account = undefined } catch { account = undefined }
+              // The ERC-7730 description reads @.from and "(this wallet)" off the matched key only.
+              if (signingInfo.erc7730Description && account !== signingInfo.from) {
+                const described = describeErc7730Call(signingInfo.erc7730!.definitions[0].envelope, {
+                  chainId: signingInfo.chainId as number, to: preview.to, data: preview.data, value: preview.value,
+                })
+                if (described) signingInfo.erc7730Description = described
+                else delete signingInfo.erc7730Description
+              }
+              const contractFacts = addContractFacts(signingInfo, engine.isPassphraseWallet ? undefined : engine.getDeviceState().deviceId, account)
               if (path === '/eth/sign-transaction' && /^0x[0-9a-fA-F]{40}$/.test(String(preview.from || ''))) {
                 const chainIdNum = typeof signingInfo.chainId === 'string'
                   ? (signingInfo.chainId.startsWith('0x') ? parseInt(signingInfo.chainId, 16) : parseInt(signingInfo.chainId, 10))
@@ -2000,6 +2019,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
                   rating: await findContractRating(chainIdNum, String(preview.to || ''), measureLiveDeployment),
                 })
               }
+              await contractFacts
             }
           } catch (e: any) {
             if (e instanceof HttpError) throw e
@@ -2095,6 +2115,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               })
             }
           }
+          if(path === '/utxo/sign-transaction' && hasMultisigSigningData(probeCheckBody) && !btcMultisigEnabled(getSetting)) throw new HttpError(403,BTC_MULTISIG_DISABLED)
           const approvalStartedAt = Date.now()
           const approval = await callbacks.onSigningRequest(signingInfo)
           if (!approval.approved) {
@@ -2892,6 +2913,11 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               }
             }, '[REST]')
             console.log('[REST] ethSignTx result:', JSON.stringify(result))
+            // Keep what the card showed, by txid, for the history dialog.
+            const reviewScope = engine.isPassphraseWallet ? null : getWalletDbScope()
+            if (reviewScope && activeSigningInfo && (result as any)?.serialized) {
+              recordSignedEvmTx(reviewScope, chainId, (result as any).serialized, activeSigningInfo, signedMsg)
+            }
             if (clearSignPayload) recordRestClearSignEvent({
               kind: 'transaction', outcome: 'signed', source: 'rest-api', chain: evmChainName,
               format: 'EVM_TX_METADATA', label: 'EVM ClearSign transaction', payload: clearSignPayload,
@@ -3091,6 +3117,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.UtxoSignTransactionRequest)
+          if(hasMultisigSigningData(body) && !btcMultisigEnabled(getSetting))throw new HttpError(403,BTC_MULTISIG_DISABLED)
           const coin = body.coin || 'Bitcoin'
 
           // BCH: prepend bitcoincash: prefix to output addresses

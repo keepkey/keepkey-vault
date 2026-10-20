@@ -13,6 +13,7 @@ import { caipToIcon } from "../../shared/assetLookup"
 import { getRequiredConfs } from "../../shared/confirmations"
 import type { RecentActivity, PendingSwap, ChainBalance, SwapTrackingStatus } from "../../shared/types"
 import { isSwapFullySettled } from "../../shared/swap-settlement"
+import type { TxDetailLine } from "../../shared/tx-clearsign"
 
 interface ActivityPanelProps {
   open: boolean
@@ -213,11 +214,11 @@ export function formatFullDate(ts: number): string {
     ' ' + d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
 }
 
-function TxDetailRow({ label, value, mono, color: c }: { label: string; value: string; mono?: boolean; color?: string }) {
+function TxDetailRow({ label, value, mono, color: c, prose }: { label: string; value: string; mono?: boolean; color?: string; prose?: boolean }) {
   return (
     <Flex justify="space-between" align="center" py="1.5" gap="3">
       <Text fontSize="11px" color="kk.textMuted" minW="100px" flexShrink={0}>{label}</Text>
-      <Text fontSize="11px" color={c || 'kk.textSecondary'} textAlign="right" fontFamily={mono ? 'mono' : undefined} wordBreak="break-all" maxW="280px">{value}</Text>
+      <Text fontSize="11px" color={c || 'kk.textSecondary'} textAlign="right" fontFamily={mono ? 'mono' : undefined} wordBreak={prose ? 'normal' : 'break-all'} maxW="280px">{value}</Text>
     </Flex>
   )
 }
@@ -247,6 +248,27 @@ function CopyableRow({ label, value, explorerUrl }: { label: string; value: stri
         )}
       </HStack>
     </Flex>
+  )
+}
+
+/** What the transaction did, in plain words. Loads after the dialog opens, so
+ *  it never holds the dialog up; nothing to say renders nothing. */
+function TxDetailsSection({ networkId, txid }: { networkId: string; txid: string }) {
+  const [lines, setLines] = useState<TxDetailLine[] | null>(null)
+  useEffect(() => {
+    let live = true
+    setLines(null)
+    rpcRequest('getTxDetails', { networkId, txid })
+      .then(r => { if (live) setLines(r) })
+      .catch(() => { if (live) setLines(null) })
+    return () => { live = false }
+  }, [networkId, txid])
+  if (!lines?.length) return null
+  return (
+    <Box mt="2" pt="2" borderTop="1px solid" borderColor="kk.border">
+      <Text fontSize="11px" fontWeight="700" color="kk.textPrimary">Details</Text>
+      {lines.map((l, i) => <TxDetailRow key={i} label={l.label} value={l.value} prose />)}
+    </Box>
   )
 }
 
@@ -377,6 +399,9 @@ export function TxDetailDialog({ detail, onClose, nativePrices }: { detail: TxDe
                 </Flex>
               </Box>
             )}
+
+            {/* Below the button, so it does not move when this loads. */}
+            {a.txid && chainDef?.chainFamily === 'evm' && <TxDetailsSection networkId={chainDef.networkId} txid={a.txid} />}
           </VStack>
         </Box>
       </Box>

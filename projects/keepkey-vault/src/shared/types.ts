@@ -654,6 +654,8 @@ export interface ChainBalance {
   balance: string       // human-readable (e.g. "0.001")
   balanceUsd: number    // total USD (native + tokens)
   nativeBalanceUsd?: number  // native-only USD (excludes tokens)
+  /** Own-node balances remain usable when the optional fiat quote fails. */
+  fiatValueState?: 'stale' | 'unavailable'
   address: string
   tokens?: TokenBalance[]
   /**
@@ -905,6 +907,7 @@ export interface AddressBookEntry {
   firstSeenTxid?: string     // external rows — txid that introduced the recipient
   note?: string
   savedAt?: number           // external rows — when the user explicitly saved it (R4); null = history-only
+  lastUsedAt?: number        // latest send to this entry from the Send page (list reads only)
   createdAt: number
   updatedAt: number
 }
@@ -1144,6 +1147,13 @@ export interface SigningRequestInfo {
   /** The same, for the recipient of a plain ERC-20 transfer: a reviewed
    *  contract (such as a Universal Router) that does not credit a transfer. */
   recognizedRecipient?: string
+  /** Approval card only, from this computer's own records: earlier
+   *  transactions this account sent or signed to this contract on this
+   *  chain (a lower bound; `since` in ms). */
+  priorUse?: { count: number; since: number }
+  /** Approval card only: the name and symbol the contract reports for
+   *  itself. Any contract can claim any name, so it is never trust. */
+  contractName?: { name: string; symbol: string }
   /** Certified metadata resolved before user approval. The signing handler
    *  reuses this exact envelope so approval and device review cannot drift. */
   certifiedEvmSchema?: {
@@ -1157,6 +1167,8 @@ export interface SigningRequestInfo {
    *  fetched and checked before approval. The signing handler sends exactly
    *  this one, so approval and device review cannot drift. */
   erc7730?: Erc7730Catalog
+  /** What that definition makes the KeepKey show, read here from its bytes. */
+  erc7730Description?: Erc7730Description
   /** true when the UI must enable AdvancedMode before allowing approval */
   requiresAdvancedMode?: boolean
   /** true when this request needs a separate, explicit one-shot opaque-signing
@@ -1375,6 +1387,7 @@ export interface AppSettings {
   activePioneerServer: string    // URL of the active server
   fiatCurrency: FiatCurrency     // display currency (default 'USD')
   numberLocale: string           // number formatting locale (default 'en-US')
+  btcMultisigEnabled: boolean    // runtime feature flag: Bitcoin multisig co-signing (default OFF)
   walletConnectEnabled: boolean   // feature flag: WalletConnect dApp support (default OFF)
   zcashPrivacyEnabled: boolean   // read-only capability: auto-ON when firmware >= 7.15.0 and this build includes zcash-cli
   hiveEnabled: boolean           // read-only capability: Hive blockchain — auto-ON when firmware >= 7.15.0
@@ -1446,7 +1459,10 @@ export interface RegisteredDevice {
   label: string
   firmwareVer: string
   updatedAt: number
-  totalUsd: number       // sum of cached balance_usd across all chains
+  totalUsd: number | null // sum of cached balance_usd across all chains; null = never synced
+  /** Watch-only import (no device); verified once a KeepKey returned the same account xpub */
+  imported?: boolean
+  verified?: boolean
 }
 
 // ── BIP-85 types ────────────────────────────────────────────────────────
@@ -1516,6 +1532,94 @@ export interface BtcSignTxParams {
   outputs: any[] // TODO: type BTCSignTxOutput
   version?: number
   locktime?: number
+}
+
+/** btcPsbtAnalyze result. Amounts are satoshis as decimal strings (bigint on the bun side). */
+export type BtcPsbtReview =
+  | {kind:'policy-required';message:string}
+  | { kind: 'signed'; txid: string; txHex: string; /** null = inputs not hash-verified, unknown */ fee: string | null }
+  | {
+      kind: 'review'
+      multisig?:{policyId:string;threshold:number;cosigners:number;fingerprint:string;signedCounts:number[]}
+      id: string
+      version: number
+      locktime: number
+      inputs: Array<{ txid: string; vout: number; sequence: number; amount: string; amountVerified: boolean; scriptType: string; path: string; address: string }>
+      outputs: Array<{
+        index: number
+        amount: string
+        address?: string
+        opReturn?: { hex: string; text: string }
+        kind: 'payment' | 'change' | 'own' | 'op-return'
+        deviceWillShow: 'hidden-change' | 'address' | 'op-return'
+        path?: string
+      }>
+      totalIn: string
+      fee: string
+      change: string
+      sent: string
+      deviceTotal: string
+      estVsize: number
+      satPerVbyte: number
+      feePercent: number | null
+      flags: { nonZeroLocktime: boolean; rbf: boolean; unusualVersion: boolean; noChange: boolean; multiAccount: boolean; unverifiedAmounts: boolean; ownOutputShown: boolean }
+    }
+
+export interface BtcWatchOnlyAccounts {
+  fingerprintKnown: boolean
+  /** Who answers chain data: 'pioneer', or the user's own node ('blockbook' / 'core') */
+  backend: string
+  accounts: Array<{ scriptType: BtcScriptType; accountIndex: number; path: string }>
+}
+
+/** btcWatchOnlyImport result (preview, or saved). fingerprint null = unknown (Electrum-style origins in PSBTs). */
+export interface BtcWatchOnlyImport {
+  id: string
+  label: string
+  source: 'electrum' | 'key' | 'desktop'
+  scriptType: BtcScriptType
+  key: string
+  path: string
+  /** Inferred from the key, not stated by the import: the user must confirm it */
+  pathAssumed: boolean
+  fingerprint: string | null
+  saved: boolean
+}
+
+/** btcWatchOnlyReceive result. verified false = an imported key no KeepKey has confirmed yet. */
+export interface BtcWatchOnlyReceive {
+  address: string
+  path: number[]
+  scriptType: string
+  xpub: string
+  /** Set when the backend could not prove the index unused */
+  warning?: string
+  verified: boolean
+}
+
+/** btcWatchOnlyBuildPsbt result. Amounts are satoshis as decimal strings. */
+export interface BtcWatchOnlyPsbt {
+  filePath: string
+  psbtBase64: string
+  backend: string
+  fingerprintKnown: boolean
+  outputs: Array<{ address?: string; amount: string; change: boolean }>
+  fee: string
+  satPerVbyte: number
+  estVsize: number
+}
+
+/** btcBroadcastSigned result. fee null = unknown (never estimated). feeSource: 'psbt' or the backend that supplied the previous txs.
+ *  backend: the BTC backend kind that will broadcast ('device-only' = offline); a send is refused if it changed since the review. */
+export interface BtcBroadcastReview {
+  txid: string
+  txHex: string
+  outputs: Array<{ amount: string; address?: string; opReturnHex?: string; scriptHex: string }>
+  fee: string | null
+  feeSource: string | null
+  backend: string
+  backendId: string
+  broadcast: boolean
 }
 
 export interface GetPublicKeysParams {
@@ -1754,6 +1858,23 @@ export interface RelayTxParams {
   }
   /** Reusable signed ERC-7730 v2 definitions supplied by the quote/catalog service. */
   erc7730?: Erc7730Catalog
+}
+
+/** What a KeepKey ClearSign ERC-7730 definition makes the KeepKey show for one
+ *  call (bun/erc7730-describe). `protocol` is Desktop's own name for the
+ *  contract, not part of the signed definition. */
+export interface Erc7730Description {
+  /** The certificate alias: this computer checked the envelope's signature up
+   *  to KeepKey's production root (no description otherwise). */
+  signedBy: string
+  intent: string
+  /** The interpolated intent ("Stake 0.01 ETH"), when the definition has one. */
+  summary?: string
+  /** Values as the device shows them, one device line per "\n"; `note` is
+   *  this computer's own reading of a token the device does not know. */
+  fields: Array<{ label: string; value: string; note?: string }>
+  protocol?: { name: string; url: string; about?: string }
+  explorerUrl?: string
 }
 
 /** Signed ERC-7730 v2 definitions in the shape hdwallet's transport sends. */

@@ -11,6 +11,8 @@ import { useDeviceState } from "../hooks/useDeviceState"
 import { AddressIdenticon } from "./AddressIdenticon"
 import { AssetIcon } from "./AssetIcon"
 import { AddAddressDialog } from "./AddAddressDialog"
+import { Z } from "../lib/z-index"
+import { evmChainLabel } from "../../shared/chains"
 import type { AddressBookEntry, AddressBookTx, AppSettings } from "../../shared/types"
 
 const chainById = new Map(CHAINS.map(c => [c.id, c]))
@@ -73,11 +75,25 @@ export function AddressBookView() {
     setCertificationNotice(enabled ? "ClearSign enabled — certify after contact changes." : "")
   }, [clearSignEnabled])
 
-  const certify = useCallback(async () => {
+  // One review of every contact before the device is asked to certify them all.
+  const [certifyPreview, setCertifyPreview] = useState<{ label: string; network: string; address: string }[] | null>(null)
+  const reviewCertify = useCallback(async () => {
+    setCertificationNotice("")
+    try {
+      const contacts = await rpcRequest<{ label: string; network: string; address: string }[]>("previewAddressBookCertification", undefined, 5000)
+      if (!contacts.length) setCertificationNotice("Add at least one labeled EVM contact before certifying")
+      else setCertifyPreview(contacts)
+    } catch (error: any) {
+      setCertificationNotice(error?.message || "Could not list the contacts to certify")
+    }
+  }, [])
+
+  const certify = useCallback(async (picked: { label: string; network: string; address: string }[]) => {
+    setCertifyPreview(null)
     setCertifying(true)
     setCertificationNotice("")
     try {
-      const result = await rpcRequest<{ revision: number; count: number; fingerprint: string }>("certifyAddressBook", undefined, 0)
+      const result = await rpcRequest<{ revision: number; count: number; fingerprint: string }>("certifyAddressBook", { only: picked.map(c => ({ network: c.network, address: c.address })) }, 0)
       setCertificationNotice(`Certified ${result.count} contacts · revision ${result.revision} · ${result.fingerprint}`)
     } catch (error: any) {
       const message = error?.message || "Address Book certification failed"
@@ -129,20 +145,20 @@ export function AddressBookView() {
     return Array.from(byDevice.values())
   }, [display])
 
-  const externalRows = useMemo(() => display.filter(e => e.kind === "external"), [display])
+  // Most recently sent-to first (Send page), then most recently saved.
+  const externalRows = useMemo(() => display.filter(e => e.kind === "external")
+    .sort((a, b) => (b.lastUsedAt || 0) - (a.lastUsedAt || 0) || (b.savedAt || 0) - (a.savedAt || 0) || b.updatedAt - a.updatedAt), [display])
 
   const tabs = useMemo(() => {
+    // Saved recipients first: always shown, and the tab the Address Book opens on.
     const list: Array<{ id: string; label: string; connected?: boolean; external?: boolean }> =
-      deviceTabs.map(g => ({ id: g.deviceId, label: g.label, connected: g.deviceId === connectedDeviceId }))
-    // External tab is always shown so it's discoverable + a target for "Add address".
-    list.push({ id: EXTERNAL_TAB, label: t("contacts", { defaultValue: "Saved recipients" }), external: true })
+      [{ id: EXTERNAL_TAB, label: t("contacts", { defaultValue: "Saved recipients" }), external: true }]
+    list.push(...deviceTabs.map(g => ({ id: g.deviceId, label: g.label, connected: g.deviceId === connectedDeviceId })))
     return list
   }, [deviceTabs, connectedDeviceId, t])
 
-  // Resolve the active tab: explicit selection if still valid, else connected device, else first.
-  const effectiveTab = (activeTab && tabs.some(tb => tb.id === activeTab))
-    ? activeTab
-    : (tabs.find(tb => tb.connected)?.id || tabs[0]?.id || null)
+  // Resolve the active tab: explicit selection if still valid, else Saved recipients.
+  const effectiveTab = (activeTab && tabs.some(tb => tb.id === activeTab)) ? activeTab : EXTERNAL_TAB
 
   const tabRows = useMemo<DisplayEntry[]>(() => {
     if (effectiveTab === EXTERNAL_TAB) return externalRows
@@ -181,7 +197,7 @@ export function AddressBookView() {
           {clearSignEnabled ? "ClearSign on" : "Enable ClearSign"}
         </Button>}
         {clearSignEnabled && clearSignSupported && <Button size="sm" variant="outline" borderColor="var(--teal)" color="var(--teal)" borderRadius="10px" px="3" h="34px"
-                onClick={certify} disabled={certifying || !clearSignSupported || certifyUnsupported}
+                onClick={reviewCertify} disabled={certifying || !clearSignSupported || certifyUnsupported}
                 title={certifyUnsupported ? "This firmware build cannot certify contacts" : undefined}>{certifying ? "Review on device…" : "Certify contacts"}</Button>}
         <Button size="sm" variant="outline" borderColor="var(--gold)" color="var(--gold)" borderRadius="10px" px="3" h="34px"
                 _hover={{ bg: "rgba(233,196,106,0.10)" }} onClick={() => setAddOpen(true)} flexShrink={0} title={t("addAddressHint", { defaultValue: "Add an address to your Address Book" })}>
@@ -192,6 +208,61 @@ export function AddressBookView() {
         </Button>
         </Flex>
       </Flex>
+      {certifyPreview && (
+        <Box position="fixed" inset="0" zIndex={Z.dialog} display="flex" alignItems="center" justifyContent="center" bg="rgba(0,0,0,0.6)"
+             onClick={() => setCertifyPreview(null)}>
+          <Box bg="kk.cardBg" border="1px solid" borderColor="rgba(72,187,170,0.45)" borderRadius="16px" p="5" w="92%" maxW="540px" maxH="80vh" overflowY="auto"
+               boxShadow="0 0 0 1px rgba(72,187,170,0.15), 0 8px 32px rgba(0,0,0,0.6)" onClick={(e) => e.stopPropagation()}>
+            <Flex align="center" gap="2.5" mb="1">
+              <Flex w="32px" h="32px" borderRadius="full" bg="rgba(72,187,170,0.15)" align="center" justify="center" flexShrink={0}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--teal)" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+              </Flex>
+              <Text fontSize="md" fontWeight="700" color="var(--text-0)">
+                Certify <Text as="span" color="var(--teal)">{certifyPreview.length}</Text> contact{certifyPreview.length === 1 ? "" : "s"}?
+              </Text>
+            </Flex>
+            <Text fontSize="xs" color="var(--text-2)" mb="3" pl="42px">
+              Your KeepKey signs this list. Sends to these addresses on these networks then show the name on your KeepKey.
+            </Text>
+            <Flex direction="column" gap="2">
+              {certifyPreview.map((c) => {
+                const chain = CHAINS.find(ch => caipToNetworkId(ch.caip) === c.network)
+                const key = `${c.network}:${c.address}`
+                return (
+                  <Flex key={key} align="center" gap="3" px="3" py="2.5" borderRadius="12px" bg="var(--ink-0)" border="1px solid" borderColor="var(--line)"
+                        borderLeft="3px solid var(--gold)">
+                    <AddressIdenticon seed={c.address.toLowerCase()} size={32} />
+                    <Box flex="1" minW="0">
+                      <Flex align="center" gap="2">
+                        <Text fontSize="sm" fontWeight="700" color="var(--gold)" truncate>{c.label}</Text>
+                        <Flex align="center" gap="1" px="1.5" py="0.5" borderRadius="6px" bg="rgba(255,255,255,0.05)" flexShrink={0}>
+                          {chain && <AssetIcon caip={chain.caip} size={12} alt={chain.symbol} />}
+                          <Text fontSize="10px" color="var(--text-1)">{chain?.coin || evmChainLabel(c.network.split(":")[1])?.name || c.network}</Text>
+                        </Flex>
+                      </Flex>
+                      <Text fontSize="xs" color="var(--text-1)" fontFamily="mono" wordBreak="break-all">{c.address}</Text>
+                    </Box>
+                    <Box as="button" aria-label={`Leave ${c.label} out`} title="Leave out of this certification" flexShrink={0}
+                         w="26px" h="26px" borderRadius="full" color="var(--text-2)" _hover={{ color: "var(--rose)", bg: "rgba(224,140,123,0.12)" }}
+                         onClick={() => setCertifyPreview(prev => {
+                           const next = (prev || []).filter(p => `${p.network}:${p.address}` !== key)
+                           return next.length ? next : null
+                         })}>
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" style={{ margin: "0 auto" }}><line x1="6" y1="6" x2="18" y2="18" /><line x1="18" y1="6" x2="6" y2="18" /></svg>
+                    </Box>
+                  </Flex>
+                )
+              })}
+            </Flex>
+            <Flex justify="flex-end" gap="2" mt="4">
+              <Button size="sm" variant="outline" borderColor="var(--line)" color="var(--text-1)" onClick={() => setCertifyPreview(null)}>Cancel</Button>
+              <Button size="sm" bg="var(--teal)" color="black" fontWeight="700" _hover={{ opacity: 0.9 }} onClick={() => certify(certifyPreview)}>
+                Certify {certifyPreview.length} on KeepKey
+              </Button>
+            </Flex>
+          </Box>
+        </Box>
+      )}
 
       {certificationNotice && <Text fontSize="11px" color="var(--text-2)" mb="3">{certificationNotice}</Text>}
 

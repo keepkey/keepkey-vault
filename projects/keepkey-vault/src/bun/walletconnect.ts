@@ -16,7 +16,7 @@ import { evmAddressPath } from './evm-addresses'
 import { verifyEvmSigner } from './evm-rpc'
 import { applyEvmTxPreview, attachErc7730Definition, evmPriorityFee, recognizedTypedDataSpender } from './evm-signing-preview'
 import { signWithErc7730Fallback } from './erc7730-resolver'
-import { withoutErc7730Description } from './evm-presign-report'
+import { evmSigningVerdict, withoutErc7730Description } from './evm-presign-report'
 import { buildSolanaMessageDecodedInfo } from './solana-message-preview'
 import { ethMessagePreview } from './eth-message-preview'
 import { buildSolanaDecodedInfo } from './solana-clearsign'
@@ -205,6 +205,10 @@ export interface WcCallbacks {
   finalizeClearSignObservation: (id: string, outcome: Exclude<ClearSignObservationOutcome, 'pending'>, errorClass?: string) => void
   /** The device refused the observation's ERC-7730 definition; the call signs without it. */
   refuseClearSignObservationDefinition?: (id: string) => void
+  /** Keep what the card showed for this signed transaction (signed-tx-review). */
+  recordSignedTx?: (chainId: number, serialized: string, shown: SigningRequestInfo, signedMsg: any) => void
+  /** Add this computer's records of the called contract to the card (contract-facts). */
+  addContractFacts?: (info: SigningRequestInfo) => Promise<void>
   /** Show signing approval to user — returns true if approved. */
   requestSigningApproval: (info: SigningRequestInfo) => Promise<boolean>
   /** Dismiss the signing overlay. */
@@ -1011,6 +1015,8 @@ export class WalletConnectManager {
       await attachErc7730Definition(signingInfo, tx.to, tx.data, this.callbacks.getFirmwareVersion(),
         this.callbacks.getDeviceCapabilities?.(), '[WC]')
     }
+    // After the ERC-7730 attach, so a call the KeepKey shows gets nothing added.
+    const contractFacts = this.callbacks.addContractFacts?.(signingInfo)
     if (from) {
       const simulation = await simulateEvmEffects({
         chainId: effectiveChainId, from, to: tx.to, data: tx.data || '0x',
@@ -1022,19 +1028,22 @@ export class WalletConnectManager {
         tx.data, effectiveChainId, tx.to, from, this.callbacks.getEvmSimulationEndpoint(effectiveChainId),
       )
       signingInfo.clearSignReport = buildClearSignReport({
-        requestedLevel: simulation.status === 'success' ? 'P3' : universalRouterFindings.complete ? 'P2' : 'P1',
-        descriptor: clearSignSchema ? {
-          source: clearSignSchema.keyId === 0x80 ? 'certified' : 'runtime',
-          authenticated: false,
-          format: 'EVM_METADATA',
-          label: clearSignSchema.method,
-        } : signingInfo.erc7730 ? { source: 'erc7730', authenticated: false, format: 'ERC7730' }
-          : { source: 'none', authenticated: false },
+        // An attached ERC-7730 definition: the in-app overlay's verdict, so the card agrees with itself.
+        ...(!clearSignSchema && signingInfo.erc7730 ? evmSigningVerdict(signingInfo, {}, simulation, universalRouterFindings.complete) : {
+          requestedLevel: simulation.status === 'success' ? 'P3' : universalRouterFindings.complete ? 'P2' : 'P1',
+          descriptor: clearSignSchema ? {
+            source: clearSignSchema.keyId === 0x80 ? 'certified' : 'runtime',
+            authenticated: false,
+            format: 'EVM_METADATA',
+            label: clearSignSchema.method,
+          } : { source: 'none', authenticated: false },
+        }),
         simulation,
         hostFindings: universalRouterFindings.findings,
         hostLimitations: universalRouterFindings.limitations,
       })
     }
+    await contractFacts
     // Name on the card the provider the sign step will ask (its /signer
     // only). The sign step attaches a description only from that provider.
     if (!clearSignSchema && !signingInfo.calldataDecoded?.signedInsightBlob && !signingInfo.erc7730) {
@@ -1154,12 +1163,14 @@ export class WalletConnectManager {
       }
 
       let signedMsg: any = msg
+      let shown = signingInfo
       const result = await signWithErc7730Fallback(msg, (m: any) => { signedMsg = m; return this.callbacks.ethSignTx(m) }, async () => {
         // The device refused the definition. The user approved a card that
         // said the device shows the call; it now signs blind. Always ask again
         // with the card for the blind call it now is, whatever AdvancedMode
         // (the card offers to turn it on when it is off).
         const again = withoutErc7730Description(signingInfo)
+        shown = again
         if (observationId) this.callbacks.refuseClearSignObservationDefinition?.(observationId)
         this.callbacks.dismissSigning(cardId)
         cardId = again.id
@@ -1177,6 +1188,7 @@ export class WalletConnectManager {
       // mangled pre-image is accepted by RPC nodes and then silently dropped
       // from the mempool; see verifyEvmSigner in evm-rpc.ts.
       await verifyEvmSigner(result.serialized, from)
+      this.callbacks.recordSignedTx?.(effectiveChainId, result.serialized, shown, signedMsg)
       if (observationId && clearSignSchema) this.callbacks.authenticateClearSignObservation(
         observationId, clearSignSchema.keyId === 0x80 ? 'certified' : 'runtime', 1,
         clearSignSchema.source === 'promoted-local', clearSignSchema.bundleHash,

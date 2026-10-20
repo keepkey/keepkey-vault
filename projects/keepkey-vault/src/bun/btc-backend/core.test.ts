@@ -43,10 +43,12 @@ eq(btcToSats(0.00099705), 99705, 'btcToSats sub-BTC')
 eq(btcToSats(0.00000001), 1, 'btcToSats one sat')
 eq(btcToSats(1), 100000000, 'btcToSats 1 BTC')
 
-// estimatesmartfee BTC/kB → sat/vB, floor 1
+// estimatesmartfee BTC/kB → sat/vB, floor 1; no estimate throws (never a guessed rate)
 eq(feerateToSatVb(0.0001), 10, 'feerate 0.0001 BTC/kB → 10 sat/vB')
 eq(feerateToSatVb(0.00000141), 1, 'tiny feerate floors to 1')
-eq(feerateToSatVb(undefined), 1, 'missing feerate → 1')
+let noRate = ''
+try { feerateToSatVb(undefined, ['Insufficient data or no feerate found']) } catch (e: any) { noRate = e.message }
+ok(noRate.includes('Insufficient data'), 'missing feerate throws with the node errors')
 
 // scantxoutset desc → signing path + scriptType (get this wrong → sign with the
 // wrong key → unbroadcastable tx). Cover both hardened notations Core may emit.

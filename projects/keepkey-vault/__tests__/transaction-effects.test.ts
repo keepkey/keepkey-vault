@@ -118,7 +118,7 @@ describe('Vault ClearSign effect reports', () => {
     expect(report.headline).toContain('not authenticated')
   })
 
-  test('ClearSign Report separates authenticated description from incomplete effects', () => {
+  test('ClearSign Report adds no filler line when an authenticated description has incomplete effects', () => {
     const simulation = normalizeEvmSimulation(
       { chainId: 1, from: wallet, to: other, input: '0x12345678' },
       'http://rpc', '0x10', { status: '0x1' }, undefined,
@@ -130,7 +130,8 @@ describe('Vault ClearSign effect reports', () => {
       now: 100,
     })
     expect(report.protectionLevel).toBe('P5')
-    expect(report.limitations.map((finding) => finding.code)).toContain('DESCRIPTION_WITHOUT_COMPLETE_SIMULATION')
+    expect(report.simulation.status).not.toBe('success')
+    expect(report.limitations.map((finding) => finding.code)).not.toContain('DESCRIPTION_WITHOUT_COMPLETE_SIMULATION')
     expect(report.claims.map((claim) => claim.source)).toContain('authenticated-definition')
   })
 
@@ -301,7 +302,7 @@ test('a simulation Pioneer has no route for reads as a plain sentence; a real no
   const { simulationUnavailableMessage } = await import('../src/bun/evm-effects')
   const noRoute = new Error('Pioneer does not expose eth_simulateV1; no direct-node fallback is allowed')
   expect(simulationUnavailableMessage('Pioneer does not expose this eth_call selector: 0xd9627aa4', noRoute))
-    .toBe('This computer could not simulate this transaction, so it cannot predict what it will move.')
+    .toBe("Couldn't simulate this transaction.")
   expect(simulationUnavailableMessage('insufficient funds for gas * price + value', noRoute))
-    .toContain('insufficient funds for gas * price + value')
+    .toBe("Couldn't simulate this transaction. insufficient funds for gas * price + value")
 })
