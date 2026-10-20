@@ -5735,8 +5735,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (offlineMode) {
 					const deviceId = engine.getDeviceState().deviceId
 					const cached = !engine.isPassphraseWallet && deviceId ? getCachedBalances(deviceId) : null
-					return cached?.balances.find(balance => balance.chainId === chain.id)
-						|| { chainId: chain.id, symbol: chain.symbol, balance: '0', balanceUsd: 0, address: '' }
+					const balance = cached?.balances.find(balance => balance.chainId === chain.id)
+					return balance ? { ...balance, syncState: 'stale' as const }
+						: { chainId: chain.id, symbol: chain.symbol, balance: '0', balanceUsd: 0, address: '', syncState: 'degraded' as const }
 				}
 				// forceRefresh defaults TRUE: single-chain fetches are user-clicked
 				// refreshes, post-send resyncs, or tx pushes — chain state changed, so
@@ -5751,7 +5752,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					|| ((chain.id === 'zcash' || chain.id === 'zcash-shielded') && !zcashPrivacyEnabled)
 					|| (chain.id === 'hive' && !hiveEnabled)) {
 					console.warn(`[getBalance] ${chain.id}: unsupported on firmware ${fwVersion || '?'} or feature-flagged off — returning empty balance`)
-					return { chainId: chain.id, symbol: chain.symbol, balance: '0', balanceUsd: 0, address: '' }
+					return { chainId: chain.id, symbol: chain.symbol, balance: '0', balanceUsd: 0, address: '', syncState: 'degraded' as const }
 				}
 				// Firmware-capability gate (mirrors getBalances): if this chain's address
 				// message was already rejected as unknown, return an empty balance instead
@@ -5759,7 +5760,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// bounce the user to the wallet picker (e.g. drilling into Hive to Receive).
 				if (unsupportedDeviceMessages.has(capabilityKey(chain.id))) {
 					console.warn(`[getBalance] ${chain.id}: firmware does not implement ${chain.rpcMethod} — returning empty balance`)
-					return { chainId: chain.id, symbol: chain.symbol, balance: '0', balanceUsd: 0, address: '' }
+					return { chainId: chain.id, symbol: chain.symbol, balance: '0', balanceUsd: 0, address: '', syncState: 'degraded' as const }
 				}
 				const bitcoinSelfHost = chain.id === 'bitcoin' && getBtcBackend().kind !== 'pioneer'
 				const pioneer = bitcoinSelfHost ? {} : await getPioneer()
