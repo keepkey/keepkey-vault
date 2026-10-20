@@ -19,6 +19,7 @@ import { nativeMaxSpendableAmount, normalizeDecimals, tokenMaxSpendableAmount } 
 import { getAssetIcon } from "../../shared/assetLookup"
 import { validateAddress } from "../../shared/address-validation"
 import { isBalanceUnverified, selectBalanceEntry } from "../../shared/balance-display-state"
+import { mergeTrustedBalanceSnapshot } from "../../shared/balance-reconciliation"
 import type { SwapAsset, SwapQuote, ChainBalance, CustomToken, SwapStatusUpdate, SwapTrackingStatus, PendingSwap, SwapUiState, SwapUiCommand, SwapHealth } from "../../shared/types"
 import { SOLANA_BLIND_SIGNING_REQUIRED } from "../../shared/types"
 import { Z } from "../lib/z-index"
@@ -1255,7 +1256,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
         const idx = prev.findIndex(b => b.chainId === updated.chainId)
         if (idx === -1) return [...prev, updated]
         const next = [...prev]
-        next[idx] = updated
+        next[idx] = mergeTrustedBalanceSnapshot(prev[idx], updated, false) ?? prev[idx]
         return next
       })
     })

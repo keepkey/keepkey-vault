@@ -14,6 +14,7 @@ import bs58 from 'bs58'
 import type { ClearSignObservationDraft, ClearSignObservationOutcome, SigningRequestInfo, WcSessionInfo } from '../shared/types'
 import { evmAddressPath } from './evm-addresses'
 import { verifyEvmSigner } from './evm-rpc'
+import { assertEvmFeeCapCoversBaseFee } from '../shared/evmFeePreview'
 import { applyEvmTxPreview, attachErc7730Definition, evmPriorityFee, recognizedTypedDataSpender } from './evm-signing-preview'
 import { signWithErc7730Fallback } from './erc7730-resolver'
 import { evmSigningVerdict, withoutErc7730Description } from './evm-presign-report'
@@ -868,13 +869,26 @@ export class WalletConnectManager {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+      signal: AbortSignal.timeout(20_000),
     })
-    const json = await resp.json() as any
+    if (!resp.ok) throw new Error(`RPC ${method} failed (HTTP ${resp.status})`)
+    let json: any
+    try { json = await resp.json() }
+    catch { throw new Error(`RPC ${method} returned a non-JSON response (HTTP ${resp.status}). Try again later.`) }
+    if (!json || typeof json !== 'object' || Array.isArray(json)) throw new Error(`RPC ${method} returned an invalid response`)
     if (json.error) throw new Error(json.error.message)
+    if (!Object.prototype.hasOwnProperty.call(json, 'result')) throw new Error(`RPC ${method} returned no result`)
     return json.result
   }
 
   // ── Signing implementations ─────────────────────────────────────
+
+  private async checkTransactionFee(chainId: number, msg: any): Promise<void> {
+    if (msg.maxFeePerGas === undefined) return
+    const block = await this.rpcCall(chainId, 'eth_getBlockByNumber', ['latest', false])
+    // Canonical RLP represents a zero priority fee as the empty string.
+    assertEvmFeeCapCoversBaseFee(msg.maxFeePerGas, msg.maxPriorityFeePerGas === '0x' ? '0x0' : msg.maxPriorityFeePerGas, block?.baseFeePerGas)
+  }
 
   private async signMessage(
     message: string,
@@ -1125,8 +1139,12 @@ export class WalletConnectManager {
       if (tx.maxFeePerGas) {
         msg.maxFeePerGas = tx.maxFeePerGas
         // Fetch tip if omitted — 0x0 works but produces slow txs
-        const prio = tx.maxPriorityFeePerGas
-          ?? await this.rpcCall(effectiveChainId, 'eth_maxPriorityFeePerGas', []).catch(() => '0x59682F00') // 1.5 gwei fallback
+        const suggested = tx.maxPriorityFeePerGas
+          ?? await this.rpcCall(effectiveChainId, 'eth_maxPriorityFeePerGas', []).catch(() => '0x0')
+        // A network suggestion must fit inside the dApp's approved cap. The
+        // old fixed 1.5 gwei fallback exceeded typical Arbitrum fee caps.
+        const prio = tx.maxPriorityFeePerGas == null && BigInt(suggested) > BigInt(tx.maxFeePerGas)
+          ? tx.maxFeePerGas : suggested
         // Canonical RLP needs a zero priority fee as the EMPTY string, not a
         // 0x00 byte (same as REST /eth/sign-transaction) or the tx recovers to
         // the wrong signer.
@@ -1164,7 +1182,11 @@ export class WalletConnectManager {
 
       let signedMsg: any = msg
       let shown = signingInfo
-      const result = await signWithErc7730Fallback(msg, (m: any) => { signedMsg = m; return this.callbacks.ethSignTx(m) }, async () => {
+      const result = await signWithErc7730Fallback(msg, async (m: any) => {
+        await this.checkTransactionFee(effectiveChainId, m)
+        signedMsg = m
+        return this.callbacks.ethSignTx(m)
+      }, async () => {
         // The device refused the definition. The user approved a card that
         // said the device shows the call; it now signs blind. Always ask again
         // with the card for the blind call it now is, whatever AdvancedMode
@@ -1194,6 +1216,10 @@ export class WalletConnectManager {
         clearSignSchema.source === 'promoted-local', clearSignSchema.bundleHash,
       )
       else if (observationId && signedMsg.erc7730) this.callbacks.authenticateClearSignObservation(observationId, 'erc7730')
+
+      // On-device confirmation can take minutes. Check again before sending
+      // these bytes to a node or dApp; a changed fee requires fresh approval.
+      await this.checkTransactionFee(effectiveChainId, signedMsg)
 
       if (broadcast) {
         const txHash = await this.rpcCall(effectiveChainId, 'eth_sendRawTransaction', [result.serialized])

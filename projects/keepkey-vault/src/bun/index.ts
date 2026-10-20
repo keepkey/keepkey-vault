@@ -15,6 +15,7 @@
 // what code executed, at the cost of a per-call sync. The throughput hit is
 // negligible for our log volume (~10–100 lines/sec at peak boot).
 import { withPermit2SpenderName } from './permit2-spender-name'
+import { portfolioBalanceSyncState } from '../shared/balance-display-state'
 import * as fs from "fs"
 import * as os from "os"
 import * as path from "path"
@@ -5905,6 +5906,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// True once Pioneer answered with NON-degraded data — gates the force
 				// cache overwrite below (degraded responses must not clobber the cache).
 				let pioneerConfirmed = false
+				let syncState: ChainBalance['syncState'] = 'degraded'
 				// Snapshot pre-refresh address from cache so we can preserve it on Pioneer failure (Finding 3)
 				let cachedAddress = ''
 				try {
@@ -5991,11 +5993,13 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					// cache. Surface it (same banner channel as getBalances) and treat
 					// the response as UNCONFIRMED — its values must not force-overwrite
 					// our cache (a degraded zero would clobber a good cached balance).
-					pioneerConfirmed = !portfolioMeta?.degraded && !portfolioMeta?.failures?.length && !portfolioMeta?.staleChains?.length
-					if (portfolioMeta?.degraded) {
-						console.warn(`[getBalance] ${chain.coin}: Pioneer served degraded data`)
+					syncState = portfolioBalanceSyncState(portfolioMeta)
+					pioneerConfirmed = syncState === 'confirmed'
+					if (!pioneerConfirmed) {
+						console.warn(`[getBalance] ${chain.coin}: Pioneer served ${syncState} data`)
 						try {
-							rpc.send['pioneer-error']({ message: '', url: getPioneerApiBase(), severity: 'warning', degradedChains: [chain.symbol], staleChains: [], staleMinutes: 0, degradedChainIds: [chain.id], staleChainIds: [], unresolvedFaultCount: 0 })
+							const stale = syncState === 'stale'
+							rpc.send['pioneer-error']({ message: '', url: getPioneerApiBase(), severity: 'warning', degradedChains: stale ? [] : [chain.symbol], staleChains: stale ? [chain.symbol] : [], staleMinutes: Math.floor(Math.max(0, ...(portfolioMeta?.staleChains || []).map(s => s.ageMs || 0)) / 60000), degradedChainIds: stale ? [] : [chain.id], staleChainIds: stale ? [chain.id] : [], unresolvedFaultCount: 0 })
 						} catch { /* webview not ready */ }
 					}
 
@@ -6051,7 +6055,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							|| pureNatives.find((d: any) => d.pubkey === sourcePubkey)
 							|| pureNatives.find((d: any) => d.caip === pk.caip && d.address === pk.pubkey)
 							|| pureNatives.find((d: any) => d.address?.toLowerCase() === pk.pubkey.toLowerCase())
-						if (isUtxo && !match) pioneerConfirmed = false
+						if (isUtxo && !match) {
+							pioneerConfirmed = false
+							syncState = 'degraded'
+						}
 						const bal = parseFloat(String(match?.balance ?? '0'))
 						const usd = Number(match?.valueUsd ?? 0)
 						nativeTotalBalance += bal
@@ -6217,13 +6224,14 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					tokens,
 					defiPositions: chainDefiPositions,
 					breakdown: utxoBreakdown.length ? utxoBreakdown : undefined,
+					syncState,
 				}
 
 				// Update single-chain cache + push to frontend so Dashboard stays in sync.
 				// PRIVACY: Skip DB write for passphrase wallets.
 				try {
 					const deviceId = engine.getDeviceState().deviceId || 'unknown'
-					if (!engine.isPassphraseWallet && (!isUtxo || pioneerConfirmed)) {
+					if (!engine.isPassphraseWallet && pioneerConfirmed) {
 						// force only when Pioneer confirmed (non-degraded) the value — then a
 						// genuine zero / unpriced balance must overwrite the stale cache row
 						// (same rule as getBalances' confirmedChainIds).

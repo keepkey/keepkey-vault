@@ -6,6 +6,16 @@ const parse = (value: unknown): bigint | null => {
   if (!/^(?:0x[0-9a-fA-F]+|\d+)$/.test(raw)) return null
   try { return BigInt(raw) } catch { return null }
 }
+
+/** Validate the approved fee without increasing or otherwise changing it. */
+export function assertEvmFeeCapCoversBaseFee(maxFeePerGas: unknown, maxPriorityFeePerGas: unknown, baseFeePerGas: unknown): void {
+  const cap = parse(maxFeePerGas)
+  const tip = parse(maxPriorityFeePerGas)
+  const base = parse(baseFeePerGas)
+  if (cap === null || tip === null || tip > cap) throw new Error('Invalid EIP-1559 fee: priority fee must not exceed the fee cap')
+  if (base === null) throw new Error('Cannot verify the current network base fee. Refresh the transaction and try again.')
+  if (cap < base) throw new Error('Transaction fee cap is below the current network base fee. Refresh the transaction and review the new fee before signing again.')
+}
 const unit = (chainId?: number): string => evmChainLabel(chainId)?.symbol ?? 'native coin'
 const formatWei = (wei: bigint, chainId?: number): string => {
   const whole = wei / 10n ** 18n

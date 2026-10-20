@@ -997,8 +997,35 @@ function TypedDataSection({ decoded, t }: { decoded: EIP712DecodedInfo; t: (k: s
 			{typedDataRows(decoded).map((row, i) => (
 				<Row key={i} label={row.label} value={identified(row.value)} />
 			))}
+			{decoded.hashes ? <>
+				<Text fontSize="2xs" color="kk.textSecondary" mt="2">
+					{t('signing.compareDigests', 'If your KeepKey displays hash digests, compare the full values below before approving.')}
+				</Text>
+				<Row label="TYPED DATA DOMAIN" value={decoded.hashes.domainHash} />
+				<Row label="TYPED DATA MESSAGE" value={decoded.hashes.messageHash} />
+			</> : <Text fontSize="2xs" color="kk.textSecondary">
+				{t('signing.digestsUnavailable', 'Digest comparison is unavailable for this request.')}
+			</Text>}
 		</VStack>
 	)
+}
+
+/** Keep the reviewed request beside the OLED throughout transport and confirmation. */
+function SigningReference({ request }: { request: SigningRequestInfo }) {
+	const { t } = useTranslation('device')
+	const translate = (key: string, fallback?: string): string => t(key, fallback ?? key)
+	return <VStack w="100%" gap="3" maxH="42vh" overflowY="auto" textAlign="left" flexShrink={1} minH="0">
+		<Row label="Account" value={request.from} />
+		<Row label="Recipient" value={request.to} />
+		<Row label="Value" value={request.chain === 'eth' ? evmNativeValue(request.value, request.chainId) ?? request.value : request.value} />
+		{request.method === '/eth/sign-transaction' && <Row label="Max network fee" value={evmMaxFee(request.rawRequestBody, request.chainId) ?? undefined} />}
+		{request.erc7730 && request.erc7730Description && <Erc7730Section d={request.erc7730Description} />}
+		{request.typedDataDecoded && <TypedDataSection decoded={request.typedDataDecoded} t={translate} />}
+		{request.calldataDecoded && <CalldataSection decoded={request.calldataDecoded} request={request} t={translate} />}
+		{request.ethMessageDecoded && <EthMessageSection decoded={request.ethMessageDecoded} t={translate} />}
+		{request.solanaMessageDecoded && <SolanaMessageSection decoded={request.solanaMessageDecoded} t={translate} />}
+		{request.solanaDecoded && <SolanaDecodedSection decoded={request.solanaDecoded} t={translate} certified={request.solanaCertified} />}
+	</VStack>
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -1192,7 +1219,7 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 				<style>{SIGNING_ANIMATIONS}</style>
 				<VStack
 					bg="kk.cardBg" border="1px solid" borderColor="rgba(233,196,106,0.45)" borderRadius="2xl"
-					p="8" gap="5" maxW="400px" w="90vw" textAlign="center"
+					p="6" gap="3" maxW="640px" w="90vw" maxH="95vh" overflowY="auto" textAlign="center"
 					css={{ animation: "signingCardIn 0.3s ease-out, signingPulseGlow 4s ease-in-out infinite 0.3s" }}
 				>
 					<Flex justify="center">
@@ -1230,6 +1257,7 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 					<Button variant="solid" colorScheme="red" size="lg" width="100%" minH="52px" onClick={onCancel}>
 						{t("signing.cancel", "Cancel")}
 					</Button>
+					<SigningReference request={request} />
 				</VStack>
 			</Box>
 		)
@@ -1246,7 +1274,7 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 				<style>{SIGNING_ANIMATIONS}</style>
 				<VStack
 					bg="kk.cardBg" border="1px solid" borderColor="rgba(233,196,106,0.45)" borderRadius="2xl"
-					p="8" gap="5" maxW="400px" w="90vw" textAlign="center"
+					p="6" gap="3" maxW="640px" w="90vw" maxH="95vh" overflowY="auto" textAlign="center"
 					css={{ animation: "signingCardIn 0.3s ease-out, signingPulseGlow 4s ease-in-out infinite 0.3s" }}
 				>
 					<Flex justify="center">
@@ -1284,6 +1312,7 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 					<Button variant="solid" colorScheme="red" size="lg" width="100%" minH="52px" onClick={onCancel}>
 						{t("signing.cancel", "Cancel")}
 					</Button>
+					<SigningReference request={request} />
 				</VStack>
 			</Box>
 		)
@@ -1349,6 +1378,7 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 				<VStack flex="1" minH="0" overflowY="auto" w="100%" gap="3">
 				{/* ── Method ── */}
 				<Text fontSize="sm" fontWeight="600" color="white" alignSelf="flex-start">{methodLabel}</Text>
+				{request.typedDataDecoded && <Row label="Account" value={request.from} />}
 				{swapDecision && decoded && <SwapDecisionCard decoded={decoded} />}
 				{cosmosDeposit && (
 					<VStack w="100%" align="stretch" gap="1.5" bg="rgba(0,0,0,0.25)" borderRadius="xl" p="3">
