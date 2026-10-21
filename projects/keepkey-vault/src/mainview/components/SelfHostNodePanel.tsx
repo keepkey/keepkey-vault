@@ -64,7 +64,7 @@ export function SelfHostNodePanel({ settings, onChange, onConnected }: { setting
         {enabled && <Text fontSize="9px" color="var(--teal)" bg="rgba(139,227,196,0.12)" px="1.5" py="0.5" borderRadius="sm" textTransform="uppercase" letterSpacing="0.05em">Active</Text>}
       </Flex>
       <Text fontSize="sm" color="kk.textSecondary" mb="3">
-        Point Vault at your own {type === "blockbook" ? "Blockbook indexer" : "Bitcoin Core node"} instead of Pioneer. If your node fails, Vault shows the error — it never falls back to Pioneer.
+        Point KeepKey Desktop at your own {type === "blockbook" ? "Blockbook indexer" : "Bitcoin Core node"} instead of KeepKey servers. If your node fails, KeepKey Desktop shows the error — it never falls back to KeepKey servers.
       </Text>
 
       <Text fontSize="11px" color="kk.textSecondary" mb="1">Node type</Text>
@@ -81,7 +81,7 @@ export function SelfHostNodePanel({ settings, onChange, onConnected }: { setting
       </Flex>
       <Text fontSize="10px" color="kk.textSecondary" mb="2.5">
         {type === "blockbook"
-          ? "Trezor indexer — xpub-native, full history. What Pioneer uses."
+          ? "Trezor indexer — xpub-native, full history. What KeepKey servers use."
           : "Bitcoin Core RPC — scantxoutset (no history unless txindex + archival)."}
       </Text>
 

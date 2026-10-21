@@ -51,13 +51,13 @@ export function BitcoinOnlyOnboardingDialog({ onClose }: { onClose: () => void }
             </Text>
 
             <OptionCard
-              title="Pioneer" badge="Recommended"
-              body="Fast, zero setup. Vault's hosted Bitcoin data — the default."
-              action="Continue with Pioneer" onClick={onClose} primary
+              title="KeepKey servers" badge="Recommended"
+              body="Fast, zero setup. Bitcoin data from KeepKey.com's hosted servers — the default."
+              action="Use KeepKey servers" onClick={onClose} primary
             />
             <OptionCard
               title="Self-host your node"
-              body="Point Vault at your own Bitcoin Core node. Full sovereignty — your keys, your node, no third party."
+              body="Point KeepKey Desktop at your own Bitcoin Core node. Full sovereignty — your keys, your node, no third party."
               action="Set up my node" onClick={() => setView("selfhost")}
             />
             <OptionCard
