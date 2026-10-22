@@ -766,6 +766,8 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 	const [showBip85, setShowBip85] = useState(false)
 	const [zcashEnabled, setZcashEnabled] = useState(false)
 	const [hiveEnabled, setHiveEnabled] = useState(false)
+	// Networks turned off in the network picker: not loaded, not shown, not totalled.
+	const [disabledNetworks, setDisabledNetworks] = useState<string[]>([])
 	// One-time passphrase/hidden-wallet intro. `passphraseIntroSeen` starts true so
 	// the dialog never flashes before settings load; refreshFeatureFlags sets the
 	// real value. `introDismissed` suppresses it for the rest of this session.
@@ -946,6 +948,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 			.then(s => {
 				setZcashEnabled(s.zcashPrivacyEnabled)
 				setHiveEnabled(s.hiveEnabled)
+				setDisabledNetworks(s.disabledNetworks)
 				setPassphraseIntroSeen(s.passphraseIntroShown)
 			})
 			.catch(() => {})
@@ -1288,6 +1291,15 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 		}
 	}, [zcashEnabled, refreshBalances, loadingBalances])
 
+	// A network turned back on has no balances yet — load them.
+	const prevDisabledRef = useRef(disabledNetworks)
+	useEffect(() => {
+		const turnedOn = prevDisabledRef.current.some(id => !disabledNetworks.includes(id))
+		if (turnedOn && loadingBalances) return // retried when the running load ends
+		prevDisabledRef.current = disabledNetworks
+		if (turnedOn) refreshBalances()
+	}, [disabledNetworks, refreshBalances, loadingBalances])
+
 	// Auto-refresh balances when Hive feature flag is enabled mid-session
 	const prevHiveRef = useRef(hiveEnabled)
 	useEffect(() => {
@@ -1462,6 +1474,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 		for (const [chainId, bal] of balances) {
 			// Honor the Hive feature flag — stale Hive rows in the map must not count toward totals
 			if (chainId === 'hive' && !hiveEnabled) continue
+			if (disabledNetworks.includes(chainId)) continue
 			if (bal.tokens && bal.tokens.length > 0) {
 				const { clean } = categorizeTokens(bal.tokens, overrides)
 				const spamUsd = (bal.tokens.length - clean.length) > 0
@@ -1476,7 +1489,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 			}
 		}
 		return result
-	}, [balances, visibilityMap, hiveEnabled])
+	}, [balances, visibilityMap, hiveEnabled, disabledNetworks])
 
 	const totalUsd = useMemo(() => Array.from(cleanBalanceUsd.values()).reduce((sum, b) => sum + b.usd, 0), [cleanBalanceUsd])
 
@@ -1654,11 +1667,12 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 		// Bitcoin-only firmware physically can't touch other chains — show only BTC.
 		if (btcOnly) return c.id === 'bitcoin'
 		if (!isChainSupported(c, firmwareVersion)) return false
+		if (disabledNetworks.includes(c.id)) return false
 		// Zcash transparent is hidden by default — show when feature flag is on
 		if (c.id === 'zcash') return zcashEnabled
 		if (c.id === 'hive') return hiveEnabled
 		return !c.hidden
-	}), [allChains, btcOnly, firmwareVersion, zcashEnabled, hiveEnabled])
+	}), [allChains, btcOnly, firmwareVersion, zcashEnabled, hiveEnabled, disabledNetworks])
 
 	const sortedChains = useMemo(() => [...visibleChains].sort((a, b) => {
 		const aUsd = cleanBalanceUsd.get(a.id)?.usd || 0

@@ -47,6 +47,8 @@ interface DeviceSettingsDrawerProps {
 	onOpenAuditLog?: () => void
 	onOpenPairedApps?: () => void
 	onOpenMobilePairing?: () => void
+	/** Opens the network picker (multi-chain only). */
+	onChooseNetworks?: () => void
 	onRestApiChanged?: (enabled: boolean) => void
 	/** Self-host node connected (tested OK + saved) — parent closes the drawer and runs the walkthrough. */
 	onNodeConnected?: () => void
@@ -171,7 +173,7 @@ function VerificationBadge({ verified, t }: { verified?: boolean; t: (key: strin
 
 // ── Main Component ──────────────────────────────────────────────────
 
-export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpdate, onDownloadUpdate, onApplyUpdate, updatePhase, updateVersion, appVersion, onOpenAuditLog, onOpenPairedApps, onOpenMobilePairing, onRestApiChanged, onNodeConnected, onWordCountChange }: DeviceSettingsDrawerProps) {
+export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpdate, onDownloadUpdate, onApplyUpdate, updatePhase, updateVersion, appVersion, onOpenAuditLog, onOpenPairedApps, onOpenMobilePairing, onChooseNetworks, onRestApiChanged, onNodeConnected, onWordCountChange }: DeviceSettingsDrawerProps) {
 	const { t } = useTranslation("settings")
 	const [features, setFeatures] = useState<DeviceFeatures | null>(null)
 	const [featuresError, setFeaturesError] = useState(false)
@@ -191,7 +193,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 	const [togglingPassphrase, setTogglingPassphrase] = useState(false)
 	const [togglingPolicy, setTogglingPolicy] = useState("")
 	const [browserPromptStatus, setBrowserPromptStatus] = useState("")
-	const [appSettings, setAppSettings] = useState<AppSettings>({ restApiEnabled: false, pioneerApiBase: '', pioneerServers: [], activePioneerServer: '', fiatCurrency: 'USD', numberLocale: 'en-US', walletConnectEnabled: false, zcashPrivacyEnabled: false, hiveEnabled: false, emulatorEnabled: false, offlineMode: false, btcNodeEnabled: false, btcNodeType: 'blockbook', btcNodeUrl: '', btcOnboardingShown: false, preReleaseUpdates: false, alphaFirmware: false, addressBookClearsignEnabled: false, privateModeEnabled: false, passphraseIntroShown: false, evmSimulationRpcUrls: {} })
+	const [appSettings, setAppSettings] = useState<AppSettings>({ restApiEnabled: false, pioneerApiBase: '', pioneerServers: [], activePioneerServer: '', fiatCurrency: 'USD', numberLocale: 'en-US', walletConnectEnabled: false, zcashPrivacyEnabled: false, hiveEnabled: false, emulatorEnabled: false, offlineMode: false, btcNodeEnabled: false, btcNodeType: 'blockbook', btcNodeUrl: '', btcOnboardingShown: false, disabledNetworks: [], networksChosen: false, preReleaseUpdates: false, alphaFirmware: false, addressBookClearsignEnabled: false, privateModeEnabled: false, passphraseIntroShown: false, evmSimulationRpcUrls: {} })
 	const [togglingRestApi, setTogglingRestApi] = useState(false)
 	const [windowFocusState, setWindowFocusState] = useState<{ refs: number; alwaysOnTop: boolean } | null>(null)
 	const [releasingWindowFocus, setReleasingWindowFocus] = useState(false)
@@ -1700,8 +1702,21 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 
 					{/* ── Bitcoin node (self-host) — btc-only devices ─── */}
 					{isBitcoinOnlyVariant(deviceState.firmwareVariant) && (
-						<Section title="Bitcoin node" defaultOpen={true}>
+						<Section title="Bitcoin node" defaultOpen={true} videoHref={watch('btc-node-desktop-core')}>
 							<SelfHostNodePanel settings={appSettings} onChange={setAppSettings} onConnected={onNodeConnected} />
+						</Section>
+					)}
+
+					{!isBitcoinOnlyVariant(deviceState.firmwareVariant) && onChooseNetworks && (
+						<Section title="Networks" defaultOpen={false} docsHref={DOCS_LINKS.performance}>
+							<Flex align="center" justify="space-between" gap="3">
+								<Text fontSize="sm" color="kk.textSecondary">
+									{appSettings.disabledNetworks.length === 0
+										? "Every network is on."
+										: `${appSettings.disabledNetworks.length} turned off for a faster dashboard.`}
+								</Text>
+								<Button size="sm" variant="outline" borderColor="kk.border" color="kk.textPrimary" onClick={onChooseNetworks}>Choose networks</Button>
+							</Flex>
 						</Section>
 					)}
 

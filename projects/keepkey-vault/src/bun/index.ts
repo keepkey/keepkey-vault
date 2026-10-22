@@ -1026,6 +1026,11 @@ let restApiEnabled = false
 let walletConnectEnabled = false
 let zcashPrivacyEnabled = false
 let hiveEnabled = false
+// Networks the user turned off (network picker). Off = not derived, not
+// fetched, not scanned, not watched. zcash-shielded follows zcash. Bitcoin
+// can't be turned off: getBalances always reads its accounts.
+let disabledNetworks = new Set<string>()
+const networkOn = (chainId: string) => !disabledNetworks.has(chainId === 'zcash-shielded' ? 'zcash' : chainId)
 let offlineMode = false
 const minedEvmTxCache = new Map<string, NonNullable<Awaited<ReturnType<typeof lookupEvmTx>>>>()
 // Hive sponsor ETH anti-drain gate. ON for release — the vault signs the EIP-191
@@ -1086,6 +1091,7 @@ function loadSettings() {
 		setSetting('zcash_privacy_enabled', '0')
 	}
 	hiveEnabled = getSetting('hive_enabled') === '1'
+	try { disabledNetworks = new Set((JSON.parse(getSetting('disabled_networks') || '[]') as string[]).filter(id => id !== 'bitcoin')) } catch { disabledNetworks = new Set() }
 	emulatorEnabled = getSetting('emulator_enabled') === '1'
 	preReleaseUpdates = getSetting('pre_release_updates') === '1'
 	alphaFirmware = getSetting('alpha_firmware') === '1'
@@ -1454,6 +1460,8 @@ function getAppSettings() {
 		btcNodeType: getSetting('btc_node_type') === 'core' ? 'core' : 'blockbook',
 		btcNodeUrl: getSetting('btc_node_url') || '',
 		btcOnboardingShown: getSetting('btc_onboarding_shown') === '1',
+		disabledNetworks: [...disabledNetworks],
+		networksChosen: getSetting('networks_chosen') === '1',
 		preReleaseUpdates,
 		alphaFirmware,
 		addressBookClearsignEnabled,
@@ -2026,7 +2034,7 @@ async function scanOneChain(chainId: string, forceRefresh = false) {
 	const result = await rebuildActivityHistory({
 		wallet: engine.wallet,
 		scope,
-		chains: getAllChains().filter(c => c.id !== 'hive' || hiveEnabled),
+		chains: getAllChains().filter(c => (c.id !== 'hive' || hiveEnabled) && networkOn(c.id)),
 		firmwareVersion: engine.getDeviceState().firmwareVersion,
 		options: { chainId, dryRun: hidden, collectRows: true, forceRefresh },
 		isCurrent,
@@ -4186,11 +4194,14 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// onto the managers after init so the BTC-only path stays detectable.
 				const inventoryEpoch = activitySessionEpoch
 				const inventoryWallet = engine.wallet
+				// Per-step timings feed the network picker's load estimate (shared/network-load.ts).
+				const loadT0 = Date.now()
 				const { truth: liveSeedIdentity } = await ensureManagersForSeed('getBalances')
 
 				// Initialize BTC multi-account on first balance fetch
 				if (!btcAccounts.isInitialized) {
-					try { await btcAccounts.initialize(wallet) } catch (e: any) {
+					const btcT0 = Date.now()
+					try { await btcAccounts.initialize(wallet); console.log(`[getBalances] timing btc-accounts: ${Date.now() - btcT0}ms`) } catch (e: any) {
 						console.warn('[getBalances] BTC accounts init failed:', e.message)
 					}
 				}
@@ -4205,6 +4216,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					if (!isChainSupported(c, fwVersion)) return false
 					if ((c.id === 'zcash' || c.id === 'zcash-shielded') && !zcashPrivacyEnabled) return false
 					if (c.id === 'hive' && !hiveEnabled) return false
+					if (!networkOn(c.id)) return false
 					return true
 				})
 				const utxoChains = allChains.filter(c => c.chainFamily === 'utxo' && c.id !== 'bitcoin')
@@ -4222,12 +4234,16 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				let xpubResults: any[] = []
 				try {
 					if (utxoPubKeyPaths.length > 0) {
+						const utxoT0 = Date.now()
 						xpubResults = await wallet.getPublicKeys(utxoPubKeyPaths.map(p => ({
 							addressNList: p.path,
 							coin: p.chain.coin,
 							scriptType: p.scriptType,
 							curve: 'secp256k1',
 						}))) || []
+						const perChain = new Map<string, number>()
+						for (const p of utxoPubKeyPaths) perChain.set(p.chain.id, (perChain.get(p.chain.id) || 0) + 1)
+						console.log(`[getBalances] timing utxo: ${utxoPubKeyPaths.length} paths in ${Date.now() - utxoT0}ms (${[...perChain].map(([id, n]) => `${id}:${n}`).join(' ')})`)
 					}
 				} catch (e: any) {
 					console.warn('[getBalances] UTXO xpub batch failed:', e.message)
@@ -4276,7 +4292,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const nonEvmChains = nonUtxoChains.filter(c => c.chainFamily !== 'evm')
 
 				if (evmChains.length > 0 && !evmAddresses.isInitialized) {
-					try { await evmAddresses.initialize(wallet) } catch (e: any) {
+					const evmT0 = Date.now()
+					try { await evmAddresses.initialize(wallet); console.log(`[getBalances] timing evm: ${Date.now() - evmT0}ms`) } catch (e: any) {
 						console.warn('[getBalances] EVM addresses init failed:', e.message)
 					}
 				}
@@ -5190,7 +5207,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// ── Final audit log ──
 				const totalTokens = results.reduce((n, r) => n + (r.tokens?.length || 0), 0)
 				const totalUsd = results.reduce((n, r) => n + (r.balanceUsd || 0), 0)
-				console.log(`[getBalances] FINAL: ${results.length} chains, ${totalTokens} tokens, $${totalUsd.toFixed(2)}`)
+				console.log(`[getBalances] FINAL: ${results.length} chains, ${totalTokens} tokens, $${totalUsd.toFixed(2)} (timing total: ${Date.now() - loadT0}ms)`)
 				for (const r of results) {
 					if (r.tokens && r.tokens.length > 0) {
 						console.log(`[getBalances]   ${r.chainId}: ${r.tokens.length} tokens attached`)
@@ -5273,8 +5290,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const fwVersion = engine.getDeviceState().firmwareVersion
 				if (!isChainSupported(chain, fwVersion)
 					|| ((chain.id === 'zcash' || chain.id === 'zcash-shielded') && !zcashPrivacyEnabled)
-					|| (chain.id === 'hive' && !hiveEnabled)) {
-					console.warn(`[getBalance] ${chain.id}: unsupported on firmware ${fwVersion || '?'} or feature-flagged off — returning empty balance`)
+					|| (chain.id === 'hive' && !hiveEnabled)
+					|| !networkOn(chain.id)) {
+					console.warn(`[getBalance] ${chain.id}: unsupported on firmware ${fwVersion || '?'}, feature-flagged off or turned off — returning empty balance`)
 					return { chainId: chain.id, symbol: chain.symbol, balance: '0', balanceUsd: 0, address: '' }
 				}
 				// Firmware-capability gate (mirrors getBalances): if this chain's address
@@ -7150,6 +7168,13 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				setSetting('btc_onboarding_shown', '1')
 				return getAppSettings()
 			},
+			setDisabledNetworks: async (params) => {
+				disabledNetworks = new Set(params.chainIds.filter((id: string) => id !== 'bitcoin'))
+				setSetting('disabled_networks', JSON.stringify([...disabledNetworks]))
+				setSetting('networks_chosen', '1')
+				console.log(`[settings] Networks off: ${[...disabledNetworks].join(', ') || 'none'}`)
+				return getAppSettings()
+			},
 			setRestApiEnabled: async (params) => {
 				restApiEnabled = params.enabled
 				setSetting('rest_api_enabled', params.enabled ? '1' : '0')
@@ -8357,6 +8382,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const supportedChains = bitcoinOnlyChainList(getAllChains(), bitcoinOnly).filter(c => {
 					if (!isChainSupported(c, fwVersion)) return false
 					if (c.id === 'zcash-shielded') return false
+					if (!networkOn(c.id)) return false
 					if (c.id === 'zcash') return zcashPrivacyEnabled
 					if (c.id === 'hive') return hiveEnabled
 					return !c.hidden
@@ -8394,6 +8420,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					const chain = getAllChains().find(c => c.id === b.chainId)
 					if (!chain) return true // keep unknowns (tokens)
 					if (chain.id === 'hive' && !hiveEnabled) return false // honor feature flag — drop stale Hive rows
+					if (!networkOn(chain.id)) return false // turned off in the network picker
 					return isChainSupported(chain, fwVersion)
 				})
 				return { balances: filteredBalances, updatedAt: result.updatedAt, staleReasons: staleReasons.length > 0 ? staleReasons : undefined }
@@ -9890,7 +9917,7 @@ engine.on('state-change', (state) => {
 			rebuildActivityHistory({
 				wallet: engine.wallet,
 				scope,
-				chains: bitcoinOnlyChainList(getAllChains(), bitcoinOnly).filter(c => c.id !== 'hive' || hiveEnabled),
+				chains: bitcoinOnlyChainList(getAllChains(), bitcoinOnly).filter(c => (c.id !== 'hive' || hiveEnabled) && networkOn(c.id)),
 				firmwareVersion: engine.getDeviceState().firmwareVersion,
 				// A PIN/passphrase prompt mid-scan must not let another wallet's
 				// history land on disk under this walletId.

@@ -21,6 +21,7 @@ import { OfflineBanner } from "./components/OfflineBanner"
 import { NodeStatusBar } from "./components/NodeStatusBar"
 import { NodeConnectedDialog } from "./components/NodeConnectedDialog"
 import { BitcoinOnlyOnboardingDialog } from "./components/BitcoinOnlyOnboardingDialog"
+import { NetworkPickerDialog } from "./components/NetworkPickerDialog"
 import { DeviceGrid } from "./components/DeviceGrid"
 import { EmulatorWalletChooser } from "./components/EmulatorWalletChooser"
 import { DeviceClaimedDialog } from "./components/DeviceClaimedDialog"
@@ -42,7 +43,7 @@ import { IncomingTxToast, type IncomingTx } from "./components/IncomingTxToast"
 import { useDeviceState } from "./hooks/useDeviceState"
 import { useUpdateState } from "./hooks/useUpdateState"
 import { rpcRequest, onRpcMessage, rpcFire } from "./lib/rpc"
-import { CHAINS, customChainToChainDef, findChainByNetwork, type ChainDef } from "../shared/chains"
+import { CHAINS, customChainToChainDef, findChainByNetwork, isChainSupported, type ChainDef } from "../shared/chains"
 import { loadSupportedChains } from "../shared/swap-support-matrix"
 import { Z } from "./lib/z-index"
 import { ActivityTracker } from "./components/ActivityTracker"
@@ -106,6 +107,11 @@ function App() {
 	// before settings load; the real value arrives from getAppSettings.
 	const [btcOnboardingSeen, setBtcOnboardingSeen] = useState(true)
 	const [btcOnboardingDismissed, setBtcOnboardingDismissed] = useState(false)
+	// Network picker: asked once before the first multi-chain dashboard load, then from Settings.
+	const [networksChosen, setNetworksChosen] = useState(true)
+	const [disabledNetworks, setDisabledNetworks] = useState<string[]>([])
+	const [networkPickerOpen, setNetworkPickerOpen] = useState(false)
+	const [zcashEnabled, setZcashEnabled] = useState(false)
 	const [btcNodeEnabledSetting, setBtcNodeEnabledSetting] = useState(false)
 	const [nodeDialogOpen, setNodeDialogOpen] = useState(false)
 	// Skip the reachability probe when airplane mode is on — we already know we're
@@ -165,7 +171,7 @@ function App() {
 		const refreshSettings = () => {
 			rpcRequest<AppSettings>("getAppSettings")
 				.then((s) => {
-					setRestApiEnabled(s.restApiEnabled); setWalletConnectEnabled(s.walletConnectEnabled); setEmulatorEnabled(s.emulatorEnabled); setHiveEnabled(s.hiveEnabled); setOfflineModeSetting(s.offlineMode); setBtcOnboardingSeen(s.btcOnboardingShown); setBtcNodeEnabledSetting(s.btcNodeEnabled)
+					setRestApiEnabled(s.restApiEnabled); setWalletConnectEnabled(s.walletConnectEnabled); setEmulatorEnabled(s.emulatorEnabled); setHiveEnabled(s.hiveEnabled); setOfflineModeSetting(s.offlineMode); setBtcOnboardingSeen(s.btcOnboardingShown); setBtcNodeEnabledSetting(s.btcNodeEnabled); setNetworksChosen(s.networksChosen); setDisabledNetworks(s.disabledNetworks); setZcashEnabled(s.zcashPrivacyEnabled)
 					if (s.pioneerApiBase) loadSupportedChains(s.pioneerApiBase).catch(() => {})
 				})
 				.catch(() => {})
@@ -1058,6 +1064,19 @@ function App() {
 		)
 	}
 
+	// What this device can show — the same set the Dashboard grid uses.
+	const pickerChains = CHAINS.filter(c => !c.hidden && isChainSupported(c, deviceState.firmwareVersion) && (c.id !== "hive" || hiveEnabled) && (c.id !== "zcash" || zcashEnabled))
+	const saveNetworks = async (chainIds: string[]) => {
+		const s = await rpcRequest<AppSettings>("setDisabledNetworks", { chainIds }).catch(() => null)
+		if (s) { setDisabledNetworks(s.disabledNetworks); setNetworksChosen(s.networksChosen) }
+		setNetworkPickerOpen(false)
+		window.dispatchEvent(new Event("keepkey-settings-changed"))
+	}
+	// Before the Dashboard mounts, so the first load already skips what was turned off.
+	if (!networksChosen && !splashBitcoinOnly) {
+		return <NetworkPickerDialog chains={pickerChains} initialDisabled={disabledNetworks} onDone={saveNetworks} />
+	}
+
 	// ── Ready phase ─────────────────────────────────────────────────
 	// Warning/error are now bottom-right toasts — only push content down for actionable top banners
 	const showBanner = !updateDismissed && update.phase !== "idle" && update.phase !== "checking" && update.phase !== "warning" && update.phase !== "error"
@@ -1067,6 +1086,9 @@ function App() {
 			{offline && <OfflineBanner airplane={offlineModeSetting} />}
 			{showNodeBar && nodeStatus && <NodeStatusBar status={nodeStatus} />}
 			{nodeDialogOpen && <NodeConnectedDialog onClose={() => setNodeDialogOpen(false)} />}
+			{networkPickerOpen && (
+				<NetworkPickerDialog chains={pickerChains} initialDisabled={disabledNetworks} onDone={saveNetworks} onCancel={() => setNetworkPickerOpen(false)} />
+			)}
 			{splashBitcoinOnly && !btcOnboardingSeen && !btcOnboardingDismissed && portfolioLoaded && !btcSplashHold && (
 				<BitcoinOnlyOnboardingDialog onClose={() => { setBtcOnboardingDismissed(true); rpcRequest("markBtcOnboardingShown").catch(() => {}) }} />
 			)}
@@ -1144,6 +1166,7 @@ function App() {
 				onOpenAuditLog={() => setAuditLogOpen(true)}
 				onOpenPairedApps={() => setPairedAppsOpen(true)}
 				onOpenMobilePairing={() => setMobilePairingOpen(true)}
+				onChooseNetworks={() => { setSettingsOpen(false); setNetworkPickerOpen(true) }}
 				onRestApiChanged={setRestApiEnabled}
 				onNodeConnected={() => {
 					setSettingsOpen(false)
