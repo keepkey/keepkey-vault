@@ -651,9 +651,12 @@ function App() {
 		setCharRequest(null)
 	}, [])
 	const handleRecoveryDismiss = useCallback(() => {
+		// The device is still in recovery waiting for letters, holding the
+		// transport; hiding the overlay alone left the app stuck until a replug.
+		if (charRequest) rpcRequest("cancelDeviceSigning").catch(() => {})
 		setCharRequest(null)
 		setRecoveryError(null)
-	}, [])
+	}, [charRequest])
 	const handleRecoveryRetry = useCallback(() => {
 		// Dismiss error overlay — let the wizard/settings UI handle re-initiation
 		setCharRequest(null)

@@ -212,6 +212,14 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 		return n * pricePerUnit
 	}, [amount, hasPrice, pricePerUnit, isMax])
 
+	// MAX on a Bitcoin-style chain: the amount actually sent, read from the built
+	// transaction's recipient output, so the review matches what the device shows.
+	const maxSentAmount = useMemo(() => {
+		if (!isMax || chain.chainFamily !== 'utxo') return null
+		const out = buildResult?.unsignedTx?.outputs?.find((o: any) => o.addressType === 'spend' && o.address === recipient)
+		return out ? (Number(out.amount) / 10 ** chain.decimals).toFixed(chain.decimals) : null
+	}, [isMax, chain.chainFamily, chain.decimals, buildResult, recipient])
+
 	const addressValidation = useMemo(() => {
 		if (!recipient) return null
 		return validateAddress(recipient, chain)
@@ -812,12 +820,13 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 						<Text fontSize="xs" color="kk.textMuted" mb="2">{t("transactionReady")}</Text>
 						<Flex justify="space-between" mb="1">
 							<Text fontSize="xs" color="kk.textSecondary">{t("to")}</Text>
-							<Text fontSize="xs" fontFamily="mono" color="kk.textPrimary" maxW="250px" truncate>{recipient}</Text>
+							{/* Full address, never truncated: this is what the user checks against the device. */}
+							<Text fontSize="xs" fontFamily="mono" color="kk.textPrimary" maxW="300px" textAlign="right" wordBreak="break-all">{recipient}</Text>
 						</Flex>
 						<Flex justify="space-between" mb="1">
 							<Text fontSize="xs" color="kk.textSecondary">{t("amount")}</Text>
 							<Flex direction="column" align="flex-end">
-								<Text fontSize="xs" fontFamily="mono" color="kk.textPrimary">{isMax ? 'MAX' : amount} {displaySymbol}</Text>
+								<Text fontSize="xs" fontFamily="mono" color="kk.textPrimary">{isMax ? (maxSentAmount ?? 'MAX') : amount} {displaySymbol}</Text>
 								{!isMax && amountUsdPreview !== null && (
 									<Text fontSize="10px" fontFamily="mono" color="kk.textMuted">{fmtCompact(amountUsdPreview)}</Text>
 								)}

@@ -2585,7 +2585,10 @@ export class EngineController extends EventEmitter {
    */
   private async deriveSeedFingerprint(): Promise<string | null> {
     if (!this.wallet) return null
-    try {
+    // Bitcoin-only firmware refuses ETH ("Unknown message"); asking anyway cost a
+    // failed round trip on every connect. Go straight to the btc: fingerprint.
+    const btcOnly = isBitcoinOnlyVariant(this.cachedFeatures?.firmwareVariant)
+    if (!btcOnly) try {
       const result = await (this.wallet as any).ethGetAddress({
         addressNList: [0x80000000 + 44, 0x80000000 + 60, 0x80000000 + 0, 0, 0],
         showDisplay: false,
