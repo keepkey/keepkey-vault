@@ -736,6 +736,17 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
     }
   }, [inBootloader, step])
 
+  // "Create New Wallet" scares owners into thinking they were wiped, so it only
+  // renders on proof: an app-mode features read with initialized === false
+  // (needsInit is false whenever that field is missing). A device that reads as
+  // holding a wallet leaves for the app instead of waiting on a hidden screen.
+  const confirmedNoWallet = !inBootloader && needsInit
+  useEffect(() => {
+    if (step !== 'init-choose') return
+    if (!hasFeatures || inBootloader || needsInit) return
+    onComplete()
+  }, [step, hasFeatures, inBootloader, needsInit, onComplete])
+
   useEffect(() => {
     return () => {
       if (bootloaderPollRef.current) clearInterval(bootloaderPollRef.current)
@@ -1155,14 +1166,14 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
   // init-label excluded: its Previous target is init-progress, which the
   // create-recovery effect immediately pushes forward again — a no-op bounce.
   const showPrevious = !['authenticity', 'coin-choice', 'intro', 'welcome', 'complete', 'init-progress', 'init-label', 'verify-seed', 'security-tips'].includes(step)
-  // L4 fix: hide Next on firmware step for OOB devices (firmware is required)
+  // No footer Next on firmware: STEP_SEQUENCE puts init-choose after it, so Next
+  // walked an updating (often initialized) device onto "Create New Wallet".
+  // Leaving the firmware step is "Skip for now", which routes on needsInit.
   // Security steps carry their own Accept/Skip actions; a footer Next would
   // bypass them (and from sec-dice would land on init-progress with no RPC in
   // flight — a spinner that never resolves).
   const showNext =
-    !['authenticity', 'coin-choice', 'intro', 'bootloader', 'init-choose', 'create-briefing', 'sec-randomness', 'sec-dice', 'init-progress', 'init-label', 'verify-seed', 'security-tips', 'complete'].includes(step) &&
-    !(step === 'firmware' && (updateState === 'updating' || updateState === 'complete')) &&
-    !(step === 'firmware' && isOobDevice)
+    !['authenticity', 'coin-choice', 'intro', 'bootloader', 'firmware', 'init-choose', 'create-briefing', 'sec-randomness', 'sec-dice', 'init-progress', 'init-label', 'verify-seed', 'security-tips', 'complete'].includes(step)
 
   // ── Render ─────────────────────────────────────────────────────────────
 
@@ -2435,7 +2446,15 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
             )}
 
             {/* ═══════════════ INIT: CHOOSE ═════════════════════════ */}
-            {step === 'init-choose' && (
+            {step === 'init-choose' && !confirmedNoWallet && (
+              <VStack gap={3} w="100%" py={8}>
+                <Spinner size="md" color="var(--gold)" />
+                <Text fontSize="sm" color="kk.textSecondary">
+                  {t('initChoose.checking', { defaultValue: 'Reading your KeepKey…' })}
+                </Text>
+              </VStack>
+            )}
+            {step === 'init-choose' && confirmedNoWallet && (
               <VStack gap={3} w="100%">
                 <VStack gap={0.5}>
                   <Text fontSize="lg" fontWeight="bold" color="white" textAlign="center">
