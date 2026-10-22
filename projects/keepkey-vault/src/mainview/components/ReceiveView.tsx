@@ -34,6 +34,8 @@ interface ReceiveViewProps {
 	onTonBounceableChange?: (bounceable: boolean) => void
 	// Watch-only: no device — hide device-required actions (verify-on-device, derive/retry).
 	watchOnly?: boolean
+	/** Watch-only with a connected KeepKey that holds this wallet: verify-on-device goes through this. */
+	onShowOnDevice?: () => Promise<void>
 }
 
 /** Eyebrow + ink-0 mono block + copy chip on the right.
@@ -149,7 +151,7 @@ function PillToggle<T extends string | number>({
 export function ReceiveView({
 	chain, address, loading, error, currentPath, onDerive, scriptType, xpub,
 	isBtc, btcChangeIndex = 0, btcAddressIndex = 0, btcAddressWarning, onBtcChangeIndex, onBtcAddressIndex,
-	isTon, tonBounceable = false, onTonBounceableChange, watchOnly = false,
+	isTon, tonBounceable = false, onTonBounceableChange, watchOnly = false, onShowOnDevice,
 }: ReceiveViewProps) {
 	const { t } = useTranslation("receive")
 	const [showing, setShowing] = useState(false)
@@ -158,6 +160,11 @@ export function ReceiveView({
 
 	const showOnDevice = useCallback(async () => {
 		setShowing(true)
+		if (onShowOnDevice) {
+			await onShowOnDevice().catch((e: any) => console.error("showOnDevice:", e))
+			setShowing(false)
+			return
+		}
 		try {
 			const params: any = {
 				addressNList: currentPath,
@@ -170,7 +177,7 @@ export function ReceiveView({
 			await rpcRequest(chain.rpcMethod, params, 60000)
 		} catch (e: any) { console.error("showOnDevice:", e) }
 		setShowing(false)
-	}, [chain, currentPath, scriptType, isTon, tonBounceable])
+	}, [chain, currentPath, scriptType, isTon, tonBounceable, onShowOnDevice])
 
 	const handlePathApply = useCallback((newPath: number[]) => {
 		setPathDialogOpen(false)
@@ -194,7 +201,7 @@ export function ReceiveView({
 		if (watchOnly) {
 			return (
 				<Flex direction="column" align="center" py="10" gap="4">
-					<Text fontSize="13px" color="var(--text-2)" letterSpacing="-0.005em">{t("watchOnlyNoAddress")}</Text>
+					<Text fontSize="13px" color={error ? "var(--rose)" : "var(--text-2)"} letterSpacing="-0.005em">{error || t("watchOnlyNoAddress")}</Text>
 				</Flex>
 			)
 		}
@@ -285,8 +292,8 @@ export function ReceiveView({
 							sx={{ '& svg': { width: '100%', height: '100%', display: 'block' } }}
 						/>
 					</Box>
-					{/* Verify-on-device requires the device — hidden in watch-only mode. */}
-					{!watchOnly && (
+					{/* Verify-on-device requires the device — in watch-only only via onShowOnDevice (matching KeepKey). */}
+					{(!watchOnly || onShowOnDevice) && (
 					<Box
 						as="button"
 						className="electrobun-webkit-app-region-no-drag"

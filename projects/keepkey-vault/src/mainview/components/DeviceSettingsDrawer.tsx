@@ -193,7 +193,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 	const [togglingPassphrase, setTogglingPassphrase] = useState(false)
 	const [togglingPolicy, setTogglingPolicy] = useState("")
 	const [browserPromptStatus, setBrowserPromptStatus] = useState("")
-	const [appSettings, setAppSettings] = useState<AppSettings>({ restApiEnabled: false, pioneerApiBase: '', pioneerServers: [], activePioneerServer: '', fiatCurrency: 'USD', numberLocale: 'en-US', walletConnectEnabled: false, zcashPrivacyEnabled: false, hiveEnabled: false, emulatorEnabled: false, offlineMode: false, btcNodeEnabled: false, btcNodeType: 'blockbook', btcNodeUrl: '', btcOnboardingShown: false, disabledNetworks: [], networksChosen: false, preReleaseUpdates: false, alphaFirmware: false, addressBookClearsignEnabled: false, privateModeEnabled: false, passphraseIntroShown: false, evmSimulationRpcUrls: {} })
+	const [appSettings, setAppSettings] = useState<AppSettings>({ restApiEnabled: false, pioneerApiBase: '', pioneerServers: [], activePioneerServer: '', fiatCurrency: 'USD', numberLocale: 'en-US', walletConnectEnabled: false, btcMultisigEnabled: false, zcashPrivacyEnabled: false, hiveEnabled: false, emulatorEnabled: false, offlineMode: false, btcNodeEnabled: false, btcNodeType: 'blockbook', btcNodeUrl: '', btcOnboardingShown: false, preReleaseUpdates: false, alphaFirmware: false, addressBookClearsignEnabled: false, privateModeEnabled: false, passphraseIntroShown: false, evmSimulationRpcUrls: {}, disabledNetworks: [], networksChosen: false })
 	const [togglingRestApi, setTogglingRestApi] = useState(false)
 	const [windowFocusState, setWindowFocusState] = useState<{ refs: number; alwaysOnTop: boolean } | null>(null)
 	const [releasingWindowFocus, setReleasingWindowFocus] = useState(false)
@@ -355,7 +355,19 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 		setTogglingRestApi(false)
 	}, [onRestApiChanged])
 
-	const toggleWalletConnect = useCallback(async (enabled: boolean) => {
+	const [togglingMultisig,setTogglingMultisig]=useState(false)
+    const [multisigError,setMultisigError]=useState<string|null>(null)
+    const toggleMultisig=useCallback(async(enabled:boolean)=>{
+        setTogglingMultisig(true);setMultisigError(null)
+        try{
+            const result=await rpcRequest<AppSettings>('setBtcMultisigEnabled',{enabled},10000)
+            setAppSettings(result)
+            window.dispatchEvent(new Event('keepkey-settings-changed'))
+        }catch(e:any){setMultisigError(e?.message||'Could not change multisig co-signing')}
+        finally{setTogglingMultisig(false)}
+    },[])
+
+    const toggleWalletConnect = useCallback(async (enabled: boolean) => {
 		setTogglingWalletConnect(true)
 		try {
 			const result = await rpcRequest<AppSettings>("setWalletConnectEnabled", { enabled }, 10000)
@@ -1765,7 +1777,16 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 								/>
 							</Flex>
 
-							{/* WalletConnect is an altcoin signing surface. A persisted global
+							<Box>
+                                <Flex justify="space-between" align="center" gap="3">
+                                    <Box><Text fontSize="md" color="kk.textPrimary" fontWeight="500">Bitcoin multisig co-signing</Text>
+                                    <Text fontSize="sm" color="kk.textSecondary" mt="0.5">Experimental. Verify a public wallet policy and add KeepKey’s signature to Sparrow or Electrum PSBTs. Off by default. Completed transactions can still be broadcast with this off.</Text></Box>
+                                    <Toggle checked={appSettings.btcMultisigEnabled===true} onChange={toggleMultisig} disabled={togglingMultisig}/>
+                                </Flex>
+                                {multisigError && <Text role="alert" fontSize="xs" color="kk.error" mt="2">{multisigError}</Text>}
+                            </Box>
+
+                            {/* WalletConnect is an altcoin signing surface. A persisted global
 							    setting must not re-expose it on Bitcoin-only firmware. */}
 							{!isBitcoinOnlyVariant(deviceState.firmwareVariant) && <Flex justify="space-between" align="center">
 								<Flex align="center" gap="3">

@@ -654,6 +654,8 @@ export interface ChainBalance {
   balance: string       // human-readable (e.g. "0.001")
   balanceUsd: number    // total USD (native + tokens)
   nativeBalanceUsd?: number  // native-only USD (excludes tokens)
+  /** Own-node balances remain usable when the optional fiat quote fails. */
+  fiatValueState?: 'stale' | 'unavailable'
   address: string
   tokens?: TokenBalance[]
   /**
@@ -1011,6 +1013,8 @@ export interface EIP712DecodedInfo {
   isKnownType: boolean
   /** True only when the signed protocol contract identity is in the reviewed deployment registry. */
   protocolIdentityVerified?: boolean
+  /** Full host-computed digests for comparison with legacy device screens. */
+  hashes?: { domainHash: string; messageHash?: string }
 }
 
 /**
@@ -1385,6 +1389,7 @@ export interface AppSettings {
   activePioneerServer: string    // URL of the active server
   fiatCurrency: FiatCurrency     // display currency (default 'USD')
   numberLocale: string           // number formatting locale (default 'en-US')
+  btcMultisigEnabled: boolean    // runtime feature flag: Bitcoin multisig co-signing (default OFF)
   walletConnectEnabled: boolean   // feature flag: WalletConnect dApp support (default OFF)
   zcashPrivacyEnabled: boolean   // read-only capability: auto-ON when firmware >= 7.15.0 and this build includes zcash-cli
   hiveEnabled: boolean           // read-only capability: Hive blockchain — auto-ON when firmware >= 7.15.0
@@ -1458,7 +1463,10 @@ export interface RegisteredDevice {
   label: string
   firmwareVer: string
   updatedAt: number
-  totalUsd: number       // sum of cached balance_usd across all chains
+  totalUsd: number | null // sum of cached balance_usd across all chains; null = never synced
+  /** Watch-only import (no device); verified once a KeepKey returned the same account xpub */
+  imported?: boolean
+  verified?: boolean
 }
 
 // ── BIP-85 types ────────────────────────────────────────────────────────
@@ -1528,6 +1536,94 @@ export interface BtcSignTxParams {
   outputs: any[] // TODO: type BTCSignTxOutput
   version?: number
   locktime?: number
+}
+
+/** btcPsbtAnalyze result. Amounts are satoshis as decimal strings (bigint on the bun side). */
+export type BtcPsbtReview =
+  | {kind:'policy-required';message:string}
+  | { kind: 'signed'; txid: string; txHex: string; /** null = inputs not hash-verified, unknown */ fee: string | null }
+  | {
+      kind: 'review'
+      multisig?:{policyId:string;threshold:number;cosigners:number;fingerprint:string;signedCounts:number[]}
+      id: string
+      version: number
+      locktime: number
+      inputs: Array<{ txid: string; vout: number; sequence: number; amount: string; amountVerified: boolean; scriptType: string; path: string; address: string }>
+      outputs: Array<{
+        index: number
+        amount: string
+        address?: string
+        opReturn?: { hex: string; text: string }
+        kind: 'payment' | 'change' | 'own' | 'op-return'
+        deviceWillShow: 'hidden-change' | 'address' | 'op-return'
+        path?: string
+      }>
+      totalIn: string
+      fee: string
+      change: string
+      sent: string
+      deviceTotal: string
+      estVsize: number
+      satPerVbyte: number
+      feePercent: number | null
+      flags: { nonZeroLocktime: boolean; rbf: boolean; unusualVersion: boolean; noChange: boolean; multiAccount: boolean; unverifiedAmounts: boolean; ownOutputShown: boolean }
+    }
+
+export interface BtcWatchOnlyAccounts {
+  fingerprintKnown: boolean
+  /** Who answers chain data: 'pioneer', or the user's own node ('blockbook' / 'core') */
+  backend: string
+  accounts: Array<{ scriptType: BtcScriptType; accountIndex: number; path: string }>
+}
+
+/** btcWatchOnlyImport result (preview, or saved). fingerprint null = unknown (Electrum-style origins in PSBTs). */
+export interface BtcWatchOnlyImport {
+  id: string
+  label: string
+  source: 'electrum' | 'key' | 'desktop'
+  scriptType: BtcScriptType
+  key: string
+  path: string
+  /** Inferred from the key, not stated by the import: the user must confirm it */
+  pathAssumed: boolean
+  fingerprint: string | null
+  saved: boolean
+}
+
+/** btcWatchOnlyReceive result. verified false = an imported key no KeepKey has confirmed yet. */
+export interface BtcWatchOnlyReceive {
+  address: string
+  path: number[]
+  scriptType: string
+  xpub: string
+  /** Set when the backend could not prove the index unused */
+  warning?: string
+  verified: boolean
+}
+
+/** btcWatchOnlyBuildPsbt result. Amounts are satoshis as decimal strings. */
+export interface BtcWatchOnlyPsbt {
+  filePath: string
+  psbtBase64: string
+  backend: string
+  fingerprintKnown: boolean
+  outputs: Array<{ address?: string; amount: string; change: boolean }>
+  fee: string
+  satPerVbyte: number
+  estVsize: number
+}
+
+/** btcBroadcastSigned result. fee null = unknown (never estimated). feeSource: 'psbt' or the backend that supplied the previous txs.
+ *  backend: the BTC backend kind that will broadcast ('device-only' = offline); a send is refused if it changed since the review. */
+export interface BtcBroadcastReview {
+  txid: string
+  txHex: string
+  outputs: Array<{ amount: string; address?: string; opReturnHex?: string; scriptHex: string }>
+  fee: string | null
+  feeSource: string | null
+  backend: string
+  backendId: string
+  broadcast: boolean
 }
 
 export interface GetPublicKeysParams {

@@ -1,12 +1,12 @@
 /**
  * ReproducibleBuildNotice — shown before installing official firmware.
- * States the reproducible-build guarantee, the pinned payload hash Vault
- * verifies the download against, and links for independent verification.
+ * Describes the download hash check separately from independent reproduction,
+ * publisher authentication and checking the installed image.
  */
 import { Box, Text, VStack, HStack } from '@chakra-ui/react'
 import { rpcRequest } from '../lib/rpc'
 
-const REPRO_DOC_URL = 'https://github.com/keepkey/keepkey-firmware/blob/master/docs/ReproducibleBuilds.md'
+const REPRO_DOC_URL = 'https://github.com/keepkey/keepkey-firmware#verifying-published-binaries'
 
 interface Props {
   /** Target firmware version being installed (no leading "v") */
@@ -36,13 +36,17 @@ export function ReproducibleBuildNotice({ version, payloadHash }: Props) {
         </Box>
         <VStack gap={1} align="start" flex={1} minW={0}>
           <Text fontSize="xs" fontWeight="700" color="green.300">
-            Reproducible build — verified before install
+            Download integrity checked before install
           </Text>
           <Text fontSize="2xs" color="whiteAlpha.600" lineHeight="1.5">
-            This release is built deterministically from public source code. Vault
-            checks the downloaded firmware&apos;s payload sha256 (the signed file
-            minus its 256-byte signature header) against the pinned release hash
-            before flashing anything to your device.
+            Vault compares the downloaded firmware&apos;s payload SHA256 (the signed
+            file minus its 256-byte signature header) with the pinned release hash
+            before flashing. This checks download integrity; it does not rebuild the source.
+          </Text>
+          <Text fontSize="2xs" color="whiteAlpha.600" lineHeight="1.5">
+            Reproduction compares locally built application code with the published payload.
+            Publisher signatures authenticate the release. A device-reported hash
+            cross-checks the installed image. A matching hash does not prove the source is bug-free.
           </Text>
           {payloadHash && (
             <Text fontSize="2xs" color="whiteAlpha.500" fontFamily="mono" wordBreak="break-all">

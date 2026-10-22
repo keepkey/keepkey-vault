@@ -1,3 +1,5 @@
+import { MULTISIG_POLICY_EVENT } from "../../shared/multisig-policy"
+import { BITCOIN_QR_SCAN_EVENT } from "./BitcoinQrImport"
 import React, { lazy, Suspense, useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { useTranslation } from "react-i18next"
 import { Box, Flex, Text, Button, Image, VStack, HStack, IconButton, Spinner } from "@chakra-ui/react"
@@ -5,7 +7,7 @@ import { FaPlus, FaEye, FaEyeSlash, FaShieldAlt, FaCheck, FaCopy, FaTag, FaChevr
 import { rpcRequest, onRpcMessage } from "../lib/rpc"
 import type { ChainDef } from "../../shared/chains"
 import { CHAINS, btcScriptTypeConfig, btcAccountPath, evmAddressPath, isChainSupported } from "../../shared/chains"
-import type { ChainBalance, TokenBalance, TokenVisibilityStatus, AppSettings, SwapAsset } from "../../shared/types"
+import type { ChainBalance, TokenBalance, TokenVisibilityStatus, AppSettings, SwapAsset, BtcWatchOnlyReceive } from "../../shared/types"
 import { VAULT_CHAIN_TO_THOR } from "../../shared/swap-discovery"
 import { getAssetIcon } from "../../shared/assetLookup"
 import { AnimatedUsd } from "./AnimatedUsd"
@@ -34,9 +36,12 @@ import { EvmAddressSelector } from "./EvmAddressSelector"
 import { useBtcAccounts } from "../hooks/useBtcAccounts"
 import { useEvmAddresses } from "../hooks/useEvmAddresses"
 import { AddTokenDialog } from "./AddTokenDialog"
+import { PSBT_PASTE_EVENT } from "./PsbtSignDialog"
+import { WatchOnlyExportDialog } from "./WatchOnlyExportDialog"
+import { CreatePsbtPanel } from "./CreatePsbtPanel"
 import { detectSpamToken, categorizeTokens, type SpamResult } from "../../shared/spamFilter"
 
-type AssetView = "receive" | "send" | "privacy"
+type AssetView = "receive" | "send" | "privacy" | "psbt"
 
 type BtcAddressIndexResult = {
 	receiveIndex: number
@@ -139,7 +144,10 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 		try {
 			// 90s: backend budget is 60s of Pioneer time plus device derivation —
 			// the 30s rpc default made slow forced refreshes fail invisibly.
-			await rpcRequest<ChainBalance>("getBalance", { chainId: chain.id }, 90000)
+			const refreshed = await rpcRequest<ChainBalance>("getBalance", { chainId: chain.id }, 90000)
+			if (refreshed.syncState === 'degraded' || refreshed.syncState === 'stale') {
+				throw new Error('Balance could not be verified. Showing the last known balance when available.')
+			}
 			setRefreshNonce(n => n + 1)
 			setLastSyncedAt(new Date())
 		} catch (e) {
@@ -154,19 +162,24 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 	// keeping the chip up next to just-updated data would be a false alarm.
 	useEffect(() => {
 		return onRpcMessage("balance-updated", (updated: ChainBalance) => {
-			if (updated.chainId === chain.id) { setRefreshError(null); setLastSyncedAt(new Date()) }
+			if (updated.chainId !== chain.id) return
+			if (updated.syncState === 'degraded' || updated.syncState === 'stale') {
+				setRefreshError('Balance could not be verified. Showing the last known balance when available.')
+			} else { setRefreshError(null); setLastSyncedAt(new Date()) }
 		})
 	}, [chain.id])
 
 	// Feature flags: zcash privacy
 	const [swappableChainIds, setSwappableChainIds] = useState<Set<string>>(new Set())
 	const [zcashPrivacyEnabled, setZcashPrivacyEnabled] = useState(false)
+	const [btcMultisigEnabled,setBtcMultisigEnabled]=useState(false)
 	const settingsLoaded = useRef(false)
 	const refreshFeatureFlags = useCallback(() => {
 		rpcRequest<AppSettings>("getAppSettings")
 			.then(s => {
 				settingsLoaded.current = true
 				setZcashPrivacyEnabled(s.zcashPrivacyEnabled)
+				setBtcMultisigEnabled(s.btcMultisigEnabled===true)
 			})
 			.catch(() => {})
 		rpcRequest<string[]>("getSwappableChainIds", undefined, 20000)
@@ -293,13 +306,8 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 	// Cancellation guard prevents stale responses from overwriting current address (Finding 5)
 	useEffect(() => {
 		if (!isBtc || !btcSelected) return
-		// Watch-only: no device — show the cached BTC address; can't derive per-index offline.
-		if (watchOnly) {
-			setAddress(balance?.address || null)
-			setDeriveError(balance?.address ? null : 'Address unavailable offline')
-			setLoading(false)
-			return
-		}
+		// Watch-only: the host derives the address from the saved xpub (effect below), never the connected device.
+		if (watchOnly) return
 		let cancelled = false
 		const path = btcSelected.fullPath
 		;(async () => {
@@ -338,7 +346,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 		?.xpubs.find(x => x.scriptType === (selectedBtcScriptType ?? 'p2wpkh'))
 		?.xpub
 	useEffect(() => {
-		if (!isBtc) return
+		if (!isBtc || watchOnly) return
 		setBtcChangeIndex(0)
 		setBtcAddressIndices(null)
 		if (!selectedBtcXpub) return
@@ -360,7 +368,41 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 		return () => { cancelled = true }
 	// Re-run after every successful balance sync. A receive address that was
 	// unused when the page opened may have become used since the prior scan.
-	}, [isBtc, selectedBtcScriptType, selectedBtcAccountIndex, selectedBtcXpub, lastSyncedAt])
+	}, [isBtc, selectedBtcScriptType, selectedBtcAccountIndex, selectedBtcXpub, lastSyncedAt, watchOnly])
+
+	// Watch-only Bitcoin: next unused receive address derived on the host from the saved xpub
+	// (index from the active backend). An imported key stays "not verified" until a KeepKey that
+	// holds it is connected; only then is "Show on KeepKey" offered.
+	const [woReceive, setWoReceive] = useState<BtcWatchOnlyReceive | null>(null)
+	const [woDeviceMatch, setWoDeviceMatch] = useState(false)
+	const [woAck, setWoAck] = useState(false)
+	useEffect(() => { setWoAck(false) }, [watchOnlyDeviceId])
+	useEffect(() => {
+		if (!watchOnly || !isBtc) return
+		let cancelled = false
+		setLoading(true)
+		setDeriveError(null)
+		setAddress(null)
+		;(async () => {
+			try {
+				// Asked first: a match also marks an imported key verified.
+				const match = watchOnlyDeviceId
+					? (await rpcRequest<{ match: boolean }>('btcWatchOnlyDeviceMatch', { deviceId: watchOnlyDeviceId }, 60000).catch(() => ({ match: false }))).match
+					: false
+				const r = await rpcRequest<BtcWatchOnlyReceive>('btcWatchOnlyReceive', watchOnlyDeviceId ? { deviceId: watchOnlyDeviceId } : undefined, 60000)
+				if (cancelled) return
+				setWoDeviceMatch(match)
+				setWoReceive(r)
+				setAddress(r.address)
+				setCurrentPath(r.path)
+			} catch (e: any) {
+				if (!cancelled) setDeriveError(e?.message || 'Receive address unavailable')
+			}
+			if (!cancelled) setLoading(false)
+		})()
+		return () => { cancelled = true }
+	}, [watchOnly, isBtc, watchOnlyDeviceId, lastSyncedAt])
+	const woUnverified = watchOnly && isBtc && !!woReceive && !woReceive.verified
 
 	// When toggling Receive/Change, set index to the active backend's cached value.
 	const handleBtcChangeIndex = useCallback((v: 0 | 1) => {
@@ -523,6 +565,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 		: `${headerBalance} ${chain.symbol}`
 
 	const [showAddToken, setShowAddToken] = useState(false)
+	const [showWatchOnlyExport, setShowWatchOnlyExport] = useState(false)
 	// Watch-only mode never opens signing dialogs, regardless of how they're
 	// triggered (initialAction prop, action-row button, hotkey, dApp request).
 	const [showSwapDialog, setShowSwapDialogRaw] = useState(initialAction === "swap" && !watchOnly)
@@ -642,6 +685,10 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 			<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19" /><polyline points="5 12 12 19 19 12" /></svg>
 		) }] : []),
 		...(!watchOnly && !isShieldedToken ? [{ id: "send" as const, label: t("send"), icon: (
+			<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="19" x2="12" y2="5" /><polyline points="5 12 12 5 19 12" /></svg>
+		) }] : []),
+		// Watch-only Bitcoin: Send becomes Create PSBT (unsigned; a KeepKey signs it later).
+		...(watchOnly && isBtc && !selectedToken ? [{ id: "psbt" as const, label: t("createPsbt", { defaultValue: "Create PSBT" }), icon: (
 			<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="19" x2="12" y2="5" /><polyline points="5 12 12 5 19 12" /></svg>
 		) }] : []),
 		...(!watchOnly && swappableChainIds.has(chain.id) && !isShieldedToken ? [{ id: "swap" as const, label: t("swap"), icon: (
@@ -940,6 +987,15 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 											<Flex align="center" gap="1" color="var(--rose)" className="v3-glass-chip" px="2" py="0.5" title={refreshError} cursor="help">
 												<Box w="6px" h="6px" borderRadius="full" bg="var(--rose)" />
 												<Text fontSize="10px" fontFamily="mono" fontWeight="500" letterSpacing="0.02em">{t("refreshFailed")}</Text>
+											</Flex>
+										) : watchOnly && activeBalance?.syncState === "stale" ? (
+											// Watch-only cache: never "Synced". Say it is cached and how old it is.
+											<Flex align="center" gap="1" color="var(--gold)" className="v3-glass-chip" px="2" py="0.5"
+												title={activeBalance.updatedAt ? `Cached ${new Date(activeBalance.updatedAt).toLocaleString()}` : undefined}>
+												<Box w="6px" h="6px" borderRadius="full" bg="var(--gold)" />
+												<Text fontSize="10px" fontFamily="mono" fontWeight="500" letterSpacing="0.02em">
+													{t("cached", { defaultValue: "Cached" })}{activeBalance.updatedAt ? ` · ${new Date(activeBalance.updatedAt).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}` : ""}
+												</Text>
 											</Flex>
 										) : activeBalance ? (
 											<Flex align="center" gap="1" color="var(--teal)" className="v3-glass-chip" px="2" py="0.5"
@@ -1264,6 +1320,8 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 						<Suspense fallback={<Spinner size="sm" color="kk.gold" />}>
 							<ZcashPrivacyTab initialPage={safeInitial === "send" ? "send" : "receive"} />
 						</Suspense>
+					) : view === "psbt" ? (
+						<CreatePsbtPanel deviceId={watchOnlyDeviceId} />
 					) : view === "send" ? (
 						isBtc && !btcSelected?.xpubData ? (
 							<Flex align="center" justify="center" minH="200px">
@@ -1294,15 +1352,32 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 					) : isHive ? (
 						<HiveAccountPanel activeKey={address} color={chain.color} loading={loading} deriveError={deriveError} onRetryDerive={deriveAddress} refreshNonce={refreshNonce} />
 					) : (
-						<ReceiveView
+						<>
+						{woUnverified && (
+							<Box w="100%" mb="4" p="3" borderRadius="10px" border="1px solid rgba(245,101,101,0.45)" bg="rgba(245,101,101,0.08)">
+								<Text fontSize="13px" fontWeight="700" color="red.300">{t("watchOnlyNotVerifiedTitle", { defaultValue: "Addresses NOT verified on a KeepKey" })}</Text>
+								<Text fontSize="12px" color="var(--text-2)" mt="1">
+									{t("watchOnlyNotVerifiedBody", { defaultValue: "This wallet was imported from a key, not read from your KeepKey. If that key was swapped or mistyped, coins sent here are not yours. Connect the KeepKey that holds it to verify." })}
+								</Text>
+								{!woAck && (
+									<Button size="xs" mt="2" variant="outline" color="red.200" borderColor="rgba(245,101,101,0.45)" onClick={() => setWoAck(true)}>
+										{t("watchOnlyShowUnverified", { defaultValue: "I understand, show the address" })}
+									</Button>
+								)}
+							</Box>
+						)}
+						{watchOnly && isBtc && woReceive?.warning && (
+							<Text fontSize="11px" color="orange.300" lineHeight="1.45" mb="3">{woReceive.warning}</Text>
+						)}
+						{!(woUnverified && !woAck) && <ReceiveView
 							chain={chain}
 							address={address}
 							loading={loading || btcAddressDiscoveryLoading}
 							error={deriveError}
-							currentPath={isBtc && btcSelected ? btcSelected.fullPath : currentPath}
+							currentPath={isBtc && btcSelected && !watchOnly ? btcSelected.fullPath : currentPath}
 							onDerive={deriveAddress}
-							scriptType={effectiveScriptType}
-							xpub={isBtc ? btcSelected?.xpubData?.xpub : utxoXpub ?? undefined}
+							scriptType={watchOnly && isBtc ? woReceive?.scriptType : effectiveScriptType}
+							xpub={isBtc ? (watchOnly ? woReceive?.xpub : btcSelected?.xpubData?.xpub) : utxoXpub ?? undefined}
 							isBtc={isBtc}
 							btcChangeIndex={btcChangeIndex}
 							btcAddressIndex={btcAddressIndex}
@@ -1313,7 +1388,19 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 							tonBounceable={tonBounceable}
 							onTonBounceableChange={(v) => { setTonBounceable(v); deriveAddress(undefined, v) }}
 							watchOnly={watchOnly}
-						/>
+							onShowOnDevice={watchOnly && isBtc && woDeviceMatch && woReceive && watchOnlyDeviceId
+								? async () => {
+									try {
+										await rpcRequest('btcWatchOnlyShowAddress', { deviceId: watchOnlyDeviceId, index: woReceive.path[4] }, 120000)
+									} catch (e: any) {
+										// A device that shows another address makes the host one suspect: hide it and say why.
+										setAddress(null)
+										setDeriveError(e?.message || 'Could not show the address on the KeepKey')
+									}
+								}
+								: undefined}
+						/>}
+						</>
 					)}
 				</Box>
 
@@ -1463,6 +1550,9 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 						onClose={() => setShowAddToken(false)}
 					/>
 				)}
+				{showWatchOnlyExport && (
+					<WatchOnlyExportDialog accounts={btcAccounts.accounts} isHiddenWallet={isHiddenWallet} onClose={() => setShowWatchOnlyExport(false)} />
+				)}
 
 				{/* Activity preview */}
 				<Box mt="6">
@@ -1479,6 +1569,28 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 								className="electrobun-webkit-app-region-no-drag"
 							>
 								Reports
+							</Box>
+						)}
+						{isBtc && <Button size="xs" variant="ghost" color="var(--gold)" onClick={() => window.dispatchEvent(new Event(BITCOIN_QR_SCAN_EVENT))}>Scan Bitcoin QR</Button>}
+						{isBtc && btcMultisigEnabled && <Button size="xs" variant="ghost" color="var(--gold)" onClick={()=>window.dispatchEvent(new Event(MULTISIG_POLICY_EVENT))}>Multisig co-signing</Button>}
+						{isBtc && !watchOnly && (
+							<Box
+								as="button" fontSize="11px" color="var(--gold)" fontWeight="500"
+								cursor="pointer" _hover={{ opacity: 0.75 }} transition="opacity 0.15s"
+								onClick={() => window.dispatchEvent(new Event(PSBT_PASTE_EVENT))}
+								className="electrobun-webkit-app-region-no-drag"
+							>
+								Sign PSBT
+							</Box>
+						)}
+						{isBtc && !watchOnly && btcAccounts.accounts.length > 0 && (
+							<Box
+								as="button" fontSize="11px" color="var(--gold)" fontWeight="500"
+								cursor="pointer" _hover={{ opacity: 0.75 }} transition="opacity 0.15s"
+								onClick={() => setShowWatchOnlyExport(true)}
+								className="electrobun-webkit-app-region-no-drag"
+							>
+								Watch-only export
 							</Box>
 						)}
 						{onViewActivity && (

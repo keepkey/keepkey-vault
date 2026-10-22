@@ -16,14 +16,22 @@ export function BitcoinOnlyOnboardingDialog({ onClose }: { onClose: () => void }
   const [view, setView] = useState<"intro" | "selfhost">("intro")
   const [settings, setSettings] = useState<AppSettings | null>(null)
   const [busy, setBusy] = useState(false)
+  const [offlineReady, setOfflineReady] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => { rpcRequest<AppSettings>("getAppSettings").then(setSettings).catch(() => {}) }, [])
 
   const goOffline = async () => {
     setBusy(true)
-    try { await rpcRequest("setOfflineMode", { enabled: true }, 10000) } catch { /* best effort */ }
-    setBusy(false)
-    onClose()
+    setError(null)
+    try {
+      const result = await rpcRequest<AppSettings>("setOfflineMode", { enabled: true }, 10000)
+      if (result.offlineMode !== true) throw new Error("Desktop did not confirm offline mode. Try again.")
+      setSettings(result)
+      setOfflineReady(true)
+    } catch (e: any) {
+      setError(e?.message || "Could not enable offline mode. Try again.")
+    } finally { setBusy(false) }
   }
 
   return (
@@ -52,22 +60,34 @@ export function BitcoinOnlyOnboardingDialog({ onClose }: { onClose: () => void }
 
             <OptionCard
               title="KeepKey servers" badge="Recommended"
-              body="Fast, zero setup. Bitcoin data from KeepKey.com's hosted servers — the default."
-              action="Use KeepKey servers" onClick={onClose} primary
+              body="KeepKey's hosted Bitcoin data. This service receives wallet queries; its availability and data accuracy affect your view."
+              action="Use KeepKey servers" onClick={onClose} primary disabled={busy || offlineReady}
             />
             <OptionCard
               title="Self-host your node"
-              body="Point KeepKey Desktop at your own Bitcoin Core node. Full sovereignty — your keys, your node, no third party."
-              action="Set up my node" onClick={() => setView("selfhost")}
+              body="Use your Bitcoin Core or Blockbook node for Bitcoin queries and broadcast. Fiat prices use a separate hosted service."
+              action="Set up my node" onClick={() => setView("selfhost")} disabled={busy || offlineReady}
             />
             <OptionCard
               title="Offline mode"
-              body="Airplane mode — no network at all. Read addresses, receive, and sign transactions air-gapped."
-              action={busy ? "Enabling…" : "Go offline"} onClick={goOffline} disabled={busy}
+              body="Disable Desktop's network requests. Disconnect this computer from the network yourself; KeepKey communicates with it over USB."
+              action={busy ? "Enabling…" : offlineReady ? "Continue offline" : "Enable offline mode"} onClick={offlineReady ? onClose : goOffline} disabled={busy}
             />
 
+            {error && <Text role="alert" fontSize="xs" color="var(--rose)">{error}</Text>}
+            {offlineReady && <Text role="status" fontSize="xs" color="var(--teal)">Offline mode confirmed.</Text>}
+            <Text fontSize="xs" color="kk.textSecondary" lineHeight="1.6">
+              Create and export an unsigned PSBT on the online computer using a public watch-only wallet.
+              Transfer it to this computer and drop it on Desktop to review and sign with your USB-connected KeepKey.
+              Return the signed file to the online computer for broadcast. Saved files can be reopened after restarting Desktop.
+            </Text>
+            <Text fontSize="xs" color="kk.textSecondary" lineHeight="1.6">
+              Removable media and transaction parsers remain attack surfaces. Check recipients and amounts on KeepKey.
+              An offline computer cannot independently know whether an input has subsequently been spent.
+            </Text>
+
             <Text as="button" fontSize="xs" color="kk.textSecondary" textAlign="center" mt="1"
-                  _hover={{ color: "kk.textPrimary" }} onClick={onClose}>
+                  _hover={{ color: "kk.textPrimary" }} aria-disabled={busy} onClick={() => { if (!busy) onClose() }}>
               Skip — decide later
             </Text>
           </Flex>

@@ -3,11 +3,58 @@ import { Database } from 'bun:sqlite'
 import { CHAINS } from '../src/shared/chains'
 import { utxoAccountScriptPaths, pathToBip32 } from '../src/bun/chain-scan'
 import { migratePublicKeyCache } from '../src/bun/public-key-cache-migration'
-import { watchOnlyPortfolioKeys, watchOnlyNativeBalances, trackedUtxoScriptPaths } from '../src/bun/watch-only-portfolio'
+import { watchOnlyPortfolioKeys, watchOnlyNativeBalances, watchOnlyNodeBalances, trackedUtxoScriptPaths } from '../src/bun/watch-only-portfolio'
+import type { BtcBackend } from '../src/bun/btc-backend/types'
 import type { ChainBalance } from '../src/shared/types'
 const ltc = CHAINS.find(c => c.id === 'litecoin')!
 const eth = CHAINS.find(c => c.id === 'ethereum')!
 const base = CHAINS.find(c => c.id === 'base')!
+const btc = CHAINS.find(c => c.id === 'bitcoin')!
+
+test('node balances succeed when hosted pricing fails, with cached or explicitly unavailable fiat values', async () => {
+  const { pubkeys } = watchOnlyPortfolioKeys([btc], [], [{ chainId: btc.id, xpub: 'xpub-test', path: "m/84'/0'/0'", scriptType: 'p2wpkh', address: '' }])
+  let requests = 0
+  const backend = { kind: 'core', listUnspent: async () => { requests++; return [{ value: 12345678 }] } } as unknown as BtcBackend
+  const quote = async () => { throw new Error('Pioneer unavailable') }
+  const cached = await watchOnlyNodeBalances(backend, pubkeys, quote, 100000)
+  expect(cached.fiatValueState).toBe('stale')
+  expect(cached.entries[0]).toMatchObject({ balance: '0.12345678', valueUsd: 12345.678 })
+  const unavailable = await watchOnlyNodeBalances(backend, pubkeys, quote)
+  expect(unavailable.fiatValueState).toBe('unavailable')
+  expect(unavailable.entries[0]).toMatchObject({ balance: '0.12345678', valueUsd: 0 })
+  const fresh = await watchOnlyNodeBalances(backend, pubkeys, async () => 50000)
+  expect(fresh.fiatValueState).toBeUndefined()
+  expect(fresh.entries[0].valueUsd).toBe(6172.839)
+  expect(requests).toBe(3)
+})
+
+test('failed or malformed node results cannot confirm a partial account balance', async () => {
+  const { pubkeys } = watchOnlyPortfolioKeys([btc], [], [{ chainId: btc.id, xpub: 'xpub-test', path: "m/84'/0'/0'", scriptType: 'p2wpkh', address: '' }])
+  for (const value of [NaN, -1, 0.1, Number.MAX_SAFE_INTEGER]) {
+    const backend = { listUnspent: async () => [{ value }] } as unknown as BtcBackend
+    await expect(watchOnlyNodeBalances(backend, pubkeys, async () => 1)).rejects.toThrow(/invalid/)
+  }
+  const backend = { listUnspent: async () => { throw new Error('own node is down') } } as unknown as BtcBackend
+  await expect(watchOnlyNodeBalances(backend, pubkeys, async () => 1)).rejects.toThrow('own node is down')
+})
+
+test('Core scans accounts serially and malformed fiat quotes do not discard node balances', async () => {
+  const rows = [0, 1].map(i => ({ chainId: btc.id, xpub: `xpub-${i}`, path: `m/84'/0'/${i}'`, scriptType: 'p2wpkh', address: '' }))
+  const { pubkeys } = watchOnlyPortfolioKeys([btc], [], rows)
+  let active = false
+  const backend = { listUnspent: async () => {
+    if (active) throw new Error('Core scan already running')
+    active = true
+    await Promise.resolve()
+    active = false
+    return [{ value: 1 }]
+  } } as unknown as BtcBackend
+  for (const price of [NaN, -1, Infinity, Number.MAX_VALUE]) {
+    const result = await watchOnlyNodeBalances(backend, pubkeys, async () => price)
+    expect(result.fiatValueState).toBe('unavailable')
+    expect(result.entries.map(e => e.balance)).toEqual(['0.00000001', '0.00000001'])
+  }
+})
 const saved = (account = 0) => utxoAccountScriptPaths(ltc, account).map((sp, i) => ({
   chainId: ltc.id, path: pathToBip32(sp.path), scriptType: sp.scriptType, xpub: `key-${account}-${i}`, address: '',
 }))

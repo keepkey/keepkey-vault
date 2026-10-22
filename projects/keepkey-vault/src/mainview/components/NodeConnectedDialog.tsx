@@ -47,9 +47,9 @@ export function NodeConnectedDialog({ onClose }: { onClose: () => void }) {
 
   const limitations = isCore
     ? [
-        "Balances, receiving, and sending work from your node.",
-        "No transaction history unless your node is archival with txindex=1.",
-        "Spending legacy (1…) inputs needs txindex=1.",
+        "UTXO balances, fee estimates and broadcast use your node. Watch-only PSBT creation supports send-max; change-index discovery is unavailable.",
+        "Desktop does not discover Core transaction history. Archival storage and txindex=1 alone do not enable it.",
+        "Legacy inputs require full previous transactions; txindex and retained block data may be needed to retrieve them.",
         "Prices still come from KeepKey (your node doesn't serve USD).",
       ]
     : [
