@@ -345,7 +345,14 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
     : coinMode === 'multi' ? deviceStatus.installWipeReason?.multi : undefined
   // A different target needs a fresh acknowledgement.
   useEffect(() => { setInstallWipeAcknowledged(false) }, [coinMode, installWipeReason])
-  const needsFirmware = deviceStatus.needsFirmwareUpdate
+  // A current multi-chain device the user switched to Bitcoin-only ("Go
+  // Bitcoin-only" on the wallet page) still needs the install.
+  const switchingToBitcoinOnly = coinMode === 'bitcoin-only' && deviceStatus.installedBitcoinOnly === false
+  const needsFirmware = deviceStatus.needsFirmwareUpdate || switchingToBitcoinOnly
+  // A wiped multi-chain KeepKey never sees the setup choice (its firmware is
+  // current), so the wallet page offers it. No wallet, nothing lost.
+  const offerBitcoinOnly = BITCOIN_ONLY_ONBOARDING && !!deviceStatus.latestFirmwareBitcoinOnly
+    && deviceStatus.installedBitcoinOnly === false && !deviceStatus.initialized
   const needsInit = deviceStatus.needsInit
   // Sticky for the session: once a device has told us it holds a wallet, a later
   // ambiguous/partial features read must not let it walk into the create flow
@@ -1080,6 +1087,32 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
     setDevAcknowledged(false)
   }
 
+  // Multi-chain firmware over a Bitcoin-only wallet: Features says
+  // initialized=false, but the firmware refuses create/recover until a wipe.
+  // Both firmware wordings name "bitcoin-only wallet".
+  const btcOnlyLocked = !!setupError && /bitcoin-only wallet/i.test(setupError)
+  const [lockWiping, setLockWiping] = useState(false)
+  const [lockWipeAcknowledged, setLockWipeAcknowledged] = useState(false)
+  const handleWipeLockedWallet = async () => {
+    setLockWiping(true)
+    try {
+      await rpcRequest('wipeDevice', undefined, 0)
+      setSetupError(null)
+    } catch (err) {
+      setSetupError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setLockWiping(false)
+      setLockWipeAcknowledged(false)
+    }
+  }
+  // Bitcoin-only firmware unlocks the hidden wallet again; no wipe involved.
+  const handleReinstallBitcoinOnly = () => {
+    chooseCoin('bitcoin-only')
+    setSetupError(null)
+    setLockWipeAcknowledged(false)
+    setStep('firmware')
+  }
+
   const handleRecoverWallet = async () => {
     setSetupType('recover')
     setStep('init-progress')
@@ -1641,13 +1674,15 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                         <HStack gap={2}>
                           <FaExclamationTriangle color="var(--gold)" size={16} />
                           <Text fontSize="sm" color="yellow.200" fontWeight="bold">
-                            {t('firmware.pleaseDisconnect', { defaultValue: 'Please disconnect and reconnect your KeepKey' })}
+                            {t('bootloader.waitTitle', { defaultValue: 'Keep your KeepKey plugged in' })}
                           </Text>
                         </HStack>
+                        {/* The upload ending is not the install ending: the KeepKey keeps
+                            installing with its own progress bar, and unplugging then can
+                            leave it unusable. Desktop can't see that finish, so the device
+                            screen is the only signal. */}
                         <Text fontSize="xs" color="yellow.300">
-                          {rebootElapsedMs < 20000
-                            ? t('firmware.disconnectMessage', { defaultValue: 'Your device says "Firmware Update Complete." Unplug the USB cable and plug it back in to continue.' })
-                            : t('firmware.stillWaitingDisconnect', { defaultValue: 'Still waiting — make sure you unplug and re-plug the USB cable.' })}
+                          {t('bootloader.waitBody', { defaultValue: 'Your KeepKey is still installing the bootloader. Wait until its screen says the update is complete. Then unplug it and plug it back in to continue. Unplugging while it is still installing can leave your KeepKey unusable.' })}
                         </Text>
                         <Box w="100%" mt={1} p={2} bg="rgba(224,140,123,0.10)" borderRadius="sm" borderWidth="1px" borderColor="red.500">
                           <Text fontSize="xs" color="red.200" fontWeight="bold">
@@ -1657,7 +1692,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                       </VStack>
                     </Box>
 
-                    {rebootElapsedMs >= 30000 && (
+                    {rebootElapsedMs >= 90000 && (
                       <Box w="100%" p={3} bg="blue.900" borderRadius="md" borderWidth="2px" borderColor="blue.600">
                         <VStack gap={1.5} align="start">
                           <HStack gap={2}>
@@ -1667,7 +1702,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                             </Text>
                           </HStack>
                           <VStack align="start" gap={0.5} pl={5}>
-                            <Text fontSize="xs" color="blue.200">{t('firmware.manualReconnectStep1', { defaultValue: '1. Unplug your KeepKey' })}</Text>
+                            <Text fontSize="xs" color="blue.200">{t('bootloader.manualReconnectStep1', { defaultValue: '1. Check that your KeepKey says the update is complete, then unplug it' })}</Text>
                             <Text fontSize="xs" color="blue.200">{t('firmware.manualReconnectStep2', { defaultValue: '2. Wait 5 seconds' })}</Text>
                             <Text fontSize="xs" color="blue.200">{t('firmware.manualReconnectStep3', { defaultValue: '3. Plug it back in' })}</Text>
                           </VStack>
@@ -2465,7 +2500,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                   </Text>
                 </VStack>
 
-                {setupError && (
+                {setupError && !btcOnlyLocked && (
                   <Box w="100%" p={2} bg="rgba(224,140,123,0.10)" borderRadius="md" borderWidth="1px" borderColor="var(--rose)">
                     <Text fontSize="xs" color="var(--rose)">{setupError}</Text>
                   </Box>
@@ -3344,6 +3379,26 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
         {/* ── Footer ─────────────────────────────────────────────────── */}
         <Box display={step === 'authenticity' || step === 'coin-choice' ? 'none' : undefined} px={5} py={3} borderTopWidth="1px" borderColor="rgba(233,196,106, 0.2)">
           <HStack justify="space-between">
+            {step === 'init-choose' && offerBitcoinOnly ? (
+              <HStack
+                as="button"
+                gap={2}
+                color="#F7931A"
+                cursor="pointer"
+                _hover={{ color: '#FFB347' }}
+                transition="color 0.15s ease"
+                onClick={() => {
+                  chooseCoin('bitcoin-only')
+                  setCoinReturnStep('firmware')
+                  setStep('coin-choice')
+                }}
+              >
+                <FaBitcoin size={28} />
+                <Text fontSize="lg" fontWeight="800" letterSpacing="tight">
+                  {t('coinMode.goBitcoinOnly', { defaultValue: 'Go Bitcoin-only' })}
+                </Text>
+              </HStack>
+            ) : (
             <Text fontSize="sm" color="kk.textSecondary" fontWeight="500">
               {visibleIndex >= 0
                 ? t('footer.stepOf', { current: visibleIndex + 1, total: VISIBLE_STEPS.length })
@@ -3353,6 +3408,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                     ? t('footer.securityTips', { defaultValue: 'Security Tips' })
                     : t('footer.settingUpWallet')}
             </Text>
+            )}
             <HStack gap={3}>
               {/* Docs article for this screen — the page quotes this screen's
                   copy verbatim so it is recognisable on arrival. */}
@@ -3391,6 +3447,81 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
           </HStack>
         </Box>
       </Box>
+
+      {/* ── Hidden Bitcoin-only Wallet Dialog ───────────────────────── */}
+      {btcOnlyLocked && step === 'init-choose' && (
+        <Flex
+          position="fixed" top={0} left={0} w="100vw" h="100vh"
+          bg="blackAlpha.800" align="center" justify="center"
+          zIndex={2000} pointerEvents="auto"
+        >
+          <Box
+            w="100%" maxW="480px" mx={4}
+            bg="var(--ink-0)" borderRadius="xl" borderWidth="1px" borderColor="var(--gold)"
+            boxShadow="0 8px 32px rgba(0,0,0,0.6)"
+          >
+            <Box px={5} py={4} borderBottomWidth="1px" borderColor="kk.cardBg">
+              <HStack gap={2}>
+                <FaBitcoin color="#F7931A" size={18} />
+                <Text fontSize="md" fontWeight="bold" color="white">
+                  {t('btcOnlyLock.title', { defaultValue: 'A Bitcoin-only wallet is still on this KeepKey' })}
+                </Text>
+              </HStack>
+            </Box>
+
+            <VStack px={5} py={4} gap={3} align="stretch">
+              <Text fontSize="sm" color="kk.textPrimary" lineHeight="1.6">
+                {t('btcOnlyLock.hidden', { defaultValue: 'This KeepKey still holds the Bitcoin-only wallet it had before multi-chain firmware was installed. Multi-chain firmware keeps that wallet hidden and locked, so a new wallet can’t be set up over it.' })}
+              </Text>
+              <Text fontSize="sm" color="kk.textPrimary" lineHeight="1.6">
+                {t('btcOnlyLock.lastChance', { defaultValue: 'This is your last chance to get it back from this device: reinstall Bitcoin-only firmware and the wallet unlocks again.' })}
+              </Text>
+              <Text fontSize="sm" color="kk.textPrimary" lineHeight="1.6">
+                {t('btcOnlyLock.wipeMeans', { defaultValue: 'Wiping and continuing with multi-chain setup permanently erases the Bitcoin-only wallet from this KeepKey. After that, its paper recovery phrase is the only way to restore it, and keeping that backup safe is up to you.' })}
+              </Text>
+
+              <Flex
+                as="label" align="flex-start" gap={2} cursor="pointer" userSelect="none"
+                p={3} bg="kk.cardBg" borderRadius="md"
+                onClick={() => !lockWiping && setLockWipeAcknowledged(!lockWipeAcknowledged)}
+              >
+                <Box
+                  w="16px" h="16px" mt="2px" borderRadius="sm" border="2px solid" flexShrink={0}
+                  borderColor={lockWipeAcknowledged ? 'var(--gold)' : 'kk.textSecondary'}
+                  bg={lockWipeAcknowledged ? 'var(--gold)' : 'transparent'}
+                  display="flex" alignItems="center" justifyContent="center"
+                >
+                  {lockWipeAcknowledged && <Text fontSize="2xs" color="black" lineHeight="1">&#10003;</Text>}
+                </Box>
+                <Text fontSize="xs" fontWeight="600" color="kk.textPrimary" lineHeight="1.6">
+                  {t('btcOnlyLock.acknowledge', { defaultValue: 'I understand the Bitcoin-only wallet will be erased from this KeepKey, and I have its paper recovery phrase.' })}
+                </Text>
+              </Flex>
+
+              <HStack gap={2} pt={1}>
+                <Button
+                  flex={1} size="sm" bg="var(--gold)" color="black" fontWeight="700"
+                  _hover={{ opacity: 0.9 }}
+                  disabled={lockWiping}
+                  onClick={handleReinstallBitcoinOnly}
+                >
+                  {t('btcOnlyLock.reinstall', { defaultValue: 'Reinstall Bitcoin-only firmware' })}
+                </Button>
+                <Button
+                  flex={1} size="sm" variant="outline" borderColor="kk.textSecondary" color="white" fontWeight="600"
+                  _hover={{ bg: 'rgba(255,255,255,0.06)' }}
+                  disabled={!lockWipeAcknowledged || lockWiping}
+                  onClick={handleWipeLockedWallet}
+                >
+                  {lockWiping
+                    ? t('btcOnlyLock.wiping', { defaultValue: 'Confirm on your KeepKey…' })
+                    : t('btcOnlyLock.wipe', { defaultValue: 'Wipe and continue' })}
+                </Button>
+              </HStack>
+            </VStack>
+          </Box>
+        </Flex>
+      )}
 
       {/* ── Dev Load-Device Dialog ──────────────────────────────────── */}
       {devLoadOpen && (
