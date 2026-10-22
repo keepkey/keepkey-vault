@@ -10,6 +10,8 @@ import { QrScannerOverlay } from "./QrScannerOverlay"
 import { AddressBookPicker } from "./AddressBookPicker"
 import { AddressIdenticon } from "./AddressIdenticon"
 import { SaveRecipientDialog } from "./SaveRecipientDialog"
+import { DocsLink } from "./DocsLink"
+import { DOCS_LINKS, watch } from "../../shared/docs-links"
 import { caipToNetworkId, isTokenCaip } from "../../shared/chains"
 import type { ChainDef } from "../../shared/chains"
 import type { ChainBalance, TokenBalance, BuildTxResult, BroadcastResult, AddressBookEntry } from "../../shared/types"
@@ -427,6 +429,10 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 
 	return (
 		<VStack gap="4" align="stretch" py="2" px="2">
+			<Flex justify="flex-end" gap="3">
+				<DocsLink href={DOCS_LINKS.send} />
+				<DocsLink href={watch('course-05-send')} label="Watch video" />
+			</Flex>
 			{/* Token badge — shown when sending a token */}
 			{isTokenSend && (
 				<Flex align="center" justify="space-between" bg="rgba(233,196,106,0.06)" border="1px solid rgba(233,196,106,0.22)" px="3" py="2" borderRadius="999px">

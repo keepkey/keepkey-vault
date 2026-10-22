@@ -35,6 +35,8 @@ import { ClearSignReportCard } from "./ClearSignReportCard"
 import { namedProviderLine, swapReportNeedsAttention } from "../../shared/clearsign-report"
 import { versionCompare } from "../../shared/firmware-versions"
 import { AssetPickerDialog } from "./AssetPickerDialog"
+import { DocsLink } from "./DocsLink"
+import { DOCS_LINKS, watch } from "../../shared/docs-links"
 import { networkDisplayName, ellipsizeCaip, parseCaip } from "../../shared/swap-discovery"
 import { isSymbolSquatter } from "../../shared/symbolSquatter"
 import { shouldRetryCompletedSwapMetadata } from "../../shared/swap-tracker-guards"
@@ -2743,11 +2745,15 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
               )
             })()}
           </HStack>
-          {!busy && (
-            <Button size="xs" variant="ghost" color="kk.textMuted" px="1" minW="auto" _hover={{ color: "kk.textPrimary" }} onClick={handleClose}>
-              &times;
-            </Button>
-          )}
+          <HStack gap="3" align="center">
+            <DocsLink href={DOCS_LINKS.swap} />
+            <DocsLink href={watch('course-07-swap')} label="Watch video" />
+            {!busy && (
+              <Button size="xs" variant="ghost" color="kk.textMuted" px="1" minW="auto" _hover={{ color: "kk.textPrimary" }} onClick={handleClose}>
+                &times;
+              </Button>
+            )}
+          </HStack>
         </Flex>
 
         {/* ── Body ────────────────────────────────────────────────── */}
@@ -5114,8 +5120,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
             <Box
               as="a"
               href="https://api.shapeshift.com/docs#description/introduction"
-              target="_blank"
-              rel="noopener noreferrer"
+              onClick={(e: React.MouseEvent) => { e.preventDefault(); rpcRequest("openUrl", { url: "https://api.shapeshift.com/docs#description/introduction" }).catch(() => {}) }}
               display="flex"
               alignItems="center"
               gap="1.5"

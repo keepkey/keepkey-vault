@@ -3,6 +3,8 @@ import { Box, Flex, Text, Spinner, Image } from "@chakra-ui/react"
 import { rpcRequest, onRpcMessage } from "../lib/rpc"
 import { useFiat } from "../lib/fiat-context"
 import { Z } from "../lib/z-index"
+import { DocsLink } from "./DocsLink"
+import { DOCS_LINKS } from "../../shared/docs-links"
 import type { ReportMeta } from "../../shared/types"
 
 import keepkeyLogo from "../assets/icon.png"
@@ -134,9 +136,12 @@ export function ReportDialog({ onClose }: ReportDialogProps) {
 					borderColor="kk.border"
 					flexShrink={0}
 				>
-					<Text fontSize="lg" fontWeight="700" color="kk.gold">
-						Reports &amp; Tax Export
-					</Text>
+					<Flex align="center" gap="3">
+						<Text fontSize="lg" fontWeight="700" color="kk.gold">
+							Reports &amp; Tax Export
+						</Text>
+						<DocsLink href={DOCS_LINKS.reports} />
+					</Flex>
 					{!generating && (
 						<Box
 							as="button"

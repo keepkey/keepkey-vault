@@ -2,6 +2,8 @@ import { Box, Flex, Text, Button } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
 import { FaUserSecret } from "react-icons/fa"
 import { Z } from "../lib/z-index"
+import { DocsLink } from "./DocsLink"
+import { DOCS_LINKS, watch } from "../../shared/docs-links"
 
 const ACCENT = "#8B5CF6"
 
@@ -56,6 +58,11 @@ export function PassphraseIntroDialog({ onClose }: PassphraseIntroDialogProps) {
 					<Text fontSize="xl" fontWeight="800" color="kk.textPrimary" textAlign="center" letterSpacing="-0.02em">
 						{t("tutorial.cards.hiddenWallets.title")}
 					</Text>
+
+					<Flex gap="3">
+						<DocsLink href={DOCS_LINKS.passphrase} />
+						<DocsLink href={watch('intro-more-passphrase')} label="Watch video" />
+					</Flex>
 
 					<Text fontSize="sm" color="kk.textSecondary" textAlign="center" lineHeight="1.6">
 						{t("tutorial.cards.hiddenWallets.body")}

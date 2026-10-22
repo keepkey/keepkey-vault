@@ -572,7 +572,7 @@ export function AddChainDialog({ onClose, onAdded, existingChainIds = [] }: AddC
 								<Flex align="center" gap="2" px="3" py="2" bg="rgba(239,68,68,0.08)" border="1px solid" borderColor="rgba(239,68,68,0.2)" borderRadius="lg" mb="2">
 									<Text fontSize="xs" color="red.300">
 										{t('addChain.noWorkingNodes', { defaultValue: 'No working RPC nodes found. Find one at' })}{' '}
-										<Box as="a" href="https://chainlist.org" target="_blank" rel="noopener noreferrer" color="kk.gold" textDecoration="underline" _hover={{ color: "white" }}>
+										<Box as="a" href="https://chainlist.org" onClick={(e: React.MouseEvent) => { e.preventDefault(); rpcRequest("openUrl", { url: "https://chainlist.org" }).catch(() => {}) }} color="kk.gold" textDecoration="underline" _hover={{ color: "white" }}>
 											chainlist.org
 										</Box>
 									</Text>

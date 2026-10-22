@@ -18,6 +18,8 @@ import { typedDataRows } from "../../../shared/typedDataRows"
 import { assessSigningRisk, formatCertifiedArg, type RiskLevel, type SigningTier } from "../../../shared/clearsign-risk"
 import { ClearSignReportCard } from "../ClearSignReportCard"
 import { KeepKeyUILogo } from "../logo/keepkey-ui"
+import { DocsLink } from "../DocsLink"
+import { DOCS_LINKS, watch } from "../../../shared/docs-links"
 import { namedProviderLine } from "../../../shared/clearsign-report"
 
 interface SigningApprovalProps {
@@ -1318,6 +1320,8 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 							<Box w="5px" h="5px" borderRadius="full" bg="kk.gold" />
 							<Text fontSize="2xs" fontWeight="500" color="kk.gold">{safeAppName}</Text>
 						</Flex>
+						<DocsLink href={DOCS_LINKS.verifyOnDevice} />
+						<DocsLink href={watch('course-06-verify')} label="Watch video" />
 					</Flex>
 					<Flex align="center" gap="2">
 						{/*

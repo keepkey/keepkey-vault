@@ -2,6 +2,8 @@ import { useEffect, useState } from "react"
 import { Box, Text, VStack, Flex, Button, Image } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
 import { Z } from "../../lib/z-index"
+import { DocsLink } from "../DocsLink"
+import { DOCS_LINKS, watch } from "../../../shared/docs-links"
 import type { PairingRequestInfo } from "../../../shared/types"
 
 interface PairingApprovalProps {
@@ -139,6 +141,10 @@ export function PairingApproval({ request, onApprove, onReject }: PairingApprova
 							{request.url}
 						</Text>
 					)}
+					<Flex gap="3" justify="center">
+						<DocsLink href={DOCS_LINKS.settingsPairing} />
+						<DocsLink href={watch('course-11-app-connections')} label="Watch video" />
+					</Flex>
 				</VStack>
 
 				<Flex

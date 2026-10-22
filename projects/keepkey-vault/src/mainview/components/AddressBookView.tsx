@@ -11,6 +11,8 @@ import { useDeviceState } from "../hooks/useDeviceState"
 import { AddressIdenticon } from "./AddressIdenticon"
 import { AssetIcon } from "./AssetIcon"
 import { AddAddressDialog } from "./AddAddressDialog"
+import { DocsLink } from "./DocsLink"
+import { DOCS_LINKS } from "../../shared/docs-links"
 import { Z } from "../lib/z-index"
 import { evmChainLabel } from "../../shared/chains"
 import type { AddressBookEntry, AddressBookTx, AppSettings } from "../../shared/types"
@@ -189,7 +191,10 @@ export function AddressBookView() {
   return (
     <Box maxW="760px" mx="auto" w="full" px="4">
       <Flex align="center" justify="space-between" mb="3" mt="2" gap="2">
-        <Text fontSize="lg" fontWeight="700" color="var(--text-0)">{t("title", { defaultValue: "Address Book" })}</Text>
+        <Flex align="center" gap="3">
+          <Text fontSize="lg" fontWeight="700" color="var(--text-0)">{t("title", { defaultValue: "Address Book" })}</Text>
+          <DocsLink href={DOCS_LINKS.addressBook} />
+        </Flex>
         <Flex gap="2">
         {/* Unreleased-firmware feature: absent, not teased, below 7.16. */}
         {clearSignSupported && <Button size="sm" variant="outline" borderColor={clearSignEnabled ? "var(--teal)" : "var(--line)"} color={clearSignEnabled ? "var(--teal)" : "var(--text-2)"}

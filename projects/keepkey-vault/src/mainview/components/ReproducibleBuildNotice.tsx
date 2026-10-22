@@ -4,6 +4,7 @@
  * verifies the download against, and links for independent verification.
  */
 import { Box, Text, VStack, HStack } from '@chakra-ui/react'
+import { rpcRequest } from '../lib/rpc'
 
 const REPRO_DOC_URL = 'https://github.com/keepkey/keepkey-firmware/blob/master/docs/ReproducibleBuilds.md'
 
@@ -52,8 +53,10 @@ export function ReproducibleBuildNotice({ version, payloadHash }: Props) {
             <Box
               as="a"
               href={releaseUrl}
-              target="_blank"
-              rel="noopener noreferrer"
+              onClick={(e) => {
+                e.preventDefault()
+                rpcRequest('openUrl', { url: releaseUrl }).catch(() => {})
+              }}
               fontSize="2xs"
               color="green.400"
               textDecoration="underline"
@@ -64,8 +67,10 @@ export function ReproducibleBuildNotice({ version, payloadHash }: Props) {
             <Box
               as="a"
               href={REPRO_DOC_URL}
-              target="_blank"
-              rel="noopener noreferrer"
+              onClick={(e) => {
+                e.preventDefault()
+                rpcRequest('openUrl', { url: REPRO_DOC_URL }).catch(() => {})
+              }}
               fontSize="2xs"
               color="green.400"
               textDecoration="underline"

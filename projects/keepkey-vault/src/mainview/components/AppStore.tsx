@@ -7,6 +7,29 @@ import bexIcon from "../assets/apps/bex.svg"
 import keepkeyIcon from "../assets/apps/keepkey.png"
 import shapeshiftIcon from "../assets/apps/shapeshift.png"
 import swapsproIcon from "../assets/apps/swapspro.png"
+import { rpcRequest } from "../lib/rpc"
+import { DOCS_LINKS, watch } from "../../shared/docs-links"
+
+/** KeepKey Academy: the main course from docs.keepkey.com/watch, copied from the
+ *  docs repo's data/videos.json (ids, titles, posters). Cards open the docs
+ *  player at that video; old ids keep working there if a video is re-released. */
+const ACADEMY = [
+	{ id: "course-overview-welcome", code: "START 00", title: "Welcome to KeepKey", minutes: 1, poster: "https://pub-adc370f689a247389d20badd7a32cf36.r2.dev/step-by-step/releases/intro-20261022-17708cbfdb65/course-overview-welcome.jpg" },
+	{ id: "course-01-install", code: "START 01", title: "Download, install and connect", minutes: 2, poster: "https://pub-adc370f689a247389d20badd7a32cf36.r2.dev/step-by-step/releases/intro-20261022-17708cbfdb65/course-01-install.jpg" },
+	{ id: "course-02-setup", code: "START 02", title: "Create your wallet and PIN", minutes: 1, poster: "https://pub-adc370f689a247389d20badd7a32cf36.r2.dev/step-by-step/releases/intro-20261022-17708cbfdb65/course-02-setup.jpg" },
+	{ id: "intro-backup", code: "START 03", title: "Write down and check your backup", minutes: 1, poster: "https://pub-adc370f689a247389d20badd7a32cf36.r2.dev/step-by-step/releases/intro-20261022-17708cbfdb65/intro-backup.jpg" },
+	{ id: "course-04-receive", code: "START 04", title: "Receive your first payment", minutes: 1, poster: "https://pub-adc370f689a247389d20badd7a32cf36.r2.dev/step-by-step/releases/intro-20261022-17708cbfdb65/course-04-receive.jpg" },
+	{ id: "course-05-send", code: "START 05", title: "Make your first payment", minutes: 1, poster: "https://pub-adc370f689a247389d20badd7a32cf36.r2.dev/step-by-step/releases/intro-20261022-17708cbfdb65/course-05-send.jpg" },
+	{ id: "course-06-verify", code: "HELP 05", title: "Verify on your device", minutes: 2, poster: "https://pub-adc370f689a247389d20badd7a32cf36.r2.dev/step-by-step/course/course-06-verify-b1775ee665d373a7.jpg" },
+	{ id: "course-07-swap", code: "MULTI 03", title: "Review a swap", minutes: 2, poster: "https://pub-adc370f689a247389d20badd7a32cf36.r2.dev/step-by-step/course/course-07-swap-d22999eba8988fad.jpg" },
+	{ id: "course-09-passphrase", code: "MULTI 05", title: "Passphrase wallets", minutes: 1, poster: "https://pub-adc370f689a247389d20badd7a32cf36.r2.dev/step-by-step/course/course-09-passphrase-7c6bb1de6a8097ef.jpg" },
+	{ id: "course-08-firmware", code: "MULTI 06", title: "Update firmware", minutes: 1, poster: "https://pub-adc370f689a247389d20badd7a32cf36.r2.dev/step-by-step/course/course-08-firmware-21ce86184a0680bc.jpg" },
+	{ id: "course-11-app-connections", code: "MULTI 04", title: "Connect an application", minutes: 1, poster: "https://pub-adc370f689a247389d20badd7a32cf36.r2.dev/step-by-step/course/course-11-app-connections-2f16b7f25918bf03.jpg" },
+	{ id: "course-13-not-showing", code: "MULTI 07", title: "Find a missing payment", minutes: 2, poster: "https://pub-adc370f689a247389d20badd7a32cf36.r2.dev/step-by-step/course/course-13-not-showing-5ecfb6af707c4494.jpg" },
+]
+
+/** Docs and videos open in the system browser, not as a dApp window. */
+const openExternal = (url: string) => { rpcRequest("openUrl", { url }).catch(() => {}) }
 
 interface AppDef {
 	id: string
@@ -20,6 +43,8 @@ interface AppDef {
 	internal?: boolean
 	/** Brand accent — drives the soft blur tint in the card's top-right corner */
 	accent?: string
+	/** Opens in the system browser instead of as a dApp (docs, not an app) */
+	external?: boolean
 }
 
 function useApps(): AppDef[] {
@@ -75,9 +100,10 @@ function useApps(): AppDef[] {
 			name: t("docsName"),
 			description: t("docsDescription"),
 			icon: docsIcon,
-			url: "https://docs.keepkey.com",
+			url: DOCS_LINKS.docsHome,
 			enabled: true,
 			accent: "var(--gold)",
+			external: true,
 		},
 		{
 			id: "affiliates",
@@ -120,6 +146,7 @@ export function AppStore({ onOpenApp, onOpenKeepKey }: AppStoreProps) {
 	const handleClick = (app: AppDef) => {
 		if (!app.enabled) return
 		if (app.internal) onOpenKeepKey()
+		else if (app.external) openExternal(app.url)
 		else if (app.url) onOpenApp(app.url)
 	}
 
@@ -154,6 +181,55 @@ export function AppStore({ onOpenApp, onOpenKeepKey }: AppStoreProps) {
 					</Text>
 				</Box>
 
+				{/* ── KeepKey Academy ── */}
+				<Flex align="baseline" justify="space-between" mb="4" gap="3" wrap="wrap">
+					<Box>
+						<Text fontSize="22px" fontWeight="600" color="var(--text-0)" letterSpacing="-0.01em">
+							{t("academyTitle", { defaultValue: "KeepKey Academy" })}
+						</Text>
+						<Text fontSize="13px" color="var(--text-2)" mt="1">
+							{t("academySubtitle", { defaultValue: "Short videos that walk through KeepKey one step at a time." })}
+						</Text>
+					</Box>
+					<Text as="button" fontSize="13px" color="var(--text-2)" textDecoration="underline" _hover={{ color: "var(--text-0)" }}
+						onClick={() => openExternal(DOCS_LINKS.watchAll)}>
+						{t("academyAll", { defaultValue: "All videos" })}
+					</Text>
+				</Flex>
+				<Grid templateColumns={{ base: "1fr 1fr", sm: "repeat(auto-fill, minmax(200px, 1fr))" }} gap="3" mb={{ base: "10", md: "14" }}>
+					{ACADEMY.map((v) => (
+						<Box
+							key={v.id}
+							as="button"
+							className="electrobun-webkit-app-region-no-drag"
+							textAlign="left"
+							bg="var(--ink-2)"
+							border="1px solid var(--line)"
+							borderRadius="var(--r-lg)"
+							overflow="hidden"
+							cursor="pointer"
+							_hover={{ borderColor: "var(--line-2)", transform: "translateY(-2px)" }}
+							transition="all 0.25s"
+							onClick={() => openExternal(watch(v.id))}
+						>
+							<Box position="relative" aspectRatio="16 / 9" bg="var(--ink-3)">
+								<Image src={v.poster} alt="" w="100%" h="100%" objectFit="cover" loading="lazy" />
+								<Box position="absolute" bottom="2" right="2" px="1.5" py="0.5" borderRadius="sm" bg="rgba(0,0,0,0.7)">
+									<Text fontSize="10px" color="white">{v.minutes} min</Text>
+								</Box>
+							</Box>
+							<Box p="3">
+								<Text fontSize="10px" fontFamily="mono" color="var(--text-3)" letterSpacing="0.04em">{v.code}</Text>
+								<Text fontSize="13px" fontWeight="600" color="var(--text-0)" lineHeight="1.3" mt="0.5">{v.title}</Text>
+							</Box>
+						</Box>
+					))}
+				</Grid>
+
+				{/* ── Apps ── */}
+				<Text fontSize="22px" fontWeight="600" color="var(--text-0)" letterSpacing="-0.01em" mb="4">
+					{t("appsTitle", { defaultValue: "Apps" })}
+				</Text>
 				<Grid templateColumns={{ base: "1fr", sm: "repeat(auto-fill, minmax(260px, 1fr))" }} gap="4">
 					{APPS.map((app) => (
 						<Box

@@ -2603,12 +2603,10 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                               <Text
                                 as="a"
                                 href={DOCS_LINKS.seedLengthEntropy}
-                                target="_blank"
-                                rel="noopener noreferrer"
                                 color={HIGHLIGHT}
                                 textDecoration="underline"
                                 _hover={{ color: 'green.300' }}
-                                onClick={(e: React.MouseEvent) => e.stopPropagation()}
+                                onClick={(e: React.MouseEvent) => { e.preventDefault(); e.stopPropagation(); rpcRequest('openUrl', { url: DOCS_LINKS.seedLengthEntropy }).catch(() => {}) }}
                               >
                                 {t('initChoose.learnMore', { defaultValue: 'Learn more' })}
                               </Text>

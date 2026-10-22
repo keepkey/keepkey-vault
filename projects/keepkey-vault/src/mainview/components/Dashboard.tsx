@@ -35,6 +35,8 @@ import { useFiat } from "../lib/fiat-context"
 import { ViewPickerButton } from "./ViewPickerMenu"
 import { DashboardLoading } from "./DashboardLoading"
 import { AssetIcon } from "./AssetIcon"
+import { DocsLink } from "./DocsLink"
+import { DOCS_LINKS, watch } from "../../shared/docs-links"
 import { categorizeTokens } from "../../shared/spamFilter"
 import { useBtcAccounts } from "../hooks/useBtcAccounts"
 import { useEvmAddresses } from "../hooks/useEvmAddresses"
@@ -2483,6 +2485,8 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 							<Text fontSize="sm" fontWeight="600" color="#22c55e">
 								{portfolioFault.degradedChains.length > 0 ? t("degradedTitle") : t("staleTitle")}
 							</Text>
+							<DocsLink href={DOCS_LINKS.missingCoins} ml="1" />
+							<DocsLink href={watch('course-13-not-showing')} label="Watch video" />
 						</Flex>
 						{/* Backend can report degraded and stale chains together; render
 						    both so the stale warning isn't swallowed by the degraded one. */}

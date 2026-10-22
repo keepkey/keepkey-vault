@@ -5,6 +5,8 @@ import { useTranslation } from "react-i18next"
 import { BTC_SCRIPT_TYPES, btcScriptTypeConfig } from "../../shared/chains"
 import { formatBalance } from "../lib/formatting"
 import { AnimatedUsd } from "./AnimatedUsd"
+import { DocsLink } from "./DocsLink"
+import { DOCS_LINKS, watch } from "../../shared/docs-links"
 import type { BtcAccountSet, BtcScriptType } from "../../shared/types"
 
 interface BtcXpubSelectorProps {
@@ -217,6 +219,10 @@ function BitcoinScriptTypeDialog({ onClose }: { onClose: () => void }) {
             <Text mt="1" fontSize="sm" color="kk.textSecondary" maxW="680px" lineHeight="1.6">
               These are separate accounts derived from the same recovery phrase. Funds remain yours in every account; the format mainly changes fees and service compatibility.
             </Text>
+            <Flex mt="2" gap="3">
+              <DocsLink href={DOCS_LINKS.addressTypes} />
+              <DocsLink href={watch('intro-more-address')} label="Watch video" />
+            </Flex>
           </Box>
           <Box as="button" aria-label="Close" onClick={onClose} color="kk.textMuted" p="2" borderRadius="lg" _hover={{ color: 'white', bg: 'rgba(255,255,255,0.06)' }}>
             <Box as={FaTimes} />

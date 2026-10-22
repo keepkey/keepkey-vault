@@ -6,6 +6,8 @@ import { generateQRSvg } from "../lib/qr"
 import { rpcRequest } from "../lib/rpc"
 import { pathToString } from "../lib/bip44"
 import { PathEditDialog } from "./PathEditDialog"
+import { DocsLink } from "./DocsLink"
+import { DOCS_LINKS, watch } from "../../shared/docs-links"
 import type { ChainDef } from "../../shared/chains"
 
 const MAX_NEW_ADDRESSES_PER_SESSION = 10
@@ -315,9 +317,15 @@ export function ReceiveView({
 
 				{/* Right column: address + xpub + path + chips */}
 				<Flex direction="column" gap="4" flex="1" minW="0" w="100%">
-					<Text fontSize="13px" color="var(--text-2)" letterSpacing="-0.005em">
-						{t("sendToAddress", { symbol: chain.symbol })}
-					</Text>
+					<Flex align="center" justify="space-between" gap="3" flexWrap="wrap">
+						<Text fontSize="13px" color="var(--text-2)" letterSpacing="-0.005em">
+							{t("sendToAddress", { symbol: chain.symbol })}
+						</Text>
+						<Flex gap="3">
+							<DocsLink href={DOCS_LINKS.receive} />
+							<DocsLink href={watch('course-04-receive')} label="Watch video" />
+						</Flex>
+					</Flex>
 
 					{/* BTC: receive/change toggle + index stepper — needs the device to derive
 					    each index, so hidden in watch-only (cached address only). */}

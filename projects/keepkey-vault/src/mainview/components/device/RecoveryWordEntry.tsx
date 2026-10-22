@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback, useRef } from "react"
 import { useTranslation } from "react-i18next"
 import { Box, Text, VStack, Flex, Button, HStack } from "@chakra-ui/react"
 import { FaCheckCircle, FaExclamationTriangle } from "react-icons/fa"
+import { DocsLink } from "../DocsLink"
+import { DOCS_LINKS, watch } from "../../../shared/docs-links"
 
 interface RecoveryWordEntryProps {
   wordPos: number
@@ -360,7 +362,7 @@ export function RecoveryWordEntry({
         </Text>
 
         {/* Help toggle */}
-        <Flex justify="center" mb="3">
+        <Flex justify="center" align="center" gap="3" mb="3">
           <Button
             size="xs"
             variant="ghost"
@@ -370,6 +372,8 @@ export function RecoveryWordEntry({
           >
             {showHelp ? t('recovery.hideHelp') : t('recovery.howCipherWorks')}
           </Button>
+          <DocsLink href={DOCS_LINKS.cipherRecovery} />
+          <DocsLink href={watch('intro-more-cipher')} label="Watch video" />
         </Flex>
 
         {showHelp && (

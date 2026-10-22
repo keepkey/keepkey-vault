@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from "react"
 import { Box, Text, Flex, Button, Input, Spinner } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
+import { DocsLink } from "../DocsLink"
+import { DOCS_LINKS, watch } from "../../../shared/docs-links"
 
 interface PassphraseEntryProps {
 	onSubmit: (passphrase: string) => Promise<void>
@@ -130,6 +132,10 @@ export function PassphraseEntry({ onSubmit, onCancel }: PassphraseEntryProps) {
 						<Text fontSize="xl" fontWeight="bold" mb="2" textAlign="center" color="kk.textPrimary">
 							{t("passphrase.title")}
 						</Text>
+						<Flex justify="center" gap="3" mb="2">
+							<DocsLink href={DOCS_LINKS.passphrase} />
+							<DocsLink href={watch('course-09-passphrase')} label="Watch video" />
+						</Flex>
 						<Text color="kk.textSecondary" fontSize="sm" mb="6" textAlign="center">
 							{t("passphrase.description")}
 						</Text>

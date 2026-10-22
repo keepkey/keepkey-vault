@@ -1,5 +1,6 @@
 import { Box, Text, Flex, VStack, Link } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
+import { rpcRequest } from "../lib/rpc"
 import connectSvgRaw from "../assets/svg/connect-keepkey.svg?raw"
 
 export function DeviceClaimedDialog({ error }: { error: string }) {
@@ -72,7 +73,10 @@ export function DeviceClaimedDialog({ error }: { error: string }) {
 
         <Link
           href="https://support.keepkey.com"
-          target="_blank"
+          onClick={(e) => {
+            e.preventDefault()
+            rpcRequest("openUrl", { url: "https://support.keepkey.com" }).catch(() => {})
+          }}
           fontSize="12px"
           color="var(--text-3)"
           textAlign="center"

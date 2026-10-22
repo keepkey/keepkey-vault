@@ -14,6 +14,8 @@ import { SelfHostNodePanel } from "./SelfHostNodePanel"
 import { ClearSignStudio } from "./ClearSignStudio"
 import { ClearSignProvidersPanel } from "./ClearSignProvidersPanel"
 import { RngAuditPanel } from "./RngAuditPanel"
+import { DocsLink } from "./DocsLink"
+import { DOCS_LINKS, watch } from "../../shared/docs-links"
 import { BROWSER_AGENT_PROMPT, BROWSER_EXTENSION_URL, BROWSER_AGENT_DOCS_URL } from "../../shared/browser-agent-prompt"
 
 interface DevicePolicy {
@@ -53,36 +55,54 @@ interface DeviceSettingsDrawerProps {
 
 // ── Collapsible Section ─────────────────────────────────────────────
 
-function Section({ title, color, defaultOpen = true, children }: {
+function Section({ title, color, defaultOpen = true, docsHref, videoHref, children }: {
 	title: string
 	color?: string
 	defaultOpen?: boolean
+	docsHref?: string
+	videoHref?: string
 	children: React.ReactNode
 }) {
 	const [open, setOpen] = useState(defaultOpen)
 	return (
 		<Box bg="kk.cardBg" border="1px solid" borderColor={color === "kk.error" ? "kk.error" : "kk.border"} borderRadius="xl" overflow="hidden">
+			{/* Docs links sit outside the toggle buttons: an anchor inside a button is invalid. */}
 			<Flex
-				as="button"
 				align="center"
-				justify="space-between"
-				w="100%"
 				px="5"
-				py="3"
-				cursor="pointer"
-				onClick={() => setOpen(o => !o)}
 				_hover={{ bg: "rgba(255,255,255,0.02)" }}
 				borderBottom={open ? "1px solid" : "none"}
 				borderColor="kk.border"
 			>
-				<Text fontSize="lg" fontWeight="600" color={color || "kk.gold"}>{title}</Text>
-				<svg
-					width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-					strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-					style={{ transform: open ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s", color: "var(--chakra-colors-kk-textSecondary)" }}
+				<Box as="button" py="3" textAlign="left" cursor="pointer" onClick={() => setOpen(o => !o)}>
+					<Text fontSize="lg" fontWeight="600" color={color || "kk.gold"}>{title}</Text>
+				</Box>
+				{(docsHref || videoHref) && (
+					<Flex align="center" gap="3" ml="3">
+						{docsHref && <DocsLink href={docsHref} />}
+						{videoHref && <DocsLink href={videoHref} label="Watch video" />}
+					</Flex>
+				)}
+				<Flex
+					as="button"
+					tabIndex={-1}
+					aria-hidden="true"
+					flex="1"
+					alignSelf="stretch"
+					align="center"
+					justify="flex-end"
+					pl="3"
+					cursor="pointer"
+					onClick={() => setOpen(o => !o)}
 				>
-					<polyline points="6 9 12 15 18 9" />
-				</svg>
+					<svg
+						width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+						strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+						style={{ transform: open ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s", color: "var(--chakra-colors-kk-textSecondary)" }}
+					>
+						<polyline points="6 9 12 15 18 9" />
+					</svg>
+				</Flex>
 			</Flex>
 			{open && <Box px="5" py="4">{children}</Box>}
 		</Box>
@@ -777,7 +797,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 					</Section>
 
 					{/* ── Device Identity ─────────────────────────────── */}
-					<Section title={t("device")}>
+					<Section title={t("device")} docsHref={DOCS_LINKS.settingsDevice} videoHref={watch('course-08-firmware')}>
 						<VStack gap="2" align="stretch">
 							<InfoRow label={t("label")} value={features?.label || deviceState.label || "—"} />
 							<InfoRow label={t("deviceId")} value={deviceState.deviceId ? deviceState.deviceId.slice(0, 16) + "..." : "—"} />
@@ -1015,7 +1035,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 					)}
 
 					{/* ── Security ────────────────────────────────────── */}
-					<Section title={t("security")}>
+					<Section title={t("security")} docsHref={DOCS_LINKS.settingsSecurity} videoHref={watch('course-03-pin')}>
 						{featuresError && (
 							<Text fontSize="sm" color="kk.error" mb="2">{t("couldNotLoadFeatures")}</Text>
 						)}
@@ -1307,7 +1327,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 					</Section>
 
 					{/* ── Signing Policy ─────────────────────────────── */}
-					<Section title={t("signingPolicy")} defaultOpen={false}>
+					<Section title={t("signingPolicy")} defaultOpen={false} docsHref={DOCS_LINKS.settingsSigningPolicy}>
 						<VStack gap="4" align="stretch">
 							{/* Advanced Mode (blind signing) */}
 							<Flex
@@ -1367,7 +1387,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 					</Section>
 
 					{/* ── Application Settings ────────────────────────── */}
-					<Section title={t("application")} defaultOpen={false}>
+					<Section title={t("application")} defaultOpen={false} docsHref={DOCS_LINKS.settingsApplication}>
 						<VStack gap="4" align="stretch">
 							{/* REST API server toggle */}
 							<Flex justify="space-between" align="center">
@@ -1701,7 +1721,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 					)}
 
 					{/* ── Feature Flags ──────────────────────────────── */}
-					<Section title={t("featureFlags")} defaultOpen={false}>
+					<Section title={t("featureFlags")} defaultOpen={false} docsHref={DOCS_LINKS.settingsFeatureFlags}>
 						<VStack gap="4" align="stretch">
 							{/* Offline (airplane) mode toggle */}
 							<Flex justify="space-between" align="center">
@@ -1804,7 +1824,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 					</Section>
 
 					{/* ── API Services ────────────────────────────────── */}
-					<Section title="API Services" defaultOpen={false}>
+					<Section title="API Services" defaultOpen={false} docsHref={DOCS_LINKS.settingsApi} videoHref={watch('course-11-app-connections')}>
 						<VStack gap="4" align="stretch">
 							<Box>
 								<Text fontSize="md" color="kk.textPrimary" fontWeight="500">Pioneer API Servers</Text>
@@ -1932,7 +1952,7 @@ export function DeviceSettingsDrawer({ open, onClose, deviceState, onCheckForUpd
 					</Section>
 
 					{/* ── Danger Zone ─────────────────────────────────── */}
-					<Section title={t("dangerZone")} color="kk.error" defaultOpen={false}>
+					<Section title={t("dangerZone")} color="kk.error" defaultOpen={false} docsHref={DOCS_LINKS.wipeDevice} videoHref={watch('intro-more-forgot-pin')}>
 						<Text fontSize="sm" color="kk.textSecondary" mb="3">
 							{t("wipeWarning")}
 						</Text>
