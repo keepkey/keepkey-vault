@@ -5,6 +5,7 @@
 	"networksCount": "{{count}} networks",
 	"addChain": "Add Chain",
 	"addEvmChain": "Add EVM chain",
+	"addNetwork": "Add network",
 	"noBalance": "No balance",
 	"tokensCount_one": "+{{count}} token",
 	"tokensCount_other": "+{{count}} tokens",

@@ -1674,6 +1674,12 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 		return !c.hidden
 	}), [allChains, btcOnly, firmwareVersion, zcashEnabled, hiveEnabled, disabledNetworks])
 
+	// Built-in networks the user turned off: offered back in the Add network dialog.
+	const turnedOffChains = useMemo(() => btcOnly ? [] : allChains.filter(c =>
+		disabledNetworks.includes(c.id) && !c.hidden && isChainSupported(c, firmwareVersion)
+		&& (c.id !== 'zcash' || zcashEnabled) && (c.id !== 'hive' || hiveEnabled)
+	), [allChains, btcOnly, disabledNetworks, firmwareVersion, zcashEnabled, hiveEnabled])
+
 	const sortedChains = useMemo(() => [...visibleChains].sort((a, b) => {
 		const aUsd = cleanBalanceUsd.get(a.id)?.usd || 0
 		const bUsd = cleanBalanceUsd.get(b.id)?.usd || 0
@@ -2076,9 +2082,9 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 						)
 					})}
 
-					{/* Add chain — every default chain is already shown above, so the
-					    only thing left to add is a custom EVM network (by chainId /
-					    RPC, or from the Pioneer catalog). Opens AddChainDialog.
+					{/* Add network — turns a network back on that the network picker
+					    turned off, or adds a custom EVM network (by chainId / RPC, or
+					    from the Pioneer catalog). Opens AddChainDialog.
 					    Hidden on bitcoin-only firmware — the device can't touch EVM. */}
 					{!watchOnly && !btcOnly && (
 						<Box
@@ -2097,7 +2103,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 							<Flex align="center" gap="2" justify="center">
 								<Text fontSize="14px" color="var(--text-2)">+</Text>
 								<Text fontSize="11px" color="var(--text-2)" fontWeight="500" letterSpacing="0.02em">
-									{t("addEvmChain", { defaultValue: "Add EVM chain" })}
+									{t("addNetwork", { defaultValue: "Add network" })}
 								</Text>
 							</Flex>
 						</Box>
@@ -3196,6 +3202,12 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 						}
 					}}
 					existingChainIds={existingChainIds}
+					turnedOff={turnedOffChains}
+					onTurnOn={async (id) => {
+						const s = await rpcRequest<AppSettings>('setDisabledNetworks', { chainIds: disabledNetworks.filter(d => d !== id) })
+						setDisabledNetworks(s.disabledNetworks) // reload effect fetches its balances
+						window.dispatchEvent(new Event('keepkey-settings-changed'))
+					}}
 				/>
 			)}
 

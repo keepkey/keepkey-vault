@@ -1,6 +1,10 @@
 {
 	"addChain": {
 		"title": "Add EVM Chain",
+		"addNetworkTitle": "Add network",
+		"turnedOffTitle": "Turned-off networks",
+		"turnOn": "Turn on",
+		"customTitle": "Custom EVM networks",
 		"configureTitle": "Configure Chain",
 		"addCustomTitle": "Add Custom Chain",
 		"searchPlaceholder": "Search chains...",
