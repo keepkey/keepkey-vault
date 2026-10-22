@@ -3,6 +3,7 @@ import { takeDeviceRefusal } from './device-refusal'
 import { withPermit2SpenderName } from './permit2-spender-name'
 import type { AuthStore } from './auth'
 import { HttpError } from './auth'
+import { WIPE_BUSY_MESSAGE } from './device-wipe'
 import { WalletCacheSession, WalletSessionChangedError, WalletSessionMap } from './wallet-session-cache'
 import type { SigningRequestInfo, ApiLogEntry, EIP712DecodedInfo } from '../shared/types'
 import { tronPreview } from './tron-preview'
@@ -185,6 +186,8 @@ function corsHeaders(_req?: Request): Record<string, string> {
 
 function requireWallet(engine: EngineController) {
   if (!engine.wallet) throw new HttpError(503, 'No device connected')
+  // A wipe owns the device until it answers: any message sent during its confirmation breaks it (device-wipe.ts).
+  if (engine.wipeInProgress) throw new HttpError(409, WIPE_BUSY_MESSAGE)
   return engine.wallet
 }
 
@@ -4717,8 +4720,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/system/wipe-device' && method === 'POST') {
           auth.requireAuth(req)
-          const wallet = requireWallet(engine)
-          await wallet.wipe()
+          requireWallet(engine)
+          await engine.wipeDevice()
           featuresCache = null
           return json({ success: true })
         }

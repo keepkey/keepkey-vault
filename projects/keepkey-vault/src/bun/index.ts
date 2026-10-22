@@ -3404,31 +3404,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				return { ok: true }
 			},
 			wipeDevice: async () => {
-				if (!engine.wallet) throw new Error('No device connected')
-				// Cancel any pending PIN/passphrase request before wiping —
-				// the transport lock is held while waiting for PIN input,
-				// so wipe() would deadlock without this.
-				// Cancelling rejects a pending PIN prompt; keep its auto-retry off the transport.
-				engine.wipeInProgress = true
-				try {
-					await engine.wallet.cancel().catch(() => {})
-					if (engine.isEmulator) {
-						await emuConfirmOp(() => engine.wallet!.wipe())
-						const { flushRingBuffers } = await import('./emulator')
-						flushRingBuffers()
-						await engine.connectEmulator()
-					} else {
-						await engine.wallet.wipe()
-						await engine.syncState()
-					}
-				} catch (e) {
-					// Refused on the device or failed: still locked, so bring the PIN prompt back.
-					engine.wipeInProgress = false
-					engine.repromptPin()
-					throw e
-				} finally {
-					engine.wipeInProgress = false
-				}
+				await engine.wipeDevice(engine.isEmulator ? emuConfirmOp : undefined)
 				return { success: true }
 			},
 			getPublicKeys: async (params) => {
