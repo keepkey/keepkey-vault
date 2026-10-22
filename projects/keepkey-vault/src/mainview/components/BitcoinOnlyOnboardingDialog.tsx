@@ -59,9 +59,9 @@ export function BitcoinOnlyOnboardingDialog({ onClose }: { onClose: () => void }
             </Text>
 
             <OptionCard
-              title="Pioneer" badge="Recommended"
-              body="Vault's hosted Bitcoin data. This service receives wallet queries; its availability and data accuracy affect your view."
-              action="Continue with Pioneer" onClick={onClose} primary disabled={busy || offlineReady}
+              title="KeepKey servers" badge="Recommended"
+              body="KeepKey's hosted Bitcoin data. This service receives wallet queries; its availability and data accuracy affect your view."
+              action="Use KeepKey servers" onClick={onClose} primary disabled={busy || offlineReady}
             />
             <OptionCard
               title="Self-host your node"

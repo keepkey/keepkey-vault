@@ -1,5 +1,13 @@
 import { expect, test } from 'bun:test'
-import { evmMaxFee, evmNativeValue } from './evmFeePreview'
+import { assertEvmFeeCapCoversBaseFee, evmMaxFee, evmNativeValue } from './evmFeePreview'
+
+test('fee validation keeps exact integer precision and permits a base fee equal to the cap', () => {
+  expect(() => assertEvmFeeCapCoversBaseFee('20032000', '0', '20186000')).toThrow('below the current network base fee')
+  expect(() => assertEvmFeeCapCoversBaseFee('9007199254740993', '0', '9007199254740994')).toThrow('below the current network base fee')
+  expect(() => assertEvmFeeCapCoversBaseFee('0x10', '0x0', '0x10')).not.toThrow()
+  expect(() => assertEvmFeeCapCoversBaseFee('0x10', '0x11', '0x1')).toThrow('priority fee')
+  expect(() => assertEvmFeeCapCoversBaseFee('0x10', '0x0', undefined)).toThrow('Cannot verify')
+})
 
 test('legacy and EIP-1559 signing requests expose their maximum network fee', () => {
   expect(evmMaxFee({ gasLimit: '0x27100', gasPrice: '0x3b9aca00' }, 1)).toBe('0.00016 ETH')

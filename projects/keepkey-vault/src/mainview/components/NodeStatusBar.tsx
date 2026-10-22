@@ -19,7 +19,7 @@ export function NodeStatusBar({ status }: { status: BtcNodeStatus }) {
   const bg = failing ? "rgba(224,140,123,0.14)" : (scanning || syncing) ? "rgba(233,196,106,0.12)" : "rgba(139,227,196,0.10)"
 
   const label = failing
-    ? `Self-host node error — ${status.error || "unreachable"}. Fix your node; Vault won't fall back to Pioneer.`
+    ? `Self-host node error — ${status.error || "unreachable"}. Fix your node; KeepKey Desktop won't fall back to KeepKey servers.`
     : scanning
       ? `${kind} scanning the UTXO set · ${scanPct}% — reading your balance directly from the node.`
       : syncing

@@ -4,6 +4,8 @@ import { useTranslation } from "react-i18next"
 import { rpcRequest } from "../lib/rpc"
 import { Z } from "../lib/z-index"
 import type { CustomChain, PioneerChainInfo } from "../../shared/types"
+import type { ChainDef } from "../../shared/chains"
+import { getAssetIcon } from "../../shared/assetLookup"
 
 type Mode = 'browse' | 'configure' | 'manual'
 const PAGE_SIZE = 20
@@ -19,9 +21,13 @@ interface AddChainDialogProps {
 	onClose: () => void
 	onAdded?: (chain: CustomChain) => void
 	existingChainIds?: number[]
+	/** Built-in networks the user turned off (network picker); listed above the custom catalog. */
+	turnedOff?: ChainDef[]
+	onTurnOn?: (chainId: string) => Promise<void>
 }
 
-export function AddChainDialog({ onClose, onAdded, existingChainIds = [] }: AddChainDialogProps) {
+export function AddChainDialog({ onClose, onAdded, existingChainIds = [], turnedOff = [], onTurnOn }: AddChainDialogProps) {
+	const [turningOn, setTurningOn] = useState<string | null>(null)
 	const { t } = useTranslation("dialogs")
 	const [mode, setMode] = useState<Mode>('browse')
 
@@ -288,7 +294,7 @@ export function AddChainDialog({ onClose, onAdded, existingChainIds = [] }: AddC
 							</Box>
 						)}
 						<Text fontSize="sm" fontWeight="600" color="kk.textPrimary">
-							{mode === 'browse' ? t('addChain.title') : mode === 'configure' ? t('addChain.configureTitle') : t('addChain.addCustomTitle')}
+							{mode === 'browse' ? t('addChain.addNetworkTitle', { defaultValue: 'Add network' }) : mode === 'configure' ? t('addChain.configureTitle') : t('addChain.addCustomTitle')}
 						</Text>
 					</Flex>
 					<Box
@@ -307,6 +313,30 @@ export function AddChainDialog({ onClose, onAdded, existingChainIds = [] }: AddC
 				{/* Browse Mode */}
 				{mode === 'browse' && (
 					<Box display="flex" flexDirection="column" overflow="hidden" flex="1">
+						{/* Main networks turned off in the network picker */}
+						{turnedOff.length > 0 && onTurnOn && (
+							<Box px="5" pt="3" pb="1" flexShrink={0}>
+								<Text fontSize="xs" fontWeight="600" color="kk.textSecondary" mb="2">
+									{t('addChain.turnedOffTitle', { defaultValue: 'Turned-off networks' })}
+								</Text>
+								<Flex direction="column" gap="1.5">
+									{turnedOff.map(c => (
+										<Flex key={c.id} align="center" gap="2.5" px="3" py="2" borderRadius="lg" bg="black" border="1px solid" borderColor="kk.border">
+											<Image src={getAssetIcon(c.caip)} alt="" w="20px" h="20px" borderRadius="full" />
+											<Text fontSize="sm" color="kk.textPrimary" flex="1">{c.coin}</Text>
+											<Button size="xs" bg="kk.gold" color="black" fontWeight="700" _hover={{ opacity: 0.9 }}
+												disabled={turningOn !== null}
+												onClick={async () => { setTurningOn(c.id); try { await onTurnOn(c.id) } finally { setTurningOn(null) } }}>
+												{turningOn === c.id ? <Spinner size="xs" /> : t('addChain.turnOn', { defaultValue: 'Turn on' })}
+											</Button>
+										</Flex>
+									))}
+								</Flex>
+								<Text fontSize="xs" fontWeight="600" color="kk.textSecondary" mt="4">
+									{t('addChain.customTitle', { defaultValue: 'Custom EVM networks' })}
+								</Text>
+							</Box>
+						)}
 						{/* Search input */}
 						<Box px="5" pt="3" pb="2" flexShrink={0}>
 							<Flex align="center" gap="2" bg="black" border="1px solid" borderColor="kk.border" borderRadius="lg" px="3">
@@ -572,7 +602,7 @@ export function AddChainDialog({ onClose, onAdded, existingChainIds = [] }: AddC
 								<Flex align="center" gap="2" px="3" py="2" bg="rgba(239,68,68,0.08)" border="1px solid" borderColor="rgba(239,68,68,0.2)" borderRadius="lg" mb="2">
 									<Text fontSize="xs" color="red.300">
 										{t('addChain.noWorkingNodes', { defaultValue: 'No working RPC nodes found. Find one at' })}{' '}
-										<Box as="a" href="https://chainlist.org" target="_blank" rel="noopener noreferrer" color="kk.gold" textDecoration="underline" _hover={{ color: "white" }}>
+										<Box as="a" href="https://chainlist.org" onClick={(e: React.MouseEvent) => { e.preventDefault(); rpcRequest("openUrl", { url: "https://chainlist.org" }).catch(() => {}) }} color="kk.gold" textDecoration="underline" _hover={{ color: "white" }}>
 											chainlist.org
 										</Box>
 									</Text>

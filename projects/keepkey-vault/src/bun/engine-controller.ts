@@ -18,7 +18,8 @@ import { EmulatorKeepKeyAdapter } from './emulator-transport'
 import { requestUnlock, isTransportTimeout, UNLOCK_TIMEOUT_MESSAGE } from './pin-unlock'
 import { forceReleaseWebUsb, isUnreleasable } from './webusb-recovery'
 import type { DeviceFailure } from './device-refusal'
-import { getActiveFlashName, getEmulatorStatus } from './emulator'
+import { flushRingBuffers, getActiveFlashName, getEmulatorStatus } from './emulator'
+import { wipeOwningDevice } from './device-wipe'
 
 const KEEPKEY_VENDOR_ID = 0x2B24 // 11044
 // Firmware manifest lives in keepkey-vault (migrated from keepkey-desktop, which is now stale).
@@ -178,7 +179,7 @@ export class EngineController extends EventEmitter {
   // While active, sendPin/sendPassphrase must NOT call getFeatures — that would
   // race with the pending getPublicKeys and cause transport "Unexpected message".
   private promptPinActive = false
-  /** Set by the wipeDevice RPC; stops the PIN auto-prompt from racing the wipe. */
+  /** Set while wipeDevice owns the device; keeps the PIN auto-prompt and REST device calls off it. */
   wipeInProgress = false
 
   get isSyncing(): boolean { return this.syncing }
@@ -2163,6 +2164,18 @@ export class EngineController extends EventEmitter {
     if (this.lastState === 'needs_pin') this.updateState('needs_pin')
   }
 
+  /** Wipe the device, owning it until it answers (see device-wipe.ts). Used by the UI and REST. */
+  async wipeDevice(confirm: (wipe: () => Promise<unknown>) => Promise<unknown> = (wipe) => wipe()) {
+    await wipeOwningDevice(this, confirm, async () => {
+      if (this.isEmulator) {
+        flushRingBuffers()
+        await this.connectEmulator()
+      } else {
+        await this.syncState()
+      }
+    })
+  }
+
   async sendPin(pin: string) {
     if (!this.wallet) throw new Error('No device connected')
     console.log(`[Engine] sendPin (pinRequests=${this.pinRequestCount}, promptPinActive=${this.promptPinActive})`)
@@ -2572,7 +2585,10 @@ export class EngineController extends EventEmitter {
    */
   private async deriveSeedFingerprint(): Promise<string | null> {
     if (!this.wallet) return null
-    try {
+    // Bitcoin-only firmware refuses ETH ("Unknown message"); asking anyway cost a
+    // failed round trip on every connect. Go straight to the btc: fingerprint.
+    const btcOnly = isBitcoinOnlyVariant(this.cachedFeatures?.firmwareVariant)
+    if (!btcOnly) try {
       const result = await (this.wallet as any).ethGetAddress({
         addressNList: [0x80000000 + 44, 0x80000000 + 60, 0x80000000 + 0, 0, 0],
         showDisplay: false,

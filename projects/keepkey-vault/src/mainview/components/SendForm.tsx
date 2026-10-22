@@ -10,6 +10,8 @@ import { QrScannerOverlay } from "./QrScannerOverlay"
 import { AddressBookPicker } from "./AddressBookPicker"
 import { AddressIdenticon } from "./AddressIdenticon"
 import { SaveRecipientDialog } from "./SaveRecipientDialog"
+import { DocsLink } from "./DocsLink"
+import { DOCS_LINKS, watch } from "../../shared/docs-links"
 import { caipToNetworkId, isTokenCaip } from "../../shared/chains"
 import type { ChainDef } from "../../shared/chains"
 import type { ChainBalance, TokenBalance, BuildTxResult, BroadcastResult, AddressBookEntry } from "../../shared/types"
@@ -209,6 +211,14 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 		if (isNaN(n) || n <= 0) return null
 		return n * pricePerUnit
 	}, [amount, hasPrice, pricePerUnit, isMax])
+
+	// MAX on a Bitcoin-style chain: the amount actually sent, read from the built
+	// transaction's recipient output, so the review matches what the device shows.
+	const maxSentAmount = useMemo(() => {
+		if (!isMax || chain.chainFamily !== 'utxo') return null
+		const out = buildResult?.unsignedTx?.outputs?.find((o: any) => o.addressType === 'spend' && o.address === recipient)
+		return out ? (Number(out.amount) / 10 ** chain.decimals).toFixed(chain.decimals) : null
+	}, [isMax, chain.chainFamily, chain.decimals, buildResult, recipient])
 
 	const addressValidation = useMemo(() => {
 		if (!recipient) return null
@@ -427,6 +437,10 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 
 	return (
 		<VStack gap="4" align="stretch" py="2" px="2">
+			<Flex justify="flex-end" gap="3">
+				<DocsLink href={DOCS_LINKS.send} />
+				<DocsLink href={watch('course-05-send')} label="Watch video" />
+			</Flex>
 			{/* Token badge — shown when sending a token */}
 			{isTokenSend && (
 				<Flex align="center" justify="space-between" bg="rgba(233,196,106,0.06)" border="1px solid rgba(233,196,106,0.22)" px="3" py="2" borderRadius="999px">
@@ -806,12 +820,13 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 						<Text fontSize="xs" color="kk.textMuted" mb="2">{t("transactionReady")}</Text>
 						<Flex justify="space-between" mb="1">
 							<Text fontSize="xs" color="kk.textSecondary">{t("to")}</Text>
-							<Text fontSize="xs" fontFamily="mono" color="kk.textPrimary" maxW="250px" truncate>{recipient}</Text>
+							{/* Full address, never truncated: this is what the user checks against the device. */}
+							<Text fontSize="xs" fontFamily="mono" color="kk.textPrimary" maxW="300px" textAlign="right" wordBreak="break-all">{recipient}</Text>
 						</Flex>
 						<Flex justify="space-between" mb="1">
 							<Text fontSize="xs" color="kk.textSecondary">{t("amount")}</Text>
 							<Flex direction="column" align="flex-end">
-								<Text fontSize="xs" fontFamily="mono" color="kk.textPrimary">{isMax ? 'MAX' : amount} {displaySymbol}</Text>
+								<Text fontSize="xs" fontFamily="mono" color="kk.textPrimary">{isMax ? (maxSentAmount ?? 'MAX') : amount} {displaySymbol}</Text>
 								{!isMax && amountUsdPreview !== null && (
 									<Text fontSize="10px" fontFamily="mono" color="kk.textMuted">{fmtCompact(amountUsdPreview)}</Text>
 								)}

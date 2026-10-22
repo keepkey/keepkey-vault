@@ -35,6 +35,8 @@ import { useFiat } from "../lib/fiat-context"
 import { ViewPickerButton } from "./ViewPickerMenu"
 import { DashboardLoading } from "./DashboardLoading"
 import { AssetIcon } from "./AssetIcon"
+import { DocsLink } from "./DocsLink"
+import { DOCS_LINKS, watch } from "../../shared/docs-links"
 import { categorizeTokens } from "../../shared/spamFilter"
 import { useBtcAccounts } from "../hooks/useBtcAccounts"
 import { useEvmAddresses } from "../hooks/useEvmAddresses"
@@ -764,6 +766,8 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 	const [showBip85, setShowBip85] = useState(false)
 	const [zcashEnabled, setZcashEnabled] = useState(false)
 	const [hiveEnabled, setHiveEnabled] = useState(false)
+	// Networks turned off in the network picker: not loaded, not shown, not totalled.
+	const [disabledNetworks, setDisabledNetworks] = useState<string[]>([])
 	// One-time passphrase/hidden-wallet intro. `passphraseIntroSeen` starts true so
 	// the dialog never flashes before settings load; refreshFeatureFlags sets the
 	// real value. `introDismissed` suppresses it for the rest of this session.
@@ -944,6 +948,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 			.then(s => {
 				setZcashEnabled(s.zcashPrivacyEnabled)
 				setHiveEnabled(s.hiveEnabled)
+				setDisabledNetworks(s.disabledNetworks)
 				setPassphraseIntroSeen(s.passphraseIntroShown)
 			})
 			.catch(() => {})
@@ -1294,6 +1299,15 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 		}
 	}, [zcashEnabled, refreshBalances, loadingBalances])
 
+	// A network turned back on has no balances yet — load them.
+	const prevDisabledRef = useRef(disabledNetworks)
+	useEffect(() => {
+		const turnedOn = prevDisabledRef.current.some(id => !disabledNetworks.includes(id))
+		if (turnedOn && loadingBalances) return // retried when the running load ends
+		prevDisabledRef.current = disabledNetworks
+		if (turnedOn) refreshBalances()
+	}, [disabledNetworks, refreshBalances, loadingBalances])
+
 	// Auto-refresh balances when Hive feature flag is enabled mid-session
 	const prevHiveRef = useRef(hiveEnabled)
 	useEffect(() => {
@@ -1468,6 +1482,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 		for (const [chainId, bal] of balances) {
 			// Honor the Hive feature flag — stale Hive rows in the map must not count toward totals
 			if (chainId === 'hive' && !hiveEnabled) continue
+			if (disabledNetworks.includes(chainId)) continue
 			if (bal.tokens && bal.tokens.length > 0) {
 				const { clean } = categorizeTokens(bal.tokens, overrides)
 				const spamUsd = (bal.tokens.length - clean.length) > 0
@@ -1482,7 +1497,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 			}
 		}
 		return result
-	}, [balances, visibilityMap, hiveEnabled])
+	}, [balances, visibilityMap, hiveEnabled, disabledNetworks])
 
 	const totalUsd = useMemo(() => Array.from(cleanBalanceUsd.values()).reduce((sum, b) => sum + b.usd, 0), [cleanBalanceUsd])
 
@@ -1660,11 +1675,18 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 		// Bitcoin-only firmware physically can't touch other chains — show only BTC.
 		if (btcOnly) return c.id === 'bitcoin'
 		if (!isChainSupported(c, firmwareVersion)) return false
+		if (disabledNetworks.includes(c.id)) return false
 		// Zcash transparent is hidden by default — show when feature flag is on
 		if (c.id === 'zcash') return zcashEnabled
 		if (c.id === 'hive') return hiveEnabled
 		return !c.hidden
-	}), [allChains, btcOnly, firmwareVersion, zcashEnabled, hiveEnabled])
+	}), [allChains, btcOnly, firmwareVersion, zcashEnabled, hiveEnabled, disabledNetworks])
+
+	// Built-in networks the user turned off: offered back in the Add network dialog.
+	const turnedOffChains = useMemo(() => btcOnly ? [] : allChains.filter(c =>
+		disabledNetworks.includes(c.id) && !c.hidden && isChainSupported(c, firmwareVersion)
+		&& (c.id !== 'zcash' || zcashEnabled) && (c.id !== 'hive' || hiveEnabled)
+	), [allChains, btcOnly, disabledNetworks, firmwareVersion, zcashEnabled, hiveEnabled])
 
 	const sortedChains = useMemo(() => [...visibleChains].sort((a, b) => {
 		const aUsd = cleanBalanceUsd.get(a.id)?.usd || 0
@@ -2068,9 +2090,9 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 						)
 					})}
 
-					{/* Add chain — every default chain is already shown above, so the
-					    only thing left to add is a custom EVM network (by chainId /
-					    RPC, or from the Pioneer catalog). Opens AddChainDialog.
+					{/* Add network — turns a network back on that the network picker
+					    turned off, or adds a custom EVM network (by chainId / RPC, or
+					    from the Pioneer catalog). Opens AddChainDialog.
 					    Hidden on bitcoin-only firmware — the device can't touch EVM. */}
 					{!watchOnly && !btcOnly && (
 						<Box
@@ -2089,7 +2111,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 							<Flex align="center" gap="2" justify="center">
 								<Text fontSize="14px" color="var(--text-2)">+</Text>
 								<Text fontSize="11px" color="var(--text-2)" fontWeight="500" letterSpacing="0.02em">
-									{t("addEvmChain", { defaultValue: "Add EVM chain" })}
+									{t("addNetwork", { defaultValue: "Add network" })}
 								</Text>
 							</Flex>
 						</Box>
@@ -2497,6 +2519,8 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 							<Text fontSize="sm" fontWeight="600" color="#22c55e">
 								{portfolioFault.degradedChains.length > 0 ? t("degradedTitle") : t("staleTitle")}
 							</Text>
+							<DocsLink href={DOCS_LINKS.missingCoins} ml="1" />
+							<DocsLink href={watch('course-13-not-showing')} label="Watch video" />
 						</Flex>
 						{/* Backend can report degraded and stale chains together; render
 						    both so the stale warning isn't swallowed by the degraded one. */}
@@ -3192,6 +3216,12 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 						}
 					}}
 					existingChainIds={existingChainIds}
+					turnedOff={turnedOffChains}
+					onTurnOn={async (id) => {
+						const s = await rpcRequest<AppSettings>('setDisabledNetworks', { chainIds: disabledNetworks.filter(d => d !== id) })
+						setDisabledNetworks(s.disabledNetworks) // reload effect fetches its balances
+						window.dispatchEvent(new Event('keepkey-settings-changed'))
+					}}
 				/>
 			)}
 

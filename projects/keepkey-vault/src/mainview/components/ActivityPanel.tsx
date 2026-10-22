@@ -8,6 +8,8 @@ import { useState, useEffect, useMemo, useCallback, useRef } from "react"
 import { Box, Text, Flex, VStack, HStack, Image } from "@chakra-ui/react"
 import { rpcRequest } from "../lib/rpc"
 import { Z } from "../lib/z-index"
+import { DocsLink } from "./DocsLink"
+import { DOCS_LINKS } from "../../shared/docs-links"
 import { CHAINS, getExplorerTxUrl } from "../../shared/chains"
 import { caipToIcon } from "../../shared/assetLookup"
 import { getRequiredConfs } from "../../shared/confirmations"
@@ -945,7 +947,10 @@ export function ActivityPanel({ open, onClose, activities, pendingSwaps, onRefre
       >
         {/* Header */}
         <Flex px="4" pt="4" pb="2" justify="space-between" align="center" flexShrink={0}>
-          <Text fontSize="sm" fontWeight="700" color="white">Recent Activity</Text>
+          <HStack gap="3">
+            <Text fontSize="sm" fontWeight="700" color="white">Recent Activity</Text>
+            <DocsLink href={DOCS_LINKS.activity} />
+          </HStack>
           <HStack gap="2">
             {onOpenFullPage && (
               <Text

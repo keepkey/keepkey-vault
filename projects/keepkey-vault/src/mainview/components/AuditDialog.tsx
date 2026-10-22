@@ -26,6 +26,8 @@ import { AuditKnownPaths } from "./AuditKnownPaths"
 import { AuditSweepButton } from "./AuditSweepButton"
 import { AuditBtcDeep } from "./AuditBtcDeep"
 import { AuditInspector } from "./AuditInspector"
+import { DocsLink } from "./DocsLink"
+import { DOCS_LINKS, watch } from "../../shared/docs-links"
 import type { ChainDef } from "../../shared/chains"
 import type { AuditReport, AuditPortfolioSnapshot, AuditMode, AuditChainFinding, AuditDerivedAddress } from "../../shared/types"
 
@@ -591,6 +593,10 @@ export function AuditDialog({ onClose, snapshot, isHidden, chainCatalog, chainAd
             <Box>
               <Text fontSize="lg" fontWeight="700" color="var(--gold)" letterSpacing="-0.01em" lineHeight="1.15">Audit balances</Text>
               <Text fontSize="xs" color="var(--text-2)">Let’s walk every chain and make sure nothing’s hiding.</Text>
+              <Flex mt="1" gap="3">
+                <DocsLink href={DOCS_LINKS.audit} />
+                <DocsLink href={watch('course-14-audit')} label="Watch video" />
+              </Flex>
             </Box>
           </Flex>
           <Flex align="center" gap="4">

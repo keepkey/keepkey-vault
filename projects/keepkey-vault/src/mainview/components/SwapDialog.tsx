@@ -19,6 +19,7 @@ import { nativeMaxSpendableAmount, normalizeDecimals, tokenMaxSpendableAmount } 
 import { getAssetIcon } from "../../shared/assetLookup"
 import { validateAddress } from "../../shared/address-validation"
 import { isBalanceUnverified, selectBalanceEntry } from "../../shared/balance-display-state"
+import { mergeTrustedBalanceSnapshot } from "../../shared/balance-reconciliation"
 import type { SwapAsset, SwapQuote, ChainBalance, CustomToken, SwapStatusUpdate, SwapTrackingStatus, PendingSwap, SwapUiState, SwapUiCommand, SwapHealth } from "../../shared/types"
 import { SOLANA_BLIND_SIGNING_REQUIRED } from "../../shared/types"
 import { Z } from "../lib/z-index"
@@ -35,6 +36,8 @@ import { ClearSignReportCard } from "./ClearSignReportCard"
 import { namedProviderLine, swapReportNeedsAttention } from "../../shared/clearsign-report"
 import { versionCompare } from "../../shared/firmware-versions"
 import { AssetPickerDialog } from "./AssetPickerDialog"
+import { DocsLink } from "./DocsLink"
+import { DOCS_LINKS, watch } from "../../shared/docs-links"
 import { networkDisplayName, ellipsizeCaip, parseCaip } from "../../shared/swap-discovery"
 import { isSymbolSquatter } from "../../shared/symbolSquatter"
 import { shouldRetryCompletedSwapMetadata } from "../../shared/swap-tracker-guards"
@@ -1255,7 +1258,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
         const idx = prev.findIndex(b => b.chainId === updated.chainId)
         if (idx === -1) return [...prev, updated]
         const next = [...prev]
-        next[idx] = updated
+        next[idx] = mergeTrustedBalanceSnapshot(prev[idx], updated, false) ?? prev[idx]
         return next
       })
     })
@@ -2743,11 +2746,15 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
               )
             })()}
           </HStack>
-          {!busy && (
-            <Button size="xs" variant="ghost" color="kk.textMuted" px="1" minW="auto" _hover={{ color: "kk.textPrimary" }} onClick={handleClose}>
-              &times;
-            </Button>
-          )}
+          <HStack gap="3" align="center">
+            <DocsLink href={DOCS_LINKS.swap} />
+            <DocsLink href={watch('course-07-swap')} label="Watch video" />
+            {!busy && (
+              <Button size="xs" variant="ghost" color="kk.textMuted" px="1" minW="auto" _hover={{ color: "kk.textPrimary" }} onClick={handleClose}>
+                &times;
+              </Button>
+            )}
+          </HStack>
         </Flex>
 
         {/* ── Body ────────────────────────────────────────────────── */}
@@ -5114,8 +5121,7 @@ export function SwapDialog({ open, onClose, chain, balance, address, resumeSwap,
             <Box
               as="a"
               href="https://api.shapeshift.com/docs#description/introduction"
-              target="_blank"
-              rel="noopener noreferrer"
+              onClick={(e: React.MouseEvent) => { e.preventDefault(); rpcRequest("openUrl", { url: "https://api.shapeshift.com/docs#description/introduction" }).catch(() => {}) }}
               display="flex"
               alignItems="center"
               gap="1.5"

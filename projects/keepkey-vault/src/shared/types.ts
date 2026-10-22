@@ -1013,6 +1013,8 @@ export interface EIP712DecodedInfo {
   isKnownType: boolean
   /** True only when the signed protocol contract identity is in the reviewed deployment registry. */
   protocolIdentityVerified?: boolean
+  /** Full host-computed digests for comparison with legacy device screens. */
+  hashes?: { domainHash: string; messageHash?: string }
 }
 
 /**
@@ -1397,6 +1399,8 @@ export interface AppSettings {
   btcNodeType: 'blockbook' | 'core' // self-host node backend type (default blockbook — xpub-native, what Pioneer speaks)
   btcNodeUrl: string             // self-host node RPC URL (auth stored separately, never returned to the UI)
   btcOnboardingShown: boolean    // one-time btc-only data-source onboarding seen (default false)
+  disabledNetworks: string[]     // chain ids the user turned off for a lighter dashboard (default none)
+  networksChosen: boolean        // one-time multi-chain network picker answered (default false)
   preReleaseUpdates: boolean     // opt-in to pre-release auto-updates (default OFF)
   alphaFirmware: boolean         // opt-in to alpha firmware channel (manifest.beta) (default OFF)
   addressBookClearsignEnabled: boolean // experimental device-certified contact labels (default OFF)

@@ -5,7 +5,8 @@ import type { PinRequestType } from "../../../shared/types"
 import { KeepKeyUILogo } from "../logo/keepkey-ui"
 import { Z } from "../../lib/z-index"
 import { rpcRequest } from "../../lib/rpc"
-import { DOCS_LINKS } from "../../../shared/docs-links"
+import { DOCS_LINKS, watch } from "../../../shared/docs-links"
+import { DocsLink } from "../DocsLink"
 
 interface PinEntryProps {
 	type?: PinRequestType
@@ -191,11 +192,12 @@ export function PinEntry({ type = "current", failed, errorDetail, requestSeq, on
 					{t(DESCRIPTION_KEYS[type])}
 				</Text>
 				{/* openUrl RPC: target="_blank" is a dead click in Electrobun. */}
-				<Flex justify="center" mb="5">
+				<Flex justify="center" align="center" gap="3" mb="5">
 					<Box as="button" type="button" fontSize="xs" color="kk.gold" textDecoration="underline"
 						onClick={() => rpcRequest("openUrl", { url: DOCS_LINKS.pinScrambled }).catch(() => {})}>
 						{t("pin.howPinWorks")}
 					</Box>
+					<DocsLink href={watch('intro-more-forgot-pin')} label="Watch video" />
 				</Flex>
 
 				{!showWipeConfirm && (<>

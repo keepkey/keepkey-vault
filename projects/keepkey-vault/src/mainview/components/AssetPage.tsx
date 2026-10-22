@@ -144,7 +144,10 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 		try {
 			// 90s: backend budget is 60s of Pioneer time plus device derivation —
 			// the 30s rpc default made slow forced refreshes fail invisibly.
-			await rpcRequest<ChainBalance>("getBalance", { chainId: chain.id }, 90000)
+			const refreshed = await rpcRequest<ChainBalance>("getBalance", { chainId: chain.id }, 90000)
+			if (refreshed.syncState === 'degraded' || refreshed.syncState === 'stale') {
+				throw new Error('Balance could not be verified. Showing the last known balance when available.')
+			}
 			setRefreshNonce(n => n + 1)
 			setLastSyncedAt(new Date())
 		} catch (e) {
@@ -159,7 +162,10 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 	// keeping the chip up next to just-updated data would be a false alarm.
 	useEffect(() => {
 		return onRpcMessage("balance-updated", (updated: ChainBalance) => {
-			if (updated.chainId === chain.id) { setRefreshError(null); setLastSyncedAt(new Date()) }
+			if (updated.chainId !== chain.id) return
+			if (updated.syncState === 'degraded' || updated.syncState === 'stale') {
+				setRefreshError('Balance could not be verified. Showing the last known balance when available.')
+			} else { setRefreshError(null); setLastSyncedAt(new Date()) }
 		})
 	}, [chain.id])
 

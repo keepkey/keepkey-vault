@@ -73,9 +73,9 @@ describe('engine-controller wiring', () => {
     expect(block).toMatch(/const autoPrompt = [\s\S]*?!this\.wipeInProgress\)[\s\S]*?autoPrompt\(\)/)
   })
 
+  // The wipe moved to device-wipe.ts (shared by the UI and REST); its behaviour is in device-wipe.test.ts.
   test('a failed wipe brings the PIN prompt back', () => {
-    const index = readFileSync(path.join(import.meta.dir, '../src/bun/index.ts'), 'utf8')
-    const wipe = index.slice(index.indexOf('wipeDevice: async'), index.indexOf('getPublicKeys: async'))
-    expect(wipe).toMatch(/engine\.wipeInProgress = true[\s\S]*?catch \(e\)[\s\S]*?engine\.repromptPin\(\)[\s\S]*?throw e/)
+    const wipe = readFileSync(path.join(import.meta.dir, '../src/bun/device-wipe.ts'), 'utf8')
+    expect(wipe).toMatch(/host\.wipeInProgress = true[\s\S]*?catch \(e\)[\s\S]*?host\.repromptPin\(\)[\s\S]*?throw e/)
   })
 })

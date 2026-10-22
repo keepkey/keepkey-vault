@@ -6,6 +6,7 @@
  * 2. Generic fallback — reads types[primaryType] and auto-detects format from Solidity type names
  */
 import type { EIP712DecodedField, EIP712DecodedInfo } from '../shared/types'
+import { utils as ethersUtils } from 'ethers'
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -466,10 +467,31 @@ function genericExtract(typedData: any): EIP712DecodedField[] {
 
 // ── Public API ───────────────────────────────────────────────────────────
 
+function comparisonHashes(typedData: any): EIP712DecodedInfo['hashes'] {
+  try {
+    const domain = typedData.domain || {}
+    // Match hdwallet's inferred domain type when a dApp omits it, and respect
+    // the supplied order otherwise: changing that order changes the hash.
+    const domainType = typedData.types?.EIP712Domain ?? [
+      ['name', 'string'], ['version', 'string'], ['chainId', 'uint256'],
+      ['verifyingContract', 'address'], ['salt', 'bytes32'],
+    ].filter(([name]) => domain[name] !== undefined).map(([name, type]) => ({ name, type }))
+    const domainHash = ethersUtils._TypedDataEncoder.hashStruct('EIP712Domain', { EIP712Domain: domainType }, domain)
+    const { EIP712Domain: _domainType, ...messageTypes } = typedData.types || {}
+    const messageHash = typedData.primaryType === 'EIP712Domain' ? undefined
+      : ethersUtils._TypedDataEncoder.hashStruct(typedData.primaryType, messageTypes, typedData.message || {})
+    return { domainHash, messageHash }
+  } catch {
+    // Never substitute a digest from a partial or reconstructed document.
+    return undefined
+  }
+}
+
 export function decodeEIP712(typedData: any): EIP712DecodedInfo {
   const domain = typedData.domain || {}
   const primaryType = typedData.primaryType || 'Unknown'
   const message = typedData.message || {}
+  const hashes = comparisonHashes(typedData)
 
   // Try known descriptors first
   for (const desc of KNOWN_DESCRIPTORS) {
@@ -486,6 +508,7 @@ export function decodeEIP712(typedData: any): EIP712DecodedInfo {
         fields: desc.extract(message),
         isKnownType: true,
         protocolIdentityVerified: desc.protocolIdentity ? desc.protocolIdentity(typedData, message) : true,
+        hashes,
       }
     }
   }
@@ -503,5 +526,6 @@ export function decodeEIP712(typedData: any): EIP712DecodedInfo {
     fields: genericExtract(typedData),
     isKnownType: false,
     protocolIdentityVerified: false,
+    hashes,
   }
 }

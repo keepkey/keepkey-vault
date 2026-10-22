@@ -3,6 +3,8 @@ import { Box, Flex, Text, VStack, IconButton, Image } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
 import { rpcRequest } from "../lib/rpc"
 import { Z } from "../lib/z-index"
+import { DocsLink } from "./DocsLink"
+import { DOCS_LINKS, watch } from "../../shared/docs-links"
 import type { PairedAppInfo } from "../../shared/types"
 
 interface PairedAppsPanelProps {
@@ -134,6 +136,8 @@ export function PairedAppsPanel({ open, onClose }: PairedAppsPanelProps) {
 					<Text fontSize="xs" color="kk.textMuted">
 						({apps.length})
 					</Text>
+					<DocsLink href={DOCS_LINKS.settingsPairing} ml="1" />
+					<DocsLink href={watch('course-11-app-connections')} label="Watch video" />
 				</Flex>
 				<IconButton
 					aria-label={t('pairedAppsPanel.closePairedApps')}

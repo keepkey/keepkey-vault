@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <defs>
+    <linearGradient id="kkAcadBg" x1="0" y1="0" x2="0" y2="64" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#17171c"/>
+      <stop offset="1" stop-color="#0a0a0c"/>
+    </linearGradient>
+    <radialGradient id="kkAcadGlow" cx="32" cy="22" r="26" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#e9c46a" stop-opacity="0.16"/>
+      <stop offset="1" stop-color="#e9c46a" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="64" height="64" rx="15" fill="url(#kkAcadBg)"/>
+  <rect width="64" height="64" rx="15" fill="url(#kkAcadGlow)"/>
+  <rect x="0.5" y="0.5" width="63" height="63" rx="14.5" stroke="#ffffff" stroke-opacity="0.06"/>
+  <!-- university: pediment, columns, base -->
+  <path d="M14 26L32 15l18 11H14z" stroke="#e9c46a" stroke-width="2.4" stroke-linejoin="round"/>
+  <path d="M19 30v13M27 30v13M37 30v13M45 30v13" stroke="#ffffff" stroke-width="2.4" stroke-linecap="round"/>
+  <path d="M15 48h34" stroke="#ffffff" stroke-width="2.4" stroke-linecap="round"/>
+</svg>

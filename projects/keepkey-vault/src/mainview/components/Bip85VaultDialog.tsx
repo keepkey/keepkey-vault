@@ -3,6 +3,8 @@ import { Box, Flex, Text, Button, Input, Spinner } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
 import { rpcRequest } from "../lib/rpc"
 import { Z } from "../lib/z-index"
+import { DocsLink } from "./DocsLink"
+import { DOCS_LINKS } from "../../shared/docs-links"
 import type { Bip85SeedMeta } from "../../shared/types"
 
 interface Bip85VaultDialogProps {
@@ -169,6 +171,7 @@ export function Bip85VaultDialog({ onClose }: Bip85VaultDialogProps) {
 						</Box>
 						<Box>
 							<Text fontSize="md" fontWeight="600" color="kk.textPrimary">{t("bip85.title")}</Text>
+							<DocsLink href={DOCS_LINKS.bip85} />
 						</Box>
 					</Flex>
 					<Box as="button" p="1" borderRadius="md" cursor="pointer" color="kk.textMuted" _hover={{ color: "kk.textPrimary", bg: "rgba(255,255,255,0.06)" }} onClick={onClose}>

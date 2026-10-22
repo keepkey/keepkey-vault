@@ -12,9 +12,31 @@
  * Run: bun test __tests__/balance-display-state.test.ts
  */
 import { describe, test, expect } from 'bun:test'
-import { balanceDisplayState } from '../src/shared/balance-display-state'
+import { balanceDisplayState, portfolioBalanceSyncState } from '../src/shared/balance-display-state'
+import { mergeTrustedBalanceSnapshot } from '../src/shared/balance-reconciliation'
 
 const base = { loadingBalances: false, initialLoaded: true }
+
+describe('single-chain portfolio confidence', () => {
+  const cached = { chainId: 'dogecoin', symbol: 'DOGE', balance: '200', balanceUsd: 20, address: 'test', syncState: 'confirmed' as const }
+
+  test.each([
+    [{ degraded: true }, 'degraded'],
+    [{ failures: [{ caip: 'bip122:doge' }] }, 'degraded'],
+    [{ staleChains: [{ ageMs: 60_000 }] }, 'stale'],
+    [{ failures: [{}], staleChains: [{}] }, 'degraded'],
+  ] as const)('partial refresh %j preserves the trusted DOGE balance', (meta, state) => {
+    const incoming = { ...cached, balance: '0', balanceUsd: 0, syncState: portfolioBalanceSyncState(meta) }
+    expect(incoming.syncState).toBe(state)
+    expect(mergeTrustedBalanceSnapshot(cached, incoming, false)?.balance).toBe('200')
+  })
+
+  test('an explicit confirmed zero replaces a previous positive balance', () => {
+    const incoming = { ...cached, balance: '0', balanceUsd: 0, syncState: portfolioBalanceSyncState({ degraded: false, failures: [], staleChains: [] }) }
+    expect(mergeTrustedBalanceSnapshot(cached, incoming, false)?.balance).toBe('0')
+    expect(portfolioBalanceSyncState(null)).toBe('confirmed')
+  })
+})
 
 describe('balanceDisplayState', () => {
   // ── pending: an answer is genuinely still in flight ──

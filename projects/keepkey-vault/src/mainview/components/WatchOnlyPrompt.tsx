@@ -1,5 +1,7 @@
 import { Box, Flex, Text, Button } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
+import { DocsLink } from "./DocsLink"
+import { DOCS_LINKS } from "../../shared/docs-links"
 
 interface WatchOnlyPromptProps {
   deviceLabel: string
@@ -47,6 +49,7 @@ export function WatchOnlyPrompt({ deviceLabel, lastSynced, onViewPortfolio, onCo
         <Text fontSize="xs" color="kk.textMuted">
           {t("watchOnly.lastSynced", { time: formatTimeAgo(lastSynced) })}
         </Text>
+        <DocsLink href={DOCS_LINKS.watchOnly} mt="1" />
       </Box>
       <Flex px="5" pb="4" gap="3">
         <Button

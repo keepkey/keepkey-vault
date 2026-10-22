@@ -2,11 +2,17 @@ import { Box, Flex, Text, Grid, Image } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
 import supportIcon from "../assets/apps/support.svg"
 import docsIcon from "../assets/apps/docs.svg"
+import academyIcon from "../assets/apps/academy.svg"
 import affiliatesIcon from "../assets/apps/affiliates.svg"
 import bexIcon from "../assets/apps/bex.svg"
 import keepkeyIcon from "../assets/apps/keepkey.png"
 import shapeshiftIcon from "../assets/apps/shapeshift.png"
 import swapsproIcon from "../assets/apps/swapspro.png"
+import { rpcRequest } from "../lib/rpc"
+import { DOCS_LINKS } from "../../shared/docs-links"
+
+/** Docs and videos open in the system browser, not as a dApp window. */
+const openExternal = (url: string) => { rpcRequest("openUrl", { url }).catch(() => {}) }
 
 interface AppDef {
 	id: string
@@ -20,6 +26,8 @@ interface AppDef {
 	internal?: boolean
 	/** Brand accent — drives the soft blur tint in the card's top-right corner */
 	accent?: string
+	/** Opens in the system browser instead of as a dApp (docs, not an app) */
+	external?: boolean
 }
 
 function useApps(): AppDef[] {
@@ -75,9 +83,20 @@ function useApps(): AppDef[] {
 			name: t("docsName"),
 			description: t("docsDescription"),
 			icon: docsIcon,
-			url: "https://docs.keepkey.com",
+			url: DOCS_LINKS.docsHome,
 			enabled: true,
 			accent: "var(--gold)",
+			external: true,
+		},
+		{
+			id: "academy",
+			name: t("academyName", { defaultValue: "KeepKey Academy" }),
+			description: t("academyDescription", { defaultValue: "Short videos that walk through KeepKey one step at a time" }),
+			icon: academyIcon,
+			url: DOCS_LINKS.watchAll,
+			enabled: true,
+			accent: "var(--gold)",
+			external: true,
 		},
 		{
 			id: "affiliates",
@@ -120,6 +139,7 @@ export function AppStore({ onOpenApp, onOpenKeepKey }: AppStoreProps) {
 	const handleClick = (app: AppDef) => {
 		if (!app.enabled) return
 		if (app.internal) onOpenKeepKey()
+		else if (app.external) openExternal(app.url)
 		else if (app.url) onOpenApp(app.url)
 	}
 

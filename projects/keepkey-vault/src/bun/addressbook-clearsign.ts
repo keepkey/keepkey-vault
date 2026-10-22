@@ -1,5 +1,6 @@
 import { createHash } from 'crypto'
 import type { AddressBookEntry } from '../shared/types'
+import { firmwareClearSigns } from './calldata-decoder'
 
 const REQUEST_MAGIC = Buffer.from('KKABREQ1', 'ascii')
 const ROOT_MAGIC = Buffer.from('KKABRT01', 'ascii')
@@ -189,4 +190,20 @@ export const ADDRESS_BOOK_CERTIFY_UNSUPPORTED =
  */
 export function isAddressBookCertifyUnsupported(message: string): boolean {
   return /AdvancedMode required for schema attestation|Invalid schema|Attestor cannot review this schema version/i.test(message)
+}
+
+/** May a contact proof go with this send? One metadata message per transaction,
+ *  so a proof only goes when nothing else describes the call, or when Desktop's
+ *  own certified schema would just repeat what the device already shows natively
+ *  (a native-coin send, or a transfer of a token in the firmware's own table).
+ *  A caller's metadata or an ERC-7730 definition always wins. */
+export function contactProofAllowed(p: {
+  to?: string; data?: string; chainId: number; value?: unknown; firmwareVersion?: string
+  callerMetadata: boolean; schemaAttached: boolean; erc7730: boolean
+}): boolean {
+  if (p.callerMetadata || p.erc7730) return false
+  if (!p.schemaAttached) return true
+  const data = String(p.data || '')
+  return /^(0x)?$/.test(data)
+    || (data.toLowerCase().startsWith('0xa9059cbb') && firmwareClearSigns(p.to, data, p.chainId, p.firmwareVersion, p.value))
 }

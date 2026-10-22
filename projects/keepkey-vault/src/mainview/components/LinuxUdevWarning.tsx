@@ -1,6 +1,8 @@
 import { useState } from "react"
 import { Box, Button, Code, Flex, Text, VStack, Link } from "@chakra-ui/react"
 import { rpcRequest } from "../lib/rpc"
+import { DocsLink } from "./DocsLink"
+import { DOCS_LINKS } from "../../shared/docs-links"
 
 const RULE_CONTENT = `# KeepKey hardware wallet
 SUBSYSTEMS=="usb", ATTRS{idVendor}=="2b24", ATTRS{idProduct}=="0001", TAG+="uaccess"
@@ -62,6 +64,7 @@ export function LinuxUdevWarning() {
 					Your KeepKey is plugged in, but this user account doesn't have permission to talk to it.
 					Linux requires a one-time udev rule to grant USB access to the device.
 				</Text>
+				<DocsLink href={DOCS_LINKS.linuxTips} alignSelf="flex-start" mt={-2} />
 
 				{phase === "success" ? (
 					<Box
@@ -148,7 +151,10 @@ export function LinuxUdevWarning() {
 
 				<Link
 					href="https://support.keepkey.com"
-					target="_blank"
+					onClick={(e) => {
+						e.preventDefault()
+						rpcRequest("openUrl", { url: "https://support.keepkey.com" }).catch(() => {})
+					}}
 					fontSize="12px"
 					color="var(--text-3)"
 					textAlign="center"
