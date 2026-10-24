@@ -1770,7 +1770,7 @@ export class EngineController extends EventEmitter {
       this.emit('firmware-progress', { percent: 50, message: 'Look at your KeepKey — confirm to upload the bootloader…' })
       await this.wallet.firmwareUpload(firmware)
 
-      this.emit('firmware-progress', { percent: 90, message: 'Bootloader updated, rebooting...' })
+      this.emit('firmware-progress', { percent: 90, message: 'Bootloader uploaded. Follow the instructions on your KeepKey.' })
       this.updatePhase = 'rebooting'
       this.sawDetachSinceFlash = false
       this.clearWallet()
