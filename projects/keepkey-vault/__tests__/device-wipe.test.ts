@@ -205,11 +205,17 @@ describe('REST writes to the device (device-gate.ts)', () => {
   const T = Messages.MessageType
   const asRest = { whileLocked: false }
 
-  test('only REST requests are gated, and replies to the device always pass', () => {
+  test("a wipe owns the device outright: only its own messages go, Desktop's queued calls included", () => {
     const wiping = { ...free, wipeInProgress: true }
-    expect(restWriteRefusal(wiping, T.MESSAGETYPE_GETPUBLICKEY, undefined)).toBeNull() // Desktop's own call
-    expect(restWriteRefusal(wiping, T.MESSAGETYPE_GETPUBLICKEY, asRest)?.status).toBe(409)
-    expect(restWriteRefusal(wiping, T.MESSAGETYPE_BUTTONACK, asRest)).toBeNull()
+    for (const own of [T.MESSAGETYPE_CANCEL, T.MESSAGETYPE_WIPEDEVICE, T.MESSAGETYPE_BUTTONACK]) expect(restWriteRefusal(wiping, own, undefined)).toBeNull()
+    expect(restWriteRefusal(wiping, T.MESSAGETYPE_RECOVERYDEVICE, undefined)?.status).toBe(409) // the wizard's verify step
+    expect(restWriteRefusal(wiping, T.MESSAGETYPE_GETPUBLICKEY, undefined)?.status).toBe(409) // the unlock retry
+    expect(restWriteRefusal(wiping, T.MESSAGETYPE_GETFEATURES, asRest)?.status).toBe(409)
+    expect(restWriteRefusal(wiping, T.MESSAGETYPE_PINMATRIXACK, undefined)?.status).toBe(409)
+  })
+
+  test('outside a wipe only REST requests are gated, and replies to the device always pass', () => {
+    expect(restWriteRefusal({ ...free, locked: true }, T.MESSAGETYPE_GETPUBLICKEY, undefined)).toBeNull() // Desktop's own unlock
     expect(restWriteRefusal(free, T.MESSAGETYPE_GETPUBLICKEY, asRest)).toBeNull()
   })
 
@@ -231,8 +237,32 @@ describe('REST writes to the device (device-gate.ts)', () => {
       readChunk: () => new Promise<Uint8Array>((r) => replies.push(r)),
     })
     const features = () => { const b = new Uint8Array(64); b.set([0x3f, 0x23, 0x23, 0, T.MESSAGETYPE_FEATURES, 0, 0, 0, 0]); replies.shift()!(b) }
-    return { transport, written, features }
+    const failure = () => { const b = new Uint8Array(64); b.set([0x3f, 0x23, 0x23, 0, T.MESSAGETYPE_FAILURE, 0, 0, 0, 0]); replies.shift()!(b) }
+    return { transport, written, features, failure }
   }
+
+  test("the wipe's cancel releases Desktop's queued PIN request; it is refused, the wipe goes (hardware test 2026-10-24)", async () => {
+    const { transport, written, features, failure } = quietKeepKey()
+    const state = { ...free, locked: true }
+    gateRestWrites(transport, () => state)
+    // Desktop's unlock is showing the PIN grid; the wizard's verify step waits behind it.
+    const unlock = transport.call(T.MESSAGETYPE_GETPUBLICKEY, new Messages.GetPublicKey(), { msgTimeout: 2000 }).catch((e) => e)
+    await tick()
+    const verify = transport.call(T.MESSAGETYPE_RECOVERYDEVICE, new Messages.RecoveryDevice(), { msgTimeout: 2000 }).catch((e) => e)
+    ;(transport as any).userActionRequired = true // the device sent PinMatrixRequest
+    state.wipeInProgress = true
+    await transport.cancel() // device-wipe.ts order: Cancel, wait for the unlock to settle, then wipe
+    failure() // "PIN Cancelled" ends the unlock; the queued verify step goes out next
+    await unlock
+    const wipe = transport.call(T.MESSAGETYPE_WIPEDEVICE, new Messages.WipeDevice(), { msgTimeout: 2000 }).catch((e) => e)
+    const refused = await verify
+    expect(refused).toBeInstanceOf(HttpError)
+    expect(refused.status).toBe(409)
+    await tick()
+    expect(written).toEqual([T.MESSAGETYPE_GETPUBLICKEY, T.MESSAGETYPE_CANCEL, T.MESSAGETYPE_WIPEDEVICE])
+    features()
+    await wipe
+  })
 
   test('a REST request admitted before a wipe began is refused when it reaches the device (hardware test 2026-10-24)', async () => {
     const { transport, written, features } = quietKeepKey()
@@ -352,6 +382,21 @@ describe('wiring', () => {
   test("state changes run outside any REST store, and the batch route doesn't turn a refusal into a 200", () => {
     expect(engine).toContain('restRequest.exit(() => this.applyState(state))')
     expect(rest.split('if (err instanceof HttpError) throw err // the device is locked or wiping').length - 1).toBe(2)
+  })
+
+  test("the PIN pad is live only while the device asks for the PIN, not during its countdown (hardware test 2026-10-24)", () => {
+    const listener = engine.slice(engine.indexOf('transport.on(String(core.Events.PIN_REQUEST)'), engine.indexOf("this.emit('pin-request'") + 40)
+    expect(listener).toContain('this.setPinPromptOpen(true)')
+    const failures = engine.slice(engine.indexOf('transport.on(core.Events.FAILURE'), engine.indexOf('transport.on(core.Events.FAILURE') + 500)
+    expect(failures).toContain('this.setPinPromptOpen(false)')
+    const sendPin = engine.slice(engine.indexOf('  async sendPin(pin: string) {'), engine.indexOf('  async sendPin(pin: string) {') + 400)
+    expect(sendPin).toContain('this.setPinPromptOpen(false)')
+    const app = readFileSync(path.join(import.meta.dir, '../src/mainview/App.tsx'), 'utf8')
+    expect(app).toContain('deviceAsking={deviceState.pinPromptOpen ?? true}')
+    const pad = readFileSync(path.join(import.meta.dir, '../src/mainview/components/device/PinEntry.tsx'), 'utf8')
+    expect(pad).toContain('if (!deviceAsking) return')
+    expect(pad).toContain('disabled={pin.length >= 9 || !deviceAsking}')
+    expect(pad).toContain('if (pin.length > 0 && deviceAsking)')
   })
 
   test('REST and UI wipes both go through the engine, never straight to wallet.wipe()', () => {

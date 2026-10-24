@@ -186,6 +186,9 @@ export class EngineController extends EventEmitter {
   wipeOnReconnect: string | null = null
   /** The connection the wipe was deferred on: the wipe goes out only on a newer one. */
   private wipeDeferredWallet: unknown = null
+  /** The device sent PinMatrixRequest and no PIN or answer has followed. Before that, after
+   *  wrong PINs, it is counting down and reads no USB: a PIN typed then is lost. */
+  private pinPromptOpen = false
   /** promptPin's seed-access request while it waits on the PIN (device-wipe.ts reads it). */
   unlockRequest: Promise<unknown> | null = null
 
@@ -233,6 +236,7 @@ export class EngineController extends EventEmitter {
     this.hiddenWalletActive = false
     this.passphraseSetThisSession = false
     this.unlockRequest = null // belonged to the old connection
+    this.pinPromptOpen = false
     this.resetRecoveryState()
     this.keyring.removeAll().catch(() => {})
   }
@@ -281,6 +285,7 @@ export class EngineController extends EventEmitter {
         this.wipeOnReconnect = null
         this.emit('state-change', this.getDeviceState())
       }
+      this.setPinPromptOpen(true)
       this.emit('pin-request', { type })
     })
 
@@ -292,6 +297,7 @@ export class EngineController extends EventEmitter {
       const message = ev?.message?.message
       console.warn(`[Engine] Device FAILURE code=${code} message="${message}" (pinAwaitingResult=${this.pinAwaitingResult}, state=${this.lastState})`)
       this.lastFailure = { code, message, at: Date.now() }
+      this.setPinPromptOpen(false)
       if (!this.pinAwaitingResult) return
       this.pinAwaitingResult = false
       this.emit('pin-error', { code, message })
@@ -1674,6 +1680,7 @@ export class EngineController extends EventEmitter {
       activeTransport: this.activeTransport,
       updatePhase: this.updatePhase,
       wipePending: this.wipeInProgress ? 'confirm' : this.wipeOnReconnect ? 'replug' : undefined,
+      pinPromptOpen: this.pinPromptOpen,
       deviceId: features?.deviceId || undefined,
       label: features?.label || undefined,
       firmwareVersion: fwVersion,
@@ -2208,6 +2215,12 @@ export class EngineController extends EventEmitter {
     }
   }
 
+  private setPinPromptOpen(open: boolean) {
+    if (this.pinPromptOpen === open) return
+    this.pinPromptOpen = open
+    this.emit('state-change', this.getDeviceState())
+  }
+
   /** device-wipe.ts: the device can't hear Desktop. Only a locked, real device has a countdown to wait out by replugging. */
   deferWipeUntilReplug(): boolean {
     const deviceId = this.cachedFeatures?.deviceId
@@ -2242,6 +2255,7 @@ export class EngineController extends EventEmitter {
     if (!this.wallet) throw new Error('No device connected')
     // A PinMatrixAck during the wipe confirmation breaks the wipe (device-wipe.ts).
     if (this.wipeInProgress) throw new Error(WIPE_BUSY_MESSAGE)
+    this.setPinPromptOpen(false)
     console.log(`[Engine] sendPin (pinRequests=${this.pinRequestCount}, promptPinActive=${this.promptPinActive})`)
     this.pinAwaitingResult = true
     await this.wallet.sendPin(pin)

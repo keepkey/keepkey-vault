@@ -1,5 +1,6 @@
 {
 	"pin": {
+		"waitingForDevice": "Waiting for your KeepKey. After wrong PINs it makes you wait before it asks again; the keypad turns on when it does.",
 		"enterPin": "Enter PIN",
 		"createPin": "Create a NEW PIN",
 		"confirmPin": "Enter the SAME PIN again",

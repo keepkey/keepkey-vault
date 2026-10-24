@@ -8,10 +8,11 @@
  * "Unexpected message"); another, sent during the PIN-failure countdown, timed
  * out after 5 s and closed the connection for everyone.
  *
- * Only REST requests are gated: rest-api.ts runs each one inside `restRequest`.
- * Desktop's own unlock prompt, wipe and setup flows are not REST. Replies to
- * the device's own prompts always pass, so a request already running (a sign
- * waiting on its button) is never cut off.
+ * During a wipe nothing but the wipe's own messages goes, whoever sends it.
+ * Otherwise only REST requests are gated: rest-api.ts runs each one inside
+ * `restRequest`; Desktop's own unlock prompt and setup flows are not REST.
+ * Replies to the device's own prompts pass, so a request already running (a
+ * sign waiting on its button) is never cut off.
  */
 import { AsyncLocalStorage } from 'node:async_hooks'
 import * as Messages from '@keepkey/device-protocol/lib/messages_pb'
@@ -31,6 +32,9 @@ const REPLIES = new Set<number>([
   T.MESSAGETYPE_CHARACTERACK, T.MESSAGETYPE_WORDACK, T.MESSAGETYPE_ENTROPYACK, T.MESSAGETYPE_CANCEL,
 ])
 
+/** All a wipe sends: Cancel for the PIN prompt, WipeDevice, the ButtonAck for its confirmation. */
+const WIPE_OWN = new Set<number>([T.MESSAGETYPE_CANCEL, T.MESSAGETYPE_WIPEDEVICE, T.MESSAGETYPE_BUTTONACK])
+
 export interface GateState {
   wipeInProgress: boolean
   wipeOnReconnect: boolean
@@ -39,8 +43,12 @@ export interface GateState {
 }
 
 export function restWriteRefusal(state: GateState, messageType: number, rest: RestRequest | undefined) {
+  // A wipe owns the device outright, against Desktop's own calls too. hdwallet's cancel()
+  // releases every request queued behind the PIN prompt, and one asking for the PIN
+  // restarted the countdown under the wipe (hardware test 2026-10-24: "the wipe
+  // triggered an additional lock, and after that cooldown still failed to wipe").
+  if (state.wipeInProgress) return WIPE_OWN.has(messageType) ? null : { status: 409, message: WIPE_BUSY_MESSAGE }
   if (!rest || REPLIES.has(messageType)) return null
-  if (state.wipeInProgress) return { status: 409, message: WIPE_BUSY_MESSAGE }
   if (state.wipeOnReconnect) return { status: 409, message: WIPE_REPLUG_PENDING_MESSAGE }
   // Only a request's first message: once it runs, the device may lock mid-flow (its own
   // PIN prompt), and the TxAcks, data chunks and struct acks that follow must still go.
