@@ -253,6 +253,49 @@ describe('REST writes to the device (device-gate.ts)', () => {
   })
 })
 
+describe('REST requests already running when the device locks (review 2026-10-24)', () => {
+  const T = Messages.MessageType
+  function answeringKeepKey() {
+    const written: number[] = []
+    const replies: Array<(b: Uint8Array) => void> = []
+    const transport = new Transport(new core.Keyring(), {
+      isOpened: async () => true, getDeviceID: async () => 'flow', connect: async () => {}, disconnect: async () => {},
+      async writeChunk(buf: Uint8Array) { if (buf[1] === 0x23 && buf[2] === 0x23) written.push((buf[3] << 8) | buf[4]) },
+      readChunk: () => new Promise<Uint8Array>((r) => replies.push(r)),
+    })
+    const answer = (type: number) => { const b = new Uint8Array(64); b.set([0x3f, 0x23, 0x23, type >> 8, type & 0xff, 0, 0, 0, 0]); replies.shift()!(b) }
+    return { transport, written, answer }
+  }
+
+  test("a multi-message flow's follow-ups still go after the device locks mid-flow; a new request does not", async () => {
+    const { transport, written, answer } = answeringKeepKey()
+    const state: GateState = { wipeInProgress: false, wipeOnReconnect: false, locked: false }
+    gateRestWrites(transport, () => state)
+    const t: any = transport
+    // hdwallet's signing shape: one lockDuring, every message omitLock (bitcoin.ts, ethereum.ts).
+    const flow = restRequest.run({ whileLocked: false }, () => t.lockDuring(async () => {
+      await t.call(T.MESSAGETYPE_SIGNTX, new Messages.SignTx(), { omitLock: true, msgTimeout: 2000 })
+      state.locked = true // the device asked for its PIN: Desktop now counts it as locked
+      await t.call(T.MESSAGETYPE_TXACK, new Messages.TxAck(), { omitLock: true, msgTimeout: 2000 })
+    }))
+    await tick(); answer(T.MESSAGETYPE_FEATURES)
+    await tick(); answer(T.MESSAGETYPE_FEATURES)
+    await flow
+    expect(written).toEqual([T.MESSAGETYPE_SIGNTX, T.MESSAGETYPE_TXACK])
+    const fresh = await restRequest.run({ whileLocked: false }, () =>
+      transport.call(T.MESSAGETYPE_GETADDRESS, new Messages.GetAddress(), { msgTimeout: 2000 })).catch((e) => e)
+    expect(fresh.status).toBe(423)
+    expect(written).toEqual([T.MESSAGETYPE_SIGNTX, T.MESSAGETYPE_TXACK])
+  })
+
+  test("what a state change starts is Desktop's, not the REST request's (the PIN auto-prompt timer)", async () => {
+    const seen = await restRequest.run({ whileLocked: false }, () => new Promise((resolve) => {
+      restRequest.exit(() => setTimeout(() => resolve(restRequest.getStore()), 0))
+    }))
+    expect(seen).toBeUndefined()
+  })
+})
+
 describe('wiring', () => {
   const read = (f: string) => readFileSync(path.join(import.meta.dir, '../src/bun', f), 'utf8')
   const rest = read('rest-api.ts')
@@ -304,6 +347,11 @@ describe('wiring', () => {
     // A PIN prompt the device raises on its own (auto-lock) hands the unlock to Desktop.
     const listener = engine.slice(engine.indexOf('transport.on(String(core.Events.PIN_REQUEST)'), engine.indexOf("this.emit('pin-request'"))
     expect(listener).toContain("if (this.lastState === 'ready' && !this.setupInProgress && !this.verifyInProgress) this.updateState('needs_pin')")
+  })
+
+  test("state changes run outside any REST store, and the batch route doesn't turn a refusal into a 200", () => {
+    expect(engine).toContain('restRequest.exit(() => this.applyState(state))')
+    expect(rest.split('if (err instanceof HttpError) throw err // the device is locked or wiping').length - 1).toBe(2)
   })
 
   test('REST and UI wipes both go through the engine, never straight to wallet.wipe()', () => {

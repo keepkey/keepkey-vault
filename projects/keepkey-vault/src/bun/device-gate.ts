@@ -18,8 +18,10 @@ import * as Messages from '@keepkey/device-protocol/lib/messages_pb'
 import { WIPE_BUSY_MESSAGE, WIPE_REPLUG_PENDING_MESSAGE } from './device-wipe'
 import { HttpError } from './auth'
 
-/** `whileLocked`: set by requireWallet for routes that never ask for the PIN. */
-export const restRequest = new AsyncLocalStorage<{ whileLocked: boolean }>()
+/** `whileLocked`: set by requireWallet for routes that never ask for the PIN.
+ *  `admitted`: this device request's first message already passed the lock check. */
+export interface RestRequest { whileLocked: boolean; admitted?: boolean }
+export const restRequest = new AsyncLocalStorage<RestRequest>()
 
 export const DEVICE_LOCKED_MESSAGE = 'KeepKey is locked: enter the PIN in KeepKey Desktop, then try again'
 
@@ -36,23 +38,41 @@ export interface GateState {
   locked: boolean
 }
 
-export function restWriteRefusal(state: GateState, messageType: number, rest: { whileLocked: boolean } | undefined) {
+export function restWriteRefusal(state: GateState, messageType: number, rest: RestRequest | undefined) {
   if (!rest || REPLIES.has(messageType)) return null
   if (state.wipeInProgress) return { status: 409, message: WIPE_BUSY_MESSAGE }
   if (state.wipeOnReconnect) return { status: 409, message: WIPE_REPLUG_PENDING_MESSAGE }
-  if (state.locked && !rest.whileLocked) return { status: 423, message: DEVICE_LOCKED_MESSAGE }
+  // Only a request's first message: once it runs, the device may lock mid-flow (its own
+  // PIN prompt), and the TxAcks, data chunks and struct acks that follow must still go.
+  if (state.locked && !rest.whileLocked && !rest.admitted) return { status: 423, message: DEVICE_LOCKED_MESSAGE }
   return null
 }
 
-/** Wrap hdwallet's per-message write (private, one call per message) once per transport. */
+/**
+ * Wrap hdwallet's per-message write (private, one call per message) once per transport.
+ * One device request = a `call` without omitLock, or a `lockDuring` block (multi-message
+ * flows send every message, the first included, with omitLock inside one): each gets its
+ * own store, so its first write is checked and the rest of its flow is not.
+ */
 export function gateRestWrites(transport: any, state: () => GateState) {
   if (transport.restGated) return
   transport.restGated = true
+  const ownRequest = <T>(run: () => T): T => {
+    const rest = restRequest.getStore()
+    return rest ? restRequest.run({ whileLocked: rest.whileLocked }, run) : run()
+  }
+  const call = transport.call.bind(transport)
+  transport.call = (type: number, msg: unknown, options?: { omitLock?: boolean }) =>
+    options?.omitLock ? call(type, msg, options) : ownRequest(() => call(type, msg, options))
+  const lockDuring = transport.lockDuring.bind(transport)
+  transport.lockDuring = (action: () => Promise<unknown>) => ownRequest(() => lockDuring(action))
   const write = transport.write.bind(transport)
   transport.write = async (buf: Uint8Array, debugLink: boolean) => {
+    const rest = restRequest.getStore()
     // Message buffer: '##', then the big-endian message type (hdwallet toMessageBuffer).
-    const refusal = restWriteRefusal(state(), (buf[2] << 8) | buf[3], restRequest.getStore())
+    const refusal = restWriteRefusal(state(), (buf[2] << 8) | buf[3], rest)
     if (refusal) throw new HttpError(refusal.status, refusal.message)
+    if (rest) rest.admitted = true
     return write(buf, debugLink)
   }
 }

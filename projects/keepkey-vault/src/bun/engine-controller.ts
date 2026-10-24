@@ -262,8 +262,8 @@ export class EngineController extends EventEmitter {
     gateRestWrites(transport, () => ({
       wipeInProgress: this.wipeInProgress,
       wipeOnReconnect: !!this.wipeOnReconnect,
-      // Connected but not read yet counts as locked: the read may well say needs_pin.
-      locked: this.isLocked || this.lastState === 'connected_unpaired' || this.lastState === 'disconnected',
+      // Paired but not read yet counts as locked: the read may well say needs_pin.
+      locked: this.isLocked || !this.cachedFeatures,
     }))
 
     transport.on(String(core.Events.PIN_REQUEST), () => {
@@ -428,7 +428,13 @@ export class EngineController extends EventEmitter {
     usb.removeAllListeners('detach')
   }
 
+  /** Never inside a REST request's store (device-gate.ts): what a state change starts
+   *  (the PIN auto-prompt, seed checks, Pioneer) is Desktop's own work, not that request's. */
   private updateState(state: DeviceState) {
+    restRequest.exit(() => this.applyState(state))
+  }
+
+  private applyState(state: DeviceState) {
     this.lastState = state
     if (state !== 'needs_pin') this.pinAwaitingResult = false
     if (state === 'ready') this.wipeOnReconnect = null // unlocked with the PIN after all

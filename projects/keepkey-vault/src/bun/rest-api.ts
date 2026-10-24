@@ -4347,6 +4347,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
                   addressNList: p.address_n,
                 })
               } catch (err: any) {
+                if (err instanceof HttpError) throw err // the device is locked or wiping: not a per-path miss
                 console.warn(`[REST] batch address failed for path ${JSON.stringify(p.address_n)}:`, err?.message)
               }
               continue
@@ -4399,6 +4400,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
                 addressNList: p.address_n,
               })
             } catch (err: any) {
+              if (err instanceof HttpError) throw err // the device is locked or wiping: not a per-path miss
               console.warn(`[REST] batch pubkey failed for path ${JSON.stringify(p.address_n)} coin=${coin} scriptType=${p.script_type}:`, err?.message)
             }
           }
