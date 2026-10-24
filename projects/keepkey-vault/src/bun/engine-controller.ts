@@ -20,6 +20,7 @@ import { forceReleaseWebUsb, isUnreleasable } from './webusb-recovery'
 import type { DeviceFailure } from './device-refusal'
 import { flushRingBuffers, getActiveFlashName, getEmulatorStatus } from './emulator'
 import { wipeOwningDevice, WIPE_BUSY_MESSAGE, type WipeHost } from './device-wipe'
+import { gateRestWrites, restRequest } from './device-gate'
 
 const KEEPKEY_VENDOR_ID = 0x2B24 // 11044
 // Firmware manifest lives in keepkey-vault (migrated from keepkey-desktop, which is now stale).
@@ -185,10 +186,16 @@ export class EngineController extends EventEmitter {
   wipeOnReconnect: string | null = null
   /** The connection the wipe was deferred on: the wipe goes out only on a newer one. */
   private wipeDeferredWallet: unknown = null
+  /** The device sent PinMatrixRequest and no PIN or answer has followed. Before that, after
+   *  wrong PINs, it is counting down and reads no USB: a PIN typed then is lost. */
+  private pinPromptOpen = false
   /** promptPin's seed-access request while it waits on the PIN (device-wipe.ts reads it). */
   unlockRequest: Promise<unknown> | null = null
 
   get isSyncing(): boolean { return this.syncing }
+  /** Waiting for its PIN: only Desktop's own prompt should talk to it (rest-api.ts requireWallet). */
+  get isLocked(): boolean { return this.lastState === 'needs_pin' }
+
   get isEmulator(): boolean { return this.activeTransport === 'emulator' }
   /** Get the emulator transport delegate (for chunk counting in confirmOp). */
   get emuDelegate(): any { return this.isEmulator ? (this.wallet as any)?.transport?.delegate : null }
@@ -229,6 +236,7 @@ export class EngineController extends EventEmitter {
     this.hiddenWalletActive = false
     this.passphraseSetThisSession = false
     this.unlockRequest = null // belonged to the old connection
+    this.pinPromptOpen = false
     this.resetRecoveryState()
     this.keyring.removeAll().catch(() => {})
   }
@@ -254,6 +262,13 @@ export class EngineController extends EventEmitter {
     this.cleanupTransportListeners()
 
     const transport = this.wallet.transport
+    // REST writes that would collide with a wipe or ask a locked device for its PIN are refused (device-gate.ts).
+    gateRestWrites(transport, () => ({
+      wipeInProgress: this.wipeInProgress,
+      wipeOnReconnect: !!this.wipeOnReconnect,
+      // Paired but not read yet counts as locked: the read may well say needs_pin.
+      locked: this.isLocked || !this.cachedFeatures,
+    }))
 
     transport.on(String(core.Events.PIN_REQUEST), () => {
       this.pinRequestCount++
@@ -262,11 +277,15 @@ export class EngineController extends EventEmitter {
         type = this.pinRequestCount === 1 ? 'new-first' : 'new-second'
       }
       console.log(`[Engine] PIN_REQUEST → type=${type} (count=${this.pinRequestCount}, setup=${this.setupInProgress})`)
+      // A request found the device locked (auto-lock, clear-session): from here Desktop's
+      // prompt owns the unlock, and other REST requests are refused (device-gate.ts).
+      if (this.lastState === 'ready' && !this.setupInProgress && !this.verifyInProgress) this.updateState('needs_pin')
       // The countdown ended without a replug: the device hears Desktop again, so a wipe needs a new click.
       if (this.wipeOnReconnect) {
         this.wipeOnReconnect = null
         this.emit('state-change', this.getDeviceState())
       }
+      this.setPinPromptOpen(true)
       this.emit('pin-request', { type })
     })
 
@@ -278,6 +297,7 @@ export class EngineController extends EventEmitter {
       const message = ev?.message?.message
       console.warn(`[Engine] Device FAILURE code=${code} message="${message}" (pinAwaitingResult=${this.pinAwaitingResult}, state=${this.lastState})`)
       this.lastFailure = { code, message, at: Date.now() }
+      this.setPinPromptOpen(false)
       if (!this.pinAwaitingResult) return
       this.pinAwaitingResult = false
       this.emit('pin-error', { code, message })
@@ -414,7 +434,13 @@ export class EngineController extends EventEmitter {
     usb.removeAllListeners('detach')
   }
 
+  /** Never inside a REST request's store (device-gate.ts): what a state change starts
+   *  (the PIN auto-prompt, seed checks, Pioneer) is Desktop's own work, not that request's. */
   private updateState(state: DeviceState) {
+    restRequest.exit(() => this.applyState(state))
+  }
+
+  private applyState(state: DeviceState) {
     this.lastState = state
     if (state !== 'needs_pin') this.pinAwaitingResult = false
     if (state === 'ready') this.wipeOnReconnect = null // unlocked with the PIN after all
@@ -1654,6 +1680,7 @@ export class EngineController extends EventEmitter {
       activeTransport: this.activeTransport,
       updatePhase: this.updatePhase,
       wipePending: this.wipeInProgress ? 'confirm' : this.wipeOnReconnect ? 'replug' : undefined,
+      pinPromptOpen: this.pinPromptOpen,
       deviceId: features?.deviceId || undefined,
       label: features?.label || undefined,
       firmwareVersion: fwVersion,
@@ -2188,6 +2215,12 @@ export class EngineController extends EventEmitter {
     }
   }
 
+  private setPinPromptOpen(open: boolean) {
+    if (this.pinPromptOpen === open) return
+    this.pinPromptOpen = open
+    this.emit('state-change', this.getDeviceState())
+  }
+
   /** device-wipe.ts: the device can't hear Desktop. Only a locked, real device has a countdown to wait out by replugging. */
   deferWipeUntilReplug(): boolean {
     const deviceId = this.cachedFeatures?.deviceId
@@ -2207,20 +2240,22 @@ export class EngineController extends EventEmitter {
   /** Wipe the device, owning it until it answers (see device-wipe.ts). Used by the UI and REST. */
   async wipeDevice(confirm: (wipe: () => Promise<unknown>) => Promise<unknown> = (wipe) => wipe()) {
     // `this.wallet` is typed as core.HDWallet; its transport is hdwallet-keepkey's, which has both fields.
-    await wipeOwningDevice(this as WipeHost, confirm, async () => {
+    // Not a REST request even when REST asked for it: the wipe's own writes are never gated.
+    await restRequest.exit(() => wipeOwningDevice(this as WipeHost, confirm, async () => {
       if (this.isEmulator) {
         flushRingBuffers()
         await this.connectEmulator()
       } else {
         await this.syncState()
       }
-    })
+    }))
   }
 
   async sendPin(pin: string) {
     if (!this.wallet) throw new Error('No device connected')
     // A PinMatrixAck during the wipe confirmation breaks the wipe (device-wipe.ts).
     if (this.wipeInProgress) throw new Error(WIPE_BUSY_MESSAGE)
+    this.setPinPromptOpen(false)
     console.log(`[Engine] sendPin (pinRequests=${this.pinRequestCount}, promptPinActive=${this.promptPinActive})`)
     this.pinAwaitingResult = true
     await this.wallet.sendPin(pin)
