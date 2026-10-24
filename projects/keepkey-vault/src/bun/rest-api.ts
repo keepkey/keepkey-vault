@@ -185,13 +185,29 @@ function corsHeaders(_req?: Request): Record<string, string> {
   }
 }
 
-function requireWallet(engine: EngineController) {
-  if (!engine.wallet) throw new HttpError(503, 'No device connected')
-  // A wipe owns the device until it answers: any message sent during its confirmation breaks it (device-wipe.ts).
-  if (engine.wipeInProgress) throw new HttpError(409, WIPE_BUSY_MESSAGE)
-  // A wipe waiting for its replug too: a PIN-protected call would restart the device's countdown.
-  if (engine.wipeOnReconnect) throw new HttpError(409, WIPE_REPLUG_PENDING_MESSAGE)
-  return engine.wallet
+/** As long as hdwallet waits on a PIN prompt (LONG_TIMEOUT). */
+const UNLOCK_WAIT_MS = 5 * 60 * 1000
+export const DEVICE_LOCKED_MESSAGE = 'KeepKey is locked: enter the PIN in KeepKey Desktop, then try again'
+
+/** `whileLocked`: the route never asks the device for its PIN (features, wipe, PIN entry). */
+async function requireWallet(engine: EngineController, { whileLocked = false } = {}) {
+  const usable = () => {
+    if (!engine.wallet) throw new HttpError(503, 'No device connected')
+    // A wipe owns the device until it answers: any message sent during its confirmation breaks it (device-wipe.ts).
+    if (engine.wipeInProgress) throw new HttpError(409, WIPE_BUSY_MESSAGE)
+    // A wipe waiting for its replug too: a PIN-protected call would restart the device's countdown.
+    if (engine.wipeOnReconnect) throw new HttpError(409, WIPE_REPLUG_PENDING_MESSAGE)
+    return engine.wallet
+  }
+  usable()
+  // A locked KeepKey belongs to Desktop's PIN prompt. A call that needs the seed and
+  // went to the device now would ask for the PIN itself (it took a PIN the user typed
+  // for Desktop) or, after wrong PINs, time out during the device's countdown and close
+  // the connection for everyone (hardware test 2026-10-24). It waits for the unlock instead.
+  if (!whileLocked && engine.isLocked) {
+    await engine.waitUntilUnlocked(UNLOCK_WAIT_MS).catch(() => { throw new HttpError(423, DEVICE_LOCKED_MESSAGE) })
+  }
+  return usable()
 }
 
 const KEEPKEY_VENDOR_ID = 0x2B24
@@ -1753,7 +1769,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
                   : undefined
               let actualSigner = formatAddressNPath(addressNList)
               try {
-                const wallet = requireWallet(engine)
+                const wallet = await requireWallet(engine)
                 const derived = await wallet.solanaGetAddress({ addressNList, showDisplay: false })
                 const derivedSigner = typeof derived === 'string' ? derived : derived?.address
                 if (derivedSigner) actualSigner = derivedSigner
@@ -1804,7 +1820,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
                 }
                 try {
                   const addressNList = pickAddressNList(preview, DEFAULT_SOLANA_ADDRESS_N)
-                  const wallet = requireWallet(engine)
+                  const wallet = await requireWallet(engine)
                   const derived = await wallet.solanaGetAddress({ addressNList, showDisplay: false })
                   const owner = typeof derived === 'string' ? derived : derived?.address
                   if (owner) {
@@ -2155,7 +2171,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         // ── ADDRESSES (9 endpoints) ──────────────────────────────────
         if (path === '/addresses/utxo' && method === 'POST') {
           auth.requireAuth(req)
-          const wallet = requireWallet(engine)
+          const wallet = await requireWallet(engine)
           const body = await parseRequest(req, S.AddressRequest)
           const sd = showDisplay(body.show_display)
           const cacheKey = scopedKey(engine, 'utxo', body, wallet)
@@ -2177,7 +2193,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/addresses/cosmos' && method === 'POST') {
           auth.requireAuth(req)
-          const wallet = requireWallet(engine)
+          const wallet = await requireWallet(engine)
           const body = await parseRequest(req, S.AddressRequest)
           const cacheKey = scopedKey(engine, 'cosmos', body, wallet)
           const cached = addressCache.get(cacheKey)
@@ -2196,7 +2212,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/addresses/osmosis' && method === 'POST') {
           auth.requireAuth(req)
-          const wallet = requireWallet(engine)
+          const wallet = await requireWallet(engine)
           const body = await parseRequest(req, S.AddressRequest)
           const cacheKey = scopedKey(engine, 'osmo', body, wallet)
           const cached = addressCache.get(cacheKey)
@@ -2215,7 +2231,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/addresses/eth' && method === 'POST') {
           auth.requireAuth(req)
-          const wallet = requireWallet(engine)
+          const wallet = await requireWallet(engine)
           const body = await parseRequest(req, S.AddressRequest)
           const cacheKey = scopedKey(engine, 'eth', body, wallet)
           const cached = addressCache.get(cacheKey)
@@ -2234,7 +2250,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/addresses/tendermint' && method === 'POST') {
           auth.requireAuth(req)
-          const wallet = requireWallet(engine)
+          const wallet = await requireWallet(engine)
           const body = await parseRequest(req, S.AddressRequest)
           const cacheKey = scopedKey(engine, 'tendermint', body, wallet)
           const cached = addressCache.get(cacheKey)
@@ -2253,7 +2269,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/addresses/thorchain' && method === 'POST') {
           auth.requireAuth(req)
-          const wallet = requireWallet(engine)
+          const wallet = await requireWallet(engine)
           const body = await parseRequest(req, S.AddressRequest)
           const cacheKey = scopedKey(engine, 'thor', body, wallet)
           const cached = addressCache.get(cacheKey)
@@ -2272,7 +2288,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/addresses/mayachain' && method === 'POST') {
           auth.requireAuth(req)
-          const wallet = requireWallet(engine)
+          const wallet = await requireWallet(engine)
           const body = await parseRequest(req, S.AddressRequest)
           const cacheKey = scopedKey(engine, 'maya', body, wallet)
           const cached = addressCache.get(cacheKey)
@@ -2291,7 +2307,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/addresses/xrp' && method === 'POST') {
           auth.requireAuth(req)
-          const wallet = requireWallet(engine)
+          const wallet = await requireWallet(engine)
           const body = await parseRequest(req, S.AddressRequest)
           const cacheKey = scopedKey(engine, 'xrp', body, wallet)
           const cached = addressCache.get(cacheKey)
@@ -2312,7 +2328,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           auth.requireAuth(req)
           const fwBlock = requireChainSupport('solana')
           if (fwBlock) return fwBlock
-          const wallet = requireWallet(engine)
+          const wallet = await requireWallet(engine)
           const body = await parseRequest(req, S.AddressRequest)
           const cacheKey = scopedKey(engine, 'sol', body, wallet)
           const cached = addressCache.get(cacheKey)
@@ -2333,7 +2349,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           auth.requireAuth(req)
           const fwBlock = requireChainSupport('tron')
           if (fwBlock) return fwBlock
-          const wallet = requireWallet(engine)
+          const wallet = await requireWallet(engine)
           const body = await parseRequest(req, S.AddressRequest)
           const cacheKey = scopedKey(engine, 'trx', body, wallet)
           const cached = addressCache.get(cacheKey)
@@ -2354,7 +2370,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           auth.requireAuth(req)
           const fwBlock = requireChainSupport('ton')
           if (fwBlock) return fwBlock
-          const wallet = requireWallet(engine)
+          const wallet = await requireWallet(engine)
           const body = await parseRequest(req, S.AddressRequest)
           const cacheKey = scopedKey(engine, 'ton', body, wallet)
           const cached = addressCache.get(cacheKey)
@@ -2378,7 +2394,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           if (getSetting('hive_enabled') !== '1') return json({ error: 'Hive is disabled' }, 403)
           const fwBlock = requireChainSupport('hive')
           if (fwBlock) return fwBlock
-          const wallet = requireWallet(engine)
+          const wallet = await requireWallet(engine)
           const body = await parseRequest(req, S.AddressRequest)
           const cacheKey = scopedKey(engine, 'hive', body, wallet)
           const cached = addressCache.get(cacheKey)
@@ -2402,7 +2418,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           if (getSetting('hive_enabled') !== '1') return json({ error: 'Hive is disabled' }, 403)
           const fwBlock = requireChainSupport('hive')
           if (fwBlock) return fwBlock
-          const wallet = requireWallet(engine)
+          const wallet = await requireWallet(engine)
           const body = await parseRequest(req, S.HiveSignMessageRequest)
           const messageBytes = body.is_text === false
             ? Buffer.from(body.message.replace(/^0x/, ''), 'hex')
@@ -2450,7 +2466,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           if (getSetting('hive_enabled') !== '1') return json({ error: 'Hive is disabled' }, 403)
           const fwBlock = requireChainSupport('hive')
           if (fwBlock) return fwBlock
-          const wallet = requireWallet(engine)
+          const wallet = await requireWallet(engine)
           const body = await parseRequest(req, S.HiveSignOperationsRequest)
 
           // Header (TaPoS) from Pioneer — the exact values the device signs
@@ -2504,7 +2520,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           if (getSetting('hive_enabled') !== '1') return json({ error: 'Hive is disabled' }, 403)
           const fwBlock = requireChainSupport('hive')
           if (fwBlock) return fwBlock
-          const wallet = requireWallet(engine)
+          const wallet = await requireWallet(engine)
           const body = await parseRequest(req, S.HiveSignTransferRequest)
           const addressNList = body.addressNList || body.address_n || hiveRolePath('active', 0)
           const result = await emuWrap(() => (wallet as any).hiveSignTx({
@@ -2716,7 +2732,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/eth/sign-transaction' && method === 'POST') {
           auth.requireAuth(req)
-          const wallet = requireWallet(engine)
+          const wallet = await requireWallet(engine)
           const body = await parseRequest(req, S.EthSignTransactionRequest)
 
           // Resolve addressNList from body or by scanning
@@ -2964,7 +2980,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/eth/clearsign/load-signer' && method === 'POST') {
           auth.requireAuth(req)
-          const wallet = requireWallet(engine)
+          const wallet = await requireWallet(engine)
           const body = await parseRequest(req, S.LoadClearsignSignerRequest)
           const pubkey = parseHex(body.pubkey, 'pubkey')
           if (pubkey.length !== 33) throw new HttpError(400, `pubkey must be 33 bytes, got ${pubkey.length}`)
@@ -3027,7 +3043,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/eth/sign-typed-data' && method === 'POST') {
           auth.requireAuth(req)
-          const wallet = requireWallet(engine)
+          const wallet = await requireWallet(engine)
           const body = await parseRequest(req, S.EthSignTypedDataRequest)
 
           // Address resolution: cache first, then scan accounts
@@ -3060,7 +3076,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/eth/sign' && method === 'POST') {
           auth.requireAuth(req)
-          const wallet = requireWallet(engine)
+          const wallet = await requireWallet(engine)
           const body = await parseRequest(req, S.EthSignRequest)
           const { addressNList } = auth.getAccount(body.address)
           // hdwallet expects message as a hex string (isHexString check), not Buffer
@@ -3070,7 +3086,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/eth/verify' && method === 'POST') {
           auth.requireAuth(req)
-          const wallet = requireWallet(engine)
+          const wallet = await requireWallet(engine)
           const body = await parseRequest(req, S.EthVerifyRequest)
           const msgBytes = Buffer.from(body.message.replace(/^0x/, ''), 'hex')
           const result = await wallet.ethVerifyMessage({
@@ -3120,7 +3136,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         // ── UTXO SIGNING (1 endpoint) ────────────────────────────────
         if (path === '/utxo/sign-transaction' && method === 'POST') {
           auth.requireAuth(req)
-          const wallet = requireWallet(engine)
+          const wallet = await requireWallet(engine)
           const body = await parseRequest(req, S.UtxoSignTransactionRequest)
           if(hasMultisigSigningData(body) && !btcMultisigEnabled(getSetting))throw new HttpError(403,BTC_MULTISIG_DISABLED)
           const coin = body.coin || 'Bitcoin'
@@ -3153,37 +3169,37 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         // ── COSMOS SIGNING (6 endpoints) ──────────────────────────────
         if (path === '/cosmos/sign-amino' && method === 'POST') {
           auth.requireAuth(req)
-          const wallet = requireWallet(engine)
+          const wallet = await requireWallet(engine)
           const body = await parseRequest(req, S.CosmosAminoSignRequest)
           return json(validateResponse(await cosmosAminoSign(wallet, auth, body, 'cosmosSignTx', 'uatom', '5000', '1000000', (fn) => emuWrap(fn, { operation: 'cosmosSignTx', chain: 'Cosmos' })), S.CosmosAminoSignResponse, path))
         }
         if (path === '/cosmos/sign-amino-delegate' && method === 'POST') {
           auth.requireAuth(req)
-          const wallet = requireWallet(engine)
+          const wallet = await requireWallet(engine)
           const body = await parseRequest(req, S.CosmosAminoSignRequest)
           return json(validateResponse(await cosmosAminoSign(wallet, auth, body, 'cosmosSignTx', 'uatom', '5000', '1000000', (fn) => emuWrap(fn, { operation: 'cosmosSignTx', chain: 'Cosmos' })), S.CosmosAminoSignResponse, path))
         }
         if (path === '/cosmos/sign-amino-undelegate' && method === 'POST') {
           auth.requireAuth(req)
-          const wallet = requireWallet(engine)
+          const wallet = await requireWallet(engine)
           const body = await parseRequest(req, S.CosmosAminoSignRequest)
           return json(validateResponse(await cosmosAminoSign(wallet, auth, body, 'cosmosSignTx', 'uatom', '5000', '1000000', (fn) => emuWrap(fn, { operation: 'cosmosSignTx', chain: 'Cosmos' })), S.CosmosAminoSignResponse, path))
         }
         if (path === '/cosmos/sign-amino-redelegate' && method === 'POST') {
           auth.requireAuth(req)
-          const wallet = requireWallet(engine)
+          const wallet = await requireWallet(engine)
           const body = await parseRequest(req, S.CosmosAminoSignRequest)
           return json(validateResponse(await cosmosAminoSign(wallet, auth, body, 'cosmosSignTx', 'uatom', '5000', '1000000', (fn) => emuWrap(fn, { operation: 'cosmosSignTx', chain: 'Cosmos' })), S.CosmosAminoSignResponse, path))
         }
         if (path === '/cosmos/sign-amino-withdraw-delegator-rewards-all' && method === 'POST') {
           auth.requireAuth(req)
-          const wallet = requireWallet(engine)
+          const wallet = await requireWallet(engine)
           const body = await parseRequest(req, S.CosmosAminoSignRequest)
           return json(validateResponse(await cosmosAminoSign(wallet, auth, body, 'cosmosSignTx', 'uatom', '5000', '1000000', (fn) => emuWrap(fn, { operation: 'cosmosSignTx', chain: 'Cosmos' })), S.CosmosAminoSignResponse, path))
         }
         if (path === '/cosmos/sign-amino-ibc-transfer' && method === 'POST') {
           auth.requireAuth(req)
-          const wallet = requireWallet(engine)
+          const wallet = await requireWallet(engine)
           const body = await parseRequest(req, S.CosmosAminoSignRequest)
           return json(validateResponse(await cosmosAminoSign(wallet, auth, body, 'cosmosSignTx', 'uatom', '5000', '1000000', (fn) => emuWrap(fn, { operation: 'cosmosSignTx', chain: 'Cosmos' })), S.CosmosAminoSignResponse, path))
         }
@@ -3191,55 +3207,55 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         // ── OSMOSIS SIGNING (9 endpoints) ────────────────────────────
         if (path === '/osmosis/sign-amino' && method === 'POST') {
           auth.requireAuth(req)
-          const wallet = requireWallet(engine)
+          const wallet = await requireWallet(engine)
           const body = await parseRequest(req, S.CosmosAminoSignRequest)
           return json(validateResponse(await cosmosAminoSign(wallet, auth, body, 'osmosisSignTx', 'uosmo', '800', '290000', (fn) => emuWrap(fn, { operation: 'osmosisSignTx', chain: 'Osmosis' })), S.CosmosAminoSignResponse, path))
         }
         if (path === '/osmosis/sign-amino-delegate' && method === 'POST') {
           auth.requireAuth(req)
-          const wallet = requireWallet(engine)
+          const wallet = await requireWallet(engine)
           const body = await parseRequest(req, S.CosmosAminoSignRequest)
           return json(validateResponse(await cosmosAminoSign(wallet, auth, body, 'osmosisSignTx', 'uosmo', '800', '290000', (fn) => emuWrap(fn, { operation: 'osmosisSignTx', chain: 'Osmosis' })), S.CosmosAminoSignResponse, path))
         }
         if (path === '/osmosis/sign-amino-undelegate' && method === 'POST') {
           auth.requireAuth(req)
-          const wallet = requireWallet(engine)
+          const wallet = await requireWallet(engine)
           const body = await parseRequest(req, S.CosmosAminoSignRequest)
           return json(validateResponse(await cosmosAminoSign(wallet, auth, body, 'osmosisSignTx', 'uosmo', '800', '290000', (fn) => emuWrap(fn, { operation: 'osmosisSignTx', chain: 'Osmosis' })), S.CosmosAminoSignResponse, path))
         }
         if (path === '/osmosis/sign-amino-redelegate' && method === 'POST') {
           auth.requireAuth(req)
-          const wallet = requireWallet(engine)
+          const wallet = await requireWallet(engine)
           const body = await parseRequest(req, S.CosmosAminoSignRequest)
           return json(validateResponse(await cosmosAminoSign(wallet, auth, body, 'osmosisSignTx', 'uosmo', '800', '290000', (fn) => emuWrap(fn, { operation: 'osmosisSignTx', chain: 'Osmosis' })), S.CosmosAminoSignResponse, path))
         }
         if (path === '/osmosis/sign-amino-withdraw-delegator-rewards-all' && method === 'POST') {
           auth.requireAuth(req)
-          const wallet = requireWallet(engine)
+          const wallet = await requireWallet(engine)
           const body = await parseRequest(req, S.CosmosAminoSignRequest)
           return json(validateResponse(await cosmosAminoSign(wallet, auth, body, 'osmosisSignTx', 'uosmo', '800', '290000', (fn) => emuWrap(fn, { operation: 'osmosisSignTx', chain: 'Osmosis' })), S.CosmosAminoSignResponse, path))
         }
         if (path === '/osmosis/sign-amino-ibc-transfer' && method === 'POST') {
           auth.requireAuth(req)
-          const wallet = requireWallet(engine)
+          const wallet = await requireWallet(engine)
           const body = await parseRequest(req, S.CosmosAminoSignRequest)
           return json(validateResponse(await cosmosAminoSign(wallet, auth, body, 'osmosisSignTx', 'uosmo', '800', '290000', (fn) => emuWrap(fn, { operation: 'osmosisSignTx', chain: 'Osmosis' })), S.CosmosAminoSignResponse, path))
         }
         if (path === '/osmosis/sign-amino-lp-remove' && method === 'POST') {
           auth.requireAuth(req)
-          const wallet = requireWallet(engine)
+          const wallet = await requireWallet(engine)
           const body = await parseRequest(req, S.CosmosAminoSignRequest)
           return json(validateResponse(await cosmosAminoSign(wallet, auth, body, 'osmosisSignTx', 'uosmo', '800', '290000', (fn) => emuWrap(fn, { operation: 'osmosisSignTx', chain: 'Osmosis' })), S.CosmosAminoSignResponse, path))
         }
         if (path === '/osmosis/sign-amino-lp-add' && method === 'POST') {
           auth.requireAuth(req)
-          const wallet = requireWallet(engine)
+          const wallet = await requireWallet(engine)
           const body = await parseRequest(req, S.CosmosAminoSignRequest)
           return json(validateResponse(await cosmosAminoSign(wallet, auth, body, 'osmosisSignTx', 'uosmo', '800', '290000', (fn) => emuWrap(fn, { operation: 'osmosisSignTx', chain: 'Osmosis' })), S.CosmosAminoSignResponse, path))
         }
         if (path === '/osmosis/sign-amino-swap' && method === 'POST') {
           auth.requireAuth(req)
-          const wallet = requireWallet(engine)
+          const wallet = await requireWallet(engine)
           const body = await parseRequest(req, S.CosmosAminoSignRequest)
           return json(validateResponse(await cosmosAminoSign(wallet, auth, body, 'osmosisSignTx', 'uosmo', '800', '290000', (fn) => emuWrap(fn, { operation: 'osmosisSignTx', chain: 'Osmosis' })), S.CosmosAminoSignResponse, path))
         }
@@ -3247,13 +3263,13 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         // ── THORCHAIN SIGNING (2 endpoints) ──────────────────────────
         if (path === '/thorchain/sign-amino-transfer' && method === 'POST') {
           auth.requireAuth(req)
-          const wallet = requireWallet(engine)
+          const wallet = await requireWallet(engine)
           const body = await parseRequest(req, S.CosmosAminoSignRequest)
           return json(validateResponse(await cosmosAminoSign(wallet, auth, body, 'thorchainSignTx', 'rune', '0', '500000000', (fn) => emuWrap(fn, { operation: 'thorchainSignTx', chain: 'THORChain' })), S.CosmosAminoSignResponse, path))
         }
         if (path === '/thorchain/sign-amino-deposit' && method === 'POST') {
           auth.requireAuth(req)
-          const wallet = requireWallet(engine)
+          const wallet = await requireWallet(engine)
           const body = await parseRequest(req, S.CosmosAminoSignRequest)
           return json(validateResponse(await cosmosAminoSign(wallet, auth, body, 'thorchainSignTx', 'rune', '0', '500000000', (fn) => emuWrap(fn, { operation: 'thorchainSignTx', chain: 'THORChain' })), S.CosmosAminoSignResponse, path))
         }
@@ -3261,13 +3277,13 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         // ── MAYACHAIN SIGNING (2 endpoints) ──────────────────────────
         if (path === '/mayachain/sign-amino-transfer' && method === 'POST') {
           auth.requireAuth(req)
-          const wallet = requireWallet(engine)
+          const wallet = await requireWallet(engine)
           const body = await parseRequest(req, S.CosmosAminoSignRequest)
           return json(validateResponse(await cosmosAminoSign(wallet, auth, body, 'mayachainSignTx', 'cacao', '0', '500000000', (fn) => emuWrap(fn, { operation: 'mayachainSignTx', chain: 'Maya' })), S.CosmosAminoSignResponse, path))
         }
         if (path === '/mayachain/sign-amino-deposit' && method === 'POST') {
           auth.requireAuth(req)
-          const wallet = requireWallet(engine)
+          const wallet = await requireWallet(engine)
           const body = await parseRequest(req, S.CosmosAminoSignRequest)
           return json(validateResponse(await cosmosAminoSign(wallet, auth, body, 'mayachainSignTx', 'cacao', '0', '500000000', (fn) => emuWrap(fn, { operation: 'mayachainSignTx', chain: 'Maya' })), S.CosmosAminoSignResponse, path))
         }
@@ -3275,7 +3291,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         // ── XRP SIGNING (1 endpoint) ─────────────────────────────────
         if (path === '/xrp/sign-transaction' && method === 'POST') {
           auth.requireAuth(req)
-          const wallet = requireWallet(engine)
+          const wallet = await requireWallet(engine)
           const body = await parseRequest(req, S.XrpSignRequest)
           const result = await emuWrap(() => wallet.rippleSignTx(body), { operation: 'rippleSignTx', chain: 'XRP' })
           return json(result)
@@ -3284,7 +3300,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         // ── SOLANA SIGNING (1 endpoint) ────────────────────────────────
         if (path === '/solana/sign-transaction' && method === 'POST') {
           auth.requireAuth(req)
-          const wallet = requireWallet(engine)
+          const wallet = await requireWallet(engine)
           const body = await parseRequest(req, S.SolanaSignRequest)
           const addressNList = pickAddressNList(body, DEFAULT_SOLANA_ADDRESS_N)
 
@@ -3443,7 +3459,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         // ── SOLANA MESSAGE SIGNING (firmware type 754) ──────────────────
         if (path === '/solana/sign-message' && method === 'POST') {
           auth.requireAuth(req)
-          const wallet = requireWallet(engine)
+          const wallet = await requireWallet(engine)
           const body = await parseRequest(req, S.SolanaSignMessageRequest)
           const addressNList = body.addressNList || body.address_n || [0x8000002C, 0x800001F5, 0x80000000, 0x80000000]
           // A dapp left on the pre-switch account would get a signature from a
@@ -3475,7 +3491,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         // ── TRON SIGNING (1 endpoint) ──────────────────────────────────
         if (path === '/tron/sign-transaction' && method === 'POST') {
           auth.requireAuth(req)
-          const wallet = requireWallet(engine)
+          const wallet = await requireWallet(engine)
           const body = await parseRequest(req, S.TronSignRequest)
           const addressNList = body.addressNList || body.address_n || [0x8000002C, 0x800000C3, 0x80000000, 0, 0]
           const result = await emuWrap(() => wallet.tronSignTx({
@@ -3494,7 +3510,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         // ── TON SIGNING (1 endpoint) ──────────────────────────────────
         if (path === '/ton/sign-transaction' && method === 'POST') {
           auth.requireAuth(req)
-          const wallet = requireWallet(engine)
+          const wallet = await requireWallet(engine)
           const body = await parseRequest(req, S.TonSignRequest)
           const addressNList = body.addressNList || body.address_n || [0x8000002C, 0x8000025F, 0x80000000]
           const result = await emuWrap(() => wallet.tonSignTx({
@@ -3512,7 +3528,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         // hash = keccak256("\x19TRON Signed Message:\n" + len + msg)
         if (path === '/tron/sign-message' && method === 'POST') {
           auth.requireAuth(req)
-          const wallet = requireWallet(engine)
+          const wallet = await requireWallet(engine)
           const body = await parseRequest(req, S.TronSignMessageRequest)
           const addressNList = body.addressNList || body.address_n || [0x8000002C, 0x800000C3, 0x80000000, 0, 0]
           const message = decodeMessageBody(body.message, body.is_text, 'tronSignMessage')
@@ -3528,7 +3544,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         // TIP-191 verify — recovers signer pubkey from sig + checks claimed address.
         if (path === '/tron/verify-message' && method === 'POST') {
           auth.requireAuth(req)
-          const wallet = requireWallet(engine)
+          const wallet = await requireWallet(engine)
           const body = await parseRequest(req, S.TronVerifyMessageRequest)
           // signature is regex-validated to 65 bytes hex by zod; parseHex is belt-and-braces.
           const sig = parseHex(body.signature, 'tronVerifyMessage.signature', 65)
@@ -3546,7 +3562,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         // assembles keccak256("\x19\x01" || ds_hash || msg_hash) and signs.
         if (path === '/tron/sign-typed-hash' && method === 'POST') {
           auth.requireAuth(req)
-          const wallet = requireWallet(engine)
+          const wallet = await requireWallet(engine)
           const body = await parseRequest(req, S.TronSignTypedHashRequest)
           const addressNList = body.addressNList || body.address_n || [0x8000002C, 0x800000C3, 0x80000000, 0, 0]
           // Both hashes are regex-validated to 32 bytes hex by zod; parseHex
@@ -3568,7 +3584,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         // the AdvancedMode policy — without it, expect Failure.
         if (path === '/ton/sign-message' && method === 'POST') {
           auth.requireAuth(req)
-          const wallet = requireWallet(engine)
+          const wallet = await requireWallet(engine)
           const body = await parseRequest(req, S.TonSignMessageRequest)
           const addressNList = body.addressNList || body.address_n || [0x8000002C, 0x8000025F, 0x80000000]
           const message = decodeMessageBody(body.message, body.is_text, 'tonSignMessage')
@@ -3586,7 +3602,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         // and Ed25519-signs the envelope.
         if (path === '/solana/sign-offchain-message' && method === 'POST') {
           auth.requireAuth(req)
-          const wallet = requireWallet(engine)
+          const wallet = await requireWallet(engine)
           const body = await parseRequest(req, S.SolanaSignOffchainMessageRequest)
           const addressNList = body.addressNList || body.address_n || [0x8000002C, 0x800001F5, 0x80000000, 0x80000000]
           const message = decodeMessageBody(body.message, body.is_text, 'solanaSignOffchainMessage')
@@ -3754,14 +3770,14 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         // ── DEVICE INFO (2 endpoints — read-only) ────────────────────
         if (path === '/system/info/get-features' && method === 'POST') {
           auth.requireAuth(req)
-          const wallet = requireWallet(engine)
+          const wallet = await requireWallet(engine, { whileLocked: true })
           const features = await getCachedFeatures(wallet, engine.getCachedFeaturesSnapshot())
           return json(validateResponse(formatFeatures(features), S.FeaturesResponse, path))
         }
 
         if (path === '/system/info/get-entropy' && method === 'POST') {
           auth.requireAuth(req)
-          const wallet = requireWallet(engine)
+          const wallet = await requireWallet(engine)
           const body = await parseRequest(req, S.GetEntropyRequest)
           // Chunked collection: the device answers one GetEntropy message at a
           // time — 8192 bytes on firmware with the bulk-audit unlock (7.15+),
@@ -3805,7 +3821,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/system/info/get-public-key' && method === 'POST') {
           auth.requireAuth(req)
-          const wallet = requireWallet(engine)
+          const wallet = await requireWallet(engine)
           const body = await parseRequest(req, S.GetPublicKeyRequest)
           const cacheKey = scopedKey(engine, 'pubkey', body, wallet)
           const cached = pubkeyCache.get(cacheKey)
@@ -4235,7 +4251,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/api/pubkeys/batch' && method === 'POST') {
           auth.requireAuth(req)
-          const wallet = requireWallet(engine)
+          const wallet = await requireWallet(engine)
           // During setup the device runs the bootloader, factory firmware, no
           // wallet, or firmware so old that setup updates the bootloader first
           // (e.g. 5.2.4 on bootloader 1.0.2): it answers derivations with a
@@ -4472,7 +4488,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           if (!scope) {
             return json({ error: 'Wallet scope is not ready. Unlock the device and wait for seed identity.' }, 409)
           }
-          const wallet = requireWallet(engine)
+          const wallet = await requireWallet(engine)
           reqBody = await req.json().catch(() => ({}))
           const body = (reqBody && typeof reqBody === 'object') ? reqBody as ActivityHistoryRebuildOptions : {}
           const chainIds = [
@@ -4682,7 +4698,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/system/apply-settings' && method === 'POST') {
           auth.requireAuth(req)
-          const wallet = requireWallet(engine)
+          const wallet = await requireWallet(engine)
           const body = await parseRequest(req, S.ApplySettingsRequest)
           const settings: any = {}
           if (body.label !== undefined) settings.label = body.label
@@ -4695,7 +4711,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/system/change-pin' && method === 'POST') {
           auth.requireAuth(req)
-          const wallet = requireWallet(engine)
+          const wallet = await requireWallet(engine)
           const body = await parseRequest(req, S.ChangePinRequest).catch(() => ({} as any))
           if (body.remove) {
             await wallet.removePin()
@@ -4708,7 +4724,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/system/apply-policies' && method === 'POST') {
           auth.requireAuth(req)
-          const wallet = requireWallet(engine)
+          const wallet = await requireWallet(engine)
           const body = await parseRequest(req, S.ApplyPoliciesRequest)
           // AdvancedMode off ends the Studio provider-key session, as the RPC path does.
           callbacks?.onPolicyApplied?.(body as { policyName?: unknown; enabled?: unknown })
@@ -4725,7 +4741,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/system/wipe-device' && method === 'POST') {
           auth.requireAuth(req)
-          requireWallet(engine)
+          await requireWallet(engine, { whileLocked: true })
           await engine.wipeDevice()
           featuresCache = null
           return json({ success: true })
@@ -4733,7 +4749,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/system/clear-session' && method === 'POST') {
           auth.requireAuth(req)
-          const wallet = requireWallet(engine)
+          const wallet = await requireWallet(engine, { whileLocked: true })
           await wallet.clearSession()
           featuresCache = null
           return json({ success: true })
@@ -4741,7 +4757,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/system/initialize/reset-device' && method === 'POST') {
           auth.requireAuth(req)
-          const wallet = requireWallet(engine)
+          const wallet = await requireWallet(engine)
           const body = await parseRequest(req, S.ResetDeviceRequest)
           await wallet.reset({
             entropy: body.word_count ? ({ 12: 128, 18: 192, 24: 256 } as Record<number, number>)[body.word_count] || 128 : 128,
@@ -4756,7 +4772,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/system/initialize/recover-device' && method === 'POST') {
           const client = auth.requireAuth(req)
-          const wallet = requireWallet(engine)
+          const wallet = await requireWallet(engine)
           const body = await parseRequest(req, S.RecoverDeviceRequest)
           // beginRecovery sets setupInProgress so syncState()/getFeatures()
           // back off the transport — a concurrent GetFeatures corrupts the
@@ -4781,7 +4797,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/system/initialize/load-device' && method === 'POST') {
           auth.requireAuth(req)
-          const wallet = requireWallet(engine)
+          const wallet = await requireWallet(engine)
           const body = await parseRequest(req, S.LoadDeviceRequest)
           await wallet.loadDevice(body)
           featuresCache = null
@@ -4790,7 +4806,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/system/recovery/pin' && method === 'POST') {
           const client = auth.requireAuth(req)
-          const wallet = requireWallet(engine)
+          const wallet = await requireWallet(engine, { whileLocked: true })
           const body = await parseRequest(req, S.SendPinRequest)
           // During an owned recovery, only the initiating client may send the
           // recovery PIN — otherwise a second paired client could inject PIN
@@ -4874,7 +4890,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           auth.requireAuth(req)
           const body = await parseRequest(req, S.ZcashInitRequest)
           if (body.from_device) {
-            const wallet = requireWallet(engine)
+            const wallet = await requireWallet(engine)
             const result = await initializeOrchardFromDevice(wallet, body.account ?? 0)
             return json(result)
           }
@@ -4885,7 +4901,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         if (path === '/api/zcash/shielded/display-address' && method === 'POST') {
           auth.requireAuth(req)
           const body = await parseRequest(req, S.ZcashDisplayAddressRequest)
-          const wallet = requireWallet(engine)
+          const wallet = await requireWallet(engine)
           // Route through emuWrap for emulator parity (AUTH-2): on the emulator this
           // raises the interactive view-on-device confirm the user must approve; on
           // real hardware it is a pure passthrough. The RPC zcashDisplayAddress
@@ -4897,7 +4913,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         if (path === '/api/zcash/shielded/scan' && method === 'POST') {
           auth.requireAuth(req)
           const body = await parseRequest(req, S.ZcashScanRequest)
-          const wallet = requireWallet(engine)
+          const wallet = await requireWallet(engine)
           // REST callers haven't necessarily gone through the Privacy tab init,
           // so the sidecar may have no FVK yet — refresh from device first
           // rather than failing with "No FVK set".
@@ -4913,7 +4929,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/api/zcash/shielded/balance' && method === 'GET') {
           auth.requireAuth(req)
-          const wallet = requireWallet(engine)
+          const wallet = await requireWallet(engine)
           await ensureFvkLoaded(wallet, 0)
           if (!callbacks?.zcashVerifyWallet) throw new HttpError(503, 'Zcash wallet verification unavailable')
           await callbacks.zcashVerifyWallet(0)
@@ -4928,7 +4944,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         // prompt the user must approve; it does NOT auto-press.
         if (path === '/api/zcash/shielded/send' && method === 'POST') {
           auth.requireAuth(req)
-          const wallet = requireWallet(engine)
+          const wallet = await requireWallet(engine)
           const body = await req.json() as { recipient?: string; amount?: number; memo?: string; account?: number }
           // amount is ZATOSHIS (integer) — it goes straight to the sidecar's
           // build_pczt, which parses u64. The Rust side rejects fractions, so
@@ -4967,7 +4983,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         // Always requires auth + interactive confirm (no emulator bypass).
         if (path === '/api/zcash/shielded/deshield' && method === 'POST') {
           auth.requireAuth(req)
-          const wallet = requireWallet(engine)
+          const wallet = await requireWallet(engine)
           const body = await req.json() as { recipient?: string; amount?: number; account?: number }
           // Upper-bound the amount at the Zcash money-supply cap (21M ZEC in
           // zatoshis), matching ZcashBuildRequest. Without it a near-u64::MAX value
@@ -4999,7 +5015,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         // Always requires auth + interactive confirm (no emulator bypass).
         if (path === '/api/zcash/shielded/shield' && method === 'POST') {
           auth.requireAuth(req)
-          const wallet = requireWallet(engine)
+          const wallet = await requireWallet(engine)
           const body = await req.json() as { amount?: number; account?: number }
           if (typeof body.amount !== 'number' || !Number.isInteger(body.amount) || body.amount <= 0 || body.amount > 2_100_000_000_000_000) {
             throw new HttpError(400, 'amount (positive integer zatoshis, <= 21M ZEC) is required')
@@ -5031,7 +5047,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         // compares ak to the cache. Does not mutate state.
         if (path === '/api/zcash/shielded/verify-device' && method === 'GET') {
           auth.requireAuth(req)
-          const wallet = requireWallet(engine)
+          const wallet = await requireWallet(engine)
           if (typeof (wallet as any).zcashGetOrchardFVK !== 'function') {
             throw new HttpError(400, 'Device firmware does not support Orchard FVK export')
           }
@@ -5055,7 +5071,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/api/zcash/shielded/build' && method === 'POST') {
           auth.requireAuth(req)
-          const wallet = requireWallet(engine)
+          const wallet = await requireWallet(engine)
           const body = await parseRequest(req, S.ZcashBuildRequest)
           // FAIL-CLOSED preflight, mirroring /send (P2-C): prove the cached Orchard
           // FVK belongs to the connected device (purges stale state on mismatch) +

@@ -204,7 +204,7 @@ describe('wiring', () => {
   const engine = read('engine-controller.ts')
 
   test('every REST device route is refused while a wipe owns the device or waits for its replug', () => {
-    const requireWallet = rest.slice(rest.indexOf('function requireWallet('), rest.indexOf('const KEEPKEY_VENDOR_ID'))
+    const requireWallet = rest.slice(rest.indexOf('async function requireWallet('), rest.indexOf('const KEEPKEY_VENDOR_ID'))
     expect(requireWallet).toContain('engine.wipeInProgress')
     expect(requireWallet).toContain('engine.wipeOnReconnect')
     expect(requireWallet).toContain('409')
@@ -231,6 +231,24 @@ describe('wiring', () => {
     expect(sync).toContain('this.wipeInProgress')
     const attach = engine.slice(engine.indexOf("usb.on('attach'"), engine.indexOf("usb.on('detach'"))
     expect(attach).toContain('this.wipeInProgress')
+  })
+
+  test('a locked device: REST seed calls wait for Desktop to unlock it; features, wipe, PIN entry do not', () => {
+    // Hardware test 2026-10-24: a REST batch request between PIN retries asked for the PIN
+    // itself, and one sent during the countdown timed out after 5 s and closed the connection.
+    const requireWallet = rest.slice(rest.indexOf('async function requireWallet('), rest.indexOf('const KEEPKEY_VENDOR_ID'))
+    expect(requireWallet).toMatch(/if \(!whileLocked && engine\.isLocked\) \{\s*await engine\.waitUntilUnlocked\(/)
+    // every call site awaits the wait (the one other occurrence is the definition)
+    expect(rest.split('await requireWallet(engine').length).toBe(rest.split('requireWallet(engine').length - 1)
+    const exempt = (route: string) => {
+      const body = rest.slice(rest.indexOf(`'${route}'`), rest.indexOf(`'${route}'`) + 400)
+      return body.includes('requireWallet(engine, { whileLocked: true })')
+    }
+    for (const route of ['/system/info/get-features', '/system/wipe-device', '/system/clear-session', '/system/recovery/pin']) expect([route, exempt(route)]).toEqual([route, true])
+    for (const route of ['/api/pubkeys/batch', '/eth/sign-transaction', '/addresses/utxo']) expect([route, exempt(route)]).toEqual([route, false])
+    const wait = engine.slice(engine.indexOf('  waitUntilUnlocked('), engine.indexOf('  waitUntilUnlocked(') + 600)
+    expect(wait).toContain("this.on('state-change'")
+    expect(wait).toContain("this.off('state-change'")
   })
 
   test('REST and UI wipes both go through the engine, never straight to wallet.wipe()', () => {

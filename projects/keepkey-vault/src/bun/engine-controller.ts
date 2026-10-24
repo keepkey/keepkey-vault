@@ -189,6 +189,23 @@ export class EngineController extends EventEmitter {
   unlockRequest: Promise<unknown> | null = null
 
   get isSyncing(): boolean { return this.syncing }
+  /** Waiting for its PIN: only Desktop's own prompt should talk to it (rest-api.ts requireWallet). */
+  get isLocked(): boolean { return this.lastState === 'needs_pin' }
+
+  /** Resolves once the device leaves needs_pin (unlocked, unplugged, wiped); rejects after timeoutMs. */
+  waitUntilUnlocked(timeoutMs: number): Promise<void> {
+    if (!this.isLocked) return Promise.resolve()
+    return new Promise((resolve, reject) => {
+      const done = (err?: Error) => {
+        clearTimeout(timer)
+        this.off('state-change', onState)
+        err ? reject(err) : resolve()
+      }
+      const onState = () => { if (!this.isLocked) done() }
+      const timer = setTimeout(() => done(new Error('still locked')), timeoutMs)
+      this.on('state-change', onState)
+    })
+  }
   get isEmulator(): boolean { return this.activeTransport === 'emulator' }
   /** Get the emulator transport delegate (for chunk counting in confirmOp). */
   get emuDelegate(): any { return this.isEmulator ? (this.wallet as any)?.transport?.delegate : null }
