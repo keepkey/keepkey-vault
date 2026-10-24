@@ -4,7 +4,7 @@ import { takeDeviceRefusal } from './device-refusal'
 import { withPermit2SpenderName } from './permit2-spender-name'
 import type { AuthStore } from './auth'
 import { HttpError } from './auth'
-import { WIPE_BUSY_MESSAGE } from './device-wipe'
+import { WIPE_BUSY_MESSAGE, WIPE_REPLUG_PENDING_MESSAGE } from './device-wipe'
 import { WalletCacheSession, WalletSessionChangedError, WalletSessionMap } from './wallet-session-cache'
 import type { SigningRequestInfo, ApiLogEntry, EIP712DecodedInfo } from '../shared/types'
 import { tronPreview } from './tron-preview'
@@ -189,6 +189,8 @@ function requireWallet(engine: EngineController) {
   if (!engine.wallet) throw new HttpError(503, 'No device connected')
   // A wipe owns the device until it answers: any message sent during its confirmation breaks it (device-wipe.ts).
   if (engine.wipeInProgress) throw new HttpError(409, WIPE_BUSY_MESSAGE)
+  // A wipe waiting for its replug too: a PIN-protected call would restart the device's countdown.
+  if (engine.wipeOnReconnect) throw new HttpError(409, WIPE_REPLUG_PENDING_MESSAGE)
   return engine.wallet
 }
 
