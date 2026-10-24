@@ -674,10 +674,10 @@ function App() {
 	// Auto-show PIN for locked device (only once — respect user dismiss)
 	// Skip auto-show during any firmware operation phase — backend promptPin handles it with a delay
 	useEffect(() => {
-		if (deviceState.state === "needs_pin" && !pinRequestType && !pinDismissed && (!deviceState.updatePhase || deviceState.updatePhase === "idle")) {
+		if (deviceState.state === "needs_pin" && !deviceState.wipePending && !pinRequestType && !pinDismissed && (!deviceState.updatePhase || deviceState.updatePhase === "idle")) {
 			setPinRequestType("current")
 		}
-	}, [deviceState.state, deviceState.updatePhase, pinRequestType, pinDismissed])
+	}, [deviceState.state, deviceState.updatePhase, deviceState.wipePending, pinRequestType, pinDismissed])
 
 	// Clear overlays on ready or disconnect
 	useEffect(() => {
@@ -905,7 +905,7 @@ function App() {
 	) : null
 
 	const pinOverlay = pinRequestType && !passphraseRequested ? (
-		<PinEntry type={pinRequestType} failed={pinFailed} errorDetail={pinErrorDetail} requestSeq={pinRequestSeq} onSubmit={handlePinSubmit} onCancel={handlePinCancel} onWipe={handlePinWipe} />
+		<PinEntry type={pinRequestType} failed={pinFailed} errorDetail={pinErrorDetail} requestSeq={pinRequestSeq} onSubmit={handlePinSubmit} onCancel={handlePinCancel} onWipe={handlePinWipe} deviceAsking={deviceState.pinPromptOpen ?? true} />
 	) : null
 
 	const charOverlay = (charRequest || recoveryError) ? (
@@ -1066,13 +1066,18 @@ function App() {
 				<SplashScreen
 					statusText={
 						linuxUdevBlocked ? "KeepKey detected — install udev rules to continue"
+						: needsPin && deviceState.wipePending === "confirm" ? t("confirmWipeOnDevice", { ns: "nav", defaultValue: "Confirm the wipe on your KeepKey" })
+						: needsPin && deviceState.wipePending === "replug" ? t("replugToWipe", { ns: "nav", defaultValue: "Unplug your KeepKey and plug it back in to wipe it" })
 						: needsPin ? t("unlockYourKeepKey", { ns: "nav" })
 						: needsPassphrase ? t("passphraseRequired", { ns: "nav" })
 						: isConnecting ? t("keepkeyDetectedConnecting", { ns: "nav" })
 						: isError ? t("errorWithMessage", { ns: "nav", error: deviceState.error || "Unknown" })
 						: t("searchingForKeepKey", { ns: "nav" })
 					}
-					hintText={isError ? t("tryUnplugging", { ns: "nav" }) : undefined}
+					hintText={isError ? t("tryUnplugging", { ns: "nav" })
+						// The device has no reject button on this screen: unplugging is the way out.
+						: needsPin && deviceState.wipePending === "confirm" ? t("unplugToCancelWipe", { ns: "nav", defaultValue: "Changed your mind? Unplug your KeepKey to cancel." })
+						: undefined}
 					variant={linuxUdevBlocked ? "error" : needsPin || needsPassphrase || isConnecting ? "connecting" : isError ? "error" : "searching"}
 					childrenReady={linuxUdevBlocked ? true : gridReady}
 					onLogoClick={linuxUdevBlocked || needsPin || needsPassphrase ? undefined : () => { rpcRequest("retryConnect").catch(() => {}) }}

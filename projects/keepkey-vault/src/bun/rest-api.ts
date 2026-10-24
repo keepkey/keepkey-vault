@@ -4,7 +4,8 @@ import { takeDeviceRefusal } from './device-refusal'
 import { withPermit2SpenderName } from './permit2-spender-name'
 import type { AuthStore } from './auth'
 import { HttpError } from './auth'
-import { WIPE_BUSY_MESSAGE } from './device-wipe'
+import { WIPE_BUSY_MESSAGE, WIPE_REPLUG_PENDING_MESSAGE } from './device-wipe'
+import { DEVICE_LOCKED_MESSAGE, restRequest } from './device-gate'
 import { WalletCacheSession, WalletSessionChangedError, WalletSessionMap } from './wallet-session-cache'
 import type { SigningRequestInfo, ApiLogEntry, EIP712DecodedInfo } from '../shared/types'
 import { tronPreview } from './tron-preview'
@@ -185,10 +186,19 @@ function corsHeaders(_req?: Request): Record<string, string> {
   }
 }
 
-function requireWallet(engine: EngineController) {
+/** `whileLocked`: the route never asks the device for its PIN (features, wipe, PIN entry). */
+function requireWallet(engine: EngineController, { whileLocked = false } = {}) {
   if (!engine.wallet) throw new HttpError(503, 'No device connected')
   // A wipe owns the device until it answers: any message sent during its confirmation breaks it (device-wipe.ts).
   if (engine.wipeInProgress) throw new HttpError(409, WIPE_BUSY_MESSAGE)
+  // A wipe waiting for its replug too: a PIN-protected call would restart the device's countdown.
+  if (engine.wipeOnReconnect) throw new HttpError(409, WIPE_REPLUG_PENDING_MESSAGE)
+  // A locked KeepKey belongs to Desktop's PIN prompt (device-gate.ts). Refuse now rather
+  // than wait: Bun drops an idle REST socket after 10 s, and parked requests would all
+  // reach the device at once on unlock.
+  if (!whileLocked && engine.isLocked) throw new HttpError(423, DEVICE_LOCKED_MESSAGE)
+  const rest = restRequest.getStore()
+  if (rest) rest.whileLocked = whileLocked
   return engine.wallet
 }
 
@@ -1183,7 +1193,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
     // blocks while the user confirms on the device. Without that, Bun closes
     // the socket mid-confirm ("other side closed" → the device cancels the
     // confirm and returns home), which killed the second consecutive sign.
-    async fetch(req, server) {
+    // Every request runs tagged, so its device writes are checked when they happen (device-gate.ts).
+    fetch(req, server) { return restRequest.run({ whileLocked: false }, async () => {
       const url = new URL(req.url)
       const path = url.pathname
       const method = req.method
@@ -3752,7 +3763,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         // ── DEVICE INFO (2 endpoints — read-only) ────────────────────
         if (path === '/system/info/get-features' && method === 'POST') {
           auth.requireAuth(req)
-          const wallet = requireWallet(engine)
+          const wallet = requireWallet(engine, { whileLocked: true })
           const features = await getCachedFeatures(wallet, engine.getCachedFeaturesSnapshot())
           return json(validateResponse(formatFeatures(features), S.FeaturesResponse, path))
         }
@@ -4336,6 +4347,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
                   addressNList: p.address_n,
                 })
               } catch (err: any) {
+                if (err instanceof HttpError) throw err // the device is locked or wiping: not a per-path miss
                 console.warn(`[REST] batch address failed for path ${JSON.stringify(p.address_n)}:`, err?.message)
               }
               continue
@@ -4388,6 +4400,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
                 addressNList: p.address_n,
               })
             } catch (err: any) {
+              if (err instanceof HttpError) throw err // the device is locked or wiping: not a per-path miss
               console.warn(`[REST] batch pubkey failed for path ${JSON.stringify(p.address_n)} coin=${coin} scriptType=${p.script_type}:`, err?.message)
             }
           }
@@ -4723,7 +4736,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/system/wipe-device' && method === 'POST') {
           auth.requireAuth(req)
-          requireWallet(engine)
+          requireWallet(engine, { whileLocked: true })
           await engine.wipeDevice()
           featuresCache = null
           return json({ success: true })
@@ -4731,7 +4744,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/system/clear-session' && method === 'POST') {
           auth.requireAuth(req)
-          const wallet = requireWallet(engine)
+          const wallet = requireWallet(engine, { whileLocked: true })
           await wallet.clearSession()
           featuresCache = null
           return json({ success: true })
@@ -4788,7 +4801,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
         if (path === '/system/recovery/pin' && method === 'POST') {
           const client = auth.requireAuth(req)
-          const wallet = requireWallet(engine)
+          const wallet = requireWallet(engine, { whileLocked: true })
           const body = await parseRequest(req, S.SendPinRequest)
           // During an owned recovery, only the initiating client may send the
           // recovery PIN — otherwise a second paired client could inject PIN
@@ -5174,7 +5187,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         activeClearSignObservationId = undefined
         activeSolanaCertified = undefined
       }
-    },
+    }) },
     // WS endpoint for the BEX agent bridge (/bex-bridge upgrade above).
     websocket: {
       open(ws) { onBexOpen(ws) },
