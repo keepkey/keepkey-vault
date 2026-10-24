@@ -100,6 +100,7 @@ export function FirmwareAuthenticity({
 	installBootloader,
 	onContinue,
 	continueDisabled,
+	holdsWallet,
 }: {
 	firmwareHash?: string
 	firmwareRelease?: string
@@ -112,13 +113,15 @@ export function FirmwareAuthenticity({
 	installBootloader?: { version: string; signed: boolean }
 	onContinue: () => void
 	continueDisabled?: boolean
+	/** A returning owner's KeepKey: this screen must not read as new-device setup. */
+	holdsWallet?: boolean
 }) {
 	const verdict = authenticityVerdict(firmwareHash, firmwareVerified, bootloaderVerified)
 	const passed = verdict === "verified" || verdict === "genuine"
 
 	const headline = passed
 		? "Genuine KeepKey"
-		: verdict === "unrecognized" ? "Firmware not in the release list" : "Firmware can't be checked"
+		: verdict === "unrecognized" ? "Firmware not in the release list" : "This KeepKey's firmware is too old to check here"
 
 	const subline = verdict === "verified"
 		? firmwareSignaturesVerified
@@ -128,7 +131,9 @@ export function FirmwareAuthenticity({
 			? `Its bootloader${bootloaderRelease ? ` ${bootloaderRelease}` : ""} matches an official KeepKey release.`
 			: verdict === "unrecognized"
 				? "This may be a custom, Bitcoin-only, or modified build. Compare its hash with the build you expected, and confirm the device showed no warning at startup."
-				: "This firmware is too old to report its hash. The bootloader still checks firmware signatures before startup."
+				// Support ticket 2026-10-01: a returning owner read "can't be checked" as
+				// "my wallet is about to be wiped" and stopped. Say what is and isn't changed.
+				: "Older firmware can't report its fingerprint. Your wallet on the device is not changed by this screen. Next, Desktop updates the firmware (you'll confirm on the device), and then it can be checked."
 
 	const rows: Array<Omit<ComponentProps<typeof CheckRow>, "index">> = []
 	if (bootloaderVerified === true) {
@@ -158,7 +163,7 @@ export function FirmwareAuthenticity({
 	}
 	rows.push({ icon: <FaShieldAlt size={11} />, tone: passed ? "pass" : "info", title: "Signature check", who: "On the device",
 		detail: "Before it runs any firmware, your KeepKey checks it for KeepKey's release signatures and warns you if they are missing." })
-	if (passed) {
+	if (passed && !holdsWallet) {
 		rows.push({ icon: <FaKey size={10} />, tone: "pass", title: "Recovery phrase", who: "On the device",
 			detail: "Created on your KeepKey and shown only on its screen. It never leaves the device." })
 	}
@@ -267,7 +272,7 @@ export function FirmwareAuthenticity({
 			<Button w="100%" maxW="360px" size="md" bg={GOLD} color="black" fontWeight="700"
 				_hover={{ opacity: 0.9 }} _active={{ transform: "scale(0.98)" }} disabled={continueDisabled} onClick={onContinue}>
 				<Flex gap={2} align="center" justify="center">
-					<Text>{verdict === "unrecognized" ? "Continue with this build" : passed ? "Set up my KeepKey" : "Continue"}</Text>
+					<Text>{verdict === "unrecognized" ? "Continue with this build" : verdict === "unreported" ? "Continue to update" : passed && !holdsWallet ? "Set up my KeepKey" : "Continue"}</Text>
 					<FaChevronRight size={10} />
 				</Flex>
 			</Button>

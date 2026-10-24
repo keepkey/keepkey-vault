@@ -1350,6 +1350,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                 installFirmware={deviceStatus?.installFirmware}
                 installBootloader={deviceStatus?.installBootloader}
                 continueDisabled={!hasFeatures}
+                holdsWallet={everSeenInitializedRef.current || lastAppModeInitializedRef.current === true}
                 onContinue={() => setStep(stepAfterAuthenticity({ showPicker: showCoinPicker, hasFeatures }))}
               />
             )}
