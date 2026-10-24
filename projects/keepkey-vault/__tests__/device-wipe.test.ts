@@ -23,6 +23,8 @@ import {
   wipeOwningDevice, WIPE_BUSY_MESSAGE, WIPE_AFTER_REPLUG_MESSAGE, WIPE_UNREACHABLE_MESSAGE, type WipeHost,
 } from '../src/bun/device-wipe'
 import { requestUnlock } from '../src/bun/pin-unlock'
+import { DEVICE_LOCKED_MESSAGE, gateRestWrites, restRequest, restWriteRefusal, type GateState } from '../src/bun/device-gate'
+import { HttpError } from '../src/bun/auth'
 
 type Link = { matrixShown?: boolean; open?: boolean; unlock?: Promise<unknown> | null; canDefer?: boolean }
 
@@ -198,13 +200,66 @@ describe('with the real hdwallet transport', () => {
   })
 })
 
+describe('REST writes to the device (device-gate.ts)', () => {
+  const free: GateState = { wipeInProgress: false, wipeOnReconnect: false, locked: false }
+  const T = Messages.MessageType
+  const asRest = { whileLocked: false }
+
+  test('only REST requests are gated, and replies to the device always pass', () => {
+    const wiping = { ...free, wipeInProgress: true }
+    expect(restWriteRefusal(wiping, T.MESSAGETYPE_GETPUBLICKEY, undefined)).toBeNull() // Desktop's own call
+    expect(restWriteRefusal(wiping, T.MESSAGETYPE_GETPUBLICKEY, asRest)?.status).toBe(409)
+    expect(restWriteRefusal(wiping, T.MESSAGETYPE_BUTTONACK, asRest)).toBeNull()
+    expect(restWriteRefusal(free, T.MESSAGETYPE_GETPUBLICKEY, asRest)).toBeNull()
+  })
+
+  test('a locked device refuses REST seed requests with 423, but not routes that never ask for the PIN', () => {
+    const locked = { ...free, locked: true }
+    expect(restWriteRefusal(locked, T.MESSAGETYPE_GETADDRESS, asRest)).toEqual({ status: 423, message: DEVICE_LOCKED_MESSAGE })
+    expect(restWriteRefusal(locked, T.MESSAGETYPE_GETFEATURES, { whileLocked: true })).toBeNull()
+    expect(restWriteRefusal(locked, T.MESSAGETYPE_PINMATRIXACK, asRest)).toBeNull()
+    expect(restWriteRefusal({ ...free, wipeOnReconnect: true }, T.MESSAGETYPE_GETADDRESS, asRest)?.status).toBe(409)
+  })
+
+  /** Takes writes, answers each with an empty Features once released. */
+  function quietKeepKey() {
+    const written: number[] = []
+    const replies: Array<(b: Uint8Array) => void> = []
+    const transport = new Transport(new core.Keyring(), {
+      isOpened: async () => true, getDeviceID: async () => 'gate', connect: async () => {}, disconnect: async () => {},
+      async writeChunk(buf: Uint8Array) { if (buf[1] === 0x23 && buf[2] === 0x23) written.push((buf[3] << 8) | buf[4]) },
+      readChunk: () => new Promise<Uint8Array>((r) => replies.push(r)),
+    })
+    const features = () => { const b = new Uint8Array(64); b.set([0x3f, 0x23, 0x23, 0, T.MESSAGETYPE_FEATURES, 0, 0, 0, 0]); replies.shift()!(b) }
+    return { transport, written, features }
+  }
+
+  test('a REST request admitted before a wipe began is refused when it reaches the device (hardware test 2026-10-24)', async () => {
+    const { transport, written, features } = quietKeepKey()
+    const state = { ...free }
+    gateRestWrites(transport, () => state)
+    const desktop = transport.call(T.MESSAGETYPE_GETFEATURES, new Messages.GetFeatures(), { msgTimeout: 2000 })
+    // The REST request passes every handler check, then waits on the transport lock.
+    const queued = restRequest.run({ whileLocked: false }, () =>
+      transport.call(T.MESSAGETYPE_GETADDRESS, new Messages.GetAddress(), { msgTimeout: 2000 })).catch((e) => e)
+    await tick()
+    state.wipeInProgress = true // the wipe starts while it waits
+    features()
+    await desktop
+    const refused = await queued
+    expect(refused).toBeInstanceOf(HttpError)
+    expect(refused.status).toBe(409)
+    expect(written).toEqual([T.MESSAGETYPE_GETFEATURES]) // the GetAddress never reached the device
+  })
+})
+
 describe('wiring', () => {
   const read = (f: string) => readFileSync(path.join(import.meta.dir, '../src/bun', f), 'utf8')
   const rest = read('rest-api.ts')
   const engine = read('engine-controller.ts')
 
   test('every REST device route is refused while a wipe owns the device or waits for its replug', () => {
-    const requireWallet = rest.slice(rest.indexOf('async function requireWallet('), rest.indexOf('const KEEPKEY_VENDOR_ID'))
+    const requireWallet = rest.slice(rest.indexOf('function requireWallet('), rest.indexOf('const KEEPKEY_VENDOR_ID'))
     expect(requireWallet).toContain('engine.wipeInProgress')
     expect(requireWallet).toContain('engine.wipeOnReconnect')
     expect(requireWallet).toContain('409')
@@ -233,22 +288,22 @@ describe('wiring', () => {
     expect(attach).toContain('this.wipeInProgress')
   })
 
-  test('a locked device: REST seed calls wait for Desktop to unlock it; features, wipe, PIN entry do not', () => {
-    // Hardware test 2026-10-24: a REST batch request between PIN retries asked for the PIN
-    // itself, and one sent during the countdown timed out after 5 s and closed the connection.
-    const requireWallet = rest.slice(rest.indexOf('async function requireWallet('), rest.indexOf('const KEEPKEY_VENDOR_ID'))
-    expect(requireWallet).toMatch(/if \(!whileLocked && engine\.isLocked\) \{\s*await engine\.waitUntilUnlocked\(/)
-    // every call site awaits the wait (the one other occurrence is the definition)
-    expect(rest.split('await requireWallet(engine').length).toBe(rest.split('requireWallet(engine').length - 1)
-    const exempt = (route: string) => {
-      const body = rest.slice(rest.indexOf(`'${route}'`), rest.indexOf(`'${route}'`) + 400)
-      return body.includes('requireWallet(engine, { whileLocked: true })')
-    }
+  test('a locked device: REST seed calls are refused at once; features, wipe, clear-session, PIN entry are not', () => {
+    const requireWallet = rest.slice(rest.indexOf('function requireWallet('), rest.indexOf('const KEEPKEY_VENDOR_ID'))
+    expect(requireWallet).toContain('if (!whileLocked && engine.isLocked) throw new HttpError(423, DEVICE_LOCKED_MESSAGE)')
+    const exempt = (route: string) => rest.slice(rest.indexOf(`'${route}'`), rest.indexOf(`'${route}'`) + 400)
+      .includes('requireWallet(engine, { whileLocked: true })')
     for (const route of ['/system/info/get-features', '/system/wipe-device', '/system/clear-session', '/system/recovery/pin']) expect([route, exempt(route)]).toEqual([route, true])
     for (const route of ['/api/pubkeys/batch', '/eth/sign-transaction', '/addresses/utxo']) expect([route, exempt(route)]).toEqual([route, false])
-    const wait = engine.slice(engine.indexOf('  waitUntilUnlocked('), engine.indexOf('  waitUntilUnlocked(') + 600)
-    expect(wait).toContain("this.on('state-change'")
-    expect(wait).toContain("this.off('state-change'")
+  })
+
+  test('every REST request runs tagged, the wipe runs untagged, and the engine gates the transport', () => {
+    expect(rest).toContain('fetch(req, server) { return restRequest.run({ whileLocked: false }, async () => {')
+    expect(engine).toContain('await restRequest.exit(() => wipeOwningDevice(')
+    expect(engine).toContain('gateRestWrites(transport, () => ({')
+    // A PIN prompt the device raises on its own (auto-lock) hands the unlock to Desktop.
+    const listener = engine.slice(engine.indexOf('transport.on(String(core.Events.PIN_REQUEST)'), engine.indexOf("this.emit('pin-request'"))
+    expect(listener).toContain("if (this.lastState === 'ready' && !this.setupInProgress && !this.verifyInProgress) this.updateState('needs_pin')")
   })
 
   test('REST and UI wipes both go through the engine, never straight to wallet.wipe()', () => {
