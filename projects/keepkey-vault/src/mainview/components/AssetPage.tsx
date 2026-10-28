@@ -557,11 +557,12 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 	// already counts it. Fold it into the header amount too, as the Dashboard
 	// does, so "0 ZEC" never sits next to a nonzero USD total.
 	const shieldedAmount = tokens.reduce((sum, t) => t.type === 'shielded' ? sum + parseFloat(t.balance || '0') : sum, 0)
-	const headerBalance = activeBalance && shieldedAmount > 0
-		? String(parseFloat(activeBalance.balance || '0') + shieldedAmount)
+	const pendingAmount = tokens.reduce((sum, t) => t.type === 'shielded' ? sum + parseFloat(t.pendingBalance || '0') : sum, 0)
+	const headerBalance = activeBalance && shieldedAmount + pendingAmount > 0
+		? String(parseFloat(activeBalance.balance || '0') + shieldedAmount + pendingAmount)
 		: activeBalance?.balance ?? '0'
-	const headerBalanceTitle = shieldedAmount > 0
-		? `${shieldedAmount} shielded + ${activeBalance?.balance ?? '0'} transparent ${chain.symbol}`
+	const headerBalanceTitle = shieldedAmount + pendingAmount > 0
+		? `${shieldedAmount} shielded + ${activeBalance?.balance ?? '0'} transparent${pendingAmount > 0 ? ` + ${pendingAmount} pending` : ''} ${chain.symbol}`
 		: `${headerBalance} ${chain.symbol}`
 
 	const [showAddToken, setShowAddToken] = useState(false)

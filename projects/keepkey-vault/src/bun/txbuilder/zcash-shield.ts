@@ -166,7 +166,7 @@ export async function shieldZec(
 	wallet: any,
 	pioneer: any,
 	params: ShieldParams,
-	opts?: { signWrap?: import("./zcash-shielded").DeviceSignWrap; onProgress?: TxProgressFn },
+	opts?: { signWrap?: import("./zcash-shielded").DeviceSignWrap; onProgress?: TxProgressFn; onBroadcast?: (txid: string, amountZat: number) => void },
 ): Promise<{ txid: string; txids: string[] }> {
 	if (shieldInProgress) {
 		throw new Error("A shield transaction is already in progress")
@@ -185,7 +185,7 @@ async function _shieldZecInner(
 	wallet: any,
 	pioneer: any,
 	params: ShieldParams,
-	opts?: { signWrap?: import("./zcash-shielded").DeviceSignWrap; onProgress?: TxProgressFn },
+	opts?: { signWrap?: import("./zcash-shielded").DeviceSignWrap; onProgress?: TxProgressFn; onBroadcast?: (txid: string, amountZat: number) => void },
 ): Promise<{ txid: string; txids: string[] }> {
 	const account = params.account ?? 0
 
@@ -367,6 +367,7 @@ async function _shieldZecInner(
 				compressedPubkey: compressedPubkey!,
 			}, { ...opts, progress })
 			txids.push(txid)
+			opts?.onBroadcast?.(txid, batch.amount)
 		} catch (e: any) {
 			if (txids.length === 0) throw e
 			throw new Error(

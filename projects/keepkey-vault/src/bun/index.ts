@@ -250,6 +250,7 @@ import { addSessionActivity, getSessionActivity, clearSessionActivity } from "./
 import { buildTx, broadcastTx, canonicalizeTronTokenCaip } from "./txbuilder"
 import { buildCosmosStakingTx, buildCosmosNameRegTx } from "./txbuilder/cosmos"
 import { initializeOrchardFromDevice, exportOrchardFvk, scanOrchardNotes, getShieldedBalance, sendShielded, ensureFvkLoaded, displayOrchardAddressOnDevice, setFvkDiskAllowed } from "./txbuilder/zcash-shielded"
+import { unresolvedShields, type PendingShield } from "../shared/zcash-pending"
 import { findZcashCliBinary, isSidecarReady, startSidecar, stopSidecar, wipeSidecarWalletDb, hasFvkLoaded, getCachedFvk, onScanProgress, getScanState, updateSyncedTo, beginZcashSend, endZcashSend, isZcashSendInFlight } from "./zcash-sidecar"
 import { CHAINS, customChainToChainDef, isChainSupported, hiveRolePath, btcTaprootSupported, findChainByNetwork } from "../shared/chains"
 import { versionCompare } from "../shared/firmware-versions"
@@ -608,44 +609,100 @@ function mapServerDefiPosition(sp: ServerDefiPosition): DefiPosition {
 	}
 }
 
+/** What this wallet last knew about its shielded ZEC, so a refresh that
+ *  cannot read the sidecar (not verified yet, not started, offline, slow)
+ *  shows the last balance instead of none. Keyed by device + seed, so it
+ *  never shows on another wallet. pendingShields: shields broadcast but not
+ *  yet found by a scan; their transparent coins are already spent. */
+interface ZcashBalanceMemory {
+	confirmed: number // spendable now
+	pending: number   // maturing notes
+	pendingShields: PendingShield[]
+}
+function zcashMemoryKey(): string | null {
+	const scope = getWalletDbScope()
+	return scope ? `zcash_balance_memory:${scope.walletId}` : null
+}
+function readZcashMemory(): ZcashBalanceMemory {
+	const key = zcashMemoryKey()
+	try {
+		const m = key ? JSON.parse(getSetting(key) || 'null') : null
+		if (m && typeof m.confirmed === 'number') return { pending: 0, pendingShields: [], ...m }
+	} catch { /* unreadable: start over */ }
+	return { confirmed: 0, pending: 0, pendingShields: [] }
+}
+function writeZcashMemory(m: ZcashBalanceMemory): void {
+	const key = zcashMemoryKey()
+	if (key) setSetting(key, JSON.stringify(m))
+}
+/** A broadcast shield: its value is pending until a scan finds the note. */
+function recordPendingShield(txid: string, amountZat: number): void {
+	const m = readZcashMemory()
+	m.pendingShields.push({ txid, amountZat, afterHeight: getScanState().syncedTo ?? 0, at: Date.now() })
+	writeZcashMemory(m)
+}
+
 /**
  * Shielded ZEC as a synthetic token to attach under native Zcash — the
- * dashboard renders it like an ERC20 sub-row. The Orchard FVK lives in the
- * local sidecar; the seed never left the device. Only surfaces once the
- * cached FVK is PROVEN to belong to the connected device (a stale FVK from a
- * previous seed would show a phantom balance the user can't spend); when not
- * yet verified, kicks off the device-match check and returns null — the
- * balance appears on the next refresh. Shared by getBalances and getBalance
- * so a single-chain zcash refresh can't wipe the shielded sub-row.
+ * dashboard renders it like an ERC20 sub-row. `balance` is the spendable
+ * (confirmed) amount; `pendingBalance` is maturing notes plus shields not yet
+ * scanned, counted in balanceUsd so the total never drops to zero mid-shield.
+ * Live values need the cached FVK PROVEN to belong to the connected device;
+ * until then (or when the sidecar cannot answer) the wallet's last known
+ * values are shown. Shared by getBalances and getBalance so a single-chain
+ * zcash refresh can't wipe the shielded sub-row.
  */
 async function fetchShieldedZecToken(zecPriceUsd: number): Promise<TokenBalance | null> {
-	if (!zcashPrivacyEnabled || !hasFvkLoaded()) return null
-	if (!zcashDeviceVerified) {
-		maybeStartBackgroundWalletVerification()
-		return null
-	}
-	try {
-		const shielded = await Promise.race([
-			getShieldedBalance(),
-			new Promise<null>(r => setTimeout(() => r(null), 5000)),
-		])
-		if (!shielded || shielded.confirmed <= 0) return null
-		const zecAmount = shielded.confirmed / 1e8
-		return {
-			symbol: 'zZEC',
-			name: 'Shielded ZEC',
-			balance: zecAmount.toFixed(8),
-			balanceUsd: zecAmount * zecPriceUsd,
-			priceUsd: zecPriceUsd,
-			caip: 'bip122:00040fe8ec8471911baa1db1266ea15d/orchard:shielded',
-			contractAddress: 'orchard',
-			networkId: 'bip122:00040fe8ec8471911baa1db1266ea15d',
-			decimals: 8,
-			type: 'shielded',
+	if (!zcashPrivacyEnabled) return null
+	const memory = readZcashMemory()
+	let live: Awaited<ReturnType<typeof getShieldedBalance>> | null = null
+	if (hasFvkLoaded() && zcashDeviceVerified) {
+		try {
+			live = await Promise.race([
+				getShieldedBalance(),
+				new Promise<null>(r => setTimeout(() => r(null), 5000)),
+			])
+		} catch (e: any) {
+			console.warn('[balances] Shielded balance fetch failed, showing last known:', e?.message || e)
 		}
-	} catch (e: any) {
-		console.warn('[balances] Shielded balance fetch failed:', e?.message || e)
-		return null
+	} else if (hasFvkLoaded()) {
+		maybeStartBackgroundWalletVerification()
+	}
+	if (live) {
+		// The sidecar's `confirmed` is the total; `pending` is the part still maturing.
+		memory.pending = Math.min(live.pending || 0, live.confirmed)
+		memory.confirmed = live.confirmed - memory.pending
+		memory.pendingShields = await stillPendingShields(memory.pendingShields)
+		writeZcashMemory(memory)
+	}
+	if (memory.pendingShields.length > 0) schedulePostZcashTxRescans()
+	const pendingZat = memory.pending + memory.pendingShields.reduce((sum, s) => sum + s.amountZat, 0)
+	if (memory.confirmed <= 0 && pendingZat <= 0) return null
+	const zecAmount = memory.confirmed / 1e8
+	const pendingZec = pendingZat / 1e8
+	return {
+		symbol: 'zZEC',
+		name: 'Shielded ZEC',
+		balance: zecAmount.toFixed(8),
+		...(pendingZat > 0 ? { pendingBalance: pendingZec.toFixed(8) } : {}),
+		balanceUsd: (zecAmount + pendingZec) * zecPriceUsd,
+		priceUsd: zecPriceUsd,
+		caip: 'bip122:00040fe8ec8471911baa1db1266ea15d/orchard:shielded',
+		contractAddress: 'orchard',
+		networkId: 'bip122:00040fe8ec8471911baa1db1266ea15d',
+		decimals: 8,
+		type: 'shielded',
+	}
+}
+
+/** Pending shields the sidecar has not found yet (see unresolvedShields). */
+async function stillPendingShields(shields: PendingShield[]): Promise<PendingShield[]> {
+	if (shields.length === 0) return shields
+	try {
+		const { getZcashTransactions } = await import('./zcash-sidecar')
+		return unresolvedShields(shields, (await getZcashTransactions())?.transactions || [], Date.now())
+	} catch {
+		return unresolvedShields(shields, [], Date.now()) // cannot check now: only expiry applies
 	}
 }
 
@@ -2487,9 +2544,26 @@ async function texRecovery(action: 'complete' | 'shieldBack', index: number): Pr
  * and reconcile anything the optimistic pass missed. Scans go straight to the
  * sidecar — no device round-trip; the wallet was verified by the tx that just
  * completed — and each one nudges the frontend to re-pull the zcash row.
- * ponytail: fixed 20s/95s/200s schedule; switch to block-header push if these
- * windows ever prove too coarse. */
+ * Then every 90 s while a shield is still unseen (it can take minutes to mine).
+ * ponytail: timer schedule; switch to block-header push if it proves too coarse. */
+let zcashRescanLoopActive = false
 function schedulePostZcashTxRescans(): void {
+	// After the fixed passes, keep scanning while a shield is unseen: a block
+	// can take several minutes, and the last fixed pass ran before it mined.
+	if (zcashRescanLoopActive) return
+	zcashRescanLoopActive = true
+	setTimeout(function loop() {
+		if (!zcashPrivacyEnabled || readZcashMemory().pendingShields.length === 0) { zcashRescanLoopActive = false; return }
+		setTimeout(loop, 90_000)
+		if (hasFvkLoaded() && !isZcashSendInFlight()) {
+			scanOrchardNotes()
+				.then(result => {
+					if (result?.synced_to != null) updateSyncedTo(result.synced_to)
+					try { rpc.send['zcash-rescan-complete']({ syncedTo: result?.synced_to ?? null, notesFound: result?.notes_found ?? 0 }) } catch { /* webview not ready */ }
+				})
+				.catch((e: any) => console.warn('[zcash] pending-shield rescan failed (non-fatal):', e?.message || e))
+		}
+	}, 290_000)
 	for (const delayMs of [20_000, 95_000, 200_000]) {
 		setTimeout(async () => {
 			try {
@@ -7273,7 +7347,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const result = await shieldZec(engine.wallet as any, pioneer, {
 					amount: params.amount,
 					account,
-				}, { signWrap, onProgress })
+				}, { signWrap, onProgress, onBroadcast: recordPendingShield })
 				try { rpc.send['shield-progress']({ step: 'complete', detail: result.txid }) } catch { /* webview not ready */ }
 				logZcashShieldedActivity('shield', result.txid, params.amount, undefined, sessionEpoch)
 				schedulePostZcashTxRescans()
