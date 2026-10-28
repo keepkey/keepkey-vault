@@ -214,7 +214,7 @@ function recoverTronSigner(rawHex, signatureHex) {
 
 module.exports = {
   b58decode, b58encode,
-  SYSTEM_PROGRAM, RELAY, legacyMessage, unsignedWireTx, solTransferMessage, solTransferPlusUnknownMessage,
+  SYSTEM_PROGRAM, RELAY, legacyMessage, unsignedWireTx, systemTransferData, solTransferMessage, solTransferPlusUnknownMessage,
   relayDepositNativeMessage, throwawaySolanaKey, ed25519Verify,
   TRON_USDT, TRON_USDC, tronAddressBytes, tronAddressFromBytes, trc20TransferRaw, recoverTronSigner,
 }

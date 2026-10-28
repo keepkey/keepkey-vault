@@ -24,7 +24,9 @@ typedef struct _SolanaOffchainMessageSignature SolanaOffchainMessageSignature;
 typedef struct _SolanaTokenInfo SolanaTokenInfo;
 EOF
 echo 'typedef struct HDNode HDNode;' > "$WORK/stub/trezor/crypto/bip32.h"
-for h in memzero.h sha2.h ed25519-donna/ed25519-donna.h; do : > "$WORK/stub/trezor/crypto/$h"; done
+for h in memzero.h sha2.h base58.h ed25519-donna/ed25519-donna.h; do : > "$WORK/stub/trezor/crypto/$h"; done
+# Released 7.16.0 includes the board layout header; the classifier never calls it.
+mkdir -p "$WORK/stub/keepkey/board" && : > "$WORK/stub/keepkey/board/layout.h"
 
 BUILDS=()
 SHAS=()
