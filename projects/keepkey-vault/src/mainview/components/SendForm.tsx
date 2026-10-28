@@ -998,6 +998,8 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 				<AddressBookPicker
 					networkId={caipToNetworkId(activeCaip)}
 					chainFamily={chain.chainFamily}
+					// This form sends transparent ZEC: shielded (u1…/zs1…) contacts belong to the Privacy tab.
+					entryFilter={chain.id === 'zcash' ? (e) => /^(t1|t3|tex1)/i.test(e.address.trim()) : undefined}
 					onSelect={(e) => { setRecipient(e.address); promptedAddressRef.current = e.address; setShowAddressBook(false) }}
 					onClose={() => setShowAddressBook(false)}
 				/>
