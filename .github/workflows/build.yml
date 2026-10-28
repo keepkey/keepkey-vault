@@ -859,16 +859,27 @@ jobs:
           # Exercise the bundle through LaunchServices, matching how Finder and
           # the DMG launch it. Executing a GUI app's Mach-O directly does not
           # provide the macOS application bootstrap context.
+          # The launcher staying up is not enough: wait until the Bun backend
+          # logs "boot complete" (db, window, engine and sidecar started).
+          LOG="$HOME/Library/Application Support/com.keepkey.vault/vault-backend.log"
+          START=0; [ -f "$LOG" ] && START=$(stat -f%z "$LOG")
           open -n "$APP"
-          sleep 15
+          BOOTED=0
+          for _ in $(seq 1 90); do
+            if [ -f "$LOG" ] && tail -c +$((START + 1)) "$LOG" | grep 'boot complete' >/dev/null; then BOOTED=1; break; fi
+            sleep 1
+          done
           PID=$(pgrep -f "$APP/Contents/MacOS/launcher" | head -1 || true)
-          if [ -z "$PID" ]; then
-            echo "ERROR: Intel application exited during startup"
+          if [ -z "$PID" ] || [ "$BOOTED" != 1 ]; then
+            [ -z "$PID" ] && echo "ERROR: Intel application exited during startup"
+            [ "$BOOTED" != 1 ] && echo "ERROR: Intel backend did not log 'boot complete' within 90s"
+            if [ -f "$LOG" ]; then echo "--- vault-backend.log (this launch) ---"; tail -c +$((START + 1)) "$LOG" | tail -80; fi
             find "$HOME/Library/Logs/DiagnosticReports" -maxdepth 1 \
-              -type f \( -name 'launcher*.ips' -o -name 'keepkey-vault*.ips' \) \
+              -type f \( -name 'launcher*.ips' -o -name 'keepkey-vault*.ips' -o -name 'bun*.ips' \) \
               -mmin -5 -print -exec sed -n '1,160p' {} \; 2>/dev/null || true
             exit 1
           fi
+          tail -c +$((START + 1)) "$LOG" | grep 'PERF' || true
           kill "$PID" 2>/dev/null || true
           wait "$PID" 2>/dev/null || true
           echo "Intel application remained alive through startup (pid $PID)"
