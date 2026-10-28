@@ -2545,8 +2545,25 @@ async function texRecovery(action: 'complete' | 'shieldBack', index: number): Pr
  * completed — and each one nudges the frontend to re-pull the zcash row.
  * Then every 90 s while value is in flight (a block can take minutes).
  * ponytail: timer schedule; switch to block-header push if it proves too coarse. */
+async function rescanZcashAndNotify(): Promise<void> {
+	try {
+		if (!zcashPrivacyEnabled || !hasFvkLoaded() || isZcashSendInFlight()) return
+		const result = await scanOrchardNotes()
+		if (result?.synced_to != null) updateSyncedTo(result.synced_to)
+		try {
+			rpc.send['zcash-rescan-complete']({
+				syncedTo: result?.synced_to ?? null,
+				notesFound: result?.notes_found ?? 0,
+			})
+		} catch { /* webview not ready */ }
+	} catch (e: any) {
+		console.warn('[zcash] post-tx rescan failed (non-fatal):', e?.message || e)
+	}
+}
+
 let zcashRescanLoopActive = false
 function schedulePostZcashTxRescans(): void {
+	for (const delayMs of [20_000, 95_000, 200_000]) setTimeout(rescanZcashAndNotify, delayMs)
 	// After the fixed passes, keep scanning while value is in flight: a block
 	// can take several minutes, and the last fixed pass ran before it mined.
 	if (zcashRescanLoopActive) return
@@ -2554,32 +2571,8 @@ function schedulePostZcashTxRescans(): void {
 	setTimeout(function loop() {
 		if (!zcashPrivacyEnabled || !readZcashMemory().expected) { zcashRescanLoopActive = false; return }
 		setTimeout(loop, 90_000)
-		if (hasFvkLoaded() && !isZcashSendInFlight()) {
-			scanOrchardNotes()
-				.then(result => {
-					if (result?.synced_to != null) updateSyncedTo(result.synced_to)
-					try { rpc.send['zcash-rescan-complete']({ syncedTo: result?.synced_to ?? null, notesFound: result?.notes_found ?? 0 }) } catch { /* webview not ready */ }
-				})
-				.catch((e: any) => console.warn('[zcash] pending-shield rescan failed (non-fatal):', e?.message || e))
-		}
+		void rescanZcashAndNotify()
 	}, 290_000)
-	for (const delayMs of [20_000, 95_000, 200_000]) {
-		setTimeout(async () => {
-			try {
-				if (!zcashPrivacyEnabled || !hasFvkLoaded() || isZcashSendInFlight()) return
-				const result = await scanOrchardNotes()
-				if (result?.synced_to != null) updateSyncedTo(result.synced_to)
-				try {
-					rpc.send['zcash-rescan-complete']({
-						syncedTo: result?.synced_to ?? null,
-						notesFound: result?.notes_found ?? 0,
-					})
-				} catch { /* webview not ready */ }
-			} catch (e: any) {
-				console.warn('[zcash] post-tx rescan failed (non-fatal):', e?.message || e)
-			}
-		}, delayMs)
-	}
 }
 
 // ── Shared swap engine entrypoints ───────────────────────────────────
@@ -10611,7 +10604,9 @@ engine.on('button-request', () => {
 	try { rpc.send['device-button-request']({}) } catch { /* webview not ready yet */ }
 })
 engine.on('zcash-device-progress', (p) => {
-	try { rpc.send['zcash-device-progress'](p) } catch { /* webview not ready yet */ }
+	// ponytail: cast because every rpc.send message types as never here (the
+	// typecheck baseline counts them); fix the RPC typing, then drop the cast.
+	try { (rpc.send as any)['zcash-device-progress'](p) } catch { /* webview not ready yet */ }
 })
 engine.on('recovery-error', (err) => {
 	try { rpc.send['recovery-error'](err) } catch { /* webview not ready yet */ }
