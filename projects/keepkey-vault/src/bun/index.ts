@@ -10528,6 +10528,9 @@ engine.on('passphrase-request', () => {
 engine.on('button-request', () => {
 	try { rpc.send['device-button-request']({}) } catch { /* webview not ready yet */ }
 })
+engine.on('zcash-device-progress', (p) => {
+	try { rpc.send['zcash-device-progress'](p) } catch { /* webview not ready yet */ }
+})
 engine.on('recovery-error', (err) => {
 	try { rpc.send['recovery-error'](err) } catch { /* webview not ready yet */ }
 })
