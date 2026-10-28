@@ -34,7 +34,7 @@ import {
   type EvmSchemaSpec,
   buildEvmSchemaBody,
 } from './evm-certified-schema'
-import { buildTokenSchema, tokenCallShape } from './evm-token-schema'
+import { buildTokenSchema, firmwareTokenSymbol, tokenCallShape } from './evm-token-schema'
 import { findPromotedEvmArtifact } from './clearsign-artifact-resolver'
 import { runtimeEvmSighash } from './uniswap-runtime-envelope'
 
@@ -183,6 +183,8 @@ async function fetchCertifiedEvmSchema(
       || token.source !== 'pioneer-discovery' || !/^[0-9a-f]{64}$/.test(token.sourceSha256)) {
       throw new Error('ClearSign service returned an invalid token identity')
     }
+    // A symbol the device cannot show (USD+, USDC.e) has no usable description.
+    if (!firmwareTokenSymbol(token.symbol)) return unavailable(`token symbol ${JSON.stringify(token.symbol)} is not shown by firmware`)
     spec = buildTokenSchema(Number(chainId), String(to), selector, length, token)
     // Bind displayed symbol/scale to the actual signed schema, never just JSON.
     const envelope = Buffer.from(String(result.signedPayload || '').replace(/^0x/i, ''), 'hex')

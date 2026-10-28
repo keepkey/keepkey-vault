@@ -24,6 +24,10 @@ test('missing source metadata, certificates and RPC stay visible as independent 
   expect(result.rows[0].blockers).toContain('chain-certificate-missing')
   expect(result.rows[0].blockers).toContain('verification-rpc-missing')
   expect(result.rows[0].blockers).toContain('snapshot-identity-mismatch')
+  // Firmware 7.16 accepts letters and digits only (signed_metadata.c).
+  for (const symbol of ['USD+', 'USDC.e', 'SY-USDE']) {
+    expect(inventoryDiscovery({ ...base, assets: { [caip]: { symbol, decimals: 6 } } }).rows[0].blockers).toContain('firmware-symbol-format')
+  }
 })
 test('retired networks are denied instead of queued as live signing candidates', () => {
   const retired = 'binance:bnb-beacon-chain/slip44:60'
