@@ -598,7 +598,7 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 			setSendError(recipientValidation.error ? t(recipientValidation.error) : t("invalidZcashRecipient"))
 			return
 		}
-		setSending(true); setSendError(null); setSendResult(null); setSendStep("building")
+		setSending(true); setSendError(null); setSendResult(null); setSendStep("syncing")
 		try {
 			const zatoshis = parseZatoshis(amount)
 			if (memo && new TextEncoder().encode(memo).length > 512) throw new Error(t("memoTooLong"))
@@ -618,7 +618,7 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 
 	const handleShield = useCallback(async () => {
 		if (!shieldAmount) return
-		setShielding(true); setShieldError(null); setShieldResult(null); setShieldStep("building")
+		setShielding(true); setShieldError(null); setShieldResult(null); setShieldStep("syncing")
 		try {
 			const zatoshis = parseZatoshis(shieldAmount)
 			const result = await rpcRequest<{ txid: string }>("zcashShieldZec",
@@ -635,7 +635,7 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 			setDeshieldError(deshieldRecipientValidation.error ? t(deshieldRecipientValidation.error) : t("invalidAddress"))
 			return
 		}
-		setDeshielding(true); setDeshieldError(null); setDeshieldResult(null); setDeshieldStep("building")
+		setDeshielding(true); setDeshieldError(null); setDeshieldResult(null); setDeshieldStep("syncing")
 		try {
 			const zatoshis = parseZatoshis(deshieldAmount)
 			const result = await rpcRequest<{ txid: string; txids?: string[]; unsentZat?: number; unsentReason?: string }>("zcashDeshieldZec",
@@ -978,7 +978,7 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 									</div>
 								</div>
 
-								<TxFlowStatus step={sendStep} batch={sendBatch} awaitingButton={awaitingButton} kind="send" intent="shielded send" />
+								<TxFlowStatus step={sendStep} scanProgress={scanProgress} batch={sendBatch} awaitingButton={awaitingButton} kind="send" intent="shielded send" />
 								{texPending.length > 0 && (
 									<div className="tex-pending">
 										<div className="tex-pending-title">Unfinished TEX payments</div>
@@ -1129,7 +1129,7 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 										>Max</button>
 									</div>
 								</div>
-								<TxFlowStatus step={shieldStep} batch={shieldBatch} awaitingButton={awaitingButton} kind="shield" intent="shield transaction" />
+								<TxFlowStatus step={shieldStep} scanProgress={scanProgress} batch={shieldBatch} awaitingButton={awaitingButton} kind="shield" intent="shield transaction" />
 
 								{!shielding && (
 									<div className="submit-row">
@@ -1215,7 +1215,7 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 										>Max</button>
 									</div>
 								</div>
-								<TxFlowStatus step={deshieldStep} batch={deshieldBatch} awaitingButton={awaitingButton} kind="unshield" intent="unshield transaction" />
+								<TxFlowStatus step={deshieldStep} scanProgress={scanProgress} batch={deshieldBatch} awaitingButton={awaitingButton} kind="unshield" intent="unshield transaction" />
 
 								{!deshielding && (
 									<div className="submit-row">
@@ -1498,7 +1498,8 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 
 /** Prominent in-form status panel shown while a Zcash tx is in flight.
  *
- *   building     — sidecar building PCZT + Halo 2 proof (~5–30s)
+ *   syncing      — catching the wallet up to the chain tip (minutes on a first sync)
+ *   building     — sidecar building PCZT + Halo 2 proof (usually under a minute)
  *   signing      — sent to KeepKey, awaiting user approval (USER MUST LOOK AT DEVICE)
  *   broadcasting — pushing raw_tx to lightwalletd
  *
@@ -1519,8 +1520,10 @@ function batchLabel(kind: "shield" | "unshield" | "send", batch: ZcashTxBatch | 
 	return `${verb} ${batch.index} of ${batch.total}`
 }
 
-function TxFlowStatus({ step, batch = null, awaitingButton, kind, intent }: {
+function TxFlowStatus({ step, batch = null, awaitingButton, kind, intent, scanProgress = null }: {
 	step: string | null
+	/** Live pre-send scan progress, shown while syncing */
+	scanProgress?: ScanProgress | null
 	/** Position in a multi-transaction operation, from the progress event */
 	batch?: ZcashTxBatch | null
 	/** True when the device just emitted a ButtonRequest — user must press it now.
@@ -1531,9 +1534,20 @@ function TxFlowStatus({ step, batch = null, awaitingButton, kind, intent }: {
 	/** Plain-English description of what the user is doing — used in the title */
 	intent: string
 }) {
+	// Elapsed time across all steps, so a slow step still visibly moves.
+	const [startedAt, setStartedAt] = useState<number | null>(null)
+	const [, setTick] = useState(0)
+	useEffect(() => {
+		if (!step || step === "complete") { setStartedAt(null); return }
+		setStartedAt(s => s ?? Date.now())
+		const id = setInterval(() => setTick(n => n + 1), 1000)
+		return () => clearInterval(id)
+	}, [step])
 	if (!step || step === "complete") return null
+	const elapsed = startedAt ? Math.floor((Date.now() - startedAt) / 1000) : 0
 	const accent = kind === "unshield" ? "copper" : kind === "send" ? "blue" : "gold"
 	const steps: Array<{ id: string; label: string }> = [
+		{ id: "syncing",      label: "Syncing wallet" },
 		{ id: "building",     label: "Building proof" },
 		{ id: "signing",      label: "Sign on KeepKey" },
 		{ id: "broadcasting", label: "Broadcasting" },
@@ -1561,15 +1575,26 @@ function TxFlowStatus({ step, batch = null, awaitingButton, kind, intent }: {
 					)
 				})}
 			</div>
+			<div className="tx-flow-elapsed">Working · {Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, "0")}</div>
+
+			{step === "syncing" && !awaitingButton && (
+				<div className="tx-flow-body">
+					<div className="tx-flow-headline">Syncing your wallet…</div>
+					<p>Catching up to the latest Zcash block before building your {intent}. The first sync can take a few minutes; later ones take seconds.</p>
+					{scanProgress && scanProgress.percent < 100 && (
+						<p>{scanProgress.scannedHeight.toLocaleString()} / {scanProgress.tipHeight.toLocaleString()} blocks · {formatEta(scanProgress.etaSeconds)} left</p>
+					)}
+				</div>
+			)}
 
 			{step === "building" && (
 				<div className="tx-flow-body">
 					<div className="tx-flow-headline">Building your {intent}…</div>
-					<p>The Zcash sidecar is generating a Halo 2 zero-knowledge proof. This is normal cryptographic work — typically 5–30 seconds.</p>
+					<p>The Zcash sidecar is generating a Halo 2 zero-knowledge proof. Usually under a minute; transactions with more notes take longer.</p>
 				</div>
 			)}
 
-			{step === "signing" && awaitingButton && (
+			{(step === "signing" || step === "syncing") && awaitingButton && (
 				<div className="tx-flow-body tx-flow-signing tx-flow-press">
 					<div className="tx-flow-device tx-flow-device-active">
 						<svg viewBox="0 0 64 96" width="56" height="84">
@@ -1586,7 +1611,9 @@ function TxFlowStatus({ step, batch = null, awaitingButton, kind, intent }: {
 						</svg>
 					</div>
 					<div className="tx-flow-headline">Press the button on your KeepKey →</div>
-					<p>Confirm the {intent} on the device screen, then press the round button.</p>
+					<p>{step === "syncing"
+						? "Approve the Zcash view key export on the device screen, then press the round button."
+						: `Confirm the ${intent} on the device screen, then press the round button.`}</p>
 				</div>
 			)}
 
@@ -1603,7 +1630,7 @@ function TxFlowStatus({ step, batch = null, awaitingButton, kind, intent }: {
 						</svg>
 					</div>
 					<div className="tx-flow-headline">Signing on device…</div>
-					<p>Your KeepKey is computing the Orchard signature. <strong>This may take 60+ seconds</strong> — no input needed yet, just wait.</p>
+					<p>Your KeepKey is working on the transaction. <strong>This can take 1–3 minutes</strong>, longer for transactions with more inputs or notes. Keep it plugged in; no input needed yet.</p>
 				</div>
 			)}
 
