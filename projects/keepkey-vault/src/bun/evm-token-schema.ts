@@ -8,10 +8,15 @@ export function tokenCallShape(chainId: number, contract: string, selector: stri
       || (selector.toLowerCase() === '0x23b872dd' && length === 100))
 }
 
+/** Firmware 7.16 shows token symbols of 1-10 letters or digits only (signed_metadata.c). */
+export function firmwareTokenSymbol(symbol: unknown): boolean {
+  return typeof symbol === 'string' && /^[A-Za-z0-9]{1,10}$/.test(symbol)
+}
+
 export function buildTokenSchema(chainId: number, contract: string, selector: string, length: number,
   token: { symbol: string; decimals: number }): EvmSchemaSpec {
   if (!tokenCallShape(chainId, contract, selector, length)
-    || !/^[A-Za-z0-9]{1,10}$/.test(token.symbol)
+    || !firmwareTokenSymbol(token.symbol)
     || !Number.isInteger(token.decimals) || token.decimals < 0 || token.decimals > 36) {
     throw new Error('Unsupported token identity or calldata shape')
   }

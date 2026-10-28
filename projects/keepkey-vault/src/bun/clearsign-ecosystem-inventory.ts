@@ -1,3 +1,5 @@
+import { firmwareTokenSymbol } from './evm-token-schema'
+
 /** Coverage accounting, not an approval decision. Every source row survives. */
 export interface EcosystemInventoryInput {
   assets: Record<string, any>
@@ -38,7 +40,7 @@ export function inventoryDiscovery(input: EcosystemInventoryInput) {
       const chain = Number(network.slice(7))
       if (!Number.isSafeInteger(chain) || chain < 1 || chain > 0xffffffff) blockers.push('firmware-chain-id-range')
       if (!Number.isInteger(asset?.decimals) || asset.decimals < 0 || asset.decimals > 36) blockers.push('missing-or-unsupported-decimals')
-      if (typeof asset?.symbol !== 'string' || !/^[A-Za-z0-9]{1,10}$/.test(asset.symbol)) blockers.push('firmware-symbol-format')
+      if (!firmwareTokenSymbol(asset?.symbol)) blockers.push('firmware-symbol-format')
       if (!input.rpcChains.includes(String(chain))) blockers.push('verification-rpc-missing')
       if (!input.certificateChains.includes(chain)) blockers.push('chain-certificate-missing')
       if (identity && !Object.hasOwn(input.tokens, identity)) blockers.push('not-in-reviewed-token-snapshot')
