@@ -1,9 +1,11 @@
 import type { ReactNode } from "react"
 import { useState, useEffect, useCallback, useRef, useMemo } from "react"
 import { useTranslation } from "react-i18next"
+import { createPortal } from "react-dom"
 import { Box, Flex, Text, Button, Spinner, IconButton } from "@chakra-ui/react"
 import { FaShieldAlt, FaArrowRotateRight } from "react-icons/fa"
 import { rpcRequest, onRpcMessage } from "../lib/rpc"
+import { Z } from "../lib/z-index"
 import { useFiat } from "../lib/fiat-context"
 import { generateQRSvg } from "../lib/qr"
 import { QrScannerOverlay } from "./QrScannerOverlay"
@@ -1503,6 +1505,7 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
  *   signing      — sent to KeepKey, awaiting user approval (USER MUST LOOK AT DEVICE)
  *   broadcasting — pushing raw_tx to lightwalletd
  *
+ *  Shown as a modal that locks the app until the transaction finishes or fails.
  *  Replaces the tiny "submit-hint" mid-form text the old UI used. The "signing"
  *  state is the one users actually need to act on, so it gets the loudest
  *  treatment: full-card takeover with the device illustration and an explicit
@@ -1543,6 +1546,18 @@ function TxFlowStatus({ step, batch = null, awaitingButton, kind, intent, scanPr
 		const id = setInterval(() => setTick(n => n + 1), 1000)
 		return () => clearInterval(id)
 	}, [step])
+	// The dialog blocks clicks; this keeps the keyboard from reaching the app
+	// behind it, so nothing can start another device call mid-transaction.
+	// ponytail: Tab-block only, not `inert` on the root: PIN and signing
+	// prompts render inside the root and must stay usable on top.
+	const active = !!step && step !== "complete"
+	useEffect(() => {
+		if (!active) return
+		;(document.activeElement as HTMLElement | null)?.blur?.()
+		const blockTab = (e: KeyboardEvent) => { if (e.key === "Tab") e.preventDefault() }
+		window.addEventListener("keydown", blockTab, true)
+		return () => window.removeEventListener("keydown", blockTab, true)
+	}, [active])
 	if (!step || step === "complete") return null
 	const elapsed = startedAt ? Math.floor((Date.now() - startedAt) / 1000) : 0
 	const accent = kind === "unshield" ? "copper" : kind === "send" ? "blue" : "gold"
@@ -1554,7 +1569,11 @@ function TxFlowStatus({ step, batch = null, awaitingButton, kind, intent, scanPr
 	]
 	const activeIdx = steps.findIndex(s => s.id === step)
 	const label = batchLabel(kind, batch)
-	return (
+	// A modal over the whole app, below only the PIN and signing prompts.
+	return createPortal(
+		<Flex position="fixed" inset={0} bg="blackAlpha.800" zIndex={Z.overlay} align="center" justify="center" p="4"
+			role="dialog" aria-modal="true" aria-label={`${intent} in progress`}>
+		<div className="zcash-v2 tx-flow-modal">
 		<div className={`tx-flow tx-flow-${accent}`}>
 			{label && (
 				<div className="tx-flow-batch">
@@ -1576,6 +1595,9 @@ function TxFlowStatus({ step, batch = null, awaitingButton, kind, intent, scanPr
 				})}
 			</div>
 			<div className="tx-flow-elapsed">Working · {Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, "0")}</div>
+			{step === "signing" && elapsed >= 300 && (
+				<div className="tx-flow-elapsed">Taking unusually long. To cancel, unplug your KeepKey.</div>
+			)}
 
 			{step === "syncing" && !awaitingButton && (
 				<div className="tx-flow-body">
@@ -1641,6 +1663,9 @@ function TxFlowStatus({ step, batch = null, awaitingButton, kind, intent, scanPr
 				</div>
 			)}
 		</div>
+		</div>
+		</Flex>,
+		document.body,
 	)
 }
 

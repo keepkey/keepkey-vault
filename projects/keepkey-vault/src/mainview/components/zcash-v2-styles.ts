@@ -369,6 +369,12 @@ export const ZCASH_V2_CSS = `
 .zcash-v2 .tx-flow-copper   { border-color: rgba(217,119,87,0.3); background: linear-gradient(180deg, rgba(217,119,87,0.05), transparent); }
 .zcash-v2 .tx-flow-blue     { border-color: rgba(122,166,240,0.35); background: linear-gradient(180deg, rgba(122,166,240,0.05), transparent); }
 
+.zcash-v2.tx-flow-modal { width: min(560px, 100%); padding: 0; }
+.zcash-v2.tx-flow-modal .tx-flow {
+	margin-top: 0;
+	background-color: var(--zk-bg);
+	box-shadow: 0 24px 64px rgba(0,0,0,0.6);
+}
 .zcash-v2 .tx-flow-elapsed {
 	padding: 0 18px;
 	font-size: 11.5px; font-variant-numeric: tabular-nums;
