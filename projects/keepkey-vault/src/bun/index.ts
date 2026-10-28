@@ -7224,7 +7224,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// UI without a manual DB wipe. Reuses the coalesced-purge path instead of
 				// mutating the module-global zcashDeviceVerified (which would open a
 				// transient window where a concurrent balance read throws "not verified").
-				await ensureZcashDeviceMatch(0, true)
+				// quick (the header refresh): an incremental scan that trusts this
+				// session's verification instead of a device prompt on every click.
+				await ensureZcashDeviceMatch(0, !(params?.quick && params.startHeight == null && !params.fullRescan))
 				const result = await scanOrchardNotes(params?.startHeight, params?.fullRescan)
 				if (result?.synced_to != null) updateSyncedTo(result.synced_to)
 				// A successful scan validates the wallet against the chain — even an

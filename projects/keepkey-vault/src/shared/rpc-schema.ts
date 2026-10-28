@@ -233,7 +233,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       // ── Zcash Shielded (Orchard) ──────────────────────────────────────
       zcashShieldedStatus: { params: void; response: { ready: boolean; fvk_loaded: boolean; address: string | null; fvk: { ak: string; nk: string; rivk: string } | null; synced_to: number | null; keepkey_release_block: number | null; verified: boolean; synced: boolean; verifying: boolean } }
       zcashShieldedInit: { params: { account?: number }; response: { fvk: { ak: string; nk: string; rivk: string }; address: string } }
-      zcashShieldedScan: { params: { startHeight?: number; fullRescan?: boolean }; response: { balance: number; notes_found: number; synced_to: number } }
+      zcashShieldedScan: { params: { startHeight?: number; fullRescan?: boolean; quick?: boolean }; response: { balance: number; notes_found: number; synced_to: number } }
       // max_send / max_deshield: the most one payment can move, across as many
       // transactions as the 16-action device limit requires.
       zcashShieldedBalance: { params: void; response: { confirmed: number; pending: number; synced_to?: number | null; notes_total?: number; notes_unspent?: number; keepkey_release_block?: number; max_send?: number; max_deshield?: number } }
