@@ -64,7 +64,17 @@ export const ZCASH_V2_CSS = `
 	font-variant-numeric: tabular-nums;
 }
 .zcash-v2 .zk-balance .amount .ticker { color: var(--zk-gold); font-size: 13px; margin-left: 8px; }
-.zcash-v2 .zk-balance .amount .pending { color: var(--zk-fg-mute); font-size: 11px; margin-left: 12px; }
+.zcash-v2 .zk-balance .amount .pending { color: #f5c542; font-size: 12px; font-weight: 600; margin-left: 12px; }
+.zcash-v2 .balance-hint.maturing { color: #f5c542; font-weight: 600; }
+.zcash-v2 .maturing-banner {
+	display: flex; align-items: center; gap: 12px;
+	margin-bottom: 14px; padding: 12px 14px;
+	border: 1px solid rgba(245,197,66,0.6); border-radius: 8px;
+	background: rgba(245,197,66,0.10); color: #f5c542;
+}
+.zcash-v2 .maturing-banner .maturing-icon { font-size: 20px; }
+.zcash-v2 .maturing-banner strong { display: block; font-size: 13.5px; }
+.zcash-v2 .maturing-banner span { font-size: 12px; color: var(--zk-fg-dim); }
 .zcash-v2 .zk-balance .sub {
 	margin-top: 4px;
 	font-family: var(--zk-font-mono); font-size: 11px;
@@ -251,6 +261,14 @@ export const ZCASH_V2_CSS = `
 	flex-shrink: 0; font-weight: 600;
 }
 .zcash-v2 .field .max:hover:not(:disabled) { background: rgba(201,163,104,0.22); }
+.zcash-v2 .unit-flip {
+	align-self: flex-start; margin: -2px 0 0 2px;
+	font-family: var(--zk-font-mono); font-size: 11.5px; font-weight: 600;
+	color: var(--zk-gold); padding: 3px 10px;
+	border: 1px solid var(--zk-gold-line); border-radius: 999px;
+	background: var(--zk-gold-soft);
+}
+.zcash-v2 .unit-flip:hover { background: rgba(201,163,104,0.22); }
 .zcash-v2 .field-err {
 	font-family: var(--zk-font-display); font-size: 12px;
 	color: var(--zk-copper); padding: 0 2px;
@@ -369,6 +387,30 @@ export const ZCASH_V2_CSS = `
 .zcash-v2 .tx-flow-copper   { border-color: rgba(217,119,87,0.3); background: linear-gradient(180deg, rgba(217,119,87,0.05), transparent); }
 .zcash-v2 .tx-flow-blue     { border-color: rgba(122,166,240,0.35); background: linear-gradient(180deg, rgba(122,166,240,0.05), transparent); }
 
+.zcash-v2.tx-flow-modal { width: min(560px, 100%); padding: 0; }
+.zcash-v2.tx-flow-modal .tx-flow {
+	margin-top: 0;
+	background-color: var(--zk-bg);
+	box-shadow: 0 24px 64px rgba(0,0,0,0.6);
+}
+.zcash-v2 .tx-flow-pb {
+	width: 100%; max-width: 360px; height: 5px; margin: 10px auto;
+	border-radius: 999px; background: var(--zk-bg-3); overflow: hidden;
+}
+.zcash-v2 .tx-flow-pb-fill {
+	height: 100%;
+	background: linear-gradient(90deg, var(--zk-gold-deep), var(--zk-gold));
+	transition: width 0.3s ease-out;
+}
+.zcash-v2 .tx-flow-pb.indeterminate .tx-flow-pb-fill { width: 35%; animation: zk-pb-sweep 1.4s ease-in-out infinite; }
+@keyframes zk-pb-sweep { from { transform: translateX(-100%); } to { transform: translateX(290%); } }
+.zcash-v2 .tx-flow-body p.tx-flow-checkin { color: var(--zk-fg); font-family: var(--zk-font-mono); font-size: 12px; margin-bottom: 6px; }
+.zcash-v2 .tx-flow-headline .tx-flow-spin { display: inline-block; vertical-align: middle; margin-right: 6px; }
+.zcash-v2 .tx-flow-elapsed {
+	padding: 0 18px;
+	font-size: 11.5px; font-variant-numeric: tabular-nums;
+	color: var(--zk-fg-dim);
+}
 .zcash-v2 .tx-flow-batch {
 	padding: 10px 18px 0;
 	font-size: 12px; font-weight: 600;

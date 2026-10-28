@@ -46,6 +46,9 @@ describe('findCertifiedEvmSchema', () => {
         globalThis.fetch = (async () => Response.json({ ...response, tokenIdentity: token })) as typeof fetch
         await expect(findCertifiedEvmSchema(42161, contract, calldata)).rejects.toThrow(/token identity/)
       }
+      // A symbol firmware refuses is no description, not a signing error.
+      globalThis.fetch = (async () => Response.json({ ...response, tokenIdentity: { ...tokenIdentity, symbol: 'USD+' } })) as unknown as typeof fetch
+      expect(await findCertifiedEvmSchema(42161, contract, calldata)).toBeUndefined()
       globalThis.fetch = (async () => Response.json({ classification: 'OPAQUE', code: 'TOKEN_IDENTITY_UNVERIFIED' }, { status: 422 })) as typeof fetch
       expect(await findCertifiedEvmSchema(42161, contract, calldata)).toBeUndefined()
     } finally { globalThis.fetch = originalFetch }

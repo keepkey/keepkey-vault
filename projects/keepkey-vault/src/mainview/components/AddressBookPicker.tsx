@@ -49,6 +49,8 @@ export function AddressBookPicker({ networkId, chainFamily, entryFilter, renderT
       .filter(e => chainFamily !== "utxo" || e.kind === "external" || !/^[xyz]pub/i.test(e.address))
       .filter(e => !entryFilter || entryFilter(e))
       .filter(e => !q || e.label?.toLowerCase().includes(q) || e.address.toLowerCase().includes(q))
+      // External contacts first: they are who you pay; own wallets follow.
+      .sort((a, b) => Number(b.kind === "external") - Number(a.kind === "external"))
   }, [entries, chainFamily, entryFilter, search])
 
   return (

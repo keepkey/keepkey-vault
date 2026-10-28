@@ -388,10 +388,17 @@ export async function broadcastShieldedTx(rawTxHex: string): Promise<{
  */
 let sendInProgress = false
 
+export interface SendShieldedOptions {
+	signWrap?: DeviceSignWrap
+	onProgress?: import("./zcash-shield").TxProgressFn
+	/** Called after each transaction broadcasts, with what it paid. */
+	onBroadcast?: (tx: { txid: string; pay: number; fee: number }) => void
+}
+
 export async function sendShielded(
 	wallet: any,
 	params: ShieldedSendParams,
-	opts?: { signWrap?: DeviceSignWrap; onProgress?: import("./zcash-shield").TxProgressFn },
+	opts?: SendShieldedOptions,
 ): Promise<SplitSendResult> {
 	if (sendInProgress) {
 		throw new Error("A shielded send is already in progress — wait for it to complete")
@@ -409,7 +416,7 @@ export async function sendShielded(
 async function _sendShieldedInner(
 	wallet: any,
 	params: ShieldedSendParams,
-	opts?: { signWrap?: DeviceSignWrap; onProgress?: import("./zcash-shield").TxProgressFn },
+	opts?: SendShieldedOptions,
 ): Promise<SplitSendResult> {
 	// 0. Ensure sidecar is running and FVK is set
 	if (!isSidecarReady()) {
@@ -457,7 +464,9 @@ async function _sendShieldedInner(
 			await broadcastShieldedTx(raw_tx)
 			txids.push(txidToDisplayOrder(txid))
 			console.log(`[zcash-shielded] Transaction sent: ${txids[txids.length - 1]}`)
-			remaining = batch ? batch.remaining_after : 0
+			const after = batch ? batch.remaining_after : 0
+			opts?.onBroadcast?.({ txid: txids[txids.length - 1], pay: remaining - after, fee: batch?.fee ?? 0 })
+			remaining = after
 		} catch (e: any) {
 			if (txids.length === 0) throw e
 			console.warn(`[zcash-shielded] Sent ${txids.length} transaction(s); ${remaining} ZAT was not sent: ${e?.message ?? e}`)

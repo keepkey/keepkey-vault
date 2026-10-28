@@ -253,7 +253,11 @@ export class EngineController extends EventEmitter {
     transport.removeAllListeners(String(core.Events.BUTTON_REQUEST))
     transport.removeAllListeners(String(core.Events.PASSPHRASE_REQUEST))
     transport.removeAllListeners("80")
+    for (const [type, fn] of this.zcashProgressListeners) transport.removeListener(type, fn)
+    this.zcashProgressListeners = []
   }
+
+  private zcashProgressListeners: [string, (e: any) => void][] = []
 
   private attachTransportListeners() {
     if (!this.wallet?.transport) return
@@ -313,6 +317,28 @@ export class EngineController extends EventEmitter {
       // the transport delegate's onButtonRequest hook (one DebugLinkDecision
       // per ButtonRequest, gated on the user's click) — NOT here.
     })
+
+    // Zcash signing: ZcashSignPCZT (1300) announces how many transparent
+    // outputs (1310), inputs (1306) and actions (1301) follow; each one sent
+    // is a step of the progress bar the Zcash tab shows while the device works.
+    const zcashSteps = { done: 0, total: 0 }
+    const count = (m: any, snake: string) =>
+      Number(m?.[snake] ?? m?.[snake.replace(/_([a-z])/g, (_, c) => c.toUpperCase())] ?? 0) || 0
+    const onStart = (e: any) => {
+      if (e?.from_wallet) return
+      zcashSteps.done = 0
+      zcashSteps.total = count(e?.message, 'n_transparent_outputs') + count(e?.message, 'n_transparent_inputs') + count(e?.message, 'n_actions')
+      this.emit('zcash-device-progress', { ...zcashSteps, phase: 'confirm' })
+    }
+    this.zcashProgressListeners = [['1300', onStart]]
+    for (const [type, phase] of [['1310', 'output'], ['1306', 'input'], ['1301', 'action']] as const) {
+      this.zcashProgressListeners.push([type, (e: any) => {
+        if (e?.from_wallet || !zcashSteps.total) return
+        zcashSteps.done = Math.min(zcashSteps.done + 1, zcashSteps.total)
+        this.emit('zcash-device-progress', { ...zcashSteps, phase })
+      }])
+    }
+    for (const [type, fn] of this.zcashProgressListeners) transport.on(type, fn)
 
     transport.on(String(core.Events.PASSPHRASE_REQUEST), () => {
       console.log('[Engine] PASSPHRASE_REQUEST → emitting to UI')

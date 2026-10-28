@@ -124,12 +124,28 @@ const DASHBOARD_ANIMATIONS = `
 /** Shielded portion of a chain's tokens (zZEC) — same denomination as the
  *  chain coin, so displays fold it into the coin amount and break it out as
  *  its own "shielded" field. Zero for every chain without shielded tokens. */
-function shieldedPortion(bal?: ChainBalance): { amount: number; usd: number } {
-	let amount = 0, usd = 0
+function shieldedPortion(bal?: ChainBalance): { amount: number; pending: number; usd: number } {
+	let amount = 0, pending = 0, usd = 0
 	for (const t of bal?.tokens ?? []) {
-		if (t.type === 'shielded') { amount += parseFloat(t.balance || '0'); usd += t.balanceUsd || 0 }
+		if (t.type === 'shielded') {
+			amount += parseFloat(t.balance || '0')
+			pending += parseFloat(t.pendingBalance || '0')
+			usd += t.balanceUsd || 0
+		}
 	}
-	return { amount, usd }
+	return { amount, pending, usd }
+}
+
+/** Some amount on the chain went up: its coin or any token, by symbol+caip. */
+function amountIncreased(old: ChainBalance, next: ChainBalance): boolean {
+	const amounts = (b: ChainBalance) => {
+		const m = new Map<string, number>([['', parseFloat(b.balance || '0')]])
+		for (const t of b.tokens ?? []) m.set(t.caip, parseFloat(t.balance || '0'))
+		return m
+	}
+	const before = amounts(old)
+	for (const [k, v] of amounts(next)) if (v > (before.get(k) ?? 0) + 1e-12) return true
+	return false
 }
 
 /** Tiny shield glyph for the shielded-balance field. */
@@ -527,7 +543,7 @@ function ChainDetailOrbital({
 
 	const nativeBal = balance?.balance || '0'
 	const shielded = shieldedPortion(balance)
-	const combinedBal = parseFloat(nativeBal) + shielded.amount
+	const combinedBal = parseFloat(nativeBal) + shielded.amount + shielded.pending
 
 	return (
 		<Box position="relative" w={`${size}px`} h={`${size}px`} mx="auto" my="2">
@@ -608,11 +624,12 @@ function ChainDetailOrbital({
 						≈ ${(nativeBalanceUsd + shielded.usd).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
 					</Text>
 				)}
-				{shielded.amount > 0 && (
+				{(shielded.amount > 0 || shielded.pending > 0) && (
 					<Flex align="center" justify="center" gap="1" mt="0.5">
 						<ShieldGlyph size={11} />
 						<Text fontSize="12px" color="var(--gold)" fontWeight="500">
 							{formatBalance(String(shielded.amount))} shielded · {formatBalance(nativeBal)} transparent
+							{shielded.pending > 0 && ` · ${formatBalance(String(shielded.pending))} pending`}
 						</Text>
 					</Flex>
 				)}
@@ -1438,10 +1455,10 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 				)
 				if (!merged) return prev
 				const old = prev.get(updated.chainId)
-				const oldUsd = old?.balanceUsd ?? 0
 				const newUsd = merged.balanceUsd ?? 0
-				// Cha-ching when balance increased
-				if (newUsd > oldUsd && oldUsd > 0) {
+				// Cha-ching when an amount increased (coin or token) — not when a
+				// price tick raised the USD value.
+				if (old && newUsd > 0 && amountIncreased(old, merged)) {
 					playChaChing()
 				}
 				const next = new Map(prev)
@@ -1998,7 +2015,7 @@ export function Dashboard({ onLoaded, watchOnly, watchOnlyDeviceId, onOpenSettin
 												</Text>
 											) : (
 												<Text fontSize="12px" color="var(--text-2)" lineHeight="1.3" truncate>
-													{`${formatBalance(String(balNum + shielded.amount))} ${chain.symbol}`}
+													{`${formatBalance(String(balNum + shielded.amount + shielded.pending))} ${chain.symbol}`}
 												</Text>
 											)}
 											{lowGas && (

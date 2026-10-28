@@ -179,8 +179,10 @@ function predictFirmwareReview(
   const external = message.instructions.some(
     (ix) => ix.programIdIndex >= count || ix.accountIndices.some((i) => i >= count),
   )
-  // More than SOL_MAX_ACCOUNTS static keys: OPAQUE before 7.16, MALFORMED since.
-  if (count > 32) return at('7.16.0') ? 'malformed' : 'opaque'
+  // More than SOL_MAX_ACCOUNTS (32) static keys: too many to review, so every
+  // release treats it as OPAQUE (AdvancedMode). Only more than 32 signers is
+  // MALFORMED: they cannot fit a Solana packet (solana.c oversized key list).
+  if (count > 32) return message.header.numRequiredSignatures > 32 ? 'malformed' : 'opaque'
   if (message.version === 'legacy') {
     if (external) return 'malformed'
   } else if (!at('7.15.0')) {

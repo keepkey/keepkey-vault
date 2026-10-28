@@ -233,10 +233,10 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       // ── Zcash Shielded (Orchard) ──────────────────────────────────────
       zcashShieldedStatus: { params: void; response: { ready: boolean; fvk_loaded: boolean; address: string | null; fvk: { ak: string; nk: string; rivk: string } | null; synced_to: number | null; keepkey_release_block: number | null; verified: boolean; synced: boolean; verifying: boolean } }
       zcashShieldedInit: { params: { account?: number }; response: { fvk: { ak: string; nk: string; rivk: string }; address: string } }
-      zcashShieldedScan: { params: { startHeight?: number; fullRescan?: boolean }; response: { balance: number; notes_found: number; synced_to: number } }
+      zcashShieldedScan: { params: { startHeight?: number; fullRescan?: boolean; quick?: boolean }; response: { balance: number; notes_found: number; synced_to: number } }
       // max_send / max_deshield: the most one payment can move, across as many
       // transactions as the 16-action device limit requires.
-      zcashShieldedBalance: { params: void; response: { confirmed: number; pending: number; synced_to?: number | null; notes_total?: number; notes_unspent?: number; keepkey_release_block?: number; max_send?: number; max_deshield?: number } }
+      zcashShieldedBalance: { params: void; response: { confirmed: number; pending: number; in_flight?: number; synced_to?: number | null; notes_total?: number; notes_unspent?: number; keepkey_release_block?: number; max_send?: number; max_deshield?: number } }
       // A payment that needs more notes than one transaction can spend is sent
       // as several; `txids` lists them all, `txid` is the last. A tex1
       // recipient (ZIP-320) is paid via a one-time transparent address.
@@ -641,6 +641,8 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       // that are mid-signing use this to switch from "device computing" to
       // "press the button on your KeepKey".
       'device-button-request': {}
+      /** Zcash signing: messages streamed to the device so far, of `total`. */
+      'zcash-device-progress': { done: number; total: number; phase: 'confirm' | 'output' | 'input' | 'action' }
       'emulator-status': EmulatorStatus
       /** Bun hit an uncaught error. App process stays alive (handlers are non-exit);
        *  UI should surface a recovery prompt and let the user reload / reconnect. */

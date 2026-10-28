@@ -51,6 +51,18 @@ describe('bundled manifest', () => {
     expect(LATEST_BTC).toBe('7.14.3')
     expect(latestFor(manifest.beta, true)).toBe('7.14.3')
   })
+
+  test('the beta channel offers signed 7.16.0 to multi-chain devices only', () => {
+    const beta = latestFor(manifest.beta, false)!
+    expect(beta).toBe('7.16.0')
+    const installed = inFirmware('7.14.2', false)
+    expect(needs(installed, false, manifest.beta, beta)).toBe(true)
+    expect(planInstall({ installed, channel: manifest.beta, fallbackMulti: beta })).toMatchObject({ ok: true, bitcoinOnly: false, version: '7.16.0', wipeReason: undefined })
+    // Bitcoin-only stays on 7.14.3 whichever channel is selected.
+    expect(needs(inFirmware('7.14.3', true), false, manifest.beta, beta)).toBe(false)
+    // Back on the default channel, a 7.16.0 device is not offered 7.14.2.
+    expect(needs(inFirmware('7.16.0', false), false)).toBe(false)
+  })
 })
 
 describe('(a)/(b) new KeepKey: choose Bitcoin-only or multi-chain, nothing to wipe', () => {

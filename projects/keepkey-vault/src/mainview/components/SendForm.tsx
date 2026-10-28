@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef, Fragment } from "rea
 import { useTranslation } from "react-i18next"
 import { Box, Flex, Text, VStack, Button, Input } from "@chakra-ui/react"
 import { rpcRequest } from "../lib/rpc"
+import { playSent } from "../lib/sounds"
 import { formatBalance } from "../lib/formatting"
 import { describeSigningError } from "../lib/signing-errors"
 import { useFiat } from "../lib/fiat-context"
@@ -349,6 +350,7 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 			}, 60000)
 			setTxid(result.txid)
 			setPhase('broadcast')
+			playSent()
 			// Balance resync + confirmation tracking are owned by the backend for every
 			// broadcast source (in-app, REST, swap): broadcastTx → onActivityLogged.
 		} catch (e: any) {
@@ -998,6 +1000,8 @@ export function SendForm({ chain, address, balance, token, onClearToken, xpubOve
 				<AddressBookPicker
 					networkId={caipToNetworkId(activeCaip)}
 					chainFamily={chain.chainFamily}
+					// This form sends transparent ZEC: shielded (u1…/zs1…) contacts belong to the Privacy tab.
+					entryFilter={chain.id === 'zcash' ? (e) => /^(t1|t3|tex1)/i.test(e.address.trim()) : undefined}
 					onSelect={(e) => { setRecipient(e.address); promptedAddressRef.current = e.address; setShowAddressBook(false) }}
 					onClose={() => setShowAddressBook(false)}
 				/>

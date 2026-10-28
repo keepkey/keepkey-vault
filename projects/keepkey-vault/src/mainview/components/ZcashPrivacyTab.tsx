@@ -1,9 +1,12 @@
 import type { ReactNode } from "react"
 import { useState, useEffect, useCallback, useRef, useMemo } from "react"
 import { useTranslation } from "react-i18next"
+import { createPortal } from "react-dom"
 import { Box, Flex, Text, Button, Spinner, IconButton } from "@chakra-ui/react"
 import { FaShieldAlt, FaArrowRotateRight } from "react-icons/fa"
 import { rpcRequest, onRpcMessage } from "../lib/rpc"
+import { Z } from "../lib/z-index"
+import { playAttention, playSent } from "../lib/sounds"
 import { useFiat } from "../lib/fiat-context"
 import { generateQRSvg } from "../lib/qr"
 import { QrScannerOverlay } from "./QrScannerOverlay"
@@ -74,6 +77,9 @@ const KEEPKEY_RELEASE_BLOCK = 3282941
 type SidecarStatus = "checking" | "ready" | "not_running" | "initializing"
 type ScanState = "idle" | "scanning" | "done"
 type Page = "send" | "shield" | "receive" | "scan" | "history"
+
+/** Zcash device signing: messages streamed so far (zcash-device-progress). */
+interface DeviceProgress { done: number; total: number; phase: "confirm" | "output" | "input" | "action" }
 
 interface ScanProgress {
 	percent: number
@@ -174,11 +180,14 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 	const [startError, setStartError] = useState<string | null>(null)
 	const [orchardAddress, setOrchardAddress] = useState<string | null>(null)
 	const [balance, setBalance] = useState<{
-		confirmed: number; pending: number
+		confirmed: number; pending: number; in_flight?: number
 		notes_unspent?: number; spendable_confirmed?: number
 		spendable_notes_count?: number; min_confirmations?: number
 		max_send?: number; max_deshield?: number
 	} | null>(null)
+	// The user's ZEC that is not spendable yet: maturing notes plus value in
+	// flight (a shield not scanned yet, change from a send not mined yet).
+	const onTheWay = balance ? balance.pending + (balance.in_flight ?? 0) : 0
 	const [syncedTo, setSyncedTo] = useState<number | null>(null)
 	const [scanState, setScanState] = useState<ScanState>("idle")
 	const [scanResult, setScanResult] = useState<string | null>(null)
@@ -196,6 +205,27 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 	const [showSaveDialog, setShowSaveDialog] = useState(false)
 	const promptedAddressRef = useRef<string | null>(null)
 	const [amount, setAmount] = useState("")
+	// USD/ZEC amount entry, like the other send forms. `amount` (ZEC) stays the
+	// value sent; usdText is what was typed in USD (null: derive from amount).
+	const [amountUnit, setAmountUnit] = useState<"zec" | "usd">("zec")
+	const [usdText, setUsdText] = useState<string | null>(null)
+	const [zecPrice, setZecPrice] = useState(0)
+	useEffect(() => {
+		rpcRequest<{ balances: any[] } | null>("getCachedBalances").then(r => {
+			const z = r?.balances?.find(b => b.chainId === "zcash")
+			const bal = parseFloat(z?.balance || "0")
+			const price = z?.tokens?.find((t: any) => t.priceUsd > 0)?.priceUsd
+				|| (bal > 0 ? (z?.nativeBalanceUsd ?? 0) / bal : 0)
+			if (price > 0) setZecPrice(price)
+		}).catch(() => { /* no price: ZEC entry only */ })
+	}, [])
+	const usdShown = usdText ?? (zecPrice > 0 && parseFloat(amount) > 0 ? (parseFloat(amount) * zecPrice).toFixed(2) : "")
+	const setZecAmount = (v: string) => { setAmount(v); setUsdText(null) }
+	const setUsdAmount = (v: string) => {
+		setUsdText(v)
+		const n = parseFloat(v)
+		setAmount(zecPrice > 0 && n > 0 ? (n / zecPrice).toFixed(8).replace(/\.?0+$/, "") : "")
+	}
 	const [memo, setMemo] = useState("")
 	const [sending, setSending] = useState(false)
 	const [sendResult, setSendResult] = useState<string | null>(null)
@@ -327,16 +357,43 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 		}
 	}), [])
 
+	// Sounds: a ding whenever the KeepKey asks for a press mid-transaction, and
+	// a reminder if it is still waiting with no device activity. The host can't
+	// see the press itself, only the next prompt or progress step.
+	// ponytail: 45 s of silence after a prompt; the device computing after the
+	// last press can look the same, so at most 3 reminders per prompt.
+	const txActiveRef = useRef(false)
+	txActiveRef.current = !!(sendStep || shieldStep || deshieldStep)
+	const promptRef = useRef<{ at: number; reminders: number } | null>(null)
+	useEffect(() => {
+		const id = setInterval(() => {
+			const p = promptRef.current
+			if (!p || !txActiveRef.current || p.reminders >= 3 || Date.now() - p.at < 45_000) return
+			p.reminders++; p.at = Date.now()
+			playAttention()
+		}, 5_000)
+		return () => clearInterval(id)
+	}, [])
+
 	useEffect(() => onRpcMessage("device-button-request", () => {
+		if (txActiveRef.current) { playAttention(); promptRef.current = { at: Date.now(), reminders: 0 } }
 		setAwaitingButton(true)
 		if (awaitingButtonTimeoutRef.current) clearTimeout(awaitingButtonTimeoutRef.current)
 		awaitingButtonTimeoutRef.current = setTimeout(() => setAwaitingButton(false), 6000)
+	}), [])
+
+	const [deviceProgress, setDeviceProgress] = useState<DeviceProgress | null>(null)
+	useEffect(() => onRpcMessage("zcash-device-progress", (p: DeviceProgress) => {
+		promptRef.current = null // the device moved on: the prompt was answered
+		setDeviceProgress(p)
 	}), [])
 
 	// Clear awaitingButton whenever any tx phase transitions — keeps the state
 	// honest after a flow finishes or moves into broadcasting.
 	useEffect(() => {
 		if (sendStep !== "signing" && shieldStep !== "signing" && deshieldStep !== "signing") {
+			promptRef.current = null
+			setDeviceProgress(null)
 			setAwaitingButton(false)
 			if (awaitingButtonTimeoutRef.current) {
 				clearTimeout(awaitingButtonTimeoutRef.current)
@@ -396,6 +453,15 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 					setOrchardAddress(r.address); setStatus("ready")
 					if (r.verified) {
 						refreshBalance(); loadTransactions()
+						// One light catch-up each time the tab opens (no polling): a note
+						// may have matured or arrived since the last scan.
+						rpcRequest<{ synced_to?: number }>("zcashShieldedScan", { quick: true }, 120000)
+							.then(res => {
+								if (cancelled) return
+								if (res?.synced_to != null) setSyncedTo(res.synced_to)
+								refreshBalance(); loadTransactions()
+							})
+							.catch((e: any) => console.warn("[ZcashPrivacyTab] open-time sync failed:", e?.message || e))
 					} else {
 						setBalance(null); setTransactions([])
 					}
@@ -519,12 +585,13 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 	const [scanFromHeight, setScanFromHeight] = useState("")
 	const [advancedScanOpen, setAdvancedScanOpen] = useState(false)
 
-	const handleScan = useCallback(async (startHeight?: number, fullRescan?: boolean) => {
+	const handleScan = useCallback(async (startHeight?: number, fullRescan?: boolean, quick?: boolean) => {
 		setScanState("scanning"); setScanResult(null)
 		try {
-			const params: { startHeight?: number; fullRescan?: boolean } = {}
+			const params: { startHeight?: number; fullRescan?: boolean; quick?: boolean } = {}
 			if (startHeight != null) params.startHeight = startHeight
 			if (fullRescan) params.fullRescan = true
+			if (quick) params.quick = true
 			const timeout = startHeight != null ? 300000 : 1800000
 			const result = await rpcRequest<{
 				balance: number; notes_found: number; new_notes?: number
@@ -585,7 +652,7 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 		setTexBusy(index); setTexError(null); setSendStep("building")
 		try {
 			const result = await rpcRequest<{ txid: string }>(action, { index }, ZCASH_TX_TIMEOUT)
-			setSendResult(result.txid)
+			setSendResult(result.txid); playSent()
 			refreshBalance()
 		} catch (e: any) { setTexError(e.message || "TEX payment failed") }
 		setTexBusy(null); setSendStep(null); setSendBatch(null)
@@ -598,18 +665,18 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 			setSendError(recipientValidation.error ? t(recipientValidation.error) : t("invalidZcashRecipient"))
 			return
 		}
-		setSending(true); setSendError(null); setSendResult(null); setSendStep("building")
+		setSending(true); setSendError(null); setSendResult(null); setSendStep("syncing")
 		try {
 			const zatoshis = parseZatoshis(amount)
 			if (memo && new TextEncoder().encode(memo).length > 512) throw new Error(t("memoTooLong"))
 			const result = await rpcRequest<{ txid: string; txids?: string[]; unsentZat?: number; unsentReason?: string }>("zcashShieldedSend",
 				{ recipient, amount: zatoshis, memo: memo || undefined }, ZCASH_TX_TIMEOUT)
-			setSendResult(result.txid)
+			setSendResult(result.txid); playSent()
 			if (result.unsentZat) {
 				// Part went out. Leave only the remainder, so sending again cannot pay twice.
-				setAmount(formatZec(result.unsentZat))
+				setZecAmount(formatZec(result.unsentZat))
 				setSendError(partialSendMessage(zatoshis, result.unsentZat, result.txids, result.unsentReason))
-			} else { setRecipient(""); setAmount(""); setMemo("") }
+			} else { setRecipient(""); setZecAmount(""); setMemo("") }
 			refreshBalance()
 		} catch (e: any) { setSendError(e.message || "Send failed") }
 		setSending(false); setSendStep(null); setSendBatch(null)
@@ -618,12 +685,12 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 
 	const handleShield = useCallback(async () => {
 		if (!shieldAmount) return
-		setShielding(true); setShieldError(null); setShieldResult(null); setShieldStep("building")
+		setShielding(true); setShieldError(null); setShieldResult(null); setShieldStep("syncing")
 		try {
 			const zatoshis = parseZatoshis(shieldAmount)
 			const result = await rpcRequest<{ txid: string }>("zcashShieldZec",
 				{ amount: zatoshis }, ZCASH_TX_TIMEOUT)
-			setShieldResult(result.txid); setShieldAmount("")
+			setShieldResult(result.txid); setShieldAmount(""); playSent()
 			refreshBalance(); refreshTransparentBalance()
 		} catch (e: any) { setShieldError(e.message || "Shield failed") }
 		setShielding(false); setShieldStep(null); setShieldBatch(null)
@@ -635,12 +702,12 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 			setDeshieldError(deshieldRecipientValidation.error ? t(deshieldRecipientValidation.error) : t("invalidAddress"))
 			return
 		}
-		setDeshielding(true); setDeshieldError(null); setDeshieldResult(null); setDeshieldStep("building")
+		setDeshielding(true); setDeshieldError(null); setDeshieldResult(null); setDeshieldStep("syncing")
 		try {
 			const zatoshis = parseZatoshis(deshieldAmount)
 			const result = await rpcRequest<{ txid: string; txids?: string[]; unsentZat?: number; unsentReason?: string }>("zcashDeshieldZec",
 				{ recipient: deshieldRecipient, amount: zatoshis }, ZCASH_TX_TIMEOUT)
-			setDeshieldResult(result.txid)
+			setDeshieldResult(result.txid); playSent()
 			if (result.unsentZat) {
 				setDeshieldAmount(formatZec(result.unsentZat))
 				setDeshieldError(partialSendMessage(zatoshis, result.unsentZat, result.txids, result.unsentReason))
@@ -834,8 +901,8 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 						  mature number big so it matches what's actually spendable. */}
 						{balance ? formatZec(Math.max(0, balance.confirmed - balance.pending)) : "—"}
 						<span className="ticker">ZEC</span>
-						{balance && balance.pending > 0 && (
-							<span className="pending">+ {formatZec(balance.pending)} maturing</span>
+						{onTheWay > 0 && (
+							<span className="pending">+ {formatZec(onTheWay)} pending</span>
 						)}
 					</div>
 					{scanInFlight && scanProgress ? (
@@ -853,12 +920,12 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 				</div>
 				<div className="status-pill">
 					<span className={`led ${scanInFlight ? "amber" : ""}`} />
-					{scanInFlight ? "Syncing" : synced ? "Up to date" : "Idle"}
+					{scanInFlight || scanState === "scanning" ? "Syncing" : synced ? "Synced" : "Idle"}
 					<button
 						className="ghost-btn refresh-compact"
-						onClick={() => { refreshBalance(); loadTransactions() }}
-						disabled={scanInFlight}
-						title="Refresh balance"
+						onClick={() => handleScan(undefined, undefined, true)}
+						disabled={scanInFlight || scanState === "scanning"}
+						title="Sync to the latest block"
 					>↻</button>
 				</div>
 			</div>
@@ -955,17 +1022,25 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 										<span className="lbl">Amount</span>
 										<input
 											type="text"
-											placeholder="0.00000000"
-											value={amount}
-											onChange={e => setAmount(e.target.value)}
+											placeholder={amountUnit === "usd" ? "0.00" : "0.00000000"}
+											value={amountUnit === "usd" ? usdShown : amount}
+											onChange={e => amountUnit === "usd" ? setUsdAmount(e.target.value) : setZecAmount(e.target.value)}
 										/>
-										<span className="suffix">ZEC</span>
+										<span className="suffix">{amountUnit === "usd" ? "USD" : "ZEC"}</span>
 										<button
 											className="max"
-											onClick={() => setAmount(formatZec(spendableMaxZatoshis))}
+											onClick={() => setZecAmount(formatZec(spendableMaxZatoshis))}
 											disabled={spendableMaxZatoshis === 0}
 										>Max</button>
 									</div>
+									{zecPrice > 0 && (
+										<button className="unit-flip" title="Switch between USD and ZEC"
+											onClick={() => { setAmountUnit(u => u === "usd" ? "zec" : "usd"); setUsdText(null) }}>
+											{amountUnit === "usd"
+												? `${amount || "0"} ZEC`
+												: `$${usdShown || "0.00"}`} ⇄
+										</button>
+									)}
 									<div className="field">
 										<span className="lbl">Memo</span>
 										<input
@@ -978,7 +1053,7 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 									</div>
 								</div>
 
-								<TxFlowStatus step={sendStep} batch={sendBatch} awaitingButton={awaitingButton} kind="send" intent="shielded send" />
+								<TxFlowStatus step={sendStep} scanProgress={scanProgress} batch={sendBatch} awaitingButton={awaitingButton} deviceProgress={deviceProgress} kind="send" intent="shielded send" />
 								{texPending.length > 0 && (
 									<div className="tex-pending">
 										<div className="tex-pending-title">Unfinished TEX payments</div>
@@ -1085,6 +1160,7 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 						<h2>Shield &amp; Unshield</h2>
 						<p>Shielded ZEC hides amounts and recipients. Transparent ZEC is publicly visible like Bitcoin.</p>
 					</div>
+					{balance && onTheWay > 0 && <MaturingBanner zat={onTheWay} confirmations={balance.min_confirmations ?? 10} />}
 
 					<div className="form-page">
 						<div className="card">
@@ -1129,7 +1205,7 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 										>Max</button>
 									</div>
 								</div>
-								<TxFlowStatus step={shieldStep} batch={shieldBatch} awaitingButton={awaitingButton} kind="shield" intent="shield transaction" />
+								<TxFlowStatus step={shieldStep} scanProgress={scanProgress} batch={shieldBatch} awaitingButton={awaitingButton} deviceProgress={deviceProgress} kind="shield" intent="shield transaction" />
 
 								{!shielding && (
 									<div className="submit-row">
@@ -1165,9 +1241,9 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 											after fee · {balance.spendable_notes_count ?? 0} spendable notes
 										</span>
 									)}
-									{balance && balance.pending > 0 && (
-										<span className="balance-hint">
-											{formatZec(balance.pending)} ZEC maturing — spendable after {balance.min_confirmations ?? 10} confirmations
+									{onTheWay > 0 && (
+										<span className="balance-hint maturing">
+											+ {formatZec(onTheWay)} ZEC pending
 										</span>
 									)}
 								</div>
@@ -1215,7 +1291,7 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 										>Max</button>
 									</div>
 								</div>
-								<TxFlowStatus step={deshieldStep} batch={deshieldBatch} awaitingButton={awaitingButton} kind="unshield" intent="unshield transaction" />
+								<TxFlowStatus step={deshieldStep} scanProgress={scanProgress} batch={deshieldBatch} awaitingButton={awaitingButton} deviceProgress={deviceProgress} kind="unshield" intent="unshield transaction" />
 
 								{!deshielding && (
 									<div className="submit-row">
@@ -1318,7 +1394,7 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 								<div className="title">
 									{scanState === "scanning" ? "Scanning…"
 										: scanInFlight ? "Catching up…"
-										: synced ? "Up to date"
+										: synced ? "Last synced"
 										: "Not synced yet"}
 								</div>
 								<div className="sub">
@@ -1498,10 +1574,12 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 
 /** Prominent in-form status panel shown while a Zcash tx is in flight.
  *
- *   building     — sidecar building PCZT + Halo 2 proof (~5–30s)
+ *   syncing      — catching the wallet up to the chain tip (minutes on a first sync)
+ *   building     — sidecar building PCZT + Halo 2 proof (usually under a minute)
  *   signing      — sent to KeepKey, awaiting user approval (USER MUST LOOK AT DEVICE)
  *   broadcasting — pushing raw_tx to lightwalletd
  *
+ *  Shown as a modal that locks the app until the transaction finishes or fails.
  *  Replaces the tiny "submit-hint" mid-form text the old UI used. The "signing"
  *  state is the one users actually need to act on, so it gets the loudest
  *  treatment: full-card takeover with the device illustration and an explicit
@@ -1519,8 +1597,12 @@ function batchLabel(kind: "shield" | "unshield" | "send", batch: ZcashTxBatch | 
 	return `${verb} ${batch.index} of ${batch.total}`
 }
 
-function TxFlowStatus({ step, batch = null, awaitingButton, kind, intent }: {
+function TxFlowStatus({ step, batch = null, awaitingButton, kind, intent, scanProgress = null, deviceProgress = null }: {
 	step: string | null
+	/** Live pre-send scan progress, shown while syncing */
+	scanProgress?: ScanProgress | null
+	/** Messages streamed to the device so far, shown while signing */
+	deviceProgress?: DeviceProgress | null
 	/** Position in a multi-transaction operation, from the progress event */
 	batch?: ZcashTxBatch | null
 	/** True when the device just emitted a ButtonRequest — user must press it now.
@@ -1531,16 +1613,43 @@ function TxFlowStatus({ step, batch = null, awaitingButton, kind, intent }: {
 	/** Plain-English description of what the user is doing — used in the title */
 	intent: string
 }) {
+	// Elapsed time across all steps, so a slow step still visibly moves.
+	const [startedAt, setStartedAt] = useState<number | null>(null)
+	const [, setTick] = useState(0)
+	useEffect(() => {
+		if (!step || step === "complete") { setStartedAt(null); return }
+		setStartedAt(s => s ?? Date.now())
+		const id = setInterval(() => setTick(n => n + 1), 1000)
+		return () => clearInterval(id)
+	}, [step])
+	// The dialog blocks clicks; this keeps the keyboard from reaching the app
+	// behind it, so nothing can start another device call mid-transaction.
+	// ponytail: Tab-block only, not `inert` on the root: PIN and signing
+	// prompts render inside the root and must stay usable on top.
+	const active = !!step && step !== "complete"
+	useEffect(() => {
+		if (!active) return
+		;(document.activeElement as HTMLElement | null)?.blur?.()
+		const blockTab = (e: KeyboardEvent) => { if (e.key === "Tab") e.preventDefault() }
+		window.addEventListener("keydown", blockTab, true)
+		return () => window.removeEventListener("keydown", blockTab, true)
+	}, [active])
 	if (!step || step === "complete") return null
+	const elapsed = startedAt ? Math.floor((Date.now() - startedAt) / 1000) : 0
 	const accent = kind === "unshield" ? "copper" : kind === "send" ? "blue" : "gold"
 	const steps: Array<{ id: string; label: string }> = [
+		{ id: "syncing",      label: "Syncing wallet" },
 		{ id: "building",     label: "Building proof" },
 		{ id: "signing",      label: "Sign on KeepKey" },
 		{ id: "broadcasting", label: "Broadcasting" },
 	]
 	const activeIdx = steps.findIndex(s => s.id === step)
 	const label = batchLabel(kind, batch)
-	return (
+	// A modal over the whole app, below only the PIN and signing prompts.
+	return createPortal(
+		<Flex position="fixed" inset={0} bg="blackAlpha.800" zIndex={Z.overlay} align="center" justify="center" p="4"
+			role="dialog" aria-modal="true" aria-label={`${intent} in progress`}>
+		<div className="zcash-v2 tx-flow-modal">
 		<div className={`tx-flow tx-flow-${accent}`}>
 			{label && (
 				<div className="tx-flow-batch">
@@ -1561,15 +1670,31 @@ function TxFlowStatus({ step, batch = null, awaitingButton, kind, intent }: {
 					)
 				})}
 			</div>
+			<div className="tx-flow-elapsed">Working · {Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, "0")}</div>
+			{step === "signing" && elapsed >= 300 && (
+				<div className="tx-flow-elapsed">Taking unusually long. To cancel, unplug your KeepKey.</div>
+			)}
+
+			{step === "syncing" && !awaitingButton && (
+				<div className="tx-flow-body">
+					<div className="tx-flow-headline">Syncing your wallet…</div>
+					<p>Catching up to the latest Zcash block before building your {intent}. The first sync can take a few minutes; later ones take seconds.</p>
+					<ProgressBar percent={scanProgress && scanProgress.percent < 100 ? scanProgress.percent : null} />
+					{scanProgress && scanProgress.percent < 100 && (
+						<p>{scanProgress.scannedHeight.toLocaleString()} / {scanProgress.tipHeight.toLocaleString()} blocks · {formatEta(scanProgress.etaSeconds)} left</p>
+					)}
+				</div>
+			)}
 
 			{step === "building" && (
 				<div className="tx-flow-body">
 					<div className="tx-flow-headline">Building your {intent}…</div>
-					<p>The Zcash sidecar is generating a Halo 2 zero-knowledge proof. This is normal cryptographic work — typically 5–30 seconds.</p>
+					<ProgressBar percent={null} />
+					<p>The Zcash sidecar is generating a Halo 2 zero-knowledge proof. Usually under a minute; transactions with more notes take longer.</p>
 				</div>
 			)}
 
-			{step === "signing" && awaitingButton && (
+			{(step === "signing" || step === "syncing") && awaitingButton && (
 				<div className="tx-flow-body tx-flow-signing tx-flow-press">
 					<div className="tx-flow-device tx-flow-device-active">
 						<svg viewBox="0 0 64 96" width="56" height="84">
@@ -1586,7 +1711,9 @@ function TxFlowStatus({ step, batch = null, awaitingButton, kind, intent }: {
 						</svg>
 					</div>
 					<div className="tx-flow-headline">Press the button on your KeepKey →</div>
-					<p>Confirm the {intent} on the device screen, then press the round button.</p>
+					<p>{step === "syncing"
+						? "Approve the Zcash view key export on the device screen, then press the round button."
+						: `Confirm the ${intent} on the device screen, then press the round button.`}</p>
 				</div>
 			)}
 
@@ -1602,8 +1729,10 @@ function TxFlowStatus({ step, batch = null, awaitingButton, kind, intent }: {
 							<circle cx="32" cy="78" r="6" fill="none" stroke="currentColor" strokeWidth="1.5"/>
 						</svg>
 					</div>
-					<div className="tx-flow-headline">Signing on device…</div>
-					<p>Your KeepKey is computing the Orchard signature. <strong>This may take 60+ seconds</strong> — no input needed yet, just wait.</p>
+					<div className="tx-flow-headline"><span className="tx-flow-spin" /> Signing on device…</div>
+					<ProgressBar percent={deviceProgress?.total ? (deviceProgress.done / deviceProgress.total) * 100 : null} />
+					<p className="tx-flow-checkin">{deviceCheckin(deviceProgress)}</p>
+					<p>Your KeepKey is working on the transaction. <strong>This can take 1–3 minutes</strong>, longer for transactions with more inputs or notes. Keep it plugged in; no input needed yet.</p>
 				</div>
 			)}
 
@@ -1613,6 +1742,40 @@ function TxFlowStatus({ step, batch = null, awaitingButton, kind, intent }: {
 					<p>Almost done. Just pushing the signed transaction to a Zcash node.</p>
 				</div>
 			)}
+		</div>
+		</div>
+		</Flex>,
+		document.body,
+	)
+}
+
+/** What the device is doing, from the messages streamed to it so far. */
+function deviceCheckin(p: DeviceProgress | null): string {
+	if (!p || p.phase === "confirm") return "Waiting for your confirmation on the KeepKey…"
+	if (p.done >= p.total) return `All ${p.total} parts sent · KeepKey is computing signatures…`
+	const what = p.phase === "action" ? "shielded action" : p.phase === "input" ? "transparent input" : "transparent output"
+	return `Verifying ${what} · step ${p.done} of ${p.total}`
+}
+
+/** A determinate bar, or an indeterminate sweep when percent is null. */
+function ProgressBar({ percent }: { percent: number | null }) {
+	return (
+		<div className={`tx-flow-pb ${percent == null ? "indeterminate" : ""}`}>
+			<div className="tx-flow-pb-fill" style={percent == null ? undefined : { width: `${Math.max(2, Math.min(100, percent))}%` }} />
+		</div>
+	)
+}
+
+/** Shielded ZEC that is the user's but not spendable yet: impossible to miss,
+ *  so it never reads as missing money. Zcash targets a block every 75 s. */
+function MaturingBanner({ zat, confirmations }: { zat: number; confirmations: number }) {
+	return (
+		<div className="maturing-banner" role="status">
+			<span className="maturing-icon">⏳</span>
+			<div>
+				<strong>{formatZec(zat)} ZEC is on its way into your shielded balance</strong>
+				<span>Spendable after {confirmations} confirmations, about {Math.ceil(confirmations * 75 / 60)} minutes. It is safe; nothing to do.</span>
+			</div>
 		</div>
 	)
 }
