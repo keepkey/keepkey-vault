@@ -1123,6 +1123,7 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 						<h2>Shield &amp; Unshield</h2>
 						<p>Shielded ZEC hides amounts and recipients. Transparent ZEC is publicly visible like Bitcoin.</p>
 					</div>
+					{balance && balance.pending > 0 && <MaturingBanner zat={balance.pending} confirmations={balance.min_confirmations ?? 10} />}
 
 					<div className="form-page">
 						<div className="card">
@@ -1204,8 +1205,8 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 										</span>
 									)}
 									{balance && balance.pending > 0 && (
-										<span className="balance-hint">
-											{formatZec(balance.pending)} ZEC maturing — spendable after {balance.min_confirmations ?? 10} confirmations
+										<span className="balance-hint maturing">
+											+ {formatZec(balance.pending)} ZEC maturing
 										</span>
 									)}
 								</div>
@@ -1724,6 +1725,20 @@ function ProgressBar({ percent }: { percent: number | null }) {
 	return (
 		<div className={`tx-flow-pb ${percent == null ? "indeterminate" : ""}`}>
 			<div className="tx-flow-pb-fill" style={percent == null ? undefined : { width: `${Math.max(2, Math.min(100, percent))}%` }} />
+		</div>
+	)
+}
+
+/** Shielded ZEC that is the user's but not spendable yet: impossible to miss,
+ *  so it never reads as missing money. Zcash targets a block every 75 s. */
+function MaturingBanner({ zat, confirmations }: { zat: number; confirmations: number }) {
+	return (
+		<div className="maturing-banner" role="status">
+			<span className="maturing-icon">⏳</span>
+			<div>
+				<strong>{formatZec(zat)} ZEC is on its way into your shielded balance</strong>
+				<span>Spendable after {confirmations} confirmations, about {Math.ceil(confirmations * 75 / 60)} minutes. It is safe; nothing to do.</span>
+			</div>
 		</div>
 	)
 }

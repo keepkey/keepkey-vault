@@ -64,7 +64,17 @@ export const ZCASH_V2_CSS = `
 	font-variant-numeric: tabular-nums;
 }
 .zcash-v2 .zk-balance .amount .ticker { color: var(--zk-gold); font-size: 13px; margin-left: 8px; }
-.zcash-v2 .zk-balance .amount .pending { color: var(--zk-fg-mute); font-size: 11px; margin-left: 12px; }
+.zcash-v2 .zk-balance .amount .pending { color: #f5c542; font-size: 12px; font-weight: 600; margin-left: 12px; }
+.zcash-v2 .balance-hint.maturing { color: #f5c542; font-weight: 600; }
+.zcash-v2 .maturing-banner {
+	display: flex; align-items: center; gap: 12px;
+	margin-bottom: 14px; padding: 12px 14px;
+	border: 1px solid rgba(245,197,66,0.6); border-radius: 8px;
+	background: rgba(245,197,66,0.10); color: #f5c542;
+}
+.zcash-v2 .maturing-banner .maturing-icon { font-size: 20px; }
+.zcash-v2 .maturing-banner strong { display: block; font-size: 13.5px; }
+.zcash-v2 .maturing-banner span { font-size: 12px; color: var(--zk-fg-dim); }
 .zcash-v2 .zk-balance .sub {
 	margin-top: 4px;
 	font-family: var(--zk-font-mono); font-size: 11px;
