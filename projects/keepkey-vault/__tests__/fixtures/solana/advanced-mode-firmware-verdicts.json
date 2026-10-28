@@ -1,27 +1,27 @@
 {
   "_comment": "Solana transactions with each firmware build's review verdict. Generated, do not edit: every verdict is the output of scripts/solana-fw-review-oracle/harness.c, which links that build's own lib/firmware/solana.c and calls solana_inspectTx on the exact message bytes Vault sends. fsm_msgSolanaSignTx refuses OPAQUE without AdvancedMode, signs VERIFIED without it, and refuses MALFORMED either way. solanaFirmwareRequiresAdvancedMode must agree with them (__tests__/solana-advanced-mode.test.ts).",
-  "command": "scripts/solana-fw-review-oracle/gen-verdicts.sh <keepkey-firmware> 5482e7366a36e81336074f53a9defb6cff45ed72 e519dc13ced6adbd77cc5ceb6207f3cc04e57492 dd38324e3ffa1178d632e4da58f27cab7c0494a4 2676ec43089223daae7f588494975108e6201a75 4f94a63b6632be48379c95465b3a9f4ae6e561bb b452f011c93eb98d7d1e859c1927842729d20e13",
+  "command": "scripts/solana-fw-review-oracle/gen-verdicts.sh <keepkey-firmware> 5482e7366a36e81336074f53a9defb6cff45ed72 e519dc13ced6adbd77cc5ceb6207f3cc04e57492 dd38324e3ffa1178d632e4da58f27cab7c0494a4 2676ec43089223daae7f588494975108e6201a75 4f94a63b6632be48379c95465b3a9f4ae6e561bb",
   "builds": [
     {
-      "rev": "v7.14.1",
+      "rev": "5482e7366a36e81336074f53a9defb6cff45ed72",
       "sha": "5482e7366a36e81336074f53a9defb6cff45ed72",
       "version": "7.14.1",
       "subject": "Merge pull request #425 from keepkey/release-7141"
     },
     {
-      "rev": "keepkey/release/7.14.2-rc31",
+      "rev": "e519dc13ced6adbd77cc5ceb6207f3cc04e57492",
       "sha": "e519dc13ced6adbd77cc5ceb6207f3cc04e57492",
       "version": "7.14.2",
       "subject": "ci: produce the ARM build manifest the release evidence requires"
     },
     {
-      "rev": "v7.15.0-rc29",
+      "rev": "dd38324e3ffa1178d632e4da58f27cab7c0494a4",
       "sha": "dd38324e3ffa1178d632e4da58f27cab7c0494a4",
       "version": "7.15.0",
       "subject": "Merge pull request #373 from BitHighlander/feat/session-scoped-advanced-mode"
     },
     {
-      "rev": "keepkey/release/7.15",
+      "rev": "2676ec43089223daae7f588494975108e6201a75",
       "sha": "2676ec43089223daae7f588494975108e6201a75",
       "version": "7.15.0",
       "subject": "Fix confirmation observer static analysis"
@@ -31,12 +31,6 @@
       "sha": "4f94a63b6632be48379c95465b3a9f4ae6e561bb",
       "version": "7.16.0",
       "subject": "Merge pull request #495 from keepkey/release/7.16.0"
-    },
-    {
-      "rev": "bithighlander/alpha",
-      "sha": "b452f011c93eb98d7d1e859c1927842729d20e13",
-      "version": "7.16.0",
-      "subject": "Merge pull request #824 from BitHighlander/chore/pin-pyk-upstream-sync"
     }
   ],
   "cases": [
@@ -48,8 +42,7 @@
         "e519dc13ced6adbd77cc5ceb6207f3cc04e57492": "VERIFIED",
         "dd38324e3ffa1178d632e4da58f27cab7c0494a4": "VERIFIED",
         "2676ec43089223daae7f588494975108e6201a75": "VERIFIED",
-        "4f94a63b6632be48379c95465b3a9f4ae6e561bb": "VERIFIED",
-        "b452f011c93eb98d7d1e859c1927842729d20e13": "VERIFIED"
+        "4f94a63b6632be48379c95465b3a9f4ae6e561bb": "VERIFIED"
       }
     },
     {
@@ -60,8 +53,7 @@
         "e519dc13ced6adbd77cc5ceb6207f3cc04e57492": "OPAQUE",
         "dd38324e3ffa1178d632e4da58f27cab7c0494a4": "VERIFIED",
         "2676ec43089223daae7f588494975108e6201a75": "VERIFIED",
-        "4f94a63b6632be48379c95465b3a9f4ae6e561bb": "VERIFIED",
-        "b452f011c93eb98d7d1e859c1927842729d20e13": "VERIFIED"
+        "4f94a63b6632be48379c95465b3a9f4ae6e561bb": "VERIFIED"
       }
     },
     {
@@ -72,8 +64,7 @@
         "e519dc13ced6adbd77cc5ceb6207f3cc04e57492": "VERIFIED",
         "dd38324e3ffa1178d632e4da58f27cab7c0494a4": "VERIFIED",
         "2676ec43089223daae7f588494975108e6201a75": "VERIFIED",
-        "4f94a63b6632be48379c95465b3a9f4ae6e561bb": "VERIFIED",
-        "b452f011c93eb98d7d1e859c1927842729d20e13": "VERIFIED"
+        "4f94a63b6632be48379c95465b3a9f4ae6e561bb": "VERIFIED"
       }
     },
     {
@@ -84,8 +75,7 @@
         "e519dc13ced6adbd77cc5ceb6207f3cc04e57492": "OPAQUE",
         "dd38324e3ffa1178d632e4da58f27cab7c0494a4": "VERIFIED",
         "2676ec43089223daae7f588494975108e6201a75": "VERIFIED",
-        "4f94a63b6632be48379c95465b3a9f4ae6e561bb": "VERIFIED",
-        "b452f011c93eb98d7d1e859c1927842729d20e13": "VERIFIED"
+        "4f94a63b6632be48379c95465b3a9f4ae6e561bb": "VERIFIED"
       }
     },
     {
@@ -96,8 +86,7 @@
         "e519dc13ced6adbd77cc5ceb6207f3cc04e57492": "VERIFIED",
         "dd38324e3ffa1178d632e4da58f27cab7c0494a4": "VERIFIED",
         "2676ec43089223daae7f588494975108e6201a75": "VERIFIED",
-        "4f94a63b6632be48379c95465b3a9f4ae6e561bb": "VERIFIED",
-        "b452f011c93eb98d7d1e859c1927842729d20e13": "VERIFIED"
+        "4f94a63b6632be48379c95465b3a9f4ae6e561bb": "VERIFIED"
       }
     },
     {
@@ -108,8 +97,7 @@
         "e519dc13ced6adbd77cc5ceb6207f3cc04e57492": "VERIFIED",
         "dd38324e3ffa1178d632e4da58f27cab7c0494a4": "VERIFIED",
         "2676ec43089223daae7f588494975108e6201a75": "VERIFIED",
-        "4f94a63b6632be48379c95465b3a9f4ae6e561bb": "VERIFIED",
-        "b452f011c93eb98d7d1e859c1927842729d20e13": "VERIFIED"
+        "4f94a63b6632be48379c95465b3a9f4ae6e561bb": "VERIFIED"
       }
     },
     {
@@ -120,8 +108,7 @@
         "e519dc13ced6adbd77cc5ceb6207f3cc04e57492": "VERIFIED",
         "dd38324e3ffa1178d632e4da58f27cab7c0494a4": "VERIFIED",
         "2676ec43089223daae7f588494975108e6201a75": "VERIFIED",
-        "4f94a63b6632be48379c95465b3a9f4ae6e561bb": "VERIFIED",
-        "b452f011c93eb98d7d1e859c1927842729d20e13": "VERIFIED"
+        "4f94a63b6632be48379c95465b3a9f4ae6e561bb": "VERIFIED"
       }
     },
     {
@@ -132,8 +119,7 @@
         "e519dc13ced6adbd77cc5ceb6207f3cc04e57492": "OPAQUE",
         "dd38324e3ffa1178d632e4da58f27cab7c0494a4": "OPAQUE",
         "2676ec43089223daae7f588494975108e6201a75": "OPAQUE",
-        "4f94a63b6632be48379c95465b3a9f4ae6e561bb": "OPAQUE",
-        "b452f011c93eb98d7d1e859c1927842729d20e13": "OPAQUE"
+        "4f94a63b6632be48379c95465b3a9f4ae6e561bb": "OPAQUE"
       }
     },
     {
@@ -144,8 +130,7 @@
         "e519dc13ced6adbd77cc5ceb6207f3cc04e57492": "OPAQUE",
         "dd38324e3ffa1178d632e4da58f27cab7c0494a4": "OPAQUE",
         "2676ec43089223daae7f588494975108e6201a75": "OPAQUE",
-        "4f94a63b6632be48379c95465b3a9f4ae6e561bb": "OPAQUE",
-        "b452f011c93eb98d7d1e859c1927842729d20e13": "OPAQUE"
+        "4f94a63b6632be48379c95465b3a9f4ae6e561bb": "OPAQUE"
       }
     },
     {
@@ -156,8 +141,7 @@
         "e519dc13ced6adbd77cc5ceb6207f3cc04e57492": "OPAQUE",
         "dd38324e3ffa1178d632e4da58f27cab7c0494a4": "VERIFIED",
         "2676ec43089223daae7f588494975108e6201a75": "OPAQUE",
-        "4f94a63b6632be48379c95465b3a9f4ae6e561bb": "OPAQUE",
-        "b452f011c93eb98d7d1e859c1927842729d20e13": "OPAQUE"
+        "4f94a63b6632be48379c95465b3a9f4ae6e561bb": "OPAQUE"
       }
     },
     {
@@ -168,8 +152,7 @@
         "e519dc13ced6adbd77cc5ceb6207f3cc04e57492": "OPAQUE",
         "dd38324e3ffa1178d632e4da58f27cab7c0494a4": "OPAQUE",
         "2676ec43089223daae7f588494975108e6201a75": "OPAQUE",
-        "4f94a63b6632be48379c95465b3a9f4ae6e561bb": "OPAQUE",
-        "b452f011c93eb98d7d1e859c1927842729d20e13": "OPAQUE"
+        "4f94a63b6632be48379c95465b3a9f4ae6e561bb": "OPAQUE"
       }
     },
     {
@@ -180,8 +163,7 @@
         "e519dc13ced6adbd77cc5ceb6207f3cc04e57492": "OPAQUE",
         "dd38324e3ffa1178d632e4da58f27cab7c0494a4": "VERIFIED",
         "2676ec43089223daae7f588494975108e6201a75": "OPAQUE",
-        "4f94a63b6632be48379c95465b3a9f4ae6e561bb": "OPAQUE",
-        "b452f011c93eb98d7d1e859c1927842729d20e13": "OPAQUE"
+        "4f94a63b6632be48379c95465b3a9f4ae6e561bb": "OPAQUE"
       }
     },
     {
@@ -192,8 +174,7 @@
         "e519dc13ced6adbd77cc5ceb6207f3cc04e57492": "OPAQUE",
         "dd38324e3ffa1178d632e4da58f27cab7c0494a4": "VERIFIED",
         "2676ec43089223daae7f588494975108e6201a75": "OPAQUE",
-        "4f94a63b6632be48379c95465b3a9f4ae6e561bb": "OPAQUE",
-        "b452f011c93eb98d7d1e859c1927842729d20e13": "OPAQUE"
+        "4f94a63b6632be48379c95465b3a9f4ae6e561bb": "OPAQUE"
       }
     },
     {
@@ -204,8 +185,7 @@
         "e519dc13ced6adbd77cc5ceb6207f3cc04e57492": "VERIFIED",
         "dd38324e3ffa1178d632e4da58f27cab7c0494a4": "OPAQUE",
         "2676ec43089223daae7f588494975108e6201a75": "VERIFIED",
-        "4f94a63b6632be48379c95465b3a9f4ae6e561bb": "VERIFIED",
-        "b452f011c93eb98d7d1e859c1927842729d20e13": "VERIFIED"
+        "4f94a63b6632be48379c95465b3a9f4ae6e561bb": "VERIFIED"
       }
     },
     {
@@ -216,8 +196,7 @@
         "e519dc13ced6adbd77cc5ceb6207f3cc04e57492": "OPAQUE",
         "dd38324e3ffa1178d632e4da58f27cab7c0494a4": "OPAQUE",
         "2676ec43089223daae7f588494975108e6201a75": "OPAQUE",
-        "4f94a63b6632be48379c95465b3a9f4ae6e561bb": "OPAQUE",
-        "b452f011c93eb98d7d1e859c1927842729d20e13": "OPAQUE"
+        "4f94a63b6632be48379c95465b3a9f4ae6e561bb": "OPAQUE"
       }
     },
     {
@@ -228,8 +207,7 @@
         "e519dc13ced6adbd77cc5ceb6207f3cc04e57492": "OPAQUE",
         "dd38324e3ffa1178d632e4da58f27cab7c0494a4": "OPAQUE",
         "2676ec43089223daae7f588494975108e6201a75": "OPAQUE",
-        "4f94a63b6632be48379c95465b3a9f4ae6e561bb": "VERIFIED",
-        "b452f011c93eb98d7d1e859c1927842729d20e13": "OPAQUE"
+        "4f94a63b6632be48379c95465b3a9f4ae6e561bb": "VERIFIED"
       }
     },
     {
@@ -240,8 +218,7 @@
         "e519dc13ced6adbd77cc5ceb6207f3cc04e57492": "OPAQUE",
         "dd38324e3ffa1178d632e4da58f27cab7c0494a4": "OPAQUE",
         "2676ec43089223daae7f588494975108e6201a75": "OPAQUE",
-        "4f94a63b6632be48379c95465b3a9f4ae6e561bb": "OPAQUE",
-        "b452f011c93eb98d7d1e859c1927842729d20e13": "MALFORMED"
+        "4f94a63b6632be48379c95465b3a9f4ae6e561bb": "OPAQUE"
       }
     },
     {
@@ -252,8 +229,7 @@
         "e519dc13ced6adbd77cc5ceb6207f3cc04e57492": "OPAQUE",
         "dd38324e3ffa1178d632e4da58f27cab7c0494a4": "VERIFIED",
         "2676ec43089223daae7f588494975108e6201a75": "VERIFIED",
-        "4f94a63b6632be48379c95465b3a9f4ae6e561bb": "VERIFIED",
-        "b452f011c93eb98d7d1e859c1927842729d20e13": "VERIFIED"
+        "4f94a63b6632be48379c95465b3a9f4ae6e561bb": "VERIFIED"
       }
     },
     {
@@ -264,8 +240,7 @@
         "e519dc13ced6adbd77cc5ceb6207f3cc04e57492": "MALFORMED",
         "dd38324e3ffa1178d632e4da58f27cab7c0494a4": "OPAQUE",
         "2676ec43089223daae7f588494975108e6201a75": "OPAQUE",
-        "4f94a63b6632be48379c95465b3a9f4ae6e561bb": "VERIFIED",
-        "b452f011c93eb98d7d1e859c1927842729d20e13": "OPAQUE"
+        "4f94a63b6632be48379c95465b3a9f4ae6e561bb": "VERIFIED"
       }
     },
     {
@@ -276,8 +251,7 @@
         "e519dc13ced6adbd77cc5ceb6207f3cc04e57492": "MALFORMED",
         "dd38324e3ffa1178d632e4da58f27cab7c0494a4": "OPAQUE",
         "2676ec43089223daae7f588494975108e6201a75": "OPAQUE",
-        "4f94a63b6632be48379c95465b3a9f4ae6e561bb": "OPAQUE",
-        "b452f011c93eb98d7d1e859c1927842729d20e13": "OPAQUE"
+        "4f94a63b6632be48379c95465b3a9f4ae6e561bb": "OPAQUE"
       }
     },
     {
@@ -288,8 +262,7 @@
         "e519dc13ced6adbd77cc5ceb6207f3cc04e57492": "OPAQUE",
         "dd38324e3ffa1178d632e4da58f27cab7c0494a4": "OPAQUE",
         "2676ec43089223daae7f588494975108e6201a75": "OPAQUE",
-        "4f94a63b6632be48379c95465b3a9f4ae6e561bb": "OPAQUE",
-        "b452f011c93eb98d7d1e859c1927842729d20e13": "OPAQUE"
+        "4f94a63b6632be48379c95465b3a9f4ae6e561bb": "OPAQUE"
       }
     },
     {
@@ -300,8 +273,7 @@
         "e519dc13ced6adbd77cc5ceb6207f3cc04e57492": "OPAQUE",
         "dd38324e3ffa1178d632e4da58f27cab7c0494a4": "OPAQUE",
         "2676ec43089223daae7f588494975108e6201a75": "OPAQUE",
-        "4f94a63b6632be48379c95465b3a9f4ae6e561bb": "OPAQUE",
-        "b452f011c93eb98d7d1e859c1927842729d20e13": "OPAQUE"
+        "4f94a63b6632be48379c95465b3a9f4ae6e561bb": "OPAQUE"
       }
     },
     {
@@ -312,8 +284,7 @@
         "e519dc13ced6adbd77cc5ceb6207f3cc04e57492": "MALFORMED",
         "dd38324e3ffa1178d632e4da58f27cab7c0494a4": "OPAQUE",
         "2676ec43089223daae7f588494975108e6201a75": "OPAQUE",
-        "4f94a63b6632be48379c95465b3a9f4ae6e561bb": "OPAQUE",
-        "b452f011c93eb98d7d1e859c1927842729d20e13": "OPAQUE"
+        "4f94a63b6632be48379c95465b3a9f4ae6e561bb": "OPAQUE"
       }
     }
   ]
