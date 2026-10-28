@@ -641,6 +641,8 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       // that are mid-signing use this to switch from "device computing" to
       // "press the button on your KeepKey".
       'device-button-request': {}
+      /** Zcash signing: messages streamed to the device so far, of `total`. */
+      'zcash-device-progress': { done: number; total: number; phase: 'confirm' | 'output' | 'input' | 'action' }
       'emulator-status': EmulatorStatus
       /** Bun hit an uncaught error. App process stays alive (handlers are non-exit);
        *  UI should surface a recovery prompt and let the user reload / reconnect. */

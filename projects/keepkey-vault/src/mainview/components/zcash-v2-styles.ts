@@ -251,6 +251,14 @@ export const ZCASH_V2_CSS = `
 	flex-shrink: 0; font-weight: 600;
 }
 .zcash-v2 .field .max:hover:not(:disabled) { background: rgba(201,163,104,0.22); }
+.zcash-v2 .unit-flip {
+	align-self: flex-start; margin: -2px 0 0 2px;
+	font-family: var(--zk-font-mono); font-size: 11.5px; font-weight: 600;
+	color: var(--zk-gold); padding: 3px 10px;
+	border: 1px solid var(--zk-gold-line); border-radius: 999px;
+	background: var(--zk-gold-soft);
+}
+.zcash-v2 .unit-flip:hover { background: rgba(201,163,104,0.22); }
 .zcash-v2 .field-err {
 	font-family: var(--zk-font-display); font-size: 12px;
 	color: var(--zk-copper); padding: 0 2px;
@@ -375,6 +383,19 @@ export const ZCASH_V2_CSS = `
 	background-color: var(--zk-bg);
 	box-shadow: 0 24px 64px rgba(0,0,0,0.6);
 }
+.zcash-v2 .tx-flow-pb {
+	width: 100%; max-width: 360px; height: 5px; margin: 10px auto;
+	border-radius: 999px; background: var(--zk-bg-3); overflow: hidden;
+}
+.zcash-v2 .tx-flow-pb-fill {
+	height: 100%;
+	background: linear-gradient(90deg, var(--zk-gold-deep), var(--zk-gold));
+	transition: width 0.3s ease-out;
+}
+.zcash-v2 .tx-flow-pb.indeterminate .tx-flow-pb-fill { width: 35%; animation: zk-pb-sweep 1.4s ease-in-out infinite; }
+@keyframes zk-pb-sweep { from { transform: translateX(-100%); } to { transform: translateX(290%); } }
+.zcash-v2 .tx-flow-body p.tx-flow-checkin { color: var(--zk-fg); font-family: var(--zk-font-mono); font-size: 12px; margin-bottom: 6px; }
+.zcash-v2 .tx-flow-headline .tx-flow-spin { display: inline-block; vertical-align: middle; margin-right: 6px; }
 .zcash-v2 .tx-flow-elapsed {
 	padding: 0 18px;
 	font-size: 11.5px; font-variant-numeric: tabular-nums;

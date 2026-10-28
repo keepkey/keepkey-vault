@@ -77,6 +77,9 @@ type SidecarStatus = "checking" | "ready" | "not_running" | "initializing"
 type ScanState = "idle" | "scanning" | "done"
 type Page = "send" | "shield" | "receive" | "scan" | "history"
 
+/** Zcash device signing: messages streamed so far (zcash-device-progress). */
+interface DeviceProgress { done: number; total: number; phase: "confirm" | "output" | "input" | "action" }
+
 interface ScanProgress {
 	percent: number
 	scannedHeight: number
@@ -198,6 +201,27 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 	const [showSaveDialog, setShowSaveDialog] = useState(false)
 	const promptedAddressRef = useRef<string | null>(null)
 	const [amount, setAmount] = useState("")
+	// USD/ZEC amount entry, like the other send forms. `amount` (ZEC) stays the
+	// value sent; usdText is what was typed in USD (null: derive from amount).
+	const [amountUnit, setAmountUnit] = useState<"zec" | "usd">("zec")
+	const [usdText, setUsdText] = useState<string | null>(null)
+	const [zecPrice, setZecPrice] = useState(0)
+	useEffect(() => {
+		rpcRequest<{ balances: any[] } | null>("getCachedBalances").then(r => {
+			const z = r?.balances?.find(b => b.chainId === "zcash")
+			const bal = parseFloat(z?.balance || "0")
+			const price = z?.tokens?.find((t: any) => t.priceUsd > 0)?.priceUsd
+				|| (bal > 0 ? (z?.nativeBalanceUsd ?? 0) / bal : 0)
+			if (price > 0) setZecPrice(price)
+		}).catch(() => { /* no price: ZEC entry only */ })
+	}, [])
+	const usdShown = usdText ?? (zecPrice > 0 && parseFloat(amount) > 0 ? (parseFloat(amount) * zecPrice).toFixed(2) : "")
+	const setZecAmount = (v: string) => { setAmount(v); setUsdText(null) }
+	const setUsdAmount = (v: string) => {
+		setUsdText(v)
+		const n = parseFloat(v)
+		setAmount(zecPrice > 0 && n > 0 ? (n / zecPrice).toFixed(8).replace(/\.?0+$/, "") : "")
+	}
 	const [memo, setMemo] = useState("")
 	const [sending, setSending] = useState(false)
 	const [sendResult, setSendResult] = useState<string | null>(null)
@@ -335,10 +359,14 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 		awaitingButtonTimeoutRef.current = setTimeout(() => setAwaitingButton(false), 6000)
 	}), [])
 
+	const [deviceProgress, setDeviceProgress] = useState<DeviceProgress | null>(null)
+	useEffect(() => onRpcMessage("zcash-device-progress", (p: DeviceProgress) => setDeviceProgress(p)), [])
+
 	// Clear awaitingButton whenever any tx phase transitions — keeps the state
 	// honest after a flow finishes or moves into broadcasting.
 	useEffect(() => {
 		if (sendStep !== "signing" && shieldStep !== "signing" && deshieldStep !== "signing") {
+			setDeviceProgress(null)
 			setAwaitingButton(false)
 			if (awaitingButtonTimeoutRef.current) {
 				clearTimeout(awaitingButtonTimeoutRef.current)
@@ -609,9 +637,9 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 			setSendResult(result.txid)
 			if (result.unsentZat) {
 				// Part went out. Leave only the remainder, so sending again cannot pay twice.
-				setAmount(formatZec(result.unsentZat))
+				setZecAmount(formatZec(result.unsentZat))
 				setSendError(partialSendMessage(zatoshis, result.unsentZat, result.txids, result.unsentReason))
-			} else { setRecipient(""); setAmount(""); setMemo("") }
+			} else { setRecipient(""); setZecAmount(""); setMemo("") }
 			refreshBalance()
 		} catch (e: any) { setSendError(e.message || "Send failed") }
 		setSending(false); setSendStep(null); setSendBatch(null)
@@ -957,17 +985,25 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 										<span className="lbl">Amount</span>
 										<input
 											type="text"
-											placeholder="0.00000000"
-											value={amount}
-											onChange={e => setAmount(e.target.value)}
+											placeholder={amountUnit === "usd" ? "0.00" : "0.00000000"}
+											value={amountUnit === "usd" ? usdShown : amount}
+											onChange={e => amountUnit === "usd" ? setUsdAmount(e.target.value) : setZecAmount(e.target.value)}
 										/>
-										<span className="suffix">ZEC</span>
+										<span className="suffix">{amountUnit === "usd" ? "USD" : "ZEC"}</span>
 										<button
 											className="max"
-											onClick={() => setAmount(formatZec(spendableMaxZatoshis))}
+											onClick={() => setZecAmount(formatZec(spendableMaxZatoshis))}
 											disabled={spendableMaxZatoshis === 0}
 										>Max</button>
 									</div>
+									{zecPrice > 0 && (
+										<button className="unit-flip" title="Switch between USD and ZEC"
+											onClick={() => { setAmountUnit(u => u === "usd" ? "zec" : "usd"); setUsdText(null) }}>
+											{amountUnit === "usd"
+												? `${amount || "0"} ZEC`
+												: `$${usdShown || "0.00"}`} ⇄
+										</button>
+									)}
 									<div className="field">
 										<span className="lbl">Memo</span>
 										<input
@@ -980,7 +1016,7 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 									</div>
 								</div>
 
-								<TxFlowStatus step={sendStep} scanProgress={scanProgress} batch={sendBatch} awaitingButton={awaitingButton} kind="send" intent="shielded send" />
+								<TxFlowStatus step={sendStep} scanProgress={scanProgress} batch={sendBatch} awaitingButton={awaitingButton} deviceProgress={deviceProgress} kind="send" intent="shielded send" />
 								{texPending.length > 0 && (
 									<div className="tex-pending">
 										<div className="tex-pending-title">Unfinished TEX payments</div>
@@ -1131,7 +1167,7 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 										>Max</button>
 									</div>
 								</div>
-								<TxFlowStatus step={shieldStep} scanProgress={scanProgress} batch={shieldBatch} awaitingButton={awaitingButton} kind="shield" intent="shield transaction" />
+								<TxFlowStatus step={shieldStep} scanProgress={scanProgress} batch={shieldBatch} awaitingButton={awaitingButton} deviceProgress={deviceProgress} kind="shield" intent="shield transaction" />
 
 								{!shielding && (
 									<div className="submit-row">
@@ -1217,7 +1253,7 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 										>Max</button>
 									</div>
 								</div>
-								<TxFlowStatus step={deshieldStep} scanProgress={scanProgress} batch={deshieldBatch} awaitingButton={awaitingButton} kind="unshield" intent="unshield transaction" />
+								<TxFlowStatus step={deshieldStep} scanProgress={scanProgress} batch={deshieldBatch} awaitingButton={awaitingButton} deviceProgress={deviceProgress} kind="unshield" intent="unshield transaction" />
 
 								{!deshielding && (
 									<div className="submit-row">
@@ -1523,10 +1559,12 @@ function batchLabel(kind: "shield" | "unshield" | "send", batch: ZcashTxBatch | 
 	return `${verb} ${batch.index} of ${batch.total}`
 }
 
-function TxFlowStatus({ step, batch = null, awaitingButton, kind, intent, scanProgress = null }: {
+function TxFlowStatus({ step, batch = null, awaitingButton, kind, intent, scanProgress = null, deviceProgress = null }: {
 	step: string | null
 	/** Live pre-send scan progress, shown while syncing */
 	scanProgress?: ScanProgress | null
+	/** Messages streamed to the device so far, shown while signing */
+	deviceProgress?: DeviceProgress | null
 	/** Position in a multi-transaction operation, from the progress event */
 	batch?: ZcashTxBatch | null
 	/** True when the device just emitted a ButtonRequest — user must press it now.
@@ -1603,6 +1641,7 @@ function TxFlowStatus({ step, batch = null, awaitingButton, kind, intent, scanPr
 				<div className="tx-flow-body">
 					<div className="tx-flow-headline">Syncing your wallet…</div>
 					<p>Catching up to the latest Zcash block before building your {intent}. The first sync can take a few minutes; later ones take seconds.</p>
+					<ProgressBar percent={scanProgress && scanProgress.percent < 100 ? scanProgress.percent : null} />
 					{scanProgress && scanProgress.percent < 100 && (
 						<p>{scanProgress.scannedHeight.toLocaleString()} / {scanProgress.tipHeight.toLocaleString()} blocks · {formatEta(scanProgress.etaSeconds)} left</p>
 					)}
@@ -1612,6 +1651,7 @@ function TxFlowStatus({ step, batch = null, awaitingButton, kind, intent, scanPr
 			{step === "building" && (
 				<div className="tx-flow-body">
 					<div className="tx-flow-headline">Building your {intent}…</div>
+					<ProgressBar percent={null} />
 					<p>The Zcash sidecar is generating a Halo 2 zero-knowledge proof. Usually under a minute; transactions with more notes take longer.</p>
 				</div>
 			)}
@@ -1651,7 +1691,9 @@ function TxFlowStatus({ step, batch = null, awaitingButton, kind, intent, scanPr
 							<circle cx="32" cy="78" r="6" fill="none" stroke="currentColor" strokeWidth="1.5"/>
 						</svg>
 					</div>
-					<div className="tx-flow-headline">Signing on device…</div>
+					<div className="tx-flow-headline"><span className="tx-flow-spin" /> Signing on device…</div>
+					<ProgressBar percent={deviceProgress?.total ? (deviceProgress.done / deviceProgress.total) * 100 : null} />
+					<p className="tx-flow-checkin">{deviceCheckin(deviceProgress)}</p>
 					<p>Your KeepKey is working on the transaction. <strong>This can take 1–3 minutes</strong>, longer for transactions with more inputs or notes. Keep it plugged in; no input needed yet.</p>
 				</div>
 			)}
@@ -1666,6 +1708,23 @@ function TxFlowStatus({ step, batch = null, awaitingButton, kind, intent, scanPr
 		</div>
 		</Flex>,
 		document.body,
+	)
+}
+
+/** What the device is doing, from the messages streamed to it so far. */
+function deviceCheckin(p: DeviceProgress | null): string {
+	if (!p || p.phase === "confirm") return "Waiting for your confirmation on the KeepKey…"
+	if (p.done >= p.total) return `All ${p.total} parts sent · KeepKey is computing signatures…`
+	const what = p.phase === "action" ? "shielded action" : p.phase === "input" ? "transparent input" : "transparent output"
+	return `Verifying ${what} · step ${p.done} of ${p.total}`
+}
+
+/** A determinate bar, or an indeterminate sweep when percent is null. */
+function ProgressBar({ percent }: { percent: number | null }) {
+	return (
+		<div className={`tx-flow-pb ${percent == null ? "indeterminate" : ""}`}>
+			<div className="tx-flow-pb-fill" style={percent == null ? undefined : { width: `${Math.max(2, Math.min(100, percent))}%` }} />
+		</div>
 	)
 }
 
