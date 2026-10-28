@@ -49,7 +49,7 @@ describe('bundled release images', () => {
   })
   test('keys are the device-reported firmware hashes', () => {
     const byPath = new Map([...images].map(([hash, image]) => [image.relPath, hash]))
-    for (const version of ['v7.10.0', 'v7.14.0', 'v7.14.1']) {
+    for (const version of ['v7.10.0', 'v7.14.0', 'v7.14.1', 'v7.16.0']) {
       expect(resolveOndeviceFirmwareVersion(byPath.get(`${version}/firmware.keepkey.bin`))).toBe(version)
     }
     expect(byPath.has('bl_v2.1.4/blupdater.bin')).toBe(true)

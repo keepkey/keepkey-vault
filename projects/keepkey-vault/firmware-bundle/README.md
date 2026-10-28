@@ -12,6 +12,7 @@ firmware-bundle/
 ├── v7.14.1/firmware.keepkey.bin
 ├── v7.14.2/firmware.keepkey.bin
 ├── v7.14.3/firmware.keepkey.bitcoin-only.bin   # Bitcoin-only build (releases.json firmwareBitcoinOnly)
+├── v7.16.0/firmware.keepkey.bin                # Pre-release, beta channel only
 └── bl_v2.1.4/blupdater.bin
 ```
 
@@ -19,7 +20,7 @@ firmware-bundle/
 
 - **Stronger chain of custody**: Apple-notarized DMG → firmware inside the signed bundle. Tampering with any bundled binary breaks the DMG signature. Stronger than downloading + hash-checking at runtime (which trusts a JSON file on GitHub).
 - **Offline installs**: Users on air-gapped machines can flash without network access.
-- **Alpha channel**: Ships 7.14.1 inside the app — alpha testers flip the Settings toggle, no remote manifest update required.
+- **Alpha channel**: Ships 7.16.0 (signed pre-release) inside the app — alpha testers flip the Settings toggle, no remote manifest update required.
 
 ## Runtime behavior
 

@@ -267,7 +267,7 @@ export const ONDEVICE_FIRMWARE_HASHES: Record<string, string> = {
   'caa53bd48e7a6c1f01dcf20ac434cefad0d72ea93a7b0ca688072f36a19d68df': 'v7.14.2',
   // Bitcoin-only build, release v7.14.3 asset firmware.keepkey.bitcoin-only.bin.
   '74b6b2d03e38aa8fe646fb8c8016cb4e7be1793d1ce9493c2bbe5759a85ecbec': 'v7.14.3-bitcoin-only',
-  // Pre-release, recognised only: Desktop does not bundle or offer it.
+  // Pre-release: bundled and offered only on the beta channel (Alpha Firmware toggle).
   '99ebac75902b285678c235ec3cb0a9de2d2bc1181c0d47db6a9ae14cf035879c': 'v7.16.0',
   // v7.14.0 unsigned builds (custom firmware)
   '75dc509a90f70a1f0025a9c5451532f407c4f78df5ef7d1d7b9b2ef9b9740e19': 'v7.14.0-solana',
