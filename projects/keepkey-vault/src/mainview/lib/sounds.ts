@@ -27,6 +27,41 @@ export function playChaChing() {
   }
 }
 
+/** Sent: a short rising whoosh, played once a transaction is broadcast. */
+export function playSent() {
+  try {
+    const ctx = getCtx()
+    const now = ctx.currentTime
+    const osc = ctx.createOscillator()
+    const gain = ctx.createGain()
+    osc.type = 'sine'
+    osc.frequency.setValueAtTime(420, now)
+    osc.frequency.exponentialRampToValueAtTime(1300, now + 0.22)
+    gain.gain.setValueAtTime(0.0001, now)
+    gain.gain.exponentialRampToValueAtTime(0.18, now + 0.04)
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.3)
+    osc.connect(gain)
+    gain.connect(ctx.destination)
+    osc.start(now)
+    osc.stop(now + 0.3)
+    playTone(ctx, 1568, now + 0.24, 0.18, 0.12)
+  } catch {
+    // Audio not available — silently skip
+  }
+}
+
+/** Attention: a soft ding-dong — "look at your KeepKey, it needs a press". */
+export function playAttention() {
+  try {
+    const ctx = getCtx()
+    const now = ctx.currentTime
+    playTone(ctx, 1319, now, 0.35, 0.16)        // E6
+    playTone(ctx, 988, now + 0.22, 0.45, 0.14)  // B5
+  } catch {
+    // Audio not available — silently skip
+  }
+}
+
 /** Synthesize a two-yip bark — no audio file required. */
 export function playBark() {
   try {

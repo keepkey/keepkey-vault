@@ -6,6 +6,7 @@ import { Box, Flex, Text, Button, Spinner, IconButton } from "@chakra-ui/react"
 import { FaShieldAlt, FaArrowRotateRight } from "react-icons/fa"
 import { rpcRequest, onRpcMessage } from "../lib/rpc"
 import { Z } from "../lib/z-index"
+import { playAttention, playSent } from "../lib/sounds"
 import { useFiat } from "../lib/fiat-context"
 import { generateQRSvg } from "../lib/qr"
 import { QrScannerOverlay } from "./QrScannerOverlay"
@@ -353,19 +354,42 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 		}
 	}), [])
 
+	// Sounds: a ding whenever the KeepKey asks for a press mid-transaction, and
+	// a reminder if it is still waiting with no device activity. The host can't
+	// see the press itself, only the next prompt or progress step.
+	// ponytail: 45 s of silence after a prompt; the device computing after the
+	// last press can look the same, so at most 3 reminders per prompt.
+	const txActiveRef = useRef(false)
+	txActiveRef.current = !!(sendStep || shieldStep || deshieldStep)
+	const promptRef = useRef<{ at: number; reminders: number } | null>(null)
+	useEffect(() => {
+		const id = setInterval(() => {
+			const p = promptRef.current
+			if (!p || !txActiveRef.current || p.reminders >= 3 || Date.now() - p.at < 45_000) return
+			p.reminders++; p.at = Date.now()
+			playAttention()
+		}, 5_000)
+		return () => clearInterval(id)
+	}, [])
+
 	useEffect(() => onRpcMessage("device-button-request", () => {
+		if (txActiveRef.current) { playAttention(); promptRef.current = { at: Date.now(), reminders: 0 } }
 		setAwaitingButton(true)
 		if (awaitingButtonTimeoutRef.current) clearTimeout(awaitingButtonTimeoutRef.current)
 		awaitingButtonTimeoutRef.current = setTimeout(() => setAwaitingButton(false), 6000)
 	}), [])
 
 	const [deviceProgress, setDeviceProgress] = useState<DeviceProgress | null>(null)
-	useEffect(() => onRpcMessage("zcash-device-progress", (p: DeviceProgress) => setDeviceProgress(p)), [])
+	useEffect(() => onRpcMessage("zcash-device-progress", (p: DeviceProgress) => {
+		promptRef.current = null // the device moved on: the prompt was answered
+		setDeviceProgress(p)
+	}), [])
 
 	// Clear awaitingButton whenever any tx phase transitions — keeps the state
 	// honest after a flow finishes or moves into broadcasting.
 	useEffect(() => {
 		if (sendStep !== "signing" && shieldStep !== "signing" && deshieldStep !== "signing") {
+			promptRef.current = null
 			setDeviceProgress(null)
 			setAwaitingButton(false)
 			if (awaitingButtonTimeoutRef.current) {
@@ -615,7 +639,7 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 		setTexBusy(index); setTexError(null); setSendStep("building")
 		try {
 			const result = await rpcRequest<{ txid: string }>(action, { index }, ZCASH_TX_TIMEOUT)
-			setSendResult(result.txid)
+			setSendResult(result.txid); playSent()
 			refreshBalance()
 		} catch (e: any) { setTexError(e.message || "TEX payment failed") }
 		setTexBusy(null); setSendStep(null); setSendBatch(null)
@@ -634,7 +658,7 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 			if (memo && new TextEncoder().encode(memo).length > 512) throw new Error(t("memoTooLong"))
 			const result = await rpcRequest<{ txid: string; txids?: string[]; unsentZat?: number; unsentReason?: string }>("zcashShieldedSend",
 				{ recipient, amount: zatoshis, memo: memo || undefined }, ZCASH_TX_TIMEOUT)
-			setSendResult(result.txid)
+			setSendResult(result.txid); playSent()
 			if (result.unsentZat) {
 				// Part went out. Leave only the remainder, so sending again cannot pay twice.
 				setZecAmount(formatZec(result.unsentZat))
@@ -653,7 +677,7 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 			const zatoshis = parseZatoshis(shieldAmount)
 			const result = await rpcRequest<{ txid: string }>("zcashShieldZec",
 				{ amount: zatoshis }, ZCASH_TX_TIMEOUT)
-			setShieldResult(result.txid); setShieldAmount("")
+			setShieldResult(result.txid); setShieldAmount(""); playSent()
 			refreshBalance(); refreshTransparentBalance()
 		} catch (e: any) { setShieldError(e.message || "Shield failed") }
 		setShielding(false); setShieldStep(null); setShieldBatch(null)
@@ -670,7 +694,7 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 			const zatoshis = parseZatoshis(deshieldAmount)
 			const result = await rpcRequest<{ txid: string; txids?: string[]; unsentZat?: number; unsentReason?: string }>("zcashDeshieldZec",
 				{ recipient: deshieldRecipient, amount: zatoshis }, ZCASH_TX_TIMEOUT)
-			setDeshieldResult(result.txid)
+			setDeshieldResult(result.txid); playSent()
 			if (result.unsentZat) {
 				setDeshieldAmount(formatZec(result.unsentZat))
 				setDeshieldError(partialSendMessage(zatoshis, result.unsentZat, result.txids, result.unsentReason))
