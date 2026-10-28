@@ -7239,7 +7239,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					maybeStartBackgroundWalletVerification()
 					throw new Error('Zcash wallet is not verified against the connected device yet')
 				}
-				return await getShieldedBalance()
+				const balance = await getShieldedBalance()
+				// Value still in flight (an unscanned shield, unmined change): not in the
+				// sidecar's notes yet, so the Privacy tab would otherwise read it as gone.
+				const in_flight = inFlightShielded(readZcashMemory().expected, balance.confirmed, Date.now()).pending
+				return { ...balance, in_flight }
 			},
 			zcashShieldedSend: async (params) => {
 				const sessionEpoch = activitySessionEpoch // the wallet session this send belongs to
