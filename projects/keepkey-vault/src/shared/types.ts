@@ -72,6 +72,10 @@ export interface DeviceStateInfo {
    *  at all. UI only: a device with no firmware can still hold a wallet in
    *  storage, so installWipeReason still carries any wipe ('no-firmware'). */
   factoryFirmware?: boolean
+  /** A wipe is waiting for the user to replug the device, or for confirmation on it: no PIN prompt. */
+  wipePending?: 'replug' | 'confirm'
+  /** The device is showing its PIN grid and waiting for the PIN; false while it counts down after wrong PINs. */
+  pinPromptOpen?: boolean
   /** Why installing each official build may wipe or lock this device's wallet
    *  (see flashWipeReason); undefined = it does not. The install must carry an
    *  explicit acknowledgement when set. */

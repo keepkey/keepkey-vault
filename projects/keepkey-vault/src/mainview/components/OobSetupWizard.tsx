@@ -1350,6 +1350,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                 installFirmware={deviceStatus?.installFirmware}
                 installBootloader={deviceStatus?.installBootloader}
                 continueDisabled={!hasFeatures}
+                holdsWallet={everSeenInitializedRef.current || lastAppModeInitializedRef.current === true}
                 onContinue={() => setStep(stepAfterAuthenticity({ showPicker: showCoinPicker, hasFeatures }))}
               />
             )}
@@ -1674,21 +1675,19 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                         <HStack gap={2}>
                           <FaExclamationTriangle color="var(--gold)" size={16} />
                           <Text fontSize="sm" color="yellow.200" fontWeight="bold">
-                            {t('bootloader.waitTitle', { defaultValue: 'Keep your KeepKey plugged in' })}
+                            {t('bootloader.followDeviceTitle', { defaultValue: 'Follow the instructions on your KeepKey' })}
                           </Text>
                         </HStack>
                         {/* The upload ending is not the install ending: the KeepKey keeps
-                            installing with its own progress bar, and unplugging then can
-                            leave it unusable. Desktop can't see that finish, so the device
-                            screen is the only signal. */}
+                            installing on its own, then its screen asks for the unplug and
+                            replug. Desktop can't see that finish, so the device screen is the
+                            one instruction to follow; the warning is only about unplugging early. */}
                         <Text fontSize="xs" color="yellow.300">
-                          {t('bootloader.waitBody', { defaultValue: 'Your KeepKey is still installing the bootloader. Wait until its screen says the update is complete. Then unplug it and plug it back in to continue. Unplugging while it is still installing can leave your KeepKey unusable.' })}
+                          {t('bootloader.followDeviceBody', { defaultValue: 'Your KeepKey finishes the update on its own, then its screen asks you to unplug it and plug it back in. Do that when it asks, not before: unplugging while it is still updating can leave it unusable.' })}
                         </Text>
-                        <Box w="100%" mt={1} p={2} bg="rgba(224,140,123,0.10)" borderRadius="sm" borderWidth="1px" borderColor="red.500">
-                          <Text fontSize="xs" color="red.200" fontWeight="bold">
-                            {t('bootloader.doNotHoldButton', { defaultValue: 'DO NOT hold down the button when reconnecting! Just plug it in normally. Holding the button will put the device back into bootloader mode.' })}
-                          </Text>
-                        </Box>
+                        <Text fontSize="xs" color="yellow.300">
+                          {t('bootloader.reconnectNoButton', { defaultValue: "When you plug it back in, don't hold the button: that puts it back into bootloader mode." })}
+                        </Text>
                       </VStack>
                     </Box>
 
@@ -1702,7 +1701,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                             </Text>
                           </HStack>
                           <VStack align="start" gap={0.5} pl={5}>
-                            <Text fontSize="xs" color="blue.200">{t('bootloader.manualReconnectStep1', { defaultValue: '1. Check that your KeepKey says the update is complete, then unplug it' })}</Text>
+                            <Text fontSize="xs" color="blue.200">{t('bootloader.manualReconnectIfAsked', { defaultValue: '1. If your KeepKey is asking to be reconnected, unplug it' })}</Text>
                             <Text fontSize="xs" color="blue.200">{t('firmware.manualReconnectStep2', { defaultValue: '2. Wait 5 seconds' })}</Text>
                             <Text fontSize="xs" color="blue.200">{t('firmware.manualReconnectStep3', { defaultValue: '3. Plug it back in' })}</Text>
                           </VStack>
@@ -1760,7 +1759,7 @@ export function OobSetupWizard({ onComplete: onCompleteProp, onWalletCreated, on
                       <HStack gap={2}>
                         <FaExclamationTriangle color="var(--teal-2)" size={12} />
                         <Text fontSize="2xs" color="blue.200">
-                          {t('bootloader.doNotUnplugBrick')}
+                          {t('bootloader.keepPluggedUntilAsked', { defaultValue: 'Keep your KeepKey plugged in until its screen asks you to unplug it. Unplugging before then can leave it unusable.' })}
                         </Text>
                       </HStack>
                     </Box>

@@ -19,7 +19,8 @@ import { requestUnlock, isTransportTimeout, UNLOCK_TIMEOUT_MESSAGE } from './pin
 import { forceReleaseWebUsb, isUnreleasable } from './webusb-recovery'
 import type { DeviceFailure } from './device-refusal'
 import { flushRingBuffers, getActiveFlashName, getEmulatorStatus } from './emulator'
-import { wipeOwningDevice } from './device-wipe'
+import { wipeOwningDevice, WIPE_BUSY_MESSAGE, type WipeHost } from './device-wipe'
+import { gateRestWrites, restRequest } from './device-gate'
 
 const KEEPKEY_VENDOR_ID = 0x2B24 // 11044
 // Firmware manifest lives in keepkey-vault (migrated from keepkey-desktop, which is now stale).
@@ -181,8 +182,20 @@ export class EngineController extends EventEmitter {
   private promptPinActive = false
   /** Set while wipeDevice owns the device; keeps the PIN auto-prompt and REST device calls off it. */
   wipeInProgress = false
+  /** Device id of a wipe the device couldn't hear (PIN-failure countdown): sent on its next connection, before any PIN request. */
+  wipeOnReconnect: string | null = null
+  /** The connection the wipe was deferred on: the wipe goes out only on a newer one. */
+  private wipeDeferredWallet: unknown = null
+  /** The device sent PinMatrixRequest and no PIN or answer has followed. Before that, after
+   *  wrong PINs, it is counting down and reads no USB: a PIN typed then is lost. */
+  private pinPromptOpen = false
+  /** promptPin's seed-access request while it waits on the PIN (device-wipe.ts reads it). */
+  unlockRequest: Promise<unknown> | null = null
 
   get isSyncing(): boolean { return this.syncing }
+  /** Waiting for its PIN: only Desktop's own prompt should talk to it (rest-api.ts requireWallet). */
+  get isLocked(): boolean { return this.lastState === 'needs_pin' }
+
   get isEmulator(): boolean { return this.activeTransport === 'emulator' }
   /** Get the emulator transport delegate (for chunk counting in confirmOp). */
   get emuDelegate(): any { return this.isEmulator ? (this.wallet as any)?.transport?.delegate : null }
@@ -222,6 +235,8 @@ export class EngineController extends EventEmitter {
     this.seedEthAddress = null
     this.hiddenWalletActive = false
     this.passphraseSetThisSession = false
+    this.unlockRequest = null // belonged to the old connection
+    this.pinPromptOpen = false
     this.resetRecoveryState()
     this.keyring.removeAll().catch(() => {})
   }
@@ -247,6 +262,13 @@ export class EngineController extends EventEmitter {
     this.cleanupTransportListeners()
 
     const transport = this.wallet.transport
+    // REST writes that would collide with a wipe or ask a locked device for its PIN are refused (device-gate.ts).
+    gateRestWrites(transport, () => ({
+      wipeInProgress: this.wipeInProgress,
+      wipeOnReconnect: !!this.wipeOnReconnect,
+      // Paired but not read yet counts as locked: the read may well say needs_pin.
+      locked: this.isLocked || !this.cachedFeatures,
+    }))
 
     transport.on(String(core.Events.PIN_REQUEST), () => {
       this.pinRequestCount++
@@ -255,6 +277,15 @@ export class EngineController extends EventEmitter {
         type = this.pinRequestCount === 1 ? 'new-first' : 'new-second'
       }
       console.log(`[Engine] PIN_REQUEST → type=${type} (count=${this.pinRequestCount}, setup=${this.setupInProgress})`)
+      // A request found the device locked (auto-lock, clear-session): from here Desktop's
+      // prompt owns the unlock, and other REST requests are refused (device-gate.ts).
+      if (this.lastState === 'ready' && !this.setupInProgress && !this.verifyInProgress) this.updateState('needs_pin')
+      // The countdown ended without a replug: the device hears Desktop again, so a wipe needs a new click.
+      if (this.wipeOnReconnect) {
+        this.wipeOnReconnect = null
+        this.emit('state-change', this.getDeviceState())
+      }
+      this.setPinPromptOpen(true)
       this.emit('pin-request', { type })
     })
 
@@ -266,6 +297,7 @@ export class EngineController extends EventEmitter {
       const message = ev?.message?.message
       console.warn(`[Engine] Device FAILURE code=${code} message="${message}" (pinAwaitingResult=${this.pinAwaitingResult}, state=${this.lastState})`)
       this.lastFailure = { code, message, at: Date.now() }
+      this.setPinPromptOpen(false)
       if (!this.pinAwaitingResult) return
       this.pinAwaitingResult = false
       this.emit('pin-error', { code, message })
@@ -326,7 +358,7 @@ export class EngineController extends EventEmitter {
         console.log('[Engine] KeepKey USB attached')
         // During recovery/verify, the device is already paired and the transport
         // is locked by the cipher session — don't touch state or trigger syncState.
-        if (this.setupInProgress || this.verifyInProgress) return
+        if (this.setupInProgress || this.verifyInProgress || this.wipeInProgress) return
         this.updateState('connected_unpaired')
         setTimeout(() => this.syncState(), ATTACH_DELAY_MS)
         // Backstop: WinUSB binding can outlast ATTACH_DELAY_MS on hubs/docks,
@@ -402,9 +434,16 @@ export class EngineController extends EventEmitter {
     usb.removeAllListeners('detach')
   }
 
+  /** Never inside a REST request's store (device-gate.ts): what a state change starts
+   *  (the PIN auto-prompt, seed checks, Pioneer) is Desktop's own work, not that request's. */
   private updateState(state: DeviceState) {
+    restRequest.exit(() => this.applyState(state))
+  }
+
+  private applyState(state: DeviceState) {
     this.lastState = state
     if (state !== 'needs_pin') this.pinAwaitingResult = false
+    if (state === 'ready') this.wipeOnReconnect = null // unlocked with the PIN after all
     console.log(`[Engine] State → ${state}`)
 
     // Reconnect detection: if the device reaches ready with a cached passphrase
@@ -499,6 +538,17 @@ export class EngineController extends EventEmitter {
         this.emit('state-change', this.getDeviceState())
       }
       const autoPrompt = (): void => {
+        if (this.wipeInProgress) return
+        // The replug a deferred wipe asked for: the same device on a new connection gets the
+        // wipe before a PIN request can restart its countdown. Another device just unlocks.
+        if (this.wipeOnReconnect && this.wallet !== this.wipeDeferredWallet && !this.unlockRequest) {
+          const sameDevice = this.wipeOnReconnect === this.cachedFeatures?.deviceId
+          this.wipeOnReconnect = null
+          if (sameDevice) {
+            this.wipeDevice().catch(err => console.warn('[Engine] Wipe after replug failed:', err?.message))
+            return
+          }
+        }
         this.promptPin().catch(err => {
           console.warn('[Engine] Auto prompt-pin failed (expected if PIN flow interrupts):', err?.message)
           // A timeout leaves the transport unusable; retrying would just
@@ -777,7 +827,8 @@ export class EngineController extends EventEmitter {
     // corrupt the CHARACTER_REQUEST / CharacterAck message flow (the device
     // receives GetFeatures instead of the next CharacterAck, garbling the
     // decoded word and triggering "Word not found in BIP39 wordlist").
-    if (this.setupInProgress || this.verifyInProgress) return
+    // A wipe confirmation breaks on any other message (device-wipe.ts).
+    if (this.setupInProgress || this.verifyInProgress || this.wipeInProgress) return
 
     // Post-flash reconnect gate: after a firmware/bootloader flash the device must
     // be physically unplugged and replugged before we trust it. Re-pairing to the
@@ -1628,6 +1679,8 @@ export class EngineController extends EventEmitter {
       state: this.lastState,
       activeTransport: this.activeTransport,
       updatePhase: this.updatePhase,
+      wipePending: this.wipeInProgress ? 'confirm' : this.wipeOnReconnect ? 'replug' : undefined,
+      pinPromptOpen: this.pinPromptOpen,
       deviceId: features?.deviceId || undefined,
       label: features?.label || undefined,
       firmwareVersion: fwVersion,
@@ -1744,7 +1797,7 @@ export class EngineController extends EventEmitter {
       this.emit('firmware-progress', { percent: 50, message: 'Look at your KeepKey — confirm to upload the bootloader…' })
       await this.wallet.firmwareUpload(firmware)
 
-      this.emit('firmware-progress', { percent: 90, message: 'Bootloader updated, rebooting...' })
+      this.emit('firmware-progress', { percent: 90, message: 'Bootloader uploaded. Follow the instructions on your KeepKey.' })
       this.updatePhase = 'rebooting'
       this.sawDetachSinceFlash = false
       this.clearWallet()
@@ -2131,6 +2184,7 @@ export class EngineController extends EventEmitter {
    */
   async promptPin() {
     if (!this.wallet?.transport) throw new Error('No device connected')
+    if (this.wipeInProgress) throw new Error(WIPE_BUSY_MESSAGE)
     // getPublicKeys accesses the seed → triggers PinMatrixRequest on locked device.
     // It also triggers PASSPHRASE_REQUEST if passphrase protection is enabled.
     // Both are resolved via transport event handlers (sendPin/sendPassphrase).
@@ -2140,6 +2194,8 @@ export class EngineController extends EventEmitter {
     // Not wallet.getPublicKeys(): it uses a 5 s timeout, shorter than the
     // firmware's post-failure PIN lockout wait (see pin-unlock.ts).
     const promise = requestUnlock(this.wallet.transport)
+    this.unlockRequest = promise
+    promise.catch(() => {}).finally(() => { if (this.unlockRequest === promise) this.unlockRequest = null })
     try {
       await promise
       // getPublicKeys completed — PIN (and passphrase if needed) were provided.
@@ -2159,6 +2215,23 @@ export class EngineController extends EventEmitter {
     }
   }
 
+  private setPinPromptOpen(open: boolean) {
+    if (this.pinPromptOpen === open) return
+    this.pinPromptOpen = open
+    this.emit('state-change', this.getDeviceState())
+  }
+
+  /** device-wipe.ts: the device can't hear Desktop. Only a locked, real device has a countdown to wait out by replugging. */
+  deferWipeUntilReplug(): boolean {
+    const deviceId = this.cachedFeatures?.deviceId
+    const locked = this.lastState === 'needs_pin' || this.lastError === UNLOCK_TIMEOUT_MESSAGE
+    if (!locked || this.isEmulator || !deviceId) return false
+    this.wipeOnReconnect = deviceId
+    this.wipeDeferredWallet = this.wallet
+    this.emit('state-change', this.getDeviceState())
+    return true
+  }
+
   /** Re-issue the PIN prompt after something else (a failed wipe) cancelled it. */
   repromptPin() {
     if (this.lastState === 'needs_pin') this.updateState('needs_pin')
@@ -2166,18 +2239,23 @@ export class EngineController extends EventEmitter {
 
   /** Wipe the device, owning it until it answers (see device-wipe.ts). Used by the UI and REST. */
   async wipeDevice(confirm: (wipe: () => Promise<unknown>) => Promise<unknown> = (wipe) => wipe()) {
-    await wipeOwningDevice(this, confirm, async () => {
+    // `this.wallet` is typed as core.HDWallet; its transport is hdwallet-keepkey's, which has both fields.
+    // Not a REST request even when REST asked for it: the wipe's own writes are never gated.
+    await restRequest.exit(() => wipeOwningDevice(this as WipeHost, confirm, async () => {
       if (this.isEmulator) {
         flushRingBuffers()
         await this.connectEmulator()
       } else {
         await this.syncState()
       }
-    })
+    }))
   }
 
   async sendPin(pin: string) {
     if (!this.wallet) throw new Error('No device connected')
+    // A PinMatrixAck during the wipe confirmation breaks the wipe (device-wipe.ts).
+    if (this.wipeInProgress) throw new Error(WIPE_BUSY_MESSAGE)
+    this.setPinPromptOpen(false)
     console.log(`[Engine] sendPin (pinRequests=${this.pinRequestCount}, promptPinActive=${this.promptPinActive})`)
     this.pinAwaitingResult = true
     await this.wallet.sendPin(pin)

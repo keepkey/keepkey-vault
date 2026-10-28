@@ -18,6 +18,8 @@ interface PinEntryProps {
 	onSubmit: (pin: string) => void
 	onCancel: () => void
 	onWipe?: () => Promise<void>
+	/** False while the device counts down after wrong PINs: it reads nothing, so typed PINs are lost. */
+	deviceAsking?: boolean
 }
 
 const TITLE_KEYS: Record<PinRequestType, string> = {
@@ -66,7 +68,7 @@ const PIN_ANIMATIONS = `
  * The device screen shows scrambled numbers; the user taps
  * position-based buttons (1-9) on this grid.
  */
-export function PinEntry({ type = "current", failed, errorDetail, requestSeq, onSubmit, onCancel, onWipe }: PinEntryProps) {
+export function PinEntry({ type = "current", failed, errorDetail, requestSeq, onSubmit, onCancel, onWipe, deviceAsking = true }: PinEntryProps) {
 	const { t } = useTranslation("device")
 	const [pin, setPin] = useState("")
 	const [showError, setShowError] = useState(false)
@@ -105,20 +107,21 @@ export function PinEntry({ type = "current", failed, errorDetail, requestSeq, on
 	}, [onWipe])
 
 	const handleDigit = useCallback((digit: string) => {
+		if (!deviceAsking) return
 		setShowError(false)
 		setPin((p) => (p.length < 9 ? p + digit : p))
-	}, [])
+	}, [deviceAsking])
 
 	const handleBackspace = useCallback(() => {
 		setPin((p) => p.slice(0, -1))
 	}, [])
 
 	const handleSubmit = useCallback(() => {
-		if (pin.length > 0) {
+		if (pin.length > 0 && deviceAsking) {
 			onSubmit(pin)
 			setPin("")
 		}
-	}, [pin, onSubmit])
+	}, [pin, onSubmit, deviceAsking])
 
 	// Keyboard support: 1-9 digits, backspace, enter
 	useEffect(() => {
@@ -257,8 +260,14 @@ export function PinEntry({ type = "current", failed, errorDetail, requestSeq, on
 					}
 				</Box>
 
+				{!deviceAsking && (
+					<Text fontSize="sm" color="kk.textSecondary" textAlign="center" mb="3">
+						{t("pin.waitingForDevice", { defaultValue: "Waiting for your KeepKey. After wrong PINs it makes you wait before it asks again; the keypad turns on when it does." })}
+					</Text>
+				)}
+
 				{/* 3x3 PIN pad */}
-				<VStack gap="3" mb="5">
+				<VStack gap="3" mb="5" opacity={deviceAsking ? 1 : 0.4}>
 					{rows.map((row, i) => (
 						<Flex key={i} gap="3" justifyContent="center">
 							{row.map((digit) => (
@@ -277,7 +286,7 @@ export function PinEntry({ type = "current", failed, errorDetail, requestSeq, on
 									transition="all 0.15s ease"
 									_hover={{ borderColor: "rgba(233,196,106,0.6)", bg: "rgba(233,196,106,0.08)", transform: "scale(1.05)" }}
 									_active={{ bg: "kk.gold", borderColor: "kk.gold", color: "black", transform: "scale(0.95)" }}
-									disabled={pin.length >= 9}
+									disabled={pin.length >= 9 || !deviceAsking}
 									css={{ backdropFilter: "blur(12px) saturate(140%)" }}
 								>
 									{"\u2022"}
@@ -315,7 +324,7 @@ export function PinEntry({ type = "current", failed, errorDetail, requestSeq, on
 						transition="all 0.15s ease"
 						_hover={{ bg: "kk.goldHover", transform: "scale(1.02)", boxShadow: "0 0 24px -4px rgba(233,196,106,0.5)" }}
 						_active={{ transform: "scale(0.97)" }}
-						disabled={pin.length === 0}
+						disabled={pin.length === 0 || !deviceAsking}
 						flex={1}
 					>
 						{type === "current" ? t("pin.unlock") : t("confirm", { ns: "common" })}
