@@ -53,7 +53,7 @@ export interface DeshieldOptions {
 	outputAddressN?: number[]
 	/** Called after each transaction broadcasts; its transparent output is
 	 *  vout 0 (change stays shielded). */
-	onBroadcast?: (tx: { txid: string; vout: number; value: number }) => void
+	onBroadcast?: (tx: { txid: string; vout: number; value: number; fee?: number }) => void
 }
 
 let deshieldInProgress = false
@@ -117,7 +117,7 @@ async function _deshieldZecInner(
 			const { txid, paid } = await deshieldOnce(wallet, { ...params, amount: remaining, account }, txids.length, opts)
 			const display = txidToDisplayOrder(txid)
 			txids.push(display)
-			opts?.onBroadcast?.({ txid: display, vout: 0, value: paid.pay })
+			opts?.onBroadcast?.({ txid: display, vout: 0, value: paid.pay, fee: paid.fee })
 			console.log(`[zcash-deshield] Deshield transaction sent: ${display}`)
 			remaining = paid.remaining_after
 		} catch (e: any) {
@@ -136,7 +136,7 @@ async function deshieldOnce(
 	params: Required<DeshieldParams>,
 	done: number,
 	opts?: DeshieldOptions,
-): Promise<{ txid: string; paid: { pay: number; remaining_after: number } }> {
+): Promise<{ txid: string; paid: { pay: number; remaining_after: number; fee?: number } }> {
 	if (done > 0) opts?.onProgress?.("building", { index: done + 1, total: done + 1 })
 	console.log("[zcash-deshield] Building deshield PCZT...")
 	const buildResult: DeshieldBuildResult = await sendCommand("build_deshield_pczt", {
