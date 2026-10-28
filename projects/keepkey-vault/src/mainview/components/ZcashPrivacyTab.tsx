@@ -180,11 +180,14 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 	const [startError, setStartError] = useState<string | null>(null)
 	const [orchardAddress, setOrchardAddress] = useState<string | null>(null)
 	const [balance, setBalance] = useState<{
-		confirmed: number; pending: number
+		confirmed: number; pending: number; in_flight?: number
 		notes_unspent?: number; spendable_confirmed?: number
 		spendable_notes_count?: number; min_confirmations?: number
 		max_send?: number; max_deshield?: number
 	} | null>(null)
+	// The user's ZEC that is not spendable yet: maturing notes plus value in
+	// flight (a shield not scanned yet, change from a send not mined yet).
+	const onTheWay = balance ? balance.pending + (balance.in_flight ?? 0) : 0
 	const [syncedTo, setSyncedTo] = useState<number | null>(null)
 	const [scanState, setScanState] = useState<ScanState>("idle")
 	const [scanResult, setScanResult] = useState<string | null>(null)
@@ -450,6 +453,15 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 					setOrchardAddress(r.address); setStatus("ready")
 					if (r.verified) {
 						refreshBalance(); loadTransactions()
+						// One light catch-up each time the tab opens (no polling): a note
+						// may have matured or arrived since the last scan.
+						rpcRequest<{ synced_to?: number }>("zcashShieldedScan", { quick: true }, 120000)
+							.then(res => {
+								if (cancelled) return
+								if (res?.synced_to != null) setSyncedTo(res.synced_to)
+								refreshBalance(); loadTransactions()
+							})
+							.catch((e: any) => console.warn("[ZcashPrivacyTab] open-time sync failed:", e?.message || e))
 					} else {
 						setBalance(null); setTransactions([])
 					}
@@ -889,8 +901,8 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 						  mature number big so it matches what's actually spendable. */}
 						{balance ? formatZec(Math.max(0, balance.confirmed - balance.pending)) : "—"}
 						<span className="ticker">ZEC</span>
-						{balance && balance.pending > 0 && (
-							<span className="pending">+ {formatZec(balance.pending)} maturing</span>
+						{onTheWay > 0 && (
+							<span className="pending">+ {formatZec(onTheWay)} pending</span>
 						)}
 					</div>
 					{scanInFlight && scanProgress ? (
@@ -1148,7 +1160,7 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 						<h2>Shield &amp; Unshield</h2>
 						<p>Shielded ZEC hides amounts and recipients. Transparent ZEC is publicly visible like Bitcoin.</p>
 					</div>
-					{balance && balance.pending > 0 && <MaturingBanner zat={balance.pending} confirmations={balance.min_confirmations ?? 10} />}
+					{balance && onTheWay > 0 && <MaturingBanner zat={onTheWay} confirmations={balance.min_confirmations ?? 10} />}
 
 					<div className="form-page">
 						<div className="card">
@@ -1229,9 +1241,9 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 											after fee · {balance.spendable_notes_count ?? 0} spendable notes
 										</span>
 									)}
-									{balance && balance.pending > 0 && (
+									{onTheWay > 0 && (
 										<span className="balance-hint maturing">
-											+ {formatZec(balance.pending)} ZEC maturing
+											+ {formatZec(onTheWay)} ZEC pending
 										</span>
 									)}
 								</div>
