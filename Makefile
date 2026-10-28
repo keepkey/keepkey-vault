@@ -23,7 +23,7 @@ include .env
 export ELECTROBUN_DEVELOPER_ID ELECTROBUN_TEAMID ELECTROBUN_APPLEID ELECTROBUN_APPLEIDPASS
 endif
 
-.PHONY: clearsign-worker-test sync-asset-data clearsign-worker-rehearsal-guard clearsign-worker-rehearsal-deploy install dev dev-hmr build build-stable build-canary build-signed patch-arm64-release-tar prune-bundle dmg clean help vault sign-check notary-check verify verify-entitlements publish release upload-dmg upload-all-dmgs sign-release sign-release-intel verify-arch audit-macos-bundle submodules modules-install modules-build device-protocol-build modules-clean audit build-zcash-cli build-zcash-cli-debug build-zcash-cli-intel test test-unit test-rest test-sign-gating test-zcash-cli test-emu test-emu-erc7730 build-intel build-signed-intel build-electrobun-x64-core build-electrobun-arm64-core prepare-electrobun-arm64-core publish-electrobun-x64-core build-electrobun-linux-x64-core preflight build-emulator build-emulator-windows build-emulator-macos-release build-emulator-release clean-emulator test-emu-python
+.PHONY: release-sums clearsign-worker-test sync-asset-data clearsign-worker-rehearsal-guard clearsign-worker-rehearsal-deploy install dev dev-hmr build build-stable build-canary build-signed patch-arm64-release-tar prune-bundle dmg clean help vault sign-check notary-check verify verify-entitlements publish release upload-dmg upload-all-dmgs sign-release sign-release-intel verify-arch audit-macos-bundle submodules modules-install modules-build device-protocol-build modules-clean audit build-zcash-cli build-zcash-cli-debug build-zcash-cli-intel test test-unit test-rest test-sign-gating test-zcash-cli test-emu test-emu-erc7730 build-intel build-signed-intel build-electrobun-x64-core build-electrobun-arm64-core prepare-electrobun-arm64-core publish-electrobun-x64-core build-electrobun-linux-x64-core preflight build-emulator build-emulator-windows build-emulator-macos-release build-emulator-release clean-emulator test-emu-python
 
 # --- Submodules (auto-init on fresh worktrees/clones) ---
 
@@ -675,7 +675,7 @@ release: sign-check build-signed
 	fi; \
 	gh release create v$(VERSION) \
 		--repo $(GITHUB_REPO) \
-		--title "KeepKey Vault v$(VERSION)" \
+		--title "KeepKey Desktop v$(VERSION)" \
 		--draft \
 		--generate-notes \
 		$(PROJECT_DIR)/artifacts/$(DMG_NAME) \
@@ -792,6 +792,13 @@ sign-release-intel: notary-check
 	@echo ""
 	@echo "=== Intel release v$(VERSION) signed and uploaded ==="
 	@rm -rf $(PROJECT_DIR)/artifacts/ci-x64
+	@# CI's SHA256SUMS.txt still lists the unsigned x64 bundle: regenerate it.
+	@$(MAKE) release-sums
+
+# Regenerate SHA256SUMS.txt + SHA256SUMS-macos.txt from the release's own bytes,
+# verified against GitHub's digests. Re-run after the Windows installer lands.
+release-sums:
+	@scripts/release-sums.sh v$(VERSION) $(GITHUB_REPO)
 
 # Internal: sign a single tar.zst, produce a signed tar.zst (auto-update) and DMG
 # Args: _SRC_TAR (path to tar.zst), _DMG_ARCH (arm64 or x86_64)
@@ -942,6 +949,10 @@ help:
 	@echo "  make clean-emulator        - Remove the installed dylib + binary"
 
 # --- Pre-release Validation ---
+# These repos run no CI on the pinned commits. Accepted 2026-10-28 (1.6.7):
+# Vault's own CI builds both, and its Intel smoke test boots the packaged app.
+PREFLIGHT_NO_CI_OK := modules/proto-tx-builder modules/electrobun
+
 preflight: submodules
 	@echo "╔══════════════════════════════════════════╗"
 	@echo "║   PRE-RELEASE VALIDATION                 ║"
@@ -961,11 +972,12 @@ preflight: submodules
 	else echo "   ❌ certified emulator artifacts missing or invalid — run scripts/stage-certified-emulator.sh <artifact-dir>"; fail=1; fi; \
 	echo ""; \
 	echo "3. CANONICAL BRANCHES"; \
-	for pair in "modules/hdwallet|origin/master" "modules/proto-tx-builder|origin/main" "modules/device-protocol|origin/master" "modules/electrobun|origin/keepkey/launcher-env-lifetime"; do \
-		mod="$${pair%%|*}"; ref="$${pair##*|}"; \
-		behind=$$(cd "$$mod" && git rev-list --count HEAD.."$$ref" 2>/dev/null || echo "?"); \
-		if [ "$$behind" = "0" ]; then echo "   ✅ $$mod"; \
-		else echo "   ⚠️  $$mod: $$behind behind $$ref"; fi; \
+	for spec in "modules/hdwallet|https://github.com/keepkey/hdwallet|master" "modules/proto-tx-builder|https://github.com/BitHighlander/proto-tx-builder|main" "modules/device-protocol|https://github.com/keepkey/device-protocol|master" "modules/electrobun|https://github.com/BitHighlander/electrobun|keepkey/launcher-env-uaf-fix"; do \
+		mod=$$(echo "$$spec" | cut -d'|' -f1); url=$$(echo "$$spec" | cut -d'|' -f2); br=$$(echo "$$spec" | cut -d'|' -f3); \
+		tip=$$(git -C "$$mod" fetch -q "$$url" "$$br" 2>/dev/null && git -C "$$mod" rev-parse FETCH_HEAD); \
+		behind=$$( [ -n "$$tip" ] && git -C "$$mod" rev-list --count HEAD.."$$tip" || echo "?"); \
+		if [ "$$behind" = "0" ]; then echo "   ✅ $$mod (on $$br)"; \
+		else echo "   ⚠️  $$mod: $$behind behind $$url $$br"; fi; \
 	done; \
 	echo ""; \
 	echo "4. CI STATUS (checks pinned commit, falls back to fork repo for cross-fork PRs)"; \
@@ -982,7 +994,8 @@ preflight: submodules
 		if [ -z "$$checks" ]; then echo "   ❌ $$mod: CI unavailable"; fail=1; \
 		else \
 			set -- $$checks; total=$$1; unready=$$2; listed=$$3; \
-			if [ "$$total" = "0" ]; then echo "   ❌ $$mod: no CI evidence"; fail=1; \
+			if [ "$$total" = "0" ] && echo " $(PREFLIGHT_NO_CI_OK) " | grep -q " $$mod "; then echo "   ⚠️  $$mod: no CI on the pin (accepted, see PREFLIGHT_NO_CI_OK)"; \
+			elif [ "$$total" = "0" ]; then echo "   ❌ $$mod: no CI evidence"; fail=1; \
 			elif [ "$$total" != "$$listed" ]; then echo "   ❌ $$mod: incomplete CI evidence ($$listed/$$total checks)"; fail=1; \
 			elif [ "$$unready" = "0" ]; then echo "   ✅ $$mod: $$total/$$total green"; \
 			else echo "   ❌ $$mod: $$unready/$$total checks failed or incomplete"; fail=1; fi; \
