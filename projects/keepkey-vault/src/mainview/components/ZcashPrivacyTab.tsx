@@ -450,6 +450,15 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 					setOrchardAddress(r.address); setStatus("ready")
 					if (r.verified) {
 						refreshBalance(); loadTransactions()
+						// One light catch-up each time the tab opens (no polling): a note
+						// may have matured or arrived since the last scan.
+						rpcRequest<{ synced_to?: number }>("zcashShieldedScan", { quick: true }, 120000)
+							.then(res => {
+								if (cancelled) return
+								if (res?.synced_to != null) setSyncedTo(res.synced_to)
+								refreshBalance(); loadTransactions()
+							})
+							.catch((e: any) => console.warn("[ZcashPrivacyTab] open-time sync failed:", e?.message || e))
 					} else {
 						setBalance(null); setTransactions([])
 					}
