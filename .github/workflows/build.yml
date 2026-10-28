@@ -953,7 +953,7 @@ jobs:
           target_commitish: ${{ github.sha }}
           draft: true
           generate_release_notes: true
-          name: KeepKey Vault ${{ steps.tag.outputs.tag }}
+          name: KeepKey Desktop ${{ steps.tag.outputs.tag }}
           files: |
             artifacts/**/*
         env:
