@@ -649,6 +649,7 @@ export interface TokenBalance {
   icon?: string            // [DB] TEXT — icon URL (keepkey.info or override)
   decimals?: number        // [DB] INTEGER — token decimals (e.g. 6 for USDT, 18 for most ERC-20)
   type?: string            // [DB] TEXT — "native" | "token" | "unknown"
+  pendingBalance?: string  // shielded ZEC only: maturing or not yet scanned; in balanceUsd, not spendable
   dataSource?: string      // data origin: "zapper" | "blockbook" | "cache"
 }
 

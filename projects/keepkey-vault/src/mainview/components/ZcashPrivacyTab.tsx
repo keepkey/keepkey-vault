@@ -573,12 +573,13 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 	const [scanFromHeight, setScanFromHeight] = useState("")
 	const [advancedScanOpen, setAdvancedScanOpen] = useState(false)
 
-	const handleScan = useCallback(async (startHeight?: number, fullRescan?: boolean) => {
+	const handleScan = useCallback(async (startHeight?: number, fullRescan?: boolean, quick?: boolean) => {
 		setScanState("scanning"); setScanResult(null)
 		try {
-			const params: { startHeight?: number; fullRescan?: boolean } = {}
+			const params: { startHeight?: number; fullRescan?: boolean; quick?: boolean } = {}
 			if (startHeight != null) params.startHeight = startHeight
 			if (fullRescan) params.fullRescan = true
+			if (quick) params.quick = true
 			const timeout = startHeight != null ? 300000 : 1800000
 			const result = await rpcRequest<{
 				balance: number; notes_found: number; new_notes?: number
@@ -907,12 +908,12 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 				</div>
 				<div className="status-pill">
 					<span className={`led ${scanInFlight ? "amber" : ""}`} />
-					{scanInFlight ? "Syncing" : synced ? "Up to date" : "Idle"}
+					{scanInFlight || scanState === "scanning" ? "Syncing" : synced ? "Synced" : "Idle"}
 					<button
 						className="ghost-btn refresh-compact"
-						onClick={() => { refreshBalance(); loadTransactions() }}
-						disabled={scanInFlight}
-						title="Refresh balance"
+						onClick={() => handleScan(undefined, undefined, true)}
+						disabled={scanInFlight || scanState === "scanning"}
+						title="Sync to the latest block"
 					>↻</button>
 				</div>
 			</div>
@@ -1381,7 +1382,7 @@ export function ZcashPrivacyTab({ initialPage }: { initialPage?: Page } = {}) {
 								<div className="title">
 									{scanState === "scanning" ? "Scanning…"
 										: scanInFlight ? "Catching up…"
-										: synced ? "Up to date"
+										: synced ? "Last synced"
 										: "Not synced yet"}
 								</div>
 								<div className="sub">
