@@ -7,7 +7,7 @@ test('only canonical ERC-20 shapes and firmware-representable token identities c
     expect(buildEvmSchemaBody(buildTokenSchema(42161, contract, selector, length, { symbol: 'USDT', decimals: 6 })).length).toBeGreaterThan(40)
     expect(tokenCallShape(42161, contract, selector, length + 1)).toBe(false)
   }
-  for (const token of [{ symbol: 'USDT\nApprove', decimals: 6 }, { symbol: 'USDT', decimals: 37 }, { symbol: 'USDT', decimals: -1 }, { symbol: 'USDT', decimals: 6.5 }]) {
+  for (const token of [{ symbol: 'USDT\nApprove', decimals: 6 }, { symbol: 'USD+', decimals: 6 }, { symbol: 'USDC.e', decimals: 6 }, { symbol: 'SY-USDE', decimals: 18 }, { symbol: 'ABCDEFGHIJK', decimals: 6 }, { symbol: 'USDT', decimals: 37 }, { symbol: 'USDT', decimals: -1 }, { symbol: 'USDT', decimals: 6.5 }]) {
     expect(() => buildTokenSchema(42161, contract, '0x095ea7b3', 68, token)).toThrow()
   }
   expect(tokenCallShape(2 ** 32, contract, '0x095ea7b3', 68)).toBe(false)

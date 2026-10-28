@@ -11,7 +11,7 @@ export function tokenCallShape(chainId: number, contract: string, selector: stri
 export function buildTokenSchema(chainId: number, contract: string, selector: string, length: number,
   token: { symbol: string; decimals: number }): EvmSchemaSpec {
   if (!tokenCallShape(chainId, contract, selector, length)
-    || !/^[A-Za-z0-9][A-Za-z0-9._+-]{0,9}$/.test(token.symbol)
+    || !/^[A-Za-z0-9]{1,10}$/.test(token.symbol)
     || !Number.isInteger(token.decimals) || token.decimals < 0 || token.decimals > 36) {
     throw new Error('Unsupported token identity or calldata shape')
   }
