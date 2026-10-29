@@ -1199,10 +1199,12 @@ export interface SigningRequestInfo {
 }
 
 /** current: every source lists this vault as an active Asgard vault that uses
- *  this router on the chain. not-current: they agree it is not. unchecked: a
- *  source did not answer, the sources disagree, or no vault list covers the chain. */
+ *  this router on the chain. retiring: every source lists it as a retiring
+ *  vault for this router (it still accepts deposits during the migration).
+ *  not-current: they agree it is neither. unchecked: a source did not answer,
+ *  the sources disagree, or no vault list covers the chain. */
 export interface ThorVaultCheck {
-  status: 'current' | 'not-current' | 'unchecked'
+  status: 'current' | 'retiring' | 'not-current' | 'unchecked'
   protocol: 'THORChain' | 'Mayachain'
   /** The network's name for the chain (ETH, BASE, ARB, ...). */
   chain?: string

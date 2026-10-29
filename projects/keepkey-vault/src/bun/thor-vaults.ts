@@ -2,8 +2,9 @@
  * Where a THORChain/Maya router deposit pays is the `vault` word, chosen by
  * whoever built the transaction. Firmware cannot check it and labels it
  * "UNVERIFIED vault" (thortx.c). This computer checks it, as advice for the
- * approval card only: the vault must be one of the network's active Asgard
- * vaults, using this router on this chain, in every source asked. Not just the
+ * approval card and the swap card: the vault must be one of the network's
+ * active (or retiring) Asgard vaults, using this router on this chain, in
+ * every source asked. Not just the
  * inbound address: that rotates between the active vaults every few minutes,
  * and a quote's vault stays valid while it is active. A source that does not
  * answer leaves the vault unchecked: agreement between sources, not failover.
@@ -22,15 +23,21 @@ export interface AsgardVault {
 
 // GET /thorchain/vaults/asgard (https://gitlab.com/thorchain/thornode/-/raw/develop/openapi/openapi.yaml)
 // and /mayachain/vaults/asgard (https://gitlab.com/mayachain/mayanode/-/raw/develop/openapi/openapi.yaml),
-// from two operators each.
+// from two operators each, each its own node (different node_info ids,
+// 2026-10-29). THORChain: Liquify and Rorcual, both in the chain registry
+// (https://github.com/cosmos/chain-registry/blob/master/thorchain/chain.json).
+// Maya: the Maya team's node, the only one the registry lists
+// (https://github.com/cosmos/chain-registry/blob/master/mayachain/chain.json),
+// and Liquify's. Not rest.cosmos.directory: it proxies those same registry
+// nodes, so it would count one node twice.
 export const VAULT_SOURCES: Record<Protocol, string[]> = {
   THORChain: [
     'https://gateway.liquify.com/chain/thorchain_api/thorchain/vaults/asgard',
-    'https://rest.cosmos.directory/thorchain/thorchain/vaults/asgard',
+    'https://api-thorchain.rorcual.xyz/thorchain/vaults/asgard',
   ],
   Mayachain: [
     'https://mayanode.mayachain.info/mayachain/vaults/asgard',
-    'https://rest.cosmos.directory/mayachain/mayachain/vaults/asgard',
+    'https://api-maya.liquify.com/mayachain/vaults/asgard',
   ],
 }
 
@@ -49,11 +56,13 @@ const MEMO_CHAIN: Record<string, string> = {
 
 const lower = (s: string | null | undefined) => (s ?? '').toLowerCase()
 
-/** One source's answer: the router of the active vault paid, or null when no active vault is it. */
-function activeRouter(vaults: AsgardVault[], chain: string, vault: string): string | null {
-  const v = vaults.find((x) => x.status === 'ActiveVault'
-    && x.addresses?.some((a) => a.chain === chain && lower(a.address) === lower(vault)))
-  return v ? lower(v.routers?.find((r) => r.chain === chain)?.router) : null
+/** One source's answer: the status and router of the vault paid, or null when
+ *  no active or retiring vault is it. A retiring vault still accepts deposits
+ *  while the network migrates its funds to the new vaults. */
+function vaultAnswer(vaults: AsgardVault[], chain: string, vault: string): string | null {
+  const paid = (x: AsgardVault) => x.addresses?.some((a) => a.chain === chain && lower(a.address) === lower(vault))
+  const v = vaults.find((x) => x.status === 'ActiveVault' && paid(x)) ?? vaults.find((x) => x.status === 'RetiringVault' && paid(x))
+  return v ? `${v.status} ${lower(v.routers?.find((r) => r.chain === chain)?.router)}` : null
 }
 
 export function checkThorVault(protocol: Protocol, chainId: number | undefined, router: string, vault: string,
@@ -63,11 +72,13 @@ export function checkThorVault(protocol: Protocol, chainId: number | undefined, 
   if (!chain) return { ...base, status: 'unchecked', reason: 'no vault list covers this chain' }
   const missing = lists.filter((l) => !l).length
   if (missing) return { ...base, status: 'unchecked', reason: `${missing} of ${lists.length} sources did not answer` }
-  const answers = new Set(lists.map((l) => activeRouter(l!, chain, vault)))
+  const answers = new Set(lists.map((l) => vaultAnswer(l!, chain, vault)))
   if (answers.size !== 1) return { ...base, status: 'unchecked', reason: 'the sources disagree' }
-  const used = [...answers][0]
-  if (used === null) return { ...base, status: 'not-current' }
-  return used === lower(router) ? { ...base, status: 'current' } : { ...base, status: 'not-current', currentRouter: used }
+  const answer = [...answers][0]
+  if (answer === null) return { ...base, status: 'not-current' }
+  const [status, used] = answer.split(' ')
+  if (used !== lower(router)) return { ...base, status: 'not-current', currentRouter: used }
+  return { ...base, status: status === 'ActiveVault' ? 'current' : 'retiring' }
 }
 
 type FetchJson = (url: string) => Promise<unknown>

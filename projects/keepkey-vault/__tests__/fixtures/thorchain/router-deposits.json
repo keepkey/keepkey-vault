@@ -2692,7 +2692,7 @@
      ]
     }
    ],
-   "https://rest.cosmos.directory/thorchain/thorchain/vaults/asgard": [
+   "https://api-thorchain.rorcual.xyz/thorchain/vaults/asgard": [
     {
      "status": "ActiveVault",
      "addresses": [
@@ -3001,7 +3001,7 @@
      ]
     }
    ],
-   "https://rest.cosmos.directory/mayachain/mayachain/vaults/asgard": [
+   "https://api-maya.liquify.com/mayachain/vaults/asgard": [
     {
      "status": "ActiveVault",
      "addresses": [

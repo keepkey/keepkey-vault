@@ -61,6 +61,16 @@ async function card(d: Deposit, fetchJson: (url: string) => Promise<unknown>, is
   await addThorDepositFacts(info, 'dev', { fetchJson, isOwn })
   return info
 }
+/** depositWithExpiry/deposit calldata's memo, and the same call with another memo. */
+const memoAt = (data: string) => 10 + (data.startsWith('0x44bc937b') ? 5 : 4) * 64
+const memoOf = (data: string) => {
+  const n = parseInt(data.slice(memoAt(data), memoAt(data) + 64), 16)
+  return Buffer.from(data.slice(memoAt(data) + 64, memoAt(data) + 64 + n * 2), 'hex').toString('utf8')
+}
+const withMemo = (data: string, memo: string) => {
+  const hex = Buffer.from(memo).toString('hex')
+  return data.slice(0, memoAt(data)) + (hex.length / 2).toString(16).padStart(64, '0') + hex.padEnd(Math.ceil(hex.length / 64) * 64, '0')
+}
 const texts = (s: SigningRequestInfo) => assessSigningRisk(s)!.reasons.map((r) => r.text).join('\n')
 
 describe('router deposits KeepKey Desktop signed', () => {
@@ -99,13 +109,22 @@ describe('router deposits KeepKey Desktop signed', () => {
     expect(texts(s)).toContain(`Pays vault 0x${ATTACKER}, which is NOT one of THORChain's active ETH vaults.`)
   })
 
-  test('CONTROL: a vault the network lists only as retiring is red', async () => {
+  test('a vault every source lists as retiring is a medium line: still accepted during the migration', async () => {
     // Active when Desktop signed it on 2026-10-10; RetiringVault after the churn a day later.
     expect((await card(RETIRED_LATER, all(RETIRED_LATER.vaults))).thorVault!.status).toBe('current')
     const s = await card(RETIRED_LATER, all(fixtures.vaultsDuringChurn.vaults))
     expect(fixtures.vaultsDuringChurn.vaults.find((v) => v.addresses.some((a) => a.address.toLowerCase() === vaultOf(RETIRED_LATER)))?.status).toBe('RetiringVault')
-    expect(s.thorVault!.status).toBe('not-current')
-    expect(assessSigningRisk(s)!.tier).toBe('red')
+    expect(s.thorVault).toEqual({ status: 'retiring', protocol: 'THORChain', chain: 'BASE', sources: 2 })
+    const vaultLine = (c: SigningRequestInfo) => assessSigningRisk(c)!.reasons.find((x) => x.text.startsWith(`Pays vault ${vaultOf(RETIRED_LATER)}`))!
+    expect(vaultLine(s).level).toBe('medium')
+    expect(vaultLine(s).text).toContain('which THORChain is retiring')
+    expect(texts(s)).not.toContain('can be lost')
+    // (This deposit swaps a Base token Desktop does not pin, a high line of its own.)
+    expect(assessSigningRisk(s)!.level).toBe('high')
+    // A month later no source lists it at all: critical.
+    const gone = await card(RETIRED_LATER, now('THORChain'))
+    expect(vaultLine(gone).level).toBe('critical')
+    expect(assessSigningRisk(gone)!.level).toBe('critical')
   })
 
   test('the router an active vault does not use is red', () => {
@@ -124,10 +143,11 @@ describe('router deposits KeepKey Desktop signed', () => {
       expect(r.level).toBe('medium')
       expect(texts(s)).toContain(`This computer could not check vault ${vaultOf(s === one ? OWN_ETH : TO_BTC)} against THORChain's active vaults`)
     }
-    // A card nothing checked (a REST report, a stored review) reads the same.
+    // A card nothing checked (a stored review) is yellow too, and says it was not checked.
     const plain: SigningRequestInfo = { id: 'r', method: '/eth/sign-transaction', appName: 'x', from: OWN_ETH.from, to: OWN_ETH.to, data: OWN_ETH.data, value: OWN_ETH.value, chainId: 1, firmwareVersion: '7.16.0' }
     await applyEvmTxPreview(plain, plain.to, plain.data, 1, '7.16.0')
     expect(assessSigningRisk(plain)!.tier).toBe('yellow')
+    expect(texts(plain)).toContain(`Vault ${vaultOf(OWN_ETH)} was not checked against THORChain's active vaults here`)
   })
 
   test('payout to another chain: own address calm, not this wallet red, unknown asks to check', async () => {
@@ -141,8 +161,9 @@ describe('router deposits KeepKey Desktop signed', () => {
 
     const btc = await card(TO_BTC, all(TO_BTC.vaults), ask(undefined))
     expect(seen.pop()).toEqual(['dev', network('bitcoin'), 'bc1q8w2ypqgx39gucxcypqv2m90wz9rvhmmrcnpdjs', 'utxo'])
+    // Not named calmly: a payout this computer cannot attribute is yellow.
     const r = assessSigningRisk(btc)!
-    expect([r.tier, r.level]).toEqual(['green', 'medium'])
+    expect([r.tier, r.level]).toEqual(['yellow', 'medium'])
     expect(texts(btc)).toContain('This computer cannot tell whether bc1q8w2ypqgx39gucxcypqv2m90wz9rvhmmrcnpdjs on BTC is your address.')
   })
 
@@ -157,6 +178,37 @@ describe('router deposits KeepKey Desktop signed', () => {
     expect(db.isOwnAddress('dev', network('bitcoin'), 'bc1q8w2ypqgx39gucxcypqv2m90wz9rvhmmrcnpdjs', 'utxo')).toBeUndefined()
     expect(db.isOwnAddress('dev', network('mayachain'), 'maya13d4tzmehhmt4r8w9s4n0g0lw7h3ggpyv95f55k', 'cosmos')).toBeUndefined()
     expect(db.isOwnAddress('other-device', network('thorchain'), 'thor13d4tzmehhmt4r8w9s4n0g0lw7h3ggpyv9rhczx', 'cosmos')).toBeUndefined()
+  })
+
+  test('CONTROL: an action this computer does not decode is never green, even to an active vault', async () => {
+    const good = await card(OWN_ETH, all(OWN_ETH.vaults))
+    expect(assessSigningRisk(good)!.tier).toBe('green')
+    for (const memo of [
+      'TRADE+:thor19qud0fs2lhcwr5a2l9l7uceym0cyvktf4s78c2',
+      `=:ETH~ETH:${OWN_ETH.from}`,
+      `swap:ETH.ETH:${OWN_ETH.from}`,
+    ]) {
+      const s = await card(OWN_ETH, all(OWN_ETH.vaults), undefined, withMemo(OWN_ETH.data, memo))
+      expect(s.calldataDecoded?.fields.find((f) => f.name === 'Memo (exact)')?.value).toBe(memo)
+      expect(s.deviceClearSigns).toBe(true)
+      expect(s.thorVault!.status).toBe('current')
+      expect(assessSigningRisk(s)!.tier).toBe('red')
+      expect(texts(s)).toContain('an action this computer does not decode')
+    }
+  })
+
+  test('affiliate fee: a wallet\'s fee named calmly, over 1% red', async () => {
+    const own = await card(OWN_ETH, all(OWN_ETH.vaults))
+    expect(texts(own)).toContain('Affiliate fee: 0.30% of this swap goes to keep.')
+    // CONTROL: the same real deposit with its fee raised to 1000 bps.
+    const memo = memoOf(OWN_ETH.data).replace(/:keep:30$/, ':evil:1000')
+    expect(memo).toEndWith(':evil:1000')
+    const s = await card(OWN_ETH, all(OWN_ETH.vaults), undefined, withMemo(OWN_ETH.data, memo))
+    const r = assessSigningRisk(s)!
+    expect([r.tier, r.level]).toEqual(['red', 'high'])
+    expect(texts(s)).toContain('10.00% of this swap goes to evil, not to you.')
+    // Several affiliates: the fees add up (third-party Maya Arbitrum deposit, _/t1:0/70).
+    expect(texts(await card(MAYA_ARB, all(MAYA_ARB.vaults)))).toContain('Affiliate fee: 0.70% of this swap goes to _/t1.')
   })
 
   test('Maya on Ethereum: vault named; its swap with no minimum stays red', async () => {
@@ -184,6 +236,44 @@ describe('the approval card hook', () => {
       expect(info.memoDestinationOwn).toBe(true)
       expect(assessSigningRisk(info)!.tier).toBe('green')
     } finally { globalThis.fetch = real }
+  })
+})
+
+describe('the in-app swap card (buildEvmReportForTx)', () => {
+  test('checks the vault, as the approval overlay does', async () => {
+    const real = globalThis.fetch
+    const asked: string[] = []
+    globalThis.fetch = (async (url: string) => {
+      if (!VAULT_SOURCES.THORChain.includes(String(url))) throw new Error('offline')
+      asked.push(url)
+      return Response.json(OWN_ETH.vaults)
+    }) as any
+    try {
+      const { buildEvmReportForTx } = await import('../src/bun/evm-presign-report')
+      const { report, signingInfo } = await buildEvmReportForTx({
+        tx: { chainId: 1, from: OWN_ETH.from, to: OWN_ETH.to, data: OWN_ETH.data, value: OWN_ETH.value },
+        firmwareVersion: '7.16.0', endpoint: 'http://127.0.0.1:9/', signerVerdict: true, deviceId: 'dev',
+        measure: async () => { throw new Error('offline') },
+      })
+      expect(asked.sort()).toEqual([...VAULT_SOURCES.THORChain].sort())
+      expect(signingInfo.thorVault!.status).toBe('current')
+      const lines = report.findings.map((f) => f.message).join('\n')
+      expect(lines).toContain(`Pays vault ${vaultOf(OWN_ETH)}, one of THORChain's active ETH vaults`)
+      expect(lines).not.toContain('could not check')
+      expect(assessSigningRisk(signingInfo)!.tier).toBe('green')
+    } finally { globalThis.fetch = real }
+  })
+})
+
+describe('vault sources', () => {
+  test('two different operators per network, never a proxy of the same nodes', () => {
+    for (const urls of Object.values(VAULT_SOURCES)) {
+      const hosts = urls.map((u) => new URL(u).hostname)
+      expect(new Set(hosts).size).toBe(hosts.length)
+      expect(hosts.length).toBeGreaterThanOrEqual(2)
+      // rest.cosmos.directory proxies the chain-registry nodes, including the other source.
+      expect(hosts).not.toContain('rest.cosmos.directory')
+    }
   })
 })
 
@@ -229,6 +319,41 @@ describe('native MsgDeposit swaps', () => {
     const body = structuredClone(thor.body)
     body.signDoc.memo = '=:ETH.ETH:0x1111111111111111111111111111111111111111:2234918:keep:30'
     expect(texts(await native(thor, () => true, body))).toContain('This deposit carries two different memos.')
+  })
+
+  test('CONTROL: the same deposit with a zero limit, plain or streaming, is red', async () => {
+    for (const limit of ['0', '0/1/0', '0e3', 'abc']) {
+      const body = structuredClone(thor.body)
+      const memo = body.signDoc.memo.replace(':2234918:', `:${limit}:`)
+      body.signDoc.memo = memo
+      body.signDoc.msgs[0].value.memo = memo
+      const s = await native(thor, () => true, body)
+      const r = assessSigningRisk(s)!
+      expect([r.tier, r.level]).toEqual(['red', 'high'])
+      expect(texts(s)).toContain('Sets no minimum, so this swap can pay you back almost nothing.')
+      expect(texts(s)).toContain('for ETH.ETH with NO MINIMUM via THORChain')
+    }
+    // A streaming swap with a real limit is not.
+    const body = structuredClone(thor.body)
+    body.signDoc.memo = body.signDoc.msgs[0].value.memo = body.signDoc.memo.replace(':2234918:', ':2234918/1/0:')
+    expect(assessSigningRisk(await native(thor, () => true, body))!.tier).toBe('green')
+  })
+
+  test('CONTROL: a payout this computer cannot attribute is yellow, not green', async () => {
+    const s = await native(thor, () => undefined)
+    expect(s.memoDestinationOwn).toBeUndefined()
+    const r = assessSigningRisk(s)!
+    expect([r.tier, r.level]).toEqual(['yellow', 'medium'])
+    expect(texts(s)).toContain('This computer cannot tell whether 0x909Ef6B32DfDc12CA86aA710b54c991af3C5F82E on ETH is your address.')
+  })
+
+  test('CONTROL: the same deposit with its affiliate fee raised to 1000 bps is red', async () => {
+    expect(texts(await native(thor, () => true))).toContain('Affiliate fee: 0.30% of this swap goes to keep.')
+    const body = structuredClone(thor.body)
+    body.signDoc.memo = body.signDoc.msgs[0].value.memo = body.signDoc.memo.replace(':keep:30', ':evil:1000')
+    const s = await native(thor, () => true, body)
+    expect(assessSigningRisk(s)!.tier).toBe('red')
+    expect(texts(s)).toContain('10.00% of this swap goes to evil, not to you.')
   })
 
   test('Maya CACAO swap with no minimum is red', async () => {
