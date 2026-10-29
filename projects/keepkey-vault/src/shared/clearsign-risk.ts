@@ -454,6 +454,16 @@ function acrossDeposit(d: AcrossDepositV3, req: SigningRequestInfo, add: (l: Ris
   if (d.message !== '0x') add('high', `Also passes ${(d.message.length - 2) / 2} bytes of instructions that run at the recipient on ${v.destination}. This computer cannot read them.`)
 }
 
+/** The bytes as text, when they are printable UTF-8 (a sign-in message), else undefined. */
+function printableUtf8(hex: string): string | undefined {
+  if (!/^0x([0-9a-fA-F]{2})+$/.test(hex)) return undefined
+  try {
+    const bytes = new Uint8Array(hex.slice(2).match(/../g)!.map((b) => parseInt(b, 16)))
+    const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+    return /^[\x20-\x7e\t\n\r\u00a0-\uffff]+$/.test(text) && !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(text) ? text : undefined
+  } catch { return undefined }
+}
+
 function evmTypedData(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void): Recognition {
   const d = req.typedDataDecoded
   if (!d) {
@@ -485,6 +495,17 @@ function evmTypedData(req: SigningRequestInfo, add: (l: RiskLevel, t: string) =>
     add('high', f('Operation')?.raw === '1'
       ? `Runs code from ${to} inside your Safe (delegatecall). That code can do anything with what the Safe holds.`
       : `Makes your Safe call ${to} with data this computer cannot read. Your KeepKey shows that data only as raw hex.`)
+  } else if (d.primaryType === 'SafeMessage') {
+    // EIP-1271: the Safe treats this as its own signature. Readable text (a
+    // sign-in) is normal; a hash can stand for any permit or order the app hashed in.
+    const safe = d.domain.verifyingContract || 'unknown Safe'
+    const text = printableUtf8(String(f('Message')?.raw ?? ''))
+    if (text) {
+      add('medium', `Your Safe (${safe}) signs this text as its own, so apps that check the Safe's signature accept it: "${text.length > 200 ? text.slice(0, 200) + '…' : text}"`)
+    } else {
+      opaque = true
+      add('high', `Approves a message for your whole Safe (${safe}). Apps use this to make the Safe sign permits and orders, and this computer cannot read what it approves.`)
+    }
   } else if (/^Permit/.test(d.primaryType) || contract === PERMIT2) {
     const raw = f('Value')?.raw ?? f('Amount')?.raw ?? d.fields.find((x) => /Amount$/.test(x.label))?.raw
     // Every amount counts: a batch can hide an unlimited entry behind a small first one.
@@ -536,6 +557,14 @@ function evmTypedData(req: SigningRequestInfo, add: (l: RiskLevel, t: string) =>
     }
   } else if (/^(OrderComponents|BulkOrder)$/.test(d.primaryType)) {
     add('critical', 'This is a marketplace order. Anyone holding this signature can take the listed items at the price in the order.')
+  }
+  if (d.primaryType === 'SafeTx') {
+    // Safe pays gasPrice × gas in gasToken to refundReceiver when this executes.
+    // Safe{Wallet} leaves all three at zero, so a set refund is a hidden payout.
+    const set = (label: string) => !/^(0x)?0*$/.test(String(f(label)?.raw ?? '0'))
+    if (set('Gas Price') || set('Gas Token') || set('Refund Receiver')) {
+      add('high', `Pays a gas refund out of your Safe when it is executed, to ${set('Refund Receiver') ? f('Refund Receiver')!.raw : 'whoever executes it'}. Normal Safe transactions leave the refund at zero.`)
+    }
   }
   const structured = !!req.firmwareVersion && versionCompare(req.firmwareVersion, '7.15.0') >= 0
   if (structured) {
