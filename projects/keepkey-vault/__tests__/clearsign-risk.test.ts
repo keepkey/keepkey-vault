@@ -180,7 +180,7 @@ describe('assessSigningRisk — rules', () => {
   })
 
   test('chains without rules get no bar yet', () => {
-    expect(assessSigningRisk({ method: '/cosmos/sign-amino' } as SigningRequestInfo)).toBeNull()
+    expect(assessSigningRisk({ method: '/ton/sign-transaction' } as SigningRequestInfo)).toBeNull()
   })
 })
 

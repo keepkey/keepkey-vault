@@ -1126,6 +1126,9 @@ export interface SigningRequestInfo {
   simulatedOutflow?: SimulatedHoldings
   /** Parsed only from the exact TRON raw_data protobuf bytes being signed. */
   tronDecoded?: TronTxPreview
+  /** A TRON call the firmware does not decode (TRC-20 approve, staking,
+   *  votes, a SunSwap router call), read on this computer as advice only. */
+  tronCall?: TronCallPreview
   /**
    * Populated when a Solana transaction was received but clear-sign decoding
    * failed (malformed wire layout, unsupported message version, RPC outage,
@@ -1190,6 +1193,19 @@ export interface SigningRequestInfo {
   /** Vault-side prediction + authenticated-description boundary for this exact request. */
   clearSignReport?: import('./clearsign-report').ClearSignReport
 }
+
+/** What a TRON transaction the device shows as raw data does, read from the
+ *  exact raw_data bytes it signs (bun/tron-preview.ts tronCallPreview). */
+export type TronCallPreview =
+  | { kind: 'TRC-20 approve'; owner: string; token: string; tokenSymbol?: string; spender: string; spenderName?: string; amount: string; unlimited: boolean; revoke: boolean }
+  | { kind: 'Stake TRX'; owner: string; amount: string; resource: string }
+  | { kind: 'Unstake TRX'; owner: string; amount: string; resource: string }
+  | { kind: 'Withdraw unstaked TRX'; owner: string }
+  | { kind: 'Claim voting rewards'; owner: string }
+  | { kind: 'Vote'; owner: string; votes: { witness: string; count: string }[] }
+  | { kind: 'Delegate resources'; owner: string; amount: string; resource: string; receiver: string; locked: boolean }
+  | { kind: 'Reclaim delegated resources'; owner: string; amount: string; resource: string; receiver: string }
+  | { kind: 'Contract call'; owner: string; contract: string; contractName?: string; callValue?: string }
 
 export interface TronTxPreview {
   kind: 'TRX transfer' | 'TRC-20 transfer'
@@ -1256,6 +1272,11 @@ export interface SolanaTxDecodedInfo {
    *  string): the per-signature base fee plus the priority fee its own
    *  ComputeBudget instructions ask for. Read from the signed bytes. */
   maxNetworkFeeLamports?: string
+  /** Token accounts this transaction names, by address: the mint they hold
+   *  and the wallet that owns them. Read from an ATA create in the same
+   *  transaction (the ATA program refuses a wrong address) or from the chain
+   *  (token-program-owned accounts only). Advice: missing = not checked. */
+  tokenAccounts?: Record<string, { mint: string; owner: string }>
 }
 
 // ── Certified Solana description ─────────────────────────────────────────

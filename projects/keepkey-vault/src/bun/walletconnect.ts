@@ -648,6 +648,8 @@ export class WalletConnectManager {
           from: account.address,
           chainId: 0, // not an EVM numeric id
           data: JSON.stringify(signDoc),
+          // Same shape as the REST body, so the card and the risk bar read it.
+          rawRequestBody: { signerAddress: account.address, signDoc },
         }
         const approved = await this.callbacks.requestSigningApproval(signingInfo)
         if (!approved) throw new Error('User rejected signing')

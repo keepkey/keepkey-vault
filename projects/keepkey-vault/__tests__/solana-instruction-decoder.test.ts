@@ -220,8 +220,8 @@ describe('PROGRAM_REGISTRY', () => {
     const p = PROGRAM_REGISTRY.programs[SYSTEM_PROGRAM]
     expect(p.instructions?.['02000000']?.args?.[0]).toEqual({ name: 'lamports', type: 'u64' })
   })
-  test('SPL Token has 7 decoder-ready instructions', () => {
+  test('SPL Token has 8 decoder-ready instructions (SyncNative from the local registry)', () => {
     const ixs = PROGRAM_REGISTRY.programs[SPL_TOKEN].instructions!
-    expect(Object.keys(ixs).sort()).toEqual(['03', '04', '07', '08', '09', '0c', '0d'])
+    expect(Object.keys(ixs).sort()).toEqual(['03', '04', '07', '08', '09', '0c', '0d', '11'])
   })
 })
