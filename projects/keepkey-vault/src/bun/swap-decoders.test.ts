@@ -6,6 +6,7 @@
  * payment of ETH to a contract.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
+import { utils } from 'ethers'
 import type { SigningRequestInfo } from '../shared/types'
 import { assessSigningRisk } from '../shared/clearsign-risk'
 import { buildEvmPresignReport, prepareEvmTxSigningInfo } from './evm-presign-report'
@@ -179,5 +180,90 @@ describe('Relay Router swaps Desktop builds from a Pioneer quote (G05)', () => {
     expect(t.data.slice(flag, flag + 2)).toBe('00')
     expect(decodeSwapCall(t.to, `${t.data.slice(0, flag)}01${t.data.slice(flag + 2)}`, 1, t.value)).toBeNull()
     expect(decodeSwapCall(OTHER, t.data, 1, t.value)).toBeNull()
+  })
+})
+
+describe('Relay Router: a later step that spends or re-sweeps the swap output', () => {
+  const mc = new utils.Interface(['function multicall((address target,bool allowFailure,uint256 value,bytes callData)[] calls,address refundTo,address nftRecipient,bytes metadata)'])
+  const kyber = new utils.Interface(['function swap((address callTarget,address approveTarget,bytes targetData,(address srcToken,address dstToken,address[] srcReceivers,uint256[] srcAmounts,address[] feeReceivers,uint256[] feeAmounts,address dstReceiver,uint256 amount,uint256 minReturnAmount,uint256 flags,bytes permit) desc,bytes clientData) execution)'])
+  const ah = new utils.Interface(['function exec(address operator,address token,uint256 amount,address target,bytes data)'])
+  const erc20 = new utils.Interface([
+    'function approve(address,uint256)',
+    'function cleanupErc20s(address[] tokens,address[] recipients,uint256[] amounts,bytes metadata)',
+  ])
+  const KYBER = '0x6131B5fae19EA4f9D964eAc0408E4408b66337b5'
+  const AH = '0x0000000000001fF3684f28c67538d4D072C22734'
+  const USDT = '0xdAC17F958D2ee523a2206206994597C13D831ec7'
+  const WETH = '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2'
+  const ROUTER = '0x0729E2a4716d9f7dD17858d5d504426D228697f7'
+  const ATTACKER = '0x2222222222222222222222222222222222222222'
+  const MIN = 3957520044n // the real Kyber step's minReturnAmount of USDT
+  type Call = { target: string; allowFailure: boolean; value: unknown; callData: string }
+  const call = (target: string, callData: string): Call => ({ target, allowFailure: false, value: 0, callData })
+
+  /** The real Kyber ETH → USDT multicall (fee, swap, sweep USDT to the signer)
+   *  with `edit` applied to its calls. */
+  function rebuilt(edit: (calls: Call[]) => Call[]) {
+    const t = tx('relay-v32-router-kyber-eth-to-usdt')
+    const d = mc.decodeFunctionData('multicall', t.data)
+    return { ...t, data: mc.encodeFunctionData('multicall', [edit([...d.calls]), d.refundTo, d.nftRecipient, d.metadata]) }
+  }
+  /** A second Kyber step that sells the router's USDT, paying it to `srcReceiver`. */
+  function kyberSellsUsdt(srcReceiver: string) {
+    const real = kyber.decodeFunctionData('swap', mc.decodeFunctionData('multicall', tx('relay-v32-router-kyber-eth-to-usdt').data).calls[1].callData).execution
+    return kyber.encodeFunctionData('swap', [{
+      callTarget: real.callTarget, approveTarget: real.approveTarget, targetData: '0x', clientData: '0x',
+      desc: {
+        srcToken: USDT, dstToken: WETH, srcReceivers: [srcReceiver], srcAmounts: [MIN], feeReceivers: [], feeAmounts: [],
+        dstReceiver: utils.hexZeroPad('0x', 20), amount: MIN, minReturnAmount: 1, flags: 0, permit: '0x',
+      },
+    }])
+  }
+  const sweepUsdt = (to: string) => erc20.encodeFunctionData('cleanupErc20s', [[USDT], [to], [0], '0x'])
+
+  test('control: the real request still claims the Kyber minimum', () => {
+    const t = rebuilt((c) => c)
+    expect(decodeSwapCall(t.to, t.data, 1, t.value)?.fields.find((f) => f.name === 'Minimum output')?.value).toBe('3957.520044 USDT')
+  })
+
+  test('a second KyberSwap step sells the swept USDT to another address: blind and red, not "at least 3957 USDT"', async () => {
+    const t = rebuilt((c) => [c[0], c[1], call(USDT, erc20.encodeFunctionData('approve', [KYBER, MIN])), call(KYBER, kyberSellsUsdt(ATTACKER)), c[2]])
+    expect(decodeSwapCall(t.to, t.data, 1, t.value)).toBeNull()
+    const r = await review(t)
+    expect(r.risk.tier).toBe('red')
+    expect(r.text).not.toContain('sent to your account')
+    expect(r.text).not.toContain('3957.520044 USDT')
+  })
+
+  test('the same through a second 0x AllowanceHolder step selling the USDT', () => {
+    const zx = mc.decodeFunctionData('multicall', tx('relay-v32-router-0x-eth-to-usdt').data).calls[1].callData
+    const e = ah.decodeFunctionData('exec', zx)
+    // Settler.execute slippage: recipient = the router, buyToken = WETH, minAmountOut = 1.
+    const word = (v: string) => v.slice(2).toLowerCase().padStart(64, '0')
+    const inner = `${e.data.slice(0, 10)}${word(ROUTER)}${word(WETH)}${word('0x1')}${e.data.slice(10 + 3 * 64)}`
+    const sell = ah.encodeFunctionData('exec', [e.operator, USDT, MIN, e.target, inner])
+    expect(decodeSwapCall(AH, sell, 1, '0x0')).not.toBeNull() // a step the decoder reads on its own
+    const t = rebuilt((c) => [c[0], c[1], call(USDT, erc20.encodeFunctionData('approve', [AH, MIN])), call(AH, sell), c[2]])
+    expect(decodeSwapCall(t.to, t.data, 1, t.value)).toBeNull()
+  })
+
+  test('only an approval of the swept USDT after the swap: blind', () => {
+    const t = rebuilt((c) => [c[0], c[1], call(USDT, erc20.encodeFunctionData('approve', [KYBER, MIN])), c[2]])
+    expect(decodeSwapCall(t.to, t.data, 1, t.value)).toBeNull()
+  })
+
+  test('USDT swept twice, or swept before the swap that makes it: blind', () => {
+    const twice = rebuilt((c) => [c[0], c[1], call(ROUTER, sweepUsdt(ATTACKER)), c[2]])
+    expect(decodeSwapCall(twice.to, twice.data, 1, twice.value)).toBeNull()
+    const early = rebuilt((c) => [c[0], c[2], c[1]])
+    expect(decodeSwapCall(early.to, early.data, 1, early.value)).toBeNull()
+  })
+
+  test('an exact USDT payout after the swap lowers the guaranteed minimum of the sweep', () => {
+    const fee = erc20.encodeFunctionData('cleanupErc20s', [[USDT], ['0xf70da97812CB96acDF810712Aa562db8dfA3dbEF'], [1000000], '0x'])
+    const t = rebuilt((c) => [c[0], c[1], call(ROUTER, fee), c[2]])
+    const fields = decodeSwapCall(t.to, t.data, 1, t.value)!.fields
+    expect(fields.find((f) => f.name === 'Minimum output')?.value).toBe('3956.520044 USDT')
+    expect(fields.filter((f) => f.name === 'Relay fee').map((f) => f.value)).toContain("1 USDT to Relay's solver 0xf70da97812cb96acdf810712aa562db8dfa3dbef")
   })
 })

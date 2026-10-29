@@ -258,9 +258,13 @@ function cowEthFlow(chainId: number, data: string, value: bigint): CalldataDecod
   })
 }
 
-/** What the router holds after the route steps: at least these amounts. */
-type Ledger = Map<string, bigint>
-interface Payout { token: string; to: string; exact?: bigint }
+/** What the router is sure to hold so far, step by step. A swap step credits
+ *  its guaranteed output; a step that spends a credited token (a later swap,
+ *  an approval, a wrap or unwrap) removes the credit, and sweeping that token
+ *  afterwards, or sweeping any token twice, leaves the whole call blind. */
+interface Ledger { held: Map<string, bigint>; voided: Set<string>; swept: Set<string> }
+/** `claim`: for a sweep, what the ledger held of that token at that step. */
+interface Payout { token: string; to: string; exact?: bigint; claim?: bigint }
 
 /** One Call3Value the Relay Router runs (as msg.sender). Returns false for a
  *  step this computer does not read, which leaves the whole call blind. */
@@ -271,19 +275,34 @@ function relayStep(
   const { target, value, data } = call
   const sel = data.slice(0, 8)
   const r = new Abi(data.slice(8))
-  const add = (token: string, raw: bigint) => produced.set(token, (produced.get(token) ?? 0n) + raw)
+  const { held, voided, swept } = produced
+  const add = (token: string, raw: bigint) => held.set(token, (held.get(token) ?? 0n) + raw)
+  const spend = (token: string) => { if (held.delete(token)) voided.add(token) }
+  // cleanup*: an exact amount moves just that much; 0 sweeps the router's whole balance.
+  const payout = (token: string, to: string, amount: bigint): boolean => {
+    if (amount !== 0n) {
+      const h = held.get(token)
+      if (h !== undefined) held.set(token, h > amount ? h - amount : 0n)
+      if (to !== ZERO) payouts.push({ token, to, exact: amount })
+      return true
+    }
+    if (voided.has(token) || swept.has(token)) return false
+    swept.add(token)
+    const claim = held.get(token)
+    held.delete(token)
+    if (to !== ZERO) payouts.push({ token, to, claim })
+    return true
+  }
+  if (value > 0n && target !== router) spend(NATIVE)
   if (target === router) {
     if (data === '') return true // coin moved to the router itself
-    if (sel === 'a6bd8c96') { // cleanupNative(amount, recipient, metadata); 0 = the router's whole balance
-      const amount = r.uint(0), to = r.addr(32)
-      if (to !== ZERO) payouts.push({ token: NATIVE, to, exact: amount || undefined })
-      return value === 0n
+    if (sel === 'a6bd8c96') { // cleanupNative(amount, recipient, metadata)
+      return value === 0n && payout(NATIVE, r.addr(32), r.uint(0))
     }
     if (sel === '9bb43718') { // cleanupErc20s(tokens, recipients, amounts, metadata)
       const tokens = r.addrs(0, 0), to = r.addrs(0, 32), amounts = r.uints(0, 64)
       if (tokens.length !== to.length || tokens.length !== amounts.length) return false
-      tokens.forEach((token, i) => payouts.push({ token, to: to[i], exact: amounts[i] || undefined }))
-      return value === 0n
+      return value === 0n && tokens.every((token, i) => payout(token, to[i], amounts[i]))
     }
     return false
   }
@@ -295,21 +314,26 @@ function relayStep(
     if (r.array(d, d + 128).n !== 0 || (r.uint(d + 288) & 1n) === 1n) return false // no Kyber fees, no partial fill
     const receiver = r.addr(d + 192)
     if (receiver !== ZERO && receiver !== router) return false
+    spend(r.addr(d))
     add(r.addr(d + 32), r.uint(d + 256))
     return true
   }
   if (target === ALLOWANCE_HOLDER && sel === '2213bc0b') {
     const z = settlerSwap(chainId, r, value)
     if (!z || z.recipient !== router) return false
+    spend(z.sell.token)
     add(z.min.token, z.min.raw)
     return true
   }
   const weth = CHAINS[chainId].weth
-  if (target === weth && sel === '2e1a7d4d' && value === 0n && data.length === 8 + 64) { add(NATIVE, r.uint(0)); return true }
+  if (target === weth && sel === '2e1a7d4d' && value === 0n && data.length === 8 + 64) { spend(weth); add(NATIVE, r.uint(0)); return true }
   if (target === weth && sel === 'd0e30db0' && data.length === 8) { add(weth, value); return true }
   // approve(spender, amount) from the router to the swap router it calls next
   // (or to itself, which Relay's unwrap route does and which moves nothing).
-  if (sel === '095ea7b3' && value === 0n && data.length === 8 + 128) return [KYBER_ROUTER, ALLOWANCE_HOLDER, router].includes(r.addr(0))
+  if (sel === '095ea7b3' && value === 0n && data.length === 8 + 128 && [KYBER_ROUTER, ALLOWANCE_HOLDER, router].includes(r.addr(0))) {
+    spend(target)
+    return true
+  }
   return false
 }
 
@@ -332,7 +356,7 @@ function relaySwap(chainId: number, to: string, data: string, value: bigint): Ca
   const head = viaProxy ? 64 : 0
   const calls = r.array(0, head)
   const refundTo = r.addr(head + 32)
-  const produced: Ledger = new Map()
+  const produced: Ledger = { held: new Map(), voided: new Set(), swept: new Set() }
   const payouts: Payout[] = []
   for (let i = 0; i < calls.n; i++) {
     const at = calls.at + r.num(calls.at + 32 * i)
@@ -344,11 +368,11 @@ function relaySwap(chainId: number, to: string, data: string, value: bigint): Ca
   const outputs = payouts.filter((p) => !fees.includes(p))
   const recipients = [...new Set(outputs.map((p) => p.to))]
   if (recipients.length !== 1) return null
-  // An "all of it" payout is at least what the swap steps guarantee the router got.
+  // An "all of it" payout is at least what the ledger held of it at that step.
   const min: Amount[] = []
   const sweeps: string[] = []
   for (const p of outputs) {
-    const raw = p.exact ?? produced.get(p.token)
+    const raw = p.exact ?? p.claim
     if (raw !== undefined) min.push({ token: p.token, raw })
     else sweeps.push(tokenInfo(chainId, p.token)?.symbol ?? p.token)
   }
