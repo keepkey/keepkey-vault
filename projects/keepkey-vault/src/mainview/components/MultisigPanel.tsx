@@ -12,6 +12,7 @@ import { rpcRequest } from "../lib/rpc"
 import { Z } from "../lib/z-index"
 import { playAttention, playSent } from "../lib/sounds"
 import type { SafeInfo, PendingSafeTx } from "../../shared/types"
+import { SafeCreateWizard } from "./SafeCreateWizard"
 
 const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase()
 
@@ -203,6 +204,7 @@ function SafeCard({ info, me, symbol }: { info: SafeInfo; me: string; symbol: st
 export function MultisigPanel({ chainId, chainName, symbol }: { chainId: number; chainName: string; symbol: string }) {
 	const [state, setState] = useState<{ owner: string; safes: SafeInfo[]; errors: { address: string; error: string }[] } | null>(null)
 	const [error, setError] = useState<string | null>(null)
+	const [creating, setCreating] = useState(false)
 
 	const load = useCallback(() => {
 		setState(null); setError(null)
@@ -242,7 +244,10 @@ export function MultisigPanel({ chainId, chainName, symbol }: { chainId: number;
 					{state.safes.map(s => <SafeCard key={s.address} info={s} me={state.owner} symbol={symbol} />)}
 				</>
 			)}
-			<Text fontSize="11px" color="var(--text-2)">Executing, and guided setup for new Safes and owner changes, are coming next.</Text>
+			{creating
+				? <SafeCreateWizard chainId={chainId} chainName={chainName} symbol={symbol} onClose={() => setCreating(false)} onCreated={load} />
+				: <Text as="button" fontSize="13px" fontWeight="600" color="var(--gold)" alignSelf="flex-start" onClick={() => setCreating(true)}>Create a Safe</Text>}
+			<Text fontSize="11px" color="var(--text-2)">Executing, and owner changes, are coming next.</Text>
 		</VStack>
 	)
 }
