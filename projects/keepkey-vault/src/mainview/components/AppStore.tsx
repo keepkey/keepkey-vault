@@ -63,7 +63,7 @@ function useApps(): AppDef[] {
 		{
 			id: "safe",
 			name: t("safeName", { defaultValue: "Safe{Wallet}" }),
-			description: t("safeDescription", { defaultValue: "Shared multisig accounts on EVM chains. Connect your KeepKey as an owner. For guided, phishing-resistant use, open Multisig on an EVM asset in Desktop." }),
+			description: t("safeDescription", { defaultValue: "Shared multisig accounts on EVM chains. Connect your KeepKey as an owner. To see your Safes and check pending transactions in Desktop, open Multisig on an EVM asset." }),
 			icon: "https://app.safe.global/favicons/apple-touch-icon.png",
 			url: "https://app.safe.global",
 			enabled: true,

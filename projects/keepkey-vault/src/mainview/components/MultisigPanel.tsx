@@ -10,7 +10,6 @@ import { Box, Flex, Text, Spinner, VStack } from "@chakra-ui/react"
 import { rpcRequest } from "../lib/rpc"
 import type { SafeInfo, PendingSafeTx } from "../../shared/types"
 
-const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`
 const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase()
 
 function nativeAmount(wei: string, symbol: string): string {
@@ -37,21 +36,23 @@ function Badge({ tone, children }: { tone: "ok" | "warn" | "bad" | "muted"; chil
 }
 
 function PendingRow({ tx, info, me, symbol }: { tx: PendingSafeTx; info: SafeInfo; me: string; symbol: string }) {
-	const confirmations = tx.confirmedBy.length + tx.unverifiedConfirmations.length
-	const signedByMe = tx.confirmedBy.some(a => same(a, me)) || tx.unverifiedConfirmations.some(a => same(a, me))
+	// Only signatures checked here count toward the threshold.
+	const confirmations = tx.confirmedBy.length
+	const signedByMe = tx.confirmedBy.some(a => same(a, me))
 	return (
 		<Box p="3" borderRadius="lg" bg="rgba(255,255,255,0.03)" border="1px solid" borderColor={tx.hashMatches ? "var(--line)" : "#F56565"}>
 			<Flex justify="space-between" align="center" gap="2" wrap="wrap">
 				<Text fontSize="13px" fontWeight="600" color="var(--text-0)">#{tx.nonce} · {describe(tx, info)}</Text>
 				<Flex gap="1.5" wrap="wrap">
-					{tx.hashMatches ? <Badge tone="ok">Checked on this computer</Badge> : <Badge tone="bad">Hash mismatch: do not sign</Badge>}
+					{tx.hashMatches ? <Badge tone="ok">Hash matches</Badge> : <Badge tone="bad">Hash mismatch: do not sign</Badge>}
 					{tx.delegateCall && <Badge tone="warn">Delegate call</Badge>}
 					<Badge tone={confirmations >= info.threshold ? "ok" : "muted"}>{confirmations} of {info.threshold} signed</Badge>
+					{tx.unverifiedConfirmations.length > 0 && <Badge tone="muted">{tx.unverifiedConfirmations.length} not verifiable</Badge>}
 					{signedByMe && <Badge tone="ok">Signed by you</Badge>}
 				</Flex>
 			</Flex>
 			<Text fontSize="12px" color="var(--text-2)" mt="1.5">
-				To <Text as="span" fontFamily="mono">{short(tx.to)}</Text>{nativeAmount(tx.value, symbol) && <> · {nativeAmount(tx.value, symbol)}</>}
+				To <Text as="span" fontFamily="mono" wordBreak="break-all">{tx.to}</Text>{nativeAmount(tx.value, symbol) && <> · {nativeAmount(tx.value, symbol)}</>}
 			</Text>
 			{tx.delegateCall && (
 				<Text fontSize="12px" color="#f5c542" mt="1">A delegate call runs other code with this Safe's full authority. Only approve it if you know exactly what it does.</Text>
@@ -77,7 +78,7 @@ function SafeCard({ info, me, symbol }: { info: SafeInfo; me: string; symbol: st
 		<Box p="4" borderRadius="xl" bg="rgba(255,255,255,0.02)" border="1px solid" borderColor="var(--line)">
 			<Flex as="button" w="100%" justify="space-between" align="center" onClick={() => setOpen(o => !o)} textAlign="left">
 				<Box>
-					<Text fontSize="14px" fontWeight="600" color="var(--text-0)" fontFamily="mono">{short(info.address)}</Text>
+					<Text fontSize="14px" fontWeight="600" color="var(--text-0)" fontFamily="mono" wordBreak="break-all">{info.address}</Text>
 					<Text fontSize="12px" color="var(--text-2)">{info.threshold} of {info.owners.length} owners must sign · Safe {info.version} · next nonce {info.nonce}</Text>
 				</Box>
 				<Text fontSize="12px" color="var(--gold)">{open ? "Hide" : "Open"}</Text>
@@ -106,12 +107,12 @@ function SafeCard({ info, me, symbol }: { info: SafeInfo; me: string; symbol: st
 }
 
 export function MultisigPanel({ chainId, chainName, symbol }: { chainId: number; chainName: string; symbol: string }) {
-	const [state, setState] = useState<{ owner: string; safes: SafeInfo[] } | null>(null)
+	const [state, setState] = useState<{ owner: string; safes: SafeInfo[]; errors: { address: string; error: string }[] } | null>(null)
 	const [error, setError] = useState<string | null>(null)
 
 	const load = useCallback(() => {
 		setState(null); setError(null)
-		rpcRequest<{ owner: string; safes: SafeInfo[] }>("safeMine", { chainId }, 60000)
+		rpcRequest<{ owner: string; safes: SafeInfo[]; errors: { address: string; error: string }[] }>("safeMine", { chainId }, 60000)
 			.then(setState)
 			.catch(e => setError(e?.message || "Could not load Safes"))
 	}, [chainId])
@@ -122,18 +123,30 @@ export function MultisigPanel({ chainId, chainName, symbol }: { chainId: number;
 			<Box>
 				<Text fontSize="15px" fontWeight="600" color="var(--text-0)">Multisig (Safe)</Text>
 				<Text fontSize="12px" color="var(--text-2)">
-					Safes on {chainName} where this KeepKey is an owner. Owners, threshold and every pending
-					transaction are read from the blockchain and checked on this computer, not taken from a website.
+					Safes on {chainName} whose contract lists this KeepKey as an owner. Owners and threshold are read
+					from the blockchain, and each pending transaction's hash and signatures are checked on this computer.
+					Anyone can create a Safe that lists your address, so only use Safes you recognize.
 				</Text>
 			</Box>
 			{error ? (
 				<Flex align="center" gap="2"><Text fontSize="13px" color="#F56565">{error}</Text><Text as="button" fontSize="12px" color="var(--gold)" onClick={load}>Retry</Text></Flex>
 			) : !state ? (
 				<Flex align="center" gap="2"><Spinner size="sm" color="kk.gold" /><Text fontSize="13px" color="var(--text-2)">Looking for your Safes…</Text></Flex>
-			) : state.safes.length === 0 ? (
-				<Text fontSize="13px" color="var(--text-2)">No Safe on {chainName} lists this KeepKey ({short(state.owner)}) as an owner yet.</Text>
 			) : (
-				state.safes.map(s => <SafeCard key={s.address} info={s} me={state.owner} symbol={symbol} />)
+				<>
+					{state.errors.length > 0 && (
+						<Flex align="center" gap="2" wrap="wrap">
+							<Text fontSize="13px" color="#F56565">
+								Could not read {state.errors.length} Safe{state.errors.length > 1 ? "s" : ""} from the blockchain: {state.errors[0].error}
+							</Text>
+							<Text as="button" fontSize="12px" color="var(--gold)" onClick={load}>Retry</Text>
+						</Flex>
+					)}
+					{state.safes.length === 0 && state.errors.length === 0 && (
+						<Text fontSize="13px" color="var(--text-2)">No Safe on {chainName} lists this KeepKey ({state.owner}) as an owner yet.</Text>
+					)}
+					{state.safes.map(s => <SafeCard key={s.address} info={s} me={state.owner} symbol={symbol} />)}
+				</>
 			)}
 			<Text fontSize="11px" color="var(--text-2)">Signing, executing, and guided setup for new Safes and owner changes are coming next.</Text>
 		</VStack>

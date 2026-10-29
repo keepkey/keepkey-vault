@@ -10,7 +10,7 @@ const BITCOIN_ASSET_CAIPS = new Set([
   'bip122:000000000933ea01ad0ee984209779ba/slip44:1',
 ])
 const NON_BITCOIN_RPC_PREFIXES = [
-  'clearsign', 'eth', 'cosmos', 'thorchain', 'mayachain', 'osmosis',
+  'clearsign', 'eth', 'safe', 'cosmos', 'thorchain', 'mayachain', 'osmosis',
   'xrp', 'solana', 'tron', 'ton', 'hive', 'zcash', 'bnb', 'binance',
 ]
 
