@@ -1,16 +1,18 @@
 /**
  * Coverage observations for what the KeepKey shows from its own decode, and
- * the in-app swap signature boundary that records one for every swap
- * signature. Telemetry only: these predictions never relax a signing gate.
+ * the in-app boundaries that record one per signature: swaps (vault-swap) and
+ * Desktop's own signers (vault-rpc). Telemetry only: these predictions never
+ * relax a signing gate.
  */
 import type { ChainDef } from '../shared/chains'
-import type { ClearSignObservationChain, ClearSignObservationDraft } from '../shared/types'
+import type { ClearSignDefinitionResolution, ClearSignDefinitionSource, ClearSignObservationChain, ClearSignObservationDraft } from '../shared/types'
 import { deviceErrorMessage } from '../shared/device-error'
 import { firmwareClearSigns } from './calldata-decoder'
-import { classifyEffectExposure, observeEvmCall, observeMalformedSolanaTransaction, observeSigningRequest, observeSolanaTransaction } from './clearsign-observation'
+import { classifyEffectExposure, observeEvmCall, observeMalformedSolanaTransaction, observeSigningRequest, observeSolanaTransaction, transactionShownNatively } from './clearsign-observation'
 import { auditUnknownClearSignShape } from './clearsign-live-auditor'
 import { authenticateClearSignObservation, finalizeClearSignObservation, insertClearSignObservation } from './db'
 import { buildSolanaDecodedInfo } from './solana-clearsign'
+import { ethMessagePreview } from './eth-message-preview'
 import { requiresSolanaBlindSigningConsent, solanaFirmwareRequiresAdvancedMode } from './solana-consent'
 
 /** A plain transfer, or a call the firmware decodes itself (a THORChain or
@@ -36,12 +38,6 @@ export async function solanaShownNatively(
     return false
   }
 }
-
-// Families whose swap signature the device shows field by field (outputs and
-// OP_RETURN memo, MsgDeposit memo, XRP destination tag); no blind-sign path
-// exists for them. Tron, TON and Hive swaps are not predicted here and are
-// recorded as not native.
-const SWAP_NATIVE_FAMILIES = new Set<ChainDef['chainFamily']>(['utxo', 'zcash-shielded', 'cosmos', 'xrp'])
 
 function swapChain(family: ChainDef['chainFamily'], chainId?: string): ClearSignObservationChain {
   if (family === 'cosmos') {
@@ -105,7 +101,11 @@ export async function protectSwapSignature(
   } else {
     draft = observeSigningRequest({
       chain: swapChain(input.chainFamily, input.chainId), requestKind: 'transaction',
-      route: `swap:${input.chainFamily}`, native: SWAP_NATIVE_FAMILIES.has(input.chainFamily),
+      route: `swap:${input.chainFamily}`,
+      // Same per-chain rule as REST and in-app sends: outputs and OP_RETURN
+      // memo, MsgDeposit memo, XRP destination tag and "Send Hive" are shown
+      // field by field; Tron only for what its parser clear-signs; TON never.
+      native: transactionShownNatively(swapChain(input.chainFamily, input.chainId), input.tx?.rawTx ?? input.tx?.raw_tx, firmwareVersion),
     })
   }
   const observation = insertClearSignObservation(draft, { deviceId: ctx.deviceId(), source: 'vault-swap' })
@@ -119,6 +119,128 @@ export async function protectSwapSignature(
       observation.id, input.tx.erc7730 ? 'erc7730' : input.tx.txMetadata?.keyId === 0x80 || result?.clearSignPromotionBundleHash ? 'certified' : 'runtime',
       1, Boolean(result?.clearSignPromotionBundleHash), result?.clearSignPromotionBundleHash,
     )
+    finalizeClearSignObservation(observation.id, 'signed')
+    return result
+  } catch (error: any) {
+    const rejected = /reject|cancel|denied/i.test(deviceErrorMessage(error))
+    finalizeClearSignObservation(observation.id, rejected ? 'rejected' : 'failed', rejected ? 'user-rejected' : 'device-or-transport')
+    throw error
+  }
+}
+
+export interface VaultRpcObservationContext {
+  isPassphraseWallet: () => boolean
+  firmwareVersion: () => string | undefined
+  deviceId: () => string | undefined
+}
+
+/** ethSignTx (vault-rpc: in-app sends, extension calls): the row for one call,
+ *  native when the device decodes it. Hidden wallets record nothing. */
+export function recordVaultRpcEvmCall(ctx: VaultRpcObservationContext, input: {
+  params: any; source: ClearSignDefinitionSource; definitionResolution: ClearSignDefinitionResolution; evmEndpoint: (chainId: number) => string
+}): string | undefined {
+  if (ctx.isPassphraseWallet()) return undefined
+  const { to, data, value } = input.params ?? {}
+  const chainId = Number(input.params?.chainId || 1)
+  const draft = observeEvmCall({
+    chainId, to, data, source: input.source,
+    native: evmShownNatively({ to, data, value, chainId }, ctx.firmwareVersion()),
+    definitionResolution: input.definitionResolution,
+  })
+  const id = insertClearSignObservation(draft, { deviceId: ctx.deviceId(), source: 'vault-rpc' }).id
+  void auditUnknownClearSignShape(draft, { evm: input.evmEndpoint(chainId) })
+  return id
+}
+
+/** solanaSignTx (vault-rpc): the same for a Solana transaction. Malformed input
+ *  records nothing here; the signing helper rejects it. */
+export async function recordVaultRpcSolanaTransaction(ctx: VaultRpcObservationContext, input: {
+  rawTx: string; schema?: unknown; source: ClearSignDefinitionSource; definitionResolution: ClearSignDefinitionResolution; solanaEndpoint: string
+}): Promise<string | undefined> {
+  if (ctx.isPassphraseWallet()) return undefined
+  try {
+    const draft = observeSolanaTransaction({
+      rawTxBase64: input.rawTx, source: input.source,
+      native: await solanaShownNatively(input.rawTx, ctx.firmwareVersion(), input.schema),
+      definitionResolution: input.definitionResolution,
+    })
+    const id = insertClearSignObservation(draft, { deviceId: ctx.deviceId(), source: 'vault-rpc' }).id
+    void auditUnknownClearSignShape(draft, { solana: input.solanaEndpoint })
+    return id
+  } catch { return undefined }
+}
+
+const RPC_TRANSACTION_CHAIN = {
+  btcSignTx: 'UTXO', btcPsbtSign: 'UTXO', cosmosSignTx: 'Cosmos', thorchainSignTx: 'THORChain', mayachainSignTx: 'Mayachain',
+  osmosisSignTx: 'Osmosis', xrpSignTx: 'XRP', tronSignTx: 'Tron', tonSignTx: 'TON', hiveSignTx: 'Hive',
+} as const satisfies Record<string, ClearSignObservationChain>
+const RPC_MESSAGE_CHAIN = {
+  ethSignMessage: 'Ethereum', solanaSignMessage: 'Solana', solanaSignOffchainMessage: 'Solana',
+  tronSignMessage: 'Tron', tronSignTypedHash: 'Tron', tonSignMessage: 'TON',
+} as const satisfies Record<string, ClearSignObservationChain>
+export type VaultRpcSigner = keyof typeof RPC_TRANSACTION_CHAIN | keyof typeof RPC_MESSAGE_CHAIN
+
+/** The bytes hdwallet sends for a message: Uint8Array as is; a string is UTF-8,
+ *  except SolanaSignMessage, which reads hex or base64 (hdwallet solana.ts). */
+function rpcMessageBytes(method: VaultRpcSigner, message: unknown): Buffer | undefined {
+  if (message instanceof Uint8Array) return Buffer.from(message)
+  if (typeof message !== 'string') return undefined
+  if (method !== 'solanaSignMessage') return Buffer.from(message, 'utf8')
+  return /^(?:[0-9a-fA-F]{2})+$/.test(message) ? Buffer.from(message, 'hex') : Buffer.from(message, 'base64')
+}
+
+/** Text the device pages as text: valid UTF-8 without control characters
+ *  other than tab and newlines. */
+function readableText(bytes: Buffer): boolean {
+  try {
+    const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+    return text.length > 0 && !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/.test(text)
+  } catch { return false }
+}
+
+/**
+ * The observation for one of Desktop's own signers (vault-rpc), at the level
+ * the device shows, by the same per-chain rules as REST. Messages: an Ethereum
+ * message that decodes as UTF-8, Tron and Solana off-chain text, Solana plain
+ * text (printable ASCII; the signer is not derived on this path, so the
+ * firmware's own-key check is not repeated). A typed hash and a TON message
+ * are always blind.
+ */
+export function vaultRpcSigningDraft(method: VaultRpcSigner, params: any, firmwareVersion: string | undefined): ClearSignObservationDraft {
+  const route = `vault-rpc:${method}`
+  if (method in RPC_TRANSACTION_CHAIN) {
+    const chain = RPC_TRANSACTION_CHAIN[method as keyof typeof RPC_TRANSACTION_CHAIN]
+    const msgs = params?.tx?.msg
+    const msgTypes = Array.isArray(msgs)
+      ? msgs.slice(0, 16).map((m: any) => typeof m?.type === 'string' ? m.type.slice(0, 128) : 'unknown') : undefined
+    return observeSigningRequest({
+      chain, requestKind: 'transaction', route,
+      native: transactionShownNatively(chain, params?.rawTx, firmwareVersion),
+      ...(msgTypes ? { detail: { msgTypes } } : {}),
+    })
+  }
+  const chain = RPC_MESSAGE_CHAIN[method as keyof typeof RPC_MESSAGE_CHAIN]
+  const bytes = method === 'ethSignMessage' ? undefined : rpcMessageBytes(method, params?.message)
+  const readable = method === 'ethSignMessage' ? ethMessagePreview('', params?.message).isUtf8Text
+    : !bytes ? false
+      : method === 'solanaSignMessage' ? bytes.length > 0 && bytes.every(b => (b >= 0x20 && b <= 0x7e) || b === 0x0a)
+        : method === 'tronSignMessage' || method === 'solanaSignOffchainMessage' ? readableText(bytes)
+          : false
+  return observeSigningRequest({
+    chain, requestKind: 'message', route, native: readable,
+    detail: readable ? { format: 'text' } : { format: 'bytes', ...(bytes ? { byteLength: bytes.length } : {}) },
+  })
+}
+
+/** One row per signature from Desktop's own signers (in-app sends, PSBTs,
+ *  messages), finalized signed / rejected / failed. Hidden wallets record nothing. */
+export async function observeVaultRpcSignature<T>(
+  ctx: VaultRpcObservationContext, method: VaultRpcSigner, params: unknown, sign: () => Promise<T>,
+): Promise<T> {
+  if (ctx.isPassphraseWallet()) return sign()
+  const observation = insertClearSignObservation(vaultRpcSigningDraft(method, params, ctx.firmwareVersion()), { deviceId: ctx.deviceId(), source: 'vault-rpc' })
+  try {
+    const result = await sign()
     finalizeClearSignObservation(observation.id, 'signed')
     return result
   } catch (error: any) {

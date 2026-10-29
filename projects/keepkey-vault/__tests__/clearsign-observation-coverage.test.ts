@@ -7,7 +7,7 @@
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, mock, test } from 'bun:test'
 import { EventEmitter } from 'node:events'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import bs58 from 'bs58'
@@ -17,7 +17,8 @@ mock.module('@keepkey/hdwallet-keepkey-nodehid', () => ({ HIDKeepKeyAdapter: cla
 const dir = mkdtempSync(join(tmpdir(), 'vault-cs-observation-'))
 mock.module('electrobun/bun', () => ({ Utils: { paths: { userData: dir } } }))
 const db = await import('../src/bun/db')
-const { protectSwapSignature, evmShownNatively, solanaShownNatively } = await import('../src/bun/clearsign-native')
+const { protectSwapSignature, evmShownNatively, solanaShownNatively, recordVaultRpcEvmCall, recordVaultRpcSolanaTransaction, observeVaultRpcSignature } = await import('../src/bun/clearsign-native')
+const { ActionCancelled } = await import('@keepkey/hdwallet-core')
 const { observeEvmCall, observeSigningInfo } = await import('../src/bun/clearsign-observation')
 const { SIGNING_ROUTES } = await import('../src/bun/signing-routes')
 const { startRestApi } = await import('../src/bun/rest-api')
@@ -34,14 +35,14 @@ beforeEach(() => { db.getDb()!.run('DELETE FROM clearsign_observations') })
 type Row = { source: string; chain: string; request_kind: string; protection_level: string; definition_source: string; outcome: string; shape_json: string; authenticated_component_count: number }
 const rows = () => db.getDb()!.query(
   `SELECT source, chain, request_kind, protection_level, definition_source, outcome, shape_json, authenticated_component_count
-     FROM clearsign_observations ORDER BY created_at`,
+     FROM clearsign_observations ORDER BY created_at, rowid`,
 ).all() as Row[]
 
 describe('vault-swap: one row per swap signature, at the level the device shows', () => {
-  const swap = (input: { chainFamily: any; chainId?: string; tx: any }, opts: { passphrase?: boolean } = {}) =>
+  const swap = (input: { chainFamily: any; chainId?: string; tx: any }, opts: { passphrase?: boolean; fw?: string } = {}) =>
     protectSwapSignature({
       isPassphraseWallet: () => opts.passphrase === true,
-      firmwareVersion: () => FW,
+      firmwareVersion: () => opts.fw ?? FW,
       deviceId: () => 'cs-observation-test',
       evmEndpoint: () => CLOSED,
       solanaEndpoint: () => CLOSED,
@@ -82,28 +83,120 @@ describe('vault-swap: one row per swap signature, at the level the device shows'
     expect(rows()[0].shape_json).not.toContain('BSC.USDT')
   })
 
+  test('Tron: a TRX transfer and a USDT transfer are native on 7.16; a TRC-20 outside the table is not', async () => {
+    await swap({ chainFamily: 'tron', tx: { rawTx: fx.tronTrxTransfer.rawDataHex } })
+    await swap({ chainFamily: 'tron', tx: { rawTx: fx.tronUsdtTransfer.rawDataHex } })
+    await swap({ chainFamily: 'tron', tx: { rawTx: fx.tronTrc20OutsideTable.rawDataHex } })
+    expect(rows().map((r) => [r.chain, r.protection_level, r.definition_source])).toEqual([
+      ['Tron', 'P4', 'native'], ['Tron', 'P4', 'native'], ['Tron', 'P1', 'none'],
+    ])
+  })
+
+  test('Tron on 7.14.3 (no raw_data parser) is never native', async () => {
+    await swap({ chainFamily: 'tron', tx: { rawTx: fx.tronUsdtTransfer.rawDataHex } }, { fw: '7.14.3' })
+    expect(rows()).toMatchObject([{ chain: 'Tron', protection_level: 'P1' }])
+  })
+
+  test('TON is never native; a Hive transfer is', async () => {
+    await swap({ chainFamily: 'ton', tx: { rawTx: fx.tonTransfer.rawTx } })
+    await swap({ chainFamily: 'hive', tx: {} })
+    expect(rows().map((r) => [r.chain, r.protection_level])).toEqual([['TON', 'P1'], ['Hive', 'P4']])
+  })
+
   test('a hidden (passphrase) wallet records nothing', async () => {
     await swap(evm(fx.evmThorchainDeposit), { passphrase: true })
     expect(rows()).toEqual([])
   })
 })
 
-describe('vault-rpc native sends: the helpers its observations use', () => {
-  test('EVM: transfer, THOR deposit and known-token transfer are native; the 0x swap is not', () => {
-    const at = (t: any) => evmShownNatively({ to: t.to, data: t.data, value: t.value, chainId: t.chainId }, FW)
-    expect([at({ ...fx.evmNativeSend, data: '0x' }), at(fx.evmThorchainDeposit), at(fx.evmUsdtTransfer), at(fx.evmSwapNotNative)])
-      .toEqual([true, true, true, false])
-    expect(observeEvmCall({ chainId: 1, to: fx.evmUsdtTransfer.to, data: fx.evmUsdtTransfer.data, native: true }))
-      .toMatchObject({ protectionLevel: 'P4', definitionSource: 'native', definitionResolution: 'not-checked' })
+describe('vault-rpc: Desktop signers record a row at the level the device shows', () => {
+  const ctx = (opts: { passphrase?: boolean } = {}) => ({
+    isPassphraseWallet: () => opts.passphrase === true, firmwareVersion: () => FW, deviceId: () => 'cs-observation-test',
   })
-  test('Solana', async () => {
+  const evmCall = (t: any) => recordVaultRpcEvmCall(ctx(), {
+    params: { chainId: t.chainId, to: t.to, data: t.data, value: t.value }, source: 'none', definitionResolution: 'not-checked', evmEndpoint: () => CLOSED,
+  })
+
+  test('ethSignTx: THOR deposit, USDT transfer and a plain send are native; the 0x swap is not', () => {
+    for (const t of [fx.evmThorchainDeposit, fx.evmUsdtTransfer, { ...fx.evmNativeSend, data: '0x' }, fx.evmSwapNotNative]) evmCall(t)
+    expect(rows().map((r) => [r.source, r.chain, r.protection_level, r.definition_source])).toEqual([
+      ['vault-rpc', 'Ethereum', 'P4', 'native'], ['vault-rpc', 'Ethereum', 'P4', 'native'],
+      ['vault-rpc', 'Ethereum', 'P4', 'native'], ['vault-rpc', 'Ethereum', 'P1', 'none'],
+    ])
+  })
+
+  test('solanaSignTx: a transfer the device reviews is native; one it does not review is not', async () => {
+    for (const t of [fx.solanaNativeSend, fx.solanaNotReviewed]) await recordVaultRpcSolanaTransaction(ctx(), {
+      rawTx: t.rawTxBase64, source: 'none', definitionResolution: 'not-checked', solanaEndpoint: CLOSED,
+    })
+    expect(rows().map((r) => [r.source, r.protection_level, r.definition_source])).toEqual([
+      ['vault-rpc', 'P4', 'native'], ['vault-rpc', 'P1', 'none'],
+    ])
+  })
+
+  test('the helpers it uses agree', async () => {
+    expect(evmShownNatively({ ...fx.evmUsdtTransfer }, FW)).toBe(true)
     expect(await solanaShownNatively(fx.solanaNativeSend.rawTxBase64, FW)).toBe(true)
-    expect(await solanaShownNatively(fx.solanaNotReviewed.rawTxBase64, FW)).toBe(false)
   })
+
   test('a runtime blob beside a native call does not lower it', () => {
     const row = db.insertClearSignObservation(observeEvmCall({ chainId: 1, to: fx.evmUsdtTransfer.to, data: fx.evmUsdtTransfer.data, native: true }), { source: 'vault-rpc' })
     db.authenticateClearSignObservation(row.id, 'runtime')
     expect(rows()).toMatchObject([{ protection_level: 'P4', definition_source: 'native' }])
+  })
+
+  const signed = async () => ({ signature: '00' })
+  test('every other signer writes one row, by chain (send dialog, PSBT, staking, messages)', async () => {
+    const c = ctx()
+    const cosmosTx = (doc: any) => ({ tx: { msg: doc.signDoc.msgs, fee: doc.signDoc.fee, memo: doc.signDoc.memo }, chain_id: doc.signDoc.chain_id })
+    await observeVaultRpcSignature(c, 'btcSignTx', { coin: 'Bitcoin' }, signed)
+    await observeVaultRpcSignature(c, 'btcPsbtSign', { coin: 'Bitcoin' }, signed)
+    await observeVaultRpcSignature(c, 'cosmosSignTx', cosmosTx(fx.cosmosAminoSend), signed)
+    await observeVaultRpcSignature(c, 'thorchainSignTx', cosmosTx(fx.thorchainAminoDeposit), signed)
+    await observeVaultRpcSignature(c, 'xrpSignTx', {}, signed)
+    await observeVaultRpcSignature(c, 'tronSignTx', { rawTx: fx.tronUsdtTransfer.rawDataHex }, signed)
+    await observeVaultRpcSignature(c, 'tronSignTx', { rawTx: fx.tronTrc20OutsideTable.rawDataHex }, signed)
+    await observeVaultRpcSignature(c, 'tonSignTx', { rawTx: fx.tonTransfer.rawTx }, signed)
+    await observeVaultRpcSignature(c, 'hiveSignTx', {}, signed)
+    await observeVaultRpcSignature(c, 'ethSignMessage', { message: fx.personalSignSiwe.messageHex }, signed)
+    await observeVaultRpcSignature(c, 'ethSignMessage', { message: fx.ethSignSafeTxHash.messageHex }, signed)
+    await observeVaultRpcSignature(c, 'solanaSignMessage', { message: Buffer.from(fx.solanaMessageText.messageUtf8).toString('base64') }, signed)
+    await observeVaultRpcSignature(c, 'tronSignTypedHash', {}, signed)
+    await observeVaultRpcSignature(c, 'tonSignMessage', { message: fx.hiveKeychainLogin.message }, signed)
+    expect(rows().map((r) => [r.source, r.chain, r.request_kind, r.protection_level, r.outcome])).toEqual([
+      ['vault-rpc', 'UTXO', 'transaction', 'P4', 'signed'],
+      ['vault-rpc', 'UTXO', 'transaction', 'P4', 'signed'],
+      ['vault-rpc', 'Cosmos', 'transaction', 'P4', 'signed'],
+      ['vault-rpc', 'THORChain', 'transaction', 'P4', 'signed'],
+      ['vault-rpc', 'XRP', 'transaction', 'P4', 'signed'],
+      ['vault-rpc', 'Tron', 'transaction', 'P4', 'signed'],
+      ['vault-rpc', 'Tron', 'transaction', 'P1', 'signed'],
+      ['vault-rpc', 'TON', 'transaction', 'P1', 'signed'],
+      ['vault-rpc', 'Hive', 'transaction', 'P4', 'signed'],
+      ['vault-rpc', 'Ethereum', 'message', 'P4', 'signed'],
+      ['vault-rpc', 'Ethereum', 'message', 'P1', 'signed'],
+      ['vault-rpc', 'Solana', 'message', 'P4', 'signed'],
+      ['vault-rpc', 'Tron', 'message', 'P1', 'signed'],
+      ['vault-rpc', 'TON', 'message', 'P1', 'signed'],
+    ])
+    expect(JSON.parse(rows()[3].shape_json).msgTypes).toEqual(['thorchain/MsgDeposit'])
+    expect(rows().map((r) => r.shape_json).join()).not.toMatch(/cosmos1|thor1|BSC\.USDT|example\.com/)
+  })
+
+  test('index.ts sends each of these signers through the wrapper', () => {
+    const src = readFileSync(join(import.meta.dir, '../src/bun/index.ts'), 'utf8')
+    for (const m of ['btcSignTx', 'btcPsbtSign', 'cosmosSignTx', 'thorchainSignTx', 'mayachainSignTx', 'osmosisSignTx', 'xrpSignTx',
+      'tronSignTx', 'tonSignTx', 'hiveSignTx', 'ethSignMessage', 'solanaSignMessage', 'tronSignMessage', 'tronSignTypedHash',
+      'tonSignMessage', 'solanaSignOffchainMessage']) expect(src, m).toContain(`observedRpcSign('${m}', `)
+    expect(src).toContain('recordVaultRpcEvmCall(vaultRpcObservation, {')
+    expect(src).toContain('recordVaultRpcSolanaTransaction(vaultRpcObservation, {')
+  })
+
+  test('a cancel on the device is rejected, anything else failed; a hidden wallet records nothing', async () => {
+    await expect(observeVaultRpcSignature(ctx(), 'btcSignTx', {}, async () => { throw new ActionCancelled() })).rejects.toThrow()
+    await expect(observeVaultRpcSignature(ctx(), 'btcSignTx', {}, async () => { throw new Error('Device disconnected') })).rejects.toThrow()
+    await observeVaultRpcSignature(ctx({ passphrase: true }), 'btcSignTx', {}, signed)
+    expect(rows().map((r) => r.outcome)).toEqual(['rejected', 'failed'])
   })
 })
 
@@ -116,7 +209,7 @@ describe('REST: every signing route records a row', () => {
     }
   })
 
-  async function restPost(path: string, body: unknown, opts: { passphrase?: boolean } = {}) {
+  async function restPost(path: string, body: unknown, opts: { passphrase?: boolean; wallet?: Record<string, unknown> } = {}) {
     const solanaKey = new Uint8Array(32).fill(7)
     const stop = async () => { throw new Error('test-stop') }
     const engine: any = Object.assign(new EventEmitter(), {
@@ -127,7 +220,8 @@ describe('REST: every signing route records a row', () => {
         ethSignMessage: async () => ({ address: '0x0000000000000000000000000000000000000001', signature: '0x01' }),
         solanaGetAddress: async () => bs58.encode(solanaKey),
         solanaSignMessage: async () => ({ publicKey: solanaKey, signature: new Uint8Array(64) }),
-        cosmosSignTx: stop, thorchainSignTx: stop,
+        cosmosSignTx: stop, thorchainSignTx: stop, tronSignTx: stop, tonSignTx: stop, tonSignMessage: stop,
+        ...opts.wallet,
       },
     })
     const auth: any = {
@@ -173,6 +267,41 @@ describe('REST: every signing route records a row', () => {
     expect(rows().map((r) => r.shape_json).join()).not.toMatch(/cosmos1|thor1|45191972|BSC\.USDT/)
   }, 30_000)
 
+  test('TON transaction and TON text message: the device blind-signs both, P1', async () => {
+    await restPost('/ton/sign-transaction', { raw_tx: fx.tonTransfer.rawTx, to_address: 'EQ-untrusted', amount: '1' })
+    await restPost('/ton/sign-message', { message: fx.hiveKeychainLogin.message })
+    expect(rows().map((r) => [r.chain, r.request_kind, r.protection_level, r.definition_source])).toEqual([
+      ['TON', 'transaction', 'P1', 'none'], ['TON', 'message', 'P1', 'none'],
+    ])
+  }, 30_000)
+
+  test('Tron: TRX and USDT transfers are native; a TRC-20 outside the firmware table is P1', async () => {
+    for (const t of [fx.tronTrxTransfer, fx.tronUsdtTransfer, fx.tronTrc20OutsideTable]) await restPost('/tron/sign-transaction', { raw_tx: t.rawDataHex })
+    expect(rows().map((r) => [r.chain, r.protection_level, r.definition_source])).toEqual([
+      ['Tron', 'P4', 'native'], ['Tron', 'P4', 'native'], ['Tron', 'P1', 'none'],
+    ])
+  }, 30_000)
+
+  test('Hive Keychain login (printable challenge): shown as text, native', async () => {
+    await restPost('/hive/sign-message', { message: fx.hiveKeychainLogin.message })
+    expect(rows()).toMatchObject([{ chain: 'Hive', request_kind: 'message', protection_level: 'P4', definition_source: 'native' }])
+    expect(JSON.parse(rows()[0].shape_json)).toEqual({ route: '/hive/sign-message', format: 'text' })
+  }, 30_000)
+
+  test('a cancel on the device is rejected, not failed', async () => {
+    await restPost('/cosmos/sign-amino', { signerAddress: fx.cosmosAminoSend.signerAddress, signDoc: structuredClone(fx.cosmosAminoSend.signDoc) },
+      { wallet: { cosmosSignTx: async () => { throw new ActionCancelled() } } })
+    expect(rows()).toMatchObject([{ chain: 'Cosmos', outcome: 'rejected' }])
+  }, 30_000)
+
+  test('BTC multisig while the feature is off: policy-blocked', async () => {
+    db.setSetting('btc_multisig_enabled', '0')
+    expect(await restPost('/utxo/sign-transaction', {
+      coin: 'Bitcoin', inputs: [{ scriptType: 'p2wsh', amount: '1000', multisig: { m: 2, pubkeys: [] } }], outputs: [{ address: 'bc1qtest', amount: '900' }],
+    })).toBe(403)
+    expect(rows()).toMatchObject([{ chain: 'UTXO', outcome: 'policy-blocked' }])
+  }, 30_000)
+
   test('a hidden (passphrase) wallet records nothing', async () => {
     await restPost('/eth/sign', { address: '0x0000000000000000000000000000000000000001', message: fx.personalSignSiwe.messageHex }, { passphrase: true })
     expect(rows()).toEqual([])
@@ -208,6 +337,13 @@ describe('WalletConnect: messages and Cosmos sign docs record a row', () => {
       ['Ethereum', 'message', 'P4'], ['Ethereum', 'message', 'P1'],
     ])
     expect(finalized).toEqual(['signed', 'signed'])
+  })
+
+  test('a cancel on the device is rejected, not failed', async () => {
+    const { manager, finalized } = wc()
+    manager.callbacks.ethSignMessage = async () => { throw new ActionCancelled() }
+    await expect(manager.handleRequest('personal_sign', [fx.personalSignSiwe.messageHex, '0x0000000000000000000000000000000000000001'], 'eip155:1', 'dapp')).rejects.toThrow()
+    expect(finalized).toEqual(['rejected'])
   })
 
   test('cosmos_signAmino and solana_signMessage', async () => {

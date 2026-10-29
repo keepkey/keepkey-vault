@@ -275,7 +275,7 @@ import { shouldResetManagersOnReady, nextReadyDeviceId } from "../shared/device-
 import { isManagerSeedStale } from "../shared/seed-reconcile"
 import { WalletConnectManager } from "./walletconnect"
 import { auditUnknownClearSignShape, setClearSignAuditGate } from "./clearsign-live-auditor"
-import { evmShownNatively, protectSwapSignature, solanaShownNatively } from "./clearsign-native"
+import { observeVaultRpcSignature, protectSwapSignature, recordVaultRpcEvmCall, recordVaultRpcSolanaTransaction, type VaultRpcObservationContext, type VaultRpcSigner } from "./clearsign-native"
 import { classifyEffectExposure, observeEvmCall, observeEvmTypedData, observeMalformedSolanaTransaction, observeSolanaTransaction } from "./clearsign-observation"
 import { getClearSignProtectionCaseStudies } from "./clearsign-case-studies"
 import { getEvmSimulationEndpoint, getEvmSimulationRpcUrls } from "./evm-simulation-config"
@@ -2939,6 +2939,15 @@ async function deriveChainAddress(wallet: any, chain: ChainDef): Promise<string 
 
 const uiWatchdog = createUiWatchdog({ timeoutMs: 30_000, log: console.log, error: console.error })
 
+// Coverage observations for Desktop's own signers (clearsign-native.ts).
+const vaultRpcObservation: VaultRpcObservationContext = {
+	isPassphraseWallet: () => engine.isPassphraseWallet,
+	firmwareVersion: () => engine.getDeviceState().firmwareVersion,
+	deviceId: () => engine.getDeviceState().deviceId,
+}
+const observedRpcSign = (method: VaultRpcSigner, params: unknown, sign: () => Promise<any>): Promise<any> =>
+	observeVaultRpcSignature(vaultRpcObservation, method, params, sign)
+
 const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 	maxRequestTime: 1_800_000, // 30 minutes — generous for device-interactive ops, but not infinite
 	handlers: {
@@ -3727,12 +3736,12 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					const sumIn = ins.reduce((s, i) => s + Number(i?.amount ?? i?.value ?? 0), 0)
 					const fee = sumIn > sumOut ? String(sumIn - sumOut) + unit : undefined
 					const amt = outs[0]?.amount
-					return emuSigningOp(
+					return observedRpcSign('btcSignTx', params, () => emuSigningOp(
 						() => engine.wallet!.btcSignTx(params),
 						{ operation: 'btcSignTx', chain: coin, to: outs[0]?.address, value: amt != null ? String(amt) + unit : undefined, fee },
-					)
+					))
 				}
-				return await engine.wallet.btcSignTx(params)
+				return await observedRpcSign('btcSignTx', params, () => engine.wallet!.btcSignTx(params))
 			},
 			btcMultisigCosigner: async (params) => {
 				const { wallet, assertCurrent } = multisigSession()
@@ -3853,7 +3862,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				p.signing = true
 				try {
 					const req = 'multisig' in p.analysis ? multisigToSignTx(p.analysis) : toSignTx(p.analysis)
-					const sign = () => engine.wallet!.btcSignTx(req as any)
+					const sign = () => observedRpcSign('btcPsbtSign', req, () => engine.wallet!.btcSignTx(req as any))
 					let res: any
 					try {
 						res = engine.isEmulator
@@ -4116,23 +4125,16 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					dataSelector: typeof effectiveParams?.data === 'string' ? effectiveParams.data.slice(0, 10) : undefined,
 				}
 				let sentToDevice = false
-				let observationId: string | undefined
-				if (!engine.isPassphraseWallet) {
-					const definitionSource = effectiveParams?.erc7730 ? 'erc7730'
+				const observationId = recordVaultRpcEvmCall(vaultRpcObservation, {
+					params: effectiveParams,
+					source: effectiveParams?.erc7730 ? 'erc7730'
 						: contactProofAttached ? 'none'
 							: effectiveParams?.txMetadata?.keyId === 0x80 ? 'certified'
-								: effectiveParams?.txMetadata ? 'runtime' : 'none'
-					const chainId = Number(effectiveParams?.chainId || 1)
-					const draft = observeEvmCall({
-						chainId, to: effectiveParams?.to, data: effectiveParams?.data,
-						source: definitionSource,
-						native: evmShownNatively({ to: effectiveParams?.to, data: effectiveParams?.data, value: effectiveParams?.value, chainId }, engine.getDeviceState().firmwareVersion),
-						definitionResolution: effectiveParams?.erc7730 || (effectiveParams?.txMetadata && !contactProofAttached)
-							? 'selected' : promotedResolution.status,
-					})
-					observationId = insertClearSignObservation(draft, { deviceId: engine.getDeviceState().deviceId, source: 'vault-rpc' }).id
-					void auditUnknownClearSignShape(draft, { evm: getEvmSimulationEndpoint(Number(draft.shape.chainId || 1)) })
-				}
+								: effectiveParams?.txMetadata ? 'runtime' : 'none',
+					definitionResolution: effectiveParams?.erc7730 || (effectiveParams?.txMetadata && !contactProofAttached)
+						? 'selected' : promotedResolution.status,
+					evmEndpoint: getEvmSimulationEndpoint,
+				})
 				// What the device signed: without the ERC-7730 definition if it refused it.
 				let signedParams: any = effectiveParams
 				try {
@@ -4208,12 +4210,12 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							if (txt && /^[\t\n\r\x20-\x7e]*$/.test(txt)) memo = txt.slice(0, 64)
 						} catch { /* not valid UTF-8 — keep raw hex */ }
 					}
-					return emuSigningOp(
+					return observedRpcSign('ethSignMessage', params, () => emuSigningOp(
 						() => engine.wallet!.ethSignMessage(params),
 						{ operation: 'ethSignMessage', chain: 'Ethereum', memo },
-					)
+					))
 				}
-				return await engine.wallet.ethSignMessage(params)
+				return await observedRpcSign('ethSignMessage', params, () => engine.wallet!.ethSignMessage(params))
 			},
 			ethSignTypedData: async (rawParams) => {
 				if (!engine.wallet) throw new Error('No device connected')
@@ -4254,41 +4256,45 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			cosmosSignTx: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
-				if (engine.isEmulator) return emuSigningOp(
-					() => engine.wallet!.cosmosSignTx(params),
-					cosmosConfirmDetails('cosmosSignTx', 'Cosmos', params),
-				)
-				return await engine.wallet.cosmosSignTx(params)
+				return await observedRpcSign('cosmosSignTx', params, () => engine.isEmulator
+					? emuSigningOp(
+						() => engine.wallet!.cosmosSignTx(params),
+						cosmosConfirmDetails('cosmosSignTx', 'Cosmos', params),
+					)
+					: engine.wallet!.cosmosSignTx(params))
 			},
 			thorchainSignTx: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
-				if (engine.isEmulator) return emuSigningOp(
-					() => engine.wallet!.thorchainSignTx(params),
-					cosmosConfirmDetails('thorchainSignTx', 'THORChain', params),
-				)
-				return await engine.wallet.thorchainSignTx(params)
+				return await observedRpcSign('thorchainSignTx', params, () => engine.isEmulator
+					? emuSigningOp(
+						() => engine.wallet!.thorchainSignTx(params),
+						cosmosConfirmDetails('thorchainSignTx', 'THORChain', params),
+					)
+					: engine.wallet!.thorchainSignTx(params))
 			},
 			mayachainSignTx: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
-				if (engine.isEmulator) return emuSigningOp(
-					() => engine.wallet!.mayachainSignTx(params),
-					cosmosConfirmDetails('mayachainSignTx', 'Maya', params),
-				)
-				return await engine.wallet.mayachainSignTx(params)
+				return await observedRpcSign('mayachainSignTx', params, () => engine.isEmulator
+					? emuSigningOp(
+						() => engine.wallet!.mayachainSignTx(params),
+						cosmosConfirmDetails('mayachainSignTx', 'Maya', params),
+					)
+					: engine.wallet!.mayachainSignTx(params))
 			},
 			osmosisSignTx: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
-				if (engine.isEmulator) return emuSigningOp(
-					() => engine.wallet!.osmosisSignTx(params),
-					cosmosConfirmDetails('osmosisSignTx', 'Osmosis', params),
-				)
-				return await engine.wallet.osmosisSignTx(params)
+				return await observedRpcSign('osmosisSignTx', params, () => engine.isEmulator
+					? emuSigningOp(
+						() => engine.wallet!.osmosisSignTx(params),
+						cosmosConfirmDetails('osmosisSignTx', 'Osmosis', params),
+					)
+					: engine.wallet!.osmosisSignTx(params))
 			},
 			xrpSignTx: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
 				if (engine.isEmulator) {
 					const tx: any = (params as any).tx ?? params
-					return emuSigningOp(
+					return observedRpcSign('xrpSignTx', params, () => emuSigningOp(
 						() => engine.wallet!.rippleSignTx(params),
 						{
 							operation: 'xrpSignTx', chain: 'XRP',
@@ -4296,9 +4302,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 							value: tx?.amount != null ? String(tx.amount) + ' drops' : undefined,
 							fee: tx?.fee != null ? String(tx.fee) + ' drops' : undefined,
 						},
-					)
+					))
 				}
-				return await engine.wallet.rippleSignTx(params)
+				return await observedRpcSign('xrpSignTx', params, () => engine.wallet!.rippleSignTx(params))
 			},
 			solanaSignTx: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
@@ -4322,19 +4328,12 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					txHash: createHash('sha256').update(Buffer.from(String((params as any).rawTx || ''), 'base64')).digest('hex'),
 				} : undefined
 				let sentToDevice = false
-				let observationId: string | undefined
-				if (!engine.isPassphraseWallet) {
-					try {
-						const draft = observeSolanaTransaction({
-							rawTxBase64: String((params as any).rawTx),
-							source: schema ? (promoted || (params as any)?.certificate ? 'certified' : 'runtime') : 'none',
-							native: await solanaShownNatively(String((params as any).rawTx), engine.getDeviceState().firmwareVersion, schema),
-							definitionResolution: schema ? 'selected' : promotedResolution?.status || 'not-checked',
-						})
-						observationId = insertClearSignObservation(draft, { deviceId: engine.getDeviceState().deviceId, source: 'vault-rpc' }).id
-						void auditUnknownClearSignShape(draft, { solana: getSetting('solana_rpc_endpoint') || 'https://api.mainnet-beta.solana.com' })
-					} catch { /* malformed input is rejected by the signing helper */ }
-				}
+				const observationId = await recordVaultRpcSolanaTransaction(vaultRpcObservation, {
+					rawTx: String((params as any).rawTx), schema,
+					source: schema ? (promoted || (params as any)?.certificate ? 'certified' : 'runtime') : 'none',
+					definitionResolution: schema ? 'selected' : promotedResolution?.status || 'not-checked',
+					solanaEndpoint: getSetting('solana_rpc_endpoint') || 'https://api.mainnet-beta.solana.com',
+				})
 				try {
 					const result = await signSolanaWireTransaction(
 						params,
@@ -4390,9 +4389,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			solanaSignMessage: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
-				const result = engine.isEmulator
-					? await emuSigningOp(() => engine.wallet!.solanaSignMessage(params), { operation: 'solanaSignMessage', chain: 'Solana' })
-					: await engine.wallet.solanaSignMessage(params)
+				const result = await observedRpcSign('solanaSignMessage', params, () => engine.isEmulator
+					? emuSigningOp(() => engine.wallet!.solanaSignMessage(params), { operation: 'solanaSignMessage', chain: 'Solana' })
+					: engine.wallet!.solanaSignMessage(params))
 				if (!result) throw new Error('solanaSignMessage returned no result')
 				return {
 					signature: result.signature instanceof Uint8Array
@@ -4405,9 +4404,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			tronSignTx: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
-				const result = engine.isEmulator
-					? await emuSigningOp(() => engine.wallet!.tronSignTx(params), { operation: 'tronSignTx', chain: 'Tron' })
-					: await engine.wallet.tronSignTx(params)
+				const result = await observedRpcSign('tronSignTx', params, () => engine.isEmulator
+					? emuSigningOp(() => engine.wallet!.tronSignTx(params), { operation: 'tronSignTx', chain: 'Tron' })
+					: engine.wallet!.tronSignTx(params))
 				if (!result) throw new Error('tronSignTx returned no result')
 				return {
 					signature: result.signature instanceof Uint8Array
@@ -4422,9 +4421,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			tonSignTx: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
-				const result = engine.isEmulator
-					? await emuSigningOp(() => engine.wallet!.tonSignTx(params), { operation: 'tonSignTx', chain: 'TON' })
-					: await engine.wallet.tonSignTx(params)
+				const result = await observedRpcSign('tonSignTx', params, () => engine.isEmulator
+					? emuSigningOp(() => engine.wallet!.tonSignTx(params), { operation: 'tonSignTx', chain: 'TON' })
+					: engine.wallet!.tonSignTx(params))
 				if (!result) throw new Error('tonSignTx returned no result')
 				return {
 					signature: result.signature instanceof Uint8Array
@@ -4438,9 +4437,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			// ── TRON TIP-191 personal_sign ────────────────────────────────
 			tronSignMessage: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
-				const result = engine.isEmulator
-					? await emuSigningOp(() => engine.wallet!.tronSignMessage(params), { operation: 'tronSignMessage', chain: 'Tron' })
-					: await engine.wallet.tronSignMessage(params)
+				const result = await observedRpcSign('tronSignMessage', params, () => engine.isEmulator
+					? emuSigningOp(() => engine.wallet!.tronSignMessage(params), { operation: 'tronSignMessage', chain: 'Tron' })
+					: engine.wallet!.tronSignMessage(params))
 				if (!result) throw new Error('tronSignMessage returned no result')
 				return { address: result.address, signature: bytesToHex(result.signature) }
 			},
@@ -4455,9 +4454,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			// ── TRON TIP-712 typed-data hash mode ─────────────────────────
 			tronSignTypedHash: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
-				const result = engine.isEmulator
-					? await emuSigningOp(() => engine.wallet!.tronSignTypedHash(params), { operation: 'tronSignTypedHash', chain: 'Tron' })
-					: await engine.wallet.tronSignTypedHash(params)
+				const result = await observedRpcSign('tronSignTypedHash', params, () => engine.isEmulator
+					? emuSigningOp(() => engine.wallet!.tronSignTypedHash(params), { operation: 'tronSignTypedHash', chain: 'Tron' })
+					: engine.wallet!.tronSignTypedHash(params))
 				if (!result) throw new Error('tronSignTypedHash returned no result')
 				return { address: result.address, signature: bytesToHex(result.signature) }
 			},
@@ -4465,9 +4464,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			// ── TON Ed25519 SignMessage (AdvancedMode-gated firmware-side) ─
 			tonSignMessage: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
-				const result = engine.isEmulator
-					? await emuSigningOp(() => engine.wallet!.tonSignMessage(params), { operation: 'tonSignMessage', chain: 'TON' })
-					: await engine.wallet.tonSignMessage(params)
+				const result = await observedRpcSign('tonSignMessage', params, () => engine.isEmulator
+					? emuSigningOp(() => engine.wallet!.tonSignMessage(params), { operation: 'tonSignMessage', chain: 'TON' })
+					: engine.wallet!.tonSignMessage(params))
 				if (!result) throw new Error('tonSignMessage returned no result')
 				return { publicKey: bytesToHex(result.publicKey), signature: bytesToHex(result.signature) }
 			},
@@ -4475,9 +4474,9 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			// ── Solana off-chain message (domain-separated envelope) ─────
 			solanaSignOffchainMessage: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
-				const result = engine.isEmulator
-					? await emuSigningOp(() => engine.wallet!.solanaSignOffchainMessage(params), { operation: 'solanaSignOffchainMessage', chain: 'Solana' })
-					: await engine.wallet.solanaSignOffchainMessage(params)
+				const result = await observedRpcSign('solanaSignOffchainMessage', params, () => engine.isEmulator
+					? emuSigningOp(() => engine.wallet!.solanaSignOffchainMessage(params), { operation: 'solanaSignOffchainMessage', chain: 'Solana' })
+					: engine.wallet!.solanaSignOffchainMessage(params))
 				if (!result) throw new Error('solanaSignOffchainMessage returned no result')
 				return { publicKey: bytesToHex(result.publicKey), signature: bytesToHex(result.signature) }
 			},
@@ -4621,7 +4620,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				if (!engine.wallet) throw new Error('No device connected')
 				// Route through emuSigningOp on the emulator so the interactive
 				// Confirm/Reject gate appears (a real device uses its button).
-				const signTx = () => (engine.wallet as any).hiveSignTx(params)
+				const signTx = () => observedRpcSign('hiveSignTx', params, () => (engine.wallet as any).hiveSignTx(params))
 				const result = engine.isEmulator
 					? await emuSigningOp(signTx, { operation: 'hiveSignTx', chain: 'Hive', to: params?.to, value: params?.amount != null ? String(params.amount) : undefined })
 					: await signTx()

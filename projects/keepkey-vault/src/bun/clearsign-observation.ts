@@ -25,6 +25,7 @@ import type {
 } from '../shared/types'
 import type { EffectReport } from '../shared/transaction-effects'
 import { parseSolanaMessage, parseSolanaTx, solanaMessageSlice } from './solana-tx'
+import { tronShownNatively } from './tron-preview'
 
 function digestShape(shape: Record<string, unknown>): string {
   return createHash('sha256').update(JSON.stringify(shape)).digest('hex')
@@ -427,23 +428,48 @@ const CHAIN_BY_ROUTE: Record<string, ClearSignObservationChain> = {
 const MESSAGE_ROUTE = /^\/[a-z]+\/sign(-message|-offchain-message|-typed-hash)?$/
 
 /**
+ * A transaction the device shows from its own parse, by chain. UTXO outputs,
+ * Cosmos-SDK amino messages, XRP payments and Hive transfers/operations have no
+ * blind-sign path. Tron only for what its parser clear-signs (tronShownNatively).
+ * TON is always "TON Blind Sign" behind AdvancedMode (fsm_msg_ton.h).
+ */
+export function transactionShownNatively(chain: ClearSignObservationChain, rawTx: unknown, firmwareVersion: string | undefined): boolean {
+  if (chain === 'Tron') return tronShownNatively(rawTx, firmwareVersion)
+  return NATIVE_TX_CHAINS.has(chain)
+}
+const NATIVE_TX_CHAINS = new Set<ClearSignObservationChain>(['UTXO', 'Zcash', 'XRP', 'Cosmos', 'Osmosis', 'THORChain', 'Mayachain', 'Hive'])
+
+/** Hive SignMessage takes only printable ASCII (hive_message_is_printable) and
+ *  pages all of it on "Sign Hive Message". */
+export function hiveMessageShown(bytes: Buffer): boolean {
+  return bytes.length > 0 && bytes.every(b => b >= 0x20 && b <= 0x7e)
+}
+
+/**
  * The observation for an approval card on a route without its own observer:
  * every message, and every transaction that is not EVM or Solana. A message
  * is native only when the device shows readable text; a hash or other binary
- * message (a Safe safeTxHash, say) is shown as bytes nobody can check. A
- * transaction is native unless Desktop's own gates say the device will need
- * blind signing for it. `msgs` is an amino sign doc's message list: only the
- * public type strings are kept.
+ * message (a Safe safeTxHash, say) is shown as bytes nobody can check, and a
+ * TON message is always a blind Ed25519 signature. A transaction is native
+ * only when transactionShownNatively says the device parses it, and Desktop's
+ * own gates do not predict blind signing. `msgs` is an amino sign doc's
+ * message list: only the public type strings are kept.
  */
 export function observeSigningInfo(info: SigningRequestInfo, msgs?: unknown): ClearSignObservationDraft | undefined {
   const route = String(info.method || '')
   const chain = CHAIN_BY_ROUTE[route.split('/')[1]]
   if (!chain) return undefined
+  const body = info.rawRequestBody as any
   if (MESSAGE_ROUTE.test(route)) {
     const solana = info.solanaMessageDecoded
-    const readable = solana ? solana.plainText === true : info.ethMessageDecoded?.isUtf8Text === true
+    const hive = chain === 'Hive' && typeof body?.message === 'string'
+      ? body.is_text === false ? Buffer.from(body.message.replace(/^0x/, ''), 'hex') : Buffer.from(body.message, 'utf8')
+      : undefined
+    const readable = chain === 'TON' ? false
+      : hive ? hiveMessageShown(hive)
+        : solana ? solana.plainText === true : info.ethMessageDecoded?.isUtf8Text === true
     const hex = String(info.ethMessageDecoded?.messageRaw || '').replace(/^0x/i, '')
-    const byteLength = solana ? solana.byteLength
+    const byteLength = hive ? hive.length : solana ? solana.byteLength
       : info.ethMessageDecoded && /^(?:[0-9a-fA-F]{2})+$/.test(hex) ? hex.length / 2 : undefined
     return observeSigningRequest({
       chain, requestKind: 'message', route, native: readable,
@@ -456,7 +482,8 @@ export function observeSigningInfo(info: SigningRequestInfo, msgs?: unknown): Cl
     ? msgs.slice(0, 16).map((m: any) => typeof m?.type === 'string' ? m.type.slice(0, 128) : 'unknown') : undefined
   return observeSigningRequest({
     chain, requestKind: 'transaction', route,
-    native: info.needsBlindSigning !== true && info.requiresAdvancedMode !== true,
+    native: info.needsBlindSigning !== true && info.requiresAdvancedMode !== true
+      && transactionShownNatively(chain, body?.raw_tx, info.firmwareVersion),
     ...(msgTypes ? { detail: { msgTypes } } : {}),
   })
 }

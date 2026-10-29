@@ -9,6 +9,7 @@ import { DEVICE_LOCKED_MESSAGE, restRequest } from './device-gate'
 import { WalletCacheSession, WalletSessionChangedError, WalletSessionMap } from './wallet-session-cache'
 import type { SigningRequestInfo, ApiLogEntry, EIP712DecodedInfo } from '../shared/types'
 import { tronPreview } from './tron-preview'
+import { deviceErrorMessage } from '../shared/device-error'
 import type { ClearSignEvent } from '../shared/types'
 import { createHash } from 'crypto'
 import { decodeEIP712 } from './eip712-decoder'
@@ -2142,7 +2143,10 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               source: 'rest-api',
             }).id
           }
-          if(path === '/utxo/sign-transaction' && hasMultisigSigningData(probeCheckBody) && !btcMultisigEnabled(getSetting)) throw new HttpError(403,BTC_MULTISIG_DISABLED)
+          if(path === '/utxo/sign-transaction' && hasMultisigSigningData(probeCheckBody) && !btcMultisigEnabled(getSetting)) {
+            if (activeClearSignObservationId) finalizeClearSignObservation(activeClearSignObservationId, 'policy-blocked', 'btc-multisig-disabled')
+            throw new HttpError(403,BTC_MULTISIG_DISABLED)
+          }
           const approvalStartedAt = Date.now()
           const approval = await callbacks.onSigningRequest(signingInfo)
           if (!approval.approved) {
@@ -3144,7 +3148,10 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.UtxoSignTransactionRequest)
-          if(hasMultisigSigningData(body) && !btcMultisigEnabled(getSetting))throw new HttpError(403,BTC_MULTISIG_DISABLED)
+          if(hasMultisigSigningData(body) && !btcMultisigEnabled(getSetting)) {
+            if (activeClearSignObservationId) finalizeClearSignObservation(activeClearSignObservationId, 'policy-blocked', 'btc-multisig-disabled')
+            throw new HttpError(403,BTC_MULTISIG_DISABLED)
+          }
           const coin = body.coin || 'Bitcoin'
 
           // BCH: prepend bitcoincash: prefix to output addresses
@@ -5169,6 +5176,11 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         return json({ error: 'Not found', path }, 404)
 
       } catch (err: any) {
+        // A cancel on the device is the user's answer, not a failure. Explicit
+        // outcomes recorded above win (conditional update).
+        if (activeClearSignObservationId && /reject|cancel|denied/i.test(deviceErrorMessage(err))) {
+          finalizeClearSignObservation(activeClearSignObservationId, 'rejected', 'user-rejected')
+        }
         // HttpError carries a typed status + optional `details` (e.g.
         // { boc, txid } on TON broadcast failure so a client can retry
         // broadcast without re-signing). Anything without a status falls

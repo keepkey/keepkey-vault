@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import protobuf from 'protobufjs/light'
 import bs58 from 'bs58'
 import type { TronTxPreview } from '../shared/types'
+import { versionCompare } from '../shared/firmware-versions'
 
 type Value = { wire: number; bytes?: Buffer; number?: bigint }
 function fields(bytes: Buffer, allowed: Record<number, number>): Map<number, Value> {
@@ -89,6 +90,31 @@ export function decodeTronTransfer(rawHex: string): TronTransfer {
       units: BigInt(`0x${call.subarray(36).toString('hex')}`), memo, feeLimit }
   }
   throw Error(`Unsupported TRON contract type ${kind}`)
+}
+
+/** Firmware v7.16.0 scripts/tron_tokens.json, the table fsm_msgTronSignTx
+ *  clear-signs TRC-20 transfers for. Deployed on mainnet (TronGrid
+ *  wallet/getcontract, 2026-10-29). */
+const TRON_FIRMWARE_TOKENS = new Set([
+  'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t', // USDT
+  'TXDk8mbtRbXeYuMNS83CfKPaYYT8XWv9Hz', // USDD 2.0
+  'TNUC9Qb1rRpS5CbWLmNMxXBjyFoydXjWFR', // WTRX
+])
+/** First firmware that parses TRON raw_data. 7.14.x blind-signs every TronSignTx. */
+const TRON_PARSER_MIN_FW = '7.16.0'
+
+/** The device shows this transaction from its own parse: a plain TRX transfer,
+ *  or a TRC-20 transfer of a token in its table. Anything else (another
+ *  contract, a TRC-20 outside the table, older firmware, an unknown version)
+ *  is "TRON Blind Sign" behind AdvancedMode. */
+export function tronShownNatively(rawTx: unknown, firmwareVersion: string | undefined): boolean {
+  if (!firmwareVersion || versionCompare(firmwareVersion.replace(/^v/, ''), TRON_PARSER_MIN_FW) < 0) return false
+  const hex = rawTx instanceof Uint8Array ? Buffer.from(rawTx).toString('hex') : rawTx
+  if (typeof hex !== 'string') return false
+  try {
+    const { kind, tokenContract } = decodeTronTransfer(hex)
+    return kind === 'TRX transfer' || TRON_FIRMWARE_TOKENS.has(tokenContract!)
+  } catch { return false }
 }
 
 /** Fail closed like firmware tron_parseRawTx. Only a single plain TRX or

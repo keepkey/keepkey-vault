@@ -32,6 +32,7 @@ import { nameRuntimeProvider, resolveProviderTxMetadata } from './clearsign-prov
 import { trustRuntimeSigner, type RuntimeEvmSigner } from './evm-runtime-metadata'
 import { supportsCertifiedClearSign } from './solana-certified-policy'
 import { decodeEIP712 } from './eip712-decoder'
+import { deviceErrorMessage } from '../shared/device-error'
 
 function base64ToBase58(base64: string): string {
   return bs58.encode(Buffer.from(base64, 'base64'))
@@ -855,7 +856,11 @@ export class WalletConnectManager {
       if (observationId) this.callbacks.finalizeClearSignObservation(observationId, 'signed')
       return result
     } catch (error) {
-      if (observationId) this.callbacks.finalizeClearSignObservation(observationId, 'failed', 'device-or-transport')
+      if (observationId) {
+        // A cancel on the device is the user's answer, as on the swap path.
+        const rejected = /reject|cancel|denied/i.test(deviceErrorMessage(error))
+        this.callbacks.finalizeClearSignObservation(observationId, rejected ? 'rejected' : 'failed', rejected ? 'user-rejected' : 'device-or-transport')
+      }
       throw error
     } finally {
       this.callbacks.dismissSigning(signingInfo.id)
