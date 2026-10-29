@@ -673,7 +673,7 @@ describe('Uniswap V4 through UR 2.1.2 — preview rows and certified attach', ()
   })
 })
 
-test('recognizedSpender: canonical Permit2 and certified name records only', async () => {
+test('recognizedSpender: canonical Permit2, certified name records and Desktop spender list only', async () => {
   const { recognizedSpender } = await import('./evm-signing-preview')
   expect(recognizedSpender(1, '0x000000000022D473030F116dDEE9F6B43aC78BA3')).toBe('Uniswap Permit2')
   expect(recognizedSpender(1, '0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD')).toBe('Uniswap Universal Router')

@@ -10,6 +10,7 @@ import { decodeCalldata, firmwareClearSigns, formatDeadline } from './calldata-d
 import { findCertifiedEvmSchema, findCertifiedUniswapSwap } from './evm-schema-registry'
 import { REVIEWED_EVM_TOKENS, findEvmNameRecord, findReviewedUniversalRouter } from './evm-certified-schema'
 import { evmContractIdentity } from '../shared/evm-contract-identity'
+import { knownSpenderName } from '../shared/evm-known-spenders'
 import { urPrecheck } from './uniswap-ur'
 import { supportsCertifiedClearSign } from './solana-certified-policy'
 import { certifiedBodyRefused, certifiedEnvelopeShown, metadataPayloadBytes } from '../shared/certified-evm-envelope'
@@ -215,12 +216,13 @@ export async function attachCertifiedUniswapSwap(
  * Decode calldata for the overlay and set deviceClearSigns / needsBlindSigning.
  * `callerMetadata` is a runtime-signer blob a REST caller supplied directly.
  */
-/** A spender KeepKey has reviewed: canonical Permit2, or an address with a
- * certified name record (the same list the device names spenders from). */
+/** A spender KeepKey has reviewed: canonical Permit2, an address with a
+ * certified name record (the same list the device names spenders from), or a
+ * swap/bridge contract on Desktop's own list (advice only, evm-known-spenders). */
 export function recognizedSpender(chainId: number | undefined, address: string | undefined): string | undefined {
   if (!chainId || !address || !/^0x[0-9a-fA-F]{40}$/.test(address)) return undefined
   const identity = evmContractIdentity(chainId, address)
-  return identity === 'Uniswap Permit2' ? identity : findEvmNameRecord(chainId, address)?.name
+  return identity === 'Uniswap Permit2' ? identity : findEvmNameRecord(chainId, address)?.name ?? knownSpenderName(chainId, address)
 }
 
 /** The reviewed spender of a decoded permit, for both REST and WalletConnect. */

@@ -27,6 +27,7 @@ import { providerTrackerUrl } from "../lib/trackers"
 import { ProviderBadge, ProverChip, resolveProvider } from "./ProviderBadge"
 import { getSwapperAnimation } from "../lib/swapper-animations"
 import { assessSwapRisk } from "../../shared/swap-risk"
+import { knownSpenderName } from "../../shared/evm-known-spenders"
 import { isSwapFullySettled, payoutReachesMinimum } from "../../shared/swap-settlement"
 import { SwapRiskReview } from "./SwapRiskReview"
 import { computeDustWarning, shouldWarnHighSlippage, computeEffectiveSlippageBps, isSmallSwapQuoteWarning } from "../../shared/swap-warnings"
@@ -204,15 +205,18 @@ function protocolLabel(swapper: string | undefined | null): string | null {
   return swapper
 }
 
-// Friendly hint for a known spender contract address. Independent of the
-// protocol — many ShapeShift routes (ButterSwap, Relay, Hop, etc.) use the
-// same Relay aggregator router as their executor. Returns null for unknowns.
-function spenderHint(addr: string | undefined): string | null {
+// Friendly hint for a known spender contract address: Desktop's per-chain
+// spender list first (the same names the signing card uses), then a few
+// protocol-independent hints — many ShapeShift routes (ButterSwap, Relay, Hop,
+// etc.) use the same Relay aggregator router as their executor. Returns null
+// for unknowns.
+function spenderHint(chainId: unknown, addr: string | undefined): string | null {
   if (!addr) return null
+  const known = knownSpenderName(Number(chainId) || undefined, addr)
+  if (known) return known
   const a = addr.toLowerCase()
   if (a === '0xee0319cf0bca5d09333f9f6277743e8de31bd69a') return 'Relay aggregator router'
   if (a === '0xdef1c0ded9bec7f1a1670819833240f027b25eff') return '0x ExchangeProxy'
-  if (a === '0x9008d19f58aabd9ed0d60971565aa8510560ab41') return 'CoW Vault Relayer'
   return null
 }
 
@@ -343,7 +347,7 @@ function EvmTxSummaryCard({
   const value = toBigIntValue(tx?.value)
   const selector = evmSelector(tx?.data)
   const approve = isApproval ? parseApproveCalldata(tx?.data) : null
-  const spenderName = spenderHint(approve?.spender)
+  const spenderName = spenderHint(tx?.chainId, approve?.spender)
 
   return (
     <Box bg="rgba(0,0,0,0.20)" border="1px solid" borderColor="kk.border" borderRadius="lg" px="3" py="2">
