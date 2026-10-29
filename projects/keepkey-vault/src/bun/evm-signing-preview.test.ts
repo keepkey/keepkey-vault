@@ -533,6 +533,38 @@ describe('certified Uniswap swap (0x07) attach', () => {
     expect(seen).toHaveLength(0)
   })
 
+  // Batch 5: a real Ethereum USDT swap through UR v1 (added router, added token).
+  const batch5 = require('../../__tests__/fixtures/uniswap/batch5-public-calls.json').calls
+  const ethUsdt = batch5.find((c: any) => c.router === '0xef1c6e67703c7bd7107eed8303fbe6ec2554bf6b' && c.tokens?.join() === 'USDT')
+
+  test('batch 5: an Ethereum USDT swap through UR v1 attaches its entry, and the preview names USDT', async () => {
+    const seen = swapService([])
+    const s = swapInfo(BigInt(ethUsdt.value))
+    await applyEvmTxPreview(s, ethUsdt.router, ethUsdt.data, 1, '7.16.0')
+    expect(s.needsBlindSigning).toBe(false)
+    expect(Buffer.from(s.calldataDecoded!.signedInsightBlob!, 'base64')[140]).toBe(0x07)
+    expect(seen.map((x) => x.body.tokens)).toEqual([['0xdac17f958d2ee523a2206206994597c13d831ec7']])
+    const { uniswapSwapFields } = require('./evm-signing-preview')
+    const rows = uniswapSwapFields(1, ethUsdt.router, ethUsdt.data, ethUsdt.value)
+    expect(rows.find((r: any) => r.name === 'Minimum output').value).toEndWith(' USDT')
+    expect(rows.some((r: any) => r.name === 'Token warning')).toBe(false)
+  })
+
+  test('batch 5: a service body for another router (UR 2.1.2 entry for a UR v1 call) is refused', async () => {
+    globalThis.fetch = (async (url: any, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body))
+      if (String(url).endsWith('/v1/evm/schema')) return new Response(JSON.stringify({ classification: 'OPAQUE' }), { status: 422 })
+      const other = '0x23617e59a5925b2a4bf75d73ff6711cd0b29de85'
+      const inner = buildEvmDecoderBody(1, other, body.selector, reviewedSwapTokens(1, body.tokens)).toString('hex')
+      return Response.json({ classification: 'VERIFIED', keyId: 0x80, chainId: 1, entry: `eip155:1:${body.contract}:uniswap-ur`,
+        contract: body.contract, selector: body.selector, method: 'execute', signedPayload: `0x03${CERT}${inner}${'ee'.repeat(65)}` })
+    }) as typeof fetch
+    const s = swapInfo(BigInt(ethUsdt.value))
+    await applyEvmTxPreview(s, ethUsdt.router, ethUsdt.data, 1, '7.16.0')
+    expect(s.needsBlindSigning).toBe(true)
+    expect(s.calldataDecoded?.signedInsightBlob).toBeUndefined()
+  })
+
   test('a service body naming other token identities is refused, never attached', async () => {
     swapService([], (tokens) => [...tokens].reverse())
     const s = swapInfo(0n)

@@ -22,6 +22,31 @@ export const REVIEWED_EVM_TOKENS: Record<string, { symbol: string; decimals: num
 }
 
 /**
+ * Tokens named only inside a certified Uniswap swap entry (0x07) and the
+ * swap preview. Their approve/transfer descriptions stay with the signed
+ * discovered-token catalog: listing them in REVIEWED_EVM_TOKENS would make
+ * Desktop expect a reviewed approve/transfer body that the service does not
+ * serve for them, and those calls would fail.
+ *
+ * Major tokens only. Each one is on the Uniswap Labs Default list v22.32.0
+ * with this symbol and these decimals, is in the worker's majors-only token
+ * snapshot with the same identity (so the swap names a token the same way
+ * its approve does), and has this symbol()/decimals() on chain (public RPC,
+ * eth_chainId checked), checked 2026-10-29.
+ */
+export const REVIEWED_SWAP_TOKENS: Record<string, { symbol: string; decimals: number }> = {
+  '1:0xdac17f958d2ee523a2206206994597c13d831ec7': { symbol: 'USDT', decimals: 6 },
+  '1:0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48': { symbol: 'USDC', decimals: 6 },
+  '1:0x6b175474e89094c44da98b954eedeac495271d0f': { symbol: 'DAI', decimals: 18 },
+  '1:0xc770eefad204b5180df6a14ee197d99d808ee52d': { symbol: 'FOX', decimals: 18 },
+  '1:0x2260fac5e5542a773aa44fbcfedf7c193bc2c599': { symbol: 'WBTC', decimals: 8 },
+  '1:0x514910771af9ca656af840dff83e8264ecf986ca': { symbol: 'LINK', decimals: 18 },
+  '10:0x4200000000000000000000000000000000000042': { symbol: 'OP', decimals: 18 },
+  '10:0xef4461891dfb3ac8572ccf7c794664a8dd927945': { symbol: 'WCT', decimals: 18 },
+  '8453:0xf4d97f2da56e8c3098f3a8d538db630a2606a024': { symbol: 'DIEM', decimals: 18 },
+}
+
+/**
  * Names for the USDC/USDT an Across deposit pays out, so a normal stablecoin
  * route is not "a token this computer cannot name". Naming ONLY: this map
  * never feeds the certified catalog (that stays REVIEWED_EVM_TOKENS).

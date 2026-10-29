@@ -73,10 +73,11 @@ describe('ClearSign Worker public surface', () => {
     expect(response.status).toBe(200)
     // 72 + Relay depositNative on Base/Arbitrum + 11 Relay depositErc20 (one per reviewed token).
     // The Arbitrum USDT approve pair is reviewed-token again: batch 2 superseded batch 1's entry.
-    expect(body.entries).toHaveLength(85)
-    expect(body.entries.filter((entry: any) => entry.family === 'evm')).toHaveLength(58)
+    // + 5 Uniswap routers reviewed for batch 5 (one swap entry each).
+    expect(body.entries).toHaveLength(90)
+    expect(body.entries.filter((entry: any) => entry.family === 'evm')).toHaveLength(63)
     expect(body.entries.filter((entry: any) => entry.family === 'evm' && entry.protocol === 'Relay')).toHaveLength(14)
-    expect(body.entries.filter((entry: any) => entry.protocol === 'Uniswap')).toHaveLength(9)
+    expect(body.entries.filter((entry: any) => entry.protocol === 'Uniswap')).toHaveLength(14)
     expect(body.entries.filter((entry: any) => entry.protocol === 'ERC-20')).toHaveLength(33)
     expect(body.entries.filter((entry: any) => entry.family === 'solana')).toHaveLength(27)
     for (const entry of body.entries) {
