@@ -308,7 +308,7 @@ import { DEFAULT_CLEARSIGN_SERVICE_URL } from "./solana-certified-registry"
 import { createRpcAltFetcher } from "./solana-alt"
 import { createProviderKeySession } from "./clearsign-provider-session"
 import { buildProviderBundle, buildStudioEvmSchema, parseProviderBundle, providerBundleFileName, uniqueFilePath } from "./clearsign-studio-evm"
-import { getTokenMetadata, broadcastEvmTx, verifyEvmSigner, ethCall, ethGetCode, getEvmGasPrice, getEvmNonce, getEvmBalance, waitForTxReceipt } from "./evm-rpc"
+import { getTokenMetadata, broadcastEvmTx, verifyEvmSigner } from "./evm-rpc"
 import { evmSourceForChain } from "./pioneer-evm"
 import { deviceErrorMessage } from "../shared/device-error"
 import type { BtcBroadcastReview, BtcPsbtReview, BtcWatchOnlyAccounts, BtcWatchOnlyImport, BtcWatchOnlyPsbt, BtcWatchOnlyReceive, ChainBalance, TokenBalance, CustomToken, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, EvmAddressSet, Bip85SeedMeta, StakingPosition, SwapAsset, AuditToken, DefiPosition, RecentActivity, ClearSignEvent, ClearSignSolanaSchemaArtifact } from "../shared/types"
@@ -1057,20 +1057,6 @@ function attachSigningPolicySnapshot(info: SigningRequestInfo): SigningRequestIn
 // Whether the device's AdvancedMode (blind-signing) policy is enabled, read
 // from cached features. Returns undefined when unknown (no cached features /
 // policy not reported) so callers can distinguish "off" from "can't tell".
-/** Safes created in Desktop, shown before Safe's service has indexed them. Never kept for passphrase wallets. */
-function createdSafes(chainId: number): { address: string; owners: string[] }[] {
-	try { return (JSON.parse(getSetting('safe_created') || '[]') as { chainId: number; address: string; owners: string[] }[]).filter(s => s.chainId === chainId) } catch { return [] }
-}
-const ownsCreatedSafe = (chainId: number, account: string) => createdSafes(chainId).some(s => s.owners.some(o => o.toLowerCase() === account.toLowerCase()))
-
-function safeReader(chainId: number) {
-	const source = `eip155:${chainId}`
-	return { getCode: (a: string) => ethGetCode(source, a), call: (to: string, data: string) => ethCall(source, to, data) }
-}
-
-// ponytail: fixed limit (a 2-owner create used 282,719 gas); Pioneer has no eth_estimateGas yet. Only gas used is charged.
-const safeCreateGasLimit = (owners: number) => 270_000n + 30_000n * BigInt(owners)
-
 function getAdvancedModeEnabled(): boolean | undefined {
 	const features = engine.getCachedFeaturesSnapshot()
 	if (!features) return undefined
@@ -7239,137 +7225,6 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// incremental one from synced_to brings the unspent set up to truth.
 				zcashVerifiedThisSession = true
 				return result
-			},
-			// ── Safe multisig (read side) ─────────────────────────────
-			safeChains: async () => {
-				const { safeTxServices } = await import('./safe')
-				return [...(await safeTxServices()).keys()]
-			},
-			safeMine: async (params) => {
-				if (!engine.wallet) throw new Error('No device connected')
-				if (!evmAddresses.isInitialized) await evmAddresses.initialize(engine.wallet)
-				const owner = evmAddresses.getSelectedAddress()?.address
-				if (!owner) throw new Error('No EVM address')
-				const { listOwnedSafes, readSafe } = await import('./safe')
-				const found = [...new Set([...await listOwnedSafes(params.chainId, owner), ...createdSafes(params.chainId).map(s => s.address)])]
-				// The service only suggests Safes; keep those whose contract lists us as an owner.
-				// A failed read is reported, never dropped: an empty list must mean "none", not "could not check".
-				const reads = await Promise.all(found.map(address => readSafe(params.chainId, address)
-					.then(info => ({ address, info, error: null }), (e: any) => ({ address, info: null, error: String(e?.message || e) }))))
-				const safes = reads.flatMap(r => r.info && r.info.owners.some(o => o.toLowerCase() === owner.toLowerCase()) ? [r.info] : [])
-				const errors = reads.flatMap(r => r.error ? [{ address: r.address, error: r.error }] : [])
-				return { owner, safes, errors }
-			},
-			safePending: async (params) => {
-				const { readSafe, pendingSafeTxs } = await import('./safe')
-				const info = await readSafe(params.chainId, params.address)
-				return { info, pending: await pendingSafeTxs(info) }
-			},
-			safeCreatePlan: async (params) => {
-				if (!engine.wallet) throw new Error('No device connected')
-				if (!evmAddresses.isInitialized) await evmAddresses.initialize(engine.wallet)
-				const payer = evmAddresses.getSelectedAddress()
-				if (!payer) throw new Error('No EVM address')
-				const { planSafeCreate, checkBeforeCreate } = await import('./safe-create')
-				const { listOwnedSafes } = await import('./safe')
-				const plan = planSafeCreate(params.chainId, params.owners, params.threshold, String(Date.now()))
-				await checkBeforeCreate(plan, safeReader(params.chainId))
-				const source = `eip155:${params.chainId}`
-				const [gasPrice, balance, payerSafes] = await Promise.all([getEvmGasPrice(source), getEvmBalance(source, payer.address), listOwnedSafes(params.chainId, payer.address)])
-				const fee = gasPrice * safeCreateGasLimit(plan.owners.length)
-				return {
-					plan, payer: payer.address, fee: fee.toString(), balance: balance.toString(),
-					payerOwnsSafe: payerSafes.length > 0 || ownsCreatedSafe(params.chainId, payer.address),
-					advancedMode: getAdvancedModeEnabled() ?? null,
-					calldataHash: (await import('ethers')).ethers.utils.keccak256(plan.data),
-				}
-			},
-			safeCreate: async (params) => {
-				if (!engine.wallet) throw new Error('No device connected')
-				if (!evmAddresses.isInitialized) await evmAddresses.initialize(engine.wallet)
-				const payer = evmAddresses.getSelectedAddress()
-				if (!payer) throw new Error('No EVM address')
-				const { planSafeCreate, checkBeforeCreate, checkCreatedSafe } = await import('./safe-create')
-				const { listOwnedSafes } = await import('./safe')
-				// Recomputed, never taken from the screen; it must land where the user was shown.
-				const plan = planSafeCreate(params.chainId, params.owners, params.threshold, params.saltNonce)
-				if (plan.predicted !== params.predicted) throw new Error('The Safe would not land at the address you reviewed')
-				// Under AdvancedMode a swapped blind call could approve a transaction for a Safe the payer
-				// already owns, permanently. A payer that owns no Safe here has nothing to approve.
-				if ((await listOwnedSafes(params.chainId, payer.address)).length > 0 || ownsCreatedSafe(params.chainId, payer.address)) {
-					throw new Error(`Pay from an account that owns no Safe on this chain; ${payer.address} already owns one`)
-				}
-				const read = safeReader(params.chainId)
-				await checkBeforeCreate(plan, read)
-				const source = `eip155:${params.chainId}`
-				const gasLimit = safeCreateGasLimit(plan.owners.length)
-				const [gasPrice, nonce, balance] = await Promise.all([getEvmGasPrice(source), getEvmNonce(source, payer.address), getEvmBalance(source, payer.address)])
-				// ponytail: no OP Stack L1 data fee in this check (Base/Optimism); it is a fraction of a cent here.
-				if (balance < gasPrice * gasLimit) throw new Error(`${payer.address} needs at least ${Number(gasPrice * gasLimit) / 1e18} for the network fee`)
-
-				const setAdvancedMode = async (enabled: boolean) => {
-					providerKeySession.onPolicy({ policyName: 'AdvancedMode', enabled })
-					const apply = () => engine.wallet!.applyPolicy({ policyName: 'AdvancedMode', enabled })
-					if (engine.isEmulator) await emuSigningOp(apply, { operation: 'applyPolicy', opLabel: `${enabled ? 'Enable' : 'Disable'} AdvancedMode policy` })
-					else await apply()
-					clearFeaturesCache()
-					await engine.refreshFeaturesSnapshot()
-					if (getAdvancedModeEnabled() !== enabled) throw new Error(`AdvancedMode did not turn ${enabled ? 'on' : 'off'}`)
-				}
-				// Firmware 7.16 has no decoder for the factory call, so it signs only under AdvancedMode.
-				// Desktop holds the device for that window and turns AdvancedMode off right after.
-				const wasOn = getAdvancedModeEnabled() === true
-				let signed: any
-				engine.exclusiveHolder = 'creating a Safe'
-				try {
-					if (!wasOn) await setAdvancedMode(true)
-					try {
-						signed = await engine.wallet.ethSignTx({
-							addressNList: evmAddressPath(payer.addressIndex), chainId: params.chainId,
-							nonce: `0x${nonce.toString(16)}`, gasLimit: `0x${gasLimit.toString(16)}`, gasPrice: `0x${gasPrice.toString(16)}`,
-							to: plan.factory, value: '0x0', data: plan.data,
-						} as any)
-					} finally {
-						if (!wasOn) await setAdvancedMode(false)
-					}
-				} finally {
-					engine.exclusiveHolder = null
-				}
-				const txHash = await broadcastEvmTx(source, signed?.serialized || signed?.serializedTx, payer.address)
-				const receipt = await waitForTxReceipt(source, txHash, 180_000)
-				if (!receipt) throw new Error(`Sent ${txHash}, but it was not mined within 3 minutes. Check it in a block explorer before trying again.`)
-				if (!receipt.status) throw new Error(`The create transaction ${txHash} failed on chain`)
-				await checkCreatedSafe(plan, read)
-				if (!engine.isPassphraseWallet) {
-					const list = JSON.parse(getSetting('safe_created') || '[]')
-					setSetting('safe_created', JSON.stringify([...list, { chainId: params.chainId, address: plan.predicted, owners: plan.owners }]))
-				}
-				return { address: plan.predicted, txHash }
-			},
-			safeConfirm: async (params) => {
-				if (!engine.wallet) throw new Error('No device connected')
-				const firmware = engine.getDeviceState().firmwareVersion
-				// 7.16 shows every SafeTx field on the device; older firmware only shows hashes.
-				if (!firmware || versionCompare(firmware, '7.16.0') < 0) throw new Error('Signing Safe transactions needs KeepKey firmware 7.16 or newer. Update it from Settings (opt in to new firmware).')
-				if (!evmAddresses.isInitialized) await evmAddresses.initialize(engine.wallet)
-				const me = evmAddresses.getSelectedAddress()
-				if (!me) throw new Error('No EVM address')
-				const { readSafe, pendingSafeTxs, postConfirmation } = await import('./safe')
-				const { safeTypedData, safeSignature, checkConfirmation } = await import('./safe-core')
-				// Everything is re-read here; nothing the screen sent is trusted except which proposal.
-				const info = await readSafe(params.chainId, params.address)
-				if (!info.owners.some(o => o.toLowerCase() === me.address.toLowerCase())) throw new Error(`${me.address} is not an owner of this Safe`)
-				const tx = (await pendingSafeTxs(info)).find(t => t.safeTxHash.toLowerCase() === params.safeTxHash.toLowerCase())
-				if (!tx) throw new Error('This proposal is no longer pending, or its fields do not produce that hash')
-				if (!tx.hashMatches) throw new Error("Safe's service published a different hash for this proposal. Do not sign it.")
-				const signOp = () => engine.wallet!.ethSignTypedData({ addressNList: evmAddressPath(me.addressIndex), typedData: safeTypedData(info.chainId, info.address, info.version, tx) } as any)
-				const result: any = engine.isEmulator ? await emuSigningOp(signOp, { operation: 'ethSignTypedData', chain: 'Ethereum' }) : await signOp()
-				const signature = safeSignature(typeof result === 'string' ? result : result?.signature)
-				if (checkConfirmation(tx.safeTxHash, info.owners, { owner: me.address, signature }) !== 'verified') {
-					throw new Error('The KeepKey signature does not recover to your owner address for this hash; it was not sent')
-				}
-				await postConfirmation(info.chainId, tx.safeTxHash, signature)
-				return { signature }
 			},
 			zcashShieldedBalance: async () => {
 				if (!zcashPrivacyEnabled) throw new Error('Zcash privacy feature is disabled')

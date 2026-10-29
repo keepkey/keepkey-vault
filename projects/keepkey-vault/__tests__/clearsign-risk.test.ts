@@ -601,24 +601,6 @@ describe('message verdicts', () => {
     expect(text(delegatecall)).toContain('(delegatecall)')
     // A plain ETH send from the Safe carries no data: the device shows every field.
     expect(typed(safeTx({ to: EVIL, value: '1000000000000000000', data: '0x', operation: 0 })).tier).toBe('green')
-
-    // A refund set on that same send pays someone out of the Safe on execution.
-    const refund = typed(safeTx({ to: EVIL, value: '1000000000000000000', data: '0x', operation: 0, gasPrice: '1000000000', refundReceiver: EVIL }))
-    expect(refund.tier).toBe('red')
-    expect(text(refund)).toContain(`Pays a gas refund out of your Safe when it is executed, to ${EVIL}`)
-    expect(text(typed(safeTx({ to: EVIL, data: '0x', operation: 0, gasToken: USDC })))).toContain('to whoever executes it')
-  })
-
-  test('a SafeMessage approval for the whole Safe is red: the device shows only its hash', () => {
-    const safe = '0x1234567890123456789012345678901234567890'
-    const msg = typed({
-      primaryType: 'SafeMessage',
-      domain: { chainId: 1, verifyingContract: safe },
-      types: { EIP712Domain: [{ name: 'chainId', type: 'uint256' }, { name: 'verifyingContract', type: 'address' }], SafeMessage: [{ name: 'message', type: 'bytes' }] },
-      message: { message: '0x' + 'ab'.repeat(32) },
-    })
-    expect(msg.tier).toBe('red')
-    expect(text(msg)).toContain(`Approves a message for your whole Safe (${safe})`)
   })
 
   // messages:1

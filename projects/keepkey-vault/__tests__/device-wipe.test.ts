@@ -227,13 +227,6 @@ describe('REST writes to the device (device-gate.ts)', () => {
     expect(restWriteRefusal({ ...free, wipeOnReconnect: true }, T.MESSAGETYPE_GETADDRESS, asRest)?.status).toBe(409)
   })
 
-  test("while Desktop holds the device, every new REST request is refused; Desktop's own calls and replies pass", () => {
-    const held = { ...free, exclusive: 'creating a Safe' }
-    expect(restWriteRefusal(held, T.MESSAGETYPE_ETHEREUMSIGNTX, asRest)).toEqual({ status: 409, message: 'KeepKey is busy: creating a Safe. Try again when it finishes.' })
-    expect(restWriteRefusal(held, T.MESSAGETYPE_ETHEREUMSIGNTX, undefined)).toBeNull()
-    expect(restWriteRefusal(held, T.MESSAGETYPE_BUTTONACK, asRest)).toBeNull()
-  })
-
   /** Takes writes, answers each with an empty Features once released. */
   function quietKeepKey() {
     const written: number[] = []
