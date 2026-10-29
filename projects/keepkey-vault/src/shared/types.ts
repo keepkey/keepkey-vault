@@ -1079,6 +1079,14 @@ export interface SafeInfo {
   threshold: number
   nonce: number
   version: string
+  vetting: SafeVetting
+}
+
+export interface SafeVetting {
+  /** Why the contract is not Safe's own code, or null when it is. Owners and threshold read from it cannot be trusted otherwise. */
+  codeProblem: string | null
+  /** Extensions the Safe has enabled (modules, a guard, a custom fallback handler). Normal for DAOs; described, never blocking. */
+  extensions: string[]
 }
 
 /** A proposed, not-yet-executed Safe transaction, re-derived locally. */

@@ -4,6 +4,8 @@
  * and which owners' signatures actually recover over that hash.
  */
 import { ethers } from 'ethers'
+import { SAFE_PROXY_CODE_HASHES, SAFE_SINGLETONS, SAFE_FALLBACK_HANDLERS } from '../shared/safe-deployments'
+import type { SafeVetting } from '../shared/types'
 
 export interface SafeTxFields {
   to: string
@@ -97,6 +99,9 @@ const iface = new ethers.utils.Interface([
   'function nonce() view returns (uint256)',
   'function VERSION() view returns (string)',
   'function approvedHashes(address, bytes32) view returns (uint256)',
+  'function masterCopy() view returns (address)',
+  'function getStorageAt(uint256 offset, uint256 length) view returns (bytes)',
+  'function getModulesPaginated(address start, uint256 pageSize) view returns (address[] array, address next)',
 ])
 
 export const SAFE_READS = {
@@ -111,3 +116,49 @@ export const approvedHashCall = (owner: string, hash: string) => iface.encodeFun
 export function decodeSafeRead(fn: keyof typeof SAFE_READS | 'approvedHashes', result: string): any {
   return iface.decodeFunctionResult(fn, result)[0]
 }
+
+// keccak256("fallback_manager.handler.address") and keccak256("guard_manager.guard.address")
+const FALLBACK_HANDLER_SLOT = '0x6c9a6c4a39284e37ed1cf53d337577d14212a4870fb976a4366c693b939918d5'
+const GUARD_SLOT = '0x4a204f620c8c5ccdca3fd54d003badd85ba500436a431f0cbda4f558c93c34c8'
+const SENTINEL = '0x0000000000000000000000000000000000000001'
+
+export interface SafeReader {
+  getCode(address: string): Promise<string>
+  call(to: string, data: string): Promise<string>
+}
+
+/**
+ * Whether this address runs Safe's own code (a known proxy pointing at a
+ * pinned singleton whose code matches), and which extensions it has enabled.
+ * Storage is read only after the singleton's code is verified, because it is
+ * the singleton's getStorageAt that answers.
+ */
+export async function vetSafe(chainId: number, safe: string, read: SafeReader): Promise<SafeVetting> {
+  const problem = (codeProblem: string): SafeVetting => ({ codeProblem, extensions: [] })
+  const proxyVersion = SAFE_PROXY_CODE_HASHES[ethers.utils.keccak256(await read.getCode(safe))]
+  if (!proxyVersion) return problem('Its contract is not a standard Safe proxy')
+  const singleton = ethers.utils.getAddress(iface.decodeFunctionResult('masterCopy', await read.call(safe, iface.encodeFunctionData('masterCopy')))[0])
+  const pinned = SAFE_SINGLETONS.find(c => same(c.address, singleton) && c.chains.includes(chainId))
+  if (!pinned) return problem(`It runs Safe code Desktop does not recognize (${singleton})`)
+  if (ethers.utils.keccak256(await read.getCode(singleton)) !== pinned.codeHash) return problem(`The Safe code at ${singleton} does not match Safe's published build`)
+
+  const slot = async (s: string) => {
+    const [word] = iface.decodeFunctionResult('getStorageAt', await read.call(safe, iface.encodeFunctionData('getStorageAt', [s, 1])))
+    return ethers.utils.getAddress(ethers.utils.hexDataSlice(word, 12, 32))
+  }
+  const [handler, guard, modules] = await Promise.all([
+    slot(FALLBACK_HANDLER_SLOT),
+    slot(GUARD_SLOT),
+    read.call(safe, iface.encodeFunctionData('getModulesPaginated', [SENTINEL, 10])).then(r => iface.decodeFunctionResult('getModulesPaginated', r).array as string[]),
+  ])
+  const extensions: string[] = []
+  for (const m of modules) extensions.push(`Module ${ethers.utils.getAddress(m)} can make transactions for this Safe without owner signatures. DAOs use modules for governance, spending limits and recovery.`)
+  if (guard !== ethers.constants.AddressZero) extensions.push(`Guard ${guard} checks every transaction this Safe makes and can refuse ones it does not allow.`)
+  // ponytail: handler checked by address only; Safe's deterministic deployments make the address imply the code.
+  if (handler !== ethers.constants.AddressZero && !SAFE_FALLBACK_HANDLERS.some(c => same(c.address, handler) && c.chains.includes(chainId))) {
+    extensions.push(`Custom fallback handler ${handler} answers calls the Safe itself does not handle, such as signature checks.`)
+  }
+  return { codeProblem: null, extensions }
+}
+
+const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase()

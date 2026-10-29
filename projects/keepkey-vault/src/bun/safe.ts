@@ -6,9 +6,9 @@
  * spoofed proposal shows as a mismatch instead of being shown as real.
  */
 import { ethers } from 'ethers'
-import { ethCall } from './evm-rpc'
+import { ethCall, ethGetCode } from './evm-rpc'
 import { decodeCalldata } from './calldata-decoder'
-import { safeTxHash, checkConfirmation, approvedHashCall, SAFE_READS, decodeSafeRead, type SafeTxFields } from './safe-core'
+import { safeTxHash, checkConfirmation, approvedHashCall, vetSafe, SAFE_READS, decodeSafeRead, type SafeTxFields } from './safe-core'
 import type { SafeInfo, PendingSafeTx } from '../shared/types'
 
 const SAFE_CONFIG_URL = 'https://safe-config.safe.global/api/v1/chains/?limit=200'
@@ -58,13 +58,14 @@ export async function listOwnedSafes(chainId: number, owner: string): Promise<st
 export async function readSafe(chainId: number, address: string): Promise<SafeInfo> {
   const safe = ethers.utils.getAddress(address)
   const source = `eip155:${chainId}`
-  const [owners, threshold, nonce, version] = await Promise.all([
+  const [owners, threshold, nonce, version, vetting] = await Promise.all([
     ethCall(source, safe, SAFE_READS.getOwners).then(r => decodeSafeRead('getOwners', r) as string[]),
     ethCall(source, safe, SAFE_READS.getThreshold).then(r => Number(decodeSafeRead('getThreshold', r))),
     ethCall(source, safe, SAFE_READS.nonce).then(r => Number(decodeSafeRead('nonce', r))),
     ethCall(source, safe, SAFE_READS.VERSION).then(r => String(decodeSafeRead('VERSION', r))),
+    vetSafe(chainId, safe, { getCode: a => ethGetCode(source, a), call: (to, data) => ethCall(source, to, data) }),
   ])
-  return { chainId, address: safe, owners: owners.map(o => ethers.utils.getAddress(o)), threshold, nonce, version }
+  return { chainId, address: safe, owners: owners.map(o => ethers.utils.getAddress(o)), threshold, nonce, version, vetting }
 }
 
 /** Not-yet-executed proposals from the current nonce, oldest first. */

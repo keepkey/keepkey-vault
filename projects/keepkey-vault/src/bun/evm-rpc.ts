@@ -13,6 +13,10 @@ export async function ethCall(rpcUrl: string, to: string, data: string): Promise
   return (await ethRpc(rpcUrl, 'eth_call', [{ to, data }, 'latest'])) || '0x'
 }
 
+export async function ethGetCode(rpcUrl: string, address: string): Promise<string> {
+  return (await ethRpc(rpcUrl, 'eth_getCode', [address, 'latest'])) || '0x'
+}
+
 async function ethRpc(rpcUrl: string, method: string, params: any[]): Promise<any> {
   if (isPioneerEvmSource(rpcUrl)) {
     const { getPioneer } = await import('./pioneer')
