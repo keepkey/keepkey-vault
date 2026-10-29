@@ -64,6 +64,12 @@ export function typedDataRows(decoded: EIP712DecodedInfo): { label: string; valu
     if (field.format === 'datetime' && field.value && field.value !== String(field.raw)) {
       return { label: field.label, value: `${field.value} (${field.raw})` }
     }
+    // A known descriptor that already read this field (CoW "25,000 USDC",
+    // "This wallet") keeps the signed value beside its reading.
+    if (decoded.isKnownType && (field.format === 'amount' || field.format === 'address')
+      && field.raw && field.value && field.value !== String(field.raw)) {
+      return { label: field.label, value: `${field.value} (${field.raw})` }
+    }
     return { label: field.label, value: String(field.raw || field.value) }
   })
 }

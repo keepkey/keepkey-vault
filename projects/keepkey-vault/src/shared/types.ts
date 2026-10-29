@@ -1020,6 +1020,15 @@ export interface EIP712DecodedInfo {
   protocolIdentityVerified?: boolean
   /** Full host-computed digests for comparison with legacy device screens. */
   hashes?: { domainHash: string; messageHash?: string }
+  /** A Seaport 1.6 order shaped like a listing: only NFTs offered, every
+   *  payment in one currency at a fixed price. Who each payment goes to. */
+  seaportListing?: {
+    offerer: string
+    items: string[]
+    total: string
+    payments: Array<{ recipient: string; amount: string; role: 'offerer' | 'opensea-fee' | 'other' }>
+    endTime: string
+  }
 }
 
 /**

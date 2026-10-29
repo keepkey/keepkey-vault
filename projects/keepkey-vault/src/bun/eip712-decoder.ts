@@ -7,6 +7,10 @@
  */
 import type { EIP712DecodedField, EIP712DecodedInfo } from '../shared/types'
 import { utils as ethersUtils } from 'ethers'
+import { evmChainLabel } from '../shared/chains'
+import { evmTokenIdentity } from '../shared/evm-contract-identity'
+import { amountWithDecimals } from '../shared/erc20Preview'
+import { OPENSEA_CONDUIT_KEY, OPENSEA_FEE_RECIPIENT, SEAPORT_1_6, SEAPORT_1_6_CHAINS } from '../shared/nft-marketplaces'
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -66,8 +70,9 @@ const PERMIT2_ADDRESS = '0x000000000022d473030f116ddee9f6b43ac78ba3'
 interface KnownDescriptor {
   match: (typedData: any) => boolean
   operationName: string
-  extract: (message: any) => EIP712DecodedField[]
+  extract: (message: any, typedData: any, signer?: string) => EIP712DecodedField[]
   protocolIdentity?: (typedData: any, message: any) => boolean
+  seaportListing?: (typedData: any) => EIP712DecodedInfo['seaportListing']
 }
 
 function exactFields(typedData: any, typeName: string, expected: Array<[string, string]>): boolean {
@@ -178,6 +183,150 @@ function uniswapXBaseFields(message: any, inputToken: any, inputAmounts: Array<[
     ...inputAmounts.map(([label, value]) => ({ label, value: formatValue(value, 'amount'), format: 'amount' as const, raw: value })),
     ...outputFields(outputs, outputAmounts),
   ]
+}
+
+function toBig(raw: unknown): bigint | undefined {
+  const s = typeof raw === 'number' && Number.isSafeInteger(raw) ? String(raw) : typeof raw === 'string' ? raw.trim() : ''
+  return /^\d+$/.test(s) ? BigInt(s) : /^0x[0-9a-fA-F]+$/.test(s) ? BigInt(s) : undefined
+}
+
+/** An amount in whole units with its symbol: the chain's coin when `native`,
+ *  else a catalogued token. Base units and the address when neither is known. */
+function tokenUnits(chainId: number, token: unknown, raw: unknown, native = false): string {
+  const amount = toBig(raw)
+  if (amount === undefined) return String(raw ?? '')
+  const coin = native ? evmChainLabel(chainId)?.symbol : undefined
+  if (coin) return `${amountWithDecimals(amount, 18)} ${coin}`
+  const t = !native && typeof token === 'string' && /^0x[0-9a-fA-F]{40}$/.test(token) ? evmTokenIdentity(chainId, token) : undefined
+  return t ? `${amountWithDecimals(amount, t.decimals)} ${t.symbol}` : `${amount} base units of ${native ? 'the native coin' : `token ${String(token)}`}`
+}
+
+const lower = (v: unknown) => String(v ?? '').toLowerCase()
+
+// CoW Protocol GPv2Settlement, one CREATE2 address on every chain CoW runs:
+// https://github.com/cowprotocol/contracts/blob/main/networks.json (GPv2Settlement).
+// Checked 2026-10-29 on each chain below: eth_getCode, and domainSeparator()
+// equals the ("Gnosis Protocol", "v2", chainId, this address) domain.
+const COW_SETTLEMENT = '0x9008d19f58aabd9ed0d60971565aa8510560ab41'
+const COW_CHAINS = new Set([1, 10, 56, 100, 137, 8453, 42161, 43114])
+/** GPv2's marker for the chain's own coin as the token bought. */
+const COW_NATIVE = '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'
+
+const isCowOrder = (td: any) => td.domain?.name === 'Gnosis Protocol' && td.domain?.version === 'v2'
+  && lower(td.domain?.verifyingContract) === COW_SETTLEMENT && COW_CHAINS.has(Number(td.domain?.chainId))
+  && td.primaryType === 'Order' && exactFields(td, 'Order', [
+    ['sellToken', 'address'], ['buyToken', 'address'], ['receiver', 'address'], ['sellAmount', 'uint256'],
+    ['buyAmount', 'uint256'], ['validTo', 'uint32'], ['appData', 'bytes32'], ['feeAmount', 'uint256'],
+    ['kind', 'string'], ['partiallyFillable', 'bool'], ['sellTokenBalance', 'string'], ['buyTokenBalance', 'string'],
+  ])
+  // The only values GPv2Settlement accepts; anything else is not a valid order.
+  && ['sell', 'buy'].includes(td.message?.kind)
+  && ['erc20', 'external', 'internal'].includes(td.message?.sellTokenBalance)
+  && ['erc20', 'internal'].includes(td.message?.buyTokenBalance)
+
+function cowOrderFields(msg: any, td: any, signer?: string): EIP712DecodedField[] {
+  const chainId = Number(td.domain.chainId)
+  const sell = msg.kind === 'sell'
+  const nativeBuy = lower(msg.buyToken) === COW_NATIVE
+  const receiver = String(msg.receiver ?? '')
+  // A zero receiver means the order's owner: the account that signs it.
+  const own = /^0x0{40}$/.test(receiver) || (!!signer && lower(receiver) === lower(signer))
+  const coin = evmChainLabel(chainId)?.symbol
+  return [
+    { label: sell ? 'Sell' : 'Sell at most', value: tokenUnits(chainId, msg.sellToken, msg.sellAmount), format: 'amount', raw: String(msg.sellAmount) },
+    { label: sell ? 'Receive at least' : 'Receive', value: tokenUnits(chainId, msg.buyToken, msg.buyAmount, nativeBuy), format: 'amount', raw: String(msg.buyAmount) },
+    { label: 'Sell Token', value: formatValue(msg.sellToken, 'address'), format: 'address', raw: msg.sellToken },
+    { label: 'Buy Token', value: nativeBuy && coin ? `${coin} (native coin)` : formatValue(msg.buyToken, 'address'), format: 'address', raw: msg.buyToken },
+    { label: 'Receiver', value: own ? 'This wallet' : receiver, format: 'address', raw: receiver },
+    { label: 'Valid Until', value: formatValue(msg.validTo, 'datetime'), format: 'datetime', raw: String(msg.validTo) },
+    { label: 'Fee', value: tokenUnits(chainId, msg.sellToken, msg.feeAmount), format: 'amount', raw: String(msg.feeAmount) },
+    { label: 'Order Kind', value: String(msg.kind), format: 'raw', raw: String(msg.kind) },
+    { label: 'Partially Fillable', value: String(msg.partiallyFillable), format: 'raw', raw: String(msg.partiallyFillable) },
+    { label: 'App Data', value: formatValue(msg.appData, 'hex'), format: 'hex', raw: msg.appData },
+    { label: 'Sell Token Balance', value: String(msg.sellTokenBalance), format: 'raw', raw: String(msg.sellTokenBalance) },
+    { label: 'Buy Token Balance', value: String(msg.buyTokenBalance), format: 'raw', raw: String(msg.buyTokenBalance) },
+  ]
+}
+
+const isSeaportOrder = (td: any) => td.domain?.name === 'Seaport' && td.domain?.version === '1.6'
+  && lower(td.domain?.verifyingContract) === SEAPORT_1_6 && SEAPORT_1_6_CHAINS.has(Number(td.domain?.chainId))
+  && td.primaryType === 'OrderComponents' && exactFields(td, 'OrderComponents', [
+    ['offerer', 'address'], ['zone', 'address'], ['offer', 'OfferItem[]'], ['consideration', 'ConsiderationItem[]'],
+    ['orderType', 'uint8'], ['startTime', 'uint256'], ['endTime', 'uint256'], ['zoneHash', 'bytes32'],
+    ['salt', 'uint256'], ['conduitKey', 'bytes32'], ['counter', 'uint256'],
+  ]) && exactFields(td, 'OfferItem', [
+    ['itemType', 'uint8'], ['token', 'address'], ['identifierOrCriteria', 'uint256'], ['startAmount', 'uint256'], ['endAmount', 'uint256'],
+  ]) && exactFields(td, 'ConsiderationItem', [
+    ['itemType', 'uint8'], ['token', 'address'], ['identifierOrCriteria', 'uint256'], ['startAmount', 'uint256'],
+    ['endAmount', 'uint256'], ['recipient', 'address'],
+  ])
+
+/** One Seaport item in words. A start/end pair that differ is a price that moves over time. */
+function seaportItem(chainId: number, item: any): string {
+  const type = Number(item?.itemType)
+  const amount = (raw: unknown) => type === 0 ? tokenUnits(chainId, item.token, raw, true)
+    : type === 1 ? tokenUnits(chainId, item.token, raw) : String(raw)
+  const start = amount(item?.startAmount), end = amount(item?.endAmount)
+  const howMany = start === end ? start : `${start}, moving to ${end}`
+  switch (type) {
+    case 0: case 1: return howMany
+    case 2: return `ERC-721 #${item.identifierOrCriteria} of collection ${item.token}`
+    case 3: return `${howMany} × ERC-1155 #${item.identifierOrCriteria} of collection ${item.token}`
+    case 4: case 5: return `${howMany} × any ${type === 4 ? 'ERC-721' : 'ERC-1155'} of collection ${item.token} matching criteria ${item.identifierOrCriteria}`
+    default: return `unknown item type ${item?.itemType} (${JSON.stringify(item)})`
+  }
+}
+
+const SEAPORT_ORDER_TYPES = ['Full, open', 'Partial, open', 'Full, restricted by zone', 'Partial, restricted by zone', 'Contract order']
+
+function seaportOrderFields(msg: any, td: any): EIP712DecodedField[] {
+  const chainId = Number(td.domain.chainId)
+  const offerer = lower(msg.offerer)
+  const role = (r: string) => lower(r) === offerer ? ' (the offerer)' : lower(r) === OPENSEA_FEE_RECIPIENT ? ' (OpenSea fee)' : ''
+  const offer: any[] = Array.isArray(msg.offer) ? msg.offer : []
+  const consideration: any[] = Array.isArray(msg.consideration) ? msg.consideration : []
+  return [
+    { label: 'Offerer', value: formatValue(msg.offerer, 'address'), format: 'address', raw: msg.offerer },
+    ...offer.map((item, i): EIP712DecodedField => ({ label: `Offer ${i + 1}`, value: seaportItem(chainId, item), format: 'raw' })),
+    ...consideration.map((item, i): EIP712DecodedField => ({
+      label: `Payment ${i + 1}`, value: `${seaportItem(chainId, item)} to ${item.recipient}${role(item.recipient)}`, format: 'raw',
+    })),
+    { label: 'Order Type', value: SEAPORT_ORDER_TYPES[Number(msg.orderType)] ?? String(msg.orderType), format: 'raw' },
+    { label: 'Zone', value: formatValue(msg.zone, 'address'), format: 'address', raw: msg.zone },
+    { label: 'Starts', value: formatValue(msg.startTime, 'datetime'), format: 'datetime', raw: String(msg.startTime) },
+    { label: 'Ends', value: formatValue(msg.endTime, 'datetime'), format: 'datetime', raw: String(msg.endTime) },
+    { label: 'Conduit', value: lower(msg.conduitKey) === OPENSEA_CONDUIT_KEY ? `OpenSea conduit (${msg.conduitKey})` : String(msg.conduitKey), format: 'raw' },
+    { label: 'Salt', value: formatValue(msg.salt, 'raw'), format: 'raw', raw: String(msg.salt) },
+    { label: 'Counter', value: formatValue(msg.counter, 'raw'), format: 'raw', raw: String(msg.counter) },
+  ]
+}
+
+/** The order as a listing: only specific NFTs offered, and every payment in
+ *  one currency at a fixed price. Any other shape is left undefined. */
+function seaportListing(td: any): EIP712DecodedInfo['seaportListing'] {
+  const msg = td.message || {}
+  const chainId = Number(td.domain.chainId)
+  const offer: any[] = Array.isArray(msg.offer) ? msg.offer : []
+  const pay: any[] = Array.isArray(msg.consideration) ? msg.consideration : []
+  const fixed = (i: any) => toBig(i?.startAmount) !== undefined && toBig(i.startAmount) === toBig(i.endAmount)
+  if (offer.length === 0 || !offer.every((i) => (Number(i?.itemType) === 2 || Number(i?.itemType) === 3) && fixed(i))) return undefined
+  const type = Number(pay[0]?.itemType), token = lower(pay[0]?.token)
+  if (pay.length === 0 || (type !== 0 && type !== 1)
+    || !pay.every((i) => Number(i?.itemType) === type && lower(i?.token) === token && fixed(i) && /^0x[0-9a-fA-F]{40}$/.test(String(i?.recipient)))) return undefined
+  if (type === 0 && !/^0x0{40}$/.test(token)) return undefined
+  const offerer = lower(msg.offerer)
+  const units = (raw: bigint) => tokenUnits(chainId, pay[0].token, raw.toString(), type === 0)
+  return {
+    offerer: String(msg.offerer),
+    items: offer.map((i) => seaportItem(chainId, i)),
+    total: units(pay.reduce((sum, i) => sum + toBig(i.startAmount)!, 0n)),
+    payments: pay.map((i) => ({
+      recipient: String(i.recipient),
+      amount: units(toBig(i.startAmount)!),
+      role: lower(i.recipient) === offerer ? 'offerer' as const : lower(i.recipient) === OPENSEA_FEE_RECIPIENT ? 'opensea-fee' as const : 'other' as const,
+    })),
+    endTime: formatValue(msg.endTime, 'datetime'),
+  }
 }
 
 const KNOWN_DESCRIPTORS: KnownDescriptor[] = [
@@ -431,6 +580,20 @@ const KNOWN_DESCRIPTORS: KnownDescriptor[] = [
       { label: 'Allowed', value: formatValue(msg.allowed, 'raw'), format: 'raw' },
     ],
   },
+  // CoW Protocol GPv2 order, only at the pinned settlement contract.
+  {
+    match: isCowOrder,
+    operationName: 'CoW Protocol Order',
+    extract: cowOrderFields,
+  },
+  // Seaport 1.6 OrderComponents, only at the pinned Seaport deployment. A
+  // BulkOrder (a tree of orders) is not matched.
+  {
+    match: isSeaportOrder,
+    operationName: 'Seaport 1.6 Order',
+    extract: seaportOrderFields,
+    seaportListing,
+  },
 ]
 
 // ── Generic fallback ─────────────────────────────────────────────────────
@@ -487,7 +650,8 @@ function comparisonHashes(typedData: any): EIP712DecodedInfo['hashes'] {
   }
 }
 
-export function decodeEIP712(typedData: any): EIP712DecodedInfo {
+/** `signer` is the account asked to sign; a descriptor may name it "this wallet". */
+export function decodeEIP712(typedData: any, signer?: string): EIP712DecodedInfo {
   const domain = typedData.domain || {}
   const primaryType = typedData.primaryType || 'Unknown'
   const message = typedData.message || {}
@@ -496,6 +660,7 @@ export function decodeEIP712(typedData: any): EIP712DecodedInfo {
   // Try known descriptors first
   for (const desc of KNOWN_DESCRIPTORS) {
     if (desc.match(typedData)) {
+      const listing = desc.seaportListing?.(typedData)
       return {
         operationName: desc.operationName,
         domain: {
@@ -505,10 +670,11 @@ export function decodeEIP712(typedData: any): EIP712DecodedInfo {
           verifyingContract: domain.verifyingContract,
         },
         primaryType,
-        fields: desc.extract(message),
+        fields: desc.extract(message, typedData, signer),
         isKnownType: true,
         protocolIdentityVerified: desc.protocolIdentity ? desc.protocolIdentity(typedData, message) : true,
         hashes,
+        ...(listing ? { seaportListing: listing } : {}),
       }
     }
   }

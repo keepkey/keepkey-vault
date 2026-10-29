@@ -1533,6 +1533,10 @@ function getOrCreateWcManager(): WalletConnectManager {
 		addContractFacts: (info) => addContractFacts(info, engine.isPassphraseWallet ? undefined : engine.getDeviceState().deviceId, info.from),
 		requestSigningApproval: async (info) => {
 			attachSigningPolicySnapshot(info)
+			// Typed data gets a report level once the firmware version is known.
+			if (info.method === '/eth/sign-typed-data' && !info.clearSignReport) {
+				info.clearSignReport = (await import('./evm-presign-report')).buildTypedDataReport(info)
+			}
 			try { rpc.send['signing-request'](info) } catch { /* webview not ready */ }
 			acquireWindowFocus()
 			try {

@@ -13,7 +13,7 @@ import type { ClearSignEvent } from '../shared/types'
 import { createHash } from 'crypto'
 import { decodeEIP712 } from './eip712-decoder'
 import { evmPriorityFee, normalizeEvmChainId, recognizedTypedDataSpender, typedDataNativelyReviewed } from './evm-signing-preview'
-import { buildEvmReportForTx, evmSigningVerdict, prepareEvmTxSigningInfo, withoutErc7730Description } from './evm-presign-report'
+import { buildEvmReportForTx, buildTypedDataReport, evmSigningVerdict, prepareEvmTxSigningInfo, withoutErc7730Description } from './evm-presign-report'
 import { describeErc7730Call } from './erc7730-describe'
 import { signWithErc7730Fallback } from './erc7730-resolver'
 import { CHAINS, isChainSupported, hiveRolePath, evmChainLabel } from '../shared/chains'
@@ -1716,7 +1716,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               signingInfo.from = preview.address
               signingInfo.chainId = normalizeEvmChainId(preview.typedData?.domain?.chainId)
               if (preview.typedData) {
-                signingInfo.typedDataDecoded = decodeEIP712(preview.typedData)
+                signingInfo.typedDataDecoded = decodeEIP712(preview.typedData, preview.address)
                 signingInfo.recognizedSpender = recognizedTypedDataSpender(signingInfo.typedDataDecoded, signingInfo.chainId)
                 // hdwallet streams every document; the device reviews x402 and
                 // (7.16+) a canonical Permit2 PermitSingle natively. Anything
@@ -2072,6 +2072,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             signingInfo.needsBlindSigning = false
             signingInfo.requiresAdvancedMode = false
           }
+          // Typed data gets a report level the way a transaction does.
+          if (path === '/eth/sign-typed-data') signingInfo.clearSignReport = buildTypedDataReport(signingInfo)
           // Name the runtime provider the sign handler will ask, on the card,
           // before approval: its description is fetched only after approval,
           // and the handler attaches one only from the key named here.
