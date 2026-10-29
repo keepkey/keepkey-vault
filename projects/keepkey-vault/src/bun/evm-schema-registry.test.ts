@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'bun:test'
 import { findCertifiedEvmSchema, resolveEvmSchema } from './evm-schema-registry'
 import { buildTokenSchema } from './evm-token-schema'
-import { buildEvmSchemaBody } from './evm-certified-schema'
+import { buildEvmSchemaBody, evmEntryId, findCertifiedEvmSchemaSpec } from './evm-certified-schema'
 
 describe('findCertifiedEvmSchema', () => {
   it('leaves the live USDT approval to the device when its reviewed artifact is unavailable', async () => {
@@ -51,6 +51,27 @@ describe('findCertifiedEvmSchema', () => {
       expect(await findCertifiedEvmSchema(42161, contract, calldata)).toBeUndefined()
       globalThis.fetch = (async () => Response.json({ classification: 'OPAQUE', code: 'TOKEN_IDENTITY_UNVERIFIED' }, { status: 422 })) as typeof fetch
       expect(await findCertifiedEvmSchema(42161, contract, calldata)).toBeUndefined()
+    } finally { globalThis.fetch = originalFetch }
+  })
+
+  it('OpolisPay payPayroll sends only its token word and gets the entry pinned to that token', async () => {
+    const originalFetch = globalThis.fetch
+    const { calls } = require('../../__tests__/fixtures/clearsign-longtail/observed-calls.json')
+    const { chainId, to, data } = calls.find((c: any) => c.name.startsWith('OpolisPay'))
+    const spec = findCertifiedEvmSchemaSpec(chainId, to, data)!
+    const certificate = Buffer.alloc(139, 0x11)
+    certificate.writeUInt32BE(1, 2)
+    const signedPayload = `0x03${certificate.toString('hex')}${buildEvmSchemaBody(spec).toString('hex')}${'22'.repeat(65)}`
+    let sent: any
+    try {
+      globalThis.fetch = (async (_url: any, init: any) => {
+        sent = JSON.parse(init.body)
+        return Response.json({ classification: 'VERIFIED', keyId: 128, signedPayload, chainId, contract: to,
+          selector: '0x02d5f05f', method: 'payPayroll', expectedCalldataLength: 100, entry: evmEntryId(spec) })
+      }) as typeof fetch
+      expect((await findCertifiedEvmSchema(chainId, to, data))?.method).toBe('payPayroll')
+      expect(sent).toEqual({ chainId, contract: to, selector: '0x02d5f05f', calldataLength: 100,
+        token: '0xdac17f958d2ee523a2206206994597c13d831ec7' })
     } finally { globalThis.fetch = originalFetch }
   })
 
