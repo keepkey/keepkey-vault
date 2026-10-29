@@ -1161,6 +1161,13 @@ export interface SigningRequestInfo {
   /** Approval card only: the name and symbol the contract reports for
    *  itself. Any contract can claim any name, so it is never trust. */
   contractName?: { name: string; symbol: string }
+  /** Approval card only: a THORChain/Maya router deposit's vault, checked on
+   *  this computer against the network's active vaults (bun/thor-vaults.ts).
+   *  The device can only label the vault UNVERIFIED. */
+  thorVault?: ThorVaultCheck
+  /** Approval card only: a THORChain/Maya swap memo pays out to one of this
+   *  wallet's own addresses (true) or not (false). Absent = cannot tell. */
+  memoDestinationOwn?: boolean
   /** Certified metadata resolved before user approval. The signing handler
    *  reuses this exact envelope so approval and device review cannot drift. */
   certifiedEvmSchema?: {
@@ -1189,6 +1196,21 @@ export interface SigningRequestInfo {
   rawRequestBody?: Record<string, unknown>
   /** Vault-side prediction + authenticated-description boundary for this exact request. */
   clearSignReport?: import('./clearsign-report').ClearSignReport
+}
+
+/** current: every source lists this vault as an active Asgard vault that uses
+ *  this router on the chain. not-current: they agree it is not. unchecked: a
+ *  source did not answer, the sources disagree, or no vault list covers the chain. */
+export interface ThorVaultCheck {
+  status: 'current' | 'not-current' | 'unchecked'
+  protocol: 'THORChain' | 'Mayachain'
+  /** The network's name for the chain (ETH, BASE, ARB, ...). */
+  chain?: string
+  /** The router the active vault uses, when the deposit calls another. */
+  currentRouter?: string
+  /** How many sources were asked. */
+  sources: number
+  reason?: string
 }
 
 export interface TronTxPreview {

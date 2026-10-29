@@ -486,10 +486,13 @@ function thor714Confirms(data: string, chainId: number | undefined, selector: st
   const native = /^0{64}$/.test(data.slice(10 + 64, 10 + 128))
   return native || BigInt(`0x${data.slice(10 + 128, 10 + 192)}`) < 10n ** 28n
 }
-// Display-only: THORChain's Base router decodes for the overlay on every
-// firmware; whether it is native is decided by the tables above.
+// Display-only: THORChain's Base and BSC routers decode for the overlay on
+// every firmware; whether it is native is decided by the tables above. Each is
+// the router thornode publishes for that chain (GET /thorchain/inbound_addresses)
+// and has code on chain (eth_getCode, 2026-10-29).
 const THOR_ROUTER_DECODE_BY_CHAIN: Record<number, string> = {
   ...THOR_ROUTER_BY_CHAIN,
+  56: ADDR.THOR_ROUTER_BSC,
   8453: ADDR.THOR_ROUTER_AVAX,
 }
 
@@ -637,7 +640,8 @@ export async function decodeCalldata(
   if (THOR_MAYA_DEPOSIT.has(selector)) {
     const dest = contractAddress.toLowerCase()
     const thor = _chainId != null && THOR_ROUTER_DECODE_BY_CHAIN[_chainId] === dest
-    const maya = _chainId === 1 && (dest === ADDR.MAYA_ROUTER || dest === ADDR.MAYA_ROUTER_V4)
+    const maya = (_chainId === 1 && (dest === ADDR.MAYA_ROUTER || dest === ADDR.MAYA_ROUTER_V4))
+      || (_chainId === 42161 && dest === ADDR.MAYA_ROUTER_ARB) // mayanode's ARB router (GET /mayachain/inbound_addresses)
     const protocol = thor ? 'THORChain' : maya ? 'Mayachain' : null
     const fields = protocol ? thorDepositFields(data, _chainId, protocol) : null
     if (fields) return {

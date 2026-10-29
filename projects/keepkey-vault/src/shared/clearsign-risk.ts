@@ -22,10 +22,12 @@ import type {
   SimulatedHoldings,
   SolanaCertifiedArg,
   SolanaTxDecodedInstruction,
+  ThorVaultCheck,
 } from './types'
 import { versionCompare } from './firmware-versions'
 import { base64PayloadBytes, certifiedEnvelopeShown, evmSignedChainId as evmChainId } from './certified-evm-envelope'
 import { typedDataSpendAmounts } from './typedDataRows'
+import { cosmosDepositPreview } from './cosmosDepositPreview'
 
 export type RiskLevel = 'low' | 'medium' | 'high' | 'critical'
 export interface RiskReason { level: RiskLevel; text: string }
@@ -279,8 +281,8 @@ function evmTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void):
   const urSwap = field('Protocol') === 'Uniswap Universal Router' && field('Action')?.startsWith('Swap ')
     ? field('Action')!.replace(/^Swap /, 'Swaps ') : undefined
   const relay = decodeRelayDeposit(to, data, chainId)
-  const thorProtocol = req.calldataDecoded?.source === 'local' ? req.calldataDecoded.dappName : undefined
-  const thorSwap = (thorProtocol === 'THORChain' || thorProtocol === 'Mayachain') ? field('Action') : undefined
+  const thorProtocol = thorDepositProtocol(req)
+  const thorSwap = thorProtocol ? field('Action') : undefined
   // A standard token reverts a transfer/approve that carries native coin.
   const coinOnTokenCall = () => { if (sendsCoin) add('high', `Also sends ${native} to the token contract, which a token transfer or approval does not do.`) }
   if ((sel === '0x095ea7b3' || sel === '0x39509351') && addrWord(0) && num(1) !== null) {
@@ -345,13 +347,15 @@ function evmTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void):
   } else if (relay) {
     recognition = 'known'
     relayDeposit(relay, req, field('You send'), add)
-  } else if (thorSwap) {
-    recognition = 'known'
+  } else if (thorProtocol) {
+    recognition = thorSwap ? 'known' : 'unknown'
     // A fully decoded deposit to the router pinned for this chain is a normal
     // swap: say what it does, not "unknown contract".
-    add(req.deviceClearSigns ? 'low' : 'medium', req.deviceClearSigns
-      ? `${thorSwap}. Your KeepKey shows this deposit on its screen; check it there.`
-      : `${thorSwap}. ${notOnThisFirmware('this deposit', req.firmwareVersion)}`)
+    const what = thorSwap ?? `${thorProtocol} deposit of ${field('Input amount')} with memo "${field('Memo (exact)')}", an action this computer does not decode`
+    add(req.deviceClearSigns && thorSwap ? 'low' : 'medium', req.deviceClearSigns
+      ? `${what}. Your KeepKey shows this deposit on its screen; check it there.`
+      : `${what}. ${notOnThisFirmware('this deposit', req.firmwareVersion)}`)
+    thorVault(req.thorVault, thorProtocol, field('Vault') ?? '', String(req.to ?? ''), add)
   } else if (urSwap && !req.deviceClearSigns) {
     recognition = 'known'
     add('medium', `${urSwap} through the Uniswap Universal Router, a contract KeepKey has reviewed. ${notOnThisFirmware('this swap', req.firmwareVersion)}`)
@@ -393,13 +397,70 @@ function evmTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void):
     if (fee && Number(fee[1]) * 100 + Number(fee[2]) > 100) add('high', `${fee[1]}.${fee[2]}% of the swap output goes to ${fee[3]}, not to you.`)
     else if (fee) add('low', `Fee: ${fee[1]}.${fee[2]}% of the swap output goes to ${fee[3]}.`)
   }
-  if (thorSwap) {
-    const dest = field('Output destination')
-    if (from && dest && /^0x[0-9a-fA-F]{40}$/.test(dest) && dest.toLowerCase() !== from) {
-      add('high', `The swap pays out to ${dest}, which is NOT the account signing this (${from}).`)
-    }
-  }
+  if (thorSwap) thorDestination(req, field('Output destination'), field('Output chain'), from, add)
   return recognition
+}
+
+/** THORChain or Mayachain, when calldata-decoder named the router this deposit calls. */
+function thorDepositProtocol(req: SigningRequestInfo): 'THORChain' | 'Mayachain' | undefined {
+  const d = req.calldataDecoded
+  return d?.source === 'local' && (d.dappName === 'THORChain' || d.dappName === 'Mayachain') ? d.dappName : undefined
+}
+
+/** The vault a router deposit pays, against the network's active vaults
+ *  (bun/thor-vaults.ts). Advice: the device labels every vault UNVERIFIED. */
+function thorVault(c: ThorVaultCheck | undefined, protocol: string, vault: string, router: string, add: (l: RiskLevel, t: string) => void) {
+  const name = protocol === 'Mayachain' ? 'Maya' : protocol
+  if (c?.status === 'current') {
+    add('low', `Pays vault ${vault}, one of ${name}'s active ${c.chain} vaults in all ${c.sources} ${name} sources this computer asked. Your KeepKey cannot check vaults itself, so it labels this one UNVERIFIED.`)
+  } else if (c?.status === 'not-current') {
+    add('critical', c.currentRouter !== undefined
+      ? `Calls router ${router}, but ${name}'s vault ${vault} uses router ${c.currentRouter || '(none)'} on ${c.chain}. A normal ${name} app does not do this.`
+      : `Pays vault ${vault}, which is NOT one of ${name}'s active ${c.chain} vaults. Funds sent to a wrong or retired vault can be lost. A normal ${name} app does not do this.`)
+  } else {
+    add('medium', `This computer could not check vault ${vault} against ${name}'s active vaults${c?.reason ? ` (${c.reason})` : ''}, and your KeepKey cannot check vaults itself.`)
+  }
+}
+
+/** Where a THORChain/Maya swap memo pays out. `from` is the EVM signer, or
+ *  undefined when the deposit is not from an EVM account. */
+function thorDestination(req: SigningRequestInfo, dest: string | undefined, chain: string | undefined, from: string | undefined, add: (l: RiskLevel, t: string) => void) {
+  // A memo may name a refund address after the payout one: DEST/REFUND.
+  dest = dest?.split('/')[0]
+  if (!dest || dest === 'self') return
+  const on = chain ? ` on ${chain}` : ''
+  const evm = /^0x[0-9a-fA-F]{40}$/.test(dest)
+  if (req.memoDestinationOwn === true || (from && evm && dest.toLowerCase() === from)) {
+    add('low', `The swap pays out to ${dest}${on}, one of your own addresses.`)
+  } else if (from && evm) {
+    add('high', `The swap pays out to ${dest}, which is NOT the account signing this (${from}).`)
+  } else if (req.memoDestinationOwn === false) {
+    add('high', `The swap pays out to ${dest}${on}, which is NOT one of this wallet's addresses.`)
+  } else {
+    add('medium', `This computer cannot tell whether ${dest}${on} is your address. Check it on your KeepKey screen.`)
+  }
+}
+
+/** A native THORChain/Maya MsgDeposit. The device parses a swap memo and shows
+ *  its terms, or shows the memo itself; there is no vault to check. */
+function nativeThorDeposit(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void): Recognition {
+  const chain = req.method === '/thorchain/sign-amino-deposit' ? 'THORChain' : 'Maya'
+  const p = cosmosDepositPreview(req.rawRequestBody, chain)
+  if (!p) {
+    add('high', `This computer cannot read this ${chain} deposit. Read it on your KeepKey screen.`)
+    return 'unknown'
+  }
+  const sent = `${p.inputAmount} ${p.inputAsset}`
+  if (p.warning.includes('differ')) add('high', 'This deposit carries two different memos. A normal app sends the same memo in both places.')
+  if (!p.outputAsset || !p.destination) {
+    add('medium', `Deposits ${sent} to ${chain} with memo "${p.memo}", an action this computer does not decode. Read the memo on your KeepKey screen.`)
+    return 'known'
+  }
+  const noMinimum = p.minimum === 'NO MINIMUM IN SIGNED MEMO'
+  add('low', `Swap ${sent} for ${noMinimum ? `${p.outputAsset} with NO MINIMUM` : `at least ${p.minimum}`} via ${chain}. Your KeepKey shows this swap on its screen; check it there.`)
+  if (noMinimum) add('high', 'Sets no minimum, so this swap can pay you back almost nothing.')
+  thorDestination(req, p.destination, p.outputAsset.split('.')[0], undefined, add)
+  return 'shows'
 }
 
 /** A deposit to the Relay Depository. The calldata names what is sent and
@@ -714,8 +775,11 @@ export function assessSigningRisk(req: SigningRequestInfo): RiskAssessment | nul
     }
   } else if (req.method === '/eth/sign-transaction') {
     recognition = evmTx(req, add)
-    // The device verifies a KeepKey-certified description and shows it.
-    if (req.deviceClearSigns || req.certifiedEvmSchema || certifiedBlobShown(req) || req.erc7730) recognition = 'shows'
+    // The device verifies a KeepKey-certified description and shows it. It
+    // shows a THORChain/Maya vault only as UNVERIFIED: shown once this computer
+    // has matched it to one of the network's active vaults.
+    const shown = req.deviceClearSigns || req.certifiedEvmSchema || certifiedBlobShown(req) || req.erc7730
+    if (shown && (!thorDepositProtocol(req) || req.thorVault?.status === 'current')) recognition = 'shows'
     if (reasons.length === 0) add('low', 'Your KeepKey decodes this call on its screen. Check the recipient and amount there.')
     // A verified human rating can only add a reason, so it can only raise the level.
     const rating = req.clearSignReport?.rating
@@ -727,6 +791,8 @@ export function assessSigningRisk(req: SigningRequestInfo): RiskAssessment | nul
     recognition = evmTypedData(req, add)
   } else if (req.method === '/eth/sign') {
     recognition = evmMessage(req, add)
+  } else if (req.method === '/thorchain/sign-amino-deposit' || req.method === '/mayachain/sign-amino-deposit') {
+    recognition = nativeThorDeposit(req, add)
   } else if (req.solanaDecodeError || /^\/solana\/sign-(transaction|and-send)/.test(req.method)) {
     add('high', 'KeepKey cannot read this transaction at all. You would be signing blind.')
   } else {
