@@ -461,18 +461,34 @@ function acrossDeposit(d: AcrossDepositV3, req: SigningRequestInfo, add: (l: Ris
 
 /** What a SafeTx does, from its own fields. Shared by a request to sign the
  *  SafeTx and by a 32-byte hash of it Desktop matched (safeHashLink), so both
- *  read the same. Returns true when the call inside is opaque. */
-function safeTxReasons(d: NonNullable<SigningRequestInfo['typedDataDecoded']>, add: (l: RiskLevel, t: string) => void): boolean {
+ *  read the same. `hashOnly`: the KeepKey sees only that hash, not the fields.
+ *  `method`: the inner call's name, when Desktop decoded it.
+ *  Returns 'opaque' when this computer cannot say what the transaction does,
+ *  'known' when it decodes the call inside, 'plain' when there is no call. */
+function safeTxReasons(d: NonNullable<SigningRequestInfo['typedDataDecoded']>, add: (l: RiskLevel, t: string) => void,
+  hashOnly = false, method?: string): 'opaque' | 'known' | 'plain' {
   const f = (label: string) => d.fields.find((x) => x.label === label)
-  let opaque = false
-  if (!/^(0x)?$/.test(String(f('Data')?.raw ?? ''))) {
-    // The device decodes only an embedded approve and warns on delegatecall;
-    // any other call inside a Safe transaction shows as hex, and so it is here.
-    opaque = true
-    const to = f('To')?.raw || 'another contract'
-    add('high', f('Operation')?.raw === '1'
-      ? `Runs code from ${to} inside your Safe (delegatecall). That code can do anything with what the Safe holds.`
-      : `Makes your Safe call ${to} with data this computer cannot read. Your KeepKey shows that data only as raw hex.`)
+  const to = f('To')?.raw || 'another contract'
+  const data = String(f('Data')?.raw ?? '').toLowerCase()
+  let what: 'opaque' | 'known' | 'plain' = /^(0x)?$/.test(data) ? 'plain' : 'opaque'
+  if (f('Operation')?.raw === '1') {
+    // A delegatecall runs `to`'s code as the Safe itself, with or without
+    // data: empty data still runs its fallback.
+    what = 'opaque'
+    add('high', `Runs code from ${to} inside your Safe (delegatecall). That code can do anything with what the Safe holds.`)
+  } else if (what === 'opaque') {
+    // The device decodes only an embedded approve; any other call inside a
+    // Safe transaction shows as hex. A plain transfer of a token this
+    // computer knows is decoded here, the way evmTx decodes it.
+    const token = EVM_TOKENS[`${Number(d.domain.chainId)}:${to.toLowerCase()}`]
+    const transfer = /^0xa9059cbb0{24}([0-9a-f]{40})([0-9a-f]{64})$/.exec(data)
+    const onDevice = hashOnly ? 'Your KeepKey shows only the 32-byte hash' : 'Your KeepKey shows this call only as raw hex'
+    if (token && transfer && /^(0x)?0*$/.test(String(f('Value')?.raw ?? '0'))) {
+      what = 'known'
+      add('medium', `Makes your Safe send ${units(BigInt(`0x${transfer[2]}`).toString(), token.decimals)} ${token.symbol} to 0x${transfer[1]}. ${onDevice}, so check it here.`)
+    } else {
+      add('high', `Makes your Safe call ${method ? `${method} on ` : ''}${to}${method ? ', a call this computer does not check' : ' with data this computer cannot read'}. ${hashOnly ? `${onDevice}.` : 'Your KeepKey shows that data only as raw hex.'}`)
+    }
   }
   // Safe pays gasPrice × gas in gasToken to refundReceiver when this executes.
   // Safe{Wallet} leaves all three at zero, so a set refund is a hidden payout.
@@ -480,7 +496,7 @@ function safeTxReasons(d: NonNullable<SigningRequestInfo['typedDataDecoded']>, a
   if (set('Gas Price') || set('Gas Token') || set('Refund Receiver')) {
     add('high', `Pays a gas refund out of your Safe when it is executed, to ${set('Refund Receiver') ? f('Refund Receiver')!.raw : 'whoever executes it'}. Normal Safe transactions leave the refund at zero.`)
   }
-  return opaque
+  return what
 }
 
 /** A 32-byte value Safe counts as this owner's confirmation (a personal_sign
@@ -492,7 +508,7 @@ function safeHashLinked(req: SigningRequestInfo, onChain: boolean, add: (l: Risk
   const what = onChain ? 'This on-chain approval' : 'This signature'
   if (link.status === 'match') {
     add('medium', `${onChain ? 'Permanently approves' : 'Approves'} Safe transaction #${link.nonce} of your Safe ${link.safe} on ${link.chainName}: ${link.summary}.`)
-    return safeTxReasons(link.safeTx, add) ? 'unknown' : 'known'
+    return safeTxReasons(link.safeTx, add, true, link.method) === 'opaque' ? 'unknown' : 'known'
   }
   const risk = `${what} counts as your confirmation of whichever Safe transaction has this hash${onChain ? ', and it cannot be withdrawn once mined' : ''}.`
   add('high', link.status === 'no-match'
@@ -518,6 +534,7 @@ function evmTypedData(req: SigningRequestInfo, add: (l: RiskLevel, t: string) =>
   let knownCalm = false
   // The meaning sits in bytes the device shows only as raw hex.
   let opaque = false
+  let innerKnown = false
   const delegate = f('Agent Address')?.raw ?? f('Delegate')?.raw ?? f('Session Key')?.raw
   if (/ApproveAgent$/.test(d.primaryType) || delegate) {
     // Owner rule: handing over signing power is never a normal request.
@@ -525,7 +542,11 @@ function evmTypedData(req: SigningRequestInfo, add: (l: RiskLevel, t: string) =>
       && /^0x(ff){32}$/i.test(String(f('Authority')?.raw ?? ''))
     add(unlimited ? 'critical' : 'high', `Gives ${delegate || 'another account'} the power to act for your account. It can then sign without your KeepKey.${unlimited ? ' There are no limits on what it can do.' : ''}`)
   } else if (d.primaryType === 'SafeTx') {
-    opaque = safeTxReasons(d, add)
+    const decoded = req.calldataDecoded && req.calldataDecoded.source !== 'none' ? req.calldataDecoded.method : undefined
+    const inner = safeTxReasons(d, add, false, decoded)
+    opaque = inner === 'opaque'
+    // A call Desktop decodes, which the device shows only as hex: known, not shown.
+    knownCalm = innerKnown = inner === 'known'
   } else if (d.primaryType === 'SafeMessage') {
     // EIP-1271: the Safe treats this as its own signature, for any permit or
     // order the app hashed into it. The device shows only that hash.
@@ -591,7 +612,7 @@ function evmTypedData(req: SigningRequestInfo, add: (l: RiskLevel, t: string) =>
   } else {
     add('high', 'Your KeepKey can only show a code (hash) for this signature, not what it says. You would be signing blind.')
   }
-  return opaque ? 'unknown' : structured ? 'shows' : knownCalm ? 'known' : 'unknown'
+  return opaque ? 'unknown' : structured ? (innerKnown ? 'known' : 'shows') : knownCalm ? 'known' : 'unknown'
 }
 
 function evmMessage(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void): Recognition {

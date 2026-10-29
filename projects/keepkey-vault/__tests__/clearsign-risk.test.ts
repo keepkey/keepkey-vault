@@ -592,10 +592,18 @@ describe('message verdicts', () => {
       },
       message: { value: '0', safeTxGas: 0, baseGas: 0, gasPrice: 0, gasToken: '0x' + '0'.repeat(40), refundReceiver: '0x' + '0'.repeat(40), nonce: 3, ...msg },
     })
-    const transfer = '0xa9059cbb' + EVIL.slice(2).padStart(64, '0') + (10n ** 12n).toString(16).padStart(64, '0')
-    const call = typed(safeTx({ to: USDC, data: transfer, operation: 0 }))
+    const call = typed(safeTx({ to: EVIL, data: '0x12345678', operation: 0 }))
     expect(call.tier).toBe('red')
     expect(text(call)).toContain('Your KeepKey shows that data only as raw hex')
+    // A USDC transfer this computer decodes is known, not red; the device still shows it as hex.
+    const transfer = '0xa9059cbb' + EVIL.slice(2).padStart(64, '0') + (10n ** 12n).toString(16).padStart(64, '0')
+    const usdc = typed(safeTx({ to: USDC, data: transfer, operation: 0 }))
+    expect(usdc.tier).toBe('yellow')
+    expect(text(usdc)).toContain(`Makes your Safe send 1,000,000 USDC to ${EVIL}. Your KeepKey shows this call only as raw hex, so check it here.`)
+    // A delegatecall with no data still runs the target's code inside the Safe.
+    const bareDelegate = typed(safeTx({ to: EVIL, data: '0x', operation: 1 }))
+    expect(bareDelegate.tier).toBe('red')
+    expect(text(bareDelegate)).toContain(`Runs code from ${EVIL} inside your Safe (delegatecall).`)
     const delegatecall = typed(safeTx({ to: EVIL, data: '0x12345678', operation: 1 }))
     expect(delegatecall.tier).toBe('red')
     expect(text(delegatecall)).toContain('(delegatecall)')

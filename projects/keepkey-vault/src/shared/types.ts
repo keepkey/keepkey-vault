@@ -1092,9 +1092,10 @@ export interface SafeVetting {
 
 /** What Desktop found for a 32-byte value Safe would count as an owner's
  *  confirmation. `safeTx` is that SafeTx decoded the way a dapp's SafeTx
- *  signature request is, so it gets the same risk lines. */
+ *  signature request is, so it gets the same risk lines; `method` names the
+ *  call inside it when Desktop decoded that call. */
 export type SafeHashLink =
-  | { status: 'match'; chainId: number; chainName: string; safe: string; nonce: string; summary: string; safeTx: EIP712DecodedInfo }
+  | { status: 'match'; chainId: number; chainName: string; safe: string; nonce: string; summary: string; safeTx: EIP712DecodedInfo; method?: string }
   | { status: 'no-match'; safes: string[] }
   | { status: 'unchecked'; error: string }
 

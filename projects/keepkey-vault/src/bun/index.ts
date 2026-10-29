@@ -7290,12 +7290,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			safePending: async (params) => {
 				const { readSafe, pendingSafeTxs } = await import('./safe')
-				const { reviewSafeTx } = await import('./safe-review')
+				const { withRisk } = await import('./safe-review')
 				const info = await readSafe(params.chainId, params.address)
 				// The same risk lines a dapp's request to sign each SafeTx would get.
-				const firmwareVersion = engine.getDeviceState().firmwareVersion
-				const pending = (await pendingSafeTxs(info)).map(tx => ({ ...tx, risk: reviewSafeTx(info, tx, { firmwareVersion }).risk }))
-				return { info, pending }
+				return { info, pending: withRisk(info, await pendingSafeTxs(info), engine.getDeviceState().firmwareVersion) }
 			},
 			safeCreatePlan: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')

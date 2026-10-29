@@ -1,0 +1,36 @@
+{
+  "_source": {
+    "safeTx": "https://api.safe.global/tx-service/eth/api/v1/multisig-transactions/0xe7ea6f2169aee758f62c57117a040970168d27beb1a22cb220ee38397401c0e7/ (recorded 2026-10-29; executed in 0x05d24c35cbe7617193de0664aae3ad16ed62592f5f412bda2de07e10778b5fc2)",
+    "safe": "https://api.safe.global/tx-service/eth/api/v1/safes/0xde21F729137C5Af1b01d73aF1dC21eFfa2B8a0d6/ (Gitcoin multisig; recorded 2026-10-29; eth_getCode non-empty on https://ethereum-rpc.publicnode.com)"
+  },
+  "chainId": 1,
+  "safe": {
+    "address": "0xde21F729137C5Af1b01d73aF1dC21eFfa2B8a0d6",
+    "version": "1.3.0",
+    "threshold": 4,
+    "owners": [
+      "0x7904667C340601AaB73939372C016dC5102732A2",
+      "0xd58bB7Ae72B5b2FDc980C908baB75013a3628820",
+      "0x0EdEeA07FB4E700a2A502FDB43414Bde3c75F8ee",
+      "0x00De4B13153673BCAE2616b67bf822500d325Fc3",
+      "0x5a5D9aB7b1bD978F80909503EBb828879daCa9C3",
+      "0x393BC37ea5493233D2bDC68FD59Dd97Ee01B18Cf",
+      "0xc2E2B715d9e302947Ec7e312fd2384b5a1296099"
+    ],
+    "masterCopy": "0xd9Db270c1B5E3Bd161E8c8503c55cEABeE709552"
+  },
+  "safeTx": {
+    "to": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+    "value": "0",
+    "data": "0xa9059cbb000000000000000000000000180f57e672898a973836c507cbba0e77983b5b6800000000000000000000000000000000000000000000000000000005cc27d900",
+    "operation": 0,
+    "safeTxGas": "0",
+    "baseGas": "0",
+    "gasPrice": "0",
+    "gasToken": "0x0000000000000000000000000000000000000000",
+    "refundReceiver": "0x0000000000000000000000000000000000000000",
+    "nonce": "292",
+    "safeTxHash": "0xe7ea6f2169aee758f62c57117a040970168d27beb1a22cb220ee38397401c0e7",
+    "submissionDate": "2026-09-28T19:56:30.043086Z"
+  }
+}

@@ -10,7 +10,8 @@
  *
  * Fixtures are real: the Safe DAO treasury's nonce-76 SafeTx (a delegatecall
  * to MultiSendCallOnly), a real approveHash transaction with the SafeTx it
- * approved, and a real Safe creation. The Safe service and chain reads are
+ * approved, Gitcoin's nonce-292 SafeTx (a USDC transfer), and a real Safe
+ * creation. The Safe service and chain reads are
  * served from those fixtures; the database is a fresh file in a temp dir.
  */
 import { afterAll, beforeAll, describe, expect, mock, test } from 'bun:test'
@@ -22,6 +23,7 @@ import { ethers } from 'ethers'
 import safedao from './fixtures/safe/safedao-nonce76.json'
 import approved from './fixtures/safe/approvehash-22681.json'
 import created from './fixtures/safe/create-385e.json'
+import usdcFx from './fixtures/safe/usdc-transfer-292.json'
 import { assessSigningRisk } from '../src/shared/clearsign-risk'
 import type { PendingSafeTx, SafeInfo, SigningRequestInfo } from '../src/shared/types'
 
@@ -30,7 +32,8 @@ const dir = mkdtempSync(join(tmpdir(), 'vault-safe-clearsign-'))
 mock.module('electrobun/bun', () => ({ Utils: { paths: { userData: dir } } }))
 const db = await import('../src/bun/db')
 const { startRestApi } = await import('../src/bun/rest-api')
-const { reviewSafeTx, confirmSafeTx, observedSign, safeHashLink } = await import('../src/bun/safe-review')
+const { reviewSafeTx, confirmSafeTx, observedSign, safeHashLink, withRisk } = await import('../src/bun/safe-review')
+const { decodeCalldata } = await import('../src/bun/calldata-decoder')
 const { safeTxHash, safeTypedData } = await import('../src/bun/safe-core')
 const { decodeEIP712 } = await import('../src/bun/eip712-decoder')
 const { observeEvmCall } = await import('../src/bun/clearsign-observation')
@@ -78,20 +81,40 @@ const ahInfo: SafeInfo = { chainId: 1, address: ethers.utils.getAddress(ah.safe.
 const ahPending = pending(ahInfo, ah.safeTx)
 // A mutant of the real Safe DAO transaction with a gas refund set (no real refund capture found).
 const refundTx = { ...daoTx, gasPrice: '20000000000', refundReceiver: '0x2222222222222222222222222222222222222222' }
+// A mutant of it that delegatecalls with no data: Safe still runs the target's fallback as itself.
+const bareDelegate = pending(daoInfo, { ...daoTx, data: '0x', operation: 1 })
+// Gitcoin's real USDC payment, decoded the way safe.ts pendingSafeTxs decodes it.
+const usdcInfo: SafeInfo = { chainId: 1, address: usdcFx.safe.address, owners: usdcFx.safe.owners, threshold: usdcFx.safe.threshold, nonce: Number(usdcFx.safeTx.nonce), version: usdcFx.safe.version, vetting: { codeProblem: null, extensions: [] } }
+const usdcPending: PendingSafeTx = { ...pending(usdcInfo, usdcFx.safeTx), decoded: await decodeCalldata(usdcFx.safeTx.to, usdcFx.safeTx.data, 1, usdcFx.safeTx.value) }
+const ahDecoded: PendingSafeTx = { ...ahPending, decoded: await decodeCalldata(ahPending.to, ahPending.data!, 1, ahPending.value) }
 
 const texts = (r: { reasons: { text: string }[] } | null) => (r?.reasons ?? []).map(x => x.text)
 
 describe('G22: the panel reviews a SafeTx as a dapp request', () => {
-  test('both real fixtures recompute to the hash Safe published', () => {
+  test('the real fixtures recompute to the hash Safe published', () => {
     expect(daoPending.hashMatches).toBe(true)
     expect(ahPending.hashMatches).toBe(true)
+    expect(usdcPending.hashMatches).toBe(true)
   })
 
-  test('the Safe DAO delegatecall gets the dapp card\'s exact risk', () => {
-    const { risk } = reviewSafeTx(daoInfo, daoPending, { firmwareVersion: '7.16.0' })
-    const dapp = assessSigningRisk({ id: 'd', method: '/eth/sign-typed-data', appName: 'dapp', chainId: 1, firmwareVersion: '7.16.0', typedDataDecoded: decodeEIP712(safeTypedData(1, daoTx.safe, daoTx.version, daoPending)) })
-    expect(risk).toEqual(dapp)
-    expect(texts(risk)).toContain('Runs code from 0x40A2aCCbd92BCA938b02010E17A5b8929b49130D inside your Safe (delegatecall). That code can do anything with what the Safe holds.')
+  test('the panel\'s pending list: each SafeTx carries its own risk lines', () => {
+    const [dao, usdc] = withRisk(daoInfo, [daoPending, usdcPending], '7.16.0')
+    expect(dao.risk).toMatchObject({ tier: 'red', level: 'high' })
+    expect(texts(dao.risk!)[0]).toBe('Runs code from 0x40A2aCCbd92BCA938b02010E17A5b8929b49130D inside your Safe (delegatecall). That code can do anything with what the Safe holds.')
+    // The most common Safe transaction, a token payment, is known and calm.
+    expect(usdc.risk).toMatchObject({ tier: 'yellow', level: 'medium' })
+    expect(texts(usdc.risk!)).toContain('Makes your Safe send 24,900 USDC to 0x180f57e672898a973836c507cbba0e77983b5b68. Your KeepKey shows this call only as raw hex, so check it here.')
+  })
+
+  test('a dapp\'s SafeTx request reads the same: a delegatecall with no data is red', () => {
+    const dapp = (tx: PendingSafeTx, info: SafeInfo) => assessSigningRisk({ id: 'd', method: '/eth/sign-typed-data', appName: 'dapp', chainId: 1, firmwareVersion: '7.16.0', typedDataDecoded: decodeEIP712(safeTypedData(1, info.address, info.version, tx)) })!
+    const bare = dapp(bareDelegate, daoInfo)
+    expect(bare.tier).toBe('red')
+    expect(texts(bare)).toContain('Runs code from 0x40A2aCCbd92BCA938b02010E17A5b8929b49130D inside your Safe (delegatecall). That code can do anything with what the Safe holds.')
+    expect(dapp(usdcPending, usdcInfo).tier).toBe('yellow')
+    // CONTROL: the same transfer to a token this computer does not know stays red.
+    const unknownToken = { ...usdcFx.safeTx, to: '0x2222222222222222222222222222222222222222' }
+    expect(dapp(pending(usdcInfo, unknownToken), usdcInfo).tier).toBe('red')
   })
 
   test('a gas refund and an unreadable inner call each get their line', () => {
@@ -148,14 +171,15 @@ const lookupDeps = (opts: { fail?: boolean } = {}) => ({
   ownedSafes: async (chainId: number, owner: string) => {
     if (opts.fail) throw new Error('Safe Transaction Service HTTP 503')
     if (chainId !== 1) return []
-    return [daoInfo, ahInfo].filter(i => i.owners.some(o => o.toLowerCase() === owner.toLowerCase())).map(i => i.address)
+    return [daoInfo, ahInfo, usdcInfo].filter(i => i.owners.some(o => o.toLowerCase() === owner.toLowerCase())).map(i => i.address)
   },
   readSafe: async (_c: number, address: string) => {
-    const info = [daoInfo, ahInfo].find(i => i.address.toLowerCase() === address.toLowerCase())
+    const info = [daoInfo, ahInfo, usdcInfo].find(i => i.address.toLowerCase() === address.toLowerCase())
     if (!info) throw new Error('call reverted')
     return info
   },
-  pendingSafeTxs: async (info: SafeInfo) => info.address === daoInfo.address ? [daoPending] : [ahPending],
+  pendingSafeTxs: async (info: SafeInfo) => info.address === daoInfo.address ? [daoPending, bareDelegate]
+    : info.address === usdcInfo.address ? [usdcPending] : [ahDecoded],
 })
 
 async function restCard(path: '/eth/sign' | '/eth/sign-transaction', body: any, from: string, deps = lookupDeps()): Promise<SigningRequestInfo> {
@@ -219,10 +243,49 @@ describe('G12: personal_sign of a safeTxHash', () => {
     expect(assessSigningRisk(card)!.tier).toBe('red')
   }, 30_000)
 
+  test('a delegatecall with no data is named as one and reads red', async () => {
+    const card = await restCard('/eth/sign', { address: DAO_OWNER, message: bareDelegate.safeTxHash }, DAO_OWNER)
+    expect(card.safeHashLink).toMatchObject({ status: 'match', nonce: '76', summary: 'delegatecall to 0x40A2aCCbd92BCA938b02010E17A5b8929b49130D with no data' })
+    const risk = assessSigningRisk(card)!
+    expect(risk.tier).toBe('red')
+    expect(texts(risk)[0]).toBe('Runs code from 0x40A2aCCbd92BCA938b02010E17A5b8929b49130D inside your Safe (delegatecall). That code can do anything with what the Safe holds.')
+  }, 30_000)
+
+  test('a Safe USDC payment reads known, not red', async () => {
+    const owner = ethers.utils.getAddress(usdcInfo.owners[0])
+    const card = await restCard('/eth/sign', { address: owner, message: usdcFx.safeTx.safeTxHash }, owner)
+    expect(card.safeHashLink).toMatchObject({ status: 'match', nonce: '292', method: 'transfer' })
+    const risk = assessSigningRisk(card)!
+    expect(risk.tier).toBe('yellow')
+    expect(texts(risk)).toContain('Makes your Safe send 24,900 USDC to 0x180f57e672898a973836c507cbba0e77983b5b68. Your KeepKey shows only the 32-byte hash, so check it here.')
+  }, 30_000)
+
   test('text that is not 32 bytes is never looked up', async () => {
     const card = await restCard('/eth/sign', { address: DAO_OWNER, message: ethers.utils.hexlify(ethers.utils.toUtf8Bytes('Sign in to example.com')) }, DAO_OWNER)
     expect(card.safeHashLink).toBeUndefined()
   }, 30_000)
+})
+
+describe('finding the Safe: one slow or failing chain', () => {
+  const req = (from: string, message: string): SigningRequestInfo => ({ id: 'l', method: '/eth/sign', appName: 'dapp', from, ethMessageDecoded: { messageRaw: message } as any })
+  const base = lookupDeps()
+
+  test('a chain whose service fails, with no Safe on any other: no link, the generic line', async () => {
+    const deps = { ...base, ownedSafes: async (c: number, o: string) => { if (c === 8453) throw new Error('HTTP 429'); return base.ownedSafes(c, o) } }
+    expect(await safeHashLink(req(STRANGER, daoTx.safeTxHash), deps)).toBeUndefined()
+  })
+
+  test('a chain that never answers does not hold the card for the full timeout', async () => {
+    const deps = { ...base, ownedSafes: (c: number, o: string) => c === 8453 ? new Promise<string[]>(() => {}) : base.ownedSafes(c, o) }
+    const started = Date.now()
+    expect(await safeHashLink(req(STRANGER, daoTx.safeTxHash), deps, 12_000, 100)).toBeUndefined()
+    expect(Date.now() - started).toBeLessThan(2_000)
+  })
+
+  test('one Safe that cannot be read does not hide the match in another', async () => {
+    const deps = { ...base, ownedSafes: async (c: number) => c === 1 ? ['0x3333333333333333333333333333333333333333', daoInfo.address] : [] }
+    expect(await safeHashLink(req(DAO_OWNER, daoTx.safeTxHash), deps)).toMatchObject({ status: 'match', nonce: '76' })
+  })
 })
 
 describe('G21: approveHash to a Safe', () => {
@@ -235,6 +298,10 @@ describe('G21: approveHash to a Safe', () => {
     expect(lines.some(t => t.startsWith(`Permanently approves Safe transaction #22681 of your Safe ${ahInfo.address} on Ethereum: call to 0x36c6C69A6186D4475fc5c21181CD980Bd6E5e11F.`))).toBe(true)
     expect(lines.some(t => t.startsWith('Once mined, this approval cannot be withdrawn'))).toBe(true)
     expect(lines.some(t => t.includes('You would be signing blind'))).toBe(false)
+    // Its inner call is one Desktop really cannot read, so it stays red; the
+    // device sees only the 32-byte hash, not raw hex of the call.
+    expect(risk.tier).toBe('red')
+    expect(lines).toContain('Makes your Safe call 0x36c6C69A6186D4475fc5c21181CD980Bd6E5e11F with data this computer cannot read. Your KeepKey shows only the 32-byte hash.')
   }, 30_000)
 
   test('CONTROL: an approveHash of a hash the Safe has not proposed reads red and permanent', async () => {

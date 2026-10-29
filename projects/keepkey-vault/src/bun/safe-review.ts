@@ -12,7 +12,7 @@ import { assessSigningRisk } from '../shared/clearsign-risk'
 import { evmChainLabel } from '../shared/chains'
 import { evmNativeValue } from '../shared/evmFeePreview'
 import { deviceErrorMessage } from '../shared/device-error'
-import type { ClearSignObservationDraft, ClearSignObservationOutcome, PendingSafeTx, SafeHashLink, SafeInfo, SigningRequestInfo } from '../shared/types'
+import type { CalldataDecodedInfo, ClearSignObservationDraft, ClearSignObservationOutcome, PendingSafeTx, SafeHashLink, SafeInfo, SigningRequestInfo } from '../shared/types'
 import { decodeEIP712 } from './eip712-decoder'
 import { observeEvmTypedData } from './clearsign-observation'
 import { safeTypedData, safeSignature, checkConfirmation, type SafeTxFields } from './safe-core'
@@ -20,13 +20,19 @@ import { safeTypedData, safeSignature, checkConfirmation, type SafeTxFields } fr
 const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase()
 
 /** The document the KeepKey signs for this SafeTx, and the risk lines a dapp's request to sign it gets. */
-export function reviewSafeTx(info: SafeInfo, tx: SafeTxFields, ctx: { from?: string; firmwareVersion?: string }) {
+export function reviewSafeTx(info: SafeInfo, tx: SafeTxFields & { decoded?: CalldataDecodedInfo | null }, ctx: { from?: string; firmwareVersion?: string }) {
   const typedData = safeTypedData(info.chainId, info.address, info.version, tx)
   const risk = assessSigningRisk({
     id: 'safe-panel', method: '/eth/sign-typed-data', appName: 'KeepKey Desktop', chain: 'eth',
     from: ctx.from, chainId: info.chainId, firmwareVersion: ctx.firmwareVersion, typedDataDecoded: decodeEIP712(typedData),
+    calldataDecoded: tx.decoded ?? undefined,
   })
   return { typedData, risk }
+}
+
+/** The panel's pending list, each SafeTx carrying the risk lines reviewSafeTx gives it. */
+export function withRisk(info: SafeInfo, pending: PendingSafeTx[], firmwareVersion?: string): PendingSafeTx[] {
+  return pending.map(tx => ({ ...tx, risk: reviewSafeTx(info, tx, { firmwareVersion }).risk }))
 }
 
 export interface ObservationSink {
@@ -103,19 +109,25 @@ export interface SafeLookupDeps {
   pendingSafeTxs: (info: SafeInfo) => Promise<PendingSafeTx[]>
 }
 
+/** The inner call's name, when Desktop decoded it (decodeCalldata says 'none' otherwise). */
+const decodedMethod = (tx: PendingSafeTx) => tx.decoded && tx.decoded.source !== 'none' ? tx.decoded.method : undefined
+
 function summarize(info: SafeInfo, tx: PendingSafeTx): string {
   const value = BigInt(tx.value || '0') > 0n ? evmNativeValue(tx.value, info.chainId) : null
   const to = same(tx.to, info.address) ? `the Safe itself (${tx.to})` : tx.to
-  if (!tx.data || tx.data === '0x') return value ? `sends ${value} to ${to}` : `calls ${to} with no data and no value`
-  const method = tx.decoded?.method && tx.decoded.method !== 'Unknown' ? `${tx.decoded.method} on ` : ''
-  return `${tx.operation === 1 ? 'delegatecall' : 'call'} to ${method}${to}${value ? `, sending ${value}` : ''}`
+  const empty = !tx.data || tx.data === '0x'
+  // A delegatecall is named as one even with no data: Safe still runs `to`'s code.
+  if (tx.operation === 1) return `delegatecall to ${to}${empty ? ' with no data' : ''}${value ? `, sending ${value}` : ''}`
+  if (empty) return value ? `sends ${value} to ${to}` : `calls ${to} with no data and no value`
+  const method = decodedMethod(tx)
+  return `call to ${method ? `${method} on ` : ''}${to}${value ? `, sending ${value}` : ''}`
 }
 
 function matched(info: SafeInfo, tx: PendingSafeTx): SafeHashLink {
   return {
     status: 'match', chainId: info.chainId, chainName: evmChainLabel(info.chainId)?.name ?? `chain ${info.chainId}`,
     safe: info.address, nonce: tx.nonce, summary: summarize(info, tx),
-    safeTx: decodeEIP712(safeTypedData(info.chainId, info.address, info.version, tx)),
+    safeTx: decodeEIP712(safeTypedData(info.chainId, info.address, info.version, tx)), method: decodedMethod(tx),
   }
 }
 
@@ -125,7 +137,17 @@ async function findIn(info: SafeInfo, hash: string, deps: SafeLookupDeps): Promi
   return tx ? matched(info, tx) : { status: 'no-match', safes: [info.address] }
 }
 
-async function lookup(req: SigningRequestInfo, hash: string, owner: string, deps: SafeLookupDeps): Promise<SafeHashLink | undefined> {
+/** `p`, or a rejection once `ms` pass. */
+async function within<T>(p: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([p, new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('timed out')), ms) })])
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+async function lookup(req: SigningRequestInfo, hash: string, owner: string, deps: SafeLookupDeps, discoveryMs: number): Promise<SafeHashLink | undefined> {
   if (req.method === '/eth/sign-transaction') {
     // approveHash is called on the Safe itself, and only an owner's call does anything.
     if (!req.to || !req.chainId) return undefined
@@ -133,19 +155,27 @@ async function lookup(req: SigningRequestInfo, hash: string, owner: string, deps
     return info.owners.some(o => same(o, owner)) ? findIn(info, hash, deps) : undefined
   }
   const chainIds = req.chainId ? [Number(req.chainId)] : await deps.chains()
-  const results = await Promise.allSettled(chainIds.map(async chainId => {
-    const found: SafeHashLink[] = []
-    for (const address of await deps.ownedSafes(chainId, owner)) {
-      const info = await deps.readSafe(chainId, address)
-      // The service only suggests Safes; one whose contract does not list this owner is not theirs.
-      if (info.owners.some(o => same(o, owner))) found.push(await findIn(info, hash, deps))
-    }
-    return found
+  // Discovery on every chain at once, each bounded so one slow service does not hold the card.
+  const discovered = await Promise.allSettled(chainIds.map(async chainId =>
+    (await within(deps.ownedSafes(chainId, owner), discoveryMs)).map(address => ({ chainId, address }))))
+  const candidates = discovered.flatMap(r => r.status === 'fulfilled' ? r.value : [])
+  const discoveryFailed = discovered.find((r): r is PromiseRejectedResult => r.status === 'rejected')
+  if (!candidates.length) {
+    // No Safe anywhere that answered: a chain that did not answer counts as none,
+    // unless none answered at all.
+    if (discoveryFailed && discovered.every(r => r.status === 'rejected')) throw discoveryFailed.reason
+    return undefined
+  }
+  const results = await Promise.allSettled(candidates.map(async ({ chainId, address }) => {
+    const info = await deps.readSafe(chainId, address)
+    // The service only suggests Safes; one whose contract does not list this owner is not theirs.
+    return info.owners.some(o => same(o, owner)) ? findIn(info, hash, deps) : null
   }))
-  const links = results.flatMap(r => r.status === 'fulfilled' ? r.value : [])
+  const links = results.flatMap(r => r.status === 'fulfilled' && r.value ? [r.value] : [])
   const match = links.find(l => l.status === 'match')
   if (match) return match
-  const failed = results.find((r): r is PromiseRejectedResult => r.status === 'rejected')
+  // The user has a Safe, so a chain or Safe that could not be read may hold the match.
+  const failed = results.find((r): r is PromiseRejectedResult => r.status === 'rejected') ?? discoveryFailed
   if (failed) throw failed.reason
   return links.length ? { status: 'no-match', safes: links.flatMap(l => l.status === 'no-match' ? l.safes : []) } : undefined
 }
@@ -155,19 +185,13 @@ async function lookup(req: SigningRequestInfo, hash: string, owner: string, deps
  * Safe. Never throws: a lookup that fails or runs out of time is reported as
  * unchecked, so the card says so instead of falling back to a generic line.
  */
-export async function safeHashLink(req: SigningRequestInfo, deps: SafeLookupDeps, timeoutMs = 12_000): Promise<SafeHashLink | undefined> {
+export async function safeHashLink(req: SigningRequestInfo, deps: SafeLookupDeps, timeoutMs = 12_000, discoveryMs = 5_000): Promise<SafeHashLink | undefined> {
   const hash = confirmationHash(req)
   const owner = req.from
   if (!hash || !owner || !ethers.utils.isAddress(owner)) return undefined
-  let timer: ReturnType<typeof setTimeout> | undefined
   try {
-    return await Promise.race([
-      lookup(req, hash, owner, deps),
-      new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('timed out')), timeoutMs) }),
-    ])
+    return await within(lookup(req, hash, owner, deps, discoveryMs), timeoutMs)
   } catch (e) {
     return { status: 'unchecked', error: deviceErrorMessage(e) }
-  } finally {
-    clearTimeout(timer)
   }
 }
