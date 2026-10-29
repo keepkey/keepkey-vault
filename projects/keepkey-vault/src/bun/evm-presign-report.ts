@@ -90,6 +90,8 @@ export function reviewedEvmDecodeLabel(info: SigningRequestInfo): string | undef
   if (field('Protocol') === 'Uniswap Universal Router' && field('Action')?.startsWith('Swap ')) return 'Uniswap Universal Router swap'
   if (d.dappName === 'Across' && d.functionType === 'bridge') return 'Across bridge deposit'
   if (d.dappName === 'Relay' && d.functionType === 'bridge') return 'Relay deposit'
+  // swap-decoders: a pinned 0x Settler / CoW EthFlow / Relay Router call, every step read.
+  if (d.functionType === 'swap' && field('Protocol')) return `${field('Protocol')} swap`
   // calldata-decoder names THORChain/Maya only for a pinned router on this chain.
   if ((d.dappName === 'THORChain' || d.dappName === 'Mayachain') && field('Action')) return `${d.dappName} deposit`
   return undefined

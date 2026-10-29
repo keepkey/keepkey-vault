@@ -15,6 +15,7 @@ import type { CalldataDecodedInfo, CalldataDecodedField } from '../shared/types'
 import { thorDepositFields } from './thor-swap-preview'
 import { acrossDepositView, decodeAcrossDepositV3 } from '../shared/acrossDeposit'
 import { RELAY_DEPOSITORY, decodeRelayDeposit, isZeroAddress } from '../shared/relayDeposit'
+import { decodeSwapCall } from './swap-decoders'
 import { evmNativeValue } from '../shared/evmFeePreview'
 import { REVIEWED_EVM_TOKENS } from './evm-certified-schema'
 import firmwareTokenTable from './firmware-token-table.json'
@@ -698,6 +699,11 @@ export async function decodeCalldata(
       selector, functionType: 'bridge', fields, source: 'local',
     }
   }
+
+  // 0x Settler, CoW EthFlow and Relay Router swaps (swap-decoders): pinned
+  // contracts only, every step decoded, else null. Display only, like Relay above.
+  const swap = decodeSwapCall(contractAddress, data, _chainId, value)
+  if (swap) return swap
 
   // Tier 1: Local decoders (offline, instant)
   for (const decoder of LOCAL_DECODERS) {

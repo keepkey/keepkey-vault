@@ -1053,7 +1053,7 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 
 	const decoded = request.calldataDecoded
 	const swapDecision = decoded?.fields.some(field => field.name === 'Action' && field.value.startsWith('Swap '))
-		&& decoded.fields.some(field => field.name === 'Protocol' && /^(THORChain|Mayachain) Router$/.test(field.value))
+		&& decoded.fields.some(field => field.name === 'Protocol' && /^((THORChain|Mayachain|Relay) Router|0x Settler|CoW EthFlow)$/.test(field.value))
 	const hasCalldata = fwSupportsBlindSignGate
 		&& (request.needsBlindSigning !== undefined || (decoded && decoded.source !== undefined))
 	const hasSignedBlob = !!decoded?.signedInsightBlob
