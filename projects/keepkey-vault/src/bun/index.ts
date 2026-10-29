@@ -7226,6 +7226,28 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				zcashVerifiedThisSession = true
 				return result
 			},
+			// ── Safe multisig (read side) ─────────────────────────────
+			safeChains: async () => {
+				const { safeTxServices } = await import('./safe')
+				return [...(await safeTxServices()).keys()]
+			},
+			safeMine: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				if (!evmAddresses.isInitialized) await evmAddresses.initialize(engine.wallet)
+				const owner = evmAddresses.getSelectedAddress()?.address
+				if (!owner) throw new Error('No EVM address')
+				const { listOwnedSafes, readSafe } = await import('./safe')
+				const found = await listOwnedSafes(params.chainId, owner)
+				// The service only suggests Safes; keep those whose contract lists us as an owner.
+				const safes = (await Promise.all(found.map(a => readSafe(params.chainId, a).catch(() => null))))
+					.filter((s): s is NonNullable<typeof s> => !!s && s.owners.some(o => o.toLowerCase() === owner.toLowerCase()))
+				return { owner, safes }
+			},
+			safePending: async (params) => {
+				const { readSafe, pendingSafeTxs } = await import('./safe')
+				const info = await readSafe(params.chainId, params.address)
+				return { info, pending: await pendingSafeTxs(info) }
+			},
 			zcashShieldedBalance: async () => {
 				if (!zcashPrivacyEnabled) throw new Error('Zcash privacy feature is disabled')
 				if (hasFvkLoaded() && !zcashDeviceVerified) {
