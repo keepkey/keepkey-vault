@@ -80,15 +80,22 @@ function SafeCard({ info, me, symbol }: { info: SafeInfo; me: string; symbol: st
 				<Box>
 					<Text fontSize="14px" fontWeight="600" color="var(--text-0)" fontFamily="mono" wordBreak="break-all">{info.address}</Text>
 					<Text fontSize="12px" color="var(--text-2)">{info.threshold} of {info.owners.length} owners must sign · Safe {info.version} · next nonce {info.nonce}</Text>
-					<Box mt="1">{info.issues.length === 0 ? <Badge tone="ok">Standard Safe</Badge> : <Badge tone="warn">Not a standard Safe</Badge>}</Box>
+					<Flex mt="1" gap="1.5" wrap="wrap">
+						{info.vetting.codeProblem ? <Badge tone="warn">Unrecognized Safe code</Badge> : <Badge tone="ok">Safe's own code</Badge>}
+						{info.vetting.extensions.length > 0 && <Badge tone="muted">{info.vetting.extensions.length} extension{info.vetting.extensions.length > 1 ? "s" : ""}</Badge>}
+					</Flex>
 				</Box>
 				<Text fontSize="12px" color="var(--gold)">{open ? "Hide" : "Open"}</Text>
 			</Flex>
 			{open && (
 				<VStack align="stretch" gap="3" mt="3">
-					{info.issues.length > 0 && (
+					{info.vetting.codeProblem && (
+						<Text fontSize="12px" color="#f5c542">{info.vetting.codeProblem}, so its owners and threshold shown here cannot be confirmed.</Text>
+					)}
+					{info.vetting.extensions.length > 0 && (
 						<Box>
-							{info.issues.map(i => <Text key={i} fontSize="12px" color="#f5c542">{i}.</Text>)}
+							<Text fontSize="12px" fontWeight="600" color="var(--text-1)" mb="1">Extensions</Text>
+							{info.vetting.extensions.map(e => <Text key={e} fontSize="12px" color="var(--text-2)">{e}</Text>)}
 						</Box>
 					)}
 					<Box>

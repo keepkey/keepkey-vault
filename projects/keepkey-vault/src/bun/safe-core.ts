@@ -5,6 +5,7 @@
  */
 import { ethers } from 'ethers'
 import { SAFE_PROXY_CODE_HASHES, SAFE_SINGLETONS, SAFE_FALLBACK_HANDLERS } from '../shared/safe-deployments'
+import type { SafeVetting } from '../shared/types'
 
 export interface SafeTxFields {
   to: string
@@ -127,19 +128,19 @@ export interface SafeReader {
 }
 
 /**
- * Whether this address runs standard Safe code: a known proxy pointing at a
- * pinned singleton whose code matches, no guard, no modules, and a standard
- * fallback handler (or none). Storage is read only after the singleton's code
- * is verified, because it is the singleton's getStorageAt that answers.
- * An empty list means standard; each entry says what is not.
+ * Whether this address runs Safe's own code (a known proxy pointing at a
+ * pinned singleton whose code matches), and which extensions it has enabled.
+ * Storage is read only after the singleton's code is verified, because it is
+ * the singleton's getStorageAt that answers.
  */
-export async function vetSafe(chainId: number, safe: string, read: SafeReader): Promise<string[]> {
+export async function vetSafe(chainId: number, safe: string, read: SafeReader): Promise<SafeVetting> {
+  const problem = (codeProblem: string): SafeVetting => ({ codeProblem, extensions: [] })
   const proxyVersion = SAFE_PROXY_CODE_HASHES[ethers.utils.keccak256(await read.getCode(safe))]
-  if (!proxyVersion) return ['Its contract is not a standard Safe proxy']
+  if (!proxyVersion) return problem('Its contract is not a standard Safe proxy')
   const singleton = ethers.utils.getAddress(iface.decodeFunctionResult('masterCopy', await read.call(safe, iface.encodeFunctionData('masterCopy')))[0])
   const pinned = SAFE_SINGLETONS.find(c => same(c.address, singleton) && c.chains.includes(chainId))
-  if (!pinned) return [`It runs Safe code Desktop does not recognize (${singleton})`]
-  if (ethers.utils.keccak256(await read.getCode(singleton)) !== pinned.codeHash) return [`The Safe code at ${singleton} does not match Safe's published build`]
+  if (!pinned) return problem(`It runs Safe code Desktop does not recognize (${singleton})`)
+  if (ethers.utils.keccak256(await read.getCode(singleton)) !== pinned.codeHash) return problem(`The Safe code at ${singleton} does not match Safe's published build`)
 
   const slot = async (s: string) => {
     const [word] = iface.decodeFunctionResult('getStorageAt', await read.call(safe, iface.encodeFunctionData('getStorageAt', [s, 1])))
@@ -150,14 +151,14 @@ export async function vetSafe(chainId: number, safe: string, read: SafeReader): 
     slot(GUARD_SLOT),
     read.call(safe, iface.encodeFunctionData('getModulesPaginated', [SENTINEL, 10])).then(r => iface.decodeFunctionResult('getModulesPaginated', r).array as string[]),
   ])
-  const issues: string[] = []
+  const extensions: string[] = []
+  for (const m of modules) extensions.push(`Module ${ethers.utils.getAddress(m)} can make transactions for this Safe without owner signatures. DAOs use modules for governance, spending limits and recovery.`)
+  if (guard !== ethers.constants.AddressZero) extensions.push(`Guard ${guard} checks every transaction this Safe makes and can refuse ones it does not allow.`)
   // ponytail: handler checked by address only; Safe's deterministic deployments make the address imply the code.
   if (handler !== ethers.constants.AddressZero && !SAFE_FALLBACK_HANDLERS.some(c => same(c.address, handler) && c.chains.includes(chainId))) {
-    issues.push(`It has a non-standard fallback handler (${handler})`)
+    extensions.push(`Custom fallback handler ${handler} answers calls the Safe itself does not handle, such as signature checks.`)
   }
-  if (guard !== ethers.constants.AddressZero) issues.push(`It has a transaction guard (${guard})`)
-  for (const m of modules) issues.push(`It has a module that can move funds without the owners (${ethers.utils.getAddress(m)})`)
-  return issues
+  return { codeProblem: null, extensions }
 }
 
 const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase()
