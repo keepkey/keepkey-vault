@@ -124,13 +124,59 @@ describe('permits to recognised spenders use the same recognition', () => {
     expect(assessSigningRisk(other)!.level).toBe('high')
   })
 
-  test('unlimited Permit2 permit to the 1inch v6 router: named and calm; to an unknown spender: danger', () => {
+  test('unlimited Permit2 permit to the 1inch v6 router: named, high like an unlimited approve; to an unknown spender: danger', () => {
     const s = typed(oneInchPermit2.typedData)
     expect(s.recognizedSpender).toBe('1inch Aggregation Router v6')
-    expect(assessSigningRisk(s)!.level).toBe('medium')
+    const r = assessSigningRisk(s)!
+    expect(r.level).toBe('high')
+    expect(r.reasons[0].text).toContain('Lets 1inch Aggregation Router v6 (0x111111125421ca6dc452d289314280a0f8842a65) spend ALL of ')
     const other = typed({ ...oneInchPermit2.typedData, message: { ...oneInchPermit2.typedData.message, spender: STRANGER } })
     expect(other.recognizedSpender).toBeUndefined()
     expect(assessSigningRisk(other)!.level).toBe('critical')
+  })
+
+  // A standing max Permit2 allowance is at least as strong as an unlimited
+  // approve(): a Desktop-list name must not make it the quieter of the two.
+  // Only certified name records (the Uniswap routers) get the Permit2 exemption.
+  test('unlimited Permit2 to any Desktop-list spender reads high, never "check before you sign"', () => {
+    const spenders: [string, string][] = [
+      ['0x1231deb6f5749ef6ce6943a275a1d3e7486f4eae', 'LI.FI Diamond'],
+      ['0xc92e8bdf79f0507f65a392b0ab4667716bfe0110', 'CoW Protocol Vault Relayer'],
+      ['0x0000000000001ff3684f28c67538d4d072c22734', '0x AllowanceHolder'],
+      ['0xdef1c0ded9bec7f1a1670819833240f027b25eff', '0x Exchange Proxy'],
+      ['0x5c7bcd6e7de5423a257d81b442095a1a6ced35c5', 'Across SpokePool'],
+      ['0x6131b5fae19ea4f9d964eac0408e4408b66337b5', 'KyberSwap Meta Aggregation Router v2'],
+      ['0x5567954cd026cebfe486062cb75848e0f1c12e58', 'Relay Approval Proxy'],
+    ]
+    for (const [spender, name] of spenders) {
+      const s = typed({ ...oneInchPermit2.typedData, message: { ...oneInchPermit2.typedData.message, spender } })
+      expect(s.recognizedSpender).toBe(name)
+      const r = assessSigningRisk(s)!
+      expect(`${name}: ${r.level}`).toBe(`${name}: high`)
+      expect(r.reasons[0].text).toContain(`Lets ${name} (${spender}) spend ALL of `)
+    }
+  })
+
+  test('a certified router keeps the Permit2 exemption: unlimited Permit2 to the Uniswap Universal Router reads medium', () => {
+    const ur = '0x66a9893cc07d91d95644aedd05d03f95e1dba8af'
+    const s = typed({ ...oneInchPermit2.typedData, message: { ...oneInchPermit2.typedData.message, spender: ur } })
+    expect(s.recognizedSpender).toMatch(/^Uniswap /)
+    expect(assessSigningRisk(s)!.level).toBe('medium')
+  })
+})
+
+describe('Relay Receiver is not a spender', () => {
+  // Its only functions are forward() (native coin) and a solver-only
+  // makeCalls(): no Relay flow approves it, so an allowance reads as unknown.
+  test('a 25,000 USDC approve to the Relay Receiver is not named and reads high', async () => {
+    const receiver = '0xa5f565650890fba1824ee0f21ebbbf660a179934'
+    expect(knownSpenderName(1, receiver)).toBeUndefined()
+    expect(knownSpenderName(143, '0xf17902d51fdff7bf50aacc78d6bb399baf88b479')).toBeUndefined()
+    const req = swapsPro('approve-cow-vaultrelayer')
+    const s = await preview(req.body, withSpender(req.body.data, receiver))
+    expect(s.recognizedSpender).toBeUndefined()
+    expect(assessSigningRisk(s)!.level).toBe('high')
+    expect(erc20Preview(s.to, s.chainId as number, s.data, s.recognizedSpender)?.counterpartyIdentity).toBeUndefined()
   })
 })
 
@@ -146,7 +192,6 @@ describe('Desktop spender list', () => {
       ['0x6131B5fae19EA4f9D964eAc0408E4408b66337b5', 'KyberSwap Meta Aggregation Router v2'],
       ['0x5567954cd026cebfe486062cb75848e0f1c12e58', 'Relay Approval Proxy'],
       ['0xccc88a9d1b4ed6b0eaba998850414b24f1c315be', 'Relay Approval Proxy'],
-      ['0xa5f565650890fba1824ee0f21ebbbf660a179934', 'Relay Receiver'],
     ]
     for (const chainId of [1, 8453]) for (const [a, name] of both) expect(knownSpenderName(chainId, a)).toBe(name)
     expect(knownSpenderName(8453, '0x19cEeAd7105607Cd444F5ad10dd51356436095a1')).toBe('Odos Router v2')

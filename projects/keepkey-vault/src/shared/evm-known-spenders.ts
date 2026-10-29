@@ -50,11 +50,11 @@ const KNOWN_SPENDERS: KnownSpender[] = [
   { name: 'KyberSwap Meta Aggregation Router v2', address: '0x6131b5fae19ea4f9d964eac0408e4408b66337b5', chains: [1, 10, 56, 137, 143, 8453, 42161, 43114] },
   // https://github.com/relayprotocol/relay-docs/blob/1d219baf2dbbfc0d0cb8c6d3a22ff0584bb6cc4d/references/api/api_resources/contract-addresses.mdx
   // (v3 and v3.2 Cancun ApprovalProxy; both stay live) and, per chain,
-  // https://api.relay.link/chains contracts.approvalProxy / v3.approvalProxy / relayReceiver.
+  // https://api.relay.link/chains contracts.approvalProxy / v3.approvalProxy.
+  // Not the Relay Receiver (0xa5f5…9934): no Relay flow approves it, and only
+  // Relay's solver can call it, so an allowance to it is not a normal request.
   { name: 'Relay Approval Proxy', address: '0x5567954cd026cebfe486062cb75848e0f1c12e58', chains: [1, 10, 56, 100, 137, 143, 8453, 42161, 43114] },
   { name: 'Relay Approval Proxy', address: '0xccc88a9d1b4ed6b0eaba998850414b24f1c315be', chains: [1, 10, 56, 100, 137, 143, 8453, 42161, 43114] },
-  { name: 'Relay Receiver', address: '0xa5f565650890fba1824ee0f21ebbbf660a179934', chains: [1, 10, 56, 100, 137, 8453, 42161, 43114] },
-  { name: 'Relay Receiver', address: '0xf17902d51fdff7bf50aacc78d6bb399baf88b479', chains: [143] },
   // Across SpokePools: the pinned, on-chain-checked list in acrossDeposit.ts
   // (re-checked 2026-10-29 with eth_getCode on 1, 10, 56, 137, 8453, 42161, 43114).
   ...REVIEWED_ACROSS_SPOKE_POOLS.map((p) => ({ name: 'Across SpokePool', address: p.address, chains: [p.chainId] })),
