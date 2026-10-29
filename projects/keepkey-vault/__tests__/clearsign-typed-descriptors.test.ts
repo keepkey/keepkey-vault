@@ -4,6 +4,9 @@
  *   seaport-opensea-listing-mainnet.json  an OpenSea listing sold on Ethereum; the OrderComponents
  *                                         hash matches the OrderFulfilled event and the signature
  *                                         recovers the seller (see its _source)
+ *   seaport-opensea-listing-creator-fee-mainnet.json  the same, for a collection with a creator fee,
+ *                                         with the collection's ERC-2981 royaltyInfo answer
+ *   safetx-multisend-mainnet.json         an executed Safe MultiSend (python-keepkey eip712 corpus)
  *   setapprovalforall-opensea-conduit-pudgy.json  a mainnet setApprovalForAll to the OpenSea conduit
  * Each normal request reads named and calm; each mutant of it that a normal
  * dapp would not send stays loud.
@@ -11,11 +14,14 @@
 import { describe, expect, test } from 'bun:test'
 import { decodeEIP712 } from '../src/bun/eip712-decoder'
 import { buildTypedDataReport } from '../src/bun/evm-presign-report'
+import { addSeaportCreatorFee } from '../src/bun/seaport-creator-fee'
 import { assessSigningRisk } from '../src/shared/clearsign-risk'
 import { typedDataRows } from '../src/shared/typedDataRows'
 import type { SigningRequestInfo } from '../src/shared/types'
 import cow from './fixtures/typed-data/cow-order-swapspro-usdc-eth.json'
 import seaport from './fixtures/typed-data/seaport-opensea-listing-mainnet.json'
+import creatorFee from './fixtures/typed-data/seaport-opensea-listing-creator-fee-mainnet.json'
+import safeMultiSend from './fixtures/typed-data/safetx-multisend-mainnet.json'
 import nftApproval from './fixtures/nft/setapprovalforall-opensea-conduit-pudgy.json'
 
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v))
@@ -113,11 +119,102 @@ describe('Seaport 1.6 listing (OpenSea, mainnet)', () => {
     expect(assessSigningRisk(typedRequest(typedData, OTHER))!.level).toBe('critical')
   })
 
+  // A phishing listing pays the seller nothing, or nothing anyone can value.
+  const seller = (startAmount: string) => ({
+    itemType: 0, token: '0x0000000000000000000000000000000000000000', identifierOrCriteria: '0', startAmount, endAmount: startAmount, recipient: address,
+  })
+
+  test('mutant: the seller is paid 1 wei', () => {
+    const td = clone(typedData)
+    td.message.consideration = [seller('1')]
+    const req = typedRequest(td, address)
+    expect(assessSigningRisk(req)!.tier).toBe('red')
+    expect(texts(req)).toContain('Pays you only 0.000000000000000001 ETH for ERC-721 #5318')
+  })
+
+  test('mutant: the seller is paid 0', () => {
+    const td = clone(typedData)
+    td.message.consideration = [seller('0')]
+    const req = typedRequest(td, address)
+    expect(assessSigningRisk(req)!.tier).toBe('red')
+    expect(texts(req)).toContain('Pays you nothing for ERC-721 #5318')
+  })
+
+  test('mutant: the seller\'s payment is 0 and only the OpenSea fee is left', () => {
+    const td = clone(typedData)
+    td.message.consideration[0].startAmount = td.message.consideration[0].endAmount = '0'
+    const req = typedRequest(td, address)
+    expect(assessSigningRisk(req)!.tier).toBe('red')
+    expect(texts(req)).toContain('Pays you nothing for ERC-721 #5318')
+  })
+
+  test('mutant: paid in a token this computer cannot name', () => {
+    const td = clone(typedData)
+    for (const c of td.message.consideration) { c.itemType = 1; c.token = '0x3333333333333333333333333333333333333333' }
+    const req = typedRequest(td, address)
+    expect(assessSigningRisk(req)!.tier).toBe('red')
+    expect(texts(req)).toContain('Paid in a token this computer cannot name (558997810000000000 base units of token 0x3333333333333333333333333333333333333333)')
+  })
+
   test('mutant: not the pinned Seaport 1.6 deployment', () => {
     const td = clone(typedData)
     td.domain.verifyingContract = '0x00000000000000ADc04C56Bf30aC9d3c0aAF14dC' // Seaport 1.5
     expect(decodeEIP712(td, address).isKnownType).toBe(false)
     expect(assessSigningRisk(typedRequest(td, address))!.level).toBe('critical')
+  })
+})
+
+describe('Seaport 1.6 listing with a creator fee (OpenSea, mainnet)', () => {
+  const { address, typedData } = creatorFee.body
+  const { royaltyInfo } = creatorFee
+  const CREATOR = royaltyInfo.decoded.receiver
+  // The collection's recorded answer, only for the exact call it was read with.
+  const chain = async (chainId: number, to: string, data: string) => {
+    expect(chainId).toBe(1)
+    expect(to).toBe(royaltyInfo._source.to)
+    expect(data).toBe(royaltyInfo.data)
+    return royaltyInfo.result
+  }
+  const looked = async (td: any, call = chain) => {
+    const req = typedRequest(td, address)
+    await addSeaportCreatorFee(req, call)
+    return req
+  }
+
+  test('unchecked, the creator payee is unknown', () => {
+    const req = typedRequest(typedData, address)
+    expect(assessSigningRisk(req)!.level).toBe('critical')
+    expect(texts(req)).toContain(`Pays 0.00105 ETH to ${CREATOR}, which is neither the seller nor a marketplace fee address`)
+  })
+
+  test('the collection\'s own royaltyInfo names it: calm, with the creator fee', async () => {
+    const req = await looked(typedData)
+    const risk = assessSigningRisk(req)!
+    expect(risk.level).toBe('medium')
+    expect(risk.tier).toBe('green')
+    expect(texts(req)).toContain(`You receive 0.01974 ETH, and 0.00021 ETH goes to OpenSea's fee address, and 0.00105 ETH goes to the creator fee address the collection names on chain (${CREATOR}).`)
+  })
+
+  test('mutant: the "royalty" goes to another address', async () => {
+    const td = clone(typedData)
+    td.message.consideration[2].recipient = OTHER
+    const req = await looked(td)
+    expect(assessSigningRisk(req)!.level).toBe('critical')
+    expect(texts(req)).toContain(`Pays 0.00105 ETH to ${OTHER}, which is neither`)
+  })
+
+  test('mutant: more than the collection\'s royalty goes to its creator (same price)', async () => {
+    const td = clone(typedData)
+    const [own, , creator] = td.message.consideration
+    own.startAmount = own.endAmount = (BigInt(own.startAmount) - 10n ** 15n).toString()
+    creator.startAmount = creator.endAmount = (BigInt(creator.startAmount) + 10n ** 15n).toString()
+    const req = await looked(td)
+    expect(assessSigningRisk(req)!.level).toBe('critical')
+  })
+
+  test('no answer from the collection: the payee stays unknown', async () => {
+    const req = await looked(typedData, async () => { throw new Error('execution reverted') })
+    expect(assessSigningRisk(req)!.level).toBe('critical')
   })
 })
 
@@ -159,5 +256,13 @@ describe('ClearSign report for typed data', () => {
     const unknown = clone(cow.body.typedData)
     unknown.domain.verifyingContract = OTHER
     expect(buildTypedDataReport(typedRequest(unknown, cow.body.address, '7.14.2'))!.protectionLevel).toBe('P1')
+  })
+
+  test('a SafeTx whose call the device shows only as hex is not "ClearSign ready"', () => {
+    const req = typedRequest(safeMultiSend.body.typedData, OTHER)
+    expect(assessSigningRisk(req)!.tier).toBe('red')
+    const report = buildTypedDataReport(req)!
+    expect(report.protectionLevel).toBe('P1')
+    expect(report.headline).not.toBe('KeepKey ClearSign ready')
   })
 })

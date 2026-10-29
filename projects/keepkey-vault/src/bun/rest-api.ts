@@ -12,6 +12,7 @@ import { tronPreview } from './tron-preview'
 import type { ClearSignEvent } from '../shared/types'
 import { createHash } from 'crypto'
 import { decodeEIP712 } from './eip712-decoder'
+import { addSeaportCreatorFee } from './seaport-creator-fee'
 import { evmPriorityFee, normalizeEvmChainId, recognizedTypedDataSpender, typedDataNativelyReviewed } from './evm-signing-preview'
 import { buildEvmReportForTx, buildTypedDataReport, evmSigningVerdict, prepareEvmTxSigningInfo, withoutErc7730Description } from './evm-presign-report'
 import { describeErc7730Call } from './erc7730-describe'
@@ -1717,6 +1718,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               signingInfo.chainId = normalizeEvmChainId(preview.typedData?.domain?.chainId)
               if (preview.typedData) {
                 signingInfo.typedDataDecoded = decodeEIP712(preview.typedData, preview.address)
+                await addSeaportCreatorFee(signingInfo)
                 signingInfo.recognizedSpender = recognizedTypedDataSpender(signingInfo.typedDataDecoded, signingInfo.chainId)
                 // hdwallet streams every document; the device reviews x402 and
                 // (7.16+) a canonical Permit2 PermitSingle natively. Anything

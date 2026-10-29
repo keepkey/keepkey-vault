@@ -316,13 +316,23 @@ function seaportListing(td: any): EIP712DecodedInfo['seaportListing'] {
   if (type === 0 && !/^0x0{40}$/.test(token)) return undefined
   const offerer = lower(msg.offerer)
   const units = (raw: bigint) => tokenUnits(chainId, pay[0].token, raw.toString(), type === 0)
+  const total = pay.reduce((sum, i) => sum + toBig(i.startAmount)!, 0n)
+  const nftId = offer.length === 1 ? toBig(offer[0].identifierOrCriteria) : undefined
+  // The same test tokenUnits uses to name the currency.
+  const decimals = type === 0 ? (evmChainLabel(chainId)?.symbol ? 18 : undefined)
+    : /^0x[0-9a-fA-F]{40}$/.test(String(pay[0].token)) ? evmTokenIdentity(chainId, pay[0].token)?.decimals : undefined
   return {
     offerer: String(msg.offerer),
     items: offer.map((i) => seaportItem(chainId, i)),
-    total: units(pay.reduce((sum, i) => sum + toBig(i.startAmount)!, 0n)),
+    total: units(total),
+    totalRaw: total.toString(),
+    ...(decimals !== undefined ? { decimals } : {}),
+    ...(nftId !== undefined && /^0x[0-9a-fA-F]{40}$/.test(String(offer[0].token))
+      ? { nft: { token: String(offer[0].token), id: nftId.toString() } } : {}),
     payments: pay.map((i) => ({
       recipient: String(i.recipient),
       amount: units(toBig(i.startAmount)!),
+      raw: toBig(i.startAmount)!.toString(),
       role: lower(i.recipient) === offerer ? 'offerer' as const : lower(i.recipient) === OPENSEA_FEE_RECIPIENT ? 'opensea-fee' as const : 'other' as const,
     })),
     endTime: formatValue(msg.endTime, 'datetime'),
@@ -587,7 +597,9 @@ const KNOWN_DESCRIPTORS: KnownDescriptor[] = [
     extract: cowOrderFields,
   },
   // Seaport 1.6 OrderComponents, only at the pinned Seaport deployment. A
-  // BulkOrder (a tree of orders) is not matched.
+  // BulkOrder (a tree of orders: OpenSea's several-items-at-once listing) is
+  // not matched and still reads critical. Firmware 7.16 refuses it; older
+  // firmware signs its hash. No real BulkOrder document is public to test with.
   {
     match: isSeaportOrder,
     operationName: 'Seaport 1.6 Order',

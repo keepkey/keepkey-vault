@@ -582,14 +582,25 @@ function evmTypedData(req: SigningRequestInfo, add: (l: RiskLevel, t: string) =>
     const from = req.from?.toLowerCase()
     const others = listing?.payments.filter((p) => p.role === 'other') ?? []
     const own = listing?.payments.filter((p) => p.role === 'offerer') ?? []
-    // A normal listing: the signer sells its own NFTs, is paid, and the only
-    // other payee is a marketplace fee address this computer knows.
-    if (listing && from && listing.offerer.toLowerCase() === from && own.length > 0 && others.length === 0) {
+    const seller = !!listing && !!from && listing.offerer.toLowerCase() === from
+    const proceeds = own.reduce((sum, p) => sum + BigInt(p.raw), 0n)
+    // Under a millionth of a coin or token is no price: it is how a phishing
+    // listing takes the NFT for nothing. Unnamed currency: worth unknown.
+    const named = listing?.decimals !== undefined
+    const dust = named && proceeds < 10n ** BigInt(Math.max(listing!.decimals! - 6, 0))
+    // A normal listing: the signer sells its own NFTs, is paid a real amount in
+    // a currency this computer names, and every other payee is a marketplace
+    // fee address it knows or the collection's own creator fee.
+    if (listing && seller && own.length > 0 && others.length === 0 && named && !dust) {
       const fees = listing.payments.filter((p) => p.role === 'opensea-fee')
-      add('medium', `Seaport listing: sells ${listing.items.join(', ')} for ${listing.total}. You receive ${own.map((p) => p.amount).join(' + ')}${fees.length ? `, and ${fees.map((p) => p.amount).join(' + ')} goes to OpenSea's fee address` : ''}. Anyone can buy at this price until ${listing.endTime}; nothing moves until a buyer pays it.`)
+      const creator = listing.payments.filter((p) => p.role === 'creator-fee')
+      add('medium', `Seaport listing: sells ${listing.items.join(', ')} for ${listing.total}. You receive ${own.map((p) => p.amount).join(' + ')}${fees.length ? `, and ${fees.map((p) => p.amount).join(' + ')} goes to OpenSea's fee address` : ''}${creator.length ? `, and ${creator.map((p) => p.amount).join(' + ')} goes to the creator fee address the collection names on chain (${creator[0].recipient})` : ''}. Anyone can buy at this price until ${listing.endTime}; nothing moves until a buyer pays it.`)
       knownCalm = true
     } else {
       add('critical', 'This is a marketplace order. Anyone holding this signature can take the listed items at the price in the order.')
+      if (listing && seller && proceeds === 0n) add('critical', `Pays you nothing for ${listing.items.join(', ')}. A real listing pays the seller.`)
+      else if (listing && seller && dust) add('critical', `Pays you only ${own.map((p) => p.amount).join(' + ')} for ${listing.items.join(', ')}. That is not a real price.`)
+      if (listing && !named) add('high', `Paid in a token this computer cannot name (${listing.total}), so it cannot tell what this price is worth.`)
       for (const p of others) add('critical', `Pays ${p.amount} to ${p.recipient}, which is neither the seller nor a marketplace fee address this computer knows.`)
     }
   }
@@ -610,6 +621,12 @@ function evmTypedData(req: SigningRequestInfo, add: (l: RiskLevel, t: string) =>
     add('high', 'Your KeepKey can only show a code (hash) for this signature, not what it says. You would be signing blind.')
   }
   return opaque ? 'unknown' : structured ? 'shows' : knownCalm ? 'known' : 'unknown'
+}
+
+/** What the typed-data verdict rests on, for the ClearSign report: 'shows'
+ *  only when the device shows the meaning, not raw hex standing for it. */
+export function typedDataRecognition(req: SigningRequestInfo): Recognition {
+  return evmTypedData(req, () => {})
 }
 
 function evmMessage(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void): Recognition {
