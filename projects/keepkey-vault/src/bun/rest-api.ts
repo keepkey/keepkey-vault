@@ -81,7 +81,7 @@ import { simulateEvmEffects } from './evm-effects'
 import { simulateSolanaEffects } from './solana-effects'
 import { buildClearSignReport, solanaDecodedReportFindings } from '../shared/clearsign-report'
 import { uniswapReportFindingsWithState } from './uniswap-report'
-import { classifyEffectExposure, observeEvmCall, observeEvmTypedData, observeMalformedSolanaTransaction, observeSolanaTransaction } from './clearsign-observation'
+import { classifyEffectExposure, observeEvmCall, observeEvmTypedData, observeMalformedSolanaTransaction, observeSigningInfo, observeSolanaTransaction } from './clearsign-observation'
 import { auditUnknownClearSignShape } from './clearsign-live-auditor'
 import { clearSignIdentityHash, evaluateClearSignPromotion } from './clearsign-promotion'
 import { compilePromotedClearSignArtifact } from './clearsign-artifact-compiler'
@@ -1241,6 +1241,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
       // Request-scoped body capture (set by POST handlers before json() is called)
       let reqBody: any = undefined
+      // This request's coverage observation (signing routes); json() closes it on success.
+      let activeClearSignObservationId: string | undefined
 
       // Per-request response helpers (capture req for CORS origin check)
       const json = (data: unknown, status = 200, activity?: RestActivityTag) => {
@@ -1254,6 +1256,10 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           if (chainForRoute) resolvedActivity = { chain: chainForRoute, activityType: 'sign' }
         }
         if (method === 'POST' && SIGNING_ROUTES.has(path) && status >= 200 && status < 300) signedTxs.remember(data, sessionEpoch)
+        // A signing route answers 2xx only with the device's signature.
+        if (activeClearSignObservationId && method === 'POST' && SIGNING_ROUTES.has(path) && status >= 200 && status < 300) {
+          finalizeClearSignObservation(activeClearSignObservationId, 'signed')
+        }
         // Log the request with body + response + duration.
         // Sanitize: strip sensitive fields from signing payloads to prevent
         // leaking signatures, transaction data, or typed-data content to audit log.
@@ -1509,7 +1515,6 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
       let activeSigningId: string | undefined
       let activeSigningInfo: SigningRequestInfo | undefined
       let activeAllowBlindSigning = false
-      let activeClearSignObservationId: string | undefined
       // Certified envelope found for this request's raw_tx before approval.
       let activeSolanaCertified: { rawTx: string; proof: CertifiedSolanaProof } | undefined
 
@@ -2128,6 +2133,14 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
                 solana: getSetting('solana_rpc_endpoint') || DEFAULT_SOLANA_RPC_ENDPOINT,
               })
             }
+          } else if (!engine.isPassphraseWallet && path !== '/api/v2/swap/execute') {
+            // Every other route: messages, and transactions that are not EVM or
+            // Solana. A headless swap is recorded per signature (vault-swap).
+            const draft = observeSigningInfo(signingInfo, probeCheckBody?.signDoc?.msgs)
+            if (draft) activeClearSignObservationId = insertClearSignObservation(draft, {
+              deviceId: engine.getDeviceState().deviceId,
+              source: 'rest-api',
+            }).id
           }
           if(path === '/utxo/sign-transaction' && hasMultisigSigningData(probeCheckBody) && !btcMultisigEnabled(getSetting)) throw new HttpError(403,BTC_MULTISIG_DISABLED)
           const approvalStartedAt = Date.now()

@@ -222,7 +222,11 @@ export interface ClearSignEvent {
 export type ClearSignProtectionLevel = 'P0' | 'P1' | 'P2' | 'P3' | 'P4' | 'P5'
 export type ClearSignDefinitionSource = 'none' | 'native' | 'runtime' | 'certified' | 'erc7730'
 export type ClearSignObservationOutcome = 'pending' | 'signed' | 'rejected' | 'timed-out' | 'policy-blocked' | 'failed'
-export type ClearSignObservationKind = 'evm-call' | 'evm-typed-data' | 'solana-transaction'
+/** 'message' and 'transaction' are every other signing request (messages on any
+ *  chain, non-EVM/Solana transactions): counted for coverage, never audited. */
+export type ClearSignObservationKind = 'evm-call' | 'evm-typed-data' | 'solana-transaction' | 'message' | 'transaction'
+export type ClearSignObservationChain = 'Ethereum' | 'Solana' | 'UTXO' | 'Zcash' | 'Cosmos' | 'Osmosis' | 'THORChain'
+  | 'Mayachain' | 'XRP' | 'Tron' | 'TON' | 'Hive'
 export type ClearSignSimulationStatus = 'not-requested' | 'success' | 'revert' | 'incomplete' | 'unavailable'
 export type ClearSignDefinitionResolution = 'not-checked' | 'selected' | 'invalid-request' | 'no-artifact' | 'shape-mismatch'
   | 'revoked' | 'expired' | 'identity-unavailable' | 'identity-stale' | 'identity-changed' | 'identity-mismatch' | 'unsupported-alt'
@@ -232,7 +236,7 @@ export type ClearSignExposureClass = 'not-evaluated' | 'none-observed' | 'bounde
 
 /** Local, privacy-safe denominator for ClearSign coverage metrics. */
 export interface ClearSignObservationDraft {
-  chain: 'Ethereum' | 'Solana'
+  chain: ClearSignObservationChain
   requestKind: ClearSignObservationKind
   shapeKey: string
   /** Public contract/program shape only. Never raw arguments or user accounts. */
@@ -298,7 +302,7 @@ export interface ClearSignCoverageSummary {
     successfulRequests: number
     successPercent: number
   }
-  byChain: Record<ClearSignObservation['chain'], ClearSignCoverageSlice>
+  byChain: Record<'Ethereum' | 'Solana', ClearSignCoverageSlice> & Partial<Record<ClearSignObservation['chain'], ClearSignCoverageSlice>>
   bySource: Record<ClearSignEventSource, ClearSignCoverageSlice>
   rolling: {
     last24Hours: ClearSignCoverageSlice
@@ -399,7 +403,8 @@ export type ClearSignMutationKind = 'truncation' | 'selector-or-discriminator' |
 export interface ClearSignPromotionBundle {
   version: 1
   shapeKey: string
-  chain: ClearSignObservation['chain']
+  /** Only contract/program shapes are audited and promoted. */
+  chain: 'Ethereum' | 'Solana'
   candidate: NonNullable<ClearSignAuditEvidence['candidates']>[number]
   identityHash: string
   createdAt: number

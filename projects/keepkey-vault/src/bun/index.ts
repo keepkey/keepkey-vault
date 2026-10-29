@@ -275,6 +275,7 @@ import { shouldResetManagersOnReady, nextReadyDeviceId } from "../shared/device-
 import { isManagerSeedStale } from "../shared/seed-reconcile"
 import { WalletConnectManager } from "./walletconnect"
 import { auditUnknownClearSignShape, setClearSignAuditGate } from "./clearsign-live-auditor"
+import { evmShownNatively, protectSwapSignature, solanaShownNatively } from "./clearsign-native"
 import { classifyEffectExposure, observeEvmCall, observeEvmTypedData, observeMalformedSolanaTransaction, observeSolanaTransaction } from "./clearsign-observation"
 import { getClearSignProtectionCaseStudies } from "./clearsign-case-studies"
 import { getEvmSimulationEndpoint, getEvmSimulationRpcUrls } from "./evm-simulation-config"
@@ -2821,55 +2822,13 @@ async function headlessExecuteSwap(params: ExecuteSwapParams, pushSubStage: (sta
 		getFirmwareVersion: () => engine.getDeviceState().firmwareVersion,
 		getDeviceCapabilities: () => engine.getDeviceState().capabilities,
 		getSolanaRpcEndpoint: () => getSetting('solana_rpc_endpoint') || undefined,
-		protectSign: async (input, sign) => {
-			if (engine.isPassphraseWallet || (input.chainFamily !== 'evm' && input.chainFamily !== 'solana')) return sign()
-			let draft: import('../shared/types').ClearSignObservationDraft
-			if (input.chainFamily === 'evm') {
-				const chainId = Number(input.tx.chainId || input.chainId || 1)
-				const { simulateEvmEffects } = await import('./evm-effects')
-				const simulation = await simulateEvmEffects({
-					chainId, from: input.from, to: input.tx.to, data: input.tx.data || '0x', value: input.tx.value || '0x0',
-					gas: input.tx.gas || input.tx.gasLimit, gasPrice: input.tx.gasPrice,
-					maxFeePerGas: input.tx.maxFeePerGas, maxPriorityFeePerGas: input.tx.maxPriorityFeePerGas, nonce: input.tx.nonce,
-				}, getEvmSimulationEndpoint(chainId))
-				draft = observeEvmCall({
-					chainId, to: input.tx.to, data: input.tx.data,
-					source: input.tx.erc7730 ? 'erc7730' : input.tx.txMetadata ? 'runtime' : 'none',
-					simulated: simulation.status === 'success',
-					simulationStatus: simulation.status,
-					exposureClass: classifyEffectExposure(simulation),
-				})
-				// Attachment presence is not authentication. Promote only after the
-				// device accepts the exact definition and transaction below.
-				draft.protectionLevel = simulation.status === 'success' ? 'P3' : 'P1'
-			} else {
-				const rawTx = input.tx.rawTx || input.tx.raw_tx
-				try {
-					const { simulateSolanaEffects } = await import('./solana-effects')
-					const simulation = await simulateSolanaEffects(rawTx, input.from, getSetting('solana_rpc_endpoint') || 'https://api.mainnet-beta.solana.com')
-					draft = observeSolanaTransaction({ rawTxBase64: rawTx, source: input.tx.schema ? 'runtime' : 'none', simulated: simulation.status === 'success', simulationStatus: simulation.status, exposureClass: classifyEffectExposure(simulation) })
-					draft.protectionLevel = simulation.status === 'success' ? 'P3' : 'P1'
-				} catch { draft = observeMalformedSolanaTransaction(String(rawTx || '')) }
-			}
-			const observation = insertClearSignObservation(draft, { deviceId: engine.getDeviceState().deviceId, source: 'vault-swap' })
-			void auditUnknownClearSignShape(draft, {
-				evm: draft.chain === 'Ethereum' ? getEvmSimulationEndpoint(Number(draft.shape.chainId || 1)) : undefined,
-				solana: getSetting('solana_rpc_endpoint') || 'https://api.mainnet-beta.solana.com',
-			})
-			try {
-				const result = await sign()
-				if (input.tx.erc7730 || input.tx.txMetadata || input.tx.schema || result?.clearSignPromotionBundleHash) authenticateClearSignObservation(
-					observation.id, input.tx.erc7730 ? 'erc7730' : input.tx.txMetadata?.keyId === 0x80 || result?.clearSignPromotionBundleHash ? 'certified' : 'runtime',
-					1, Boolean(result?.clearSignPromotionBundleHash), result?.clearSignPromotionBundleHash,
-				)
-				finalizeClearSignObservation(observation.id, 'signed')
-				return result
-			} catch (error: any) {
-				const rejected = /reject|cancel|denied/i.test(deviceErrorMessage(error))
-				finalizeClearSignObservation(observation.id, rejected ? 'rejected' : 'failed', rejected ? 'user-rejected' : 'device-or-transport')
-				throw error
-			}
-		},
+		protectSign: (input, sign) => protectSwapSignature({
+			isPassphraseWallet: () => engine.isPassphraseWallet,
+			firmwareVersion: () => engine.getDeviceState().firmwareVersion,
+			deviceId: () => engine.getDeviceState().deviceId,
+			evmEndpoint: getEvmSimulationEndpoint,
+			solanaEndpoint: () => getSetting('solana_rpc_endpoint') || 'https://api.mainnet-beta.solana.com',
+		}, input, sign),
 		onClearSignEvent: (event) => recordClearSignEvent({
 			kind: 'transaction',
 			source: 'vault-rpc',
@@ -4163,9 +4122,11 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						: contactProofAttached ? 'none'
 							: effectiveParams?.txMetadata?.keyId === 0x80 ? 'certified'
 								: effectiveParams?.txMetadata ? 'runtime' : 'none'
+					const chainId = Number(effectiveParams?.chainId || 1)
 					const draft = observeEvmCall({
-						chainId: Number(effectiveParams?.chainId || 1), to: effectiveParams?.to, data: effectiveParams?.data,
+						chainId, to: effectiveParams?.to, data: effectiveParams?.data,
 						source: definitionSource,
+						native: evmShownNatively({ to: effectiveParams?.to, data: effectiveParams?.data, value: effectiveParams?.value, chainId }, engine.getDeviceState().firmwareVersion),
 						definitionResolution: effectiveParams?.erc7730 || (effectiveParams?.txMetadata && !contactProofAttached)
 							? 'selected' : promotedResolution.status,
 					})
@@ -4367,6 +4328,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						const draft = observeSolanaTransaction({
 							rawTxBase64: String((params as any).rawTx),
 							source: schema ? (promoted || (params as any)?.certificate ? 'certified' : 'runtime') : 'none',
+							native: await solanaShownNatively(String((params as any).rawTx), engine.getDeviceState().firmwareVersion, schema),
 							definitionResolution: schema ? 'selected' : promotedResolution?.status || 'not-checked',
 						})
 						observationId = insertClearSignObservation(draft, { deviceId: engine.getDeviceState().deviceId, source: 'vault-rpc' }).id

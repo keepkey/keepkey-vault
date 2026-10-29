@@ -688,6 +688,7 @@ describe('message verdicts', () => {
     let seen: SigningRequestInfo | undefined
     const wc = new WalletConnectManager({
       getEvmAddressInfo: () => ({ address: USER }),
+      recordClearSignObservation: () => undefined,
       requestSigningApproval: async (info: SigningRequestInfo) => { seen = info; return false },
     } as any)
     await expect((wc as any).signMessage(hex(siwe), [], 'Uniswap', 1)).rejects.toThrow('User rejected signing')

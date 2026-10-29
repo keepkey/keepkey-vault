@@ -20,6 +20,8 @@ import type {
   ClearSignDefinitionResolution,
   ClearSignExposureClass,
   ClearSignProtectionLevel,
+  ClearSignObservationChain,
+  SigningRequestInfo,
 } from '../shared/types'
 import type { EffectReport } from '../shared/transaction-effects'
 import { parseSolanaMessage, parseSolanaTx, solanaMessageSlice } from './solana-tx'
@@ -28,8 +30,10 @@ function digestShape(shape: Record<string, unknown>): string {
   return createHash('sha256').update(JSON.stringify(shape)).digest('hex')
 }
 
-/** Audit and promotion operate on one reusable instruction; coverage remains per signing request. */
+/** Audit and promotion operate on one reusable instruction; coverage remains per signing request.
+ *  Messages and other chains' transactions have no contract or program to audit. */
 export function expandClearSignAuditDrafts(draft: ClearSignObservationDraft): ClearSignObservationDraft[] {
+  if (draft.requestKind === 'message' || draft.requestKind === 'transaction') return []
   if (draft.chain !== 'Solana' || !Array.isArray(draft.shape.components)) return [draft]
   return draft.shape.components
     .filter(component => component && typeof component === 'object')
@@ -111,7 +115,7 @@ export function summarizeClearSignObservations(observations: ClearSignObservatio
     if (authenticatedComponentCount === 0) componentCoverage.unauthenticatedRequests++
     else if (authenticatedComponentCount >= componentCount) componentCoverage.fullyAuthenticatedRequests++
     else componentCoverage.partiallyAuthenticatedRequests++
-    add(byChain[observation.chain], authenticated)
+    add(byChain[observation.chain] ??= emptySlice(), authenticated)
     add(bySource[observation.source], authenticated)
     const age = Math.max(0, now - observation.createdAt)
     if (age <= 24 * 60 * 60 * 1000) add(last24Hours, authenticated)
@@ -197,7 +201,9 @@ export function summarizeClearSignObservations(observations: ClearSignObservatio
   }
 }
 
-function levelFor(source: ClearSignDefinitionSource, hostDecoded: boolean, simulated: boolean): ClearSignProtectionLevel {
+function levelFor(source: ClearSignDefinitionSource, hostDecoded: boolean, simulated: boolean, native = false): ClearSignProtectionLevel {
+  // The firmware shows the request from its own decode: nothing to authenticate.
+  if (native) return 'P4'
   if (simulated) return 'P3'
   // Presence is not authentication. Certified/ERC-7730 metadata is only a
   // host-visible candidate until the device accepts it for these exact bytes;
@@ -222,6 +228,8 @@ export interface EvmObservationInput {
   simulationStatus?: Exclude<ClearSignSimulationStatus, 'not-requested'>
   definitionResolution?: ClearSignDefinitionResolution
   exposureClass?: ClearSignExposureClass
+  /** The device shows this call from its own decode (clearsign-native.ts). */
+  native?: boolean
 }
 
 export interface EvmTypedDataObservationInput {
@@ -285,16 +293,16 @@ export function observeEvmCall(input: EvmObservationInput): ClearSignObservation
     selector,
     calldataLength: valid ? clean.length / 2 : -1,
   }
-  const source = input.source || 'none'
+  const source = input.native ? 'native' : input.source || 'none'
   return {
     chain: 'Ethereum',
     requestKind: 'evm-call',
     shapeKey: `evm:${digestShape(shape)}`,
     shape,
-    protectionLevel: levelFor(source, input.hostDecoded === true, input.simulated === true),
+    protectionLevel: levelFor(source, input.hostDecoded === true, input.simulated === true, input.native),
     definitionSource: source,
     simulationStatus: input.simulationStatus || (input.simulated ? 'success' : 'not-requested'),
-    definitionResolution: input.definitionResolution || (source === 'none' ? 'not-checked' : 'selected'),
+    definitionResolution: input.definitionResolution || (source === 'none' || input.native ? 'not-checked' : 'selected'),
     exposureClass: input.exposureClass || 'not-evaluated',
   }
 }
@@ -307,6 +315,8 @@ export interface SolanaObservationInput {
   simulationStatus?: Exclude<ClearSignSimulationStatus, 'not-requested'>
   definitionResolution?: ClearSignDefinitionResolution
   exposureClass?: ClearSignExposureClass
+  /** The device reviews every instruction itself (clearsign-native.ts). */
+  native?: boolean
 }
 
 /**
@@ -350,16 +360,16 @@ export function observeSolanaTransaction(input: SolanaObservationInput): ClearSi
     hasLookupTables: message.altEntries.length > 0,
     components,
   }
-  const source = input.source || 'none'
+  const source = input.native ? 'native' : input.source || 'none'
   return {
     chain: 'Solana',
     requestKind: 'solana-transaction',
     shapeKey: `solana:${digestShape(shape)}`,
     shape,
-    protectionLevel: levelFor(source, input.hostDecoded === true, input.simulated === true),
+    protectionLevel: levelFor(source, input.hostDecoded === true, input.simulated === true, input.native),
     definitionSource: source,
     simulationStatus: input.simulationStatus || (input.simulated ? 'success' : 'not-requested'),
-    definitionResolution: input.definitionResolution || (source === 'none' ? 'not-checked' : 'selected'),
+    definitionResolution: input.definitionResolution || (source === 'none' || input.native ? 'not-checked' : 'selected'),
     exposureClass: input.exposureClass || 'not-evaluated',
   }
 }
@@ -380,4 +390,73 @@ export function observeMalformedSolanaTransaction(rawTxBase64: string): ClearSig
     definitionResolution: 'invalid-request',
     exposureClass: 'not-evaluated',
   }
+}
+
+export interface SigningRequestObservationInput {
+  chain: ClearSignObservationChain
+  requestKind: 'message' | 'transaction'
+  /** The REST route (WalletConnect uses the route its card names); swaps `swap:<chain family>`. */
+  route: string
+  /** The device shows the request from its own decode, or as text the user can read. */
+  native: boolean
+  /** Public structure only: never message text, amounts, addresses or memos. */
+  detail?: Record<string, unknown>
+}
+
+/** Count a message or a non-EVM/Solana transaction by route. Never audited
+ *  (expandClearSignAuditDrafts): there is no contract or program to look up. */
+export function observeSigningRequest(input: SigningRequestObservationInput): ClearSignObservationDraft {
+  const shape = { route: input.route, ...input.detail }
+  return {
+    chain: input.chain,
+    requestKind: input.requestKind,
+    shapeKey: `${input.requestKind === 'message' ? 'msg' : 'tx'}:${digestShape(shape)}`,
+    shape,
+    protectionLevel: input.native ? 'P4' : 'P1',
+    definitionSource: input.native ? 'native' : 'none',
+    simulationStatus: 'not-requested',
+    definitionResolution: 'not-checked',
+    exposureClass: 'not-evaluated',
+  }
+}
+
+const CHAIN_BY_ROUTE: Record<string, ClearSignObservationChain> = {
+  eth: 'Ethereum', solana: 'Solana', utxo: 'UTXO', xrp: 'XRP', tron: 'Tron', ton: 'TON', hive: 'Hive',
+  cosmos: 'Cosmos', osmosis: 'Osmosis', thorchain: 'THORChain', mayachain: 'Mayachain',
+}
+const MESSAGE_ROUTE = /^\/[a-z]+\/sign(-message|-offchain-message|-typed-hash)?$/
+
+/**
+ * The observation for an approval card on a route without its own observer:
+ * every message, and every transaction that is not EVM or Solana. A message
+ * is native only when the device shows readable text; a hash or other binary
+ * message (a Safe safeTxHash, say) is shown as bytes nobody can check. A
+ * transaction is native unless Desktop's own gates say the device will need
+ * blind signing for it. `msgs` is an amino sign doc's message list: only the
+ * public type strings are kept.
+ */
+export function observeSigningInfo(info: SigningRequestInfo, msgs?: unknown): ClearSignObservationDraft | undefined {
+  const route = String(info.method || '')
+  const chain = CHAIN_BY_ROUTE[route.split('/')[1]]
+  if (!chain) return undefined
+  if (MESSAGE_ROUTE.test(route)) {
+    const solana = info.solanaMessageDecoded
+    const readable = solana ? solana.plainText === true : info.ethMessageDecoded?.isUtf8Text === true
+    const hex = String(info.ethMessageDecoded?.messageRaw || '').replace(/^0x/i, '')
+    const byteLength = solana ? solana.byteLength
+      : info.ethMessageDecoded && /^(?:[0-9a-fA-F]{2})+$/.test(hex) ? hex.length / 2 : undefined
+    return observeSigningRequest({
+      chain, requestKind: 'message', route, native: readable,
+      detail: readable ? { format: 'text' } : {
+        format: 'bytes', ...(solana ? { classification: solana.classification } : {}), ...(byteLength != null ? { byteLength } : {}),
+      },
+    })
+  }
+  const msgTypes = Array.isArray(msgs)
+    ? msgs.slice(0, 16).map((m: any) => typeof m?.type === 'string' ? m.type.slice(0, 128) : 'unknown') : undefined
+  return observeSigningRequest({
+    chain, requestKind: 'transaction', route,
+    native: info.needsBlindSigning !== true && info.requiresAdvancedMode !== true,
+    ...(msgTypes ? { detail: { msgTypes } } : {}),
+  })
 }
