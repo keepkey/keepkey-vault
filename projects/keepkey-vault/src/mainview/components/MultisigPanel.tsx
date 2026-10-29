@@ -80,11 +80,17 @@ function SafeCard({ info, me, symbol }: { info: SafeInfo; me: string; symbol: st
 				<Box>
 					<Text fontSize="14px" fontWeight="600" color="var(--text-0)" fontFamily="mono" wordBreak="break-all">{info.address}</Text>
 					<Text fontSize="12px" color="var(--text-2)">{info.threshold} of {info.owners.length} owners must sign · Safe {info.version} · next nonce {info.nonce}</Text>
+					<Box mt="1">{info.issues.length === 0 ? <Badge tone="ok">Standard Safe</Badge> : <Badge tone="warn">Not a standard Safe</Badge>}</Box>
 				</Box>
 				<Text fontSize="12px" color="var(--gold)">{open ? "Hide" : "Open"}</Text>
 			</Flex>
 			{open && (
 				<VStack align="stretch" gap="3" mt="3">
+					{info.issues.length > 0 && (
+						<Box>
+							{info.issues.map(i => <Text key={i} fontSize="12px" color="#f5c542">{i}.</Text>)}
+						</Box>
+					)}
 					<Box>
 						<Text fontSize="12px" fontWeight="600" color="var(--text-1)" mb="1">Owners</Text>
 						{info.owners.map(o => (

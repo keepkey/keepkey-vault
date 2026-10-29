@@ -1079,6 +1079,8 @@ export interface SafeInfo {
   threshold: number
   nonce: number
   version: string
+  /** What makes this not a standard Safe (unknown code, guard, modules); empty when standard. */
+  issues: string[]
 }
 
 /** A proposed, not-yet-executed Safe transaction, re-derived locally. */
