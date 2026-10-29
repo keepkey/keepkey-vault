@@ -48,6 +48,19 @@ async function txServiceAll(chainId: number, path: string): Promise<any[]> {
   return results
 }
 
+/** Adds an owner's signature to a proposal on Safe's Transaction Service. */
+export async function postConfirmation(chainId: number, safeTxHash: string, signature: string): Promise<void> {
+  const base = (await safeTxServices()).get(chainId)
+  if (!base) throw new Error(`Safe does not support chain ${chainId}`)
+  const resp = await fetch(`${base}/api/v1/multisig-transactions/${safeTxHash}/confirmations/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ signature }),
+    signal: AbortSignal.timeout(15_000),
+  })
+  if (!resp.ok) throw new Error(`Safe Transaction Service refused the signature (HTTP ${resp.status}): ${(await resp.text()).slice(0, 200)}`)
+}
+
 /** Safes on this chain that list `owner` as an owner (discovery only). */
 export async function listOwnedSafes(chainId: number, owner: string): Promise<string[]> {
   const safes = await txServiceAll(chainId, `/v2/owners/${ethers.utils.getAddress(owner)}/safes/`)

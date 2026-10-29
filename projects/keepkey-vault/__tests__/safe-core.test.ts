@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import fixture from './fixtures/safe/safedao-nonce76.json'
-import { safeTxHash, verifiedSigners, checkConfirmation, approvedHashCall, safeTxDomain, SAFE_READS, decodeSafeRead } from '../src/bun/safe-core'
+import { ethers } from 'ethers'
+import { safeTxHash, verifiedSigners, checkConfirmation, approvedHashCall, safeTxDomain, safeTypedData, safeSignature, SAFE_READS, decodeSafeRead } from '../src/bun/safe-core'
 
 // A real executed transaction from the Safe DAO treasury (Safe 1.3.0, chain 1):
 // a delegatecall to MultiSendCallOnly with 676 bytes of data and three
@@ -68,6 +69,36 @@ describe('each service confirmation is checked against the owner it names', () =
     expect(checkConfirmation(tx.safeTxHash, tx.owners, { owner: A, signature: contractSig })).toBe('unverified')
     expect(checkConfirmation(tx.safeTxHash, [B, C], { owner: A, signature: sig(0) })).toBe('unverified')
     expect(checkConfirmation(tx.safeTxHash, tx.owners, { owner: A, signature: null })).toBe('unverified')
+  })
+})
+
+describe('the document sent to the KeepKey', () => {
+  test('hashes to the safeTxHash Safe published', () => {
+    const doc = safeTypedData(Number(tx.chainId), tx.safe, tx.version, tx)
+    const { EIP712Domain, ...types } = doc.types
+    expect(EIP712Domain.map(f => f.name)).toEqual(['chainId', 'verifyingContract'])
+    expect(ethers.utils._TypedDataEncoder.hash(doc.domain, types, doc.message)).toBe(tx.safeTxHash)
+  })
+
+  test('Safe 1.1.1 documents carry no chainId', () => {
+    expect(safeTypedData(1, tx.safe, '1.1.1', tx).types.EIP712Domain.map(f => f.name)).toEqual(['verifyingContract'])
+  })
+
+  test('a signature over it verifies for the owner who made it, and only them', async () => {
+    const owner = ethers.Wallet.createRandom()
+    const doc = safeTypedData(Number(tx.chainId), tx.safe, tx.version, tx)
+    const { EIP712Domain, ...types } = doc.types
+    const raw = await owner._signTypedData(doc.domain, types, doc.message)
+    const owners = [...tx.owners, owner.address]
+    expect(checkConfirmation(tx.safeTxHash, owners, { owner: owner.address, signature: safeSignature(raw) })).toBe('verified')
+    expect(checkConfirmation(tx.safeTxHash, owners, { owner: tx.owners[0], signature: safeSignature(raw) })).toBe('unverified')
+  })
+
+  test('v 0/1 signatures are normalised to 27/28, anything else is refused', () => {
+    const sig = '0x' + '11'.repeat(64)
+    expect(safeSignature(sig + '00').endsWith('1b')).toBe(true)
+    expect(safeSignature(sig + '1c').endsWith('1c')).toBe(true)
+    expect(() => safeSignature(sig)).toThrow('65-byte')
   })
 })
 

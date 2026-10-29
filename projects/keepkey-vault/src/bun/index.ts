@@ -7251,6 +7251,31 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const info = await readSafe(params.chainId, params.address)
 				return { info, pending: await pendingSafeTxs(info) }
 			},
+			safeConfirm: async (params) => {
+				if (!engine.wallet) throw new Error('No device connected')
+				const firmware = engine.getDeviceState().firmwareVersion
+				// 7.16 shows every SafeTx field on the device; older firmware only shows hashes.
+				if (!firmware || versionCompare(firmware, '7.16.0') < 0) throw new Error('Signing Safe transactions needs KeepKey firmware 7.16 or newer. Update it from Settings (opt in to new firmware).')
+				if (!evmAddresses.isInitialized) await evmAddresses.initialize(engine.wallet)
+				const me = evmAddresses.getSelectedAddress()
+				if (!me) throw new Error('No EVM address')
+				const { readSafe, pendingSafeTxs, postConfirmation } = await import('./safe')
+				const { safeTypedData, safeSignature, checkConfirmation } = await import('./safe-core')
+				// Everything is re-read here; nothing the screen sent is trusted except which proposal.
+				const info = await readSafe(params.chainId, params.address)
+				if (!info.owners.some(o => o.toLowerCase() === me.address.toLowerCase())) throw new Error(`${me.address} is not an owner of this Safe`)
+				const tx = (await pendingSafeTxs(info)).find(t => t.safeTxHash.toLowerCase() === params.safeTxHash.toLowerCase())
+				if (!tx) throw new Error('This proposal is no longer pending, or its fields do not produce that hash')
+				if (!tx.hashMatches) throw new Error("Safe's service published a different hash for this proposal. Do not sign it.")
+				const signOp = () => engine.wallet!.ethSignTypedData({ addressNList: evmAddressPath(me.addressIndex), typedData: safeTypedData(info.chainId, info.address, info.version, tx) } as any)
+				const result: any = engine.isEmulator ? await emuSigningOp(signOp, { operation: 'ethSignTypedData', chain: 'Ethereum' }) : await signOp()
+				const signature = safeSignature(typeof result === 'string' ? result : result?.signature)
+				if (checkConfirmation(tx.safeTxHash, info.owners, { owner: me.address, signature }) !== 'verified') {
+					throw new Error('The KeepKey signature does not recover to your owner address for this hash; it was not sent')
+				}
+				await postConfirmation(info.chainId, tx.safeTxHash, signature)
+				return { signature }
+			},
 			zcashShieldedBalance: async () => {
 				if (!zcashPrivacyEnabled) throw new Error('Zcash privacy feature is disabled')
 				if (hasFvkLoaded() && !zcashDeviceVerified) {

@@ -44,6 +44,31 @@ function message(tx: SafeTxFields) {
   return { ...tx, data: tx.data || '0x' }
 }
 
+/** The EIP-712 document the KeepKey signs; its hash is safeTxHash. */
+export function safeTypedData(chainId: number, safe: string, version: string, tx: SafeTxFields) {
+  const domain = safeTxDomain(chainId, safe, version)
+  return {
+    types: {
+      EIP712Domain: [
+        ...('chainId' in domain ? [{ name: 'chainId', type: 'uint256' }] : []),
+        { name: 'verifyingContract', type: 'address' },
+      ],
+      SafeTx: SAFE_TX_TYPE,
+    },
+    primaryType: 'SafeTx',
+    domain,
+    message: message(tx),
+  }
+}
+
+/** Safe accepts ECDSA owner signatures with v 27/28; some signers return 0/1. */
+export function safeSignature(signature: string): string {
+  const bytes = ethers.utils.arrayify(signature)
+  if (bytes.length !== 65) throw new Error(`Expected a 65-byte signature, got ${bytes.length}`)
+  if (bytes[64] < 27) bytes[64] += 27
+  return ethers.utils.hexlify(bytes)
+}
+
 /** The safeTxHash an owner signs, from the transaction's own fields. */
 export function safeTxHash(chainId: number, safe: string, version: string, tx: SafeTxFields): string {
   return ethers.utils._TypedDataEncoder.hash(safeTxDomain(chainId, safe, version), { SafeTx: SAFE_TX_TYPE }, message(tx))

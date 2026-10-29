@@ -6,8 +6,11 @@
  * mismatch rather than as something to sign.
  */
 import { useCallback, useEffect, useState, type ReactNode } from "react"
+import { createPortal } from "react-dom"
 import { Box, Flex, Text, Spinner, VStack } from "@chakra-ui/react"
 import { rpcRequest } from "../lib/rpc"
+import { Z } from "../lib/z-index"
+import { playAttention, playSent } from "../lib/sounds"
 import type { SafeInfo, PendingSafeTx } from "../../shared/types"
 
 const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase()
@@ -35,10 +38,68 @@ function Badge({ tone, children }: { tone: "ok" | "warn" | "bad" | "muted"; chil
 	)
 }
 
-function PendingRow({ tx, info, me, symbol }: { tx: PendingSafeTx; info: SafeInfo; me: string; symbol: string }) {
+const ZERO = "0x0000000000000000000000000000000000000000"
+
+/** The fields in the order the KeepKey shows them, so they can be compared screen by screen. */
+function reviewRows(tx: PendingSafeTx, info: SafeInfo, symbol: string): [string, string][] {
+	const data = tx.data && tx.data !== "0x" ? tx.data : "0x"
+	return [
+		["Chain ID", String(info.chainId)],
+		["Safe (verifying contract)", info.address],
+		["to", tx.to],
+		["value", `${tx.value} wei${nativeAmount(tx.value, symbol) ? ` (${nativeAmount(tx.value, symbol)})` : ""}`],
+		["data", data === "0x" ? "none" : `${(data.length - 2) / 2} bytes: ${data}`],
+		["operation", tx.operation === 1 ? "1 (delegate call)" : "0 (call)"],
+		["safeTxGas", tx.safeTxGas],
+		["baseGas", tx.baseGas],
+		["gasPrice", tx.gasPrice],
+		["gasToken", tx.gasToken === ZERO ? `${ZERO} (native)` : tx.gasToken],
+		["refundReceiver", tx.refundReceiver],
+		["nonce", tx.nonce],
+	]
+}
+
+function SignOnDevice() {
+	return createPortal(
+		<Flex position="fixed" inset={0} bg="blackAlpha.800" zIndex={Z.dialog} align="center" justify="center" p="4"
+			role="dialog" aria-modal="true" aria-label="Signing on KeepKey">
+			<VStack bg="var(--bg-1, #111)" border="1px solid" borderColor="var(--line)" borderRadius="xl" p="6" maxW="420px" gap="3">
+				<Spinner color="kk.gold" />
+				<Text fontSize="15px" fontWeight="600" color="var(--text-0)">Confirm on your KeepKey</Text>
+				<Text fontSize="13px" color="var(--text-2)" textAlign="center">
+					Your KeepKey shows each field of this Safe transaction. Check every screen against the review in Desktop,
+					and reject on the device if anything differs.
+				</Text>
+			</VStack>
+		</Flex>,
+		document.body,
+	)
+}
+
+function PendingRow({ tx, info, me, symbol, onSigned }: { tx: PendingSafeTx; info: SafeInfo; me: string; symbol: string; onSigned: () => void }) {
+	const [reviewing, setReviewing] = useState(false)
+	const [signing, setSigning] = useState(false)
+	const [signError, setSignError] = useState<string | null>(null)
+	const isOwner = info.owners.some(o => same(o, me))
 	// Only signatures checked here count toward the threshold.
 	const confirmations = tx.confirmedBy.length
 	const signedByMe = tx.confirmedBy.some(a => same(a, me))
+	const canSign = isOwner && !signedByMe && tx.hashMatches
+
+	const sign = async () => {
+		setSigning(true); setSignError(null)
+		playAttention()
+		try {
+			await rpcRequest("safeConfirm", { chainId: info.chainId, address: info.address, safeTxHash: tx.safeTxHash }, 600000)
+			playSent()
+			setReviewing(false)
+			onSigned()
+		} catch (e: any) {
+			setSignError(e?.message || "Signing failed")
+		} finally {
+			setSigning(false)
+		}
+	}
 	return (
 		<Box p="3" borderRadius="lg" bg="rgba(255,255,255,0.03)" border="1px solid" borderColor={tx.hashMatches ? "var(--line)" : "#F56565"}>
 			<Flex justify="space-between" align="center" gap="2" wrap="wrap">
@@ -58,6 +119,26 @@ function PendingRow({ tx, info, me, symbol }: { tx: PendingSafeTx; info: SafeInf
 				<Text fontSize="12px" color="#f5c542" mt="1">A delegate call runs other code with this Safe's full authority. Only approve it if you know exactly what it does.</Text>
 			)}
 			<Text fontSize="11px" color="var(--text-2)" fontFamily="mono" mt="1.5" wordBreak="break-all">Safe tx hash {tx.safeTxHash}</Text>
+			{canSign && !reviewing && (
+				<Text as="button" fontSize="12px" fontWeight="600" color="var(--gold)" mt="2" onClick={() => setReviewing(true)}>Review and sign</Text>
+			)}
+			{reviewing && (
+				<Box mt="2" p="3" borderRadius="md" bg="rgba(255,255,255,0.03)" border="1px solid" borderColor="var(--line)">
+					<Text fontSize="12px" color="var(--text-1)" mb="2">Your KeepKey will show these fields. Each one must match.</Text>
+					{reviewRows(tx, info, symbol).map(([k, v]) => (
+						<Flex key={k} gap="3" fontSize="12px" py="0.5">
+							<Text color="var(--text-2)" minW="150px">{k}</Text>
+							<Text color="var(--text-0)" fontFamily="mono" wordBreak="break-all">{v}</Text>
+						</Flex>
+					))}
+					{signError && <Text fontSize="12px" color="#F56565" mt="2">{signError}</Text>}
+					<Flex gap="4" mt="3">
+						<Text as="button" fontSize="13px" fontWeight="600" color="var(--gold)" onClick={sign}>Sign on KeepKey</Text>
+						<Text as="button" fontSize="13px" color="var(--text-2)" onClick={() => { setReviewing(false); setSignError(null) }}>Cancel</Text>
+					</Flex>
+				</Box>
+			)}
+			{signing && <SignOnDevice />}
 		</Box>
 	)
 }
@@ -111,7 +192,7 @@ function SafeCard({ info, me, symbol }: { info: SafeInfo; me: string; symbol: st
 						{error ? <Text fontSize="12px" color="#F56565">{error}</Text>
 							: !pending ? <Spinner size="sm" color="kk.gold" />
 							: pending.length === 0 ? <Text fontSize="12px" color="var(--text-2)">Nothing pending.</Text>
-							: <VStack align="stretch" gap="2">{pending.map(tx => <PendingRow key={tx.safeTxHash} tx={tx} info={info} me={me} symbol={symbol} />)}</VStack>}
+							: <VStack align="stretch" gap="2">{pending.map(tx => <PendingRow key={tx.safeTxHash} tx={tx} info={info} me={me} symbol={symbol} onSigned={() => setPending(null)} />)}</VStack>}
 					</Box>
 				</VStack>
 			)}
@@ -161,7 +242,7 @@ export function MultisigPanel({ chainId, chainName, symbol }: { chainId: number;
 					{state.safes.map(s => <SafeCard key={s.address} info={s} me={state.owner} symbol={symbol} />)}
 				</>
 			)}
-			<Text fontSize="11px" color="var(--text-2)">Signing, executing, and guided setup for new Safes and owner changes are coming next.</Text>
+			<Text fontSize="11px" color="var(--text-2)">Executing, and guided setup for new Safes and owner changes, are coming next.</Text>
 		</VStack>
 	)
 }
