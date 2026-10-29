@@ -160,17 +160,29 @@ export function formatSimulatedHoldings(s: SimulatedHoldings): string {
 }
 
 const TOKEN_2022 = 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb'
+const TOKEN_PROGRAMS = new Set(['TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', TOKEN_2022])
 const JUPITER_V6 = 'JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4'
 type TokenAccounts = SolanaTxDecodedInfo['tokenAccounts']
 
 /** An amount of a mint, named only from the checked table. */
 function solanaTokenAmount(raw: string, mint: string | undefined): string {
-  const id = mint ? SOLANA_TOKEN_IDENTITIES[mint] : undefined
+  if (!mint) return `${BigInt(raw).toLocaleString('en-US')} base units of a token this computer could not check`
+  const id = SOLANA_TOKEN_IDENTITIES[mint]
   return tokenAmount(raw, mint, id?.symbol, id?.decimals, true)
 }
 
-/** Plain sentence for an instruction KeepKey fully understands, or null. */
-function describeKnown(ix: SolanaTxDecodedInstruction, tokenAccounts: TokenAccounts, from?: string): RiskReason | null {
+/** The token account a Jupiter swap pays out to: the optional
+ *  destinationTokenAccount when set (left empty it is the program id),
+ *  otherwise the user's own. */
+function jupiterOutput(ix: SolanaTxDecodedInstruction): string | undefined {
+  const optional = acct(ix, 'destinationTokenAccount')
+  return optional && optional !== JUPITER_V6 ? optional : acct(ix, 'userDestinationTokenAccount')
+}
+
+/** Plain sentence for an instruction KeepKey fully understands, or null.
+ *  `from` is the signing account; `swapOutputs` the accounts a Jupiter swap
+ *  in this transaction pays out to. */
+function describeKnown(ix: SolanaTxDecodedInstruction, tokenAccounts: TokenAccounts, from?: string, swapOutputs = new Set<string>()): RiskReason | null {
   const name = ix.instructionName
   if (ix.programName === 'System Program' && name === 'transfer') {
     const to = acct(ix, 'destination')
@@ -207,6 +219,23 @@ function describeKnown(ix: SolanaTxDecodedInstruction, tokenAccounts: TokenAccou
     const to = held ? ` to ${held.owner}${held.owner === from ? ' (your own account)' : ''}` : dest ? ` to token account ${dest}` : ''
     return { level: 'low', text: `Sends ${amount}${to}.` }
   }
+  // Closing a token account sends all of its SOL (rent, and for wrapped SOL
+  // the balance, e.g. a swap's SOL output) to `destination`.
+  if (TOKEN_PROGRAMS.has(ix.programId) && name === 'closeAccount') {
+    const account = acct(ix, 'account'), dest = acct(ix, 'destination')
+    if (!account || !dest) return null
+    const swapOut = swapOutputs.has(account)
+    const what = swapOut ? `the account ${account} that receives the swap output` : `token account ${account}`
+    if (!from) return { level: 'medium', text: `Closes ${what} and sends everything in it to ${dest}. This computer could not check whether that is your account.` }
+    if (dest === from) {
+      return { level: 'low', text: swapOut ? `Unwraps the swap output and sends it to ${dest} (your own account).` : `Closes token account ${shortAddr(account)} and returns its SOL to ${dest} (your own account).` }
+    }
+    const yours = swapOut || acct(ix, 'owner') === from || tokenAccounts?.[account]?.owner === from
+    if (!yours) return { level: 'low', text: `Closes token account ${account}, which is not yours, and sends its SOL to ${dest}.` }
+    return { level: 'high', text: swapOut
+      ? `The swap output goes to ${dest}, which is NOT the account signing this (${from}): this step closes ${account} and sends everything in it there.`
+      : `Closes your token account ${account} and sends its SOL to ${dest}, which is NOT the account signing this (${from}).` }
+  }
   if (name === 'approve' || name === 'approveChecked') {
     const raw = arg(ix, 'amount') ?? '0'
     const dec = arg(ix, 'decimals')
@@ -227,10 +256,15 @@ function jupiterSwap(ix: SolanaTxDecodedInstruction, d: SolanaTxDecodedInfo, req
   // The amounts did not read: the note line says so, nothing to state here.
   if (slip === undefined || (quotedOut === undefined && quotedIn === undefined)) return
   const src = acct(ix, 'userSourceTokenAccount') ?? acct(ix, 'sourceTokenAccount')
-  const optional = acct(ix, 'destinationTokenAccount')
-  const out = optional && optional !== JUPITER_V6 ? optional : acct(ix, 'userDestinationTokenAccount')
-  const inMint = acct(ix, 'sourceMint') ?? (src ? d.tokenAccounts?.[src]?.mint : undefined)
-  const outMint = acct(ix, 'destinationMint')
+  const out = jupiterOutput(ix)
+  // The mint the account actually holds over the instruction's own label.
+  const srcHeld = src ? d.tokenAccounts?.[src] : undefined
+  const outHeld = out ? d.tokenAccounts?.[out] : undefined
+  const inLabel = acct(ix, 'sourceMint'), outLabel = acct(ix, 'destinationMint')
+  const inMint = srcHeld?.mint ?? inLabel
+  const outMint = outHeld?.mint ?? outLabel
+  if (srcHeld && inLabel && srcHeld.mint !== inLabel) add('high', `This swap says it spends token ${inLabel}, but the account it spends from holds token ${srcHeld.mint}.`)
+  if (outHeld && outLabel && outHeld.mint !== outLabel) add('high', `This swap says it pays out token ${outLabel}, but the account that receives it holds token ${outHeld.mint}.`)
   const pct = (bps: bigint) => `${Number(bps) / 100}%`
   const venues = arg(ix, 'route') ? `, routed through ${arg(ix, 'route')}` : ''
   const fw = notOnThisFirmware('Jupiter swaps', req.firmwareVersion)
@@ -251,9 +285,12 @@ function jupiterSwap(ix: SolanaTxDecodedInstruction, d: SolanaTxDecodedInfo, req
   // Integrator fees run up to about 1%; well past that it is not a fee.
   if (fee !== undefined && fee > 100n) add('high', `${pct(fee)} of this swap goes to the app as a fee.`)
   else if (fee) add('low', `App fee: ${pct(fee)} of this swap.`)
-  const holder = out ? d.tokenAccounts?.[out]?.owner : undefined
-  if (!holder) add('medium', 'This computer could not check which account receives the swap output.')
-  else if (req.from && holder !== req.from) add('high', `The swap output goes to ${holder}, which is NOT the account signing this (${req.from}).`)
+  // The swap's own transfer authority is in the signed bytes, so a caller
+  // that did not say who signs (decode-transaction) is still checked.
+  const me = req.from ?? acct(ix, 'userTransferAuthority')
+  const holder = outHeld?.owner
+  if (!holder || !me) add('medium', 'This computer could not check which account receives the swap output.')
+  else if (holder !== me) add('high', `The swap output goes to ${holder}, which is NOT the account signing this (${me}).`)
 }
 
 // ── EVM ──────────────────────────────────────────────────────────────
@@ -727,6 +764,13 @@ function tronTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void)
     case 'Reclaim delegated resources':
       add('low', `Takes back the ${c.resource} of ${c.amount} of stake you lent to ${c.receiver}.`)
       break
+    case 'SunSwap swap':
+      add('medium', `Swaps ${c.amountIn} for at least ${c.amountOutMin} through the ${c.contractName} (${c.contract}).`)
+      if (c.noMinimum) add('high', 'Sets no minimum, so this swap can pay you back almost nothing.')
+      if (c.to !== c.owner) add('high', `The swap output goes to ${c.to}, which is NOT the account signing this (${c.owner}).`)
+      if (c.callValue) add('medium', `Also sends ${c.callValue} to the contract.`)
+      fw('SunSwap swaps')
+      return 'known'
     case 'Contract call':
       if (c.contractName) {
         add('medium', `Calls the ${c.contractName} (${c.contract}), a swap contract SUN.io publishes. This computer cannot read the swap amounts, so check them in the app before you sign.`)
@@ -826,13 +870,16 @@ export function assessSigningRisk(req: SigningRequestInfo): RiskAssessment | nul
     const d = req.solanaDecoded
     const assets = d.assetPrograms ?? []
     const unknown = d.instructions.filter((i) => i.status === 'unknown-program')
+    const swaps = d.instructions.filter((i) => i.status === 'known' && i.programId === JUPITER_V6)
+    const me = req.from ?? swaps.map((i) => acct(i, 'userTransferAuthority')).find(Boolean)
+    const swapOutputs = new Set(swaps.map(jupiterOutput).filter((k): k is string => !!k))
 
     for (const ix of d.instructions) {
       if (ix.status === 'known' && ix.programId === JUPITER_V6) {
         jupiterSwap(ix, d, req, add)
         if (ix.note) add('medium', `This Jupiter step has bytes this computer cannot account for (${ix.note}), so it is not decoded in full.`)
       } else if (ix.status === 'known') {
-        const r = describeKnown(ix, d.tokenAccounts, req.from)
+        const r = describeKnown(ix, d.tokenAccounts, me, swapOutputs)
         if (r) reasons.push(r)
         // Token-2022 lets a token's issuer add a transfer fee or a hook that
         // runs on every transfer; nothing here reads those settings.

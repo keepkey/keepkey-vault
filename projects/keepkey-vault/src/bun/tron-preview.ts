@@ -143,6 +143,42 @@ function addressWord(word: Buffer): string {
   return address(Buffer.from(`41${word.subarray(12).toString('hex')}`, 'hex'))
 }
 
+/** A TRC-20 amount, named only for USDT; address(0) is TRX in a SunSwap path. */
+function tronTokenAmount(units: bigint, token: string | null): string {
+  if (token === null) return `${human(units, 6)} TRX`
+  return token === USDT_TRC20 ? `${human(units, 6)} USDT` : `${units} base units of token ${token}`
+}
+
+/** SmartExchangeRouter swapExactInput(address[] path, string[] poolVersion,
+ * uint256[] versionLen, uint24[] fees, SwapData data), selector cef95229, with
+ * SwapData = (amountIn, amountOutMin, to, deadline) inline after the four
+ * array offsets. Layout per SUN.io's router source,
+ * https://github.com/sun-protocol/smart-exchange-router/blob/main/contracts/SmartExchangeRouter.sol
+ * (path[0] is spent, the last path token goes to `to`; address(0) is TRX).
+ * null for anything else or anything that does not read in full. */
+function sunSwapExactInput(call: Buffer) {
+  try {
+    if (call.length < 4 + 8 * 32 || call.subarray(0, 4).toString('hex') !== 'cef95229') return null
+    const uint = (at: number) => {
+      if (at + 32 > call.length) throw Error('Call data too short')
+      return BigInt(`0x${call.subarray(at, at + 32).toString('hex')}`)
+    }
+    const token = (at: number) => (uint(at) === 0n ? null : addressWord(call.subarray(at, at + 32)))
+    const pathOffset = uint(4)
+    if (pathOffset > BigInt(call.length)) return null
+    const pathAt = 4 + Number(pathOffset)
+    const n = uint(pathAt)
+    if (n < 2n || n > 16n) return null
+    const tokenIn = token(pathAt + 32), tokenOut = token(pathAt + 32 * Number(n))
+    const amountIn = uint(4 + 4 * 32), amountOutMin = uint(4 + 5 * 32)
+    return {
+      amountIn: tronTokenAmount(amountIn, tokenIn), amountOutMin: tronTokenAmount(amountOutMin, tokenOut),
+      noMinimum: amountOutMin === 0n, to: addressWord(call.subarray(4 + 6 * 32, 4 + 7 * 32)),
+      trxIn: tokenIn === null ? amountIn : undefined,
+    }
+  } catch { return null }
+}
+
 /** What a TRON transaction the firmware shows only as raw data does, read
  * from the exact raw_data bytes. Advice for the approval card, never a gate:
  * null for anything it does not parse in full (one contract, no unknown
@@ -175,6 +211,13 @@ export function tronCallPreview(rawHex: unknown): TronCallPreview | null {
           amount: usdt ? `${human(units, 6)} USDT` : `${units} base units of token ${target}`,
           unlimited: units >= BOUND_LIMIT, revoke: units === 0n,
         }
+      }
+      const swap = TRON_CONTRACT_NAMES[target] === 'SunSwap Smart Router' ? sunSwapExactInput(call) : null
+      if (swap) {
+        const { trxIn, ...rest } = swap
+        // TRX in is paid as the call value; anything else sent along is extra.
+        return { kind: 'SunSwap swap', owner, contract: target, contractName: TRON_CONTRACT_NAMES[target], ...rest,
+          callValue: callValue > 0n && callValue !== trxIn ? trx(callValue) : undefined }
       }
       return { kind: 'Contract call', owner, contract: target, contractName: TRON_CONTRACT_NAMES[target],
         callValue: callValue > 0n ? trx(callValue) : undefined }

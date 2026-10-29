@@ -21,6 +21,7 @@ import { evmSigningVerdict, withoutErc7730Description } from './evm-presign-repo
 import { buildSolanaMessageDecodedInfo } from './solana-message-preview'
 import { ethMessagePreview } from './eth-message-preview'
 import { buildSolanaDecodedInfo } from './solana-clearsign'
+import { createRpcAltFetcher, DEFAULT_SOLANA_RPC_ENDPOINT } from './solana-alt'
 import { applySolanaSigningGates, solanaSigningVerdict } from './solana-consent'
 import { simulateEvmEffects } from './evm-effects'
 import { simulateSolanaEffects } from './solana-effects'
@@ -77,9 +78,11 @@ async function attachSolanaTransactionPreview(
   endpoint?: string,
 ): Promise<void> {
   try {
+    // Same read-only account lookups as REST: lookup tables and token
+    // accounts, so one transaction gets one verdict on both paths.
     signingInfo.solanaDecoded = await buildSolanaDecodedInfo(
       transactionBase64,
-      async (pubkeys) => pubkeys.map(() => null),
+      createRpcAltFetcher(endpoint || DEFAULT_SOLANA_RPC_ENDPOINT),
     )
   } catch (e: any) {
     signingInfo.solanaDecodeError = `${e?.name || 'Error'}: ${e?.message || String(e)}`

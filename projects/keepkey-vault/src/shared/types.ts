@@ -1205,6 +1205,7 @@ export type TronCallPreview =
   | { kind: 'Vote'; owner: string; votes: { witness: string; count: string }[] }
   | { kind: 'Delegate resources'; owner: string; amount: string; resource: string; receiver: string; locked: boolean }
   | { kind: 'Reclaim delegated resources'; owner: string; amount: string; resource: string; receiver: string }
+  | { kind: 'SunSwap swap'; owner: string; contract: string; contractName: string; amountIn: string; amountOutMin: string; noMinimum: boolean; to: string; callValue?: string }
   | { kind: 'Contract call'; owner: string; contract: string; contractName?: string; callValue?: string }
 
 export interface TronTxPreview {
