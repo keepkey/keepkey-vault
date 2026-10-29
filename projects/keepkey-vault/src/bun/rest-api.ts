@@ -7,7 +7,7 @@ import { HttpError } from './auth'
 import { WIPE_BUSY_MESSAGE, WIPE_REPLUG_PENDING_MESSAGE } from './device-wipe'
 import { DEVICE_LOCKED_MESSAGE, restRequest } from './device-gate'
 import { WalletCacheSession, WalletSessionChangedError, WalletSessionMap } from './wallet-session-cache'
-import type { SigningRequestInfo, ApiLogEntry, EIP712DecodedInfo } from '../shared/types'
+import type { SigningRequestInfo, ApiLogEntry, EIP712DecodedInfo, SafeHashLink } from '../shared/types'
 import { tronPreview } from './tron-preview'
 import type { ClearSignEvent } from '../shared/types'
 import { createHash } from 'crypto'
@@ -132,6 +132,8 @@ export interface RestApiCallbacks {
   /** networkId → chain over the FULL list (built-in + user-added chains). */
   resolveChain?: (networkId: string) => import('../shared/chains').ChainDef | undefined
   onSigningRequest: (info: SigningRequestInfo) => Promise<SigningApprovalDecision>
+  /** The Safe transaction a 32-byte confirmation approves (safe-review.ts safeHashLink). */
+  lookupSafeHash?: (info: SigningRequestInfo) => Promise<SafeHashLink | undefined>
   onSigningDismissed?: (id: string) => void
   onPairRequest: (info: { name: string; url: string; imageUrl: string }) => void
   /** A device policy is being applied (POST /system/apply-policies). */
@@ -1734,6 +1736,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               // EIP-191 personal_sign: body is { address, addressNList, message }.
               signingInfo.from = preview.address
               signingInfo.ethMessageDecoded = ethMessagePreview(preview.address, preview.message)
+              signingInfo.safeHashLink = await callbacks?.lookupSafeHash?.(signingInfo)
             } else if (path === '/ton/sign-transaction') {
               // TON: field names differ from EVM (to_address, amount, raw_tx)
               signingInfo.to = preview.to_address
@@ -2003,6 +2006,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
                 else delete signingInfo.erc7730Description
               }
               const contractFacts = addContractFacts(signingInfo, engine.isPassphraseWallet ? undefined : engine.getDeviceState().deviceId, account)
+              // approveHash: Safe credits the caller, so only the matched key's own Safes count.
+              if (path === '/eth/sign-transaction' && account) signingInfo.safeHashLink = await callbacks?.lookupSafeHash?.({ ...signingInfo, from: account })
               if (path === '/eth/sign-transaction' && /^0x[0-9a-fA-F]{40}$/.test(String(preview.from || ''))) {
                 const chainIdNum = typeof signingInfo.chainId === 'string'
                   ? (signingInfo.chainId.startsWith('0x') ? parseInt(signingInfo.chainId, 16) : parseInt(signingInfo.chainId, 10))

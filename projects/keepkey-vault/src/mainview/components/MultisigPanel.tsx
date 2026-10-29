@@ -12,6 +12,7 @@ import { rpcRequest } from "../lib/rpc"
 import { Z } from "../lib/z-index"
 import { playAttention, playSent } from "../lib/sounds"
 import type { SafeInfo, PendingSafeTx } from "../../shared/types"
+import type { RiskLevel } from "../../shared/clearsign-risk"
 import { SafeCreateWizard } from "./SafeCreateWizard"
 
 const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase()
@@ -40,6 +41,8 @@ function Badge({ tone, children }: { tone: "ok" | "warn" | "bad" | "muted"; chil
 }
 
 const ZERO = "0x0000000000000000000000000000000000000000"
+// The approval card's colors (SigningApproval RISK_STYLE): plain text when the line is routine.
+const RISK_COLOR: Record<RiskLevel, string> = { low: "var(--text-2)", medium: "var(--gold)", high: "var(--rose)", critical: "var(--rose)" }
 
 /** The fields in the order the KeepKey shows them, so they can be compared screen by screen. */
 function reviewRows(tx: PendingSafeTx, info: SafeInfo, symbol: string): [string, string][] {
@@ -132,6 +135,13 @@ function PendingRow({ tx, info, me, symbol, onSigned }: { tx: PendingSafeTx; inf
 							<Text color="var(--text-0)" fontFamily="mono" wordBreak="break-all">{v}</Text>
 						</Flex>
 					))}
+					{tx.risk && (
+						<Box mt="2" data-risk-tier={tx.risk.tier}>
+							<Text fontSize="12px" fontWeight="600" color="var(--text-1)">What signing this does</Text>
+							{tx.risk.reasons.map((r, i) => <Text key={i} fontSize="12px" color={RISK_COLOR[r.level]}>• {r.text}</Text>)}
+							<Text fontSize="11px" color="var(--text-2)" mt="1">Checked on this computer. Your KeepKey screen is the final word.</Text>
+						</Box>
+					)}
 					{signError && <Text fontSize="12px" color="#F56565" mt="2">{signError}</Text>}
 					<Flex gap="4" mt="3">
 						<Text as="button" fontSize="13px" fontWeight="600" color="var(--gold)" onClick={sign}>Sign on KeepKey</Text>

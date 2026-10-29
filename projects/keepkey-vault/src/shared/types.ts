@@ -1090,6 +1090,14 @@ export interface SafeVetting {
   extensions: string[]
 }
 
+/** What Desktop found for a 32-byte value Safe would count as an owner's
+ *  confirmation. `safeTx` is that SafeTx decoded the way a dapp's SafeTx
+ *  signature request is, so it gets the same risk lines. */
+export type SafeHashLink =
+  | { status: 'match'; chainId: number; chainName: string; safe: string; nonce: string; summary: string; safeTx: EIP712DecodedInfo }
+  | { status: 'no-match'; safes: string[] }
+  | { status: 'unchecked'; error: string }
+
 /** A proposed, not-yet-executed Safe transaction, re-derived locally. */
 export interface PendingSafeTx {
   to: string
@@ -1113,6 +1121,8 @@ export interface PendingSafeTx {
   delegateCall: boolean
   decoded: CalldataDecodedInfo | null
   submittedAt: string | null
+  /** The same risk lines a dapp's request to sign this SafeTx gets (assessSigningRisk). */
+  risk?: import('./clearsign-risk').RiskAssessment | null
 }
 
 export interface CalldataDecodedField {
@@ -1205,6 +1215,11 @@ export interface SigningRequestInfo {
   /** Approval card only: the name and symbol the contract reports for
    *  itself. Any contract can claim any name, so it is never trust. */
   contractName?: { name: string; symbol: string }
+  /** Approval card only: the 32-byte value a personal_sign signs, or an
+   *  approveHash call approves, looked up among the pending transactions of
+   *  the signer's Safes (safe-review.ts). Absent = the signer owns no Safe
+   *  there, or this is not such a request. */
+  safeHashLink?: SafeHashLink
   /** Certified metadata resolved before user approval. The signing handler
    *  reuses this exact envelope so approval and device review cannot drift. */
   certifiedEvmSchema?: {
