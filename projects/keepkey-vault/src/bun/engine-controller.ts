@@ -182,8 +182,6 @@ export class EngineController extends EventEmitter {
   private promptPinActive = false
   /** Set while wipeDevice owns the device; keeps the PIN auto-prompt and REST device calls off it. */
   wipeInProgress = false
-  /** Set while Desktop must be the device's only user (see GateState.exclusive). */
-  exclusiveHolder: string | null = null
   /** Device id of a wipe the device couldn't hear (PIN-failure countdown): sent on its next connection, before any PIN request. */
   wipeOnReconnect: string | null = null
   /** The connection the wipe was deferred on: the wipe goes out only on a newer one. */
@@ -274,7 +272,6 @@ export class EngineController extends EventEmitter {
       wipeOnReconnect: !!this.wipeOnReconnect,
       // Paired but not read yet counts as locked: the read may well say needs_pin.
       locked: this.isLocked || !this.cachedFeatures,
-      exclusive: this.exclusiveHolder,
     }))
 
     transport.on(String(core.Events.PIN_REQUEST), () => {
