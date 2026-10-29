@@ -1038,6 +1038,18 @@ const evmAddresses = new EvmAddressManager()
 let lastReadyDeviceId: string | null = null
 let lastReadyFirmwareVariant: string | null = null
 
+/** Safe requests: this wallet's accounts and saved contacts on the request's
+ *  chain, so the risk bar can name a recipient or new owner and flag a
+ *  look-alike. Read from this computer's address book; never a verification. */
+function attachSafeKnownAddresses(info: SigningRequestInfo): void {
+	if (info.typedDataDecoded?.primaryType !== 'SafeTx' || !info.chainId) return
+	const networkId = `eip155:${info.chainId}`
+	info.knownAddresses = [
+		...getAddressBookList({ kind: 'own', networkId }).map(e => ({ address: e.address, name: 'your KeepKey account', own: true })),
+		...getAddressBookList({ kind: 'external', networkId, savedOnly: true }).map(e => ({ address: e.address, name: e.label || 'a saved contact', own: false })),
+	]
+}
+
 function attachSigningPolicySnapshot(info: SigningRequestInfo): SigningRequestInfo {
 	const features = engine.getCachedFeaturesSnapshot()
 	if (features) {
@@ -1533,6 +1545,7 @@ function getOrCreateWcManager(): WalletConnectManager {
 		addContractFacts: (info) => addContractFacts(info, engine.isPassphraseWallet ? undefined : engine.getDeviceState().deviceId, info.from),
 		requestSigningApproval: async (info) => {
 			attachSigningPolicySnapshot(info)
+			attachSafeKnownAddresses(info)
 			try { rpc.send['signing-request'](info) } catch { /* webview not ready */ }
 			acquireWindowFocus()
 			try {
@@ -1923,6 +1936,7 @@ const restCallbacks: RestApiCallbacks = {
 		resolveChain: (networkId: string) => findChainByNetwork(networkId, undefined, getAllChains()),
 	onSigningRequest: async (info: SigningRequestInfo) => {
 		attachSigningPolicySnapshot(info)
+		attachSafeKnownAddresses(info)
 		// Emulator test tape only; a real device is never recorded or marked.
 		const taping = engine.isEmulator && process.env.KEEPKEY_TEST_EMULATOR_CONTROL === '1' && reviewTapeRecording()
 		if (taping) recordReviewCard(info)

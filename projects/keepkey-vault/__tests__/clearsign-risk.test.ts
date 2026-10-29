@@ -577,7 +577,7 @@ describe('message verdicts', () => {
   })!
 
   // messages:0
-  test('a SafeTx carrying a call is red: the device shows the call only as hex', () => {
+  test('a SafeTx carrying a call this computer cannot read is red; a known token transfer is not', () => {
     const safeTx = (msg: any) => ({
       primaryType: 'SafeTx',
       domain: { chainId: 1, verifyingContract: '0x1234567890123456789012345678901234567890' },
@@ -593,9 +593,13 @@ describe('message verdicts', () => {
       message: { value: '0', safeTxGas: 0, baseGas: 0, gasPrice: 0, gasToken: '0x' + '0'.repeat(40), refundReceiver: '0x' + '0'.repeat(40), nonce: 3, ...msg },
     })
     const transfer = '0xa9059cbb' + EVIL.slice(2).padStart(64, '0') + (10n ** 12n).toString(16).padStart(64, '0')
+    // Decoded here (advice); the device still shows the data as hex.
     const call = typed(safeTx({ to: USDC, data: transfer, operation: 0 }))
-    expect(call.tier).toBe('red')
-    expect(text(call)).toContain('Your KeepKey shows that data only as raw hex')
+    expect(call.tier).toBe('yellow')
+    expect(text(call)).toContain(`Sends 1,000,000 USDC to ${EVIL}.`)
+    const unread = typed(safeTx({ to: EVIL, data: '0x12345678', operation: 0 }))
+    expect(unread.tier).toBe('red')
+    expect(text(unread)).toContain('Your KeepKey shows that data only as raw hex')
     const delegatecall = typed(safeTx({ to: EVIL, data: '0x12345678', operation: 1 }))
     expect(delegatecall.tier).toBe('red')
     expect(text(delegatecall)).toContain('(delegatecall)')

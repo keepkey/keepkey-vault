@@ -225,6 +225,13 @@ export function recognizedSpender(chainId: number | undefined, address: string |
 
 /** The reviewed spender of a decoded permit, for both REST and WalletConnect. */
 export function recognizedTypedDataSpender(decoded: SigningRequestInfo['typedDataDecoded'], chainId: number | undefined): string | undefined {
+  if (decoded?.primaryType === 'SafeTx') {
+    // The spender of an approve the Safe itself makes (one call, not a batch).
+    const data = String(decoded.fields.find((x) => x.label === 'Data')?.raw ?? '').toLowerCase()
+    const op = String(decoded.fields.find((x) => x.label === 'Operation')?.raw ?? '')
+    return op === '0' && /^0x(095ea7b3|39509351)0{24}[0-9a-f]{40}[0-9a-f]{64}$/.test(data)
+      ? recognizedSpender(chainId, `0x${data.slice(34, 74)}`) : undefined
+  }
   const spender = decoded?.fields.find((x) => x.label === 'Spender')?.raw
   return recognizedSpender(chainId, typeof spender === 'string' ? spender : undefined)
 }
