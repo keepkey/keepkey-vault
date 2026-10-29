@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react"
+import { useDeviceState } from "../hooks/useDeviceState"
 import { Box, Flex, Text, Input, Button } from "@chakra-ui/react"
 import { useTranslation } from "react-i18next"
 import { rpcRequest } from "../lib/rpc"
@@ -19,6 +20,8 @@ export function AddAddressDialog({ onClose, onAdded }: { onClose: () => void; on
   const [chainSearch, setChainSearch] = useState("")
   const [address, setAddress] = useState("")
   const [label, setLabel] = useState("")
+  const [cosigner, setCosigner] = useState(false)
+  const { isHiddenWallet } = useDeviceState()
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -43,6 +46,7 @@ export function AddAddressDialog({ onClose, onAdded }: { onClose: () => void; on
         networkId: chain.networkId,
         address: address.trim(),
         label: label.trim() || undefined,
+        ...(cosigner && chain.chainFamily === "evm" ? { cosigner: true } : {}),
       }, 8000)
       if (entry) onAdded?.(entry)
       onClose()
@@ -120,6 +124,12 @@ export function AddAddressDialog({ onClose, onAdded }: { onClose: () => void; on
                  placeholder={t("labelPlaceholder", { defaultValue: "Label (e.g. Alice)" })}
                  size="sm" bg="var(--ink-0)" border="1px solid var(--line)" color="var(--text-0)"
                  onKeyDown={(e) => { if (e.key === "Enter" && canSave) handleAdd() }} />
+          {chain?.chainFamily === "evm" && !isHiddenWallet && (
+            <Flex as="label" gap="2" align="center" mt="2" fontSize="11px" color="var(--text-2)" cursor="pointer">
+              <input type="checkbox" checked={cosigner} onChange={(e) => setCosigner(e.target.checked)} />
+              {t("cosignerOption", { defaultValue: "Safe co-signer: offer it first when creating a multisig" })}
+            </Flex>
+          )}
         </Box>
 
         {error && <Text fontSize="11px" color="var(--rose)">{error}</Text>}

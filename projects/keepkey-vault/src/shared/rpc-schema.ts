@@ -243,7 +243,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       /** A Safe's on-chain configuration and its pending, locally re-derived proposals. */
       safePending: { params: { chainId: number; address: string }; response: { info: SafeInfo; pending: PendingSafeTx[] } }
       /** Plans a new Safe (owners, threshold) and checks the factory on chain; nothing is signed. */
-      safeCreatePlan: { params: { chainId: number; owners: string[]; threshold: number }; response: { plan: { chainId: number; owners: string[]; threshold: number; saltNonce: string; factory: string; singleton: string; fallbackHandler: string; data: string; predicted: string }; payer: string; fee: string; balance: string; payerOwnsSafe: boolean; advancedMode: boolean | null; calldataHash: string } }
+      safeCreatePlan: { params: { chainId: number; owners: string[]; threshold: number }; response: { plan: { chainId: number; owners: string[]; threshold: number; saltNonce: string; factory: string; singleton: string; fallbackHandler: string; data: string; predicted: string }; ownerCode: Record<string, 'none' | 'contract'>; payer: string; fee: string; balance: string; payerOwnsSafe: boolean; advancedMode: boolean | null; calldataHash: string } }
       /** Deploys the planned Safe from the selected account (AdvancedMode for that one signature) and reads it back. */
       safeCreate: { params: { chainId: number; owners: string[]; threshold: number; saltNonce: string; predicted: string }; response: { address: string; txHash: string } }
       /** Signs a pending proposal on the KeepKey (firmware 7.16+) and posts the signature to Safe's service. */
@@ -409,8 +409,8 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       matchAddress: { params: { networkId: string; address: string }; response: AddressBookEntry | null }
       // Manually add (or relabel) an external contact. networkId picks the chain;
       // the address is normalized + the row scoped to the current wallet.
-      addAddressBook: { params: { networkId: string; address: string; label?: string }; response: AddressBookEntry | null }
-      updateAddressBook: { params: { id: string; label?: string; note?: string }; response: boolean }
+      addAddressBook: { params: { networkId: string; address: string; label?: string; cosigner?: boolean }; response: AddressBookEntry | null }
+      updateAddressBook: { params: { id: string; label?: string; note?: string; cosigner?: boolean }; response: boolean }
       deleteAddressBook: { params: { id: string }; response: void }
       getAddressBookHistory: { params: { entryId: string }; response: AddressBookTx[] }
       certifyAddressBook: { params: { only?: { network: string; address: string }[] } | void; response: { revision: number; count: number; root: string; fingerprint: string } }

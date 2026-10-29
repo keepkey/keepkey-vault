@@ -406,6 +406,8 @@ export function initDb() {
     // contact. Backfill existing intentional rows — labeled, or manually added
     // (manual adds never carry a first_seen_txid) — so they aren't hidden.
     try { db.exec(`ALTER TABLE addressbook ADD COLUMN saved_at INTEGER`) } catch { /* already exists */ }
+    // `cosigner`: the user marked this address as a Safe co-owner candidate. A note, not a verification.
+    try { db.exec(`ALTER TABLE addressbook ADD COLUMN cosigner INTEGER NOT NULL DEFAULT 0`) } catch { /* already exists */ }
     try {
       db.exec(`UPDATE addressbook SET saved_at = COALESCE(saved_at, updated_at)
                WHERE kind = 'external' AND saved_at IS NULL
@@ -2849,6 +2851,7 @@ function mapAddressBookRow(r: any): AddressBookEntry {
     firstSeenTxid: r.first_seen_txid || undefined,
     note: r.note || undefined,
     savedAt: r.saved_at ?? undefined,
+    cosigner: r.cosigner ? true : undefined,
     lastUsedAt: r.last_used_at ?? undefined,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
@@ -3021,7 +3024,7 @@ export function matchAddressBook(networkId: string, address: string, chainFamily
 /** Patch a label/note. Pass walletId to scope by wallet; omit (null) to act on the
  *  entry globally (the book is wallet-agnostic). Returns true if a row changed. */
 export function updateAddressBookEntry(
-  id: string, walletId: string | null, patch: { label?: string; note?: string },
+  id: string, walletId: string | null, patch: { label?: string; note?: string; cosigner?: boolean },
 ): boolean {
   try {
     if (!db) return false
@@ -3029,11 +3032,15 @@ export function updateAddressBookEntry(
     const params: any[] = []
     if (patch.label !== undefined) { sets.push('label = ?'); params.push(patch.label || null) }
     if (patch.note !== undefined)  { sets.push('note = ?');  params.push(patch.note || null) }
+    // Toggling the flag alone does not reorder the book (lists sort by updated_at).
+    if (sets.length) { sets.push('updated_at = ?'); params.push(Date.now()) }
+    if (patch.cosigner !== undefined) { sets.push('cosigner = ?'); params.push(patch.cosigner ? 1 : 0) }
     if (sets.length === 0) return false
-    sets.push('updated_at = ?'); params.push(Date.now())
     let where = 'id = ?'; params.push(id)
     if (walletId) { where += ' AND wallet_id = ?'; params.push(walletId) }
     const res = db.run(`UPDATE addressbook SET ${sets.join(', ')} WHERE ${where}`, params)
+    // A Safe owner is one address on every EVM chain: keep the flag the same on all its rows.
+    if (patch.cosigner !== undefined) setEvmCosigner(id, patch.cosigner)
     return Boolean((res as any)?.changes)
   } catch (e: any) {
     console.warn('[db] updateAddressBookEntry failed:', e.message)
@@ -3077,29 +3084,47 @@ export function getAddressBookHistory(entryId: string, walletId: string | null, 
 
 /** Manually add (or relabel) an external contact. Upserts on the dedupe key so a
  *  re-add just updates the label. Returns the resulting row. */
+function setEvmCosigner(id: string, on: boolean) {
+  db!.run(`UPDATE addressbook SET cosigner = ? WHERE network_id LIKE 'eip155:%'
+             AND address = (SELECT address FROM addressbook WHERE id = ? AND network_id LIKE 'eip155:%')`, [on ? 1 : 0, id])
+}
+
+/** A new EVM row takes the flag its address already has on other networks. */
+function evmCosigner(address: string, networkId: string): number {
+  if (!networkId.startsWith('eip155:')) return 0
+  const row = db!.query(`SELECT MAX(cosigner) AS c FROM addressbook WHERE address = ? AND network_id LIKE 'eip155:%'`).get(address) as { c: number | null } | null
+  return row?.c ? 1 : 0
+}
+
 export function addExternalEntry(args: {
   walletId: string; deviceId: string; networkId: string; chainId: string; chainFamily: string; address: string; label?: string | null
+  cosigner?: boolean
 }): AddressBookEntry | null {
   try {
     if (!db) return null
     const addr = normalizeAddress(args.address, args.chainFamily)
     const now = Date.now()
-    const existing = db.query('SELECT id FROM addressbook WHERE wallet_id = ? AND network_id = ? AND address = ?')
-      .get(args.walletId, args.networkId, addr) as { id: string } | null
+    const cosigner = args.cosigner === undefined ? null : args.cosigner ? 1 : 0
+    const existing = db.query('SELECT id, label FROM addressbook WHERE wallet_id = ? AND network_id = ? AND address = ?')
+      .get(args.walletId, args.networkId, addr) as { id: string; label: string | null } | null
     let id: string
     if (existing) {
       id = existing.id
       // Explicit save — confirm the contact (preserve the original save date if any).
-      db.run('UPDATE addressbook SET label = ?, saved_at = COALESCE(saved_at, ?), updated_at = ? WHERE id = ?', [args.label ?? null, now, now, id])
+      // A plain re-save (no cosigner given) keeps an existing co-signer flag; marking a
+      // co-signer without a name keeps the name already saved.
+      const label = cosigner !== null && !args.label ? existing.label : (args.label ?? null)
+      db.run('UPDATE addressbook SET label = ?, saved_at = COALESCE(saved_at, ?), cosigner = COALESCE(?, cosigner), updated_at = ? WHERE id = ?', [label, now, cosigner, now, id])
     } else {
       id = crypto.randomUUID()
       db.run(
         `INSERT INTO addressbook
-           (id, wallet_id, device_id, kind, network_id, chain_id, address, label, saved_at, created_at, updated_at)
-         VALUES (?, ?, ?, 'external', ?, ?, ?, ?, ?, ?, ?)`,
-        [id, args.walletId, args.deviceId, args.networkId, args.chainId, addr, args.label ?? null, now, now, now],
+           (id, wallet_id, device_id, kind, network_id, chain_id, address, label, saved_at, cosigner, created_at, updated_at)
+         VALUES (?, ?, ?, 'external', ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [id, args.walletId, args.deviceId, args.networkId, args.chainId, addr, args.label ?? null, now, cosigner ?? evmCosigner(addr, args.networkId), now, now],
       )
     }
+    if (cosigner !== null) setEvmCosigner(id, cosigner === 1)
     const row = db.query('SELECT * FROM addressbook WHERE id = ?').get(id) as any
     return row ? mapAddressBookRow(row) : null
   } catch (e: any) {

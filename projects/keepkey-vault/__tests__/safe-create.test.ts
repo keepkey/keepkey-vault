@@ -31,6 +31,13 @@ describe('planSafeCreate', () => {
     expect(plan.singleton).toBe('0x29fcB43b46531BcA003ddC8FCB67FFE91900C762')
   })
 
+  test('lowercase owners (how the address book stores them) plan the same Safe; case is not a second owner', () => {
+    const lower = planSafeCreate(1, owners.map((o: string) => o.toLowerCase()), Number(threshold), saltNonce.toString())
+    expect(lower.predicted).toBe(ref.created)
+    expect(lower.data).toBe(ref.input)
+    expect(() => planSafeCreate(8453, [owners[0], owners[0].toLowerCase()], 1, '1')).toThrow('only once')
+  })
+
   test('refuses bad owners and thresholds, and chains without Safe', () => {
     const a = '0x1111111111111111111111111111111111111111'
     expect(() => planSafeCreate(8453, [], 1, '1')).toThrow('at least one owner')

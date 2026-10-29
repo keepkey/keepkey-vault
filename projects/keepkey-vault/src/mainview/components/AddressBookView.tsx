@@ -38,7 +38,7 @@ interface DisplayEntry extends AddressBookEntry {
  *  a per-address outbound-history drilldown (R7). */
 export function AddressBookView() {
   const { t } = useTranslation("addressbook")
-  const { entries: allEntries, loading, seeding, saveLabel, remove } = useAddressBook()
+  const { entries: allEntries, loading, seeding, saveLabel, setCosigner, remove } = useAddressBook()
   const deviceState = useDeviceState()
   // btc-only device: non-BTC entries are dead weight (can't send to them) and the
   // chain filter offers chains the device can't use. Scope to Bitcoin at the source;
@@ -183,6 +183,8 @@ export function AddressBookView() {
 
   const handleSave = useCallback((ids: string[], label: string) =>
     Promise.all(ids.map(id => saveLabel(id, label))).then(() => {}), [saveLabel])
+  const handleCosigner = useCallback((ids: string[], on: boolean) =>
+    Promise.all(ids.map(id => setCosigner(id, on))).then(() => {}), [setCosigner])
   const handleRemove = useCallback((ids: string[]) =>
     Promise.all(ids.map(id => remove(id))).then(() => {}), [remove])
 
@@ -323,7 +325,7 @@ export function AddressBookView() {
         </Text>
       ) : (
         <Flex direction="column" gap="1.5">
-          {visibleRows.map(e => <Row key={e.id} entry={e} connected={!!tabs.find(tb => tb.id === effectiveTab)?.connected && e.kind === "own"} onSave={handleSave} onRemove={handleRemove} />)}
+          {visibleRows.map(e => <Row key={e.id} entry={e} connected={!!tabs.find(tb => tb.id === effectiveTab)?.connected && e.kind === "own"} onSave={handleSave} onRemove={handleRemove} onCosigner={deviceState.isHiddenWallet ? undefined : handleCosigner} />)}
         </Flex>
       )}
 
@@ -363,11 +365,13 @@ function CopyButton({ value, label }: { value: string; label: string }) {
   )
 }
 
-function Row({ entry, connected, onSave, onRemove }: {
+function Row({ entry, connected, onSave, onRemove, onCosigner }: {
   entry: DisplayEntry
   connected?: boolean
   onSave: (ids: string[], label: string) => Promise<void> | void
   onRemove: (ids: string[]) => Promise<void> | void
+  /** Absent in a passphrase session: co-signers are not saved for hidden wallets. */
+  onCosigner?: (ids: string[], on: boolean) => Promise<void> | void
 }) {
   const { t } = useTranslation("addressbook")
   const chain = chainById.get(entry.chainId)
@@ -419,6 +423,11 @@ function Row({ entry, connected, onSave, onRemove }: {
                 </Text>
               </Flex>
             )}
+            {entry.cosigner && (
+              <Text fontSize="9px" fontWeight="700" color="var(--gold)" textTransform="uppercase" letterSpacing="0.04em" px="1" borderRadius="sm" border="1px solid var(--gold)">
+                {t("cosigner", { defaultValue: "Co-signer" })}
+              </Text>
+            )}
             {entry.networkCount && entry.networkCount > 1 && (
               <Text fontSize="9px" color="var(--text-3)" bg="var(--ink-2)" px="1" borderRadius="sm">
                 {entry.networkCount} {t("networksLabel", { defaultValue: "networks" })}
@@ -459,6 +468,11 @@ function Row({ entry, connected, onSave, onRemove }: {
                 <Button size="xs" variant="ghost" color="var(--text-2)" _hover={{ color: "var(--teal)" }} onClick={() => setEditing(true)}>
                   {t("edit", { defaultValue: "Edit" })}
                 </Button>
+                {onCosigner && chain?.chainFamily === "evm" && (
+                  <Button size="xs" variant="ghost" color="var(--text-2)" _hover={{ color: "var(--gold)" }} onClick={() => onCosigner(entry.memberIds, !entry.cosigner)}>
+                    {entry.cosigner ? t("notCosigner", { defaultValue: "Not a co-signer" }) : t("markCosigner", { defaultValue: "Mark as Safe co-signer" })}
+                  </Button>
+                )}
                 <Button size="xs" variant="ghost" color="var(--text-2)" _hover={{ color: "var(--rose)" }} onClick={() => onRemove(entry.memberIds)}>
                   {t("delete", { defaultValue: "Delete" })}
                 </Button>

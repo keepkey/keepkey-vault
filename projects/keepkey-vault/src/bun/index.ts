@@ -7277,7 +7277,13 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const source = `eip155:${params.chainId}`
 				const [gasPrice, balance, payerSafes] = await Promise.all([getEvmGasPrice(source), getEvmBalance(source, payer.address), listOwnedSafes(params.chainId, payer.address)])
 				const fee = gasPrice * safeCreateGasLimit(plan.owners.length)
+				// A contract owner (or an address with code on another chain only) needs a closer look.
+				const read = safeReader(params.chainId)
+				// EIP-7702 delegated wallets (0xef0100 + 20 bytes) still sign with their own key, like any wallet.
+				const isKey = (code: string) => code === '0x' || /^0xef0100[0-9a-f]{40}$/i.test(code)
+				const ownerCode = Object.fromEntries(await Promise.all(plan.owners.map(async o => [o, isKey(await read.getCode(o)) ? 'none' : 'contract'] as const)))
 				return {
+					ownerCode,
 					plan, payer: payer.address, fee: fee.toString(), balance: balance.toString(),
 					payerOwnsSafe: payerSafes.length > 0 || ownsCreatedSafe(params.chainId, payer.address),
 					advancedMode: getAdvancedModeEnabled() ?? null,
@@ -8193,24 +8199,35 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// Wallet-agnostic: contacts can be saved from any session (incl. hidden).
 				const scope = getWalletDbScope()
 				if (!scope) return null
+				// The scope names the hidden wallet's address; a Safe co-signer must not tie it to disk.
+				if (params.cosigner && engine.isPassphraseWallet) throw new Error('Co-signers cannot be saved while a passphrase wallet is open')
 				const chain = getAllChains().find(c => c.networkId === params.networkId)
 				if (!chain) { console.warn('[addressbook] addAddressBook: unknown networkId', params.networkId); return null }
+				// Stored lowercase, a mistyped mixed-case address would lose its checksum and later pass as an owner.
+				if (params.cosigner && chain.chainFamily === 'evm') {
+					const { ethers } = await import('ethers')
+					if (!ethers.utils.isAddress(params.address)) throw new Error(`Not a valid address (checksum failed): ${params.address}`)
+				}
+				const prior = params.cosigner ? matchAddressBook(chain.networkId, params.address, chain.chainFamily) : null
 				const entry = addExternalEntry({
 					walletId: scope.walletId, deviceId: scope.deviceId,
 					networkId: chain.networkId, chainId: chain.id, chainFamily: chain.chainFamily,
-					address: params.address, label: params.label ?? null,
+					address: params.address, label: params.label ?? null, cosigner: params.cosigner,
 				})
 				if (entry) {
-					invalidateAddressBookCertification()
+					// Certified contacts are labeled external EVM entries: a co-signer save that keeps the label changes none.
+					if (!params.cosigner || (prior?.label || '') !== (entry.label || '')) invalidateAddressBookCertification()
 					try { rpc.send['addressbook-changed']({}) } catch { /* webview not ready */ }
 				}
 				return entry
 			},
 			updateAddressBook: async (params) => {
 				// Global (wallet-agnostic) — edit any contact from any session.
-				const ok = updateAddressBookEntry(params.id, null, { label: params.label, note: params.note })
+				if (params.cosigner && engine.isPassphraseWallet) throw new Error('Co-signers cannot be saved while a passphrase wallet is open')
+				const ok = updateAddressBookEntry(params.id, null, { label: params.label, note: params.note, cosigner: params.cosigner })
 				if (ok) {
-					invalidateAddressBookCertification()
+					// The co-signer flag is not part of the certified contact bytes; only label/note edits void it.
+					if (params.label !== undefined || params.note !== undefined) invalidateAddressBookCertification()
 					try { rpc.send['addressbook-changed']({}) } catch { /* webview not ready */ }
 				}
 				return ok
