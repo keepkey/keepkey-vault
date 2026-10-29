@@ -21,6 +21,7 @@ import { SendForm } from "./SendForm"
 // Lazy-load optional feature components — defers module evaluation to avoid
 // bundler TDZ issues when these heavy modules are statically imported.
 const SwapDialog = lazy(() => import("./SwapDialog").then(m => ({ default: m.SwapDialog })).catch(err => { console.error("[SwapDialog lazy] TDZ or load error:", err, err?.stack); throw err }))
+const MultisigPanel = lazy(() => import("./MultisigPanel").then(m => ({ default: m.MultisigPanel })))
 const ZcashPrivacyTab = lazy(() => import("./ZcashPrivacyTab").then(m => ({ default: m.ZcashPrivacyTab })))
 const StakingPanel = lazy(() => import("./StakingPanel").then(m => ({ default: m.StakingPanel })))
 const DefiPositionsPanel = lazy(() => import("./DefiPositionsPanel").then(m => ({ default: m.DefiPositionsPanel })))
@@ -41,7 +42,7 @@ import { WatchOnlyExportDialog } from "./WatchOnlyExportDialog"
 import { CreatePsbtPanel } from "./CreatePsbtPanel"
 import { detectSpamToken, categorizeTokens, type SpamResult } from "../../shared/spamFilter"
 
-type AssetView = "receive" | "send" | "privacy" | "psbt"
+type AssetView = "receive" | "send" | "privacy" | "psbt" | "multisig"
 
 type BtcAddressIndexResult = {
 	receiveIndex: number
@@ -173,6 +174,13 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 	const [swappableChainIds, setSwappableChainIds] = useState<Set<string>>(new Set())
 	const [zcashPrivacyEnabled, setZcashPrivacyEnabled] = useState(false)
 	const [btcMultisigEnabled,setBtcMultisigEnabled]=useState(false)
+	// EVM chains Safe supports: the Multisig pill shows only there.
+	const [safeChainIds, setSafeChainIds] = useState<number[]>([])
+	useEffect(() => {
+		if (chain.chainFamily !== 'evm') return
+		rpcRequest<number[]>('safeChains', undefined, 15000).then(setSafeChainIds).catch(() => {})
+	}, [chain.chainFamily])
+	const evmMultisig = chain.chainFamily === 'evm' && safeChainIds.includes(Number(chain.chainId))
 	const settingsLoaded = useRef(false)
 	const refreshFeatureFlags = useCallback(() => {
 		rpcRequest<AppSettings>("getAppSettings")
@@ -694,6 +702,10 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 		) }] : []),
 		...(!watchOnly && swappableChainIds.has(chain.id) && !isShieldedToken ? [{ id: "swap" as const, label: t("swap"), icon: (
 			<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="17 1 21 5 17 9" /><path d="M3 11V9a4 4 0 0 1 4-4h14" /><polyline points="7 23 3 19 7 15" /><path d="M21 13v2a4 4 0 0 1-4 4H3" /></svg>
+		) }] : []),
+		// Multisig: Safe on supported EVM chains; Bitcoin co-signing when enabled.
+		...(!watchOnly && !selectedToken && (evmMultisig || (isBtc && btcMultisigEnabled)) ? [{ id: "multisig" as const, label: t("multisig", { defaultValue: "Multisig" }), icon: (
+			<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg>
 		) }] : []),
 		...(!watchOnly && (!selectedToken || isShieldedToken) && zcashPrivacyEnabled && zcashShieldedSupported ? [{ id: "privacy" as const, label: t("privacy"), icon: (
 			<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>
@@ -1280,6 +1292,7 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 									className="electrobun-webkit-app-region-no-drag"
 									onClick={() => {
 										if (p.id === 'swap') { setShowSwapDialog(true); return }
+										if (p.id === 'multisig' && isBtc) { window.dispatchEvent(new Event(MULTISIG_POLICY_EVENT)); return }
 										setView(p.id as AssetView); if (p.id === 'receive') setSelectedToken(null)
 									}}
 									display="flex"
@@ -1320,6 +1333,10 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 						// t-addr + xpub under a "Shielded ZEC" heading.
 						<Suspense fallback={<Spinner size="sm" color="kk.gold" />}>
 							<ZcashPrivacyTab initialPage={safeInitial === "send" ? "send" : "receive"} />
+						</Suspense>
+					) : view === "multisig" && evmMultisig ? (
+						<Suspense fallback={<Spinner size="sm" color="kk.gold" />}>
+							<MultisigPanel chainId={Number(chain.chainId)} chainName={chain.coin} symbol={chain.symbol} />
 						</Suspense>
 					) : view === "psbt" ? (
 						<CreatePsbtPanel deviceId={watchOnlyDeviceId} />
@@ -1573,7 +1590,6 @@ export function AssetPage({ chain, balance, onBack, firmwareVersion, initialActi
 							</Box>
 						)}
 						{isBtc && <Button size="xs" variant="ghost" color="var(--gold)" onClick={() => window.dispatchEvent(new Event(BITCOIN_QR_SCAN_EVENT))}>Scan Bitcoin QR</Button>}
-						{isBtc && btcMultisigEnabled && <Button size="xs" variant="ghost" color="var(--gold)" onClick={()=>window.dispatchEvent(new Event(MULTISIG_POLICY_EVENT))}>Multisig co-signing</Button>}
 						{isBtc && !watchOnly && (
 							<Box
 								as="button" fontSize="11px" color="var(--gold)" fontWeight="500"
