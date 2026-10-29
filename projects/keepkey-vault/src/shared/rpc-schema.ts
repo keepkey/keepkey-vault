@@ -242,6 +242,10 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       safeMine: { params: { chainId: number }; response: { owner: string; safes: SafeInfo[]; errors: { address: string; error: string }[] } }
       /** A Safe's on-chain configuration and its pending, locally re-derived proposals. */
       safePending: { params: { chainId: number; address: string }; response: { info: SafeInfo; pending: PendingSafeTx[] } }
+      /** Plans a new Safe (owners, threshold) and checks the factory on chain; nothing is signed. */
+      safeCreatePlan: { params: { chainId: number; owners: string[]; threshold: number }; response: { plan: { chainId: number; owners: string[]; threshold: number; saltNonce: string; factory: string; singleton: string; fallbackHandler: string; data: string; predicted: string }; payer: string; fee: string; balance: string; payerOwnsSafe: boolean; advancedMode: boolean | null; calldataHash: string } }
+      /** Deploys the planned Safe from the selected account (AdvancedMode for that one signature) and reads it back. */
+      safeCreate: { params: { chainId: number; owners: string[]; threshold: number; saltNonce: string; predicted: string }; response: { address: string; txHash: string } }
       /** Signs a pending proposal on the KeepKey (firmware 7.16+) and posts the signature to Safe's service. */
       safeConfirm: { params: { chainId: number; address: string; safeTxHash: string }; response: { signature: string } }
       zcashShieldedBalance: { params: void; response: { confirmed: number; pending: number; in_flight?: number; synced_to?: number | null; notes_total?: number; notes_unspent?: number; keepkey_release_block?: number; max_send?: number; max_deshield?: number } }

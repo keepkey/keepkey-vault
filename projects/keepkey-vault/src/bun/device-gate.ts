@@ -40,6 +40,8 @@ export interface GateState {
   wipeOnReconnect: boolean
   /** Waiting for its PIN, or connected but not read yet: only Desktop's prompt may ask for the PIN. */
   locked: boolean
+  /** Desktop holds the device for one flow (why, shown to REST callers); every new REST request is refused. */
+  exclusive?: string | null
 }
 
 export function restWriteRefusal(state: GateState, messageType: number, rest: RestRequest | undefined) {
@@ -49,6 +51,7 @@ export function restWriteRefusal(state: GateState, messageType: number, rest: Re
   // triggered an additional lock, and after that cooldown still failed to wipe").
   if (state.wipeInProgress) return WIPE_OWN.has(messageType) ? null : { status: 409, message: WIPE_BUSY_MESSAGE }
   if (!rest || REPLIES.has(messageType)) return null
+  if (state.exclusive) return { status: 409, message: `KeepKey is busy: ${state.exclusive}. Try again when it finishes.` }
   if (state.wipeOnReconnect) return { status: 409, message: WIPE_REPLUG_PENDING_MESSAGE }
   // Only a request's first message: once it runs, the device may lock mid-flow (its own
   // PIN prompt), and the TxAcks, data chunks and struct acks that follow must still go.
