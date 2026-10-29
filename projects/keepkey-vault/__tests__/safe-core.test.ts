@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import fixture from './fixtures/safe/safedao-nonce76.json'
-import { safeTxHash, verifiedSigners, safeTxDomain, SAFE_READS, decodeSafeRead } from '../src/bun/safe-core'
+import { safeTxHash, verifiedSigners, checkConfirmation, approvedHashCall, safeTxDomain, SAFE_READS, decodeSafeRead } from '../src/bun/safe-core'
 
 // A real executed transaction from the Safe DAO treasury (Safe 1.3.0, chain 1):
 // a delegatecall to MultiSendCallOnly with 676 bytes of data and three
@@ -42,6 +42,32 @@ describe('confirmations count only when the signature recovers to an owner', () 
 
   test('a signer who is not an owner is not counted', () => {
     expect(verifiedSigners(tx.safeTxHash, tx.signatures, [tx.owners[0]].filter((o: string) => !tx.confirmationOwners.includes(o))).verified).toEqual([])
+  })
+})
+
+describe('each service confirmation is checked against the owner it names', () => {
+  // The packed signatures are sorted by owner: 0x3242… (v 28), 0x6b28… (v 1), 0xb1Df… (v 28).
+  const sig = (i: number) => '0x' + tx.signatures.slice(2 + i * 130, 2 + (i + 1) * 130)
+  const [A, B, C] = ['0x3242071b0b406B6661AF2dE1115CD46567Ab0917', '0x6b28FdCF3059dd13847648213175dCa8853557B5', '0xb1Df01604095536CEA66a9D06E67Ed6F00684e58']
+
+  test('an ECDSA signature counts only for the owner it recovers to', () => {
+    expect(checkConfirmation(tx.safeTxHash, tx.owners, { owner: A, signature: sig(0) })).toBe('verified')
+    expect(checkConfirmation(tx.safeTxHash, tx.owners, { owner: C, signature: sig(2) })).toBe('verified')
+    // A real signature credited to another owner is not counted for them.
+    expect(checkConfirmation(tx.safeTxHash, tx.owners, { owner: C, signature: sig(0) })).toBe('unverified')
+  })
+
+  test('an approved hash needs an on-chain check, and only for the owner it names', () => {
+    expect(checkConfirmation(tx.safeTxHash, tx.owners, { owner: B, signature: sig(1) })).toBe('approved-hash')
+    expect(checkConfirmation(tx.safeTxHash, tx.owners, { owner: A, signature: sig(1) })).toBe('unverified')
+    expect(approvedHashCall(B, tx.safeTxHash).slice(0, 10)).toBe('0x7d832974')
+  })
+
+  test('contract signatures, non-owners, and missing signatures are never counted', () => {
+    const contractSig = '0x' + A.slice(2).padStart(64, '0') + '41'.padStart(64, '0') + '00' + '20'.padStart(64, '0') + 'ab'.repeat(32)
+    expect(checkConfirmation(tx.safeTxHash, tx.owners, { owner: A, signature: contractSig })).toBe('unverified')
+    expect(checkConfirmation(tx.safeTxHash, [B, C], { owner: A, signature: sig(0) })).toBe('unverified')
+    expect(checkConfirmation(tx.safeTxHash, tx.owners, { owner: A, signature: null })).toBe('unverified')
   })
 })
 

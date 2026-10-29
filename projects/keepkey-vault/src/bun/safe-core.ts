@@ -76,11 +76,27 @@ export function verifiedSigners(hash: string, signatures: string, owners: string
   return { verified, unverifiable }
 }
 
+/**
+ * One confirmation from the service, checked on its own: its signature must
+ * recover to the owner the service says signed. An approved hash (v 1) only
+ * names the owner; the caller checks approvedHashes on chain before counting it.
+ * Contract signatures (v 0) are never counted.
+ */
+export function checkConfirmation(hash: string, owners: string[], c: { owner: string; signature?: string | null }): 'verified' | 'approved-hash' | 'unverified' {
+  const sig = ethers.utils.arrayify(c.signature || '0x')
+  const claimed = c.owner.toLowerCase()
+  if (sig.length < 65 || !owners.some(o => o.toLowerCase() === claimed)) return 'unverified'
+  if (sig[64] === 1) return ethers.utils.hexDataSlice(sig, 12, 32).toLowerCase() === claimed ? 'approved-hash' : 'unverified'
+  const { verified } = verifiedSigners(hash, ethers.utils.hexlify(sig.slice(0, 65)), owners)
+  return verified.length === 1 && verified[0].toLowerCase() === claimed ? 'verified' : 'unverified'
+}
+
 const iface = new ethers.utils.Interface([
   'function getOwners() view returns (address[])',
   'function getThreshold() view returns (uint256)',
   'function nonce() view returns (uint256)',
   'function VERSION() view returns (string)',
+  'function approvedHashes(address, bytes32) view returns (uint256)',
 ])
 
 export const SAFE_READS = {
@@ -90,6 +106,8 @@ export const SAFE_READS = {
   VERSION: iface.encodeFunctionData('VERSION'),
 } as const
 
-export function decodeSafeRead<K extends keyof typeof SAFE_READS>(fn: K, result: string): any {
+export const approvedHashCall = (owner: string, hash: string) => iface.encodeFunctionData('approvedHashes', [owner, hash])
+
+export function decodeSafeRead(fn: keyof typeof SAFE_READS | 'approvedHashes', result: string): any {
   return iface.decodeFunctionResult(fn, result)[0]
 }

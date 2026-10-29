@@ -239,7 +239,7 @@ export type VaultRPCSchema = ElectrobunRPCSchema & {
       /** Chain ids Safe's Transaction Service supports. */
       safeChains: { params: void; response: number[] }
       /** Safes on this chain where this KeepKey's EVM address is an on-chain owner. */
-      safeMine: { params: { chainId: number }; response: { owner: string; safes: SafeInfo[] } }
+      safeMine: { params: { chainId: number }; response: { owner: string; safes: SafeInfo[]; errors: { address: string; error: string }[] } }
       /** A Safe's on-chain configuration and its pending, locally re-derived proposals. */
       safePending: { params: { chainId: number; address: string }; response: { info: SafeInfo; pending: PendingSafeTx[] } }
       zcashShieldedBalance: { params: void; response: { confirmed: number; pending: number; in_flight?: number; synced_to?: number | null; notes_total?: number; notes_unspent?: number; keepkey_release_block?: number; max_send?: number; max_deshield?: number } }

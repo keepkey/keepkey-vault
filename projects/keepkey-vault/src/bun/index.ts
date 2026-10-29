@@ -7239,9 +7239,12 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const { listOwnedSafes, readSafe } = await import('./safe')
 				const found = await listOwnedSafes(params.chainId, owner)
 				// The service only suggests Safes; keep those whose contract lists us as an owner.
-				const safes = (await Promise.all(found.map(a => readSafe(params.chainId, a).catch(() => null))))
-					.filter((s): s is NonNullable<typeof s> => !!s && s.owners.some(o => o.toLowerCase() === owner.toLowerCase()))
-				return { owner, safes }
+				// A failed read is reported, never dropped: an empty list must mean "none", not "could not check".
+				const reads = await Promise.all(found.map(address => readSafe(params.chainId, address)
+					.then(info => ({ address, info, error: null }), (e: any) => ({ address, info: null, error: String(e?.message || e) }))))
+				const safes = reads.flatMap(r => r.info && r.info.owners.some(o => o.toLowerCase() === owner.toLowerCase()) ? [r.info] : [])
+				const errors = reads.flatMap(r => r.error ? [{ address: r.address, error: r.error }] : [])
+				return { owner, safes, errors }
 			},
 			safePending: async (params) => {
 				const { readSafe, pendingSafeTxs } = await import('./safe')
