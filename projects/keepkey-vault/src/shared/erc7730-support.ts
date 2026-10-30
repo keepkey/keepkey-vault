@@ -23,6 +23,12 @@ export const ERC7730_MIN_FW = '7.16.0'
  * screens). 7.17 shows each value once (firmware #1025), so typed data gets a
  * definition from 7.17.0 on. A PermitSingle never gets one: a preload turns
  * off the native Permit2 review.
+ *
+ * Gated on the version alone (owner rule: versions, not flags). Firmware alpha
+ * has reported 7.17.0 since 2026-09-21, but show-once (520ec4ed5) reached alpha
+ * only on 2026-10-30 (296aa1e2c). A 7.17.0 alpha built before that re-shows
+ * every value on each field pass. Those are unreleased test builds and are not
+ * supported: reflash current alpha. Every released 7.17.0 carries #1025.
  */
 export const ERC7730_TYPED_DATA_MIN_FW = '7.17.0'
 
