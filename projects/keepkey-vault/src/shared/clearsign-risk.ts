@@ -201,6 +201,8 @@ const EVM_TOKENS: Record<string, { symbol: string; decimals: number }> = {
   '1:0xdac17f958d2ee523a2206206994597c13d831ec7': { symbol: 'USDT', decimals: 6 },
   '42161:0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9': { symbol: 'USDT', decimals: 6 },
 }
+/** Safe's approveHash(bytes32): an owner's on-chain confirmation. */
+const APPROVE_HASH = '0xd4d9bdcd'
 const KNOWN_SELECTORS = new Set(['0x095ea7b3', '0x39509351', '0xa22cb465', '0xa9059cbb'])
 const PERMIT2 = '0x000000000022d473030f116ddee9f6b43ac78ba3'
 const ALL_THRESHOLD = (1n << 160n) - 1n // uint160 max: Permit2's "unlimited"
@@ -355,6 +357,9 @@ function evmTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void):
   } else if (urSwap && !req.deviceClearSigns) {
     recognition = 'known'
     add('medium', `${urSwap} through the Uniswap Universal Router, a contract KeepKey has reviewed. ${notOnThisFirmware('this swap', req.firmwareVersion)}`)
+  } else if (sel === APPROVE_HASH && req.safeHashLink) {
+    recognition = safeHashLinked(req, true, add)!
+    if (req.safeHashLink.status === 'match') add('medium', `Once mined, this approval cannot be withdrawn, and it counts as your signature. ${notOnThisFirmware('this approval', req.firmwareVersion)}`)
   } else if (!req.deviceClearSigns && certifiedBlobShown(req)) {
     // No decoder here, but the device verifies the certified description and
     // shows the call from it, so this is not a blind signature.
@@ -454,6 +459,64 @@ function acrossDeposit(d: AcrossDepositV3, req: SigningRequestInfo, add: (l: Ris
   if (d.message !== '0x') add('high', `Also passes ${(d.message.length - 2) / 2} bytes of instructions that run at the recipient on ${v.destination}. This computer cannot read them.`)
 }
 
+/** What a SafeTx does, from its own fields. Shared by a request to sign the
+ *  SafeTx and by a 32-byte hash of it Desktop matched (safeHashLink), so both
+ *  read the same. `hashOnly`: the KeepKey sees only that hash, not the fields.
+ *  `method`: the inner call's name, when Desktop decoded it.
+ *  Returns 'opaque' when this computer cannot say what the transaction does,
+ *  'known' when it decodes the call inside, 'plain' when there is no call. */
+function safeTxReasons(d: NonNullable<SigningRequestInfo['typedDataDecoded']>, add: (l: RiskLevel, t: string) => void,
+  hashOnly = false, method?: string): 'opaque' | 'known' | 'plain' {
+  const f = (label: string) => d.fields.find((x) => x.label === label)
+  const to = f('To')?.raw || 'another contract'
+  const data = String(f('Data')?.raw ?? '').toLowerCase()
+  let what: 'opaque' | 'known' | 'plain' = /^(0x)?$/.test(data) ? 'plain' : 'opaque'
+  if (f('Operation')?.raw === '1') {
+    // A delegatecall runs `to`'s code as the Safe itself, with or without
+    // data: empty data still runs its fallback.
+    what = 'opaque'
+    add('high', `Runs code from ${to} inside your Safe (delegatecall). That code can do anything with what the Safe holds.`)
+  } else if (what === 'opaque') {
+    // The device decodes only an embedded approve; any other call inside a
+    // Safe transaction shows as hex. A plain transfer of a token this
+    // computer knows is decoded here, the way evmTx decodes it.
+    const token = EVM_TOKENS[`${Number(d.domain.chainId)}:${to.toLowerCase()}`]
+    const transfer = /^0xa9059cbb0{24}([0-9a-f]{40})([0-9a-f]{64})$/.exec(data)
+    const onDevice = hashOnly ? 'Your KeepKey shows only the 32-byte hash' : 'Your KeepKey shows this call only as raw hex'
+    if (token && transfer && /^(0x)?0*$/.test(String(f('Value')?.raw ?? '0'))) {
+      what = 'known'
+      add('medium', `Makes your Safe send ${units(BigInt(`0x${transfer[2]}`).toString(), token.decimals)} ${token.symbol} to 0x${transfer[1]}. ${onDevice}, so check it here.`)
+    } else {
+      add('high', `Makes your Safe call ${method ? `${method} on ` : ''}${to}${method ? ', a call this computer does not check' : ' with data this computer cannot read'}. ${hashOnly ? `${onDevice}.` : 'Your KeepKey shows that data only as raw hex.'}`)
+    }
+  }
+  // Safe pays gasPrice × gas in gasToken to refundReceiver when this executes.
+  // Safe{Wallet} leaves all three at zero, so a set refund is a hidden payout.
+  const set = (label: string) => !/^(0x)?0*$/.test(String(f(label)?.raw ?? '0'))
+  if (set('Gas Price') || set('Gas Token') || set('Refund Receiver')) {
+    add('high', `Pays a gas refund out of your Safe when it is executed, to ${set('Refund Receiver') ? f('Refund Receiver')!.raw : 'whoever executes it'}. Normal Safe transactions leave the refund at zero.`)
+  }
+  return what
+}
+
+/** A 32-byte value Safe counts as this owner's confirmation (a personal_sign
+ *  of it, or approveHash on chain), as Desktop looked it up. The device sees
+ *  only the 32 bytes, so everything here is this computer's advice. */
+function safeHashLinked(req: SigningRequestInfo, onChain: boolean, add: (l: RiskLevel, t: string) => void): Recognition | null {
+  const link = req.safeHashLink
+  if (!link) return null
+  const what = onChain ? 'This on-chain approval' : 'This signature'
+  if (link.status === 'match') {
+    add('medium', `${onChain ? 'Permanently approves' : 'Approves'} Safe transaction #${link.nonce} of your Safe ${link.safe} on ${link.chainName}: ${link.summary}.`)
+    return safeTxReasons(link.safeTx, add, true, link.method) === 'opaque' ? 'unknown' : 'known'
+  }
+  const risk = `${what} counts as your confirmation of whichever Safe transaction has this hash${onChain ? ', and it cannot be withdrawn once mined' : ''}.`
+  add('high', link.status === 'no-match'
+    ? `This hash is not a pending transaction of your Safe ${link.safes.join(', ')}, so this computer cannot tell what it approves. ${risk}`
+    : `This computer could not check whether this hash is a transaction of a Safe you own (${link.error}). ${risk}`)
+  return 'unknown'
+}
+
 function evmTypedData(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void): Recognition {
   const d = req.typedDataDecoded
   if (!d) {
@@ -471,20 +534,19 @@ function evmTypedData(req: SigningRequestInfo, add: (l: RiskLevel, t: string) =>
   let knownCalm = false
   // The meaning sits in bytes the device shows only as raw hex.
   let opaque = false
+  let innerKnown = false
   const delegate = f('Agent Address')?.raw ?? f('Delegate')?.raw ?? f('Session Key')?.raw
   if (/ApproveAgent$/.test(d.primaryType) || delegate) {
     // Owner rule: handing over signing power is never a normal request.
     const unlimited = d.primaryType === 'Delegation' && f('Caveats')?.value === '[]'
       && /^0x(ff){32}$/i.test(String(f('Authority')?.raw ?? ''))
     add(unlimited ? 'critical' : 'high', `Gives ${delegate || 'another account'} the power to act for your account. It can then sign without your KeepKey.${unlimited ? ' There are no limits on what it can do.' : ''}`)
-  } else if (d.primaryType === 'SafeTx' && !/^(0x)?$/.test(String(f('Data')?.raw ?? ''))) {
-    // The device decodes only an embedded approve and warns on delegatecall;
-    // any other call inside a Safe transaction shows as hex, and so it is here.
-    opaque = true
-    const to = f('To')?.raw || 'another contract'
-    add('high', f('Operation')?.raw === '1'
-      ? `Runs code from ${to} inside your Safe (delegatecall). That code can do anything with what the Safe holds.`
-      : `Makes your Safe call ${to} with data this computer cannot read. Your KeepKey shows that data only as raw hex.`)
+  } else if (d.primaryType === 'SafeTx') {
+    const decoded = req.calldataDecoded && req.calldataDecoded.source !== 'none' ? req.calldataDecoded.method : undefined
+    const inner = safeTxReasons(d, add, false, decoded)
+    opaque = inner === 'opaque'
+    // A call Desktop decodes, which the device shows only as hex: known, not shown.
+    knownCalm = innerKnown = inner === 'known'
   } else if (d.primaryType === 'SafeMessage') {
     // EIP-1271: the Safe treats this as its own signature, for any permit or
     // order the app hashed into it. The device shows only that hash.
@@ -542,14 +604,6 @@ function evmTypedData(req: SigningRequestInfo, add: (l: RiskLevel, t: string) =>
   } else if (/^(OrderComponents|BulkOrder)$/.test(d.primaryType)) {
     add('critical', 'This is a marketplace order. Anyone holding this signature can take the listed items at the price in the order.')
   }
-  if (d.primaryType === 'SafeTx') {
-    // Safe pays gasPrice × gas in gasToken to refundReceiver when this executes.
-    // Safe{Wallet} leaves all three at zero, so a set refund is a hidden payout.
-    const set = (label: string) => !/^(0x)?0*$/.test(String(f(label)?.raw ?? '0'))
-    if (set('Gas Price') || set('Gas Token') || set('Refund Receiver')) {
-      add('high', `Pays a gas refund out of your Safe when it is executed, to ${set('Refund Receiver') ? f('Refund Receiver')!.raw : 'whoever executes it'}. Normal Safe transactions leave the refund at zero.`)
-    }
-  }
   const structured = !!req.firmwareVersion && versionCompare(req.firmwareVersion, '7.15.0') >= 0
   if (structured) {
     add('low', 'Your KeepKey will request and display the structured fields that it hashes for this signature.')
@@ -558,13 +612,18 @@ function evmTypedData(req: SigningRequestInfo, add: (l: RiskLevel, t: string) =>
   } else {
     add('high', 'Your KeepKey can only show a code (hash) for this signature, not what it says. You would be signing blind.')
   }
-  return opaque ? 'unknown' : structured ? 'shows' : knownCalm ? 'known' : 'unknown'
+  return opaque ? 'unknown' : structured ? (innerKnown ? 'known' : 'shows') : knownCalm ? 'known' : 'unknown'
 }
 
 function evmMessage(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void): Recognition {
   const m = req.ethMessageDecoded
   const raw = String(m?.messageRaw ?? req.data ?? '')
   if (/^0x[0-9a-fA-F]{64}$/.test(raw)) {
+    const linked = safeHashLinked(req, false, add)
+    if (linked) {
+      if (req.safeHashLink?.status === 'match') add('low', 'Safe counts this signature as your owner confirmation. Your KeepKey shows only the 32-byte code, so check the transaction here.')
+      return linked
+    }
     add('high', 'You are signing a 32-byte code, not text. Some apps accept this as approval of a payment or order you cannot see.')
   } else if (m?.isUtf8Text && m.messageText !== undefined && !/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(m.messageText)) {
     // The device draws only printable ASCII as characters; every other byte,

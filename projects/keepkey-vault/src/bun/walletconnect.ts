@@ -11,7 +11,7 @@ import { buildApprovedNamespaces, getSdkError } from '@walletconnect/utils'
 import { formatJsonRpcResult, formatJsonRpcError } from '@walletconnect/jsonrpc-utils'
 import type { SessionTypes, SignClientTypes } from '@walletconnect/types'
 import bs58 from 'bs58'
-import type { ClearSignObservationDraft, ClearSignObservationOutcome, SigningRequestInfo, WcSessionInfo } from '../shared/types'
+import type { ClearSignObservationDraft, ClearSignObservationOutcome, SafeHashLink, SigningRequestInfo, WcSessionInfo } from '../shared/types'
 import { evmAddressPath } from './evm-addresses'
 import { verifyEvmSigner } from './evm-rpc'
 import { assertEvmFeeCapCoversBaseFee } from '../shared/evmFeePreview'
@@ -200,6 +200,8 @@ export interface WcCallbacks {
   getSolanaRpcEndpoint: () => string
   /** Explicit per-chain endpoint for EVM simulation; Pioneer fallback is returned when unset. */
   getEvmSimulationEndpoint: (chainId: number) => string
+  /** The Safe transaction a 32-byte confirmation approves (safe-review.ts safeHashLink). */
+  lookupSafeHash?: (info: SigningRequestInfo) => Promise<SafeHashLink | undefined>
   /** Local privacy-safe ClearSign demand telemetry. Hidden wallets return undefined. */
   recordClearSignObservation: (draft: ClearSignObservationDraft) => string | undefined
   authenticateClearSignObservation: (id: string, source: 'runtime' | 'certified' | 'erc7730', authenticatedComponentCount?: number, codeIdentityBound?: boolean, promotionBundleHash?: string) => void
@@ -910,6 +912,7 @@ export class WalletConnectManager {
       // Same decode as REST /eth/sign, so a WalletConnect login gets the same verdict.
       ethMessageDecoded: ethMessagePreview(from ?? '', message),
     }
+    signingInfo.safeHashLink = await this.callbacks.lookupSafeHash?.(signingInfo)
 
     const approved = await this.callbacks.requestSigningApproval(signingInfo)
     if (!approved) throw new Error('User rejected signing')
@@ -1011,6 +1014,7 @@ export class WalletConnectManager {
     // Same calldata decode + verdict as REST: native firmware decode, else a
     // 7.16 KeepKey-certified schema, else AdvancedMode (blind).
     await applyEvmTxPreview(signingInfo, tx.to, tx.data, effectiveChainId, this.callbacks.getFirmwareVersion(), undefined, '[WC]')
+    signingInfo.safeHashLink = await this.callbacks.lookupSafeHash?.(signingInfo)
 
     const from = tx.from ?? this.callbacks.getEvmAddressInfo()?.address
     let clearSignSchema: SignedEvmSchema | undefined

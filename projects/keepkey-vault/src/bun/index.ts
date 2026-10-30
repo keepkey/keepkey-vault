@@ -311,7 +311,8 @@ import { buildProviderBundle, buildStudioEvmSchema, parseProviderBundle, provide
 import { getTokenMetadata, broadcastEvmTx, verifyEvmSigner, ethCall, ethGetCode, getEvmGasPrice, getEvmNonce, getEvmBalance, waitForTxReceipt } from "./evm-rpc"
 import { evmSourceForChain } from "./pioneer-evm"
 import { deviceErrorMessage } from "../shared/device-error"
-import type { BtcBroadcastReview, BtcPsbtReview, BtcWatchOnlyAccounts, BtcWatchOnlyImport, BtcWatchOnlyPsbt, BtcWatchOnlyReceive, ChainBalance, TokenBalance, CustomToken, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, EvmAddressSet, Bip85SeedMeta, StakingPosition, SwapAsset, AuditToken, DefiPosition, RecentActivity, ClearSignEvent, ClearSignSolanaSchemaArtifact } from "../shared/types"
+import type { BtcBroadcastReview, BtcPsbtReview, BtcWatchOnlyAccounts, BtcWatchOnlyImport, BtcWatchOnlyPsbt, BtcWatchOnlyReceive, ChainBalance, TokenBalance, CustomToken, SigningRequestInfo, ApiLogEntry, PioneerChainInfo, EvmAddressSet, Bip85SeedMeta, StakingPosition, SwapAsset, AuditToken, DefiPosition, RecentActivity, ClearSignEvent, ClearSignSolanaSchemaArtifact, ClearSignObservationDraft } from "../shared/types"
+import type { SafeLookupDeps } from "./safe-review"
 import type { VaultRPCSchema } from "../shared/rpc-schema"
 import type { WipeReason } from "../shared/flash-wipe"
 import { collectAndAnalyzeWithGate, MAX_CHUNK_BYTES } from "./rng-audit"
@@ -1068,6 +1069,31 @@ function safeReader(chainId: number) {
 	return { getCode: (a: string) => ethGetCode(source, a), call: (to: string, data: string) => ethCall(source, to, data) }
 }
 
+/** In-app Safe signatures in ClearSign coverage, like every other signing path; never for hidden wallets. */
+function safeObservationSink() {
+	return {
+		record: (draft: ClearSignObservationDraft) => engine.isPassphraseWallet ? undefined
+			: insertClearSignObservation(draft, { deviceId: engine.getDeviceState().deviceId, source: 'vault-rpc' }).id,
+		finalize: finalizeClearSignObservation,
+	}
+}
+
+/** Where a 32-byte Safe confirmation is looked up (safe-review.ts safeHashLink). */
+const safeLookupDeps: SafeLookupDeps = {
+	chains: async () => {
+		const services = await (await import('./safe')).safeTxServices()
+		return CHAINS.filter(c => c.chainFamily === 'evm' && services.has(Number(c.chainId))).map(c => Number(c.chainId))
+	},
+	ownedSafes: async (chainId, owner) => {
+		const { safeTxServices, listOwnedSafes } = await import('./safe')
+		if (!(await safeTxServices()).has(chainId)) return []
+		const created = createdSafes(chainId).filter(s => s.owners.some(o => o.toLowerCase() === owner.toLowerCase())).map(s => s.address)
+		return [...new Set([...await listOwnedSafes(chainId, owner), ...created])]
+	},
+	readSafe: async (chainId, address) => (await import('./safe')).readSafe(chainId, address),
+	pendingSafeTxs: async (info) => (await import('./safe')).pendingSafeTxs(info),
+}
+
 // ponytail: fixed limit (a 2-owner create used 282,719 gas); Pioneer has no eth_estimateGas yet. Only gas used is charged.
 const safeCreateGasLimit = (owners: number) => 270_000n + 30_000n * BigInt(owners)
 
@@ -1494,6 +1520,7 @@ function getOrCreateWcManager(): WalletConnectManager {
 			const scope = engine.isPassphraseWallet ? null : getWalletDbScope()
 			if (scope) recordSignedEvmTx(scope, chainId, serialized, shown, signedMsg)
 		},
+		lookupSafeHash: async (info) => (await import('./safe-review')).safeHashLink(info, safeLookupDeps),
 		recordClearSignObservation: (draft) => {
 			if (engine.isPassphraseWallet) return undefined
 			const observation = insertClearSignObservation(draft, {
@@ -1913,6 +1940,7 @@ async function deviceSwapAssets() {
 
 // Callbacks bridge REST → RPC UI
 const restCallbacks: RestApiCallbacks = {
+	lookupSafeHash: async (info) => (await import('./safe-review')).safeHashLink(info, safeLookupDeps),
 	onApiLog: (entry: ApiLogEntry) => {
 		if (entryIsStale(entry)) {
 			console.warn(`[api-log] dropped ${entry.method} ${entry.route}: wallet session changed mid-request`)
@@ -7262,8 +7290,10 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			safePending: async (params) => {
 				const { readSafe, pendingSafeTxs } = await import('./safe')
+				const { withRisk } = await import('./safe-review')
 				const info = await readSafe(params.chainId, params.address)
-				return { info, pending: await pendingSafeTxs(info) }
+				// The same risk lines a dapp's request to sign each SafeTx would get.
+				return { info, pending: withRisk(info, await pendingSafeTxs(info), engine.getDeviceState().firmwareVersion) }
 			},
 			safeCreatePlan: async (params) => {
 				if (!engine.wallet) throw new Error('No device connected')
@@ -7326,15 +7356,17 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				// Desktop holds the device for that window and turns AdvancedMode off right after.
 				const wasOn = getAdvancedModeEnabled() === true
 				let signed: any
+				const { observedSign } = await import('./safe-review')
+				const draft = observeEvmCall({ chainId: params.chainId, to: plan.factory, data: plan.data, hostDecoded: true })
 				engine.exclusiveHolder = 'creating a Safe'
 				try {
 					if (!wasOn) await setAdvancedMode(true)
 					try {
-						signed = await engine.wallet.ethSignTx({
+						signed = await observedSign(draft, safeObservationSink(), () => engine.wallet!.ethSignTx({
 							addressNList: evmAddressPath(payer.addressIndex), chainId: params.chainId,
 							nonce: `0x${nonce.toString(16)}`, gasLimit: `0x${gasLimit.toString(16)}`, gasPrice: `0x${gasPrice.toString(16)}`,
 							to: plan.factory, value: '0x0', data: plan.data,
-						} as any)
+						} as any))
 					} finally {
 						if (!wasOn) await setAdvancedMode(false)
 					}
@@ -7361,20 +7393,14 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				const me = evmAddresses.getSelectedAddress()
 				if (!me) throw new Error('No EVM address')
 				const { readSafe, pendingSafeTxs, postConfirmation } = await import('./safe')
-				const { safeTypedData, safeSignature, checkConfirmation } = await import('./safe-core')
-				// Everything is re-read here; nothing the screen sent is trusted except which proposal.
-				const info = await readSafe(params.chainId, params.address)
-				if (!info.owners.some(o => o.toLowerCase() === me.address.toLowerCase())) throw new Error(`${me.address} is not an owner of this Safe`)
-				const tx = (await pendingSafeTxs(info)).find(t => t.safeTxHash.toLowerCase() === params.safeTxHash.toLowerCase())
-				if (!tx) throw new Error('This proposal is no longer pending, or its fields do not produce that hash')
-				if (!tx.hashMatches) throw new Error("Safe's service published a different hash for this proposal. Do not sign it.")
-				const signOp = () => engine.wallet!.ethSignTypedData({ addressNList: evmAddressPath(me.addressIndex), typedData: safeTypedData(info.chainId, info.address, info.version, tx) } as any)
-				const result: any = engine.isEmulator ? await emuSigningOp(signOp, { operation: 'ethSignTypedData', chain: 'Ethereum' }) : await signOp()
-				const signature = safeSignature(typeof result === 'string' ? result : result?.signature)
-				if (checkConfirmation(tx.safeTxHash, info.owners, { owner: me.address, signature }) !== 'verified') {
-					throw new Error('The KeepKey signature does not recover to your owner address for this hash; it was not sent')
-				}
-				await postConfirmation(info.chainId, tx.safeTxHash, signature)
+				const { confirmSafeTx } = await import('./safe-review')
+				const { signature } = await confirmSafeTx(params, me.address, firmware, {
+					readSafe, pendingSafeTxs, postConfirmation, ...safeObservationSink(),
+					sign: (typedData) => {
+						const signOp = () => engine.wallet!.ethSignTypedData({ addressNList: evmAddressPath(me.addressIndex), typedData } as any)
+						return engine.isEmulator ? emuSigningOp(signOp, { operation: 'ethSignTypedData', chain: 'Ethereum' }) : signOp()
+					},
+				})
 				return { signature }
 			},
 			zcashShieldedBalance: async () => {

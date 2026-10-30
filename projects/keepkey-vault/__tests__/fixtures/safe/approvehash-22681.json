@@ -1,0 +1,42 @@
+{
+ "_source": {
+  "approveHashTx": "eth_getTransactionByHash 0x3f7be8ce60dcee480e27b066979606dc55a09845268323e8622ac3f0b346fc53 on chain 1 via https://ethereum-rpc.publicnode.com, recorded 2026-10-29 (found by its ApproveHash log via eth_getLogs on https://eth.drpc.org)",
+  "safeTx": "https://api.safe.global/tx-service/eth/api/v1/multisig-transactions/0xf9d265ee1f6487bdcb5ed8b81667fc170f3ceb0d6a107b269695a55e25ee0ef3/ (recorded 2026-10-29; executed later in 0x9ef33a21...)",
+  "safe": "https://api.safe.global/tx-service/eth/api/v1/safes/0xddb901e4E9A2e659aa1d6476d5D7A2833E7c3dFa/ (recorded 2026-10-29)"
+ },
+ "chainId": 1,
+ "request": {
+  "from": "0xc711f8acc65306d4f16f874fe88c43ef23504f5c",
+  "to": "0xddb901e4e9a2e659aa1d6476d5d7a2833e7c3dfa",
+  "value": "0x0",
+  "data": "0xd4d9bdcdf9d265ee1f6487bdcb5ed8b81667fc170f3ceb0d6a107b269695a55e25ee0ef3",
+  "chainId": "0x1",
+  "nonce": "0xfe53",
+  "gas": "0x19498",
+  "maxFeePerGas": "0xdf8476241",
+  "maxPriorityFeePerGas": "0x2faf080"
+ },
+ "safe": {
+  "address": "0xddb901e4E9A2e659aa1d6476d5D7A2833E7c3dFa",
+  "version": "1.3.0",
+  "threshold": 1,
+  "owners": [
+   "0xC711f8aCC65306D4f16F874Fe88C43eF23504F5c"
+  ],
+  "masterCopy": "0xd9Db270c1B5E3Bd161E8c8503c55cEABeE709552"
+ },
+ "safeTx": {
+  "to": "0x36c6C69A6186D4475fc5c21181CD980Bd6E5e11F",
+  "value": "0",
+  "data": "0x3ed57598af39beea206259fe5abbe7ec525ff91f75c85daedb8ff3fd8a7febe98cec772c72acd8066512fa07b4c2d733aa0b30af4f4d0edd6dfde3c7679f86a3cf143c2a53320c3a87e6f93f2f4a0f45f68b59a6674f94c71d146d9aa49a09d10eccfafe",
+  "operation": 0,
+  "safeTxGas": "0",
+  "baseGas": "0",
+  "gasPrice": "0",
+  "gasToken": "0x0000000000000000000000000000000000000000",
+  "refundReceiver": "0x0000000000000000000000000000000000000000",
+  "nonce": "22681",
+  "safeTxHash": "0xf9d265ee1f6487bdcb5ed8b81667fc170f3ceb0d6a107b269695a55e25ee0ef3",
+  "submissionDate": "2026-10-29T22:46:47Z"
+ }
+}
