@@ -246,8 +246,17 @@ Reviewed routers (Uniswap `deploy-addresses` at commit `a9c574f6`):
 | Arbitrum | UniversalRouterV1_2_V2Support | `0x5E325eDA8064b456f4781070C0738d849c824258` |
 | Arbitrum | UniversalRouterV2 | `0xA51afAFe0263b40EdaEf0Df8781eA9aa03E381a3` |
 | Arbitrum | UniversalRouterV2_1_2 | `0x2d01411773c8C24805306E89A41F7855C3c4Fe65` |
+| Ethereum | UniversalRouterV1 | `0xEf1c6E67703c7BD7107eed8303Fbe6EC2554BF6B` |
+| Ethereum | UniversalRouterV2_1_1 | `0x4C82D1fBFe28C977cBB58D8C7FF8FCF9F70a2cCA` |
+| Base | UniversalRouterV1_2 (listed at commit `bae062f1`, since dropped) | `0x198EF79F1F515F02dFE9e3115eD9fC07183f02fC` |
+| Optimism | UniversalRouterV1_2 (listed at commit `3e16080e`, since dropped) | `0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD` |
+| Optimism | UniversalRouterV2 | `0x851116D9223fabED8E56C0E6b8Ad0c31d98B3507` |
 
-No Ethereum token is reviewed yet, so every Ethereum swap request is 422 today.
+Only chains whose native coin is ETH: 7.16 calls msg.value and an unwrapped
+output `ETH` on every chain, so BNB Chain and Polygon routers are left out.
+Swap entries name tokens from `REVIEWED_EVM_TOKENS` and the swap-only
+`REVIEWED_SWAP_TOKENS` (Ethereum USDT, USDC, DAI, FOX, WBTC, LINK; Optimism
+OP, WCT; Base DIEM).
 
 ## 5. Relay deposit (Relay Depository, inner version 0x05) — DRAFT, not deployed
 
