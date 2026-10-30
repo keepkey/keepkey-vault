@@ -14,8 +14,8 @@ import { knownSpenderName } from '../shared/evm-known-spenders'
 import { urPrecheck } from './uniswap-ur'
 import { supportsCertifiedClearSign } from './solana-certified-policy'
 import { certifiedBodyRefused, certifiedEnvelopeShown, metadataPayloadBytes } from '../shared/certified-evm-envelope'
-import { fetchErc7730CalldataDefinition, resolveErc7730ForCall } from './erc7730-resolver'
-import { describeErc7730Call } from './erc7730-describe'
+import { fetchErc7730CalldataDefinition, resolveErc7730ForCall, resolveErc7730ForTypedData } from './erc7730-resolver'
+import { describeErc7730Call, describeErc7730TypedData } from './erc7730-describe'
 import { safeTxCalls } from '../shared/safe-tx'
 
 /** A chain id as dapps send it (number, "8453", "0x2105") → positive integer, else undefined. */
@@ -103,6 +103,29 @@ export async function attachErc7730Definition(
   })
   if (description) signingInfo.erc7730Description = description
   console.log(`${tag} EVM clear-sign: ERC-7730 definition ${catalog.primaryDefinitionId.slice(0, 18)}… attached (chain ${signingInfo.chainId}, to ${to})`)
+  return true
+}
+
+/**
+ * Attach the KeepKey ClearSign service's typed-data definition for this
+ * document (7.17+), before approval, so the card and report describe what the
+ * device will show; the sign handler sends exactly signingInfo.erc7730. `from`
+ * only when it is the signing key. Returns true when one was attached.
+ */
+export async function attachErc7730TypedDefinition(
+  signingInfo: SigningRequestInfo,
+  typedData: unknown,
+  firmwareVersion: string | undefined,
+  capabilities: readonly number[] | undefined,
+  from?: string,
+  tag = '[REST]',
+): Promise<boolean> {
+  const catalog = await resolveErc7730ForTypedData({ typedData, firmwareVersion, capabilities })
+  if (!catalog) return false
+  signingInfo.erc7730 = catalog
+  const description = describeErc7730TypedData(catalog.definitions[0].envelope, typedData, from)
+  if (description) signingInfo.erc7730Description = description
+  console.log(`${tag} EIP-712 clear-sign: ERC-7730 definition ${catalog.primaryDefinitionId.slice(0, 18)}… attached`)
   return true
 }
 
