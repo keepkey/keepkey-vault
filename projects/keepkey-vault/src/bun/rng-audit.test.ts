@@ -64,7 +64,7 @@ describe('RNG health testing', () => {
 	})
 
 	it('runs the positive control once the sample is large enough', () => {
-		const report = analyze(new Uint8Array(randomBytes(2 * 1024 * 1024)))
+		const report = analyze(uniformSample(2 * 1024 * 1024))
 
 		expect(report.stats.collisionControlUsable).toBe(true)
 		expect(report.stats.expectedCollisions4).toBeGreaterThan(1)
@@ -81,6 +81,17 @@ describe('RNG health testing', () => {
 		expect(analyze(sample).sampleSha256).toBe(sha(sample))
 	})
 })
+
+// A fixed, statistically uniform sample (SHA-256 in counter mode) for the checks that
+// expect a healthy verdict: fresh random bytes fail a health check by chance now and
+// then, which made CI flaky.
+function uniformSample(size: number): Uint8Array {
+	const out = new Uint8Array(size)
+	for (let i = 0, block = 0; i < size; i += 32, block++) {
+		out.set(createHash('sha256').update(`rng-audit-positive-control:${block}`).digest().subarray(0, Math.min(32, size - i)), i)
+	}
+	return out
+}
 
 describe('entropy collection', () => {
 	it('keeps one emulator confirmation gate around the complete multi-chunk audit', async () => {
@@ -213,7 +224,7 @@ describe('honesty contract', () => {
 	})
 
 	it('runs every check once the sample is large enough', () => {
-		const report = analyze(new Uint8Array(randomBytes(2 * 1024 * 1024)))
+		const report = analyze(uniformSample(2 * 1024 * 1024))
 		expect(report.checks.every((c) => c.status !== 'not-run')).toBe(true)
 		expect(report.verdict).toBe('healthy')
 	})
