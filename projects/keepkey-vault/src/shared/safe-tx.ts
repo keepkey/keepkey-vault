@@ -10,6 +10,7 @@
  * pinned one is Safe's own code, so the card can say what it does.
  */
 
+import { keccak_256 } from '@noble/hashes/sha3'
 import { versionCompare } from './firmware-versions'
 
 const CHAINS = [1, 10, 56, 100, 137, 143, 4663, 8453, 42161, 43114]
@@ -109,9 +110,12 @@ export function safeTxCalls(chainId: number, to: string, operation: number, valu
  *    is pinned for (an inner SafeMigration call allowed), and SafeMigration or
  *    SafeToL2Setup/SafeToL2Migration to a pinned SafeL2, which get a calm
  *    "Safe upgrade" screen instead.
- *  Any other target, SignMessageLib included, gets the screen on every version. */
+ *  Any other target, SignMessageLib included, gets the screen on every version.
+ *  `chainId` is the EIP-712 domain's own, 0 when it has none (Safes before
+ *  1.3.0): the device then pins nothing and always shows the screen. */
 export function deviceWarnsSafeDelegatecall(firmwareVersion: string | undefined, chainId: number, to: string, data: string): boolean {
   if (!firmwareVersion || versionCompare(firmwareVersion, '7.15.0') < 0) return false
+  if (!chainId) return true
   const kind = safeContract(chainId, to)?.kind
   const calls = kind === 'multisend' || kind === 'multisend-call-only' ? decodeMultiSend(data) : null
   if (versionCompare(firmwareVersion, '7.17.0') < 0) return !(chainId === 1 && calls?.every((c) => c.operation === 0))
@@ -129,4 +133,11 @@ export function deviceWarnsSafeDelegatecall(firmwareVersion: string | undefined,
   if (kind === 'to-l2-migration' && sel === '0xef2624ae' && data.length === 74 && arg(0, l2)) return false
   if (kind === 'to-l2-migration' && sel === '0xd9a20812' && data.length === 138 && arg(0, l2) && arg(1, handler)) return false
   return true
+}
+
+/** An address the way the KeepKey shows it (EIP-55). */
+export function eip55(address: string): string {
+  const hex = address.toLowerCase().replace(/^0x/, '')
+  const hash = keccak_256(new TextEncoder().encode(hex))
+  return `0x${[...hex].map((c, i) => ((hash[i >> 1] >> (i % 2 ? 0 : 4)) & 15) >= 8 ? c.toUpperCase() : c).join('')}`
 }

@@ -34,7 +34,7 @@ import { nftMarketplaceOperator } from './nft-marketplaces'
 import { cosmosDepositPreview } from './cosmosDepositPreview'
 import { SOLANA_TOKEN_IDENTITIES } from './solana-token-identities'
 import { lookalikeOf } from './address-lookalike'
-import { decodeMultiSend, deviceWarnsSafeDelegatecall, safeContract } from './safe-tx'
+import { decodeMultiSend, deviceWarnsSafeDelegatecall, eip55, safeContract } from './safe-tx'
 
 export type RiskLevel = 'low' | 'medium' | 'high' | 'critical'
 export interface RiskReason { level: RiskLevel; text: string }
@@ -766,6 +766,10 @@ interface SafeCtx {
   known: { address: string; name: string }[]
   req: SigningRequestInfo
   add: (l: RiskLevel, t: string) => void
+  /** Set when a delegatecall to a pinned Safe contract is not Safe{Wallet}'s
+   *  standard use of it: an unpinned target or handler argument, or a
+   *  delegatecall inside a batch. */
+  offStandard?: boolean
 }
 
 /** What this computer calls an address, if anything: never a verification. */
@@ -921,6 +925,7 @@ function safeDelegateCall(ctx: SafeCtx, to: string, data: string): Recognition |
       const prefix = `Call ${i + 1} of ${calls.length}: `
       if (c.operation === 1) {
         ctx.add('high', delegatecallLine(c.to, prefix))
+        ctx.offStandard = true
         decoded = false
       } else if (!safeCall(ctx, c.to, c.value, c.data, prefix, ctx.req.safeCalls?.[i])) decoded = false
     })
@@ -944,14 +949,16 @@ function safeDelegateCall(ctx: SafeCtx, to: string, data: string): Recognition |
     const target = `0x${word(0).slice(24)}`
     const singleton = safeContract(ctx.chainId, target)
     if (singleton?.kind !== 'singleton-l2') {
+      ctx.offStandard = true
       ctx.add('critical', `Switches the code your Safe runs to ${target}, which is not a standard SafeL2 contract. That code would control everything your Safe holds.`)
       return 'known'
     }
     ctx.add('medium', `Switches your Safe to the standard SafeL2 ${singleton.version} contract, through Safe's own ${pinned.name}.`)
     if (sel === '0xd9a20812') {
       const handler = /^0{24}/.test(word(1)) ? `0x${word(1).slice(24)}` : ''
+      const known = Boolean(handler) && safeContract(ctx.chainId, handler)?.kind === 'fallback-handler'
+      if (!known) ctx.offStandard = true
       if (!handler) return 'unknown'
-      const known = safeContract(ctx.chainId, handler)?.kind === 'fallback-handler'
       ctx.add(known ? 'low' : 'medium', known ? `Also sets Safe's standard fallback handler (${handler}).` : `Also sets ${handler} as your Safe's fallback handler. It answers the signature checks (EIP-1271) apps use to accept your Safe's signatures.`)
     }
     return 'known'
@@ -986,10 +993,13 @@ function safeTx(req: SigningRequestInfo, d: NonNullable<SigningRequestInfo['type
   if (f('Operation') === '1') {
     const helper = safeDelegateCall(ctx, to, data)
     if (helper) {
-      // The firmware warns about every delegatecall it cannot check, Safe's own included.
+      // The firmware warns about every delegatecall it cannot check, Safe's own
+      // included. It reads the chain from the domain alone (0 when it has none).
       const pinned = safeContract(ctx.chainId, to)!
-      if (deviceWarnsSafeDelegatecall(req.firmwareVersion, ctx.chainId, to, data)) {
-        add('low', `Your KeepKey will show "Delegatecall: SafeTx gives ${to} your Safe's full authority. Not checked." That is expected here: it says so for any delegatecall it cannot check itself, and ${to} is Safe's own ${pinned.name} ${pinned.version} contract at its standard address, which Safe{Wallet} uses this way.`)
+      if (deviceWarnsSafeDelegatecall(req.firmwareVersion, Number(d.domain.chainId ?? 0), to, data)) {
+        const screen = `Your KeepKey will show "Delegatecall: SafeTx gives ${eip55(to)} your Safe's full authority. Not checked."`
+        if (ctx.offStandard) add('high', `${screen} Take it seriously here: this is not how Safe{Wallet} uses Safe's ${pinned.name}. Read the other lines on this card before you approve.`)
+        else add('low', `${screen} That is expected here: it says so for any delegatecall it cannot check itself, and ${eip55(to)} is Safe's own ${pinned.name} ${pinned.version} contract at its standard address, which Safe{Wallet} uses this way.`)
       }
       return helper
     }

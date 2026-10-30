@@ -52,16 +52,16 @@ const SERVICE = (async (url: any) => {
   return hit ? Response.json(hit) : Response.json({ classification: 'OPAQUE', code: 'NOT_IN_SIGNED_CATALOG' }, { status: 422 })
 }) as unknown as typeof fetch
 /** The approval card's request for a SafeTx, the way REST and WalletConnect build it. */
-async function request(typedData: any, opts: { from?: string; known?: Known; firmwareVersion?: string } = {}) {
+async function request(typedData: any, opts: { from?: string; known?: Known; firmwareVersion?: string; chainId?: number } = {}) {
   const info: SigningRequestInfo = {
-    id: 't', method: '/eth/sign-typed-data', appName: 'Safe{Wallet}', chain: 'eth', chainId: Number(typedData.domain.chainId),
+    id: 't', method: '/eth/sign-typed-data', appName: 'Safe{Wallet}', chain: 'eth', chainId: opts.chainId ?? Number(typedData.domain.chainId),
     from: opts.from, firmwareVersion: opts.firmwareVersion ?? '7.16.0', typedDataDecoded: decodeEIP712(typedData), knownAddresses: opts.known,
   }
   await attachSafeCallPreviews(info, SERVICE)
   return info
 }
 const review = async (typedData: any, opts: Parameters<typeof request>[1] = {}) => assessSigningRisk(await request(typedData, opts))!
-const real = (fx: Fixture, opts: { known?: Known; firmwareVersion?: string } = {}) => review(fx.typedData, { from: fx.signer, ...opts })
+const real = (fx: Fixture, opts: { known?: Known; firmwareVersion?: string; chainId?: number } = {}) => review(fx.typedData, { from: fx.signer, ...opts })
 const text = (r: { reasons: { text: string }[] }) => r.reasons.map((x) => x.text).join('\n')
 const levelOf = (r: { reasons: { level: string; text: string }[] }, part: string) => r.reasons.find((x) => x.text.includes(part))?.level
 /** The same document with message fields replaced (a mutant of a real request). */
@@ -393,7 +393,7 @@ describe("the device's Delegatecall screen for Safe's own contracts is on the ca
       const r = await real(fx)
       const line = deviceLine(r)
       expect(`${leg} ${line?.level}`).toBe(`${leg} low`)
-      expect(line!.text.toLowerCase()).toContain(`"delegatecall: ${said.toLowerCase()}"`)
+      expect(line!.text).toContain(`"Delegatecall: ${said}"`)
       expect(line!.text).toContain("That is expected here")
       expect(line!.text).toMatch(/Safe's own (MultiSend|MultiSendCallOnly|SignMessageLib) 1\.[345]\.[01] contract at its standard address/)
     }
@@ -437,5 +437,70 @@ describe("the device's Delegatecall screen for Safe's own contracts is on the ca
     expect(deviceLine(r)).toBeUndefined()
     expect(r.tier).toBe('red')
     expect(levelOf(r, 'inside your Safe (delegatecall)')).toBe('high')
+  })
+})
+
+/** Requests that keep one of Safe's own contracts in `to` but are not how
+ *  Safe{Wallet} uses it, or that the device reads differently (PR #583 review).
+ *  Mutants of real requests, each also run on the 7.16.0 and 7.14.2 emulators
+ *  (emulator-legs-20261030/fixes/safe-card-review). */
+describe("the device's Delegatecall screen when the request is not Safe's standard use", () => {
+  const TO_L2_MIGRATION = '0xfF83F6335d8930cBad1c0D439A841f01888D9f69'
+  const SAFE_L2_141 = '0x29fcB43b46531BcA003ddC8FCB67FFE91900C762'
+  const CFH_141 = '0xfd0732dc9E303f09fCEf3a7388Ad10A83459Ec99'
+  const ROGUE = '0x1111111111111111111111111111111111111111'
+  const toL2 = (data: string) => mutate(baseAddOwners, { to: TO_L2_MIGRATION, operation: 1, data })
+  const run = (td: any, firmwareVersion: string) => review(td, { from: baseAddOwners.signer, firmwareVersion })
+  const said = `"Delegatecall: SafeTx gives ${TO_L2_MIGRATION} your Safe's full authority. Not checked."`
+
+  test('migrateToL2 to a contract that is not SafeL2: the warning is real, never "expected"', async () => {
+    for (const fw of ['7.16.0', '7.17.0']) {
+      const r = await run(toL2(`0xef2624ae${word(ROGUE)}`), fw)
+      expect(r.tier).toBe('red')
+      expect(levelOf(r, 'which is not a standard SafeL2 contract')).toBe('critical')
+      expect(`${fw} ${deviceLine(r)?.level}`).toBe(`${fw} high`)
+      expect(deviceLine(r)!.text).toContain(said)
+      expect(deviceLine(r)!.text).toContain('Take it seriously here')
+      expect(text(r)).not.toContain('That is expected here')
+    }
+  })
+  test('migrateFromV111 with a fallback handler that is not pinned: red, the warning is real', async () => {
+    for (const fw of ['7.16.0', '7.17.0']) {
+      const r = await run(toL2(`0xd9a20812${word(SAFE_L2_141)}${word(ROGUE)}`), fw)
+      expect(`${fw} ${r.tier}`).toBe(`${fw} red`)
+      expect(levelOf(r, `Also sets ${ROGUE} as your Safe's fallback handler`)).toBe('medium')
+      expect(`${fw} ${deviceLine(r)?.level}`).toBe(`${fw} high`)
+      expect(text(r)).not.toContain('That is expected here')
+    }
+  })
+  test('the same two calls with pinned arguments stay calm: 7.16 warns ("expected"), 7.17 shows its own upgrade screen', async () => {
+    for (const data of [`0xef2624ae${word(SAFE_L2_141)}`, `0xd9a20812${word(SAFE_L2_141)}${word(CFH_141)}`]) {
+      const r16 = await run(toL2(data), '7.16.0')
+      expect(r16.tier).toBe('yellow')
+      expect(deviceLine(r16)?.level).toBe('low')
+      expect(deviceLine(r16)!.text).toContain(`${said} That is expected here`)
+      expect(deviceLine(await run(toL2(data), '7.17.0'))).toBeUndefined()
+    }
+  })
+  test('an inner delegatecall in a batch: the warning is real, never "expected"', async () => {
+    const data = baseAddOwners.typedData.message.data.replace(/^(0x8d80ff0a[0-9a-f]{128})00/i, '$101')
+    const r = await run(mutate(baseAddOwners, { data }), '7.16.0')
+    expect(levelOf(r, 'Call 1 of 2: Runs code from')).toBe('high')
+    expect(deviceLine(r)?.level).toBe('high')
+    expect(text(r)).not.toContain('That is expected here')
+  })
+  test('a Safe before 1.3.0 (no chainId in its domain): the device pins nothing and warns about a clean MultiSend batch', async () => {
+    const MULTISEND_111 = '0x8D29bE29923b68abfDD21e541b9374737B49cdAD'
+    const td = mutate(ethFallbackHandler, { to: MULTISEND_111 })
+    const old = { ...td, types: { ...td.types, EIP712Domain: [{ name: 'verifyingContract', type: 'address' }] }, domain: { verifyingContract: td.domain.verifyingContract } }
+    for (const fw of ['7.16.0', '7.17.0']) {
+      const line = deviceLine(await review(old, { from: ethFallbackHandler.signer, firmwareVersion: fw, chainId: 1 }))
+      expect(`${fw} ${line?.level}`).toBe(`${fw} low`)
+      expect(line!.text).toContain(`"Delegatecall: SafeTx gives ${MULTISEND_111} your Safe's full authority. Not checked."`)
+    }
+    // control: the same batch with chainId 1 in its domain gets no screen on 7.16 (the emulator showed none)
+    expect(deviceLine(await review(td, { from: ethFallbackHandler.signer, firmwareVersion: '7.16.0' }))).toBeUndefined()
+    expect(deviceWarnsSafeDelegatecall('7.16.0', 0, MULTISEND_111, td.message.data)).toBe(true)
+    expect(deviceWarnsSafeDelegatecall('7.16.0', 1, MULTISEND_111, td.message.data)).toBe(false)
   })
 })
