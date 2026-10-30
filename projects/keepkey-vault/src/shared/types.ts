@@ -1151,6 +1151,9 @@ export interface SigningRequestInfo {
   /** A TRON call the firmware does not decode (TRC-20 approve, staking,
    *  votes, a SunSwap router call), read on this computer as advice only. */
   tronCall?: TronCallPreview
+  /** The device shows tronCall from its own parse (7.17+: an approve of a
+   *  table token, staking, votes), so no AdvancedMode. */
+  tronCallShown?: boolean
   /**
    * Populated when a Solana transaction was received but clear-sign decoding
    * failed (malformed wire layout, unsupported message version, RPC outage,

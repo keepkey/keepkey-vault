@@ -546,6 +546,15 @@ function evmTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void,
     // Uniswap's own interface fee is 0.15-0.25%; above 1% it is not a fee.
     if (fee && Number(fee[1]) * 100 + Number(fee[2]) > 100) add('high', `${fee[1]}.${fee[2]}% of the swap output goes to ${fee[3]}, not to you.`)
     else if (fee) add('low', `Fee: ${fee[1]}.${fee[2]}% of the swap output goes to ${fee[3]}.`)
+    // 7.17: an exact-output swap's fee is a fixed amount of the output token.
+    const paid = /^(\d+(?:\.\d+)?) (\S+) to (0x[0-9a-f]{40})$/.exec(field('Fee') ?? '')
+    const out = /^(\d+(?:\.\d+)?) (\S+)$/.exec(field('Minimum output') ?? '')
+    if (paid) {
+      const share = out && out[2] === paid[2] ? Number(paid[1]) / (Number(paid[1]) + Number(out[1])) : undefined
+      const pct = share === undefined ? '' : ` (${(share * 100).toFixed(2)}%)`
+      if (share === undefined || share > 0.01) add('high', `${paid[1]} ${paid[2]}${pct} of the swap output goes to ${paid[3]}, not to you.`)
+      else add('low', `Fee: ${paid[1]} ${paid[2]}${pct} of the swap output goes to ${paid[3]}.`)
+    }
   }
   if (thorSwap) {
     thorDestination(req, field('Output destination'), field('Output chain'), from, add)
@@ -1328,8 +1337,10 @@ function evmMessage(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => v
   return 'unknown'
 }
 
-/** TRON: the firmware shows a plain TRX or TRC-20 transfer (tronDecoded);
- *  everything else it shows as raw data, so this reads it (tronCall). */
+/** TRON: the firmware shows a plain TRX or TRC-20 transfer (tronDecoded),
+ *  and from 7.17 an approve of a table token, staking and votes
+ *  (tronCallShown); everything else it shows as raw data, so this reads it
+ *  (tronCall). */
 function tronTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void): Recognition {
   const t = req.tronDecoded
   if (t) {
@@ -1350,7 +1361,9 @@ function tronTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void)
     return shown ? 'shows' : 'known'
   }
   const c = req.tronCall
-  const fw = (what: string) => add('medium', notOnThisFirmware(what, req))
+  const fw = (what: string) => req.tronCallShown
+    ? add('low', 'Your KeepKey shows this from the signed transaction; check it there.')
+    : add('medium', notOnThisFirmware(what, req))
   if (!c) {
     add('high', 'KeepKey cannot read this transaction at all. You would be signing blind.')
     return 'unknown'
@@ -1372,7 +1385,7 @@ function tronTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void)
         if (level === 'critical') add('critical', `${c.spender} is not a contract KeepKey knows. Sites that steal ${token} ask for exactly this approval; whoever controls that address can take your ${token} at any time.`)
       }
       fw('TRC-20 approvals')
-      return 'known'
+      return req.tronCallShown ? 'shows' : 'known'
     }
     case 'Stake TRX':
       add('low', `Stakes ${c.amount} for ${c.resource}. The TRX stays locked until you unstake it and the network's waiting period ends.`)
@@ -1412,7 +1425,7 @@ function tronTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void)
       return 'unknown'
   }
   fw('TRON staking and voting')
-  return 'known'
+  return req.tronCallShown ? 'shows' : 'known'
 }
 
 /** Cosmos Hub amino: hdwallet builds each of these message types on the

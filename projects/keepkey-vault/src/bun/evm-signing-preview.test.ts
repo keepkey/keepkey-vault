@@ -779,3 +779,77 @@ test('recognizedSpender: canonical Permit2, certified name records and Desktop s
   expect(recognizedSpender(1, 'not-an-address')).toBeUndefined()
   expect(recognizedSpender(undefined, '0x000000000022D473030F116dDEE9F6B43aC78BA3')).toBeUndefined()
 })
+
+describe('7.17 Universal Router review: the app fee on an exact-output swap (TRANSFER)', () => {
+  const { urPrecheck } = require('./uniswap-ur')
+  const { buildEvmDecoderBody, reviewedSwapTokens } = require('./evm-certified-schema')
+  const { uniswapSwapFields } = require('./evm-signing-preview')
+  // Other wallets' public calls from firmware 7.17's model set (rw lines).
+  const fx = JSON.parse(Buffer.from(Bun.gunzipSync(require('node:fs').readFileSync(new URL('../../__tests__/fixtures/uniswap/ur-firmware-parity-717.json.gz', import.meta.url)))).toString())
+  const feeSwaps = Object.entries(fx.calls as Record<string, [string, string, string]>)
+    .filter(([k]) => k.startsWith('rw'))
+    .map(([k, [r, v, cd]]) => ({ key: k, router: `0x${r}`, value: BigInt(`0x${v}`), data: `0x${cd}` }))
+    .filter((c) => {
+      const pre = urPrecheck(c.router, c.data, c.value, '7.17.0')
+      return pre?.summary.fee?.amount !== undefined && reviewedSwapTokens(1, pre.tokens)
+    })
+  // A 1,500 USDT exact-output swap paying the app 3.75 USDT (searched, not pinned).
+  const usdt = feeSwaps.find((c) => urPrecheck(c.router, c.data, c.value, '7.17.0').tokens[0] === '0xdac17f958d2ee523a2206206994597c13d831ec7')
+  function swapService(seen: any[]) {
+    globalThis.fetch = (async (url: any, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body))
+      if (String(url).endsWith('/v1/evm/schema')) return new Response(JSON.stringify({ classification: 'OPAQUE' }), { status: 422 })
+      seen.push({ url: String(url), body })
+      const tokens = reviewedSwapTokens(body.chainId, body.tokens)
+      const inner = buildEvmDecoderBody(body.chainId, body.contract, body.selector, tokens).toString('hex')
+      return new Response(JSON.stringify({
+        success: true, classification: 'VERIFIED', version: 7, keyId: 0x80, chainId: body.chainId,
+        entry: `eip155:${body.chainId}:${body.contract}:uniswap-ur`, contract: body.contract, selector: body.selector,
+        method: 'execute', signedPayload: testCertifiedEnvelope(inner), tokens,
+      }), { status: 200, headers: { 'content-type': 'application/json' } })
+    }) as typeof fetch
+    return seen
+  }
+
+  test('the 7.17 fixture holds public fee calls with reviewed tokens on Ethereum UR 1.2', () => {
+    expect(feeSwaps.length).toBeGreaterThan(1)
+    expect(usdt).toBeDefined()
+  })
+
+  test('the card states the fee as the amount the device shows; 7.16 reads no swap', () => {
+    const rows = uniswapSwapFields(1, usdt!.router, usdt!.data, `0x${usdt!.value.toString(16)}`, undefined, '7.17.0')
+    const row = (n: string) => rows.find((r: any) => r.name === n)?.value
+    expect(row('Fee')).toMatch(/^3\.75 USDT to 0x[0-9a-f]{40}$/)
+    expect(row('You pay at most')).toMatch(/ ETH$/)
+    expect(row('Minimum output')).toBe('1500 USDT') // the SWEEP minimum: after the fee
+    expect(uniswapSwapFields(1, usdt!.router, usdt!.data, `0x${usdt!.value.toString(16)}`, undefined, '7.16.0')).toEqual([])
+    expect(uniswapSwapFields(1, usdt!.router, usdt!.data, `0x${usdt!.value.toString(16)}`)).toEqual([])
+  })
+
+  test('the risk bar states the fee and its share of the output', async () => {
+    swapService([])
+    const s: SigningRequestInfo = { ...info(), value: `0x${usdt!.value.toString(16)}` }
+    await applyEvmTxPreview(s, usdt!.router, usdt!.data, 1, '7.17.0')
+    const reasons = assessSigningRisk({ ...s, to: usdt!.router, data: usdt!.data, chainId: 1, firmwareVersion: '7.17.0' })!.reasons
+    expect(reasons.map((r) => `${r.level}: ${r.text}`)).toContainEqual(expect.stringMatching(/^low: Fee: 3\.75 USDT \(0\.25%\) of the swap output goes to 0x[0-9a-f]{40}\.$/))
+  })
+
+  test('7.17.0: attaches the 0x07 entry, no AdvancedMode; 7.16.0: no request, AdvancedMode', async () => {
+    for (const c of feeSwaps) {
+      const seen = swapService([])
+      const s: SigningRequestInfo = { ...info(), value: `0x${c.value.toString(16)}` }
+      await applyEvmTxPreview(s, c.router, c.data, 1, '7.17.0')
+      expect([c.key, s.needsBlindSigning]).toEqual([c.key, false])
+      const blob = Buffer.from(s.calldataDecoded!.signedInsightBlob!, 'base64')
+      expect(blob[140]).toBe(0x07)
+      expect(seen.map((x) => x.body.tokens)).toEqual([urPrecheck(c.router, c.data, c.value, '7.17.0').tokens])
+      expect(evmCallRequiresAdvancedMode(c.router, c.data, 1, false, { signedPayload: `0x${blob.toString('hex')}`, keyId: 0x80 }, undefined, '7.17.0', s.value)).toBe(false)
+
+      const old = swapService([])
+      const s16: SigningRequestInfo = { ...info(), value: `0x${c.value.toString(16)}` }
+      await applyEvmTxPreview(s16, c.router, c.data, 1, '7.16.0')
+      expect(s16.needsBlindSigning).toBe(true)
+      expect(old.filter((x) => x.url.endsWith('/v1/evm/swap'))).toHaveLength(0)
+    }
+  })
+})
