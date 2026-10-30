@@ -1,13 +1,19 @@
 import { describe, expect, it } from 'bun:test'
+import { createHash } from 'node:crypto'
+import { readFileSync } from 'node:fs'
 
 import {
   buildCertifiedEvmDecoderEnvelope,
   buildEvmDecoderBody,
+  findReviewedTokenSchema,
   findReviewedUniversalRouter,
+  relayErc20DepositEntries,
+  REVIEWED_EVM_TOKENS,
   REVIEWED_UNIVERSAL_ROUTERS,
   reviewedSwapTokens,
   UNIVERSAL_ROUTER_PROVENANCE,
 } from './evm-certified-schema'
+import { REVIEWED_SWAP_TOKENS } from '../shared/reviewed-evm-tokens'
 import { urDecode, urPrecheck, urSummarize, type UrPlan, type UrStep } from './uniswap-ur'
 import production from '../../__tests__/fixtures/clearsign-production-catalog-batch1.json'
 import { ALPHA_ROOT_PUBLIC_KEY } from '../../scripts/clearsign-alpha-rehearsal'
@@ -214,7 +220,7 @@ describe('v0x07 decoder entry body', () => {
       .toThrow(/does not match the certificate's delegate/)
   })
 
-  it('reviews only UR 1.2, 2.0 and 2.1.2 deployments, all from the pinned Uniswap list', () => {
+  it('reviews only checked deployments from Uniswap\'s list, on chains whose native coin is ETH', () => {
     expect(UNIVERSAL_ROUTER_PROVENANCE).toContain('a9c574f6caf1d6f1b51facd3fe32dec7c4df392c')
     expect(REVIEWED_UNIVERSAL_ROUTERS.map((r) => `${r.chainId}:${r.address}`)).toEqual([
       '8453:0x3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad',
@@ -226,8 +232,94 @@ describe('v0x07 decoder entry body', () => {
       '42161:0x5e325eda8064b456f4781070c0738d849c824258',
       '42161:0xa51afafe0263b40edaef0df8781ea9aa03e381a3',
       '42161:0x2d01411773c8c24805306e89a41f7855c3c4fe65',
+      '1:0xef1c6e67703c7bd7107eed8303fbe6ec2554bf6b',
+      '1:0x4c82d1fbfe28c977cbb58d8c7ff8fcf9f70a2cca',
+      '8453:0x198ef79f1f515f02dfe9e3115ed9fc07183f02fc',
+      '10:0x3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad',
+      '10:0x851116d9223fabed8e56c0e6b8ad0c31d98b3507',
     ])
-    for (const r of REVIEWED_UNIVERSAL_ROUTERS) expect(r.source).toMatch(/UniversalRouterV(1_2_V2Support|2|2_1_2)$/)
+    // The pinned list, or (first 1.2 deployments, since dropped) the commit that listed them.
+    for (const r of REVIEWED_UNIVERSAL_ROUTERS) {
+      expect(r.source).toMatch(/UniversalRouterV(1|1_2_V2Support|2|2_1_1|2_1_2)$|UniversalRouterV1_2 at [0-9a-f]{40}$/)
+    }
+    // 7.16 names msg.value and an unwrapped output "ETH" on every chain.
+    for (const r of REVIEWED_UNIVERSAL_ROUTERS) expect([1, 10, 8453, 42161]).toContain(r.chainId)
+    expect(findReviewedUniversalRouter(56, '0x8b844f885672f333bc0042cb669255f93a4c1e6b')).toBeUndefined()
     expect(findReviewedUniversalRouter(8453, '0x6fF5693b99212Da76ad316178A184AB56D299b43')).toBeDefined()
+  })
+})
+
+/**
+ * Batch 5 (gap rows G01, G04): major tokens on Ethereum, Optimism and Base,
+ * and five more Universal Routers. Real calls by third parties on mainnet
+ * (fixture header): each must request exactly the 0x07 body the ceremony
+ * candidate set holds (entrySha256), which only exists if both the token and
+ * the router are reviewed.
+ */
+describe('batch 5: added swap tokens and routers, real public calls', () => {
+  const fixture = JSON.parse(readFileSync(new URL('../../__tests__/fixtures/uniswap/batch5-public-calls.json', import.meta.url), 'utf8'))
+  const calls = fixture.calls as Array<{ tx: string; chainId: number; router: string; value: string; data: string; tokens?: string[]; entrySha256?: string; control?: string }>
+  const sha256 = (b: Uint8Array) => createHash('sha256').update(b).digest('hex')
+
+  it('every added router and token has a real call, and each call requests the candidate body byte for byte', () => {
+    const entries = calls.filter((c) => c.entrySha256)
+    expect(new Set(entries.map((c) => `${c.chainId}:${c.router}`))).toEqual(new Set([
+      '1:0xef1c6e67703c7bd7107eed8303fbe6ec2554bf6b', '1:0x4c82d1fbfe28c977cbb58d8c7ff8fcf9f70a2cca',
+      '1:0x3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad', '1:0x66a9893cc07d91d95644aedd05d03f95e1dba8af',
+      '1:0x23617e59a5925b2a4bf75d73ff6711cd0b29de85', '10:0x3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad',
+    ]))
+    expect(new Set(entries.flatMap((c) => c.tokens!))).toEqual(new Set(['USDT', 'USDC', 'DAI', 'WBTC', 'LINK', 'OP']))
+    for (const c of entries) {
+      expect(findReviewedUniversalRouter(c.chainId, c.router)).toBeDefined()
+      const pre = urPrecheck(c.router, c.data, BigInt(c.value))
+      expect(pre).not.toBeNull()
+      const ids = reviewedSwapTokens(c.chainId, pre!.tokens)
+      expect(ids?.map((t) => t.symbol)).toEqual(c.tokens)
+      expect(sha256(buildEvmDecoderBody(c.chainId, c.router, pre!.selector, ids!))).toBe(c.entrySha256)
+    }
+  })
+
+  it('controls: V4 through UR 2.1.1 is refused; an unreviewed Optimism token requests nothing', () => {
+    const v4 = calls.find((c) => c.control === 'v4-on-2.1.1')!
+    expect(findReviewedUniversalRouter(v4.chainId, v4.router)).toBeDefined()
+    expect(urPrecheck(v4.router, v4.data, BigInt(v4.value))).toBeNull()
+    const other = calls.find((c) => c.control === 'unreviewed-token')!
+    const pre = urPrecheck(other.router, other.data, BigInt(other.value))
+    expect(pre).not.toBeNull()
+    expect(reviewedSwapTokens(other.chainId, pre!.tokens)).toBeUndefined()
+  })
+
+  it('a body is bound to its router: the same tokens on UR 2.0 and UR 2.1.2 are different entries', () => {
+    const ids = reviewedSwapTokens(1, ['0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48', '0xdac17f958d2ee523a2206206994597c13d831ec7'])!
+    const ur20 = buildEvmDecoderBody(1, '0x66a9893cc07d91d95644aedd05d03f95e1dba8af', '0x3593564c', ids)
+    const ur212 = buildEvmDecoderBody(1, '0x23617e59a5925b2a4bf75d73ff6711cd0b29de85', '0x3593564c', ids)
+    expect(ur20.equals(ur212)).toBe(false)
+    expect(ur20.subarray(5, 25).toString('hex')).toBe('66a9893cc07d91d95644aedd05d03f95e1dba8af')
+  })
+
+  it('swap-only tokens never change approve, transfer or Relay descriptions', () => {
+    for (const key of Object.keys(REVIEWED_SWAP_TOKENS)) {
+      const [chain, address] = key.split(':')
+      expect(REVIEWED_EVM_TOKENS[key]).toBeUndefined()
+      for (const selector of ['0x095ea7b3', '0xa9059cbb']) {
+        expect(findReviewedTokenSchema(Number(chain), address, selector, 68)).toBeUndefined()
+        expect(findReviewedTokenSchema(Number(chain), address, selector, 68, '0x000000000022d473030f116ddee9f6b43ac78ba3')).toBeUndefined()
+      }
+    }
+    expect(relayErc20DepositEntries()).toHaveLength(Object.keys(REVIEWED_EVM_TOKENS).length)
+  })
+
+  it('the 0x07 bodies Desktop can request are exactly the reviewed set (a change needs a new ceremony)', () => {
+    const bodies: string[] = []
+    for (const router of REVIEWED_UNIVERSAL_ROUTERS) {
+      const onChain = [...Object.keys(REVIEWED_EVM_TOKENS), ...Object.keys(REVIEWED_SWAP_TOKENS)]
+        .filter((k) => Number(k.split(':')[0]) === router.chainId).map((k) => k.split(':')[1])
+      const sets = [...onChain.map((t) => [t]), ...onChain.flatMap((a) => onChain.filter((b) => b !== a).map((b) => [a, b]))]
+      for (const selector of ['0x3593564c', '0x24856bc3']) {
+        for (const set of sets) bodies.push(buildEvmDecoderBody(router.chainId, router.address, selector, reviewedSwapTokens(router.chainId, set)!).toString('hex'))
+      }
+    }
+    expect(bodies).toHaveLength(918)
+    expect(sha256(Buffer.from(bodies.sort().join('\n')))).toBe('8c089336065ef49da35fecff730d38a285a0412841384b702ef1c999a1b5c38a')
   })
 })
