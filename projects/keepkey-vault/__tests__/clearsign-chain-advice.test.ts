@@ -184,6 +184,64 @@ describe('Jupiter swaps (v0, lookup tables) read on this computer', () => {
   })
 })
 
+// The Jupiter route above starts with System AdvanceNonceAccount (a durable
+// nonce, emulator leg S4 2026-10-30). Its authority is the signing account,
+// so it is a normal request: it read red "a System Program action KeepKey
+// does not recognize" before this instruction was decoded.
+describe('durable nonce (System AdvanceNonceAccount)', () => {
+  const NONCE = 'BRuqUm4Ed5HpaAqfmBWD26x9J1FgKLVD6QCn1iexmEiM'
+  const withAuthority = (decoded: SolanaTxDecodedInfo, authority: string): SolanaTxDecodedInfo => ({
+    ...decoded,
+    instructions: decoded.instructions.map((i, n) => n !== 0 ? i
+      : { ...i, accounts: i.accounts.map((a) => a.label === 'nonceAuthority' ? { ...a, pubkey: authority } : a) }),
+  })
+
+  test('controlled by the signing account: decoded and calm, the swap sets the tone', async () => {
+    const { fx, decoded } = await solana('jupiter-route.json')
+    const user = fx.accountKeys[0]
+    const ix = decoded.instructions[0]
+    expect([ix.status, ix.programName, ix.instructionName]).toEqual(['known', 'System Program', 'advanceNonceAccount'])
+    expect(ix.accounts.map((a) => [a.label, a.pubkey])).toEqual([
+      ['nonceAccount', NONCE], ['recentBlockhashesSysvar', 'SysvarRecentB1ockHashes11111111111111111111'], ['nonceAuthority', user],
+    ])
+    const r = assessSigningRisk(solanaRequest(decoded, user))!
+    const t = text(r)
+    expect(t).toContain(`low: Uses durable nonce account ${NONCE.slice(0, 4)}…${NONCE.slice(-4)}, which your own account controls: this transaction does not expire until it is sent or you advance that nonce.`)
+    expect(t).not.toContain('does not recognize')
+    expect(r.tier).toBe('yellow')
+    expect(r.level).toBe('medium')
+  })
+
+  test('CONTROL: controlled by another account, or unchecked, keeps the warning', async () => {
+    const { fx, decoded } = await solana('jupiter-route.json')
+    const user = fx.accountKeys[0]
+    const other = fx.accountKeys[1]
+    const r = assessSigningRisk(solanaRequest(withAuthority(decoded, other), user))!
+    expect(r.tier).toBe('red')
+    expect(text(r)).toContain(`high: Uses durable nonce account ${NONCE}, controlled by ${other}, which is NOT the account signing this (${user}).`)
+    // No signing account to compare with (no from, no swap naming one).
+    const nonceOnly = { ...decoded, instructions: decoded.instructions.slice(0, 1) }
+    const unknown = assessSigningRisk({ ...solanaRequest(nonceOnly, user), from: undefined } as SigningRequestInfo)!
+    expect(text(unknown)).toContain('this computer could not check who can cancel it')
+    expect(unknown.tier).toBe('red')
+  })
+
+  // The browser extension's preview (/solana/decode-transaction) passes no
+  // `from`. The swap's userTransferAuthority comes from the same bytes as the
+  // nonce authority, so it cannot vouch that the user controls the nonce.
+  test('CONTROL: no signing account, and the swap names the nonce authority as its user', async () => {
+    const { fx, decoded } = await solana('jupiter-route.json')
+    const other = fx.accountKeys[1]
+    const forged = withAuthority(decoded, other)
+    forged.instructions = forged.instructions.map((i) => i.programId !== 'JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4' ? i
+      : { ...i, accounts: i.accounts.map((a) => a.label === 'userTransferAuthority' ? { ...a, pubkey: other } : a) })
+    expect(forged.instructions.some((i) => i.accounts.some((a) => a.label === 'userTransferAuthority' && a.pubkey === other))).toBe(true)
+    const r = assessSigningRisk({ ...solanaRequest(forged, other), from: undefined } as SigningRequestInfo)!
+    expect(text(r)).not.toContain('which your own account controls')
+    expect(text(r)).toContain(`high: Uses durable nonce account ${NONCE}. This transaction does not expire, and this computer could not check who can cancel it.`)
+  })
+})
+
 describe('WalletConnect reads the same accounts as REST', () => {
   test('a Jupiter v0 swap over WalletConnect resolves its lookup tables and reads yellow', async () => {
     const fx = await load('jupiter-route-v2.json') as SolanaFixture & { rawTx: string; slot: number }

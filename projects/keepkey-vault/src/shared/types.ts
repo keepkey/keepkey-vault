@@ -1218,6 +1218,13 @@ export interface SigningRequestInfo {
   erc7730Description?: Erc7730Description
   /** true when the UI must enable AdvancedMode before allowing approval */
   requiresAdvancedMode?: boolean
+  /** true when the connected firmware refuses this request whether
+   *  AdvancedMode is on or off. The card says so, never offers AdvancedMode
+   *  and keeps Approve disabled. */
+  firmwareCannotSign?: boolean
+  /** With firmwareCannotSign: true when the newest firmware Desktop mirrors
+   *  clear-signs it, so the card may say a firmware update fixes it. */
+  firmwareUpdateClearSigns?: boolean
   /** true when this request needs a separate, explicit one-shot opaque-signing
    * consent in the Vault UI. External callers cannot set the device flag. */
   requiresBlindSigningConsent?: boolean
