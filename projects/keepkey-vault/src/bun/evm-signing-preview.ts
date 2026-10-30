@@ -38,6 +38,14 @@ export function evmPriorityFee(prio: unknown): string {
   return (!raw || /^0x0*$/.test(raw)) ? '0x' : raw
 }
 
+/** An RLP integer for hdwallet, which sends gasPrice, gasLimit and
+ *  maxFeePerGas bytes as given. Firmware before 7.16 hashes them unstripped, so a
+ *  leading 0x00 byte ('0x0', '0x00ff') signs a pre-image that recovers to
+ *  another address. Minimal hex; zero is '0x'. Non-hex passes through. */
+export function evmQuantity(value: string | undefined): string | undefined {
+  return value && /^0x[0-9a-fA-F]*$/.test(value) ? `0x${value.slice(2).replace(/^0+/, '')}` : value
+}
+
 /**
  * Attach a KeepKey-certified (keyId 0x80) schema for this exact call to the
  * overlay info, where the sign handler picks it up as txMetadata. Only the
