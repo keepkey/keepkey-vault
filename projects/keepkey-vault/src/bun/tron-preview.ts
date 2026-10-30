@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import protobuf from 'protobufjs/light'
 import bs58 from 'bs58'
-import type { TronCallPreview, TronTxPreview } from '../shared/types'
+import type { SigningRequestInfo, TronCallPreview, TronTxPreview } from '../shared/types'
 import { versionCompare } from '../shared/firmware-versions'
 
 type Value = { wire: number; bytes?: Buffer; number?: bigint }
@@ -115,6 +115,28 @@ export function tronShownNatively(rawTx: unknown, firmwareVersion: string | unde
     const { kind, tokenContract } = decodeTronTransfer(hex)
     return kind === 'TRX transfer' || TRON_FIRMWARE_TOKENS.has(tokenContract!)
   } catch { return false }
+}
+
+/** The REST /tron/sign-transaction approval card: what this computer reads
+ *  from the signed raw_data bytes, and the AdvancedMode gate from what this
+ *  firmware reads. A transfer decoded here is not one the device shows:
+ *  7.14/7.15 blind-sign every TRON transaction, and 7.16 shows only TRX and
+ *  the TRC-20 tokens in its own table. */
+export function applyTronSigningPreview(info: SigningRequestInfo, rawTx: unknown, firmwareVersion: string | undefined): void {
+  info.chain = 'tron'
+  info.tronDecoded = tronPreview(rawTx) ?? undefined
+  if (info.tronDecoded) {
+    info.from = info.tronDecoded.owner
+    info.to = info.tronDecoded.to
+    info.value = info.tronDecoded.amount
+  } else {
+    // The device shows this as raw data; say what it does here.
+    info.tronCall = tronCallPreview(rawTx) ?? undefined
+    if (info.tronCall) info.from = info.tronCall.owner
+  }
+  const shown = tronShownNatively(rawTx, firmwareVersion)
+  info.needsBlindSigning = !shown
+  info.requiresAdvancedMode = !shown
 }
 
 /** Fail closed like firmware tron_parseRawTx. Only a single plain TRX or

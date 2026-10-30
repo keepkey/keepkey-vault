@@ -261,6 +261,28 @@ export function applySolanaSigningGates(
   )
   info.requiresAdvancedMode = solanaFirmwareRequiresAdvancedMode(rawTxBase64, firmwareVersion, metadata)
   if (info.requiresBlindSigningConsent || info.requiresAdvancedMode) info.needsBlindSigning = true
+  if (solanaFirmwareCannotSign(rawTxBase64, firmwareVersion)) info.firmwareCannotSign = true
+}
+
+/** The newest release predictFirmwareReview mirrors. */
+const NEWEST_MIRRORED_FW = '7.16.0'
+
+/**
+ * True when every build of the connected firmware refuses this transaction as
+ * malformed (AdvancedMode does not help) while the newest release can sign it:
+ * 7.14 cannot parse a v0 message that reaches a lookup table. A transaction
+ * every release refuses is not a firmware gap, so it is not reported here.
+ */
+export function solanaFirmwareCannotSign(rawTxBase64: string | undefined, firmwareVersion: string | undefined): boolean {
+  if (!rawTxBase64 || !firmwareVersion) return false
+  try {
+    const full = new Uint8Array(Buffer.from(rawTxBase64, 'base64'))
+    const message = parseSolanaMessage(solanaMessageSlice(full, parseSolanaTx(full)))
+    const review = (fw: string) => predictFirmwareReview(message, (version) => versionCompare(fw, version) >= 0)
+    return review(firmwareVersion) === 'malformed' && review(NEWEST_MIRRORED_FW) !== 'malformed'
+  } catch {
+    return false
+  }
 }
 
 /**

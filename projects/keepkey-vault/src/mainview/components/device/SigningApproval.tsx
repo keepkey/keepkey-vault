@@ -1122,10 +1122,12 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 		!hasCalldata && !request.typedDataDecoded && !request.ethMessageDecoded && !request.solanaMessageDecoded && !isSolanaRequest
 	const blindSigningConsentRequired = !!request.requiresBlindSigningConsent
 	const solanaPlainText = isSolanaSignMessage && request.solanaMessageDecoded?.plainText === true
-	const advancedModeRequired =
+	// A request this firmware refuses outright: AdvancedMode would not help,
+	// so it is never offered (the risk bar says a firmware update fixes it).
+	const advancedModeRequired = !request.firmwareCannotSign && (
 		(isSolanaSignMessage && !solanaPlainText)
 		|| !!request.requiresAdvancedMode
-		|| (fwSupportsBlindSignGate && !!request.needsBlindSigning && !blindSigningConsentRequired)
+		|| (fwSupportsBlindSignGate && !!request.needsBlindSigning && !blindSigningConsentRequired))
 	const advancedModeBlocked = advancedModeRequired && !advancedModeEnabled
 	const blindSigningConsentBlocked = blindSigningConsentRequired && !blindSigningConsentGranted
 	const approveDisabled = enablingPolicy || advancedModeBlocked || blindSigningConsentBlocked

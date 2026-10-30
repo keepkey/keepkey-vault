@@ -6,7 +6,7 @@
  * Runtime/provider metadata is annotation only and never relaxes the verdict.
  */
 import type { CalldataDecodedField, SafeCallPreview, SigningRequestInfo } from '../shared/types'
-import { decodeCalldata, firmwareClearSigns, formatDeadline } from './calldata-decoder'
+import { decodeCalldata, firmwareClearSigns, formatDeadline, thor714Refuses } from './calldata-decoder'
 import { findCertifiedEvmSchema, findCertifiedUniswapSwap } from './evm-schema-registry'
 import { findEvmNameRecord, findReviewedUniversalRouter, reviewedSwapToken } from './evm-certified-schema'
 import { evmContractIdentity } from '../shared/evm-contract-identity'
@@ -17,6 +17,7 @@ import { certifiedBodyRefused, certifiedEnvelopeShown, metadataPayloadBytes } fr
 import { fetchErc7730CalldataDefinition, resolveErc7730ForCall, resolveErc7730ForTypedData } from './erc7730-resolver'
 import { describeErc7730Call, describeErc7730TypedData } from './erc7730-describe'
 import { safeTxCalls } from '../shared/safe-tx'
+import { versionCompare } from '../shared/firmware-versions'
 
 /** A chain id as dapps send it (number, "8453", "0x2105") → positive integer, else undefined. */
 export function normalizeEvmChainId(raw: unknown): number | undefined {
@@ -353,6 +354,8 @@ export async function applyEvmTxPreview(
     // the calldata — a contract we can decode (Uniswap/1inch) but the firmware
     // can't still blind-signs (PR #261/#303).
     signingInfo.needsBlindSigning = true
+    // 7.14 cancels this deposit whatever AdvancedMode is set to: say so, never offer AdvancedMode.
+    if (thor714Refuses(to, data, chainId, firmwareVersion)) signingInfo.firmwareCannotSign = true
   }
   console.log(`${tag} needsBlindSigning=${signingInfo.needsBlindSigning} (firmwareClearSigns=${signingInfo.deviceClearSigns}, decoder source=${signingInfo.calldataDecoded?.source})`)
 }
@@ -379,4 +382,19 @@ export function typedDataNativelyReviewed(typedData: any, firmwareVersion: strin
     [['name', 'string'], ['chainId', 'uint256'], ['verifyingContract', 'address']])) return false
   return sameFields(types.PermitSingle, [['details', 'PermitDetails'], ['spender', 'address'], ['sigDeadline', 'uint256']]) &&
     sameFields(types.PermitDetails, [['token', 'address'], ['amount', 'uint160'], ['expiration', 'uint48'], ['nonce', 'uint48']])
+}
+
+/**
+ * The AdvancedMode gate for a typed-data request, for REST and WalletConnect
+ * alike. The device reviews x402 and (7.16+) a canonical Permit2 PermitSingle
+ * natively, and from 7.15 it drives the structured EIP-712 stream for every
+ * document. Anything else (older or unknown firmware) is hash-signed, which
+ * the device refuses unless AdvancedMode is on.
+ */
+export function applyTypedDataSigningGate(signingInfo: SigningRequestInfo, typedData: any, firmwareVersion: string | undefined): void {
+  const shown = signingInfo.typedDataDecoded?.operationName === 'x402 EIP-3009 Payment'
+    || typedDataNativelyReviewed(typedData, firmwareVersion)
+    || (!!firmwareVersion && versionCompare(firmwareVersion, '7.15.0') >= 0)
+  signingInfo.needsBlindSigning = !shown
+  signingInfo.requiresAdvancedMode = !shown
 }
