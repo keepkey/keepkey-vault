@@ -14,10 +14,10 @@ import type { ClearSignEvent } from '../shared/types'
 import { createHash } from 'crypto'
 import { decodeEIP712 } from './eip712-decoder'
 import { addSeaportCreatorFee } from './seaport-creator-fee'
-import { evmPriorityFee, normalizeEvmChainId, recognizedTypedDataSpender, typedDataNativelyReviewed } from './evm-signing-preview'
+import { attachErc7730TypedDefinition, evmPriorityFee, normalizeEvmChainId, recognizedTypedDataSpender, typedDataNativelyReviewed } from './evm-signing-preview'
 import { buildEvmReportForTx, buildTypedDataReport, evmSigningVerdict, prepareEvmTxSigningInfo, withoutErc7730Description } from './evm-presign-report'
 import { describeErc7730Call } from './erc7730-describe'
-import { signWithErc7730Fallback, withErc7730TypedData } from './erc7730-resolver'
+import { signWithErc7730Fallback } from './erc7730-resolver'
 import { CHAINS, isChainSupported, hiveRolePath, evmChainLabel } from '../shared/chains'
 import { getEvmSimulationEndpoint } from './evm-simulation-config'
 import { addContractFacts } from './contract-facts'
@@ -1737,6 +1737,11 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
                 } else {
                   signingInfo.needsBlindSigning = false
                 }
+                // 7.17+: the ClearSign service's definition for this document,
+                // fetched and checked now so the card and report describe it;
+                // the sign handler sends exactly this one.
+                const { firmwareVersion, capabilities } = engine.getDeviceState()
+                await attachErc7730TypedDefinition(signingInfo, preview.typedData, firmwareVersion, capabilities, preview.address)
               }
             } else if (path === '/eth/sign') {
               // EIP-191 personal_sign: body is { address, addressNList, message }.
@@ -2110,6 +2115,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
                     typedData: probeCheckBody.typedData,
                     chainId: Number(signingInfo.chainId || 1),
                     hostDecoded: Boolean(signingInfo.typedDataDecoded),
+                    ...(report?.descriptor.source === 'erc7730' ? { source: 'erc7730' as const } : {}),
                   })
               : path === '/solana/sign-transaction' && typeof probeCheckBody?.raw_tx === 'string'
                 ? (() => {
@@ -3072,17 +3078,27 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           }
 
           try {
-            const { firmwareVersion, capabilities } = engine.getDeviceState()
-            const params = await withErc7730TypedData(
-              await withPermit2SpenderName({ addressNList, typedData: body.typedData }, firmwareVersion),
-              { firmwareVersion, capabilities },
-            )
+            const named = await withPermit2SpenderName({ addressNList, typedData: body.typedData }, engine.getDeviceState().firmwareVersion)
+            // Exactly the definition the card was built on (the signing gate),
+            // never one fetched after approval; never beside a Permit2 name.
+            const erc7730 = named.txMetadata ? undefined : activeSigningInfo?.erc7730
+            const params = erc7730 ? { ...named, erc7730 } : named
             const typedChainId = normalizeEvmChainId(body.typedData?.domain?.chainId)
             const chain = typedChainId ? evmChainLabel(typedChainId)?.name ?? `EVM chain ${typedChainId}` : 'Ethereum'
+            let signedParams: any = params
             const result = await emuWrap(
-              () => signWithErc7730Fallback(params, (p: any) => wallet.ethSignTypedData(p), undefined, '[REST] ethSignTypedData'),
+              () => signWithErc7730Fallback(params, (p: any) => { signedParams = p; return wallet.ethSignTypedData(p) }, () => {
+                // The device refused the definition: it streams the document
+                // instead (7.15+ shows every value). Report and record that.
+                if (activeSigningInfo) {
+                  const { erc7730: _refused, erc7730Description: _shown, ...plain } = activeSigningInfo
+                  activeSigningInfo = { ...plain, clearSignReport: buildTypedDataReport(plain) }
+                }
+                if (activeClearSignObservationId) refuseClearSignObservationDefinition(activeClearSignObservationId, activeSigningInfo?.clearSignReport?.protectionLevel)
+              }, '[REST] ethSignTypedData'),
               { operation: 'ethSignTypedData', chain },
             )
+            if (activeClearSignObservationId && signedParams.erc7730) authenticateClearSignObservation(activeClearSignObservationId, 'erc7730')
             if (activeClearSignObservationId) finalizeClearSignObservation(activeClearSignObservationId, 'signed')
             return json(result)
           } catch (err: any) {

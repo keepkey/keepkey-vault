@@ -112,6 +112,40 @@ export function describeErc7730Call(
   envelopeHex: string,
   call: { chainId: number; to: string; data: string; value?: unknown; from?: string },
 ): Erc7730Description | undefined {
+  return describeProgram(envelopeHex, call)
+}
+
+/**
+ * The description of an EIP-712 document from a typed-data (kind 2) envelope,
+ * the way 7.17 shows it: each definition field once, in its format. The
+ * values no field shows are shown raw by the device after the fields (the
+ * card lists every value in its own typed-data section). `from` as for calls.
+ * Typed data has one container, @.to: the domain's verifyingContract.
+ */
+export function describeErc7730TypedData(envelopeHex: string, typedData: any, from?: string): Erc7730Description | undefined {
+  try {
+    const contract = String(typedData?.domain?.verifyingContract ?? '')
+    if (!/^0x[0-9a-fA-F]{40}$/.test(contract)) return undefined
+    const types = typedData.types ?? {}
+    // The message in the program's node order: struct members in declared order.
+    const tuple = (type: string, value: any): any => {
+      const array = /^(.*)\[(\d*)\]$/.exec(type)
+      if (array) return (value as any[]).map((v) => tuple(array[1], v))
+      return Array.isArray(types[type]) ? types[type].map((m: { name: string; type: string }) => tuple(m.type, value[m.name])) : value
+    }
+    return describeProgram(envelopeHex, {
+      chainId: Number(typedData.domain.chainId), to: contract, from,
+      typed: tuple(String(typedData.primaryType), typedData.message),
+    })
+  } catch {
+    return undefined
+  }
+}
+
+function describeProgram(
+  envelopeHex: string,
+  call: { chainId: number; to: string; from?: string } & ({ data: string; value?: unknown; typed?: undefined } | { typed: any[]; data?: undefined; value?: undefined }),
+): Erc7730Description | undefined {
   try {
     const envelope = Uint8Array.from(Buffer.from(envelopeHex.replace(/^0x/i, ''), 'hex'))
     const program = envelope.subarray(10, 10 + u32(envelope, 6))
@@ -168,7 +202,7 @@ export function describeErc7730Call(
           : kind === 9 ? `${type(first)}[${length === ABSENT ? '' : length}]` : '?')
     }
     const root = nodes[0]
-    const args = ethersUtils.defaultAbiCoder.decode(
+    const args = call.typed ?? ethersUtils.defaultAbiCoder.decode(
       Array.from({ length: root.count }, (_, k) => type(root.first + k)), `0x${call.data.slice(10)}`)
 
     const leaf = (kind: number, v: any): Leaf => ({
@@ -188,6 +222,10 @@ export function describeErc7730Call(
       const path = paths[i]
       if (path.source === 3) return [literal(path.index)]
       if (path.source === 2) {
+        if (call.typed) {
+          if (path.index !== 2) throw new Error('typed data has only @.to')
+          return [{ kind: 3, value: call.to.toLowerCase() }]
+        }
         const value = String(call.value ?? '')
         if (path.index === 3) return [{ kind: 1, value: BigInt(value === '' || value === '0x' ? 0 : value) }]
         if (path.index === 1 && !call.from) throw new Error('signer not matched')
@@ -290,7 +328,7 @@ export function describeErc7730Call(
 
     const to = call.to.toLowerCase()
     const protocol = PROTOCOLS[`${call.chainId}:${to}`]
-    const about = protocol?.about[call.data.slice(0, 10).toLowerCase()]
+    const about = call.data === undefined ? undefined : protocol?.about[call.data.slice(0, 10).toLowerCase()]
     const explorer = CHAINS.find((c) => c.chainFamily === 'evm' && c.chainId === String(call.chainId))?.explorerAddressUrl
     return {
       signedBy,

@@ -5,10 +5,12 @@
  * python-keepkey corpus case on Ethereum) are each signed twice on a kkemu
  * built from keepkey-firmware alpha (7.17.0, typed-data show-once #1025):
  *   1. hdwallet alone, no definition: the streamed review;
- *   2. Desktop's REST/RPC step: withErc7730TypedData (GETs the stand-in
- *      ClearSign service) then signWithErc7730Fallback.
+ *   2. Desktop's signing gate (attachErc7730TypedDefinition GETs the stand-in
+ *      ClearSign service and builds the approval card), then the sign
+ *      handler's step: exactly the card's definition, signWithErc7730Fallback.
  * Desktop must attach the definition, the device must use it and show the
- * definition's fields, and the signature must not change. Both reviews are
+ * definition's fields as the card states them, and the signature must not
+ * change. Both reviews are
  * printed with their screen counts. The same request with the firmware
  * reported as 7.16.0 must attach nothing.
  *
@@ -31,6 +33,7 @@ import * as core from '@keepkey/hdwallet-core'
 import { Transport, type TransportDelegate } from '@keepkey/hdwallet-keepkey'
 import { TEST_MNEMONIC } from './harness'
 import requestFixture from '../../src/bun/erc7730-typed-data.fixtures.json'
+import { describeErc7730TypedData } from '../../src/bun/erc7730-describe'
 
 const PORT = Number(process.env.KK_EMU_UDP_PORT || 0)
 const CATALOG = process.env.KK_ERC7730_TYPED_FIXTURE
@@ -206,6 +209,7 @@ describe.skipIf(!enabled)('typed-data ERC-7730 through Desktop on a 7.17 emulato
   let firmwareVersion = ''
   let capabilities: number[] = []
   let resolver: typeof import('../../src/bun/erc7730-resolver')
+  let preview: typeof import('../../src/bun/evm-signing-preview')
 
   test('kkemu answers over UDP, loads the test seed, reports 7.17 with capability 4', async () => {
     const definitions = new Map([1, 8453].map((c) => [String(c), testDefinition(c)]))
@@ -225,6 +229,7 @@ describe.skipIf(!enabled)('typed-data ERC-7730 through Desktop on a 7.17 emulato
     // As in 09-erc7730: an emulator started with a test root trusts that root.
     ;(await import('../../src/shared/certified-evm-envelope')).configureProductionRootTrust(() => true)
     resolver = await import('../../src/bun/erc7730-resolver')
+    preview = await import('../../src/bun/evm-signing-preview')
     resolver.forgetRefusedErc7730Definitions()
 
     const keyring = new core.Keyring()
@@ -256,9 +261,12 @@ describe.skipIf(!enabled)('typed-data ERC-7730 through Desktop on a 7.17 emulato
 
       lookups = []
       const chainId = Number(c.typedData.domain.chainId)
-      const params = await resolver.withErc7730TypedData({ addressNList: PATH, typedData: c.typedData }, { firmwareVersion, capabilities })
-      expect(params.erc7730?.primaryDefinitionId).toBe(testDefinition(chainId).definitionId)
+      const from = (await wallet.ethGetAddress({ addressNList: PATH, showDisplay: false })) as string
+      const card: any = { id: 'card', method: '/eth/sign-typed-data', appName: 'dapp', chain: 'eth' }
+      expect(await preview.attachErc7730TypedDefinition(card, c.typedData, firmwareVersion, capabilities, from)).toBe(true)
+      expect(card.erc7730?.primaryDefinitionId).toBe(testDefinition(chainId).definitionId)
       expect(lookups).toEqual([`?kind=eip712&chainId=${chainId}&contract=${PERMIT2}&typeHash=0x${TYPEHASH}`])
+      const params = { addressNList: PATH, typedData: c.typedData, erc7730: card.erc7730 }
       delegate!.run = { screens: [], definitionRequests: 0, failure: '' }
       const sent: boolean[] = []
       const out = await resolver.signWithErc7730Fallback(params, (p: any) => { sent.push(!!p.erc7730); return wallet.ethSignTypedData(p) })
@@ -273,7 +281,27 @@ describe.skipIf(!enabled)('typed-data ERC-7730 through Desktop on a 7.17 emulato
       expect(run.failure).toBe('')
       expect(out.signature).toBe(plain.signature)
       expect(run.screens.some((s) => s.title === 'Verified by KeepKey')).toBe(true)
+      // Show-once (firmware #1025): no screen repeats. A 7.17.0 alpha built
+      // before it re-shows every value on each field pass; Desktop does not
+      // support those builds (shared/erc7730-support).
+      const screens = run.screens.map((s) => `${s.title}|${s.body}`)
+      expect(new Set(screens).size).toBe(screens.length)
       for (const label of ['Spender:', 'Amount:', 'Deadline:']) expect(run.screens.some((s) => s.body.startsWith(label))).toBe(true)
+      // The card states what the device showed: its intent and each field's
+      // value. The card describes only a production-signed envelope, so read
+      // the production envelope of the same program (the Base request fixture;
+      // the TEST dry run signs identical programs under a TEST root).
+      expect(card.erc7730Description).toBeUndefined()
+      if (chainId !== Number(requestFixture.typedData.domain.chainId)) return
+      const program = (hex: string) => { const b = Buffer.from(hex.replace(/^0x/, ''), 'hex'); return b.subarray(10, 10 + b.readUInt32BE(6)).toString('hex') }
+      expect(program(requestFixture.definition.envelope)).toBe(program(card.erc7730.definitions[0].envelope))
+      const d = describeErc7730TypedData(requestFixture.definition.envelope, c.typedData, from)!
+      console.log(`  card: ${d?.intent} | ${d?.fields.map((f: any) => `${f.label}: ${f.value.replace(/\n/g, ' / ')}`).join(' | ')}`)
+      expect(d?.intent).toBeTruthy()
+      expect(run.screens.some((s) => `${s.title} ${s.body}`.includes(d.intent))).toBe(true)
+      // A value too long for one screen continues on the next (1/2, 2/2).
+      const shown = run.screens.map((s) => s.body).join('').replace(/\s+/g, '')
+      for (const f of d.fields) expect(shown).toContain(`${f.label}:${f.value}`.replace(/\s+/g, ''))
     }, 240_000)
   }
 

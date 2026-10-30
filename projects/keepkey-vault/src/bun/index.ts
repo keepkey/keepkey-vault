@@ -1397,7 +1397,7 @@ function getOrCreateWcManager(): WalletConnectManager {
 		getAdvancedModeEnabled: () => getAdvancedModeEnabled() === true,
 		loadClearsignSigner: async (signer) => { if (!engine.wallet) throw new Error('Device disconnected'); await loadProviderSigner(signer) },
 		ethSignMessage: (params) => { if (isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant)) throw new Error('WalletConnect is not available on bitcoin-only firmware'); if (!engine.wallet) throw new Error('Device disconnected'); return engine.wallet.ethSignMessage(params) },
-		ethSignTypedData: async (params) => { if (isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant)) throw new Error('WalletConnect is not available on bitcoin-only firmware'); if (!engine.wallet) throw new Error('Device disconnected'); const wallet = engine.wallet; const { firmwareVersion, capabilities } = engine.getDeviceState(); const signParams = await withErc7730TypedData(await withPermit2SpenderName(withoutCallerErc7730(params, '[WC] ethSignTypedData'), firmwareVersion), { firmwareVersion, capabilities }); return signWithErc7730Fallback(signParams, (p) => wallet.ethSignTypedData(p), undefined, '[WC] ethSignTypedData') },
+		ethSignTypedData: async (params, erc7730) => { if (isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant)) throw new Error('WalletConnect is not available on bitcoin-only firmware'); if (!engine.wallet) throw new Error('Device disconnected'); const named = await withPermit2SpenderName(withoutCallerErc7730(params, '[WC] ethSignTypedData'), engine.getDeviceState().firmwareVersion); return engine.wallet.ethSignTypedData(erc7730 && !named.txMetadata ? { ...named, erc7730 } : named) },
 		getCosmosAccountInfo: async (caipChain) => {
 			if (isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant)) return null
 			if (!engine.wallet) return null
@@ -4248,10 +4248,13 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					await withPermit2SpenderName(withoutCallerErc7730(rawParams, 'ethSignTypedData'), firmwareVersion),
 					{ firmwareVersion, capabilities },
 				)
-				const signTyped = () => signWithErc7730Fallback(params, (p: any) => engine.wallet!.ethSignTypedData(p), undefined, '[ethSignTypedData]')
 				let observationId: string | undefined
+				let signedParams: any = params
+				const signTyped = () => signWithErc7730Fallback(params, (p: any) => { signedParams = p; return engine.wallet!.ethSignTypedData(p) }, () => {
+					if (observationId) refuseClearSignObservationDefinition(observationId)
+				}, '[ethSignTypedData]')
 				if (!engine.isPassphraseWallet) {
-					const draft = observeEvmTypedData({ typedData: (params as any)?.typedData, hostDecoded: true })
+					const draft = observeEvmTypedData({ typedData: (params as any)?.typedData, hostDecoded: true, ...(params.erc7730 ? { source: 'erc7730' as const } : {}) })
 					observationId = insertClearSignObservation(draft, { deviceId: engine.getDeviceState().deviceId, source: 'vault-rpc' }).id
 					void auditUnknownClearSignShape(draft, { evm: getEvmSimulationEndpoint(Number(draft.shape.chainId || 1)) })
 				}
@@ -4259,6 +4262,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 					const result = engine.isEmulator
 						? await emuSigningOp(signTyped, { operation: 'ethSignTypedData', chain: 'Ethereum' })
 						: await signTyped()
+					if (observationId && signedParams.erc7730) authenticateClearSignObservation(observationId, 'erc7730')
 					if (observationId) finalizeClearSignObservation(observationId, 'signed')
 					return result
 				} catch (cause: any) {
