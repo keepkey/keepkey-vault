@@ -2,22 +2,26 @@
  * Uniswap Universal Router execute() pre-check: a line-for-line TypeScript
  * port of the firmware decoder (keepkey-firmware lib/firmware/uniswap_ur.c at
  * 51f85368e: the streaming ur_stream_* decoder with V4_SWAP, and the
- * token-flow ur_summarize). Host-side only: it decides whether a certified
+ * token-flow ur_summarize), and firmware 7.17's rules from 296aa1e2c
+ * (UR_RULES_717, picked by urRules). Host-side only: it decides whether a certified
  * 0x07 decoder entry is worth requesting, which token identities it must
  * carry, and what the Desktop shows as advice. The device decodes the
  * calldata itself and is authoritative.
  *
  * It must accept and refuse exactly what the device does, and read the same
  * values: __tests__/uniswap-ur-firmware-parity.test.ts runs it on every call
- * the firmware's own model test reads, against the firmware's output
+ * the firmware's own model test reads, against the firmware's output, for
+ * each version
  * (scripts/uniswap-fw-oracle). A looser port would attach a certified entry
  * the device rejects with no fallback; a stricter one would send a swap the
  * device reads to the blind path.
  */
+import { versionCompare } from '../shared/firmware-versions'
 
 export const UR_EXECUTE = '0x3593564c'
 export const UR_EXECUTE_NO_DEADLINE = '0x24856bc3'
-/** Firmware UR_MAX_STEPS: plan steps per call (a V4 swap with a fee is two). */
+/** Firmware UR_MAX_STEPS: plan steps per call (a V4 swap with a fee is two).
+ *  7.17 allows 8 (UR_RULES_717). */
 export const UR_MAX_STEPS = 6
 /** Firmware UR_MAX_HOOKS: distinct non-zero V4 hook contracts per call. */
 export const UR_MAX_HOOKS = 3
@@ -31,6 +35,52 @@ export const UR_V4_MAX_PATH = 4
  * reviewed on Base only (REVIEWED_UNIVERSAL_ROUTERS), so this is chain 8453.
  */
 export const UR_V4_ROUTERS = ['0xd6145b2d3f379919e8cdeda7b97e37c4b2ca9c40'] as const
+
+/** 7.17 V4_ROUTERS flags (uniswap_ur.c). V4_DECODED: V4_SWAP is read (UR 2.0
+ * layout). V4_MIN_HOP: Exact{In,Out}putParams carry uint256[] minHopPriceX36
+ * (UR 2.1.x). V4_EXACT_OUT: an exact output reverts unless delivered in full
+ * (UR 2.1.2). */
+const V4_DECODED = 0x01, V4_MIN_HOP = 0x02, V4_EXACT_OUT = 0x04
+const V4_ALL = V4_DECODED | V4_MIN_HOP | V4_EXACT_OUT
+/** Firmware 7.17 V4_ROUTERS: each address is the same router version on
+ * every chain Uniswap lists it on. */
+export const UR_V4_ROUTERS_717: Readonly<Record<string, number>> = {
+  '0x66a9893cc07d91d95644aedd05d03f95e1dba8af': V4_DECODED, // UR 2.0: Ethereum
+  '0x6ff5693b99212da76ad316178a184ab56d299b43': V4_DECODED, // UR 2.0: Base
+  '0xa51afafe0263b40edaef0df8781ea9aa03e381a3': V4_DECODED, // UR 2.0: Arbitrum
+  '0x4c82d1fbfe28c977cbb58d8c7ff8fcf9f70a2cca': V4_DECODED | V4_MIN_HOP, // UR 2.1.1: Ethereum
+  '0x23617e59a5925b2a4bf75d73ff6711cd0b29de85': V4_ALL, // UR 2.1.2: Ethereum
+  '0xd6145b2d3f379919e8cdeda7b97e37c4b2ca9c40': V4_ALL, // UR 2.1.2: Base
+  '0x2d01411773c8c24805306e89a41f7855c3c4fe65': V4_ALL, // UR 2.1.2: Arbitrum
+}
+
+/** What a firmware version's decoder accepts. */
+export interface UrRules {
+  maxSteps: number
+  /** How V4_SWAP is read for this router; without V4_DECODED it is refused. */
+  layout: (router: string) => number
+  /** Which V4 swaps the review accepts for this router. */
+  v4: (router: string) => number
+  /** A TRANSFER of the output token before its SWEEP is the fee, and no fee
+   * may go to the payer (MSG_SENDER). */
+  transferFee: boolean
+}
+/** 7.16 (and the 51f85368e decoder): V4_SWAP read in the UR 2.1.x layout
+ * for any router, reviewed only for UR 2.1.2 on Base. */
+export const UR_RULES_716: UrRules = {
+  maxSteps: UR_MAX_STEPS,
+  layout: () => V4_DECODED | V4_MIN_HOP,
+  v4: (r) => ((UR_V4_ROUTERS as readonly string[]).includes(r.toLowerCase()) ? V4_ALL : 0),
+  transferFee: false,
+}
+const v4Flags717 = (r: string) => UR_V4_ROUTERS_717[r.toLowerCase()] ?? 0
+/** 7.17 (keepkey-firmware 296aa1e2c). */
+export const UR_RULES_717: UrRules = { maxSteps: 8, layout: v4Flags717, v4: v4Flags717, transferFee: true }
+/** The decoder of this firmware version; unknown or older = 7.16's. */
+export function urRules(firmwareVersion: string | undefined): UrRules {
+  const fw = firmwareVersion?.replace(/^v/, '')
+  return fw && versionCompare(fw, '7.17.0') >= 0 ? UR_RULES_717 : UR_RULES_716
+}
 
 /** Firmware UrKind, in its order (the parity fixture uses the numbers). */
 export const UR_KINDS = [
@@ -83,7 +133,9 @@ export interface UrSummary {
   recipientIsSender: boolean
   recipient: string
   permit?: { token: string; amount: bigint; expiration: bigint }
-  fee?: { bips: number; recipient: string }
+  /** bips: PAY_PORTION / TAKE_PORTION share of the output. A 7.17 TRANSFER
+   * fee has bips 0 and `amount` of the output token. */
+  fee?: { bips: number; amount?: bigint; recipient: string }
   /** V4 pool hooks the swap runs through; the device shows each. */
   hooks: string[]
 }
@@ -188,8 +240,15 @@ class UrStream {
   cmds: number[] = []
   pstep = 0
   v4 = this.freshV4()
+  maxSteps: number
+  /** The router's V4Router layout (UrRules.layout). */
+  v4Layout: number
 
-  constructor(total: number) { this.total = total }
+  constructor(total: number, router: string, rules: UrRules) {
+    this.total = total
+    this.maxSteps = rules.maxSteps
+    this.v4Layout = rules.layout(router)
+  }
 
   freshV4() {
     return {
@@ -207,7 +266,7 @@ class UrStream {
   current() { return COMMANDS[this.cmds[this.step]] }
   cur(): RawStep { return this.steps[this.pstep] }
   addStep(): RawStep {
-    if (this.steps.length >= UR_MAX_STEPS) refuse()
+    if (this.steps.length >= this.maxSteps) refuse()
     const st = rawStep()
     this.steps.push(st)
     return st
@@ -392,12 +451,14 @@ class UrStream {
   }
 
   /** Exact{In,Out}putParams: (currency, PathKey[] path, uint256[]
-   * minHopPriceX36, uint128 amount, uint128 limit). */
+   * minHopPriceX36, uint128 amount, uint128 limit), without minHopPriceX36
+   * on UR 2.0. */
   v4SwapHead() {
     const st = this.cur()
     const exactIn = st.kind === K_V4_IN
     const w = this.word
-    switch (this.field) {
+    // The field read, numbered as in the UR 2.1.x layout.
+    switch (this.field + (this.field >= 2 && !(this.v4Layout & V4_MIN_HOP) ? 1 : 0)) {
       case 0:
         if (narrow(w, 20) === null) refuse()
         ;(exactIn ? st.tokenIn : st.tokenOut).set(w.subarray(12))
@@ -575,7 +636,7 @@ class UrStream {
         return this.nextAt(4 + this.base)
       case S.CMDS_LEN: {
         const v = this.u32()
-        if (v === 0 || v > UR_MAX_STEPS) refuse()
+        if (v === 0 || v > this.maxSteps) refuse()
         this.ncmds = v
         this.k = 0
         this.state = S.CMDS
@@ -601,6 +662,8 @@ class UrStream {
         this.field = 0
         this.state = S.FIELD
         if (this.cmds[this.step] === CMD_V4_SWAP) {
+          // Only a router whose V4Router layout is known.
+          if (!(this.v4Layout & V4_DECODED)) refuse()
           this.v4 = this.freshV4()
           this.state = S.V4_HEAD
         }
@@ -637,10 +700,11 @@ class UrStream {
 const hex = (b: Uint8Array) => '0x' + Buffer.from(b).toString('hex')
 const big = (b: Uint8Array) => BigInt(hex(b))
 
-/** ur_decode: every command fully understood, or null (never a partial plan). */
-export function urDecode(calldata: Uint8Array): UrPlan | null {
+/** ur_decode: every command fully understood, or null (never a partial plan).
+ * `router` is the contract called: 7.17 reads V4_SWAP with its layout. */
+export function urDecode(calldata: Uint8Array, router = ZERO, rules: UrRules = UR_RULES_716): UrPlan | null {
   if (calldata.length > 0xffffffff) return null
-  const s = new UrStream(calldata.length)
+  const s = new UrStream(calldata.length, router, rules)
   try {
     s.feed(calldata)
     if (s.state !== S.DONE || s.pos !== s.total) return null
@@ -680,16 +744,21 @@ const feeBips = (a: bigint) => (a >= 1n && a <= 10_000n ? Number(a) : undefined)
  * recipient). Router-paid swaps (splits, multi-hop through V2/V3/V4 pools) are
  * free to the user. amountIn is the sum the user pays, amountOut the sum of the
  * minimums every delivery enforces; all swaps exact-in or all exact-out; at
- * most one fee. `router` is the called contract, `value` msg.value.
+ * most one fee (7.17: also a TRANSFER of a fixed amount of the output token
+ * before the SWEEP that delivers it, never to the payer). V4 swaps only on a
+ * router `rules.v4` lists, exact-output V4 only where it is delivered in
+ * full. `router` is the called contract, `value` msg.value.
  */
-export function urSummarize(plan: UrPlan, router: string, value: bigint): UrSummary | null {
+export function urSummarize(plan: UrPlan, router: string, value: bigint, rules: UrRules = UR_RULES_716): UrSummary | null {
   const steps = plan.steps
-  if (steps.length === 0 || steps.length > UR_MAX_STEPS || value < 0n || value >= U256) return null
+  if (steps.length === 0 || steps.length > rules.maxSteps || value < 0n || value >= U256) return null
   const r = router.toLowerCase()
   // The router itself, by placeholder or by its own address: either way it
   // holds the funds for a later step. Apps encode both.
   const isRouter = (x: string) => x === ADDRESS_THIS || x === r
-  const v4Router = (UR_V4_ROUTERS as readonly string[]).includes(r)
+  // The router pays the signer: apps never charge the payer a fee (7.17).
+  const isPayer = (x: string) => rules.transferFee && x === MSG_SENDER
+  const v4f = rules.v4(r)
   const eth = value !== 0n
   let permit: UrStep | undefined
   let firstSwap: UrStep | undefined
@@ -726,15 +795,19 @@ export function urSummarize(plan: UrPlan, router: string, value: bigint): UrSumm
         break
       case 'UNWRAP_WETH': case 'SWEEP': case 'PAY_PORTION': case 'V4_TAKE_PORTION':
         break // pass 2
+      case 'TRANSFER':
+        if (!rules.transferFee) return null
+        break // pass 2
       default: {
-        if (!isSwap(s.kind)) return null // TRANSFER
+        if (!isSwap(s.kind)) return null
         if (!firstSwap) {
           firstSwap = s
           exactIn = isExactIn(s.kind)
         } else if (exactIn !== isExactIn(s.kind)) return null
         lastSwap = s
         const v4 = isV4(s.kind)
-        if (v4 && !v4Router) return null
+        // A V4 swap only on a listed router; an exact output only where it is delivered in full.
+        if (v4 && (!(v4f & V4_DECODED) || (s.kind === 'V4_SWAP_EXACT_OUT' && !(v4f & V4_EXACT_OUT)))) return null
         // Only a V4 swap moves native ETH.
         if (!v4 && (s.tokenIn === ZERO || s.tokenOut === ZERO)) return null
         if (s.payerIsUser) {
@@ -793,7 +866,9 @@ export function urSummarize(plan: UrPlan, router: string, value: bigint): UrSumm
   if (!z) return null // nothing reaches anyone
   const asset = z as { eth: boolean; token: string }
   let direct = 0n, swept = 0n, held = 0n
-  let consumed = false
+  // unswept: a swap left the asset in the router after its last SWEEP (a
+  // SWEEP moves only what the router holds when it runs; v7.16.0 and 7.17).
+  let consumed = false, unswept = false
   let fromRouterStep = false
   let feeIndex = -1
   for (let i = 0; i < steps.length; i++) {
@@ -816,16 +891,25 @@ export function urSummarize(plan: UrPlan, router: string, value: bigint): UrSumm
         swept += s.amount
         if (swept >= U256) return null
         fromRouterStep = true
+        unswept = false
         break
       }
       case 'PAY_PORTION':
       case 'V4_TAKE_PORTION': {
         const bips = feeBips(s.amount)
-        if (feeIndex >= 0 || bips === undefined || isRouter(s.recipient)) return null
+        if (feeIndex >= 0 || bips === undefined || isRouter(s.recipient) || isPayer(s.recipient)) return null
         feeIndex = i
         out.fee = { bips, recipient: s.recipient }
         break
       }
+      case 'TRANSFER':
+        // A fixed amount of the delivered token, out of what the router holds,
+        // to someone else: the fee, shown as that amount.
+        if (feeIndex >= 0 || asset.eth || s.tokenIn !== asset.token || s.amount === 0n || s.amount === CONTRACT_BALANCE ||
+            isRouter(s.recipient) || isPayer(s.recipient)) return null
+        feeIndex = i
+        out.fee = { bips: 0, amount: s.amount, recipient: s.recipient }
+        break
       default: {
         if (!isSwap(s.kind)) break
         let g = exactIn ? s.limit : s.amount
@@ -842,12 +926,13 @@ export function urSummarize(plan: UrPlan, router: string, value: bigint): UrSumm
         } else if (!asset.eth && s.tokenOut === asset.token) {
           held += g
           if (held >= U256) return null
+          unswept = true
         }
         if (!s.payerIsUser && !asset.eth && s.tokenIn === asset.token) consumed = true // the router spends the asset again
       }
     }
   }
-  if (!recipient) return null
+  if (!recipient || unswept) return null
   const fee = feeIndex >= 0 ? steps[feeIndex] : undefined
   if (fee) {
     // PAY_PORTION takes from what the router holds for the user (the token,
@@ -860,6 +945,10 @@ export function urSummarize(plan: UrPlan, router: string, value: bigint): UrSumm
         heldFee = isSwap(s.kind) && isRouter(s.recipient) && s.tokenOut === fee.tokenIn
       }
       if (!heldFee || !fromRouterStep) return null
+    } else if (fee.kind === 'TRANSFER') {
+      // Paid before the SWEEP that delivers the token: that SWEEP's minimum
+      // is what the user receives, after the fee.
+      if (!steps.slice(feeIndex + 1).some((s) => s.kind === 'SWEEP' && s.tokenIn === asset.token)) return null
     } else {
       if (feeIndex === 0) return null
       const swap = steps[feeIndex - 1]
@@ -867,10 +956,10 @@ export function urSummarize(plan: UrPlan, router: string, value: bigint): UrSumm
     }
   }
   // What the router holds for the user: its SWEEP / UNWRAP minimums, or, with
-  // no fee taken from it and nothing spending it again, the larger of those
-  // and the minimums of the swaps that filled it.
+  // no fee taken from it (PAY_PORTION, TRANSFER) and nothing spending it
+  // again, the larger of those and the minimums of the swaps that filled it.
   let fromRouter = swept
-  if ((!fee || fee.kind !== 'PAY_PORTION') && !consumed && !asset.eth && held > swept) fromRouter = held
+  if ((!fee || fee.kind === 'V4_TAKE_PORTION') && !consumed && !asset.eth && held > swept) fromRouter = held
   direct += fromRouter
   if (direct >= U256) return null
 
@@ -896,14 +985,16 @@ export function urTokenSet(s: UrSummary): string[] {
   return [...set]
 }
 
-/** Decode + summarize a call to `router`, or null when the device would not. */
-export function urPrecheck(router: string, data: string, value: bigint):
+/** Decode + summarize a call to `router`, or null when the device running
+ * `firmwareVersion` would not (unknown = 7.16's decoder). */
+export function urPrecheck(router: string, data: string, value: bigint, firmwareVersion?: string):
   { selector: string; plan: UrPlan; summary: UrSummary; tokens: string[] } | null {
   const hex = String(data || '').replace(/^0x/i, '')
   if (!/^[0-9a-fA-F]*$/.test(hex) || hex.length % 2) return null
   if (value < 0n || value >= U256) return null
-  const plan = urDecode(Buffer.from(hex, 'hex'))
-  const summary = plan && urSummarize(plan, router, value)
+  const rules = urRules(firmwareVersion)
+  const plan = urDecode(Buffer.from(hex, 'hex'), router, rules)
+  const summary = plan && urSummarize(plan, router, value, rules)
   if (!plan || !summary) return null
   return { selector: `0x${hex.slice(0, 8).toLowerCase()}`, plan, summary, tokens: urTokenSet(summary) }
 }

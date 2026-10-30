@@ -102,19 +102,79 @@ const TRON_FIRMWARE_TOKENS = new Set([
 ])
 /** First firmware that parses TRON raw_data. 7.14.x blind-signs every TronSignTx. */
 const TRON_PARSER_MIN_FW = '7.16.0'
+/** First firmware that also shows a TRC-20 approve of a table token, TRX
+ *  staking (FreezeBalanceV2 / UnfreezeBalanceV2) and SR votes (tron.c). */
+const TRON_STAKE_VOTE_MIN_FW = '7.17.0'
+const INT64_MAX = (1n << 63n) - 1n
+/** Firmware TRON_MAX_VOTES. */
+const TRON_MAX_VOTES = 30
+
+/** 7.17 tron_parseContract for an approve, a stake, an unstake or a vote:
+ *  true only for what it reads in full. Anything else is TRON_TX_UNVERIFIED. */
+function tronApproveStakeVoteParsed(hex: string): boolean {
+  try {
+    if (!/^(?:0x)?(?:[0-9a-fA-F]{2})+$/.test(hex)) return false
+    const top = fields(Buffer.from(hex.replace(/^0x/i, ''), 'hex'), { 1: 2, 3: 0, 4: 2, 8: 0, 10: 2, 11: 2, 14: 0, 18: 0 })
+    const contract = fields(bytes(top, 11), { 1: 0, 2: 2 })
+    const kind = Number(number(contract, 1))
+    const any = fields(bytes(contract, 2), { 1: 2, 2: 2 })
+    const url = bytes(any, 1).toString('utf8')
+    const payload = bytes(any, 2)
+    if (kind === 31 && url.endsWith('/protocol.TriggerSmartContract')) {
+      const t = fields(payload, { 1: 2, 2: 2, 3: 0, 4: 2 })
+      address(bytes(t, 1))
+      const call = bytes(t, 4)
+      return (t.get(3)?.number ?? 0n) === 0n && call.length === 68 && call.subarray(0, 4).toString('hex') === '095ea7b3' &&
+        call.subarray(4, 15).every(v => v === 0) && [0, 0x41].includes(call[15]) &&
+        TRON_FIRMWARE_TOKENS.has(address(bytes(t, 2)))
+    }
+    if ((kind === 54 && url.endsWith('/protocol.FreezeBalanceV2Contract')) ||
+        (kind === 55 && url.endsWith('/protocol.UnfreezeBalanceV2Contract'))) {
+      const f = fields(payload, { 1: 2, 2: 0, 3: 0 })
+      address(bytes(f, 1))
+      const amount = number(f, 2)
+      return amount > 0n && amount <= INT64_MAX && (f.get(3)?.number ?? 0n) <= 2n
+    }
+    if (kind === 4 && url.endsWith('/protocol.VoteWitnessContract')) {
+      // votes is repeated, so it is read here rather than by fields().
+      const reader = new protobuf.Reader(new Uint8Array(payload))
+      let owner = false, votes = 0
+      while (reader.pos < reader.len) {
+        const tag = reader.uint32()
+        if (tag === 10 && !owner) {
+          address(Buffer.from(reader.bytes()))
+          owner = true
+        } else if (tag === 18 && votes < TRON_MAX_VOTES) {
+          const v = fields(Buffer.from(reader.bytes()), { 1: 2, 2: 0 })
+          address(bytes(v, 1))
+          const count = number(v, 2)
+          if (count === 0n || count > INT64_MAX) return false
+          votes++
+        } else return false
+      }
+      return owner && votes > 0
+    }
+    return false
+  } catch { return false }
+}
 
 /** The device shows this transaction from its own parse: a plain TRX transfer,
- *  or a TRC-20 transfer of a token in its table. Anything else (another
- *  contract, a TRC-20 outside the table, older firmware, an unknown version)
- *  is "TRON Blind Sign" behind AdvancedMode. */
+ *  or a TRC-20 transfer of a token in its table; from 7.17.0 also a TRC-20
+ *  approve of a table token, a FreezeBalanceV2 / UnfreezeBalanceV2 and a
+ *  VoteWitness. Anything else (another contract, a token outside the table, a
+ *  multisig Permission_id, older firmware, an unknown version) is "TRON Blind
+ *  Sign" behind AdvancedMode. */
 export function tronShownNatively(rawTx: unknown, firmwareVersion: string | undefined): boolean {
-  if (!firmwareVersion || versionCompare(firmwareVersion.replace(/^v/, ''), TRON_PARSER_MIN_FW) < 0) return false
+  const fw = firmwareVersion?.replace(/^v/, '')
+  if (!fw || versionCompare(fw, TRON_PARSER_MIN_FW) < 0) return false
   const hex = rawTx instanceof Uint8Array ? Buffer.from(rawTx).toString('hex') : rawTx
   if (typeof hex !== 'string') return false
   try {
     const { kind, tokenContract } = decodeTronTransfer(hex)
     return kind === 'TRX transfer' || TRON_FIRMWARE_TOKENS.has(tokenContract!)
-  } catch { return false }
+  } catch {
+    return versionCompare(fw, TRON_STAKE_VOTE_MIN_FW) >= 0 && tronApproveStakeVoteParsed(hex)
+  }
 }
 
 /** Fail closed like firmware tron_parseRawTx. Only a single plain TRX or

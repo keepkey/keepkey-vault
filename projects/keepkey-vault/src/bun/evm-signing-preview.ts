@@ -124,13 +124,14 @@ function txValue(raw: unknown): bigint | undefined {
  * hook. Token names come only from reviewedSwapToken by chain:address; any
  * other token is shown as raw units of its address with a "Token warning".
  * Advice checked on this computer (D-018): it never sets or relaxes a gate.
+ * `firmwareVersion` picks the device's decoder (urRules; unknown = 7.16).
  */
 export function uniswapSwapFields(
-  chainId: number | undefined, router: string, data: string, value: unknown, from?: string,
+  chainId: number | undefined, router: string, data: string, value: unknown, from?: string, firmwareVersion?: string,
 ): CalldataDecodedField[] {
   const v = txValue(value)
   if (!chainId || v === undefined || !findReviewedUniversalRouter(chainId, router)) return []
-  const plan = urPrecheck(router, data, v)
+  const plan = urPrecheck(router, data, v, firmwareVersion)
   if (!plan) return []
   const s = plan.summary
   const unknown: string[] = []
@@ -158,7 +159,10 @@ export function uniswapSwapFields(
     row('Minimum output', amountOut),
     row('Recipient', recipient),
   ]
-  if (s.fee) {
+  if (s.fee?.amount !== undefined) {
+    // 7.17: the app's exact-output fee, a fixed amount of the output token.
+    rows.push(row('Fee', `${amount(s.fee.amount, s.tokenOut, false)} to ${s.fee.recipient}`))
+  } else if (s.fee) {
     const pct = `${Math.floor(s.fee.bips / 100)}.${String(s.fee.bips % 100).padStart(2, '0')}%`
     rows.push(row('Fee', `${pct} of the output to ${s.fee.recipient}`))
   }
@@ -173,9 +177,10 @@ export function uniswapSwapFields(
 
 /**
  * Attach a certified 0x07 Uniswap swap entry when `to` is a reviewed Universal
- * Router on 7.16+ and the calldata pre-checks as a call the device decodes and
- * reviews (urPrecheck: any length, V4 only through UR 2.1.2 on Base) whose
- * every named token is reviewed. The device refuses an incomplete entry with no fallback, so
+ * Router on 7.16+ and the calldata pre-checks as a call this firmware decodes
+ * and reviews (urPrecheck: any length; V4 only through UR 2.1.2 on Base on
+ * 7.16, through every V4_ROUTERS router on 7.17) whose every named token is
+ * reviewed. The device refuses an incomplete entry with no fallback, so
  * anything short of that returns false (the AdvancedMode path).
  */
 export async function attachCertifiedUniswapSwap(
@@ -188,7 +193,7 @@ export async function attachCertifiedUniswapSwap(
 ): Promise<boolean> {
   if (!supportsCertifiedClearSign(firmwareVersion) || !chainId || !findReviewedUniversalRouter(chainId, to)) return false
   const value = txValue(signingInfo.value)
-  const plan = value === undefined ? null : urPrecheck(to, data, value)
+  const plan = value === undefined ? null : urPrecheck(to, data, value, firmwareVersion)
   if (!plan) {
     console.log(`${tag} Uniswap clear-sign: calldata is not a shape the device decodes — not attaching`)
     return false
@@ -256,7 +261,7 @@ export async function attachSafeCallPreviews(info: SigningRequestInfo, fetchImpl
     if (c.operation !== 0 || c.to === safe || c.data.length < 10) return {}
     const callValue = c.value.toString()
     let calldataDecoded = await decodeCalldata(c.to, c.data, chainId, callValue).catch(() => null) ?? undefined
-    const swapRows = uniswapSwapFields(chainId, c.to, c.data, callValue, safe)
+    const swapRows = uniswapSwapFields(chainId, c.to, c.data, callValue, safe, info.firmwareVersion)
     if (swapRows.length > 0 && calldataDecoded) calldataDecoded = { ...calldataDecoded, fields: [...swapRows, ...calldataDecoded.fields] }
     const selector = c.data.slice(0, 10)
     const arg0 = /^0{24}[0-9a-f]{40}$/.test(c.data.slice(10, 74)) ? `0x${c.data.slice(34, 74)}` : undefined
@@ -285,7 +290,7 @@ export async function applyEvmTxPreview(
   try {
     signingInfo.calldataDecoded = await decodeCalldata(to, data, chainId, signingInfo.value) ?? undefined
   } catch (e) { console.warn(`${tag} Calldata decode failed:`, e) }
-  const swapRows = uniswapSwapFields(chainId, to, data, signingInfo.value, signingInfo.from)
+  const swapRows = uniswapSwapFields(chainId, to, data, signingInfo.value, signingInfo.from, firmwareVersion)
   if (swapRows.length > 0 && signingInfo.calldataDecoded) {
     signingInfo.calldataDecoded.fields = [...swapRows, ...signingInfo.calldataDecoded.fields]
   }
