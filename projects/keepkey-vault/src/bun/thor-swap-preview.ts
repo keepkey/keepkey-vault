@@ -25,9 +25,11 @@ const INPUT_TOKENS: Record<string, { symbol: string; decimals: number }> = {
 }
 const INPUT_CHAIN_NAMES: Record<number, string> = { 1: 'Ethereum', 8453: 'Base', 42161: 'Arbitrum' }
 
-/** Single-asset short codes the network expands in a memo (THORChain
- *  common/asset.go ShortCode, thornode 55ac22c7; Mayachain common/asset.go
- *  ShortCode, mayanode de97de72). The two networks use different codes. */
+/** Short codes the network expands in a memo (THORChain common/asset.go
+ *  ShortCode, thornode 55ac22c7; Mayachain common/asset.go ShortCode and
+ *  TwoLetterShortCodeV129, as NewAssetWithShortCodesV129 reads them, mayanode
+ *  de97de72). The two networks use different codes ('tr' is TRON.TRX on
+ *  THORChain, THOR.RUNE on Maya). A code names its contract itself. */
 const SHORT_CODES: Record<'THORChain' | 'Mayachain', Record<string, string>> = {
   THORChain: {
     r: 'THOR.RUNE', b: 'BTC.BTC', e: 'ETH.ETH', g: 'GAIA.ATOM', d: 'DOGE.DOGE', l: 'LTC.LTC', c: 'BCH.BCH',
@@ -37,6 +39,14 @@ const SHORT_CODES: Record<'THORChain' | 'Mayachain', Record<string, string>> = {
   Mayachain: {
     a: 'ARB.ETH', b: 'BTC.BTC', d: 'DASH.DASH', e: 'ETH.ETH', k: 'KUJI.KUJI', c: 'MAYA.CACAO',
     r: 'THOR.RUNE', x: 'XRD.XRD', z: 'ZEC.ZEC',
+    ae: 'ARB.ETH', at: 'ARB.USDT-0XFD086BC7CD5C481DCC9C85EBE478A1C0B69FCBB9',
+    ac: 'ARB.USDC-0XAF88D065E77C8CC2239327C5EDB3A432268E5831', ad: 'ARB.DAI-0XDA10009CBD5D07DD0CECC66161FC93D7C9000DA1',
+    ap: 'ARB.PEPE-0X25D887CE7A35172C62FEBFD67A1856F20FAEBB00', aw: 'ARB.WSTETH-0X5979D7B546E38E414F7E9822514BE443A4800529',
+    ab: 'ARB.WBTC-0X2F2A2543B76A4166549F7AAB2E75BEF0AEFC5B0F', bb: 'BTC.BTC', dd: 'DASH.DASH',
+    et: 'ETH.USDT-0XDAC17F958D2EE523A2206206994597C13D831EC7', ec: 'ETH.USDC-0XA0B86991C6218B36C1D19D4A2E9EB0CE3606EB48',
+    ep: 'ETH.PEPE-0X6982508145454CE325DDBE47A25D4EC3D2311933', ew: 'ETH.WSTETH-0X7F39C581F595B53C5CB19BD0B3F8DA6C935E2CA0',
+    ku: 'KUJI.USK', mc: 'MAYA.CACAO', tr: 'THOR.RUNE', xx: 'XRD.XRD', ee: 'ETH.ETH', kk: 'KUJI.KUJI',
+    aa: 'ADA.ADA', zz: 'ZEC.ZEC',
   },
 }
 
@@ -93,7 +103,8 @@ export function thorDepositFields(data: string, chainId?: number, protocol: 'THO
 
   const parts = memo.split(':')
   if (parts.length >= 3 && parts.length <= 6 && ['=', 's', 'SWAP'].includes(parts[0])) {
-    if (protocol !== 'Unverified') parts[1] = SHORT_CODES[protocol][parts[1]] ?? parts[1]
+    const short = protocol !== 'Unverified' && Object.prototype.hasOwnProperty.call(SHORT_CODES[protocol], parts[1]) ? SHORT_CODES[protocol][parts[1]] : undefined
+    if (short) parts[1] = short
     const assetMatch = /^([A-Z0-9]+)\.([A-Z0-9]{1,12})(?:-.+)?$/.exec(parts[1])
     if (assetMatch) {
       const output = assetMatch[2]
@@ -109,9 +120,10 @@ export function thorDepositFields(data: string, chainId?: number, protocol: 'THO
       const expectedContract = pinnedStablecoins[`${outputChain}.${output}`]?.toLowerCase()
       // A ticker with no contract is the network's own pool asset: it matches
       // the deepest pool with that ticker (THORChain docs, memo-length-reduction
-      // "Asset Abbreviations"), so it is not a token the memo can fake.
+      // "Asset Abbreviations"), so it is not a token the memo can fake. A short
+      // code names its contract from the network's own table (SHORT_CODES).
       const suffix = /-(.+)$/.exec(parts[1])?.[1]
-      const tokenWarning = outputContract
+      const tokenWarning = short ? null : outputContract
         ? expectedContract && outputContract.toLowerCase() === expectedContract
           ? null : `UNVERIFIED ${output} token contract ${outputContract}`
         : expectedContract && suffix && !expectedContract.endsWith(suffix.toLowerCase())
