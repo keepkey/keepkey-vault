@@ -1083,16 +1083,10 @@ export class WalletConnectManager {
         tx.data, effectiveChainId, tx.to, from, this.callbacks.getEvmSimulationEndpoint(effectiveChainId),
       )
       signingInfo.clearSignReport = buildClearSignReport({
-        // An attached ERC-7730 definition: the in-app overlay's verdict, so the card agrees with itself.
-        ...(!clearSignSchema && signingInfo.erc7730 ? evmSigningVerdict(signingInfo, {}, simulation, universalRouterFindings.complete) : {
-          requestedLevel: simulation.status === 'success' ? 'P3' : universalRouterFindings.complete ? 'P2' : 'P1',
-          descriptor: clearSignSchema ? {
-            source: clearSignSchema.keyId === 0x80 ? 'certified' : 'runtime',
-            authenticated: false,
-            format: 'EVM_METADATA',
-            label: clearSignSchema.method,
-          } : { source: 'none', authenticated: false },
-        }),
+        // REST's verdict, so a call reads the same on both paths: P4 when the
+        // device shows it natively, from the certified envelope the preview
+        // attached, or from the ERC-7730 definition.
+        ...evmSigningVerdict(signingInfo, {}, simulation, universalRouterFindings.complete),
         simulation,
         hostFindings: universalRouterFindings.findings,
         hostLimitations: universalRouterFindings.limitations,
