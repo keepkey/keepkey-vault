@@ -341,7 +341,11 @@ function readLevel(envelopeHex: string, call: Level, walk: Walk): { signedBy: st
           const alias = !known && set && Array.from({ length: u16(set, 0) }, (_, k) => literal(u16(set, 2 + 2 * k)).value).includes(token)
           const ours = REVIEWED_EVM_TOKENS[`${call.chainId}:${token}`] ?? evmTokenIdentity(call.chainId, token)
           if (!known && !alias && ours && ours.symbol !== 'UNKNOWN') note = `This computer reads it as ${scaled(n, ours.decimals)} ${ours.symbol}.`
+          // 7.17 shows the usual native stand-ins (0x00..00, 0xEeee..EEeE) as the coin itself
+          // (erc7730_field.c is_native_placeholder); 7.16 always shows the alias line.
+          const placeholder = /^0x(0{40}|e{40})$/i.test(token)
           const shown = known ? `${scaled(n, Number(known[1]))} ${known[0]}`
+            : alias && placeholder && is717(call.firmwareVersion) ? nativeOf(n)
             : alias ? `Signer native alias:\n${ethersUtils.getAddress(token)}\n${nativeOf(n)}`
               : `${n}\nunknown token\n${ethersUtils.getAddress(token)}`
           return message ? `Signer: ${message}\n${shown}` : shown

@@ -210,7 +210,8 @@ describe('the card says what 7.17 shows (embedded calls, RECIPIENT, TX_VALUE)', 
       { label: 'To', value: '0xbd757963C857c884153d24B4589A94F45762e7D5\nNOT this wallet', depth: 1 },
       { label: 'Amount', value: '894300000000000000\nunknown token\n0x8292Bb45bf1Ee4d140127049757C2E0fF06317eD', note: 'This computer reads it as 0.8943 RLUSD.', depth: 1 },
       { label: 'Gas amount', value: '0' },
-      { label: 'Gas price', value: 'Signer native alias:\n0x0000000000000000000000000000000000000000\n0 Wei' },
+      // 7.17 (fw #1031) shows the 0x00..00 stand-in as the coin itself, no alias line.
+      { label: 'Gas price', value: '0 Wei' },
       { label: 'Gas receiver', value: '0x0000000000000000000000000000000000000000' },
     ])
   })
