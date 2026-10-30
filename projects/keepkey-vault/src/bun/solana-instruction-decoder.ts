@@ -29,6 +29,7 @@
 import bs58 from 'bs58'
 import { solanaPrograms as solanaProgramsData } from '@pioneer-platform/pioneer-discovery'
 import localPrograms from './solana-programs-local.json'
+import { JUPITER_V6, decodeJupiterSwap } from './solana-jupiter'
 
 // ── Registry shape ────────────────────────────────────────────────────
 
@@ -316,6 +317,23 @@ export function decodeInstruction(input: DecodeInstructionInput): DecodedInstruc
       programName: programId.slice(0, 6) + '…' + programId.slice(-4),
       args: [],
       accounts,
+    }
+  }
+
+  // A Jupiter route plan is variable-length, so the registry's flat arg list
+  // cannot describe it (solana-jupiter.ts walks it).
+  const jupiter = programId === JUPITER_V6 ? decodeJupiterSwap(input.data) : null
+  if (jupiter) {
+    accounts.forEach((a, i) => { a.label = jupiter.accountLabels[i] })
+    return {
+      status: 'known',
+      programId,
+      programName: program.name,
+      programCategory: program.category,
+      instructionName: jupiter.instructionName,
+      args: jupiter.args.map((a) => ({ ...a, rawHex: '' })),
+      accounts,
+      note: jupiter.note,
     }
   }
 

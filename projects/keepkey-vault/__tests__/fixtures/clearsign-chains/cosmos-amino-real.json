@@ -1,0 +1,273 @@
+{
+ "_source": "Cosmos Hub mainnet transactions signed with SIGN_MODE_LEGACY_AMINO_JSON, fetched 2026-10-29 from https://cosmos-rest.publicnode.com/cosmos/tx/v1beta1/txs/<hash> (explorer: https://www.mintscan.io/cosmos/tx/<hash>). signDoc is the amino StdSignDoc rebuilt from that tx: chain_id cosmoshub-4, account_number from /cosmos/auth/v1beta1/account_info/<signer> at capture time, sequence from auth_info.signer_infos, fee/memo/msgs from the tx with the amino type names. onchain is the LCD tx body + auth_info as returned.",
+ "requests": {
+  "msg-send": {
+   "txhash": "5AC70521594721FE8D9C442C9E45FE217398FEAB9B7B57BADBEE6EFD78A8F3C4",
+   "height": "33639122",
+   "signerAddress": "cosmos132utv2xspy0569x8yqla39tg406qwv9gvjx8sd",
+   "signDoc": {
+    "chain_id": "cosmoshub-4",
+    "account_number": "2822905",
+    "sequence": "12662",
+    "fee": {
+     "amount": [
+      {
+       "denom": "uatom",
+       "amount": "800"
+      }
+     ],
+     "gas": "120000"
+    },
+    "memo": "",
+    "msgs": [
+     {
+      "type": "cosmos-sdk/MsgSend",
+      "value": {
+       "from_address": "cosmos132utv2xspy0569x8yqla39tg406qwv9gvjx8sd",
+       "to_address": "cosmos1wey473vwghyaxpqnvn24kfvfn5zxjc8gpwczwk",
+       "amount": [
+        {
+         "denom": "uatom",
+         "amount": "200000000"
+        }
+       ]
+      }
+     }
+    ]
+   },
+   "onchain": {
+    "body": {
+     "messages": [
+      {
+       "@type": "/cosmos.bank.v1beta1.MsgSend",
+       "from_address": "cosmos132utv2xspy0569x8yqla39tg406qwv9gvjx8sd",
+       "to_address": "cosmos1wey473vwghyaxpqnvn24kfvfn5zxjc8gpwczwk",
+       "amount": [
+        {
+         "denom": "uatom",
+         "amount": "200000000"
+        }
+       ]
+      }
+     ],
+     "memo": "",
+     "timeout_height": "0",
+     "unordered": false,
+     "timeout_timestamp": null,
+     "extension_options": [],
+     "non_critical_extension_options": []
+    },
+    "auth_info": {
+     "signer_infos": [
+      {
+       "public_key": {
+        "@type": "/cosmos.crypto.secp256k1.PubKey",
+        "key": "AvRNpCZEs8B+P9U1mZ7kxfmejsvWsp312vxIA3v2AlKX"
+       },
+       "mode_info": {
+        "single": {
+         "mode": "SIGN_MODE_LEGACY_AMINO_JSON"
+        }
+       },
+       "sequence": "12662"
+      }
+     ],
+     "fee": {
+      "amount": [
+       {
+        "denom": "uatom",
+        "amount": "800"
+       }
+      ],
+      "gas_limit": "120000",
+      "payer": "",
+      "granter": ""
+     },
+     "tip": null
+    }
+   }
+  },
+  "msg-delegate": {
+   "txhash": "9C14E0676912417233353812F44B58FFF9B2D9AEF578CD3FF745A3011CA9313D",
+   "height": "33639196",
+   "signerAddress": "cosmos1ykdu7sqcrj63whey4y5wkgergktkqhaa07f30j",
+   "signDoc": {
+    "chain_id": "cosmoshub-4",
+    "account_number": "3726380",
+    "sequence": "2",
+    "fee": {
+     "amount": [
+      {
+       "denom": "uatom",
+       "amount": "6558"
+      }
+     ],
+     "gas": "1092932"
+    },
+    "memo": "",
+    "msgs": [
+     {
+      "type": "cosmos-sdk/MsgDelegate",
+      "value": {
+       "delegator_address": "cosmos1ykdu7sqcrj63whey4y5wkgergktkqhaa07f30j",
+       "validator_address": "cosmosvaloper1gf3dm2mvqhymts6ksrstlyuu2m8pw6dhfp9md2",
+       "amount": {
+        "denom": "uatom",
+        "amount": "9677551"
+       }
+      }
+     }
+    ]
+   },
+   "onchain": {
+    "body": {
+     "messages": [
+      {
+       "@type": "/cosmos.staking.v1beta1.MsgDelegate",
+       "delegator_address": "cosmos1ykdu7sqcrj63whey4y5wkgergktkqhaa07f30j",
+       "validator_address": "cosmosvaloper1gf3dm2mvqhymts6ksrstlyuu2m8pw6dhfp9md2",
+       "amount": {
+        "denom": "uatom",
+        "amount": "9677551"
+       }
+      }
+     ],
+     "memo": "",
+     "timeout_height": "0",
+     "unordered": false,
+     "timeout_timestamp": null,
+     "extension_options": [],
+     "non_critical_extension_options": []
+    },
+    "auth_info": {
+     "signer_infos": [
+      {
+       "public_key": {
+        "@type": "/cosmos.crypto.secp256k1.PubKey",
+        "key": "A3646TGlicZHVqrE5NmA2zVC8g7ZXXHKOH89k2wCveTr"
+       },
+       "mode_info": {
+        "single": {
+         "mode": "SIGN_MODE_LEGACY_AMINO_JSON"
+        }
+       },
+       "sequence": "2"
+      }
+     ],
+     "fee": {
+      "amount": [
+       {
+        "denom": "uatom",
+        "amount": "6558"
+       }
+      ],
+      "gas_limit": "1092932",
+      "payer": "",
+      "granter": ""
+     },
+     "tip": null
+    }
+   }
+  },
+  "ibc-transfer": {
+   "txhash": "8807F1FA86CF95A016B12D33C6625AC66E486C240DF51ED52A0F17423391B0E0",
+   "height": "33639173",
+   "signerAddress": "cosmos1rgf4z0qljnsaq2tt5dzr058snqahfkha797w54",
+   "signDoc": {
+    "chain_id": "cosmoshub-4",
+    "account_number": "2729301",
+    "sequence": "81",
+    "fee": {
+     "amount": [
+      {
+       "denom": "uatom",
+       "amount": "1239"
+      }
+     ],
+     "gas": "206460"
+    },
+    "memo": "",
+    "msgs": [
+     {
+      "type": "cosmos-sdk/MsgTransfer",
+      "value": {
+       "source_port": "transfer",
+       "source_channel": "channel-141",
+       "token": {
+        "denom": "uatom",
+        "amount": "242811669"
+       },
+       "sender": "cosmos1rgf4z0qljnsaq2tt5dzr058snqahfkha797w54",
+       "receiver": "osmo1rgf4z0qljnsaq2tt5dzr058snqahfkhak7d7z8",
+       "timeout_height": {
+        "revision_number": "1",
+        "revision_height": "73513973"
+       },
+       "timeout_timestamp": "0",
+       "memo": "",
+       "encoding": ""
+      }
+     }
+    ]
+   },
+   "onchain": {
+    "body": {
+     "messages": [
+      {
+       "@type": "/ibc.applications.transfer.v1.MsgTransfer",
+       "source_port": "transfer",
+       "source_channel": "channel-141",
+       "token": {
+        "denom": "uatom",
+        "amount": "242811669"
+       },
+       "sender": "cosmos1rgf4z0qljnsaq2tt5dzr058snqahfkha797w54",
+       "receiver": "osmo1rgf4z0qljnsaq2tt5dzr058snqahfkhak7d7z8",
+       "timeout_height": {
+        "revision_number": "1",
+        "revision_height": "73513973"
+       },
+       "timeout_timestamp": "0",
+       "memo": "",
+       "encoding": ""
+      }
+     ],
+     "memo": "",
+     "timeout_height": "0",
+     "unordered": false,
+     "timeout_timestamp": null,
+     "extension_options": [],
+     "non_critical_extension_options": []
+    },
+    "auth_info": {
+     "signer_infos": [
+      {
+       "public_key": {
+        "@type": "/cosmos.crypto.secp256k1.PubKey",
+        "key": "AlOhN0uAAf8e02A5lyRiJ/bFuZ/k6xnZYAQC2N/jCEG7"
+       },
+       "mode_info": {
+        "single": {
+         "mode": "SIGN_MODE_LEGACY_AMINO_JSON"
+        }
+       },
+       "sequence": "81"
+      }
+     ],
+     "fee": {
+      "amount": [
+       {
+        "denom": "uatom",
+        "amount": "1239"
+       }
+      ],
+      "gas_limit": "206460",
+      "payer": "",
+      "granter": ""
+     },
+     "tip": null
+    }
+   }
+  }
+ }
+}

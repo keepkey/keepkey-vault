@@ -8,6 +8,7 @@ import { WIPE_BUSY_MESSAGE, WIPE_REPLUG_PENDING_MESSAGE } from './device-wipe'
 import { DEVICE_LOCKED_MESSAGE, restRequest } from './device-gate'
 import { WalletCacheSession, WalletSessionChangedError, WalletSessionMap } from './wallet-session-cache'
 import type { SigningRequestInfo, ApiLogEntry, EIP712DecodedInfo } from '../shared/types'
+import { tronCallPreview, tronPreview } from './tron-preview'
 import { tronPreview } from './tron-preview'
 import { deviceErrorMessage } from '../shared/device-error'
 import type { ClearSignEvent } from '../shared/types'
@@ -1758,6 +1759,9 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               } else {
                 signingInfo.needsBlindSigning = true
                 signingInfo.requiresAdvancedMode = true
+                // The device shows this as raw data; say what it does here.
+                signingInfo.tronCall = tronCallPreview(preview.raw_tx) ?? undefined
+                if (signingInfo.tronCall) signingInfo.from = signingInfo.tronCall.owner
               }
             } else if (path === '/solana/sign-message') {
               const raw = typeof preview.message === 'string' ? preview.message : ''

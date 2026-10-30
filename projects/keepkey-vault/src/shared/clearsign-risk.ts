@@ -21,6 +21,7 @@ import type {
   SigningRequestInfo,
   SimulatedHoldings,
   SolanaCertifiedArg,
+  SolanaTxDecodedInfo,
   SolanaTxDecodedInstruction,
   ThorVaultCheck,
 } from './types'
@@ -30,6 +31,7 @@ import { typedDataSpendAmounts } from './typedDataRows'
 import { knownSpenderName } from './evm-known-spenders'
 import { nftMarketplaceOperator } from './nft-marketplaces'
 import { cosmosDepositPreview } from './cosmosDepositPreview'
+import { SOLANA_TOKEN_IDENTITIES } from './solana-token-identities'
 
 export type RiskLevel = 'low' | 'medium' | 'high' | 'critical'
 export interface RiskReason { level: RiskLevel; text: string }
@@ -161,13 +163,41 @@ export function formatSimulatedHoldings(s: SimulatedHoldings): string {
   return `Checked on this computer: if this goes through, ${whose} ${holdings.join(' and ')}.${s.note ? ` ${s.note}` : ''}`
 }
 
-/** Plain sentence for an instruction KeepKey fully understands, or null. */
-function describeKnown(ix: SolanaTxDecodedInstruction): RiskReason | null {
+const TOKEN_2022 = 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb'
+const TOKEN_PROGRAMS = new Set(['TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', TOKEN_2022])
+const JUPITER_V6 = 'JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4'
+type TokenAccounts = SolanaTxDecodedInfo['tokenAccounts']
+
+/** An amount of a mint, named only from the checked table. */
+function solanaTokenAmount(raw: string, mint: string | undefined): string {
+  if (!mint) return `${BigInt(raw).toLocaleString('en-US')} base units of a token this computer could not check`
+  const id = SOLANA_TOKEN_IDENTITIES[mint]
+  return tokenAmount(raw, mint, id?.symbol, id?.decimals, true)
+}
+
+/** The token account a Jupiter swap pays out to: the optional
+ *  destinationTokenAccount when set (left empty it is the program id),
+ *  otherwise the user's own. */
+function jupiterOutput(ix: SolanaTxDecodedInstruction): string | undefined {
+  const optional = acct(ix, 'destinationTokenAccount')
+  return optional && optional !== JUPITER_V6 ? optional : acct(ix, 'userDestinationTokenAccount')
+}
+
+/** Plain sentence for an instruction KeepKey fully understands, or null.
+ *  `from` is the signing account; `swapOutputs` the accounts a Jupiter swap
+ *  in this transaction pays out to. */
+function describeKnown(ix: SolanaTxDecodedInstruction, tokenAccounts: TokenAccounts, from?: string, swapOutputs = new Set<string>()): RiskReason | null {
   const name = ix.instructionName
   if (ix.programName === 'System Program' && name === 'transfer') {
     const to = acct(ix, 'destination')
     const lamports = arg(ix, 'lamports')
-    return { level: 'low', text: `Sends ${lamports ? `${units(lamports, 9)} SOL` : 'SOL'}${to ? ` to ${shortAddr(to)}` : ''}.` }
+    const sol = lamports ? `${units(lamports, 9)} SOL` : 'SOL'
+    // Funding your own wrapped-SOL account is how a SOL swap starts.
+    const held = to ? tokenAccounts?.[to] : undefined
+    if (to && from && held?.owner === from && held.mint === 'So11111111111111111111111111111111111111112') {
+      return { level: 'low', text: `Moves ${sol} into your own wrapped-SOL account ${shortAddr(to)}.` }
+    }
+    return { level: 'low', text: `Sends ${sol}${to ? ` to ${shortAddr(to)}` : ''}.` }
   }
   if (ix.programName === 'Stake Program' && name === 'delegateStake') {
     const stake = acct(ix, 'stakeAccount'), vote = acct(ix, 'voteAccount')
@@ -179,9 +209,36 @@ function describeKnown(ix: SolanaTxDecodedInstruction): RiskReason | null {
   }
   if (name === 'transfer' || name === 'transferChecked') {
     const dec = arg(ix, 'decimals'), raw = arg(ix, 'amount')
-    const amount = dec && raw ? units(raw, Number(dec)) : 'tokens'
-    const mint = acct(ix, 'mint')
-    return { level: 'low', text: `Sends ${amount}${dec && mint ? ` of token ${shortAddr(mint)}` : ''}.` }
+    const dest = acct(ix, 'destination')
+    const held = dest ? tokenAccounts?.[dest] : undefined
+    const mint = acct(ix, 'mint') ?? held?.mint
+    const id = mint ? SOLANA_TOKEN_IDENTITIES[mint] : undefined
+    // transferChecked fails unless its decimals match the mint, so a named
+    // mint with other decimals is not the token it claims to be.
+    const amount = !raw ? 'tokens'
+      : id && (dec === undefined || Number(dec) === id.decimals) ? solanaTokenAmount(raw, mint)
+        : dec ? `${units(raw, Number(dec))}${mint ? ` of token ${mint}` : ''}`
+          : solanaTokenAmount(raw, mint)
+    // The token account is not the person: name the wallet that holds it.
+    const to = held ? ` to ${held.owner}${held.owner === from ? ' (your own account)' : ''}` : dest ? ` to token account ${dest}` : ''
+    return { level: 'low', text: `Sends ${amount}${to}.` }
+  }
+  // Closing a token account sends all of its SOL (rent, and for wrapped SOL
+  // the balance, e.g. a swap's SOL output) to `destination`.
+  if (TOKEN_PROGRAMS.has(ix.programId) && name === 'closeAccount') {
+    const account = acct(ix, 'account'), dest = acct(ix, 'destination')
+    if (!account || !dest) return null
+    const swapOut = swapOutputs.has(account)
+    const what = swapOut ? `the account ${account} that receives the swap output` : `token account ${account}`
+    if (!from) return { level: 'medium', text: `Closes ${what} and sends everything in it to ${dest}. This computer could not check whether that is your account.` }
+    if (dest === from) {
+      return { level: 'low', text: swapOut ? `Unwraps the swap output and sends it to ${dest} (your own account).` : `Closes token account ${shortAddr(account)} and returns its SOL to ${dest} (your own account).` }
+    }
+    const yours = swapOut || acct(ix, 'owner') === from || tokenAccounts?.[account]?.owner === from
+    if (!yours) return { level: 'low', text: `Closes token account ${account}, which is not yours, and sends its SOL to ${dest}.` }
+    return { level: 'high', text: swapOut
+      ? `The swap output goes to ${dest}, which is NOT the account signing this (${from}): this step closes ${account} and sends everything in it there.`
+      : `Closes your token account ${account} and sends its SOL to ${dest}, which is NOT the account signing this (${from}).` }
   }
   if (name === 'approve' || name === 'approveChecked') {
     const raw = arg(ix, 'amount') ?? '0'
@@ -191,6 +248,53 @@ function describeKnown(ix: SolanaTxDecodedInstruction): RiskReason | null {
     return { level: 'critical', text: `Lets ${who ? shortAddr(who) : 'another account'} spend ${howMuch} your tokens, now and later, without asking you again.` }
   }
   return null
+}
+
+/** A Jupiter v6 swap, from the amounts in its own instruction data
+ *  (bun/solana-jupiter.ts). The device shows it as raw data, so this is the
+ *  only place the amounts are read back to the user. */
+function jupiterSwap(ix: SolanaTxDecodedInstruction, d: SolanaTxDecodedInfo, req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void) {
+  const a = (n: string) => { const v = arg(ix, n); return v === undefined ? undefined : BigInt(v) }
+  const slip = a('slippageBps'), fee = a('platformFeeBps')
+  const quotedOut = a('quotedOutAmount'), quotedIn = a('quotedInAmount')
+  // The amounts did not read: the note line says so, nothing to state here.
+  if (slip === undefined || (quotedOut === undefined && quotedIn === undefined)) return
+  const src = acct(ix, 'userSourceTokenAccount') ?? acct(ix, 'sourceTokenAccount')
+  const out = jupiterOutput(ix)
+  // The mint the account actually holds over the instruction's own label.
+  const srcHeld = src ? d.tokenAccounts?.[src] : undefined
+  const outHeld = out ? d.tokenAccounts?.[out] : undefined
+  const inLabel = acct(ix, 'sourceMint'), outLabel = acct(ix, 'destinationMint')
+  const inMint = srcHeld?.mint ?? inLabel
+  const outMint = outHeld?.mint ?? outLabel
+  if (srcHeld && inLabel && srcHeld.mint !== inLabel) add('high', `This swap says it spends token ${inLabel}, but the account it spends from holds token ${srcHeld.mint}.`)
+  if (outHeld && outLabel && outHeld.mint !== outLabel) add('high', `This swap says it pays out token ${outLabel}, but the account that receives it holds token ${outHeld.mint}.`)
+  const pct = (bps: bigint) => `${Number(bps) / 100}%`
+  const venues = arg(ix, 'route') ? `, routed through ${arg(ix, 'route')}` : ''
+  const fw = notOnThisFirmware('Jupiter swaps', req.firmwareVersion)
+  if (quotedOut !== undefined) {
+    const min = slip >= 10_000n ? 0n : quotedOut * (10_000n - slip) / 10_000n
+    const amountIn = a('inAmount')
+    // The token-ledger forms swap whatever an earlier step set aside.
+    const what = amountIn !== undefined ? solanaTokenAmount(amountIn.toString(), inMint)
+      : 'the tokens an earlier step of this transaction sets aside'
+    add('medium', `Swaps ${what} for at least ${solanaTokenAmount(min.toString(), outMint)} through Jupiter (quoted ${solanaTokenAmount(quotedOut.toString(), outMint)}, ${pct(slip)} slippage${venues}). ${fw}`)
+    if (min === 0n) add('high', 'Sets no minimum, so this swap can pay you back almost nothing.')
+    else if (slip >= 5_000n) add('high', `Accepts up to ${pct(slip)} less than the quote, so this swap can pay you back far less.`)
+  } else {
+    const max = quotedIn! * (10_000n + slip) / 10_000n
+    add('medium', `Buys ${solanaTokenAmount(String(a('outAmount') ?? 0n), outMint)} for at most ${solanaTokenAmount(max.toString(), inMint)} through Jupiter (quoted ${solanaTokenAmount(quotedIn!.toString(), inMint)}, ${pct(slip)} slippage${venues}). ${fw}`)
+    if (slip >= 5_000n) add('high', `Accepts paying up to ${pct(slip)} more than the quote.`)
+  }
+  // Integrator fees run up to about 1%; well past that it is not a fee.
+  if (fee !== undefined && fee > 100n) add('high', `${pct(fee)} of this swap goes to the app as a fee.`)
+  else if (fee) add('low', `App fee: ${pct(fee)} of this swap.`)
+  // The swap's own transfer authority is in the signed bytes, so a caller
+  // that did not say who signs (decode-transaction) is still checked.
+  const me = req.from ?? acct(ix, 'userTransferAuthority')
+  const holder = outHeld?.owner
+  if (!holder || !me) add('medium', 'This computer could not check which account receives the swap output.')
+  else if (holder !== me) add('high', `The swap output goes to ${holder}, which is NOT the account signing this (${me}).`)
 }
 
 // ── EVM ──────────────────────────────────────────────────────────────
@@ -794,6 +898,140 @@ function evmMessage(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => v
   return 'unknown'
 }
 
+/** TRON: the firmware shows a plain TRX or TRC-20 transfer (tronDecoded);
+ *  everything else it shows as raw data, so this reads it (tronCall). */
+function tronTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void): Recognition {
+  const t = req.tronDecoded
+  if (t) {
+    const unverified = t.kind === 'TRC-20 transfer' && !/ USDT$/.test(t.amount)
+    add(unverified ? 'medium' : 'low', `Sends ${t.amount} to ${t.to}.${unverified ? ` This computer does not recognize token ${t.tokenContract}.` : ''} Your KeepKey shows this transfer; check it there.`)
+    if (t.minimumOutput === 'NO MINIMUM IN SIGNED MEMO') add('high', 'Sets no minimum, so this swap can pay you back almost nothing.')
+    return 'shows'
+  }
+  const c = req.tronCall
+  const fw = (what: string) => add('medium', notOnThisFirmware(what, req.firmwareVersion))
+  if (!c) {
+    add('high', 'KeepKey cannot read this transaction at all. You would be signing blind.')
+    return 'unknown'
+  }
+  switch (c.kind) {
+    case 'TRC-20 approve': {
+      const who = c.spenderName ? `${c.spenderName} (${c.spender})` : c.spender
+      const token = c.tokenSymbol ?? `token ${c.token}`
+      if (c.revoke) {
+        add('low', `Removes ${who}'s permission to spend your ${token}.`)
+      } else {
+        const permit2Setup = c.spenderName === 'SunSwap Permit2'
+        const level = spendPermissionLevel(c.spenderName, c.unlimited || !c.tokenSymbol, permit2Setup)
+        add(level, permit2Setup && c.unlimited
+          ? `Standard SunSwap setup: gives SunSwap Permit2 (${c.spender}) persistent access to your ${token}. You can revoke this allowance later.`
+          : `Lets ${who} spend ${c.unlimited ? `ALL of your ${token}` : `up to ${c.amount}`}, now and later, without asking you again.`)
+        // The USDT-TRC20 approval scam: a site asks for an unlimited approve
+        // to its own address, then drains the wallet with transferFrom.
+        if (level === 'critical') add('critical', `${c.spender} is not a contract KeepKey knows. Sites that steal ${token} ask for exactly this approval; whoever controls that address can take your ${token} at any time.`)
+      }
+      fw('TRC-20 approvals')
+      return 'known'
+    }
+    case 'Stake TRX':
+      add('low', `Stakes ${c.amount} for ${c.resource}. The TRX stays locked until you unstake it and the network's waiting period ends.`)
+      break
+    case 'Unstake TRX':
+      add('low', `Unstakes ${c.amount} of ${c.resource} stake. You can withdraw it once the network's waiting period ends.`)
+      break
+    case 'Withdraw unstaked TRX':
+      add('low', 'Moves TRX whose unstaking waiting period has ended back to your balance.')
+      break
+    case 'Claim voting rewards':
+      add('low', 'Claims your voting rewards to your balance.')
+      break
+    case 'Vote':
+      add('low', `Votes for ${c.votes.map((v) => `${v.witness} (${v.count} votes)`).join(', ')}. This replaces your earlier votes.`)
+      break
+    case 'Delegate resources':
+      add('low', `Lends the ${c.resource} of ${c.amount} of your stake to ${c.receiver}${c.locked ? ', locked for a period' : ''}. The TRX stays yours and you can reclaim it${c.locked ? ' once the lock ends' : ''}.`)
+      break
+    case 'Reclaim delegated resources':
+      add('low', `Takes back the ${c.resource} of ${c.amount} of stake you lent to ${c.receiver}.`)
+      break
+    case 'SunSwap swap':
+      add('medium', `Swaps ${c.amountIn} for at least ${c.amountOutMin} through the ${c.contractName} (${c.contract}).`)
+      if (c.noMinimum) add('high', 'Sets no minimum, so this swap can pay you back almost nothing.')
+      if (c.to !== c.owner) add('high', `The swap output goes to ${c.to}, which is NOT the account signing this (${c.owner}).`)
+      if (c.callValue) add('medium', `Also sends ${c.callValue} to the contract.`)
+      fw('SunSwap swaps')
+      return 'known'
+    case 'Contract call':
+      if (c.contractName) {
+        add('medium', `Calls the ${c.contractName} (${c.contract}), a swap contract SUN.io publishes. This computer cannot read the swap amounts, so check them in the app before you sign.`)
+      } else {
+        add('high', `Your KeepKey cannot show what this call to ${c.contract} does. You would be signing blind.`)
+      }
+      if (c.callValue) add('medium', `Also sends ${c.callValue} to the contract.`)
+      return 'unknown'
+  }
+  fw('TRON staking and voting')
+  return 'known'
+}
+
+/** Cosmos Hub amino: hdwallet builds each of these message types on the
+ *  device, which shows its fields; any other type it refuses to sign. */
+const COSMOS_ON_DEVICE = new Set(['cosmos-sdk/MsgSend', 'cosmos-sdk/MsgDelegate', 'cosmos-sdk/MsgUndelegate',
+  'cosmos-sdk/MsgBeginRedelegate', 'cosmos-sdk/MsgWithdrawDelegationReward', 'cosmos-sdk/MsgTransfer'])
+
+function cosmosAmino(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void): Recognition {
+  const body = req.rawRequestBody as { signerAddress?: string; signDoc?: { msgs?: unknown } } | undefined
+  const msgs = Array.isArray(body?.signDoc?.msgs) ? body!.signDoc!.msgs as { type?: unknown; value?: any }[] : []
+  if (msgs.length === 0) {
+    add('high', 'This computer could not read this Cosmos request.')
+    return 'unknown'
+  }
+  const signer = body?.signerAddress ?? req.from
+  // Only the chain's own coin has fixed decimals; every other denom as signed.
+  const coin = (c: any) => (c?.denom === 'uatom' && /^\d+$/.test(String(c?.amount)) ? `${units(String(c.amount), 6)} ATOM` : `${c?.amount ?? '?'} ${c?.denom ?? '?'}`)
+  const notYou = (who: unknown) => { if (signer && typeof who === 'string' && who !== signer) add('high', `This message acts for ${who}, which is NOT the account signing this (${signer}).`) }
+  let shows = true
+  for (const m of msgs) {
+    const v = m?.value ?? {}
+    const type = String(m?.type ?? 'unknown')
+    const denoms = [v.amount, v.token].flat().filter(Boolean).map((c: any) => c?.denom)
+    if (!COSMOS_ON_DEVICE.has(type) || denoms.some((d: unknown) => d !== 'uatom')) shows = false
+    switch (type) {
+      case 'cosmos-sdk/MsgSend':
+        notYou(v.from_address)
+        add('low', `Sends ${(Array.isArray(v.amount) ? v.amount : [v.amount]).map(coin).join(' + ')} to ${v.to_address}.`)
+        break
+      case 'cosmos-sdk/MsgDelegate':
+        notYou(v.delegator_address)
+        add('low', `Stakes ${coin(v.amount)} with validator ${v.validator_address}. Unstaking it later takes the chain's unbonding period.`)
+        break
+      case 'cosmos-sdk/MsgUndelegate':
+        notYou(v.delegator_address)
+        add('low', `Unstakes ${coin(v.amount)} from validator ${v.validator_address}. It returns to your balance after the chain's unbonding period.`)
+        break
+      case 'cosmos-sdk/MsgBeginRedelegate':
+        notYou(v.delegator_address)
+        add('low', `Moves ${coin(v.amount)} of stake from validator ${v.validator_src_address} to ${v.validator_dst_address}.`)
+        break
+      case 'cosmos-sdk/MsgWithdrawDelegationReward':
+        notYou(v.delegator_address)
+        add('low', `Claims your staking rewards from validator ${v.validator_address}.`)
+        break
+      case 'cosmos-sdk/MsgTransfer':
+        notYou(v.sender)
+        add('low', `Sends ${coin(v.token)} over IBC (${v.source_port}/${v.source_channel}) to ${v.receiver} on another chain. Check the receiver: an IBC transfer cannot be called back once it arrives.`)
+        if (typeof v.memo === 'string' && v.memo) add('medium', `Also carries instructions for the receiving chain: "${v.memo.length > 200 ? v.memo.slice(0, 200) + '…' : v.memo}". Your KeepKey does not show them.`)
+        break
+      default:
+        add(/authz|MsgGrant|MsgExec/i.test(type) ? 'critical' : 'high', /authz|MsgGrant|MsgExec/i.test(type)
+          ? `Gives another account power to act for your account (${type}). That account can then move your funds without your KeepKey.`
+          : `This computer does not recognize message type ${type}. Your KeepKey signs only sends, staking and IBC transfers, so it will refuse this.`)
+    }
+  }
+  if (shows) add('low', 'Your KeepKey shows each of these on its screen; check them there.')
+  return shows ? 'shows' : 'unknown'
+}
+
 /** null = no assessment for this request type yet (bar hidden). */
 export function assessSigningRisk(req: SigningRequestInfo): RiskAssessment | null {
   const reasons: RiskReason[] = []
@@ -822,11 +1060,23 @@ export function assessSigningRisk(req: SigningRequestInfo): RiskAssessment | nul
     const d = req.solanaDecoded
     const assets = d.assetPrograms ?? []
     const unknown = d.instructions.filter((i) => i.status === 'unknown-program')
+    const swaps = d.instructions.filter((i) => i.status === 'known' && i.programId === JUPITER_V6)
+    const me = req.from ?? swaps.map((i) => acct(i, 'userTransferAuthority')).find(Boolean)
+    const swapOutputs = new Set(swaps.map(jupiterOutput).filter((k): k is string => !!k))
 
     for (const ix of d.instructions) {
-      if (ix.status === 'known') {
-        const r = describeKnown(ix)
+      if (ix.status === 'known' && ix.programId === JUPITER_V6) {
+        jupiterSwap(ix, d, req, add)
+        if (ix.note) add('medium', `This Jupiter step has bytes this computer cannot account for (${ix.note}), so it is not decoded in full.`)
+      } else if (ix.status === 'known') {
+        const r = describeKnown(ix, d.tokenAccounts, me, swapOutputs)
         if (r) reasons.push(r)
+        // Token-2022 lets a token's issuer add a transfer fee or a hook that
+        // runs on every transfer; nothing here reads those settings.
+        if (ix.programId === TOKEN_2022 && /^transfer/.test(ix.instructionName ?? '')) {
+          const mint = acct(ix, 'mint') ?? d.tokenAccounts?.[acct(ix, 'destination') ?? '']?.mint
+          if (!mint || !SOLANA_TOKEN_IDENTITIES[mint]) add('medium', 'This is a Token-2022 token. Its issuer can charge a fee or run its own code on every transfer, and this computer did not check this token\'s settings.')
+        }
         if (ix.note) add('medium', `This ${ix.programName} step has bytes this computer cannot account for, so it is not decoded in full.`)
       } else if (ix.status === 'known-program-unknown-ix' && assets.includes(ix.programName)) {
         add('high', `Uses a ${ix.programName} action KeepKey does not recognize. It could move your funds or hand over control of them.`)
@@ -869,10 +1119,12 @@ export function assessSigningRisk(req: SigningRequestInfo): RiskAssessment | nul
     const firmwareShows = d.instructions.every(solanaFirmwareShows) && req.requiresAdvancedMode === false
     recognition = req.deviceClearSigns || (decoded && firmwareShows) ? 'shows'
       : decoded ? 'known' : 'unknown'
-    if (reasons.length === 0) {
-      add('low', recognition === 'shows'
-        ? 'Your KeepKey shows every step of this transaction.'
-        : 'This computer decodes every step of this transaction. Your KeepKey shows it as raw data.')
+    // Decoded here but not on the device: say so even when the steps above
+    // read calm, so a named send is not taken for a device-shown one.
+    if (recognition === 'known' && !reasons.some((r) => r.text.includes('raw data'))) {
+      add('low', 'This computer decodes every step of this transaction. Your KeepKey shows it as raw data.')
+    } else if (reasons.length === 0 && recognition === 'shows') {
+      add('low', 'Your KeepKey shows every step of this transaction.')
     }
     // The amounts the signed description names, in its own labels, and what
     // they add up to in SOL. Arithmetic over signed values — never a cap on
@@ -923,6 +1175,10 @@ export function assessSigningRisk(req: SigningRequestInfo): RiskAssessment | nul
     recognition = evmMessage(req, add)
   } else if (req.method === '/thorchain/sign-amino-deposit' || req.method === '/mayachain/sign-amino-deposit') {
     recognition = nativeThorDeposit(req, add)
+  } else if (req.method === '/tron/sign-transaction') {
+    recognition = tronTx(req, add)
+  } else if (/^\/cosmos\/sign-amino/.test(req.method)) {
+    recognition = cosmosAmino(req, add)
   } else if (req.solanaDecodeError || /^\/solana\/sign-(transaction|and-send)/.test(req.method)) {
     add('high', 'KeepKey cannot read this transaction at all. You would be signing blind.')
   } else {
