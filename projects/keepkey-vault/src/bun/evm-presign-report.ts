@@ -48,7 +48,7 @@ export async function prepareEvmTxSigningInfo(
           maxPriorityFeePerGas: preview.maxPriorityFeePerGas || preview.max_priority_fee_per_gas || '0x0',
         }),
       }
-      const found = await resolveEvmSchema(chainIdNum, preview.to, preview.data, true, signingInfo.firmwareVersion)
+      const found = await resolveEvmSchema(chainIdNum, preview.to, preview.data, true, signingInfo.firmwareVersion, preview.value)
         ?? await resolveCertifiedEvmTransaction(txForCertification)
       // The swap gate's rule (evmCallRequiresAdvancedMode): relax only for an
       // envelope this firmware shows for this exact call. A body it refuses

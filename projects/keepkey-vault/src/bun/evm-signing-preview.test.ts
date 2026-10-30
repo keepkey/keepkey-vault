@@ -211,7 +211,7 @@ describe('one rule for certified 0x04 dynamic schemas (REST gate = swap gate)', 
   })
 })
 
-test('every resolveEvmSchema call passes the firmware version (unknown firmware drops 0x04)', () => {
+test('every resolveEvmSchema call passes the firmware version (unknown firmware drops 0x04) and the value (a valued approve is not native)', () => {
   const { readdirSync, readFileSync } = require('node:fs') as typeof import('node:fs')
   const { join } = require('node:path') as typeof import('node:path')
   const dir = join(import.meta.dir)
@@ -231,7 +231,7 @@ test('every resolveEvmSchema call passes the firmware version (unknown firmware 
     }
   }
   expect(calls.length).toBeGreaterThanOrEqual(6)
-  expect(calls.filter((c) => !c.endsWith(' 5 args'))).toEqual([])
+  expect(calls.filter((c) => !c.endsWith(' 6 args'))).toEqual([])
 })
 
 describe('a transaction-bound certified answer follows the same rule (REST gate = swap gate)', () => {

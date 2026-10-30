@@ -1056,7 +1056,7 @@ export class WalletConnectManager {
     try {
       clearSignSchema = await resolveEvmSchema(
         effectiveChainId, tx.to, tx.data,
-        supportsCertifiedClearSign(this.callbacks.getFirmwareVersion()), this.callbacks.getFirmwareVersion(),
+        supportsCertifiedClearSign(this.callbacks.getFirmwareVersion()), this.callbacks.getFirmwareVersion(), tx.value,
       )
     } catch (error: any) {
       this.callbacks.log(`[WC] ClearSign schema lookup unavailable: ${error?.message || error}`)

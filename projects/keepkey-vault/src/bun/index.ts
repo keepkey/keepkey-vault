@@ -4072,6 +4072,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						resolvedSchema = await resolveEvmSchema(
 							Number((params as any)?.chainId), (params as any)?.to, (params as any)?.data,
 							supportsCertifiedClearSign(engine.getDeviceState().firmwareVersion), engine.getDeviceState().firmwareVersion,
+							(params as any)?.value,
 						)
 					} catch (error: any) {
 						console.warn(`[ethSignTx] ClearSign schema lookup unavailable: ${error?.message || error}`)
