@@ -5,7 +5,7 @@
  *   needsAdvancedMode = !(firmwareNativelyDecodes || (fw >= 7.16 && certifiedPayloadAttached))
  * Runtime/provider metadata is annotation only and never relaxes the verdict.
  */
-import type { CalldataDecodedField, SigningRequestInfo } from '../shared/types'
+import type { CalldataDecodedField, SafeCallPreview, SigningRequestInfo } from '../shared/types'
 import { decodeCalldata, firmwareClearSigns, formatDeadline } from './calldata-decoder'
 import { findCertifiedEvmSchema, findCertifiedUniswapSwap } from './evm-schema-registry'
 import { findEvmNameRecord, findReviewedUniversalRouter, reviewedSwapToken } from './evm-certified-schema'
@@ -14,8 +14,9 @@ import { knownSpenderName } from '../shared/evm-known-spenders'
 import { urPrecheck } from './uniswap-ur'
 import { supportsCertifiedClearSign } from './solana-certified-policy'
 import { certifiedBodyRefused, certifiedEnvelopeShown, metadataPayloadBytes } from '../shared/certified-evm-envelope'
-import { resolveErc7730ForCall } from './erc7730-resolver'
+import { fetchErc7730CalldataDefinition, resolveErc7730ForCall } from './erc7730-resolver'
 import { describeErc7730Call } from './erc7730-describe'
+import { safeTxCalls } from '../shared/safe-tx'
 
 /** A chain id as dapps send it (number, "8453", "0x2105") → positive integer, else undefined. */
 export function normalizeEvmChainId(raw: unknown): number | undefined {
@@ -229,6 +230,46 @@ export function recognizedSpender(chainId: number | undefined, address: string |
 export function recognizedTypedDataSpender(decoded: SigningRequestInfo['typedDataDecoded'], chainId: number | undefined): string | undefined {
   const spender = decoded?.fields.find((x) => x.label === 'Spender')?.raw
   return recognizedSpender(chainId, typeof spender === 'string' ? spender : undefined)
+}
+
+/**
+ * Safe requests: each call the SafeTx makes (one, or each MultiSend entry)
+ * gets the preview a call from an account gets: the local calldata decode,
+ * the reviewed spender or recipient, and, when nothing else describes it, a
+ * KeepKey ClearSign service definition checked here. Advice for the approval
+ * card only; nothing here is sent to the KeepKey, which shows SafeTx.data as hex.
+ */
+export async function attachSafeCallPreviews(info: SigningRequestInfo, fetchImpl: typeof fetch = fetch): Promise<void> {
+  const d = info.typedDataDecoded
+  if (d?.primaryType !== 'SafeTx') return
+  const raw = (label: string) => String(d.fields.find((x) => x.label === label)?.raw ?? '')
+  const chainId = normalizeEvmChainId(d.domain.chainId ?? info.chainId)
+  const safe = String(d.domain.verifyingContract ?? '').toLowerCase()
+  const to = raw('To').toLowerCase()
+  const data = /^(0x)?$/.test(raw('Data')) ? '0x' : raw('Data').toLowerCase()
+  if (!chainId || !/^0x[0-9a-f]{40}$/.test(to) || !/^0x([0-9a-f]{2})*$/.test(data) || !/^[01]$/.test(raw('Operation'))) return
+  let value: bigint
+  try { value = BigInt(raw('Value') || '0') } catch { return }
+  const calls = safeTxCalls(chainId, to, Number(raw('Operation')), value, data)
+  if (!calls) return
+  info.safeCalls = await Promise.all(calls.map(async (c): Promise<SafeCallPreview> => {
+    if (c.operation !== 0 || c.to === safe || c.data.length < 10) return {}
+    const callValue = c.value.toString()
+    let calldataDecoded = await decodeCalldata(c.to, c.data, chainId, callValue).catch(() => null) ?? undefined
+    const swapRows = uniswapSwapFields(chainId, c.to, c.data, callValue, safe)
+    if (swapRows.length > 0 && calldataDecoded) calldataDecoded = { ...calldataDecoded, fields: [...swapRows, ...calldataDecoded.fields] }
+    const selector = c.data.slice(0, 10)
+    const arg0 = /^0{24}[0-9a-f]{40}$/.test(c.data.slice(10, 74)) ? `0x${c.data.slice(34, 74)}` : undefined
+    const tokenCall = ['0x095ea7b3', '0x39509351', '0xa22cb465', '0xa9059cbb'].includes(selector)
+    const catalog = tokenCall || calldataDecoded?.source === 'local'
+      ? undefined : await fetchErc7730CalldataDefinition(chainId, c.to, c.data, fetchImpl)
+    return {
+      calldataDecoded,
+      recognizedSpender: selector === '0x095ea7b3' || selector === '0x39509351' ? recognizedSpender(chainId, arg0) : undefined,
+      recognizedRecipient: selector === '0xa9059cbb' ? recognizedSpender(chainId, arg0) : undefined,
+      erc7730Description: catalog && describeErc7730Call(catalog.definitions[0].envelope, { chainId, to: c.to, data: c.data, value: callValue, from: safe }),
+    }
+  }))
 }
 
 export async function applyEvmTxPreview(

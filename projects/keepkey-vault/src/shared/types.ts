@@ -1177,6 +1177,14 @@ export interface SigningRequestInfo {
   /** The same, for the recipient of a plain ERC-20 transfer: a reviewed
    *  contract (such as a Universal Router) that does not credit a transfer. */
   recognizedRecipient?: string
+  /** Approval card only, Safe requests: this wallet's own accounts and saved
+   *  contacts on the request's chain, from this computer's address book. The
+   *  risk bar names them and flags look-alikes; it is never a verification. */
+  knownAddresses?: { address: string; name: string; own: boolean }[]
+  /** Approval card only, Safe requests: this computer's preview of each call
+   *  the SafeTx makes (safeTxCalls order), the same preview a call from an
+   *  account gets. Advice: the KeepKey shows SafeTx.data as raw hex. */
+  safeCalls?: SafeCallPreview[]
   /** Approval card only, from this computer's own records: earlier
    *  transactions this account sent or signed to this contract on this
    *  chain (a lower bound; `since` in ms). */
@@ -1950,6 +1958,15 @@ export interface Erc7730Description {
   fields: Array<{ label: string; value: string; note?: string }>
   protocol?: { name: string; url: string; about?: string }
   explorerUrl?: string
+}
+
+/** One call a SafeTx makes, previewed the way a call from an account is
+ *  (bun/evm-signing-preview attachSafeCallPreviews). Approval card only. */
+export interface SafeCallPreview {
+  calldataDecoded?: CalldataDecodedInfo
+  recognizedSpender?: string
+  recognizedRecipient?: string
+  erc7730Description?: Erc7730Description
 }
 
 /** Signed ERC-7730 v2 definitions in the shape hdwallet's transport sends. */

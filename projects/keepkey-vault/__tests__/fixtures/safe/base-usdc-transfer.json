@@ -1,0 +1,83 @@
+{
+ "_source": [
+  "https://api.safe.global/tx-service/base/api/v1/multisig-transactions/0x6415ec485e96f6d9845ad5681b1b4583e3987b28246c4d15a18add94f4f8c847/",
+  "Safe{Wallet} proposal, Base Safe 0xac47..23e0 nonce 207: transfer 30,000 USDC"
+ ],
+ "safeTxHash": "0x6415ec485e96f6d9845ad5681b1b4583e3987b28246c4d15a18add94f4f8c847",
+ "safeVersion": "1.4.1+L2",
+ "signer": "0x328871F5A477A6434142eb679799dD88A61C4FB0",
+ "_signer": "an owner of this Safe today (tx-service /safes/<safe>/ owners), used as the signing account",
+ "typedData": {
+  "types": {
+   "EIP712Domain": [
+    {
+     "name": "chainId",
+     "type": "uint256"
+    },
+    {
+     "name": "verifyingContract",
+     "type": "address"
+    }
+   ],
+   "SafeTx": [
+    {
+     "name": "to",
+     "type": "address"
+    },
+    {
+     "name": "value",
+     "type": "uint256"
+    },
+    {
+     "name": "data",
+     "type": "bytes"
+    },
+    {
+     "name": "operation",
+     "type": "uint8"
+    },
+    {
+     "name": "safeTxGas",
+     "type": "uint256"
+    },
+    {
+     "name": "baseGas",
+     "type": "uint256"
+    },
+    {
+     "name": "gasPrice",
+     "type": "uint256"
+    },
+    {
+     "name": "gasToken",
+     "type": "address"
+    },
+    {
+     "name": "refundReceiver",
+     "type": "address"
+    },
+    {
+     "name": "nonce",
+     "type": "uint256"
+    }
+   ]
+  },
+  "primaryType": "SafeTx",
+  "domain": {
+   "chainId": 8453,
+   "verifyingContract": "0xac47B4226149312a4574bc2388DF2FC8557123e0"
+  },
+  "message": {
+   "to": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+   "value": "0",
+   "data": "0xa9059cbb000000000000000000000000ab1d09e877ed3ba27e132f86acada264b60b155100000000000000000000000000000000000000000000000000000006fc23ac00",
+   "operation": 0,
+   "safeTxGas": 0,
+   "baseGas": 0,
+   "gasPrice": "0",
+   "gasToken": "0x0000000000000000000000000000000000000000",
+   "refundReceiver": "0x0000000000000000000000000000000000000000",
+   "nonce": 207
+  }
+ }
+}

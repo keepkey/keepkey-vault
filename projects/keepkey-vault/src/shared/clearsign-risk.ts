@@ -18,6 +18,7 @@ import { acrossDepositView, decodeAcrossDepositV3, findReviewedAcrossSpokePool, 
 import { RELAY_DEPOSITORY, decodeRelayDeposit, isZeroAddress, type RelayDeposit } from './relayDeposit'
 import { ACROSS_NAMED_TOKENS, REVIEWED_EVM_TOKENS } from './reviewed-evm-tokens'
 import type {
+  SafeCallPreview,
   SigningRequestInfo,
   SimulatedHoldings,
   SolanaCertifiedArg,
@@ -32,6 +33,8 @@ import { knownSpenderName } from './evm-known-spenders'
 import { nftMarketplaceOperator } from './nft-marketplaces'
 import { cosmosDepositPreview } from './cosmosDepositPreview'
 import { SOLANA_TOKEN_IDENTITIES } from './solana-token-identities'
+import { lookalikeOf } from './address-lookalike'
+import { decodeMultiSend, safeContract } from './safe-tx'
 
 export type RiskLevel = 'low' | 'medium' | 'high' | 'critical'
 export interface RiskReason { level: RiskLevel; text: string }
@@ -349,7 +352,10 @@ function certifiedBlobShown(req: SigningRequestInfo): boolean {
  *  or none of these. */
 type Recognition = 'shows' | 'known' | 'used' | 'unknown'
 
-function evmTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void): Recognition {
+/** `notShown` says the device cannot show a protocol yet; a call inside a
+ *  SafeTx passes its own (the card says that once for the whole SafeTx). */
+function evmTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void,
+  notShown = (what: string) => notOnThisFirmware(what, req.firmwareVersion)): Recognition {
   const to = (req.to ?? '').toLowerCase()
   const chainId = evmChainId(req.chainId)
   const rawData = typeof req.data === 'string' && req.data !== '' ? req.data : '0x'
@@ -458,13 +464,13 @@ function evmTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void):
     add('medium', `${urSwap} through the Uniswap Universal Router, a contract KeepKey has reviewed. Your KeepKey shows this swap on its screen from a signed description, and refuses it if that description is not genuine. Check the amounts there.`)
   } else if (across) {
     recognition = 'known'
-    acrossDeposit(across, req, add)
+    acrossDeposit(across, req, add, notShown)
   } else if (relay) {
     recognition = 'known'
-    relayDeposit(relay, req, field('You send'), add)
+    relayDeposit(relay, req, field('You send'), add, notShown)
   } else if (swapCall) {
     recognition = 'known'
-    decodedSwap(req, field, add)
+    decodedSwap(req, field, add, notShown)
   } else if (thorProtocol) {
     recognition = thorSwap ? 'known' : 'unknown'
     // A fully decoded deposit to the router pinned for this chain is a normal
@@ -472,11 +478,11 @@ function evmTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void):
     const what = thorSwap ?? `${thorProtocol} deposit of ${field('Input amount')} with memo "${field('Memo (exact)')}", an action this computer does not decode`
     add(req.deviceClearSigns && thorSwap ? 'low' : 'medium', req.deviceClearSigns
       ? `${what}. Your KeepKey shows this deposit on its screen; check it there.`
-      : `${what}. ${notOnThisFirmware('this deposit', req.firmwareVersion)}`)
+      : `${what}. ${notShown('this deposit')}`)
     thorVault(req.thorVault, thorProtocol, field('Vault') ?? '', String(req.to ?? ''), add)
   } else if (urSwap && !req.deviceClearSigns) {
     recognition = 'known'
-    add('medium', `${urSwap} through the Uniswap Universal Router, a contract KeepKey has reviewed. ${notOnThisFirmware('this swap', req.firmwareVersion)}`)
+    add('medium', `${urSwap} through the Uniswap Universal Router, a contract KeepKey has reviewed. ${notShown('this swap')}`)
   } else if (!req.deviceClearSigns && certifiedBlobShown(req)) {
     // No decoder here, but the device verifies the certified description and
     // shows the call from it, so this is not a blind signature.
@@ -629,7 +635,8 @@ function nativeThorDeposit(req: SigningRequestInfo, add: (l: RiskLevel, t: strin
 
 /** A deposit to the Relay Depository. The calldata names what is sent and
  *  who is credited; where it arrives is Relay's off-chain order. */
-function relayDeposit(d: RelayDeposit, req: SigningRequestInfo, decodedSent: string | undefined, add: (l: RiskLevel, t: string) => void) {
+function relayDeposit(d: RelayDeposit, req: SigningRequestInfo, decodedSent: string | undefined, add: (l: RiskLevel, t: string) => void,
+  notShown: (what: string) => string) {
   const sent = d.kind === 'native'
     ? (evmNativeValue(req.value ?? '0', d.chainId) ?? 'the coin sent with this call')
     : (decodedSent ?? `${d.amount} base units of token ${d.token}`)
@@ -642,7 +649,7 @@ function relayDeposit(d: RelayDeposit, req: SigningRequestInfo, decodedSent: str
   if (certified) {
     add('medium', `${what} Your KeepKey shows this deposit from a KeepKey-certified description and refuses it if that description is not genuine. Check the amount there.`)
   } else {
-    add('medium', `${what} ${notOnThisFirmware('Relay deposits', req.firmwareVersion)}`)
+    add('medium', `${what} ${notShown('Relay deposits')}`)
   }
   if (credited !== 'your account' && from) add('high', `The deposit is credited to ${d.depositor}, not to the signing account.`)
   add('medium', "Where it arrives (destination chain, recipient and amount) is set by Relay's off-chain order, not by this transaction. Neither this computer nor your KeepKey can check it.")
@@ -652,14 +659,15 @@ function relayDeposit(d: RelayDeposit, req: SigningRequestInfo, decodedSent: str
  *  Desktop decoded in full (bun/swap-decoders). Advice from this computer: the
  *  device shows raw data. A normal swap back to the signer is calm; output or
  *  leftovers going to anyone else is not normal. */
-function decodedSwap(req: SigningRequestInfo, field: (n: string) => string | undefined, add: (l: RiskLevel, t: string) => void) {
+function decodedSwap(req: SigningRequestInfo, field: (n: string) => string | undefined, add: (l: RiskLevel, t: string) => void,
+  notShown = (what: string) => notOnThisFirmware(what, req.firmwareVersion)) {
   const from = (req.from ?? '').toLowerCase()
   const protocol = field('Protocol') ?? 'this protocol'
   const dest = field('Output destination') ?? ''
   const shown = req.deviceClearSigns || certifiedBlobShown(req)
   add('medium', `Swap through ${protocol} (contract ${req.to}): pays ${field('Input amount')} for at least ${field('Minimum output')}, sent to ${dest === from ? 'your account' : dest}. ${shown
     ? 'Your KeepKey shows this call from a KeepKey-certified description and refuses it if that description is not genuine. Check the amounts there.'
-    : notOnThisFirmware(`${protocol} swaps`, req.firmwareVersion)}`)
+    : notShown(`${protocol} swaps`)}`)
   if (from && dest !== from) add('high', `The swap output goes to ${dest}, which is NOT the account signing this (${from}).`)
   const refund = field('Leftover refund to')
   if (from && refund && /^0x[0-9a-f]{40}$/.test(refund) && refund !== from) add('high', `Leftover coins are refunded to ${refund}, which is NOT the account signing this (${from}).`)
@@ -672,12 +680,12 @@ function decodedSwap(req: SigningRequestInfo, field: (n: string) => string | und
 /** A depositV3 to a pinned Across SpokePool. Decoded here only: the device
  *  shows it as raw data and AdvancedMode still gates, but a known protocol is
  *  normal, so the line says so instead of "signing blind". */
-function acrossDeposit(d: AcrossDepositV3, req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void) {
+function acrossDeposit(d: AcrossDepositV3, req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void, notShown: (what: string) => string) {
   const v = acrossDepositView(d, { ...ACROSS_NAMED_TOKENS, ...EVM_TOKENS })
   const from = (req.from ?? '').toLowerCase()
   let value: bigint | null = null
   try { value = BigInt(req.value === undefined || req.value === '' || req.value === '0x' ? 0 : req.value) } catch { /* unreadable: no claim about it */ }
-  add('medium', `Across bridge deposit to the Across SpokePool on ${d.pool.chain}, a contract KeepKey knows. ${notOnThisFirmware('Across deposits', req.firmwareVersion)}`)
+  add('medium', `Across bridge deposit to the Across SpokePool on ${d.pool.chain}, a contract KeepKey knows. ${notShown('Across deposits')}`)
   if (value !== null && value > 0n) {
     if (d.inputToken !== d.pool.wrappedNative.address || value !== d.inputAmount) {
       add('high', `The coin sent with this call does not match the deposit (${v.sent}). The SpokePool will reject it and you would still pay the network fee.`)
@@ -710,6 +718,286 @@ function printableUtf8(hex: string): string | undefined {
   } catch { return undefined }
 }
 
+/** A message the Safe signs as its own (EIP-1271), from a SafeMessage or an
+ *  on-chain SignMessageLib call. Readable text (a sign-in) is normal; a hash
+ *  can stand for any permit or order the app hashed in. True = unreadable. */
+function safeSignsMessage(safe: string, hex: string, add: (l: RiskLevel, t: string) => void): boolean {
+  const text = printableUtf8(hex)
+  if (text) {
+    add('medium', `Your Safe (${safe}) signs this text as its own, so apps that check the Safe's signature accept it: "${text.length > 200 ? text.slice(0, 200) + '…' : text}"`)
+    return false
+  }
+  add('high', `Approves a message for your whole Safe (${safe}). Apps use this to make the Safe sign permits and orders, and this computer cannot read what it approves.`)
+  return true
+}
+
+// ── Safe transactions ────────────────────────────────────────────────
+// The KeepKey shows a SafeTx's to, value and nonce, and its data as raw hex
+// (7.16 decodes only an embedded approve). Desktop decodes the data here as
+// advice and says so; it never claims the device checked it.
+
+/** Safe's own settings calls (OwnerManager, ModuleManager, GuardManager,
+ *  FallbackManager), by selector: the number of argument words. Read only
+ *  when the Safe calls itself. */
+const SAFE_SELF_CALLS: Record<string, number> = {
+  '0x0d582f13': 2, // addOwnerWithThreshold(address,uint256)
+  '0xf8dc5dd9': 3, // removeOwner(address,address,uint256)
+  '0xe318b52b': 3, // swapOwner(address,address,address)
+  '0x694e80c3': 1, // changeThreshold(uint256)
+  '0x610b5925': 1, // enableModule(address)
+  '0xe009cfde': 2, // disableModule(address,address)
+  '0xe19a9dd9': 1, // setGuard(address)
+  '0xe068df37': 1, // setModuleGuard(address), Safe 1.5.0
+  '0xf08a0323': 1, // setFallbackHandler(address)
+  '0x7de7edef': 1, // changeMasterCopy(address), Safe 1.1.1 and older
+  '0x3365582c': 2, // setDomainVerifier(bytes32,address), ExtensibleFallbackHandler
+}
+const SAFE_MIGRATIONS: Record<string, string> = {
+  '0xf6682ab0': 'Safe', // migrateSingleton()
+  '0xed007fc6': 'Safe, with its standard fallback handler', // migrateWithFallbackHandler()
+  '0x07f464a4': 'SafeL2', // migrateL2Singleton()
+  '0x68cb3d94': 'SafeL2, with its standard fallback handler', // migrateL2WithFallbackHandler()
+}
+const ZERO_ADDRESS = `0x${'0'.repeat(40)}`
+
+interface SafeCtx {
+  chainId: number
+  safe: string
+  known: { address: string; name: string }[]
+  req: SigningRequestInfo
+  add: (l: RiskLevel, t: string) => void
+}
+
+/** What this computer calls an address, if anything: never a verification. */
+function safeName(ctx: SafeCtx, a: string): string | undefined {
+  return ctx.known.find((k) => k.address === a)?.name
+}
+const safeWho = (ctx: SafeCtx, a: string) => { const n = safeName(ctx, a); return n ? `${n} (${a})` : a }
+
+/** True when the address imitates one this computer knows (address poisoning). */
+function safePoisoned(ctx: SafeCtx, a: string, prefix: string): boolean {
+  const twin = safeName(ctx, a) ? undefined : lookalikeOf(a, ctx.known)
+  if (twin) ctx.add('high', `${prefix}${a} looks like ${twin.name} (${twin.address}) but is a different address. Address-poisoning scams use look-alikes like this, so compare every character on your KeepKey.`)
+  return Boolean(twin)
+}
+
+function safeSend(ctx: SafeCtx, to: string, value: bigint, prefix: string) {
+  const amount = evmNativeValue(value.toString(), ctx.chainId) ?? `${value} wei`
+  const name = safeName(ctx, to)
+  if (name) return ctx.add('low', `${prefix}Sends ${amount} from your Safe to ${name} (${to}).`)
+  ctx.add('medium', `${prefix}Sends ${amount} from your Safe to ${to}, an address not in your address book. Check it on your KeepKey.`)
+  safePoisoned(ctx, to, prefix)
+}
+
+/** The Safe calling itself to change its own settings. False = not read. */
+function safeSelfCall(ctx: SafeCtx, data: string, prefix: string): boolean {
+  const sel = data.slice(0, 10)
+  const words = SAFE_SELF_CALLS[sel]
+  if (words === undefined || data.length !== 10 + 64 * words) return false
+  const word = (i: number) => data.slice(10 + 64 * i, 74 + 64 * i)
+  const addrs = Array.from({ length: words }, (_, i) => (/^0{24}/.test(word(i)) ? `0x${word(i).slice(24)}` : ''))
+  const num = (i: number) => BigInt(`0x${word(i)}`)
+  const sigs = (n: bigint) => `${n} owner signature${n === 1n ? '' : 's'}`
+  const addr = (i: number) => addrs[i]
+  const { add } = ctx
+  switch (sel) {
+    case '0x0d582f13':
+      if (!addr(0)) return false
+      add('medium', `${prefix}Adds ${safeWho(ctx, addr(0))} as an owner of your Safe, and the Safe then needs ${sigs(num(1))}.`)
+      safePoisoned(ctx, addr(0), prefix)
+      return true
+    case '0xf8dc5dd9':
+      if (!addr(0) || !addr(1)) return false
+      add('medium', `${prefix}Removes owner ${safeWho(ctx, addr(1))} from your Safe, and the Safe then needs ${sigs(num(2))}.`)
+      return true
+    case '0xe318b52b':
+      if (!addr(0) || !addr(1) || !addr(2)) return false
+      add('medium', `${prefix}Replaces owner ${safeWho(ctx, addr(1))} of your Safe with ${safeWho(ctx, addr(2))}.`)
+      safePoisoned(ctx, addr(2), prefix)
+      return true
+    case '0x694e80c3':
+      add('medium', `${prefix}Changes your Safe to need ${sigs(num(0))} for every transaction.`)
+      return true
+    case '0x610b5925':
+      if (!addr(0)) return false
+      add('medium', `${prefix}Enables ${safeWho(ctx, addr(0))} as a module of your Safe. A module can move funds and run calls from your Safe without owner signatures, until it is disabled.`)
+      return true
+    case '0xe009cfde':
+      if (!addr(0) || !addr(1)) return false
+      add('low', `${prefix}Disables module ${safeWho(ctx, addr(1))} on your Safe.`)
+      return true
+    case '0xe19a9dd9':
+    case '0xe068df37': {
+      if (!addr(0)) return false
+      const what = sel === '0xe19a9dd9' ? 'transaction guard' : 'module guard'
+      add(addr(0) === ZERO_ADDRESS ? 'low' : 'medium', addr(0) === ZERO_ADDRESS
+        ? `${prefix}Removes your Safe's ${what}.`
+        : `${prefix}Sets ${safeWho(ctx, addr(0))} as your Safe's ${what}. It checks every transaction ${sel === '0xe19a9dd9' ? 'your Safe runs' : 'a module runs from your Safe'} and can refuse them.`)
+      return true
+    }
+    case '0xf08a0323': {
+      if (!addr(0)) return false
+      const handler = safeContract(ctx.chainId, addr(0))
+      if (handler?.kind === 'fallback-handler') add('low', `${prefix}Sets your Safe's fallback handler to Safe's standard ${handler.name} ${handler.version} (${addr(0)}).`)
+      else if (addr(0) === ZERO_ADDRESS) add('medium', `${prefix}Removes your Safe's fallback handler. Apps then cannot check your Safe's signatures (EIP-1271).`)
+      else add('medium', `${prefix}Sets ${safeWho(ctx, addr(0))} as your Safe's fallback handler. It answers calls your Safe does not handle itself, including the signature checks (EIP-1271) apps use to accept your Safe's signatures.`)
+      return true
+    }
+    case '0x7de7edef': {
+      if (!addr(0)) return false
+      const singleton = safeContract(ctx.chainId, addr(0))
+      if (singleton?.kind === 'singleton' || singleton?.kind === 'singleton-l2') {
+        add('medium', `${prefix}Upgrades your Safe to the standard ${singleton.name} ${singleton.version} contract (${addr(0)}).`)
+      } else {
+        add('critical', `${prefix}Replaces the code your Safe runs with ${addr(0)}, which is not a standard Safe contract. That code would control everything your Safe holds.`)
+      }
+      return true
+    }
+    case '0x3365582c':
+      if (!addr(1)) return false
+      add(addr(1) === ZERO_ADDRESS ? 'low' : 'medium', addr(1) === ZERO_ADDRESS
+        ? `${prefix}Removes the signature checker your Safe uses for app domain 0x${word(0)}.`
+        : `${prefix}Lets ${safeWho(ctx, addr(1))} answer signature checks for your Safe for one app domain (0x${word(0)}). Apps on that domain accept what it approves as your Safe's signature.`)
+      return true
+  }
+  return false
+}
+
+/** A plain call (operation 0) from the Safe. True = decoded here in full.
+ *  `preview` is bun's preview of this call (SigningRequestInfo.safeCalls). */
+function safeCall(ctx: SafeCtx, to: string, value: bigint, data: string, prefix: string, preview: SafeCallPreview | undefined): boolean {
+  if (data === '0x') {
+    safeSend(ctx, to, value, prefix)
+    return true
+  }
+  if (to === ctx.safe) {
+    if (safeSelfCall(ctx, data, prefix)) return true
+    ctx.add('high', `${prefix}Makes your Safe call itself with data this computer cannot read. Your KeepKey shows that data only as raw hex.`)
+    return false
+  }
+  // Read by the same rules as a call sent from an account: a token transfer or
+  // approve, an Across or Relay deposit, a THORChain deposit or a Universal
+  // Router swap. The card says once that the device shows SafeTx.data as hex.
+  const lines: RiskReason[] = []
+  const recognition = evmTx({
+    id: ctx.req.id, method: '/eth/sign-transaction', appName: ctx.req.appName, chainId: ctx.chainId,
+    from: ctx.safe, to, data, value: value.toString(), calldataDecoded: preview?.calldataDecoded,
+    recognizedSpender: preview?.recognizedSpender, recognizedRecipient: preview?.recognizedRecipient,
+  }, (level, text) => lines.push({ level, text }), () => '')
+  if (recognition === 'known' || (KNOWN_SELECTORS.has(data.slice(0, 10)) && /^0x[0-9a-f]{8}0{24}[0-9a-f]{104}$/.test(data))) {
+    for (const l of lines) ctx.add(l.level, prefix + l.text.trimEnd())
+    if (data.startsWith('0xa9059cbb')) {
+      const rcpt = `0x${data.slice(34, 74)}`
+      if (!safePoisoned(ctx, rcpt, prefix) && safeName(ctx, rcpt)) ctx.add('low', `${prefix}${rcpt} is ${safeName(ctx, rcpt)}.`)
+    }
+    return recognition === 'known'
+  }
+  // A KeepKey ClearSign service definition for this exact call, checked here.
+  const d = preview?.erc7730Description
+  if (d) {
+    ctx.add('medium', `${prefix}${d.summary ?? d.intent}${d.protocol ? ` on ${d.protocol.name}` : ''} (${to}), as this computer reads it from a KeepKey ClearSign description.`)
+    return true
+  }
+  ctx.add('high', `${prefix}Makes your Safe call ${to} with data this computer cannot read. Your KeepKey shows that data only as raw hex.`)
+  return false
+}
+
+const delegatecallLine = (to: string, prefix = '') =>
+  `${prefix}Runs code from ${to} inside your Safe (delegatecall). That code can do anything with what the Safe holds.`
+
+/** A delegatecall to one of Safe's own pinned helpers: 'known' = decoded in
+ *  full, 'unknown' = described but part of it unreadable, undefined = not one. */
+function safeDelegateCall(ctx: SafeCtx, to: string, data: string): Recognition | undefined {
+  const pinned = safeContract(ctx.chainId, to)
+  if (!pinned) return undefined
+  const sel = data.slice(0, 10)
+  const word = (i: number) => data.slice(10 + 64 * i, 74 + 64 * i)
+  if (pinned.kind === 'multisend' || pinned.kind === 'multisend-call-only') {
+    const calls = decodeMultiSend(data)
+    if (!calls) return undefined
+    ctx.add('low', `Runs ${calls.length} call${calls.length === 1 ? '' : 's'} in one batch through Safe's standard ${pinned.name} ${pinned.version} contract.`)
+    let decoded = true
+    calls.forEach((c, i) => {
+      const prefix = `Call ${i + 1} of ${calls.length}: `
+      if (c.operation === 1) {
+        ctx.add('high', delegatecallLine(c.to, prefix))
+        decoded = false
+      } else if (!safeCall(ctx, c.to, c.value, c.data, prefix, ctx.req.safeCalls?.[i])) decoded = false
+    })
+    return decoded ? 'known' : 'unknown'
+  }
+  if (pinned.kind === 'sign-message-lib' && sel === '0x85a5affe' && data.length >= 138 && BigInt(`0x${word(0)}`) === 32n) {
+    const len = Number(BigInt(`0x${word(1)}`))
+    const body = data.slice(138)
+    if (len * 2 > body.length || Math.ceil(len / 32) * 64 !== body.length) return undefined
+    ctx.add('low', `Signs a message on-chain for your Safe through Safe's standard SignMessageLib ${pinned.version}.`)
+    return safeSignsMessage(ctx.safe, `0x${body.slice(0, len * 2)}`, ctx.add) ? 'unknown' : 'known'
+  }
+  if (pinned.kind === 'migration' && SAFE_MIGRATIONS[sel] && data.length === 10) {
+    ctx.add('medium', `Upgrades your Safe to the standard ${SAFE_MIGRATIONS[sel]} ${pinned.version}, through Safe's own SafeMigration contract.`)
+    return 'known'
+  }
+  // migrateToL2(address), setupToL2(address), migrateFromV111(address,address)
+  const toL2 = (pinned.kind === 'to-l2-migration' && (sel === '0xef2624ae' || sel === '0xd9a20812'))
+    || (pinned.kind === 'to-l2-setup' && sel === '0xfe51f643')
+  if (toL2 && data.length === (sel === '0xd9a20812' ? 138 : 74) && /^0{24}/.test(word(0))) {
+    const target = `0x${word(0).slice(24)}`
+    const singleton = safeContract(ctx.chainId, target)
+    if (singleton?.kind !== 'singleton-l2') {
+      ctx.add('critical', `Switches the code your Safe runs to ${target}, which is not a standard SafeL2 contract. That code would control everything your Safe holds.`)
+      return 'known'
+    }
+    ctx.add('medium', `Switches your Safe to the standard SafeL2 ${singleton.version} contract, through Safe's own ${pinned.name}.`)
+    if (sel === '0xd9a20812') {
+      const handler = /^0{24}/.test(word(1)) ? `0x${word(1).slice(24)}` : ''
+      if (!handler) return 'unknown'
+      const known = safeContract(ctx.chainId, handler)?.kind === 'fallback-handler'
+      ctx.add(known ? 'low' : 'medium', known ? `Also sets Safe's standard fallback handler (${handler}).` : `Also sets ${handler} as your Safe's fallback handler. It answers the signature checks (EIP-1271) apps use to accept your Safe's signatures.`)
+    }
+    return 'known'
+  }
+  return undefined
+}
+
+/** A SafeTx, decoded here. 'shows' = the device shows all of it (a coin send,
+ *  a rejection); 'known' = decoded here, the device shows the data as hex. */
+function safeTx(req: SigningRequestInfo, d: NonNullable<SigningRequestInfo['typedDataDecoded']>, add: (l: RiskLevel, t: string) => void): Recognition {
+  const f = (label: string) => String(d.fields.find((x) => x.label === label)?.raw ?? '')
+  const safe = (d.domain.verifyingContract ?? '').toLowerCase()
+  const from = (req.from ?? '').toLowerCase()
+  const ctx: SafeCtx = {
+    chainId: evmChainId(d.domain.chainId ?? req.chainId), safe, req, add,
+    known: [
+      ...(from ? [{ address: from, name: 'this KeepKey account' }] : []),
+      ...(safe ? [{ address: safe, name: 'your Safe' }] : []),
+      ...(req.knownAddresses ?? []).map((k) => ({
+        address: k.address.toLowerCase(), name: k.own ? 'your KeepKey account' : k.name ? `your contact ${k.name}` : 'a saved contact',
+      })),
+    ],
+  }
+  const to = f('To').toLowerCase()
+  const data = /^(0x)?$/.test(f('Data')) ? '0x' : f('Data').toLowerCase()
+  let value: bigint
+  try { value = BigInt(f('Value') || '0') } catch { value = -1n }
+  if (!/^0x[0-9a-f]{40}$/.test(to) || !/^0x([0-9a-f]{2})*$/.test(data) || value < 0n || !/^[01]$/.test(f('Operation'))) {
+    add('high', 'This computer cannot read this Safe transaction. Your KeepKey shows its fields as they are.')
+    return 'unknown'
+  }
+  if (f('Operation') === '1') {
+    const helper = safeDelegateCall(ctx, to, data)
+    if (helper) return helper
+    add('high', delegatecallLine(to))
+    return 'unknown'
+  }
+  // Safe{Wallet}'s "Reject": an empty transaction with the pending one's number.
+  if (to === safe && data === '0x' && value === 0n) {
+    add('low', `Rejects pending transaction #${f('Nonce')}: an empty transaction from your Safe to itself with the same number, so the pending one can never run.`)
+    return 'shows'
+  }
+  const decoded = safeCall(ctx, to, value, data, '', req.safeCalls?.[0])
+  return data === '0x' ? 'shows' : decoded ? 'known' : 'unknown'
+}
+
 function evmTypedData(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void): Recognition {
   const d = req.typedDataDecoded
   if (!d) {
@@ -727,31 +1015,20 @@ function evmTypedData(req: SigningRequestInfo, add: (l: RiskLevel, t: string) =>
   let knownCalm = false
   // The meaning sits in bytes the device shows only as raw hex.
   let opaque = false
+  // A SafeTx whose data this computer decoded ('known'): the device shows it as hex.
+  let safeRecognition: Recognition | undefined
   const delegate = f('Agent Address')?.raw ?? f('Delegate')?.raw ?? f('Session Key')?.raw
   if (/ApproveAgent$/.test(d.primaryType) || delegate) {
     // Owner rule: handing over signing power is never a normal request.
     const unlimited = d.primaryType === 'Delegation' && f('Caveats')?.value === '[]'
       && /^0x(ff){32}$/i.test(String(f('Authority')?.raw ?? ''))
     add(unlimited ? 'critical' : 'high', `Gives ${delegate || 'another account'} the power to act for your account. It can then sign without your KeepKey.${unlimited ? ' There are no limits on what it can do.' : ''}`)
-  } else if (d.primaryType === 'SafeTx' && !/^(0x)?$/.test(String(f('Data')?.raw ?? ''))) {
-    // The device decodes only an embedded approve and warns on delegatecall;
-    // any other call inside a Safe transaction shows as hex, and so it is here.
-    opaque = true
-    const to = f('To')?.raw || 'another contract'
-    add('high', f('Operation')?.raw === '1'
-      ? `Runs code from ${to} inside your Safe (delegatecall). That code can do anything with what the Safe holds.`
-      : `Makes your Safe call ${to} with data this computer cannot read. Your KeepKey shows that data only as raw hex.`)
+  } else if (d.primaryType === 'SafeTx') {
+    safeRecognition = safeTx(req, d, add)
+    opaque = safeRecognition === 'unknown'
   } else if (d.primaryType === 'SafeMessage') {
-    // EIP-1271: the Safe treats this as its own signature. Readable text (a
-    // sign-in) is normal; a hash can stand for any permit or order the app hashed in.
-    const safe = d.domain.verifyingContract || 'unknown Safe'
-    const text = printableUtf8(String(f('Message')?.raw ?? ''))
-    if (text) {
-      add('medium', `Your Safe (${safe}) signs this text as its own, so apps that check the Safe's signature accept it: "${text.length > 200 ? text.slice(0, 200) + '…' : text}"`)
-    } else {
-      opaque = true
-      add('high', `Approves a message for your whole Safe (${safe}). Apps use this to make the Safe sign permits and orders, and this computer cannot read what it approves.`)
-    }
+    // EIP-1271: the Safe treats this as its own signature.
+    opaque = safeSignsMessage(d.domain.verifyingContract || 'unknown Safe', String(f('Message')?.raw ?? ''), add)
   } else if (/^Permit/.test(d.primaryType) || contract === PERMIT2) {
     const raw = f('Value')?.raw ?? f('Amount')?.raw ?? d.fields.find((x) => /Amount$/.test(x.label))?.raw
     // Every amount counts: a batch can hide an unlimited entry behind a small first one.
@@ -857,12 +1134,13 @@ function evmTypedData(req: SigningRequestInfo, add: (l: RiskLevel, t: string) =>
   const structured = !!req.firmwareVersion && versionCompare(req.firmwareVersion, '7.15.0') >= 0
   if (structured) {
     add('low', 'Your KeepKey will request and display the structured fields that it hashes for this signature.')
+    if (safeRecognition === 'known') add('low', "Your KeepKey may show this Safe transaction's call data only as raw hex. The description of it here is from this computer, not from your KeepKey.")
   } else if (knownCalm) {
     add('medium', notOnThisFirmware(`this ${d.operationName}`, req.firmwareVersion))
   } else {
     add('high', 'Your KeepKey can only show a code (hash) for this signature, not what it says. You would be signing blind.')
   }
-  return opaque ? 'unknown' : structured ? 'shows' : knownCalm ? 'known' : 'unknown'
+  return opaque ? 'unknown' : structured ? (safeRecognition === 'known' ? 'known' : 'shows') : knownCalm ? 'known' : 'unknown'
 }
 
 /** What the typed-data verdict rests on, for the ClearSign report: 'shows'
