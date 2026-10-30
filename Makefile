@@ -377,14 +377,20 @@ dmg: verify-arch
 
 # 7.17's token table (src/bun/firmware-token-table-717.json), generated the way
 # fork alpha's lib/firmware/CMakeLists.txt builds it. FW_SRC = a keepkey-firmware
-# checkout at the alpha commit, deps/python-keepkey initialised.
+# checkout at the alpha commit, deps/python-keepkey initialised at its gitlink
+# (the lists come from python-keepkey, so both commits go into _firmware).
 firmware-token-table-717:
 	@test -n "$(FW_SRC)" || { echo "usage: make firmware-token-table-717 FW_SRC=<keepkey-firmware checkout at fork/alpha>"; exit 1; }
-	@d=$$(mktemp -d) && E=$(FW_SRC)/deps/python-keepkey/keepkeylib/eth && \
+	@FW=$(abspath $(FW_SRC)) && \
+	FW_HEAD=$$(git -C $$FW log -1 --format='%H tree %T') && \
+	PYK=$$(git -C $$FW submodule status deps/python-keepkey) && \
+	case "$$PYK" in " "*) ;; *) echo "deps/python-keepkey is not at $$FW's gitlink: $$PYK"; exit 1;; esac && \
+	PYK_HEAD=$$(git -C $$FW/deps/python-keepkey rev-parse HEAD) && \
+	d=$$(mktemp -d) && E=$$FW/deps/python-keepkey/keepkeylib/eth && \
 	python3 $$E/ethereum_tokens.py $$d/ethereum_tokens.def --profile priority-only && \
 	python3 $$E/uniswap_tokens.py $$d/uniswap_tokens.def --profile priority-only && \
-	python3 $(FW_SRC)/scripts/dedupe-token-def.py $$d/ethereum_tokens.def $$d/uniswap_tokens.def && \
-	cd $(PROJECT_DIR) && FIRMWARE_COMMIT="$$(git -C $(FW_SRC) log -1 --format='%H tree %T')" bun scripts/gen-firmware-token-table.ts $$d firmware-token-table-717.json && \
+	python3 $$FW/scripts/dedupe-token-def.py $$d/ethereum_tokens.def $$d/uniswap_tokens.def && \
+	cd $(PROJECT_DIR) && FIRMWARE_COMMIT="$$FW_HEAD python-keepkey $$PYK_HEAD" bun scripts/gen-firmware-token-table.ts $$d firmware-token-table-717.json && \
 	rm -rf $$d
 
 # --- ClearSign Worker ---

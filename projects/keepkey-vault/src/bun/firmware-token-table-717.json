@@ -1,7 +1,7 @@
 {
  "_source": "firmware tokenByChainAddress table (uniswap_tokens.def + ethereum_tokens.def)",
  "_regenerate": "make firmware-token-table-717 FW_SRC=<keepkey-firmware checkout>",
- "_firmware": "c758197510559fe8e2e6e71995e6caa0113f6d4c tree bbe3613d119affe6f8917badf06e517f7de71bad",
+ "_firmware": "c758197510559fe8e2e6e71995e6caa0113f6d4c tree bbe3613d119affe6f8917badf06e517f7de71bad python-keepkey 2143c639779911f57e9c348b5ce926c05e76df3a",
  "tokens": [
   "1:0x0000000000085d4780b73119b644ae5ecd22b376",
   "1:0x056fd409e1d7a124bd7017459dfea2f387b6d5cd",
