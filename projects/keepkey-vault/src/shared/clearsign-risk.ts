@@ -261,8 +261,11 @@ function evmTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void):
   const from = (req.from ?? '').toLowerCase()
   const native = evmNativeValue(req.value ?? '0', chainId)
   const sendsCoin = native !== null && !/^0 /.test(native)
+  // A 0x / CoW EthFlow / Relay Router swap Desktop decoded in full
+  // (bun/swap-decoders): the coin it sends is what the swap pays, not a payment.
+  const swapCall = req.calldataDecoded?.source === 'local' && req.calldataDecoded.functionType === 'swap'
   // A Relay deposit states its own amount and destination contract below.
-  if (sendsCoin && !decodeRelayDeposit(to, data, chainId)) add('low', `Sends ${native} to ${data === '0x' ? '' : 'the contract at '}${to}.`)
+  if (sendsCoin && !decodeRelayDeposit(to, data, chainId) && !swapCall) add('low', `Sends ${native} to ${data === '0x' ? '' : 'the contract at '}${to}.`)
   if (data === '0x') {
     if (!sendsCoin) add('low', 'Calls no contract and sends nothing.')
     return 'shows'
@@ -353,6 +356,9 @@ function evmTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void):
   } else if (relay) {
     recognition = 'known'
     relayDeposit(relay, req, field('You send'), add)
+  } else if (swapCall) {
+    recognition = 'known'
+    decodedSwap(req, field, add)
   } else if (thorSwap) {
     recognition = 'known'
     // A fully decoded deposit to the router pinned for this chain is a normal
@@ -429,6 +435,27 @@ function relayDeposit(d: RelayDeposit, req: SigningRequestInfo, decodedSent: str
   }
   if (credited !== 'your account' && from) add('high', `The deposit is credited to ${d.depositor}, not to the signing account.`)
   add('medium', "Where it arrives (destination chain, recipient and amount) is set by Relay's off-chain order, not by this transaction. Neither this computer nor your KeepKey can check it.")
+}
+
+/** A 0x Settler, CoW EthFlow or Relay Router swap to its pinned contract that
+ *  Desktop decoded in full (bun/swap-decoders). Advice from this computer: the
+ *  device shows raw data. A normal swap back to the signer is calm; output or
+ *  leftovers going to anyone else is not normal. */
+function decodedSwap(req: SigningRequestInfo, field: (n: string) => string | undefined, add: (l: RiskLevel, t: string) => void) {
+  const from = (req.from ?? '').toLowerCase()
+  const protocol = field('Protocol') ?? 'this protocol'
+  const dest = field('Output destination') ?? ''
+  const shown = req.deviceClearSigns || certifiedBlobShown(req)
+  add('medium', `Swap through ${protocol} (contract ${req.to}): pays ${field('Input amount')} for at least ${field('Minimum output')}, sent to ${dest === from ? 'your account' : dest}. ${shown
+    ? 'Your KeepKey shows this call from a KeepKey-certified description and refuses it if that description is not genuine. Check the amounts there.'
+    : notOnThisFirmware(`${protocol} swaps`, req.firmwareVersion)}`)
+  if (from && dest !== from) add('high', `The swap output goes to ${dest}, which is NOT the account signing this (${from}).`)
+  const refund = field('Leftover refund to')
+  if (from && refund && /^0x[0-9a-f]{40}$/.test(refund) && refund !== from) add('high', `Leftover coins are refunded to ${refund}, which is NOT the account signing this (${from}).`)
+  const fee = field('Relay fee')
+  if (fee) add('low', `Relay fee: ${fee}.`)
+  const validTo = field('Valid until')
+  if (validTo) add('low', `This places a CoW order: the ETH waits in CoW's EthFlow contract until a solver fills it, by ${validTo}. If nobody fills it, the ETH can be refunded to the account that placed the order after that time.`)
 }
 
 /** A depositV3 to a pinned Across SpokePool. Decoded here only: the device
