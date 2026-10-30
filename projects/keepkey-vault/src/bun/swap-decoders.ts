@@ -160,6 +160,13 @@ function genuineSettler(chainId: number, address: string): number | null {
   return found
 }
 
+/** '0x Settler' when `address` is a genuine taker Settler on a chain listed
+ *  above (the spender of a 0x Swap API permit2 quote), else undefined. */
+export function zeroExSettlerName(chainId: number, address: string): string | undefined {
+  if (!CHAINS[chainId] || !/^0x[0-9a-fA-F]{40}$/.test(address)) return undefined
+  return genuineSettler(chainId, address.toLowerCase()) === null ? undefined : '0x Settler'
+}
+
 /** AllowanceHolder.exec args (no selector) into Settler.execute. `value` is
  *  the coin sent with the exec call. */
 function settlerSwap(chainId: number, r: Abi, value: bigint) {

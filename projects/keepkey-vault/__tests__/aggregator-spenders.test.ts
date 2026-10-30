@@ -24,6 +24,7 @@ import { decodeMultiSend } from '../src/shared/safe-tx'
 import type { SigningRequestInfo } from '../src/shared/types'
 import cowPermit from './fixtures/spenders/usdc-permit-cow-vaultrelayer.json'
 import oneInchPermit2 from './fixtures/spenders/permit2-1inch-v6-unlimited.json'
+import zeroExQuote from '../src/bun/erc7730-typed-data.fixtures.json'
 
 const REQUESTS = join(import.meta.dir, '../../../docs/clearsign-case-studies/swapspro-20261029/requests')
 const swapsPro = (name: string) => JSON.parse(readFileSync(join(REQUESTS, `${name}.json`), 'utf8'))
@@ -178,6 +179,57 @@ describe('Relay Receiver is not a spender', () => {
     expect(s.recognizedSpender).toBeUndefined()
     expect(assessSigningRisk(s)!.level).toBe('high')
     expect(erc20Preview(s.to, s.chainId as number, s.data, s.recognizedSpender)?.counterpartyIdentity).toBeUndefined()
+  })
+})
+
+// The real 0x Swap API v2 permit2 quote on Base (0x-examples README, the
+// fixture of the 2026-10-30 emulator leg "Generic EIP-712"): a one-time
+// Permit2 PermitTransferFrom of 0.0001 WETH to 0x Settler deployment 9. It read
+// red "Unknown or unusual" with the amount in raw units.
+describe('0x Swap API permit2 quote', () => {
+  const quote = zeroExQuote.typedData
+  const typed = (doc: any, fw = '7.16.0') => {
+    const chainId = Number(doc.domain.chainId)
+    const typedDataDecoded = decodeEIP712(doc)
+    return {
+      id: 't', method: '/eth/sign-typed-data', appName: '0x', chain: 'eth', chainId, firmwareVersion: fw,
+      typedDataDecoded, recognizedSpender: recognizedTypedDataSpender(typedDataDecoded, chainId),
+    } as SigningRequestInfo
+  }
+  const with_ = (message: Record<string, unknown>) => ({ ...quote, message: { ...quote.message, ...message } })
+
+  test('the fixture is the document 0x hashed', () => {
+    const { EIP712Domain: _, ...types } = quote.types
+    expect(ethers.utils._TypedDataEncoder.hash(quote.domain, types, quote.message)).toBe(zeroExQuote.zeroXPermit2Hash)
+  })
+
+  test('names the Settler and the WETH amount, and reads "check before you sign"', () => {
+    const s = typed(quote)
+    expect(s.recognizedSpender).toBe('0x Settler')
+    const r = assessSigningRisk(s)!
+    expect(r.level).toBe('medium')
+    expect(r.tier).not.toBe('red')
+    expect(r.reasons[0].text).toBe('Lets 0x Settler (0x6a57a0579e91a5b7ce9c2d08b93e1a9b995f974f) take up to 0.0001 WETH, once. This signature alone is enough; no transaction from you is needed.')
+  })
+
+  test('on 7.14.2, which cannot show it, the card is known (yellow) and still says the device cannot show it', () => {
+    const r = assessSigningRisk(typed(quote, '7.14.2'))!
+    expect(r.level).toBe('medium')
+    expect(r.tier).toBe('yellow')
+    expect(r.reasons.map((x) => x.text).join('\n')).toContain('KeepKey firmware 7.14.2 cannot show this Permit2 Signature Transfer on the device yet')
+  })
+
+  test('controls: a spender that is not a genuine Settler, and an unlimited one-time transfer, still read red', () => {
+    const stranger = typed(with_({ spender: STRANGER }))
+    expect(stranger.recognizedSpender).toBeUndefined()
+    expect(assessSigningRisk(stranger)!.level).toBe('high')
+    // The Settler of another chain is not this chain's Settler.
+    expect(typed({ ...quote, domain: { ...quote.domain, chainId: 1 } }).recognizedSpender).toBeUndefined()
+    // A Settler is never a spender for an allowance (0x: never approve Settler).
+    expect(recognizedSpender(8453, quote.message.spender)).toBeUndefined()
+    const all = typed(with_({ permitted: { ...quote.message.permitted, amount: MAX.toString() } }))
+    expect(all.recognizedSpender).toBe('0x Settler')
+    expect(assessSigningRisk(all)!.level).toBe('high')
   })
 })
 

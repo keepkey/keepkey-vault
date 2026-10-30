@@ -18,6 +18,7 @@ import { certifiedBodyRefused, certifiedEnvelopeShown, metadataPayloadBytes } fr
 import { fetchErc7730CalldataDefinition, resolveErc7730ForCall, resolveErc7730ForTypedData } from './erc7730-resolver'
 import { describeErc7730Call, describeErc7730TypedData } from './erc7730-describe'
 import { safeTxCalls } from '../shared/safe-tx'
+import { zeroExSettlerName } from './swap-decoders'
 import { versionCompare } from '../shared/firmware-versions'
 
 /** A chain id as dapps send it (number, "8453", "0x2105") → positive integer, else undefined. */
@@ -256,7 +257,16 @@ export function recognizedSpender(chainId: number | undefined, address: string |
 /** The reviewed spender of a decoded permit, for both REST and WalletConnect. */
 export function recognizedTypedDataSpender(decoded: SigningRequestInfo['typedDataDecoded'], chainId: number | undefined): string | undefined {
   const spender = decoded?.fields.find((x) => x.label === 'Spender')?.raw
-  return recognizedSpender(chainId, typeof spender === 'string' ? spender : undefined)
+  const address = typeof spender === 'string' ? spender : undefined
+  // A 0x Swap API permit2 quote: a one-time Permit2 signature transfer to a
+  // genuine taker Settler. Only here: 0x says never to approve a Settler.
+  const signedChain = Number(decoded?.domain.chainId)
+  if (decoded?.primaryType === 'PermitTransferFrom' && address
+    && evmContractIdentity(signedChain, decoded.domain.verifyingContract ?? '') === 'Uniswap Permit2') {
+    const settler = zeroExSettlerName(signedChain, address)
+    if (settler) return settler
+  }
+  return recognizedSpender(chainId, address)
 }
 
 /**
