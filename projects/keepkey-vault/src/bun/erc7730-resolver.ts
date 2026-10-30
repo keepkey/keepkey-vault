@@ -8,15 +8,18 @@
  * call) never replaces the normal review:
  *  - sha256(envelope) is the definition id;
  *  - the program header names this chain, contract and selector;
- *  - the program has no embedded-call formatter: on 7.16 a missing inner
- *    definition fails the whole signature after the outer screens (owner,
- *    2026-10-16: skip embedded calls). When the bytes cannot say, no definition.
+ *  - below 7.17, the program has no embedded-call formatter and no formatter
+ *    flags: on 7.16 a missing inner definition fails the whole signature after
+ *    the outer screens (owner, 2026-10-16: skip embedded calls), and a flag
+ *    fails the program. When the bytes cannot say, no definition.
+ * On 7.17+ an embedded call's definition (and a second level's) is fetched
+ * from the same service when the device asks for it, with the same checks.
  * A 404 or 422 means no definition; nothing here throws.
  */
 import { createHash } from 'node:crypto'
 import { DEFAULT_CLEARSIGN_SERVICE_URL } from './solana-certified-registry'
 import { firmwareClearSigns } from './calldata-decoder'
-import { erc7730CalldataSkipReason, supportsErc7730Transport } from '../shared/erc7730-support'
+import { erc7730CalldataSkipReason, supportsErc7730EmbeddedCalls, supportsErc7730Transport } from '../shared/erc7730-support'
 import { deviceErrorMessage } from '../shared/device-error'
 import type { Erc7730Catalog } from '../shared/types'
 
@@ -56,19 +59,22 @@ export interface Erc7730EnvelopeHeader {
   selectorOrTypeHash: string
   /** undefined: the program sections could not be read. */
   embeddedCall: boolean | undefined
+  /** A formatter sets flag bits (7.17: RECIPIENT, TX_VALUE); undefined as above. */
+  formatterFlags: boolean | undefined
 }
 
 const be32 = (b: Uint8Array, at: number) => ((b[at] << 24) >>> 0) + (b[at + 1] << 16) + (b[at + 2] << 8) + b[at + 3]
 const hex = (b: Uint8Array) => Buffer.from(b).toString('hex')
 
 /**
- * Whether a C773 program uses the embedded-call formatter; undefined when its
- * sections cannot be read the way 7.16 reads them (erc7730_program.c): section
- * types 1..9 strictly increasing, exactly the declared count, ending exactly at
- * the program length; at most 64 formatters, each with 1..23 arguments, ending
+ * Whether a C773 program uses the embedded-call formatter, and whether any
+ * formatter sets flag bits (byte 1 of its entry); undefined when its sections
+ * cannot be read the way 7.16 reads them (erc7730_program.c): section types
+ * 1..9 strictly increasing, exactly the declared count, ending exactly at the
+ * program length; at most 64 formatters, each with 1..23 arguments, ending
  * exactly at the formatter section's end.
  */
-export function programHasEmbeddedCall(program: Uint8Array): boolean | undefined {
+export function readProgramFormatters(program: Uint8Array): { embeddedCall: boolean; formatterFlags: boolean } | undefined {
   if (program.length < PROGRAM_HEADER_SIZE) return undefined
   let formatters: Uint8Array | undefined
   let resources: Uint8Array | undefined
@@ -90,18 +96,26 @@ export function programHasEmbeddedCall(program: Uint8Array): boolean | undefined
   const count = (formatters[0] << 8) | formatters[1]
   if (count > MAX_FORMATTERS) return undefined
   let embedded = false
+  let flags = false
   let p = 2
   for (let i = 0; i < count; i++) {
     if (p + 3 > formatters.length) return undefined
     const args = formatters[p + 2]
     if (args === 0 || args > MAX_FORMATTER_ARGUMENTS) return undefined
     if (formatters[p] === FORMATTER_EMBEDDED_CALL) embedded = true
+    if (formatters[p + 1] !== 0) flags = true
     p += 3 + 4 * args
   }
   if (p !== formatters.length) return undefined
   // The resource summary's own flag for the same thing.
   if (resources && resources.length >= 20 && resources[19] !== 0) embedded = true
-  return embedded
+  return { embeddedCall: embedded, formatterFlags: flags }
+}
+
+/** Whether a C773 program uses the embedded-call formatter; undefined when its
+ *  sections cannot be read (readProgramFormatters). */
+export function programHasEmbeddedCall(program: Uint8Array): boolean | undefined {
+  return readProgramFormatters(program)?.embeddedCall
 }
 
 /** The K773 envelope's program header, or undefined when it is not one. */
@@ -112,12 +126,14 @@ export function readErc7730Envelope(envelope: Uint8Array): Erc7730EnvelopeHeader
   if (programLength < PROGRAM_HEADER_SIZE || 10 + programLength > envelope.length) return undefined
   const program = envelope.subarray(10, 10 + programLength)
   if (hex(program.subarray(0, 6)) !== '433737330102') return undefined
+  const formatters = readProgramFormatters(program)
   return {
     kind: program[7],
     chainId: Buffer.from(program.subarray(10, 18)).readBigUInt64BE(0),
     contract: `0x${hex(program.subarray(18, 38))}`,
     selectorOrTypeHash: `0x${hex(program.subarray(38, 70))}`,
-    embeddedCall: programHasEmbeddedCall(program),
+    embeddedCall: formatters?.embeddedCall,
+    formatterFlags: formatters?.formatterFlags,
   }
 }
 
@@ -126,10 +142,12 @@ const HEX_BYTES = /^(?:[0-9a-f]{2})+$/
 /**
  * A definition for exactly this call, or the reason it is not one. `claimed`
  * holds the service's own JSON fields, which must agree with the header.
+ * `embedded`: the device takes embedded calls and formatter flags (7.17+).
  */
 export function checkErc7730CalldataDefinition(
   definition: { definitionId?: unknown; envelope?: unknown; kind?: unknown; chainId?: unknown; contractAddress?: unknown; selectorOrTypeHash?: unknown },
   call: { chainId: number; to: string; data: string },
+  embedded = false,
 ): { entry: Erc7730Catalog['definitions'][number] } | { reason: string } {
   const envelopeHex = typeof definition.envelope === 'string' ? definition.envelope.replace(/^0x/i, '').toLowerCase() : ''
   const id = typeof definition.definitionId === 'string' ? definition.definitionId.replace(/^0x/i, '').toLowerCase() : ''
@@ -145,9 +163,9 @@ export function checkErc7730CalldataDefinition(
   if (header.chainId !== BigInt(call.chainId)) return { reason: `envelope chain ${header.chainId} is not ${call.chainId}` }
   if (header.contract !== to) return { reason: `envelope contract ${header.contract} is not ${to}` }
   if (header.selectorOrTypeHash !== selector + '0'.repeat(56)) return { reason: `envelope selector ${header.selectorOrTypeHash.slice(0, 10)} is not ${selector}` }
-  if (header.embeddedCall !== false) {
-    return { reason: header.embeddedCall ? 'program has an embedded call' : 'program sections cannot be read' }
-  }
+  if (header.embeddedCall === undefined || header.formatterFlags === undefined) return { reason: 'program sections cannot be read' }
+  if (header.embeddedCall && !embedded) return { reason: 'program has an embedded call' }
+  if (header.formatterFlags && !embedded) return { reason: 'program uses formatter flags' }
   // The service's JSON must say the same thing as the signed header.
   const claimedKind = definition.kind
   if (claimedKind !== undefined && claimedKind !== KIND_CALLDATA && claimedKind !== 'calldata') return { reason: 'service kind is not calldata' }
@@ -170,28 +188,20 @@ export function checkErc7730CalldataDefinition(
 }
 
 /** The catalog's primary definition describes exactly this call (the gate's check). */
-export function erc7730CatalogDescribesCall(catalog: unknown, chainId: number | undefined, to: string | undefined, data: string | undefined): boolean {
+export function erc7730CatalogDescribesCall(
+  catalog: unknown, chainId: number | undefined, to: string | undefined, data: string | undefined, firmwareVersion?: string,
+): boolean {
   const c = catalog as Partial<Erc7730Catalog> | null | undefined
   if (!c || typeof c !== 'object' || !Array.isArray(c.definitions) || typeof c.primaryDefinitionId !== 'string') return false
   if (!chainId || typeof to !== 'string' || !/^0x[0-9a-fA-F]{40}$/.test(to) || erc7730CalldataSkipReason(data)) return false
   const primaryId = c.primaryDefinitionId.replace(/^0x/i, '').toLowerCase()
   const primary = c.definitions.find((d) => String(d?.definitionId ?? '').replace(/^0x/i, '').toLowerCase() === primaryId)
-  return !!primary && 'entry' in checkErc7730CalldataDefinition(primary, { chainId, to, data: data! })
+  return !!primary && 'entry' in checkErc7730CalldataDefinition(primary, { chainId, to, data: data! }, supportsErc7730EmbeddedCalls(firmwareVersion))
 }
 
-/**
- * GET the service's definition for (chain, contract, selector). Undefined for
- * 404/422 (none), for any check that fails, and for any network or format
- * error; it never throws.
- */
-export async function fetchErc7730CalldataDefinition(
-  chainId: number, to: string, data: string, fetchImpl: typeof fetch = fetch,
-): Promise<Erc7730Catalog | undefined> {
-  const skip = erc7730CalldataSkipReason(data)
-  if (skip) return undefined
-  if (!Number.isSafeInteger(chainId) || chainId <= 0 || !/^0x[0-9a-fA-F]{40}$/.test(to)) return undefined
-  const contract = to.toLowerCase()
-  const selector = data.slice(0, 10).toLowerCase()
+/** GET the service's answer for one lookup: the JSON object, or undefined for
+ *  none (404/422), an error status, bad JSON or a network failure. */
+async function fetchDefinitionBody(chainId: number, contract: string, selector: string, fetchImpl: typeof fetch): Promise<any> {
   const url = `${serviceBase()}/v1/erc7730/definition?kind=calldata&chainId=${chainId}&contract=${contract}&selector=${selector}`
   let response: Response
   try {
@@ -217,11 +227,31 @@ export async function fetchErc7730CalldataDefinition(
     console.warn(`${TAG} definition lookup returned no object; none attached`)
     return undefined
   }
-  if (body.embeddedCalls === true) {
+  return body
+}
+
+/**
+ * GET the service's definition for (chain, contract, selector). Undefined for
+ * 404/422 (none), for any check that fails, and for any network or format
+ * error; it never throws. `firmwareVersion` 7.17+ also takes a definition with
+ * embedded calls or formatter flags.
+ */
+export async function fetchErc7730CalldataDefinition(
+  chainId: number, to: string, data: string, fetchImpl: typeof fetch = fetch, firmwareVersion?: string,
+): Promise<Erc7730Catalog | undefined> {
+  const skip = erc7730CalldataSkipReason(data)
+  if (skip) return undefined
+  if (!Number.isSafeInteger(chainId) || chainId <= 0 || !/^0x[0-9a-fA-F]{40}$/.test(to)) return undefined
+  const contract = to.toLowerCase()
+  const selector = data.slice(0, 10).toLowerCase()
+  const embedded = supportsErc7730EmbeddedCalls(firmwareVersion)
+  const body = await fetchDefinitionBody(chainId, contract, selector, fetchImpl)
+  if (!body) return undefined
+  if (body.embeddedCalls === true && !embedded) {
     console.info(`${TAG} chain ${chainId} ${contract} ${selector}: definition has embedded calls; not attached`)
     return undefined
   }
-  const checked = checkErc7730CalldataDefinition(body, { chainId, to: contract, data })
+  const checked = checkErc7730CalldataDefinition(body, { chainId, to: contract, data }, embedded)
   if ('reason' in checked) {
     console.warn(`${TAG} chain ${chainId} ${contract} ${selector}: definition not attached (${checked.reason})`)
     return undefined
@@ -257,12 +287,45 @@ export async function resolveErc7730ForCall(
   if (call.txMetadata) return undefined
   if (!call.chainId || !call.to || typeof call.data !== 'string') return undefined
   if (firmwareClearSigns(call.to, call.data, call.chainId, call.firmwareVersion, call.value)) return undefined
-  return fetchErc7730CalldataDefinition(call.chainId, call.to, call.data, fetchImpl)
+  return fetchErc7730CalldataDefinition(call.chainId, call.to, call.data, fetchImpl, call.firmwareVersion)
 }
 
-/** Refusals of the definition, not of the transaction (7.16 fsm_msg_ethereum.h,
- *  and hdwallet's own check that the device used the preload). */
-const DEFINITION_REFUSAL = /ERC-7730|Value too long to clear-sign|Inner call cannot be clear-signed/i
+/**
+ * The definition of an embedded call the device asks for while it signs
+ * (7.17+: by chain, callee and selector, all read from the signed calldata),
+ * from the same service with the same checks; undefined answers "none", and
+ * the device then refuses the definition ("Inner call cannot be clear-signed").
+ * A second level may embed calls of its own; the device bounds the depth.
+ */
+export async function resolveErc7730InnerDefinition(
+  chainId: number, contractAddress: string, selector: string, fetchImpl: typeof fetch = fetch,
+): Promise<Erc7730Catalog['definitions'][number] | undefined> {
+  if (!Number.isSafeInteger(chainId) || chainId <= 0 || !/^0x[0-9a-fA-F]{40}$/.test(contractAddress) || !/^0x[0-9a-fA-F]{8}$/.test(selector)) return undefined
+  const contract = contractAddress.toLowerCase()
+  const sel = selector.toLowerCase()
+  const body = await fetchDefinitionBody(chainId, contract, sel, fetchImpl)
+  if (!body) return undefined
+  const checked = checkErc7730CalldataDefinition(body, { chainId, to: contract, data: sel }, true)
+  if ('reason' in checked) {
+    console.warn(`${TAG} chain ${chainId} ${contract} ${sel}: inner definition not served (${checked.reason})`)
+    return undefined
+  }
+  console.info(`${TAG} chain ${chainId} ${contract} ${sel}: inner definition ${checked.entry.definitionId.slice(0, 18)}… checked`)
+  return checked.entry
+}
+
+/** The catalog's primary definition embeds calls: the device will ask for theirs. */
+function primaryHasEmbeddedCall(catalog: Partial<Erc7730Catalog> | undefined): boolean {
+  const primaryId = String(catalog?.primaryDefinitionId ?? '').replace(/^0x/i, '').toLowerCase()
+  const primary = catalog?.definitions?.find((d) => String(d?.definitionId ?? '').replace(/^0x/i, '').toLowerCase() === primaryId)
+  const envelope = typeof primary?.envelope === 'string' ? primary.envelope.replace(/^0x/i, '') : ''
+  return !!envelope && readErc7730Envelope(Uint8Array.from(Buffer.from(envelope, 'hex')))?.embeddedCall === true
+}
+
+/** Refusals of the definition, not of the transaction (7.16/7.17
+ *  fsm_msg_ethereum.h, and hdwallet's own check that the device used the
+ *  preload). 7.17 names an inner DELEGATECALL and refuses to describe it. */
+const DEFINITION_REFUSAL = /ERC-7730|Value too long to clear-sign|Inner call cannot be clear-signed|DELEGATECALL cannot be clear-signed/i
 
 /** The device (or hdwallet) refused the attached definition. A cancel is the user's answer, never a refusal. */
 export function isErc7730Refusal(error: unknown): boolean {
@@ -275,17 +338,23 @@ export function isErc7730Refusal(error: unknown): boolean {
  * sign again without it on the normal path (owner rule: a transaction that
  * signs today is never rejected for its description). `beforeFallback` runs
  * the normal gate for the plain call first, such as the blind-sign approval
- * card; it throws to stop.
+ * card; it throws to stop. A definition with embedded calls (7.17+) goes with
+ * a resolver for the definitions the device asks for while it signs.
  */
 export async function signWithErc7730Fallback<M extends object, R>(
   msg: M,
   sign: (msg: M) => Promise<R>,
   beforeFallback?: (plain: M, reason: string) => Promise<void> | void,
   tag = TAG,
+  fetchImpl: typeof fetch = fetch,
 ): Promise<R> {
-  if (!(msg as { erc7730?: unknown }).erc7730) return sign(msg)
+  const catalog = (msg as { erc7730?: Erc7730Catalog }).erc7730
+  if (!catalog) return sign(msg)
+  const withInner = primaryHasEmbeddedCall(catalog) && !(catalog as any).resolveInner
+    ? { ...msg, erc7730: { ...catalog, resolveInner: (chainId: number, contract: string, selector: string) => resolveErc7730InnerDefinition(chainId, contract, selector, fetchImpl) } }
+    : msg
   try {
-    return await sign(msg)
+    return await sign(withInner)
   } catch (error) {
     if (!isErc7730Refusal(error)) throw error
     const reason = deviceErrorMessage(error)
