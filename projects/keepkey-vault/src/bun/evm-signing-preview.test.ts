@@ -705,6 +705,66 @@ describe('Uniswap V4 through UR 2.1.2 — preview rows and certified attach', ()
   })
 })
 
+// A real V4 swap through Ethereum UR 2.1.1 (batch 5 control 'v4-on-2.1.1',
+// emulator leg G02-a 2026-10-30): SWAP_EXACT_IN_SINGLE, SETTLE_ALL, TAKE_ALL.
+// The device does not decode it (urPrecheck refuses), and the card read it as
+// an unknown call, "signing blind", although Desktop reads the whole plan.
+describe('Uniswap V4 one-pool plan the device does not decode', () => {
+  const { urPrecheck } = require('./uniswap-ur')
+  const { uniswapSwapFields } = require('./evm-signing-preview')
+  const call = require('../../__tests__/fixtures/uniswap/batch5-public-calls.json').calls.find((c: any) => c.control === 'v4-on-2.1.1')
+  const SELL = '1eef208926667594e5136e89d0e9dd6907959197'
+  const FROM = '0x9858effd232b4033e47d90003d41ec34ecaeda94'
+  const rows = (data = call.data, router = call.router) =>
+    Object.fromEntries(uniswapSwapFields(1, router, data, call.value, FROM).map((f: any) => [f.name, f.value]))
+  const card = async (data = call.data, router = call.router) => {
+    globalThis.fetch = (async () => { throw new Error('offline') }) as unknown as typeof fetch
+    const s: SigningRequestInfo = { ...info(), from: FROM, to: router, value: call.value, data, chainId: 1, firmwareVersion: '7.16.0' }
+    await applyEvmTxPreview(s, router, data, 1, '7.16.0')
+    return s
+  }
+  const texts = (s: SigningRequestInfo) => assessSigningRisk(s)!.reasons.map((r) => `${r.level}: ${r.text}`).join('\n')
+  const BLIND = `cannot show what this call to ${call.router} does`
+
+  test('Desktop reads the plan the device refuses: amounts, recipient, the unreviewed token', () => {
+    expect(urPrecheck(call.router, call.data, BigInt(call.value))).toBeNull()
+    const r = rows()
+    expect(r.Action).toBe(`Swap 4624635698929038446195 base units of token 0x${SELL} for at least 155.650232 USDT`)
+    expect(r['Minimum output']).toBe('155.650232 USDT')
+    expect(r.Recipient).toBe('the signing account')
+    expect(r['Token warning']).toBe(`Token 0x${SELL} is not on KeepKey's reviewed list`)
+  })
+
+  test('the card describes the swap instead of "signing blind"; the unreviewed token keeps its own line', async () => {
+    const s = await card()
+    expect(s.needsBlindSigning).toBe(true)
+    const t = texts(s)
+    expect(t).toContain(`medium: Swaps 4624635698929038446195 base units of token 0x${SELL} for at least 155.650232 USDT through the Uniswap Universal Router, a contract KeepKey has reviewed. KeepKey firmware 7.16.0 cannot show this swap on the device yet`)
+    expect(t).not.toContain(BLIND)
+    expect(t).toContain('high: Swaps a token KeepKey does not recognize. It may be a fake.')
+  })
+
+  test('the same plan between reviewed tokens is known, not red', async () => {
+    const usdc = call.data.split(SELL).join('a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48')
+    expect(rows(usdc).Action).toBe('Swap 4624635698929038.446195 USDC for at least 155.650232 USDT')
+    const r = assessSigningRisk(await card(usdc))!
+    expect([r.tier, r.level]).toEqual(['yellow', 'medium'])
+  })
+
+  test('CONTROLS: an older router layout, or a plan that is not the one-pool shape, stays an unknown call', async () => {
+    // UR 2.0 reads V4 swaps without minHopPriceX36: the same bytes would mean other amounts.
+    const ur20 = '0x66a9893cc07d91d95644aedd05d03f95e1dba8af'
+    expect(rows(call.data, ur20)).toEqual({})
+    const t = texts(await card(call.data, ur20))
+    expect(t).toContain(`high: Your KeepKey cannot show what this call to ${ur20} does. You would be signing blind.`)
+    // TAKE_ALL (0x0f) turned into TAKE (0x0e): the recipient is no longer the signer.
+    const take = call.data.replace('060c0f', '060c0e')
+    expect(take).not.toBe(call.data)
+    expect(rows(take)).toEqual({})
+    expect(texts(await card(take))).toContain(BLIND)
+  })
+})
+
 test('recognizedSpender: canonical Permit2, certified name records and Desktop spender list only', async () => {
   const { recognizedSpender } = await import('./evm-signing-preview')
   expect(recognizedSpender(1, '0x000000000022D473030F116dDEE9F6B43aC78BA3')).toBe('Uniswap Permit2')

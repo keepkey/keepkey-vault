@@ -11,6 +11,7 @@ import { CERTIFIED_METADATA_KEY_ID } from './evm-certified-schema'
 import { certifiedBodyRefused, certifiedEnvelopeShown, metadataPayloadBytes } from '../shared/certified-evm-envelope'
 import { assessSigningRisk, typedDataRecognition, type RiskLevel } from '../shared/clearsign-risk'
 import { applyEvmTxPreview, attachErc7730Definition } from './evm-signing-preview'
+import { firmwareClearSigns } from './calldata-decoder'
 import { measureLiveDeployment, resolveCertifiedEvmTransaction, resolveEvmSchema } from './evm-schema-registry'
 import { supportsCertifiedClearSign } from './solana-certified-policy'
 import { resolvePromotedEvmArtifact, type ClearSignArtifactResolution } from './clearsign-artifact-resolver'
@@ -35,7 +36,11 @@ export async function prepareEvmTxSigningInfo(
     signingInfo, preview.to, preview.data, signingInfo.chainId as number | undefined,
     firmwareVersion, preview.txMetadata,
   )
-  if (signingInfo.needsBlindSigning && preview.data && preview.data.length >= 10 && preview.to
+  // A call the firmware decodes natively still gets the certified schema the
+  // sign handler would send (resolveEvmSchema), so the card names what the
+  // device shows instead of its native review.
+  const native = signingInfo.deviceClearSigns === true && !signingInfo.needsBlindSigning
+  if ((signingInfo.needsBlindSigning || native) && preview.data && preview.data.length >= 10 && preview.to
     && !preview.txMetadata?.signedPayload && supportsCertifiedClearSign(signingInfo.firmwareVersion)) {
     const chainIdNum = Number(signingInfo.chainId)
     try {
@@ -49,7 +54,7 @@ export async function prepareEvmTxSigningInfo(
         }),
       }
       const found = await resolveEvmSchema(chainIdNum, preview.to, preview.data, true, signingInfo.firmwareVersion, preview.value)
-        ?? await resolveCertifiedEvmTransaction(txForCertification)
+        ?? (native ? undefined : await resolveCertifiedEvmTransaction(txForCertification))
       // The swap gate's rule (evmCallRequiresAdvancedMode): relax only for an
       // envelope this firmware shows for this exact call. A body it refuses
       // (0x04 on 7.16.0) is dropped, so the device shows its normal review.
@@ -65,7 +70,7 @@ export async function prepareEvmTxSigningInfo(
         console.log(`[REST] Approval preview authenticated by certified schema ${certified.method} (source=${certified.source || 'service'})`)
       }
     } catch (error: any) {
-      console.warn(`[REST] Certified approval preview unavailable, staying blind: ${error?.message || error}`)
+      console.warn(`[REST] Certified approval preview unavailable, staying ${native ? 'native' : 'blind'}: ${error?.message || error}`)
     }
   }
   // Last: a ClearSign service ERC-7730 definition, only when nothing above
@@ -262,8 +267,8 @@ export function buildEvmPresignReport(input: {
   // A plain transfer, or a call the firmware decodes itself (an ERC-20 transfer
   // of a token in its table), has no descriptor to wait for: the device shows
   // it whoever asks.
-  const firmwareNative = info.deviceClearSigns === true && !info.certifiedEvmSchema
-    && info.calldataDecoded?.insightKeyId !== CERTIFIED_METADATA_KEY_ID
+  // (Its own decode: a certified schema found for such a call does not change that.)
+  const firmwareNative = firmwareClearSigns(info.to, info.data, info.chainId as number | undefined, info.firmwareVersion, info.value)
   const verdict = input.signerVerdict || isPlainEvmTransfer(info) || firmwareNative ? evmSigningVerdict(info, {}, simulation, ur.complete) : undefined
   const report = buildClearSignReport({
     // A supplied descriptor becomes P4 only after the device verifies it

@@ -6,18 +6,20 @@
  * Runtime/provider metadata is annotation only and never relaxes the verdict.
  */
 import type { CalldataDecodedField, SafeCallPreview, SigningRequestInfo } from '../shared/types'
-import { decodeCalldata, firmwareClearSigns, formatDeadline } from './calldata-decoder'
+import { decodeCalldata, firmwareClearSigns, formatDeadline, thor714Refuses } from './calldata-decoder'
 import { findCertifiedEvmSchema, findCertifiedUniswapSwap } from './evm-schema-registry'
 import { findEvmNameRecord, findReviewedUniversalRouter, reviewedSwapToken } from './evm-certified-schema'
 import { evmContractIdentity } from '../shared/evm-contract-identity'
 import { knownSpenderName } from '../shared/evm-known-spenders'
 import { urPrecheck } from './uniswap-ur'
+import { v4SingleSwapSummary } from './uniswap-universal-router'
 import { supportsCertifiedClearSign } from './solana-certified-policy'
 import { certifiedBodyRefused, certifiedEnvelopeShown, metadataPayloadBytes } from '../shared/certified-evm-envelope'
 import { fetchErc7730CalldataDefinition, resolveErc7730ForCall, resolveErc7730ForTypedData } from './erc7730-resolver'
 import { describeErc7730Call, describeErc7730TypedData } from './erc7730-describe'
 import { safeTxCalls } from '../shared/safe-tx'
 import { zeroExSettlerName } from './swap-decoders'
+import { versionCompare } from '../shared/firmware-versions'
 
 /** A chain id as dapps send it (number, "8453", "0x2105") → positive integer, else undefined. */
 export function normalizeEvmChainId(raw: unknown): number | undefined {
@@ -141,8 +143,10 @@ function txValue(raw: unknown): bigint | undefined {
 
 /**
  * The swap a reviewed Universal Router call makes, as card rows: the same
- * decode and token-flow review the device runs (urPrecheck), so a call it
- * would not decode gets no rows, and a call it reviews gets the facts its
+ * decode and token-flow review the device runs (urPrecheck), or else the
+ * one-pool v4 plan Desktop reads but the device does not (v4SingleSwapSummary;
+ * the card then says the device cannot show it). Any other call gets no rows;
+ * a call the device reviews gets the facts its
  * screens state (signed_metadata_build_ur_review): what is paid, the minimum
  * received, the recipient, the fee, the Permit2 allowance and every V4 pool
  * hook. Token names come only from reviewedSwapToken by chain:address; any
@@ -154,9 +158,9 @@ export function uniswapSwapFields(
 ): CalldataDecodedField[] {
   const v = txValue(value)
   if (!chainId || v === undefined || !findReviewedUniversalRouter(chainId, router)) return []
-  const plan = urPrecheck(router, data, v)
-  if (!plan) return []
-  const s = plan.summary
+  // A one-pool v4 plan the device does not decode: Desktop still reads it.
+  const s = urPrecheck(router, data, v)?.summary ?? v4SingleSwapSummary(chainId, router, data, v)
+  if (!s) return []
   const unknown: string[] = []
   const amount = (raw: bigint, token: string, isEth: boolean, unlimitedAt?: bigint) => {
     const t = isEth ? { symbol: 'ETH', decimals: 18 } : reviewedSwapToken(chainId, token)
@@ -305,6 +309,9 @@ export async function attachSafeCallPreviews(info: SigningRequestInfo, fetchImpl
   }))
 }
 
+/** The newest release firmwareClearSigns mirrors. */
+const NEWEST_MIRRORED_FW = '7.16.0'
+
 export async function applyEvmTxPreview(
   signingInfo: SigningRequestInfo,
   to: string | undefined,
@@ -363,6 +370,12 @@ export async function applyEvmTxPreview(
     // the calldata — a contract we can decode (Uniswap/1inch) but the firmware
     // can't still blind-signs (PR #261/#303).
     signingInfo.needsBlindSigning = true
+    // 7.14 cancels this deposit whatever AdvancedMode is set to: say so, never
+    // offer AdvancedMode. An update fixes it only where 7.16 pins the router.
+    if (thor714Refuses(to, data, chainId, firmwareVersion)) {
+      signingInfo.firmwareCannotSign = true
+      signingInfo.firmwareUpdateClearSigns = firmwareClearSigns(to, data, chainId, NEWEST_MIRRORED_FW)
+    }
   }
   console.log(`${tag} needsBlindSigning=${signingInfo.needsBlindSigning} (firmwareClearSigns=${signingInfo.deviceClearSigns}, decoder source=${signingInfo.calldataDecoded?.source})`)
 }
@@ -389,4 +402,19 @@ export function typedDataNativelyReviewed(typedData: any, firmwareVersion: strin
     [['name', 'string'], ['chainId', 'uint256'], ['verifyingContract', 'address']])) return false
   return sameFields(types.PermitSingle, [['details', 'PermitDetails'], ['spender', 'address'], ['sigDeadline', 'uint256']]) &&
     sameFields(types.PermitDetails, [['token', 'address'], ['amount', 'uint160'], ['expiration', 'uint48'], ['nonce', 'uint48']])
+}
+
+/**
+ * The AdvancedMode gate for a typed-data request, for REST and WalletConnect
+ * alike. The device reviews x402 and (7.16+) a canonical Permit2 PermitSingle
+ * natively, and from 7.15 it drives the structured EIP-712 stream for every
+ * document. Anything else (older or unknown firmware) is hash-signed, which
+ * the device refuses unless AdvancedMode is on.
+ */
+export function applyTypedDataSigningGate(signingInfo: SigningRequestInfo, typedData: any, firmwareVersion: string | undefined): void {
+  const shown = signingInfo.typedDataDecoded?.operationName === 'x402 EIP-3009 Payment'
+    || typedDataNativelyReviewed(typedData, firmwareVersion)
+    || (!!firmwareVersion && versionCompare(firmwareVersion, '7.15.0') >= 0)
+  signingInfo.needsBlindSigning = !shown
+  signingInfo.requiresAdvancedMode = !shown
 }

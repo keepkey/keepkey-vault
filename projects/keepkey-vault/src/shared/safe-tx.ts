@@ -10,6 +10,9 @@
  * pinned one is Safe's own code, so the card can say what it does.
  */
 
+import { keccak_256 } from '@noble/hashes/sha3'
+import { versionCompare } from './firmware-versions'
+
 const CHAINS = [1, 10, 56, 100, 137, 143, 4663, 8453, 42161, 43114]
 
 export type SafeContractKind = 'multisend' | 'multisend-call-only' | 'sign-message-lib' | 'migration'
@@ -95,4 +98,46 @@ export function safeTxCalls(chainId: number, to: string, operation: number, valu
   if (operation === 0) return [{ operation, to, value, data }]
   const kind = safeContract(chainId, to)?.kind
   return kind === 'multisend' || kind === 'multisend-call-only' ? decodeMultiSend(data) : null
+}
+
+/** Whether the KeepKey shows "Delegatecall: SafeTx gives <to> your Safe's full
+ *  authority. Not checked." for this SafeTx (operation 1) on this firmware.
+ *  - below 7.15: no; the device signs a SafeTx as a hash.
+ *  - 7.15, 7.16: yes, except a batch through MultiSend on Ethereum with no
+ *    inner delegatecall (eip712_stream.c is_safe_multisend; zkSync is not a
+ *    Desktop chain).
+ *  - 7.17 on (firmware #1021): yes, except such a batch on every chain Safe
+ *    is pinned for (an inner SafeMigration call allowed), and SafeMigration or
+ *    SafeToL2Setup/SafeToL2Migration to a pinned SafeL2, which get a calm
+ *    "Safe upgrade" screen instead.
+ *  Any other target, SignMessageLib included, gets the screen on every version.
+ *  `chainId` is the EIP-712 domain's own, 0 when it has none (Safes before
+ *  1.3.0): the device then pins nothing and always shows the screen. */
+export function deviceWarnsSafeDelegatecall(firmwareVersion: string | undefined, chainId: number, to: string, data: string): boolean {
+  if (!firmwareVersion || versionCompare(firmwareVersion, '7.15.0') < 0) return false
+  if (!chainId) return true
+  const kind = safeContract(chainId, to)?.kind
+  const calls = kind === 'multisend' || kind === 'multisend-call-only' ? decodeMultiSend(data) : null
+  if (versionCompare(firmwareVersion, '7.17.0') < 0) return !(chainId === 1 && calls?.every((c) => c.operation === 0))
+  if (calls?.every((c) => c.operation === 0 || safeContract(chainId, c.to)?.kind === 'migration')) return false
+  if (kind === 'migration') return false
+  const sel = data.slice(0, 10).toLowerCase()
+  const arg = (i: number, ok: (k?: SafeContract) => boolean) => {
+    const w = data.slice(10 + 64 * i, 74 + 64 * i)
+    return /^0{24}[0-9a-f]{40}$/i.test(w) && ok(safeContract(chainId, `0x${w.slice(24)}`))
+  }
+  const l2 = (k?: SafeContract) => k?.kind === 'singleton-l2'
+  // migrateFromV111 takes the 1.3.0 or 1.4.1 CompatibilityFallbackHandler only.
+  const handler = (k?: SafeContract) => k?.name === 'CompatibilityFallbackHandler' && k.version !== '1.5.0'
+  if (kind === 'to-l2-setup' && sel === '0xfe51f643' && data.length === 74 && arg(0, l2)) return false
+  if (kind === 'to-l2-migration' && sel === '0xef2624ae' && data.length === 74 && arg(0, l2)) return false
+  if (kind === 'to-l2-migration' && sel === '0xd9a20812' && data.length === 138 && arg(0, l2) && arg(1, handler)) return false
+  return true
+}
+
+/** An address the way the KeepKey shows it (EIP-55). */
+export function eip55(address: string): string {
+  const hex = address.toLowerCase().replace(/^0x/, '')
+  const hash = keccak_256(new TextEncoder().encode(hex))
+  return `0x${[...hex].map((c, i) => ((hash[i >> 1] >> (i % 2 ? 0 : 4)) & 15) >= 8 ? c.toUpperCase() : c).join('')}`
 }
