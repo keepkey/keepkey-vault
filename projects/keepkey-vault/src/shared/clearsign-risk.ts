@@ -749,15 +749,19 @@ function acrossDeposit(d: AcrossDepositV3, req: SigningRequestInfo, add: (l: Ris
   if (d.message !== '0x') add('high', `Also passes ${(d.message.length - 2) / 2} bytes of instructions that run at the recipient on ${v.destination}. This computer cannot read them.`)
 }
 
+const readableText = (text: string) => /^[\x20-\x7e\t\n\r\u00a0-\uffff]+$/.test(text) && !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(text)
+
 /** The bytes as text, when they are printable UTF-8 (a sign-in message), else undefined. */
 function printableUtf8(hex: string): string | undefined {
   if (!/^0x([0-9a-fA-F]{2})+$/.test(hex)) return undefined
   try {
     const bytes = new Uint8Array(hex.slice(2).match(/../g)!.map((b) => parseInt(b, 16)))
     const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes)
-    return /^[\x20-\x7e\t\n\r\u00a0-\uffff]+$/.test(text) && !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(text) ? text : undefined
+    return readableText(text) ? text : undefined
   } catch { return undefined }
 }
+
+const quoted = (text: string, max = 200) => `"${text.length > max ? text.slice(0, max) + '…' : text}"`
 
 /** A message the Safe signs as its own (EIP-1271), from a SafeMessage or an
  *  on-chain SignMessageLib call. Readable text (a sign-in) is normal; a hash
@@ -765,11 +769,45 @@ function printableUtf8(hex: string): string | undefined {
 function safeSignsMessage(safe: string, hex: string, add: (l: RiskLevel, t: string) => void): boolean {
   const text = printableUtf8(hex)
   if (text) {
-    add('medium', `Your Safe (${safe}) signs this text as its own, so apps that check the Safe's signature accept it: "${text.length > 200 ? text.slice(0, 200) + '…' : text}"`)
+    add('medium', `Your Safe (${safe}) signs this text as its own, so apps that check the Safe's signature accept it: ${quoted(text)}`)
     return false
   }
   add('high', `Approves a message for your whole Safe (${safe}). Apps use this to make the Safe sign permits and orders, and this computer cannot read what it approves.`)
   return true
+}
+
+/** A SafeMessage. Safe{Wallet} sends only a hash of the original (hashMessage
+ *  of the text, or a typed document's EIP-712 hash); the gate attaches the
+ *  original from Safe's Transaction Service only when it hashes to it.
+ *  `hostRead` = described here, while the device shows only the hash. */
+function safeMessage(req: SigningRequestInfo, d: EIP712DecodedInfo, add: (l: RiskLevel, t: string) => void): TypedDoc {
+  const safe = d.domain.verifyingContract || 'unknown Safe'
+  const o = req.safeMessageOriginal
+  const checked = "This computer read it from Safe's Transaction Service and checked that it matches what your KeepKey signs."
+  // A hex string is a code standing for something else, not words. The text
+  // is shown in full (to 1000 characters): the device shows only its hash.
+  if (o?.status === 'text' && readableText(o.text) && !/^0x[0-9a-fA-F]*$/.test(o.text)) {
+    add('medium', `Your Safe (${safe}) signs this text as its own, so apps that check the Safe's signature accept it: ${quoted(o.text, 1000)}. ${checked}`)
+    return { knownCalm: true, unverified: false, opaque: false, hostRead: true }
+  }
+  if (o?.status === 'typed') {
+    add('medium', `Your Safe (${safe}) signs this ${o.decoded.operationName} as its own, so apps that check the Safe's signature accept it. ${checked}`)
+    let described = 0
+    // The Safe is the account that signs the document inside; a SafeMessage
+    // inside it is read only from its own bytes.
+    const inner = describeTypedDoc({ ...req, from: safe, typedDataDecoded: o.decoded, recognizedSpender: o.recognizedSpender, safeMessageOriginal: undefined }, o.decoded,
+      (l, t) => { described++; add(l, t) }, true)
+    if (!described) add('high', `This computer has no description of ${o.decoded.operationName}, so it cannot say what it lets an app do.`)
+    return { knownCalm: inner.knownCalm && !inner.unverified, unverified: false, opaque: inner.opaque || !described, hostRead: true }
+  }
+  const opaque = safeSignsMessage(safe, String(d.fields.find((x) => x.label === 'Message')?.raw ?? ''), add)
+  if (opaque && o) {
+    add('medium', o.status === 'text' ? `The original in Safe's Transaction Service is not readable text${/^0x[0-9a-fA-F]*$/.test(o.text) ? `: ${quoted(o.text)}` : ''}.`
+      : o.status === 'not-found' ? "Safe's Transaction Service has no copy of the original yet. If you are the first owner to sign, Safe{Wallet} shares it only after your signature, so this computer could not read it."
+      : o.status === 'mismatch' ? "Safe's Transaction Service holds a message under this ID that does not match what you are signing, so this computer ignored it."
+      : "This computer could not reach Safe's Transaction Service to read the original.")
+  }
+  return { knownCalm: false, unverified: false, opaque, hostRead: false }
 }
 
 // ── Safe transactions ────────────────────────────────────────────────
@@ -1009,14 +1047,14 @@ function safeDelegateCall(ctx: SafeCtx, to: string, data: string): Recognition |
 
 /** A SafeTx, decoded here. 'shows' = the device shows all of it (a coin send,
  *  a rejection); 'known' = decoded here, the device shows the data as hex. */
-function safeTx(req: SigningRequestInfo, d: NonNullable<SigningRequestInfo['typedDataDecoded']>, add: (l: RiskLevel, t: string) => void): Recognition {
+function safeTx(req: SigningRequestInfo, d: NonNullable<SigningRequestInfo['typedDataDecoded']>, add: (l: RiskLevel, t: string) => void, signerSafe = false): Recognition {
   const f = (label: string) => String(d.fields.find((x) => x.label === label)?.raw ?? '')
   const safe = (d.domain.verifyingContract ?? '').toLowerCase()
   const from = (req.from ?? '').toLowerCase()
   const ctx: SafeCtx = {
     chainId: evmChainId(d.domain.chainId ?? req.chainId), safe, req, add,
     known: [
-      ...(from ? [{ address: from, name: 'this KeepKey account' }] : []),
+      ...(from ? [{ address: from, name: signerSafe ? 'your Safe that signs this message' : 'this KeepKey account' }] : []),
       ...(safe ? [{ address: safe, name: 'your Safe' }] : []),
       ...(req.knownAddresses ?? []).map((k) => ({
         address: k.address.toLowerCase(), name: k.own ? 'your KeepKey account' : k.name ? `your contact ${k.name}` : 'a saved contact',
@@ -1081,17 +1119,14 @@ function safeGasRefund(d: EIP712DecodedInfo, f: (label: string) => EIP712Decoded
   return `Pays a gas refund out of your Safe when it is executed: up to ${amount} (gas price ${gasPrice} × (safeTxGas ${num('Safe Tx Gas')} + baseGas ${num('Base Gas')}), plus Safe's own call overhead${zero('Gas Token') ? ", at no more than the executor's own gas price" : ''}), to ${receiver}. Normal Safe transactions leave the refund at zero.`
 }
 
-function evmTypedData(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void): Recognition {
-  const d = req.typedDataDecoded
-  if (!d) {
-    add('high', 'This computer could not read this signature request, and your KeepKey shows only a code (hash) for it. You would be signing blind.')
-    return 'unknown'
-  }
+/** What a typed document asks for, from this computer's describers; nothing
+ *  here says what the device shows of it. */
+interface TypedDoc { knownCalm: boolean; unverified: boolean; opaque: boolean; safeRecognition?: Recognition; hostRead?: boolean }
+
+/** `signerSafe`: the document is signed by this Safe (as req.from) through a
+ *  SafeMessage, not by the KeepKey account itself. */
+function describeTypedDoc(req: SigningRequestInfo, d: EIP712DecodedInfo, add: (l: RiskLevel, t: string) => void, signerSafe = false): TypedDoc {
   const f = (label: string) => d.fields.find((x) => x.label === label)
-  if (d.operationName === 'x402 EIP-3009 Payment') {
-    add('medium', `Authorizes a payment of ${f('Value')?.value ?? 'an amount'} to ${f('Pay To')?.raw ?? 'another account'}. Anyone holding this signature can collect it until ${f('Valid Before')?.value ?? 'it expires'}.`)
-    return !!req.firmwareVersion && versionCompare(req.firmwareVersion, '7.15.0') >= 0 ? 'shows' : 'unknown'
-  }
   const contract = d.domain.verifyingContract?.toLowerCase()
   // A known document whose spend line stays at "check before you sign":
   // firmware that cannot show it still leaves it known, not unknown.
@@ -1102,6 +1137,8 @@ function evmTypedData(req: SigningRequestInfo, add: (l: RiskLevel, t: string) =>
   let opaque = false
   // A SafeTx whose data this computer decoded ('known'): the device shows it as hex.
   let safeRecognition: Recognition | undefined
+  // A SafeMessage whose original this computer read: the device shows its hash.
+  let hostRead = false
   const delegate = f('Agent Address')?.raw ?? f('Delegate')?.raw ?? f('Session Key')?.raw
   if (/ApproveAgent$/.test(d.primaryType) || delegate) {
     // Owner rule: handing over signing power is never a normal request.
@@ -1109,11 +1146,18 @@ function evmTypedData(req: SigningRequestInfo, add: (l: RiskLevel, t: string) =>
       && /^0x(ff){32}$/i.test(String(f('Authority')?.raw ?? ''))
     add(unlimited ? 'critical' : 'high', `Gives ${delegate || 'another account'} the power to act for your account. It can then sign without your KeepKey.${unlimited ? ' There are no limits on what it can do.' : ''}`)
   } else if (d.primaryType === 'SafeTx') {
-    safeRecognition = safeTx(req, d, add)
+    safeRecognition = safeTx(req, d, add, signerSafe)
     opaque = safeRecognition === 'unknown'
+    // Safe pays gasPrice × gas in gasToken to refundReceiver when this executes.
+    // Safe{Wallet} leaves all three at zero, so a set refund is a hidden payout.
+    const set = (label: string) => !/^(0x)?0*$/.test(String(f(label)?.raw ?? '0'))
+    if (set('Gas Price') || set('Gas Token') || set('Refund Receiver')) add('high', safeGasRefund(d, f))
   } else if (d.primaryType === 'SafeMessage') {
     // EIP-1271: the Safe treats this as its own signature.
-    opaque = safeSignsMessage(d.domain.verifyingContract || 'unknown Safe', String(f('Message')?.raw ?? ''), add)
+    const m = safeMessage(req, d, add)
+    knownCalm = m.knownCalm
+    opaque = m.opaque
+    hostRead = !!m.hostRead
   } else if (/^Permit/.test(d.primaryType) || contract === PERMIT2) {
     const raw = f('Value')?.raw ?? f('Amount')?.raw ?? d.fields.find((x) => /Amount$/.test(x.label))?.raw
     // Every amount counts: a batch can hide an unlimited entry behind a small first one.
@@ -1222,23 +1266,33 @@ function evmTypedData(req: SigningRequestInfo, add: (l: RiskLevel, t: string) =>
       for (const p of others) add('critical', `Pays ${p.amount} to ${p.recipient}, which is neither the seller nor a marketplace fee address this computer knows.`)
     }
   }
-  if (d.primaryType === 'SafeTx') {
-    // Safe pays gasPrice × gas in gasToken to refundReceiver when this executes.
-    // Safe{Wallet} leaves all three at zero, so a set refund is a hidden payout.
-    const set = (label: string) => !/^(0x)?0*$/.test(String(f(label)?.raw ?? '0'))
-    if (set('Gas Price') || set('Gas Token') || set('Refund Receiver')) add('high', safeGasRefund(d, f))
+  return { knownCalm, unverified, opaque, safeRecognition, hostRead }
+}
+
+function evmTypedData(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void): Recognition {
+  const d = req.typedDataDecoded
+  if (!d) {
+    add('high', 'This computer could not read this signature request, and your KeepKey shows only a code (hash) for it. You would be signing blind.')
+    return 'unknown'
   }
+  const f = (label: string) => d.fields.find((x) => x.label === label)
+  if (d.operationName === 'x402 EIP-3009 Payment') {
+    add('medium', `Authorizes a payment of ${f('Value')?.value ?? 'an amount'} to ${f('Pay To')?.raw ?? 'another account'}. Anyone holding this signature can collect it until ${f('Valid Before')?.value ?? 'it expires'}.`)
+    return !!req.firmwareVersion && versionCompare(req.firmwareVersion, '7.15.0') >= 0 ? 'shows' : 'unknown'
+  }
+  const { knownCalm, unverified, opaque, safeRecognition, hostRead } = describeTypedDoc(req, d, add)
   const structured = !!req.firmwareVersion && versionCompare(req.firmwareVersion, '7.15.0') >= 0
   if (structured) {
     add('low', 'Your KeepKey will request and display the structured fields that it hashes for this signature.')
     if (safeRecognition === 'known') add('low', "Your KeepKey may show this Safe transaction's call data only as raw hex. The description of it here is from this computer, not from your KeepKey.")
+    if (hostRead) add('low', 'Your KeepKey shows this message only as its hash. The description of it here is from this computer, not from your KeepKey.')
   } else if (knownCalm) {
     // Before 7.15 the device shows a typed signature only as two hash codes.
     add('medium', `${firmwareName(req)} cannot show this ${d.operationName} on the device yet: it shows only the signature's hash codes and needs Advanced Mode to sign. Later firmware shows it. Check the details here.`)
   } else {
     add('high', 'Your KeepKey can only show a code (hash) for this signature, not what it says. You would be signing blind.')
   }
-  return opaque ? 'unknown' : structured ? (safeRecognition === 'known' ? 'known' : unverified ? 'unchecked' : 'shows') : knownCalm ? 'known' : 'unknown'
+  return opaque ? 'unknown' : structured ? (safeRecognition === 'known' || hostRead ? 'known' : unverified ? 'unchecked' : 'shows') : knownCalm ? 'known' : 'unknown'
 }
 
 /** What the typed-data verdict rests on, for the ClearSign report: 'shows'

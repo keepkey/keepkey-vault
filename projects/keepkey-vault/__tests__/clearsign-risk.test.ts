@@ -16,6 +16,7 @@ import { parseSolanaTx, solanaMessageSlice } from '../src/bun/solana-tx'
 import { assessSigningRisk } from '../src/shared/clearsign-risk'
 import type { SigningRequestInfo } from '../src/shared/types'
 import joinFixture from './fixtures/solana/soltoshidice-blackjack-join.json'
+import siweOdos from './fixtures/safe/messages/siwe-odos.json'
 import swap from './fixtures/uniswap/base-ur-usdc-to-eth-swap.json'
 import { applyEvmTxPreview, recognizedTypedDataSpender } from '../src/bun/evm-signing-preview'
 import { decodeEIP712 } from '../src/bun/eip712-decoder'
@@ -620,25 +621,22 @@ describe('message verdicts', () => {
   })
 
   test('a SafeMessage approval for the whole Safe is red: the device shows only its hash', () => {
-    const safe = '0x1234567890123456789012345678901234567890'
-    const msg = typed({
-      primaryType: 'SafeMessage',
-      domain: { chainId: 1, verifyingContract: safe },
-      types: { EIP712Domain: [{ name: 'chainId', type: 'uint256' }, { name: 'verifyingContract', type: 'address' }], SafeMessage: [{ name: 'message', type: 'bytes' }] },
-      message: { message: '0x' + 'ab'.repeat(32) },
-    })
+    // A real Safe{Wallet} SIWE request (fixtures/safe/messages/siwe-odos.json):
+    // SafeMessage.message is hashMessage(text), never the text itself.
+    const safe = siweOdos.typedData.domain.verifyingContract
+    const request = (safeMessageOriginal?: SigningRequestInfo['safeMessageOriginal']) => assessSigningRisk({
+      id: 't', method: '/eth/sign-typed-data', appName: 'dapp', chain: 'eth', from: USER, chainId: 1, firmwareVersion: '7.16.0',
+      typedDataDecoded: decodeEIP712(siweOdos.typedData), safeMessageOriginal,
+    })!
+    const msg = request()
     expect(msg.tier).toBe('red')
     expect(text(msg)).toContain(`Approves a message for your whole Safe (${safe})`)
-    // A readable sign-in is a normal Safe{Wallet} flow: named, quoted, not red.
-    const signIn = typed({
-      primaryType: 'SafeMessage',
-      domain: { chainId: 1, verifyingContract: safe },
-      types: { EIP712Domain: [{ name: 'chainId', type: 'uint256' }, { name: 'verifyingContract', type: 'address' }], SafeMessage: [{ name: 'message', type: 'bytes' }] },
-      message: { message: '0x' + Buffer.from('Sign in to app.example.com\nNonce: 42').toString('hex') },
-    })
+    // With the original the gate verified (safe-message-original.test.ts), a
+    // readable sign-in is a normal Safe{Wallet} flow: named, quoted, not red.
+    const signIn = request({ status: 'text', text: siweOdos.record.message })
     expect(signIn.tier).not.toBe('red')
     expect(text(signIn)).toContain('signs this text as its own')
-    expect(text(signIn)).toContain('Sign in to app.example.com')
+    expect(text(signIn)).toContain('app.odos.xyz wants you to sign in')
   })
 
   // messages:1
