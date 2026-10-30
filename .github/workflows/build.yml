@@ -93,7 +93,7 @@ jobs:
             artifact-suffix: linux-x64
 
           - name: macOS
-            runner: macos-14
+            runner: macos-15
             artifact-suffix: macos
             expected-arch: arm64
 
