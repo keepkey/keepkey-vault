@@ -1,0 +1,18 @@
+{
+ "site": "https://www.swaps.pro",
+ "sell": "eth-usdc",
+ "buy": "eth-eth",
+ "amount": "25000",
+ "route": "CoW",
+ "method": "ETH_SENDTRANSACTION",
+ "note": "from the panel DATA field (ext-swapspro.ts); gas fields not captured",
+ "body": {
+  "from": "0x9858EfFD232B4033E47d90003D41EC34EcaEda94",
+  "to": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+  "value": "0x0",
+  "data": "0x095ea7b3000000000000000000000000c92e8bdf79f0507f65a392b0ab4667716bfe011000000000000000000000000000000000000000000000000000000005d21dba00",
+  "chainId": "0x1",
+  "nonce": "0x7",
+  "gas": "0xea60"
+ }
+}
