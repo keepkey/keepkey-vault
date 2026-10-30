@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from 'bun:test'
+import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test'
 import type { SigningRequestInfo } from '../shared/types'
 import { applyEvmTxPreview, evmPriorityFee, normalizeEvmChainId, typedDataNativelyReviewed } from './evm-signing-preview'
 import { approveSpender, findCertifiedEvmSchema, resolveEvmSchema } from './evm-schema-registry'
@@ -10,9 +10,14 @@ import { evmCallRequiresAdvancedMode } from './evm-signing-policy'
 import { assessSigningRisk } from '../shared/clearsign-risk'
 import { prepareEvmTxSigningInfo } from './evm-presign-report'
 import { runtimeEvmSighash } from './uniswap-runtime-envelope'
+import { testCertifiedEnvelope, trustTestRoot } from '../../__tests__/support/clearsign-test-root'
 
 const originalFetch = globalThis.fetch
 afterEach(() => { globalThis.fetch = originalFetch })
+// Certified envelopes here are signed under a TEST root, trusted for this file.
+let restoreRoot = () => {}
+beforeAll(() => { restoreRoot = trustTestRoot() })
+afterAll(() => restoreRoot())
 
 const USDC_ETH = '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48'
 const USDC_BASE = '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913'
@@ -22,7 +27,7 @@ const word = (hex: string) => hex.padStart(64, '0')
 const transfer = '0xa9059cbb' + word(RECIPIENT) + word('f4240')
 const approve = (spender: string) => '0x095ea7b3' + word(spender.replace(/^0x/, '')) + word('f4240')
 // The envelope's certificate names chain 8453 at bytes 3..6 (schema registry checks it).
-const PAYLOAD = `0x03${'ab'.repeat(2)}00002105${'ab'.repeat(194)}`
+const PAYLOAD = testCertifiedEnvelope(`0200002105${'ab'.repeat(60)}`)
 
 const info = (): SigningRequestInfo => ({ id: 't', method: '/eth/sign-transaction', appName: 'test' })
 
@@ -178,7 +183,7 @@ describe('one rule for certified 0x04 dynamic schemas (REST gate = swap gate)', 
   const PORTALS = '0xbf5a7f3629fb325e2a8453d595ab103465f75e62'
   const DATA = '0xa2e42c65' + '00'.repeat(448)
   /** 0x03 | certificate (chain id at bytes 3..6) | 0x04 body | signature. */
-  const dynamicEnvelope = () => `0x03${'cc'.repeat(2)}00000001${'cc'.repeat(133)}04${'00000001'}${PORTALS.slice(2)}a2e42c65${'00'.repeat(8)}${'ab'.repeat(65)}`
+  const dynamicEnvelope = () => testCertifiedEnvelope(`04${'00000001'}${PORTALS.slice(2)}a2e42c65${'00'.repeat(8)}`)
   const service = () => {
     globalThis.fetch = (async () => Response.json({
       classification: 'VERIFIED', chainId: 1, contract: PORTALS, selector: '0xa2e42c65', method: 'Portals swap',
@@ -454,7 +459,6 @@ describe('certified Uniswap swap (0x07) attach', () => {
   const appSwap = fullyReviewed[0]
   const ethSwap = fullyReviewed.find((v) => v.steps.includes('WRAP_ETH'))
   const unreviewedToken = vectors.find((v) => appShaped(v) && urPrecheck(v.router, v.data, v.value) && !reviewed(v))!
-  const CERT = 'cc'.repeat(139)
 
   /** A worker that signs nothing: it returns the body Desktop expects (or a tampered one). */
   function swapService(seen: any[], tamper?: (tokens: any[]) => any[]) {
@@ -471,7 +475,7 @@ describe('certified Uniswap swap (0x07) attach', () => {
       return new Response(JSON.stringify({
         success: true, classification: 'VERIFIED', version: 7, keyId: 0x80, chainId: body.chainId,
         entry: `eip155:${body.chainId}:${body.contract}:uniswap-ur`, contract: body.contract, selector: body.selector,
-        method: 'execute', signedPayload: `0x03${CERT}${inner}${'ee'.repeat(65)}`, tokens,
+        method: 'execute', signedPayload: testCertifiedEnvelope(inner), tokens,
       }), { status: 200, headers: { 'content-type': 'application/json' } })
     }) as typeof fetch
     return seen
@@ -557,7 +561,7 @@ describe('certified Uniswap swap (0x07) attach', () => {
       const other = '0x23617e59a5925b2a4bf75d73ff6711cd0b29de85'
       const inner = buildEvmDecoderBody(1, other, body.selector, reviewedSwapTokens(1, body.tokens)).toString('hex')
       return Response.json({ classification: 'VERIFIED', keyId: 0x80, chainId: 1, entry: `eip155:1:${body.contract}:uniswap-ur`,
-        contract: body.contract, selector: body.selector, method: 'execute', signedPayload: `0x03${CERT}${inner}${'ee'.repeat(65)}` })
+        contract: body.contract, selector: body.selector, method: 'execute', signedPayload: testCertifiedEnvelope(inner) })
     }) as typeof fetch
     const s = swapInfo(BigInt(ethUsdt.value))
     await applyEvmTxPreview(s, ethUsdt.router, ethUsdt.data, 1, '7.16.0')
@@ -695,7 +699,7 @@ describe('Uniswap V4 through UR 2.1.2 — preview rows and certified attach', ()
       return new Response(JSON.stringify({
         success: true, classification: 'VERIFIED', version: 7, keyId: 0x80, chainId: body.chainId,
         entry: `eip155:${body.chainId}:${body.contract}:uniswap-ur`, contract: body.contract, selector: body.selector,
-        method: 'execute', signedPayload: `0x03${'cc'.repeat(139)}${inner}${'ee'.repeat(65)}`, tokens,
+        method: 'execute', signedPayload: testCertifiedEnvelope(inner), tokens,
       }), { status: 200 })
     }) as typeof fetch
     const s: SigningRequestInfo = { ...info(), value: `0x${ethIn.value.toString(16)}` }

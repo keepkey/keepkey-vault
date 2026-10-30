@@ -7,7 +7,7 @@
 import type { ClearSignProtectionLevel, SigningRequestInfo } from '../shared/types'
 import type { EffectFinding, EffectReport } from '../shared/transaction-effects'
 import { buildClearSignReport, type ClearSignDescriptorEvidence, type ClearSignReport, type ContractRating } from '../shared/clearsign-report'
-import { CERTIFIED_METADATA_KEY_ID } from './evm-certified-schema'
+import { CERTIFIED_METADATA_KEY_ID, describeCertifiedEvmCall } from './evm-certified-schema'
 import { certifiedBodyRefused, certifiedEnvelopeShown, metadataPayloadBytes } from '../shared/certified-evm-envelope'
 import { assessSigningRisk, typedDataRecognition, type RiskLevel } from '../shared/clearsign-risk'
 import { applyEvmTxPreview, attachErc7730Definition } from './evm-signing-preview'
@@ -67,6 +67,12 @@ export async function prepareEvmTxSigningInfo(
         signingInfo.certifiedEvmSchema = certified
         signingInfo.deviceClearSigns = true
         signingInfo.needsBlindSigning = false
+        // A call the local decoder could not read: the card reads it from the certified schema.
+        if (!signingInfo.calldataDecoded || signingInfo.calldataDecoded.source === 'none') {
+          const described = describeCertifiedEvmCall(certified.signedPayload,
+            { to: preview.to, data: preview.data, value: preview.value, chainId: chainIdNum })
+          if (described) signingInfo.calldataDecoded = described
+        }
         console.log(`[REST] Approval preview authenticated by certified schema ${certified.method} (source=${certified.source || 'service'})`)
       }
     } catch (error: any) {

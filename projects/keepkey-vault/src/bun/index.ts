@@ -951,7 +951,10 @@ setClearSignAuditGate(() => engine.isEmulator && !offlineMode && !engine.isPassp
 // device always trusts the production root.
 const emulatorTestRoot = emulatorClearSignTestRoot(process.env, DEFAULT_CLEARSIGN_SERVICE_URL)
 if (emulatorTestRoot) console.warn(`[clearsign] KK_CLEARSIGN_TEST_ROOT=${emulatorTestRoot}: an emulator library that reads it gets certified descriptions (TEST root)`)
-configureProductionRootTrust(() => !engine.isEmulator || (!!emulatorTestRoot && emulatorReadsClearSignTestRoot()))
+configureProductionRootTrust(
+	() => !engine.isEmulator || (!!emulatorTestRoot && emulatorReadsClearSignTestRoot()),
+	() => engine.isEmulator ? emulatorTestRoot : undefined,
+)
 // A hidden wallet's Zcash view key is never written to disk.
 setFvkDiskAllowed(() => !engine.isPassphraseWallet)
 
