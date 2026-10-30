@@ -30,7 +30,7 @@
  * it for this process only (the product default stays production). Each case
  * is also signed blind with AdvancedMode on, and the two signatures must match.
  * Typed data is not run: Desktop never attaches a typed-data definition on 7.16
- * (supportsErc7730TypedData; 7.17 typed data is 10-erc7730-typed-717).
+ * (supportsErc7730TypedData; 7.17 typed data is 11-erc7730-typed-717).
  */
 import { dlopen, FFIType, ptr } from 'bun:ffi'
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'

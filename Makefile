@@ -23,7 +23,7 @@ include .env
 export ELECTROBUN_DEVELOPER_ID ELECTROBUN_TEAMID ELECTROBUN_APPLEID ELECTROBUN_APPLEIDPASS
 endif
 
-.PHONY: release-sums clearsign-worker-test sync-asset-data clearsign-worker-rehearsal-guard clearsign-worker-rehearsal-deploy install dev dev-hmr build build-stable build-canary build-signed patch-arm64-release-tar prune-bundle dmg clean help vault sign-check notary-check verify verify-entitlements publish release upload-dmg upload-all-dmgs sign-release sign-release-intel verify-arch audit-macos-bundle submodules modules-install modules-build device-protocol-build modules-clean audit build-zcash-cli build-zcash-cli-debug build-zcash-cli-intel test test-unit test-rest test-sign-gating test-zcash-cli test-emu test-emu-erc7730 build-intel build-signed-intel build-electrobun-x64-core build-electrobun-arm64-core prepare-electrobun-arm64-core publish-electrobun-x64-core build-electrobun-linux-x64-core preflight build-emulator build-emulator-windows build-emulator-macos-release build-emulator-release clean-emulator test-emu-python
+.PHONY: release-sums clearsign-worker-test sync-asset-data clearsign-worker-rehearsal-guard clearsign-worker-rehearsal-deploy install dev dev-hmr build build-stable build-canary build-signed patch-arm64-release-tar prune-bundle dmg clean help vault sign-check notary-check verify verify-entitlements publish release upload-dmg upload-all-dmgs sign-release sign-release-intel verify-arch audit-macos-bundle submodules modules-install modules-build device-protocol-build modules-clean audit build-zcash-cli build-zcash-cli-debug build-zcash-cli-intel test test-unit test-rest test-sign-gating test-zcash-cli test-emu test-emu-erc7730 test-emu-erc7730-typed build-intel build-signed-intel build-electrobun-x64-core build-electrobun-arm64-core prepare-electrobun-arm64-core publish-electrobun-x64-core build-electrobun-linux-x64-core preflight build-emulator build-emulator-windows build-emulator-macos-release build-emulator-release clean-emulator test-emu-python
 
 # --- Submodules (auto-init on fresh worktrees/clones) ---
 
@@ -463,6 +463,17 @@ test-emu-erc7730:
 	KK_ERC7730_LIMIT="$(ERC7730_LIMIT)" KK_ERC7730_FILTER="$(ERC7730_FILTER)" KK_ERC7730_SHARD="$(or $(ERC7730_SHARD),0/1)" KK_ERC7730_REPORT="$(ERC7730_REPORT)" \
 	KK_ERC7730_MODE="$(ERC7730_MODE)" \
 	bun test --timeout 300000 tests/emulator/09-erc7730.test.ts
+
+# Typed-data ERC-7730 on a 7.17 kkemu over UDP only, never USB
+# (tests/emulator/11-erc7730-typed-717.test.ts). Start kkemu from an empty
+# directory first: KEEPKEY_UDP_PORT=<port> KK_CLEARSIGN_TEST_ROOT=<fixture's test root> kkemu
+#   make test-emu-erc7730-typed KK_EMU_UDP_PORT=13744 ERC7730_TYPED_FIXTURE=<signed-catalog-4-TEST.json>
+ERC7730_TYPED_FIXTURE ?= $(HOME)/keepkey-audit-rigs/issuer/batch4/emu-dryrun/signed-catalog-4-TEST.json
+test-emu-erc7730-typed:
+	@test -n "$(KK_EMU_UDP_PORT)" || (echo "ERROR: set KK_EMU_UDP_PORT to the kkemu main UDP port"; exit 1)
+	@test -f "$(ERC7730_TYPED_FIXTURE)" || (echo "ERROR: ERC-7730 fixture not found: $(ERC7730_TYPED_FIXTURE)"; exit 1)
+	cd $(PROJECT_DIR) && KK_FORCE_UDP=1 KK_EMU_UDP_PORT="$(KK_EMU_UDP_PORT)" KK_ERC7730_TYPED_FIXTURE="$(ERC7730_TYPED_FIXTURE)" \
+	bun test --timeout 300000 tests/emulator/11-erc7730-typed-717.test.ts
 
 # --- Emulator (developer feature) ---
 # Build the native emulator from the firmware submodule on the current
