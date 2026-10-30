@@ -1,0 +1,202 @@
+{
+ "_source": {
+  "capture": "swaps.pro CoW route, USDC to ETH, ETH_SIGNTYPEDDATA_V4",
+  "file": "docs/clearsign-case-studies/swapspro-20261029/requests/order-cow-usdc.json (keepkey-vault-v11 checkout)",
+  "captured": "2026-10-29"
+ },
+ "site": "https://www.swaps.pro",
+ "sell": "eth-usdc",
+ "buy": "eth-eth",
+ "amount": "25000",
+ "route": "CoW",
+ "method": "ETH_SIGNTYPEDDATA_V4",
+ "typedData": {
+  "types": {
+   "EIP712Domain": [
+    {
+     "name": "name",
+     "type": "string"
+    },
+    {
+     "name": "version",
+     "type": "string"
+    },
+    {
+     "name": "chainId",
+     "type": "uint256"
+    },
+    {
+     "name": "verifyingContract",
+     "type": "address"
+    }
+   ],
+   "Order": [
+    {
+     "name": "sellToken",
+     "type": "address"
+    },
+    {
+     "name": "buyToken",
+     "type": "address"
+    },
+    {
+     "name": "receiver",
+     "type": "address"
+    },
+    {
+     "name": "sellAmount",
+     "type": "uint256"
+    },
+    {
+     "name": "buyAmount",
+     "type": "uint256"
+    },
+    {
+     "name": "validTo",
+     "type": "uint32"
+    },
+    {
+     "name": "appData",
+     "type": "bytes32"
+    },
+    {
+     "name": "feeAmount",
+     "type": "uint256"
+    },
+    {
+     "name": "kind",
+     "type": "string"
+    },
+    {
+     "name": "partiallyFillable",
+     "type": "bool"
+    },
+    {
+     "name": "sellTokenBalance",
+     "type": "string"
+    },
+    {
+     "name": "buyTokenBalance",
+     "type": "string"
+    }
+   ]
+  },
+  "primaryType": "Order",
+  "domain": {
+   "name": "Gnosis Protocol",
+   "version": "v2",
+   "chainId": 1,
+   "verifyingContract": "0x9008D19f58AAbD9eD0D60971565AA8510560ab41"
+  },
+  "message": {
+   "sellToken": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+   "buyToken": "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE",
+   "receiver": "0x9858EfFD232B4033E47d90003D41EC34EcaEda94",
+   "sellAmount": "25000000000",
+   "buyAmount": "9487278979799916817",
+   "validTo": 1793308500,
+   "appData": "0x048680e79dfa12d06c2362b19faa34b7c754a3ed153d204656c48f82e84d4e60",
+   "feeAmount": "0",
+   "kind": "sell",
+   "partiallyFillable": false,
+   "sellTokenBalance": "erc20",
+   "buyTokenBalance": "erc20"
+  }
+ },
+ "body": {
+  "address": "0x9858EfFD232B4033E47d90003D41EC34EcaEda94",
+  "typedData": {
+   "types": {
+    "EIP712Domain": [
+     {
+      "name": "name",
+      "type": "string"
+     },
+     {
+      "name": "version",
+      "type": "string"
+     },
+     {
+      "name": "chainId",
+      "type": "uint256"
+     },
+     {
+      "name": "verifyingContract",
+      "type": "address"
+     }
+    ],
+    "Order": [
+     {
+      "name": "sellToken",
+      "type": "address"
+     },
+     {
+      "name": "buyToken",
+      "type": "address"
+     },
+     {
+      "name": "receiver",
+      "type": "address"
+     },
+     {
+      "name": "sellAmount",
+      "type": "uint256"
+     },
+     {
+      "name": "buyAmount",
+      "type": "uint256"
+     },
+     {
+      "name": "validTo",
+      "type": "uint32"
+     },
+     {
+      "name": "appData",
+      "type": "bytes32"
+     },
+     {
+      "name": "feeAmount",
+      "type": "uint256"
+     },
+     {
+      "name": "kind",
+      "type": "string"
+     },
+     {
+      "name": "partiallyFillable",
+      "type": "bool"
+     },
+     {
+      "name": "sellTokenBalance",
+      "type": "string"
+     },
+     {
+      "name": "buyTokenBalance",
+      "type": "string"
+     }
+    ]
+   },
+   "primaryType": "Order",
+   "domain": {
+    "name": "Gnosis Protocol",
+    "version": "v2",
+    "chainId": 1,
+    "verifyingContract": "0x9008D19f58AAbD9eD0D60971565AA8510560ab41"
+   },
+   "message": {
+    "sellToken": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+    "buyToken": "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE",
+    "receiver": "0x9858EfFD232B4033E47d90003D41EC34EcaEda94",
+    "sellAmount": "25000000000",
+    "buyAmount": "9487278979799916817",
+    "validTo": 1793308500,
+    "appData": "0x048680e79dfa12d06c2362b19faa34b7c754a3ed153d204656c48f82e84d4e60",
+    "feeAmount": "0",
+    "kind": "sell",
+    "partiallyFillable": false,
+    "sellTokenBalance": "erc20",
+    "buyTokenBalance": "erc20"
+   }
+  }
+ }
+}

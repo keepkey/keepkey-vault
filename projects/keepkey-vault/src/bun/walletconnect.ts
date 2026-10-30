@@ -936,14 +936,15 @@ export class WalletConnectManager {
   ): Promise<string> {
     const signingId = crypto.randomUUID()
 
+    const from = this.callbacks.getEvmAddressInfo()?.address
     const signingInfo: SigningRequestInfo = {
       id: signingId,
       method: '/eth/sign-typed-data',
       appName,
       chain: 'eth',
-      from: this.callbacks.getEvmAddressInfo()?.address,
+      from,
       chainId: typedData.domain?.chainId ? Number(typedData.domain.chainId) : chainId,
-      typedDataDecoded: decodeEIP712(typedData),
+      typedDataDecoded: decodeEIP712(typedData, from),
     }
     signingInfo.recognizedSpender = recognizedTypedDataSpender(signingInfo.typedDataDecoded, signingInfo.chainId)
 

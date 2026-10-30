@@ -27,6 +27,7 @@ import { versionCompare } from './firmware-versions'
 import { base64PayloadBytes, certifiedEnvelopeShown, evmSignedChainId as evmChainId } from './certified-evm-envelope'
 import { typedDataSpendAmounts } from './typedDataRows'
 import { knownSpenderName } from './evm-known-spenders'
+import { nftMarketplaceOperator } from './nft-marketplaces'
 
 export type RiskLevel = 'low' | 'medium' | 'high' | 'critical'
 export interface RiskReason { level: RiskLevel; text: string }
@@ -310,6 +311,12 @@ function evmTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void):
         ? `Standard Permit2 setup: gives canonical Permit2 persistent access to your ${token?.symbol ?? `token at ${to}`}. You can revoke this allowance later.`
         : text)
     }
+  } else if (sel === '0xa22cb465' && addrWord(0) && num(1) !== null && num(1) !== 0n && nftMarketplaceOperator(chainId, addrWord(0)!)) {
+    // Approving a marketplace's own transfer operator is how listing on it is
+    // set up: named, and not danger. Any other operator stays below.
+    if (!req.deviceClearSigns) recognition = 'known'
+    const market = nftMarketplaceOperator(chainId, addrWord(0)!)!
+    add(spendPermissionLevel(market, true, true), `Standard marketplace setup: lets ${market} (${addrWord(0)}) move ALL of your NFTs in collection ${to} when a listing you sign sells. You can revoke this later.${req.deviceClearSigns ? '' : ` ${notOnThisFirmware('NFT approvals', req.firmwareVersion)}`}`)
   } else if (sel === '0xa22cb465' && addrWord(0) && num(1) !== null) {
     add(num(1) === 0n ? 'low' : 'critical', num(1) === 0n
       ? `Removes ${addrWord(0)}'s access to your NFTs in collection ${to}.`
@@ -559,8 +566,47 @@ function evmTypedData(req: SigningRequestInfo, add: (l: RiskLevel, t: string) =>
         : `Lets ${who} spend ${howMuch}, now and later. This signature alone is enough; no transaction from you is needed.`)
       knownCalm = identified && ORDER.indexOf(level) <= ORDER.indexOf('medium')
     }
+  } else if (d.operationName === 'CoW Protocol Order' && d.isKnownType) {
+    // The decoder matched it at the pinned GPv2Settlement on this chain.
+    const from = req.from?.toLowerCase()
+    const receiver = String(f('Receiver')?.raw ?? '').toLowerCase()
+    // A zero receiver pays the order's owner, the account signing it.
+    const own = /^0x0{40}$/.test(receiver) || (!!from && receiver === from)
+    const sell = f('Sell')?.value ?? f('Sell at most')?.value
+    const buy = f('Receive at least')?.value ?? f('Receive')?.value
+    const deal = f('Order Kind')?.raw === 'sell' ? `sells ${sell} for at least ${buy}` : `buys ${buy} for at most ${sell}`
+    add('medium', `CoW Protocol swap order: ${deal}, paid to ${own ? 'this wallet' : receiver}, valid until ${f('Valid Until')?.value}. Nothing moves until a solver fills it at this price or better.`)
+    if (!own) add('high', `The tokens bought go to ${receiver}, which is NOT the account signing this (${from || 'unknown'}).`)
+    const unnamed = [sell, buy].filter((v) => / base units of /.test(v ?? ''))
+    if (unnamed.length) add('medium', `This computer cannot name ${unnamed.length === 2 ? 'either token' : 'one of the tokens'} in this order, so ${unnamed.length === 2 ? 'those amounts are' : 'that amount is'} in base units.`)
+    if (!/^(0x)?0*$/.test(String(f('Fee')?.raw ?? '0'))) add('low', `Fee: ${f('Fee')!.value}, taken from what you sell.`)
+    knownCalm = own
   } else if (/^(OrderComponents|BulkOrder)$/.test(d.primaryType)) {
-    add('critical', 'This is a marketplace order. Anyone holding this signature can take the listed items at the price in the order.')
+    const listing = d.isKnownType ? d.seaportListing : undefined
+    const from = req.from?.toLowerCase()
+    const others = listing?.payments.filter((p) => p.role === 'other') ?? []
+    const own = listing?.payments.filter((p) => p.role === 'offerer') ?? []
+    const seller = !!listing && !!from && listing.offerer.toLowerCase() === from
+    const proceeds = own.reduce((sum, p) => sum + BigInt(p.raw), 0n)
+    // Under a millionth of a coin or token is no price: it is how a phishing
+    // listing takes the NFT for nothing. Unnamed currency: worth unknown.
+    const named = listing?.decimals !== undefined
+    const dust = named && proceeds < 10n ** BigInt(Math.max(listing!.decimals! - 6, 0))
+    // A normal listing: the signer sells its own NFTs, is paid a real amount in
+    // a currency this computer names, and every other payee is a marketplace
+    // fee address it knows or the collection's own creator fee.
+    if (listing && seller && own.length > 0 && others.length === 0 && named && !dust) {
+      const fees = listing.payments.filter((p) => p.role === 'opensea-fee')
+      const creator = listing.payments.filter((p) => p.role === 'creator-fee')
+      add('medium', `Seaport listing: sells ${listing.items.join(', ')} for ${listing.total}. You receive ${own.map((p) => p.amount).join(' + ')}${fees.length ? `, and ${fees.map((p) => p.amount).join(' + ')} goes to OpenSea's fee address` : ''}${creator.length ? `, and ${creator.map((p) => p.amount).join(' + ')} goes to the creator fee address the collection names on chain (${creator[0].recipient})` : ''}. Anyone can buy at this price until ${listing.endTime}; nothing moves until a buyer pays it.`)
+      knownCalm = true
+    } else {
+      add('critical', 'This is a marketplace order. Anyone holding this signature can take the listed items at the price in the order.')
+      if (listing && seller && proceeds === 0n) add('critical', `Pays you nothing for ${listing.items.join(', ')}. A real listing pays the seller.`)
+      else if (listing && seller && dust) add('critical', `Pays you only ${own.map((p) => p.amount).join(' + ')} for ${listing.items.join(', ')}. That is not a real price.`)
+      if (listing && !named) add('high', `Paid in a token this computer cannot name (${listing.total}), so it cannot tell what this price is worth.`)
+      for (const p of others) add('critical', `Pays ${p.amount} to ${p.recipient}, which is neither the seller nor a marketplace fee address this computer knows.`)
+    }
   }
   if (d.primaryType === 'SafeTx') {
     // Safe pays gasPrice × gas in gasToken to refundReceiver when this executes.
@@ -579,6 +625,12 @@ function evmTypedData(req: SigningRequestInfo, add: (l: RiskLevel, t: string) =>
     add('high', 'Your KeepKey can only show a code (hash) for this signature, not what it says. You would be signing blind.')
   }
   return opaque ? 'unknown' : structured ? 'shows' : knownCalm ? 'known' : 'unknown'
+}
+
+/** What the typed-data verdict rests on, for the ClearSign report: 'shows'
+ *  only when the device shows the meaning, not raw hex standing for it. */
+export function typedDataRecognition(req: SigningRequestInfo): Recognition {
+  return evmTypedData(req, () => {})
 }
 
 function evmMessage(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void): Recognition {

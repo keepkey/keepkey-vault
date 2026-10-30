@@ -1020,6 +1020,21 @@ export interface EIP712DecodedInfo {
   protocolIdentityVerified?: boolean
   /** Full host-computed digests for comparison with legacy device screens. */
   hashes?: { domainHash: string; messageHash?: string }
+  /** A Seaport 1.6 order shaped like a listing: only NFTs offered, every
+   *  payment in one currency at a fixed price. Who each payment goes to.
+   *  `decimals` is set only when this computer can name the currency; `nft`
+   *  only when a single NFT is offered. 'creator-fee' is set after the
+   *  collection's own ERC-2981 royaltyInfo named that payee and amount. */
+  seaportListing?: {
+    offerer: string
+    items: string[]
+    total: string
+    totalRaw: string
+    decimals?: number
+    nft?: { token: string; id: string }
+    payments: Array<{ recipient: string; amount: string; raw: string; role: 'offerer' | 'opensea-fee' | 'creator-fee' | 'other' }>
+    endTime: string
+  }
 }
 
 /**
