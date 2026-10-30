@@ -487,6 +487,17 @@ function thor714Confirms(data: string, chainId: number | undefined, selector: st
   const native = /^0{64}$/.test(data.slice(10 + 64, 10 + 128))
   return native || BigInt(`0x${data.slice(10 + 128, 10 + 192)}`) < 10n ** 28n
 }
+/** A deposit to a router Desktop knows that 7.14.x refuses outright: the
+ *  device takes every deposit selector (thor_isThorchainTx), and when
+ *  thor_confirmThorTx refuses the memo it cancels, AdvancedMode or not.
+ *  7.15+ signs it only for a router it pins (not the legacy Maya router). */
+export function thor714Refuses(to: string | undefined, data: string | undefined, chainId: number | undefined, firmwareVersion: string | undefined): boolean {
+  if (!to || !data || data.length < 10 || (data.length - 2) / 2 > FIRMWARE_INITIAL_CHUNK_BYTES) return false
+  const selector = data.slice(0, 10).toLowerCase()
+  return firmwareVersion?.split('.').slice(0, 2).join('.') === THOR_UNPINNED_LINE && THOR_MAYA_DEPOSIT.has(selector)
+    && knownDepositRouter(to.toLowerCase(), chainId) && !thor714Confirms(data, chainId, selector)
+}
+
 // Display-only: THORChain's Base and BSC routers decode for the overlay on
 // every firmware; whether it is native is decided by the tables above. Each is
 // the router thornode publishes for that chain (GET /thorchain/inbound_addresses)

@@ -57,9 +57,14 @@ const U64_MAX = (1n << 64n) - 1n
 /** A protocol Desktop knows and decodes in full, on firmware that cannot show
  *  it yet. Owner rule: known is normal, so say "not on this firmware yet",
  *  not "signing blind". The device still needs AdvancedMode for raw data. */
-function notOnThisFirmware(what: string, fw?: string): string {
-  return `${fw ? `KeepKey firmware ${fw}` : 'This KeepKey firmware'} cannot show ${what} on the device yet, so the device shows raw data and needs Advanced Mode to sign. Later firmware may add it. Check the details here.`
+function notOnThisFirmware(what: string, req: SigningRequestInfo): string {
+  // A request this firmware refuses outright gets one reason for that
+  // (assessSigningRisk); AdvancedMode would not help, so it is not mentioned.
+  if (req.firmwareCannotSign) return 'Check the details here.'
+  return `${firmwareName(req)} cannot show ${what} on the device yet, so the device shows raw data and needs Advanced Mode to sign. Later firmware may add it. Check the details here.`
 }
+
+const firmwareName = (req: SigningRequestInfo) => req.firmwareVersion ? `KeepKey firmware ${req.firmwareVersion}` : 'This KeepKey firmware'
 
 export const shortAddr = (a: string) => (a.length > 12 ? `${a.slice(0, 4)}…${a.slice(-4)}` : a)
 
@@ -274,7 +279,7 @@ function jupiterSwap(ix: SolanaTxDecodedInstruction, d: SolanaTxDecodedInfo, req
   if (outHeld && outLabel && outHeld.mint !== outLabel) add('high', `This swap says it pays out token ${outLabel}, but the account that receives it holds token ${outHeld.mint}.`)
   const pct = (bps: bigint) => `${Number(bps) / 100}%`
   const venues = arg(ix, 'route') ? `, routed through ${arg(ix, 'route')}` : ''
-  const fw = notOnThisFirmware('Jupiter swaps', req.firmwareVersion)
+  const fw = notOnThisFirmware('Jupiter swaps', req)
   if (quotedOut !== undefined) {
     const min = slip >= 10_000n ? 0n : quotedOut * (10_000n - slip) / 10_000n
     const amountIn = a('inAmount')
@@ -355,7 +360,7 @@ type Recognition = 'shows' | 'known' | 'used' | 'unknown'
 /** `notShown` says the device cannot show a protocol yet; a call inside a
  *  SafeTx passes its own (the card says that once for the whole SafeTx). */
 function evmTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void,
-  notShown = (what: string) => notOnThisFirmware(what, req.firmwareVersion)): Recognition {
+  notShown = (what: string) => notOnThisFirmware(what, req)): Recognition {
   const to = (req.to ?? '').toLowerCase()
   const chainId = evmChainId(req.chainId)
   const rawData = typeof req.data === 'string' && req.data !== '' ? req.data : '0x'
@@ -431,7 +436,7 @@ function evmTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void,
     // set up: named, and not danger. Any other operator stays below.
     if (!req.deviceClearSigns) recognition = 'known'
     const market = nftMarketplaceOperator(chainId, addrWord(0)!)!
-    add(spendPermissionLevel(market, true, true), `Standard marketplace setup: lets ${market} (${addrWord(0)}) move ALL of your NFTs in collection ${to} when a listing you sign sells. You can revoke this later.${req.deviceClearSigns ? '' : ` ${notOnThisFirmware('NFT approvals', req.firmwareVersion)}`}`)
+    add(spendPermissionLevel(market, true, true), `Standard marketplace setup: lets ${market} (${addrWord(0)}) move ALL of your NFTs in collection ${to} when a listing you sign sells. You can revoke this later.${req.deviceClearSigns ? '' : ` ${notOnThisFirmware('NFT approvals', req)}`}`)
   } else if (sel === '0xa22cb465' && addrWord(0) && num(1) !== null) {
     add(num(1) === 0n ? 'low' : 'critical', num(1) === 0n
       ? `Removes ${addrWord(0)}'s access to your NFTs in collection ${to}.`
@@ -479,7 +484,7 @@ function evmTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void,
     add(req.deviceClearSigns && thorSwap ? 'low' : 'medium', req.deviceClearSigns
       ? `${what}. Your KeepKey shows this deposit on its screen; check it there.`
       : `${what}. ${notShown('this deposit')}`)
-    thorVault(req.thorVault, thorProtocol, field('Vault') ?? '', String(req.to ?? ''), add)
+    thorVault(req.thorVault, thorProtocol, field('Vault') ?? '', String(req.to ?? ''), req.firmwareVersion, add)
   } else if (urSwap && !req.deviceClearSigns) {
     recognition = 'known'
     add('medium', `${urSwap} through the Uniswap Universal Router, a contract KeepKey has reviewed. ${notShown('this swap')}`)
@@ -535,11 +540,18 @@ function thorDepositProtocol(req: SigningRequestInfo): 'THORChain' | 'Mayachain'
 }
 
 /** The vault a router deposit pays, against the network's active vaults
- *  (bun/thor-vaults.ts). Advice: the device labels every vault UNVERIFIED. */
-function thorVault(c: ThorVaultCheck | undefined, protocol: string, vault: string, router: string, add: (l: RiskLevel, t: string) => void) {
+ *  (bun/thor-vaults.ts). Advice: the device cannot check a vault. 7.16 labels
+ *  every vault UNVERIFIED; 7.14 shows "Using Asgard vault", which is no check. */
+function thorVault(c: ThorVaultCheck | undefined, protocol: string, vault: string, router: string, fw: string | undefined, add: (l: RiskLevel, t: string) => void) {
   const name = protocol === 'Mayachain' ? 'Maya' : protocol
   if (c?.status === 'current') {
-    add('low', `Pays vault ${vault}, one of ${name}'s active ${c.chain} vaults in all ${c.sources} ${name} sources this computer asked. Your KeepKey cannot check vaults itself, so it labels this one UNVERIFIED.`)
+    // The 7.15 builds disagree (release/7.15 "Using Asgard vault", 7.15-b6
+    // "Pays UNVERIFIED vault"), so 7.15 names no screen.
+    const label = fw && versionCompare(fw, '7.15.0') < 0
+      ? `its "Using Asgard vault" screen shows the address but is not a check`
+      : fw && versionCompare(fw, '7.16.0') >= 0 ? 'it labels this one UNVERIFIED'
+      : 'its screen shows the address but is not a check'
+    add('low', `Pays vault ${vault}, one of ${name}'s active ${c.chain} vaults in all ${c.sources} ${name} sources this computer asked. Your KeepKey cannot check vaults itself, so ${label}.`)
   } else if (c?.status === 'retiring') {
     add('medium', `Pays vault ${vault}, which ${name} is retiring: every ${name} source this computer asked lists it as retiring on ${c.chain}. ${name} still accepts deposits to it while it moves funds to the new vaults; a fresh quote would use an active vault. Your KeepKey cannot check vaults itself.`)
   } else if (c?.status === 'not-current') {
@@ -660,7 +672,7 @@ function relayDeposit(d: RelayDeposit, req: SigningRequestInfo, decodedSent: str
  *  device shows raw data. A normal swap back to the signer is calm; output or
  *  leftovers going to anyone else is not normal. */
 function decodedSwap(req: SigningRequestInfo, field: (n: string) => string | undefined, add: (l: RiskLevel, t: string) => void,
-  notShown = (what: string) => notOnThisFirmware(what, req.firmwareVersion)) {
+  notShown = (what: string) => notOnThisFirmware(what, req)) {
   const from = (req.from ?? '').toLowerCase()
   const protocol = field('Protocol') ?? 'this protocol'
   const dest = field('Output destination') ?? ''
@@ -1054,7 +1066,9 @@ function evmTypedData(req: SigningRequestInfo, add: (l: RiskLevel, t: string) =>
       const unlimited = amounts.filter((a) => a.unlimited)
       const symbols = [...new Set(unlimited.map((a) => a.symbol))]
       const named = unlimited.length > 0 && symbols.every(Boolean)
-      const howMuch = all ? `ALL of your ${named ? symbols.join(' and ') : 'tokens'}`
+      // One unnamed token (a PermitSingle) is that token, not every token you hold.
+      const howMuch = all ? (named ? `ALL of your ${symbols.join(' and ')}`
+        : amounts.length <= 1 && token ? `ALL of token ${f('Token')!.raw}` : 'ALL of your tokens')
         : amounts.length ? `up to ${amounts.map((a) => a.text).join(' and ')}`
         : raw !== undefined ? `up to ${raw} of your tokens` : 'some of your tokens'
       // A UniswapX order to the reactor the decoder verified, paying out only
@@ -1136,7 +1150,8 @@ function evmTypedData(req: SigningRequestInfo, add: (l: RiskLevel, t: string) =>
     add('low', 'Your KeepKey will request and display the structured fields that it hashes for this signature.')
     if (safeRecognition === 'known') add('low', "Your KeepKey may show this Safe transaction's call data only as raw hex. The description of it here is from this computer, not from your KeepKey.")
   } else if (knownCalm) {
-    add('medium', notOnThisFirmware(`this ${d.operationName}`, req.firmwareVersion))
+    // Before 7.15 the device shows a typed signature only as two hash codes.
+    add('medium', `${firmwareName(req)} cannot show this ${d.operationName} on the device yet: it shows only the signature's hash codes and needs Advanced Mode to sign. Later firmware shows it. Check the details here.`)
   } else {
     add('high', 'Your KeepKey can only show a code (hash) for this signature, not what it says. You would be signing blind.')
   }
@@ -1182,12 +1197,23 @@ function tronTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void)
   const t = req.tronDecoded
   if (t) {
     const unverified = t.kind === 'TRC-20 transfer' && !/ USDT$/.test(t.amount)
-    add(unverified ? 'medium' : 'low', `Sends ${t.amount} to ${t.to}.${unverified ? ` This computer does not recognize token ${t.tokenContract}.` : ''} Your KeepKey shows this transfer; check it there.`)
+    // Only the REST gate's firmware check says the device shows it (7.15+,
+    // TRX or a token in its table); 7.14 blind-signs every transfer. From 7.16
+    // a TRC-20 outside its table is "TRON Blind Sign" behind AdvancedMode, and
+    // then the device shows the contract, base units and recipient.
+    const shown = req.requiresAdvancedMode === false
+    const fieldsAfterWarning = !shown && t.kind === 'TRC-20 transfer'
+      && !!req.firmwareVersion && versionCompare(req.firmwareVersion, '7.16.0') >= 0
+    add(unverified || !shown ? 'medium' : 'low', `Sends ${t.amount} to ${t.to}.${unverified ? ` This computer does not recognize token ${t.tokenContract}.` : ''} ${shown
+      ? 'Your KeepKey shows this transfer; check it there.'
+      : fieldsAfterWarning
+        ? `${firmwareName(req)} does not know this token: it warns "TRON Blind Sign" and needs Advanced Mode, then shows the token contract, the amount in base units and the recipient. Check those on your KeepKey.`
+        : `${firmwareName(req)} cannot show this transfer on the device: it signs it blind, without the amount or recipient, and needs Advanced Mode. Check them here.`}`)
     if (t.minimumOutput === 'NO MINIMUM IN SIGNED MEMO') add('high', 'Sets no minimum, so this swap can pay you back almost nothing.')
-    return 'shows'
+    return shown ? 'shows' : 'known'
   }
   const c = req.tronCall
-  const fw = (what: string) => add('medium', notOnThisFirmware(what, req.firmwareVersion))
+  const fw = (what: string) => add('medium', notOnThisFirmware(what, req))
   if (!c) {
     add('high', 'KeepKey cannot read this transaction at all. You would be signing blind.')
     return 'unknown'
@@ -1394,12 +1420,12 @@ export function assessSigningRisk(req: SigningRequestInfo): RiskAssessment | nul
       && d.instructions.every((i) => (i.status === 'known' && !i.note) || SOLANA_MEMO_PROGRAMS.has(i.programId))
     // Only a firmware check that ran says the device shows it: a caller that
     // never asked (no firmware version) leaves requiresAdvancedMode unset.
-    const firmwareShows = d.instructions.every(solanaFirmwareShows) && req.requiresAdvancedMode === false
+    const firmwareShows = d.instructions.every(solanaFirmwareShows) && req.requiresAdvancedMode === false && !req.firmwareCannotSign
     recognition = req.deviceClearSigns || (decoded && firmwareShows) ? 'shows'
       : decoded ? 'known' : 'unknown'
     // Decoded here but not on the device: say so even when the steps above
     // read calm, so a named send is not taken for a device-shown one.
-    if (recognition === 'known' && !reasons.some((r) => r.text.includes('raw data'))) {
+    if (recognition === 'known' && !req.firmwareCannotSign && !reasons.some((r) => r.text.includes('raw data'))) {
       add('low', 'This computer decodes every step of this transaction. Your KeepKey shows it as raw data.')
     } else if (reasons.length === 0 && recognition === 'shows') {
       add('low', 'Your KeepKey shows every step of this transaction.')
@@ -1462,6 +1488,13 @@ export function assessSigningRisk(req: SigningRequestInfo): RiskAssessment | nul
   } else {
     return null
   }
+  // The device refuses it whatever AdvancedMode is set to: promise an update
+  // only where the newest firmware clear-signs it.
+  if (req.firmwareCannotSign) {
+    add('medium', `${firmwareName(req)} cannot sign this: your KeepKey will refuse it. ${req.firmwareUpdateClearSigns
+      ? 'Updating your KeepKey firmware fixes this.'
+      : 'Newer firmware does not show it on the device either.'}`)
+  }
 
   // Last, and deliberately at 'low': a simulation is an estimate this computer
   // made, so it may add an answer but never change the verdict above. The level
@@ -1474,5 +1507,8 @@ export function assessSigningRisk(req: SigningRequestInfo): RiskAssessment | nul
   reasons.sort((a, b) => ORDER.indexOf(b.level) - ORDER.indexOf(a.level))
   const tier: SigningTier = ORDER.indexOf(level) >= ORDER.indexOf('high') || recognition === 'unknown' ? 'red'
     : recognition === 'shows' ? 'green' : 'yellow'
-  return { level, tier, headline: tier === 'yellow' && recognition === 'used' ? USED_BEFORE_HEADLINE : TIER_HEADLINE[tier], reasons }
+  const headline = req.firmwareCannotSign
+    ? `${firmwareName(req)} cannot sign this${req.firmwareUpdateClearSigns ? '. Update your firmware' : ''}`
+    : tier === 'yellow' && recognition === 'used' ? USED_BEFORE_HEADLINE : TIER_HEADLINE[tier]
+  return { level, tier, headline, reasons }
 }
