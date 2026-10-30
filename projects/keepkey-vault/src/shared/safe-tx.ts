@@ -4,14 +4,13 @@
  * https://github.com/safe-global/safe-deployments/tree/685f22be940739259cfc4148db3df7048f39a4e8/src/assets
  * for the EVM chains Desktop supports. Every address was checked on 2026-10-29
  * with eth_getCode on each chain listed: keccak256 of the code equals the
- * codeHash in that manifest. Robinhood (4663) is left out: no public RPC
- * answered, so nothing there is checked.
+ * codeHash in that manifest (Robinhood 4663 via robinhood-rpc.publicnode.com).
  *
  * Advice for the approval card only. A Safe can delegatecall any address; a
  * pinned one is Safe's own code, so the card can say what it does.
  */
 
-const CHAINS = [1, 10, 56, 100, 137, 143, 8453, 42161, 43114]
+const CHAINS = [1, 10, 56, 100, 137, 143, 4663, 8453, 42161, 43114]
 
 export type SafeContractKind = 'multisend' | 'multisend-call-only' | 'sign-message-lib' | 'migration'
   | 'to-l2-migration' | 'to-l2-setup' | 'singleton' | 'singleton-l2' | 'fallback-handler'
@@ -87,4 +86,13 @@ export function decodeMultiSend(data: string): SafeInnerCall[] | null {
     i += 170 + size * 2
   }
   return calls.length > 0 ? calls : null
+}
+
+/** The calls a SafeTx makes, in the order the approval card reads them: the
+ *  call itself (operation 0), or each entry of a batch through a pinned
+ *  MultiSend. Null for anything else. */
+export function safeTxCalls(chainId: number, to: string, operation: number, value: bigint, data: string): SafeInnerCall[] | null {
+  if (operation === 0) return [{ operation, to, value, data }]
+  const kind = safeContract(chainId, to)?.kind
+  return kind === 'multisend' || kind === 'multisend-call-only' ? decodeMultiSend(data) : null
 }

@@ -279,6 +279,7 @@ import { classifyEffectExposure, observeEvmCall, observeEvmTypedData, observeMal
 import { getClearSignProtectionCaseStudies } from "./clearsign-case-studies"
 import { getEvmSimulationEndpoint, getEvmSimulationRpcUrls } from "./evm-simulation-config"
 import { addContractFacts } from "./contract-facts"
+import { attachSafeCallPreviews } from "./evm-signing-preview"
 import { initDb, getDb, factoryResetDb, getCustomTokens, addCustomToken as dbAddCustomToken, removeCustomToken as dbRemoveCustomToken, setCustomTokenIcon as dbSetCustomTokenIcon, getCustomChains, addCustomChainDb, removeCustomChainDb, getSetting, setSetting, setTokenVisibility as dbSetTokenVisibility, removeTokenVisibility as dbRemoveTokenVisibility, getAllTokenVisibility, insertApiLog, getApiLogs, clearApiLogs, setCachedBalances, getCachedBalances, updateCachedBalance, clearBalances, deleteCachedChainBalance, saveCachedPubkey, getLatestDeviceSnapshot, getCachedPubkeys, saveReport, getReportsList, getReportById, deleteReport, reportExists, getSwapHistory, getSwapHistoryStats, getSwapHistoryByTxid, getBip85Seeds, saveBip85Seed, deleteBip85Seed, clearCachedPubkeys, getRecentActivityFromLog, getPioneerServers, addPioneerServerDb, removePioneerServerDb, syncOwnAddressBook, recordOutbound, getAddressBookList, updateAddressBookEntry, deleteAddressBookEntry, getAddressBookHistory, getDeviceLabelMap, getBalancesForOwnSeed, addExternalEntry, matchAddressBook, insertClearSignEvent, getClearSignEvents, insertClearSignObservation, finalizeClearSignObservation, authenticateClearSignObservation, refuseClearSignObservationDefinition, getClearSignCoverageSummary, getClearSignAuditJobs, enqueueClearSignAuditDemand, getSignedTxReview, setDeviceMasterFingerprint, getDeviceSnapshotById, getAllDeviceSnapshots, saveImportedWatchOnlyWallet, setImportedWalletVerified } from "./db"
 import { lookupEvmTx, recordSignedEvmTx, txDetails, walletBook } from "./signed-tx-review"
 import { getCentralAssetAuditHistory, getCentralClearSignStatus, getCentralContractAudit, submitCentralAssetReview, submitCentralContractReview } from './clearsign-central-client'
@@ -1046,7 +1047,7 @@ function attachSafeKnownAddresses(info: SigningRequestInfo): void {
 	const networkId = `eip155:${info.chainId}`
 	info.knownAddresses = [
 		...getAddressBookList({ kind: 'own', networkId }).map(e => ({ address: e.address, name: 'your KeepKey account', own: true })),
-		...getAddressBookList({ kind: 'external', networkId, savedOnly: true }).map(e => ({ address: e.address, name: e.label || 'a saved contact', own: false })),
+		...getAddressBookList({ kind: 'external', networkId, savedOnly: true }).map(e => ({ address: e.address, name: e.label || '', own: false })),
 	]
 }
 
@@ -1546,6 +1547,7 @@ function getOrCreateWcManager(): WalletConnectManager {
 		requestSigningApproval: async (info) => {
 			attachSigningPolicySnapshot(info)
 			attachSafeKnownAddresses(info)
+			await attachSafeCallPreviews(info)
 			try { rpc.send['signing-request'](info) } catch { /* webview not ready */ }
 			acquireWindowFocus()
 			try {
@@ -1937,6 +1939,7 @@ const restCallbacks: RestApiCallbacks = {
 	onSigningRequest: async (info: SigningRequestInfo) => {
 		attachSigningPolicySnapshot(info)
 		attachSafeKnownAddresses(info)
+		await attachSafeCallPreviews(info)
 		// Emulator test tape only; a real device is never recorded or marked.
 		const taping = engine.isEmulator && process.env.KEEPKEY_TEST_EMULATOR_CONTROL === '1' && reviewTapeRecording()
 		if (taping) recordReviewCard(info)

@@ -18,6 +18,7 @@ import { acrossDepositView, decodeAcrossDepositV3, findReviewedAcrossSpokePool, 
 import { RELAY_DEPOSITORY, decodeRelayDeposit, isZeroAddress, type RelayDeposit } from './relayDeposit'
 import { ACROSS_NAMED_TOKENS, REVIEWED_EVM_TOKENS } from './reviewed-evm-tokens'
 import type {
+  SafeCallPreview,
   SigningRequestInfo,
   SimulatedHoldings,
   SolanaCertifiedArg,
@@ -243,7 +244,10 @@ function certifiedBlobShown(req: SigningRequestInfo): boolean {
  *  or none of these. */
 type Recognition = 'shows' | 'known' | 'used' | 'unknown'
 
-function evmTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void): Recognition {
+/** `notShown` says the device cannot show a protocol yet; a call inside a
+ *  SafeTx passes its own (the card says that once for the whole SafeTx). */
+function evmTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void,
+  notShown = (what: string) => notOnThisFirmware(what, req.firmwareVersion)): Recognition {
   const to = (req.to ?? '').toLowerCase()
   const chainId = evmChainId(req.chainId)
   const rawData = typeof req.data === 'string' && req.data !== '' ? req.data : '0x'
@@ -343,20 +347,20 @@ function evmTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void):
     add('medium', `${urSwap} through the Uniswap Universal Router, a contract KeepKey has reviewed. Your KeepKey shows this swap on its screen from a signed description, and refuses it if that description is not genuine. Check the amounts there.`)
   } else if (across) {
     recognition = 'known'
-    acrossDeposit(across, req, add)
+    acrossDeposit(across, req, add, notShown)
   } else if (relay) {
     recognition = 'known'
-    relayDeposit(relay, req, field('You send'), add)
+    relayDeposit(relay, req, field('You send'), add, notShown)
   } else if (thorSwap) {
     recognition = 'known'
     // A fully decoded deposit to the router pinned for this chain is a normal
     // swap: say what it does, not "unknown contract".
     add(req.deviceClearSigns ? 'low' : 'medium', req.deviceClearSigns
       ? `${thorSwap}. Your KeepKey shows this deposit on its screen; check it there.`
-      : `${thorSwap}. ${notOnThisFirmware('this deposit', req.firmwareVersion)}`)
+      : `${thorSwap}. ${notShown('this deposit')}`)
   } else if (urSwap && !req.deviceClearSigns) {
     recognition = 'known'
-    add('medium', `${urSwap} through the Uniswap Universal Router, a contract KeepKey has reviewed. ${notOnThisFirmware('this swap', req.firmwareVersion)}`)
+    add('medium', `${urSwap} through the Uniswap Universal Router, a contract KeepKey has reviewed. ${notShown('this swap')}`)
   } else if (!req.deviceClearSigns && certifiedBlobShown(req)) {
     // No decoder here, but the device verifies the certified description and
     // shows the call from it, so this is not a blind signature.
@@ -406,7 +410,8 @@ function evmTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void):
 
 /** A deposit to the Relay Depository. The calldata names what is sent and
  *  who is credited; where it arrives is Relay's off-chain order. */
-function relayDeposit(d: RelayDeposit, req: SigningRequestInfo, decodedSent: string | undefined, add: (l: RiskLevel, t: string) => void) {
+function relayDeposit(d: RelayDeposit, req: SigningRequestInfo, decodedSent: string | undefined, add: (l: RiskLevel, t: string) => void,
+  notShown: (what: string) => string) {
   const sent = d.kind === 'native'
     ? (evmNativeValue(req.value ?? '0', d.chainId) ?? 'the coin sent with this call')
     : (decodedSent ?? `${d.amount} base units of token ${d.token}`)
@@ -419,7 +424,7 @@ function relayDeposit(d: RelayDeposit, req: SigningRequestInfo, decodedSent: str
   if (certified) {
     add('medium', `${what} Your KeepKey shows this deposit from a KeepKey-certified description and refuses it if that description is not genuine. Check the amount there.`)
   } else {
-    add('medium', `${what} ${notOnThisFirmware('Relay deposits', req.firmwareVersion)}`)
+    add('medium', `${what} ${notShown('Relay deposits')}`)
   }
   if (credited !== 'your account' && from) add('high', `The deposit is credited to ${d.depositor}, not to the signing account.`)
   add('medium', "Where it arrives (destination chain, recipient and amount) is set by Relay's off-chain order, not by this transaction. Neither this computer nor your KeepKey can check it.")
@@ -428,12 +433,12 @@ function relayDeposit(d: RelayDeposit, req: SigningRequestInfo, decodedSent: str
 /** A depositV3 to a pinned Across SpokePool. Decoded here only: the device
  *  shows it as raw data and AdvancedMode still gates, but a known protocol is
  *  normal, so the line says so instead of "signing blind". */
-function acrossDeposit(d: AcrossDepositV3, req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void) {
+function acrossDeposit(d: AcrossDepositV3, req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void, notShown: (what: string) => string) {
   const v = acrossDepositView(d, { ...ACROSS_NAMED_TOKENS, ...EVM_TOKENS })
   const from = (req.from ?? '').toLowerCase()
   let value: bigint | null = null
   try { value = BigInt(req.value === undefined || req.value === '' || req.value === '0x' ? 0 : req.value) } catch { /* unreadable: no claim about it */ }
-  add('medium', `Across bridge deposit to the Across SpokePool on ${d.pool.chain}, a contract KeepKey knows. ${notOnThisFirmware('Across deposits', req.firmwareVersion)}`)
+  add('medium', `Across bridge deposit to the Across SpokePool on ${d.pool.chain}, a contract KeepKey knows. ${notShown('Across deposits')}`)
   if (value !== null && value > 0n) {
     if (d.inputToken !== d.pool.wrappedNative.address || value !== d.inputAmount) {
       add('high', `The coin sent with this call does not match the deposit (${v.sent}). The SpokePool will reject it and you would still pay the network fee.`)
@@ -611,8 +616,9 @@ function safeSelfCall(ctx: SafeCtx, data: string, prefix: string): boolean {
   return false
 }
 
-/** A plain call (operation 0) from the Safe. True = decoded here in full. */
-function safeCall(ctx: SafeCtx, to: string, value: bigint, data: string, prefix: string, single: boolean): boolean {
+/** A plain call (operation 0) from the Safe. True = decoded here in full.
+ *  `preview` is bun's preview of this call (SigningRequestInfo.safeCalls). */
+function safeCall(ctx: SafeCtx, to: string, value: bigint, data: string, prefix: string, preview: SafeCallPreview | undefined): boolean {
   if (data === '0x') {
     safeSend(ctx, to, value, prefix)
     return true
@@ -622,20 +628,28 @@ function safeCall(ctx: SafeCtx, to: string, value: bigint, data: string, prefix:
     ctx.add('high', `${prefix}Makes your Safe call itself with data this computer cannot read. Your KeepKey shows that data only as raw hex.`)
     return false
   }
-  // A token transfer, approve or NFT approval, read by the same rules as one
-  // sent from an account: a known token reads like a normal transfer.
-  if (KNOWN_SELECTORS.has(data.slice(0, 10)) && /^0x[0-9a-f]{8}0{24}[0-9a-f]{104}$/.test(data)) {
-    const lines: RiskReason[] = []
-    const recognition = evmTx({
-      id: ctx.req.id, method: '/eth/sign-transaction', appName: ctx.req.appName, chainId: ctx.chainId,
-      from: ctx.safe, to, data, value: value.toString(), recognizedSpender: single ? ctx.req.recognizedSpender : undefined,
-    }, (level, text) => lines.push({ level, text }))
-    for (const l of lines) ctx.add(l.level, prefix + l.text)
+  // Read by the same rules as a call sent from an account: a token transfer or
+  // approve, an Across or Relay deposit, a THORChain deposit or a Universal
+  // Router swap. The card says once that the device shows SafeTx.data as hex.
+  const lines: RiskReason[] = []
+  const recognition = evmTx({
+    id: ctx.req.id, method: '/eth/sign-transaction', appName: ctx.req.appName, chainId: ctx.chainId,
+    from: ctx.safe, to, data, value: value.toString(), calldataDecoded: preview?.calldataDecoded,
+    recognizedSpender: preview?.recognizedSpender, recognizedRecipient: preview?.recognizedRecipient,
+  }, (level, text) => lines.push({ level, text }), () => '')
+  if (recognition === 'known' || (KNOWN_SELECTORS.has(data.slice(0, 10)) && /^0x[0-9a-f]{8}0{24}[0-9a-f]{104}$/.test(data))) {
+    for (const l of lines) ctx.add(l.level, prefix + l.text.trimEnd())
     if (data.startsWith('0xa9059cbb')) {
       const rcpt = `0x${data.slice(34, 74)}`
       if (!safePoisoned(ctx, rcpt, prefix) && safeName(ctx, rcpt)) ctx.add('low', `${prefix}${rcpt} is ${safeName(ctx, rcpt)}.`)
     }
     return recognition === 'known'
+  }
+  // A KeepKey ClearSign service definition for this exact call, checked here.
+  const d = preview?.erc7730Description
+  if (d) {
+    ctx.add('medium', `${prefix}${d.summary ?? d.intent}${d.protocol ? ` on ${d.protocol.name}` : ''} (${to}), as this computer reads it from a KeepKey ClearSign description.`)
+    return true
   }
   ctx.add('high', `${prefix}Makes your Safe call ${to} with data this computer cannot read. Your KeepKey shows that data only as raw hex.`)
   return false
@@ -661,7 +675,7 @@ function safeDelegateCall(ctx: SafeCtx, to: string, data: string): Recognition |
       if (c.operation === 1) {
         ctx.add('high', delegatecallLine(c.to, prefix))
         decoded = false
-      } else if (!safeCall(ctx, c.to, c.value, c.data, prefix, false)) decoded = false
+      } else if (!safeCall(ctx, c.to, c.value, c.data, prefix, ctx.req.safeCalls?.[i])) decoded = false
     })
     return decoded ? 'known' : 'unknown'
   }
@@ -709,7 +723,9 @@ function safeTx(req: SigningRequestInfo, d: NonNullable<SigningRequestInfo['type
     known: [
       ...(from ? [{ address: from, name: 'this KeepKey account' }] : []),
       ...(safe ? [{ address: safe, name: 'your Safe' }] : []),
-      ...(req.knownAddresses ?? []).map((k) => ({ address: k.address.toLowerCase(), name: k.own ? 'your KeepKey account' : `your contact ${k.name}` })),
+      ...(req.knownAddresses ?? []).map((k) => ({
+        address: k.address.toLowerCase(), name: k.own ? 'your KeepKey account' : k.name ? `your contact ${k.name}` : 'a saved contact',
+      })),
     ],
   }
   const to = f('To').toLowerCase()
@@ -731,7 +747,7 @@ function safeTx(req: SigningRequestInfo, d: NonNullable<SigningRequestInfo['type
     add('low', `Rejects pending transaction #${f('Nonce')}: an empty transaction from your Safe to itself with the same number, so the pending one can never run.`)
     return 'shows'
   }
-  const decoded = safeCall(ctx, to, value, data, '', true)
+  const decoded = safeCall(ctx, to, value, data, '', req.safeCalls?.[0])
   return data === '0x' ? 'shows' : decoded ? 'known' : 'unknown'
 }
 
