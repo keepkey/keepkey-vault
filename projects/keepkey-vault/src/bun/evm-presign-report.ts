@@ -17,6 +17,7 @@ import { resolvePromotedEvmArtifact, type ClearSignArtifactResolution } from './
 import { simulateEvmEffects } from './evm-effects'
 import { uniswapReportFindingsWithState } from './uniswap-report'
 import { findContractRating } from './clearsign-review'
+import { addThorDepositFacts } from './thor-vaults'
 import { utils as ethersUtils } from 'ethers'
 
 /**
@@ -91,6 +92,8 @@ export function reviewedEvmDecodeLabel(info: SigningRequestInfo): string | undef
   if (field('Protocol') === 'Uniswap Universal Router' && field('Action')?.startsWith('Swap ')) return 'Uniswap Universal Router swap'
   if (d.dappName === 'Across' && d.functionType === 'bridge') return 'Across bridge deposit'
   if (d.dappName === 'Relay' && d.functionType === 'bridge') return 'Relay deposit'
+  // swap-decoders: a pinned 0x Settler / CoW EthFlow / Relay Router call, every step read.
+  if (d.functionType === 'swap' && field('Protocol')) return `${field('Protocol')} swap`
   // calldata-decoder names THORChain/Maya only for a pinned router on this chain.
   if ((d.dappName === 'THORChain' || d.dappName === 'Mayachain') && field('Action')) return `${d.dappName} deposit`
   return undefined
@@ -319,6 +322,9 @@ export async function buildEvmReportForTx(input: {
   endpoint: string
   signerVerdict?: boolean
   measure?: typeof measureLiveDeployment
+  /** In-app only: the device whose address book a THORChain/Maya memo's payout
+   *  is checked against. Left out for an external caller and a passphrase wallet. */
+  deviceId?: string
 }): Promise<{ report: ClearSignReport; signingInfo: SigningRequestInfo; simulation: EffectReport; artifactResolution: ReturnType<typeof resolvePromotedEvmArtifact> }> {
   const { tx, firmwareVersion, endpoint } = input
   const data = tx.data || '0x'
@@ -336,6 +342,8 @@ export async function buildEvmReportForTx(input: {
   // The request as a dapp would send it: no caller metadata, so the shared
   // preview resolves certified envelopes itself, as the signing path does.
   await prepareEvmTxSigningInfo(signingInfo, { ...tx, data }, firmwareVersion, input.capabilities)
+  // The vault a THORChain/Maya router deposit pays, checked as the signing overlay checks it.
+  await addThorDepositFacts(signingInfo, input.deviceId)
   const report = buildEvmPresignReport({
     signingInfo,
     deviceConnected: Boolean(firmwareVersion),

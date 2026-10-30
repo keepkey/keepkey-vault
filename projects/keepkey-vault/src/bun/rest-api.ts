@@ -8,7 +8,8 @@ import { WIPE_BUSY_MESSAGE, WIPE_REPLUG_PENDING_MESSAGE } from './device-wipe'
 import { DEVICE_LOCKED_MESSAGE, restRequest } from './device-gate'
 import { WalletCacheSession, WalletSessionChangedError, WalletSessionMap } from './wallet-session-cache'
 import type { SigningRequestInfo, ApiLogEntry, EIP712DecodedInfo } from '../shared/types'
-import { tronPreview } from './tron-preview'
+import { tronCallPreview, tronPreview } from './tron-preview'
+import { deviceErrorMessage } from '../shared/device-error'
 import type { ClearSignEvent } from '../shared/types'
 import { createHash } from 'crypto'
 import { decodeEIP712 } from './eip712-decoder'
@@ -82,7 +83,7 @@ import { simulateEvmEffects } from './evm-effects'
 import { simulateSolanaEffects } from './solana-effects'
 import { buildClearSignReport, solanaDecodedReportFindings } from '../shared/clearsign-report'
 import { uniswapReportFindingsWithState } from './uniswap-report'
-import { classifyEffectExposure, observeEvmCall, observeEvmTypedData, observeMalformedSolanaTransaction, observeSolanaTransaction } from './clearsign-observation'
+import { classifyEffectExposure, observeEvmCall, observeEvmTypedData, observeMalformedSolanaTransaction, observeSigningInfo, observeSolanaTransaction } from './clearsign-observation'
 import { auditUnknownClearSignShape } from './clearsign-live-auditor'
 import { clearSignIdentityHash, evaluateClearSignPromotion } from './clearsign-promotion'
 import { compilePromotedClearSignArtifact } from './clearsign-artifact-compiler'
@@ -1242,6 +1243,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
 
       // Request-scoped body capture (set by POST handlers before json() is called)
       let reqBody: any = undefined
+      // This request's coverage observation (signing routes); json() closes it on success.
+      let activeClearSignObservationId: string | undefined
 
       // Per-request response helpers (capture req for CORS origin check)
       const json = (data: unknown, status = 200, activity?: RestActivityTag) => {
@@ -1255,6 +1258,10 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           if (chainForRoute) resolvedActivity = { chain: chainForRoute, activityType: 'sign' }
         }
         if (method === 'POST' && SIGNING_ROUTES.has(path) && status >= 200 && status < 300) signedTxs.remember(data, sessionEpoch)
+        // A signing route answers 2xx only with the device's signature.
+        if (activeClearSignObservationId && method === 'POST' && SIGNING_ROUTES.has(path) && status >= 200 && status < 300) {
+          finalizeClearSignObservation(activeClearSignObservationId, 'signed')
+        }
         // Log the request with body + response + duration.
         // Sanitize: strip sensitive fields from signing payloads to prevent
         // leaking signatures, transaction data, or typed-data content to audit log.
@@ -1510,7 +1517,6 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
       let activeSigningId: string | undefined
       let activeSigningInfo: SigningRequestInfo | undefined
       let activeAllowBlindSigning = false
-      let activeClearSignObservationId: string | undefined
       // Certified envelope found for this request's raw_tx before approval.
       let activeSolanaCertified: { rawTx: string; proof: CertifiedSolanaProof } | undefined
 
@@ -1752,6 +1758,9 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
               } else {
                 signingInfo.needsBlindSigning = true
                 signingInfo.requiresAdvancedMode = true
+                // The device shows this as raw data; say what it does here.
+                signingInfo.tronCall = tronCallPreview(preview.raw_tx) ?? undefined
+                if (signingInfo.tronCall) signingInfo.from = signingInfo.tronCall.owner
               }
             } else if (path === '/solana/sign-message') {
               const raw = typeof preview.message === 'string' ? preview.message : ''
@@ -2132,8 +2141,19 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
                 solana: getSetting('solana_rpc_endpoint') || DEFAULT_SOLANA_RPC_ENDPOINT,
               })
             }
+          } else if (!engine.isPassphraseWallet && path !== '/api/v2/swap/execute') {
+            // Every other route: messages, and transactions that are not EVM or
+            // Solana. A headless swap is recorded per signature (vault-swap).
+            const draft = observeSigningInfo(signingInfo, probeCheckBody?.signDoc?.msgs)
+            if (draft) activeClearSignObservationId = insertClearSignObservation(draft, {
+              deviceId: engine.getDeviceState().deviceId,
+              source: 'rest-api',
+            }).id
           }
-          if(path === '/utxo/sign-transaction' && hasMultisigSigningData(probeCheckBody) && !btcMultisigEnabled(getSetting)) throw new HttpError(403,BTC_MULTISIG_DISABLED)
+          if(path === '/utxo/sign-transaction' && hasMultisigSigningData(probeCheckBody) && !btcMultisigEnabled(getSetting)) {
+            if (activeClearSignObservationId) finalizeClearSignObservation(activeClearSignObservationId, 'policy-blocked', 'btc-multisig-disabled')
+            throw new HttpError(403,BTC_MULTISIG_DISABLED)
+          }
           const approvalStartedAt = Date.now()
           const approval = await callbacks.onSigningRequest(signingInfo)
           if (!approval.approved) {
@@ -3135,7 +3155,10 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           auth.requireAuth(req)
           const wallet = requireWallet(engine)
           const body = await parseRequest(req, S.UtxoSignTransactionRequest)
-          if(hasMultisigSigningData(body) && !btcMultisigEnabled(getSetting))throw new HttpError(403,BTC_MULTISIG_DISABLED)
+          if(hasMultisigSigningData(body) && !btcMultisigEnabled(getSetting)) {
+            if (activeClearSignObservationId) finalizeClearSignObservation(activeClearSignObservationId, 'policy-blocked', 'btc-multisig-disabled')
+            throw new HttpError(403,BTC_MULTISIG_DISABLED)
+          }
           const coin = body.coin || 'Bitcoin'
 
           // BCH: prepend bitcoincash: prefix to output addresses
@@ -5160,6 +5183,11 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
         return json({ error: 'Not found', path }, 404)
 
       } catch (err: any) {
+        // A cancel on the device is the user's answer, not a failure. Explicit
+        // outcomes recorded above win (conditional update).
+        if (activeClearSignObservationId && /reject|cancel|denied/i.test(deviceErrorMessage(err))) {
+          finalizeClearSignObservation(activeClearSignObservationId, 'rejected', 'user-rejected')
+        }
         // HttpError carries a typed status + optional `details` (e.g.
         // { boc, txid } on TON broadcast failure so a client can retry
         // broadcast without re-signing). Anything without a status falls

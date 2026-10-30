@@ -21,17 +21,19 @@ import { evmSigningVerdict, withoutErc7730Description } from './evm-presign-repo
 import { buildSolanaMessageDecodedInfo } from './solana-message-preview'
 import { ethMessagePreview } from './eth-message-preview'
 import { buildSolanaDecodedInfo } from './solana-clearsign'
+import { createRpcAltFetcher, DEFAULT_SOLANA_RPC_ENDPOINT } from './solana-alt'
 import { applySolanaSigningGates, solanaSigningVerdict } from './solana-consent'
 import { simulateEvmEffects } from './evm-effects'
 import { simulateSolanaEffects } from './solana-effects'
 import { buildClearSignReport, solanaDecodedReportFindings } from '../shared/clearsign-report'
 import { uniswapReportFindingsWithState } from './uniswap-report'
-import { classifyEffectExposure, observeEvmCall, observeEvmTypedData, observeMalformedSolanaTransaction, observeSolanaTransaction } from './clearsign-observation'
+import { classifyEffectExposure, observeEvmCall, observeEvmTypedData, observeMalformedSolanaTransaction, observeSigningInfo, observeSolanaTransaction } from './clearsign-observation'
 import { resolveEvmSchema, type SignedEvmSchema } from './evm-schema-registry'
 import { nameRuntimeProvider, resolveProviderTxMetadata } from './clearsign-providers'
 import { trustRuntimeSigner, type RuntimeEvmSigner } from './evm-runtime-metadata'
 import { supportsCertifiedClearSign } from './solana-certified-policy'
 import { decodeEIP712 } from './eip712-decoder'
+import { deviceErrorMessage } from '../shared/device-error'
 
 function base64ToBase58(base64: string): string {
   return bs58.encode(Buffer.from(base64, 'base64'))
@@ -77,9 +79,11 @@ async function attachSolanaTransactionPreview(
   endpoint?: string,
 ): Promise<void> {
   try {
+    // Same read-only account lookups as REST: lookup tables and token
+    // accounts, so one transaction gets one verdict on both paths.
     signingInfo.solanaDecoded = await buildSolanaDecodedInfo(
       transactionBase64,
-      async (pubkeys) => pubkeys.map(() => null),
+      createRpcAltFetcher(endpoint || DEFAULT_SOLANA_RPC_ENDPOINT),
     )
   } catch (e: any) {
     signingInfo.solanaDecodeError = `${e?.name || 'Error'}: ${e?.message || String(e)}`
@@ -648,10 +652,10 @@ export class WalletConnectManager {
           from: account.address,
           chainId: 0, // not an EVM numeric id
           data: JSON.stringify(signDoc),
+          // Same shape as the REST body, so the card and the risk bar read it.
+          rawRequestBody: { signerAddress: account.address, signDoc },
         }
-        const approved = await this.callbacks.requestSigningApproval(signingInfo)
-        if (!approved) throw new Error('User rejected signing')
-        try {
+        return this.observed(signingInfo, signDoc?.msgs, async () => {
           const { signatureBase64 } = await this.callbacks.cosmosSignAmino({
             addressNList: account.addressNList,
             signDoc,
@@ -663,9 +667,7 @@ export class WalletConnectManager {
               signature: signatureBase64,
             },
           }
-        } finally {
-          this.callbacks.dismissSigning(signingId)
-        }
+        })
       }
 
       case 'cosmos_signDirect': {
@@ -722,18 +724,14 @@ export class WalletConnectManager {
             signer: account.address,
           }),
         }
-        const approved = await this.callbacks.requestSigningApproval(signingInfo)
-        if (!approved) throw new Error('User rejected signing')
-        try {
+        return this.observed(signingInfo, undefined, async () => {
           const { signatureBase64 } = await this.callbacks.solanaSignMessageRaw({
             addressNList: account.addressNList,
             messageBase58: message,
           })
           // WC dApps expect the signature as bs58 (Solana standard).
           return { signature: base64ToBase58(signatureBase64) }
-        } finally {
-          this.callbacks.dismissSigning(signingId)
-        }
+        })
       }
 
       case 'solana_signTransaction': {
@@ -842,6 +840,38 @@ export class WalletConnectManager {
 
   // ── JSON-RPC helper ─────────────────────────────────────────────
 
+  /** Approval card, then the device, for a request with no observer of its
+   *  own (messages, Cosmos amino): one coverage observation for it. */
+  private async observed<T>(signingInfo: SigningRequestInfo, msgs: unknown, sign: () => Promise<T>): Promise<T> {
+    const draft = observeSigningInfo(signingInfo, msgs)
+    const observationId = draft ? this.callbacks.recordClearSignObservation(draft) : undefined
+    const approvalStartedAt = Date.now()
+    let approved: boolean
+    try { approved = await this.callbacks.requestSigningApproval(signingInfo) }
+    catch (error) {
+      if (observationId) this.callbacks.finalizeClearSignObservation(observationId, 'failed', 'approval-ui')
+      throw error
+    }
+    if (!approved) {
+      if (observationId) this.callbacks.finalizeClearSignObservation(observationId, Date.now() - approvalStartedAt >= 119_000 ? 'timed-out' : 'rejected')
+      throw new Error('User rejected signing')
+    }
+    try {
+      const result = await sign()
+      if (observationId) this.callbacks.finalizeClearSignObservation(observationId, 'signed')
+      return result
+    } catch (error) {
+      if (observationId) {
+        // A cancel on the device is the user's answer, as on the swap path.
+        const rejected = /reject|cancel|denied/i.test(deviceErrorMessage(error))
+        this.callbacks.finalizeClearSignObservation(observationId, rejected ? 'rejected' : 'failed', rejected ? 'user-rejected' : 'device-or-transport')
+      }
+      throw error
+    } finally {
+      this.callbacks.dismissSigning(signingInfo.id)
+    }
+  }
+
   private recordSolanaObservation(signingInfo: SigningRequestInfo, transaction: string): string | undefined {
     const report = signingInfo.clearSignReport
     let draft: ClearSignObservationDraft
@@ -911,10 +941,7 @@ export class WalletConnectManager {
       ethMessageDecoded: ethMessagePreview(from ?? '', message),
     }
 
-    const approved = await this.callbacks.requestSigningApproval(signingInfo)
-    if (!approved) throw new Error('User rejected signing')
-
-    try {
+    return this.observed(signingInfo, undefined, async () => {
       // hdwallet expects message as a hex string — pass through as-is
       // (WC personal_sign already provides 0x-prefixed hex)
       const result = await this.callbacks.ethSignMessage({
@@ -923,9 +950,7 @@ export class WalletConnectManager {
       })
 
       return result?.signature ?? result
-    } finally {
-      this.callbacks.dismissSigning(signingId)
-    }
+    })
   }
 
   private async signTypedData(
