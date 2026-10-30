@@ -270,13 +270,37 @@ describe('attached only when the device will clear-sign it (7.17)', () => {
     expect(await ids(txs.safe_exec_native)).toEqual([defs.safe_exec_b.definitionId]) // no data: nothing to fetch
   })
 
-  it('a Safe DELEGATECALL (execTransaction operation 1, or setup with a module) is not attached', async () => {
+  it('a Safe DELEGATECALL (execTransaction operation 1, or setup with any other module) is not attached', async () => {
     const batch = { ...txs.safe_exec_transfer, data: withWord(txs.safe_exec_transfer.data, 3, '0x1') }
-    for (const tx of [batch, txs.safe_create_l2_setup]) {
+    // Safe{Wallet}'s creation with one byte changed (calldata hex offsets): `to` no longer SafeToL2Setup,
+    // a dirty `to` word, setupToL2's argument not a SafeL2, the call not setupToL2.
+    const byte = (tx: typeof txs.safe_create_l2_setup, at: number, b: string) => ({ ...tx, data: `0x${tx.data.slice(2, 2 + 2 * at)}${b}${tx.data.slice(4 + 2 * at)}` })
+    const create = txs.safe_create_l2_setup
+    const modules = [byte(create, 231, '55'), byte(create, 200, '01'), byte(create, 619, '63'), byte(create, 584, 'ef')]
+    for (const tx of [batch, ...modules]) {
       expect(await attach717(tx, service().impl)).toBeUndefined()
       expect(evmCallRequiresAdvancedMode(tx.to, tx.data, tx.chainId, false, undefined, undefined, '7.17.0', tx.value, CAPS)).toBe(true)
     }
     expect(planErc7730EmbeddedCalls(defs.safe_exec_a.envelope, batch, Object.values(defs) as any).refused).toBe('DELEGATECALL cannot be clear-signed')
+    // The dirty `to` word does not even decode as setup(); the others are named delegatecalls.
+    expect(planErc7730EmbeddedCalls(defs.safe_factory.envelope, modules[1], Object.values(defs) as any).refused).toBeTruthy()
+    for (const tx of [modules[0], modules[2], modules[3]]) {
+      expect(planErc7730EmbeddedCalls(defs.safe_factory.envelope, tx, Object.values(defs) as any).refused).toBe('DELEGATECALL cannot be clear-signed')
+    }
+  })
+
+  it("Safe{Wallet}'s creation (setup() delegatecalls the pinned SafeToL2Setup with a pinned SafeL2) is attached and said as the device says it", async () => {
+    const tx = txs.safe_create_l2_setup
+    const catalog = await attach717(tx, service().impl)
+    // The device never asks for SafeToL2Setup's own definition.
+    expect(catalog?.definitions.map((d) => d.definitionId.slice(2))).toEqual([defs.safe_factory.definitionId, defs.safe_setup_141.definitionId])
+    expect(evmCallRequiresAdvancedMode(tx.to, tx.data, tx.chainId, false, undefined, catalog, '7.17.0', tx.value, CAPS)).toBe(false)
+    const d = (await card(tx))!
+    const lines = d.fields.map((f) => `${'>'.repeat(f.depth ?? 0)}${f.label}: ${f.value.replace(/\n/g, ' / ')}`)
+    expect(lines).toContain('>Inner action: Setup Safe')
+    expect(lines).toContain(">Module: To 0xBD89A1CE4DDe368FFAB0eC35506eEcE0b1fFdc54 / Safe's SafeToL2Setup: off Ethereum, your Safe runs Safe's SafeL2 0x29fcB43b46531BcA003ddC8FCB67FFE91900C762")
+    expect(lines.some((l) => l.includes('DELEGATECALL'))).toBe(false)
+    expect(lines.some((l) => l.includes('Use L2 singleton'))).toBe(false)
   })
 
   it('an inner call the service does not serve is not attached', async () => {

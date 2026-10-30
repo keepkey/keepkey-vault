@@ -30,6 +30,7 @@ import firmwareTokens717 from './firmware-token-table-717.json'
 import { versionCompare } from '../shared/firmware-versions'
 import { evmTokenIdentity } from '../shared/evm-contract-identity'
 import { CHAINS } from '../shared/chains'
+import { safeContract } from '../shared/safe-tx'
 import type { Erc7730Description } from '../shared/types'
 
 /**
@@ -205,6 +206,27 @@ function safeDelegatecall(data: string): boolean {
   const selector = data.slice(0, 10).toLowerCase()
   const word = selector === SAFE_SETUP ? 2 : SAFE_EXEC.has(selector) ? 3 : -1
   return word >= 0 && /[1-9a-f]/i.test(data.slice(10 + 64 * word, 10 + 64 * (word + 1)))
+}
+
+/** A Safe setup() whose module call is Safe{Wallet}'s own: the pinned
+ *  SafeToL2Setup with exactly setupToL2(a pinned SafeL2), read as 7.17
+ *  reads it (erc7730_workflow.c safe_module_feed: `data` past the eight head
+ *  words). The device then says what it does instead of refusing. */
+function safeSetupToL2(chainId: number, data: string): { to: string; call: string; l2: string } | undefined {
+  const hex = data.toLowerCase()
+  if (hex.slice(0, 10) !== SAFE_SETUP) return undefined
+  const word = (at: number) => hex.slice(10 + 2 * at, 10 + 2 * at + 64)
+  const to = `0x${word(64).slice(24)}`
+  if (!/^0{24}/.test(word(64)) || safeContract(chainId, to)?.kind !== 'to-l2-setup') return undefined
+  const offset = BigInt(`0x${word(96) || '0'}`)
+  if (offset < 256n || offset >= 2n ** 32n) return undefined
+  const at = Number(offset)
+  if (BigInt(`0x${word(at) || '0'}`) !== 36n) return undefined
+  const call = `0x${hex.slice(10 + 2 * (at + 32), 10 + 2 * (at + 68))}`
+  const l2 = `0x${call.slice(34)}`
+  if (call.length !== 74 || call.slice(0, 10) !== '0xfe51f643' || !/^0{24}/.test(call.slice(10, 34))
+    || safeContract(chainId, l2)?.kind !== 'singleton-l2') return undefined
+  return { to, call, l2 }
 }
 
 /** The intent, interpolated summary and fields of one level, as the device shows them. Throws when it cannot say. */
@@ -390,6 +412,7 @@ function readLevel(envelopeHex: string, call: Level, walk: Walk): { signedBy: st
   }
 
   const delegatecall = safeDelegatecall(call.data)
+  const toL2 = delegatecall ? safeSetupToL2(call.chainId, call.data) : undefined
   const selector = call.data.slice(0, 10).toLowerCase()
   /** An embedded call (7.17, kind 13): per element, the device's context line,
    *  then the inner definition's own intent and fields. */
@@ -398,9 +421,16 @@ function readLevel(envelopeHex: string, call: Level, walk: Walk): { signedBy: st
     const out: Field[] = []
     resolve(f.args.get(1)!.index).forEach((bytes, i) => {
       const pick = (role: number) => { const list = argument(f, role); return list?.[list.length === 1 ? 0 : i] }
-      // A Safe delegatecall is never shown as the callee's own action.
-      if (delegatecall) throw new Erc7730Refusal('DELEGATECALL cannot be clear-signed')
       const callee = String(pick(15)!.value).toLowerCase()
+      // A Safe delegatecall is never shown as the callee's own action; Safe{Wallet}'s
+      // own setup() module is said by the device itself (fsm_msg_ethereum.h show_erc7730_safe_to_l2).
+      if (delegatecall) {
+        if (toL2 && callee === toL2.to && String(bytes.value).toLowerCase() === toL2.call) {
+          out.push({ label, value: `To ${ethersUtils.getAddress(callee)}\nSafe's SafeToL2Setup: off Ethereum, your Safe runs Safe's SafeL2 ${ethersUtils.getAddress(toL2.l2)}` })
+          return
+        }
+        throw new Erc7730Refusal('DELEGATECALL cannot be clear-signed')
+      }
       const value = pick(17)?.value as bigint | undefined
       const spender = pick(18)?.value as string | undefined
       const data = String(bytes.value).toLowerCase()
@@ -447,7 +477,7 @@ function readLevel(envelopeHex: string, call: Level, walk: Walk): { signedBy: st
     if (d.op === 1) {
       intent = strings[d.a]
       // Said before any field, whatever the definition shows, at whatever level.
-      if (delegatecall) fields.push({ label: 'DELEGATECALL', value: "Runs the contract in 'to' as the Safe, with its full authority. Not checked.", ...depth })
+      if (delegatecall && !toL2) fields.push({ label: 'DELEGATECALL', value: "Runs the contract in 'to' as the Safe, with its full authority. Not checked.", ...depth })
     } else if (d.op === 2) parts.push(strings[d.a])
     else if (d.op === 3) parts.push(format(d.a).value)
     else if (d.op === 4 && formatters[d.b].kind === 13) fields.push(...embedded(d.b, strings[d.a]).map((x) => ({ ...depth, ...x })))
