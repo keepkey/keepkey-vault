@@ -43,7 +43,7 @@ async function batch(state: Record<string, unknown>) {
   const server = startRestApi(engine, auth, 0, {
     onApiLog: () => {}, onPairRequest: () => {}, getVersion: () => 'test',
     onSigningRequest: async () => ({ approved: false }) as any, onSigningDismissed: () => {},
-  } as any)
+  } as any, '127.0.0.1')
   try {
     const res = await fetch(`http://127.0.0.1:${server.port}/api/pubkeys/batch`, {
       method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer test' },

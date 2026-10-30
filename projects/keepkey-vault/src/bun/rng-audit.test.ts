@@ -7,7 +7,7 @@ const analyze = (b: Uint8Array) => analyzeEntropy(b, sha(b))
 
 describe('RNG health testing', () => {
 	it('passes a healthy sample and reports ~8 bits/byte', () => {
-		const sample = new Uint8Array(randomBytes(256 * 1024))
+		const sample = uniformSample(256 * 1024)
 		const report = analyze(sample)
 
 		expect(report.verdict).toBe('healthy')
@@ -56,7 +56,7 @@ describe('RNG health testing', () => {
 		// 64 KB is the firmware's press-free budget, so it is the size a user
 		// can realistically pull today — and at that size the collision test
 		// expects 0.03 hits, meaning "zero collisions" says nothing at all.
-		const report = analyze(new Uint8Array(randomBytes(64 * 1024)))
+		const report = analyze(uniformSample(64 * 1024))
 
 		expect(report.stats.collisionControlUsable).toBe(false)
 		expect(report.stats.expectedCollisions4).toBeLessThan(1)
@@ -72,7 +72,7 @@ describe('RNG health testing', () => {
 	})
 
 	it('never claims to have measured entropy', () => {
-		const summary = verdictSummary(analyze(new Uint8Array(randomBytes(128 * 1024))))
+		const summary = verdictSummary(analyze(uniformSample(128 * 1024)))
 		expect(summary).toContain('does NOT measure')
 	})
 

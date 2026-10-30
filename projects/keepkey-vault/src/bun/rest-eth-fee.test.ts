@@ -105,7 +105,7 @@ async function restSign(body: object, fw: Fw) {
     onApiLog: () => {}, onPairRequest: () => {}, getVersion: () => 'test',
     onSigningRequest: async () => ({ approved: true }) as any,
     onSigningDismissed: () => {},
-  } as any)
+  } as any, '127.0.0.1')
   try {
     const post = (path: string, b: unknown) => originalFetch(`http://127.0.0.1:${server.port}${path}`, {
       method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer test' }, body: JSON.stringify(b),

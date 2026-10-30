@@ -68,7 +68,7 @@ describe('7.15 runtime EVM metadata', () => {
  * alive, so a pooled socket to a stopped server never leaks into a later test. */
 function provider(signer: () => Response | Promise<Response>, sign: () => Response | Promise<Response>) {
   const server = Bun.serve({
-    port: 0,
+    port: 0, hostname: '127.0.0.1',
     fetch: async (req) => {
       const res = await (new URL(req.url).pathname === '/signer' ? signer() : sign())
       res.headers.set('connection', 'close')
@@ -179,7 +179,7 @@ describe('a provider decline or outage means no description, never a failed sign
   test('the signer is checked before the transaction is sent: another key gets no POST', async () => {
     const hits: string[] = []
     server = Bun.serve({
-      port: 0,
+      port: 0, hostname: '127.0.0.1',
       fetch: (req) => {
         hits.push(`${req.method} ${new URL(req.url).pathname}`)
         const res = new URL(req.url).pathname === '/signer' ? goodSigner() : Response.json({ keyId: 2, signedPayload: `0x${'ab'.repeat(80)}` })

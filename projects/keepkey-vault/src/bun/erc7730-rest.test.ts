@@ -91,7 +91,7 @@ async function restSign(opts: { advancedMode?: boolean; declineSecondCard?: bool
       return { approved: !(opts.declineSecondCard && cards.length === 2) } as any
     },
     onSigningDismissed: () => {},
-  } as any)
+  } as any, '127.0.0.1')
   try {
     const post = (path: string, body: unknown) => originalFetch(`http://127.0.0.1:${server.port}${path}`, {
       method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer test' }, body: JSON.stringify(body),

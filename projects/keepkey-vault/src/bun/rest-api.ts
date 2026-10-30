@@ -1136,7 +1136,10 @@ const ROUTE_TO_CHAIN: Record<string, string> = {
   solana: 'SOL', tron: 'TRX', ton: 'TON', hive: 'HIVE',
 }
 
-export function startRestApi(engine: EngineController, auth: AuthStore, port = 1646, callbacks?: RestApiCallbacks) {
+/** `hostname` unset keeps Bun's default bind (the app). Tests pass '127.0.0.1':
+ *  a port-0 server on the wildcard can share its port with another process's
+ *  127.0.0.1 listener on macOS, which then answers the test's requests. */
+export function startRestApi(engine: EngineController, auth: AuthStore, port = 1646, callbacks?: RestApiCallbacks, hostname?: string) {
   // Split-flow shielded sends: the sidecar's /broadcast reply carries no reliable
   // txid ("" when a node already had the tx), so the activity row takes the
   // authoritative one from the matching /finalize. The sidecar holds a single
@@ -1190,6 +1193,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
   const ZCASH_SEND_ROUTES = new Set(['/api/zcash/shielded/send', '/api/zcash/shielded/shield', '/api/zcash/shielded/deshield'])
   const server = Bun.serve({
     port,
+    ...(hostname ? { hostname } : {}),
     maxRequestBodySize: 1024 * 1024, // 1 MB max (addresses/signing payloads are small)
     // Keep Bun's default idle timeout for the server as a whole (so idle/
     // unauthenticated connections still get reaped) — but lift it per-request

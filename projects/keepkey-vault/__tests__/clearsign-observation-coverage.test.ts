@@ -231,7 +231,7 @@ describe('REST: every signing route records a row', () => {
     const server = startRestApi(engine, auth, 0, {
       onApiLog: () => {}, onPairRequest: () => {}, getVersion: () => 'test',
       onSigningRequest: async () => ({ approved: true }) as any, onSigningDismissed: () => {},
-    } as any)
+    } as any, '127.0.0.1')
     try {
       const res = await fetch(`http://127.0.0.1:${server.port}${path}`, {
         method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer test' }, body: JSON.stringify(body),
