@@ -32,6 +32,14 @@ export const ERC7730_MIN_FW = '7.16.0'
  */
 export const ERC7730_TYPED_DATA_MIN_FW = '7.17.0'
 
+/**
+ * The first firmware that follows an embedded call to that call's own
+ * definition (a Safe's execTransaction, a factory's initializer, each step of
+ * a multicall; two levels deep) and checks formatter flags (RECIPIENT,
+ * TX_VALUE). 7.16 refuses both, so they are never sent to it.
+ */
+export const ERC7730_EMBEDDED_MIN_FW = '7.17.0'
+
 /** Features.capabilities value (messages.proto). It sits in the 7.15 block of
  *  the firmware's list, so it does not identify 7.16 alone. */
 export const CAPABILITY_ERC7730_RUNTIME_REVIEW = 4
@@ -46,6 +54,11 @@ export function supportsErc7730Transport(firmwareVersion: string | undefined, ca
     && Array.isArray(capabilities) && capabilities.includes(CAPABILITY_ERC7730_RUNTIME_REVIEW)
     // The bundled emulator trusts only the alpha root (see certified-evm-envelope).
     && deviceTrustsProductionRoot()
+}
+
+/** This firmware takes definitions with embedded calls and formatter flags. */
+export function supportsErc7730EmbeddedCalls(firmwareVersion: string | undefined): boolean {
+  return !!firmwareVersion && versionCompare(firmwareVersion, ERC7730_EMBEDDED_MIN_FW) >= 0
 }
 
 /** Desktop may send this device an ERC-7730 typed-data definition. */

@@ -32,6 +32,6 @@ export function evmCallRequiresAdvancedMode(
     // beside it is never sent. A refused definition falls back to this same
     // gate (erc7730-resolver signWithErc7730Fallback).
     !(!m?.signedPayload && supportsErc7730Transport(firmwareVersion, capabilities)
-      && erc7730CatalogDescribesCall(erc7730, chainId, to, data)) &&
+      && erc7730CatalogDescribesCall(erc7730, chainId, to, data, firmwareVersion)) &&
     advancedMode === false
 }
