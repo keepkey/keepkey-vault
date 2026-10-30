@@ -8,7 +8,7 @@ import {
   type AlphaCertificateBody,
 } from './clearsign-alpha-ceremony'
 import { UR_V4_ROUTERS } from './uniswap-ur'
-import { REVIEWED_EVM_TOKENS } from '../shared/reviewed-evm-tokens'
+import { REVIEWED_EVM_TOKENS, REVIEWED_SWAP_TOKENS } from '../shared/reviewed-evm-tokens'
 
 export const CERTIFIED_METADATA_VERSION = 0x03
 export const CERTIFIED_METADATA_KEY_ID = 0x80
@@ -707,6 +707,21 @@ export const UR_MAX_TOKENS = 4
  * the Uniswap app sends to; its vectors are real Base calls. V4_SWAP (0x10) is
  * decoded only for UR 2.1.2 on Base (UR_V4_ROUTERS: its V4Router layout was
  * checked against the verified source); elsewhere a V4 route is refused.
+ *
+ * Added 2026-10-29, each checked against those generations:
+ * - UR v1 and UR 2.1.1 on Ethereum, by verified source (eth.blockscout.com).
+ *   2.1.1's contracts/ are identical to 2.1.2's; only its v4-periphery
+ *   differs, and V4 stays refused there. v1 uses the same command ids, input
+ *   tuples and recipient constants as 1.2 for every command the device
+ *   decodes, and decodes with abi.decode, which is stricter.
+ * - The first UR 1.2 deployments on Base and Optimism and UR 2.0 on
+ *   Optimism, by runtime code: byte-identical to a reviewed deployment of
+ *   the same generation except constructor immutables. They were later
+ *   dropped from Uniswap's list, so the source names the commit that listed
+ *   them (bae062f1 for Base, 3e16080e for Optimism).
+ * Only chains whose native coin is ETH: the device calls msg.value and an
+ * unwrapped output "ETH" on every chain (7.16 signed_metadata.c
+ * ur_amount_text), so a BSC or Polygon router would show BNB or POL as ETH.
  */
 export const REVIEWED_UNIVERSAL_ROUTERS: EvmNameRecord[] = [
   { chainId: 8453, address: '0x3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad', name: 'Uniswap Universal Router', source: 'base.json UniversalRouterV1_2_V2Support' },
@@ -718,6 +733,11 @@ export const REVIEWED_UNIVERSAL_ROUTERS: EvmNameRecord[] = [
   { chainId: 42161, address: '0x5e325eda8064b456f4781070c0738d849c824258', name: 'Uniswap Universal Router', source: 'arbitrum.json UniversalRouterV1_2_V2Support' },
   { chainId: 42161, address: '0xa51afafe0263b40edaef0df8781ea9aa03e381a3', name: 'Uniswap Universal Router', source: 'arbitrum.json UniversalRouterV2' },
   { chainId: 42161, address: '0x2d01411773c8c24805306e89a41f7855c3c4fe65', name: 'Uniswap Universal Router', source: 'arbitrum.json UniversalRouterV2_1_2' },
+  { chainId: 1, address: '0xef1c6e67703c7bd7107eed8303fbe6ec2554bf6b', name: 'Uniswap Universal Router', source: 'mainnet.json UniversalRouterV1' },
+  { chainId: 1, address: '0x4c82d1fbfe28c977cbb58d8c7ff8fcf9f70a2cca', name: 'Uniswap Universal Router', source: 'mainnet.json UniversalRouterV2_1_1' },
+  { chainId: 8453, address: '0x198ef79f1f515f02dfe9e3115ed9fc07183f02fc', name: 'Uniswap Universal Router', source: 'base.json UniversalRouterV1_2 at bae062f100ada72597880e877d40ce467a8b4aa3' },
+  { chainId: 10, address: '0x3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad', name: 'Uniswap Universal Router', source: 'optimism.json UniversalRouterV1_2 at 3e16080e480311a9011ae295b84fd9117bffcf41' },
+  { chainId: 10, address: '0x851116d9223fabed8e56c0e6b8ad0c31d98b3507', name: 'Uniswap Universal Router', source: 'optimism.json UniversalRouterV2' },
 ]
 
 /** True when the device decodes V4_SWAP for this router (firmware V4_ROUTERS). */
@@ -733,16 +753,22 @@ export function findReviewedUniversalRouter(chainId: number | undefined, router:
 
 export interface EvmDecoderToken { address: string; symbol: string; decimals: number }
 
-/** Token identities for a swap entry: REVIEWED_EVM_TOKENS by exact chain:address
- * only, never by symbol. Undefined if any is unreviewed, repeated, or the count
- * is outside 1..4. */
+/** A token a swap entry may name: REVIEWED_EVM_TOKENS, then the swap-only
+ * REVIEWED_SWAP_TOKENS, by exact chain:address only, never by symbol. */
+export function reviewedSwapToken(chainId: number, address: string): { symbol: string; decimals: number } | undefined {
+  const key = `${chainId}:${String(address).toLowerCase()}`
+  return REVIEWED_EVM_TOKENS[key] ?? REVIEWED_SWAP_TOKENS[key]
+}
+
+/** Token identities for a swap entry (reviewedSwapToken). Undefined if any is
+ * unreviewed, repeated, or the count is outside 1..4. */
 export function reviewedSwapTokens(chainId: number, addresses: string[]): EvmDecoderToken[] | undefined {
   if (!Array.isArray(addresses) || addresses.length < 1 || addresses.length > UR_MAX_TOKENS) return undefined
   const seen = new Set<string>()
   const out: EvmDecoderToken[] = []
   for (const raw of addresses) {
     const address = String(raw).toLowerCase()
-    const token = REVIEWED_EVM_TOKENS[`${chainId}:${address}`]
+    const token = reviewedSwapToken(chainId, address)
     if (!token || seen.has(address)) return undefined
     seen.add(address)
     out.push({ address, ...token })

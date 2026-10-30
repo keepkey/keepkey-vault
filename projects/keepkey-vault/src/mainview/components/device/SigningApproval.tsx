@@ -504,7 +504,7 @@ function Erc7730Section({ d }: { d: Erc7730Description }) {
 // ── Calldata decoded section ──────────────────────────────────────────
 
 function CalldataSection({ decoded, request, t }: { decoded: CalldataDecodedInfo; request: SigningRequestInfo; t: (k: string, f?: string) => string }) {
-	const erc20 = erc20Preview(request.to, request.chainId, request.data)
+	const erc20 = erc20Preview(request.to, request.chainId, request.data, request.recognizedSpender)
 	return (
 		<VStack gap="1.5" w="100%" bg="rgba(0,0,0,0.25)" borderRadius="xl" p="3">
 			<Flex gap="2" align="center" w="100%">
