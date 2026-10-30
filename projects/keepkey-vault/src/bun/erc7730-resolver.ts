@@ -11,7 +11,10 @@
  *  - the program header names this chain, contract and selector;
  *  - the program has no embedded-call formatter: on 7.16 a missing inner
  *    definition fails the whole signature after the outer screens (owner,
- *    2026-10-16: skip embedded calls). When the bytes cannot say, no definition.
+ *    2026-10-16: skip embedded calls). When the bytes cannot say, no definition;
+ *  - the catalog signature checks out to the root the device trusts, as the
+ *    device checks it: Desktop never attaches (or shows as clear-signed) an
+ *    envelope it cannot verify itself.
  * A 404 or 422 means no definition; nothing here throws.
  */
 import { createHash } from 'node:crypto'
@@ -20,6 +23,7 @@ import { firmwareClearSigns } from './calldata-decoder'
 import { utils as ethersUtils } from 'ethers'
 import { erc7730CalldataSkipReason, supportsErc7730Transport, supportsErc7730TypedData } from '../shared/erc7730-support'
 import { deviceErrorMessage } from '../shared/device-error'
+import { erc7730EnvelopeSigner } from './erc7730-describe'
 import type { Erc7730Catalog } from '../shared/types'
 
 const TAG = '[erc7730]'
@@ -160,6 +164,7 @@ export function checkErc7730CalldataDefinition(
     const claimed = String(definition.selectorOrTypeHash).toLowerCase().replace(/^(0x)?/, '0x')
     if (claimed !== selector && claimed !== selector + '0'.repeat(56)) return { reason: 'service selector differs' }
   }
+  if (!erc7730EnvelopeSigner(envelope)) return { reason: 'catalog signature does not verify to the trusted ClearSign root' }
   return {
     entry: {
       definitionId: `0x${id}`,
@@ -328,6 +333,7 @@ export function checkErc7730TypedDataDefinition(
   if (definition.selectorOrTypeHash !== undefined && String(definition.selectorOrTypeHash).toLowerCase().replace(/^(0x)?/, '0x') !== typeHash) {
     return { reason: 'service typeHash differs' }
   }
+  if (!erc7730EnvelopeSigner(envelope)) return { reason: 'catalog signature does not verify to the trusted ClearSign root' }
   return {
     entry: {
       definitionId: `0x${id}`, envelope: `0x${envelopeHex}`, kind: KIND_EIP712,

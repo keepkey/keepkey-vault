@@ -30,6 +30,7 @@ import {
   type EvmNameRecord,
   selectingToken,
   findReviewedUniversalRouter,
+  certifiedEvmEnvelopeVerifies,
   isCertifiedEvmMetadata,
   reviewedSwapTokens,
   UR_METHOD,
@@ -223,6 +224,11 @@ async function fetchCertifiedEvmSchema(
   ) {
     fail('ClearSign verification service response does not match the requested schema')
   }
+  // The device would refuse it: never attached, so the card never shows it as clear-signed.
+  if (!certifiedEvmEnvelopeVerifies(result.signedPayload)) {
+    console.warn(`[clearsign] certified ${spec.method} for chain ${chainId} ${to} does not verify to the trusted ClearSign root; not attached`)
+    return undefined
+  }
   return {
     method: spec.method,
     keyId: CERTIFIED_METADATA_KEY_ID,
@@ -288,6 +294,10 @@ export async function findCertifiedUniswapSwap(
   ) {
     throw new Error('ClearSign verification service response does not match the requested swap entry')
   }
+  if (!certifiedEvmEnvelopeVerifies(result.signedPayload)) {
+    console.warn(`[clearsign] certified swap entry for chain ${chainId} ${reviewed.address} does not verify to the trusted ClearSign root; not attached`)
+    return undefined
+  }
   return {
     method: UR_METHOD,
     keyId: CERTIFIED_METADATA_KEY_ID,
@@ -319,7 +329,8 @@ export async function findCertifiedEvmName(
       result?.chainId !== record.chainId ||
       String(result?.address || '').toLowerCase() !== record.address ||
       result?.keyId !== CERTIFIED_METADATA_KEY_ID ||
-      !isCertifiedEvmMetadata(metadata)
+      !isCertifiedEvmMetadata(metadata) ||
+      !certifiedEvmEnvelopeVerifies(metadata.signedPayload)
     ) {
       console.warn(`${tag} no certified name for ${record.address} on chain ${record.chainId}: ${result?.error || response.status}`)
       return undefined

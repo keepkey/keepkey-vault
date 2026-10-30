@@ -1,14 +1,18 @@
 import { createHash } from 'node:crypto'
 import { utils as ethersUtils } from 'ethers'
 
+import { secp256k1 } from '@noble/curves/secp256k1'
 import {
   CLEARSIGN_SCOPE_ETHEREUM,
   delegateFingerprint,
+  deviceClearSignRoot,
   inspectAlphaCertificate,
   type AlphaCertificateBody,
 } from './clearsign-alpha-ceremony'
 import { UR_V4_ROUTERS } from './uniswap-ur'
 import { REVIEWED_EVM_TOKENS, REVIEWED_SWAP_TOKENS } from '../shared/reviewed-evm-tokens'
+import { evmNativeValue } from '../shared/evmFeePreview'
+import type { CalldataDecodedInfo } from '../shared/types'
 
 export const CERTIFIED_METADATA_VERSION = 0x03
 export const CERTIFIED_METADATA_KEY_ID = 0x80
@@ -991,6 +995,104 @@ function signCertifiedEvmBody(
     keyId: CERTIFIED_METADATA_KEY_ID,
     fingerprint: delegateFingerprint(certificateInfo.delegatePublicKey),
     alias: certificateInfo.alias,
+  }
+}
+
+/** A certified 0x02 / 0x05 schema body, read the way the device reads it
+ *  (the inverse of buildEvmSchemaBody); undefined for any other body. */
+export function readEvmSchemaBody(body: Uint8Array): Pick<EvmSchemaSpec, 'method' | 'args' | 'intent'> | undefined {
+  const b = Buffer.from(body)
+  const version = b[0]
+  if (version !== 0x02 && version !== 0x05) return undefined
+  try {
+    // version | chain id(4) | contract(20) | selector(4) | method length(2) | method | args
+    let at = 31
+    const text = (length: number) => { const t = b.subarray(at, at + length).toString('ascii'); at += length; return t }
+    const method = text(b.readUInt16BE(29))
+    const args: EvmSchemaArg[] = []
+    for (let i = 0, count = b[at++]; i < count; i++) {
+      const arg: EvmSchemaArg = { name: text(b[at++]), format: b[at++] }
+      if (arg.format === EVM_ARG_ADDRESS_PINNED) { arg.pinned = `0x${b.subarray(at, at + 20).toString('hex')}`; at += 20 }
+      if (arg.format === EVM_ARG_TOKEN_AMOUNT) { arg.decimals = b[at++]; arg.symbol = text(b[at++]) }
+      if (version === 0x05) arg.role = b[at++]
+      args.push(arg)
+    }
+    if (version === 0x02) return { method, args }
+    const valueRole = b[at++]
+    const title = text(b[at++])
+    const template = text(b[at++])
+    return at > b.length ? undefined : { method, args, intent: { title, template, valueRole } }
+  } catch {
+    return undefined
+  }
+}
+
+const MAX_UINT256 = (1n << 256n) - 1n
+
+/**
+ * The card's reading of a call from the certified schema Desktop attaches:
+ * the device's summary sentence (0x05) and each argument, decoded from the
+ * calldata the way the schema tells the device to. Undefined when the payload
+ * is not a certified 0x02/0x05 schema that accounts for this calldata.
+ */
+export function describeCertifiedEvmCall(
+  signedPayload: string,
+  call: { to: string; data: string; value?: unknown; chainId?: number },
+): CalldataDecodedInfo | undefined {
+  const payload = Buffer.from(signedPayload.replace(/^0x/i, ''), 'hex')
+  if (payload[0] !== CERTIFIED_METADATA_VERSION || payload.length < 1 + 139 + 65) return undefined
+  const schema = readEvmSchemaBody(Uint8Array.from(payload.subarray(140, payload.length - 65)))
+  const calldata = call.data.replace(/^0x/i, '').toLowerCase()
+  if (!schema || calldata.length !== 8 + 64 * schema.args.length) return undefined
+  const values = schema.args.map((arg, i) => {
+    const word = calldata.slice(8 + 64 * i, 8 + 64 * (i + 1))
+    const n = BigInt(`0x${word}`)
+    if (arg.format === EVM_ARG_ADDRESS || arg.format === EVM_ARG_ADDRESS_PINNED) {
+      return { type: 'address', format: 'address' as const, value: ethersUtils.getAddress(`0x${word.slice(24)}`) }
+    }
+    if (arg.format === EVM_ARG_TOKEN_AMOUNT) {
+      return { type: 'uint256', format: 'amount' as const,
+        value: n === MAX_UINT256 ? `UNLIMITED ${arg.symbol}` : `${ethersUtils.formatUnits(n, arg.decimals).replace(/\.0$/, '')} ${arg.symbol}` }
+    }
+    if (arg.format === EVM_ARG_AMOUNT) return { type: 'uint256', format: 'amount' as const, value: n === MAX_UINT256 ? 'UNLIMITED' : `${n} wei` }
+    return { type: 'bytes32', format: 'hex' as const, value: `0x${word}` }
+  })
+  const summary = schema.intent?.template.replace(/\{(v|\d)\}/g, (_, p) =>
+    p === 'v' ? (evmNativeValue(call.value ?? '0x0', call.chainId) ?? String(call.value)) : values[Number(p)]?.value ?? '')
+  return {
+    dappName: schema.intent?.title || 'Unknown',
+    contractName: call.to,
+    method: schema.method,
+    selector: `0x${calldata.slice(0, 8)}`,
+    fields: [
+      ...(summary ? [{ name: 'Summary', type: 'string', value: summary, format: 'raw' as const }] : []),
+      ...schema.args.map((arg, i) => ({ name: arg.name, ...values[i] })),
+    ],
+    source: 'local',
+  }
+}
+
+/**
+ * Whether a certified (0x03) envelope verifies the way 7.16 verifies it
+ * (signed_metadata.c process_certified): a certificate from the root the
+ * device trusts, scoped to the body's chain, and the delegate's signature over
+ * sha256(body). Desktop never attaches, or shows as clear-signed, an envelope
+ * that fails this: the device would refuse it.
+ */
+export function certifiedEvmEnvelopeVerifies(signedPayload: unknown, rootPublicKey: string | undefined = deviceClearSignRoot()): boolean {
+  if (!rootPublicKey || typeof signedPayload !== 'string') return false
+  try {
+    const payload = Buffer.from(signedPayload.replace(/^0x/i, ''), 'hex')
+    // 0x03 | certificate(139) | body: version, chain id(4), ... | r,s,v(65)
+    if (payload[0] !== CERTIFIED_METADATA_VERSION || payload.length < 1 + 139 + 5 + 65) return false
+    const certificate = inspectAlphaCertificate(payload.subarray(1, 140).toString('hex'), undefined, rootPublicKey)
+    const body = payload.subarray(140, payload.length - 65)
+    if (body.readUInt32BE(1) !== certificate.chainId) return false
+    const signature = Uint8Array.from(payload.subarray(payload.length - 65, payload.length - 1))
+    const digest = Uint8Array.from(createHash('sha256').update(Uint8Array.from(body)).digest())
+    return secp256k1.verify(signature, digest, Uint8Array.from(Buffer.from(certificate.delegatePublicKey, 'hex')), { prehash: false, lowS: false })
+  } catch {
+    return false
   }
 }
 
