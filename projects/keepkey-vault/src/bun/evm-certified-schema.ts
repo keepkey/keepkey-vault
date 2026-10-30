@@ -8,7 +8,7 @@ import {
   type AlphaCertificateBody,
 } from './clearsign-alpha-ceremony'
 import { UR_V4_ROUTERS } from './uniswap-ur'
-import { REVIEWED_EVM_TOKENS } from '../shared/reviewed-evm-tokens'
+import { REVIEWED_EVM_TOKENS, REVIEWED_SWAP_TOKENS } from '../shared/reviewed-evm-tokens'
 
 export const CERTIFIED_METADATA_VERSION = 0x03
 export const CERTIFIED_METADATA_KEY_ID = 0x80
@@ -148,6 +148,67 @@ export function relayErc20DepositEntries(): EvmSchemaSpec[] {
   })
 }
 
+/** OpolisPay v3 on Ethereum (github.com/opolis/crypto-payroll-contracts
+ * README "Mainnetv3"; Sourcify exact match). payPayroll(token, amount,
+ * payrollId) pulls `amount` of a whitelisted token from the caller into the
+ * contract. Its whole whitelist (supportedTokens), with symbol() and
+ * decimals() as read on chain 2026-10-29; Ethereum has no REVIEWED_EVM_TOKENS. */
+export const OPOLIS_PAY_ADDRESS = '0x22a8fe0109b5457ae5c9e916838e807dd8b0a5b6'
+export const OPOLIS_PAY_PAYROLL_SELECTOR = '0x02d5f05f'
+const OPOLIS_PAY_TOKENS: Record<string, { symbol: string; decimals: number }> = {
+  '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48': { symbol: 'USDC', decimals: 6 },
+  '0x6b175474e89094c44da98b954eedeac495271d0f': { symbol: 'DAI', decimals: 18 },
+  '0xdac17f958d2ee523a2206206994597c13d831ec7': { symbol: 'USDT', decimals: 6 },
+}
+
+/** One entry per token, selected and pinned by the token word, like Relay
+ * depositErc20. The payroll id is shown as its 32 calldata bytes. */
+export function findOpolisPayrollSchema(
+  chainId: number,
+  contract: string,
+  selector: string,
+  calldataLength: number,
+  token?: string,
+): EvmSchemaSpec | undefined {
+  if (chainId !== 1 || contract.toLowerCase() !== OPOLIS_PAY_ADDRESS || selector !== OPOLIS_PAY_PAYROLL_SELECTOR || calldataLength !== 100 || !token) return undefined
+  const address = token.toLowerCase()
+  const identity = OPOLIS_PAY_TOKENS[address]
+  if (!identity) return undefined
+  return {
+    chainId: 1,
+    contract: OPOLIS_PAY_ADDRESS,
+    selector: OPOLIS_PAY_PAYROLL_SELECTOR,
+    method: 'payPayroll',
+    args: [
+      { name: 'token', format: EVM_ARG_ADDRESS_PINNED, pinned: address },
+      { name: 'amount', format: EVM_ARG_TOKEN_AMOUNT, symbol: identity.symbol, decimals: identity.decimals, role: ROLE_SPEND_EXACT },
+      { name: 'payrollId', format: EVM_ARG_BYTES },
+    ],
+    expectedCalldataLength: 100,
+    protocol: 'Opolis',
+    maintainedBy: 'Opolis',
+    action: `Pay an Opolis payroll invoice in ${identity.symbol}`,
+    provenance: {
+      protocol: 'https://github.com/opolis/crypto-payroll-contracts',
+      verifiedContract: 'https://repo.sourcify.dev/contracts/full_match/1/0x22a8fe0109b5457aE5C9E916838e807dd8B0A5B6/',
+    },
+    intent: { title: 'Opolis Payroll', template: 'Pay {1} to the Opolis payroll contract', valueRole: 0 },
+  }
+}
+
+export function opolisPayrollEntries(): EvmSchemaSpec[] {
+  return Object.keys(OPOLIS_PAY_TOKENS).map((token) => findOpolisPayrollSchema(1, OPOLIS_PAY_ADDRESS, OPOLIS_PAY_PAYROLL_SELECTOR, 100, token)!)
+}
+
+/** Venice Staking (sVVV) on Base: ERC-1967 proxy named by
+ * docs.venice.ai ("Venice Staking Smart Contract"), implementation StakingV2
+ * 0xe37a7920dbc11253ac6d031c29f592f71b348dca (Sourcify exact match). */
+const VENICE_STAKING = '0x321b7ff75154472b18edb199033ff4d116f340ff'
+const VENICE_PROVENANCE = {
+  protocol: 'https://docs.venice.ai/llms-full.txt',
+  implementation: 'https://repo.sourcify.dev/contracts/full_match/8453/0xe37A7920dbc11253ac6d031C29f592f71B348DCA/',
+}
+
 /**
  * The catalog id for a spec, shared by the worker and Vault. An approve
  * pinned to Permit2 ends ':permit2'; a Relay depositErc20 ends with its
@@ -179,6 +240,36 @@ export const CERTIFIED_EVM_CATALOG: Record<string, EvmSchemaSpec> = {
   // as the Ethereum entry above (whose method name, bridgeDeposit, predates
   // the ABI name and stays as signed), with an intent.
   ...relayNativeEntries([8453, 42161]),
+  // claimAndStake(): stakes the caller's pending VVV rewards (needs a VVV
+  // approval to the staking contract).
+  [`8453:${VENICE_STAKING}:0xcb1a4fc0`]: {
+    chainId: 8453,
+    contract: VENICE_STAKING,
+    selector: '0xcb1a4fc0',
+    method: 'claimAndStake',
+    args: [],
+    expectedCalldataLength: 4,
+    protocol: 'Venice',
+    maintainedBy: 'Venice',
+    action: 'Claim pending VVV staking rewards and stake them',
+    provenance: VENICE_PROVENANCE,
+    intent: { title: 'Venice Staking', template: 'Claim your pending VVV staking rewards and stake them', valueRole: 0 },
+  },
+  // initiateUnstake(amount): burns `amount` sVVV, pays pending rewards, and
+  // starts the cooldown after which the VVV can be withdrawn.
+  [`8453:${VENICE_STAKING}:0xae5ac921`]: {
+    chainId: 8453,
+    contract: VENICE_STAKING,
+    selector: '0xae5ac921',
+    method: 'initiateUnstake',
+    args: [{ name: 'amount', format: EVM_ARG_TOKEN_AMOUNT, symbol: 'sVVV', decimals: 18, role: ROLE_SPEND_EXACT }],
+    expectedCalldataLength: 36,
+    protocol: 'Venice',
+    maintainedBy: 'Venice',
+    action: 'Start unstaking sVVV; the VVV can be withdrawn after the cooldown',
+    provenance: VENICE_PROVENANCE,
+    intent: { title: 'Venice Staking', template: 'Start unstaking {0}; pending VVV rewards are paid; withdraw the VVV after the cooldown', valueRole: 0 },
+  },
   '1:0xbf5a7f3629fb325e2a8453d595ab103465f75e62:0xa2e42c65': {
     chainId: 1,
     contract: '0xbf5A7F3629fB325E2a8453D595AB103465F75E62',
@@ -419,18 +510,21 @@ export function findCertifiedEvmSchemaSpec(
   // approve: the spender word picks pinned vs generic; a dirty word pins nothing.
   const word = calldata.slice(8, 72)
   const spender = selector === ERC20_APPROVE && /^0{24}[0-9a-f]{40}$/.test(word) ? `0x${word.slice(24)}` : undefined
-  return findCertifiedEvmSchemaByShape(chainId, contract, selector, calldata.length / 2, spender, relayDepositToken(selector, calldata))
+  return findCertifiedEvmSchemaByShape(chainId, contract, selector, calldata.length / 2, spender, selectingToken(selector, calldata))
 }
 
-/** depositErc20's token word (a clean address), which selects its entry. */
-export function relayDepositToken(selector: string, calldataHex: string): string | undefined {
-  if (selector.toLowerCase() !== RELAY_DEPOSIT_ERC20_SELECTOR) return undefined
-  const word = calldataHex.replace(/^0x/i, '').toLowerCase().slice(72, 136)
+/** The token word (a clean address) that selects a per-token entry: Relay
+ * depositErc20's second word, OpolisPay payPayroll's first. */
+export function selectingToken(selector: string, calldataHex: string): string | undefined {
+  const index = { [RELAY_DEPOSIT_ERC20_SELECTOR]: 1, [OPOLIS_PAY_PAYROLL_SELECTOR]: 0 }[selector.toLowerCase()]
+  if (index === undefined) return undefined
+  const start = 8 + 64 * index
+  const word = calldataHex.replace(/^0x/i, '').toLowerCase().slice(start, start + 64)
   return /^0{24}[0-9a-f]{40}$/.test(word) ? `0x${word.slice(24)}` : undefined
 }
 
 /** Match without sending transaction arguments to a remote schema service
- * (only an approve's spender or a Relay depositErc20's token address, which
+ * (only an approve's spender or a per-token entry's token address, which
  * select the description). */
 export function findCertifiedEvmSchemaByShape(
   chainId: number | undefined,
@@ -447,6 +541,7 @@ export function findCertifiedEvmSchemaByShape(
   if (!spec) {
     return findReviewedTokenSchema(chainId, contract, normalizedSelector, calldataLength!, spender)
       ?? findRelayErc20DepositSchema(chainId, contract, normalizedSelector, calldataLength!, token)
+      ?? findOpolisPayrollSchema(chainId, contract, normalizedSelector, calldataLength!, token)
   }
   if (spec.expectedCalldataLength !== undefined) {
     if (calldataLength !== spec.expectedCalldataLength) return undefined
@@ -707,6 +802,21 @@ export const UR_MAX_TOKENS = 4
  * the Uniswap app sends to; its vectors are real Base calls. V4_SWAP (0x10) is
  * decoded only for UR 2.1.2 on Base (UR_V4_ROUTERS: its V4Router layout was
  * checked against the verified source); elsewhere a V4 route is refused.
+ *
+ * Added 2026-10-29, each checked against those generations:
+ * - UR v1 and UR 2.1.1 on Ethereum, by verified source (eth.blockscout.com).
+ *   2.1.1's contracts/ are identical to 2.1.2's; only its v4-periphery
+ *   differs, and V4 stays refused there. v1 uses the same command ids, input
+ *   tuples and recipient constants as 1.2 for every command the device
+ *   decodes, and decodes with abi.decode, which is stricter.
+ * - The first UR 1.2 deployments on Base and Optimism and UR 2.0 on
+ *   Optimism, by runtime code: byte-identical to a reviewed deployment of
+ *   the same generation except constructor immutables. They were later
+ *   dropped from Uniswap's list, so the source names the commit that listed
+ *   them (bae062f1 for Base, 3e16080e for Optimism).
+ * Only chains whose native coin is ETH: the device calls msg.value and an
+ * unwrapped output "ETH" on every chain (7.16 signed_metadata.c
+ * ur_amount_text), so a BSC or Polygon router would show BNB or POL as ETH.
  */
 export const REVIEWED_UNIVERSAL_ROUTERS: EvmNameRecord[] = [
   { chainId: 8453, address: '0x3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad', name: 'Uniswap Universal Router', source: 'base.json UniversalRouterV1_2_V2Support' },
@@ -718,6 +828,11 @@ export const REVIEWED_UNIVERSAL_ROUTERS: EvmNameRecord[] = [
   { chainId: 42161, address: '0x5e325eda8064b456f4781070c0738d849c824258', name: 'Uniswap Universal Router', source: 'arbitrum.json UniversalRouterV1_2_V2Support' },
   { chainId: 42161, address: '0xa51afafe0263b40edaef0df8781ea9aa03e381a3', name: 'Uniswap Universal Router', source: 'arbitrum.json UniversalRouterV2' },
   { chainId: 42161, address: '0x2d01411773c8c24805306e89a41f7855c3c4fe65', name: 'Uniswap Universal Router', source: 'arbitrum.json UniversalRouterV2_1_2' },
+  { chainId: 1, address: '0xef1c6e67703c7bd7107eed8303fbe6ec2554bf6b', name: 'Uniswap Universal Router', source: 'mainnet.json UniversalRouterV1' },
+  { chainId: 1, address: '0x4c82d1fbfe28c977cbb58d8c7ff8fcf9f70a2cca', name: 'Uniswap Universal Router', source: 'mainnet.json UniversalRouterV2_1_1' },
+  { chainId: 8453, address: '0x198ef79f1f515f02dfe9e3115ed9fc07183f02fc', name: 'Uniswap Universal Router', source: 'base.json UniversalRouterV1_2 at bae062f100ada72597880e877d40ce467a8b4aa3' },
+  { chainId: 10, address: '0x3fc91a3afd70395cd496c647d5a6cc9d4b2b7fad', name: 'Uniswap Universal Router', source: 'optimism.json UniversalRouterV1_2 at 3e16080e480311a9011ae295b84fd9117bffcf41' },
+  { chainId: 10, address: '0x851116d9223fabed8e56c0e6b8ad0c31d98b3507', name: 'Uniswap Universal Router', source: 'optimism.json UniversalRouterV2' },
 ]
 
 /** True when the device decodes V4_SWAP for this router (firmware V4_ROUTERS). */
@@ -733,16 +848,22 @@ export function findReviewedUniversalRouter(chainId: number | undefined, router:
 
 export interface EvmDecoderToken { address: string; symbol: string; decimals: number }
 
-/** Token identities for a swap entry: REVIEWED_EVM_TOKENS by exact chain:address
- * only, never by symbol. Undefined if any is unreviewed, repeated, or the count
- * is outside 1..4. */
+/** A token a swap entry may name: REVIEWED_EVM_TOKENS, then the swap-only
+ * REVIEWED_SWAP_TOKENS, by exact chain:address only, never by symbol. */
+export function reviewedSwapToken(chainId: number, address: string): { symbol: string; decimals: number } | undefined {
+  const key = `${chainId}:${String(address).toLowerCase()}`
+  return REVIEWED_EVM_TOKENS[key] ?? REVIEWED_SWAP_TOKENS[key]
+}
+
+/** Token identities for a swap entry (reviewedSwapToken). Undefined if any is
+ * unreviewed, repeated, or the count is outside 1..4. */
 export function reviewedSwapTokens(chainId: number, addresses: string[]): EvmDecoderToken[] | undefined {
   if (!Array.isArray(addresses) || addresses.length < 1 || addresses.length > UR_MAX_TOKENS) return undefined
   const seen = new Set<string>()
   const out: EvmDecoderToken[] = []
   for (const raw of addresses) {
     const address = String(raw).toLowerCase()
-    const token = REVIEWED_EVM_TOKENS[`${chainId}:${address}`]
+    const token = reviewedSwapToken(chainId, address)
     if (!token || seen.has(address)) return undefined
     seen.add(address)
     out.push({ address, ...token })

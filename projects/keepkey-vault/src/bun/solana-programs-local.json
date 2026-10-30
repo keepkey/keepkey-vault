@@ -48,6 +48,23 @@
         }
       }
     },
+    "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA": {
+      "name": "SPL Token",
+      "category": "token",
+      "website": "https://spl.solana.com/token",
+      "description": "The SPL Token program (legacy). Same as pioneer-discovery plus SyncNative (0x11), which wraps the SOL already sent to a wrapped-SOL account; firmware decodes it (lib/firmware/solana.c SOL_TOKEN_SYNC_NATIVE_IX) and Jupiter SOL swaps send it.",
+      "discriminator": { "encoding": "u8", "offset": 0, "length": 1 },
+      "instructions": {
+        "03": { "name": "transfer", "accounts": ["source", "destination", "authority"], "args": [{ "name": "amount", "type": "u64" }] },
+        "04": { "name": "approve", "accounts": ["source", "delegate", "owner"], "args": [{ "name": "amount", "type": "u64" }] },
+        "07": { "name": "mintTo", "accounts": ["mint", "destination", "authority"], "args": [{ "name": "amount", "type": "u64" }] },
+        "08": { "name": "burn", "accounts": ["account", "mint", "authority"], "args": [{ "name": "amount", "type": "u64" }] },
+        "09": { "name": "closeAccount", "accounts": ["account", "destination", "owner"], "args": [] },
+        "0c": { "name": "transferChecked", "accounts": ["source", "mint", "destination", "authority"], "args": [{ "name": "amount", "type": "u64" }, { "name": "decimals", "type": "u8" }] },
+        "0d": { "name": "approveChecked", "accounts": ["source", "mint", "delegate", "owner"], "args": [{ "name": "amount", "type": "u64" }, { "name": "decimals", "type": "u8" }] },
+        "11": { "name": "syncNative", "accounts": ["account"], "args": [] }
+      }
+    },
     "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL": {
       "name": "Associated Token Account",
       "category": "token",

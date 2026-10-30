@@ -1,0 +1,182 @@
+{
+ "_source": {
+  "chain": "Ethereum mainnet",
+  "transaction": "0x24550d5012c90f1b478d243aca85563f57b196f6a492aeb21b96c0709da2a5e8",
+  "explorer": "https://etherscan.io/tx/0x24550d5012c90f1b478d243aca85563f57b196f6a492aeb21b96c0709da2a5e8",
+  "block": 26301406,
+  "rpc": "https://ethereum-rpc.publicnode.com",
+  "method": "Seaport 1.6 fulfillBasicOrder (ETH for an ERC-721): the OrderComponents the seller signed on OpenSea, rebuilt from the BasicOrderParameters in the calldata. The counter is Seaport.getCounter(offerer).",
+  "checks": {
+   "orderHashMatchesOrderFulfilledEvent": "0x93ec2b85e8de40a2415d878f8f08a73958368f6f129959e7db4a8963a5e044bd",
+   "signatureRecoversOfferer": "0x3A3B180A7eb906D808A999148A81128543EfC5Bc",
+   "eip712Digest": "0x287fca9958156e17d5b5fb07976a80a89e6d2ae2e477a1309c66204a95c467f9"
+  },
+  "fetched": "2026-10-29"
+ },
+ "site": "https://opensea.io",
+ "method": "ETH_SIGNTYPEDDATA_V4",
+ "body": {
+  "address": "0x3A3B180A7eb906D808A999148A81128543EfC5Bc",
+  "typedData": {
+   "types": {
+    "EIP712Domain": [
+     {
+      "name": "name",
+      "type": "string"
+     },
+     {
+      "name": "version",
+      "type": "string"
+     },
+     {
+      "name": "chainId",
+      "type": "uint256"
+     },
+     {
+      "name": "verifyingContract",
+      "type": "address"
+     }
+    ],
+    "OrderComponents": [
+     {
+      "name": "offerer",
+      "type": "address"
+     },
+     {
+      "name": "zone",
+      "type": "address"
+     },
+     {
+      "name": "offer",
+      "type": "OfferItem[]"
+     },
+     {
+      "name": "consideration",
+      "type": "ConsiderationItem[]"
+     },
+     {
+      "name": "orderType",
+      "type": "uint8"
+     },
+     {
+      "name": "startTime",
+      "type": "uint256"
+     },
+     {
+      "name": "endTime",
+      "type": "uint256"
+     },
+     {
+      "name": "zoneHash",
+      "type": "bytes32"
+     },
+     {
+      "name": "salt",
+      "type": "uint256"
+     },
+     {
+      "name": "conduitKey",
+      "type": "bytes32"
+     },
+     {
+      "name": "counter",
+      "type": "uint256"
+     }
+    ],
+    "OfferItem": [
+     {
+      "name": "itemType",
+      "type": "uint8"
+     },
+     {
+      "name": "token",
+      "type": "address"
+     },
+     {
+      "name": "identifierOrCriteria",
+      "type": "uint256"
+     },
+     {
+      "name": "startAmount",
+      "type": "uint256"
+     },
+     {
+      "name": "endAmount",
+      "type": "uint256"
+     }
+    ],
+    "ConsiderationItem": [
+     {
+      "name": "itemType",
+      "type": "uint8"
+     },
+     {
+      "name": "token",
+      "type": "address"
+     },
+     {
+      "name": "identifierOrCriteria",
+      "type": "uint256"
+     },
+     {
+      "name": "startAmount",
+      "type": "uint256"
+     },
+     {
+      "name": "endAmount",
+      "type": "uint256"
+     },
+     {
+      "name": "recipient",
+      "type": "address"
+     }
+    ]
+   },
+   "primaryType": "OrderComponents",
+   "domain": {
+    "name": "Seaport",
+    "version": "1.6",
+    "chainId": 1,
+    "verifyingContract": "0x0000000000000068F116a894984e2DB1123eB395"
+   },
+   "message": {
+    "offerer": "0x3A3B180A7eb906D808A999148A81128543EfC5Bc",
+    "zone": "0x0000000000000000000000000000000000000000",
+    "offer": [
+     {
+      "itemType": 2,
+      "token": "0x387C41B0B2F1128dE44dB1Bcf8baad085f26392C",
+      "identifierOrCriteria": "5318",
+      "startAmount": "1",
+      "endAmount": "1"
+     }
+    ],
+    "consideration": [
+     {
+      "itemType": 0,
+      "token": "0x0000000000000000000000000000000000000000",
+      "identifierOrCriteria": "0",
+      "startAmount": "553407831900000000",
+      "endAmount": "553407831900000000",
+      "recipient": "0x3A3B180A7eb906D808A999148A81128543EfC5Bc"
+     },
+     {
+      "itemType": 0,
+      "token": "0x0000000000000000000000000000000000000000",
+      "identifierOrCriteria": "0",
+      "startAmount": "5589978100000000",
+      "endAmount": "5589978100000000",
+      "recipient": "0x0000a26b00c1F0DF003000390027140000fAa719"
+     }
+    ],
+    "orderType": 0,
+    "startTime": "1793312324",
+    "endTime": "1793333924",
+    "zoneHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "salt": "27855337018906766782546881864045825683096516384821792734238808442380141071021",
+    "conduitKey": "0x0000007b02230091a7ed01230072f7006a004d60a8d4e71d599b8104250f0000",
+    "counter": "0"
+   }
+  }
+ }
+}

@@ -1,0 +1,30 @@
+{
+ "_source": "Ethereum mainnet tx 0xd7a2e6e72c9ce0a40b0ba70cdc45562344571307cfda1f9013a875c2b478e209 (block 26299726, to GPv2Settlement; eth_getLogs + eth_getTransactionByHash via ethereum-rpc.publicnode.com, 2026-10-29). A CoW order's pre-hook calls USDC.permit(owner, GPv2VaultRelayer, 1088.201491 USDC, deadline 1793294602, v=27, r=0xccee26c03b052169a5a3fd4a3325fb7c6b2999e4870bf8d29d8cb6b61dfc8ca5, s=0x0a39f4ff0f44f630b664eb63d1cfba59acff8e680379e8ceca8178a3503528e5). The nonce is not in the calldata: 5 is the one value for which the signature recovers the owner.",
+ "typedData": {
+  "types": {
+   "EIP712Domain": [
+    { "name": "name", "type": "string" },
+    { "name": "version", "type": "string" },
+    { "name": "chainId", "type": "uint256" },
+    { "name": "verifyingContract", "type": "address" }
+   ],
+   "Permit": [
+    { "name": "owner", "type": "address" },
+    { "name": "spender", "type": "address" },
+    { "name": "value", "type": "uint256" },
+    { "name": "nonce", "type": "uint256" },
+    { "name": "deadline", "type": "uint256" }
+   ]
+  },
+  "primaryType": "Permit",
+  "domain": { "name": "USD Coin", "version": "2", "chainId": 1, "verifyingContract": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48" },
+  "message": {
+   "owner": "0xa6601384d5053d7348801ee7675f7788071f8002",
+   "spender": "0xc92e8bdf79f0507f65a392b0ab4667716bfe0110",
+   "value": "1088201491",
+   "nonce": "5",
+   "deadline": "1793294602"
+  }
+ },
+ "signature": "0xccee26c03b052169a5a3fd4a3325fb7c6b2999e4870bf8d29d8cb6b61dfc8ca50a39f4ff0f44f630b664eb63d1cfba59acff8e680379e8ceca8178a3503528e51b"
+}

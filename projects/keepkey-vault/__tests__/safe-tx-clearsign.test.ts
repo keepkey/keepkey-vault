@@ -234,7 +234,7 @@ describe('MultiSend batches through pinned Safe contracts (G11, G18)', () => {
     expect(text(await real(baseMultiSend141))).toContain("Safe's standard MultiSend 1.4.1 contract")
     const r = await review(doc('safe-SafeTx-multisend-approve-unlimited'))
     expect(text(r)).toContain("Runs 2 calls in one batch through Safe's standard MultiSendCallOnly 1.3.0 contract.")
-    expect(text(r)).toContain('Call 1 of 2: Lets 0xc92e8bdf79f0507f65a392b0ab4667716bfe0110 spend ALL of your token at 0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2')
+    expect(text(r)).toContain('Call 1 of 2: Lets CoW Protocol Vault Relayer (0xc92e8bdf79f0507f65a392b0ab4667716bfe0110) spend ALL of your token at 0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2')
     expect(text(await review(doc('safe-SafeTx-multisend-4900')))).toContain("through Safe's standard MultiSendCallOnly 1.3.0 contract")
   })
   test('an inner delegatecall is flagged', async () => {

@@ -27,6 +27,7 @@ import { parseSolanaTx, solanaMessageSlice, parseSolanaMessage, type ParsedSolan
 import type { AltAccountFetcher } from './solana-alt'
 import { resolveAlts } from './solana-alt'
 import { buildExpandedAccounts, decodeInstruction } from './solana-instruction-decoder'
+import { JUPITER_V6 } from './solana-jupiter'
 import type { SolanaTxDecodedInfo, SolanaTxDecodedInstruction } from '../shared/types'
 
 // ponytail: Stake/Vote programs omitted — add if a dApp flow ever touches them.
@@ -35,6 +36,49 @@ const ASSET_PROGRAMS: Record<string, string> = {
   [SYSTEM_PROGRAM]: 'System Program',
   TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA: 'SPL Token',
   TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb: 'SPL Token 2022',
+}
+
+const ATA_PROGRAM = 'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL'
+const TOKEN_PROGRAMS = new Set(['TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb'])
+/** Token accounts whose holder the review names: where a token-program send
+ *  or a Jupiter swap takes from and pays out to. */
+const TOKEN_ACCOUNT_LABELS = new Set(['source', 'destination', 'userSourceTokenAccount', 'sourceTokenAccount', 'userDestinationTokenAccount', 'destinationTokenAccount'])
+
+/**
+ * Mint and holder of the token accounts the review names. An ATA create in
+ * this transaction states them (the ATA program refuses an address that is
+ * not that wallet's account for that mint); the rest are read from the chain
+ * with the same read-only fetcher as the lookup tables. Best-effort: an
+ * account that does not resolve is left out, never guessed.
+ */
+async function resolveTokenAccounts(
+  instructions: SolanaTxDecodedInstruction[],
+  fetcher: AltAccountFetcher,
+): Promise<Record<string, { mint: string; owner: string }>> {
+  const out: Record<string, { mint: string; owner: string }> = {}
+  for (const ix of instructions) {
+    if (ix.programId !== ATA_PROGRAM || ix.status !== 'known' || ix.note) continue
+    const at = (label: string) => ix.accounts.find((a) => a.label === label)?.pubkey
+    const ata = at('associated_account'), owner = at('owner'), mint = at('mint')
+    if (ata && owner && mint) out[ata] = { mint, owner }
+  }
+  // A Jupiter optional account left empty is the program id itself.
+  const programs = new Set(instructions.map((ix) => ix.programId))
+  const wanted = [...new Set(instructions.flatMap((ix) => ix.status === 'known' && (TOKEN_PROGRAMS.has(ix.programId) || ix.programId === JUPITER_V6)
+    ? ix.accounts.filter((a) => a.label && TOKEN_ACCOUNT_LABELS.has(a.label)).map((a) => a.pubkey)
+    : []))].filter((k) => !out[k] && !k.startsWith('<') && !programs.has(k))
+  if (wanted.length === 0) return out
+  try {
+    const accounts = await fetcher(wanted)
+    accounts.forEach((acct, i) => {
+      // An SPL token account is exactly 165 bytes; a Token-2022 one may be
+      // longer, with account type 2 (Account) right after the base layout.
+      if (!acct || !TOKEN_PROGRAMS.has(acct.owner) || acct.data.length < 165) return
+      if (acct.data.length > 165 && acct.data[165] !== 2) return
+      out[wanted[i]] = { mint: bs58.encode(acct.data.subarray(0, 32)), owner: bs58.encode(acct.data.subarray(32, 64)) }
+    })
+  } catch { /* not checked: the review says so */ }
+  return out
 }
 
 const COMPUTE_BUDGET_PROGRAM = 'ComputeBudget111111111111111111111111111111'
@@ -123,6 +167,8 @@ export async function buildSolanaDecodedInfo(
     .filter(([id]) => expanded.includes(id))
     .map(([, name]) => name)
 
+  const tokenAccounts = await resolveTokenAccounts(instructions, altFetcher)
+
   return {
     version: parsedMsg.version,
     staticAccountCount: parsedMsg.staticAccounts.length,
@@ -132,6 +178,7 @@ export async function buildSolanaDecodedInfo(
     hasUnknownProgram: hasUnknownProgram || undefined,
     assetPrograms,
     fundedKeysGivenToUnknownProgram,
+    ...(Object.keys(tokenAccounts).length > 0 ? { tokenAccounts } : {}),
     // Withheld when a lookup table did not resolve: an instruction whose
     // program id came from that table is unreadable here, so a priority fee
     // could be missed and "up to X" would be an understatement.

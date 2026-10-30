@@ -1322,15 +1322,17 @@ export function insertClearSignObservation(
   draft: ClearSignObservationDraft,
   context: { deviceId?: string; source: ClearSignEventSource },
 ): ClearSignObservation {
+  const componentCount = draft.chain === 'Solana' && Array.isArray(draft.shape.components)
+    ? Math.max(1, draft.shape.components.length) : 1
   const entry: ClearSignObservation = {
     ...draft,
     ...context,
     id: randomUUID(),
     createdAt: Date.now(),
     outcome: 'pending',
-    componentCount: draft.chain === 'Solana' && Array.isArray(draft.shape.components)
-      ? Math.max(1, draft.shape.components.length) : 1,
-    authenticatedComponentCount: 0,
+    componentCount,
+    // The device decodes a native request whole, every component included.
+    authenticatedComponentCount: draft.definitionSource === 'native' && draft.protectionLevel === 'P4' ? componentCount : 0,
   }
   try {
     if (!db) return entry
@@ -1404,8 +1406,11 @@ export function authenticateClearSignObservation(
       `UPDATE clearsign_observations
           SET protection_level = ?, definition_source = ?,
               authenticated_component_count = MIN(component_count, MAX(authenticated_component_count, ?))
-        WHERE id = ? AND outcome = 'pending'`,
-      [protectionLevel, definitionSource, authenticated ? Math.max(0, Math.floor(authenticatedComponentCount)) : 0, id],
+        WHERE id = ? AND outcome = 'pending'
+          AND NOT (definition_source = 'native' AND ? = 0)`,
+      // A runtime blob beside a call the device decodes itself annotates it:
+      // the native level stands.
+      [protectionLevel, definitionSource, authenticated ? Math.max(0, Math.floor(authenticatedComponentCount)) : 0, id, authenticated ? 1 : 0],
     )
     if (authenticated) {
       const bundleHash = promotionBundleHash?.replace(/^0x/i, '').toLowerCase()
@@ -3015,6 +3020,24 @@ export function matchAddressBook(networkId: string, address: string, chainFamily
   } catch (e: any) {
     console.warn('[db] matchAddressBook failed:', e.message)
     return null
+  }
+}
+
+/** Is `address` one of this device's own addresses on `networkId`? Undefined
+ *  when this computer cannot tell: no own entries for that network yet, or a
+ *  UTXO chain, whose own entries are account xpubs that do not list every address. */
+export function isOwnAddress(deviceId: string, networkId: string, address: string, chainFamily: string): boolean | undefined {
+  try {
+    if (!db) return undefined
+    const rows = db.query(
+      `SELECT address FROM addressbook WHERE kind = 'own' AND device_id = ? AND network_id = ?`,
+    ).all(deviceId, networkId) as Array<{ address: string }>
+    if (rows.length === 0) return undefined
+    if (rows.some((r) => r.address === normalizeAddress(address, chainFamily))) return true
+    return chainFamily === 'utxo' ? undefined : false
+  } catch (e: any) {
+    console.warn('[db] isOwnAddress failed:', e.message)
+    return undefined
   }
 }
 

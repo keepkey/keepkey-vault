@@ -8,8 +8,9 @@
 import type { CalldataDecodedField, SafeCallPreview, SigningRequestInfo } from '../shared/types'
 import { decodeCalldata, firmwareClearSigns, formatDeadline } from './calldata-decoder'
 import { findCertifiedEvmSchema, findCertifiedUniswapSwap } from './evm-schema-registry'
-import { REVIEWED_EVM_TOKENS, findEvmNameRecord, findReviewedUniversalRouter } from './evm-certified-schema'
+import { findEvmNameRecord, findReviewedUniversalRouter, reviewedSwapToken } from './evm-certified-schema'
 import { evmContractIdentity } from '../shared/evm-contract-identity'
+import { knownSpenderName } from '../shared/evm-known-spenders'
 import { urPrecheck } from './uniswap-ur'
 import { supportsCertifiedClearSign } from './solana-certified-policy'
 import { certifiedBodyRefused, certifiedEnvelopeShown, metadataPayloadBytes } from '../shared/certified-evm-envelope'
@@ -120,7 +121,7 @@ function txValue(raw: unknown): bigint | undefined {
  * would not decode gets no rows, and a call it reviews gets the facts its
  * screens state (signed_metadata_build_ur_review): what is paid, the minimum
  * received, the recipient, the fee, the Permit2 allowance and every V4 pool
- * hook. Token names come only from REVIEWED_EVM_TOKENS by chain:address; any
+ * hook. Token names come only from reviewedSwapToken by chain:address; any
  * other token is shown as raw units of its address with a "Token warning".
  * Advice checked on this computer (D-018): it never sets or relaxes a gate.
  */
@@ -134,7 +135,7 @@ export function uniswapSwapFields(
   const s = plan.summary
   const unknown: string[] = []
   const amount = (raw: bigint, token: string, isEth: boolean, unlimitedAt?: bigint) => {
-    const t = isEth ? { symbol: 'ETH', decimals: 18 } : REVIEWED_EVM_TOKENS[`${chainId}:${token}`]
+    const t = isEth ? { symbol: 'ETH', decimals: 18 } : reviewedSwapToken(chainId, token)
     if (!t) { unknown.push(token); return `${raw} base units of token ${token}` }
     // The device's ur_amount_text: a permit's all-ones uint160 reads UNLIMITED.
     if (raw === unlimitedAt) return `UNLIMITED ${t.symbol}`
@@ -216,12 +217,13 @@ export async function attachCertifiedUniswapSwap(
  * Decode calldata for the overlay and set deviceClearSigns / needsBlindSigning.
  * `callerMetadata` is a runtime-signer blob a REST caller supplied directly.
  */
-/** A spender KeepKey has reviewed: canonical Permit2, or an address with a
- * certified name record (the same list the device names spenders from). */
+/** A spender KeepKey has reviewed: canonical Permit2, an address with a
+ * certified name record (the same list the device names spenders from), or a
+ * swap/bridge contract on Desktop's own list (advice only, evm-known-spenders). */
 export function recognizedSpender(chainId: number | undefined, address: string | undefined): string | undefined {
   if (!chainId || !address || !/^0x[0-9a-fA-F]{40}$/.test(address)) return undefined
   const identity = evmContractIdentity(chainId, address)
-  return identity === 'Uniswap Permit2' ? identity : findEvmNameRecord(chainId, address)?.name
+  return identity === 'Uniswap Permit2' ? identity : findEvmNameRecord(chainId, address)?.name ?? knownSpenderName(chainId, address)
 }
 
 /** The reviewed spender of a decoded permit, for both REST and WalletConnect. */

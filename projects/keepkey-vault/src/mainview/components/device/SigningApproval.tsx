@@ -504,7 +504,7 @@ function Erc7730Section({ d }: { d: Erc7730Description }) {
 // ── Calldata decoded section ──────────────────────────────────────────
 
 function CalldataSection({ decoded, request, t }: { decoded: CalldataDecodedInfo; request: SigningRequestInfo; t: (k: string, f?: string) => string }) {
-	const erc20 = erc20Preview(request.to, request.chainId, request.data)
+	const erc20 = erc20Preview(request.to, request.chainId, request.data, request.recognizedSpender)
 	return (
 		<VStack gap="1.5" w="100%" bg="rgba(0,0,0,0.25)" borderRadius="xl" p="3">
 			<Flex gap="2" align="center" w="100%">
@@ -1053,7 +1053,7 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 
 	const decoded = request.calldataDecoded
 	const swapDecision = decoded?.fields.some(field => field.name === 'Action' && field.value.startsWith('Swap '))
-		&& decoded.fields.some(field => field.name === 'Protocol' && /^(THORChain|Mayachain) Router$/.test(field.value))
+		&& decoded.fields.some(field => field.name === 'Protocol' && /^((THORChain|Mayachain|Relay) Router|0x Settler|CoW EthFlow)$/.test(field.value))
 	const hasCalldata = fwSupportsBlindSignGate
 		&& (request.needsBlindSigning !== undefined || (decoded && decoded.source !== undefined))
 	const hasSignedBlob = !!decoded?.signedInsightBlob
