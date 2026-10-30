@@ -2823,7 +2823,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             const erc7730 = activeSigningInfo?.erc7730
             if (!certified && !erc7730 && supportsCertifiedClearSign(firmwareVersion)) {
               try {
-                certified = await resolveEvmSchema(msg.chainId, msg.to, msg.data, true, firmwareVersion)
+                certified = await resolveEvmSchema(msg.chainId, msg.to, msg.data, true, firmwareVersion, msg.value)
               } catch (error: any) {
                 // A reviewed certified call must not lose authentication when
                 // its service or artifact is unavailable.
