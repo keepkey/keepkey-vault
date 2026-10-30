@@ -1533,6 +1533,7 @@ function getOrCreateWcManager(): WalletConnectManager {
 				},
 				'walletconnect:solanaSignTransaction',
 				() => engine.getDeviceState().firmwareVersion,
+				createRpcAltFetcher(getSetting('solana_rpc_endpoint') || 'https://api.mainnet-beta.solana.com'),
 			)
 			if (!result?.signature || !result.serializedTx) {
 				throw new Error('Device returned no Solana transaction signature')
@@ -4379,6 +4380,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 						},
 						'solanaSignTx',
 						() => engine.getDeviceState().firmwareVersion,
+						createRpcAltFetcher(getSetting('solana_rpc_endpoint') || 'https://api.mainnet-beta.solana.com'),
 					)
 					if (observationId && (schema || result?.clearSignPromotionBundleHash)) authenticateClearSignObservation(
 						observationId, promoted || result?.clearSignPromotionBundleHash || (params as any)?.certificate ? 'certified' : 'runtime',
