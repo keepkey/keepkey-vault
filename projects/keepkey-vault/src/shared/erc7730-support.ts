@@ -14,17 +14,17 @@ import { deviceTrustsProductionRoot } from './certified-evm-envelope'
 /** Calldata definitions: on, behind the firmware and capability gate below. */
 export const ERC7730_TRANSPORT_SUPPORTED: boolean = true
 
+/** The first firmware with the ERC-7730 v2 interpreter. */
+export const ERC7730_MIN_FW = '7.16.0'
+
 /**
  * Typed-data (EIP-712) definitions: OFF on 7.16 (owner, 2026-10-16). Measured
  * on stock 7.16.0, every field pass re-shows every message leaf (4.2x the
- * screens), and a preload turns off the native Permit2 review. Desktop never
- * attaches a definition to typed data in this build. Revisit with a firmware
- * that shows each leaf once.
+ * screens). 7.17 shows each value once (firmware #1025), so typed data gets a
+ * definition from 7.17.0 on. A PermitSingle never gets one: a preload turns
+ * off the native Permit2 review.
  */
-export const ERC7730_TYPED_DATA_SUPPORTED: boolean = false
-
-/** The first firmware with the ERC-7730 v2 interpreter. */
-export const ERC7730_MIN_FW = '7.16.0'
+export const ERC7730_TYPED_DATA_MIN_FW = '7.17.0'
 
 /** Features.capabilities value (messages.proto). It sits in the 7.15 block of
  *  the firmware's list, so it does not identify 7.16 alone. */
@@ -40,6 +40,12 @@ export function supportsErc7730Transport(firmwareVersion: string | undefined, ca
     && Array.isArray(capabilities) && capabilities.includes(CAPABILITY_ERC7730_RUNTIME_REVIEW)
     // The bundled emulator trusts only the alpha root (see certified-evm-envelope).
     && deviceTrustsProductionRoot()
+}
+
+/** Desktop may send this device an ERC-7730 typed-data definition. */
+export function supportsErc7730TypedData(firmwareVersion: string | undefined, capabilities: readonly number[] | undefined): boolean {
+  return supportsErc7730Transport(firmwareVersion, capabilities)
+    && versionCompare(firmwareVersion!, ERC7730_TYPED_DATA_MIN_FW) >= 0
 }
 
 /**

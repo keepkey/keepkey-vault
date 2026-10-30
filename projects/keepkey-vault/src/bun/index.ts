@@ -298,7 +298,7 @@ import { prioritizeExtraContracts, type PortfolioExtraContract } from "./portfol
 import { buildSolanaSchema, inspectSolanaSchema } from "./clearsign-studio"
 import { resolvePromotedEvmArtifact, resolvePromotedSolanaArtifact } from "./clearsign-artifact-resolver"
 import { resolveEvmSchema } from "./evm-schema-registry"
-import { resolveErc7730ForCall, signWithErc7730Fallback } from "./erc7730-resolver"
+import { resolveErc7730ForCall, signWithErc7730Fallback, withErc7730TypedData } from "./erc7730-resolver"
 import { requestClearSignReview } from "./clearsign-review"
 import { trustRuntimeSigner, type RuntimeEvmSigner } from "./evm-runtime-metadata"
 import { addClearSignProvider, listClearSignProviders, removeClearSignProvider, resolveProviderTxMetadata, seedClearSignProviderFromEnv } from "./clearsign-providers"
@@ -1397,7 +1397,7 @@ function getOrCreateWcManager(): WalletConnectManager {
 		getAdvancedModeEnabled: () => getAdvancedModeEnabled() === true,
 		loadClearsignSigner: async (signer) => { if (!engine.wallet) throw new Error('Device disconnected'); await loadProviderSigner(signer) },
 		ethSignMessage: (params) => { if (isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant)) throw new Error('WalletConnect is not available on bitcoin-only firmware'); if (!engine.wallet) throw new Error('Device disconnected'); return engine.wallet.ethSignMessage(params) },
-		ethSignTypedData: async (params) => { if (isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant)) throw new Error('WalletConnect is not available on bitcoin-only firmware'); if (!engine.wallet) throw new Error('Device disconnected'); return engine.wallet.ethSignTypedData(await withPermit2SpenderName(withoutCallerErc7730(params, '[WC] ethSignTypedData'), engine.getDeviceState().firmwareVersion)) },
+		ethSignTypedData: async (params) => { if (isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant)) throw new Error('WalletConnect is not available on bitcoin-only firmware'); if (!engine.wallet) throw new Error('Device disconnected'); const wallet = engine.wallet; const { firmwareVersion, capabilities } = engine.getDeviceState(); const signParams = await withErc7730TypedData(await withPermit2SpenderName(withoutCallerErc7730(params, '[WC] ethSignTypedData'), firmwareVersion), { firmwareVersion, capabilities }); return signWithErc7730Fallback(signParams, (p) => wallet.ethSignTypedData(p), undefined, '[WC] ethSignTypedData') },
 		getCosmosAccountInfo: async (caipChain) => {
 			if (isBitcoinOnlyVariant(engine.getDeviceState().firmwareVariant)) return null
 			if (!engine.wallet) return null
@@ -4241,9 +4241,14 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 			},
 			ethSignTypedData: async (rawParams) => {
 				if (!engine.wallet) throw new Error('No device connected')
-				// Typed-data ERC-7730 stays off on 7.16 (ERC7730_TYPED_DATA_SUPPORTED):
-				// no definition is ever sent with a document.
-				const params = await withPermit2SpenderName(withoutCallerErc7730(rawParams, 'ethSignTypedData'), engine.getDeviceState().firmwareVersion)
+				// A caller's catalog is always dropped. Desktop attaches its own
+				// typed-data definition only on 7.17+ (supportsErc7730TypedData).
+				const { firmwareVersion, capabilities } = engine.getDeviceState()
+				const params = await withErc7730TypedData(
+					await withPermit2SpenderName(withoutCallerErc7730(rawParams, 'ethSignTypedData'), firmwareVersion),
+					{ firmwareVersion, capabilities },
+				)
+				const signTyped = () => signWithErc7730Fallback(params, (p: any) => engine.wallet!.ethSignTypedData(p), undefined, '[ethSignTypedData]')
 				let observationId: string | undefined
 				if (!engine.isPassphraseWallet) {
 					const draft = observeEvmTypedData({ typedData: (params as any)?.typedData, hostDecoded: true })
@@ -4252,11 +4257,8 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 				}
 				try {
 					const result = engine.isEmulator
-						? await emuSigningOp(
-							() => engine.wallet!.ethSignTypedData(params),
-							{ operation: 'ethSignTypedData', chain: 'Ethereum' },
-						)
-						: await engine.wallet.ethSignTypedData(params)
+						? await emuSigningOp(signTyped, { operation: 'ethSignTypedData', chain: 'Ethereum' })
+						: await signTyped()
 					if (observationId) finalizeClearSignObservation(observationId, 'signed')
 					return result
 				} catch (cause: any) {

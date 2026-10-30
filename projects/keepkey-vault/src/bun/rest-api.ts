@@ -17,7 +17,7 @@ import { addSeaportCreatorFee } from './seaport-creator-fee'
 import { evmPriorityFee, normalizeEvmChainId, recognizedTypedDataSpender, typedDataNativelyReviewed } from './evm-signing-preview'
 import { buildEvmReportForTx, buildTypedDataReport, evmSigningVerdict, prepareEvmTxSigningInfo, withoutErc7730Description } from './evm-presign-report'
 import { describeErc7730Call } from './erc7730-describe'
-import { signWithErc7730Fallback } from './erc7730-resolver'
+import { signWithErc7730Fallback, withErc7730TypedData } from './erc7730-resolver'
 import { CHAINS, isChainSupported, hiveRolePath, evmChainLabel } from '../shared/chains'
 import { getEvmSimulationEndpoint } from './evm-simulation-config'
 import { addContractFacts } from './contract-facts'
@@ -3072,10 +3072,17 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
           }
 
           try {
-            const params = await withPermit2SpenderName({ addressNList, typedData: body.typedData }, engine.getDeviceState().firmwareVersion)
+            const { firmwareVersion, capabilities } = engine.getDeviceState()
+            const params = await withErc7730TypedData(
+              await withPermit2SpenderName({ addressNList, typedData: body.typedData }, firmwareVersion),
+              { firmwareVersion, capabilities },
+            )
             const typedChainId = normalizeEvmChainId(body.typedData?.domain?.chainId)
             const chain = typedChainId ? evmChainLabel(typedChainId)?.name ?? `EVM chain ${typedChainId}` : 'Ethereum'
-            const result = await emuWrap(() => wallet.ethSignTypedData(params), { operation: 'ethSignTypedData', chain })
+            const result = await emuWrap(
+              () => signWithErc7730Fallback(params, (p: any) => wallet.ethSignTypedData(p), undefined, '[REST] ethSignTypedData'),
+              { operation: 'ethSignTypedData', chain },
+            )
             if (activeClearSignObservationId) finalizeClearSignObservation(activeClearSignObservationId, 'signed')
             return json(result)
           } catch (err: any) {
