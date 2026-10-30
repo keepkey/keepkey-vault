@@ -411,7 +411,8 @@ function evmTx(req: SigningRequestInfo, add: (l: RiskLevel, t: string) => void,
   const fields = req.calldataDecoded?.fields ?? []
   const field = (n: string) => fields.find((f) => f.name === n)?.value
   // Set only for a reviewed Universal Router whose calldata decodes the way
-  // the device decodes it (evm-signing-preview uniswapSwapFields).
+  // the device decodes it, or as a one-pool v4 plan the device does not show
+  // (evm-signing-preview uniswapSwapFields).
   const urSwap = field('Protocol') === 'Uniswap Universal Router' && field('Action')?.startsWith('Swap ')
     ? field('Action')!.replace(/^Swap /, 'Swaps ') : undefined
   const relay = decodeRelayDeposit(to, data, chainId)
