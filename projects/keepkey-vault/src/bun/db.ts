@@ -3018,6 +3018,24 @@ export function matchAddressBook(networkId: string, address: string, chainFamily
   }
 }
 
+/** Is `address` one of this device's own addresses on `networkId`? Undefined
+ *  when this computer cannot tell: no own entries for that network yet, or a
+ *  UTXO chain, whose own entries are account xpubs that do not list every address. */
+export function isOwnAddress(deviceId: string, networkId: string, address: string, chainFamily: string): boolean | undefined {
+  try {
+    if (!db) return undefined
+    const rows = db.query(
+      `SELECT address FROM addressbook WHERE kind = 'own' AND device_id = ? AND network_id = ?`,
+    ).all(deviceId, networkId) as Array<{ address: string }>
+    if (rows.length === 0) return undefined
+    if (rows.some((r) => r.address === normalizeAddress(address, chainFamily))) return true
+    return chainFamily === 'utxo' ? undefined : false
+  } catch (e: any) {
+    console.warn('[db] isOwnAddress failed:', e.message)
+    return undefined
+  }
+}
+
 /** Patch a label/note. Pass walletId to scope by wallet; omit (null) to act on the
  *  entry globally (the book is wallet-agnostic). Returns true if a row changed. */
 export function updateAddressBookEntry(

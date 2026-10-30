@@ -8546,6 +8546,7 @@ const rpc = BrowserView.defineRPC<VaultRPCSchema>({
 									maxFeePerGas: tx.maxFeePerGas, maxPriorityFeePerGas: tx.maxPriorityFeePerGas, nonce: tx.nonce,
 								},
 								firmwareVersion, endpoint, signerVerdict: true,
+								deviceId: engine.isPassphraseWallet ? undefined : engine.getDeviceState().deviceId,
 								// An ERC-7730 definition only where the swap build attached
 								// one (Relay), as the signer sends it: never a lookup of its
 								// own for a THOR/Maya router call the signer sends without.

@@ -48,9 +48,10 @@ export function thorDepositFields(data: string, chainId?: number, protocol: 'THO
     '0xdac17f958d2ee523a2206206994597c13d831ec7': 'USDT',
   }
   const inputToken = !native && chainId === 1 ? ethereumInputTokens[asset.toLowerCase()] : undefined
-  const inputUnit = native ? (chainId === 43114 ? 'AVAX' : chainId === 8453 ? 'ETH on Base' : chainId === 1 ? 'ETH' : 'native coin')
+  const inputUnit = native ? (chainId === 43114 ? 'AVAX' : chainId === 8453 ? 'ETH on Base' : chainId === 1 ? 'ETH'
+    : chainId === 56 ? 'BNB' : chainId === 42161 ? 'ETH on Arbitrum' : 'native coin')
     : inputToken ?? 'raw token units'
-  const amountText = native && (chainId === 1 || chainId === 43114 || chainId === 8453)
+  const amountText = native && (chainId === 1 || chainId === 43114 || chainId === 8453 || chainId === 56 || chainId === 42161)
     ? `${fixed(amount, 18)} ${inputUnit}` : inputToken
       ? `${fixed(amount, 6)} ${inputToken}` : `${amount} ${inputUnit}`
   const fields = [

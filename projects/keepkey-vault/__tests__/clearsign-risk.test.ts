@@ -522,7 +522,12 @@ describe('EVM verdict regressions', () => {
       const other = await preview(1, ROUTER, deposit(`=:ETH.ETH:${STRANGER}:30000000`), fw)
       expect(assessSigningRisk(other)!.tier).toBe('red')
       expect(texts(other)).toContain(`The swap pays out to ${STRANGER}, which is NOT the account signing this (${SIGNER}).`)
-      expect(assessSigningRisk(await preview(1, ROUTER, deposit(`=:ETH.ETH:${SIGNER}:30000000`), fw))!.tier).toBe('green')
+      // To the signer: green once this computer matched the vault to a current
+      // inbound address, yellow while it is unchecked (thorchain-deposit-risk.test.ts).
+      const own = await preview(1, ROUTER, deposit(`=:ETH.ETH:${SIGNER}:30000000`), fw)
+      expect(assessSigningRisk(own)!.tier).toBe('yellow')
+      own.thorVault = { status: 'current', protocol: 'THORChain', inboundChain: 'ETH', sources: 2 }
+      expect(assessSigningRisk(own)!.tier).toBe('green')
     }
   })
 
