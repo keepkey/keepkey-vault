@@ -15,7 +15,7 @@ import type { ClearSignObservationDraft, ClearSignObservationOutcome, Erc7730Cat
 import { evmAddressPath } from './evm-addresses'
 import { verifyEvmSigner } from './evm-rpc'
 import { assertEvmFeeCapCoversBaseFee } from '../shared/evmFeePreview'
-import { applyEvmTxPreview, attachErc7730Definition, attachErc7730TypedDefinition, evmPriorityFee, recognizedTypedDataSpender } from './evm-signing-preview'
+import { applyEvmTxPreview, attachErc7730Definition, attachErc7730TypedDefinition, applyTypedDataSigningGate, evmPriorityFee, recognizedTypedDataSpender } from './evm-signing-preview'
 import { signWithErc7730Fallback } from './erc7730-resolver'
 import { buildTypedDataReport, evmSigningVerdict, withoutErc7730Description } from './evm-presign-report'
 import { buildSolanaMessageDecodedInfo } from './solana-message-preview'
@@ -973,6 +973,8 @@ export class WalletConnectManager {
       typedDataDecoded: decodeEIP712(typedData, from),
     }
     signingInfo.recognizedSpender = recognizedTypedDataSpender(signingInfo.typedDataDecoded, signingInfo.chainId)
+    // Same AdvancedMode gate as REST /eth/sign-typed-data.
+    applyTypedDataSigningGate(signingInfo, typedData, this.callbacks.getFirmwareVersion())
     // 7.17+: the ClearSign service's definition, checked before approval so
     // the card describes it; exactly this one is sent.
     if (await attachErc7730TypedDefinition(signingInfo, typedData, this.callbacks.getFirmwareVersion(),

@@ -8,13 +8,13 @@ import { WIPE_BUSY_MESSAGE, WIPE_REPLUG_PENDING_MESSAGE } from './device-wipe'
 import { DEVICE_LOCKED_MESSAGE, restRequest } from './device-gate'
 import { WalletCacheSession, WalletSessionChangedError, WalletSessionMap } from './wallet-session-cache'
 import type { SigningRequestInfo, ApiLogEntry, EIP712DecodedInfo } from '../shared/types'
-import { tronCallPreview, tronPreview } from './tron-preview'
+import { applyTronSigningPreview } from './tron-preview'
 import { deviceErrorMessage } from '../shared/device-error'
 import type { ClearSignEvent } from '../shared/types'
 import { createHash } from 'crypto'
 import { decodeEIP712 } from './eip712-decoder'
 import { addSeaportCreatorFee } from './seaport-creator-fee'
-import { attachErc7730TypedDefinition, evmPriorityFee, evmQuantity, normalizeEvmChainId, recognizedTypedDataSpender, typedDataNativelyReviewed } from './evm-signing-preview'
+import { attachErc7730TypedDefinition, evmPriorityFee, evmQuantity, normalizeEvmChainId, recognizedTypedDataSpender, applyTypedDataSigningGate } from './evm-signing-preview'
 import { buildEvmReportForTx, buildTypedDataReport, evmSigningVerdict, prepareEvmTxSigningInfo, withoutErc7730Description } from './evm-presign-report'
 import { describeErc7730Call } from './erc7730-describe'
 import { signWithErc7730Fallback } from './erc7730-resolver'
@@ -1727,17 +1727,8 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
                 signingInfo.typedDataDecoded = decodeEIP712(preview.typedData, preview.address)
                 await addSeaportCreatorFee(signingInfo)
                 signingInfo.recognizedSpender = recognizedTypedDataSpender(signingInfo.typedDataDecoded, signingInfo.chainId)
-                // hdwallet streams every document; the device reviews x402 and
-                // (7.16+) a canonical Permit2 PermitSingle natively. Anything
-                // else ends up hash-signed, which needs AdvancedMode.
-                const native = signingInfo.typedDataDecoded.operationName === 'x402 EIP-3009 Payment'
-                  || typedDataNativelyReviewed(preview.typedData, engine.getDeviceState().firmwareVersion)
-                if (!native) {
-                  signingInfo.needsBlindSigning = true
-                  signingInfo.requiresAdvancedMode = true
-                } else {
-                  signingInfo.needsBlindSigning = false
-                }
+                // Same gate as WalletConnect eth_signTypedData_v4.
+                applyTypedDataSigningGate(signingInfo, preview.typedData, engine.getDeviceState().firmwareVersion)
                 // 7.17+: the ClearSign service's definition for this document,
                 // fetched and checked now so the card and report describe it;
                 // the sign handler sends exactly this one.
@@ -1755,19 +1746,7 @@ export function startRestApi(engine: EngineController, auth: AuthStore, port = 1
             } else if (path === '/tron/sign-transaction') {
               // Only raw_tx is signed. The optional to_address/amount side
               // channel is untrusted, even if it looks like a useful preview.
-              signingInfo.chain = 'tron'
-              signingInfo.tronDecoded = tronPreview(preview.raw_tx) ?? undefined
-              if (signingInfo.tronDecoded) {
-                signingInfo.from = signingInfo.tronDecoded.owner
-                signingInfo.to = signingInfo.tronDecoded.to
-                signingInfo.value = signingInfo.tronDecoded.amount
-              } else {
-                signingInfo.needsBlindSigning = true
-                signingInfo.requiresAdvancedMode = true
-                // The device shows this as raw data; say what it does here.
-                signingInfo.tronCall = tronCallPreview(preview.raw_tx) ?? undefined
-                if (signingInfo.tronCall) signingInfo.from = signingInfo.tronCall.owner
-              }
+              applyTronSigningPreview(signingInfo, preview.raw_tx, signingInfo.firmwareVersion)
             } else if (path === '/solana/sign-message') {
               const raw = typeof preview.message === 'string' ? preview.message : ''
               const messageEncoding = /^[0-9a-fA-F]+$/.test(raw) ? 'hex' : 'base64'
