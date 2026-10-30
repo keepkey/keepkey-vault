@@ -8,7 +8,7 @@
 import type { CalldataDecodedField, SafeCallPreview, SigningRequestInfo } from '../shared/types'
 import { decodeCalldata, firmwareClearSigns, formatDeadline, thor714Refuses } from './calldata-decoder'
 import { findCertifiedEvmSchema, findCertifiedUniswapSwap } from './evm-schema-registry'
-import { findEvmNameRecord, findReviewedUniversalRouter, reviewedSwapToken } from './evm-certified-schema'
+import { describeCertifiedEvmCall, findEvmNameRecord, findReviewedUniversalRouter, reviewedSwapToken } from './evm-certified-schema'
 import { evmContractIdentity } from '../shared/evm-contract-identity'
 import { knownSpenderName } from '../shared/evm-known-spenders'
 import { urPrecheck } from './uniswap-ur'
@@ -74,11 +74,16 @@ export async function attachCertifiedEvmSchema(
     console.log(`${tag} EVM clear-sign: certified "${schema.method}" is a dynamic schema this firmware (${firmwareVersion}) refuses — not attached`)
     return false
   }
+  // The card names what the device shows: a call the local decoder could not
+  // read is described from the certified schema itself.
+  const decoded = signingInfo.calldataDecoded
   signingInfo.calldataDecoded = {
-    ...(signingInfo.calldataDecoded ?? {
-      dappName: 'Unknown', contractName: to, method: schema.method,
-      selector: data.slice(0, 10).toLowerCase(), fields: [], source: 'none',
-    }),
+    ...((decoded?.source !== 'none' ? decoded : undefined)
+      ?? describeCertifiedEvmCall(schema.signedPayload, { to, data, value: signingInfo.value, chainId })
+      ?? decoded ?? {
+        dappName: 'Unknown', contractName: to, method: schema.method,
+        selector: data.slice(0, 10).toLowerCase(), fields: [], source: 'none',
+      }),
     // Same encoding as a Pioneer blob: base64, decoded to bytes by the sign handler.
     signedInsightBlob: Buffer.from(schema.signedPayload.replace(/^0x/i, ''), 'hex').toString('base64'),
     insightKeyId: schema.keyId,
@@ -110,7 +115,7 @@ export async function attachErc7730Definition(
   signingInfo.erc7730 = catalog
   signingInfo.needsBlindSigning = false
   const description = describeErc7730Call(catalog.definitions[0].envelope, {
-    chainId: signingInfo.chainId as number, to: to!, data: data!, value: signingInfo.value, from: signingInfo.from,
+    chainId: signingInfo.chainId as number, to: to!, data: data!, value: signingInfo.value, from: signingInfo.from, firmwareVersion,
   }, catalog.definitions)
   if (description) signingInfo.erc7730Description = description
   console.log(`${tag} EVM clear-sign: ERC-7730 definition ${catalog.primaryDefinitionId.slice(0, 18)}… attached (chain ${signingInfo.chainId}, to ${to})`)
@@ -134,7 +139,7 @@ export async function attachErc7730TypedDefinition(
   const catalog = await resolveErc7730ForTypedData({ typedData, firmwareVersion, capabilities })
   if (!catalog) return false
   signingInfo.erc7730 = catalog
-  const description = describeErc7730TypedData(catalog.definitions[0].envelope, typedData, from)
+  const description = describeErc7730TypedData(catalog.definitions[0].envelope, typedData, firmwareVersion, from)
   if (description) signingInfo.erc7730Description = description
   console.log(`${tag} EIP-712 clear-sign: ERC-7730 definition ${catalog.primaryDefinitionId.slice(0, 18)}… attached`)
   return true
@@ -160,14 +165,15 @@ function txValue(raw: unknown): bigint | undefined {
  * hook. Token names come only from reviewedSwapToken by chain:address; any
  * other token is shown as raw units of its address with a "Token warning".
  * Advice checked on this computer (D-018): it never sets or relaxes a gate.
+ * `firmwareVersion` picks the device's decoder (urRules; unknown = 7.16).
  */
 export function uniswapSwapFields(
-  chainId: number | undefined, router: string, data: string, value: unknown, from?: string,
+  chainId: number | undefined, router: string, data: string, value: unknown, from?: string, firmwareVersion?: string,
 ): CalldataDecodedField[] {
   const v = txValue(value)
   if (!chainId || v === undefined || !findReviewedUniversalRouter(chainId, router)) return []
   // A one-pool v4 plan the device does not decode: Desktop still reads it.
-  const s = urPrecheck(router, data, v)?.summary ?? v4SingleSwapSummary(chainId, router, data, v)
+  const s = urPrecheck(router, data, v, firmwareVersion)?.summary ?? v4SingleSwapSummary(chainId, router, data, v)
   if (!s) return []
   const unknown: string[] = []
   const amount = (raw: bigint, token: string, isEth: boolean, unlimitedAt?: bigint) => {
@@ -194,7 +200,10 @@ export function uniswapSwapFields(
     row('Minimum output', amountOut),
     row('Recipient', recipient),
   ]
-  if (s.fee) {
+  if (s.fee?.amount !== undefined) {
+    // 7.17: the app's exact-output fee, a fixed amount of the output token.
+    rows.push(row('Fee', `${amount(s.fee.amount, s.tokenOut, false)} to ${s.fee.recipient}`))
+  } else if (s.fee) {
     const pct = `${Math.floor(s.fee.bips / 100)}.${String(s.fee.bips % 100).padStart(2, '0')}%`
     rows.push(row('Fee', `${pct} of the output to ${s.fee.recipient}`))
   }
@@ -209,9 +218,10 @@ export function uniswapSwapFields(
 
 /**
  * Attach a certified 0x07 Uniswap swap entry when `to` is a reviewed Universal
- * Router on 7.16+ and the calldata pre-checks as a call the device decodes and
- * reviews (urPrecheck: any length, V4 only through UR 2.1.2 on Base) whose
- * every named token is reviewed. The device refuses an incomplete entry with no fallback, so
+ * Router on 7.16+ and the calldata pre-checks as a call this firmware decodes
+ * and reviews (urPrecheck: any length; V4 only through UR 2.1.2 on Base on
+ * 7.16, through every V4_ROUTERS router on 7.17) whose every named token is
+ * reviewed. The device refuses an incomplete entry with no fallback, so
  * anything short of that returns false (the AdvancedMode path).
  */
 export async function attachCertifiedUniswapSwap(
@@ -224,7 +234,7 @@ export async function attachCertifiedUniswapSwap(
 ): Promise<boolean> {
   if (!supportsCertifiedClearSign(firmwareVersion) || !chainId || !findReviewedUniversalRouter(chainId, to)) return false
   const value = txValue(signingInfo.value)
-  const plan = value === undefined ? null : urPrecheck(to, data, value)
+  const plan = value === undefined ? null : urPrecheck(to, data, value, firmwareVersion)
   if (!plan) {
     console.log(`${tag} Uniswap clear-sign: calldata is not a shape the device decodes — not attaching`)
     return false
@@ -301,7 +311,7 @@ export async function attachSafeCallPreviews(info: SigningRequestInfo, fetchImpl
     if (c.operation !== 0 || c.to === safe || c.data.length < 10) return {}
     const callValue = c.value.toString()
     let calldataDecoded = await decodeCalldata(c.to, c.data, chainId, callValue).catch(() => null) ?? undefined
-    const swapRows = uniswapSwapFields(chainId, c.to, c.data, callValue, safe)
+    const swapRows = uniswapSwapFields(chainId, c.to, c.data, callValue, safe, info.firmwareVersion)
     if (swapRows.length > 0 && calldataDecoded) calldataDecoded = { ...calldataDecoded, fields: [...swapRows, ...calldataDecoded.fields] }
     const selector = c.data.slice(0, 10)
     const arg0 = /^0{24}[0-9a-f]{40}$/.test(c.data.slice(10, 74)) ? `0x${c.data.slice(34, 74)}` : undefined
@@ -312,7 +322,7 @@ export async function attachSafeCallPreviews(info: SigningRequestInfo, fetchImpl
       calldataDecoded,
       recognizedSpender: selector === '0x095ea7b3' || selector === '0x39509351' ? recognizedSpender(chainId, arg0) : undefined,
       recognizedRecipient: selector === '0xa9059cbb' ? recognizedSpender(chainId, arg0) : undefined,
-      erc7730Description: catalog && describeErc7730Call(catalog.definitions[0].envelope, { chainId, to: c.to, data: c.data, value: callValue, from: safe }, catalog.definitions),
+      erc7730Description: catalog && describeErc7730Call(catalog.definitions[0].envelope, { chainId, to: c.to, data: c.data, value: callValue, from: safe, firmwareVersion: info.firmwareVersion }, catalog.definitions),
     }
   }))
 }
@@ -333,7 +343,7 @@ export async function applyEvmTxPreview(
   try {
     signingInfo.calldataDecoded = await decodeCalldata(to, data, chainId, signingInfo.value) ?? undefined
   } catch (e) { console.warn(`${tag} Calldata decode failed:`, e) }
-  const swapRows = uniswapSwapFields(chainId, to, data, signingInfo.value, signingInfo.from)
+  const swapRows = uniswapSwapFields(chainId, to, data, signingInfo.value, signingInfo.from, firmwareVersion)
   if (swapRows.length > 0 && signingInfo.calldataDecoded) {
     signingInfo.calldataDecoded.fields = [...swapRows, ...signingInfo.calldataDecoded.fields]
   }

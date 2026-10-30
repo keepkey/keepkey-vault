@@ -1,10 +1,10 @@
 /**
  * What a KeepKey ClearSign ERC-7730 definition makes the KeepKey show, read on
  * this computer from the exact envelope Desktop sends: the intent and every
- * field's label and value, formatted the way 7.16 formats them
- * (erc7730_field.c, erc7730_format.c; lines split as on the device), only
- * when this computer checked the envelope's signature up to KeepKey's
- * production root.
+ * field's label and value, formatted the way the connected firmware formats
+ * them (erc7730_field.c, erc7730_format.c; lines split as on the device), only
+ * when this computer checked the envelope's signature up to the root the
+ * device trusts (KeepKey's production root; an emulator's TEST root in QA).
  *
  * Display only, with one exception: on 7.17 planErc7730EmbeddedCalls reads
  * the same way which inner definitions the device will ask for, so a
@@ -23,9 +23,11 @@
 import { createHash } from 'node:crypto'
 import { utils as ethersUtils } from 'ethers'
 import { secp256k1 } from '@noble/curves/secp256k1'
-import { inspectAlphaCertificate, PRODUCTION_ROOT_PUBLIC_KEY } from './clearsign-alpha-ceremony'
+import { deviceClearSignRoot, inspectAlphaCertificate } from './clearsign-alpha-ceremony'
 import { REVIEWED_EVM_TOKENS } from '../shared/reviewed-evm-tokens'
-import firmwareTokens from './firmware-token-table-716.json'
+import firmwareTokens716 from './firmware-token-table-716.json'
+import firmwareTokens717 from './firmware-token-table-717.json'
+import { versionCompare } from '../shared/firmware-versions'
 import { evmTokenIdentity } from '../shared/evm-contract-identity'
 import { CHAINS } from '../shared/chains'
 import type { Erc7730Description } from '../shared/types'
@@ -80,30 +82,35 @@ const escaped = (text: string, spaces = true) => {
     : (b <= 0x20 && !(spaces && b === 0x20 && i > 0 && i < bytes.length - 1 && bytes[i - 1] !== 0x20 && bytes[i + 1] !== 0x20)) || b >= 0x7f
       ? `\\x${b.toString(16).padStart(2, '0')}` : String.fromCharCode(b)).join('')
 }
-/** The 7.16 token table (tokenByChainAddress): what the device names a token. */
-const DEVICE_TOKENS: Record<string, Array<string | number>> = {
-  ...firmwareTokens.symbols, // [ticker, decimals]
-  [`1:0x${'e'.repeat(40)}`]: ['ETH', 18], // the Ethereum-mainnet sentinel
-}
+/** 7.17 (fork alpha) cut the token table to the priority list (7d6743275)
+ *  and names Polygon's coin POL (437bd20aa). Unknown version: 7.17's smaller
+ *  table, so the card never names a token the device may not. */
+const is717 = (firmwareVersion: string | undefined) => !firmwareVersion || versionCompare(firmwareVersion, '7.17.0') >= 0
+/** The firmware's token table (tokenByChainAddress): what the device names a token. */
+const ETH_SENTINEL: Record<string, Array<string | number>> = { [`1:0x${'e'.repeat(40)}`]: ['ETH', 18] }
+const DEVICE_TOKENS_716: Record<string, Array<string | number>> = { ...firmwareTokens716.symbols, ...ETH_SENTINEL } // [ticker, decimals]
+const DEVICE_TOKENS_717: Record<string, Array<string | number>> = { ...firmwareTokens717.symbols, ...ETH_SENTINEL }
 
 /** ethereumFormatAmount's native tickers (ethereum.c); any other chain shows Wei. */
 const NATIVE_TICKERS: Record<number, string> = {
   1: 'ETH', 2: 'EXP', 8: 'UBQ', 10: 'ETH', 20: 'EOSC', 28: 'ETSC', 30: 'RBTC', 40: 'TLOS', 56: 'BNB', 61: 'ETC',
-  64: 'ELLA', 100: 'xDAI', 137: 'POL', 8453: 'ETH', 42161: 'ETH', 43114: 'AVAX',
+  64: 'ELLA', 100: 'xDAI', 137: 'MATIC', 8453: 'ETH', 42161: 'ETH', 43114: 'AVAX',
 }
 /** A native amount as the device prints it (ethereumFormatNativeAmount): under 1 gwei, or on a chain it has no ticker for, in Wei. */
-function deviceNative(v: bigint, chainId: number): string {
-  const ticker = NATIVE_TICKERS[chainId]
+function deviceNative(v: bigint, chainId: number, firmwareVersion: string | undefined): string {
+  const ticker = chainId === 137 && is717(firmwareVersion) ? 'POL' : NATIVE_TICKERS[chainId]
   if (v < 1_000_000_000n || !ticker) return `${v} Wei`
   const fraction = (v % 10n ** 18n).toString().padStart(18, '0').replace(/0+$/, '')
   return `${v / 10n ** 18n}${fraction ? `.${fraction}` : ''} ${ticker}`
 }
 
 /** The certificate alias, when the envelope's catalog signature verifies the
- *  way 7.16 verifies it (clearsign_root_verify_erc7730_catalog): a production
- *  root certificate for this chain, and the delegate's signature over the
- *  Merkle root the program and its proof lead to. */
-function catalogSigner(program: Uint8Array, proof: Uint8Array[], cert: Uint8Array, sig: Uint8Array, chainId: bigint, root?: string): string | undefined {
+ *  way 7.16 verifies it (clearsign_root_verify_erc7730_catalog): a certificate
+ *  from `root` (by default the root the device trusts), for this chain, and
+ *  the delegate's signature over the Merkle root the program and its proof
+ *  lead to. */
+function catalogSigner(program: Uint8Array, proof: Uint8Array[], cert: Uint8Array, sig: Uint8Array, chainId: bigint, root: string | undefined = deviceClearSignRoot()): string | undefined {
+  if (!root) return undefined
   try {
     const c = inspectAlphaCertificate(hex(cert).slice(2), undefined, root)
     if (BigInt(c.chainId) !== chainId) return undefined
@@ -113,6 +120,31 @@ function catalogSigner(program: Uint8Array, proof: Uint8Array[], cert: Uint8Arra
       node = sha256(Uint8Array.of(1), a, b)
     }
     return secp256k1.verify(sig, sha256(CATALOG_PURPOSE, node), Uint8Array.from(Buffer.from(c.delegatePublicKey, 'hex')), { lowS: false }) ? c.alias : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** A K773 envelope's parts: program, Merkle proof, certificate, signature. */
+function envelopeParts(envelope: Uint8Array) {
+  const program = envelope.subarray(10, 10 + u32(envelope, 6))
+  let at = 10 + program.length
+  const proof = Array.from({ length: envelope[at] }, (_, i) => envelope.subarray(at + 1 + 32 * i, at + 33 + 32 * i))
+  at += 1 + 32 * proof.length
+  const cert = envelope.subarray(at + 2, at + 2 + u16(envelope, at))
+  const sig = envelope.subarray(at + 2 + cert.length, at + 66 + cert.length)
+  return { program, proof, cert, sig, chainId: BigInt(hex(program.subarray(10, 18))) }
+}
+
+/**
+ * Who signed a K773 envelope (the certificate alias), or undefined when its
+ * catalog signature does not check out to the root the device trusts. The
+ * resolver attaches no definition this computer cannot verify.
+ */
+export function erc7730EnvelopeSigner(envelope: Uint8Array): string | undefined {
+  try {
+    const { program, proof, cert, sig, chainId } = envelopeParts(envelope)
+    return catalogSigner(program, proof, cert, sig, chainId)
   } catch {
     return undefined
   }
@@ -152,6 +184,8 @@ interface Level {
   from?: string
   /** The device's signing address, for "(this wallet)"; undefined when not matched. */
   signer?: string
+  /** The connected KeepKey's, which decides token and coin names. */
+  firmwareVersion: string | undefined
   depth: number
 }
 
@@ -176,13 +210,7 @@ function safeDelegatecall(data: string): boolean {
 /** The intent, interpolated summary and fields of one level, as the device shows them. Throws when it cannot say. */
 function readLevel(envelopeHex: string, call: Level, walk: Walk): { signedBy: string; intent: string; parts: string[]; fields: Field[] } {
   const envelope = Uint8Array.from(Buffer.from(envelopeHex.replace(/^0x/i, ''), 'hex'))
-  const program = envelope.subarray(10, 10 + u32(envelope, 6))
-  let at = 10 + program.length
-  const proof = Array.from({ length: envelope[at] }, (_, i) => envelope.subarray(at + 1 + 32 * i, at + 33 + 32 * i))
-  at += 1 + 32 * proof.length
-  const cert = envelope.subarray(at + 2, at + 2 + u16(envelope, at))
-  const sig = envelope.subarray(at + 2 + cert.length, at + 66 + cert.length)
-  const chainId = BigInt(hex(program.subarray(10, 18)))
+  const { program, proof, cert, sig, chainId } = envelopeParts(envelope)
   const signedBy = walk.root === undefined ? '' : catalogSigner(program, proof, cert, sig, chainId, walk.root)
   if (signedBy === undefined || chainId !== BigInt(call.chainId)) throw new Error('not signed for this chain')
   // An embedded call's definition names its callee and selector (H8).
@@ -286,7 +314,8 @@ function readLevel(envelopeHex: string, call: Level, walk: Walk): { signedBy: st
     const fraction = (v % base).toString().padStart(decimals, '0').replace(/0+$/, '')
     return `${v / base}${fraction ? `.${fraction}` : ''}`
   }
-  const nativeOf = (v: bigint) => deviceNative(v, call.chainId)
+  const deviceTokens = is717(call.firmwareVersion) ? DEVICE_TOKENS_717 : DEVICE_TOKENS_716
+  const nativeOf = (v: bigint) => deviceNative(v, call.chainId, call.firmwareVersion)
   const format = (index: number): { value: string; note?: string } => {
     const f = formatters[index]
     if (f.kind === 13) throw new Error('an embedded call is a field of its own')
@@ -305,7 +334,7 @@ function readLevel(envelopeHex: string, call: Level, walk: Walk): { signedBy: st
           // Roles 7/8: the signer's message ("Max") once the amount reaches the threshold.
           const threshold = pick(7)
           const message = threshold && n >= (threshold.value as bigint) ? pick(8)?.value : undefined
-          const known = /^0x0{40}$/.test(token) ? undefined : DEVICE_TOKENS[`${call.chainId}:${token}`]
+          const known = /^0x0{40}$/.test(token) ? undefined : deviceTokens[`${call.chainId}:${token}`]
           // Role 22: addresses the signer says stand for the native coin, never over the device's table.
           const aliases = f.args.get(22)
           const set = aliases && literals[aliases.index].bytes
@@ -399,7 +428,7 @@ function readLevel(envelopeHex: string, call: Level, walk: Walk): { signedBy: st
       const inner = readLevel(envelope, {
         chainId: call.chainId, to: callee, data, value: value ?? 0n,
         // ERC-7730: inside the call @.from is whose authority it runs with, else the contract making it.
-        from: spender ?? call.to.toLowerCase(), signer: call.signer, depth: call.depth + 1,
+        from: spender ?? call.to.toLowerCase(), signer: call.signer, firmwareVersion: call.firmwareVersion, depth: call.depth + 1,
       }, walk)
       out.push({ label: 'Inner action', value: inner.intent, depth: call.depth + 1 }, ...inner.fields)
     })
@@ -466,25 +495,28 @@ export interface InnerDefinition { chainId?: unknown; contractAddress?: unknown;
 
 /**
  * The description of `call` from a K773 envelope (hex), or undefined when its
- * signature does not check out to the production root, or the envelope or the
+ * signature does not check out to the device's root, or the envelope or the
  * calldata cannot be read the way the device reads them. `from` is the signing
  * address only when this computer has matched it to the signing key; without
  * it, @.from cannot be shown and no address reads "(this wallet)".
+ * `firmwareVersion`: the connected KeepKey's, which decides token and coin names.
  *
  * 7.17: an embedded call is described from `inner`, the same checked
  * definitions the device is sent (catalog.definitions); one that is missing,
  * or that the device would refuse, leaves the call without a description.
- * `rootPublicKey`: tests only (a TEST-root fixture); the production root otherwise.
+ * `rootPublicKey`: tests only (a TEST-root fixture); the root the device trusts otherwise.
  */
 export function describeErc7730Call(
   envelopeHex: string,
-  call: { chainId: number; to: string; data: string; value?: unknown; from?: string },
+  call: { chainId: number; to: string; data: string; value?: unknown; from?: string; firmwareVersion: string | undefined },
   inner?: readonly InnerDefinition[],
-  rootPublicKey: string = PRODUCTION_ROOT_PUBLIC_KEY,
+  rootPublicKey: string | undefined = deviceClearSignRoot(),
 ): Erc7730Description | undefined {
+  if (!rootPublicKey) return undefined
   try {
     return describeLevel(envelopeHex, {
-      chainId: call.chainId, to: call.to, data: call.data, value: toBigint(call.value), from: call.from, signer: call.from, depth: 0,
+      chainId: call.chainId, to: call.to, data: call.data, value: toBigint(call.value), from: call.from, signer: call.from,
+      firmwareVersion: call.firmwareVersion, depth: 0,
     }, { root: rootPublicKey, inner: innerLookup(call.chainId, inner) })
   } catch {
     return undefined
@@ -498,7 +530,7 @@ export function describeErc7730Call(
  * card lists every value in its own typed-data section). `from` as for calls.
  * Typed data has one container, @.to: the domain's verifyingContract.
  */
-export function describeErc7730TypedData(envelopeHex: string, typedData: any, from?: string): Erc7730Description | undefined {
+export function describeErc7730TypedData(envelopeHex: string, typedData: any, firmwareVersion: string | undefined, from?: string): Erc7730Description | undefined {
   try {
     const contract = String(typedData?.domain?.verifyingContract ?? '')
     if (!/^0x[0-9a-fA-F]{40}$/.test(contract)) return undefined
@@ -509,10 +541,12 @@ export function describeErc7730TypedData(envelopeHex: string, typedData: any, fr
       if (array) return (value as any[]).map((v) => tuple(array[1], v))
       return Array.isArray(types[type]) ? types[type].map((m: { name: string; type: string }) => tuple(m.type, value[m.name])) : value
     }
+    const root = deviceClearSignRoot()
+    if (!root) return undefined
     return describeLevel(envelopeHex, {
-      chainId: Number(typedData.domain.chainId), to: contract, data: '', value: 0n, from, signer: from, depth: 0,
+      chainId: Number(typedData.domain.chainId), to: contract, data: '', value: 0n, from, signer: from, firmwareVersion, depth: 0,
       typed: tuple(String(typedData.primaryType), typedData.message),
-    }, { root: PRODUCTION_ROOT_PUBLIC_KEY, inner: () => undefined })
+    }, { root, inner: () => undefined })
   } catch {
     return undefined
   }
@@ -552,8 +586,8 @@ export function planErc7730EmbeddedCalls(
   const missing: Array<{ contractAddress: string; selector: string }> = []
   try {
     readLevel(envelopeHex, {
-      // @.from and "(this wallet)" change no screen count and no lookup.
-      chainId: call.chainId, to: call.to, data: call.data, value: toBigint(call.value), from: ZERO_ADDRESS, signer: ZERO_ADDRESS, depth: 0,
+      // @.from, "(this wallet)" and token names change no screen count and no lookup.
+      chainId: call.chainId, to: call.to, data: call.data, value: toBigint(call.value), from: ZERO_ADDRESS, signer: ZERO_ADDRESS, firmwareVersion: undefined, depth: 0,
     }, { inner: innerLookup(call.chainId, known), missing })
     return { missing }
   } catch (error: any) {

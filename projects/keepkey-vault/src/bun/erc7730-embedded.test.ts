@@ -8,7 +8,7 @@
  * multicall, 0x AllowanceHolder.exec into Settler, CoW EthFlow) and their
  * programs, signed under a TEST root (erc7730-embedded.fixtures.json).
  */
-import { beforeEach, describe, expect, it } from 'bun:test'
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'bun:test'
 import {
   checkErc7730CalldataDefinition, erc7730CatalogDescribesCall, fetchErc7730CalldataDefinition, forgetRefusedErc7730Definitions,
   isErc7730Refusal, readErc7730Envelope, resolveErc7730ForCall, resolveErc7730InnerDefinition, signWithErc7730Fallback,
@@ -19,11 +19,17 @@ import { makeErc7730DefinitionChunk } from '@keepkey/hdwallet-keepkey/dist/ether
 import * as Erc7730Proto from '@keepkey/hdwallet-keepkey/dist/ethereum-erc7730-proto'
 import { ERC7730_EMBEDDED_MIN_FW, supportsErc7730EmbeddedCalls } from '../shared/erc7730-support'
 import fixtures from './erc7730-embedded.fixtures.json'
+import { trustTestRoot } from '../../__tests__/support/clearsign-test-root'
+import { PRODUCTION_ROOT_PUBLIC_KEY } from './clearsign-alpha-ceremony'
 
 type Def = (typeof fixtures.definitions)[keyof typeof fixtures.definitions]
 const defs = fixtures.definitions
 const txs = fixtures.transactions
 const CAPS = [1, 4]
+// The fixtures are signed under a TEST root: Desktop attaches only what verifies to the root the device trusts.
+let restoreRoot: () => void
+beforeAll(() => { restoreRoot = trustTestRoot(fixtures.testRootPubkey) })
+afterAll(() => restoreRoot())
 
 /** A stand-in ClearSign service: the fixture's definitions by (chain, contract, selector), else 422. */
 function service(opts: { without?: string[]; extra?: Record<string, unknown> } = {}) {
@@ -188,7 +194,7 @@ const attach717 = (tx: { chainId: number; to: string; data: string; value: strin
 async function card(tx: { chainId: number; to: string; data: string; value: string }, from = ME) {
   const catalog = (await attach717(tx, service().impl))!
   expect(catalog).toBeDefined()
-  return describeErc7730Call(catalog.definitions[0].envelope, { ...tx, from }, catalog.definitions, fixtures.testRootPubkey)
+  return describeErc7730Call(catalog.definitions[0].envelope, { ...tx, from, firmwareVersion: '7.17.0' }, catalog.definitions, fixtures.testRootPubkey)
 }
 
 describe('the card says what 7.17 shows (embedded calls, RECIPIENT, TX_VALUE)', () => {
@@ -238,21 +244,21 @@ describe('the card says what 7.17 shows (embedded calls, RECIPIENT, TX_VALUE)', 
     expect((await card(txs.cow_ethflow, receiver))!.fields).toContainEqual({ label: 'Receiver', value: '0x9858EfFD232B4033E47d90003D41EC34EcaEda94\n(this wallet)' })
     // Without a matched signer the device's line cannot be known: no description.
     const catalog = (await attach717(txs.cow_ethflow, service().impl))!
-    expect(describeErc7730Call(catalog.definitions[0].envelope, txs.cow_ethflow, catalog.definitions, fixtures.testRootPubkey)).toBeUndefined()
+    expect(describeErc7730Call(catalog.definitions[0].envelope, { ...txs.cow_ethflow, firmwareVersion: '7.17.0' }, catalog.definitions, fixtures.testRootPubkey)).toBeUndefined()
   })
 
   it('TX_VALUE: an amount that is not the call value is refused, so neither attached nor described', async () => {
     const tx = { ...txs.cow_ethflow, value: '0x1' }
     expect(planErc7730EmbeddedCalls(defs.cow_ethflow.envelope, tx, []).refused).toBe('ERC-7730 value does not match the call')
-    expect(describeErc7730Call(defs.cow_ethflow.envelope, { ...tx, from: ME }, [], fixtures.testRootPubkey)).toBeUndefined()
+    expect(describeErc7730Call(defs.cow_ethflow.envelope, { ...tx, from: ME, firmwareVersion: '7.17.0' }, [], fixtures.testRootPubkey)).toBeUndefined()
     expect(await attach717(tx, service().impl)).toBeUndefined()
   })
 
   it('an embedded call whose definition is not at hand gets no description, never a blob', () => {
     const tx = txs.safe_exec_transfer
-    expect(describeErc7730Call(defs.safe_exec_a.envelope, { ...tx, from: ME }, [], fixtures.testRootPubkey)).toBeUndefined()
-    // Only the KeepKey root (or the root given) makes a description.
-    expect(describeErc7730Call(defs.safe_exec_a.envelope, { ...tx, from: ME }, Object.values(defs) as any)).toBeUndefined()
+    expect(describeErc7730Call(defs.safe_exec_a.envelope, { ...tx, from: ME, firmwareVersion: '7.17.0' }, [], fixtures.testRootPubkey)).toBeUndefined()
+    // Only the root the device trusts (or the root given) makes a description.
+    expect(describeErc7730Call(defs.safe_exec_a.envelope, { ...tx, from: ME, firmwareVersion: '7.17.0' }, Object.values(defs) as any, PRODUCTION_ROOT_PUBLIC_KEY)).toBeUndefined()
   })
 })
 

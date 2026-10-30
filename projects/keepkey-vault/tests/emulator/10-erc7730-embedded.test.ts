@@ -250,7 +250,7 @@ async function desktopSign(tx: FxTx) {
   ))
   // The card a production-signed definition gets, read here with the fixture's test root.
   const card = info.erc7730 && mods.describe(info.erc7730.definitions[0].envelope,
-    { chainId: tx.chain_id, to: tx.to, data: tx.data, value: tx.value, from: address }, info.erc7730.definitions, fixture!.testRootPubkey)
+    { chainId: tx.chain_id, to: tx.to, data: tx.data, value: tx.value, from: address, firmwareVersion }, info.erc7730.definitions, fixture!.testRootPubkey)
   return { result, attached: !!info.erc7730, needsBlindSigning: info.needsBlindSigning === true, fellBack, card }
 }
 
@@ -297,7 +297,8 @@ describe.skipIf(!fixture)('ERC-7730 embedded calls through Desktop on a 7.17 emu
   test('boot over UDP, stand-in worker, firmware 7.17', async () => {
     process.env.CLEARSIGN_SERVICE_URL = startWorker()
     const envelope = await import('../../src/shared/certified-evm-envelope')
-    envelope.configureProductionRootTrust(() => true) // the emulator was started with the fixture's test root
+    // The emulator was started with the fixture's test root: Desktop attaches only what verifies to it.
+    envelope.configureProductionRootTrust(() => true, () => fixture!.testRootPubkey)
     mods = {
       prepare: (await import('../../src/bun/evm-presign-report')).prepareEvmTxSigningInfo,
       resolver: await import('../../src/bun/erc7730-resolver'),

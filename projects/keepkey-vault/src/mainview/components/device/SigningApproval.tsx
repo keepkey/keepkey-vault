@@ -1427,7 +1427,7 @@ export function SigningApproval({ request, phase, onApprove, onReject, onCancel 
 						<Text fontSize="2xs" color="var(--rose)">{request.tronDecoded.warning}</Text>
 					</VStack>
 				)}
-				{request.method === '/tron/sign-transaction' && !request.tronDecoded && (
+				{request.method === '/tron/sign-transaction' && !request.tronDecoded && !request.tronCallShown && (
 					<Box w="100%" bg="rgba(239,68,68,0.15)" border="1px solid rgba(239,68,68,0.6)" borderRadius="lg" px="3" py="2">
 						<Text fontSize="xs" fontWeight="700" color="var(--rose)">TRON transaction cannot be verified from signed bytes</Text>
 						<Text fontSize="2xs" color="kk.textSecondary">Amount and destination in the request are untrusted. The device requires Advanced Mode for unsupported TRON payloads.</Text>

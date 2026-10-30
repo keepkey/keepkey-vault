@@ -295,7 +295,7 @@ describe.skipIf(!enabled)('typed-data ERC-7730 through Desktop on a 7.17 emulato
       if (chainId !== Number(requestFixture.typedData.domain.chainId)) return
       const program = (hex: string) => { const b = Buffer.from(hex.replace(/^0x/, ''), 'hex'); return b.subarray(10, 10 + b.readUInt32BE(6)).toString('hex') }
       expect(program(requestFixture.definition.envelope)).toBe(program(card.erc7730.definitions[0].envelope))
-      const d = describeErc7730TypedData(requestFixture.definition.envelope, c.typedData, from)!
+      const d = describeErc7730TypedData(requestFixture.definition.envelope, c.typedData, firmwareVersion, from)!
       console.log(`  card: ${d?.intent} | ${d?.fields.map((f: any) => `${f.label}: ${f.value.replace(/\n/g, ' / ')}`).join(' | ')}`)
       expect(d?.intent).toBeTruthy()
       expect(run.screens.some((s) => `${s.title} ${s.body}`.includes(d.intent))).toBe(true)

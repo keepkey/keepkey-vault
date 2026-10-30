@@ -20,6 +20,7 @@ import { evmNativeValue } from '../shared/evmFeePreview'
 import { REVIEWED_EVM_TOKENS } from './evm-certified-schema'
 import firmwareTokenTable from './firmware-token-table.json'
 import firmwareTokenTable716 from './firmware-token-table-716.json'
+import firmwareTokenTable717 from './firmware-token-table-717.json'
 import { versionCompare } from '../shared/firmware-versions'
 
 // ── Helpers ──────────────────────────────────────────────────────────────
@@ -534,17 +535,21 @@ const FIRMWARE_TOKENS: ReadonlySet<string> = new Set((firmwareTokenTable as { to
  *  a subset of the above. Everything else is AdvancedMode or a certified schema. */
 const FIRMWARE_TOKENS_716: ReadonlySet<string> = new Set((firmwareTokenTable716 as { tokens: string[] }).tokens)
 const PRIORITY_ONLY_TOKENS_MIN_FW = '7.16.0'
+/** 7.17 (fork alpha 7d6743275) builds both lists with `--profile priority-only`:
+ *  50 mainnet entries, a subset of the 7.16 table (no WETH, WBTC, UNI, ...). */
+const FIRMWARE_TOKENS_717: ReadonlySet<string> = new Set((firmwareTokenTable717 as { tokens: string[] }).tokens)
+const PRIORITY_ONLY_BOTH_LISTS_MIN_FW = '7.17.0'
 
 /** Firmware ethereum_contractHandled only claims calldata that fits the first
  *  1024-byte chunk (data_total == data_initial_chunk.size). */
 const FIRMWARE_INITIAL_CHUNK_BYTES = 1024
 
 /** True iff (chainId, token) is in this firmware's built-in token table.
- *  Unknown version = the smaller 7.16 table: over-warning is recoverable,
+ *  Unknown version = the smallest (7.17) table: over-warning is recoverable,
  *  predicting a clear-sign the device refuses is a dead "Blocked". */
 export function firmwareKnowsToken(chainId: number | undefined, token: string | undefined, firmwareVersion?: string): boolean {
-  const table = firmwareVersion && versionCompare(firmwareVersion, PRIORITY_ONLY_TOKENS_MIN_FW) < 0
-    ? FIRMWARE_TOKENS : FIRMWARE_TOKENS_716
+  const table = !firmwareVersion || versionCompare(firmwareVersion, PRIORITY_ONLY_BOTH_LISTS_MIN_FW) >= 0 ? FIRMWARE_TOKENS_717
+    : versionCompare(firmwareVersion, PRIORITY_ONLY_TOKENS_MIN_FW) >= 0 ? FIRMWARE_TOKENS_716 : FIRMWARE_TOKENS
   return chainId != null && !!token && table.has(`${chainId}:${token.toLowerCase()}`)
 }
 

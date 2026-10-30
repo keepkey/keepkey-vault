@@ -1151,6 +1151,9 @@ export interface SigningRequestInfo {
   /** A TRON call the firmware does not decode (TRC-20 approve, staking,
    *  votes, a SunSwap router call), read on this computer as advice only. */
   tronCall?: TronCallPreview
+  /** The device shows tronCall from its own parse (7.17+: an approve of a
+   *  table token, staking, votes), so no AdvancedMode. */
+  tronCallShown?: boolean
   /**
    * Populated when a Solana transaction was received but clear-sign decoding
    * failed (malformed wire layout, unsupported message version, RPC outage,
@@ -1187,6 +1190,13 @@ export interface SigningRequestInfo {
    *  the SafeTx makes (safeTxCalls order), the same preview a call from an
    *  account gets. Advice: the KeepKey shows SafeTx.data as raw hex. */
   safeCalls?: SafeCallPreview[]
+  /** Approval card only, a SafeMessage whose message is a 32-byte hash: the
+   *  original from Safe's Transaction Service, kept only when it hashes to
+   *  that value (bun/safe-message-preimage). Advice: the KeepKey shows the hash. */
+  safeMessageOriginal?:
+    | { status: 'text'; text: string }
+    | { status: 'typed'; decoded: EIP712DecodedInfo; recognizedSpender?: string }
+    | { status: 'not-found' | 'mismatch' | 'failed' }
   /** Approval card only, from this computer's own records: earlier
    *  transactions this account sent or signed to this contract on this
    *  chain (a lower bound; `since` in ms). */

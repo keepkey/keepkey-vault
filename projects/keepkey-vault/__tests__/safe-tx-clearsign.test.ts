@@ -31,6 +31,9 @@ import ethSignMessageLib from './fixtures/safe/eth-sign-message-lib.json'
 import ethFallbackHandler from './fixtures/safe/eth-multisend-fallback-handler.json'
 import ethNativeSend from './fixtures/safe/eth-native-send.json'
 import corpus from './fixtures/safe/pyk-eip712-corpus-safetx.json'
+// Real Safe{Wallet} proposals that refund the executor (G24), from Safe's transaction service.
+import refundNativeSend from './fixtures/safe/refund-eth-txorigin-native-send.json'
+import refundUsdcTransfer from './fixtures/safe/refund-eth-txorigin-usdc-transfer.json'
 
 interface Fixture { safeTxHash: string; signer: string; typedData: any }
 const REAL: Record<string, Fixture> = {
@@ -509,5 +512,39 @@ describe("the device's Delegatecall screen when the request is not Safe's standa
     expect(deviceLine(await review(td, { from: ethFallbackHandler.signer, firmwareVersion: '7.16.0' }))).toBeUndefined()
     expect(deviceWarnsSafeDelegatecall('7.16.0', 0, MULTISEND_111, td.message.data)).toBe(true)
     expect(deviceWarnsSafeDelegatecall('7.16.0', 1, MULTISEND_111, td.message.data)).toBe(false)
+  })
+})
+
+describe('a Safe gas refund states what it can pay and to whom (G24)', () => {
+  const refundLine = (r: { reasons: { level: string; text: string }[] }) => r.reasons.find((x) => /gas refund/.test(x.text))
+
+  test('the real refunds hash to the safeTxHash Safe recorded', () => {
+    for (const fx of [refundNativeSend, refundUsdcTransfer]) {
+      const { EIP712Domain: _d, ...types } = fx.typedData.types as any
+      expect(ethersUtils._TypedDataEncoder.hash(fx.typedData.domain, types, fx.typedData.message)).toBe(fx.safeTxHash)
+    }
+  })
+
+  test('native refund to tx.origin: the maximum in ETH and the receiver; the tone is unchanged', async () => {
+    // 3522492647 × (108606 + 68982) wei; on chain the executor was paid 0.000003934351902039 ETH.
+    const usdc = refundLine(await review(refundUsdcTransfer.typedData))!
+    expect(usdc.level).toBe('high')
+    expect(usdc.text).toBe('Pays a gas refund out of your Safe when it is executed: up to 0.000625552424195436 ETH'
+      + " (gas price 3522492647 × (safeTxGas 108606 + baseGas 68982), plus Safe's own call overhead, at no more than the executor's own gas price),"
+      + ' to the account that executes it (tx.origin). Normal Safe transactions leave the refund at zero.')
+    const send = refundLine(await review(refundNativeSend.typedData))!
+    expect(send.level).toBe('high')
+    expect(send.text).toContain('up to 0.000496368528859358 ETH (gas price 3522492647 × (safeTxGas 78492 + baseGas 62422)')
+  })
+
+  test('an explicit receiver and an ERC-20 gas token (mutants of the real refund)', async () => {
+    const receiver = '0x1111111111111111111111111111111111111111'
+    const usdc = '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48'
+    const line = refundLine(await review(mutate(refundUsdcTransfer, { gasToken: usdc, gasPrice: '2', refundReceiver: receiver })))!
+    expect(line.level).toBe('high')
+    expect(line.text).toContain("up to 0.355176 USDC (gas price 2 × (safeTxGas 108606 + baseGas 68982), plus Safe's own call overhead), to 0x1111111111111111111111111111111111111111.")
+    // A receiver with a gas price of 0 pays nothing (Safe pays only when gasPrice > 0).
+    const none = refundLine(await review(mutate(refundUsdcTransfer, { gasPrice: '0', refundReceiver: receiver })))!
+    expect(none.text).toContain('with a gas price of 0, so executing it pays no refund')
   })
 })

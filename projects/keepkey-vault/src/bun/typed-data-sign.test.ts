@@ -87,11 +87,15 @@ function device716() {
 }
 
 describe('typed data after ClearSession on 7.16 (eth-multisend-4900-corpus leg)', () => {
-  test('the pinned hdwallet alone aborts: its Features cache is empty after ClearSession', async () => {
-    const { wallet } = device716()
+  test('the pinned hdwallet (keepkey/hdwallet#83) reads Features again itself after ClearSession', async () => {
+    const { frames, wallet } = device716()
     await wallet.getFeatures()
     await wallet.clearSession()
-    await expect(wallet.ethSignTypedData({ addressNList: PATH, typedData: doc })).rejects.toThrow('over the 1024-byte wire limit')
+    const signed = await wallet.ethSignTypedData({ addressNList: PATH, typedData: doc })
+    expect(signed.signature).toBe(`0x${'33'.repeat(65)}`)
+    expect(frames.map((f) => f.type).slice(0, 4)).toEqual([
+      MT.MESSAGETYPE_GETFEATURES, MT.MESSAGETYPE_CLEARSESSION, MT.MESSAGETYPE_GETFEATURES, MT.MESSAGETYPE_ETHEREUMSIGNTYPEDDATA,
+    ])
   })
   test('Desktop reads Features again first, and the batch is sent in 1 KB chunks', async () => {
     const { frames, wallet } = device716()

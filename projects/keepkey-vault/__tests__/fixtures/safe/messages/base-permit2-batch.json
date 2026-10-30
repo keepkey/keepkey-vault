@@ -1,0 +1,135 @@
+{
+ "_source": [
+  "https://api.safe.global/tx-service/base/api/v1/messages/0xe7feb52513682601dfa5e830bc69bffa9ec7efc1f89d72cf91c6a8547beef48c/",
+  "Safe 0x616dE58c011F8736fa20c7Ae5352F7f6FB9F0669 (base, Safe 1.3.0+L2): opaque: Permit2 PermitBatch hashed into a SafeMessage, Base. typedData is what Safe{Wallet} sends an owner (message = hashTypedData(original)); record is the Transaction Service's GET response, fetched 2026-10-30."
+ ],
+ "typedData": {
+  "domain": {
+   "chainId": 8453,
+   "verifyingContract": "0x616dE58c011F8736fa20c7Ae5352F7f6FB9F0669"
+  },
+  "types": {
+   "EIP712Domain": [
+    {
+     "name": "chainId",
+     "type": "uint256"
+    },
+    {
+     "name": "verifyingContract",
+     "type": "address"
+    }
+   ],
+   "SafeMessage": [
+    {
+     "name": "message",
+     "type": "bytes"
+    }
+   ]
+  },
+  "primaryType": "SafeMessage",
+  "message": {
+   "message": "0xd519d82a6e89228b1a4267d7ba9dff775a4e799dd924e3804e4ffef1071dd35d"
+  }
+ },
+ "record": {
+  "created": "2026-02-16T14:16:08.770620Z",
+  "modified": "2026-02-16T14:17:35.978566Z",
+  "safe": "0x616dE58c011F8736fa20c7Ae5352F7f6FB9F0669",
+  "messageHash": "0xe7feb52513682601dfa5e830bc69bffa9ec7efc1f89d72cf91c6a8547beef48c",
+  "message": {
+   "types": {
+    "PermitBatch": [
+     {
+      "name": "details",
+      "type": "PermitDetails[]"
+     },
+     {
+      "name": "spender",
+      "type": "address"
+     },
+     {
+      "name": "sigDeadline",
+      "type": "uint256"
+     }
+    ],
+    "EIP712Domain": [
+     {
+      "name": "name",
+      "type": "string"
+     },
+     {
+      "name": "chainId",
+      "type": "uint256"
+     },
+     {
+      "name": "verifyingContract",
+      "type": "address"
+     }
+    ],
+    "PermitDetails": [
+     {
+      "name": "token",
+      "type": "address"
+     },
+     {
+      "name": "amount",
+      "type": "uint160"
+     },
+     {
+      "name": "expiration",
+      "type": "uint48"
+     },
+     {
+      "name": "nonce",
+      "type": "uint48"
+     }
+    ]
+   },
+   "domain": {
+    "name": "Permit2",
+    "chainId": 8453,
+    "verifyingContract": "0x000000000022D473030F116dDEE9F6B43aC78BA3"
+   },
+   "message": {
+    "details": [
+     {
+      "nonce": "0",
+      "token": "0x4200000000000000000000000000000000000006",
+      "amount": "734404572758778716397351628439932217377106102844",
+      "expiration": "1771337723"
+     },
+     {
+      "nonce": "0",
+      "token": "0xc694a91e6b071bf030a18bd3053a7fe09b6dae69",
+      "amount": "734404572758778716397351628439932217377106102844",
+      "expiration": "1771337723"
+     }
+    ],
+    "spender": "0x3f170631ed9821ca51a59d996ab095162438dc10",
+    "sigDeadline": "115792089237316195423570985008687907853269984665640564039457584007913129639935"
+   },
+   "primaryType": "PermitBatch"
+  },
+  "proposedBy": "0x9990A21cf9AF6b77b0DF3eF479be3c307Df8df44",
+  "safeAppId": null,
+  "confirmations": [
+   {
+    "created": "2026-02-16T14:16:08.783999Z",
+    "modified": "2026-02-16T14:16:08.783999Z",
+    "owner": "0x9990A21cf9AF6b77b0DF3eF479be3c307Df8df44",
+    "signature": "0x4bb7aac0b972729f24ab8782930eaceb4af25d06861d2082a84a7b016c7a17bd576a26798e2f3f828d1b89023fdbe8b9e03a57319ce8d7575ac2ead368e6ef6c1b",
+    "signatureType": "EOA"
+   },
+   {
+    "created": "2026-02-16T14:16:38.978970Z",
+    "modified": "2026-02-16T14:16:38.978970Z",
+    "owner": "0x927CBc6A90080068cF839d27000E13355870c825",
+    "signature": "0x0b479aef25349df4ed8dea5ae37b58f801ae00e5b2606340812d6272ba4a923f5126755438816f065d00ef345f6d5b2d80651980ba5852ad52344a973a804b9f1c",
+    "signatureType": "EOA"
+   }
+  ],
+  "preparedSignature": "0x0b479aef25349df4ed8dea5ae37b58f801ae00e5b2606340812d6272ba4a923f5126755438816f065d00ef345f6d5b2d80651980ba5852ad52344a973a804b9f1c4bb7aac0b972729f24ab8782930eaceb4af25d06861d2082a84a7b016c7a17bd576a26798e2f3f828d1b89023fdbe8b9e03a57319ce8d7575ac2ead368e6ef6c1b",
+  "preparedSignatureEip1271": "0x000000000000000000000000616de58c011f8736fa20c7ae5352f7f6fb9f066900000000000000000000000000000000000000000000000000000000000000410000000000000000000000000000000000000000000000000000000000000000820b479aef25349df4ed8dea5ae37b58f801ae00e5b2606340812d6272ba4a923f5126755438816f065d00ef345f6d5b2d80651980ba5852ad52344a973a804b9f1c4bb7aac0b972729f24ab8782930eaceb4af25d06861d2082a84a7b016c7a17bd576a26798e2f3f828d1b89023fdbe8b9e03a57319ce8d7575ac2ead368e6ef6c1b",
+  "origin": "https://apps-portal.safe.global/wallet-connect"
+ }
+}
